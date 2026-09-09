@@ -183,7 +183,7 @@ var verbTiers = map[string]VerbTier{
 	"bench-ingest":                  TierDev,
 	"bench-loop":                    TierDev,
 	"bench-runs":                    TierDev,
-	"bench-subagent-fanout":          TierDev,
+	"bench-subagent-fanout":         TierDev,
 	"benchmarks":                    TierDev,
 	"bgloop":                        TierDev,
 	"bitnetmeta":                    TierDev,

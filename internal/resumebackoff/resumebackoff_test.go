@@ -49,4 +49,3 @@ func TestCrashLoopQuarantinedWhenBudgetExceeded(t *testing.T) {
 		t.Fatalf("expected eligible on changed signature: d=%+v", dNew)
 	}
 }
-

@@ -76,4 +76,3 @@ func TestNewGitCmdEmptyStdin(t *testing.T) {
 		t.Errorf("cmd.Stdin must be empty reader, got %d bytes (err: %v)", len(b), err)
 	}
 }
-

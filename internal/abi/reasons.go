@@ -10,30 +10,30 @@ package abi
 import "strconv"
 
 const (
-	ReasonNone             ReasonCode = iota // not a refusal
-	ReasonDefaultDeny                        // allowed only once a policy affirmatively permits it; none did (fail-closed)
-	ReasonPolicyBlock                        // an explicit policy rule denied it
-	ReasonSelfModify                         // the call would modify the agent/kernel itself
-	ReasonLeaseHeld                          // take the tree once the conflicting lease releases; a file-tree lease conflict for now (dos arbitrate)
-	ReasonTrustViolation                     // taint/scope violation (shared-result isolation)
-	ReasonMalformed                          // must pass the grammar / arity well-formedness rung; this call did not
-	ReasonMisroute                           // use the right tool and arg shape — MODEL-FIXABLE
-	ReasonRateLimited                        // retry after a wait; throttled for now
-	ReasonSecretExfil                        // result/args matched a secret pattern
-	ReasonUnwitnessed                        // supply a corroborating witness; the require-witness gate found none
-	ReasonOversize                           // keep the payload within the context-admission budget; this one exceeded it
-	ReasonUnknownTool                        // use a tool in the registry; this one is not
-	ReasonSecretDiscovered                   // a tool RESULT bore a secret, caught on discovery (the on-discovery event; distinct from ReasonSecretExfil, the egress verdict) [#884]
-	ReasonSecretRedacted                     // a credential span in a tool RESULT was MASKED in place (warn-first default); the rest of the result stays in context, distinct from the SECRET_EXFIL seal
-	ReasonShellDialect                       // a command in the wrong shell dialect for the tool (a PowerShell cmdlet submitted to the POSIX Bash tool) — it fails `command not found` (exit 127) before doing anything; MODEL-FIXABLE by re-routing to the PowerShell tool or the POSIX equivalent [#3941]
-	ReasonPIIRedacted                        // a general-PII span (email/phone/national-id/PAN/IBAN) in a tool RESULT was MASKED in place (warn-first default); the rest of the result stays in context, the PII twin of ReasonSecretRedacted [#5378]
-	ReasonPIIExfil                           // result/args matched a general-PII pattern and the fail-closed posture (or an obfuscation-only hit) SEALED the whole result, the PII twin of ReasonSecretExfil [#5378]
-	ReasonTaintEgress                        // sensitive-sink call carrying tainted data, or result exceeding taint ceiling
-	ReasonScopeCrossing                      // payload routed or shared wider than its declared isolation scope
-	ReasonPromptInjection                    // tool result or payload contains prompt injection markers
-	ReasonIntegrityRefuted                   // witness resolver actively refuted the claimed effect
-	ReasonSpeculationMispredict              // speculative tool call was mispredicted or squashed
-	ReasonSpeculativeEffectLeak              // speculative execution attempted or caused an unauthorized side-effect leak
+	ReasonNone                  ReasonCode = iota // not a refusal
+	ReasonDefaultDeny                             // allowed only once a policy affirmatively permits it; none did (fail-closed)
+	ReasonPolicyBlock                             // an explicit policy rule denied it
+	ReasonSelfModify                              // the call would modify the agent/kernel itself
+	ReasonLeaseHeld                               // take the tree once the conflicting lease releases; a file-tree lease conflict for now (dos arbitrate)
+	ReasonTrustViolation                          // taint/scope violation (shared-result isolation)
+	ReasonMalformed                               // must pass the grammar / arity well-formedness rung; this call did not
+	ReasonMisroute                                // use the right tool and arg shape — MODEL-FIXABLE
+	ReasonRateLimited                             // retry after a wait; throttled for now
+	ReasonSecretExfil                             // result/args matched a secret pattern
+	ReasonUnwitnessed                             // supply a corroborating witness; the require-witness gate found none
+	ReasonOversize                                // keep the payload within the context-admission budget; this one exceeded it
+	ReasonUnknownTool                             // use a tool in the registry; this one is not
+	ReasonSecretDiscovered                        // a tool RESULT bore a secret, caught on discovery (the on-discovery event; distinct from ReasonSecretExfil, the egress verdict) [#884]
+	ReasonSecretRedacted                          // a credential span in a tool RESULT was MASKED in place (warn-first default); the rest of the result stays in context, distinct from the SECRET_EXFIL seal
+	ReasonShellDialect                            // a command in the wrong shell dialect for the tool (a PowerShell cmdlet submitted to the POSIX Bash tool) — it fails `command not found` (exit 127) before doing anything; MODEL-FIXABLE by re-routing to the PowerShell tool or the POSIX equivalent [#3941]
+	ReasonPIIRedacted                             // a general-PII span (email/phone/national-id/PAN/IBAN) in a tool RESULT was MASKED in place (warn-first default); the rest of the result stays in context, the PII twin of ReasonSecretRedacted [#5378]
+	ReasonPIIExfil                                // result/args matched a general-PII pattern and the fail-closed posture (or an obfuscation-only hit) SEALED the whole result, the PII twin of ReasonSecretExfil [#5378]
+	ReasonTaintEgress                             // sensitive-sink call carrying tainted data, or result exceeding taint ceiling
+	ReasonScopeCrossing                           // payload routed or shared wider than its declared isolation scope
+	ReasonPromptInjection                         // tool result or payload contains prompt injection markers
+	ReasonIntegrityRefuted                        // witness resolver actively refuted the claimed effect
+	ReasonSpeculationMispredict                   // speculative tool call was mispredicted or squashed
+	ReasonSpeculativeEffectLeak                   // speculative execution attempted or caused an unauthorized side-effect leak
 	// 24.. reserved for additive core reasons; register out-of-tree names via
 	// RegisterReason.
 	ReasonCoreMax ReasonCode = 1023

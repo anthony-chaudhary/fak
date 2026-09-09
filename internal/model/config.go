@@ -216,10 +216,10 @@ type Config struct {
 	AttnOutputGate        bool `json:"attn_output_gate,omitempty"`
 	FullAttentionInterval int  `json:"full_attention_interval,omitempty"`
 
-	// DeepSeek V2/V3 MLA metadata. These fields are exported and audited so a real
-	// DeepSeek artifact is not mistaken for the standard q/k/v attention path. The
-	// current runtime still requires explicit MLA projection wiring before these become
-	// executable support.
+	// DeepSeek V2/V3 MLA and V4 attention/index metadata. These fields are exported
+	// and audited so a real DeepSeek artifact is not mistaken for standard q/k/v
+	// attention. The current runtime still requires explicit projection wiring before
+	// these become executable support.
 	QLoraRank     int      `json:"q_lora_rank,omitempty"`
 	KVLoraRank    int      `json:"kv_lora_rank,omitempty"`
 	QKNopeHeadDim int      `json:"qk_nope_head_dim,omitempty"`
@@ -230,21 +230,20 @@ type Config struct {
 	IndexTopK     int      `json:"index_topk,omitempty"`
 	IndexerTypes  []string `json:"indexer_types,omitempty"`
 
-	// DeepSeek-V4 CSA/HCA two-tier compression rates. V4 runs a hybrid attention:
-	// a lightly compressed "CSA" (Compressed Sparse Attention) latent KV plane that
-	// the lightning indexer selects a sparse top-k over, plus a heavily compressed
-	// "HCA" (Heavily Compressed Attention) block plane attended densely. The two
-	// documented rates are CSA=4 (light) and HCA=128 (aggressive) — see the V4
-	// technical report (arxiv 2606.19348) as mapped in docs/deepseek/
-	// v4-attention-seam-map.md (Missing seam #7).
-	//
-	// METADATA ONLY: these are exported and audited so a real V4 artifact is not
-	// mistaken for the single-plane glm_moe_dsa MLA path, but the co-resident
-	// two-plane kvLayout + dense-over-compressed attend do NOT exist yet (Missing
-	// seams #1-#3), so setting them does not make V4 executable. Zero = not a V4
-	// checkpoint (every existing export leaves both unset, so the load path is
-	// byte-identical). Field names follow the tech report / seam map; the exact HF
-	// config.json key is reconciled against the released checkpoint when it lands.
+	// DeepSeek-V4-Flash-0731 forward metadata from revision
+	// 7872f01b1d1fe23eabc4c98b48bffcef5a386062. CompressRatios selects one
+	// compression regime for each attention layer; the remaining fields define the
+	// model's hyperconnection and grouped low-rank output transforms.
+	CompressRatios  []int   `json:"compress_ratios,omitempty"`
+	HCMult          int     `json:"hc_mult,omitempty"`
+	HCEps           float64 `json:"hc_eps,omitempty"`
+	HCSinkhornIters int     `json:"hc_sinkhorn_iters,omitempty"`
+	OGroups         int     `json:"o_groups,omitempty"`
+	OLoraRank       int     `json:"o_lora_rank,omitempty"`
+
+	// Legacy V4 compatibility metadata retained for older callers. Published Flash
+	// checkpoints use CompressRatios to choose a single per-layer regime rather than
+	// simultaneous CSA and HCA planes.
 	CSACompressionRate int `json:"csa_compression_rate,omitempty"`
 	HCACompressionRate int `json:"hca_compression_rate,omitempty"`
 

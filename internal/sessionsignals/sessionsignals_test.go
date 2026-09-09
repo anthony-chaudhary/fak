@@ -314,5 +314,3 @@ func BenchmarkClassifyHTTPStatus(b *testing.B) {
 		}
 	}
 }
-
-

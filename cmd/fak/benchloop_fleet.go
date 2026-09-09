@@ -270,6 +270,7 @@ func loadBenchFleetPlan(root, stamp, python, path string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, python, filepath.Join(root, "tools", "bench_plan.py"), "--workspace", root, "--now", stamp, "--json")
+	configureDispatchHelperCommand(cmd)
 	cmd.WaitDelay = 5 * time.Second
 	cmd.Cancel = func() error {
 		if cmd.Process != nil && cmd.Process.Pid > 0 {

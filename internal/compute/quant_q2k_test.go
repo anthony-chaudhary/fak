@@ -113,12 +113,12 @@ func TestNewQ2KRejectsInvalidStorage(t *testing.T) {
 		{
 			name:  "short_storage",
 			shape: []int{1, q2kSuper},
-			raw:   make([]byte, q2kSuperBlock - 1),
+			raw:   make([]byte, q2kSuperBlock-1),
 		},
 		{
 			name:  "long_storage",
 			shape: []int{1, q2kSuper},
-			raw:   make([]byte, q2kSuperBlock + 1),
+			raw:   make([]byte, q2kSuperBlock+1),
 		},
 	}
 

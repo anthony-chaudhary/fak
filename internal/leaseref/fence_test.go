@@ -390,4 +390,3 @@ func TestFenceRefusesMissingHolderIdentity(t *testing.T) {
 			vLegacyMismatch.OK, vLegacyMismatch.Reason)
 	}
 }
-

@@ -212,7 +212,7 @@ func TestSpeculativeDecodingSubstrate(t *testing.T) {
 		}
 
 		// Test strict argmax tripwire
-		cleanLogits := []float32{1.0, 5.0, 2.0} // argmax is 1
+		cleanLogits := []float32{1.0, 5.0, 2.0}    // argmax is 1
 		targetRows := [][]float32{{3.0, 1.0, 4.0}} // argmax is 2
 		targetArgmax := []int{1, 2}
 

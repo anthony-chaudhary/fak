@@ -138,8 +138,8 @@ func (s *v4HashRouterSource) lookup(layer, tokenID int) ([]int, error) {
 }
 
 func v4HashRoute(logits []float32, expertIDs []int, routeScale float32) ([]routePick, error) {
-	if len(logits) != v4HashExperts {
-		return nil, &v4RouteError{Field: "logits", Reason: fmt.Sprintf("width %d, want %d", len(logits), v4HashExperts)}
+	if len(logits) != 256 && len(logits) != v4HashExperts {
+		return nil, &v4RouteError{Field: "logits", Reason: fmt.Sprintf("width %d, want 256 or %d", len(logits), v4HashExperts)}
 	}
 	if len(expertIDs) != v4HashTopK {
 		return nil, &v4RouteError{Field: "expert_ids", Reason: fmt.Sprintf("width %d, want %d", len(expertIDs), v4HashTopK)}

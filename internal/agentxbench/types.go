@@ -15,12 +15,12 @@ type ClientPhases struct {
 // InteractivityMetrics records latency and interactivity percentiles for a request.
 // Invariant: TTFT and ITL metrics must be non-negative.
 type InteractivityMetrics struct {
-	TTFTMS                 float64 `json:"ttft_ms"`
-	ITLMedianMS            float64 `json:"itl_median_ms"`
-	ITLP90MS               float64 `json:"itl_p90_ms"`
-	ITLP95MS               float64 `json:"itl_p95_ms"`
-	ITLP99MS               float64 `json:"itl_p99_ms"`
-	ITLMaxMS               float64 `json:"itl_max_ms"`
+	TTFTMS                  float64 `json:"ttft_ms"`
+	ITLMedianMS             float64 `json:"itl_median_ms"`
+	ITLP90MS                float64 `json:"itl_p90_ms"`
+	ITLP95MS                float64 `json:"itl_p95_ms"`
+	ITLP99MS                float64 `json:"itl_p99_ms"`
+	ITLMaxMS                float64 `json:"itl_max_ms"`
 	NormalizedInteractivity float64 `json:"normalized_interactivity_tok_per_sec"`
 }
 
@@ -43,26 +43,26 @@ type RequestRecord struct {
 
 // AggregatedMetrics holds summarized statistics across all executed agent requests.
 type AggregatedMetrics struct {
-	TotalRequests               int     `json:"total_requests"`
-	SuccessfulRequests          int     `json:"successful_requests"`
-	FailedRequests              int     `json:"failed_requests"`
-	SuccessRate                 float64 `json:"success_rate"`
-	TotalPromptTokens           int     `json:"total_prompt_tokens"`
-	TotalCompletionTokens       int     `json:"total_completion_tokens"`
-	TotalCachedTokens           int     `json:"total_cached_tokens"`
-	AggregateCacheHitRatio      float64 `json:"aggregate_cache_hit_ratio"`
-	ColdTTFTMeanMS              float64 `json:"cold_ttft_mean_ms"`
-	WarmTTFTMeanMS              float64 `json:"warm_ttft_mean_ms"`
-	PrefixSpeedupRatio          float64 `json:"prefix_speedup_ratio"`
-	TTFTP50MS                   float64 `json:"ttft_p50_ms"`
-	TTFTP95MS                   float64 `json:"ttft_p95_ms"`
-	ITLP50MS                    float64 `json:"itl_p50_ms"`
-	ITLP95MS                    float64 `json:"itl_p95_ms"`
-	NormalizedInteractivity     float64 `json:"normalized_interactivity_tok_per_sec"`
-	RequestThroughputPerSec     float64 `json:"request_throughput_per_sec"`
-	OutputTokenThroughputPerSec float64 `json:"output_token_throughput_per_sec"`
+	TotalRequests                int     `json:"total_requests"`
+	SuccessfulRequests           int     `json:"successful_requests"`
+	FailedRequests               int     `json:"failed_requests"`
+	SuccessRate                  float64 `json:"success_rate"`
+	TotalPromptTokens            int     `json:"total_prompt_tokens"`
+	TotalCompletionTokens        int     `json:"total_completion_tokens"`
+	TotalCachedTokens            int     `json:"total_cached_tokens"`
+	AggregateCacheHitRatio       float64 `json:"aggregate_cache_hit_ratio"`
+	ColdTTFTMeanMS               float64 `json:"cold_ttft_mean_ms"`
+	WarmTTFTMeanMS               float64 `json:"warm_ttft_mean_ms"`
+	PrefixSpeedupRatio           float64 `json:"prefix_speedup_ratio"`
+	TTFTP50MS                    float64 `json:"ttft_p50_ms"`
+	TTFTP95MS                    float64 `json:"ttft_p95_ms"`
+	ITLP50MS                     float64 `json:"itl_p50_ms"`
+	ITLP95MS                     float64 `json:"itl_p95_ms"`
+	NormalizedInteractivity      float64 `json:"normalized_interactivity_tok_per_sec"`
+	RequestThroughputPerSec      float64 `json:"request_throughput_per_sec"`
+	OutputTokenThroughputPerSec  float64 `json:"output_token_throughput_per_sec"`
 	ClusterTokenThroughputPerSec float64 `json:"cluster_token_throughput_per_sec"`
-	TotalWallTimeMS             float64 `json:"total_wall_time_ms"`
+	TotalWallTimeMS              float64 `json:"total_wall_time_ms"`
 }
 
 // AgentXReceipt represents the full benchmark artifact witnessing an AgentX evaluation.

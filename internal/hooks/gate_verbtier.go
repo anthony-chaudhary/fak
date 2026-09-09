@@ -219,8 +219,8 @@ func gateVerbTierTree(t *TrackedTree) ([]Finding, error) {
 	for _, verb := range mainVerbs {
 		if !hasVerbTier(verb, declared, mainAliases) {
 			findings = append(findings, Finding{
-				Gate: "VERB_UNTIERED",
-				File: mainCmdFile,
+				Gate:   "VERB_UNTIERED",
+				File:   mainCmdFile,
 				Detail: fmt.Sprintf("dispatched verb %q has no tier assigned in %s; classify it in one tier block (TierFrontdoor, TierDev, or TierHidden)", verb, verbTiersFile),
 			})
 		}
@@ -228,8 +228,8 @@ func gateVerbTierTree(t *TrackedTree) ([]Finding, error) {
 	for _, verb := range devVerbs {
 		if !hasVerbTier(verb, declared, devAliases) {
 			findings = append(findings, Finding{
-				Gate: "VERB_UNTIERED",
-				File: devCmdFile,
+				Gate:   "VERB_UNTIERED",
+				File:   devCmdFile,
 				Detail: fmt.Sprintf("dispatched verb %q has no tier assigned in %s; classify it in one tier block (TierFrontdoor, TierDev, or TierHidden)", verb, verbTiersFile),
 			})
 		}

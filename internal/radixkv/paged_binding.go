@@ -198,10 +198,8 @@ func (p *PagedRadixKVPool) SetNodeBlocks(n *Node, blockIDs []int) error {
 
 	// Retain each block in the allocator for the tree
 	alloc := p.pool.Allocator()
-	for _, bID := range blockIDs {
-		if err := alloc.Retain(bID); err != nil {
-			return err
-		}
+	if _, err := retainBlocks(alloc, blockIDs); err != nil {
+		return err
 	}
 
 	// Release any previously assigned blocks
@@ -318,17 +316,88 @@ func (p *PagedRadixKVPool) resolveBlockIDsLocked(n *node) []int {
 	return nil
 }
 
-// ResolveMetalPageTable returns the 32-bit Metal page table for node n.
+func metalSlot(block *ctxmmu.PhysicalBlock, totalSlots int) (uint32, error) {
+	slot := block.PhysicalSlot()
+	if slot < 0 || slot >= totalSlots || uint64(slot) > uint64(^uint32(0)) {
+		return 0, fmt.Errorf("radixkv: physical slot %d out of range", slot)
+	}
+	return uint32(slot), nil
+}
+
+func resolveMetalSlots(alloc *ctxmmu.PhysicalBlockAllocator, blockIDs []int) ([]uint32, error) {
+	metalTable := make([]uint32, len(blockIDs))
+	for i, bID := range blockIDs {
+		block, err := alloc.GetBlock(bID)
+		if err != nil {
+			return nil, err
+		}
+		metalTable[i], err = metalSlot(block, alloc.TotalCount())
+		if err != nil {
+			return nil, err
+		}
+	}
+	return metalTable, nil
+}
+
+func releaseBlocks(blocks []*ctxmmu.PhysicalBlock) {
+	for _, block := range blocks {
+		block.Release()
+	}
+}
+
+func retainBlocks(alloc *ctxmmu.PhysicalBlockAllocator, blockIDs []int) ([]*ctxmmu.PhysicalBlock, error) {
+	retained := make([]*ctxmmu.PhysicalBlock, 0, len(blockIDs))
+	for _, bID := range blockIDs {
+		block, err := alloc.GetBlock(bID)
+		if err != nil {
+			releaseBlocks(retained)
+			return nil, err
+		}
+		if err := alloc.Retain(bID); err != nil {
+			releaseBlocks(retained)
+			return nil, err
+		}
+		retained = append(retained, block)
+	}
+	return retained, nil
+}
+
+func retainMetalSlots(alloc *ctxmmu.PhysicalBlockAllocator, blockIDs []int) ([]uint32, error) {
+	retained, err := retainBlocks(alloc, blockIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	metalTable := make([]uint32, len(blockIDs))
+	for i, block := range retained {
+		metalTable[i], err = metalSlot(block, alloc.TotalCount())
+		if err != nil {
+			releaseBlocks(retained)
+			return nil, err
+		}
+	}
+	return metalTable, nil
+}
+
+// ResolveMetalPageTable returns a snapshot of the 32-bit Metal page table for node n.
+// The radix tree's block references protect the allocations while slots are resolved;
+// callers must keep that owning node alive while the returned table is in use.
 func (p *PagedRadixKVPool) ResolveMetalPageTable(n *Node) []uint32 {
-	blocks := p.ResolveBlockIDs(n)
+	if p == nil || n == nil {
+		return nil
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	blocks := p.resolveBlockIDsLocked(n)
 	if len(blocks) == 0 {
 		return nil
 	}
-	out := make([]uint32, len(blocks))
-	for i, bID := range blocks {
-		out[i] = uint32(bID)
+	metalTable, err := resolveMetalSlots(p.pool.Allocator(), blocks)
+	if err != nil {
+		return nil
 	}
-	return out
+	return metalTable
 }
 
 // InsertPaged inserts a token suffix off boundary into the radix tree, associates the provided
@@ -433,19 +502,12 @@ func (p *PagedRadixKVPool) BindPrefix(tokens []int, streamID string) (*PagedBloc
 	}
 	activeBlocks := blockIDs[:neededBlocks]
 
-	// Retain each shared block for this stream
+	// Retain each shared block and resolve its reusable physical slot for this stream.
 	alloc := p.pool.Allocator()
-	for _, bID := range activeBlocks {
-		if err := alloc.Retain(bID); err != nil {
-			p.Tree.Done(boundary)
-			return nil, matched, false, err
-		}
-	}
-
-	// Construct Metal page table (uint32 physical block IDs)
-	metalTable := make([]uint32, len(activeBlocks))
-	for i, bID := range activeBlocks {
-		metalTable[i] = uint32(bID)
+	metalTable, err := retainMetalSlots(alloc, activeBlocks)
+	if err != nil {
+		p.Tree.Done(boundary)
+		return nil, matched, false, err
 	}
 
 	table := &PagedBlockTable{
@@ -512,15 +574,9 @@ func (p *PagedRadixKVPool) BindNode(n *Node, streamID string) (*PagedBlockTable,
 	}
 
 	alloc := p.pool.Allocator()
-	for _, bID := range blockIDs {
-		if err := alloc.Retain(bID); err != nil {
-			return nil, err
-		}
-	}
-
-	metalTable := make([]uint32, len(blockIDs))
-	for i, bID := range blockIDs {
-		metalTable[i] = uint32(bID)
+	metalTable, err := retainMetalSlots(alloc, blockIDs)
+	if err != nil {
+		return nil, err
 	}
 
 	table := &PagedBlockTable{

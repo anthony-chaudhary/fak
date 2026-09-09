@@ -661,7 +661,7 @@ func TestFlashAttnDequant_DispatchPlan(t *testing.T) {
 		t.Fatalf("PlanFlashAttnDequantDispatch failed: %v", err)
 	}
 
-	expectedElements := uint64(32768 * 8 * 128) // 33,554,432 elements
+	expectedElements := uint64(32768 * 8 * 128)          // 33,554,432 elements
 	expectedWorkgroups := (expectedElements + 255) / 256 // 131,072 workgroups
 
 	if plan.TotalElements != expectedElements {

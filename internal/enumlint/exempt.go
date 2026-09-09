@@ -98,7 +98,7 @@ var exemptions = map[string]string{
 	"literal|internal/hil|DefaultMicroDoses":                                                   "Default microdoses define default bounded suite without optional hardware extensions.",
 	"switch|internal/macobs|UnifiedMemoryPressureGovernor.OnPressureEvent":                     "Pressure level switch handles active pressure levels; unknown level ignored.",
 	"switch|internal/macobs|MemoryPressureGovernor.OnPressureEvent":                            "Pressure level switch handles active pressure levels; unknown level ignored.",
-	"switch|internal/model|TestQwen38MTPMixedQ4KMForwardMatchesDequantizedReference":          "Unit test asserts mixed Q4_K format forward pass.",
+	"switch|internal/model|TestQwen38MTPMixedQ4KMForwardMatchesDequantizedReference":           "Unit test asserts mixed Q4_K format forward pass.",
 }
 
 // LookupExemption is the default Config.Exempt. An entry with a blank reason is

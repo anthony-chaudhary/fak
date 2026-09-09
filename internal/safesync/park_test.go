@@ -360,4 +360,3 @@ func TestParkDetached_BranchRole(t *testing.T) {
 		t.Fatalf("expected OK=true, got reason: %s", rec.Reason)
 	}
 }
-

@@ -92,9 +92,9 @@ type Slot struct {
 	PromptTokens      []int
 	GeneratedTokens   []int
 	TargetTokens      int
-	ExecutionDepth    int           // Configured recurrent depth limit (default 1)
-	CurrentDepth      int           // Current recurrent depth reached (0..ExecutionDepth)
-	RecurrentPasses   int           // Recurrent execution passes completed
+	ExecutionDepth    int // Configured recurrent depth limit (default 1)
+	CurrentDepth      int // Current recurrent depth reached (0..ExecutionDepth)
+	RecurrentPasses   int // Recurrent execution passes completed
 	YieldCount        int
 	ResumeCount       int
 	LastToken         int

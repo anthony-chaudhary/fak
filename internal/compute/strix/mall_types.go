@@ -89,12 +89,12 @@ type MALLTile struct {
 
 // MALLTilerConfig configures attention geometry, capacity constraints, and ISA modifier flags.
 type MALLTilerConfig struct {
-	Geometry               AttentionGeometry    `json:"geometry"`
-	TotalMALLCapacityBytes int64                `json:"total_mall_capacity_bytes"` // Defaults to MALLCapacityBytes (33,554,432 bytes)
-	RootTokenCount         int                  `json:"root_token_count"`          // Defaults to DefaultStrixRootTokens (8,192 tokens)
-	TargetArch             string               `json:"target_arch"`               // Defaults to TargetArchGFX1151 ("gfx1151")
-	EnableAssemblyTagging  bool                 `json:"enable_assembly_tagging"`   // Synthesize explicit SLC/GLC bitmasks
-	AblationArm            ModifierAblationArm  `json:"ablation_arm"`              // Ablation mode (default: Arm1ExplicitBitmasks)
+	Geometry               AttentionGeometry   `json:"geometry"`
+	TotalMALLCapacityBytes int64               `json:"total_mall_capacity_bytes"` // Defaults to MALLCapacityBytes (33,554,432 bytes)
+	RootTokenCount         int                 `json:"root_token_count"`          // Defaults to DefaultStrixRootTokens (8,192 tokens)
+	TargetArch             string              `json:"target_arch"`               // Defaults to TargetArchGFX1151 ("gfx1151")
+	EnableAssemblyTagging  bool                `json:"enable_assembly_tagging"`   // Synthesize explicit SLC/GLC bitmasks
+	AblationArm            ModifierAblationArm `json:"ablation_arm"`              // Ablation mode (default: Arm1ExplicitBitmasks)
 }
 
 // Validate checks configuration invariants and establishes default fallback values.

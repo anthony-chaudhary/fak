@@ -713,11 +713,17 @@ func resolveRunner(runner any) (func(context.Context, string, string) (string, e
 		return func(_ context.Context, t, a string) (string, error) {
 			return r(t, a)
 		}, nil
-	case interface{ RunTool(context.Context, string, string) (string, error) }:
+	case interface {
+		RunTool(context.Context, string, string) (string, error)
+	}:
 		return r.RunTool, nil
-	case interface{ Execute(context.Context, string, string) (string, error) }:
+	case interface {
+		Execute(context.Context, string, string) (string, error)
+	}:
 		return r.Execute, nil
-	case interface{ Run(context.Context, string, string) (string, error) }:
+	case interface {
+		Run(context.Context, string, string) (string, error)
+	}:
 		return r.Run, nil
 	default:
 		return nil, fmt.Errorf("streaming tool fsm: unsupported runner type %T", runner)

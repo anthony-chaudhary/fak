@@ -55,9 +55,9 @@ func TestHarnessVersion_ExplicitWireNegotiation(t *testing.T) {
 	srv := newTestServer(t)
 	router := harnessversion.NewStickySessionRouter()
 	if err := router.Register(harnessversion.VersionDescriptor{
-		Version: "v1",
-		Weight:  100,
-		Active:  true,
+		Version:  "v1",
+		Weight:   100,
+		Active:   true,
 		Metadata: map[string]string{"default": "true"},
 	}); err != nil {
 		t.Fatalf("Register v1 failed: %v", err)
@@ -110,9 +110,9 @@ func TestHarnessVersion_StickySessionAffinity(t *testing.T) {
 	srv := newTestServer(t)
 	router := harnessversion.NewStickySessionRouter()
 	if err := router.Register(harnessversion.VersionDescriptor{
-		Version: "v1",
-		Weight:  100,
-		Active:  true,
+		Version:  "v1",
+		Weight:   100,
+		Active:   true,
 		Metadata: map[string]string{"default": "true"},
 	}); err != nil {
 		t.Fatalf("Register v1 failed: %v", err)
@@ -263,9 +263,9 @@ func TestHarnessVersion_FallbackToDefault(t *testing.T) {
 	srv := newTestServer(t)
 	router := harnessversion.NewStickySessionRouter()
 	if err := router.Register(harnessversion.VersionDescriptor{
-		Version: "v1",
-		Weight:  100,
-		Active:  true,
+		Version:  "v1",
+		Weight:   100,
+		Active:   true,
 		Metadata: map[string]string{"default": "true"},
 	}); err != nil {
 		t.Fatalf("Register v1 failed: %v", err)
@@ -312,9 +312,9 @@ func TestHarnessVersion_HTTPChatCompletionsIntegration(t *testing.T) {
 
 	router := harnessversion.NewStickySessionRouter()
 	if err := router.Register(harnessversion.VersionDescriptor{
-		Version: "v1",
-		Weight:  80,
-		Active:  true,
+		Version:  "v1",
+		Weight:   80,
+		Active:   true,
 		Metadata: map[string]string{"default": "true"},
 	}); err != nil {
 		t.Fatalf("Register v1 failed: %v", err)

@@ -905,7 +905,6 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		cmdMerge(args)
 	case "affected":
 		cmdAffected(args)
-
 	case "go":
 		cmdGoShim(args)
 	case "hil":
@@ -1014,11 +1013,6 @@ func ctx() context.Context { return context.Background() }
 // `fak replay` is an explicit, unambiguous alias for the trace path.
 func cmdRun(argv []string) {
 	runUnifiedRun(argv)
-}
-
-// cmdRunTrace replays a trace through the kernel (the original `fak run`).
-func cmdRunTrace(argv []string) {
-	cmdRunTraceNamed("run", argv)
 }
 
 func cmdRunTraceNamed(verb string, argv []string) {
@@ -1207,7 +1201,6 @@ func cmdBench(argv []string) {
 			"p50_ms": float64(rep.Baseline.P50Ns) / 1e6, "calls": rep.Baseline.Calls,
 		}))
 	}
-
 	printReport(rep, *out)
 }
 
@@ -1353,19 +1346,15 @@ func applyPolicyWithProfile(path string, profile string) {
 func reloadPolicy(path string) (policy.Runtime, string, error) {
 	policyReloadMu.Lock()
 	defer policyReloadMu.Unlock()
-	return loadAndApplyPolicyLocked(path, true)
+	return loadAndApplyPolicyWithProfileLocked(path, "", true)
 }
 
 func reloadPolicyWithPrior(path string) (policy.Runtime, adjudicator.Policy, string, error) {
 	policyReloadMu.Lock()
 	defer policyReloadMu.Unlock()
 	prior := adjudicator.Default.PolicySnapshot()
-	rt, warning, err := loadAndApplyPolicyLocked(path, true)
+	rt, warning, err := loadAndApplyPolicyWithProfileLocked(path, "", true)
 	return rt, prior, warning, err
-}
-
-func loadAndApplyPolicyLocked(path string, enforceWideningGate bool) (policy.Runtime, string, error) {
-	return loadAndApplyPolicyWithProfileLocked(path, "", enforceWideningGate)
 }
 
 func loadAndApplyPolicyWithProfileLocked(path string, profile string, enforceWideningGate bool) (policy.Runtime, string, error) {
@@ -1407,7 +1396,6 @@ func loadAndApplyPolicyWithProfileLocked(path string, profile string, enforceWid
 		overlayWarning += "\ndeny_overlay_error: " + ovErr.Error()
 	}
 	rt = protectGuardPolicyConfig(rt, append(guardAllowOverlayLayerPaths(), denyPath, path)...)
-
 	digest := configFileDigest(path)
 	overlayWarning, err = applyPolicyRuntimeLocked(rt, path, digest, overlayWarning, enforceWideningGate)
 	if err != nil {
@@ -1483,8 +1471,7 @@ func guardPolicyReloader(policyPath string) gateway.PolicyReloadFunc {
 }
 
 func resetTrace(_ context.Context, traceID string) error {
-	traceID = strings.TrimSpace(traceID)
-	if traceID == "" {
+	if traceID = strings.TrimSpace(traceID); traceID == "" {
 		return errors.New("trace_id is required")
 	}
 	ifc.Default.Reset(traceID)

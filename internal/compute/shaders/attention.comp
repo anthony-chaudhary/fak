@@ -2,7 +2,8 @@
 // attention.comp — decode attention, one workgroup per query head.
 // q[nH*hd] (one position); K,V [nPos, nKV*hd] row-major; out[nH*hd].
 // FlashAttention online softmax: streaming keys with running (m, l, acc)
-// in registers/shared memory — zero global scratch allocations.
+// in registers/shared memory. The default control makes zero global scratch
+// allocations; the explicit context-split candidate uses bounded partial-state scratch.
 // Evaluates over contiguous gathered sparse KV tiles (aligned to 256-wide tiles) sized to
 // reside entirely within Strix Halo's 32MB MALL Infinity Cache without dense masking overhead.
 // FlashAttention-3 architecture reference:
@@ -37,9 +38,12 @@ float loadKAsF32(uint logicalIndex) { return K[logicalIndex]; }
 float loadVAsF32(uint logicalIndex) { return V[logicalIndex]; }
 #endif
 layout(std430, binding = 3) writeonly buffer Obuf { float Outp[]; };
+// Context-split scratch rows contain (m, l, unnormalised accumulator[hd]).
+// The default path binds a harmless existing buffer here and never accesses it.
+layout(std430, binding = 4) buffer ScratchBuf { float Scratch[]; };
 
 layout(push_constant) uniform Push {
-    int nPos; int nH; int nKV; int hd; float scale;
+    int nPos; int nH; int nKV; int hd; float scale; int mode; int tileCount;
 } pc;
 
 // Architectural rationale: LDS Shared Memory Bank Conflict Elimination (Pad-2 Stride)
@@ -59,7 +63,12 @@ uint red_idx(uint i) {
 const uint QSA_TILE_SIZE = 256u;
 
 void main() {
+    uint splitTile = 0u;
     uint h = gl_WorkGroupID.x;
+    if (pc.mode == 1) {
+        splitTile = h % uint(pc.tileCount);
+        h /= uint(pc.tileCount);
+    }
     if (h >= uint(pc.nH)) return;
     uint tid = gl_LocalInvocationID.x;
     int grp = pc.nH / pc.nKV;
@@ -79,7 +88,10 @@ void main() {
     float acc[8];
     for (uint k = 0u; k < 8u; ++k) acc[k] = 0.0;
 
-    for (uint tile = 0u; tile < uint(pc.nPos); tile += QSA_TILE_SIZE) {
+    uint firstTile = pc.mode == 1 ? splitTile * QSA_TILE_SIZE : 0u;
+    uint endPos = pc.mode == 1 ? min(firstTile + QSA_TILE_SIZE, uint(pc.nPos))
+                               : (pc.mode == 2 ? 0u : uint(pc.nPos));
+    for (uint tile = firstTile; tile < endPos; tile += QSA_TILE_SIZE) {
         uint tileEnd = min(tile + QSA_TILE_SIZE, uint(pc.nPos));
         for (uint j = tile; j < tileEnd; ++j) {
             uint kbase = j * uint(w) + uint(kvh) * uint(pc.hd);
@@ -115,6 +127,41 @@ void main() {
                 k++;
             }
             m = m_new;
+        }
+    }
+
+    if (pc.mode == 1) {
+        uint scratchBase = (h * uint(pc.tileCount) + splitTile) * (uint(pc.hd) + 2u);
+        if (tid == 0u) {
+            Scratch[scratchBase] = m;
+            Scratch[scratchBase + 1u] = l;
+        }
+        uint k = 0u;
+        for (uint d = tid; d < uint(pc.hd); d += 128u) {
+            Scratch[scratchBase + 2u + d] = acc[k];
+            k++;
+        }
+        return;
+    }
+
+    if (pc.mode == 2) {
+        m = -3.402823466e38;
+        l = 0.0;
+        for (uint k = 0u; k < 8u; ++k) acc[k] = 0.0;
+        for (uint split = 0u; split < uint(pc.tileCount); ++split) {
+            uint scratchBase = (h * uint(pc.tileCount) + split) * (uint(pc.hd) + 2u);
+            float partialM = Scratch[scratchBase];
+            float partialL = Scratch[scratchBase + 1u];
+            float nextM = max(m, partialM);
+            float leftScale = l > 0.0 ? exp(m - nextM) : 0.0;
+            float rightScale = partialL > 0.0 ? exp(partialM - nextM) : 0.0;
+            uint k = 0u;
+            for (uint d = tid; d < uint(pc.hd); d += 128u) {
+                acc[k] = acc[k] * leftScale + Scratch[scratchBase + 2u + d] * rightScale;
+                k++;
+            }
+            l = l * leftScale + partialL * rightScale;
+            m = nextM;
         }
     }
 

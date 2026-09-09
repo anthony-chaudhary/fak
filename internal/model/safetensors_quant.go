@@ -357,11 +357,35 @@ func quantizeNamedTensorsInto(names []string, hdr map[string]json.RawMessage, te
 		if consumed[name] {
 			continue
 		}
+		// Flash-0731 publishes DSpark/MTP tensors that this runtime cannot execute.
+		// Drop them before format-specific pairing so an E8M0 scale cannot fall
+		// through to the ordinary tensor decoder and abort an otherwise usable load.
+		if isDeepSeekV4FlashProfile(m.Cfg) && strings.HasPrefix(name, "mtp.") {
+			if RetainMTP {
+				return fmt.Errorf("safetensors: DeepSeek V4 Flash RetainMTP is unsupported for DSpark tensor %s", name)
+			}
+			consumed[name] = true
+			continue
+		}
+		// The first three Flash layers route by a published token-ID table. Its
+		// I64 payload stays in the indexed source for v4HashRouterSource range reads;
+		// the eager float/Q8 loader must neither convert nor retain it.
+		if isDeepSeekV4FlashProfile(m.Cfg) && isDeepSeekV4FlashLazyHashTable(name) {
+			consumed[name] = true
+			continue
+		}
 		if keepLayer != nil && !keepLayer(name) {
 			consumed[name] = true
 			continue
 		}
-		handled, err := quantizeMXFP4TensorInto(name, hdr, tensorBytes, m, tied, raw, off, consumed)
+		handled, err := quantizeV4DenseFP8TensorInto(name, hdr, tensorBytes, m, consumed)
+		if err != nil {
+			return err
+		}
+		if handled {
+			continue
+		}
+		handled, err = quantizeMXFP4TensorInto(name, hdr, tensorBytes, m, tied, raw, off, consumed)
 		if err != nil {
 			return err
 		}
@@ -391,6 +415,15 @@ func quantizeNamedTensorsInto(names []string, hdr map[string]json.RawMessage, te
 		}
 	}
 	return nil
+}
+
+func isDeepSeekV4FlashLazyHashTable(name string) bool {
+	switch name {
+	case "layers.0.ffn.gate.tid2eid", "layers.1.ffn.gate.tid2eid", "layers.2.ffn.gate.tid2eid":
+		return true
+	default:
+		return false
+	}
 }
 
 func quantizeFP8BlockScaleTensorInto(

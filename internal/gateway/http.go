@@ -1038,6 +1038,12 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 		return http.StatusConflict, "in_kernel_recurrent_evict_unsupported",
 			"context budget exhausted but this Gated-DeltaNet recurrent cache cannot evict in place; retry in a fresh session or start fak serve with --reset-on-budget"
 	}
+	var contextErr *agent.InKernelContextLengthError
+	if errors.As(err, &contextErr) {
+		return http.StatusBadRequest, "context_length_exceeded",
+			fmt.Sprintf("in-kernel request exceeds the context window (prompt_tokens=%d, max_tokens=%d, context_window=%d); reduce the prompt or max_tokens",
+				contextErr.PromptTokens, contextErr.MaxNewTokens, contextErr.MaxContext)
+	}
 	// An in-kernel device-allocation failure (e.g. the model decode OOM'd on a small GPU under
 	// a large prompt) is a LOCAL resource exhaustion the caller can act on, not an upstream
 	// failure. It is in-kernel by construction (only the in-kernel planner produces it), so the

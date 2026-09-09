@@ -1508,7 +1508,7 @@ func (t *MALLTiler) PlanSpeculativeTreeVerification(
 		evictions = 0
 		dramKVRefetch = 0
 		sustainedWeightBW = StrixHaloContigBandwidthTargetGBs + 16.0 // >= 236 GB/s out of 273 GB/s peak
-		intraMALLAttentionBW = StrixHaloPeakMALLBandwidthGBs        // > 1.2 TB/s intra-MALL
+		intraMALLAttentionBW = StrixHaloPeakMALLBandwidthGBs         // > 1.2 TB/s intra-MALL
 	} else {
 		evictions = int(weightBytes / StrixHaloMALLSizeBytes)
 		dramKVRefetch = pinnedKVBytes

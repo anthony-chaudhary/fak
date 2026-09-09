@@ -116,8 +116,8 @@ func TestAsCUDAError_Conversion(t *testing.T) {
 
 	// 4. Bare strings for request-reachable CUDA failures
 	cases := []struct {
-		input string
-		wantOp string
+		input    string
+		wantOp   string
 		wantSite string
 	}{
 		{"compute: cuda graph capture/launch failed", "GraphEndLaunch", "cuda-graph-launch"},

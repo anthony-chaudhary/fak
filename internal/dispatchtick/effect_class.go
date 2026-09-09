@@ -38,14 +38,14 @@ func (e EffectClass) Valid() bool {
 
 // MaintenanceProfile defines the resource footprint and effect contract of a recurring task.
 type MaintenanceProfile struct {
-	ID                    string      `json:"id"`
-	Key                   string      `json:"key"`
-	EffectClass           EffectClass `json:"effect_class"`
-	CapacityWeight        float64     `json:"capacity_weight"`
-	LeasePath             string      `json:"lease_path,omitempty"`
-	LeaseLane             string      `json:"lease_lane,omitempty"`
-	AllowsRecursiveSpawn  bool        `json:"allows_recursive_spawn,omitempty"`
-	SpawnsWorkers         bool        `json:"spawns_workers,omitempty"`
+	ID                   string      `json:"id"`
+	Key                  string      `json:"key"`
+	EffectClass          EffectClass `json:"effect_class"`
+	CapacityWeight       float64     `json:"capacity_weight"`
+	LeasePath            string      `json:"lease_path,omitempty"`
+	LeaseLane            string      `json:"lease_lane,omitempty"`
+	AllowsRecursiveSpawn bool        `json:"allows_recursive_spawn,omitempty"`
+	SpawnsWorkers        bool        `json:"spawns_workers,omitempty"`
 }
 
 // DefaultMaintenanceProfile returns the fail-closed profile for unprofiled tasks:
@@ -61,24 +61,24 @@ func DefaultMaintenanceProfile(id, key string) MaintenanceProfile {
 
 // MaintenancePreflightReport is the JSON-serializable diagnostic preflight report.
 type MaintenancePreflightReport struct {
-	Admitted           bool               `json:"admitted"`
-	RefusalReason      string             `json:"refusal_reason,omitempty"`
-	EngineeringWorkers int                `json:"engineering_workers"`
-	MaintenanceRuns    int                `json:"maintenance_runs"`
-	TotalCapacityUnits float64            `json:"total_capacity_units"`
-	WeightedUnitsUsed  float64            `json:"weighted_units_used"`
-	RemainingUnits     float64            `json:"remaining_units"`
-	CollisionKeys      []string           `json:"collision_keys,omitempty"`
-	BindingLimiter     string             `json:"binding_limiter,omitempty"`
-	AdmittedTasks      []string           `json:"admitted_tasks,omitempty"`
+	Admitted           bool                 `json:"admitted"`
+	RefusalReason      string               `json:"refusal_reason,omitempty"`
+	EngineeringWorkers int                  `json:"engineering_workers"`
+	MaintenanceRuns    int                  `json:"maintenance_runs"`
+	TotalCapacityUnits float64              `json:"total_capacity_units"`
+	WeightedUnitsUsed  float64              `json:"weighted_units_used"`
+	RemainingUnits     float64              `json:"remaining_units"`
+	CollisionKeys      []string             `json:"collision_keys,omitempty"`
+	BindingLimiter     string               `json:"binding_limiter,omitempty"`
+	AdmittedTasks      []string             `json:"admitted_tasks,omitempty"`
 	Profiles           []MaintenanceProfile `json:"profiles,omitempty"`
 }
 
 // MaintenancePreflightEngine evaluates candidate maintenance and recurring tasks against host capacity.
 type MaintenancePreflightEngine struct {
-	HostCapacityUnits   float64 // Total capacity in weighted units (e.g., number of worker slots)
-	EngineeringWorkers  int     // Currently active engineering workers (each counts as 1.0 unit)
-	ActiveMaintenance   []MaintenanceProfile
+	HostCapacityUnits  float64 // Total capacity in weighted units (e.g., number of worker slots)
+	EngineeringWorkers int     // Currently active engineering workers (each counts as 1.0 unit)
+	ActiveMaintenance  []MaintenanceProfile
 }
 
 // EvaluatePreflight evaluates a batch of candidate tasks and returns the admission verdict and report.
