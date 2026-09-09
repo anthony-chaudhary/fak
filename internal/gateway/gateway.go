@@ -890,6 +890,17 @@ func (s *Server) MarkReady() {
 	s.startup.markReady(time.Now())
 }
 
+// BoundAddr returns the listening address of the server, or "" if not bound.
+func (s *Server) BoundAddr() string {
+	if s == nil {
+		return ""
+	}
+	if p := s.boundAddr.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
+
 // AdjudicationSummary returns a verdict roll-up over every kernel decision this
 // gateway has made so far — proposed-call adjudication, direct syscalls, and inbound
 // result admission. It is the live tally `fak guard` prints on exit (what the kernel
