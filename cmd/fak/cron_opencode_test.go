@@ -573,3 +573,15 @@ func TestCronOpenCodeUntilActive(t *testing.T) {
 		t.Errorf("expected session_id 'ses_active_123', got %q", receipt.SessionID)
 	}
 }
+
+func TestCronOpenCodeAllowsLongTimeout(t *testing.T) {
+	if got := cronOpenCodeEffectiveTimeout(45 * time.Minute); got != 45*time.Minute {
+		t.Fatalf("expected 45m, got %v", got)
+	}
+	if got := cronOpenCodeEffectiveTimeout(0); got != 45*time.Minute {
+		t.Fatalf("expected default 45m, got %v", got)
+	}
+	if got := cronOpenCodeEffectiveTimeout(3 * time.Hour); got != 2*time.Hour {
+		t.Fatalf("expected clamped 2h, got %v", got)
+	}
+}

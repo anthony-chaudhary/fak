@@ -24,8 +24,19 @@ import (
 )
 
 const (
-	cronOpenCodeRunSchema = "fak-opencode-run/1"
+	cronOpenCodeRunSchema  = "fak-opencode-run/1"
+	cronOpenCodeMaxTimeout = 2 * time.Hour
 )
+
+func cronOpenCodeEffectiveTimeout(requested time.Duration) time.Duration {
+	if requested <= 0 {
+		return 45 * time.Minute
+	}
+	if requested > cronOpenCodeMaxTimeout {
+		return cronOpenCodeMaxTimeout
+	}
+	return requested
+}
 
 // OpenCodeRunReceipt records the terminal outcome, duration, and session join of an
 // OpenCode execution. WitnessRef is explicitly serialized as null when absent.
@@ -246,11 +257,8 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 		}
 	}
 
-	// Child process execution with timeout context bounded by hard-interrupt ceiling (#2927)
-	effectiveTimeout := opts.Timeout
-	if effectiveTimeout <= 0 || effectiveTimeout > CronHardInterruptCeiling {
-		effectiveTimeout = CronHardInterruptCeiling
-	}
+	// Child process execution with bounded timeout context (#11953)
+	effectiveTimeout := cronOpenCodeEffectiveTimeout(opts.Timeout)
 	ctx, cancel := context.WithTimeout(context.Background(), effectiveTimeout)
 	defer cancel()
 
