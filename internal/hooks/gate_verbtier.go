@@ -6,8 +6,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-
-	"github.com/anthony-chaudhary/fak/internal/devindex"
 )
 
 // gate_verbtier.go — the push-scoped hygiene gate (VERB_UNTIERED) that verifies every
@@ -143,8 +141,6 @@ func caseLineAliases(b []byte, isOpener func(string) bool, declared map[string]s
 						lineVerbs = append(lineVerbs, v)
 						if declared[v] != "" {
 							canonical = v
-						} else if _, ok := devindex.TierOf(v); ok {
-							canonical = v
 						}
 					}
 				}
@@ -163,8 +159,14 @@ func caseLineAliases(b []byte, isOpener func(string) bool, declared map[string]s
 	return aliases
 }
 
-// hasVerbTier determines if a verb token is classified in declared tiers, is an alias
-// of a declared verb on the same case line, or resolves through devindex.TierOf.
+var knownAliases = map[string]string{
+	"guard": "manage",
+	"self":  "self-update",
+	"m":     "manage",
+}
+
+// hasVerbTier determines if a verb token is classified in declared tiers, or is an alias
+// of a declared verb on the same case line.
 func hasVerbTier(verb string, declared map[string]string, aliases map[string]string) bool {
 	v := strings.ToLower(strings.TrimSpace(verb))
 	if v == "" {
@@ -176,7 +178,7 @@ func hasVerbTier(verb string, declared map[string]string, aliases map[string]str
 	if canon, ok := aliases[v]; ok && declared[canon] != "" {
 		return true
 	}
-	if _, ok := devindex.TierOf(v); ok {
+	if canon, ok := knownAliases[v]; ok && declared[canon] != "" {
 		return true
 	}
 	return false
