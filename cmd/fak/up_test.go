@@ -610,6 +610,31 @@ func TestFakUpTurnkeyBootstrap(t *testing.T) {
 			t.Fatalf("REPL output missing token/s telemetry:\n%s", replText)
 		}
 	})
+
+	t.Run("ReadyBannerOutputCleanAndClear", func(t *testing.T) {
+		plan, err := macfit.ConfigureTurnkey(36 * macfit.GiB)
+		if err != nil {
+			t.Fatalf("ConfigureTurnkey: %v", err)
+		}
+		var out bytes.Buffer
+		printTurnkeyReady(&out, "v1.0.0", "127.0.0.1:8080", plan)
+		text := out.String()
+		if !strings.Contains(text, "[READY]") {
+			t.Fatalf("ready banner missing [READY] indicator:\n%s", text)
+		}
+		if !strings.Contains(text, "fak up v1.0.0 running on http://127.0.0.1:8080") {
+			t.Fatalf("ready banner missing running on address line:\n%s", text)
+		}
+		if !strings.Contains(text, "OpenAI-compatible endpoint: http://127.0.0.1:8080/v1/chat/completions") {
+			t.Fatalf("ready banner missing completions endpoint:\n%s", text)
+		}
+		if !strings.Contains(text, "Health check endpoint:      http://127.0.0.1:8080/healthz") {
+			t.Fatalf("ready banner missing healthz endpoint:\n%s", text)
+		}
+		if !strings.Contains(text, "Model:") || !strings.Contains(text, "Context:") {
+			t.Fatalf("ready banner missing model or context details:\n%s", text)
+		}
+	})
 }
 
 func testProbeTokenizer(t *testing.T) *tokenizer.Tokenizer {

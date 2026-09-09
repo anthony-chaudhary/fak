@@ -173,7 +173,19 @@ func runAllInOneUp(argv []string) {
 	if id := guardShortBuildID(); id != "" {
 		ver += " (" + id + ")"
 	}
-	fmt.Printf("fak up %s running on %s\n", ver, sup.Addr())
+	readyBadge := "[READY]"
+	if guardFdIsTerminal(int(os.Stdout.Fd())) && os.Getenv("NO_COLOR") == "" {
+		readyBadge = tuiSGRGreenBold + "[READY]" + tuiSGRReset
+	}
+	supAddr := sup.Addr()
+	if !strings.HasPrefix(supAddr, "http://") && !strings.HasPrefix(supAddr, "https://") {
+		supAddr = "http://" + supAddr
+	}
+	fmt.Printf("\n%s fak up %s running on %s\n", readyBadge, ver, supAddr)
+	fmt.Printf("  • OpenAI-compatible endpoint: %s/v1/chat/completions\n", supAddr)
+	fmt.Printf("  • Agent sessions endpoint:    %s/v1/fak/agent/sessions\n", supAddr)
+	fmt.Printf("  • Health check endpoint:      %s/healthz\n\n", supAddr)
+	_ = os.Stdout.Sync()
 
 	<-ctx.Done()
 	shutdownTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -261,10 +273,7 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	if id := guardShortBuildID(); id != "" {
 		ver += " (" + id + ")"
 	}
-	fmt.Fprintf(stdout, "fak up %s running on http://%s\n", ver, server.Addr())
-	fmt.Fprintf(stdout, "Model: %s (%s, quant: %s) | Context: %d tokens | Headroom: %.1f%%\n",
-		plan.Tier.Name, plan.Tier.ModelID, plan.Tier.QuantTier, plan.ContextBudgetTokens, plan.HeadroomRatio*100)
-	fmt.Fprintf(stdout, "OpenAI-compatible endpoint: http://%s/v1/chat/completions\n", server.Addr())
+	printTurnkeyReady(stdout, ver, server.Addr(), plan)
 
 	if *headless || in == nil {
 		<-ctx.Done()
@@ -272,6 +281,25 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	}
 
 	_ = runTurnkeyREPL(ctx, in, stdout, "http://"+server.Addr(), plan)
+}
+
+func printTurnkeyReady(w io.Writer, ver, addr string, plan macfit.TurnkeyProfile) {
+	isTTY := false
+	if f, ok := w.(*os.File); ok {
+		isTTY = guardFdIsTerminal(int(f.Fd()))
+	}
+	readyBadge := "[READY]"
+	if isTTY && os.Getenv("NO_COLOR") == "" {
+		readyBadge = tuiSGRGreenBold + "[READY]" + tuiSGRReset
+	}
+	fmt.Fprintf(w, "\n%s fak up %s running on http://%s\n", readyBadge, ver, addr)
+	fmt.Fprintf(w, "  • Model:                      %s (%s, quant: %s) | Context: %d tokens | Headroom: %.1f%%\n",
+		plan.Tier.Name, plan.Tier.ModelID, plan.Tier.QuantTier, plan.ContextBudgetTokens, plan.HeadroomRatio*100)
+	fmt.Fprintf(w, "  • OpenAI-compatible endpoint: http://%s/v1/chat/completions\n", addr)
+	fmt.Fprintf(w, "  • Health check endpoint:      http://%s/healthz\n\n", addr)
+	if f, ok := w.(*os.File); ok {
+		_ = f.Sync()
+	}
 }
 
 type turnkeyServer struct {
