@@ -1325,7 +1325,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     ok &= buildKernel(g_kern[K_SWIGLU_MATMUL_ADD], P("swiglu_matmul_add.spv"), 4, 3 * sizeof(int));
     ok &= buildKernel(g_kern[K_ADD],       P("add.spv"),       2, sizeof(int));
     ok &= buildKernel(g_kern[K_ADD_BIAS],  P("add_bias.spv"),  2, 2 * sizeof(int));
-    ok &= buildKernel(g_kern[K_ATTENTION], P("attention.spv"), 4, 4 * sizeof(int) + sizeof(float));
+    ok &= buildKernel(g_kern[K_ATTENTION], P("attention.spv"), 5, 6 * sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_ARGMAX],    P("argmax.spv"),    2, sizeof(int));
     ok &= buildKernel(g_kern[K_ARGMAX_PAIRS], P("argmax_pairs.spv"), 3, sizeof(int));
     ok &= buildKernel(g_kern[K_QWEN35_GDN_CONV], P("qwen35_gdn_conv.spv"), 4, 3 * sizeof(int));
@@ -2089,9 +2089,51 @@ void fvk_add_bias_f32(void* dDst, const void* dBias, int rows, int width) {
 
 void fvk_attention_f32(const void* dQ, const void* dK, const void* dV, void* dOut,
                        int nPos, int nH, int nKV, int hd, float scale) {
-    struct { int nPos, nH, nKV, hd; float scale; } pc{nPos, nH, nKV, hd, scale};
-    Buffer* bufs[4] = {B((void*)dQ), B((void*)dK), B((void*)dV), B(dOut)};
+    // Experimental, default-off selector for #12535. Exact "1" is the only
+    // admitted value; every other value preserves the production control path.
+    // The variable is read at each call so isolated test subprocesses can select
+    // the candidate without widening the public C or Go backend APIs.
+    const char* splitEnv = std::getenv("FAK_VULKAN_ATTENTION_CONTEXT_SPLIT");
+    const bool contextSplit = splitEnv && splitEnv[0] == '1' && splitEnv[1] == '\0';
+    struct { int nPos, nH, nKV, hd; float scale; int mode, tileCount; }
+        pc{nPos, nH, nKV, hd, scale, 0, 1};
+    Buffer* out = B(dOut);
+    Buffer* bufs[5] = {B((void*)dQ), B((void*)dK), B((void*)dV), out, out};
+    if (!contextSplit) {
+        dispatch(g_kern[K_ATTENTION], bufs, &pc, sizeof(pc), (uint32_t)nH);
+        return;
+    }
+
+    constexpr uint64_t tileSize = 256u;
+    uint64_t tileCount = nPos > 0 ? ((uint64_t)nPos + tileSize - 1u) / tileSize : 1u;
+    uint64_t rowFloats = hd > 0 ? (uint64_t)hd + 2u : 0u;
+    if (nPos < 0 || nH <= 0 || nKV <= 0 || nH % nKV != 0 || hd <= 0 || hd > 1024 ||
+        tileCount > UINT32_MAX || (uint64_t)nH > UINT32_MAX / tileCount ||
+        (uint64_t)nH * tileCount > 65535u || rowFloats > SIZE_MAX / sizeof(float) ||
+        (uint64_t)nH * tileCount > (SIZE_MAX / sizeof(float)) / rowFloats) {
+        g_submissionStatus = VK_ERROR_OUT_OF_DEVICE_MEMORY;
+        return;
+    }
+    uint64_t scratchFloats = (uint64_t)nH * tileCount * rowFloats;
+    Buffer* scratch = B(fvk_malloc((size_t)(scratchFloats * sizeof(float))));
+    if (!scratch) {
+        g_submissionStatus = VK_ERROR_OUT_OF_DEVICE_MEMORY;
+        return;
+    }
+    bufs[4] = scratch;
+    pc.mode = 1;
+    pc.tileCount = (int)tileCount;
+    dispatch(g_kern[K_ATTENTION], bufs, &pc, sizeof(pc), (uint32_t)((uint64_t)nH * tileCount));
+    // One-shot dispatch executes immediately, so do not let a merge submission
+    // obscure its failure. In batch mode both phases are recorded into the same
+    // ordered command buffer and the eventual flush preserves submission status.
+    if (!g_batching && g_submissionStatus != VK_SUCCESS) {
+        fvk_free(scratch);
+        return;
+    }
+    pc.mode = 2;
     dispatch(g_kern[K_ATTENTION], bufs, &pc, sizeof(pc), (uint32_t)nH);
+    fvk_free(scratch);
 }
 
 int fvk_argmax_f32(const void* dLogits, int n) {
