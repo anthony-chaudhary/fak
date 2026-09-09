@@ -400,6 +400,12 @@ type Config struct {
 	// (the metalgemm stub makes the decode/prefill dispatch fall back to CPU), and the
 	// resident decode self-declines anything but a dense Qwen-class Q8 model.
 	Metal bool
+	// MetalMTP, when true, enables the in-kernel Metal MTP draft-verify-rollback
+	// speculative decoding loop for Apple Silicon resident chat.
+	MetalMTP bool
+	// DisableMetalMTP explicitly disables Metal MTP speculative decoding even
+	// if FAK_SPECULATIVE=mtp is set in the environment.
+	DisableMetalMTP bool
 	// ExpertParallelRanks is the expert-parallel rank count for the in-kernel MoE forward:
 	// the number of expert shards the routed glm_moe_dsa MoE delta is reduced across
 	// (model.SetExpertParallelRanks; the EP twin glmMoeEPFFN). 0/1 leave the forward on the

@@ -277,7 +277,7 @@ func emitGitDailyUnit(stdout, stderr io.Writer, target, label, fakBin, repoRoot 
 		timer:   "Timer for " + label,
 		task:    "fak daily git hygiene (reap orphaned git locks, then consolidate the object DB)",
 	}
-	cronRender(stdout, target, cronSanitizeLabel(label), descs, interval, args)
+	cronRender(stdout, target, cronSanitizeLabel(label), descs, interval, args, abs, nil)
 	return 0
 }
 
