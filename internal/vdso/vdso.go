@@ -215,6 +215,10 @@ type VDSO struct {
 	// path-scope invalidation (#11492).
 	searchCache *SearchCache
 
+	// promoted tracks dynamically promoted read-only tools based on verified idempotency receipts.
+	promotedMu sync.RWMutex
+	promoted   *PromotedRegistry
+
 	// cachemeta emission (§2.5). cacheSink observes tier-2 lifecycle events as
 	// cachemeta entries; witnessAdapters are per-tool external-witness extractors.
 	// resultStore is the opt-in durable write-through delegate. All are opt-in
@@ -303,7 +307,7 @@ func (v *VDSO) gateMiss(c *abi.ToolCall) (*abi.Result, bool) {
 	switch {
 	case destructive(c):
 		return v.missed(c, MissDestructive)
-	case !isReadOnlyCall(c):
+	case !v.isReadOnly(c):
 		return v.missed(c, MissMissingHints)
 	case !toolCacheIdentityKnown(c):
 		return v.missed(c, MissMissingHints)
@@ -369,6 +373,7 @@ func New(capacity int) *VDSO {
 		revokedIndex:  map[string]*list.Element{},
 		fileWitnesses: map[string]map[string]struct{}{},
 		searchCache:   NewSearchCache(capacity),
+		promoted:      NewPromotedRegistry(),
 	}
 }
 
@@ -608,7 +613,7 @@ func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) 
 	}
 
 	// tier 1: pure registry, gated on read-only+idempotent and not destructive.
-	if isReadOnlyCall(c) && !destructive(c) {
+	if v.isReadOnly(c) && !destructive(c) {
 		v.mu.Lock()
 		f, ok := v.pure[c.Tool]
 		v.mu.Unlock()
@@ -633,7 +638,7 @@ func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) 
 	}
 
 	// tier 2: content-addressed cache, gated identically and world-versioned.
-	if isReadOnlyCall(c) && !destructive(c) {
+	if v.isReadOnly(c) && !destructive(c) {
 		args := v.bytes(ctx, c.Args)
 		// Resource-mode soundness gate: refuse to serve a read that can't name its
 		// entity (it would be invalidated by no entity-fine write) — go to the engine.
@@ -800,10 +805,14 @@ func (v *VDSO) Emit(ev abi.Event) {
 		return
 	}
 	c, r := ev.Call, ev.Result
+	if isStateDriftOrMutation(c, r) {
+		v.InvalidatePromoted(c.Tool)
+	}
 	if r.Status != abi.StatusOK {
 		return
 	}
 	if destructive(c) {
+		v.InvalidatePromoted(c.Tool)
 		// The finer eraser: bump only the epoch(s) of the tag(s) this write touches,
 		// then publish the mutation on the coherence bus. In Global mode writeTags is
 		// always ["*"], so this reduces to the v0.1 worldVer++ full flush; in finer
@@ -845,7 +854,16 @@ func (v *VDSO) StoreResult(ctx context.Context, c *abi.ToolCall, r *abi.Result) 
 	if c == nil || r == nil || r.Status != abi.StatusOK || destructive(c) {
 		return ResultStoreReceipt{}, nil
 	}
-	if !isReadOnlyCall(c) {
+	if isStateDriftOrMutation(c, r) {
+		v.InvalidatePromoted(c.Tool)
+		return ResultStoreReceipt{}, nil
+	}
+	readOnly := v.isReadOnly(c)
+	if !readOnly && HasIdempotencyReceipt(r.Meta) {
+		v.PromoteReadOnly(c.Tool)
+		readOnly = true
+	}
+	if !readOnly {
 		return ResultStoreReceipt{}, nil
 	}
 	if !toolCacheIdentityKnown(c) {

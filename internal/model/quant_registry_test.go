@@ -447,7 +447,7 @@ func TestIQ3XXSHALAdmissionRequiresRegisteredCapability(t *testing.T) {
 		t.Errorf("admittedDtype = %v, want compute.IQ3_XXS", admittedDtype)
 	}
 
-	// 6. Registered HAL descriptor injection allows admission
+	// 6. Fail-closed: descriptor with HALSupported: true must NOT bypass backend capability requirement
 	capableDesc := BaseQuantDescriptor{
 		QuantKind:     kindIQ3XXS,
 		QuantName:     "IQ3_XXS",
@@ -459,11 +459,14 @@ func TestIQ3XXSHALAdmissionRequiresRegisteredCapability(t *testing.T) {
 	}
 	RegisterQuantDescriptor(capableDesc)
 	if !SupportsHALKQuant(kindIQ3XXS) {
-		t.Fatalf("SupportsHALKQuant(kindIQ3XXS) must be true after registering capable descriptor")
+		t.Fatalf("SupportsHALKQuant(kindIQ3XXS) must be true after registering descriptor with HALSupported")
 	}
-	vInjected := AdmitIQ3XXSHAL(defaultBE)
-	if !vInjected.Admitted {
-		t.Fatalf("AdmitIQ3XXSHAL(defaultBE) refused after descriptor registration: %v", vInjected.Refusal)
+	vBypass := AdmitIQ3XXSHAL(defaultBE)
+	if vBypass.Admitted {
+		t.Fatalf("AdmitIQ3XXSHAL(defaultBE) must not admit when backend lacks capability even if descriptor has HALSupported")
+	}
+	if vBypass.Refusal == nil || vBypass.Refusal.Reason != IQ3XXSRefusalNoCapability {
+		t.Fatalf("AdmitIQ3XXSHAL(defaultBE) refusal = %v, want %s", vBypass.Refusal, IQ3XXSRefusalNoCapability)
 	}
 }
 

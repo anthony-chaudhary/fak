@@ -164,6 +164,11 @@ func normalizeOptions(opts Options) Options {
 	if opts.ExcludePrivate || opts.PrivateRepo == "-" || opts.PrivateRepo == "none" {
 		opts.IncludePrivate = false
 	}
+	if opts.IncludePrivate && opts.Source == "git" && opts.GitExecutor == nil {
+		if fi, statErr := os.Stat(opts.PrivateDir); statErr != nil || !fi.IsDir() {
+			opts.IncludePrivate = false
+		}
+	}
 	return opts
 }
 
@@ -228,6 +233,13 @@ func collectRepo(ctx context.Context, repo, dir string, opts Options,
 	ghExec func(ctx context.Context, args ...string) ([]byte, error),
 	gitExec func(ctx context.Context, dir string, args ...string) ([]byte, error),
 ) (RepoReport, error) {
+	if ghExec == nil {
+		ghExec = defaultGhExecutor
+	}
+	if gitExec == nil {
+		gitExec = defaultGitExecutor
+	}
+
 	rr := RepoReport{
 		Repo:   repo,
 		Path:   dir,
@@ -253,6 +265,11 @@ func collectRepo(ctx context.Context, repo, dir string, opts Options,
 		}
 	case "git":
 		rr.Source = "git"
+		if dir != "" && opts.GitExecutor == nil {
+			if fi, statErr := os.Stat(dir); statErr != nil || !fi.IsDir() {
+				return rr, nil
+			}
+		}
 		issues, issuesErr = collectIssuesFromGit(ctx, repo, dir, opts.Since, opts.Now, gitExec)
 		if issuesErr != nil {
 			return rr, issuesErr
@@ -418,10 +435,21 @@ func collectIssuesFromGit(ctx context.Context, repo, dir string, since, until ti
 		"--format=%H\x1f%aI\x1f%s\x1f%b\x1e",
 	}
 
+	if dir != "" {
+		if fi, statErr := os.Stat(dir); statErr != nil || !fi.IsDir() {
+			return nil, nil
+		}
+	}
+
 	out, err := execFn(ctx, dir, args...)
 	if err != nil {
-		errStr := err.Error()
-		if strings.Contains(errStr, "no such file or directory") || strings.Contains(errStr, "cannot find the file") {
+		errStr := strings.ToLower(err.Error())
+		if strings.Contains(errStr, "no such file or directory") ||
+			strings.Contains(errStr, "cannot find the file") ||
+			strings.Contains(errStr, "cannot find the path") ||
+			strings.Contains(errStr, "not a git repository") ||
+			strings.Contains(errStr, "does not exist") ||
+			strings.Contains(errStr, "chdir") {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("git log: %w", err)

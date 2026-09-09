@@ -1803,6 +1803,11 @@
         },
         {
             "command": "fak version modules",
+            "output_contains": "internal/hil",
+            "lane": "hil"
+        },
+        {
+            "command": "fak version modules",
             "output_contains": "internal/hooks",
             "lane": "hooks"
         },

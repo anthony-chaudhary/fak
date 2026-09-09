@@ -768,3 +768,22 @@ func TestMetalgemmRuntimeProofRecorded(t *testing.T) {
 		t.Fatalf("unexpected output_contains for metalgemm: %q", proof.OutputContains)
 	}
 }
+
+func TestHilRuntimeProofRecorded(t *testing.T) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	proofs, err := loadRuntimeProofs(root)
+	if err != nil {
+		t.Fatalf("loadRuntimeProofs: %v", err)
+	}
+	proof, ok := proofs["hil"]
+	if !ok {
+		t.Fatalf("missing hil runtime proof in runtime-proofs.json")
+	}
+	if proof.Command != "fak version modules" {
+		t.Fatalf("unexpected command for hil: %q", proof.Command)
+	}
+	if proof.OutputContains != "internal/hil" {
+		t.Fatalf("unexpected output_contains for hil: %q", proof.OutputContains)
+	}
+}
+
