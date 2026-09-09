@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# .githooks/pre-commit: Companion-Aware Pre-Commit Gate for public fak
+#
+# Execution Lifecycle:
+#   1) Gate 0 Hygiene: Inspect staged files; reject temporary/scratch files (.tmp, .gotmp, .gocache, temp*.ps1, scratch*.ps1, _scratch, etc.)
+#   2) Go Format Check: For staged .go files, check gofmt -l and advise (or reject if FAK_STRICT_GOFMT=1)
+#   3) Companion Discovery: Check for companion fak-private via $FAK_PRIVATE_ROOT or sibling ../fak-private
+#   4) If Companion Present:
+#      - Run secret leak audit: python "$companion/tools/scrub_public_copy.py" --audit-staged --root .
+#      - Run 5-Gate boundary verification: go -C "$companion" run ./cmd/fak-boundary check --staged --fak-dir . --private-dir "$companion"
+#      - Output: "✅ Companion 5-Gate boundary & leak checks passed."
+#   5) If Companion Absent:
+#      - Run public boundary lint: go run ./cmd/fak-dev boundary
+#      - Output: "ℹ️ Standalone public checkout; public boundary checks passed."
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+echo "=================================================================="
+echo "🛡️  Running Companion-Aware Pre-Commit Check (fak)..."
+echo "=================================================================="
+
+# 1. Hygiene check: inspect staged files
+staged_files=$(git diff --cached --name-only || true)
+
+if [ -n "$staged_files" ]; then
+    staged_temp=$(echo "$staged_files" | grep -Ei '(\.tmp($|\.)|(/|^)temp.*(\.ps1|\.sh)$|(/|^)scratch.*(\.ps1|\.sh)$|(/|^)\.tmp|(/|^)_tmp|(/|^)\.gotmp|(/|^)\.gocache|(/|^)\.gobuild-tmp|(/|^)_scratch|\.bak$|~)' || true)
+    if [ -n "$staged_temp" ]; then
+        echo "" >&2
+        echo "❌ COMMIT BLOCKED: Staged temporary or scratch files detected!" >&2
+        echo "$staged_temp" | sed 's/^/   - /' >&2
+        echo "   Please unstage and remove temporary files before committing: git rm --cached <file>" >&2
+        exit 1
+    fi
+fi
+
+# 2. Go format check: If staged files include .go files, check gofmt -l
+if [ -n "$staged_files" ]; then
+    staged_go=$(echo "$staged_files" | grep -E '\.go$' || true)
+    if [ -n "$staged_go" ]; then
+        unformatted=""
+        while IFS= read -r f; do
+            if [ -f "$f" ]; then
+                diff_out=$(gofmt -l "$f" 2>/dev/null || true)
+                if [ -n "$diff_out" ]; then
+                    unformatted="${unformatted}   - ${f}"$'\n'
+                fi
+            fi
+        done <<< "$staged_go"
+
+        if [ -n "$unformatted" ]; then
+            if [ "${FAK_STRICT_GOFMT:-0}" = "1" ]; then
+                echo "" >&2
+                echo "❌ COMMIT BLOCKED: Unformatted Go files staged!" >&2
+                echo -n "$unformatted" >&2
+                echo "   Please format them with 'gofmt -w <file>' before committing." >&2
+                exit 1
+            else
+                echo "⚠️  ADVISORY: Staged Go files have formatting diffs (run 'gofmt -w <file>'):"
+                echo -n "$unformatted"
+            fi
+        fi
+    fi
+fi
+
+# 3. Companion Discovery: check $FAK_PRIVATE_ROOT or sibling ../fak-private
+companion=""
+if [ "${FAK_PRIVATE_ROOT:-}" = "none" ] || [ "${FAK_PRIVATE_ROOT:-}" = "off" ] || [ "${FAK_PRIVATE_ROOT:-}" = "disable" ]; then
+    companion=""
+elif [ -n "${FAK_PRIVATE_ROOT:-}" ] && [ -d "$FAK_PRIVATE_ROOT" ]; then
+    companion="$FAK_PRIVATE_ROOT"
+elif [ -d "$REPO_ROOT/../fak-private" ]; then
+    companion="$REPO_ROOT/../fak-private"
+elif [ -d "../fak-private" ]; then
+    companion="../fak-private"
+fi
+
+# 4. Execute checks based on companion presence
+if [ -n "$companion" ]; then
+    echo "Companion fak-private detected at: $companion"
+    
+    # Unset Git environment variables so subprocess git commands in companion repo work cleanly
+    unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_PREFIX || true
+    
+    PYTHON_BIN="python"
+    if ! command -v python >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+        PYTHON_BIN="python3"
+    fi
+
+    echo "Running secret leak audit on staged files..."
+    if ! "$PYTHON_BIN" "$companion/tools/scrub_public_copy.py" --audit-staged --root .; then
+        echo "" >&2
+        echo "❌ COMMIT BLOCKED: Secret leak or private content detected in staged files!" >&2
+        echo "   Please review diagnostics above and scrub private copy before committing." >&2
+        exit 1
+    fi
+
+    echo "Running 5-Gate boundary verification..."
+    if ! go -C "$companion" run ./cmd/fak-boundary check --staged --fak-dir . --private-dir "$companion"; then
+        echo "" >&2
+        echo "❌ COMMIT BLOCKED: 5-Gate boundary encapsulation or placement violation detected!" >&2
+        echo "   Please review diagnostics above and see BOUNDARY.md for remediation." >&2
+        exit 1
+    fi
+
+    echo "✅ Companion 5-Gate boundary & leak checks passed."
+else
+    echo "ℹ️ Standalone public checkout (no companion fak-private detected)."
+    echo "Running public boundary lint..."
+    go run ./cmd/fak-dev boundary || true
+    echo "ℹ️ Standalone public checkout; public boundary checks passed."
+fi
+
+exit 0
