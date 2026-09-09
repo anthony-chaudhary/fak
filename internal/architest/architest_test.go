@@ -276,7 +276,7 @@ var tier = map[string]int{
 	"windowgate":       2, // no-desktop-popup ratchet: scans tracked .ps1 task installers + window-suppressing .py for console-window flashes; stdlib-only, off the hot path.
 	"worktype":         1, // closed work-class taxonomy (ongoing optimization PROGRAM vs DISCRETE deliverable epic) the milestone roadmap + `fak program` report sort by; stdlib-only, imports nothing internal, off the hot path.
 	"programreport":    2, // ongoing-program report (kernel-opt + cache-opt frontier+trend; the sibling of milestonereport that measures never-'done' programs); imports worktype(1)+cachevalueledger(1)+hooks(1), off the hot path.
-	"benchauthority":   1, // typed in-binary source of truth for the PRIMARY benchmark numbers fak claims (the "what" half of the benchmark discipline); stdlib-only, imports nothing internal, off the hot path.
+	"benchauthority":   2, // typed in-binary source of truth for the PRIMARY benchmark numbers fak claims (the "what" half of the benchmark discipline); imports benchcli(2)+stdlib, off the hot path.
 	"closureaudit":     1, // pure stdlib-only port of the issue_closure_audit grader (#1406): binds commits to issue numbers and grades each issue's closure; imports nothing internal, off the hot path.
 	"ctxplans":         1, // CONTEXT-PLAN-REQUIRED advisory lint (R4, #2202, epic #2198): the code form of doctrine law L7 — every surface declares its context plan; stdlib-only, off the hot path.
 	"fleetverify":      2, // throwaway compile-witness isolating the operator.go fleet helpers' loopfleet/loopmgr API usage from the churning cmd/fak; imports loopfleet(1)+loopmgr(1), off the hot path.
@@ -297,13 +297,13 @@ var tier = map[string]int{
 	"preflight": 3, "vdso": 3, "plancfi": 3, "steward": 3, "witness": 3,
 	"cachevaluereport": 3, // weekly cache-value TREND roll-up (epic #1301 rung A, Track 1): pure Fold over cachevalueledger(1) into a by-week realized-reuse trend, #1066-fenced; imports cachevalueledger(1)+stdlib only, off the hot path.
 	"auditusage":       3, // cross-session audit usage rollup (#1612): folds sink rows from journal(2), loopmgr(1), dispatchaudit(1), and usage ledgers into one CLI report; off the hot path.
-	"harvest":          3, "shipgate": 3, "policy": 3, "privacy": 3, "auditreceipt": 3, "providercost": 3, "modelengine": 3, "ratelimit": 3,
+	"harvest":          3, "shipgate": 3, "policy": 3, "privacy": 3, "auditreceipt": 3, "providercost": 3, "ratelimit": 3,
 	"launchshim": 2, // user-local launch configuration + direct-bypass policy; stdlib-only foundation consumed by cmd/fak.
 	"journal":    3, "gitgate": 3, "gitdaily": 3, "safecommit": 3, "patchcommit": 3,
 	"storedrv": 3, // content-addressed storage ROUTER: composes the blob/blobfs/blobhttp (tier-1) drivers into one namespace; the abi RegionBackend only when FAK_STORE opts in.
 	"capindex": 3, // protocol-blind capability keystone (#1104 C1): CapRef/Capability/Index/Resolver + skill resolver, imports only abi(0). The gateway-backed MCP/A2A resolvers live in capindexgw(4) so the core stays importable by the tier-3 skill-loader (ctxresidency/ctxmmu, #1106).
 
-	"ifc": 4, "normgate": 4, "secretgate": 4, "recall": 4, "kvmmu": 4, "radixkv": 4, "cdb": 4, "contextq": 4, "agentdojo": 4, "toollint": 4, "toolsandbox": 4, "terminalbench": 4,
+	"ifc": 4, "normgate": 4, "secretgate": 4, "recall": 4, "kvmmu": 4, "radixkv": 4, "modelengine": 4, "cdb": 4, "contextq": 4, "agentdojo": 4, "toollint": 4, "toolsandbox": 4, "terminalbench": 4,
 	"agentdemo":     4,                // agentic "try-it" demo spine (epic #1167): a deterministic, no-key tool-using agent loop that folds the REAL kernel per call â€” the live-loop dual of turnbench's trace replay. Composer: imports abi(0)+adjudicator(2)+kernel(2), off the hot path.
 	"browseraction": 4,                // browser/computer-use action-mediation harness: composes webbench actions with policy/adjudicator, off the live request path.
 	"demo":          4,                // CLI 60-second proof composer: folds agentdemo(3)+kernel(2)+abi(0) into ALLOW/DENY/QUARANTINE evidence for `fak demo`, off the hot path.
@@ -1572,6 +1572,7 @@ var chatEndpointRole = map[string]string{
 	"tb4bench":          "the off-path Terminal-Bench 4 benchmark client comparing fak harness vs reference runner (not a live planner)",
 	"agentxbench":       "the off-path AgentX benchmark client against a declared OpenAI-compatible endpoint (not a live planner)",
 	"gym":               "the off-path sandbox evaluation gym scenario runner against an ephemeral gateway (not a live planner)",
+	"amdgpu":            "the off-path hardware-in-the-loop Strix Halo inference verification client (not a live planner)",
 }
 
 // TestSingleOpenAIChatClient pins the T4 fix as an architecture invariant: the
