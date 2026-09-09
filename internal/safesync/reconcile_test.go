@@ -139,6 +139,34 @@ func TestRouteReconciliationTable(t *testing.T) {
 			wantReason: ReasonDivergedDisjoint,
 		},
 		{
+			name: "diverged (disjoint untracked collision)",
+			setup: func(t *testing.T, origin, clone string) ReconcileOptions {
+				writeFile(t, filepath.Join(origin, "remote_file.txt"), "remote\n")
+				git(t, origin, "add", ".")
+				git(t, origin, "commit", "-m", "remote file")
+
+				writeFile(t, filepath.Join(clone, "local_file.txt"), "local\n")
+				git(t, clone, "add", ".")
+				git(t, clone, "commit", "-m", "local file")
+
+				git(t, clone, "fetch", "origin")
+
+				// Untracked local file collides with incoming remote_file.txt
+				writeFile(t, filepath.Join(clone, "remote_file.txt"), "untracked collision\n")
+				return ReconcileOptions{
+					Repo:   clone,
+					Remote: "origin",
+					Branch: "work",
+					Goal:   "publish",
+				}
+			},
+			wantRoute:      RouteHoldDirtyCollision,
+			wantOK:         false,
+			wantState:      StateDiverged,
+			wantReason:     ReasonCollisionRisk,
+			checkColliding: []string{"remote_file.txt"},
+		},
+		{
 			name: "diverged (overlap)",
 			setup: func(t *testing.T, origin, clone string) ReconcileOptions {
 				writeFile(t, filepath.Join(origin, "shared.txt"), "conflicting remote content\n")
@@ -363,12 +391,21 @@ func TestRouteReconciliationApplyExecution(t *testing.T) {
 		if res.Execution == nil || !res.Execution.Success {
 			t.Fatalf("execution failed: %+v", res.Execution)
 		}
-		// Confirm remote file exists in synthetic merge tree and local file remains in working tree
+		// Confirm remote file exists in synthetic merge tree and both files exist in working tree
 		if got := strings.TrimSpace(gitOutput(t, clone, "show", "HEAD:disjoint_remote.txt")); got != "remote" {
 			t.Fatalf("disjoint_remote.txt in HEAD = %q, want %q", got, "remote")
 		}
+		if got := readFile(t, filepath.Join(clone, "disjoint_remote.txt")); got != "remote\n" {
+			t.Fatalf("disjoint_remote.txt in clone working tree = %q, want %q", got, "remote\n")
+		}
 		if got := readFile(t, filepath.Join(clone, "disjoint_local.txt")); got != "local\n" {
 			t.Fatalf("disjoint_local.txt = %q", got)
+		}
+
+		// Confirm git status in clone has no staged deletions or uncommitted index drift
+		status := strings.TrimSpace(gitOutput(t, clone, "status", "--porcelain"))
+		if status != "" {
+			t.Fatalf("git status after disjoint integrate = %q, want clean status (no false deletions)", status)
 		}
 	})
 }
@@ -712,4 +749,132 @@ func TestRouteReconciliationSuspendPaths(t *testing.T) {
 	if gotA := readFile(t, filepath.Join(clone, "a.txt")); gotA != wantA {
 		t.Fatalf("a.txt = %q, want %q", gotA, wantA)
 	}
+}
+
+func TestRouteReconciliationDisjointUntrackedCollision(t *testing.T) {
+	t.Run("disjoint with colliding untracked file fails closed with COLLISION_RISK", func(t *testing.T) {
+		origin, clone := setupTestOriginAndClone(t)
+		writeFile(t, filepath.Join(origin, "disjoint_remote.txt"), "remote content\n")
+		git(t, origin, "add", ".")
+		git(t, origin, "commit", "-m", "remote disjoint")
+
+		writeFile(t, filepath.Join(clone, "disjoint_local.txt"), "local content\n")
+		git(t, clone, "add", ".")
+		git(t, clone, "commit", "-m", "local disjoint")
+		git(t, clone, "fetch", "origin")
+
+		// Create untracked local file colliding with incoming remote file
+		untrackedContent := "untracked local work that must not be overwritten\n"
+		untrackedPath := filepath.Join(clone, "disjoint_remote.txt")
+		writeFile(t, untrackedPath, untrackedContent)
+
+		// 1. Preview assessment (Apply: false) must fail closed with COLLISION_RISK
+		opts := ReconcileOptions{
+			Repo:   clone,
+			Remote: "origin",
+			Branch: "work",
+			Goal:   "integrate",
+			Apply:  false,
+		}
+		res, err := RouteReconciliation(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.OK {
+			t.Fatalf("expected res.OK to be false due to untracked collision, got true")
+		}
+		if res.Reason != ReasonCollisionRisk {
+			t.Fatalf("expected res.Reason = %q, got %q", ReasonCollisionRisk, res.Reason)
+		}
+		if res.Route != RouteHoldDirtyCollision {
+			t.Fatalf("expected res.Route = %q, got %q", RouteHoldDirtyCollision, res.Route)
+		}
+		foundColliding := false
+		for _, c := range res.CollidingPaths {
+			if c == "disjoint_remote.txt" {
+				foundColliding = true
+				break
+			}
+		}
+		if !foundColliding {
+			t.Fatalf("expected colliding path disjoint_remote.txt, got %v", res.CollidingPaths)
+		}
+
+		// 2. Apply execution (Apply: true) without quarantine must fail closed and NOT clobber file
+		optsApply := ReconcileOptions{
+			Repo:   clone,
+			Remote: "origin",
+			Branch: "work",
+			Goal:   "integrate",
+			Apply:  true,
+		}
+		resApply, err := RouteReconciliation(context.Background(), optsApply)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resApply.OK || resApply.Applied {
+			t.Fatalf("expected Apply to fail closed, got OK=%v Applied=%v", resApply.OK, resApply.Applied)
+		}
+		if resApply.Reason != ReasonCollisionRisk {
+			t.Fatalf("expected resApply.Reason = %q, got %q", ReasonCollisionRisk, resApply.Reason)
+		}
+
+		// Untracked local file MUST remain intact
+		if got := readFile(t, untrackedPath); got != untrackedContent {
+			t.Fatalf("local untracked file was modified/overwritten! got %q, want %q", got, untrackedContent)
+		}
+	})
+
+	t.Run("disjoint with colliding untracked file and auto-quarantine succeeds", func(t *testing.T) {
+		origin, clone := setupTestOriginAndClone(t)
+		remoteContent := "remote content\n"
+		writeFile(t, filepath.Join(origin, "disjoint_remote.txt"), remoteContent)
+		git(t, origin, "add", ".")
+		git(t, origin, "commit", "-m", "remote disjoint")
+
+		writeFile(t, filepath.Join(clone, "disjoint_local.txt"), "local content\n")
+		git(t, clone, "add", ".")
+		git(t, clone, "commit", "-m", "local disjoint")
+		git(t, clone, "fetch", "origin")
+
+		// Create untracked local file colliding with incoming remote file
+		untrackedContent := "untracked local work to quarantine\n"
+		untrackedPath := filepath.Join(clone, "disjoint_remote.txt")
+		writeFile(t, untrackedPath, untrackedContent)
+		expectedHash, _, err := FileSHA256(untrackedPath)
+		if err != nil {
+			t.Fatalf("FileSHA256: %v", err)
+		}
+
+		opts := ReconcileOptions{
+			Repo:           clone,
+			Remote:         "origin",
+			Branch:         "work",
+			Goal:           "integrate",
+			Apply:          true,
+			AutoQuarantine: true,
+			Session:        "disjoint-quarantine-test",
+		}
+		res, err := RouteReconciliation(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !res.OK || !res.Applied {
+			t.Fatalf("expected apply with AutoQuarantine to succeed, got OK=%v Applied=%v Reason=%s", res.OK, res.Applied, res.Reason)
+		}
+		if res.Route != RouteDisjointIntegrate {
+			t.Fatalf("expected res.Route = %q, got %q", RouteDisjointIntegrate, res.Route)
+		}
+		if res.Quarantine == nil {
+			t.Fatalf("expected non-nil Quarantine receipt")
+		}
+		if res.Quarantine.Preserved["disjoint_remote.txt"] != expectedHash && res.Quarantine.SHA256 != expectedHash {
+			t.Fatalf("quarantine receipt did not preserve hash %s: %+v", expectedHash, res.Quarantine)
+		}
+
+		// Working tree file must now have remote content
+		if got := readFile(t, untrackedPath); got != remoteContent {
+			t.Fatalf("working tree disjoint_remote.txt = %q, want %q", got, remoteContent)
+		}
+	})
 }
