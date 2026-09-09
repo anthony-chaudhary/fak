@@ -26,6 +26,77 @@ func stubDisambiguationReader(fn func(repo, tree string) DisambiguationWitness) 
 	}
 }
 
+func TestDisambiguationApplicabilitySkipsOnlyNeverPresentContract(t *testing.T) {
+	// Oracle-only configuration cannot turn an inapplicable root into an
+	// invalid one, and cannot act as a bypass when the contract is present.
+	t.Setenv(DisambiguationTimeoutEnv, "not-a-timeout")
+	oldHas := hasDisambiguationContract
+	oldRead := readDisambiguation
+	defer func() {
+		hasDisambiguationContract = oldHas
+		readDisambiguation = oldRead
+	}()
+
+	var probes []string
+	hasDisambiguationContract = func(_ context.Context, repo, tree string) (bool, error) {
+		probes = append(probes, repo+"@"+tree)
+		return false, nil
+	}
+	reads := 0
+	readDisambiguation = stubDisambiguationReader(func(repo, tree string) DisambiguationWitness {
+		reads++
+		return DisambiguationWitness{Tree: tree}
+	})
+
+	got, ok := verifyApplicableDisambiguation("/root", "/worker", "post-tree")
+	if !ok || got != nil {
+		t.Fatalf("never-present contract = (%+v, %v), want (nil, true)", got, ok)
+	}
+	wantProbes := []string{"/root@HEAD", "/worker@HEAD", "/root@post-tree"}
+	if !reflect.DeepEqual(probes, wantProbes) || reads != 0 {
+		t.Fatalf("probes=%v reads=%d, want probes=%v and no oracle reads", probes, reads, wantProbes)
+	}
+}
+
+func TestDisambiguationApplicabilityPreservesFullOracleForAnyContractView(t *testing.T) {
+	views := []struct {
+		name    string
+		present string
+		wantOK  bool
+	}{
+		{name: "before preserves removal detection", present: "/root@HEAD", wantOK: false},
+		{name: "worker", present: "/worker@HEAD", wantOK: true},
+		{name: "post apply preserves addition detection", present: "/root@post-tree", wantOK: true},
+	}
+	for _, tc := range views {
+		t.Run(tc.name, func(t *testing.T) {
+			oldHas := hasDisambiguationContract
+			oldRead := readDisambiguation
+			defer func() {
+				hasDisambiguationContract = oldHas
+				readDisambiguation = oldRead
+			}()
+
+			hasDisambiguationContract = func(_ context.Context, repo, tree string) (bool, error) {
+				return repo+"@"+tree == tc.present, nil
+			}
+			reads := 0
+			readDisambiguation = stubDisambiguationReader(func(repo, tree string) DisambiguationWitness {
+				reads++
+				semanticValid := tc.wantOK || tree != "post-tree"
+				return DisambiguationWitness{
+					Tree: tree, Fresh: true, SemanticValid: semanticValid, CriticalClean: true, Coverage: 1,
+				}
+			})
+
+			got, ok := verifyApplicableDisambiguation("/root", "/worker", "post-tree")
+			if ok != tc.wantOK || got == nil || reads != 3 {
+				t.Fatalf("contract view %q = (%+v, %v), reads=%d; want complete three-view oracle and ok=%v", tc.present, got, ok, reads, tc.wantOK)
+			}
+		})
+	}
+}
+
 type manualDeadlineContext struct {
 	done chan struct{}
 }
@@ -416,17 +487,20 @@ func validDisambiguationPayload() []byte {
 
 func TestLandIsolatedDisambiguationTimeoutIsTypedCancellableAndPreCAS(t *testing.T) {
 	oldResolve := resolveDisambiguationTree
+	oldHas := hasDisambiguationContract
 	oldList := listDisambiguationTree
 	oldReadObject := readDisambiguationObject
 	oldScorecard := runAnalyzer
 	oldContext := newDeadline
 	defer func() {
 		resolveDisambiguationTree = oldResolve
+		hasDisambiguationContract = oldHas
 		listDisambiguationTree = oldList
 		readDisambiguationObject = oldReadObject
 		runAnalyzer = oldScorecard
 		newDeadline = oldContext
 	}()
+	hasDisambiguationContract = func(context.Context, string, string) (bool, error) { return true, nil }
 
 	manual := newManualDeadlineContext()
 	t.Setenv(DisambiguationTimeoutEnv, "37000")
@@ -523,7 +597,12 @@ func TestLandIsolatedDisambiguationTimeoutIsTypedCancellableAndPreCAS(t *testing
 
 func TestLandIsolatedInvalidDisambiguationTimeoutRefusesTypedAndPreCAS(t *testing.T) {
 	old := readDisambiguation
-	defer func() { readDisambiguation = old }()
+	oldHas := hasDisambiguationContract
+	defer func() {
+		readDisambiguation = old
+		hasDisambiguationContract = oldHas
+	}()
+	hasDisambiguationContract = func(context.Context, string, string) (bool, error) { return true, nil }
 
 	for _, raw := range []string{"", "0", "-1", "900001", "malformed-secret-sentinel"} {
 		t.Run(raw, func(t *testing.T) {

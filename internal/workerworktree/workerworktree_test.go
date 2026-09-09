@@ -906,7 +906,12 @@ func TestLandIsolatedPostMergeVerificationSuccessProceedsWithCAS(t *testing.T) {
 func TestLandIsolatedDisambiguationRefusalRequiresReconciliation(t *testing.T) {
 	g := isolatedHappyFake()
 	oldRead := readDisambiguation
-	defer func() { readDisambiguation = oldRead }()
+	oldHas := hasDisambiguationContract
+	defer func() {
+		readDisambiguation = oldRead
+		hasDisambiguationContract = oldHas
+	}()
+	hasDisambiguationContract = func(context.Context, string, string) (bool, error) { return true, nil }
 	reads := 0
 	readDisambiguation = stubDisambiguationReader(func(repo, tree string) DisambiguationWitness {
 		reads++

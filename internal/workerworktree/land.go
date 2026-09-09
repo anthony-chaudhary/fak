@@ -765,7 +765,7 @@ func landIsolatedProspectiveVerified(root, wtPath, diff, msgFile string, paths [
 		if disambiguationRelevant(paths) {
 			finishAnalysis := beginLandPhase(tracker, "whole-tree-disambiguation", attempt)
 			var valid bool
-			disambiguation, valid = verifyAppliedDisambiguation(root, wtPath, treeSHA)
+			disambiguation, valid = verifyApplicableDisambiguation(root, wtPath, treeSHA)
 			finishAnalysis()
 			if !valid {
 				return isolatedLandReconciliationResult(wtPath, Result{Reason: "post-apply disambiguation invariant failed", Detail: disambiguation.compactDetail(), Disambiguation: disambiguation}), true

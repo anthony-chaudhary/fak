@@ -410,3 +410,72 @@ func TestLiveLandWithSiblingWorkspaceVerified(t *testing.T) {
 		t.Fatalf("trunk app.go = %q, %v; want landed worker bytes", got, err)
 	}
 }
+
+// TestLiveLandWithoutDisambiguationContract proves #12457: a repository that
+// has never carried fak's concept analyzer can still use the same root-portable
+// managed lander for an ordinary Go command change.
+func TestLiveLandWithoutDisambiguationContract(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not on PATH")
+	}
+
+	repo := t.TempDir()
+	runGit := func(args ...string) string {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return string(out)
+	}
+	runGit("init", "-q", "-b", "main")
+	runGit("config", "user.email", "e2e@test")
+	runGit("config", "user.name", "e2e")
+	runGit("config", "commit.gpgsign", "false")
+	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module example.test/portable-land\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commandDir := filepath.Join(repo, "cmd", "demo")
+	if err := os.MkdirAll(commandDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(commandDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "go.mod", "cmd/demo/main.go")
+	runGit("commit", "-q", "-m", "base")
+	base := TrunkHeadSHA(repo, nil)
+
+	prepared := Prepare(repo, "workerworktree", "12457", base, t.TempDir(), nil)
+	if !prepared.OK {
+		t.Fatalf("prepare: %+v", prepared)
+	}
+	t.Cleanup(func() { _ = Reap(repo, prepared.Path, nil) })
+	workerBody := "package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"portable\") }\n"
+	if err := os.WriteFile(filepath.Join(prepared.Path, "cmd", "demo", "main.go"), []byte(workerBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	verify := func(dir string) (bool, string) {
+		cmd := exec.Command("go", "build", "./...")
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GOWORK=off")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return false, strings.TrimSpace(string(out))
+		}
+		return true, ""
+	}
+	landed := Land(repo, prepared.Path, base, "", []string{"cmd/demo/main.go"}, verify, nil)
+	if !landed.OK || !landed.Committed {
+		t.Fatalf("portable land without analyzer contract failed: %+v", landed)
+	}
+	got, err := os.ReadFile(filepath.Join(repo, "cmd", "demo", "main.go"))
+	if err != nil || string(got) != workerBody {
+		t.Fatalf("trunk command = %q, %v; want landed worker bytes", got, err)
+	}
+}

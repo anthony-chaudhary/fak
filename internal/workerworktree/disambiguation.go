@@ -35,12 +35,18 @@ const (
 	// whole-tree witness that exceeded the single pre-CAS deadline.
 	DisambiguationTimeoutCode = "DISAMBIGUATION_TIMEOUT"
 
+	// DisambiguationApplicabilityCode identifies a pre-CAS failure while
+	// deciding whether the selected Git trees carry the analyzer contract.
+	DisambiguationApplicabilityCode = "DISAMBIGUATION_APPLICABILITY"
+
 	// One deadline covers all three whole-tree witnesses together. The work is
 	// intentionally bounded well below the 20+ minute stalls seen in #9579 while
 	// leaving ample room for the normal full-corpus scan on a busy workstation.
 	defaultDisambiguationTimeout = 2 * time.Minute
 	maxDisambiguationTimeout     = 15 * time.Minute
 )
+
+const disambiguationAnalyzerContractPath = "tools/concept_disambiguation_scorecard.py"
 
 const (
 	disambiguationRecoveryDefault  = "default"
@@ -128,6 +134,20 @@ var (
 		out, err := cmd.Output()
 		return strings.TrimSpace(string(out)), err
 	}
+	hasDisambiguationContract = func(ctx context.Context, repo, tree string) (bool, error) {
+		treeID, err := resolveDisambiguationTree(ctx, repo, tree)
+		if err != nil {
+			return false, err
+		}
+		cmd := exec.CommandContext(ctx, "git", "ls-tree", "--name-only", treeID, "--", disambiguationAnalyzerContractPath)
+		cmd.Dir = repo
+		windowgate.ConfigureBackgroundCommand(cmd)
+		out, err := cmd.Output()
+		if err != nil {
+			return false, err
+		}
+		return strings.TrimSpace(string(out)) == disambiguationAnalyzerContractPath, nil
+	}
 	listDisambiguationTree = func(ctx context.Context, repo, tree string) ([]byte, error) {
 		cmd := exec.CommandContext(ctx, "git", "ls-tree", "-r", "-z", "-l", tree)
 		cmd.Dir = repo
@@ -175,7 +195,7 @@ var (
 			python = "python"
 		}
 		cmd := exec.CommandContext(ctx, python,
-			filepath.Join(root, "tools", "concept_disambiguation_scorecard.py"),
+			filepath.Join(root, filepath.FromSlash(disambiguationAnalyzerContractPath)),
 			"--workspace", root,
 			"--json",
 			"--markdown-dir", generated,
@@ -216,6 +236,28 @@ func verifyAppliedDisambiguation(root, wtPath, treeSHA string) (*DisambiguationW
 	ctx, cancel := newDeadline(timeout)
 	defer cancel()
 	return verifyWithinDeadline(ctx, root, wtPath, treeSHA, timeoutReceipt)
+}
+
+func verifyApplicableDisambiguation(root, wtPath, treeSHA string) (*DisambiguationWitnesses, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultDisambiguationTimeout)
+	applicable, err := disambiguationApplicable(ctx, root, wtPath, treeSHA)
+	cancel()
+	if err != nil {
+		all := newDisambiguationWitnesses(treeSHA, DisambiguationTimeoutReceipt{
+			DefaultTimeoutMS:   defaultDisambiguationTimeout.Milliseconds(),
+			EffectiveTimeoutMS: defaultDisambiguationTimeout.Milliseconds(),
+			RecoveryMode:       disambiguationRecoveryDefault,
+		})
+		all.Before.Detail = fmt.Sprintf("%s: witness=applicability subphase=contract-probe: %v", DisambiguationApplicabilityCode, err)
+		all.Before.Diagnostic = &DisambiguationDiagnostic{
+			Code: DisambiguationApplicabilityCode, Witness: "applicability", Subphase: "contract-probe",
+		}
+		return all, false
+	}
+	if !applicable {
+		return nil, true
+	}
+	return verifyAppliedDisambiguation(root, wtPath, treeSHA)
 }
 
 func resolveDisambiguationTimeout(lookup func(string) (string, bool)) (DisambiguationTimeoutReceipt, time.Duration, error) {
@@ -289,6 +331,32 @@ func verifyWithinDeadline(ctx context.Context, root, wtPath, treeSHA string, tim
 		all.PostApply.Detail = fmt.Sprintf("clarity debt %d -> %d; coverage %.2f -> %.2f; coverage debt %d -> %d", before.ClarityDebt, post.ClarityDebt, before.Coverage, post.Coverage, before.CoverageDebt, post.CoverageDebt)
 	}
 	return all, ok
+}
+
+// disambiguationApplicable derives repository-level oracle admission solely
+// from the three Git trees land already evaluates. Presence in any tree keeps
+// the full invariant active, so adding or removing the analyzer cannot turn a
+// violated contract into an inapplicable one. Only a root that carries the
+// contract in none of the views skips this repository-specific oracle.
+func disambiguationApplicable(ctx context.Context, root, wtPath, treeSHA string) (bool, error) {
+	views := []struct {
+		repo string
+		tree string
+	}{
+		{repo: root, tree: "HEAD"},
+		{repo: wtPath, tree: "HEAD"},
+		{repo: root, tree: treeSHA},
+	}
+	for _, view := range views {
+		present, err := hasDisambiguationContract(ctx, view.repo, view.tree)
+		if err != nil {
+			return false, fmt.Errorf("probe %s tree %s: %w", view.repo, view.tree, err)
+		}
+		if present {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // readOneBounded bounds even a non-command subphase such as
@@ -662,7 +730,7 @@ func parseDisambiguationTree(listing []byte) ([]disambiguationTreeEntry, error) 
 
 func disambiguationCorpusPath(path string, size int64) bool {
 	path = filepath.ToSlash(path)
-	required := path == "tools/concept_disambiguation_scorecard.py" ||
+	required := path == disambiguationAnalyzerContractPath ||
 		path == "tools/concept_disambiguation_scorecard.data/_meta.json" ||
 		path == filepath.ToSlash(conceptcatalog.GeneratedReadme) ||
 		path == filepath.ToSlash(conceptcatalog.GeneratedIndex)
