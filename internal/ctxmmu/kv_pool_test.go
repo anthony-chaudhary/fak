@@ -44,8 +44,8 @@ func TestDecoupledKVPoolPaging(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected allocation error at index %d: %v", i, err)
 			}
-			if b.ID != i {
-				t.Fatalf("expected block ID %d, got %d", i, b.ID)
+			if b.PhysicalSlot() != i {
+				t.Fatalf("expected physical slot %d, got %d", i, b.PhysicalSlot())
 			}
 			if b.RefCount() != 1 {
 				t.Fatalf("expected refCount 1 for newly allocated block, got %d", b.RefCount())
@@ -155,8 +155,8 @@ func TestDecoupledKVPoolPaging(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected allocation error on re-allocating slot %d: %v", i, err)
 			}
-			if b.ID%2 != 0 {
-				t.Fatalf("expected newly allocated block to reuse even slot, got %d", b.ID)
+			if b.PhysicalSlot()%2 != 0 {
+				t.Fatalf("expected newly allocated block to reuse even slot, got %d", b.PhysicalSlot())
 			}
 		}
 		if alloc.FreeCount() != 0 {
@@ -257,16 +257,29 @@ func TestDecoupledKVPoolPaging(t *testing.T) {
 
 		// Verify non-contiguous page mappings for seq1 and seq3
 		seq1Pages := seq1.Pages()
-		expectedSeq1Pages := []int{0, 2, 4}
-		if !reflect.DeepEqual(seq1Pages, expectedSeq1Pages) {
-			t.Fatalf("expected non-contiguous pages %v for seq1, got %v", expectedSeq1Pages, seq1Pages)
+		physicalSlots := func(ids []int) []int {
+			slots := make([]int, len(ids))
+			for i, id := range ids {
+				block, err := pool.Allocator().GetBlock(id)
+				if err != nil {
+					t.Fatalf("GetBlock(%d): %v", id, err)
+				}
+				slots[i] = block.PhysicalSlot()
+			}
+			return slots
+		}
+		seq1Slots := physicalSlots(seq1Pages)
+		expectedSeq1Slots := []int{0, 2, 4}
+		if !reflect.DeepEqual(seq1Slots, expectedSeq1Slots) {
+			t.Fatalf("expected non-contiguous physical slots %v for seq1, got %v", expectedSeq1Slots, seq1Slots)
 		}
 		seq3Pages := seq3.Pages()
-		expectedSeq3Pages := []int{1, 3}
-		if !reflect.DeepEqual(seq3Pages, expectedSeq3Pages) {
-			t.Fatalf("expected non-contiguous pages %v for seq3, got %v", expectedSeq3Pages, seq3Pages)
+		seq3Slots := physicalSlots(seq3Pages)
+		expectedSeq3Slots := []int{1, 3}
+		if !reflect.DeepEqual(seq3Slots, expectedSeq3Slots) {
+			t.Fatalf("expected non-contiguous physical slots %v for seq3, got %v", expectedSeq3Slots, seq3Slots)
 		}
-		t.Logf("AC1: Non-contiguous physical page mapping verified: seq1=%v, seq3=%v", seq1Pages, seq3Pages)
+		t.Logf("AC1: Non-contiguous physical page mapping verified: seq1=%v, seq3=%v", seq1Slots, seq3Slots)
 
 		// Address translation verification: Translate(seqID, tokenPos)
 		totalTokensSeq1 := seq1.Tokens()

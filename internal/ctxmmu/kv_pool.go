@@ -71,9 +71,9 @@ type KVPoolConfig struct {
 	TokensPerPage int        `json:"tokens_per_page"`
 	NumLayers     int        `json:"num_layers"`
 	NumKVHeads    int        `json:"num_kv_heads"`     // for GQA/MHA
-	HeadDim       int        `json:"head_dim"`          // for GQA/MHA
-	KVLoraRank    int        `json:"kv_lora_rank"`      // for MLA (e.g. 512)
-	QKRopeHeadDim int        `json:"qk_rope_head_dim"`  // for MLA (e.g. 64)
+	HeadDim       int        `json:"head_dim"`         // for GQA/MHA
+	KVLoraRank    int        `json:"kv_lora_rank"`     // for MLA (e.g. 512)
+	QKRopeHeadDim int        `json:"qk_rope_head_dim"` // for MLA (e.g. 64)
 	DType         KVDType    `json:"dtype"`
 	Topology      KVTopology `json:"topology"`
 	TotalPages    int        `json:"total_pages"`
@@ -125,6 +125,7 @@ type KVSequence struct {
 	PageTable    []int // maps logical page index to physical block ID
 	PagedKV      bool  // whether paged KV management is active
 	swappedPages map[int][]byte
+	released     bool
 }
 
 // Pages returns a point-in-time copy of the sequence's page table.
@@ -158,6 +159,10 @@ type KVPool struct {
 	swapMu        sync.Mutex
 	swapStore     map[string][]byte
 	pressureHooks []func(float64)
+
+	// testHookSequenceResolved coordinates deterministic lifetime-race tests at
+	// the boundary between registry lookup and per-sequence locking.
+	testHookSequenceResolved func(*KVSequence)
 }
 
 // NewKVPool initializes a unified memory KV cache pool with physical block allocator.
@@ -244,6 +249,19 @@ func (p *KVPool) GetSequence(seqID string) (*KVSequence, bool) {
 	return seq, ok
 }
 
+// resolveSequence returns the sequence incarnation currently registered for
+// seqID. Callers must check released after taking the sequence lock: release
+// can retire this incarnation between the registry lookup and that lock.
+func (p *KVPool) resolveSequence(seqID string) (*KVSequence, bool) {
+	p.mu.RLock()
+	seq, ok := p.sequences[seqID]
+	p.mu.RUnlock()
+	if ok && p.testHookSequenceResolved != nil {
+		p.testHookSequenceResolved(seq)
+	}
+	return seq, ok
+}
+
 // ReleaseSequence removes a sequence and releases its physical pages back to the allocator.
 func (p *KVPool) ReleaseSequence(seqID string) error {
 	if seqID == "" {
@@ -251,12 +269,21 @@ func (p *KVPool) ReleaseSequence(seqID string) error {
 	}
 
 	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	seq, ok := p.sequences[seqID]
 	if !ok {
-		p.mu.Unlock()
 		return ErrSequenceNotFound
 	}
+
+	// Keep registry publication serialized through complete retirement. This
+	// prevents a replacement using the same ID from observing old swap keys or
+	// competing with reclamation of the old incarnation's physical pages.
+	seq.mu.Lock()
+	defer seq.mu.Unlock()
+
 	delete(p.sequences, seqID)
+	seq.released = true
 
 	// Clean up any swapped entries for this sequence
 	prefix := seqID + ":"
@@ -267,10 +294,6 @@ func (p *KVPool) ReleaseSequence(seqID string) error {
 		}
 	}
 	p.swapMu.Unlock()
-	p.mu.Unlock()
-
-	seq.mu.Lock()
-	defer seq.mu.Unlock()
 
 	for _, blockID := range seq.PageTable {
 		if blockID >= 0 {
@@ -296,15 +319,16 @@ func (p *KVPool) AppendTokens(seqID string, count int) error {
 		return nil
 	}
 
-	p.mu.RLock()
-	seq, ok := p.sequences[seqID]
-	p.mu.RUnlock()
+	seq, ok := p.resolveSequence(seqID)
 	if !ok {
 		return ErrSequenceNotFound
 	}
 
 	seq.mu.Lock()
 	defer seq.mu.Unlock()
+	if seq.released {
+		return ErrSequenceNotFound
+	}
 
 	oldTokens := seq.TokenCount
 	newTokens := oldTokens + count
@@ -363,15 +387,16 @@ func (p *KVPool) Translate(seqID string, tokenPos int) (blockID int, pageOffset 
 	if tokenPos < 0 {
 		return -1, -1, ErrTokenOutOfBounds
 	}
-	p.mu.RLock()
-	seq, ok := p.sequences[seqID]
-	p.mu.RUnlock()
+	seq, ok := p.resolveSequence(seqID)
 	if !ok {
 		return -1, -1, ErrSequenceNotFound
 	}
 
 	seq.mu.RLock()
 	defer seq.mu.RUnlock()
+	if seq.released {
+		return -1, -1, ErrSequenceNotFound
+	}
 
 	if tokenPos >= seq.TokenCount {
 		return -1, -1, ErrTokenOutOfBounds
@@ -396,15 +421,16 @@ func (p *KVPool) WriteTokenKV(seqID string, tokenPos int, layer int, keyData, va
 		return ErrInvalidLayer
 	}
 
-	p.mu.RLock()
-	seq, ok := p.sequences[seqID]
-	p.mu.RUnlock()
+	seq, ok := p.resolveSequence(seqID)
 	if !ok {
 		return ErrSequenceNotFound
 	}
 
 	seq.mu.Lock()
 	defer seq.mu.Unlock()
+	if seq.released {
+		return ErrSequenceNotFound
+	}
 
 	if tokenPos < 0 || tokenPos >= seq.TokenCount {
 		return ErrTokenOutOfBounds
@@ -510,15 +536,16 @@ func (p *KVPool) ReadTokenKV(seqID string, tokenPos int, layer int) (keyData, va
 		return nil, nil, ErrInvalidLayer
 	}
 
-	p.mu.RLock()
-	seq, ok := p.sequences[seqID]
-	p.mu.RUnlock()
+	seq, ok := p.resolveSequence(seqID)
 	if !ok {
 		return nil, nil, ErrSequenceNotFound
 	}
 
 	seq.mu.RLock()
 	defer seq.mu.RUnlock()
+	if seq.released {
+		return nil, nil, ErrSequenceNotFound
+	}
 
 	if tokenPos < 0 || tokenPos >= seq.TokenCount {
 		return nil, nil, ErrTokenOutOfBounds
@@ -598,6 +625,9 @@ func (p *KVPool) ForkSequence(parentID, childID string) (*KVSequence, error) {
 
 	parent.mu.RLock()
 	defer parent.mu.RUnlock()
+	if parent.released {
+		return nil, ErrSequenceNotFound
+	}
 
 	pageCount := len(parent.PageTable)
 	childPageTable := make([]int, pageCount)
@@ -651,15 +681,22 @@ func (p *KVPool) TriggerPressure(pressure float64) {
 
 // SwapBlock swaps out a sequence's physical page to the swap store and marks it swapped.
 func (p *KVPool) SwapBlock(seqID string, pageIdx int) error {
-	p.mu.RLock()
-	seq, ok := p.sequences[seqID]
-	p.mu.RUnlock()
+	seq, ok := p.resolveSequence(seqID)
 	if !ok {
 		return ErrSequenceNotFound
 	}
+	return p.swapBlock(seqID, seq, pageIdx, -1)
+}
 
+// swapBlock swaps a page from one exact sequence incarnation. expectedBlockID
+// is used by eviction snapshots to avoid applying an old candidate to a page
+// that has since been replaced by copy-on-write.
+func (p *KVPool) swapBlock(seqID string, seq *KVSequence, pageIdx, expectedBlockID int) error {
 	seq.mu.Lock()
 	defer seq.mu.Unlock()
+	if seq.released {
+		return ErrSequenceNotFound
+	}
 
 	if pageIdx < 0 || pageIdx >= len(seq.PageTable) {
 		return ErrPageNotAllocated
@@ -668,6 +705,9 @@ func (p *KVPool) SwapBlock(seqID string, pageIdx int) error {
 	blockID := seq.PageTable[pageIdx]
 	if blockID < 0 {
 		return nil
+	}
+	if expectedBlockID >= 0 && blockID != expectedBlockID {
+		return ErrPageNotAllocated
 	}
 
 	block, err := p.allocator.GetBlock(blockID)
@@ -693,15 +733,16 @@ func (p *KVPool) SwapBlock(seqID string, pageIdx int) error {
 
 // SwapInBlock restores a previously swapped-out page from the swap store.
 func (p *KVPool) SwapInBlock(seqID string, pageIdx int) error {
-	p.mu.RLock()
-	seq, ok := p.sequences[seqID]
-	p.mu.RUnlock()
+	seq, ok := p.resolveSequence(seqID)
 	if !ok {
 		return ErrSequenceNotFound
 	}
 
 	seq.mu.Lock()
 	defer seq.mu.Unlock()
+	if seq.released {
+		return ErrSequenceNotFound
+	}
 
 	if pageIdx < 0 || pageIdx >= len(seq.PageTable) {
 		return ErrPageNotAllocated
@@ -758,6 +799,7 @@ func (p *KVPool) EvictLRU(targetBlocks int) (int, error) {
 
 	type pageRef struct {
 		seqID      string
+		seq        *KVSequence
 		pageIdx    int
 		blockID    int
 		lastAccess int64
@@ -772,6 +814,7 @@ func (p *KVPool) EvictLRU(targetBlocks int) (int, error) {
 				if b, bErr := p.allocator.GetBlock(bID); bErr == nil && !b.Swapped() && b.RefCount() == 1 {
 					candidates = append(candidates, pageRef{
 						seqID:      sID,
+						seq:        seq,
 						pageIdx:    pIdx,
 						blockID:    bID,
 						lastAccess: b.LastAccess(),
@@ -797,7 +840,7 @@ func (p *KVPool) EvictLRU(targetBlocks int) (int, error) {
 		if evicted >= targetBlocks {
 			break
 		}
-		if swapErr := p.SwapBlock(cand.seqID, cand.pageIdx); swapErr == nil {
+		if swapErr := p.swapBlock(cand.seqID, cand.seq, cand.pageIdx, cand.blockID); swapErr == nil {
 			evicted++
 		}
 	}
