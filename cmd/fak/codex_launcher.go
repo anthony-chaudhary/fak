@@ -532,7 +532,7 @@ func buildCodexRawArgv(o codexLaunchOptions) ([]string, [][2]string) {
 
 	model := o.model
 	if model == "" {
-		if detected := detectServedModel(base); detected != "" {
+		if detected := detectServedModel(base); detected != "" && detected != "mock" {
 			model = detected
 		} else {
 			model = projectassets.DefaultCodexModelID
