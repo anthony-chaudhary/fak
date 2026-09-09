@@ -153,6 +153,14 @@ type serveFlags struct {
 	claude                       *bool
 	claudeConfig                 *bool
 	writeClaudeConfig            *bool
+	pi                           *bool
+	piConfig                     *bool
+	writePiConfig                *bool
+	piConfigPath                 *string
+	codex                        *bool
+	codexConfig                  *bool
+	writeCodexConfig             *bool
+	codexConfigPath              *string
 	routeManifest                *string
 	routeAccounts                *string
 	ggufPath                     *string
@@ -234,6 +242,10 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.claude = fs.Bool("claude", false, "one-touch Claude Code setup: write or update .claude/settings.json in the current workspace with this server's backend environment")
 	sf.claudeConfig = fs.Bool("claude-config", false, "print .claude/settings.json configuration for this server and exit without binding a listener")
 	sf.writeClaudeConfig = fs.Bool("write-claude-config", false, "write or update .claude/settings.json in the current workspace with this server's backend environment and exit without binding a listener")
+	sf.codex = fs.Bool("codex", false, "one-touch Codex setup: write or update config.toml with this server's provider config")
+	sf.codexConfig = fs.Bool("codex-config", false, "print Codex config.toml configuration for this server and exit without binding a listener")
+	sf.writeCodexConfig = fs.Bool("write-codex-config", false, "write or update config.toml with this server's provider config and exit without binding a listener")
+	sf.codexConfigPath = fs.String("codex-config-path", "", "custom destination path for Codex config.toml (default: $CODEX_HOME/config.toml or ~/.codex/config.toml)")
 	sf.apiKeyEnv = fs.String("api-key-env", "", "env var holding the upstream API key (proxy mode)")
 	sf.streamProgressTimeout = fs.Duration("stream-progress-timeout", agent.DefaultStreamProgressTimeout, "proxy mode: end a STREAMING upstream turn that has stayed warm this long without a single frame that advances it (#5486). Keepalive frames (a ping, an SSE comment, an empty-delta chunk) re-arm the inter-byte deadline but are NOT progress, so a generation wedged behind a live socket otherwise rides the 600s whole-request ceiling. DEFAULT-ON at agent.DefaultStreamProgressTimeout (300s), which sits above the worst prefill-to-first-token gap on a large cached prompt and above any extended-thinking pause (thinking streams content deltas, which do count as progress). Pass 0 to DISABLE the deadline — the escape hatch when a provider's prefill legitimately outlasts the window. A positive value outside [5s, 600s] is not honored as a real window: the default is used instead, so a typo never silently becomes a different deadline. Inert on the non-streaming path and on the offline mock planner.")
 	sf.engineCacheEngine = fs.String("engine-cache-engine", "", "self-hosted upstream cache reset engine for quarantined provider-bound tool results: sglang|vllm (empty disables)")
@@ -391,7 +403,7 @@ func cmdServe(argv []string) {
 	}
 	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
 		if *sf.ggufPath == "" && strings.TrimSpace(*sf.baseURL) == "" && len(sf.replicaBaseURLs.Values()) == 0 {
-			if *sf.opencode || *sf.claude || *sf.metal {
+			if *sf.opencode || *sf.metal {
 				*sf.ggufPath = "default"
 				*sf.metal = true
 				if *sf.model == "mock" || *sf.model == "" {
@@ -476,21 +488,6 @@ func cmdServe(argv []string) {
 	// --opencode: ensure opencode.json is configured before booting listener.
 	if *sf.opencode {
 		runServeOpenCodeConfig(sf, os.Stderr, true)
-	}
-
-	// --claude-config: emit .claude/settings.json configuration and exit before load.
-	if *sf.claudeConfig {
-		runServeClaudeConfig(sf, os.Stdout, false)
-		return
-	}
-	// --write-claude-config: write or update .claude/settings.json in the current workspace and exit before load.
-	if *sf.writeClaudeConfig {
-		runServeClaudeConfig(sf, os.Stderr, true)
-		return
-	}
-	// --claude: ensure .claude/settings.json is configured before booting listener.
-	if *sf.claude {
-		runServeClaudeConfig(sf, os.Stderr, true)
 	}
 
 	// Advisory (#3094): a serve launched from a non-fak cwd silently indexes whatever
