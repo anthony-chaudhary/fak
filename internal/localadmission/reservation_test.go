@@ -33,7 +33,7 @@ func TestReservationLifecycleAccountsStartupAndSteadySeparately(t *testing.T) {
 		t.Fatalf("first=%+v err=%v", first, err)
 	}
 	blocked, err := store.Reserve(ctx, reservationRequest(102, 50, 20, 100, PressureNormal))
-	if err != nil || blocked.Admit || blocked.Reason != "aggregate_capacity" || blocked.ReservedBytes != 60 {
+	if err != nil || blocked.Admit || blocked.Reason != "aggregate_capacity" || blocked.ReservedBytes != 60 || blocked.RemedyHint == "" {
 		t.Fatalf("blocked=%+v err=%v", blocked, err)
 	}
 	steady, err := store.MarkSteady(ctx, first.Reservation.ID)

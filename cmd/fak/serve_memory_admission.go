@@ -74,9 +74,17 @@ func estimateMetalModelMemoryBounds(ggufPath string) localadmission.MemoryPlan {
 							SteadyBytes:      steady,
 						}
 					}
-					peak, _ := metalGGUFPeakCapacity(true, steady, total, known)
-					if peak <= steady {
-						peak = int64(float64(steady) * metalGGUFObservedPeakMultiplier)
+					var peak int64
+					if arm == serveLoadArmResidentQ4K {
+						// Resident quant on Metal loads weights directly into resident buffers.
+						// Sizing startup peak to steady plus staging scratch (1 GiB) prevents
+						// spurious aggregate_capacity refusals against allocatable RAM.
+						peak = steady + (1 << 30)
+					} else {
+						peak, _ = metalGGUFPeakCapacity(true, steady, total, known)
+						if peak <= steady {
+							peak = int64(float64(steady) * metalGGUFObservedPeakMultiplier)
+						}
 					}
 					if peak < steady {
 						peak = steady
@@ -162,10 +170,18 @@ func loadLocalLauncherModelWithMetalLease(useMetal bool, ggufPath string, opts g
 			if !dec.Admit {
 				lease.Release()
 				hint := dec.RemedyHint
-				if hint != "" {
-					return func() {}, fmt.Errorf("fak local launcher: local memory reservation refused: %s (%s)", dec.Reason, hint)
+				if hint == "" {
+					avail := dec.CapacityBytes - dec.ReservedBytes
+					if avail < 0 {
+						avail = 0
+					}
+					hint = fmt.Sprintf("requested startup peak %.2f GiB (steady %.2f GiB) exceeds available allocatable capacity %.2f GiB (active reservations %.2f GiB)",
+						float64(dec.RequestedPeakBytes)/(1<<30),
+						float64(plan.SteadyBytes)/(1<<30),
+						float64(avail)/(1<<30),
+						float64(dec.ReservedBytes)/(1<<30))
 				}
-				return func() {}, fmt.Errorf("fak local launcher: local memory reservation refused: %s", dec.Reason)
+				return func() {}, fmt.Errorf("fak local launcher: local memory reservation refused: %s (%s)", dec.Reason, hint)
 			}
 			if dec.Reservation != nil {
 				resID = dec.Reservation.ID

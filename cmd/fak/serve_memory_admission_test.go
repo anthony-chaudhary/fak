@@ -656,18 +656,38 @@ func TestLoadLocalLauncherModelWithMetalLeaseRefusesExpandingQ8LoadOn36GBHost(t 
 	udPath := filepath.Join(t.TempDir(), "qwen38-27b-ud-q2kxl.gguf")
 	writeSynth27BGGUF(t, udPath, true)
 
-	loads := 0
-	release, err := loadLocalLauncherModelWithMetalLease(true, udPath, gpulease.Options{}, func() {
-		loads++
+	t.Run("resident UD-Q2_K_XL admits on host", func(t *testing.T) {
+		loads := 0
+		release, err := loadLocalLauncherModelWithMetalLease(true, udPath, gpulease.Options{}, func() {
+			loads++
+		})
+		if err != nil {
+			t.Fatalf("expected resident load of 27B UD-Q2_K_XL to admit, got: %v", err)
+		}
+		defer release()
+		if loads != 1 {
+			t.Fatalf("expected 1 load, got %d", loads)
+		}
 	})
-	if err == nil {
-		release()
-		t.Fatal("expected expanding Q8 load of 27B model to be refused before load on 36 GiB host, got success")
-	}
-	if loads != 0 {
-		t.Fatalf("loader must not be called on refusal, got %d loads", loads)
-	}
-	if !strings.Contains(err.Error(), "refused") {
-		t.Fatalf("unexpected error message: %v", err)
-	}
+
+	t.Run("FAK_Q4K=0 forces expanding Q8 load and refuses", func(t *testing.T) {
+		t.Setenv("FAK_Q4K", "0")
+		loads := 0
+		release, err := loadLocalLauncherModelWithMetalLease(true, udPath, gpulease.Options{}, func() {
+			loads++
+		})
+		if err == nil {
+			release()
+			t.Fatal("expected expanding Q8 load of 27B model to be refused before load on 36 GiB host, got success")
+		}
+		if loads != 0 {
+			t.Fatalf("loader must not be called on refusal, got %d loads", loads)
+		}
+		if !strings.Contains(err.Error(), "refused") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+		if !strings.Contains(err.Error(), "exceeds available allocatable capacity") {
+			t.Fatalf("expected detailed remedy hint in error message, got: %v", err)
+		}
+	})
 }

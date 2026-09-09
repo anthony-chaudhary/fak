@@ -566,11 +566,17 @@ func TestFitServeGGUFPathOnHostRefusesExpandingQ8Load(t *testing.T) {
 	udPath := filepath.Join(dir, "qwen38-27b-ud-q2kxl.gguf")
 	writeSynth27BGGUF(t, udPath, true)
 
+	// In resident mode, 27B UD-Q2_K_XL weights (~9.53 GiB) admit on 36 GiB host.
+	if err := fitServeGGUFPathOnReportedHost(udPath, false, 0, 36*gib, 36*gib, true); err != nil {
+		t.Fatalf("fitServeGGUFPathOnHost should admit resident 27B UD-Q2_K_XL on 36 GiB host: %v", err)
+	}
+
+	// When FAK_Q4K=0 forces Q8 rollback:
 	// Host allocatable memory: 36 GiB total, 36 GiB free (MemAvailable).
 	// With 15% headroom, allocatable budget is 30.6 GiB.
-	// Raw on-disk payload of 27B UD-Q2_K_XL is ~9.53 GiB, which would pass if unaligned.
 	// But runtime arm executes LoadModelQuantProfile, expanding to ~31.27 GiB resident weights.
 	// 31.27 GiB > 30.6 GiB allocatable, so it must refuse with FitTooBig.
+	t.Setenv("FAK_Q4K", "0")
 	err := fitServeGGUFPathOnReportedHost(udPath, false, 0, 36*gib, 36*gib, true)
 	if err == nil {
 		t.Fatal("fitServeGGUFPathOnHost must refuse expanding Q8 load of 27B model on 36 GiB host, got nil")
