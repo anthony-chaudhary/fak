@@ -223,10 +223,25 @@ def commits_since(tag: str | None, limit: int) -> list[dict]:
         cur["files"].append({"path": "\t".join(cols[2:]), "additions": _to_int(cols[0]), "deletions": _to_int(cols[1])})
     if cur is not None:
         out.append(cur)
-    for commit in out:
-        gen = commit_generation(str(commit.get("sha") or ""))
-        if gen:
-            commit["generation"] = gen
+    if out:
+        raw_gen = run(["git", "log", *rng, "--format=%h\x1f%B\x1e", f"-n{limit}"])
+        gen_by_sha = {}
+        for block in raw_gen.split("\x1e"):
+            block = block.strip()
+            if not block:
+                continue
+            parts = block.split("\x1f", 1)
+            if len(parts) == 2:
+                gen_by_sha[parts[0]] = generation_from_text(parts[1])
+        for commit in out:
+            sha = str(commit.get("sha") or "")
+            if sha in gen_by_sha:
+                if gen_by_sha[sha]:
+                    commit["generation"] = gen_by_sha[sha]
+            elif sha:
+                gen = commit_generation(sha)
+                if gen:
+                    commit["generation"] = gen
     return out
 
 
