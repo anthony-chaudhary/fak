@@ -82,7 +82,6 @@ func TestRunMacObs_InvalidFlags(t *testing.T) {
 	}{
 		{"unknown flag", []string{"--unknown-xyz"}, 2},
 		{"extra positional", []string{"extra-arg"}, 2},
-		{"json and check-headroom mutually exclusive", []string{"--json", "--check-headroom"}, 2},
 		{"zero agents", []string{"--agents", "0"}, 2},
 		{"negative agents", []string{"--agents", "-1"}, 2},
 		{"zero prefix tokens", []string{"--prefix-tokens", "0"}, 2},
@@ -220,5 +219,79 @@ func TestRunMacObs_CheckHeadroom_ExceededAdmissionGate(t *testing.T) {
 	}
 	if !strings.Contains(out, "recommended_agents=") {
 		t.Errorf("expected output to contain 'recommended_agents=', got: %s", out)
+	}
+}
+
+func TestRunMacObs_JSON_CheckHeadroom_24Agents(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	rc := runMacObs(&stdout, &stderr, []string{
+		"--json",
+		"--agents", "24",
+		"--check-headroom",
+	})
+	if rc != 0 {
+		t.Fatalf("expected rc 0 for 24 agents, got %d. stderr: %s", rc, stderr.String())
+	}
+
+	var m struct {
+		Schema   string `json:"schema"`
+		Governor struct {
+			ActiveAgents        int    `json:"active_agents"`
+			ZeroSwapGuaranteed  bool   `json:"zero_swap_guaranteed"`
+			SwapUsedDeltaBytes  uint64 `json:"swap_used_delta_bytes"`
+			PageoutsDelta       uint64 `json:"pageouts_delta"`
+			ConcurrencyStatus   string `json:"concurrency_status"`
+			WiredCeilingBytes   uint64 `json:"wired_memory_ceiling_bytes"`
+			ResidentMemoryBytes uint64 `json:"resident_memory_bytes"`
+		} `json:"governor"`
+		Analysis struct {
+			Verdict string `json:"verdict"`
+		} `json:"analysis"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &m); err != nil {
+		t.Fatalf("failed to unmarshal JSON: %v", err)
+	}
+
+	if m.Schema != "fak.macobs.v1" {
+		t.Errorf("expected schema fak.macobs.v1, got %s", m.Schema)
+	}
+	if m.Governor.ActiveAgents != 24 {
+		t.Errorf("expected 24 active agents, got %d", m.Governor.ActiveAgents)
+	}
+	if !m.Governor.ZeroSwapGuaranteed {
+		t.Errorf("expected ZeroSwapGuaranteed == true")
+	}
+	if m.Governor.SwapUsedDeltaBytes != 0 {
+		t.Errorf("expected SwapUsedDeltaBytes == 0, got %d", m.Governor.SwapUsedDeltaBytes)
+	}
+	if m.Governor.PageoutsDelta != 0 {
+		t.Errorf("expected PageoutsDelta == 0, got %d", m.Governor.PageoutsDelta)
+	}
+	if m.Analysis.Verdict != "HEADROOM_OK" {
+		t.Errorf("expected verdict HEADROOM_OK, got %s", m.Analysis.Verdict)
+	}
+}
+
+func TestRunMacObs_JSON_CheckHeadroom_ExceededAdmission(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	rc := runMacObs(&stdout, &stderr, []string{
+		"--json",
+		"--agents", "999999",
+		"--check-headroom",
+	})
+	if rc != 1 {
+		t.Fatalf("expected rc 1 for exceeded headroom with json, got %d", rc)
+	}
+
+	var m struct {
+		Analysis struct {
+			Verdict string `json:"verdict"`
+		} `json:"analysis"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &m); err != nil {
+		t.Fatalf("failed to unmarshal JSON: %v", err)
+	}
+	if m.Analysis.Verdict != "REDUCE_CONCURRENCY" {
+		t.Errorf("expected REDUCE_CONCURRENCY, got %s", m.Analysis.Verdict)
 	}
 }

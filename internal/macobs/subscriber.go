@@ -155,9 +155,9 @@ type GovernorStats struct {
 	LastEvictLatencyNs int64               `json:"last_evict_latency_ns"`
 }
 
-// MemoryGovernor bridges a MemoryPressureSubscriber with a KVCacheEvictor to perform
+// MemoryPressureGovernor bridges a MemoryPressureSubscriber with a KVCacheEvictor to perform
 // deterministic proactive page eviction and request admission throttling under OS pressure.
-type MemoryGovernor struct {
+type MemoryPressureGovernor struct {
 	mu             sync.RWMutex
 	config         GovernorConfig
 	subscriber     MemoryPressureSubscriber
@@ -171,8 +171,11 @@ type MemoryGovernor struct {
 	running        bool
 }
 
-// NewMemoryGovernor creates a MemoryGovernor linked to the specified subscriber and cache evictor.
-func NewMemoryGovernor(subscriber MemoryPressureSubscriber, evictor KVCacheEvictor, cfg GovernorConfig) *MemoryGovernor {
+// PressureGovernor is an alias for MemoryPressureGovernor.
+type PressureGovernor = MemoryPressureGovernor
+
+// NewMemoryPressureGovernor creates a MemoryPressureGovernor linked to the specified subscriber and cache evictor.
+func NewMemoryPressureGovernor(subscriber MemoryPressureSubscriber, evictor KVCacheEvictor, cfg GovernorConfig) *MemoryPressureGovernor {
 	if cfg.WarnEvictFraction <= 0 || cfg.WarnEvictFraction > 1.0 {
 		cfg.WarnEvictFraction = 0.30
 	}
@@ -191,7 +194,7 @@ func NewMemoryGovernor(subscriber MemoryPressureSubscriber, evictor KVCacheEvict
 		initialLevel = subscriber.CurrentLevel()
 	}
 
-	return &MemoryGovernor{
+	return &MemoryPressureGovernor{
 		config:         cfg,
 		subscriber:     subscriber,
 		evictor:        evictor,
@@ -206,7 +209,7 @@ func NewMemoryGovernor(subscriber MemoryPressureSubscriber, evictor KVCacheEvict
 }
 
 // Start begins listening to memory pressure events and initiates proactive throttling.
-func (g *MemoryGovernor) Start(ctx context.Context) error {
+func (g *MemoryPressureGovernor) Start(ctx context.Context) error {
 	g.mu.Lock()
 	if g.running {
 		g.mu.Unlock()
@@ -224,7 +227,7 @@ func (g *MemoryGovernor) Start(ctx context.Context) error {
 }
 
 // Stop unsubscribes from pressure events and terminates governor operations.
-func (g *MemoryGovernor) Stop() error {
+func (g *MemoryPressureGovernor) Stop() error {
 	g.mu.Lock()
 	if !g.running {
 		g.mu.Unlock()
@@ -246,7 +249,7 @@ func (g *MemoryGovernor) Stop() error {
 }
 
 // OnPressureEvent handles an incoming memory pressure transition from the subscriber.
-func (g *MemoryGovernor) OnPressureEvent(evt PressureEvent) {
+func (g *MemoryPressureGovernor) OnPressureEvent(evt PressureEvent) {
 	start := time.Now()
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -353,28 +356,28 @@ func (g *MemoryGovernor) OnPressureEvent(evt PressureEvent) {
 }
 
 // CurrentLevel returns the governor's observed memory pressure level.
-func (g *MemoryGovernor) CurrentLevel() MemoryPressureLevel {
+func (g *MemoryPressureGovernor) CurrentLevel() MemoryPressureLevel {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	return g.currentLevel
 }
 
 // AdmissionState returns the current admission throttle or pause state.
-func (g *MemoryGovernor) AdmissionState() AdmissionState {
+func (g *MemoryPressureGovernor) AdmissionState() AdmissionState {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	return g.admissionState
 }
 
 // Stats returns a point-in-time copy of memory governor metrics.
-func (g *MemoryGovernor) Stats() GovernorStats {
+func (g *MemoryPressureGovernor) Stats() GovernorStats {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	return g.stats
 }
 
 // LastEventLog returns the most recent structured event log, or nil if none.
-func (g *MemoryGovernor) LastEventLog() *MemoryGovernorEventLog {
+func (g *MemoryPressureGovernor) LastEventLog() *MemoryGovernorEventLog {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	if g.lastEventLog == nil {
@@ -385,7 +388,7 @@ func (g *MemoryGovernor) LastEventLog() *MemoryGovernorEventLog {
 }
 
 // History returns an immutable copy of all recorded memory pressure event logs.
-func (g *MemoryGovernor) History() []MemoryGovernorEventLog {
+func (g *MemoryPressureGovernor) History() []MemoryGovernorEventLog {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	out := make([]MemoryGovernorEventLog, len(g.history))

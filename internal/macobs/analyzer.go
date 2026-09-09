@@ -5,13 +5,47 @@ import (
 )
 
 // Diagnose evaluates hardware, serving, and headroom telemetry to produce an actionable AnalysisReport.
-func Diagnose(hw HardwareTelemetry, srv MLXServingTelemetry, head HeadroomTelemetry, requestedAgents int) AnalysisReport {
+func Diagnose(hw HardwareTelemetry, srv MLXServingTelemetry, head HeadroomTelemetry, requestedAgents int, govOpt ...GovernorTelemetry) AnalysisReport {
 	if requestedAgents <= 0 {
 		requestedAgents = 1
 	}
 
+	var hasGov bool
+	var gov GovernorTelemetry
+	if len(govOpt) > 0 && govOpt[0].Available {
+		hasGov = true
+		gov = govOpt[0]
+	}
+
+	// 0. If governor is present and requested agents exceeds capacity, reduce concurrency first
+	if hasGov && ((head.Available && head.MaxSharedAgents > 0 && requestedAgents > head.MaxSharedAgents) ||
+		(gov.MaxSharedAgents > 0 && requestedAgents > gov.MaxSharedAgents)) {
+		maxAgents := head.MaxSharedAgents
+		if gov.MaxSharedAgents > 0 && gov.MaxSharedAgents < maxAgents {
+			maxAgents = gov.MaxSharedAgents
+		}
+		if maxAgents < 1 {
+			maxAgents = 1
+		}
+		return AnalysisReport{
+			Verdict:           VerdictReduceConcurrency,
+			PrimaryBottleneck: BottleneckMemoryCapacity,
+			BottleneckReason:  fmt.Sprintf("Requested %d concurrent agents exceeds modeled headroom of %d shared agents", requestedAgents, maxAgents),
+			RecommendedAgents: maxAgents,
+			Remediation:       fmt.Sprintf("Limit active concurrent subagents to %d to remain within wired unified memory limits.", maxAgents),
+			Confidence:        0.90,
+		}
+	}
+
 	// 1. SWAP_CRITICAL: Kernel memory paging severely degrades throughput
-	if hw.Available && (hw.SwapUsedBytes > 1024*1024*1024 || (hw.SwapUsedBytes > 0 && hw.PageOuts > 50000)) {
+	swapViolated := false
+	if hasGov {
+		swapViolated = gov.SwapUsedDeltaBytes > 0 || gov.PageoutsDelta > 0 || (!gov.ZeroSwapGuaranteed && gov.ActiveAgents < requestedAgents)
+	} else {
+		swapViolated = hw.Available && (hw.SwapUsedBytes > 1024*1024*1024 || (hw.SwapUsedBytes > 0 && hw.PageOuts > 50000))
+	}
+
+	if swapViolated {
 		return AnalysisReport{
 			Verdict:           VerdictSwapCritical,
 			PrimaryBottleneck: BottleneckSwap,
