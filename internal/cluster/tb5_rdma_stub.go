@@ -5,7 +5,6 @@ package cluster
 import (
 	"errors"
 	"fmt"
-	"strings"
 )
 
 // ErrNonDarwinPlatform indicates that live Thunderbolt 5 RDMA hardware discovery is only available on Darwin.
