@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/selfinstall"
+	"github.com/anthony-chaudhary/fak/internal/selfupdate"
 )
 
 const (
@@ -15,12 +16,7 @@ const (
 	selfUpdateRevisionEnv = "FAK_HANDOFF_REVISION"
 )
 
-type selfUpdateHandoffReceipt struct {
-	State             selfinstall.HandoffState `json:"state"`
-	SessionID         string                   `json:"session_id"`
-	SuccessorRevision string                   `json:"successor_revision"`
-	Detail            string                   `json:"detail,omitempty"`
-}
+type selfUpdateHandoffReceipt = selfupdate.HandoffReceipt
 
 func runSelfUpdateHandoff(ctx context.Context, target, sessionID, revision string, args []string) selfUpdateHandoffReceipt {
 	var handoff selfinstall.Handoff

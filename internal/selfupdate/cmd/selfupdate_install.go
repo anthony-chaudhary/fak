@@ -2,7 +2,6 @@ package selfupdatecmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -427,22 +426,6 @@ var selfUpdateCandidateCacheOutcomes struct {
 	sync.Mutex
 	counts      selfUpdateCandidateCacheOutcomeCounts
 	disposition selfUpdateCandidateCacheDisposition
-}
-
-func (receipt selfUpdateReceipt) MarshalJSON() ([]byte, error) {
-	type receiptAlias selfUpdateReceipt
-	disposition := selfUpdateCandidateCacheDispositionSnapshot()
-	var candidateCache *selfUpdateCandidateCacheDisposition
-	if disposition.State != "" {
-		candidateCache = &disposition
-	}
-	return json.Marshal(struct {
-		receiptAlias
-		CandidateCache *selfUpdateCandidateCacheDisposition `json:"candidate_cache,omitempty"`
-	}{
-		receiptAlias:   receiptAlias(receipt),
-		CandidateCache: candidateCache,
-	})
 }
 
 func selfUpdateCandidateCacheEntryPresent(cacheDir string) bool {

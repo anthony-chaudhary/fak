@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/selfinstall"
+	"github.com/anthony-chaudhary/fak/internal/selfupdate"
 )
 
 const (
@@ -20,16 +21,7 @@ const (
 	selfUpdateDeltaMaxRatio = 0.80
 )
 
-type selfUpdateTransferReceipt struct {
-	ChosenPath     string `json:"chosen_path"`
-	DeltaBytes     int64  `json:"delta_bytes"`
-	FullBytes      int64  `json:"full_bytes"`
-	TotalMS        int64  `json:"elapsed_total_ms"`
-	Verification   string `json:"verification"`
-	FallbackReason string `json:"fallback_reason,omitempty"`
-	FallbackBytes  int64  `json:"fallback_bytes"`
-	FallbackMS     int64  `json:"fallback_ms"`
-}
+type selfUpdateTransferReceipt = selfupdate.TransferReceipt
 
 var selfUpdateTransportNow = time.Now
 
