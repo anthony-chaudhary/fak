@@ -68,6 +68,8 @@ func TestMacBenchSweepExecutionAndSchema(t *testing.T) {
 			return []byte("38654705664\n"), nil // 36 GiB
 		case strings.Contains(full, "pmset -g therm"):
 			return []byte("Note: No thermal warning level has been recorded\n"), nil
+		case strings.Contains(full, "system_profiler SPDisplaysDataType -json"):
+			return []byte(`{"SPDisplaysDataType":[{"spdisplays_vendor":"sppci_vendor_Apple","sppci_bus":"spdisplays_builtin","sppci_cores":"18","sppci_device_type":"spdisplays_gpu"}]}`), nil
 		case strings.Contains(full, "ioreg") && strings.Contains(full, "IOAccelerator"):
 			return []byte("<plist><dict><key>PerformanceStatistics</key><dict><key>Device Utilization %</key><integer>75</integer></dict></dict></plist>"), nil
 		case strings.Contains(full, "llama-bench"):
@@ -218,6 +220,73 @@ Peak memory: 17.50 GB
 	bearerMarker := "Bearer" + " "
 	if strings.Contains(md, bearerMarker) || strings.Contains(md, "FAK_GATEWAY_KEY") {
 		t.Errorf("markdown report contains secret key tokens")
+	}
+}
+
+func TestCollectHardwareDiscoversAppleGPUCores(t *testing.T) {
+	tests := []struct {
+		name     string
+		displays string
+		want     int
+	}{
+		{
+			name: "m5_observed_non_16_core_count",
+			displays: `{"SPDisplaysDataType":[{
+				"_name":"Apple M5 Pro",
+				"spdisplays_vendor":"sppci_vendor_Apple",
+				"sppci_bus":"spdisplays_builtin",
+				"sppci_cores":"24",
+				"sppci_device_type":"spdisplays_gpu"
+			}]}`,
+			want: 24,
+		},
+		{
+			name: "missing_core_count_is_unknown",
+			displays: `{"SPDisplaysDataType":[{
+				"spdisplays_vendor":"sppci_vendor_Apple",
+				"sppci_bus":"spdisplays_builtin",
+				"sppci_device_type":"spdisplays_gpu"
+			}]}`,
+			want: 0,
+		},
+		{
+			name:     "malformed_output_is_unknown",
+			displays: `{"SPDisplaysDataType":`,
+			want:     0,
+		},
+		{
+			name: "ambiguous_apple_gpus_are_unknown",
+			displays: `{"SPDisplaysDataType":[
+				{"spdisplays_vendor":"sppci_vendor_Apple","sppci_bus":"spdisplays_builtin","sppci_cores":"24","sppci_device_type":"spdisplays_gpu"},
+				{"spdisplays_vendor":"sppci_vendor_Apple","sppci_bus":"spdisplays_builtin","sppci_cores":"32","sppci_device_type":"spdisplays_gpu"}
+			]}`,
+			want: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := func(_ context.Context, name string, args ...string) ([]byte, error) {
+				full := name + " " + strings.Join(args, " ")
+				switch {
+				case strings.Contains(full, "sysctl -n machdep.cpu.brand_string"):
+					return []byte("Apple M5 Pro\n"), nil
+				case strings.Contains(full, "sysctl -n hw.memsize"):
+					return []byte("51539607552\n"), nil
+				case strings.Contains(full, "pmset -g therm"):
+					return []byte("Note: No thermal warning level has been recorded\n"), nil
+				case strings.Contains(full, "system_profiler SPDisplaysDataType -json"):
+					return []byte(tc.displays), nil
+				default:
+					return nil, fmt.Errorf("unexpected command: %s", full)
+				}
+			}
+
+			hw := CollectHardware(context.Background(), runner)
+			if hw.GPUCores != tc.want {
+				t.Fatalf("GPUCores=%d, want observed count %d", hw.GPUCores, tc.want)
+			}
+		})
 	}
 }
 
