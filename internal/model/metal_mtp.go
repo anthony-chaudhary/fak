@@ -26,6 +26,48 @@ var (
 	ErrMetalMTPInvalidDraftDepth = errors.New("model: Metal MTP draft depth must be between 1 and 4")
 )
 
+// MetalMTPCheckpointOperation identifies the durable Context-MMU operation that failed.
+type MetalMTPCheckpointOperation string
+
+const (
+	MetalMTPCheckpointRecord   MetalMTPCheckpointOperation = "record"
+	MetalMTPCheckpointCommit   MetalMTPCheckpointOperation = "commit"
+	MetalMTPCheckpointRollback MetalMTPCheckpointOperation = "rollback"
+)
+
+// MetalMTPCheckpointError preserves the failing durable checkpoint operation and cause.
+type MetalMTPCheckpointError struct {
+	Operation MetalMTPCheckpointOperation
+	Err       error
+}
+
+func (e *MetalMTPCheckpointError) Error() string {
+	return fmt.Sprintf("model: Metal MTP checkpoint %s failed: %v", e.Operation, e.Err)
+}
+
+func (e *MetalMTPCheckpointError) Unwrap() error { return e.Err }
+
+// MetalMTPSnapshotOperation identifies the target-state snapshot operation that failed.
+type MetalMTPSnapshotOperation string
+
+const (
+	MetalMTPSnapshotCapture MetalMTPSnapshotOperation = "capture"
+	MetalMTPSnapshotClone   MetalMTPSnapshotOperation = "clone"
+	MetalMTPSnapshotRestore MetalMTPSnapshotOperation = "restore"
+)
+
+// MetalMTPSnapshotError preserves the failing target-state snapshot operation and cause.
+type MetalMTPSnapshotError struct {
+	Operation MetalMTPSnapshotOperation
+	Err       error
+}
+
+func (e *MetalMTPSnapshotError) Error() string {
+	return fmt.Sprintf("model: Metal MTP snapshot %s failed: %v", e.Operation, e.Err)
+}
+
+func (e *MetalMTPSnapshotError) Unwrap() error { return e.Err }
+
 // StepCostFn calculates or overrides step and target latencies or speedup for an adaptive governor observation.
 type StepCostFn func(proposed, accepted int, base Qwen38AdaptiveStepObservation) Qwen38AdaptiveStepObservation
 
@@ -96,6 +138,54 @@ type MTPCheckpointRecorder interface {
 	RollbackMTPDraft(sessionID string) (int, error)
 }
 
+type metalMTPTargetSnapshot interface {
+	Clone() (metalMTPTargetSnapshot, error)
+	Restore(*Session) error
+	Close()
+}
+
+type metalMTPPrefixSnapshot struct {
+	snapshot *PrefixSnapshot
+}
+
+func captureMetalMTPTargetSnapshot(target *Session) (metalMTPTargetSnapshot, error) {
+	snapshot, err := target.PrefixSnapshot()
+	if err != nil {
+		return nil, err
+	}
+	if snapshot == nil {
+		return nil, errors.New("model: target prefix snapshot is nil")
+	}
+	return &metalMTPPrefixSnapshot{snapshot: snapshot}, nil
+}
+
+func (s *metalMTPPrefixSnapshot) Clone() (metalMTPTargetSnapshot, error) {
+	if s == nil || s.snapshot == nil {
+		return nil, errors.New("model: cannot clone nil Metal MTP snapshot")
+	}
+	clone, err := s.snapshot.Clone()
+	if err != nil {
+		return nil, err
+	}
+	if clone == nil {
+		return nil, errors.New("model: cloned Metal MTP snapshot is nil")
+	}
+	return &metalMTPPrefixSnapshot{snapshot: clone}, nil
+}
+
+func (s *metalMTPPrefixSnapshot) Restore(target *Session) error {
+	if s == nil || s.snapshot == nil {
+		return errors.New("model: cannot restore nil Metal MTP snapshot")
+	}
+	return s.snapshot.Restore(target)
+}
+
+func (s *metalMTPPrefixSnapshot) Close() {
+	if s != nil && s.snapshot != nil {
+		s.snapshot.Close()
+	}
+}
+
 // MTPDraftTracker records speculative candidate draft tokens, depth, and page state.
 type MTPDraftTracker struct {
 	DraftDepth       int     `json:"draft_depth"`
@@ -155,6 +245,7 @@ type MetalMTPCoordinator struct {
 	checkpointMgr MTPCheckpointRecorder
 	sessionID     string
 	draftState    *MTPDraftTracker
+	captureTarget func(*Session) (metalMTPTargetSnapshot, error)
 
 	// Rolling acceptance monitoring (32-token window)
 	windowOutcomes []bool
@@ -201,6 +292,7 @@ func NewMetalMTPCoordinator(target *Session, cfgs ...MetalMTPConfig) (*MetalMTPC
 		cfg:            cfg,
 		draftState:     &MTPDraftTracker{DraftDepth: cfg.DraftDepth},
 		windowOutcomes: make([]bool, 0, cfg.WindowSize),
+		captureTarget:  captureMetalMTPTargetSnapshot,
 	}
 
 	if cfg.Adaptive || cfg.AdaptiveConfig != nil {
@@ -272,6 +364,35 @@ func (c *MetalMTPCoordinator) SetMMU(cm MTPCheckpointRecorder, sessionID string)
 	defer c.mu.Unlock()
 	c.checkpointMgr = cm
 	c.sessionID = sessionID
+}
+
+func (c *MetalMTPCoordinator) checkpointConfiguredLocked() bool {
+	return c.checkpointMgr != nil && c.sessionID != ""
+}
+
+// rollbackRoundLocked restores the target snapshot even when durable rollback fails and
+// joins every failure so callers can match both the primary cause and cleanup failures.
+func (c *MetalMTPCoordinator) rollbackRoundLocked(snapshot metalMTPTargetSnapshot, cause error) error {
+	errs := make([]error, 0, 4)
+	if cause != nil {
+		errs = append(errs, cause)
+	}
+	if c.draftState != nil {
+		if _, err := c.draftState.RollbackDraft(); err != nil {
+			errs = append(errs, fmt.Errorf("model: Metal MTP local draft rollback failed: %w", err))
+		}
+	}
+	if c.checkpointConfiguredLocked() {
+		if _, err := c.checkpointMgr.RollbackMTPDraft(c.sessionID); err != nil {
+			errs = append(errs, &MetalMTPCheckpointError{Operation: MetalMTPCheckpointRollback, Err: err})
+		}
+	}
+	if snapshot != nil {
+		if err := snapshot.Restore(c.target); err != nil {
+			errs = append(errs, &MetalMTPSnapshotError{Operation: MetalMTPSnapshotRestore, Err: err})
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // TargetSession returns the underlying target model session.
@@ -547,17 +668,34 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 		draftTokens32[i] = int32(t)
 	}
 
-	// Vocabulary sanity check: reject out-of-vocab candidates
+	// Capture the pre-round target before any durable or inference state changes.
+	snapshot, snapshotErr := c.captureTarget(c.target)
+	if snapshotErr != nil {
+		return nil, -1, nil, &MetalMTPSnapshotError{Operation: MetalMTPSnapshotCapture, Err: snapshotErr}
+	}
+	defer snapshot.Close()
+
+	// Record the draft locally and durably before verification mutates the target.
+	c.draftState.RecordDraft(draftTokens32)
+	if c.checkpointConfiguredLocked() {
+		if recordErr := c.checkpointMgr.RecordMTPDraft(c.sessionID, draftTokens32); recordErr != nil {
+			return nil, -1, nil, c.rollbackRoundLocked(snapshot, &MetalMTPCheckpointError{Operation: MetalMTPCheckpointRecord, Err: recordErr})
+		}
+	}
+
+	// Vocabulary sanity check: reject out-of-vocab candidates.
 	vocabSize := c.target.M.Cfg.VocabSize
 	for _, tok := range drafts {
 		if tok < 0 || (vocabSize > 0 && tok >= vocabSize) {
-			c.recordAcceptanceLocked(len(drafts), 0)
-			c.draftState.RecordDraft(draftTokens32)
-			_, _, _ = c.draftState.CommitDraft(0)
-			if c.checkpointMgr != nil && c.sessionID != "" {
-				_ = c.checkpointMgr.RecordMTPDraft(c.sessionID, draftTokens32)
-				_, _, _ = c.checkpointMgr.CommitMTPDraft(c.sessionID, 0)
+			if c.checkpointConfiguredLocked() {
+				if _, _, commitErr := c.checkpointMgr.CommitMTPDraft(c.sessionID, 0); commitErr != nil {
+					return nil, -1, nil, c.rollbackRoundLocked(snapshot, &MetalMTPCheckpointError{Operation: MetalMTPCheckpointCommit, Err: commitErr})
+				}
 			}
+			if _, _, commitErr := c.draftState.CommitDraft(0); commitErr != nil {
+				return nil, -1, nil, c.rollbackRoundLocked(snapshot, commitErr)
+			}
+			c.recordAcceptanceLocked(len(drafts), 0)
 			nextLogits = c.target.Step(target0)
 			elapsed := time.Since(start)
 			c.totalGenerated++
@@ -575,34 +713,6 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 			}
 			return nil, target0, nextLogits, nil
 		}
-	}
-
-	// 4. Capture pre-round verified snapshot for exact rollback
-	snap, snapErr := c.target.PrefixSnapshot()
-	if snapErr != nil {
-		nextLogits = c.target.Step(target0)
-		elapsed := time.Since(start)
-		c.totalGenerated++
-		if c.governor != nil {
-			obs := Qwen38AdaptiveStepObservation{
-				ProposedTokens: 0,
-				AcceptedTokens: 0,
-				StepLatency:    elapsed,
-				TargetLatency:  c.targetLatency,
-			}
-			if c.stepCostFn != nil {
-				obs = c.stepCostFn(0, 0, obs)
-			}
-			_, _, _ = c.governor.ObserveStep(obs)
-		}
-		return []int{target0}, -1, nextLogits, nil
-	}
-	defer snap.Close()
-
-	// Record draft in Context-MMU with speculative page tracking
-	c.draftState.RecordDraft(draftTokens32)
-	if c.checkpointMgr != nil && c.sessionID != "" {
-		_ = c.checkpointMgr.RecordMTPDraft(c.sessionID, draftTokens32)
 	}
 
 	// 5. Wide-M Metal verification dispatch (evaluates K candidate tokens in 1 weight-streaming pass)
@@ -625,11 +735,9 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 
 	if len(rows) != len(drafts) {
 		// Verification returned mismatched rows: fail closed and rollback
-		_, _ = c.draftState.RollbackDraft()
-		if c.checkpointMgr != nil && c.sessionID != "" {
-			_, _ = c.checkpointMgr.RollbackMTPDraft(c.sessionID)
+		if rollbackErr := c.rollbackRoundLocked(snapshot, nil); rollbackErr != nil {
+			return nil, -1, nil, rollbackErr
 		}
-		_ = snap.Restore(c.target)
 		nextLogits = c.target.Step(target0)
 		elapsed := time.Since(start)
 		c.totalGenerated++
@@ -655,12 +763,7 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 				if math.IsNaN(float64(l)) || math.IsInf(float64(l), 0) {
 					c.tripwireTripped = true
 					c.tripwireReason = "non-finite logits in verification rows"
-					_, _ = c.draftState.RollbackDraft()
-					if c.checkpointMgr != nil && c.sessionID != "" {
-						_, _ = c.checkpointMgr.RollbackMTPDraft(c.sessionID)
-					}
-					_ = snap.Restore(c.target)
-					return nil, -1, nil, ErrMetalMTPNonFiniteLogits
+					return nil, -1, nil, c.rollbackRoundLocked(snapshot, ErrMetalMTPNonFiniteLogits)
 				}
 			}
 		}
@@ -678,30 +781,31 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 	if tripErr != nil {
 		c.tripwireTripped = true
 		c.tripwireReason = tripErr.Error()
-		_, _ = c.draftState.RollbackDraft()
-		if c.checkpointMgr != nil && c.sessionID != "" {
-			_, _ = c.checkpointMgr.RollbackMTPDraft(c.sessionID)
-		}
-		_ = snap.Restore(c.target)
-		return nil, -1, nil, tripErr
+		return nil, -1, nil, c.rollbackRoundLocked(snapshot, tripErr)
 	}
 
 	numAccepted := len(accTokens)
 
 	// 8. Atomic Context-MMU page commit & rollback:
 	// Commits accepted token pages and immediately frees rejected pages without memory leaks
-	_, _, _ = c.draftState.CommitDraft(numAccepted)
-	if c.checkpointMgr != nil && c.sessionID != "" {
-		_, _, _ = c.checkpointMgr.CommitMTPDraft(c.sessionID, numAccepted)
+	if c.checkpointConfiguredLocked() {
+		if _, _, commitErr := c.checkpointMgr.CommitMTPDraft(c.sessionID, numAccepted); commitErr != nil {
+			return nil, -1, nil, c.rollbackRoundLocked(snapshot, &MetalMTPCheckpointError{Operation: MetalMTPCheckpointCommit, Err: commitErr})
+		}
+	}
+	if _, _, commitErr := c.draftState.CommitDraft(numAccepted); commitErr != nil {
+		return nil, -1, nil, c.rollbackRoundLocked(snapshot, commitErr)
 	}
 
 	// Roll back unaccepted KV cache positions and recurrent state in the target session
 	if numAccepted < len(drafts) {
-		clone, cErr := snap.Clone()
-		if cErr == nil {
-			_ = clone.Restore(c.target)
-		} else {
-			_ = snap.Restore(c.target)
+		clone, cloneErr := snapshot.Clone()
+		if cloneErr != nil {
+			return nil, -1, nil, c.rollbackRoundLocked(snapshot, &MetalMTPSnapshotError{Operation: MetalMTPSnapshotClone, Err: cloneErr})
+		}
+		defer clone.Close()
+		if restoreErr := clone.Restore(c.target); restoreErr != nil {
+			return nil, -1, nil, c.rollbackRoundLocked(snapshot, &MetalMTPSnapshotError{Operation: MetalMTPSnapshotRestore, Err: restoreErr})
 		}
 		for _, tok := range accTokens {
 			c.target.Step(tok)
