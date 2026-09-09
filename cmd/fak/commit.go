@@ -17,6 +17,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/commitrollup"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/hooks"
+	"github.com/anthony-chaudhary/fak/internal/patchcommit"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
 	"github.com/anthony-chaudhary/fak/internal/safesync"
@@ -24,6 +25,9 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/workdelivery"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
+
+// ReasonPhantomDeletionRisk indicates that a requested or staged deletion targets files introduced by a recent disjoint integrate merge.
+const ReasonPhantomDeletionRisk = patchcommit.ReasonPhantomDeletionRisk
 
 // commitFn is the seam the CLI shim calls; it defaults to the real safecommit.Commit and
 // is overridden in tests so runCommit is exercised without a real git or repo.
@@ -219,6 +223,29 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 			renderPreview(stderr, rep, "")
 			return safecommit.ExitRefused
 		}
+	}
+
+	// PHANTOM_DELETION_RISK pre-commit guard: inspect staged or requested deletions.
+	// If a deleted path was added or modified in the immediate parent merge commit
+	// (specifically a disjoint integrate merge) within recent turns, refuse the commit
+	// with a typed structured error and instruct the operator to run recovery.
+	if riskDetail, fired, _ := patchcommit.CheckPhantomDeletionRisk(context.Background(), root, paths, nil); fired {
+		res := safecommit.ScoreResult(safecommit.Result{
+			Paths:  append([]string(nil), paths...),
+			Reason: ReasonPhantomDeletionRisk,
+			Detail: riskDetail,
+		})
+		if *asJSON {
+			if err := writeIndentedJSON(stdout, res); err != nil {
+				fmt.Fprintf(stderr, "fak commit: %v\n", err)
+				return 1
+			}
+			return safecommit.ExitRefused
+		}
+		fmt.Fprintf(stderr, "fak commit: %s\n", res.Reason)
+		fmt.Fprintf(stderr, "  %s\n", res.Detail)
+		fmt.Fprintln(stderr, "  recovery: restore missing files using `git checkout HEAD -- <paths>` or run `fak sync reconcile --apply`")
+		return safecommit.ExitRefused
 	}
 
 	if ready, receipt := commitLaneWaitFn(root, *lockTimeout); !ready {
@@ -634,6 +661,30 @@ func runCommitDrain(stdout, stderr io.Writer, argv []string) int {
 		return safecommit.ExitRefused
 	}
 
+	if riskDetail, fired, _ := patchcommit.CheckPhantomDeletionRisk(context.Background(), root, plan.UnionPaths, nil); fired {
+		commitRes := safecommit.Result{
+			Paths:  plan.UnionPaths,
+			Reason: ReasonPhantomDeletionRisk,
+			Detail: riskDetail,
+		}
+		commitRes = safecommit.FinalizeEvidence(commitRes, safecommit.EvidenceContract{
+			CompletionClass: safecommit.CompletionVerifiedDelivery,
+			RequirePush:     *push,
+			RequireClosure:  true,
+		})
+		commitRes = safecommit.ScoreResult(commitRes)
+		res.Commit = &commitRes
+		if *asJSON {
+			if err := writeIndentedJSON(stdout, res); err != nil {
+				fmt.Fprintf(stderr, "fak commit drain: %v\n", err)
+				return 1
+			}
+		} else {
+			renderCommitDrainResult(stdout, res)
+		}
+		return safecommit.ExitRefused
+	}
+
 	buildCheckOutcome, buildCheckDetail := safecommit.BuildCheckDisabled, ""
 	if !*noBuildCheck && os.Getenv("FAK_COMMIT_BUILD_CHECK") != "off" {
 		buildCheckOutcome, buildCheckDetail = executeCommitBuildCheck(stderr, root, plan.UnionPaths, *buildCheckTimeout)
@@ -810,6 +861,15 @@ func renderCommitDrainResult(stdout io.Writer, res commitDrainResult) {
 	} else {
 		fmt.Fprintln(stdout, "no drainable commit intents")
 	}
+	if res.Commit != nil && res.Commit.Reason != "" {
+		fmt.Fprintf(stdout, "  refused: %s\n", res.Commit.Reason)
+		if res.Commit.Detail != "" {
+			fmt.Fprintf(stdout, "    %s\n", res.Commit.Detail)
+		}
+		if res.Commit.Reason == ReasonPhantomDeletionRisk || strings.Contains(res.Commit.Reason, ReasonPhantomDeletionRisk) {
+			fmt.Fprintln(stdout, "    recovery: restore missing files using `git checkout HEAD -- <paths>` or run `fak sync reconcile --apply`")
+		}
+	}
 	if res.Plan.Subject != "" {
 		fmt.Fprintf(stdout, "  subject: %s\n", res.Plan.Subject)
 	}
@@ -824,6 +884,9 @@ func renderCommitDrainResult(stdout io.Writer, res commitDrainResult) {
 		fmt.Fprintln(stdout)
 		if refusal.Reason == safecommit.ReasonPreStagedPathOverlap || strings.Contains(string(refusal.Reason), safecommit.ReasonPreStagedPathOverlap) || strings.Contains(refusal.Detail, safecommit.ReasonPreStagedPathOverlap) {
 			fmt.Fprintln(stdout, "    remedy: unstage pre-existing index changes via `git restore --staged <paths>` (worktree edits stay), then retry `fak commit`")
+		}
+		if refusal.Reason == ReasonPhantomDeletionRisk || strings.Contains(string(refusal.Reason), ReasonPhantomDeletionRisk) || strings.Contains(refusal.Detail, ReasonPhantomDeletionRisk) {
+			fmt.Fprintln(stdout, "    recovery: restore missing files using `git checkout HEAD -- <paths>` or run `fak sync reconcile --apply`")
 		}
 	}
 	if res.Pathset != nil && !res.Pathset.OK {
@@ -939,6 +1002,8 @@ func commitExitCode(res safecommit.Result) int {
 	switch res.Reason {
 	case "":
 		return 0
+	case ReasonPhantomDeletionRisk:
+		return safecommit.ExitRefused
 	case safecommit.ReasonNoPath, safecommit.ReasonEmptyMessage:
 		return 2
 	case safecommit.ReasonNotARepo:
@@ -980,6 +1045,9 @@ func renderCommitResult(stdout io.Writer, res safecommit.Result) {
 	}
 	if res.Reason == safecommit.ReasonPreStagedPathOverlap || strings.Contains(res.Reason, safecommit.ReasonPreStagedPathOverlap) || strings.Contains(res.Detail, safecommit.ReasonPreStagedPathOverlap) {
 		fmt.Fprintln(stdout, "  remedy: unstage pre-existing index changes via `git restore --staged <paths>` (worktree edits stay), then retry `fak commit`")
+	}
+	if res.Reason == ReasonPhantomDeletionRisk || strings.Contains(res.Reason, ReasonPhantomDeletionRisk) || strings.Contains(res.Detail, ReasonPhantomDeletionRisk) {
+		fmt.Fprintln(stdout, "  recovery: restore the phantom deleted file(s) with `git checkout HEAD -- <paths>` or resynchronize the working tree with `fak sync reconcile --apply`")
 	}
 	renderCommitScore(stdout, res)
 	renderCommitVelocity(stdout, res)
