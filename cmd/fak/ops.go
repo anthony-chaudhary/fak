@@ -14,7 +14,7 @@ import (
 
 func runOps(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "usage: fak ops <status|sweep|log|daemon|run> [options]")
+		fmt.Fprintln(stderr, "usage: fak ops <status|sweep|log|daemon|run|schedule> [options]")
 		return 2
 	}
 
@@ -35,6 +35,8 @@ func runOps(stdout, stderr io.Writer, argv []string) int {
 		return runOpsLog(stdout, stderr, root, args)
 	case "daemon":
 		return runOpsDaemon(stdout, stderr, root, cfg, args)
+	case "schedule":
+		return runOpsSchedule(stdout, stderr, args)
 	default:
 		fmt.Fprintf(stderr, "fak ops: unknown command %q\n", verb)
 		return 2
