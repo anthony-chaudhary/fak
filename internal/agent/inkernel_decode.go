@@ -225,7 +225,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		prefillAt := matched
 		checkpoint := inKernelSnapshotCheckpoint(prefillAt, len(ids))
 		if reuse && p.backend != nil && checkpoint > prefillAt {
-			logits, err = p.prefillDivergentSuffix(ctx, s, ids[prefillAt:checkpoint])
+			logits, err = p.prefillDivergentSuffix(ctx, s, ids[prefillAt:checkpoint], measurement)
 			if err != nil {
 				return
 			}
@@ -241,7 +241,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			prefillAt = checkpoint
 		}
 		if prefillAt < len(ids) {
-			logits, err = p.prefillDivergentSuffix(ctx, s, ids[prefillAt:])
+			logits, err = p.prefillDivergentSuffix(ctx, s, ids[prefillAt:], measurement)
 			if err != nil {
 				return
 			}
@@ -364,26 +364,34 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 // This is a source-level capability gate, not hardware parity evidence. Other
 // forward paths keep the historical single Prefill call because they do not share
 // the required append contract.
-func (p *InKernelPlanner) prefillDivergentSuffix(ctx context.Context, s inKernelPrefillSession, ids []int) ([]float32, error) {
+func (p *InKernelPlanner) prefillDivergentSuffix(ctx context.Context, s inKernelPrefillSession, ids []int, measurementOpt ...*nativeInferenceMeasurement) ([]float32, error) {
+	var measurement *nativeInferenceMeasurement
+	if len(measurementOpt) > 0 {
+		measurement = measurementOpt[0]
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	chunkTokens := p.effectiveQwenQ4KPrefillChunkTokens()
 	if !p.qwenQ4KPrefillChunkTarget() || len(ids) <= chunkTokens {
 		logits := s.Prefill(ids)
+		recordQwen35SequencePrefillRoute(measurement, s, len(ids))
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		return logits, nil
 	}
 	for len(ids) > chunkTokens {
-		s.PrefillNoLogits(ids[:chunkTokens])
+		chunk := ids[:chunkTokens]
+		s.PrefillNoLogits(chunk)
+		recordQwen35SequencePrefillRoute(measurement, s, len(chunk))
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		ids = ids[chunkTokens:]
 	}
 	logits := s.Prefill(ids)
+	recordQwen35SequencePrefillRoute(measurement, s, len(ids))
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -495,6 +503,7 @@ type nativeInferenceMeasurement struct {
 	decodeTokenIDs                      []int
 	qwen35MetalForwardSequence          model.Qwen35MetalForwardSequenceReceipt
 	qwen35MetalStateIdentity            *model.Qwen35MetalStateIdentityReceipt
+	qwen35SequencePrefillRoute          *model.NativeSequencePrefillRouteReceipt
 	cudaImmutableWeightUploadsBefore    model.NativeCUDAImmutableWeightUploadCounters
 	cudaImmutableWeightUploadsAvailable bool
 }
@@ -511,6 +520,7 @@ func (m *nativeInferenceMeasurement) reset() {
 	m.decodeTokenIDs = m.decodeTokenIDs[:0]
 	m.qwen35MetalForwardSequence = model.Qwen35MetalForwardSequenceReceipt{}
 	m.qwen35MetalStateIdentity = nil
+	m.qwen35SequencePrefillRoute = nil
 }
 
 func (m *nativeInferenceMeasurement) record(logits []float32, token int) error {
