@@ -152,6 +152,46 @@ func TestCommitRefusesHeadRace(t *testing.T) {
 	}
 }
 
+func TestCommitRefusesPhantomDeletionOfRecentMergeAddition(t *testing.T) {
+	repo := newRepo(t)
+	write(t, repo, "base.txt", "base content\n")
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "base")
+	headSHA := strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
+
+	git(t, repo, "checkout", "-b", "peer")
+	write(t, repo, "peer_added.txt", "peer content\n")
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "peer work")
+	peerSHA := strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
+
+	git(t, repo, "checkout", "main")
+	treeOID := strings.TrimSpace(git(t, repo, "merge-tree", "--write-tree", headSHA, peerSHA))
+	mergeSHA := strings.TrimSpace(git(t, repo, "commit-tree", treeOID, "-p", headSHA, "-p", peerSHA, "-m", "Merge origin/main (disjoint integrate) (fak safesync)"))
+	git(t, repo, "update-ref", "refs/heads/main", mergeSHA, headSHA)
+	git(t, repo, "update-ref", "HEAD", mergeSHA)
+
+	patchContent := "diff --git a/peer_added.txt b/peer_added.txt\ndeleted file mode 100644\n--- a/peer_added.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-peer content\n"
+	patch := filepath.Join(repo, "delete.patch")
+	write(t, repo, "delete.patch", patchContent)
+
+	res, err := Commit(context.Background(), Options{
+		Dir:       repo,
+		PatchFile: patch,
+		Paths:     []string{"peer_added.txt"},
+		Message:   "chore: delete peer added file",
+	})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if res.Reason != ReasonPhantomDeletionRisk {
+		t.Fatalf("res.Reason = %q, want %q; detail=%s", res.Reason, ReasonPhantomDeletionRisk, res.Detail)
+	}
+	if !strings.Contains(res.Detail, "recovery") && !strings.Contains(res.Detail, "git checkout") {
+		t.Fatalf("expected recovery instructions in detail, got: %s", res.Detail)
+	}
+}
+
 func newRepo(t *testing.T) string {
 	t.Helper()
 	d := t.TempDir()
