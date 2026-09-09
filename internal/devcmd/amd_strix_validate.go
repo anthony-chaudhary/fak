@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -17,7 +18,12 @@ import (
 )
 
 var (
-	runStrixValidationFn         = amdgpu.RunStrixValidation
+	runStrixValidationFn          = amdgpu.RunStrixValidation
+	discoverStrixTargetFn         = amdgpu.DiscoverStrixTarget
+	newStrixControllerAuthorityFn = func(ctx context.Context, root string) (strixControllerAuthority, error) {
+		authority, err := amdgpu.NewStrixControllerAuthority(ctx, root)
+		return authority, err
+	}
 	buildStrixCandidateArchiveFn = amdgpu.BuildStrixCandidateArchive
 	gitRevParseFn                = defaultGitRevParse
 	gitStatusFn                  = defaultGitStatus
@@ -70,6 +76,7 @@ func IsValidFullGitTip(s string) bool {
 }
 
 type resolvedStrixCandidate struct {
+	root    string
 	tip     string
 	archive amdgpu.StrixCandidateArchive
 }
@@ -164,7 +171,45 @@ func resolveStrixCandidate(ctx context.Context, candidateDir, explicitTip string
 	if archive.SourceArchiveSHA256 != computed {
 		return resolvedStrixCandidate{}, fmt.Errorf("candidate archive/digest disagreement: computed %s, got %s", computed, archive.SourceArchiveSHA256)
 	}
-	return resolvedStrixCandidate{tip: tip, archive: archive}, nil
+	return resolvedStrixCandidate{root: root, tip: tip, archive: archive}, nil
+}
+
+type strixControllerRefusal interface {
+	error
+	Code() string
+	Recovery() string
+	RetryCleanup() error
+}
+
+type strixControllerAuthority interface {
+	Epoch() string
+}
+
+func requireStrixControllerAuthority(ctx context.Context, stderr io.Writer, command, root string) (strixControllerAuthority, bool) {
+	authority, err := newStrixControllerAuthorityFn(ctx, root)
+	if err == nil && authority != nil && authority.Epoch() != "" {
+		return authority, true
+	}
+	code := "INVALID_CONTROLLER_AUTHORITY"
+	recovery := ""
+	cleanupFailed := false
+	var refusal strixControllerRefusal
+	if errors.As(err, &refusal) {
+		code = refusal.Code()
+		recovery = refusal.Recovery()
+		cleanupFailed = refusal.RetryCleanup() != nil
+	} else if err != nil {
+		code = "CONTROLLER_AUTHORITY_UNAVAILABLE"
+	}
+	fmt.Fprintf(stderr, "%s: controller authority refused: %s", command, code)
+	if recovery != "" {
+		fmt.Fprintf(stderr, "; recovery: %s", recovery)
+	}
+	if cleanupFailed {
+		fmt.Fprint(stderr, "; snapshot_cleanup=FAILED")
+	}
+	fmt.Fprintln(stderr)
+	return nil, false
 }
 
 func isCanonicalSHA256(digest string) bool {
@@ -259,6 +304,10 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 		}
 		return 1
 	}
+	controllerAuthority, ok := requireStrixControllerAuthority(ctx, stderr, "amd-strix-validate", candidate.root)
+	if !ok {
+		return 1
+	}
 
 	runSK := *subkernels != "none" && *subkernels != ""
 	runAB := *ablate != "none" && *ablate != ""
@@ -281,6 +330,7 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "==> Validating exact candidate on AMD Strix Halo target %s...\n", *host)
 	}
 	receipt, runErr := runStrixValidationFn(ctx, opts)
+	_ = controllerAuthority // retained across transport for downstream receipt binding
 	if receipt == nil {
 		fmt.Fprintf(stderr, "amd-strix-validate: validation failed: %v\n", runErr)
 		if *asJSON {
@@ -357,12 +407,32 @@ func RunAMDStrixProbe(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	host := fs.String("host", "", "target Strix Halo host")
 	asJSON := fs.Bool("json", false, "emit facts as JSON")
+	candidateDir := fs.String("candidate-dir", ".", "path within the controller checkout")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(stderr, "amd-strix-probe: positional arguments rejected: %v\n", fs.Args())
+		return 1
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	target, err := amdgpu.DiscoverStrixTarget(ctx, *host)
+	root, err := gitRevParseFn(ctx, *candidateDir, "--show-toplevel")
+	if err != nil || strings.TrimSpace(root) == "" {
+		fmt.Fprintf(stderr, "amd-strix-probe: resolve repository root for %q: %v\n", *candidateDir, err)
+		return 1
+	}
+	root, err = filepath.Abs(strings.TrimSpace(root))
+	if err != nil {
+		fmt.Fprintf(stderr, "amd-strix-probe: canonicalize repository root: %v\n", err)
+		return 1
+	}
+	controllerAuthority, ok := requireStrixControllerAuthority(ctx, stderr, "amd-strix-probe", filepath.Clean(root))
+	if !ok {
+		return 1
+	}
+	target, err := discoverStrixTargetFn(ctx, *host)
+	_ = controllerAuthority // retained across transport for downstream receipt binding
 	if err != nil || target == nil || !target.Reachable {
 		fmt.Fprintf(stderr, "amd-strix-probe: cannot reach Strix Halo appliance: %v\n", err)
 		return 1
