@@ -19,7 +19,7 @@ import (
 const (
 	// ReasonCircularDependency is the registered refusal code for detected cycles
 	// in cross-agent context search and peer dependency graphs.
-	ReasonCircularDependency     abi.ReasonCode = 1100
+	ReasonCircularDependency     abi.ReasonCode = 1105
 	ReasonCircularDependencyName                = "CIRCULAR_DEPENDENCY"
 )
 
@@ -33,11 +33,11 @@ const MultiAgentReceiptSchema = "fak.gym.multiagent.v1"
 // QueryRefusal represents a structured refusal when a cross-agent context query
 // induces a cycle in the active peer dependency / wait-for graph.
 type QueryRefusal struct {
-	Status     string         `json:"status"` // "refused"
-	Refusal    bool           `json:"refusal"` // true
-	Reason     string         `json:"reason"` // "CIRCULAR_DEPENDENCY"
-	ReasonCode abi.ReasonCode `json:"reason_code"` // 1100
-	Cycle      []string       `json:"cycle"` // e.g. ["worker-A", "worker-B", "worker-A"]
+	Status     string         `json:"status"`      // "refused"
+	Refusal    bool           `json:"refusal"`     // true
+	Reason     string         `json:"reason"`      // "CIRCULAR_DEPENDENCY"
+	ReasonCode abi.ReasonCode `json:"reason_code"` // 1105
+	Cycle      []string       `json:"cycle"`       // e.g. ["worker-A", "worker-B", "worker-A"]
 	Detail     string         `json:"detail"`
 }
 

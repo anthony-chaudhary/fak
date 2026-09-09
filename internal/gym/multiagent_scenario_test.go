@@ -162,11 +162,14 @@ func TestGym_MultiAgentPeerContextScenarios(t *testing.T) {
 			if res.Refusal.ReasonCode != ReasonCircularDependency {
 				t.Errorf("expected ReasonCode == %d, got %d", ReasonCircularDependency, res.Refusal.ReasonCode)
 			}
+			if res.Refusal.ReasonCode != 1105 {
+				t.Errorf("expected ReasonCode == 1105, got %d", res.Refusal.ReasonCode)
+			}
 			if abi.ReasonName(res.Refusal.ReasonCode) != "CIRCULAR_DEPENDENCY" {
 				t.Errorf("expected ReasonName == CIRCULAR_DEPENDENCY, got %q", abi.ReasonName(res.Refusal.ReasonCode))
 			}
 			code, ok := abi.ReasonByName("CIRCULAR_DEPENDENCY")
-			if !ok || code != ReasonCircularDependency {
+			if !ok || code != 1105 {
 				t.Errorf("ReasonByName(\"CIRCULAR_DEPENDENCY\") failed: ok=%v code=%d", ok, code)
 			}
 
