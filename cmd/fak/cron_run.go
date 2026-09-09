@@ -31,11 +31,13 @@ const (
 	cronRunStatusSkippedDuplicate = "skipped_duplicate"
 	cronRunStatusFailed           = "failed"
 	cronRunStatusTimeout          = "timeout"
+	cronRunStatusExpired          = "expired"
 
 	cronRunOutcomeSucceeded        = "succeeded"
 	cronRunOutcomeFailed           = "failed"
 	cronRunOutcomeTimeout          = "timeout"
 	cronRunOutcomeSkippedDuplicate = "skipped_duplicate"
+	cronRunOutcomeExpired          = "expired"
 
 	cronRunExitTimeout = 124
 
@@ -125,6 +127,8 @@ func runCronRun(stdout, stderr io.Writer, argv []string) int {
 	at := fs.String("at", "", "wall-clock tick time (RFC3339); default now — injectable for tests")
 	slot := fs.String("slot", "", "override computed slot key directly")
 	asJSON := fs.Bool("json", false, "emit outcome receipt as JSON instead of human key-value")
+	until := fs.String("until", "", "expiration deadline (RFC3339); ticks after this time are marked expired")
+	workdir := fs.String("workdir", "", "working directory for child command execution")
 
 	// Find the trailing "--" separator for command arguments
 	dashIdx := -1
@@ -178,6 +182,46 @@ func runCronRun(stdout, stderr io.Writer, argv []string) int {
 	fireAt, slotKey, ok := resolveCronTimeAndSlot(stderr, "fak cron run", *at, *slot, *interval)
 	if !ok {
 		return 2
+	}
+
+	// Expiration check: ticks occurring after --until are marked expired
+	if strings.TrimSpace(*until) != "" {
+		untilTime, err := time.Parse(time.RFC3339, strings.TrimSpace(*until))
+		if err != nil {
+			if d, durErr := time.ParseDuration(strings.TrimSpace(*until)); durErr == nil && d > 0 {
+				untilTime = fireAt.Add(d)
+			} else {
+				fmt.Fprintf(stderr, "fak cron run: invalid --until %q (must be RFC3339 or duration)\n", *until)
+				return 2
+			}
+		}
+		if fireAt.After(untilTime) {
+			receipt := cronRunReceipt{
+				Schema:     cronRunReceiptSchema,
+				Job:        *job,
+				Slot:       slotKey,
+				Status:     cronRunStatusExpired,
+				Outcome:    cronRunOutcomeExpired,
+				ExitCode:   0,
+				DurationMS: 0,
+				Command:    strings.Join(cmdArgs, " "),
+			}
+			rec := cronRunRecord{
+				Schema:     cronRunSchema,
+				Job:        *job,
+				Slot:       slotKey,
+				Outcome:    cronRunOutcomeExpired,
+				Status:     cronRunStatusExpired,
+				ExitCode:   0,
+				DurationMS: 0,
+				Command:    strings.Join(cmdArgs, " "),
+				StartedAt:  fireAt.Format(time.RFC3339),
+				FinishedAt: fireAt.Format(time.RFC3339),
+			}
+			_ = cronAppendJSONL(*ledger, rec)
+			emitCronRunReceipt(stdout, *asJSON, receipt)
+			return 0
+		}
 	}
 
 	// Acquire dup-tick lock for CAS
@@ -251,6 +295,10 @@ func runCronRun(stdout, stderr io.Writer, argv []string) int {
 	cmdName := cmdArgs[0]
 	cmdRest := cmdArgs[1:]
 	c := exec.CommandContext(ctx, cmdName, cmdRest...)
+	configureDispatchHelperCommand(c)
+	if *workdir != "" {
+		c.Dir = *workdir
+	}
 	c.Stdout = stdout
 	c.Stderr = stderr
 	c.WaitDelay = 5 * time.Second
