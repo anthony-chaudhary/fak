@@ -226,7 +226,7 @@ func wipUsage(w io.Writer) {
       set and exits 3 if any exist. Read-only. The --ttl claim window is also the cost
       bound: only checkpoints inside it (or held by a live session) are read.
 
-  fak wip admit [-C <repo>] --self <session> [--path <glob>]... [--strict] [--ceiling N] [--work-intent fresh|recovery|landing|safety|continuation] [--flow-window N] [--json]
+  fak wip admit [-C <repo>] --session <session> [--path <glob>]... [--strict] [--ceiling N] [--work-intent fresh|recovery|landing|safety|continuation] [--flow-window N] [--json]
       Read-only start-of-task admission. Refuse hard peer collisions, stale untracked
       source, and fresh discretionary WIP when the witnessed arrival/service ratio is
       above the flowmetrics threshold. Recovery, landing, safety, and already-owned
