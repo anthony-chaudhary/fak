@@ -397,6 +397,147 @@ func TestSingleReapDirtyWorktreeReturnsTypedRefusalAndPreservesWork(t *testing.T
 	}
 }
 
+func TestWorkerReapRefusesWhenPreLifecycleInventoryIsUnknown(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	t.Setenv(workerworktree.PoolCapEnv, "0")
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-q", "-b", "main")
+	git("config", "user.email", "t@t")
+	git("config", "user.name", "t")
+
+	file1Rel := "file1.txt"
+	file2Rel := "file2.txt"
+	if err := os.WriteFile(filepath.Join(repo, file1Rel), []byte("base file1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, file2Rel), []byte("base file2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", file1Rel, file2Rel)
+	git("commit", "-qm", "base files")
+	base := git("rev-parse", "HEAD")
+
+	workerRoot := filepath.Join(root, "workers")
+	prepared := workerworktree.Prepare(repo, "cmd", "12404", base, workerRoot, nil)
+	if !prepared.OK {
+		t.Fatalf("prepare: %+v", prepared)
+	}
+	worktree := prepared.Path
+	t.Cleanup(func() { _ = workerworktree.ForceReap(repo, worktree, nil) })
+
+	wantBytes1 := []byte("dirty file1 contents\n")
+	wantBytes2 := []byte("dirty file2 contents\n")
+	wtFile1 := filepath.Join(worktree, file1Rel)
+	wtFile2 := filepath.Join(worktree, file2Rel)
+	if err := os.WriteFile(wtFile1, wantBytes1, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wtFile2, wantBytes2, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Force before-inventory unknown pre-state: corrupt .git/index in repo so
+	// wipinventory.Collect encounters a git error during population capture,
+	// rendering receipt.Before.Known = false.
+	indexPath := filepath.Join(repo, ".git", "index")
+	savedIndex, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(indexPath, []byte("invalid index"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res := runReapCommand(t, 15*time.Second, nil, "--root", repo, "--worktree", worktree, "--max-wait", "10s")
+	if res.code != 1 {
+		t.Fatalf("want exit code 1 on unknown pre-state, got %d; stdout=%q stderr=%q", res.code, res.stdout, res.stderr)
+	}
+	got := reapReceipt(t, res.stdout)
+	if got["ok"] != false {
+		t.Fatalf("want ok=false, got %v", got["ok"])
+	}
+	if got["code"] != ReapCodePrestateUnknown {
+		t.Fatalf("want code %q, got %v", ReapCodePrestateUnknown, got["code"])
+	}
+	if got["preserved"] != true {
+		t.Fatalf("want preserved=true, got %v", got["preserved"])
+	}
+	if got["removed"] == true {
+		t.Fatalf("want no removal receipt emitted, got removed=true")
+	}
+
+	// Restore .git/index
+	if err := os.WriteFile(indexPath, savedIndex, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert worktree directory and Git registration survive
+	if fi, err := os.Stat(worktree); err != nil || !fi.IsDir() {
+		t.Fatalf("worktree directory did not survive: %v", err)
+	}
+	wtList := git("worktree", "list", "--porcelain")
+	if !strings.Contains(wtList, filepath.ToSlash(worktree)) && !strings.Contains(wtList, worktree) {
+		t.Fatalf("git worktree registration did not survive: %s", wtList)
+	}
+
+	// Assert tracked file bytes are unchanged
+	b1, err := os.ReadFile(wtFile1)
+	if err != nil || !bytes.Equal(b1, wantBytes1) {
+		t.Fatalf("tracked file 1 bytes changed: got %q, want %q (err=%v)", b1, wantBytes1, err)
+	}
+	b2, err := os.ReadFile(wtFile2)
+	if err != nil || !bytes.Equal(b2, wantBytes2) {
+		t.Fatalf("tracked file 2 bytes changed: got %q, want %q (err=%v)", b2, wantBytes2, err)
+	}
+
+	// Also verify before-inventory failure (error != nil): lifecycle store path blocked by a file.
+	lifecycleStore := filepath.Join(repo, ".git", "fak-wip-lifecycle")
+	_ = os.RemoveAll(lifecycleStore)
+	if err := os.WriteFile(lifecycleStore, []byte("blocked"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resStoreBlocked := runReapCommand(t, 10*time.Second, nil, "--root", repo, "--worktree", worktree, "--max-wait", "5s")
+	if resStoreBlocked.code != 1 {
+		t.Fatalf("want exit code 1 on store failure, got %d", resStoreBlocked.code)
+	}
+	gotBlocked := reapReceipt(t, resStoreBlocked.stdout)
+	if gotBlocked["code"] != ReapCodePrestateUnknown || gotBlocked["ok"] != false || gotBlocked["preserved"] != true {
+		t.Fatalf("want REAP_PRESTATE_UNKNOWN refusal on store failure, got %v", gotBlocked)
+	}
+	if err := os.Remove(lifecycleStore); err != nil {
+		t.Fatal(err)
+	}
+
+	// Control run: with complete before-inventory, the reap proceeds to the
+	// existing checked reap path and returns DIRTY_WORKTREE_REFUSED.
+	controlRes := runReapCommand(t, 10*time.Second, nil, "--root", repo, "--worktree", worktree, "--max-wait", "5s")
+	if controlRes.code != 1 {
+		t.Fatalf("control reap exit=%d stdout=%q stderr=%q", controlRes.code, controlRes.stdout, controlRes.stderr)
+	}
+	controlGot := reapReceipt(t, controlRes.stdout)
+	if controlGot["code"] != "DIRTY_WORKTREE_REFUSED" || controlGot["ok"] != false || controlGot["preserved"] != true {
+		t.Fatalf("control reap want DIRTY_WORKTREE_REFUSED, got %v", controlGot)
+	}
+}
+
 func TestSingleReapExplicitSupersessionRemovesRegisteredDirtyWorktree(t *testing.T) {
 	repo, worktree, _ := newSingleReapFixture(t)
 	want := []byte("already landed\n")

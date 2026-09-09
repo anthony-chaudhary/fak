@@ -106,7 +106,8 @@ func emitWIPLifecycle(stdout, stderr io.Writer, receipt wiplifecycle.Receipt) in
 }
 
 func beginAutomaticWIPLifecycle(root, kind string, stderr io.Writer) func() {
-	return beginAutomaticWIPLifecycleWithRunner(root, kind, stderr, wipinventory.GitRunner{})
+	finish, _, _ := beginAutomaticWIPLifecycleWithRunner(root, kind, stderr, wipinventory.GitRunner{})
+	return finish
 }
 
 type boundedLifecycleGitRunner struct {
@@ -121,22 +122,30 @@ func (r boundedLifecycleGitRunner) Run(root string, args ...string) ([]byte, err
 	return []byte(out), nil
 }
 
-func beginAutomaticWIPLifecycleWithGit(root, kind string, stderr io.Writer, git workerworktree.GitRunner) func() {
+func beginAutomaticWIPLifecycleWithGit(root, kind string, stderr io.Writer, git workerworktree.GitRunner) (func(), wiplifecycle.Receipt, error) {
 	return beginAutomaticWIPLifecycleWithRunner(root, kind, stderr, boundedLifecycleGitRunner{run: git})
 }
 
-func beginAutomaticWIPLifecycleWithRunner(root, kind string, stderr io.Writer, runner wipinventory.Runner) func() {
+func beginAutomaticWIPLifecycleWithRunner(root, kind string, stderr io.Writer, runner wipinventory.Runner) (func(), wiplifecycle.Receipt, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		fmt.Fprintf(stderr, "WIP_LIFECYCLE_CAPTURE_FAILED phase=before kind=%s error=%v\n", kind, err)
-		return func() {}
+		return func() {}, wiplifecycle.Receipt{}, err
 	}
 	receipt, err := wiplifecycle.BeginWithRunner(root, kind, "", time.Now(), runner)
 	if err != nil {
 		fmt.Fprintf(stderr, "WIP_LIFECYCLE_CAPTURE_FAILED phase=before kind=%s error=%v\n", kind, err)
-		return func() {}
+		return func() {}, receipt, err
 	}
-	fmt.Fprintf(stderr, "WIP_LIFECYCLE_CAPTURED phase=before kind=%s operation=%s artifact=%s\n", kind, receipt.OperationID, receipt.Before.Artifact)
+	if !receipt.Before.Known {
+		errDetail := receipt.Before.Error
+		if errDetail == "" {
+			errDetail = "before inventory is incomplete or unknown"
+		}
+		fmt.Fprintf(stderr, "WIP_LIFECYCLE_CAPTURE_FAILED phase=before kind=%s error=%s\n", kind, errDetail)
+	} else {
+		fmt.Fprintf(stderr, "WIP_LIFECYCLE_CAPTURED phase=before kind=%s operation=%s artifact=%s\n", kind, receipt.OperationID, receipt.Before.Artifact)
+	}
 	var once sync.Once
 	return func() {
 		once.Do(func() {
@@ -147,5 +156,5 @@ func beginAutomaticWIPLifecycleWithRunner(root, kind string, stderr io.Writer, r
 			}
 			fmt.Fprintf(stderr, "WIP_LIFECYCLE_CAPTURED phase=after kind=%s operation=%s artifact=%s receipt=%s\n", kind, finished.OperationID, finished.After.Artifact, finished.ReceiptPath)
 		})
-	}
+	}, receipt, nil
 }

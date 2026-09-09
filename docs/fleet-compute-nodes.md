@@ -49,6 +49,19 @@ preflight; the operator completes and records private discovery in the private r
 Do not reconstruct private commands from dated public notes, and do not report local
 hardware absence as the result of a task whose claim requires remote hardware.
 
+## Shift-left sub-component testing on live hardware (divide and conquer)
+
+Reserve full-model end-to-end serving runs for final release gates, and shift active development verification left to physical sub-components. Monolithic model serves are heavy, memory-intensive, and slow to load, making fine-grained regression attribution difficult.
+
+Instead, **bias toward testing sub-components on live hardware (divide and conquer)**:
+1. **Decompose compute pipelines into atomic sub-components**: Isolate individual compute sub-kernels (`argmax`, `matmul_f32`, `q8_matmul`, `q4k_matmul`, `q2k_matmul`, `rmsnorm`, `swiglu`, `rope`, `attention`, `f16_kv_contiguize`), memory bus P2P transfers, or microbenchmarks.
+2. **Shift left with real hardware testing (more volume, more often)**: Execute sub-component tests in the active inner loop before committing. Fast sub-component validation finishes in seconds, enabling high-volume, frequent regression checks during active development.
+3. **Execute against the appropriate sanctioned hardware target**:
+   - **AMD Strix Halo APU (`strix-agent` / `strix1`)**: Run `fak-dev amd-strix-validate --subkernels=<names> --ablate=<arms>` or `fak validate --strix --subkernels=all --ablate=all` for sub-kernel verification and differential ablation.
+   - **Apple Silicon Metal**: Run `make mac-perf` on Apple Silicon dev targets for on-device Metal tok/s and prefill verification.
+   - **NVIDIA CUDA / Cloud GPU**: Run `make cuda-accept` or `internal/compute/build_cuda.sh test` on the GPU node.
+4. **Physical evidence over synthetic mocks**: Physical silicon execution proves device behavior, memory coalescing, latency, and numerical stability. Always prefer a physical sub-component execution receipt.
+
 ## Witness contract
 
 A hardware claim is supported only by a run on a target that provides the required device

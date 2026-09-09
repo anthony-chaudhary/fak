@@ -16,6 +16,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
+const (
+	ReapCodePrestateUnknown = "REAP_PRESTATE_UNKNOWN"
+)
+
 func worktreeWorkerReap(argv []string) {
 	flags := flag.NewFlagSet("worktree worker reap", flag.ExitOnError)
 	worktree := flags.String("worktree", "", "the worker's managed worktree dir (single-worktree mode)")
@@ -52,8 +56,25 @@ func worktreeWorkerReap(argv []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), *maxWait)
 	defer cancel()
 	git := workerworktree.BoundedGitRunner(ctx)
-	finishLifecycle := beginAutomaticWIPLifecycleWithGit(repoRoot, "worker-reap", os.Stderr, git)
+	finishLifecycle, receipt, err := beginAutomaticWIPLifecycleWithGit(repoRoot, "worker-reap", os.Stderr, git)
 	defer finishLifecycle()
+	if err != nil || !receipt.Before.Known {
+		detail := ""
+		if err != nil {
+			detail = err.Error()
+		} else if receipt.Before.Error != "" {
+			detail = receipt.Before.Error
+		}
+		worktreeWorkerEmit(workerworktree.Result{
+			OK:        false,
+			Code:      ReapCodePrestateUnknown,
+			Path:      strings.TrimSpace(*worktree),
+			Preserved: true,
+			Reason:    "before lifecycle inventory could not be captured completely",
+			Detail:    detail,
+		})
+		os.Exit(1)
+	}
 	res := workerworktree.ReapChecked(repoRoot, strings.TrimSpace(*worktree), strings.TrimSpace(*supersededBy), git)
 	worktreeWorkerEmit(res)
 	if !res.OK {
