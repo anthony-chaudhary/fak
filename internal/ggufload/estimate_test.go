@@ -117,6 +117,40 @@ func TestEstimateF32LoadBytesCountsResidentExpansion(t *testing.T) {
 	}
 }
 
+func TestEstimateQ8LoadBytesCountsResidentQ8Expansion(t *testing.T) {
+	// Build a weight source with a 2D matmul tensor, a 2D embedding tensor, and a 1D norm tensor.
+	f := &File{
+		Metadata: map[string]Value{
+			"general.architecture": {Type: TypeString, Value: "qwen2"},
+			"qwen2.block_count":    {Type: TypeUint64, Value: uint64(1)},
+		},
+		Tensors: []TensorInfo{
+			{Name: "token_embd.weight", Dims: []uint64{1024, 256}, Type: TensorF32},   // 262,144 elems * 4 = 1,048,576 B (F32 embedding)
+			{Name: "blk.0.attn_q.weight", Dims: []uint64{256, 256}, Type: TensorQ2_K}, // 65,536 elems * 34 / 32 = 69,632 B (Q8 matmul)
+			{Name: "output_norm.weight", Dims: []uint64{256}, Type: TensorF32},         // 256 elems * 4 = 1,024 B (F32 norm)
+		},
+	}
+	ws, err := NewWeightSource(f, nil, 0)
+	if err != nil {
+		t.Fatalf("NewWeightSource: %v", err)
+	}
+	got, err := ws.EstimateQ8LoadBytes()
+	if err != nil {
+		t.Fatalf("EstimateQ8LoadBytes: %v", err)
+	}
+	want := int64(1048576 + 69632 + 1024)
+	if got != want {
+		t.Fatalf("EstimateQ8LoadBytes = %d, want %d", got, want)
+	}
+	plan, err := ws.EstimateQ8LoadMemoryPlan()
+	if err != nil {
+		t.Fatalf("EstimateQ8LoadMemoryPlan: %v", err)
+	}
+	if plan.Total() != got || len(plan) != 1 || plan[0].Class != compute.MemoryWeights || plan[0].Detail != "gguf-q8-load" || plan[0].DType != compute.Q8_0.String() {
+		t.Fatalf("q8 memory plan = %+v, want one weights demand totaling %d", plan, got)
+	}
+}
+
 func TestFitOnDeviceRefusesOversizeOnKnownCeiling(t *testing.T) {
 	ws := synthWeightSource(t) // needs 1638400 B
 	// A capacity-reporting backend whose 1 MiB budget is smaller than the 1.56 MiB model.

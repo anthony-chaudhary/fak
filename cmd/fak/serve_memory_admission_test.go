@@ -645,3 +645,29 @@ func TestLoadServeModelWithVulkanLeaseUsesExactBackendAndGGUF(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadLocalLauncherModelWithMetalLeaseRefusesExpandingQ8LoadOn36GBHost(t *testing.T) {
+	resDir := filepath.Join(t.TempDir(), "reservations")
+	leasePath := filepath.Join(t.TempDir(), "gpu.lease")
+	t.Setenv("FAK_RESERVATION_DIR", resDir)
+	t.Setenv("FAK_GPU_LEASE", leasePath)
+	t.Setenv("FAK_ADMISSION_POLICY", "dev")
+
+	udPath := filepath.Join(t.TempDir(), "qwen38-27b-ud-q2kxl.gguf")
+	writeSynth27BGGUF(t, udPath, true)
+
+	loads := 0
+	release, err := loadLocalLauncherModelWithMetalLease(true, udPath, gpulease.Options{}, func() {
+		loads++
+	})
+	if err == nil {
+		release()
+		t.Fatal("expected expanding Q8 load of 27B model to be refused before load on 36 GiB host, got success")
+	}
+	if loads != 0 {
+		t.Fatalf("loader must not be called on refusal, got %d loads", loads)
+	}
+	if !strings.Contains(err.Error(), "refused") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}

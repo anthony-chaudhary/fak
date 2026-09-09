@@ -333,6 +333,101 @@ func (s *WeightSource) EstimateF32LoadMemoryPlan() (compute.MemoryPlan, error) {
 	return compute.MemoryPlan{{Class: compute.MemoryWeights, Bytes: want, Detail: "gguf-f32-load", DType: compute.F32.String()}}, nil
 }
 
+func isGGUFMatmulWeight(name string) bool {
+	switch {
+	case strings.HasSuffix(name, ".attn_q.weight"),
+		strings.HasSuffix(name, ".attn_k.weight"),
+		strings.HasSuffix(name, ".attn_v.weight"),
+		strings.HasSuffix(name, ".attn_output.weight"),
+		strings.HasSuffix(name, ".ffn_gate.weight"),
+		strings.HasSuffix(name, ".ffn_up.weight"),
+		strings.HasSuffix(name, ".ffn_down.weight"),
+		strings.HasSuffix(name, ".attn_qkv.weight"),
+		strings.HasSuffix(name, ".attn_gate.weight"):
+		return true
+	}
+	return name == "output.weight"
+}
+
+// EstimateQ8LoadBytes reports the resident footprint of loading this GGUF through
+// LoadModelQuantProfile / QuantModelProfile. 2D matmul projection weights are quantized
+// to Q8_0 at ~1.0625 bytes/parameter (34/32 bytes per parameter), while unquantized
+// embedding tables and normalization tensors are retained as float32 (4 bytes/element).
+// If word embeddings are tied, the embedding table is held both as float32 and quantized
+// into Q8_0.
+func (s *WeightSource) EstimateQ8LoadBytes() (int64, error) {
+	var total uint64
+	cfg, cfgErr := s.File.Config()
+	for _, info := range s.File.Tensors {
+		if cfgErr == nil {
+			name, qwenMTPHandled := qwen35MTPMaterializationName(info.Name, cfg)
+			if qwenMTPHandled && name == "" {
+				continue
+			}
+			if !qwenMTPHandled && archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
+				continue
+			}
+		}
+
+		elems, err := tensorElems(info)
+		if err != nil {
+			return 0, fmt.Errorf("gguf: estimate q8 tensor %s: %w", info.Name, err)
+		}
+
+		var canon string
+		var ok bool
+		if cfgErr == nil {
+			canon, ok = CanonicalTensorNameArch(info.Name, cfg.ModelType)
+		}
+
+		batchedMoE := cfgErr == nil && archUsesGGUFBatchedMoEExperts(cfg.ModelType) &&
+			len(info.Dims) == 3 && strings.Contains(info.Name, "_exps.weight")
+
+		q8Weight := batchedMoE || (len(info.Dims) == 2 && ((ok && model.IsQuantWeight(canon)) || isGGUFMatmulWeight(info.Name)))
+
+		tiedEmbedding := cfgErr == nil && cfg.TieWordEmbeddings && len(info.Dims) == 2 &&
+			((ok && canon == "model.embed_tokens.weight") || info.Name == "token_embd.weight")
+
+		var tensorBytes uint64
+		if q8Weight || tiedEmbedding {
+			if elems > (math.MaxUint64-31)/34 {
+				return 0, fmt.Errorf("gguf: estimated q8 load bytes overflow uint64")
+			}
+			q8Bytes := (elems*34 + 31) / 32
+			tensorBytes += q8Bytes
+		}
+		if !q8Weight || tiedEmbedding {
+			if elems > math.MaxUint64/4 {
+				return 0, fmt.Errorf("gguf: estimated q8 f32 bytes overflow uint64")
+			}
+			f32Bytes := elems * 4
+			if tensorBytes > math.MaxUint64-f32Bytes {
+				return 0, fmt.Errorf("gguf: estimated q8 load bytes overflow uint64")
+			}
+			tensorBytes += f32Bytes
+		}
+
+		if total > math.MaxUint64-tensorBytes {
+			return 0, fmt.Errorf("gguf: estimated q8 load bytes overflow uint64")
+		}
+		total += tensorBytes
+	}
+	if total > math.MaxInt64 {
+		return 0, fmt.Errorf("gguf: estimated q8 load bytes %d overflow int64", total)
+	}
+	return int64(total), nil
+}
+
+// EstimateQ8LoadMemoryPlan is the classed form of EstimateQ8LoadBytes for the Q8
+// dequantization arm (LoadModelQuantProfile).
+func (s *WeightSource) EstimateQ8LoadMemoryPlan() (compute.MemoryPlan, error) {
+	want, err := s.EstimateQ8LoadBytes()
+	if err != nil {
+		return nil, err
+	}
+	return compute.MemoryPlan{{Class: compute.MemoryWeights, Bytes: want, Detail: "gguf-q8-load", DType: compute.Q8_0.String()}}, nil
+}
+
 // EstimateCPUOffloadExpertsMemoryPlan estimates the --cpu-offload-experts placement without
 // reading tensor payloads. Dense/router/attention tensors remain device-scoped weights; routed
 // and shared expert tensors are host-scoped offload bytes. The partition uses the same canonical
