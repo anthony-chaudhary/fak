@@ -256,3 +256,22 @@ func TestRunBenchSubagentPhysicalModeHumanOutputFailsClosed(t *testing.T) {
 		t.Fatalf("missing fail-closed diagnostic: %s", stderr.String())
 	}
 }
+
+func TestFrontpageDemoSubagentBenchCommand(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	args := []string{"subagent", "--concurrency=4"}
+	code := runBenchSubagent(&stdout, &stderr, args)
+	if code != 0 {
+		t.Fatalf("frontpage demo 'fak bench subagent --concurrency=4' failed: %d, stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Subagent Fan-Out Benchmark Receipt") {
+		t.Errorf("expected benchmark receipt header in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "shared_prefix_forked") {
+		t.Errorf("expected default scenario shared_prefix_forked in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Logit Cosine:        1.000000") {
+		t.Errorf("expected bit-exact logit cosine in output, got:\n%s", out)
+	}
+}

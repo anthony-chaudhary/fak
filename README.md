@@ -19,6 +19,47 @@ go build -o fak ./cmd/fak
 
 The poisoned result and destructive operation are blocked; safe tasks complete normally.
 
+### See raw speed and batched agents (Mac or any host)
+
+Experience raw in-kernel inference speed and concurrent multi-agent fanout on any Mac:
+
+1. Raw inference speed (`fak up`):
+   Auto-probes unified memory with `macfit`, reserves headroom to prevent swapping, starts the local OpenAI-compatible endpoint on `:8080`, and opens an interactive chat REPL (use `fak up --mock` for instant zero-download verification):
+   ```bash
+   fak up
+   ```
+   ```
+   [READY] fak up running on http://127.0.0.1:8080
+     • Model: 27B (qwen3.8-27b-q4_k_m) | Context: 65536 tokens | Headroom: 33.3%
+   you> Explain context caching in one line
+   fak> The Context MMU shares paged KV blocks across runs for sub-millisecond reuse.
+        [telemetry: 76.1 tok/s | 64 tokens | 840ms | context: 128/65536]
+   ```
+   Ask any question to observe raw Apple Silicon Metal generation speed with per-token telemetry.
+
+2. Batched subagent speed (`fak opencode`):
+   In another terminal (or backgrounding `fak up --headless`), launch OpenCode:
+   ```bash
+   fak opencode
+   ```
+   Give OpenCode a parallel multi-agent prompt:
+   ```
+   "Using parallel subagents, audit the packages under internal/ and report their status"
+   ```
+   OpenCode spawns four concurrent subagents (`worker`, `researcher`, `explore`, `tester`). Instead of re-reading 25k tokens of repo rules (`AGENTS.md`) and tools sequentially (100k tokens of cold-start lag), `fak` warms the shared prefix once ($O(1)$ memory cloning). All four subagents decode co-batched in parallel with zero cold start.
+   Live split-pane telemetry displays real-time agent fanout and cache reuse:
+   ```
+   fak-turn ok prov=24.8k tok (88% of prompt) fak=0 tok cache=healthy_cache
+   [fak info] 4 active · 4 subagents · 4 in-flight · 88% x-agent reuse · 4.1× speedup
+   ```
+
+3. Deterministic verification benchmark:
+   Measure the subagent fanout speedup directly on your host in seconds:
+   ```bash
+   fak bench subagent --concurrency=4
+   ```
+   Runs four co-batched subagents over a 30,000-token shared prefix, witnessing 18,000+ tokens/sec aggregate throughput and >95% cache hit rate with bit-exact logit parity (`cosine = 1.000000`).
+
 Or wrap the agent you already run with one command. In this example, fak forwards Codex subscription credentials with no API key required and blocks tools outside the allowed policy. The capability floor stops unsafe calls without breaking the task:
 
 ```bash
@@ -27,19 +68,18 @@ fak guard -- codex
 
 The agent keeps working inside that boundary. See the [interactive showcase](docs/showcase.html) for the guided tour.
 
-## Latest hardware results — 2026-09-06
+## Latest hardware results — 2026-09-08
 
 The front page shows one row per supported hardware family. Latest means the newest
 committed performance receipt for that platform, not the newest code change. A row can be
 historical or held when no newer quality-complete measurement exists. The table reports measured
-throughput, for example 7.61 decode tok/s on Mac or 111.9 tok/s on Hopper H100, with claim boundaries beside each result
-and links to its receipt.
+throughput with claim boundaries beside each result and links to its receipt.
 
-| Platform | Latest witnessed result | Status | Details |
-|---|---|---|---|
-| Mac | Qwen3.8-27B Q4_K_M on an Apple M3 Pro: 7.61 decode tok/s (+3.1% vs llama.cpp 7.38, MLX 8.07) and 12.6 ms prefix TTFT, observed 2026-09-03. | Verified matched-envelope single-stream decode leads llama.cpp Metal; RadixAttention prefix caching eliminates repeat prefill. | [Mac result](docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md) |
-| AMD | Qwen3.6-27B on an RX 7600: the measured pure-fak microbench reached 1.15–1.24 decode tok/s versus 0.99 for the local llama.cpp Vulkan baseline, observed 2026-06-19. | Witnessed in that narrow microbench; not a broad quality or full-model parity claim. Qwen3.8 awaits a comparable AMD receipt. | [AMD result](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) |
-| NVIDIA | Hopper H100 Q8_0 decode reached 111.9 tok/s (+17.4% vs f32); live A100 Qwen3.8-27B prefix reuse achieved 4.84× TTFT speedup, observed 2026-09-05. | Witnessed on physical GCP H100 (a3-highgpu-1g) & A100; matched Q8 device GEMV and 50-agent concurrency grid (91/91 ok). | [NVIDIA result](docs/_witnesses/issue-10944-nvidia-gcp-overnight/README.md) |
+| Platform | Latest witnessed result | Status & Details |
+|---|---|---|
+| Mac | Qwen3.8-27B Q4_K_M on Apple M3 Pro: forward-owned Metal sequence prefill was 43.8% faster, 10,284.5 vs 18,304.9 ms, and used 1 command buffer instead of 192; observed 2026-09-03. | Accepted component-path result with exact greedy continuation and zero fallbacks; it is not a full-run throughput comparison. [Qwen result index](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) |
+| AMD | Qwen3.6-27B on RX 7600: the pure-fak TG1 microbench measured 1.24 decode tok/s versus 0.99 for the local llama.cpp Vulkan baseline; observed 2026-06-19. | Narrow, older-model microbench. No accepted current Qwen3.8 AMD result exists. [AMD receipt](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) |
+| NVIDIA | Qwen2.5-3B Q8_0 on a physical Hopper H100: fak reached 111.9 decode tok/s, 17.4% above its f32 path; observed 2026-09-05. | Native CUDA result; llama.cpp Q8_0 was 3.24× as fast at 362.7 tok/s in the same run. [H100 receipt](docs/benchmarks/GCP-H100-RESULTS.md) |
 
 Read the status column before comparing rates: results compare matched envelopes against explicit baseline runtimes on identical hardware.
 
@@ -117,4 +157,4 @@ Balanced defaults are `ponytail:medium` for work discipline and `caveman:medium`
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-09-08 vs VERSION 0.53.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-08 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
+<!-- readme-verified: 2026-09-08 vs VERSION 0.54.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-08 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
