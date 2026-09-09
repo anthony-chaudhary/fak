@@ -54,9 +54,13 @@ type InKernelPlanner struct {
 	// given a grade — leaves placement exactly as cpuOffloadExperts alone decided it. Resolved once
 	// by SetExpertSpill (inkernel_expert_spill.go), never per request.
 	expertSpill *model.ExpertSpillPlacement
-	maxNew      int
-	temp        float64
-	seed        int64
+	// contextTokens is the operator-configured runtime ceiling. Zero delegates to
+	// the loaded model's declared MaxPositionEmbeddings; ContextWindow resolves
+	// the effective bound shared by request admission and model discovery.
+	contextTokens int
+	maxNew        int
+	temp          float64
+	seed          int64
 	// decodeTraceNow is an injectable monotonic clock used only by explicitly
 	// traced requests. nil selects time.Now; the default path never reads it.
 	decodeTraceNow func() time.Time
@@ -1362,6 +1366,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	chat := renderInKernelChatMLRequest(messages, tools, p.m.Cfg, sp.ResponseFormat, sp.ToolChoice, sp)
 	ids, err := p.tok.Encode(chat)
 	if err != nil {
+		return nil, err
+	}
+	if err := p.refuseContextLength(len(ids), maxNew); err != nil {
 		return nil, err
 	}
 	stops := StopIDs(p.tok, p.m.Cfg)

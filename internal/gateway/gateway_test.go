@@ -168,9 +168,9 @@ func TestBuildCall_StampsRedactedArgsLabel(t *testing.T) {
 
 func TestRenderVerdict(t *testing.T) {
 	cases := []struct {
-		name   string
-		v      abi.Verdict
-		meta   map[string]string
+		name    string
+		v       abi.Verdict
+		meta    map[string]string
 		kind    string
 		reason  string
 		disp    string
@@ -444,8 +444,10 @@ func TestHTTPModelsAndHealth(t *testing.T) {
 		t.Errorf("/v1/models Codex catalog = %+v", models.Models)
 	} else if models.Models[0].BaseInstructions != "" || models.Models[0].Priority != 0 || models.Models[0].ReasoningSummaries || models.Models[0].Verbosity {
 		t.Errorf("/v1/models Codex metadata = %+v", models.Models[0])
-	} else if models.Models[0].TruncationPolicy.Mode != "tokens" || models.Models[0].TruncationPolicy.Limit <= 0 || models.Models[0].ContextWindow <= 0 {
+	} else if models.Models[0].TruncationPolicy.Mode != "tokens" || models.Models[0].TruncationPolicy.Limit <= 0 {
 		t.Errorf("/v1/models Codex limits = %+v", models.Models[0])
+	} else if models.Models[0].ContextWindow != 0 {
+		t.Errorf("/v1/models fabricated unknown mock context_window = %d", models.Models[0].ContextWindow)
 	}
 	var health map[string]any
 	getJSON(t, ts.URL+"/healthz", &health)

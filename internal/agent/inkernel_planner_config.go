@@ -27,6 +27,10 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 // InKernelPlannerConfig carries settings that must be fixed at planner construction.
 // Empty/zero fields preserve NewInKernelPlanner's historical defaults.
 type InKernelPlannerConfig struct {
+	// ContextTokens caps the total prompt plus planned decode positions accepted by
+	// this planner. Zero uses the model's declared context window; when both are
+	// known, the smaller bound wins.
+	ContextTokens int
 	// CPUCacheBytes caps retained native CPU KV payload; zero uses the environment.
 	CPUCacheBytes             int64
 	CPUOffloadExperts         bool
@@ -51,6 +55,7 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 		backend:                      backend,
 		metal:                        metal,
 		cpuOffloadExperts:            cfg.CPUOffloadExperts,
+		contextTokens:                cfg.ContextTokens,
 		denseGPULayers:               cfg.DenseGPULayers,
 		maxNew:                       envInt("FAK_INKERNEL_MAX_TOKENS", 256),
 		temp:                         envFloat("FAK_INKERNEL_TEMP", 0),
@@ -122,6 +127,7 @@ func (p *InKernelPlanner) RuntimeConfig() InKernelPlannerConfig {
 		cpuBytes = p.tree.CPUCacheByteBudget()
 	}
 	return InKernelPlannerConfig{
+		ContextTokens:             p.contextTokens,
 		CPUCacheBytes:             cpuBytes,
 		CPUOffloadExperts:         p.cpuOffloadExperts,
 		QwenQ4KPrefillChunkTokens: p.qwenQ4KPrefillChunkTokens,

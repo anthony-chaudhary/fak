@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/session"
 )
@@ -47,13 +48,29 @@ func codexServiceTierCatalog(rows []map[string]string) []codexServiceTier {
 	return catalog
 }
 
+func modelCatalogRow(id, owner string, contextWindow int) map[string]any {
+	row := map[string]any{"id": id, "object": "model", "owned_by": owner}
+	if contextWindow > 0 {
+		row["context_length"] = contextWindow
+	}
+	return row
+}
+
+func inKernelContextWindow(planner agent.Planner) int {
+	p, ok := planner.(*agent.InKernelPlanner)
+	if !ok || p == nil {
+		return 0
+	}
+	return p.ContextWindow()
+}
+
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
-	data := []map[string]any{{"id": s.model, "object": "model", "owned_by": "fak"}}
+	data := []map[string]any{modelCatalogRow(s.model, "fak", inKernelContextWindow(s.planner))}
 	// Dual mode (local model alongside the API upstream): advertise the in-kernel
 	// model's id too, so an OpenAI-wire client can DISCOVER the local side instead of
 	// needing out-of-band knowledge of the alias.
 	if d, ok := s.planner.(*DualPlanner); ok {
-		data = append(data, map[string]any{"id": d.LocalModelID(), "object": "model", "owned_by": "fak"})
+		data = append(data, modelCatalogRow(d.LocalModelID(), "fak", inKernelContextWindow(d.Local())))
 	}
 	if s.roster != nil {
 		seen := make(map[string]struct{}, len(data)+len(s.roster.Bindings))
@@ -93,7 +110,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		if id == "" {
 			continue
 		}
-		codexModels = append(codexModels, map[string]any{
+		catalogRow := map[string]any{
 			"slug":                    id,
 			"display_name":            id,
 			"description":             "fak gateway model",
@@ -116,8 +133,6 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			"truncation_policy":                map[string]any{"mode": "tokens", "limit": 10000},
 			"supports_parallel_tool_calls":     true,
 			"supports_image_detail_original":   false,
-			"context_window":                   272000,
-			"max_context_window":               272000,
 			"comp_hash":                        "fak",
 			"effective_context_window_percent": 95,
 			"experimental_supported_tools":     []string{},
@@ -128,7 +143,12 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			"additional_speed_tiers":           tiers,
 			"service_tiers":                    tierCatalog,
 			"availability_nux":                 nil,
-		})
+		}
+		if contextWindow, ok := row["context_length"].(int); ok && contextWindow > 0 {
+			catalogRow["context_window"] = contextWindow
+			catalogRow["max_context_window"] = contextWindow
+		}
+		codexModels = append(codexModels, catalogRow)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"object": "list",
