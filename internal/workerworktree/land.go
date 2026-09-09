@@ -732,7 +732,7 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 			disambiguation, valid = verifyAppliedDisambiguation(root, wtPath, treeSHA)
 			finishAnalysis()
 			if !valid {
-				return isolatedLandReconciliationResult(wtPath, Result{Path: root, Reason: "post-apply disambiguation invariant failed", Detail: disambiguation.compactDetail(), Disambiguation: disambiguation}), true
+				return isolatedLandReconciliationResult(wtPath, Result{Reason: "post-apply disambiguation invariant failed", Detail: disambiguation.compactDetail(), Disambiguation: disambiguation}), true
 			}
 		}
 		finishCommit := beginLandPhase(tracker, "commit-construction", attempt)

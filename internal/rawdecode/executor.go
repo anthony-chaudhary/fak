@@ -8,6 +8,7 @@ package rawdecode
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -85,7 +86,7 @@ type CPUVerification struct {
 // GenerationObservation is an opaque account of the token-generation boundary
 // observed by the real decode loop. Its state cannot be populated by callers;
 // zero values are unavailable. It authenticates generation policy and accepted
-// token IDs only; exported timing fields remain diagnostic observations.
+// token IDs only; timing/resource authority has its own opaque observation.
 type GenerationObservation struct {
 	observed       bool
 	executionSeal  *generationExecutionSeal
@@ -93,6 +94,50 @@ type GenerationObservation struct {
 	ignoreEOS      bool
 	eosStopped     bool
 	outputTokenIDs []int
+}
+
+// TimingObservation is an opaque account of the five timed phases and backend
+// resource window observed around one real repetition. It is software evidence
+// only: it grants no receipt, hardware, performance, comparison, or win credit.
+type TimingObservation struct {
+	observed         bool
+	executionSeal    *generationExecutionSeal
+	repetition       int
+	boundaries       [6]time.Time
+	backendExecution compute.BackendExecutionObservation
+}
+
+// SessionSetupDuration reports the runner-observed candidate-session setup.
+func (o TimingObservation) SessionSetupDuration() time.Duration {
+	return o.boundaries[1].Sub(o.boundaries[0])
+}
+
+// PrefillDuration reports the runner-observed prompt prefill.
+func (o TimingObservation) PrefillDuration() time.Duration {
+	return o.boundaries[2].Sub(o.boundaries[1])
+}
+
+// FirstSampleDuration reports the runner-observed first greedy selection.
+func (o TimingObservation) FirstSampleDuration() time.Duration {
+	return o.boundaries[3].Sub(o.boundaries[2])
+}
+
+// DecodeDuration reports the runner-observed remaining decode loop.
+func (o TimingObservation) DecodeDuration() time.Duration {
+	return o.boundaries[4].Sub(o.boundaries[3])
+}
+
+// TeardownDuration reports the runner-observed candidate-session teardown.
+func (o TimingObservation) TeardownDuration() time.Duration {
+	return o.boundaries[5].Sub(o.boundaries[4])
+}
+
+// BackendExecution returns the complete backend-owned resource window.
+func (o TimingObservation) BackendExecution() (compute.BackendExecutionObservation, bool) {
+	if !o.observed {
+		return compute.BackendExecutionObservation{}, false
+	}
+	return o.backendExecution, true
 }
 
 type generationExecutionSeal struct {
@@ -107,6 +152,8 @@ type generationExecutionBinding struct {
 	generatedLimit        int
 	ignoreEOS             bool
 	modelName             string
+	modelConfigSHA256     [sha256.Size]byte
+	modelConfigValid      bool
 	artifactPath          string
 	artifactSHA256        string
 	tensorInventorySHA256 string
@@ -148,6 +195,7 @@ type Run struct {
 	GeneratedTokens      []int
 	EOSStopped           bool
 	generation           GenerationObservation
+	timing               TimingObservation
 	Steps                []Step
 	CPUVerification      *CPUVerification
 	BackendExecution     *compute.BackendExecutionObservation
@@ -206,10 +254,11 @@ type Execution struct {
 }
 
 func generationBinding(execution Execution) generationExecutionBinding {
+	modelConfigSHA256, modelConfigValid := modelConfigDigest(execution.ModelConfig)
 	return generationExecutionBinding{
 		promptTokenIDs: slices.Clone(execution.PromptTokenIDs), contextLimit: execution.ContextLimit,
 		generatedLimit: execution.GeneratedLimit, ignoreEOS: execution.IgnoreEOS,
-		modelName: execution.ModelName, artifactPath: execution.ArtifactPath,
+		modelName: execution.ModelName, modelConfigSHA256: modelConfigSHA256, modelConfigValid: modelConfigValid, artifactPath: execution.ArtifactPath,
 		artifactSHA256: execution.ArtifactSHA256, tensorInventorySHA256: execution.TensorInventorySHA256,
 		tokenizerSHA256: execution.TokenizerSHA256, templateSHA256: execution.TemplateSHA256,
 		quantization: execution.Quantization,
@@ -217,12 +266,42 @@ func generationBinding(execution Execution) generationExecutionBinding {
 }
 
 func (binding generationExecutionBinding) matches(execution Execution) bool {
+	modelConfigSHA256, modelConfigValid := modelConfigDigest(execution.ModelConfig)
 	return slices.Equal(binding.promptTokenIDs, execution.PromptTokenIDs) &&
 		binding.contextLimit == execution.ContextLimit && binding.generatedLimit == execution.GeneratedLimit &&
 		binding.ignoreEOS == execution.IgnoreEOS && binding.modelName == execution.ModelName &&
+		binding.modelConfigValid && modelConfigValid && binding.modelConfigSHA256 == modelConfigSHA256 &&
 		binding.artifactPath == execution.ArtifactPath && binding.artifactSHA256 == execution.ArtifactSHA256 &&
 		binding.tensorInventorySHA256 == execution.TensorInventorySHA256 && binding.tokenizerSHA256 == execution.TokenizerSHA256 &&
 		binding.templateSHA256 == execution.TemplateSHA256 && binding.quantization == execution.Quantization
+}
+
+func modelConfigDigest(config model.Config) ([sha256.Size]byte, bool) {
+	// residualHook is intentionally unexported and callback identity has no
+	// stable content representation. An enabled hook can change execution, so
+	// refuse authority instead of binding a process-local function address.
+	if config.EnableResidualHook {
+		return [sha256.Size]byte{}, false
+	}
+	// Config's JSON form is content-canonical for its string-keyed maps and
+	// dereferences nested pointers. Include the five intentionally JSON-hidden
+	// model-identity fields explicitly so the seal covers the complete config.
+	canonical, err := json.Marshal(struct {
+		Config        model.Config        `json:"config"`
+		GLM5Next      bool                `json:"glm5_next"`
+		Name          string              `json:"name"`
+		EOSTokenID    int                 `json:"eos_token_id"`
+		EOSTokenIDs   []int               `json:"eos_token_ids"`
+		BlockTopology model.BlockTopology `json:"block_topology"`
+	}{
+		Config: config, GLM5Next: config.GLM5Next, Name: config.Name,
+		EOSTokenID: config.EOSTokenID, EOSTokenIDs: config.EOSTokenIDs,
+		BlockTopology: config.BlockTopology,
+	})
+	if err != nil {
+		return [sha256.Size]byte{}, false
+	}
+	return sha256.Sum256(canonical), true
 }
 
 func (execution *Execution) sealGenerationBinding() {
@@ -259,6 +338,59 @@ func (execution Execution) GenerationObservation(repetition int) (GenerationObse
 		}
 	}
 	return observed, true
+}
+
+// TimingObservation returns the runner-owned timing/resource observation for
+// one exact repetition after validating its execution seal, ordinal, public
+// aliases, monotonic boundaries, and complete backend resource window.
+func (execution Execution) TimingObservation(repetition int) (TimingObservation, bool) {
+	if _, ok := execution.GenerationObservation(repetition); !ok {
+		return TimingObservation{}, false
+	}
+	seal := execution.generationSeal
+	run := execution.Runs[repetition]
+	observed := run.timing
+	if !observed.observed || observed.executionSeal != seal || observed.repetition != repetition ||
+		execution.Backend.Selected != observed.backendExecution.Identity.Backend ||
+		!monotonicTimingBoundaries(observed.boundaries) || !completeBackendExecutionObservation(observed.backendExecution) {
+		return TimingObservation{}, false
+	}
+	if run.SessionSetupDuration != observed.SessionSetupDuration() || run.PrefillDuration != observed.PrefillDuration() ||
+		run.FirstSampleDuration != observed.FirstSampleDuration() || run.DecodeDuration != observed.DecodeDuration() ||
+		run.TeardownDuration != observed.TeardownDuration() || run.BackendExecution == nil || *run.BackendExecution != observed.backendExecution {
+		return TimingObservation{}, false
+	}
+	return observed, true
+}
+
+func monotonicTimingBoundaries(boundaries [6]time.Time) bool {
+	if boundaries[0].IsZero() {
+		return false
+	}
+	for i := 1; i < len(boundaries); i++ {
+		if boundaries[i].IsZero() || boundaries[i].Before(boundaries[i-1]) {
+			return false
+		}
+	}
+	return true
+}
+
+func completeBackendExecutionObservation(observed compute.BackendExecutionObservation) bool {
+	identity := observed.Identity
+	if strings.TrimSpace(identity.Backend) == "" || strings.TrimSpace(identity.Device) == "" ||
+		strings.TrimSpace(identity.Driver) == "" || strings.TrimSpace(identity.Runtime) == "" ||
+		!observed.TransferCountersObserved || !observed.DeviceAllocationObserved ||
+		observed.DeviceAllocationPeakBytes < observed.DeviceAllocationLiveBytes {
+		return false
+	}
+	counters := observed.Counters
+	if (counters.H2DCount == 0) != (counters.H2DBytes == 0) ||
+		(counters.D2HCount == 0) != (counters.D2HBytes == 0) ||
+		(counters.D2DCopies == 0) != (counters.D2DBytes == 0) {
+		return false
+	}
+	return !observed.DeviceMemoryObserved ||
+		observed.DeviceMemoryTotalBytes > 0 && observed.DeviceMemoryFreeBytes <= observed.DeviceMemoryTotalBytes
 }
 
 // BindQwen38VulkanSelectedTokenLogprobsV3 binds runner-owned selected-token
@@ -752,32 +884,35 @@ func executeLoaded(ctx context.Context, req Request, m loadedModel, be compute.B
 	}
 	var verifyErr error
 	for rep := 0; rep < req.Repetitions; rep++ {
-		before, observed, err := compute.CaptureBackendExecutionSnapshot(be)
+		window, windowAvailable, err := compute.BeginBackendExecutionObservation(be)
 		if err != nil {
-			return Execution{}, fmt.Errorf("raw decode: capture backend observation before run %d: %w", rep+1, err)
+			return Execution{}, fmt.Errorf("raw decode: begin backend observation for run %d: %w", rep+1, err)
 		}
-		run, selectedTokenLogprobs, err := executeRun(req, m, be, generationSeal, rep, now, since)
-		if err != nil {
-			return Execution{}, err
-		}
-		if observed {
-			after, stillObserved, err := compute.CaptureBackendExecutionSnapshot(be)
-			if err != nil {
-				return Execution{}, fmt.Errorf("raw decode: capture backend observation after run %d: %w", rep+1, err)
-			}
-			if !stillObserved {
-				return Execution{}, fmt.Errorf("raw decode: backend observation became unavailable after run %d", rep+1)
-			}
-			delta, err := compute.BackendExecutionDelta(before, after)
-			if err != nil {
-				return Execution{}, fmt.Errorf("raw decode: backend observation for run %d: %w", rep+1, err)
-			}
-			run.BackendExecution = &delta
-			if observeHost != nil && delta.Identity.Backend == "vulkan" {
-				host, hostErr := observeHost(ctx, be)
-				if hostErr == nil && rawDecodeHostMatchesBackend(host, delta.Identity) {
-					run.HostEnvironment = &host
+		run, selectedTokenLogprobs, runErr := executeRun(req, m, be, generationSeal, rep, now, since)
+		if windowAvailable {
+			backendExecution, endErr := window.End()
+			if runErr != nil {
+				if endErr != nil {
+					return Execution{}, errors.Join(runErr, fmt.Errorf("raw decode: end backend observation for run %d: %w", rep+1, endErr))
 				}
+				return Execution{}, runErr
+			}
+			if endErr != nil {
+				return Execution{}, fmt.Errorf("raw decode: end backend observation for run %d: %w", rep+1, endErr)
+			}
+			if !completeBackendExecutionObservation(backendExecution) || backendExecution.Identity.Backend != be.Name() {
+				return Execution{}, fmt.Errorf("raw decode: backend observation for run %d is incomplete or malformed", rep+1)
+			}
+			run.BackendExecution = &backendExecution
+			run.timing.backendExecution = backendExecution
+			run.timing.observed = true
+		} else if runErr != nil {
+			return Execution{}, runErr
+		}
+		if run.BackendExecution != nil && observeHost != nil && run.BackendExecution.Identity.Backend == "vulkan" {
+			host, hostErr := observeHost(ctx, be)
+			if hostErr == nil && rawDecodeHostMatchesBackend(host, run.BackendExecution.Identity) {
+				run.HostEnvironment = &host
 			}
 		}
 		exec.Runs = append(exec.Runs, run)
@@ -917,11 +1052,20 @@ func executeRun(req Request, m loadedModel, be compute.Backend, executionSeal *g
 	decoded := now()
 	s.Close()
 	closed := now()
-	run.SessionSetupDuration = setupDone.Sub(start)
-	run.PrefillDuration = prefillDone.Sub(setupDone)
-	run.FirstSampleDuration = sampled.Sub(prefillDone)
-	run.DecodeDuration = decoded.Sub(sampled)
-	run.TeardownDuration = closed.Sub(decoded)
+	boundaries := [6]time.Time{start, setupDone, prefillDone, sampled, decoded, closed}
+	if !monotonicTimingBoundaries(boundaries) {
+		return Run{}, nil, errors.New("raw decode: timing clock regressed during repetition")
+	}
+	run.timing = TimingObservation{
+		executionSeal: executionSeal,
+		repetition:    repetition,
+		boundaries:    boundaries,
+	}
+	run.SessionSetupDuration = run.timing.SessionSetupDuration()
+	run.PrefillDuration = run.timing.PrefillDuration()
+	run.FirstSampleDuration = run.timing.FirstSampleDuration()
+	run.DecodeDuration = run.timing.DecodeDuration()
+	run.TeardownDuration = run.timing.TeardownDuration()
 	if req.VerifyCPU {
 		verifyStart := now()
 		verification, err := verifyCPU(req, m.NewCPUSession(req), run, candidateLogits)
