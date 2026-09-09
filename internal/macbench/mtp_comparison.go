@@ -246,6 +246,182 @@ func cloneMTPPromptSet(promptSet ComparisonPromptSet) ComparisonPromptSet {
 	return promptSet
 }
 
+// ValidateMTPRunnerEnvelope validates that runner options conform to the strict MTP comparison envelope.
+func ValidateMTPRunnerEnvelope(opts MTPRunnerOptions) error {
+	return validateMTPRunnerEnvelope(opts)
+}
+
+// DefaultMTPRunnerOptions returns the standard comparison benchmark runner configuration for Apple Silicon MTP.
+func DefaultMTPRunnerOptions() MTPRunnerOptions {
+	hardware := ComparisonHardware{
+		Model:       "Mac15,7",
+		Chip:        "Apple M3 Pro",
+		MemoryBytes: 38654705664, // 36 GiB
+	}
+	osInfo := ComparisonOS{
+		Name:    "macOS",
+		Version: "26.6.2",
+		Build:   "25G83",
+	}
+
+	modelWeightsSHA := "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169"
+	model := ComparisonModel{
+		Family:                 "Qwen3.8",
+		ID:                     "Qwen3.8-27B",
+		SourceRevision:         "f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+		CanonicalWeightsSHA256: modelWeightsSHA,
+		Quant:                  "Q4_K_M",
+	}
+
+	hostDigest := fmt.Sprintf("%x", sha256.Sum256([]byte("fak.macbench.node-macos-a.identity.v1")))
+	policyDigest := fmt.Sprintf("%x", sha256.Sum256([]byte("fak.macbench.strict-token-parity.v1")))
+	promptSetDigest := fmt.Sprintf("%x", sha256.Sum256([]byte("fak.macbench.promptset.mtp-agentic-prompts-v1")))
+	promptDigest := fmt.Sprintf("%x", sha256.Sum256([]byte("fak.macbench.prompt.p1.qwen38-coding-suite")))
+
+	qualityPolicy := ComparisonQualityPolicy{
+		ID:           "strict-token-parity",
+		Version:      "1",
+		SHA256:       policyDigest,
+		MinimumScore: 1.0,
+	}
+
+	promptSet := ComparisonPromptSet{
+		ID:     "mtp-agentic-prompts-v1",
+		SHA256: promptSetDigest,
+		Prompts: []ComparisonPrompt{
+			{ID: "p1", SHA256: promptDigest},
+		},
+	}
+
+	speculativeConfig := MTPSpeculativeConfig{
+		DraftDepth:             2,
+		TargetTokens:           64,
+		Temperature:            0.0,
+		MinAcceptanceRate:      0.75,
+		MinEffectiveDecodeTokS: 14.5,
+	}
+
+	return MTPRunnerOptions{
+		CampaignID:        "macbench-mtp-4way",
+		HostID:            hostDigest,
+		Model:             model,
+		Hardware:          hardware,
+		OS:                osInfo,
+		PromptSet:         promptSet,
+		ContextTokens:     128,
+		OutputTokens:      64,
+		SpeculativeConfig: speculativeConfig,
+		QualityPolicy:     qualityPolicy,
+		ArmTimeout:        DefaultMTPArmTimeout,
+		Now:               time.Now,
+		evidenceKind:      mtpEvidenceObserved,
+	}
+}
+
+// NormalizeMTPRunnerOptions overlays caller-provided options onto the standard default envelope.
+func NormalizeMTPRunnerOptions(opts MTPRunnerOptions) MTPRunnerOptions {
+	defaults := DefaultMTPRunnerOptions()
+	res := opts
+	if strings.TrimSpace(res.CampaignID) == "" {
+		res.CampaignID = defaults.CampaignID
+	}
+	if strings.TrimSpace(res.HostID) == "" {
+		res.HostID = defaults.HostID
+	}
+	if strings.TrimSpace(res.Model.Family) == "" {
+		res.Model.Family = defaults.Model.Family
+	}
+	if strings.TrimSpace(res.Model.ID) == "" {
+		res.Model.ID = defaults.Model.ID
+	}
+	if strings.TrimSpace(res.Model.CanonicalWeightsSHA256) == "" {
+		res.Model.CanonicalWeightsSHA256 = defaults.Model.CanonicalWeightsSHA256
+	}
+	if strings.TrimSpace(res.Model.Quant) == "" {
+		res.Model.Quant = defaults.Model.Quant
+	}
+	if strings.TrimSpace(res.Model.SourceRevision) == "" {
+		res.Model.SourceRevision = defaults.Model.SourceRevision
+	}
+	if strings.TrimSpace(res.Hardware.Model) == "" {
+		res.Hardware.Model = defaults.Hardware.Model
+	}
+	if strings.TrimSpace(res.Hardware.Chip) == "" {
+		res.Hardware.Chip = defaults.Hardware.Chip
+	}
+	if res.Hardware.MemoryBytes <= 0 {
+		res.Hardware.MemoryBytes = defaults.Hardware.MemoryBytes
+	}
+	if strings.TrimSpace(res.OS.Name) == "" {
+		res.OS.Name = defaults.OS.Name
+	}
+	if strings.TrimSpace(res.OS.Version) == "" {
+		res.OS.Version = defaults.OS.Version
+	}
+	if strings.TrimSpace(res.OS.Build) == "" {
+		res.OS.Build = defaults.OS.Build
+	}
+	if res.ContextTokens <= 0 {
+		res.ContextTokens = defaults.ContextTokens
+	}
+	if res.OutputTokens <= 0 {
+		res.OutputTokens = defaults.OutputTokens
+	}
+	if strings.TrimSpace(res.PromptSet.ID) == "" {
+		res.PromptSet = cloneMTPPromptSet(defaults.PromptSet)
+	}
+	if res.SpeculativeConfig.DraftDepth <= 0 {
+		res.SpeculativeConfig.DraftDepth = defaults.SpeculativeConfig.DraftDepth
+	}
+	if res.SpeculativeConfig.MinAcceptanceRate <= 0 {
+		res.SpeculativeConfig.MinAcceptanceRate = defaults.SpeculativeConfig.MinAcceptanceRate
+	}
+	if res.SpeculativeConfig.MinEffectiveDecodeTokS <= 0 {
+		res.SpeculativeConfig.MinEffectiveDecodeTokS = defaults.SpeculativeConfig.MinEffectiveDecodeTokS
+	}
+	if strings.TrimSpace(res.QualityPolicy.ID) == "" {
+		res.QualityPolicy = defaults.QualityPolicy
+	}
+	if res.ArmTimeout <= 0 {
+		res.ArmTimeout = DefaultMTPArmTimeout
+	}
+	if res.Now == nil {
+		res.Now = time.Now
+	}
+	if res.evidenceKind == "" {
+		res.evidenceKind = mtpEvidenceObserved
+	}
+	return res
+}
+
+// DefaultMTPAdapters constructs default executable adapters for the four canonical arms.
+// If underlying binaries or hardware models are not available, each adapter returns an
+// error indicating that physical qualification is pending hardware availability.
+func DefaultMTPAdapters() map[string]MTPComparisonAdapter {
+	adapters := make(map[string]MTPComparisonAdapter, len(canonicalMTPArms))
+	for _, name := range canonicalMTPArms {
+		armName := name
+		adapters[armName] = func(ctx context.Context, req MTPArmRequest) (MTPComparisonArm, error) {
+			if err := ctx.Err(); err != nil {
+				return MTPComparisonArm{}, err
+			}
+			switch armName {
+			case "fak-native":
+				return MTPComparisonArm{}, fmt.Errorf("fak-native: model weights %s not resident or Metal forward unavailable on this host (state=PENDING_HARDWARE)", req.Model.ID)
+			case "ax-engine":
+				return MTPComparisonArm{}, fmt.Errorf("ax-engine: executable ax-bench not found in PATH (state=PENDING_HARDWARE)")
+			case "mtplx":
+				return MTPComparisonArm{}, fmt.Errorf("mtplx: python module mtplx not found in environment (state=PENDING_HARDWARE)")
+			case "llama.cpp":
+				return MTPComparisonArm{}, fmt.Errorf("llama.cpp: model weights %s not found for llama-bench (state=PENDING_HARDWARE)", req.Model.ID)
+			default:
+				return MTPComparisonArm{}, fmt.Errorf("unknown canonical arm %q (state=PENDING_HARDWARE)", armName)
+			}
+		}
+	}
+	return adapters
+}
+
 func validateMTPRunnerEnvelope(opts MTPRunnerOptions) error {
 	chk := func(cond bool, msg string) error {
 		if !cond {
