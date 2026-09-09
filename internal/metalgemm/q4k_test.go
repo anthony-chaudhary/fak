@@ -393,7 +393,7 @@ func TestQ6KNoCopyResidency(t *testing.T) {
 	aligned := backing[offset : offset+need]
 	copy(aligned, q6kTestRaw(out, in, 0x12664))
 
-	w := UploadQ6K(aligned, out, in)
+	w := UploadQ6KGoOwned(aligned, out, in)
 	if w == nil || w.shared == nil || !w.shared.noCopy {
 		t.Fatalf("aligned UploadQ6K = %#v, want no-copy residency", w)
 	}
@@ -444,7 +444,7 @@ func TestQ6KNoCopyResidency(t *testing.T) {
 	}
 	copied.Release()
 
-	resetWeight := UploadQ6K(aligned, out, in)
+	resetWeight := UploadQ6KGoOwned(aligned, out, in)
 	if resetWeight == nil || resetWeight.shared == nil || !resetWeight.shared.noCopy {
 		t.Fatalf("reset-path UploadQ6K = %#v, want no-copy residency", resetWeight)
 	}

@@ -652,6 +652,13 @@ func q6kWeightValidLocked(w *Q6KWeight) bool {
 		w.shared.refs > 0 && w.shared.epoch == q6kRegistryEpoch
 }
 
+// UploadQ6KGoOwned uploads a Go-heap-owned Q6_K payload. The raw backing MUST belong to the Go
+// heap and MUST NOT be mutated while this handle or any handle returned by Share remains live.
+// External mmap and other borrowed memory must use UploadQ6K.
+func UploadQ6KGoOwned(raw []byte, out, in int) *Q6KWeight {
+	return UploadQ6K(raw, out, in)
+}
+
 // UploadQ6K makes a row-major Q6_K payload (verbatim GGUF super-block bytes, length
 // out*(in/256)*210) resident for the GPU and returns a handle, or nil if the backend is
 // unavailable, in is not a multiple of 256, or the payload is short / the table is full. A
