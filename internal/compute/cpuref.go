@@ -90,7 +90,24 @@ func (c *cpuBackend) CloneTensor(t Tensor) (Tensor, error) {
 		return Tensor{}, errors.New("cpu-ref: CloneTensor requires host buffer")
 	}
 	out.buf = &hostBuf{f32: append([]float32(nil), h.f32...), i8: append([]int8(nil), h.i8...)}
+	if t.Quant != nil {
+		out.Quant = cloneQuantSpec(t.Quant)
+	}
 	return out, nil
+}
+
+func cloneQuantSpec(q *QuantSpec) *QuantSpec {
+	if q == nil {
+		return nil
+	}
+	out := *q
+	if q.Scale != nil {
+		out.Scale = append([]float32(nil), q.Scale...)
+	}
+	if q.ZeroPoint != nil {
+		out.ZeroPoint = append([]int32(nil), q.ZeroPoint...)
+	}
+	return &out
 }
 
 func (c *cpuBackend) Host(t Tensor) ([]float32, bool) {
