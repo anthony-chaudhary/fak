@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -86,7 +87,22 @@ var (
 
 	// ErrExecutionCancelled indicates that prefill was aborted due to context cancellation.
 	ErrExecutionCancelled = errors.New("watchdog: prefill execution cancelled")
+
+	// ErrVulkanDecodeQueueFull indicates bounded decode-ready admission backpressure.
+	ErrVulkanDecodeQueueFull = errors.New("watchdog: Vulkan decode-priority queue full")
 )
+
+// VulkanDecodeQueueFullError reports the exact bounded-queue state at rejection.
+type VulkanDecodeQueueFullError struct {
+	Capacity int
+	Pending  int
+}
+
+func (e *VulkanDecodeQueueFullError) Error() string {
+	return fmt.Sprintf("Vulkan decode-priority queue full: pending %d, capacity %d", e.Pending, e.Capacity)
+}
+
+func (e *VulkanDecodeQueueFullError) Unwrap() error { return ErrVulkanDecodeQueueFull }
 
 // WatchdogSafetyViolationError provides detailed context when a chunk exceeds the safety ceiling.
 type WatchdogSafetyViolationError struct {
@@ -662,15 +678,134 @@ type InterChunkHook func(ctx context.Context, chunk PrefillChunk, report Progres
 // ChunkExecutor executes a single prefill chunk command buffer on hardware or simulator.
 type ChunkExecutor func(ctx context.Context, chunk PrefillChunk) error
 
+// VulkanDecodeSubmission is one ready decode command-buffer submission. The
+// prefill schedule is the other queue class; it always resumes after at most one decode.
+type VulkanDecodeSubmission func(ctx context.Context) error
+
+// VulkanDecodePriorityQueue is a bounded FIFO of ready decode submissions.
+// Enqueue is concurrency-safe and never blocks: saturation returns typed backpressure.
+type VulkanDecodePriorityQueue struct {
+	mu       sync.Mutex
+	admitMu  sync.Mutex
+	capacity int
+	pending  []vulkanDecodeQueueEntry
+}
+
+type vulkanDecodeQueueEntry struct {
+	ctx        context.Context
+	submission VulkanDecodeSubmission
+}
+
+// NewVulkanDecodePriorityQueue constructs a bounded ready-decode queue.
+func NewVulkanDecodePriorityQueue(capacity int) (*VulkanDecodePriorityQueue, error) {
+	if capacity <= 0 {
+		return nil, fmt.Errorf("watchdog: Vulkan decode-priority queue capacity must be positive: %d", capacity)
+	}
+	return &VulkanDecodePriorityQueue{
+		capacity: capacity,
+		pending:  make([]vulkanDecodeQueueEntry, 0, capacity),
+	}, nil
+}
+
+// Enqueue appends one ready decode submission or returns typed backpressure.
+func (q *VulkanDecodePriorityQueue) Enqueue(submission VulkanDecodeSubmission) error {
+	return q.EnqueueContext(context.Background(), submission)
+}
+
+// EnqueueContext appends one request-owned decode submission. Canceled pending
+// entries are reclaimed before applying the capacity bound.
+func (q *VulkanDecodePriorityQueue) EnqueueContext(ctx context.Context, submission VulkanDecodeSubmission) error {
+	if q == nil {
+		return errors.New("watchdog: nil Vulkan decode-priority queue")
+	}
+	if submission == nil {
+		return errors.New("watchdog: nil Vulkan decode submission")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.dropCancelledLocked()
+	if len(q.pending) >= q.capacity {
+		return &VulkanDecodeQueueFullError{Capacity: q.capacity, Pending: len(q.pending)}
+	}
+	q.pending = append(q.pending, vulkanDecodeQueueEntry{ctx: ctx, submission: submission})
+	return nil
+}
+
+func (q *VulkanDecodePriorityQueue) dropCancelledLocked() {
+	live := q.pending[:0]
+	for _, entry := range q.pending {
+		if entry.ctx.Err() == nil {
+			live = append(live, entry)
+		}
+	}
+	clear(q.pending[len(live):])
+	q.pending = live
+}
+
+// Len returns the current number of ready decode submissions.
+func (q *VulkanDecodePriorityQueue) Len() int {
+	if q == nil {
+		return 0
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.dropCancelledLocked()
+	return len(q.pending)
+}
+
+func (q *VulkanDecodePriorityQueue) takeReady() (vulkanDecodeQueueEntry, bool) {
+	if q == nil {
+		return vulkanDecodeQueueEntry{}, false
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.dropCancelledLocked()
+	if len(q.pending) == 0 {
+		return vulkanDecodeQueueEntry{}, false
+	}
+	entry := q.pending[0]
+	q.pending[0] = vulkanDecodeQueueEntry{}
+	q.pending = q.pending[1:]
+	return entry, true
+}
+
+// executeOne serializes dequeue-through-callback admission so concurrent prefill
+// executors cannot overtake FIFO order. The queue mutex is released before the callback.
+func (q *VulkanDecodePriorityQueue) executeOne(ctx context.Context) (bool, error) {
+	if q == nil {
+		return false, nil
+	}
+	q.admitMu.Lock()
+	defer q.admitMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	entry, ok := q.takeReady()
+	if !ok {
+		return false, nil
+	}
+	callbackCtx, cancel := context.WithCancel(entry.ctx)
+	stop := context.AfterFunc(ctx, cancel)
+	defer func() {
+		stop()
+		cancel()
+	}()
+	return true, entry.submission(callbackCtx)
+}
+
 // ExecutionReceipt records the actual execution telemetry of a prefill schedule.
 type ExecutionReceipt struct {
-	TotalTokens    int           `json:"total_tokens"`
-	ChunksExecuted int           `json:"chunks_executed"`
-	TotalElapsed   time.Duration `json:"total_elapsed"`
-	CompletedClean bool          `json:"completed_clean"`
-	YieldPointsHit int           `json:"yield_points_hit"`
-	Cancelled      bool          `json:"cancelled"`
-	Error          error         `json:"error,omitempty"`
+	TotalTokens               int           `json:"total_tokens"`
+	ChunksExecuted            int           `json:"chunks_executed"`
+	DecodeSubmissionsExecuted int           `json:"decode_submissions_executed"`
+	TotalElapsed              time.Duration `json:"total_elapsed"`
+	CompletedClean            bool          `json:"completed_clean"`
+	YieldPointsHit            int           `json:"yield_points_hit"`
+	Cancelled                 bool          `json:"cancelled"`
+	Error                     error         `json:"error,omitempty"`
 }
 
 // WatchdogPrefillScheduler generates and executes paced prefill command buffer schedules
@@ -1027,6 +1162,18 @@ func (s *WatchdogPrefillScheduler) Execute(
 	executor ChunkExecutor,
 	hook InterChunkHook,
 ) (*ExecutionReceipt, error) {
+	return s.ExecuteWithDecodePriority(ctx, schedule, executor, hook, nil)
+}
+
+// ExecuteWithDecodePriority runs the same paced prefill contract while admitting
+// at most one ready FIFO decode submission after each completed non-final chunk.
+func (s *WatchdogPrefillScheduler) ExecuteWithDecodePriority(
+	ctx context.Context,
+	schedule *PrefillSchedule,
+	executor ChunkExecutor,
+	hook InterChunkHook,
+	decodeQueue *VulkanDecodePriorityQueue,
+) (*ExecutionReceipt, error) {
 	if schedule == nil || len(schedule.Chunks) == 0 {
 		return nil, ErrEmptySchedule
 	}
@@ -1097,6 +1244,23 @@ func (s *WatchdogPrefillScheduler) Execute(
 
 		if !chunk.IsLastChunk {
 			receipt.YieldPointsHit++
+			// Cancellation wins at the boundary and leaves ready decode work queued
+			// for its owner; a cancelled request never consumes another class's work.
+			if err := ctx.Err(); err != nil {
+				receipt.Cancelled = true
+				receipt.CompletedClean = false
+				receipt.TotalElapsed = time.Since(startTime)
+				receipt.Error = fmt.Errorf("%w: %v", ErrExecutionCancelled, err)
+				return receipt, receipt.Error
+			}
+			if admitted, err := decodeQueue.executeOne(ctx); err != nil {
+				receipt.CompletedClean = false
+				receipt.TotalElapsed = time.Since(startTime)
+				receipt.Error = fmt.Errorf("decode-priority submission after prefill chunk %d failed: %w", i, err)
+				return receipt, receipt.Error
+			} else if admitted {
+				receipt.DecodeSubmissionsExecuted++
+			}
 		}
 	}
 

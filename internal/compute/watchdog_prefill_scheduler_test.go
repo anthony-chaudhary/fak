@@ -20,6 +20,111 @@ func TestWatchdogPrefillScheduler(t *testing.T) {
 	t.Run("AdaptiveDownsizingAtExtremeDepth", testWatchdogPrefillScheduler_AdaptiveDownsizingAtExtremeDepth)
 }
 
+// TestVulkanDecodePriorityBetweenPrefillChunks proves the bounded two-class
+// policy admits one FIFO decode submission at each non-final prefill boundary.
+func TestVulkanDecodePriorityBetweenPrefillChunks(t *testing.T) {
+	sched, err := NewDeepContextPrefillScheduler(ProfileSingleSequenceDeepContext)
+	if err != nil {
+		t.Fatalf("NewDeepContextPrefillScheduler: %v", err)
+	}
+	schedule, err := sched.PlanSchedule(4096)
+	if err != nil {
+		t.Fatalf("PlanSchedule: %v", err)
+	}
+
+	queue, err := NewVulkanDecodePriorityQueue(4)
+	if err != nil {
+		t.Fatalf("NewVulkanDecodePriorityQueue: %v", err)
+	}
+	trace := make([]string, 0, 7)
+	for i := 0; i < 4; i++ {
+		label := "d" + string(rune('0'+i))
+		if err := queue.Enqueue(func(context.Context) error {
+			trace = append(trace, label)
+			return nil
+		}); err != nil {
+			t.Fatalf("Enqueue decode %d: %v", i, err)
+		}
+	}
+	backpressure := queue.Enqueue(func(context.Context) error { return nil })
+	if !errors.Is(backpressure, ErrVulkanDecodeQueueFull) {
+		t.Fatalf("fifth enqueue error=%v, want ErrVulkanDecodeQueueFull", backpressure)
+	}
+	var full *VulkanDecodeQueueFullError
+	if !errors.As(backpressure, &full) || full.Capacity != 4 || full.Pending != 4 {
+		t.Fatalf("fifth enqueue typed error=%#v, want capacity=4 pending=4", backpressure)
+	}
+
+	receipt, err := sched.ExecuteWithDecodePriority(
+		context.Background(),
+		schedule,
+		func(_ context.Context, chunk PrefillChunk) error {
+			trace = append(trace, "p"+string(rune('0'+chunk.Index)))
+			return nil
+		},
+		nil,
+		queue,
+	)
+	if err != nil {
+		t.Fatalf("ExecuteWithDecodePriority: %v", err)
+	}
+	want := []string{"p0", "d0", "p1", "d1", "p2", "d2", "p3"}
+	if len(trace) != len(want) {
+		t.Fatalf("execution trace=%v, want %v", trace, want)
+	}
+	for i := range want {
+		if trace[i] != want[i] {
+			t.Fatalf("execution trace=%v, want %v", trace, want)
+		}
+	}
+	if receipt.DecodeSubmissionsExecuted != 3 {
+		t.Fatalf("DecodeSubmissionsExecuted=%d, want 3", receipt.DecodeSubmissionsExecuted)
+	}
+	if !receipt.CompletedClean || receipt.ChunksExecuted != 4 || receipt.YieldPointsHit != 3 {
+		t.Fatalf("prefill receipt=%+v, want four chunks, three boundaries, clean completion", receipt)
+	}
+	if got := queue.Len(); got != 1 {
+		t.Fatalf("queue length after final prefill=%d, want d3 still queued", got)
+	}
+
+	oneBoundary, err := sched.PlanSchedule(2048)
+	if err != nil {
+		t.Fatalf("PlanSchedule cancellation queue case: %v", err)
+	}
+	cancelQueue, err := NewVulkanDecodePriorityQueue(1)
+	if err != nil {
+		t.Fatalf("NewVulkanDecodePriorityQueue cancellation queue case: %v", err)
+	}
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	if err := cancelQueue.EnqueueContext(requestCtx, func(context.Context) error {
+		t.Fatal("canceled decode submission executed")
+		return nil
+	}); err != nil {
+		t.Fatalf("EnqueueContext canceled candidate: %v", err)
+	}
+	cancelRequest()
+	replacementRan := false
+	if err := cancelQueue.Enqueue(func(ctx context.Context) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		replacementRan = true
+		return nil
+	}); err != nil {
+		t.Fatalf("live replacement rejected by canceled capacity: %v", err)
+	}
+	cancelReceipt, err := sched.ExecuteWithDecodePriority(context.Background(), oneBoundary, nil, nil, cancelQueue)
+	if err != nil {
+		t.Fatalf("ExecuteWithDecodePriority cancellation queue case: %v", err)
+	}
+	if !replacementRan || cancelReceipt.DecodeSubmissionsExecuted != 1 {
+		t.Fatalf("live replacement ran=%v decode submissions=%d, want true/1", replacementRan, cancelReceipt.DecodeSubmissionsExecuted)
+	}
+	if got := cancelQueue.Len(); got != 0 {
+		t.Fatalf("cancellation queue length=%d, want 0", got)
+	}
+}
+
 func testWatchdogPrefillScheduler_BoundaryPartitioning(t *testing.T) {
 	sched, err := NewDeepContextPrefillScheduler(ProfileSingleSequenceDeepContext)
 	if err != nil {
