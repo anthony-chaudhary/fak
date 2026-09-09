@@ -578,3 +578,110 @@ func TestQwen35PrefixSnapshotHostRoundTripOwnsCompleteHybridState(t *testing.T) 
 		t.Fatal("Qwen convolution/recurrent state drifted across host round trip")
 	}
 }
+
+type mockThirdPartyGDNBackend struct {
+	compute.Backend
+	name string
+	path string
+}
+
+func (b *mockThirdPartyGDNBackend) Name() string {
+	if b.name != "" {
+		return b.name
+	}
+	return "synthetic-npu"
+}
+
+func (b *mockThirdPartyGDNBackend) Qwen35GDNPath() string {
+	if b.path != "" {
+		return b.path
+	}
+	return Qwen35GDNCapabilityIdentity
+}
+
+func (b *mockThirdPartyGDNBackend) Qwen35GDNDecode(
+	normalizedInput,
+	inProjQKV, inProjZ, inProjB, inProjA,
+	conv1D, aLog, dtBias, norm, outProj,
+	convState, recurrentState compute.Tensor,
+	numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel int,
+	rmsNormEpsilon float32,
+) (output, nextConvState, nextRecurrentState compute.Tensor, err error) {
+	return compute.Tensor{}, convState, recurrentState, nil
+}
+
+func TestQwen35GDNCapabilityIdentity(t *testing.T) {
+	for _, p := range []string{Qwen35GDNCapabilityIdentity, Qwen35GDNCUDAPath, Qwen35GDNVulkanPath} {
+		if !IsSupportedQwen35GDNPath(p) {
+			t.Errorf("IsSupportedQwen35GDNPath(%q) = false, want true", p)
+		}
+	}
+	for _, p := range []string{"legacy/unsupported", "unknown", ""} {
+		if IsSupportedQwen35GDNPath(p) {
+			t.Errorf("IsSupportedQwen35GDNPath(%q) = true, want false", p)
+		}
+	}
+
+	cfg := qwen35HybridTestCfg()
+	npuBackend := &mockThirdPartyGDNBackend{
+		Backend: compute.Default(),
+		name:    "synthetic-npu",
+		path:    Qwen35GDNCapabilityIdentity,
+	}
+
+	// Prove ValidateBackendForwardConfig admits it for a Qwen35 hybrid config.
+	if err := ValidateBackendForwardConfig(cfg, npuBackend); err != nil {
+		t.Fatalf("ValidateBackendForwardConfig refused synthetic GDN backend: %v", err)
+	}
+
+	// Prove a backend with an unsupported path (e.g. "legacy/unsupported") is refused with UnsupportedBackendForwardError.
+	unsupportedBackend := &mockThirdPartyGDNBackend{
+		Backend: compute.Default(),
+		name:    "synthetic-npu",
+		path:    "legacy/unsupported",
+	}
+	err := ValidateBackendForwardConfig(cfg, unsupportedBackend)
+	var unsupported *UnsupportedBackendForwardError
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("ValidateBackendForwardConfig error=%T %v, want *UnsupportedBackendForwardError", err, err)
+	}
+
+	// Prove prefix snapshot decode accepts the synthetic backend.
+	m := NewSynthetic(cfg)
+	recBe := newRecordingQwen35Backend(m)
+	s, err := m.NewBackendSessionChecked(recBe)
+	if err != nil {
+		t.Fatalf("NewBackendSessionChecked: %v", err)
+	}
+	defer s.Close()
+	s.Prefill([]int{3, 7, 11})
+	snap, err := s.PrefixSnapshot()
+	if err != nil {
+		t.Fatalf("PrefixSnapshot: %v", err)
+	}
+	defer snap.Close()
+	host, err := snap.CloneToHost()
+	if err != nil {
+		t.Fatalf("CloneToHost: %v", err)
+	}
+	defer host.Close()
+	wire, err := host.MarshalBinary()
+	if err != nil {
+		t.Fatalf("MarshalBinary: %v", err)
+	}
+
+	decoded, err := DecodeHostPrefixSnapshot(wire, npuBackend, cfg)
+	if err != nil {
+		t.Fatalf("DecodeHostPrefixSnapshot refused synthetic GDN backend: %v", err)
+	}
+	defer decoded.Close()
+
+	if decoded.qwen35 == nil || decoded.qwen35.backend != npuBackend {
+		t.Fatalf("decoded snapshot did not bind synthetic backend: %+v", decoded.qwen35)
+	}
+
+	// Prove prefix snapshot decode refuses unsupported backend.
+	if _, err := DecodeHostPrefixSnapshot(wire, unsupportedBackend, cfg); err == nil {
+		t.Fatal("DecodeHostPrefixSnapshot accepted backend with unsupported GDN path")
+	}
+}
