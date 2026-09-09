@@ -351,9 +351,9 @@ func resolveTurnkeyModelRef(ref string) string {
 		return trimmed
 	}
 	switch strings.ToLower(trimmed) {
-	case "70b", "qwen3.8-70b-q4_k_m", "qwen3.8-70b":
+	case "70b", "qwen3.8-70b-q4_k_m", "qwen3.8-70b", "qwen38-70b", "qwen38:70b", "qwen38:70b-q4_k_m":
 		return "qwen38:70b"
-	case "27b", "qwen3.8-27b-q4_k_m", "qwen3.8-27b":
+	case "27b", "qwen3.8-27b-q4_k_m", "qwen3.8-27b", "qwen38-27b", "qwen38:27b", "qwen38:27b-q4_k_m":
 		return "qwen38:27b"
 	case "7b", "qwen3.8-7b-q4_k_m", "qwen3.8-7b":
 		return "qwen2.5:7b"
