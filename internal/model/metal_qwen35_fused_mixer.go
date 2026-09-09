@@ -45,6 +45,7 @@ type FusedLinearAttentionReceipt struct {
 	Committed             bool
 	CompletedWait         bool
 	OperationOrder        []string
+	PackedRecurrence      bool
 }
 
 // FusedLinearAttentionMixerOptions configures custom state, weights, or test flags.
@@ -52,6 +53,7 @@ type FusedLinearAttentionMixerOptions struct {
 	State                          *metalgemm.GDNState
 	Weights                        *metalgemm.Qwen35DecodeWeights
 	InjectPostSubmitFailureForTest bool
+	ForceBaselineRecurrence        bool
 }
 
 // FusedLinearAttentionMixer manages one session-owned linear-attention layer
@@ -70,6 +72,7 @@ type FusedLinearAttentionMixer struct {
 	closed                         bool
 	customWeights                  []*metalgemm.Q8Weight
 	injectPostSubmitFailureForTest bool
+	forceBaselineRecurrence        bool
 }
 
 // NewFusedLinearAttentionMixer constructs a new fused linear attention mixer
@@ -202,6 +205,7 @@ func NewFusedLinearAttentionMixerWithOptions(m *Model, layer int, opts FusedLine
 		ownsState:                      ownsState,
 		customWeights:                  customWeights,
 		injectPostSubmitFailureForTest: opts.InjectPostSubmitFailureForTest,
+		forceBaselineRecurrence:        opts.ForceBaselineRecurrence,
 	}, nil
 }
 
@@ -219,6 +223,11 @@ func (m *FusedLinearAttentionMixer) Step(x []float32) ([]float32, FusedLinearAtt
 		return nil, FusedLinearAttentionReceipt{}, fmt.Errorf("model: input size %d != hidden size %d", len(x), m.m.Cfg.HiddenSize)
 	}
 
+	if m.forceBaselineRecurrence {
+		metalgemm.SetGDNForceBaseline(true)
+		defer metalgemm.SetGDNForceBaseline(false)
+	}
+
 	req := metalgemm.Qwen35DecodeRequest{
 		Input:                          x,
 		Weights:                        m.weights,
@@ -228,7 +237,7 @@ func (m *FusedLinearAttentionMixer) Step(x []float32) ([]float32, FusedLinearAtt
 	}
 
 	out, nativeReceipt, accepted, err := metalgemm.RunQwen35Decode(req)
-	receipt := makeFusedLinearAttentionReceipt(nativeReceipt)
+	receipt := makeFusedLinearAttentionReceipt(nativeReceipt, m.packedBTreeActiveLocked())
 	if err != nil {
 		return nil, receipt, err
 	}
@@ -251,20 +260,24 @@ func (m *FusedLinearAttentionMixer) Encode(graph *metalgemm.ProjectionGraph, inp
 	if m.closed {
 		return nil, FusedLinearAttentionReceipt{}, errors.New("model: mixer is closed")
 	}
+	if m.forceBaselineRecurrence {
+		metalgemm.SetGDNForceBaseline(true)
+		defer metalgemm.SetGDNForceBaseline(false)
+	}
 	req := metalgemm.Qwen35DecodeRequest{
 		Weights: m.weights,
 		State:   m.state,
 		Panel:   m.panel,
 	}
 	res, nativeReceipt, err := metalgemm.EncodeQwen35Decode(graph, input, req)
-	receipt := makeFusedLinearAttentionReceipt(nativeReceipt)
+	receipt := makeFusedLinearAttentionReceipt(nativeReceipt, m.packedBTreeActiveLocked())
 	if err != nil {
 		return nil, receipt, err
 	}
 	return res, receipt, nil
 }
 
-func makeFusedLinearAttentionReceipt(native metalgemm.Qwen35DecodeReceipt) FusedLinearAttentionReceipt {
+func makeFusedLinearAttentionReceipt(native metalgemm.Qwen35DecodeReceipt, packedRecurrence bool) FusedLinearAttentionReceipt {
 	h2d := native.InputUploads
 	d2h := native.FinalReadbacks
 	intermediate := native.IntermediateReadbacks + native.StateH2DTransfers + native.StateD2HTransfers
@@ -288,6 +301,7 @@ func makeFusedLinearAttentionReceipt(native metalgemm.Qwen35DecodeReceipt) Fused
 		Committed:             native.Committed,
 		CompletedWait:         native.CompletedWait,
 		OperationOrder:        append([]string(nil), FusedLinearAttentionOperationOrder...),
+		PackedRecurrence:      packedRecurrence,
 	}
 }
 
@@ -365,6 +379,29 @@ func (m *FusedLinearAttentionMixer) Model() *Model {
 // Weights returns the decode projection weights.
 func (m *FusedLinearAttentionMixer) Weights() metalgemm.Qwen35DecodeWeights {
 	return m.weights
+}
+
+// PackedBTreeActive reports whether this mixer qualifies for the 8-row
+// B-tree SIMDgroup packed recurrence kernel (D_k == 128 and D_v % 8 == 0)
+// and is not overridden by ForceBaselineRecurrence.
+func (m *FusedLinearAttentionMixer) PackedBTreeActive() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.packedBTreeActiveLocked()
+}
+
+func (m *FusedLinearAttentionMixer) packedBTreeActiveLocked() bool {
+	if m.forceBaselineRecurrence {
+		return false
+	}
+	return IsGDNPackedBTreeEligible(m.geom.KeyHeadDim, m.geom.ValueHeadDim)
+}
+
+// IsGDNPackedBTreeEligible checks whether key and value head dimensions
+// satisfy the shape requirements for 8-row B-tree SIMDgroup packing:
+// D_k == 128 and D_v > 0 and D_v % 8 == 0.
+func IsGDNPackedBTreeEligible(keyHeadDim, valueHeadDim int) bool {
+	return metalgemm.IsGDNPackedBTreeEligible(keyHeadDim, valueHeadDim)
 }
 
 // CPUOracleParity holds the outcome of comparing a step against the CPU reference.

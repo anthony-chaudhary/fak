@@ -60,3 +60,9 @@ func Prefill(X []float32, P, nLayers, w, H int) (lastPre, kraw, kpost, v []float
 // of the most recent q4_k GEMM/GEMMGroup dispatch; the model side reads it under FAK_QPROFILE to
 // split its wall time into compute vs roundtrip, and safely treats 0 as "not measured here".
 func LastGEMMGPUMs() float64 { return 0 }
+
+// IsGDNPackedBTreeEligible reports whether the head dimensions meet the requirements
+// for the 8-row B-tree SIMDgroup packed recurrence kernel (kHd == 128 && vHd % 8 == 0).
+func IsGDNPackedBTreeEligible(kHd, vHd int) bool {
+	return kHd == 128 && vHd > 0 && vHd%8 == 0
+}

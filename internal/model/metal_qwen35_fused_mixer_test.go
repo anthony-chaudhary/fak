@@ -436,3 +436,66 @@ func TestFusedLinearAttentionMixerDeclineAndFailure(t *testing.T) {
 		t.Fatalf("failing receipt expected Committed & CompletedWait, got: %+v", receipt)
 	}
 }
+
+func TestFusedLinearAttentionMixerPackedBTreeShapeGuards(t *testing.T) {
+	// 1. Validate shape guard helper
+	if !IsGDNPackedBTreeEligible(128, 128) {
+		t.Errorf("IsGDNPackedBTreeEligible(128, 128) = false, want true")
+	}
+	if !IsGDNPackedBTreeEligible(128, 256) {
+		t.Errorf("IsGDNPackedBTreeEligible(128, 256) = false, want true")
+	}
+	if !IsGDNPackedBTreeEligible(128, 64) {
+		t.Errorf("IsGDNPackedBTreeEligible(128, 64) = false, want true")
+	}
+	if IsGDNPackedBTreeEligible(64, 128) {
+		t.Errorf("IsGDNPackedBTreeEligible(64, 128) = true, want false (Dk != 128)")
+	}
+	if IsGDNPackedBTreeEligible(128, 125) {
+		t.Errorf("IsGDNPackedBTreeEligible(128, 125) = true, want false (Dv %% 8 != 0)")
+	}
+	if IsGDNPackedBTreeEligible(128, 0) {
+		t.Errorf("IsGDNPackedBTreeEligible(128, 0) = true, want false (Dv == 0)")
+	}
+
+	if !metalgemm.Available() {
+		t.Skip("no Metal device available")
+	}
+
+	// 2. Hybrid test config has Dk=8, Dv=8 -> should not support packed
+	cfg := qwen35HybridTestCfg()
+	m := NewSynthetic(cfg)
+	m.Quantize()
+
+	mixer, err := NewFusedLinearAttentionMixer(m, 0)
+	if err != nil {
+		t.Fatalf("NewFusedLinearAttentionMixer failed: %v", err)
+	}
+	defer mixer.Close()
+
+	if mixer.PackedBTreeActive() {
+		t.Errorf("mixer with Dk=8, Dv=8 should not have packed recurrence active")
+	}
+
+	input := randomVecF(cfg.HiddenSize, 9701)
+	_, receipt, err := mixer.Step(input)
+	if err != nil {
+		t.Fatalf("mixer.Step failed: %v", err)
+	}
+	if receipt.PackedRecurrence {
+		t.Errorf("receipt.PackedRecurrence = true on Dk=8, want false")
+	}
+
+	// 3. Force baseline option
+	forcedBaselineMixer, err := NewFusedLinearAttentionMixerWithOptions(m, 0, FusedLinearAttentionMixerOptions{
+		ForceBaselineRecurrence: true,
+	})
+	if err != nil {
+		t.Fatalf("NewFusedLinearAttentionMixerWithOptions failed: %v", err)
+	}
+	defer forcedBaselineMixer.Close()
+
+	if forcedBaselineMixer.PackedBTreeActive() {
+		t.Errorf("forced baseline mixer should report PackedBTreeActive() = false")
+	}
+}

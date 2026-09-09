@@ -41,7 +41,13 @@ static uint64_t gGDNNextHandle = 1;
 static id<MTLComputePipelineState> gGDNConvPSO;
 static id<MTLComputePipelineState> gGDNQKNormPSO;
 static id<MTLComputePipelineState> gGDNRecurrentPSO;
+static id<MTLComputePipelineState> gGDNRecurrentPackedPSO;
 static BOOL gGDNPipelineAttempted;
+static int gGDNForceBaseline = 0;
+
+void mg_gdn_set_force_baseline(int force) {
+    gGDNForceBaseline = force;
+}
 
 static NSString *gGDNSrc = @R"MSL(
 #include <metal_stdlib>
@@ -194,11 +200,137 @@ kernel void gdn_recurrent_panel(device const float *convOut [[buffer(0)]],
         }
     }
 }
+
+// One threadgroup per value head. Threads are partitioned into SIMDgroups of 32 lanes.
+// Each SIMDgroup owns 8 rows of value dimension; 4 lanes cooperatively process 128 elements of D_k per row.
+kernel void gdn_recurrent_packed_8row(device const float *convOut [[buffer(0)]],
+                                      device const float *qNorm [[buffer(1)]],
+                                      device const float *kNorm [[buffer(2)]],
+                                      device const float *z [[buffer(3)]],
+                                      device const float *b [[buffer(4)]],
+                                      device const float *a [[buffer(5)]],
+                                      device const float *aLog [[buffer(6)]],
+                                      device const float *dtBias [[buffer(7)]],
+                                      device const float *norm [[buffer(8)]],
+                                      device float *state [[buffer(9)]],
+                                      device float *core [[buffer(10)]],
+                                      constant int& tokens [[buffer(11)]],
+                                      constant int& convDim [[buffer(12)]],
+                                      constant int& nK [[buffer(13)]],
+                                      constant int& nV [[buffer(14)]],
+                                      constant int& kHd [[buffer(15)]],
+                                      constant int& vHd [[buffer(16)]],
+                                      constant float& eps [[buffer(17)]],
+                                      uint head [[threadgroup_position_in_grid]],
+                                      uint tid [[thread_index_in_threadgroup]],
+                                      uint lanes [[threads_per_threadgroup]]) {
+    if (head >= (uint)nV) return;
+    int repeat = nV / nK;
+    int keyHead = (int)head / repeat;
+    int keyDim = nK * kHd;
+
+    uint simd_id = tid / 32;
+    uint lane_id = tid % 32;
+    uint row_id = lane_id / 4;
+    uint sub_lane = lane_id % 4;
+    uint v_idx = simd_id * 8 + row_id;
+    uint k_start = sub_lane * 32;
+
+    float4 st[8];
+    if (v_idx < (uint)vHd) {
+        for (int j = 0; j < 8; ++j) {
+            float4 s;
+            for (int c = 0; c < 4; ++c) {
+                s[c] = state[((long)head * kHd + (sub_lane * 32 + j * 4 + c)) * vHd + v_idx];
+            }
+            st[j] = s;
+        }
+    } else {
+        for (int j = 0; j < 8; ++j) {
+            st[j] = float4(0.0f);
+        }
+    }
+
+    threadgroup float tg_sq[32];
+
+    for (int token = 0; token < tokens; ++token) {
+        device const float *qRow = qNorm + ((long)token * nK + keyHead) * kHd;
+        device const float *kRow = kNorm + ((long)token * nK + keyHead) * kHd;
+
+        float4 k_vec[8];
+        float4 q_vec[8];
+        device const float4 *k_ptr = (device const float4 *)(kRow + k_start);
+        device const float4 *q_ptr = (device const float4 *)(qRow + k_start);
+        for (int j = 0; j < 8; ++j) {
+            k_vec[j] = k_ptr[j];
+            q_vec[j] = q_ptr[j];
+        }
+
+        float beta = 1.0f / (1.0f + exp(-b[(long)token * nV + head]));
+        float decay = exp(-exp(aLog[head]) * gdn_softplus(a[(long)token * nV + head] + dtBias[head]));
+
+        float v_row = 0.0f;
+        if (v_idx < (uint)vHd) {
+            long valueIndex = (long)token * convDim + 2L * keyDim + (long)head * vHd + v_idx;
+            v_row = convOut[valueIndex];
+        }
+
+        float part[8];
+        for (int j = 0; j < 8; ++j) {
+            st[j] *= decay;
+            part[j] = dot(st[j], k_vec[j]);
+        }
+        float kv_mem = ((part[0] + part[1]) + (part[2] + part[3])) +
+                       ((part[4] + part[5]) + (part[6] + part[7]));
+        kv_mem += simd_shuffle_xor(kv_mem, 1);
+        kv_mem += simd_shuffle_xor(kv_mem, 2);
+
+        float delta = (v_row - kv_mem) * beta;
+
+        float r_part[8];
+        for (int j = 0; j < 8; ++j) {
+            st[j] += delta * k_vec[j];
+            r_part[j] = dot(st[j], q_vec[j]);
+        }
+        float readout = ((r_part[0] + r_part[1]) + (r_part[2] + r_part[3])) +
+                        ((r_part[4] + r_part[5]) + (r_part[6] + r_part[7]));
+        readout += simd_shuffle_xor(readout, 1);
+        readout += simd_shuffle_xor(readout, 2);
+
+        float sq = (sub_lane == 0 && v_idx < (uint)vHd) ? (readout * readout) : 0.0f;
+        float simd_sq = simd_sum(sq);
+        if (lane_id == 0) {
+            tg_sq[simd_id] = simd_sq;
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+
+        float total_sq = 0.0f;
+        uint num_simds = lanes / 32;
+        for (uint s = 0; s < num_simds; ++s) {
+            total_sq += tg_sq[s];
+        }
+        float inv = rsqrt(total_sq / (float)vHd + eps);
+
+        if (sub_lane == 0 && v_idx < (uint)vHd) {
+            long vd = (long)head * vHd + v_idx;
+            core[(long)token * nV * vHd + vd] = norm[v_idx] * readout * inv * gdn_silu(z[(long)token * nV * vHd + vd]);
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+
+    if (v_idx < (uint)vHd) {
+        for (int j = 0; j < 8; ++j) {
+            for (int c = 0; c < 4; ++c) {
+                state[((long)head * kHd + (sub_lane * 32 + j * 4 + c)) * vHd + v_idx] = st[j][c];
+            }
+        }
+    }
+}
 )MSL";
 
 static int mg_gdn_pipelines(void) {
     @synchronized(gDev) {
-        if (gGDNConvPSO != nil && gGDNQKNormPSO != nil && gGDNRecurrentPSO != nil) return 1;
+        if (gGDNConvPSO != nil && gGDNQKNormPSO != nil && gGDNRecurrentPSO != nil && gGDNRecurrentPackedPSO != nil) return 1;
         if (gGDNPipelineAttempted) return 0;
         gGDNPipelineAttempted = YES;
         NSError *error = nil;
@@ -210,7 +342,8 @@ static int mg_gdn_pipelines(void) {
         gGDNConvPSO = [gDev newComputePipelineStateWithFunction:[library newFunctionWithName:@"gdn_conv_panel"] error:&error];
         gGDNQKNormPSO = [gDev newComputePipelineStateWithFunction:[library newFunctionWithName:@"gdn_qk_norm_panel"] error:&error];
         gGDNRecurrentPSO = [gDev newComputePipelineStateWithFunction:[library newFunctionWithName:@"gdn_recurrent_panel"] error:&error];
-        if (gGDNConvPSO == nil || gGDNQKNormPSO == nil || gGDNRecurrentPSO == nil) {
+        gGDNRecurrentPackedPSO = [gDev newComputePipelineStateWithFunction:[library newFunctionWithName:@"gdn_recurrent_packed_8row"] error:&error];
+        if (gGDNConvPSO == nil || gGDNQKNormPSO == nil || gGDNRecurrentPSO == nil || gGDNRecurrentPackedPSO == nil) {
             NSLog(@"mg_gdn: pipeline creation failed: %@", error);
             return 0;
         }
@@ -336,7 +469,13 @@ int mg_gdn_state_run(int owner,
         [encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
 
         int vThreads = mg_gdn_threads(vHd);
-        [encoder setComputePipelineState:gGDNRecurrentPSO];
+        id<MTLComputePipelineState> recPSO = gGDNRecurrentPSO;
+        int recThreads = vThreads;
+        if (!gGDNForceBaseline && kHd == 128 && (vHd % 8) == 0 && gGDNRecurrentPackedPSO != nil) {
+            recPSO = gGDNRecurrentPackedPSO;
+            recThreads = (vHd / 8) * 32;
+        }
+        [encoder setComputePipelineState:recPSO];
         [encoder setBuffer:convOutB offset:0 atIndex:0]; [encoder setBuffer:qNormB offset:0 atIndex:1]; [encoder setBuffer:kNormB offset:0 atIndex:2];
         [encoder setBuffer:zB offset:0 atIndex:3]; [encoder setBuffer:bB offset:0 atIndex:4]; [encoder setBuffer:aB offset:0 atIndex:5];
         [encoder setBuffer:aLogB offset:0 atIndex:6]; [encoder setBuffer:dtBiasB offset:0 atIndex:7]; [encoder setBuffer:normB offset:0 atIndex:8];
@@ -345,7 +484,7 @@ int mg_gdn_state_run(int owner,
         [encoder setBytes:&nK length:sizeof(nK) atIndex:13]; [encoder setBytes:&nV length:sizeof(nV) atIndex:14];
         [encoder setBytes:&kHd length:sizeof(kHd) atIndex:15]; [encoder setBytes:&vHd length:sizeof(vHd) atIndex:16];
         [encoder setBytes:&eps length:sizeof(eps) atIndex:17];
-        [encoder dispatchThreadgroups:MTLSizeMake((NSUInteger)nV, 1, 1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)vThreads, 1, 1)];
+        [encoder dispatchThreadgroups:MTLSizeMake((NSUInteger)nV, 1, 1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)recThreads, 1, 1)];
         [encoder endEncoding];
 
         if (event != NULL) { event->command_buffer = (uintptr_t)(__bridge void *)command; event->encoders = 1; }
@@ -443,7 +582,7 @@ void *mg_gdn_graph_encode(void *graph, int owner,
     id<MTLComputeCommandEncoder>encoder=[command computeCommandEncoder];
     [encoder setComputePipelineState:gGDNConvPSO];[encoder setBuffer:mixed offset:0 atIndex:0];[encoder setBuffer:convWB offset:0 atIndex:1];[encoder setBuffer:(__bridge id<MTLBuffer>)slot.conv offset:0 atIndex:2];[encoder setBuffer:convOut offset:0 atIndex:3];[encoder setBytes:&tokens length:sizeof(tokens) atIndex:4];[encoder setBytes:&convDim length:sizeof(convDim) atIndex:5];[encoder setBytes:&convKernel length:sizeof(convKernel) atIndex:6];[encoder dispatchThreads:MTLSizeMake((NSUInteger)convDim,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];[encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
     int qThreads=mg_gdn_threads(kHd);[encoder setComputePipelineState:gGDNQKNormPSO];[encoder setBuffer:convOut offset:0 atIndex:0];[encoder setBuffer:qNorm offset:0 atIndex:1];[encoder setBuffer:kNorm offset:0 atIndex:2];[encoder setBytes:&tokens length:sizeof(tokens) atIndex:3];[encoder setBytes:&convDim length:sizeof(convDim) atIndex:4];[encoder setBytes:&nK length:sizeof(nK) atIndex:5];[encoder setBytes:&kHd length:sizeof(kHd) atIndex:6];[encoder dispatchThreadgroups:MTLSizeMake((NSUInteger)nK,(NSUInteger)tokens,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)qThreads,1,1)];[encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
-    int vThreads=mg_gdn_threads(vHd);[encoder setComputePipelineState:gGDNRecurrentPSO];[encoder setBuffer:convOut offset:0 atIndex:0];[encoder setBuffer:qNorm offset:0 atIndex:1];[encoder setBuffer:kNorm offset:0 atIndex:2];[encoder setBuffer:z offset:0 atIndex:3];[encoder setBuffer:b offset:0 atIndex:4];[encoder setBuffer:a offset:0 atIndex:5];[encoder setBuffer:aLogB offset:0 atIndex:6];[encoder setBuffer:dtBiasB offset:0 atIndex:7];[encoder setBuffer:normB offset:0 atIndex:8];[encoder setBuffer:(__bridge id<MTLBuffer>)slot.recurrent offset:0 atIndex:9];[encoder setBuffer:core offset:0 atIndex:10];[encoder setBytes:&tokens length:sizeof(tokens) atIndex:11];[encoder setBytes:&convDim length:sizeof(convDim) atIndex:12];[encoder setBytes:&nK length:sizeof(nK) atIndex:13];[encoder setBytes:&nV length:sizeof(nV) atIndex:14];[encoder setBytes:&kHd length:sizeof(kHd) atIndex:15];[encoder setBytes:&vHd length:sizeof(vHd) atIndex:16];[encoder setBytes:&eps length:sizeof(eps) atIndex:17];[encoder dispatchThreadgroups:MTLSizeMake((NSUInteger)nV,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)vThreads,1,1)];[encoder endEncoding];return (__bridge void*)core;
+    int vThreads=mg_gdn_threads(vHd);id<MTLComputePipelineState> recPSO=gGDNRecurrentPSO;int recThreads=vThreads;if(!gGDNForceBaseline&&kHd==128&&(vHd%8)==0&&gGDNRecurrentPackedPSO!=nil){recPSO=gGDNRecurrentPackedPSO;recThreads=(vHd/8)*32;}[encoder setComputePipelineState:recPSO];[encoder setBuffer:convOut offset:0 atIndex:0];[encoder setBuffer:qNorm offset:0 atIndex:1];[encoder setBuffer:kNorm offset:0 atIndex:2];[encoder setBuffer:z offset:0 atIndex:3];[encoder setBuffer:b offset:0 atIndex:4];[encoder setBuffer:a offset:0 atIndex:5];[encoder setBuffer:aLogB offset:0 atIndex:6];[encoder setBuffer:dtBiasB offset:0 atIndex:7];[encoder setBuffer:normB offset:0 atIndex:8];[encoder setBuffer:(__bridge id<MTLBuffer>)slot.recurrent offset:0 atIndex:9];[encoder setBuffer:core offset:0 atIndex:10];[encoder setBytes:&tokens length:sizeof(tokens) atIndex:11];[encoder setBytes:&convDim length:sizeof(convDim) atIndex:12];[encoder setBytes:&nK length:sizeof(nK) atIndex:13];[encoder setBytes:&nV length:sizeof(nV) atIndex:14];[encoder setBytes:&kHd length:sizeof(kHd) atIndex:15];[encoder setBytes:&vHd length:sizeof(vHd) atIndex:16];[encoder setBytes:&eps length:sizeof(eps) atIndex:17];[encoder dispatchThreadgroups:MTLSizeMake((NSUInteger)nV,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)recThreads,1,1)];[encoder endEncoding];return (__bridge void*)core;
 }
 
 // Encode B independent P=1 owners into one caller-owned projection graph. The
@@ -520,7 +659,14 @@ void *mg_gdn_graph_encode_batch(void *graph, const int *owners, int batch,
                  threadsPerThreadgroup:MTLSizeMake((NSUInteger)qThreads, 1, 1)];
         [encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
 
-        [encoder setComputePipelineState:gGDNRecurrentPSO];
+        id<MTLComputePipelineState> recPSO = gGDNRecurrentPSO;
+        int recThreads = vThreads;
+        if (!gGDNForceBaseline && kHd == 128 && (vHd % 8) == 0 && gGDNRecurrentPackedPSO != nil) {
+            recPSO = gGDNRecurrentPackedPSO;
+            recThreads = (vHd / 8) * 32;
+        }
+
+        [encoder setComputePipelineState:recPSO];
         [encoder setBuffer:convOut offset:mixedOffset atIndex:0];
         [encoder setBuffer:qNorm offset:keyOffset atIndex:1];
         [encoder setBuffer:kNorm offset:keyOffset atIndex:2];
@@ -540,7 +686,7 @@ void *mg_gdn_graph_encode_batch(void *graph, const int *owners, int batch,
         [encoder setBytes:&vHd length:sizeof(vHd) atIndex:16];
         [encoder setBytes:&eps length:sizeof(eps) atIndex:17];
         [encoder dispatchThreadgroups:MTLSizeMake((NSUInteger)nV, 1, 1)
-                 threadsPerThreadgroup:MTLSizeMake((NSUInteger)vThreads, 1, 1)];
+                 threadsPerThreadgroup:MTLSizeMake((NSUInteger)recThreads, 1, 1)];
         [encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
     }
     [encoder endEncoding];
@@ -642,4 +788,51 @@ int mg_gdn_live_buffers(void) {
 uint64_t mg_gdn_current_allocated_size(void) {
     if (!mg_init()) return 0;
     return (uint64_t)gDev.currentAllocatedSize;
+}
+
+static id<MTLComputePipelineState> gTestShufflePSO = nil;
+
+int mg_test_run_shuffle(const float *in, float *out) {
+    if (!mg_init()) return 0;
+    @autoreleasepool {
+        if (gTestShufflePSO == nil) {
+            NSString *src = @R"MSL(
+#include <metal_stdlib>
+using namespace metal;
+
+kernel void test_4lane_butterfly_shuffle(device const float *in [[buffer(0)]],
+                                         device float *out [[buffer(1)]],
+                                         uint tid [[thread_index_in_threadgroup]]) {
+    float v = in[tid];
+    v += simd_shuffle_xor(v, 1);
+    v += simd_shuffle_xor(v, 2);
+    out[tid] = v;
+}
+)MSL";
+            NSError *error = nil;
+            id<MTLLibrary> lib = [gDev newLibraryWithSource:src options:nil error:&error];
+            if (lib == nil) return 0;
+            id<MTLFunction> fn = [lib newFunctionWithName:@"test_4lane_butterfly_shuffle"];
+            if (fn == nil) return 0;
+            gTestShufflePSO = [gDev newComputePipelineStateWithFunction:fn error:&error];
+            if (gTestShufflePSO == nil) return 0;
+        }
+
+        id<MTLBuffer> inBuf = [gDev newBufferWithBytes:in length:32 * sizeof(float) options:MTLResourceStorageModeShared];
+        id<MTLBuffer> outBuf = [gDev newBufferWithLength:32 * sizeof(float) options:MTLResourceStorageModeShared];
+        if (inBuf == nil || outBuf == nil) return 0;
+
+        id<MTLCommandBuffer> cmd = [gQueue commandBuffer];
+        id<MTLComputeCommandEncoder> enc = [cmd computeCommandEncoder];
+        [enc setComputePipelineState:gTestShufflePSO];
+        [enc setBuffer:inBuf offset:0 atIndex:0];
+        [enc setBuffer:outBuf offset:0 atIndex:1];
+        [enc dispatchThreadgroups:MTLSizeMake(1, 1, 1) threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+        [enc endEncoding];
+        [cmd commit];
+        [cmd waitUntilCompleted];
+        if (cmd.status != MTLCommandBufferStatusCompleted) return 0;
+        memcpy(out, outBuf.contents, 32 * sizeof(float));
+        return 1;
+    }
 }
