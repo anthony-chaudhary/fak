@@ -21,6 +21,8 @@ const (
 	DefaultGatewayPort = "8080"
 	// DefaultSSHPort is the default appliance SSH management port.
 	DefaultSSHPort = "22"
+	// canonicalStrixLANHost is the bounded zero-config discovery candidate.
+	canonicalStrixLANHost = "strix-halo-fak.local"
 )
 
 var ipv4Pattern = regexp.MustCompile(`\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b`)
@@ -39,8 +41,10 @@ func ScrubLANTelemetry(text string) string {
 
 // ProbeLANNode performs fast, non-blocking reachability and capability probing of a LAN accelerator node.
 func ProbeLANNode(ctx context.Context, hostOverride string) LANNodeInfo {
-	start := time.Now()
+	return probeLANNode(ctx, hostOverride, []string{canonicalStrixLANHost})
+}
 
+func probeLANNode(ctx context.Context, hostOverride string, canonicalCandidates []string) LANNodeInfo {
 	rawHost := strings.TrimSpace(hostOverride)
 	if rawHost == "" {
 		rawHost = strings.TrimSpace(os.Getenv("FAK_STRIX_HOST"))
@@ -48,15 +52,41 @@ func ProbeLANNode(ctx context.Context, hostOverride string) LANNodeInfo {
 	if rawHost == "" {
 		rawHost = strings.TrimSpace(os.Getenv("FAK_LAN_HOST"))
 	}
-	if rawHost == "" || strings.EqualFold(rawHost, "unconfigured") || strings.EqualFold(rawHost, "none") {
-		return LANNodeInfo{
-			Status:        LANNodeUnconfigured,
-			Host:          "",
-			Reachable:     false,
-			LatencyMicros: 0,
-			Transport:     "offline",
-			Error:         "lan host unconfigured",
+	if rawHost != "" {
+		return probeLANHost(ctx, rawHost)
+	}
+
+	for _, candidate := range canonicalCandidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || strings.EqualFold(candidate, "unconfigured") || strings.EqualFold(candidate, "none") {
+			continue
 		}
+		if info := probeLANHost(ctx, candidate); info.Reachable {
+			return info
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+
+	return unconfiguredLANNode()
+}
+
+func unconfiguredLANNode() LANNodeInfo {
+	return LANNodeInfo{
+		Status:        LANNodeUnconfigured,
+		Host:          "",
+		Reachable:     false,
+		LatencyMicros: 0,
+		Transport:     "offline",
+		Error:         "lan host unconfigured",
+	}
+}
+
+func probeLANHost(ctx context.Context, rawHost string) LANNodeInfo {
+	start := time.Now()
+	if strings.EqualFold(rawHost, "unconfigured") || strings.EqualFold(rawHost, "none") {
+		return unconfiguredLANNode()
 	}
 
 	cleanHost := rawHost
