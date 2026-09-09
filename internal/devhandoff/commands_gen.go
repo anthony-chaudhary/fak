@@ -12,6 +12,7 @@ var Commands = []Command{
 	{Name: "amd-strix-probe", Aliases: []string{"strix-probe"}, Owner: "dev", Handler: "devcmd.RunAMDStrixProbe", SourceOrigin: "internal/devcmd/amd_strix_validate.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "amd-strix-validate", Aliases: []string{"strix-validate"}, Owner: "dev", Handler: "devcmd.RunAMDStrixValidate", SourceOrigin: "internal/devcmd/amd_strix_validate.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "backend", Owner: "dev", Handler: "devcmd.RunBackend", SourceOrigin: "internal/devcmd/backend.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
+	{Name: "bench-subagent-fanout", Aliases: []string{"subagent-fanout-bench"}, Owner: "dev", Handler: "runBenchSubagentFanout", SourceOrigin: "cmd/fak-dev/bench_subagent_fanout.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "blast", Owner: "dev", Handler: "devcmd.RunBlast", SourceOrigin: "internal/devcmd/blast.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "borrow-provenance", Owner: "dev", Handler: "devcmd.RunBorrowProvenance", SourceOrigin: "internal/devcmd/borrow_provenance.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "boundary", Owner: "dev", Handler: "devcmd.RunBoundary", SourceOrigin: "internal/devcmd/boundary.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
