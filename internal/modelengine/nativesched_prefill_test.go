@@ -12,6 +12,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
 
 func TestNativeSchedulerInterleavesBoundedQwenPrefill(t *testing.T) {
@@ -776,4 +777,270 @@ func nativeSchedulerAssertLogitParity(t *testing.T, got, want []float32) {
 	if gotArgmax, wantArgmax := argmax(got), argmax(want); gotArgmax != wantArgmax {
 		t.Fatalf("chunked final-logit argmax = %d, synchronous = %d", gotArgmax, wantArgmax)
 	}
+}
+
+func TestNativeScheduler_PrefixCacheAwarePrefill(t *testing.T) {
+	const budget = nativeQwenPrefillMinChunkTokens // 16
+
+	t.Run("full_hit_zero_prefill_chunks_and_immediate_decode", func(t *testing.T) {
+		m := nativeSchedulerPrefillModel(t)
+		fullPrompt := nativeSchedulerQwenPrompt(48) // 3 chunks under budget 16
+		tree := radixkv.New(0)
+
+		// Pre-populate RadixKV with the full prompt and reference prefilled state.
+		ctl := m.NewSession()
+		ctl.Quant = true
+		ctl.Q4K = true
+		wantLogits := ctl.Prefill(fullPrompt)
+		boundary, matched := tree.Lookup(fullPrompt)
+		tree.Done(tree.InsertWithLogits(boundary, fullPrompt[matched:], ctl.Cache, wantLogits))
+		ctl.Close()
+
+		prepare := nativeSchedulerPrefillPrepare(map[string][]int{
+			"decode":   nativeSchedulerQwenPrompt(budget),
+			"full-hit": fullPrompt,
+		})
+		s := newNativeScheduler(m, prepare)
+		if err := s.SetQwenPrefillMaxTokensPerIteration(budget); err != nil {
+			t.Fatalf("SetQwenPrefillMaxTokensPerIteration: %v", err)
+		}
+		s.SetRadixKV(tree)
+		nativeSchedulerBeginManualDrain(t, s)
+
+		var events []nativeSchedulerEvent
+		s.observeNativeEvent = func(event nativeSchedulerEvent) {
+			events = append(events, event)
+		}
+
+		// 1. Establish an active decode lane.
+		decodeReq := nativeSchedulerAdmitLane(t, s, "decode")
+		nativeSchedulerDriveIteration(t, s)
+		if got := nativeSchedulerDrainAvailable(decodeReq); len(got) != 1 {
+			t.Fatalf("initial decode tokens = %v, want one token", got)
+		}
+		if decodeReq.state != schedLaneDecode {
+			t.Fatalf("initial decode lane state = %d, want DECODE", decodeReq.state)
+		}
+
+		events = nil
+		// 2. Admit the 100% prefix-cache-hit lane.
+		hitReq := nativeSchedulerAdmitLane(t, s, "full-hit")
+
+		// 3. Drive 1 iteration: hitReq must transition immediately to decode with zero prefill chunks.
+		nativeSchedulerDriveIteration(t, s)
+
+		// Active decode stream must receive its next token without prefill jitter.
+		if got := nativeSchedulerDrainAvailable(decodeReq); len(got) != 1 {
+			t.Fatalf("interleaved decode tokens = %v, want one token", got)
+		}
+		// Full-hit lane must emit its first decode token on iteration 1!
+		gotHit := nativeSchedulerDrainAvailable(hitReq)
+		if len(gotHit) != 1 {
+			t.Fatalf("full-hit lane tokens on iteration 1 = %v, want exactly one decode token", gotHit)
+		}
+		if got, want := gotHit[0], argmax(wantLogits); got != want {
+			t.Fatalf("full-hit first token = %d, want argmax of cached logits %d", got, want)
+		}
+
+		// Acceptance criterion 2: ZERO prefill chunks scheduled on 100% prefix cache hits.
+		prefillCount := 0
+		transitionCount := 0
+		for _, ev := range events {
+			if ev.Lane == hitReq {
+				if ev.Kind == nativeSchedulerEventPrefill {
+					prefillCount++
+				}
+				if ev.Kind == nativeSchedulerEventTransition {
+					transitionCount++
+				}
+			}
+		}
+		if prefillCount != 0 {
+			t.Fatalf("full-hit scheduled %d prefill chunks, want exactly 0", prefillCount)
+		}
+		if transitionCount != 1 {
+			t.Fatalf("full-hit transition count = %d, want 1", transitionCount)
+		}
+
+		// Verify telemetry / prefix stats.
+		stats := s.PrefixStats()
+		if stats.Lookups < 1 || stats.FullHits < 1 || stats.Hits < 1 {
+			t.Fatalf("PrefixStats = %+v, want Lookups>=1 FullHits>=1 Hits>=1", stats)
+		}
+		if stats.MatchedTokens < uint64(len(fullPrompt)) {
+			t.Fatalf("PrefixStats.MatchedTokens = %d, want >= %d", stats.MatchedTokens, len(fullPrompt))
+		}
+
+		decodeReq.Cancel()
+		hitReq.Cancel()
+		nativeSchedulerEndManualDrain(s)
+	})
+
+	t.Run("partial_hit_schedules_chunks_solely_for_uncached_suffix", func(t *testing.T) {
+		m := nativeSchedulerPrefillModel(t)
+		longPrompt := nativeSchedulerQwenPrompt(48) // 48 tokens (budget 16 = 3 chunks when cold)
+		const cachedLen = 32                        // exactly 2 chunks cached
+		tree := radixkv.New(0)
+
+		// Seed the first 32 tokens into RadixKV.
+		ctl := m.NewSession()
+		ctl.Quant = true
+		ctl.Q4K = true
+		ctl.PrefillNoLogits(longPrompt[:cachedLen])
+		boundary, matched := tree.Lookup(longPrompt[:cachedLen])
+		tree.Done(tree.InsertWithLogits(boundary, longPrompt[:cachedLen][matched:], ctl.Cache, nil))
+		ctl.Close()
+
+		prepare := nativeSchedulerPrefillPrepare(map[string][]int{
+			"decode":      nativeSchedulerQwenPrompt(budget),
+			"partial-hit": longPrompt,
+		})
+		s := newNativeScheduler(m, prepare)
+		if err := s.SetQwenPrefillMaxTokensPerIteration(budget); err != nil {
+			t.Fatalf("SetQwenPrefillMaxTokensPerIteration: %v", err)
+		}
+		s.SetRadixKV(tree)
+		nativeSchedulerBeginManualDrain(t, s)
+
+		var events []nativeSchedulerEvent
+		s.observeNativeEvent = func(event nativeSchedulerEvent) {
+			events = append(events, event)
+		}
+
+		decodeReq := nativeSchedulerAdmitLane(t, s, "decode")
+		nativeSchedulerDriveIteration(t, s)
+		nativeSchedulerDrainAvailable(decodeReq)
+
+		events = nil
+		partReq := nativeSchedulerAdmitLane(t, s, "partial-hit")
+
+		// Drive 1 iteration: only the uncached suffix (32..48, 16 tokens) should prefill and transition.
+		nativeSchedulerDriveIteration(t, s)
+		gotDecode := nativeSchedulerDrainAvailable(decodeReq)
+		if len(gotDecode) != 1 {
+			t.Fatalf("active decode tokens during partial hit = %v, want 1 token", gotDecode)
+		}
+		gotPart := nativeSchedulerDrainAvailable(partReq)
+		if len(gotPart) != 1 {
+			t.Fatalf("partial-hit tokens after 1 suffix chunk = %v, want 1 decode token", gotPart)
+		}
+
+		// Acceptance criterion 3: Partial hits schedule chunks solely for uncached suffixes.
+		var prefills []nativeSchedulerEvent
+		for _, ev := range events {
+			if ev.Lane == partReq && ev.Kind == nativeSchedulerEventPrefill {
+				prefills = append(prefills, ev)
+			}
+		}
+		if len(prefills) != 1 {
+			t.Fatalf("partial-hit scheduled %d prefill chunks, want exactly 1 (uncached suffix only); events=%+v", len(prefills), events)
+		}
+		if prefills[0].ChunkStart != cachedLen || prefills[0].ChunkLen != len(longPrompt)-cachedLen {
+			t.Fatalf("partial-hit prefill chunk = start %d len %d, want start %d len %d (suffix only)",
+				prefills[0].ChunkStart, prefills[0].ChunkLen, cachedLen, len(longPrompt)-cachedLen)
+		}
+
+		stats := s.PrefixStats()
+		if stats.PartialHits < 1 || stats.Hits < 1 {
+			t.Fatalf("PrefixStats = %+v, want PartialHits>=1 Hits>=1", stats)
+		}
+
+		decodeReq.Cancel()
+		partReq.Cancel()
+		nativeSchedulerEndManualDrain(s)
+	})
+
+	t.Run("four_x_ttft_reduction_and_zero_decode_sla_violations", func(t *testing.T) {
+		m := nativeSchedulerPrefillModel(t)
+		// 64 tokens with budget 16 = 4 chunks cold.
+		testPrompt := nativeSchedulerQwenPrompt(64)
+
+		// 1. Cold baseline measurement: count scheduler iterations to first decode token.
+		prepareCold := nativeSchedulerPrefillPrepare(map[string][]int{
+			"stream": nativeSchedulerQwenPrompt(budget),
+			"target": testPrompt,
+		})
+		sCold := newNativeScheduler(m, prepareCold)
+		if err := sCold.SetQwenPrefillMaxTokensPerIteration(budget); err != nil {
+			t.Fatalf("SetQwenPrefillMaxTokensPerIteration: %v", err)
+		}
+		nativeSchedulerBeginManualDrain(t, sCold)
+
+		streamCold := nativeSchedulerAdmitLane(t, sCold, "stream")
+		nativeSchedulerDriveIteration(t, sCold)
+		nativeSchedulerDrainAvailable(streamCold)
+
+		targetCold := nativeSchedulerAdmitLane(t, sCold, "target")
+		coldIterations := 0
+		for coldIterations < 10 {
+			coldIterations++
+			nativeSchedulerDriveIteration(t, sCold)
+			nativeSchedulerDrainAvailable(streamCold)
+			if got := nativeSchedulerDrainAvailable(targetCold); len(got) > 0 {
+				break
+			}
+		}
+		if coldIterations != 4 {
+			t.Fatalf("cold target TTFT = %d iterations, want 4 chunks", coldIterations)
+		}
+		streamCold.Cancel()
+		targetCold.Cancel()
+		nativeSchedulerEndManualDrain(sCold)
+
+		// 2. Cached run: 100% prefix cache hit on 64 tokens.
+		tree := radixkv.New(0)
+		ctl := m.NewSession()
+		ctl.Quant = true
+		ctl.Q4K = true
+		logits := ctl.Prefill(testPrompt)
+		boundary, matched := tree.Lookup(testPrompt)
+		tree.Done(tree.InsertWithLogits(boundary, testPrompt[matched:], ctl.Cache, logits))
+		ctl.Close()
+
+		prepareCached := nativeSchedulerPrefillPrepare(map[string][]int{
+			"stream": nativeSchedulerQwenPrompt(budget),
+			"target": testPrompt,
+		})
+		sCached := newNativeScheduler(m, prepareCached)
+		if err := sCached.SetQwenPrefillMaxTokensPerIteration(budget); err != nil {
+			t.Fatalf("SetQwenPrefillMaxTokensPerIteration: %v", err)
+		}
+		sCached.SetRadixKV(tree)
+		nativeSchedulerBeginManualDrain(t, sCached)
+
+		streamCached := nativeSchedulerAdmitLane(t, sCached, "stream")
+		nativeSchedulerDriveIteration(t, sCached)
+		nativeSchedulerDrainAvailable(streamCached)
+
+		targetCached := nativeSchedulerAdmitLane(t, sCached, "target")
+		cachedIterations := 0
+		streamTokensDuringTarget := 0
+		for cachedIterations < 10 {
+			cachedIterations++
+			nativeSchedulerDriveIteration(t, sCached)
+			streamTokensDuringTarget += len(nativeSchedulerDrainAvailable(streamCached))
+			if got := nativeSchedulerDrainAvailable(targetCached); len(got) > 0 {
+				break
+			}
+		}
+		if cachedIterations != 1 {
+			t.Fatalf("cached target TTFT = %d iterations, want 1 (immediate decode on iteration 1)", cachedIterations)
+		}
+
+		// 4x TTFT reduction verification:
+		ttftRatio := float64(coldIterations) / float64(cachedIterations)
+		if ttftRatio < 4.0 {
+			t.Fatalf("TTFT reduction ratio = %.2fx (cold=%d, cached=%d), want at least 4.0x",
+				ttftRatio, coldIterations, cachedIterations)
+		}
+
+		// Decode SLA verification: active stream received its token with 0 decode stalls.
+		if streamTokensDuringTarget != 1 {
+			t.Fatalf("active decode tokens during target admission = %d, want 1 (zero decode SLA violations)", streamTokensDuringTarget)
+		}
+
+		streamCached.Cancel()
+		targetCached.Cancel()
+		nativeSchedulerEndManualDrain(sCached)
+	})
 }
