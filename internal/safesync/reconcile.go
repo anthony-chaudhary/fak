@@ -30,6 +30,9 @@ const (
 	RouteReconcilePacket    = "ROUTE_RECONCILE_PACKET"
 	RouteHoldMergeActive    = "ROUTE_HOLD_MERGE_ACTIVE"
 	RouteDrain              = "ROUTE_DRAIN"
+
+	// StateSynchronized indicates successful reconciliation where tip matches expected synchronized state.
+	StateSynchronized = "synchronized"
 )
 
 // ReconcileOptions configures ReconcileRouter.
@@ -60,13 +63,15 @@ type GoalInfo struct {
 
 // ReconcileExecution records execution results when --apply is specified.
 type ReconcileExecution struct {
-	Primitive string `json:"primitive"`
-	Success   bool   `json:"success"`
-	Pushed    bool   `json:"pushed,omitempty"`
-	Applied   bool   `json:"applied,omitempty"`
-	NewHead   string `json:"new_head,omitempty"`
-	Detail    string `json:"detail,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Primitive     string `json:"primitive"`
+	Success       bool   `json:"success"`
+	Pushed        bool   `json:"pushed,omitempty"`
+	Applied       bool   `json:"applied,omitempty"`
+	NewHead       string `json:"new_head,omitempty"`
+	Status        string `json:"status,omitempty"`
+	AppliedCommit string `json:"applied_commit,omitempty"`
+	Detail        string `json:"detail,omitempty"`
+	Error         string `json:"error,omitempty"`
 }
 
 // ReconcileAssessment is the typed, evidence-backed reconciliation verdict.
@@ -90,6 +95,8 @@ type ReconcileAssessment struct {
 	MergeActive    bool                  `json:"merge_active,omitempty"`
 	Contention     bool                  `json:"contention,omitempty"`
 	Applied        bool                  `json:"applied,omitempty"`
+	Status         string                `json:"status,omitempty"`
+	AppliedCommit  string                `json:"applied_commit,omitempty"`
 	Execution      *ReconcileExecution   `json:"execution,omitempty"`
 	Park           *ParkReceipt          `json:"park,omitempty"`
 	Packet         *ReconciliationPacket `json:"packet,omitempty"`
@@ -623,21 +630,56 @@ func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessmen
 		assessment.Detail = "local and remote changes touch disjoint paths; safe to integrate"
 
 		if r.opts.Apply {
-			mergeRes := run(ctx, repo, "merge", "--no-ff", "--no-edit", "--signoff", "-m", fmt.Sprintf("Merge %s (disjoint integrate)", targetRef), targetSHA)
-			success := mergeRes.Err == nil && mergeRes.Code == 0
-			newHead, _ := rev(ctx, run, repo, "HEAD")
-			exec := &ReconcileExecution{
-				Primitive: primitive,
-				Applied:   success,
-				Success:   success,
-				NewHead:   newHead,
-				Detail:    runDetail(mergeRes),
+			targetBranch := strings.TrimSpace(r.opts.Branch)
+			if targetBranch == "" {
+				symRes := run(ctx, repo, "symbolic-ref", "--quiet", "HEAD")
+				if symRes.Err == nil && symRes.Code == 0 {
+					targetBranch = strings.TrimSpace(string(symRes.Stdout))
+				}
 			}
-			if mergeRes.Err != nil {
-				exec.Error = mergeRes.Err.Error()
+			if targetBranch == "" {
+				targetBranch = branch
 			}
-			assessment.Execution = exec
-			assessment.Applied = success
+
+			newCommitSHA, transplantErr := TransplantDisjointTreeWithRunner(ctx, run, repo, targetBranch, headSHA, targetSHA, targetRef)
+			if transplantErr == nil {
+				newHead, _ := rev(ctx, run, repo, "HEAD")
+				exec := &ReconcileExecution{
+					Primitive:     primitive,
+					Applied:       true,
+					Success:       true,
+					NewHead:       newHead,
+					Status:        StateSynchronized,
+					AppliedCommit: newCommitSHA,
+					Detail:        fmt.Sprintf("synthetic merge commit %s created and %s updated", newCommitSHA, targetBranch),
+				}
+				assessment.Execution = exec
+				assessment.Applied = true
+				assessment.Status = StateSynchronized
+				assessment.AppliedCommit = newCommitSHA
+			} else {
+				// Fallback to direct git merge if merge-tree fails
+				mergeRes := run(ctx, repo, "merge", "--no-ff", "--no-edit", "--signoff", "-m", fmt.Sprintf("Merge %s (disjoint integrate)", targetRef), targetSHA)
+				success := mergeRes.Err == nil && mergeRes.Code == 0
+				newHead, _ := rev(ctx, run, repo, "HEAD")
+				exec := &ReconcileExecution{
+					Primitive: primitive,
+					Applied:   success,
+					Success:   success,
+					NewHead:   newHead,
+					Detail:    runDetail(mergeRes),
+				}
+				if !success {
+					exec.Error = fmt.Sprintf("transplant error: %v; merge fallback error: %s", transplantErr, runDetail(mergeRes))
+				} else {
+					exec.Status = StateSynchronized
+					exec.AppliedCommit = newHead
+					assessment.Status = StateSynchronized
+					assessment.AppliedCommit = newHead
+				}
+				assessment.Execution = exec
+				assessment.Applied = success
+			}
 		}
 		return assessment, nil
 	}

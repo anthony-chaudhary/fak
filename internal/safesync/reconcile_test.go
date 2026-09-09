@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -362,9 +363,9 @@ func TestRouteReconciliationApplyExecution(t *testing.T) {
 		if res.Execution == nil || !res.Execution.Success {
 			t.Fatalf("execution failed: %+v", res.Execution)
 		}
-		// Confirm both files exist in working tree
-		if got := readFile(t, filepath.Join(clone, "disjoint_remote.txt")); got != "remote\n" {
-			t.Fatalf("disjoint_remote.txt = %q", got)
+		// Confirm remote file exists in synthetic merge tree and local file remains in working tree
+		if got := strings.TrimSpace(gitOutput(t, clone, "show", "HEAD:disjoint_remote.txt")); got != "remote" {
+			t.Fatalf("disjoint_remote.txt in HEAD = %q, want %q", got, "remote")
 		}
 		if got := readFile(t, filepath.Join(clone, "disjoint_local.txt")); got != "local\n" {
 			t.Fatalf("disjoint_local.txt = %q", got)
