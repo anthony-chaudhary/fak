@@ -523,9 +523,29 @@ func RegisterVerdictKind(k VerdictKind, name string, foldRank int, fb FallbackCl
 }
 
 // RegisterReason adds to the closed refusal vocabulary (the model label space).
+// Panics if c <= ReasonCoreMax (the closed core set), on duplicate ReasonCode,
+// or on duplicate ReasonName under a different code. Exact (code, name)
+// re-registration is a no-op so independent consumers can register idempotently.
 func RegisterReason(c ReasonCode, name string) {
+	if c <= ReasonCoreMax {
+		panic(fmt.Sprintf("abi: ReasonCode %d is in the closed core range", c))
+	}
 	reg.mu.Lock()
 	defer reg.mu.Unlock()
+	if existing, dup := reg.reasons[c]; dup {
+		if existing != name {
+			panic(fmt.Sprintf("abi: duplicate ReasonCode %d", c))
+		}
+		return
+	}
+	if _, dup := reasonCodesByName[name]; dup {
+		panic(fmt.Sprintf("abi: duplicate ReasonName %q", name))
+	}
+	for _, existing := range reg.reasons {
+		if existing == name {
+			panic(fmt.Sprintf("abi: duplicate ReasonName %q", name))
+		}
+	}
 	reg.reasons[c] = name
 	rebuildSnapshot()
 }
