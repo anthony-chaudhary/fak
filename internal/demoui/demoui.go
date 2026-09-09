@@ -12,10 +12,12 @@
 //     silently running on "whatever", so a viewer can see it is saturating the box —
 //     and a GPU build (-tags cuda/metal/vulkan on matching hardware) lights up the
 //     accelerator field automatically, with no demo-side change.
-//   - Beat() / Spinner() keep the screen alive during a blocking phase (model load,
-//     prefill measurement) that would otherwise emit nothing for tens of seconds.
-//     Beat is for an event-stream demo (it heartbeats a callback ~1×/s while a call
-//     runs in the background); Spinner is its terminal twin (an animated stderr line).
+//   - Beat() / Spinner() / ModelLoadingSpinner() keep the screen alive during a
+//     blocking phase (model load, prefill measurement) that would otherwise emit
+//     nothing for tens of seconds. Beat is for an event-stream demo (it heartbeats
+//     a callback ~1×/s while a call runs in the background); Spinner is its terminal
+//     twin (an animated stderr line); ModelLoadingSpinner provides an interactive
+//     progress bar with elapsed timer and ETA.
 //
 // The package is deliberately tiny and depends only on internal/compute and
 // internal/model, so every demo can adopt it without pulling in heavy state.

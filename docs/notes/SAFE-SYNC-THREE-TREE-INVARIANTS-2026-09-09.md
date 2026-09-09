@@ -101,11 +101,17 @@ git diff --name-only
 If phantom deletions appear, align the Index and Working Tree to HEAD safely:
 
 ```bash
-# Refresh the index to match HEAD without destroying untracked files
+# Preview phantom deletions and preserved dirty paths
+fak sync heal --dry-run
+
+# Restore missing HEAD files and synchronize index while strictly preserving dirty WIP
+fak sync heal
+
+# Low-level fallback: refresh the index to match HEAD
 git read-tree -u -m HEAD HEAD
 
 # Verify clean status
 fak sync check
 ```
 
-This command restores missing files to disk and aligns the index with HEAD so that future commits never introduce phantom deletions. Act quickly.
+This restores missing files to disk, clears false deletions, and aligns the index with HEAD while strictly preserving uncommitted local edits. Act quickly.

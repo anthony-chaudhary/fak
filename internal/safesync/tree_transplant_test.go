@@ -2,6 +2,7 @@ package safesync
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -315,6 +316,68 @@ func TestSyntheticTreeTransplantCheckoutIncomingPaths(t *testing.T) {
 	}
 }
 
+func TestSyntheticTreeTransplantSpacesAndUnicode(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init", "-b", "main")
+	git(t, repo, "config", "core.autocrlf", "false")
+	git(t, repo, "config", "core.quotepath", "true")
+	git(t, repo, "config", "user.name", "test")
+	git(t, repo, "config", "user.email", "test@example.com")
+
+	// Base commit
+	writeFile(t, filepath.Join(repo, "base.txt"), "base\n")
+	git(t, repo, "add", "base.txt")
+	git(t, repo, "commit", "-m", "base commit")
+
+	// Target commit adds files with spaces and unicode characters
+	git(t, repo, "checkout", "-b", "feature")
+	spaceDir := filepath.Join(repo, "folder with spaces")
+	mkdir(t, spaceDir)
+	spaceFile := filepath.Join(spaceDir, "file with spaces.txt")
+	writeFile(t, spaceFile, "content in file with spaces\n")
+
+	unicodeDir := filepath.Join(repo, "unicode_dir")
+	mkdir(t, unicodeDir)
+	unicodeFile := filepath.Join(unicodeDir, "données_été.txt")
+	writeFile(t, unicodeFile, "données été utf8 content\n")
+
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "feature commit with spaces and unicode")
+	targetSHA := revString(t, repo, "feature")
+
+	// Main branch makes a disjoint commit
+	git(t, repo, "checkout", "main")
+	writeFile(t, filepath.Join(repo, "local_main.txt"), "local main content\n")
+	git(t, repo, "add", "local_main.txt")
+	git(t, repo, "commit", "-m", "main commit")
+	headSHA := revString(t, repo, "main")
+
+	ctx := context.Background()
+	newCommitSHA, err := TransplantDisjointTree(ctx, repo, "main", headSHA, targetSHA, "refs/heads/feature")
+	if err != nil {
+		t.Fatalf("TransplantDisjointTree failed: %v", err)
+	}
+	if newCommitSHA == "" {
+		t.Fatalf("expected non-empty newCommitSHA")
+	}
+
+	// Verify the file with spaces exists in working tree with expected content
+	if got := readFile(t, spaceFile); got != "content in file with spaces\n" {
+		t.Errorf("space file content = %q, want %q", got, "content in file with spaces\n")
+	}
+
+	// Verify the file with unicode exists in working tree with expected content
+	if got := readFile(t, unicodeFile); got != "données été utf8 content\n" {
+		t.Errorf("unicode file content = %q, want %q", got, "données été utf8 content\n")
+	}
+
+	// Verify git status is clean
+	status := strings.TrimSpace(gitOutput(t, repo, "status", "--porcelain"))
+	if status != "" {
+		t.Errorf("expected clean git status, got:\n%s", status)
+	}
+}
+
 func TestTransplantRenames(t *testing.T) {
 	t.Run("direct_transplant_basic_rename", func(t *testing.T) {
 		repo := t.TempDir()
@@ -614,4 +677,89 @@ func TestParseRenameSummary(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSyntheticTreeTransplantBatchCheckout(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init", "-b", "main")
+	git(t, repo, "config", "core.autocrlf", "false")
+	git(t, repo, "config", "user.name", "test")
+	git(t, repo, "config", "user.email", "test@example.com")
+
+	// Base commit
+	writeFile(t, filepath.Join(repo, "base.txt"), "base\n")
+	git(t, repo, "add", "base.txt")
+	git(t, repo, "commit", "-m", "base commit")
+
+	// Feature branch adds 250 files
+	git(t, repo, "checkout", "-b", "feature")
+	const totalFiles = 250
+	for i := 0; i < totalFiles; i++ {
+		name := fmt.Sprintf("file_%03d.txt", i)
+		writeFile(t, filepath.Join(repo, name), fmt.Sprintf("content %d\n", i))
+	}
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "feature commit with 250 files")
+	targetSHA := revString(t, repo, "feature")
+
+	// Main branch adds disjoint file local.txt
+	git(t, repo, "checkout", "main")
+	writeFile(t, filepath.Join(repo, "local.txt"), "local content\n")
+	git(t, repo, "add", "local.txt")
+	git(t, repo, "commit", "-m", "main commit")
+	headSHA := revString(t, repo, "main")
+
+	// Intercept runner calls to record checkout invocations
+	var checkoutBatches [][]string
+	runner := func(ctx context.Context, dir string, args ...string) RunResult {
+		if len(args) >= 3 && args[0] == "checkout" && args[2] == "--" {
+			paths := append([]string(nil), args[3:]...)
+			checkoutBatches = append(checkoutBatches, paths)
+		}
+		return RealRunner(ctx, dir, args...)
+	}
+
+	ctx := context.Background()
+	newCommitSHA, err := TransplantDisjointTreeWithRunner(ctx, runner, repo, "main", headSHA, targetSHA, "refs/heads/feature")
+	if err != nil {
+		t.Fatalf("TransplantDisjointTreeWithRunner failed: %v", err)
+	}
+	if newCommitSHA == "" {
+		t.Fatalf("expected non-empty newCommitSHA")
+	}
+
+	// Verify batching: 250 files with batch size 100 => 3 batches (100, 100, 50)
+	if len(checkoutBatches) != 3 {
+		t.Fatalf("expected 3 checkout batches, got %d", len(checkoutBatches))
+	}
+	if len(checkoutBatches[0]) != 100 {
+		t.Errorf("batch 0 len = %d, want 100", len(checkoutBatches[0]))
+	}
+	if len(checkoutBatches[1]) != 100 {
+		t.Errorf("batch 1 len = %d, want 100", len(checkoutBatches[1]))
+	}
+	if len(checkoutBatches[2]) != 50 {
+		t.Errorf("batch 2 len = %d, want 50", len(checkoutBatches[2]))
+	}
+
+	// Verify each batch does not exceed batch size 100
+	for idx, batch := range checkoutBatches {
+		if len(batch) > 100 {
+			t.Errorf("batch %d exceeded max batch size 100: got %d", idx, len(batch))
+		}
+	}
+
+	// Verify all 250 files actually exist on disk in the working tree
+	for i := 0; i < totalFiles; i++ {
+		name := fmt.Sprintf("file_%03d.txt", i)
+		got := readFile(t, filepath.Join(repo, name))
+		want := fmt.Sprintf("content %d\n", i)
+		if got != want {
+			t.Fatalf("file %s = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestTransplantDisjointTreeBatchedCheckout(t *testing.T) {
+	TestSyntheticTreeTransplantBatchCheckout(t)
 }
