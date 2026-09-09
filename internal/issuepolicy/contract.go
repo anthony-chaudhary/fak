@@ -46,6 +46,7 @@ const (
 	ReasonProblemFrameIncomplete = "ISSUE_PROBLEM_FRAME_INCOMPLETE"
 	ReasonUnrouted               = "ISSUE_UNROUTED"
 	ReasonNotBornRouted          = "ISSUE_NOT_BORN_ROUTED"
+	ReasonNotBornMerged          = "ISSUE_NOT_BORN_MERGED"
 	ReasonPrivateBoundary        = "ISSUE_PRIVATE_BOUNDARY"
 	ReasonLiveUnarmored          = "ISSUE_LIVE_UNARMORED"
 	ReasonNotDispatchLeaf        = "ISSUE_NOT_DISPATCH_LEAF"
@@ -204,6 +205,7 @@ type Options struct {
 	StrictScale      bool
 	StrictWitness    bool // advisory by default; hold non-strong witness grades when true
 	StrictBornRouted bool
+	StrictBornMerged bool
 	// StrictProjectWork holds dispatchable tickets missing or contradicting the
 	// canonical effort/contribution/completion contract.
 	StrictProjectWork bool
@@ -299,13 +301,29 @@ type Review struct {
 	Closure           ClosureReadout           `json:"closure"`
 	WitnessGrade      WitnessGrade             `json:"witness_grade"`
 	BornRouted        BornRouted               `json:"born_routed"`
+	BornMerged        BornMerged               `json:"born_merged"`
 }
 
 // ReviewCandidate grades c. OK means the candidate is safe to sync as a
 // dispatchable public issue; non-OK reviews still preserve enough detail to render
 // a triage-only row or refuse a live sync.
 func ReviewCandidate(c Candidate, opt Options) Review {
-	return reviewCandidate(c, opt, false)
+	rev := reviewCandidate(c, opt, false)
+	bm := bornMerged(c)
+	rev.BornMerged = bm
+	if opt.StrictBornMerged && len(bm.Flags) > 0 {
+		if !containsString(rev.Reasons, ReasonNotBornMerged) {
+			rev.Reasons = append(rev.Reasons, ReasonNotBornMerged)
+		}
+		if rev.Dispatchability == Dispatchable {
+			rev.Dispatchability = TriageOnly
+			rev.OK = false
+		}
+		if rev.Verdict == "DISPATCHABLE" {
+			rev.Verdict = "TRIAGE_ONLY"
+		}
+	}
+	return rev
 }
 
 func reviewCandidate(c Candidate, opt Options, allowLegacyProblemFrame bool) Review {
@@ -376,6 +394,10 @@ func reviewCandidate(c Candidate, opt Options, allowLegacyProblemFrame bool) Rev
 	bornRoutedReadout := bornRouted(c)
 	if opt.StrictBornRouted && len(bornRoutedReadout.Flags) > 0 {
 		reasons.add(ReasonNotBornRouted)
+	}
+	bornMergedReadout := bornMerged(c)
+	if opt.StrictBornMerged && len(bornMergedReadout.Flags) > 0 {
+		reasons.add(ReasonNotBornMerged)
 	}
 	witnessGradeReadout := witnessGrade(c, opt.StrictWitness)
 	if opt.StrictWitness && witnessGradeReadout.Grade != WitnessGradeStrong {
@@ -481,6 +503,7 @@ func reviewCandidate(c Candidate, opt Options, allowLegacyProblemFrame bool) Rev
 		Closure:           closureReadout,
 		WitnessGrade:      witnessGradeReadout,
 		BornRouted:        bornRoutedReadout,
+		BornMerged:        bornMergedReadout,
 	}
 	out.OK = len(out.Reasons) == 0
 	switch {
@@ -516,6 +539,18 @@ func reviewCandidate(c Candidate, opt Options, allowLegacyProblemFrame bool) Rev
 			}
 		} else {
 			out.SuggestedLanes = progRes.SuggestedLanes
+		}
+	}
+	if opt.StrictBornMerged && len(bornMergedReadout.Flags) > 0 {
+		if !containsString(out.Reasons, ReasonNotBornMerged) {
+			out.Reasons = append(out.Reasons, ReasonNotBornMerged)
+		}
+		if out.Dispatchability == Dispatchable {
+			out.Dispatchability = TriageOnly
+			out.OK = false
+		}
+		if out.Verdict == "DISPATCHABLE" {
+			out.Verdict = "TRIAGE_ONLY"
 		}
 	}
 	return out
