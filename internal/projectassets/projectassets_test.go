@@ -1214,9 +1214,9 @@ func TestOpenCodePluginAlternativePathKeysAndUnifiedDiffs(t *testing.T) {
 }
 
 func TestOpenCodeGrepExecutableResolutionAndFallback(t *testing.T) {
-	root := filepath.Clean(filepath.Join("..", ".."))
-	if err := syncOpenCodeGrep(root); err != nil {
-		t.Fatalf("syncOpenCodeGrep failed: %v", err)
+	root := t.TempDir()
+	if err := SyncOpenCodePlugin(root); err != nil {
+		t.Fatalf("SyncOpenCodePlugin failed: %v", err)
 	}
 	if err := VerifyOpenCodePlugin(root); err != nil {
 		t.Fatalf("VerifyOpenCodePlugin failed: %v", err)
