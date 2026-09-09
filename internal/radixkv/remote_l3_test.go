@@ -469,3 +469,119 @@ func TestRemoteL3BreakerCallerCancelDoesNotTripBreaker(t *testing.T) {
 			stats.L3BreakerConsecutiveFaults, stats.L3BreakerTotalFaults)
 	}
 }
+
+func TestTree_RuntimeAttachDetachRemoteSnapshotStore(t *testing.T) {
+	cfg := remoteL3TestConfig()
+	m := model.NewSynthetic(cfg)
+	be := &deviceCapsBackend{Backend: compute.Default()}
+	store := &memorySnapshotStore{}
+	tree := NewWithTierBudgetsAndEvictionPolicy(0, 0, 0, EvictionLRU)
+
+	if tree.HasRemoteSnapshotStore() {
+		t.Fatal("expected HasRemoteSnapshotStore() to be false initially")
+	}
+
+	// 1. Configure/attach a remote snapshot store on a tree.
+	if err := tree.AttachRemoteSnapshotStore(store, "synthetic-l3-test", be, m.Cfg); err != nil {
+		t.Fatalf("AttachRemoteSnapshotStore: %v", err)
+	}
+
+	// 2. Verify HasRemoteSnapshotStore() is true.
+	if !tree.HasRemoteSnapshotStore() {
+		t.Fatal("expected HasRemoteSnapshotStore() to be true after attach")
+	}
+	if !tree.RemoteSnapshotEnabled() {
+		t.Fatal("expected RemoteSnapshotEnabled() to be true after attach")
+	}
+
+	ids := []int{10, 20, 30}
+	digest := insertRemoteL3Snapshot(t, tree, m, be, ids)
+	if got := tree.StageSnapshotToRemote(context.Background(), digest); got.Outcome != SnapshotTransferOK {
+		t.Fatalf("stage remote: %+v", got)
+	}
+
+	// Evict hot snapshot so lookup depends on remote L3 recovery.
+	if tree.EvictHotSnapshot(digest) != len(ids) {
+		t.Fatal("hot owner was not removed")
+	}
+
+	// 3. Call DetachRemoteSnapshotStore(context.Background()).
+	if err := tree.DetachRemoteSnapshotStore(context.Background()); err != nil {
+		t.Fatalf("DetachRemoteSnapshotStore: %v", err)
+	}
+
+	// 4. Verify HasRemoteSnapshotStore() is false.
+	if tree.HasRemoteSnapshotStore() {
+		t.Fatal("expected HasRemoteSnapshotStore() to be false after detach")
+	}
+	if tree.RemoteSnapshotEnabled() {
+		t.Fatal("expected RemoteSnapshotEnabled() to be false after detach")
+	}
+
+	// Detached lookup cannot restore from remote L3.
+	nMiss, snapMiss, _, _, _ := tree.LookupSnapshotTieredContext(context.Background(), ids)
+	tree.Done(nMiss)
+	if snapMiss != nil {
+		snapMiss.Close()
+		t.Fatal("expected nil snapshot when remote L3 store is detached")
+	}
+
+	// 5. Re-attach with AttachRemoteSnapshotStore.
+	if err := tree.AttachRemoteSnapshotStore(store, "synthetic-l3-test", be, m.Cfg); err != nil {
+		t.Fatalf("re-attach AttachRemoteSnapshotStore: %v", err)
+	}
+
+	// 6. Verify HasRemoteSnapshotStore() is true again and operations succeed.
+	if !tree.HasRemoteSnapshotStore() {
+		t.Fatal("expected HasRemoteSnapshotStore() to be true after re-attach")
+	}
+	if !tree.RemoteSnapshotEnabled() {
+		t.Fatal("expected RemoteSnapshotEnabled() to be true after re-attach")
+	}
+
+	n, snap, matched, tier, err := tree.LookupSnapshotTieredContext(context.Background(), ids)
+	if err != nil {
+		t.Fatalf("lookup after re-attach: %v", err)
+	}
+	defer tree.Done(n)
+	if snap == nil {
+		t.Fatal("expected recovered snapshot after re-attach, got nil")
+	}
+	defer snap.Close()
+	if tier != SnapshotTierRemoteL3 {
+		t.Fatalf("tier = %q, want %q", tier, SnapshotTierRemoteL3)
+	}
+	if matched != len(ids) {
+		t.Fatalf("matched = %d, want %d", matched, len(ids))
+	}
+
+	// Context cancellation check on detach.
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := tree.DetachRemoteSnapshotStore(canceledCtx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled error, got %v", err)
+	}
+	if !tree.HasRemoteSnapshotStore() {
+		t.Fatal("expected remote snapshot store to remain attached after canceled detach")
+	}
+
+	// Re-configuring via ConfigureRemoteSnapshotStore also works as expected.
+	if err := tree.ConfigureRemoteSnapshotStore(store, "synthetic-l3-test", be, m.Cfg); err != nil {
+		t.Fatalf("ConfigureRemoteSnapshotStore: %v", err)
+	}
+	if !tree.HasRemoteSnapshotStore() {
+		t.Fatal("expected HasRemoteSnapshotStore() to be true after ConfigureRemoteSnapshotStore")
+	}
+
+	// Nil receiver safety.
+	var nilTree *Tree
+	if nilTree.HasRemoteSnapshotStore() {
+		t.Fatal("expected nilTree.HasRemoteSnapshotStore() to be false")
+	}
+	if err := nilTree.DetachRemoteSnapshotStore(context.Background()); err != nil {
+		t.Fatalf("expected nilTree.DetachRemoteSnapshotStore() to return nil, got %v", err)
+	}
+	if err := nilTree.AttachRemoteSnapshotStore(store, "synthetic-l3-test", be, m.Cfg); err == nil {
+		t.Fatal("expected nilTree.AttachRemoteSnapshotStore() to return error, got nil")
+	}
+}
