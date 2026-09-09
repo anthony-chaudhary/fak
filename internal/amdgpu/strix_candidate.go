@@ -498,8 +498,8 @@ func (r *StrixCandidateRegistry) EvaluateCandidateWithOptions(result StrixAblati
 }
 
 // EvaluateReceipt evaluates all ablations contained in a validation receipt against the registry.
-// It enforces digest validation and fails closed on receipt invalidity or digest mismatch
-// rather than accepting mismatched or fabricated ablation evidence.
+// It requires physical credit eligibility before any candidate evaluation. The
+// current argmax-only credit envelope admits no ablations or scoreboard writes.
 func (r *StrixCandidateRegistry) EvaluateReceipt(receipt *StrixValidationReceipt) ([]StrixCandidateComparison, error) {
 	if receipt == nil {
 		return nil, fmt.Errorf("amdgpu: receipt is nil")
@@ -519,6 +519,9 @@ func (r *StrixCandidateRegistry) EvaluateReceipt(receipt *StrixValidationReceipt
 	}
 	if err := receipt.Validate(); err != nil {
 		return nil, fmt.Errorf("amdgpu: validation artifact invalid: %w", err)
+	}
+	if !receipt.CreditEligible() {
+		return nil, fmt.Errorf("amdgpu: validation artifact is not eligible for authenticated physical execution credit")
 	}
 
 	var comparisons []StrixCandidateComparison

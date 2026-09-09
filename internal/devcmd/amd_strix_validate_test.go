@@ -72,7 +72,7 @@ func stubAMDStrixCandidate(t *testing.T, archive []byte) (string, string) {
 	return filepath.Clean(root), digest
 }
 
-func creditableAMDStrixReceipt(t *testing.T, opts amdgpu.StrixValidationOpts) *amdgpu.StrixValidationReceipt {
+func structurallyValidAMDStrixReceipt(t *testing.T, opts amdgpu.StrixValidationOpts) *amdgpu.StrixValidationReceipt {
 	t.Helper()
 	target := amdgpu.StrixTarget{
 		Mode: "ssh", Host: "strix1", Reachable: true,
@@ -112,15 +112,15 @@ func creditableAMDStrixReceipt(t *testing.T, opts amdgpu.StrixValidationOpts) *a
 	if err := r.Validate(); err != nil {
 		t.Fatalf("test receipt is invalid: %v", err)
 	}
-	if !r.CreditEligible() {
-		t.Fatal("test receipt is not credit eligible")
+	if r.CreditEligible() {
+		t.Fatal("caller-authored test receipt unexpectedly minted physical credit")
 	}
 	return r
 }
 
 func noncreditFullMatrixLikeAMDStrixReceipt(t *testing.T, opts amdgpu.StrixValidationOpts) *amdgpu.StrixValidationReceipt {
 	t.Helper()
-	r := creditableAMDStrixReceipt(t, opts)
+	r := structurallyValidAMDStrixReceipt(t, opts)
 	evidence := r.Subkernels[0].Evidence
 	r.Subkernels = append(r.Subkernels, amdgpu.StrixSubkernelResult{
 		Name:       "matmul_f32",
@@ -175,11 +175,11 @@ func TestRunAMDStrixValidatePassesCanonicalArchiveFieldsUnchanged(t *testing.T) 
 	var captured amdgpu.StrixValidationOpts
 	runStrixValidationFn = func(_ context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
 		captured = opts
-		return creditableAMDStrixReceipt(t, opts), nil
+		return structurallyValidAMDStrixReceipt(t, opts), nil
 	}
 	var stdout, stderr bytes.Buffer
 	code := RunAMDStrixValidate(&stdout, &stderr, []string{
-		"--json", "--mine", "internal/amdgpu/strix_validation.go", "--mine", "internal/devcmd/amd_strix_validate.go",
+		"--evidence-only", "--json", "--mine", "internal/amdgpu/strix_validation.go", "--mine", "internal/devcmd/amd_strix_validate.go",
 		"--git-tip", testStrixTip, "--subkernels", "argmax", "--ablate", "none", "--timeout", "20", "--admission-timeout", "7",
 	})
 	if code != 0 {
@@ -381,11 +381,11 @@ func TestRunAMDStrixValidateRejectsResealedGitRefMismatchInBothModes(t *testing.
 	origRun := runStrixValidationFn
 	defer func() { runStrixValidationFn = origRun }()
 	runStrixValidationFn = func(_ context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
-		r := creditableAMDStrixReceipt(t, opts)
+		r := structurallyValidAMDStrixReceipt(t, opts)
 		r.Provenance.GitRef = testSHA256([]byte("different candidate"))
 		r.Digest, _ = r.ComputeDigest()
-		if err := r.Validate(); err != nil || !r.CreditEligible() {
-			t.Fatalf("GitRef mismatch fixture must otherwise be valid and creditable: validate=%v credit=%v", err, r.CreditEligible())
+		if err := r.Validate(); err != nil || r.CreditEligible() {
+			t.Fatalf("GitRef mismatch fixture must be structurally valid and non-credit: validate=%v credit=%v", err, r.CreditEligible())
 		}
 		return r, nil
 	}
@@ -471,7 +471,7 @@ func TestRunAMDStrixValidateEvidenceOnlyRejectsNonPassVerdicts(t *testing.T) {
 	for _, verdict := range []string{"FAIL", "SKIPPED"} {
 		t.Run(verdict, func(t *testing.T) {
 			runStrixValidationFn = func(_ context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
-				r := creditableAMDStrixReceipt(t, opts)
+				r := structurallyValidAMDStrixReceipt(t, opts)
 				r.Verdict = verdict
 				r.Verified = false
 				r.Digest, _ = r.ComputeDigest()
@@ -615,10 +615,10 @@ func TestRunAMDStrixCommandsRequireControllerAuthorityBeforeTransport(t *testing
 		}
 		runStrixValidationFn = func(_ context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
 			runCalls++
-			return creditableAMDStrixReceipt(t, opts), nil
+			return structurallyValidAMDStrixReceipt(t, opts), nil
 		}
 		var stdout, stderr bytes.Buffer
-		if code := RunAMDStrixValidate(&stdout, &stderr, []string{"--candidate-dir", root, "--mine=a.go", "--json", "--subkernels=argmax", "--ablate=none"}); code != 0 {
+		if code := RunAMDStrixValidate(&stdout, &stderr, []string{"--evidence-only", "--candidate-dir", root, "--mine=a.go", "--json", "--subkernels=argmax", "--ablate=none"}); code != 0 {
 			t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 		}
 		if authorityCalls != 1 || runCalls != 1 {

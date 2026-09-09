@@ -159,6 +159,9 @@ func sealReceipt(t *testing.T, r *StrixValidationReceipt) {
 			r.Verdict = "SKIPPED"
 			r.Verified = false
 		}
+		if r.Verdict == "PASS" && r.Verified {
+			authorizeStrixReceiptForTest(t, r)
+		}
 	}
 	digest, err := r.ComputeDigest()
 	if err != nil {
