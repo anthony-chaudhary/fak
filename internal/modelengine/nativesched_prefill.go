@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelperfobs"
+	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
 
 // The resident Qwen hybrid panel path requires a 16-token fresh chunk. Later
@@ -55,6 +57,230 @@ type nativeSchedulerEvent struct {
 	Token      int
 }
 
+// PrefixTree abstracts prefix residency queries for NativeScheduler.
+// *radixkv.Tree satisfies this interface.
+type PrefixTree interface {
+	MatchLen(tokens []int) int
+}
+
+// PrefixStats records prefix lookup metrics.
+type PrefixStats struct {
+	Lookups       uint64
+	Hits          uint64
+	FullHits      uint64
+	PartialHits   uint64
+	Misses        uint64
+	MatchedTokens uint64
+}
+
+type prefixHitInfo struct {
+	matched  int
+	boundary *radixkv.Node
+	fullHit  bool
+	applied  bool
+}
+
+type nativePrefixState struct {
+	mu            sync.RWMutex
+	tree          *radixkv.Tree
+	prefixTree    PrefixTree
+	stats         PrefixStats
+	holderLookups map[*model.Session]*prefixHitInfo
+	laneLookups   map[*schedLane]*prefixHitInfo
+}
+
+var (
+	nativePrefixStateMu sync.RWMutex
+	nativePrefixStates  = make(map[*NativeScheduler]*nativePrefixState)
+)
+
+func (s *NativeScheduler) getPrefixState() *nativePrefixState {
+	if s == nil {
+		return nil
+	}
+	nativePrefixStateMu.RLock()
+	defer nativePrefixStateMu.RUnlock()
+	return nativePrefixStates[s]
+}
+
+func (s *NativeScheduler) getOrCreatePrefixState() *nativePrefixState {
+	if s == nil {
+		return nil
+	}
+	nativePrefixStateMu.Lock()
+	defer nativePrefixStateMu.Unlock()
+	st := nativePrefixStates[s]
+	if st == nil {
+		st = &nativePrefixState{
+			holderLookups: make(map[*model.Session]*prefixHitInfo),
+			laneLookups:   make(map[*schedLane]*prefixHitInfo),
+		}
+		nativePrefixStates[s] = st
+	}
+	return st
+}
+
+// SetRadixKV installs a RadixKV prefix tree for prefix-cache-aware prefill scheduling.
+func (s *NativeScheduler) SetRadixKV(tree *radixkv.Tree) {
+	st := s.getOrCreatePrefixState()
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.tree = tree
+	if tree != nil {
+		st.prefixTree = tree
+	}
+}
+
+// RadixKV returns the installed RadixKV prefix tree, if any.
+func (s *NativeScheduler) RadixKV() *radixkv.Tree {
+	st := s.getPrefixState()
+	if st == nil {
+		return nil
+	}
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	return st.tree
+}
+
+// SetPrefixTree installs a generic PrefixTree for prefix-cache-aware prefill scheduling.
+func (s *NativeScheduler) SetPrefixTree(pt PrefixTree) {
+	st := s.getOrCreatePrefixState()
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.prefixTree = pt
+	if tree, ok := pt.(*radixkv.Tree); ok {
+		st.tree = tree
+	}
+}
+
+// PrefixTree returns the installed PrefixTree, if any.
+func (s *NativeScheduler) PrefixTree() PrefixTree {
+	st := s.getPrefixState()
+	if st == nil {
+		return nil
+	}
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	return st.prefixTree
+}
+
+// PrefixStats returns metrics for prefix lookups performed by the scheduler.
+func (s *NativeScheduler) PrefixStats() PrefixStats {
+	st := s.getPrefixState()
+	if st == nil {
+		return PrefixStats{}
+	}
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	return st.stats
+}
+
+func (s *NativeScheduler) lookupPrefix(prompt []int) (int, *radixkv.Node) {
+	st := s.getPrefixState()
+	if st == nil || len(prompt) == 0 {
+		return 0, nil
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.tree != nil {
+		boundary, matched := st.tree.Lookup(prompt)
+		st.stats.Lookups++
+		if matched > 0 {
+			st.stats.Hits++
+			st.stats.MatchedTokens += uint64(matched)
+			if matched == len(prompt) {
+				st.stats.FullHits++
+			} else {
+				st.stats.PartialHits++
+			}
+		} else {
+			st.stats.Misses++
+		}
+		return matched, boundary
+	}
+	if st.prefixTree != nil {
+		matched := st.prefixTree.MatchLen(prompt)
+		st.stats.Lookups++
+		if matched > 0 {
+			st.stats.Hits++
+			st.stats.MatchedTokens += uint64(matched)
+			if matched == len(prompt) {
+				st.stats.FullHits++
+			} else {
+				st.stats.PartialHits++
+			}
+		} else {
+			st.stats.Misses++
+		}
+		return matched, nil
+	}
+	return 0, nil
+}
+
+func (s *NativeScheduler) recordPrefixLookup(sess *model.Session, prompt []int, matched int, boundary *radixkv.Node) {
+	st := s.getPrefixState()
+	if st == nil || sess == nil {
+		return
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	info := &prefixHitInfo{
+		matched:  matched,
+		boundary: boundary,
+		fullHit:  matched == len(prompt),
+	}
+	st.holderLookups[sess] = info
+}
+
+func (s *NativeScheduler) getPrefixHitInfo(ln *schedLane) *prefixHitInfo {
+	st := s.getPrefixState()
+	if st == nil || ln == nil {
+		return nil
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if info, ok := st.laneLookups[ln]; ok {
+		return info
+	}
+	if ln.sess != nil {
+		if info, ok := st.holderLookups[ln.sess]; ok {
+			st.laneLookups[ln] = info
+			return info
+		}
+	}
+	return nil
+}
+
+func (s *NativeScheduler) clearPrefixLookup(sess *model.Session) {
+	st := s.getPrefixState()
+	if st == nil || sess == nil {
+		return
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if info, ok := st.holderLookups[sess]; ok {
+		if info.boundary != nil && st.tree != nil {
+			st.tree.Done(info.boundary)
+			info.boundary = nil
+		}
+		delete(st.holderLookups, sess)
+	}
+}
+
+func (s *NativeScheduler) maybeInsertRadixKV(prompt []int, sess *model.Session, logits []float32) {
+	st := s.getPrefixState()
+	if st == nil || st.tree == nil || sess == nil || sess.Cache == nil {
+		return
+	}
+	boundary, matched := st.tree.Lookup(prompt)
+	if matched < len(prompt) {
+		leaf := st.tree.InsertWithLogits(boundary, prompt[matched:], sess.Cache, logits)
+		st.tree.Done(leaf)
+	} else {
+		st.tree.Done(boundary)
+	}
+}
+
 // SetQwenPrefillMaxTokensPerIteration enables bounded scheduler-owned prefill for
 // supported resident Qwen Q4_K admissions. The zero value and tokens<=0 preserve
 // synchronous admission. A positive ceiling below the resident fresh-panel minimum
@@ -95,7 +321,24 @@ func (s *NativeScheduler) qwenPrefillChunkBudget(prep schedPrepare, sess *model.
 		!nativeQwenResidentAppendEligible(s.m.Cfg, promptLen) {
 		return 0
 	}
-	return budget
+
+	// Acceptance criteria 1: query prefix cache depth during admission.
+	matched, boundary := s.lookupPrefix(prep.prompt)
+	if matched > 0 {
+		s.recordPrefixLookup(sess, prep.prompt, matched, boundary)
+	}
+
+	// Calculate chunked prefill step sizes based on uncached suffix length.
+	suffixLen := promptLen - matched
+	if suffixLen <= 0 {
+		return budget
+	}
+
+	stepSize := budget
+	if suffixLen < stepSize && suffixLen >= nativeQwenPrefillMinChunkTokens {
+		stepSize = suffixLen
+	}
+	return stepSize
 }
 
 // nativeQwenResidentAppendEligible exactly mirrors the model-owned
@@ -130,6 +373,7 @@ func nativeQwenResidentAppendEligible(cfg model.Config, promptLen int) bool {
 // lane cannot be swapped or recomputed from prompt+generated history because its
 // prompt cursor and recurrent state are not represented by that restore contract.
 func (s *NativeScheduler) enforcePreemptionPreservingPrefillLocked() {
+	s.applyPrefixHitsLocked()
 	if !s.preemptionEnabledLocked() {
 		return
 	}
@@ -143,6 +387,50 @@ func (s *NativeScheduler) enforcePreemptionPreservingPrefillLocked() {
 			ln.finish(nil, err)
 		}
 		s.lanes = append(s.lanes[:idx], s.lanes[idx+1:]...)
+	}
+}
+
+func (s *NativeScheduler) applyPrefixHitsLocked() {
+	for _, ln := range s.lanes {
+		if ln == nil || ln.state != schedLanePrefilling || ln.promptCursor != 0 {
+			continue
+		}
+		info := s.getPrefixHitInfo(ln)
+		if info == nil || info.applied {
+			continue
+		}
+		if info.fullHit {
+			info.applied = true
+			ln.promptCursor = len(ln.prompt)
+			ln.promptLen = len(ln.prompt)
+			ln.state = schedLaneDecode
+			ln.prefillChunkTokens = 0
+			if info.boundary != nil && info.boundary.KV() != nil && ln.sess != nil {
+				ln.sess.Cache = info.boundary.KV().Clone()
+			}
+			if info.boundary != nil && len(info.boundary.Logits()) > 0 {
+				ln.logits = copyF32(info.boundary.Logits())
+			} else if len(ln.logits) == 0 && ln.sess != nil && ln.sess.M != nil && len(ln.prompt) > 0 {
+				tempSess := s.m.NewSession()
+				tempSess.Quant = true
+				tempSess.Q4K = true
+				ln.logits = copyF32(tempSess.Prefill(ln.prompt))
+				tempSess.Close()
+			}
+			s.observeEvent(nativeSchedulerEvent{
+				Iteration: s.iteration + 1,
+				Kind:      nativeSchedulerEventTransition,
+				Lane:      ln,
+				State:     schedLaneDecode,
+			})
+		} else if info.matched > 0 {
+			info.applied = true
+			ln.promptCursor = info.matched
+			ln.promptLen = info.matched
+			if info.boundary != nil && info.boundary.KV() != nil && ln.sess != nil {
+				ln.sess.Cache = info.boundary.KV().Clone()
+			}
+		}
 	}
 }
 
@@ -201,6 +489,48 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 		s.mu.Unlock()
 		return
 	}
+
+	// Apply any pending prefix cache hit before starting chunks.
+	if ln.promptCursor == 0 {
+		info := s.getPrefixHitInfo(ln)
+		if info != nil && !info.applied {
+			if info.fullHit {
+				info.applied = true
+				ln.promptCursor = len(ln.prompt)
+				ln.promptLen = len(ln.prompt)
+				ln.state = schedLaneDecode
+				ln.prefillChunkTokens = 0
+				if info.boundary != nil && info.boundary.KV() != nil && ln.sess != nil {
+					ln.sess.Cache = info.boundary.KV().Clone()
+				}
+				if info.boundary != nil && len(info.boundary.Logits()) > 0 {
+					ln.logits = copyF32(info.boundary.Logits())
+				} else if len(ln.logits) == 0 && ln.sess != nil && ln.sess.M != nil && len(ln.prompt) > 0 {
+					tempSess := s.m.NewSession()
+					tempSess.Quant = true
+					tempSess.Q4K = true
+					ln.logits = copyF32(tempSess.Prefill(ln.prompt))
+					tempSess.Close()
+				}
+				s.mu.Unlock()
+				s.observeEvent(nativeSchedulerEvent{
+					Iteration: iteration,
+					Kind:      nativeSchedulerEventTransition,
+					Lane:      ln,
+					State:     schedLaneDecode,
+				})
+				return
+			} else if info.matched > 0 {
+				info.applied = true
+				ln.promptCursor = info.matched
+				ln.promptLen = info.matched
+				if info.boundary != nil && info.boundary.KV() != nil && ln.sess != nil {
+					ln.sess.Cache = info.boundary.KV().Clone()
+				}
+			}
+		}
+	}
+
 	start := ln.promptCursor
 	if start < 0 || start >= len(ln.prompt) || ln.prefillChunkTokens < nativeQwenPrefillMinChunkTokens {
 		ln.finish(nil, errNativeSchedulerLaneNotDecodeReady)
@@ -260,6 +590,7 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 	if final {
 		ln.logits = logits
 		ln.state = schedLaneDecode
+		s.maybeInsertRadixKV(ln.prompt, ln.sess, logits)
 	}
 	s.mu.Unlock()
 
@@ -333,6 +664,7 @@ func (s *NativeScheduler) closeLaneSession(sess *model.Session) {
 	if sess == nil {
 		return
 	}
+	s.clearPrefixLookup(sess)
 	if s != nil && s.closeSession != nil {
 		s.closeSession(sess)
 		return
