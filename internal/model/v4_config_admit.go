@@ -18,20 +18,26 @@ func AdmitDeepSeekV4Config(c Config) error {
 	if !c.IsDeepSeekV4() {
 		return fmt.Errorf("%w: model_type=%q", ErrV4ConfigAdmission, c.ModelType)
 	}
+	supportedProfile := (c.NumLayers == 61 &&
+		c.HiddenSize == 7168 &&
+		c.NumExperts == 384 &&
+		c.MoEIntermediateSize == 3072 &&
+		c.RoutedScalingFactor == 2.5) ||
+		(c.NumLayers == 43 &&
+			c.HiddenSize == 4096 &&
+			c.NumExperts == 256 &&
+			c.MoEIntermediateSize == 2048 &&
+			c.RoutedScalingFactor == 1.5)
 	checks := []struct {
 		name string
 		ok   bool
 		got  any
 	}{
-		{"num_hidden_layers", c.NumLayers == 61, c.NumLayers},
-		{"hidden_size", c.HiddenSize == 7168, c.HiddenSize},
-		{"n_routed_experts", c.NumExperts == 384, c.NumExperts},
+		{"profile", supportedProfile, fmt.Sprintf("layers=%d hidden=%d experts=%d moe_intermediate=%d route_scale=%g", c.NumLayers, c.HiddenSize, c.NumExperts, c.MoEIntermediateSize, c.RoutedScalingFactor)},
 		{"num_experts_per_tok", c.NumExpertsPerTok == 6, c.NumExpertsPerTok},
-		{"moe_intermediate_size", c.MoEIntermediateSize == 3072, c.MoEIntermediateSize},
 		{"n_shared_experts", c.NSharedExperts == 1, c.NSharedExperts},
 		{"expert_dtype", c.ExpertDtype == "fp4", c.ExpertDtype},
 		{"norm_topk_prob", c.NormTopKProb, c.NormTopKProb},
-		{"routed_scaling_factor", c.RoutedScalingFactor == 2.5, c.RoutedScalingFactor},
 		{"scoring_func", c.ScoringFunc == "sqrtsoftplus", c.ScoringFunc},
 		{"topk_method", c.TopKMethod == "noaux_tc", c.TopKMethod},
 		{"swiglu_limit", c.SwigluLimit >= 0 && !math.IsNaN(c.SwigluLimit) && !math.IsInf(c.SwigluLimit, 0), c.SwigluLimit},

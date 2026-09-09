@@ -9,7 +9,7 @@ import (
 )
 
 // ErrV4ExpertQuantMetadata identifies a routed-expert weight/scale pair that
-// does not match the immutable DeepSeek-V4-Pro safetensors contract.
+// does not match an admitted DeepSeek-V4 safetensors contract.
 var ErrV4ExpertQuantMetadata = errors.New("model: invalid V4 expert quant metadata")
 
 // v4ExpertE2M1Values is the OCP MX E2M1 finite value table indexed by
@@ -33,8 +33,15 @@ var v4ExpertQuantSpecs = map[string]v4ExpertQuantSpec{
 	"w3": {weightRows: 3072, weightCols: 3584, scaleRows: 3072, scaleCols: 224},
 }
 
+var v4FlashExpertQuantSpecs = map[string]v4ExpertQuantSpec{
+	"w1": {weightRows: 2048, weightCols: 2048, scaleRows: 2048, scaleCols: 128},
+	"w2": {weightRows: 4096, weightCols: 1024, scaleRows: 4096, scaleCols: 64},
+	"w3": {weightRows: 2048, weightCols: 2048, scaleRows: 2048, scaleCols: 128},
+}
+
 // decodeV4ExpertQuant decodes the exact routed-expert format observed in
-// deepseek-ai/DeepSeek-V4-Pro@b5968e9190ef611bbf34a7229255be88a0e937c1.
+// deepseek-ai/DeepSeek-V4-Pro@b5968e9190ef611bbf34a7229255be88a0e937c1
+// and DeepSeek-V4-Flash-0731@7872f01b1d1fe23eabc4c98b48bffcef5a386062.
 // The pinned inference code views each byte as torch.float4_e2m1fn_x2 and
 // applies one F8_E8M0 scale per 32 unpacked K values. PyTorch's OCP type
 // definition establishes low-nibble val0/high-nibble val1 ordering. The
@@ -44,7 +51,6 @@ func decodeV4ExpertQuant(weightName, scaleName string, weightEntry, scaleEntry s
 	if err != nil {
 		return nil, nil, err
 	}
-	spec := v4ExpertQuantSpecs[projection]
 	wantScaleName := stem + projection + ".scale"
 	if scaleName != wantScaleName {
 		return nil, nil, v4QuantMetadataf("scale name %q, want %q", scaleName, wantScaleName)
@@ -56,11 +62,9 @@ func decodeV4ExpertQuant(weightName, scaleName string, weightEntry, scaleEntry s
 	if scaleEntry.Dtype != "F8_E8M0" {
 		return nil, nil, v4QuantMetadataf("%s dtype %q, want F8_E8M0", scaleName, scaleEntry.Dtype)
 	}
-	if !sameShape(weightEntry.Shape, []int{spec.weightRows, spec.weightCols}) {
-		return nil, nil, v4QuantMetadataf("%s shape %v, want [%d %d]", weightName, weightEntry.Shape, spec.weightRows, spec.weightCols)
-	}
-	if !sameShape(scaleEntry.Shape, []int{spec.scaleRows, spec.scaleCols}) {
-		return nil, nil, v4QuantMetadataf("%s shape %v, want [%d %d]", scaleName, scaleEntry.Shape, spec.scaleRows, spec.scaleCols)
+	spec, ok := selectV4ExpertQuantSpec(projection, weightEntry.Shape, scaleEntry.Shape)
+	if !ok {
+		return nil, nil, v4QuantMetadataf("%s shape %v with %s shape %v does not match a supported V4 profile", weightName, weightEntry.Shape, scaleName, scaleEntry.Shape)
 	}
 	if spec.weightCols != spec.scaleCols*16 {
 		return nil, nil, v4QuantMetadataf("%s scale ratio %d:%d, want 16 packed weight bytes per scale", weightName, spec.weightCols, spec.scaleCols)
@@ -108,6 +112,19 @@ func decodeV4ExpertQuant(weightName, scaleName string, weightEntry, scaleEntry s
 		}
 	}
 	return out, []int{spec.weightRows, unpackedCols}, nil
+}
+
+func selectV4ExpertQuantSpec(projection string, weightShape, scaleShape []int) (v4ExpertQuantSpec, bool) {
+	for _, spec := range [...]v4ExpertQuantSpec{
+		v4ExpertQuantSpecs[projection],
+		v4FlashExpertQuantSpecs[projection],
+	} {
+		if sameShape(weightShape, []int{spec.weightRows, spec.weightCols}) &&
+			sameShape(scaleShape, []int{spec.scaleRows, spec.scaleCols}) {
+			return spec, true
+		}
+	}
+	return v4ExpertQuantSpec{}, false
 }
 
 func parseV4ExpertQuantWeightName(name string) (stem, projection string, err error) {
