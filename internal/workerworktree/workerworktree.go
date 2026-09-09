@@ -107,6 +107,9 @@ const (
 	ReapCodeTimeout                = "REAP_TIMEOUT"
 	ReapCodeRemoved                = "WORKTREE_REAPED"
 	ReapCodeReleased               = "WORKTREE_RELEASED"
+
+	PrepareCodeOrphanTargetRefused = "ORPHAN_TARGET_REFUSED"
+	RecoveryActionOrphanTarget     = "adjudicate ownership/liveness of orphan target before managed reap and retry"
 	keyHashLen                     = 12
 )
 
@@ -148,18 +151,19 @@ func IsolationBackends() []IsolationBackend {
 // Result is the fail-open outcome of a git-touching op. OK is the one bit callers
 // branch on; the rest carries evidence for the record/log.
 type Result struct {
-	OK        bool   `json:"ok"`
-	Code      string `json:"code,omitempty"`
-	Backend   string `json:"backend,omitempty"`
-	Path      string `json:"path,omitempty"`
-	BaseSHA   string `json:"base_sha,omitempty"`
-	Reused    bool   `json:"reused,omitempty"`
-	Applied   bool   `json:"applied,omitempty"`
-	Committed bool   `json:"committed,omitempty"`
-	Removed   bool   `json:"removed,omitempty"`
-	Preserved bool   `json:"preserved,omitempty"`
-	Reason    string `json:"reason,omitempty"`
-	Detail    string `json:"detail,omitempty"`
+	OK             bool   `json:"ok"`
+	Code           string `json:"code,omitempty"`
+	Backend        string `json:"backend,omitempty"`
+	Path           string `json:"path,omitempty"`
+	BaseSHA        string `json:"base_sha,omitempty"`
+	Reused         bool   `json:"reused,omitempty"`
+	Applied        bool   `json:"applied,omitempty"`
+	Committed      bool   `json:"committed,omitempty"`
+	Removed        bool   `json:"removed,omitempty"`
+	Preserved      bool   `json:"preserved,omitempty"`
+	Reason         string `json:"reason,omitempty"`
+	Detail         string `json:"detail,omitempty"`
+	RecoveryAction string `json:"recovery_action,omitempty"`
 	// SupersededBy is populated only after the named commit is proven to be on
 	// current trunk ancestry and byte-equivalent to the managed worktree.
 	SupersededBy string `json:"superseded_by,omitempty"`
@@ -707,6 +711,16 @@ func (gitWorktree) MaterializeOwned(root, lane, key, baseSHA, wtRoot string, git
 					return Result{OK: true, Path: wt, BaseSHA: base, Reused: true}
 				}
 			}
+		}
+		return Result{
+			OK:             false,
+			Code:           PrepareCodeOrphanTargetRefused,
+			Path:           wt,
+			BaseSHA:        base,
+			Preserved:      true,
+			Reason:         "orphan target refused: target exists on disk but is not registered in git worktree list",
+			Detail:         "managed ownership/liveness adjudication required before reap and retry; common git state preserved without mutation",
+			RecoveryAction: RecoveryActionOrphanTarget,
 		}
 	}
 	// #3572 warm pool: hand this worker an ALREADY-materialized idle worktree of its

@@ -1,6 +1,7 @@
 package workerworktree
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -2201,5 +2202,144 @@ func TestIsWindowsAbsolutePath(t *testing.T) {
 		if got := isWindowsAbsolutePath(tc.path); got != tc.want {
 			t.Errorf("isWindowsAbsolutePath(%q) = %v, want %v", tc.path, got, tc.want)
 		}
+	}
+}
+
+func TestPrepareWindowsOrphanTargetPreservesCommonGitState(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("skipping Windows orphan target test on non-windows platform")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+
+	repo := t.TempDir()
+	reapProofGit(t, repo, "init", "-q", "-b", "main")
+	reapProofGit(t, repo, "config", "user.email", "orphan-test@test")
+	reapProofGit(t, repo, "config", "user.name", "orphan test")
+	reapProofGit(t, repo, "config", "commit.gpgsign", "false")
+	reapProofGit(t, repo, "config", "core.filemode", "false")
+
+	// Commit initial file so HEAD is valid
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("# repo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reapProofGit(t, repo, "add", "README.md")
+	reapProofGit(t, repo, "commit", "-q", "-m", "initial commit")
+	base := strings.TrimSpace(reapProofGit(t, repo, "rev-parse", "HEAD"))
+
+	wtRoot := t.TempDir()
+	lane := "amdgpu-strix-controller-authority"
+	key := "issue-12295"
+	targetPath := Path(lane, key, wtRoot)
+
+	// Construct pre-existing unregistered orphan target shape
+	if err := os.MkdirAll(targetPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sentinelFile := filepath.Join(targetPath, "orphan-sentinel.txt")
+	sentinelContent := []byte("orphan target sentinel content: do not delete or overwrite\n")
+	if err := os.WriteFile(sentinelFile, sentinelContent, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Confirm target is NOT listed in git worktree list
+	wtList := reapProofGit(t, repo, "worktree", "list", "--porcelain")
+	for _, p := range parseWorktreePaths(wtList) {
+		if samePath(p, targetPath) {
+			t.Fatalf("target %q must be unregistered in git worktree list, but found", targetPath)
+		}
+	}
+
+	// Snapshot common .git/config bytes
+	configPath := filepath.Join(repo, ".git", "config")
+	configBefore, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("reading common .git/config: %v", err)
+	}
+
+	// Snapshot lock paths
+	indexLockPath := filepath.Join(repo, ".git", "index.lock")
+	if _, err := os.Stat(indexLockPath); err == nil {
+		t.Fatalf("expected no index.lock before prepare")
+	}
+
+	// Track all executed git commands to verify zero mutating subcommands
+	var mutatingCommands []string
+	recordingGit := func(dir string, args []string) (int, string) {
+		cmdStr := strings.Join(args, " ")
+		for _, mut := range []string{"worktree add", "worktree remove", "worktree prune", "checkout", "reset"} {
+			if strings.Contains(cmdStr, mut) {
+				mutatingCommands = append(mutatingCommands, cmdStr)
+			}
+		}
+		return defaultGit(dir, args)
+	}
+
+	// Call the real prepare path
+	res := Prepare(repo, lane, key, base, wtRoot, recordingGit)
+
+	// 1. Assert typed refusal
+	if res.OK {
+		t.Fatalf("expected prepare to refuse unregistered orphan target, got OK: %+v", res)
+	}
+	if res.Code != PrepareCodeOrphanTargetRefused {
+		t.Fatalf("expected refusal code %q, got %q", PrepareCodeOrphanTargetRefused, res.Code)
+	}
+	if !res.Preserved {
+		t.Fatalf("expected Preserved=true on orphan target refusal, got false")
+	}
+	if res.RecoveryAction != RecoveryActionOrphanTarget {
+		t.Fatalf("expected RecoveryAction %q, got %q", RecoveryActionOrphanTarget, res.RecoveryAction)
+	}
+
+	// 2. Assert intact target sentinel
+	readSentinel, err := os.ReadFile(sentinelFile)
+	if err != nil {
+		t.Fatalf("sentinel file missing after prepare: %v", err)
+	}
+	if !bytes.Equal(readSentinel, sentinelContent) {
+		t.Fatalf("sentinel content was modified: got %q, want %q", string(readSentinel), string(sentinelContent))
+	}
+
+	// 3. Assert byte-identical common .git/config
+	configAfter, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("reading common .git/config after prepare: %v", err)
+	}
+	if !bytes.Equal(configBefore, configAfter) {
+		t.Fatalf("common .git/config mutated!\nBefore:\n%s\nAfter:\n%s", string(configBefore), string(configAfter))
+	}
+
+	// 4. Assert identical lock inventory (no orphaned index.lock)
+	if _, err := os.Stat(indexLockPath); err == nil {
+		t.Fatalf("stranded index.lock found after prepare refusal at %s", indexLockPath)
+	}
+
+	// 5. Assert zero mutating worktree/index subcommands
+	if len(mutatingCommands) > 0 {
+		t.Fatalf("mutating git commands were executed: %v", mutatingCommands)
+	}
+
+	// Also verify that PrepareOwnedBounded exhibits the identical safe containment
+	mutatingCommands = nil
+	owner := OwnerStamp{PID: os.Getpid(), LeaseID: "lease-orphan-test"}
+	resBounded := PrepareOwnedBounded(repo, lane, key, base, wtRoot, owner, 30*time.Second)
+	if resBounded.OK {
+		t.Fatalf("expected PrepareOwnedBounded to refuse, got OK")
+	}
+	if resBounded.Code != PrepareCodeOrphanTargetRefused {
+		t.Fatalf("expected PrepareOwnedBounded code %q, got %q", PrepareCodeOrphanTargetRefused, resBounded.Code)
+	}
+	if !resBounded.Preserved {
+		t.Fatalf("expected PrepareOwnedBounded Preserved=true, got false")
+	}
+	configAfterBounded, err := os.ReadFile(configPath)
+	if err != nil || !bytes.Equal(configBefore, configAfterBounded) {
+		t.Fatalf("common .git/config mutated after PrepareOwnedBounded")
+	}
+	readSentinelBounded, err := os.ReadFile(sentinelFile)
+	if err != nil || !bytes.Equal(readSentinelBounded, sentinelContent) {
+		t.Fatalf("sentinel corrupted after PrepareOwnedBounded")
 	}
 }
