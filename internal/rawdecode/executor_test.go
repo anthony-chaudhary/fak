@@ -20,6 +20,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
 type fakeSession struct {
@@ -351,6 +352,230 @@ func TestRawDecodeExecutorCarriesEmbeddedTokenizerTemplateIdentity(t *testing.T)
 	}
 }
 
+func TestRawDecodeOutputTextIsArtifactOwnedAndRunnerSealed(t *testing.T) {
+	compressed, err := os.ReadFile(filepath.Join("..", "ggufload", "testdata", "qwen38_ud_q2kxl_header.gguf.gz"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(compressed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(io.LimitReader(zr, 16<<20))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := zr.Close(); err != nil {
+		t.Fatal(err)
+	}
+	openBytes := func(string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(raw)), nil }
+	artifact, err := inspectGGUFArtifact("fixture.gguf", openBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ggufload.Read(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata, ok := parsed.GGMLTokenizer()
+	if !ok {
+		t.Fatal("fixture has no parsed GGML tokenizer")
+	}
+	expectedTokenizer, err := tokenizer.FromGGML(metadata.Tokens, metadata.Merges, metadata.TokenTypes, metadata.Pre)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, err := expectedTokenizer.Decode([]int{0})
+	if err != nil || expected == "" {
+		t.Fatalf("fixture token 0 decode = %q, %v", expected, err)
+	}
+
+	run := func(observed artifactObservation, tokenID, vocabSize, repetitions int) (Execution, error) {
+		logits := make([]float32, vocabSize)
+		logits[tokenID] = 1
+		config := model.Config{VocabSize: vocabSize, EOSTokenID: -1}
+		m := &fakeLoadedModel{candidate: &fakeSession{outputs: [][]float32{logits}}, config: &config}
+		d := dependencies{
+			openArtifact: openBytes,
+			inspectArtifact: func(string, func(string) (io.ReadCloser, error)) (artifactObservation, error) {
+				return observed, nil
+			},
+			loadModel: func(context.Context, Request) (loadedModel, string, error) { return m, "fixture", nil },
+			resolveBackend: func(Request) (compute.Backend, BackendObservation, error) {
+				return nil, BackendObservation{Selected: "legacy"}, nil
+			},
+			now: fakeClock(),
+		}
+		return d.execute(context.Background(), Request{
+			ArtifactPath: observed.Path, ExpectedArtifactSHA256: observed.SHA256,
+			PromptTokenIDs: []int{0}, ContextLimit: 2, GeneratedTokenLimit: 1, Repetitions: repetitions,
+		})
+	}
+
+	execution, err := run(artifact, 0, 3, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for repetition := range execution.Runs {
+		observation, ok := execution.OutputTextObservation(repetition)
+		if !ok {
+			t.Fatalf("output text observation %d unavailable", repetition)
+		}
+		if text, ok := observation.Text(); !ok || text != expected {
+			t.Fatalf("output text %d = %q, %v; want %q", repetition, text, ok, expected)
+		}
+	}
+
+	mutatedTokens := execution
+	mutatedTokens.Runs = slices.Clone(execution.Runs)
+	mutatedTokens.Runs[0].GeneratedTokens = slices.Clone(execution.Runs[0].GeneratedTokens)
+	mutatedTokens.Runs[0].GeneratedTokens[0]++
+	if _, ok := mutatedTokens.OutputTextObservation(0); ok {
+		t.Fatal("public token mutation retained output-text authority")
+	}
+	permuted := execution
+	permuted.Runs = slices.Clone(execution.Runs)
+	permuted.Runs[0], permuted.Runs[1] = permuted.Runs[1], permuted.Runs[0]
+	if _, ok := permuted.OutputTextObservation(0); ok {
+		t.Fatal("cross-run permutation retained output-text authority")
+	}
+	other, err := run(artifact, 0, 3, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transplanted := execution
+	transplanted.Runs = slices.Clone(execution.Runs)
+	transplanted.Runs[0] = other.Runs[0]
+	if _, ok := transplanted.OutputTextObservation(0); ok {
+		t.Fatal("cross-execution transplant retained output-text authority")
+	}
+	for name, mutate := range map[string]func(*Execution){
+		"request":  func(got *Execution) { got.ContextLimit++ },
+		"artifact": func(got *Execution) { got.ArtifactSHA256 = strings.Repeat("0", sha256.Size*2) },
+		"model":    func(got *Execution) { got.ModelName = "other" },
+	} {
+		t.Run("binding "+name, func(t *testing.T) {
+			drifted := execution
+			mutate(&drifted)
+			if _, ok := drifted.OutputTextObservation(0); ok {
+				t.Fatal("execution binding drift retained output-text authority")
+			}
+		})
+	}
+
+	missing := artifact
+	missing.outputTokenizer = nil
+	if got, err := run(missing, 0, 3, 1); err != nil {
+		t.Fatal(err)
+	} else if observation, ok := got.OutputTextObservation(0); ok || !reflect.DeepEqual(observation, OutputTextObservation{}) {
+		t.Fatalf("missing tokenizer metadata gained output-text authority: %+v, %v", observation, ok)
+	}
+	cloneParsed := func() *ggufload.File {
+		cloned := *parsed
+		cloned.Metadata = make(map[string]ggufload.Value, len(parsed.Metadata))
+		for key, value := range parsed.Metadata {
+			cloned.Metadata[key] = value
+		}
+		return &cloned
+	}
+	for _, key := range []string{"tokenizer.ggml.pre", "tokenizer.ggml.token_type"} {
+		t.Run("optional metadata absent "+key, func(t *testing.T) {
+			withoutOptional := cloneParsed()
+			delete(withoutOptional.Metadata, key)
+			observed := artifact
+			observed.outputTokenizer = buildArtifactOutputTokenizerFromGGUF(withoutOptional)
+			got, err := run(observed, 0, 3, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := got.OutputTextObservation(0); !ok {
+				t.Fatalf("valid absence of %s lost output-text authority", key)
+			}
+		})
+	}
+	for name, malformedValue := range map[string]struct {
+		key   string
+		value ggufload.Value
+	}{
+		"pre wrong type": {
+			key: "tokenizer.ggml.pre", value: ggufload.Value{Type: ggufload.TypeUint32, Value: uint32(1)},
+		},
+		"token type wrong type": {
+			key: "tokenizer.ggml.token_type", value: ggufload.Value{Type: ggufload.TypeString, Value: "wrong"},
+		},
+		"token type wrong element type": {
+			key: "tokenizer.ggml.token_type", value: ggufload.Value{Type: ggufload.TypeArray, Value: []ggufload.Value{{Type: ggufload.TypeString, Value: "wrong"}}},
+		},
+	} {
+		t.Run("malformed metadata "+name, func(t *testing.T) {
+			malformedParsed := cloneParsed()
+			malformedParsed.Metadata[malformedValue.key] = malformedValue.value
+			observed := artifact
+			observed.outputTokenizer = buildArtifactOutputTokenizerFromGGUF(malformedParsed)
+			if observed.outputTokenizer != nil {
+				t.Fatal("malformed present tokenizer metadata built a decoder")
+			}
+			got, err := run(observed, 0, 3, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := got.OutputTextObservation(0); ok {
+				t.Fatal("malformed present tokenizer metadata gained output-text authority")
+			}
+		})
+	}
+	malformed := artifact
+	malformed.outputTokenizer = buildArtifactOutputTokenizer(&ggufload.GGMLTokenizer{
+		Tokens: []string{"a", "b"}, Merges: []string{"malformed"},
+	})
+	if malformed.outputTokenizer != nil {
+		t.Fatal("malformed tokenizer metadata built a decoder")
+	}
+	if got, err := run(malformed, 0, 3, 1); err != nil {
+		t.Fatal(err)
+	} else if _, ok := got.OutputTextObservation(0); ok {
+		t.Fatal("malformed tokenizer metadata gained output-text authority")
+	}
+	emptyVocabulary := artifact
+	emptyVocabulary.outputTokenizer = buildArtifactOutputTokenizer(&ggufload.GGMLTokenizer{
+		Tokens: []string{"a", "", "b"}, Merges: []string{"a b"},
+	})
+	if emptyVocabulary.outputTokenizer != nil {
+		t.Fatal("empty vocabulary entry synthesized an authoritative decoder")
+	}
+	if got, err := run(emptyVocabulary, 0, 3, 1); err != nil {
+		t.Fatal(err)
+	} else if _, ok := got.OutputTextObservation(0); ok {
+		t.Fatal("empty vocabulary entry gained output-text authority")
+	}
+
+	tiny := artifact
+	tiny.outputTokenizer = buildArtifactOutputTokenizer(&ggufload.GGMLTokenizer{
+		Tokens: []string{"a", "b"}, Merges: []string{"a b"},
+	})
+	if got, err := run(tiny, 2, 3, 1); err != nil {
+		t.Fatal(err)
+	} else if _, ok := got.OutputTextObservation(0); ok {
+		t.Fatal("out-of-range accepted token ID gained output-text authority")
+	}
+	if text, ok := decodeArtifactOutputText(tiny.outputTokenizer, []int{-1}); ok || text != "" {
+		t.Fatalf("invalid token ID decoded as %q, %v", text, ok)
+	}
+	if text, ok := decodeArtifactOutputText(tiny.outputTokenizer, nil); ok || text != "" {
+		t.Fatalf("empty output decoded as %q, %v", text, ok)
+	}
+
+	invalidUTF8 := artifact
+	invalidUTF8.outputTokenizer = buildArtifactOutputTokenizer(&ggufload.GGMLTokenizer{
+		Tokens: []string{"a", "b", "ab", "ÿ"}, Merges: []string{"a b"},
+	})
+	if got, err := run(invalidUTF8, 3, 4, 1); err != nil {
+		t.Fatal(err)
+	} else if _, ok := got.OutputTextObservation(0); ok {
+		t.Fatal("invalid UTF-8 output gained output-text authority")
+	}
+}
+
 func TestRawDecodeExecutorRejectsArtifactMismatchBeforeExecution(t *testing.T) {
 	loadCalls, backendCalls := 0, 0
 	d := dependencies{
@@ -371,6 +596,193 @@ func TestRawDecodeExecutorRejectsArtifactMismatchBeforeExecution(t *testing.T) {
 	}
 	if loadCalls != 0 || backendCalls != 0 {
 		t.Fatalf("mismatch crossed fail-closed boundary: load=%d backend=%d", loadCalls, backendCalls)
+	}
+}
+
+func rawDecodeProductionArtifactFixture(t *testing.T) []byte {
+	t.Helper()
+	// One real decoder block: the swap changes weight bytes while preserving
+	// every model/config/tokenizer field, so metadata equality cannot detect it.
+	var fixture bytes.Buffer
+	write := func(value any) {
+		t.Helper()
+		if err := binary.Write(&fixture, binary.LittleEndian, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeString := func(value string) { write(uint64(len(value))); fixture.WriteString(value) }
+	fixture.WriteString(ggufload.Magic)
+	write(uint32(ggufload.Version))
+	tensors := []rawDecodeGGUFTensor{
+		{name: "token_embd.weight", dims: []uint64{32, 3}},
+		{name: "output_norm.weight", dims: []uint64{32}},
+		{name: "output.weight", dims: []uint64{32, 3}},
+		{name: "blk.0.attn_norm.weight", dims: []uint64{32}},
+		{name: "blk.0.attn_q.weight", dims: []uint64{32, 32}},
+		{name: "blk.0.attn_k.weight", dims: []uint64{32, 32}},
+		{name: "blk.0.attn_v.weight", dims: []uint64{32, 32}},
+		{name: "blk.0.attn_output.weight", dims: []uint64{32, 32}},
+		{name: "blk.0.ffn_norm.weight", dims: []uint64{32}},
+		{name: "blk.0.ffn_gate.weight", dims: []uint64{32, 32}},
+		{name: "blk.0.ffn_up.weight", dims: []uint64{32, 32}},
+		{name: "blk.0.ffn_down.weight", dims: []uint64{32, 32}},
+	}
+	write(uint64(len(tensors)))
+	write(uint64(10))
+	for _, item := range []struct{ key, value string }{
+		{"general.architecture", "qwen2"}, {"tokenizer.ggml.pre", "qwen2"},
+	} {
+		writeString(item.key)
+		write(uint32(ggufload.TypeString))
+		writeString(item.value)
+	}
+	for _, item := range []struct {
+		key   string
+		value uint32
+	}{
+		{"qwen2.embedding_length", 32}, {"qwen2.block_count", 1},
+		{"qwen2.attention.head_count", 1}, {"qwen2.feed_forward_length", 32},
+	} {
+		writeString(item.key)
+		write(uint32(ggufload.TypeUint32))
+		write(item.value)
+	}
+	for _, item := range []struct {
+		key    string
+		values []string
+	}{
+		{"tokenizer.ggml.tokens", []string{"a", "b", "ab"}},
+		{"tokenizer.ggml.merges", []string{"a b"}},
+	} {
+		writeString(item.key)
+		write(uint32(ggufload.TypeArray))
+		write(uint32(ggufload.TypeString))
+		write(uint64(len(item.values)))
+		for _, value := range item.values {
+			writeString(value)
+		}
+	}
+	for _, item := range []struct {
+		key   string
+		value float32
+	}{
+		{"qwen2.attention.layer_norm_rms_epsilon", 1e-5}, {"qwen2.rope.freq_base", 10000},
+	} {
+		writeString(item.key)
+		write(uint32(ggufload.TypeFloat32))
+		write(item.value)
+	}
+	var offset uint64
+	for _, tensor := range tensors {
+		writeString(tensor.name)
+		write(uint32(len(tensor.dims)))
+		elements := uint64(1)
+		for _, dim := range tensor.dims {
+			write(dim)
+			elements *= dim
+		}
+		write(uint32(ggufload.TensorF32))
+		write(offset)
+		offset += elements * 4
+	}
+	for fixture.Len()%32 != 0 {
+		fixture.WriteByte(0)
+	}
+	for _, tensor := range tensors {
+		elements := uint64(1)
+		for _, dim := range tensor.dims {
+			elements *= dim
+		}
+		for i := uint64(0); i < elements; i++ {
+			value := float32(0)
+			if tensor.name == "token_embd.weight" || strings.Contains(tensor.name, "norm.weight") {
+				value = 1
+			}
+			if tensor.name == "output.weight" {
+				value = float32(i / 32)
+			}
+			write(value)
+		}
+	}
+	return fixture.Bytes()
+}
+
+func TestRawDecodeProductionLoadRejectsArtifactSwap(t *testing.T) {
+	original := rawDecodeProductionArtifactFixture(t)
+	digest := fmt.Sprintf("%x", sha256.Sum256(original))
+	t.Run("split requires authenticated siblings", func(t *testing.T) {
+		parsed, err := ggufload.Read(bytes.NewReader(original))
+		if err != nil {
+			t.Fatal(err)
+		}
+		entry := binary.LittleEndian.AppendUint64(nil, uint64(len("split.count")))
+		entry = append(entry, "split.count"...)
+		entry = binary.LittleEndian.AppendUint32(entry, uint32(ggufload.TypeUint32))
+		entry = binary.LittleEndian.AppendUint32(entry, 2)
+		split := slices.Clone(original[:24])
+		binary.LittleEndian.PutUint64(split[16:24], binary.LittleEndian.Uint64(split[16:24])+1)
+		split = append(split, entry...)
+		split = append(split, original[24:parsed.TensorDataOffset]...)
+		for len(split)%32 != 0 {
+			split = append(split, 0)
+		}
+		split = append(split, original[parsed.TensorDataOffset:]...)
+		path := filepath.Join(t.TempDir(), "model-00001-of-00002.gguf")
+		if err := os.WriteFile(path, split, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		loaded, _, err := loadProductionModel(context.Background(), Request{
+			ArtifactPath: path, ExpectedArtifactSHA256: fmt.Sprintf("%x", sha256.Sum256(split)),
+		})
+		if err == nil || loaded != nil || !strings.Contains(err.Error(), "digest-bound shard manifest") {
+			t.Fatalf("unverified sibling shard admitted: model=%v err=%v", loaded, err)
+		}
+	})
+	for _, mmap := range []string{"0", "1"} {
+		for _, changed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("mmap_%s_changed_%t", mmap, changed), func(t *testing.T) {
+				t.Setenv("FAK_GGUF_MMAP", mmap)
+				path := filepath.Join(t.TempDir(), "model.gguf")
+				replacement := slices.Clone(original)
+				if changed {
+					binary.LittleEndian.PutUint32(replacement[len(replacement)-4:], math.Float32bits(1))
+				}
+				if err := os.WriteFile(path, original, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				d := defaultDependencies()
+				d.inspectArtifact = func(path string, open func(string) (io.ReadCloser, error)) (artifactObservation, error) {
+					observed, err := inspectGGUFArtifact(path, open)
+					if err != nil {
+						return observed, err
+					}
+					if err := os.Rename(path, path+".inspected"); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(path, replacement, 0o600); err != nil {
+						t.Fatal(err)
+					}
+					return observed, nil
+				}
+				got, err := d.execute(context.Background(), Request{
+					ArtifactPath: path, ExpectedArtifactSHA256: digest,
+					PromptTokenIDs: []int{0}, ContextLimit: 2, GeneratedTokenLimit: 1, Repetitions: 1,
+				})
+				if changed {
+					if err == nil || !strings.Contains(err.Error(), "SHA-256 mismatch") || len(got.Runs) != 0 {
+						t.Fatalf("different loaded weight bytes gained authority: runs=%d err=%v", len(got.Runs), err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				observed, ok := got.OutputTextObservation(0)
+				if text, textOK := observed.Text(); !ok || !textOK || text != "ab" {
+					t.Fatalf("identical replacement lost real decoded output: text=%q available=%t/%t", text, ok, textOK)
+				}
+			})
+		}
 	}
 }
 

@@ -6,6 +6,7 @@
 package rawdecode
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -19,11 +20,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/qwen38quantrun"
+	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
 // Request is the complete, explicit input to one real raw-decode execution.
@@ -105,6 +108,25 @@ type TimingObservation struct {
 	repetition       int
 	boundaries       [6]time.Time
 	backendExecution compute.BackendExecutionObservation
+}
+
+// OutputTextObservation is the artifact-owned decoding of the exact token IDs
+// accepted by one real repetition. It is software evidence only and grants no
+// receipt, hardware, quality, throughput, performance, comparison, or win credit.
+type OutputTextObservation struct {
+	observed       bool
+	executionSeal  *generationExecutionSeal
+	repetition     int
+	outputTokenIDs []int
+	text           string
+}
+
+// Text returns the exact non-empty UTF-8 text decoded from the artifact tokenizer.
+func (o OutputTextObservation) Text() (string, bool) {
+	if !o.observed {
+		return "", false
+	}
+	return o.text, true
 }
 
 // SessionSetupDuration reports the runner-observed candidate-session setup.
@@ -196,6 +218,7 @@ type Run struct {
 	EOSStopped           bool
 	generation           GenerationObservation
 	timing               TimingObservation
+	outputText           OutputTextObservation
 	Steps                []Step
 	CPUVerification      *CPUVerification
 	BackendExecution     *compute.BackendExecutionObservation
@@ -361,6 +384,67 @@ func (execution Execution) TimingObservation(repetition int) (TimingObservation,
 		return TimingObservation{}, false
 	}
 	return observed, true
+}
+
+// OutputTextObservation returns the runner-owned artifact decoding for one
+// exact repetition after revalidating generation, execution binding, and ordinal.
+func (execution Execution) OutputTextObservation(repetition int) (OutputTextObservation, bool) {
+	generation, ok := execution.GenerationObservation(repetition)
+	if !ok {
+		return OutputTextObservation{}, false
+	}
+	outputTokenIDs, ok := generation.OutputTokenIDs()
+	if !ok {
+		return OutputTextObservation{}, false
+	}
+	seal := execution.generationSeal
+	observed := execution.Runs[repetition].outputText
+	if !observed.observed || observed.executionSeal != seal || observed.repetition != repetition ||
+		len(observed.outputTokenIDs) == 0 || !slices.Equal(observed.outputTokenIDs, outputTokenIDs) ||
+		observed.text == "" || !utf8.ValidString(observed.text) {
+		return OutputTextObservation{}, false
+	}
+	return observed, true
+}
+
+func (execution *Execution) sealOutputText(tokenizer *tokenizer.Tokenizer) {
+	if execution == nil || tokenizer == nil {
+		return
+	}
+	for repetition := range execution.Runs {
+		generation, ok := execution.GenerationObservation(repetition)
+		if !ok {
+			continue
+		}
+		outputTokenIDs, ok := generation.OutputTokenIDs()
+		if !ok {
+			continue
+		}
+		text, ok := decodeArtifactOutputText(tokenizer, outputTokenIDs)
+		if !ok {
+			continue
+		}
+		execution.Runs[repetition].outputText = OutputTextObservation{
+			observed: true, executionSeal: execution.generationSeal, repetition: repetition,
+			outputTokenIDs: slices.Clone(outputTokenIDs), text: text,
+		}
+	}
+}
+
+func decodeArtifactOutputText(tokenizer *tokenizer.Tokenizer, outputTokenIDs []int) (string, bool) {
+	if tokenizer == nil || len(outputTokenIDs) == 0 {
+		return "", false
+	}
+	for _, id := range outputTokenIDs {
+		if id < 0 || id >= tokenizer.Vocab() {
+			return "", false
+		}
+	}
+	text, err := tokenizer.Decode(outputTokenIDs)
+	if err != nil || text == "" || !utf8.ValidString(text) {
+		return "", false
+	}
+	return text, true
 }
 
 func monotonicTimingBoundaries(boundaries [6]time.Time) bool {
@@ -619,6 +703,7 @@ func (d dependencies) execute(ctx context.Context, req Request) (Execution, erro
 	exec.QuantDuration = quantDuration
 	exec.Engine, exec.Precision = describeEngine(req, be)
 	exec.sealGenerationBinding()
+	exec.sealOutputText(artifact.outputTokenizer)
 	return exec, runErr
 }
 
@@ -678,6 +763,7 @@ type artifactObservation struct {
 	TokenizerSHA256       string
 	TemplateSHA256        string
 	Quantization          string
+	outputTokenizer       *tokenizer.Tokenizer
 }
 
 // inspectGGUFArtifact derives model identity and hashes the exact byte stream
@@ -708,6 +794,7 @@ func inspectGGUFArtifact(path string, open func(string) (io.ReadCloser, error)) 
 		observed.TokenizerSHA256 = identity.TokenizerDigest
 		observed.TemplateSHA256 = identity.TemplateDigest
 	}
+	observed.outputTokenizer = buildArtifactOutputTokenizerFromGGUF(gg)
 	observed.Quantization = quant.Recipe
 	if observed.Quantization == "" {
 		observed.Quantization = quant.Name
@@ -716,6 +803,47 @@ func inspectGGUFArtifact(path string, open func(string) (io.ReadCloser, error)) 
 		return observed, errors.New("raw decode: parsed artifact has no quantization inventory")
 	}
 	return observed, nil
+}
+
+func buildArtifactOutputTokenizer(metadata *ggufload.GGMLTokenizer) *tokenizer.Tokenizer {
+	if metadata == nil {
+		return nil
+	}
+	for _, token := range metadata.Tokens {
+		if token == "" {
+			return nil
+		}
+	}
+	artifactTokenizer, err := tokenizer.FromGGML(metadata.Tokens, metadata.Merges, metadata.TokenTypes, metadata.Pre)
+	if err != nil {
+		return nil
+	}
+	return artifactTokenizer
+}
+
+func buildArtifactOutputTokenizerFromGGUF(gg *ggufload.File) *tokenizer.Tokenizer {
+	if gg == nil {
+		return nil
+	}
+	if value, present := gg.Metadata["tokenizer.ggml.pre"]; present {
+		pre, ok := value.Value.(string)
+		if value.Type != ggufload.TypeString || !ok || pre == "" {
+			return nil
+		}
+	}
+	if value, present := gg.Metadata["tokenizer.ggml.token_type"]; present {
+		if value.Type != ggufload.TypeArray {
+			return nil
+		}
+		if _, ok := gg.Int32Array("tokenizer.ggml.token_type"); !ok {
+			return nil
+		}
+	}
+	metadata, ok := gg.GGMLTokenizer()
+	if !ok {
+		return nil
+	}
+	return buildArtifactOutputTokenizer(metadata)
 }
 
 type productionModel struct{ model *model.Model }
@@ -753,61 +881,140 @@ func applySessionFlags(s *model.Session, req Request, candidate bool) {
 }
 
 func loadProductionModel(ctx context.Context, req Request) (loadedModel, string, error) {
-	path := req.ArtifactPath
+	ws, closer, err := openVerifiedProductionWeights(ctx, req)
+	if err != nil {
+		return nil, "", err
+	}
+	retained := false
+	defer func() {
+		if !retained {
+			_ = closer.Close()
+		}
+	}()
 	var (
 		m     *model.Model
 		label string
-		err   error
 	)
 	switch {
 	case req.Q4K && req.BackendName != "" && req.BackendName != "legacy":
 		opts := []ggufload.Q4KLoadOption{ggufload.WithDenseKQuantResident(false)}
 		if req.BackendName == "vulkan" {
 			opts = append(opts, ggufload.WithDenseQ2KResident(true))
-			if q2kEmbeddingEligible(path) {
+			if q2kEmbeddingEligible(ws.File) {
 				opts = append(opts, ggufload.WithQ2KEmbeddingResident(true))
 			}
 		}
-		loader := ggufload.LoadModelQ4KProfileOptionsContext
 		label = " [gguf-q4k]"
 		if req.StreamQ4K {
-			loader = ggufload.LoadModelQ4KStreamedDenseContext
+			opts = append(opts, ggufload.WithStreamedDenseQ4K(true))
 			label = " [gguf-q4k-streamed-dense]"
 		}
-		m, err = loader(ctx, path, req.LoadProfiler, opts...)
+		m, err = ws.QuantModelQ4KProfileOptionsContext(ctx, req.LoadProfiler, opts...)
 	case req.Q4K:
 		label = " [gguf-q4k]"
 		if req.StreamQ4K {
 			label = " [gguf-q4k-streamed-dense]"
-			m, err = ggufload.LoadModelQ4KStreamedDenseContext(ctx, path, req.LoadProfiler)
+			m, err = ws.QuantModelQ4KProfileOptionsContext(ctx, req.LoadProfiler, ggufload.WithStreamedDenseQ4K(true))
 		} else {
-			m, err = ggufload.LoadModelQ4KContext(ctx, path)
+			m, err = ws.QuantModelQ4KContext(ctx)
 		}
 	case req.Lean:
 		label = " [gguf-lean]"
-		m, err = ggufload.LoadModelQuantProfile(path, req.LoadProfiler)
+		m, err = ws.QuantModelProfile(req.LoadProfiler)
 	default:
 		label = " [gguf]"
-		m, err = ggufload.LoadModel(path)
+		m, err = ws.Model()
 	}
 	if err != nil {
 		return nil, "", err
 	}
-	return &productionModel{model: m}, filepath.Base(path) + label, nil
+	// Streamed dense weights retain this reader. Model ownership also delays
+	// unmapping until the final session releases any borrowed checkpoint data.
+	m.SetWeightCloser(closer)
+	retained = true
+	return &productionModel{model: m}, filepath.Base(req.ArtifactPath) + label, nil
 }
 
-func q2kEmbeddingEligible(path string) bool {
-	ws, err := ggufload.OpenWeights(path)
-	if err != nil {
-		return false
+// openVerifiedProductionWeights binds parsing, hashing, and every later tensor
+// read to one retained reader. Rechecking the pathname after loading would miss
+// A -> B -> A swaps; matching this reader's digest to the inspected artifact
+// instead makes a pathname replacement unable to substitute different weights.
+func openVerifiedProductionWeights(ctx context.Context, req Request) (*ggufload.WeightSource, io.Closer, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
 	}
-	defer ws.Close()
-	cfg, err := ws.File.Config()
+	var reader io.ReaderAt
+	var size int64
+	var closer io.Closer
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_GGUF_MMAP"))) {
+	case "1", "on", "true":
+		data, mappedCloser, available, err := model.MmapOpen(req.ArtifactPath)
+		if err != nil {
+			return nil, nil, err
+		}
+		if available {
+			reader, size, closer = bytes.NewReader(data), int64(len(data)), mappedCloser
+		}
+	}
+	if reader == nil {
+		file, err := os.Open(req.ArtifactPath)
+		if err != nil {
+			return nil, nil, err
+		}
+		stat, err := file.Stat()
+		if err != nil {
+			_ = file.Close()
+			return nil, nil, err
+		}
+		reader, size, closer = file, stat.Size(), file
+	}
+	accepted := false
+	defer func() {
+		if !accepted {
+			_ = closer.Close()
+		}
+	}()
+	// mmap is verified from its actual bytes, not from a separately reopened
+	// file. Both mmap and portable ReadAt retain the same reader through teardown.
+	stream := io.NewSectionReader(reader, 0, size)
+	hash := sha256.New()
+	parsed, err := ggufload.Read(io.TeeReader(stream, hash))
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, err := io.Copy(hash, stream); err != nil {
+		return nil, nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	digest := fmt.Sprintf("%x", hash.Sum(nil))
+	if !strings.EqualFold(digest, req.ExpectedArtifactSHA256) {
+		return nil, nil, fmt.Errorf("loaded artifact SHA-256 mismatch: expected %s, observed %s", strings.ToLower(req.ExpectedArtifactSHA256), digest)
+	}
+	// A single expected artifact digest cannot authenticate sibling shards.
+	// Fail before model construction instead of reopening unverified siblings.
+	if _, present := parsed.Metadata["split.count"]; present {
+		count, ok := parsed.Uint64("split.count")
+		if !ok || count != 1 {
+			return nil, nil, errors.New("raw decode: split artifacts require a digest-bound shard manifest")
+		}
+	}
+	ws, err := ggufload.NewWeightSource(parsed, reader, size)
+	if err != nil {
+		return nil, nil, err
+	}
+	accepted = true
+	return ws, closer, nil
+}
+
+func q2kEmbeddingEligible(parsed *ggufload.File) bool {
+	cfg, err := parsed.Config()
 	if err != nil || !cfg.IsQwen35Hybrid() || cfg.IsMoE() || cfg.TieWordEmbeddings {
 		return false
 	}
 	var embedding, output bool
-	for _, tensor := range ws.File.Tensors {
+	for _, tensor := range parsed.Tensors {
 		embedding = embedding || tensor.Name == "token_embd.weight" && tensor.Type == ggufload.TensorQ2_K
 		output = output || tensor.Name == "output.weight"
 	}
