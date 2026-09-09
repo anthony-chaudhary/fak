@@ -643,6 +643,7 @@ func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessmen
 
 			newCommitSHA, transplantErr := TransplantDisjointTreeWithRunner(ctx, run, repo, targetBranch, headSHA, targetSHA, targetRef)
 			if transplantErr == nil {
+				syncIndexWithHEAD(ctx, run, repo, headSHA, newCommitSHA, targetSHA)
 				newHead, _ := rev(ctx, run, repo, "HEAD")
 				exec := &ReconcileExecution{
 					Primitive:     primitive,
@@ -869,4 +870,42 @@ func splitNUL(b []byte) []string {
 		}
 	}
 	return out
+}
+
+// syncIndexWithHEAD synchronizes the git index and working tree with the new merge commit HEAD,
+// eliminating false staged deletions for incoming disjoint files while preserving local uncommitted work.
+func syncIndexWithHEAD(ctx context.Context, run Runner, repo, headSHA, newCommitSHA, targetSHA string) {
+	// 1. Two-tree read-tree: fast-forwards index and working tree from headSHA to newCommitSHA.
+	rtRes := run(ctx, repo, "read-tree", "-m", "-u", headSHA, newCommitSHA)
+	if rtRes.Err == nil && rtRes.Code == 0 {
+		_ = run(ctx, repo, "update-index", "-q", "--refresh")
+		return
+	}
+
+	// 2. Fallback: path-scoped index refresh for incoming disjoint files from targetSHA.
+	mbRes := run(ctx, repo, "merge-base", headSHA, targetSHA)
+	if mbRes.Err == nil && mbRes.Code == 0 {
+		mb := strings.TrimSpace(string(mbRes.Stdout))
+		if mb != "" {
+			diffRes := run(ctx, repo, "diff", "--name-only", "-z", mb, targetSHA)
+			if diffRes.Err == nil && diffRes.Code == 0 {
+				paths := splitNUL(diffRes.Stdout)
+				for _, p := range paths {
+					p = strings.TrimSpace(p)
+					if p == "" {
+						continue
+					}
+					catRes := run(ctx, repo, "cat-file", "-e", fmt.Sprintf("%s:%s", newCommitSHA, p))
+					if catRes.Err == nil && catRes.Code == 0 {
+						_ = run(ctx, repo, "checkout", "HEAD", "--", p)
+					} else {
+						_ = run(ctx, repo, "rm", "-f", "--cached", "--ignore-unmatch", p)
+						fullP := filepath.Join(repo, filepath.FromSlash(p))
+						_ = os.Remove(fullP)
+					}
+				}
+			}
+		}
+	}
+	_ = run(ctx, repo, "update-index", "-q", "--refresh")
 }

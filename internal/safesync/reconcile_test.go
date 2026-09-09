@@ -370,6 +370,16 @@ func TestRouteReconciliationApplyExecution(t *testing.T) {
 		if got := readFile(t, filepath.Join(clone, "disjoint_local.txt")); got != "local\n" {
 			t.Fatalf("disjoint_local.txt = %q", got)
 		}
+
+		// Confirm incoming remote file is checked out to working tree
+		if got := readFile(t, filepath.Join(clone, "disjoint_remote.txt")); got != "remote\n" {
+			t.Fatalf("disjoint_remote.txt in clone working tree = %q, want %q", got, "remote\n")
+		}
+		// Confirm git status in clone has no staged deletions or uncommitted index drift
+		status := strings.TrimSpace(gitOutput(t, clone, "status", "--porcelain"))
+		if status != "" {
+			t.Fatalf("git status after disjoint integrate = %q, want clean status (no false deletions)", status)
+		}
 	})
 }
 
