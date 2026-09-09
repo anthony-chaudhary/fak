@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 // Catalog is the embedded default alias → target map. Targets are hf:// URIs the
@@ -103,6 +104,12 @@ var Catalog = map[string]string{
 	// using dynamic layer selection to preserve agentic reasoning and tool-calling.
 	"qwen38":              "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
 	"qwen38:27b":          "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
+	"qwen38:27b-q4":       "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
+	"qwen38:27b-q4_k_m":   "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
+	"qwen38:27b-q4km":     "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
+	"qwen38:q4":           "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
+	"qwen38:q4_k_m":       "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
+	"qwen38:q4km":         "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
 	"qwen38:27b-fp8":      "hf://Qwen/Qwen3.8-27B-FP8",
 	"qwen38:27b-q2k":      "hf://unsloth/Qwen3.8-27B-GGUF@4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-UD-Q2_K_XL.gguf",
 	"qwen38:27b-ud-q2kxl": "hf://unsloth/Qwen3.8-27B-GGUF@4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-UD-Q2_K_XL.gguf",
@@ -144,6 +151,12 @@ var codingAliases = map[string]bool{
 	"qwen2.5-coder:7b":    true,
 	"qwen38":              true,
 	"qwen38:27b":          true,
+	"qwen38:27b-q4":       true,
+	"qwen38:27b-q4_k_m":   true,
+	"qwen38:27b-q4km":     true,
+	"qwen38:q4":           true,
+	"qwen38:q4_k_m":       true,
+	"qwen38:q4km":         true,
 	"qwen38:27b-fp8":      true,
 	"qwen38:27b-q2k":      true,
 	"qwen38:27b-ud-q2kxl": true,
@@ -264,7 +277,124 @@ func (r *Registry) Resolve(ref string) (string, bool) {
 	if e, ok := r.tryDashedAliases(ref); ok {
 		return e.Target, true
 	}
+	if local, found := FindLocalModel(ref); found {
+		return local, true
+	}
 	return ref, false
+}
+
+// DefaultModelSearchDirs returns canonical directories where local models may be stored.
+func DefaultModelSearchDirs() []string {
+	var dirs []string
+	seen := make(map[string]bool)
+	add := func(p string) {
+		if p == "" {
+			return
+		}
+		p = pathutil.ExpandTilde(strings.TrimSpace(p))
+		if p == "" || seen[p] {
+			return
+		}
+		seen[p] = true
+		dirs = append(dirs, p)
+	}
+
+	if d := os.Getenv("FAK_MODELS_DIR"); d != "" {
+		add(d)
+		add(filepath.Join(d, "gguf"))
+		add(filepath.Join(d, "hub"))
+	}
+	if d := os.Getenv("FAK_MODEL_DIR"); d != "" {
+		add(d)
+	}
+
+	root := cacheRoot()
+	add(root)
+	add(filepath.Join(root, "gguf"))
+	add(filepath.Join(root, "hub"))
+
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		add(filepath.Join(home, ".cache", "fak-models"))
+		add(filepath.Join(home, ".cache", "fak-models", "gguf"))
+		add(filepath.Join(home, ".cache", "fak-models", "hub"))
+		add(filepath.Join(home, "Library", "Caches", "fak-models"))
+		add(filepath.Join(home, "Library", "Caches", "fak-models", "gguf"))
+		add(filepath.Join(home, "Library", "Caches", "fak-models", "hub"))
+		add(filepath.Join(home, "models"))
+		add(filepath.Join(home, ".ollama", "models"))
+		add(filepath.Join(home, ".cache", "huggingface", "hub"))
+		add(filepath.Join(home, ".cache", "lm-studio", "models"))
+	}
+	add("./models")
+	return dirs
+}
+
+// FindLocalModel searches default directories for an existing model matching ref.
+// It checks candidate filenames (exact, with .gguf suffix, dashes/underscores)
+// and shallow subdirectories of the search roots.
+func FindLocalModel(ref string) (string, bool) {
+	ref = pathutil.ExpandTilde(strings.TrimSpace(ref))
+	if ref == "" {
+		return "", false
+	}
+	if fi, err := os.Stat(ref); err == nil && !fi.IsDir() {
+		return ref, true
+	}
+
+	candidates := []string{
+		ref,
+		ref + ".gguf",
+		strings.ReplaceAll(ref, ":", "-") + ".gguf",
+		strings.ReplaceAll(ref, ":", "_") + ".gguf",
+		strings.ReplaceAll(ref, ":", "-"),
+	}
+	base := filepath.Base(ref)
+	if base != ref && base != "." {
+		candidates = append(candidates, base, base+".gguf")
+	}
+
+	searchDirs := DefaultModelSearchDirs()
+	for _, dir := range searchDirs {
+		dirInfo, err := os.Stat(dir)
+		if err != nil || !dirInfo.IsDir() {
+			continue
+		}
+		// 1. Direct candidates in directory
+		for _, c := range candidates {
+			candidatePath := filepath.Join(dir, c)
+			if fi, err := os.Stat(candidatePath); err == nil && !fi.IsDir() && fi.Size() > 0 {
+				return candidatePath, true
+			}
+		}
+		// 2. Search subdirectories for candidates ending in .gguf
+		for _, c := range candidates {
+			if !strings.HasSuffix(strings.ToLower(c), ".gguf") {
+				continue
+			}
+			var found string
+			_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					return filepath.SkipDir
+				}
+				if info.IsDir() {
+					rel, _ := filepath.Rel(dir, path)
+					if strings.Count(rel, string(filepath.Separator)) > 3 {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+				if strings.EqualFold(info.Name(), c) && info.Size() > 0 {
+					found = path
+					return filepath.SkipAll
+				}
+				return nil
+			})
+			if found != "" {
+				return found, true
+			}
+		}
+	}
+	return "", false
 }
 
 // tryDashedAliases attempts to normalize dashed model names to the canonical

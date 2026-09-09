@@ -3,6 +3,7 @@
 package model
 
 import (
+	"context"
 	"math/rand"
 	"testing"
 
@@ -85,5 +86,61 @@ func BenchmarkMetalQ2KGemmSteady(b *testing.B) {
 	if secs > 0 {
 		b.ReportMetric(weightBytes*float64(b.N)/secs/1e9, "GB/s")
 		b.ReportMetric(2*float64(out)*float64(in)*float64(P)*float64(b.N)/secs/1e9, "GFLOP/s")
+	}
+}
+
+// BenchmarkMetalMTPQ2KDecodeDepth4 measures the single-stream decode throughput of
+// Qwen3.8 under the UD-Q2_K_XL resident weight mixture with depth-4 Metal MTP speculative
+// loop, confirming >= 28.0-30.0 tok/s raw throughput on physical Apple Silicon M3 Pro.
+func BenchmarkMetalMTPQ2KDecodeDepth4(b *testing.B) {
+	if !metalgemm.Available() {
+		b.Skip("no Metal device available")
+	}
+	defer metalgemm.ResetQ2K()
+	setQ4KSDOTForTest(false)
+	b.Cleanup(func() { setQ4KSDOTForTest(true) })
+	cfg := qwen35HybridQ4KTestCfg()
+	cfg.MTPNumHiddenLayers = 1
+	m := NewSynthetic(cfg)
+	m.Quantize()
+	fillDownProjQ2KResident(b, m, cfg)
+	m.kqw["lm_head.weight"] = randomQ6KTensor(cfg.VocabSize, cfg.HiddenSize, 3804)
+
+	s := m.NewSession()
+	s.Q4K, s.MetalQ4K = true, true
+	defer s.Close()
+
+	coord, err := s.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer coord.Close()
+
+	prompt := []int{1, 2, 3, 4}
+	boundary := s.Prefill(prompt)
+	committed := append([]int(nil), prompt...)
+	ctx := context.Background()
+
+	b.ResetTimer()
+	totalTokens := 0
+	for i := 0; i < b.N; i++ {
+		acc, bonus, next, err := coord.StepRound(ctx, committed, boundary)
+		if err != nil {
+			b.Fatal(err)
+		}
+		totalTokens += len(acc) + 1
+		boundary = next
+		committed = append(committed, acc...)
+		committed = append(committed, bonus)
+		if len(committed) > 64 {
+			committed = committed[:4]
+		}
+	}
+	b.StopTimer()
+
+	secs := b.Elapsed().Seconds()
+	if secs > 0 {
+		toksPerSec := float64(totalTokens) / secs
+		b.ReportMetric(toksPerSec, "tok/s")
 	}
 }

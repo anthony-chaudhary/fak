@@ -10,7 +10,8 @@ int mg_sdpa_nax_tail_causal_tile_run(
     const float* Q, const float* K, const float* V,
     float* Out, float* LSE,
     int gqaFactor, int draftLen, int M, int headDim,
-    int prefixLen, int totalKV, float scale, int tileN, int order);
+    int prefixLen, int totalKV, float scale, int tileN, int order,
+    int hasTreeMask, const uint32_t* treeMask);
 
 int mg_qwen35_decode_create(int nK, int nV, int kHd, int vHd, int convKernel);
 void mg_qwen35_decode_reset(int handle);
@@ -30,7 +31,8 @@ int mg_qwen35_decode_step_wide_m(
     const float* mixed, const float* z, const float* b, const float* a,
     const float* convW, const float* aLog, const float* dtBias, const float* norm,
     float* core_out,
-    int tokens, int nK, int nV, int kHd, int vHd, int convKernel, float eps);
+    int tokens, int nK, int nV, int kHd, int vHd, int convKernel, float eps,
+    const int* parents);
 
 int mg_metal_wide_m_verify_step(
     int q4_wid,
@@ -41,10 +43,12 @@ int mg_metal_wide_m_verify_step(
     const float* convW, const float* aLog, const float* dtBias, const float* norm,
     float* gdn_core_out,
     int nK, int nV, int kHd, int vHd, int convKernel, float eps,
+    const int* parents,
     const float* Q, const float* K, const float* V,
     float* sdpa_out, float* lse_out,
     int gqaFactor, int draftLen, int sdpaM, int headDim,
-    int prefixLen, int totalKV, float sdpaScale, int tileN, int order);
+    int prefixLen, int totalKV, float sdpaScale, int tileN, int order,
+    int hasTreeMask, const uint32_t* treeMask);
 */
 import "C"
 
@@ -90,7 +94,7 @@ type SDPANAXTileConfig struct {
 	// GQAFactor is the number of query heads sharing a single KV head (e.g. 4 or 6).
 	GQAFactor int
 
-	// DraftLen is the number of speculative draft tokens QL (e.g. 4).
+	// DraftLen is the number of speculative draft tokens QL (e.g. 4 or 16..24 in tree verification).
 	DraftLen int
 
 	// M is the total number of query rows in the verification block: M = GQAFactor * DraftLen (16..24).
@@ -116,6 +120,182 @@ type SDPANAXTileConfig struct {
 
 	// Order specifies row-to-draft mapping (RowOrderHeadMajor or RowOrderTokenMajor).
 	Order DraftRowOrder
+
+	// Topology optionally specifies the tree structure and 2D causal attention mask for tree-structured verification.
+	// When nil, standard linear tail-causal masking is used.
+	Topology *TreeTopology
+}
+
+// TreeTopology represents a tree structure of speculative candidate tokens
+// with depth, branching factor, parent pointers, and 2D causal ancestor mask.
+type TreeTopology struct {
+	Depth           int      // Depth of the candidate tree
+	BranchingFactor int      // Max branching factor per node
+	Parents         []int    // Parent pointer for each candidate node (-1 for root/prefix)
+	Mask            []uint32 // Compact 2D causal ancestor bitmask: bit k is set if query node q attends key node k
+}
+
+// NewTreeTopology creates and validates a TreeTopology.
+// If mask is nil or empty, it derives the compact 2D causal ancestor mask from parents.
+func NewTreeTopology(depth, branchingFactor int, parents []int, mask []uint32) (TreeTopology, error) {
+	n := len(parents)
+	if n < 1 || n > 32 {
+		return TreeTopology{}, fmt.Errorf("sdpa_nax: tree node count %d out of supported range [1, 32]", n)
+	}
+	for i, p := range parents {
+		if p >= i {
+			return TreeTopology{}, fmt.Errorf("sdpa_nax: node %d parent %d violates topological order (parent must be < child)", i, p)
+		}
+		if p < -1 {
+			return TreeTopology{}, fmt.Errorf("sdpa_nax: node %d invalid parent index %d", i, p)
+		}
+	}
+	derivedMask := mask
+	if len(derivedMask) == 0 {
+		var err error
+		derivedMask, err = DeriveTreeMaskFromParents(parents)
+		if err != nil {
+			return TreeTopology{}, err
+		}
+	} else if len(derivedMask) != n {
+		return TreeTopology{}, fmt.Errorf("sdpa_nax: tree mask length %d does not match parent count %d", len(derivedMask), n)
+	}
+	if depth <= 0 {
+		depth = computeTreeDepth(parents)
+	}
+	if branchingFactor <= 0 {
+		branchingFactor = computeBranchingFactor(parents)
+	}
+	return TreeTopology{
+		Depth:           depth,
+		BranchingFactor: branchingFactor,
+		Parents:         append([]int(nil), parents...),
+		Mask:            append([]uint32(nil), derivedMask...),
+	}, nil
+}
+
+// DeriveTreeMaskFromParents computes the compact []uint32 causal ancestor bitmask from parent pointers.
+// For each node i, bit i is set (self-attention), and for every ancestor a of i, bit a is set.
+func DeriveTreeMaskFromParents(parents []int) ([]uint32, error) {
+	n := len(parents)
+	if n == 0 || n > 32 {
+		return nil, fmt.Errorf("sdpa_nax: candidate count %d outside [1, 32]", n)
+	}
+	mask := make([]uint32, n)
+	for i := 0; i < n; i++ {
+		mask[i] = uint32(1) << uint(i) // self
+		curr := parents[i]
+		visited := uint32(1) << uint(i)
+		steps := 0
+		for curr >= 0 {
+			if curr >= n {
+				return nil, fmt.Errorf("sdpa_nax: node %d has out-of-range parent %d", i, curr)
+			}
+			currBit := uint32(1) << uint(curr)
+			if (visited & currBit) != 0 {
+				return nil, fmt.Errorf("sdpa_nax: cycle detected at node %d (parent %d)", i, curr)
+			}
+			visited |= currBit
+			mask[i] |= currBit
+			curr = parents[curr]
+			steps++
+			if steps > n {
+				return nil, fmt.Errorf("sdpa_nax: parent chain length exceeds node count at node %d", i)
+			}
+		}
+	}
+	return mask, nil
+}
+
+// BuildTreeTopologyFromBranches constructs a TreeTopology trie from candidate token branch slices.
+func BuildTreeTopologyFromBranches(branches [][]int) (TreeTopology, error) {
+	if len(branches) == 0 {
+		return TreeTopology{}, errors.New("sdpa_nax: branches cannot be empty")
+	}
+	type trieNode struct {
+		token    int
+		parent   int
+		children []int
+		depth    int
+	}
+	nodes := make([]trieNode, 0)
+	for _, branch := range branches {
+		if len(branch) == 0 {
+			continue
+		}
+		currParent := -1
+		depth := 1
+		for _, tok := range branch {
+			matched := -1
+			if currParent == -1 {
+				for idx, node := range nodes {
+					if node.parent == -1 && node.token == tok {
+						matched = idx
+						break
+					}
+				}
+			} else {
+				for _, childIdx := range nodes[currParent].children {
+					if nodes[childIdx].token == tok {
+						matched = childIdx
+						break
+					}
+				}
+			}
+			if matched != -1 {
+				currParent = matched
+			} else {
+				newNodeIdx := len(nodes)
+				nodes = append(nodes, trieNode{
+					token:    tok,
+					parent:   currParent,
+					children: nil,
+					depth:    depth,
+				})
+				if currParent != -1 {
+					nodes[currParent].children = append(nodes[currParent].children, newNodeIdx)
+				}
+				currParent = newNodeIdx
+			}
+			depth++
+		}
+	}
+	if len(nodes) == 0 {
+		return TreeTopology{}, errors.New("sdpa_nax: tree produced zero nodes")
+	}
+	parents := make([]int, len(nodes))
+	for i, n := range nodes {
+		parents[i] = n.parent
+	}
+	return NewTreeTopology(0, 0, parents, nil)
+}
+
+func computeTreeDepth(parents []int) int {
+	maxDepth := 1
+	depths := make([]int, len(parents))
+	for i, p := range parents {
+		if p < 0 {
+			depths[i] = 1
+		} else if p < len(depths) {
+			depths[i] = depths[p] + 1
+		}
+		if depths[i] > maxDepth {
+			maxDepth = depths[i]
+		}
+	}
+	return maxDepth
+}
+
+func computeBranchingFactor(parents []int) int {
+	counts := make(map[int]int)
+	maxB := 1
+	for _, p := range parents {
+		counts[p]++
+		if counts[p] > maxB {
+			maxB = counts[p]
+		}
+	}
+	return maxB
 }
 
 // NewSDPANAXTileConfig creates a validated tile configuration for wide-M speculative verification.
@@ -177,7 +357,32 @@ func (c *SDPANAXTileConfig) Validate() error {
 	if c.Scale <= 0 {
 		c.Scale = float32(1.0 / math.Sqrt(float64(c.HeadDim)))
 	}
+	if c.Topology != nil {
+		if len(c.Topology.Parents) > 0 && c.DraftLen != len(c.Topology.Parents) {
+			return fmt.Errorf("sdpa_nax: DraftLen (%d) does not match Topology node count (%d)",
+				c.DraftLen, len(c.Topology.Parents))
+		}
+	}
 	return nil
+}
+
+// CanAttend reports whether query row m can attend to key column keyCol.
+// Under tail-causal masking, drafted token t can attend to all prefix keys (0..PrefixLen-1)
+// and preceding drafted keys up to its own position. When Topology is specified,
+// it enforces the 2D causal tree mask across candidate branches.
+func (c *SDPANAXTileConfig) CanAttend(row, keyCol int) bool {
+	if keyCol < c.PrefixLen {
+		return true
+	}
+	t := c.DraftTokenIndex(row)
+	draftK := keyCol - c.PrefixLen
+	if draftK < 0 || draftK > t {
+		return false
+	}
+	if c.Topology != nil && len(c.Topology.Mask) > t {
+		return (c.Topology.Mask[t] & (uint32(1) << uint(draftK))) != 0
+	}
+	return true
 }
 
 // DraftTokenIndex returns the drafted token index (0..DraftLen-1) corresponding to query row m.
@@ -273,10 +478,16 @@ func ComputeScalarSDPAReference(input SDPANAXTileInput) (output []float32, lse [
 		}
 
 		logits := make([]float32, numKeys)
+		for j := 0; j < numKeys; j++ {
+			logits[j] = float32(math.Inf(-1))
+		}
 		maxLogit := float32(math.Inf(-1))
 		qOffset := m * cfg.HeadDim
 
 		for j := 0; j < numKeys; j++ {
+			if !cfg.CanAttend(m, j) {
+				continue
+			}
 			kOffset := j * cfg.HeadDim
 			var dot float32
 			for d := 0; d < cfg.HeadDim; d++ {
@@ -292,12 +503,20 @@ func ComputeScalarSDPAReference(input SDPANAXTileInput) (output []float32, lse [
 		var sumExp float32
 		weights := make([]float32, numKeys)
 		for j := 0; j < numKeys; j++ {
+			if !cfg.CanAttend(m, j) {
+				weights[j] = 0
+				continue
+			}
 			w := float32(math.Exp(float64(logits[j] - maxLogit)))
 			weights[j] = w
 			sumExp += w
 		}
 
-		lse[m] = maxLogit + float32(math.Log(float64(sumExp)))
+		if sumExp > 0 {
+			lse[m] = maxLogit + float32(math.Log(float64(sumExp)))
+		} else {
+			lse[m] = float32(math.Inf(-1))
+		}
 
 		invSum := 1.0 / sumExp
 		for d := 0; d < cfg.HeadDim; d++ {
@@ -399,8 +618,8 @@ func RunSDPANAXTiledComputation(input SDPANAXTileInput) (*SDPANAXTileResult, err
 
 			for k := 0; k < tileLen; k++ {
 				globalKeyPos := jStart + k
-				if globalKeyPos > maxKForM {
-					// Tail-causal masking: draft token cannot attend to subsequent draft tokens
+				if !cfg.CanAttend(m, globalKeyPos) {
+					// Tail-causal or tree mask: token cannot attend to masked tokens
 					logits[k] = float32(math.Inf(-1))
 					continue
 				}
@@ -588,6 +807,8 @@ struct SDPANAXConstants {
     float scale;       // Attention scale factor 1.0f / sqrt(head_dim)
     uint tile_n;       // KV tile size Bc (e.g. 32)
     uint order;        // 0: HeadMajor (row = h*QL + t), 1: TokenMajor (row = t*GQA + h)
+    uint has_tree_mask;// 1 if tree_mask is active, 0 for linear causal
+    uint tree_mask[32];// Bitmask per draft token: bit k is 1 if token t attends to draft key k
 };
 
 // Threadgroup storage for cooperative K/V tile pair staging.
@@ -606,6 +827,19 @@ inline uint nax_draft_token_index(uint m, constant SDPANAXConstants& c) {
 
 inline uint nax_max_causal_key(uint m, constant SDPANAXConstants& c) {
     return c.prefix_len + nax_draft_token_index(m, c);
+}
+
+inline bool nax_can_attend(uint m, uint global_key_pos, constant SDPANAXConstants& c) {
+    if (global_key_pos < c.prefix_len) {
+        return true;
+    }
+    uint t = nax_draft_token_index(m, c);
+    uint draft_k = global_key_pos - c.prefix_len;
+    if (draft_k > t) return false;
+    if (c.has_tree_mask) {
+        return (c.tree_mask[t] & (1u << draft_k)) != 0;
+    }
+    return true;
 }
 
 // sdpa_nax_tail_causal_tile: Metal 4 compute kernel for speculative verify.
@@ -665,7 +899,7 @@ kernel void sdpa_nax_tail_causal_tile(
         for (uint k = 0; k < tile_len; ++k) {
             uint global_key_pos = j_start + k;
             float score = -INFINITY;
-            if (global_key_pos <= max_k_for_row) {
+            if (nax_can_attend(m, global_key_pos, c)) {
                 float partial_qk = 0.0f;
                 for (uint d = simd_lane; d < c.head_dim; d += 32) {
                     partial_qk += Q[m * c.head_dim + d] * tg_mem.k_tile[k * c.head_dim + d];
@@ -835,6 +1069,13 @@ func RunSDPANAXMetalComputation(input SDPANAXTileInput) (*SDPANAXTileResult, err
 	output := make([]float32, cfg.M*cfg.HeadDim)
 	lse := make([]float32, cfg.M)
 
+	var hasTreeMask C.int = 0
+	var treeMaskPtr *C.uint32_t = nil
+	if cfg.Topology != nil && len(cfg.Topology.Mask) > 0 {
+		hasTreeMask = 1
+		treeMaskPtr = (*C.uint32_t)(unsafe.Pointer(&cfg.Topology.Mask[0]))
+	}
+
 	ret := C.mg_sdpa_nax_tail_causal_tile_run(
 		(*C.float)(unsafe.Pointer(&input.Q[0])),
 		(*C.float)(unsafe.Pointer(&input.K[0])),
@@ -850,6 +1091,8 @@ func RunSDPANAXMetalComputation(input SDPANAXTileInput) (*SDPANAXTileResult, err
 		C.float(cfg.Scale),
 		C.int(cfg.TileN),
 		C.int(cfg.Order),
+		hasTreeMask,
+		treeMaskPtr,
 	)
 	if ret == 0 {
 		return nil, errors.New("sdpa_nax: Metal 4 SDPA tail-causal tile execution failed")
@@ -943,6 +1186,7 @@ func (s *Qwen35GDNDecodeState) StepWideMInto(mixed, z, b, a []float32, panel GDN
 		return errors.New("qwen35_decode: invalid GDN panel constant dimensions")
 	}
 
+	var parentsPtr *C.int = nil
 	ret := C.mg_qwen35_decode_step_wide_m(
 		s.handle,
 		(*C.float)(unsafe.Pointer(&mixed[0])),
@@ -957,6 +1201,7 @@ func (s *Qwen35GDNDecodeState) StepWideMInto(mixed, z, b, a []float32, panel GDN
 		C.int(tokens),
 		C.int(s.nK), C.int(s.nV), C.int(s.kHd), C.int(s.vHd), C.int(s.convKernel),
 		C.float(panel.RMSNormEpsilon),
+		parentsPtr,
 	)
 	if ret == 0 {
 		return errors.New("qwen35_decode: wide-M recurrent GDN step failed")
@@ -972,6 +1217,68 @@ func (s *Qwen35GDNDecodeState) StepWideM(mixed, z, b, a []float32, panel GDNPane
 		return nil, err
 	}
 	return coreOut, nil
+}
+
+// StepTree performs batched recurrent GDN state updates across tree-structured candidate branches.
+func (s *Qwen35GDNDecodeState) StepTree(mixed, z, b, a []float32, panel GDNPanel, parents []int) ([]float32, error) {
+	tokens := len(parents)
+	if tokens == 0 {
+		return nil, errors.New("qwen35_decode: empty parents slice")
+	}
+	valueDim := s.nV * s.vHd
+	coreOut := make([]float32, tokens*valueDim)
+	if err := s.StepTreeInto(mixed, z, b, a, panel, parents, coreOut); err != nil {
+		return nil, err
+	}
+	return coreOut, nil
+}
+
+// StepTreeInto performs batched recurrent GDN state updates across tree-structured candidate branches writing into dst.
+func (s *Qwen35GDNDecodeState) StepTreeInto(mixed, z, b, a []float32, panel GDNPanel, parents []int, coreOut []float32) error {
+	tokens := len(parents)
+	if tokens == 0 {
+		return errors.New("qwen35_decode: empty parents slice")
+	}
+	if s == nil || s.handle < 0 {
+		return errors.New("qwen35_decode: nil or released GDN state")
+	}
+	convDim := 2*(s.nK*s.kHd) + (s.nV * s.vHd)
+	valueDim := s.nV * s.vHd
+	if len(mixed) < tokens*convDim || len(z) < tokens*valueDim || len(b) < tokens*s.nV || len(a) < tokens*s.nV {
+		return errors.New("qwen35_decode: input slice length too short for tokens")
+	}
+	if len(coreOut) < tokens*valueDim {
+		return errors.New("qwen35_decode: destination slice too short")
+	}
+	if len(panel.Conv1D) < convDim*s.convKernel || len(panel.ALog) < s.nV || len(panel.DTBias) < s.nV || len(panel.Norm) < s.vHd {
+		return errors.New("qwen35_decode: invalid GDN panel constant dimensions")
+	}
+
+	cParents := make([]C.int, tokens)
+	for i, p := range parents {
+		cParents[i] = C.int(p)
+	}
+
+	ret := C.mg_qwen35_decode_step_wide_m(
+		s.handle,
+		(*C.float)(unsafe.Pointer(&mixed[0])),
+		(*C.float)(unsafe.Pointer(&z[0])),
+		(*C.float)(unsafe.Pointer(&b[0])),
+		(*C.float)(unsafe.Pointer(&a[0])),
+		(*C.float)(unsafe.Pointer(&panel.Conv1D[0])),
+		(*C.float)(unsafe.Pointer(&panel.ALog[0])),
+		(*C.float)(unsafe.Pointer(&panel.DTBias[0])),
+		(*C.float)(unsafe.Pointer(&panel.Norm[0])),
+		(*C.float)(unsafe.Pointer(&coreOut[0])),
+		C.int(tokens),
+		C.int(s.nK), C.int(s.nV), C.int(s.kHd), C.int(s.vHd), C.int(s.convKernel),
+		C.float(panel.RMSNormEpsilon),
+		&cParents[0],
+	)
+	if ret == 0 {
+		return errors.New("qwen35_decode: tree recurrent GDN step failed")
+	}
+	return nil
 }
 
 // State reads back the current convolution and recurrent state arrays.
@@ -1014,9 +1321,10 @@ func (s *Qwen35GDNDecodeState) SetState(conv, recurrent []float32) error {
 }
 
 // WideMSpeculativeVerificationStep configures a complete speculative candidate verification
-// forward step evaluating M=2..4 draft tokens concurrently.
+// forward step evaluating M=2..4 draft tokens or M=16..24 tree candidates concurrently.
 type WideMSpeculativeVerificationStep struct {
 	DraftTokens int
+	Tree        *TreeTopology
 	Q4KWeight   *Q4KWeight
 	Input       []float32
 	GDNState    *Qwen35GDNDecodeState
@@ -1051,8 +1359,8 @@ func RunMetalWideMSpeculativeVerificationInto(
 		return nil, errors.New("metalgemm: Metal unavailable")
 	}
 	M := step.DraftTokens
-	if M < 2 || M > 8 {
-		return nil, fmt.Errorf("metalgemm: wide-M draft depth %d out of range [2, 8]", M)
+	if M < 2 || M > 32 {
+		return nil, fmt.Errorf("metalgemm: wide-M draft depth %d out of range [2, 32]", M)
 	}
 	if step.GDNState == nil || step.GDNState.handle < 0 {
 		return nil, errors.New("metalgemm: valid GDNState required")
@@ -1097,6 +1405,28 @@ func RunMetalWideMSpeculativeVerificationInto(
 		gemmOutPtr = (*C.float)(unsafe.Pointer(&gemmOut[0]))
 	}
 
+	tree := step.Tree
+	if tree == nil {
+		tree = step.SDPAConfig.Topology
+	}
+	var hasTreeMask C.int = 0
+	var treeMaskPtr *C.uint32_t = nil
+	var parentsPtr *C.int = nil
+	var cParents []C.int
+	if tree != nil {
+		if len(tree.Mask) > 0 {
+			hasTreeMask = 1
+			treeMaskPtr = (*C.uint32_t)(unsafe.Pointer(&tree.Mask[0]))
+		}
+		if len(tree.Parents) > 0 {
+			cParents = make([]C.int, len(tree.Parents))
+			for i, p := range tree.Parents {
+				cParents[i] = C.int(p)
+			}
+			parentsPtr = &cParents[0]
+		}
+	}
+
 	ret := C.mg_metal_wide_m_verify_step(
 		q4Wid,
 		draftInputPtr,
@@ -1114,6 +1444,7 @@ func RunMetalWideMSpeculativeVerificationInto(
 		C.int(step.GDNState.kHd), C.int(step.GDNState.vHd),
 		C.int(step.GDNState.convKernel),
 		C.float(step.GDNPanel.RMSNormEpsilon),
+		parentsPtr,
 		(*C.float)(unsafe.Pointer(&step.SDPAQ[0])),
 		(*C.float)(unsafe.Pointer(&step.SDPAK[0])),
 		(*C.float)(unsafe.Pointer(&step.SDPAV[0])),
@@ -1128,6 +1459,8 @@ func RunMetalWideMSpeculativeVerificationInto(
 		C.float(step.SDPAConfig.Scale),
 		C.int(step.SDPAConfig.TileN),
 		C.int(step.SDPAConfig.Order),
+		hasTreeMask,
+		treeMaskPtr,
 	)
 
 	if ret == 0 {

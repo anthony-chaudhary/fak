@@ -1152,7 +1152,7 @@ func TestMacbenchManyAgent_ModeledProvenanceAndProjection(t *testing.T) {
 	}
 }
 
-func TestMacBenchValidateMTPComparison(t *testing.T) {
+func TestMacBenchValidateMTPComparisonRejectsSynthesizedPacket(t *testing.T) {
 	diskPath := filepath.Join("..", "..", "experiments", "benchmark", "runs", "by-machine", "node-macos-a", "20260908T160000Z-macbench-mtp", "packet.json")
 	if _, err := os.Stat(diskPath); err != nil {
 		diskPath = filepath.Join("experiments", "benchmark", "runs", "by-machine", "node-macos-a", "20260908T160000Z-macbench-mtp", "packet.json")
@@ -1161,44 +1161,22 @@ func TestMacBenchValidateMTPComparison(t *testing.T) {
 		}
 	}
 
-	// 1. Validate on-disk packet with --json.
+	// The historical 15.22 tok/s packet is synthesized and must not be
+	// accepted as physical evidence in either output mode.
 	var stdout, stderr bytes.Buffer
 	code := runMacBench(&stdout, &stderr, []string{"validate-mtp-comparison", "--input", diskPath, "--json"})
-	if code != 0 {
-		t.Fatalf("validate-mtp-comparison failed: code=%d stderr=%s", code, stderr.String())
-	}
-	var res struct {
-		Schema              string  `json:"schema"`
-		Valid               bool    `json:"valid"`
-		PacketSHA256        string  `json:"packet_sha256"`
-		FakNativeDecodeTokS float64 `json:"fak_native_decode_tok_s"`
-		AcceptanceRate      float64 `json:"acceptance_rate"`
-		VsLlamaSpeedupRatio float64 `json:"vs_llama_speedup_ratio"`
-		VsAxEngineRatio     float64 `json:"vs_ax_engine_ratio"`
-		VsMTPLXRatio        float64 `json:"vs_mtplx_ratio"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
-		t.Fatalf("unmarshal json: %v\nstdout: %s", err, stdout.String())
-	}
-	if res.Schema != "fak.macbench.mtp-comparison.validation.v1" || !res.Valid || len(res.PacketSHA256) != 64 {
-		t.Fatalf("unexpected validation result: %+v", res)
-	}
-	if res.FakNativeDecodeTokS < 14.5 || res.AcceptanceRate < 0.75 {
-		t.Fatalf("expected >=14.5 tok/s and >=0.75 acceptance, got %.2f tok/s, %.3f", res.FakNativeDecodeTokS, res.AcceptanceRate)
+	if code == 0 || strings.Contains(stdout.String(), "VALID") || strings.Contains(stdout.String(), `"valid": true`) {
+		t.Fatalf("synthesized packet printed VALID: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 
-	// 2. Validate on-disk packet with plain text output.
 	stdout.Reset()
 	stderr.Reset()
 	code = runMacBench(&stdout, &stderr, []string{"validate-mtp-comparison", "--input", diskPath})
-	if code != 0 {
-		t.Fatalf("validate-mtp-comparison text failed: code=%d stderr=%s", code, stderr.String())
-	}
-	if !strings.HasPrefix(stdout.String(), "VALID packet_sha256=") || !strings.Contains(stdout.String(), "fak_native_decode=15.22 tok/s") {
-		t.Fatalf("unexpected text output: %s", stdout.String())
+	if code == 0 || strings.Contains(stdout.String(), "VALID") {
+		t.Fatalf("synthesized packet printed VALID: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 
-	// 3. Reject missing --input.
+	// Reject missing --input.
 	stdout.Reset()
 	stderr.Reset()
 	code = runMacBench(&stdout, &stderr, []string{"validate-mtp-comparison"})
@@ -1206,7 +1184,7 @@ func TestMacBenchValidateMTPComparison(t *testing.T) {
 		t.Fatalf("expected code=2 for missing --input, got code=%d stderr=%s", code, stderr.String())
 	}
 
-	// 4. Reject unknown fields.
+	// Reject unknown fields.
 	raw, err := os.ReadFile(diskPath)
 	if err != nil {
 		t.Fatal(err)
@@ -1221,5 +1199,284 @@ func TestMacBenchValidateMTPComparison(t *testing.T) {
 	code = runMacBench(&stdout, &stderr, []string{"validate-mtp-comparison", "--input", tempPacket})
 	if code == 0 || !strings.Contains(stderr.String(), "unknown field") {
 		t.Fatalf("expected failure on unknown field, got code=%d stderr=%s", code, stderr.String())
+	}
+}
+
+func TestMacBenchValidateMTPComparisonRequiresUntamperedEvidenceFiles(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*testing.T, string)
+	}{
+		{
+			name: "missing",
+			mutate: func(t *testing.T, rawPath string) {
+				t.Helper()
+				if err := os.Remove(rawPath); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "tampered",
+			mutate: func(t *testing.T, rawPath string) {
+				t.Helper()
+				raw, err := os.ReadFile(rawPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(rawPath, append(raw, '\n'), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			packetPath, rawPath := writePhysicalMTPComparisonFixture(t, t.TempDir())
+			tt.mutate(t, rawPath)
+
+			var stdout, stderr bytes.Buffer
+			code := runMacBench(&stdout, &stderr, []string{"validate-mtp-comparison", "--input", packetPath})
+			if code == 0 || strings.Contains(stdout.String(), "VALID") {
+				t.Fatalf("invalid evidence printed VALID: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), "mtp comparison evidence invalid") || !strings.Contains(stderr.String(), "raw_result") {
+				t.Fatalf("invalid evidence rejection missing provenance: %s", stderr.String())
+			}
+		})
+	}
+}
+
+func writePhysicalMTPComparisonFixture(t *testing.T, dir string) (packetPath, rawPath string) {
+	t.Helper()
+	digest := func(label string) string {
+		return fmt.Sprintf("%x", sha256.Sum256([]byte(label)))
+	}
+
+	packet := macbench.NodeMacOSAMTPComparisonPacket()
+	packet.HostID = digest("physical-host")
+	packet.PromptSet.SHA256 = digest("prompt-set")
+	packet.PromptSet.Prompts[0].SHA256 = digest("prompt-p1")
+	packet.QualityPolicy.SHA256 = digest("quality-policy")
+	packet.SpeculativeConfig.DraftDepth = 2
+
+	rates := []float64{30, 12, 11, 10}
+	for i := range packet.Arms {
+		arm := &packet.Arms[i]
+		arm.EvidenceKind = "observed"
+		arm.HostID = packet.HostID
+		arm.PromptSetSHA256 = packet.PromptSet.SHA256
+		arm.Quality.PolicySHA256 = packet.QualityPolicy.SHA256
+		arm.DraftDepth = packet.SpeculativeConfig.DraftDepth
+		arm.AcceptanceRate = 0.8
+		arm.RollbackCount = 12
+
+		decodeMS := float64(packet.OutputTokens-1) * 1000 / rates[i]
+		for j := range arm.Samples {
+			sample := &arm.Samples[j]
+			sample.PromptSHA256 = packet.PromptSet.Prompts[0].SHA256
+			sample.DraftDepth = packet.SpeculativeConfig.DraftDepth
+			sample.DraftProposed = 60
+			sample.DraftAccepted = 48
+			sample.AcceptanceRate = arm.AcceptanceRate
+			sample.RollbackCount = arm.RollbackCount
+			sample.Boundary.DecodeMS = decodeMS
+			sample.Boundary.TotalMS = sample.Boundary.QueueMS + sample.Boundary.SetupMS + sample.Boundary.PrefillMS +
+				sample.Boundary.DecodeMS + sample.Boundary.VerificationMS + sample.Boundary.RecoveryMS + sample.Boundary.OtherMS
+			sample.ITLMS = decodeMS / float64(sample.OutputTokens-1)
+			sample.DecodeTokPerS = rates[i]
+		}
+		arm.Metrics = macbench.SummarizeMTPSamples(arm.Samples)
+		arm.EffectiveDecodeTokS = arm.Metrics.Decode.ThroughputTokS.P50
+		arm.AcceptanceRate = arm.Metrics.Decode.AcceptanceRate.P50
+		arm.RollbackCount = int(arm.Metrics.Decode.RollbackCount.P50)
+
+		rawFile := macbench.MTPComparisonRawSamplesFile{
+			Schema:     macbench.MTPComparisonRawSamplesSchema,
+			Arm:        arm.Name,
+			CampaignID: packet.CampaignID,
+			RunID:      arm.RunID,
+			HostID:     arm.HostID,
+			StartedAt:  arm.StartedAt,
+			FinishedAt: arm.FinishedAt,
+			Samples:    arm.Samples,
+		}
+		raw := marshalJSONForTest(t, rawFile)
+		arm.RawResult.SHA256 = fmt.Sprintf("%x", sha256.Sum256(raw))
+		armRawPath := filepath.Join(dir, arm.RawResult.Path)
+		if err := os.WriteFile(armRawPath, raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			rawPath = armRawPath
+		}
+
+		qualityFile := macbench.ComparisonQualityEvidenceFile{
+			Schema:          macbench.ComparisonQualityEvidenceSchema,
+			Arm:             arm.Name,
+			RunID:           arm.RunID,
+			PolicyRef:       arm.Quality.PolicyRef,
+			PolicyVersion:   arm.Quality.PolicyVersion,
+			PolicySHA256:    arm.Quality.PolicySHA256,
+			Passed:          arm.Quality.Passed,
+			Score:           arm.Quality.Score,
+			ArtifactSHA256:  arm.Artifact.SHA256,
+			PromptSetSHA256: arm.PromptSetSHA256,
+		}
+		quality := marshalJSONForTest(t, qualityFile)
+		arm.Quality.ResultSHA256 = fmt.Sprintf("%x", sha256.Sum256(quality))
+		if err := os.WriteFile(filepath.Join(dir, arm.Quality.ResultPath), quality, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	fakArm := packet.Arms[0]
+	packet.Baseline = macbench.MTPComparisonBaseline{
+		ArmName:             packet.Arms[3].Name,
+		RunID:               packet.Arms[3].RunID,
+		EffectiveDecodeTokS: packet.Arms[3].EffectiveDecodeTokS,
+	}
+	packet.Summary.FakNativeDecodeTokS = fakArm.EffectiveDecodeTokS
+	packet.Summary.FakNativeAcceptanceRate = fakArm.AcceptanceRate
+	packet.Summary.VsLlamaSpeedupRatio = fakArm.EffectiveDecodeTokS / packet.Arms[3].EffectiveDecodeTokS
+	packet.Summary.VsAxEngineRatio = fakArm.EffectiveDecodeTokS / packet.Arms[1].EffectiveDecodeTokS
+	packet.Summary.VsMTPLXRatio = fakArm.EffectiveDecodeTokS / packet.Arms[2].EffectiveDecodeTokS
+	packet.Summary.Verified = true
+
+	packetPath = filepath.Join(dir, "packet.json")
+	if err := os.WriteFile(packetPath, marshalJSONForTest(t, packet), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := macbench.ValidateMTPComparisonEvidence(packet, packetPath); err != nil {
+		t.Fatalf("fixture must begin as valid physical evidence: %v", err)
+	}
+	return packetPath, rawPath
+}
+
+func marshalJSONForTest(t *testing.T, value any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func TestMacBenchValidateAgenticMTP_OnDisk(t *testing.T) {
+	diskPath := filepath.Join("..", "..", "experiments", "benchmark", "runs", "by-machine", "node-macos-a", "20260908T170000Z-macbench-agentic-mtp", "packet.json")
+	if _, err := os.Stat(diskPath); err != nil {
+		diskPath = filepath.Join("experiments", "benchmark", "runs", "by-machine", "node-macos-a", "20260908T170000Z-macbench-agentic-mtp", "packet.json")
+		if _, err := os.Stat(diskPath); err != nil {
+			t.Skip("packet.json not found on disk, skipping on-disk integration test")
+		}
+	}
+
+	// 1. JSON output
+	var stdout, stderr bytes.Buffer
+	code := runMacBench(&stdout, &stderr, []string{"validate-agentic-mtp", "--input", diskPath, "--json"})
+	if code != 0 {
+		t.Fatalf("validate-agentic-mtp --json failed: code=%d stderr=%s", code, stderr.String())
+	}
+	var res struct {
+		Schema              string  `json:"schema"`
+		Valid               bool    `json:"valid"`
+		PacketSHA256        string  `json:"packet_sha256"`
+		Concurrency         int     `json:"concurrency"`
+		DraftDepth          int     `json:"draft_depth"`
+		AggregateDecodeTokS float64 `json:"aggregate_decode_tok_s"`
+		PerAgentDecodeTokS  float64 `json:"per_agent_decode_tok_s"`
+		AcceptanceRate      float64 `json:"acceptance_rate"`
+		ZeroFallback        bool    `json:"zero_fallback"`
+		Verified            bool    `json:"verified"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+		t.Fatalf("unmarshal validation json: %v\nstdout: %s", err, stdout.String())
+	}
+	if res.Schema != macbench.AgenticMTPValidationSchema || !res.Valid || len(res.PacketSHA256) != 64 {
+		t.Fatalf("unexpected validation result: %+v", res)
+	}
+	if res.AggregateDecodeTokS < 300.0 {
+		t.Fatalf("expected aggregate decode >= 300.0 tok/s, got %.2f", res.AggregateDecodeTokS)
+	}
+	if res.Concurrency != 24 {
+		t.Fatalf("expected concurrency 24, got %d", res.Concurrency)
+	}
+	if !res.ZeroFallback || !res.Verified {
+		t.Fatalf("expected zero_fallback and verified to be true, got fallback=%t, verified=%t", res.ZeroFallback, res.Verified)
+	}
+
+	// 2. Text output
+	stdout.Reset()
+	stderr.Reset()
+	code = runMacBench(&stdout, &stderr, []string{"validate-agentic-mtp", "--input", diskPath})
+	if code != 0 {
+		t.Fatalf("validate-agentic-mtp text failed: code=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.HasPrefix(stdout.String(), "VALID packet_sha256=") || !strings.Contains(stdout.String(), "concurrency=24") {
+		t.Fatalf("unexpected text output: %s", stdout.String())
+	}
+
+	// 3. Reject missing --input
+	stdout.Reset()
+	stderr.Reset()
+	code = runMacBench(&stdout, &stderr, []string{"validate-agentic-mtp"})
+	if code != 2 {
+		t.Fatalf("expected code=2 for missing --input, got code=%d stderr=%s", code, stderr.String())
+	}
+}
+
+func TestMacBenchRunAgenticMTP_CLI(t *testing.T) {
+	// 1. Dry run output
+	var stdout, stderr bytes.Buffer
+	code := runMacBench(&stdout, &stderr, []string{"run-agentic-mtp", "--concurrency", "24", "--draft-depth", "3", "--dry-run", "--json"})
+	if code != 0 {
+		t.Fatalf("run-agentic-mtp dry-run failed: code=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "DRY_RUN_PLAN_VALID") {
+		t.Fatalf("expected DRY_RUN_PLAN_VALID in output, got: %s", stdout.String())
+	}
+
+	// 2. Reject bad concurrency
+	stdout.Reset()
+	stderr.Reset()
+	code = runMacBench(&stdout, &stderr, []string{"run-agentic-mtp", "--concurrency", "16"})
+	if code != 2 {
+		t.Fatalf("expected code=2 for concurrency != 24, got %d", code)
+	}
+
+	// 3. Reject bad draft depth
+	stdout.Reset()
+	stderr.Reset()
+	code = runMacBench(&stdout, &stderr, []string{"run-agentic-mtp", "--draft-depth", "1"})
+	if code != 2 {
+		t.Fatalf("expected code=2 for draft depth 1, got %d", code)
+	}
+
+	// 4. Execution into temp dir
+	tempDir := t.TempDir()
+	stdout.Reset()
+	stderr.Reset()
+	code = runMacBench(&stdout, &stderr, []string{
+		"run-agentic-mtp",
+		"--concurrency", "24",
+		"--draft-depth", "3",
+		"--out-dir", tempDir,
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("run-agentic-mtp execution failed: code=%d stderr=%s", code, stderr.String())
+	}
+	packetPath := filepath.Join(tempDir, "packet.json")
+	if _, err := os.Stat(packetPath); err != nil {
+		t.Fatalf("packet.json not created in %s: %v", tempDir, err)
+	}
+
+	// Validate the freshly created packet
+	stdout.Reset()
+	stderr.Reset()
+	code = runMacBench(&stdout, &stderr, []string{"validate-agentic-mtp", "--input", packetPath, "--json"})
+	if code != 0 {
+		t.Fatalf("validation of generated packet failed: code=%d stderr=%s", code, stderr.String())
 	}
 }

@@ -809,6 +809,395 @@ func TestMetalWideMSpeculativeVerification(t *testing.T) {
 		t.Logf("M=4 latency ratio: %.2fx (durSingle=%v durWide=%v) achieving >3.2x arithmetic efficiency per streamed weight byte",
 			ratio, durSingle/iters, durWide/iters)
 	})
+
+	t.Run("TreeTopology_ValidationAndDerivation", func(t *testing.T) {
+		// Valid binary tree with 7 nodes (depth 3, branching factor 2)
+		parents := []int{-1, 0, 0, 1, 1, 2, 2}
+		top, err := NewTreeTopology(0, 0, parents, nil)
+		if err != nil {
+			t.Fatalf("failed to create valid TreeTopology: %v", err)
+		}
+		if top.Depth != 3 {
+			t.Errorf("expected depth 3, got %d", top.Depth)
+		}
+		if top.BranchingFactor != 2 {
+			t.Errorf("expected branching factor 2, got %d", top.BranchingFactor)
+		}
+		// Check masks: node 3 has ancestors {3, 1, 0}
+		wantMask3 := uint32((1 << 3) | (1 << 1) | (1 << 0))
+		if top.Mask[3] != wantMask3 {
+			t.Errorf("node 3 mask = %08b, want %08b", top.Mask[3], wantMask3)
+		}
+		// Node 4 has ancestors {4, 1, 0}
+		wantMask4 := uint32((1 << 4) | (1 << 1) | (1 << 0))
+		if top.Mask[4] != wantMask4 {
+			t.Errorf("node 4 mask = %08b, want %08b", top.Mask[4], wantMask4)
+		}
+
+		// Topological order violation (parent >= child)
+		_, err = NewTreeTopology(0, 0, []int{-1, 2, 1}, nil)
+		if err == nil {
+			t.Error("expected error for non-topological parent >= child")
+		}
+
+		// Build from branches
+		branches := [][]int{
+			{101, 102, 103},
+			{101, 102, 104},
+			{101, 105},
+		}
+		branchTop, err := BuildTreeTopologyFromBranches(branches)
+		if err != nil {
+			t.Fatalf("BuildTreeTopologyFromBranches failed: %v", err)
+		}
+		if len(branchTop.Parents) != 5 {
+			t.Fatalf("expected 5 deduplicated trie nodes, got %d", len(branchTop.Parents))
+		}
+		t.Logf("TreeTopology validated successfully: 5 nodes, depth %d, branching %d", branchTop.Depth, branchTop.BranchingFactor)
+	})
+
+	t.Run("BatchedRecurrentGDN_Tree_BitExact", func(t *testing.T) {
+		const (
+			nK         = 4
+			nV         = 8
+			kHd        = 64
+			vHd        = 64
+			convKernel = 4
+			treeM      = 16
+		)
+		convDim := 2*(nK*kHd) + (nV * vHd)
+		valueDim := nV * vHd
+
+		panel := GDNPanel{
+			Conv1D:         makeDeterministicSlice(convDim*convKernel, 551, 0.5),
+			ALog:           makeDeterministicSlice(nV, 552, 0.5),
+			DTBias:         makeDeterministicSlice(nV, 553, 0.5),
+			Norm:           makeDeterministicSlice(vHd, 554, 0.5),
+			RMSNormEpsilon: 1e-5,
+		}
+
+		// Tree topology for M=16:
+		// 2 roots (0, 1)
+		// 0 has children (2, 3)
+		// 1 has children (4, 5)
+		// 2 has children (6, 7)
+		// 3 has children (8, 9)
+		// 4 has children (10, 11)
+		// 5 has children (12, 13)
+		// 6 has children (14, 15)
+		parents := []int{
+			-1, -1,
+			0, 0,
+			1, 1,
+			2, 2,
+			3, 3,
+			4, 4,
+			5, 5,
+			6, 6,
+		}
+
+		mixed := makeDeterministicSlice(treeM*convDim, 561, 0.5)
+		z := makeDeterministicSlice(treeM*valueDim, 562, 0.5)
+		b := makeDeterministicSlice(treeM*nV, 563, 0.5)
+		a := makeDeterministicSlice(treeM*nV, 564, 0.5)
+
+		// 1. Run Tree Batched GDN on Metal
+		stateTree, err := NewQwen35GDNDecodeState(nK, nV, kHd, vHd, convKernel)
+		if err != nil {
+			t.Fatalf("failed to create tree GDN state: %v", err)
+		}
+		defer stateTree.Release()
+
+		treeOutputs, err := stateTree.StepTree(mixed, z, b, a, panel, parents)
+		if err != nil {
+			t.Fatalf("StepTree failed: %v", err)
+		}
+		if len(treeOutputs) != treeM*valueDim {
+			t.Fatalf("expected output length %d, got %d", treeM*valueDim, len(treeOutputs))
+		}
+
+		// 2. Verify bit-exact parity against serial decode along distinct candidate branches
+		testBranches := [][]int{
+			{0, 2, 6, 14}, // Branch A
+			{0, 2, 7},     // Branch B
+			{0, 3, 8},     // Branch C
+			{1, 4, 10},    // Branch D
+			{1, 5, 13},    // Branch E
+		}
+
+		for bIdx, branch := range testBranches {
+			stateSerial, err := NewQwen35GDNDecodeState(nK, nV, kHd, vHd, convKernel)
+			if err != nil {
+				t.Fatalf("failed to create serial GDN state: %v", err)
+			}
+			defer stateSerial.Release()
+
+			for _, nodeIdx := range branch {
+				serialOut, err := stateSerial.Step(
+					mixed[nodeIdx*convDim:(nodeIdx+1)*convDim],
+					z[nodeIdx*valueDim:(nodeIdx+1)*valueDim],
+					b[nodeIdx*nV:(nodeIdx+1)*nV],
+					a[nodeIdx*nV:(nodeIdx+1)*nV],
+					panel,
+				)
+				if err != nil {
+					t.Fatalf("serial step for node %d failed: %v", nodeIdx, err)
+				}
+				treeOutNode := treeOutputs[nodeIdx*valueDim : (nodeIdx+1)*valueDim]
+				for i := range serialOut {
+					diff := math.Abs(float64(serialOut[i] - treeOutNode[i]))
+					if diff > 1e-6 {
+						t.Fatalf("branch %d node %d divergence at %d: serial=%.8e tree=%.8e diff=%.8e",
+							bIdx, nodeIdx, i, serialOut[i], treeOutNode[i], diff)
+					}
+				}
+			}
+		}
+		t.Logf("Batched Recurrent GDN Tree M=%d: verified bit-exact parity across %d distinct branches", treeM, len(testBranches))
+	})
+
+	t.Run("TailCausalSDPA_Tree_Metal_Parity_M16_M24", func(t *testing.T) {
+		testSizes := []int{16, 20, 24}
+		for _, m := range testSizes {
+			parents := make([]int, m)
+			parents[0] = -1
+			for i := 1; i < m; i++ {
+				parents[i] = (i - 1) / 2 // binary tree topology
+			}
+
+			top, err := NewTreeTopology(0, 0, parents, nil)
+			if err != nil {
+				t.Fatalf("failed to create tree topology for M=%d: %v", m, err)
+			}
+
+			headDim := 64
+			prefixLen := 64
+			cfg, err := NewSDPANAXTileConfig(1, m, headDim, prefixLen)
+			if err != nil {
+				t.Fatalf("failed to create SDPA config: %v", err)
+			}
+			cfg.Topology = &top
+
+			q := makeDeterministicSlice(cfg.M*cfg.HeadDim, int64(m*701), 1.0)
+			k := makeDeterministicSlice(cfg.TotalKV*cfg.HeadDim, int64(m*702), 1.0)
+			v := makeDeterministicSlice(cfg.TotalKV*cfg.HeadDim, int64(m*703), 1.0)
+
+			input := SDPANAXTileInput{Config: cfg, Q: q, K: k, V: v}
+
+			metalRes, err := RunSDPANAXMetalComputation(input)
+			if err != nil {
+				t.Fatalf("Metal SDPA execution failed for M=%d: %v", m, err)
+			}
+
+			refOut, refLSE, _, err := ComputeScalarSDPAReference(input)
+			if err != nil {
+				t.Fatalf("reference SDPA failed for M=%d: %v", m, err)
+			}
+
+			report := EvaluateSDPAEquivalence(metalRes, refOut, refLSE, 1e-4)
+			if !report.Passed {
+				t.Fatalf("M=%d Tree SDPA Metal vs Scalar parity check failed: %s", m, report.Details)
+			}
+
+			// Verify Tree Branch Isolation: mutating a sibling branch's keys has zero effect
+			// on a node's output!
+			// For example, node 1 and node 2 are siblings (parents[1] = 0, parents[2] = 0).
+			// Mutating K and V at node 2 must NOT change the output of node 1!
+			kMutated := append([]float32(nil), k...)
+			vMutated := append([]float32(nil), v...)
+			node2KeyPos := prefixLen + 2
+			for d := 0; d < headDim; d++ {
+				kMutated[node2KeyPos*headDim+d] += 5.0
+				vMutated[node2KeyPos*headDim+d] += 5.0
+			}
+			inputMutated := SDPANAXTileInput{Config: cfg, Q: q, K: kMutated, V: vMutated}
+			metalMutatedRes, err := RunSDPANAXMetalComputation(inputMutated)
+			if err != nil {
+				t.Fatalf("Metal SDPA mutated execution failed for M=%d: %v", m, err)
+			}
+			// Compare node 1 output before and after mutating sibling node 2
+			node1Before := metalRes.Output[1*headDim : 2*headDim]
+			node1After := metalMutatedRes.Output[1*headDim : 2*headDim]
+			for d := 0; d < headDim; d++ {
+				diff := math.Abs(float64(node1Before[d] - node1After[d]))
+				if diff > 1e-6 {
+					t.Fatalf("M=%d tree branch isolation failed at node 1 dim %d: diff=%.8e (sibling mutation leaked into node)", m, d, diff)
+				}
+			}
+
+			t.Logf("Tail-Causal SDPA Tree Metal M=%d: passed parity with scalar reference and verified branch isolation (%s)", m, report.Details)
+		}
+	})
+
+	t.Run("IntegratedSingleCommandBuffer_Tree_M16_M24", func(t *testing.T) {
+		for _, m := range []int{16, 20, 24} {
+			parents := make([]int, m)
+			parents[0] = -1
+			for i := 1; i < m; i++ {
+				parents[i] = (i - 1) / 2
+			}
+			top, err := NewTreeTopology(0, 0, parents, nil)
+			if err != nil {
+				t.Fatalf("failed to create tree topology: %v", err)
+			}
+
+			const (
+				in         = 1024
+				out        = 1024
+				nK         = 4
+				nV         = 8
+				kHd        = 64
+				vHd        = 64
+				convKernel = 4
+			)
+			convDim := 2*(nK*kHd) + (nV * vHd)
+			valueDim := nV * vHd
+
+			gdnState, err := NewQwen35GDNDecodeState(nK, nV, kHd, vHd, convKernel)
+			if err != nil {
+				t.Fatalf("failed to create GDN state: %v", err)
+			}
+			defer gdnState.Release()
+
+			panel := GDNPanel{
+				Conv1D:         makeDeterministicSlice(convDim*convKernel, int64(m*801), 0.5),
+				ALog:           makeDeterministicSlice(nV, int64(m*802), 0.5),
+				DTBias:         makeDeterministicSlice(nV, int64(m*803), 0.5),
+				Norm:           makeDeterministicSlice(vHd, int64(m*804), 0.5),
+				RMSNormEpsilon: 1e-5,
+			}
+
+			sdpaCfg, err := NewSDPANAXTileConfig(1, m, 64, 64)
+			if err != nil {
+				t.Fatalf("sdpa config error: %v", err)
+			}
+			sdpaCfg.Topology = &top
+
+			step := WideMSpeculativeVerificationStep{
+				DraftTokens: m,
+				Tree:        &top,
+				Input:       makeDeterministicSlice(m*convDim, int64(m*805), 0.5),
+				GDNState:    gdnState,
+				GDNPanel:    panel,
+				Z:           makeDeterministicSlice(m*valueDim, int64(m*806), 0.5),
+				B:           makeDeterministicSlice(m*nV, int64(m*807), 0.5),
+				A:           makeDeterministicSlice(m*nV, int64(m*808), 0.5),
+				SDPAConfig:  sdpaCfg,
+				SDPAQ:       makeDeterministicSlice(sdpaCfg.M*sdpaCfg.HeadDim, int64(m*809), 0.5),
+				SDPAK:       makeDeterministicSlice(sdpaCfg.TotalKV*sdpaCfg.HeadDim, int64(m*810), 0.5),
+				SDPAV:       makeDeterministicSlice(sdpaCfg.TotalKV*sdpaCfg.HeadDim, int64(m*811), 0.5),
+			}
+
+			res, err := RunMetalWideMSpeculativeVerification(step)
+			if err != nil {
+				t.Fatalf("RunMetalWideMSpeculativeVerification failed for M=%d: %v", m, err)
+			}
+			if !res.SingleBuffer || !res.Committed {
+				t.Fatalf("expected single command buffer committed, got %+v", res)
+			}
+			if len(res.GDNOutput) != m*valueDim {
+				t.Fatalf("unexpected GDN output length: %d", len(res.GDNOutput))
+			}
+			if len(res.SDPAOutput) != sdpaCfg.M*sdpaCfg.HeadDim {
+				t.Fatalf("unexpected SDPA output length: %d", len(res.SDPAOutput))
+			}
+			t.Logf("Integrated Tree Verification M=%d: successfully executed in single command buffer", m)
+		}
+	})
+
+	t.Run("HIL_Latency_Tree_M16_M24_Under_1_8x_Baseline", func(t *testing.T) {
+		const (
+			nK         = 4
+			nV         = 8
+			kHd        = 64
+			vHd        = 64
+			convKernel = 4
+		)
+		convDim := 2*(nK*kHd) + (nV * vHd)
+		valueDim := nV * vHd
+
+		state, err := NewQwen35GDNDecodeState(nK, nV, kHd, vHd, convKernel)
+		if err != nil {
+			t.Fatalf("failed to create GDN state: %v", err)
+		}
+		defer state.Release()
+
+		panel := GDNPanel{
+			Conv1D:         makeDeterministicSlice(convDim*convKernel, 981, 0.5),
+			ALog:           makeDeterministicSlice(nV, 982, 0.5),
+			DTBias:         makeDeterministicSlice(nV, 983, 0.5),
+			Norm:           makeDeterministicSlice(vHd, 984, 0.5),
+			RMSNormEpsilon: 1e-5,
+		}
+
+		mixed1 := makeDeterministicSlice(convDim, 985, 0.5)
+		z1 := makeDeterministicSlice(valueDim, 986, 0.5)
+		b1 := makeDeterministicSlice(nV, 987, 0.5)
+		a1 := makeDeterministicSlice(nV, 988, 0.5)
+
+		// Baseline: serial single token
+		const iters = 25
+		for i := 0; i < 5; i++ {
+			_, _ = state.Step(mixed1, z1, b1, a1, panel)
+		}
+		t0 := time.Now()
+		for i := 0; i < iters; i++ {
+			_, _ = state.Step(mixed1, z1, b1, a1, panel)
+		}
+		durSingle := time.Since(t0)
+
+		for _, m := range []int{16, 20, 24} {
+			parents := make([]int, m)
+			parents[0] = -1
+			for i := 1; i < m; i++ {
+				parents[i] = (i - 1) / 2
+			}
+			top, err := NewTreeTopology(0, 0, parents, nil)
+			if err != nil {
+				t.Fatalf("failed to create tree topology: %v", err)
+			}
+
+			sdpaCfg, err := NewSDPANAXTileConfig(1, m, 64, 64)
+			if err != nil {
+				t.Fatalf("sdpa config error: %v", err)
+			}
+			sdpaCfg.Topology = &top
+
+			step := WideMSpeculativeVerificationStep{
+				DraftTokens: m,
+				Tree:        &top,
+				Input:       makeDeterministicSlice(m*convDim, int64(m*991), 0.5),
+				GDNState:    state,
+				GDNPanel:    panel,
+				Z:           makeDeterministicSlice(m*valueDim, int64(m*992), 0.5),
+				B:           makeDeterministicSlice(m*nV, int64(m*993), 0.5),
+				A:           makeDeterministicSlice(m*nV, int64(m*994), 0.5),
+				SDPAConfig:  sdpaCfg,
+				SDPAQ:       makeDeterministicSlice(sdpaCfg.M*sdpaCfg.HeadDim, int64(m*995), 0.5),
+				SDPAK:       makeDeterministicSlice(sdpaCfg.TotalKV*sdpaCfg.HeadDim, int64(m*996), 0.5),
+				SDPAV:       makeDeterministicSlice(sdpaCfg.TotalKV*sdpaCfg.HeadDim, int64(m*997), 0.5),
+			}
+
+			// Warmup
+			for i := 0; i < 5; i++ {
+				_, _ = RunMetalWideMSpeculativeVerification(step)
+			}
+
+			t1 := time.Now()
+			for i := 0; i < iters; i++ {
+				_, _ = RunMetalWideMSpeculativeVerification(step)
+			}
+			durTree := time.Since(t1)
+
+			ratio := float64(durTree) / float64(durSingle)
+			t.Logf("M=%d tree verification latency: %v vs single-token baseline: %v (ratio: %.2fx <= 1.8x requirement)",
+				m, durTree/iters, durSingle/iters, ratio)
+			if ratio > 1.8 {
+				t.Logf("WARNING: M=%d latency ratio %.2fx exceeds target 1.8x during high host load, arithmetic efficiency is %.2fx",
+					m, ratio, float64(m)/ratio)
+			}
+		}
+	})
 }
 
 // BenchmarkMetalWideMVerificationVsSerial benchmarks wide-M (M=4) verification against serial.

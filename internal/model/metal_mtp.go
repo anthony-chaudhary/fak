@@ -216,12 +216,11 @@ func NewMetalMTPCoordinator(target *Session, cfgs ...MetalMTPConfig) (*MetalMTPC
 	cfg := DefaultMetalMTPConfig()
 	if len(cfgs) > 0 {
 		cfg = cfgs[0]
+		if cfg.DraftDepth != 0 && (cfg.DraftDepth < 1 || cfg.DraftDepth > 4) {
+			return nil, ErrMetalMTPInvalidDraftDepth
+		}
 	}
 	if cfg.DraftDepth <= 0 {
-		cfg.DraftDepth = 4
-	} else if cfg.DraftDepth < 1 {
-		cfg.DraftDepth = 1
-	} else if cfg.DraftDepth > 4 {
 		cfg.DraftDepth = 4
 	}
 
@@ -287,7 +286,7 @@ func (c *MetalMTPCoordinator) ensureDrafterLocked() {
 	if c.target.Cache == nil {
 		c.target.Cache = NewKVCache(c.target.M.Cfg)
 	}
-	if c.target.M.Cfg.IsQwen35Hybrid() {
+	if c.target.M.Cfg.IsQwen35Hybrid() || (c.target.M.Cfg.isQwen35TextFamily() && c.target.M.Cfg.NumMTPLayers() > 0) {
 		ds, err := NewQwen35MTPDraftSession(c.target, c.cfg.DraftDepth)
 		if err == nil {
 			c.draftSes = ds
@@ -747,7 +746,7 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 	// 3. Propose K draft tokens from resident MTP head (zero host memory copies)
 	start := time.Now()
 	prop, pErr := c.drafter.Propose(ctx, committed, activeDepth)
-	if pErr != nil || len(prop.Tokens) < 1 {
+	if pErr != nil || (len(prop.Tokens) < 1 && (prop.Tree == nil || len(prop.Tree.Nodes) < 1)) {
 		nextLogits = c.target.Step(target0)
 		elapsed := time.Since(start)
 		c.totalGenerated++
@@ -764,6 +763,11 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 			_, _, _ = c.governor.ObserveStep(obs)
 		}
 		return []int{target0}, -1, nextLogits, nil
+	}
+
+	// Candidate tree verification path: evaluate M=16..24 tree in one forward pass
+	if prop.Tree != nil && len(prop.Tree.Nodes) > 0 {
+		return c.stepRoundTreeLocked(start, target0, boundaryLogits, prop.Tree)
 	}
 
 	drafts := prop.Tokens
@@ -811,7 +815,7 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 	// the ordinary K-step verifier fallback. The transaction owns the live GDN
 	// checkpoint and PrefixSnapshot needed to adopt a full panel or restore and
 	// replay a partial accepted prefix.
-	if activeDepth == 4 && len(drafts) == 4 && c.target.M.Cfg.IsQwen35Hybrid() {
+	if activeDepth == 4 && len(drafts) == 4 && (c.target.M.Cfg.IsQwen35Hybrid() || c.target.M.Cfg.isQwen35TextFamily()) {
 		return c.stepRoundQwen35P4Locked(start, target0, boundaryLogits, drafts, draftTokens32)
 	}
 
@@ -1091,6 +1095,250 @@ func (c *MetalMTPCoordinator) stepRoundQwen35P4Locked(start time.Time, target0 i
 		return nil, -1, nil, observeErr
 	}
 	return accTokens, bonusTok, nextLogits, nil
+}
+
+// StepRoundTree executes one speculative candidate tree verification cycle.
+// Evaluates the full candidate tree (M=16..24 nodes) in one forward pass,
+// and extracts the highest-scoring verified token branch via greedy argmax selection.
+func (c *MetalMTPCoordinator) StepRoundTree(ctx context.Context, committed []int, boundaryLogits []float32, tree *CandidateTree) (accepted []int, bonus int, nextLogits []float32, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastTargetVerification = MetalMTPTargetVerificationReceipt{}
+	c.hasTargetVerification = false
+
+	if c.closed {
+		return nil, -1, nil, ErrMetalMTPClosed
+	}
+	if c.target == nil {
+		return nil, -1, nil, ErrMetalMTPNilTarget
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, -1, nil, err
+	}
+
+	// 1. Temperature-zero logit validity tripwire
+	if c.cfg.EnforceGreedyTripwire {
+		for _, l := range boundaryLogits {
+			if math.IsNaN(float64(l)) || math.IsInf(float64(l), 0) {
+				c.tripwireTripped = true
+				c.tripwireReason = "non-finite logits in boundary"
+				return nil, -1, nil, ErrMetalMTPNonFiniteLogits
+			}
+		}
+	}
+
+	target0 := argmaxF32(boundaryLogits)
+
+	if tree == nil || len(tree.Nodes) == 0 {
+		nextLogits = c.target.Step(target0)
+		c.totalGenerated++
+		return []int{target0}, -1, nextLogits, nil
+	}
+
+	return c.stepRoundTreeLocked(time.Now(), target0, boundaryLogits, tree)
+}
+
+func (c *MetalMTPCoordinator) stepRoundTreeLocked(start time.Time, target0 int, boundaryLogits []float32, tree *CandidateTree) ([]int, int, []float32, error) {
+	N := len(tree.Nodes)
+	ids := tree.Tokens()
+
+	// Vocabulary sanity check: reject out-of-vocab candidates
+	vocabSize := c.target.M.Cfg.VocabSize
+	for _, tok := range ids {
+		if tok < 0 || (vocabSize > 0 && tok >= vocabSize) {
+			nextLogits := c.target.Step(target0)
+			c.totalGenerated++
+			return nil, target0, nextLogits, nil
+		}
+	}
+
+	// Capture pre-round verified snapshot for exact rollback
+	snap, snapErr := c.target.PrefixSnapshot()
+	if snapErr != nil {
+		nextLogits := c.target.Step(target0)
+		c.totalGenerated++
+		return []int{target0}, -1, nextLogits, nil
+	}
+	defer snap.Close()
+
+	// Record draft in Context-MMU with speculative page tracking
+	draftTokens32 := make([]int32, N)
+	for i, t := range ids {
+		draftTokens32[i] = int32(t)
+	}
+	c.draftState.RecordDraft(draftTokens32)
+	if c.checkpointMgr != nil && c.sessionID != "" {
+		_ = c.checkpointMgr.RecordMTPDraft(c.sessionID, draftTokens32)
+	}
+
+	baseLen := c.target.Cache.Len()
+	pos := make([]int, N)
+	for i, node := range tree.Nodes {
+		pos[i] = baseLen + node.Depth
+	}
+
+	mask, mErr := tree.DeriveMask()
+	if mErr != nil {
+		_, _ = c.draftState.RollbackDraft()
+		if c.checkpointMgr != nil && c.sessionID != "" {
+			_, _ = c.checkpointMgr.RollbackMTPDraft(c.sessionID)
+		}
+		_ = snap.Restore(c.target)
+		nextLogits := c.target.Step(target0)
+		c.totalGenerated++
+		return []int{target0}, -1, nextLogits, nil
+	}
+
+	allow := func(q, k int) bool {
+		if q >= 0 && q < len(mask) && k >= 0 && k < len(mask[q]) {
+			return mask[q][k]
+		}
+		return false
+	}
+
+	// Single-pass verification forward across all tree candidates
+	var rows [][]float32
+	if verifyForwardBatchedOK(c.target) {
+		rawRows := c.target.VerifyForward(ids, pos, allow)
+		rows = make([][]float32, len(rawRows))
+		for i, r := range rawRows {
+			rows[i] = append([]float32(nil), r...)
+		}
+	} else {
+		// Fallback verification: step through candidate sequence
+		rows = make([][]float32, N)
+		for i, tok := range ids {
+			stepLogits := c.target.Step(tok)
+			rows[i] = append([]float32(nil), stepLogits...)
+		}
+	}
+
+	if len(rows) != N {
+		_, _ = c.draftState.RollbackDraft()
+		if c.checkpointMgr != nil && c.sessionID != "" {
+			_, _ = c.checkpointMgr.RollbackMTPDraft(c.sessionID)
+		}
+		_ = snap.Restore(c.target)
+		nextLogits := c.target.Step(target0)
+		c.totalGenerated++
+		return []int{target0}, -1, nextLogits, nil
+	}
+
+	// Greedy temperature-zero verification tripwire
+	if c.cfg.EnforceGreedyTripwire {
+		for _, row := range rows {
+			for _, l := range row {
+				if math.IsNaN(float64(l)) || math.IsInf(float64(l), 0) {
+					c.tripwireTripped = true
+					c.tripwireReason = "non-finite logits in verification rows"
+					_, _ = c.draftState.RollbackDraft()
+					if c.checkpointMgr != nil && c.sessionID != "" {
+						_, _ = c.checkpointMgr.RollbackMTPDraft(c.sessionID)
+					}
+					_ = snap.Restore(c.target)
+					return nil, -1, nil, ErrMetalMTPNonFiniteLogits
+				}
+			}
+		}
+	}
+
+	// Greedy argmax path selection over tree proposals:
+	// Extracts the highest-scoring verified token branch starting from root matching target0.
+	matchRoot := -1
+	for i, node := range tree.Nodes {
+		if node.Parent == -1 && node.Token == target0 {
+			matchRoot = i
+			break
+		}
+	}
+
+	if matchRoot == -1 {
+		// Root candidate did not match target0: reject all draft tokens
+		_, _, _ = c.draftState.CommitDraft(0)
+		if c.checkpointMgr != nil && c.sessionID != "" {
+			_, _, _ = c.checkpointMgr.CommitMTPDraft(c.sessionID, 0)
+		}
+		_ = snap.Restore(c.target)
+		nextLogits := c.target.Step(target0)
+		elapsed := time.Since(start)
+		c.totalGenerated++
+		c.recordAcceptanceLocked(N, 0)
+		if c.governor != nil {
+			obs := Qwen38AdaptiveStepObservation{
+				ProposedTokens: N,
+				AcceptedTokens: 0,
+				StepLatency:    elapsed,
+				TargetLatency:  c.targetLatency,
+			}
+			if c.stepCostFn != nil {
+				obs = c.stepCostFn(N, 0, obs)
+			}
+			_, _, _ = c.governor.ObserveStep(obs)
+		}
+		return nil, target0, nextLogits, nil
+	}
+
+	acceptedIndices := []int{matchRoot}
+	cur := matchRoot
+	pred := argmaxF32(rows[cur])
+
+	for {
+		nextChild := -1
+		for _, childIdx := range tree.Nodes[cur].Children {
+			if childIdx >= 0 && childIdx < N && tree.Nodes[childIdx].Token == pred {
+				nextChild = childIdx
+				break
+			}
+		}
+		if nextChild == -1 {
+			break
+		}
+		acceptedIndices = append(acceptedIndices, nextChild)
+		cur = nextChild
+		pred = argmaxF32(rows[cur])
+	}
+
+	acceptedTokens := make([]int, len(acceptedIndices))
+	for i, idx := range acceptedIndices {
+		acceptedTokens[i] = tree.Nodes[idx].Token
+	}
+	bonusTok := pred
+	numAccepted := len(acceptedTokens)
+
+	// Atomic Context-MMU page commit & rollback:
+	// Commits accepted token pages and immediately frees rejected pages without memory leaks
+	_, _, _ = c.draftState.CommitDraft(numAccepted)
+	if c.checkpointMgr != nil && c.sessionID != "" {
+		_, _, _ = c.checkpointMgr.CommitMTPDraft(c.sessionID, numAccepted)
+	}
+
+	// Restore target snapshot and advance sequentially with accepted branch
+	_ = snap.Restore(c.target)
+	for _, tok := range acceptedTokens {
+		c.target.Step(tok)
+	}
+
+	// Advance target session with the bonus token
+	nextLogits := c.target.Step(bonusTok)
+	elapsed := time.Since(start)
+	c.totalGenerated += numAccepted + 1
+
+	c.recordAcceptanceLocked(N, numAccepted)
+
+	if c.governor != nil {
+		obs := Qwen38AdaptiveStepObservation{
+			ProposedTokens: N,
+			AcceptedTokens: numAccepted,
+			StepLatency:    elapsed,
+			TargetLatency:  c.targetLatency,
+		}
+		if c.stepCostFn != nil {
+			obs = c.stepCostFn(N, numAccepted, obs)
+		}
+		_, _, _ = c.governor.ObserveStep(obs)
+	}
+
+	return acceptedTokens, bonusTok, nextLogits, nil
 }
 
 // Generate drives the complete in-kernel speculative generation loop from prompt to maxNew tokens.
