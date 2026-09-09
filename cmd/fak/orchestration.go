@@ -25,7 +25,7 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 		return runOrchestrationStatus(stdout, stderr, args[1:])
 	}
 	if len(args) == 0 || args[0] != "plan" {
-		fmt.Fprintln(stderr, "usage: fak orchestration plan --profile off|auto|fast|ultracode (--task FIXTURE | --task-text TEXT) [--json] [--strict] [--launch] [--max-wall DURATION] [--selfcheck]")
+		fmt.Fprintln(stderr, "usage: fak orchestration plan --profile off|auto|fast|ultracode (--task FIXTURE [--task-text TEXT] | --task-text TEXT) [--json] [--strict] [--launch] [--max-wall DURATION] [--selfcheck]")
 		return 2
 	}
 	fs := flag.NewFlagSet("orchestration plan", flag.ContinueOnError)
@@ -55,6 +55,7 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
+	normalizedTaskText := strings.TrimSpace(*taskText)
 	profilesExplicit := profilesWereExplicit(fs)
 	output := syspromptmmu.DescribeStyle(*outputProfile)
 	if !output.Known {
@@ -70,8 +71,8 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 	if profilesExplicit {
 		profileSource = "cli"
 	}
-	if (*taskPath == "") == (strings.TrimSpace(*taskText) == "") || fs.NArg() != 0 || (*launch && *selfcheck) {
-		fmt.Fprintln(stderr, "fak orchestration plan: exactly one of --task or --task-text is required, positional arguments are not accepted, and --launch conflicts with --selfcheck")
+	if (*taskPath == "" && normalizedTaskText == "") || fs.NArg() != 0 || (*launch && *selfcheck) {
+		fmt.Fprintln(stderr, "fak orchestration plan: at least one of --task or --task-text is required, positional arguments are not accepted, and --launch conflicts with --selfcheck")
 		return 2
 	}
 	if *launch && *maxWall <= 0 {
@@ -89,7 +90,7 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 		}
 		task, err = orchestration.ParseTask(data)
 	} else {
-		task, err = orchestration.TaskFromText(*taskText)
+		task, err = orchestration.TaskFromText(normalizedTaskText)
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "fak orchestration plan: %v\n", err)
@@ -117,8 +118,8 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 	if err == nil {
 		bindFastClaudeSpeed(&resolved)
 	}
-	if err == nil && taskText != nil && *taskText != "" {
-		orchestration.RouteResolution(&resolved, *taskText, guardCodexDefaultModelID)
+	if err == nil && normalizedTaskText != "" {
+		orchestration.RouteResolution(&resolved, normalizedTaskText, guardCodexDefaultModelID)
 	}
 	if err == nil {
 		envModel := strings.TrimSpace(os.Getenv("FAK_ORCHESTRATION_WORKER_MODEL"))
@@ -199,18 +200,32 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stderr, "SELFCHECK PASS schema=%s offline=true launched=0\n", resolved.Schema)
 	}
 	sessionID := strings.TrimSpace(os.Getenv("CODEX_THREAD_ID"))
+	effectiveCodexHome := ""
+	if sessionID != "" || *launch {
+		effectiveCodexHome, err = resolvedCodexLoopHome(*codexHome)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak orchestration plan: resolve Codex artifact home: %v\n", err)
+			return 1
+		}
+		effectiveCodexHome, err = filepath.Abs(effectiveCodexHome)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak orchestration plan: resolve Codex artifact home: %v\n", err)
+			return 1
+		}
+		effectiveCodexHome = filepath.Clean(effectiveCodexHome)
+	}
 	if *launch {
 		if orchestrationChildProcess() {
 			fmt.Fprintln(stderr, "fak orchestration plan: nested --launch is refused; orchestration children must finish their assigned role within the parent wave budget")
 			return 2
 		}
-		if err := validateCodexOrchestrationArtifactHome(*codexHome); err != nil {
+		if err := validateCodexOrchestrationArtifactHome(effectiveCodexHome); err != nil {
 			fmt.Fprintf(stderr, "fak orchestration plan: %v\n", err)
 			return 1
 		}
 	}
 	if sessionID != "" && !*selfcheck {
-		if err := writeCodexOrchestrationInvocationReceipt(*codexHome, codexOrchestrationInvocationReceipt{
+		if err := writeCodexOrchestrationInvocationReceipt(effectiveCodexHome, codexOrchestrationInvocationReceipt{
 			Schema: "fak.codex_orchestration_invocation.v1", SessionID: sessionID,
 			InvokedAt: time.Now().UTC().Format(time.RFC3339Nano), TaskID: task.ID,
 			Requested: resolved.Requested.Name, Resolved: resolved.Resolved.Profile,
@@ -230,11 +245,8 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 		if *capset == "unsupported" {
 			capabilityProfile = "unsupported"
 		}
-		launchTaskText := *taskText
-		if task.FormalPacket != nil {
-			launchTaskText = orchestrationFormalPacketTaskText(*task.FormalPacket)
-		}
-		launched, launchErr := launchCodexOrchestrationWorkersWithProfiles(*codexHome, sessionID, *profile, capabilityProfile, launchTaskText, output.Style, work.Profile, profileSource, resolved, *maxWall)
+		launchTaskText := orchestrationLaunchTaskText(task.FormalPacket, normalizedTaskText)
+		launched, launchErr := launchCodexOrchestrationWorkersWithProfiles(effectiveCodexHome, sessionID, *profile, capabilityProfile, launchTaskText, output.Style, work.Profile, profileSource, resolved, *maxWall)
 		if launchErr != nil {
 			fmt.Fprintf(stderr, "fak orchestration plan: %v\n", launchErr)
 			return 1
@@ -307,6 +319,18 @@ func orchestrationFormalPacketTaskText(packet orchestration.FormalPacket) string
 		fmt.Fprintf(&text, "- %s\n", surface)
 	}
 	return strings.TrimSpace(text.String())
+}
+
+func orchestrationLaunchTaskText(packet *orchestration.FormalPacket, assignment string) string {
+	assignment = strings.TrimSpace(assignment)
+	if packet == nil {
+		return assignment
+	}
+	formal := orchestrationFormalPacketTaskText(*packet)
+	if assignment == "" {
+		return formal
+	}
+	return formal + "\n\nephemeral_assignment:\n" + assignment
 }
 
 type codexOrchestrationInvocationReceipt struct {
