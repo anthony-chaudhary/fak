@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -91,6 +92,21 @@ func TestVulkanFP16KVNoF32Expansion(t *testing.T) {
 		nKV                 = 1
 		elementsPerPosition = 513
 	)
+	for _, dims := range []struct {
+		capacityPos int
+		nKV         int
+		headDim     int
+	}{
+		{capacityPos: math.MaxInt, nKV: 2, headDim: 1},
+		{capacityPos: 1, nKV: math.MaxInt, headDim: 2},
+		{capacityPos: math.MaxInt, nKV: 1, headDim: 1},
+	} {
+		got, err := NewVulkanFP16KVContract(dims.capacityPos, dims.nKV, dims.headDim)
+		if err == nil || got != nil {
+			t.Fatalf("NewVulkanFP16KVContract(%d, %d, %d) = (%v, %v), want nil overflow error", dims.capacityPos, dims.nKV, dims.headDim, got, err)
+		}
+	}
+
 	cache, err := NewVulkanFP16KVContract(capacityPos, nKV, elementsPerPosition)
 	if err != nil {
 		t.Fatalf("NewVulkanFP16KVContract: %v", err)
@@ -99,9 +115,16 @@ func TestVulkanFP16KVNoF32Expansion(t *testing.T) {
 	contractType := reflect.TypeOf(*cache)
 	for i := 0; i < contractType.NumField(); i++ {
 		field := contractType.Field(i)
+		if field.IsExported() {
+			t.Fatalf("contract invariant/accounting field %s is exported and caller-mutable", field.Name)
+		}
 		if field.Type.Kind() == reflect.Slice && field.Type.Elem().Kind() == reflect.Float32 {
 			t.Fatalf("resident field %s is an F32 shadow slice", field.Name)
 		}
+	}
+	if cache.CapacityPositions() != capacityPos || cache.NumKVHeads() != nKV || cache.HeadDim() != elementsPerPosition || cache.Positions() != 0 {
+		t.Fatalf("contract geometry getters = capacity:%d heads:%d head_dim:%d positions:%d, want %d/%d/%d/0",
+			cache.CapacityPositions(), cache.NumKVHeads(), cache.HeadDim(), cache.Positions(), capacityPos, nKV, elementsPerPosition)
 	}
 
 	rowsK := make([][]float32, capacityPos)
@@ -120,7 +143,7 @@ func TestVulkanFP16KVNoF32Expansion(t *testing.T) {
 	if err := cache.Append(rowsK[0][:elementsPerPosition-1], rowsV[0]); err == nil {
 		t.Fatal("Append accepted a partial K row")
 	}
-	if cache.NumPos != 0 || !reflect.DeepEqual(cache.packedK, zeroK) || !reflect.DeepEqual(cache.packedV, zeroV) {
+	if cache.Positions() != 0 || !reflect.DeepEqual(cache.packedK, zeroK) || !reflect.DeepEqual(cache.packedV, zeroV) {
 		t.Fatal("invalid append mutated resident state")
 	}
 
@@ -215,11 +238,12 @@ func TestVulkanFP16KVNoF32Expansion(t *testing.T) {
 	if cache.ResidentBytes()%StrixHaloCacheLineBytes != 0 {
 		t.Fatalf("resident bytes %d are not %d-byte aligned", cache.ResidentBytes(), StrixHaloCacheLineBytes)
 	}
-	if cache.FallbackCount != 0 {
-		t.Fatalf("fallback_count=%d, want 0", cache.FallbackCount)
+	if cache.FallbackCount() != 0 {
+		t.Fatalf("fallback_count=%d, want 0", cache.FallbackCount())
 	}
 
-	shader, err := os.ReadFile(filepath.Join("shaders", "attention.comp"))
+	shaderPath := filepath.Join("shaders", "attention.comp")
+	shader, err := os.ReadFile(shaderPath)
 	if err != nil {
 		t.Fatalf("read attention shader: %v", err)
 	}
@@ -243,8 +267,59 @@ func TestVulkanFP16KVNoF32Expansion(t *testing.T) {
 			t.Errorf("attention.comp missing FP16-KV/F32-accumulator contract token %q", token)
 		}
 	}
+	witnessVulkanPackedFP16ShaderCompile(t, shaderPath)
 	t.Logf("FP16 KV software witness: software_contract=true runtime_integrated=false physical_executed=false elements_per_position=%d positions=%d oracle_max_abs=%g logical_bytes=%d resident_bytes=%d f32_resident_bytes=%d reduction=%.1f%% fallback_count=%d",
-		elementsPerPosition, cache.NumPos, maxAbs, cache.LogicalBytes(), cache.ResidentBytes(), f32ResidentBytes, reduction*100, cache.FallbackCount)
+		elementsPerPosition, cache.Positions(), maxAbs, cache.LogicalBytes(), cache.ResidentBytes(), f32ResidentBytes, reduction*100, cache.FallbackCount())
+}
+
+func witnessVulkanPackedFP16ShaderCompile(t *testing.T, shaderPath string) {
+	t.Helper()
+	glslcPath, err := exec.LookPath("glslc")
+	if err != nil {
+		if sdk := os.Getenv("VULKAN_SDK"); sdk != "" {
+			candidate := filepath.Join(sdk, "Bin", "glslc.exe")
+			if _, statErr := os.Stat(candidate); statErr == nil {
+				glslcPath = candidate
+			}
+		}
+	}
+	if glslcPath == "" {
+		t.Log("packed FP16 shader compile witness unavailable: glslc was not found on PATH or under VULKAN_SDK; structural source-contract assertions only")
+		return
+	}
+
+	define := "-DFAK_ATTENTION_PACKED_FP16_KV=1"
+	preprocess := exec.Command(glslcPath, define, "-E", "-fshader-stage=comp", shaderPath)
+	preprocessed, err := preprocess.CombinedOutput()
+	if err != nil {
+		t.Fatalf("preprocess packed FP16 attention specialization: %v\n%s", err, preprocessed)
+	}
+	preprocessedSource := string(preprocessed)
+	for _, token := range []string{"uint PackedK[];", "uint PackedV[];"} {
+		if !strings.Contains(preprocessedSource, token) {
+			t.Fatalf("packed FP16 preprocessed shader missing selected ABI token %q", token)
+		}
+	}
+	for _, token := range []string{"float K[];", "float V[];"} {
+		if strings.Contains(preprocessedSource, token) {
+			t.Fatalf("packed FP16 preprocessed shader retained default F32 ABI token %q", token)
+		}
+	}
+
+	spvPath := filepath.Join(t.TempDir(), "attention-packed-fp16.spv")
+	compile := exec.Command(glslcPath, define, "-O", "--target-env=vulkan1.2", "-fshader-stage=comp", shaderPath, "-o", spvPath)
+	output, err := compile.CombinedOutput()
+	if err != nil {
+		t.Fatalf("compile packed FP16 attention specialization: %v\n%s", err, output)
+	}
+	spv, err := os.ReadFile(spvPath)
+	if err != nil {
+		t.Fatalf("read packed FP16 attention SPIR-V: %v", err)
+	}
+	if len(spv) < 4 || spv[0] != 0x03 || spv[1] != 0x02 || spv[2] != 0x23 || spv[3] != 0x07 {
+		t.Fatalf("packed FP16 attention specialization produced invalid SPIR-V header: % x", spv[:min(len(spv), 4)])
+	}
+	t.Logf("packed FP16 shader preprocessing/compile witness: compiler=%s spirv_bytes=%d magic=0x07230203", glslcPath, len(spv))
 }
 
 // TestVulkanKVScratchpadDequantOnce tests the dequant-once KV cache scratchpad for full-attention

@@ -4,6 +4,7 @@ package compute
 
 import (
 	"fmt"
+	"math"
 )
 
 // Architecture and cache constants for AMD Strix Halo (gfx1151) RDNA 3.5.
@@ -22,36 +23,99 @@ const (
 // This contract is not the device-runtime integration. The vulkanKV allocator and
 // dispatch wiring adopt it in a separate, physically witnessed leaf.
 type VulkanFP16KVContract struct {
-	NumKVHeads     int
-	HeadDim        int
-	CapacityPos    int
-	NumPos         int
-	AllocatedBytes int64
-	FallbackCount  int
+	numKVHeads     int
+	headDim        int
+	capacityPos    int
+	numPos         int
+	rowElems       int
+	allocatedBytes int64
+	fallbackCount  int
 	packedK        []uint32
 	packedV        []uint32
 }
 
 // NewVulkanFP16KVContract allocates separately cache-line-aligned K and V
 // payloads. Each logical resident value occupies exactly two bytes; alignment
-// padding is included in AllocatedBytes but never exposed as a logical position.
+// padding is included in ResidentBytes but never exposed as a logical position.
 func NewVulkanFP16KVContract(capacityPos, nKV, headDim int) (*VulkanFP16KVContract, error) {
 	if capacityPos <= 0 || nKV <= 0 || headDim <= 0 {
 		return nil, fmt.Errorf("vulkan_fp16_kv: invalid dimensions (capacityPos=%d, nKV=%d, headDim=%d)", capacityPos, nKV, headDim)
 	}
-	logicalElems := capacityPos * nKV * headDim
-	packedWordsPerBuffer := (logicalElems + 1) / 2
-	rawBytesPerBuffer := int64(packedWordsPerBuffer * 4)
+	rowElems, ok := checkedVulkanFP16KVMul(nKV, headDim)
+	if !ok {
+		return nil, fmt.Errorf("vulkan_fp16_kv: dimensions overflow row element count (nKV=%d, headDim=%d)", nKV, headDim)
+	}
+	logicalElems, ok := checkedVulkanFP16KVMul(capacityPos, rowElems)
+	if !ok || int64(logicalElems) > math.MaxInt64/4 {
+		return nil, fmt.Errorf("vulkan_fp16_kv: dimensions overflow logical byte count (capacityPos=%d, nKV=%d, headDim=%d)", capacityPos, nKV, headDim)
+	}
+	packedWordsPerBuffer := logicalElems/2 + logicalElems%2
+	rawBytesPerBuffer := int64(packedWordsPerBuffer) * 4
+	if rawBytesPerBuffer > math.MaxInt64-(StrixHaloCacheLineBytes-1) {
+		return nil, fmt.Errorf("vulkan_fp16_kv: dimensions overflow aligned resident byte count (capacityPos=%d, nKV=%d, headDim=%d)", capacityPos, nKV, headDim)
+	}
 	alignedBytesPerBuffer := (rawBytesPerBuffer + StrixHaloCacheLineBytes - 1) &^ (StrixHaloCacheLineBytes - 1)
+	if alignedBytesPerBuffer > math.MaxInt64/2 || alignedBytesPerBuffer/4 > int64(math.MaxInt) {
+		return nil, fmt.Errorf("vulkan_fp16_kv: dimensions overflow resident allocation (capacityPos=%d, nKV=%d, headDim=%d)", capacityPos, nKV, headDim)
+	}
 	residentWordsPerBuffer := int(alignedBytesPerBuffer / 4)
 	return &VulkanFP16KVContract{
-		NumKVHeads:     nKV,
-		HeadDim:        headDim,
-		CapacityPos:    capacityPos,
-		AllocatedBytes: alignedBytesPerBuffer * 2,
+		numKVHeads:     nKV,
+		headDim:        headDim,
+		capacityPos:    capacityPos,
+		rowElems:       rowElems,
+		allocatedBytes: alignedBytesPerBuffer * 2,
 		packedK:        make([]uint32, residentWordsPerBuffer),
 		packedV:        make([]uint32, residentWordsPerBuffer),
 	}, nil
+}
+
+func checkedVulkanFP16KVMul(a, b int) (int, bool) {
+	if a <= 0 || b <= 0 || a > math.MaxInt/b {
+		return 0, false
+	}
+	return a * b, true
+}
+
+// NumKVHeads reports the immutable number of resident KV heads.
+func (c *VulkanFP16KVContract) NumKVHeads() int {
+	if c == nil {
+		return 0
+	}
+	return c.numKVHeads
+}
+
+// HeadDim reports the immutable number of values per KV head.
+func (c *VulkanFP16KVContract) HeadDim() int {
+	if c == nil {
+		return 0
+	}
+	return c.headDim
+}
+
+// CapacityPositions reports the immutable token-position capacity.
+func (c *VulkanFP16KVContract) CapacityPositions() int {
+	if c == nil {
+		return 0
+	}
+	return c.capacityPos
+}
+
+// Positions reports the number of positions appended to the cache.
+func (c *VulkanFP16KVContract) Positions() int {
+	if c == nil {
+		return 0
+	}
+	return c.numPos
+}
+
+// FallbackCount reports software fallback attempts. This standalone packed
+// contract has no fallback path, so constructed values always report zero.
+func (c *VulkanFP16KVContract) FallbackCount() int {
+	if c == nil {
+		return 0
+	}
+	return c.fallbackCount
 }
 
 // Append stores one token-major [nKV, headDim] K/V row as FP16. Conversion is
@@ -60,19 +124,19 @@ func (c *VulkanFP16KVContract) Append(k, v []float32) error {
 	if c == nil {
 		return fmt.Errorf("vulkan_fp16_kv: nil cache")
 	}
-	rowElems := c.NumKVHeads * c.HeadDim
+	rowElems := c.rowElems
 	if len(k) != rowElems || len(v) != rowElems {
 		return fmt.Errorf("vulkan_fp16_kv: append row shape mismatch (K=%d, V=%d, want %d)", len(k), len(v), rowElems)
 	}
-	if c.NumPos >= c.CapacityPos {
-		return fmt.Errorf("vulkan_fp16_kv: capacity %d positions exceeded", c.CapacityPos)
+	if c.numPos >= c.capacityPos {
+		return fmt.Errorf("vulkan_fp16_kv: capacity %d positions exceeded", c.capacityPos)
 	}
-	base := c.NumPos * rowElems
+	base := c.numPos * rowElems
 	for i := 0; i < rowElems; i++ {
 		writeVulkanPackedHalf(c.packedK, base+i, Float32ToFloat16Bits(k[i]))
 		writeVulkanPackedHalf(c.packedV, base+i, Float32ToFloat16Bits(v[i]))
 	}
-	c.NumPos++
+	c.numPos++
 	return nil
 }
 
@@ -81,7 +145,7 @@ func (c *VulkanFP16KVContract) LogicalBytes() int64 {
 	if c == nil {
 		return 0
 	}
-	return int64(c.NumPos * c.NumKVHeads * c.HeadDim * 2 * 2)
+	return int64(c.numPos) * int64(c.rowElems) * 4
 }
 
 // ResidentBytes reports the cache-line-aligned K+V allocation footprint.
@@ -89,7 +153,7 @@ func (c *VulkanFP16KVContract) ResidentBytes() int64 {
 	if c == nil {
 		return 0
 	}
-	return c.AllocatedBytes
+	return c.allocatedBytes
 }
 
 // ReadPosition widens exactly one position into ephemeral float32 result rows.
@@ -98,10 +162,10 @@ func (c *VulkanFP16KVContract) ReadPosition(pos int) (k, v []float32, err error)
 	if c == nil {
 		return nil, nil, fmt.Errorf("vulkan_fp16_kv: nil cache")
 	}
-	if pos < 0 || pos >= c.NumPos {
-		return nil, nil, fmt.Errorf("vulkan_fp16_kv: position %d out of bounds [0, %d)", pos, c.NumPos)
+	if pos < 0 || pos >= c.numPos {
+		return nil, nil, fmt.Errorf("vulkan_fp16_kv: position %d out of bounds [0, %d)", pos, c.numPos)
 	}
-	rowElems := c.NumKVHeads * c.HeadDim
+	rowElems := c.rowElems
 	k = make([]float32, rowElems)
 	v = make([]float32, rowElems)
 	base := pos * rowElems
