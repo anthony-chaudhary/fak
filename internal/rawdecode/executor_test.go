@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -44,6 +45,8 @@ type fakeLoadedModel struct {
 	closeCalls     int
 	candidate      *fakeSession
 	cpu            *fakeSession
+	candidateHook  func()
+	config         *model.Config
 }
 
 type rawObservedBackend struct {
@@ -59,7 +62,49 @@ func (b *rawObservedBackend) Class() compute.CorrectnessClass { return compute.A
 func (b *rawObservedBackend) Caps() compute.Caps              { return compute.Caps{DeviceMemory: true} }
 func (b *rawObservedBackend) BackendExecutionSnapshot() (compute.BackendExecutionSnapshot, error) {
 	b.calls++
+	if b.calls > len(b.snapshots) {
+		return compute.BackendExecutionSnapshot{}, fmt.Errorf("snapshot %d unavailable", b.calls)
+	}
 	return b.snapshots[b.calls-1], nil
+}
+
+func (b *rawObservedBackend) BeginBackendExecutionWindow() (compute.BackendExecutionWindow, error) {
+	before, available, err := compute.CaptureBackendExecutionSnapshot(b)
+	if err != nil {
+		return nil, err
+	}
+	if !available {
+		return nil, fmt.Errorf("opening snapshot unavailable")
+	}
+	return &rawObservedWindow{backend: b, before: before}, nil
+}
+
+type rawObservedWindow struct {
+	backend *rawObservedBackend
+	before  compute.BackendExecutionSnapshot
+}
+
+func (w *rawObservedWindow) End() (compute.BackendExecutionObservation, error) {
+	after, available, err := compute.CaptureBackendExecutionSnapshot(w.backend)
+	if err != nil {
+		return compute.BackendExecutionObservation{}, err
+	}
+	if !available {
+		return compute.BackendExecutionObservation{}, fmt.Errorf("closing snapshot unavailable")
+	}
+	peak := max(w.before.DeviceAllocationLiveBytes, after.DeviceAllocationLiveBytes)
+	return compute.BackendExecutionWindowDelta(w.before, after, after.DeviceAllocationLiveBytes, peak)
+}
+
+type rawSnapshotOnlyBackend struct {
+	rawUnsupportedBackend
+	snapshot compute.BackendExecutionSnapshot
+	calls    int
+}
+
+func (b *rawSnapshotOnlyBackend) BackendExecutionSnapshot() (compute.BackendExecutionSnapshot, error) {
+	b.calls++
+	return b.snapshot, nil
 }
 
 type rawUnsupportedBackend struct {
@@ -72,11 +117,70 @@ func (b rawUnsupportedBackend) Tier() string                    { return "unsupp
 func (b rawUnsupportedBackend) Class() compute.CorrectnessClass { return compute.Approx }
 func (b rawUnsupportedBackend) Caps() compute.Caps              { return compute.Caps{} }
 
-func (m *fakeLoadedModel) Config() model.Config { return model.Config{VocabSize: 3, EOSTokenID: -1} }
-func (m *fakeLoadedModel) IsEOS(int) bool       { return false }
-func (m *fakeLoadedModel) CloseWeights() error  { m.closeCalls++; return nil }
+type rawWindowBackend struct {
+	rawUnsupportedBackend
+	observations []compute.BackendExecutionObservation
+	events       *[]string
+	beginCalls   int
+	endCalls     int
+	beginErr     error
+	endErr       error
+	nilWindow    bool
+}
+
+func (b *rawWindowBackend) BeginBackendExecutionWindow() (compute.BackendExecutionWindow, error) {
+	if b.events != nil {
+		*b.events = append(*b.events, "begin")
+	}
+	index := b.beginCalls
+	b.beginCalls++
+	if b.beginErr != nil {
+		return nil, b.beginErr
+	}
+	if b.nilWindow {
+		return nil, nil
+	}
+	observation := compute.BackendExecutionObservation{}
+	if index < len(b.observations) {
+		observation = b.observations[index]
+	}
+	return &rawWindow{backend: b, observation: observation}, nil
+}
+
+type rawWindow struct {
+	backend     *rawWindowBackend
+	observation compute.BackendExecutionObservation
+	ended       bool
+}
+
+func (w *rawWindow) End() (compute.BackendExecutionObservation, error) {
+	if w.ended {
+		return compute.BackendExecutionObservation{}, fmt.Errorf("window already ended")
+	}
+	w.ended = true
+	w.backend.endCalls++
+	if w.backend.events != nil {
+		*w.backend.events = append(*w.backend.events, "end")
+	}
+	if w.backend.endErr != nil {
+		return compute.BackendExecutionObservation{}, w.backend.endErr
+	}
+	return w.observation, nil
+}
+
+func (m *fakeLoadedModel) Config() model.Config {
+	if m.config != nil {
+		return *m.config
+	}
+	return model.Config{VocabSize: 3, EOSTokenID: -1}
+}
+func (m *fakeLoadedModel) IsEOS(int) bool      { return false }
+func (m *fakeLoadedModel) CloseWeights() error { m.closeCalls++; return nil }
 func (m *fakeLoadedModel) NewCandidateSession(compute.Backend, Request) (session, error) {
 	m.candidateCalls++
+	if m.candidateHook != nil {
+		m.candidateHook()
+	}
 	return m.candidate, nil
 }
 func (m *fakeLoadedModel) NewCPUSession(Request) session {
@@ -510,10 +614,14 @@ func TestRawDecodeBackendObservationIsPerRunAndBackendOwned(t *testing.T) {
 	artifact := "observed backend artifact"
 	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(artifact)))
 	identity := compute.BackendRuntimeIdentity{Backend: "vulkan", Device: "device", Driver: "driver", Runtime: "vulkan-1.3.0"}
-	before := compute.BackendExecutionSnapshot{Identity: identity, Counters: compute.BackendCounterSnapshot{ComputeDispatches: 100, H2DBytes: 1000}}
+	before := compute.BackendExecutionSnapshot{
+		Identity: identity, Counters: compute.BackendCounterSnapshot{ComputeDispatches: 100, H2DBytes: 1000, H2DCount: 10},
+		TransferCountersObserved: true, DeviceAllocationObserved: true, DeviceAllocationLiveBytes: 128,
+	}
 	after := before
 	after.Counters.ComputeDispatches = 107
 	after.Counters.H2DBytes = 1064
+	after.Counters.H2DCount = 11
 	backend := &rawObservedBackend{name: "vulkan", snapshots: []compute.BackendExecutionSnapshot{before, after}}
 	m := &fakeLoadedModel{candidate: &fakeSession{outputs: [][]float32{{0, 2, 1}}}}
 	d := dependencies{
@@ -535,6 +643,391 @@ func TestRawDecodeBackendObservationIsPerRunAndBackendOwned(t *testing.T) {
 	}
 	if observed.Counters.ComputeDispatches == after.Counters.ComputeDispatches || observed.Identity.Backend == req.BackendName {
 		t.Fatalf("caller label or prior cumulative counters leaked into observation: %+v", observed)
+	}
+}
+
+func TestRawDecodeTimingObservationIsRunnerSealedAndResourceWindowBound(t *testing.T) {
+	artifact := "timing observation artifact"
+	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(artifact)))
+	identity := compute.BackendRuntimeIdentity{Backend: "vulkan", Device: "device", Driver: "driver", Runtime: "runtime"}
+	complete := compute.BackendExecutionObservation{
+		Identity:                  identity,
+		Counters:                  compute.BackendCounterSnapshot{ComputeDispatches: 1, H2DBytes: 64, H2DCount: 1},
+		DeviceMemoryTotalBytes:    1024,
+		DeviceMemoryFreeBytes:     512,
+		DeviceMemoryObserved:      true,
+		TransferCountersObserved:  true,
+		DeviceAllocationLiveBytes: 128,
+		DeviceAllocationPeakBytes: 256,
+		DeviceAllocationObserved:  true,
+	}
+	request := Request{
+		ArtifactPath: "model.gguf", ExpectedArtifactSHA256: digest, ModelName: "timed-model",
+		BackendName: "vulkan", PromptTokenIDs: []int{0}, ContextLimit: 3,
+		GeneratedTokenLimit: 1, Repetitions: 2,
+	}
+	newModelConfig := func() model.Config {
+		truncate := true
+		return model.Config{
+			VocabSize: 3, EOSTokenID: -1,
+			LongRope: &model.RopeScaling{Factor: 2},
+			RopeParameters: model.RopeParameters{
+				"full_attention": model.RopeScaling{Truncate: &truncate},
+			},
+		}
+	}
+	newExecutionWithConfig := func(backend compute.Backend, now func() time.Time, candidateHook func(), config *model.Config) (Execution, error) {
+		m := &fakeLoadedModel{candidate: &fakeSession{outputs: [][]float32{{0, 2, 1}}}, config: config}
+		m.candidateHook = candidateHook
+		d := dependencies{
+			openArtifact: func(string) (io.ReadCloser, error) { return io.NopCloser(strings.NewReader(artifact)), nil },
+			inspectArtifact: func(path string, _ func(string) (io.ReadCloser, error)) (artifactObservation, error) {
+				return artifactObservation{Path: path, SHA256: digest, TensorInventorySHA256: "tensor", TokenizerSHA256: "tokenizer", TemplateSHA256: "template", Quantization: "F32"}, nil
+			},
+			loadModel: func(context.Context, Request) (loadedModel, string, error) { return m, "timed-model", nil },
+			resolveBackend: func(Request) (compute.Backend, BackendObservation, error) {
+				return backend, BackendObservation{Selected: backend.Name()}, nil
+			},
+			now: now,
+		}
+		return d.execute(context.Background(), request)
+	}
+	newExecution := func(backend compute.Backend, now func() time.Time, candidateHook func()) (Execution, error) {
+		config := newModelConfig()
+		return newExecutionWithConfig(backend, now, candidateHook, &config)
+	}
+
+	events := []string{}
+	backend := &rawWindowBackend{
+		rawUnsupportedBackend: rawUnsupportedBackend{name: "vulkan"},
+		observations:          []compute.BackendExecutionObservation{complete, complete},
+		events:                &events,
+	}
+	execution, err := newExecution(backend, fakeClock(), func() { events = append(events, "candidate") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backend.beginCalls != 2 || backend.endCalls != 2 || fmt.Sprint(events) != "[begin candidate end begin candidate end]" {
+		t.Fatalf("resource windows begin=%d end=%d events=%v", backend.beginCalls, backend.endCalls, events)
+	}
+	hookConfig := newModelConfig()
+	hookConfig.EnableResidualHook = true
+	hookModel := &model.Model{Cfg: hookConfig}
+	hookModel.SetResidualHook(func(int, []float32) {})
+	hookBackend := &rawWindowBackend{
+		rawUnsupportedBackend: rawUnsupportedBackend{name: "vulkan"},
+		observations:          []compute.BackendExecutionObservation{complete, complete},
+	}
+	hookExecution, err := newExecutionWithConfig(hookBackend, fakeClock(), nil, &hookModel.Cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := hookExecution.GenerationObservation(0); ok {
+		t.Fatal("enabled residual hook gained generation authority")
+	}
+	if _, ok := hookExecution.TimingObservation(0); ok {
+		t.Fatal("enabled residual hook gained timing authority")
+	}
+	for rep := range execution.Runs {
+		observation, ok := execution.TimingObservation(rep)
+		if !ok {
+			t.Fatalf("sealed timing observation %d is unavailable", rep)
+		}
+		boundaries := observation.boundaries
+		for i, boundary := range boundaries {
+			want := time.Unix(100, 0).Add(time.Duration(3+rep*6+i) * time.Millisecond)
+			if boundary != want {
+				t.Fatalf("timing boundary %d = %v, want %v", i, boundary, want)
+			}
+			if i > 0 && boundary.Before(boundaries[i-1]) {
+				t.Fatalf("timing boundary %d regressed: %v before %v", i, boundary, boundaries[i-1])
+			}
+		}
+		for name, duration := range map[string]time.Duration{
+			"setup": observation.SessionSetupDuration(), "prefill": observation.PrefillDuration(),
+			"sample": observation.FirstSampleDuration(), "decode": observation.DecodeDuration(),
+			"teardown": observation.TeardownDuration(),
+		} {
+			if duration != time.Millisecond {
+				t.Fatalf("%s duration = %v, want 1ms", name, duration)
+			}
+		}
+		if got, ok := observation.BackendExecution(); !ok || got != complete {
+			t.Fatalf("backend observation = %+v, %v", got, ok)
+		}
+	}
+
+	for name, mutate := range map[string]func(*Run){
+		"setup":    func(run *Run) { run.SessionSetupDuration++ },
+		"prefill":  func(run *Run) { run.PrefillDuration++ },
+		"sample":   func(run *Run) { run.FirstSampleDuration++ },
+		"decode":   func(run *Run) { run.DecodeDuration++ },
+		"teardown": func(run *Run) { run.TeardownDuration++ },
+	} {
+		t.Run("duration "+name, func(t *testing.T) {
+			mutated := execution
+			mutated.Runs = slices.Clone(execution.Runs)
+			mutate(&mutated.Runs[0])
+			if _, ok := mutated.TimingObservation(0); ok {
+				t.Fatal("public duration mutation retained timing authority")
+			}
+		})
+	}
+	for name, mutate := range map[string]func(*compute.BackendExecutionObservation){
+		"identity backend":      func(got *compute.BackendExecutionObservation) { got.Identity.Backend = "other" },
+		"identity device":       func(got *compute.BackendExecutionObservation) { got.Identity.Device = "other" },
+		"identity driver":       func(got *compute.BackendExecutionObservation) { got.Identity.Driver = "other" },
+		"identity runtime":      func(got *compute.BackendExecutionObservation) { got.Identity.Runtime = "other" },
+		"counter":               func(got *compute.BackendExecutionObservation) { got.Counters.ComputeDispatches++ },
+		"transfer availability": func(got *compute.BackendExecutionObservation) { got.TransferCountersObserved = false },
+		"memory availability":   func(got *compute.BackendExecutionObservation) { got.DeviceMemoryObserved = false },
+		"memory total":          func(got *compute.BackendExecutionObservation) { got.DeviceMemoryTotalBytes++ },
+		"memory free":           func(got *compute.BackendExecutionObservation) { got.DeviceMemoryFreeBytes++ },
+		"allocation availability": func(got *compute.BackendExecutionObservation) {
+			got.DeviceAllocationObserved = false
+		},
+		"allocation live": func(got *compute.BackendExecutionObservation) { got.DeviceAllocationLiveBytes++ },
+		"allocation peak": func(got *compute.BackendExecutionObservation) { got.DeviceAllocationPeakBytes++ },
+	} {
+		t.Run("backend "+name, func(t *testing.T) {
+			mutated := execution
+			mutated.Runs = slices.Clone(execution.Runs)
+			forged := *mutated.Runs[0].BackendExecution
+			mutate(&forged)
+			mutated.Runs[0].BackendExecution = &forged
+			if _, ok := mutated.TimingObservation(0); ok {
+				t.Fatal("public backend mutation retained timing authority")
+			}
+		})
+	}
+	permuted := execution
+	permuted.Runs = slices.Clone(execution.Runs)
+	permuted.Runs[0], permuted.Runs[1] = permuted.Runs[1], permuted.Runs[0]
+	if _, ok := permuted.TimingObservation(0); ok {
+		t.Fatal("permuted repetition retained timing authority")
+	}
+	otherBackend := &rawWindowBackend{rawUnsupportedBackend: rawUnsupportedBackend{name: "vulkan"}, observations: []compute.BackendExecutionObservation{complete, complete}}
+	other, err := newExecution(otherBackend, fakeClock(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transplanted := execution
+	transplanted.Runs = slices.Clone(execution.Runs)
+	transplanted.Runs[0] = other.Runs[0]
+	if _, ok := transplanted.TimingObservation(0); ok {
+		t.Fatal("cross-execution transplant retained timing authority")
+	}
+	bindingMutations := map[string]func(*Execution){
+		"prompt": func(got *Execution) {
+			got.PromptTokenIDs = slices.Clone(got.PromptTokenIDs)
+			got.PromptTokenIDs[0]++
+		},
+		"context limit":    func(got *Execution) { got.ContextLimit++ },
+		"generated limit":  func(got *Execution) { got.GeneratedLimit++ },
+		"ignore EOS":       func(got *Execution) { got.IgnoreEOS = !got.IgnoreEOS },
+		"artifact path":    func(got *Execution) { got.ArtifactPath += ".other" },
+		"artifact digest":  func(got *Execution) { got.ArtifactSHA256 = "other" },
+		"tensor inventory": func(got *Execution) { got.TensorInventorySHA256 = "other" },
+		"tokenizer":        func(got *Execution) { got.TokenizerSHA256 = "other" },
+		"template":         func(got *Execution) { got.TemplateSHA256 = "other" },
+		"quantization":     func(got *Execution) { got.Quantization = "other" },
+		"model name":       func(got *Execution) { got.ModelName = "different-model" },
+		"model config":     func(got *Execution) { got.ModelConfig.VocabSize++ },
+		"backend selection": func(got *Execution) {
+			got.Backend.Selected = "other"
+		},
+	}
+	for name, mutate := range bindingMutations {
+		t.Run("binding "+name, func(t *testing.T) {
+			drifted := execution
+			mutate(&drifted)
+			if _, ok := drifted.TimingObservation(0); ok {
+				t.Fatal("execution binding drift retained timing authority")
+			}
+		})
+	}
+	assertNestedMutationRejected := func(t *testing.T, mutated Execution) {
+		t.Helper()
+		if _, ok := mutated.GenerationObservation(0); ok {
+			t.Fatal("nested model configuration mutation retained generation authority")
+		}
+		if _, ok := mutated.TimingObservation(0); ok {
+			t.Fatal("nested model configuration mutation retained timing authority")
+		}
+	}
+	t.Run("nested binding longrope factor", func(t *testing.T) {
+		backend := &rawWindowBackend{rawUnsupportedBackend: rawUnsupportedBackend{name: "vulkan"}, observations: []compute.BackendExecutionObservation{complete, complete}}
+		mutated, err := newExecution(backend, fakeClock(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		longRope := mutated.ModelConfig.LongRope
+		mutated.ModelConfig.LongRope.Factor++
+		if mutated.ModelConfig.LongRope != longRope {
+			t.Fatal("LongRope mutation replaced rather than mutated the existing pointee")
+		}
+		assertNestedMutationRejected(t, mutated)
+	})
+	t.Run("nested binding rope parameter truncate", func(t *testing.T) {
+		backend := &rawWindowBackend{rawUnsupportedBackend: rawUnsupportedBackend{name: "vulkan"}, observations: []compute.BackendExecutionObservation{complete, complete}}
+		mutated, err := newExecution(backend, fakeClock(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rope := mutated.ModelConfig.RopeParameters["full_attention"]
+		truncate := rope.Truncate
+		*rope.Truncate = !*rope.Truncate
+		if mutated.ModelConfig.RopeParameters["full_attention"].Truncate != truncate {
+			t.Fatal("RopeParameters truncate mutation replaced rather than mutated the existing pointee")
+		}
+		assertNestedMutationRejected(t, mutated)
+	})
+	for name, mutate := range map[string]func(*Run){
+		"generated tokens": func(run *Run) {
+			run.GeneratedTokens = slices.Clone(run.GeneratedTokens)
+			run.GeneratedTokens[0]++
+		},
+		"prefill output": func(run *Run) { run.PrefillOutputID++ },
+		"steps": func(run *Run) {
+			run.Steps = slices.Clone(run.Steps)
+			run.Steps[0].TokenID++
+		},
+		"EOS state": func(run *Run) { run.EOSStopped = !run.EOSStopped },
+	} {
+		t.Run("generation "+name, func(t *testing.T) {
+			mutated := execution
+			mutated.Runs = slices.Clone(execution.Runs)
+			mutate(&mutated.Runs[0])
+			if _, ok := mutated.TimingObservation(0); ok {
+				t.Fatal("generation alias mutation retained timing authority")
+			}
+		})
+	}
+	cardinality := execution
+	cardinality.Runs = slices.Clone(execution.Runs[:1])
+	if _, ok := cardinality.TimingObservation(0); ok {
+		t.Fatal("repetition cardinality mismatch retained timing authority")
+	}
+	constructed := execution
+	constructed.Runs = slices.Clone(execution.Runs)
+	constructed.Runs[0] = Run{
+		SessionSetupDuration: time.Millisecond, PrefillDuration: time.Millisecond,
+		FirstSampleDuration: time.Millisecond, DecodeDuration: time.Millisecond,
+		TeardownDuration: time.Millisecond, BackendExecution: &complete,
+	}
+	if _, ok := constructed.TimingObservation(0); ok {
+		t.Fatal("caller-constructed run gained timing authority")
+	}
+
+	malformedObservations := map[string]func() compute.BackendExecutionObservation{
+		"identity": func() compute.BackendExecutionObservation {
+			got := complete
+			got.Identity.Device = ""
+			return got
+		},
+		"wrong backend": func() compute.BackendExecutionObservation {
+			got := complete
+			got.Identity.Backend = "other"
+			return got
+		},
+		"transfer unavailable": func() compute.BackendExecutionObservation {
+			got := complete
+			got.TransferCountersObserved = false
+			return got
+		},
+		"transfer pair": func() compute.BackendExecutionObservation {
+			got := complete
+			got.Counters.H2DCount = 0
+			return got
+		},
+		"allocation unavailable": func() compute.BackendExecutionObservation {
+			got := complete
+			got.DeviceAllocationObserved = false
+			return got
+		},
+		"allocation peak": func() compute.BackendExecutionObservation {
+			got := complete
+			got.DeviceAllocationPeakBytes = got.DeviceAllocationLiveBytes - 1
+			return got
+		},
+		"memory total": func() compute.BackendExecutionObservation {
+			got := complete
+			got.DeviceMemoryTotalBytes = 0
+			return got
+		},
+		"memory free": func() compute.BackendExecutionObservation {
+			got := complete
+			got.DeviceMemoryFreeBytes = got.DeviceMemoryTotalBytes + 1
+			return got
+		},
+	}
+	for name, makeObservation := range malformedObservations {
+		t.Run("malformed "+name, func(t *testing.T) {
+			backend := &rawWindowBackend{rawUnsupportedBackend: rawUnsupportedBackend{name: "vulkan"}, observations: []compute.BackendExecutionObservation{makeObservation()}}
+			got, err := newExecution(backend, fakeClock(), nil)
+			if err == nil || len(got.Runs) != 0 || backend.beginCalls != 1 || backend.endCalls != 1 {
+				t.Fatalf("malformed observation published a repetition: got=%+v err=%v begin=%d end=%d", got, err, backend.beginCalls, backend.endCalls)
+			}
+		})
+	}
+
+	for name, backend := range map[string]*rawWindowBackend{
+		"begin error": {rawUnsupportedBackend: rawUnsupportedBackend{name: "vulkan"}, beginErr: fmt.Errorf("begin failed")},
+		"nil window":  {rawUnsupportedBackend: rawUnsupportedBackend{name: "vulkan"}, nilWindow: true},
+		"end error":   {rawUnsupportedBackend: rawUnsupportedBackend{name: "vulkan"}, observations: []compute.BackendExecutionObservation{complete}, endErr: fmt.Errorf("end failed")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			events := []string{}
+			backend.events = &events
+			got, err := newExecution(backend, fakeClock(), func() { events = append(events, "candidate") })
+			if err == nil || len(got.Runs) != 0 || backend.beginCalls != 1 {
+				t.Fatalf("window failure published a repetition: got=%+v err=%v begin=%d end=%d events=%v", got, err, backend.beginCalls, backend.endCalls, events)
+			}
+			if name == "end error" && (backend.endCalls != 1 || fmt.Sprint(events) != "[begin candidate end]") {
+				t.Fatalf("end failure lifecycle: begin=%d end=%d events=%v", backend.beginCalls, backend.endCalls, events)
+			}
+			if name != "end error" && (backend.endCalls != 0 || fmt.Sprint(events) != "[begin]") {
+				t.Fatalf("begin failure lifecycle: begin=%d end=%d events=%v", backend.beginCalls, backend.endCalls, events)
+			}
+		})
+	}
+
+	unsupported := &rawUnsupportedBackend{name: "vulkan"}
+	if got, err := newExecution(unsupported, fakeClock(), nil); err != nil || len(got.Runs) != request.Repetitions {
+		t.Fatalf("unsupported observation changed execution: runs=%d err=%v", len(got.Runs), err)
+	} else if _, ok := got.TimingObservation(0); ok || got.Runs[0].BackendExecution != nil {
+		t.Fatal("unsupported backend gained timing/resource authority")
+	}
+	snapshotOnly := &rawSnapshotOnlyBackend{rawUnsupportedBackend: rawUnsupportedBackend{name: "vulkan"}, snapshot: compute.BackendExecutionSnapshot{Identity: identity}}
+	if got, err := newExecution(snapshotOnly, fakeClock(), nil); err != nil || len(got.Runs) != request.Repetitions || snapshotOnly.calls != 0 {
+		t.Fatalf("snapshot fallback was used: runs=%d calls=%d err=%v", len(got.Runs), snapshotOnly.calls, err)
+	} else if _, ok := got.TimingObservation(0); ok || got.Runs[0].BackendExecution != nil {
+		t.Fatal("snapshot-only backend gained timing/resource authority")
+	}
+
+	for transition := 1; transition < 6; transition++ {
+		t.Run(fmt.Sprintf("clock regression %d", transition), func(t *testing.T) {
+			clockCalls := 0
+			regressingClock := func() time.Time {
+				clockCalls++
+				if clockCalls == 3+transition {
+					return time.Unix(100, 0).Add(time.Duration(clockCalls-2) * time.Millisecond)
+				}
+				return time.Unix(100, 0).Add(time.Duration(clockCalls) * time.Millisecond)
+			}
+			backend := &rawWindowBackend{rawUnsupportedBackend: rawUnsupportedBackend{name: "vulkan"}, observations: []compute.BackendExecutionObservation{complete}}
+			got, err := newExecution(backend, regressingClock, nil)
+			if err == nil || len(got.Runs) != 0 || backend.beginCalls != 1 || backend.endCalls != 1 {
+				t.Fatalf("clock regression published aliases: got=%+v err=%v begin=%d end=%d", got, err, backend.beginCalls, backend.endCalls)
+			}
+		})
+	}
+
+	errorBackend := &rawWindowBackend{rawUnsupportedBackend: rawUnsupportedBackend{name: "vulkan"}, observations: []compute.BackendExecutionObservation{complete}}
+	errorModel := &fakeLoadedModel{candidate: &fakeSession{outputs: [][]float32{{float32(math.NaN())}}}}
+	_, executeErr := executeLoaded(context.Background(), Request{PromptTokenIDs: []int{0}, ContextLimit: 2, GeneratedTokenLimit: 1, Repetitions: 1}, errorModel, errorBackend, nil, fakeClock(), time.Since)
+	if executeErr == nil || errorBackend.beginCalls != 1 || errorBackend.endCalls != 1 {
+		t.Fatalf("failed repetition did not close exactly one window: err=%v begin=%d end=%d", executeErr, errorBackend.beginCalls, errorBackend.endCalls)
 	}
 }
 
@@ -576,8 +1069,8 @@ func TestRawDecodeBackendObservationRefusesForgedLabelMissingIdentityAndReset(t 
 		m := newModel()
 		identity := compute.BackendRuntimeIdentity{Backend: "vulkan", Device: "device", Driver: "driver", Runtime: "runtime"}
 		backend := &rawObservedBackend{name: "vulkan", snapshots: []compute.BackendExecutionSnapshot{
-			{Identity: identity, Counters: compute.BackendCounterSnapshot{ComputeDispatches: 2}},
-			{Identity: identity, Counters: compute.BackendCounterSnapshot{ComputeDispatches: 1}},
+			{Identity: identity, Counters: compute.BackendCounterSnapshot{ComputeDispatches: 2}, TransferCountersObserved: true, DeviceAllocationObserved: true},
+			{Identity: identity, Counters: compute.BackendCounterSnapshot{ComputeDispatches: 1}, TransferCountersObserved: true, DeviceAllocationObserved: true},
 		}}
 		if got, err := baseDeps(m, backend, "vulkan").execute(context.Background(), request); err == nil || len(got.Runs) != 0 || got.ArtifactSHA256 != "" || !strings.Contains(err.Error(), "reset") {
 			t.Fatalf("got=%+v err=%v", got, err)
@@ -623,7 +1116,10 @@ func TestRawDecodeHostEnvironmentIsPerRunInjectedAndCrossBound(t *testing.T) {
 		MesaVersion: "Mesa 26.1.0", Firmware: "vbios-observed",
 	}
 	newExecution := func(observe func(context.Context, compute.Backend) (compute.VulkanHostEnvironment, error)) (Execution, error) {
-		before := compute.BackendExecutionSnapshot{Identity: identity, Counters: compute.BackendCounterSnapshot{ComputeDispatches: 10}}
+		before := compute.BackendExecutionSnapshot{
+			Identity: identity, Counters: compute.BackendCounterSnapshot{ComputeDispatches: 10},
+			TransferCountersObserved: true, DeviceAllocationObserved: true,
+		}
 		after := before
 		after.Counters.ComputeDispatches = 11
 		backend := &rawObservedBackend{name: "vulkan", snapshots: []compute.BackendExecutionSnapshot{before, after}}
