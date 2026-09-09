@@ -367,27 +367,76 @@ var (
 
 	// ErrBlockNotFound is returned when a requested physical block is not currently allocated.
 	ErrBlockNotFound = errors.New("ctxmmu: physical block not found")
+
+	// ErrBlockIDExhausted is returned before allocation state changes when no new
+	// allocation-incarnation ID can be represented by int.
+	ErrBlockIDExhausted = errors.New("ctxmmu: physical block allocation ID exhausted")
 )
 
 // PhysicalBlock represents an atomic physical memory page in unified memory for KV caches.
 type PhysicalBlock struct {
-	ID         int
-	Data       []byte
-	refCount   atomic.Int32
-	lastAccess atomic.Int64
-	swapped    atomic.Bool
+	// ID identifies this allocation incarnation. Physical slots may be reused,
+	// but an ID is never reused by an allocator.
+	ID int
+	// Data belongs only to this allocation incarnation. A replacement allocation
+	// receives fresh backing so a retired block cannot overwrite it.
+	Data []byte
+
+	allocationID int
+	slot         int
+	refCount     atomic.Int32
+	lastAccess   atomic.Int64
+	swapped      atomic.Bool
 }
 
-// Retain increments the reference count of the block atomically and updates last access.
+const maxPhysicalBlockRefCount = int32(^uint32(0) >> 1)
+
+// PhysicalSlot returns the bounded physical slot used by device page tables.
+// Unlike ID, the slot may be reused after this allocation is retired.
+func (b *PhysicalBlock) PhysicalSlot() int {
+	if b == nil {
+		return -1
+	}
+	return b.slot
+}
+
+// Retain increments a live block's reference count and updates last access.
+// Retired blocks stay at zero and cannot be resurrected; overflow saturates.
 func (b *PhysicalBlock) Retain() int32 {
-	b.Touch()
-	return b.refCount.Add(1)
+	if b == nil {
+		return 0
+	}
+	for {
+		current := b.refCount.Load()
+		if current <= 0 {
+			return 0
+		}
+		if current == maxPhysicalBlockRefCount {
+			return current
+		}
+		if b.refCount.CompareAndSwap(current, current+1) {
+			b.Touch()
+			return current + 1
+		}
+	}
 }
 
-// Release decrements the reference count of the block atomically and updates last access.
+// Release decrements a live block's reference count and updates last access.
+// Releasing a retired or already-unreferenced block is idempotent at zero.
 func (b *PhysicalBlock) Release() int32 {
-	b.Touch()
-	return b.refCount.Add(-1)
+	if b == nil {
+		return 0
+	}
+	for {
+		current := b.refCount.Load()
+		if current <= 0 {
+			return 0
+		}
+		if b.refCount.CompareAndSwap(current, current-1) {
+			b.Touch()
+			return current - 1
+		}
+	}
 }
 
 // RefCount returns the current atomic reference count.
@@ -415,19 +464,23 @@ func (b *PhysicalBlock) SetSwapped(val bool) {
 	b.swapped.Store(val)
 }
 
-// PhysicalBlockAllocator manages physical memory pages via a high-performance
-// lock-free atomic bitmask with O(1) page acquisition and release.
+// PhysicalBlockAllocator manages reusable physical slots. Allocation IDs are
+// opaque, monotonic incarnation handles; blocksByID is the authoritative live
+// allocation registry and blocks indexes the current occupant of each slot.
 type PhysicalBlockAllocator struct {
+	mu             sync.RWMutex
 	totalBlocks    int
 	blockSizeBytes int
 	bitmask        []atomic.Uint64
 	blocks         []*PhysicalBlock
+	blocksByID     map[int]*PhysicalBlock
+	nextID         uint64
 	allocatedCount atomic.Int64
 	allocHint      atomic.Uint64
 }
 
-// NewPhysicalBlockAllocator creates a PhysicalBlockAllocator with pre-allocated
-// physical blocks backed by an atomic bitmask.
+// NewPhysicalBlockAllocator creates a PhysicalBlockAllocator with reusable
+// physical slots backed by an atomic bitmask.
 func NewPhysicalBlockAllocator(totalBlocks int, blockSizeBytes int) *PhysicalBlockAllocator {
 	if totalBlocks <= 0 {
 		totalBlocks = 1024
@@ -442,119 +495,165 @@ func NewPhysicalBlockAllocator(totalBlocks int, blockSizeBytes int) *PhysicalBlo
 		bitmask[numWords-1].Store(unusedMask)
 	}
 
-	blocks := make([]*PhysicalBlock, totalBlocks)
-	for i := 0; i < totalBlocks; i++ {
-		var data []byte
-		if blockSizeBytes > 0 {
-			data = make([]byte, blockSizeBytes)
-		}
-		blocks[i] = &PhysicalBlock{
-			ID:   i,
-			Data: data,
-		}
-	}
-
 	return &PhysicalBlockAllocator{
 		totalBlocks:    totalBlocks,
 		blockSizeBytes: blockSizeBytes,
 		bitmask:        bitmask,
-		blocks:         blocks,
+		blocks:         make([]*PhysicalBlock, totalBlocks),
+		blocksByID:     make(map[int]*PhysicalBlock, totalBlocks),
 	}
 }
 
-// Allocate claims a free physical block from the pool in O(1) time using CAS on the bitmask.
+func maxPhysicalBlockID() uint64 {
+	return uint64(^uint(0) >> 1)
+}
+
+// Allocate claims a free physical slot and gives it a unique allocation ID.
 func (a *PhysicalBlockAllocator) Allocate() (*PhysicalBlock, error) {
 	if a == nil || a.totalBlocks == 0 {
 		return nil, ErrNoFreeBlocks
 	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
 	numWords := len(a.bitmask)
 	if numWords == 0 {
 		return nil, ErrNoFreeBlocks
+	}
+	if a.nextID > maxPhysicalBlockID() {
+		return nil, ErrBlockIDExhausted
 	}
 
 	start := int(a.allocHint.Load() % uint64(numWords))
 	for offset := 0; offset < numWords; offset++ {
 		w := (start + offset) % numWords
-		for {
-			word := a.bitmask[w].Load()
-			inv := ^word
-			if inv == 0 {
-				break
-			}
-			bit := bits.TrailingZeros64(inv)
-			if bit >= 64 {
-				break
-			}
-			blockID := w*64 + bit
-			if blockID >= a.totalBlocks {
-				break
-			}
-			mask := uint64(1) << bit
-			if a.bitmask[w].CompareAndSwap(word, word|mask) {
-				a.allocatedCount.Add(1)
-				a.allocHint.Store(uint64(w))
-				block := a.blocks[blockID]
-				block.refCount.Store(1)
-				block.swapped.Store(false)
-				block.Touch()
-				return block, nil
-			}
+		word := a.bitmask[w].Load()
+		inv := ^word
+		if inv == 0 {
+			continue
 		}
+		bit := bits.TrailingZeros64(inv)
+		if bit >= 64 {
+			continue
+		}
+		slot := w*64 + bit
+		if slot >= a.totalBlocks {
+			continue
+		}
+
+		var data []byte
+		if a.blockSizeBytes > 0 {
+			data = make([]byte, a.blockSizeBytes)
+		}
+		id := int(a.nextID)
+		block := &PhysicalBlock{
+			ID:           id,
+			Data:         data,
+			allocationID: id,
+			slot:         slot,
+		}
+		block.refCount.Store(1)
+		block.Touch()
+
+		a.nextID++
+		a.bitmask[w].Store(word | uint64(1)<<bit)
+		a.blocks[slot] = block
+		a.blocksByID[id] = block
+		a.allocatedCount.Add(1)
+		a.allocHint.Store(uint64(w))
+		return block, nil
 	}
 	return nil, ErrNoFreeBlocks
 }
 
-// Free releases a physical block by ID back into the free bitmask in O(1) time.
+// Free retires one exact allocation incarnation and releases its physical slot.
 // It returns true if the block was previously allocated and successfully freed.
 func (a *PhysicalBlockAllocator) Free(id int) (bool, error) {
-	if a == nil || id < 0 || id >= a.totalBlocks {
+	if a == nil || id < 0 {
 		return false, ErrInvalidBlockID
 	}
-	w := id / 64
-	bit := id % 64
-	mask := uint64(1) << bit
 
-	for {
-		word := a.bitmask[w].Load()
-		if (word & mask) == 0 {
-			return false, nil // already free
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.freeLocked(id, false)
+}
+
+func (a *PhysicalBlockAllocator) freeLocked(id int, requireUnreferenced bool) (bool, error) {
+	block, ok := a.blocksByID[id]
+	if !ok {
+		if uint64(id) >= a.nextID {
+			return false, ErrInvalidBlockID
 		}
-		block := a.blocks[id]
-		block.refCount.Store(0)
-		block.swapped.Store(false)
-		if a.bitmask[w].CompareAndSwap(word, word&^mask) {
-			a.allocatedCount.Add(-1)
-			return true, nil
-		}
+		return false, nil
 	}
+	if block.allocationID != id {
+		return false, ErrBlockNotFound
+	}
+	slot := block.slot
+	if slot < 0 || slot >= a.totalBlocks || a.blocks[slot] != block {
+		return false, ErrBlockNotFound
+	}
+	if requireUnreferenced && block.RefCount() > 0 {
+		return false, nil
+	}
+	w := slot / 64
+	bit := slot % 64
+	mask := uint64(1) << bit
+	word := a.bitmask[w].Load()
+	if word&mask == 0 {
+		return false, ErrBlockNotFound
+	}
+
+	delete(a.blocksByID, id)
+	a.blocks[slot] = nil
+	a.bitmask[w].Store(word &^ mask)
+	block.refCount.Store(0)
+	block.swapped.Store(false)
+	a.allocatedCount.Add(-1)
+	return true, nil
 }
 
 // GetBlock retrieves the physical block by ID if it is currently allocated.
 func (a *PhysicalBlockAllocator) GetBlock(id int) (*PhysicalBlock, error) {
-	if a == nil || id < 0 || id >= a.totalBlocks {
+	if a == nil || id < 0 {
 		return nil, ErrInvalidBlockID
 	}
-	w := id / 64
-	bit := id % 64
-	mask := uint64(1) << bit
-	if (a.bitmask[w].Load() & mask) == 0 {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	block, ok := a.blocksByID[id]
+	if !ok {
+		if uint64(id) >= a.nextID {
+			return nil, ErrInvalidBlockID
+		}
 		return nil, ErrBlockNotFound
 	}
-	return a.blocks[id], nil
+	if block.allocationID != id || block.slot < 0 || block.slot >= a.totalBlocks || a.blocks[block.slot] != block {
+		return nil, ErrBlockNotFound
+	}
+	return block, nil
 }
 
 // Retain increments the reference count of the physical block by ID.
 func (a *PhysicalBlockAllocator) Retain(id int) error {
-	if a == nil || id < 0 || id >= a.totalBlocks {
+	if a == nil || id < 0 {
 		return ErrInvalidBlockID
 	}
-	w := id / 64
-	bit := id % 64
-	mask := uint64(1) << bit
-	if (a.bitmask[w].Load() & mask) == 0 {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	block, ok := a.blocksByID[id]
+	if !ok {
+		if uint64(id) >= a.nextID {
+			return ErrInvalidBlockID
+		}
 		return ErrBlockNotFound
 	}
-	a.blocks[id].Retain()
+	if block.allocationID != id || block.slot < 0 || block.slot >= a.totalBlocks || a.blocks[block.slot] != block {
+		return ErrBlockNotFound
+	}
+	if block.Retain() <= 0 {
+		return ErrBlockNotFound
+	}
 	return nil
 }
 
@@ -611,20 +710,24 @@ func (a *PhysicalBlockAllocator) RecycleLRU(reclaimCount int) ([]int, error) {
 		return nil, nil
 	}
 
+	a.mu.RLock()
 	var candidates []lruCandidate
-	for i := 0; i < a.totalBlocks; i++ {
-		w := i / 64
-		bit := i % 64
-		mask := uint64(1) << bit
-		if (a.bitmask[w].Load() & mask) != 0 {
-			b := a.blocks[i]
+	for slot, b := range a.blocks {
+		if b != nil {
+			w := slot / 64
+			bit := slot % 64
+			mask := uint64(1) << bit
+			if a.bitmask[w].Load()&mask == 0 {
+				continue
+			}
 			candidates = append(candidates, lruCandidate{
-				id:         b.ID,
+				id:         b.allocationID,
 				refCount:   b.RefCount(),
 				lastAccess: b.LastAccess(),
 			})
 		}
 	}
+	a.mu.RUnlock()
 
 	if len(candidates) == 0 {
 		return nil, nil
@@ -648,7 +751,10 @@ func (a *PhysicalBlockAllocator) RecycleLRU(reclaimCount int) ([]int, error) {
 		if c.refCount > 0 {
 			break // only recycle unreferenced blocks; active resident blocks must be evicted via swap
 		}
-		if ok, err := a.Free(c.id); err == nil && ok {
+		a.mu.Lock()
+		ok, freeErr := a.freeLocked(c.id, true)
+		a.mu.Unlock()
+		if freeErr == nil && ok {
 			reclaimed = append(reclaimed, c.id)
 		}
 	}
