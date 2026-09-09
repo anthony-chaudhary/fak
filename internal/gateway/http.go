@@ -604,6 +604,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if reqModel == "" {
 		reqModel = s.model
 	}
+	applyChatCompletionSpeculativeHeaders(w, s, reqModel)
 	if decodeTraceRequested && !s.chatDecodeTraceSupported(req.Model) {
 		writeErr(w, http.StatusBadRequest, "fak_decode_trace requires a fak-native model route")
 		return

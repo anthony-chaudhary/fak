@@ -40,6 +40,47 @@ func TestCronEmitRunnerLaunchd(t *testing.T) {
 	)
 }
 
+func TestCronEmitOpenCodeLaunchd(t *testing.T) {
+	out := emitCron(t,
+		"--opencode",
+		"--target", "launchd",
+		"--job", "mac-perf-hourly",
+		"--ledger", "/var/log/opencode.jsonl",
+		"--interval", "1h",
+		"--timeout", "30m",
+		"--until", "2026-09-16T06:00:00Z",
+		"--workdir", "/var/fak/workspace",
+		"--", "opencode", "run", "/goal test",
+	)
+	assertWellFormedXML(t, out)
+	mustContain(t, out,
+		"<string>fak</string>",
+		"<string>cron</string>",
+		"<string>opencode</string>",
+		"<string>--job</string>",
+		"<string>mac-perf-hourly</string>",
+		"<string>--ledger</string>",
+		"<string>/var/log/opencode.jsonl</string>",
+		"<string>--interval</string>",
+		"<string>1h0m0s</string>",
+		"<string>--timeout</string>",
+		"<string>30m0s</string>",
+		"<string>--until</string>",
+		"<string>2026-09-16T06:00:00Z</string>",
+		"<string>--workdir</string>",
+		"<string>/var/fak/workspace</string>",
+		"<string>--</string>",
+		"<string>opencode</string>",
+		"<string>run</string>",
+		"<string>/goal test</string>",
+		"<key>StartInterval</key>",
+		"<integer>3600</integer>",
+		"<key>WorkingDirectory</key>",
+		"<string>/var/fak/workspace</string>",
+		"<string>fak-cron-mac-perf-hourly</string>",
+	)
+}
+
 func TestCronEmitRunnerSystemd(t *testing.T) {
 	out := emitCron(t,
 		"--runner",

@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -49,6 +50,9 @@ type ScheduledOpenCodeOptions struct {
 	At          string
 	Slot        string
 	RunID       string
+	Until       string
+	Workdir     string
+	UnloadPlist string
 	Command     []string
 	Stdout      io.Writer
 	Stderr      io.Writer
@@ -77,6 +81,61 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 			Outcome:    "failed",
 			WitnessRef: nil,
 		}, errors.New("fak cron opencode: command is required")
+	}
+
+	// Expiration check: ticks occurring after opts.Until are marked expired (#11953)
+	if strings.TrimSpace(opts.Until) != "" {
+		untilTime, err := time.Parse(time.RFC3339, strings.TrimSpace(opts.Until))
+		if err != nil {
+			if d, durErr := time.ParseDuration(strings.TrimSpace(opts.Until)); durErr == nil && d > 0 {
+				untilTime = time.Now().Add(d)
+			} else {
+				if opts.Stderr != nil {
+					fmt.Fprintf(opts.Stderr, "fak cron opencode: invalid --until %q (must be RFC3339 or duration)\n", opts.Until)
+				}
+				return OpenCodeRunReceipt{
+					Schema:     cronOpenCodeRunSchema,
+					RunID:      runID,
+					ExitCode:   2,
+					Outcome:    "failed",
+					WitnessRef: nil,
+				}, fmt.Errorf("fak cron opencode: invalid --until %q: %w", opts.Until, err)
+			}
+		}
+
+		checkTime := time.Now()
+		if strings.TrimSpace(opts.At) != "" {
+			if t, err := time.Parse(time.RFC3339, strings.TrimSpace(opts.At)); err == nil {
+				checkTime = t
+			}
+		}
+
+		if checkTime.After(untilTime) {
+			nowStr := checkTime.UTC().Format(time.RFC3339)
+			receipt := OpenCodeRunReceipt{
+				Schema:     cronOpenCodeRunSchema,
+				RunID:      runID,
+				SessionID:  "",
+				ExitCode:   0,
+				Outcome:    "expired",
+				StartedAt:  nowStr,
+				EndedAt:    nowStr,
+				DurationMS: 0,
+				WitnessRef: nil,
+			}
+			if opts.Ledger != "" {
+				_ = cronAppendJSONL(opts.Ledger, receipt)
+			}
+			if strings.TrimSpace(opts.UnloadPlist) != "" && runtime.GOOS == "darwin" {
+				_ = exec.Command("launchctl", "unload", strings.TrimSpace(opts.UnloadPlist)).Run()
+			}
+			if opts.EmitReceipt && opts.Stdout != nil {
+				enc := json.NewEncoder(opts.Stdout)
+				enc.SetIndent("", "  ")
+				_ = enc.Encode(receipt)
+			}
+			return receipt, nil
+		}
 	}
 
 	// CAS lock handling when Ledger != "" && Job != "" && Interval > 0
@@ -198,6 +257,10 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 	cmdName := opts.Command[0]
 	cmdRest := opts.Command[1:]
 	c := exec.CommandContext(ctx, cmdName, cmdRest...)
+	configureDispatchHelperCommand(c)
+	if opts.Workdir != "" {
+		c.Dir = opts.Workdir
+	}
 	if len(opts.Env) > 0 {
 		c.Env = append(os.Environ(), opts.Env...)
 	}
@@ -305,6 +368,9 @@ func runCronOpenCode(stdout, stderr io.Writer, argv []string) int {
 	at := fs.String("at", "", "wall-clock tick time (RFC3339); default now — injectable for tests")
 	slot := fs.String("slot", "", "override computed slot key directly")
 	runID := fs.String("run-id", "", "explicit run ID")
+	until := fs.String("until", "", "expiration deadline (RFC3339); executions after this time are marked expired")
+	workdir := fs.String("workdir", "", "working directory for child command execution")
+	unloadPlist := fs.String("unload-plist", "", "launchd plist to unload upon expiration (macOS)")
 	passthrough := fs.Bool("passthrough", false, "pass child stdout through to stdout during execution")
 
 	// Find the trailing "--" separator for command arguments
@@ -347,6 +413,9 @@ func runCronOpenCode(stdout, stderr io.Writer, argv []string) int {
 		At:          *at,
 		Slot:        *slot,
 		RunID:       *runID,
+		Until:       *until,
+		Workdir:     *workdir,
+		UnloadPlist: *unloadPlist,
 		Passthrough: *passthrough,
 		EmitReceipt: true,
 		Command:     cmdArgs,

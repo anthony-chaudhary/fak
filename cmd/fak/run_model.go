@@ -30,6 +30,7 @@ const (
 type runFlags struct {
 	// Chat / model controls
 	backendName      *string
+	metal            *bool
 	system           *string
 	maxTokens        *int
 	temp             *float64
@@ -53,6 +54,7 @@ type chatModelConfig struct {
 	modelRef         string
 	prompt           string
 	backendName      string
+	metal            bool
 	system           string
 	maxTokens        int
 	temp             float64
@@ -85,6 +87,7 @@ func newRunFlagSet(name string, errorHandling flag.ErrorHandling) (*flag.FlagSet
 
 	// Chat / model controls
 	flags.backendName = fs.String("backend", "", "compute backend for decode: empty = the CPU reference path; a registered device like 'cuda' runs through the GPU HAL (needs a -tags cuda build + a reachable GPU)")
+	flags.metal = fs.Bool("metal", false, "require the Apple-Silicon Metal GPU forward — GPU prefill + GPU-resident Q8 decode. Apple-Silicon+cgo builds auto-select Metal when a usable device is present; this flag/FAK_METAL=1 makes absence fail loud instead of falling back to CPU. Mutually exclusive with --backend.")
 	flags.nativeFlags = registerRunNativeControlFlags(fs)
 	flags.system = fs.String("system", "", "optional system prompt prepended to the conversation")
 	flags.maxTokens = fs.Int("max-tokens", 512, "maximum number of tokens to generate per turn")
@@ -169,6 +172,7 @@ func parseRunArgs(fs *flag.FlagSet, flags *runFlags, argv []string) (parsedRunCo
 			modelRef:         modelRef,
 			prompt:           prompt,
 			backendName:      *flags.backendName,
+			metal:            *flags.metal,
 			system:           *flags.system,
 			maxTokens:        *flags.maxTokens,
 			temp:             *flags.temp,
@@ -240,7 +244,7 @@ func executeChatModel(cfg chatModelConfig) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	planner := buildRunPlanner(ctx, cfg.modelRef, cfg.backendName, cfg.nativeFlags.config())
+	planner := buildRunPlanner(ctx, cfg.modelRef, cfg.backendName, cfg.metal, cfg.nativeFlags.config())
 
 	var extraOpts []agent.SampleOpt
 	if cfg.effort != "" {
@@ -320,7 +324,20 @@ func registerRunNativeControlFlags(fs *flag.FlagSet) nativeControlFlags {
 	return registerNativeControlFlags(fs)
 }
 
-func buildRunPlanner(ctx context.Context, modelRef, backendName string, nativeConfig nativeControlConfig) *agent.InKernelPlanner {
+// resolveRunMetal decides whether `fak run` runs in-kernel chat through the
+// Apple-Silicon Metal GPU forward. Metal auto-selects when this binary has the backend
+// linked and a usable device is present; --metal/FAK_METAL=1 only changes the unavailable
+// case from CPU fallback to a fail-loud error. Metal is the CPU-session seam (the served session keeps
+// s.Backend nil and gets s.Metal=true), so it is mutually exclusive with a device --backend.
+func resolveRunMetal(flag, env bool, backendName string) (bool, error) {
+	use, err := resolveServeMetal(flag, env, backendName)
+	if err != nil {
+		return false, errors.New(strings.ReplaceAll(err.Error(), "fak serve:", "fak run:"))
+	}
+	return use, nil
+}
+
+func buildRunPlanner(ctx context.Context, modelRef, backendName string, metalRequested bool, nativeConfig nativeControlConfig) *agent.InKernelPlanner {
 	ref, expanded := modelreg.Resolve(modelRef)
 	if expanded {
 		fmt.Fprintf(os.Stderr, "fak run: %s → %s\n", modelRef, ref)
@@ -344,6 +361,11 @@ func buildRunPlanner(ctx context.Context, modelRef, backendName string, nativeCo
 		fmt.Fprintf(os.Stderr, "fak run: %v\n", err)
 		os.Exit(2)
 	}
+	useMetal, err := resolveRunMetal(metalRequested, os.Getenv("FAK_METAL") != "", backendName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak run: %v\n", err)
+		os.Exit(2)
+	}
 	if err := applyNativeControls(backend, nativeConfig); err != nil {
 		fmt.Fprintln(os.Stderr, "fak run:", err)
 		os.Exit(2)
@@ -358,9 +380,9 @@ func buildRunPlanner(ctx context.Context, modelRef, backendName string, nativeCo
 		fmt.Fprintf(os.Stderr, "fak run: %q has no usable tokenizer; pass a GGUF with an embedded tokenizer\n", ref)
 		os.Exit(1)
 	}
-	// metal=false: `fak run`'s first cut targets the CPU reference path and the cuda
-	// HAL; the Apple-Metal session forward is reachable through `fak serve --metal`.
-	return agent.NewInKernelPlannerWithConfig(model, tok, modelRef, q4k, backend, false, nativeConfig.Planner)
+	// When Metal is enabled (useMetal=true on Apple Silicon), the native session forward runs with GPU acceleration.
+	// When Metal is not available or disabled, metal=false: falls back to the CPU reference path.
+	return agent.NewInKernelPlannerWithConfig(model, tok, modelRef, q4k, backend, useMetal, nativeConfig.Planner)
 }
 
 // runSampleOpts folds the CLI sampling flags into planner SampleOpts. Sampling and

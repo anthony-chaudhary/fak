@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"reflect"
 	"strings"
@@ -8,6 +9,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
+	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 )
 
 func TestRunNativeControlsUseExplicitFlagsOverAmbientValues(t *testing.T) {
@@ -70,6 +73,8 @@ func TestRunDispatchRule(t *testing.T) {
 		{argv: []string{"smollm2", "--temp", "0.7", "explain mmap"}, wantAction: runActionChat, wantModel: "smollm2", wantPrompt: "explain mmap"},
 		{argv: []string{"--temp", "0.7", "smollm2", "explain mmap"}, wantAction: runActionChat, wantModel: "smollm2", wantPrompt: "explain mmap"},
 		{argv: []string{"--backend", "cuda", "qwen38"}, wantAction: runActionChat, wantModel: "qwen38"},
+		{argv: []string{"--metal", "qwen38"}, wantAction: runActionChat, wantModel: "qwen38"},
+		{argv: []string{"qwen38", "--metal"}, wantAction: runActionChat, wantModel: "qwen38"},
 		{argv: []string{"--backend", "cuda"}, wantAction: runActionUsage},
 		{argv: []string{"smollm2", "--trace", "x.json"}, wantAction: runActionUsage},
 	}
@@ -115,6 +120,7 @@ func TestRunHelpOutput(t *testing.T) {
 		"fak run --trace FILE",
 		"--trace",
 		"--backend",
+		"--metal",
 		"--max-tokens",
 		"--temp",
 	} {
@@ -221,5 +227,117 @@ func TestCacheTurnLine(t *testing.T) {
 	// show=true but an idle turn (no prompt delta) still prints nothing.
 	if got := cacheTurnLine(cacheobs.Stats{PromptTokens: 7}, cacheobs.Stats{PromptTokens: 7}, true); got != "" {
 		t.Errorf("idle turn must print nothing even when show=true, got %q", got)
+	}
+}
+
+// TestRunMetalFlagAndResolution tests the --metal flag and resolution rules for `fak run`.
+func TestRunMetalFlagAndResolution(t *testing.T) {
+	// 1. --metal flag parse
+	fs, flags := newRunFlagSet("run", flag.ContinueOnError)
+	cmd, err := parseRunArgs(fs, flags, []string{"qwen38", "--metal", "hello"})
+	if err != nil {
+		t.Fatalf("parseRunArgs failed: %v", err)
+	}
+	if !cmd.chatConfig.metal {
+		t.Fatalf("chatConfig.metal = false, want true when --metal is specified")
+	}
+
+	fs2, flags2 := newRunFlagSet("run", flag.ContinueOnError)
+	cmd2, err := parseRunArgs(fs2, flags2, []string{"--metal", "qwen38", "hello"})
+	if err != nil {
+		t.Fatalf("parseRunArgs failed: %v", err)
+	}
+	if !cmd2.chatConfig.metal {
+		t.Fatalf("chatConfig.metal = false, want true when --metal is specified as leading flag")
+	}
+
+	// 2. resolveRunMetal logic
+	// Unrequested -> auto-selects if metal is available
+	use, err := resolveRunMetal(false, false, "")
+	if err != nil {
+		t.Fatalf("resolveRunMetal(false, false, \"\") err: %v", err)
+	}
+	if use != metalgemm.Available() {
+		t.Fatalf("resolveRunMetal(false, false, \"\") = %v, want metalgemm.Available()=%v", use, metalgemm.Available())
+	}
+
+	// Unrequested with explicit backend -> Metal disabled
+	use, err = resolveRunMetal(false, false, "cuda")
+	if err != nil {
+		t.Fatalf("resolveRunMetal(false, false, \"cuda\") err: %v", err)
+	}
+	if use {
+		t.Fatalf("resolveRunMetal(false, false, \"cuda\") = true, want false")
+	}
+
+	// Requested with explicit backend -> mutually exclusive error
+	_, err = resolveRunMetal(true, false, "cuda")
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("resolveRunMetal(true, false, \"cuda\") expected mutually exclusive error, got %v", err)
+	}
+	_, err = resolveRunMetal(false, true, "cuda")
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("resolveRunMetal(false, true, \"cuda\") expected mutually exclusive error, got %v", err)
+	}
+
+	// Explicitly requested without backend
+	use, err = resolveRunMetal(true, false, "")
+	if metalgemm.Available() {
+		if !use || err != nil {
+			t.Fatalf("resolveRunMetal(true, false, \"\") with Metal available got (%v, %v), want (true, nil)", use, err)
+		}
+	} else {
+		if err == nil {
+			t.Fatalf("resolveRunMetal(true, false, \"\") with Metal unavailable should fail loud, got nil error")
+		}
+	}
+}
+
+// TestRunMetalPlannerWiring tests that InKernelPlanner engages Metal and Qwen hybrid forward path.
+func TestRunMetalPlannerWiring(t *testing.T) {
+	tok := testProbeTokenizer(t)
+	m := fakmodel.NewSynthetic(fakmodel.Config{
+		HiddenSize:          32,
+		NumLayers:           2,
+		NumHeads:            4,
+		NumKVHeads:          2,
+		HeadDim:             8,
+		IntermediateSize:    64,
+		VocabSize:           320,
+		RMSNormEps:          1e-5,
+		RopeTheta:           10000,
+		TieWordEmbeddings:   true,
+		EOSTokenID:          -1,
+		LayerTypes:          []string{"linear_attention", "linear_attention"},
+		LinearConvKernelDim: 3,
+		LinearKeyHeadDim:    8,
+		LinearNumKeyHeads:   2,
+		LinearValueHeadDim:  8,
+		LinearNumValueHeads: 4,
+		AttnOutputGate:      true,
+	})
+	m.Quantize()
+
+	// CPU fallback (metal=false)
+	cpuPlanner := agent.NewInKernelPlannerWithConfig(m, tok, "qwen38", true, nil, false, nativeControlConfig{}.Planner)
+	if cpuPlanner == nil {
+		t.Fatal("planner(metal=false) returned nil")
+	}
+
+	// Metal enabled (metal=true)
+	metalPlanner := agent.NewInKernelPlannerWithConfig(m, tok, "qwen38", true, nil, true, nativeControlConfig{}.Planner)
+	if metalPlanner == nil {
+		t.Fatal("planner(metal=true) returned nil")
+	}
+
+	// When metal=true on Apple Silicon or with synthetic model, Complete logs backend=metal and forward_path=metal/qwen35-hybrid-session-v1
+	ctx := context.Background()
+	msgs := []agent.Message{{Role: "user", Content: "hi"}}
+	comp, err := metalPlanner.Complete(ctx, msgs, nil, agent.WithMaxTokens(2))
+	if err != nil {
+		t.Fatalf("metalPlanner.Complete failed: %v", err)
+	}
+	if comp == nil {
+		t.Fatal("metalPlanner.Complete returned nil completion")
 	}
 }
