@@ -206,6 +206,25 @@ func expandLandPaths(wtPath, diffRef string, requested []string, git GitRunner) 
 	return expanded, nil
 }
 
+func landMutationPaths(wtPath, diffRef, nameOnly, diff string, git GitRunner) []string {
+	paths := landChangedPaths(nameOnly, diff)
+	seen := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		seen[p] = true
+	}
+	rc, out := run(git, wtPath, []string{"ls-files", "--others", "--exclude-standard"})
+	if rc == 0 && strings.TrimSpace(out) != "" {
+		for _, f := range strings.Fields(out) {
+			clean := filepath.ToSlash(filepath.Clean(strings.TrimSpace(f)))
+			if clean != "" && clean != "." && !seen[clean] {
+				seen[clean] = true
+				paths = append(paths, clean)
+			}
+		}
+	}
+	return paths
+}
+
 // ProspectiveVerifyHook verifies the exact detached prospective commit built for a
 // CAS attempt. A non-nil materializationErr means no safe candidate checkout was
 // available; the hook must return its fail-closed refusal without inspecting dir.
@@ -297,6 +316,21 @@ func land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	droppedOutOfLane := 0
 	if len(paths) > 0 && names != "" {
 		droppedOutOfLane = CountPathsOutsideTrees(strings.Fields(names), paths)
+	}
+	if len(cfg.LeasedGlobs) > 0 {
+		mutations := landMutationPaths(wtPath, diffRef, names, diff, git)
+		if err := ValidateWorkerTreeDisjointness(mutations, cfg.LeasedGlobs); err != nil {
+			if admissionActive {
+				finishAdmission()
+				admissionActive = false
+			}
+			return Result{
+				OK:        false,
+				Code:      ReasonOutOfLaneMutation,
+				Reason:    fmt.Sprintf("out-of-lane write detected: %v", err),
+				Preserved: true,
+			}
+		}
 	}
 	if verify != nil {
 		finishAdmission()

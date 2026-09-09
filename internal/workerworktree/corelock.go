@@ -83,6 +83,19 @@ type landConfig struct {
 	resources       func() landResourceSample
 	tracker         *landProgressTracker
 	queue           *LandingQueue
+	LeasedGlobs     []string
+}
+
+// WithLeasedGlobs configures the leased path globs for pathspec disjointness fencing.
+func WithLeasedGlobs(globs []string) LandOption {
+	return func(c *landConfig) {
+		c.LeasedGlobs = append([]string(nil), globs...)
+	}
+}
+
+// WithLeasedGlobPatterns configures leased path globs from variadic patterns.
+func WithLeasedGlobPatterns(globs ...string) LandOption {
+	return WithLeasedGlobs(globs)
 }
 
 // WithCoreLockWitness supplies the hard-self core-lock maintenance witness claim

@@ -1073,3 +1073,18 @@ func Count(root string, git GitRunner) (int, []string) {
 // the diagnosis is at the END of a failing command's output. strmatch.Tail owns the
 // one definition; `fak release status` carried a byte-identical private copy.
 func tail(s string, n int) string { return strmatch.Tail(s, n) }
+
+// LandOptions holds optional configuration for worker landing, including pathspec fencing.
+type LandOptions struct {
+	LeasedGlobs []string `json:"leased_globs,omitempty"`
+}
+
+// WithLandOptions configures Land with structured LandOptions.
+func WithLandOptions(opts LandOptions) LandOption {
+	return WithLeasedGlobs(opts.LeasedGlobs)
+}
+
+// LandChecked executes Land with pre-land audits and pathspec fencing.
+func LandChecked(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, git GitRunner, opts ...LandOption) Result {
+	return Land(root, wtPath, baseSHA, commitMsgFile, paths, verify, git, opts...)
+}
