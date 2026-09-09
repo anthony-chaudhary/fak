@@ -42,6 +42,7 @@ func (m *Model) SessionFromPrefix(prefix *KVCache) *Session {
 // sessions Cache is sufficient. Device hybrid sessions additionally carry attention
 // KV and recurrent Qwen state; keeping all three in one owner prevents partial restores.
 type PrefixSnapshot struct {
+	mu         sync.Mutex
 	owner      *Session
 	epoch      uint64
 	Cache      *KVCache
@@ -61,7 +62,8 @@ type PrefixSnapshot struct {
 	targetHiddenTokens  []int
 }
 
-// PrefixSnapshot captures a deep clone suitable for shared-prefix admission.
+// PrefixSnapshot captures an independently owned prefix. Qwen recurrent layers
+// share immutable device pairs until a branch first mutates that layer.
 func (s *Session) PrefixSnapshot() (*PrefixSnapshot, error) {
 	s.cacheGeometryMu.RLock()
 	defer s.cacheGeometryMu.RUnlock()
@@ -99,9 +101,14 @@ func (s *Session) PrefixSnapshot() (*PrefixSnapshot, error) {
 
 // Clone makes a second independent owner for lookup; the cache retains the original.
 func (p *PrefixSnapshot) Clone() (*PrefixSnapshot, error) {
+	if p == nil {
+		return nil, nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	started := prefixProfileStart()
 	defer func() { emitPrefixProfile(started, "device_clone", "complete", p, nil) }()
-	if p == nil || p.Cache == nil {
+	if p.Cache == nil {
 		return nil, nil
 	}
 	out := &PrefixSnapshot{
@@ -128,14 +135,19 @@ func (p *PrefixSnapshot) Clone() (*PrefixSnapshot, error) {
 
 // Restore installs this snapshot into a fresh backend session and transfers ownership.
 func (p *PrefixSnapshot) Restore(s *Session) error {
-	if p != nil && p.owner != nil {
+	if p == nil {
+		return fmt.Errorf("model: invalid prefix snapshot restore")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.owner != nil {
 		p.owner.cacheGeometryMu.RLock()
 		defer p.owner.cacheGeometryMu.RUnlock()
 	}
-	if p != nil && p.owner != nil && p.epoch != p.owner.cacheGeometryEpoch {
+	if p.owner != nil && p.epoch != p.owner.cacheGeometryEpoch {
 		return fmt.Errorf("model: stale prefix snapshot after cache rebuild")
 	}
-	if p == nil || s == nil || p.Cache == nil {
+	if s == nil || p.Cache == nil {
 		return fmt.Errorf("model: invalid prefix snapshot restore")
 	}
 	if p.Backend != s.Backend {
@@ -175,6 +187,8 @@ func (p *PrefixSnapshot) Close() {
 	if p == nil {
 		return
 	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.halKV != nil {
 		p.halKV.Free()
 		p.halKV = nil

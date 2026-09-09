@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -43,6 +44,7 @@ func (e *Qwen35QKNormResidencyError) Error() string {
 }
 
 type qwen35HALState struct {
+	mu                  sync.Mutex
 	backend             Qwen35GDNBackend
 	layers              []qwen35HALLayerState
 	sequenceBackend     Qwen35GDNPreprojectedSequenceBackend
@@ -112,8 +114,182 @@ func (s *Session) RequireQwen35SequencePrefillNativePerformance() error {
 }
 
 type qwen35HALLayerState struct {
+	owner     *qwen35HALLayerOwner
 	conv      compute.Tensor
 	recurrent compute.Tensor
+}
+
+// qwen35HALLayerOwner is the physical owner of one convolution/recurrent pair.
+// Snapshot layers retain it without copying device memory; the first branch that
+// writes while refs > 1 receives a transactional pair clone.
+type qwen35HALLayerOwner struct {
+	mu        sync.Mutex
+	refs      int
+	backend   compute.Backend
+	conv      compute.Tensor
+	recurrent compute.Tensor
+}
+
+func newQwen35HALLayerState(backend compute.Backend, conv, recurrent compute.Tensor) qwen35HALLayerState {
+	return qwen35HALLayerState{
+		owner:     &qwen35HALLayerOwner{refs: 1, backend: backend, conv: conv, recurrent: recurrent},
+		conv:      conv,
+		recurrent: recurrent,
+	}
+}
+
+// ownerLocked adopts states restored by the host snapshot path, which predates
+// the shared owner. The containing qwen35HALState.mu must be held by the caller.
+func (l *qwen35HALLayerState) ownerLocked(backend compute.Backend) *qwen35HALLayerOwner {
+	if l.owner == nil && (l.conv.Buf() != nil || l.recurrent.Buf() != nil) {
+		l.owner = &qwen35HALLayerOwner{refs: 1, backend: backend, conv: l.conv, recurrent: l.recurrent}
+	}
+	return l.owner
+}
+
+func (l *qwen35HALLayerState) share(backend compute.Backend) qwen35HALLayerState {
+	owner := l.ownerLocked(backend)
+	if owner == nil {
+		return qwen35HALLayerState{}
+	}
+	owner.mu.Lock()
+	owner.refs++
+	conv, recurrent := owner.conv, owner.recurrent
+	owner.mu.Unlock()
+	return qwen35HALLayerState{owner: owner, conv: conv, recurrent: recurrent}
+}
+
+type qwen35HALLayerRelease struct {
+	backend         compute.Backend
+	conv, recurrent compute.Tensor
+}
+
+// detach releases this handle's reference while the containing state is
+// locked. Physical frees are returned to the caller so backend callbacks never
+// run under qwen35HALState.mu.
+func (l *qwen35HALLayerState) detach(backend compute.Backend) (qwen35HALLayerRelease, bool) {
+	owner := l.ownerLocked(backend)
+	l.owner = nil
+	l.conv = compute.Tensor{}
+	l.recurrent = compute.Tensor{}
+	if owner == nil {
+		return qwen35HALLayerRelease{}, false
+	}
+	owner.mu.Lock()
+	owner.refs--
+	last := owner.refs == 0
+	conv, recurrent, owningBackend := owner.conv, owner.recurrent, owner.backend
+	if last {
+		owner.conv = compute.Tensor{}
+		owner.recurrent = compute.Tensor{}
+	}
+	owner.mu.Unlock()
+	if owningBackend == nil {
+		owningBackend = backend
+	}
+	if !last {
+		return qwen35HALLayerRelease{}, false
+	}
+	return qwen35HALLayerRelease{backend: owningBackend, conv: conv, recurrent: recurrent}, true
+}
+
+// mutableOwnerLocked returns an exclusive owner with owner.mu held. The
+// containing qwen35HALState.mu must already be held. A failed pair clone leaves
+// the shared owner and refcount unchanged.
+func (l *qwen35HALLayerState) mutableOwnerLocked(backend compute.Backend) (*qwen35HALLayerOwner, error) {
+	owner := l.ownerLocked(backend)
+	if owner == nil {
+		return nil, fmt.Errorf("model: missing Qwen3.5 recurrent state")
+	}
+	owner.mu.Lock()
+	if owner.refs == 1 {
+		return owner, nil
+	}
+	cloner, ok := backend.(compute.TensorCloner)
+	if !ok {
+		owner.mu.Unlock()
+		return nil, fmt.Errorf("model: backend %T cannot clone Qwen3.5 recurrent state", backend)
+	}
+	conv, err := cloner.CloneTensor(owner.conv)
+	if err != nil {
+		owner.mu.Unlock()
+		return nil, fmt.Errorf("model: clone Qwen3.5 convolution state: %w", err)
+	}
+	recurrent, err := cloner.CloneTensor(owner.recurrent)
+	if err != nil {
+		if conv.Buf() != nil {
+			backend.Free(conv)
+		}
+		owner.mu.Unlock()
+		return nil, fmt.Errorf("model: clone Qwen3.5 recurrent state: %w", err)
+	}
+	owner.refs--
+	owner.mu.Unlock()
+	owner = &qwen35HALLayerOwner{refs: 1, backend: backend, conv: conv, recurrent: recurrent}
+	owner.mu.Lock()
+	l.owner = owner
+	l.conv, l.recurrent = conv, recurrent
+	return owner, nil
+}
+
+// mutateLayer holds the handle/owner locks across the backend operation. That makes a
+// concurrent snapshot either share the pre-write owner or observe the completed
+// write, never a partially mutated pair.
+func (q *qwen35HALState) mutateLayer(
+	backend compute.Backend,
+	layer int,
+	fn func(conv, recurrent compute.Tensor) (compute.Tensor, compute.Tensor, compute.Tensor, error),
+) (output, nextConv, nextRecurrent compute.Tensor, err error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if layer < 0 || layer >= len(q.layers) {
+		return compute.Tensor{}, compute.Tensor{}, compute.Tensor{}, fmt.Errorf("model: Qwen3.5 recurrent layer %d out of bounds", layer)
+	}
+	l := &q.layers[layer]
+	owner, err := l.mutableOwnerLocked(backend)
+	if err != nil {
+		return compute.Tensor{}, compute.Tensor{}, compute.Tensor{}, err
+	}
+	defer owner.mu.Unlock()
+	output, nextConv, nextRecurrent, err = fn(owner.conv, owner.recurrent)
+	if err == nil && nextConv.Buf() == owner.conv.Buf() && nextRecurrent.Buf() == owner.recurrent.Buf() {
+		owner.conv, owner.recurrent = nextConv, nextRecurrent
+		l.conv, l.recurrent = nextConv, nextRecurrent
+	}
+	return output, nextConv, nextRecurrent, err
+}
+
+// mutateSequence makes every recurrent pair private, installs only those
+// protected handles in the request, and keeps them locked through the backend's
+// whole-sequence in-place mutation.
+func (q *qwen35HALState) mutateSequence(
+	backend compute.Backend,
+	fn func(states []compute.Qwen35SequenceState) (compute.Qwen35SequencePrefillResult, error),
+) (compute.Qwen35SequencePrefillResult, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	states := make([]compute.Qwen35SequenceState, len(q.layers))
+	locked := make([]*qwen35HALLayerOwner, 0, len(q.layers))
+	unlock := func() {
+		for i := len(locked) - 1; i >= 0; i-- {
+			locked[i].mu.Unlock()
+		}
+	}
+	for layer := range q.layers {
+		state := &q.layers[layer]
+		if state.conv.Buf() == nil && state.recurrent.Buf() == nil {
+			continue
+		}
+		owner, err := state.mutableOwnerLocked(backend)
+		if err != nil {
+			unlock()
+			return compute.Qwen35SequencePrefillResult{}, fmt.Errorf("layer %d: %w", layer, err)
+		}
+		locked = append(locked, owner)
+		states[layer] = compute.Qwen35SequenceState{Conv: owner.conv, Recurrent: owner.recurrent}
+	}
+	defer unlock()
+	return fn(states)
 }
 
 type qwen35PartialRoPEBackend interface {
@@ -143,51 +319,34 @@ func (s *Session) initQwen35HALState(gdn Qwen35GDNBackend) {
 		if !cfg.isLinearAttnLayer(l) {
 			continue
 		}
-		state.layers[l] = qwen35HALLayerState{
-			conv: s.uploadHostF32(
-				[]int{cfg.LinearConvKernelDim - 1, convDim},
-				make([]float32, (cfg.LinearConvKernelDim-1)*convDim),
-				compute.MemoryKVCache,
-				"qwen35-gdn-conv-state layer "+itoa(l),
-			),
-			recurrent: s.uploadHostF32(
-				[]int{nV, kHd, vHd},
-				make([]float32, nV*kHd*vHd),
-				compute.MemoryKVCache,
-				"qwen35-gdn-recurrent-state layer "+itoa(l),
-			),
-		}
+		conv := s.uploadHostF32(
+			[]int{cfg.LinearConvKernelDim - 1, convDim},
+			make([]float32, (cfg.LinearConvKernelDim-1)*convDim),
+			compute.MemoryKVCache,
+			"qwen35-gdn-conv-state layer "+itoa(l),
+		)
+		recurrent := s.uploadHostF32(
+			[]int{nV, kHd, vHd},
+			make([]float32, nV*kHd*vHd),
+			compute.MemoryKVCache,
+			"qwen35-gdn-recurrent-state layer "+itoa(l),
+		)
+		state.layers[l] = newQwen35HALLayerState(s.Backend, conv, recurrent)
 	}
 	s.qwen35HAL = state
 }
 
-// cloneQwen35HALState deep-copies the recurrent Qwen3.5/3.6 device state. The
-// state is semantically part of the prefix just as much as attention KV is: restoring
-// only halKV yields plausible but incorrect continuations after a GDN layer.
+// cloneQwen35HALState creates a read-only shared checkpoint of recurrent
+// Qwen3.5/3.6 device state. Mutation performs the physical copy per layer.
 func cloneQwen35HALState(src *qwen35HALState, backend compute.Backend) (*qwen35HALState, error) {
 	if src == nil {
 		return nil, nil
 	}
-	cloner, ok := backend.(compute.TensorCloner)
-	if !ok {
-		return nil, fmt.Errorf("model: backend %T cannot clone Qwen3.5 recurrent state", backend)
-	}
+	src.mu.Lock()
+	defer src.mu.Unlock()
 	out := &qwen35HALState{backend: src.backend, layers: make([]qwen35HALLayerState, len(src.layers))}
 	for i := range src.layers {
-		if src.layers[i].conv.Buf() == nil && src.layers[i].recurrent.Buf() == nil {
-			continue
-		}
-		var err error
-		out.layers[i].conv, err = cloner.CloneTensor(src.layers[i].conv)
-		if err != nil {
-			out.free(backend)
-			return nil, fmt.Errorf("model: clone Qwen3.5 layer %d convolution state: %w", i, err)
-		}
-		out.layers[i].recurrent, err = cloner.CloneTensor(src.layers[i].recurrent)
-		if err != nil {
-			out.free(backend)
-			return nil, fmt.Errorf("model: clone Qwen3.5 layer %d recurrent state: %w", i, err)
-		}
+		out.layers[i] = src.layers[i].share(backend)
 	}
 	return out, nil
 }
@@ -196,38 +355,61 @@ func (q *qwen35HALState) free(backend compute.Backend) {
 	if q == nil {
 		return
 	}
-	if backend != nil {
-		for i := range q.layers {
-			if q.layers[i].conv.Buf() != nil {
-				backend.Free(q.layers[i].conv)
-			}
-			if q.layers[i].recurrent.Buf() != nil {
-				backend.Free(q.layers[i].recurrent)
-			}
-			q.layers[i] = qwen35HALLayerState{}
+	q.mu.Lock()
+	releases := make([]qwen35HALLayerRelease, 0, len(q.layers))
+	for i := range q.layers {
+		if release, last := q.layers[i].detach(backend); last {
+			releases = append(releases, release)
 		}
 	}
 	q.qsaGatheredK = nil
 	q.qsaGatheredV = nil
 	q.qsaBlockScores = nil
-	q.freeSequence()
+	sequenceBackend, sequenceStates := q.detachSequenceLocked()
+	q.mu.Unlock()
+	for _, release := range releases {
+		if release.backend == nil {
+			continue
+		}
+		if release.conv.Buf() != nil {
+			release.backend.Free(release.conv)
+		}
+		if release.recurrent.Buf() != nil {
+			release.backend.Free(release.recurrent)
+		}
+	}
+	freeQwen35SequenceStates(sequenceBackend, sequenceStates)
 }
 
-func (q *qwen35HALState) freeSequence() {
-	if q == nil || q.sequenceBackend == nil {
-		return
-	}
+func (q *qwen35HALState) detachSequenceLocked() (Qwen35GDNPreprojectedSequenceBackend, []Qwen35GDNAuxState) {
 	backend := q.sequenceBackend
 	states := q.sequenceLayers
 	// Clear ownership before invoking backend cleanup so Close remains exact-once
 	// even when a backend reports a teardown error or re-enters a failure path.
 	q.sequenceBackend = nil
 	q.sequenceLayers = nil
+	return backend, states
+}
+
+func freeQwen35SequenceStates(backend Qwen35GDNPreprojectedSequenceBackend, states []Qwen35GDNAuxState) {
+	if backend == nil {
+		return
+	}
 	for _, state := range states {
 		if state.valid() {
 			_ = backend.FreeQwen35GDNAuxState(state)
 		}
 	}
+}
+
+func (q *qwen35HALState) freeSequence() {
+	if q == nil {
+		return
+	}
+	q.mu.Lock()
+	backend, states := q.detachSequenceLocked()
+	q.mu.Unlock()
+	freeQwen35SequenceStates(backend, states)
 }
 
 func (s *Session) closeQwen35HALState() {
@@ -427,22 +609,22 @@ func (s *Session) qwen35LinearHAL(layer int, residual compute.Tensor, eps float3
 	nK, nV, kHd, vHd, _, _, _ := cfg.linearAttnDims()
 	p := func(suffix string) string { return layerName(layer, suffix) }
 	xn := s.Backend.RMSNorm(residual, s.normWeightHAL(p("input_layernorm.weight")), eps)
-	state := &s.qwen35HAL.layers[layer]
-	oldConv, oldRecurrent := state.conv, state.recurrent
-	output, nextConv, nextRecurrent, err := s.qwen35HAL.backend.Qwen35GDNDecode(
-		xn,
-		s.matWeightHAL(p("linear_attn.in_proj_qkv.weight")),
-		s.matWeightHAL(p("linear_attn.in_proj_z.weight")),
-		s.matWeightHAL(p("linear_attn.in_proj_b.weight")),
-		s.matWeightHAL(p("linear_attn.in_proj_a.weight")),
-		s.weightHAL(p("linear_attn.conv1d.weight")),
-		s.weightHAL(p("linear_attn.A_log")),
-		s.weightHAL(p("linear_attn.dt_bias")),
-		s.weightHAL(p("linear_attn.norm.weight")),
-		s.matWeightHAL(p("linear_attn.out_proj.weight")),
-		oldConv, oldRecurrent,
-		nK, nV, kHd, vHd, cfg.LinearConvKernelDim, eps,
-	)
+	output, nextConv, nextRecurrent, err := s.qwen35HAL.mutateLayer(s.Backend, layer, func(oldConv, oldRecurrent compute.Tensor) (compute.Tensor, compute.Tensor, compute.Tensor, error) {
+		return s.qwen35HAL.backend.Qwen35GDNDecode(
+			xn,
+			s.matWeightHAL(p("linear_attn.in_proj_qkv.weight")),
+			s.matWeightHAL(p("linear_attn.in_proj_z.weight")),
+			s.matWeightHAL(p("linear_attn.in_proj_b.weight")),
+			s.matWeightHAL(p("linear_attn.in_proj_a.weight")),
+			s.weightHAL(p("linear_attn.conv1d.weight")),
+			s.weightHAL(p("linear_attn.A_log")),
+			s.weightHAL(p("linear_attn.dt_bias")),
+			s.weightHAL(p("linear_attn.norm.weight")),
+			s.matWeightHAL(p("linear_attn.out_proj.weight")),
+			oldConv, oldRecurrent,
+			nK, nV, kHd, vHd, cfg.LinearConvKernelDim, eps,
+		)
+	})
 	if err != nil {
 		s.failBackendForward(layer, "Qwen35GDNDecode", err)
 	}
@@ -451,16 +633,16 @@ func (s *Session) qwen35LinearHAL(layer int, residual compute.Tensor, eps float3
 	}
 	// The production operation's mutable state contract is in-place. Enforce it here so
 	// a backend cannot silently substitute transient state that Recycle will reclaim.
-	if nextConv.Buf() != oldConv.Buf() || nextRecurrent.Buf() != oldRecurrent.Buf() {
-		if nextConv.Buf() != nil && nextConv.Buf() != oldConv.Buf() {
+	state := s.qwen35HAL.layers[layer]
+	if nextConv.Buf() != state.conv.Buf() || nextRecurrent.Buf() != state.recurrent.Buf() {
+		if nextConv.Buf() != nil && nextConv.Buf() != state.conv.Buf() {
 			s.Backend.Free(nextConv)
 		}
-		if nextRecurrent.Buf() != nil && nextRecurrent.Buf() != oldRecurrent.Buf() {
+		if nextRecurrent.Buf() != nil && nextRecurrent.Buf() != state.recurrent.Buf() {
 			s.Backend.Free(nextRecurrent)
 		}
 		s.failBackendForward(layer, "Qwen35GDNDecode state identity", fmt.Errorf("backend replaced persistent in-place state"))
 	}
-	state.conv, state.recurrent = nextConv, nextRecurrent
 	s.Backend.AddInPlace(residual, output)
 }
 
@@ -899,8 +1081,6 @@ func (s *Session) qwen35SequencePrefillRequestWithEmbedding(ids []int, needLogit
 			layer.GDNDTBias = s.weightHAL(p("linear_attn.dt_bias"))
 			layer.GDNNorm = s.weightHAL(p("linear_attn.norm.weight"))
 			layer.GDNOut = s.matWeightHAL(p("linear_attn.out_proj.weight"))
-			state := s.qwen35HAL.layers[l]
-			req.States[l] = compute.Qwen35SequenceState{Conv: state.conv, Recurrent: state.recurrent}
 		} else {
 			layer.Q = s.matWeightHAL(p("self_attn.q_proj.weight"))
 			layer.K = s.matWeightHAL(p("self_attn.k_proj.weight"))
@@ -985,7 +1165,10 @@ func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.
 	startPos := s.halKV.Len()
 	finishLineage := s.beginHALTokenLineageWrite(ids)
 	defer finishLineage()
-	result, err := seq.Qwen35SequencePrefill(request)
+	result, err := s.qwen35HAL.mutateSequence(s.Backend, func(states []compute.Qwen35SequenceState) (compute.Qwen35SequencePrefillResult, error) {
+		request.States = states
+		return seq.Qwen35SequencePrefill(request)
+	})
 	if err != nil {
 		return result, true, &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardQwen35GDN, Path: compute.Qwen35SequencePrefillPath, Layer: -1, Stage: "sequence prefill", Cause: err}
 	}
