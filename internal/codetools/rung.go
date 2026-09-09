@@ -13,7 +13,7 @@ import (
 //
 //  1. ROUTING. abi.ToolCall.Engine is what kernel.routeFor dispatches on, and a loop that
 //     does not know about this package leaves it empty — which routes the call to the
-//     kernel's DEFAULT engine (the airline demo's "localtools" on the owned loop), where
+//     kernel's DEFAULT engine (the mock demo's 'localtools' on the owned loop), where
 //     a Read is an unknown tool. Adjudicate receives the call by POINTER and runs before
 //     dispatch, so pinning c.Engine here is what makes the six engines reachable at all,
 //     without any edit to the loop that proposed the call.

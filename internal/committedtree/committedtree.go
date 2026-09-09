@@ -66,6 +66,93 @@ func Resolve(repo, ref string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// DefaultStaleTreeAge is the default quiet-period floor under which an extracted
+// committed tree is considered still in use and never reaped.
+const DefaultStaleTreeAge = 2 * time.Hour
+
+var (
+	reapMu     sync.Mutex
+	lastReapAt time.Time
+)
+
+// ReapStale sweeps temporary directories matching "fak-committed-tree-*" under tempParent
+// whose newest file (or directory modtime if empty) is older than maxAge.
+// If tempParent is "", os.TempDir() is used.
+// It returns the count of directories removed and the total bytes reclaimed.
+func ReapStale(tempParent string, maxAge time.Duration) (int, int64, error) {
+	if tempParent == "" {
+		tempParent = os.TempDir()
+	}
+	if maxAge <= 0 {
+		maxAge = DefaultStaleTreeAge
+	}
+	entries, err := os.ReadDir(tempParent)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	now := time.Now()
+	reapedCount := 0
+	var reapedBytes int64
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasPrefix(name, "fak-committed-tree-") {
+			continue
+		}
+		dirPath := filepath.Join(tempParent, name)
+		fi, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		newest := fi.ModTime()
+		var dirBytes int64
+
+		_ = filepath.WalkDir(dirPath, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			info, err := d.Info()
+			if err != nil {
+				return nil
+			}
+			if info.ModTime().After(newest) {
+				newest = info.ModTime()
+			}
+			if !d.IsDir() {
+				dirBytes += info.Size()
+			}
+			return nil
+		})
+
+		if now.Sub(newest) >= maxAge {
+			if removeErr := os.RemoveAll(dirPath); removeErr == nil {
+				reapedCount++
+				reapedBytes += dirBytes
+			}
+		}
+	}
+	return reapedCount, reapedBytes, nil
+}
+
+func maybeOpportunisticReap(tempParent string) {
+	reapMu.Lock()
+	now := time.Now()
+	if now.Sub(lastReapAt) < 10*time.Minute {
+		reapMu.Unlock()
+		return
+	}
+	lastReapAt = now
+	reapMu.Unlock()
+
+	go func() {
+		_, _, _ = ReapStale(tempParent, DefaultStaleTreeAge)
+	}()
+}
+
 // Extract resolves no refs: object must already identify a commit or tree. The
 // caller owns the returned temporary directory.
 func Extract(repo, object string) (string, error) {
@@ -73,6 +160,7 @@ func Extract(repo, object string) (string, error) {
 }
 
 func extractTemp(repo, object, tempParent string) (string, error) {
+	maybeOpportunisticReap(tempParent)
 	dir, err := os.MkdirTemp(tempParent, "fak-committed-tree-*")
 	if err != nil {
 		return "", err

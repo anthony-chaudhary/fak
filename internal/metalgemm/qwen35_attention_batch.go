@@ -18,7 +18,7 @@ import (
 	"unsafe"
 )
 
-const Qwen35FullAttentionBatchMax = 8
+const Qwen35FullAttentionBatchMax = 24
 const qwen35MaxCInt = int(^uint32(0) >> 1)
 
 type Qwen35FullAttentionWeights struct {

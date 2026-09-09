@@ -11,7 +11,7 @@ import (
 	"unsafe"
 )
 
-// Hardware architecture constants for UMA on AMD RDNA 3.5 APUs (Strix Halo / Strix Point).
+// Hardware architecture constants for UMA on AMD RDNA 3.5 APUs and Apple Silicon Metal.
 const (
 	// RDNA35TargetArch identifies the AMD RDNA 3.5 APU target (gfx1150 / gfx1151).
 	RDNA35TargetArch = "RDNA 3.5 / gfx1151 (UMA)"
@@ -19,6 +19,12 @@ const (
 	// RDNA35GPUVABase is the canonical 64-bit base virtual address for coherent UMA KV page tables.
 	// On UMA APUs, the unified system DRAM is coherent between CPU Context MMU and RDNA 3.5 GPU shaders.
 	RDNA35GPUVABase uint64 = 0x0000_7f00_0000_0000
+
+	// AppleSiliconMetalTargetArch identifies Apple Silicon unified memory architecture with Metal 4 compute.
+	AppleSiliconMetalTargetArch = "Apple Silicon / Metal (UMA)"
+
+	// AppleSiliconMetalGPUVABase is the canonical 64-bit base virtual address for coherent Metal UMA KV page tables.
+	AppleSiliconMetalGPUVABase uint64 = 0x0000_1000_0000_0000
 
 	// BlockGranularity16 is the 16-token physical KV block granularity.
 	BlockGranularity16 = 16

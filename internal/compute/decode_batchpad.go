@@ -28,6 +28,10 @@ package compute
 // A scheduler is then the wrong fix, and the honest outcome is the null result #5852's witness
 // clause already admits.
 
+// ResidentDecodeBatchConcurrencyMax defines the resident hybrid lockstep co-batching concurrency bound
+// across Apple Silicon unified memory (B=24).
+const ResidentDecodeBatchConcurrencyMax = 24
+
 // DecodeSlotSchedule is one batching policy's exact slot-token accounting over a set of
 // compatibility classes. UsefulSteps is policy-invariant (it is the work itself); AllocatedSteps
 // is what the policy makes the machine pay for it; PaddingFrac is the wasted share. Batches and
@@ -42,6 +46,8 @@ type DecodeSlotSchedule struct {
 	Batches int
 	// Lanes is the number of scheduled jobs (one decode lane each).
 	Lanes int
+	// MaxConcurrency is the peak number of concurrent active lanes scheduled in any batch step.
+	MaxConcurrency int
 	// UsefulSteps is the total real token steps — sum of every lane's decode length. Invariant
 	// across policies: scheduling never changes the work, only its packing.
 	UsefulSteps int
@@ -102,6 +108,9 @@ func CompactedSlotSchedule(classes [][]int, width, gran int) DecodeSlotSchedule 
 				end = len(class)
 			}
 			batch := class[start:end]
+			if len(batch) > s.MaxConcurrency {
+				s.MaxConcurrency = len(batch)
+			}
 			longest, alloc := 0, 0
 			for _, n := range batch {
 				s.Lanes++
@@ -150,6 +159,9 @@ func chunkedSchedule(policy string, classes [][]int, width int, byLength bool) D
 				end = len(lanes)
 			}
 			batch := lanes[start:end]
+			if len(batch) > s.MaxConcurrency {
+				s.MaxConcurrency = len(batch)
+			}
 			longest := 0
 			for _, n := range batch {
 				s.Lanes++

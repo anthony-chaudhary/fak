@@ -34,7 +34,7 @@ type nativeControlConfig struct {
 
 func registerNativeControlFlags(fs *flag.FlagSet) nativeControlFlags {
 	return nativeControlFlags{
-		prefillChunk:      fs.Int(nativeQwenQ4KPrefillChunkFlag, defaultNativeQwenQ4KPrefillChunk, "fak-native resident Qwen Q4_K prefill chunk ceiling in tokens (128..8192; default 512); validated before model load and stamped into native inference receipts; does not select another engine"),
+		prefillChunk:      fs.Int(nativeQwenQ4KPrefillChunkFlag, defaultNativeQwenQ4KPrefillChunk, "Qwen Q4_K prefill chunk ceiling in tokens (128..8192; default 512). Validated before model load and stamped into native receipts."),
 		qwen35GDNSequence: fs.Bool("native-qwen35-metal-gdn-sequence", false, "enable the experimental Qwen3.5 Metal GDN preprojected sequence path"),
 		q4kGateUpSlab:     fs.Bool("native-q4k-gateup-slab", false, "reuse the bounded Q4_K gate/up output slab within each native session"),
 		prefixProfile:     fs.String("native-prefix-profile", "", "write native prefix-cache operation profiles to this JSONL path"),

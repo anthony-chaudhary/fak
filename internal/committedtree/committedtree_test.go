@@ -548,3 +548,70 @@ func killWindowsProcessTree(pid int) {
 		_ = exec.Command("taskkill.exe", "/PID", strconv.Itoa(pid), "/T", "/F").Run()
 	}
 }
+
+func TestReapStaleCommittedTrees(t *testing.T) {
+	parent := t.TempDir()
+	now := time.Now()
+
+	// 1. Create a stale directory older than 2 hours
+	staleDir := filepath.Join(parent, "fak-committed-tree-stale")
+	if err := os.MkdirAll(staleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	staleFile := filepath.Join(staleDir, "file.txt")
+	content := []byte("stale content payload")
+	if err := os.WriteFile(staleFile, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := now.Add(-3 * time.Hour)
+	if err := os.Chtimes(staleFile, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(staleDir, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Create a fresh directory
+	freshDir := filepath.Join(parent, "fak-committed-tree-fresh")
+	if err := os.MkdirAll(freshDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	freshFile := filepath.Join(freshDir, "file.txt")
+	if err := os.WriteFile(freshFile, []byte("fresh content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Create an unrelated directory
+	otherDir := filepath.Join(parent, "other-temp-dir")
+	if err := os.MkdirAll(otherDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(otherDir, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	// 4. Run ReapStale with a 2-hour threshold
+	count, bytesReaped, err := ReapStale(parent, 2*time.Hour)
+	if err != nil {
+		t.Fatalf("ReapStale failed: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("ReapStale reaped %d directories, want 1", count)
+	}
+	if bytesReaped != int64(len(content)) {
+		t.Fatalf("ReapStale reaped %d bytes, want %d", bytesReaped, len(content))
+	}
+
+	// Stale directory must be removed
+	if _, err := os.Stat(staleDir); !os.IsNotExist(err) {
+		t.Errorf("stale directory %s still exists", staleDir)
+	}
+	// Fresh directory must be preserved
+	if _, err := os.Stat(freshDir); err != nil {
+		t.Errorf("fresh directory %s was unexpectedly removed: %v", freshDir, err)
+	}
+	// Unrelated directory must be preserved
+	if _, err := os.Stat(otherDir); err != nil {
+		t.Errorf("other directory %s was unexpectedly removed: %v", otherDir, err)
+	}
+}

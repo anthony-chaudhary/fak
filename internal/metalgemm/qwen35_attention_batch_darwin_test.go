@@ -50,7 +50,7 @@ func TestQwen35FullAttentionDecodeBatchIndependentKVSingleFence(t *testing.T) {
 			}
 		}()
 
-		for _, batch := range []int{2, 4, 8} {
+		for _, batch := range []int{2, 4, 8, 24} {
 			t.Run(fmt.Sprintf("B%d", batch), func(t *testing.T) {
 				req := attentionBatchRequest(batch, modelWidth, nH, nKV, hd, rotary, weights)
 				attentionBatchRunParityAndIsolation(t, req, modelWidth, attentionWidth, kvWidth)

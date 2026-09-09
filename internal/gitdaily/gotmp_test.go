@@ -86,7 +86,8 @@ func TestTickCollectsOrphanedGoBuildWorkDirs(t *testing.T) {
 	if res.GoTmp.ReapedBytes != 4096 {
 		t.Fatalf("GoTmp.ReapedBytes = %d, want 4096", res.GoTmp.ReapedBytes)
 	}
-	if res.GoTmp.Root != gotmp {
+	canonGoTmp, _ := filepath.EvalSymlinks(gotmp)
+	if res.GoTmp.Root != gotmp && res.GoTmp.Root != canonGoTmp {
 		t.Fatalf("GoTmp.Root = %q, want %q", res.GoTmp.Root, gotmp)
 	}
 	// The age split rides along in every report so a reader can never mistake in-flight

@@ -325,6 +325,19 @@ func (c *Client) Download(ctx context.Context, r Ref, progress io.Writer) (strin
 		return dst, nil
 	}
 
+	for _, alt := range candidateCachePaths(c.CacheDir, r) {
+		if fi, err := os.Stat(alt); err == nil && fi.Size() > 0 {
+			if want != "" {
+				got, err := fileSHA256(alt)
+				if err != nil || !strings.EqualFold(want, got) {
+					continue
+				}
+			}
+			logf(progress, "cache hit: %s", alt)
+			return alt, nil
+		}
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, resolveURL, nil)
 	if err != nil {
 		return "", err
@@ -386,6 +399,46 @@ func fileSHA256(path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func candidateCachePaths(cacheDir string, r Ref) []string {
+	var candidates []string
+	seen := make(map[string]bool)
+	add := func(p string) {
+		if p == "" || seen[p] {
+			return
+		}
+		seen[p] = true
+		candidates = append(candidates, p)
+	}
+
+	add(filepath.Join(cacheDir, r.Repo, "main", r.File))
+	if matches, err := filepath.Glob(filepath.Join(cacheDir, r.Repo, "*", r.File)); err == nil {
+		for _, m := range matches {
+			add(m)
+		}
+	}
+
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		dotHub := filepath.Join(home, ".cache", "fak-models", "hub")
+		libHub := filepath.Join(home, "Library", "Caches", "fak-models", "hub")
+		for _, hub := range []string{dotHub, libHub} {
+			if hub == cacheDir {
+				continue
+			}
+			add(filepath.Join(hub, r.cacheRel()))
+			add(filepath.Join(hub, r.Repo, "main", r.File))
+			if matches, err := filepath.Glob(filepath.Join(hub, r.Repo, "*", r.File)); err == nil {
+				for _, m := range matches {
+					add(m)
+				}
+			}
+		}
+		add(filepath.Join(home, ".cache", "fak-models", "gguf", r.File))
+		add(filepath.Join(home, "Library", "Caches", "fak-models", "gguf", r.File))
+		add(filepath.Join(home, "models", r.File))
+	}
+	return candidates
 }
 
 // linkedSHA does a best-effort HEAD to read the Hub's LFS sha256 (X-Linked-Etag)

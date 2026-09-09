@@ -453,10 +453,10 @@ void *mg_gdn_graph_encode_batch(void *graph, const int *owners, int batch,
                                 void *mixedPtr, void *zPtr, void *bPtr, void *aPtr,
                                 const float *convW, const float *aLog, const float *dtBias, const float *norm,
                                 int nK, int nV, int kHd, int vHd, int convKernel, float eps) {
-    if (!graph || !owners || batch < 2 || batch > 8 || !mixedPtr || !zPtr || !bPtr || !aPtr ||
+    if (!graph || !owners || batch < 2 || batch > 24 || !mixedPtr || !zPtr || !bPtr || !aPtr ||
         !convW || !aLog || !dtBias || !norm || eps <= 0 || !mg_gdn_pipelines()) return NULL;
 
-    MGGDNOwner slots[8];
+    MGGDNOwner slots[24];
     for (int row = 0; row < batch; ++row) {
         if (owners[row] < 0 || owners[row] >= MG_GDN_MAX_OWNERS) return NULL;
         for (int previous = 0; previous < row; ++previous) {
