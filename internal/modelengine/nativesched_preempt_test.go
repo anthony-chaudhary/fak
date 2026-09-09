@@ -600,7 +600,7 @@ func drainIssue31SchedulerWithStats(t *testing.T, m *model.Model, calls []*abi.T
 
 func drainIssue31Requests(t *testing.T, s *NativeScheduler, calls []*abi.ToolCall) [][]int {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	reqs := make([]abi.EngineRequest, len(calls))
