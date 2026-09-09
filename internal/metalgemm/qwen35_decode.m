@@ -94,37 +94,38 @@ kernel void gdn_conv_wide_m(
     uint channel [[thread_position_in_grid]]
 ) {
     if (channel >= (uint)convDim) return;
-    float window[7];
-    float saved_windows[32][7];
-    for (int j = 0; j < kernelSize - 1; ++j) {
+    float window[4];
+    float saved_windows[32][3];
+    int kMinus1 = min(kernelSize - 1, 3);
+    for (int j = 0; j < kMinus1; ++j) {
         window[j] = convState[(long)j * convDim + channel];
     }
     for (int token = 0; token < tokens; ++token) {
         int p = parents ? parents[token] : (token - 1);
         if (p >= 0 && p < tokens && p < 32) {
-            for (int j = 0; j < kernelSize - 1; ++j) {
+            for (int j = 0; j < kMinus1; ++j) {
                 window[j] = saved_windows[p][j];
             }
         } else if (p < 0 && token > 0) {
-            for (int j = 0; j < kernelSize - 1; ++j) {
+            for (int j = 0; j < kMinus1; ++j) {
                 window[j] = convState[(long)j * convDim + channel];
             }
         }
         float acc = 0.0f;
         int wb = (int)channel * kernelSize;
-        for (int j = 0; j < kernelSize - 1; ++j) acc += convW[wb + j] * window[j];
+        for (int j = 0; j < kMinus1; ++j) acc += convW[wb + j] * window[j];
         float current = mixed[(long)token * convDim + channel];
         acc += convW[wb + kernelSize - 1] * current;
         convOut[(long)token * convDim + channel] = gdn_silu(acc);
-        for (int j = 0; j < kernelSize - 2; ++j) window[j] = window[j + 1];
-        if (kernelSize > 1) window[kernelSize - 2] = current;
+        for (int j = 0; j < kMinus1 - 1; ++j) window[j] = window[j + 1];
+        if (kMinus1 > 0) window[kMinus1 - 1] = current;
         if (token < 32) {
-            for (int j = 0; j < kernelSize - 1; ++j) {
+            for (int j = 0; j < kMinus1; ++j) {
                 saved_windows[token][j] = window[j];
             }
         }
     }
-    for (int j = 0; j < kernelSize - 1; ++j) {
+    for (int j = 0; j < kMinus1; ++j) {
         convState[(long)j * convDim + channel] = window[j];
     }
 }
@@ -190,6 +191,7 @@ kernel void gdn_recurrent_wide_m(
     constant float& eps         [[buffer(17)]],
     device const int *parents   [[buffer(18)]],
     device float *treeState     [[buffer(19)]],
+    constant uint32_t& parentMask [[buffer(20)]],
     uint head [[threadgroup_position_in_grid]],
     uint lane [[thread_index_in_threadgroup]],
     uint lanes [[threads_per_threadgroup]]
@@ -198,80 +200,124 @@ kernel void gdn_recurrent_wide_m(
     int repeat = nV / nK;
     int keyHead = (int)head / repeat;
     int keyDim = nK * kHd;
-    float baseState[128];
-    float localState[128];
+    float4 localState[16];
+    int nChunks = kHd / 4;
+    if (nChunks > 16) nChunks = 16;
+
     if (lane < (uint)vHd) {
-        for (int i = 0; i < 128; ++i) {
-            float val = (i < kHd) ? state[((long)head * kHd + i) * vHd + lane] : 0.0f;
-            baseState[i] = val;
-            localState[i] = val;
+        for (int i = 0; i < nChunks; ++i) {
+            localState[i] = float4(
+                state[((long)head * kHd + i * 4 + 0) * vHd + lane],
+                state[((long)head * kHd + i * 4 + 1) * vHd + lane],
+                state[((long)head * kHd + i * 4 + 2) * vHd + lane],
+                state[((long)head * kHd + i * 4 + 3) * vHd + lane]
+            );
         }
     }
-    threadgroup float squares[256];
+    threadgroup float tg_sq[8];
+    uint simd_id = lane / 32;
+    uint simd_lane = lane % 32;
+    float neg_exp_aLog = -exp(aLog[head]);
+    float head_dtBias = dtBias[head];
+
+    int last_token = -1;
     for (int token = 0; token < tokens; ++token) {
         int p = parents ? parents[token] : (token - 1);
         if (lane < (uint)vHd) {
-            if (p < 0) {
-                for (int i = 0; i < 128; ++i) {
-                    if (i < kHd) localState[i] = baseState[i];
-                }
-            } else if (treeState != nullptr) {
-                for (int i = 0; i < 128; ++i) {
-                    if (i < kHd) {
-                        long pOffset = (((long)p * nV + (long)head) * kHd + (long)i) * vHd + lane;
-                        localState[i] = treeState[pOffset];
+            if (p != last_token) {
+                if (p < 0) {
+                    for (int i = 0; i < nChunks; ++i) {
+                        localState[i] = float4(
+                            state[((long)head * kHd + i * 4 + 0) * vHd + lane],
+                            state[((long)head * kHd + i * 4 + 1) * vHd + lane],
+                            state[((long)head * kHd + i * 4 + 2) * vHd + lane],
+                            state[((long)head * kHd + i * 4 + 3) * vHd + lane]
+                        );
+                    }
+                } else if (treeState != nullptr) {
+                    long pOffset = (((long)p * nV + (long)head) * kHd) * vHd + lane;
+                    for (int i = 0; i < nChunks; ++i) {
+                        localState[i] = float4(
+                            treeState[pOffset + (long)(i * 4 + 0) * vHd],
+                            treeState[pOffset + (long)(i * 4 + 1) * vHd],
+                            treeState[pOffset + (long)(i * 4 + 2) * vHd],
+                            treeState[pOffset + (long)(i * 4 + 3) * vHd]
+                        );
                     }
                 }
             }
         }
-        device const float *qRow = qNorm + ((long)token * nK + keyHead) * kHd;
-        device const float *kRow = kNorm + ((long)token * nK + keyHead) * kHd;
+        last_token = token;
+
+        // Register-level SIMD broadcast of K and Q vector chunks and scalar factors
+        device const float4 *qRow4 = (device const float4 *)(qNorm + ((long)token * nK + keyHead) * kHd);
+        device const float4 *kRow4 = (device const float4 *)(kNorm + ((long)token * nK + keyHead) * kHd);
+
+        float4 my_k = (simd_lane < (uint)nChunks) ? kRow4[simd_lane] : float4(0.0f);
+        float4 my_q = (simd_lane < (uint)nChunks) ? qRow4[simd_lane] : float4(0.0f);
+
+        float beta_0 = (simd_lane == 0) ? (1.0f / (1.0f + exp(-b[(long)token * nV + head]))) : 0.0f;
+        float decay_0 = (simd_lane == 0) ? exp(neg_exp_aLog * gdn_softplus(a[(long)token * nV + head] + head_dtBias)) : 0.0f;
+        float beta = simd_broadcast(beta_0, 0);
+        float decay = simd_broadcast(decay_0, 0);
+
         float readout = 0.0f;
         if (lane < (uint)vHd) {
-            float beta = 1.0f / (1.0f + exp(-b[(long)token * nV + head]));
-            float decay = exp(-exp(aLog[head]) * gdn_softplus(a[(long)token * nV + head] + dtBias[head]));
-            float kvmem = 0.0f;
-            for (int i = 0; i < 128; ++i) {
-                if (i < kHd) {
-                    float value = localState[i] * decay;
-                    localState[i] = value;
-                    kvmem += value * kRow[i];
+            float4 kvmem4 = float4(0.0f);
+            #pragma unroll
+            for (int i = 0; i < 16; ++i) {
+                if (i < nChunks) {
+                    float4 val = localState[i] * decay;
+                    localState[i] = val;
+                    float4 k_val = simd_broadcast(my_k, (uint16_t)i);
+                    kvmem4 += val * k_val;
                 }
             }
+            float kvmem = kvmem4.x + kvmem4.y + kvmem4.z + kvmem4.w;
             long valueIndex = (long)token * convDim + 2L * keyDim + (long)head * vHd + lane;
             float delta = (convOut[valueIndex] - kvmem) * beta;
-            for (int i = 0; i < 128; ++i) {
-                if (i < kHd) {
-                    float value = localState[i] + kRow[i] * delta;
-                    localState[i] = value;
-                    readout += value * qRow[i];
-                }
-            }
-            if (treeState != nullptr) {
-                for (int i = 0; i < 128; ++i) {
-                    if (i < kHd) {
-                        long tokOffset = (((long)token * nV + (long)head) * kHd + (long)i) * vHd + lane;
-                        treeState[tokOffset] = localState[i];
+            long tokOffset = (((long)token * nV + (long)head) * kHd) * vHd + lane;
+            float4 readout4 = float4(0.0f);
+            #pragma unroll
+            for (int i = 0; i < 16; ++i) {
+                if (i < nChunks) {
+                    float4 k_val = simd_broadcast(my_k, (uint16_t)i);
+                    float4 q_val = simd_broadcast(my_q, (uint16_t)i);
+                    float4 val = localState[i] + k_val * delta;
+                    localState[i] = val;
+                    readout4 += val * q_val;
+                    if (treeState != nullptr) {
+                        treeState[tokOffset + (long)(i * 4 + 0) * vHd] = val.x;
+                        treeState[tokOffset + (long)(i * 4 + 1) * vHd] = val.y;
+                        treeState[tokOffset + (long)(i * 4 + 2) * vHd] = val.z;
+                        treeState[tokOffset + (long)(i * 4 + 3) * vHd] = val.w;
                     }
                 }
             }
+            readout = readout4.x + readout4.y + readout4.z + readout4.w;
         }
-        squares[lane] = lane < (uint)vHd ? readout * readout : 0.0f;
+
+        float sq = (lane < (uint)vHd) ? readout * readout : 0.0f;
+        float simd_sq = simd_sum(sq);
+        if (simd_lane == 0) {
+            tg_sq[simd_id] = simd_sq;
+        }
         threadgroup_barrier(mem_flags::mem_threadgroup);
-        for (uint offset = lanes >> 1; offset > 0; offset >>= 1) {
-            if (lane < offset) squares[lane] += squares[lane + offset];
-            threadgroup_barrier(mem_flags::mem_threadgroup);
-        }
+
+        float total_sq = tg_sq[0] + ((lanes > 32) ? tg_sq[1] : 0.0f);
+
         if (lane < (uint)vHd) {
-            float inv = 1.0f / sqrt(squares[0] / (float)vHd + eps);
+            float inv = rsqrt(total_sq / (float)vHd + eps);
             long vd = (long)head * vHd + lane;
             core[(long)token * nV * vHd + vd] = norm[lane] * readout * inv * gdn_silu(z[(long)token * nV * vHd + vd]);
         }
-        threadgroup_barrier(mem_flags::mem_threadgroup);
     }
     if (lane < (uint)vHd) {
-        for (int i = 0; i < 128; ++i) {
-            if (i < kHd) state[((long)head * kHd + i) * vHd + lane] = localState[i];
+        for (int i = 0; i < nChunks; ++i) {
+            state[((long)head * kHd + i * 4 + 0) * vHd + lane] = localState[i].x;
+            state[((long)head * kHd + i * 4 + 1) * vHd + lane] = localState[i].y;
+            state[((long)head * kHd + i * 4 + 2) * vHd + lane] = localState[i].z;
+            state[((long)head * kHd + i * 4 + 3) * vHd + lane] = localState[i].w;
         }
     }
 }
@@ -347,36 +393,67 @@ kernel void sdpa_nax_tail_causal_tile(
     float m_prev = -INFINITY;
     float l_prev = 0.0f;
 
+    // Preload Q values for row m in registers (eliminating global Q memory reads inside tile/k loop)
+    float q_reg[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    uint q_idx = 0;
+    for (uint d = simd_lane; d < c.head_dim; d += 32) {
+        q_reg[q_idx++] = Q[m * c.head_dim + d];
+    }
+
     uint max_k_for_row = nax_max_causal_key(m, c);
     uint num_tiles = (c.total_kv + c.tile_n - 1) / c.tile_n;
 
     for (uint tile_idx = 0; tile_idx < num_tiles; ++tile_idx) {
         uint j_start = tile_idx * c.tile_n;
+        if (j_start > max_k_for_row) {
+            break; // Future tiles are strictly causal and cannot be attended
+        }
         uint j_end = min(j_start + c.tile_n, c.total_kv);
         uint tile_len = j_end - j_start;
 
         threadgroup_barrier(mem_flags::mem_threadgroup);
-        uint total_elements = tile_len * c.head_dim;
-        for (uint idx = tid; idx < total_elements; idx += tg_size) {
-            uint k_row = idx / c.head_dim;
-            uint k_col = idx % c.head_dim;
-            uint global_k_pos = j_start + k_row;
-            tg_mem.k_tile[k_row * c.head_dim + k_col] = K[global_k_pos * c.head_dim + k_col];
-            tg_mem.v_transposed[k_col * c.tile_n + k_row] = V[global_k_pos * c.head_dim + k_col];
+        if (c.head_dim == 64) {
+            device const float4* K4 = (device const float4*)(K + j_start * 64);
+            threadgroup float4* k_tile4 = (threadgroup float4*)tg_mem.k_tile;
+            uint total_f4 = tile_len * 16;
+            for (uint idx4 = tid; idx4 < total_f4; idx4 += tg_size) {
+                k_tile4[idx4] = K4[idx4];
+            }
+            device const float4* V4 = (device const float4*)(V + j_start * 64);
+            for (uint idx4 = tid; idx4 < total_f4; idx4 += tg_size) {
+                uint k_row = idx4 >> 4;
+                uint k_col4 = (idx4 & 15) << 2;
+                float4 v_val = V4[idx4];
+                tg_mem.v_transposed[(k_col4 + 0) * c.tile_n + k_row] = v_val.x;
+                tg_mem.v_transposed[(k_col4 + 1) * c.tile_n + k_row] = v_val.y;
+                tg_mem.v_transposed[(k_col4 + 2) * c.tile_n + k_row] = v_val.z;
+                tg_mem.v_transposed[(k_col4 + 3) * c.tile_n + k_row] = v_val.w;
+            }
+        } else {
+            uint total_elements = tile_len * c.head_dim;
+            for (uint idx = tid; idx < total_elements; idx += tg_size) {
+                uint k_row = idx / c.head_dim;
+                uint k_col = idx % c.head_dim;
+                uint global_k_pos = j_start + k_row;
+                tg_mem.k_tile[k_row * c.head_dim + k_col] = K[global_k_pos * c.head_dim + k_col];
+                tg_mem.v_transposed[k_col * c.tile_n + k_row] = V[global_k_pos * c.head_dim + k_col];
+            }
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
-
-        if (j_start > max_k_for_row) {
-            continue;
-        }
 
         for (uint k = 0; k < tile_len; ++k) {
             uint global_key_pos = j_start + k;
             float score = -INFINITY;
             if (nax_can_attend(m, global_key_pos, c)) {
                 float partial_qk = 0.0f;
-                for (uint d = simd_lane; d < c.head_dim; d += 32) {
-                    partial_qk += Q[m * c.head_dim + d] * tg_mem.k_tile[k * c.head_dim + d];
+                if (c.head_dim == 64) {
+                    partial_qk = q_reg[0] * tg_mem.k_tile[k * 64 + simd_lane] +
+                                 q_reg[1] * tg_mem.k_tile[k * 64 + simd_lane + 32];
+                } else {
+                    uint d_idx = 0;
+                    for (uint d = simd_lane; d < c.head_dim; d += 32) {
+                        partial_qk += q_reg[d_idx++] * tg_mem.k_tile[k * c.head_dim + d];
+                    }
                 }
                 score = simd_sum(partial_qk) * c.scale;
             }
@@ -386,11 +463,18 @@ kernel void sdpa_nax_tail_causal_tile(
             float p = (score == -INFINITY) ? 0.0f : exp(score - m_new);
             l_prev = alpha * l_prev + p;
 
-            uint d_idx = 0;
-            for (uint d = simd_lane; d < c.head_dim; d += 32) {
-                float v_val = tg_mem.v_transposed[d * c.tile_n + k];
-                acc[d_idx] = alpha * acc[d_idx] + p * v_val;
-                d_idx++;
+            if (c.head_dim == 64) {
+                float v_val0 = tg_mem.v_transposed[simd_lane * c.tile_n + k];
+                float v_val1 = tg_mem.v_transposed[(simd_lane + 32) * c.tile_n + k];
+                acc[0] = alpha * acc[0] + p * v_val0;
+                acc[1] = alpha * acc[1] + p * v_val1;
+            } else {
+                uint d_idx = 0;
+                for (uint d = simd_lane; d < c.head_dim; d += 32) {
+                    float v_val = tg_mem.v_transposed[d * c.tile_n + k];
+                    acc[d_idx] = alpha * acc[d_idx] + p * v_val;
+                    d_idx++;
+                }
             }
             m_prev = m_new;
         }
@@ -418,17 +502,86 @@ static int qwen35_init_pipelines(void) {
             NSLog(@"qwen35_decode: MSL compilation failed: %@", err);
             return 0;
         }
-        psoGDNConvWideM = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"gdn_conv_wide_m"] error:&err];
-        psoGDNQKNormWideM = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"gdn_qk_norm_wide_m"] error:&err];
-        psoGDNRecurrentWideM = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"gdn_recurrent_wide_m"] error:&err];
-        psoSDPATailCausalTile = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"sdpa_nax_tail_causal_tile"] error:&err];
-        if (!psoGDNConvWideM || !psoGDNQKNormWideM || !psoGDNRecurrentWideM || !psoSDPATailCausalTile) {
-            NSLog(@"qwen35_decode: pipeline creation failed: %@", err);
+        MTLComputePipelineDescriptor *desc = [[MTLComputePipelineDescriptor alloc] init];
+        desc.supportIndirectCommandBuffers = YES;
+
+        desc.computeFunction = [lib newFunctionWithName:@"gdn_conv_wide_m"];
+        psoGDNConvWideM = [gDev newComputePipelineStateWithDescriptor:desc options:0 reflection:nil error:&err];
+        if (!psoGDNConvWideM) {
+            NSLog(@"qwen35_decode: psoGDNConvWideM build failed: %@", err);
+            return 0;
+        }
+
+        desc.computeFunction = [lib newFunctionWithName:@"gdn_qk_norm_wide_m"];
+        psoGDNQKNormWideM = [gDev newComputePipelineStateWithDescriptor:desc options:0 reflection:nil error:&err];
+        if (!psoGDNQKNormWideM) {
+            NSLog(@"qwen35_decode: psoGDNQKNormWideM build failed: %@", err);
+            return 0;
+        }
+
+        desc.computeFunction = [lib newFunctionWithName:@"gdn_recurrent_wide_m"];
+        psoGDNRecurrentWideM = [gDev newComputePipelineStateWithDescriptor:desc options:0 reflection:nil error:&err];
+        if (!psoGDNRecurrentWideM) {
+            NSLog(@"qwen35_decode: psoGDNRecurrentWideM build failed: %@", err);
+            return 0;
+        }
+
+        desc.computeFunction = [lib newFunctionWithName:@"sdpa_nax_tail_causal_tile"];
+        psoSDPATailCausalTile = [gDev newComputePipelineStateWithDescriptor:desc options:0 reflection:nil error:&err];
+        if (!psoSDPATailCausalTile) {
+            NSLog(@"qwen35_decode: psoSDPATailCausalTile build failed: %@", err);
             return 0;
         }
         gQwen35PipelinesReady = 1;
         return 1;
     }
+}
+
+typedef struct {
+    id<MTLBuffer> mixedBuf;
+    id<MTLBuffer> zBuf;
+    id<MTLBuffer> bBuf;
+    id<MTLBuffer> aBuf;
+    id<MTLBuffer> convWBuf;
+    id<MTLBuffer> aLogBuf;
+    id<MTLBuffer> dtBiasBuf;
+    id<MTLBuffer> normBuf;
+    id<MTLBuffer> coreOutBuf;
+    id<MTLBuffer> parentsBuf;
+    id<MTLBuffer> treeStateBuf;
+    id<MTLBuffer> convOut;
+    id<MTLBuffer> qNorm;
+    id<MTLBuffer> kNorm;
+    id<MTLBuffer> qBuf;
+    id<MTLBuffer> kBuf;
+    id<MTLBuffer> vBuf;
+    id<MTLBuffer> outBuf;
+    id<MTLBuffer> lseBuf;
+    id<MTLBuffer> constBuf;
+    id<MTLBuffer> gemmX;
+    id<MTLBuffer> gemmY;
+    id<MTLIndirectCommandBuffer> icb;
+    int icbSlotCount;
+    int lastTokens;
+    int lastSdpaM;
+    int lastConvDim;
+    int lastNK;
+    int lastNV;
+    int lastKHd;
+    int lastVHd;
+    int lastConvKernel;
+    int lastGdnHandle;
+    id<MTLBuffer> lastEffectiveMixed;
+} WideMVerifyScratch;
+
+static WideMVerifyScratch gVerifyScratch;
+
+static id<MTLBuffer> verify_ensure_buffer(id<MTLBuffer> buf, size_t needed, MTLResourceOptions options) {
+    if (buf != nil && [buf length] >= needed) {
+        return buf;
+    }
+    size_t allocSize = needed < 262144 ? 262144 : (needed < 4194304 ? 4194304 : needed);
+    return [gDev newBufferWithLength:allocSize options:options];
 }
 
 // ==============================================================================
@@ -595,6 +748,7 @@ static int mg_qwen35_gdn_encode_into(
 
     // 3. Recurrent Delta Update
     int vThreads = vHd <= 32 ? 32 : (vHd <= 64 ? 64 : 128);
+    uint32_t parentMask = 0;
     [enc setComputePipelineState:psoGDNRecurrentWideM];
     [enc setBuffer:convOut offset:0 atIndex:0];
     [enc setBuffer:qNorm offset:0 atIndex:1];
@@ -616,6 +770,7 @@ static int mg_qwen35_gdn_encode_into(
     [enc setBytes:&eps length:sizeof(eps) atIndex:17];
     [enc setBuffer:activeParentsBuf offset:0 atIndex:18];
     [enc setBuffer:activeTreeStateBuf offset:0 atIndex:19];
+    [enc setBytes:&parentMask length:sizeof(parentMask) atIndex:20];
     [enc dispatchThreadgroups:MTLSizeMake((NSUInteger)nV, 1, 1)
         threadsPerThreadgroup:MTLSizeMake((NSUInteger)vThreads, 1, 1)];
     [enc endEncoding];
@@ -811,72 +966,81 @@ int mg_metal_wide_m_verify_step(
     }
 
     int tokens = draftLen;
-    int convDim = 2 * (nK * kHd) + (nV * vHd);
+    int keyDim = nK * kHd;
     int valueDim = nV * vHd;
+    int convDim = 2 * keyDim + valueDim;
+    size_t qBytes = (size_t)sdpaM * headDim * sizeof(float);
+    size_t kvBytes = (size_t)totalKV * headDim * sizeof(float);
+    size_t lseBytes = (size_t)sdpaM * sizeof(float);
+    size_t gemmYBytes = (size_t)tokens * convDim * sizeof(float);
 
     @autoreleasepool {
-        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
-        if (!cb) return 0;
-
-        // 1. Stage inputs
-        // A. Q4_K GEMM
-        id<MTLBuffer> gemmX = nil;
-        id<MTLBuffer> gemmY = nil;
-        size_t gemmYBytes = 0;
-        if (q4_wid >= 0 && draft_input && gemm_out) {
-            size_t inBytes = (size_t)tokens * convDim * sizeof(float);
-            gemmYBytes = (size_t)tokens * convDim * sizeof(float);
-            gemmX = [gDev newBufferWithBytes:draft_input length:inBytes options:MTLResourceStorageModeShared];
-            gemmY = [gDev newBufferWithLength:gemmYBytes options:MTLResourceStorageModeShared];
-            if (!gemmX || !gemmY) return 0;
-            if (!mg_q4k_gemv_wide_m_encode((__bridge void*)cb, q4_wid, (__bridge void*)gemmX, (__bridge void*)gemmY, tokens)) {
-                return 0;
+        // Ensure reusable persistent scratch buffers to eliminate host heap/VRAM allocation overhead
+        if (gVerifyScratch.mixedBuf == nil || [gVerifyScratch.mixedBuf length] < (size_t)tokens * convDim * sizeof(float) ||
+            [gVerifyScratch.treeStateBuf length] < (size_t)tokens * nV * kHd * vHd * sizeof(float)) {
+            @synchronized(gDev) {
+                if (q4_wid >= 0) {
+                    gVerifyScratch.gemmX = verify_ensure_buffer(gVerifyScratch.gemmX, (size_t)tokens * convDim * sizeof(float), MTLResourceStorageModeShared);
+                    gVerifyScratch.gemmY = verify_ensure_buffer(gVerifyScratch.gemmY, (size_t)tokens * convDim * sizeof(float), MTLResourceStorageModeShared);
+                }
+                gVerifyScratch.mixedBuf = verify_ensure_buffer(gVerifyScratch.mixedBuf, (size_t)tokens * convDim * sizeof(float), MTLResourceStorageModeShared);
+                gVerifyScratch.zBuf = verify_ensure_buffer(gVerifyScratch.zBuf, (size_t)tokens * valueDim * sizeof(float), MTLResourceStorageModeShared);
+                gVerifyScratch.bBuf = verify_ensure_buffer(gVerifyScratch.bBuf, (size_t)tokens * nV * sizeof(float), MTLResourceStorageModeShared);
+                gVerifyScratch.aBuf = verify_ensure_buffer(gVerifyScratch.aBuf, (size_t)tokens * nV * sizeof(float), MTLResourceStorageModeShared);
+                gVerifyScratch.convWBuf = verify_ensure_buffer(gVerifyScratch.convWBuf, (size_t)convDim * convKernel * sizeof(float), MTLResourceStorageModeShared);
+                gVerifyScratch.aLogBuf = verify_ensure_buffer(gVerifyScratch.aLogBuf, (size_t)nV * sizeof(float), MTLResourceStorageModeShared);
+                gVerifyScratch.dtBiasBuf = verify_ensure_buffer(gVerifyScratch.dtBiasBuf, (size_t)nV * sizeof(float), MTLResourceStorageModeShared);
+                gVerifyScratch.normBuf = verify_ensure_buffer(gVerifyScratch.normBuf, (size_t)vHd * sizeof(float), MTLResourceStorageModeShared);
+                gVerifyScratch.coreOutBuf = verify_ensure_buffer(gVerifyScratch.coreOutBuf, (size_t)tokens * valueDim * sizeof(float), MTLResourceStorageModeShared);
+                gVerifyScratch.parentsBuf = verify_ensure_buffer(gVerifyScratch.parentsBuf, (size_t)tokens * sizeof(int), MTLResourceStorageModeShared);
+                gVerifyScratch.treeStateBuf = verify_ensure_buffer(gVerifyScratch.treeStateBuf, (size_t)tokens * nV * kHd * vHd * sizeof(float), MTLResourceStorageModePrivate);
+                gVerifyScratch.convOut = verify_ensure_buffer(gVerifyScratch.convOut, (size_t)tokens * convDim * sizeof(float), MTLResourceStorageModePrivate);
+                gVerifyScratch.qNorm = verify_ensure_buffer(gVerifyScratch.qNorm, (size_t)tokens * keyDim * sizeof(float), MTLResourceStorageModePrivate);
+                gVerifyScratch.kNorm = verify_ensure_buffer(gVerifyScratch.kNorm, (size_t)tokens * keyDim * sizeof(float), MTLResourceStorageModePrivate);
+                gVerifyScratch.qBuf = verify_ensure_buffer(gVerifyScratch.qBuf, qBytes, MTLResourceStorageModeShared);
+                gVerifyScratch.kBuf = verify_ensure_buffer(gVerifyScratch.kBuf, kvBytes, MTLResourceStorageModeShared);
+                gVerifyScratch.vBuf = verify_ensure_buffer(gVerifyScratch.vBuf, kvBytes, MTLResourceStorageModeShared);
+                gVerifyScratch.outBuf = verify_ensure_buffer(gVerifyScratch.outBuf, qBytes, MTLResourceStorageModeShared);
+                gVerifyScratch.lseBuf = verify_ensure_buffer(gVerifyScratch.lseBuf, lseBytes, MTLResourceStorageModeShared);
+                gVerifyScratch.constBuf = verify_ensure_buffer(gVerifyScratch.constBuf, 4096, MTLResourceStorageModeShared);
             }
         }
 
-        // B. Recurrent GDN step
-        id<MTLBuffer> mixedBuf = gemmY ? gemmY : [gDev newBufferWithBytes:draft_input length:(size_t)tokens * convDim * sizeof(float) options:MTLResourceStorageModeShared];
-        id<MTLBuffer> zBuf = [gDev newBufferWithBytes:z length:(size_t)tokens * valueDim * sizeof(float) options:MTLResourceStorageModeShared];
-        id<MTLBuffer> bBuf = [gDev newBufferWithBytes:b length:(size_t)tokens * nV * sizeof(float) options:MTLResourceStorageModeShared];
-        id<MTLBuffer> aBuf = [gDev newBufferWithBytes:a length:(size_t)tokens * nV * sizeof(float) options:MTLResourceStorageModeShared];
-        id<MTLBuffer> convWBuf = [gDev newBufferWithBytes:convW length:(size_t)convDim * convKernel * sizeof(float) options:MTLResourceStorageModeShared];
-        id<MTLBuffer> aLogBuf = [gDev newBufferWithBytes:aLog length:(size_t)nV * sizeof(float) options:MTLResourceStorageModeShared];
-        id<MTLBuffer> dtBiasBuf = [gDev newBufferWithBytes:dtBias length:(size_t)nV * sizeof(float) options:MTLResourceStorageModeShared];
-        id<MTLBuffer> normBuf = [gDev newBufferWithBytes:norm length:(size_t)vHd * sizeof(float) options:MTLResourceStorageModeShared];
-        id<MTLBuffer> coreOutBuf = [gDev newBufferWithLength:(size_t)tokens * valueDim * sizeof(float) options:MTLResourceStorageModeShared];
-
-        if (!mixedBuf || !zBuf || !bBuf || !aBuf || !convWBuf || !aLogBuf || !dtBiasBuf || !normBuf || !coreOutBuf) {
+        if (!gVerifyScratch.mixedBuf || !gVerifyScratch.zBuf || !gVerifyScratch.bBuf || !gVerifyScratch.aBuf ||
+            !gVerifyScratch.convWBuf || !gVerifyScratch.aLogBuf || !gVerifyScratch.dtBiasBuf || !gVerifyScratch.normBuf ||
+            !gVerifyScratch.coreOutBuf || !gVerifyScratch.parentsBuf || !gVerifyScratch.treeStateBuf ||
+            !gVerifyScratch.convOut || !gVerifyScratch.qNorm || !gVerifyScratch.kNorm ||
+            !gVerifyScratch.qBuf || !gVerifyScratch.kBuf || !gVerifyScratch.vBuf ||
+            !gVerifyScratch.outBuf || !gVerifyScratch.lseBuf || !gVerifyScratch.constBuf) {
             return 0;
         }
 
-        id<MTLBuffer> parentsBuf = nil;
-        id<MTLBuffer> treeStateBuf = nil;
+        // Copy input slices into shared scratch buffers
+        if (q4_wid >= 0 && draft_input) {
+            memcpy([gVerifyScratch.gemmX contents], draft_input, (size_t)tokens * convDim * sizeof(float));
+        } else if (draft_input) {
+            memcpy([gVerifyScratch.mixedBuf contents], draft_input, (size_t)tokens * convDim * sizeof(float));
+        }
+        memcpy([gVerifyScratch.zBuf contents], z, (size_t)tokens * valueDim * sizeof(float));
+        memcpy([gVerifyScratch.bBuf contents], b, (size_t)tokens * nV * sizeof(float));
+        memcpy([gVerifyScratch.aBuf contents], a, (size_t)tokens * nV * sizeof(float));
+        memcpy([gVerifyScratch.convWBuf contents], convW, (size_t)convDim * convKernel * sizeof(float));
+        memcpy([gVerifyScratch.aLogBuf contents], aLog, (size_t)nV * sizeof(float));
+        memcpy([gVerifyScratch.dtBiasBuf contents], dtBias, (size_t)nV * sizeof(float));
+        memcpy([gVerifyScratch.normBuf contents], norm, (size_t)vHd * sizeof(float));
         if (parents != NULL) {
-            parentsBuf = [gDev newBufferWithBytes:parents length:(size_t)tokens * sizeof(int) options:MTLResourceStorageModeShared];
-            treeStateBuf = [gDev newBufferWithLength:(size_t)tokens * nV * kHd * vHd * sizeof(float) options:MTLResourceStorageModePrivate];
-            if (!parentsBuf || !treeStateBuf) return 0;
+            memcpy([gVerifyScratch.parentsBuf contents], parents, (size_t)tokens * sizeof(int));
+        } else {
+            int linearParents[32];
+            linearParents[0] = -1;
+            for (int i = 1; i < 32; ++i) linearParents[i] = i - 1;
+            memcpy([gVerifyScratch.parentsBuf contents], linearParents, (size_t)tokens * sizeof(int));
         }
+        memcpy([gVerifyScratch.qBuf contents], Q, qBytes);
+        memcpy([gVerifyScratch.kBuf contents], K, kvBytes);
+        memcpy([gVerifyScratch.vBuf contents], V, kvBytes);
 
-        if (!mg_qwen35_gdn_encode_into(cb, gdnState.conv, gdnState.recurrent, mixedBuf, zBuf, bBuf, aBuf,
-                                      convWBuf, aLogBuf, dtBiasBuf, normBuf, coreOutBuf,
-                                      tokens, nK, nV, kHd, vHd, convKernel, eps,
-                                      parentsBuf, treeStateBuf)) {
-            return 0;
-        }
-
-        // C. Tail-causal SDPA
-        size_t qBytes = (size_t)sdpaM * headDim * sizeof(float);
-        size_t kvBytes = (size_t)totalKV * headDim * sizeof(float);
-        size_t lseBytes = (size_t)sdpaM * sizeof(float);
-
-        id<MTLBuffer> qBuf = [gDev newBufferWithBytes:Q length:qBytes options:MTLResourceStorageModeShared];
-        id<MTLBuffer> kBuf = [gDev newBufferWithBytes:K length:kvBytes options:MTLResourceStorageModeShared];
-        id<MTLBuffer> vBuf = [gDev newBufferWithBytes:V length:kvBytes options:MTLResourceStorageModeShared];
-        id<MTLBuffer> outBuf = [gDev newBufferWithLength:qBytes options:MTLResourceStorageModeShared];
-        id<MTLBuffer> lseBuf = [gDev newBufferWithLength:lseBytes options:MTLResourceStorageModeShared];
-
-        if (!qBuf || !kBuf || !vBuf || !outBuf || !lseBuf) return 0;
-
+        // Populate constant buffer (256-byte aligned offsets for universal Apple Silicon compliance)
         SDPANAXConstants constants;
         memset(&constants, 0, sizeof(constants));
         constants.gqa_factor = (uint32_t)gqaFactor;
@@ -894,42 +1058,281 @@ int mg_metal_wide_m_verify_step(
             memcpy(constants.tree_mask, treeMask, copyCount * sizeof(uint32_t));
         }
 
-        id<MTLComputeCommandEncoder> sdpaEnc = [cb computeCommandEncoder];
-        if (!sdpaEnc) return 0;
+        uint8_t *cPtr = (uint8_t *)[gVerifyScratch.constBuf contents];
+        *((int *)(cPtr + 0)) = tokens;
+        *((int *)(cPtr + 256)) = convDim;
+        *((int *)(cPtr + 512)) = convKernel;
+        *((int *)(cPtr + 768)) = nK;
+        *((int *)(cPtr + 1024)) = nV;
+        *((int *)(cPtr + 1280)) = kHd;
+        *((int *)(cPtr + 1536)) = vHd;
+        *((float *)(cPtr + 1792)) = eps;
+        uint32_t parentMask = 0;
+        if (parents != NULL) {
+            for (int t = 0; t < tokens; ++t) {
+                if (parents[t] >= 0 && parents[t] < 32) {
+                    parentMask |= (1u << parents[t]);
+                }
+            }
+        }
+        *((uint32_t *)(cPtr + 1808)) = parentMask;
+        memcpy(cPtr + 2048, &constants, sizeof(constants));
 
-        uint sdpa_threads = 32;
-        uint sdpa_num_tgs = (uint)sdpaM;
+        id<MTLCommandBuffer> cb = [gQueue commandBufferWithUnretainedReferences];
+        if (!cb) cb = [gQueue commandBuffer];
+        if (!cb) return 0;
 
-        [sdpaEnc setComputePipelineState:psoSDPATailCausalTile];
-        [sdpaEnc setBuffer:qBuf offset:0 atIndex:0];
-        [sdpaEnc setBuffer:kBuf offset:0 atIndex:1];
-        [sdpaEnc setBuffer:vBuf offset:0 atIndex:2];
-        [sdpaEnc setBuffer:outBuf offset:0 atIndex:3];
-        [sdpaEnc setBuffer:lseBuf offset:0 atIndex:4];
-        [sdpaEnc setBytes:&constants length:sizeof(constants) atIndex:5];
-        [sdpaEnc setThreadgroupMemoryLength:sizeof(SDPANAXThreadgroupStorage) atIndex:0];
-        [sdpaEnc dispatchThreadgroups:MTLSizeMake((NSUInteger)sdpa_num_tgs, 1, 1)
-            threadsPerThreadgroup:MTLSizeMake((NSUInteger)sdpa_threads, 1, 1)];
-        [sdpaEnc endEncoding];
+        if (q4_wid >= 0) {
+            if (!mg_q4k_gemv_wide_m_encode((__bridge void*)cb, q4_wid, (__bridge void*)gVerifyScratch.gemmX, (__bridge void*)gVerifyScratch.gemmY, tokens)) {
+                return 0;
+            }
+        }
+        id<MTLBuffer> effectiveMixed = (q4_wid >= 0) ? gVerifyScratch.gemmY : gVerifyScratch.mixedBuf;
 
-        // Commit the single command buffer and wait once
+        // Check ICB readiness and support
+        int useICB = 0;
+        if (gVerifyScratch.icb == nil) {
+            @synchronized(gDev) {
+                if (gVerifyScratch.icb == nil) {
+                    MTLIndirectCommandBufferDescriptor *icbDesc = [[MTLIndirectCommandBufferDescriptor alloc] init];
+                    icbDesc.commandTypes = MTLIndirectCommandTypeConcurrentDispatch | MTLIndirectCommandTypeConcurrentDispatchThreads;
+                    icbDesc.inheritBuffers = NO;
+                    icbDesc.inheritPipelineState = NO;
+                    icbDesc.maxKernelBufferBindCount = 24;
+                    gVerifyScratch.icb = [gDev newIndirectCommandBufferWithDescriptor:icbDesc maxCommandCount:4 options:MTLResourceStorageModeShared];
+                }
+            }
+        }
+        if (gVerifyScratch.icb != nil && q4_wid < 0) {
+            useICB = 1;
+        }
+
+        int qThreads = kHd <= 32 ? 32 : (kHd <= 64 ? 64 : 128);
+        int vThreads = vHd <= 32 ? 32 : (vHd <= 64 ? 64 : 128);
+
+        if (useICB) {
+            int icbNeedsRecord = (gVerifyScratch.lastTokens != tokens ||
+                                  gVerifyScratch.lastSdpaM != sdpaM ||
+                                  gVerifyScratch.lastConvDim != convDim ||
+                                  gVerifyScratch.lastNK != nK ||
+                                  gVerifyScratch.lastNV != nV ||
+                                  gVerifyScratch.lastKHd != kHd ||
+                                  gVerifyScratch.lastVHd != vHd ||
+                                  gVerifyScratch.lastConvKernel != convKernel ||
+                                  gVerifyScratch.lastGdnHandle != gdn_handle ||
+                                  gVerifyScratch.lastEffectiveMixed != effectiveMixed);
+
+            if (icbNeedsRecord) {
+                int slot = 0;
+
+                // 1. SDPA Tail Causal Tile (dispatches concurrently with GDN pipeline - zero data hazard)
+                {
+                    id<MTLIndirectComputeCommand> cmd = [gVerifyScratch.icb indirectComputeCommandAtIndex:(NSUInteger)slot++];
+                    [cmd setComputePipelineState:psoSDPATailCausalTile];
+                    [cmd setKernelBuffer:gVerifyScratch.qBuf offset:0 atIndex:0];
+                    [cmd setKernelBuffer:gVerifyScratch.kBuf offset:0 atIndex:1];
+                    [cmd setKernelBuffer:gVerifyScratch.vBuf offset:0 atIndex:2];
+                    [cmd setKernelBuffer:gVerifyScratch.outBuf offset:0 atIndex:3];
+                    [cmd setKernelBuffer:gVerifyScratch.lseBuf offset:0 atIndex:4];
+                    [cmd setKernelBuffer:gVerifyScratch.constBuf offset:2048 atIndex:5];
+                    [cmd setThreadgroupMemoryLength:sizeof(SDPANAXThreadgroupStorage) atIndex:0];
+                    [cmd concurrentDispatchThreadgroups:MTLSizeMake((NSUInteger)sdpaM, 1, 1)
+                                  threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+                }
+
+                // 2. GDN Conv (executes concurrently with SDPA)
+                {
+                    id<MTLIndirectComputeCommand> cmd = [gVerifyScratch.icb indirectComputeCommandAtIndex:(NSUInteger)slot++];
+                    [cmd setComputePipelineState:psoGDNConvWideM];
+                    [cmd setKernelBuffer:effectiveMixed offset:0 atIndex:0];
+                    [cmd setKernelBuffer:gVerifyScratch.convWBuf offset:0 atIndex:1];
+                    [cmd setKernelBuffer:gdnState.conv offset:0 atIndex:2];
+                    [cmd setKernelBuffer:gVerifyScratch.convOut offset:0 atIndex:3];
+                    [cmd setKernelBuffer:gVerifyScratch.constBuf offset:0 atIndex:4];
+                    [cmd setKernelBuffer:gVerifyScratch.constBuf offset:256 atIndex:5];
+                    [cmd setKernelBuffer:gVerifyScratch.constBuf offset:512 atIndex:6];
+                    [cmd setKernelBuffer:gVerifyScratch.parentsBuf offset:0 atIndex:7];
+                    [cmd concurrentDispatchThreadgroups:MTLSizeMake(((NSUInteger)convDim + 255) / 256, 1, 1)
+                                  threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+                }
+
+                // 3. GDN QK Norm (barrier waits for Conv)
+                {
+                    id<MTLIndirectComputeCommand> cmd = [gVerifyScratch.icb indirectComputeCommandAtIndex:(NSUInteger)slot++];
+                    [cmd setBarrier];
+                    [cmd setComputePipelineState:psoGDNQKNormWideM];
+                    [cmd setKernelBuffer:gVerifyScratch.convOut offset:0 atIndex:0];
+                    [cmd setKernelBuffer:gVerifyScratch.qNorm offset:0 atIndex:1];
+                    [cmd setKernelBuffer:gVerifyScratch.kNorm offset:0 atIndex:2];
+                    [cmd setKernelBuffer:gVerifyScratch.constBuf offset:0 atIndex:3];
+                    [cmd setKernelBuffer:gVerifyScratch.constBuf offset:256 atIndex:4];
+                    [cmd setKernelBuffer:gVerifyScratch.constBuf offset:768 atIndex:5];
+                    [cmd setKernelBuffer:gVerifyScratch.constBuf offset:1280 atIndex:6];
+                    [cmd concurrentDispatchThreadgroups:MTLSizeMake((NSUInteger)nK, (NSUInteger)tokens, 1)
+                                  threadsPerThreadgroup:MTLSizeMake((NSUInteger)qThreads, 1, 1)];
+                }
+
+                // 4. GDN Recurrent (barrier waits for QK Norm)
+                {
+                    id<MTLIndirectComputeCommand> cmd = [gVerifyScratch.icb indirectComputeCommandAtIndex:(NSUInteger)slot++];
+                    [cmd setBarrier];
+                    [cmd setComputePipelineState:psoGDNRecurrentWideM];
+                    [cmd setKernelBuffer:gVerifyScratch.convOut offset:0 atIndex:0];
+                    [cmd setKernelBuffer:gVerifyScratch.qNorm offset:0 atIndex:1];
+                    [cmd setKernelBuffer:gVerifyScratch.kNorm offset:0 atIndex:2];
+                    [cmd setKernelBuffer:gVerifyScratch.zBuf offset:0 atIndex:3];
+                    [cmd setKernelBuffer:gVerifyScratch.bBuf offset:0 atIndex:4];
+                    [cmd setKernelBuffer:gVerifyScratch.aBuf offset:0 atIndex:5];
+                    [cmd setKernelBuffer:gVerifyScratch.aLogBuf offset:0 atIndex:6];
+                    [cmd setKernelBuffer:gVerifyScratch.dtBiasBuf offset:0 atIndex:7];
+                    [cmd setKernelBuffer:gVerifyScratch.normBuf offset:0 atIndex:8];
+                    [cmd setKernelBuffer:gdnState.recurrent offset:0 atIndex:9];
+                    [cmd setKernelBuffer:gVerifyScratch.coreOutBuf offset:0 atIndex:10];
+                    [cmd setKernelBuffer:gVerifyScratch.constBuf offset:0 atIndex:11];
+                    [cmd setKernelBuffer:gVerifyScratch.constBuf offset:256 atIndex:12];
+                    [cmd setKernelBuffer:gVerifyScratch.constBuf offset:768 atIndex:13];
+                    [cmd setKernelBuffer:gVerifyScratch.constBuf offset:1024 atIndex:14];
+                    [cmd setKernelBuffer:gVerifyScratch.constBuf offset:1280 atIndex:15];
+                    [cmd setKernelBuffer:gVerifyScratch.constBuf offset:1536 atIndex:16];
+                    [cmd setKernelBuffer:gVerifyScratch.constBuf offset:1792 atIndex:17];
+                    [cmd setKernelBuffer:gVerifyScratch.parentsBuf offset:0 atIndex:18];
+                    [cmd setKernelBuffer:gVerifyScratch.treeStateBuf offset:0 atIndex:19];
+                    [cmd setKernelBuffer:gVerifyScratch.constBuf offset:1808 atIndex:20];
+                    [cmd concurrentDispatchThreadgroups:MTLSizeMake((NSUInteger)nV, 1, 1)
+                                  threadsPerThreadgroup:MTLSizeMake((NSUInteger)vThreads, 1, 1)];
+                }
+
+                gVerifyScratch.icbSlotCount = slot;
+                gVerifyScratch.lastTokens = tokens;
+                gVerifyScratch.lastSdpaM = sdpaM;
+                gVerifyScratch.lastConvDim = convDim;
+                gVerifyScratch.lastNK = nK;
+                gVerifyScratch.lastNV = nV;
+                gVerifyScratch.lastKHd = kHd;
+                gVerifyScratch.lastVHd = vHd;
+                gVerifyScratch.lastConvKernel = convKernel;
+                gVerifyScratch.lastGdnHandle = gdn_handle;
+                gVerifyScratch.lastEffectiveMixed = effectiveMixed;
+            }
+
+            id<MTLResource> resList[22];
+            int rCount = 0;
+            resList[rCount++] = effectiveMixed;
+            resList[rCount++] = gVerifyScratch.convWBuf;
+            resList[rCount++] = gdnState.conv;
+            resList[rCount++] = gVerifyScratch.convOut;
+            resList[rCount++] = gVerifyScratch.constBuf;
+            resList[rCount++] = gVerifyScratch.parentsBuf;
+            resList[rCount++] = gVerifyScratch.qNorm;
+            resList[rCount++] = gVerifyScratch.kNorm;
+            resList[rCount++] = gVerifyScratch.zBuf;
+            resList[rCount++] = gVerifyScratch.bBuf;
+            resList[rCount++] = gVerifyScratch.aBuf;
+            resList[rCount++] = gVerifyScratch.aLogBuf;
+            resList[rCount++] = gVerifyScratch.dtBiasBuf;
+            resList[rCount++] = gVerifyScratch.normBuf;
+            resList[rCount++] = gdnState.recurrent;
+            resList[rCount++] = gVerifyScratch.coreOutBuf;
+            resList[rCount++] = gVerifyScratch.treeStateBuf;
+            resList[rCount++] = gVerifyScratch.qBuf;
+            resList[rCount++] = gVerifyScratch.kBuf;
+            resList[rCount++] = gVerifyScratch.vBuf;
+            resList[rCount++] = gVerifyScratch.outBuf;
+            resList[rCount++] = gVerifyScratch.lseBuf;
+
+            id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
+            if (!enc) return 0;
+            [enc useResources:resList count:(NSUInteger)rCount usage:MTLResourceUsageRead | MTLResourceUsageWrite];
+            [enc executeCommandsInBuffer:gVerifyScratch.icb withRange:NSMakeRange(0, (NSUInteger)gVerifyScratch.icbSlotCount)];
+            [enc endEncoding];
+        } else {
+            // Direct consolidated execution inside a single compute command encoder
+            id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
+            if (!enc) return 0;
+
+            // 1. Convolution
+            [enc setComputePipelineState:psoGDNConvWideM];
+            [enc setBuffer:effectiveMixed offset:0 atIndex:0];
+            [enc setBuffer:gVerifyScratch.convWBuf offset:0 atIndex:1];
+            [enc setBuffer:gdnState.conv offset:0 atIndex:2];
+            [enc setBuffer:gVerifyScratch.convOut offset:0 atIndex:3];
+            [enc setBytes:&tokens length:sizeof(tokens) atIndex:4];
+            [enc setBytes:&convDim length:sizeof(convDim) atIndex:5];
+            [enc setBytes:&convKernel length:sizeof(convKernel) atIndex:6];
+            [enc setBuffer:gVerifyScratch.parentsBuf offset:0 atIndex:7];
+            [enc dispatchThreads:MTLSizeMake((NSUInteger)convDim, 1, 1) threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+            [enc memoryBarrierWithScope:MTLBarrierScopeBuffers];
+
+            // 2. QK Normalization
+            [enc setComputePipelineState:psoGDNQKNormWideM];
+            [enc setBuffer:gVerifyScratch.convOut offset:0 atIndex:0];
+            [enc setBuffer:gVerifyScratch.qNorm offset:0 atIndex:1];
+            [enc setBuffer:gVerifyScratch.kNorm offset:0 atIndex:2];
+            [enc setBytes:&tokens length:sizeof(tokens) atIndex:3];
+            [enc setBytes:&convDim length:sizeof(convDim) atIndex:4];
+            [enc setBytes:&nK length:sizeof(nK) atIndex:5];
+            [enc setBytes:&kHd length:sizeof(kHd) atIndex:6];
+            [enc dispatchThreadgroups:MTLSizeMake((NSUInteger)nK, (NSUInteger)tokens, 1)
+                threadsPerThreadgroup:MTLSizeMake((NSUInteger)qThreads, 1, 1)];
+            [enc memoryBarrierWithScope:MTLBarrierScopeBuffers];
+
+            // 3. Recurrent Delta Update
+            [enc setComputePipelineState:psoGDNRecurrentWideM];
+            [enc setBuffer:gVerifyScratch.convOut offset:0 atIndex:0];
+            [enc setBuffer:gVerifyScratch.qNorm offset:0 atIndex:1];
+            [enc setBuffer:gVerifyScratch.kNorm offset:0 atIndex:2];
+            [enc setBuffer:gVerifyScratch.zBuf offset:0 atIndex:3];
+            [enc setBuffer:gVerifyScratch.bBuf offset:0 atIndex:4];
+            [enc setBuffer:gVerifyScratch.aBuf offset:0 atIndex:5];
+            [enc setBuffer:gVerifyScratch.aLogBuf offset:0 atIndex:6];
+            [enc setBuffer:gVerifyScratch.dtBiasBuf offset:0 atIndex:7];
+            [enc setBuffer:gVerifyScratch.normBuf offset:0 atIndex:8];
+            [enc setBuffer:gdnState.recurrent offset:0 atIndex:9];
+            [enc setBuffer:gVerifyScratch.coreOutBuf offset:0 atIndex:10];
+            [enc setBytes:&tokens length:sizeof(tokens) atIndex:11];
+            [enc setBytes:&convDim length:sizeof(convDim) atIndex:12];
+            [enc setBytes:&nK length:sizeof(nK) atIndex:13];
+            [enc setBytes:&nV length:sizeof(nV) atIndex:14];
+            [enc setBytes:&kHd length:sizeof(kHd) atIndex:15];
+            [enc setBytes:&vHd length:sizeof(vHd) atIndex:16];
+            [enc setBytes:&eps length:sizeof(eps) atIndex:17];
+            [enc setBuffer:gVerifyScratch.parentsBuf offset:0 atIndex:18];
+            [enc setBuffer:gVerifyScratch.treeStateBuf offset:0 atIndex:19];
+            [enc setBytes:&parentMask length:sizeof(parentMask) atIndex:20];
+            [enc dispatchThreadgroups:MTLSizeMake((NSUInteger)nV, 1, 1)
+                threadsPerThreadgroup:MTLSizeMake((NSUInteger)vThreads, 1, 1)];
+
+            // 4. Tail-causal SDPA (dispatches concurrently with GDN Recurrent - zero data hazard)
+            [enc setComputePipelineState:psoSDPATailCausalTile];
+            [enc setBuffer:gVerifyScratch.qBuf offset:0 atIndex:0];
+            [enc setBuffer:gVerifyScratch.kBuf offset:0 atIndex:1];
+            [enc setBuffer:gVerifyScratch.vBuf offset:0 atIndex:2];
+            [enc setBuffer:gVerifyScratch.outBuf offset:0 atIndex:3];
+            [enc setBuffer:gVerifyScratch.lseBuf offset:0 atIndex:4];
+            [enc setBytes:&constants length:sizeof(constants) atIndex:5];
+            [enc setThreadgroupMemoryLength:sizeof(SDPANAXThreadgroupStorage) atIndex:0];
+            [enc dispatchThreadgroups:MTLSizeMake((NSUInteger)sdpaM, 1, 1)
+                threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+            [enc endEncoding];
+        }
+
         [cb commit];
         [cb waitUntilCompleted];
         if (cb.status != MTLCommandBufferStatusCompleted) return 0;
 
-        // Copy readbacks
-        if (gemm_out && gemmY) {
-            memcpy(gemm_out, [gemmY contents], gemmYBytes);
+        // Copy readbacks into caller-provided destination buffers
+        if (gemm_out && q4_wid >= 0) {
+            memcpy(gemm_out, [gVerifyScratch.gemmY contents], gemmYBytes);
         }
         if (gdn_core_out) {
-            memcpy(gdn_core_out, [coreOutBuf contents], (size_t)tokens * valueDim * sizeof(float));
+            memcpy(gdn_core_out, [gVerifyScratch.coreOutBuf contents], (size_t)tokens * valueDim * sizeof(float));
         }
         if (sdpa_out) {
-            memcpy(sdpa_out, [outBuf contents], qBytes);
+            memcpy(sdpa_out, [gVerifyScratch.outBuf contents], qBytes);
         }
         if (lse_out) {
-            memcpy(lse_out, [lseBuf contents], lseBytes);
+            memcpy(lse_out, [gVerifyScratch.lseBuf contents], lseBytes);
         }
-        return 1;
+        return useICB ? 2 : 1;
     }
 }

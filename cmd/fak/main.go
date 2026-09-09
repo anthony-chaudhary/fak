@@ -276,6 +276,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		cmdCodex(args)
 	case "opencode":
 		cmdOpencode(args)
+	case "claude":
+		cmdClaude(args)
 	case "codex-mcp-health":
 		cmdCodexMCPHealth(args)
 	case "loop":
@@ -1162,6 +1164,8 @@ func cmdBench(argv []string) {
 			os.Exit(runBenchTB4(os.Stdout, os.Stderr, argv[1:]))
 		case "effort":
 			os.Exit(runBenchEffort(os.Stdout, os.Stderr, argv[1:]))
+		case "subagent":
+			os.Exit(runBenchSubagent(os.Stdout, os.Stderr, argv[1:]))
 		}
 	}
 	fs := flag.NewFlagSet("bench", flag.ExitOnError)

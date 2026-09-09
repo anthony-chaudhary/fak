@@ -133,6 +133,7 @@ type TreeTopology struct {
 	BranchingFactor int      // Max branching factor per node
 	Parents         []int    // Parent pointer for each candidate node (-1 for root/prefix)
 	Mask            []uint32 // Compact 2D causal ancestor bitmask: bit k is set if query node q attends key node k
+	cParents        []C.int  // Cached C.int representation to eliminate heap allocation on hot verification path
 }
 
 // NewTreeTopology creates and validates a TreeTopology.
@@ -166,11 +167,16 @@ func NewTreeTopology(depth, branchingFactor int, parents []int, mask []uint32) (
 	if branchingFactor <= 0 {
 		branchingFactor = computeBranchingFactor(parents)
 	}
+	cParents := make([]C.int, len(parents))
+	for i, p := range parents {
+		cParents[i] = C.int(p)
+	}
 	return TreeTopology{
 		Depth:           depth,
 		BranchingFactor: branchingFactor,
 		Parents:         append([]int(nil), parents...),
 		Mask:            append([]uint32(nil), derivedMask...),
+		cParents:        cParents,
 	}, nil
 }
 
@@ -1347,6 +1353,7 @@ type WideMSpeculativeVerificationResult struct {
 	SDPALSE      []float32
 	SingleBuffer bool
 	Committed    bool
+	ICBUsed      bool
 }
 
 // RunMetalWideMSpeculativeVerificationInto executes the complete verification pipeline into
@@ -1418,7 +1425,9 @@ func RunMetalWideMSpeculativeVerificationInto(
 			hasTreeMask = 1
 			treeMaskPtr = (*C.uint32_t)(unsafe.Pointer(&tree.Mask[0]))
 		}
-		if len(tree.Parents) > 0 {
+		if len(tree.cParents) == len(tree.Parents) && len(tree.cParents) > 0 {
+			parentsPtr = &tree.cParents[0]
+		} else if len(tree.Parents) > 0 {
 			cParents = make([]C.int, len(tree.Parents))
 			for i, p := range tree.Parents {
 				cParents[i] = C.int(p)
@@ -1474,6 +1483,7 @@ func RunMetalWideMSpeculativeVerificationInto(
 		SDPALSE:      sdpaLSE,
 		SingleBuffer: true,
 		Committed:    true,
+		ICBUsed:      ret == 2,
 	}, nil
 }
 

@@ -21,6 +21,9 @@ import (
 func cmdMacBench(argv []string) { os.Exit(runMacBench(os.Stdout, os.Stderr, argv)) }
 
 func runMacBench(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && (argv[0] == "load-drive" || argv[0] == "load-driver") {
+		return runMacBenchLoadDrive(stdout, stderr, argv[1:])
+	}
 	if len(argv) > 0 && argv[0] == "validate-comparison" {
 		return runMacBenchValidateComparison(stdout, stderr, argv[1:])
 	}
@@ -446,6 +449,116 @@ func runMacBenchRunAgenticMTP(stdout, stderr io.Writer, argv []string) int {
 	}
 	_ = raw
 	_ = quality
+	return 0
+}
+
+func runMacBenchLoadDrive(stdout, stderr io.Writer, argv []string) int {
+	def := macbench.DefaultLoadDriverOptions()
+	fs := flag.NewFlagSet("macbench load-drive", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	gateway := fs.String("gateway", envOrDefault("FAK_MAC_GATEWAY", def.Gateway), "fak serve gateway on the Mac; defaults to loopback")
+	model := fs.String("model", envOrDefault("FAK_MAC_MODEL", def.Model), "model id served by the Mac gateway")
+	keyEnv := fs.String("gateway-key-env", "FAK_GATEWAY_KEY", "env var holding the gateway bearer")
+	keyFile := fs.String("gateway-key-file", "~/.fak-gateway-key", "file holding the gateway bearer when the env var is empty; empty disables file lookup")
+	fetchKey := fs.Bool("fetch-key", true, "when env/file key lookup is empty for a remote gateway, fetch ~/.fak-gateway-key from the Mac over ssh")
+	sshHost := fs.String("ssh-host", envOrDefault("FAK_MAC_SSH_HOST", defaultClaudeMacSSHHost), "ssh host used by --fetch-key")
+	sshKey := fs.String("ssh-key", defaultClaudeMacSSHKey(), "ssh identity used by --fetch-key; empty uses ssh defaults")
+	concurrency := fs.Int("concurrency", def.Concurrency, "number of concurrent client streams (default 24)")
+	duration := fs.Duration("duration", 0, "load duration (e.g. 10s); 0 runs 1 turn per agent")
+	targetToks := fs.Int("target-toks", def.TargetTokens, "target output tokens requested per stream/turn")
+	targetTokens := fs.Int("target-tokens", 0, "alias for --target-toks")
+	sharedPrefix := fs.Int("shared-prefix-tokens", def.SharedPrefixTokens, "shared prefix tokens in preamble")
+	turnDelta := fs.Int("turn-delta-tokens", def.TurnDeltaTokens, "input tokens per turn")
+	horizon := fs.Int("horizon", def.Horizon, "number of interaction turns per agent when duration is 0")
+	draftDepth := fs.Int("draft-depth", def.DraftDepth, "speculative MTP draft depth (3 or 4)")
+	outDir := fs.String("out-dir", "", "output directory for packet and evidence files")
+	dryRun := fs.Bool("dry-run", false, "dry run without generating HTTP requests")
+	asJSON := fs.Bool("json", false, "emit machine-readable JSON output")
+	timeout := fs.Duration("timeout", 15*time.Minute, "overall load drive timeout")
+
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+
+	target := *targetToks
+	if *targetTokens > 0 {
+		target = *targetTokens
+	}
+
+	if *concurrency <= 0 {
+		fmt.Fprintf(stderr, "fak macbench load-drive: --concurrency must be positive, got %d\n", *concurrency)
+		return 2
+	}
+
+	if *dryRun {
+		plan := struct {
+			Action       string `json:"action"`
+			Concurrency  int    `json:"concurrency"`
+			Duration     string `json:"duration"`
+			TargetTokens int    `json:"target_tokens"`
+			Status       string `json:"status"`
+		}{
+			Action:       "load-drive",
+			Concurrency:  *concurrency,
+			Duration:     duration.String(),
+			TargetTokens: target,
+			Status:       "DRY_RUN_PLAN_VALID",
+		}
+		if *asJSON {
+			_ = writeIndentedJSONNoEscape(stdout, plan)
+		} else {
+			fmt.Fprintf(stdout, "DRY_RUN_PLAN_VALID concurrency=%d duration=%s target_tokens=%d\n", *concurrency, *duration, target)
+		}
+		return 0
+	}
+
+	key, err := resolveMacBenchKeyForRun(*keyEnv, *keyFile, *fetchKey, *sshHost, *sshKey, *gateway, macbench.SuiteHealth)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak macbench load-drive: %v\n", err)
+		return 2
+	}
+
+	opts := macbench.LoadDriverOptions{
+		Gateway:            *gateway,
+		Model:              *model,
+		Key:                key,
+		Concurrency:        *concurrency,
+		Duration:           *duration,
+		TargetTokens:       target,
+		SharedPrefixTokens: *sharedPrefix,
+		TurnDeltaTokens:    *turnDelta,
+		Horizon:            *horizon,
+		DraftDepth:         *draftDepth,
+		OutDir:             *outDir,
+		Now:                time.Now,
+	}
+
+	ctxTimeout := *timeout
+	if *duration > 0 && *duration+time.Minute > ctxTimeout {
+		ctxTimeout = *duration + time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), ctxTimeout)
+	defer cancel()
+
+	driver := macbench.NewLoadDriver(opts)
+	result, err := driver.Run(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak macbench load-drive: %v\n", err)
+		return 1
+	}
+
+	if *asJSON {
+		_ = writeIndentedJSONNoEscape(stdout, result.AgenticMTPPacket)
+	} else {
+		fmt.Fprintf(stdout, "COMPLETED load-drive concurrency=%d aggregate_decode=%.2f tok/s per_agent=%.2f tok/s p50_ttft=%.2fms p95_ttft=%.2fms p50_itl=%.2fms p95_itl=%.2fms\n",
+			result.Summary.Concurrency, result.Summary.AggregateDecodeTokS, result.Summary.PerAgentDecodeTokS,
+			result.Metrics.Prefill.TTFTMS.P50, result.Metrics.Prefill.TTFTMS.P95,
+			result.Summary.P50ITLMS, result.Summary.P95ITLMS)
+		if *outDir != "" {
+			fmt.Fprintf(stdout, "Artifacts written to %s (packet.json, %s, %s, manifest.json)\n",
+				*outDir, result.RawResult.Path, result.Quality.ResultPath)
+		}
+	}
 	return 0
 }
 

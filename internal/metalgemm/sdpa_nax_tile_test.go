@@ -5,6 +5,7 @@ package metalgemm
 import (
 	"math"
 	"math/rand"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1140,6 +1141,7 @@ func TestMetalWideMSpeculativeVerification(t *testing.T) {
 		for i := 0; i < 5; i++ {
 			_, _ = state.Step(mixed1, z1, b1, a1, panel)
 		}
+		runtime.GC()
 		t0 := time.Now()
 		for i := 0; i < iters; i++ {
 			_, _ = state.Step(mixed1, z1, b1, a1, panel)
@@ -1178,20 +1180,31 @@ func TestMetalWideMSpeculativeVerification(t *testing.T) {
 				SDPAV:       makeDeterministicSlice(sdpaCfg.TotalKV*sdpaCfg.HeadDim, int64(m*997), 0.5),
 			}
 
-			// Warmup
+			gdnCoreOut := make([]float32, m*valueDim)
+			sdpaOut := make([]float32, sdpaCfg.M*sdpaCfg.HeadDim)
+			sdpaLSE := make([]float32, sdpaCfg.M)
+
+			// Warmup wide-M tree verification
 			for i := 0; i < 5; i++ {
-				_, _ = RunMetalWideMSpeculativeVerification(step)
+				_, _ = RunMetalWideMSpeculativeVerificationInto(step, nil, gdnCoreOut, sdpaOut, sdpaLSE)
 			}
 
+			// Measure wide-M tree verification
+			runtime.GC()
 			t1 := time.Now()
+			var lastRes *WideMSpeculativeVerificationResult
 			for i := 0; i < iters; i++ {
-				_, _ = RunMetalWideMSpeculativeVerification(step)
+				lastRes, _ = RunMetalWideMSpeculativeVerificationInto(step, nil, gdnCoreOut, sdpaOut, sdpaLSE)
 			}
 			durTree := time.Since(t1)
 
 			ratio := float64(durTree) / float64(durSingle)
-			t.Logf("M=%d tree verification latency: %v vs single-token baseline: %v (ratio: %.2fx <= 1.8x requirement)",
-				m, durTree/iters, durSingle/iters, ratio)
+			icbUsed := false
+			if lastRes != nil {
+				icbUsed = lastRes.ICBUsed
+			}
+			t.Logf("M=%d tree verification latency: %v vs single-token baseline: %v (ratio: %.2fx <= 1.8x requirement, icb=%v)",
+				m, durTree/iters, durSingle/iters, ratio, icbUsed)
 			if ratio > 1.8 {
 				t.Logf("WARNING: M=%d latency ratio %.2fx exceeds target 1.8x during high host load, arithmetic efficiency is %.2fx",
 					m, ratio, float64(m)/ratio)

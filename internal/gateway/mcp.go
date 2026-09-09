@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -75,8 +76,23 @@ type rpcError struct {
 // session continues — one bad frame never tears down the loop.
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
 	br := bufio.NewReader(in)
+	var encMu sync.Mutex
 	enc := json.NewEncoder(out)
 	enc.SetEscapeHTML(false)
+
+	peerID := fmt.Sprintf("stdio-%d", time.Now().UnixNano())
+	unreg := s.RegisterMCPNotificationSink(peerID, func(method string, params any) {
+		encMu.Lock()
+		defer encMu.Unlock()
+		_ = enc.Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"method":  method,
+			"params":  params,
+		})
+	})
+	defer unreg()
+	ctx = withMCPPeer(ctx, peerID)
+
 	// The MCP-over-stdio loop is ready to serve frames; close the boot timeline.
 	s.MarkReady()
 	for {
@@ -93,15 +109,20 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 			return err
 		}
 		if tooLong {
+			encMu.Lock()
 			_ = enc.Encode(&rpcResponse{JSONRPC: "2.0",
 				Error: &rpcError{Code: rpcInvalidRequest, Message: "frame exceeds maximum size"}})
+			encMu.Unlock()
 			continue
 		}
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
 		if resp := s.dispatchRPC(ctx, line); resp != nil {
-			if err := enc.Encode(resp); err != nil {
+			encMu.Lock()
+			err := enc.Encode(resp)
+			encMu.Unlock()
+			if err != nil {
 				return err
 			}
 		}
@@ -220,6 +241,10 @@ func (s *Server) handleMethod(ctx context.Context, method string, params json.Ra
 		return mcpCacheHint(map[string]any{"resourceTemplates": s.resourceTemplateDescriptors()}, mcpCatalogTTLMillis, mcpCacheScopePublic), nil
 	case "resources/read":
 		return s.readResource(params)
+	case "resources/subscribe":
+		return s.handleResourceSubscribe(ctx, params)
+	case "resources/unsubscribe":
+		return s.handleResourceUnsubscribe(ctx, params)
 	case "prompts/list":
 		return mcpCacheHint(map[string]any{"prompts": promptDescriptors()}, mcpCatalogTTLMillis, mcpCacheScopePublic), nil
 	case "prompts/get":
@@ -293,9 +318,12 @@ func (s *Server) initializeResult(params json.RawMessage) map[string]any {
 		// compliant client knows it may call resources/* and prompts/* (#213),
 		// not just tools/* — an unadvertised capability is one a client won't probe.
 		"capabilities": map[string]any{
-			"tools":     map[string]any{},
-			"resources": map[string]any{},
-			"prompts":   map[string]any{},
+			"tools": map[string]any{},
+			"resources": map[string]any{
+				"subscribe":   true,
+				"listChanged": true,
+			},
+			"prompts": map[string]any{},
 		},
 		"serverInfo": map[string]any{"name": "fak-gateway", "version": s.version},
 	}
