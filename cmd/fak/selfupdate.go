@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/anthony-chaudhary/fak/internal/selfupdate"
 	selfupdatecmd "github.com/anthony-chaudhary/fak/internal/selfupdate/cmd"
 )
 
@@ -25,9 +26,9 @@ func cmdSelf(argv []string) {
 	os.Exit(2)
 }
 
-type selfUpdateReceipt = selfupdatecmd.Receipt
-type selfUpdateReceiptTarget = selfupdatecmd.ReceiptTarget
+type selfUpdateReceipt = selfupdate.Receipt
+type selfUpdateReceiptTarget = selfupdate.ReceiptTarget
 
-const selfUpdateReceiptSchema = selfupdatecmd.ReceiptSchema
+const selfUpdateReceiptSchema = selfupdate.ReceiptSchema
 
 func repoRevOf(root, ref string) string { return selfupdatecmd.RepoRevOf(root, ref) }
