@@ -28,6 +28,8 @@ import (
 // ProductionExecutor binds Runner to the real fak-native GGUF and Metal paths.
 type ProductionExecutor struct{}
 
+func (ProductionExecutor) Memory() (MemorySnapshot, error) { return observeMemory() }
+
 func (ProductionExecutor) Preflight(_ context.Context, cfg Config) (Preflight, error) {
 	ws, err := ggufload.OpenWeights(cfg.ArtifactPath)
 	if err != nil {
