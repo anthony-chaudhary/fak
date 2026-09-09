@@ -11,6 +11,7 @@ import "C"
 import (
 	"fmt"
 	"math"
+	"os"
 	"unsafe"
 )
 
@@ -352,6 +353,107 @@ func (v *vulkanBackend) qwen35VulkanSequenceReleaseLocked(start int, keep ...Ten
 	v.transient = retained
 }
 
+// qwen35SequenceKVGeometricCapacity computes the capacity for a sequence KV cache vslice under a guarded
+// geometric growth policy. When currentCap is insufficient for need, it geometrically doubles currentCap
+// (borrowed from growAppend: cap*2) with integer overflow and single-resource physical device ceiling guards.
+func (v *vulkanBackend) qwen35SequenceKVGeometricCapacity(currentCap, need int) int {
+	if currentCap >= need {
+		return currentCap
+	}
+	if currentCap <= 0 {
+		return need
+	}
+	// Check for explicit exact-reserve ablation override.
+	if os.Getenv("FAK_QWEN35_SEQUENCE_KV_EXACT") == "1" {
+		return need
+	}
+	// Geometric doubling (borrowed from growAppend: cap*2).
+	ncap := need
+	if currentCap <= (math.MaxInt-1)/2 {
+		ncap = currentCap * 2
+	} else {
+		ncap = math.MaxInt
+	}
+	if ncap < need {
+		ncap = need
+	}
+	// Guard against byte-count integer overflow (ncap * 4).
+	const maxFloats = math.MaxInt / 4
+	if ncap > maxFloats {
+		if need <= maxFloats {
+			ncap = maxFloats
+		} else {
+			ncap = need
+		}
+	}
+	// Single-resource buffer ceiling guard from physical device.
+	if v != nil && v.maxBufferBytes > 0 {
+		maxBufFloats := int(v.maxBufferBytes / 4)
+		if maxBufFloats > 0 && ncap > maxBufFloats {
+			if need <= maxBufFloats {
+				ncap = maxBufFloats
+			} else {
+				ncap = need
+			}
+		}
+	}
+	return ncap
+}
+
+// qwen35SequenceReserveGeometric reserves capacity for a single KV cache vslice using guarded geometric
+// growth. It preserves cache.len (the number of valid populated floats), allocates the geometric capacity
+// via dallocKVFor, copies existing data via C.fvk_d2d, frees the old buffer, and updates cache.ptr and cache.cap.
+func (v *vulkanBackend) qwen35SequenceReserveGeometric(cache *vslice, need int, what string) {
+	if cache.cap >= need {
+		return
+	}
+	ncap := v.qwen35SequenceKVGeometricCapacity(cache.cap, need)
+	b := v.dallocKVFor(ncap*4, what)
+	if cache.len > 0 {
+		C.fvk_d2d(b.ptr, cache.ptr, C.size_t(cache.len*4))
+	}
+	if cache.ptr != nil {
+		C.fvk_free(cache.ptr)
+	}
+	cache.ptr, cache.cap = b.ptr, ncap
+}
+
+// qwen35SequenceUploadKVFloatsForTest copies host float32s into a cache vslice at float offset offsetFloats.
+func (v *vulkanBackend) qwen35SequenceUploadKVFloatsForTest(cache *vslice, offsetFloats int, data []float32) {
+	if cache == nil || cache.ptr == nil || len(data) == 0 {
+		return
+	}
+	src := v.Upload(NewF32(Default(), []int{len(data)}, data), F32)
+	defer v.Free(src)
+	C.fvk_d2d_off(cache.ptr, C.size_t(offsetFloats*4), v.vp(src), C.size_t(len(data)*4))
+}
+
+// qwen35SequenceReadKVFloatsForTest reads back countFloats float32s from a cache vslice at float offset 0.
+func (v *vulkanBackend) qwen35SequenceReadKVFloatsForTest(cache *vslice, countFloats int) []float32 {
+	if cache == nil || cache.ptr == nil || countFloats <= 0 {
+		return nil
+	}
+	dst, _ := v.devTr([]int{countFloats}, F32)
+	defer v.Free(dst)
+	C.fvk_d2d(v.vp(dst), cache.ptr, C.size_t(countFloats*4))
+	return v.Read(dst)
+}
+
+// qwen35SequenceCausalAttentionForTest dispatches fvk_qwen35_causal_attention_panel_f32 on device pointers.
+func (v *vulkanBackend) qwen35SequenceCausalAttentionForTest(qrPtr, kPtr, vPtr, outPtr unsafe.Pointer, tokens, prefix, nH, nKV, hd int, scale float32) int {
+	return int(C.fvk_qwen35_causal_attention_panel_f32(qrPtr, kPtr, vPtr, outPtr, C.int(tokens), C.int(prefix), C.int(nH), C.int(nKV), C.int(hd), C.float(scale)))
+}
+
+// qwen35SequenceFreeVsliceForTest releases device memory associated with a vslice.
+func (v *vulkanBackend) qwen35SequenceFreeVsliceForTest(cache *vslice) {
+	if cache != nil && cache.ptr != nil {
+		C.fvk_free(cache.ptr)
+		cache.ptr = nil
+		cache.cap = 0
+		cache.len = 0
+	}
+}
+
 // Qwen35SequencePrefill runs the prompt layer-major. Dense projections and full
 // attention process token panels; recurrent GDN dependencies remain inside the
 // device kernel. Each layer fence bounds scratch lifetime independently of depth.
@@ -420,17 +522,7 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 	need := (req.StartPos + tokens) * kvWidth
 	for i := 0; i < len(req.Layers)/4; i++ {
 		for _, cache := range []*vslice{&kv.Kraw[i], &kv.K[i], &kv.V[i]} {
-			if cache.cap >= need {
-				continue
-			}
-			b := v.dallocKVFor(need*4, "Qwen sequence KV reservation")
-			if cache.len > 0 {
-				C.fvk_d2d(b.ptr, cache.ptr, C.size_t(cache.len*4))
-			}
-			if cache.ptr != nil {
-				C.fvk_free(cache.ptr)
-			}
-			cache.ptr, cache.cap = b.ptr, need
+			v.qwen35SequenceReserveGeometric(cache, need, "Qwen sequence KV reservation")
 		}
 	}
 	h2dStart, d2hStart := uint64(C.fvk_h2d_bytes()), uint64(C.fvk_d2h_bytes())
