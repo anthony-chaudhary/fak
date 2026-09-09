@@ -414,3 +414,89 @@ func TestDeviceSnapshotLookupFallsBackToNearestExactAncestor(t *testing.T) {
 	}
 	got.Close()
 }
+
+func TestTree_EvictionHaltWhenSharedCapacitySufficient(t *testing.T) {
+	tree := New(50)
+
+	// Insert 5 sequences totaling 100 tokens (each 20 tokens). Hold leases
+	// during insertion so none are evicted while populating the tree.
+	leaves := make([]*node, 5)
+	seqs := make([][]int, 5)
+	for i := 0; i < 5; i++ {
+		seqs[i] = distinctReq(i, 20)
+		_, leaves[i] = servePure(tree, seqs[i])
+	}
+	if tree.tokens != 100 {
+		t.Fatalf("expected 100 tokens initially, got %d", tree.tokens)
+	}
+
+	// Release leases so all leaves become eviction candidates.
+	for _, l := range leaves {
+		tree.Done(l)
+	}
+
+	// Configure an EvictionHaltPredicate that returns true after 1 eviction,
+	// simulating shared headroom becoming sufficient.
+	initialEvictions := tree.evictions
+	tree.SetEvictionHaltPredicate(func() bool {
+		return tree.evictions > initialEvictions
+	})
+
+	// Trigger eviction.
+	tree.evictToBudget()
+
+	// Verify eviction halted early (tokens still > budget: 100 - 20 = 80 > 50).
+	if tree.tokens <= 50 {
+		t.Fatalf("expected tree.tokens > 50 after early halt, got %d", tree.tokens)
+	}
+	if tree.tokens != 80 {
+		t.Fatalf("expected tree.tokens == 80, got %d", tree.tokens)
+	}
+
+	// Verify t.EvictionHaltSufficientCapacity() == 1.
+	if got := tree.EvictionHaltSufficientCapacity(); got != 1 {
+		t.Fatalf("expected EvictionHaltSufficientCapacity == 1, got %d", got)
+	}
+
+	// Verify warm nodes that would otherwise have been evicted remain accessible.
+	// seqs[0] was evicted (LRU), but seqs[1], seqs[2], seqs[3], seqs[4] remain.
+	// Under a strict 50-token budget without halt, seqs[1] and seqs[2] would also have been evicted.
+	if m := tree.MatchLen(seqs[0]); m != 0 {
+		t.Errorf("seqs[0] should have been evicted, matched %d", m)
+	}
+	for i := 1; i < 5; i++ {
+		if m := tree.MatchLen(seqs[i]); m != len(seqs[i]) {
+			t.Errorf("warm node seqs[%d] should remain accessible, matched %d/%d", i, m, len(seqs[i]))
+		}
+	}
+
+	// Verify normal eviction without predicate still evicts down to budget.
+	tree.SetEvictionHaltPredicate(nil)
+	tree.evictToBudget()
+
+	if tree.tokens > 50 {
+		t.Fatalf("expected tree.tokens <= 50 after normal eviction, got %d", tree.tokens)
+	}
+	if tree.tokens != 40 {
+		t.Fatalf("expected tree.tokens == 40 (2 remaining 20-token sequences), got %d", tree.tokens)
+	}
+
+	// Halt counter remains 1 since normal eviction ran without predicate.
+	if got := tree.EvictionHaltSufficientCapacity(); got != 1 {
+		t.Fatalf("expected EvictionHaltSufficientCapacity to remain 1, got %d", got)
+	}
+
+	// In normal eviction, seqs[1] and seqs[2] are now evicted; seqs[3] and seqs[4] survive.
+	if m := tree.MatchLen(seqs[1]); m != 0 {
+		t.Errorf("seqs[1] should be evicted now, matched %d", m)
+	}
+	if m := tree.MatchLen(seqs[2]); m != 0 {
+		t.Errorf("seqs[2] should be evicted now, matched %d", m)
+	}
+	if m := tree.MatchLen(seqs[3]); m != len(seqs[3]) {
+		t.Errorf("seqs[3] should survive, matched %d/%d", m, len(seqs[3]))
+	}
+	if m := tree.MatchLen(seqs[4]); m != len(seqs[4]) {
+		t.Errorf("seqs[4] should survive, matched %d/%d", m, len(seqs[4]))
+	}
+}
