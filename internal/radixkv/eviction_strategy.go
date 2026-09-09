@@ -115,6 +115,44 @@ type lowestScoreFirstStrategy struct{ costAwareStrategy }
 
 func (lowestScoreFirstStrategy) Name() string { return "lowest-score-first" }
 
+// priorityStrategy implements tree-aware priority-tiered cache eviction:
+// Tier 3 (probationary tool outputs) -> Tier 2 (idle subagents) -> Tier 1 (active subagents) -> Tier 0 (pinned root, immune).
+// Within each tier, LRU recency (oldest lastUsed) serves as the within-tier tie-break.
+type priorityStrategy struct{}
+
+func (priorityStrategy) Name() string { return "priority" }
+func (priorityStrategy) Priority(n *node) victimKey {
+	seg := nodeEvictionSeg(n, 0)
+	return victimKey{seg: seg, age: n.lastUsed}
+}
+
+// nodeEvictionSeg resolves the eviction segment for node n.
+// Lower seg evicts first (seg 0 = Tier 3; seg 1 = Tier 2; seg 2 = Tier 1; seg 3 = Tier 0 immune).
+func nodeEvictionSeg(n *node, clock uint64) int {
+	if n == nil {
+		return 0
+	}
+	if n.pinned {
+		return Tier0PinnedRoot.Seg()
+	}
+	if n.retention != nil {
+		if clock > 0 && n.retention.Expired(int64(clock)) {
+			return Tier3Probationary.Seg()
+		}
+		return TierFromRetentionPriority(n.retention.Priority).Seg()
+	}
+	if n.tierSet {
+		return n.tier.Seg()
+	}
+	if n.hits == 0 {
+		return Tier3Probationary.Seg()
+	}
+	if n.hits >= 2 {
+		return Tier1ActiveSubagent.Seg()
+	}
+	return Tier2IdleSubagent.Seg()
+}
+
 // victimStrategies is the string-keyed factory registry (SGLang's get_eviction_strategy
 // table). Seed entries reproduce the two legacy enum behaviors byte-for-byte; slru is the
 // first policy the open seam adds. RegisterVictimStrategy extends it in-package.
@@ -123,6 +161,8 @@ var victimStrategies = map[string]func() VictimStrategy{
 	"cost-aware":         func() VictimStrategy { return costAwareStrategy{} },
 	"lowest-score-first": func() VictimStrategy { return lowestScoreFirstStrategy{costAwareStrategy{}} },
 	"slru":               func() VictimStrategy { return slruStrategy{protectThreshold: slruProtectThreshold} },
+	"priority":           func() VictimStrategy { return priorityStrategy{} },
+	"priority-tier":      func() VictimStrategy { return priorityStrategy{} },
 	"page-aware":         func() VictimStrategy { return NewPageAwareStrategy(nil) },
 	"page-aligned":       func() VictimStrategy { return NewPageAwareStrategy(nil) },
 	"chunk-aware":        func() VictimStrategy { return NewPageAwareStrategy(nil) },
@@ -191,6 +231,9 @@ func (t *Tree) SetEvictionStrategy(name string) error {
 		t.SetAdmissionEnabled(true)
 	case "page-aware", "page-aligned", "chunk-aware":
 		t.policy = EvictionPageAware
+		t.SetAdmissionEnabled(false)
+	case "priority", "priority-tier":
+		t.policy = EvictionPriority
 		t.SetAdmissionEnabled(false)
 	default:
 		t.policy = EvictionLRU

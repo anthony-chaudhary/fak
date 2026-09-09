@@ -26,22 +26,60 @@ func newBlockCloneBackend() blockClone {
 	return blockClone{probe: probeBlockClone, clone: cloneFileBlocks}
 }
 
+var _ ownedIsolationBackend = blockClone{}
+
 func (b blockClone) Materialize(root, lane, key, baseSHA, wtRoot string, git GitRunner) Result {
+	return b.MaterializeOwned(root, lane, key, baseSHA, wtRoot, git, defaultOwnerStamp(lane))
+}
+
+func (b blockClone) MaterializeOwned(root, lane, key, baseSHA, wtRoot string, git GitRunner, owner OwnerStamp) Result {
 	targetRoot := resolveWorktreeRoot(wtRoot)
 	if err := b.probe(targetRoot); err != nil {
-		res := gitWorktree{}.Materialize(root, lane, key, baseSHA, wtRoot, git)
+		res := gitWorktree{}.MaterializeOwned(root, lane, key, baseSHA, wtRoot, git, owner)
 		res.Backend = gitWorktreeBackendName
 		if res.OK {
 			res.Detail = "block-clone unavailable; fell back to git-worktree: " + err.Error()
 		}
 		return res
 	}
-	res := b.materialize(root, lane, key, baseSHA, wtRoot, git)
+	base := baseSHA
+	if base == "" {
+		base = TrunkHeadSHA(root, git)
+	}
+	if base == "" {
+		return Result{OK: false, Reason: "could not resolve trunk HEAD (git error) — fail open"}
+	}
+	wt := Path(lane, key, wtRoot)
+	if _, err := os.Stat(wt); err == nil {
+		rc, out := run(git, root, []string{"worktree", "list", "--porcelain"})
+		if rc == 0 {
+			for _, p := range parseWorktreePaths(out) {
+				if samePath(p, wt) {
+					if PoolCap() > 0 {
+						if meta, err := readPoolMember(wt); err == nil && meta.State == poolStateIdle {
+							if res, ok := leaseSpecificPooled(root, wt, base, git, owner); ok {
+								return res
+							}
+							return Result{OK: false, Path: wt, BaseSHA: base,
+								Reason: "same-key idle pool member could not be leased — fail open"}
+						}
+					}
+					return Result{OK: true, Path: wt, BaseSHA: base, Reused: true}
+				}
+			}
+		}
+	}
+	if k := PoolCap(); k > 0 {
+		if res, ok := leasePooled(root, lane, base, wtRoot, git, owner); ok {
+			return res
+		}
+	}
+	res := b.materialize(root, lane, key, base, wtRoot, git)
 	if res.OK {
 		res.Backend = blockCloneBackendName
 		return res
 	}
-	fallback := gitWorktree{}.Materialize(root, lane, key, baseSHA, wtRoot, git)
+	fallback := gitWorktree{}.MaterializeOwned(root, lane, key, base, wtRoot, git, owner)
 	fallback.Backend = gitWorktreeBackendName
 	if fallback.OK {
 		fallback.Detail = "block-clone declined during materialization; fell back to git-worktree: " + res.Reason
@@ -64,7 +102,7 @@ func (b blockClone) materialize(root, lane, key, baseSHA, wtRoot string, git Git
 	if err := os.MkdirAll(filepath.Dir(wt), 0o755); err != nil {
 		return Result{OK: false, Path: wt, BaseSHA: base, Reason: "could not create worktree root: " + err.Error() + " — fail open"}
 	}
-	rc, out := run(git, root, []string{"worktree", "add", "--detach", "--no-checkout", wt, base})
+	rc, out := run(git, root, []string{"-c", "core.longpaths=true", "worktree", "add", "--detach", "--no-checkout", wt, base})
 	if rc != 0 {
 		return Result{OK: false, Path: wt, BaseSHA: base, Reason: "git worktree add --no-checkout failed — fail open", Detail: tail(out, 500)}
 	}
@@ -85,8 +123,11 @@ func (b blockClone) materialize(root, lane, key, baseSHA, wtRoot string, git Git
 			continue
 		}
 		tab := strings.IndexByte(record, '\t')
+		if tab < 0 {
+			return fail("unexpected git ls-tree record")
+		}
 		fields := strings.Fields(record[:tab])
-		if tab < 0 || len(fields) != 3 || fields[1] != "blob" {
+		if len(fields) != 3 || fields[1] != "blob" {
 			return fail("unexpected git ls-tree record")
 		}
 		mode, objectID, rel := fields[0], fields[2], record[tab+1:]

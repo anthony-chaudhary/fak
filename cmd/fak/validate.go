@@ -347,7 +347,7 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 			}
 		}
 		if shouldRunStrixValidation(*strix, paths) {
-			if err := executeStrixValidationPhase(ctx, stdout, stderr, &res, &recorder, *strix, *strixHost, *subkernels, *ablate, paths); err != nil {
+			if err := executeStrixValidationPhase(ctx, stdout, stderr, &res, &recorder, r, *strix, *strixHost, *subkernels, *ablate, paths); err != nil {
 				res.OK = false
 			}
 		}

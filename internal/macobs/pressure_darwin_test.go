@@ -149,7 +149,7 @@ func TestDarwinMemoryPressureSubscriptionAndEviction(t *testing.T) {
 		t.Fatalf("expected 3 active sessions, got %d", cache.ActiveSessions())
 	}
 
-	// 3. Initialize MemoryGovernor with JSON log capture
+	// 3. Initialize MemoryPressureGovernor with JSON log capture
 	logBuf := &bytes.Buffer{}
 	cfg := GovernorConfig{
 		WarnEvictFraction:     0.30, // Evict 30% on WARN (30 pages)
@@ -158,7 +158,7 @@ func TestDarwinMemoryPressureSubscriptionAndEviction(t *testing.T) {
 		BytesPerPage:          16384,
 		LogEmitter:            logBuf,
 	}
-	gov := NewMemoryGovernor(sub, cache, cfg)
+	gov := NewMemoryPressureGovernor(sub, cache, cfg)
 	if err := gov.Start(ctx); err != nil {
 		t.Fatalf("gov.Start failed: %v", err)
 	}
@@ -410,7 +410,7 @@ func TestMemoryGovernorZeroPagesEdgeCase(t *testing.T) {
 	cache := newMockKVCache(0, 0, nil)
 	cfg := DefaultGovernorConfig()
 
-	gov := NewMemoryGovernor(sub, cache, cfg)
+	gov := NewMemoryPressureGovernor(sub, cache, cfg)
 	if err := gov.Start(context.Background()); err != nil {
 		t.Fatalf("gov.Start: %v", err)
 	}
@@ -436,7 +436,7 @@ func TestMemoryGovernorConcurrentPressureSpikes(t *testing.T) {
 	cache := newMockKVCache(200, 5, []string{"s1", "s2"})
 	cfg := DefaultGovernorConfig()
 
-	gov := NewMemoryGovernor(sub, cache, cfg)
+	gov := NewMemoryPressureGovernor(sub, cache, cfg)
 	_ = gov.Start(context.Background())
 	defer func() { _ = gov.Stop() }()
 

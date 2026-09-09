@@ -25,7 +25,7 @@ func runMacObs(stdout, stderr io.Writer, argv []string) int {
 	checkHeadroom := fs.Bool("check-headroom", false, "emit concise agent-focused admission report")
 	agents := fs.Int("agents", 4, "target concurrent agents to evaluate")
 	prefixTokens := fs.Uint64("prefix-tokens", 4096, "shared prefix tokens (system prompt + tools)")
-	tailTokens := fs.Uint64("tail-tokens", 2048, "private agent turn tokens")
+	tailTokens := fs.Uint64("tail-tokens", 1024, "private agent turn tokens")
 	mlxEndpoint := fs.String("mlx-endpoint", "", "MLX server metrics Prometheus endpoint URL")
 	watch := fs.Bool("watch", false, "watch mode: periodically refresh dashboard")
 	interval := fs.Duration("interval", 2*time.Second, "refresh interval in watch mode")
@@ -36,10 +36,6 @@ func runMacObs(stdout, stderr io.Writer, argv []string) int {
 
 	if fs.NArg() != 0 {
 		fmt.Fprintln(stderr, "fak macobs: unexpected positional arguments")
-		return 2
-	}
-	if *asJSON && *checkHeadroom {
-		fmt.Fprintln(stderr, "fak macobs: cannot specify both --json and --check-headroom")
 		return 2
 	}
 	if *agents <= 0 {
@@ -79,6 +75,8 @@ func runMacObs(stdout, stderr io.Writer, argv []string) int {
 			return 1
 		}
 
+		gatePassed := snap.Analysis.Verdict == macobs.VerdictHeadroomOK
+
 		if *asJSON {
 			data, err := json.MarshalIndent(snap, "", "  ")
 			if err != nil {
@@ -86,19 +84,23 @@ func runMacObs(stdout, stderr io.Writer, argv []string) int {
 				return 1
 			}
 			fmt.Fprintln(stdout, string(data))
+			if *checkHeadroom && !gatePassed {
+				return 1
+			}
 		} else if *checkHeadroom {
 			bName := string(snap.Analysis.PrimaryBottleneck)
 			if !strings.HasPrefix(bName, "BOTTLENECK_") {
 				bName = "BOTTLENECK_" + bName
 			}
-			gatePassed := snap.Analysis.Verdict == macobs.VerdictHeadroomOK
-			fmt.Fprintf(stdout, "macobs: [%s] recommended_agents=%d (shared=%d, isolated=%d) available_kv=%dMB bottleneck=%s gate_passed=%t\n",
+			fmt.Fprintf(stdout, "macobs: [%s] recommended_agents=%d (shared=%d, isolated=%d) available_kv=%dMB bottleneck=%s governor_active=%d zero_swap=%t gate_passed=%t\n",
 				snap.Analysis.Verdict,
 				snap.Analysis.RecommendedAgents,
 				snap.Headroom.MaxSharedAgents,
 				snap.Headroom.MaxIsolatedAgents,
 				snap.Headroom.AvailableKVPoolBytes/(1024*1024),
 				bName,
+				snap.Governor.ActiveAgents,
+				snap.Governor.ZeroSwapGuaranteed,
 				gatePassed,
 			)
 			if !gatePassed {
@@ -185,6 +187,27 @@ func renderMacObsDashboard(w io.Writer, snap macobs.Snapshot) {
 		)
 	} else {
 		fmt.Fprintln(w, "  Status: unavailable (insufficient unified memory for KV pool)")
+	}
+
+	fmt.Fprintln(w, "Memory Governor:")
+	if snap.Governor.Available {
+		fmt.Fprintf(w, "  Active Agents: %d | Available Slots: %d | Status: %s\n",
+			snap.Governor.ActiveAgents,
+			snap.Governor.AvailableAgentSlots,
+			snap.Governor.ConcurrencyStatus,
+		)
+		fmt.Fprintf(w, "  Wired Ceiling: %.2f GB | Resident: %.2f GB | Peak: %.2f GB\n",
+			float64(snap.Governor.WiredMemoryCeilingBytes)/(1<<30),
+			float64(snap.Governor.ResidentMemoryBytes)/(1<<30),
+			float64(snap.Governor.PeakMemoryBytes)/(1<<30),
+		)
+		fmt.Fprintf(w, "  Zero Swap Guaranteed: %t (Swap Delta: %d B, Pageouts Delta: %d)\n",
+			snap.Governor.ZeroSwapGuaranteed,
+			snap.Governor.SwapUsedDeltaBytes,
+			snap.Governor.PageoutsDelta,
+		)
+	} else {
+		fmt.Fprintln(w, "  Status: unavailable")
 	}
 
 	bName := string(snap.Analysis.PrimaryBottleneck)

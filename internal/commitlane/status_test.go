@@ -2,6 +2,7 @@ package commitlane
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -156,6 +157,64 @@ func TestStatusSurfacesProcessProbeErrors(t *testing.T) {
 	}
 	if !rep.OK || rep.Verdict != VerdictClear {
 		t.Fatalf("process probe errors should not fake a blockage: %+v", rep)
+	}
+}
+
+func TestStatusForeignCommitLockReapable(t *testing.T) {
+	root, gitDir := testRepoPaths(t)
+	rep, err := Status(context.Background(), Options{
+		Runner: fakeRepoRunner(root, gitDir),
+		ProbeLock: func(path string) safecommit.LockProbe {
+			return safecommit.LockProbe{
+				Path:      path,
+				Exists:    true,
+				HolderPID: 9999,
+				Alive:     true,
+				Foreign:   true,
+				Reason:    safecommit.ReapReasonHolderForeign,
+			}
+		},
+		Stat:        func(path string) FileFact { return FileFact{} },
+		ProcessList: func(context.Context) ([]Process, error) { return nil, nil },
+		Now:         fixedNow,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.OK || rep.Verdict != VerdictStale {
+		t.Fatalf("foreign lock report = %+v, want not-ok stale", rep)
+	}
+	if !rep.CommitLock.Stale {
+		t.Fatalf("foreign lock must be marked stale/reapable: %+v", rep.CommitLock)
+	}
+}
+
+func TestStatusReleasedLockCleared(t *testing.T) {
+	root, gitDir := testRepoPaths(t)
+	lockPath := filepath.Join(gitDir, "fak-commit.lock")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lockPath, []byte("0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := Status(context.Background(), Options{
+		Runner: fakeRepoRunner(root, gitDir),
+		ProbeLock: func(path string) safecommit.LockProbe {
+			return safecommit.LockProbe{Path: path, Exists: true, HolderPID: 0}
+		},
+		Stat:        func(path string) FileFact { return FileFact{} },
+		ProcessList: func(context.Context) ([]Process, error) { return nil, nil },
+		Now:         fixedNow,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.OK || rep.Verdict != VerdictClear {
+		t.Fatalf("unheld lockfile report = %+v, want ok clear", rep)
+	}
+	if rep.CommitLock.Present {
+		t.Fatalf("commit lock should not be present when unheld: %+v", rep.CommitLock)
 	}
 }
 

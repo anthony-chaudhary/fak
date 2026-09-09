@@ -1687,7 +1687,7 @@ func TestPrepare_WindowsIndexResetSelfRecoveringAndAtomic(t *testing.T) {
 			return 0, ""
 		}
 
-		res := Prepare(root, lane, key, base, wtRoot, git)
+		res := PrepareWithBackend(root, lane, key, base, wtRoot, git, gitWorktree{})
 		if !res.OK {
 			t.Fatalf("expected Prepare to succeed via decoupled retry, got: %+v", res)
 		}
@@ -1738,7 +1738,7 @@ func TestPrepare_WindowsIndexResetSelfRecoveringAndAtomic(t *testing.T) {
 			return 0, ""
 		}
 
-		res := Prepare(root, lane, key, base, wtRoot, git)
+		res := PrepareWithBackend(root, lane, key, base, wtRoot, git, gitWorktree{})
 		if res.OK {
 			t.Fatalf("expected Prepare to fail when both attempts fail, got: %+v", res)
 		}

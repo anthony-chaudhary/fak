@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/flock"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -360,12 +361,22 @@ func StatFile(path string) FileFact {
 
 func probeCommitLock(path string, probe ProbeLockFunc) CommitLock {
 	p := probe(path)
+	held := p.Exists
+	if p.Exists && p.HolderPID <= 0 {
+		if f, err := os.OpenFile(path, os.O_RDWR, 0); err == nil {
+			if err := flock.TryLock(f); err == nil {
+				_ = flock.Unlock(f)
+				held = false
+			}
+			_ = f.Close()
+		}
+	}
 	return CommitLock{
 		Path:        path,
-		Present:     p.Exists,
+		Present:     held,
 		HolderPID:   p.HolderPID,
-		HolderAlive: p.Alive,
-		Stale:       p.Stale,
+		HolderAlive: p.Alive && !p.Foreign,
+		Stale:       p.Reapable(),
 	}
 }
 

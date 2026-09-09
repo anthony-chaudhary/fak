@@ -9,7 +9,7 @@
 // staged diff ONCE and runs every gate over it — the whole measured cost was spawn overhead,
 // so a single static-binary start recovers essentially all of it.
 //
-// The registry has grown well past that Python-era set: PreCommitGates() registers all 26 gates
+// The registry has grown well past that Python-era set: PreCommitGates() registers all 27 gates
 // today. That number is BOUND, not typed — exhaustiveness_claim_test.go re-derives it from the
 // registry and fails when the two disagree, so this sentence cannot quietly decay the way the
 // count it replaces did (#5605, epic #5601). Adding a gate is expected to update it.
@@ -162,6 +162,9 @@ func PreCommitGates() []Gate {
 		// IMPORT_WITNESS is ADVISORY by default (DefaultMode "warn"): flags module-local imports
 		// of internal packages with no tracked non-test .go source (forgotten `git add`).
 		{Name: "IMPORT_WITNESS", ModeEnv: "FLEET_IMPORT_WITNESS_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_UNCOMMITTED_IMPORT", Check: gateImportWitness},
+		// CLEAR_INVENTORY_ADMISSION is ADVISORY by default (DefaultMode "warn"): detects newly added mock
+		// substitutions and stub panics without clear inventory gating concept or shift-left witness.
+		{Name: "CLEAR_INVENTORY_ADMISSION", ModeEnv: "FLEET_INVENTORY_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_UNINVENTORIED_STUB", Check: gateClearInventoryAdmission},
 		// DUPLICATION is ADVISORY (DefaultMode "warn"): the commit-boundary, in-process twin of
 		// `fak dup guard --staged`. It brings the clonescan clone engine (the same normalized-token
 		// definition the code-slop scorecard grades the whole tree with, a cycle later) to the commit

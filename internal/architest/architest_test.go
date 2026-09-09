@@ -73,6 +73,7 @@ var tier = map[string]int{
 	"resulttier":         1, // standard bounded result tiers and cursor pagination; stdlib-only, off the hot path.
 	"resultstier":        1, // role-based artifact storage tiering (claim vs payload) and payload index minting (#11687, #11688).
 	"power":              1, // cross-platform OS power assertion and wake-lock management; stdlib-only, off the hot path.
+	"telemetry":          1, // live runtime telemetry aggregation and Prometheus exposition; stdlib-only, off the hot path.
 	"issuesolved":        3, // issue resolution and proof verification helper.
 	"rawdecode":          3, // standalone raw decode executor for Qwen models.
 
@@ -866,6 +867,7 @@ var tier = map[string]int{
 	"capabilitymatrix":           1, // unified model capability registry (#11507); stdlib-only, off the hot path.
 	"containment":                1,
 	"readmenext":                 2, // README-NEXT staging and reconciliation pipeline (#11881).
+	"hil":                        2, // Hardware-in-the-loop micro-dose execution and comparison audit leaf.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

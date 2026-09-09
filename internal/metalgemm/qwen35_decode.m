@@ -35,6 +35,8 @@ typedef struct SDPANAXConstants {
     float scale;
     uint32_t tile_n;
     uint32_t order;
+    uint32_t has_tree_mask;
+    uint32_t tree_mask[32];
 } SDPANAXConstants;
 
 #define QWEN35_MAX_STATES 256
@@ -78,7 +80,7 @@ inline float gdn_softplus(float x) { return x > 20.0f ? x : log(1.0f + exp(x)); 
 // Batched Recurrent GDN Step Shaders
 // ==============================================================================
 
-// gdn_conv_wide_m: Advances the 1D convolution window across M sequential tokens.
+// gdn_conv_wide_m: Advances the 1D convolution window across M sequential or tree-structured tokens.
 // Each channel runs across token 0..tokens-1 in order, maintaining exact state.
 kernel void gdn_conv_wide_m(
     device const float *mixed [[buffer(0)]],
@@ -88,14 +90,26 @@ kernel void gdn_conv_wide_m(
     constant int& tokens      [[buffer(4)]],
     constant int& convDim     [[buffer(5)]],
     constant int& kernelSize  [[buffer(6)]],
+    device const int *parents [[buffer(7)]],
     uint channel [[thread_position_in_grid]]
 ) {
     if (channel >= (uint)convDim) return;
     float window[7];
+    float saved_windows[32][7];
     for (int j = 0; j < kernelSize - 1; ++j) {
         window[j] = convState[(long)j * convDim + channel];
     }
     for (int token = 0; token < tokens; ++token) {
+        int p = parents ? parents[token] : (token - 1);
+        if (p >= 0 && p < tokens && p < 32) {
+            for (int j = 0; j < kernelSize - 1; ++j) {
+                window[j] = saved_windows[p][j];
+            }
+        } else if (p < 0 && token > 0) {
+            for (int j = 0; j < kernelSize - 1; ++j) {
+                window[j] = convState[(long)j * convDim + channel];
+            }
+        }
         float acc = 0.0f;
         int wb = (int)channel * kernelSize;
         for (int j = 0; j < kernelSize - 1; ++j) acc += convW[wb + j] * window[j];
@@ -104,6 +118,11 @@ kernel void gdn_conv_wide_m(
         convOut[(long)token * convDim + channel] = gdn_silu(acc);
         for (int j = 0; j < kernelSize - 2; ++j) window[j] = window[j + 1];
         if (kernelSize > 1) window[kernelSize - 2] = current;
+        if (token < 32) {
+            for (int j = 0; j < kernelSize - 1; ++j) {
+                saved_windows[token][j] = window[j];
+            }
+        }
     }
     for (int j = 0; j < kernelSize - 1; ++j) {
         convState[(long)j * convDim + channel] = window[j];
@@ -148,9 +167,8 @@ kernel void gdn_qk_norm_wide_m(
     }
 }
 
-// gdn_recurrent_wide_m: Evaluates recurrent state update across M tokens in registers.
-// The recurrent state is maintained across token 0..tokens-1 sequentially, ensuring
-// bit-exact agreement with serial execution.
+// gdn_recurrent_wide_m: Evaluates recurrent state update across M tokens in registers and tree-branching buffers.
+// When parents are provided, branches read their true parent's state and record their own state.
 kernel void gdn_recurrent_wide_m(
     device const float *convOut [[buffer(0)]],
     device const float *qNorm   [[buffer(1)]],
@@ -170,6 +188,8 @@ kernel void gdn_recurrent_wide_m(
     constant int& kHd           [[buffer(15)]],
     constant int& vHd           [[buffer(16)]],
     constant float& eps         [[buffer(17)]],
+    device const int *parents   [[buffer(18)]],
+    device float *treeState     [[buffer(19)]],
     uint head [[threadgroup_position_in_grid]],
     uint lane [[thread_index_in_threadgroup]],
     uint lanes [[threads_per_threadgroup]]
@@ -178,14 +198,32 @@ kernel void gdn_recurrent_wide_m(
     int repeat = nV / nK;
     int keyHead = (int)head / repeat;
     int keyDim = nK * kHd;
+    float baseState[128];
     float localState[128];
     if (lane < (uint)vHd) {
         for (int i = 0; i < 128; ++i) {
-            if (i < kHd) localState[i] = state[((long)head * kHd + i) * vHd + lane];
+            float val = (i < kHd) ? state[((long)head * kHd + i) * vHd + lane] : 0.0f;
+            baseState[i] = val;
+            localState[i] = val;
         }
     }
     threadgroup float squares[256];
     for (int token = 0; token < tokens; ++token) {
+        int p = parents ? parents[token] : (token - 1);
+        if (lane < (uint)vHd) {
+            if (p < 0) {
+                for (int i = 0; i < 128; ++i) {
+                    if (i < kHd) localState[i] = baseState[i];
+                }
+            } else if (treeState != nullptr) {
+                for (int i = 0; i < 128; ++i) {
+                    if (i < kHd) {
+                        long pOffset = (((long)p * nV + (long)head) * kHd + (long)i) * vHd + lane;
+                        localState[i] = treeState[pOffset];
+                    }
+                }
+            }
+        }
         device const float *qRow = qNorm + ((long)token * nK + keyHead) * kHd;
         device const float *kRow = kNorm + ((long)token * nK + keyHead) * kHd;
         float readout = 0.0f;
@@ -207,6 +245,14 @@ kernel void gdn_recurrent_wide_m(
                     float value = localState[i] + kRow[i] * delta;
                     localState[i] = value;
                     readout += value * qRow[i];
+                }
+            }
+            if (treeState != nullptr) {
+                for (int i = 0; i < 128; ++i) {
+                    if (i < kHd) {
+                        long tokOffset = (((long)token * nV + (long)head) * kHd + (long)i) * vHd + lane;
+                        treeState[tokOffset] = localState[i];
+                    }
                 }
             }
         }
@@ -239,7 +285,7 @@ kernel void gdn_recurrent_wide_m(
 
 struct SDPANAXConstantsMSL {
     uint gqa_factor;   // Number of query heads sharing a KV head
-    uint draft_len;    // Number of speculative draft tokens (e.g. 2..4)
+    uint draft_len;    // Number of speculative draft tokens (e.g. 2..32)
     uint M;            // Total query rows: M = gqa_factor * draft_len
     uint head_dim;     // Head dimension D (e.g. 64 or 128)
     uint prefix_len;   // Sequence prefix length
@@ -247,6 +293,8 @@ struct SDPANAXConstantsMSL {
     float scale;       // Attention scale factor 1.0f / sqrt(head_dim)
     uint tile_n;       // KV tile size Bc (e.g. 32)
     uint order;        // 0: HeadMajor, 1: TokenMajor
+    uint has_tree_mask;// 1 if tree_mask is active
+    uint tree_mask[32];// bitmask per draft token
 };
 
 struct SDPANAXThreadgroupStorageMSL {
@@ -263,6 +311,19 @@ inline uint nax_draft_token_index(uint m, constant SDPANAXConstantsMSL& c) {
 
 inline uint nax_max_causal_key(uint m, constant SDPANAXConstantsMSL& c) {
     return c.prefix_len + nax_draft_token_index(m, c);
+}
+
+inline bool nax_can_attend(uint m, uint global_key_pos, constant SDPANAXConstantsMSL& c) {
+    if (global_key_pos < c.prefix_len) {
+        return true;
+    }
+    uint t = nax_draft_token_index(m, c);
+    uint draft_k = global_key_pos - c.prefix_len;
+    if (draft_k > t) return false;
+    if (c.has_tree_mask) {
+        return (c.tree_mask[t] & (1u << draft_k)) != 0;
+    }
+    return true;
 }
 
 kernel void sdpa_nax_tail_causal_tile(
@@ -312,7 +373,7 @@ kernel void sdpa_nax_tail_causal_tile(
         for (uint k = 0; k < tile_len; ++k) {
             uint global_key_pos = j_start + k;
             float score = -INFINITY;
-            if (global_key_pos <= max_k_for_row) {
+            if (nax_can_attend(m, global_key_pos, c)) {
                 float partial_qk = 0.0f;
                 for (uint d = simd_lane; d < c.head_dim; d += 32) {
                     partial_qk += Q[m * c.head_dim + d] * tg_mem.k_tile[k * c.head_dim + d];
@@ -474,7 +535,9 @@ static int mg_qwen35_gdn_encode_into(
     id<MTLBuffer> dtBiasBuf,
     id<MTLBuffer> normBuf,
     id<MTLBuffer> coreOutBuf,
-    int tokens, int nK, int nV, int kHd, int vHd, int convKernel, float eps
+    int tokens, int nK, int nV, int kHd, int vHd, int convKernel, float eps,
+    id<MTLBuffer> parentsBuf,
+    id<MTLBuffer> treeStateBuf
 ) {
     int keyDim = nK * kHd;
     int valueDim = nV * vHd;
@@ -484,6 +547,21 @@ static int mg_qwen35_gdn_encode_into(
     id<MTLBuffer> qNorm = [gDev newBufferWithLength:(size_t)tokens * keyDim * sizeof(float) options:MTLResourceStorageModePrivate];
     id<MTLBuffer> kNorm = [gDev newBufferWithLength:(size_t)tokens * keyDim * sizeof(float) options:MTLResourceStorageModePrivate];
     if (!convOut || !qNorm || !kNorm) return 0;
+
+    id<MTLBuffer> activeParentsBuf = parentsBuf;
+    if (!activeParentsBuf) {
+        int linearParents[32];
+        linearParents[0] = -1;
+        for (int i = 1; i < 32; ++i) linearParents[i] = i - 1;
+        activeParentsBuf = [gDev newBufferWithBytes:linearParents length:(size_t)tokens * sizeof(int) options:MTLResourceStorageModeShared];
+        if (!activeParentsBuf) return 0;
+    }
+
+    id<MTLBuffer> activeTreeStateBuf = treeStateBuf;
+    if (!activeTreeStateBuf) {
+        activeTreeStateBuf = [gDev newBufferWithLength:(size_t)tokens * nV * kHd * vHd * sizeof(float) options:MTLResourceStorageModePrivate];
+        if (!activeTreeStateBuf) return 0;
+    }
 
     id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
     if (!enc) return 0;
@@ -497,6 +575,7 @@ static int mg_qwen35_gdn_encode_into(
     [enc setBytes:&tokens length:sizeof(tokens) atIndex:4];
     [enc setBytes:&convDim length:sizeof(convDim) atIndex:5];
     [enc setBytes:&convKernel length:sizeof(convKernel) atIndex:6];
+    [enc setBuffer:activeParentsBuf offset:0 atIndex:7];
     [enc dispatchThreads:MTLSizeMake((NSUInteger)convDim, 1, 1) threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
     [enc memoryBarrierWithScope:MTLBarrierScopeBuffers];
 
@@ -535,6 +614,8 @@ static int mg_qwen35_gdn_encode_into(
     [enc setBytes:&kHd length:sizeof(kHd) atIndex:15];
     [enc setBytes:&vHd length:sizeof(vHd) atIndex:16];
     [enc setBytes:&eps length:sizeof(eps) atIndex:17];
+    [enc setBuffer:activeParentsBuf offset:0 atIndex:18];
+    [enc setBuffer:activeTreeStateBuf offset:0 atIndex:19];
     [enc dispatchThreadgroups:MTLSizeMake((NSUInteger)nV, 1, 1)
         threadsPerThreadgroup:MTLSizeMake((NSUInteger)vThreads, 1, 1)];
     [enc endEncoding];
@@ -546,7 +627,8 @@ int mg_qwen35_decode_step_wide_m(
     const float* mixed, const float* z, const float* b, const float* a,
     const float* convW, const float* aLog, const float* dtBias, const float* norm,
     float* core_out,
-    int tokens, int nK, int nV, int kHd, int vHd, int convKernel, float eps
+    int tokens, int nK, int nV, int kHd, int vHd, int convKernel, float eps,
+    const int* parents
 ) {
     if (!qwen35_init_pipelines()) return 0;
     if (handle < 0 || handle >= gQwen35StateCount || tokens <= 0 || eps <= 0.0f) return 0;
@@ -579,12 +661,21 @@ int mg_qwen35_decode_step_wide_m(
             return 0;
         }
 
+        id<MTLBuffer> parentsBuf = nil;
+        id<MTLBuffer> treeStateBuf = nil;
+        if (parents != NULL) {
+            parentsBuf = [gDev newBufferWithBytes:parents length:(size_t)tokens * sizeof(int) options:MTLResourceStorageModeShared];
+            treeStateBuf = [gDev newBufferWithLength:(size_t)tokens * nV * kHd * vHd * sizeof(float) options:MTLResourceStorageModePrivate];
+            if (!parentsBuf || !treeStateBuf) return 0;
+        }
+
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
         if (!cb) return 0;
 
         if (!mg_qwen35_gdn_encode_into(cb, state.conv, state.recurrent, mixedBuf, zBuf, bBuf, aBuf,
                                       convWBuf, aLogBuf, dtBiasBuf, normBuf, coreOutBuf,
-                                      tokens, nK, nV, kHd, vHd, convKernel, eps)) {
+                                      tokens, nK, nV, kHd, vHd, convKernel, eps,
+                                      parentsBuf, treeStateBuf)) {
             return 0;
         }
 
@@ -605,7 +696,7 @@ int mg_qwen35_decode_step(
     int nK, int nV, int kHd, int vHd, int convKernel, float eps
 ) {
     return mg_qwen35_decode_step_wide_m(handle, mixed, z, b, a, convW, aLog, dtBias, norm,
-                                        core_out, 1, nK, nV, kHd, vHd, convKernel, eps);
+                                        core_out, 1, nK, nV, kHd, vHd, convKernel, eps, NULL);
 }
 
 // ==============================================================================
@@ -616,7 +707,8 @@ int mg_sdpa_nax_tail_causal_tile_run(
     const float* Q, const float* K, const float* V,
     float* Out, float* LSE,
     int gqaFactor, int draftLen, int M, int headDim,
-    int prefixLen, int totalKV, float scale, int tileN, int order
+    int prefixLen, int totalKV, float scale, int tileN, int order,
+    int hasTreeMask, const uint32_t* treeMask
 ) {
     if (!qwen35_init_pipelines()) return 0;
     if (!Q || !K || !V || !Out || !LSE || M <= 0 || headDim <= 0 || totalKV <= 0) return 0;
@@ -635,6 +727,7 @@ int mg_sdpa_nax_tail_causal_tile_run(
         if (!qBuf || !kBuf || !vBuf || !outBuf || !lseBuf) return 0;
 
         SDPANAXConstants constants;
+        memset(&constants, 0, sizeof(constants));
         constants.gqa_factor = (uint32_t)gqaFactor;
         constants.draft_len = (uint32_t)draftLen;
         constants.M = (uint32_t)M;
@@ -644,6 +737,11 @@ int mg_sdpa_nax_tail_causal_tile_run(
         constants.scale = scale;
         constants.tile_n = (uint32_t)tileN;
         constants.order = (uint32_t)order;
+        constants.has_tree_mask = (uint32_t)hasTreeMask;
+        if (hasTreeMask && treeMask) {
+            uint32_t copyCount = draftLen > 32 ? 32 : (uint32_t)draftLen;
+            memcpy(constants.tree_mask, treeMask, copyCount * sizeof(uint32_t));
+        }
 
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
         if (!cb) return 0;
@@ -694,13 +792,15 @@ int mg_metal_wide_m_verify_step(
     const float* convW, const float* aLog, const float* dtBias, const float* norm,
     float* gdn_core_out,
     int nK, int nV, int kHd, int vHd, int convKernel, float eps,
+    const int* parents,
     const float* Q, const float* K, const float* V,
     float* sdpa_out, float* lse_out,
     int gqaFactor, int draftLen, int sdpaM, int headDim,
-    int prefixLen, int totalKV, float sdpaScale, int tileN, int order
+    int prefixLen, int totalKV, float sdpaScale, int tileN, int order,
+    int hasTreeMask, const uint32_t* treeMask
 ) {
     if (!qwen35_init_pipelines()) return 0;
-    if (draftLen < 2 || draftLen > 8) return 0;
+    if (draftLen < 2 || draftLen > 32) return 0;
 
     Qwen35DecodeState gdnState;
     @synchronized(gDev) {
@@ -749,9 +849,18 @@ int mg_metal_wide_m_verify_step(
             return 0;
         }
 
+        id<MTLBuffer> parentsBuf = nil;
+        id<MTLBuffer> treeStateBuf = nil;
+        if (parents != NULL) {
+            parentsBuf = [gDev newBufferWithBytes:parents length:(size_t)tokens * sizeof(int) options:MTLResourceStorageModeShared];
+            treeStateBuf = [gDev newBufferWithLength:(size_t)tokens * nV * kHd * vHd * sizeof(float) options:MTLResourceStorageModePrivate];
+            if (!parentsBuf || !treeStateBuf) return 0;
+        }
+
         if (!mg_qwen35_gdn_encode_into(cb, gdnState.conv, gdnState.recurrent, mixedBuf, zBuf, bBuf, aBuf,
                                       convWBuf, aLogBuf, dtBiasBuf, normBuf, coreOutBuf,
-                                      tokens, nK, nV, kHd, vHd, convKernel, eps)) {
+                                      tokens, nK, nV, kHd, vHd, convKernel, eps,
+                                      parentsBuf, treeStateBuf)) {
             return 0;
         }
 
@@ -769,6 +878,7 @@ int mg_metal_wide_m_verify_step(
         if (!qBuf || !kBuf || !vBuf || !outBuf || !lseBuf) return 0;
 
         SDPANAXConstants constants;
+        memset(&constants, 0, sizeof(constants));
         constants.gqa_factor = (uint32_t)gqaFactor;
         constants.draft_len = (uint32_t)draftLen;
         constants.M = (uint32_t)sdpaM;
@@ -778,6 +888,11 @@ int mg_metal_wide_m_verify_step(
         constants.scale = sdpaScale;
         constants.tile_n = (uint32_t)tileN;
         constants.order = (uint32_t)order;
+        constants.has_tree_mask = (uint32_t)hasTreeMask;
+        if (hasTreeMask && treeMask) {
+            uint32_t copyCount = draftLen > 32 ? 32 : (uint32_t)draftLen;
+            memcpy(constants.tree_mask, treeMask, copyCount * sizeof(uint32_t));
+        }
 
         id<MTLComputeCommandEncoder> sdpaEnc = [cb computeCommandEncoder];
         if (!sdpaEnc) return 0;
