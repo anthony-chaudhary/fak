@@ -101,12 +101,22 @@ func qwen35GDNPreprojectedSequenceBackend(candidate any) (Qwen35GDNPreprojectedS
 	return backend, true, nil
 }
 
+// Qwen35GDNCapabilityIdentity is the canonical versioned capability identity for
+// the Qwen3.5/3.6 Gated-DeltaNet/SSM token mixer.
+const Qwen35GDNCapabilityIdentity = "qwen35/gdn-token-mixer-v1"
+
 // Qwen35GDNCUDAPath is the production path identity reserved for a Qwen3.5/3.6
 // Gated-DeltaNet/SSM token mixer implemented by the CUDA compute backend.
 const (
 	Qwen35GDNCUDAPath   = "cuda/qwen35-gdn-ssm-decode-v1"
 	Qwen35GDNVulkanPath = "vulkan/qwen35-gdn-ssm-decode-v1"
 )
+
+// IsSupportedQwen35GDNPath returns true if the given path identity represents a supported
+// Qwen3.5/3.6 GDN capability or legacy device path.
+func IsSupportedQwen35GDNPath(p string) bool {
+	return p == Qwen35GDNCapabilityIdentity || p == Qwen35GDNCUDAPath || p == Qwen35GDNVulkanPath
+}
 
 // Qwen35GDNParityCosineMin is the deterministic device/reference acceptance floor.
 const Qwen35GDNParityCosineMin = 0.999
@@ -159,7 +169,7 @@ func ValidateBackendForwardConfig(cfg Config, be compute.Backend) error {
 		return nil
 	}
 	gdn, ok := be.(Qwen35GDNBackend)
-	if ok && (gdn.Qwen35GDNPath() == Qwen35GDNCUDAPath || gdn.Qwen35GDNPath() == Qwen35GDNVulkanPath) {
+	if ok && IsSupportedQwen35GDNPath(gdn.Qwen35GDNPath()) {
 		return nil
 	}
 	reason := "backend does not structurally implement model.Qwen35GDNBackend"

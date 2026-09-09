@@ -214,6 +214,10 @@ func (p EvictionPolicy) String() string {
 	}
 }
 
+// EvictionHaltPredicate returns true when budget eviction should halt early
+// because shared allocation capacity is already sufficient.
+type EvictionHaltPredicate func() bool
+
 // Tree is a RadixAttention prefix cache: a radix tree of token sequences with
 // longest-prefix matching, an LRU token budget, and reference counting.
 type Tree struct {
@@ -360,6 +364,10 @@ type Tree struct {
 	demoteBeforeDrop bool
 	demotionDecider  DemotionDecider
 	demotions        int
+
+	// Halt eviction early when shared allocation capacity is sufficient (#12414).
+	haltPredicate                  EvictionHaltPredicate
+	evictionHaltSufficientCapacity int64
 }
 
 // New builds an empty prefix cache. maxTokens is the LRU budget in cached tokens; pass 0
@@ -964,6 +972,14 @@ func (t *Tree) Demotions() int {
 	return t.demotions
 }
 
+func (t *Tree) SetEvictionHaltPredicate(p EvictionHaltPredicate) {
+	t.haltPredicate = p
+}
+
+func (t *Tree) EvictionHaltSufficientCapacity() int64 {
+	return t.evictionHaltSufficientCapacity
+}
+
 // evictToBudget evicts least-recently-used, unlocked LEAVES until the cached-token count
 // is within budget — RadixAttention's eviction policy. Removing a leaf can make its parent
 // a leaf, which the next iteration may then evict (the upward collapse). A node that is
@@ -974,6 +990,10 @@ func (t *Tree) evictToBudget() {
 		return // keep-all: eviction disabled
 	}
 	for t.tokens > budget {
+		if t.haltPredicate != nil && t.haltPredicate() {
+			t.evictionHaltSufficientCapacity++
+			break
+		}
 		v := t.victimLeaf()
 		if v == nil {
 			return // everything in budget-excess is locked; cannot evict further

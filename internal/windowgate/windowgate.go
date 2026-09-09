@@ -1241,6 +1241,68 @@ func ScanFiles(repoRoot string, relPaths []string) (Report, error) {
 	return scanFileSet(repoRoot, ps1, py, goFiles), nil
 }
 
+// ScanContent audits the raw content of a file (PowerShell, Python, or Go source)
+// for window-suppression and interactive-popup violations based on its path and content.
+// Can be called as ScanContent(src) or ScanContent(rel, src).
+func ScanContent(args ...string) []string {
+	rel := ""
+	src := ""
+	if len(args) == 1 {
+		src = args[0]
+	} else if len(args) >= 2 {
+		rel = args[0]
+		src = args[1]
+	}
+	relLower := strings.ToLower(rel)
+	switch {
+	case strings.HasSuffix(relLower, ".ps1") || strings.HasSuffix(relLower, ".py"):
+		return ScanScript(rel, src)
+	case strings.HasSuffix(relLower, ".go"):
+		return ScanGoFileForExec(rel, src)
+	default:
+		if strings.Contains(src, "package ") {
+			return ScanGoFileForExec(rel, src)
+		}
+		return ScanScript(rel, src)
+	}
+}
+
+// ScanScript audits a script (PowerShell or Python) for interactive popups
+// and unsuppressed background spawns.
+// Can be called as ScanScript(src) or ScanScript(rel, src).
+func ScanScript(args ...string) []string {
+	rel := ""
+	src := ""
+	if len(args) == 1 {
+		src = args[0]
+	} else if len(args) >= 2 {
+		rel = args[0]
+		src = args[1]
+	}
+	relLower := strings.ToLower(rel)
+	var out []string
+	switch {
+	case strings.HasSuffix(relLower, ".ps1"):
+		if v, bad := PSInstallerViolation(rel, src); bad {
+			out = append(out, v)
+		}
+		out = append(out, PSStartProcessViolations(rel, src)...)
+	case strings.HasSuffix(relLower, ".py"):
+		out = append(out, PySpawnViolations(rel, src)...)
+	default:
+		r := rel
+		if r == "" {
+			r = "script"
+		}
+		if v, bad := PSInstallerViolation(r+".ps1", src); bad {
+			out = append(out, v)
+		}
+		out = append(out, PSStartProcessViolations(r+".ps1", src)...)
+		out = append(out, PySpawnViolations(r+".py", src)...)
+	}
+	return out
+}
+
 // scanFileSet applies the per-file violation and watchlist logic to the given
 // pre-partitioned repo-relative paths and returns a sorted Report. It is the single
 // shared per-file loop behind both ScanTree (whole worktree) and ScanFiles (push range),

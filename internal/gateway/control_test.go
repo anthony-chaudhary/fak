@@ -472,3 +472,107 @@ func TestControlConfigUnixDomainSocketIPC(t *testing.T) {
 		t.Errorf("server ScalarConfig().MaxWaitingSeqs = %d, want 999", srv.ScalarConfig().MaxWaitingSeqs)
 	}
 }
+
+func TestControlConfigUnixDomainSocketLoadIPC(t *testing.T) {
+	srv := newTestControlGateway(t, Config{})
+	ctl := NewAdmissionController(AdmissionPolicy{
+		MaxNumSeqs:  1,
+		TokenBudget: 1000,
+		MaxWaiting:  10,
+	})
+	srv.SetAdmissionController(ctl)
+
+	// Offer one request so it is admitted and running, and one that waits
+	v1 := ctl.Offer(SeqRequest{TraceID: "req-1", Tokens: 50})
+	if v1 != VerdictAdmitted {
+		t.Fatalf("Offer req-1 verdict = %v, want %v", v1, VerdictAdmitted)
+	}
+	v2 := ctl.Offer(SeqRequest{TraceID: "req-2", Tokens: 30})
+	if v2 != VerdictQueued {
+		t.Fatalf("Offer req-2 verdict = %v, want %v", v2, VerdictQueued)
+	}
+
+	socketPath := filepath.Join(t.TempDir(), "control_load.sock")
+	cs, err := srv.StartControlSocket(socketPath)
+	if err != nil {
+		t.Fatalf("StartControlSocket: %v", err)
+	}
+	defer cs.Close()
+
+	// 1. Test with "get_load" op
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("net.Dial unix: %v", err)
+	}
+	defer conn.Close()
+
+	ipcReq := `{"op":"get_load"}` + "\n"
+	if _, err := conn.Write([]byte(ipcReq)); err != nil {
+		t.Fatalf("conn.Write get_load: %v", err)
+	}
+
+	line, err := bufio.NewReader(conn).ReadBytes('\n')
+	if err != nil {
+		t.Fatalf("read IPC response for get_load: %v", err)
+	}
+
+	var resp controlIPCResponse
+	if err := json.Unmarshal(line, &resp); err != nil {
+		t.Fatalf("unmarshal IPC response: %v", err)
+	}
+	if resp.Status != "ok" {
+		t.Fatalf("status = %q, want 'ok'", resp.Status)
+	}
+	if resp.Load == nil {
+		t.Fatalf("expected non-nil response.Load")
+	}
+	if resp.Load.Running != 1 {
+		t.Errorf("Load.Running = %d, want 1", resp.Load.Running)
+	}
+	if resp.Load.Waiting != 1 {
+		t.Errorf("Load.Waiting = %d, want 1", resp.Load.Waiting)
+	}
+	if resp.Load.TokensInUse != 50 {
+		t.Errorf("Load.TokensInUse = %d, want 50", resp.Load.TokensInUse)
+	}
+	if resp.Load.QueuedTokens != 30 {
+		t.Errorf("Load.QueuedTokens = %d, want 30", resp.Load.QueuedTokens)
+	}
+	if resp.Load.Admitted != 1 {
+		t.Errorf("Load.Admitted = %d, want 1", resp.Load.Admitted)
+	}
+	if resp.Load.Queued != 1 {
+		t.Errorf("Load.Queued = %d, want 1", resp.Load.Queued)
+	}
+
+	// 2. Test with "load" op
+	conn2, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("net.Dial unix for load: %v", err)
+	}
+	defer conn2.Close()
+
+	ipcReq2 := `{"op":"load"}` + "\n"
+	if _, err := conn2.Write([]byte(ipcReq2)); err != nil {
+		t.Fatalf("conn2.Write load: %v", err)
+	}
+
+	line2, err := bufio.NewReader(conn2).ReadBytes('\n')
+	if err != nil {
+		t.Fatalf("read IPC response for load: %v", err)
+	}
+
+	var resp2 controlIPCResponse
+	if err := json.Unmarshal(line2, &resp2); err != nil {
+		t.Fatalf("unmarshal IPC load response: %v", err)
+	}
+	if resp2.Status != "ok" {
+		t.Fatalf("status = %q, want 'ok'", resp2.Status)
+	}
+	if resp2.Load == nil {
+		t.Fatalf("expected non-nil response.Load for load op")
+	}
+	if resp2.Load.Running != 1 || resp2.Load.Waiting != 1 || resp2.Load.TokensInUse != 50 || resp2.Load.QueuedTokens != 30 {
+		t.Errorf("unexpected Load fields for load op: %+v", resp2.Load)
+	}
+}

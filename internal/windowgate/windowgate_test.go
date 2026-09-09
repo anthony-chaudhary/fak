@@ -722,6 +722,9 @@ func TestScanFilesScopesToSuppliedSetNotWholeTree(t *testing.T) {
 // and untracked worktree .ps1 task installers, window-suppressing .py modules,
 // and hard-ratcheted Go helpers must be clean.
 func TestTrackedTreeHasNoPopups(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping whole-tree scan in short mode")
+	}
 	rep, err := ScanTree(repoRoot(t))
 	if err != nil {
 		t.Fatalf("scan: %v", err)
@@ -797,6 +800,91 @@ func TestWindowgateTestsHaveNoUnsuppressedStartProcess(t *testing.T) {
 				t.Errorf("%s:%d: Start-Process missing -NoNewWindow flag (required to prevent Windows Terminal ConPTY 0x800700e8)", rel, i+1)
 			}
 		}
+	}
+}
+
+func TestScanContentAndScript(t *testing.T) {
+	safePS := "$p = New-ScheduledTaskPrincipal -UserId SYSTEM -LogonType ServiceAccount\n" +
+		"Register-ScheduledTask -TaskName T -Action $a -Principal $p\n"
+	unsafePSInstaller := "Register-ScheduledTask -TaskName T -Action $a\n"
+	unsafePSStartProc := "Start-Process -FilePath notepad.exe\n"
+
+	safePy := "from tools.window_suppression import no_window_creationflags\n" +
+		"subprocess.run(['git', 'status'], creationflags=no_window_creationflags())\n"
+	unsafePy := "from tools.window_suppression import no_window_creationflags\n" +
+		"subprocess.run(['git', 'status'])\n"
+
+	// ScanContent 2-arg calls
+	if v := ScanContent("task.ps1", safePS); len(v) != 0 {
+		t.Fatalf("expected 0 violations for safe PS1, got %v", v)
+	}
+	if v := ScanContent("task.ps1", unsafePSInstaller); len(v) != 1 {
+		t.Fatalf("expected 1 violation for unsafe PS1 installer, got %v", v)
+	}
+	if v := ScanContent("task.ps1", unsafePSStartProc); len(v) != 1 {
+		t.Fatalf("expected 1 violation for unsafe PS1 start-process, got %v", v)
+	}
+	if v := ScanContent("run.py", safePy); len(v) != 0 {
+		t.Fatalf("expected 0 violations for safe Py, got %v", v)
+	}
+	if v := ScanContent("run.py", unsafePy); len(v) != 1 {
+		t.Fatalf("expected 1 violation for unsafe Py, got %v", v)
+	}
+
+	// ScanContent 1-arg calls
+	if v := ScanContent(safePS); len(v) != 0 {
+		t.Fatalf("expected 0 violations for safe PS1 content, got %v", v)
+	}
+	if v := ScanContent(unsafePSInstaller); len(v) < 1 {
+		t.Fatalf("expected violation for unsafe PS1 installer content, got %v", v)
+	}
+
+	// ScanScript calls
+	if v := ScanScript("task.ps1", safePS); len(v) != 0 {
+		t.Fatalf("expected 0 violations for safe PS script, got %v", v)
+	}
+	if v := ScanScript("task.ps1", unsafePSStartProc); len(v) != 1 {
+		t.Fatalf("expected 1 violation for unsafe PS script, got %v", v)
+	}
+	if v := ScanScript("run.py", unsafePy); len(v) != 1 {
+		t.Fatalf("expected 1 violation for unsafe Py script, got %v", v)
+	}
+	if v := ScanScript(safePS); len(v) != 0 {
+		t.Fatalf("expected 0 violations for 1-arg ScanScript, got %v", v)
+	}
+}
+
+func TestScanGoFileForExec(t *testing.T) {
+	safeGo := `package fak
+import "os/exec"
+import "github.com/anthony-chaudhary/fak/internal/windowgate"
+func run() {
+	cmd := exec.Command("git", "status")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	_ = cmd.Run()
+}`
+
+	unsafeGo := `package fak
+import "os/exec"
+func run() {
+	cmd := exec.Command("git", "status")
+	_ = cmd.Run()
+}`
+
+	// 2-arg calls
+	if v := ScanGoFileForExec("cmd/fak/dispatch_worker.go", safeGo); len(v) != 0 {
+		t.Fatalf("expected 0 violations for safe Go helper, got %v", v)
+	}
+	if v := ScanGoFileForExec("cmd/fak/dispatch_worker.go", unsafeGo); len(v) != 1 {
+		t.Fatalf("expected 1 violation for unsafe Go helper, got %v", v)
+	}
+
+	// 1-arg call (defaults to hard background helper path)
+	if v := ScanGoFileForExec(safeGo); len(v) != 0 {
+		t.Fatalf("expected 0 violations for 1-arg safe Go, got %v", v)
+	}
+	if v := ScanGoFileForExec(unsafeGo); len(v) != 1 {
+		t.Fatalf("expected 1 violation for 1-arg unsafe Go, got %v", v)
 	}
 }
 

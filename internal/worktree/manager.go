@@ -50,9 +50,12 @@ type WorktreeContext struct {
 
 // EnvList returns the isolated git environment variables as KEY=VALUE slice.
 func (w *WorktreeContext) EnvList() []string {
-	var res []string
+	if len(w.Env) == 0 {
+		return nil
+	}
+	res := make([]string, 0, len(w.Env))
 	for k, v := range w.Env {
-		res = append(res, fmt.Sprintf("%s=%s", k, v))
+		res = append(res, k+"="+v)
 	}
 	return res
 }
@@ -230,4 +233,10 @@ func (m *Manager) Deallocate(ctx context.Context, ticketID string, keepBranch bo
 	}
 
 	return nil
+}
+
+// Release deallocates the ephemeral worktree and removes its branch.
+// It is equivalent to Deallocate(ctx, ticketID, false).
+func (m *Manager) Release(ctx context.Context, ticketID string) error {
+	return m.Deallocate(ctx, ticketID, false)
 }

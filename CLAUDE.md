@@ -35,13 +35,15 @@ The six that will bite you if you skip them:
   pre-flight sync with trunk (`fak sync check`, `fak sync reconcile --apply`, or `fak sync apply`),
   verify on-device (`fak validate --mine <paths>`, `go test ./internal/<pkg>/...`), commit by explicit path
   (`fak commit --path <p> -m "<subject> (fak <leaf>)"` or `fak sweep --apply --lane <lane> -m "<subject>"`), and push unprompted via `fak sync push` or `fak commit --push`.
-  "Green" requires shift-left proof: for changes touching executable CLI verbs, gateway adapters, or runtime logic,
-  execute real paths in dogfood or integration tests rather than relying on mock-only or shallow tests.
+  "Green" requires shift-left proof: for changes touching executable CLI verbs, gateway adapters, runtime logic, or hardware/compute paths,
+  execute real paths in dogfood, integration tests, or live hardware sub-component runs rather than relying on mock-only or shallow tests.
+  Bias heavily toward testing sub-components on live physical hardware (divide and conquer) with high volume and frequency (e.g. `fak validate --strix --subkernels=...`, `make mac-perf`, `make cuda-test`).
   Safe merge discipline: verify no in-flight `MERGE_HEAD` exists before staging (if active, unstage and wait; never clobber, abort, or finish a peer's merge); use `fak sync apply` (`--ff-only`) for clean trunk convergence; route divergence via `fak sync reconcile` (disjoint integration, superset merge, or dirty parking via `fak wip park`); never force-push, use `--autostash`, or perform raw 3-way merges.
   Dual-repo synchronization invariant: when working across both repos or touching shared interfaces (`pkg/*`), keep both `fak` and `fak-private` synchronized (fetch both remotes and `refs/fak/locks/*`, fast-forward both, sync `go.work` to prevent module skew, and audit with public leak scrub `tools/scrub_public_copy.py --audit-staged`). Cross-repo issue quoting rule: bare `#<num>` strictly denotes a public `fak` issue; quoting a `fak-private` issue in public `fak` MUST be explicitly qualified as `fak-private#<num>` (or `anthony-chaudhary/fak-private#<num>`) to ensure provenance is unambiguous. Full default + verify command in [`AGENTS.md`](AGENTS.md).
 - **Divide and conquer: Delegate substantive work and keep this coordinator context clean; enforce capability-aware scoping and persistence** —
   structurally drive 10x subagent adoption by launching 4–8 (up to 16 on multi-core hosts) specialized subagents concurrently across pairwise tree-disjoint lanes.
   Decompose substantive or multi-part requests into atomic single-concern units and deploy multi-agent triads per leaf (researcher/explore -> worker -> cross-validator/issue-auditor).
+  Divide and conquer applies equally to hardware verification: isolate compute workloads into discrete sub-components (sub-kernels, GEMV/GEMM microbenchmarks, Vulkan primitives) to test on live physical devices early and often, rather than bottlenecking on monolithic full-model runs.
   Top-level coordinator (depth 0) aggressively fans out parallel subagents; leaf workers (depth 1) execute directly within assigned package boundaries and must NOT invoke nested `task` calls (preventing recursion depth exhaustion, #12028).
   Use guarded headless agents or equivalent isolated workers for investigation,
   implementation, tests, and review. Constrain smaller models and workers to atomic S0/S1 leaf units (1–3 files,

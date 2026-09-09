@@ -205,7 +205,28 @@ func expandLandPaths(wtPath, diffRef string, requested []string, git GitRunner) 
 	sort.Strings(expanded)
 	return expanded, nil
 }
-func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, git GitRunner, opts ...LandOption) (res Result) {
+
+// ProspectiveVerifyHook verifies the exact detached prospective commit built for a
+// CAS attempt. A non-nil materializationErr means no safe candidate checkout was
+// available; the hook must return its fail-closed refusal without inspecting dir.
+type ProspectiveVerifyHook func(dir string, materializationErr error) Result
+
+func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, git GitRunner, opts ...LandOption) Result {
+	return land(root, wtPath, baseSHA, commitMsgFile, paths, verify, nil, git, opts...)
+}
+
+// LandProspectiveVerified is Land with an additional fail-closed gate over the
+// exact post-normalization candidate built for every CAS attempt. It always uses
+// isolated candidate construction, requires explicit paths so post-CAS sync is
+// exact, and never falls back to the shared-index path.
+func LandProspectiveVerified(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, prospectiveVerify ProspectiveVerifyHook, git GitRunner, opts ...LandOption) Result {
+	if prospectiveVerify == nil {
+		return Result{OK: false, Reason: "prospective verification hook is required"}
+	}
+	return land(root, wtPath, baseSHA, commitMsgFile, paths, verify, prospectiveVerify, git, opts...)
+}
+
+func land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, prospectiveVerify ProspectiveVerifyHook, git GitRunner, opts ...LandOption) (res Result) {
 	cfg := newLandConfig(opts)
 	tracker := newLandProgressTracker(cfg)
 	cfg.tracker = tracker
@@ -268,6 +289,9 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	namesRC, names := run(git, wtPath, []string{"diff", "--name-only", diffRef})
 	if namesRC != 0 {
 		names = ""
+	}
+	if prospectiveVerify != nil && len(paths) == 0 {
+		return prospectiveVerify("", fmt.Errorf("explicit land paths are required for an isolated verified prospective commit"))
 	}
 	tracker.setPatchScope(countPatchScopeFiles(names), int64(len(diff)))
 	droppedOutOfLane := 0
@@ -333,6 +357,14 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	}
 
 	landingOp := func() Result {
+		if prospectiveVerify != nil {
+			r, _ := landIsolatedProspectiveVerified(root, wtPath, diff, msgFile, paths, prospectiveVerify, verify, git, isolatedGitEnv, cfg)
+			r.DroppedOutOfLane = droppedOutOfLane
+			if r.OK && r.Committed {
+				r.Code = LandResultSuccess
+			}
+			return r
+		}
 		// Default-on race-free layer-2 land: stage+commit through a THROWAWAY
 		// index so the shared index is never a sweep target. Any inability to
 		// isolate is a terminal preserved refusal; only an explicit env opt-out
@@ -585,6 +617,10 @@ func parseIsolatedArgs(args []any) (VerifyHook, GitRunner, GitEnvRunner, landCon
 // see the landed change, matching the baseline post-state; a sync hiccup is reported
 // but does NOT unland.
 func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...any) (Result, bool) {
+	return landIsolatedProspectiveVerified(root, wtPath, diff, msgFile, paths, nil, args...)
+}
+
+func landIsolatedProspectiveVerified(root, wtPath, diff, msgFile string, paths []string, prospectiveVerify ProspectiveVerifyHook, args ...any) (Result, bool) {
 	verify, git, genv, cfg := parseIsolatedArgs(args)
 	tracker := cfg.tracker
 	finishIsolationAdmission := beginLandPhase(tracker, "isolated-admission", 0)
@@ -744,6 +780,36 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 		}
 		lastCommit = newCommit
 		lastBase = oldHEAD
+		if prospectiveVerify != nil {
+			finishVerify := beginLandPhase(tracker, "prospective-commit-verification", attempt)
+			prospectiveRan := false
+			prospectiveResult := Result{}
+			combinedVerify := func(dir string) (bool, string) {
+				prospectiveRan = true
+				prospectiveResult = prospectiveVerify(dir, nil)
+				if !prospectiveResult.OK {
+					return false, prospectiveResult.Detail
+				}
+				if verify != nil {
+					return verify(dir)
+				}
+				return true, ""
+			}
+			ok, detail := verifyTopologyCandidate(root, newCommit, "", combinedVerify, git)
+			finishVerify()
+			if !ok {
+				if !prospectiveRan {
+					return prospectiveVerify("", fmt.Errorf("could not materialize exact prospective commit: %s", detail)), true
+				}
+				if !prospectiveResult.OK {
+					return prospectiveResult, true
+				}
+				return isolatedLandReconciliationResult(wtPath, Result{
+					Reason: "post-merge compilation verification failed, refusing CAS update: " + detail,
+					Detail: detail,
+				}), true
+			}
+		}
 		// Name the off-branch commit before trunk CAS. A process crash from here on
 		// leaves an observable, GC-safe recovery candidate instead of a dangling SHA.
 		finishRecovery := beginLandPhase(tracker, "recovery-ref-publication", attempt)
@@ -763,7 +829,7 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 		}
 		finishRecovery()
 
-		if verify != nil {
+		if prospectiveVerify == nil && verify != nil {
 			finishVerify := beginLandPhase(tracker, "post-merge-validation", attempt)
 			ok, detail := verifyTopologyCandidate(root, newCommit, "", verify, git)
 			finishVerify()

@@ -55,6 +55,7 @@ on multi-core hosts) specialized subagents concurrently across pairwise tree-dis
 - **Depth-0 Coordinator vs. Depth-1 Leaf Worker**:
   - *Top-level coordinator (depth 0)*: Aggressively fans out parallel subagents across the 3-tier pipeline, arbitrates lane leases (`dos arbitrate`), and collects compact receipts.
   - *Leaf worker (depth 1)*: Executes directly within assigned package boundaries (1–3 files, package-scoped tests). Leaf workers must NOT invoke nested `task` calls (preventing recursion depth exhaustion, #12028). Autonomous safe sync landing (`fak sync`, `fak commit --path`, `fak sync push`) is active by default working within each worker process upon test verification. Subagents and leaf workers are strictly banned from creating new PowerShell (`.ps1`) or shell (`.sh`, `.bat`) scripts; all automation, test helpers, and tooling MUST be native Go programs.
+- **Shift-left sub-component testing on live hardware (divide and conquer)**: When changes touch hardware, compute kernels, or accelerator paths (CUDA, Vulkan, Metal, APU/UMA), divide and conquer the compute pipeline into isolated sub-components (compute sub-kernels, GEMV/GEMM microbenchmarks, quantized matmul tiles, KV contiguization, attention blocks, P2P bus transfers, clock/governor states). Bias heavily toward testing these sub-components directly on live physical hardware (e.g. `fak validate --strix --subkernels=...`, `fak-dev amd-strix-validate`, `make mac-perf`, `make cuda-test`) early, with high volume, and high frequency throughout the inner loop. Sub-component verification executes in seconds, isolates regressions directly to the failing primitive, and establishes physical proof before full-model assembly.
 - **Tree-disjoint boundaries**: Assign each worker a distinct, non-overlapping file set to avoid
   concurrent collisions on the shared trunk.
 - **Isolate and witness**: Keep heavy command logs and raw transcripts in worker boundaries; pull
@@ -234,6 +235,14 @@ pattern and types each hit to a sanctioned-node redirect (the hardware-gate dual
 local-hardware blocker as terminal (`--hardware-gate enforce`), feeding the redirect back so the
 agent dispatches instead of stopping. `fak guard-stops` tallies the pattern for the soak → promote read.
 
+### Shift-left sub-component testing on live hardware (divide and conquer)
+
+Shift real hardware testing left into the active development loop by decomposing compute workloads into isolated sub-components (compute sub-kernels, GEMV/GEMM microbenchmarks, Vulkan compute primitives, quantized matmuls, KV contiguization, attention blocks, memory bus P2P, clock/governor states). Test these sub-components on live hardware more often and in greater volume across parallel subagent runs:
+- **AMD Strix Halo APU (`strix-agent` / `strix1`)**: Validate sub-kernels directly with `fak validate --strix --subkernels=<names> --ablate=<arms>` or `fak-dev amd-strix-validate --subkernels=all --ablate=all`.
+- **Apple Silicon Metal**: Verify Metal tok/s and prefill on-device via `make mac-perf`.
+- **CUDA / Cloud GPU**: Verify kernel acceptance on-device via `make cuda-accept` or `internal/compute/build_cuda.sh test` on the GPU host.
+Testing sub-components on physical hardware provides fast, deterministic proof (seconds per sub-kernel vs. hours for full-model serving) without memory contention or weight-loading overhead, isolating regressions to the exact failing primitive.
+
 ## Proof by default (every issue fix ships its evidence)
 
 This kernel exists because a self-report is not a fact. Hold your own fixes to the same bar:
@@ -260,6 +269,7 @@ just a code change and a "looks fixed". Pick the witness the bug actually has:
   completion. A green unit test that only asserts mocks or verifies syntax without executing the
   real path is unproven and must not be declared done. Shift left: prove execution early during
   development, never deferring validation to post-merge or scheduled nightly runs.
+- **Compute / Hardware / Accelerators** (CUDA, Vulkan, Metal, APU/UMA kernels, quantization, memory layout): the proof is a **live hardware execution witness** of the affected sub-component on a physical target, not a host mock or synthetic emulator. Bias toward testing sub-components on live hardware (divide and conquer): test isolated sub-kernels and primitives early, frequently, and with high volume (`fak validate --strix --subkernels=...`, `make mac-perf`, `make cuda-test`). Physical silicon execution witnesses true hardware timing, register pressure, memory coalescing, and arithmetic precision.
 - **"Shipped / done" claims**: a witnessed commit (`dos verify`, the `(fak <leaf>)` trailer) — see
   the witness rules below. A subject line is forgeable; the diff and the registry are not.
 

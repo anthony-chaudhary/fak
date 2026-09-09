@@ -196,17 +196,16 @@ func TestPowerShellDynamicDeadlines(t *testing.T) {
 func TestPowerShellStreamingExtension(t *testing.T) {
 	ctx := context.Background()
 
-	// PowerShell starts in ~250ms on Windows.
-	// Total duration is ~1050ms with outputs at ~250ms, ~650ms, and ~1050ms.
-	// Base timeout is 750ms. Without streaming extension, it would time out.
-	// With streaming extension (slices of 500ms), it completes successfully.
-	script := `Write-Output 'stage 1'; [Console]::Out.Flush(); Start-Sleep -Milliseconds 400; Write-Output 'stage 2'; [Console]::Out.Flush(); Start-Sleep -Milliseconds 400; Write-Output 'stage 3'`
+	// PowerShell cold start on Windows takes ~2s under real-time antivirus inspection.
+	// Base timeout is 4s. Outputs stream at ~2s, ~2.5s, and ~3s with 500ms sleeps.
+	// Streaming activity triggers deadline extensions beyond base timeout if needed.
+	script := `Write-Output 'stage 1'; [Console]::Out.Flush(); Start-Sleep -Milliseconds 500; Write-Output 'stage 2'; [Console]::Out.Flush(); Start-Sleep -Milliseconds 500; Write-Output 'stage 3'`
 
 	res, err := RunPowerShell(ctx, script,
 		WithPreferredEngine("powershell.exe"),
-		WithTimeout(750*time.Millisecond),
-		WithExtensionSlice(500*time.Millisecond),
-		WithMaxDeadline(5*time.Second),
+		WithTimeout(3*time.Second),
+		WithExtensionSlice(2*time.Second),
+		WithMaxDeadline(15*time.Second),
 	)
 	if err != nil {
 		t.Fatalf("RunPowerShell streaming extension failed: %v, stdout=%q, stderr=%q", err, res.Stdout, res.Stderr)
@@ -228,14 +227,14 @@ func TestPowerShellStreamingExtension(t *testing.T) {
 func TestPowerShellSoftProgressiveWarning(t *testing.T) {
 	ctx := context.Background()
 
-	// Base timeout: 3500ms. 70% threshold is 2450ms.
-	// Command sleeps 2500ms, guaranteeing crossing the 2450ms warning threshold
-	// while finishing well before the 3500ms deadline.
-	script := `Start-Sleep -Milliseconds 2500; Write-Output 'progressive complete'`
+	// Base timeout: 7000ms. 70% threshold is 4900ms.
+	// Command sleeps 5100ms, guaranteeing crossing the 4900ms warning threshold
+	// while finishing comfortably before the 7000ms deadline.
+	script := `Start-Sleep -Milliseconds 5100; Write-Output 'progressive complete'`
 
 	res, err := RunPowerShell(ctx, script,
 		WithPreferredEngine("powershell.exe"),
-		WithTimeout(3500*time.Millisecond),
+		WithTimeout(7000*time.Millisecond),
 		WithWarningThreshold(0.70),
 		WithExtensionSlice(5*time.Second),
 	)

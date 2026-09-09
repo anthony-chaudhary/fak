@@ -57,6 +57,33 @@ func (t *Tree) ConfigureRemoteSnapshotStore(store SnapshotStore, modelID string,
 	return nil
 }
 
+// AttachRemoteSnapshotStore attaches or reconfigures the remote snapshot store at runtime.
+func (t *Tree) AttachRemoteSnapshotStore(store SnapshotStore, modelID string, backend compute.Backend, cfg model.Config) error {
+	return t.ConfigureRemoteSnapshotStore(store, modelID, backend, cfg)
+}
+
+// DetachRemoteSnapshotStore detaches the remote snapshot store at runtime.
+func (t *Tree) DetachRemoteSnapshotStore(ctx context.Context) error {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
+	if t == nil {
+		return nil
+	}
+	t.remoteSnapshotStore = nil
+	t.remoteModelID = ""
+	t.remoteBackend = nil
+	t.remoteConfig = model.Config{}
+	return nil
+}
+
+// HasRemoteSnapshotStore returns true if a remote snapshot store is attached.
+func (t *Tree) HasRemoteSnapshotStore() bool {
+	return t != nil && t.remoteSnapshotStore != nil
+}
+
 // RemoteL3Breaker returns the circuit breaker guarding remote L3 snapshot reads.
 func (t *Tree) RemoteL3Breaker() *RemoteL3Breaker {
 	if t == nil {
