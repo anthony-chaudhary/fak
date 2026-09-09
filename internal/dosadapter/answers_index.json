@@ -1,0 +1,1154 @@
+[
+  {
+    "answer": "The duty to verify is non-delegable: you can't hand it to the tool that wrote the cite. The checkable half \u2014 *does this case exist?* \u2014 you can automate against a source the AI didn't author. `pip install \"dos-kernel[mcp]\"`, then `citation-resolve`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos doctor"
+    ],
+    "path": "docs/answers/aba-512-verify-ai-citations-duty.md",
+    "queries": [
+      "does ABA Opinion 512 require me to verify AI-generated citations",
+      "a lawyer's duty to verify AI-generated case law citations"
+    ],
+    "question": "Does ABA Opinion 512 require me to verify AI-generated citations \u2014 and how?",
+    "slug": "aba-512-verify-ai-citations-duty",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/aba-512-verify-ai-citations-duty.md"
+  },
+  {
+    "answer": "If your runtime can run a shell command and read `$?`, it can enforce DOS \u2014 no plugin, no hook adapter, no MCP client. `pip install dos-kernel`, then `dos verify` (or `dos commit-audit`): the exit code IS the verdict \u2014 `0` shipped, non-zero not. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit",
+      "dos hook-exit",
+      "dos init",
+      "dos verify"
+    ],
+    "path": "docs/answers/add-a-trust-gate-with-only-exit-codes.md",
+    "queries": [
+      "how to add an agent trust gate using only exit codes no plugin system",
+      "trust gate for an agent runtime that has no hook or MCP system",
+      "make a git pre-push hook reject an over-claiming AI commit"
+    ],
+    "question": "How do I add an agent trust gate using only exit codes, no plugin system?",
+    "slug": "add-a-trust-gate-with-only-exit-codes",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/add-a-trust-gate-with-only-exit-codes.md"
+  },
+  {
+    "answer": "Host your own marketplace \u2014 a git repo with a `.claude-plugin/marketplace.json` catalog \u2014 and list the DOS plugin in it with a `source` pinned to a commit you reviewed. Your team runs `/plugin marketplace add your-org/claude-plugins` then `/plugin install dos-kernel@<your-marketplace>`, and DOS's hooks + MCP tools + skills arrive from a repo **you** control. The one DOS-specific catch: a plugin install copies files, not Python packages, so your image or onboarding must also `pip install \"dos-kernel[mcp]\"` into the interpreter Claude Code launches. The package is `dos-kernel` (the bare `dos` on PyPI is an unrelated squatter).",
+    "commands": [
+      "dos doctor",
+      "dos path"
+    ],
+    "path": "docs/answers/add-the-dos-plugin-to-a-private-company-marketplace.md",
+    "queries": [],
+    "question": "How do I add the DOS plugin to a private company Claude Code marketplace?",
+    "slug": "add-the-dos-plugin-to-a-private-company-marketplace",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/add-the-dos-plugin-to-a-private-company-marketplace.md"
+  },
+  {
+    "answer": "\"Fixed it\" is a claim; a commit that changes the buggy code (and a test that goes red\u2192green) is the evidence. `pip install dos-kernel`, then `dos verify` / `dos commit-audit` / `dos test-witness`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit",
+      "dos test-witness",
+      "dos verify"
+    ],
+    "path": "docs/answers/agent-claimed-it-fixed-the-bug-but-it-didnt.md",
+    "queries": [
+      "my AI agent claimed it fixed the bug but it didn't"
+    ],
+    "question": "My AI agent claimed it fixed the bug, but it didn't",
+    "slug": "agent-claimed-it-fixed-the-bug-but-it-didnt",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/agent-claimed-it-fixed-the-bug-but-it-didnt.md"
+  },
+  {
+    "answer": "Hand a peer a verified status digest with no \"claimed\" field \u2014 only the witnessed effect. `pip install dos-kernel`, then `dos status` / `dos verify`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos status",
+      "dos verify"
+    ],
+    "path": "docs/answers/agent-to-agent-proof-that-work-landed.md",
+    "queries": [
+      "how do agents prove to each other that work actually landed"
+    ],
+    "question": "How do agents prove to each other that work actually landed (agent-to-agent trust)",
+    "slug": "agent-to-agent-proof-that-work-landed",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/agent-to-agent-proof-that-work-landed.md"
+  },
+  {
+    "answer": "Making the build green by deleting the test is specification gaming \u2014 and you catch it by reading the world's state, not the agent's \"build passes\". `pip install dos-kernel`, then `dos test-witness` / `dos commit-audit`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit",
+      "dos test-witness"
+    ],
+    "path": "docs/answers/ai-agent-deleted-my-tests-to-pass-the-build.md",
+    "queries": [
+      "my AI agent deleted my tests to make the build pass"
+    ],
+    "question": "My AI agent deleted my tests to make the build pass",
+    "slug": "ai-agent-deleted-my-tests-to-pass-the-build",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/ai-agent-deleted-my-tests-to-pass-the-build.md"
+  },
+  {
+    "answer": "\"Tests pass\" is a sentence; the test runner's exit code and the world's actual state are the evidence. Read those: `pip install dos-kernel`, then `dos test-witness` / `dos coverage`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos coverage",
+      "dos test-witness"
+    ],
+    "path": "docs/answers/ai-agent-said-tests-pass-but-app-is-broken.md",
+    "queries": [
+      "my AI agent said all tests pass but the app is still broken"
+    ],
+    "question": "My AI agent said \"all tests pass\" but the app is still broken",
+    "slug": "ai-agent-said-tests-pass-but-app-is-broken",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/ai-agent-said-tests-pass-but-app-is-broken.md"
+  },
+  {
+    "answer": "A grader that reads the agent's output can be gamed; one that reads an effect the agent didn't author can't. `pip install dos-kernel`, then `dos reward` / `dos commit-audit`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit",
+      "dos reward"
+    ],
+    "path": "docs/answers/ai-agents-that-game-swe-bench-benchmark-cheating.md",
+    "queries": [
+      "AI agents that game SWE-bench how to catch benchmark cheating"
+    ],
+    "question": "AI agents that game SWE-bench \u2014 how benchmark cheating works and how to catch it",
+    "slug": "ai-agents-that-game-swe-bench-benchmark-cheating",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/ai-agents-that-game-swe-bench-benchmark-cheating.md"
+  },
+  {
+    "answer": "A test that passes whether or not the code is correct witnesses nothing \u2014 it's green theater. The mechanical name for it is **VACUOUS**, and you get that verdict from a witness the agent didn't author: `pip install dos-kernel`, then `dos test-witness`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos test-witness"
+    ],
+    "path": "docs/answers/ai-generated-tests-that-pass-but-test-nothing.md",
+    "queries": [
+      "my AI writes tests that pass but test nothing",
+      "AI generated tests that always pass and assert nothing"
+    ],
+    "question": "My AI writes tests that pass but test nothing",
+    "slug": "ai-generated-tests-that-pass-but-test-nothing",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/ai-generated-tests-that-pass-but-test-nothing.md"
+  },
+  {
+    "answer": "When an agent mocks the database, the network, and the very function under test, the test asserts that a fake returned a fake \u2014 it passes no matter what the real code does. That's a test that witnesses nothing, and you catch it with a witness the agent didn't author: `pip install dos-kernel`, then `dos test-witness`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos test-witness"
+    ],
+    "path": "docs/answers/ai-mocks-everything-tests-are-useless.md",
+    "queries": [
+      "my AI agent mocks everything and the tests are useless"
+    ],
+    "question": "My AI agent mocks everything and the tests are useless",
+    "slug": "ai-mocks-everything-tests-are-useless",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/ai-mocks-everything-tests-are-useless.md"
+  },
+  {
+    "answer": "A \"real\" test fails when the code is wrong. You find out whether an AI-generated test is real \u2014 not lying \u2014 by running it against the code *without* the change and requiring it to fail: `pip install dos-kernel`, then `dos test-witness`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos test-witness"
+    ],
+    "path": "docs/answers/are-my-ai-generated-tests-real.md",
+    "queries": [
+      "how do I tell if my AI-generated tests are real or just lying"
+    ],
+    "question": "How do I tell if my AI-generated tests are real or just lying to me",
+    "slug": "are-my-ai-generated-tests-real",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/are-my-ai-generated-tests-real.md"
+  },
+  {
+    "answer": "Audit each commit's subject against its own diff, author-neutrally \u2014 a forgeable message vs the diff git wrote. `pip install dos-kernel`, then `dos commit-audit`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit"
+    ],
+    "path": "docs/answers/audit-which-commits-were-ai-and-did-they-ship.md",
+    "queries": [
+      "how to audit AI-generated commits across a repo which were AI and did they ship"
+    ],
+    "question": "How to audit AI-generated commits across a repo \u2014 which were AI, and did they ship real work",
+    "slug": "audit-which-commits-were-ai-and-did-they-ship",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/audit-which-commits-were-ai-and-did-they-ship.md"
+  },
+  {
+    "answer": "A bare `dos arbitrate` (no `--lane`) asks the kernel to walk the workspace's autopick ladder and hand back a free lane whose file tree is disjoint from every live lease. `pip install dos-kernel`, then `dos arbitrate`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos arbitrate",
+      "dos enumerate",
+      "dos lease-lane",
+      "dos pickable"
+    ],
+    "path": "docs/answers/auto-pick-a-free-lane-for-an-agent.md",
+    "queries": [
+      "how does an agent auto-pick a free non-colliding lane to work in",
+      "let the kernel choose a free file tree for an agent without naming a lane",
+      "automatically route an agent to a disjoint file region"
+    ],
+    "question": "How does an agent auto-pick a free, non-colliding lane to work in?",
+    "slug": "auto-pick-a-free-lane-for-an-agent",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/auto-pick-a-free-lane-for-an-agent.md"
+  },
+  {
+    "answer": "Decide admission at the write, from the file the agent is about to touch: `pip install dos-kernel`, then `dos arbitrate` wired into a PreToolUse hook. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos arbitrate",
+      "dos init"
+    ],
+    "path": "docs/answers/block-an-out-of-lane-file-write-at-pretooluse.md",
+    "queries": [
+      "how to block an out-of-lane file write before the agent makes it PreToolUse"
+    ],
+    "question": "How to block an out-of-lane file write before the agent makes it (PreToolUse)",
+    "slug": "block-an-out-of-lane-file-write-at-pretooluse",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/block-an-out-of-lane-file-write-at-pretooluse.md"
+  },
+  {
+    "answer": "Make the validator read an effect the generator didn't author, so the two can't collude. `pip install dos-kernel`, then `dos verify` / `dos commit-audit`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit",
+      "dos test-witness",
+      "dos verify"
+    ],
+    "path": "docs/answers/builder-validator-chain-separate-generator-from-evaluator.md",
+    "queries": [
+      "how to build a builder-validator chain that separates generator from evaluator"
+    ],
+    "question": "How to build a builder-validator chain \u2014 separate the generator from the evaluator",
+    "slug": "builder-validator-chain-separate-generator-from-evaluator",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/builder-validator-chain-separate-generator-from-evaluator.md"
+  },
+  {
+    "answer": "Trust the diff and the shipped phase, not the PR description: `pip install dos-kernel`, then `dos commit-audit` / `dos verify`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit",
+      "dos test-witness",
+      "dos verify"
+    ],
+    "path": "docs/answers/can-i-trust-a-coding-agents-pull-request.md",
+    "queries": [
+      "can I trust an AI coding agent's pull request"
+    ],
+    "question": "Can I trust an AI coding agent's pull request \u2014 how do I check it landed real work",
+    "slug": "can-i-trust-a-coding-agents-pull-request",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/can-i-trust-a-coding-agents-pull-request.md"
+  },
+  {
+    "answer": "An empty commit is a \"done\" with no diff behind it \u2014 and a subject-only claim never counts as shipped. `pip install dos-kernel`, then `dos commit-audit` / `dos verify`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit",
+      "dos verify"
+    ],
+    "path": "docs/answers/catch-allow-empty-shipped-fake-done.md",
+    "queries": [
+      "how to catch an empty commit allow-empty shipped fake done"
+    ],
+    "question": "How to catch an empty commit / `--allow-empty \"shipped\"` fake-done",
+    "slug": "catch-allow-empty-shipped-fake-done",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/catch-allow-empty-shipped-fake-done.md"
+  },
+  {
+    "answer": "Read the effect the tool was supposed to have, not the agent's transcript of \"I ran it\". `pip install dos-kernel`, then `dos commit-audit` / `dos verify`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit",
+      "dos verify"
+    ],
+    "path": "docs/answers/catch-an-agent-that-fakes-tool-calls-or-output.md",
+    "queries": [
+      "how to catch an AI agent that fakes tool calls or fabricates output"
+    ],
+    "question": "How to catch an AI agent that fakes tool calls or fabricates command output",
+    "slug": "catch-an-agent-that-fakes-tool-calls-or-output",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/catch-an-agent-that-fakes-tool-calls-or-output.md"
+  },
+  {
+    "answer": "Grade the recomputed value, not the asserted one: `pip install dos-kernel`, then the `formula_recompute` witness re-evaluates every cell. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that. (Run `dos doctor` to list the witnesses your install exposes.)",
+    "commands": [
+      "dos doctor"
+    ],
+    "path": "docs/answers/catch-fabricated-figures-in-agent-financial-output.md",
+    "queries": [
+      "how to catch fabricated figures in an AI agent's financial model output"
+    ],
+    "question": "How to catch fabricated figures in an AI agent's financial model output",
+    "slug": "catch-fabricated-figures-in-agent-financial-output",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/catch-fabricated-figures-in-agent-financial-output.md"
+  },
+  {
+    "answer": "Wire the check into the agent that writes the cite, so a fabricated case is caught the moment it's emitted \u2014 not in a post-hoc scan of a finished brief. `pip install \"dos-kernel[mcp]\"`, then the `citation-resolve` MCP tool resolves each cite against a third-party reporter. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos doctor"
+    ],
+    "path": "docs/answers/catch-fabricated-legal-citations-in-my-ai-agent.md",
+    "queries": [
+      "how to catch fabricated legal citations inside my AI agent before filing",
+      "MCP tool to verify case law a legal AI agent generated"
+    ],
+    "question": "How to catch fabricated legal citations inside my AI agent \u2014 before they reach a filing",
+    "slug": "catch-fabricated-legal-citations-in-my-ai-agent",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/catch-fabricated-legal-citations-in-my-ai-agent.md"
+  },
+  {
+    "answer": "Run `dos doctor --wiring` \u2014 it re-reads each runtime's config and reports `WIRED` / `DRIFTED` / `NOT_WIRED` with the event count, so a guardrail that quietly un-bound shows up as a verdict instead of staying invisible. `pip install dos-kernel`; a `DRIFTED` line means re-run `dos init --hooks <runtime>` to repair. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit",
+      "dos doctor",
+      "dos init",
+      "dos verify"
+    ],
+    "path": "docs/answers/check-the-agent-guardrail-hooks-havent-drifted.md",
+    "queries": [
+      "how to check my agent's trust-gate hooks haven't silently stopped enforcing",
+      "my guardrail hook stopped firing but nothing told me how to detect it",
+      "audit that my coding agent's trust gates didn't silently un-install"
+    ],
+    "question": "How do I check my agent's trust-gate hooks haven't silently stopped enforcing?",
+    "slug": "check-the-agent-guardrail-hooks-havent-drifted",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/check-the-agent-guardrail-hooks-havent-drifted.md"
+  },
+  {
+    "answer": "A green pipeline proves the tests it ran passed, not that the feature shipped. Check the feature's own evidence: `pip install dos-kernel`, then `dos verify` / `dos test-witness`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos test-witness",
+      "dos verify"
+    ],
+    "path": "docs/answers/ci-passed-but-the-feature-isnt-there.md",
+    "queries": [
+      "CI passed but the feature isn't there how to catch that"
+    ],
+    "question": "CI passed but the feature isn't there \u2014 how do I catch that",
+    "slug": "ci-passed-but-the-feature-isnt-there",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/ci-passed-but-the-feature-isnt-there.md"
+  },
+  {
+    "answer": "Coverage proves a line *ran*, not that a test would *fail if that line were wrong*. A suite can hit 100% coverage and catch nothing. The missing check is red\u2192green: `pip install dos-kernel`, then `dos test-witness` (does the test discriminate the change?) alongside `dos coverage` (did it execute the changed lines?). The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos coverage",
+      "dos test-witness"
+    ],
+    "path": "docs/answers/coverage-is-green-but-tests-are-worthless.md",
+    "queries": [
+      "100% coverage but the AI's tests are worthless"
+    ],
+    "question": "I have 100% coverage but the AI's tests are worthless",
+    "slug": "coverage-is-green-but-tests-are-worthless",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/coverage-is-green-but-tests-are-worthless.md"
+  },
+  {
+    "answer": "Don't ask the fleet which model is down \u2014 read it from the transcripts the workers left behind: `pip install dos-kernel`, then `dos model-health --session <transcript>` names the dead model across every descendant and `dos model-reroute` proposes a sibling. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos model-health",
+      "dos model-reroute",
+      "dos verify"
+    ],
+    "path": "docs/answers/detect-a-model-outage-mid-fleet-and-reroute.md",
+    "queries": [
+      "how to detect which model died across a fleet and reroute",
+      "one model is down across my agents how do I find which and fail over",
+      "roll up per-model failures across child and grandchild sessions"
+    ],
+    "question": "How do I detect which model died across a fleet and reroute?",
+    "slug": "detect-a-model-outage-mid-fleet-and-reroute",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/detect-a-model-outage-mid-fleet-and-reroute.md"
+  },
+  {
+    "answer": "A commit that claims work but changes nothing meaningful is caught by reading its diff, not its subject. `pip install dos-kernel`, then `dos commit-audit`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit"
+    ],
+    "path": "docs/answers/detect-a-no-op-commit-from-an-agent.md",
+    "queries": [
+      "how to detect a no-op commit from an AI agent"
+    ],
+    "question": "How to detect a no-op commit from an AI agent",
+    "slug": "detect-a-no-op-commit-from-an-agent",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/detect-a-no-op-commit-from-an-agent.md"
+  },
+  {
+    "answer": "Read whether the run is still producing real output, not whether it says it is: `pip install dos-kernel`, then `dos liveness` / `dos breaker`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos breaker",
+      "dos liveness"
+    ],
+    "path": "docs/answers/detect-a-runaway-agent-before-it-burns-the-budget.md",
+    "queries": [
+      "how to detect a runaway AI agent before it burns the token budget"
+    ],
+    "question": "How to detect a runaway AI agent before it burns the token budget",
+    "slug": "detect-a-runaway-agent-before-it-burns-the-budget",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/detect-a-runaway-agent-before-it-burns-the-budget.md"
+  },
+  {
+    "answer": "An agent that weakens its own rules is a commit you can audit \u2014 by authorship and by whether the edit loosens a directive. `pip install dos-kernel`, then `dos commit-audit`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit"
+    ],
+    "path": "docs/answers/detect-a-self-edited-claude-md-instruction-file.md",
+    "queries": [
+      "how to detect when an AI agent self-edited its CLAUDE.md or AGENTS.md instruction file"
+    ],
+    "question": "How to detect when an AI agent self-edited its CLAUDE.md / AGENTS.md instruction file",
+    "slug": "detect-a-self-edited-claude-md-instruction-file",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/detect-a-self-edited-claude-md-instruction-file.md"
+  },
+  {
+    "answer": "A rule in the prompt is advice the agent can ignore; a rule in a deterministic gate is enforcement it can't. `pip install dos-kernel`, then `dos commit-audit` as an exit-code gate. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit"
+    ],
+    "path": "docs/answers/deterministic-hook-vs-agent-skill-which-enforces.md",
+    "queries": [
+      "deterministic pre-commit hook vs an agent skill which actually enforces"
+    ],
+    "question": "Deterministic pre-commit hook vs an agent skill \u2014 which one actually enforces the rule",
+    "slug": "deterministic-hook-vs-agent-skill-which-enforces",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/deterministic-hook-vs-agent-skill-which-enforces.md"
+  },
+  {
+    "answer": "Yes \u2014 and a model's \"I committed it\" is a claim, not evidence. Check the artifact instead: `pip install dos-kernel`, then `dos verify` / `dos commit-audit`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit",
+      "dos verify"
+    ],
+    "path": "docs/answers/do-ai-coding-agents-lie-about-what-they-shipped.md",
+    "queries": [
+      "do AI coding agents lie about what they shipped"
+    ],
+    "question": "Do AI coding agents lie about what they shipped?",
+    "slug": "do-ai-coding-agents-lie-about-what-they-shipped",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/do-ai-coding-agents-lie-about-what-they-shipped.md"
+  },
+  {
+    "answer": "The subject is forgeable; the diff is not. Compare them: `pip install dos-kernel`, then `dos commit-audit`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit"
+    ],
+    "path": "docs/answers/does-the-commit-message-match-what-changed.md",
+    "queries": [
+      "how do I know if my AI agent's commit message matches what it actually changed"
+    ],
+    "question": "How do I know if my AI agent's commit message matches what it actually changed",
+    "slug": "does-the-commit-message-match-what-changed",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/does-the-commit-message-match-what-changed.md"
+  },
+  {
+    "answer": "DOS is not a CI/CD platform \u2014 it's the **trust floor** you add *inside* your pipeline. It verifies that a claim landed (`dos verify`), that a commit's message matches its diff (`dos commit-audit`), and that concurrent agents don't collide (`dos arbitrate`) \u2014 at the merge/gate boundary, as an exit code your branch protection already knows how to require. `pip install dos-kernel` (the PyPI name is `dos-kernel`; the bare `dos` is an unrelated squatter \u2014 never install that).",
+    "commands": [
+      "dos arbitrate",
+      "dos attest",
+      "dos breaker",
+      "dos commit-audit",
+      "dos coverage",
+      "dos lease",
+      "dos observe",
+      "dos reconcile",
+      "dos test-witness",
+      "dos trace",
+      "dos verify",
+      "dos verify-receipt"
+    ],
+    "path": "docs/answers/dos-for-ci-cd.md",
+    "queries": [],
+    "question": "How does DOS fit into my CI/CD pipeline?",
+    "slug": "dos-for-ci-cd",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/dos-for-ci-cd.md"
+  },
+  {
+    "answer": "\"I ran the tests\" is a claim; the test runner's exit code and a red\u2192green witness are the evidence. `pip install dos-kernel`, then `dos test-witness` / `dos coverage`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos coverage",
+      "dos test-witness"
+    ],
+    "path": "docs/answers/enforce-that-an-agent-ran-the-tests-it-claims.md",
+    "queries": [
+      "how to enforce that an AI agent actually ran the tests it claims it ran"
+    ],
+    "question": "How to enforce that an AI agent actually ran the tests it claims it ran",
+    "slug": "enforce-that-an-agent-ran-the-tests-it-claims",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/enforce-that-an-agent-ran-the-tests-it-claims.md"
+  },
+  {
+    "answer": "Run a DOS verdict in CI and let its exit code be the gate: `pip install dos-kernel`, then `dos commit-audit` (or `dos verify`) over the commits about to land. The verdict IS the exit code \u2014 clean=0, unwitnessed=1, contract_error=2 \u2014 so the CI wrapper is deliberately thin. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit",
+      "dos verify"
+    ],
+    "path": "docs/answers/gate-a-ci-job-on-an-agents-claim.md",
+    "queries": [
+      "how to gate a CI job on whether an AI agent's claim is actually backed",
+      "how do I make CI fail when an AI's PR claims something its diff doesn't do",
+      "required GitHub check that catches a lying commit message from an agent"
+    ],
+    "question": "How do I gate a CI job on whether an AI agent's claim is actually backed?",
+    "slug": "gate-a-ci-job-on-an-agents-claim",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/gate-a-ci-job-on-an-agents-claim.md"
+  },
+  {
+    "answer": "The missing layer is a runtime trust gate: adjudicate every claim and serialize every effect from evidence the agents can't author. `pip install dos-kernel`, then `dos verify` / `dos arbitrate`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos arbitrate",
+      "dos liveness",
+      "dos verify"
+    ],
+    "path": "docs/answers/governance-for-agentic-ai-projects-that-keep-getting-canceled.md",
+    "queries": [
+      "governance is why agentic AI projects get canceled what is the missing layer"
+    ],
+    "question": "Governance is why agentic AI projects get canceled \u2014 what does the missing layer look like",
+    "slug": "governance-for-agentic-ai-projects-that-keep-getting-canceled",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/governance-for-agentic-ai-projects-that-keep-getting-canceled.md"
+  },
+  {
+    "answer": "Grade the keep decision on a held-out witness the agent never saw, so overfitting the visible tests buys nothing. `pip install dos-kernel`, then `dos improve` / `dos reward`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos improve",
+      "dos reward"
+    ],
+    "path": "docs/answers/hidden-test-split-to-stop-agents-overfitting.md",
+    "queries": [
+      "how to use a hidden test split to stop agents overfitting the visible tests"
+    ],
+    "question": "How to use a hidden test split to stop agents overfitting the visible tests",
+    "slug": "hidden-test-split-to-stop-agents-overfitting",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/hidden-test-split-to-stop-agents-overfitting.md"
+  },
+  {
+    "answer": "Re-run the certification you already require: `pip install \"dos-kernel[mcp]\"`, then the `citation-resolve` tool checks each cited case against a third-party reporter \u2014 a witness neither the court nor the filer authored. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos doctor"
+    ],
+    "path": "docs/answers/how-a-court-can-audit-ai-citations-in-filings.md",
+    "queries": [],
+    "question": "How a court can audit AI-generated citations in filings it receives",
+    "slug": "how-a-court-can-audit-ai-citations-in-filings",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/how-a-court-can-audit-ai-citations-in-filings.md"
+  },
+  {
+    "answer": "If your agent runs a command after it edits \u2014 **aider**, a CI step, a git hook, or a hook-less CLI like Windsurf / Warp / Zed \u2014 you already have the only seam you need. `pip install dos-kernel`, then point that command at a `dos` verb: the exit code is the verdict. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit",
+      "dos hook-exit"
+    ],
+    "path": "docs/answers/how-to-add-a-guardrail-to-a-coding-agent-with-no-plugin-system.md",
+    "queries": [
+      "add a guardrail to a coding agent with no plugin system"
+    ],
+    "question": "How to add a guardrail to a coding agent that has no plugin or hook system",
+    "slug": "how-to-add-a-guardrail-to-a-coding-agent-with-no-plugin-system",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/how-to-add-a-guardrail-to-a-coding-agent-with-no-plugin-system.md"
+  },
+  {
+    "answer": "Read progress from the artifacts the loop leaves behind, not from its own \"making progress\": `pip install dos-kernel`, then `dos liveness` / `productivity` / `efficiency`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos efficiency",
+      "dos init",
+      "dos liveness",
+      "dos productivity",
+      "dos verify"
+    ],
+    "path": "docs/answers/how-to-detect-an-agent-loop-spinning-without-progress.md",
+    "queries": [
+      "how to detect an agent loop spinning without progress"
+    ],
+    "question": "How to detect an agent loop spinning without progress",
+    "slug": "how-to-detect-an-agent-loop-spinning-without-progress",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/how-to-detect-an-agent-loop-spinning-without-progress.md"
+  },
+  {
+    "answer": "Decide whether two agents may run at once *before* they write, from the files each will touch: `pip install dos-kernel`, then `dos arbitrate`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos arbitrate",
+      "dos init"
+    ],
+    "path": "docs/answers/how-to-stop-two-ai-agents-overwriting-each-other.md",
+    "queries": [
+      "how to stop two AI agents overwriting each other"
+    ],
+    "question": "How to stop two AI agents overwriting each other",
+    "slug": "how-to-stop-two-ai-agents-overwriting-each-other",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/how-to-stop-two-ai-agents-overwriting-each-other.md"
+  },
+  {
+    "answer": "Resolve the citation against a third-party reporter before you rely on it: `pip install \"dos-kernel[mcp]\"`, then the `citation-resolve` tool checks the cite against CourtListener. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos doctor"
+    ],
+    "path": "docs/answers/how-to-verify-a-cited-legal-case-exists.md",
+    "queries": [
+      "how to verify a cited legal case actually exists before filing"
+    ],
+    "question": "How to verify a cited legal case actually exists before filing",
+    "slug": "how-to-verify-a-cited-legal-case-exists",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/how-to-verify-a-cited-legal-case-exists.md"
+  },
+  {
+    "answer": "One command answers it from your git history, not the agent's transcript: `pip install dos-kernel`, then `dos verify`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos init",
+      "dos verify"
+    ],
+    "path": "docs/answers/how-to-verify-an-ai-agent-actually-committed-code.md",
+    "queries": [
+      "how to verify an AI coding agent actually committed code instead of just saying it did"
+    ],
+    "question": "How to verify an AI coding agent actually committed code instead of just saying it did",
+    "slug": "how-to-verify-an-ai-agent-actually-committed-code",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/how-to-verify-an-ai-agent-actually-committed-code.md"
+  },
+  {
+    "answer": "One command answers it from your git history, not the agent's transcript: `pip install dos-kernel`, then `dos verify`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit",
+      "dos init",
+      "dos verify"
+    ],
+    "path": "docs/answers/how-to-verify-an-ai-agent-actually-did-the-work.md",
+    "queries": [
+      "how to verify an AI agent actually did the work"
+    ],
+    "question": "How to verify an AI agent actually did the work",
+    "slug": "how-to-verify-an-ai-agent-actually-did-the-work",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/how-to-verify-an-ai-agent-actually-did-the-work.md"
+  },
+  {
+    "answer": "Yes \u2014 the PyPI distribution is `dos-kernel`, so `pip install dos-kernel` (or `dos-kernel[mcp]`, or a pin `dos-kernel==X.Y.Z`); then `dos verify` runs the kernel. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos verify"
+    ],
+    "path": "docs/answers/is-dos-kernel-the-real-package-supply-chain.md",
+    "queries": [
+      "is dos-kernel the real package how do I avoid the squatter",
+      "why does pip install dos give me the wrong project",
+      "correct PyPI name for the DOS trust substrate kernel"
+    ],
+    "question": "Is `dos-kernel` the real package \u2014 how do I avoid the squatter?",
+    "slug": "is-dos-kernel-the-real-package-supply-chain",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/is-dos-kernel-the-real-package-supply-chain.md"
+  },
+  {
+    "answer": "Don't measure its length or trust that `refused=False` \u2014 run the output through a shape verdict that fires on the marker a leaked chain-of-thought carries. `pip install dos-kernel`, then `dos answer-shape --text '<the output>'`: NON_ANSWER (exit 3) is a structural disqualification. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos answer-shape"
+    ],
+    "path": "docs/answers/is-this-agent-output-an-answer-or-a-leaked-reasoning-log.md",
+    "queries": [
+      "how to tell if an agent's output is a real answer or a leaked reasoning log",
+      "detect a tool-call dump or traceback pasted as an answer",
+      "my RAG app shipped reasoning as the answer how to catch that"
+    ],
+    "question": "How do I tell if an agent's output is a real answer or a leaked reasoning log?",
+    "slug": "is-this-agent-output-an-answer-or-a-leaked-reasoning-log",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/is-this-agent-output-an-answer-or-a-leaked-reasoning-log.md"
+  },
+  {
+    "answer": "Keep a candidate only when a witness the candidate's author didn't write confirms a real gain \u2014 otherwise revert. `pip install dos-kernel`, then `dos improve`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos improve"
+    ],
+    "path": "docs/answers/keep-a-self-improvement-loop-from-keeping-bad-changes.md",
+    "queries": [
+      "how to keep an AI self-improvement loop from keeping bad changes"
+    ],
+    "question": "How to keep an AI self-improvement loop from keeping bad changes",
+    "slug": "keep-a-self-improvement-loop-from-keeping-bad-changes",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/keep-a-self-improvement-loop-from-keeping-bad-changes.md"
+  },
+  {
+    "answer": "Every sanctioned filing shares one fact: a cited case did not exist, and no one checked it against a reporter the model didn't write. `pip install \"dos-kernel[mcp]\"`, then `citation-resolve` does that check. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos doctor"
+    ],
+    "path": "docs/answers/largest-ai-hallucination-sanction-how-to-avoid.md",
+    "queries": [
+      "how to avoid getting sanctioned for AI-hallucinated legal citations",
+      "what is the largest AI hallucination sanction and how to avoid one"
+    ],
+    "question": "How to avoid an AI-citation sanction \u2014 what the record fines have in common",
+    "slug": "largest-ai-hallucination-sanction-how-to-avoid",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/largest-ai-hallucination-sanction-how-to-avoid.md"
+  },
+  {
+    "answer": "Serialize the contended region with a lease, so the second writer is admitted or refused, never silently overwriting. `pip install dos-kernel`, then `dos arbitrate`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos arbitrate"
+    ],
+    "path": "docs/answers/last-writer-wins-multi-agent-shared-memory.md",
+    "queries": [
+      "the last-writer-wins problem in multi-agent shared memory"
+    ],
+    "question": "The last-writer-wins problem in multi-agent shared memory \u2014 how do I stop it",
+    "slug": "last-writer-wins-multi-agent-shared-memory",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/last-writer-wins-multi-agent-shared-memory.md"
+  },
+  {
+    "answer": "Give each agent a lease over a declared region of the tree; grant it only when the region is disjoint from every live lease. `pip install dos-kernel`, then `dos arbitrate` / `dos lease-lane`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos arbitrate",
+      "dos lease-lane"
+    ],
+    "path": "docs/answers/lease-based-file-locking-for-parallel-agents.md",
+    "queries": [
+      "lease-based file locking to coordinate parallel coding agents"
+    ],
+    "question": "Lease-based file locking to coordinate parallel coding agents",
+    "slug": "lease-based-file-locking-for-parallel-agents",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/lease-based-file-locking-for-parallel-agents.md"
+  },
+  {
+    "answer": "One read-only command emits the layout as machine-readable JSON: `pip install dos-kernel`, then `dos doctor --json`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos arbitrate",
+      "dos doctor",
+      "dos init",
+      "dos verify"
+    ],
+    "path": "docs/answers/machine-readable-workspace-report-for-an-agent.md",
+    "queries": [
+      "how does an agent read a workspace's layout instead of hardcoding it",
+      "machine-readable workspace report for an agent dos doctor json",
+      "discover a repo's lane taxonomy and stamp grammar from one command"
+    ],
+    "question": "How does an agent read a workspace's layout instead of hardcoding it?",
+    "slug": "machine-readable-workspace-report-for-an-agent",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/machine-readable-workspace-report-for-an-agent.md"
+  },
+  {
+    "answer": "Ground the stop condition in git evidence the agent didn't author \u2014 so \"done\" requires a shipped commit, not a claim. `pip install dos-kernel`, then `dos verify` in the stop hook. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos init",
+      "dos verify"
+    ],
+    "path": "docs/answers/make-agent-done-mean-a-checkable-effect.md",
+    "queries": [
+      "how to make an AI agent's done mean a checkable effect not a sentence"
+    ],
+    "question": "How to make an AI agent's \"done\" mean a checkable effect, not a sentence",
+    "slug": "make-agent-done-mean-a-checkable-effect",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/make-agent-done-mean-a-checkable-effect.md"
+  },
+  {
+    "answer": "You don't make the agent write good tests by asking nicely \u2014 you put a gate after it that refuses a test which doesn't fail on broken code. The agent then has to produce a test that discriminates, because the cheap empty one no longer passes the gate: `pip install dos-kernel`, then `dos test-witness`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos test-witness"
+    ],
+    "path": "docs/answers/make-ai-write-tests-that-actually-assert.md",
+    "queries": [
+      "how to make an AI agent write tests that actually assert something"
+    ],
+    "question": "How do I make an AI agent write tests that actually assert something",
+    "slug": "make-ai-write-tests-that-actually-assert",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/make-ai-write-tests-that-actually-assert.md"
+  },
+  {
+    "answer": "Separate the worker from the judge: the agent proposes, a witness it didn't author decides. `pip install dos-kernel`, then `dos improve` / `dos verify`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos improve",
+      "dos verify"
+    ],
+    "path": "docs/answers/make-an-agent-prove-the-work-not-self-certify.md",
+    "queries": [
+      "how to make an AI agent prove it did the work instead of self-certifying done"
+    ],
+    "question": "How to make an AI agent prove it did the work instead of self-certifying done",
+    "slug": "make-an-agent-prove-the-work-not-self-certify",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/make-an-agent-prove-the-work-not-self-certify.md"
+  },
+  {
+    "answer": "Don't rewrite the skill \u2014 bolt a witness onto it. `pip install dos-kernel`, then the `dos-skillify` skill reads any `SKILL.md` and emits an additive `-dos` copy whose every \"done / shipped / found\" step shells a `dos` verb and reads the verdict, instead of trusting the agent's own word. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos arbitrate",
+      "dos commit-audit",
+      "dos coverage",
+      "dos doctor",
+      "dos hook",
+      "dos recall",
+      "dos verify",
+      "dos verify-result"
+    ],
+    "path": "docs/answers/make-any-agent-skill-verify-its-own-work.md",
+    "queries": [
+      "how to make any agent skill verify its own work"
+    ],
+    "question": "How do I make any agent skill verify its own work?",
+    "slug": "make-any-agent-skill-verify-its-own-work",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/make-any-agent-skill-verify-its-own-work.md"
+  },
+  {
+    "answer": "Replace the central queue with a per-region admission contract every agent checks before it writes. `pip install dos-kernel`, then `dos arbitrate`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos arbitrate"
+    ],
+    "path": "docs/answers/multi-agent-coordination-without-a-central-orchestrator.md",
+    "queries": [
+      "how to coordinate multiple AI agents without a central orchestrator"
+    ],
+    "question": "How to coordinate multiple AI agents without a central orchestrator (contracts, not a queue)",
+    "slug": "multi-agent-coordination-without-a-central-orchestrator",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/multi-agent-coordination-without-a-central-orchestrator.md"
+  },
+  {
+    "answer": "Mutation testing asks \"does my whole suite catch injected bugs?\" \u2014 a thorough, expensive batch job. A test-witness gate asks \"does *this one new* test catch the change it claims to cover?\" \u2014 a cheap per-change floor you can put in CI. Use both: `pip install dos-kernel`, then `dos test-witness`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos test-witness"
+    ],
+    "path": "docs/answers/mutation-testing-vs-test-witness-for-ai-tests.md",
+    "queries": [
+      "mutation testing vs a test-witness gate for AI-generated tests"
+    ],
+    "question": "Mutation testing vs a test-witness gate for checking AI-generated tests",
+    "slug": "mutation-testing-vs-test-witness-for-ai-tests",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/mutation-testing-vs-test-witness-for-ai-tests.md"
+  },
+  {
+    "answer": "Yes \u2014 resolve each citation against CourtListener for free, from the command line or as an MCP tool. `pip install \"dos-kernel[mcp]\"`, then `citation-resolve`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that. (Run `dos doctor` to list the tools your install exposes.)",
+    "commands": [
+      "dos doctor"
+    ],
+    "path": "docs/answers/open-source-ai-legal-citation-checker.md",
+    "queries": [
+      "open-source alternative to paid AI legal citation checkers"
+    ],
+    "question": "Is there an open-source alternative to paid AI legal citation checkers?",
+    "slug": "open-source-ai-legal-citation-checker",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/open-source-ai-legal-citation-checker.md"
+  },
+  {
+    "answer": "Don't let a past self-report re-enter as a fact \u2014 re-verify each recalled claim against ground truth, and refuse the bindable poison at birth. `pip install \"dos-kernel[mcp]\"`, then the `recall` tool. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos doctor"
+    ],
+    "path": "docs/answers/prevent-context-poisoning-from-an-agents-own-outputs.md",
+    "queries": [
+      "how to prevent context poisoning from an AI agent's own prior outputs"
+    ],
+    "question": "How to prevent context poisoning from an AI agent's own prior outputs",
+    "slug": "prevent-context-poisoning-from-an-agents-own-outputs",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/prevent-context-poisoning-from-an-agents-own-outputs.md"
+  },
+  {
+    "answer": "Compute the collision graph from the file-trees the fan-out would hand its workers, *before* agent #1 runs: `pip install dos-kernel`, then run the `examples/plan_price/` oracle (the forward sibling of `dos arbitrate`). The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos arbitrate"
+    ],
+    "path": "docs/answers/price-a-parallel-agent-fan-out-before-launching-it.md",
+    "queries": [
+      "how to price a parallel agent fan-out before launching it",
+      "will these N agents collide on files before I run them",
+      "compute safe concurrency for a multi-agent dispatch ahead of time"
+    ],
+    "question": "How do I price a parallel agent fan-out before launching it?",
+    "slug": "price-a-parallel-agent-fan-out-before-launching-it",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/price-a-parallel-agent-fan-out-before-launching-it.md"
+  },
+  {
+    "answer": "A per-step label that is not the agent's own word: `pip install dos-kernel`, then `dos reward`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos reward"
+    ],
+    "path": "docs/answers/process-reward-model-training-data-that-cant-be-gamed.md",
+    "queries": [
+      "process-reward training data that can't be gamed"
+    ],
+    "question": "Process-reward-model training data that can't be gamed",
+    "slug": "process-reward-model-training-data-that-cant-be-gamed",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/process-reward-model-training-data-that-cant-be-gamed.md"
+  },
+  {
+    "answer": "Read git ancestry, not a status report: `pip install dos-kernel`, then `dos verify`. No plan files needed. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit",
+      "dos test-witness",
+      "dos verify"
+    ],
+    "path": "docs/answers/prove-a-phase-shipped-from-git-history.md",
+    "queries": [
+      "how to prove a phase or feature actually shipped from git history"
+    ],
+    "question": "How to prove a phase or feature actually shipped from git history",
+    "slug": "prove-a-phase-shipped-from-git-history",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/prove-a-phase-shipped-from-git-history.md"
+  },
+  {
+    "answer": "A recalled memory is a frozen self-report from a past session \u2014 re-check its claims against ground truth before trusting them. `pip install \"dos-kernel[mcp]\"`, then the `recall` tool re-verifies a memory at read time. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos doctor"
+    ],
+    "path": "docs/answers/recalled-agent-memory-is-stale-how-to-reverify.md",
+    "queries": [
+      "recalled AI agent memory is stale or wrong how to re-verify it"
+    ],
+    "question": "My recalled AI agent memory is stale or wrong \u2014 how do I re-verify it",
+    "slug": "recalled-agent-memory-is-stale-how-to-reverify",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/recalled-agent-memory-is-stale-how-to-reverify.md"
+  },
+  {
+    "answer": "Every kernel syscall is a kind of refusal \u2014 and a refusal is only useful if it's emittable, verifiable, and routable. `pip install dos-kernel`, then `dos refuse-reasons` / `dos verify`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos verify"
+    ],
+    "path": "docs/answers/refusal-as-a-first-class-primitive-for-agents.md",
+    "queries": [
+      "why should no be a first-class verifiable primitive in an agent system"
+    ],
+    "question": "Why \"no\" should be a first-class, verifiable primitive in an agent system",
+    "slug": "refusal-as-a-first-class-primitive-for-agents",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/refusal-as-a-first-class-primitive-for-agents.md"
+  },
+  {
+    "answer": "Refuse with a token from a closed, checkable vocabulary \u2014 not a prose sentence the next step has to parse. `pip install \"dos-kernel[mcp]\"`, then `dos refuse-reasons` / `dos doctor`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos check-reason",
+      "dos doctor",
+      "dos refuse-reasons"
+    ],
+    "path": "docs/answers/refuse-an-agent-action-with-a-structured-reason.md",
+    "queries": [
+      "how to refuse an agent action with a structured reason instead of free text"
+    ],
+    "question": "How to refuse an agent action with a structured reason instead of free text",
+    "slug": "refuse-an-agent-action-with-a-structured-reason",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/refuse-an-agent-action-with-a-structured-reason.md"
+  },
+  {
+    "answer": "Score the reward off an effect the agent can't author, not off its own claim of success. `pip install dos-kernel`, then `dos reward` / `dos improve`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos improve",
+      "dos reward"
+    ],
+    "path": "docs/answers/reward-hacking-in-llm-coding-agents.md",
+    "queries": [
+      "reward hacking in LLM coding agents how to measure and prevent"
+    ],
+    "question": "Reward hacking in LLM coding agents \u2014 how to measure and prevent it",
+    "slug": "reward-hacking-in-llm-coding-agents",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/reward-hacking-in-llm-coding-agents.md"
+  },
+  {
+    "answer": "Distinguish STALLED (dead, safe to reclaim) from SPINNING (alive but stuck, surface don't kill): `pip install dos-kernel`, then `dos liveness` / `dos reap`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos liveness",
+      "dos reap"
+    ],
+    "path": "docs/answers/scavenge-a-stalled-lease-without-killing-a-live-one.md",
+    "queries": [
+      "how to scavenge a stalled agent's lease without killing a live one"
+    ],
+    "question": "How to scavenge a stalled agent's lease without killing a live one",
+    "slug": "scavenge-a-stalled-lease-without-killing-a-live-one",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/scavenge-a-stalled-lease-without-killing-a-live-one.md"
+  },
+  {
+    "answer": "A \"fake test\" is one that stays green no matter what the code does \u2014 it asserts nothing, mocks the thing under test, or got added to a commit that touched no test file. You stop it by reading a witness the agent didn't write: `pip install dos-kernel`, then `dos test-witness` (a new test must go red\u2192green) and `dos commit-audit` (a \"added tests\" claim must touch a test file). The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit",
+      "dos test-witness"
+    ],
+    "path": "docs/answers/stop-ai-making-fake-tests.md",
+    "queries": [
+      "how to stop an AI agent from making fake tests",
+      "stop my AI coding agent writing fake tests"
+    ],
+    "question": "How to stop an AI agent from making fake tests",
+    "slug": "stop-ai-making-fake-tests",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/stop-ai-making-fake-tests.md"
+  },
+  {
+    "answer": "Catch the config edit by reading the diff and the world state, not the agent's \"build is green now\". `pip install dos-kernel`, then `dos commit-audit` / `dos scope-gate`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit",
+      "dos scope-gate"
+    ],
+    "path": "docs/answers/stop-an-agent-editing-ci-to-skip-tests.md",
+    "queries": [
+      "how to stop an AI agent from editing CI config to skip failing tests"
+    ],
+    "question": "How to stop an AI agent from editing CI config to skip failing tests",
+    "slug": "stop-an-agent-editing-ci-to-skip-tests",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/stop-an-agent-editing-ci-to-skip-tests.md"
+  },
+  {
+    "answer": "Partition the commits before you read them. `pip install dos-kernel`, then run the residual-review projection over your range: it stands on `dos commit-audit`'s non-forgeable `diff-witnessed` verdict to split commits into CLEARED (the diff already matched what the message claimed \u2014 spend ~0% attention) and RESIDUAL (the machine could not witness the claim \u2014 spend 100%). The PyPI name is `dos-kernel`; the bare `dos` package is an unrelated squatter, never install it.",
+    "commands": [
+      "dos commit-audit"
+    ],
+    "path": "docs/answers/stop-re-reviewing-code-the-machine-already-verified.md",
+    "queries": [
+      "how do I stop re-reviewing code a machine already verified",
+      "review only the commits the kernel could not verify",
+      "AI code review wastes time on changes that were already checked"
+    ],
+    "question": "How do I stop re-reviewing code a machine already verified \u2014 and spend review only on the rest?",
+    "slug": "stop-re-reviewing-code-the-machine-already-verified",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/stop-re-reviewing-code-the-machine-already-verified.md"
+  },
+  {
+    "answer": "Order them by trust: a deterministic oracle decides what it can, an advisory judge rules on the residue, a human takes what neither can \u2014 and an error in the untrusted rung can never manufacture an approval. `pip install dos-kernel`, then `dos verify`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos verify"
+    ],
+    "path": "docs/answers/the-trust-ladder-oracle-judge-human.md",
+    "queries": [
+      "how to combine a deterministic check an LLM judge and a human reviewer for agent oversight"
+    ],
+    "question": "How do I combine a deterministic check, an LLM judge, and a human reviewer for agent oversight",
+    "slug": "the-trust-ladder-oracle-judge-human",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/the-trust-ladder-oracle-judge-human.md"
+  },
+  {
+    "answer": "The part of the stack that doesn't believe the agents \u2014 it adjudicates ground truth and serializes effects, without trusting self-reports. `pip install dos-kernel`, then `dos verify` / `dos arbitrate`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos arbitrate",
+      "dos liveness",
+      "dos verify"
+    ],
+    "path": "docs/answers/trust-substrate-for-a-fleet-of-autonomous-agents.md",
+    "queries": [
+      "what is a trust substrate for a fleet of autonomous AI agents"
+    ],
+    "question": "What is a trust substrate for a fleet of autonomous AI agents",
+    "slug": "trust-substrate-for-a-fleet-of-autonomous-agents",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/trust-substrate-for-a-fleet-of-autonomous-agents.md"
+  },
+  {
+    "answer": "Lease the file regions and decide admission before each write \u2014 disjoint agents run, colliding ones wait. `pip install dos-kernel`, then `dos arbitrate` wired into the runtime. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos arbitrate",
+      "dos init"
+    ],
+    "path": "docs/answers/two-claude-code-agents-on-one-branch.md",
+    "queries": [
+      "two Claude Code agents on one branch keep clobbering each other"
+    ],
+    "question": "Two Claude Code agents on one branch keep clobbering each other \u2014 how do I fix it",
+    "slug": "two-claude-code-agents-on-one-branch",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/two-claude-code-agents-on-one-branch.md"
+  },
+  {
+    "answer": "Existence isn't enough \u2014 check the quote against the resolved opinion text. `pip install \"dos-kernel[mcp]\"`, then the `citation-resolve` tool checks both. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos doctor"
+    ],
+    "path": "docs/answers/verify-a-quoted-holding-appears-in-the-opinion.md",
+    "queries": [
+      "how to verify a quoted holding actually appears in the cited opinion"
+    ],
+    "question": "How to verify a quoted holding actually appears in the cited opinion",
+    "slug": "verify-a-quoted-holding-appears-in-the-opinion",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/verify-a-quoted-holding-appears-in-the-opinion.md"
+  },
+  {
+    "answer": "Don't trust the generated call \u2014 check the symbol against the real codebase and gate the commit on a test that runs it. `pip install dos-kernel`, then `dos test-witness` / `dos commit-audit`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit",
+      "dos test-witness"
+    ],
+    "path": "docs/answers/verify-an-llm-didnt-hallucinate-a-function-or-api.md",
+    "queries": [
+      "how to verify an LLM didn't hallucinate a function or API that doesn't exist"
+    ],
+    "question": "How to verify an LLM didn't hallucinate a function or API that doesn't exist",
+    "slug": "verify-an-llm-didnt-hallucinate-a-function-or-api",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/verify-an-llm-didnt-hallucinate-a-function-or-api.md"
+  },
+  {
+    "answer": "At the fold barrier, don't believe the subagent's return string \u2014 read an independently-authored witness of the effect it claims. `pip install dos-kernel`, then `dos verify` / `dos commit-audit`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit",
+      "dos verify"
+    ],
+    "path": "docs/answers/verify-what-a-subagent-claims-before-folding.md",
+    "queries": [
+      "how to verify what a subagent claims before folding its output"
+    ],
+    "question": "How to verify what a subagent claims before folding its output",
+    "slug": "verify-what-a-subagent-claims-before-folding",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/verify-what-a-subagent-claims-before-folding.md"
+  },
+  {
+    "answer": "Truth, for a kernel that won't believe the agents, is the narrow thing it can establish *without* trusting the author of the claim. `pip install dos-kernel`, then `dos verify`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos verify"
+    ],
+    "path": "docs/answers/what-is-truth-for-an-ai-agent-verdict.md",
+    "queries": [
+      "what does true mean for an AI agent's verdict"
+    ],
+    "question": "What does \"true\" mean for an AI agent's verdict \u2014 and why does it matter",
+    "slug": "what-is-truth-for-an-ai-agent-verdict",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/what-is-truth-for-an-ai-agent-verdict.md"
+  },
+  {
+    "answer": "Verified outcomes \u2014 and a loop is only \"progress\" if a witness the agent didn't author says so: `pip install dos-kernel`, then `dos verify` / `dos efficiency` / `dos reward`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos efficiency",
+      "dos liveness",
+      "dos reward",
+      "dos verify"
+    ],
+    "path": "docs/answers/what-replaced-tokens-burned-as-the-metric-for-ai-agents.md",
+    "queries": [
+      "what replaced tokens-burned as the metric for AI agents",
+      "is the token-maxxing era over / what is token efficiency",
+      "how to measure verified outcomes instead of token usage"
+    ],
+    "question": "What replaced tokens-burned as the metric for AI agents?",
+    "slug": "what-replaced-tokens-burned-as-the-metric-for-ai-agents",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/what-replaced-tokens-burned-as-the-metric-for-ai-agents.md"
+  },
+  {
+    "answer": "Recoverability rises with competence across the on-device band \u2014 a guardrail catches a small model's over-claim only once the model is capable enough to read before it writes. `pip install dos-kernel`, then `dos commit-audit` / `dos verify`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos commit-audit"
+    ],
+    "path": "docs/answers/which-on-device-agent-models-are-recoverable.md",
+    "queries": [
+      "which on-device AI agent models can a guardrail actually recover from a bad action"
+    ],
+    "question": "Which on-device AI agent models can a guardrail actually recover from a bad action?",
+    "slug": "which-on-device-agent-models-are-recoverable",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/which-on-device-agent-models-are-recoverable.md"
+  },
+  {
+    "answer": "A rule in a prompt is advice the agent can talk past; a rule in a deterministic gate is enforcement it can't. `pip install dos-kernel`, then `dos commit-audit` as an exit-code gate. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos arbitrate",
+      "dos commit-audit",
+      "dos verify"
+    ],
+    "path": "docs/answers/why-does-my-agent-ignore-the-rules-in-claude-md.md",
+    "queries": [
+      "why does my AI agent ignore the rules in CLAUDE.md"
+    ],
+    "question": "Why does my AI agent ignore the rules in CLAUDE.md \u2014 and how do I make them stick",
+    "slug": "why-does-my-agent-ignore-the-rules-in-claude-md",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/why-does-my-agent-ignore-the-rules-in-claude-md.md"
+  },
+  {
+    "answer": "The contestant can't be the referee \u2014 judge the work with an oracle that reads an effect the model didn't author. `pip install dos-kernel`, then `dos verify` / `dos improve`. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos improve",
+      "dos verify"
+    ],
+    "path": "docs/answers/why-you-cant-trust-a-model-to-judge-its-own-work.md",
+    "queries": [
+      "why you can't trust an AI model to judge its own work"
+    ],
+    "question": "Why you can't trust an AI model to judge its own work",
+    "slug": "why-you-cant-trust-a-model-to-judge-its-own-work",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/why-you-cant-trust-a-model-to-judge-its-own-work.md"
+  },
+  {
+    "answer": "`pip install dos-kernel`, then `dos init --hooks auto .` \u2014 it detects the runtime your repo already uses (Claude Code, Cursor, Codex, Gemini, Antigravity, Claude Cowork) and binds the DOS verdict to that runtime's hook events, so a false \"done\" is refused at the hook with no `settings.json` hand-editing. The PyPI name is `dos-kernel` \u2014 the bare `dos` package is an unrelated squatter; never install that.",
+    "commands": [
+      "dos doctor",
+      "dos hook",
+      "dos init",
+      "dos verify"
+    ],
+    "path": "docs/answers/wire-a-trust-gate-into-claude-code-cursor-codex.md",
+    "queries": [
+      "how to wire a trust gate into Claude Code Cursor or Codex with one command",
+      "one-command hook install for a coding agent guardrail",
+      "make Claude Code refuse to stop on an unverified done"
+    ],
+    "question": "How do I wire a trust gate into Claude Code, Cursor, or Codex with one command?",
+    "slug": "wire-a-trust-gate-into-claude-code-cursor-codex",
+    "url": "https://github.com/anthony-chaudhary/dos-kernel/blob/master/docs/answers/wire-a-trust-gate-into-claude-code-cursor-codex.md"
+  }
+]
