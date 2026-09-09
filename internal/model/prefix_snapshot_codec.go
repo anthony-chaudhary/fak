@@ -113,7 +113,7 @@ func DecodeHostPrefixSnapshot(data []byte, backend compute.Backend, expected Con
 	var qwen *hostQwen35State
 	if hasQwen {
 		gdn, ok := backend.(Qwen35GDNBackend)
-		if !ok || gdn.Qwen35GDNPath() != Qwen35GDNCUDAPath {
+		if !ok || !IsSupportedQwen35GDNPath(gdn.Qwen35GDNPath()) {
 			return nil, fmt.Errorf("model: backend %q cannot restore Qwen3.5/3.6 recurrent state", backend.Name())
 		}
 		layerCount := d.count()

@@ -1,10 +1,10 @@
 ---
 name: opencode-wave
-description: Spawn and coordinate a wave of user-visible, detached OpenCode leaf worker sessions running with high reasoning effort (--variant high), automated approvals (--auto), and direct leaf execution within package...
+description: Spawn and coordinate deterministic, collision-safe OpenCode leaf worker waves with high reasoning effort (--variant high), automated approvals (--auto), mandatory detached worktree isolation (--worktree), pre-flight...
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/opencode-wave/SKILL.md
-  canonical-description-hash: ae1d041387adcb6fccc4befbc8cf4913791fe3b2672e7ed4dab03d0125b244af
+  canonical-description-hash: a2f39984697c064e12b5b947052a2582e8f86b3322726c347c13fb21d8c196dd
 ---
 
 # Canonical project skill adapter
