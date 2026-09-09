@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
+	"github.com/anthony-chaudhary/fak/internal/memgate"
 )
 
 func TestLoadLocalLauncherModelWithMetalLeaseRefusesBeforeLoadAndReleasesAfterServe(t *testing.T) {
@@ -35,6 +37,7 @@ func TestLoadLocalLauncherModelWithMetalLeaseRefusesBeforeLoadAndReleasesAfterSe
 
 	path := filepath.Join(t.TempDir(), "gpu.lease")
 	t.Setenv("FAK_GPU_LEASE", path)
+	t.Setenv("FAK_RESERVATION_DIR", t.TempDir())
 	t.Setenv("FAK_ADMISSION_POLICY", "dev")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(cancel)
@@ -80,7 +83,7 @@ func TestLoadLocalLauncherModelWithMetalLeaseRefusesBeforeLoadAndReleasesAfterSe
 	if !errors.Is(err, gpulease.ErrBusy) {
 		t.Fatalf("busy admission error = %v, want errors.Is(ErrBusy)", err)
 	}
-	for _, want := range []string{path, "pid " + strconv.Itoa(child.Process.Pid), "before model load", "stop the holder process"} {
+	for _, want := range []string{path, "pid " + strconv.Itoa(child.Process.Pid), "before model load", "stop the holder process", "fak doctor serve"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("busy admission error %q does not contain %q", err, want)
 		}
@@ -647,6 +650,18 @@ func TestLoadServeModelWithVulkanLeaseUsesExactBackendAndGGUF(t *testing.T) {
 }
 
 func TestLoadLocalLauncherModelWithMetalLeaseRefusesExpandingQ8LoadOn36GBHost(t *testing.T) {
+	origRead := serveReadMemory
+	defer func() { serveReadMemory = origRead }()
+	serveReadMemory = func() (memgate.Memory, error) {
+		mem, err := origRead()
+		if err == nil && mem.AvailableBytes < 15*(1<<30) {
+			mem.TotalBytes = 36 * (1 << 30)
+			mem.AvailableBytes = 22 * (1 << 30)
+			mem.FreeBytes = 20 * (1 << 30)
+		}
+		return mem, err
+	}
+
 	resDir := filepath.Join(t.TempDir(), "reservations")
 	leasePath := filepath.Join(t.TempDir(), "gpu.lease")
 	t.Setenv("FAK_RESERVATION_DIR", resDir)
@@ -690,4 +705,60 @@ func TestLoadLocalLauncherModelWithMetalLeaseRefusesExpandingQ8LoadOn36GBHost(t 
 			t.Fatalf("expected detailed remedy hint in error message, got: %v", err)
 		}
 	})
+}
+
+func TestLoadLocalLauncherModelWithMetalLeaseWarningPressureAdvisory(t *testing.T) {
+	origRead := serveReadMemory
+	defer func() { serveReadMemory = origRead }()
+
+	serveReadMemory = func() (memgate.Memory, error) {
+		return memgate.Memory{
+			TotalBytes:      40 * (1 << 30),
+			AvailableBytes:  25 * (1 << 30),
+			CompressedBytes: 5 * (1 << 30),
+			WiredBytes:      2 * (1 << 30),
+		}, nil
+	}
+
+	path := filepath.Join(t.TempDir(), "gpu.lease")
+	t.Setenv("FAK_GPU_LEASE", path)
+	t.Setenv("FAK_ADMISSION_POLICY", "dev")
+	t.Setenv("FAK_TEST_STARTUP_PEAK_BYTES", "536870912")
+	t.Setenv("FAK_TEST_STEADY_BYTES", "268435456")
+
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+
+	loaded := false
+	release, err := loadLocalLauncherModelWithMetalLease(true, "small-model.gguf", gpulease.Options{Path: path}, func() {
+		loaded = true
+	})
+
+	_ = w.Close()
+	os.Stderr = oldStderr
+
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+	_ = r.Close()
+
+	if err != nil {
+		t.Fatalf("load failed: %v", err)
+	}
+	defer release()
+	if !loaded {
+		t.Fatal("expected model to load")
+	}
+
+	stderrOutput := buf.String()
+	want := "fak local launcher: advisory: ambient memory pressure is warning"
+	if !strings.Contains(stderrOutput, want) {
+		t.Fatalf("stderr %q does not contain %q", stderrOutput, want)
+	}
+	if !strings.Contains(stderrOutput, "close background apps if paging occurs") {
+		t.Fatalf("stderr %q does not contain close background apps advice", stderrOutput)
+	}
 }

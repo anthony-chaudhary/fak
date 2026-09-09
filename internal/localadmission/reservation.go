@@ -198,6 +198,39 @@ func (s *ReservationStore) Release(ctx context.Context, id string) error {
 	return s.writeLedger(ledger)
 }
 
+// ActiveReservations returns all currently active reservations after reaping dead processes.
+func (s *ReservationStore) ActiveReservations(ctx context.Context) ([]Reservation, error) {
+	unlock, err := s.lock(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
+	ledger, err := s.readLedger()
+	if err != nil {
+		return nil, err
+	}
+
+	active, reaped := s.reap(ledger.Reservations)
+	if reaped > 0 {
+		_ = s.writeLedger(ledger)
+	}
+	return active, nil
+}
+
+// TotalReservedBytes returns the sum of HeldBytes across all active reservations.
+func (s *ReservationStore) TotalReservedBytes(ctx context.Context) (int64, error) {
+	active, err := s.ActiveReservations(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	for _, r := range active {
+		total += r.HeldBytes
+	}
+	return total, nil
+}
+
 func (s *ReservationStore) update(ctx context.Context, id string, fn func(*Reservation)) (Reservation, error) {
 	unlock, err := s.lock(ctx)
 	if err != nil {

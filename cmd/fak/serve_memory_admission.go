@@ -18,6 +18,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/memgate"
 )
 
+var serveReadMemory = memgate.ReadMemory
+
 func defaultLocalReservationDir() string {
 	if dir := os.Getenv("FAK_RESERVATION_DIR"); dir != "" {
 		return dir
@@ -132,7 +134,7 @@ func loadLocalLauncherModelWithMetalLease(useMetal bool, ggufPath string, opts g
 			path = gpulease.DefaultPath()
 		}
 		if errors.Is(err, gpulease.ErrBusy) {
-			return func() {}, fmt.Errorf("fak local launcher: Metal residency admission refused before model load: %w; stop the holder process and retry, or run a CPU/non-Metal serve", err)
+			return func() {}, fmt.Errorf("fak local launcher: Metal residency admission refused before model load: %w; stop the holder process and retry, or run a CPU/non-Metal serve; inspect active leases with 'fak doctor serve' or release %s", err, path)
 		}
 		return func() {}, fmt.Errorf("fak local launcher: acquire Metal residency lease %s before model load: %w", path, err)
 	}
@@ -144,10 +146,19 @@ func loadLocalLauncherModelWithMetalLease(useMetal bool, ggufPath string, opts g
 	var resID string
 	retainLease := os.Getenv("FAK_NATIVE_ADMISSION") != "aggregate"
 
-	if !exclusiveMode {
-		mem, memErr := memgate.ReadMemory()
-		if memErr == nil && mem.TotalBytes > 0 {
-			sample := memgate.AdmissionSampleFor(mem)
+	mem, memErr := serveReadMemory()
+	if memErr == nil && mem.TotalBytes > 0 {
+		sample := memgate.AdmissionSampleFor(mem)
+		if localadmission.Pressure(sample.Pressure) == localadmission.PressureWarning {
+			compPct := 0.0
+			if sample.TotalBytes > 0 {
+				compPct = float64(sample.CompressedBytes) / float64(sample.TotalBytes) * 100.0
+			}
+			allocGiB := float64(sample.AllocatableBytes) / (1 << 30)
+			fmt.Fprintf(os.Stderr, "fak local launcher: advisory: ambient memory pressure is warning (compressed %.1f%%, %.2f GiB allocatable); close background apps if paging occurs\n", compPct, allocGiB)
+		}
+
+		if !exclusiveMode {
 			req := localadmission.ReservationRequest{
 				OwnerPID: os.Getpid(),
 				Plan:     plan,

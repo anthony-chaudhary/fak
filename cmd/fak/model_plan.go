@@ -5,8 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"runtime"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/modelloadplan"
 )
 
@@ -53,6 +56,24 @@ func runModelPlan(stdout, stderr io.Writer, args []string) int {
 	disk, ok := toBytes("disk-gib", *diskGiB)
 	if !ok {
 		return 2
+	}
+	if device == 0 {
+		if total, _, known := compute.HostSystemMemoryInfo(); known && total > 0 {
+			if *memory == "unified" || (runtime.GOOS == "darwin" && runtime.GOARCH == "arm64") {
+				device = total
+			} else {
+				host = total
+			}
+		}
+	}
+	if disk == 0 {
+		cacheDir, err := os.UserCacheDir()
+		if err != nil {
+			cacheDir = os.TempDir()
+		}
+		if _, freeDisk, known := compute.DiskInfo(cacheDir); known && freeDisk > 0 {
+			disk = freeDisk
+		}
 	}
 	plan, err := modelloadplan.Build(modelloadplan.Request{Setup: *setup, Goal: *goal, LocalPolicy: *local, Memory: *memory, DeviceBytes: device, HostBytes: host, DiskBytes: disk})
 	if err != nil {
