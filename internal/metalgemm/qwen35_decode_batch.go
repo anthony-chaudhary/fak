@@ -20,7 +20,7 @@ import (
 
 const (
 	Qwen35DecodeBatchMin = 2
-	Qwen35DecodeBatchMax = 8
+	Qwen35DecodeBatchMax = 24
 )
 
 // Qwen35DecodeBatchRequest describes B independent P=1 decode rows. Input is
@@ -48,7 +48,7 @@ type Qwen35DecodeBatchReceipt struct {
 	Committed, CompletedWait                                     bool
 }
 
-// RunQwen35DecodeBatch executes B=2..8 independent Qwen linear-attention
+// RunQwen35DecodeBatch executes B=2..24 independent Qwen linear-attention
 // mixers in one caller-owned command buffer. The projection GEMMs share their
 // weight dispatch across all rows, while each row mutates exactly one distinct
 // resident GDN owner. Once committed, failures are accepted and must not be
@@ -198,7 +198,7 @@ func validateQwen35DecodeBatchRequest(req Qwen35DecodeBatchRequest) (batch, hidd
 func (g *ProjectionGraph) encodeGDNBatch(states []*GDNState, mixed, z, b, a *GraphResult, panel GDNPanel, afterFirstRetainForTest func()) (*GraphResult, error) {
 	batch := len(states)
 	if g == nil || g.p != batch || batch < Qwen35DecodeBatchMin || batch > Qwen35DecodeBatchMax {
-		return nil, &GDNDeclinedError{Reason: "Qwen batch decode GDN requires B=2..8"}
+		return nil, &GDNDeclinedError{Reason: fmt.Sprintf("Qwen batch decode GDN requires B=%d..%d", Qwen35DecodeBatchMin, Qwen35DecodeBatchMax)}
 	}
 	geometry, err := states[0].graphGeometry()
 	if err != nil {
