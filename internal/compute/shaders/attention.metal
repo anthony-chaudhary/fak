@@ -49,10 +49,10 @@ kernel void attention_f32(device const float* q [[buffer(0)]],
     uint lane_id = tid % 32;
     uint num_simd = (tg_size + 31) / 32;
 
-    // Register-resident online softmax state (avoids register spilling)
+    // Register-resident online softmax state (avoids register spilling: acc[8] covers hd<=256 for tg_size>=32)
     float m = -3.402823466e38f;
     float l = 0.0f;
-    float acc[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    float acc[8] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 
     // Stream through key/value sequence positions
     for (int j = 0; j < nPos; j++) {

@@ -83,5 +83,24 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "issue12688-gateway-engine-maxkernelbufferbindcount",
+      "canonical": "MaxKernelBufferBindCount (Metal ICB descriptor)",
+      "family": "gateway-engine",
+      "kind": "config",
+      "definition": "MaxKernelBufferBindCount is the per-command Metal indirect-command-buffer descriptor limit for bound kernel buffer arguments.",
+      "distinction": "It bounds buffer argument slots encoded by one Metal ICB command; kernel denotes the broader compute implementation, execution path, or subsystem.",
+      "distinct_from": [
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "MaxKernelBufferBindCount",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

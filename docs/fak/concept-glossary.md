@@ -496,3 +496,10 @@ guardSessionStartInstall is the typed receipt returned while fak guard installs 
 Per-file Codex compacted event receipts measuring supported explicit transcript UTF8 content before and after replacement history.
 
 **Distinct from:** Counts reconstructed transcript content bytes with incomplete-history coverage; does not measure provider prompt tokens, attribute the compaction engine, or stitch separate transcript fragments.
+
+
+### MaxKernelBufferBindCount (Metal ICB descriptor)
+
+MaxKernelBufferBindCount is the per-command Metal indirect-command-buffer descriptor limit for bound kernel buffer arguments.
+
+**Distinct from:** It bounds buffer argument slots encoded by one Metal ICB command; kernel denotes the broader compute implementation, execution path, or subsystem.
