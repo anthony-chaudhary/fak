@@ -868,6 +868,7 @@ var tier = map[string]int{
 	"containment":                1,
 	"readmenext":                 2, // README-NEXT staging and reconciliation pipeline (#11881).
 	"hil":                        2, // Hardware-in-the-loop micro-dose execution and comparison audit leaf.
+	"cluster":                    1, // multi-Mac point-to-point mesh allocation and Thunderbolt 5 RDMA discovery (#12596).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
