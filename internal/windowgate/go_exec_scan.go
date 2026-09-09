@@ -94,6 +94,21 @@ func GoExecViolations(rel, src string) []string {
 	return goExecFindings(rel, src, false, true)
 }
 
+// ScanGoFileForExec scans Go source code for background commands that reach
+// Run/Output/CombinedOutput/Start before Windows no-window suppression is applied.
+// Can be called as ScanGoFileForExec(src) or ScanGoFileForExec(rel, src).
+func ScanGoFileForExec(args ...string) []string {
+	rel := "cmd/fak/dispatch_helper.go"
+	src := ""
+	if len(args) == 1 {
+		src = args[0]
+	} else if len(args) >= 2 {
+		rel = args[0]
+		src = args[1]
+	}
+	return GoExecViolations(rel, src)
+}
+
 // GoExecCandidates returns advisory findings for literal console tools in Go
 // files that are not yet part of the hard ratchet. It makes the remaining popup
 // surface visible without instantly reding the whole shared tree.
