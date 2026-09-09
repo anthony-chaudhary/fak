@@ -457,7 +457,7 @@ func cmdServe(argv []string) {
 		}
 	}
 
-	rt := &serveRuntime{t0: t0, toolPlugins: toolPlugins, toolPreferences: toolPreferences, startupPhases: []gateway.StartupPhase{
+	rt := &serveRuntime{t0: t0, toolPlugins: toolPlugins, toolPreferences: toolPreferences, explicitFlags: explicit, startupPhases: []gateway.StartupPhase{
 		{Name: "flag-parse", Dur: parseDur},
 	}}
 	if err := resolveServeModelOrPrompt(sf, explicit, os.Stdin, os.Stderr, guardFdIsTerminal(int(os.Stdin.Fd()))); err != nil {
@@ -615,10 +615,27 @@ func cmdServe(argv []string) {
 	rt.configureEPDecode()
 	rt.resolveSessionPlane(sf)
 	rt.resolveObservers(sf)
+	resolveServeEngine(sf, explicit, rt.inKernelModel != nil)
 	rt.buildGateway(sf)
 	rt.wireGateway(sf)
 	rt.addStartupMessage(serveDurabilityStartupMessage(durability))
 	rt.run(sf)
+}
+
+// resolveServeEngine selects the appropriate engine ID. If --engine was not explicitly
+// passed by the operator, and in-kernel weights are configured or loaded (e.g. --gguf is set
+// or in-kernel model weights are resident), it automatically defaults sf.engineID to "inkernel"
+// rather than leaving the default "mock".
+func resolveServeEngine(sf *serveFlags, explicit map[string]bool, inKernelLoaded bool) {
+	if sf == nil || sf.engineID == nil {
+		return
+	}
+	if explicit != nil && explicit["engine"] {
+		return
+	}
+	if (sf.ggufPath != nil && *sf.ggufPath != "") || inKernelLoaded {
+		*sf.engineID = "inkernel"
+	}
 }
 
 // isServeVulkan reports only an exact, explicitly parsed --backend=vulkan.
@@ -718,6 +735,7 @@ func loadServeRouteFile[T any](flagName, path, want string, load func(string) (T
 // server from the resolved planes, and arms the admission controller for a pure
 // in-kernel serve.
 func (rt *serveRuntime) buildGateway(sf *serveFlags) {
+	resolveServeEngine(sf, rt.explicitFlags, rt.inKernelModel != nil)
 	startupMessages := append([]gateway.StartupMessage(nil), rt.startupMessages...)
 	// Resolve the optional model-routing policy. Off by default: an empty --route-manifest
 	// leaves routeMan nil, so gateway.New gets a nil RouteManifest and Engine stays unset —

@@ -43,6 +43,7 @@ type serveRuntime struct {
 	t0              time.Time
 	startupPhases   []gateway.StartupPhase
 	startupMessages []gateway.StartupMessage
+	explicitFlags   map[string]bool
 
 	chatBackend compute.Backend
 	useMetal    bool
