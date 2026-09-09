@@ -592,6 +592,8 @@ func dispatchExtendedVerbA(name string, args []string) bool {
 		cmdFreshStatus(args)
 	case "stale-work":
 		cmdStaleWork(args)
+	case "doc-freshness", "docs-freshness":
+		cmdDocFreshness(args)
 	case "cadence":
 		cmdCadence(args)
 	case "operator":

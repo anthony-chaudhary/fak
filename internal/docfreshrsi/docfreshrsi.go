@@ -453,7 +453,11 @@ func EvaluateCandidate(base Corpus, c Candidate, tgt Target) (Verdict, Corpus) {
 	cand := c.Apply(base.Clone())
 	after := Debt(cand, tgt)
 	clean := confined(base, cand, c.Doc) && wellFormed(cand)
+	beforeLinks, baseDangling := truthClean(base, tgt)
 	links, dangling := truthClean(cand, tgt)
+	// A candidate is truth-clean if all links resolve, or if it did not introduce any
+	// new dangling links on top of pre-existing ones in the base corpus.
+	truthIsClean := links || (!beforeLinks && len(dangling) <= len(baseDangling) && !danglingIntroduced(baseDangling, dangling))
 
 	w := shipgate.Witness{
 		Class:       shipgate.ClassFull, // all three signals must hold (the issue's "any one failing REVERTs")
@@ -462,7 +466,7 @@ func EvaluateCandidate(base Corpus, c Candidate, tgt Target) (Verdict, Corpus) {
 		After:       float64(after),
 		LowerBetter: true, // a SMALLER debt is the gain
 		SuiteGreen:  clean,
-		TruthClean:  links,
+		TruthClean:  truthIsClean,
 	}
 	d, ev := shipgate.Evaluate(w)
 	v := Verdict{
@@ -473,7 +477,7 @@ func EvaluateCandidate(base Corpus, c Candidate, tgt Target) (Verdict, Corpus) {
 		DebtAfter:    after,
 		Improved:     after < before,
 		Clean:        clean,
-		LinksResolve: links,
+		LinksResolve: truthIsClean,
 		Dangling:     dangling,
 		Decision:     d.String(),
 		Kept:         ev.Kept(),
@@ -483,6 +487,19 @@ func EvaluateCandidate(base Corpus, c Candidate, tgt Target) (Verdict, Corpus) {
 		return v, cand
 	}
 	return v, base
+}
+
+func danglingIntroduced(before, after []string) bool {
+	beforeSet := make(map[string]bool, len(before))
+	for _, b := range before {
+		beforeSet[b] = true
+	}
+	for _, a := range after {
+		if !beforeSet[a] {
+			return true
+		}
+	}
+	return false
 }
 
 func scoreVerdict(v Verdict) Scorecard {

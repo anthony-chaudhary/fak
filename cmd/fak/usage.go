@@ -384,9 +384,15 @@ const usageCoreText = `usage:
                  no certificate can fix. Read-only; an unreachable endpoint is reported
                  as "no verdict", so an offline host raises nothing. Exit 1 on a finding)
   fak check-tool-failure [--list | TOKEN | --message TEXT] [--json]
-                (closed NON-GUARD tool-failure vocabulary: hangs, timeouts, shell
-                 mismatches, hang/shell-mismatch exit-143 cases, and partial applies.
-                 Prints a DOS-wedge-shaped summary/fix/retryable row)
+                 (closed NON-GUARD tool-failure vocabulary: hangs, timeouts, shell
+                  mismatches, hang/shell-mismatch exit-143 cases, and partial applies.
+                  Prints a DOS-wedge-shaped summary/fix/retryable row)
+  fak doc-freshness [--check] [--refresh] [--generated] [--corpus] [--json] [--workspace DIR]
+                 (the DOC FRESHNESS tool: detect and refresh stale documentation across
+                  the repository. Audits generated doc blocks (milestone status, hardware
+                  matrix, scoreboard debt, workflow audit, structured data, llms-full) and
+                  prose for stale version pins, dead links, and unpointed claims via
+                  internal/docfreshrsi. --refresh applies safe mechanical updates)
   fak index     lane <path>... | leaf [<query>] | docs <query> | refs <pkg>.<Sym>   [--json] [--limit N] [--root DIR]
                 (the QUERYABLE SELF-INDEX: query fak's own dev facts instead of
                  re-surveying prose. 'lane' resolves which lane/leaf owns a path
