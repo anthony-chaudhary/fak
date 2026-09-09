@@ -914,6 +914,167 @@ func TestLandIsolatedHappyPathUsesTempIndexAndCASRefUpdate(t *testing.T) {
 	}
 }
 
+func TestLandIsolatedSyncsIntermediatePeerCommits(t *testing.T) {
+	g := isolatedHappyFake().
+		reply("diff", 0, "x\npeer.txt\n").
+		reply("status", 0, "")
+	msg := writeMsg(t, "feat(x): do the thing (fak x)")
+	res, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", msg, []string{"x"}, "oldhead000", g.run, g.runEnv)
+	if !handled || !res.OK || !res.Committed || !res.Applied {
+		t.Fatalf("isolated land should succeed: handled=%v res=%+v", handled, res)
+	}
+	co := g.callsWithPrefix("checkout")
+	if len(co) != 1 {
+		t.Fatalf("want exactly 1 checkout call, got %d: %v", len(co), co)
+	}
+	if !contains(co[0], "x") || !contains(co[0], "peer.txt") {
+		t.Fatalf("checkout must include both worker path and peer path: %v", co[0])
+	}
+}
+
+func TestLandIsolatedSkipsConflictedRemotePaths(t *testing.T) {
+	g := isolatedHappyFake().
+		reply("diff", 0, "x\npeer.txt\n").
+		reply("status", 0, " M peer.txt\n")
+	msg := writeMsg(t, "feat(x): do the thing (fak x)")
+	res, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", msg, []string{"x"}, "oldhead000", g.run, g.runEnv)
+	if !handled || !res.OK || !res.Committed || !res.Applied {
+		t.Fatalf("isolated land should succeed: handled=%v res=%+v", handled, res)
+	}
+	co := g.callsWithPrefix("checkout")
+	if len(co) != 1 {
+		t.Fatalf("want exactly 1 checkout call, got %d: %v", len(co), co)
+	}
+	if !contains(co[0], "x") {
+		t.Fatalf("checkout must include worker path: %v", co[0])
+	}
+	if contains(co[0], "peer.txt") {
+		t.Fatalf("checkout must NOT include conflicted peer path: %v", co[0])
+	}
+}
+
+func TestLandSyncsIntermediatePeerCommitsLiveRepo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := t.TempDir()
+	mustGit(t, root, "init", "-q", "-b", "main")
+	mustGit(t, root, "config", "user.email", "tester@test")
+	mustGit(t, root, "config", "user.name", "tester")
+	mustGit(t, root, "config", "commit.gpgsign", "false")
+
+	initFile := filepath.Join(root, "init.txt")
+	if err := os.WriteFile(initFile, []byte("init\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, root, "add", "init.txt")
+	mustGit(t, root, "commit", "-q", "-m", "init")
+	baseSHA := strings.TrimSpace(mustGit(t, root, "rev-parse", "HEAD"))
+
+	wtRoot := t.TempDir()
+	prep := Prepare(root, "lane", "key", baseSHA, wtRoot, nil)
+	if !prep.OK {
+		t.Fatalf("prepare failed: %+v", prep)
+	}
+	wtPath := prep.Path
+
+	workerFile := filepath.Join(wtPath, "worker.txt")
+	if err := os.WriteFile(workerFile, []byte("worker content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, wtPath, "add", "worker.txt")
+	mustGit(t, wtPath, "commit", "-q", "-m", "feat: worker file (#12574) (fak workerworktree)")
+
+	peerFile := filepath.Join(root, "peer.txt")
+	if err := os.WriteFile(peerFile, []byte("peer content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, root, "add", "peer.txt")
+	mustGit(t, root, "commit", "-q", "-m", "feat: peer file (#12574) (fak peer)")
+
+	// In the primary trunk working tree, remove peer.txt so it is missing from working tree
+	_ = os.Remove(peerFile)
+	mustGit(t, root, "checkout", "HEAD", "--", "init.txt")
+
+	if _, err := os.Stat(peerFile); !os.IsNotExist(err) {
+		t.Fatalf("precondition: peer.txt should be missing from root before land")
+	}
+
+	res := Land(root, wtPath, baseSHA, "", []string{"worker.txt"}, nil, nil)
+	if !res.OK || !res.Committed {
+		t.Fatalf("land failed: %+v", res)
+	}
+
+	rootWorkerFile := filepath.Join(root, "worker.txt")
+	if data, err := os.ReadFile(rootWorkerFile); err != nil || string(data) != "worker content\n" {
+		t.Fatalf("worker.txt missing or wrong content in root: %v (data=%q)", err, string(data))
+	}
+
+	if data, err := os.ReadFile(peerFile); err != nil || string(data) != "peer content\n" {
+		t.Fatalf("peer.txt must be synced to trunk root: %v (data=%q)", err, string(data))
+	}
+}
+
+func TestLandSyncsIntermediatePeerCommitsSkipsConflictedLiveRepo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := t.TempDir()
+	mustGit(t, root, "init", "-q", "-b", "main")
+	mustGit(t, root, "config", "user.email", "tester@test")
+	mustGit(t, root, "config", "user.name", "tester")
+	mustGit(t, root, "config", "commit.gpgsign", "false")
+
+	initFile := filepath.Join(root, "init.txt")
+	if err := os.WriteFile(initFile, []byte("init\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, root, "add", "init.txt")
+	mustGit(t, root, "commit", "-q", "-m", "init")
+	baseSHA := strings.TrimSpace(mustGit(t, root, "rev-parse", "HEAD"))
+
+	wtRoot := t.TempDir()
+	prep := Prepare(root, "lane", "key", baseSHA, wtRoot, nil)
+	if !prep.OK {
+		t.Fatalf("prepare failed: %+v", prep)
+	}
+	wtPath := prep.Path
+
+	workerFile := filepath.Join(wtPath, "worker.txt")
+	if err := os.WriteFile(workerFile, []byte("worker content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, wtPath, "add", "worker.txt")
+	mustGit(t, wtPath, "commit", "-q", "-m", "feat: worker file (#12574) (fak workerworktree)")
+
+	peerFile := filepath.Join(root, "peer.txt")
+	if err := os.WriteFile(peerFile, []byte("peer content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, root, "add", "peer.txt")
+	mustGit(t, root, "commit", "-q", "-m", "feat: peer file (#12574) (fak peer)")
+
+	// In the primary trunk working tree, leave local uncommitted edits to peer.txt
+	if err := os.WriteFile(peerFile, []byte("local uncommitted edits\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res := Land(root, wtPath, baseSHA, "", []string{"worker.txt"}, nil, nil)
+	if !res.OK || !res.Committed {
+		t.Fatalf("land failed: %+v", res)
+	}
+
+	rootWorkerFile := filepath.Join(root, "worker.txt")
+	if data, err := os.ReadFile(rootWorkerFile); err != nil || string(data) != "worker content\n" {
+		t.Fatalf("worker.txt missing or wrong content in root: %v (data=%q)", err, string(data))
+	}
+
+	// Conflicted peer.txt must NOT be overwritten
+	if data, err := os.ReadFile(peerFile); err != nil || string(data) != "local uncommitted edits\n" {
+		t.Fatalf("peer.txt local dirty changes must be preserved: %v (data=%q)", err, string(data))
+	}
+}
+
 func TestLandIsolatedCandidateVerificationRefusalRequiresReconciliation(t *testing.T) {
 	g := newFakeGit().
 		reply("symbolic-ref", 0, "refs/heads/main\n").

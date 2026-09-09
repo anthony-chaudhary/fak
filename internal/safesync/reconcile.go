@@ -644,6 +644,10 @@ func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessmen
 			newCommitSHA, transplantErr := TransplantDisjointTreeWithRunner(ctx, run, repo, targetBranch, headSHA, targetSHA, targetRef)
 			if transplantErr == nil {
 				syncIndexWithHEAD(ctx, run, repo, headSHA, newCommitSHA, targetSHA)
+				// Handle incoming path renames across disjoint integration
+				if renames, err := InspectIncomingRenames(ctx, run, repo, headSHA, targetSHA, newCommitSHA); err == nil && len(renames) > 0 {
+					_ = ApplyIncomingRenames(ctx, run, repo, headSHA, newCommitSHA, renames)
+				}
 				newHead, _ := rev(ctx, run, repo, "HEAD")
 				exec := &ReconcileExecution{
 					Primitive:     primitive,
