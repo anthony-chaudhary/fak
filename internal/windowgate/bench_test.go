@@ -129,7 +129,7 @@ Register-ScheduledTask -TaskName "PeriodicRun" -Action $a -Principal $p
 		{
 			name: "PowerShellUnsuppressedStartProcess",
 			rel:  "tools/watcher.ps1",
-			src: "Start" + "-Process -FilePath powershell.exe -ArgumentList \"-NoProfile -File worker.ps1\"\n",
+			src:  "Start" + "-Process -FilePath powershell.exe -ArgumentList \"-NoProfile -File worker.ps1\"\n",
 		},
 		{
 			name: "PowerShellBlockCommentsProse",

@@ -786,4 +786,3 @@ func TestHilRuntimeProofRecorded(t *testing.T) {
 		t.Fatalf("unexpected output_contains for hil: %q", proof.OutputContains)
 	}
 }
-

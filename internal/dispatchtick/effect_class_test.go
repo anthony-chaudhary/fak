@@ -53,8 +53,8 @@ func TestEffectClass_ZeroCostMaintenanceForbidden(t *testing.T) {
 // can overlap without consuming two full engineering slots.
 func TestEffectClass_ReadOnlyTasksOverlap(t *testing.T) {
 	engine := &MaintenancePreflightEngine{
-		HostCapacityUnits:   2.0, // 2 slots total
-		EngineeringWorkers:  1,   // 1 engineering worker active (1.0 unit used, 1.0 unit left)
+		HostCapacityUnits:  2.0, // 2 slots total
+		EngineeringWorkers: 1,   // 1 engineering worker active (1.0 unit used, 1.0 unit left)
 	}
 	// Two lightweight read-only tasks, each 0.25 units (total 0.5 units < 1.0 unit remaining).
 	candidates := []MaintenanceProfile{
@@ -228,8 +228,8 @@ func TestEffectClass_RecursiveSpawningRefused(t *testing.T) {
 // engineering workers, maintenance runs, weighted units, collision keys, and the binding limiter separately.
 func TestEffectClass_JSONPreflightReportDetails(t *testing.T) {
 	engine := &MaintenancePreflightEngine{
-		HostCapacityUnits:   8.0,
-		EngineeringWorkers:  3,
+		HostCapacityUnits:  8.0,
+		EngineeringWorkers: 3,
 	}
 	candidates := []MaintenanceProfile{
 		{

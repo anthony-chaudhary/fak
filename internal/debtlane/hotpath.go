@@ -14,7 +14,7 @@ import (
 const (
 	DimAllocationCopyDebt DetectorDimension = "allocation_copy_debt" // Loop-local heap growth and byte/string copies on critical paths
 	DimBlockingCallDebt   DetectorDimension = "blocking_call_debt"   // Filesystem/subprocess I/O, sleep, and mutex acquisition on critical paths
-	DimHotpathDebt        DetectorDimension = "hotpath_debt"        // General hot-path performance debt token
+	DimHotpathDebt        DetectorDimension = "hotpath_debt"         // General hot-path performance debt token
 )
 
 // Aliases for dimensional lookup compatibility.

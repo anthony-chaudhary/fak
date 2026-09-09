@@ -638,7 +638,7 @@ func TestFakRead_PagedRefImmediatelyRestorableWithBounds(t *testing.T) {
 	// Write a file of ~16 KiB (> 4096).
 	filePath := filepath.Join(dir, "large.txt")
 	line := "0123456789abcdef0123456789abcdef\n" // 33 bytes
-	fileData := strings.Repeat(line, 500)             // 16,500 bytes
+	fileData := strings.Repeat(line, 500)        // 16,500 bytes
 	if err := os.WriteFile(filePath, []byte(fileData), 0o644); err != nil {
 		t.Fatal(err)
 	}

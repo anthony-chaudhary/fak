@@ -1626,7 +1626,7 @@ func TestSessionHubDroppedFrames(t *testing.T) {
 		t.Fatalf("expected status 200 from /api/sessions, got %d", respSess.StatusCode)
 	}
 	var sessPayload struct {
-		DroppedFrames uint64                 `json:"dropped_frames"`
+		DroppedFrames uint64                `json:"dropped_frames"`
 		Diagnostics   SessionHubDiagnostics `json:"diagnostics"`
 	}
 	if err := json.NewDecoder(respSess.Body).Decode(&sessPayload); err != nil {

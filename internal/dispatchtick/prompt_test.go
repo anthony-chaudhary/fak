@@ -521,4 +521,3 @@ func TestIssuePromptScopesValidationToOwnedPaths(t *testing.T) {
 		t.Fatalf("prompt must not mandate whole-repo `go test ./...` in gate-before-done rule:\n%s", p)
 	}
 }
-

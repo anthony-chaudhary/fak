@@ -53,20 +53,20 @@ package compute
 type Dtype uint8
 
 const (
-	F32  Dtype = iota // IEEE binary32 — the reference currency
-	F16               // IEEE binary16 (device-native; widened at load today)
-	BF16              // bfloat16
-	Q8_0              // 8-bit, symmetric, per-block(32) scale — llama.cpp's block_q8_0
-	I8                // generic int8 (scheme in QuantSpec)
-	I4                // generic int4 / nibble-packed (scheme in QuantSpec)
-	FP8               // 8-bit float (E4M3/E5M2; variant in QuantSpec)
-	Q4_K              // llama.cpp k-quant: 256-elem super-block, f16 d+dmin, 6-bit sub-scales, 4-bit codes
-	Q5_K              // llama.cpp k-quant: 256-elem super-block, 176 raw bytes
-	Q6_K              // llama.cpp k-quant: 256-elem super-block, 210 raw bytes
-	Q2_0              // packed ternary: 2-bit codes (4/byte) in {-1,0,+1} · per-block(32) f32 scale (BitNet/prism-ml)
-	Q2_K              // llama.cpp k-quant: 256-elem super-block, 84 raw bytes
-	IQ3_XXS           // llama.cpp i-quant: 256-elem super-block, 98 raw bytes
-	IQ3_S             // llama.cpp i-quant: 256-elem super-block, 110 raw bytes
+	F32     Dtype = iota // IEEE binary32 — the reference currency
+	F16                  // IEEE binary16 (device-native; widened at load today)
+	BF16                 // bfloat16
+	Q8_0                 // 8-bit, symmetric, per-block(32) scale — llama.cpp's block_q8_0
+	I8                   // generic int8 (scheme in QuantSpec)
+	I4                   // generic int4 / nibble-packed (scheme in QuantSpec)
+	FP8                  // 8-bit float (E4M3/E5M2; variant in QuantSpec)
+	Q4_K                 // llama.cpp k-quant: 256-elem super-block, f16 d+dmin, 6-bit sub-scales, 4-bit codes
+	Q5_K                 // llama.cpp k-quant: 256-elem super-block, 176 raw bytes
+	Q6_K                 // llama.cpp k-quant: 256-elem super-block, 210 raw bytes
+	Q2_0                 // packed ternary: 2-bit codes (4/byte) in {-1,0,+1} · per-block(32) f32 scale (BitNet/prism-ml)
+	Q2_K                 // llama.cpp k-quant: 256-elem super-block, 84 raw bytes
+	IQ3_XXS              // llama.cpp i-quant: 256-elem super-block, 98 raw bytes
+	IQ3_S                // llama.cpp i-quant: 256-elem super-block, 110 raw bytes
 )
 
 // Bytes is the per-element storage width. For sub-byte formats (I4) it reports the

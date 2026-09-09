@@ -52,9 +52,9 @@ import (
 // advanced the turn" from "the stream outlived its absolute max-duration budget". All three
 // are stalls to the gateway (a 504 upstream_stalled); only the cause differs.
 const (
-	stallKindIdle          = "idle"
-	stallKindNoProgress    = "no-progress"
-	stallKindMaxDuration   = "max-duration"
+	stallKindIdle        = "idle"
+	stallKindNoProgress  = "no-progress"
+	stallKindMaxDuration = "max-duration"
 )
 
 // ErrUpstreamStalled is the sentinel a streaming read returns when the upstream produced

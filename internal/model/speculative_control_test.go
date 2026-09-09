@@ -154,7 +154,7 @@ func TestSpeculativeControl_ConcurrentHotSwap(t *testing.T) {
 		go func(workerID int) {
 			defer wg.Done()
 			for i := 0; i < iterations; i++ {
-				targetK := (i + workerID) % (kMax + 5) - 2 // includes -2, -1, ..., kMax+2
+				targetK := (i+workerID)%(kMax+5) - 2 // includes -2, -1, ..., kMax+2
 				_ = ctrl.SetDepth(targetK)
 			}
 		}(w)

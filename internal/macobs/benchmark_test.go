@@ -233,7 +233,7 @@ func BenchmarkParseMLXMetrics_Parallel(b *testing.B) {
 // for a 7B/8B GQA model with a 4096-token shared prefix.
 func BenchmarkComputeHeadroom_Standard(b *testing.B) {
 	hw := HardwareTelemetry{
-		TotalSystemMemoryBytes: 38654705664,       // 36GB
+		TotalSystemMemoryBytes: 38654705664,             // 36GB
 		WiredMemoryLimitBytes:  27 * 1024 * 1024 * 1024, // 27GB
 		Available:              true,
 	}
@@ -251,7 +251,7 @@ func BenchmarkComputeHeadroom_Standard(b *testing.B) {
 // with a 32K context window and 16K shared prefix.
 func BenchmarkComputeHeadroom_LargeModel(b *testing.B) {
 	hw := HardwareTelemetry{
-		TotalSystemMemoryBytes: 137438953472,       // 128GB unified memory
+		TotalSystemMemoryBytes: 137438953472,             // 128GB unified memory
 		WiredMemoryLimitBytes:  100 * 1024 * 1024 * 1024, // 100GB wired limit
 		Available:              true,
 	}
@@ -279,7 +279,7 @@ func BenchmarkComputeHeadroom_LargeModel(b *testing.B) {
 // is constrained near base model weight and OS reserve limits.
 func BenchmarkComputeHeadroom_Constrained(b *testing.B) {
 	hw := HardwareTelemetry{
-		TotalSystemMemoryBytes: 17179869184, // 16GB
+		TotalSystemMemoryBytes: 17179869184,            // 16GB
 		WiredMemoryLimitBytes:  9 * 1024 * 1024 * 1024, // 9GB
 		Available:              true,
 	}

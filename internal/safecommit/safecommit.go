@@ -117,17 +117,17 @@ const DefaultLockTimeout = 10 * time.Second
 
 // Options is the full request to Commit / CommitWith.
 type Options struct {
-	Dir      string            // repo dir ("" => git discovery from cwd)
-	Paths    []string          // explicit repo-relative pathspec (REQUIRED, >= 1)
-	Message  string            // commit message (already assembled from -m / -F / stdin)
-	Trunk    string            // expected development branch override ("" => branch_roles.development_branch)
-	SignOff              bool        // add the DCO sign-off (-s)
-	Push                 bool        // push, but ONLY after a verified commit
-	DisableAutoReconcile bool        // disable automatic reconciliation of safe-disjoint divergence on push (#12078)
-	Lock                 LockOptions // advisory same-host lock
-	Recorder *witness.Recorder // optional decisions-note sink for post-commit assertions
-	Window   *Window           // optional adaptive process-local writer window
-	Review   *ReviewOptions    // optional pre-commit cross-model review rung
+	Dir                  string            // repo dir ("" => git discovery from cwd)
+	Paths                []string          // explicit repo-relative pathspec (REQUIRED, >= 1)
+	Message              string            // commit message (already assembled from -m / -F / stdin)
+	Trunk                string            // expected development branch override ("" => branch_roles.development_branch)
+	SignOff              bool              // add the DCO sign-off (-s)
+	Push                 bool              // push, but ONLY after a verified commit
+	DisableAutoReconcile bool              // disable automatic reconciliation of safe-disjoint divergence on push (#12078)
+	Lock                 LockOptions       // advisory same-host lock
+	Recorder             *witness.Recorder // optional decisions-note sink for post-commit assertions
+	Window               *Window           // optional adaptive process-local writer window
+	Review               *ReviewOptions    // optional pre-commit cross-model review rung
 	// CoreLockMaintenanceWitness is an independent witness claim that may clear a
 	// hard-self core-lock pathset. Empty means ordinary in-agent hard-self edits are
 	// refused before staging with CORE_SELF_MODIFY.

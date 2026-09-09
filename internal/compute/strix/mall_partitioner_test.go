@@ -4,7 +4,6 @@ import (
 	"errors"
 	"sync"
 	"testing"
-
 )
 
 // TestMALLPartitioner executes the complete verification suite for attention working set

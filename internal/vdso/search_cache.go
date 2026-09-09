@@ -45,8 +45,8 @@ type SearchEntry struct {
 type SearchCache struct {
 	mu           sync.Mutex
 	capacity     int
-	entries      map[string]*list.Element // key -> list.Element containing *SearchEntry
-	lru          *list.List               // front = most recent
+	entries      map[string]*list.Element       // key -> list.Element containing *SearchEntry
+	lru          *list.List                     // front = most recent
 	dirIndex     map[string]map[string]struct{} // directory -> set of keys
 	witnessIndex map[string]map[string]struct{} // witness -> set of keys
 

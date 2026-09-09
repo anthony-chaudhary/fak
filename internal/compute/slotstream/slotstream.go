@@ -29,12 +29,12 @@ type ExpertSlot struct {
 
 // MultiTensorSlotPool manages preallocated VRAM slots for massive MoE models.
 type MultiTensorSlotPool struct {
-	mu             sync.Mutex
-	SlotsPerLayer  int
-	NumLayers      int
-	Slots          map[int][]*ExpertSlot // layerID -> slots
+	mu              sync.Mutex
+	SlotsPerLayer   int
+	NumLayers       int
+	Slots           map[int][]*ExpertSlot // layerID -> slots
 	DenseTrunkBytes int64
-	TotalVRAMBytes int64
+	TotalVRAMBytes  int64
 }
 
 // NewMultiTensorSlotPool initializes preallocated slots for all layers within the VRAM budget.

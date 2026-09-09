@@ -9,20 +9,20 @@ import (
 
 // GLM5NextOperatingEnvelopeReceipt schema for Issue #9438.
 type GLM5NextOperatingEnvelopeReceipt struct {
-	Schema                  string                      `json:"schema"`
-	Issue                   int                         `json:"issue"`
-	Role                    string                      `json:"role"`
-	Engine                  string                      `json:"engine"`
-	Model                   string                      `json:"model"`
-	TotalParameters         int64                       `json:"total_parameters"`
-	ActiveParameters        int64                       `json:"active_parameters"`
-	LayersTotal             int                         `json:"layers_total"`
-	KDARecurrentLayers      int                         `json:"kda_recurrent_layers"`
-	DSASparseLayers         int                         `json:"dsa_sparse_layers"`
-	FixedKDABallastBytes    int64                       `json:"fixed_kda_ballast_bytes"`
-	EvaluatedStages         []GLM5NextContextStage      `json:"evaluated_stages"`
-	AdmissionChecksVerified bool                        `json:"admission_checks_verified"`
-	ComparisonBaseline      string                      `json:"comparison_baseline"`
+	Schema                  string                 `json:"schema"`
+	Issue                   int                    `json:"issue"`
+	Role                    string                 `json:"role"`
+	Engine                  string                 `json:"engine"`
+	Model                   string                 `json:"model"`
+	TotalParameters         int64                  `json:"total_parameters"`
+	ActiveParameters        int64                  `json:"active_parameters"`
+	LayersTotal             int                    `json:"layers_total"`
+	KDARecurrentLayers      int                    `json:"kda_recurrent_layers"`
+	DSASparseLayers         int                    `json:"dsa_sparse_layers"`
+	FixedKDABallastBytes    int64                  `json:"fixed_kda_ballast_bytes"`
+	EvaluatedStages         []GLM5NextContextStage `json:"evaluated_stages"`
+	AdmissionChecksVerified bool                   `json:"admission_checks_verified"`
+	ComparisonBaseline      string                 `json:"comparison_baseline"`
 }
 
 func TestGLM5NextOperatingEnvelope(t *testing.T) {

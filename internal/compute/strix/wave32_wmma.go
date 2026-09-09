@@ -101,7 +101,7 @@ func (c Wave32WMMAConfig) Validate() error {
 // WaveAccessResult captures the bank collision metrics for a single Wave32 memory transaction.
 type WaveAccessResult struct {
 	BanksHit            int     `json:"banks_hit"`             // Number of unique banks accessed
-	MaxConflictDepth    int     `json:"max_conflict_depth"`   // Max distinct addresses mapping to a single bank
+	MaxConflictDepth    int     `json:"max_conflict_depth"`    // Max distinct addresses mapping to a single bank
 	ConflictStallCycles int     `json:"conflict_stall_cycles"` // Total stall cycles: sum(distinct_addresses - 1)
 	BankOccupancy       [32]int `json:"bank_occupancy"`        // Access count per bank
 	UniqueAddressesHit  int     `json:"unique_addresses_hit"`  // Total unique addresses requested
@@ -113,14 +113,14 @@ type TileStrideComparison struct {
 	TileCols               int     `json:"tile_cols"`
 	StandardStride         int     `json:"standard_stride"`
 	PaddedStride           int     `json:"padded_stride"`
-	StandardBanksHit       int     `json:"standard_banks_hit"`        // e.g. 8 of 32 banks
-	PaddedBanksHit         int     `json:"padded_banks_hit"`          // e.g. 16 or 28/32 banks
-	StandardMaxCollision   int     `json:"standard_max_collision"`    // e.g. 4-way collision
-	PaddedMaxCollision     int     `json:"padded_max_collision"`      // e.g. 1-way (conflict-free) or 2-way distribution
+	StandardBanksHit       int     `json:"standard_banks_hit"`     // e.g. 8 of 32 banks
+	PaddedBanksHit         int     `json:"padded_banks_hit"`       // e.g. 16 or 28/32 banks
+	StandardMaxCollision   int     `json:"standard_max_collision"` // e.g. 4-way collision
+	PaddedMaxCollision     int     `json:"padded_max_collision"`   // e.g. 1-way (conflict-free) or 2-way distribution
 	StandardConflictCycles int     `json:"standard_conflict_cycles"`
 	PaddedConflictCycles   int     `json:"padded_conflict_cycles"`
-	ConflictReductionRatio float64 `json:"conflict_reduction_ratio"`  // >= 0.50
-	Eliminates8BankStall   bool    `json:"eliminates_8bank_stall"`    // true
+	ConflictReductionRatio float64 `json:"conflict_reduction_ratio"` // >= 0.50
+	Eliminates8BankStall   bool    `json:"eliminates_8bank_stall"`   // true
 }
 
 // LDSBankConflictTracker simulates physical LDS bank indexing across 32 banks
@@ -341,25 +341,25 @@ type WMMATelemetry struct {
 	K                         int              `json:"k"`
 	TotalFLOPs                int64            `json:"total_flops"`
 	TotalBytes                int64            `json:"total_bytes"`
-	ArithmeticIntensity       float64          `json:"arithmetic_intensity"`        // FLOPs / byte
-	WaveSize                  int              `json:"wave_size"`                   // 32
-	NativeWave32              bool             `json:"native_wave32"`               // true (no Wave64 wrapping)
+	ArithmeticIntensity       float64          `json:"arithmetic_intensity"` // FLOPs / byte
+	WaveSize                  int              `json:"wave_size"`            // 32
+	NativeWave32              bool             `json:"native_wave32"`        // true (no Wave64 wrapping)
 	TileM                     int              `json:"tile_m"`
 	TileN                     int              `json:"tile_n"`
 	TileK                     int              `json:"tile_k"`
-	LDSBankPadding            int              `json:"lds_bank_padding"`            // 2
+	LDSBankPadding            int              `json:"lds_bank_padding"` // 2
 	StandardBankConflicts     int              `json:"standard_bank_conflicts"`
 	PaddedBankConflicts       int              `json:"padded_bank_conflicts"`
-	ConflictReductionRatio    float64          `json:"conflict_reduction_ratio"`    // (standard - padded) / standard
-	StandardBanksHit          int              `json:"standard_banks_hit"`          // e.g. 8
-	PaddedBanksHit            int              `json:"padded_banks_hit"`            // e.g. 16 or 28
-	StandardMaxCollision      int              `json:"standard_max_collision"`      // e.g. 4-way
-	PaddedMaxCollision        int              `json:"padded_max_collision"`        // e.g. 1-way / 2-way
+	ConflictReductionRatio    float64          `json:"conflict_reduction_ratio"` // (standard - padded) / standard
+	StandardBanksHit          int              `json:"standard_banks_hit"`       // e.g. 8
+	PaddedBanksHit            int              `json:"padded_banks_hit"`         // e.g. 16 or 28
+	StandardMaxCollision      int              `json:"standard_max_collision"`   // e.g. 4-way
+	PaddedMaxCollision        int              `json:"padded_max_collision"`     // e.g. 1-way / 2-way
 	BaselineDuration          time.Duration    `json:"baseline_duration"`
 	RetiledDuration           time.Duration    `json:"retiled_duration"`
 	BaselineThroughputTokS    float64          `json:"baseline_throughput_tok_s"`
 	RetiledThroughputTokS     float64          `json:"retiled_throughput_tok_s"`
-	ThroughputGainPercent     float64          `json:"throughput_gain_percent"`     // >= 7.0%
+	ThroughputGainPercent     float64          `json:"throughput_gain_percent"`      // >= 7.0%
 	VerifiedConflictFree2Bank bool             `json:"verified_conflict_free_2bank"` // true
 }
 

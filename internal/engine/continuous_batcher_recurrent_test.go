@@ -6,9 +6,9 @@ import (
 )
 
 // TestRecurrentAdmissionUsesExecutionBudget verifies that under a fixed KV memory budget:
-// 1. An ordinary non-recurrent request (depth=1) fits within the budget and is admitted into an active slot.
-// 2. An equivalent recurrent request (depth > 1, requiring larger KV cache state) exceeds the budget and is
-//    queued into waitingQueue rather than admitted immediately.
+//  1. An ordinary non-recurrent request (depth=1) fits within the budget and is admitted into an active slot.
+//  2. An equivalent recurrent request (depth > 1, requiring larger KV cache state) exceeds the budget and is
+//     queued into waitingQueue rather than admitted immediately.
 func TestRecurrentAdmissionUsesExecutionBudget(t *testing.T) {
 	ctx := context.Background()
 

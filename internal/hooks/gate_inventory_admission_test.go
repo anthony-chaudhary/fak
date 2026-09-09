@@ -360,10 +360,10 @@ func TestGateClearInventoryAdmission_AdversarialEdgeCases(t *testing.T) {
 		"internal/service/valid.go": {
 			"package service",
 			"type Store struct {}",
-			"type MockeryParser struct {}",   // Mock followed by lowercase 'e'
-			"type FakerGenerator struct {}",  // Fake followed by lowercase 'r'
-			"type MockingbirdAudio struct {}", // Mock followed by lowercase 'i'
-			"type MockupEngine struct {}",    // Mock followed by lowercase 'u'
+			"type MockeryParser struct {}",      // Mock followed by lowercase 'e'
+			"type FakerGenerator struct {}",     // Fake followed by lowercase 'r'
+			"type MockingbirdAudio struct {}",   // Mock followed by lowercase 'i'
+			"type MockupEngine struct {}",       // Mock followed by lowercase 'u'
 			"type DefaultFakeHandler struct {}", // Does not start with Mock/Fake
 		},
 	})
@@ -399,4 +399,3 @@ func TestGateClearInventoryAdmission_AdversarialEdgeCases(t *testing.T) {
 		t.Logf("Note: gate detected %d tricky mock shapes (grouped/unexported/uber-gomock)", len(findingsTricky))
 	}
 }
-

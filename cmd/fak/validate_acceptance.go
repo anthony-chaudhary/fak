@@ -149,16 +149,16 @@ type SubagentRooflineAttainment struct {
 
 // SubagentReproducibility records commands, artifact references, and scrubbing attestation.
 type SubagentReproducibility struct {
-	ArtifactPath        string `json:"artifact_path"`
-	Command             string `json:"command"`
-	CaptureCommand      string `json:"capture_command,omitempty"`
-	Provenance          string `json:"provenance,omitempty"`
-	ProvenanceDetails   string `json:"provenance_details,omitempty"`
-	RawArtifactPath     string `json:"raw_artifact_path,omitempty"`
-	RawArtifactDigest   string `json:"raw_artifact_digest,omitempty"`
-	HardwareAttested    bool   `json:"hardware_attested,omitempty"`
-	Scrubbed            bool   `json:"scrubbed"`
-	Digest              string `json:"digest,omitempty"`
+	ArtifactPath      string `json:"artifact_path"`
+	Command           string `json:"command"`
+	CaptureCommand    string `json:"capture_command,omitempty"`
+	Provenance        string `json:"provenance,omitempty"`
+	ProvenanceDetails string `json:"provenance_details,omitempty"`
+	RawArtifactPath   string `json:"raw_artifact_path,omitempty"`
+	RawArtifactDigest string `json:"raw_artifact_digest,omitempty"`
+	HardwareAttested  bool   `json:"hardware_attested,omitempty"`
+	Scrubbed          bool   `json:"scrubbed"`
+	Digest            string `json:"digest,omitempty"`
 }
 
 // EffectiveProvenance returns the non-empty provenance declared on receipt or reproducibility.

@@ -195,9 +195,12 @@ func TestSupervisorRejectsBadObservations(t *testing.T) {
 
 // TestSupervisorSettlementGrace verifies bounded settlement grace handling:
 // (a) A cooperative / responsive process that exits within the settlement grace
-//     window is not forcefully reaped (Reaped is false, Settled is true).
+//
+//	window is not forcefully reaped (Reaped is false, Settled is true).
+//
 // (b) A non-responsive process that ignores cancel and stays alive past the
-//     settlement grace window is forcefully reaped when grace expires.
+//
+//	settlement grace window is forcefully reaped when grace expires.
 func TestSupervisorSettlementGrace(t *testing.T) {
 	Reset()
 	t.Cleanup(Reset)

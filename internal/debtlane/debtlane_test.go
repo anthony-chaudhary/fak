@@ -1412,14 +1412,14 @@ func TestEvaluateLaneHealth(t *testing.T) {
 		Criticality: CriticalityCore,
 		Maturity:    9.5,
 		Evidence: Evidence{
-			HasCode:         true,
-			HasTests:        true,
-			TestFilesCount:  2,
-			Integrated:      true,
-			Dogfooded:       true,
-			Benchmarked:     true,
-			CodeLines:       200,
-			ExcessComments:  false,
+			HasCode:        true,
+			HasTests:       true,
+			TestFilesCount: 2,
+			Integrated:     true,
+			Dogfooded:      true,
+			Benchmarked:    true,
+			CodeLines:      200,
+			ExcessComments: false,
 		},
 		Interest: Interest{Band: InterestLow, Rate: 0.05},
 	}
@@ -2279,4 +2279,3 @@ func TestPerformanceProofFreshness_HistoricalEvidencePreserved(t *testing.T) {
 		t.Fatalf("expected typed stale_perf_proof finding for historical incompatible scope")
 	}
 }
-

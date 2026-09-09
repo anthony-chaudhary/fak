@@ -29,11 +29,13 @@ func TestNativeCPUCacheByteBudgetPreservesGeneration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cap=="1" && !scoped {
-			b,_:=p.tree.Lookup(ids)
-			retained:=b.KV()!=nil
+		if cap == "1" && !scoped {
+			b, _ := p.tree.Lookup(ids)
+			retained := b.KV() != nil
 			p.tree.Done(b)
-			if retained { t.Fatal("native cache retained the full prompt KV despite a one-byte cap") }
+			if retained {
+				t.Fatal("native cache retained the full prompt KV despite a one-byte cap")
+			}
 		}
 		data, _ := json.Marshal(p.tree.Stats())
 		var stats map[string]any

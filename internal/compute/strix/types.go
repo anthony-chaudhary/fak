@@ -201,18 +201,18 @@ type MemoryBusQoS struct {
 
 // WeightStreamMetrics captures sustained throughput and cache invariants for weight scanning.
 type WeightStreamMetrics struct {
-	LayersStreamed   int          `json:"layers_streamed"`
-	BytesStreamed    int64        `json:"bytes_streamed"`
+	LayersStreamed   int           `json:"layers_streamed"`
+	BytesStreamed    int64         `json:"bytes_streamed"`
 	Duration         time.Duration `json:"duration"`
-	ThroughputGBs    float64      `json:"throughput_gbs"`
-	DRAMReadBytes    uint64       `json:"dram_read_bytes"`
-	MCBusyPercent    float64      `json:"mc_busy_percent"`
-	MALLEvictions    uint64       `json:"mall_evictions"`
-	NonTemporalLoads int64        `json:"non_temporal_loads"`
-	StrideCount      int64        `json:"stride_count"`
-	ChannelBalance   []float64    `json:"channel_balance"` // Channel utilization fraction [0..7]
-	QoS              MemoryBusQoS `json:"qos"`
-	Timestamp        time.Time    `json:"timestamp"`
+	ThroughputGBs    float64       `json:"throughput_gbs"`
+	DRAMReadBytes    uint64        `json:"dram_read_bytes"`
+	MCBusyPercent    float64       `json:"mc_busy_percent"`
+	MALLEvictions    uint64        `json:"mall_evictions"`
+	NonTemporalLoads int64         `json:"non_temporal_loads"`
+	StrideCount      int64         `json:"stride_count"`
+	ChannelBalance   []float64     `json:"channel_balance"` // Channel utilization fraction [0..7]
+	QoS              MemoryBusQoS  `json:"qos"`
+	Timestamp        time.Time     `json:"timestamp"`
 }
 
 // PrefetchRequest represents an asynchronous software prefetch directive (s_prefetch_data).
@@ -392,4 +392,3 @@ func (b *MALLCacheBudgetTracker) Reset() {
 	b.weightBytes = 0
 	b.bypassedBytes = 0
 }
-

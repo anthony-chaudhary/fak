@@ -123,4 +123,3 @@ func TestRaceJobHasExplicitWallClockDeadline(t *testing.T) {
 		t.Fatalf("job timeout-minutes (%d) exceeds bounded upper grace limit (expected <= 45)", jobTimeout)
 	}
 }
-

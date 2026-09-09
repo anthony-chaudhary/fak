@@ -62,17 +62,17 @@ type gardenLoopOptions struct {
 }
 
 type gardenLoopCycleReport struct {
-	Schema       string                  `json:"schema"`
-	Cycle        int                     `json:"cycle"`
-	Timestamp    string                  `json:"timestamp"`
-	DurationMS   int64                   `json:"duration_ms"`
-	Live         bool                    `json:"live"`
-	Watchdog     *gardenWatchdogEnvelope `json:"watchdog,omitempty"`
-	CleanBins    *cleanBinsResult        `json:"clean_bins,omitempty"`
-	TreeDoctor   []string                `json:"tree_doctor,omitempty"`
-	RefsPacked   bool                    `json:"refs_packed"`
-	Status       string                  `json:"status"`
-	Reason       string                  `json:"reason"`
+	Schema     string                  `json:"schema"`
+	Cycle      int                     `json:"cycle"`
+	Timestamp  string                  `json:"timestamp"`
+	DurationMS int64                   `json:"duration_ms"`
+	Live       bool                    `json:"live"`
+	Watchdog   *gardenWatchdogEnvelope `json:"watchdog,omitempty"`
+	CleanBins  *cleanBinsResult        `json:"clean_bins,omitempty"`
+	TreeDoctor []string                `json:"tree_doctor,omitempty"`
+	RefsPacked bool                    `json:"refs_packed"`
+	Status     string                  `json:"status"`
+	Reason     string                  `json:"reason"`
 }
 
 func runGardenLoop(stdout, stderr io.Writer, argv []string) int {

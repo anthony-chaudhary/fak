@@ -84,17 +84,17 @@ type GridSpec struct {
 
 // SweepSpeculativeResult aggregates the complete outcome of the combinatorial sweep and Pareto analysis.
 type SweepSpeculativeResult struct {
-	Schema           string                        `json:"schema"`
-	Hardware         compute.HardwareProfile       `json:"hardware"`
-	TargetModel      compute.ModelCostProfile      `json:"target_model"`
-	DraftModel       compute.ModelCostProfile      `json:"draft_model"`
-	Acceptance       compute.SpecAcceptanceProfile `json:"acceptance"`
-	Grid             GridSpec                      `json:"grid"`
-	TotalEvaluated   int                           `json:"total_evaluated"`
-	ParetoCount      int                           `json:"pareto_count"`
-	ParetoFrontier   []SweepPoint                  `json:"pareto_frontier"`
-	BreakEven        BreakEvenBoundaries           `json:"break_even_boundaries"`
-	RecommendedTop3  []RecommendedConfig           `json:"recommended_top3"`
+	Schema          string                        `json:"schema"`
+	Hardware        compute.HardwareProfile       `json:"hardware"`
+	TargetModel     compute.ModelCostProfile      `json:"target_model"`
+	DraftModel      compute.ModelCostProfile      `json:"draft_model"`
+	Acceptance      compute.SpecAcceptanceProfile `json:"acceptance"`
+	Grid            GridSpec                      `json:"grid"`
+	TotalEvaluated  int                           `json:"total_evaluated"`
+	ParetoCount     int                           `json:"pareto_count"`
+	ParetoFrontier  []SweepPoint                  `json:"pareto_frontier"`
+	BreakEven       BreakEvenBoundaries           `json:"break_even_boundaries"`
+	RecommendedTop3 []RecommendedConfig           `json:"recommended_top3"`
 }
 
 func cmdSweepSpeculative(argv []string) {

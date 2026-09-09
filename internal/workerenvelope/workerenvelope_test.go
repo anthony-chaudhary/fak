@@ -349,4 +349,3 @@ func TestParseFailClosedInvariants(t *testing.T) {
 		})
 	}
 }
-
