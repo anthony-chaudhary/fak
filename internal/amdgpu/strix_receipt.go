@@ -553,6 +553,35 @@ type StrixValidationReceipt struct {
 	Failures           []string               `json:"failures,omitempty"`
 	Digest             string                 `json:"digest,omitempty"`
 	Verified           bool                   `json:"verified"`
+	authority          strixReceiptAuthority
+}
+
+// UnmarshalJSON clears in-process physical authority before decoding public
+// receipt fields, including when decoding fails after making partial progress.
+func (r *StrixValidationReceipt) UnmarshalJSON(data []byte) error {
+	r.authority = strixReceiptAuthority{}
+	type wireReceipt StrixValidationReceipt
+	return json.Unmarshal(data, (*wireReceipt)(r))
+}
+
+// strixReceiptAuthority is deliberately absent from the wire format. Its seal
+// is created only after the verifier has observed the complete execution and
+// cleanup path; hashing the public receipt is integrity, not authority.
+type strixReceiptAuthority struct {
+	seal    *strixReceiptAuthoritySeal
+	binding string
+}
+
+type strixReceiptAuthoritySeal struct{}
+
+var strixReceiptAuthoritySealValue strixReceiptAuthoritySeal
+
+func (a strixReceiptAuthority) validFor(r *StrixValidationReceipt) bool {
+	if a.seal != &strixReceiptAuthoritySealValue || a.binding == "" || r == nil {
+		return false
+	}
+	binding, err := r.ComputeDigest()
+	return err == nil && a.binding == binding
 }
 
 // StrixProvenance records the software revision, command, and run mode.
@@ -643,10 +672,7 @@ func (r *StrixValidationReceipt) CreditEligible() bool {
 	if err := r.Validate(); err != nil {
 		return false
 	}
-	if r.Schema != StrixValidationSchemaV2 {
-		return false
-	}
-	if r.Verdict != "PASS" || !r.Verified || len(r.Failures) > 0 {
+	if !r.authenticatedPass() {
 		return false
 	}
 	if !r.Target.Reachable {
@@ -705,7 +731,8 @@ type StrixArmResult struct {
 	Argmax          int     `json:"argmax,omitempty"`
 }
 
-// ComputeDigest computes a deterministic SHA-256 digest over the receipt.
+// ComputeDigest computes a deterministic SHA-256 integrity digest over the
+// public receipt. It does not mint physical execution authority.
 func (r *StrixValidationReceipt) ComputeDigest() (string, error) {
 	if r.Schema == StrixValidationSchemaV1 {
 		return r.computeV1Digest()
@@ -795,7 +822,9 @@ func (r *StrixValidationReceipt) computeV1Digest() (string, error) {
 	return "sha256:" + hex.EncodeToString(h[:]), nil
 }
 
-// Validate checks receipt invariants, schema, and consistency.
+// Validate checks the public receipt's schema, integrity, and structural
+// consistency. Opaque in-process execution authority is intentionally checked
+// only by credit consumers, so serialized receipts remain readable.
 func (r *StrixValidationReceipt) Validate() error {
 	if r.Schema != StrixValidationSchemaV1 && r.Schema != StrixValidationSchemaV2 {
 		return fmt.Errorf("invalid schema %q (want %q or %q)", r.Schema, StrixValidationSchemaV2, StrixValidationSchemaV1)
@@ -871,7 +900,7 @@ func (r *StrixValidationReceipt) Validate() error {
 				return fmt.Errorf("verdict is PASS but ablation %q suffered regression (speedup=%.2fx)", ab.Feature, ab.Speedup)
 			}
 		}
-		if err := r.validateExecutionCredit(); err != nil {
+		if err := r.validateExecutionEvidence(); err != nil {
 			return err
 		}
 	}
@@ -973,7 +1002,28 @@ func executionManifestDigest(r *StrixValidationReceipt) string {
 func withinRatioTolerance(got, want, tol float64) bool {
 	return want > 0 && !math.IsNaN(got) && !math.IsInf(got, 0) && math.Abs(got-want)/want <= tol
 }
-func (r *StrixValidationReceipt) validateExecutionCredit() error {
+func (r *StrixValidationReceipt) authenticatedPass() bool {
+	return r != nil && r.Schema == StrixValidationSchemaV2 && r.Verdict == "PASS" &&
+		r.Verified && len(r.Failures) == 0 && r.authority.validFor(r)
+}
+
+// authorizePhysicalCredit is package-private so serialized data and external
+// callers cannot mint physical credit. The production validation flow invokes
+// it only after source/build artifacts, device execution, raw output, and
+// cleanup have all been observed and cross-bound by validateExecutionEvidence.
+func (r *StrixValidationReceipt) authorizePhysicalCredit() error {
+	if err := r.validateExecutionEvidence(); err != nil {
+		return err
+	}
+	binding, err := r.ComputeDigest()
+	if err != nil {
+		return fmt.Errorf("compute physical execution authority binding: %w", err)
+	}
+	r.authority = strixReceiptAuthority{seal: &strixReceiptAuthoritySealValue, binding: binding}
+	return nil
+}
+
+func (r *StrixValidationReceipt) validateExecutionEvidence() error {
 	if !fullGitTipRE.MatchString(r.Provenance.GitTip) || !sha256RE.MatchString(r.Provenance.SourceArchiveSHA256) || !sha256RE.MatchString(r.Provenance.BinarySHA256) || !sha256RE.MatchString(r.Provenance.ShaderBundleSHA256) || !sha256RE.MatchString(r.Provenance.BuildCommandSHA256) || !sha256RE.MatchString(r.Provenance.ExecutionManifestSHA256) || r.Provenance.EngineIdentity != "fak-native/vulkan" || strings.TrimSpace(r.Provenance.Command) == "" {
 		return fmt.Errorf("PASS v2 receipt has incomplete immutable source/build/command provenance")
 	}

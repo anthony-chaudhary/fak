@@ -4,11 +4,14 @@ package amdgpu
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -41,6 +44,14 @@ const (
 
 	// MinRecommendedRAMRatio is the Linux kernel default allocation level (50%).
 	MinRecommendedRAMRatio = 0.50
+
+	StrixPowerFrontierSchema         = "fak.amdgpu.strix-power-frontier/v1"
+	StrixPowerFrontierPromptTokens   = 26
+	StrixPowerFrontierAcceptedTokens = 128
+	StrixPowerFrontierMinRepetitions = 5
+	StrixPowerFrontierMaxCVPercent   = 5.0
+	StrixPowerFrontierModelSHA256    = "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169"
+	StrixPowerFrontierPromptSHA256   = "ecb27635e62e758f65a349c34ef2f873d9f43e1e78357d3ab72691eb255f05ef"
 )
 
 // ValidDPMLevels is the closed set of valid AMD power_dpm_force_performance_level options.
@@ -155,6 +166,229 @@ type GovernorConfig struct {
 	SysfsRoot        string  `json:"sysfs_root,omitempty"`         // override sysfs root (default "/sys")
 	ProcRoot         string  `json:"proc_root,omitempty"`          // override proc root (default "/proc")
 	NameFilter       string  `json:"name_filter,omitempty"`        // device filter for Windows probe
+}
+
+// StrixPowerFrontierIdentity binds a power-frontier receipt to one c1 fak-native execution path.
+type StrixPowerFrontierIdentity struct {
+	Engine                string `json:"engine"`
+	Backend               string `json:"backend"`
+	Device                string `json:"device"`
+	Concurrency           int    `json:"concurrency"`
+	SourceCommit          string `json:"source_commit"`
+	ExecutableSHA256      string `json:"executable_sha256"`
+	BuildID               string `json:"build_id"`
+	DriverID              string `json:"driver_id"`
+	PowerController       string `json:"power_controller"`
+	ModelArtifactSHA256   string `json:"model_artifact_sha256"`
+	TensorInventorySHA256 string `json:"tensor_inventory_sha256"`
+	PromptSHA256          string `json:"prompt_sha256"`
+}
+
+// StrixPowerFrontierTrial records raw counters and reconciled metrics for one exact-token decode.
+type StrixPowerFrontierTrial struct {
+	PPTWatts               int     `json:"ppt_watts"`
+	Repetition             int     `json:"repetition"`
+	Sequence               int     `json:"sequence"`
+	AcceptedTokens         int     `json:"accepted_tokens"`
+	ElapsedNanoseconds     int64   `json:"elapsed_nanoseconds"`
+	EnergyStartMicrojoules uint64  `json:"energy_start_microjoules"`
+	EnergyEndMicrojoules   uint64  `json:"energy_end_microjoules"`
+	TokensPerSecond        float64 `json:"tokens_per_second"`
+	JoulesPerToken         float64 `json:"joules_per_token"`
+	GPUClockMHz            float64 `json:"gpu_clock_mhz"`
+	TemperatureC           float64 `json:"temperature_c"`
+	Throttled              bool    `json:"throttled"`
+	QualityPassed          bool    `json:"quality_passed"`
+	FallbackCount          int     `json:"fallback_count"`
+	SettleMilliseconds     int64   `json:"settle_milliseconds"`
+	CooldownMilliseconds   int64   `json:"cooldown_milliseconds"`
+}
+
+// StrixPowerFrontierReceipt is a software-checkable contract for a future physical power sweep.
+// Physical promotion stays disabled until a sealed native producer and authority verifier land.
+type StrixPowerFrontierReceipt struct {
+	Schema                  string                     `json:"schema"`
+	Simulated               bool                       `json:"simulated"`
+	Identity                StrixPowerFrontierIdentity `json:"identity"`
+	PromptTokens            int                        `json:"prompt_tokens"`
+	AcceptedTokensPerTrial  int                        `json:"accepted_tokens_per_trial"`
+	PredeclaredPPTWatts     []int                      `json:"predeclared_ppt_watts"`
+	Repetitions             int                        `json:"repetitions"`
+	Trials                  []StrixPowerFrontierTrial  `json:"trials"`
+	DeclaredMaxCVPercent    float64                    `json:"declared_max_cv_percent"`
+	PriorPowerSetting       string                     `json:"prior_power_setting"`
+	RestoredPowerSetting    string                     `json:"restored_power_setting"`
+	RestorationAttempted    bool                       `json:"restoration_attempted"`
+	RestoreReadbackVerified bool                       `json:"restore_readback_verified"`
+	RestoreError            string                     `json:"restore_error,omitempty"`
+	SelectedPPTWatts        int                        `json:"selected_ppt_watts,omitempty"`
+	Digest                  string                     `json:"digest"`
+}
+
+// ComputeDigest returns the canonical digest with the receipt's digest field cleared.
+func (r *StrixPowerFrontierReceipt) ComputeDigest() (string, error) {
+	if r == nil {
+		return "", errors.New("amdgpu power frontier: nil receipt")
+	}
+	clone := *r
+	clone.Digest = ""
+	raw, err := json.Marshal(clone)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+// Seal records the receipt's canonical digest. It grants no physical-execution credit.
+func (r *StrixPowerFrontierReceipt) Seal() error {
+	digest, err := r.ComputeDigest()
+	if err != nil {
+		return err
+	}
+	r.Digest = digest
+	return nil
+}
+
+// Validate checks the software receipt contract and rejects every physical or default claim.
+func (r *StrixPowerFrontierReceipt) Validate() error {
+	if r == nil {
+		return errors.New("amdgpu power frontier: nil receipt")
+	}
+	if !r.Simulated || r.SelectedPPTWatts != 0 {
+		return ErrPhysicalExecutionUnwitnessed
+	}
+	if r.Schema != StrixPowerFrontierSchema {
+		return fmt.Errorf("amdgpu power frontier: invalid schema %q", r.Schema)
+	}
+	id := r.Identity
+	if id.Engine != "fak-native" || id.Backend != "vulkan" || id.Device != DefaultStrixHaloArch || id.Concurrency != 1 {
+		return fmt.Errorf("amdgpu power frontier: identity must be fak-native/vulkan gfx1151 c1")
+	}
+	if id.SourceCommit == "" || id.BuildID == "" || id.DriverID == "" || id.PowerController == "" ||
+		!validSHA256Hex(id.ExecutableSHA256) || !validSHA256Hex(id.TensorInventorySHA256) {
+		return errors.New("amdgpu power frontier: incomplete source, executable, build, driver, power, or tensor identity")
+	}
+	if id.ModelArtifactSHA256 != StrixPowerFrontierModelSHA256 || id.PromptSHA256 != StrixPowerFrontierPromptSHA256 {
+		return errors.New("amdgpu power frontier: model or prompt digest differs from the sealed c1 contract")
+	}
+	if r.PromptTokens != StrixPowerFrontierPromptTokens || r.AcceptedTokensPerTrial != StrixPowerFrontierAcceptedTokens {
+		return errors.New("amdgpu power frontier: exact-token contract requires 26 prompt and 128 accepted output tokens")
+	}
+	if len(r.PredeclaredPPTWatts) < 2 {
+		return errors.New("amdgpu power frontier: at least two predeclared PPT points required")
+	}
+	seenPoints := make(map[int]bool, len(r.PredeclaredPPTWatts))
+	for _, point := range r.PredeclaredPPTWatts {
+		if point <= 0 || seenPoints[point] {
+			return errors.New("amdgpu power frontier: PPT points must be positive and unique")
+		}
+		seenPoints[point] = true
+	}
+	if r.Repetitions < StrixPowerFrontierMinRepetitions {
+		return fmt.Errorf("amdgpu power frontier: repetitions %d below minimum %d", r.Repetitions, StrixPowerFrontierMinRepetitions)
+	}
+	pointCount := len(r.PredeclaredPPTWatts)
+	if len(r.Trials)%pointCount != 0 || len(r.Trials)/pointCount != r.Repetitions {
+		return fmt.Errorf("amdgpu power frontier: trial count %d does not form %d repetitions across %d points", len(r.Trials), r.Repetitions, pointCount)
+	}
+	if !finitePositive(r.DeclaredMaxCVPercent) || r.DeclaredMaxCVPercent > StrixPowerFrontierMaxCVPercent {
+		return fmt.Errorf("amdgpu power frontier: declared CV %.3f%% must be in (0, %.1f]", r.DeclaredMaxCVPercent, StrixPowerFrontierMaxCVPercent)
+	}
+
+	throughput := make(map[int][]float64, len(r.PredeclaredPPTWatts))
+	energyPerToken := make(map[int][]float64, len(r.PredeclaredPPTWatts))
+	for index, trial := range r.Trials {
+		repetition, position := index/pointCount, index%pointCount
+		pointIndex := position
+		if repetition%2 == 1 {
+			pointIndex = pointCount - 1 - position
+		}
+		if trial.Sequence != index || trial.Repetition != repetition || trial.PPTWatts != r.PredeclaredPPTWatts[pointIndex] {
+			return fmt.Errorf("amdgpu power frontier: trial %d violates predeclared alternating PPT order", index)
+		}
+		if trial.AcceptedTokens != StrixPowerFrontierAcceptedTokens {
+			return fmt.Errorf("amdgpu power frontier: trial %d accepted tokens %d, want %d", index, trial.AcceptedTokens, StrixPowerFrontierAcceptedTokens)
+		}
+		if trial.FallbackCount != 0 {
+			return fmt.Errorf("amdgpu power frontier: trial %d fallback count %d, want 0", index, trial.FallbackCount)
+		}
+		if !trial.QualityPassed {
+			return fmt.Errorf("amdgpu power frontier: trial %d failed quality gate", index)
+		}
+		if trial.ElapsedNanoseconds <= 0 || trial.EnergyEndMicrojoules <= trial.EnergyStartMicrojoules ||
+			trial.SettleMilliseconds <= 0 || trial.CooldownMilliseconds <= 0 ||
+			!finitePositive(trial.TokensPerSecond) || !finitePositive(trial.JoulesPerToken) ||
+			!finitePositive(trial.GPUClockMHz) || !finitePositive(trial.TemperatureC) {
+			return fmt.Errorf("amdgpu power frontier: trial %d requires finite positive telemetry and durations", index)
+		}
+		derivedTPS := float64(StrixPowerFrontierAcceptedTokens) / (float64(trial.ElapsedNanoseconds) / 1e9)
+		derivedJPT := (float64(trial.EnergyEndMicrojoules-trial.EnergyStartMicrojoules) / 1e6) / StrixPowerFrontierAcceptedTokens
+		if !nearlyEqual(trial.TokensPerSecond, derivedTPS) {
+			return fmt.Errorf("amdgpu power frontier: trial %d throughput reconciliation failed", index)
+		}
+		if !nearlyEqual(trial.JoulesPerToken, derivedJPT) {
+			return fmt.Errorf("amdgpu power frontier: trial %d energy reconciliation failed", index)
+		}
+		throughput[trial.PPTWatts] = append(throughput[trial.PPTWatts], derivedTPS)
+		energyPerToken[trial.PPTWatts] = append(energyPerToken[trial.PPTWatts], derivedJPT)
+	}
+	for _, point := range r.PredeclaredPPTWatts {
+		if len(throughput[point]) != r.Repetitions || len(energyPerToken[point]) != r.Repetitions {
+			return fmt.Errorf("amdgpu power frontier: PPT %d has incomplete samples", point)
+		}
+		if cv := coefficientVariationPercent(throughput[point]); cv > r.DeclaredMaxCVPercent {
+			return fmt.Errorf("amdgpu power frontier: PPT %d throughput CV %.3f%% exceeds %.3f%%", point, cv, r.DeclaredMaxCVPercent)
+		}
+		if cv := coefficientVariationPercent(energyPerToken[point]); cv > r.DeclaredMaxCVPercent {
+			return fmt.Errorf("amdgpu power frontier: PPT %d energy/token CV %.3f%% exceeds %.3f%%", point, cv, r.DeclaredMaxCVPercent)
+		}
+	}
+	if r.PriorPowerSetting == "" || !r.RestorationAttempted || !r.RestoreReadbackVerified {
+		return errors.New("amdgpu power frontier: restoration and read-back are required")
+	}
+	if r.RestoreError != "" {
+		return fmt.Errorf("amdgpu power frontier: restoration failed: %s", r.RestoreError)
+	}
+	if r.RestoredPowerSetting != r.PriorPowerSetting {
+		return errors.New("amdgpu power frontier: restore read-back mismatch")
+	}
+	expected, err := r.ComputeDigest()
+	if err != nil {
+		return fmt.Errorf("amdgpu power frontier: compute digest: %w", err)
+	}
+	if r.Digest == "" || r.Digest != expected {
+		return fmt.Errorf("amdgpu power frontier: digest mismatch: got %q, want %q", r.Digest, expected)
+	}
+	return nil
+}
+
+func validSHA256Hex(value string) bool {
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(decoded) == sha256.Size
+}
+
+func finitePositive(value float64) bool {
+	return value > 0 && !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+func nearlyEqual(got, want float64) bool {
+	tolerance := math.Max(1e-12, math.Abs(want)*1e-9)
+	return math.Abs(got-want) <= tolerance
+}
+
+func coefficientVariationPercent(values []float64) float64 {
+	var sum float64
+	for _, value := range values {
+		sum += value
+	}
+	mean := sum / float64(len(values))
+	var squaredDeviation float64
+	for _, value := range values {
+		delta := value - mean
+		squaredDeviation += delta * delta
+	}
+	return math.Sqrt(squaredDeviation/float64(len(values)-1)) / mean * 100
 }
 
 // CardDPMStatus describes the power DPM status of an individual AMD DRM card.

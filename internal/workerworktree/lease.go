@@ -135,6 +135,7 @@ type DeadWorktreeSweepReport struct {
 	Pruned    int      `json:"pruned"`
 	Unlocked  int      `json:"unlocked"`
 	Paths     []string `json:"paths,omitempty"`
+	PruneErr  string   `json:"prune_err,omitempty"`
 }
 
 // isWorktreeDirty reports whether wtPath has uncommitted git changes.
@@ -269,7 +270,6 @@ func SweepDeadWorktrees(root, wtRoot string, git GitRunner) DeadWorktreeSweepRep
 					_ = os.RemoveAll(wtPath)
 					_ = os.Remove(OwnerStampPath(wtPath))
 				}
-				run(cleanupGit, root, []string{"worktree", "prune", "--expire", "now"})
 				_ = os.RemoveAll(wtAdminDir)
 				report.Pruned++
 				report.Unlocked++
@@ -345,7 +345,6 @@ func SweepDeadWorktrees(root, wtRoot string, git GitRunner) DeadWorktreeSweepRep
 				run(cleanupGit, root, []string{"worktree", "unlock", wtPath})
 				run(cleanupGit, root, []string{"worktree", "unlock", entry.Name()})
 				_ = os.RemoveAll(wtPath)
-				run(cleanupGit, root, []string{"worktree", "prune", "--expire", "now"})
 				_ = os.Remove(OwnerStampPath(wtPath))
 				report.Pruned++
 				report.Paths = append(report.Paths, wtPath)
@@ -353,11 +352,17 @@ func SweepDeadWorktrees(root, wtRoot string, git GitRunner) DeadWorktreeSweepRep
 		}
 	}
 
+	if report.Pruned > 0 {
+		if rc, out := run(cleanupGit, root, []string{"worktree", "prune", "--expire", "now"}); rc != 0 {
+			report.PruneErr = strings.TrimSpace(out)
+		}
+	}
+
 	return report
 }
 
 func sweepDeadWorktrees(root, wtRoot string, git GitRunner) {
-	_ = SweepDeadWorktrees(root, wtRoot, git)
+	_ = DebouncedSweepDeadWorktrees(root, wtRoot, git)
 }
 
 // isForeignPlatformRegistration reports whether rawGitdir or wtPath represents a

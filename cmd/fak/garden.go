@@ -39,6 +39,14 @@ import (
 func cmdGarden(argv []string) { os.Exit(runGarden(os.Stdout, os.Stderr, argv)) }
 
 func runGarden(stdout, stderr io.Writer, argv []string) int {
+	// `fak garden loop` (or `fak garden daemon`) is the LONG-RUNNING, PORTABLE
+	// native cadence runner: it executes the full system gardening sweeps (watchdog,
+	// ephemera GC, leaseref reap, clean-bins, tree-doctor, loose-ref packing) on a
+	// recurring interval with graceful signal shutdown, working identically across
+	// Windows, macOS, Linux, and containers.
+	if len(argv) > 0 && (argv[0] == "loop" || argv[0] == "daemon") {
+		return runGardenLoop(stdout, stderr, argv[1:])
+	}
 	// `fak garden tick` is the LIVE, ACTING pass (#1386): it remediates the
 	// surfaced stale-work conditions on a recurring cadence rather than only
 	// reporting. The default `fak garden` (no subcommand) stays the read-only fold.

@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -319,5 +320,86 @@ func TestWorktree_Sweep(t *testing.T) {
 	}
 	if report.RetainedCount != 1 || report.CleanedCount != 0 {
 		t.Fatalf("unexpected sweep report: %+v", report)
+	}
+}
+
+func TestManager_AutoSweepTrigger(t *testing.T) {
+	tmpDir := t.TempDir()
+	worktreesDir := filepath.Join(tmpDir, ".worktrees")
+	if err := os.MkdirAll(worktreesDir, 0755); err != nil {
+		t.Fatalf("failed to create worktrees dir: %v", err)
+	}
+
+	orphan1 := filepath.Join(worktreesDir, "ticket-orphan-1")
+	orphan2 := filepath.Join(worktreesDir, "ticket-orphan-2")
+	if err := os.MkdirAll(orphan1, 0755); err != nil {
+		t.Fatalf("failed to create orphan-1 dir: %v", err)
+	}
+	if err := os.MkdirAll(orphan2, 0755); err != nil {
+		t.Fatalf("failed to create orphan-2 dir: %v", err)
+	}
+
+	mockRunner := func(ctx context.Context, dir string, env []string, args ...string) (string, string, error) {
+		if len(args) > 0 && args[0] == "rev-parse" {
+			return "c001cafe\n", "", nil
+		}
+		return "", "", nil
+	}
+
+	activeContracts := []leaseref.ContractRecord{
+		{
+			TicketID:   "alloc-1",
+			State:      leaseref.ContractStateExecuting,
+			AcquiredAt: time.Now().Unix(),
+			TTLSeconds: 3600,
+		},
+		{
+			TicketID:   "alloc-2",
+			State:      leaseref.ContractStateExecuting,
+			AcquiredAt: time.Now().Unix(),
+			TTLSeconds: 3600,
+		},
+		{
+			TicketID:   "alloc-3",
+			State:      leaseref.ContractStateExecuting,
+			AcquiredAt: time.Now().Unix(),
+			TTLSeconds: 3600,
+		},
+	}
+
+	cfg := &AutoSweepConfig{
+		Threshold:      3,
+		DebounceWindow: 10 * time.Millisecond,
+		ContractProvider: func(ctx context.Context) ([]leaseref.ContractRecord, error) {
+			return activeContracts, nil
+		},
+	}
+
+	mgr := NewManager(tmpDir, WithRunner(mockRunner), WithAutoSweep(cfg))
+	defer mgr.Close()
+
+	ctx := context.Background()
+	for i := 1; i <= 3; i++ {
+		ticketID := fmt.Sprintf("alloc-%d", i)
+		if _, err := mgr.Allocate(ctx, ticketID, "c001cafe"); err != nil {
+			t.Fatalf("allocate %s failed: %v", ticketID, err)
+		}
+	}
+
+	// Wait for the debounced background sweep to fire and clean orphaned worktrees
+	deadline := time.Now().Add(3 * time.Second)
+	cleaned := false
+	for time.Now().Before(deadline) {
+		_, err1 := os.Stat(orphan1)
+		_, err2 := os.Stat(orphan2)
+		if os.IsNotExist(err1) && os.IsNotExist(err2) {
+			cleaned = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if !cleaned {
+		t.Fatalf("expected orphaned worktrees ticket-orphan-1 and ticket-orphan-2 to be cleaned up by auto-sweep")
 	}
 }
