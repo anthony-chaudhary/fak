@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **382** (clarity 0 + coverage 382) |
-| **Crystal-clear concepts (and climbing)** | **1073** crystal of 2794 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2909 / 3291** (88.4% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **1074** crystal of 2795 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2911 / 3293** (88.4% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 215 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **84** of 3994 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **84** of 3996 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 92.5/100 (grade A) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2794 concepts - score 92.5/100 (grade A) - disambiguation-debt 382
+concept-disambiguation chart - 2795 concepts - score 92.5/100 (grade A) - disambiguation-debt 382
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #################........... 1073
+  * crystal       #################........... 1074
   o defined       ############################ 1721
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -41,7 +41,7 @@ clarity ladder (count of concepts, best -> fog):
 clarity mix by family (each cell = one concept):
   attention        ****************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (82 concept(s); 16 crystal)
   cache            **********************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (274 concept(s); 94 crystal)
-  context-ctx      ************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (229 concept(s); 72 crystal)
+  context-ctx      *************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (230 concept(s); 73 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         **********************************ooooooooooooooooooooo (55 concept(s); 34 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
@@ -64,8 +64,8 @@ clarity mix by family (each cell = one concept):
 coverage by family (positioned / discovered):
   plan             ########################.... 416/485
   session-runtime  ########################.... 278/326
-  context-ctx      #########################... 242/275
-  gateway-engine   ########################.... 206/238
+  context-ctx      #########################... 244/277
+  gateway-engine   ########################.... 207/239
   cache            ##########################.. 321/352
   policy-capability #########################... 216/243
   witness-proof    ########################.... 164/191
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [############################....] 88.4%  (2909/3291 confusable tokens positioned)
+namespace coverage  [############################....] 88.4%  (2911/3293 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 215
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 215/215
 
-name index: 3994 lookup name(s) -> 2794 concept(s), 84 ambiguous
+name index: 3996 lookup name(s) -> 2795 concept(s), 84 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **215 / 215** (215 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1892 / 4968 |
+| Boundaries drawn (mutual / total) | 1892 / 4970 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 3994 over 2794 concepts |
+| Lookup names indexed | 3996 over 2795 concepts |
 | Lookup names landing on several concepts | 84 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2794 |
+| Concepts carrying a contrast set | 2795 |
 
 ## The concepts (best verdict first)
 
@@ -269,6 +269,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | context-ctx | **context-ctx implementation surface for queuepeakcontexts** - `queuePeakContexts` is the context-ctx symbol declared or used at `cmd/microcontextdemo/controlled_soak.go:20` as `queuePeakContexts int`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | context-ctx | **context-ctx implementation surface for restoredcontexts** - `restoredContexts` is the context-ctx symbol declared or used at `cmd/microcontextdemo/controlled_soak.go:22` as `restoredContexts int`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | context-ctx | **context-ctx implementation surface for tracefromcontext** - `TraceFromContext` is the context-ctx symbol declared or used at `cmd/microcontextdemo/multiturn_descriptor.go:53` as `trace := microagent.TraceFromContext(ctx)`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | context-ctx | **InKernelContextLengthError** - The native planner's typed refusal when rendered prompt tokens plus reserved output tokens exceed its effective context window. HTTP adapters expose the same refusal as context_length_exceeded with status 400 before native execution. |
 | * | crystal | subsystem | context-ctx | **context-MMU (ctxmmu)** - A write-time (post-tool) gate on tool RESULTS that decides if bytes enter context as-is, must be quarantined, or paged out to a pointer. |
 | * | crystal | subsystem | context-ctx | **KV-MMU (kvmmu)** - The bridge that turns ctxmmu's logical quarantine verdict into a mechanical one by evicting K/V spans from the kernel's attention cache. |
 | * | crystal | subsystem | context-ctx | **recall (session core dump)** - The persisted session core-dump: a page table over a content-addressed swap device, reloadable in a fresh process where a sealed page stays sealed. |
@@ -3066,8 +3067,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 24 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3076/4968 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2794 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3078/4970 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2795 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3076,7 +3077,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 3994 lookup name(s) resolves - 84 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 3996 lookup name(s) resolves - 84 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3085,8 +3086,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---:|---:|---:|
 | plan | 416 | 485 | 69 |
 | session-runtime | 278 | 326 | 48 |
-| context-ctx | 242 | 275 | 33 |
-| gateway-engine | 206 | 238 | 32 |
+| context-ctx | 244 | 277 | 33 |
+| gateway-engine | 207 | 239 | 32 |
 | cache | 321 | 352 | 31 |
 | policy-capability | 216 | 243 | 27 |
 | witness-proof | 164 | 191 | 27 |

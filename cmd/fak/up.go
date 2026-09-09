@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -263,6 +264,7 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 		fmt.Fprintf(stderr, "fak up: %v\n", err)
 		os.Exit(1)
 	}
+	plan = server.Plan()
 	defer func() {
 		shutdownTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -339,7 +341,21 @@ func (s *turnkeyServer) Close() error {
 }
 
 func newInKernelChatPlanner(model *fakmodel.Model, tok *tokenizer.Tokenizer, modelID string, q4k bool, backend compute.Backend, metal bool) *agent.InKernelPlanner {
-	return agent.NewInKernelPlanner(model, tok, modelID, q4k, backend, metal)
+	return newTurnkeyInKernelPlanner(model, tok, modelID, q4k, backend, metal, 0)
+}
+
+func newTurnkeyInKernelPlanner(model *fakmodel.Model, tok *tokenizer.Tokenizer, modelID string, q4k bool, backend compute.Backend, metal bool, contextTokens int) *agent.InKernelPlanner {
+	return agent.NewInKernelPlannerWithConfig(model, tok, modelID, q4k, backend, metal, agent.InKernelPlannerConfig{
+		ContextTokens: contextTokens,
+	})
+}
+
+func turnkeyContextTokens(tokens uint64) (int, error) {
+	maxInt := uint64(^uint(0) >> 1)
+	if tokens > maxInt {
+		return 0, fmt.Errorf("turnkey context budget %d exceeds the platform integer limit %d", tokens, maxInt)
+	}
+	return int(tokens), nil
 }
 
 func resolveTurnkeyModelRef(ref string) string {
@@ -364,6 +380,11 @@ func resolveTurnkeyModelRef(ref string) string {
 }
 
 func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr string, mock bool, custom ...*agent.InKernelPlanner) (*turnkeyServer, error) {
+	contextTokens, err := turnkeyContextTokens(plan.ContextBudgetTokens)
+	if err != nil {
+		return nil, err
+	}
+
 	var planner *agent.InKernelPlanner
 	if !mock {
 		if len(custom) > 0 && custom[0] != nil {
@@ -393,8 +414,7 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 			}
 			useMetal, _ := resolveServeMetal(false, false, "")
 
-			effectiveTokens := int(plan.ContextBudgetTokens)
-			m, q4k, _, _ := loadServeInKernelModel(ref, backend, false, effectiveTokens, nil, 1)
+			m, q4k, _, _ := loadServeInKernelModel(ref, backend, false, contextTokens, nil, 1)
 			if m == nil {
 				return nil, fmt.Errorf("failed to load %q into the in-kernel engine", ref)
 			}
@@ -403,7 +423,12 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 				return nil, fmt.Errorf("%q has no usable tokenizer; pass a GGUF with an embedded tokenizer", ref)
 			}
 
-			planner = newInKernelChatPlanner(m, tok, plan.Tier.ModelID, q4k, backend, useMetal)
+			planner = newTurnkeyInKernelPlanner(m, tok, plan.Tier.ModelID, q4k, backend, useMetal, contextTokens)
+		}
+	}
+	if planner != nil {
+		if effective := planner.ContextWindow(); effective > 0 {
+			plan.ContextBudgetTokens = uint64(effective)
 		}
 	}
 
@@ -459,19 +484,23 @@ func (s *turnkeyServer) handleReadyz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *turnkeyServer) handleModels(w http.ResponseWriter, r *http.Request) {
+	row := map[string]any{
+		"id":         s.plan.Tier.ModelID,
+		"object":     "model",
+		"created":    time.Now().Unix(),
+		"owned_by":   "fak",
+		"permission": []any{},
+	}
+	if s.planner != nil {
+		if contextWindow := s.planner.ContextWindow(); contextWindow > 0 {
+			row["context_length"] = contextWindow
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"object": "list",
-		"data": []map[string]any{
-			{
-				"id":         s.plan.Tier.ModelID,
-				"object":     "model",
-				"created":    time.Now().Unix(),
-				"owned_by":   "fak",
-				"permission": []any{},
-			},
-		},
+		"data":   []map[string]any{row},
 	})
 }
 
@@ -550,7 +579,7 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 		}
 		comp, err := s.planner.Complete(r.Context(), agentMsgs, nil, sampleOpts...)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("inference error: %v", err), http.StatusInternalServerError)
+			writeTurnkeyInferenceError(w, err)
 			return
 		}
 		answerText = comp.Message.Content
@@ -663,6 +692,23 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 		},
 	}
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func writeTurnkeyInferenceError(w http.ResponseWriter, err error) {
+	var contextErr *agent.InKernelContextLengthError
+	if errors.As(err, &contextErr) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
+				"message": contextErr.Error(),
+				"type":    "invalid_request_error",
+				"code":    "context_length_exceeded",
+			},
+		})
+		return
+	}
+	http.Error(w, fmt.Sprintf("inference error: %v", err), http.StatusInternalServerError)
 }
 
 func runTurnkeyREPL(ctx context.Context, in io.Reader, out io.Writer, baseURL string, profile macfit.TurnkeyProfile) error {

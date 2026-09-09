@@ -1,6 +1,22 @@
 {
   "rows": [
     {
+      "id": "native-context-refusal",
+      "canonical": "InKernelContextLengthError",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The native planner's typed refusal when rendered prompt tokens plus reserved output tokens exceed its effective context window. HTTP adapters expose the same refusal as context_length_exceeded with status 400 before native execution.",
+      "distinction": "The refusal reports a request that exceeds the context-window ceiling; it is not the ceiling itself or the ctxplan allocator that places resident spans within it. Scheduler pressure is a separate resource refusal and can reject a request before native context validation.",
+      "distinct_from": ["context-window", "ctxplan"],
+      "aliases": ["context_length_exceeded"],
+      "grounding": "InKernelContextLengthError",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/tickets/native-long-context/TICKET-03-up-context.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
       "id": "context-mmu",
       "canonical": "context-MMU (ctxmmu)",
       "family": "context-ctx",

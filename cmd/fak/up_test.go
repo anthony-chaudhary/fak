@@ -72,7 +72,7 @@ func TestUpBootsUnifiedAgentRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	descriptorRegistry := filepath.Join(cacheRoot, "session-registry.json")
-	cmd := exec.Command(bin, "up", "--addr", addr, "--engine", "mock", "--native", "--session-registry", descriptorRegistry)
+	cmd := exec.Command(bin, "up", "--addr", addr, "--engine", "mock", "--mock", "--native", "--session-registry", descriptorRegistry)
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "FAK_SESSION_REGISTRY="+childRegistry)
 	var output bytes.Buffer
