@@ -99,8 +99,8 @@ func TestServeEffectiveAdmissionTokenBudget(t *testing.T) {
 	if err := fs2.Parse([]string{"--native-admission-token-budget", "4096", "--context-budget-tokens", "2048"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := sf2.effectiveAdmissionTokenBudget(); got != 2048 {
-		t.Fatalf("effective admission token budget = %d, want 2048", got)
+	if got := sf2.effectiveAdmissionTokenBudget(); got != 4096 {
+		t.Fatalf("effective admission token budget = %d, want independent scheduler cap 4096 (session context budget must not override it)", got)
 	}
 }
 
@@ -124,68 +124,101 @@ func TestServeAdmissionMaxTotalTokensOverBudgetFailsFast(t *testing.T) {
 	}
 }
 
-func TestServeAdmissionTokenBudgetInheritsContextWindow(t *testing.T) {
-	// 1. When --native-admission-token-budget is omitted, TokenBudget inherits from --context-budget-tokens
-	fs1, sf1 := newServeFlagSet()
-	if err := fs1.Parse([]string{"--context-budget-tokens", "32768"}); err != nil {
+func TestServeAdmissionTokenBudgetMaterializesResolvedModelWindow(t *testing.T) {
+	fs, sf := newServeFlagSet()
+	if err := fs.Parse([]string{"--ctx", "32768"}); err != nil {
 		t.Fatal(err)
 	}
-	policy1, err := serveNativeAdmissionPolicy(sf1)
+	if *sf.contextBudgetTokens != 32768 || *sf.nativeContextTokens != 0 {
+		t.Fatalf("--ctx crossed token domains: session=%d native-window=%d, want 32768/auto", *sf.contextBudgetTokens, *sf.nativeContextTokens)
+	}
+	policy, err := serveNativeAdmissionPolicy(sf)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if policy1.TokenBudget != 32768 {
-		t.Fatalf("TokenBudget = %d, want 32768 inherited from --context-budget-tokens", policy1.TokenBudget)
-	}
-	if policy1.TokenBudgetProvenance != "context" {
-		t.Fatalf("TokenBudgetProvenance = %q, want \"context\"", policy1.TokenBudgetProvenance)
+	if policy.TokenBudget != 8192 || policy.TokenBudgetProvenance != "default" {
+		t.Fatalf("pre-resolution admission policy = %+v, want unchanged default independent of session budget", policy)
 	}
 
-	// 2. When --native-admission-token-budget is omitted, TokenBudget inherits from --ctx alias
-	fs2, sf2 := newServeFlagSet()
-	if err := fs2.Parse([]string{"--ctx", "65536"}); err != nil {
-		t.Fatal(err)
-	}
-	policy2, err := serveNativeAdmissionPolicy(sf2)
+	*sf.nativeAdmissionTokenBudget = effectiveNativeAdmissionTokenBudget(sf, false, 65536)
+	sf.nativeAdmissionProvenance = "context"
+	policy, err = serveNativeAdmissionPolicy(sf)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if policy2.TokenBudget != 65536 {
-		t.Fatalf("TokenBudget = %d, want 65536 inherited from --ctx", policy2.TokenBudget)
-	}
-	if policy2.TokenBudgetProvenance != "context" {
-		t.Fatalf("TokenBudgetProvenance = %q, want \"context\"", policy2.TokenBudgetProvenance)
+	if policy.TokenBudget != 65536 || policy.TokenBudgetProvenance != "context" {
+		t.Fatalf("materialized admission policy = %+v, want resolved 65536-token model window", policy)
 	}
 
-	// 3. Explicit --native-admission-token-budget declarations continue to take strict precedence
-	fs3, sf3 := newServeFlagSet()
-	if err := fs3.Parse([]string{"--ctx", "65536", "--native-admission-token-budget", "16384"}); err != nil {
+	fs, sf = newServeFlagSet()
+	if err := fs.Parse([]string{
+		"--ctx", "32768",
+		"--native-context-tokens", "65536",
+		"--native-admission-token-budget", "16384",
+	}); err != nil {
 		t.Fatal(err)
 	}
-	policy3, err := serveNativeAdmissionPolicy(sf3)
+	*sf.nativeAdmissionTokenBudget = effectiveNativeAdmissionTokenBudget(sf, true, 65536)
+	sf.nativeAdmissionProvenance = "explicit"
+	policy, err = serveNativeAdmissionPolicy(sf)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if policy3.TokenBudget != 16384 {
-		t.Fatalf("TokenBudget = %d, want 16384 from explicit --native-admission-token-budget", policy3.TokenBudget)
+	if policy.TokenBudget != 16384 || policy.TokenBudgetProvenance != "explicit" {
+		t.Fatalf("explicit admission policy = %+v, want independent 16384-token scheduler cap", policy)
 	}
-	if policy3.TokenBudgetProvenance != "explicit" {
-		t.Fatalf("TokenBudgetProvenance = %q, want \"explicit\"", policy3.TokenBudgetProvenance)
+	if *sf.contextBudgetTokens != 32768 || *sf.nativeContextTokens != 65536 {
+		t.Fatalf("explicit token domains crossed: session=%d native-window=%d, want 32768/65536", *sf.contextBudgetTokens, *sf.nativeContextTokens)
 	}
 
-	// 4. Default when neither is provided remains 8192
-	fs4, sf4 := newServeFlagSet()
-	if err := fs4.Parse([]string{}); err != nil {
-		t.Fatal(err)
+	_, sf = newServeFlagSet()
+	if got := effectiveNativeAdmissionTokenBudget(sf, false, 0); got != 8192 {
+		t.Fatalf("unresolved model admission budget = %d, want default 8192", got)
 	}
-	policy4, err := serveNativeAdmissionPolicy(sf4)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if policy4.TokenBudget != 8192 {
-		t.Fatalf("TokenBudget = %d, want default 8192", policy4.TokenBudget)
-	}
-	if policy4.TokenBudgetProvenance != "default" {
-		t.Fatalf("TokenBudgetProvenance = %q, want \"default\"", policy4.TokenBudgetProvenance)
-	}
+
+	t.Run("local max-total validates against resolved window", func(t *testing.T) {
+		for _, tc := range []struct {
+			name      string
+			maxTotal  string
+			wantError string
+		}{
+			{name: "within resolved cap", maxTotal: "32768"},
+			{name: "above resolved cap", maxTotal: "65537", wantError: "max_total_tokens (65537) exceeds admission token budget (65536)"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				fs, sf := newServeFlagSet()
+				if err := fs.Parse([]string{"--gguf", "model.gguf", "--max-total-tokens", tc.maxTotal}); err != nil {
+					t.Fatal(err)
+				}
+				*sf.nativeAdmissionTokenBudget = effectiveNativeAdmissionTokenBudget(sf, false, 65536)
+				err := validateServeMaxTotalTokens(sf, *sf.nativeAdmissionTokenBudget)
+				if tc.wantError == "" && err != nil {
+					t.Fatalf("max-total %s rejected after 65536-token model resolution: %v", tc.maxTotal, err)
+				}
+				if tc.wantError != "" && (err == nil || !strings.Contains(err.Error(), tc.wantError)) {
+					t.Fatalf("max-total %s error = %v, want %q", tc.maxTotal, err, tc.wantError)
+				}
+			})
+		}
+	})
+
+	t.Run("explicit scheduler cap validates immediately", func(t *testing.T) {
+		fs, sf := newServeFlagSet()
+		if err := fs.Parse([]string{
+			"--gguf", "model.gguf",
+			"--native-admission-token-budget", "16384",
+			"--max-total-tokens", "16385",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		policy, err := serveNativeAdmissionPolicy(sf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = validateServeMaxTotalTokens(sf, policy.TokenBudget)
+		want := "max_total_tokens (16385) exceeds admission token budget (16384)"
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("explicit scheduler envelope error = %v, want %q", err, want)
+		}
+	})
 }
