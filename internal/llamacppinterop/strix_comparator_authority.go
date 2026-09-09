@@ -2,6 +2,7 @@ package llamacppinterop
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -89,6 +90,20 @@ type strixComparatorApprovedReference struct {
 
 type strixComparatorExchangeAuthorityPlatform interface {
 	valid() bool
+}
+
+type strixComparatorResourceWindowBeginner interface {
+	beginResourceWindow(context.Context) (strixComparatorResourceWindowPlatform, error)
+}
+
+type strixComparatorResourceWindowPlatform interface {
+	finalize() (strixComparatorResourceAuthorityPlatform, error)
+	cancel() error
+}
+
+type strixComparatorResourceAuthorityPlatform interface {
+	valid() bool
+	observation() StrixComparatorResourceObservation
 }
 
 // StrixComparatorAuthorityCleanupError reports a rejected startup whose child
@@ -232,6 +247,145 @@ func (a *StrixComparatorExchangeAuthority) Valid() bool {
 	defer a.mu.Unlock()
 	return a.self == a && a.platform != nil && a.platform.valid()
 }
+
+// StrixComparatorResourceObservation contains measurements authored by the
+// Linux request-window sampler. Values are disclosed only by a valid opaque
+// resource authority; supplying an equivalent struct never creates credit.
+type StrixComparatorResourceObservation struct {
+	ProcessPeakBytes   uint64
+	DevicePeakBytes    uint64
+	GPUEngineActiveNS  uint64
+	RADVDeviceIdentity string
+}
+
+// StrixComparatorResourceWindow is a single-use, non-serializable request
+// bracket derived from an accepted comparator exchange.
+type StrixComparatorResourceWindow struct {
+	mu       *sync.Mutex
+	self     *StrixComparatorResourceWindow
+	platform strixComparatorResourceWindowPlatform
+}
+
+// StrixComparatorResourceAuthority is opaque evidence that one request window
+// retained the approved child and socket and observed owned RADV GPU activity.
+type StrixComparatorResourceAuthority struct {
+	mu       *sync.Mutex
+	self     *StrixComparatorResourceAuthority
+	platform strixComparatorResourceAuthorityPlatform
+}
+
+// BeginResourceWindow starts runner-owned sampling around one request. It does
+// not perform network I/O and cannot be minted from a copied exchange value.
+func (a *StrixComparatorExchangeAuthority) BeginResourceWindow(ctx context.Context) (*StrixComparatorResourceWindow, error) {
+	if a == nil || a.mu == nil {
+		return nil, ErrInvalidStrixComparatorAuthority
+	}
+	if ctx == nil {
+		return nil, ErrInvalidStrixComparatorAuthority
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.self != a || a.platform == nil || !a.platform.valid() {
+		return nil, ErrInvalidStrixComparatorAuthority
+	}
+	beginner, ok := a.platform.(strixComparatorResourceWindowBeginner)
+	if !ok {
+		return nil, ErrStrixComparatorAuthorityUnsupported
+	}
+	platform, err := beginner.beginResourceWindow(ctx)
+	if err != nil {
+		return nil, err
+	}
+	window := &StrixComparatorResourceWindow{mu: new(sync.Mutex), platform: platform}
+	window.self = window
+	return window, nil
+}
+
+// Close cancels sampling and releases the child-wide exclusive request-window
+// slot without minting evidence. Callers should defer Close immediately after
+// BeginResourceWindow; it is harmless only until Finalize consumes the window.
+func (w *StrixComparatorResourceWindow) Close() error {
+	if w == nil || w.mu == nil {
+		return ErrInvalidStrixComparatorAuthority
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.self != w || w.platform == nil {
+		return ErrInvalidStrixComparatorAuthority
+	}
+	platform := w.platform
+	w.platform = nil
+	w.self = nil
+	return platform.cancel()
+}
+
+// Finalize stops sampling and mints evidence only when every ownership,
+// liveness, monotonicity, and nonzero-activity check succeeds. A window is
+// consumed on the first call, including a failed call.
+func (w *StrixComparatorResourceWindow) Finalize() (*StrixComparatorResourceAuthority, error) {
+	if w == nil || w.mu == nil {
+		return nil, ErrInvalidStrixComparatorAuthority
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.self != w || w.platform == nil {
+		return nil, ErrInvalidStrixComparatorAuthority
+	}
+	platform := w.platform
+	w.platform = nil
+	w.self = nil
+	resource, err := platform.finalize()
+	if err != nil {
+		return nil, err
+	}
+	authority := &StrixComparatorResourceAuthority{mu: new(sync.Mutex), platform: resource}
+	authority.self = authority
+	return authority, nil
+}
+
+// Valid reports whether this exact minted resource value remains intact.
+func (a *StrixComparatorResourceAuthority) Valid() bool {
+	if a == nil || a.mu == nil {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.self == a && a.platform != nil && a.platform.valid()
+}
+
+// Observation returns sampler-authored values only for a valid authority.
+func (a *StrixComparatorResourceAuthority) Observation() (StrixComparatorResourceObservation, bool) {
+	if a == nil || a.mu == nil {
+		return StrixComparatorResourceObservation{}, false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.self != a || a.platform == nil || !a.platform.valid() {
+		return StrixComparatorResourceObservation{}, false
+	}
+	return a.platform.observation(), true
+}
+
+func (*StrixComparatorResourceWindow) MarshalJSON() ([]byte, error) {
+	return nil, fmt.Errorf("%w: resource window is not serializable", ErrInvalidStrixComparatorAuthority)
+}
+
+func (*StrixComparatorResourceWindow) UnmarshalJSON([]byte) error {
+	return fmt.Errorf("%w: resource window is not deserializable", ErrInvalidStrixComparatorAuthority)
+}
+
+func (*StrixComparatorResourceAuthority) MarshalJSON() ([]byte, error) {
+	return nil, fmt.Errorf("%w: resource capability is not serializable", ErrInvalidStrixComparatorAuthority)
+}
+
+func (*StrixComparatorResourceAuthority) UnmarshalJSON([]byte) error {
+	return fmt.Errorf("%w: resource capability is not deserializable", ErrInvalidStrixComparatorAuthority)
+}
+
+var _ json.Marshaler = (*StrixComparatorResourceWindow)(nil)
+var _ json.Unmarshaler = (*StrixComparatorResourceWindow)(nil)
+var _ json.Marshaler = (*StrixComparatorResourceAuthority)(nil)
+var _ json.Unmarshaler = (*StrixComparatorResourceAuthority)(nil)
 
 func (*StrixComparatorExchangeAuthority) MarshalJSON() ([]byte, error) {
 	return nil, fmt.Errorf("%w: exchange capability is not serializable", ErrInvalidStrixComparatorAuthority)

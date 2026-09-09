@@ -3,15 +3,86 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/amdgpu"
 	"github.com/anthony-chaudhary/fak/internal/devcmd"
 	"github.com/anthony-chaudhary/fak/internal/devindex"
 )
+
+func TestRunStrixKnownHostsBroker(t *testing.T) {
+	original := runStrixKnownHostsBrokerChild
+	t.Cleanup(func() { runStrixKnownHostsBrokerChild = original })
+
+	const (
+		endpoint   = "127.0.0.1:49152"
+		capability = "capability-secret-that-must-never-be-printed"
+		entry      = "strix-halo-fak.local ssh-ed25519 canonical-entry\n"
+	)
+
+	t.Run("success", func(t *testing.T) {
+		runStrixKnownHostsBrokerChild = func(gotEndpoint, gotCapability string, stdout io.Writer) error {
+			if gotEndpoint != endpoint || gotCapability != capability {
+				t.Fatalf("broker arguments = %q, %q", gotEndpoint, gotCapability)
+			}
+			_, err := io.WriteString(stdout, entry)
+			return err
+		}
+		var stdout, stderr bytes.Buffer
+		code := run(&stdout, &stderr, []string{amdgpu.StrixKnownHostsOperand, endpoint, capability})
+		if code != 0 || stdout.String() != entry || stderr.Len() != 0 {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		}
+	})
+
+	t.Run("malformed", func(t *testing.T) {
+		called := false
+		runStrixKnownHostsBrokerChild = func(string, string, io.Writer) error {
+			called = true
+			return nil
+		}
+		for _, argv := range [][]string{
+			{amdgpu.StrixKnownHostsOperand},
+			{amdgpu.StrixKnownHostsOperand, endpoint, capability, "duplicate"},
+			{amdgpu.StrixKnownHostsOperand, "", capability},
+			{amdgpu.StrixKnownHostsOperand, endpoint, ""},
+		} {
+			var stdout, stderr bytes.Buffer
+			if code := run(&stdout, &stderr, argv); code != 2 {
+				t.Fatalf("argv length=%d code=%d", len(argv), code)
+			}
+			if stdout.Len() != 0 || stderr.String() != "STRIX_HOST_TRUST_REFUSED\n" {
+				t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
+			}
+		}
+		if called {
+			t.Fatal("malformed invocation reached broker child")
+		}
+	})
+
+	t.Run("refused", func(t *testing.T) {
+		runStrixKnownHostsBrokerChild = func(_ string, _ string, stdout io.Writer) error {
+			_, _ = io.WriteString(stdout, "raw-line")
+			return errors.New("raw-line endpoint capability")
+		}
+		var stdout, stderr bytes.Buffer
+		code := run(&stdout, &stderr, []string{amdgpu.StrixKnownHostsOperand, endpoint, capability})
+		if code != 1 || stdout.Len() != 0 || stderr.String() != "STRIX_HOST_TRUST_REFUSED\n" {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		}
+		combined := stdout.String() + stderr.String()
+		for _, forbidden := range []string{endpoint, capability, "raw-line", "usage", "unknown command"} {
+			if strings.Contains(strings.ToLower(combined), strings.ToLower(forbidden)) {
+				t.Fatalf("broker refusal leaked %q in %q", forbidden, combined)
+			}
+		}
+	})
+}
 
 func TestStudyOperationsDispatcherMatchesHandlers(t *testing.T) {
 	type handler func(io.Writer, io.Writer, []string) int

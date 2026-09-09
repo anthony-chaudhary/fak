@@ -1,18 +1,25 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"runtime/debug"
 
+	"github.com/anthony-chaudhary/fak/internal/amdgpu"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/devcmd"
 )
 
+var runStrixKnownHostsBrokerChild = amdgpu.RunStrixKnownHostsBrokerChild
+
 func main() { os.Exit(run(os.Stdout, os.Stderr, os.Args[1:])) }
 
 func run(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && argv[0] == amdgpu.StrixKnownHostsOperand {
+		return runStrixKnownHostsBroker(stdout, stderr, argv[1:])
+	}
 	if len(argv) == 0 || argv[0] == "help" || argv[0] == "-h" || argv[0] == "--help" {
 		writeHelp(stdout)
 		return 0
@@ -154,6 +161,23 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "run 'fak-dev help' for repository-development commands")
 		return 2
 	}
+}
+
+func runStrixKnownHostsBroker(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) != 2 || argv[0] == "" || argv[1] == "" {
+		fmt.Fprintln(stderr, "STRIX_HOST_TRUST_REFUSED")
+		return 2
+	}
+	var entry bytes.Buffer
+	if err := runStrixKnownHostsBrokerChild(argv[0], argv[1], &entry); err != nil {
+		fmt.Fprintln(stderr, "STRIX_HOST_TRUST_REFUSED")
+		return 1
+	}
+	if _, err := io.Copy(stdout, &entry); err != nil {
+		fmt.Fprintln(stderr, "STRIX_HOST_TRUST_REFUSED")
+		return 1
+	}
+	return 0
 }
 
 func writeHelp(w io.Writer) {
