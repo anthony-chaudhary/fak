@@ -318,6 +318,12 @@ func TestEmbeddedQwen38Aliases(t *testing.T) {
 	want := map[string]string{
 		"qwen38":              "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
 		"qwen38:27b":          "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
+		"qwen38:27b-q4":       "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
+		"qwen38:27b-q4_k_m":   "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
+		"qwen38:27b-q4km":     "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
+		"qwen38:q4":           "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
+		"qwen38:q4_k_m":       "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
+		"qwen38:q4km":         "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
 		"qwen38:27b-fp8":      "hf://Qwen/Qwen3.8-27B-FP8",
 		"qwen38:27b-q2k":      "hf://unsloth/Qwen3.8-27B-GGUF@4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-UD-Q2_K_XL.gguf",
 		"qwen38:27b-ud-q2kxl": "hf://unsloth/Qwen3.8-27B-GGUF@4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-UD-Q2_K_XL.gguf",
@@ -349,5 +355,38 @@ func TestQwen38IsFirstClassDefault(t *testing.T) {
 	}
 	if !IsCoding(DefaultAlias) {
 		t.Fatal("default model must retain coding/tool capability")
+	}
+}
+
+func TestFindLocalModelDiscoversModelInDefaultDirs(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("FAK_MODELS_DIR", tempDir)
+
+	// Create a model file in gguf subdirectory
+	ggufDir := filepath.Join(tempDir, "gguf")
+	if err := os.MkdirAll(ggufDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	modelFile := filepath.Join(ggufDir, "custom-test-model.gguf")
+	if err := os.WriteFile(modelFile, []byte("GGUF mock content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should be found by filename
+	got, found := FindLocalModel("custom-test-model.gguf")
+	if !found || got != modelFile {
+		t.Fatalf("FindLocalModel(custom-test-model.gguf) = (%q, %v); want (%q, true)", got, found, modelFile)
+	}
+
+	// Should be found by bare name (without .gguf suffix)
+	got, found = FindLocalModel("custom-test-model")
+	if !found || got != modelFile {
+		t.Fatalf("FindLocalModel(custom-test-model) = (%q, %v); want (%q, true)", got, found, modelFile)
+	}
+
+	// Resolve should also find it
+	got, expanded := Resolve("custom-test-model")
+	if !expanded || got != modelFile {
+		t.Fatalf("Resolve(custom-test-model) = (%q, %v); want (%q, true)", got, expanded, modelFile)
 	}
 }
