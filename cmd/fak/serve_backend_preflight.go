@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	computestrix "github.com/anthony-chaudhary/fak/internal/compute/strix"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
@@ -117,4 +118,59 @@ func serveBackendForwardPreflightMessage(result serveBackendForwardPreflight) ga
 	}
 	return newServeStartupMessage("model-load", "backend-forward", "info", fmt.Sprintf(
 		"backend=%s forward=%s path=%s", result.Backend, result.Forward, result.Path))
+}
+
+// ServeStrixHaloPreflightResult captures the AMD Strix Halo (GFX1151) APU hardware detection
+// and initialized zero-copy unified memory / 32MB MALL Infinity Cache tiling subsystems.
+type ServeStrixHaloPreflightResult struct {
+	Detected          bool
+	UMAPointerManager *computestrix.UMAPointerManager
+	MALLTiler         *computestrix.MALLTiler
+	DeviceName        string
+}
+
+// preflightServeStrixHalo probes for AMD Strix Halo (GFX1151) APU silicon via environment
+// overrides, DRM sysfs inspection, or backend device name.
+func preflightServeStrixHalo(be compute.Backend) ServeStrixHaloPreflightResult {
+	return preflightServeStrixHaloWithSysfs(be, "")
+}
+
+// preflightServeStrixHaloWithSysfs probes for AMD Strix Halo (GFX1151) APU silicon with a custom
+// sysfs root for deterministic testing.
+func preflightServeStrixHaloWithSysfs(be compute.Backend, sysfsRoot string) ServeStrixHaloPreflightResult {
+	var deviceName string
+	if be != nil {
+		deviceName = be.Name()
+	}
+
+	detected, matchedName, err := computestrix.DetectGFX1151WithDeviceName(sysfsRoot, deviceName)
+	if err != nil || !detected {
+		return ServeStrixHaloPreflightResult{
+			Detected: false,
+		}
+	}
+
+	if matchedName == "" {
+		matchedName = computestrix.CanonicalDeviceNameStrixHalo
+	}
+
+	// Activate zero-copy UMA pointer manager and 32MB MALL Infinity Cache tiler
+	umaMgr := computestrix.NewUMAPointerManager()
+	mallTiler := computestrix.NewMALLTiler()
+
+	return ServeStrixHaloPreflightResult{
+		Detected:          true,
+		UMAPointerManager: umaMgr,
+		MALLTiler:         mallTiler,
+		DeviceName:        matchedName,
+	}
+}
+
+// serveStrixHaloPreflightMessage converts a successful Strix Halo preflight detection into a startup message.
+func serveStrixHaloPreflightMessage(result ServeStrixHaloPreflightResult) gateway.StartupMessage {
+	if !result.Detected {
+		return gateway.StartupMessage{}
+	}
+	text := fmt.Sprintf("detected=true device=%s uma_zero_copy=active mall_tiling_32mb=active", result.DeviceName)
+	return newServeStartupMessage("strix-halo", "apu-preflight", "info", text)
 }
