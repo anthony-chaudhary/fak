@@ -40,7 +40,7 @@ func (m *Manager) Janitor(ctx context.Context, liveContracts []leaseref.Contract
 	}
 
 	// Build lookup of active contract ticket IDs
-	activeContracts := make(map[string]bool)
+	activeContracts := make(map[string]bool, len(liveContracts))
 	now := time.Now()
 	for _, rec := range liveContracts {
 		cleanID := CleanTicketID(rec.TicketID)
@@ -77,4 +77,9 @@ func (m *Manager) Janitor(ctx context.Context, liveContracts []leaseref.Contract
 	}
 
 	return report, nil
+}
+
+// Sweep runs Janitor to detect and deallocate orphaned or terminal worktrees.
+func (m *Manager) Sweep(ctx context.Context, liveContracts []leaseref.ContractRecord) (*JanitorReport, error) {
+	return m.Janitor(ctx, liveContracts)
 }

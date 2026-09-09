@@ -231,3 +231,93 @@ func TestWorktree_RealGit_NoHeadModification(t *testing.T) {
 		t.Fatalf("expected worktree directory to be removed, but still exists")
 	}
 }
+
+func TestWorktreeContext_EnvList(t *testing.T) {
+	emptyCtx := &WorktreeContext{}
+	if emptyCtx.EnvList() != nil {
+		t.Fatalf("expected nil for empty env, got %+v", emptyCtx.EnvList())
+	}
+
+	wtCtx := &WorktreeContext{
+		Env: map[string]string{
+			"FOO": "bar",
+			"BAZ": "qux",
+		},
+	}
+	list := wtCtx.EnvList()
+	if len(list) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(list))
+	}
+	hasFoo := false
+	hasBaz := false
+	for _, item := range list {
+		if item == "FOO=bar" {
+			hasFoo = true
+		}
+		if item == "BAZ=qux" {
+			hasBaz = true
+		}
+	}
+	if !hasFoo || !hasBaz {
+		t.Fatalf("unexpected EnvList contents: %+v", list)
+	}
+}
+
+func TestWorktree_Release(t *testing.T) {
+	var calls []string
+	mockRunner := func(ctx context.Context, dir string, env []string, args ...string) (string, string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		return "", "", nil
+	}
+	tmpDir := t.TempDir()
+	mgr := NewManager(tmpDir, WithRunner(mockRunner))
+	ctx := context.Background()
+
+	if err := mgr.Release(ctx, "issue-99"); err != nil {
+		t.Fatalf("release failed: %v", err)
+	}
+
+	var hasRemove, hasBranchDelete bool
+	for _, call := range calls {
+		if strings.Contains(call, "worktree remove") {
+			hasRemove = true
+		}
+		if strings.Contains(call, "branch -D") {
+			hasBranchDelete = true
+		}
+	}
+	if !hasRemove || !hasBranchDelete {
+		t.Fatalf("expected worktree remove and branch -D, got: %+v", calls)
+	}
+}
+
+func TestWorktree_Sweep(t *testing.T) {
+	tmpDir := t.TempDir()
+	worktreesDir := filepath.Join(tmpDir, ".worktrees")
+	if err := os.MkdirAll(filepath.Join(worktreesDir, "ticket-1"), 0755); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+
+	mockRunner := func(ctx context.Context, dir string, env []string, args ...string) (string, string, error) {
+		return "", "", nil
+	}
+	mgr := NewManager(tmpDir, WithRunner(mockRunner))
+	ctx := context.Background()
+
+	contracts := []leaseref.ContractRecord{
+		{
+			TicketID:   "ticket-1",
+			State:      leaseref.ContractStateExecuting,
+			AcquiredAt: time.Now().Unix(),
+			TTLSeconds: 3600,
+		},
+	}
+
+	report, err := mgr.Sweep(ctx, contracts)
+	if err != nil {
+		t.Fatalf("sweep failed: %v", err)
+	}
+	if report.RetainedCount != 1 || report.CleanedCount != 0 {
+		t.Fatalf("unexpected sweep report: %+v", report)
+	}
+}
