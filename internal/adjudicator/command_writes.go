@@ -876,7 +876,9 @@ func flagValues(args []shellWord, names ...string) []string {
 func cleanShellOperand(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.Trim(s, "\"'")
-	s = strings.Trim(s, "()")
+	if strings.HasPrefix(s, "(") && strings.HasSuffix(s, ")") {
+		s = s[1 : len(s)-1]
+	}
 	return strings.Trim(strings.TrimSpace(s), "\"'")
 }
 
