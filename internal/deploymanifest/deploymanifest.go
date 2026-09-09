@@ -129,8 +129,9 @@ type AgentTemplates struct {
 
 // Observability declares the metrics/bind SHAPE for the all-in-one.
 type Observability struct {
-	Metrics bool   // expose the metrics endpoint
-	Bind    string // host:port the metrics endpoint binds
+	Metrics          bool   // expose the metrics endpoint
+	Bind             string // host:port the metrics endpoint binds
+	ApplianceProfile bool   `toml:"appliance_profile"`
 }
 
 type PluginSelection struct {
@@ -219,8 +220,9 @@ var keyDescriptions = map[string]string{
 	"auth.allow_lan":         "when true, allow unauthenticated requests from private/local networks (RFC 1918 IPv4, link-local, loopback)",
 	"auth.require_key_env":   "name of the environment variable containing the gateway token; never the token itself",
 	"budgets.default_tokens": "default per-session context token ceiling; zero leaves it unset",
-	"observability.bind":     "gateway listener address",
-	"observability.metrics":  "whether the all-in-one topology exposes metrics",
+	"observability.appliance_profile": "whether the all-in-one topology activates the appliance Grafana dashboard catalog profile (fak-strix-*)",
+	"observability.bind":              "gateway listener address",
+	"observability.metrics":           "whether the all-in-one topology exposes metrics",
 	"policy.floor":           "path to the reviewed capability-floor policy",
 	"policy.inline":          "inline capability-floor body for orchestrators that materialize it safely",
 	"runtimes.agent_runtime": "whether the all-in-one topology starts the agent runtime",
@@ -293,6 +295,8 @@ func (m Manifest) Value(key Key) any {
 		return m.Observability.Metrics
 	case "observability.bind":
 		return m.Observability.Bind
+	case "observability.appliance_profile":
+		return m.Observability.ApplianceProfile
 	default:
 		if strings.HasPrefix(key.Section, "tool_plugins.") {
 			return preferenceValue(m, key.Section, key.Name)
@@ -365,7 +369,7 @@ var knownSections = map[string]map[string]bool{
 	"audit":                     {"journal": true, "retention_days": true},
 	"tenants":                   {"enabled": true},
 	"agent_templates":           {"dir": true},
-	"observability":             {"metrics": true, "bind": true},
+	"observability":             {"metrics": true, "bind": true, "appliance_profile": true},
 	"tool_plugins":              {"plugins": true},
 	"tool_plugins.organization": {"wait_mode": true, "transform_mode": true, "require_witness": true, "disclosure": true, "witness_route": true, "timeout": true},
 	"tool_plugins.project":      {"wait_mode": true, "transform_mode": true, "require_witness": true, "disclosure": true, "witness_route": true, "timeout": true},
@@ -580,13 +584,20 @@ func assign(m *Manifest, section, key, rawVal string, lineNo int) error {
 		}
 		setPreferenceValue(m, section, key, v)
 	case "observability":
-		if key == "metrics" {
+		switch key {
+		case "metrics":
 			v, err := boolVal()
 			if err != nil {
 				return err
 			}
 			m.Observability.Metrics = v
-		} else {
+		case "appliance_profile":
+			v, err := boolVal()
+			if err != nil {
+				return err
+			}
+			m.Observability.ApplianceProfile = v
+		default:
 			v, err := stringVal("bind")
 			if err != nil {
 				return err
@@ -602,19 +613,20 @@ func assign(m *Manifest, section, key, rawVal string, lineNo int) error {
 // default). This encodes the flags > manifest > defaults precedence without
 // conflating "flag absent" with "flag set to the zero value".
 type Overrides struct {
-	Gateway       *bool
-	AgentRuntime  *bool
-	Model         *string
-	PolicyFloor   *string
-	RequireKeyEnv *string
-	AllowLAN      *bool
-	DefaultTokens *int
-	AuditJournal  *string
-	RetentionDays *int
-	TenantsOn     *bool
-	TemplatesDir  *string
-	Metrics       *bool
-	MetricsBind   *string
+	Gateway          *bool
+	AgentRuntime     *bool
+	Model            *string
+	PolicyFloor      *string
+	RequireKeyEnv    *string
+	AllowLAN         *bool
+	DefaultTokens    *int
+	AuditJournal     *string
+	RetentionDays    *int
+	TenantsOn        *bool
+	TemplatesDir     *string
+	Metrics          *bool
+	MetricsBind      *string
+	ApplianceProfile *bool
 }
 
 // WithOverrides applies explicit-flag overrides on top of the manifest, honoring
@@ -658,6 +670,9 @@ func (m Manifest) WithOverrides(o Overrides) Manifest {
 	}
 	if o.MetricsBind != nil {
 		m.Observability.Bind = *o.MetricsBind
+	}
+	if o.ApplianceProfile != nil {
+		m.Observability.ApplianceProfile = *o.ApplianceProfile
 	}
 	return m
 }
