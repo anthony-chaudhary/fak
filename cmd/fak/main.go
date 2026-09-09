@@ -33,6 +33,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
+	"github.com/anthony-chaudhary/fak/internal/amdgpu"
 	"github.com/anthony-chaudhary/fak/internal/bench"
 	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
@@ -48,6 +49,9 @@ import (
 )
 
 func main() {
+	if code, handled := runStrixKnownHostsBrokerEarly(os.Stdout, os.Stderr, os.Args[1:], amdgpu.RunStrixKnownHostsBrokerChild); handled {
+		os.Exit(code)
+	}
 	start := time.Now()
 	verb, argv := parseVerbArgv()
 	defer recoverUsage(&verb, &argv, start)
@@ -69,6 +73,26 @@ func main() {
 	printUnknownVerb(os.Stderr, os.Args[1])
 	recordUsage(verb, argv, 2, start)
 	os.Exit(2)
+}
+
+func runStrixKnownHostsBrokerEarly(stdout, stderr io.Writer, argv []string, child func(string, string, io.Writer) error) (int, bool) {
+	if len(argv) == 0 || argv[0] != amdgpu.StrixKnownHostsOperand {
+		return 0, false
+	}
+	if len(argv) != 3 || argv[1] == "" || argv[2] == "" {
+		fmt.Fprintln(stderr, "STRIX_HOST_TRUST_REFUSED")
+		return 2, true
+	}
+	var entry bytes.Buffer
+	if err := child(argv[1], argv[2], &entry); err != nil {
+		fmt.Fprintln(stderr, "STRIX_HOST_TRUST_REFUSED")
+		return 1, true
+	}
+	if _, err := io.Copy(stdout, &entry); err != nil {
+		fmt.Fprintln(stderr, "STRIX_HOST_TRUST_REFUSED")
+		return 1, true
+	}
+	return 0, true
 }
 
 var unknownVerbSuggestions = map[string]string{
