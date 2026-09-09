@@ -15,6 +15,120 @@ const (
 	StrixHaloFullAttentionHeads = 40
 )
 
+// VulkanFP16KVContract is the software contract for a token-major Vulkan KV cache
+// whose resident K and V payloads remain IEEE binary16, packed low-half first into
+// uint32 words. It deliberately has no float32 K/V shadow.
+//
+// This contract is not the device-runtime integration. The vulkanKV allocator and
+// dispatch wiring adopt it in a separate, physically witnessed leaf.
+type VulkanFP16KVContract struct {
+	NumKVHeads     int
+	HeadDim        int
+	CapacityPos    int
+	NumPos         int
+	AllocatedBytes int64
+	FallbackCount  int
+	packedK        []uint32
+	packedV        []uint32
+}
+
+// NewVulkanFP16KVContract allocates separately cache-line-aligned K and V
+// payloads. Each logical resident value occupies exactly two bytes; alignment
+// padding is included in AllocatedBytes but never exposed as a logical position.
+func NewVulkanFP16KVContract(capacityPos, nKV, headDim int) (*VulkanFP16KVContract, error) {
+	if capacityPos <= 0 || nKV <= 0 || headDim <= 0 {
+		return nil, fmt.Errorf("vulkan_fp16_kv: invalid dimensions (capacityPos=%d, nKV=%d, headDim=%d)", capacityPos, nKV, headDim)
+	}
+	logicalElems := capacityPos * nKV * headDim
+	packedWordsPerBuffer := (logicalElems + 1) / 2
+	rawBytesPerBuffer := int64(packedWordsPerBuffer * 4)
+	alignedBytesPerBuffer := (rawBytesPerBuffer + StrixHaloCacheLineBytes - 1) &^ (StrixHaloCacheLineBytes - 1)
+	residentWordsPerBuffer := int(alignedBytesPerBuffer / 4)
+	return &VulkanFP16KVContract{
+		NumKVHeads:     nKV,
+		HeadDim:        headDim,
+		CapacityPos:    capacityPos,
+		AllocatedBytes: alignedBytesPerBuffer * 2,
+		packedK:        make([]uint32, residentWordsPerBuffer),
+		packedV:        make([]uint32, residentWordsPerBuffer),
+	}, nil
+}
+
+// Append stores one token-major [nKV, headDim] K/V row as FP16. Conversion is
+// performed directly into resident storage, so no full-width cache copy exists.
+func (c *VulkanFP16KVContract) Append(k, v []float32) error {
+	if c == nil {
+		return fmt.Errorf("vulkan_fp16_kv: nil cache")
+	}
+	rowElems := c.NumKVHeads * c.HeadDim
+	if len(k) != rowElems || len(v) != rowElems {
+		return fmt.Errorf("vulkan_fp16_kv: append row shape mismatch (K=%d, V=%d, want %d)", len(k), len(v), rowElems)
+	}
+	if c.NumPos >= c.CapacityPos {
+		return fmt.Errorf("vulkan_fp16_kv: capacity %d positions exceeded", c.CapacityPos)
+	}
+	base := c.NumPos * rowElems
+	for i := 0; i < rowElems; i++ {
+		writeVulkanPackedHalf(c.packedK, base+i, Float32ToFloat16Bits(k[i]))
+		writeVulkanPackedHalf(c.packedV, base+i, Float32ToFloat16Bits(v[i]))
+	}
+	c.NumPos++
+	return nil
+}
+
+// LogicalBytes reports the live K+V payload bytes, excluding allocation padding.
+func (c *VulkanFP16KVContract) LogicalBytes() int64 {
+	if c == nil {
+		return 0
+	}
+	return int64(c.NumPos * c.NumKVHeads * c.HeadDim * 2 * 2)
+}
+
+// ResidentBytes reports the cache-line-aligned K+V allocation footprint.
+func (c *VulkanFP16KVContract) ResidentBytes() int64 {
+	if c == nil {
+		return 0
+	}
+	return c.AllocatedBytes
+}
+
+// ReadPosition widens exactly one position into ephemeral float32 result rows.
+// The packed resident backing remains unchanged and no cache-wide shadow exists.
+func (c *VulkanFP16KVContract) ReadPosition(pos int) (k, v []float32, err error) {
+	if c == nil {
+		return nil, nil, fmt.Errorf("vulkan_fp16_kv: nil cache")
+	}
+	if pos < 0 || pos >= c.NumPos {
+		return nil, nil, fmt.Errorf("vulkan_fp16_kv: position %d out of bounds [0, %d)", pos, c.NumPos)
+	}
+	rowElems := c.NumKVHeads * c.HeadDim
+	k = make([]float32, rowElems)
+	v = make([]float32, rowElems)
+	base := pos * rowElems
+	for i := 0; i < rowElems; i++ {
+		k[i] = Float16BitsToFloat32(readVulkanPackedHalf(c.packedK, base+i))
+		v[i] = Float16BitsToFloat32(readVulkanPackedHalf(c.packedV, base+i))
+	}
+	return k, v, nil
+}
+
+func writeVulkanPackedHalf(dst []uint32, logicalIndex int, bits uint16) {
+	word := logicalIndex / 2
+	if logicalIndex&1 == 0 {
+		dst[word] = dst[word]&0xffff0000 | uint32(bits)
+		return
+	}
+	dst[word] = dst[word]&0x0000ffff | uint32(bits)<<16
+}
+
+func readVulkanPackedHalf(src []uint32, logicalIndex int) uint16 {
+	word := src[logicalIndex/2]
+	if logicalIndex&1 == 0 {
+		return uint16(word)
+	}
+	return uint16(word >> 16)
+}
+
 // VulkanKVScratchpad manages a contiguous, transposed scratchpad in GPU UMA memory sized
 // to hold active dequantized KV tiles for full-attention layers on AMD Strix Halo (gfx1151).
 //

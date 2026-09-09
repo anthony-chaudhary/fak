@@ -6,19 +6,185 @@ import (
 	"encoding/json"
 	"math"
 	"math/rand"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 )
+
+func TestVulkanFP16KVNoF32Expansion(t *testing.T) {
+	const (
+		capacityPos         = 2
+		nKV                 = 1
+		elementsPerPosition = 513
+	)
+	cache, err := NewVulkanFP16KVContract(capacityPos, nKV, elementsPerPosition)
+	if err != nil {
+		t.Fatalf("NewVulkanFP16KVContract: %v", err)
+	}
+
+	contractType := reflect.TypeOf(*cache)
+	for i := 0; i < contractType.NumField(); i++ {
+		field := contractType.Field(i)
+		if field.Type.Kind() == reflect.Slice && field.Type.Elem().Kind() == reflect.Float32 {
+			t.Fatalf("resident field %s is an F32 shadow slice", field.Name)
+		}
+	}
+
+	rowsK := make([][]float32, capacityPos)
+	rowsV := make([][]float32, capacityPos)
+	for pos := 0; pos < capacityPos; pos++ {
+		rowsK[pos] = make([]float32, elementsPerPosition)
+		rowsV[pos] = make([]float32, elementsPerPosition)
+		for i := 0; i < elementsPerPosition; i++ {
+			rowsK[pos][i] = float32((i*17+pos*11)%101-50) / 37
+			rowsV[pos][i] = float32((i*29+pos*7)%97-48) / 41
+		}
+	}
+
+	zeroK := append([]uint32(nil), cache.packedK...)
+	zeroV := append([]uint32(nil), cache.packedV...)
+	if err := cache.Append(rowsK[0][:elementsPerPosition-1], rowsV[0]); err == nil {
+		t.Fatal("Append accepted a partial K row")
+	}
+	if cache.NumPos != 0 || !reflect.DeepEqual(cache.packedK, zeroK) || !reflect.DeepEqual(cache.packedV, zeroV) {
+		t.Fatal("invalid append mutated resident state")
+	}
+
+	for pos := 0; pos < capacityPos; pos++ {
+		if err := cache.Append(rowsK[pos], rowsV[pos]); err != nil {
+			t.Fatalf("Append position %d: %v", pos, err)
+		}
+		if pos == 0 {
+			for name, packed := range map[string][]uint32{"K": cache.packedK, "V": cache.packedV} {
+				lastFirstPositionWord := packed[(elementsPerPosition-1)/2]
+				if lastFirstPositionWord>>16 != 0 {
+					t.Fatalf("%s unused high half after odd-width append = %#04x, want zero", name, lastFirstPositionWord>>16)
+				}
+			}
+		}
+	}
+	for _, pair := range []struct {
+		name   string
+		packed []uint32
+		rows   [][]float32
+	}{
+		{"K", cache.packedK, rowsK},
+		{"V", cache.packedV, rowsV},
+	} {
+		crossBoundaryWord := pair.packed[(elementsPerPosition-1)/2]
+		if low := uint16(crossBoundaryWord); low != Float32ToFloat16Bits(pair.rows[0][elementsPerPosition-1]) {
+			t.Fatalf("%s position 0 final low half = %#04x, want %#04x", pair.name, low, Float32ToFloat16Bits(pair.rows[0][elementsPerPosition-1]))
+		}
+		if high := uint16(crossBoundaryWord >> 16); high != Float32ToFloat16Bits(pair.rows[1][0]) {
+			t.Fatalf("%s position 1 first high half = %#04x, want %#04x", pair.name, high, Float32ToFloat16Bits(pair.rows[1][0]))
+		}
+	}
+
+	packedKBeforeRead := append([]uint32(nil), cache.packedK...)
+	packedVBeforeRead := append([]uint32(nil), cache.packedV...)
+	if err := cache.Append(rowsK[0], rowsV[0]); err == nil {
+		t.Fatal("Append accepted a position beyond capacity")
+	}
+	if _, _, err := cache.ReadPosition(-1); err == nil {
+		t.Fatal("ReadPosition accepted position -1")
+	}
+	if _, _, err := cache.ReadPosition(capacityPos); err == nil {
+		t.Fatalf("ReadPosition accepted position %d", capacityPos)
+	}
+	var maxAbs float64
+	for pos := 0; pos < capacityPos; pos++ {
+		gotK, gotV, err := cache.ReadPosition(pos)
+		if err != nil {
+			t.Fatalf("ReadPosition(%d): %v", pos, err)
+		}
+		for i := 0; i < elementsPerPosition; i++ {
+			for _, pair := range []struct {
+				got  float32
+				want float32
+			}{
+				{gotK[i], rowsK[pos][i]},
+				{gotV[i], rowsV[pos][i]},
+			} {
+				wantBits := Float32ToFloat16Bits(pair.want)
+				if gotBits := Float32ToFloat16Bits(pair.got); gotBits != wantBits {
+					t.Fatalf("position %d element %d FP16 round-trip = %#04x, want %#04x", pos, i, gotBits, wantBits)
+				}
+				delta := math.Abs(float64(pair.got - pair.want))
+				if delta > maxAbs {
+					maxAbs = delta
+				}
+			}
+		}
+	}
+	if maxAbs > 1e-3 {
+		t.Fatalf("FP16-vs-F32 oracle max |delta| = %g, want <= 1e-3", maxAbs)
+	}
+	if !reflect.DeepEqual(cache.packedK, packedKBeforeRead) || !reflect.DeepEqual(cache.packedV, packedVBeforeRead) {
+		t.Fatal("append/read bounds or per-position widening mutated packed resident backing")
+	}
+
+	totalLogicalElems := capacityPos * nKV * elementsPerPosition
+	packedWordsPerBuffer := (totalLogicalElems + 1) / 2
+	fp16AlignedPerBuffer := (int64(packedWordsPerBuffer*4) + StrixHaloCacheLineBytes - 1) &^ int64(StrixHaloCacheLineBytes-1)
+	if wantResident := 2 * fp16AlignedPerBuffer; cache.ResidentBytes() != wantResident {
+		t.Fatalf("resident bytes = %d, want 2*align128(ceil(%d/2)*4) = %d", cache.ResidentBytes(), totalLogicalElems, wantResident)
+	}
+	f32AlignedPerBuffer := (int64(totalLogicalElems*4) + StrixHaloCacheLineBytes - 1) &^ int64(StrixHaloCacheLineBytes-1)
+	f32ResidentBytes := f32AlignedPerBuffer * 2
+	reduction := 1 - float64(cache.ResidentBytes())/float64(f32ResidentBytes)
+	if reduction < 0.45 {
+		t.Fatalf("resident-byte reduction = %.1f%%, want >= 45%% (FP16=%d F32=%d)", reduction*100, cache.ResidentBytes(), f32ResidentBytes)
+	}
+	if cache.LogicalBytes() != int64(capacityPos*nKV*elementsPerPosition*2*2) {
+		t.Fatalf("logical bytes = %d, want exact two-byte K+V accounting", cache.LogicalBytes())
+	}
+	if cache.ResidentBytes()%StrixHaloCacheLineBytes != 0 {
+		t.Fatalf("resident bytes %d are not %d-byte aligned", cache.ResidentBytes(), StrixHaloCacheLineBytes)
+	}
+	if cache.FallbackCount != 0 {
+		t.Fatalf("fallback_count=%d, want 0", cache.FallbackCount)
+	}
+
+	shader, err := os.ReadFile(filepath.Join("shaders", "attention.comp"))
+	if err != nil {
+		t.Fatalf("read attention shader: %v", err)
+	}
+	shaderSource := string(shader)
+	for _, token := range []string{
+		"#ifdef FAK_ATTENTION_PACKED_FP16_KV",
+		"buffer Kbuf { uint PackedK[]; }",
+		"buffer Vbuf { uint PackedV[]; }",
+		"buffer Kbuf { float K[]; }",
+		"buffer Vbuf { float V[]; }",
+		"unpackHalf2x16(PackedK[logicalIndex >> 1u])",
+		"unpackHalf2x16(PackedV[logicalIndex >> 1u])",
+		"(logicalIndex & 1u) == 0u ? lowHighF16.x : lowHighF16.y",
+		"float partial = 0.0;",
+		"float score =",
+		"float m =",
+		"float l = 0.0;",
+		"float acc[8];",
+	} {
+		if !strings.Contains(shaderSource, token) {
+			t.Errorf("attention.comp missing FP16-KV/F32-accumulator contract token %q", token)
+		}
+	}
+	t.Logf("FP16 KV software witness: software_contract=true runtime_integrated=false physical_executed=false elements_per_position=%d positions=%d oracle_max_abs=%g logical_bytes=%d resident_bytes=%d f32_resident_bytes=%d reduction=%.1f%% fallback_count=%d",
+		elementsPerPosition, cache.NumPos, maxAbs, cache.LogicalBytes(), cache.ResidentBytes(), f32ResidentBytes, reduction*100, cache.FallbackCount)
+}
 
 // TestVulkanKVScratchpadDequantOnce tests the dequant-once KV cache scratchpad for full-attention
 // layers on AMD Strix Halo (gfx1151 / 40 CUs / 32MB MALL Infinity Cache) as required by Issue #12186.
 //
 // Verifies:
-// 1. vulkan_kv.go allocates a contiguous UMA scratchpad adhering to 128-byte cache line and
-//    32MB MALL cache boundaries for dequantized KV tiles. [SW-VERIFIED]
-// 2. vulkan_ops.go dequantizes Q8_0/Q4_0 KV blocks exactly once across all 40 attention heads
-//    per forward pass without numerical drift. [SW-VERIFIED]
-// 3. Deep-context prefill throughput on physical AMD Strix Halo appliance at 64k context
-//    reaches >= 230 tok/s for quantized KV. [HW-WITNESSED]
+//  1. vulkan_kv.go allocates a contiguous UMA scratchpad adhering to 128-byte cache line and
+//     32MB MALL cache boundaries for dequantized KV tiles. [SW-VERIFIED]
+//  2. vulkan_ops.go dequantizes Q8_0/Q4_0 KV blocks exactly once across all 40 attention heads
+//     per forward pass without numerical drift. [SW-VERIFIED]
+//  3. Deep-context prefill throughput on physical AMD Strix Halo appliance at 64k context
+//     reaches >= 230 tok/s for quantized KV. [HW-WITNESSED]
 func TestVulkanKVScratchpadDequantOnce(t *testing.T) {
 	// 1. Boundary & Alignment Tests
 	t.Run("MALL_Boundary_And_Alignment", func(t *testing.T) {
@@ -96,7 +262,7 @@ func TestVulkanKVScratchpadDequantOnce(t *testing.T) {
 		const (
 			nPos    = 128
 			nQ      = StrixHaloFullAttentionHeads // 40 query heads matching 40 CUs
-			nKV     = 8                          // 8 KV heads (GQA ratio 5:1)
+			nKV     = 8                           // 8 KV heads (GQA ratio 5:1)
 			headDim = 64
 		)
 		totalKV := nKV * nPos * headDim
@@ -228,7 +394,7 @@ func TestVulkanKVParityAgainstCPU(t *testing.T) {
 	const (
 		nPos    = 64
 		nQ      = StrixHaloFullAttentionHeads // 40 query heads
-		nKV     = 8                          // 8 KV heads
+		nKV     = 8                           // 8 KV heads
 		headDim = 64
 	)
 	totalKV := nKV * nPos * headDim

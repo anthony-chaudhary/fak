@@ -13,8 +13,29 @@
 layout(local_size_x = 128) in;
 
 layout(std430, binding = 0) readonly  buffer Qbuf { float Q[]; };
+// FAK_ATTENTION_PACKED_FP16_KV is the source-level specialization contract for
+// FP16-resident K/V. The default F32 declarations remain active until the Vulkan
+// allocator and dispatch leaf can bind two-byte buffers with a physical witness.
+#ifdef FAK_ATTENTION_PACKED_FP16_KV
+layout(std430, binding = 1) readonly  buffer Kbuf { uint PackedK[]; };
+layout(std430, binding = 2) readonly  buffer Vbuf { uint PackedV[]; };
+
+float loadKAsF32(uint logicalIndex) {
+    vec2 lowHighF16 = unpackHalf2x16(PackedK[logicalIndex >> 1u]);
+    return (logicalIndex & 1u) == 0u ? lowHighF16.x : lowHighF16.y;
+}
+
+float loadVAsF32(uint logicalIndex) {
+    vec2 lowHighF16 = unpackHalf2x16(PackedV[logicalIndex >> 1u]);
+    return (logicalIndex & 1u) == 0u ? lowHighF16.x : lowHighF16.y;
+}
+#else
 layout(std430, binding = 1) readonly  buffer Kbuf { float K[]; };
 layout(std430, binding = 2) readonly  buffer Vbuf { float V[]; };
+
+float loadKAsF32(uint logicalIndex) { return K[logicalIndex]; }
+float loadVAsF32(uint logicalIndex) { return V[logicalIndex]; }
+#endif
 layout(std430, binding = 3) writeonly buffer Obuf { float Outp[]; };
 
 layout(push_constant) uniform Push {
@@ -66,7 +87,7 @@ void main() {
             // Partial dot product over this thread's strided dims.
             float partial = 0.0;
             for (uint d = tid; d < uint(pc.hd); d += 128u) {
-                partial += qs[d] * K[kbase + d];
+                partial += qs[d] * loadKAsF32(kbase + d);
             }
             red[red_idx(tid)] = partial;
             barrier();
@@ -90,7 +111,7 @@ void main() {
 
             uint k = 0u;
             for (uint d = tid; d < uint(pc.hd); d += 128u) {
-                acc[k] = acc[k] * corr + p * V[kbase + d];
+                acc[k] = acc[k] * corr + p * loadVAsF32(kbase + d);
                 k++;
             }
             m = m_new;
