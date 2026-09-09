@@ -53,6 +53,47 @@ func isQwen38MTPMatrixTensor(name string) bool {
 	return false
 }
 
+// Qwen38MTPQ4KResidentEligible reports whether name is one of the closed set of
+// MTP matrices that may be retained as Q4_K after the source loader has applied
+// any required row-layout normalization. It deliberately excludes norms and
+// unknown mtp.* tensors so source-format loaders cannot widen the admitted
+// layout by prefix alone.
+func Qwen38MTPQ4KResidentEligible(name string) bool {
+	return isQwen38MTPMatrixTensor(name)
+}
+
+// AddQwen38MTPResidentQ4K stores one already-canonicalized MTP projection in
+// the resident Q4_K store. MTP's fusion matrix is intentionally outside the
+// target model's generic isQuantWeight vocabulary, so this closed-set builder
+// entry point keeps source loaders from either dropping it or widening generic
+// Q4 admission.
+func (b *QuantBuilder) AddQwen38MTPResidentQ4K(name string, shape []int, raw []byte) error {
+	if b == nil {
+		return fmt.Errorf("model: nil QuantBuilder")
+	}
+	if b.built {
+		return fmt.Errorf("model: QuantBuilder already built")
+	}
+	if !RetainMTP || !Qwen38MTPQ4KResidentEligible(name) {
+		return fmt.Errorf("model: tensor %s is not an enabled Qwen3.8 MTP Q4_K matrix", name)
+	}
+	if len(shape) != 2 || shape[0] <= 0 || shape[1] <= 0 || shape[1]%qkK != 0 {
+		return fmt.Errorf("model: Qwen3.8 MTP Q4_K tensor %s has unsupported shape %v", name, shape)
+	}
+	wantBytes := shape[0] * (shape[1] / qkK) * q4kBlockBytes
+	if len(raw) != wantBytes {
+		return fmt.Errorf("model: Qwen3.8 MTP Q4_K tensor %s has %d bytes, want %d", name, len(raw), wantBytes)
+	}
+	if b.m.q4kw == nil {
+		b.m.q4kw = make(map[string]*q4kTensor)
+	}
+	if b.m.q4kw[name] != nil {
+		return fmt.Errorf("model: duplicate Qwen3.8 MTP Q4_K tensor %s", name)
+	}
+	b.m.q4kw[name] = quantizeQ4KFromRaw(raw, shape[0], shape[1])
+	return nil
+}
+
 // Qwen38MTPTensorLayout reports the actual retained MTP precision. It admits
 // exactly two closed layouts:
 //
