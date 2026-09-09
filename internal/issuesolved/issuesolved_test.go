@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -690,5 +691,82 @@ func TestReport_ProvenanceAndFilter(t *testing.T) {
 		if arg == "--search" {
 			t.Errorf("expected no '--search' arg when since is zero, got: %v", capturedZeroArgs)
 		}
+	}
+}
+
+func TestCollect_MissingPrivateDir(t *testing.T) {
+	fixedNow := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	missingDir := filepath.Join(t.TempDir(), "nonexistent-fak-private")
+
+	// Case 1: normalizeOptions disables IncludePrivate when Source="git" and PrivateDir does not exist
+	optsNorm := Options{
+		Source:         "git",
+		Now:            fixedNow,
+		IncludePrivate: true,
+		PublicDir:      ".",
+		PrivateDir:     missingDir,
+	}
+	norm := normalizeOptions(optsNorm)
+	if norm.IncludePrivate {
+		t.Errorf("expected normalizeOptions to set IncludePrivate=false for missing private dir in git mode")
+	}
+
+	// Case 2: Collect with Source="git" and missing private dir succeeds gracefully (zero exit, nil error)
+	rep, err := Collect(context.Background(), optsNorm)
+	if err != nil {
+		t.Fatalf("expected Collect to succeed gracefully when private dir is missing, got error: %v", err)
+	}
+	if rep == nil {
+		t.Fatal("expected non-nil Report")
+	}
+	if len(rep.Repos) != 1 {
+		t.Errorf("expected 1 repo (public only), got %d repos", len(rep.Repos))
+	}
+	if rep.Repos[0].Repo != "anthony-chaudhary/fak" {
+		t.Errorf("expected public repo in report, got %q", rep.Repos[0].Repo)
+	}
+
+	// Case 3: Direct collectRepo on missing directory in git mode returns (rr, nil)
+	rrDirect, errDirect := collectRepo(context.Background(), "anthony-chaudhary/fak-private", missingDir, optsNorm, nil, nil)
+	if errDirect != nil {
+		t.Fatalf("expected collectRepo on missing dir to return nil error, got: %v", errDirect)
+	}
+	if rrDirect.CommitCount != 0 {
+		t.Errorf("expected 0 commits for missing dir, got %d", rrDirect.CommitCount)
+	}
+	if len(rrDirect.Issues) != 0 {
+		t.Errorf("expected 0 issues for missing dir, got %d", len(rrDirect.Issues))
+	}
+
+	// Case 4: Source="git" with custom GitExecutor returning chdir failure on missing private dir
+	mockGit := func(ctx context.Context, dir string, args ...string) ([]byte, error) {
+		if dir == missingDir {
+			return nil, fmt.Errorf("chdir %s: no such file or directory", missingDir)
+		}
+		if len(args) > 0 && args[0] == "rev-list" {
+			return []byte("1\n"), nil
+		}
+		if len(args) > 0 && args[0] == "log" {
+			rec := "sha1\x1f2026-09-08T11:00:00Z\x1ffix: public issue (#10)\x1f"
+			return []byte(rec + "\x1e"), nil
+		}
+		return nil, nil
+	}
+
+	optsMock := Options{
+		Source:         "git",
+		Now:            fixedNow,
+		IncludePrivate: true,
+		PublicDir:      ".",
+		PrivateDir:     missingDir,
+		GitExecutor:    mockGit,
+	}
+
+	repMock, errMock := Collect(context.Background(), optsMock)
+	if errMock != nil {
+		t.Fatalf("expected Collect with mock git to succeed gracefully when private dir is missing, got: %v", errMock)
+	}
+	if repMock == nil {
+		t.Fatal("expected non-nil Report for mock git")
 	}
 }

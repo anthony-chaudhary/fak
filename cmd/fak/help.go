@@ -53,6 +53,7 @@ var overviewGroups = []struct {
 		{"run", "run an agent turn (or a recorded trace / 'fak replay') through the kernel"},
 		{"codex", "launch OpenAI Codex routed through the kernel"},
 		{"opencode", "launch OpenCode routed through the kernel"},
+		{"pi", "launch Pi coding agent directly targeting fak serve backend"},
 		{"build", "build fak from source; bootstraps fak-dev when needed"},
 	}},
 	{"save tokens + turns", []overviewEntry{

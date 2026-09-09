@@ -1,5 +1,3 @@
-//go:build wip_coordination
-
 package coordination
 
 import (

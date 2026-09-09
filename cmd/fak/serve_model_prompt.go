@@ -109,6 +109,12 @@ func resolveServeModelOrPrompt(sf *serveFlags, explicit map[string]bool, in io.R
 		(sf.policyCheck != nil && *sf.policyCheck) ||
 		(sf.opencodeConfig != nil && *sf.opencodeConfig) ||
 		(sf.writeOpencodeConfig != nil && *sf.writeOpencodeConfig) ||
+		(sf.piConfig != nil && *sf.piConfig) ||
+		(sf.writePiConfig != nil && *sf.writePiConfig) ||
+		(sf.claudeConfig != nil && *sf.claudeConfig) ||
+		(sf.writeClaudeConfig != nil && *sf.writeClaudeConfig) ||
+		(sf.codexConfig != nil && *sf.codexConfig) ||
+		(sf.writeCodexConfig != nil && *sf.writeCodexConfig) ||
 		(sf.sizingJSON != nil && *sf.sizingJSON) ||
 		(sf.stdio != nil && *sf.stdio) {
 		return nil

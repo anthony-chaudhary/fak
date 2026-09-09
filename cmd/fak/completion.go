@@ -70,7 +70,7 @@ _fak() {
         cword=$COMP_CWORD
     fi
 
-    local commands="ablate agent api-host architecture armbench attest audit bench build capabilities catchup codex codex-resume completion component compute config coordinate disambiguation doctor egress fanout glm52-prefill-sweep godsplit-plan harness help hook info info-fleet launch lifecycle llmd-smoke ls manage model opencode pack policy preflight progress ps pull quantbench question-ledger recall recover redteam replay resume run scratch-janitor self-update serve session session-audit sessionjournal signal stale-work study task tasks temp-artifacts test-quality tier-calibrate tool-width top tree-doctor trunk-build-probe ultracode value-chain version windows-setup wip work-delivery workspin"
+    local commands="ablate agent api-host architecture armbench attest audit bench build capabilities catchup codex codex-resume completion component compute config coordinate disambiguation doctor egress fanout glm52-prefill-sweep godsplit-plan harness help hook info info-fleet launch lifecycle llmd-smoke ls manage model opencode pack pi policy preflight progress ps pull quantbench question-ledger recall recover redteam replay resume run scratch-janitor self-update serve session session-audit sessionjournal signal stale-work study task tasks temp-artifacts test-quality tier-calibrate tool-width top tree-doctor trunk-build-probe ultracode value-chain version windows-setup wip work-delivery workspin"
 
     if [[ $cword -eq 1 ]]; then
         COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
@@ -106,8 +106,10 @@ _fak() {
         'agent:run one managed-agent task end to end'
         'ultracode:plan, launch, and observe a bounded concurrent coding-agent fleet'
         'run:run an agent turn (or a recorded trace) through the kernel'
+        'claude:launch Claude Code directly against fak serve backend on Mac'
         'codex:launch OpenAI Codex routed through the kernel'
         'opencode:launch OpenCode routed through the kernel'
+        'pi:launch Pi coding agent directly targeting fak serve backend'
         'build:build fak from source'
         'session:budget turns/tokens/context; steer or stop'
         'info:live reused-token, effective-cost, and total-savings overlay'
@@ -185,8 +187,10 @@ complete -c fak -n "__fak_needs_command" -a "serve" -d "OpenAI-compatible gatewa
 complete -c fak -n "__fak_needs_command" -a "agent" -d "run one managed-agent task"
 complete -c fak -n "__fak_needs_command" -a "ultracode" -d "plan, launch, and observe fleet"
 complete -c fak -n "__fak_needs_command" -a "run" -d "run an agent turn"
+complete -c fak -n "__fak_needs_command" -a "claude" -d "launch Claude Code"
 complete -c fak -n "__fak_needs_command" -a "codex" -d "launch OpenAI Codex"
 complete -c fak -n "__fak_needs_command" -a "opencode" -d "launch OpenCode"
+complete -c fak -n "__fak_needs_command" -a "pi" -d "launch Pi coding agent"
 complete -c fak -n "__fak_needs_command" -a "build" -d "build fak from source"
 complete -c fak -n "__fak_needs_command" -a "session" -d "budget turns/tokens/context"
 complete -c fak -n "__fak_needs_command" -a "info" -d "live reused-token overlay"

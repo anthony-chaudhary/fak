@@ -20,6 +20,8 @@ package adjudicator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/url"
 	"regexp"
@@ -40,6 +42,86 @@ const ReasonMissionWriteSetViolation abi.ReasonCode = 1120
 
 // ReasonMissionWriteSetViolationName is the stable name registered for ReasonMissionWriteSetViolation.
 const ReasonMissionWriteSetViolationName = "MISSION_WRITE_SET_VIOLATION"
+
+// ReasonDoomLoop is the closed refusal reason code emitted when an in-kernel circuit breaker trips (#12523).
+const ReasonDoomLoop abi.ReasonCode = 1140
+
+// ReasonDoomLoopName is the stable name registered for ReasonDoomLoop.
+const ReasonDoomLoopName = "DOOM_LOOP"
+
+// ReasonCircuitBreakerTripped is the alternative reason code name for ReasonDoomLoop (#12523).
+const ReasonCircuitBreakerTripped abi.ReasonCode = 1141
+
+// ReasonCircuitBreakerTrippedName is the stable name registered for ReasonCircuitBreakerTripped.
+const ReasonCircuitBreakerTrippedName = "CIRCUIT_BREAKER_TRIPPED"
+
+// DefaultCircuitBreakerThreshold is the default consecutive identical refusal threshold (K=3)
+// before the in-kernel circuit breaker trips (#12523).
+const DefaultCircuitBreakerThreshold = 3
+
+type sessionContextKey struct{}
+
+// ContextWithSessionID returns a derived context carrying the designated session ID (#12523).
+func ContextWithSessionID(ctx context.Context, sessionID string) context.Context {
+	return context.WithValue(ctx, sessionContextKey{}, sessionID)
+}
+
+func sessionIDFromContextOrCall(ctx context.Context, c *abi.ToolCall) string {
+	if c != nil {
+		if c.TraceID != "" {
+			return c.TraceID
+		}
+		if c.Meta != nil {
+			if s := c.Meta["session_id"]; s != "" {
+				return s
+			}
+			if s := c.Meta["trace_id"]; s != "" {
+				return s
+			}
+		}
+	}
+	if ctx != nil {
+		if s, ok := ctx.Value(sessionContextKey{}).(string); ok && s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+type sessionRefusalState struct {
+	tool    string
+	reason  abi.ReasonCode
+	argHash string
+	count   int
+	tripped bool
+}
+
+func callArgFingerprint(tool string, c *abi.ToolCall) string {
+	var rawArgs map[string]any
+	if c != nil {
+		rawArgs = decodeArgs(context.Background(), c)
+	}
+	tokArgs := argsForToken(rawArgs)
+	b, _ := json.Marshal(tokArgs)
+	h := sha256.Sum256(append([]byte(strings.ToLower(tool)+"\x00"), b...))
+	return hex.EncodeToString(h[:8])
+}
+
+type circuitBreakerTracker struct {
+	mu        sync.Mutex
+	sessions  map[string]*sessionRefusalState
+	threshold int
+}
+
+func newCircuitBreakerTracker(threshold int) *circuitBreakerTracker {
+	if threshold <= 0 {
+		threshold = DefaultCircuitBreakerThreshold
+	}
+	return &circuitBreakerTracker{
+		sessions:  make(map[string]*sessionRefusalState),
+		threshold: threshold,
+	}
+}
 
 // MissionContract defines dynamic file write-sets and asymmetric directory extraction boundaries (#12276).
 type MissionContract struct {
@@ -267,6 +349,7 @@ type Adjudicator struct {
 	missionContract atomic.Pointer[MissionContract]
 	receiptRoot     string
 	recovery        *RecoveryAuditLedger
+	circuitBreaker  atomic.Pointer[circuitBreakerTracker]
 }
 
 // New builds an adjudicator with the given policy.
@@ -277,6 +360,7 @@ func New(p Policy) *Adjudicator {
 		receiptRoot: receiptWorkspaceRoot(),
 		recovery:    NewRecoveryAuditLedger(),
 	}
+	a.circuitBreaker.Store(newCircuitBreakerTracker(DefaultCircuitBreakerThreshold))
 	a.state.Store(&policyState{
 		policy:     p,
 		argByTool:  indexArgPredicates(p.ArgPredicates),
@@ -342,6 +426,121 @@ func MissionContractFromContext(ctx context.Context) *MissionContract {
 		return &mc
 	}
 	return nil
+}
+
+func (a *Adjudicator) getCircuitBreaker() *circuitBreakerTracker {
+	if a == nil {
+		return nil
+	}
+	cb := a.circuitBreaker.Load()
+	if cb == nil {
+		newCb := newCircuitBreakerTracker(DefaultCircuitBreakerThreshold)
+		if a.circuitBreaker.CompareAndSwap(nil, newCb) {
+			return newCb
+		}
+		return a.circuitBreaker.Load()
+	}
+	return cb
+}
+
+// SetCircuitBreakerThreshold sets the threshold for consecutive identical refusals before tripping (#12523).
+func (a *Adjudicator) SetCircuitBreakerThreshold(threshold int) {
+	cb := a.getCircuitBreaker()
+	if cb == nil {
+		return
+	}
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	if threshold <= 0 {
+		threshold = DefaultCircuitBreakerThreshold
+	}
+	cb.threshold = threshold
+}
+
+// ResetCircuitBreaker resets the refusal tracking and circuit breaker for a given session (#12523).
+func (a *Adjudicator) ResetCircuitBreaker(sessionID string) {
+	cb := a.getCircuitBreaker()
+	if cb == nil {
+		return
+	}
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	delete(cb.sessions, sessionID)
+}
+
+// CircuitBreakerState returns the current tool, reason, count, and tripped state for a session (#12523).
+func (a *Adjudicator) CircuitBreakerState(sessionID string) (tool string, reason abi.ReasonCode, count int, tripped bool) {
+	cb := a.getCircuitBreaker()
+	if cb == nil {
+		return "", 0, 0, false
+	}
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	if entry, ok := cb.sessions[sessionID]; ok {
+		return entry.tool, entry.reason, entry.count, entry.tripped
+	}
+	return "", 0, 0, false
+}
+
+func (a *Adjudicator) evaluateCircuitBreaker(ctx context.Context, c *abi.ToolCall, v *abi.Verdict) {
+	if a == nil || c == nil || v == nil {
+		return
+	}
+	cb := a.getCircuitBreaker()
+	if cb == nil {
+		return
+	}
+
+	sessionID := sessionIDFromContextOrCall(ctx, c)
+	if sessionID == "" {
+		return
+	}
+
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	// If the call was permitted or transformed, reset the counter for this session.
+	if v.Kind != abi.VerdictDeny {
+		delete(cb.sessions, sessionID)
+		return
+	}
+
+	// The verdict is VerdictDeny.
+	argHash := callArgFingerprint(c.Tool, c)
+	entry, exists := cb.sessions[sessionID]
+	if !exists || entry.tool != c.Tool || entry.reason != v.Reason || entry.argHash != argHash {
+		// Non-repeating tool call (different tool, reason, or adapted arguments): reset counter to 1
+		cb.sessions[sessionID] = &sessionRefusalState{
+			tool:    c.Tool,
+			reason:  v.Reason,
+			argHash: argHash,
+			count:   1,
+			tripped: false,
+		}
+		return
+	}
+
+	// Consecutive identical refusal
+	entry.count++
+	if entry.count >= cb.threshold {
+		entry.tripped = true
+		originalReason := entry.reason
+		v.Kind = abi.VerdictDeny
+		v.Reason = ReasonDoomLoop
+		v.Disposition = "DOOM_LOOP"
+		if v.By == "" {
+			v.By = "adjudicator"
+		}
+		if v.Meta == nil {
+			v.Meta = make(map[string]string)
+		}
+		v.Meta["circuit_breaker"] = "tripped"
+		v.Meta["remedy"] = "pivot to a different tool, adapt arguments, or emit a structured refusal"
+		v.Meta["fix"] = "consecutive identical refusals detected; stop repeating this tool call and reconsider approach"
+		v.Meta["streak"] = strconv.Itoa(entry.count)
+		v.Meta["tool"] = c.Tool
+		v.Meta["original_reason"] = abi.ReasonName(originalReason)
+	}
 }
 
 // ResetRun clears the per-run synthesized-tool ledger (#543). The authored-script
@@ -477,10 +676,7 @@ func (a *Adjudicator) AdjudicateWithFSM(ctx context.Context, c *abi.ToolCall) (a
 func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) (verdict abi.Verdict) {
 	if a.recovery != nil && c != nil {
 		defer func() {
-			sessionID := c.TraceID
-			if sessionID == "" && c.Meta != nil {
-				sessionID = c.Meta["session_id"]
-			}
+			sessionID := sessionIDFromContextOrCall(ctx, c)
 			turn := 0
 			if c.Meta != nil && c.Meta["turn"] != "" {
 				if t, err := strconv.Atoi(c.Meta["turn"]); err == nil {
@@ -503,6 +699,12 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) (verdict 
 			default:
 				a.recovery.RecordOutcome(sessionID, turn, c.Tool, OutcomeRecovered)
 			}
+		}()
+	}
+
+	if c != nil {
+		defer func() {
+			a.evaluateCircuitBreaker(ctx, c, &verdict)
 		}()
 	}
 
@@ -1633,4 +1835,6 @@ func init() {
 	// so egressfloor stays a pure, init-free classifier and needs no defconfig entry.
 	abi.RegisterReason(egressfloor.ReasonEgressBlock, egressfloor.ReasonEgressBlockName)
 	abi.RegisterReason(ReasonMissionWriteSetViolation, ReasonMissionWriteSetViolationName)
+	abi.RegisterReason(ReasonDoomLoop, ReasonDoomLoopName)
+	abi.RegisterReason(ReasonCircuitBreakerTripped, ReasonCircuitBreakerTrippedName)
 }

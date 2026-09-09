@@ -622,6 +622,68 @@ func TestResponsesStreamEmitsSSE(t *testing.T) {
 	}
 }
 
+func TestResponsesStreamFunctionCallEvents(t *testing.T) {
+	srv := newTestServer(t)
+	srv.planner = stubPlanner{comp: &agent.Completion{
+		Message: agent.Message{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{
+				{
+					ID:   "call_123",
+					Type: "function",
+					Function: agent.Func{
+						Name:      "allow_a",
+						Arguments: `{"x":1}`,
+					},
+				},
+			},
+		},
+		FinishReason: "tool_calls",
+	}}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	httpResp, err := http.Post(ts.URL+"/v1/responses", "application/json",
+		strings.NewReader(`{"model":"m","input":"run allow_a","stream":true,"tools":[{"type":"function","name":"allow_a"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(httpResp.Body)
+		t.Fatalf("status = %d, want 200: %s", httpResp.StatusCode, body)
+	}
+
+	body, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := parseTypedSSE(t, string(body))
+
+	var foundArgsDelta, foundArgsDone bool
+	for _, ev := range events {
+		if ev.Event == "response.function_call_arguments.delta" {
+			foundArgsDelta = true
+			if !strings.Contains(ev.Data, `"call_id":"call_123"`) || !strings.Contains(ev.Data, `\"x\":1`) {
+				t.Errorf("unexpected function_call_arguments.delta data: %s", ev.Data)
+			}
+		}
+		if ev.Event == "response.function_call_arguments.done" {
+			foundArgsDone = true
+			if !strings.Contains(ev.Data, `"call_id":"call_123"`) || !strings.Contains(ev.Data, `\"x\":1`) {
+				t.Errorf("unexpected function_call_arguments.done data: %s", ev.Data)
+			}
+		}
+	}
+	if !foundArgsDelta {
+		t.Error("no response.function_call_arguments.delta event found")
+	}
+	if !foundArgsDone {
+		t.Error("no response.function_call_arguments.done event found")
+	}
+}
+
 func TestResponsesStreamSyntheticYieldEmitsTextDelta(t *testing.T) {
 	srv := newTestServer(t)
 	rec := httptest.NewRecorder()

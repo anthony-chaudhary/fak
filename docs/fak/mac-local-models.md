@@ -125,6 +125,19 @@ curl -s http://127.0.0.1:8080/v1/chat/completions \
   }'
 ```
 
+### Step 3: Run Pi coding agent directly against the Metal server
+
+Connect the [Pi](https://github.com/earendil-works/pi) terminal coding agent to `fak serve` ("raw" without guard):
+
+```bash
+# Terminal 1: start server and write ~/.pi/agent/models.json
+fak serve --gguf qwen38:27b-q4 --pi
+
+# Terminal 2: launch Pi connected directly to the backend
+fak pi
+# or run pi CLI directly: pi --provider fak --model qwen38:27b-q4
+```
+
 ---
 
 ## 5. Option C: Turnkey Apple Silicon Auto-Provisioner (`fak up`)
@@ -158,7 +171,52 @@ Every tool call proposed by the agent is adjudicated locally before execution, b
 
 ---
 
-## 7. Performance verification on Mac
+## 7. Option E: Direct Claude Code harness on local Mac backend (`fak claude` — raw, without guard)
+
+If you prefer running Claude Code directly against `fak serve` without the local guard wrapper:
+
+```bash
+# Terminal 1: run Metal GPU server with Claude configuration
+fak serve --gguf qwen38:27b-q4 --claude
+
+# Terminal 2: launch raw Claude Code connected to fak serve
+fak claude
+```
+
+Use `fak claude --dry-run` to preview the injected Anthropic environment, or `fak claude config --write` to update `.claude/settings.json`.
+
+---
+
+## 8. Option F: Direct Codex harness on local Mac backend (`fak codex --raw` — raw, without guard)
+
+If you prefer running OpenAI Codex directly against `fak serve` without the local guard wrapper:
+
+```bash
+# Terminal 1: run Metal GPU server with Codex configuration
+fak serve --gguf qwen38:27b-q4 --codex
+
+# Terminal 2: launch raw Codex connected to fak serve
+fak codex --raw
+```
+
+Or connect existing Codex CLI installations manually or via config generation:
+```bash
+# Write or update ~/.codex/config.toml with fak serve backend provider
+fak codex config --write
+
+# Or preview the config.toml snippet
+fak codex config
+
+# Run single headless probe turn with raw Codex
+fak codex --raw --probe "Explain prefix caching in one sentence"
+
+# Dry-run to inspect exact CLI invocation and -c overrides
+fak codex --raw --dry-run
+```
+
+---
+
+## 9. Performance verification on Mac
 
 To verify Apple Silicon Metal performance on your Mac against committed baseline contracts:
 

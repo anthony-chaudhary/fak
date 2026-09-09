@@ -1083,6 +1083,43 @@ func (s *Server) writeResponsesStream(w http.ResponseWriter, resp responsesRespo
 					nextSeq++
 				}
 			}
+		} else if item.Type == "function_call" {
+			type functionCallArgsDeltaEvent struct {
+				Type           string `json:"type"`
+				SequenceNumber int    `json:"sequence_number"`
+				OutputIndex    int    `json:"output_index"`
+				CallID         string `json:"call_id"`
+				Delta          string `json:"delta"`
+			}
+			type functionCallArgsDoneEvent struct {
+				Type           string `json:"type"`
+				SequenceNumber int    `json:"sequence_number"`
+				OutputIndex    int    `json:"output_index"`
+				CallID         string `json:"call_id"`
+				Arguments      string `json:"arguments"`
+			}
+			callID := item.CallID
+			if callID == "" {
+				callID = item.ID
+			}
+			if item.Arguments != "" {
+				_ = writeSSEEvent(w, "response.function_call_arguments.delta", functionCallArgsDeltaEvent{
+					Type:           "response.function_call_arguments.delta",
+					SequenceNumber: nextSeq,
+					OutputIndex:    i,
+					CallID:         callID,
+					Delta:          item.Arguments,
+				})
+				nextSeq++
+				_ = writeSSEEvent(w, "response.function_call_arguments.done", functionCallArgsDoneEvent{
+					Type:           "response.function_call_arguments.done",
+					SequenceNumber: nextSeq,
+					OutputIndex:    i,
+					CallID:         callID,
+					Arguments:      item.Arguments,
+				})
+				nextSeq++
+			}
 		}
 
 		// response.output_item.done
