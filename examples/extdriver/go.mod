@@ -4,7 +4,7 @@
 // the local source; a real consumer would `require` a tagged version instead.
 module github.com/anthony-chaudhary/fak/examples/extdriver
 
-go 1.26
+go 1.26.0
 
 require github.com/anthony-chaudhary/fak v0.0.0
 

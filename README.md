@@ -2,34 +2,40 @@
   <picture><source media="(prefers-color-scheme: dark)" srcset="visuals/brand/fak-logo.svg"><img src="visuals/brand/fak-logo-ink.svg" alt="fak logo" width="320"></picture>
 </p>
 
-# fak — the fast local runtime for coding agents
+# fak — useful local agents, accelerated automatically
 
-**fak is the agent runtime for local model serving, prefix caching, and zero-cold-start subagent fanout.**
+**Fak is building the open runtime that makes useful local agents practical on your own machine.**
 
-> **In short:** run coding agents locally with zero-cold-start subagent fanout and cache reuse, protected by a default-deny capability floor (blocking unauthorized actions).
+Start locally, give an agent real work, and keep useful context across turns.
+Our first breakthrough milestone combines native inference, speculative decoding,
+and agentic caching into an experience whose qualified acceleration is automatic.
+The capability floor bounds what tools the agent may execute.
+
+**Status:** this is the product milestone we are working toward. Today,
+automatic setup and cache reuse have specific model/backend limits; speculative
+decoding and physical GPU Direct paths are not universally enabled or qualified.
+See the [local-agent milestone](docs/local-agent-milestone.md) for the current
+wiring, the meaning of automatic, and the evidence required to earn the claim.
 
 ## Try fak
 
 Install with `curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh` (or `go install github.com/anthony-chaudhary/fak/cmd/fak@latest`).
 
-Experience raw in-kernel inference speed and concurrent multi-agent fanout:
+Try the local workflow on a supported Apple Silicon configuration:
 
-1. Raw inference speed (`fak up`):
-   Auto-probes unified memory with `macfit` and reserves headroom to prevent swapping. Starts the local OpenAI-compatible endpoint on `:8080` and opens an interactive chat REPL (use `fak up --mock` for zero-download verification with no key, model, or GPU):
+1. Start local inference (`fak up`):
+   Probes unified memory with `macfit` to choose a model/context budget with
+   headroom. Starts the local OpenAI-compatible endpoint on `:8080` and opens
+   an interactive chat REPL. Use `fak up --mock` to inspect the workflow without
+   a model or GPU; mock output is not inference performance evidence.
    ```bash
    fak up
    # -> [READY] fak up running on http://127.0.0.1:8080
    ```
-   ```
-   [READY] fak up running on http://127.0.0.1:8080
-     • Model: 27B (qwen3.8-27b-q4_k_m) | Context: 65536 tokens | Headroom: 33.3%
-   you> Explain context caching in one line
-   fak> The Context MMU shares paged KV blocks across runs for sub-millisecond reuse.
-        [telemetry: 76.1 tok/s | 64 tokens | 840ms | context: 128/65536]
-   ```
-   Ask any question to observe raw Apple Silicon Metal generation speed with per-token telemetry.
+   Inspect the selected model/backend and memory budget before interpreting
+   results. Apple Metal selection is automatic when the device and build support it.
 
-2. Batched subagent speed (`fak opencode`):
+2. Run agent work (`fak opencode`):
    In another terminal (or backgrounding `fak up --headless`), launch OpenCode:
    ```bash
    fak opencode
@@ -38,19 +44,17 @@ Experience raw in-kernel inference speed and concurrent multi-agent fanout:
    ```
    "Using parallel subagents, audit the packages under internal/ and report their status"
    ```
-   OpenCode spawns four concurrent subagents (`worker`, `researcher`, `explore`, `tester`). Instead of re-reading 25k tokens of repo rules (`AGENTS.md`) and tools sequentially (100k tokens of cold-start lag), `fak` warms the shared prefix once ($O(1)$ memory cloning). All four subagents decode co-batched in parallel with zero cold start.
-   Live split-pane telemetry displays real-time agent fanout and cache reuse:
-   ```
-   fak-turn ok prov=24.8k tok (88% of prompt) fak=0 tok cache=healthy_cache
-   [fak info] 4 active · 4 subagents · 4 in-flight · 88% x-agent reuse · 4.1× speedup
-   ```
+   Compatible agents can reuse shared instructions and repository context.
+   Inspect actual cache reuse and task outcomes; a fresh prefix still requires
+   prefill, and reuse depends on model state, backend support, and cache identity.
 
-3. Deterministic verification benchmark:
-   Measure the subagent fanout speedup directly on your host in seconds:
+3. Inspect the subagent benchmark:
    ```bash
    fak bench subagent --concurrency=4
    ```
-   Runs four co-batched subagents over a 30,000-token shared prefix, witnessing 18,000+ tokens/sec aggregate throughput and >95% cache hit rate with bit-exact logit parity (`cosine = 1.000000`).
+   This does not replace a real coding-task acceptance witness. Check the
+   benchmark's engine, execution regime, and receipt before treating its output
+   as hardware evidence; simulated output does not qualify a physical device.
 
 > [!TIP]
 > New to subagents? Follow the [Subagents Guide](docs/subagents-guide.md) to launch `fak up` and run parallel cohorts with shared-prefix cache reuse.
@@ -85,25 +89,24 @@ results. Use [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md) for claim boundari
 receipts. For Mac local model setup and head-to-head Apple Silicon Metal measurements, see the
 [Mac local models guide](docs/fak/mac-local-models.md) and the [three-way Mac benchmark](docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md). For agent UI workflows, see the [Mac agent UI guide](docs/fak/mac-agent-ui.md).
 
-## Open-source memory overflow landscape
-
-Most LLM serving engines treat memory overflow as a slow host-memory fallback with multiple CPU bounce copies. fak implements hardware-native, zero-copy peer-to-peer DMA directly between NVMe storage and GPU VRAM:
-
-| Framework | Storage / Offload DMA Path | Host DRAM Copies | Predictive Prefetching | Hybrid Attention + GDN Linear State | Target Workload |
-|---|---|:---:|:---:|:---:|---|
-| **fak (native)** | GPU Direct NVMe P2PDMA (BaM architecture) | 0 (strictly zero) | Yes (asynchronous pipeline) | Yes (bit-exact full + linear) | Interactive, real-time agent coding loops |
-| vLLM | Host DRAM block swapping (`swap_blocks`) | 2–3 copies | No (reactive) | No (Transformer KV only) | High-throughput data-center batching |
-| DeepSpeed ZeRO | Async CPU `aio` offload via pinned DRAM buffers | 2 copies | Coarse (layer-level weights) | No (static forward layers only) | Multi-node distributed training / inference |
-| FlexGen | 3-tier offload (GPU ↔ CPU ↔ Disk) | 2–3 copies | Zigzag batch schedule | No (attention matrices only) | Extreme high-latency batch throughput |
-| TensorRT-LLM | NVIDIA GPUDirect Storage (`libcufile.so`) | 0 (NVIDIA only) | Yes (NVIDIA GDS) | Partial (Transformer KV) | NVIDIA enterprise data centers only |
-| llama.cpp | OS `mmap` demand paging & CPU fallback | 2 copies (OS cache) | No (kernel readahead) | Basic (CPU fallback layers) | Local desktop CPU/GPU inference |
-
 ## Why run coding agents on fak
 
-- **Zero-cold-start subagent fanout:** Standard multi-agent swarms pay a heavy cold-start penalty on every spawned worker, re-ingesting 20k–30k tokens of prompts, tools, and repo context. fak warms this shared prefix once. Subagents inherit resident KV caches in milliseconds ($O(1)$ memory cloning), dropping Time-To-First-Token (TTFT) and achieving 4.1× vs tuned baselines with 86.7% cache hit rates. In-kernel tool caching (vDSO) serves idempotent reads in sub-microsecond time.
+- **Reuse the work behind each turn:** Compatible prefix/KV caching avoids
+  rebuilding shared instructions and context. The product target is automatic
+  reuse across turns and compatible agents, with correct invalidation and isolation.
+- **Accelerate generation automatically:** Native kernels, memory sizing,
+  quantization, and speculative decoding are parts of one local workflow. The
+  milestone requires qualified defaults; current MTP decoding requires explicit
+  selection. See the [implementation snapshot](docs/local-agent-milestone.md#current-implementation-is-narrower-than-the-milestone).
 - **Real-time multi-agent visibility:** Inspect live cross-agent reuse rates, per-subagent token breakdowns, and savings sparklines directly in your terminal overlay (`fak info` / `fak guard`) to see and verify the speedup as subagents execute concurrently.
-- **Zero-copy GPU Direct storage overflow:** Run models far exceeding physical GPU VRAM without host memory thrashing. Built on a BaM accelerator storage architecture, fak maps NVMe queues directly in GPU VRAM. It streams paged KV caches and hybrid linear states over peer-to-peer PCIe DMA without DRAM bounce copies (`StagingCopyCount == 0`). See the [GPU Direct overflow specification](docs/benchmarks/QWEN38-AMD-GPUDIRECT-RESULTS.md).
-- **Local execution on your hardware:** Run models directly with native inference across Apple Silicon, AMD, and NVIDIA. New work prioritizes Qwen3.8 with resident quantization and prefix reuse. Cut token bills and keep your code private on your own machine.
+- **Keep reusable state close to compute:** Device-resident caching and direct
+  GPU storage paths aim to reduce paging and copy overhead on supported hardware.
+  GPU residency and physical NVMe-to-GPU DMA are different claims. The current
+  [claim ledger](CLAIMS.md) and [milestone](docs/local-agent-milestone.md) explain
+  the wiring and qualification limits; a default-valued flag alone proves neither.
+- **Run on your own hardware:** Native backends target Apple Silicon, AMD, and
+  NVIDIA with different support envelopes. New native-performance work prefers
+  Qwen3.8. Choose a supported model/backend and measure the actual local workflow.
 - **Default-deny capability floor:** Protect your workspace from unintended commands, path escapes, or tool poisoning. Every tool call is verified against a capability floor before execution. Drop-in wrappers protect existing agents like Claude Code, Codex, OpenCode, and Cursor with zero rewrites.
 
 Native inference provides direct execution on local silicon, with external engines supported as an explicit reference; see the [native inference goal](docs/native-inference-goal.md) for details.
@@ -112,7 +115,7 @@ Native inference provides direct execution on local silicon, with external engin
 
 fak is organized around a focused four-tier default priority hierarchy:
 
-1. **fak all in one (serving and harness + memory — the "one touch" thing):** The primary focus: a single-binary deployment (`fak up`) bundling model serving, agent harness governance, and persistent memory. Verified on Terminal-Bench 4: 100.0% (5/5) solve rate vs OpenCode + llama.cpp 60.0% (3/5), cutting prompt tokens by 83.5% via in-kernel vDSO context caching (`fak bench tb4`).
+1. **fak all in one (serving and harness + memory — the "one touch" thing):** The primary focus is the [automatic local-agent milestone](docs/local-agent-milestone.md): model serving, agent execution, capability-floor governance, and reusable context through one approachable runtime. Qualification requires a real task and independent acceptance evidence on a supported machine.
 2. **fak serving only:** High-performance model inference runtime (`fak serve`), disaggregated gateway, KV-cache context acceleration, and native model execution.
 3. **fak harness only:** Standalone agent governance (`fak guard`) with a default-deny capability floor and tool adjudication over external models.
 4. **other things:** Standalone utilities, peripheral tools, benchmarks, and off-spine extensions.

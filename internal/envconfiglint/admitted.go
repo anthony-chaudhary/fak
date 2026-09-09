@@ -560,4 +560,40 @@ var admittedPostFreeze = []string{
 	// internal/hil/probe_other.go — vulkan ICD filenames override.
 	// Relocates to: vulkan probe config.
 	"VK_ICD_FILENAMES",
+
+	// internal/ggufload/loader.go — GC pacing during large model loads.
+	// Relocates to: loader pacing config.
+	"FAK_GC_PACING",
+
+	// internal/ggufload/loader.go — GC pacing interval during model loading.
+	// Relocates to: loader pacing config.
+	"FAK_GC_PACING_INTERVAL",
+
+	// internal/ggufload/loader.go — GC pacing megabyte allocation threshold.
+	// Relocates to: loader pacing config.
+	"FAK_GC_PACING_MB",
+
+	// internal/ggufload/loader.go — memory limit fraction for runtime allocation.
+	// Relocates to: loader memory limit config.
+	"FAK_MEMORY_LIMIT_FRACTION",
+
+	// internal/macfit/macfit.go — available memory bytes on mac host.
+	// Relocates to: macfit memory config.
+	"FAK_UP_AVAILABLE_BYTES",
+
+	// internal/macfit/macfit.go — connected displays count on mac host.
+	// Relocates to: macfit display config.
+	"FAK_UP_DISPLAYS",
+
+	// internal/macfit/macfit.go — display buffer bytes allocation.
+	// Relocates to: macfit display config.
+	"FAK_UP_DISPLAY_BUFFER_BYTES",
+
+	// internal/macfit/macfit.go — static memory allocation only flag.
+	// Relocates to: macfit allocation config.
+	"FAK_UP_STATIC_ONLY",
+
+	// internal/ggufload/loader.go — runtime Go memory limit knob.
+	// Relocates to: loader runtime memory config.
+	"GOMEMLIMIT",
 }
