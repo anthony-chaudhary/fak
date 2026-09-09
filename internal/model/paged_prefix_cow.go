@@ -318,16 +318,17 @@ func (p *PagedBlockPool) Block(id int) *PagedPrefixBlock {
 
 // PagedPrefixOwnerConfig configures a PagedPrefixOwner instance.
 type PagedPrefixOwnerConfig struct {
-	Config      Config
-	BlockTokens int
-	Tokens      int
-	TokenIDs    []int
-	K           [][][]float32 // [pos][layer][dim]
-	Kraw        [][][]float32 // [pos][layer][dim]
-	V           [][][]float32 // [pos][layer][dim]
-	Sidecar     []GDNLayerState
-	Pool        *PagedBlockPool
-	IsMetal     bool
+	Config       Config
+	BlockTokens  int
+	Tokens       int
+	TokenIDs     []int
+	K            [][][]float32 // [pos][layer][dim]
+	Kraw         [][][]float32 // [pos][layer][dim]
+	V            [][][]float32 // [pos][layer][dim]
+	Sidecar      []GDNLayerState
+	Pool         *PagedBlockPool
+	IsMetal      bool
+	AlignManager *AlignStateManager
 }
 
 // PagedPrefixOwner holds immutable, reference-counted page blocks for attention K/Kraw/V
@@ -345,6 +346,7 @@ type PagedPrefixOwner struct {
 	layers       int
 	isMetal      bool
 	released     bool
+	alignMgr     *AlignStateManager
 }
 
 // NewPagedPrefixOwner constructs a sealed, immutable prefix owner.
@@ -412,7 +414,14 @@ func NewPagedPrefixOwner(params PagedPrefixOwnerConfig) (*PagedPrefixOwner, erro
 		stride:       pool.stride,
 		layers:       pool.layers,
 		isMetal:      params.IsMetal,
+		alignMgr:     params.AlignManager,
 	}, nil
+}
+
+func (o *PagedPrefixOwner) AlignManager() *AlignStateManager {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.alignMgr
 }
 
 func (o *PagedPrefixOwner) PrefixTokens() int {
@@ -492,6 +501,7 @@ func (o *PagedPrefixOwner) Release() error {
 	}
 	o.pageTable = nil
 	o.prefixTokens = 0
+	o.alignMgr = nil
 	return nil
 }
 
@@ -500,47 +510,76 @@ func (o *PagedPrefixOwner) ForkSession(sessionID string) (*PagedPrefixSession, e
 	return o.forkInternal(sessionID, o.prefixTokens)
 }
 
-// ForkSessionAt forks a continuation session if requestedTokens matches the exact prefix boundary.
+// ForkSessionAt forks a continuation session if requestedTokens matches the exact prefix boundary,
+// or an intermediate block boundary when an aligned recurrent state checkpoint is available.
 func (o *PagedPrefixOwner) ForkSessionAt(sessionID string, requestedTokens int) (*PagedPrefixSession, error) {
 	o.mu.Lock()
 	prefixTokens := o.prefixTokens
+	blockTokens := o.blockTokens
+	alignMgr := o.alignMgr
 	o.mu.Unlock()
-	if requestedTokens != prefixTokens {
-		return nil, &NonExactHybridFallbackError{
-			ExpectedTokens:  prefixTokens,
-			RequestedTokens: requestedTokens,
-			Reason:          "prefix length mismatch: hybrid recurrent state requires exact token boundary",
+
+	if requestedTokens == prefixTokens {
+		return o.forkInternal(sessionID, requestedTokens)
+	}
+
+	if requestedTokens > 0 && requestedTokens < prefixTokens {
+		if requestedTokens%blockTokens == 0 && alignMgr != nil {
+			blockIdx := (requestedTokens / blockTokens) - 1
+			if slab, ok := alignMgr.GetSlab(blockIdx); ok {
+				return o.forkInternalWithSidecar(sessionID, requestedTokens, slab.ToSidecar())
+			}
 		}
 	}
-	return o.forkInternal(sessionID, requestedTokens)
+
+	return nil, &NonExactHybridFallbackError{
+		ExpectedTokens:  prefixTokens,
+		RequestedTokens: requestedTokens,
+		Reason:          "prefix length mismatch: hybrid recurrent state requires exact token boundary or aligned checkpoint",
+	}
 }
 
-// ForkSessionExact forks a continuation session if requestedTokenIDs matches the exact prefix.
+// ForkSessionExact forks a continuation session if requestedTokenIDs matches the exact prefix,
+// or an intermediate block boundary prefix when an aligned recurrent state checkpoint is available.
 func (o *PagedPrefixOwner) ForkSessionExact(sessionID string, requestedTokenIDs []int) (*PagedPrefixSession, error) {
 	o.mu.Lock()
 	prefixTokens := o.prefixTokens
 	storedTokens := append([]int(nil), o.tokenIDs...)
+	blockTokens := o.blockTokens
+	alignMgr := o.alignMgr
 	o.mu.Unlock()
 
-	if len(requestedTokenIDs) != prefixTokens {
-		return nil, &NonExactHybridFallbackError{
-			ExpectedTokens:  prefixTokens,
-			RequestedTokens: len(requestedTokenIDs),
-			Reason:          "prefix token count mismatch",
-		}
-	}
+	reqLen := len(requestedTokenIDs)
 	if len(storedTokens) > 0 {
-		for i, tok := range requestedTokenIDs {
-			if i < len(storedTokens) && tok != storedTokens[i] {
+		for i := 0; i < reqLen && i < len(storedTokens); i++ {
+			if requestedTokenIDs[i] != storedTokens[i] {
 				return nil, &NonExactHybridFallbackError{
 					ExpectedTokens:  prefixTokens,
-					RequestedTokens: len(requestedTokenIDs),
-					Reason:          fmt.Sprintf("prefix token mismatch at position %d (want %d, got %d)", i, storedTokens[i], tok),
+					RequestedTokens: reqLen,
+					Reason:          fmt.Sprintf("prefix token mismatch at position %d (want %d, got %d)", i, storedTokens[i], requestedTokenIDs[i]),
 				}
 			}
 		}
 	}
-	return o.forkInternal(sessionID, prefixTokens)
+
+	if reqLen == prefixTokens {
+		return o.forkInternal(sessionID, prefixTokens)
+	}
+
+	if reqLen > 0 && reqLen < prefixTokens {
+		if reqLen%blockTokens == 0 && alignMgr != nil {
+			blockIdx := (reqLen / blockTokens) - 1
+			if slab, ok := alignMgr.GetSlab(blockIdx); ok {
+				return o.forkInternalWithSidecar(sessionID, reqLen, slab.ToSidecar())
+			}
+		}
+	}
+
+	return nil, &NonExactHybridFallbackError{
+		ExpectedTokens:  prefixTokens,
+		RequestedTokens: reqLen,
+		Reason:          "prefix token count mismatch",
+	}
 }
 
 func (o *PagedPrefixOwner) forkInternal(sessionID string, tokens int) (*PagedPrefixSession, error) {
@@ -563,6 +602,50 @@ func (o *PagedPrefixOwner) forkInternal(sessionID string, tokens int) (*PagedPre
 
 	sidecarClones := cloneSidecar(o.sidecar)
 	scBytes := sidecarBytes(o.sidecar)
+
+	sess := &PagedPrefixSession{
+		sessionID:             sessionID,
+		owner:                 o,
+		pool:                  o.pool,
+		pageTable:             childTable,
+		tokens:                tokens,
+		prefixTokens:          tokens,
+		sidecar:               sidecarClones,
+		sharedBlockIDs:        sharedMap,
+		sharedPages:           len(childTable),
+		forkCloneBytes:        0, // Zero-copy fork: attention blocks shared, not cloned
+		cowBytes:              0,
+		recurrentSidecarBytes: scBytes,
+	}
+
+	return sess, nil
+}
+
+func (o *PagedPrefixOwner) forkInternalWithSidecar(sessionID string, tokens int, sidecar []GDNLayerState) (*PagedPrefixSession, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.released {
+		return nil, ErrOwnerReleased
+	}
+	if tokens <= 0 {
+		return nil, errors.New("model: cannot fork session with non-positive token count")
+	}
+
+	nBlocks := (tokens + o.blockTokens - 1) / o.blockTokens
+	if nBlocks > len(o.pageTable) {
+		nBlocks = len(o.pageTable)
+	}
+
+	childTable := make([]int, nBlocks)
+	copy(childTable, o.pageTable[:nBlocks])
+	sharedMap := make(map[int]struct{}, nBlocks)
+	for _, id := range childTable {
+		o.pool.Retain(id)
+		sharedMap[id] = struct{}{}
+	}
+
+	sidecarClones := cloneSidecar(sidecar)
+	scBytes := sidecarBytes(sidecarClones)
 
 	sess := &PagedPrefixSession{
 		sessionID:             sessionID,
