@@ -52,8 +52,8 @@ working-set size. The second command executes the physical micro-dose suite and 
 `all_passed: true`. `mps_available` may be false; the Q4_K native shader path does not require
 MPS.
 
-Then run a fail-loud native server smoke. This 27B Q4_K example requires the corresponding
-RAM tier in the sizing table below:
+Then run a fail-loud native server smoke. Use the weight estimate below to plan capacity,
+then confirm total process headroom on the intended Mac and workload:
 
 ```bash
 # Terminal 1
@@ -88,14 +88,30 @@ figures later in this guide as historical M3 evidence.
 
 ## 1. Unified memory model sizing
 
-Apple Silicon uses unified memory shared between CPU and GPU. Check your Mac's RAM and pick the matching model tier:
+Apple Silicon uses unified memory shared between the CPU, GPU, operating system, and other
+applications. The values below are approximate model-weight sizes. They are useful download
+and first-pass capacity estimates, but they do not measure total process footprint or prove
+that a model will run without swap.
 
-| Mac RAM | Recommended Model Alias | Quantization | Resident Size | Optimal Use |
-|---|---|---|---|---|
-| **8 GB – 16 GB** | `qwen2.5-coder:3b` or `qwen2.5-coder:7b` | Q4_K_M | 1.8 GB – 4.5 GB | Fast exploration, lightweight coding |
-| **32 GB – 36 GB** | `qwen38` (`qwen38:27b-q2k`) | UD-Q2_K_XL | 9.4 GB | Fast 27B inference with ample KV headroom |
-| **36 GB – 48 GB** | `qwen38:27b-q4` | Q4_K_M | 16.3 GB | Canonical 27B benchmark weight; high precision |
-| **64 GB+** | `qwen38:27b-q4` (large context) | Q4_K_M | 16.3 GB + KV | Large multi-agent concurrency (16+ workers) |
+| Model Alias | Quantization | Approximate Model Weights | What This Estimate Covers |
+|---|---|---:|---|
+| `qwen2.5-coder:3b` or `qwen2.5-coder:7b` | Q4_K_M | 1.8 GB - 4.5 GB | Model weights only |
+| `qwen38` (`qwen38:27b-q2k`) | UD-Q2_K_XL | 9.4 GB | Model weights only |
+| `qwen38:27b-q4` | Q4_K_M | ~17.1 GB (15.93 GiB) | Pinned artifact weights only; context length and concurrency add runtime memory |
+
+Allow additional memory for the KV cache, Metal buffers, command and scratch allocations,
+the Go heap, model loading, macOS, and other applications. Confirm the ready-state and peak
+process footprint on the intended model, context length, concurrency, and hardware before
+treating an estimate as an operating envelope.
+
+A 2026-09-09 native-v2 diagnostic candidate illustrates the gap. On a physical M3 Pro with
+36 GiB, Qwen3.8-27B Q4_K_M at 4K context reached a ready-state process footprint of
+29,821,769,400 bytes (27.77 GiB), above its 24 GiB candidate review limit, before any chat
+request. This was not a clean-trunk result: binary digest prefix `504d37fb` came from base
+`7a62f603d` plus an uncommitted managed candidate bundle. It does not establish M5 memory or
+performance. Runtime memory investigation is tracked in
+[#12684](https://github.com/anthony-chaudhary/fak/issues/12684), and physical M5 qualification
+remains [#12681](https://github.com/anthony-chaudhary/fak/issues/12681).
 
 ---
 
@@ -112,7 +128,7 @@ fak model-default
 
 # Pull weights into local cache on demand (resumable)
 fak pull qwen38          # Qwen3.8-27B UD-Q2_K_XL (~9.4 GB)
-fak pull qwen38:27b-q4   # Qwen3.8-27B Q4_K_M (~16.3 GB)
+fak pull qwen38:27b-q4   # Qwen3.8-27B Q4_K_M (~17.1 GB)
 ```
 
 Downloads are stored in `~/.cache/fak-models/hub/` or `~/Library/Caches/fak-models/hub/`.
@@ -127,7 +143,7 @@ Downloads are stored in `~/.cache/fak-models/hub/` or `~/Library/Caches/fak-mode
 # Interactive multi-turn chat (Ctrl-D or Ctrl-C to exit)
 fak run qwen38
 
-# Or with the 16.3 GB Q4_K_M model
+# Or with the approximately 17.1 GB Q4_K_M model
 fak run qwen38:27b-q4
 
 # One-shot command-line query
@@ -204,7 +220,11 @@ fak pi
 
 ## 5. Option C: Turnkey Apple Silicon Auto-Provisioner (`fak up`)
 
-`fak up` probes your Mac's unified memory using `macfit`, auto-selects the optimal model tier ensuring at least 20% memory headroom to prevent swap, and starts the server with an interactive REPL:
+`fak up` probes your Mac's unified memory using `macfit`, estimates a model tier and
+reservation headroom, and starts the server with an interactive REPL. The plan is an
+estimate; it does not prove runtime peak memory or guarantee that macOS will not swap. Confirm
+the loaded model's process footprint and memory pressure under the intended context and
+concurrency before relying on the estimated headroom:
 
 ```bash
 fak up
