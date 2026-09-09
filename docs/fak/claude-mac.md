@@ -67,9 +67,19 @@ Results across 20 turns ($K=4, H=20$):
 
 See the full [Cache-Value Roll-Up](../cache-value-rollup.md#macbook-many-agent-shared-prefix-result-apple-silicon-metal) for details.
 
-## The Single-Agent Gateway Launcher: `fak mac`
+## The Single-Agent Gateway Launcher: `fak claude` & `fak mac`
 
-To drive interactive Claude Code against your Mac gateway:
+On Apple Silicon Mac, `fak claude` provides dedicated first-class launcher support for running Claude Code directly against a local `fak serve` backend (raw, without guard):
+
+```bash
+fak claude              # launch interactive Claude Code against local Mac fak serve
+fak claude --dry-run    # preview environment and command
+fak claude --probe "hi" # headless JSON probe turn
+fak claude --print-env  # print shell export lines
+fak claude config --write # configure .claude/settings.json
+```
+
+To drive interactive Claude Code against a remote Mac gateway:
 
 ```bash
 export FAK_MAC_GATEWAY="http://<your-mac>:8080"

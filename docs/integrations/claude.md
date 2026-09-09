@@ -78,6 +78,59 @@ two-terminal wiring, and the capability floor.
 
 ---
 
+## First-Class Claude Code Harness with `fak serve` on Mac (Raw, Without Guard)
+
+To run Claude Code directly against `fak serve` on Apple Silicon macOS without running `fak guard` in between:
+
+### 1. The One-Command Launcher: `fak claude`
+
+```bash
+fak claude
+```
+
+`fak claude` is the dedicated first-class launcher for Claude Code:
+1. Automatically connects to the local Mac `fak serve` backend at `http://127.0.0.1:8080` (or `ANTHROPIC_BASE_URL` / `--gateway-url`).
+2. Probes `/healthz` to discover the live served model (e.g. `qwen38:27b-q4`) and configures all Claude model tiers (`ANTHROPIC_MODEL`, Opus, Sonnet, Haiku).
+3. Sets `ANTHROPIC_API_KEY=fak-local-dogfood`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, and `API_TIMEOUT_MS=1800000`.
+4. Launches Claude Code directly as a raw harness talking to the backend's `/v1/messages` endpoint.
+
+```bash
+# Preview launch environment and command:
+fak claude --dry-run
+
+# Run one headless JSON probe turn:
+fak claude --probe "Reply with exactly: pong"
+
+# Print shell export lines for your existing terminal:
+fak claude --print-env
+```
+
+### 2. The Two-Terminal Serving Flow
+
+* **Terminal 1 — Start the Metal GPU Server:**
+  ```bash
+  fak serve --gguf qwen38:27b-q4 --claude
+  ```
+  *`--claude` automatically ensures `.claude/settings.json` is configured with the backend environment before booting.*
+
+* **Terminal 2 — Launch Claude Code:**
+  ```bash
+  fak claude
+  # or run raw claude directly: claude
+  ```
+
+### 3. Settings Config Helper (`fak claude config`)
+
+```bash
+# Preview the .claude/settings.json snippet:
+fak claude config
+
+# Write or update .claude/settings.json in current workspace:
+fak claude config --write
+```
+
+---
+
 ## What this integration does
 
 ```

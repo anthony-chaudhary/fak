@@ -551,12 +551,26 @@ const usageOpsText = `  fak issues-solved [--hours N] [--since D] [--repo R] [--
                  with fixture-friendly JSON models for deterministic use. fak tui
                  is the compatibility alias)
   fak mac       [--dry-run] [--probe] [--prompt STR]
-                (one-command Mac gateway dogfood — the crisp handle; the long form
-                 fak claude-mac-fak keeps working byte-for-byte. Defaults to the
-                 always-on node-macos-a fak serve gateway, fetches the bearer over
-                 ssh when FAK_GATEWAY_KEY is empty, and opens interactive Claude
-                 Code through the existing fak console agent launcher. --probe runs
-                 a one-shot JSON check)
+                 (one-command Mac gateway dogfood — the crisp handle; the long form
+                  fak claude-mac-fak keeps working byte-for-byte. Defaults to the
+                  always-on node-macos-a fak serve gateway, fetches the bearer over
+                  ssh when FAK_GATEWAY_KEY is empty, and opens interactive Claude
+                  Code through the existing fak console agent launcher. --probe runs
+                  a one-shot JSON check)
+  fak claude    [--dry-run] [--probe STR] [--print-env] [--gateway-url URL] [--model M]
+                config [--write] [--addr ADDR] [--model M]
+                (CLAUDE CODE LAUNCHER: first-class support for Claude Code as harness
+                 with fak serve on Mac as backend without guard. Automatically connects
+                 to local Mac fak serve on :8080, adopts the served model, sets up
+                 ANTHROPIC_BASE_URL and required environment variables, and launches
+                 Claude Code directly. 'fak claude config' previews or writes .claude/settings.json)
+  fak pi        [--dry-run] [--probe STR] [--print-env] [--addr ADDR] [--base-url URL] [--model M]
+                config [--write] [--addr ADDR] [--model M] [--path PATH]
+                (PI CODING AGENT LAUNCHER: first-class support for Pi (earendil-works) as
+                 harness with fak serve on Mac as backend without guard. Automatically
+                 connects to local Mac fak serve on :8080, adopts the served model, updates
+                 ~/.pi/agent/models.json with the fak provider, and launches Pi directly.
+                 'fak pi config' previews or writes models.json)
   fak info      [--gateway-url URL] [--interval DUR] [--once] [--json]
                 (the live fak-info overlay: poll a fak guard/serve gateway's
                  /debug/vars and print ONE plain-words line per tick — whether
