@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +14,27 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/amdgpu"
 )
+
+type testControllerAuthorityRefusal struct {
+	code       string
+	recovery   string
+	cleanup    *int
+	cleanupErr error
+}
+
+func (r testControllerAuthorityRefusal) Error() string    { return r.code }
+func (r testControllerAuthorityRefusal) Code() string     { return r.code }
+func (r testControllerAuthorityRefusal) Recovery() string { return r.recovery }
+func (r testControllerAuthorityRefusal) RetryCleanup() error {
+	if r.cleanup != nil {
+		*r.cleanup++
+	}
+	return r.cleanupErr
+}
+
+type testControllerAuthority struct{ epoch string }
+
+func (a testControllerAuthority) Epoch() string { return a.epoch }
 
 const testStrixTip = "0123456789abcdef0123456789abcdef01234567"
 
@@ -23,7 +45,7 @@ func testSHA256(data []byte) string {
 
 func stubAMDStrixCandidate(t *testing.T, archive []byte) (string, string) {
 	t.Helper()
-	origBuild, origGit, origStatus := buildStrixCandidateArchiveFn, gitRevParseFn, gitStatusFn
+	origBuild, origGit, origStatus, origAuthority := buildStrixCandidateArchiveFn, gitRevParseFn, gitStatusFn, newStrixControllerAuthorityFn
 	root := filepath.Join(t.TempDir(), "repo")
 	digest := testSHA256(archive)
 	gitRevParseFn = func(_ context.Context, _ string, args ...string) (string, error) {
@@ -39,8 +61,12 @@ func stubAMDStrixCandidate(t *testing.T, archive []byte) (string, string) {
 	buildStrixCandidateArchiveFn = func(context.Context, string, string, []string) (amdgpu.StrixCandidateArchive, error) {
 		return amdgpu.StrixCandidateArchive{Bytes: archive, SourceArchiveSHA256: digest}, nil
 	}
+	newStrixControllerAuthorityFn = func(context.Context, string) (strixControllerAuthority, error) {
+		return testControllerAuthority{epoch: "test-semantic-epoch"}, nil
+	}
 	t.Cleanup(func() {
 		buildStrixCandidateArchiveFn, gitRevParseFn, gitStatusFn = origBuild, origGit, origStatus
+		newStrixControllerAuthorityFn = origAuthority
 	})
 	return filepath.Clean(root), digest
 }
@@ -338,4 +364,140 @@ func TestRunAMDStrixValidateRejectsResealedGitRefMismatchInBothModes(t *testing.
 			t.Fatalf("args=%v exit=%d stderr=%s", args, code, stderr.String())
 		}
 	}
+}
+
+func TestRunAMDStrixCommandsRequireControllerAuthorityBeforeTransport(t *testing.T) {
+	origAuthority, origDiscover, origRun := newStrixControllerAuthorityFn, discoverStrixTargetFn, runStrixValidationFn
+	defer func() {
+		newStrixControllerAuthorityFn, discoverStrixTargetFn, runStrixValidationFn = origAuthority, origDiscover, origRun
+	}()
+
+	root, _ := stubAMDStrixCandidate(t, []byte("candidate"))
+	for _, tc := range []struct {
+		name     string
+		command  func(io.Writer, io.Writer, []string) int
+		args     []string
+		code     string
+		recovery string
+	}{
+		{"probe_windows", RunAMDStrixProbe, []string{"--candidate-dir", root}, "UNSUPPORTED_VALIDATOR_BINARY", "use a current stamped WSL build"},
+		{"probe_stale", RunAMDStrixProbe, []string{"--candidate-dir", root}, "STALE_VALIDATOR_BINARY", ""},
+		{"validate_unattested", RunAMDStrixValidate, []string{"--candidate-dir", root, "--mine=a.go"}, "GIT_SNAPSHOT_UNATTESTED", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			discoverCalls, runCalls := 0, 0
+			discoverStrixTargetFn = func(context.Context, string) (*amdgpu.StrixTarget, error) {
+				discoverCalls++
+				return nil, fmt.Errorf("transport must not start")
+			}
+			runStrixValidationFn = func(context.Context, amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+				runCalls++
+				return nil, fmt.Errorf("transport must not start")
+			}
+			var gotRoot string
+			cleanupCalls := 0
+			cleanupErr := error(nil)
+			if tc.name == "probe_windows" {
+				cleanupErr = fmt.Errorf("secret snapshot path must not leak")
+			}
+			newStrixControllerAuthorityFn = func(_ context.Context, resolvedRoot string) (strixControllerAuthority, error) {
+				gotRoot = resolvedRoot
+				return nil, testControllerAuthorityRefusal{code: tc.code, recovery: tc.recovery, cleanup: &cleanupCalls, cleanupErr: cleanupErr}
+			}
+			var stdout, stderr bytes.Buffer
+			if code := tc.command(&stdout, &stderr, tc.args); code != 1 {
+				t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+			}
+			if gotRoot != filepath.Clean(root) {
+				t.Fatalf("authority root=%q want %q", gotRoot, filepath.Clean(root))
+			}
+			if !strings.Contains(stderr.String(), tc.code) || (tc.recovery != "" && !strings.Contains(stderr.String(), tc.recovery)) {
+				t.Fatalf("typed refusal missing from stderr: %s", stderr.String())
+			}
+			if discoverCalls != 0 || runCalls != 0 {
+				t.Fatalf("refusal reached transport: discover=%d run=%d", discoverCalls, runCalls)
+			}
+			if cleanupCalls != 1 {
+				t.Fatalf("refusal cleanup calls=%d want 1", cleanupCalls)
+			}
+			if cleanupErr != nil && (!strings.Contains(stderr.String(), "snapshot_cleanup=FAILED") || strings.Contains(stderr.String(), "secret snapshot")) {
+				t.Fatalf("cleanup outcome was not stable and redacted: %s", stderr.String())
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name    string
+		command func(io.Writer, io.Writer, []string) int
+		args    []string
+	}{
+		{"probe_zero_nil", RunAMDStrixProbe, []string{"--candidate-dir", root}},
+		{"validate_zero_nil", RunAMDStrixValidate, []string{"--candidate-dir", root, "--mine=a.go"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			discoverCalls, runCalls := 0, 0
+			discoverStrixTargetFn = func(context.Context, string) (*amdgpu.StrixTarget, error) {
+				discoverCalls++
+				return nil, nil
+			}
+			runStrixValidationFn = func(context.Context, amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+				runCalls++
+				return nil, nil
+			}
+			newStrixControllerAuthorityFn = func(context.Context, string) (strixControllerAuthority, error) {
+				return testControllerAuthority{}, nil
+			}
+			var stdout, stderr bytes.Buffer
+			if code := tc.command(&stdout, &stderr, tc.args); code != 1 || !strings.Contains(stderr.String(), "INVALID_CONTROLLER_AUTHORITY") {
+				t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+			}
+			if discoverCalls != 0 || runCalls != 0 {
+				t.Fatalf("zero authority reached transport: discover=%d run=%d", discoverCalls, runCalls)
+			}
+		})
+	}
+
+	t.Run("probe_success", func(t *testing.T) {
+		authorityCalls, discoverCalls := 0, 0
+		newStrixControllerAuthorityFn = func(_ context.Context, gotRoot string) (strixControllerAuthority, error) {
+			authorityCalls++
+			if gotRoot != filepath.Clean(root) {
+				t.Fatalf("authority root=%q want %q", gotRoot, filepath.Clean(root))
+			}
+			return testControllerAuthority{epoch: "test-semantic-epoch"}, nil
+		}
+		discoverStrixTargetFn = func(context.Context, string) (*amdgpu.StrixTarget, error) {
+			discoverCalls++
+			return &amdgpu.StrixTarget{Reachable: true}, nil
+		}
+		var stdout, stderr bytes.Buffer
+		if code := RunAMDStrixProbe(&stdout, &stderr, []string{"--candidate-dir", root, "--json"}); code != 0 {
+			t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+		}
+		if authorityCalls != 1 || discoverCalls != 1 {
+			t.Fatalf("authority=%d discover=%d", authorityCalls, discoverCalls)
+		}
+	})
+
+	t.Run("validate_success", func(t *testing.T) {
+		authorityCalls, runCalls := 0, 0
+		newStrixControllerAuthorityFn = func(_ context.Context, gotRoot string) (strixControllerAuthority, error) {
+			authorityCalls++
+			if gotRoot != filepath.Clean(root) {
+				t.Fatalf("authority root=%q want %q", gotRoot, filepath.Clean(root))
+			}
+			return testControllerAuthority{epoch: "test-semantic-epoch"}, nil
+		}
+		runStrixValidationFn = func(_ context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+			runCalls++
+			return creditableAMDStrixReceipt(t, opts), nil
+		}
+		var stdout, stderr bytes.Buffer
+		if code := RunAMDStrixValidate(&stdout, &stderr, []string{"--candidate-dir", root, "--mine=a.go", "--json", "--subkernels=argmax", "--ablate=none"}); code != 0 {
+			t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+		}
+		if authorityCalls != 1 || runCalls != 1 {
+			t.Fatalf("authority=%d runner=%d", authorityCalls, runCalls)
+		}
+	})
 }
