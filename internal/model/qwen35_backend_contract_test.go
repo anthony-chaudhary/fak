@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -34,6 +35,7 @@ type markerOnlyQwen35CUDA struct{ *refusingQwen35CUDA }
 func (*markerOnlyQwen35CUDA) Qwen35GDNPath() string { return Qwen35GDNCUDAPath }
 
 var errInjectedQwen35GDN = errors.New("injected Qwen35 GDN operation failure")
+var errInjectedQwen35Clone = errors.New("injected Qwen35 recurrent clone failure")
 
 // recordingQwen35Backend is a model-dispatch witness, not a second GDN oracle. Its
 // Qwen35GDNDecode implementation delegates the normalized input to the existing
@@ -60,6 +62,9 @@ type recordingQwen35Backend struct {
 	stateTicks      map[compute.Buffer]float32
 	stateContinuous bool
 	cloneCalls      int
+	cloneFailAt     int
+	clonedBuffers   []compute.Buffer
+	freeHook        func()
 	badRoute        string
 	failAt          int
 	deviceMemory    bool
@@ -115,19 +120,35 @@ func (b *recordingQwen35Backend) Read(t compute.Tensor) []float32 {
 func (b *recordingQwen35Backend) Free(t compute.Tensor) {
 	b.lifecycleMu.Lock()
 	b.freeCalls[t.Buf()]++
+	hook := b.freeHook
+	b.freeHook = nil
 	b.lifecycleMu.Unlock()
 	b.Backend.Free(t)
+	if hook != nil {
+		hook()
+	}
 }
 
 func (b *recordingQwen35Backend) CloneTensor(t compute.Tensor) (compute.Tensor, error) {
 	b.lifecycleMu.Lock()
 	b.cloneCalls++
+	call := b.cloneCalls
+	failAt := b.cloneFailAt
 	b.lifecycleMu.Unlock()
+	if failAt > 0 && call == failAt {
+		return compute.Tensor{}, errInjectedQwen35Clone
+	}
 	cloner, ok := b.Backend.(compute.TensorCloner)
 	if !ok {
 		return compute.Tensor{}, errors.New("recording backend cannot clone tensor")
 	}
-	return cloner.CloneTensor(t)
+	out, err := cloner.CloneTensor(t)
+	if err == nil {
+		b.lifecycleMu.Lock()
+		b.clonedBuffers = append(b.clonedBuffers, out.Buf())
+		b.lifecycleMu.Unlock()
+	}
+	return out, err
 }
 
 func (b *recordingQwen35Backend) MatMul(w, x compute.Tensor) compute.Tensor {
@@ -788,6 +809,86 @@ func TestQwen35RecurrentSnapshotCopyOnWriteIsolation(t *testing.T) {
 	for buffer := range allStateBuffers {
 		if got := be.freeCalls[buffer]; got != 1 {
 			t.Fatalf("recurrent state %p freed %d times, want exactly once", buffer, got)
+		}
+	}
+
+	// A transactional pair clone may need to discard the convolution clone when
+	// cloning recurrent state fails. That compensating Free must run only after
+	// the handle and owner locks are released because backend cleanup may re-enter
+	// Session.closeQwen35HALState.
+	failureModel := NewSynthetic(qwen35HybridTestCfg())
+	failureBackend := newRecordingQwen35Backend(failureModel)
+	failureRoot, err := failureModel.NewBackendSessionChecked(failureBackend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failureRoot.Prefill([]int{5})
+	failureBuffers := make(map[compute.Buffer]struct{})
+	rememberFailureState := func(s *Session) {
+		t.Helper()
+		for _, layer := range failureBackend.linearLayers {
+			state := s.qwen35HAL.layers[layer]
+			failureBuffers[state.conv.Buf()] = struct{}{}
+			failureBuffers[state.recurrent.Buf()] = struct{}{}
+		}
+	}
+	rememberFailureState(failureRoot)
+	failureSnapshot, err := failureRoot.PrefixSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	failureBranch, err := failureModel.NewBackendSessionChecked(failureBackend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rememberFailureState(failureBranch)
+	if err := failureSnapshot.Restore(failureBranch); err != nil {
+		t.Fatal(err)
+	}
+	failureSnapshot.Close()
+	failureBackend.cloneFailAt = failureBackend.cloneCalls + 2
+	reentered := make(chan struct{})
+	failureBackend.freeHook = func() {
+		failureBranch.closeQwen35HALState()
+		close(reentered)
+	}
+	mutationDone := make(chan error, 1)
+	failureState := failureBranch.qwen35HAL
+	go func() {
+		_, _, _, mutationErr := failureState.mutateLayer(failureBackend, failureBackend.linearLayers[0], func(conv, recurrent compute.Tensor) (compute.Tensor, compute.Tensor, compute.Tensor, error) {
+			return compute.Tensor{}, conv, recurrent, nil
+		})
+		mutationDone <- mutationErr
+	}()
+	select {
+	case mutationErr := <-mutationDone:
+		if !errors.Is(mutationErr, errInjectedQwen35Clone) {
+			t.Fatalf("recurrent clone failure=%v, want injected error", mutationErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("recurrent clone cleanup deadlocked during re-entrant close")
+	}
+	select {
+	case <-reentered:
+	default:
+		t.Fatal("partial-clone cleanup did not invoke re-entrant Free callback")
+	}
+	if failureBranch.qwen35HAL != nil {
+		t.Fatal("re-entrant close retained failed branch recurrent ownership")
+	}
+	if len(failureBackend.clonedBuffers) != 1 {
+		t.Fatalf("successful partial clones=%d, want convolution only", len(failureBackend.clonedBuffers))
+	}
+	partialClone := failureBackend.clonedBuffers[0]
+	failureBuffers[partialClone] = struct{}{}
+	if got := failureBackend.freeCalls[partialClone]; got != 1 {
+		t.Fatalf("partial convolution clone freed %d times, want once", got)
+	}
+	failureBranch.Close()
+	failureRoot.Close()
+	for buffer := range failureBuffers {
+		if got := failureBackend.freeCalls[buffer]; got != 1 {
+			t.Fatalf("failure-path state %p freed %d times, want exactly once", buffer, got)
 		}
 	}
 }
