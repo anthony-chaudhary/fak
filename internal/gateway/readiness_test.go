@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/engine"
 )
 
 func TestReadyzRequiresStartupAndReusesHealthState(t *testing.T) {
@@ -44,6 +47,7 @@ func TestReadyzRequiresStartupAndReusesHealthState(t *testing.T) {
 }
 
 func TestGatewayReadyLogging(t *testing.T) {
+	abi.RegisterEngine("mock", engine.MockEngine)
 	var logged []string
 	logf := func(format string, args ...any) {
 		logged = append(logged, fmt.Sprintf(format, args...))
