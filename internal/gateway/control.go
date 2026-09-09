@@ -305,10 +305,11 @@ type controlIPCRequest struct {
 }
 
 type controlIPCResponse struct {
-	Status      string        `json:"status"`
-	ConfigEpoch uint64        `json:"config_epoch,omitempty"`
-	Config      *ScalarConfig `json:"config,omitempty"`
-	Error       string        `json:"error,omitempty"`
+	Status      string          `json:"status"`
+	ConfigEpoch uint64          `json:"config_epoch,omitempty"`
+	Config      *ScalarConfig   `json:"config,omitempty"`
+	Load        *AdmissionStats `json:"load,omitempty"`
+	Error       string          `json:"error,omitempty"`
 }
 
 func (cs *ControlSocketServer) handle(conn net.Conn) {
@@ -346,6 +347,18 @@ func (cs *ControlSocketServer) handle(conn net.Conn) {
 				Status:      "ok",
 				ConfigEpoch: vc.Epoch,
 				Config:      &vc.Config,
+			})
+		case "get_load", "load":
+			cs.srv.admissionMu.RLock()
+			ctl := cs.srv.admissionCtl
+			cs.srv.admissionMu.RUnlock()
+			var stats AdmissionStats
+			if ctl != nil {
+				stats = ctl.Stats()
+			}
+			_ = json.NewEncoder(conn).Encode(controlIPCResponse{
+				Status: "ok",
+				Load:   &stats,
 			})
 		case "patch_config", "patch":
 			if req.Patch == nil {
