@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
@@ -38,14 +39,15 @@ type Qwen35MTPForward struct {
 	tensorFormat Qwen38MTPTensorFormat
 	lastPos      int
 	closed       bool
+	closeOnce    sync.Once
 	vocabFilter  *DraftVocabFilter
 }
 
 // NewQwen35MTPForward binds the exact mtp.layers.0 namespace to the shared Qwen
 // decoder-layer primitive and binds mtp.norm plus the target model's LM head.
-// A uniform resident-Q4_K MTP projection set selects sessionQ4KKernel (and the
-// existing Metal dispatch on Apple Silicon); the original uniform-F32 layout
-// remains unchanged. Mixed or unsupported precision is refused explicitly.
+// The exact Qwen3.8-27B-Q4_K_M Q8/Q4/Q6 inventory selects sessionQ4KKernel
+// (and the existing per-format Metal dispatch on Apple Silicon); the original
+// uniform-F32/BF16 layout remains unchanged. Other mixtures are refused.
 func (m *Model) NewQwen35MTPForward() (*Qwen35MTPForward, error) {
 	if m == nil {
 		return nil, qwen35MTPStateError("model", "non-nil model", "nil")
@@ -86,22 +88,67 @@ func (m *Model) NewQwen35MTPForward() (*Qwen35MTPForward, error) {
 		}
 	}
 	aliases["model.norm.weight"] = m.manifest["mtp.norm.weight"]
-	headName, err := m.qwen35MTPHeadName()
-	if err != nil {
-		return nil, err
-	}
-	aliases["lm_head.weight"] = m.manifest[headName]
 
-	q4Aliases := make(map[string]*q4kTensor, len(qwen35MTPDecoderAliases)+1)
+	q4Aliases := make(map[string]*q4kTensor, len(qwen35MTPDecoderAliases))
+	q8Aliases := make(map[string]*q8Tensor, len(qwen35MTPDecoderAliases)+1)
+	kqAliases := make(map[string]*kQuantTensor, len(qwen35MTPDecoderAliases)+1)
+	var q4Head *q4kTensor
+	var q8Head *q8Tensor
 	if layout.Format == Qwen38MTPFormatQ4K {
-		q4Aliases["mtp.fc.weight"] = m.q4kw["mtp.fc.weight"]
+		switch {
+		case m.q4kw["mtp.fc.weight"] != nil:
+			q4Aliases["mtp.fc.weight"] = m.q4kw["mtp.fc.weight"]
+		case m.q8w["mtp.fc.weight"] != nil:
+			q8Aliases["mtp.fc.weight"] = m.q8w["mtp.fc.weight"]
+		case m.kqw["mtp.fc.weight"] != nil:
+			kqAliases["mtp.fc.weight"] = m.kqw["mtp.fc.weight"]
+		}
 		for dst, src := range qwen35MTPDecoderAliases {
 			if qt := m.q4kw[src]; qt != nil {
 				q4Aliases[dst] = qt
 			}
+			if qt := m.q8w[src]; qt != nil {
+				q8Aliases[dst] = qt
+			}
+			if qt := m.kqw[src]; qt != nil {
+				kqAliases[dst] = qt
+			}
 		}
+		head, err := m.qwen35MTPResidentHead()
+		if err != nil {
+			return nil, err
+		}
+		switch {
+		case head.q4k != nil:
+			q4Aliases["lm_head.weight"] = head.q4k
+			q4Head = head.q4k
+		case head.kq != nil:
+			kqAliases["lm_head.weight"] = head.kq
+		case head.q8 != nil:
+			q8Aliases["lm_head.weight"] = head.q8
+			q8Head = head.q8
+		default:
+			aliases["lm_head.weight"] = m.manifest[head.f32Name]
+		}
+	} else {
+		// Preserve the original F32/BF16 path: resolve and alias the target head
+		// from the packed manifest without introducing a resident quant store.
+		headName, err := m.qwen35MTPHeadName()
+		if err != nil {
+			return nil, err
+		}
+		aliases["lm_head.weight"] = m.manifest[headName]
 	}
-	draftModel := &Model{Cfg: cfg, manifest: aliases, raw: m.raw, q4kw: q4Aliases}
+	draftModel := &Model{
+		Cfg:      cfg,
+		manifest: aliases,
+		raw:      m.raw,
+		q4kw:     q4Aliases,
+		q4khead:  q4Head,
+		q8w:      q8Aliases,
+		q8head:   q8Head,
+		kqw:      kqAliases,
+	}
 	draft := &Session{M: draftModel, Cache: NewKVCache(cfg)}
 	var mat matKernel = f32Kernel{draftModel}
 	if layout.Format == Qwen38MTPFormatQ4K {
@@ -118,19 +165,22 @@ func (m *Model) NewQwen35MTPForward() (*Qwen35MTPForward, error) {
 
 // Close releases the target checkpoint lifetime held by this draft head.
 func (f *Qwen35MTPForward) Close() {
-	if f == nil || f.closed {
+	if f == nil {
 		return
 	}
-	f.closed = true
-	if f.draft != nil {
-		if f.tensorFormat == Qwen38MTPFormatQ4K && f.draft.M != nil {
-			releaseModelQ4KHandles(f.draft.M)
+	f.closeOnce.Do(func() {
+		f.closed = true
+		if f.draft != nil {
+			if f.tensorFormat == Qwen38MTPFormatQ4K && f.draft.M != nil {
+				releaseModelQ4KHandles(f.draft.M)
+				f.draft.M.releaseMetalQ8Residency()
+			}
+			f.draft.Close()
 		}
-		f.draft.Close()
-	}
-	if f.target != nil {
-		f.target.releaseWeightSession()
-	}
+		if f.target != nil {
+			f.target.releaseWeightSession()
+		}
+	})
 }
 
 // Forward executes one native Qwen3.8 MTP draft position:
@@ -189,19 +239,196 @@ func (f *Qwen35MTPForward) ProjectHead(xf []float32) []float32 {
 	if f.vocabFilter != nil && len(f.vocabFilter.Subset) > 0 {
 		return f.ProjectFiltered(xf, f.vocabFilter.Subset)
 	}
-	return f.draft.head(xf)
+	return f.draft.headResident(xf)
 }
 
-// ProjectFiltered computes logits for an explicit subset of token IDs.
+// ProjectFiltered computes logits for an explicit subset of token IDs directly
+// from the resident LM-head format. It never expands a quantized head or allocates
+// a full-vocabulary logits buffer. The subset filter is opt-in; on Darwin it uses
+// the resident CPU bytes because Metal currently has no row-subset GEMV contract.
 func (f *Qwen35MTPForward) ProjectFiltered(xf []float32, subset []int) []float32 {
 	if f == nil || f.draft == nil || f.draft.M == nil || len(subset) == 0 {
 		return nil
 	}
-	w := f.draft.M.lmHead()
-	in := f.draft.M.Cfg.HiddenSize
-	logits := parMatRowsSubset(w, xf, subset, in)
+	m := f.draft.M
+	var logits []float32
+	switch {
+	case m.q4khead != nil || m.q4kw[m.q4kHeadName()] != nil:
+		head := m.q4khead
+		if head == nil {
+			head = m.q4kw[m.q4kHeadName()]
+		}
+		logits = q4kMatRowsSubset(head, xf, subset)
+	case m.kqHeadName() != "":
+		logits = kQuantMatRowsSubset(m.kqw[m.kqHeadName()], xf, subset)
+	case m.q4head != nil:
+		logits = q4MatRowsSubset(m.q4head, xf, subset)
+	case m.q8head != nil || m.q8w[m.headName()] != nil:
+		head := m.q8head
+		if head == nil {
+			head = m.q8w[m.headName()]
+		}
+		logits = q8MatRowsSubset(head, f.draft.quantizeVecQ8(xf), subset)
+	default:
+		logits = parMatRowsSubset(m.lmHead(), xf, subset, m.Cfg.HiddenSize)
+	}
 	scaleSubsetLogitsInPlace(logits, subset, f.draft.M.Cfg)
 	return logits
+}
+
+func q4kMatRowsSubset(qt *q4kTensor, x []float32, subset []int) []float32 {
+	qt.requireRawCPU("subset projection")
+	y := newSubsetLogits(subset, qt.out)
+	if q4kSDOTEnabled() {
+		qv := quantizeVecQ8(x)
+		parForRange(len(subset), len(subset)*qt.in, func(lo, hi int) {
+			is := make([]int32, qt.nblk*8)
+			ss := make([]int32, qt.nblk*8)
+			rowBytes := qt.q4kRowBytes()
+			for i := lo; i < hi; i++ {
+				tok := subset[i]
+				if tok < 0 || tok >= qt.out {
+					continue
+				}
+				row := qt.raw[tok*rowBytes : (tok+1)*rowBytes]
+				q4kReduceRow(row, qt.nblk, qv.q, is, ss)
+				y[i] = q4kCombineRow(row, qt.nblk, qv.d, is, ss)
+			}
+		})
+		return y
+	}
+	parForRange(len(subset), len(subset)*qt.in, func(lo, hi int) {
+		buf := make([]float32, qkK)
+		rowBytes := qt.q4kRowBytes()
+		for i := lo; i < hi; i++ {
+			tok := subset[i]
+			if tok < 0 || tok >= qt.out {
+				continue
+			}
+			row := qt.raw[tok*rowBytes : (tok+1)*rowBytes]
+			var acc float32
+			for b := 0; b < qt.nblk; b++ {
+				q4kDequantSuperBlock(buf, row[b*q4kBlockBytes:(b+1)*q4kBlockBytes])
+				acc += subsetDot4(buf, x[b*qkK:])
+			}
+			y[i] = acc
+		}
+	})
+	return y
+}
+
+func kQuantMatRowsSubset(qt *kQuantTensor, x []float32, subset []int) []float32 {
+	y := newSubsetLogits(subset, qt.out)
+	if qt.kind == kindQ6K && kQuantSDOTEnabled(qt.kind) {
+		qv := quantizeVecQ8(x)
+		parForRange(len(subset), len(subset)*qt.in, func(lo, hi int) {
+			is := make([]int32, qt.nblk*q6kGroupsPerBlock)
+			ss := make([]int32, qt.nblk*q6kGroupsPerBlock)
+			rowBytes := qt.rowBytes()
+			for i := lo; i < hi; i++ {
+				tok := subset[i]
+				if tok < 0 || tok >= qt.out {
+					continue
+				}
+				row := qt.raw[tok*rowBytes : (tok+1)*rowBytes]
+				q6kReduceRow(row, qt.nblk, qv.q, is, ss)
+				y[i] = q6kCombineRow(row, qt.nblk, qv.d, is, ss)
+			}
+		})
+		return y
+	}
+	parForRange(len(subset), len(subset)*qt.in, func(lo, hi int) {
+		blockWeights := qt.kind.blockWeights()
+		buf := make([]float32, blockWeights)
+		rowBytes := qt.rowBytes()
+		blockBytes := qt.kind.blockBytes()
+		for i := lo; i < hi; i++ {
+			tok := subset[i]
+			if tok < 0 || tok >= qt.out {
+				continue
+			}
+			row := qt.raw[tok*rowBytes : (tok+1)*rowBytes]
+			var acc float32
+			for b := 0; b < qt.nblk; b++ {
+				kQuantDequantSuperBlock(buf, row[b*blockBytes:(b+1)*blockBytes], qt.kind)
+				acc += subsetDot4(buf, x[b*blockWeights:])
+			}
+			y[i] = acc
+		}
+	})
+	return y
+}
+
+func q8MatRowsSubset(qt *q8Tensor, qv q8Vec, subset []int) []float32 {
+	y := newSubsetLogits(subset, qt.out)
+	parForRange(len(subset), len(subset)*qt.in, func(lo, hi int) {
+		for i := lo; i < hi; i++ {
+			tok := subset[i]
+			if tok < 0 || tok >= qt.out {
+				continue
+			}
+			y[i] = qdot8GEMV(
+				qt.q[tok*qt.in:(tok+1)*qt.in],
+				qt.d[tok*qt.nblk:(tok+1)*qt.nblk],
+				qv,
+				qt.nblk,
+			)
+		}
+	})
+	return y
+}
+
+func q4MatRowsSubset(qt *q4Tensor, x []float32, subset []int) []float32 {
+	y := newSubsetLogits(subset, qt.out)
+	parForRange(len(subset), len(subset)*qt.in, func(lo, hi int) {
+		buf := make([]float32, qBlk4)
+		half := qBlk4 / 2
+		for i := lo; i < hi; i++ {
+			tok := subset[i]
+			if tok < 0 || tok >= qt.out {
+				continue
+			}
+			qrow := qt.q[tok*qt.nblk*half : (tok+1)*qt.nblk*half]
+			drow := qt.d[tok*qt.nblk : (tok+1)*qt.nblk]
+			var s0, s1, s2, s3 float32
+			for b := 0; b < qt.nblk; b++ {
+				dequantQ4Block(buf, drow[b], qrow[b*half:])
+				xs := x[b*qBlk4:]
+				s0 += buf[0]*xs[0] + buf[1]*xs[1] + buf[2]*xs[2] + buf[3]*xs[3]
+				s1 += buf[4]*xs[4] + buf[5]*xs[5] + buf[6]*xs[6] + buf[7]*xs[7]
+				s2 += buf[8]*xs[8] + buf[9]*xs[9] + buf[10]*xs[10] + buf[11]*xs[11]
+				s3 += buf[12]*xs[12] + buf[13]*xs[13] + buf[14]*xs[14] + buf[15]*xs[15]
+				s0 += buf[16]*xs[16] + buf[17]*xs[17] + buf[18]*xs[18] + buf[19]*xs[19]
+				s1 += buf[20]*xs[20] + buf[21]*xs[21] + buf[22]*xs[22] + buf[23]*xs[23]
+				s2 += buf[24]*xs[24] + buf[25]*xs[25] + buf[26]*xs[26] + buf[27]*xs[27]
+				s3 += buf[28]*xs[28] + buf[29]*xs[29] + buf[30]*xs[30] + buf[31]*xs[31]
+			}
+			y[i] = (s0 + s1) + (s2 + s3)
+		}
+	})
+	return y
+}
+
+func newSubsetLogits(subset []int, vocab int) []float32 {
+	y := make([]float32, len(subset))
+	negInf := float32(math.Inf(-1))
+	for i, tok := range subset {
+		if tok < 0 || tok >= vocab {
+			y[i] = negInf
+		}
+	}
+	return y
+}
+
+func subsetDot4(w, x []float32) float32 {
+	var s0, s1, s2, s3 float32
+	for i := 0; i < len(w); i += 4 {
+		s0 += w[i] * x[i]
+		s1 += w[i+1] * x[i+1]
+		s2 += w[i+2] * x[i+2]
+		s3 += w[i+3] * x[i+3]
+	}
+	return (s0 + s1) + (s2 + s3)
 }
 
 // Argmax resolves logits returned by Forward or ProjectHead to a full vocabulary token ID,
@@ -325,6 +552,67 @@ func (m *Model) qwen35MTPHeadName() (string, error) {
 		return "", err
 	}
 	return name, nil
+}
+
+type qwen35MTPHeadAlias struct {
+	f32Name string
+	q4k     *q4kTensor
+	kq      *kQuantTensor
+	q8      *q8Tensor
+}
+
+// qwen35MTPResidentHead resolves the target LM head from its retained store.
+// The returned pointer aliases immutable target storage; the target model's
+// weight-session hold keeps that storage alive until the draft is closed.
+func (m *Model) qwen35MTPResidentHead() (qwen35MTPHeadAlias, error) {
+	want := []int{m.Cfg.VocabSize, m.Cfg.HiddenSize}
+	badShape := func(name string, out, in int) (qwen35MTPHeadAlias, error) {
+		return qwen35MTPHeadAlias{}, &Qwen35MTPForwardError{
+			Stage:  "weight shape",
+			Tensor: name,
+			Want:   fmt.Sprint(want),
+			Got:    fmt.Sprint([]int{out, in}),
+		}
+	}
+
+	q4Name := m.q4kHeadName()
+	q4 := m.q4khead
+	if q4 == nil {
+		q4 = m.q4kw[q4Name]
+	}
+	if q4 != nil {
+		if q4.out != want[0] || q4.in != want[1] {
+			return badShape(q4Name, q4.out, q4.in)
+		}
+		return qwen35MTPHeadAlias{q4k: q4}, nil
+	}
+
+	for _, name := range [...]string{"lm_head.weight", "model.embed_tokens.weight"} {
+		if q := m.kqw[name]; q != nil {
+			if q.out != want[0] || q.in != want[1] {
+				return badShape(name, q.out, q.in)
+			}
+			return qwen35MTPHeadAlias{kq: q}, nil
+		}
+	}
+
+	q8Name := m.headName()
+	q8 := m.q8head
+	if q8 == nil {
+		q8 = m.q8w[q8Name]
+	}
+	if q8 != nil {
+		if q8.out != want[0] || q8.in != want[1] {
+			return badShape(q8Name, q8.out, q8.in)
+		}
+		return qwen35MTPHeadAlias{q8: q8}, nil
+	}
+
+	name, err := m.qwen35MTPHeadName()
+	if err != nil {
+		return qwen35MTPHeadAlias{}, err
+	}
+	return qwen35MTPHeadAlias{f32Name: name}, nil
 }
 
 func (m *Model) qwen35MTPF32Tensor(name string, wantShape []int) ([]float32, error) {

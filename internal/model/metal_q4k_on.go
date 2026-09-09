@@ -634,6 +634,22 @@ func (m *Model) metalQ6KWeight(name string, qt *kQuantTensor) *metalgemm.Q6KWeig
 	if w, ok := tbl[name]; ok {
 		return w
 	}
+	// The retained MTP draft aliases the target LM-head tensor pointer under its own Model.
+	// Reuse that exact native residency with an independent handle instead of uploading the
+	// ~0.971 GiB output matrix a second time.
+	for owner, ownerTable := range metalQ6KW {
+		if owner == nil || owner.kqw == nil {
+			continue
+		}
+		for ownerName, ownerWeight := range ownerTable {
+			if ownerWeight != nil && owner.kqw[ownerName] == qt {
+				if shared := ownerWeight.Share(); shared != nil {
+					tbl[name] = shared
+					return shared
+				}
+			}
+		}
+	}
 	w := metalgemm.UploadQ6K(qt.raw, qt.out, qt.in)
 	tbl[name] = w
 	return w
@@ -967,10 +983,17 @@ func releaseMetalQ4KResidency(m *Model) {
 	metalQ4KMu.Lock()
 	tbl := metalQ4KW[m]
 	delete(metalQ4KW, m)
+	tblQ6K := metalQ6KW[m]
+	delete(metalQ6KW, m)
 	tblQ2K := metalQ2KW[m]
 	delete(metalQ2KW, m)
 	metalQ4KMu.Unlock()
 	for _, w := range tbl {
+		if w != nil {
+			w.Release()
+		}
+	}
+	for _, w := range tblQ6K {
 		if w != nil {
 			w.Release()
 		}

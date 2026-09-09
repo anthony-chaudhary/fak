@@ -366,11 +366,69 @@ int mg_gdn_state_run(int owner,
 // mutated in place and remain the same owner handed to resident decode.
 extern void *mg_graph_command_buffer(void *graph);
 extern void *mg_graph_alloc_result(void *graph, int n);
+extern void mg_graph_note_encoder(void *graph);
+
+static BOOL mg_gdn_owner_compatible(MGGDNOwner a, MGGDNOwner b) {
+    return a.conv != NULL && a.recurrent != NULL && b.conv != NULL && b.recurrent != NULL &&
+           a.conv != b.conv && a.recurrent != b.recurrent &&
+           a.nK == b.nK && a.nV == b.nV && a.kHd == b.kHd && a.vHd == b.vHd &&
+           a.convKernel == b.convKernel;
+}
+
+// Save both private state buffers in the caller-owned graph command buffer.
+// The Go checkpoint lease keeps both registry slots exclusively owned through
+// the terminal wait and until the caller resolves the token by Restore/Close.
+int mg_gdn_graph_checkpoint(void *graph, int liveOwner, int backupOwner) {
+    @autoreleasepool {
+        if (!graph || liveOwner < 0 || backupOwner < 0 || liveOwner >= MG_GDN_MAX_OWNERS ||
+            backupOwner >= MG_GDN_MAX_OWNERS || liveOwner == backupOwner) return 0;
+        MGGDNOwner live, backup;
+        @synchronized(gDev) {
+            live = gGDNOwners[liveOwner];
+            backup = gGDNOwners[backupOwner];
+        }
+        if (!mg_gdn_owner_compatible(live, backup)) return 0;
+        id<MTLBuffer> liveConv = (__bridge id<MTLBuffer>)live.conv;
+        id<MTLBuffer> liveRecurrent = (__bridge id<MTLBuffer>)live.recurrent;
+        id<MTLBuffer> backupConv = (__bridge id<MTLBuffer>)backup.conv;
+        id<MTLBuffer> backupRecurrent = (__bridge id<MTLBuffer>)backup.recurrent;
+        if (liveConv.length != backupConv.length || liveRecurrent.length != backupRecurrent.length) return 0;
+        id<MTLCommandBuffer> command = (__bridge id<MTLCommandBuffer>)mg_graph_command_buffer(graph);
+        if (command == nil) return 0;
+        id<MTLBlitCommandEncoder> encoder = [command blitCommandEncoder];
+        if (encoder == nil) return 0;
+        [encoder copyFromBuffer:liveConv sourceOffset:0 toBuffer:backupConv destinationOffset:0 size:liveConv.length];
+        [encoder copyFromBuffer:liveRecurrent sourceOffset:0 toBuffer:backupRecurrent destinationOffset:0 size:liveRecurrent.length];
+        [encoder endEncoding];
+        mg_graph_note_encoder(graph);
+        return 1;
+    }
+}
+
+// Restore is an O(1) registry transaction: logical owner/handle identities stay
+// fixed while the two owning private-buffer references exchange slots.
+int mg_gdn_state_swap_buffers(int liveOwner, int backupOwner) {
+    if (liveOwner < 0 || backupOwner < 0 || liveOwner >= MG_GDN_MAX_OWNERS ||
+        backupOwner >= MG_GDN_MAX_OWNERS || liveOwner == backupOwner) return 0;
+    @synchronized(gDev) {
+        MGGDNOwner *live = &gGDNOwners[liveOwner];
+        MGGDNOwner *backup = &gGDNOwners[backupOwner];
+        if (!mg_gdn_owner_compatible(*live, *backup)) return 0;
+        CFTypeRef conv = live->conv;
+        CFTypeRef recurrent = live->recurrent;
+        live->conv = backup->conv;
+        live->recurrent = backup->recurrent;
+        backup->conv = conv;
+        backup->recurrent = recurrent;
+        return 1;
+    }
+}
+
 void *mg_gdn_graph_encode(void *graph, int owner,
                           void *mixedPtr, void *zPtr, void *bPtr, void *aPtr,
                           const float *convW, const float *aLog, const float *dtBias, const float *norm,
                           int tokens, int nK, int nV, int kHd, int vHd, int convKernel, float eps) {
-    if(!graph||owner<0||owner>=MG_GDN_MAX_OWNERS||(tokens!=1&&tokens!=32)||!mixedPtr||!zPtr||!bPtr||!aPtr||!convW||!aLog||!dtBias||!norm||eps<=0||!mg_gdn_pipelines())return NULL;
+    if(!graph||owner<0||owner>=MG_GDN_MAX_OWNERS||!((tokens>=1&&tokens<=4)||tokens==32)||!mixedPtr||!zPtr||!bPtr||!aPtr||!convW||!aLog||!dtBias||!norm||eps<=0||!mg_gdn_pipelines())return NULL;
     MGGDNOwner slot;@synchronized(gDev){slot=gGDNOwners[owner];}
     if(slot.conv==NULL||slot.recurrent==NULL||slot.nK!=nK||slot.nV!=nV||slot.kHd!=kHd||slot.vHd!=vHd||slot.convKernel!=convKernel)return NULL;
     int keyDim=nK*kHd,valueDim=nV*vHd,convDim=2*keyDim+valueDim;

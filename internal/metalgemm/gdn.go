@@ -43,6 +43,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -167,12 +168,17 @@ func IsGDNPostSubmit(err error) bool {
 type GDNState struct {
 	mu              sync.Mutex
 	owner           C.int
+	ownerEpoch      uint64
+	version         uint64
+	checkpointGen   uint64
 	geometry        GDNGeometry
 	conv, recurrent GDNStateHandle
 	closed          bool
 	graphDone       chan struct{}
 	graphWaiters    int
 }
+
+var nextGDNOwnerEpoch atomic.Uint64
 
 // NewGDNState allocates zeroed convolution-window and recurrent-state buffers.
 func NewGDNState(g GDNGeometry) (*GDNState, error) {
@@ -194,7 +200,10 @@ func NewGDNState(g GDNGeometry) (*GDNState, error) {
 		}
 		return nil, fmt.Errorf("metalgemm: allocate GDN auxiliary state")
 	}
-	return &GDNState{owner: owner, geometry: g, conv: GDNStateHandle(conv), recurrent: GDNStateHandle(recurrent)}, nil
+	return &GDNState{
+		owner: owner, ownerEpoch: nextGDNOwnerEpoch.Add(1), version: 1,
+		geometry: g, conv: GDNStateHandle(conv), recurrent: GDNStateHandle(recurrent),
+	}, nil
 }
 
 // Handles returns the stable convolution and recurrent identities.
@@ -273,11 +282,18 @@ func (s *GDNState) retainGraph() (C.int, chan struct{}, error) {
 }
 
 func (s *GDNState) releaseGraph(done chan struct{}) {
+	s.completeGraph(done, false)
+}
+
+func (s *GDNState) completeGraph(done chan struct{}, mutated bool) {
 	if s == nil || done == nil {
 		return
 	}
 	s.mu.Lock()
 	if s.graphDone == done {
+		if mutated {
+			s.version++
+		}
 		s.graphDone = nil
 		close(done)
 	}
@@ -310,6 +326,7 @@ func (s *GDNState) run(panel GDNPanel, injectPostSubmitFailure bool) ([]float32,
 		C.float(panel.RMSNormEpsilon), gdnF32(core), inject, &event)
 	accounting := accountingFromC(event)
 	if status == 1 {
+		s.version++
 		return core, accounting, true, nil
 	}
 	if status < 0 || accounting.Committed {
@@ -344,6 +361,7 @@ func (s *GDNState) Seed(conv, recurrent []float32) error {
 		s.releaseLocked()
 		return &GDNPostSubmitError{Reason: "state seed failed"}
 	}
+	s.version++
 	return nil
 }
 
@@ -361,6 +379,7 @@ func (s *GDNState) Reset() error {
 		s.releaseLocked()
 		return &GDNPostSubmitError{Reason: "state reset failed"}
 	}
+	s.version++
 	return nil
 }
 

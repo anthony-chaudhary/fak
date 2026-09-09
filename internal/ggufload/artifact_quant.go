@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // ArtifactQuant summarizes the tensor encodings actually present in a parsed GGUF.
@@ -56,6 +58,75 @@ func ClassifyTensorQuant(tensors []TensorInfo) ArtifactQuant {
 		recipe = "Q4_K_M"
 	}
 	return ArtifactQuant{Name: name, Inventory: inventory, Q4KResident: hasQ4K, Recipe: recipe}
+}
+
+// ClassifyTargetTensorQuant classifies only the causal target model described by
+// cfg. Parsed Qwen3.5-family GGUF configs already subtract nextn_predict_layers
+// from NumLayers, so every tensor in the trailing decoder range belongs to the
+// MTP sidecar even when its source name is an ordinary blk.N attention/MLP name.
+// Known nextn and vision namespaces are also excluded unconditionally: this is a
+// target-only view and therefore does not depend on the process retention flags.
+//
+// The input slice is never mutated. This makes the helper safe for a merged
+// multi-shard inventory as well as for one config-carrying shard or a target-only
+// shard subset.
+func ClassifyTargetTensorQuant(cfg model.Config, tensors []TensorInfo) ArtifactQuant {
+	target := make([]TensorInfo, 0, len(tensors))
+	for _, tensor := range tensors {
+		if targetQuantExcludesTensor(cfg, tensor.Name) {
+			continue
+		}
+		target = append(target, tensor)
+	}
+	quant := ClassifyTensorQuant(target)
+	if quant.Recipe == "" && isQwen35Q4KMTarget(cfg, target) {
+		quant.Recipe = "Q4_K_M"
+	}
+	return quant
+}
+
+// isQwen35Q4KMTarget recognizes the parsed Qwen3.8 Q4_K_M target recipe's
+// architecture-specific Q5_K linear-attention output band. The generic recipe
+// intentionally remains unchanged: a full target+sidecar inventory or another
+// architecture carrying Q5_K must not acquire this label by coincidence.
+func isQwen35Q4KMTarget(cfg model.Config, tensors []TensorInfo) bool {
+	if cfg.ModelType != "qwen35" && cfg.ModelType != "qwen35moe" {
+		return false
+	}
+	quantTypes := make(map[TensorType]struct{})
+	for _, tensor := range tensors {
+		switch tensor.Type {
+		case TensorF32, TensorF16, TensorBF16:
+			continue
+		case TensorQ4_K, TensorQ6_K, TensorQ8_0:
+			quantTypes[tensor.Type] = struct{}{}
+		case TensorQ5_K:
+			if !strings.HasSuffix(tensor.Name, ".ssm_out.weight") {
+				return false
+			}
+			quantTypes[tensor.Type] = struct{}{}
+		default:
+			return false
+		}
+	}
+	_, hasQ4K := quantTypes[TensorQ4_K]
+	_, hasQ5K := quantTypes[TensorQ5_K]
+	_, hasQ6K := quantTypes[TensorQ6_K]
+	return hasQ4K && hasQ5K && hasQ6K
+}
+
+func targetQuantExcludesTensor(cfg model.Config, name string) bool {
+	if !archShipsMTPOrVisionSidecar(cfg.ModelType) {
+		return false
+	}
+	if glmMoeDsaMTPOrVisionTensor(name) {
+		return true
+	}
+	if (cfg.ModelType != "qwen35" && cfg.ModelType != "qwen35moe") || cfg.NumNextNPredictLayers <= 0 {
+		return false
+	}
+	layer, _, ok := parseGLMBlkLayerSuffix(name)
+	return ok && layer >= cfg.NumLayers && layer-cfg.NumLayers < cfg.NumNextNPredictLayers
 }
 
 // AdmittedUDQ2KXLConstituents defines the 14 admitted constituent tensor types

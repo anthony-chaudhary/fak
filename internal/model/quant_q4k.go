@@ -37,6 +37,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"unsafe"
@@ -842,6 +843,146 @@ func (b *QuantBuilder) AddResidentQ4K(canon string, shape []int, raw []byte) err
 		}
 		b.m.q4kw[name] = quantizeQ4KFromRaw(raw, shape[0], shape[1])
 	})
+}
+
+// AddCanonicalMTPQ4K stores an already-reordered Qwen MTP q/k projection in the
+// resident Q4_K store. Ordinary q/k projections are deliberately rejected by
+// ResidentQ4KEligible because their GGUF row order is not the model row order;
+// this narrow entry point exists for the loader after it has performed that
+// lossless row permutation. It accepts no target-layer or other MTP weights.
+func (b *QuantBuilder) AddCanonicalMTPQ4K(canon string, shape []int, raw []byte) error {
+	if b == nil || b.m == nil {
+		return fmt.Errorf("model: nil QuantBuilder")
+	}
+	if b.built {
+		return fmt.Errorf("model: QuantBuilder already built")
+	}
+	if !b.m.Cfg.isQwen35TextFamily() || b.m.Cfg.NumMTPLayers() != 1 || b.m.Cfg.MTPUseDedicatedEmbeddings {
+		return fmt.Errorf("model: canonical MTP Q4_K tensor requires an eligible one-layer shared-embedding Qwen3.8 config")
+	}
+	rest, ok := strings.CutPrefix(canon, "mtp.layers.")
+	if !ok {
+		return fmt.Errorf("model: canonical MTP Q4_K tensor %q is outside mtp.layers.N", canon)
+	}
+	layerText, suffix, ok := strings.Cut(rest, ".")
+	if !ok {
+		return fmt.Errorf("model: malformed canonical MTP Q4_K tensor %q", canon)
+	}
+	layer, err := strconv.Atoi(layerText)
+	if err != nil || layer < 0 || layer >= b.m.Cfg.NumMTPLayers() {
+		return fmt.Errorf("model: canonical MTP Q4_K tensor %q has invalid layer %q", canon, layerText)
+	}
+	if b.m.Cfg.HiddenSize <= 0 || b.m.Cfg.HeadDim <= 0 || b.m.Cfg.NumHeads <= 0 || b.m.Cfg.NumKVHeads <= 0 {
+		return fmt.Errorf("model: canonical MTP Q4_K tensor %s has invalid model geometry", canon)
+	}
+	var wantOut int
+	switch suffix {
+	case "self_attn.q_proj.weight":
+		if b.m.Cfg.NumHeads > math.MaxInt/b.m.Cfg.HeadDim {
+			return fmt.Errorf("model: canonical MTP Q4_K tensor %s q projection shape overflows int", canon)
+		}
+		wantOut = b.m.Cfg.NumHeads * b.m.Cfg.HeadDim
+		if b.m.Cfg.AttnOutputGate {
+			if wantOut > math.MaxInt/2 {
+				return fmt.Errorf("model: canonical MTP Q4_K tensor %s gated q projection shape overflows int", canon)
+			}
+			wantOut *= 2
+		}
+	case "self_attn.k_proj.weight":
+		if b.m.Cfg.NumKVHeads > math.MaxInt/b.m.Cfg.HeadDim {
+			return fmt.Errorf("model: canonical MTP Q4_K tensor %s k projection shape overflows int", canon)
+		}
+		wantOut = b.m.Cfg.NumKVHeads * b.m.Cfg.HeadDim
+	default:
+		return fmt.Errorf("model: canonical MTP Q4_K tensor %q is not a q/k projection", canon)
+	}
+	wantShape := []int{wantOut, b.m.Cfg.HiddenSize}
+	if len(shape) != 2 || shape[0] != wantShape[0] || shape[1] != wantShape[1] {
+		return fmt.Errorf("model: canonical MTP Q4_K tensor %s has shape %v, want %v", canon, shape, wantShape)
+	}
+	if shape[1]%qkK != 0 {
+		return fmt.Errorf("model: canonical MTP Q4_K tensor %s reduction dim %d is not a multiple of %d", canon, shape[1], qkK)
+	}
+	elems, err := tensorShapeElems(canon, shape)
+	if err != nil {
+		return err
+	}
+	blocks := elems / qkK
+	if blocks > math.MaxInt/q4kBlockBytes {
+		return fmt.Errorf("model: canonical MTP Q4_K tensor %s payload size overflows int", canon)
+	}
+	wantBytes := blocks * q4kBlockBytes
+	if len(raw) != wantBytes {
+		return fmt.Errorf("model: canonical MTP Q4_K tensor %s has %d payload bytes, want %d", canon, len(raw), wantBytes)
+	}
+	if b.m.q4kw[canon] != nil || b.m.q8w[canon] != nil || b.m.kqw[canon] != nil || b.m.q2w[canon] != nil {
+		return fmt.Errorf("model: canonical MTP Q4_K tensor %s already has a resident representation", canon)
+	}
+	if _, exists := b.m.manifest[canon]; exists {
+		return fmt.Errorf("model: canonical MTP Q4_K tensor %s already has a decoded representation", canon)
+	}
+	if b.m.q4kw == nil {
+		b.m.q4kw = map[string]*q4kTensor{}
+	}
+	b.m.q4kw[canon] = quantizeQ4KFromRaw(raw, shape[0], shape[1])
+	return nil
+}
+
+// AddCanonicalMTPFCQ8 stores the exact Qwen3.8 MTP fusion projection from an
+// already-typed GGUF Q8_0 payload. mtp.fc is intentionally outside the ordinary
+// target-weight eligibility vocabulary, so this entry point accepts only that
+// canonical name and the declared one-layer shared-embedding MTP geometry.
+func (b *QuantBuilder) AddCanonicalMTPFCQ8(canon string, shape []int, raw []byte) error {
+	if b == nil || b.m == nil {
+		return fmt.Errorf("model: nil QuantBuilder")
+	}
+	if b.built {
+		return fmt.Errorf("model: QuantBuilder already built")
+	}
+	if canon != "mtp.fc.weight" {
+		return fmt.Errorf("model: canonical MTP FC Q8_0 tensor %q is not mtp.fc.weight", canon)
+	}
+	if !b.m.Cfg.isQwen35TextFamily() || b.m.Cfg.NumMTPLayers() != 1 || b.m.Cfg.MTPUseDedicatedEmbeddings {
+		return fmt.Errorf("model: canonical MTP FC Q8_0 tensor requires an eligible one-layer shared-embedding Qwen3.8 config")
+	}
+	if b.m.Cfg.HiddenSize <= 0 || b.m.Cfg.HiddenSize > math.MaxInt/2 {
+		return fmt.Errorf("model: canonical MTP FC Q8_0 tensor has invalid hidden size %d", b.m.Cfg.HiddenSize)
+	}
+	wantShape := []int{b.m.Cfg.HiddenSize, 2 * b.m.Cfg.HiddenSize}
+	if len(shape) != 2 || shape[0] != wantShape[0] || shape[1] != wantShape[1] {
+		return fmt.Errorf("model: canonical MTP FC Q8_0 tensor %s has shape %v, want %v", canon, shape, wantShape)
+	}
+	elems, err := tensorShapeElems(canon, shape)
+	if err != nil {
+		return err
+	}
+	if shape[1]%kindQ8_0.blockWeights() != 0 {
+		return fmt.Errorf("model: canonical MTP FC Q8_0 tensor %s reduction dim %d is not block aligned", canon, shape[1])
+	}
+	blocks := elems / kindQ8_0.blockWeights()
+	if blocks > math.MaxInt/kindQ8_0.blockBytes() {
+		return fmt.Errorf("model: canonical MTP FC Q8_0 tensor %s payload size overflows int", canon)
+	}
+	wantBytes := blocks * kindQ8_0.blockBytes()
+	if len(raw) != wantBytes {
+		return fmt.Errorf("model: canonical MTP FC Q8_0 tensor %s has %d payload bytes, want %d", canon, len(raw), wantBytes)
+	}
+	if b.m.q4kw[canon] != nil || b.m.q8w[canon] != nil || b.m.kqw[canon] != nil {
+		return fmt.Errorf("model: canonical MTP FC Q8_0 tensor %s already has a resident representation", canon)
+	}
+	if _, exists := b.m.manifest[canon]; exists {
+		return fmt.Errorf("model: canonical MTP FC Q8_0 tensor %s already has a decoded representation", canon)
+	}
+	qt := newQ8Tensor(shape[0], shape[1], shape[1]/kindQ8_0.blockWeights())
+	for block := 0; block < blocks; block++ {
+		off := block * kindQ8_0.blockBytes()
+		qt.d[block] = math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(raw[off:])))
+		for i := 0; i < kindQ8_0.blockWeights(); i++ {
+			qt.q[block*kindQ8_0.blockWeights()+i] = int8(raw[off+2+i])
+		}
+	}
+	b.m.q8w[canon] = qt
+	return nil
 }
 
 func (b *QuantBuilder) addResidentQuant(canon string, shape []int, store func(name string)) error {

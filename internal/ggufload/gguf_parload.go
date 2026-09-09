@@ -101,19 +101,21 @@ func currentLoadConcurrencyPlan(tensors int) loadConcurrencyPlan {
 // is the order the serial loader emitted them (e.g. expert 0..E-1), so insertion order — and
 // thus the built model — is byte-identical to the serial path.
 type pendingTensor struct {
-	resident     bool       // true -> AddResident*(raw) by residentType; false -> AddF32Tensor(f32)
-	residentType TensorType // which resident raw-quant store, when resident
-	q2kEmbed     bool       // true -> model.NewQ2KEmbedding(raw) -> builder.SetQ2KEmbedding
-	lazyQ4K      bool
-	sourceInfo   TensorInfo
-	lazyReader   io.ReaderAt
-	isKVBHalf    bool // true -> bufferGLMKVBHalf(layer, half, f32); merge applied on the 2nd half
-	name         string
-	shape        []int
-	raw          []byte    // resident raw super-block bytes (resident==true)
-	f32          []float32 // dequantized + normalized values (resident==false, or a KV-b half)
-	layer        int
-	half         string
+	resident         bool       // true -> AddResident*(raw) by residentType; false -> AddF32Tensor(f32)
+	residentType     TensorType // which resident raw-quant store, when resident
+	canonicalMTPQ4K  bool       // already-reordered canonical MTP q/k; use the narrow model entry point
+	canonicalMTPFCQ8 bool       // exact canonical MTP fusion projection; preserve source Q8_0
+	q2kEmbed         bool       // true -> model.NewQ2KEmbedding(raw) -> builder.SetQ2KEmbedding
+	lazyQ4K          bool
+	sourceInfo       TensorInfo
+	lazyReader       io.ReaderAt
+	isKVBHalf        bool // true -> bufferGLMKVBHalf(layer, half, f32); merge applied on the 2nd half
+	name             string
+	shape            []int
+	raw              []byte    // resident raw super-block bytes (resident==true)
+	f32              []float32 // dequantized + normalized values (resident==false, or a KV-b half)
+	layer            int
+	half             string
 }
 
 // residentExpertBlockGeometry returns the GGUF block geometry for an expert tensor type that can
@@ -169,9 +171,10 @@ func residentExpertBlockGeometry(t TensorType) (blockWeights, blockBytes int, ok
 // tensorWork is one GGUF tensor's parallel-load result: the progress byte count, the builder
 // mutations to apply, the per-quant-type accounting for the load-path breakdown, or an error.
 type tensorWork struct {
-	tickBytes int64
-	pending   []pendingTensor
-	err       error
+	tickBytes       int64
+	pending         []pendingTensor
+	err             error
+	mtpMaterialized string
 
 	// Load-path accounting (the per-quant-type visibility, recorded once per GGUF tensor by
 	// the serial collector). acctType == "" means "do not tally" (skipped tensors).

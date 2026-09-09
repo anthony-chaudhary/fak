@@ -35,6 +35,8 @@ int  mg_q4k_q8_gemv_group(const int* q4_wids, int nq4, const float* x, float* q4
                            mg_execution_event* event);
 void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y, mg_execution_event* event);
 int  mg_q6k_upload(const unsigned char* raw, int out, int in);
+void mg_q6k_release(int wid);
+int  mg_q6k_live_count(void);
 void mg_q6k_gemv(int wid, const float* x, float* y, mg_execution_event* event);
 void mg_q6k_gemm(int wid, const float* X, int P, float* Y, mg_execution_event* event);
 void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, float* y, mg_execution_event* event);
@@ -198,9 +200,13 @@ type q4kPinnedRaw struct {
 }
 
 var (
-	q4kPinMu  sync.Mutex
-	q4kPins   = map[int]q4kPinnedRaw{}
-	q4kStaged = map[int][]byte{}
+	q4kPinMu sync.Mutex
+	// q4kExecutionMu owns q4k.m's process-wide activation/result/MLP scratch through the
+	// synchronous native call and its final host readback. Q6 callers acquire their registry
+	// lifetime read lock before this mutex; ResetQ4K follows the same registry-then-execution order.
+	q4kExecutionMu sync.Mutex
+	q4kPins        = map[int]q4kPinnedRaw{}
+	q4kStaged      = map[int][]byte{}
 )
 
 // UploadQ4K makes a row-major q4_k payload (the verbatim GGUF super-block bytes, length
@@ -369,7 +375,9 @@ func (w *Q4KWeight) gemvWithEventsMode(x, y []float32, observation *ExecutionObs
 		return q4kGEMVNotExecuted
 	}
 	var event C.mg_execution_event
+	q4kExecutionMu.Lock()
 	executed := C.mg_q4k_gemv(w.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])), C.int(mode), &event)
+	q4kExecutionMu.Unlock()
 	recordQ4KEvent(observation, &event)
 	return q4kGEMVExecution(executed)
 }
@@ -402,7 +410,9 @@ func q4kUseMultiVector(out, in, n int) bool {
 
 func (w *Q4KWeight) gemvBatchRepeatedWithEvents(Xcat []float32, n int, Ycat []float32, observation *ExecutionObservation) {
 	var event C.mg_execution_event
+	q4kExecutionMu.Lock()
 	C.mg_q4k_gemv_batch(w.id, (*C.float)(unsafe.Pointer(&Xcat[0])), C.int(n), (*C.float)(unsafe.Pointer(&Ycat[0])), &event)
+	q4kExecutionMu.Unlock()
 	recordQ4KEvent(observation, &event)
 }
 
@@ -421,7 +431,9 @@ func (w *Q4KWeight) GEMVBatchWithEvents(Xcat []float32, n int, Ycat []float32, o
 	}
 	if q4kUseMultiVector(w.Out, w.In, n) {
 		var event C.mg_execution_event
+		q4kExecutionMu.Lock()
 		C.mg_q4k_gemv_batch_multi(w.id, (*C.float)(unsafe.Pointer(&Xcat[0])), C.int(n), (*C.float)(unsafe.Pointer(&Ycat[0])), &event)
+		q4kExecutionMu.Unlock()
 		recordQ4KEvent(observation, &event)
 		return
 	}
@@ -453,8 +465,10 @@ func GEMVGroupWithEvents(ws []*Q4KWeight, x []float32, observation *ExecutionObs
 	yoff[n] = C.int(off)
 	ycat := make([]float32, off)
 	var event C.mg_execution_event
+	q4kExecutionMu.Lock()
 	C.mg_q4k_gemv_group(&wids[0], C.int(n), (*C.float)(unsafe.Pointer(&x[0])),
 		(*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0], &event)
+	q4kExecutionMu.Unlock()
 	recordQ4KEvent(observation, &event)
 	out := make([][]float32, n)
 	o := 0
@@ -549,12 +563,14 @@ func gemvGroupMixedQ4KQ8(q4ws []*Q4KWeight, q8ws []*Q8Weight, x []float32, xq []
 	if injectPostSubmitFailure {
 		injectFailure = 1
 	}
+	q4kExecutionMu.Lock()
 	status := int(C.mg_q4k_q8_gemv_group(
 		(*C.int)(unsafe.Pointer(&q4ids[0])), C.int(len(q4ids)), (*C.float)(unsafe.Pointer(&x[0])),
 		(*C.float)(unsafe.Pointer(&q4flat[0])), (*C.int)(unsafe.Pointer(&q4off[0])),
 		(*C.int)(unsafe.Pointer(&q8ids[0])), C.int(len(q8ids)), (*C.schar)(unsafe.Pointer(&xq[0])),
 		(*C.float)(unsafe.Pointer(&xd[0])), (*C.float)(unsafe.Pointer(&q8flat[0])),
 		(*C.int)(unsafe.Pointer(&q8off[0])), injectFailure, &event))
+	q4kExecutionMu.Unlock()
 	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0,
 		event.host_readback != 0, int(event.encoders), float64(event.gpu_milliseconds),
 		float64(event.wait_milliseconds), event.timing_available != 0)
@@ -588,7 +604,9 @@ func FusedMLPWithEvents(gate, up, down *Q4KWeight, x, y []float32, observation *
 		return false
 	}
 	var event C.mg_execution_event
+	q4kExecutionMu.Lock()
 	C.mg_q4k_mlp(gate.id, up.id, down.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])), &event)
+	q4kExecutionMu.Unlock()
 	recordQ4KEvent(observation, &event)
 	return true
 }
@@ -604,6 +622,30 @@ func FusedMLP(gate, up, down *Q4KWeight, x, y []float32) bool {
 type Q6KWeight struct {
 	id      C.int
 	Out, In int
+	shared  *q6kSharedWeight
+}
+
+// q6kSharedWeight owns one native Q6_K slot. Distinct Q6KWeight handles can share it while
+// retaining independent, idempotent Release lifecycles (the target-model/MTP-head case).
+type q6kSharedWeight struct {
+	id    C.int
+	refs  int
+	epoch uint64
+}
+
+// q6kRegistryMu is the lifetime boundary for the native Q6_K registry and every Go handle
+// that refers into it. Readers may execute concurrently, but upload, alias-count changes,
+// release, and ResetQ4K exclude all native calls so a tombstoned slot cannot be rebound while
+// an operation is validating or using its id. Keeping this registry-wide also avoids lock-order
+// hazards for batches containing duplicate or differently ordered handles.
+var (
+	q6kRegistryMu    sync.RWMutex
+	q6kRegistryEpoch uint64
+)
+
+func q6kWeightValidLocked(w *Q6KWeight) bool {
+	return w != nil && w.id >= 0 && w.shared != nil && w.shared.id == w.id &&
+		w.shared.refs > 0 && w.shared.epoch == q6kRegistryEpoch
 }
 
 // UploadQ6K makes a row-major Q6_K payload (verbatim GGUF super-block bytes, length
@@ -618,25 +660,95 @@ func UploadQ6K(raw []byte, out, in int) *Q6KWeight {
 		return nil
 	}
 	raw = raw[:need]
+	q6kRegistryMu.Lock()
+	defer q6kRegistryMu.Unlock()
 	id := C.mg_q6k_upload((*C.uchar)(unsafe.Pointer(&raw[0])), C.int(out), C.int(in))
 	if id < 0 {
 		return nil
 	}
 	runtime.KeepAlive(raw)
-	return &Q6KWeight{id: id, Out: out, In: in}
+	return &Q6KWeight{id: id, Out: out, In: in, shared: &q6kSharedWeight{id: id, refs: 1, epoch: q6kRegistryEpoch}}
 }
 
 // ID returns the backend handle for this matrix.
-func (w *Q6KWeight) ID() int { return int(w.id) }
+func (w *Q6KWeight) ID() int {
+	if w == nil {
+		return -1
+	}
+	q6kRegistryMu.RLock()
+	defer q6kRegistryMu.RUnlock()
+	if !q6kWeightValidLocked(w) {
+		return -1
+	}
+	return int(w.id)
+}
+
+// Share returns another handle to the same resident Q6_K buffer. Each handle must be released;
+// the native slot is freed only after the last alias is released. This lets an MTP draft model
+// reuse the target model's exact output weight without a second device upload.
+func (w *Q6KWeight) Share() *Q6KWeight {
+	if w == nil {
+		return nil
+	}
+	q6kRegistryMu.Lock()
+	defer q6kRegistryMu.Unlock()
+	if !q6kWeightValidLocked(w) {
+		return nil
+	}
+	w.shared.refs++
+	return &Q6KWeight{id: w.shared.id, Out: w.Out, In: w.In, shared: w.shared}
+}
+
+// Release invalidates this handle. It is idempotent and waits for any synchronous operation
+// already using this handle; aliases remain valid until their own Release calls.
+func (w *Q6KWeight) Release() {
+	if w == nil {
+		return
+	}
+	q6kRegistryMu.Lock()
+	defer q6kRegistryMu.Unlock()
+	if w.id < 0 || w.shared == nil {
+		return
+	}
+	shared := w.shared
+	w.id = -1
+	if shared.refs > 0 {
+		shared.refs--
+	}
+	if shared.epoch != q6kRegistryEpoch {
+		if shared.refs == 0 {
+			shared.id = -1
+		}
+		return
+	}
+	if shared.refs == 0 && shared.id >= 0 {
+		C.mg_q6k_release(shared.id)
+		shared.id = -1
+	}
+}
+
+// LiveQ6KWeights returns the native table's occupied-slot count for lifecycle tests.
+func LiveQ6KWeights() int {
+	q6kRegistryMu.RLock()
+	defer q6kRegistryMu.RUnlock()
+	return int(C.mg_q6k_live_count())
+}
 
 // GEMV computes y[Out] = W · x for one f32 activation row. It is the standalone decode/head
 // twin of the Q6_K GEMV already used inside FusedMLPQ6Down.
 func (w *Q6KWeight) GEMVWithEvents(x, y []float32, observation *ExecutionObservation) {
-	if w == nil || w.id < 0 || len(x) < w.In || len(y) < w.Out {
+	if w == nil {
+		return
+	}
+	q6kRegistryMu.RLock()
+	defer q6kRegistryMu.RUnlock()
+	if !q6kWeightValidLocked(w) || len(x) < w.In || len(y) < w.Out {
 		return
 	}
 	var event C.mg_execution_event
+	q4kExecutionMu.Lock()
 	C.mg_q6k_gemv(w.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])), &event)
+	q4kExecutionMu.Unlock()
 	recordQ4KEvent(observation, &event)
 }
 
@@ -647,11 +759,18 @@ func (w *Q6KWeight) GEMV(x, y []float32) { w.GEMVWithEvents(x, y, nil) }
 // the GPU and only moves the f32 activation panel/result, so q4_k_m dense down_proj no longer falls
 // back to the CPU batched k-quant loop during hybrid Qwen prefill.
 func (w *Q6KWeight) GEMMWithEvents(X []float32, P int, Y []float32, observation *ExecutionObservation) {
-	if w == nil || w.id < 0 || P <= 0 || len(X) < P*w.In || len(Y) < P*w.Out {
+	if w == nil {
+		return
+	}
+	q6kRegistryMu.RLock()
+	defer q6kRegistryMu.RUnlock()
+	if !q6kWeightValidLocked(w) || P <= 0 || len(X) < P*w.In || len(Y) < P*w.Out {
 		return
 	}
 	var event C.mg_execution_event
+	q4kExecutionMu.Lock()
 	C.mg_q6k_gemm(w.id, (*C.float)(unsafe.Pointer(&X[0])), C.int(P), (*C.float)(unsafe.Pointer(&Y[0])), &event)
+	q4kExecutionMu.Unlock()
 	recordQ4KEvent(observation, &event)
 }
 
@@ -663,7 +782,12 @@ func (w *Q6KWeight) GEMM(X []float32, P int, Y []float32) { w.GEMMWithEvents(X, 
 // boundary). Requires gate.In==up.In==down.Out (=H), gate.Out==up.Out==down.In (=I); len(x)>=H,
 // len(y)>=down.Out. Returns false on a shape mismatch. The activation is silu.
 func FusedMLPQ6DownWithEvents(gate, up *Q4KWeight, down *Q6KWeight, x, y []float32, observation *ExecutionObservation) bool {
-	if gate == nil || up == nil || down == nil || gate.id < 0 || up.id < 0 || down.id < 0 {
+	if down == nil {
+		return false
+	}
+	q6kRegistryMu.RLock()
+	defer q6kRegistryMu.RUnlock()
+	if gate == nil || up == nil || gate.id < 0 || up.id < 0 || !q6kWeightValidLocked(down) {
 		return false
 	}
 	if gate.In != up.In || gate.Out != up.Out || down.In != gate.Out || down.Out != gate.In {
@@ -673,8 +797,10 @@ func FusedMLPQ6DownWithEvents(gate, up *Q4KWeight, down *Q6KWeight, x, y []float
 		return false
 	}
 	var event C.mg_execution_event
+	q4kExecutionMu.Lock()
 	C.mg_q4k_mlp_q6down(gate.id, up.id, down.id,
 		(*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])), &event)
+	q4kExecutionMu.Unlock()
 	recordQ4KEvent(observation, &event)
 	return true
 }
@@ -693,16 +819,23 @@ func FusedMLPQ6Down(gate, up *Q4KWeight, down *Q6KWeight, x, y []float32) bool {
 // backend declines a shape — the caller then runs the proven per-expert FusedMLPQ6Down loop.
 func FusedMLPQ6DownBatchWithEvents(gate, up []*Q4KWeight, down []*Q6KWeight, x, Ycat []float32, observation *ExecutionObservation) bool {
 	n := len(gate)
-	if n == 0 || len(up) != n || len(down) != n {
+	if n == 0 || len(up) != n || len(down) != n || gate[0] == nil || up[0] == nil || down[0] == nil {
 		return false
 	}
+	q6kRegistryMu.RLock()
+	defer q6kRegistryMu.RUnlock()
 	H, I, Dout := gate[0].In, gate[0].Out, down[0].Out
 	gw := make([]C.int, n)
 	uw := make([]C.int, n)
 	dw := make([]C.int, n)
+	for _, d := range down {
+		if d == nil {
+			return false
+		}
+	}
 	for e := 0; e < n; e++ {
 		g, u, d := gate[e], up[e], down[e]
-		if g == nil || u == nil || d == nil || g.id < 0 || u.id < 0 || d.id < 0 {
+		if g == nil || u == nil || d == nil || g.id < 0 || u.id < 0 || !q6kWeightValidLocked(d) {
 			return false
 		}
 		if g.In != u.In || g.Out != u.Out || d.In != g.Out || d.Out != g.In {
@@ -717,8 +850,10 @@ func FusedMLPQ6DownBatchWithEvents(gate, up []*Q4KWeight, down []*Q6KWeight, x, 
 		return false
 	}
 	var event C.mg_execution_event
+	q4kExecutionMu.Lock()
 	rc := C.mg_q4k_mlp_q6down_batch(&gw[0], &uw[0], &dw[0], C.int(n),
 		(*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&Ycat[0])), &event)
+	q4kExecutionMu.Unlock()
 	recordQ4KEvent(observation, &event)
 	return rc == 0
 }
@@ -738,8 +873,10 @@ func (w *Q4KWeight) GEMMWithEventsMode(X []float32, P int, Y []float32, observat
 	}
 	var gpuMs C.double
 	var event C.mg_execution_event
+	q4kExecutionMu.Lock()
 	executed := Q4KGEMMExecution(C.mg_q4k_gemm(w.id, (*C.float)(unsafe.Pointer(&X[0])), C.int(P),
 		(*C.float)(unsafe.Pointer(&Y[0])), C.int(mode), &gpuMs, &event))
+	q4kExecutionMu.Unlock()
 	recordQ4KEvent(observation, &event)
 	if executed != Q4KGEMMNotExecuted {
 		lastGEMMGPUMs.Store(math.Float64bits(float64(gpuMs)))
@@ -784,9 +921,11 @@ func GEMMGroupIntoWithEventsMode(ws []*Q4KWeight, X []float32, P int, ycat []flo
 	yoff[n] = C.int(off)
 	var gpuMs C.double
 	var event C.mg_execution_event
+	q4kExecutionMu.Lock()
 	executed := Q4KGEMMExecution(C.mg_q4k_gemm_group(&wids[0], C.int(n),
 		(*C.float)(unsafe.Pointer(&X[0])), C.int(P), (*C.float)(unsafe.Pointer(&ycat[0])),
 		&yoff[0], C.int(mode), &gpuMs, &event))
+	q4kExecutionMu.Unlock()
 	recordQ4KEvent(observation, &event)
 	identity := q4kGEMMIdentity(P, mode, executed)
 	if executed == Q4KGEMMNotExecuted {
@@ -890,7 +1029,12 @@ func SetGEMMUseMM(on bool) {
 func ResetQ4K() {
 	q4kPinMu.Lock()
 	defer q4kPinMu.Unlock()
+	q6kRegistryMu.Lock()
+	defer q6kRegistryMu.Unlock()
+	q4kExecutionMu.Lock()
+	defer q4kExecutionMu.Unlock()
 	C.mg_q4k_reset()
+	q6kRegistryEpoch++
 	for id, pinned := range q4kPins {
 		pinned.pin.Unpin()
 		delete(q4kPins, id)

@@ -5,19 +5,22 @@ import (
 	"strings"
 )
 
-// Qwen38MTPTensorFormat names the actual retained storage used by every MTP
-// projection. Norm vectors remain F32 in both admitted layouts.
+// Qwen38MTPTensorFormat names either an individual tensor's retained storage or
+// the aggregate execution family selected by an admitted layout.
 type Qwen38MTPTensorFormat string
 
 const (
 	Qwen38MTPFormatF32  Qwen38MTPTensorFormat = "F32"
 	Qwen38MTPFormatBF16 Qwen38MTPTensorFormat = "BF16"
+	Qwen38MTPFormatQ8   Qwen38MTPTensorFormat = "Q8_0"
 	Qwen38MTPFormatQ4K  Qwen38MTPTensorFormat = "Q4_K"
+	Qwen38MTPFormatQ6K  Qwen38MTPTensorFormat = "Q6_K"
 	Qwen38MTPFormatNone Qwen38MTPTensorFormat = ""
 )
 
 // Qwen38MTPTensorLayout is a read-only inventory derived from the model's real
-// resident stores. TensorTypes is diagnostic evidence; admission keys on Format.
+// resident stores. TensorTypes is exact per-tensor evidence; Format selects the
+// compatible execution family.
 type Qwen38MTPTensorLayout struct {
 	Format      Qwen38MTPTensorFormat `json:"format"`
 	TensorTypes map[string]string     `json:"tensor_types"`
@@ -44,6 +47,21 @@ var qwen38MTPNormTensors = [...]string{
 	"mtp.layers.0.self_attn.k_norm.weight",
 }
 
+// qwen38MTPQ4KMArtifactMatrixTypes is the canonicalized tensor inventory of
+// unsloth/Qwen3.8-27B-GGUF's Q4_K_M artifact. The aggregate layout remains
+// Qwen38MTPFormatQ4K because that selects the mixed resident Q4_K session
+// kernel; TensorTypes preserves the exact per-tensor storage evidence.
+var qwen38MTPQ4KMArtifactMatrixTypes = map[string]Qwen38MTPTensorFormat{
+	"mtp.fc.weight":                        Qwen38MTPFormatQ8,
+	"mtp.layers.0.self_attn.q_proj.weight": Qwen38MTPFormatQ4K,
+	"mtp.layers.0.self_attn.k_proj.weight": Qwen38MTPFormatQ4K,
+	"mtp.layers.0.self_attn.v_proj.weight": Qwen38MTPFormatQ6K,
+	"mtp.layers.0.self_attn.o_proj.weight": Qwen38MTPFormatQ4K,
+	"mtp.layers.0.mlp.gate_proj.weight":    Qwen38MTPFormatQ4K,
+	"mtp.layers.0.mlp.up_proj.weight":      Qwen38MTPFormatQ4K,
+	"mtp.layers.0.mlp.down_proj.weight":    Qwen38MTPFormatQ6K,
+}
+
 func isQwen38MTPMatrixTensor(name string) bool {
 	for _, candidate := range qwen38MTPMatrixTensors {
 		if name == candidate {
@@ -53,56 +71,17 @@ func isQwen38MTPMatrixTensor(name string) bool {
 	return false
 }
 
-// Qwen38MTPQ4KResidentEligible reports whether name is one of the closed set of
-// MTP matrices that may be retained as Q4_K after the source loader has applied
-// any required row-layout normalization. It deliberately excludes norms and
-// unknown mtp.* tensors so source-format loaders cannot widen the admitted
-// layout by prefix alone.
-func Qwen38MTPQ4KResidentEligible(name string) bool {
-	return isQwen38MTPMatrixTensor(name)
-}
-
-// AddQwen38MTPResidentQ4K stores one already-canonicalized MTP projection in
-// the resident Q4_K store. MTP's fusion matrix is intentionally outside the
-// target model's generic isQuantWeight vocabulary, so this closed-set builder
-// entry point keeps source loaders from either dropping it or widening generic
-// Q4 admission.
-func (b *QuantBuilder) AddQwen38MTPResidentQ4K(name string, shape []int, raw []byte) error {
-	if b == nil {
-		return fmt.Errorf("model: nil QuantBuilder")
-	}
-	if b.built {
-		return fmt.Errorf("model: QuantBuilder already built")
-	}
-	if !RetainMTP || !Qwen38MTPQ4KResidentEligible(name) {
-		return fmt.Errorf("model: tensor %s is not an enabled Qwen3.8 MTP Q4_K matrix", name)
-	}
-	if len(shape) != 2 || shape[0] <= 0 || shape[1] <= 0 || shape[1]%qkK != 0 {
-		return fmt.Errorf("model: Qwen3.8 MTP Q4_K tensor %s has unsupported shape %v", name, shape)
-	}
-	wantBytes := shape[0] * (shape[1] / qkK) * q4kBlockBytes
-	if len(raw) != wantBytes {
-		return fmt.Errorf("model: Qwen3.8 MTP Q4_K tensor %s has %d bytes, want %d", name, len(raw), wantBytes)
-	}
-	if b.m.q4kw == nil {
-		b.m.q4kw = make(map[string]*q4kTensor)
-	}
-	if b.m.q4kw[name] != nil {
-		return fmt.Errorf("model: duplicate Qwen3.8 MTP Q4_K tensor %s", name)
-	}
-	b.m.q4kw[name] = quantizeQ4KFromRaw(raw, shape[0], shape[1])
-	return nil
-}
-
 // Qwen38MTPTensorLayout reports the actual retained MTP precision. It admits
-// exactly two closed layouts:
+// exactly two closed layout families:
 //
-//   - every required tensor is F32;
-//   - every matrix is resident raw Q4_K while every norm remains F32.
+//   - the compatibility layout whose matrices are uniformly F32 or BF16;
+//   - the exact Qwen3.8-27B-Q4_K_M inventory: fc Q8_0; q/k/o/gate/up
+//     Q4_K; v/down and the canonical lm_head (GGUF output.weight) Q6_K;
+//     every MTP norm F32.
 //
-// A Q4_K_M artifact label is deliberately irrelevant. Mixed stores, Q8/K-quant
-// substitutions, duplicate representations, or malformed resident spans are
-// precision_unsupported at the eligibility boundary.
+// An artifact label is deliberately irrelevant. Any other mixture, duplicate
+// representation, or malformed resident span is precision_unsupported at the
+// eligibility boundary.
 func (m *Model) Qwen38MTPTensorLayout() (Qwen38MTPTensorLayout, error) {
 	layout, present, err := m.qwen38MTPTensorLayout()
 	if !present && err == nil {
@@ -112,7 +91,7 @@ func (m *Model) Qwen38MTPTensorLayout() (Qwen38MTPTensorLayout, error) {
 }
 
 func (m *Model) qwen38MTPTensorLayout() (Qwen38MTPTensorLayout, bool, error) {
-	layout := Qwen38MTPTensorLayout{TensorTypes: make(map[string]string, len(qwen35MTPRequiredTensors))}
+	layout := Qwen38MTPTensorLayout{TensorTypes: make(map[string]string, len(qwen35MTPRequiredTensors)+1)}
 	if m == nil {
 		return layout, false, qwen35MTPStateError("model", "non-nil model", "nil")
 	}
@@ -133,34 +112,58 @@ func (m *Model) qwen38MTPTensorLayout() (Qwen38MTPTensorLayout, bool, error) {
 		return layout, false, nil
 	}
 
-	matrixFormat := Qwen38MTPFormatNone
-	for _, name := range qwen35MTPRequiredTensors {
-		wantShape := expected[name]
-		if isQwen38MTPMatrixTensor(name) {
-			format, err := m.qwen38MTPMatrixFormat(name, wantShape)
-			if err != nil {
-				return layout, true, err
-			}
-			layout.TensorTypes[name] = string(format)
-			if matrixFormat == Qwen38MTPFormatNone {
-				matrixFormat = format
-			} else if matrixFormat != format {
+	matrixTypes := make(map[string]Qwen38MTPTensorFormat, len(qwen38MTPMatrixTensors))
+	uniformFormat := Qwen38MTPFormatNone
+	uniform := true
+	for _, name := range qwen38MTPMatrixTensors {
+		format, err := m.qwen38MTPMatrixFormat(name, expected[name])
+		if err != nil {
+			return layout, true, err
+		}
+		matrixTypes[name] = format
+		layout.TensorTypes[name] = string(format)
+		if uniformFormat == Qwen38MTPFormatNone {
+			uniformFormat = format
+		} else if uniformFormat != format {
+			uniform = false
+		}
+	}
+
+	exactQ4KM := true
+	for name, want := range qwen38MTPQ4KMArtifactMatrixTypes {
+		if matrixTypes[name] != want {
+			exactQ4KM = false
+			break
+		}
+	}
+	compatibility := uniform && (uniformFormat == Qwen38MTPFormatF32 || uniformFormat == Qwen38MTPFormatBF16)
+	if !compatibility && !exactQ4KM {
+		for _, name := range qwen38MTPMatrixTensors {
+			want := qwen38MTPQ4KMArtifactMatrixTypes[name]
+			if matrixTypes[name] != want {
 				return layout, true, &Qwen35MTPForwardError{
 					Stage:  "weight precision",
 					Tensor: name,
-					Want:   string(matrixFormat),
-					Got:    string(format) + " (mixed MTP projection layout)",
+					Want:   string(want) + " (exact Qwen3.8-27B-Q4_K_M inventory)",
+					Got:    string(matrixTypes[name]),
 				}
 			}
-			continue
 		}
+	}
 
+	for _, name := range qwen38MTPNormTensors {
+		wantShape := expected[name]
 		meta, ok := m.manifest[name]
 		if !ok {
 			return layout, true, &Qwen35MTPForwardError{Stage: "weight lookup", Tensor: name, Want: "F32 norm", Got: "missing"}
 		}
-		if !strings.EqualFold(meta.Dtype, "F32") && !strings.EqualFold(meta.Dtype, "BF16") {
-			return layout, true, &Qwen35MTPForwardError{Stage: "weight dtype", Tensor: name, Want: "F32 or BF16 norm", Got: meta.Dtype}
+		allowBF16 := compatibility
+		if !strings.EqualFold(meta.Dtype, "F32") && !(allowBF16 && strings.EqualFold(meta.Dtype, "BF16")) {
+			want := "F32 norm"
+			if allowBF16 {
+				want = "F32 or BF16 norm"
+			}
+			return layout, true, &Qwen35MTPForwardError{Stage: "weight dtype", Tensor: name, Want: want, Got: meta.Dtype}
 		}
 		if err := validateQwen38MTPF32OrBF16Meta(m, name, meta, wantShape); err != nil {
 			return layout, true, err
@@ -170,7 +173,26 @@ func (m *Model) qwen38MTPTensorLayout() (Qwen38MTPTensorLayout, bool, error) {
 		}
 		layout.TensorTypes[name] = strings.ToUpper(meta.Dtype)
 	}
-	layout.Format = matrixFormat
+
+	if exactQ4KM {
+		headName := "lm_head.weight" // canonical form of the artifact's output.weight
+		headFormat, err := m.qwen38MTPMatrixFormat(headName, []int{m.Cfg.VocabSize, m.Cfg.HiddenSize})
+		if err != nil {
+			return layout, true, err
+		}
+		layout.TensorTypes[headName] = string(headFormat)
+		if headFormat != Qwen38MTPFormatQ6K {
+			return layout, true, &Qwen35MTPForwardError{
+				Stage:  "weight precision",
+				Tensor: headName,
+				Want:   "Q6_K (canonical output.weight in exact Qwen3.8-27B-Q4_K_M inventory)",
+				Got:    string(headFormat),
+			}
+		}
+		layout.Format = Qwen38MTPFormatQ4K
+	} else {
+		layout.Format = uniformFormat
+	}
 	return layout, true, nil
 }
 
@@ -223,7 +245,7 @@ func (m *Model) qwen38MTPMatrixFormat(name string, wantShape []int) (Qwen38MTPTe
 		count++
 	}
 	if count == 0 {
-		return Qwen38MTPFormatNone, &Qwen35MTPForwardError{Stage: "weight lookup", Tensor: name, Want: "F32 or resident Q4_K", Got: "missing"}
+		return Qwen38MTPFormatNone, &Qwen35MTPForwardError{Stage: "weight lookup", Tensor: name, Want: "F32, BF16, Q8_0, Q4_K, or Q6_K", Got: "missing"}
 	}
 	if count != 1 {
 		return Qwen38MTPFormatNone, &Qwen35MTPForwardError{Stage: "weight precision", Tensor: name, Want: "one retained representation", Got: "mixed or duplicate representations"}
@@ -261,9 +283,37 @@ func (m *Model) qwen38MTPMatrixFormat(name string, wantShape []int) (Qwen38MTPTe
 		}
 		return Qwen38MTPFormatQ4K, nil
 	case q8 != nil:
-		return Qwen38MTPFormatNone, &Qwen35MTPForwardError{Stage: "weight dtype", Tensor: name, Want: "F32 or Q4_K", Got: "Q8_0"}
+		wantNblk := wantShape[1] / qBlk
+		if wantShape[1]%qBlk != 0 || q8.out != wantShape[0] || q8.in != wantShape[1] || q8.nblk != wantNblk {
+			return Qwen38MTPFormatNone, &Qwen35MTPForwardError{Stage: "weight shape", Tensor: name, Want: fmt.Sprint(wantShape), Got: fmt.Sprintf("[%d %d]", q8.out, q8.in)}
+		}
+		if len(q8.q) != q8.out*q8.in || len(q8.d) != q8.out*q8.nblk {
+			return Qwen38MTPFormatNone, &Qwen35MTPForwardError{
+				Stage:  "weight storage",
+				Tensor: name,
+				Want:   fmt.Sprintf("%d Q8_0 codes and %d scales", q8.out*q8.in, q8.out*q8.nblk),
+				Got:    fmt.Sprintf("codes=%d scales=%d", len(q8.q), len(q8.d)),
+			}
+		}
+		return Qwen38MTPFormatQ8, nil
 	default:
-		return Qwen38MTPFormatNone, &Qwen35MTPForwardError{Stage: "weight dtype", Tensor: name, Want: "F32 or Q4_K", Got: kq.kind.String()}
+		if kq.kind != kindQ6K {
+			return Qwen38MTPFormatNone, &Qwen35MTPForwardError{Stage: "weight dtype", Tensor: name, Want: "F32, BF16, Q8_0, Q4_K, or Q6_K", Got: kq.kind.String()}
+		}
+		wantNblk := wantShape[1] / kindQ6K.blockWeights()
+		if wantShape[1]%kindQ6K.blockWeights() != 0 || kq.out != wantShape[0] || kq.in != wantShape[1] || kq.nblk != wantNblk {
+			return Qwen38MTPFormatNone, &Qwen35MTPForwardError{Stage: "weight shape", Tensor: name, Want: fmt.Sprint(wantShape), Got: fmt.Sprintf("[%d %d]", kq.out, kq.in)}
+		}
+		wantBytes := kq.out * kq.nblk * kindQ6K.blockBytes()
+		if len(kq.raw) != wantBytes {
+			return Qwen38MTPFormatNone, &Qwen35MTPForwardError{
+				Stage:  "weight storage",
+				Tensor: name,
+				Want:   fmt.Sprintf("%d resident Q6_K bytes", wantBytes),
+				Got:    fmt.Sprintf("resident=%d", len(kq.raw)),
+			}
+		}
+		return Qwen38MTPFormatQ6K, nil
 	}
 }
 
@@ -346,9 +396,5 @@ func (f *Qwen35MTPForward) qwen38MTPFuse(priorHidden, currentEmbedding []float32
 	normedHidden := rmsnormCfg(priorHidden, hiddenNorm, eps, f.target.Cfg)
 	fusedInput = append(fusedInput, normedEmbedding...)
 	fusedInput = append(fusedInput, normedHidden...)
-	qt := f.draft.M.q4kw["mtp.fc.weight"]
-	if qt == nil {
-		return nil, &Qwen35MTPForwardError{Stage: "weight lookup", Tensor: "mtp.fc.weight", Want: "resident Q4_K", Got: "missing"}
-	}
-	return f.draft.q4kMatRowsDispatch("mtp.fc.weight", qt, fusedInput), nil
+	return f.mat.mul("mtp.fc.weight", fusedInput, h, 2*h), nil
 }

@@ -945,13 +945,25 @@ typedef struct {
 static Q6KW gQ6[MG_MAX_Q6];
 static int gNQ6 = 0;
 
+static int q6k_valid(int wid) {
+    int idx = wid - MG_Q6_BASE;
+    return idx >= 0 && idx < gNQ6 && gQ6[idx].buf != NULL;
+}
+
+static int q6k_slot(void) {
+    for (int i = 0; i < gNQ6; i++) if (gQ6[i].buf == NULL) return i;
+    if (gNQ6 >= MG_MAX_Q6) return -1;
+    return gNQ6++;
+}
+
 // mg_q6k_upload copies a row-major Q6_K payload (out rows, in == nblk*256, 210 B/super-block)
 // verbatim into a resident device buffer and returns a handle >= MG_Q6_BASE, or -1 on failure.
 int mg_q6k_upload(const unsigned char* raw, int out, int in) {
     if (raw == NULL || gDev == nil) return -1;
     if (!q4k_init()) return -1;
     if (in <= 0 || in % 256 != 0 || out <= 0) return -1;
-    if (gNQ6 >= MG_MAX_Q6) {
+    int idx = q6k_slot();
+    if (idx < 0) {
         static int q6CapWarned = 0;
         if (!q6CapWarned) { q6CapWarned = 1; NSLog(@"mg_q6k_upload: Q6_K weight table full (%d)", MG_MAX_Q6); }
         return -1;
@@ -964,7 +976,6 @@ int mg_q6k_upload(const unsigned char* raw, int out, int in) {
         return -1;
     }
     memcpy(b.contents, raw, (size_t)bytes);
-    int idx = gNQ6++;
     gQ6[idx].buf = CFBridgingRetain(b);
     gQ6[idx].out = out;
     gQ6[idx].in = in;
@@ -972,12 +983,28 @@ int mg_q6k_upload(const unsigned char* raw, int out, int in) {
     return MG_Q6_BASE + idx;
 }
 
+// mg_q6k_release drops one native Q6_K residency slot. Interior tombstones are reusable, so
+// transient MTP aliases and model teardown cannot exhaust the fixed registry over time.
+void mg_q6k_release(int wid) {
+    if (!q6k_valid(wid)) return;
+    int idx = wid - MG_Q6_BASE;
+    CFBridgingRelease(gQ6[idx].buf);
+    memset(&gQ6[idx], 0, sizeof(Q6KW));
+    while (gNQ6 > 0 && gQ6[gNQ6 - 1].buf == NULL) gNQ6--;
+}
+
+int mg_q6k_live_count(void) {
+    int n = 0;
+    for (int i = 0; i < gNQ6; i++) if (gQ6[i].buf != NULL) n++;
+    return n;
+}
+
 // mg_q6k_gemv computes y[out] = W[wid] · x for a resident Q6_K weight in one command buffer.
 // The fused MLP already uses q6k_gemv as stage 3; this standalone wrapper lets k-quant decode
 // sites such as the Qwen3.6 Q6_K LM head stay on Metal instead of escaping to the CPU.
 void mg_q6k_gemv(int wid, const float* x, float* y, mg_execution_event* event) {
     mg_execution_event_reset(event);
-    if (wid < MG_Q6_BASE || (wid - MG_Q6_BASE) >= gNQ6) return;
+    if (!q6k_valid(wid)) return;
     @autoreleasepool {
         Q6KW W = gQ6[wid - MG_Q6_BASE];
         q4k_grow_scratch((long)W.in, (long)W.out);
@@ -1013,7 +1040,7 @@ void mg_q6k_gemv(int wid, const float* x, float* y, mg_execution_event* event) {
 // q4_k_m down_proj can stay on Metal instead of using the host kQuantMatRowsIntoBatch loop.
 void mg_q6k_gemm(int wid, const float* X, int P, float* Y, mg_execution_event* event) {
     mg_execution_event_reset(event);
-    if (wid < MG_Q6_BASE || (wid - MG_Q6_BASE) >= gNQ6 || P <= 0) return;
+    if (!q6k_valid(wid) || P <= 0) return;
     @autoreleasepool {
         Q6KW W = gQ6[wid - MG_Q6_BASE];
         q4k_grow_scratch((long)P * W.in, (long)P * W.out);
@@ -1086,7 +1113,7 @@ int mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int*
     for (int e = 0; e < n; e++) {
         int gw = gate_wids[e], uw = up_wids[e], dw = down_wids[e];
         if (gw < 0 || uw < 0 || gw >= gNQ4 || uw >= gNQ4) return -1;
-        if (dw < MG_Q6_BASE || (dw - MG_Q6_BASE) >= gNQ6) return -1;
+        if (!q6k_valid(dw)) return -1;
         Q4KW G = gQ4[gw], U = gQ4[uw];
         Q6KW D = gQ6[dw - MG_Q6_BASE];
         if (G.in != U.in || G.out != U.out || D.in != G.out || D.out != G.in) return -1;
@@ -1175,7 +1202,7 @@ int mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int*
 void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, float* y, mg_execution_event* event) {
     mg_execution_event_reset(event);
     if (gate_wid < 0 || up_wid < 0 || gate_wid >= gNQ4 || up_wid >= gNQ4) return;
-    if (down_wid < MG_Q6_BASE || (down_wid - MG_Q6_BASE) >= gNQ6) return;
+    if (!q6k_valid(down_wid)) return;
     @autoreleasepool {
         Q4KW G = gQ4[gate_wid], U = gQ4[up_wid];
         Q6KW D = gQ6[down_wid - MG_Q6_BASE];
@@ -1766,12 +1793,7 @@ void mg_q4k_reset(void) {
         }
     }
     gNQ4 = 0;
-    for (int i = 0; i < gNQ6; i++) {
-        if (gQ6[i].buf != NULL) {
-            CFBridgingRelease(gQ6[i].buf);
-            gQ6[i].buf = NULL;
-        }
-    }
+    for (int i = 0; i < gNQ6; i++) mg_q6k_release(MG_Q6_BASE + i);
     gNQ6 = 0;
     gQXBuf = nil; gQXCap = 0;
     gQYBuf = nil; gQYCap = 0;
@@ -1861,10 +1883,10 @@ void *mg_graph_encode_q4k_from(void *opaque,int wid,void*input,int elems) {
     id<MTLComputeCommandEncoder>e=[g->cb computeCommandEncoder];[e setComputePipelineState:pso];[e setBuffer:(__bridge id<MTLBuffer>)w->buf offset:w->offset atIndex:0];[e setBuffer:x offset:0 atIndex:1];[e setBuffer:y offset:0 atIndex:2];[e setBytes:&w->nblk length:sizeof(int) atIndex:3];[e setBytes:&w->out length:sizeof(int) atIndex:4];[e setBytes:&g->P length:sizeof(int) atIndex:5];for(int t0=0;t0<g->P;t0+=BN){int nt=g->P-t0;if(nt>BN)nt=BN;[e setBytes:&t0 length:sizeof(int) atIndex:6];[e setBytes:&nt length:sizeof(int) atIndex:7];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG,1,1)];}[e endEncoding];return (__bridge void*)y;
 }
 void *mg_graph_encode_q6k(void *opaque, int wid) {
-    MGProjectionGraph *g=opaque; int i=wid-MG_Q6_BASE; if(!g||g->committed||!g->xf||i<0||i>=gNQ6||gQ6[i].in!=g->in)return NULL; Q6KW *w=&gQ6[i]; id<MTLBuffer> y=(__bridge id<MTLBuffer>)mg_graph_result(g,(NSUInteger)g->P*(NSUInteger)w->out);if(!y)return NULL; id<MTLComputeCommandEncoder>e=[g->cb computeCommandEncoder];[e setComputePipelineState:psoQ6KGemm];[e setBuffer:(__bridge id<MTLBuffer>)w->buf offset:0 atIndex:0];[e setBuffer:g->xf offset:0 atIndex:1];[e setBuffer:y offset:0 atIndex:2];[e setBytes:&w->nblk length:sizeof(int) atIndex:3];[e setBytes:&w->out length:sizeof(int) atIndex:4];[e setBytes:&g->P length:sizeof(int) atIndex:5];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)w->out,(NSUInteger)g->P,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];[e endEncoding];return (__bridge void*)y;
+    MGProjectionGraph *g=opaque; int i=wid-MG_Q6_BASE; if(!g||g->committed||!g->xf||!q6k_valid(wid)||gQ6[i].in!=g->in)return NULL; Q6KW *w=&gQ6[i]; id<MTLBuffer> y=(__bridge id<MTLBuffer>)mg_graph_result(g,(NSUInteger)g->P*(NSUInteger)w->out);if(!y)return NULL; id<MTLComputeCommandEncoder>e=[g->cb computeCommandEncoder];[e setComputePipelineState:psoQ6KGemm];[e setBuffer:(__bridge id<MTLBuffer>)w->buf offset:0 atIndex:0];[e setBuffer:g->xf offset:0 atIndex:1];[e setBuffer:y offset:0 atIndex:2];[e setBytes:&w->nblk length:sizeof(int) atIndex:3];[e setBytes:&w->out length:sizeof(int) atIndex:4];[e setBytes:&g->P length:sizeof(int) atIndex:5];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)w->out,(NSUInteger)g->P,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];[e endEncoding];return (__bridge void*)y;
 }
 void *mg_graph_encode_q6k_from(void *opaque,int wid,void*input,int elems) {
-    MGProjectionGraph*g=opaque;int i=wid-MG_Q6_BASE;id<MTLBuffer>x=(__bridge id<MTLBuffer>)input;if(!g||g->committed||!x||i<0||i>=gNQ6||gQ6[i].in*g->P!=elems||![g->results containsObject:x])return NULL;Q6KW*w=&gQ6[i];id<MTLBuffer>y=(__bridge id<MTLBuffer>)mg_graph_result(g,(NSUInteger)g->P*(NSUInteger)w->out);if(!y)return NULL;id<MTLComputeCommandEncoder>e=[g->cb computeCommandEncoder];[e setComputePipelineState:psoQ6KGemm];[e setBuffer:(__bridge id<MTLBuffer>)w->buf offset:0 atIndex:0];[e setBuffer:x offset:0 atIndex:1];[e setBuffer:y offset:0 atIndex:2];[e setBytes:&w->nblk length:sizeof(int) atIndex:3];[e setBytes:&w->out length:sizeof(int) atIndex:4];[e setBytes:&g->P length:sizeof(int) atIndex:5];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)w->out,(NSUInteger)g->P,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];[e endEncoding];return (__bridge void*)y;
+    MGProjectionGraph*g=opaque;int i=wid-MG_Q6_BASE;id<MTLBuffer>x=(__bridge id<MTLBuffer>)input;if(!g||g->committed||!x||!q6k_valid(wid)||gQ6[i].in*g->P!=elems||![g->results containsObject:x])return NULL;Q6KW*w=&gQ6[i];id<MTLBuffer>y=(__bridge id<MTLBuffer>)mg_graph_result(g,(NSUInteger)g->P*(NSUInteger)w->out);if(!y)return NULL;id<MTLComputeCommandEncoder>e=[g->cb computeCommandEncoder];[e setComputePipelineState:psoQ6KGemm];[e setBuffer:(__bridge id<MTLBuffer>)w->buf offset:0 atIndex:0];[e setBuffer:x offset:0 atIndex:1];[e setBuffer:y offset:0 atIndex:2];[e setBytes:&w->nblk length:sizeof(int) atIndex:3];[e setBytes:&w->out length:sizeof(int) atIndex:4];[e setBytes:&g->P length:sizeof(int) atIndex:5];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)w->out,(NSUInteger)g->P,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];[e endEncoding];return (__bridge void*)y;
 }
 extern void *mg_q8_graph_encode(void *graph, int wid);
 extern void *mg_q8_graph_encode_from(void *graph, int wid, void *q, void *d, int elems);

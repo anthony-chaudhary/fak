@@ -4,6 +4,7 @@ package metalgemm
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"runtime"
 	"testing"
@@ -214,6 +215,241 @@ func TestProjectionGraphDeviceResultChainingSingleFence(t *testing.T) {
 	}
 }
 
+func qwenOrderedSplitCPU(src []float32, rows, qwidth, hd int) ([]float32, []float32) {
+	q, gate := make([]float32, rows*qwidth), make([]float32, rows*qwidth)
+	for row := 0; row < rows; row++ {
+		for j := 0; j < qwidth; j++ {
+			head, dim := j/hd, j%hd
+			base := row*2*qwidth + head*2*hd
+			q[row*qwidth+j] = src[base+dim]
+			gate[row*qwidth+j] = src[base+hd+dim]
+		}
+	}
+	return q, gate
+}
+
+func qwenOrderedNormalizeCPU(src, weight []float32, rows, heads, hd int, eps float32, gain1p bool) []float32 {
+	out := make([]float32, len(src))
+	for row := 0; row < rows; row++ {
+		for head := 0; head < heads; head++ {
+			base := (row*heads + head) * hd
+			var sum float64
+			for dim := 0; dim < hd; dim++ {
+				v := float64(src[base+dim])
+				sum += v * v
+			}
+			inv := float32(1 / math.Sqrt(sum/float64(hd)+float64(eps)))
+			for dim := 0; dim < hd; dim++ {
+				gain := weight[dim]
+				if gain1p {
+					gain++
+				}
+				out[base+dim] = src[base+dim] * inv * gain
+			}
+		}
+	}
+	return out
+}
+
+func qwenOrderedAttentionCPU(q, k, v, gate, qnorm, knorm, cosv, sinv, prefixK, prefixV []float32, rows, base, nH, nKV, hd, rotary int, scale, eps float32, gain1p bool) (out, kraw, kpost []float32) {
+	qpost := qwenOrderedNormalizeCPU(q, qnorm, rows, nH, hd, eps, gain1p)
+	kraw = qwenOrderedNormalizeCPU(k, knorm, rows, nKV, hd, eps, gain1p)
+	kpost = append([]float32(nil), kraw...)
+	half := rotary / 2
+	for row := 0; row < rows; row++ {
+		for head := 0; head < nH; head++ {
+			off := (row*nH + head) * hd
+			for dim := 0; dim < half; dim++ {
+				x, y := qpost[off+dim], qpost[off+half+dim]
+				c, s := cosv[row*half+dim], sinv[row*half+dim]
+				qpost[off+dim], qpost[off+half+dim] = x*c-y*s, x*s+y*c
+			}
+		}
+		for head := 0; head < nKV; head++ {
+			off := (row*nKV + head) * hd
+			for dim := 0; dim < half; dim++ {
+				x, y := kpost[off+dim], kpost[off+half+dim]
+				c, s := cosv[row*half+dim], sinv[row*half+dim]
+				kpost[off+dim], kpost[off+half+dim] = x*c-y*s, x*s+y*c
+			}
+		}
+	}
+	allK, allV := append(append([]float32(nil), prefixK...), kpost...), append(append([]float32(nil), prefixV...), v...)
+	out = make([]float32, rows*nH*hd)
+	for row := 0; row < rows; row++ {
+		for head := 0; head < nH; head++ {
+			kvHead, upto := head/(nH/nKV), base+row+1
+			scores := make([]float64, upto)
+			maxScore := math.Inf(-1)
+			for token := 0; token < upto; token++ {
+				var dot float64
+				for dim := 0; dim < hd; dim++ {
+					dot += float64(qpost[(row*nH+head)*hd+dim] * allK[(token*nKV+kvHead)*hd+dim])
+				}
+				scores[token] = dot * float64(scale)
+				maxScore = math.Max(maxScore, scores[token])
+			}
+			var denom float64
+			for token := range scores {
+				scores[token] = math.Exp(scores[token] - maxScore)
+				denom += scores[token]
+			}
+			for dim := 0; dim < hd; dim++ {
+				var sum float64
+				for token := 0; token < upto; token++ {
+					sum += scores[token] * float64(allV[(token*nKV+kvHead)*hd+dim])
+				}
+				index := (row*nH+head)*hd + dim
+				out[index] = float32(sum/denom) / (1 + float32(math.Exp(-float64(gate[index]))))
+			}
+		}
+	}
+	return out, kraw, kpost
+}
+
+func qwenOrderedRMSNormCPU(input, weight []float32, rows, width int, eps float32) []float32 {
+	out := make([]float32, len(input))
+	for row := 0; row < rows; row++ {
+		var sum float64
+		for _, value := range input[row*width : (row+1)*width] {
+			sum += float64(value * value)
+		}
+		inv := float32(1 / math.Sqrt(sum/float64(width)+float64(eps)))
+		for dim := 0; dim < width; dim++ {
+			out[row*width+dim] = input[row*width+dim] * inv * weight[dim]
+		}
+	}
+	return out
+}
+
+func TestProjectionGraphQwenOrderedPanelAttentionAndFinalNorm(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	defer ResetQ4K()
+	const input, nH, nKV, hd, rotary, base = 256, 2, 1, 32, 16, 2
+	const qwidth, kvwidth = nH * hd, nKV * hd
+	qgateRaw := q4kTestRaw(2*qwidth, input, 1223811)
+	kRaw := q4kTestRaw(kvwidth, input, 1223812)
+	vRaw := q4kTestRaw(kvwidth, input, 1223813)
+	qgateWeight := UploadQ4K(qgateRaw, 2*qwidth, input)
+	kWeight := UploadQ4K(kRaw, kvwidth, input)
+	vWeight := UploadQ4K(vRaw, kvwidth, input)
+	if qgateWeight == nil || kWeight == nil || vWeight == nil {
+		t.Fatal("ordered-panel Q4_K upload")
+	}
+	panelReference := func(raw []byte, out int, x []float32, rows int) []float32 {
+		result := make([]float32, rows*out)
+		for row := 0; row < rows; row++ {
+			copy(result[row*out:], q4kVectorizedReference(raw, out, input, x[row*input:(row+1)*input]))
+		}
+		return result
+	}
+	assertClose := func(t *testing.T, name string, want, got []float32) {
+		t.Helper()
+		if len(got) != len(want) {
+			t.Fatalf("%s elements=%d, want %d", name, len(got), len(want))
+		}
+		var maxAbs float64
+		for i := range want {
+			maxAbs = math.Max(maxAbs, math.Abs(float64(got[i]-want[i])))
+		}
+		cosine, _ := q4kTestCosineMaxRel(want, got)
+		if cosine < 0.99999 || maxAbs > 5e-4 {
+			t.Fatalf("%s cosine=%g maxAbs=%g", name, cosine, maxAbs)
+		}
+	}
+
+	for _, rows := range []int{2, 3, 4, 32} {
+		t.Run(fmt.Sprintf("P%d", rows), func(t *testing.T) {
+			x := q4kTestVector(rows*input, int64(1223820+rows))
+			qgateHost := panelReference(qgateRaw, 2*qwidth, x, rows)
+			kHost := panelReference(kRaw, kvwidth, x, rows)
+			vHost := panelReference(vRaw, kvwidth, x, rows)
+			qWant, gateWant := qwenOrderedSplitCPU(qgateHost, rows, qwidth, hd)
+			qnorm, knorm := make([]float32, hd), make([]float32, hd)
+			for i := 0; i < hd; i++ {
+				qnorm[i], knorm[i] = float32(i%7-3)*0.01, float32(i%5-2)*0.015
+			}
+			cosv, sinv := make([]float32, rows*(rotary/2)), make([]float32, rows*(rotary/2))
+			for row := 0; row < rows; row++ {
+				for dim := 0; dim < rotary/2; dim++ {
+					angle := float64((row+base+1)*(dim+1)) * 0.003
+					cosv[row*(rotary/2)+dim], sinv[row*(rotary/2)+dim] = float32(math.Cos(angle)), float32(math.Sin(angle))
+				}
+			}
+			prefixK, prefixV := make([]float32, base*kvwidth), make([]float32, base*kvwidth)
+			for i := range prefixK {
+				prefixK[i], prefixV[i] = float32(i%11-5)*0.02, float32(i%13-6)*0.018
+			}
+			const scale, qkEps, normEps = float32(0.1767767), float32(1e-6), float32(1e-5)
+			attentionWant, krawWant, kpostWant := qwenOrderedAttentionCPU(qWant, kHost, vHost, gateWant, qnorm, knorm, cosv, sinv, prefixK, prefixV, rows, base, nH, nKV, hd, rotary, scale, qkEps, true)
+			normWeight := make([]float32, qwidth)
+			for i := range normWeight {
+				normWeight[i] = 0.9 + float32(i%9)*0.025
+			}
+			normWant := qwenOrderedRMSNormCPU(attentionWant, normWeight, rows, qwidth, normEps)
+
+			g, err := BeginProjectionGraph(x, nil, nil, rows, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer g.Free()
+			qgate, err := g.EncodeQ4K(qgateWeight)
+			if err != nil {
+				t.Fatal(err)
+			}
+			k, err := g.EncodeQ4K(kWeight)
+			if err != nil {
+				t.Fatal(err)
+			}
+			v, err := g.EncodeQ4K(vWeight)
+			if err != nil {
+				t.Fatal(err)
+			}
+			q, gate, err := g.SplitGatedQ(qgate, qwidth, hd)
+			if err != nil {
+				t.Fatal(err)
+			}
+			attention, err := g.FullAttention(q, k, v, gate, qnorm, knorm, cosv, sinv, prefixK, prefixV, base, nH, nKV, hd, rotary, scale, qkEps, true, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			norm, err := g.RMSNorm(attention.Output, normWeight, normEps, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			last, err := g.LastRMSNorm(attention.Output, normWeight, normEps, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name, result := range map[string]*GraphResult{"q": q, "gate": gate, "attention": attention.Output, "kraw": attention.KRaw, "kpost": attention.KPost, "v": attention.V, "norm": norm} {
+				if result.p != rows {
+					t.Fatalf("%s result P=%d, want %d", name, result.p, rows)
+				}
+			}
+			if last.p != 1 || last.out != qwidth {
+				t.Fatalf("last norm shape P/out=%d/%d, want 1/%d", last.p, last.out, qwidth)
+			}
+			outputs, receipt, err := g.FinishRead(q, gate, attention.Output, attention.KRaw, attention.KPost, attention.V, norm, last)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !receipt.Committed || !receipt.CompletedWait || receipt.IntermediateWaits != 0 || receipt.IntermediateReadbacks != 0 || receipt.HostReadbacks != 1 {
+				t.Fatalf("ordered-panel terminal receipt=%+v", receipt)
+			}
+			assertClose(t, "split q", qWant, outputs[0])
+			assertClose(t, "split gate", gateWant, outputs[1])
+			assertClose(t, "attention", attentionWant, outputs[2])
+			assertClose(t, "K raw", krawWant, outputs[3])
+			assertClose(t, "K post", kpostWant, outputs[4])
+			assertClose(t, "V", vHost, outputs[5])
+			assertClose(t, "all-row norm", normWant, outputs[6])
+			assertClose(t, "last-row norm", normWant[(rows-1)*qwidth:], outputs[7])
+		})
+	}
+}
+
 func graphGDNPanel(g GDNGeometry, tokens int) GDNPanel {
 	panel := GDNPanel{
 		Tokens: tokens, Mixed: make([]float32, tokens*g.convDim()),
@@ -273,6 +509,404 @@ func newProjectionGraphGDNLeaseFixture(t *testing.T) (*ProjectionGraph, *GDNStat
 		t.Fatal(err)
 	}
 	return g, state, core, geometry
+}
+
+func TestProjectionGraphGDNCheckpointRestoreSingleFence(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	defer ResetQ4K()
+	const P, input = 4, 256
+	geometry := GDNGeometry{NumKeyHeads: 1, NumValueHeads: 1, KeyHeadDim: 32, ValueHeadDim: 32, ConvKernel: 2}
+	baseline := GDNLiveBufferCount()
+	live, err := NewGDNState(geometry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backup, err := NewGDNState(geometry)
+	if err != nil {
+		live.Close()
+		t.Fatal(err)
+	}
+	defer live.Close()
+	defer backup.Close()
+
+	seed := func(phase float32) ([]float32, []float32) {
+		conv := make([]float32, (geometry.ConvKernel-1)*geometry.convDim())
+		recurrent := make([]float32, geometry.NumValueHeads*geometry.KeyHeadDim*geometry.ValueHeadDim)
+		for i := range conv {
+			conv[i] = phase + float32(i%17-8)*0.003
+		}
+		for i := range recurrent {
+			recurrent[i] = phase*0.5 + float32(i%23-11)*0.002
+		}
+		return conv, recurrent
+	}
+	liveConv, liveRecurrent := seed(0.25)
+	backupConv, backupRecurrent := seed(-0.5)
+	if err := live.Seed(liveConv, liveRecurrent); err != nil {
+		t.Fatal(err)
+	}
+	if err := backup.Seed(backupConv, backupRecurrent); err != nil {
+		t.Fatal(err)
+	}
+	liveHandles := [2]GDNStateHandle{}
+	liveHandles[0], liveHandles[1] = live.Handles()
+	backupHandles := [2]GDNStateHandle{}
+	backupHandles[0], backupHandles[1] = backup.Handles()
+	originalConv, originalRecurrent, err := live.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := GDNLiveBufferCount(); got != baseline+4 {
+		t.Fatalf("two checkpoint owners have %d live buffers, want %d", got, baseline+4)
+	}
+
+	x := q4kTestVector(P*input, 1223801)
+	g, err := BeginProjectionGraph(x, nil, nil, P, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Free()
+	if _, err := g.CheckpointGDN(live, nil); err == nil {
+		t.Fatal("nil backup checkpoint accepted")
+	}
+	if _, err := g.CheckpointGDN(live, live); err == nil {
+		t.Fatal("aliased checkpoint accepted")
+	}
+	checkpoint, err := g.CheckpointGDN(live, backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := checkpoint.Receipt(); got != (GDNCheckpointReceipt{EncodedDeviceCopies: 2}) {
+		t.Fatalf("encoded checkpoint receipt=%+v", got)
+	}
+	if err := checkpoint.Restore(); err == nil {
+		t.Fatal("checkpoint restored before terminal completion")
+	}
+	encode := func(width, seed int) *GraphResult {
+		t.Helper()
+		weight := UploadQ4K(q4kTestRaw(width, input, uint64(seed)), width, input)
+		if weight == nil {
+			t.Fatalf("checkpoint Q4_K upload width=%d", width)
+		}
+		result, encodeErr := g.EncodeQ4K(weight)
+		if encodeErr != nil {
+			t.Fatalf("checkpoint projection width=%d: %v", width, encodeErr)
+		}
+		return result
+	}
+	mixed := encode(geometry.convDim(), 1223802)
+	z := encode(geometry.valueDim(), 1223803)
+	b := encode(geometry.NumValueHeads, 1223804)
+	a := encode(geometry.NumValueHeads, 1223805)
+	panel := graphGDNPanel(geometry, P)
+	for i := range panel.Conv1D {
+		panel.Conv1D[i] = 0.015 + float32(i%13)*0.001
+	}
+	core, err := g.GDN(live, mixed, z, b, a, panel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputs, receipt, err := g.FinishRead(core)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantUpload := uint64(len(x))*4 + graphGDNPanelUploadBytes(panel)
+	if len(outputs) != 1 || len(outputs[0]) != P*geometry.valueDim() || !receipt.Committed || !receipt.CompletedWait ||
+		receipt.Encoders != 6 || receipt.IntermediateWaits != 0 || receipt.IntermediateReadbacks != 0 || receipt.HostReadbacks != 1 ||
+		receipt.HostUploadBytes != wantUpload || receipt.HostReadbackBytes != uint64(P*geometry.valueDim())*4 {
+		t.Fatalf("checkpoint graph output=%d receipt=%+v want upload=%d", len(outputs), receipt, wantUpload)
+	}
+	nonzero := false
+	for _, value := range outputs[0] {
+		nonzero = nonzero || value != 0
+	}
+	if !nonzero {
+		t.Fatal("checkpoint graph produced only zero output")
+	}
+
+	equal := func(a, b []float32) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		for i := range a {
+			if a[i] != b[i] {
+				return false
+			}
+		}
+		return true
+	}
+	if got := checkpoint.Receipt(); got != (GDNCheckpointReceipt{EncodedDeviceCopies: 2, DeviceCopies: 2}) {
+		t.Fatalf("pre-restore checkpoint receipt=%+v", got)
+	}
+	if err := checkpoint.Restore(); err != nil {
+		t.Fatal(err)
+	}
+	restoredConv, restoredRecurrent, err := live.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollbackConv, rollbackRecurrent, err := backup.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !equal(restoredConv, originalConv) || !equal(restoredRecurrent, originalRecurrent) {
+		t.Fatal("restore did not recover exact original live state")
+	}
+	if equal(rollbackConv, originalConv) && equal(rollbackRecurrent, originalRecurrent) {
+		t.Fatal("restore did not swap advanced state into backup")
+	}
+	if got := checkpoint.Receipt(); got != (GDNCheckpointReceipt{EncodedDeviceCopies: 2, DeviceCopies: 2, BufferSwaps: 2}) {
+		t.Fatalf("restored checkpoint receipt=%+v", got)
+	}
+	if err := checkpoint.Restore(); err == nil {
+		t.Fatal("checkpoint restored twice")
+	}
+	checkpoint.Close()
+	checkpoint.Close()
+	if c, r := live.Handles(); [2]GDNStateHandle{c, r} != liveHandles {
+		t.Fatalf("live handles changed: got %v want %v", [2]GDNStateHandle{c, r}, liveHandles)
+	}
+	if c, r := backup.Handles(); [2]GDNStateHandle{c, r} != backupHandles {
+		t.Fatalf("backup handles changed: got %v want %v", [2]GDNStateHandle{c, r}, backupHandles)
+	}
+	if got := GDNLiveBufferCount(); got != baseline+4 {
+		t.Fatalf("checkpoint restore changed liveness: got %d want %d", got, baseline+4)
+	}
+	live.Close()
+	backup.Close()
+	if got := GDNLiveBufferCount(); got != baseline {
+		t.Fatalf("checkpoint owners leaked buffers=%d, baseline=%d", got, baseline)
+	}
+}
+
+func newProjectionGraphGDNCheckpointOnlyFixture(t *testing.T) (*ProjectionGraph, *GDNState, *GDNState, *GDNGraphCheckpoint) {
+	t.Helper()
+	geometry := GDNGeometry{NumKeyHeads: 1, NumValueHeads: 1, KeyHeadDim: 32, ValueHeadDim: 32, ConvKernel: 2}
+	live, err := NewGDNState(geometry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backup, err := NewGDNState(geometry)
+	if err != nil {
+		live.Close()
+		t.Fatal(err)
+	}
+	g, err := BeginProjectionGraph(make([]float32, 32), nil, nil, 1, 32)
+	if err != nil {
+		live.Close()
+		backup.Close()
+		t.Fatal(err)
+	}
+	checkpoint, err := g.CheckpointGDN(live, backup)
+	if err != nil {
+		g.Free()
+		live.Close()
+		backup.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		checkpoint.Close()
+		g.Free()
+		live.Close()
+		backup.Close()
+	})
+	return g, live, backup, checkpoint
+}
+
+func TestProjectionGraphGDNCheckpointUnsubmittedFreeReceiptAndCloseLifecycle(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	baseline := GDNLiveBufferCount()
+	g, live, backup, checkpoint := newProjectionGraphGDNCheckpointOnlyFixture(t)
+	checkpoint.Close()
+	checkpoint.Close()
+	if got := checkpoint.Receipt(); got != (GDNCheckpointReceipt{EncodedDeviceCopies: 2}) {
+		t.Fatalf("closed unsubmitted checkpoint receipt=%+v", got)
+	}
+
+	resetDone := make(chan error, 1)
+	go func() { resetDone <- backup.Reset() }()
+	waitForGDNGraphWaiters(t, backup, 1)
+	g.Free()
+	select {
+	case err := <-resetDone:
+		if err != nil {
+			t.Fatalf("backup reset after unsubmitted Free: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("pre-terminal Close released or stranded checkpoint lease")
+	}
+	if got := checkpoint.Receipt(); got != (GDNCheckpointReceipt{EncodedDeviceCopies: 2}) {
+		t.Fatalf("freed unsubmitted checkpoint receipt=%+v", got)
+	}
+	if err := checkpoint.Restore(); err == nil {
+		t.Fatal("unsubmitted freed checkpoint restored")
+	}
+	if err := live.Reset(); err != nil {
+		t.Fatalf("live owner remained leased after unsubmitted Free: %v", err)
+	}
+	checkpoint.Close()
+	live.Close()
+	backup.Close()
+	if got := GDNLiveBufferCount(); got != baseline {
+		t.Fatalf("unsubmitted checkpoint leaked buffers=%d, baseline=%d", got, baseline)
+	}
+}
+
+func TestProjectionGraphGDNCheckpointRejectsMutatedBackupAfterClose(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	baseline := GDNLiveBufferCount()
+	g, live, backup, checkpoint := newProjectionGraphGDNCheckpointOnlyFixture(t)
+	receipt, err := g.Finish()
+	if err != nil || !receipt.Committed || !receipt.CompletedWait || receipt.Encoders != 1 {
+		t.Fatalf("checkpoint-only terminal receipt=%+v err=%v", receipt, err)
+	}
+	if got := checkpoint.Receipt(); got != (GDNCheckpointReceipt{EncodedDeviceCopies: 2, DeviceCopies: 2}) {
+		t.Fatalf("completed checkpoint receipt=%+v", got)
+	}
+
+	resetDone := make(chan error, 1)
+	go func() { resetDone <- backup.Reset() }()
+	waitForGDNGraphWaiters(t, backup, 1)
+	checkpoint.Close()
+	select {
+	case err := <-resetDone:
+		if err != nil {
+			t.Fatalf("backup reset after checkpoint close: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("checkpoint Close did not release completed owner pair")
+	}
+	if err := checkpoint.Restore(); err == nil {
+		t.Fatal("closed checkpoint restored a subsequently mutated backup")
+	}
+	checkpoint.Close()
+	live.Close()
+	backup.Close()
+	if got := GDNLiveBufferCount(); got != baseline {
+		t.Fatalf("closed checkpoint leaked buffers=%d, baseline=%d", got, baseline)
+	}
+}
+
+func TestProjectionGraphGDNCheckpointStateIdentityLifecycleAndMutation(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	g, live, backup, checkpoint := newProjectionGraphGDNCheckpointOnlyFixture(t)
+	if identity, err := checkpoint.StateIdentity(); err == nil || identity != "" {
+		t.Fatalf("pre-completion checkpoint identity=%q err=%v", identity, err)
+	}
+	receipt, err := g.Finish()
+	if err != nil || !receipt.Committed || !receipt.CompletedWait {
+		t.Fatalf("checkpoint-only terminal receipt=%+v err=%v", receipt, err)
+	}
+	identity, err := checkpoint.StateIdentity()
+	if err != nil || len(identity) != 64 {
+		t.Fatalf("completed checkpoint identity=%q err=%v", identity, err)
+	}
+	identityAgain, err := checkpoint.StateIdentity()
+	if err != nil || identityAgain != identity {
+		t.Fatalf("untouched checkpoint identity changed: first=%q again=%q err=%v", identity, identityAgain, err)
+	}
+	checkpoint.Close()
+	if stale, err := checkpoint.StateIdentity(); err == nil || stale != "" {
+		t.Fatalf("closed checkpoint identity=%q err=%v", stale, err)
+	}
+
+	geometry := live.geometry
+	conv := make([]float32, (geometry.ConvKernel-1)*geometry.convDim())
+	recurrent := make([]float32, geometry.NumValueHeads*geometry.KeyHeadDim*geometry.ValueHeadDim)
+	for i := range conv {
+		conv[i] = float32(i+1) / 97
+	}
+	for i := range recurrent {
+		recurrent[i] = float32(i+1) / 1025
+	}
+	if err := live.Seed(conv, recurrent); err != nil {
+		t.Fatalf("seed same-geometry changed state: %v", err)
+	}
+
+	g2, err := BeginProjectionGraph(make([]float32, 32), nil, nil, 1, 32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g2.Free()
+	changedCheckpoint, err := g2.CheckpointGDN(live, backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer changedCheckpoint.Close()
+	if changedIdentity, err := changedCheckpoint.StateIdentity(); err == nil || changedIdentity != "" {
+		t.Fatalf("second pre-completion checkpoint identity=%q err=%v", changedIdentity, err)
+	}
+	receipt, err = g2.Finish()
+	if err != nil || !receipt.Committed || !receipt.CompletedWait {
+		t.Fatalf("changed-state checkpoint receipt=%+v err=%v", receipt, err)
+	}
+	changedIdentity, err := changedCheckpoint.StateIdentity()
+	if err != nil || len(changedIdentity) != 64 {
+		t.Fatalf("changed-state checkpoint identity=%q err=%v", changedIdentity, err)
+	}
+	if changedIdentity == identity {
+		t.Fatalf("same-geometry changed state reused checkpoint identity %q", identity)
+	}
+	if err := changedCheckpoint.Restore(); err != nil {
+		t.Fatalf("restore changed-state checkpoint: %v", err)
+	}
+	if stale, err := changedCheckpoint.StateIdentity(); err == nil || stale != "" {
+		t.Fatalf("restored checkpoint identity=%q err=%v", stale, err)
+	}
+}
+
+func TestGDNStateMutationVersionCoversStandaloneAndGraphPaths(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	geometry := GDNGeometry{NumKeyHeads: 1, NumValueHeads: 1, KeyHeadDim: 32, ValueHeadDim: 32, ConvKernel: 2}
+	state, err := NewGDNState(geometry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer state.Close()
+	version := state.version
+	conv := make([]float32, (geometry.ConvKernel-1)*geometry.convDim())
+	recurrent := make([]float32, geometry.NumValueHeads*geometry.KeyHeadDim*geometry.ValueHeadDim)
+	if err := state.Seed(conv, recurrent); err != nil {
+		t.Fatal(err)
+	}
+	if state.version != version+1 {
+		t.Fatalf("Seed version=%d want %d", state.version, version+1)
+	}
+	version = state.version
+	if _, _, accepted, err := state.Run(graphGDNPanel(geometry, 1)); err != nil || !accepted {
+		t.Fatalf("Run accepted=%v err=%v", accepted, err)
+	}
+	if state.version != version+1 {
+		t.Fatalf("Run version=%d want %d", state.version, version+1)
+	}
+	version = state.version
+	if err := state.Reset(); err != nil {
+		t.Fatal(err)
+	}
+	if state.version != version+1 {
+		t.Fatalf("Reset version=%d want %d", state.version, version+1)
+	}
+
+	g, graphState, core, _ := newProjectionGraphGDNLeaseFixture(t)
+	defer g.Free()
+	defer graphState.Close()
+	version = graphState.version
+	if _, receipt, err := g.FinishRead(core); err != nil || !receipt.Committed || !receipt.CompletedWait {
+		t.Fatalf("graph GDN receipt=%+v err=%v", receipt, err)
+	}
+	if graphState.version != version+1 {
+		t.Fatalf("graph GDN version=%d want %d", graphState.version, version+1)
+	}
 }
 
 func waitForGDNGraphWaiters(t *testing.T, state *GDNState, want int) {

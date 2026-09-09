@@ -4,20 +4,20 @@ import (
 	"encoding/binary"
 	"math"
 	"math/rand"
-	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/polymodel"
 )
 
-func TestQwen38MTPQ4KForwardMatchesDequantizedReference(t *testing.T) {
+func TestQwen38MTPMixedQ4KMForwardMatchesDequantizedReference(t *testing.T) {
 	setQ4KSDOTForTest(false)
 	t.Cleanup(func() { setQ4KSDOTForTest(true) })
 
 	q4, ref := qwen38MTPQ4KTestModels(t)
 	q4Forward, err := q4.NewQwen35MTPForward()
 	if err != nil {
-		t.Fatalf("construct Q4_K MTP forward: %v", err)
+		t.Fatalf("construct mixed Q4_K_M MTP forward: %v", err)
 	}
 	t.Cleanup(q4Forward.Close)
 	// The cross-platform parity witness compares the resident CPU Q4_K path to
@@ -33,29 +33,43 @@ func TestQwen38MTPQ4KForwardMatchesDequantizedReference(t *testing.T) {
 	prior, embedding := qwen38MTPInputs(q4.Cfg.HiddenSize, 0)
 	got, err := q4Forward.Forward(0, prior, embedding)
 	if err != nil {
-		t.Fatalf("execute Q4_K MTP forward: %v", err)
+		t.Fatalf("execute mixed Q4_K_M MTP forward: %v", err)
 	}
 	want, err := refForward.Forward(0, prior, embedding)
 	if err != nil {
 		t.Fatalf("execute dequantized oracle MTP forward: %v", err)
 	}
 	if cos := cosine(got, want); cos < 0.99999 {
-		t.Fatalf("Q4_K MTP forward cosine=%.8f, want >= 0.99999", cos)
+		t.Fatalf("mixed Q4_K_M MTP forward cosine=%.8f, want >= 0.99999", cos)
 	}
 	if argmaxF32(got) != argmaxF32(want) {
-		t.Fatalf("Q4_K MTP argmax=%d, oracle=%d", argmaxF32(got), argmaxF32(want))
+		t.Fatalf("mixed Q4_K_M MTP argmax=%d, oracle=%d", argmaxF32(got), argmaxF32(want))
 	}
-	for _, name := range qwen38MTPMatrixTensors {
+	for name, format := range qwen38MTPQ4KMArtifactMatrixTypes {
 		if _, ok := q4.manifest[name]; ok {
-			t.Fatalf("%s retained a persistent F32 matrix beside Q4_K execution", name)
+			t.Fatalf("%s retained a persistent F32 matrix beside %s execution", name, format)
 		}
-		if q4.q4kw[name] == nil {
-			t.Fatalf("%s missing from resident Q4_K store", name)
+		switch format {
+		case Qwen38MTPFormatQ8:
+			if q4.q8w[name] == nil {
+				t.Fatalf("%s missing from resident Q8_0 store", name)
+			}
+		case Qwen38MTPFormatQ4K:
+			if q4.q4kw[name] == nil {
+				t.Fatalf("%s missing from resident Q4_K store", name)
+			}
+		case Qwen38MTPFormatQ6K:
+			if q4.kqw[name] == nil {
+				t.Fatalf("%s missing from resident Q6_K store", name)
+			}
 		}
+	}
+	if q4.kqw["lm_head.weight"] == nil {
+		t.Fatal("canonical output.weight missing from resident Q6_K head store")
 	}
 }
 
-func TestQwen38MTPQ4KSpeculativeAcceptanceAndMechanismReceipt(t *testing.T) {
+func TestQwen38MTPMixedQ4KMSpeculativeAcceptanceAndMechanismReceipt(t *testing.T) {
 	setQ4KSDOTForTest(false)
 	t.Cleanup(func() { setQ4KSDOTForTest(true) })
 
@@ -129,6 +143,8 @@ func TestQwen38MTPQ4KSpeculativeAcceptanceAndMechanismReceipt(t *testing.T) {
 	}
 }
 
+// qwen38MTPQ4KTestModels retains its shared helper name for eligibility tests,
+// but its quantized side deliberately mirrors the exact mixed Q4_K_M artifact.
 func qwen38MTPQ4KTestModels(t *testing.T) (q4, ref *Model) {
 	t.Helper()
 	cfg := qwen35MTPTestConfig()
@@ -150,7 +166,10 @@ func qwen38MTPQ4KTestModels(t *testing.T) (q4, ref *Model) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	q4 = &Model{Cfg: cfg, manifest: map[string]tensorMeta{}, q4kw: map[string]*q4kTensor{}}
+	q4 = &Model{
+		Cfg: cfg, manifest: map[string]tensorMeta{},
+		q4kw: map[string]*q4kTensor{}, q8w: map[string]*q8Tensor{}, kqw: map[string]*kQuantTensor{},
+	}
 	ref = &Model{Cfg: cfg, manifest: map[string]tensorMeta{}}
 
 	for i, name := range qwen38MTPNormTensors {
@@ -164,29 +183,61 @@ func qwen38MTPQ4KTestModels(t *testing.T) (q4, ref *Model) {
 
 	rng := rand.New(rand.NewSource(9985))
 	for _, name := range qwen38MTPMatrixTensors {
-		shape := shapes[name]
-		raw := make([]byte, shape[0]*(shape[1]/qkK)*q4kBlockBytes)
+		appendQwen38MTPMixedQuantTensor(t, q4, ref, name, shapes[name], qwen38MTPQ4KMArtifactMatrixTypes[name], rng)
+	}
+	appendQwen38MTPMixedQuantTensor(t, q4, ref, "lm_head.weight", []int{cfg.VocabSize, cfg.HiddenSize}, Qwen38MTPFormatQ6K, rng)
+	return q4, ref
+}
+
+func appendQwen38MTPMixedQuantTensor(t *testing.T, mixed, ref *Model, name string, shape []int, format Qwen38MTPTensorFormat, rng *rand.Rand) {
+	t.Helper()
+	out, in := shape[0], shape[1]
+	dequant := make([]float32, out*in)
+	switch format {
+	case Qwen38MTPFormatQ8:
+		values := make([]float32, out*in)
+		for i := range values {
+			values[i] = float32(rng.Intn(33)-16) / 32
+		}
+		qt := quantizeQ8(values, out, in)
+		mixed.q8w[name] = qt
+		for row := 0; row < out; row++ {
+			for col := 0; col < in; col++ {
+				block := col / qBlk
+				dequant[row*in+col] = float32(qt.q[row*in+col]) * qt.d[row*qt.nblk+block]
+			}
+		}
+	case Qwen38MTPFormatQ4K:
+		raw := make([]byte, out*(in/qkK)*q4kBlockBytes)
 		for block := 0; block < len(raw)/q4kBlockBytes; block++ {
 			randQ4KBlockBounded(rng, raw[block*q4kBlockBytes:(block+1)*q4kBlockBytes], 2, 5)
 		}
-		q4.q4kw[name] = quantizeQ4KFromRaw(append([]byte(nil), raw...), shape[0], shape[1])
-		dequant := make([]float32, shape[0]*shape[1])
-		rowBytes := (shape[1] / qkK) * q4kBlockBytes
-		for row := 0; row < shape[0]; row++ {
-			dequantQ4KRef(dequant[row*shape[1]:(row+1)*shape[1]], raw[row*rowBytes:(row+1)*rowBytes])
+		mixed.q4kw[name] = quantizeQ4KFromRaw(append([]byte(nil), raw...), out, in)
+		rowBytes := (in / qkK) * q4kBlockBytes
+		for row := 0; row < out; row++ {
+			dequantQ4KRef(dequant[row*in:(row+1)*in], raw[row*rowBytes:(row+1)*rowBytes])
 		}
-		appendQwen38MTPF32Tensor(ref, name, shape, dequant)
-	}
-
-	head := make([]float32, cfg.VocabSize*cfg.HiddenSize)
-	for token := 0; token < cfg.VocabSize; token++ {
-		for j := 0; j < cfg.HiddenSize; j++ {
-			head[token*cfg.HiddenSize+j] = float32(((token+1)*(j%13+1))%17-8) / 32
+	case Qwen38MTPFormatQ6K:
+		nblk := in / kindQ6K.blockWeights()
+		raw := make([]byte, out*nblk*kindQ6K.blockBytes())
+		for i := range raw {
+			raw[i] = byte(rng.Intn(256))
 		}
+		pinResidentQuantScales(raw, out, nblk, kindQ6K)
+		qt := quantizeKQuantFromRaw(raw, out, in, kindQ6K)
+		mixed.kqw[name] = qt
+		buf := make([]float32, kindQ6K.blockWeights())
+		for row := 0; row < out; row++ {
+			for block := 0; block < nblk; block++ {
+				base := (row*nblk + block) * kindQ6K.blockBytes()
+				kQuantDequantSuperBlock(buf, raw[base:base+kindQ6K.blockBytes()], kindQ6K)
+				copy(dequant[row*in+block*len(buf):], buf)
+			}
+		}
+	default:
+		t.Fatalf("unsupported mixed fixture format %q for %s", format, name)
 	}
-	appendQwen38MTPF32Tensor(q4, "lm_head.weight", []int{cfg.VocabSize, cfg.HiddenSize}, head)
-	appendQwen38MTPF32Tensor(ref, "lm_head.weight", []int{cfg.VocabSize, cfg.HiddenSize}, head)
-	return q4, ref
+	appendQwen38MTPF32Tensor(ref, name, shape, dequant)
 }
 
 func appendQwen38MTPF32Tensor(m *Model, name string, shape []int, data []float32) {
@@ -214,7 +265,7 @@ func qwen38MTPInputs(hidden, pos int) ([]float32, []float32) {
 	return prior, embedding
 }
 
-func TestQwen38MTPQ4KFixtureActuallyDiffersFromF32Storage(t *testing.T) {
+func TestQwen38MTPQ4KMFixtureReportsExactMixedInventory(t *testing.T) {
 	q4, ref := qwen38MTPQ4KTestModels(t)
 	q4Layout, err := q4.Qwen38MTPTensorLayout()
 	if err != nil {
@@ -227,7 +278,47 @@ func TestQwen38MTPQ4KFixtureActuallyDiffersFromF32Storage(t *testing.T) {
 	if q4Layout.Format != Qwen38MTPFormatQ4K || refLayout.Format != Qwen38MTPFormatF32 {
 		t.Fatalf("layouts q4=%+v ref=%+v", q4Layout, refLayout)
 	}
-	if reflect.DeepEqual(q4Layout.TensorTypes, refLayout.TensorTypes) {
-		t.Fatal("Q4_K and F32 fixtures reported the same actual retained tensor types")
+	for name, want := range qwen38MTPQ4KMArtifactMatrixTypes {
+		if got := q4Layout.TensorTypes[name]; got != string(want) {
+			t.Fatalf("mixed inventory %s=%q, want %q; layout=%+v", name, got, want, q4Layout)
+		}
+	}
+	if got := q4Layout.TensorTypes["lm_head.weight"]; got != string(Qwen38MTPFormatQ6K) {
+		t.Fatalf("mixed inventory canonical output.weight=%q, want Q6_K; layout=%+v", got, q4Layout)
+	}
+	for _, name := range qwen38MTPNormTensors {
+		if got := q4Layout.TensorTypes[name]; got != string(Qwen38MTPFormatF32) {
+			t.Fatalf("mixed inventory norm %s=%q, want F32", name, got)
+		}
+	}
+}
+
+func TestQwen35MTPForwardConcurrentCloseReleasesWeightLifetimeOnce(t *testing.T) {
+	m, _ := qwen38MTPQ4KTestModels(t)
+	closer := &countWeightCloser{}
+	m.SetWeightCloser(closer)
+	forward, err := m.NewQwen35MTPForward()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.CloseWeights(); err == nil {
+		t.Fatal("CloseWeights admitted while MTP forward held the checkpoint")
+	}
+
+	const callers = 32
+	var wg sync.WaitGroup
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			forward.Close()
+		}()
+	}
+	wg.Wait()
+	if got := closer.n.Load(); got != 1 {
+		t.Fatalf("checkpoint closes=%d, want exactly one after %d concurrent Forward.Close calls", got, callers)
+	}
+	if err := m.CloseWeights(); err != nil {
+		t.Fatalf("completed CloseWeights: %v", err)
 	}
 }

@@ -247,7 +247,7 @@ func validateQwen35DecodeBlockHidden(req Qwen35DecodeRequest, hidden int) error 
 	if down := req.Weights.MLPDownQ4; down != nil && (down.id < 0 || down.In != gate.Out || down.Out != hidden) {
 		return &GDNDeclinedError{Reason: "invalid resident Q4_K down projection"}
 	}
-	if down := req.Weights.MLPDownQ6; down != nil && (down.id < 0 || down.In != gate.Out || down.Out != hidden) {
+	if down := req.Weights.MLPDownQ6; down != nil && (down.ID() < 0 || down.In != gate.Out || down.Out != hidden) {
 		return &GDNDeclinedError{Reason: "invalid resident Q6_K down projection"}
 	}
 	return nil

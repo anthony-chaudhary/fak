@@ -58,6 +58,48 @@ func (e *Qwen35MTPSpecDecodeUnsupportedError) Unwrap() error {
 
 type qwen35MTPDrafterBuilder func(*Model, int, Qwen35MTPTargetHidden, Qwen35MTPTokenEmbedding) (*Qwen35MTPDrafter, error)
 
+// Qwen35MetalMTPCheckpoint owns the device-private recurrent backup created by
+// an admitted target panel. Restore rolls the live recurrent owners back to the
+// pre-panel state; Close releases every backup and is idempotent. The interface
+// lives in this platform-neutral file so the transaction can own a Darwin Metal
+// checkpoint without importing metalgemm into non-Darwin builds.
+type Qwen35MetalMTPCheckpoint interface {
+	Restore() error
+	Close()
+}
+
+// Qwen35MetalMTPVerifyPanelReceipt is the platform-neutral proof exported by an
+// admitted Metal panel. The GDN checkpoint binding is a lineage aggregate over
+// device-private owner/version/checkpoint identities and covered layers. It
+// does not claim to hash recurrent or convolution buffer byte contents and adds
+// no state readback between graph submission and the terminal output pack.
+type Qwen35MetalMTPVerifyPanelReceipt struct {
+	Schema, Path, StateDigestDomain, StateSHA256   string
+	GDNCheckpointBindingSHA256, TransactionSHA256  string
+	GDNCheckpointLayers                            []int
+	GDNCheckpointLineageSHA256                     []string
+	Tokens, Base, CommandBuffers, Encoders         int
+	CheckpointLayers, DeviceCheckpointCopies       int
+	CheckpointBufferSwaps                          int
+	Q6KDownProjectionOperations, Q6KHeadOperations int
+	IntermediateWaits, IntermediateReadbacks       int
+	TerminalWaits, TerminalReadbacks               int
+	HostStateUploads, HostStateReadbacks           int
+	HostUploadBytes, HostReadbackBytes             uint64
+	Committed, CompletedWait, TimingAvailable      bool
+	GPUMilliseconds, WaitMilliseconds              float64
+}
+
+type qwen35MetalMTPPanelReceiptProvider interface {
+	Qwen35MetalMTPPanelReceipt() Qwen35MetalMTPVerifyPanelReceipt
+}
+
+type qwen35MTPMetalP4Verifier func(*Session, []int) (rows [][]float32, checkpoint Qwen35MetalMTPCheckpoint, receipt TargetVerificationReceipt, accepted bool, err error)
+
+// The Darwin implementation installs the exact-P4 resident Metal verifier.
+// A nil verifier, or accepted=false, leaves the existing f32 verifier unchanged.
+var qwen35MTPMetalP4Verify qwen35MTPMetalP4Verifier
+
 // qwen35MTPTargetTransaction owns one speculative mutation of the live target.
 // A successful incremental panel may be adopted on full acceptance. Partial
 // acceptance restores the pre-round snapshot and replays only accepted tokens;
@@ -70,6 +112,8 @@ type qwen35MTPTargetTransaction struct {
 	verify        func([]int) ([][]float32, TargetVerificationReceipt, error)
 	step          func(int) []float32
 	receipt       TargetVerificationReceipt
+	checkpoint    Qwen35MetalMTPCheckpoint
+	panelReceipt  *Qwen35MetalMTPVerifyPanelReceipt
 	closed        bool
 	closeCount    int
 	verifyStarted bool
@@ -91,6 +135,18 @@ func beginQwen35MTPTargetTransaction(target *Session, beforeLogits []float32) (*
 		step: target.Step,
 	}
 	tx.verify = func(draft []int) ([][]float32, TargetVerificationReceipt, error) {
+		if qwen35MTPMetalP4Verify != nil {
+			rows, checkpoint, receipt, accepted, err := qwen35MTPMetalP4Verify(target, draft)
+			if accepted {
+				tx.checkpoint = checkpoint
+				if provider, ok := checkpoint.(qwen35MetalMTPPanelReceiptProvider); ok {
+					panelReceipt := provider.Qwen35MetalMTPPanelReceipt()
+					tx.panelReceipt = &panelReceipt
+				}
+				tx.verifiedLive = err == nil
+				return rows, receipt, err
+			}
+		}
 		rows, receipt, err := target.verifyQwen35MTPPanel(draft, tx.beforeLogits)
 		tx.verifiedLive = err == nil
 		return rows, receipt, err
@@ -230,8 +286,13 @@ func (tx *qwen35MTPTargetTransaction) Abort() error {
 
 func (tx *qwen35MTPTargetTransaction) restore() error {
 	started := time.Now()
-	if err := tx.snapshot.Restore(tx.target); err != nil {
-		return fmt.Errorf("model: restore Qwen3.8 MTP target transaction: %w", err)
+	var checkpointErr error
+	if tx.checkpoint != nil {
+		checkpointErr = tx.checkpoint.Restore()
+	}
+	snapshotErr := tx.snapshot.Restore(tx.target)
+	if checkpointErr != nil || snapshotErr != nil {
+		return fmt.Errorf("model: restore Qwen3.8 MTP target transaction: %w", errors.Join(checkpointErr, snapshotErr))
 	}
 	cost := measuredSpeculativeCost(started)
 	tx.receipt.Accounting.Rollback.Nanoseconds += cost.Nanoseconds
@@ -252,6 +313,10 @@ func (tx *qwen35MTPTargetTransaction) finish() {
 	}
 	tx.snapshot.Close()
 	tx.snapshot = nil
+	if tx.checkpoint != nil {
+		tx.checkpoint.Close()
+		tx.checkpoint = nil
+	}
 	tx.lastLogits = nil
 	tx.closed = true
 	tx.closeCount++

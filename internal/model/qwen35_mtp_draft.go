@@ -468,12 +468,12 @@ func qwen35MTPForwardFeedback(f *Qwen35MTPForward, pos int, priorHidden, current
 		return nil, nil, qwen35MTPStateError("position", fmt.Sprintf("greater than %d", f.lastPos), fmt.Sprint(pos))
 	}
 
-	x, err := f.target.Qwen35MTPFuse(priorHidden, currentEmbedding)
+	x, err := f.qwen38MTPFuse(priorHidden, currentEmbedding)
 	if err != nil {
 		return nil, nil, err
 	}
 	cos, sin := ropeRowForLayer(f.draft.M.Cfg, 0, pos)
-	x = f.draft.blockStep(0, pos, x, cos, sin, f32Kernel{f.draft.M})
+	x = f.draft.blockStep(0, pos, x, cos, sin, f.mat)
 	f.draft.Cache.appendPosition(pos, -1)
 	f.lastPos = pos
 	feedback := f.draft.M.finalNorm(x)

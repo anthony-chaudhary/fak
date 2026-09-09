@@ -431,6 +431,7 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 
 	builder := model.NewQuantBuilder(cfg, cfg.TieWordEmbeddings)
 	kvbHalf := map[int]glmKVBHalf{} // MLA KV-b 2->1 merge buffer (see QuantModelProfile)
+	qwenMTPSeen := newQwen35MTPSeen(cfg)
 	p.SetTotal(len(s.File.Tensors))
 
 	// computeFn is the pure, concurrency-safe per-tensor work: it reads + dequantizes +
@@ -444,7 +445,13 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 	// applyFn owns all shared mutable state (builder, KV-b merge buffer, profiler) and runs
 	// on the single collector goroutine in original tensor order.
 	applyFn := func(tw tensorWork) error {
-		return applyQ4KTensorWork(tw, p, cfg, builder, kvbHalf, w3Requested)
+		if err := applyQ4KTensorWork(tw, p, cfg, builder, kvbHalf, w3Requested); err != nil {
+			return err
+		}
+		if tw.mtpMaterialized != "" {
+			qwenMTPSeen[tw.mtpMaterialized] = true
+		}
+		return nil
 	}
 
 	if err := s.parallelQuantLoadContextBudget(ctx, computeFn, applyFn); err != nil {
@@ -453,17 +460,15 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 	if err := glmKVBUnpaired(kvbHalf); err != nil {
 		return nil, err
 	}
+	if err := validateQwen35MTPMaterialized(qwenMTPSeen); err != nil {
+		return nil, err
+	}
 	if p != nil {
 		p.EmitLoadPathSummary(p.Progress)
 	}
 	m, err := builder.Build()
 	if err != nil {
 		return nil, err
-	}
-	if newQwen35MTPSeen(cfg) != nil {
-		if _, err := m.Qwen38MTPTensorLayout(); err != nil {
-			return nil, fmt.Errorf("gguf: retained Qwen MTP layout: %w", err)
-		}
 	}
 	if expertTier != nil {
 		m.SetExpertCheckpoint(expertTier)
@@ -529,6 +534,14 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 	p.recordLoadPath(tw.acctType, tw.acctExpert, tw.acctResident, tw.acctBytes, tw.acctTensors)
 	for _, pt := range tw.pending {
 		switch {
+		case pt.canonicalMTPQ4K:
+			if err := builder.AddCanonicalMTPQ4K(pt.name, pt.shape, pt.raw); err != nil {
+				return err
+			}
+		case pt.canonicalMTPFCQ8:
+			if err := builder.AddCanonicalMTPFCQ8(pt.name, pt.shape, pt.raw); err != nil {
+				return err
+			}
 		case pt.q2kEmbed:
 			embed, err := model.NewQ2KEmbedding(pt.raw, pt.shape[0], pt.shape[1])
 			if err != nil {
@@ -636,11 +649,7 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 					return err
 				}
 			default: // TensorQ4_K
-				add := builder.AddResidentQ4K
-				if model.Qwen38MTPQ4KResidentEligible(pt.name) {
-					add = builder.AddQwen38MTPResidentQ4K
-				}
-				if err := add(pt.name, pt.shape, pt.raw); err != nil {
+				if err := builder.AddResidentQ4K(pt.name, pt.shape, pt.raw); err != nil {
 					return err
 				}
 			}
@@ -653,6 +662,128 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 	return nil
 }
 
+var qwen35MTPResidentTypes = map[string]TensorType{
+	"mtp.fc.weight":                        TensorQ8_0,
+	"mtp.layers.0.self_attn.q_proj.weight": TensorQ4_K,
+	"mtp.layers.0.self_attn.k_proj.weight": TensorQ4_K,
+	"mtp.layers.0.self_attn.v_proj.weight": TensorQ6_K,
+	"mtp.layers.0.self_attn.o_proj.weight": TensorQ4_K,
+	"mtp.layers.0.mlp.gate_proj.weight":    TensorQ4_K,
+	"mtp.layers.0.mlp.up_proj.weight":      TensorQ4_K,
+	"mtp.layers.0.mlp.down_proj.weight":    TensorQ6_K,
+}
+
+// reorderQwen35MTPQ4KRows performs the same rotary row permutation as the f32
+// normalization path, but copies whole independently-quantized Q4_K rows. The
+// operation is lossless: no block is decoded or requantized.
+func reorderQwen35MTPQ4KRows(name string, raw []byte, shape []int, cfg model.Config) ([]byte, error) {
+	if len(shape) != 2 || shape[1] <= 0 || shape[1]%qkK != 0 {
+		return nil, fmt.Errorf("gguf: Qwen MTP tensor %s cannot reorder Q4_K shape %v", name, shape)
+	}
+	rowBytes := shape[1] / qkK * blockQ4KBytes
+	if shape[0] > math.MaxInt/rowBytes || len(raw) != shape[0]*rowBytes {
+		return nil, fmt.Errorf("gguf: Qwen MTP tensor %s has %d Q4_K bytes for shape %v", name, len(raw), shape)
+	}
+	dst := make([]byte, len(raw))
+	copyRow := func(dstRow, srcRow int) {
+		copy(dst[dstRow*rowBytes:(dstRow+1)*rowBytes], raw[srcRow*rowBytes:(srcRow+1)*rowBytes])
+	}
+	half := cfg.HeadDim / 2
+	if cfg.HeadDim <= 0 || cfg.HeadDim%2 != 0 {
+		return nil, fmt.Errorf("gguf: Qwen MTP tensor %s has invalid head_dim %d", name, cfg.HeadDim)
+	}
+	switch name {
+	case "mtp.layers.0.self_attn.q_proj.weight":
+		if shape[0] != cfg.NumHeads*2*cfg.HeadDim {
+			return nil, fmt.Errorf("gguf: Qwen MTP tensor %s has shape %v incompatible with gated q heads", name, shape)
+		}
+		for h := 0; h < cfg.NumHeads; h++ {
+			head := h * 2 * cfg.HeadDim
+			for j := 0; j < half; j++ {
+				for p := 0; p < 2; p++ {
+					copyRow(head+p*half+j, head+j*2+p)
+				}
+			}
+			for row := cfg.HeadDim; row < 2*cfg.HeadDim; row++ {
+				copyRow(head+row, head+row)
+			}
+		}
+	case "mtp.layers.0.self_attn.k_proj.weight":
+		if shape[0] != cfg.NumKVHeads*cfg.HeadDim {
+			return nil, fmt.Errorf("gguf: Qwen MTP tensor %s has shape %v incompatible with k heads", name, shape)
+		}
+		for h := 0; h < cfg.NumKVHeads; h++ {
+			for j := 0; j < half; j++ {
+				for p := 0; p < 2; p++ {
+					copyRow((h*2+p)*half+j, (h*half+j)*2+p)
+				}
+			}
+		}
+	default:
+		return nil, fmt.Errorf("gguf: Qwen MTP tensor %s is not a reorderable q/k projection", name)
+	}
+	return dst, nil
+}
+
+func (s *WeightSource) computeQwen35MTPQ4KTensorWork(info TensorInfo, canon string, cfg model.Config, innerWorkers int, tickBytes int64) tensorWork {
+	tw := tensorWork{tickBytes: tickBytes, mtpMaterialized: canon}
+	if !model.RetainMTP {
+		tw.err = fmt.Errorf("gguf: Qwen MTP tensor %s reached resident materialization without RetainMTP", info.Name)
+		return tw
+	}
+	shape, raw, ok := s.shapeAndBytesOrFail(info, &tw)
+	if !ok {
+		return tw
+	}
+	if err := validateQwen35MTPShape(canon, shape, cfg); err != nil {
+		tw.err = err
+		return tw
+	}
+	wantType, matrix := qwen35MTPResidentTypes[canon]
+	if matrix {
+		if info.Type != wantType {
+			tw.err = fmt.Errorf("gguf: Qwen MTP tensor %s has type %s, want %s", canon, info.Type, wantType)
+			return tw
+		}
+		if strings.HasSuffix(canon, ".q_proj.weight") || strings.HasSuffix(canon, ".k_proj.weight") {
+			var err error
+			raw, err = reorderQwen35MTPQ4KRows(canon, raw, shape, cfg)
+			if err != nil {
+				tw.err = err
+				return tw
+			}
+		}
+		tw.pending = []pendingTensor{{
+			resident:         true,
+			residentType:     info.Type,
+			canonicalMTPQ4K:  info.Type == TensorQ4_K && (strings.HasSuffix(canon, ".q_proj.weight") || strings.HasSuffix(canon, ".k_proj.weight")),
+			canonicalMTPFCQ8: canon == "mtp.fc.weight",
+			name:             canon,
+			shape:            shape,
+			raw:              raw,
+		}}
+		tw.acctType, tw.acctBytes, tw.acctTensors, tw.acctResident = info.Type.String(), tensorOnDiskBytes(info), 1, true
+		return tw
+	}
+	if info.Type != TensorF32 {
+		tw.err = fmt.Errorf("gguf: Qwen MTP tensor %s has type %s, want F32", canon, info.Type)
+		return tw
+	}
+	data, err := dequantF32Limited(info, raw, innerWorkers)
+	if err != nil {
+		tw.err = err
+		return tw
+	}
+	data, err = normalizeCanonicalTensorData(canon, data, cfg)
+	if err != nil {
+		tw.err = err
+		return tw
+	}
+	tw.pending = []pendingTensor{{name: canon, shape: shape, f32: data}}
+	tw.acctType, tw.acctBytes, tw.acctTensors = info.Type.String(), tensorOnDiskBytes(info), 1
+	return tw
+}
+
 func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w3Requested bool, streamed map[string]bool, loadOpts q4kLoadOptions, innerWorkers int) tensorWork {
 	tw := tensorWork{tickBytes: tensorOnDiskBytes(info)}
 	if w3Requested && info.Type == TensorIQ3_XXS &&
@@ -660,11 +791,13 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 		tw.err = fmt.Errorf("gguf: FAK_W3_MLP refuses IQ3_XXS tensor %s outside dense MLP W3 band", info.Name)
 		return tw
 	}
-	canon, qwenMTPHandled := qwen35MTPMaterializationName(info.Name, cfg)
-	if qwenMTPHandled && canon == "" {
-		return tw
+	if canon, handled := qwen35MTPMaterializationName(info.Name, cfg); handled {
+		if canon == "" {
+			return tw
+		}
+		return s.computeQwen35MTPQ4KTensorWork(info, canon, cfg, innerWorkers, tw.tickBytes)
 	}
-	if !qwenMTPHandled && archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
+	if archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
 		return tw
 	}
 	if archUsesMLAMoELayout(cfg.ModelType) {
@@ -739,13 +872,10 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 			return tw
 		}
 	}
-	if !qwenMTPHandled {
-		var ok bool
-		canon, ok = CanonicalTensorNameArch(info.Name, cfg.ModelType)
-		if !ok {
-			tw.err = fmt.Errorf("gguf: no canonical mapping for tensor %s", info.Name)
-			return tw
-		}
+	canon, ok := CanonicalTensorNameArch(info.Name, cfg.ModelType)
+	if !ok {
+		tw.err = fmt.Errorf("gguf: no canonical mapping for tensor %s", info.Name)
+		return tw
 	}
 	if loadOpts.residentQ2KEmbedding && info.Name == "token_embd.weight" {
 		shape, raw, ok := s.shapeAndBytesOrFail(info, &tw)
@@ -763,22 +893,7 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 	if !ok {
 		return tw
 	}
-	if qwenMTPHandled {
-		if err := validateQwen35MTPShape(canon, shape, cfg); err != nil {
-			tw.err = err
-			return tw
-		}
-	}
 	tw.acctType, tw.acctExpert, tw.acctBytes, tw.acctTensors = info.Type.String(), false, tensorOnDiskBytes(info), 1
-	if info.Type == TensorQ4_K && model.Qwen38MTPQ4KResidentEligible(canon) {
-		raw, tw.err = normalizeQwen35MTPQ4KRows(canon, shape, raw, cfg)
-		if tw.err != nil {
-			return tw
-		}
-		tw.pending = []pendingTensor{{resident: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}
-		tw.acctResident = true
-		return tw
-	}
 	w3Eligible := info.Type == TensorIQ3_XXS && model.ResidentW3MLPEligible(cfg, canon)
 	switch {
 	case w3Eligible && w3Requested:
@@ -814,59 +929,4 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 	}
 	tw.pending = []pendingTensor{{resident: false, name: canon, shape: shape, f32: data}}
 	return tw
-}
-
-// normalizeQwen35MTPQ4KRows applies the same Q/K rotary row normalization as
-// normalizeCanonicalTensorData without dequantizing or requantizing. Q4_K
-// blocks quantize complete rows, so the transform is a lossless permutation of
-// row-sized byte spans. All other admitted MTP matrices are identity-layout.
-func normalizeQwen35MTPQ4KRows(name string, shape []int, raw []byte, cfg model.Config) ([]byte, error) {
-	if len(shape) != 2 || shape[1]%qkK != 0 {
-		return nil, fmt.Errorf("gguf: Qwen MTP Q4_K tensor %s has unsupported shape %v", name, shape)
-	}
-	rowBytes := shape[1] / qkK * blockQ4KBytes
-	if len(raw) != shape[0]*rowBytes {
-		return nil, fmt.Errorf("gguf: Qwen MTP Q4_K tensor %s has %d payload bytes, want %d", name, len(raw), shape[0]*rowBytes)
-	}
-	switch {
-	case strings.HasSuffix(name, ".self_attn.q_proj.weight"):
-		mult := 1
-		if cfg.AttnOutputGate {
-			mult = 2
-		}
-		return unpermuteQwen35MTPQ4KRows(name, raw, rowBytes, cfg.NumHeads, cfg.HeadDim, mult)
-	case strings.HasSuffix(name, ".self_attn.k_proj.weight"):
-		return unpermuteQwen35MTPQ4KRows(name, raw, rowBytes, cfg.NumKVHeads, cfg.HeadDim, 1)
-	default:
-		return raw, nil
-	}
-}
-
-func unpermuteQwen35MTPQ4KRows(name string, src []byte, rowBytes, heads, headDim, mult int) ([]byte, error) {
-	if rowBytes <= 0 || heads <= 0 || headDim <= 0 || headDim%2 != 0 || (mult != 1 && mult != 2) {
-		return nil, fmt.Errorf("gguf: Qwen MTP Q4_K tensor %s has invalid rotary geometry heads=%d head_dim=%d multiplier=%d", name, heads, headDim, mult)
-	}
-	wantRows := heads * mult * headDim
-	if len(src) != wantRows*rowBytes {
-		return nil, fmt.Errorf("gguf: Qwen MTP Q4_K tensor %s has %d rows, want %d", name, len(src)/rowBytes, wantRows)
-	}
-	dst := make([]byte, len(src))
-	half := headDim / 2
-	for head := 0; head < heads; head++ {
-		srcHead := head * mult * headDim
-		dstHead := srcHead
-		for j := 0; j < half; j++ {
-			for part := 0; part < 2; part++ {
-				srcRow := srcHead + j*2 + part
-				dstRow := dstHead + part*half + j
-				copy(dst[dstRow*rowBytes:(dstRow+1)*rowBytes], src[srcRow*rowBytes:(srcRow+1)*rowBytes])
-			}
-		}
-		if mult == 2 {
-			auxStart := (srcHead + headDim) * rowBytes
-			auxEnd := (srcHead + 2*headDim) * rowBytes
-			copy(dst[auxStart:auxEnd], src[auxStart:auxEnd])
-		}
-	}
-	return dst, nil
 }

@@ -5,7 +5,11 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
 
 type mockMTPRecorder struct {
@@ -15,6 +19,38 @@ type mockMTPRecorder struct {
 	recordErr   error
 	commitErr   error
 	rollbackErr error
+}
+
+type identityMTPRecorder struct {
+	mu       sync.Mutex
+	sessions []string
+}
+
+func (m *identityMTPRecorder) record(operation, sessionID string) {
+	m.mu.Lock()
+	m.sessions = append(m.sessions, operation+":"+sessionID)
+	m.mu.Unlock()
+}
+
+func (m *identityMTPRecorder) RecordMTPDraft(sessionID string, _ []int32) error {
+	m.record("record", sessionID)
+	return nil
+}
+
+func (m *identityMTPRecorder) CommitMTPDraft(sessionID string, accepted int) (int, int, error) {
+	m.record("commit", sessionID)
+	return accepted, 0, nil
+}
+
+func (m *identityMTPRecorder) RollbackMTPDraft(sessionID string) (int, error) {
+	m.record("rollback", sessionID)
+	return 0, nil
+}
+
+func (m *identityMTPRecorder) snapshot() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.sessions...)
 }
 
 func (m *mockMTPRecorder) RecordMTPDraft(sessionID string, tokens []int32) error {
@@ -30,190 +66,6 @@ func (m *mockMTPRecorder) CommitMTPDraft(sessionID string, accepted int) (int, i
 func (m *mockMTPRecorder) RollbackMTPDraft(sessionID string) (int, error) {
 	m.rollbacks++
 	return 0, m.rollbackErr
-}
-
-type faultMetalMTPSnapshot struct {
-	base            metalMTPTargetSnapshot
-	cloneErr        error
-	restoreErr      error
-	cloneRestoreErr error
-}
-
-func (s *faultMetalMTPSnapshot) Clone() (metalMTPTargetSnapshot, error) {
-	if s.cloneErr != nil {
-		return nil, s.cloneErr
-	}
-	clone, err := s.base.Clone()
-	if err != nil {
-		return nil, err
-	}
-	return &faultMetalMTPSnapshot{base: clone, restoreErr: s.cloneRestoreErr}, nil
-}
-
-func (s *faultMetalMTPSnapshot) Restore(target *Session) error {
-	if err := s.base.Restore(target); err != nil {
-		return err
-	}
-	return s.restoreErr
-}
-
-func (s *faultMetalMTPSnapshot) Close() { s.base.Close() }
-
-func hasMetalMTPCheckpointOperation(err error, operation MetalMTPCheckpointOperation) bool {
-	if err == nil {
-		return false
-	}
-	if checkpointErr, ok := err.(*MetalMTPCheckpointError); ok && checkpointErr.Operation == operation {
-		return true
-	}
-	if joined, ok := err.(interface{ Unwrap() []error }); ok {
-		for _, nested := range joined.Unwrap() {
-			if hasMetalMTPCheckpointOperation(nested, operation) {
-				return true
-			}
-		}
-		return false
-	}
-	return hasMetalMTPCheckpointOperation(errors.Unwrap(err), operation)
-}
-
-func hasMetalMTPSnapshotOperation(err error, operation MetalMTPSnapshotOperation) bool {
-	if err == nil {
-		return false
-	}
-	if snapshotErr, ok := err.(*MetalMTPSnapshotError); ok && snapshotErr.Operation == operation {
-		return true
-	}
-	if joined, ok := err.(interface{ Unwrap() []error }); ok {
-		for _, nested := range joined.Unwrap() {
-			if hasMetalMTPSnapshotOperation(nested, operation) {
-				return true
-			}
-		}
-		return false
-	}
-	return hasMetalMTPSnapshotOperation(errors.Unwrap(err), operation)
-}
-
-func assertMetalMTPTargetRestored(t *testing.T, target *Session, wantCache *KVCache, wantHidden [][]float32, wantHiddenTokens []int) {
-	t.Helper()
-	assertKVCacheUnchanged(t, "Metal MTP failed round", wantCache, target.Cache)
-	target.targetHiddenMu.RLock()
-	defer target.targetHiddenMu.RUnlock()
-	if !reflect.DeepEqual(target.targetHidden, wantHidden) || !reflect.DeepEqual(target.targetHiddenTokens, wantHiddenTokens) {
-		t.Fatalf("Metal MTP failed round leaked target hidden state: hidden=%d/%d tokens=%v/%v",
-			len(target.targetHidden), len(wantHidden), target.targetHiddenTokens, wantHiddenTokens)
-	}
-}
-
-func newMetalMTPFailureRound(t *testing.T) (*MetalMTPCoordinator, *Session, []int, []float32, *KVCache, [][]float32, []int) {
-	t.Helper()
-	m := qwen38HybridMTPEnabledSyntheticModel(t)
-	target := m.NewSession()
-	t.Cleanup(target.Close)
-	prompt := []int{0, 1, 2}
-	boundary := target.Prefill(prompt)
-	wantCache := target.Cache.Clone()
-	target.targetHiddenMu.RLock()
-	wantHidden := cloneTargetHidden(target.targetHidden)
-	wantHiddenTokens := append([]int(nil), target.targetHiddenTokens...)
-	target.targetHiddenMu.RUnlock()
-
-	coord, err := target.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
-	if err != nil {
-		t.Fatalf("NewMetalMTPCoordinator failed: %v", err)
-	}
-	t.Cleanup(func() { _ = coord.Close() })
-	first := (argmaxF32(boundary) + 1) % m.Cfg.VocabSize
-	second := (first + 1) % m.Cfg.VocabSize
-	coord.SetDrafter(NewMTPProposalGeneratorWithFn(func(context.Context, []int, int) ([]int, error) {
-		return []int{first, second}, nil
-	}))
-	return coord, target, prompt, boundary, wantCache, wantHidden, wantHiddenTokens
-}
-
-func TestMetalMTPCheckpointFailuresFailClosed(t *testing.T) {
-	recordErr := errors.New("sentinel record failure")
-	commitErr := errors.New("sentinel commit failure")
-	rollbackErr := errors.New("sentinel rollback failure")
-
-	tests := []struct {
-		name      string
-		recorder  *mockMTPRecorder
-		want      error
-		operation MetalMTPCheckpointOperation
-	}{
-		{name: "record", recorder: &mockMTPRecorder{recordErr: recordErr}, want: recordErr, operation: MetalMTPCheckpointRecord},
-		{name: "commit", recorder: &mockMTPRecorder{commitErr: commitErr}, want: commitErr, operation: MetalMTPCheckpointCommit},
-		{name: "rollback", recorder: &mockMTPRecorder{recordErr: recordErr, rollbackErr: rollbackErr}, want: rollbackErr, operation: MetalMTPCheckpointRollback},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			coord, target, prompt, boundary, wantCache, wantHidden, wantHiddenTokens := newMetalMTPFailureRound(t)
-			coord.SetMMU(tt.recorder, "fail-closed-session")
-
-			_, _, _, err := coord.StepRound(context.Background(), prompt, boundary)
-			if !errors.Is(err, tt.want) {
-				t.Fatalf("StepRound error = %v, want sentinel %v", err, tt.want)
-			}
-			if !hasMetalMTPCheckpointOperation(err, tt.operation) {
-				t.Fatalf("StepRound error = %v, want typed checkpoint operation %q", err, tt.operation)
-			}
-			assertMetalMTPTargetRestored(t, target, wantCache, wantHidden, wantHiddenTokens)
-		})
-	}
-}
-
-func TestMetalMTPSnapshotFailuresFailClosed(t *testing.T) {
-	cloneErr := errors.New("sentinel snapshot clone failure")
-	restoreErr := errors.New("sentinel snapshot restore failure")
-
-	tests := []struct {
-		name      string
-		want      error
-		operation MetalMTPSnapshotOperation
-		wrap      func(metalMTPTargetSnapshot) metalMTPTargetSnapshot
-	}{
-		{
-			name:      "clone",
-			want:      cloneErr,
-			operation: MetalMTPSnapshotClone,
-			wrap: func(base metalMTPTargetSnapshot) metalMTPTargetSnapshot {
-				return &faultMetalMTPSnapshot{base: base, cloneErr: cloneErr}
-			},
-		},
-		{
-			name:      "restore",
-			want:      restoreErr,
-			operation: MetalMTPSnapshotRestore,
-			wrap: func(base metalMTPTargetSnapshot) metalMTPTargetSnapshot {
-				return &faultMetalMTPSnapshot{base: base, cloneRestoreErr: restoreErr}
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			coord, target, prompt, boundary, wantCache, wantHidden, wantHiddenTokens := newMetalMTPFailureRound(t)
-			coord.captureTarget = func(target *Session) (metalMTPTargetSnapshot, error) {
-				base, err := captureMetalMTPTargetSnapshot(target)
-				if err != nil {
-					return nil, err
-				}
-				return tt.wrap(base), nil
-			}
-
-			_, _, _, err := coord.StepRound(context.Background(), prompt, boundary)
-			if !errors.Is(err, tt.want) {
-				t.Fatalf("StepRound error = %v, want sentinel %v", err, tt.want)
-			}
-			if !hasMetalMTPSnapshotOperation(err, tt.operation) {
-				t.Fatalf("StepRound error = %v, want typed snapshot operation %q", err, tt.operation)
-			}
-			assertMetalMTPTargetRestored(t, target, wantCache, wantHidden, wantHiddenTokens)
-		})
-	}
 }
 
 // TestMetalMTPDraftVerifyRollbackLoop is the comprehensive witness test for Issue #12238:
@@ -407,6 +259,570 @@ func TestMetalMTPDraftVerifyRollbackLoop(t *testing.T) {
 			t.Fatalf("expected 8 tokens generated in fallback, got %d", len(outTokens))
 		}
 	})
+}
+
+func TestMetalMTPCoordinatorP4SequentialDowngradeReceiptIsHonest(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	target := m.NewSession()
+	target.captureTargetHidden = true
+	t.Cleanup(target.Close)
+	boundary := target.Prefill([]int{0, 1, 2})
+	// F16 is outside both the resident Metal P4 and incremental native-F32
+	// panel envelopes, while ordinary target Step remains a valid native path.
+	target.F16 = true
+
+	coord, err := target.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = coord.Close() })
+	coord.SetDrafter(NewMTPProposalGeneratorWithFn(func(context.Context, []int, int) ([]int, error) {
+		return []int{3, 5, 7, 11}, nil
+	}))
+
+	if _, _, _, err := coord.StepRound(context.Background(), nil, boundary); err != nil {
+		t.Fatalf("ordinary target-decode downgrade: %v", err)
+	}
+	receipt, ok := coord.LastTargetVerificationReceipt()
+	if !ok {
+		t.Fatal("downgraded P4 verification omitted receipt")
+	}
+	if receipt.Path != targetVerificationDecodePath || receipt.OneOperation ||
+		receipt.TargetVerificationOperations != 0 || receipt.TargetDecodeSteps != 4 || receipt.DowngradeReason == "" {
+		t.Fatalf("sequential P4 downgrade was not reported honestly: %+v", receipt)
+	}
+}
+
+func TestMetalMTPCoordinatorRebindsOwnedDrafterForSequentialRequests(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	promptA, promptB := []int{0, 1, 2}, []int{7, 3, 5, 1}
+
+	first := m.NewSession()
+	defer first.Close()
+	coord, err := first.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer coord.Close()
+	wantA := m.NewSession()
+	defer wantA.Close()
+	if got, want := mustMetalMTPGenerate(t, coord, promptA, 6), wantA.Generate(promptA, 6); !reflect.DeepEqual(got, want) {
+		t.Fatalf("first request output=%v want %v", got, want)
+	}
+	oldDraft := coord.draftSes
+	if oldDraft == nil || oldDraft.target != first {
+		t.Fatal("first request did not own a drafter bound to its target")
+	}
+
+	second := m.NewSession()
+	defer second.Close()
+	coord.SetTargetSession(second)
+	if !oldDraft.closed {
+		t.Fatal("target switch left the prior request drafter live")
+	}
+	if coord.draftSes == nil || coord.draftSes == oldDraft || coord.draftSes.target != second {
+		t.Fatal("target switch did not create a fresh drafter bound to the new request")
+	}
+	wantB := m.NewSession()
+	defer wantB.Close()
+	if got, want := mustMetalMTPGenerate(t, coord, promptB, 6), wantB.Generate(promptB, 6); !reflect.DeepEqual(got, want) {
+		t.Fatalf("reused coordinator output=%v want %v", got, want)
+	}
+}
+
+func TestMetalMTPCoordinatorTargetSwitchPreservesInjectedDrafter(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	first, second := m.NewSession(), m.NewSession()
+	defer first.Close()
+	defer second.Close()
+	coord, err := first.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer coord.Close()
+	auto := coord.draftSes
+	custom := NewMTPProposalGeneratorWithFn(func(context.Context, []int, int) ([]int, error) {
+		return []int{0}, nil
+	})
+	coord.SetDrafter(custom)
+	if auto == nil || !auto.closed || coord.draftSes != nil {
+		t.Fatal("injecting a custom drafter did not release the coordinator-owned drafter")
+	}
+	coord.SetTargetSession(second)
+	if coord.drafter != custom || coord.draftSes != nil {
+		t.Fatal("target switch replaced an injected custom drafter")
+	}
+}
+
+func TestMetalMTPCoordinatorConcurrentTargetSwitchKeepsDrafterAndTargetTogether(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	initial := m.NewSession()
+	defer initial.Close()
+	coord, err := initial.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer coord.Close()
+
+	targets := make([]*Session, 12)
+	for i := range targets {
+		targets[i] = m.NewSession()
+		defer targets[i].Close()
+	}
+	var wg sync.WaitGroup
+	for _, target := range targets {
+		target := target
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			coord.SetTargetSession(target)
+		}()
+	}
+	wg.Wait()
+
+	coord.mu.Lock()
+	defer coord.mu.Unlock()
+	if coord.target == nil || coord.draftSes == nil || coord.draftSes.closed || coord.draftSes.target != coord.target {
+		t.Fatalf("concurrent switch split target/drafter ownership: target=%p draft=%p draft-target=%p", coord.target, coord.draftSes, func() *Session {
+			if coord.draftSes == nil {
+				return nil
+			}
+			return coord.draftSes.target
+		}())
+	}
+}
+
+func TestMetalMTPCoordinatorTargetSwitchWaitsForActiveGeneration(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	first, second, want := m.NewSession(), m.NewSession(), m.NewSession()
+	defer first.Close()
+	defer second.Close()
+	defer want.Close()
+	coord, err := first.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer coord.Close()
+
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	custom := NewMTPProposalGeneratorWithFn(func(context.Context, []int, int) ([]int, error) {
+		once.Do(func() {
+			close(entered)
+			<-release
+		})
+		return []int{0, 0, 0, 0}, nil
+	})
+	coord.SetDrafter(custom)
+	prompt := []int{0, 1, 2}
+	wantTokens := want.Generate(prompt, 8)
+	generated := make(chan []int, 1)
+	generateErr := make(chan error, 1)
+	go func() {
+		out, err := coord.Generate(context.Background(), prompt, 8)
+		generated <- out
+		generateErr <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("generation never entered drafter")
+	}
+
+	switchStarted, switched := make(chan struct{}), make(chan struct{})
+	go func() {
+		close(switchStarted)
+		coord.SetTargetSession(second)
+		close(switched)
+	}()
+	<-switchStarted
+	select {
+	case <-switched:
+		t.Fatal("target switch completed while generation still owned the first target")
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case err := <-generateErr:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("generation deadlocked with target switch")
+	}
+	gotTokens := <-generated
+	if !reflect.DeepEqual(gotTokens, wantTokens) {
+		t.Fatalf("active generation mixed targets: got=%v want=%v", gotTokens, wantTokens)
+	}
+	select {
+	case <-switched:
+	case <-time.After(5 * time.Second):
+		t.Fatal("target switch did not resume after generation")
+	}
+	if coord.TargetSession() != second || second.Cache.Len() != 0 || coord.drafter != custom {
+		t.Fatalf("post-generation switch state target=%p second=%p second-cache=%d drafter-preserved=%v", coord.TargetSession(), second, second.Cache.Len(), coord.drafter == custom)
+	}
+}
+
+func TestMetalMTPCoordinatorMMUBindingWaitsForActiveGeneration(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	target := m.NewSession()
+	defer target.Close()
+	coord, err := target.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer coord.Close()
+
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	coord.SetDrafter(NewMTPProposalGeneratorWithFn(func(context.Context, []int, int) ([]int, error) {
+		once.Do(func() {
+			close(entered)
+			<-release
+		})
+		return []int{0, 0, 0, 0}, nil
+	}))
+	oldMMU, nextMMU := &identityMTPRecorder{}, &identityMTPRecorder{}
+	coord.SetMMU(oldMMU, "request-a")
+	generateDone := make(chan error, 1)
+	go func() {
+		_, err := coord.Generate(context.Background(), []int{0, 1, 2}, 8)
+		generateDone <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("generation never entered drafter")
+	}
+	setStarted, setDone := make(chan struct{}), make(chan struct{})
+	go func() {
+		close(setStarted)
+		coord.SetMMU(nextMMU, "request-b")
+		close(setDone)
+	}()
+	<-setStarted
+	select {
+	case <-setDone:
+		t.Fatal("MMU binding changed while a generation still owned request-a")
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case err := <-generateDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("generation deadlocked with MMU setter")
+	}
+	select {
+	case <-setDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("MMU setter did not resume after generation")
+	}
+	oldEvents := oldMMU.snapshot()
+	if len(oldEvents) == 0 {
+		t.Fatal("active generation did not use its request MMU")
+	}
+	for _, event := range oldEvents {
+		if event != "record:request-a" && event != "commit:request-a" && event != "rollback:request-a" {
+			t.Fatalf("active generation mixed MMU session identity: %v", oldEvents)
+		}
+	}
+	if events := nextMMU.snapshot(); len(events) != 0 {
+		t.Fatalf("next request MMU observed active generation events: %v", events)
+	}
+	coord.mu.Lock()
+	gotMMU, gotSession := coord.checkpointMgr, coord.sessionID
+	coord.mu.Unlock()
+	if gotMMU != nextMMU || gotSession != "request-b" {
+		t.Fatalf("post-generation MMU binding=%p/%q want %p/request-b", gotMMU, gotSession, nextMMU)
+	}
+}
+
+func TestMetalMTPCoordinatorSetMMUNoopAfterCloseAndReleasesBinding(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	target := m.NewSession()
+	defer target.Close()
+	coord, err := target.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldMMU, postCloseMMU := &identityMTPRecorder{}, &identityMTPRecorder{}
+	coord.SetMMU(oldMMU, "request-before-close")
+	if err := coord.Close(); err != nil {
+		t.Fatal(err)
+	}
+	coord.SetMMU(postCloseMMU, "request-after-close")
+	coord.mu.Lock()
+	gotMMU, gotSession := coord.checkpointMgr, coord.sessionID
+	coord.mu.Unlock()
+	if gotMMU != nil || gotSession != "" {
+		t.Fatalf("closed coordinator retained MMU/session binding=%p/%q", gotMMU, gotSession)
+	}
+}
+
+func TestMetalMTPCoordinatorDraftPhaseProfilerAttachAndRead(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	target := m.NewSession()
+	defer target.Close()
+	targetProfiler := NewPhaseProfiler()
+	target.PhaseProfiler = targetProfiler
+	coord, err := target.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer coord.Close()
+
+	draftProfiler := NewPhaseProfiler()
+	if err := coord.SetDraftPhaseProfiler(draftProfiler); err != nil {
+		t.Fatal(err)
+	}
+	if coord.draftSes == nil || coord.draftSes.forward == nil || coord.draftSes.forward.draft == nil ||
+		coord.draftSes.forward.draft.PhaseProfiler != draftProfiler || target.PhaseProfiler != targetProfiler {
+		t.Fatal("draft profiler was not attached exclusively to the owned draft Session")
+	}
+	actual := coord.draftSes.forward.draft.PhaseProfiler
+	actual.recordMetal(completeMetalSnapshot(metalgemm.ExecutionQ6KGEMV, 1, 0.25), nil)
+	actual.recordMetalFallback(MetalFallbackQ8GEMVCPU)
+	receipt, err := coord.DraftPhaseProfilerReceipt()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := metalgemm.ValidateExecutionReceipt(receipt.MetalExecution); err != nil {
+		t.Fatalf("draft Metal execution receipt: %v", err)
+	}
+	if err := ValidateMetalFallbackReceipt(receipt.MetalFallback); err != nil {
+		t.Fatalf("draft Metal fallback receipt: %v", err)
+	}
+	if len(receipt.MetalExecution.Events) != 1 || receipt.MetalExecution.Events[0].Operation != metalgemm.ExecutionQ6KGEMV ||
+		receipt.MetalFallback.PromisedCPUFallbacks != 1 || len(receipt.MetalFallback.Events) != 1 {
+		t.Fatalf("draft profiler receipt=%+v", receipt)
+	}
+	if _, err := targetProfiler.MetalExecutionReceipt(); !metalgemm.IsExecutionCountersIncomplete(err) {
+		t.Fatalf("target profiler was conflated with draft execution: %v", err)
+	}
+	if fallback, err := targetProfiler.MetalFallbackReceipt(); err != nil || len(fallback.Events) != 0 {
+		t.Fatalf("target profiler was conflated with draft fallback: receipt=%+v err=%v", fallback, err)
+	}
+
+	receipt.MetalExecution.Events[0].Operation = metalgemm.ExecutionQ4KGEMM
+	receipt.MetalFallback.Events[0].Route = MetalFallbackQ4KGEMMCPU
+	again, err := coord.DraftPhaseProfilerReceipt()
+	if err != nil || again.MetalExecution.Events[0].Operation != metalgemm.ExecutionQ6KGEMV ||
+		again.MetalFallback.Events[0].Route != MetalFallbackQ8GEMVCPU {
+		t.Fatalf("draft receipt aliases caller memory: receipt=%+v err=%v", again, err)
+	}
+}
+
+func TestMetalMTPCoordinatorDraftPhaseProfilerSurvivesOwnedRebind(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	first, second := m.NewSession(), m.NewSession()
+	defer first.Close()
+	defer second.Close()
+	coord, err := first.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer coord.Close()
+	profiler := NewPhaseProfiler()
+	if err := coord.SetDraftPhaseProfiler(profiler); err != nil {
+		t.Fatal(err)
+	}
+	old := coord.draftSes
+	coord.SetTargetSession(second)
+	if old == nil || !old.closed || coord.draftSes == nil || coord.draftSes == old ||
+		coord.draftSes.target != second || coord.draftSes.forward.draft.PhaseProfiler != profiler {
+		t.Fatal("owned target rebind did not close the old drafter and reapply its profiler")
+	}
+
+	// Prefix divergence recreates Qwen35MTPForward inside the same owned draft
+	// session. The coordinator-installed step seam must attach before execution.
+	if err := coord.draftSes.recreateForward(); err != nil {
+		t.Fatal(err)
+	}
+	if coord.draftSes.forward.draft.PhaseProfiler != nil {
+		t.Fatal("fresh internal forward unexpectedly inherited Session state")
+	}
+	prior, embedding := qwen38MTPInputs(m.Cfg.HiddenSize, 0)
+	if _, _, err := coord.draftSes.step(coord.draftSes.forward, 0, prior, embedding); err != nil {
+		t.Fatal(err)
+	}
+	if coord.draftSes.forward.draft.PhaseProfiler != profiler {
+		t.Fatal("internal draft-forward recreation lost the coordinator profiler")
+	}
+}
+
+func TestMetalMTPCoordinatorDraftPhaseProfilerRejectsInjectedAndTargetAlias(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	target := m.NewSession()
+	defer target.Close()
+	coord, err := target.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer coord.Close()
+	targetProfiler := NewPhaseProfiler()
+	target.PhaseProfiler = targetProfiler
+	if err := coord.SetDraftPhaseProfiler(targetProfiler); !errors.Is(err, ErrMetalMTPDraftProfilerTargetAlias) {
+		t.Fatalf("target profiler alias err=%v", err)
+	}
+	draftProfiler := NewPhaseProfiler()
+	if err := coord.SetDraftPhaseProfiler(draftProfiler); err != nil {
+		t.Fatal(err)
+	}
+	old := coord.draftSes
+	coord.SetDrafter(NewMTPProposalGeneratorWithFn(func(context.Context, []int, int) ([]int, error) {
+		return []int{0}, nil
+	}))
+	if old == nil || !old.closed {
+		t.Fatal("injected drafter did not close the owned profiled session")
+	}
+	if err := coord.SetDraftPhaseProfiler(NewPhaseProfiler()); !errors.Is(err, ErrMetalMTPDraftProfilerUnavailable) {
+		t.Fatalf("injected drafter profiler attach err=%v", err)
+	}
+	if _, err := coord.DraftPhaseProfilerReceipt(); !errors.Is(err, ErrMetalMTPDraftProfilerUnavailable) {
+		t.Fatalf("injected drafter profiler receipt err=%v", err)
+	}
+	if target.PhaseProfiler != targetProfiler {
+		t.Fatal("draft profiler lifecycle changed the target profiler")
+	}
+}
+
+func TestMetalMTPCoordinatorDraftPhaseProfilerConcurrentLifecycle(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	initial := m.NewSession()
+	defer initial.Close()
+	coord, err := initial.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiler := NewPhaseProfiler()
+	profiler.recordMetal(completeMetalSnapshot(metalgemm.ExecutionQ4KGEMV, 1, 0.5), nil)
+	if err := coord.SetDraftPhaseProfiler(profiler); err != nil {
+		t.Fatal(err)
+	}
+	targets := make([]*Session, 8)
+	for i := range targets {
+		targets[i] = m.NewSession()
+		defer targets[i].Close()
+	}
+	start := make(chan struct{})
+	errs := make(chan error, len(targets)*3+1)
+	var wg sync.WaitGroup
+	for _, target := range targets {
+		target := target
+		wg.Add(3)
+		go func() {
+			defer wg.Done()
+			<-start
+			coord.SetTargetSession(target)
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			err := coord.SetDraftPhaseProfiler(profiler)
+			if err != nil && !errors.Is(err, ErrMetalMTPClosed) {
+				errs <- err
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := coord.DraftPhaseProfilerReceipt()
+			if err != nil && !errors.Is(err, ErrMetalMTPClosed) {
+				errs <- err
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		errs <- coord.Close()
+	}()
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !coord.closed || coord.draftSes != nil || coord.draftProfiler != nil {
+		t.Fatalf("closed coordinator retained draft profiler state: closed=%v draft=%p profiler=%p", coord.closed, coord.draftSes, coord.draftProfiler)
+	}
+	if err := coord.SetDraftPhaseProfiler(NewPhaseProfiler()); !errors.Is(err, ErrMetalMTPClosed) {
+		t.Fatalf("post-close attach err=%v", err)
+	}
+	if _, err := coord.DraftPhaseProfilerReceipt(); !errors.Is(err, ErrMetalMTPClosed) {
+		t.Fatalf("post-close receipt err=%v", err)
+	}
+}
+
+func TestMetalMTPCoordinatorMMUCommitFailureRestoresTargetAndRecordsRejectedRound(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	prompt := []int{0, 1, 2}
+	target, oracle, want := m.NewSession(), m.NewSession(), m.NewSession()
+	defer target.Close()
+	defer oracle.Close()
+	defer want.Close()
+	target.captureTargetHidden, oracle.captureTargetHidden, want.captureTargetHidden = true, true, true
+	boundary := target.Prefill(prompt)
+	oracleLogits := oracle.Prefill(prompt)
+	want.Prefill(prompt)
+	normalizeSnapshotForTest(t, target)
+	normalizeSnapshotForTest(t, want)
+	draft := make([]int, 4)
+	for i := range draft {
+		draft[i] = argmaxF32(oracleLogits)
+		oracleLogits = oracle.Step(draft[i])
+	}
+
+	adaptive := DefaultQwen38AdaptiveConfig()
+	adaptive.ColdStartDepth = 4
+	cfg := DefaultMetalMTPConfig()
+	cfg.Adaptive = true
+	cfg.AdaptiveConfig = &adaptive
+	coord, err := target.NewMetalMTPCoordinator(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer coord.Close()
+	coord.SetDrafter(NewMTPProposalGeneratorWithFn(func(context.Context, []int, int) ([]int, error) {
+		return append([]int(nil), draft...), nil
+	}))
+	commitFailure := errors.New("injected Context-MMU commit failure")
+	mmu := &mockMTPRecorder{commitErr: commitFailure}
+	coord.SetMMU(mmu, "commit-failure")
+
+	accepted, bonus, next, err := coord.StepRound(context.Background(), prompt, boundary)
+	if !errors.Is(err, commitFailure) || accepted != nil || bonus != -1 || next != nil {
+		t.Fatalf("MMU failure escaped accepted=%v bonus=%d next=%v err=%v", accepted, bonus, next, err)
+	}
+	assertQwen35MTPTargetStateEqual(t, target, want)
+	stats := coord.Stats()
+	if stats.TotalProposed != 4 || stats.TotalAccepted != 0 || stats.TotalRollbacks != 4 ||
+		stats.CommittedPages != 0 || stats.FreedPages != 4 || stats.TotalGenerated != 0 {
+		t.Fatalf("MMU failure accounting=%+v", stats)
+	}
+	trace := coord.AdaptiveGovernor().Trace()
+	if len(trace) != 1 || trace[0].ProposedTokens != 4 || trace[0].AcceptedTokens != 0 {
+		t.Fatalf("MMU failure governor trace=%+v", trace)
+	}
+	if mmu.records != 1 || mmu.commits != 1 || mmu.rollbacks != 1 {
+		t.Fatalf("MMU lifecycle records/commits/rollbacks=%d/%d/%d", mmu.records, mmu.commits, mmu.rollbacks)
+	}
+}
+
+func mustMetalMTPGenerate(t *testing.T, coord *MetalMTPCoordinator, prompt []int, count int) []int {
+	t.Helper()
+	out, err := coord.Generate(context.Background(), prompt, count)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 // BenchmarkMetalMTPDraftVerifyRollbackLoop benchmarks wide-M (M=4) verification against serial decode.

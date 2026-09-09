@@ -7,6 +7,8 @@ import (
 	"math"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
 
 var (
@@ -24,49 +26,15 @@ var (
 
 	// ErrMetalMTPInvalidDraftDepth is returned when draft depth is outside supported bounds [1, 4].
 	ErrMetalMTPInvalidDraftDepth = errors.New("model: Metal MTP draft depth must be between 1 and 4")
+
+	// ErrMetalMTPDraftProfilerUnavailable reports that no coordinator-owned
+	// Qwen3.8 MTP draft session exists. Injected drafters never expose a profiler.
+	ErrMetalMTPDraftProfilerUnavailable = errors.New("model: coordinator-owned Metal MTP draft profiler is unavailable")
+
+	// ErrMetalMTPDraftProfilerTargetAlias prevents target and draft execution
+	// from being aggregated into one PhaseProfiler receipt.
+	ErrMetalMTPDraftProfilerTargetAlias = errors.New("model: Metal MTP draft profiler must be distinct from target profiler")
 )
-
-// MetalMTPCheckpointOperation identifies the durable Context-MMU operation that failed.
-type MetalMTPCheckpointOperation string
-
-const (
-	MetalMTPCheckpointRecord   MetalMTPCheckpointOperation = "record"
-	MetalMTPCheckpointCommit   MetalMTPCheckpointOperation = "commit"
-	MetalMTPCheckpointRollback MetalMTPCheckpointOperation = "rollback"
-)
-
-// MetalMTPCheckpointError preserves the failing durable checkpoint operation and cause.
-type MetalMTPCheckpointError struct {
-	Operation MetalMTPCheckpointOperation
-	Err       error
-}
-
-func (e *MetalMTPCheckpointError) Error() string {
-	return fmt.Sprintf("model: Metal MTP checkpoint %s failed: %v", e.Operation, e.Err)
-}
-
-func (e *MetalMTPCheckpointError) Unwrap() error { return e.Err }
-
-// MetalMTPSnapshotOperation identifies the target-state snapshot operation that failed.
-type MetalMTPSnapshotOperation string
-
-const (
-	MetalMTPSnapshotCapture MetalMTPSnapshotOperation = "capture"
-	MetalMTPSnapshotClone   MetalMTPSnapshotOperation = "clone"
-	MetalMTPSnapshotRestore MetalMTPSnapshotOperation = "restore"
-)
-
-// MetalMTPSnapshotError preserves the failing target-state snapshot operation and cause.
-type MetalMTPSnapshotError struct {
-	Operation MetalMTPSnapshotOperation
-	Err       error
-}
-
-func (e *MetalMTPSnapshotError) Error() string {
-	return fmt.Sprintf("model: Metal MTP snapshot %s failed: %v", e.Operation, e.Err)
-}
-
-func (e *MetalMTPSnapshotError) Unwrap() error { return e.Err }
 
 // StepCostFn calculates or overrides step and target latencies or speedup for an adaptive governor observation.
 type StepCostFn func(proposed, accepted int, base Qwen38AdaptiveStepObservation) Qwen38AdaptiveStepObservation
@@ -131,59 +99,26 @@ type MetalMTPAcceptanceStats struct {
 	DowngradeReason  Qwen38MTPDowngradeReason    `json:"downgrade_reason,omitempty"`
 }
 
+// MetalMTPTargetVerificationReceipt couples the generic target-verification
+// accounting with the exact admitted Metal panel and its state transaction.
+type MetalMTPTargetVerificationReceipt struct {
+	TargetVerificationReceipt
+	Panel *Qwen35MetalMTPVerifyPanelReceipt `json:"panel,omitempty"`
+}
+
+// MetalMTPDraftPhaseProfilerReceipt is an immutable readback from the profiler
+// attached to the coordinator-owned Qwen3.8 MTP draft Session. The two embedded
+// receipts remain independently schema-validated by their owning packages.
+type MetalMTPDraftPhaseProfilerReceipt struct {
+	MetalFallback  MetalFallbackReceipt       `json:"metal_fallback"`
+	MetalExecution metalgemm.ExecutionReceipt `json:"metal_execution"`
+}
+
 // MTPCheckpointRecorder records speculative candidate draft tokens and atomic page commit/rollback.
 type MTPCheckpointRecorder interface {
 	RecordMTPDraft(sessionID string, tokens []int32) error
 	CommitMTPDraft(sessionID string, accepted int) (int, int, error)
 	RollbackMTPDraft(sessionID string) (int, error)
-}
-
-type metalMTPTargetSnapshot interface {
-	Clone() (metalMTPTargetSnapshot, error)
-	Restore(*Session) error
-	Close()
-}
-
-type metalMTPPrefixSnapshot struct {
-	snapshot *PrefixSnapshot
-}
-
-func captureMetalMTPTargetSnapshot(target *Session) (metalMTPTargetSnapshot, error) {
-	snapshot, err := target.PrefixSnapshot()
-	if err != nil {
-		return nil, err
-	}
-	if snapshot == nil {
-		return nil, errors.New("model: target prefix snapshot is nil")
-	}
-	return &metalMTPPrefixSnapshot{snapshot: snapshot}, nil
-}
-
-func (s *metalMTPPrefixSnapshot) Clone() (metalMTPTargetSnapshot, error) {
-	if s == nil || s.snapshot == nil {
-		return nil, errors.New("model: cannot clone nil Metal MTP snapshot")
-	}
-	clone, err := s.snapshot.Clone()
-	if err != nil {
-		return nil, err
-	}
-	if clone == nil {
-		return nil, errors.New("model: cloned Metal MTP snapshot is nil")
-	}
-	return &metalMTPPrefixSnapshot{snapshot: clone}, nil
-}
-
-func (s *metalMTPPrefixSnapshot) Restore(target *Session) error {
-	if s == nil || s.snapshot == nil {
-		return errors.New("model: cannot restore nil Metal MTP snapshot")
-	}
-	return s.snapshot.Restore(target)
-}
-
-func (s *metalMTPPrefixSnapshot) Close() {
-	if s != nil && s.snapshot != nil {
-		s.snapshot.Close()
-	}
 }
 
 // MTPDraftTracker records speculative candidate draft tokens, depth, and page state.
@@ -229,12 +164,17 @@ func (s *MTPDraftTracker) RollbackDraft() (freedPages int, err error) {
 // wide-M Metal verification dispatch, atomic Context-MMU page commit/rollback,
 // and greedy temperature-zero tripwires into an autonomous speculative decode loop.
 type MetalMTPCoordinator struct {
-	mu sync.Mutex
+	mu           sync.Mutex
+	generationMu sync.Mutex
 
 	target   *Session
 	cfg      MetalMTPConfig
 	drafter  ProposalGenerator
 	draftSes *Qwen35MTPDraftSession
+	// draftProfiler is a coordinator configuration, not the target profiler. It
+	// survives replacement of an owned draft session and is rebound to the new
+	// Qwen35MTPForward.draft Session before that session executes.
+	draftProfiler *PhaseProfiler
 
 	// Adaptive depth governance
 	governor      *Qwen38MTPAdaptiveDepthGovernor
@@ -245,7 +185,6 @@ type MetalMTPCoordinator struct {
 	checkpointMgr MTPCheckpointRecorder
 	sessionID     string
 	draftState    *MTPDraftTracker
-	captureTarget func(*Session) (metalMTPTargetSnapshot, error)
 
 	// Rolling acceptance monitoring (32-token window)
 	windowOutcomes []bool
@@ -253,6 +192,12 @@ type MetalMTPCoordinator struct {
 	totalProposed  int
 	totalAccepted  int
 	totalRollbacks int
+
+	// Most recent target verification transaction. This diagnostic receipt keeps
+	// one-operation panel execution distinguishable from an honest K-step target
+	// decode downgrade.
+	lastTargetVerification MetalMTPTargetVerificationReceipt
+	hasTargetVerification  bool
 
 	// Fallback state
 	inFallback     bool
@@ -292,7 +237,6 @@ func NewMetalMTPCoordinator(target *Session, cfgs ...MetalMTPConfig) (*MetalMTPC
 		cfg:            cfg,
 		draftState:     &MTPDraftTracker{DraftDepth: cfg.DraftDepth},
 		windowOutcomes: make([]bool, 0, cfg.WindowSize),
-		captureTarget:  captureMetalMTPTargetSnapshot,
 	}
 
 	if cfg.Adaptive || cfg.AdaptiveConfig != nil {
@@ -333,6 +277,7 @@ func (m *Model) NewMetalMTPCoordinator(s *Session, cfgs ...MetalMTPConfig) (*Met
 
 func (c *MetalMTPCoordinator) ensureDrafterLocked() {
 	if c.drafter != nil {
+		c.rebindDraftPhaseProfilerLocked()
 		return
 	}
 	if c.target == nil || c.target.M == nil {
@@ -347,52 +292,136 @@ func (c *MetalMTPCoordinator) ensureDrafterLocked() {
 		if err == nil {
 			c.draftSes = ds
 			c.drafter = NewMTPProposalGenerator(ds)
+			c.rebindDraftPhaseProfilerLocked()
 		}
 	}
 }
 
-// SetDrafter injects an explicit ProposalGenerator (e.g. resident MTP, sidecar, or test mock).
-func (c *MetalMTPCoordinator) SetDrafter(p ProposalGenerator) {
+func (c *MetalMTPCoordinator) rebindDraftPhaseProfilerLocked() {
+	if c == nil || c.draftSes == nil {
+		return
+	}
+	ds := c.draftSes
+	// Reset the owned session to its native default before deciding whether the
+	// stored profiler remains admissible for the current target.
+	ds.step = qwen35MTPForwardFeedback
+	if ds.forward != nil && ds.forward.draft != nil {
+		ds.forward.draft.PhaseProfiler = nil
+	}
+	profiler := c.draftProfiler
+	if profiler == nil || c.target == nil || c.target.PhaseProfiler == profiler || ds.forward == nil || ds.forward.draft == nil {
+		return
+	}
+	ds.forward.draft.PhaseProfiler = profiler
+	// A draft session can recreate its Qwen35MTPForward when the committed
+	// prefix diverges. Reattach immediately before every native feedback step so
+	// that the replacement draft Session keeps the coordinator's profiler.
+	ds.step = func(forward *Qwen35MTPForward, pos int, priorHidden, embedding []float32) ([]float32, []float32, error) {
+		if forward != nil && forward.draft != nil {
+			forward.draft.PhaseProfiler = profiler
+		}
+		return qwen35MTPForwardFeedback(forward, pos, priorHidden, embedding)
+	}
+}
+
+func (c *MetalMTPCoordinator) boundDraftPhaseProfilerLocked() (*PhaseProfiler, error) {
+	if c.draftSes == nil || c.draftSes.forward == nil || c.draftSes.forward.draft == nil || c.draftProfiler == nil {
+		return nil, ErrMetalMTPDraftProfilerUnavailable
+	}
+	if c.target != nil && c.target.PhaseProfiler == c.draftProfiler {
+		return nil, ErrMetalMTPDraftProfilerTargetAlias
+	}
+	if c.draftSes.forward.draft.PhaseProfiler != c.draftProfiler {
+		return nil, ErrMetalMTPDraftProfilerUnavailable
+	}
+	return c.draftProfiler, nil
+}
+
+// SetDraftPhaseProfiler installs a profiler only on the coordinator-owned MTP
+// draft Session. It rejects injected drafters, nil profilers, and the target's
+// profiler, and reapplies the profiler whenever the owned drafter is rebound.
+func (c *MetalMTPCoordinator) SetDraftPhaseProfiler(profiler *PhaseProfiler) error {
+	if c == nil {
+		return ErrMetalMTPDraftProfilerUnavailable
+	}
+	c.generationMu.Lock()
+	defer c.generationMu.Unlock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.closed {
+		return ErrMetalMTPClosed
+	}
+	if profiler == nil {
+		return ErrMetalMTPDraftProfilerUnavailable
+	}
+	c.ensureDrafterLocked()
+	if c.draftSes == nil || c.draftSes.forward == nil || c.draftSes.forward.draft == nil {
+		return ErrMetalMTPDraftProfilerUnavailable
+	}
+	if c.target != nil && c.target.PhaseProfiler == profiler {
+		return ErrMetalMTPDraftProfilerTargetAlias
+	}
+	c.draftProfiler = profiler
+	c.rebindDraftPhaseProfilerLocked()
+	_, err := c.boundDraftPhaseProfilerLocked()
+	return err
+}
+
+// DraftPhaseProfilerReceipt safely snapshots the actual profiler currently
+// attached to the internally owned draft Session. It waits for active
+// generation before reading the profiler's otherwise single-owner state.
+func (c *MetalMTPCoordinator) DraftPhaseProfilerReceipt() (MetalMTPDraftPhaseProfilerReceipt, error) {
+	if c == nil {
+		return MetalMTPDraftPhaseProfilerReceipt{}, ErrMetalMTPDraftProfilerUnavailable
+	}
+	c.generationMu.Lock()
+	defer c.generationMu.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return MetalMTPDraftPhaseProfilerReceipt{}, ErrMetalMTPClosed
+	}
+	profiler, err := c.boundDraftPhaseProfilerLocked()
+	if err != nil {
+		return MetalMTPDraftPhaseProfilerReceipt{}, err
+	}
+	receipt := MetalMTPDraftPhaseProfilerReceipt{}
+	receipt.MetalFallback, err = profiler.MetalFallbackReceipt()
+	execution, executionErr := profiler.MetalExecutionReceipt()
+	receipt.MetalExecution = execution
+	if readErr := errors.Join(err, executionErr); readErr != nil {
+		return receipt, fmt.Errorf("model: read Metal MTP draft profiler receipt: %w", readErr)
+	}
+	return receipt, nil
+}
+
+// SetDrafter injects an explicit ProposalGenerator (e.g. resident MTP, sidecar, or test mock).
+func (c *MetalMTPCoordinator) SetDrafter(p ProposalGenerator) {
+	c.generationMu.Lock()
+	defer c.generationMu.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return
+	}
+	if c.draftSes != nil {
+		c.draftSes.Close()
+		c.draftSes = nil
+	}
 	c.drafter = p
 }
 
 // SetMMU wires a Context-MMU CheckpointManager and session identifier.
 func (c *MetalMTPCoordinator) SetMMU(cm MTPCheckpointRecorder, sessionID string) {
+	c.generationMu.Lock()
+	defer c.generationMu.Unlock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.closed {
+		return
+	}
 	c.checkpointMgr = cm
 	c.sessionID = sessionID
-}
-
-func (c *MetalMTPCoordinator) checkpointConfiguredLocked() bool {
-	return c.checkpointMgr != nil && c.sessionID != ""
-}
-
-// rollbackRoundLocked restores the target snapshot even when durable rollback fails and
-// joins every failure so callers can match both the primary cause and cleanup failures.
-func (c *MetalMTPCoordinator) rollbackRoundLocked(snapshot metalMTPTargetSnapshot, cause error) error {
-	errs := make([]error, 0, 4)
-	if cause != nil {
-		errs = append(errs, cause)
-	}
-	if c.draftState != nil {
-		if _, err := c.draftState.RollbackDraft(); err != nil {
-			errs = append(errs, fmt.Errorf("model: Metal MTP local draft rollback failed: %w", err))
-		}
-	}
-	if c.checkpointConfiguredLocked() {
-		if _, err := c.checkpointMgr.RollbackMTPDraft(c.sessionID); err != nil {
-			errs = append(errs, &MetalMTPCheckpointError{Operation: MetalMTPCheckpointRollback, Err: err})
-		}
-	}
-	if snapshot != nil {
-		if err := snapshot.Restore(c.target); err != nil {
-			errs = append(errs, &MetalMTPSnapshotError{Operation: MetalMTPSnapshotRestore, Err: err})
-		}
-	}
-	return errors.Join(errs...)
 }
 
 // TargetSession returns the underlying target model session.
@@ -404,9 +433,30 @@ func (c *MetalMTPCoordinator) TargetSession() *Session {
 
 // SetTargetSession updates the target model session.
 func (c *MetalMTPCoordinator) SetTargetSession(s *Session) {
+	c.generationMu.Lock()
+	defer c.generationMu.Unlock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.closed {
+		return
+	}
+	// draftSes is present only for the coordinator-created drafter. It is bound
+	// to target hidden history and therefore must never survive a request target
+	// switch. An injected drafter has no draftSes owner and is intentionally
+	// preserved across switches.
+	if c.draftSes != nil {
+		c.draftSes.Close()
+		c.draftSes = nil
+		c.drafter = nil
+	}
+	c.draftState = &MTPDraftTracker{DraftDepth: c.cfg.DraftDepth}
 	c.target = s
+	c.lastTargetVerification = MetalMTPTargetVerificationReceipt{}
+	c.hasTargetVerification = false
+	if s != nil {
+		s.captureTargetHidden = true
+		c.ensureDrafterLocked()
+	}
 }
 
 // Config returns the coordinator's active configuration.
@@ -483,6 +533,24 @@ func (c *MetalMTPCoordinator) recordAcceptanceLocked(proposed, accepted int) {
 				rate*100, c.cfg.MinAcceptanceRate*100, len(c.windowOutcomes))
 		}
 	}
+}
+
+func (c *MetalMTPCoordinator) observeSpeculativeRoundLocked(start time.Time, proposed, accepted int) error {
+	c.recordAcceptanceLocked(proposed, accepted)
+	if c.governor == nil {
+		return nil
+	}
+	obs := Qwen38AdaptiveStepObservation{
+		ProposedTokens: proposed,
+		AcceptedTokens: accepted,
+		StepLatency:    time.Since(start),
+		TargetLatency:  c.targetLatency,
+	}
+	if c.stepCostFn != nil {
+		obs = c.stepCostFn(proposed, accepted, obs)
+	}
+	_, _, err := c.governor.ObserveStep(obs)
+	return err
 }
 
 func (c *MetalMTPCoordinator) windowRateLocked() float64 {
@@ -566,6 +634,44 @@ func (c *MetalMTPCoordinator) Stats() MetalMTPAcceptanceStats {
 	return stats
 }
 
+// LastTargetVerificationReceipt returns the most recent speculative target
+// verification receipt. The bool is false when the latest round did not run a
+// target verification transaction (for example, target-only fallback).
+func (c *MetalMTPCoordinator) LastTargetVerificationReceipt() (MetalMTPTargetVerificationReceipt, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if !c.hasTargetVerification {
+		return MetalMTPTargetVerificationReceipt{}, false
+	}
+	receipt := c.lastTargetVerification
+	if receipt.Shape != nil {
+		shape := *receipt.Shape
+		receipt.Shape = &shape
+	}
+	if receipt.Panel != nil {
+		panel := *receipt.Panel
+		panel.GDNCheckpointLayers = append([]int(nil), receipt.Panel.GDNCheckpointLayers...)
+		panel.GDNCheckpointLineageSHA256 = append([]string(nil), receipt.Panel.GDNCheckpointLineageSHA256...)
+		receipt.Panel = &panel
+	}
+	return receipt, true
+}
+
+func (c *MetalMTPCoordinator) recordTargetVerificationLocked(tx *qwen35MTPTargetTransaction) {
+	if tx == nil {
+		return
+	}
+	c.lastTargetVerification = MetalMTPTargetVerificationReceipt{TargetVerificationReceipt: tx.VerificationReceipt()}
+	if tx.panelReceipt != nil {
+		panel := *tx.panelReceipt
+		panel.GDNCheckpointLayers = append([]int(nil), tx.panelReceipt.GDNCheckpointLayers...)
+		panel.GDNCheckpointLineageSHA256 = append([]string(nil), tx.panelReceipt.GDNCheckpointLineageSHA256...)
+		c.lastTargetVerification.Panel = &panel
+	}
+	c.hasTargetVerification = true
+}
+
 // StepRound executes one speculative draft-verify-rollback cycle or serial step.
 // Given committed token sequence and current boundary logits:
 //  1. Verifies logit finiteness and temperature-zero tripwire.
@@ -583,6 +689,8 @@ func (c *MetalMTPCoordinator) Stats() MetalMTPAcceptanceStats {
 func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, boundaryLogits []float32) (accepted []int, bonus int, nextLogits []float32, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.lastTargetVerification = MetalMTPTargetVerificationReceipt{}
+	c.hasTargetVerification = false
 
 	if c.closed {
 		return nil, -1, nil, ErrMetalMTPClosed
@@ -668,34 +776,17 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 		draftTokens32[i] = int32(t)
 	}
 
-	// Capture the pre-round target before any durable or inference state changes.
-	snapshot, snapshotErr := c.captureTarget(c.target)
-	if snapshotErr != nil {
-		return nil, -1, nil, &MetalMTPSnapshotError{Operation: MetalMTPSnapshotCapture, Err: snapshotErr}
-	}
-	defer snapshot.Close()
-
-	// Record the draft locally and durably before verification mutates the target.
-	c.draftState.RecordDraft(draftTokens32)
-	if c.checkpointConfiguredLocked() {
-		if recordErr := c.checkpointMgr.RecordMTPDraft(c.sessionID, draftTokens32); recordErr != nil {
-			return nil, -1, nil, c.rollbackRoundLocked(snapshot, &MetalMTPCheckpointError{Operation: MetalMTPCheckpointRecord, Err: recordErr})
-		}
-	}
-
-	// Vocabulary sanity check: reject out-of-vocab candidates.
+	// Vocabulary sanity check: reject out-of-vocab candidates
 	vocabSize := c.target.M.Cfg.VocabSize
 	for _, tok := range drafts {
 		if tok < 0 || (vocabSize > 0 && tok >= vocabSize) {
-			if c.checkpointConfiguredLocked() {
-				if _, _, commitErr := c.checkpointMgr.CommitMTPDraft(c.sessionID, 0); commitErr != nil {
-					return nil, -1, nil, c.rollbackRoundLocked(snapshot, &MetalMTPCheckpointError{Operation: MetalMTPCheckpointCommit, Err: commitErr})
-				}
-			}
-			if _, _, commitErr := c.draftState.CommitDraft(0); commitErr != nil {
-				return nil, -1, nil, c.rollbackRoundLocked(snapshot, commitErr)
-			}
 			c.recordAcceptanceLocked(len(drafts), 0)
+			c.draftState.RecordDraft(draftTokens32)
+			_, _, _ = c.draftState.CommitDraft(0)
+			if c.checkpointMgr != nil && c.sessionID != "" {
+				_ = c.checkpointMgr.RecordMTPDraft(c.sessionID, draftTokens32)
+				_, _, _ = c.checkpointMgr.CommitMTPDraft(c.sessionID, 0)
+			}
 			nextLogits = c.target.Step(target0)
 			elapsed := time.Since(start)
 			c.totalGenerated++
@@ -713,6 +804,43 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 			}
 			return nil, target0, nextLogits, nil
 		}
+	}
+
+	// The production Qwen3.8 Metal target panel is an exact P=4 operation. Give
+	// its transaction seam first refusal before the quantized target can reach
+	// the ordinary K-step verifier fallback. The transaction owns the live GDN
+	// checkpoint and PrefixSnapshot needed to adopt a full panel or restore and
+	// replay a partial accepted prefix.
+	if activeDepth == 4 && len(drafts) == 4 && c.target.M.Cfg.IsQwen35Hybrid() {
+		return c.stepRoundQwen35P4Locked(start, target0, boundaryLogits, drafts, draftTokens32)
+	}
+
+	// 4. Capture pre-round verified snapshot for exact rollback
+	snap, snapErr := c.target.PrefixSnapshot()
+	if snapErr != nil {
+		nextLogits = c.target.Step(target0)
+		elapsed := time.Since(start)
+		c.totalGenerated++
+		if c.governor != nil {
+			obs := Qwen38AdaptiveStepObservation{
+				ProposedTokens: 0,
+				AcceptedTokens: 0,
+				StepLatency:    elapsed,
+				TargetLatency:  c.targetLatency,
+			}
+			if c.stepCostFn != nil {
+				obs = c.stepCostFn(0, 0, obs)
+			}
+			_, _, _ = c.governor.ObserveStep(obs)
+		}
+		return []int{target0}, -1, nextLogits, nil
+	}
+	defer snap.Close()
+
+	// Record draft in Context-MMU with speculative page tracking
+	c.draftState.RecordDraft(draftTokens32)
+	if c.checkpointMgr != nil && c.sessionID != "" {
+		_ = c.checkpointMgr.RecordMTPDraft(c.sessionID, draftTokens32)
 	}
 
 	// 5. Wide-M Metal verification dispatch (evaluates K candidate tokens in 1 weight-streaming pass)
@@ -735,9 +863,11 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 
 	if len(rows) != len(drafts) {
 		// Verification returned mismatched rows: fail closed and rollback
-		if rollbackErr := c.rollbackRoundLocked(snapshot, nil); rollbackErr != nil {
-			return nil, -1, nil, rollbackErr
+		_, _ = c.draftState.RollbackDraft()
+		if c.checkpointMgr != nil && c.sessionID != "" {
+			_, _ = c.checkpointMgr.RollbackMTPDraft(c.sessionID)
 		}
+		_ = snap.Restore(c.target)
 		nextLogits = c.target.Step(target0)
 		elapsed := time.Since(start)
 		c.totalGenerated++
@@ -763,7 +893,12 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 				if math.IsNaN(float64(l)) || math.IsInf(float64(l), 0) {
 					c.tripwireTripped = true
 					c.tripwireReason = "non-finite logits in verification rows"
-					return nil, -1, nil, c.rollbackRoundLocked(snapshot, ErrMetalMTPNonFiniteLogits)
+					_, _ = c.draftState.RollbackDraft()
+					if c.checkpointMgr != nil && c.sessionID != "" {
+						_, _ = c.checkpointMgr.RollbackMTPDraft(c.sessionID)
+					}
+					_ = snap.Restore(c.target)
+					return nil, -1, nil, ErrMetalMTPNonFiniteLogits
 				}
 			}
 		}
@@ -781,31 +916,30 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 	if tripErr != nil {
 		c.tripwireTripped = true
 		c.tripwireReason = tripErr.Error()
-		return nil, -1, nil, c.rollbackRoundLocked(snapshot, tripErr)
+		_, _ = c.draftState.RollbackDraft()
+		if c.checkpointMgr != nil && c.sessionID != "" {
+			_, _ = c.checkpointMgr.RollbackMTPDraft(c.sessionID)
+		}
+		_ = snap.Restore(c.target)
+		return nil, -1, nil, tripErr
 	}
 
 	numAccepted := len(accTokens)
 
 	// 8. Atomic Context-MMU page commit & rollback:
 	// Commits accepted token pages and immediately frees rejected pages without memory leaks
-	if c.checkpointConfiguredLocked() {
-		if _, _, commitErr := c.checkpointMgr.CommitMTPDraft(c.sessionID, numAccepted); commitErr != nil {
-			return nil, -1, nil, c.rollbackRoundLocked(snapshot, &MetalMTPCheckpointError{Operation: MetalMTPCheckpointCommit, Err: commitErr})
-		}
-	}
-	if _, _, commitErr := c.draftState.CommitDraft(numAccepted); commitErr != nil {
-		return nil, -1, nil, c.rollbackRoundLocked(snapshot, commitErr)
+	_, _, _ = c.draftState.CommitDraft(numAccepted)
+	if c.checkpointMgr != nil && c.sessionID != "" {
+		_, _, _ = c.checkpointMgr.CommitMTPDraft(c.sessionID, numAccepted)
 	}
 
 	// Roll back unaccepted KV cache positions and recurrent state in the target session
 	if numAccepted < len(drafts) {
-		clone, cloneErr := snapshot.Clone()
-		if cloneErr != nil {
-			return nil, -1, nil, c.rollbackRoundLocked(snapshot, &MetalMTPSnapshotError{Operation: MetalMTPSnapshotClone, Err: cloneErr})
-		}
-		defer clone.Close()
-		if restoreErr := clone.Restore(c.target); restoreErr != nil {
-			return nil, -1, nil, c.rollbackRoundLocked(snapshot, &MetalMTPSnapshotError{Operation: MetalMTPSnapshotRestore, Err: restoreErr})
+		clone, cErr := snap.Clone()
+		if cErr == nil {
+			_ = clone.Restore(c.target)
+		} else {
+			_ = snap.Restore(c.target)
 		}
 		for _, tok := range accTokens {
 			c.target.Step(tok)
@@ -837,12 +971,136 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 	return accTokens, bonusTok, nextLogits, nil
 }
 
+func (c *MetalMTPCoordinator) stepRoundQwen35P4Locked(start time.Time, target0 int, boundaryLogits []float32, drafts []int, draftTokens32 []int32) ([]int, int, []float32, error) {
+	tx, txErr := beginQwen35MTPTargetTransaction(c.target, boundaryLogits)
+	if txErr != nil {
+		nextLogits := c.target.Step(target0)
+		elapsed := time.Since(start)
+		c.totalGenerated++
+		if c.governor != nil {
+			obs := Qwen38AdaptiveStepObservation{
+				ProposedTokens: 0,
+				AcceptedTokens: 0,
+				StepLatency:    elapsed,
+				TargetLatency:  c.targetLatency,
+			}
+			if c.stepCostFn != nil {
+				obs = c.stepCostFn(0, 0, obs)
+			}
+			_, _, _ = c.governor.ObserveStep(obs)
+		}
+		return []int{target0}, -1, nextLogits, nil
+	}
+
+	c.draftState.RecordDraft(draftTokens32)
+	if c.checkpointMgr != nil && c.sessionID != "" {
+		if recordErr := c.checkpointMgr.RecordMTPDraft(c.sessionID, draftTokens32); recordErr != nil {
+			rollbackErr := func() error {
+				_, localErr := c.draftState.RollbackDraft()
+				_, mmuErr := c.checkpointMgr.RollbackMTPDraft(c.sessionID)
+				return errors.Join(localErr, mmuErr)
+			}()
+			abortErr := tx.Abort()
+			tx.receipt.AcceptedTokens = 0
+			tx.receipt.RejectedTokens = len(drafts)
+			c.recordTargetVerificationLocked(tx)
+			observeErr := c.observeSpeculativeRoundLocked(start, len(drafts), 0)
+			return nil, -1, nil, errors.Join(fmt.Errorf("model: record Context-MMU MTP draft: %w", recordErr), rollbackErr, abortErr, observeErr)
+		}
+	}
+	rollbackDraft := func() error {
+		_, localErr := c.draftState.RollbackDraft()
+		var mmuErr error
+		if c.checkpointMgr != nil && c.sessionID != "" {
+			_, mmuErr = c.checkpointMgr.RollbackMTPDraft(c.sessionID)
+		}
+		return errors.Join(localErr, mmuErr)
+	}
+	abort := func(cause error) ([]int, int, []float32, error) {
+		rollbackErr := rollbackDraft()
+		abortErr := tx.Abort()
+		c.recordTargetVerificationLocked(tx)
+		observeErr := c.observeSpeculativeRoundLocked(start, len(drafts), 0)
+		return nil, -1, nil, errors.Join(cause, rollbackErr, abortErr, observeErr)
+	}
+
+	rows, verifyErr := tx.Verify(drafts)
+	if verifyErr != nil {
+		tx.receipt.AcceptedTokens = 0
+		tx.receipt.RejectedTokens = len(drafts)
+		return abort(verifyErr)
+	}
+	if len(rows) != len(drafts) {
+		tx.receipt.AcceptedTokens = 0
+		tx.receipt.RejectedTokens = len(drafts)
+		return abort(fmt.Errorf("model: Qwen3.8 P4 target verification returned %d rows for %d draft tokens", len(rows), len(drafts)))
+	}
+	for _, row := range rows {
+		if len(row) != c.target.M.Cfg.VocabSize {
+			tx.receipt.AcceptedTokens = 0
+			tx.receipt.RejectedTokens = len(drafts)
+			return abort(fmt.Errorf("model: Qwen3.8 P4 target verification returned malformed logits"))
+		}
+		if c.cfg.EnforceGreedyTripwire {
+			for _, l := range row {
+				if math.IsNaN(float64(l)) || math.IsInf(float64(l), 0) {
+					c.tripwireTripped = true
+					c.tripwireReason = "non-finite logits in verification rows"
+					tx.receipt.AcceptedTokens = 0
+					tx.receipt.RejectedTokens = len(drafts)
+					return abort(ErrMetalMTPNonFiniteLogits)
+				}
+			}
+		}
+	}
+
+	targetArgmax := make([]int, len(drafts)+1)
+	targetArgmax[0] = target0
+	for i, row := range rows {
+		targetArgmax[i+1] = argmaxF32(row)
+	}
+	accTokens, bonusTok, tripErr := TripwireVerify(drafts, targetArgmax, boundaryLogits, rows)
+	if tripErr != nil {
+		c.tripwireTripped = true
+		c.tripwireReason = tripErr.Error()
+		tx.receipt.AcceptedTokens = 0
+		tx.receipt.RejectedTokens = len(drafts)
+		return abort(tripErr)
+	}
+
+	numAccepted := len(accTokens)
+	// Commit the external Context-MMU while the target transaction still owns
+	// its pre-panel rollback state. A failed external commit cannot expose the
+	// verified live target or any accepted output.
+	if c.checkpointMgr != nil && c.sessionID != "" {
+		if _, _, commitErr := c.checkpointMgr.CommitMTPDraft(c.sessionID, numAccepted); commitErr != nil {
+			return abort(fmt.Errorf("model: commit Context-MMU MTP draft: %w", commitErr))
+		}
+	}
+	if _, commitErr := tx.Commit(numAccepted); commitErr != nil {
+		return abort(commitErr)
+	}
+	c.recordTargetVerificationLocked(tx)
+	if _, _, commitErr := c.draftState.CommitDraft(numAccepted); commitErr != nil {
+		return nil, -1, nil, fmt.Errorf("model: commit local MTP draft accounting: %w", commitErr)
+	}
+
+	nextLogits := c.target.Step(bonusTok)
+	c.totalGenerated += numAccepted + 1
+	if observeErr := c.observeSpeculativeRoundLocked(start, len(drafts), numAccepted); observeErr != nil {
+		return nil, -1, nil, observeErr
+	}
+	return accTokens, bonusTok, nextLogits, nil
+}
+
 // Generate drives the complete in-kernel speculative generation loop from prompt to maxNew tokens.
 // Output token sequence identity is 100% bit-exact with non-speculative autoregressive decode at temperature zero.
 func (c *MetalMTPCoordinator) Generate(ctx context.Context, prompt []int, maxNew int) ([]int, error) {
 	if c == nil {
 		return nil, ErrMetalMTPNilTarget
 	}
+	c.generationMu.Lock()
+	defer c.generationMu.Unlock()
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -908,6 +1166,8 @@ func (c *MetalMTPCoordinator) Generate(ctx context.Context, prompt []int, maxNew
 
 // Close releases the coordinator and any underlying draft session resources.
 func (c *MetalMTPCoordinator) Close() error {
+	c.generationMu.Lock()
+	defer c.generationMu.Unlock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -923,6 +1183,9 @@ func (c *MetalMTPCoordinator) Close() error {
 		c.draftSes.Close()
 		c.draftSes = nil
 	}
+	c.draftProfiler = nil
+	c.checkpointMgr = nil
+	c.sessionID = ""
 	return nil
 }
 

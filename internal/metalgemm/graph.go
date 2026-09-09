@@ -40,12 +40,18 @@ int mg_qwen35_graph_attention(void *graph, void *q, void *k, void *v, void *gate
 void *mg_gdn_graph_encode(void *graph, int owner, void *mixed, void *z, void *b, void *a,
     const float *conv, const float *alog, const float *dtbias, const float *norm,
     int tokens, int nk, int nv, int khd, int vhd, int kernel, float eps);
+int mg_gdn_graph_checkpoint(void *graph, int live_owner, int backup_owner);
+int mg_gdn_state_swap_buffers(int live_owner, int backup_owner);
 */
 import "C"
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"sync"
 	"unsafe"
 )
 
@@ -97,11 +103,259 @@ type ProjectionGraph struct {
 	hostUploadBytes         uint64
 	injectPostSubmitFailure bool
 	gdnLeases               []gdnGraphLease
+	gdnCheckpoints          []*GDNGraphCheckpoint
 }
 
 type gdnGraphLease struct {
 	state *GDNState
 	done  chan struct{}
+}
+
+// GDNCheckpointReceipt describes persistent-state movement only.
+type GDNCheckpointReceipt struct {
+	EncodedDeviceCopies, DeviceCopies    int
+	BufferSwaps                          int
+	HostStateUploads, HostStateReadbacks int
+}
+
+// GDNGraphCheckpoint is a graph-bound rollback token for one live/backup pair.
+type GDNGraphCheckpoint struct {
+	mu                     sync.Mutex
+	graph                  *ProjectionGraph
+	live, backup           *GDNState
+	liveOwner, backupOwner C.int
+	liveDone, backupDone   chan struct{}
+	used                   bool
+	terminal, completed    bool
+	closed, restored       bool
+	leasesReleased         bool
+	stateIdentitySHA256    string
+	stateVersion           uint64
+	checkpointGeneration   uint64
+}
+
+func gdnCheckpointIdentity(live, backup *GDNState, generation uint64) string {
+	h := sha256.New()
+	_, _ = h.Write([]byte("fak.metalgemm-gdn-checkpoint-owner/v1\x00"))
+	var bits [8]byte
+	write := func(value uint64) {
+		binary.LittleEndian.PutUint64(bits[:], value)
+		_, _ = h.Write(bits[:])
+	}
+	for _, value := range []uint64{
+		live.ownerEpoch, uint64(live.conv), uint64(live.recurrent), live.version, generation,
+		backup.ownerEpoch, uint64(backup.conv), uint64(backup.recurrent),
+		uint64(live.geometry.NumKeyHeads), uint64(live.geometry.NumValueHeads),
+		uint64(live.geometry.KeyHeadDim), uint64(live.geometry.ValueHeadDim), uint64(live.geometry.ConvKernel),
+	} {
+		write(value)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func lockGDNPair(a, b *GDNState) func() {
+	first, second := a, b
+	if uintptr(unsafe.Pointer(first)) > uintptr(unsafe.Pointer(second)) {
+		first, second = second, first
+	}
+	first.mu.Lock()
+	second.mu.Lock()
+	return func() {
+		second.mu.Unlock()
+		first.mu.Unlock()
+	}
+}
+
+// CheckpointGDN reserves live and backup until the checkpoint is restored or
+// closed and encodes two private-to-private copies before later graph operations
+// can mutate live. Pair locks always use pointer order; busy owners are declined
+// without waiting.
+func (g *ProjectionGraph) CheckpointGDN(live, backup *GDNState) (*GDNGraphCheckpoint, error) {
+	if err := g.open(); err != nil {
+		return nil, err
+	}
+	if live == nil || backup == nil {
+		return nil, &GDNDeclinedError{Reason: "checkpoint requires live and backup owners"}
+	}
+	if live == backup {
+		return nil, &GDNDeclinedError{Reason: "checkpoint owners alias"}
+	}
+	unlock := lockGDNPair(live, backup)
+	defer unlock()
+	if live.closed || backup.closed {
+		return nil, &GDNDeclinedError{Reason: "checkpoint owner is closed"}
+	}
+	if live.graphDone != nil || backup.graphDone != nil {
+		return nil, &GDNDeclinedError{Reason: "checkpoint owner is busy"}
+	}
+	if live.geometry != backup.geometry {
+		return nil, &GDNDeclinedError{Reason: "checkpoint owner geometry mismatch"}
+	}
+	if live.owner < 0 || backup.owner < 0 || live.owner == backup.owner {
+		return nil, &GDNDeclinedError{Reason: "checkpoint native owners alias or are missing"}
+	}
+	liveDone, backupDone := make(chan struct{}), make(chan struct{})
+	live.graphDone, backup.graphDone = liveDone, backupDone
+	live.checkpointGen++
+	checkpointGeneration := live.checkpointGen
+	stateIdentity := gdnCheckpointIdentity(live, backup, checkpointGeneration)
+	if C.mg_gdn_graph_checkpoint(g.ptr, live.owner, backup.owner) == 0 {
+		live.graphDone, backup.graphDone = nil, nil
+		close(liveDone)
+		close(backupDone)
+		return nil, errors.New("metalgemm: GDN graph checkpoint encode failed")
+	}
+	checkpoint := &GDNGraphCheckpoint{
+		graph: g, live: live, backup: backup,
+		liveOwner: live.owner, backupOwner: backup.owner,
+		liveDone: liveDone, backupDone: backupDone,
+		stateIdentitySHA256: stateIdentity, stateVersion: live.version,
+		checkpointGeneration: checkpointGeneration,
+	}
+	g.gdnCheckpoints = append(g.gdnCheckpoints, checkpoint)
+	g.encoders++
+	return checkpoint, nil
+}
+
+// Receipt distinguishes copies merely encoded in an unsubmitted command buffer
+// from copies proven complete by the graph's terminal fence. The checkpoint
+// path performs no host state transfer.
+func (c *GDNGraphCheckpoint) Receipt() GDNCheckpointReceipt {
+	if c == nil {
+		return GDNCheckpointReceipt{}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	r := GDNCheckpointReceipt{EncodedDeviceCopies: 2}
+	if c.completed {
+		r.DeviceCopies = 2
+	}
+	if c.restored {
+		r.BufferSwaps = 2
+	}
+	return r
+}
+
+// StateIdentity returns the immutable pre-mutation checkpoint owner/version
+// identity only while the completed rollback token remains live. It never
+// materializes convolution or recurrent buffers on the host.
+func (c *GDNGraphCheckpoint) StateIdentity() (string, error) {
+	if c == nil {
+		return "", &GDNDeclinedError{Reason: "missing GDN checkpoint"}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.terminal || !c.completed {
+		return "", &GDNDeclinedError{Reason: "GDN checkpoint identity unavailable before terminal completion"}
+	}
+	if c.closed || c.restored {
+		return "", &GDNDeclinedError{Reason: "GDN checkpoint identity is stale"}
+	}
+	return c.stateIdentitySHA256, nil
+}
+
+func (c *GDNGraphCheckpoint) takeLeasesLocked() (chan struct{}, chan struct{}) {
+	if c.leasesReleased {
+		return nil, nil
+	}
+	c.leasesReleased = true
+	return c.liveDone, c.backupDone
+}
+
+func (c *GDNGraphCheckpoint) releaseLeases(liveDone, backupDone chan struct{}) {
+	if liveDone != nil {
+		c.live.releaseGraph(liveDone)
+	}
+	if backupDone != nil {
+		c.backup.releaseGraph(backupDone)
+	}
+}
+
+func (c *GDNGraphCheckpoint) graphTerminal(completed bool) {
+	c.mu.Lock()
+	c.terminal = true
+	c.completed = completed
+	if completed {
+		unlock := lockGDNPair(c.live, c.backup)
+		if c.live.graphDone == c.liveDone && c.backup.graphDone == c.backupDone &&
+			!c.live.closed && !c.backup.closed && c.live.owner == c.liveOwner && c.backup.owner == c.backupOwner {
+			c.backup.version = c.stateVersion
+			if c.used {
+				c.live.version++
+			}
+		}
+		unlock()
+	}
+	if !completed {
+		c.closed = true
+	}
+	var liveDone, backupDone chan struct{}
+	if c.closed {
+		liveDone, backupDone = c.takeLeasesLocked()
+	}
+	c.mu.Unlock()
+	c.releaseLeases(liveDone, backupDone)
+}
+
+// Close abandons rollback and releases the exclusive owner pair after the graph
+// reaches a terminal fence. It is safe to call repeatedly. A pre-terminal Close
+// records abandonment but cannot release buffers still referenced by Metal.
+func (c *GDNGraphCheckpoint) Close() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.closed = true
+	var liveDone, backupDone chan struct{}
+	if c.terminal {
+		liveDone, backupDone = c.takeLeasesLocked()
+	}
+	c.mu.Unlock()
+	c.releaseLeases(liveDone, backupDone)
+}
+
+// Restore atomically exchanges native private-buffer references after the
+// graph's terminal wait, while the checkpoint still exclusively owns both
+// states. It submits no Metal work and runs in O(1).
+func (c *GDNGraphCheckpoint) Restore() error {
+	if c == nil || c.graph == nil || c.live == nil || c.backup == nil {
+		return &GDNDeclinedError{Reason: "missing GDN checkpoint"}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.restored {
+		return &GDNDeclinedError{Reason: "GDN checkpoint already restored"}
+	}
+	if c.closed {
+		return &GDNDeclinedError{Reason: "GDN checkpoint is closed"}
+	}
+	if !c.terminal || !c.completed {
+		return &GDNDeclinedError{Reason: "GDN checkpoint graph has no completed terminal wait"}
+	}
+	unlock := lockGDNPair(c.live, c.backup)
+	defer func() {
+		unlock()
+		if c.restored {
+			liveDone, backupDone := c.takeLeasesLocked()
+			c.releaseLeases(liveDone, backupDone)
+		}
+	}()
+	if c.live.closed || c.backup.closed {
+		return &GDNDeclinedError{Reason: "checkpoint owner is closed"}
+	}
+	if c.live.graphDone != c.liveDone || c.backup.graphDone != c.backupDone || c.leasesReleased {
+		return &GDNDeclinedError{Reason: "checkpoint no longer exclusively owns state"}
+	}
+	if c.live.geometry != c.backup.geometry || c.live.owner != c.liveOwner || c.backup.owner != c.backupOwner {
+		return &GDNDeclinedError{Reason: "checkpoint owner identity or geometry changed"}
+	}
+	if C.mg_gdn_state_swap_buffers(c.liveOwner, c.backupOwner) == 0 {
+		return errors.New("metalgemm: GDN checkpoint restore failed")
+	}
+	c.live.version, c.backup.version = c.backup.version, c.live.version
+	c.restored = true
+	c.closed = true
+	return nil
 }
 
 // InjectPostSubmitFailureForTest makes Finish return an accepted failure after
@@ -181,6 +435,11 @@ func (g *ProjectionGraph) EncodeQ6K(w *Q6KWeight) (*GraphResult, error) {
 	if w == nil {
 		return nil, errors.New("metalgemm: nil Q6_K weight")
 	}
+	q6kRegistryMu.RLock()
+	defer q6kRegistryMu.RUnlock()
+	if !q6kWeightValidLocked(w) {
+		return nil, errors.New("metalgemm: released Q6_K weight")
+	}
 	return g.add(C.mg_graph_encode_q6k(g.ptr, C.int(w.id)), w.Out)
 }
 
@@ -198,7 +457,12 @@ func (g *ProjectionGraph) EncodeQ6KFrom(w *Q6KWeight, input *GraphResult) (*Grap
 	if err := g.open(); err != nil {
 		return nil, err
 	}
-	if w == nil || input == nil || input.graph != g || input.ptr == nil || input.p != g.p || input.out != w.In {
+	if w == nil {
+		return nil, errors.New("metalgemm: nil Q6_K weight")
+	}
+	q6kRegistryMu.RLock()
+	defer q6kRegistryMu.RUnlock()
+	if !q6kWeightValidLocked(w) || input == nil || input.graph != g || input.ptr == nil || input.p != g.p || input.out != w.In {
 		return nil, errors.New("metalgemm: invalid graph Q6_K projection input")
 	}
 	return g.add(C.mg_graph_encode_q6k_from(g.ptr, C.int(w.id), input.ptr, C.int(input.p*input.out)), w.Out)
@@ -257,6 +521,10 @@ func (g *ProjectionGraph) qwenP32Input(input *GraphResult, width int) error {
 	return g.qwenInput(input, 32, width)
 }
 
+func qwenOrderedPanel(rows int) bool {
+	return rows == 2 || rows == 3 || rows == 4 || rows == 32
+}
+
 func (g *ProjectionGraph) RMSNorm(input *GraphResult, weight []float32, eps float32, gain1p bool) (*GraphResult, error) {
 	if err := g.qwenInput(input, g.p, len(weight)); err != nil || eps <= 0 {
 		if err == nil {
@@ -277,7 +545,13 @@ func (g *ProjectionGraph) RMSNorm(input *GraphResult, weight []float32, eps floa
 }
 
 func (g *ProjectionGraph) LastRMSNorm(input *GraphResult, weight []float32, eps float32, gain1p bool) (*GraphResult, error) {
-	if err := g.qwenP32Input(input, len(weight)); err != nil || eps <= 0 {
+	if g == nil {
+		return nil, errGraphTerminal
+	}
+	if !qwenOrderedPanel(g.p) {
+		return nil, fmt.Errorf("metalgemm: Qwen final RMSNorm panel P=%d outside witnessed set {2,3,4,32}", g.p)
+	}
+	if err := g.qwenInput(input, g.p, len(weight)); err != nil || eps <= 0 {
 		if err == nil {
 			err = errors.New("metalgemm: invalid Qwen final RMSNorm epsilon")
 		}
@@ -287,7 +561,7 @@ func (g *ProjectionGraph) LastRMSNorm(input *GraphResult, weight []float32, eps 
 	if gain1p {
 		gain = 1
 	}
-	ptr := C.mg_qwen35_graph_norm(g.ptr, input.ptr, (*C.float)(unsafe.Pointer(&weight[0])), 32, C.int(len(weight)), C.float(eps), gain, 1)
+	ptr := C.mg_qwen35_graph_norm(g.ptr, input.ptr, (*C.float)(unsafe.Pointer(&weight[0])), C.int(g.p), C.int(len(weight)), C.float(eps), gain, 1)
 	if ptr == nil {
 		return nil, errors.New("metalgemm: Qwen final RMSNorm encode failed")
 	}
@@ -319,7 +593,13 @@ func (g *ProjectionGraph) SwiGLUInPlace(gate, up *GraphResult) error {
 }
 
 func (g *ProjectionGraph) SplitGatedQ(input *GraphResult, qwidth, hd int) (q, gate *GraphResult, err error) {
-	if err = g.qwenP32Input(input, 2*qwidth); err != nil || qwidth <= 0 || hd <= 0 || qwidth%hd != 0 {
+	if g == nil {
+		return nil, nil, errGraphTerminal
+	}
+	if !qwenOrderedPanel(g.p) {
+		return nil, nil, fmt.Errorf("metalgemm: Qwen gated-Q panel P=%d outside witnessed set {2,3,4,32}", g.p)
+	}
+	if err = g.qwenInput(input, g.p, 2*qwidth); err != nil || qwidth <= 0 || hd <= 0 || qwidth%hd != 0 {
 		return nil, nil, err
 	}
 	var qp, gp unsafe.Pointer
@@ -327,22 +607,28 @@ func (g *ProjectionGraph) SplitGatedQ(input *GraphResult, qwidth, hd int) (q, ga
 		return nil, nil, errors.New("metalgemm: Qwen gated-Q split encode failed")
 	}
 	g.encoders++
-	return &GraphResult{ptr: qp, out: qwidth, p: 32, graph: g}, &GraphResult{ptr: gp, out: qwidth, p: 32, graph: g}, nil
+	return &GraphResult{ptr: qp, out: qwidth, p: g.p, graph: g}, &GraphResult{ptr: gp, out: qwidth, p: g.p, graph: g}, nil
 }
 
 func (g *ProjectionGraph) FullAttention(q, k, v, gate *GraphResult, qnorm, knorm, cosv, sinv, prefixK, prefixV []float32, base, nH, nKV, hd, rotary int, scale, qkEps float32, gain1p, qkNorm bool) (Qwen35GraphAttentionResult, error) {
+	if g == nil {
+		return Qwen35GraphAttentionResult{}, errGraphTerminal
+	}
+	if !qwenOrderedPanel(g.p) {
+		return Qwen35GraphAttentionResult{}, fmt.Errorf("metalgemm: Qwen full-attention panel P=%d outside witnessed set {2,3,4,32}", g.p)
+	}
 	qwidth, kvwidth := nH*hd, nKV*hd
 	for _, check := range []struct {
 		r *GraphResult
 		w int
 	}{{q, qwidth}, {gate, qwidth}, {k, kvwidth}, {v, kvwidth}} {
-		if err := g.qwenP32Input(check.r, check.w); err != nil {
+		if err := g.qwenInput(check.r, g.p, check.w); err != nil {
 			return Qwen35GraphAttentionResult{}, err
 		}
 	}
 	qNormShapeOK := len(qnorm) == hd || len(qnorm) == qwidth
 	kNormShapeOK := len(knorm) == hd || len(knorm) == kvwidth
-	if !qNormShapeOK || !kNormShapeOK || hd < 2 || hd > 256 || rotary < 2 || rotary > hd || rotary%2 != 0 || len(cosv) != 32*(rotary/2) || len(sinv) != len(cosv) || base < 0 || len(prefixK) != base*kvwidth || len(prefixV) != base*kvwidth || scale <= 0 || qkEps <= 0 {
+	if !qNormShapeOK || !kNormShapeOK || hd < 2 || hd > 256 || rotary < 2 || rotary > hd || rotary%2 != 0 || len(cosv) != g.p*(rotary/2) || len(sinv) != len(cosv) || base < 0 || len(prefixK) != base*kvwidth || len(prefixV) != base*kvwidth || scale <= 0 || qkEps <= 0 {
 		return Qwen35GraphAttentionResult{}, errors.New("metalgemm: invalid Qwen full-attention geometry")
 	}
 	var pk, pv *C.float
@@ -371,21 +657,41 @@ func (g *ProjectionGraph) FullAttention(q, k, v, gate *GraphResult, qnorm, knorm
 	g.encoders += 3
 	g.hostUploadBytes += uint64(len(qnorm)+len(knorm)+len(cosv)+len(sinv)+len(prefixK)+len(prefixV)) * 4
 	return Qwen35GraphAttentionResult{
-		Output: &GraphResult{ptr: outp, out: qwidth, p: 32, graph: g},
-		KRaw:   &GraphResult{ptr: krawp, out: kvwidth, p: 32, graph: g},
-		KPost:  &GraphResult{ptr: kpostp, out: kvwidth, p: 32, graph: g},
-		V:      &GraphResult{ptr: vcurp, out: kvwidth, p: 32, graph: g},
+		Output: &GraphResult{ptr: outp, out: qwidth, p: g.p, graph: g},
+		KRaw:   &GraphResult{ptr: krawp, out: kvwidth, p: g.p, graph: g},
+		KPost:  &GraphResult{ptr: kpostp, out: kvwidth, p: g.p, graph: g},
+		V:      &GraphResult{ptr: vcurp, out: kvwidth, p: g.p, graph: g},
 	}, nil
 }
 
 func (g *ProjectionGraph) GDN(state *GDNState, mixed, z, b, a *GraphResult, panel GDNPanel) (*GraphResult, error) {
+	if err := g.open(); err != nil {
+		return nil, err
+	}
+	if (g.p < 1 || g.p > 4) && g.p != 32 {
+		return nil, &GDNDeclinedError{Reason: fmt.Sprintf("graph GDN panel P=%d outside witnessed set {1,2,3,4,32}", g.p)}
+	}
 	geometry, err := state.graphGeometry()
 	if err != nil {
 		return nil, err
 	}
-	for _, lease := range g.gdnLeases {
-		if lease.state == state {
-			return nil, errors.New("metalgemm: GDN owner already retained by graph")
+	var checkpoint *GDNGraphCheckpoint
+	for _, candidate := range g.gdnCheckpoints {
+		if candidate.backup == state {
+			return nil, errors.New("metalgemm: checkpoint backup cannot be mutated by graph")
+		}
+		if candidate.live == state {
+			checkpoint = candidate
+		}
+	}
+	if checkpoint != nil && checkpoint.used {
+		return nil, errors.New("metalgemm: checkpoint live owner already mutated by graph")
+	}
+	if checkpoint == nil {
+		for _, lease := range g.gdnLeases {
+			if lease.state == state {
+				return nil, errors.New("metalgemm: GDN owner already retained by graph")
+			}
 		}
 	}
 	if err := geometry.validate(); err != nil {
@@ -396,7 +702,7 @@ func (g *ProjectionGraph) GDN(state *GDNState, mixed, z, b, a *GraphResult, pane
 		w int
 	}{{mixed, geometry.convDim()}, {z, geometry.valueDim()}, {b, geometry.NumValueHeads}, {a, geometry.NumValueHeads}}
 	for _, want := range wants {
-		if err := g.qwenP32Input(want.r, want.w); err != nil {
+		if err := g.qwenInput(want.r, g.p, want.w); err != nil {
 			return nil, err
 		}
 	}
@@ -418,28 +724,53 @@ func (g *ProjectionGraph) GDN(state *GDNState, mixed, z, b, a *GraphResult, pane
 	if panel.RMSNormEpsilon <= 0 {
 		return nil, &GDNDeclinedError{Reason: "RMSNorm epsilon must be positive"}
 	}
-	owner, done, err := state.retainGraph()
-	if err != nil {
-		return nil, err
+	var owner C.int
+	var done chan struct{}
+	if checkpoint != nil {
+		owner = checkpoint.liveOwner
+	} else {
+		owner, done, err = state.retainGraph()
+		if err != nil {
+			return nil, err
+		}
 	}
 	ptr := C.mg_gdn_graph_encode(g.ptr, owner, mixed.ptr, z.ptr, b.ptr, a.ptr,
 		gdnF32(panel.Conv1D), gdnF32(panel.ALog), gdnF32(panel.DTBias), gdnF32(panel.Norm),
-		32, C.int(geometry.NumKeyHeads), C.int(geometry.NumValueHeads), C.int(geometry.KeyHeadDim), C.int(geometry.ValueHeadDim), C.int(geometry.ConvKernel), C.float(panel.RMSNormEpsilon))
+		C.int(g.p), C.int(geometry.NumKeyHeads), C.int(geometry.NumValueHeads), C.int(geometry.KeyHeadDim), C.int(geometry.ValueHeadDim), C.int(geometry.ConvKernel), C.float(panel.RMSNormEpsilon))
 	if ptr == nil {
-		state.releaseGraph(done)
+		if checkpoint == nil {
+			state.releaseGraph(done)
+		}
 		return nil, errors.New("metalgemm: Qwen GDN graph encode failed")
 	}
-	g.gdnLeases = append(g.gdnLeases, gdnGraphLease{state: state, done: done})
+	if checkpoint != nil {
+		checkpoint.used = true
+	} else {
+		g.gdnLeases = append(g.gdnLeases, gdnGraphLease{state: state, done: done})
+	}
 	g.encoders++
 	g.hostUploadBytes += uint64(len(panel.Conv1D)+len(panel.ALog)+len(panel.DTBias)+len(panel.Norm)) * 4
-	return &GraphResult{ptr: ptr, out: geometry.valueDim(), p: 32, graph: g}, nil
+	return &GraphResult{ptr: ptr, out: geometry.valueDim(), p: g.p, graph: g}, nil
 }
 
-func (g *ProjectionGraph) releaseGDNLeases() {
+func (g *ProjectionGraph) releaseGDNLeases(completed bool) {
 	for _, lease := range g.gdnLeases {
-		lease.state.releaseGraph(lease.done)
+		lease.state.completeGraph(lease.done, completed)
 	}
 	g.gdnLeases = nil
+}
+
+func (g *ProjectionGraph) finishGDNCheckpoints(receipt GraphReceipt) {
+	completed := receipt.Committed && receipt.CompletedWait
+	for _, checkpoint := range g.gdnCheckpoints {
+		checkpoint.graphTerminal(completed)
+	}
+}
+
+func (g *ProjectionGraph) abandonGDNCheckpoints() {
+	for _, checkpoint := range g.gdnCheckpoints {
+		checkpoint.graphTerminal(false)
+	}
 }
 
 func (g *ProjectionGraph) Finish() (GraphReceipt, error) {
@@ -453,13 +784,14 @@ func (g *ProjectionGraph) Finish() (GraphReceipt, error) {
 	// Submission consumes the owner even when the device reports an error; never permit a
 	// second commit of the same native command buffer.
 	g.finished = true
-	defer g.releaseGDNLeases()
 	inject := C.int(0)
 	if g.injectPostSubmitFailure {
 		inject = 1
 	}
 	ok := C.mg_graph_finish(g.ptr, &r, inject) != 0
 	receipt := GraphReceipt{Committed: r.committed != 0, CompletedWait: r.completed_wait != 0, TimingAvailable: r.timing_available != 0, Encoders: int(r.encoders), HostReadbacks: int(r.host_readbacks), HostUploadBytes: g.hostUploadBytes, GPUMilliseconds: float64(r.gpu_milliseconds), WaitMilliseconds: float64(r.wait_milliseconds)}
+	g.finishGDNCheckpoints(receipt)
+	g.releaseGDNLeases(receipt.Committed && receipt.CompletedWait)
 	if !ok {
 		if receipt.Committed {
 			return receipt, &GraphPostSubmitError{Reason: "injected or device completion failure"}
@@ -540,8 +872,12 @@ func (g *ProjectionGraph) FinishRead(results ...*GraphResult) ([][]float32, Grap
 }
 func (g *ProjectionGraph) Free() {
 	if g != nil && g.ptr != nil && !g.freed {
+		finished := g.finished
 		C.mg_graph_free(g.ptr)
-		g.releaseGDNLeases()
+		if !finished {
+			g.abandonGDNCheckpoints()
+		}
+		g.releaseGDNLeases(false)
 		g.ptr = nil
 		g.freed = true
 	}
