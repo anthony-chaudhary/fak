@@ -479,3 +479,89 @@ func TestMTPRunnerExecutesMeasuredComparison(t *testing.T) {
 		}
 	})
 }
+
+func TestDefaultMTPRunnerOptions(t *testing.T) {
+	opts := DefaultMTPRunnerOptions()
+	if err := ValidateMTPRunnerEnvelope(opts); err != nil {
+		t.Fatalf("DefaultMTPRunnerOptions failed envelope validation: %v", err)
+	}
+	if opts.CampaignID == "" {
+		t.Error("expected non-empty CampaignID")
+	}
+	if opts.Model.Family != "Qwen3.8" {
+		t.Errorf("expected model family Qwen3.8, got %q", opts.Model.Family)
+	}
+	if opts.Model.ID != "Qwen3.8-27B" {
+		t.Errorf("expected model id Qwen3.8-27B, got %q", opts.Model.ID)
+	}
+	if opts.Model.Quant != "Q4_K_M" {
+		t.Errorf("expected model quant Q4_K_M, got %q", opts.Model.Quant)
+	}
+	if opts.Hardware.Model == "" || !strings.Contains(opts.Hardware.Model, "Mac") {
+		t.Errorf("expected Mac hardware model, got %q", opts.Hardware.Model)
+	}
+	if !strings.Contains(opts.Hardware.Chip, "M3 Pro") {
+		t.Errorf("expected M3 Pro chip, got %q", opts.Hardware.Chip)
+	}
+	if opts.OS.Name != "macOS" {
+		t.Errorf("expected macOS, got %q", opts.OS.Name)
+	}
+	if opts.ContextTokens != 128 || opts.OutputTokens != 64 {
+		t.Errorf("expected context=128 output=64, got ctx=%d out=%d", opts.ContextTokens, opts.OutputTokens)
+	}
+	if opts.SpeculativeConfig.DraftDepth < 2 || opts.SpeculativeConfig.DraftDepth > 4 {
+		t.Errorf("expected draft depth in [2,4], got %d", opts.SpeculativeConfig.DraftDepth)
+	}
+	if opts.SpeculativeConfig.Temperature != 0.0 {
+		t.Errorf("expected temperature 0.0, got %f", opts.SpeculativeConfig.Temperature)
+	}
+	if opts.SpeculativeConfig.MinAcceptanceRate < 0.70 {
+		t.Errorf("expected min acceptance rate >= 0.70, got %f", opts.SpeculativeConfig.MinAcceptanceRate)
+	}
+	if opts.SpeculativeConfig.MinEffectiveDecodeTokS < 14.0 {
+		t.Errorf("expected min effective decode tok/s >= 14.0, got %f", opts.SpeculativeConfig.MinEffectiveDecodeTokS)
+	}
+}
+
+func TestNormalizeMTPRunnerOptions(t *testing.T) {
+	empty := NormalizeMTPRunnerOptions(MTPRunnerOptions{})
+	if err := ValidateMTPRunnerEnvelope(empty); err != nil {
+		t.Fatalf("NormalizeMTPRunnerOptions(empty) failed envelope validation: %v", err)
+	}
+
+	custom := NormalizeMTPRunnerOptions(MTPRunnerOptions{
+		CampaignID:    "custom-campaign-12239",
+		ContextTokens: 128,
+		OutputTokens:  64,
+	})
+	if custom.CampaignID != "custom-campaign-12239" {
+		t.Errorf("expected custom CampaignID preserved, got %q", custom.CampaignID)
+	}
+	if custom.Model.ID != "Qwen3.8-27B" {
+		t.Errorf("expected default model ID populated, got %q", custom.Model.ID)
+	}
+}
+
+func TestDefaultMTPAdapters(t *testing.T) {
+	adapters := DefaultMTPAdapters()
+	if len(adapters) != len(canonicalMTPArms) {
+		t.Fatalf("expected %d adapters, got %d", len(canonicalMTPArms), len(adapters))
+	}
+	for _, name := range canonicalMTPArms {
+		adapter, ok := adapters[name]
+		if !ok || adapter == nil {
+			t.Errorf("missing or nil adapter for canonical arm %q", name)
+		}
+	}
+
+	// Executing an adapter without underlying hardware/tool must fail with state=PENDING_HARDWARE
+	opts := DefaultMTPRunnerOptions()
+	req := expectedMTPArmRequest(opts, "ax-engine")
+	_, err := adapters["ax-engine"](context.Background(), req)
+	if err == nil {
+		t.Fatal("expected adapter execution to report failure when tool/hardware unavailable")
+	}
+	if !strings.Contains(err.Error(), "PENDING_HARDWARE") && !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected error to mention PENDING_HARDWARE or not found, got: %v", err)
+	}
+}

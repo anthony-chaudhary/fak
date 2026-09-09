@@ -1172,6 +1172,8 @@ var (
 	macbenchMTPOutAlt      = flag.String("mtp-comparison-out", "", "alias for -macbench-mtp-out")
 	macbenchMTPReadback    = flag.String("macbench-mtp-readback", "", "validate an MTP comparative benchmark packet without loading a model")
 	macbenchMTPReadbackAlt = flag.String("mtp-comparison-readback", "", "alias for -macbench-mtp-readback")
+	macbenchMTPDryRun      = flag.Bool("macbench-mtp-dry-run", false, "validate 4-way Apple Silicon MTP runner configuration without executing adapters")
+	macbenchMTPDryRunAlt   = flag.Bool("mtp-comparison-dry-run", false, "alias for -macbench-mtp-dry-run")
 )
 
 func maybeRunMTPComparison(f *benchFlags) bool {
@@ -1199,12 +1201,26 @@ func maybeRunMTPComparison(f *benchFlags) bool {
 		return true
 	}
 
-	runMTP := *macbenchMTP || *macbenchMTPAlt
+	dryRun := *macbenchMTPDryRun || *macbenchMTPDryRunAlt
+	runMTP := *macbenchMTP || *macbenchMTPAlt || dryRun
 	if !runMTP {
 		return false
 	}
 
-	runner := macbench.NewMTPRunner(macbench.MTPRunnerOptions{})
+	opts := macbench.DefaultMTPRunnerOptions()
+	opts.Adapters = macbench.DefaultMTPAdapters()
+
+	if dryRun {
+		if err := macbench.ValidateMTPRunnerEnvelope(opts); err != nil {
+			fmt.Fprintf(os.Stderr, "macbench mtp dry-run invalid: %v\n", err)
+			f.exit(1)
+		}
+		fmt.Printf("DRY_RUN_PLAN_VALID campaign=%s host=%s model=%s draft_depth=%d\n",
+			opts.CampaignID, opts.HostID, opts.Model.ID, opts.SpeculativeConfig.DraftDepth)
+		return true
+	}
+
+	runner := macbench.NewMTPRunner(opts)
 	packet, err := runner.Run(context.Background())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "macbench mtp run: %v\n", err)
