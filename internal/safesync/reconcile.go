@@ -31,26 +31,31 @@ const (
 	RouteHoldMergeActive    = "ROUTE_HOLD_MERGE_ACTIVE"
 	RouteDrain              = "ROUTE_DRAIN"
 
+	// ReasonCollisionRisk indicates a collision risk between incoming disjoint paths and local untracked files.
+	ReasonCollisionRisk = "COLLISION_RISK"
+
 	// StateSynchronized indicates successful reconciliation where tip matches expected synchronized state.
 	StateSynchronized = "synchronized"
 )
 
 // ReconcileOptions configures ReconcileRouter.
 type ReconcileOptions struct {
-	Repo           string           `json:"repo"`
-	Remote         string           `json:"remote"`
-	Branch         string           `json:"branch,omitempty"`
-	Goal           string           `json:"goal,omitempty"` // publish (default publish HEAD), publish <sha>, integrate (default integrate origin/main)
-	Apply          bool             `json:"apply,omitempty"`
-	Fetch          bool             `json:"fetch,omitempty"`
-	Runner         Runner           `json:"-"`
-	Now            func() time.Time `json:"-"`
-	WriterLeaseTTL time.Duration    `json:"-"`
-	Contention     bool             `json:"-"` // test or override seam for active contention
-	SuspendPaths   []string         `json:"suspend_paths,omitempty"`
-	Session        string           `json:"session,omitempty"`
-	EmitPacket     bool             `json:"emit_packet,omitempty"`
-	Execute        bool             `json:"execute,omitempty"`
+	Repo              string           `json:"repo"`
+	Remote            string           `json:"remote"`
+	Branch            string           `json:"branch,omitempty"`
+	Goal              string           `json:"goal,omitempty"` // publish (default publish HEAD), publish <sha>, integrate (default integrate origin/main)
+	Apply             bool             `json:"apply,omitempty"`
+	Fetch             bool             `json:"fetch,omitempty"`
+	Runner            Runner           `json:"-"`
+	Now               func() time.Time `json:"-"`
+	WriterLeaseTTL    time.Duration    `json:"-"`
+	Contention        bool             `json:"-"` // test or override seam for active contention
+	SuspendPaths      []string         `json:"suspend_paths,omitempty"`
+	Session           string           `json:"session,omitempty"`
+	EmitPacket        bool             `json:"emit_packet,omitempty"`
+	Execute           bool             `json:"execute,omitempty"`
+	AutoQuarantine    bool             `json:"auto_quarantine,omitempty"`
+	QuarantineScratch bool             `json:"quarantine_scratch,omitempty"`
 }
 
 // GoalInfo represents the parsed reconciliation goal.
@@ -101,6 +106,7 @@ type ReconcileAssessment struct {
 	Park           *ParkReceipt          `json:"park,omitempty"`
 	Packet         *ReconciliationPacket `json:"packet,omitempty"`
 	ExecuteReceipt *ExecutionReceipt     `json:"execute_receipt,omitempty"`
+	Quarantine     *QuarantineReceipt    `json:"quarantine,omitempty"`
 }
 
 // ParseGoal decomposes a goal string into structured GoalInfo.
@@ -622,12 +628,38 @@ func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessmen
 
 	divergence := classifyDivergedPaths(ctx, run, repo, headSHA, targetSHA)
 	if divergence == ReasonDivergedDisjoint {
+		incomingFiles := incomingDisjointPaths(ctx, run, repo, headSHA, targetSHA)
+		collidingUntracked := detectCollidingUntracked(ctx, run, repo, incomingFiles)
+		quarantineEnabled := r.opts.AutoQuarantine || r.opts.QuarantineScratch
+
+		if len(collidingUntracked) > 0 && !quarantineEnabled {
+			assessment.Route = RouteHoldDirtyCollision
+			assessment.OK = false
+			assessment.Reason = ReasonCollisionRisk
+			assessment.CollidingPaths = collidingUntracked
+			assessment.Detail = fmt.Sprintf("%d untracked file(s) collide with incoming disjoint changes: %s; quarantine or clear untracked files before integrating", len(collidingUntracked), strings.Join(collidingUntracked, ", "))
+			if r.opts.Apply {
+				assessment.Applied = false
+				assessment.Execution = &ReconcileExecution{
+					Primitive: fmt.Sprintf("fak sync apply --remote %s --branch %s", r.opts.Remote, branch),
+					Applied:   false,
+					Success:   false,
+					Error:     fmt.Sprintf("refusing disjoint integrate: untracked local file(s) collide with incoming changes (%s)", strings.Join(collidingUntracked, ", ")),
+				}
+			}
+			return assessment, nil
+		}
+
 		primitive := fmt.Sprintf("fak sync apply --remote %s --branch %s", r.opts.Remote, branch)
 		assessment.Route = RouteDisjointIntegrate
 		assessment.Primitive = primitive
 		assessment.OK = true
 		assessment.Reason = ReasonDivergedDisjoint
 		assessment.Detail = "local and remote changes touch disjoint paths; safe to integrate"
+		if len(collidingUntracked) > 0 {
+			assessment.CollidingPaths = collidingUntracked
+			assessment.Detail = fmt.Sprintf("local and remote changes touch disjoint paths; %d colliding untracked file(s) will be quarantined", len(collidingUntracked))
+		}
 
 		if r.opts.Apply {
 			targetBranch := strings.TrimSpace(r.opts.Branch)
@@ -641,12 +673,42 @@ func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessmen
 				targetBranch = branch
 			}
 
+			var qTx *QuarantineTransaction
+			if quarantineEnabled && len(collidingUntracked) > 0 {
+				identMap := make(map[string]bool, len(collidingUntracked))
+				for _, p := range collidingUntracked {
+					identMap[p] = cleanEquivalentTo(ctx, run, repo, targetSHA, p)
+				}
+				var qErr error
+				qTx, qErr = PrepareQuarantine(repo, collidingUntracked, identMap, r.opts.Session)
+				if qErr != nil {
+					assessment.Route = RouteHoldDirtyCollision
+					assessment.OK = false
+					assessment.Applied = false
+					assessment.Reason = ReasonCollisionRisk
+					assessment.Detail = fmt.Sprintf("prepare quarantine failed: %v", qErr)
+					assessment.Execution = &ReconcileExecution{
+						Primitive: primitive,
+						Applied:   false,
+						Success:   false,
+						Error:     assessment.Detail,
+					}
+					return assessment, nil
+				}
+			}
+
 			newCommitSHA, transplantErr := TransplantDisjointTreeWithRunner(ctx, run, repo, targetBranch, headSHA, targetSHA, targetRef)
 			if transplantErr == nil {
 				syncIndexWithHEAD(ctx, run, repo, headSHA, newCommitSHA, targetSHA)
 				// Handle incoming path renames across disjoint integration
 				if renames, err := InspectIncomingRenames(ctx, run, repo, headSHA, targetSHA, newCommitSHA); err == nil && len(renames) > 0 {
 					_ = ApplyIncomingRenames(ctx, run, repo, headSHA, newCommitSHA, renames)
+				}
+				if qTx != nil {
+					qReceipt, commitErr := qTx.Commit()
+					if commitErr == nil {
+						assessment.Quarantine = &qReceipt
+					}
 				}
 				newHead, _ := rev(ctx, run, repo, "HEAD")
 				exec := &ReconcileExecution{
@@ -675,8 +737,17 @@ func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessmen
 					Detail:    runDetail(mergeRes),
 				}
 				if !success {
+					if qTx != nil {
+						_ = qTx.Rollback()
+					}
 					exec.Error = fmt.Sprintf("transplant error: %v; merge fallback error: %s", transplantErr, runDetail(mergeRes))
 				} else {
+					if qTx != nil {
+						qReceipt, commitErr := qTx.Commit()
+						if commitErr == nil {
+							assessment.Quarantine = &qReceipt
+						}
+					}
 					exec.Status = StateSynchronized
 					exec.AppliedCommit = newHead
 					assessment.Status = StateSynchronized
@@ -912,4 +983,83 @@ func syncIndexWithHEAD(ctx context.Context, run Runner, repo, headSHA, newCommit
 		}
 	}
 	_ = run(ctx, repo, "update-index", "-q", "--refresh")
+}
+
+// incomingDisjointPaths returns the file paths modified or added on the remote target
+// relative to the common merge-base.
+func incomingDisjointPaths(ctx context.Context, run Runner, repo, headSHA, targetSHA string) []string {
+	mbRes := run(ctx, repo, "merge-base", headSHA, targetSHA)
+	if mbRes.Err != nil || mbRes.Code != 0 {
+		return nil
+	}
+	mb := strings.TrimSpace(string(mbRes.Stdout))
+	if mb == "" {
+		return nil
+	}
+	diffRes := run(ctx, repo, "diff", "--name-only", "-z", mb, targetSHA)
+	if diffRes.Err != nil || diffRes.Code != 0 {
+		return nil
+	}
+	var paths []string
+	for _, p := range splitNUL(diffRes.Stdout) {
+		paths = append(paths, filepath.Clean(filepath.ToSlash(p)))
+	}
+	return uniqueSorted(paths)
+}
+
+// workingTreeUntrackedPaths returns untracked local file paths from git status.
+func workingTreeUntrackedPaths(ctx context.Context, run Runner, repo string) ([]string, error) {
+	res := run(ctx, repo, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	if res.Err != nil || res.Code != 0 {
+		return nil, fmt.Errorf("status: code=%d err=%v", res.Code, res.Err)
+	}
+	var untracked []string
+	raw := res.Stdout
+	for len(raw) > 0 {
+		idx := bytes.IndexByte(raw, 0)
+		if idx == -1 {
+			break
+		}
+		entry := raw[:idx]
+		raw = raw[idx+1:]
+		if len(entry) < 3 {
+			continue
+		}
+		if entry[0] == '?' && entry[1] == '?' {
+			path := strings.TrimSpace(string(entry[3:]))
+			if path != "" {
+				untracked = append(untracked, filepath.Clean(filepath.ToSlash(path)))
+			}
+		}
+	}
+	return uniqueSorted(untracked), nil
+}
+
+// detectCollidingUntracked checks which incoming disjoint paths collide with local untracked files.
+func detectCollidingUntracked(ctx context.Context, run Runner, repo string, incomingPaths []string) []string {
+	if len(incomingPaths) == 0 {
+		return nil
+	}
+	untrackedList, _ := workingTreeUntrackedPaths(ctx, run, repo)
+	untrackedMap := make(map[string]bool, len(untrackedList))
+	for _, u := range untrackedList {
+		untrackedMap[u] = true
+	}
+
+	var colliding []string
+	for _, inc := range incomingPaths {
+		if untrackedMap[inc] {
+			colliding = append(colliding, inc)
+			continue
+		}
+		// Defensively check if file exists on disk and is not tracked in the index
+		fullPath := filepath.Join(repo, filepath.FromSlash(inc))
+		if fi, err := os.Stat(fullPath); err == nil && !fi.IsDir() {
+			lsRes := run(ctx, repo, "ls-files", "--error-unmatch", inc)
+			if lsRes.Code != 0 {
+				colliding = append(colliding, inc)
+			}
+		}
+	}
+	return uniqueSorted(colliding)
 }
