@@ -853,7 +853,11 @@ func launchGuardedCodexOrchestrationWorker(req orchestrationWorkerLaunchRequest)
 		}
 	}
 	if !orchestrationWorkerLaunchProbe(pid) {
-		return codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, PID: pid, Status: "failed", LogPath: logPath, WorktreePath: worktreePath, WorktreeBaseSHA: worktreeBaseSHA, WorktreeReceipt: worktreeReceipt}, fmt.Errorf("worker exited during launch probe; inspect %s", logPath)
+		if process.KillAndWait != nil {
+			process.KillAndWait()
+		}
+		failed := codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, PID: pid, Status: "failed", LogPath: logPath, WorktreePath: worktreePath, WorktreeBaseSHA: worktreeBaseSHA, WorktreeReceipt: worktreeReceipt}
+		return cleanupCodexOrchestrationPreOwnerFailure(req, failed, fmt.Errorf("worker exited during launch probe; inspect %s", logPath))
 	}
 	if process.Release != nil {
 		if err := process.Release(); err != nil {
