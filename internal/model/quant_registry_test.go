@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"sync"
 	"testing"
 
@@ -23,7 +24,7 @@ func TestQuantRegistryBuiltinRegistration(t *testing.T) {
 		{kindQ2K, "Q2_K", compute.Q2_K, true, q2kBlockBytes, qkK},
 		{kindQ8_0, "Q8_0", compute.Q8_0, false, q8_0BlockBytes, q8_0BlockWeights},
 		{kindQ4_0, "Q4_0", 0, false, q4_0BlockBytes, q4_0BlockWeights},
-		{kindIQ3XXS, "IQ3_XXS", 0, false, iq3xxsBlockBytes, qkK},
+		{kindIQ3XXS, "IQ3_XXS", compute.IQ3_XXS, false, iq3xxsBlockBytes, qkK},
 		{kindIQ4XS, "IQ4_XS", 0, false, iq4xsBlockBytes, qkK},
 		{kindIQ2XXS, "IQ2_XXS", 0, false, iq2xxsBlockBytes, qkK},
 		{kindIQ2XS, "IQ2_XS", 0, false, iq2xsBlockBytes, qkK},
@@ -320,5 +321,148 @@ func TestMatWeightHALAndLMHeadHALRegistryIntegration(t *testing.T) {
 	t2 := s.lmHeadMatHAL()
 	if t2.Dtype != compute.Q6_K {
 		t.Fatalf("expected lmHeadMatHAL to stage Q6_K, got %v", t2.Dtype)
+	}
+}
+
+type mockIQ3XXSCapableBackend struct {
+	compute.Backend
+	capable bool
+}
+
+func (m *mockIQ3XXSCapableBackend) SupportsIQ3XXS() bool {
+	return m.capable
+}
+
+func TestIQ3XXSHALAdmissionRequiresRegisteredCapability(t *testing.T) {
+	ResetDefaultQuantDescriptors()
+	defer ResetDefaultQuantDescriptors()
+
+	// 1. Exact block metadata
+	desc, ok := LookupQuantDescriptor(kindIQ3XXS)
+	if !ok {
+		t.Fatalf("LookupQuantDescriptor(kindIQ3XXS) not found")
+	}
+	if desc.Name() != "IQ3_XXS" {
+		t.Errorf("Name = %q, want %q", desc.Name(), "IQ3_XXS")
+	}
+	if desc.Kind() != kindIQ3XXS {
+		t.Errorf("Kind = %v, want %v", desc.Kind(), kindIQ3XXS)
+	}
+	if desc.BlockBytes() != iq3xxsBlockBytes {
+		t.Errorf("BlockBytes = %d, want %d (iq3xxsBlockBytes)", desc.BlockBytes(), iq3xxsBlockBytes)
+	}
+	if desc.BlockBytes() != 98 {
+		t.Errorf("BlockBytes = %d, want 98 (2 + 3*256/8)", desc.BlockBytes())
+	}
+	if desc.BlockWeights() != qkK {
+		t.Errorf("BlockWeights = %d, want %d (qkK=256)", desc.BlockWeights(), qkK)
+	}
+	if desc.KeyPrefix() != "kquant-raw:" {
+		t.Errorf("KeyPrefix = %q, want 'kquant-raw:'", desc.KeyPrefix())
+	}
+
+	// 2. Stable dtype identity
+	if desc.Dtype() != compute.IQ3_XXS {
+		t.Fatalf("desc.Dtype() = %v, want compute.IQ3_XXS", desc.Dtype())
+	}
+	if compute.IQ3_XXS.String() != "iq3_xxs" {
+		t.Errorf("IQ3_XXS.String() = %q, want 'iq3_xxs'", compute.IQ3_XXS.String())
+	}
+	if !compute.IQ3_XXS.Quantized() {
+		t.Errorf("IQ3_XXS.Quantized() = false, want true")
+	}
+	if compute.IQ3_XXS.Bytes() != 1 {
+		t.Errorf("IQ3_XXS.Bytes() = %d, want 1", compute.IQ3_XXS.Bytes())
+	}
+
+	// 3. Default state is fail-closed (HALSupported == false)
+	if desc.SupportsHAL() {
+		t.Fatalf("IQ3_XXS default descriptor must NOT support HAL before capability is registered")
+	}
+	if SupportsHALKQuant(kindIQ3XXS) {
+		t.Fatalf("SupportsHALKQuant(kindIQ3XXS) must be false by default")
+	}
+
+	// 4. Typed refusal without capability
+	// 4a. Nil backend
+	vNil := AdmitIQ3XXSHAL(nil)
+	if vNil.Admitted {
+		t.Fatalf("AdmitIQ3XXSHAL(nil) admitted, want refusal")
+	}
+	if vNil.Refusal == nil || vNil.Refusal.Reason != IQ3XXSRefusalNilBackend {
+		t.Fatalf("AdmitIQ3XXSHAL(nil) refusal = %v, want reason %s", vNil.Refusal, IQ3XXSRefusalNilBackend)
+	}
+
+	// 4b. Incapable default backend
+	defaultBE := compute.Default()
+	vDefault := AdmitIQ3XXSHAL(defaultBE)
+	if vDefault.Admitted {
+		t.Fatalf("AdmitIQ3XXSHAL(defaultBE) admitted without capability, want refusal")
+	}
+	if vDefault.Refusal == nil || vDefault.Refusal.Reason != IQ3XXSRefusalNoCapability {
+		t.Fatalf("AdmitIQ3XXSHAL(defaultBE) refusal = %v, want reason %s", vDefault.Refusal, IQ3XXSRefusalNoCapability)
+	}
+	if vDefault.Dtype != compute.IQ3_XXS {
+		t.Errorf("vDefault.Dtype = %v, want compute.IQ3_XXS", vDefault.Dtype)
+	}
+
+	// 4c. Backend explicitly denying capability
+	deniedBE := &mockIQ3XXSCapableBackend{Backend: compute.Default(), capable: false}
+	vDenied := AdmitIQ3XXSHAL(deniedBE)
+	if vDenied.Admitted {
+		t.Fatalf("AdmitIQ3XXSHAL(deniedBE) admitted, want refusal")
+	}
+	if vDenied.Refusal == nil || vDenied.Refusal.Reason != IQ3XXSRefusalCapabilityDenied {
+		t.Fatalf("AdmitIQ3XXSHAL(deniedBE) refusal = %v, want reason %s", vDenied.Refusal, IQ3XXSRefusalCapabilityDenied)
+	}
+
+	// 4d. Typed refusal via AdmitHALQuant
+	_, err := AdmitHALQuant(kindIQ3XXS, defaultBE)
+	if err == nil {
+		t.Fatalf("AdmitHALQuant(kindIQ3XXS, defaultBE) want typed refusal, got nil")
+	}
+	var refusal *IQ3XXSHALAdmissionRefusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("AdmitHALQuant error %T is not *IQ3XXSHALAdmissionRefusal", err)
+	}
+
+	// 5. Admission only when a matching backend capability is injected
+	capableBE := &mockIQ3XXSCapableBackend{Backend: compute.Default(), capable: true}
+	vCapable := AdmitIQ3XXSHAL(capableBE)
+	if !vCapable.Admitted {
+		t.Fatalf("AdmitIQ3XXSHAL(capableBE) refused: %v, want admitted", vCapable.Refusal)
+	}
+	if vCapable.Dtype != compute.IQ3_XXS {
+		t.Errorf("vCapable.Dtype = %v, want compute.IQ3_XXS", vCapable.Dtype)
+	}
+	if vCapable.Refusal != nil {
+		t.Errorf("vCapable.Refusal = %v, want nil", vCapable.Refusal)
+	}
+
+	admittedDtype, err := AdmitHALQuant(kindIQ3XXS, capableBE)
+	if err != nil {
+		t.Fatalf("AdmitHALQuant(kindIQ3XXS, capableBE) returned error: %v", err)
+	}
+	if admittedDtype != compute.IQ3_XXS {
+		t.Errorf("admittedDtype = %v, want compute.IQ3_XXS", admittedDtype)
+	}
+
+	// 6. Registered HAL descriptor injection allows admission
+	capableDesc := BaseQuantDescriptor{
+		QuantKind:     kindIQ3XXS,
+		QuantName:     "IQ3_XXS",
+		ComputeDtype:  compute.IQ3_XXS,
+		Prefix:        "kquant-raw:",
+		HALSupported:  true,
+		BytesPerBlk:   iq3xxsBlockBytes,
+		WeightsPerBlk: qkK,
+	}
+	RegisterQuantDescriptor(capableDesc)
+	if !SupportsHALKQuant(kindIQ3XXS) {
+		t.Fatalf("SupportsHALKQuant(kindIQ3XXS) must be true after registering capable descriptor")
+	}
+	vInjected := AdmitIQ3XXSHAL(defaultBE)
+	if !vInjected.Admitted {
+		t.Fatalf("AdmitIQ3XXSHAL(defaultBE) refused after descriptor registration: %v", vInjected.Refusal)
 	}
 }
