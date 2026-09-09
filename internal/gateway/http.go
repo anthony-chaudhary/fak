@@ -305,14 +305,19 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	// until ctx is done, registered loops keep progressing (the heartbeat, plus any a
 	// host registered), observable at /v1/fak/loops and via fak_bgloop_* metrics.
 	s.startLoops(ctx)
-	s.logf("fak gateway listening on http://%s  (engine=%s model=%s vdso=%v auth=%v)",
-		ln.Addr(), s.engineID, s.model, s.k.VDSOEnabled(), s.requireKey != "")
-	// Surface fak's core value-add — realized in-kernel KV-prefix reuse — at startup so it
-	// is discoverable without scraping /metrics or waiting for a long --debug-stats session
-	// (epic #1072). The cacheobs tap is the SAME WITNESSED signal /metrics renders; at boot
-	// it is idle (no served turn yet) and climbs per in-kernel turn. A pure-proxy workload
-	// never feeds it, so the honest startup line is "idle until the first in-kernel turn".
-	s.logf("fak cache: %s", cacheBootSummary(cacheobs.Default.Snapshot()))
+	if s.logf != nil {
+		s.logf("fak gateway listening on http://%s  (engine=%s model=%s vdso=%v auth=%v)",
+			ln.Addr(), s.engineID, s.model, s.k.VDSOEnabled(), s.requireKey != "")
+		if !s.warmup.pending() {
+			s.logf("[READY] fak gateway is ready to accept requests on http://%s", ln.Addr())
+		}
+		// Surface fak's core value-add — realized in-kernel KV-prefix reuse — at startup so it
+		// is discoverable without scraping /metrics or waiting for a long --debug-stats session
+		// (epic #1072). The cacheobs tap is the SAME WITNESSED signal /metrics renders; at boot
+		// it is idle (no served turn yet) and climbs per in-kernel turn. A pure-proxy workload
+		// never feeds it, so the honest startup line is "idle until the first in-kernel turn".
+		s.logf("fak cache: %s", cacheBootSummary(cacheobs.Default.Snapshot()))
+	}
 	select {
 	case <-ctx.Done():
 		// Join the background loops first (bounded), then drain the HTTP surface, so a

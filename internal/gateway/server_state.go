@@ -16,6 +16,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessversion"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/kv"
+	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/policy"
@@ -410,6 +411,7 @@ type Server struct {
 	// ResidentBytes/DedupHits back the tool_schema_resident_bytes and
 	// tool_page_dedup_hits_total /metrics rows. Built in New; nil-safe for a bare Server.
 	toolPages               *ctxmmu.ToolPageTable
+	metalMTPCoord           *model.MetalMTPCoordinator
 	servedFailure           servedFailure // recent served-turn panic behind /healthz honesty (#2336); see served_failure.go
 	traceSeq                uint64        // mints a non-empty TraceID when the wire omits one (atomic)
 	reloadPolicy            PolicyReloadFunc

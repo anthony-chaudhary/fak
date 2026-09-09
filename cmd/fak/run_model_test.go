@@ -48,25 +48,78 @@ func TestRunNativeControlsUseExplicitFlagsOverAmbientValues(t *testing.T) {
 	}
 }
 
-// TestRunDispatchRule pins the argv[0] split that keeps `fak run --trace` (trace mode)
-// and `fak run <model>` (chat mode) on separate parsers: a leading '-' is trace mode,
-// anything else is chat mode. This is the contract cmdRun depends on.
+// TestRunDispatchRule pins the unified dispatch that supports both in-kernel
+// model execution (chat/REPL) and trace replay without ambiguous collisions or
+// misleading errors.
 func TestRunDispatchRule(t *testing.T) {
 	cases := []struct {
-		argv     []string
-		wantChat bool
+		argv       []string
+		wantAction runAction
+		wantModel  string
+		wantPrompt string
+		wantTrace  string
 	}{
-		{[]string{"--trace", "x.json"}, false}, // flag-first → trace
-		{[]string{"-trace", "x.json"}, false},  // single-dash flag → trace
-		{[]string{}, false},                    // bare → trace (errors on --trace required)
-		{[]string{"smollm2", "hi"}, true},      // alias → chat
-		{[]string{"./model.gguf"}, true},       // path → chat
-		{[]string{"hf://o/r/m.gguf"}, true},    // hf uri → chat
+		{argv: []string{"--trace", "x.json"}, wantAction: runActionTrace, wantTrace: "x.json"},
+		{argv: []string{"-trace", "x.json"}, wantAction: runActionTrace, wantTrace: "x.json"},
+		{argv: []string{"--trace=x.json"}, wantAction: runActionTrace, wantTrace: "x.json"},
+		{argv: []string{}, wantAction: runActionUsage},
+		{argv: []string{"smollm2"}, wantAction: runActionChat, wantModel: "smollm2"},
+		{argv: []string{"smollm2", "hi"}, wantAction: runActionChat, wantModel: "smollm2", wantPrompt: "hi"},
+		{argv: []string{"./model.gguf"}, wantAction: runActionChat, wantModel: "./model.gguf"},
+		{argv: []string{"hf://o/r/m.gguf"}, wantAction: runActionChat, wantModel: "hf://o/r/m.gguf"},
+		{argv: []string{"smollm2", "--temp", "0.7", "explain mmap"}, wantAction: runActionChat, wantModel: "smollm2", wantPrompt: "explain mmap"},
+		{argv: []string{"--temp", "0.7", "smollm2", "explain mmap"}, wantAction: runActionChat, wantModel: "smollm2", wantPrompt: "explain mmap"},
+		{argv: []string{"--backend", "cuda", "qwen38"}, wantAction: runActionChat, wantModel: "qwen38"},
+		{argv: []string{"--backend", "cuda"}, wantAction: runActionUsage},
+		{argv: []string{"smollm2", "--trace", "x.json"}, wantAction: runActionUsage},
 	}
 	for _, c := range cases {
-		isChat := len(c.argv) > 0 && !strings.HasPrefix(c.argv[0], "-")
-		if isChat != c.wantChat {
-			t.Errorf("argv=%v: dispatch isChat=%v, want %v", c.argv, isChat, c.wantChat)
+		fs, flags := newRunFlagSet("run", flag.ContinueOnError)
+		cmd, err := parseRunArgs(fs, flags, c.argv)
+		if c.wantAction == runActionUsage {
+			if err == nil && cmd.action != runActionUsage {
+				t.Errorf("argv=%v: got action=%v, want runActionUsage", c.argv, cmd.action)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("argv=%v: unexpected parse error: %v", c.argv, err)
+			continue
+		}
+		if cmd.action != c.wantAction {
+			t.Errorf("argv=%v: got action=%v, want %v", c.argv, cmd.action, c.wantAction)
+		}
+		if c.wantModel != "" && cmd.modelRef != c.wantModel {
+			t.Errorf("argv=%v: got modelRef=%q, want %q", c.argv, cmd.modelRef, c.wantModel)
+		}
+		if c.wantPrompt != "" && cmd.prompt != c.wantPrompt {
+			t.Errorf("argv=%v: got prompt=%q, want %q", c.argv, cmd.prompt, c.wantPrompt)
+		}
+		if c.wantTrace != "" && cmd.tracePath != c.wantTrace {
+			t.Errorf("argv=%v: got tracePath=%q, want %q", c.argv, cmd.tracePath, c.wantTrace)
+		}
+	}
+}
+
+// TestRunHelpOutput pins that `fak run --help` and `-h` expose both chat mode
+// and trace-replay mode, instead of hiding model execution behind trace flags.
+func TestRunHelpOutput(t *testing.T) {
+	var buf strings.Builder
+	fs, _ := newRunFlagSet("run", flag.ContinueOnError)
+	fs.SetOutput(&buf)
+	fs.Usage()
+	out := buf.String()
+
+	for _, want := range []string{
+		"fak run <model> [prompt]",
+		"fak run --trace FILE",
+		"--trace",
+		"--backend",
+		"--max-tokens",
+		"--temp",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("fak run usage output missing %q:\n%s", want, out)
 		}
 	}
 }

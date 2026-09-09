@@ -43,19 +43,59 @@ var interpreterEvalFlags = []interpreterEvalSpec{
 	{"ruby", []string{"-e", "--eval"}},
 }
 
-// DefaultPolicy is the v0.1 baseline: allow the read-only tool family + the
-// frozen tau2 trace tools, deny a self-modify glob set, redact common secret arg
-// fields. Tuned to be permissive enough to drive the bench yet fail-closed on
-// unknown + self-modifying calls.
+// DefaultPolicy returns the production capability floor: allowing standard
+// agent tools, coding tools, read-only utilities, and safe execution tools,
+// denying dangerous self-modify globs and destructive actions, and redacting
+// common secret arg fields.
 func DefaultPolicy() Policy {
 	return Policy{
 		Allow: map[string]bool{
-			"search_flights": true, "get_reservation_details": true,
-			"get_user_details": true, "list_all_airports": true,
-			"calculate": true, "search_direct_flight": true,
-			"transfer_to_human_agents": true, "send_certificate": true,
-			"book_reservation": true, "update_reservation_flights": true,
+			// Standard coding tools
+			"Bash": true, "BashOutput": true, "KillShell": true, "PowerShell": true,
+			"Read": true, "Edit": true, "Write": true, "NotebookEdit": true,
+			"Glob": true, "Grep": true, "LS": true, "TodoWrite": true,
+			"Task": true, "WebFetch": true, "WebSearch": true,
+			"ExitPlanMode": true, "Skill": true, "SlashCommand": true,
+
+			// Agent orchestration
+			"Agent": true, "AskUserQuestion": true, "DeferredToolPlaceholder": true,
+			"EnterPlanMode": true, "Monitor": true, "ReportFindings": true,
+			"ScheduleWakeup": true, "SendMessage": true, "StructuredOutput": true,
+			"TaskCreate": true, "TaskGet": true, "TaskList": true,
+			"TaskOutput": true, "TaskStop": true, "TaskUpdate": true,
+			"ToolSearch": true, "shell_command": true, "exec_command": true,
+			"update_plan": true, "write_stdin": true, "request_user_input": true,
+			"view_image": true, "get_goal": true, "create_goal": true,
+			"update_goal": true, "emit_context_tip": true,
+			"list_mcp_resources": true, "read_mcp_resource": true, "parallel": true,
+
+			// Workflows
+			"Workflow": true, "EnterWorktree": true, "ExitWorktree": true,
+			"CronCreate": true, "CronList": true, "CronDelete": true,
+			"PushNotification": true, "RemoteTrigger": true, "DesignSync": true,
+			"spawn_agent": true, "send_input": true, "wait": true,
+			"wait_agent": true, "close_agent": true,
+
+			// DOS tools
+			"dos_verify": true, "dos_arbitrate": true, "dos_recall": true,
+			"dos_review": true, "dos_status": true, "dos_doctor": true,
+			"dos_answer": true, "dos_check_reason": true, "dos_refuse_reasons": true,
+			"dos_commit_audit": true, "dos_citation_resolve": true,
+
+			// FAK tools
+			"fak_adjudicate": true, "fak_admit": true, "fak_syscall": true,
+			"fak_read": true, "fak_changes": true, "fak_memory_drivers": true,
+			"fak_memory_explain": true, "fak_memory_run": true,
 			"fak_grep": true, "fak_glob": true,
+
+			// Safe inspection / build / test / safe sinks
+			"git_status": true, "git_diff": true, "git_log": true,
+			"go_build": true, "go_test": true, "run_tests": true,
+			"ship_release": true, "transfer_to_human_agents": true,
+
+			// Preserve test/benchmark compatibility
+			"book_reservation": true, "update_reservation_flights": true,
+			"send_certificate": true,
 		},
 		AllowPrefix: []string{"read_", "get_", "search_", "list_", "lookup_", "find_", "calc"},
 		Deny: map[string]abi.ReasonCode{

@@ -6,9 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -61,12 +63,12 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 	cf.anthropicAuth = fs.String("anthropic-auth", "auto", "(--provider anthropic) how to present the credential: auto (sniff the token shape), bearer, or x-api-key. Pass bearer for a THIRD-PARTY Anthropic-compatible endpoint whose tenant token is not an sk-ant-* key")
 	cf.offline = fs.Bool("offline", false, "force the deterministic mock planner (no network)")
 	cf.maxTurns = fs.Int("max-turns", 10, "max model turns the loop may take to resolve ONE human turn")
-	cf.policyPath = fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor)")
+	cf.policyPath = fs.String("policy", "", "load the capability floor from a manifest (default: the built-in production capability floor)")
 	cf.posture = fs.String("posture", "fail_closed", "adjudication posture: fail_closed|default_open|admit_and_log (default: fail_closed developer floor; env: FAK_AGENT_POSTURE or FAK_GUARD_POSTURE)")
 	cf.task = fs.String("task", "", "run a single non-interactive task turn (headless mode) and exit")
 	cf.taskFile = fs.String("task-file", "", "read a non-interactive UTF-8 task from a file (mutually exclusive with --task)")
 	cf.effort = fs.String("effort", "", "reasoning effort for the native task")
-	cf.tools = fs.String("tools", "code", "toolset to arm: code (Read/Write/Edit/Bash/Grep/Glob), demo (airline fixture), or none")
+	cf.tools = fs.String("tools", "code", "toolset to arm: code (Read/Write/Edit/Bash/Grep/Glob), demo, or none")
 	cf.codeTools = fs.Bool("code-tools", true, "arm bounded kernel Read/Write/Edit/Bash/Grep/Glob in the workspace (alias for --tools=code)")
 	cf.codeWorkspace = fs.String("code-workspace", "", "override workspace root for code tools (default: current directory)")
 	cf.sysTools = fs.Bool("sys-tools", true, "arm safe read-only system and web utility tools (get_time, fetch_web, web_search); use --sys-tools=false to disable")
@@ -99,9 +101,21 @@ func cmdChat(argv []string) {
 	fs, cf := newChatFlagSet()
 	_ = fs.Parse(argv)
 	apiKeyExplicit := false
+	modelExplicit := false
+	baseURLExplicit := false
+	providerExplicit := false
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "api-key-env" {
 			apiKeyExplicit = true
+		}
+		if f.Name == "model" {
+			modelExplicit = true
+		}
+		if f.Name == "base-url" {
+			baseURLExplicit = true
+		}
+		if f.Name == "provider" {
+			providerExplicit = true
 		}
 	})
 	if *cf.codexHome != "" && !*cf.codexAuth {
@@ -174,15 +188,23 @@ func cmdChat(argv []string) {
 		initDevRules(rawMode)
 	}
 
-	providerExplicit := false
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "provider" {
-			providerExplicit = true
-		}
-	})
 	effectiveBaseURL := *cf.baseURL
 	if effectiveBaseURL == "" && providerExplicit && !*cf.offline {
 		effectiveBaseURL = dropin.DefaultBaseURL(*cf.provider)
+	}
+	if effectiveBaseURL == "" && !*cf.offline && !baseURLExplicit {
+		if localModel, ok := probeLocalGateway("http://127.0.0.1:8080"); ok {
+			effectiveBaseURL = "http://127.0.0.1:8080/v1"
+			if !modelExplicit && localModel != "" && localModel != "mock" {
+				*cf.model = localModel
+			}
+			fmt.Fprintf(os.Stderr, "fak chat: auto-connected to local gateway at %s (model: %s)\n", effectiveBaseURL, *cf.model)
+		}
+	} else if effectiveBaseURL != "" && !modelExplicit && !*cf.offline {
+		if serverModel := detectServerModel(effectiveBaseURL); serverModel != "" && serverModel != "mock" {
+			*cf.model = serverModel
+			fmt.Fprintf(os.Stderr, "fak chat: auto-detected model %q from %s\n", *cf.model, effectiveBaseURL)
+		}
 	}
 
 	if *cf.effort != "" {
@@ -273,11 +295,6 @@ func chatPlannerWithStderr(stderr io.Writer, offline bool, baseURL, provider, mo
 		stderr = os.Stderr
 	}
 	effectiveBaseURL := baseURL
-	if effectiveBaseURL == "" && !offline {
-		if u := dropin.DefaultBaseURL(provider); u != "" {
-			effectiveBaseURL = u
-		}
-	}
 	if offline || effectiveBaseURL == "" {
 		if !offline {
 			fmt.Fprintln(stderr, "fak chat: no --base-url given; using the offline mock planner (pass --base-url for a live run)")
@@ -459,4 +476,74 @@ func extractPolicyExactCommands(p adjudicator.Policy) []string {
 		}
 	}
 	return exacts
+}
+
+func probeLocalGateway(addr string) (string, bool) {
+	client := &http.Client{Timeout: 150 * time.Millisecond}
+	resp, err := client.Get(strings.TrimRight(addr, "/") + "/healthz")
+	if err != nil {
+		return "", false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", false
+	}
+	var health struct {
+		OK    bool   `json:"ok"`
+		Model string `json:"model"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil || !health.OK {
+		return "", false
+	}
+	model := strings.TrimSpace(health.Model)
+	if model == "" || model == "mock" {
+		if discovered := probeServerModels(client, strings.TrimRight(addr, "/")+"/v1/models"); discovered != "" {
+			model = discovered
+		}
+	}
+	return model, true
+}
+
+func detectServerModel(baseURL string) string {
+	client := &http.Client{Timeout: 250 * time.Millisecond}
+	root := strings.TrimRight(baseURL, "/")
+	root = strings.TrimSuffix(root, "/v1")
+	if m, ok := probeLocalGateway(root); ok && m != "" && m != "mock" {
+		return m
+	}
+	modelsURL := strings.TrimRight(baseURL, "/")
+	if !strings.HasSuffix(modelsURL, "/models") {
+		if strings.HasSuffix(modelsURL, "/v1") {
+			modelsURL += "/models"
+		} else {
+			modelsURL += "/v1/models"
+		}
+	}
+	return probeServerModels(client, modelsURL)
+}
+
+func probeServerModels(client *http.Client, modelsURL string) string {
+	resp, err := client.Get(modelsURL)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		return ""
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err == nil && len(body.Data) > 0 {
+		for _, m := range body.Data {
+			id := strings.TrimSpace(m.ID)
+			if id != "" && id != "mock" {
+				return id
+			}
+		}
+		return strings.TrimSpace(body.Data[0].ID)
+	}
+	return ""
 }

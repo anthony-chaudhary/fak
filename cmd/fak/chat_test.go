@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -251,5 +254,107 @@ func TestChatClearCommandResetsContext(t *testing.T) {
 		if strings.Contains(m.Content, "message before clear") {
 			t.Fatalf("cleared message leaked into turn 2 context:\n%+v", turn2Msgs)
 		}
+	}
+}
+
+func TestProbeLocalGateway_Success(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":     true,
+				"engine": "inkernel",
+				"model":  "qwen38:27b-q4",
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	model, ok := probeLocalGateway(ts.URL)
+	if !ok {
+		t.Fatalf("probeLocalGateway(%q) failed, want ok: true", ts.URL)
+	}
+	if model != "qwen38:27b-q4" {
+		t.Fatalf("probeLocalGateway model = %q, want %q", model, "qwen38:27b-q4")
+	}
+}
+
+func TestProbeLocalGateway_Offline(t *testing.T) {
+	// A port that is not listening
+	model, ok := probeLocalGateway("http://127.0.0.1:54321")
+	if ok || model != "" {
+		t.Fatalf("expected probeLocalGateway to return false on closed port, got ok=%v, model=%q", ok, model)
+	}
+}
+
+func TestDetectServerModel_FromHealthz(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":     true,
+				"engine": "inkernel",
+				"model":  "qwen38:27b-q4",
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	model := detectServerModel(ts.URL + "/v1")
+	if model != "qwen38:27b-q4" {
+		t.Fatalf("detectServerModel = %q, want %q", model, "qwen38:27b-q4")
+	}
+}
+
+func TestDetectServerModel_FromModels(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":     true,
+				"engine": "inkernel",
+				"model":  "mock",
+			})
+			return
+		}
+		if r.URL.Path == "/v1/models" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{
+					{"id": "qwen38:27b-q4", "object": "model"},
+				},
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	model := detectServerModel(ts.URL + "/v1")
+	if model != "qwen38:27b-q4" {
+		t.Fatalf("detectServerModel = %q, want %q", model, "qwen38:27b-q4")
+	}
+}
+
+func TestServeModelDefaultFromGGUFAlias(t *testing.T) {
+	rt := &serveRuntime{}
+	gguf := "qwen38:27b-q4"
+	tok := ""
+	baseURL := ""
+	model := "mock"
+	sf := &serveFlags{
+		ggufPath: &gguf,
+		tokPath:  &tok,
+		baseURL:  &baseURL,
+		model:    &model,
+	}
+
+	rt.resolveServeModelSources(sf)
+	if *sf.model != "qwen38:27b-q4" {
+		t.Fatalf("expected sf.model to default to GGUF alias %q, got %q", "qwen38:27b-q4", *sf.model)
 	}
 }

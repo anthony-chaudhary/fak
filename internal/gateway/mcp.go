@@ -18,6 +18,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/archcheck"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
+	"github.com/anthony-chaudhary/fak/internal/hil"
 	"github.com/anthony-chaudhary/fak/internal/numfmt"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
 )
@@ -543,6 +544,35 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 			return nil, &rpcError{Code: rpcInternalError, Message: err.Error()}
 		}
 		return mcpToolResult(res), nil
+	case "fak_hil_probe":
+		return mcpToolResult(hil.ProbeHardware()), nil
+	case "fak_hil_microdose":
+		var args struct {
+			Kinds []string `json:"kinds"`
+		}
+		if len(p.Arguments) > 0 && string(p.Arguments) != "null" {
+			if err := json.Unmarshal(p.Arguments, &args); err != nil {
+				return nil, &rpcError{Code: rpcInvalidParams, Message: "invalid fak_hil_microdose arguments: " + err.Error()}
+			}
+		}
+		var kinds []hil.DoseKind
+		for _, k := range args.Kinds {
+			kinds = append(kinds, hil.DoseKind(k))
+		}
+		return mcpToolResult(hil.RunMicroDoses(ctx, kinds...)), nil
+	case "fak_hil_audit_comparison":
+		var args struct {
+			Headline      string            `json:"headline"`
+			Candidate     hil.ComparisonArm `json:"candidate"`
+			Baseline      hil.ComparisonArm `json:"baseline"`
+			LowerIsBetter bool              `json:"lower_is_better"`
+		}
+		if len(p.Arguments) > 0 && string(p.Arguments) != "null" {
+			if err := json.Unmarshal(p.Arguments, &args); err != nil {
+				return nil, &rpcError{Code: rpcInvalidParams, Message: "invalid fak_hil_audit_comparison arguments: " + err.Error()}
+			}
+		}
+		return mcpToolResult(hil.AuditComparison(args.Headline, args.Candidate, args.Baseline, args.LowerIsBetter)), nil
 	default:
 		return nil, &rpcError{Code: rpcInvalidParams, Message: "unknown tool: " + p.Name}
 	}
@@ -1166,6 +1196,24 @@ func toolDescriptors() []map[string]any {
 			Name:        "fak_arch_check",
 			Description: "Preflight architectural validity: check whether Go package imports violate layered DAG tiers or primitive leaf constraints in <50ms.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"package":{"type":"string","description":"repo-relative package path, e.g. internal/agentquery"},"mine":{"type":"boolean","description":"check only packages touched by uncommitted or staged changes"}},"additionalProperties":false}`),
+			Annotations: readOnlyToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        "fak_hil_probe",
+			Description: "Probe and report physical hardware accelerator capabilities (Metal, CUDA, ROCm, Vulkan, CPU SIMD, unified memory, total memory) on the current host.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+			Annotations: readOnlyToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        "fak_hil_microdose",
+			Description: "Execute sub-second (<100ms) physical silicon micro-dose probes (liveness, compute_gemm, compute_gemv, bandwidth, numeric_parity) to verify real hardware acceleration and performance receipts.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"kinds":{"type":"array","items":{"type":"string"},"description":"optional micro-dose probe kinds to execute (liveness, compute_gemm, compute_gemv, bandwidth, numeric_parity)"}},"additionalProperties":false}`),
+			Annotations: readOnlyToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        "fak_hil_audit_comparison",
+			Description: "Audit a head-to-head performance comparison against fak's hardware discipline. Enforces that both candidate and baseline are measured on physical silicon; gates software simulations as EARLY_INDICATOR_ONLY.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"headline":{"type":"string","description":"optional headline or comparison title"},"candidate":{"type":"object","description":"candidate performance arm"},"baseline":{"type":"object","description":"baseline performance arm"},"lower_is_better":{"type":"boolean","description":"optional flag indicating lower values represent better performance"}},"required":["candidate","baseline"],"additionalProperties":false}`),
 			Annotations: readOnlyToolAnnotations(),
 		}.toMap(),
 	}

@@ -188,8 +188,7 @@ func Scan(opts Options) (Report, error) {
 	}
 
 	var expandedFindings []FindingProvenance
-	expandedBreadth := !opts.NoExpandedBreadth
-	if expandedBreadth && len(opts.Facts) == 0 {
+	if opts.ExpandedBreadth && len(opts.Facts) == 0 {
 		var extra []DebtLane
 		extra, expandedFindings = discoverExpandedSurfaces(absRoot)
 		for i := range extra {
@@ -1654,6 +1653,26 @@ func dedupeFindings(findings []FindingProvenance) []FindingProvenance {
 		}
 	}
 	return out
+}
+
+// inspectGoPackageEvidence runs AST-grounded detectors (including stub debt and mock hazards)
+// on a Go package unit and attaches findings to the lane.
+func inspectGoPackageEvidence(lane *DebtLane, unitDir string, surfaces ...SurfaceClass) []FindingProvenance {
+	surface := SurfaceInternal
+	if lane != nil {
+		surface = classifySurface(lane.UnitOfWork)
+	}
+	if len(surfaces) > 0 {
+		surface = surfaces[0]
+	}
+	findings := inspectGoASTDetectors(lane, unitDir, surface)
+	if lane != nil {
+		lane.FindingProvs = append(lane.FindingProvs, findings...)
+		for _, f := range findings {
+			lane.Findings = append(lane.Findings, f.Message)
+		}
+	}
+	return findings
 }
 
 func inspectCmdEvidence(cmdDir, unitOfWork, laneName string) (Evidence, []FindingProvenance) {

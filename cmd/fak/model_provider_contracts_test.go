@@ -18,7 +18,7 @@ func TestRunModelProviderContractsJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &contracts); err != nil {
 		t.Fatalf("invalid JSON: %v\n%s", err, stdout.String())
 	}
-	if len(contracts) != 2 || contracts[0].Provider != "anthropic" || contracts[1].Provider != "openai" {
+	if len(contracts) != 3 || contracts[0].Provider != "anthropic" || contracts[1].Provider != "openai" || contracts[2].Provider != "openrouter" {
 		t.Fatalf("contracts=%+v", contracts)
 	}
 }

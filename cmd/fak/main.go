@@ -850,7 +850,7 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		cmdToolWidth(args)
 	case "replay":
 		// Explicit, unambiguous spelling of the trace-replay path (`fak run --trace`).
-		cmdRunTrace(args)
+		cmdRunTraceNamed("replay", args)
 	case "commit":
 		*verb = gitOperationName(*verb, args)
 		os.Exit(runObservedGitOperation(start, *verb, args, func() int {
@@ -875,6 +875,8 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 
 	case "go":
 		cmdGoShim(args)
+	case "hil":
+		cmdHIL(args)
 	case "worktree":
 		cmdWorktreeVerb(args)
 	case "wip":
@@ -963,44 +965,51 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 
 func ctx() context.Context { return context.Background() }
 
-// fak run  -  two modes, split on argv[0] BEFORE any flag parse so the two
-// parsers never collide:
+// fak run  -  unified model chat and trace replay runner.
 //
-//   - argv[0] is a non-flag (a model alias, an hf:// URI, or a .gguf path) ->
-//     CHAT mode: load that model into the in-kernel engine and run a one-shot
-//     completion (or an interactive REPL with no prompt). The Ollama `run` analog.
-//   - argv[0] starts with '-' (or is empty) -> the existing TRACE-replay mode,
-//     parsed exactly as before (--trace still required). Every documented
-//     `fak run --trace ...` caller is flag-first, so it is unaffected.
+// In-kernel model chat / REPL mode:
+//
+//	fak run <model> [prompt] [flags]
+//	Loads that model into the in-kernel engine and runs a one-shot
+//	completion (or an interactive REPL with no prompt).
+//
+// Trace replay mode:
+//
+//	fak run --trace FILE [flags]
+//	Replays a recorded tool-call trace through the kernel.
 //
 // `fak replay` is an explicit, unambiguous alias for the trace path.
 func cmdRun(argv []string) {
-	if len(argv) > 0 && !strings.HasPrefix(argv[0], "-") {
-		runChatModel(argv)
-		return
-	}
-	cmdRunTrace(argv)
+	runUnifiedRun(argv)
 }
 
 // cmdRunTrace replays a trace through the kernel (the original `fak run`).
 func cmdRunTrace(argv []string) {
-	fs := flag.NewFlagSet("run", flag.ExitOnError)
-	verbFlagUsage(fs, "run")
+	cmdRunTraceNamed("run", argv)
+}
+
+func cmdRunTraceNamed(verb string, argv []string) {
+	fs := flag.NewFlagSet(verb, flag.ExitOnError)
+	verbFlagUsage(fs, verb)
 	trace := fs.String("trace", "", "path to a trace JSON file")
 	engineID := fs.String("engine", "mock", "engine id (default: mock; inkernel: the explicit fak-native model path; cassette)")
 	vdso := fs.Bool("vdso", true, "enable the vDSO fast path")
-	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
+	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in production capability floor; see `fak policy --dump`)")
 	_ = fs.Parse(argv)
 
 	if *trace == "" {
-		fmt.Fprintln(os.Stderr, "fak run: --trace is required")
+		fmt.Fprintf(os.Stderr, "fak %s: --trace is required\n", verb)
 		os.Exit(2)
 	}
-	applyPolicy(*policyPath)
-	t, err := bench.LoadTrace(*trace)
+	executeTraceReplay(*trace, *engineID, *vdso, *policyPath)
+}
+
+func executeTraceReplay(tracePath, engineID string, vdso bool, policyPath string) {
+	applyPolicy(policyPath)
+	t, err := bench.LoadTrace(tracePath)
 	must(err)
-	k := kernel.New(*engineID)
-	k.SetVDSO(*vdso)
+	k := kernel.New(engineID)
+	k.SetVDSO(vdso)
 	res := abi.ActiveResolver()
 	for i, c := range t.Calls {
 		args := []byte(c.Args)
@@ -1025,7 +1034,7 @@ func cmdPreflight(argv []string) {
 	verbFlagUsage(fs, "preflight")
 	tool := fs.String("tool", "", "tool name")
 	args := fs.String("args", "{}", "tool args as JSON")
-	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
+	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in production capability floor; see `fak policy --dump`)")
 	grammarSchema := fs.String("grammar-schema", "", "load a JSON Schema grammar for --tool before adjudication (demo/debug witness)")
 	showDispatchedArgs := fs.Bool("show-dispatched-args", false, "print post-transform args that would be dispatched (may include raw arg values; demo/debug only)")
 	explain := fs.Bool("explain", false, "print the full decision trace: every rung folded, what each returned, which won, and why")

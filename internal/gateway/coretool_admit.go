@@ -354,6 +354,24 @@ var CoreToolsPalette = []MCPToolDescriptor{
 		DestructiveHint: false,
 		OpenWorldHint:   false,
 	},
+	{
+		Name:            "fak_hil_probe",
+		Description:     "Probe and report physical hardware accelerator capabilities",
+		DestructiveHint: false,
+		OpenWorldHint:   false,
+	},
+	{
+		Name:            "fak_hil_microdose",
+		Description:     "Execute sub-second physical silicon micro-dose probes",
+		DestructiveHint: false,
+		OpenWorldHint:   false,
+	},
+	{
+		Name:            "fak_hil_audit_comparison",
+		Description:     "Audit head-to-head performance comparison against hardware discipline",
+		DestructiveHint: false,
+		OpenWorldHint:   false,
+	},
 }
 
 // LookupCoreTool finds a core tool in CoreToolsPalette by name.

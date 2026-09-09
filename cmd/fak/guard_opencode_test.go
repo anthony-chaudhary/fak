@@ -98,13 +98,13 @@ func TestGuardOpenCodeToolDialectAdjudication(t *testing.T) {
 		wantKind   abi.VerdictKind
 		wantReason abi.ReasonCode
 	}{
-		// Allowed OpenCode tool calls
+		// Allowed OpenCode tool calls and transparent kernel transforms (#11150, #11499)
 		{"benign bash", "bash", `{"command":"echo fak-opencode-ok"}`, abi.VerdictAllow, abi.ReasonNone},
-		{"benign read with filePath", "read", `{"filePath":"README.md"}`, abi.VerdictAllow, abi.ReasonNone},
+		{"benign read with filePath", "read", `{"filePath":"README.md"}`, abi.VerdictTransform, abi.ReasonNone},
 		{"benign in-tree write", "write", `{"filePath":"notes.txt","content":"hello"}`, abi.VerdictAllow, abi.ReasonNone},
 		{"benign in-tree edit", "edit", `{"filePath":"notes.txt","oldString":"a","newString":"b"}`, abi.VerdictAllow, abi.ReasonNone},
-		{"benign grep", "grep", `{"pattern":"func main"}`, abi.VerdictAllow, abi.ReasonNone},
-		{"benign glob", "glob", `{"pattern":"**/*.go"}`, abi.VerdictAllow, abi.ReasonNone},
+		{"benign grep", "grep", `{"pattern":"func main"}`, abi.VerdictTransform, abi.ReasonNone},
+		{"benign glob", "glob", `{"pattern":"**/*.go"}`, abi.VerdictTransform, abi.ReasonNone},
 		{"benign webfetch", "webfetch", `{"url":"https://github.com/anthony-chaudhary/fak"}`, abi.VerdictAllow, abi.ReasonNone},
 		{"benign todowrite", "todowrite", `{"todos":[]}`, abi.VerdictAllow, abi.ReasonNone},
 		{"benign skill", "skill", `{"name":"agent-readiness"}`, abi.VerdictAllow, abi.ReasonNone},
@@ -114,10 +114,10 @@ func TestGuardOpenCodeToolDialectAdjudication(t *testing.T) {
 		{"sudo blocked", "bash", `{"command":"sudo rm /etc/hosts"}`, abi.VerdictDeny, abi.ReasonPolicyBlock},
 		{"fork bomb blocked", "bash", `{"command":":(){ :|:& };:"}`, abi.VerdictDeny, abi.ReasonPolicyBlock},
 
-		// Sensitive repository structures blocked by SELF_MODIFY via filePath
+		// Sensitive repository structures blocked by SELF_MODIFY or POLICY_BLOCK via filePath
 		{"edit .git/config blocked", "edit", `{"filePath":".git/config","oldString":"a","newString":"b"}`, abi.VerdictDeny, abi.ReasonSelfModify},
 		{"write .git/hooks blocked", "write", `{"filePath":".git/hooks/pre-commit","content":"#!/bin/sh"}`, abi.VerdictDeny, abi.ReasonSelfModify},
-		{"write .env blocked", "write", `{"filePath":".env","content":"KEY=secret"}`, abi.VerdictDeny, abi.ReasonSelfModify},
+		{"write .env blocked", "write", `{"filePath":".env","content":"KEY=secret"}`, abi.VerdictDeny, abi.ReasonPolicyBlock},
 
 		// Unlisted tool fails closed under default deny
 		{"unregistered tool fails closed", "arbitrary_execution", `{}`, abi.VerdictDeny, abi.ReasonDefaultDeny},

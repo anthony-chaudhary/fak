@@ -1,6 +1,6 @@
 {
   "slice_id": "trace-authoring-minimal",
-  "_note": "Adoption walkthrough fixture for examples/trace-authoring/README.md. Three calls, one screen: one ALLOW, one DENY (DEFAULT_DENY), one DENY (POLICY_BLOCK). Replays under the built-in adjudicator floor (the tau2 airline demo tools) — no model, no network. Keys prefixed _ are author annotations the loader ignores (see tau2-smoke.json's _provenance).",
+  "_note": "Adoption walkthrough fixture for examples/trace-authoring/README.md. Three calls, one screen: one ALLOW, one DENY (DEFAULT_DENY), one DENY (POLICY_BLOCK). Replays under the built-in production capability floor — no model, no network. Keys prefixed _ are author annotations the loader ignores (see tau2-smoke.json's _provenance).",
   "calls": [
     {
       "_note": "ALLOW — get_reservation_details is on the floor's allow-set (a read-only airline tool). Verdict ALLOW, reason NONE, by=monitor.",

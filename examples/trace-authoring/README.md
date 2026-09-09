@@ -71,10 +71,10 @@ preflight a single call:
 # verdict=DENY reason=POLICY_BLOCK by=monitor
 ```
 
-`fak run` with no `--policy` uses the built-in adjudicator floor (the tau2 airline
-demo tools — read-only `get_*`/`search_*`/`list_*`, plus a handful of named
-booking tools; everything else is fail-closed). Dump it with `fak policy --dump`,
-or point `--policy <manifest>` at one of the floors in [`../`](../README.md).
+`fak run` with no `--policy` uses the built-in production capability floor —
+the same policy `fak preflight` loads when no `--policy` is passed. Dump it with
+`fak policy --dump`, or point `--policy <manifest>` at one of the floors in
+[`../`](../README.md).
 
 ## Walkthrough: authoring `minimal.json`
 

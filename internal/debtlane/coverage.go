@@ -60,6 +60,7 @@ const (
 	DimStalePerfProof              DetectorDimension = "stale_perf_proof"              // Missing from benchmark authority or proof registry
 	DimCoverageDebt                DetectorDimension = "coverage_debt"                 // Unknown, unsupported, or unreadable content
 	DimUngatedPerformanceBenchmark DetectorDimension = "ungated_performance_benchmark" // Benchmarked lanes without executable regression gates
+	DimMockHazard                  DetectorDimension = "mock_hazard"                   // Mock/fake struct or stub panic hazard
 )
 
 // Aliases for dimensional lookup compatibility.
@@ -85,6 +86,14 @@ var StandardDetectorDimensions = []DetectorDimension{
 	DimRaceFuzzStatus,
 	DimStalePerfProof,
 	DimUngatedPerformanceBenchmark,
+}
+
+// AllDetectorDimensions returns all detector dimensions supported by debtlane.
+func AllDetectorDimensions() []DetectorDimension {
+	dims := make([]DetectorDimension, 0, len(StandardDetectorDimensions)+2)
+	dims = append(dims, StandardDetectorDimensions...)
+	dims = append(dims, DimCoverageDebt, DimMockHazard)
+	return dims
 }
 
 // FindingProvenance records typed provenance for a specific debt finding.

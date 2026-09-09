@@ -116,6 +116,14 @@ func (s *Server) MarkWarmupComplete(d time.Duration) {
 		return
 	}
 	s.warmup.markComplete(d)
+	if s.logf != nil {
+		addr := s.BoundAddr()
+		if addr != "" {
+			s.logf("[READY] server warmup completed in %v — gateway is ready on http://%s", d.Round(time.Millisecond), addr)
+		} else {
+			s.logf("[READY] server warmup completed in %v — gateway is ready", d.Round(time.Millisecond))
+		}
+	}
 }
 
 // RunWarmup issues one synthetic completion through the server's chat planner and
