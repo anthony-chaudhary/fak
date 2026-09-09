@@ -843,3 +843,146 @@ func BenchmarkMetalMTPDraftVerifyRollbackLoop(b *testing.B) {
 		_, _ = coord.Generate(ctx, prompt, 8)
 	}
 }
+
+// TestMetalWideMSpeculativeTreeVerification_M16_M24 verifies that evaluating an M=16..24
+// speculative candidate tree in one forward pass and extracting the highest-scoring
+// verified token branch via greedy argmax path selection yields bit-exact equivalence
+// to serial autoregressive decode.
+func TestMetalWideMSpeculativeTreeVerification_M16_M24(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	prompt := []int{0, 1, 2}
+	ctx := context.Background()
+
+	t.Run("tree_branch_greedy_argmax_bit_exact_with_serial", func(t *testing.T) {
+		// 1. Establish ground truth serial autoregressive steps
+		goldSes := m.NewSession()
+		t.Cleanup(goldSes.Close)
+		goldBoundary := goldSes.Prefill(prompt)
+		goldT0 := argmaxF32(goldBoundary)
+
+		goldNext1 := goldSes.Step(goldT0)
+		goldT1 := argmaxF32(goldNext1)
+
+		goldNext2 := goldSes.Step(goldT1)
+		goldT2 := argmaxF32(goldNext2)
+
+		goldNext3 := goldSes.Step(goldT2)
+		goldT3 := argmaxF32(goldNext3)
+
+		wantAccepted := []int{goldT0, goldT1, goldT2}
+		wantBonus := goldT3
+
+		// 2. Build a wide candidate tree (M=16 nodes) containing the winning branch
+		// along with branching distractor candidates:
+		branches := [][]int{
+			{goldT0, goldT1, goldT2},
+			{goldT0, goldT1, (goldT2 + 1) % 100},
+			{goldT0, (goldT1 + 1) % 100, goldT2},
+			{goldT0, (goldT1 + 1) % 100, (goldT2 + 2) % 100},
+			{(goldT0 + 1) % 100, goldT1, goldT2},
+			{(goldT0 + 1) % 100, (goldT1 + 2) % 100, goldT2},
+			{(goldT0 + 2) % 100, goldT1, goldT2},
+		}
+
+		tree, err := BuildCandidateTreeFromBranches(branches)
+		if err != nil {
+			t.Fatalf("BuildCandidateTreeFromBranches failed: %v", err)
+		}
+		if len(tree.Nodes) < 16 {
+			// Pad with additional distractor branches to reach M=16..24
+			for i := len(branches); len(tree.Nodes) < 16; i++ {
+				branches = append(branches, []int{(goldT0 + i) % 100, (goldT1 + i) % 100, (goldT2 + i) % 100})
+				tree, err = BuildCandidateTreeFromBranches(branches)
+				if err != nil {
+					t.Fatalf("BuildCandidateTreeFromBranches padding failed: %v", err)
+				}
+			}
+		}
+
+		t.Logf("Constructed M=%d candidate tree for multi-branch verification", len(tree.Nodes))
+
+		// 3. Evaluate candidate tree via MetalMTPCoordinator.StepRoundTree
+		specSes := m.NewSession()
+		t.Cleanup(specSes.Close)
+		boundary := specSes.Prefill(prompt)
+
+		coord, err := specSes.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
+		if err != nil {
+			t.Fatalf("NewMetalMTPCoordinator failed: %v", err)
+		}
+		t.Cleanup(func() { _ = coord.Close() })
+
+		gotAccepted, gotBonus, nextLogits, err := coord.StepRoundTree(ctx, prompt, boundary, tree)
+		if err != nil {
+			t.Fatalf("StepRoundTree failed: %v", err)
+		}
+
+		// 4. Assert bit-exact match against serial decode
+		if !reflect.DeepEqual(gotAccepted, wantAccepted) {
+			t.Fatalf("accepted tokens mismatch:\n got:  %v\n want: %v", gotAccepted, wantAccepted)
+		}
+		if gotBonus != wantBonus {
+			t.Fatalf("bonus token mismatch: got %d, want %d", gotBonus, wantBonus)
+		}
+		if len(nextLogits) != m.Cfg.VocabSize {
+			t.Fatalf("nextLogits length %d != vocabSize %d", len(nextLogits), m.Cfg.VocabSize)
+		}
+
+		// Verify target session state matches gold session state
+		goldAfterBonus := goldSes.Step(wantBonus)
+		goldTok := argmaxF32(goldAfterBonus)
+		specTok := argmaxF32(nextLogits)
+		if specTok != goldTok {
+			t.Fatalf("continuation token mismatch after tree verification: spec %d, gold %d", specTok, goldTok)
+		}
+		for step := 0; step < 3; step++ {
+			goldNext := goldSes.Step(goldTok)
+			specNext := specSes.Step(specTok)
+			goldTok = argmaxF32(goldNext)
+			specTok = argmaxF32(specNext)
+			if specTok != goldTok {
+				t.Fatalf("step %d continuation token mismatch: spec %d, gold %d", step, specTok, goldTok)
+			}
+		}
+
+		t.Logf("Verified tree verification greedy argmax path selection is bit-exact with serial autoregressive decode")
+	})
+
+	t.Run("tree_root_mismatch_fallback", func(t *testing.T) {
+		specSes := m.NewSession()
+		t.Cleanup(specSes.Close)
+		boundary := specSes.Prefill(prompt)
+		target0 := argmaxF32(boundary)
+
+		coord, err := specSes.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
+		if err != nil {
+			t.Fatalf("NewMetalMTPCoordinator failed: %v", err)
+		}
+		t.Cleanup(func() { _ = coord.Close() })
+
+		// Construct tree where NO root candidate matches target0
+		mismatchRoot := (target0 + 1) % 100
+		branches := [][]int{
+			{mismatchRoot, 10, 20},
+			{mismatchRoot, 11, 21},
+		}
+		tree, err := BuildCandidateTreeFromBranches(branches)
+		if err != nil {
+			t.Fatalf("BuildCandidateTreeFromBranches failed: %v", err)
+		}
+
+		gotAccepted, gotBonus, nextLogits, err := coord.StepRoundTree(ctx, prompt, boundary, tree)
+		if err != nil {
+			t.Fatalf("StepRoundTree failed: %v", err)
+		}
+		if len(gotAccepted) != 0 {
+			t.Fatalf("expected 0 accepted tokens on root mismatch, got %v", gotAccepted)
+		}
+		if gotBonus != target0 {
+			t.Fatalf("expected bonus token to be target0 (%d), got %d", target0, gotBonus)
+		}
+		if len(nextLogits) != m.Cfg.VocabSize {
+			t.Fatalf("nextLogits length %d != vocabSize %d", len(nextLogits), m.Cfg.VocabSize)
+		}
+	})
+}
