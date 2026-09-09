@@ -60,6 +60,9 @@ func resolveGoTmpChild(root string, entry *GoTmpEntry) {
 	if entry.Reason == GoTmpReasonReparsePoint || entry.Reason == GoTmpReasonScanFailed {
 		return
 	}
+	if cr, err := filepath.EvalSymlinks(root); err == nil {
+		root = filepath.Clean(cr)
+	}
 	canonical, err := filepath.EvalSymlinks(entry.Path)
 	if err != nil {
 		entry.ScanErr = err.Error()
@@ -88,8 +91,21 @@ func goTmpProcessSnapshot(opts GoTmpOptions) ([]GoTmpProcess, error) {
 
 func goTmpReferencingPIDs(processes []GoTmpProcess, candidate string) []int {
 	pids := make([]int, 0)
+	candidates := []string{candidate}
+	if strings.HasPrefix(candidate, "/private/") {
+		candidates = append(candidates, strings.TrimPrefix(candidate, "/private"))
+	} else if strings.HasPrefix(candidate, "/") {
+		candidates = append(candidates, "/private"+candidate)
+	}
 	for _, process := range processes {
-		if goTmpFieldReferencesPath(process.CommandLine, candidate) || goTmpFieldReferencesPath(process.ExecutablePath, candidate) {
+		matched := false
+		for _, cand := range candidates {
+			if goTmpFieldReferencesPath(process.CommandLine, cand) || goTmpFieldReferencesPath(process.ExecutablePath, cand) {
+				matched = true
+				break
+			}
+		}
+		if matched {
 			pids = append(pids, process.PID)
 		}
 	}

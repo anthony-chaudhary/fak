@@ -82,6 +82,18 @@ func TestPlanGoTmpDecisionTable(t *testing.T) {
 			why:   "a build may still be running here",
 		},
 		{
+			name:  "an orphaned go-link dir quiet for 17 hours",
+			entry: GoTmpEntry{Name: "go-link987654", NewestAgeSec: 17 * 60 * 60, Bytes: 25 << 20},
+			want:  GoTmpReap,
+			why:   "go-link directories from the Go linker are reapable when stale",
+		},
+		{
+			name:  "a go-link dir written into a minute ago",
+			entry: GoTmpEntry{Name: "go-link123", NewestAgeSec: 60},
+			want:  GoTmpKeepLive,
+			why:   "a linker process may still be running here",
+		},
+		{
 			name:  "a WORK dir exactly at the floor",
 			entry: GoTmpEntry{Name: "go-build124", NewestAgeSec: 2 * 60 * 60},
 			want:  GoTmpReap,
@@ -657,8 +669,12 @@ func TestCanonicalGoTmpRootRejectsOutsideRepositoryScratch(t *testing.T) {
 }
 
 func goTmpReasonForPath(rep GoTmpReport, path string) string {
+	cleanPath := filepath.Clean(path)
+	normPath := strings.TrimPrefix(cleanPath, "/private")
 	for _, entry := range rep.Entries {
-		if entry.Path == path {
+		cleanEntry := filepath.Clean(entry.Path)
+		normEntry := strings.TrimPrefix(cleanEntry, "/private")
+		if cleanEntry == cleanPath || normEntry == normPath {
 			return entry.Reason
 		}
 	}

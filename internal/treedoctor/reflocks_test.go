@@ -311,3 +311,44 @@ func TestLooseRefPressureQuietUnderThreshold(t *testing.T) {
 		t.Fatalf("healthy tree emitted a pressure advisory: %v", actions)
 	}
 }
+
+// TestLooseRefPressurePacksRefsUnderApply pins that when loose-ref pressure is flagged
+// and apply is true, Sweep runs `git pack-refs --all --prune` and records the packed count.
+func TestLooseRefPressurePacksRefsUnderApply(t *testing.T) {
+	now := time.Now()
+	root, gitDir := residueGitDir(t)
+	seedRefs := func(ns string, n int) {
+		dir := filepath.Join(gitDir, "refs", filepath.FromSlash(ns))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < n; i++ {
+			if err := os.WriteFile(filepath.Join(dir, "r"+strconv.Itoa(i)), []byte("deadbeef\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	seedRefs("fak/locks", 60)
+
+	fg := &fakeGit{}
+	opts := Options{RepoRoot: root, Now: now, RefLock: RefLockOptions{
+		Sleep:         func(time.Duration) {},
+		LoosePressure: 50,
+	}}
+	_, actions := Sweep(context.Background(), fg.run, opts, true)
+
+	foundPackRefsCall := false
+	for _, call := range fg.calls {
+		if len(call) >= 4 && call[1] == "pack-refs" && call[2] == "--all" && call[3] == "--prune" {
+			foundPackRefsCall = true
+			break
+		}
+	}
+	if !foundPackRefsCall {
+		t.Fatalf("Sweep did not invoke `git pack-refs --all --prune`; calls = %v", fg.calls)
+	}
+	joined := strings.Join(actions, "\n")
+	if !strings.Contains(joined, "packed 60 loose refs into packed-refs") {
+		t.Fatalf("actions missing expected packed count; got:\n%s", joined)
+	}
+}
