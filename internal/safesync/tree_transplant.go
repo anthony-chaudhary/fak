@@ -8,8 +8,8 @@ import (
 )
 
 // TransplantDisjointTree computes a pure ODB synthetic tree transplantation for two disjoint commits,
-// mints a merge commit directly in the Git Object Database without touching the working tree or index,
-// and advances the branch reference atomically.
+// mints a merge commit directly in the Git Object Database, advances the branch reference atomically,
+// and synchronizes incoming disjoint paths to the working tree.
 func TransplantDisjointTree(ctx context.Context, repo, branch, headSHA, targetSHA, targetRef string) (string, error) {
 	return TransplantDisjointTreeWithRunner(ctx, RealRunner, repo, branch, headSHA, targetSHA, targetRef)
 }
@@ -104,6 +104,37 @@ func TransplantDisjointTreeWithRunner(ctx context.Context, run Runner, repo, bra
 					return "", fmt.Errorf("git update-ref HEAD exited with code %d: %s", upHead.Code, strings.TrimSpace(string(upHead.Stderr)))
 				}
 			}
+		}
+	}
+
+	// 4. Synchronize incoming disjoint paths to working tree.
+	// Query non-conflicting incoming paths added/modified between headSHA and targetSHA.
+	// In the synthetic merge commit (newCommitSHA), incoming paths are precisely those
+	// added or modified relative to headSHA.
+	diffRes := run(ctx, repo, "diff", "--name-only", "--diff-filter=AM", headSHA, newCommitSHA)
+	if diffRes.Err != nil {
+		return "", fmt.Errorf("git diff incoming paths failed: %w", diffRes.Err)
+	}
+	if diffRes.Code != 0 {
+		return "", fmt.Errorf("git diff incoming paths exited with code %d: %s", diffRes.Code, strings.TrimSpace(string(diffRes.Stderr)))
+	}
+
+	var incomingPaths []string
+	for _, line := range strings.Split(strings.TrimSpace(string(diffRes.Stdout)), "\n") {
+		p := strings.TrimSpace(line)
+		if p != "" {
+			incomingPaths = append(incomingPaths, p)
+		}
+	}
+
+	if len(incomingPaths) > 0 {
+		checkoutArgs := append([]string{"checkout", newCommitSHA, "--"}, incomingPaths...)
+		coRes := run(ctx, repo, checkoutArgs...)
+		if coRes.Err != nil {
+			return "", fmt.Errorf("git checkout incoming paths failed: %w", coRes.Err)
+		}
+		if coRes.Code != 0 {
+			return "", fmt.Errorf("git checkout incoming paths exited with code %d: %s", coRes.Code, strings.TrimSpace(string(coRes.Stderr)))
 		}
 	}
 
