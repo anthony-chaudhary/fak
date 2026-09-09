@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -558,3 +559,35 @@ func (b *budgetedPlanBackend) Attention(q compute.Tensor, kv compute.KVStore, la
 	panic("unused")
 }
 func (b *budgetedPlanBackend) Argmax(x compute.Tensor) int { panic("unused") }
+
+func TestFitServeGGUFPathOnHostRefusesExpandingQ8Load(t *testing.T) {
+	const gib = int64(1 << 30)
+	dir := t.TempDir()
+	udPath := filepath.Join(dir, "qwen38-27b-ud-q2kxl.gguf")
+	writeSynth27BGGUF(t, udPath, true)
+
+	// Host allocatable memory: 36 GiB total, 36 GiB free (MemAvailable).
+	// With 15% headroom, allocatable budget is 30.6 GiB.
+	// Raw on-disk payload of 27B UD-Q2_K_XL is ~9.53 GiB, which would pass if unaligned.
+	// But runtime arm executes LoadModelQuantProfile, expanding to ~31.27 GiB resident weights.
+	// 31.27 GiB > 30.6 GiB allocatable, so it must refuse with FitTooBig.
+	err := fitServeGGUFPathOnReportedHost(udPath, false, 0, 36*gib, 36*gib, true)
+	if err == nil {
+		t.Fatal("fitServeGGUFPathOnHost must refuse expanding Q8 load of 27B model on 36 GiB host, got nil")
+	}
+	fe, ok := err.(*compute.FitError)
+	if !ok {
+		t.Fatalf("want *compute.FitError, got %T: %v", err, err)
+	}
+	if fe.Verdict != compute.FitTooBig {
+		t.Fatalf("fe.Verdict = %v, want FitTooBig", fe.Verdict)
+	}
+	if fe.Scope != compute.MemoryScopeHost {
+		t.Fatalf("fe.Scope = %v, want MemoryScopeHost", fe.Scope)
+	}
+
+	// On a larger 64 GiB host, allocatable budget is 54.4 GiB, which admits the ~31.27 GiB plan.
+	if err := fitServeGGUFPathOnReportedHost(udPath, false, 0, 64*gib, 64*gib, true); err != nil {
+		t.Fatalf("fitServeGGUFPathOnHost should admit expanding Q8 load on 64 GiB host: %v", err)
+	}
+}

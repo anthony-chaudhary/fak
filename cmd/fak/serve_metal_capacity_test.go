@@ -1,9 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/ggufload"
 )
 
 func TestMetalGGUFPeakCapacity(t *testing.T) {
@@ -114,4 +120,112 @@ func TestNonStreamingMetalCapacityIsUnchangedByFREECPUDeclaration(t *testing.T) 
 	if peak != int64(float64(1592*gib/100)*metalGGUFObservedPeakMultiplier) || !refuse {
 		t.Fatalf("non-streaming capacity = (%d, %v), want unchanged generic Metal refusal", peak, refuse)
 	}
+}
+
+func writeSynth27BGGUF(t *testing.T, path string, isUDQ2KXL bool) {
+	t.Helper()
+	var b bytes.Buffer
+	b.WriteString("GGUF")
+	_ = binary.Write(&b, binary.LittleEndian, uint32(3))
+
+	writeString := func(s string) {
+		_ = binary.Write(&b, binary.LittleEndian, uint64(len(s)))
+		b.WriteString(s)
+	}
+	writeKV := func(k string, typ uint32, writeVal func()) {
+		writeString(k)
+		_ = binary.Write(&b, binary.LittleEndian, typ)
+		writeVal()
+	}
+
+	nTensors := uint64(3)
+	nKV := uint64(3)
+
+	_ = binary.Write(&b, binary.LittleEndian, nTensors)
+	_ = binary.Write(&b, binary.LittleEndian, nKV)
+
+	writeKV("general.architecture", uint32(ggufload.TypeString), func() { writeString("qwen2") })
+	writeKV("qwen2.block_count", uint32(ggufload.TypeUint64), func() { _ = binary.Write(&b, binary.LittleEndian, uint64(1)) })
+	writeKV("general.alignment", uint32(ggufload.TypeUint32), func() { _ = binary.Write(&b, binary.LittleEndian, uint32(32)) })
+
+	writeTensor := func(name string, dims []uint64, typ ggufload.TensorType, off uint64) {
+		writeString(name)
+		_ = binary.Write(&b, binary.LittleEndian, uint32(len(dims)))
+		for _, d := range dims {
+			_ = binary.Write(&b, binary.LittleEndian, d)
+		}
+		_ = binary.Write(&b, binary.LittleEndian, uint32(typ))
+		_ = binary.Write(&b, binary.LittleEndian, off)
+	}
+
+	if isUDQ2KXL {
+		// UD-Q2_K_XL mixture: Q8_0 embedding + Q2_K matmul + IQ2_XXS
+		writeTensor("token_embd.weight", []uint64{5120, 152064}, ggufload.TensorQ8_0, 0)
+		writeTensor("blk.0.ffn_gate.weight", []uint64{5120, 5600000}, ggufload.TensorQ2_K, 0)
+		writeTensor("blk.0.ffn_down.weight", []uint64{256, 256}, ggufload.TensorIQ2_XXS, 0)
+	} else {
+		// Standard Q4_K_M 27B model
+		writeTensor("token_embd.weight", []uint64{5120, 152064}, ggufload.TensorQ4_K, 0)
+		writeTensor("blk.0.ffn_gate.weight", []uint64{5120, 5600000}, ggufload.TensorQ4_K, 0)
+		writeTensor("output_norm.weight", []uint64{5120}, ggufload.TensorF32, 0)
+	}
+
+	if err := os.WriteFile(path, b.Bytes(), 0o644); err != nil {
+		t.Fatalf("writeSynth27BGGUF: %v", err)
+	}
+}
+
+func TestMetalGGUFPeakCapacityAlignsWithLoadArm(t *testing.T) {
+	const gib = int64(1 << 30)
+	dir := t.TempDir()
+	udPath := filepath.Join(dir, "qwen38-27b-ud-q2kxl.gguf")
+	writeSynth27BGGUF(t, udPath, true)
+
+	q4kPath := filepath.Join(dir, "qwen38-27b-q4km.gguf")
+	writeSynth27BGGUF(t, q4kPath, false)
+
+	t.Run("UD-Q2_K_XL expands to Q8 and refuses 36 GiB Mac", func(t *testing.T) {
+		err := refuseOversubscribedMetalGGUFForHost(udPath, 36*gib, true)
+		if err == nil {
+			t.Fatal("expanding Q8 load of 27B UD-Q2_K_XL must be refused on 36 GiB host, got nil")
+		}
+		if !strings.Contains(err.Error(), "METAL_GGUF_PEAK_TOO_BIG") {
+			t.Fatalf("error = %v, want METAL_GGUF_PEAK_TOO_BIG", err)
+		}
+	})
+
+	t.Run("UD-Q2_K_XL expands to Q8 and admits on 128 GiB Mac", func(t *testing.T) {
+		err := refuseOversubscribedMetalGGUFForHost(udPath, 128*gib, true)
+		if err != nil {
+			t.Fatalf("expanding Q8 load of 27B UD-Q2_K_XL must be admitted on 128 GiB host, got error: %v", err)
+		}
+	})
+
+	t.Run("resident Q4_K evaluates at on-disk size and refuses 36 GiB Mac", func(t *testing.T) {
+		err := refuseOversubscribedMetalGGUFForHost(q4kPath, 36*gib, true)
+		if err == nil {
+			t.Fatal("resident Q4_K 27B must be refused on 36 GiB host, got nil")
+		}
+		if !strings.Contains(err.Error(), "METAL_GGUF_PEAK_TOO_BIG") {
+			t.Fatalf("error = %v, want METAL_GGUF_PEAK_TOO_BIG", err)
+		}
+	})
+
+	t.Run("resident Q4_K evaluates at on-disk size and admits on 64 GiB Mac", func(t *testing.T) {
+		err := refuseOversubscribedMetalGGUFForHost(q4kPath, 64*gib, true)
+		if err != nil {
+			t.Fatalf("resident Q4_K 27B must be admitted on 64 GiB host, got error: %v", err)
+		}
+	})
+
+	t.Run("FAK_Q4K=0 forces Q8 rollback and refuses 36 GiB Mac", func(t *testing.T) {
+		t.Setenv("FAK_Q4K", "0")
+		err := refuseOversubscribedMetalGGUFForHost(q4kPath, 36*gib, true)
+		if err == nil {
+			t.Fatal("Q8 rollback of 27B must be refused on 36 GiB host, got nil")
+		}
+		if !strings.Contains(err.Error(), "METAL_GGUF_PEAK_TOO_BIG") {
+			t.Fatalf("error = %v, want METAL_GGUF_PEAK_TOO_BIG", err)
+		}
+	})
 }

@@ -66,4 +66,26 @@ func TestQwen38UDQ2KXLPinnedHeader(t *testing.T) {
 	if !ok || cfg.VocabSize != len(toks) || cfg.EOSTokenID >= len(toks) || toks[cfg.EOSTokenID] != "<|im_end|>" {
 		t.Fatalf("real artifact tokenizer mismatch: vocab=%d eos=%d", len(toks), cfg.EOSTokenID)
 	}
+
+	ws, err := NewWeightSource(gg, nil, 0)
+	if err != nil {
+		t.Fatalf("NewWeightSource: %v", err)
+	}
+	diskBytes, err := ws.EstimateLoadBytes()
+	if err != nil {
+		t.Fatalf("EstimateLoadBytes: %v", err)
+	}
+	q8Bytes, err := ws.EstimateQ8LoadBytes()
+	if err != nil {
+		t.Fatalf("EstimateQ8LoadBytes: %v", err)
+	}
+	// On disk, 2-bit UD-Q2_K_XL is ~9.1-9.2 GiB (9.8 GB).
+	// Under Q8 dequantization (LoadModelQuantProfile), it expands to ~30-32 GiB resident weights.
+	const gib = int64(1 << 30)
+	if diskBytes < 9*gib || diskBytes > 10*gib {
+		t.Fatalf("diskBytes = %.2f GiB, want ~9.2 GiB", float64(diskBytes)/float64(gib))
+	}
+	if q8Bytes < 29*gib || q8Bytes > 33*gib {
+		t.Fatalf("q8Bytes = %.2f GiB, want ~30-32 GiB", float64(q8Bytes)/float64(gib))
+	}
 }
