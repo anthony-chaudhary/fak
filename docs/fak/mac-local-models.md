@@ -5,9 +5,9 @@ description: "How to run local models (Qwen3.8-27B and peers) natively on Apple 
 
 # Run local models on Mac (Apple Silicon Metal) and interactive chat
 
-**fak** runs open models directly on Apple Silicon unified memory using native Metal compute kernels. No Python, no PyTorch, and no separate runtime daemon required — one static binary runs the model, accelerates KV-cache prefix reuse, and secures tool execution behind a default-deny capability floor.
+**fak** runs open models directly on Apple Silicon unified memory using native Metal compute kernels. No Python, no PyTorch, and no separate runtime daemon required — one native binary runs the model, accelerates KV-cache prefix reuse, and secures tool execution behind a default-deny capability floor.
 
-> **TL;DR — The two fastest ways to chat with Qwen3.8 right now on macOS:**
+> **TL;DR — Two ways to chat with Qwen3.8 on macOS:**
 >
 > 1. **Instant Interactive REPL (daemon-less, single command):**
 >    ```bash
@@ -21,6 +21,68 @@ description: "How to run local models (Qwen3.8-27B and peers) natively on Apple 
 >    # Terminal 2: chat through the gateway (auto-connects to :8080 and detects model)
 >    fak chat
 >    ```
+
+---
+
+## Build and qualify the native Metal binary
+
+Metal support is compiled only into a native `darwin/arm64` build with CGo enabled. The
+release archive is currently a pure-Go build: it can serve on CPU, but it cannot pass this
+Metal qualification. Install Xcode Command Line Tools and Go 1.26+, then build from a clean
+committed checkout (or a managed worker) to a unique temporary path and inspect the actual
+Mac and backend:
+
+```bash
+xcode-select -p
+go version
+system_profiler SPHardwareDataType
+sysctl -n hw.memsize
+
+FAK_BIN="$(mktemp -d)/fak"
+CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 \
+  go build -trimpath -o "${FAK_BIN}" ./cmd/fak
+file "${FAK_BIN}"
+"${FAK_BIN}" hil --probe --json
+"${FAK_BIN}" hil --json
+```
+
+The discovery probe passes when it reports `kind: "metal"`, `architecture: "arm64"`,
+`physical_available: true`, `memory_unified: true`, the device name, and a non-zero Metal
+working-set size. The second command executes the physical micro-dose suite and must report
+`all_passed: true`. `mps_available` may be false; the Q4_K native shader path does not require
+MPS.
+
+Then run a fail-loud native server smoke. This 27B Q4_K example requires the corresponding
+RAM tier in the sizing table below:
+
+```bash
+# Terminal 1
+"${FAK_BIN}" serve --gguf qwen38:27b-q4 --metal --addr 127.0.0.1:18080
+
+# Terminal 2
+curl -fsS http://127.0.0.1:18080/healthz
+curl -fsS http://127.0.0.1:18080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"qwen38:27b-q4","messages":[{"role":"user","content":"Reply with ready."}],"max_tokens":1,"temperature":0,"fak":{"native_inference_receipt":true}}'
+```
+
+Acceptance requires a successful health response with `engine: "inkernel"` and a response
+receipt under `fak.native_inference_receipt` with `backend: "metal"`, a non-empty
+`forward_path`, and `fallback_active: false`.
+
+FAK detects the Metal device and its usable working-set size at runtime rather than matching
+an M-series product name. Apple's [Metal feature-set tables](https://developer.apple.com/metal/capabilities/)
+map M3 to Apple GPU family 9 and M5 to family 10, so M5 compatibility is expected from the
+runtime contract. That is not a performance result. A base M5 cannot be assumed to equal or
+beat every M3 Pro or Max: GPU configuration, memory bandwidth and capacity, cooling, and the
+workload all affect the result.
+
+For a performance claim, measure both physical Macs with the same source revision and build
+flags, model artifact digest and quantization, prompt/context/output-token envelope, sampling,
+concurrency, warm-up/repetition policy, and power state. Record the hardware probe and native
+receipt for each run. Physical M5 qualification is tracked in
+[#12681](https://github.com/anthony-chaudhary/fak/issues/12681); until it lands, retain the M3
+figures later in this guide as historical M3 evidence.
 
 ---
 
@@ -83,9 +145,9 @@ Subsequent conversation turns automatically reuse the prior conversation context
 
 ## 4. Option B: Metal GPU server + chat (`fak serve` + `fak chat`)
 
-For maximum performance on Apple Silicon, launch the native Metal GPU server. This enables:
-- Metal 4 GPU prefill and decode kernels (`metalgemm`).
-- In-kernel RadixAttention prefix caching (>190× TTFT speedup on repeated prefixes).
+To serve through native Metal on Apple Silicon, launch the Metal GPU server. This enables:
+- Native Metal GPU prefill and decode kernels (`metalgemm`).
+- In-kernel RadixAttention prefix caching for repeated prefixes.
 - OpenAI-compatible `/v1/chat/completions` and Anthropic-compatible `/v1/messages` endpoints.
 
 ### Step 1: Start the server
@@ -99,7 +161,7 @@ fak serve --gguf qwen38:27b-q4
 Verify the server is ready:
 ```bash
 curl -s http://127.0.0.1:8080/healthz
-# {"engine":"inkernel","model":"qwen38:27b-q4","ok":true}
+# Expected acceptance shape: {"engine":"inkernel","model":"qwen38:27b-q4","ok":true}
 ```
 
 ### Step 2: Chat with the server
