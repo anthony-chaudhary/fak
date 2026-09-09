@@ -11,6 +11,15 @@ description: "The active orientation for fak: preserve managed context, choose c
 
 ## Verdict
 
+**Current product milestone (2026-09-09): [Useful local agents, accelerated
+automatically](local-agent-milestone.md).** Make performant local agent work
+practical through native execution, qualified default acceleration, and reusable
+agent context. This sharpens the current investment emphasis: a normal local
+entry point, a real task, and an independent outcome receipt. The milestone
+specifies automatic behavior and distinguishes present wiring from qualification.
+It does not replace the centrality framework below; classify a change by its
+effect on this workflow, not by the number of backends or optimizations it adds.
+
 fak's center is the **kernel-mediated agent turn**:
 
 > preserve useful managed context and cache-compatible shared work, choose the least-cost capable execution path, enforce a fail-closed capability floor at the same tool boundary, and keep that path operable through real agent harnesses.

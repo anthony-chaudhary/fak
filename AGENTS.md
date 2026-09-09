@@ -101,6 +101,22 @@ When operating as or delegating to smaller models, enforce scoping safeguards:
    - Prevent token exhaustion and context pollution by targeting only the explicit requirement or failure mode instead of writing speculative matrix permutations or redundant assertion variations.
    - Keep test execution deterministic, bounded, and fast-failing within the target package (`go test -v ./internal/<pkg>` and `go vet ./internal/<pkg>`).
 
+## First local-agent product milestone
+
+**Useful local agents, accelerated automatically.** The current public product
+milestone is practical, performant local agent work through the normal entry
+point: native inference, qualified speculative decoding enabled by default,
+legal agentic prefix/KV reuse, and supported device-resident/direct GPU paths.
+Read [the milestone and worker brief](docs/local-agent-milestone.md) before
+planning native performance, caching, local UX, or public positioning work.
+
+Make qualified acceleration automatic and observable. In worker packets name
+the workflow, bottleneck, entry-point seam, supported model/device, expected
+default, acceptance witness, and missing evidence. Prefer time to verified task
+completion over isolated token-rate peaks. Distinguish shipped defaults from
+opt-in code and hardware qualification; this is our first milestone to earn,
+not an established world-first claim.
+
 ## Native inference performance invariant
 
 For any native-inference or performance task, keep model execution **fak-native all the
