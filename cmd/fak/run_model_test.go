@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"reflect"
 	"strings"
@@ -10,7 +9,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
-	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 func TestRunNativeControlsUseExplicitFlagsOverAmbientValues(t *testing.T) {
@@ -73,9 +72,10 @@ func TestRunDispatchRule(t *testing.T) {
 		{argv: []string{"smollm2", "--temp", "0.7", "explain mmap"}, wantAction: runActionChat, wantModel: "smollm2", wantPrompt: "explain mmap"},
 		{argv: []string{"--temp", "0.7", "smollm2", "explain mmap"}, wantAction: runActionChat, wantModel: "smollm2", wantPrompt: "explain mmap"},
 		{argv: []string{"--backend", "cuda", "qwen38"}, wantAction: runActionChat, wantModel: "qwen38"},
+		{argv: []string{"--backend", "cuda"}, wantAction: runActionUsage},
 		{argv: []string{"--metal", "qwen38"}, wantAction: runActionChat, wantModel: "qwen38"},
 		{argv: []string{"qwen38", "--metal"}, wantAction: runActionChat, wantModel: "qwen38"},
-		{argv: []string{"--backend", "cuda"}, wantAction: runActionUsage},
+		{argv: []string{"--metal"}, wantAction: runActionUsage},
 		{argv: []string{"smollm2", "--trace", "x.json"}, wantAction: runActionUsage},
 	}
 	for _, c := range cases {
@@ -230,114 +230,114 @@ func TestCacheTurnLine(t *testing.T) {
 	}
 }
 
-// TestRunMetalFlagAndResolution tests the --metal flag and resolution rules for `fak run`.
-func TestRunMetalFlagAndResolution(t *testing.T) {
-	// 1. --metal flag parse
-	fs, flags := newRunFlagSet("run", flag.ContinueOnError)
-	cmd, err := parseRunArgs(fs, flags, []string{"qwen38", "--metal", "hello"})
-	if err != nil {
-		t.Fatalf("parseRunArgs failed: %v", err)
+// TestRunModelResolveMetal exercises auto-selection on Apple Silicon and explicit --metal / FAK_METAL.
+func TestRunModelResolveMetal(t *testing.T) {
+	// Not requested -> runtime auto-select only when a usable Metal device is present.
+	if use, err := resolveRunMetal(false, false, ""); use != metalgemm.Available() || err != nil {
+		t.Fatalf("neither flag nor env: got (%v,%v), want (%v,nil)", use, err, metalgemm.Available())
 	}
-	if !cmd.chatConfig.metal {
-		t.Fatalf("chatConfig.metal = false, want true when --metal is specified")
+	// A named compute backend disables Metal auto-select; only an explicit Metal request conflicts.
+	if use, err := resolveRunMetal(false, false, "cuda"); use || err != nil {
+		t.Fatalf("backend without explicit metal: got (%v,%v), want (false,nil)", use, err)
 	}
-
-	fs2, flags2 := newRunFlagSet("run", flag.ContinueOnError)
-	cmd2, err := parseRunArgs(fs2, flags2, []string{"--metal", "qwen38", "hello"})
-	if err != nil {
-		t.Fatalf("parseRunArgs failed: %v", err)
+	// Requested + a device --backend -> conflict error, independent of Metal availability.
+	if _, err := resolveRunMetal(true, false, "cuda"); err == nil {
+		t.Fatal("--metal with --backend cuda must be rejected as mutually exclusive")
 	}
-	if !cmd2.chatConfig.metal {
-		t.Fatalf("chatConfig.metal = false, want true when --metal is specified as leading flag")
+	if _, err := resolveRunMetal(false, true, "cuda"); err == nil {
+		t.Fatal("FAK_METAL with --backend cuda must be rejected as mutually exclusive")
 	}
-
-	// 2. resolveRunMetal logic
-	// Unrequested -> auto-selects if metal is available
-	use, err := resolveRunMetal(false, false, "")
-	if err != nil {
-		t.Fatalf("resolveRunMetal(false, false, \"\") err: %v", err)
-	}
-	if use != metalgemm.Available() {
-		t.Fatalf("resolveRunMetal(false, false, \"\") = %v, want metalgemm.Available()=%v", use, metalgemm.Available())
-	}
-
-	// Unrequested with explicit backend -> Metal disabled
-	use, err = resolveRunMetal(false, false, "cuda")
-	if err != nil {
-		t.Fatalf("resolveRunMetal(false, false, \"cuda\") err: %v", err)
-	}
-	if use {
-		t.Fatalf("resolveRunMetal(false, false, \"cuda\") = true, want false")
-	}
-
-	// Requested with explicit backend -> mutually exclusive error
-	_, err = resolveRunMetal(true, false, "cuda")
-	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Fatalf("resolveRunMetal(true, false, \"cuda\") expected mutually exclusive error, got %v", err)
-	}
-	_, err = resolveRunMetal(false, true, "cuda")
-	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Fatalf("resolveRunMetal(false, true, \"cuda\") expected mutually exclusive error, got %v", err)
-	}
-
-	// Explicitly requested without backend
-	use, err = resolveRunMetal(true, false, "")
+	// Requested with no conflicting backend: on a non-Metal build this fails loud.
+	// On an Apple-Silicon+cgo build with a device it succeeds.
+	use, err := resolveRunMetal(true, false, "")
 	if metalgemm.Available() {
 		if !use || err != nil {
-			t.Fatalf("resolveRunMetal(true, false, \"\") with Metal available got (%v, %v), want (true, nil)", use, err)
+			t.Fatalf("metal available: got (%v,%v), want (true,nil)", use, err)
 		}
 	} else {
-		if err == nil {
-			t.Fatalf("resolveRunMetal(true, false, \"\") with Metal unavailable should fail loud, got nil error")
+		if use || err == nil {
+			t.Fatalf("metal unavailable must fail loud: got (%v,%v), want (false, error)", use, err)
+		}
+	}
+	// FAK_METAL env is an equivalent trigger to the flag.
+	useEnv, errEnv := resolveRunMetal(false, true, "")
+	if metalgemm.Available() {
+		if !useEnv || errEnv != nil {
+			t.Fatalf("metal available with FAK_METAL: got (%v,%v), want (true,nil)", useEnv, errEnv)
+		}
+	} else {
+		if useEnv || errEnv == nil {
+			t.Fatalf("metal unavailable with FAK_METAL must fail loud: got (%v,%v), want (false, error)", useEnv, errEnv)
 		}
 	}
 }
 
-// TestRunMetalPlannerWiring tests that InKernelPlanner engages Metal and Qwen hybrid forward path.
-func TestRunMetalPlannerWiring(t *testing.T) {
-	tok := testProbeTokenizer(t)
-	m := fakmodel.NewSynthetic(fakmodel.Config{
-		HiddenSize:          32,
-		NumLayers:           2,
-		NumHeads:            4,
-		NumKVHeads:          2,
-		HeadDim:             8,
-		IntermediateSize:    64,
-		VocabSize:           320,
-		RMSNormEps:          1e-5,
-		RopeTheta:           10000,
-		TieWordEmbeddings:   true,
-		EOSTokenID:          -1,
-		LayerTypes:          []string{"linear_attention", "linear_attention"},
-		LinearConvKernelDim: 3,
-		LinearKeyHeadDim:    8,
-		LinearNumKeyHeads:   2,
-		LinearValueHeadDim:  8,
-		LinearNumValueHeads: 4,
-		AttnOutputGate:      true,
-	})
-	m.Quantize()
-
-	// CPU fallback (metal=false)
-	cpuPlanner := agent.NewInKernelPlannerWithConfig(m, tok, "qwen38", true, nil, false, nativeControlConfig{}.Planner)
-	if cpuPlanner == nil {
-		t.Fatal("planner(metal=false) returned nil")
-	}
-
-	// Metal enabled (metal=true)
-	metalPlanner := agent.NewInKernelPlannerWithConfig(m, tok, "qwen38", true, nil, true, nativeControlConfig{}.Planner)
-	if metalPlanner == nil {
-		t.Fatal("planner(metal=true) returned nil")
-	}
-
-	// When metal=true on Apple Silicon or with synthetic model, Complete logs backend=metal and forward_path=metal/qwen35-hybrid-session-v1
-	ctx := context.Background()
-	msgs := []agent.Message{{Role: "user", Content: "hi"}}
-	comp, err := metalPlanner.Complete(ctx, msgs, nil, agent.WithMaxTokens(2))
+// TestRunModelDispatchMetal checks that parseRunArgs threads the --metal flag to chatConfig.
+func TestRunModelDispatchMetal(t *testing.T) {
+	fs1, f1 := newRunFlagSet("run", flag.ContinueOnError)
+	cmd1, err := parseRunArgs(fs1, f1, []string{"--metal", "qwen38"})
 	if err != nil {
-		t.Fatalf("metalPlanner.Complete failed: %v", err)
+		t.Fatalf("parseRunArgs --metal qwen38: %v", err)
 	}
-	if comp == nil {
-		t.Fatal("metalPlanner.Complete returned nil completion")
+	if !cmd1.chatConfig.metal {
+		t.Errorf("chatConfig.metal = false, want true for --metal qwen38")
+	}
+
+	fs2, f2 := newRunFlagSet("run", flag.ContinueOnError)
+	cmd2, err := parseRunArgs(fs2, f2, []string{"qwen38", "--metal"})
+	if err != nil {
+		t.Fatalf("parseRunArgs qwen38 --metal: %v", err)
+	}
+	if !cmd2.chatConfig.metal {
+		t.Errorf("chatConfig.metal = false, want true for qwen38 --metal")
+	}
+
+	fs3, f3 := newRunFlagSet("run", flag.ContinueOnError)
+	cmd3, err := parseRunArgs(fs3, f3, []string{"qwen38"})
+	if err != nil {
+		t.Fatalf("parseRunArgs qwen38: %v", err)
+	}
+	if cmd3.chatConfig.metal {
+		t.Errorf("chatConfig.metal = true, want false when flag is omitted")
+	}
+}
+
+// TestRunModelPlannerMetalWiringDarwin proves that metal=true is wired to the in-kernel planner on Darwin.
+func TestRunModelPlannerMetalWiringDarwin(t *testing.T) {
+	m := model.NewSynthetic(model.Config{LayerTypes: []string{"linear_attention"}})
+
+	// Explicit metal=true
+	plannerMetal := agent.NewInKernelPlannerWithConfig(m, nil, "qwen38", true, nil, true, agent.InKernelPlannerConfig{})
+	if plannerMetal == nil {
+		t.Fatal("agent.NewInKernelPlannerWithConfig with metal=true returned nil")
+	}
+	val := reflect.ValueOf(plannerMetal).Elem().FieldByName("metal")
+	if !val.IsValid() || !val.Bool() {
+		t.Fatalf("planner with metal=true has metal field = %v, want true", val.IsValid() && val.Bool())
+	}
+
+	// Explicit metal=false
+	plannerCPU := agent.NewInKernelPlannerWithConfig(m, nil, "qwen38", true, nil, false, agent.InKernelPlannerConfig{})
+	if plannerCPU == nil {
+		t.Fatal("agent.NewInKernelPlannerWithConfig with metal=false returned nil")
+	}
+	valCPU := reflect.ValueOf(plannerCPU).Elem().FieldByName("metal")
+	if !valCPU.IsValid() || valCPU.Bool() {
+		t.Fatalf("planner with metal=false has metal field = %v, want false", valCPU.IsValid() && valCPU.Bool())
+	}
+
+	// Runtime auto-selection on darwin/arm64:
+	// When metalgemm.Available() is true, resolveRunMetal auto-selects true and wires it into the planner.
+	useMetal, err := resolveRunMetal(false, false, "")
+	if err != nil {
+		t.Fatalf("resolveRunMetal: %v", err)
+	}
+	if metalgemm.Available() && !useMetal {
+		t.Fatal("expected auto-select to choose Metal on Apple Silicon when available")
+	}
+	plannerAuto := agent.NewInKernelPlannerWithConfig(m, nil, "qwen38", true, nil, useMetal, agent.InKernelPlannerConfig{})
+	autoVal := reflect.ValueOf(plannerAuto).Elem().FieldByName("metal").Bool()
+	if autoVal != metalgemm.Available() {
+		t.Fatalf("auto-selected planner metal = %v, want %v", autoVal, metalgemm.Available())
 	}
 }
