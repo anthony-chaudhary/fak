@@ -509,6 +509,21 @@ func cmdServe(argv []string) {
 		runServePiConfig(sf, os.Stderr, true)
 	}
 
+	// --codex-config: emit Codex config.toml provider configuration and exit before load.
+	if sf.codexConfig != nil && *sf.codexConfig {
+		runServeCodexConfig(sf, os.Stdout, false)
+		return
+	}
+	// --write-codex-config: write or update Codex config.toml and exit before load.
+	if sf.writeCodexConfig != nil && *sf.writeCodexConfig {
+		runServeCodexConfig(sf, os.Stderr, true)
+		return
+	}
+	// --codex: ensure Codex config.toml is configured before booting listener.
+	if sf.codex != nil && *sf.codex {
+		runServeCodexConfig(sf, os.Stderr, true)
+	}
+
 	// Advisory (#3094): a serve launched from a non-fak cwd silently indexes whatever
 	// tree it was dropped into (dojo corpus, devindex, session state all resolve against
 	// the workspace root — cwd by default). That mis-binding is how a `/goal` run in a
