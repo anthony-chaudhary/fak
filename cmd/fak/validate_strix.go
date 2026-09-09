@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -45,7 +46,15 @@ func isGPURelatedValidation(mine []string) bool {
 }
 
 var (
-	discoverStrixTargetFn        = amdgpu.DiscoverStrixTarget
+	discoverStrixTargetFn           = amdgpu.DiscoverStrixTarget
+	newStrixControllerAuthorityFn   = amdgpu.NewStrixControllerAuthority
+	strixControllerAuthorityValidFn = func(authority amdgpu.StrixControllerAuthority) bool {
+		return authority.Epoch() != "" &&
+			authority.ObservedRevision() != "" &&
+			authority.ExecutableSHA256() != "" &&
+			authority.ExecutableBytes() > 0 &&
+			!authority.AdmittedAt().IsZero()
+	}
 	runStrixValidationFn         = amdgpu.RunStrixValidation
 	buildStrixCandidateArchiveFn = amdgpu.BuildStrixCandidateArchive
 )
@@ -61,6 +70,7 @@ func executeStrixValidationPhase(
 	stdout, stderr io.Writer,
 	res *validateResult,
 	recorder *validateRecorder,
+	root string,
 	explicitStrix bool,
 	hostOverride string,
 	subkernelsArg string,
@@ -74,6 +84,47 @@ func executeStrixValidationPhase(
 	}
 
 	phase := recorder.start("strix_validation")
+
+	authority, err := newStrixControllerAuthorityFn(ctx, root)
+	if err == nil && !strixControllerAuthorityValidFn(authority) {
+		err = errors.New("controller authority constructor returned unusable authority")
+	}
+	if err != nil {
+		code := "CONTROLLER_AUTHORITY_UNAVAILABLE"
+		recovery := ""
+		var refusal interface {
+			Code() string
+			Recovery() string
+		}
+		if errors.As(err, &refusal) {
+			code = refusal.Code()
+			recovery = refusal.Recovery()
+		}
+		detail := fmt.Sprintf("strix hardware validation required for relevant changes but controller authority refused: %s (observed_revision=%s executable_sha256=%s)",
+			code, authority.ObservedRevision(), authority.ExecutableSHA256())
+		var cleanupOwner interface{ RetryCleanup() error }
+		if errors.As(err, &cleanupOwner) {
+			if cleanupErr := cleanupOwner.RetryCleanup(); cleanupErr != nil {
+				detail += "; cleanup_retry=pending"
+			} else {
+				detail += "; cleanup_retry=complete"
+			}
+		}
+		if recovery != "" {
+			detail += fmt.Sprintf("; recovery: %s", recovery)
+		}
+		phase.finish(fmt.Errorf("strix controller authority refused: %s", code))
+		res.Failures = append(res.Failures, ciPreflightFailure{
+			Step:   "strix-controller-authority",
+			Detail: detail,
+			Files:  mine,
+		})
+		res.OK = false
+		return fmt.Errorf("strix controller authority refused: %s: %w", code, err)
+	}
+	// Keep the opaque authority alive for the full phase. A later receipt-binding
+	// leaf can consume it without reconstructing or serializing private evidence.
+	_ = authority
 
 	// In auto mode, probe with a fast timeout (1.5s)
 	probeTimeout := 1500 * time.Millisecond
@@ -131,7 +182,6 @@ func executeStrixValidationPhase(
 		}
 	}
 
-	root := resolveRootWithin(ctx, "")
 	candidate, archiveErr := buildStrixCandidateArchiveFn(ctx, root, res.Tip, mine)
 	if archiveErr != nil {
 		phase.finish(archiveErr)

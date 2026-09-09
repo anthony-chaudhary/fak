@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,13 +12,211 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/amdgpu"
 )
 
+type testStrixControllerAuthorityRefusal struct {
+	code         string
+	recovery     string
+	cleanupCalls *int
+	cleanupErr   error
+}
+
+func (r *testStrixControllerAuthorityRefusal) Error() string {
+	return r.code + ": controller authority refused"
+}
+func (r *testStrixControllerAuthorityRefusal) Code() string     { return r.code }
+func (r *testStrixControllerAuthorityRefusal) Recovery() string { return r.recovery }
+func (r *testStrixControllerAuthorityRefusal) RetryCleanup() error {
+	if r.cleanupCalls != nil {
+		*r.cleanupCalls++
+	}
+	return r.cleanupErr
+}
+
+func TestValidateStrixRequiresControllerAuthorityBeforeDiscovery(t *testing.T) {
+	tests := []struct {
+		name           string
+		explicit       bool
+		mine           []string
+		code           string
+		recovery       string
+		wantRecovery   bool
+		zeroAuthority  bool
+		cleanupPending bool
+	}{
+		{name: "explicit pre-epoch", explicit: true, mine: []string{"docs/README.md"}, code: "STALE_VALIDATOR_BINARY"},
+		{name: "automatic unattested", mine: []string{"internal/amdgpu/strix_validation.go"}, code: "GIT_SNAPSHOT_UNATTESTED", cleanupPending: true},
+		{name: "explicit native Windows", explicit: true, mine: []string{"docs/README.md"}, code: "UNSUPPORTED_VALIDATOR_BINARY", recovery: "use a current stamped WSL build with /proc/self/exe authority", wantRecovery: true},
+		{name: "explicit zero authority with nil error", explicit: true, mine: []string{"docs/README.md"}, code: "CONTROLLER_AUTHORITY_UNAVAILABLE", zeroAuthority: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origAuthority := newStrixControllerAuthorityFn
+			origAuthorityValid := strixControllerAuthorityValidFn
+			origDiscover := discoverStrixTargetFn
+			origArchive := buildStrixCandidateArchiveFn
+			origRun := runStrixValidationFn
+			t.Cleanup(func() {
+				newStrixControllerAuthorityFn = origAuthority
+				strixControllerAuthorityValidFn = origAuthorityValid
+				discoverStrixTargetFn = origDiscover
+				buildStrixCandidateArchiveFn = origArchive
+				runStrixValidationFn = origRun
+			})
+
+			const resolvedRoot = "/operator/selected/repository"
+			authorityCalls, discoveryCalls, archiveCalls, transportCalls, cleanupCalls := 0, 0, 0, 0, 0
+			newStrixControllerAuthorityFn = func(_ context.Context, root string) (amdgpu.StrixControllerAuthority, error) {
+				authorityCalls++
+				if root != resolvedRoot {
+					t.Fatalf("controller authority root = %q, want already-resolved %q", root, resolvedRoot)
+				}
+				if tt.zeroAuthority {
+					return amdgpu.StrixControllerAuthority{}, nil
+				}
+				refusal := &testStrixControllerAuthorityRefusal{code: tt.code, recovery: tt.recovery, cleanupCalls: &cleanupCalls}
+				if tt.cleanupPending {
+					refusal.cleanupErr = errors.New("cleanup still pending at /private/snapshot/secret")
+				}
+				return amdgpu.StrixControllerAuthority{}, refusal
+			}
+			discoverStrixTargetFn = func(context.Context, string) (*amdgpu.StrixTarget, error) {
+				discoveryCalls++
+				return nil, errors.New("must not discover")
+			}
+			buildStrixCandidateArchiveFn = func(context.Context, string, string, []string) (amdgpu.StrixCandidateArchive, error) {
+				archiveCalls++
+				return amdgpu.StrixCandidateArchive{}, errors.New("must not archive")
+			}
+			runStrixValidationFn = func(context.Context, amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+				transportCalls++
+				return nil, errors.New("must not transport")
+			}
+
+			res := validateResult{OK: true}
+			recorder := &validateRecorder{ctx: context.Background(), stderr: io.Discard, started: time.Now(), res: &res}
+			err := executeStrixValidationPhase(context.Background(), io.Discard, io.Discard, &res, recorder, resolvedRoot, tt.explicit, "", "", "", tt.mine)
+			if err == nil || !strings.Contains(err.Error(), tt.code) {
+				t.Fatalf("authority refusal = %v, want typed code %q", err, tt.code)
+			}
+			if res.OK {
+				t.Fatal("controller authority refusal remained creditable")
+			}
+			if authorityCalls != 1 || discoveryCalls != 0 || archiveCalls != 0 || transportCalls != 0 {
+				t.Fatalf("calls authority/discovery/archive/transport = %d/%d/%d/%d, want 1/0/0/0", authorityCalls, discoveryCalls, archiveCalls, transportCalls)
+			}
+			wantCleanupCalls := 1
+			if tt.zeroAuthority {
+				wantCleanupCalls = 0
+			}
+			if cleanupCalls != wantCleanupCalls {
+				t.Fatalf("cleanup retries = %d, want %d", cleanupCalls, wantCleanupCalls)
+			}
+			if tt.cleanupPending {
+				var preserved *testStrixControllerAuthorityRefusal
+				if !errors.As(err, &preserved) || preserved == nil || !strings.Contains(res.Failures[0].Detail, "cleanup_retry=pending") {
+					t.Fatalf("retryable cleanup ownership was not preserved: err=%v failures=%+v", err, res.Failures)
+				}
+				if strings.Contains(err.Error(), "/private/snapshot/secret") || strings.Contains(res.Failures[0].Detail, "/private/snapshot/secret") {
+					t.Fatalf("cleanup error disclosed private snapshot detail: err=%v failures=%+v", err, res.Failures)
+				}
+			}
+			if len(res.Failures) != 1 || res.Failures[0].Step != "strix-controller-authority" || !strings.Contains(res.Failures[0].Detail, tt.code) {
+				t.Fatalf("typed controller failure = %+v", res.Failures)
+			}
+			if strings.Contains(res.Failures[0].Detail, resolvedRoot) {
+				t.Fatalf("controller refusal disclosed repository root: %q", res.Failures[0].Detail)
+			}
+			if strings.Contains(res.Failures[0].Detail, "observed_revision=") == false || strings.Contains(res.Failures[0].Detail, "executable_sha256=") == false {
+				t.Fatalf("controller refusal lacks safe evidence fields: %q", res.Failures[0].Detail)
+			}
+			hasRecovery := strings.Contains(res.Failures[0].Detail, "recovery:")
+			if hasRecovery != tt.wantRecovery {
+				t.Fatalf("recovery presence = %v, want %v: %q", hasRecovery, tt.wantRecovery, res.Failures[0].Detail)
+			}
+			if tt.wantRecovery && !strings.Contains(res.Failures[0].Detail, tt.recovery) {
+				t.Fatalf("expected recovery %q not in %q", tt.recovery, res.Failures[0].Detail)
+			}
+		})
+	}
+
+	t.Run("runValidate forwards operator-selected root", func(t *testing.T) {
+		repo, git := seedGitFixtureRepo(t)
+		commitFiles(t, repo, git, "seed", map[string]string{
+			"go.mod":                         cleanGoMod,
+			"internal/amdgpu/strix_probe.go": "package amdgpu\n\nfunc StrixProbe() {}\n",
+		})
+		resolvedRoot, err := filepath.Abs(repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		origAuthority := newStrixControllerAuthorityFn
+		origDiscover := discoverStrixTargetFn
+		origArchive := buildStrixCandidateArchiveFn
+		origRun := runStrixValidationFn
+		t.Cleanup(func() {
+			newStrixControllerAuthorityFn = origAuthority
+			discoverStrixTargetFn = origDiscover
+			buildStrixCandidateArchiveFn = origArchive
+			runStrixValidationFn = origRun
+		})
+
+		authorityCalls, discoveryCalls, archiveCalls, transportCalls := 0, 0, 0, 0
+		newStrixControllerAuthorityFn = func(_ context.Context, root string) (amdgpu.StrixControllerAuthority, error) {
+			authorityCalls++
+			if filepath.Clean(root) != filepath.Clean(resolvedRoot) {
+				t.Fatalf("runValidate authority root = %q, want resolved --root %q", root, resolvedRoot)
+			}
+			return amdgpu.StrixControllerAuthority{}, &testStrixControllerAuthorityRefusal{code: "STALE_VALIDATOR_BINARY"}
+		}
+		discoverStrixTargetFn = func(context.Context, string) (*amdgpu.StrixTarget, error) {
+			discoveryCalls++
+			return nil, errors.New("must not discover")
+		}
+		buildStrixCandidateArchiveFn = func(context.Context, string, string, []string) (amdgpu.StrixCandidateArchive, error) {
+			archiveCalls++
+			return amdgpu.StrixCandidateArchive{}, errors.New("must not archive")
+		}
+		runStrixValidationFn = func(context.Context, amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+			transportCalls++
+			return nil, errors.New("must not transport")
+		}
+
+		res, code, stderr := runValidateJSON(t, []string{
+			"--root", repo,
+			"--mine", "internal/amdgpu/strix_probe.go",
+			"--test-only",
+			"--wsl-tests=false",
+			"--test-run=^$",
+			"--json",
+		})
+		if code == 0 || res.OK {
+			t.Fatalf("runValidate authority refusal remained successful: code=%d stderr=%q result=%+v", code, stderr, res)
+		}
+		if authorityCalls != 1 || discoveryCalls != 0 || archiveCalls != 0 || transportCalls != 0 {
+			t.Fatalf("runValidate calls authority/discovery/archive/transport = %d/%d/%d/%d, want 1/0/0/0", authorityCalls, discoveryCalls, archiveCalls, transportCalls)
+		}
+		if len(res.Failures) == 0 || res.Failures[len(res.Failures)-1].Step != "strix-controller-authority" {
+			t.Fatalf("runValidate typed controller failure = %+v", res.Failures)
+		}
+	})
+}
+
 func stubStrixCandidateArchive(t *testing.T) {
 	t.Helper()
-	orig := buildStrixCandidateArchiveFn
+	origArchive, origAuthority, origAuthorityValid := buildStrixCandidateArchiveFn, newStrixControllerAuthorityFn, strixControllerAuthorityValidFn
 	buildStrixCandidateArchiveFn = func(context.Context, string, string, []string) (amdgpu.StrixCandidateArchive, error) {
 		return amdgpu.StrixCandidateArchive{Bytes: []byte("candidate"), SourceArchiveSHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 	}
-	t.Cleanup(func() { buildStrixCandidateArchiveFn = orig })
+	newStrixControllerAuthorityFn = func(context.Context, string) (amdgpu.StrixControllerAuthority, error) {
+		return amdgpu.StrixControllerAuthority{}, nil
+	}
+	strixControllerAuthorityValidFn = func(amdgpu.StrixControllerAuthority) bool { return true }
+	t.Cleanup(func() {
+		buildStrixCandidateArchiveFn = origArchive
+		newStrixControllerAuthorityFn = origAuthority
+		strixControllerAuthorityValidFn = origAuthorityValid
+	})
 }
 
 func TestIsGPURelatedValidation(t *testing.T) {
@@ -118,7 +317,7 @@ func TestValidateStrix(t *testing.T) {
 		started: time.Now(),
 		res:     &res,
 	}
-	err := executeStrixValidationPhase(context.Background(), io.Discard, io.Discard, &res, recorder, false, "", "", "", []string{"docs/README.md"})
+	err := executeStrixValidationPhase(context.Background(), io.Discard, io.Discard, &res, recorder, "", false, "", "", "", []string{"docs/README.md"})
 	if err != nil {
 		t.Fatalf("unexpected error on non-gpu skip: %v", err)
 	}
@@ -143,7 +342,7 @@ func TestValidateStrixNonGPUChangesSkipCleanly(t *testing.T) {
 		started: time.Now(),
 		res:     &res,
 	}
-	err := executeStrixValidationPhase(context.Background(), io.Discard, io.Discard, &res, recorder, false, "", "", "", []string{"docs/README.md", "cmd/fak/new_verb.go"})
+	err := executeStrixValidationPhase(context.Background(), io.Discard, io.Discard, &res, recorder, "", false, "", "", "", []string{"docs/README.md", "cmd/fak/new_verb.go"})
 	if err != nil {
 		t.Fatalf("unexpected error on non-gpu skip: %v", err)
 	}
@@ -166,8 +365,16 @@ func TestValidateStrixNonGPUChangesSkipCleanly(t *testing.T) {
 }
 
 func TestValidateStrixUnavailableHardwareFailsClosed(t *testing.T) {
-	origDiscover := discoverStrixTargetFn
-	defer func() { discoverStrixTargetFn = origDiscover }()
+	origDiscover, origAuthority, origAuthorityValid := discoverStrixTargetFn, newStrixControllerAuthorityFn, strixControllerAuthorityValidFn
+	defer func() {
+		discoverStrixTargetFn = origDiscover
+		newStrixControllerAuthorityFn = origAuthority
+		strixControllerAuthorityValidFn = origAuthorityValid
+	}()
+	newStrixControllerAuthorityFn = func(context.Context, string) (amdgpu.StrixControllerAuthority, error) {
+		return amdgpu.StrixControllerAuthority{}, nil
+	}
+	strixControllerAuthorityValidFn = func(amdgpu.StrixControllerAuthority) bool { return true }
 
 	discoverStrixTargetFn = func(ctx context.Context, hostOverride string) (*amdgpu.StrixTarget, error) {
 		return nil, errors.New("appliance unreachable in test")
@@ -188,6 +395,7 @@ func TestValidateStrixUnavailableHardwareFailsClosed(t *testing.T) {
 		io.Discard,
 		&res,
 		recorder,
+		"",
 		false,
 		"strix-host-test",
 		"",
@@ -259,6 +467,7 @@ func TestValidateStrixNilReceiptPropagatesFailure(t *testing.T) {
 		io.Discard,
 		&res,
 		recorder,
+		"",
 		false,
 		"",
 		"",
@@ -294,6 +503,7 @@ func TestValidateStrixNilReceiptPropagatesFailure(t *testing.T) {
 		io.Discard,
 		&res,
 		recorder,
+		"",
 		false,
 		"",
 		"",
@@ -354,6 +564,7 @@ func TestValidateStrixReceiptValidationFails(t *testing.T) {
 		io.Discard,
 		&res,
 		recorder,
+		"",
 		false,
 		"",
 		"",
@@ -392,7 +603,7 @@ func TestValidateStrixHistoricalV1ReceiptCannotEarnCredit(t *testing.T) {
 	}
 	res := validateResult{OK: true, Tip: "0123456789abcdef0123456789abcdef01234567"}
 	recorder := &validateRecorder{ctx: context.Background(), stderr: io.Discard, started: time.Now(), res: &res}
-	err := executeStrixValidationPhase(context.Background(), io.Discard, io.Discard, &res, recorder, false, "", "", "", []string{"internal/amdgpu/strix_receipt.go"})
+	err := executeStrixValidationPhase(context.Background(), io.Discard, io.Discard, &res, recorder, "", false, "", "", "", []string{"internal/amdgpu/strix_receipt.go"})
 	if err == nil || res.OK || !strings.Contains(err.Error(), "not credit eligible") {
 		t.Fatalf("historical v1 receipt earned current credit: err=%v ok=%v", err, res.OK)
 	}
@@ -447,6 +658,7 @@ func TestValidateStrixReceiptNonPassVerdict(t *testing.T) {
 		io.Discard,
 		&res,
 		recorder,
+		"",
 		false,
 		"",
 		"",
@@ -524,6 +736,7 @@ func TestValidateStrixAblationsDefault(t *testing.T) {
 		io.Discard,
 		&res,
 		recorder,
+		"",
 		false,
 		"",
 		"",
@@ -558,6 +771,7 @@ func TestValidateStrixAblationsDefault(t *testing.T) {
 		io.Discard,
 		&res,
 		recorder,
+		"",
 		false,
 		"",
 		"",

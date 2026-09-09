@@ -263,7 +263,7 @@ func TestStrixValidationOrchestrator(t *testing.T) {
 	if os.Getenv("FAK_STRIX_LIVE_TEST") != "1" {
 		t.Skip("set FAK_STRIX_LIVE_TEST=1 for the explicit physical integration witness")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
 	// Discover live Strix Halo target (local or via SSH strix1)
@@ -273,23 +273,51 @@ func TestStrixValidationOrchestrator(t *testing.T) {
 	}
 
 	gitTip := ""
+	repoRoot := "."
 	if out, err := exec.Command("git", "rev-parse", "HEAD").Output(); err == nil {
 		gitTip = strings.TrimSpace(string(out))
 	}
+	if out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output(); err == nil {
+		repoRoot = strings.TrimSpace(string(out))
+	}
+
+	archive, err := BuildStrixCandidateArchive(ctx, repoRoot, gitTip, []string{
+		"internal/compute/vulkan_test.go",
+		"internal/compute/shaders/attention.comp",
+		"internal/amdgpu/strix_ablations.go",
+		"internal/amdgpu/strix_validation.go",
+		"internal/amdgpu/strix_subkernels.go",
+	})
+	if err != nil {
+		t.Fatalf("BuildStrixCandidateArchive failed: %v", err)
+	}
 
 	opts := StrixValidationOpts{
-		Host:          target.Host,
-		RunSubkernels: true,
-		Subkernels:    []string{"argmax", "matmul_f32", "q4k_matmul", "rmsnorm", "swiglu"},
-		RunAblations:  true,
-		Ablations:     []string{"cpu_vs_vulkan_gpu", "fused_vs_discrete_norm_matmul"},
-		GitRef:        "HEAD",
-		GitTip:        gitTip,
-		Command:       "fak validate --strix --subkernels --ablate",
-		Timeout:       30 * time.Second,
+		Host:                 target.Host,
+		RunSubkernels:        true,
+		Subkernels:           []string{"argmax", "matmul_f32", "q4k_matmul", "rmsnorm", "swiglu"},
+		RunAblations:         true,
+		Ablations:            []string{"cpu_vs_vulkan_gpu", "fused_vs_discrete_norm_matmul"},
+		GitRef:               archive.SourceArchiveSHA256,
+		GitTip:               gitTip,
+		Command:              "fak validate --strix --subkernels --ablate",
+		Timeout:              120 * time.Second,
+		RequireSourceBinding: true,
+		CandidateArchive:     archive.Bytes,
+		SourceArchiveSHA256:  archive.SourceArchiveSHA256,
+		AdmissionTimeout:     20 * time.Second,
 	}
 
 	receipt, err := RunStrixValidation(ctx, opts)
+	if receipt != nil {
+		t.Logf("Receipt Failures: %v", receipt.Failures)
+		for _, sk := range receipt.Subkernels {
+			t.Logf("Subkernel %s: status=%s duration=%d us error=%s", sk.Name, sk.Status, sk.DurationUS, sk.Error)
+		}
+		for _, ab := range receipt.Ablations {
+			t.Logf("Ablation %s: verdict=%s speedup=%.2f baseline=%d candidate=%d", ab.Feature, ab.Verdict, ab.Speedup, ab.BaselineArm.LatencyUS, ab.CandidateArm.LatencyUS)
+		}
+	}
 	if err != nil {
 		t.Fatalf("RunStrixValidation failed: %v", err)
 	}
