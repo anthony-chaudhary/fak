@@ -6,7 +6,7 @@
 #   3) Companion Discovery: Check for companion fak-private via $env:FAK_PRIVATE_ROOT or sibling ../fak-private
 #   4) If Companion Present:
 #      - Run secret leak audit: python "$companion/tools/scrub_public_copy.py" --audit-staged --root .
-#      - Run 5-Gate boundary verification: go -C "$companion" run ./cmd/fak-boundary check --staged --fak-dir . --private-dir "$companion"
+#      - Run 5-Gate boundary verification with the absolute public repository root after go -C changes directory
 #      - Output: "✅ Companion 5-Gate boundary & leak checks passed."
 #   5) If Companion Absent:
 #      - Run public boundary lint: go run ./cmd/fak-dev boundary
@@ -115,7 +115,7 @@ if ($companion) {
     }
 
     Write-Host "Running 5-Gate boundary verification..."
-    & go -C "$companion" run ./cmd/fak-boundary check --staged --fak-dir . --private-dir "$companion"
+    & go -C "$companion" run ./cmd/fak-boundary check --staged --fak-dir "$repoRoot" --private-dir "$companion"
     if ($LASTEXITCODE -ne 0) {
         Write-Host ""
         [Console]::Error.WriteLine("❌ COMMIT BLOCKED: 5-Gate boundary encapsulation or placement violation detected!")
