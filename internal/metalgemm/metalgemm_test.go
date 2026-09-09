@@ -116,22 +116,24 @@ func TestResetReclaimsTable(t *testing.T) {
 
 // TestSDPANAXConstantsLayout asserts that the memory layout of the SDPANAXConstants struct
 // matches the Metal Shading Language (MSL) constant buffer layout [[buffer(5)]] 1:1 across
-// all 9 fields (8 uint32_t + 1 float) with 4-byte scalar alignment and 36 bytes total size.
+// all fields (10 uint32_t + 1 float + 32 uint32_t tree_mask) with 4-byte scalar alignment and 168 bytes total size.
 func TestSDPANAXConstantsLayout(t *testing.T) {
 	type sdpaNAXConstantsLayout struct {
-		GQAFactor uint32
-		DraftLen  uint32
-		M         uint32
-		HeadDim   uint32
-		PrefixLen uint32
-		TotalKV   uint32
-		Scale     float32
-		TileN     uint32
-		Order     uint32
+		GQAFactor   uint32
+		DraftLen    uint32
+		M           uint32
+		HeadDim     uint32
+		PrefixLen   uint32
+		TotalKV     uint32
+		Scale       float32
+		TileN       uint32
+		Order       uint32
+		HasTreeMask uint32
+		TreeMask    [32]uint32
 	}
 
 	var s sdpaNAXConstantsLayout
-	const expectedSize = 36
+	const expectedSize = 168
 	if size := unsafe.Sizeof(s); size != expectedSize {
 		t.Fatalf("SDPANAXConstants layout size = %d, want %d bytes", size, expectedSize)
 	}
@@ -150,15 +152,27 @@ func TestSDPANAXConstantsLayout(t *testing.T) {
 		{"scale", unsafe.Offsetof(s.Scale), unsafe.Sizeof(s.Scale)},
 		{"tile_n", unsafe.Offsetof(s.TileN), unsafe.Sizeof(s.TileN)},
 		{"order", unsafe.Offsetof(s.Order), unsafe.Sizeof(s.Order)},
+		{"has_tree_mask", unsafe.Offsetof(s.HasTreeMask), unsafe.Sizeof(s.HasTreeMask)},
+		{"tree_mask", unsafe.Offsetof(s.TreeMask), unsafe.Sizeof(s.TreeMask)},
 	}
 
 	for i, field := range expectedOffsets {
-		wantOffset := uintptr(i * 4)
-		if field.offset != wantOffset {
-			t.Errorf("field %s at offset %d, want %d", field.name, field.offset, wantOffset)
-		}
-		if field.size != 4 {
-			t.Errorf("field %s size %d, want 4", field.name, field.size)
+		if field.name == "tree_mask" {
+			wantOffset := uintptr(40)
+			if field.offset != wantOffset {
+				t.Errorf("field %s at offset %d, want %d", field.name, field.offset, wantOffset)
+			}
+			if field.size != 128 {
+				t.Errorf("field %s size %d, want 128", field.name, field.size)
+			}
+		} else {
+			wantOffset := uintptr(i * 4)
+			if field.offset != wantOffset {
+				t.Errorf("field %s at offset %d, want %d", field.name, field.offset, wantOffset)
+			}
+			if field.size != 4 {
+				t.Errorf("field %s size %d, want 4", field.name, field.size)
+			}
 		}
 	}
 }

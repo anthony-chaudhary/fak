@@ -18,7 +18,8 @@ below and run that row's preflight before dispatching the workload.
 | Required evidence | Sanctioned target | Current support boundary | Preflight and next action |
 |---|---|---|---|
 | **Kernel policy and offline behavior; no device claim** | Local control point | The canonical proof needs no key, model, or GPU. It proves the policy and offline agent path, not CUDA, accelerator throughput, or a datacenter network. | Run the [60-second offline proof](repro-packet.md#the-60-second-offline-proof). Stop here only when its evidence matches the claim. |
-| **AMD Strix Halo APU sub-kernel, Vulkan compute, or differential ablation witness** | AMD Strix Halo appliance (`strix-agent` / `strix1` / `strix-halo-fak.local`) | AMD Ryzen AI MAX+ 395 (16 Zen 5 cores, 32 threads) + Radeon 8060S (40 CUs, gfx1151) with 64GB LPDDR5X UMA. Validated natively via Mesa RADV Vulkan compute. | Run `fak-dev amd-strix-probe` to verify LAN presence and hardware facts; run `fak-dev amd-strix-validate` or `fak validate --strix --subkernels=all --ablate=all` for physical sub-kernel verification and differential ablation. Headless agent execution uses `strix-agent` (zero token waste, batch mode, no PTY); human interactive logins use `strix1`. Remote appliance runbook: [`fak-private/docs/STRIX-HALO-APPLIANCE.md`](../fak-private/docs/STRIX-HALO-APPLIANCE.md). |
+| **Local silicon accelerator verification or micro-dose probe (<50ms)** | Local physical silicon (Metal / CUDA / Vulkan) | Apple Silicon Metal (M-series), local NVIDIA CUDA, or local Vulkan. Direct in-process CGo execution. | Run `fak hil` (<50ms physical micro-dose suite) or `fak hil --probe` to verify physical execution capabilities and enforce active hardware bias before executing larger workloads. |
+| **AMD Strix Halo APU sub-kernel, Vulkan compute, or differential ablation witness** | AMD Strix Halo appliance (`strix-agent` / `strix1` / `strix-halo-fak.local`) | AMD Ryzen AI MAX+ 395 (16 Zen 5 cores, 32 threads) + Radeon 8060S (40 CUs, gfx1151) with 64GB LPDDR5X UMA. Validated natively via Mesa RADV Vulkan compute. LAN nodes and local silicon must be probed via `fak hil --lan` and `fak-dev amd-strix-probe`. | Run `fak-dev amd-strix-probe` or `fak hil --lan` to verify LAN presence and hardware facts (fast 50ms socket/mDNS discovery); run `fak-dev amd-strix-validate` or `fak validate --strix --subkernels=all --ablate=all` for physical sub-kernel verification and differential ablation. Simulations are strictly early indicators; only physical execution yields verified receipts. Headless agent execution uses `strix-agent` (zero token waste, batch mode, no PTY); human interactive logins use `strix1`. Remote appliance runbook: [`fak-private/docs/STRIX-HALO-APPLIANCE.md`](../fak-private/docs/STRIX-HALO-APPLIANCE.md). |
 | **Live CUDA serve or an operator-controlled cloud GPU burst** | GCP GPU node | The public cloud route supports quota discovery, a dry-run command preview, and bounded instance creation. Availability, quota, accelerator shape, region, and price remain observations from the selected project at dispatch time. | Run `python tools/gcp_gpu_probe.py --all-tiers`. A candidate is eligible only when the probe reports quota for its accelerator/region and does not report an auth or API blocker. Then run `python tools/gcp_bench.py --dry-run` and use its printed command, or run `GCP_PROJECT=<id> ./scripts/gcp-qwen-serve.sh --apply`. A create failure is a failed availability check, not a witness. |
 | **Device-GEMM, kernel, or multi-GPU witness on private lab hardware** | Private lab GPU server | Access, node identity, commands, credentials, and transcripts are private. The public repo may receive only a scrubbed result and its scoped hardware witness. | Open the [private control-channel route](private-comms-channel.md) and follow its authorized private runbook; return the scrubbed witness through the [lab development loop](fak/lab-dev-loop.md). |
 | **Datacenter-network access or heavy CPU evidence** | Private lab CPU/DC target | The target is CPU-only for accelerator claims. Network reach, credentials, node selection, and transcripts remain private operator data. | Use the same [private control-channel route](private-comms-channel.md), select the CPU/DC workload in its maintained node map, and return only scrubbed evidence. |
@@ -49,19 +50,6 @@ preflight; the operator completes and records private discovery in the private r
 Do not reconstruct private commands from dated public notes, and do not report local
 hardware absence as the result of a task whose claim requires remote hardware.
 
-## Shift-left sub-component testing on live hardware (divide and conquer)
-
-Reserve full-model end-to-end serving runs for final release gates, and shift active development verification left to physical sub-components. Monolithic model serves are heavy, memory-intensive, and slow to load, making fine-grained regression attribution difficult.
-
-Instead, **bias toward testing sub-components on live hardware (divide and conquer)**:
-1. **Decompose compute pipelines into atomic sub-components**: Isolate individual compute sub-kernels (`argmax`, `matmul_f32`, `q8_matmul`, `q4k_matmul`, `q2k_matmul`, `rmsnorm`, `swiglu`, `rope`, `attention`, `f16_kv_contiguize`), memory bus P2P transfers, or microbenchmarks.
-2. **Shift left with real hardware testing (more volume, more often)**: Execute sub-component tests in the active inner loop before committing. Fast sub-component validation finishes in seconds, enabling high-volume, frequent regression checks during active development.
-3. **Execute against the appropriate sanctioned hardware target**:
-   - **AMD Strix Halo APU (`strix-agent` / `strix1`)**: Run `fak-dev amd-strix-validate --subkernels=<names> --ablate=<arms>` or `fak validate --strix --subkernels=all --ablate=all` for sub-kernel verification and differential ablation.
-   - **Apple Silicon Metal**: Run `make mac-perf` on Apple Silicon dev targets for on-device Metal tok/s and prefill verification.
-   - **NVIDIA CUDA / Cloud GPU**: Run `make cuda-accept` or `internal/compute/build_cuda.sh test` on the GPU node.
-4. **Physical evidence over synthetic mocks**: Physical silicon execution proves device behavior, memory coalescing, latency, and numerical stability. Always prefer a physical sub-component execution receipt.
-
 ## Witness contract
 
 A hardware claim is supported only by a run on a target that provides the required device
@@ -69,6 +57,22 @@ or network boundary. For CUDA acceptance, for example,
 `FAK_CUDA_ARCH=<matching-arch> bash tools/cuda_acceptance.sh` (or `make cuda-accept`)
 must execute on the selected GPU node. Its exit 3 on a non-GPU host is an honest skip,
 not a passing device witness.
+
+### Real hardware comparisons vs. software simulations
+
+Software simulations (analytical rooflines, execution trace simulations, mock fixtures) are strictly
+**early indicators and search-space bounds**—never comparative claims, achieved speedups, or victory proofs.
+Any reported head-to-head comparison must be measured on real physical silicon under matched operating
+envelopes. Any comparison citing a simulated arm is gated as `EARLY_INDICATOR_ONLY` via
+`fak hil --audit-comparison` and is structurally forbidden from claiming victory, advertising an
+achieved speedup, or closing performance issues.
+
+Before running comparative benchmarks or sub-kernel evaluations:
+- **Local silicon** (Metal / CUDA / Vulkan) must be probed via `fak hil` (<50ms physical micro-dose suite)
+  or `fak hil --probe` to verify physical capabilities and establish an active hardware bias.
+- **LAN nodes** (AMD Strix Halo APU `strix1` / `strix-agent`) must be probed via `fak hil --lan` and
+  `fak-dev amd-strix-probe` (fast 50ms socket/mDNS discovery) before running physical sub-kernel
+  validation (`fak-dev amd-strix-validate`).
 
 Every returned result should identify the tested commit or module revision, workload,
 machine class and accelerator architecture where applicable, command or runbook step,
@@ -97,11 +101,26 @@ and redirects it to this selection route. `fak manage` can enforce the same rule
 and `fak guard-stops` reports the resulting redirects. These gates select a route; they do
 not fabricate a hardware witness.
 
+### 100× micro-dose HIL testing contract (`fak hil`)
+
+Alongside `fak hwgate-lint`'s routing gate, `fak hil` enforces the physical execution invariant
+through **100× more frequent micro-doses (<50ms physical silicon probes)**:
+- **Sub-50ms Silicon Probes:** Runs micro-doses exercising context allocation, compute (GEMV/GEMM),
+  bandwidth, and numerical parity on actual silicon (Metal on Darwin, CUDA on Linux/Windows,
+  Vulkan on AMD Strix Halo).
+- **Real HW Comparison Auditing:** `fak hil --audit-comparison` audits comparative claims against
+  baselines, failing with exit code 1 if either candidate or baseline was simulated, and forbidding
+  issue closure or speedup claims from simulation leakage.
+- **Active Hardware Bias:** Enforces an active bias toward physical silicon whenever an accelerator
+  is present on the host or reachable on the LAN/fleet, preventing silent fallbacks to CPU mocks.
+- **Detailed Architecture & Roadmap:** See [`docs/benchmarks/HARDWARE-IN-THE-LOOP-ROADMAP.md`](benchmarks/HARDWARE-IN-THE-LOOP-ROADMAP.md).
+
 - [Private control channel](private-comms-channel.md) — authorized discovery and readback.
 - [Lab development loop](fak/lab-dev-loop.md) — return scrubbed hardware evidence.
 - [Nightrun](nightrun/README.md) — schedule and read recurring evidence.
 - [Backend selection](supported/backends.md) — choose model execution separately from the
   node that hosts it.
+- [HIL testing roadmap](benchmarks/HARDWARE-IN-THE-LOOP-ROADMAP.md) — hardware-in-the-loop roadmap and verification contract.
 
 ### Anthony laptop (registered baseline)
 

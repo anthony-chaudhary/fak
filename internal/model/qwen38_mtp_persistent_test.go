@@ -6,6 +6,53 @@ import (
 	"testing"
 )
 
+func TestQwen38MTPPersistentPromptReplacementMatchesFresh(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		prompt []int
+	}{
+		{"divergent", []int{0, 1, 7}},
+		{"strict-prefix", []int{0, 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := qwen38HybridMTPEnabledSyntheticModel(t)
+			target, fresh := m.NewSession(), m.NewSession()
+			t.Cleanup(target.Close)
+			t.Cleanup(fresh.Close)
+			fresh.captureTargetHidden = true
+			cfg := DefaultQwen38MTPPersistentConfig()
+			cfg.PromptCache = NewMTPPromptCache()
+			sess, err := NewQwen38MTPPersistentSession(target, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = sess.Close() })
+			if _, err := sess.Prefill([]int{0, 1, 2, 3}); err != nil {
+				t.Fatal(err)
+			}
+
+			// The oracle never sees the discarded tokens or the persistent wrapper.
+			// Cache equality includes K/Kraw/V, positions, lineage, recurrence and
+			// convolution windows; hidden rows and their token history must match too.
+			check := func(prompt []int, wantLogits []float32) {
+				t.Helper()
+				got, err := sess.Prefill(prompt)
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertQwen35MTPTargetStateEqual(t, target, fresh)
+				assertFloat32BitsEqual(t, "replacement logits", got, wantLogits)
+				assertFloat32BitsEqual(t, "stored logits", sess.lastLogits, wantLogits)
+				if !reflect.DeepEqual(sess.CommittedTokens(), prompt) {
+					t.Fatalf("committed tokens = %v, want %v", sess.CommittedTokens(), prompt)
+				}
+			}
+			check(tc.prompt, fresh.Prefill(tc.prompt))
+			check(append(append([]int(nil), tc.prompt...), 6), fresh.Step(6))
+		})
+	}
+}
+
 func TestQwen38MTP_Persistent_MultiTurnGreedyParityAndContextExtension(t *testing.T) {
 	m := qwen38HybridMTPEnabledSyntheticModel(t)
 

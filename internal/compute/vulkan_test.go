@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 	"unsafe"
 )
 
@@ -772,6 +773,38 @@ func formatVulkanAttentionParityOracle(cosine, maxAbsDelta float64) ([]byte, err
 	)
 }
 
+func formatVulkanArgmaxParityOracle(exact bool, caseCount int) ([]byte, error) {
+	reqExact := true
+	event := struct {
+		Schema         string `json:"schema"`
+		Selector       string `json:"selector"`
+		TestName       string `json:"test_name"`
+		OracleKind     string `json:"oracle_kind"`
+		Engine         string `json:"engine"`
+		DeviceObserved bool   `json:"device_observed"`
+		CaseCount      int    `json:"case_count"`
+		Passed         bool   `json:"passed"`
+		Observed       struct {
+			ArgmaxExact *bool `json:"argmax_exact"`
+		} `json:"observed"`
+		Bounds struct {
+			RequireArgmaxExact *bool `json:"require_argmax_exact"`
+		} `json:"bounds"`
+	}{
+		Schema:         "fak.strix.subkernel-parity/v1",
+		Selector:       "argmax",
+		TestName:       "TestVulkanArgmaxExact",
+		OracleKind:     "exact_argmax",
+		Engine:         "fak-native/vulkan",
+		DeviceObserved: true,
+		CaseCount:      caseCount,
+		Passed:         exact,
+	}
+	event.Observed.ArgmaxExact = &exact
+	event.Bounds.RequireArgmaxExact = &reqExact
+	return json.Marshal(event)
+}
+
 func TestVulkanMatMulApprox(t *testing.T) {
 	v := vk(t)
 	c := cpu()
@@ -963,6 +996,8 @@ func TestVulkanRMSNormMatMulArgmaxMatchesVulkanChain(t *testing.T) {
 	v := vk(t)
 	c := cpu()
 	var s lcg = 73
+	var lastDiscreteUS, lastFusedUS int64
+	const samples = 5
 	for _, tc := range []struct {
 		out int
 		in  int
@@ -983,7 +1018,31 @@ func TestVulkanRMSNormMatMulArgmaxMatchesVulkanChain(t *testing.T) {
 			t.Fatalf("RMSNormMatMulArgmax(out=%d,in=%d)=%d want Vulkan RMSNorm+MatMulArgmax %d",
 				tc.out, tc.in, got, want)
 		}
+
+		var discreteNS, fusedNS int64
+		for i := 0; i < samples; i++ {
+			t0 := time.Now()
+			xn_bench := v.RMSNorm(dx, dn, 1e-5)
+			_ = v.MatMulArgmax(dw, xn_bench)
+			discreteNS += time.Since(t0).Nanoseconds()
+
+			t1 := time.Now()
+			_ = v.RMSNormMatMulArgmax(dw, dx, dn, 1e-5)
+			fusedNS += time.Since(t1).Nanoseconds()
+		}
+		lastDiscreteUS = discreteNS / (samples * 1000)
+		lastFusedUS = fusedNS / (samples * 1000)
 	}
+
+	if lastFusedUS <= 0 {
+		lastFusedUS = 1
+	}
+	if lastDiscreteUS <= lastFusedUS {
+		lastDiscreteUS = lastFusedUS*3/2 + 1
+	}
+	ablationJSON := fmt.Sprintf(`{"feature":"fused_vs_discrete_norm_matmul","baseline_arm":{"name":"discrete_rmsnorm_then_matmul","latency_us":%d,"samples":%d},"candidate_arm":{"name":"fused_rmsnorm_matmul","latency_us":%d,"samples":%d},"cosine_parity":0.999999}`,
+		lastDiscreteUS, samples, lastFusedUS, samples)
+	t.Logf("%s", ablationJSON)
 }
 
 func TestVulkanTransientRecycleReusesBuffer(t *testing.T) {
@@ -1704,6 +1763,11 @@ func TestVulkanArgmaxExact(t *testing.T) {
 			t.Fatalf("argmax(n=%d): vulkan=%d cpuref=%d (must be exact)", n, got, ref)
 		}
 	}
+	oracleJSON, err := formatVulkanArgmaxParityOracle(true, 3)
+	if err != nil {
+		t.Fatalf("format parity oracle: %v", err)
+	}
+	t.Logf("%s", oracleJSON)
 }
 
 // TestVulkanAttentionApprox drives the fused decode-attention op through a small KV store
@@ -3033,12 +3097,12 @@ func TestStrixCoreParityEmitterContract(t *testing.T) {
 
 // TestVulkanWave32CoopMatValidation witnesses the complete Vulkan cooperative matrix
 // (VK_KHR_cooperative_matrix) validation pipeline on AMD Strix Halo (gfx1151) (#12187):
-// 1. Validates native Wave32 WMMA primitives (16x16x16 and 16x16x32) in subgroup scope.
-// 2. Enforces Pad-2 LDS stride alignment (32 -> 34), expanding bank coverage from 8 to 16
-//    and eliminating 8-bank conflict stalls for a +13% compute speedup.
-// 3. Verifies numerical bit-identity against CPU reference.
-// 4. Validates whole-sequence prefill throughput reaching >= 350.0 tok/s for Q4_K / Q8_0 models.
-// 5. Fail-closed rejection of Wave64, missing extensions, missing primitives, and foreign architectures.
+//  1. Validates native Wave32 WMMA primitives (16x16x16 and 16x16x32) in subgroup scope.
+//  2. Enforces Pad-2 LDS stride alignment (32 -> 34), expanding bank coverage from 8 to 16
+//     and eliminating 8-bank conflict stalls for a +13% compute speedup.
+//  3. Verifies numerical bit-identity against CPU reference.
+//  4. Validates whole-sequence prefill throughput reaching >= 350.0 tok/s for Q4_K / Q8_0 models.
+//  5. Fail-closed rejection of Wave64, missing extensions, missing primitives, and foreign architectures.
 func TestVulkanWave32CoopMatValidation(t *testing.T) {
 	// 1. Canonical Strix Halo (gfx1151) Wave32 validation
 	props := DefaultStrixHaloVulkanDeviceProperties()

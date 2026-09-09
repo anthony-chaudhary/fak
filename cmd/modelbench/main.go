@@ -1190,7 +1190,7 @@ func maybeRunMTPComparison(f *benchFlags) bool {
 			fmt.Fprintf(os.Stderr, "macbench mtp readback: decode packet: %v\n", err)
 			f.exit(1)
 		}
-		if err := macbench.ValidateMTPComparisonPacket(packet); err != nil {
+		if err := macbench.ValidateMTPComparisonEvidence(packet, readbackPath); err != nil {
 			fmt.Fprintf(os.Stderr, "macbench mtp readback: invalid packet: %v\n", err)
 			f.exit(1)
 		}

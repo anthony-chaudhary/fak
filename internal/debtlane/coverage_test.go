@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
-	"syscall"
 	"testing"
 )
 
@@ -847,24 +845,6 @@ func makeUnreadableFile(t *testing.T, path string) func() {
 	return func() {
 		closer()
 		_ = os.Remove(path)
-	}
-}
-
-func lockFileExclusively(path string) func() {
-	if runtime.GOOS == "windows" {
-		p, err := syscall.UTF16PtrFromString(path)
-		if err == nil {
-			h, err := syscall.CreateFile(p, syscall.GENERIC_READ|syscall.GENERIC_WRITE, 0, nil, syscall.OPEN_EXISTING, syscall.FILE_ATTRIBUTE_NORMAL, 0)
-			if err == nil {
-				return func() {
-					_ = syscall.CloseHandle(h)
-				}
-			}
-		}
-	}
-	_ = os.Chmod(path, 0000)
-	return func() {
-		_ = os.Chmod(path, 0644)
 	}
 }
 

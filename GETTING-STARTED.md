@@ -203,12 +203,45 @@ Clients can pass the key via `Authorization: Bearer <token>` or Anthropic's `x-a
 
 ## 4. Step 3: Local serve (Tier 2 — in-kernel model execution)
 
-For fully local, private inference without external servers, `fak` can run pure-Go model forward passes and local GGUF models directly in-kernel.
+For fully local, private inference without external servers, `fak` can run pure-Go model forward passes and local GGUF models directly in-kernel on your silicon:
+
+### A. Instant interactive REPL (`fak run`)
+
+Run an interactive chat session directly in your terminal (no background server needed):
+
+```bash
+# Pull and chat with Qwen3.8 (resumable download, auto-cached)
+fak run qwen38
+
+# Or run a one-shot query
+fak run qwen38 "Explain KV cache in one line"
+```
+
+### B. Apple Silicon Metal GPU acceleration (`fak serve` + `fak chat`)
+
+On macOS, leverage Apple Silicon Metal GPU decode/prefill and in-kernel RadixAttention prefix caching. Metal GPU acceleration and resident Q4_K tensor decoding are enabled by default on Apple Silicon:
+
+```bash
+# Terminal 1: start the native Metal GPU server (model alias auto-resolved, Metal auto-selected)
+fak serve --gguf qwen38:27b-q4
+
+# Terminal 2: chat with it (auto-connects to local server and detects model)
+fak chat
+```
+
+Or connect explicitly if using custom ports or model routing:
+```bash
+fak chat --base-url http://127.0.0.1:8080/v1 --model qwen38:27b-q4
+```
+
+For complete Apple Silicon unified memory sizing and multi-agent setup, see the [Mac local models guide](docs/fak/mac-local-models.md).
+
+### C. Guard existing agents with local models (`fak guard`)
 
 Run an agent wrapped with a local GGUF model:
 
 ```bash
-fak guard --gguf qwen2.5:7b -- claude
+fak guard --gguf qwen38:27b -- claude
 ```
 
 The GGUF model loads directly into the kernel address space, adjudicates every tool call locally, and requires no external API keys or network requests.

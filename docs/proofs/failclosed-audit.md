@@ -149,6 +149,7 @@ cross-checked against the live registry in code.
 | GOFMT | block | fail-open | blocking commit-boundary twin of make ci gofmt-check |
 | DUPLICATION | warn | fail-open | advisory; in-process twin of fak dup guard --staged |
 | COMMENT_QUALITY | warn | fail-open | advisory; changed-lines-only comments should explain durable why |
+| CLEAR_INVENTORY_ADMISSION | warn | fail-open | advisory by design; defaults to clear inventory gating over mock substitutions |
 
 <!-- failclosed-ledger:end -->
 
@@ -223,6 +224,7 @@ above.
 | CACHE_PREFIX_RESIDENT | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | DEPTH_NOT_CARRIED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | CHECKER_TAMPERED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| CLEAR_INVENTORY_REQUIRED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | COLLISION_RISK | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | COMPACTION_THRASH | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | CONTROL_REV_STALE | refusal | floor-declared | `Floor:` cite in the dos.toml block |

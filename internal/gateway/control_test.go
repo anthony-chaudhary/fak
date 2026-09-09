@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -376,7 +377,7 @@ func TestControlConfigUnixDomainSocketIPC(t *testing.T) {
 		CompactHistoryBudget: 40000,
 	})
 
-	socketPath := filepath.Join(t.TempDir(), "control.sock")
+	socketPath := testUnixSocketPath(t, "control.sock")
 	cs, err := srv.StartControlSocket(socketPath)
 	if err != nil {
 		t.Fatalf("StartControlSocket: %v", err)
@@ -492,7 +493,7 @@ func TestControlConfigUnixDomainSocketLoadIPC(t *testing.T) {
 		t.Fatalf("Offer req-2 verdict = %v, want %v", v2, VerdictQueued)
 	}
 
-	socketPath := filepath.Join(t.TempDir(), "control_load.sock")
+	socketPath := testUnixSocketPath(t, "control_load.sock")
 	cs, err := srv.StartControlSocket(socketPath)
 	if err != nil {
 		t.Fatalf("StartControlSocket: %v", err)
@@ -575,4 +576,15 @@ func TestControlConfigUnixDomainSocketLoadIPC(t *testing.T) {
 	if resp2.Load.Running != 1 || resp2.Load.Waiting != 1 || resp2.Load.TokensInUse != 50 || resp2.Load.QueuedTokens != 30 {
 		t.Errorf("unexpected Load fields for load op: %+v", resp2.Load)
 	}
+}
+
+func testUnixSocketPath(t *testing.T, name string) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "ctrl-*")
+	if err != nil {
+		dir = t.TempDir()
+	} else {
+		t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	}
+	return filepath.Join(dir, name)
 }

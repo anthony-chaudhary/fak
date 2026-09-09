@@ -175,7 +175,66 @@ type HeadroomTelemetry struct {
 	SharedPrefixTokens   uint64  `json:"shared_prefix_tokens"`
 	PrivateTailTokens    uint64  `json:"private_tail_tokens"`
 	ModelWeightBytes     uint64  `json:"model_weight_bytes"`
+	FullAttnLayers       uint64  `json:"full_attn_layers,omitempty"`
+	RecurrentLayers      uint64  `json:"recurrent_layers,omitempty"`
+	RecurrentStateBytes  uint64  `json:"recurrent_state_bytes,omitempty"`
+	SharedPrefixBytes    uint64  `json:"shared_prefix_bytes,omitempty"`
+	TailKVBytesPerAgent  uint64  `json:"tail_kv_bytes_per_agent,omitempty"`
 	Available            bool    `json:"available"`
+}
+
+// AgentSpec defines the context, preamble sharing, and recurrent requirements for an agent session.
+type AgentSpec struct {
+	ID                  string `json:"id"`
+	SharedPreamble      bool   `json:"shared_preamble"`
+	PreambleTokens      uint64 `json:"preamble_tokens"`
+	TailTokens          uint64 `json:"tail_tokens"`
+	RecurrentStateBytes uint64 `json:"recurrent_state_bytes,omitempty"`
+}
+
+// AdmissionVerdict represents the governor's admission decision for an agent launch request.
+type AdmissionVerdict string
+
+const (
+	AdmissionVerdictAdmitted  AdmissionVerdict = "ADMITTED"
+	AdmissionVerdictRejected  AdmissionVerdict = "REJECTED"
+	AdmissionVerdictQueued    AdmissionVerdict = "QUEUED"
+	AdmissionVerdictThrottled AdmissionVerdict = "THROTTLED"
+)
+
+// AdmissionDecision captures the evaluation result and memory projection of an admission attempt.
+type AdmissionDecision struct {
+	Admitted               bool             `json:"admitted"`
+	Verdict                AdmissionVerdict `json:"verdict"`
+	Reason                 string           `json:"reason"`
+	ReasonToken            string           `json:"reason_token"`
+	ProjectedResidentBytes uint64           `json:"projected_resident_bytes"`
+	WiredCeilingBytes      uint64           `json:"wired_ceiling_bytes"`
+	AvailableHeadroomBytes uint64           `json:"available_headroom_bytes"`
+	ActiveAgents           int              `json:"active_agents"`
+	MaxSharedAgents        int              `json:"max_shared_agents"`
+	MaxIsolatedAgents      int              `json:"max_isolated_agents"`
+}
+
+// GovernorTelemetry models real-time memory governor state, agent capacity, and swap health.
+type GovernorTelemetry struct {
+	ActiveAgents                int    `json:"active_agents"`
+	AvailableAgentSlots         int    `json:"available_agent_slots"`
+	MaxSharedAgents             int    `json:"max_shared_agents"`
+	MaxIsolatedAgents           int    `json:"max_isolated_agents"`
+	WiredMemoryCeilingBytes     uint64 `json:"wired_memory_ceiling_bytes"`
+	ResidentMemoryBytes         uint64 `json:"resident_memory_bytes"`
+	PeakMemoryBytes             uint64 `json:"peak_memory_bytes"`
+	RemainingHeadroomBytes      uint64 `json:"remaining_headroom_bytes"`
+	SharedPreamblePinned        bool   `json:"shared_preamble_pinned"`
+	SharedPreambleTokens        uint64 `json:"shared_preamble_tokens"`
+	SharedPreambleBytes         uint64 `json:"shared_preamble_bytes"`
+	RecurrentStateBytesPerAgent uint64 `json:"recurrent_state_bytes_per_agent"`
+	SwapUsedDeltaBytes          uint64 `json:"swap_used_delta_bytes"`
+	PageoutsDelta               uint64 `json:"pageouts_delta"`
+	ZeroSwapGuaranteed          bool   `json:"zero_swap_guaranteed"`
+	ConcurrencyStatus           string `json:"concurrency_status"`
+	Available                   bool   `json:"available"`
 }
 
 // AnalysisReport contains synthesized diagnostics, bottlenecks, and action verdicts.
@@ -197,5 +256,6 @@ type Snapshot struct {
 	MLXServing  MLXServingTelemetry  `json:"mlx_serving"`
 	Headroom    HeadroomTelemetry    `json:"headroom"`
 	PrefixCache PrefixCacheTelemetry `json:"prefix_cache"`
+	Governor    GovernorTelemetry    `json:"governor"`
 	Analysis    AnalysisReport       `json:"analysis"`
 }

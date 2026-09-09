@@ -141,7 +141,7 @@ func InspectUnitDetectors(lane *DebtLane, unitAbsDir string, compRoots ...string
 
 	// 9-15: AST-grounded inspections for Go files
 	if unitAbsDir != "" {
-		astFindings := inspectGoASTDetectors(lane, unitAbsDir, surface)
+		astFindings := inspectGoPackageEvidence(lane, unitAbsDir, surface)
 		findings = append(findings, astFindings...)
 	}
 
@@ -287,6 +287,10 @@ func inspectGoASTDetectors(lane *DebtLane, unitDir string, surface SurfaceClass)
 		// 10. Stub debt detection: TODO/FIXME/unimplemented panics
 		stubFindings := inspectStubDebt(fset, fileNode, relPath, lane, surface)
 		findings = append(findings, stubFindings...)
+
+		// 17. Mock hazard detection: mock/fake structs and stub panics
+		mockFindings := inspectMockHazards(fset, fileNode, relPath, lane, surface)
+		findings = append(findings, mockFindings...)
 
 		// 12. Unsafe usage in non-core
 		if lane.Criticality != CriticalityCore && lane.Criticality != CriticalityEnabling {
@@ -850,6 +854,206 @@ func countStubMarkers(filePath string) int {
 		}
 	}
 	return count
+}
+
+var nolintMockRE = regexp.MustCompile(`(?i)(?://|/\*)\s*nolint:(?:[^\n]*\b)?(?:mock_hazard|mock)\b`)
+
+type mockCandidate struct {
+	pos    token.Pos
+	line   int
+	symbol string
+	span   string
+	detail string
+}
+
+func isMockStructName(name string) bool {
+	if name == "Mock" || name == "Fake" {
+		return true
+	}
+	if strings.HasPrefix(name, "Mock") && len(name) > 4 && ((name[4] >= 'A' && name[4] <= 'Z') || name[4] == '_') {
+		return true
+	}
+	if strings.HasPrefix(name, "Fake") && len(name) > 4 && ((name[4] >= 'A' && name[4] <= 'Z') || name[4] == '_') {
+		return true
+	}
+	return false
+}
+
+func inspectMockHazards(fset *token.FileSet, fileNode *ast.File, relPath string, lane *DebtLane, surface SurfaceClass) []FindingProvenance {
+	if fileNode == nil || isGeneratedASTFile(fileNode) {
+		return nil
+	}
+
+	// Skip if file comment carries //nolint:mock_hazard or //nolint:mock
+	var firstDeclStart token.Pos
+	if len(fileNode.Decls) > 0 {
+		firstDeclStart, _, _, _ = declRange(fset, fileNode.Decls[0])
+	}
+	for _, cg := range fileNode.Comments {
+		for _, c := range cg.List {
+			if nolintMockRE.MatchString(c.Text) {
+				if c.Pos() < fileNode.Package || (firstDeclStart.IsValid() && c.Pos() < firstDeclStart) {
+					return nil
+				}
+			}
+		}
+	}
+
+	nolintLines := make(map[int]bool)
+	for _, cg := range fileNode.Comments {
+		for _, c := range cg.List {
+			if nolintMockRE.MatchString(c.Text) {
+				line := fset.Position(c.Pos()).Line
+				nolintLines[line] = true
+			}
+		}
+	}
+
+	commentGroupHasNolint := func(cg *ast.CommentGroup) bool {
+		if cg == nil {
+			return false
+		}
+		for _, c := range cg.List {
+			if nolintMockRE.MatchString(c.Text) {
+				return true
+			}
+		}
+		return false
+	}
+
+	isPosSuppressed := func(pos token.Pos) bool {
+		line := fset.Position(pos).Line
+		return nolintLines[line] || nolintLines[line-1]
+	}
+
+	isDeclCarriesNolint := func(pos token.Pos) bool {
+		for _, decl := range fileNode.Decls {
+			dStart := decl.Pos()
+			dEnd := decl.End()
+			if pos >= dStart && pos <= dEnd {
+				switch d := decl.(type) {
+				case *ast.GenDecl:
+					if commentGroupHasNolint(d.Doc) || isPosSuppressed(d.Pos()) {
+						return true
+					}
+				case *ast.FuncDecl:
+					if commentGroupHasNolint(d.Doc) || isPosSuppressed(d.Pos()) {
+						return true
+					}
+				}
+			}
+		}
+		return false
+	}
+
+	isTypeSpecSuppressed := func(ts *ast.TypeSpec) bool {
+		if isPosSuppressed(ts.Pos()) {
+			return true
+		}
+		if commentGroupHasNolint(ts.Doc) || commentGroupHasNolint(ts.Comment) {
+			return true
+		}
+		return isDeclCarriesNolint(ts.Pos())
+	}
+
+	isPanicSuppressed := func(call *ast.CallExpr) bool {
+		if isPosSuppressed(call.Pos()) {
+			return true
+		}
+		return isDeclCarriesNolint(call.Pos())
+	}
+
+	var candidates []mockCandidate
+
+	ast.Inspect(fileNode, func(n ast.Node) bool {
+		if n == nil {
+			return true
+		}
+		switch node := n.(type) {
+		case *ast.TypeSpec:
+			if node.Name != nil {
+				if _, isStruct := node.Type.(*ast.StructType); isStruct {
+					name := node.Name.Name
+					if isMockStructName(name) {
+						if isTypeSpecSuppressed(node) {
+							return true
+						}
+						scope := findEnclosingScope(fset, fileNode, node.Pos())
+						line := fset.Position(node.Pos()).Line
+						detail := fmt.Sprintf("mock struct declaration %s", name)
+						candidates = append(candidates, mockCandidate{
+							pos:    node.Pos(),
+							line:   line,
+							symbol: name,
+							span:   fmt.Sprintf("%d-%d", scope.startLine, scope.endLine),
+							detail: detail,
+						})
+					}
+				}
+			}
+		case *ast.CallExpr:
+			if isPanic, msg := isStubPanic(node); isPanic {
+				if isPanicSuppressed(node) {
+					return true
+				}
+				scope := findEnclosingScope(fset, fileNode, node.Pos())
+				line := fset.Position(node.Pos()).Line
+				detail := fmt.Sprintf("panic(%q)", msg)
+				candidates = append(candidates, mockCandidate{
+					pos:    node.Pos(),
+					line:   line,
+					symbol: scope.symbol,
+					span:   fmt.Sprintf("%d-%d", scope.startLine, scope.endLine),
+					detail: detail,
+				})
+			}
+		}
+		return true
+	})
+
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return candidates[i].pos < candidates[j].pos
+	})
+
+	laneName := ""
+	if lane != nil {
+		laneName = lane.Lane
+	}
+
+	var findings []FindingProvenance
+	seen := make(map[string]bool)
+
+	for _, c := range candidates {
+		key := fmt.Sprintf("mock_hazard:%s:%s", c.symbol, c.span)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		findings = append(findings, FindingProvenance{
+			Dimension: string(DimMockHazard),
+			Surface:   string(surface),
+			Lane:      laneName,
+			Path:      relPath,
+			Severity:  "warning",
+			Message:   fmt.Sprintf("mock hazard in %s (%s:%d): %s", c.symbol, relPath, c.line, c.detail),
+		})
+	}
+
+	return findings
+}
+
+func countMockHazardMarkers(filePath string) int {
+	fset := token.NewFileSet()
+	fileNode, err := parser.ParseFile(fset, filePath, nil, parser.ParseComments)
+	if err != nil {
+		return 0
+	}
+	findings := inspectMockHazards(fset, fileNode, filePath, nil, SurfaceInternal)
+	return len(findings)
 }
 
 func inspectSkillSurface(lane *DebtLane, dir string) []FindingProvenance {

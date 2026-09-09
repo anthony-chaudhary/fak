@@ -48,7 +48,7 @@ pf(){
 }
 
 echo "fak pre-flight ladder — cheapest rung first, before any model turn or execution"
-echo "  (default capability floor: the built-in tau2 airline tools; see 'fak policy --dump')"
+echo "  (default capability floor: the built-in production capability floor; see 'fak policy --dump')"
 
 # 1) well-formed call -> every cheap rung defers, the monitor ALLOWs.
 pf "1. clean call         -> ALLOW (rungs 0+1 pass, monitor admits)" \

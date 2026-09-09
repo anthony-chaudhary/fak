@@ -1,10 +1,12 @@
 package main
 
 import (
-	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"io"
+	"runtime"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 )
 
 func TestDispatchHostResourcesUsesSharedProcessThreads(t *testing.T) {
@@ -59,5 +61,18 @@ func TestDispatchPreflightTimedSubBuckets(t *testing.T) {
 	}
 	if tm["process_snapshot"] <= 0 || tm["kernel_probe"] <= 0 {
 		t.Fatalf("timings=%v", tm)
+	}
+}
+
+func TestDispatchFreeRAMPOSIXDarwin(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("darwin only")
+	}
+	ram := dispatchFreeRAMPOSIX()
+	if ram == nil {
+		t.Fatal("expected non-nil free RAM on darwin")
+	}
+	if *ram <= 0 {
+		t.Fatalf("expected positive free RAM on darwin, got %d MB", *ram)
 	}
 }

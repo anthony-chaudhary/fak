@@ -147,6 +147,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunCustomizationIndex(stdout, stderr, argv[1:])
 	case "factory-migrate", "factorymigrate":
 		return devcmd.RunFactoryMigrate(stdout, stderr, argv[1:])
+	case "bench-subagent-fanout", "subagent-fanout-bench":
+		return runBenchSubagentFanout(stdout, stderr, argv[1:])
 	default:
 		fmt.Fprintf(stderr, "fak-dev: unknown command %q\n", argv[0])
 		fmt.Fprintln(stderr, "run 'fak-dev help' for repository-development commands")
@@ -216,6 +218,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  borrow-provenance <pin|verify> [flags] bind borrowed code to upstream evidence")
 	fmt.Fprintln(w, "  customization-index [flags]            inspect agent customization research")
 	fmt.Fprintln(w, "  factory-migrate [status|list|next|audit-boundary|scaffold] [flags] audit and track autonomous dev factory Python to Go migration")
+	fmt.Fprintln(w, "  bench-subagent-fanout [flags]          apples-to-apples subagent fanout benchmark harness (SGLang/vLLM/FAK)")
 	fmt.Fprintln(w, "  version                               print fak-dev build identity")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "The serving/guard product surface is the separately buildable 'fak' artifact.")

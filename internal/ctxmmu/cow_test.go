@@ -1,6 +1,7 @@
 package ctxmmu_test
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -581,5 +582,630 @@ func TestCOWPageTable_ValidationAndErrors(t *testing.T) {
 	// Release
 	if err := table.ReleaseSession("self"); err != nil {
 		t.Fatalf("ReleaseSession: %v", err)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Lock-Free Candidate Tree Speculation Tests (#12319)
+// -----------------------------------------------------------------------------
+
+// TestCOWTreeSpeculation_ForkAndSquashLatency verifies:
+// 1. Fork + append + squash latency across 16 concurrent candidate branches is strictly < 20µs per branch.
+// 2. 0 duplicate physical pages are allocated on candidate forks.
+// 3. Parent session remains uncorrupted and memory is cleanly reclaimed after squashing losing branches.
+func TestCOWTreeSpeculation_ForkAndSquashLatency(t *testing.T) {
+	table := ctxmmu.NewCOWPageTable()
+
+	// 512 prefix tokens = 8 blocks of 64 tokens
+	prefixCount := 512
+	prefixTokens := make([]int, prefixCount)
+	for i := range prefixTokens {
+		prefixTokens[i] = 1000 + i
+	}
+
+	_, err := table.CreateSession("parent-spec")
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+	if err := table.AppendTokens("parent-spec", prefixTokens); err != nil {
+		t.Fatalf("AppendTokens failed: %v", err)
+	}
+
+	initialPhysBlocks := table.PhysicalBlockCount()
+	if initialPhysBlocks != 8 {
+		t.Fatalf("expected 8 physical blocks, got %d", initialPhysBlocks)
+	}
+
+	// Warmup 1 candidate fork & squash to prime candidatePool & blockPool
+	warmupCand, err := table.ForkCandidate("parent-spec", "cand-warmup")
+	if err != nil {
+		t.Fatalf("warmup ForkCandidate failed: %v", err)
+	}
+	if err := warmupCand.AppendTokens([]int{9999}); err != nil {
+		t.Fatalf("warmup AppendTokens failed: %v", err)
+	}
+	if err := table.SquashCandidate("cand-warmup"); err != nil {
+		t.Fatalf("warmup SquashCandidate failed: %v", err)
+	}
+
+	const numCandidates = 16
+	var wg sync.WaitGroup
+	errCh := make(chan error, numCandidates*3)
+	latencies := make([]time.Duration, numCandidates)
+
+	for i := 0; i < numCandidates; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			candID := fmt.Sprintf("cand-%d", idx)
+
+			start := time.Now()
+
+			cand, err := table.ForkCandidate("parent-spec", candID)
+			if err != nil {
+				errCh <- fmt.Errorf("branch %d fork failed: %w", idx, err)
+				return
+			}
+
+			if cand.PageCount() != 8 {
+				errCh <- fmt.Errorf("branch %d page count mismatch: got %d, want 8", idx, cand.PageCount())
+				return
+			}
+			if cand.TokenCount != prefixCount {
+				errCh <- fmt.Errorf("branch %d token count mismatch: got %d, want %d", idx, cand.TokenCount, prefixCount)
+				return
+			}
+
+			// Draft 4 tokens
+			draftTokens := []int{2000 + idx*10, 2000 + idx*10 + 1, 2000 + idx*10 + 2, 2000 + idx*10 + 3}
+			if err := cand.AppendTokens(draftTokens); err != nil {
+				errCh <- fmt.Errorf("branch %d append failed: %w", idx, err)
+				return
+			}
+
+			// Squash losing branch
+			if err := table.SquashCandidate(candID); err != nil {
+				errCh <- fmt.Errorf("branch %d squash failed: %w", idx, err)
+				return
+			}
+
+			dur := time.Since(start)
+			latencies[idx] = dur
+		}(i)
+	}
+
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatal(err)
+	}
+
+	var totalDuration time.Duration
+	for _, lat := range latencies {
+		totalDuration += lat
+	}
+	avgLatency := totalDuration / numCandidates
+
+	t.Logf("16 candidate branches: avg latency per branch = %v", avgLatency)
+	for i, lat := range latencies {
+		t.Logf("  branch %2d: %v", i, lat)
+	}
+
+	// Sub-20µs requirement per branch on average
+	if avgLatency >= 20*time.Microsecond {
+		t.Fatalf("average branch latency %v exceeded 20µs threshold", avgLatency)
+	}
+
+	// Verify 0 duplicate physical pages allocated
+	if table.DuplicatePhysicalPagesAllocated() != 0 {
+		t.Fatalf("expected 0 duplicate physical pages, got %d", table.DuplicatePhysicalPagesAllocated())
+	}
+
+	// Verify parent session tokens are completely intact
+	parentSess, err := table.GetSession("parent-spec")
+	if err != nil {
+		t.Fatalf("GetSession parent-spec failed: %v", err)
+	}
+	parentTokens := parentSess.Tokens()
+	if len(parentTokens) != prefixCount {
+		t.Fatalf("parent tokens count corrupted: got %d, want %d", len(parentTokens), prefixCount)
+	}
+	for i := 0; i < prefixCount; i++ {
+		if parentTokens[i] != prefixTokens[i] {
+			t.Fatalf("parent token %d corrupted: got %d, want %d", i, parentTokens[i], prefixTokens[i])
+		}
+	}
+
+	// Verify candidate table is clean (0 active candidates)
+	if table.CandidateCount() != 0 {
+		t.Fatalf("expected 0 active candidates after squash, got %d", table.CandidateCount())
+	}
+}
+
+// TestCOWTreeSpeculation_ZeroDuplicatePhysicalPages verifies:
+// Forking candidate branches shares physical page blocks and allocates 0 redundant physical DRAM pages.
+func TestCOWTreeSpeculation_ZeroDuplicatePhysicalPages(t *testing.T) {
+	table := ctxmmu.NewCOWPageTable()
+
+	prefixCount := 1024
+	prefixTokens := make([]int, prefixCount)
+	for i := range prefixTokens {
+		prefixTokens[i] = 5000 + i
+	}
+
+	parent, err := table.CreateSession("parent-1024")
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+	if err := table.AppendTokens("parent-1024", prefixTokens); err != nil {
+		t.Fatalf("AppendTokens failed: %v", err)
+	}
+
+	initialPhysBlocks := table.PhysicalBlockCount()
+	if initialPhysBlocks != 16 {
+		t.Fatalf("expected 16 physical blocks, got %d", initialPhysBlocks)
+	}
+
+	const numCandidates = 16
+	candidates := make([]*ctxmmu.ForkedCandidate, numCandidates)
+
+	for i := 0; i < numCandidates; i++ {
+		candID := fmt.Sprintf("cand-zero-%d", i)
+		cand, err := table.ForkCandidate("parent-1024", candID)
+		if err != nil {
+			t.Fatalf("ForkCandidate %s failed: %v", candID, err)
+		}
+		candidates[i] = cand
+	}
+
+	// Verify 0 duplicate physical pages allocated
+	currentPhysBlocks := table.PhysicalBlockCount()
+	if currentPhysBlocks != initialPhysBlocks {
+		t.Fatalf("expected physical blocks count unchanged at %d, got %d", initialPhysBlocks, currentPhysBlocks)
+	}
+
+	// Verify refcounts: 1 parent + 16 candidates = 17 references per block
+	for bIdx, blk := range parent.Blocks {
+		if blk.RefCount() != int32(numCandidates+1) {
+			t.Fatalf("block %d refcount expected %d, got %d", bIdx, numCandidates+1, blk.RefCount())
+		}
+	}
+
+	// Squash all candidates
+	for i := 0; i < numCandidates; i++ {
+		candID := fmt.Sprintf("cand-zero-%d", i)
+		if err := table.SquashCandidate(candID); err != nil {
+			t.Fatalf("SquashCandidate %s failed: %v", candID, err)
+		}
+	}
+
+	// Refcounts must return to 1
+	for bIdx, blk := range parent.Blocks {
+		if blk.RefCount() != 1 {
+			t.Fatalf("block %d refcount expected 1 after all squashed, got %d", bIdx, blk.RefCount())
+		}
+	}
+	if table.PhysicalBlockCount() != initialPhysBlocks {
+		t.Fatalf("physical block count corrupted: got %d, want %d", table.PhysicalBlockCount(), initialPhysBlocks)
+	}
+
+	_ = table.ReleaseSession("parent-1024")
+	if table.PhysicalBlockCount() != 0 {
+		t.Fatalf("expected 0 physical blocks after release, got %d", table.PhysicalBlockCount())
+	}
+}
+
+// TestCOWTreeSpeculation_FullPromotion verifies:
+// Winning candidate branch is promoted directly into the authoritative parent session in zero memory copies.
+func TestCOWTreeSpeculation_FullPromotion(t *testing.T) {
+	table := ctxmmu.NewCOWPageTable()
+
+	parentTokens := make([]int, 100)
+	for i := range parentTokens {
+		parentTokens[i] = i + 1
+	}
+
+	parent, err := table.CreateSession("parent-promote-full")
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+	if err := table.AppendTokens("parent-promote-full", parentTokens); err != nil {
+		t.Fatalf("AppendTokens failed: %v", err)
+	}
+
+	cand, err := table.ForkCandidate("parent-promote-full", "cand-win")
+	if err != nil {
+		t.Fatalf("ForkCandidate failed: %v", err)
+	}
+
+	draftTokens := []int{101, 102, 103, 104, 105, 106, 107, 108}
+	if err := cand.AppendTokens(draftTokens); err != nil {
+		t.Fatalf("AppendTokens candidate failed: %v", err)
+	}
+
+	if cand.TokenCount != 108 {
+		t.Fatalf("expected candidate token count 108, got %d", cand.TokenCount)
+	}
+
+	// Promote winning candidate branch
+	if err := table.PromoteCandidate("cand-win"); err != nil {
+		t.Fatalf("PromoteCandidate failed: %v", err)
+	}
+
+	// Parent session must now have 108 tokens
+	if parent.TokenCount != 108 {
+		t.Fatalf("expected parent token count 108, got %d", parent.TokenCount)
+	}
+	readBack := parent.Tokens()
+	if len(readBack) != 108 {
+		t.Fatalf("expected 108 tokens read back, got %d", len(readBack))
+	}
+	for i := 0; i < 100; i++ {
+		if readBack[i] != i+1 {
+			t.Fatalf("prefix token %d corrupted: got %d, want %d", i, readBack[i], i+1)
+		}
+	}
+	for i := 0; i < 8; i++ {
+		if readBack[100+i] != 101+i {
+			t.Fatalf("draft token %d corrupted: got %d, want %d", i, readBack[100+i], 101+i)
+		}
+	}
+
+	// Candidate must be removed from active candidates
+	if table.HasCandidate("cand-win") {
+		t.Fatalf("candidate cand-win still reported active after promotion")
+	}
+	if !cand.IsReleased() {
+		t.Fatalf("candidate cand-win should be released after promotion")
+	}
+	if !cand.IsAuthoritative() {
+		t.Fatalf("candidate cand-win should be authoritative after promotion")
+	}
+
+	// Release parent session: all physical memory must be cleanly reclaimed
+	if err := table.ReleaseSession("parent-promote-full"); err != nil {
+		t.Fatalf("ReleaseSession failed: %v", err)
+	}
+	if table.PhysicalBlockCount() != 0 {
+		t.Fatalf("expected 0 physical blocks after release, got %d", table.PhysicalBlockCount())
+	}
+	if table.TotalAllocatedBytes() != 0 {
+		t.Fatalf("expected 0 allocated bytes after release, got %d", table.TotalAllocatedBytes())
+	}
+}
+
+// TestCOWTreeSpeculation_PartialPromotion verifies:
+// Partial acceptance of drafted tokens truncates the winning candidate to acceptedTokens,
+// cleanly squashes unaccepted tail pages, and commits the accepted prefix to root.
+func TestCOWTreeSpeculation_PartialPromotion(t *testing.T) {
+	table := ctxmmu.NewCOWPageTable()
+
+	parentTokens := make([]int, 100)
+	for i := range parentTokens {
+		parentTokens[i] = i + 1000
+	}
+
+	parent, err := table.CreateSession("parent-promote-part")
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+	if err := table.AppendTokens("parent-promote-part", parentTokens); err != nil {
+		t.Fatalf("AppendTokens failed: %v", err)
+	}
+
+	cand, err := table.ForkCandidate("parent-promote-part", "cand-part")
+	if err != nil {
+		t.Fatalf("ForkCandidate failed: %v", err)
+	}
+
+	draftTokens := []int{201, 202, 203, 204, 205, 206, 207, 208}
+	if err := cand.AppendTokens(draftTokens); err != nil {
+		t.Fatalf("AppendTokens candidate failed: %v", err)
+	}
+
+	// Model verifier accepts only first 3 draft tokens (201, 202, 203).
+	// Total accepted tokens = 100 prefix + 3 accepted = 103 tokens.
+	if err := table.PromoteCandidate("cand-part", 103); err != nil {
+		t.Fatalf("PromoteCandidate with partial acceptance failed: %v", err)
+	}
+
+	// Verify parent session has exactly 103 tokens
+	if parent.TokenCount != 103 {
+		t.Fatalf("expected parent token count 103, got %d", parent.TokenCount)
+	}
+	readBack := parent.Tokens()
+	if len(readBack) != 103 {
+		t.Fatalf("expected 103 tokens read back, got %d", len(readBack))
+	}
+	for i := 0; i < 100; i++ {
+		if readBack[i] != i+1000 {
+			t.Fatalf("prefix token %d mismatch: got %d, want %d", i, readBack[i], i+1000)
+		}
+	}
+	expectedDraft := []int{201, 202, 203}
+	for i := 0; i < 3; i++ {
+		if readBack[100+i] != expectedDraft[i] {
+			t.Fatalf("accepted draft token %d mismatch: got %d, want %d", i, readBack[100+i], expectedDraft[i])
+		}
+	}
+
+	// Clean release
+	if err := table.ReleaseSession("parent-promote-part"); err != nil {
+		t.Fatalf("ReleaseSession failed: %v", err)
+	}
+	if table.PhysicalBlockCount() != 0 {
+		t.Fatalf("expected 0 physical blocks after release, got %d", table.PhysicalBlockCount())
+	}
+}
+
+// TestCOWTreeSpeculation_TreeDepthLimit verifies:
+// Hierarchical candidate trees enforce MaxCandidateTreeDepth (8) to prevent unbounded recursion.
+func TestCOWTreeSpeculation_TreeDepthLimit(t *testing.T) {
+	table := ctxmmu.NewCOWPageTable()
+
+	if _, err := table.CreateSession("root"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := table.AppendTokens("root", []int{1, 2, 3}); err != nil {
+		t.Fatalf("AppendTokens: %v", err)
+	}
+
+	prevID := "root"
+	// Fork candidates from depth 1 to MaxCandidateTreeDepth (8)
+	for d := 1; d <= ctxmmu.MaxCandidateTreeDepth; d++ {
+		candID := fmt.Sprintf("cand-depth-%d", d)
+		cand, err := table.ForkCandidate(prevID, candID)
+		if err != nil {
+			t.Fatalf("ForkCandidate at depth %d failed: %v", d, err)
+		}
+		if cand.Depth() != d {
+			t.Fatalf("expected depth %d, got %d", d, cand.Depth())
+		}
+		prevID = candID
+	}
+
+	// Attempting to fork at depth 9 must fail with ErrMaxTreeDepth
+	_, err := table.ForkCandidate(prevID, "cand-depth-9")
+	if !errors.Is(err, ctxmmu.ErrMaxTreeDepth) {
+		t.Fatalf("expected ErrMaxTreeDepth at depth 9, got %v", err)
+	}
+
+	// Clean up all candidates
+	for d := ctxmmu.MaxCandidateTreeDepth; d >= 1; d-- {
+		candID := fmt.Sprintf("cand-depth-%d", d)
+		if err := table.SquashCandidate(candID); err != nil {
+			t.Fatalf("SquashCandidate %s failed: %v", candID, err)
+		}
+	}
+
+	if err := table.ReleaseSession("root"); err != nil {
+		t.Fatalf("ReleaseSession: %v", err)
+	}
+	if table.PhysicalBlockCount() != 0 {
+		t.Fatalf("expected 0 physical blocks, got %d", table.PhysicalBlockCount())
+	}
+}
+
+// TestCOWTreeSpeculation_ConcurrentSquashRace verifies thread safety under -race.
+func TestCOWTreeSpeculation_ConcurrentSquashRace(t *testing.T) {
+	table := ctxmmu.NewCOWPageTable()
+
+	prefixTokens := make([]int, 256)
+	for i := range prefixTokens {
+		prefixTokens[i] = i
+	}
+
+	parent, err := table.CreateSession("race-parent")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := table.AppendTokens("race-parent", prefixTokens); err != nil {
+		t.Fatalf("AppendTokens: %v", err)
+	}
+
+	const concurrency = 32
+	var wg sync.WaitGroup
+	errCh := make(chan error, concurrency*2)
+
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			candID := fmt.Sprintf("race-cand-%d", workerID)
+
+			cand, err := table.ForkCandidate("race-parent", candID)
+			if err != nil {
+				errCh <- fmt.Errorf("fork %s: %w", candID, err)
+				return
+			}
+
+			// Draft tokens
+			if err := cand.AppendTokens([]int{workerID * 100, workerID*100 + 1}); err != nil {
+				errCh <- fmt.Errorf("append %s: %w", candID, err)
+				return
+			}
+
+			// Read tokens
+			toks := cand.Tokens()
+			if len(toks) != 258 {
+				errCh <- fmt.Errorf("len %s mismatch: got %d, want 258", candID, len(toks))
+				return
+			}
+
+			// Squash
+			if err := cand.Squash(); err != nil {
+				errCh <- fmt.Errorf("squash %s: %w", candID, err)
+				return
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatal(err)
+	}
+
+	if parent.TokenCount != 256 {
+		t.Fatalf("parent token count corrupted: %d", parent.TokenCount)
+	}
+
+	_ = table.ReleaseSession("race-parent")
+	if table.PhysicalBlockCount() != 0 {
+		t.Fatalf("expected 0 physical blocks, got %d", table.PhysicalBlockCount())
+	}
+}
+
+// TestCOWTreeSpeculation_ErrorsAndValidation verifies sentinel errors and boundary checks.
+func TestCOWTreeSpeculation_ErrorsAndValidation(t *testing.T) {
+	table := ctxmmu.NewCOWPageTable()
+
+	if _, err := table.CreateSession("sess"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	// Empty IDs
+	if _, err := table.ForkCandidate("", "c1"); !errors.Is(err, ctxmmu.ErrInvalidSessionID) {
+		t.Fatalf("expected ErrInvalidSessionID, got %v", err)
+	}
+	if _, err := table.ForkCandidate("sess", ""); !errors.Is(err, ctxmmu.ErrInvalidSessionID) {
+		t.Fatalf("expected ErrInvalidSessionID, got %v", err)
+	}
+	if err := table.SquashCandidate(""); !errors.Is(err, ctxmmu.ErrInvalidSessionID) {
+		t.Fatalf("expected ErrInvalidSessionID, got %v", err)
+	}
+	if err := table.PromoteCandidate(""); !errors.Is(err, ctxmmu.ErrInvalidSessionID) {
+		t.Fatalf("expected ErrInvalidSessionID, got %v", err)
+	}
+
+	// Self fork
+	if _, err := table.ForkCandidate("sess", "sess"); !errors.Is(err, ctxmmu.ErrSelfFork) {
+		t.Fatalf("expected ErrSelfFork, got %v", err)
+	}
+
+	// Parent not found
+	if _, err := table.ForkCandidate("non-existent", "c1"); !errors.Is(err, ctxmmu.ErrParentNotFound) {
+		t.Fatalf("expected ErrParentNotFound, got %v", err)
+	}
+
+	// Fork valid candidate
+	cand, err := table.ForkCandidate("sess", "c1")
+	if err != nil {
+		t.Fatalf("ForkCandidate: %v", err)
+	}
+
+	// Duplicate candidate
+	if _, err := table.ForkCandidate("sess", "c1"); !errors.Is(err, ctxmmu.ErrCandidateExists) {
+		t.Fatalf("expected ErrCandidateExists, got %v", err)
+	}
+
+	// Candidate not found
+	if err := table.SquashCandidate("non-existent"); !errors.Is(err, ctxmmu.ErrCandidateNotFound) {
+		t.Fatalf("expected ErrCandidateNotFound, got %v", err)
+	}
+	if err := table.PromoteCandidate("non-existent"); !errors.Is(err, ctxmmu.ErrCandidateNotFound) {
+		t.Fatalf("expected ErrCandidateNotFound, got %v", err)
+	}
+
+	// Squash c1
+	if err := cand.Squash(); err != nil {
+		t.Fatalf("Squash: %v", err)
+	}
+
+	// Squash already squashed candidate
+	if err := cand.Squash(); !errors.Is(err, ctxmmu.ErrCandidateNotFound) {
+		t.Fatalf("expected ErrCandidateNotFound, got %v", err)
+	}
+
+	_ = table.ReleaseSession("sess")
+}
+
+// -----------------------------------------------------------------------------
+// Benchmarks for Tree Speculation (#12319)
+// -----------------------------------------------------------------------------
+
+func BenchmarkCOWTreeSpeculation_ForkAndSquash(b *testing.B) {
+	table := ctxmmu.NewCOWPageTable()
+
+	prefixTokens := make([]int, 512)
+	for i := range prefixTokens {
+		prefixTokens[i] = 100 + i
+	}
+	if _, err := table.CreateSession("bench-parent"); err != nil {
+		b.Fatalf("CreateSession: %v", err)
+	}
+	if err := table.AppendTokens("bench-parent", prefixTokens); err != nil {
+		b.Fatalf("AppendTokens: %v", err)
+	}
+
+	var candNames = [16]string{
+		"c0", "c1", "c2", "c3",
+		"c4", "c5", "c6", "c7",
+		"c8", "c9", "c10", "c11",
+		"c12", "c13", "c14", "c15",
+	}
+
+	// Warmup run
+	for i := 0; i < 16; i++ {
+		c, err := table.ForkCandidate("bench-parent", candNames[i])
+		if err != nil {
+			b.Fatalf("warmup fork: %v", err)
+		}
+		_ = c.AppendTokens([]int{1, 2, 3, 4})
+		if err := table.SquashCandidate(candNames[i]); err != nil {
+			b.Fatalf("warmup squash: %v", err)
+		}
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for n := 0; n < b.N; n++ {
+		for i := 0; i < 16; i++ {
+			c, err := table.ForkCandidate("bench-parent", candNames[i])
+			if err != nil {
+				b.Fatalf("fork failed: %v", err)
+			}
+			_ = c.AppendTokens([]int{1, 2, 3, 4})
+			if err := table.SquashCandidate(candNames[i]); err != nil {
+				b.Fatalf("squash failed: %v", err)
+			}
+		}
+	}
+}
+
+func BenchmarkCOWTreeSpeculation_SteadyState(b *testing.B) {
+	table := ctxmmu.NewCOWPageTable()
+
+	prefixTokens := make([]int, 512)
+	for i := range prefixTokens {
+		prefixTokens[i] = 100 + i
+	}
+	if _, err := table.CreateSession("bench-steady"); err != nil {
+		b.Fatalf("CreateSession: %v", err)
+	}
+	if err := table.AppendTokens("bench-steady", prefixTokens); err != nil {
+		b.Fatalf("AppendTokens: %v", err)
+	}
+
+	candName := "c-steady"
+
+	// Warmup
+	c, _ := table.ForkCandidate("bench-steady", candName)
+	_ = c.AppendTokens([]int{1, 2, 3, 4})
+	_ = table.SquashCandidate(candName)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for n := 0; n < b.N; n++ {
+		c, err := table.ForkCandidate("bench-steady", candName)
+		if err != nil {
+			b.Fatalf("fork: %v", err)
+		}
+		_ = c.AppendTokens([]int{1, 2, 3, 4})
+		if err := table.SquashCandidate(candName); err != nil {
+			b.Fatalf("squash: %v", err)
+		}
 	}
 }

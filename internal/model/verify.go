@@ -292,7 +292,7 @@ func maxAbsF32Delta(a, b []float32) float32 {
 func (s *Session) verifyForwardSequential(ids []int) [][]float32 {
 	out := make([][]float32, len(ids))
 	for i, id := range ids {
-		out[i] = s.Step(id)
+		out[i] = append([]float32(nil), s.Step(id)...)
 	}
 	return out
 }

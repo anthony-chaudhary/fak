@@ -12,7 +12,7 @@ import (
 // codetools.go — arming the kernel-mediated coding filesystem tools (Read/Write/Edit/Grep/Glob) on the
 // owned loop (#6703, child of #6658).
 //
-// The loop's built-in catalog is the airline-support fixture and its only real
+// The loop's built-in catalog is the deterministic mock fixture and its only real
 // filesystem engine is readengine.go's read-only `fak_read` MCP miss path. So an operator
 // asking the native harness to perform a coding task had nothing to dispatch. This file
 // is the seam that changes: it binds internal/codetools' engines + adjudicator rung into

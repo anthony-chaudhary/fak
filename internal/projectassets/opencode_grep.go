@@ -9,7 +9,11 @@ import (
 const openCodeGrepPath = ".opencode/plugins/fak-grep.js"
 
 func syncOpenCodeGrep(root string) error {
-	return os.WriteFile(filepath.Join(root, filepath.FromSlash(openCodeGrepPath)), []byte(defaultOpenCodeGrep), 0644)
+	path := filepath.Join(root, filepath.FromSlash(openCodeGrepPath))
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(defaultOpenCodeGrep), 0644)
 }
 
 func verifyOpenCodeGrep(root string) error {

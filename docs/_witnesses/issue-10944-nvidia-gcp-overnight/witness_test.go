@@ -14,7 +14,7 @@ var pinnedFiles = map[string]string{
 	"qwen38_fanout_concurrency_raw.json":    "63a6bf4a50466ad8741826a2496d6a9e7fd7939109873ee71f000d4658f14384",
 	"vllm_fp8_a100_bench_raw.json":          "c6b5178aaaf7df9aa2823e076207a0fa0e44147cc112d8e5af27b06784245b1d",
 	"vllm_bf16_tp2_a100_bench_raw.json":     "d92742184c933b5a74a00240f59038bde5645aba72632fbeeead03e1c65adadd",
-	"gcp_h100_hopper_bench_raw.json":        "490ea3611de9c6fddf1877d2329cd68c5da83e7bbcec9268d84f4191fa59bfb6",
+	"gcp_h100_hopper_bench_raw.json":        "a43c1480e504d6cff8cfd9b718eb7cd10bd3ba9e6294509d3f8b9cf301cc3e18",
 	"gcp_h100_paired_report.json":           "4e7ca8d04c58db5cc168ffe652a9e2ea7ff97f38aced9af08a29c6684e5610ae",
 	"qwen38_a100_bench_v2_raw.json":         "32ae037c91039f7079faa30ab250b2695678328264868cb0f0293c32ef1ab065",
 	"fold-report.json":                      "a722dd98225391d882c67c2ae23189ad95065ed85871af1411a60964e4b85fa6",

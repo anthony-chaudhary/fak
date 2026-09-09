@@ -15,20 +15,20 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **255** (clarity 0 + coverage 255) |
+| **Disambiguation-debt (drive to 0)** | **332** (clarity 0 + coverage 332) |
 | **Crystal-clear concepts (and climbing)** | **1073** crystal of 2794 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2905 / 3160** (91.9% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2907 / 3239** (89.7% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 215 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **84** of 3993 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 94.7/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 93.3/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2794 concepts - score 94.7/100 (grade A) - disambiguation-debt 255
+concept-disambiguation chart - 2794 concepts - score 93.3/100 (grade A) - disambiguation-debt 332
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #################........... 1073
@@ -62,21 +62,21 @@ clarity mix by family (each cell = one concept):
   witness-proof    *******************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (159 concept(s); 79 crystal)
 
 coverage by family (positioned / discovered):
-  session-runtime  #########################... 278/313
-  plan             ##########################.. 416/450
-  witness-proof    ########################.... 164/189
-  context-ctx      #########################... 241/265
-  policy-capability ##########################.. 216/237
-  cache            ###########################. 320/338
-  gateway-engine   ##########################.. 204/222
-  guard-gate       ###########################. 506/524
+  plan             #########################... 416/474
+  session-runtime  ########################.... 278/326
+  context-ctx      #########################... 241/274
+  witness-proof    ########################.... 164/191
+  gateway-engine   #########################... 206/232
+  policy-capability #########################... 216/240
+  cache            ##########################.. 321/343
+  support-maturity ######################...... 70/89
+  guard-gate       ###########################. 507/525
+  render-materialize ##########################.. 212/230
   pool             ####################........ 40/57
-  render-materialize ##########################.. 212/226
-  evict            #######################..... 55/68
-  support-maturity ########################.... 69/80
+  evict            ######################...... 55/69
   loop             ##########################.. 100/107
-  attention        ###########################. 87/91
-  score-debt       ###########################. 112/116
+  attention        ##########################.. 87/92
+  score-debt       ###########################. 112/117
   decision         ############################ 60/61
   layout           ###########################. 20/21
   cross-cluster    ............................ 0/0
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [#############################...] 91.9%  (2905/3160 confusable tokens positioned)
+namespace coverage  [#############################...] 89.7%  (2907/3239 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 215
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **215 / 215** (215 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1892 / 4967 |
+| Boundaries drawn (mutual / total) | 1892 / 4968 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -1212,6 +1212,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | attention | **AttentionNeeded (taskgraph table)** - The taskgraph.Table.AttentionNeeded bool field: true when any Task in the folded shared-task table carries a refusal finding, the one-bit gate a supervisor loop or CI keys on without re-scanning every task row. |
 | o | defined | symbol | attention | **AttentionNeeded (toolproc table)** - The toolproc.Table.AttentionNeeded bool field: true when any finding across the kernel's tool-call process table advises more than plain observe, the one-bit gate a supervisor loop or CI keys on for tool-process health. |
 | o | defined | config | attention | **cudaDsaSparseAttnCosineMin (CUDA GLM-DSA accuracy gate)** - internal/compute's recorded device-vs-cpuref-f32 cosine floor (0.999) for the GLM-MoE-DSA sparse-attention kernel k_dsa_sparse_attend, whose host side already selected the exact keys so the only drift source is f32 reduction order; the value RECORDS the contract threshold an out-of-tree CUDA-node witness checks and does not itself assert a pass. |
+| o | defined | symbol | attention | **newLinearAttnLayerState (zero-state layer allocator)** - The internal/model/qwen35.go constructor allocates independently owned zero recurrent matrices for each value head and empty convolution history for one Gated-DeltaNet layer. The cacheless batched mixer uses it when no persistent layer state is supplied. |
 | o | defined | symbol | attention | **attn_v (value projection)** - The GGUF 'attn_v' value-projection weight (maps hidden state to the per-KV-head value vectors of a self-attention layer), canonicalized to self_attn.v_proj.weight on load. |
 | o | defined | concept | attention | **FlashAttention (IO-aware fused kernel)** - The IO-aware fused attention kernel technique (Dao et al.) that computes exact softmax attention via tiling and online softmax without materializing the full N-by-N score matrix, referenced as the SOTA ladder rung fak's own fused online-softmax kernel targets. |
 | o | defined | symbol | attention | **glmDsaAttentionStep (GLM-DSA decode attention)** - The GLM-MoE-DSA sparse-attention sublayer for one decode position (internal/model/glm_dsa_session.go): runs DSA key selection, sparse QK scoring, and value gathering for a single cached step, distinct from the cacheless prefill path. |
@@ -1219,7 +1220,6 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | attention | **NeedsAttention (watchdog health gate)** - watchdoghealth.Health.NeedsAttention() and Digest.NeedsAttention - the one-bit operations gate (true when any monitor sits at or above the attention floor: DOWN, UNKNOWN, or GAVE_UP) a supervisor loop or CI keys on without re-scanning every monitor row. |
 | o | defined | symbol | attention | **AttentionTriageLine (operations triage readout)** - A one-line readout function (in gardenbundle, watchdoghealth, and releasestatus) that renders the decenter split - which attention-floor monitors wait on a human vs which the fleet can clear - as a single digest line. |
 | o | defined | symbol | attention | **PartitionAttention (watchdog decenter split)** - watchdoghealth.PartitionAttention - splits the digest's attention-floor monitors into two buckets: those whose remedy needs a human (needHuman) and those the fleet can clear on its own (fleetClears), reserving ALERT severity for the genuine human residual. |
-| o | defined | symbol | attention | **newLinearAttnLayerState (Gated-DeltaNet per-layer zero-state allocator)** - The per-layer zero-state allocator for Gated-DeltaNet linear attention (internal/model/qwen35.go): allocates a fresh zero-initialized recurrent state [nV][kHd*vHd] and conv buffer for one linear attention layer. |
 | o | defined | concept | attention | **Attention (softmax token-mixer)** - The default softmax scaled-dot-product self-attention token mixer (the be.Attention HAL op and m.attnSeq body) that mixes tokens via Q·K softmax over V. |
 | o | defined | concept | attention | **self_attn (projection namespace)** - The self-attention sublayer's canonical tensor namespace (self_attn.{q,k,v,o}_proj plus q_norm/k_norm) that holds the projection weights of a softmax-attention block. |
 | o | defined | symbol | attention | **attnOut (attention output buffer)** - The per-head context-vector buffer (nH*hd wide) that attention accumulates per position and then feeds into the o_proj output matmul. |
@@ -3066,7 +3066,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 24 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3075/4967 boundaries drawn one-way only |
+| separation | `mutuality_soft` | 80 | 0 | 3076/4968 boundaries drawn one-way only |
 | well-formed | `well_formed` | 100 | 0 | all 2794 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
@@ -3083,21 +3083,21 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| session-runtime | 278 | 313 | 35 |
-| plan | 416 | 450 | 34 |
-| witness-proof | 164 | 189 | 25 |
-| context-ctx | 241 | 265 | 24 |
-| policy-capability | 216 | 237 | 21 |
-| cache | 320 | 338 | 18 |
-| gateway-engine | 204 | 222 | 18 |
-| guard-gate | 506 | 524 | 18 |
+| plan | 416 | 474 | 58 |
+| session-runtime | 278 | 326 | 48 |
+| context-ctx | 241 | 274 | 33 |
+| witness-proof | 164 | 191 | 27 |
+| gateway-engine | 206 | 232 | 26 |
+| policy-capability | 216 | 240 | 24 |
+| cache | 321 | 343 | 22 |
+| support-maturity | 70 | 89 | 19 |
+| guard-gate | 507 | 525 | 18 |
+| render-materialize | 212 | 230 | 18 |
 | pool | 40 | 57 | 17 |
-| render-materialize | 212 | 226 | 14 |
-| evict | 55 | 68 | 13 |
-| support-maturity | 69 | 80 | 11 |
+| evict | 55 | 69 | 14 |
 | loop | 100 | 107 | 7 |
-| attention | 87 | 91 | 4 |
-| score-debt | 112 | 116 | 4 |
+| attention | 87 | 92 | 5 |
+| score-debt | 112 | 117 | 5 |
 | decision | 60 | 61 | 1 |
 | layout | 20 | 21 | 1 |
 | cross-cluster | 0 | 0 | 0 |

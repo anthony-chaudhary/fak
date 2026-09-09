@@ -33,9 +33,86 @@ const (
 	DefaultRetentionPriority = 35
 )
 
-// retainForever is the TTL sentinel meaning "never expire on a window basis": an entry with
+// RetainForever is the TTL sentinel meaning "never expire on a window basis": an entry with
 // this TTL is past its window at no finite clock value, so only priority governs its reclaim.
-const retainForever int64 = 0
+const RetainForever int64 = 0
+const retainForever = RetainForever
+
+// PriorityTier represents the tree-aware cache eviction priority tier:
+//   - Tier 0: Pinned root / coordinator prompt (immune from eviction, seg = 3)
+//   - Tier 1: Active subagents (seg = 2)
+//   - Tier 2: Idle subagents (seg = 1)
+//   - Tier 3: Probationary tool outputs (seg = 0, evicted first)
+type PriorityTier int
+
+const (
+	Tier0PinnedRoot     PriorityTier = 0
+	Tier1ActiveSubagent PriorityTier = 1
+	Tier2IdleSubagent   PriorityTier = 2
+	Tier3Probationary   PriorityTier = 3
+)
+
+// Seg returns the victimKey.seg protection segment for this tier.
+// Lower seg evicts first (Tier 3 -> seg 0; Tier 2 -> seg 1; Tier 1 -> seg 2; Tier 0 -> seg 3).
+func (p PriorityTier) Seg() int {
+	switch p {
+	case Tier0PinnedRoot:
+		return 3
+	case Tier1ActiveSubagent:
+		return 2
+	case Tier2IdleSubagent:
+		return 1
+	case Tier3Probationary:
+		return 0
+	default:
+		return 0
+	}
+}
+
+func (p PriorityTier) String() string {
+	switch p {
+	case Tier0PinnedRoot:
+		return "tier0-pinned-root"
+	case Tier1ActiveSubagent:
+		return "tier1-active-subagent"
+	case Tier2IdleSubagent:
+		return "tier2-idle-subagent"
+	case Tier3Probationary:
+		return "tier3-probationary"
+	default:
+		return "tier-unknown"
+	}
+}
+
+// TierFromRetentionPriority maps a 0..100 client-declared retention priority to a PriorityTier.
+func TierFromRetentionPriority(p int) PriorityTier {
+	if p >= 90 {
+		return Tier0PinnedRoot
+	}
+	if p >= 60 {
+		return Tier1ActiveSubagent
+	}
+	if p >= 30 {
+		return Tier2IdleSubagent
+	}
+	return Tier3Probationary
+}
+
+// RetentionRequestForTier returns a RetentionRequest for the given tier anchored at clock.
+func RetentionRequestForTier(tier PriorityTier, clock int64) RetentionRequest {
+	switch tier {
+	case Tier0PinnedRoot:
+		return RetentionRequest{Priority: MaxRetentionPriority, TTL: RetainForever, Admitted: clock}
+	case Tier1ActiveSubagent:
+		return RetentionRequest{Priority: 75, TTL: RetainForever, Admitted: clock}
+	case Tier2IdleSubagent:
+		return RetentionRequest{Priority: DefaultRetentionPriority, TTL: RetainForever, Admitted: clock}
+	case Tier3Probationary:
+		return RetentionRequest{Priority: MinRetentionPriority, TTL: RetainForever, Admitted: clock}
+	default:
+		return RetentionRequest{Priority: DefaultRetentionPriority, TTL: RetainForever, Admitted: clock}
+	}
+}
 
 // RetentionRequest is a client-declared per-request KV retention descriptor: a (priority,
 // TTL-window) pair over LOGICAL time. Priority ranks the entry against other live entries for

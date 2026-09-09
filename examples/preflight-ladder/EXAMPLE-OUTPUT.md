@@ -1,7 +1,7 @@
 # Example output
 
 A captured run of the five `fak preflight` witnesses in `run.sh` (fak `0.34.0`, default
-built-in capability floor — the tau2 airline-demo tools). No model, no network, no GPU; the
+built-in capability floor — production-grade capability floor). No model, no network, no GPU; the
 verdicts are the kernel's, and every line reproduces with the one command shown above it.
 Reproduce the whole walk: `./examples/preflight-ladder/run.sh` (add `--explain` for the
 per-rung trace).
@@ -85,7 +85,7 @@ decision chain (9 rung(s), most-restrictive wins):
 
 ## Rung 1 — proven in the unit tests, not in the standalone witness
 
-The standalone `fak preflight` default floor installs no per-tool schema (the airline-demo
+The standalone `fak preflight` default floor installs no per-tool schema (the demo
 schemas are registered by the agent loop's `agent.Configure()`, which the witness verb does
 not run), so rung 1 **defers** in the run above rather than producing a live DENY. The rung
 is real and its catch is proven directly:

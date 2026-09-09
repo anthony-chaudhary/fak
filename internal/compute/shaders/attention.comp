@@ -105,7 +105,7 @@ void main() {
 
             // Online softmax recurrence.
             float m_new = max(m, score);
-            float corr = exp(m - m_new);
+            float corr = (l > 0.0) ? exp(m - m_new) : 0.0;
             float p = exp(score - m_new);
             l = l * corr + p;
 

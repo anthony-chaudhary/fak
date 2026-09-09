@@ -30,6 +30,12 @@ func runMacBench(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) > 0 && (argv[0] == "validate-mtp-comparison" || argv[0] == "validate-mtp") {
 		return runMacBenchValidateMTPComparison(stdout, stderr, argv[1:])
 	}
+	if len(argv) > 0 && argv[0] == "validate-agentic-mtp" {
+		return runMacBenchValidateAgenticMTP(stdout, stderr, argv[1:])
+	}
+	if len(argv) > 0 && argv[0] == "run-agentic-mtp" {
+		return runMacBenchRunAgenticMTP(stdout, stderr, argv[1:])
+	}
 	if len(argv) > 0 && argv[0] == "watch-status" {
 		return runMacBenchWatchStatus(stdout, stderr, argv[1:])
 	}
@@ -253,11 +259,7 @@ func runMacBenchValidateMTPComparison(stdout, stderr io.Writer, argv []string) i
 		fmt.Fprintf(stderr, "fak macbench validate-mtp-comparison: decode packet: %v\n", err)
 		return 1
 	}
-	if err := macbench.ValidateMTPComparisonPacket(packet); err != nil {
-		fmt.Fprintf(stderr, "fak macbench validate-mtp-comparison: %v\n", err)
-		return 1
-	}
-	if err := macbench.VerifyMTPComparisonEvidenceFiles(packet, *input); err != nil {
+	if err := macbench.ValidateMTPComparisonEvidence(packet, *input); err != nil {
 		fmt.Fprintf(stderr, "fak macbench validate-mtp-comparison: %v\n", err)
 		return 1
 	}
@@ -288,6 +290,162 @@ func runMacBenchValidateMTPComparison(stdout, stderr io.Writer, argv []string) i
 			result.PacketSHA256, result.FakNativeDecodeTokS, result.AcceptanceRate,
 			result.VsLlamaSpeedupRatio, result.VsAxEngineRatio, result.VsMTPLXRatio)
 	}
+	return 0
+}
+
+func runMacBenchValidateAgenticMTP(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("macbench validate-agentic-mtp", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	input := fs.String("input", "", "agentic MTP packet JSON")
+	asJSON := fs.Bool("json", false, "emit machine-readable validation result")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if strings.TrimSpace(*input) == "" {
+		fmt.Fprintln(stderr, "fak macbench validate-agentic-mtp: --input is required")
+		return 2
+	}
+	raw, err := os.ReadFile(*input)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak macbench validate-agentic-mtp: read --input: %v\n", err)
+		return 1
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var packet macbench.AgenticMTPPacket
+	if err := dec.Decode(&packet); err != nil {
+		fmt.Fprintf(stderr, "fak macbench validate-agentic-mtp: decode packet: %v\n", err)
+		return 1
+	}
+	var trailing json.RawMessage
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			err = fmt.Errorf("multiple JSON values")
+		}
+		fmt.Fprintf(stderr, "fak macbench validate-agentic-mtp: decode packet: %v\n", err)
+		return 1
+	}
+	if err := macbench.ValidateAgenticMTPEvidence(packet, *input); err != nil {
+		fmt.Fprintf(stderr, "fak macbench validate-agentic-mtp: %v\n", err)
+		return 1
+	}
+	digest := fmt.Sprintf("%x", sha256.Sum256(raw))
+	result := struct {
+		Schema              string  `json:"schema"`
+		Valid               bool    `json:"valid"`
+		PacketSHA256        string  `json:"packet_sha256"`
+		Concurrency         int     `json:"concurrency"`
+		DraftDepth          int     `json:"draft_depth"`
+		AggregateDecodeTokS float64 `json:"aggregate_decode_tok_s"`
+		PerAgentDecodeTokS  float64 `json:"per_agent_decode_tok_s"`
+		AcceptanceRate      float64 `json:"acceptance_rate"`
+		P50ITLMS            float64 `json:"p50_itl_ms"`
+		P95ITLMS            float64 `json:"p95_itl_ms"`
+		PeakMemoryGB        float64 `json:"peak_memory_gb"`
+		ZeroFallback        bool    `json:"zero_fallback"`
+		Verified            bool    `json:"verified"`
+	}{
+		Schema:              macbench.AgenticMTPValidationSchema,
+		Valid:               true,
+		PacketSHA256:        digest,
+		Concurrency:         packet.Summary.Concurrency,
+		DraftDepth:          packet.Summary.DraftDepth,
+		AggregateDecodeTokS: packet.Summary.AggregateDecodeTokS,
+		PerAgentDecodeTokS:  packet.Summary.PerAgentDecodeTokS,
+		AcceptanceRate:      packet.Summary.AcceptanceRate,
+		P50ITLMS:            packet.Summary.P50ITLMS,
+		P95ITLMS:            packet.Summary.P95ITLMS,
+		PeakMemoryGB:        packet.Summary.PeakMemoryGB,
+		ZeroFallback:        packet.Summary.ZeroFallback,
+		Verified:            packet.Summary.Verified,
+	}
+	if *asJSON {
+		_ = writeIndentedJSONNoEscape(stdout, result)
+	} else {
+		fmt.Fprintf(stdout, "VALID packet_sha256=%s aggregate_decode=%.2f tok/s per_agent=%.2f tok/s acceptance=%.3f concurrency=%d depth=%d\n",
+			result.PacketSHA256, result.AggregateDecodeTokS, result.PerAgentDecodeTokS, result.AcceptanceRate, result.Concurrency, result.DraftDepth)
+	}
+	return 0
+}
+
+func runMacBenchRunAgenticMTP(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("macbench run-agentic-mtp", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	concurrency := fs.Int("concurrency", macbench.DefaultAgenticMTPConcurrency, "number of concurrent co-batched agents (X=24)")
+	draftDepth := fs.Int("draft-depth", macbench.DefaultAgenticMTPDraftDepth, "speculative MTP draft depth (3 or 4)")
+	horizon := fs.Int("horizon", 20, "number of interaction turns per agent")
+	sharedPrefix := fs.Int("shared-prefix-tokens", 4096, "shared prefix tokens in preamble")
+	turnDelta := fs.Int("turn-delta-tokens", 128, "input tokens per turn")
+	turnOutput := fs.Int("turn-output-tokens", 64, "output tokens per turn")
+	outDir := fs.String("out-dir", "", "output directory for packet and evidence files")
+	dryRun := fs.Bool("dry-run", false, "dry run without generating full evidence files")
+	asJSON := fs.Bool("json", false, "emit machine-readable JSON output")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if *concurrency != macbench.DefaultAgenticMTPConcurrency {
+		fmt.Fprintf(stderr, "fak macbench run-agentic-mtp: --concurrency must be %d, got %d\n", macbench.DefaultAgenticMTPConcurrency, *concurrency)
+		return 2
+	}
+	if *draftDepth < macbench.MinAgenticMTPDraftDepth || *draftDepth > macbench.MaxAgenticMTPDraftDepth {
+		fmt.Fprintf(stderr, "fak macbench run-agentic-mtp: --draft-depth must be between %d and %d, got %d\n",
+			macbench.MinAgenticMTPDraftDepth, macbench.MaxAgenticMTPDraftDepth, *draftDepth)
+		return 2
+	}
+	if *dryRun {
+		plan := struct {
+			Action      string `json:"action"`
+			Concurrency int    `json:"concurrency"`
+			DraftDepth  int    `json:"draft_depth"`
+			Horizon     int    `json:"horizon"`
+			Status      string `json:"status"`
+		}{
+			Action:      "run-agentic-mtp",
+			Concurrency: *concurrency,
+			DraftDepth:  *draftDepth,
+			Horizon:     *horizon,
+			Status:      "DRY_RUN_PLAN_VALID",
+		}
+		if *asJSON {
+			_ = writeIndentedJSONNoEscape(stdout, plan)
+		} else {
+			fmt.Fprintf(stdout, "DRY_RUN_PLAN_VALID concurrency=%d draft_depth=%d horizon=%d\n", *concurrency, *draftDepth, *horizon)
+		}
+		return 0
+	}
+
+	opts := macbench.AgenticMTPOptions{
+		Concurrency:        *concurrency,
+		DraftDepth:         *draftDepth,
+		Horizon:            *horizon,
+		SharedPrefixTokens: *sharedPrefix,
+		TurnDeltaTokens:    *turnDelta,
+		TurnOutputTokens:   *turnOutput,
+		OutDir:             *outDir,
+		Timeout:            15 * time.Minute,
+		Now:                time.Now,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
+	defer cancel()
+
+	packet, raw, quality, err := macbench.RunAgenticMTP(ctx, opts)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak macbench run-agentic-mtp: %v\n", err)
+		return 1
+	}
+
+	if *asJSON {
+		_ = writeIndentedJSONNoEscape(stdout, packet)
+	} else {
+		fmt.Fprintf(stdout, "COMPLETED campaign=%s concurrency=%d draft_depth=%d aggregate_decode=%.2f tok/s acceptance=%.3f\n",
+			packet.CampaignID, packet.Summary.Concurrency, packet.Summary.DraftDepth, packet.Summary.AggregateDecodeTokS, packet.Summary.AcceptanceRate)
+		if *outDir != "" {
+			fmt.Fprintf(stdout, "Artifacts written to %s (packet.json, %s, %s, manifest.json)\n",
+				*outDir, packet.RawResult.Path, packet.Quality.ResultPath)
+		}
+	}
+	_ = raw
+	_ = quality
 	return 0
 }
 

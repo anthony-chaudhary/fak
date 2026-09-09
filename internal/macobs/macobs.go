@@ -2,6 +2,7 @@ package macobs
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"time"
@@ -94,10 +95,24 @@ func (c *Collector) Observe(ctx context.Context) (Snapshot, error) {
 	// 3. Compute headroom under hardware limits
 	head := ComputeHeadroom(hw, c.headroomConfig)
 
-	// 4. Diagnose bottlenecks and synthesize action verdict
-	diag := Diagnose(hw, srv, head, c.requestedAgents)
+	// 4. Evaluate admission and memory governor state
+	gov := NewMemoryGovernor(hw, c.headroomConfig)
+	if c.requestedAgents > 0 {
+		for i := 1; i <= c.requestedAgents; i++ {
+			gov.Admit(AgentSpec{
+				ID:             fmt.Sprintf("agent-%d", i),
+				SharedPreamble: true,
+				PreambleTokens: c.headroomConfig.SharedPrefixTokens,
+				TailTokens:     c.headroomConfig.PrivateTailTokens,
+			})
+		}
+	}
+	govTelem := gov.Telemetry()
 
-	// 5. Determine data provenance honestly
+	// 5. Diagnose bottlenecks and synthesize action verdict
+	diag := Diagnose(hw, srv, head, c.requestedAgents, govTelem)
+
+	// 6. Determine data provenance honestly
 	provenance := ProvenanceUnavailable
 	if hw.Available {
 		provenance = ProvenanceWitnessed
@@ -113,6 +128,7 @@ func (c *Collector) Observe(ctx context.Context) (Snapshot, error) {
 		MLXServing:  srv,
 		Headroom:    head,
 		PrefixCache: prefix,
+		Governor:    govTelem,
 		Analysis:    diag,
 	}, nil
 }

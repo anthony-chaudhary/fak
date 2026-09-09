@@ -15,6 +15,7 @@ const (
 	Qwen38MTPFormatQ8   Qwen38MTPTensorFormat = "Q8_0"
 	Qwen38MTPFormatQ4K  Qwen38MTPTensorFormat = "Q4_K"
 	Qwen38MTPFormatQ6K  Qwen38MTPTensorFormat = "Q6_K"
+	Qwen38MTPFormatQ2K  Qwen38MTPTensorFormat = "Q2_K"
 	Qwen38MTPFormatNone Qwen38MTPTensorFormat = ""
 )
 
@@ -59,6 +60,19 @@ var qwen38MTPQ4KMArtifactMatrixTypes = map[string]Qwen38MTPTensorFormat{
 	"mtp.layers.0.self_attn.o_proj.weight": Qwen38MTPFormatQ4K,
 	"mtp.layers.0.mlp.gate_proj.weight":    Qwen38MTPFormatQ4K,
 	"mtp.layers.0.mlp.up_proj.weight":      Qwen38MTPFormatQ4K,
+	"mtp.layers.0.mlp.down_proj.weight":    Qwen38MTPFormatQ6K,
+}
+
+// qwen38MTPUDQ2KXLArtifactMatrixTypes is the canonicalized tensor inventory of
+// unsloth/Qwen3.8-27B-GGUF's UD-Q2_K_XL artifact.
+var qwen38MTPUDQ2KXLArtifactMatrixTypes = map[string]Qwen38MTPTensorFormat{
+	"mtp.fc.weight":                        Qwen38MTPFormatQ6K,
+	"mtp.layers.0.self_attn.q_proj.weight": Qwen38MTPFormatQ6K,
+	"mtp.layers.0.self_attn.k_proj.weight": Qwen38MTPFormatQ8,
+	"mtp.layers.0.self_attn.v_proj.weight": Qwen38MTPFormatQ8,
+	"mtp.layers.0.self_attn.o_proj.weight": Qwen38MTPFormatQ6K,
+	"mtp.layers.0.mlp.gate_proj.weight":    Qwen38MTPFormatQ6K,
+	"mtp.layers.0.mlp.up_proj.weight":      Qwen38MTPFormatQ6K,
 	"mtp.layers.0.mlp.down_proj.weight":    Qwen38MTPFormatQ6K,
 }
 
@@ -136,15 +150,23 @@ func (m *Model) qwen38MTPTensorLayout() (Qwen38MTPTensorLayout, bool, error) {
 			break
 		}
 	}
+	exactUDQ2KXL := true
+	for name, want := range qwen38MTPUDQ2KXLArtifactMatrixTypes {
+		got := matrixTypes[name]
+		if got != want && !(got == Qwen38MTPFormatQ2K && strings.Contains(name, ".mlp.")) {
+			exactUDQ2KXL = false
+			break
+		}
+	}
 	compatibility := uniform && (uniformFormat == Qwen38MTPFormatF32 || uniformFormat == Qwen38MTPFormatBF16)
-	if !compatibility && !exactQ4KM {
+	if !compatibility && !exactQ4KM && !exactUDQ2KXL {
 		for _, name := range qwen38MTPMatrixTensors {
 			want := qwen38MTPQ4KMArtifactMatrixTypes[name]
 			if matrixTypes[name] != want {
 				return layout, true, &Qwen35MTPForwardError{
 					Stage:  "weight precision",
 					Tensor: name,
-					Want:   string(want) + " (exact Qwen3.8-27B-Q4_K_M inventory)",
+					Want:   string(want) + " (exact Qwen3.8-27B-Q4_K_M or UD-Q2_K_XL inventory)",
 					Got:    string(matrixTypes[name]),
 				}
 			}
@@ -174,18 +196,26 @@ func (m *Model) qwen38MTPTensorLayout() (Qwen38MTPTensorLayout, bool, error) {
 		layout.TensorTypes[name] = strings.ToUpper(meta.Dtype)
 	}
 
-	if exactQ4KM {
+	if exactQ4KM || exactUDQ2KXL {
 		headName := "lm_head.weight" // canonical form of the artifact's output.weight
 		headFormat, err := m.qwen38MTPMatrixFormat(headName, []int{m.Cfg.VocabSize, m.Cfg.HiddenSize})
 		if err != nil {
 			return layout, true, err
 		}
 		layout.TensorTypes[headName] = string(headFormat)
-		if headFormat != Qwen38MTPFormatQ6K {
+		if exactQ4KM && headFormat != Qwen38MTPFormatQ6K {
 			return layout, true, &Qwen35MTPForwardError{
 				Stage:  "weight precision",
 				Tensor: headName,
 				Want:   "Q6_K (canonical output.weight in exact Qwen3.8-27B-Q4_K_M inventory)",
+				Got:    string(headFormat),
+			}
+		}
+		if exactUDQ2KXL && headFormat != Qwen38MTPFormatQ4K && headFormat != Qwen38MTPFormatQ6K && headFormat != Qwen38MTPFormatQ2K {
+			return layout, true, &Qwen35MTPForwardError{
+				Stage:  "weight precision",
+				Tensor: headName,
+				Want:   "Q4_K, Q6_K, or Q2_K (canonical output.weight in exact Qwen3.8-27B-UD-Q2_K_XL inventory)",
 				Got:    string(headFormat),
 			}
 		}
@@ -297,8 +327,24 @@ func (m *Model) qwen38MTPMatrixFormat(name string, wantShape []int) (Qwen38MTPTe
 		}
 		return Qwen38MTPFormatQ8, nil
 	default:
+		if kq.kind == kindQ2K {
+			wantNblk := wantShape[1] / kindQ2K.blockWeights()
+			if wantShape[1]%kindQ2K.blockWeights() != 0 || kq.out != wantShape[0] || kq.in != wantShape[1] || kq.nblk != wantNblk {
+				return Qwen38MTPFormatNone, &Qwen35MTPForwardError{Stage: "weight shape", Tensor: name, Want: fmt.Sprint(wantShape), Got: fmt.Sprintf("[%d %d]", kq.out, kq.in)}
+			}
+			wantBytes := kq.out * kq.nblk * kindQ2K.blockBytes()
+			if len(kq.raw) != wantBytes {
+				return Qwen38MTPFormatNone, &Qwen35MTPForwardError{
+					Stage:  "weight storage",
+					Tensor: name,
+					Want:   fmt.Sprintf("%d resident Q2_K bytes", wantBytes),
+					Got:    fmt.Sprintf("resident=%d", len(kq.raw)),
+				}
+			}
+			return Qwen38MTPFormatQ2K, nil
+		}
 		if kq.kind != kindQ6K {
-			return Qwen38MTPFormatNone, &Qwen35MTPForwardError{Stage: "weight dtype", Tensor: name, Want: "F32, BF16, Q8_0, Q4_K, or Q6_K", Got: kq.kind.String()}
+			return Qwen38MTPFormatNone, &Qwen35MTPForwardError{Stage: "weight dtype", Tensor: name, Want: "F32, BF16, Q8_0, Q4_K, Q6_K, or Q2_K", Got: kq.kind.String()}
 		}
 		wantNblk := wantShape[1] / kindQ6K.blockWeights()
 		if wantShape[1]%kindQ6K.blockWeights() != 0 || kq.out != wantShape[0] || kq.in != wantShape[1] || kq.nblk != wantNblk {

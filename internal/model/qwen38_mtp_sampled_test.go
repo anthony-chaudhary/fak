@@ -6,6 +6,51 @@ import (
 	"testing"
 )
 
+func TestQwen38MTPSampledAcceptanceEndpoints(t *testing.T) {
+	// Invert PCG's xor-shift so its next uint32 is all ones (rotation preserves it).
+	const shifted = uint64(0xffffffff) << 27
+	const maxState = shifted ^ (shifted >> 18) ^ (shifted >> 36) ^ (shifted >> 54)
+	for _, tc := range []struct {
+		name       string
+		state      uint64
+		wantUint32 uint32
+		pTarget    []float32
+		wantAlpha  float32
+		wantAccept bool
+	}{
+		{"zero_rejects", 0, 0, []float32{0, 1}, 0, false},
+		{"maximum_accepts", maxState, 0xffffffff, []float32{1, 0}, 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v, err := NewQwen38SampledSpeculativeVerifier(Qwen38SamplerConfig{Temperature: 1, TopP: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkpoint := Qwen38RNGState{State: tc.state, Inc: 1}
+			v.RollbackRNG(checkpoint)
+			if got := v.PRNG().NextUint32(); got != tc.wantUint32 {
+				t.Fatalf("endpoint fixture generated %#x, want %#x", got, tc.wantUint32)
+			}
+			v.RollbackRNG(checkpoint)
+			u := v.PRNG().NextFloat32()
+			if !(0 <= u && u < 1) {
+				t.Errorf("uniform sample = %g, want [0,1)", u)
+			}
+			if tc.wantUint32 == 0 && u != 0 {
+				t.Errorf("zero endpoint sample = %g, want 0", u)
+			}
+			v.RollbackRNG(checkpoint)
+			got := v.VerifyToken(0, tc.pTarget, []float32{1, 0}, -1)
+			if got.UniformSample != u || got.Alpha != tc.wantAlpha || got.Accepted != tc.wantAccept {
+				t.Errorf("verification = %+v, want u=%g alpha=%g accepted=%t", got, u, tc.wantAlpha, tc.wantAccept)
+			}
+			if !tc.wantAccept && (got.ReplacementToken != 1 || len(got.ResidualDist) != 2 || got.ResidualDist[0] != 0 || got.ResidualDist[1] != 1) {
+				t.Errorf("rejection = %+v, want replacement 1 from residual [0,1]", got)
+			}
+		})
+	}
+}
+
 func makeTestDist(seed int64, n int) []float32 {
 	rng := NewQwen38PRNG(uint64(seed), 1)
 	dist := make([]float32, n)

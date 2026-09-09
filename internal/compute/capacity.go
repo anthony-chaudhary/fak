@@ -536,6 +536,12 @@ func HostSystemMemoryInfo() (total, free int64, known bool) {
 	return hostSystemMemory()
 }
 
+// HostSystemMemory reports process-host physical memory without requiring a backend.
+// It is an alias for HostSystemMemoryInfo.
+func HostSystemMemory() (total, free int64, known bool) {
+	return hostSystemMemory()
+}
+
 // DiskInfo reports filesystem total/free bytes for path without requiring a backend.
 // It is for disk-tier cache placement against real free space; unsupported platforms or
 // inaccessible paths return known=false, preserving the fail-open capacity contract.

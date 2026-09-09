@@ -2392,7 +2392,7 @@ The **not to be confused with** column is the union of the boundaries the concep
 |  | `NewKVCache (dense allocator) <br><small>newkvcache</small>` | **NewKVCache (dense allocator)** | cache / symbol | kv-cache, linearAttnCache (Qwen3.5 recurrent) |
 |  | `newLiftGuard (stream lift guard) <br><small>newliftguard</small>` | **newLiftGuard (stream lift guard)** | guard-gate / symbol | gate, guardrail |
 |  | `newlinearattncache` | **linearAttnCache (Qwen3.5 recurrent)** | cache / symbol | NewKVCache (dense allocator), kv-cache, linear-attn-cache |
-|  | `newLinearAttnLayerState <br><small>newLinearAttnLayerState (Gated-DeltaNet per-layer zero-state allocator), newlinearattnlayerstate</small>` | **newLinearAttnLayerState (Gated-DeltaNet per-layer zero-state allocator)** | attention / symbol | x-attention-linearattnseq, x-attention-linearattnstep |
+|  | `newLinearAttnLayerState <br><small>newLinearAttnLayerState (zero-state layer allocator), newlinearattnlayerstate</small>` | **newLinearAttnLayerState (zero-state layer allocator)** | attention / symbol | x-attention-linearattnseq, x-attention-linearattnstep, x-cache-newlinearattncache |
 |  | `newLoopDriveRegionHold <br><small>newLoopDriveRegionHold (loop-drive region lease acquire), newloopdriveregionhold</small>` | **newLoopDriveRegionHold (loop-drive region lease acquire)** | loop / symbol | loop-loopdriveoptions |
 |  | `newmanagedcontext` | **context-ctx implementation surface for newmanagedcontext** | context-ctx / symbol | x2-context-ctx-commandcontext |
 |  | `newmockplanner` | **MockPlanner (offline)** | plan / symbol | HTTPPlanner (agent client) |

@@ -346,7 +346,7 @@ concurrent = [
   "grafanapost", "growthgate", "guard", "guardaccuracy", "guardaudit", "guardcorpus",
   "guardrotate", "guardroute", "guardrsi", "guardsessions", "guardtrace", "guardvars",
   "guideddecode", "harnessres", "headlesslint", "heavinessscore", "hooks", "horizonrecovery",
-  "hostfault", "hostplacement", "hostresurrect", "hwgatelint", "ideascout", "idempotency",
+  "hostfault", "hostplacement", "hostresurrect", "hil", "benchpromotion", "landingvoucher", "mtpbench", "rawdecode", "telemetry", "hwgatelint", "ideascout", "idempotency",
   "incidentrsi",
   "intlist", "issuecatalog", "issuecohort", "issuecontractrepair", "issuecost",
   "issuededup", "issuehygiene", "issuesmallness", "issuesolved", "issuestriage", "jsonlledger", "kimik3page",
@@ -1145,6 +1145,12 @@ horizonrecovery = ["internal/horizonrecovery/**"]
 hostfault = ["internal/hostfault/**"]
 hostplacement = ["internal/hostplacement/**"]
 hostresurrect = ["internal/hostresurrect/**"]
+hil = ["internal/hil/**"]
+benchpromotion = ["internal/benchpromotion/**"]
+landingvoucher = ["internal/landingvoucher/**"]
+mtpbench = ["internal/mtpbench/**"]
+rawdecode = ["internal/rawdecode/**"]
+telemetry = ["internal/telemetry/**"]
 hwgatelint = ["internal/hwgatelint/**"]
 ideascout = ["internal/ideascout/**"]
 idempotency = ["internal/idempotency/**"]
@@ -1977,6 +1983,16 @@ refusal  = true
 summary  = "A commit modified a security-critical, protocol, or runtime boundary without a witnessed end-to-end run. Mocks hide integration bugs; the real path must be exercised before landing."
 fix      = "Drive the real path (via the /verify skill, integration test, or dogfood probe) and stage the output receipt or an `E2E-verified:` / `Shift-left-verified:` trailer in the commit. Floor: `internal/hooks/gate_e2eovermocks.go` (advisory by default; FLEET_E2E_GUARD=block enforces, ALLOW_NO_E2E=1 skips once)."
 see_also = ["internal/hooks/gate_e2eovermocks.go", "internal/hooks/gate_cartbeforehorse.go", "docs/shift-left-task-organization.md", "docs/spine-first-defaults.md"]
+
+# CLEAR_INVENTORY_REQUIRED (#12400): refusal when a commit or task introduces
+# uninventoried stubs or mock substitutions instead of clear inventory gating concepts
+# and real shift-left execution witnesses. Hermes' rule: "mocks hide integration bugs".
+[reasons.CLEAR_INVENTORY_REQUIRED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A commit introduced uninventoried stubs or mock substitutions instead of clear inventory gating concepts and real shift-left execution witnesses. Hermes' rule: mocks hide integration bugs."
+fix      = "Default to clear inventory gating concepts: register the concept in the disambiguation inventory (tools/concept_disambiguation_scorecard.data) or maturity ledger (internal/maturity/runtime-proofs.json), drive the real path with `fak validate --smoke` or `make smoke-exec`, and attach an `E2E-verified:` or `Shift-left-verified:` receipt. Floor: `internal/hooks/gate_inventory_admission.go` (advisory by default; FLEET_INVENTORY_GUARD=block enforces, ALLOW_UNINVENTORIED_STUB=1 skips once)."
+see_also = ["internal/hooks/gate_inventory_admission.go", "internal/hooks/gate_e2eovermocks.go", "docs/shift-left-task-organization.md", "internal/debtlane/detectors.go"]
 
 # SHIFT_LEFT_UNPROVEN (#10819, #10820): refusal when code is claimed done without meaningful
 # shift-left execution in dogfood, integration, or sub-testing. Prohibits shallow mock-only

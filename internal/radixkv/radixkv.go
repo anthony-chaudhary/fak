@@ -48,6 +48,7 @@ package radixkv
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sync/atomic"
 	"time"
@@ -97,6 +98,11 @@ type node struct {
 	hits      int    // subsequent demand lookups that found this node resident
 	chunkID   int    // physical backing page / allocation chunk identifier (0 = unassigned)
 	regimeKey string // decode regime identifier under which this node's KV was produced
+
+	pinned    bool              // Tier 0 coordinator prompt: immune from eviction (seg = 3)
+	retention *RetentionRequest // client-declared per-request KV retention descriptor
+	tier      PriorityTier      // explicit priority tier (Tier0PinnedRoot .. Tier3Probationary)
+	tierSet   bool              // true if tier was explicitly assigned
 
 	state     uint32        // lifecycle state (warm, computing prefill, failed, evicted); accessed atomically
 	ready     chan struct{} // completion broadcast for in-flight prefill promises
@@ -201,6 +207,7 @@ const (
 	EvictionLRU EvictionPolicy = iota
 	EvictionCostAware
 	EvictionPageAware
+	EvictionPriority
 )
 
 func (p EvictionPolicy) String() string {
@@ -209,6 +216,8 @@ func (p EvictionPolicy) String() string {
 		return "cost-aware"
 	case EvictionPageAware:
 		return "page-aware"
+	case EvictionPriority:
+		return "priority"
 	default:
 		return "lru"
 	}
@@ -564,6 +573,13 @@ func (t *Tree) split(parent, child *node, oi int) *node {
 		hits:      child.hits,
 		chunkID:   child.chunkID,
 		regimeKey: child.regimeKey,
+		pinned:    child.pinned,
+		tier:      child.tier,
+		tierSet:   child.tierSet,
+	}
+	if child.retention != nil {
+		retCopy := *child.retention
+		mid.retention = &retCopy
 	}
 	if child.kv != nil && child.kv.CanEvict() == nil &&
 		t.cpuCacheCanClone(child.kv) {
@@ -649,6 +665,31 @@ func (t *Tree) LookupNS(ns string, tokens []int) (*node, int) {
 // itself protected from the eviction its own Insert may trigger.
 func (t *Tree) Insert(boundary *node, suffix []int, kv *model.KVCache) *node {
 	return t.InsertWithLogits(boundary, suffix, kv, nil)
+}
+
+// InsertWithTier attaches suffix to boundary, assigns priority tier to the new leaf,
+// and enforces the budget.
+func (t *Tree) InsertWithTier(boundary *node, suffix []int, kv *model.KVCache, tier PriorityTier) *node {
+	leaf := t.Insert(boundary, suffix, kv)
+	if leaf != nil {
+		t.SetNodeTier(leaf, tier)
+	}
+	return leaf
+}
+
+// InsertWithRetention attaches suffix to boundary, assigns client-declared retention descriptor
+// to the new leaf, and enforces the budget.
+func (t *Tree) InsertWithRetention(boundary *node, suffix []int, kv *model.KVCache, req RetentionRequest) (*node, error) {
+	if err := req.Validate(); err != nil {
+		return nil, err
+	}
+	leaf := t.Insert(boundary, suffix, kv)
+	if leaf != nil {
+		if err := t.SetNodeRetention(leaf, req); err != nil {
+			return leaf, err
+		}
+	}
+	return leaf, nil
 }
 
 // LookupSnapshot is Lookup plus a deep clone/restore of the longest complete
@@ -1051,7 +1092,19 @@ func (t *Tree) selectVictimLeaf(record bool) *node {
 				locked++
 				continue
 			}
+			// Tier 0 (pinned root, immune from eviction: seg = 3)
+			if t.isNodePinnedOrImmune(n) {
+				locked++
+				continue
+			}
 			k := strat.Priority(n)
+			if seg, ok := t.nodeTierSeg(n); ok {
+				k.seg = seg
+			}
+			if k.seg >= 3 {
+				locked++
+				continue
+			}
 			if best == nil || k.less(bestKey) {
 				best, bestKey = n, k
 			}
@@ -1065,6 +1118,212 @@ func (t *Tree) selectVictimLeaf(record bool) *node {
 		t.recordEvictChoice(strat.Name(), candidates, locked, best)
 	}
 	return best
+}
+
+// isNodePinnedOrImmune reports whether node n is pinned as a Tier 0 coordinator prompt
+// and therefore immune from eviction (seg = 3).
+func (t *Tree) isNodePinnedOrImmune(n *node) bool {
+	if n == nil {
+		return false
+	}
+	if n.pinned {
+		return true
+	}
+	if n.tierSet && n.tier == Tier0PinnedRoot {
+		return true
+	}
+	if n.retention != nil {
+		if !n.retention.Expired(int64(t.clock)) && n.retention.Priority >= 90 {
+			return true
+		}
+	}
+	return false
+}
+
+// nodeTierSeg returns the effective eviction segment (0..3) based on explicit retention or tier.
+// Returns ok=true if an explicit retention, tier, or pin was set on n.
+func (t *Tree) nodeTierSeg(n *node) (int, bool) {
+	if n == nil {
+		return 0, false
+	}
+	if t.isNodePinnedOrImmune(n) {
+		return Tier0PinnedRoot.Seg(), true
+	}
+	if n.retention != nil {
+		if n.retention.Expired(int64(t.clock)) {
+			return Tier3Probationary.Seg(), true
+		}
+		return TierFromRetentionPriority(n.retention.Priority).Seg(), true
+	}
+	if n.tierSet {
+		return n.tier.Seg(), true
+	}
+	return 0, false
+}
+
+// PinPrefix pins the prefix matching tokens (creating it if absent) as a Tier 0 coordinator
+// prompt, making it immune from eviction (seg = 3) even when subagent branches collapse.
+// It returns the pinned boundary node.
+func (t *Tree) PinPrefix(tokens []int) *node {
+	return t.PinPrefixNS("", tokens)
+}
+
+// PinPrefixNS pins the prefix matching tokens under namespace ns as a Tier 0 coordinator prompt.
+func (t *Tree) PinPrefixNS(ns string, tokens []int) *node {
+	if len(tokens) == 0 {
+		return t.rootFor(ns)
+	}
+	root := t.rootFor(ns)
+	boundary, matched := t.boundaryFor(root, tokens)
+	if matched < len(tokens) {
+		boundary = t.attachLeaf(boundary, tokens[matched:], nil, nil, t.clock)
+	}
+	t.pinPath(boundary)
+	return boundary
+}
+
+// pinPath marks node n and every ancestor on the path up to root as pinned Tier 0.
+func (t *Tree) pinPath(n *node) {
+	req := RetentionRequest{
+		Priority: MaxRetentionPriority,
+		TTL:      RetainForever,
+		Admitted: int64(t.clock),
+	}
+	for p := n; p != nil && p.parent != nil; p = p.parent {
+		p.pinned = true
+		p.tier = Tier0PinnedRoot
+		p.tierSet = true
+		retCopy := req
+		p.retention = &retCopy
+	}
+}
+
+// UnpinPrefix unpins the node matching tokens on the default namespace.
+func (t *Tree) UnpinPrefix(tokens []int) {
+	t.UnpinPrefixNS("", tokens)
+}
+
+// UnpinPrefixNS unpins the node matching tokens under namespace ns.
+func (t *Tree) UnpinPrefixNS(ns string, tokens []int) {
+	root := t.rootForRead(ns)
+	if root == nil || len(tokens) == 0 {
+		return
+	}
+	n, nlen, _, _ := t.walk(root, tokens)
+	if n != nil && nlen == len(tokens) {
+		t.UnpinNode(n)
+	}
+}
+
+// UnpinNode clears the pinned flag and Tier 0 retention on node n.
+func (t *Tree) UnpinNode(n *node) {
+	if n == nil {
+		return
+	}
+	n.pinned = false
+	n.tier = Tier2IdleSubagent
+	n.tierSet = false
+	n.retention = nil
+}
+
+// IsNodePinned reports whether node n is pinned (Tier 0 coordinator prompt, immune from eviction).
+func (t *Tree) IsNodePinned(n *node) bool {
+	return t.isNodePinnedOrImmune(n)
+}
+
+// SetNodeRetention sets a client-declared per-request KV retention descriptor on node n.
+// Validates the request (fails closed on out-of-range priority or negative TTL/admitted).
+// Priority >= 90 pins the node as Tier 0 (seg = 3, immune from eviction).
+func (t *Tree) SetNodeRetention(n *node, req RetentionRequest) error {
+	if n == nil {
+		return errors.New("radixkv: nil node")
+	}
+	if err := req.Validate(); err != nil {
+		return err
+	}
+	retCopy := req
+	n.retention = &retCopy
+	tier := TierFromRetentionPriority(req.Priority)
+	n.tier = tier
+	n.tierSet = true
+	if tier == Tier0PinnedRoot {
+		t.pinPath(n)
+	} else {
+		n.pinned = false
+	}
+	return nil
+}
+
+// NodeRetention returns the node's current RetentionRequest, if any.
+func (t *Tree) NodeRetention(n *node) (RetentionRequest, bool) {
+	if n == nil || n.retention == nil {
+		return RetentionRequest{}, false
+	}
+	return *n.retention, true
+}
+
+// SetNodeTier explicitly assigns a priority tier to node n.
+func (t *Tree) SetNodeTier(n *node, tier PriorityTier) {
+	if n == nil {
+		return
+	}
+	n.tier = tier
+	n.tierSet = true
+	if tier == Tier0PinnedRoot {
+		t.pinPath(n)
+	} else {
+		n.pinned = false
+	}
+	req := RetentionRequestForTier(tier, int64(t.clock))
+	n.retention = &req
+}
+
+// NodeTier returns the effective priority tier of node n.
+func (t *Tree) NodeTier(n *node) PriorityTier {
+	if n == nil {
+		return Tier3Probationary
+	}
+	if t.isNodePinnedOrImmune(n) {
+		return Tier0PinnedRoot
+	}
+	if n.retention != nil {
+		if n.retention.Expired(int64(t.clock)) {
+			return Tier3Probationary
+		}
+		return TierFromRetentionPriority(n.retention.Priority)
+	}
+	if n.tierSet {
+		return n.tier
+	}
+	if n.hits == 0 {
+		return Tier3Probationary
+	}
+	if n.hits >= 2 {
+		return Tier1ActiveSubagent
+	}
+	return Tier2IdleSubagent
+}
+
+// PinnedTokens returns the total tokens owned by pinned Tier 0 nodes.
+func (t *Tree) PinnedTokens() int {
+	total := 0
+	t.forEachNode(func(n *node) {
+		if t.isNodePinnedOrImmune(n) {
+			total += len(n.key)
+		}
+	})
+	return total
+}
+
+// PinnedNodes returns the number of pinned Tier 0 nodes.
+func (t *Tree) PinnedNodes() int {
+	count := 0
+	t.forEachNode(func(n *node) {
+		if t.isNodePinnedOrImmune(n) {
+			count++
+		}
+	})
+	return count
 }
 
 func (n *node) kvSpanStats() compute.KVSpanStats {

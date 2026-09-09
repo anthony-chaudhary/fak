@@ -527,3 +527,28 @@ func TestWriteGitDailyTextIncludesGoCacheReceiptAndCleanupHints(t *testing.T) {
 		}
 	}
 }
+
+func TestRunGitDailyDefaultsGoTmpToRepoScratch(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitDailyTestRepo(t, repoRoot)
+	scratchGoTmp := filepath.Join(repoRoot, "_scratch", "go-tmp")
+	if err := os.MkdirAll(scratchGoTmp, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(treedoctor.GoTmpDirEnv, "")
+
+	oldRun := gitDailyRun
+	defer func() { gitDailyRun = oldRun }()
+
+	gitDailyRun = func(_ context.Context, _ gitdaily.Runner, opts gitdaily.Options) gitdaily.Result {
+		if opts.GoTmpDir != scratchGoTmp {
+			t.Fatalf("GoTmpDir = %q, want %q", opts.GoTmpDir, scratchGoTmp)
+		}
+		return gitdaily.Result{Apply: true, Day: "2026-09-08"}
+	}
+	var stdout, stderr bytes.Buffer
+	code := runGitDaily(&stdout, &stderr, []string{"--root", repoRoot})
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
+	}
+}
