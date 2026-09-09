@@ -919,6 +919,31 @@ func TestReviewIssueDraftParsesDependencyMarkers(t *testing.T) {
 	}
 }
 
+func TestReviewIssueDraftTriagesAmbiguousModernAfterDependency(t *testing.T) {
+	body := issueProofSectionBody(
+		"Dependency authors choose the relation that controls pickup or promotion.",
+		"go test ./internal/issuepolicy",
+	) + "\n" + strings.Join([]string{
+		"### Dependencies and scope fences",
+		"- **After:** #12385 must land before this work.",
+	}, "\n")
+
+	review := ReviewIssueDraft(IssueDraft{
+		Number: 12395,
+		Title:  "perf(vulkan): admit one decode-priority submission between prefill chunks",
+		Body:   body,
+	}, Options{})
+	if review.OK || review.Dispatchability != TriageOnly || review.Verdict != "needs_dependency_relation" {
+		t.Fatalf("review = %+v, want dependency-relation triage", review)
+	}
+	if !has(review.Reasons, ReasonDependencyRelationAmbiguous) {
+		t.Fatalf("reasons = %+v, want %s", review.Reasons, ReasonDependencyRelationAmbiguous)
+	}
+	if got := strings.Join(review.Coordination, "\n"); !strings.Contains(got, "Start blocked by / Coordinates with / Promotion requires") {
+		t.Fatalf("coordination = %q, want typed dependency repair direction", got)
+	}
+}
+
 func TestContract_Dependencies(t *testing.T) {
 	body := issueProofSectionBody(
 		"Dependency separation distinguishes pickup blockers from coordination and promotion gates.",

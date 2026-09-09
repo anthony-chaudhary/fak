@@ -136,11 +136,13 @@ body:
   - type: textarea
     id: coordination-notes
     attributes:
-      label: Coordination notes
-      description: Lane, lease, dependency, or sequencing notes. Write "No special coordination" if none.
+      label: Dependency and coordination edges
+      description: Use the typed relations below. Only "Start blocked by" prevents pickup, and only when no executable implementation slice exists. Write "No special coordination" if none.
       placeholder: |
-        - Avoid concurrent edits to `internal/issuecontract/**`.
-        - Dispatch after the parent route issue lands.
+        - Start blocked by: #123 only if no safe implementation slice can begin first.
+        - Coordinates with: #456 for interface alignment; this does not block pickup.
+        - Promotion requires: #789 for closure or performance evidence; this does not block implementation.
+        - Avoid concurrent edits to `internal/issuecontract/**` by narrowing and re-arbitrating a disjoint slice.
     validations:
       required: true
   - type: textarea

@@ -162,24 +162,32 @@ skill.
 
 When an issue has an explicit dependency edge, put a `Dependencies` section in the issue
 body. Each marker is one list item with the form `<relation>: #<issue>`. The supported
-relations are:
+relations for newly authored work are:
 
-- `after: #123`: this issue must wait until issue #123 is witnessed.
-- `blocks: #456`: issue #456 must wait until this issue is witnessed.
-- `related-only: #789`: issue #789 is context only and must not hold dispatch.
+- `Start blocked by: #123`: suppress pickup only when issue #123 leaves no safe,
+  executable implementation slice. The blocker must name that missing seam or unavoidable
+  same-path ownership conflict; an open issue alone is not sufficient evidence.
+- `Coordinates with: #456`: preserve interface or sequencing alignment while both issues
+  remain independently dispatchable.
+- `Promotion requires: #789`: implementation may proceed, but closure, rollout, or a
+  performance claim waits for issue #789's evidence.
 
 Example:
 
 ```markdown
 ## Dependencies
-- after: #1756
-- blocks: #1772
-- related-only: #1706
+- Start blocked by: #1756
+- Coordinates with: #1706
+- Promotion requires: #1772
 ```
 
-Dispatch tooling treats `after` and `blocks` as blocking dependency edges. It carries
-`related-only` as a non-blocking reference so operators can preserve context without
-accidentally serializing independent workers.
+Only `Start blocked by` populates the pickup-block set. `Coordinates with` and
+`Promotion requires` remain visible to workers and closure checks without serializing
+implementation. Before declaring a start block, narrow and re-arbitrate a disjoint slice;
+`BLOCKED` is valid only when no executable slice remains. Legacy `after`, `blocks`,
+`blocked-by`, `depends-on`, and `related-only` markers may still appear in older issues for
+compatibility, but new issue waves must use the typed relations above instead of treating
+broad roadmap order as a reason to idle a worker.
 
 Start from the issue metadata and record the selection in a gitignored run directory:
 
