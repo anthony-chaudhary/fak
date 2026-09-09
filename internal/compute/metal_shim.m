@@ -21,6 +21,8 @@
 #import <Metal/Metal.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #include <string.h>
+#include <unistd.h>
+#include <stdlib.h>
 #include "metal_backend.h"
 
 extern id<MTLDevice> gDev;
@@ -110,31 +112,59 @@ static const char *kShaderSrc =
     "                          constant int& nKV [[buffer(6)]],\n"
     "                          constant int& hd [[buffer(7)]],\n"
     "                          constant float& scale [[buffer(8)]],\n"
-    "                          uint h [[thread_position_in_grid]]) {\n"
+    "                          uint h [[threadgroup_position_in_grid]],\n"
+    "                          uint tid [[thread_position_in_threadgroup]],\n"
+    "                          uint tg_size [[threads_per_threadgroup]]) {\n"
     "    if ((int)h >= nH) return;\n"
     "    int grp = nH / nKV;\n"
     "    int kvh = (int)h / grp;\n"
     "    int w = nKV * hd;\n"
     "    uint qbase = h * (uint)hd;\n"
-    "    float m = -3.0e38f;\n"
+    "    uint obase = h * (uint)hd;\n"
+    "    threadgroup float qs[256];\n"
+    "    for (uint d = tid; d < (uint)hd; d += tg_size) {\n"
+    "        qs[d] = q[qbase + d];\n"
+    "    }\n"
+    "    threadgroup_barrier(mem_flags::mem_threadgroup);\n"
+    "    threadgroup float tg_sums[8];\n"
+    "    uint simd_id = tid / 32;\n"
+    "    uint lane_id = tid % 32;\n"
+    "    uint num_simd = (tg_size + 31) / 32;\n"
+    "    float m = -3.402823466e38f;\n"
     "    float l = 0.0f;\n"
-    "    float acc[256];\n"
-    "    for (int d = 0; d < hd; d++) acc[d] = 0.0f;\n"
+    "    float acc[4] = {0.0f, 0.0f, 0.0f, 0.0f};\n"
     "    for (int j = 0; j < nPos; j++) {\n"
     "        uint kvbase = (uint)(j * w + kvh * hd);\n"
-    "        float s = 0.0f;\n"
-    "        for (int d = 0; d < hd; d++) s += q[qbase + (uint)d] * K[kvbase + (uint)d];\n"
-    "        s *= scale;\n"
-    "        float mnew = max(m, s);\n"
-    "        float corr = exp(m - mnew);\n"
-    "        float p = exp(s - mnew);\n"
+    "        float partial_dot = 0.0f;\n"
+    "        for (uint d = tid; d < (uint)hd; d += tg_size) {\n"
+    "            partial_dot += qs[d] * K[kvbase + d];\n"
+    "        }\n"
+    "        float simd_s = simd_sum(partial_dot);\n"
+    "        if (lane_id == 0) {\n"
+    "            tg_sums[simd_id] = simd_s;\n"
+    "        }\n"
+    "        threadgroup_barrier(mem_flags::mem_threadgroup);\n"
+    "        float score = 0.0f;\n"
+    "        for (uint s = 0; s < num_simd; s++) {\n"
+    "            score += tg_sums[s];\n"
+    "        }\n"
+    "        score *= scale;\n"
+    "        float mnew = max(m, score);\n"
+    "        float corr = (l > 0.0f) ? exp(m - mnew) : 0.0f;\n"
+    "        float p = exp(score - mnew);\n"
     "        l = l * corr + p;\n"
-    "        for (int d = 0; d < hd; d++) acc[d] = acc[d] * corr + p * V[kvbase + (uint)d];\n"
+    "        for (uint d = tid; d < (uint)hd; d += tg_size) {\n"
+    "            uint idx = d / tg_size;\n"
+    "            acc[idx] = acc[idx] * corr + p * V[kvbase + d];\n"
+    "        }\n"
     "        m = mnew;\n"
+    "        threadgroup_barrier(mem_flags::mem_threadgroup);\n"
     "    }\n"
     "    float invl = (l > 0.0f) ? (1.0f / l) : 0.0f;\n"
-    "    uint obase = h * (uint)hd;\n"
-    "    for (int d = 0; d < hd; d++) outp[obase + (uint)d] = acc[d] * invl;\n"
+    "    for (uint d = tid; d < (uint)hd; d += tg_size) {\n"
+    "        uint idx = d / tg_size;\n"
+    "        outp[obase + d] = acc[idx] * invl;\n"
+    "    }\n"
     "}\n"
     "\n"
     "kernel void argmax_f32(device const float* x [[buffer(0)]],\n"
@@ -184,8 +214,35 @@ int fmetal_init(char *name, int namelen) {
         g_swiglu = make_pso(lib, "swiglu_f32");
         g_add = make_pso(lib, "add_f32");
         g_addbias = make_pso(lib, "add_bias_f32");
-        g_attention = make_pso(lib, "attention_f32");
         g_argmax = make_pso(lib, "argmax_f32");
+
+        // Attempt compiling threadgroup-tiled FlashAttention from external shaders/attention.metal;
+        // fallback to the embedded MSL library if file is absent on the filesystem.
+        NSString *attnSrc = nil;
+        NSArray *candidates = @[
+            @"shaders/attention.metal",
+            @"internal/compute/shaders/attention.metal",
+            @"../../internal/compute/shaders/attention.metal"
+        ];
+        for (NSString *p in candidates) {
+            if ([[NSFileManager defaultManager] fileExistsAtPath:p]) {
+                attnSrc = [NSString stringWithContentsOfFile:p encoding:NSUTF8StringEncoding error:nil];
+                if (attnSrc && [attnSrc length] > 0) break;
+            }
+        }
+        id<MTLLibrary> attnLib = nil;
+        if (attnSrc && [attnSrc length] > 0) {
+            MTLCompileOptions *attnOpts = [[MTLCompileOptions alloc] init];
+            attnLib = [gDev newLibraryWithSource:attnSrc options:attnOpts error:&err];
+            [attnOpts release];
+            if (attnLib) {
+                g_attention = make_pso(attnLib, "attention_f32");
+                [attnLib release];
+            }
+        }
+        if (!g_attention) {
+            g_attention = make_pso(lib, "attention_f32");
+        }
         [lib release];
         if (!g_rmsnorm || !g_rope || !g_swiglu || !g_add || !g_addbias || !g_attention || !g_argmax) {
             return 1;
@@ -205,12 +262,56 @@ int fmetal_init(char *name, int namelen) {
 
 // ---- residency / transfers (unified shared memory) ------------------------------
 
-void *fmetal_malloc(size_t bytes) {
-    if (bytes == 0) {
-        bytes = 16;
+// fmetal_malloc_zerocopy allocates page-aligned unified host memory and aliases it
+// directly into an MTLBuffer using newBufferWithBytesNoCopy and MTLResourceStorageModeShared.
+void *fmetal_malloc_zerocopy(size_t bytes) {
+    if (bytes == 0) bytes = 16;
+    if (gDev == nil) return NULL;
+    size_t page = (size_t)sysconf(_SC_PAGESIZE);
+    if (page == 0) page = 16384;
+    size_t page_rounded = ((bytes + page - 1) / page) * page;
+    void *ptr = NULL;
+    if (posix_memalign(&ptr, page, page_rounded) == 0 && ptr != NULL) {
+        id<MTLBuffer> b = [gDev newBufferWithBytesNoCopy:ptr
+                                                  length:(NSUInteger)page_rounded
+                                                 options:MTLResourceStorageModeShared
+                                             deallocator:^(void *pointer, NSUInteger length) {
+            free(pointer);
+        }];
+        if (b != nil) {
+            return (void *)b;
+        }
+        free(ptr);
     }
     id<MTLBuffer> b = [gDev newBufferWithLength:bytes options:MTLResourceStorageModeShared]; // +1 owned
     return (void *)b;
+}
+
+// fmetal_buffer_from_host_zerocopy wraps an existing page-aligned host pointer directly
+// into an MTLBuffer without memory allocation or copy. Returns NULL if ptr is not page-aligned.
+void *fmetal_buffer_from_host_zerocopy(void *ptr, size_t bytes) {
+    if (ptr == NULL || bytes == 0 || gDev == nil) return NULL;
+    size_t page = (size_t)sysconf(_SC_PAGESIZE);
+    if (page == 0) page = 16384;
+    if (((uintptr_t)ptr % page) != 0) {
+        return NULL;
+    }
+    size_t page_rounded = ((bytes + page - 1) / page) * page;
+    id<MTLBuffer> b = [gDev newBufferWithBytesNoCopy:ptr
+                                              length:(NSUInteger)page_rounded
+                                             options:MTLResourceStorageModeShared
+                                         deallocator:nil];
+    return (void *)b;
+}
+
+int fmetal_buffer_is_zerocopy(void *buf) {
+    if (buf == NULL) return 0;
+    id<MTLBuffer> b = (id<MTLBuffer>)buf;
+    return (b.storageMode == MTLStorageModeShared) ? 1 : 0;
+}
+
+void *fmetal_malloc(size_t bytes) {
+    return fmetal_malloc_zerocopy(bytes);
 }
 
 void fmetal_free(void *buf) {
@@ -237,19 +338,33 @@ int fmetal_device_memory_total(unsigned long long *total) {
 }
 
 void fmetal_h2d(void *dstBuf, const void *host, size_t bytes) {
+    if (!dstBuf || !host || bytes == 0) return;
     id<MTLBuffer> d = (id<MTLBuffer>)dstBuf;
+    if ([d contents] == host) {
+        // Zero-copy UMA: host and device already alias the same physical memory
+        return;
+    }
     memcpy([d contents], host, bytes);
 }
 
 void fmetal_d2h(void *host, void *srcBuf, size_t bytes) {
+    if (!srcBuf || !host || bytes == 0) return;
     id<MTLBuffer> s = (id<MTLBuffer>)srcBuf;
+    if ([s contents] == host) {
+        // Zero-copy UMA: host and device already alias the same physical memory
+        return;
+    }
     memcpy(host, [s contents], bytes);
 }
 
 void fmetal_copy_at(void *dstBuf, size_t dstOff, void *srcBuf, size_t srcOff, size_t bytes) {
+    if (!dstBuf || !srcBuf || bytes == 0) return;
     id<MTLBuffer> d = (id<MTLBuffer>)dstBuf;
     id<MTLBuffer> s = (id<MTLBuffer>)srcBuf;
-    memcpy((char *)[d contents] + dstOff, (char *)[s contents] + srcOff, bytes);
+    char *dPtr = (char *)[d contents] + dstOff;
+    char *sPtr = (char *)[s contents] + srcOff;
+    if (dPtr == sPtr) return;
+    memcpy(dPtr, sPtr, bytes);
 }
 
 // ---- helpers --------------------------------------------------------------------
@@ -374,6 +489,62 @@ int fmetal_command_encode_add_f32(void *opaque, void *dDst, void *dSrc, int n) {
         });
 }
 
+int fmetal_command_encode_rope_f32(void *opaque, void *dX, int pos, int nHeads, int headDim, float theta) {
+    if (dX == NULL || nHeads <= 0 || headDim <= 0) return 0;
+    return fmetal_command_encode_1d(opaque, g_rope, (NSUInteger)(nHeads * (headDim / 2)),
+        ^(id<MTLComputeCommandEncoder> enc) {
+            [enc setBuffer:(id<MTLBuffer>)dX offset:0 atIndex:0];
+            [enc setBytes:&pos length:sizeof(int) atIndex:1];
+            [enc setBytes:&nHeads length:sizeof(int) atIndex:2];
+            [enc setBytes:&headDim length:sizeof(int) atIndex:3];
+            [enc setBytes:&theta length:sizeof(float) atIndex:4];
+        });
+}
+
+int fmetal_command_encode_add_bias_f32(void *opaque, void *dDst, void *dBias, int rows, int width) {
+    if (dDst == NULL || dBias == NULL || rows <= 0 || width <= 0) return 0;
+    return fmetal_command_encode_1d(opaque, g_addbias, (NSUInteger)(rows * width),
+        ^(id<MTLComputeCommandEncoder> enc) {
+            [enc setBuffer:(id<MTLBuffer>)dDst offset:0 atIndex:0];
+            [enc setBuffer:(id<MTLBuffer>)dBias offset:0 atIndex:1];
+            [enc setBytes:&width length:sizeof(int) atIndex:2];
+        });
+}
+
+int fmetal_command_encode_attention_f32(void *opaque, void *dQ, void *dK, void *dV, void *dOut,
+                                        int nPos, int nH, int nKV, int hd, float scale) {
+    fmetal_command_owner *owner = opaque;
+    if (owner == NULL || owner->terminal || owner->command_buffer == nil || g_attention == nil ||
+        dQ == NULL || dK == NULL || dV == NULL || dOut == NULL || nPos <= 0 || nH <= 0 || nKV <= 0 || hd <= 0) return 0;
+    @autoreleasepool {
+        id<MTLComputeCommandEncoder> enc = [owner->command_buffer computeCommandEncoder];
+        if (enc == nil) return 0;
+        [enc setComputePipelineState:g_attention];
+        [enc setBuffer:(id<MTLBuffer>)dQ offset:0 atIndex:0];
+        [enc setBuffer:(id<MTLBuffer>)dK offset:0 atIndex:1];
+        [enc setBuffer:(id<MTLBuffer>)dV offset:0 atIndex:2];
+        [enc setBuffer:(id<MTLBuffer>)dOut offset:0 atIndex:3];
+        [enc setBytes:&nPos length:sizeof(int) atIndex:4];
+        [enc setBytes:&nH length:sizeof(int) atIndex:5];
+        [enc setBytes:&nKV length:sizeof(int) atIndex:6];
+        [enc setBytes:&hd length:sizeof(int) atIndex:7];
+        [enc setBytes:&scale length:sizeof(float) atIndex:8];
+
+        NSUInteger tg_threads = 128;
+        if (g_attention.maxTotalThreadsPerThreadgroup >= 256 && nPos >= 1024) {
+            tg_threads = 256;
+        } else if (tg_threads > g_attention.maxTotalThreadsPerThreadgroup) {
+            tg_threads = g_attention.maxTotalThreadsPerThreadgroup;
+        }
+        MTLSize threadgroups = MTLSizeMake((NSUInteger)nH, 1, 1);
+        MTLSize threadsPerThreadgroup = MTLSizeMake(tg_threads, 1, 1);
+        [enc dispatchThreadgroups:threadgroups threadsPerThreadgroup:threadsPerThreadgroup];
+        [enc endEncoding];
+        owner->encoders++;
+        return 1;
+    }
+}
+
 int fmetal_command_finish(void *opaque, fmetal_command_receipt *receipt) {
     fmetal_command_owner *owner = opaque;
     if (receipt != NULL) memset(receipt, 0, sizeof(*receipt));
@@ -419,85 +590,70 @@ void fmetal_matmul_f32(void *dW, void *dX, void *dY, int out, int in, int P) {
     (void)fmetal_command_finish(owner, &receipt);
 }
 void fmetal_rmsnorm_f32(void *dX, void *dW, void *dY, int rows, int n, float eps) {
-    @autoreleasepool {
-        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
-        id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
-        [enc setComputePipelineState:g_rmsnorm];
-        [enc setBuffer:(id<MTLBuffer>)dX offset:0 atIndex:0];
-        [enc setBuffer:(id<MTLBuffer>)dW offset:0 atIndex:1];
-        [enc setBuffer:(id<MTLBuffer>)dY offset:0 atIndex:2];
-        [enc setBytes:&n length:sizeof(int) atIndex:3];
-        [enc setBytes:&eps length:sizeof(float) atIndex:4];
-        run_1d(cb, enc, g_rmsnorm, (NSUInteger)rows);
+    void *owner = fmetal_command_begin();
+    if (owner == NULL) return;
+    if (!fmetal_command_encode_rmsnorm_f32(owner, dX, dW, dY, rows, n, eps)) {
+        fmetal_command_abort(owner);
+        return;
     }
+    fmetal_command_receipt receipt;
+    (void)fmetal_command_finish(owner, &receipt);
 }
 
 void fmetal_rope_f32(void *dX, int pos, int nHeads, int headDim, float theta) {
-    @autoreleasepool {
-        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
-        id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
-        [enc setComputePipelineState:g_rope];
-        [enc setBuffer:(id<MTLBuffer>)dX offset:0 atIndex:0];
-        [enc setBytes:&pos length:sizeof(int) atIndex:1];
-        [enc setBytes:&nHeads length:sizeof(int) atIndex:2];
-        [enc setBytes:&headDim length:sizeof(int) atIndex:3];
-        [enc setBytes:&theta length:sizeof(float) atIndex:4];
-        run_1d(cb, enc, g_rope, (NSUInteger)(nHeads * (headDim / 2)));
+    void *owner = fmetal_command_begin();
+    if (owner == NULL) return;
+    if (!fmetal_command_encode_rope_f32(owner, dX, pos, nHeads, headDim, theta)) {
+        fmetal_command_abort(owner);
+        return;
     }
+    fmetal_command_receipt receipt;
+    (void)fmetal_command_finish(owner, &receipt);
 }
 
 void fmetal_swiglu_f32(void *dG, void *dU, void *dY, int n) {
-    @autoreleasepool {
-        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
-        id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
-        [enc setComputePipelineState:g_swiglu];
-        [enc setBuffer:(id<MTLBuffer>)dG offset:0 atIndex:0];
-        [enc setBuffer:(id<MTLBuffer>)dU offset:0 atIndex:1];
-        [enc setBuffer:(id<MTLBuffer>)dY offset:0 atIndex:2];
-        run_1d(cb, enc, g_swiglu, (NSUInteger)n);
+    void *owner = fmetal_command_begin();
+    if (owner == NULL) return;
+    if (!fmetal_command_encode_swiglu_f32(owner, dG, dU, dY, n)) {
+        fmetal_command_abort(owner);
+        return;
     }
+    fmetal_command_receipt receipt;
+    (void)fmetal_command_finish(owner, &receipt);
 }
 
 void fmetal_add_f32(void *dDst, void *dSrc, int n) {
-    @autoreleasepool {
-        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
-        id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
-        [enc setComputePipelineState:g_add];
-        [enc setBuffer:(id<MTLBuffer>)dDst offset:0 atIndex:0];
-        [enc setBuffer:(id<MTLBuffer>)dSrc offset:0 atIndex:1];
-        run_1d(cb, enc, g_add, (NSUInteger)n);
+    void *owner = fmetal_command_begin();
+    if (owner == NULL) return;
+    if (!fmetal_command_encode_add_f32(owner, dDst, dSrc, n)) {
+        fmetal_command_abort(owner);
+        return;
     }
+    fmetal_command_receipt receipt;
+    (void)fmetal_command_finish(owner, &receipt);
 }
 
 void fmetal_add_bias_f32(void *dDst, void *dBias, int rows, int width) {
-    @autoreleasepool {
-        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
-        id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
-        [enc setComputePipelineState:g_addbias];
-        [enc setBuffer:(id<MTLBuffer>)dDst offset:0 atIndex:0];
-        [enc setBuffer:(id<MTLBuffer>)dBias offset:0 atIndex:1];
-        [enc setBytes:&width length:sizeof(int) atIndex:2];
-        run_1d(cb, enc, g_addbias, (NSUInteger)(rows * width));
+    void *owner = fmetal_command_begin();
+    if (owner == NULL) return;
+    if (!fmetal_command_encode_add_bias_f32(owner, dDst, dBias, rows, width)) {
+        fmetal_command_abort(owner);
+        return;
     }
+    fmetal_command_receipt receipt;
+    (void)fmetal_command_finish(owner, &receipt);
 }
 
 void fmetal_attention_f32(void *dQ, void *dK, void *dV, void *dOut,
                           int nPos, int nH, int nKV, int hd, float scale) {
-    @autoreleasepool {
-        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
-        id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
-        [enc setComputePipelineState:g_attention];
-        [enc setBuffer:(id<MTLBuffer>)dQ offset:0 atIndex:0];
-        [enc setBuffer:(id<MTLBuffer>)dK offset:0 atIndex:1];
-        [enc setBuffer:(id<MTLBuffer>)dV offset:0 atIndex:2];
-        [enc setBuffer:(id<MTLBuffer>)dOut offset:0 atIndex:3];
-        [enc setBytes:&nPos length:sizeof(int) atIndex:4];
-        [enc setBytes:&nH length:sizeof(int) atIndex:5];
-        [enc setBytes:&nKV length:sizeof(int) atIndex:6];
-        [enc setBytes:&hd length:sizeof(int) atIndex:7];
-        [enc setBytes:&scale length:sizeof(float) atIndex:8];
-        run_1d(cb, enc, g_attention, (NSUInteger)nH);
+    void *owner = fmetal_command_begin();
+    if (owner == NULL) return;
+    if (!fmetal_command_encode_attention_f32(owner, dQ, dK, dV, dOut, nPos, nH, nKV, hd, scale)) {
+        fmetal_command_abort(owner);
+        return;
     }
+    fmetal_command_receipt receipt;
+    (void)fmetal_command_finish(owner, &receipt);
 }
 
 int fmetal_argmax_f32(void *dLogits, int n) {
