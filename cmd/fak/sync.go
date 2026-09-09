@@ -33,6 +33,7 @@ var (
 	syncRouteReconciliation       = safesync.RouteReconciliation
 	syncBuildReconciliationPacket = safesync.BuildReconciliationPacket
 	syncExecutePacket             = safesync.ExecutePacket
+	syncHeal                      = safesync.Heal
 	syncCaptureSource             = func(repo string) (string, error) { return gitOut(repo, "rev-parse", "HEAD") }
 )
 
@@ -40,7 +41,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	command := "check"
 	if len(argv) > 0 {
 		switch argv[0] {
-		case "check", "apply", "push", "drain", "reconcile", "packet", "execute":
+		case "check", "apply", "push", "drain", "reconcile", "packet", "execute", "heal":
 			command = argv[0]
 			argv = argv[1:]
 		case "help", "-h", "--help":
@@ -48,7 +49,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			return syncExitOK
 		default:
 			if !strings.HasPrefix(argv[0], "-") {
-				fmt.Fprintf(stderr, "fak sync: unknown command %q (want check, apply, push, drain, reconcile, packet, or execute)\n", argv[0])
+				fmt.Fprintf(stderr, "fak sync: unknown command %q (want check, apply, push, drain, reconcile, packet, execute, or heal)\n", argv[0])
 				syncUsage(stderr)
 				return syncExitUsage
 			}
@@ -77,6 +78,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	budget := fs.Duration("budget", budgetDefault, budgetHelp)
 	quarantineScratch := fs.Bool("quarantine-scratch", true, "shift-left untracked artifact isolation: safely isolate and restore untracked files colliding with incoming fast-forward additions (#10913)")
 	asJSON := fs.Bool("json", false, "emit the assessment as JSON")
+	dryRun := fs.Bool("dry-run", false, "heal: inspect and report phantom deletions without modifying index or worktree")
 	resumeToken := fs.String("resume-token", "", "check: operation-bound token emitted by a blocked PUBLIC_LEAK preflight")
 	defaultDev := "main"
 	if roles, err := branchrole.Load(""); err == nil && roles.DevelopmentBranch != "" {
@@ -332,6 +334,33 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 		return syncExitOK
 	}
 
+	if command == "heal" {
+		repoPath := pathutil.ExpandTilde(*repo)
+		res, err := syncHeal(context.Background(), safesync.HealOptions{
+			Repo:   repoPath,
+			DryRun: *dryRun,
+		})
+		if err != nil {
+			if *asJSON {
+				_ = writeIndentedJSON(stdout, map[string]string{"error": err.Error()})
+			}
+			fmt.Fprintf(stderr, "fak sync heal: %v\n", err)
+			return syncExitInternal
+		}
+		if *asJSON {
+			if err := writeIndentedJSON(stdout, res); err != nil {
+				fmt.Fprintf(stderr, "fak sync: %v\n", err)
+				return syncExitInternal
+			}
+		} else {
+			printSyncHeal(stdout, res)
+		}
+		if res.OK {
+			return syncExitOK
+		}
+		return syncExitRefused
+	}
+
 	opts := safesync.Options{
 		Repo:                pathutil.ExpandTilde(*repo),
 		Remote:              *remote,
@@ -443,6 +472,7 @@ func syncUsage(w io.Writer) {
   fak sync reconcile [--repo DIR] [--remote origin] [--branch B] [--goal G] [--apply] [--fetch] [--json] [--emit-packet] [--execute]
   fak sync packet    [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
   fak sync execute   [--packet FILE] [--repo DIR] [--remote origin] [--branch B] [--json]
+  fak sync heal      [--repo DIR] [--dry-run] [--json]
 
 Safe shared-trunk git for dirty worktrees. check is read-only except for optional
 --fetch. It runs PUBLIC_LEAK before commit time, classifies candidate findings against
@@ -462,9 +492,36 @@ window (reusing the pre-push build witness), flushes in one push when green, and
 off — not blind-retries — while red. reconcile is the typed shared-trunk reconciliation
 router that inspects repo state and routes to a safe primitive (ROUTE_NOOP, ROUTE_PUSH,
 ROUTE_APPLY, ROUTE_HOLD_DIRTY_COLLISION, ROUTE_SUPERSET_MERGE, ROUTE_DISJOINT_INTEGRATE,
-ROUTE_RECONCILE_PACKET, ROUTE_HOLD_MERGE_ACTIVE, ROUTE_DRAIN). None of these run git pull, stash, reset --hard,
+ROUTE_RECONCILE_PACKET, ROUTE_HOLD_MERGE_ACTIVE, ROUTE_DRAIN). heal restores missing
+files from HEAD that were deleted in the index or working tree, un-stages phantom
+deletions in .git/index, and refreshes the index while strictly preserving uncommitted edits
+in existing dirty files. None of these run git pull, stash, reset --hard,
 clean, add, a non-fast-forward merge, or --force.
 `)
+}
+
+func printSyncHeal(w io.Writer, res safesync.HealResult) {
+	prefix := "fak sync heal:"
+	if res.DryRun {
+		prefix = "fak sync heal (dry-run):"
+	}
+	if res.HealedCount == 0 {
+		fmt.Fprintf(w, "%s %s\n", prefix, res.Message)
+	} else if res.DryRun {
+		fmt.Fprintf(w, "%s found %d phantom deletion(s) to heal (%d un-staged, %d staged)\n",
+			prefix, res.HealedCount, len(res.UnstagedDeleted), len(res.StagedDeleted))
+	} else {
+		fmt.Fprintf(w, "%s restored %d missing file(s) from HEAD (un-staged %d phantom deletion(s))\n",
+			prefix, res.HealedCount, len(res.StagedDeleted))
+	}
+	if len(res.RestoredFiles) > 0 {
+		for _, f := range res.RestoredFiles {
+			fmt.Fprintf(w, "  restored: %s\n", f)
+		}
+	}
+	if len(res.PreservedDirty) > 0 {
+		fmt.Fprintf(w, "  preserved dirty files: %s\n", pathPreview(res.PreservedDirty, 5))
+	}
 }
 
 func renderSyncReconcile(w io.Writer, info safesync.ReconcileAssessment) {
