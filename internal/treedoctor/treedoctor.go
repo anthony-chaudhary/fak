@@ -28,6 +28,7 @@ package treedoctor
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -279,6 +280,24 @@ func Sweep(ctx context.Context, run Runner, opts Options, apply bool) (Report, [
 	// they cause. Report-only unless apply; the reap bar is a frozen mtime PLUS the
 	// two-sample advancing witness, never age alone (see reflocks.go's header).
 	actions = append(actions, sweepRefLocks(rep.RefLocks, apply)...)
+
+	// Under apply, if loose-ref pressure was detected and no ref lock is currently
+	// holding, automatically pack loose refs with `git pack-refs --all --prune` to
+	// prevent thousands of loose ref files from accumulating.
+	if apply && rep.RefLocks.LooseRefs.Pressure {
+		packedRefsLockHeld := false
+		for _, l := range rep.RefLocks.Locks {
+			if l.Name == "packed-refs.lock" && l.Present && !l.Stale {
+				packedRefsLockHeld = true
+				break
+			}
+		}
+		if !packedRefsLockHeld {
+			if _, code, err := run(ctx, opts.RepoRoot, "pack-refs", "--all", "--prune"); err == nil && code == 0 {
+				actions = append(actions, fmt.Sprintf("packed %d loose refs into packed-refs", rep.RefLocks.LooseRefs.Total))
+			}
+		}
+	}
 
 	// Tracked separately from len(actions) so a report-only advisory (e.g. loose-ref
 	// pressure) can never make the sweep fire a `git worktree prune` it did not earn.

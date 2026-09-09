@@ -224,15 +224,18 @@ func isCanonicalSHA256(digest string) bool {
 	return true
 }
 
-func validateCurrentStrixReceipt(receipt *amdgpu.StrixValidationReceipt, tip, sourceArchiveSHA256 string) error {
+func validateCurrentStrixEvidence(receipt *amdgpu.StrixValidationReceipt, tip, sourceArchiveSHA256 string) error {
 	if receipt == nil {
 		return fmt.Errorf("receipt is nil")
 	}
 	if err := receipt.Validate(); err != nil {
 		return fmt.Errorf("receipt invariant validation failed: %w", err)
 	}
-	if !receipt.CreditEligible() {
-		return fmt.Errorf("receipt is integrity-readable but not eligible for current v2 physical Strix credit")
+	if receipt.Schema != amdgpu.StrixValidationSchemaV2 {
+		return fmt.Errorf("receipt schema %q is not current physical Strix schema %q", receipt.Schema, amdgpu.StrixValidationSchemaV2)
+	}
+	if receipt.Verdict != "PASS" {
+		return fmt.Errorf("receipt verdict %q is not PASS", receipt.Verdict)
 	}
 	if !strings.EqualFold(strings.TrimSpace(receipt.Provenance.GitTip), strings.TrimSpace(tip)) {
 		return fmt.Errorf("receipt GitTip %q does not match candidate %q", receipt.Provenance.GitTip, tip)
@@ -246,6 +249,29 @@ func validateCurrentStrixReceipt(receipt *amdgpu.StrixValidationReceipt, tip, so
 	return nil
 }
 
+func validateCurrentStrixReceipt(receipt *amdgpu.StrixValidationReceipt, tip, sourceArchiveSHA256 string, requirePromotionCredit bool) error {
+	if err := validateCurrentStrixEvidence(receipt, tip, sourceArchiveSHA256); err != nil {
+		return err
+	}
+	if requirePromotionCredit && !receipt.CreditEligible() {
+		return fmt.Errorf("receipt is valid physical Strix evidence but not eligible for current v2 promotion credit")
+	}
+	return nil
+}
+
+type strixValidationOutput struct {
+	*amdgpu.StrixValidationReceipt
+	PromotionCreditEligible bool `json:"promotion_credit_eligible"`
+}
+
+func emitStrixValidationJSON(w io.Writer, receipt *amdgpu.StrixValidationReceipt, promotionCreditEligible bool) {
+	data, _ := json.MarshalIndent(strixValidationOutput{
+		StrixValidationReceipt:  receipt,
+		PromotionCreditEligible: promotionCreditEligible,
+	}, "", "  ")
+	fmt.Fprintln(w, string(data))
+}
+
 func emitFailReceipt(w io.Writer, host, gitTip, gitRef string, argv []string, err error) {
 	receipt := amdgpu.NewStrixValidationReceipt(amdgpu.StrixTarget{
 		Mode: "ssh", Host: host, Reachable: false, TargetISA: "gfx1151", ComputeUnits: 40,
@@ -255,8 +281,7 @@ func emitFailReceipt(w io.Writer, host, gitTip, gitRef string, argv []string, er
 	receipt.Verified = false
 	receipt.Failures = append(receipt.Failures, err.Error())
 	receipt.Digest, _ = receipt.ComputeDigest()
-	data, _ := json.MarshalIndent(receipt, "", "  ")
-	fmt.Fprintln(w, string(data))
+	emitStrixValidationJSON(w, receipt, false)
 }
 
 // RunAMDStrixValidate executes physical validation on the Strix Halo appliance.
@@ -267,6 +292,7 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 	subkernels := fs.String("subkernels", "all", "sub-kernels to test")
 	ablate := fs.String("ablate", "all", "ablation arms to run")
 	asJSON := fs.Bool("json", false, "emit receipt as JSON")
+	evidenceOnly := fs.Bool("evidence-only", false, "accept valid source-bound physical evidence without granting promotion credit")
 	timeoutSec := fs.Int("timeout", 45, "total timeout in seconds")
 	admissionTimeoutSec := fs.Int("admission-timeout", 10, "hardware admission timeout in seconds")
 	gitTip := fs.String("git-tip", "", "expected full candidate HEAD")
@@ -338,10 +364,10 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 		}
 		return 1
 	}
-	receiptErr := validateCurrentStrixReceipt(receipt, candidate.tip, candidate.archive.SourceArchiveSHA256)
+	receiptErr := validateCurrentStrixReceipt(receipt, candidate.tip, candidate.archive.SourceArchiveSHA256, !*evidenceOnly)
+	promotionCreditEligible := runErr == nil && receiptErr == nil && receipt.CreditEligible()
 	if *asJSON {
-		data, _ := json.MarshalIndent(receipt, "", "  ")
-		fmt.Fprintln(stdout, string(data))
+		emitStrixValidationJSON(stdout, receipt, promotionCreditEligible)
 		if runErr != nil {
 			fmt.Fprintf(stderr, "amd-strix-validate: validation failed: %v\n", runErr)
 			return 1
@@ -352,7 +378,7 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 		}
 		return 0
 	}
-	renderAMDStrixReceipt(stdout, receipt, receiptErr == nil)
+	renderAMDStrixReceipt(stdout, receipt, promotionCreditEligible)
 	if runErr != nil {
 		fmt.Fprintf(stderr, "amd-strix-validate: validation failed: %v\n", runErr)
 		return 1
@@ -370,9 +396,14 @@ func renderAMDStrixReceipt(w io.Writer, receipt *amdgpu.StrixValidationReceipt, 
 	fmt.Fprintln(w, "================================================================================")
 	verdict := receipt.Verdict
 	if receipt.Verdict == "PASS" && !credit {
-		verdict = "PASS (historical/non-credit)"
+		if receipt.Schema == amdgpu.StrixValidationSchemaV1 {
+			verdict = "PASS (historical/non-credit)"
+		} else {
+			verdict = "PASS (valid evidence; promotion non-credit)"
+		}
 	}
 	fmt.Fprintf(w, "Verdict:     %s\n", verdict)
+	fmt.Fprintf(w, "promotion_credit_eligible: %t\n", credit)
 	fmt.Fprintf(w, "Target:      %s (%s)\n", receipt.Target.Host, receipt.Target.Mode)
 	fmt.Fprintf(w, "CPU Model:   %s\n", receipt.Target.CPUModel)
 	fmt.Fprintf(w, "GPU Model:   %s (%s, %d CUs)\n", receipt.Target.GPUName, receipt.Target.TargetISA, receipt.Target.ComputeUnits)

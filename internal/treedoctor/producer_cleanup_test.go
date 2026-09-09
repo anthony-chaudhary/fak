@@ -19,6 +19,10 @@ func TestCleanScratchProducerPreservesIgnoredSiblingByteForByte(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	canonTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		canonTarget = target
+	}
 	receipt, err := CleanScratchProducer(repo, "selected")
 	if err != nil {
 		t.Fatalf("CleanScratchProducer: %v", err)
@@ -26,7 +30,7 @@ func TestCleanScratchProducerPreservesIgnoredSiblingByteForByte(t *testing.T) {
 	if receipt.Verdict != ScratchProducerReaped || receipt.RemovedCount != 4 {
 		t.Fatalf("receipt = %+v, want reaped with 4 removed entries", receipt)
 	}
-	if receipt.ResolvedTarget != target {
+	if receipt.ResolvedTarget != target && receipt.ResolvedTarget != canonTarget {
 		t.Fatalf("resolved target = %q, want %q", receipt.ResolvedTarget, target)
 	}
 	if _, err := os.Stat(target); !os.IsNotExist(err) {
@@ -161,7 +165,10 @@ func TestCleanScratchProducerMissingDirectoryIsIdempotent(t *testing.T) {
 	if receipt.Verdict != ScratchProducerAbsent || receipt.RemovedCount != 0 {
 		t.Fatalf("receipt = %+v, want absent with zero removals", receipt)
 	}
-	if receipt.ResolvedTarget != filepath.Join(repo, "_scratch", "absent") {
+	expectedTarget := filepath.Join(repo, "_scratch", "absent")
+	canonRepo, _ := filepath.EvalSymlinks(repo)
+	canonExpected := filepath.Join(canonRepo, "_scratch", "absent")
+	if receipt.ResolvedTarget != expectedTarget && receipt.ResolvedTarget != canonExpected {
 		t.Fatalf("resolved target = %q", receipt.ResolvedTarget)
 	}
 }

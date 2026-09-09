@@ -4,8 +4,9 @@
 // (#795) — generalized from one read-only MCP tool to the full coding surface (#6658).
 //
 // WHY THIS EXISTS. The fak-owned loop (internal/agent RunArm, driven live by
-// `fak serve --native`) had no coding work surface: its catalog is the airline-support
-// demo and the only real filesystem engine is readengine's read-only `fak_read` miss
+// `fak serve --native`) had no coding work surface:
+// the owned loop's built-in catalog was only the deterministic mock demo
+// and the only real filesystem engine is readengine's read-only `fak_read` miss
 // path. So an operator asking the native harness to perform a coding task had nothing
 // to dispatch — the loop could not Read, could not mutate, could not search, and could
 // not run a process. Every one of those operations has to cross the SAME in-kernel

@@ -62,10 +62,11 @@ const GoTmpSchema = "fak-go-tmp-maintenance/1"
 const GoTmpDirEnv = "GOTMPDIR"
 
 // DefaultGoTmpPrefixes is the closed set of top-level names the sweep will reap: only the
-// WORK dirs `go` itself creates. Deliberately narrow — the same directory also collects
-// `t.TempDir()` leftovers named after the test that leaked them (41 MB of the 6,616 MB
-// measured), and those belong to whichever package leaked them, not to this reaper.
-var DefaultGoTmpPrefixes = []string{"go-build"}
+// WORK dirs `go` itself creates (compiler work trees and linker scratch). Deliberately narrow —
+// the same directory also collects `t.TempDir()` leftovers named after the test that leaked
+// them (41 MB of the 6,616 MB measured), and those belong to whichever package leaked them,
+// not to this reaper.
+var DefaultGoTmpPrefixes = []string{"go-build", "go-link"}
 
 // GoTmpVerdict is the closed vocabulary for one entry's decision. Exactly one of these is
 // assigned per entry, and only GoTmpReap ever removes anything.

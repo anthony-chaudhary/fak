@@ -77,6 +77,7 @@ func TestDetectGPU(t *testing.T) {
 	}{
 		{"explicit cuda", "cuda", false, "linux", "cuda"},
 		{"explicit metal", "metal", false, "linux", "metal"},
+		{"explicit vulkan", "vulkan", false, "linux", "vulkan"},
 		{"nvidia-smi present", "", true, "linux", "cuda"},
 		{"darwin default metal", "", false, "darwin", "metal"},
 		{"bare linux none", "", false, "linux", "none"},
@@ -102,6 +103,22 @@ func TestDetectGPU(t *testing.T) {
 				t.Errorf("detectGPU = %q, want %q", got, tc.wantGPU)
 			}
 		})
+	}
+}
+
+func TestDetectGPUFindsVulkanInfo(t *testing.T) {
+	e := probeEnv{
+		getenv: func(string) string { return "" },
+		look: func(name string) (string, error) {
+			if name == "vulkaninfo" {
+				return "/usr/bin/vulkaninfo", nil
+			}
+			return "", errNotFound{}
+		},
+		goos: "linux",
+	}
+	if got := detectGPU(e); got != "vulkan" {
+		t.Fatalf("detectGPU = %q, want vulkan when vulkaninfo is present", got)
 	}
 }
 
@@ -131,6 +148,29 @@ func TestSatisfies(t *testing.T) {
 	}
 	if ok, why := bareBox.Satisfies(credTask); ok {
 		t.Errorf("bare box without the cred should fail; why=%q", why)
+	}
+}
+
+func TestSatisfiesRequiresExactStrixAppliance(t *testing.T) {
+	task := Task{ID: "strix", Requires: []Requirement{ReqStrix}}
+	for _, box := range []Capabilities{
+		{Box: "workstation", GPU: "vulkan"},
+		{Box: "box-deadbeef", GPU: "vulkan"},
+		{Box: "strix1", GPU: "none"},
+		{Box: "strix-agent", GPU: "cuda"},
+	} {
+		box.Creds = map[string]bool{}
+		if ok, why := box.Satisfies(task); ok {
+			t.Errorf("box=%q gpu=%q unexpectedly satisfied Strix-only task", box.Box, box.GPU)
+		} else if !strings.Contains(why, "Strix appliance") {
+			t.Errorf("box=%q gpu=%q rejection should name the Strix appliance, got %q", box.Box, box.GPU, why)
+		}
+	}
+	for _, alias := range []string{"strix-agent", "strix1", "strix-halo"} {
+		box := Capabilities{Box: alias, GPU: "vulkan", Creds: map[string]bool{}}
+		if ok, why := box.Satisfies(task); !ok {
+			t.Errorf("public Strix alias %q with Vulkan should satisfy task: %s", alias, why)
+		}
 	}
 }
 
@@ -336,6 +376,46 @@ func TestBacklogNoDupIDsAndSourcesPresent(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected the q8-decode-matvec-bw witness in the backlog")
+	}
+}
+
+func TestBacklogHasTenIndependentWeeklyStrixFullMatrixPasses(t *testing.T) {
+	tasks, err := Backlog("")
+	if err != nil {
+		t.Fatalf("Backlog: %v", err)
+	}
+	const prefix = "witness-strix-halo-full-matrix-soak-"
+	seen := map[string]bool{}
+	count := 0
+	for _, task := range tasks {
+		if !strings.HasPrefix(task.ID, prefix) {
+			continue
+		}
+		count++
+		if seen[task.ID] {
+			t.Errorf("Strix pass %q is not independently ledgerable", task.ID)
+		}
+		seen[task.ID] = true
+		if task.Source != SourceWitness || !task.autoRunnable() {
+			t.Errorf("Strix pass %q must be an auto-runnable witness task", task.ID)
+		}
+		if !requires(task, ReqStrix) {
+			t.Errorf("Strix pass %q must require the exact Strix appliance", task.ID)
+		}
+		for _, flag := range []string{"--committed-only", "--subkernels=all", "--ablate=all", "--timeout=600", "--admission-timeout=30", "--evidence-only"} {
+			if !strings.Contains(task.Run, flag) {
+				t.Errorf("Strix pass %q missing %s: %q", task.ID, flag, task.Run)
+			}
+		}
+		if task.RecheckDays != 7 || task.TimeoutSec != 900 {
+			t.Errorf("Strix pass %q cadence/outer timeout = %dd/%ds, want 7d/900s", task.ID, task.RecheckDays, task.TimeoutSec)
+		}
+		if !strings.Contains(task.Acceptance, "current validator catalogs") || !strings.Contains(task.Acceptance, "promotion_credit_eligible=false") {
+			t.Errorf("Strix pass %q must select the current full matrix and preserve the non-credit evidence contract", task.ID)
+		}
+	}
+	if count != 10 {
+		t.Fatalf("Strix weekly full-matrix capacity = %d passes, want exactly 10", count)
 	}
 }
 

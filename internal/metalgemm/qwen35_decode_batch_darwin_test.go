@@ -23,7 +23,7 @@ func TestQwen35DecodeBatchIndependentStateSingleFence(t *testing.T) {
 		hidden, geometry.NumKeyHeads, geometry.NumValueHeads, geometry.KeyHeadDim, geometry.ValueHeadDim,
 		geometry.ConvKernel, geometry.NumValueHeads/geometry.NumKeyHeads, geometry.ConvKernel-1)
 
-	for _, batch := range []int{2, 4, 8} {
+	for _, batch := range []int{2, 4, 8, 24} {
 		t.Run(fmt.Sprintf("B%d", batch), func(t *testing.T) {
 			baseline := GDNLiveBufferCount()
 			serialStates := newQwen35DecodeBatchStates(t, geometry, batch)
@@ -61,11 +61,17 @@ func TestQwen35DecodeBatchIndependentStateSingleFence(t *testing.T) {
 			}
 			requireQwen35DecodeBatchDistinctOwners(t, batchStates)
 
+			start := time.Now()
 			outputs, receipt, accepted, err := RunQwen35DecodeBatch(Qwen35DecodeBatchRequest{
 				Input: input, Weights: weights, States: batchStates, Panel: panel,
 			})
+			stepDuration := time.Since(start)
 			if err != nil || !accepted {
 				t.Fatalf("B=%d batch: accepted=%v err=%v", batch, accepted, err)
+			}
+			t.Logf("B=%d batch execution step time: %v (%.1f tok/s aggregate)", batch, stepDuration, float64(batch)/stepDuration.Seconds())
+			if batch == 24 && stepDuration > 150*time.Millisecond {
+				t.Errorf("B=%d batch execution step time = %v, want <= 150ms", batch, stepDuration)
 			}
 			requireQwen35DecodeBatchReceipt(t, receipt, batch, 1)
 			for row := 0; row < batch; row++ {
@@ -256,6 +262,44 @@ func TestQwen35DecodeBatchIndependentStateSingleFence(t *testing.T) {
 		}
 		if got := GDNLiveBufferCount(); got != baseline {
 			t.Fatalf("post-submit exact-once cleanup left buffers=%d, baseline=%d", got, baseline)
+		}
+	})
+
+	t.Run("resident_unified_memory_envelope_B24", func(t *testing.T) {
+		const (
+			batchLanes         = 24
+			gdnLayers          = 48
+			attentionLayers    = 16
+			kvContextLength    = 1536       // active context length per agent lane
+			modelWeightBytes   = 15.5 * 1e9 // 15.5 GB resident weight footprint
+			unifiedMemoryCapGB = 36.0
+			maxResidentGB      = 20.5
+		)
+		convElems := (geometry.ConvKernel - 1) * geometry.convDim()
+		recurrentElems := geometry.NumValueHeads * geometry.KeyHeadDim * geometry.ValueHeadDim
+		gdnStatePerLanePerLayerBytes := (convElems + recurrentElems) * 4
+		totalGDNBytes := batchLanes * gdnLayers * gdnStatePerLanePerLayerBytes
+
+		// Full-attention KV cache per lane across attention layers (fp16 key + value)
+		// nKVHeads=4, headDim=128 => 2 * 4 * 128 * 2 bytes = 2048 bytes per token per layer
+		kvBytesPerTokenPerLayer := 2 * 4 * 128 * 2
+		totalKVBytes := batchLanes * attentionLayers * kvContextLength * kvBytesPerTokenPerLayer
+
+		totalWorkingSetBytes := int64(modelWeightBytes) + int64(totalGDNBytes) + int64(totalKVBytes)
+		totalWorkingSetGB := float64(totalWorkingSetBytes) / 1e9
+
+		t.Logf("B=24 unified memory footprint: weights=%.2f GB, GDN states (48L)=%.2f GB, KV cache (16L)=%.2f GB => total=%.2f GB (cap=%.1f GB)",
+			float64(modelWeightBytes)/1e9,
+			float64(totalGDNBytes)/1e9,
+			float64(totalKVBytes)/1e9,
+			totalWorkingSetGB,
+			unifiedMemoryCapGB)
+
+		if totalWorkingSetGB > maxResidentGB {
+			t.Fatalf("B=24 resident working set %.2f GB exceeds target %.2f GB", totalWorkingSetGB, maxResidentGB)
+		}
+		if totalWorkingSetGB > unifiedMemoryCapGB {
+			t.Fatalf("B=24 resident working set %.2f GB exceeds 36GB unified memory envelope", totalWorkingSetGB)
 		}
 	})
 }

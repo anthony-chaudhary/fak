@@ -42,6 +42,11 @@ type Capabilities struct {
 	Root string `json:"root,omitempty"`
 }
 
+// ReqStrix needs the Vulkan-capable Strix appliance, not merely any host with a
+// Vulkan driver. The public alias must be selected explicitly through FAK_BOX_ID;
+// a hostname-derived Box is intentionally hashed and therefore cannot qualify.
+const ReqStrix Requirement = "strix"
+
 // knownCredEnv is the closed set of credential env-var NAMES nightrun probes for.
 // A Task may require any name; one outside this set is simply re-checked live at
 // Satisfies time, so the set is an optimisation, not a gate.
@@ -61,7 +66,7 @@ type probeEnv struct {
 
 // ProbeLocal builds the live Capabilities of the box this process runs on, rooted
 // at root for the on-disk checks (weights cache, datasets). It reads the
-// environment, looks for nvidia-smi, and falls back to the platform default
+// environment, looks for accelerator tooling, and falls back to the platform default
 // (darwin → metal) — the same load-bearing rule tools/bench_plan.py uses ("no
 // CUDA on the mac"), but resolved for the LOCAL box instead of a static roster.
 func ProbeLocal(root string) Capabilities {
@@ -105,8 +110,9 @@ func probe(root string, e probeEnv) Capabilities {
 }
 
 // detectGPU resolves the accelerator kind. An explicit FAK_BACKEND wins (the same
-// knob the compute HAL reads); otherwise nvidia-smi on PATH ⇒ cuda; otherwise a
-// darwin host ⇒ metal (the Apple GPU the metal backend builds against); else none.
+// knob the compute HAL reads); otherwise nvidia-smi on PATH ⇒ cuda, vulkaninfo
+// on PATH ⇒ vulkan; otherwise a darwin host ⇒ metal (the Apple GPU the
+// metal backend builds against); else none.
 func detectGPU(e probeEnv) string {
 	switch strings.ToLower(strings.TrimSpace(e.getenv("FAK_BACKEND"))) {
 	case "cuda":
@@ -118,6 +124,9 @@ func detectGPU(e probeEnv) string {
 	}
 	if _, err := e.look("nvidia-smi"); err == nil {
 		return "cuda"
+	}
+	if _, err := e.look("vulkaninfo"); err == nil {
+		return "vulkan"
 	}
 	if e.goos == "darwin" {
 		return "metal"
@@ -233,6 +242,11 @@ func (c Capabilities) meets(r Requirement) (bool, string) {
 			return true, ""
 		}
 		return false, fmt.Sprintf("needs an Apple GPU (box gpu=%s)", c.gpuOrNone())
+	case ReqStrix:
+		if c.GPU == "vulkan" && isStrixBox(c.Box) {
+			return true, ""
+		}
+		return false, fmt.Sprintf("needs the Strix appliance (box=%s gpu=%s; set FAK_BOX_ID to a public Strix alias)", c.Box, c.gpuOrNone())
 	case ReqNet:
 		if c.Net {
 			return true, ""
@@ -240,6 +254,15 @@ func (c Capabilities) meets(r Requirement) (bool, string) {
 		return false, "needs network (FAK_OFFLINE is set)"
 	default:
 		return false, "unknown requirement " + string(r)
+	}
+}
+
+func isStrixBox(box string) bool {
+	switch strings.ToLower(strings.TrimSpace(box)) {
+	case "strix-agent", "strix1", "strix-halo":
+		return true
+	default:
+		return false
 	}
 }
 

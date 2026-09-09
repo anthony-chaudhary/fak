@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -135,10 +136,20 @@ func (rt *serveRuntime) resolveServeModelSources(sf *serveFlags) {
 	// surface (`fak pull` / `fak ls`) reaches `fak serve` too. A bare hf:// URI or an
 	// existing path passes through unchanged.
 	if *sf.ggufPath != "" {
+		rawAlias := strings.TrimSpace(*sf.ggufPath)
 		if resolved, expanded := modelreg.Resolve(*sf.ggufPath); expanded {
 			rt.addStartupMessage(newServeStartupMessage("serve", "model-alias", "info",
 				fmt.Sprintf("--gguf %s -> %s", *sf.ggufPath, resolved)))
 			*sf.ggufPath = resolved
+		}
+		if *sf.baseURL == "" && (*sf.model == "mock" || *sf.model == "") {
+			if !filepath.IsAbs(rawAlias) && !strings.Contains(rawAlias, "/") && !strings.HasSuffix(rawAlias, ".gguf") {
+				*sf.model = rawAlias
+			} else {
+				base := filepath.Base(*sf.ggufPath)
+				base = strings.TrimSuffix(base, ".gguf")
+				*sf.model = base
+			}
 		}
 	}
 

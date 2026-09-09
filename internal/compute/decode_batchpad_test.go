@@ -210,3 +210,21 @@ func TestSlotScheduleGuards(t *testing.T) {
 		t.Fatalf("#5852: empty class set produced %d batches / %d allocated", got.Batches, got.AllocatedSteps)
 	}
 }
+
+func TestResidentDecodeBatchConcurrencyMaxSchedule(t *testing.T) {
+	if ResidentDecodeBatchConcurrencyMax != 24 {
+		t.Fatalf("ResidentDecodeBatchConcurrencyMax = %d, want 24", ResidentDecodeBatchConcurrencyMax)
+	}
+	lanes := make([]int, 24)
+	for i := range lanes {
+		lanes[i] = 1
+	}
+	s := StaticSlotSchedule([][]int{lanes}, ResidentDecodeBatchConcurrencyMax)
+	if s.Lanes != 24 || s.Batches != 1 || s.MaxConcurrency != 24 {
+		t.Fatalf("B=24 schedule lanes=%d batches=%d maxConcurrency=%d, want 24/1/24", s.Lanes, s.Batches, s.MaxConcurrency)
+	}
+	comp := CompactedSlotSchedule([][]int{lanes}, ResidentDecodeBatchConcurrencyMax, 1)
+	if comp.Lanes != 24 || comp.Batches != 1 || comp.MaxConcurrency != 24 {
+		t.Fatalf("B=24 compacted schedule lanes=%d batches=%d maxConcurrency=%d, want 24/1/24", comp.Lanes, comp.Batches, comp.MaxConcurrency)
+	}
+}
