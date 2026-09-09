@@ -152,7 +152,7 @@ func TestPoolDisabledReproducesCreateAndReapExactly(t *testing.T) {
 	wtRoot := t.TempDir()
 	g := cleanPoolGit()
 
-	res := Prepare("/repo", "tools", "disabled", "base", wtRoot, g.run)
+	res := PrepareWithBackend("/repo", "tools", "disabled", "base", wtRoot, g.run, gitWorktree{})
 	if !res.OK || res.Reused {
 		t.Fatalf("disabled prepare: %+v", res)
 	}
@@ -367,7 +367,7 @@ func TestLeaseFailureRemovesBrokenMemberThenFallsBackToAdd(t *testing.T) {
 	}
 
 	g := cleanPoolGit().reply("reset", 128, "not a worktree")
-	res := Prepare("/repo", "tools", "new-worker", "base", wtRoot, g.run)
+	res := PrepareWithBackend("/repo", "tools", "new-worker", "base", wtRoot, g.run, gitWorktree{})
 	if !res.OK || res.Reused {
 		t.Fatalf("broken pooled member must fall back to create: %+v", res)
 	}

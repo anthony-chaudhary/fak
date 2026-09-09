@@ -23,6 +23,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/committedbuildwitness"
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/trunkbuildprobe"
@@ -574,8 +575,8 @@ func dispatchFreeRAM() *int {
 // So a POSIX tick paid for a second `ps` spawn whose answer nobody read and which could not
 // be answered on half the supported hosts. Removing it changes no reported value.
 //
-// Note what this function still does NOT do: /proc/meminfo is Linux-only, so free RAM is
-// nil on darwin. That is a pre-existing gap, reported as unknown rather than as zero.
+// On Linux, it reads MemAvailable from /proc/meminfo. On Darwin, /proc/meminfo is absent,
+// so it queries compute.HostSystemMemory() (backed by vm_stat).
 func dispatchFreeRAMPOSIX() *int {
 	var freeRAM *int
 	if b, err := os.ReadFile("/proc/meminfo"); err == nil {
@@ -590,6 +591,12 @@ func dispatchFreeRAMPOSIX() *int {
 				}
 				break
 			}
+		}
+	}
+	if freeRAM == nil && runtime.GOOS == "darwin" {
+		if _, free, _ := compute.HostSystemMemory(); free != compute.FreeUnknown && free > 0 {
+			mb := int(free / (1024 * 1024))
+			return &mb
 		}
 	}
 	return freeRAM

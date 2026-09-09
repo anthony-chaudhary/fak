@@ -40,7 +40,11 @@ func TestIsolationBackendsPreserveBaseDiff(t *testing.T) {
 		t.Skip("git not on PATH")
 	}
 	for _, backend := range IsolationBackends() {
-		t.Run("git-worktree", func(t *testing.T) {
+		name := "git-worktree"
+		if _, ok := backend.(blockClone); ok {
+			name = "block-clone"
+		}
+		t.Run(name, func(t *testing.T) {
 			repo := t.TempDir()
 			git := func(dir string, args ...string) string {
 				cmd := exec.Command("git", args...)

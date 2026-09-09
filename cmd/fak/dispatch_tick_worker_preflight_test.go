@@ -263,6 +263,7 @@ func TestDispatchWorkerPreflightHardRefusalsSkipLeaseAndWorkerSpawn(t *testing.T
 }
 
 func TestDispatchWorkerPreflightReadyLaunchesExactAccountModelAndEvidence(t *testing.T) {
+	t.Setenv("FLEET_WORKER_WORKTREE", "0")
 	root, _ := dispatchCodexGateFixture(t, false)
 	t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", healthyDispatchProvider(t)+"/v1")
 

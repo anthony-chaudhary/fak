@@ -93,6 +93,7 @@ func gateScopes() []gateScopeRow {
 		// solved this for itself, and #5931 is the same answer applied to the shared seam.
 		{"CONCEPT_FRESHNESS", "gate_conceptfreshness.go", SeamPreCommit, ClassLandsTree, ""},
 		{"IMPORT_WITNESS", "gate_importwitness.go", SeamPreCommit, ClassLandsTree, ""},
+		{"CLEAR_INVENTORY_ADMISSION", "gate_inventory_admission.go", SeamPreCommit, ClassLandsTree, ""},
 
 		// ---- pre-commit, deliberately NOT moved ----------------------------------------------
 		{"PUBLIC_LEAK", "gate_publicleak.go", SeamPreCommit, ClassWorktree,

@@ -201,10 +201,16 @@ func (t *Tree) prospectiveTokenVictims(required int) ([]compute.KVSpanStats, boo
 		var best *node
 		var bestKey victimKey
 		for _, n := range nodes {
-			if removed[n] || remainingChildren[n] != 0 || n.refs > 0 {
+			if removed[n] || remainingChildren[n] != 0 || n.refs > 0 || t.isNodePinnedOrImmune(n) {
 				continue
 			}
 			key := strategy.Priority(n)
+			if seg, ok := t.nodeTierSeg(n); ok {
+				key.seg = seg
+			}
+			if key.seg >= 3 {
+				continue
+			}
 			if best == nil || key.less(bestKey) {
 				best, bestKey = n, key
 			}

@@ -415,6 +415,7 @@ var labDevCommands = map[string]string{
 	"fleet-accounts":     "fak compute-fleet account operation",
 	"fleet-trend":        "fak compute-fleet telemetry",
 	"fleetcap":           "fak compute-fleet capacity operation",
+	"hil":                "hardware-in-the-loop micro-dose execution and comparison audit",
 	"lab":                "fak private-lab operation",
 	"macbench":           "fak lab-host benchmark operation",
 	"node":               "fak compute-node operation",

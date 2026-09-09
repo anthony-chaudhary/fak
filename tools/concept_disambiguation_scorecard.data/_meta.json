@@ -12521,6 +12521,16 @@
           "category": "incidental",
           "reason": "evict clean pages in dirty ring buffer",
           "token": "evictCleanPagesLocked"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal radixkv node eviction segment helper",
+          "token": "nodeEvictionSeg"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal radixkv priority eviction policy constant",
+          "token": "EvictionPriority"
         }
       ],
       "id": "evict",
@@ -12536,6 +12546,7 @@
         "EvictedByteCount",
         "EvictionPolicyFIFO",
         "EvictionPolicyLRU",
+        "EvictionPriority",
         "EvictionsPerHit",
         "KVDigestEvictor",
         "KVEvictionCostHazard",
@@ -12559,6 +12570,7 @@
         "evicts",
         "fak_gateway_kv_prefix_tier_evictions_total",
         "kv_evictions_total",
+        "nodeEvictionSeg",
         "noteEviction",
         "pressure_evict",
         "recordEvictChoice",
