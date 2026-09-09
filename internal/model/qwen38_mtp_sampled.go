@@ -93,7 +93,8 @@ func (r *Qwen38PRNG) NextFloat32() float32 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	val := r.stepLocked()
-	return float32(val) / 4294967296.0
+	// Keep 24 bits so conversion is exact and cannot round the upper endpoint to 1.
+	return float32(val>>8) / 16777216.0
 }
 
 // NextFloat64 returns a uniform float64 in [0, 1).
@@ -637,7 +638,7 @@ func (v *Qwen38SampledSpeculativeVerifier) VerifyToken(
 	}
 
 	alpha := v.AcceptanceProbability(pT, pD)
-	if randVal <= alpha {
+	if randVal < alpha {
 		return Qwen38SampledTokenResult{
 			Accepted:         true,
 			DraftToken:       token,

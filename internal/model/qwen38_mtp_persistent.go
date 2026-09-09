@@ -166,25 +166,12 @@ func (s *Qwen38MTPPersistentSession) Prefill(prompt []int) ([]float32, error) {
 			return append([]float32(nil), s.lastLogits...), nil
 		}
 
-		// Divergence from active committed history.
-		// Roll back cache to shared prefix if possible.
-		if shared > 0 && s.target.Cache.Len() > shared {
-			_, _ = s.target.Cache.TryEvict(shared, len(s.committed)-shared)
-			s.target.targetHiddenMu.Lock()
-			if len(s.target.targetHidden) > shared {
-				s.target.targetHidden = s.target.targetHidden[:shared]
-				s.target.targetHiddenTokens = s.target.targetHiddenTokens[:shared]
-			}
-			s.target.targetHiddenMu.Unlock()
-
-			suffix := prompt[shared:]
-			for _, tok := range suffix {
-				s.lastLogits = s.target.Step(tok)
-			}
-			s.committed = append([]int(nil), prompt...)
-			s.updatePromptCache(prompt)
-			return append([]float32(nil), s.lastLogits...), nil
-		}
+		// A replacement must equal a fresh native session over exactly prompt.
+		// KV truncation cannot undo hybrid recurrence or convolution history, and
+		// a strict-prefix replacement also needs logits from its new boundary.
+		// Replay from empty state; a common-prefix cache match may contain the
+		// discarded suffix and therefore is not a checkpoint at that boundary.
+		return s.replayPrompt(prompt), nil
 	}
 
 	// Case 2: Fresh turn or cache match from external prompt cache.
@@ -209,13 +196,38 @@ func (s *Qwen38MTPPersistentSession) Prefill(prompt []int) ([]float32, error) {
 	}
 
 	// Case 3: Cold prefill on clean session.
+	return s.replayPrompt(prompt), nil
+}
+
+// replayPrompt starts from the native empty state while retaining the target
+// session and its execution configuration. The caller holds s.mu.
+func (s *Qwen38MTPPersistentSession) replayPrompt(prompt []int) []float32 {
+	s.target.closeQwen35HALState()
+	if s.target.Backend != nil {
+		if s.target.halKV != nil {
+			s.target.halKV.Free()
+		}
+		s.target.halKV = newHALKVStore(s.target.Backend, s.target.M.Cfg)
+		s.target.halLineage = tokenLineage{}
+		s.target.halStep, s.target.halLogitsWarm = 0, false
+		if gr, ok := s.target.Backend.(interface{ GraphReset() }); ok {
+			gr.GraphReset()
+		}
+		if s.target.M.Cfg.IsQwen35Hybrid() {
+			s.target.initQwen35HALState(s.target.Backend.(Qwen35GDNBackend))
+		}
+	}
 	s.target.Cache = NewKVCache(s.target.M.Cfg)
+	s.target.targetHiddenMu.Lock()
 	s.target.captureTargetHidden = true
+	s.target.targetHidden = nil
+	s.target.targetHiddenTokens = nil
+	s.target.targetHiddenMu.Unlock()
 	s.lastLogits = s.target.Prefill(prompt)
 	s.committed = append([]int(nil), prompt...)
 	s.updatePromptCache(prompt)
 
-	return append([]float32(nil), s.lastLogits...), nil
+	return append([]float32(nil), s.lastLogits...)
 }
 
 // StepRound executes a single MTP speculative block round using batched target verification,
