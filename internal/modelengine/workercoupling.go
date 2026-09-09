@@ -101,6 +101,62 @@ const (
 	PressureCritical RuntimePressureClass = "critical"
 )
 
+// DRAMPressureStatus distinguishes measured host-controller bandwidth from unavailable input.
+type DRAMPressureStatus string
+
+const (
+	DRAMPressureUnavailable DRAMPressureStatus = "unavailable"
+	DRAMPressureMeasured    DRAMPressureStatus = "measured"
+)
+
+type DRAMPressureProvider string
+type DRAMPressureScope string
+type DRAMPressureExecution string
+type DRAMPressureQualification string
+
+const (
+	DRAMProviderHostController            DRAMPressureProvider  = "host_controller"
+	DRAMScopeSystem                       DRAMPressureScope     = "system"
+	DRAMExecutionFakNativeSharedGPUDecode DRAMPressureExecution = "fak_native_shared_gpu_decode"
+
+	DRAMQualificationUnavailable       DRAMPressureQualification = "unavailable"
+	DRAMQualificationCouplingDisabled  DRAMPressureQualification = "coupling_disabled"
+	DRAMQualificationWrongExecution    DRAMPressureQualification = "wrong_execution"
+	DRAMQualificationUnsupportedSource DRAMPressureQualification = "unsupported_source"
+	DRAMQualificationMissingSource     DRAMPressureQualification = "missing_source"
+	DRAMQualificationWrongScope        DRAMPressureQualification = "wrong_scope"
+	DRAMQualificationPartial           DRAMPressureQualification = "partial_or_multiplexed"
+	DRAMQualificationInvalidBandwidth  DRAMPressureQualification = "invalid_bandwidth"
+	DRAMQualificationMissingTime       DRAMPressureQualification = "missing_observed_at"
+	DRAMQualificationFuture            DRAMPressureQualification = "future_observation"
+	DRAMQualificationStale             DRAMPressureQualification = "stale_observation"
+	DRAMQualificationQualified         DRAMPressureQualification = "qualified"
+)
+
+// DRAMPressureObservation carries raw source-bound aggregate memory-controller evidence.
+// Utilization is always derived as TotalGBps/SustainableGBps after qualification.
+type DRAMPressureObservation struct {
+	Status          DRAMPressureStatus
+	TotalGBps       float64
+	SustainableGBps float64
+	Provider        DRAMPressureProvider
+	Source          string
+	Scope           DRAMPressureScope
+	RunningRatio    float64
+	ObservedAt      time.Time
+	Execution       DRAMPressureExecution
+}
+
+// WorkerCouplingLimitReason identifies the input that bound the decode worker budget.
+type WorkerCouplingLimitReason string
+
+const (
+	CouplingReasonNone             WorkerCouplingLimitReason = "none"
+	CouplingReasonScheduler        WorkerCouplingLimitReason = "scheduler"
+	CouplingReasonHostDRAM         WorkerCouplingLimitReason = "host_dram"
+	CouplingReasonSchedulerAndDRAM WorkerCouplingLimitReason = "scheduler_and_host_dram"
+)
+
 // RuntimeMetricsSnapshot captures a point-in-time sample of Go runtime scheduler metrics.
 type RuntimeMetricsSnapshot struct {
 	RunnableGoroutines int64
@@ -125,6 +181,10 @@ type WorkerCouplingConfig struct {
 	MinWorkers         int
 	SampleInterval     time.Duration
 	MaxRunningCap      int
+	// HostDRAMThrottleThreshold and HostDRAMObservationMaxAge are deliberately zero by
+	// default. A source-bound physical receipt must opt this controller in.
+	HostDRAMThrottleThreshold float64
+	HostDRAMObservationMaxAge time.Duration
 }
 
 // DefaultWorkerCouplingConfig returns production defaults backed by host hardware topology.
@@ -190,23 +250,42 @@ func WorkerCouplingConfigFromEnv() WorkerCouplingConfig {
 
 // WorkerCouplingStats reports telemetry for the active worker coupling state.
 type WorkerCouplingStats struct {
-	Enabled            bool                 `json:"enabled"`
-	Mode               string               `json:"mode"`
-	GOMAXPROCS         int                  `json:"gomaxprocs"`
-	NumCPU             int                  `json:"num_cpu"`
-	PressureClass      RuntimePressureClass `json:"pressure_class"`
-	PressureScore      float64              `json:"pressure_score"`
-	RunnableGoroutines int64                `json:"runnable_goroutines"`
-	SchedLatencyP50    time.Duration        `json:"sched_latency_p50"`
-	SchedLatencyP95    time.Duration        `json:"sched_latency_p95"`
-	CPUIdleFraction    float64              `json:"cpu_idle_fraction"`
-	SampleCount        int64                `json:"sample_count"`
-	ThrottleEvents     int64                `json:"throttle_events"`
-	PrefillWorkers     int                  `json:"prefill_workers"`
-	DecodeWorkers      int                  `json:"decode_workers"`
-	BatchWorkers       int                  `json:"batch_workers"`
-	PipelineWorkers    int                  `json:"pipeline_workers"`
-	LastSampleTime     time.Time            `json:"last_sample_time"`
+	Enabled                   bool                      `json:"enabled"`
+	Mode                      string                    `json:"mode"`
+	GOMAXPROCS                int                       `json:"gomaxprocs"`
+	NumCPU                    int                       `json:"num_cpu"`
+	PressureClass             RuntimePressureClass      `json:"pressure_class"`
+	PressureScore             float64                   `json:"pressure_score"`
+	RunnableGoroutines        int64                     `json:"runnable_goroutines"`
+	SchedLatencyP50           time.Duration             `json:"sched_latency_p50"`
+	SchedLatencyP95           time.Duration             `json:"sched_latency_p95"`
+	CPUIdleFraction           float64                   `json:"cpu_idle_fraction"`
+	HostDRAMStatus            DRAMPressureStatus        `json:"host_dram_status"`
+	HostDRAMQualification     DRAMPressureQualification `json:"host_dram_qualification"`
+	HostDRAMTotalGBps         float64                   `json:"host_dram_total_gb_s"`
+	HostDRAMSustainableGBps   float64                   `json:"host_dram_sustainable_gb_s"`
+	HostDRAMUtilization       float64                   `json:"host_dram_utilization"`
+	HostDRAMProvider          DRAMPressureProvider      `json:"host_dram_provider"`
+	HostDRAMSource            string                    `json:"host_dram_source"`
+	HostDRAMScope             DRAMPressureScope         `json:"host_dram_scope"`
+	HostDRAMRunningRatio      float64                   `json:"host_dram_running_ratio"`
+	HostDRAMObservedAt        time.Time                 `json:"host_dram_observed_at"`
+	HostDRAMObservationAge    time.Duration             `json:"host_dram_observation_age"`
+	HostDRAMExecution         DRAMPressureExecution     `json:"host_dram_execution"`
+	HostDRAMThrottleThreshold float64                   `json:"host_dram_throttle_threshold"`
+	HostDRAMObservationMaxAge time.Duration             `json:"host_dram_observation_max_age"`
+	HostDRAMQualified         bool                      `json:"host_dram_qualified"`
+	SampleCount               int64                     `json:"sample_count"`
+	ThrottleEvents            int64                     `json:"throttle_events"`
+	HostDRAMThrottleEvents    int64                     `json:"host_dram_throttle_events"`
+	PrefillWorkers            int                       `json:"prefill_workers"`
+	DecodeWorkers             int                       `json:"decode_workers"`
+	DecodeSchedulerWorkers    int                       `json:"decode_scheduler_workers"`
+	DecodeDRAMWorkers         int                       `json:"decode_dram_workers"`
+	DecodeLimitReason         WorkerCouplingLimitReason `json:"decode_limit_reason"`
+	BatchWorkers              int                       `json:"batch_workers"`
+	PipelineWorkers           int                       `json:"pipeline_workers"`
+	LastSampleTime            time.Time                 `json:"last_sample_time"`
 }
 
 // WorkerCoupler orchestrates dynamic runtime-capacity worker coupling.
@@ -222,9 +301,11 @@ type WorkerCoupler struct {
 	lastPressureScore float64
 	lastPressureClass RuntimePressureClass
 
-	sampleCount        int64
-	throttleEvents     int64
-	lastAppliedWorkers int
+	sampleCount            int64
+	throttleEvents         int64
+	lastAppliedWorkers     int
+	hostDRAMPressure       DRAMPressureObservation
+	hostDRAMThrottleEvents int64
 }
 
 // NewWorkerCoupler builds a coupler with the given configuration.
@@ -312,6 +393,17 @@ func (c *WorkerCoupler) SetSampler(s MetricsSampler) {
 	c.sampler = s
 	c.mu.Unlock()
 	c.SampleNow()
+}
+
+// ObserveHostDRAMPressure publishes the latest source-bound host-controller observation.
+// The observation remains inert unless the opt-in policy and all qualification checks pass.
+func (c *WorkerCoupler) ObserveHostDRAMPressure(obs DRAMPressureObservation) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.hostDRAMPressure = obs
+	c.mu.Unlock()
 }
 
 // SampleNow immediately forces a fresh metrics sample and recalculates budgets.
@@ -437,35 +529,8 @@ func (c *WorkerCoupler) workersForOpLocked(op WorkerOpKind) int {
 
 	case OpDecode:
 		// Memory-bandwidth-bound single-token GEMV: sensitive to barrier stalls, clamps aggressively.
-		switch {
-		case score < 0.20:
-			factor = 1.00
-		case score < 0.45:
-			factor = 0.75
-		case score < 0.70:
-			factor = 0.50
-		case score < 0.85:
-			// Under high contention, clamp to min(2, maxW).
-			w := 2
-			if w > maxW {
-				w = maxW
-			}
-			if w < minW {
-				w = minW
-			}
-			return w
-		default:
-			// Critical contention: single worker avoids parFor barrier entirely.
-			return minW
-		}
-		w := int(math.Round(float64(maxW) * factor))
-		if w < minW {
-			w = minW
-		}
-		if w > maxW {
-			w = maxW
-		}
-		return w
+		schedulerW := decodeSchedulerBudget(score, maxW, minW)
+		return c.applyHostDRAMDecodeLimitLocked(schedulerW, maxW, minW)
 
 	case OpBatch:
 		// Multi-lane StepBatch: intermediate compute intensity.
@@ -515,6 +580,124 @@ func (c *WorkerCoupler) workersForOpLocked(op WorkerOpKind) int {
 
 	default:
 		return maxW
+	}
+}
+
+func decodeSchedulerBudget(score float64, maxW, minW int) int {
+	var factor float64
+	switch {
+	case score < 0.20:
+		factor = 1.00
+	case score < 0.45:
+		factor = 0.75
+	case score < 0.70:
+		factor = 0.50
+	case score < 0.85:
+		w := 2
+		if w > maxW {
+			w = maxW
+		}
+		if w < minW {
+			w = minW
+		}
+		return w
+	default:
+		return minW
+	}
+	w := int(math.Round(float64(maxW) * factor))
+	if w < minW {
+		return minW
+	}
+	if w > maxW {
+		return maxW
+	}
+	return w
+}
+
+func qualifyHostDRAMPressure(obs DRAMPressureObservation, policy WorkerCouplingConfig, decisionAt time.Time) (float64, time.Duration, DRAMPressureQualification, bool) {
+	if policy.Mode != CouplingModeDynamic || policy.HostDRAMThrottleThreshold <= 0 || policy.HostDRAMThrottleThreshold > 1 || policy.HostDRAMObservationMaxAge <= 0 {
+		return 0, 0, DRAMQualificationCouplingDisabled, false
+	}
+	if obs.Status != DRAMPressureMeasured {
+		return 0, 0, DRAMQualificationUnavailable, false
+	}
+	if obs.Execution != DRAMExecutionFakNativeSharedGPUDecode {
+		return 0, 0, DRAMQualificationWrongExecution, false
+	}
+	if obs.Provider != DRAMProviderHostController {
+		return 0, 0, DRAMQualificationUnsupportedSource, false
+	}
+	if strings.TrimSpace(obs.Source) == "" {
+		return 0, 0, DRAMQualificationMissingSource, false
+	}
+	if obs.Scope != DRAMScopeSystem {
+		return 0, 0, DRAMQualificationWrongScope, false
+	}
+	if obs.RunningRatio != 1 {
+		return 0, 0, DRAMQualificationPartial, false
+	}
+	if !finiteNonNegative(obs.TotalGBps) || !finitePositive(obs.SustainableGBps) {
+		return 0, 0, DRAMQualificationInvalidBandwidth, false
+	}
+	if obs.ObservedAt.IsZero() {
+		return 0, 0, DRAMQualificationMissingTime, false
+	}
+	if decisionAt.IsZero() {
+		decisionAt = time.Now()
+	}
+	age := decisionAt.Sub(obs.ObservedAt)
+	if age < 0 {
+		return 0, age, DRAMQualificationFuture, false
+	}
+	if age > policy.HostDRAMObservationMaxAge {
+		return 0, age, DRAMQualificationStale, false
+	}
+	utilization := obs.TotalGBps / obs.SustainableGBps
+	if utilization > 1 {
+		utilization = 1
+	}
+	return utilization, age, DRAMQualificationQualified, true
+}
+
+func finitePositive(v float64) bool {
+	return v > 0 && !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
+func finiteNonNegative(v float64) bool {
+	return v >= 0 && !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
+func hostDRAMDecodeBudget(obs DRAMPressureObservation, policy WorkerCouplingConfig, decisionAt time.Time, maxW, minW int) int {
+	utilization, _, _, ok := qualifyHostDRAMPressure(obs, policy, decisionAt)
+	if !ok || utilization < policy.HostDRAMThrottleThreshold {
+		return maxW
+	}
+	return minW
+}
+
+func (c *WorkerCoupler) applyHostDRAMDecodeLimitLocked(schedulerW, maxW, minW int) int {
+	dramW := hostDRAMDecodeBudget(c.hostDRAMPressure, c.policy, time.Now(), maxW, minW)
+	if dramW < schedulerW {
+		return dramW
+	}
+	return schedulerW
+}
+
+func decodeLimitReason(selected, schedulerW, dramW, maxW int) WorkerCouplingLimitReason {
+	if selected >= maxW {
+		return CouplingReasonNone
+	}
+	schedulerBound := schedulerW == selected && schedulerW < maxW
+	dramBound := dramW == selected && dramW < maxW
+	switch {
+	case schedulerBound && dramBound:
+		return CouplingReasonSchedulerAndDRAM
+	case dramBound:
+		return CouplingReasonHostDRAM
+	case schedulerBound:
+		return CouplingReasonScheduler
+	default:
+		return CouplingReasonNone
 	}
 }
 
@@ -621,7 +804,21 @@ func (c *WorkerCoupler) WithOp(op WorkerOpKind, fn func()) {
 	c.sampleLocked(time.Now(), false)
 	targetWorkers := c.workersForOpLocked(op)
 	maxW := c.maxWorkersForOpLocked(op)
-	if targetWorkers < maxW {
+	schedulerWorkers := targetWorkers
+	if op == OpDecode && c.policy.Mode == CouplingModeDynamic {
+		minW := c.policy.MinWorkers
+		if minW < 1 {
+			minW = 1
+		}
+		if maxW < minW {
+			maxW = minW
+		}
+		schedulerWorkers = decodeSchedulerBudget(c.lastPressureScore, maxW, minW)
+		if targetWorkers < schedulerWorkers {
+			c.hostDRAMThrottleEvents++
+		}
+	}
+	if schedulerWorkers < maxW {
 		c.throttleEvents++
 	}
 	if targetWorkers != c.lastAppliedWorkers {
@@ -671,25 +868,70 @@ func (c *WorkerCoupler) Stats() WorkerCouplingStats {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.sampleLocked(time.Now(), false)
+	dram := c.hostDRAMPressure
+	decisionAt := time.Now()
+	dramUtilization, dramAge, dramQualification, dramQualified := qualifyHostDRAMPressure(dram, c.policy, decisionAt)
+	dramStatus := dram.Status
+	if !dramQualified {
+		dramStatus = DRAMPressureUnavailable
+	}
+	decodeMax := c.maxWorkersForOpLocked(OpDecode)
+	decodeMin := c.policy.MinWorkers
+	if decodeMin < 1 {
+		decodeMin = 1
+	}
+	if decodeMax < decodeMin {
+		decodeMax = decodeMin
+	}
+	decodeSchedulerWorkers := decodeMax
+	decodeDRAMWorkers := decodeMax
+	if c.policy.Mode == CouplingModeDynamic {
+		decodeSchedulerWorkers = decodeSchedulerBudget(c.lastPressureScore, decodeMax, decodeMin)
+		decodeDRAMWorkers = hostDRAMDecodeBudget(dram, c.policy, decisionAt, decodeMax, decodeMin)
+	}
+	decodeWorkers := c.workersForOpLocked(OpDecode)
+	decodeReason := CouplingReasonNone
+	if c.policy.Mode == CouplingModeDynamic {
+		decodeReason = decodeLimitReason(decodeWorkers, decodeSchedulerWorkers, decodeDRAMWorkers, decodeMax)
+	}
 
 	return WorkerCouplingStats{
-		Enabled:            c.policy.Mode != CouplingModeDisabled,
-		Mode:               c.policy.Mode.String(),
-		GOMAXPROCS:         c.lastSnapshot.GOMAXPROCS,
-		NumCPU:             c.lastSnapshot.NumCPU,
-		PressureClass:      c.lastPressureClass,
-		PressureScore:      c.lastPressureScore,
-		RunnableGoroutines: c.lastSnapshot.RunnableGoroutines,
-		SchedLatencyP50:    c.lastSnapshot.SchedLatencyP50,
-		SchedLatencyP95:    c.lastSnapshot.SchedLatencyP95,
-		CPUIdleFraction:    c.lastSnapshot.CPUIdleFraction,
-		SampleCount:        c.sampleCount,
-		ThrottleEvents:     c.throttleEvents,
-		PrefillWorkers:     c.workersForOpLocked(OpPrefill),
-		DecodeWorkers:      c.workersForOpLocked(OpDecode),
-		BatchWorkers:       c.workersForOpLocked(OpBatch),
-		PipelineWorkers:    c.workersForOpLocked(OpPipeline),
-		LastSampleTime:     c.lastSampleTime,
+		Enabled:                   c.policy.Mode != CouplingModeDisabled,
+		Mode:                      c.policy.Mode.String(),
+		GOMAXPROCS:                c.lastSnapshot.GOMAXPROCS,
+		NumCPU:                    c.lastSnapshot.NumCPU,
+		PressureClass:             c.lastPressureClass,
+		PressureScore:             c.lastPressureScore,
+		RunnableGoroutines:        c.lastSnapshot.RunnableGoroutines,
+		SchedLatencyP50:           c.lastSnapshot.SchedLatencyP50,
+		SchedLatencyP95:           c.lastSnapshot.SchedLatencyP95,
+		CPUIdleFraction:           c.lastSnapshot.CPUIdleFraction,
+		HostDRAMStatus:            dramStatus,
+		HostDRAMQualification:     dramQualification,
+		HostDRAMTotalGBps:         dram.TotalGBps,
+		HostDRAMSustainableGBps:   dram.SustainableGBps,
+		HostDRAMUtilization:       dramUtilization,
+		HostDRAMProvider:          dram.Provider,
+		HostDRAMSource:            dram.Source,
+		HostDRAMScope:             dram.Scope,
+		HostDRAMRunningRatio:      dram.RunningRatio,
+		HostDRAMObservedAt:        dram.ObservedAt,
+		HostDRAMObservationAge:    dramAge,
+		HostDRAMExecution:         dram.Execution,
+		HostDRAMThrottleThreshold: c.policy.HostDRAMThrottleThreshold,
+		HostDRAMObservationMaxAge: c.policy.HostDRAMObservationMaxAge,
+		HostDRAMQualified:         dramQualified,
+		SampleCount:               c.sampleCount,
+		ThrottleEvents:            c.throttleEvents,
+		HostDRAMThrottleEvents:    c.hostDRAMThrottleEvents,
+		PrefillWorkers:            c.workersForOpLocked(OpPrefill),
+		DecodeWorkers:             c.workersForOpLocked(OpDecode),
+		DecodeSchedulerWorkers:    decodeSchedulerWorkers,
+		DecodeDRAMWorkers:         decodeDRAMWorkers,
+		DecodeLimitReason:         decodeReason,
+		BatchWorkers:              c.workersForOpLocked(OpBatch),
+		PipelineWorkers:           c.workersForOpLocked(OpPipeline),
+		LastSampleTime:            c.lastSampleTime,
 	}
 }
 
@@ -715,14 +957,89 @@ func (c *WorkerCoupler) WriteMetrics(b *strings.Builder) {
 	writeNativeHelpType(b, p+"cpu_idle_fraction", "Recent CPU idle time fraction in range [0.0, 1.0].", "gauge")
 	fmt.Fprintf(b, "%scpu_idle_fraction %.4f\n", p, st.CPUIdleFraction)
 
+	writeNativeHelpType(b, p+"host_dram_pressure_qualified", "Whether host DRAM utilization is measured and source-qualified (1) or unavailable (0).", "gauge")
+	fmt.Fprintf(b, "%shost_dram_pressure_qualified %d\n", p, boolMetric(st.HostDRAMQualified))
+
+	writeNativeHelpType(b, p+"host_dram_pressure_total_gb_s", "Observed aggregate host memory-controller traffic in GB/s.", "gauge")
+	fmt.Fprintf(b, "%shost_dram_pressure_total_gb_s %.4f\n", p, st.HostDRAMTotalGBps)
+
+	writeNativeHelpType(b, p+"host_dram_pressure_sustainable_gb_s", "Measured sustainable host DRAM bandwidth used as the utilization denominator.", "gauge")
+	fmt.Fprintf(b, "%shost_dram_pressure_sustainable_gb_s %.4f\n", p, st.HostDRAMSustainableGBps)
+
+	writeNativeHelpType(b, p+"host_dram_pressure_running_ratio", "Counter time-running ratio; only exactly 1 is eligible for coupling.", "gauge")
+	fmt.Fprintf(b, "%shost_dram_pressure_running_ratio %.4f\n", p, st.HostDRAMRunningRatio)
+
+	writeNativeHelpType(b, p+"host_dram_pressure_utilization", "Derived qualified host DRAM utilization in range [0.0, 1.0]; zero when unavailable.", "gauge")
+	fmt.Fprintf(b, "%shost_dram_pressure_utilization %.4f\n", p, st.HostDRAMUtilization)
+
+	writeNativeHelpType(b, p+"host_dram_pressure_observation_age_seconds", "Age of the host DRAM observation at the coupling sample.", "gauge")
+	fmt.Fprintf(b, "%shost_dram_pressure_observation_age_seconds %.6f\n", p, st.HostDRAMObservationAge.Seconds())
+
+	writeNativeHelpType(b, p+"host_dram_pressure_observed_at_seconds", "Unix timestamp of the host DRAM observation; zero when missing.", "gauge")
+	fmt.Fprintf(b, "%shost_dram_pressure_observed_at_seconds %.6f\n", p, unixSeconds(st.HostDRAMObservedAt))
+
+	writeNativeHelpType(b, p+"host_dram_pressure_throttle_threshold", "Opt-in utilization threshold for host DRAM decode throttling; zero disables it.", "gauge")
+	fmt.Fprintf(b, "%shost_dram_pressure_throttle_threshold %.4f\n", p, st.HostDRAMThrottleThreshold)
+
+	writeNativeHelpType(b, p+"host_dram_pressure_max_age_seconds", "Maximum eligible host DRAM observation age; zero disables coupling.", "gauge")
+	fmt.Fprintf(b, "%shost_dram_pressure_max_age_seconds %.6f\n", p, st.HostDRAMObservationMaxAge.Seconds())
+
+	writeNativeHelpType(b, p+"host_dram_pressure_info", "Typed host DRAM qualification, provenance, scope, and execution applicability.", "gauge")
+	fmt.Fprintf(b, "%shost_dram_pressure_info{status=\"%s\",qualification=\"%s\",provider=\"%s\",scope=\"%s\",execution=\"%s\"} 1\n",
+		p, st.HostDRAMStatus, st.HostDRAMQualification, metricDRAMProvider(st.HostDRAMProvider), metricDRAMScope(st.HostDRAMScope), metricDRAMExecution(st.HostDRAMExecution))
+
 	writeNativeHelpType(b, p+"active_workers", "Active parallel worker allocations by operation kind.", "gauge")
 	fmt.Fprintf(b, "%sactive_workers{op=\"prefill\"} %d\n", p, st.PrefillWorkers)
 	fmt.Fprintf(b, "%sactive_workers{op=\"decode\"} %d\n", p, st.DecodeWorkers)
 	fmt.Fprintf(b, "%sactive_workers{op=\"batch\"} %d\n", p, st.BatchWorkers)
 	fmt.Fprintf(b, "%sactive_workers{op=\"pipeline\"} %d\n", p, st.PipelineWorkers)
 
+	writeNativeHelpType(b, p+"decode_worker_limit", "Decode worker budgets from each decision input and the selected binding reason.", "gauge")
+	fmt.Fprintf(b, "%sdecode_worker_limit{input=\"scheduler\"} %d\n", p, st.DecodeSchedulerWorkers)
+	fmt.Fprintf(b, "%sdecode_worker_limit{input=\"host_dram\"} %d\n", p, st.DecodeDRAMWorkers)
+	fmt.Fprintf(b, "%sdecode_worker_limit{input=\"selected\"} %d\n", p, st.DecodeWorkers)
+
+	writeNativeHelpType(b, p+"decode_limit_reason", "Current binding reason for the selected decode worker budget.", "gauge")
+	fmt.Fprintf(b, "%sdecode_limit_reason{reason=\"%s\"} 1\n", p, st.DecodeLimitReason)
+
 	writeNativeCounter(b, p+"samples_total", "Cumulative scheduler metrics samples taken.", st.SampleCount)
 	writeNativeCounter(b, p+"throttle_events_total", "Cumulative parallel worker throttle events under scheduler pressure.", st.ThrottleEvents)
+	writeNativeCounter(b, p+"host_dram_throttle_events_total", "Cumulative decode worker reductions bound by qualified host DRAM pressure.", st.HostDRAMThrottleEvents)
+}
+
+func boolMetric(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
+}
+
+func unixSeconds(t time.Time) float64 {
+	if t.IsZero() {
+		return 0
+	}
+	return float64(t.UnixNano()) / float64(time.Second)
+}
+
+func metricDRAMProvider(v DRAMPressureProvider) DRAMPressureProvider {
+	if v == DRAMProviderHostController {
+		return v
+	}
+	return "unavailable"
+}
+
+func metricDRAMScope(v DRAMPressureScope) DRAMPressureScope {
+	if v == DRAMScopeSystem {
+		return v
+	}
+	return "unavailable"
+}
+
+func metricDRAMExecution(v DRAMPressureExecution) DRAMPressureExecution {
+	if v == DRAMExecutionFakNativeSharedGPUDecode {
+		return v
+	}
+	return "unavailable"
 }
 
 // Internal hardware defaults.

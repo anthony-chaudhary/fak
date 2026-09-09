@@ -263,6 +263,147 @@ func TestWorkerCouplerOperationDifferentiation(t *testing.T) {
 	}
 }
 
+func TestStrixSharedBandwidthWorkerCoupling(t *testing.T) {
+	policy := WorkerCouplingConfig{
+		Mode:                      CouplingModeDynamic,
+		MaxPrefillWorkers:         8,
+		MaxDecodeWorkers:          8,
+		MaxBatchWorkers:           8,
+		MaxPipelineWorkers:        8,
+		MinWorkers:                2,
+		SampleInterval:            0,
+		HostDRAMThrottleThreshold: 0.90,
+		HostDRAMObservationMaxAge: time.Minute,
+	}
+	coupler := NewWorkerCoupler(policy)
+	now := time.Now()
+	coupler.SetSampler(func() RuntimeMetricsSnapshot {
+		return RuntimeMetricsSnapshot{
+			RunnableGoroutines: 0,
+			GOMAXPROCS:         8,
+			NumCPU:             8,
+			SchedLatencyP95:    50 * time.Microsecond,
+			CPUIdleFraction:    0.95,
+			SampledAt:          now,
+		}
+	})
+
+	valid := DRAMPressureObservation{
+		Status:          DRAMPressureMeasured,
+		TotalGBps:       190,
+		SustainableGBps: 200,
+		Provider:        DRAMProviderHostController,
+		Source:          "receipt:strix-host-controller",
+		Scope:           DRAMScopeSystem,
+		RunningRatio:    1,
+		ObservedAt:      now.Add(-100 * time.Millisecond),
+		Execution:       DRAMExecutionFakNativeSharedGPUDecode,
+	}
+	invalid := []struct {
+		name string
+		edit func(*DRAMPressureObservation)
+		want DRAMPressureQualification
+	}{
+		{"missing", func(o *DRAMPressureObservation) { *o = DRAMPressureObservation{} }, DRAMQualificationUnavailable},
+		{"unqualified_provider", func(o *DRAMPressureObservation) { o.Provider = "" }, DRAMQualificationUnsupportedSource},
+		{"missing_source", func(o *DRAMPressureObservation) { o.Source = "" }, DRAMQualificationMissingSource},
+		{"wrong_scope", func(o *DRAMPressureObservation) { o.Scope = "process" }, DRAMQualificationWrongScope},
+		{"partial", func(o *DRAMPressureObservation) { o.RunningRatio = 0.99 }, DRAMQualificationPartial},
+		{"invalid_bandwidth", func(o *DRAMPressureObservation) { o.SustainableGBps = 0 }, DRAMQualificationInvalidBandwidth},
+		{"nan_total", func(o *DRAMPressureObservation) { o.TotalGBps = math.NaN() }, DRAMQualificationInvalidBandwidth},
+		{"infinite_total", func(o *DRAMPressureObservation) { o.TotalGBps = math.Inf(1) }, DRAMQualificationInvalidBandwidth},
+		{"negative_total", func(o *DRAMPressureObservation) { o.TotalGBps = -1 }, DRAMQualificationInvalidBandwidth},
+		{"stale", func(o *DRAMPressureObservation) { o.ObservedAt = now.Add(-2 * time.Minute) }, DRAMQualificationStale},
+		{"future", func(o *DRAMPressureObservation) { o.ObservedAt = now.Add(time.Hour) }, DRAMQualificationFuture},
+		{"cpu_decode", func(o *DRAMPressureObservation) { o.Execution = "cpu_decode" }, DRAMQualificationWrongExecution},
+	}
+	for _, tc := range invalid {
+		t.Run(tc.name, func(t *testing.T) {
+			dram := valid
+			tc.edit(&dram)
+			coupler.ObserveHostDRAMPressure(dram)
+			if got := coupler.WorkersFor(OpDecode); got != 8 {
+				t.Fatalf("workers = %d, want unchanged 8", got)
+			}
+			st := coupler.Stats()
+			if st.HostDRAMQualified || st.HostDRAMStatus != DRAMPressureUnavailable || st.HostDRAMQualification != tc.want {
+				t.Fatalf("invalid observation stats = %+v, want reason %s", st, tc.want)
+			}
+		})
+	}
+
+	for _, mode := range []WorkerCouplingMode{CouplingModeStatic, CouplingModeDisabled} {
+		p := policy
+		p.Mode = mode
+		coupler.SetConfig(p)
+		coupler.ObserveHostDRAMPressure(valid)
+		if got := coupler.WorkersFor(OpDecode); got != 8 {
+			t.Fatalf("decode workers in %s mode = %d, want unchanged 8", mode, got)
+		}
+		if st := coupler.Stats(); st.HostDRAMQualification != DRAMQualificationCouplingDisabled {
+			t.Fatalf("qualification in %s mode = %s, want coupling_disabled", mode, st.HostDRAMQualification)
+		}
+	}
+	coupler.SetConfig(policy)
+	coupler.ObserveHostDRAMPressure(valid)
+	if got := coupler.WorkersFor(OpDecode); got != 2 {
+		t.Fatalf("decode workers under measured shared-DRAM pressure = %d, want floor 2", got)
+	}
+	if got := coupler.WorkersFor(OpPrefill); got != 8 {
+		t.Fatalf("prefill workers under measured shared-DRAM pressure = %d, want unchanged 8", got)
+	}
+	st := coupler.Stats()
+	if !st.HostDRAMQualified || st.HostDRAMStatus != DRAMPressureMeasured ||
+		st.HostDRAMQualification != DRAMQualificationQualified || st.HostDRAMTotalGBps != 190 ||
+		st.HostDRAMSustainableGBps != 200 || st.HostDRAMUtilization != 0.95 {
+		t.Fatalf("qualified DRAM decision inputs = %+v", st)
+	}
+	if st.DecodeSchedulerWorkers != 8 || st.DecodeDRAMWorkers != 2 || st.DecodeWorkers != 2 ||
+		st.DecodeLimitReason != CouplingReasonHostDRAM {
+		t.Fatalf("bounded DRAM decode decision = %+v", st)
+	}
+
+	var metrics strings.Builder
+	coupler.WriteMetrics(&metrics)
+	for _, want := range []string{
+		"fak_worker_coupling_host_dram_pressure_qualified 1",
+		"fak_worker_coupling_host_dram_pressure_total_gb_s 190.0000",
+		"fak_worker_coupling_host_dram_pressure_sustainable_gb_s 200.0000",
+		"fak_worker_coupling_host_dram_pressure_running_ratio 1.0000",
+		"fak_worker_coupling_host_dram_pressure_utilization 0.9500",
+		"provider=\"host_controller\",scope=\"system\",execution=\"fak_native_shared_gpu_decode\"",
+		"fak_worker_coupling_decode_worker_limit{input=\"scheduler\"} 8",
+		"fak_worker_coupling_decode_worker_limit{input=\"host_dram\"} 2",
+		"fak_worker_coupling_decode_worker_limit{input=\"selected\"} 2",
+		"fak_worker_coupling_decode_limit_reason{reason=\"host_dram\"} 1",
+		"fak_worker_coupling_host_dram_throttle_events_total 0",
+	} {
+		if !strings.Contains(metrics.String(), want) {
+			t.Errorf("metrics missing %q:\n%s", want, metrics.String())
+		}
+	}
+
+	coupler.WithOp(OpDecode, func() {})
+	if st := coupler.Stats(); st.ThrottleEvents != 0 || st.HostDRAMThrottleEvents != 1 {
+		t.Fatalf("separate throttle counters = %+v", st)
+	}
+
+	low := valid
+	low.TotalGBps = 0
+	coupler.ObserveHostDRAMPressure(low)
+	if got := coupler.WorkersFor(OpDecode); got != 8 {
+		t.Fatalf("decode workers after shared-DRAM pressure recovers = %d, want 8", got)
+	}
+	if st := coupler.Stats(); st.DecodeLimitReason != CouplingReasonNone || st.DecodeWorkers != 8 {
+		t.Fatalf("recovered decode decision = %+v", st)
+	}
+
+	coupler.ObserveHostDRAMPressure(DRAMPressureObservation{})
+	if got := coupler.WorkersFor(OpDecode); got != 8 {
+		t.Fatalf("decode workers after observation becomes unavailable = %d, want 8", got)
+	}
+}
+
 func TestWorkerCouplerThrottleScaleAndCap(t *testing.T) {
 	policy := WorkerCouplingConfig{
 		Mode:              CouplingModeDynamic,
