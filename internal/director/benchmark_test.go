@@ -291,7 +291,7 @@ func BenchmarkStallTimeoutAutomaticTransition(b *testing.B) {
 		if i%2 == 0 {
 			atomic.StoreInt64(&nowMs, 1700000000000+1000) // 1000ms elapsed > 500ms -> stalled
 		} else {
-			atomic.StoreInt64(&nowMs, 1700000000000+200)  // 200ms elapsed < 500ms -> active
+			atomic.StoreInt64(&nowMs, 1700000000000+200) // 200ms elapsed < 500ms -> active
 		}
 		d, recs := engine.CompileAndEvaluate()
 		benchDigestSink.digest = d

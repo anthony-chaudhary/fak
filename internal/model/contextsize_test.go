@@ -131,8 +131,8 @@ func TestContextSizeConfigQwen38_20kContext(t *testing.T) {
 	// 3. Recurrent state is fixed O(1) size (independent of context length)
 	const wantLinearLayers = 48
 	const wantRecurrent = int64(wantLinearLayers * 48 * 128 * 128 * 4) // 150,994,944 bytes
-	const convDim = 2*(16*128) + (48*128)                              // 10,240 floats
-	const wantConv = int64(wantLinearLayers * (4 - 1) * convDim * 4)  // 5,898,240 bytes
+	const convDim = 2*(16*128) + (48 * 128)                            // 10,240 floats
+	const wantConv = int64(wantLinearLayers * (4 - 1) * convDim * 4)   // 5,898,240 bytes
 	const wantFixed = wantRecurrent + wantConv                         // 156,893,184 bytes
 
 	if len(got.SessionState) != 1 {
@@ -174,4 +174,3 @@ func TestContextSizeConfigQwen38_20kContext(t *testing.T) {
 		t.Fatalf("hybrid plan did not discount KV: got %d, uniform %d", kvClassBytes, uniformKV)
 	}
 }
-

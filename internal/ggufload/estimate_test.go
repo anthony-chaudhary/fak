@@ -127,7 +127,7 @@ func TestEstimateQ8LoadBytesCountsResidentQ8Expansion(t *testing.T) {
 		Tensors: []TensorInfo{
 			{Name: "token_embd.weight", Dims: []uint64{1024, 256}, Type: TensorF32},   // 262,144 elems * 4 = 1,048,576 B (F32 embedding)
 			{Name: "blk.0.attn_q.weight", Dims: []uint64{256, 256}, Type: TensorQ2_K}, // 65,536 elems * 34 / 32 = 69,632 B (Q8 matmul)
-			{Name: "output_norm.weight", Dims: []uint64{256}, Type: TensorF32},         // 256 elems * 4 = 1,024 B (F32 norm)
+			{Name: "output_norm.weight", Dims: []uint64{256}, Type: TensorF32},        // 256 elems * 4 = 1,024 B (F32 norm)
 		},
 	}
 	ws, err := NewWeightSource(f, nil, 0)

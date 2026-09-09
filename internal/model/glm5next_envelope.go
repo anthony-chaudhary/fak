@@ -4,25 +4,25 @@ import "fmt"
 
 // GLM5NextContextStage defines evaluated context length tiers.
 type GLM5NextContextStage struct {
-	Name          string `json:"name"`           // "short", "32k", "128k", "256k", "1m"
-	ContextTokens int    `json:"context_tokens"` // 4096, 32768, 131072, 262144, 1048576
-	KDABallastBytes int64 `json:"kda_ballast_bytes"` // fixed O(1) state: 34 layers * 64 heads * 128 * 128 * 4
-	DSAKVBytes     int64 `json:"dsa_kv_bytes"`      // O(N): 11 layers * 512 latent * 2 bytes * N
-	ActiveMoEBytes int64 `json:"active_moe_bytes"`  // 18B active parameters (~18.2 GB in FP8)
-	TotalRequiredBytes int64 `json:"total_required_bytes"`
-	FeasibleOn96GB bool  `json:"feasible_on_96gb"`
-	FeasibleOn128GB bool `json:"feasible_on_128gb"`
+	Name               string `json:"name"`              // "short", "32k", "128k", "256k", "1m"
+	ContextTokens      int    `json:"context_tokens"`    // 4096, 32768, 131072, 262144, 1048576
+	KDABallastBytes    int64  `json:"kda_ballast_bytes"` // fixed O(1) state: 34 layers * 64 heads * 128 * 128 * 4
+	DSAKVBytes         int64  `json:"dsa_kv_bytes"`      // O(N): 11 layers * 512 latent * 2 bytes * N
+	ActiveMoEBytes     int64  `json:"active_moe_bytes"`  // 18B active parameters (~18.2 GB in FP8)
+	TotalRequiredBytes int64  `json:"total_required_bytes"`
+	FeasibleOn96GB     bool   `json:"feasible_on_96gb"`
+	FeasibleOn128GB    bool   `json:"feasible_on_128gb"`
 }
 
 // GLM5NextOperatingEnvelope models and checks the capacity envelope for GLM-5.3-Flash.
 type GLM5NextOperatingEnvelope struct {
-	Model             string                 `json:"model"`
-	TotalParameters   int64                  `json:"total_parameters"`
-	ActiveParameters  int64                  `json:"active_parameters"`
-	LayersTotal       int                    `json:"layers_total"`
-	KDARecurrentLayers int                   `json:"kda_recurrent_layers"`
-	DSASparseLayers   int                    `json:"dsa_sparse_layers"`
-	Stages            []GLM5NextContextStage `json:"stages"`
+	Model              string                 `json:"model"`
+	TotalParameters    int64                  `json:"total_parameters"`
+	ActiveParameters   int64                  `json:"active_parameters"`
+	LayersTotal        int                    `json:"layers_total"`
+	KDARecurrentLayers int                    `json:"kda_recurrent_layers"`
+	DSASparseLayers    int                    `json:"dsa_sparse_layers"`
+	Stages             []GLM5NextContextStage `json:"stages"`
 }
 
 // DefaultGLM5NextOperatingEnvelope returns the verified operating envelope parameters.

@@ -81,8 +81,8 @@ func (v *vulkanBackend) AddBias(dst, bias Tensor) {
 
 // Attention runs the fused scaled-dot-product FlashAttention for one layer over the cached
 // keys/values (grp query heads per KV head, scale applied to the scores) via online softmax,
-// dispatching 4 buffers (Q, K, V, Out) with zero global scratch allocations, and returning the
-// per-head context vectors as one device tensor.
+// returning the per-head context vectors as one device tensor. The default path uses no
+// global scratch; the explicit context-split candidate uses bounded transient scratch.
 func (v *vulkanBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, grp int, scale float32) Tensor {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -91,9 +91,17 @@ func (v *vulkanBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, 
 	nH := grp * nKV
 	w := nKV * hd
 	nPos := vk.K[layer].len / w
-	out, _ := v.devTr([]int{nH * hd}, F32)
+	out, outBuf := v.devTr([]int{nH * hd}, F32)
 	C.fvk_attention_f32(v.vp(q), vk.K[layer].ptr, vk.V[layer].ptr, v.vp(out),
 		C.int(nPos), C.int(nH), C.int(nKV), C.int(hd), C.float(scale))
+	if status := int(C.fvk_submission_status()); status != 0 {
+		if outBuf != nil && outBuf.ptr != nil {
+			C.fvk_free(outBuf.ptr)
+			outBuf.ptr = nil
+			outBuf.n = 0
+		}
+		panic(fmt.Errorf("compute: Vulkan attention failed closed (code %d); no fallback", status))
+	}
 	return out
 }
 

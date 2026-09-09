@@ -493,11 +493,12 @@ func (q *AQLQueue) SubmitBarrier(packet AQLBarrierPacket) (uint64, int64, error)
 }
 
 // ResumeToolYield coordinates lockless tool resumption:
-// 1. Records the child process / tool exit code.
-// 2. Transitions queue state from QueueStateYielded back to QueueStateActive.
-// 3. If an optional resumption packet is provided, submits it to the ring buffer.
-//    Otherwise, advances the write pointer to signal the RDNA 3.5 command processor.
-// 4. Rings the hardware MMIO doorbell register (or in-memory fallback simulation).
+//  1. Records the child process / tool exit code.
+//  2. Transitions queue state from QueueStateYielded back to QueueStateActive.
+//  3. If an optional resumption packet is provided, submits it to the ring buffer.
+//     Otherwise, advances the write pointer to signal the RDNA 3.5 command processor.
+//  4. Rings the hardware MMIO doorbell register (or in-memory fallback simulation).
+//
 // Returns the dispatch latency in nanoseconds (< 50µs SLA).
 func (q *AQLQueue) ResumeToolYield(exitCode int, resumptionPacket ...any) (latencyNs int64, err error) {
 	atomic.StoreInt32(&q.lastExitCode, int32(exitCode))

@@ -261,6 +261,8 @@ concurrent = [
   "benchruns",
   "newleaf",
   "scorecard", # pkg/scorecard shared scorecard fold/render kernel; not an internal leaf
+  "repocompose", # pkg/repocompose
+  "strix", # pkg/strix
   "productscorecard",
   "rsl", # internal/rsl Reference State Log leaf; cmd/fak audit shim stays in the cmd lane
   "mlpscore", # internal/mlpscore MLP first-lovable-cut scorecard; cmd/fak shims stay in the cmd lane
@@ -625,6 +627,8 @@ autopick = [
   "benchruns",
   "newleaf",
   "scorecard", # pkg/scorecard shared scorecard fold/render kernel; see [lanes].concurrent note
+  "repocompose", # pkg/repocompose
+  "strix", # pkg/strix
   "productscorecard",
   "rsl", # internal/rsl Reference State Log leaf; see [lanes].concurrent note
   "mlpscore", # internal/mlpscore MLP first-lovable-cut scorecard; see [lanes].concurrent note
@@ -777,6 +781,7 @@ cachemeta = ["internal/cachemeta/**"]
 capindex = ["internal/capindex/**"]
 capindexgw = ["internal/capindexgw/**"]
 compute = ["internal/compute/**"]
+cluster = ["internal/cluster/**"]
 cdb = ["internal/cdb/**"]
 ctxmmu = ["internal/ctxmmu/**"]
 engine = ["internal/engine/**"]
@@ -916,6 +921,8 @@ benchloop = ["internal/benchloop/**"]
 benchruns = ["internal/benchruns/**"]
 newleaf = ["internal/newleaf/**"]
 scorecard = ["pkg/scorecard/**"]
+repocompose = ["pkg/repocompose/**"]
+strix = ["pkg/strix/**"]
 scratchmark = ["internal/scratchmark/**"] # self-declared-disposability detector: a file whose leading comment block calls itself a throwaway. Its gate shim (internal/hooks/gate_scratchmark.go) stays in the `hooks` lane to keep leaf trees pairwise-disjoint.
 productscorecard = ["internal/productscorecard/**"]
 rsl = ["internal/rsl/**"]

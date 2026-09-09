@@ -300,4 +300,3 @@ func extractBulletedField(text, fieldName string) string {
 	}
 	return ""
 }
-

@@ -1,6 +1,7 @@
 package radixkv_test
 
 import (
+	"encoding/binary"
 	"math"
 	"math/rand"
 	"testing"
@@ -93,11 +94,15 @@ func TestPagedRadixKVPool_ZeroCopyBinding(t *testing.T) {
 		}
 	}
 
-	// Verify Metal page table matches block IDs (uint32)
+	// Verify Metal page table contains physical slots rather than allocation IDs.
 	metalPages := table.MetalPages()
 	for i, mbID := range metalPages {
-		if mbID != uint32(allocatedBlocks[i]) {
-			t.Errorf("metal page[%d] = %d, want %d", i, mbID, allocatedBlocks[i])
+		blk, err := allocator.GetBlock(allocatedBlocks[i])
+		if err != nil {
+			t.Fatalf("failed to resolve block %d: %v", allocatedBlocks[i], err)
+		}
+		if mbID != uint32(blk.PhysicalSlot()) {
+			t.Errorf("metal page[%d] = %d, want physical slot %d", i, mbID, blk.PhysicalSlot())
 		}
 	}
 
@@ -140,6 +145,121 @@ func TestPagedRadixKVPool_ZeroCopyBinding(t *testing.T) {
 		if ref := blk.RefCount(); ref != 1 {
 			t.Fatalf("block %d post-release refcount = %d, want 1 (tree ownership)", bID, ref)
 		}
+	}
+}
+
+func TestPagedTablesUsePhysicalSlots(t *testing.T) {
+	pagedRadix, kvPool := makeTestPool(t, 2, 16)
+	allocator := kvPool.Allocator()
+
+	retired, err := allocator.Allocate()
+	if err != nil {
+		t.Fatalf("allocate retired incarnation: %v", err)
+	}
+	retiredID, slot := retired.ID, retired.PhysicalSlot()
+	if freed, err := allocator.Free(retiredID); err != nil || !freed {
+		t.Fatalf("free retired incarnation: freed=%v err=%v", freed, err)
+	}
+	live, err := allocator.Allocate()
+	if err != nil {
+		t.Fatalf("allocate live incarnation: %v", err)
+	}
+	if live.ID == live.PhysicalSlot() || live.PhysicalSlot() != slot {
+		t.Fatalf("slot reuse did not separate identity: retired=%d live=%d slot=%d", retiredID, live.ID, live.PhysicalSlot())
+	}
+	liveSecond, err := allocator.Allocate()
+	if err != nil {
+		t.Fatalf("allocate second live block: %v", err)
+	}
+
+	boundary, _ := pagedRadix.Tree.Lookup(nil)
+	tokens := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17}
+	leaf, err := pagedRadix.InsertPaged(boundary, tokens, []int{live.ID, liveSecond.ID})
+	if err != nil {
+		t.Fatalf("InsertPaged: %v", err)
+	}
+	if got := live.Release(); got != 1 {
+		t.Fatalf("release first allocation reference = %d, want tree reference 1", got)
+	}
+	if got := liveSecond.Release(); got != 1 {
+		t.Fatalf("release second allocation reference = %d, want tree reference 1", got)
+	}
+
+	wantSlots := []uint32{uint32(slot), uint32(liveSecond.PhysicalSlot())}
+	assertMetal := func(name string, table *radixkv.PagedBlockTable) {
+		t.Helper()
+		pages := table.MetalPages()
+		if len(pages) != len(wantSlots) {
+			t.Fatalf("%s MetalPages = %v, want %v", name, pages, wantSlots)
+		}
+		pageBytes := table.MetalPageTableBytes()
+		for i, want := range wantSlots {
+			if pages[i] != want || len(pageBytes) != len(wantSlots)*4 || binary.LittleEndian.Uint32(pageBytes[i*4:]) != want {
+				t.Fatalf("%s Metal table = %v / %v, want slots %v", name, pages, pageBytes, wantSlots)
+			}
+		}
+	}
+
+	if got := pagedRadix.ResolveMetalPageTable(leaf); len(got) != len(wantSlots) || got[0] != wantSlots[0] || got[1] != wantSlots[1] {
+		t.Fatalf("ResolveMetalPageTable = %v, want %v", got, wantSlots)
+	}
+	nodeTable, err := pagedRadix.BindNode(leaf, "slot-node")
+	if err != nil {
+		t.Fatalf("BindNode: %v", err)
+	}
+	assertMetal("BindNode", nodeTable)
+	if got := live.RefCount(); got != 2 || liveSecond.RefCount() != 2 {
+		t.Fatalf("BindNode refcounts = %d/%d, want tree + table = 2", got, liveSecond.RefCount())
+	}
+	if err := pagedRadix.ReleaseBlockTable(nodeTable); err != nil {
+		t.Fatalf("release node table: %v", err)
+	}
+
+	prefixTable, matched, hit, err := pagedRadix.BindPrefix(tokens, "slot-prefix")
+	if err != nil || !hit || matched != len(tokens) {
+		t.Fatalf("BindPrefix: matched=%d hit=%v err=%v", matched, hit, err)
+	}
+	assertMetal("BindPrefix", prefixTable)
+	if err := pagedRadix.ReleaseBlockTable(prefixTable); err != nil {
+		t.Fatalf("release prefix table: %v", err)
+	}
+	if got := live.RefCount(); got != 1 || liveSecond.RefCount() != 1 {
+		t.Fatalf("refcounts after table releases = %d/%d, want tree reference 1", got, liveSecond.RefCount())
+	}
+
+	if freed, err := allocator.Free(liveSecond.ID); err != nil || !freed {
+		t.Fatalf("retire tree's allocation ID: freed=%v err=%v", freed, err)
+	}
+	replacement, err := allocator.Allocate()
+	if err != nil {
+		t.Fatalf("allocate replacement: %v", err)
+	}
+	if replacement.ID == liveSecond.ID || replacement.PhysicalSlot() != liveSecond.PhysicalSlot() {
+		t.Fatalf("replacement identity/slot = %d/%d, want new ID in slot %d", replacement.ID, replacement.PhysicalSlot(), liveSecond.PhysicalSlot())
+	}
+	if err := pagedRadix.SetNodeBlocks(leaf, []int{live.ID, liveSecond.ID}); err == nil {
+		t.Fatal("SetNodeBlocks(live, stale) succeeded, want error")
+	}
+	if got := pagedRadix.ResolveMetalPageTable(leaf); got != nil {
+		t.Fatalf("ResolveMetalPageTable(stale ID) = %v, want nil", got)
+	}
+	if table, err := pagedRadix.BindNode(leaf, "stale-node"); err == nil || table != nil {
+		t.Fatalf("BindNode(stale ID) = table=%v err=%v, want nil/error", table, err)
+	}
+	if table, _, hit, err := pagedRadix.BindPrefix(tokens, "stale-prefix"); err == nil || hit || table != nil {
+		t.Fatalf("BindPrefix(stale ID) = table=%v hit=%v err=%v, want nil/false/error", table, hit, err)
+	}
+	if got := live.RefCount(); got != 1 || replacement.RefCount() != 1 {
+		t.Fatalf("refcounts after partial stale binds = live %d replacement %d, want 1/1", got, replacement.RefCount())
+	}
+	if freed, err := allocator.Free(live.ID); err != nil || !freed {
+		t.Fatalf("free first live block: freed=%v err=%v", freed, err)
+	}
+	if freed, err := allocator.Free(replacement.ID); err != nil || !freed {
+		t.Fatalf("free replacement: freed=%v err=%v", freed, err)
+	}
+	if got := allocator.AllocatedCount(); got != 0 {
+		t.Fatalf("allocated blocks after cleanup = %d, want 0", got)
 	}
 }
 

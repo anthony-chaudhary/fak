@@ -216,7 +216,7 @@ func addLocalModuleReplacement(productDir, repoRoot string) error {
 }
 
 func runExternalSelfcheck(ctx context.Context, productDir string) (harnesskit.LaunchReceipt, error) {
-	cmd := exec.CommandContext(ctx, "go", "run", "./cmd/product", "--selfcheck")
+	cmd := exec.CommandContext(ctx, "go", "run", "-mod=mod", "./cmd/product", "--selfcheck")
 	cmd.Dir = productDir
 	cmd.Env = append(os.Environ(), "GOPROXY=off", "GOSUMDB=off", "GOWORK=off")
 	windowgate.ConfigureBackgroundCommand(cmd)

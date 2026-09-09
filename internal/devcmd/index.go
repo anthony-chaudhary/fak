@@ -80,6 +80,7 @@ func RunIndex(stdout, stderr io.Writer, argv []string) int {
 	fs.Var(&agentsFallbacks, "fallback", "fak-dev index agents: lower-precedence instruction file name (repeatable)")
 	agentsMaxBytes := fs.Int64("max-bytes", 0, "fak-dev index agents: shared effective-instruction byte budget")
 	agentsTrust := fs.Bool("trust", false, "fak-dev index agents: mark caller-verified sources trusted")
+	writeManifest := fs.Bool("write-manifest", false, "fak-dev index ownership: write the generated commands manifest")
 	// Parse flags that may appear ANYWHERE around the positional query (the natural
 	// `fak-dev index leaf cache --limit 6` order), not just before it. Go's flag package
 	// stops at the first non-flag arg, so interleave Parse with positional collection.
@@ -147,7 +148,7 @@ func RunIndex(stdout, stderr io.Writer, argv []string) int {
 			*agentsFor, []string(agentsFallbacks), *agentsMaxBytes, *agentsTrust)
 
 	case "ownership":
-		return indexOwnership(stdout, stderr, rootDir, args, *asJSON)
+		return indexOwnership(stdout, stderr, rootDir, args, *asJSON, *writeManifest)
 	case "policy", "enforce":
 		return runIndexPolicy(stdout, stderr, rootDir, args, *asJSON)
 	case "graph":
@@ -504,9 +505,9 @@ func flushTab(tw *tabwriter.Writer, stderr io.Writer, label string) int {
 	return 0
 }
 
-func indexOwnership(stdout, stderr io.Writer, root string, args []string, inheritedJSON bool) int {
+func indexOwnership(stdout, stderr io.Writer, root string, args []string, inheritedJSON bool, inheritedWriteManifest bool) int {
 	asJSON := inheritedJSON
-	writeManifest := false
+	writeManifest := inheritedWriteManifest
 	for _, arg := range args {
 		switch arg {
 		case "--json":

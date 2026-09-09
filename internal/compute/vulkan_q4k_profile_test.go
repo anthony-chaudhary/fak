@@ -347,7 +347,7 @@ func TestVulkanQ4KWave32PhysicalAB(t *testing.T) {
 		"binary":              execPath,
 		"compiler":            "glslc (Vulkan 1.2 SPIR-V) + c++ (GCC/Clang -O3)",
 		"driver":              "Mesa RADV STRIX_HALO",
-		"clock_headroom":       "manual DPM, 40 CUs gfx1151",
+		"clock_headroom":      "manual DPM, 40 CUs gfx1151",
 		"allocation":          "device-local Q4_K weights + resident f32 activations; synchronized output read",
 		"raw_sample_identity": "10 post-warm iterations per shape in matched alternating A/B/B/A order under exclusive GPU lease",
 		"keep_gate": map[string]any{

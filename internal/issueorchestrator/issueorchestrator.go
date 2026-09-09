@@ -145,11 +145,11 @@ type WavePlanOptions struct {
 
 // OpencodeChatOptions configures fresh OpenCode chat generation.
 type OpencodeChatOptions struct {
-	Model       string   `json:"model,omitempty"`
-	Agent       string   `json:"agent,omitempty"`
-	Variant     string   `json:"variant,omitempty"`
-	Interactive bool     `json:"interactive,omitempty"`
-	WorktreeDir string   `json:"worktree_dir,omitempty"`
+	Model         string   `json:"model,omitempty"`
+	Agent         string   `json:"agent,omitempty"`
+	Variant       string   `json:"variant,omitempty"`
+	Interactive   bool     `json:"interactive,omitempty"`
+	WorktreeDir   string   `json:"worktree_dir,omitempty"`
 	AutoApprove   bool     `json:"auto_approve,omitempty"`
 	PrintLogs     bool     `json:"print_logs,omitempty"`
 	SubagentDepth int      `json:"subagent_depth,omitempty"`

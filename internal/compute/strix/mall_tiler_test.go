@@ -4,7 +4,6 @@ import (
 	"errors"
 	"sync"
 	"testing"
-
 )
 
 // TestMALLTiler executes the comprehensive test suite for AMD Strix Halo

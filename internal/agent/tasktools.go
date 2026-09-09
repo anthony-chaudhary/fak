@@ -680,10 +680,47 @@ var (
 	activeTaskEngine *taskEngine
 )
 
+// SetLimits updates the max active and backlog capacity limits.
+func (s *TaskState) SetLimits(maxActive, maxBacklog int) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if maxActive > 0 {
+		s.maxActive = maxActive
+	}
+	if maxBacklog > 0 {
+		s.maxBacklog = maxBacklog
+	}
+}
+
+// Limits returns the current max active and backlog capacity limits.
+func (s *TaskState) Limits() (maxActive, maxBacklog int) {
+	if s == nil {
+		return 0, 0
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.maxActive, s.maxBacklog
+}
+
 // ArmTaskTools initializes the native child task tools, registers their engines,
 // installs the adjudicator gate once, and returns the planner-facing ToolDef declarations.
 func ArmTaskTools() ([]ToolDef, error) {
+	return ArmTaskToolsWithLimits(DefaultMaxActiveTasks, DefaultMaxBacklogTasks)
+}
+
+// ArmTaskToolsWithLimits initializes the native child task tools with explicit capacity limits,
+// registers their engines, installs the adjudicator gate once, and returns planner ToolDefs.
+func ArmTaskToolsWithLimits(maxActive, maxBacklog int) ([]ToolDef, error) {
 	st := NewTaskState()
+	if maxActive > 0 {
+		st.maxActive = maxActive
+	}
+	if maxBacklog > 0 {
+		st.maxBacklog = maxBacklog
+	}
 	armedTaskTools.Store(st)
 
 	taskEnginesOnce.Do(func() {

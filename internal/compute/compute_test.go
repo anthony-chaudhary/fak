@@ -504,3 +504,32 @@ func TestMatMulEmitsOptInHostTrace(t *testing.T) {
 		t.Fatalf("event=%+v", e)
 	}
 }
+
+// TestAuditCPUCloneTensorOwnsQuantScale states TensorCloner's independently-owned
+// value contract for a normally constructed Q8 tensor. Quant scales participate in
+// MatMul values, so changing a clone must not change its source tensor's result.
+func TestAuditCPUCloneTensorOwnsQuantScale(t *testing.T) {
+	c := cpu()
+	src := QuantizeQ8(c, []int{1, 32}, []float32{
+		1, 2, 3, 4, 5, 6, 7, 8,
+		9, 10, 11, 12, 13, 14, 15, 16,
+		17, 18, 19, 20, 21, 22, 23, 24,
+		25, 26, 27, 28, 29, 30, 31, 32,
+	}, 32)
+	x := NewF32(c, []int{32}, []float32{
+		1, 1, 1, 1, 1, 1, 1, 1,
+		1, 1, 1, 1, 1, 1, 1, 1,
+		1, 1, 1, 1, 1, 1, 1, 1,
+		1, 1, 1, 1, 1, 1, 1, 1,
+	})
+	before := c.Read(c.MatMul(src, x))[0]
+	clone, err := c.CloneTensor(src)
+	if err != nil {
+		t.Fatalf("CloneTensor: %v", err)
+	}
+	clone.Quant.Scale[0] *= 2
+	after := c.Read(c.MatMul(src, x))[0]
+	if math.Float32bits(after) != math.Float32bits(before) {
+		t.Fatalf("mutating clone scale changed source MatMul: before=%g after=%g", before, after)
+	}
+}

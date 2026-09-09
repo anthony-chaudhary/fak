@@ -208,6 +208,21 @@ func TestProbeLANNodeAutoDiscoversCanonicalStrix(t *testing.T) {
 	}
 }
 
+func TestProbeLANNodePreservesCanonicalFailure(t *testing.T) {
+	t.Setenv("FAK_STRIX_HOST", "")
+	t.Setenv("FAK_LAN_HOST", "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	info := probeLANNode(ctx, "", []string{"192.0.2.1"})
+	if info.Status != LANNodeOffline || info.Error == "" {
+		t.Fatalf("canonical failure = %+v, want concrete OFFLINE diagnostic", info)
+	}
+	if strings.Contains(info.Error, "192.0.2.1") || info.Host != "<LAN_IP>" {
+		t.Fatalf("canonical failure leaked raw endpoint: %+v", info)
+	}
+}
+
 func TestProbeLANNodeSSHReachable(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -339,7 +354,7 @@ func TestProbeInventory(t *testing.T) {
 	}
 
 	// Unconfigured inventory check
-	t.Setenv("FAK_STRIX_HOST", "")
+	t.Setenv("FAK_STRIX_HOST", "unconfigured")
 	t.Setenv("FAK_LAN_HOST", "")
 	repUnconf := ProbeInventory(ctx, "")
 	if repUnconf.LAN.Status != LANNodeUnconfigured {

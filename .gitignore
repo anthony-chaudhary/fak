@@ -891,6 +891,7 @@ docs/dispatch-status.md
 !/.env.example
 !/.gitattributes
 !/.github
+!/.githooks
 !/.gitignore
 !/.gopls
 !/.junie

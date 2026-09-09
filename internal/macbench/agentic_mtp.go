@@ -125,12 +125,12 @@ type AgenticMTPPacket struct {
 	HostID            string                  `json:"host_id"`
 	Provenance        string                  `json:"provenance"` // "PHYSICAL_SILICON"
 	IsPhysicalSilicon bool                    `json:"is_physical_silicon"`
-	Engine            string                  `json:"engine"`          // "fak-native"
-	Runtime           string                  `json:"runtime"`         // "inkernel"
+	Engine            string                  `json:"engine"`  // "fak-native"
+	Runtime           string                  `json:"runtime"` // "inkernel"
 	RuntimeRevision   string                  `json:"runtime_revision"`
-	SpecType          string                  `json:"spec_type"`       // "mtp-sidecar"
-	Fallback          string                  `json:"fallback"`        // "none"
-	FallbackCount     int                     `json:"fallback_count"`  // 0
+	SpecType          string                  `json:"spec_type"`      // "mtp-sidecar"
+	Fallback          string                  `json:"fallback"`       // "none"
+	FallbackCount     int                     `json:"fallback_count"` // 0
 	Model             ComparisonModel         `json:"model"`
 	Hardware          ComparisonHardware      `json:"hardware"`
 	OS                ComparisonOS            `json:"os"`
@@ -809,7 +809,7 @@ func WriteAgenticMTPRun(outDir string, packet AgenticMTPPacket, raw AgenticMTPRa
 			"name":    "macbench-agentic-mtp",
 			"version": "1",
 		},
-		"machine_id":       "node-macos-a",
+		"machine_id": "node-macos-a",
 		"model": map[string]string{
 			"name":      packet.Model.ID,
 			"precision": packet.Model.Quant,

@@ -4,9 +4,11 @@ package compute
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"math/rand"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -134,6 +136,151 @@ func TestVulkanQwen35SequenceQuantizedPanelsMatchCPU(t *testing.T) {
 		t.Fatalf("format parity oracle: %v", err)
 	}
 	t.Logf("%s", oracleJSON)
+}
+
+// TestVulkanDecodeAttentionContextSplitParity proves that the opt-in decode
+// attention context split executes both of its ordered dispatches and preserves
+// the scalar CPU attention result across non-divisible 256-position tile tails.
+func TestVulkanDecodeAttentionContextSplitParity(t *testing.T) {
+	const childEnv = "FAK_TEST_VULKAN_ATTENTION_CONTEXT_SPLIT_CHILD"
+	if os.Getenv(childEnv) != "1" {
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatalf("os.Executable: %v", err)
+		}
+		cmd := exec.CommandContext(t.Context(), exe, "-test.v", "-test.run=^TestVulkanDecodeAttentionContextSplitParity$")
+		cmd.Env = append(os.Environ(),
+			childEnv+"=1",
+			"FAK_VULKAN_DISPATCH_PROFILE=1",
+			"FAK_VULKAN_ATTENTION_CONTEXT_SPLIT=1",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("context-split attention subprocess failed: %v\n%s", err, out)
+		}
+		if strings.Contains(string(out), "--- SKIP: TestVulkanDecodeAttentionContextSplitParity") {
+			t.Skipf("context-split attention subprocess skipped without a Vulkan device:\n%s", out)
+		}
+		t.Logf("%s", out)
+		return
+	}
+	if os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") != "1" {
+		t.Fatal("set FAK_VULKAN_DISPATCH_PROFILE=1 before process start")
+	}
+	if os.Getenv("FAK_VULKAN_ATTENTION_CONTEXT_SPLIT") != "1" {
+		t.Fatal("set FAK_VULKAN_ATTENTION_CONTEXT_SPLIT=1 before process start")
+	}
+	v := vk(t)
+	c := cpu()
+	cases := []struct {
+		name       string
+		nPos       int
+		nKV, group int
+		headDim    int
+	}{
+		{name: "mha_ctx257_tail1", nPos: 257, nKV: 2, group: 1, headDim: 32},
+		{name: "gqa_ctx511_tail255", nPos: 511, nKV: 2, group: 3, headDim: 32},
+		{name: "mqa_ctx513_tail1", nPos: 513, nKV: 1, group: 6, headDim: 256},
+	}
+	var seed lcg = 12535
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := KVConfig{NumLayers: 1, NumKVHeads: tc.nKV, HeadDim: tc.headDim, RopeTheta: 10000}
+			ckv := c.NewKV(cfg)
+			defer ckv.Free()
+			vkv := v.NewKV(cfg)
+			defer vkv.Free()
+			kvWidth := tc.nKV * tc.headDim
+			for pos := 0; pos < tc.nPos; pos++ {
+				kRaw := randVec(&seed, kvWidth)
+				kRoPE := randVec(&seed, kvWidth)
+				value := randVec(&seed, kvWidth)
+				ckv.AppendKV(0, NewF32(c, []int{kvWidth}, kRaw), NewF32(c, []int{kvWidth}, kRoPE), NewF32(c, []int{kvWidth}, value), pos)
+				dkRaw := v.Upload(NewF32(c, []int{kvWidth}, kRaw), F32)
+				dkRoPE := v.Upload(NewF32(c, []int{kvWidth}, kRoPE), F32)
+				dValue := v.Upload(NewF32(c, []int{kvWidth}, value), F32)
+				vkv.AppendKV(0, dkRaw, dkRoPE, dValue, pos)
+				v.Free(dkRaw)
+				v.Free(dkRoPE)
+				v.Free(dValue)
+			}
+
+			nHeads := tc.nKV * tc.group
+			scale := float32(1 / math.Sqrt(float64(tc.headDim)))
+			// A second call against the same KV store exercises reuse and lifetime
+			// of the split candidate's partial-reduction scratch allocation.
+			for query := 0; query < 2; query++ {
+				q := randVec(&seed, nHeads*tc.headDim)
+				refTensor := c.Attention(NewF32(c, []int{len(q)}, q), ckv, 0, true, tc.group, scale)
+				ref := c.Read(refTensor)
+				c.Free(refTensor)
+				dq := v.Upload(NewF32(c, []int{len(q)}, q), F32)
+				v.VulkanDebugResetDispatchProfile()
+				if query == 1 {
+					v.BeginBatch()
+				}
+				gotTensor := v.Attention(dq, vkv, 0, true, tc.group, scale)
+				if query == 1 {
+					v.FlushBatch()
+				}
+				got := v.Read(gotTensor)
+				profile := v.VulkanDebugDispatchProfileSnapshot()
+				v.Free(gotTensor)
+				v.Free(dq)
+				if profile.OtherAttentionDispatches != 2 {
+					t.Fatalf("query %d context-split attention dispatches=%d, want 2 (partial + ordered merge); profile=%+v", query, profile.OtherAttentionDispatches, profile)
+				}
+				if len(got) != len(ref) {
+					t.Fatalf("query %d output length=%d, want %d", query, len(got), len(ref))
+				}
+				for i := range got {
+					if math.IsNaN(float64(got[i])) || math.IsInf(float64(got[i]), 0) ||
+						math.IsNaN(float64(ref[i])) || math.IsInf(float64(ref[i]), 0) {
+						t.Fatalf("query %d output[%d] must be finite: got=%g ref=%g", query, i, got[i], ref[i])
+					}
+				}
+				cos := cosine(ref, got)
+				delta := maxAbs(ref, got)
+				if cos < 0.999 {
+					t.Fatalf("query %d attention cosine %.8f < 0.999", query, cos)
+				}
+				if delta > 1e-2 {
+					t.Fatalf("query %d attention max|delta| %.6g > 1e-2", query, delta)
+				}
+				t.Logf("query=%d context=%d nKV=%d group=%d headDim=%d cosine=%.8f maxAbs=%.6g dispatches=%d",
+					query, tc.nPos, tc.nKV, tc.group, tc.headDim, cos, delta, profile.OtherAttentionDispatches)
+			}
+		})
+	}
+	t.Run("reject_head_dim_over_split_limit", func(t *testing.T) {
+		const headDim = 1025
+		cfg := KVConfig{NumLayers: 1, NumKVHeads: 1, HeadDim: headDim, RopeTheta: 10000}
+		vkv := v.NewKV(cfg)
+		defer vkv.Free()
+		row := make([]float32, headDim)
+		for i := range row {
+			row[i] = float32(i%17-8) / 17
+		}
+		dkRaw := v.Upload(NewF32(c, []int{headDim}, row), F32)
+		dkRoPE := v.Upload(NewF32(c, []int{headDim}, row), F32)
+		dValue := v.Upload(NewF32(c, []int{headDim}, row), F32)
+		defer v.Free(dkRaw)
+		defer v.Free(dkRoPE)
+		defer v.Free(dValue)
+		vkv.AppendKV(0, dkRaw, dkRoPE, dValue, 0)
+		dq := v.Upload(NewF32(c, []int{headDim}, row), F32)
+		defer v.Free(dq)
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatal("headDim 1025 returned a tensor; want context-split failure with no fallback")
+			}
+			if got := fmt.Sprint(r); !strings.Contains(got, "Vulkan attention failed closed") {
+				t.Fatalf("headDim 1025 panic=%q, want Vulkan attention failed closed", got)
+			}
+		}()
+		_ = v.Attention(dq, vkv, 0, true, 1, float32(1/math.Sqrt(headDim)))
+	})
 }
 
 func TestVulkanQwen35SequenceGeometryValidation(t *testing.T) {

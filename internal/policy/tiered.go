@@ -155,12 +155,12 @@ type RuleProvenance struct {
 
 // CompiledTieredPolicy contains the result of compiling multiple settings tiers.
 type CompiledTieredPolicy struct {
-	Effective   Manifest          `json:"effective"`
-	Epoch       string            `json:"epoch"`
-	Provenance  map[string]Tier   `json:"provenance"`
-	RuleActions []RuleProvenance  `json:"rule_actions"`
-	Layers      []TierLayer       `json:"layers"`
-	Hermetic    bool              `json:"hermetic"`
+	Effective   Manifest         `json:"effective"`
+	Epoch       string           `json:"epoch"`
+	Provenance  map[string]Tier  `json:"provenance"`
+	RuleActions []RuleProvenance `json:"rule_actions"`
+	Layers      []TierLayer      `json:"layers"`
+	Hermetic    bool             `json:"hermetic"`
 }
 
 // TieredResolverOptions configures the compilation and resolution behavior.

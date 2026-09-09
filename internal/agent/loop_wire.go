@@ -118,6 +118,15 @@ func WithTaskTools() RunOption {
 	}
 }
 
+// WithTaskToolsLimits arms the kernel-mediated child task tools with explicit capacity limits
+// and merges them into the run's tool catalog.
+func WithTaskToolsLimits(maxActive, maxBacklog int) RunOption {
+	return func(c *runConfig) {
+		_, _ = ArmTaskToolsWithLimits(maxActive, maxBacklog)
+		c.taskTools = true
+	}
+}
+
 // WithContextControl arms the context_control tool and merges it into the run's tool catalog.
 func WithContextControl(opts ...ContextControlOption) RunOption {
 	return func(c *runConfig) {

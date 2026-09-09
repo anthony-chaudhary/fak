@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -354,5 +355,204 @@ func TestServeLocalRuntimePreflightPassesAuditablePlanToLauncher(t *testing.T) {
 	}
 	if launched.ArtifactSHA256 != req.Declaration.ArtifactSHA256 || launched.DeviceKind != "cuda" || launched.DeviceID != "0" || launched.Required.VRAMBytes != 2*(1<<30) {
 		t.Fatalf("launcher did not receive the admitted artifact/runtime/resource plan: %+v", launched)
+	}
+}
+
+func TestServeBackendPreflight_StrixHaloActivation(t *testing.T) {
+	defer os.Unsetenv("FAK_STRIX_GFX1151_OVERRIDE")
+
+	// Case 1: Environment override activation (1 and true)
+	os.Setenv("FAK_STRIX_GFX1151_OVERRIDE", "1")
+	res1 := preflightServeStrixHalo(nil)
+	if !res1.Detected {
+		t.Fatal("expected Strix Halo detected=true via env override=1")
+	}
+	if res1.UMAPointerManager == nil {
+		t.Fatal("expected initialized UMAPointerManager")
+	}
+	if res1.MALLTiler == nil {
+		t.Fatal("expected initialized MALLTiler")
+	}
+	// MALL Infinity Cache tiling window capacity equals 8,192 tokens
+	if capTokens := res1.MALLTiler.CapacityTokens(); capTokens != 8192 {
+		t.Fatalf("expected 8192 MALL tokens, got %d", capTokens)
+	}
+	rootSpan := res1.MALLTiler.ClassifyTokenSpan(0, 8192)
+	if rootSpan.PinnedTokens != 8192 || rootSpan.BypassTokens != 0 {
+		t.Fatalf("expected 8192 pinned tokens in root context, got %+v", rootSpan)
+	}
+	bypassSpan := res1.MALLTiler.ClassifyTokenSpan(8192, 16384)
+	if bypassSpan.PinnedTokens != 0 || bypassSpan.BypassTokens != 8192 {
+		t.Fatalf("expected 8192 bypass tokens beyond MALL root context, got %+v", bypassSpan)
+	}
+
+	// UMA buffer allocation guarantees zero-copy pointer identity uintptr(HostPtr) == uintptr(DevPtr)
+	buf, err := res1.UMAPointerManager.AllocateUMABuffer(1024, 64)
+	if err != nil {
+		t.Fatalf("failed to allocate UMA buffer: %v", err)
+	}
+	if !buf.IsZeroCopy() {
+		t.Fatal("expected zero-copy UMA buffer on Strix Halo")
+	}
+	hp := buf.HostPtr()
+	dp := buf.DevPtr()
+	if hp == 0 || dp == 0 {
+		t.Fatalf("expected non-zero pointers: hp=%x dp=%x", hp, dp)
+	}
+	if uintptr(hp) != uintptr(dp) {
+		t.Fatalf("zero-copy pointer identity violation: uintptr(HostPtr)=0x%x != uintptr(DevPtr)=0x%x", hp, dp)
+	}
+	if !res1.UMAPointerManager.AssertPointerIdentity(buf.UnsafePointer(), dp) {
+		t.Fatalf("AssertPointerIdentity failed: hp=0x%x dp=0x%x", hp, dp)
+	}
+	if err := res1.UMAPointerManager.FreeUMABuffer(buf); err != nil {
+		t.Fatalf("failed to free UMA buffer: %v", err)
+	}
+
+	msg1 := serveStrixHaloPreflightMessage(res1)
+	if msg1.Source != "strix-halo" || msg1.Kind != "apu-preflight" || msg1.Level != "info" {
+		t.Fatalf("unexpected message metadata: %+v", msg1)
+	}
+	if !strings.Contains(msg1.Text, "detected=true") || !strings.Contains(msg1.Text, "uma_zero_copy=active") || !strings.Contains(msg1.Text, "mall_tiling_32mb=active") {
+		t.Fatalf("unexpected message text: %q", msg1.Text)
+	}
+
+	// Case 1b: Environment override via "true"
+	os.Setenv("FAK_STRIX_GFX1151_OVERRIDE", "true")
+	res1b := preflightServeStrixHalo(nil)
+	if !res1b.Detected || res1b.UMAPointerManager == nil || res1b.MALLTiler == nil {
+		t.Fatal("expected Strix Halo detected=true via env override=true")
+	}
+
+	// Case 2: Environment override explicit disable (0 and false)
+	os.Setenv("FAK_STRIX_GFX1151_OVERRIDE", "0")
+	res2 := preflightServeStrixHalo(nil)
+	if res2.Detected {
+		t.Fatal("expected detected=false when override=0")
+	}
+	if res2.UMAPointerManager != nil || res2.MALLTiler != nil {
+		t.Fatal("expected nil subsystems when detected=false")
+	}
+	msg2 := serveStrixHaloPreflightMessage(res2)
+	if msg2 != (gateway.StartupMessage{}) {
+		t.Fatalf("expected empty startup message, got %+v", msg2)
+	}
+
+	os.Setenv("FAK_STRIX_GFX1151_OVERRIDE", "false")
+	res2b := preflightServeStrixHalo(nil)
+	if res2b.Detected || res2b.UMAPointerManager != nil || res2b.MALLTiler != nil {
+		t.Fatal("expected detected=false when override=false")
+	}
+
+	// Case 3: Mock DRM sysfs detection (vendor 0x1002, device 0x1586)
+	os.Unsetenv("FAK_STRIX_GFX1151_OVERRIDE")
+	tmpSysfs := t.TempDir()
+	card0Dev := filepath.Join(tmpSysfs, "card0", "device")
+	if err := os.MkdirAll(card0Dev, 0755); err != nil {
+		t.Fatalf("failed to create mock sysfs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(card0Dev, "vendor"), []byte("0x1002\n"), 0644); err != nil {
+		t.Fatalf("failed to write mock vendor: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(card0Dev, "device"), []byte("0x1586\n"), 0644); err != nil {
+		t.Fatalf("failed to write mock device: %v", err)
+	}
+
+	res3 := preflightServeStrixHaloWithSysfs(nil, tmpSysfs)
+	if !res3.Detected {
+		t.Fatal("expected detected=true from mock DRM sysfs (0x1002:0x1586)")
+	}
+	if res3.UMAPointerManager == nil || res3.MALLTiler == nil {
+		t.Fatal("expected active UMAPointerManager and MALLTiler on mock sysfs detection")
+	}
+
+	// Case 4: Backend device name detection
+	beStrix := newServePreflightBackend("AMD Radeon 8060S Graphics (gfx1151)")
+	res4 := preflightServeStrixHalo(beStrix)
+	if !res4.Detected {
+		t.Fatal("expected detected=true via backend name")
+	}
+	if res4.DeviceName != "AMD Radeon 8060S Graphics (gfx1151)" {
+		t.Fatalf("got device name %q", res4.DeviceName)
+	}
+
+	// Case 5: Graceful fallback on non-Strix hardware with zero errors and no crash
+	beCUDA := newServePreflightBackend("cuda")
+	res5 := preflightServeStrixHaloWithSysfs(beCUDA, t.TempDir())
+	if res5.Detected {
+		t.Fatal("expected detected=false for standard CUDA backend without GFX1151 hardware")
+	}
+	if res5.UMAPointerManager != nil || res5.MALLTiler != nil {
+		t.Fatal("expected nil subsystems for non-Strix hardware")
+	}
+	msg5 := serveStrixHaloPreflightMessage(res5)
+	if msg5.Text != "" {
+		t.Fatalf("expected empty message on non-Strix device, got %q", msg5.Text)
+	}
+
+	// Sysfs with non-AMD vendor (Intel 0x8086 with device 0x1586)
+	tmpIntelSysfs := t.TempDir()
+	intelDev := filepath.Join(tmpIntelSysfs, "card0", "device")
+	_ = os.MkdirAll(intelDev, 0755)
+	_ = os.WriteFile(filepath.Join(intelDev, "vendor"), []byte("0x8086\n"), 0644)
+	_ = os.WriteFile(filepath.Join(intelDev, "device"), []byte("0x1586\n"), 0644)
+	resIntel := preflightServeStrixHaloWithSysfs(nil, tmpIntelSysfs)
+	if resIntel.Detected {
+		t.Fatal("expected detected=false for non-AMD vendor 0x8086")
+	}
+
+	// Sysfs with AMD vendor (0x1002) but discrete GPU device (0x1100 / Navi 31)
+	tmpDiscreteSysfs := t.TempDir()
+	discreteDev := filepath.Join(tmpDiscreteSysfs, "card0", "device")
+	_ = os.MkdirAll(discreteDev, 0755)
+	_ = os.WriteFile(filepath.Join(discreteDev, "vendor"), []byte("0x1002\n"), 0644)
+	_ = os.WriteFile(filepath.Join(discreteDev, "device"), []byte("0x1100\n"), 0644)
+	resDiscrete := preflightServeStrixHaloWithSysfs(nil, tmpDiscreteSysfs)
+	if resDiscrete.Detected {
+		t.Fatal("expected detected=false for AMD discrete GPU device 0x1100")
+	}
+
+	// Case 6: Concurrent preflight safety across multiple goroutines
+	{
+		var wg sync.WaitGroup
+		concurrency := 16
+		errCh := make(chan error, concurrency)
+		for i := 0; i < concurrency; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				res := preflightServeStrixHaloWithSysfs(beStrix, tmpSysfs)
+				if !res.Detected {
+					errCh <- fmt.Errorf("goroutine %d: expected detected=true", idx)
+					return
+				}
+				if res.UMAPointerManager == nil || res.MALLTiler == nil {
+					errCh <- fmt.Errorf("goroutine %d: subsystems nil", idx)
+					return
+				}
+				if c := res.MALLTiler.CapacityTokens(); c != 8192 {
+					errCh <- fmt.Errorf("goroutine %d: capacity tokens=%d, want 8192", idx, c)
+					return
+				}
+				b, err := res.UMAPointerManager.AllocateUMABuffer(512, 64)
+				if err != nil {
+					errCh <- fmt.Errorf("goroutine %d: alloc error: %w", idx, err)
+					return
+				}
+				if !b.IsZeroCopy() || uintptr(b.HostPtr()) != uintptr(b.DevPtr()) {
+					errCh <- fmt.Errorf("goroutine %d: pointer identity mismatch", idx)
+					return
+				}
+				if err := res.UMAPointerManager.FreeUMABuffer(b); err != nil {
+					errCh <- fmt.Errorf("goroutine %d: free error: %w", idx, err)
+					return
+				}
+			}(i)
+		}
+		wg.Wait()
+		close(errCh)
+		for err := range errCh {
+			t.Errorf("concurrent preflight error: %v", err)
+		}
 	}
 }

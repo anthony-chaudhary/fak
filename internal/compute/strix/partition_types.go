@@ -56,11 +56,11 @@ var (
 // AttentionGeometry defines the architectural tensor geometry of the attention working set.
 // Standard GQA on AMD Strix Halo: 8 KV heads, dim 128, FP16 = 4,096 bytes per token per layer.
 type AttentionGeometry struct {
-	Layers           int                `json:"layers"`             // Transformer layer count (e.g. 32 or 40)
-	KVHeads          int                `json:"kv_heads"`           // Key-Value attention head count (e.g. 8 for GQA)
-	HeadDim          int                `json:"head_dim"`           // Dimension per head (e.g. 128)
-	BytesPerElement  int                `json:"bytes_per_element"`  // Element byte width (2 for FP16/BF16, 1 for FP8)
-	Precision        AttentionPrecision `json:"precision"`          // Precision format tag
+	Layers          int                `json:"layers"`            // Transformer layer count (e.g. 32 or 40)
+	KVHeads         int                `json:"kv_heads"`          // Key-Value attention head count (e.g. 8 for GQA)
+	HeadDim         int                `json:"head_dim"`          // Dimension per head (e.g. 128)
+	BytesPerElement int                `json:"bytes_per_element"` // Element byte width (2 for FP16/BF16, 1 for FP8)
+	Precision       AttentionPrecision `json:"precision"`         // Precision format tag
 }
 
 // DefaultGQAAttentionGeometry returns reference GQA geometry for Qwen/Llama models on Strix Halo:
@@ -68,8 +68,8 @@ type AttentionGeometry struct {
 func DefaultGQAAttentionGeometry() AttentionGeometry {
 	return AttentionGeometry{
 		Layers:          32,
-		KVHeads:         GQAKVHeads, // 8
-		HeadDim:         GQAHeadDim, // 128
+		KVHeads:         GQAKVHeads,          // 8
+		HeadDim:         GQAHeadDim,          // 128
 		BytesPerElement: FP16BytesPerElement, // 2
 		Precision:       AttentionPrecisionFP16,
 	}

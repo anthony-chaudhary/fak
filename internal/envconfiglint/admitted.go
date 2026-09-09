@@ -395,18 +395,6 @@ var admittedPostFreeze = []string{
 	"VULKAN_SDK",
 	"XDG_DATA_HOME",
 
-	// internal/qwen38campaign/subagent_fanout.go — immutable SHA-256 identity stamped into
-	// physical-runner evidence when the launcher already knows the exact binary artifact. It
-	// is provenance, not a credential; the fallback hashes os.Executable directly.
-	// Relocates to: an explicit runner-provenance input supplied when ProductPhysicalRunner is built.
-	"FAK_BINARY_SHA256",
-
-	// internal/qwen38campaign/subagent_fanout.go — source revision stamped beside the binary
-	// digest in physical-runner evidence when VCS build info and a Git checkout are unavailable.
-	// It identifies source bytes and grants no access.
-	// Relocates to: the same explicit runner-provenance input as FAK_BINARY_SHA256.
-	"FAK_SOURCE_COMMIT",
-
 	// cmd/fak/commit.go — opts a contending commit into the epilogue landing queue instead of
 	// waiting for or refusing a busy commit lock. It selects contention behavior, not authority.
 	// Relocates to: the existing `fak commit --queue-on-busy` flag; callers should pass it directly.
@@ -432,4 +420,144 @@ var admittedPostFreeze = []string{
 	// It is a transport compatibility switch, not authentication data.
 	// Relocates to: an explicit guard launch-plan prompt-fuel setting passed to preparePromptFuel.
 	"FAK_GUARD_PROMPT_FUEL",
+
+	// cmd/fak/claude_launcher.go — anthropic model override for claude launcher.
+	// Relocates to: an explicit model flag on claude launch.
+	"ANTHROPIC_MODEL",
+
+	// internal/hil/probe_other.go — GPU isolation device selection.
+	// Relocates to: an explicit device selector on probe.
+	"CUDA_VISIBLE_DEVICES",
+
+	// internal/compute/gemm_arm64.go — arm dotprod capability toggle.
+	// Relocates to: compute capability config.
+	"FAK_ARM_DOTPROD",
+
+	// internal/compute/gemm_arm64.go — arm fp16 capability toggle.
+	// Relocates to: compute capability config.
+	"FAK_ARM_FP16",
+
+	// internal/hil/probe_other.go — force cuda probe enablement.
+	// Relocates to: hil probe config.
+	"FAK_CUDA",
+
+	// internal/patchcommit/patchcommit.go — disable phantom deletion guard.
+	// Relocates to: patchcommit config.
+	"FAK_DISABLE_PHANTOM_DELETIONS",
+
+	// internal/compute/strix/device_detect.go — override sysfs DRM path.
+	// Relocates to: strix hardware config.
+	"FAK_DRM_SYSFS_PATH",
+
+	// internal/compute/gemm_arm64.go — force generic gemm fallback.
+	// Relocates to: compute backend config.
+	"FAK_GEMM_FORCE_GENERIC",
+
+	// internal/compute/strix/kfd_alloc.go — HSA library search path.
+	// Relocates to: strix loader config.
+	"FAK_HSA_PATH",
+
+	// internal/hil/probe_lan.go — override LAN gateway port.
+	// Relocates to: LAN node probe config.
+	"FAK_LAN_GATEWAY_PORT",
+
+	// internal/gateway/mcp_resources_prompts.go — gateway LAN host announcement.
+	// Relocates to: gateway server config.
+	"FAK_LAN_HOST",
+
+	// internal/hil/probe_lan.go — override LAN ssh port.
+	// Relocates to: LAN node probe config.
+	"FAK_LAN_SSH_PORT",
+
+	// cmd/fak/claude_launcher.go — mac gateway URL override.
+	// Relocates to: claude launcher config.
+	"FAK_MAC_GATEWAY",
+
+	// cmd/fak/claude_launcher.go — mac model selector override.
+	// Relocates to: claude launcher config.
+	"FAK_MAC_MODEL",
+
+	// cmd/fak/serve.go — memory governor mode selector.
+	// Relocates to: serve memory config.
+	"FAK_MEMORY_GOVERNOR",
+
+	// internal/gateway/session_admit.go — memory governor queue timeout.
+	// Relocates to: gateway admission config.
+	"FAK_MEMORY_GOVERNOR_QUEUE_TIMEOUT",
+
+	// internal/patchcommit/patchcommit.go — enable phantom deletion checking.
+	// Relocates to: patchcommit config.
+	"FAK_PHANTOM_DELETION_CHECK",
+
+	// internal/compute/vulkan_qwen35_sequence.go — exact KV calculation toggle.
+	// Relocates to: vulkan compute config.
+	"FAK_QWEN35_SEQUENCE_KV_EXACT",
+
+	// cmd/fak/pi_launcher.go — serve address for pi launcher.
+	// Relocates to: pi launcher config.
+	"FAK_SERVE_ADDR",
+
+	// internal/gateway/chat_completions.go — speculative decoding profile selector.
+	// Relocates to: gateway serve config.
+	"FAK_SPECULATIVE",
+
+	// internal/compute/strix/device_detect.go — force gfx1151 override.
+	// Relocates to: strix device detection config.
+	"FAK_STRIX_GFX1151_OVERRIDE",
+
+	// internal/macfit/macfit.go — memory ceiling override for mac fit.
+	// Relocates to: macfit model selector config.
+	"FAK_UP_MEMORY_BYTES",
+
+	// internal/hil/probe_other.go — vulkan probe toggle.
+	// Relocates to: hil probe config.
+	"FAK_VULKAN",
+
+	// internal/compute/vulkan.go — cooperative matrix toggle.
+	// Relocates to: vulkan compute config.
+	"FAK_VULKAN_COOPMAT",
+
+	// internal/compute/vulkan.go — q2k fusion toggle.
+	// Relocates to: vulkan compute config.
+	"FAK_VULKAN_Q2K_FUSION",
+
+	// internal/compute/vulkan.go — q4k arm backend selector.
+	// Relocates to: vulkan compute config.
+	"FAK_VULKAN_Q4K_ARM",
+
+	// internal/compute/vulkan.go — q4k fusion toggle.
+	// Relocates to: vulkan compute config.
+	"FAK_VULKAN_Q4K_FUSION",
+
+	// cmd/fak/serve.go — wired memory ceiling limit.
+	// Relocates to: serve memory config.
+	"FAK_WIRED_MEMORY_CEILING_BYTES",
+
+	// cmd/fak/ops_schedule.go — gobin path override.
+	// Relocates to: ops schedule config.
+	"GOBIN",
+
+	// internal/compute/strix/kfd_alloc.go — dynamic library search path.
+	// Relocates to: strix loader config.
+	"LD_LIBRARY_PATH",
+
+	// cmd/fak/pi_launcher.go — pi binary path.
+	// Relocates to: pi launcher config.
+	"PI_BIN",
+
+	// internal/projectassets/pi_config.go — pi coding agent directory.
+	// Relocates to: pi config assets.
+	"PI_CODING_AGENT_DIR",
+
+	// internal/compute/strix/kfd_alloc.go — rocm installation path.
+	// Relocates to: strix loader config.
+	"ROCM_PATH",
+
+	// internal/gateway/chat_completions.go — speculative profile shorthand.
+	// Relocates to: gateway serve config.
+	"SPECULATIVE",
+
+	// internal/hil/probe_other.go — vulkan ICD filenames override.
+	// Relocates to: vulkan probe config.
+	"VK_ICD_FILENAMES",
 }

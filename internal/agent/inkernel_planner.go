@@ -54,13 +54,14 @@ type InKernelPlanner struct {
 	// given a grade — leaves placement exactly as cpuOffloadExperts alone decided it. Resolved once
 	// by SetExpertSpill (inkernel_expert_spill.go), never per request.
 	expertSpill *model.ExpertSpillPlacement
-	maxNew      int
-	temp        float64
-	seed        int64
+	// contextTokens is the runtime ceiling; zero delegates to MaxPositionEmbeddings.
+	contextTokens int
+	maxNew        int
+	temp          float64
+	seed          int64
 	// decodeTraceNow is an injectable monotonic clock used only by explicitly
 	// traced requests. nil selects time.Now; the default path never reads it.
 	decodeTraceNow func() time.Time
-
 	// qwenQ4KPrefillChunkTokens and its typed parse error are resolved once at
 	// construction. The error is request-gated to the exact resident hybrid path,
 	// so an unrelated model remains byte-for-byte on its historical forward.
@@ -70,12 +71,10 @@ type InKernelPlanner struct {
 	q4kGateUpOutputSlab          bool
 	denseGPULayers               int
 	qwen35MetalGDNExecuted       atomic.Bool
-
-	compactHistoryBudget int
-	elideStaleReads      bool
-	deferColdTools       bool
-	restoreStash         func(trace, id, excerpt string, body []byte)
-
+	compactHistoryBudget         int
+	elideStaleReads              bool
+	deferColdTools               bool
+	restoreStash                 func(trace, id, excerpt string, body []byte)
 	// tree is the process-scoped RadixAttention prefix cache (internal/radixkv): the
 	// multi-thousand-token static system+tool-schema prefix is prefilled once and the
 	// next turn REUSES its KV, prefilling only the divergent suffix — the candidate-#13
@@ -1357,15 +1356,16 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	if sp.NativeInferenceReceipt && (temp != 0 || topP != 0 || topK > 0 || len(logitBias) > 0 || freqPenalty != 0 || presPenalty != 0) {
 		return nil, &model.NativeInferenceReceiptUnsupportedError{Reason: "requires greedy sampling over unmodified logits"}
 	}
-
 	messages, tools, _ = p.ApplyPromptShrink(ctx, messages, tools, opts...)
 	chat := renderInKernelChatMLRequest(messages, tools, p.m.Cfg, sp.ResponseFormat, sp.ToolChoice, sp)
 	ids, err := p.tok.Encode(chat)
 	if err != nil {
 		return nil, err
 	}
+	if err := p.refuseContextLength(len(ids), maxNew); err != nil {
+		return nil, err
+	}
 	stops := StopIDs(p.tok, p.m.Cfg)
-
 	var turnContext []TurnAssessment
 	if ta, ok := AssessTranscriptTurn(messages); ok {
 		turnContext = append(turnContext, ta)
@@ -1376,7 +1376,6 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	if effectiveBudget > 0 {
 		tb = NewThinkBudget(effectiveBudget, startInSpan)
 	}
-
 	// emit runs per generated token: decode the piece, accumulate the text, and apply the
 	// per-request string-suffix Stop (orthogonal to the token-ID stops). Returning true
 	// ends the turn with the token counted and its text trimmed (the stop string is not

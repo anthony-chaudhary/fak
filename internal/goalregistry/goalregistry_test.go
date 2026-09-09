@@ -380,4 +380,3 @@ func TestBindingCanonicalTuple(t *testing.T) {
 		t.Fatalf("expected 0 bindings after unbind, got %d", len(bindingsAfterUnbind))
 	}
 }
-

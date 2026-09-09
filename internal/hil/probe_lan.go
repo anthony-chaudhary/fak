@@ -56,17 +56,23 @@ func probeLANNode(ctx context.Context, hostOverride string, canonicalCandidates 
 		return probeLANHost(ctx, rawHost)
 	}
 
+	var lastAttempt *LANNodeInfo
 	for _, candidate := range canonicalCandidates {
 		candidate = strings.TrimSpace(candidate)
 		if candidate == "" || strings.EqualFold(candidate, "unconfigured") || strings.EqualFold(candidate, "none") {
 			continue
 		}
-		if info := probeLANHost(ctx, candidate); info.Reachable {
+		info := probeLANHost(ctx, candidate)
+		if info.Reachable {
 			return info
 		}
+		lastAttempt = &info
 		if ctx.Err() != nil {
 			break
 		}
+	}
+	if lastAttempt != nil {
+		return *lastAttempt
 	}
 
 	return unconfiguredLANNode()

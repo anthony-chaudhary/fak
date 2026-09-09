@@ -556,4 +556,3 @@ func TestMCPAdmission_BudgetClamping_ReservesByteLimitBounded(t *testing.T) {
 		t.Errorf("expected VerdictTransform on clamped result, got %v", res.Verdict.Kind)
 	}
 }
-

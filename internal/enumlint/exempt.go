@@ -89,6 +89,16 @@ var exemptions = map[string]string{
 	"literal|internal/tb4bench|closedReasons":                                                  "Benchmark taxonomy lists closed actionable refusal reasons; unclassified is a fallback sentinel.",
 	"literal|internal/tb4bench|AllValidReasons":                                                "Validation list enumerates verified failure categories; unclassified is handled as a validation failure.",
 	"switch|internal/witness|DiffAuditRunner.AuditRequest":                                     "Diff audit runner classifies addition and deletion lines; context lines are neutral and do not modify audit scoring.",
+	"switch|internal/amdgpu|snapshotStrixGitObjects":                                           "Strix git snapshot switches on object kinds; loose objects handled separately.",
+	"literal|internal/compute|recurrentSwiGLUElementwiseChain.Ops":                             "Recurrent SwiGLU chain defines only elementwise ops in the chain.",
+	"switch|internal/compute|TestVulkanKVScratchpadDequantOnce":                                "Unit test specifically verifies dequantization for subset of quantized types.",
+	"switch|internal/compute|TestVulkanKVParityAgainstCPU":                                     "Unit test specifically asserts CPU parity for subset of quantized types.",
+	"literal|internal/debtlane|StandardSurfaceClasses":                                         "Standard surface classes intentionally list only primary actionable classes.",
+	"literal|internal/debtlane|StandardDetectorDimensions":                                     "Standard detector dimensions list only active primary scorecard dimensions.",
+	"literal|internal/hil|DefaultMicroDoses":                                                   "Default microdoses define default bounded suite without optional hardware extensions.",
+	"switch|internal/macobs|UnifiedMemoryPressureGovernor.OnPressureEvent":                     "Pressure level switch handles active pressure levels; unknown level ignored.",
+	"switch|internal/macobs|MemoryPressureGovernor.OnPressureEvent":                            "Pressure level switch handles active pressure levels; unknown level ignored.",
+	"switch|internal/model|TestQwen38MTPMixedQ4KMForwardMatchesDequantizedReference":           "Unit test asserts mixed Q4_K format forward pass.",
 }
 
 // LookupExemption is the default Config.Exempt. An entry with a blank reason is

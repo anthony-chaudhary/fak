@@ -9,7 +9,7 @@
 // and golang.org/x/sys indirectly through it — pinned by a 4-line go.sum.
 module github.com/anthony-chaudhary/fak
 
-go 1.26
+go 1.26.0
 
 // Pin the patched toolchain: go1.26.6 fixes the reachable standard-library
 // vulnerabilities reported by govulncheck against go1.26.5.

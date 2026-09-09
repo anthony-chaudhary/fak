@@ -71,6 +71,7 @@ type serveRuntime struct {
 	srv             *gateway.Server
 	qwen38Deps      *qwen38RuntimeDependencies
 	llamaProcess    qwen38ChildProcess
+	strixPreflight  ServeStrixHaloPreflightResult
 }
 
 func newServeStartupMessage(source, kind, level, text string) gateway.StartupMessage {
@@ -354,6 +355,11 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 	pf, err := preflightServeBackendForward(*sf.ggufPath, rt.chatBackend)
 	must(err)
 	rt.addStartupMessage(serveBackendForwardPreflightMessage(pf))
+
+	rt.strixPreflight = preflightServeStrixHalo(rt.chatBackend)
+	if msg := serveStrixHaloPreflightMessage(rt.strixPreflight); msg.Text != "" {
+		rt.addStartupMessage(msg)
+	}
 
 	// Eager GGUF load: pull the weights resident BEFORE binding the listener so the
 	// (potentially multi-second) load is measured as part of time-to-ready and its
