@@ -85,6 +85,24 @@ func DefaultSweepConfig() SweepConfig {
 	}
 }
 
+// AppleSiliconMetalSweepConfig returns hardware-calibrated parameters for Apple Silicon Metal (M3/M4 unified memory architecture).
+func AppleSiliconMetalSweepConfig() SweepConfig {
+	return SweepConfig{
+		KMin:               1,
+		KMax:               4,
+		PMin:               0.0,
+		PMax:               1.0,
+		PStep:              0.2,
+		Tasks:              AllTasks(),
+		BusBandwidthGBs:    150.0, // Apple M3 Pro unified memory (150 GB/s)
+		ModelWeightGB:      15.5,  // Qwen 3.8 / 3.6 27B Q4_K_M
+		MTPHeadWeightGB:    0.40,  // MTP draft heads
+		KVTrafficPerTokGB:  0.06,  // KV cache traffic per token
+		BaseComputeMs:      3.5,   // Metal SDPA wide-M verification pass
+		DraftStepComputeMs: 1.2,   // Metal MTP draft step compute
+	}
+}
+
 // MeasurementPoint captures metrics for a specific (Task, K, P) combination.
 type MeasurementPoint struct {
 	Task           TaskCategory `json:"task"`
