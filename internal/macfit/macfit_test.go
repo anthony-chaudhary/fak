@@ -1,6 +1,9 @@
 package macfit
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestQwen25SevenBQ4On36GiBWorkedExample(t *testing.T) {
 	const gib = uint64(1 << 30)
@@ -115,4 +118,116 @@ func BenchmarkCalculate(b *testing.B) {
 			b.Fatalf("Calculate failed: %v", err)
 		}
 	}
+}
+
+func TestTurnkeyDynamicMemoryPressure(t *testing.T) {
+	const total36 = 36 * GiB
+
+	t.Run("KVClampingAndContextReductionUnderPressure", func(t *testing.T) {
+		// Unpressured baseline
+		unpressured, err := ConfigureTurnkeyWithOptions(total36, TurnkeyOptions{
+			AvailableBytes:     32 * GiB,
+			DisplayBufferBytes: 512 * 1024 * 1024,
+		})
+		if err != nil {
+			t.Fatalf("ConfigureTurnkeyWithOptions unpressured failed: %v", err)
+		}
+		if unpressured.MemoryPressure {
+			t.Errorf("unpressured plan should not have MemoryPressure flag set")
+		}
+
+		// Active memory pressure with 18 GiB available and 1.5 GiB display buffers
+		pressured, err := ConfigureTurnkeyWithOptions(total36, TurnkeyOptions{
+			AvailableBytes:     18 * GiB,
+			DisplayBufferBytes: 1500 * 1024 * 1024,
+		})
+		if err != nil {
+			t.Fatalf("ConfigureTurnkeyWithOptions pressured failed: %v", err)
+		}
+
+		if !pressured.MemoryPressure {
+			t.Errorf("pressured plan must report MemoryPressure = true")
+		}
+		if pressured.Tier.Name != "27B" {
+			t.Errorf("expected tier 27B, got %s", pressured.Tier.Name)
+		}
+		if pressured.KVPoolBytes >= unpressured.KVPoolBytes {
+			t.Errorf("pressured KVPoolBytes (%d) must be clamped lower than unpressured (%d)",
+				pressured.KVPoolBytes, unpressured.KVPoolBytes)
+		}
+		if pressured.ContextBudgetTokens >= unpressured.ContextBudgetTokens {
+			t.Errorf("pressured context budget (%d) must be reduced lower than unpressured (%d)",
+				pressured.ContextBudgetTokens, unpressured.ContextBudgetTokens)
+		}
+
+		// Verify total allocation fits within available memory minus display buffers
+		allocated := pressured.Tier.WeightBytes + (pressured.ContextBudgetTokens * pressured.KVBytesPerToken)
+		netAvailable := 18*GiB - 1500*1024*1024
+		if allocated > netAvailable {
+			t.Errorf("allocated bytes (%d) exceeds net available capacity (%d)", allocated, netAvailable)
+		}
+	})
+
+	t.Run("DisplayBufferSubtraction", func(t *testing.T) {
+		planSmallDisplay, err := ConfigureTurnkeyWithOptions(total36, TurnkeyOptions{
+			AvailableBytes:     20 * GiB,
+			DisplayBufferBytes: 512 * 1024 * 1024,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		planLargeDisplays, err := ConfigureTurnkeyWithOptions(total36, TurnkeyOptions{
+			AvailableBytes:     20 * GiB,
+			DisplayBufferBytes: 3 * GiB,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if planLargeDisplays.KVPoolBytes >= planSmallDisplay.KVPoolBytes {
+			t.Errorf("large display buffer setup should yield smaller KV pool than small display: %d vs %d",
+				planLargeDisplays.KVPoolBytes, planSmallDisplay.KVPoolBytes)
+		}
+		if planLargeDisplays.ContextBudgetTokens > planSmallDisplay.ContextBudgetTokens {
+			t.Errorf("large display buffer context budget (%d) cannot exceed small display (%d)",
+				planLargeDisplays.ContextBudgetTokens, planSmallDisplay.ContextBudgetTokens)
+		}
+	})
+
+	t.Run("EnvironmentVariableSimulation", func(t *testing.T) {
+		t.Setenv("FAK_UP_MEMORY_BYTES", fmt.Sprint(total36))
+		t.Setenv("FAK_UP_AVAILABLE_BYTES", fmt.Sprint(18*GiB))
+		t.Setenv("FAK_UP_DISPLAY_BUFFER_BYTES", fmt.Sprint(1500*1024*1024))
+
+		total, avail, err := DetectUnifiedMemoryInfo()
+		if err != nil {
+			t.Fatalf("DetectUnifiedMemoryInfo: %v", err)
+		}
+		if total != total36 {
+			t.Errorf("DetectUnifiedMemoryInfo total = %d, want %d", total, total36)
+		}
+		if avail != 18*GiB {
+			t.Errorf("DetectUnifiedMemoryInfo available = %d, want %d", avail, 18*GiB)
+		}
+
+		disp := DetectDisplayBufferBytes()
+		if disp != 1500*1024*1024 {
+			t.Errorf("DetectDisplayBufferBytes() = %d, want %d", disp, 1500*1024*1024)
+		}
+
+		plan, err := ConfigureTurnkey(total36)
+		if err != nil {
+			t.Fatalf("ConfigureTurnkey: %v", err)
+		}
+		if !plan.MemoryPressure {
+			t.Errorf("plan should reflect memory pressure from env overrides")
+		}
+		if plan.AvailableBytes != 18*GiB {
+			t.Errorf("plan.AvailableBytes = %d, want %d", plan.AvailableBytes, 18*GiB)
+		}
+		if plan.DisplayBufferBytes != 1500*1024*1024 {
+			t.Errorf("plan.DisplayBufferBytes = %d, want %d", plan.DisplayBufferBytes, 1500*1024*1024)
+		}
+	})
 }

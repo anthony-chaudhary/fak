@@ -14,6 +14,31 @@ import (
 )
 
 func hostSystemMemory() (total, free int64, known bool) {
+	if v := strings.TrimSpace(syscallGetenv("FAK_UP_MEMORY_BYTES")); v != "" {
+		if n, err := strconv.ParseUint(v, 10, 64); err == nil && n > 0 {
+			if avail := strings.TrimSpace(syscallGetenv("FAK_UP_AVAILABLE_BYTES")); avail != "" {
+				if a, err := strconv.ParseInt(avail, 10, 64); err == nil && a > 0 {
+					return uint64ToCapInt64(n), a, true
+				}
+			}
+			return uint64ToCapInt64(n), int64((n * 80) / 100), true
+		}
+	}
+	if avail := strings.TrimSpace(syscallGetenv("FAK_UP_AVAILABLE_BYTES")); avail != "" {
+		if a, err := strconv.ParseInt(avail, 10, 64); err == nil && a > 0 {
+			raw, err := syscall.Sysctl("hw.memsize")
+			if err == nil && raw != "" {
+				var buf [8]byte
+				copy(buf[:], raw)
+				totalBytes := binary.LittleEndian.Uint64(buf[:])
+				if totalBytes > 0 {
+					return uint64ToCapInt64(totalBytes), a, true
+				}
+			}
+			return a, a, true
+		}
+	}
+
 	raw, err := syscall.Sysctl("hw.memsize")
 	if err != nil || raw == "" {
 		return 0, FreeUnknown, false
@@ -24,12 +49,22 @@ func hostSystemMemory() (total, free int64, known bool) {
 	if totalBytes == 0 {
 		return 0, FreeUnknown, false
 	}
-	if out, err := exec.Command("vm_stat").Output(); err == nil {
+	cmd := exec.Command("/usr/bin/vm_stat")
+	out, err := cmd.Output()
+	if err != nil {
+		out, err = exec.Command("vm_stat").Output()
+	}
+	if err == nil {
 		if freeBytes, ok := parseVMStat(out); ok && freeBytes > 0 {
 			return uint64ToCapInt64(totalBytes), int64(freeBytes), true
 		}
 	}
 	return uint64ToCapInt64(totalBytes), FreeUnknown, true
+}
+
+func syscallGetenv(key string) string {
+	v, _ := syscall.Getenv(key)
+	return v
 }
 
 func parseVMStat(out []byte) (int64, bool) {
