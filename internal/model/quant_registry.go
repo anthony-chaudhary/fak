@@ -135,7 +135,7 @@ func resetDefaultQuantDescriptors() {
 		{kindQ8_0, "Q8_0", compute.Q8_0},
 		{kindQ4_0, "Q4_0", 0},
 		{kindQ3K, "Q3_K", 0},
-		{kindIQ3S, "IQ3_S", 0},
+		{kindIQ3S, "IQ3_S", compute.IQ3_S},
 	}
 	for _, item := range nonHAL {
 		registerDefaultLocked(BaseQuantDescriptor{
@@ -313,6 +313,13 @@ func AdmitHALQuant(kind kQuantKind, be compute.Backend) (compute.Dtype, error) {
 		}
 		return v.Dtype, nil
 	}
+	if kind == kindIQ3S {
+		v := AdmitIQ3SHAL(be)
+		if !v.Admitted {
+			return v.Dtype, v.Refusal
+		}
+		return v.Dtype, nil
+	}
 	desc, ok := LookupQuantDescriptor(kind)
 	if !ok {
 		return 0, fmt.Errorf("model: quant kind %s not registered", kind)
@@ -321,4 +328,98 @@ func AdmitHALQuant(kind kQuantKind, be compute.Backend) (compute.Dtype, error) {
 		return desc.Dtype(), fmt.Errorf("model: quant kind %s does not support device HAL staging", kind)
 	}
 	return desc.Dtype(), nil
+}
+
+// IQ3SCapabilityBackend is the optional capability interface that a device backend
+// implements to declare native execution and staging support for IQ3_S weights.
+type IQ3SCapabilityBackend interface {
+	SupportsIQ3S() bool
+}
+
+// IQ3SHALRefusalReason represents a closed-vocabulary failure reason for IQ3_S HAL admission.
+type IQ3SHALRefusalReason string
+
+const (
+	IQ3SRefusalNilBackend       IQ3SHALRefusalReason = "NIL_BACKEND"
+	IQ3SRefusalNoCapability     IQ3SHALRefusalReason = "NO_BACKEND_CAPABILITY"
+	IQ3SRefusalCapabilityDenied IQ3SHALRefusalReason = "CAPABILITY_DENIED"
+	IQ3SRefusalHALNotRegistered IQ3SHALRefusalReason = "HAL_NOT_REGISTERED"
+)
+
+// IQ3SHALAdmissionRefusal is the typed, fail-closed refusal returned when
+// IQ3_S HAL admission cannot be granted.
+type IQ3SHALAdmissionRefusal struct {
+	Kind   kQuantKind
+	Dtype  compute.Dtype
+	Reason IQ3SHALRefusalReason
+	Detail string
+}
+
+func (e *IQ3SHALAdmissionRefusal) Error() string {
+	return fmt.Sprintf("model: IQ3_S HAL admission refused (kind=%s, dtype=%s): %s - %s",
+		e.Kind, e.Dtype, e.Reason, e.Detail)
+}
+
+// IQ3SHALAdmissionVerdict represents the result of evaluating IQ3_S HAL admission.
+type IQ3SHALAdmissionVerdict struct {
+	Admitted bool
+	Dtype    compute.Dtype
+	Refusal  *IQ3SHALAdmissionRefusal
+}
+
+// AdmitIQ3SHAL evaluates the model-to-HAL admission contract for IQ3_S weights.
+// By default, execution remains denied until a capable backend (implementing
+// IQ3SCapabilityBackend with SupportsIQ3S() == true) is provided.
+func AdmitIQ3SHAL(be compute.Backend) IQ3SHALAdmissionVerdict {
+	desc, ok := LookupQuantDescriptor(kindIQ3S)
+	dtype := compute.IQ3_S
+	if ok && desc.Dtype() != 0 {
+		dtype = desc.Dtype()
+	}
+
+	if be == nil {
+		return IQ3SHALAdmissionVerdict{
+			Admitted: false,
+			Dtype:    dtype,
+			Refusal: &IQ3SHALAdmissionRefusal{
+				Kind:   kindIQ3S,
+				Dtype:  dtype,
+				Reason: IQ3SRefusalNilBackend,
+				Detail: "nil compute backend provided",
+			},
+		}
+	}
+
+	// 1. Check if backend implements explicit capability
+	capable, isCapable := be.(IQ3SCapabilityBackend)
+	if !isCapable {
+		return IQ3SHALAdmissionVerdict{
+			Admitted: false,
+			Dtype:    dtype,
+			Refusal: &IQ3SHALAdmissionRefusal{
+				Kind:   kindIQ3S,
+				Dtype:  dtype,
+				Reason: IQ3SRefusalNoCapability,
+				Detail: "backend does not implement SupportsIQ3S capability",
+			},
+		}
+	}
+
+	if !capable.SupportsIQ3S() {
+		return IQ3SHALAdmissionVerdict{
+			Admitted: false,
+			Dtype:    dtype,
+			Refusal: &IQ3SHALAdmissionRefusal{
+				Kind:   kindIQ3S,
+				Dtype:  dtype,
+				Reason: IQ3SRefusalCapabilityDenied,
+				Detail: "backend explicitly reported SupportsIQ3S() == false",
+			},
+		}
+	}
+
+	return IQ3SHALAdmissionVerdict{
+		Admitted: true,
+		Dtype:    dtype,
+	}
 }
