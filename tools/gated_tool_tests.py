@@ -89,7 +89,6 @@ QUARANTINE: dict[str, str] = {
     "issue_views_test.py": "red",  # shipped issue views now include a sixth entry
     "persona_readiness_scorecard_test.py": "red",  # live scorecard has one docs coverage debt
     "popularization_readiness_scorecard_test.py": "red",  # live scorecard has one docs coverage debt
-    "release_build_flags_drift_test.py": "red",  # release-workflow fixture misses the current setup prelude
     "tier_launch_test.py": "red",  # launch fixture mocks lag current repository wiring
     "concept_disambiguation_scorecard_test.py": "red",  # live tree has disambiguation coverage debt
     "fleet_bottleneck_test.py": "red",  # reads fleet infra fixtures (grafana dashboards) absent here
