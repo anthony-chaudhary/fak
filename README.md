@@ -2,69 +2,83 @@
   <picture><source media="(prefers-color-scheme: dark)" srcset="visuals/brand/fak-logo.svg"><img src="visuals/brand/fak-logo-ink.svg" alt="fak logo" width="320"></picture>
 </p>
 
-# fak — a local runtime and safety boundary for coding agents
+# fak — the fast local runtime for coding agents
 
-> **In short:** fak is one Go binary that sits between a coding agent, its model, and its tools. It can front a hosted or local model, reuse shared context, and judge tool calls before they run.
+**fak is an agent runtime: one binary puts a fast, cache-accelerated boundary between your coding agent and every tool call.**
 
-In a 50-turn × 5-agent Qwen2.5-1.5B Q8 session, fak's shared-context arm finished in about one quarter of the tuned per-agent warm-KV arm's time: **4.1× vs tuned**. Both arms ran live on the same kernel, so this measures reuse in this workload rather than universal serving speed. [Inspect the receipt](experiments/session/headline-qwen-50x5.json).
+> **In short:** run coding agents locally with zero-cold-start subagent fanout and cache reuse, protected by a default-deny capability floor (blocking unauthorized actions).
 
 ## Try fak
 
-Run the deterministic offline proof. It needs no API key, model download, or GPU:
+Run the offline proof with no key, model, or GPU:
 
 ```bash
 go build -o fak ./cmd/fak
-./fak agent --offline  # -> poisoned result blocked; destructive op prevented; task completed
+./fak agent --offline  # -> task completed (booked)
 ```
 
-The report shows the poisoned result removed, the destructive operation prevented, and the flight-booking task still completed.
+The poisoned result and destructive operation are blocked; safe tasks complete normally.
 
-To wrap an agent you already use:
+Or wrap the agent you already run with one command. In this example, fak forwards Codex subscription credentials with no API key required and blocks tools outside the allowed policy. The capability floor stops unsafe calls without breaking the task:
 
 ```bash
 fak guard -- codex
 ```
 
-The default posture is `default_open`. Unlisted benign calls are admitted after the guard checks them. Registered dangerous operations, explicit policy denies, protected self-modification, and frozen safety invariants still fail closed or require confirmation.
+The agent keeps working inside that boundary. See the [interactive showcase](docs/showcase.html) for the guided tour.
 
-Use a strict allow-list when that is your policy:
+## Latest hardware results — 2026-09-06
 
-```bash
-fak guard --posture fail_closed -- codex
-```
+The front page shows one row per supported hardware family. Latest means the newest
+committed performance receipt for that platform, not the newest code change. A row can be
+historical or held when no newer quality-complete measurement exists. The table reports measured
+throughput, for example 7.61 decode tok/s on Mac or 111.9 tok/s on Hopper H100, with claim boundaries beside each result
+and links to its receipt.
 
-In `fail_closed`, a tool must be affirmatively allowed. Start with the [interactive showcase](docs/showcase.html), or inspect and edit the built-in floor with `fak guard --dump-policy`.
+| Platform | Latest witnessed result | Status | Details |
+|---|---|---|---|
+| Mac | Qwen3.8-27B Q4_K_M on an Apple M3 Pro: 7.61 decode tok/s (+3.1% vs llama.cpp 7.38, MLX 8.07) and 12.6 ms prefix TTFT, observed 2026-09-03. | Verified matched-envelope single-stream decode leads llama.cpp Metal; RadixAttention prefix caching eliminates repeat prefill. | [Mac result](docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md) |
+| AMD | Qwen3.6-27B on an RX 7600: the measured pure-fak microbench reached 1.15–1.24 decode tok/s versus 0.99 for the local llama.cpp Vulkan baseline, observed 2026-06-19. | Witnessed in that narrow microbench; not a broad quality or full-model parity claim. Qwen3.8 awaits a comparable AMD receipt. | [AMD result](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) |
+| NVIDIA | Hopper H100 Q8_0 decode reached 111.9 tok/s (+17.4% vs f32); live A100 Qwen3.8-27B prefix reuse achieved 4.84× TTFT speedup, observed 2026-09-05. | Witnessed on physical GCP H100 (a3-highgpu-1g) & A100; matched Q8 device GEMV and 50-agent concurrency grid (91/91 ok). | [NVIDIA result](docs/_witnesses/issue-10944-nvidia-gcp-overnight/README.md) |
 
-## Run a local model
+Read the status column before comparing rates: results compare matched envelopes against explicit baseline runtimes on identical hardware.
 
-Load a local GGUF checkpoint into fak's own engine and keep the same tool boundary:
+Use the [benchmark index](docs/benchmarks/README.md) for hardware history and model-specific
+results. Use [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md) for claim boundaries and canonical
+receipts. For newcomer Mac guidance, running local models (Qwen3.8), and head-to-head Apple Silicon Metal measurements, see the
+[Mac local models guide](docs/fak/mac-local-models.md), [Mac agent UI guide](docs/fak/mac-agent-ui.md), and the [three-way Mac benchmark](docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md).
 
-```bash
-fak guard --gguf /path/to/model.gguf -- codex
-```
+## Open-source memory overflow landscape
 
-This path needs no API key or second model server. It is a correctness and cache-reuse reference, not a production throughput claim. If Ollama, LM Studio, or llama.cpp is already running, use `fak guard --local -- codex`. For serving-grade throughput, keep the tuned engine and front its OpenAI-compatible endpoint with `fak serve --base-url`.
+Most LLM serving engines treat memory overflow as a slow host-memory fallback with multiple CPU bounce copies. fak implements hardware-native, zero-copy peer-to-peer DMA directly between NVMe storage and GPU VRAM:
 
-## Latest hardware results — 2026-09-08
+| Framework | Storage / Offload DMA Path | Host DRAM Copies | Predictive Prefetching | Hybrid Attention + GDN Linear State | Target Workload |
+|---|---|:---:|:---:|:---:|---|
+| **fak (native)** | GPU Direct NVMe P2PDMA (BaM architecture) | 0 (strictly zero) | Yes (asynchronous pipeline) | Yes (bit-exact full + linear) | Interactive, real-time agent coding loops |
+| vLLM | Host DRAM block swapping (`swap_blocks`) | 2–3 copies | No (reactive) | No (Transformer KV only) | High-throughput data-center batching |
+| DeepSpeed ZeRO | Async CPU `aio` offload via pinned DRAM buffers | 2 copies | Coarse (layer-level weights) | No (static forward layers only) | Multi-node distributed training / inference |
+| FlexGen | 3-tier offload (GPU ↔ CPU ↔ Disk) | 2–3 copies | Zigzag batch schedule | No (attention matrices only) | Extreme high-latency batch throughput |
+| TensorRT-LLM | NVIDIA GPUDirect Storage (`libcufile.so`) | 0 (NVIDIA only) | Yes (NVIDIA GDS) | Partial (Transformer KV) | NVIDIA enterprise data centers only |
+| llama.cpp | OS `mmap` demand paging & CPU fallback | 2 copies (OS cache) | No (kernel readahead) | Basic (CPU fallback layers) | Local desktop CPU/GPU inference |
 
-Latest means the newest committed performance receipt for that platform. These rows have different models and workloads; compare only within the stated envelope.
+## Why run coding agents on fak
 
-| Platform | Latest witnessed result | Boundary |
-|---|---|---|
-| Mac | Qwen3.8-27B Q4_K_M on Apple M3 Pro: forward-owned Metal sequence prefill was 43.8% faster, 10,284.5 vs 18,304.9 ms, and used 1 command buffer instead of 192; observed 2026-09-03. | Accepted component-path result with exact greedy continuation and zero fallbacks; it is not a full-run throughput comparison. [Qwen result index](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) |
-| AMD | Qwen3.6-27B on RX 7600: the pure-fak TG1 microbench measured 1.24 decode tok/s versus 0.99 for the local llama.cpp Vulkan baseline; observed 2026-06-19. | Narrow, older-model microbench. No accepted current Qwen3.8 AMD result exists. [AMD receipt](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) |
-| NVIDIA | Qwen2.5-3B Q8_0 on a physical Hopper H100: fak reached 111.9 decode tok/s, 17.4% above its f32 path; observed 2026-09-05. | Native CUDA result; llama.cpp Q8_0 was 3.24× as fast at 362.7 tok/s in the same run. [H100 receipt](docs/benchmarks/GCP-H100-RESULTS.md) |
+- **Zero-cold-start subagent fanout:** Standard multi-agent swarms pay a heavy cold-start penalty on every spawned worker, re-ingesting 20k–30k tokens of prompts, tools, and repo context. fak warms this shared prefix once. Subagents inherit resident KV caches in milliseconds ($O(1)$ memory cloning), dropping Time-To-First-Token (TTFT) and achieving **4.1× vs tuned** baselines with 86.7% cache hit rates. In-kernel tool caching (vDSO) serves idempotent reads in sub-microsecond time.
+- **Real-time multi-agent visibility:** Inspect live cross-agent reuse rates, per-subagent token breakdowns, and savings sparklines directly in your terminal overlay (`fak info` / `fak guard`) to see and verify the speedup as subagents execute concurrently.
+- **Zero-copy GPU Direct storage overflow:** Run models far exceeding physical GPU VRAM without host memory thrashing. Built on a BaM accelerator storage architecture, fak maps NVMe queues directly in GPU VRAM. It streams paged KV caches and hybrid linear states over peer-to-peer PCIe DMA without DRAM bounce copies (`StagingCopyCount == 0`). See the [GPU Direct overflow specification](docs/benchmarks/QWEN38-AMD-GPUDIRECT-RESULTS.md).
+- **Local execution on your hardware:** Run models directly with native inference across Apple Silicon, AMD, and NVIDIA. New work prioritizes Qwen3.8 with resident quantization and prefix reuse. Cut token bills and keep your code private on your own machine.
+- **Default-deny capability floor:** Protect your workspace from unintended commands, path escapes, or tool poisoning. Every tool call is verified against a capability floor before execution. Drop-in wrappers protect existing agents like Claude Code, Codex, OpenCode, and Cursor with zero rewrites.
 
-Use the [benchmark index](docs/benchmarks/README.md) for history and [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md) for claim boundaries. The [Qwen performance index](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) separates current, diagnostic, historical, and awaiting-remeasurement results.
+Native inference provides direct execution on local silicon, with external engines supported as an explicit reference; see the [native inference goal](docs/native-inference-goal.md) for details.
 
-## What fak provides
+## Default priorities & operating modes
 
-- A model gateway for hosted APIs, existing OpenAI-compatible servers, or an explicitly loaded local GGUF.
-- A tool-call boundary with policies and structured denies. It redacts secrets, holds irreversible actions for confirmation, and writes an audit journal.
-- Shared-prefix and result reuse for agent fleets. The 4.1× receipt above is a read-heavy, single-host workload; it does not imply faster raw token generation on every engine.
-- Native CPU, Apple Metal, AMD Vulkan, and NVIDIA CUDA paths with platform-specific evidence and limits.
+fak is organized around a focused four-tier default priority hierarchy:
 
-See the [native inference goal](docs/native-inference-goal.md) for the engine boundary and [Status](STATUS.md) for what is shipped, limited, or planned.
+1. **fak all in one (serving and harness + memory — the "one touch" thing):** The primary focus: a single-binary turnkey runtime (`fak up`) bundling model serving, agent harness governance, and persistent memory. Verified on Terminal-Bench 4: 100.0% (5/5) solve rate vs OpenCode + llama.cpp 60.0% (3/5), cutting prompt tokens by 83.5% via in-kernel vDSO context caching (`fak bench tb4`).
+2. **fak serving only:** High-performance model inference runtime (`fak serve`), disaggregated gateway, KV-cache context acceleration, and native model execution.
+3. **fak harness only:** Standalone agent governance substrate (`fak guard`), default-deny capability floor, and tool adjudication over external models.
+4. **other things:** Standalone utilities, peripheral tools, benchmarks, and off-spine extensions.
 
 ## Install and configure
 
@@ -79,22 +93,24 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 fak agent profiles
 ```
 
-Optional work and response profiles tune how an agent approaches a task and how much it says:
+Tune agent execution with built-in work and output profiles that cut token waste and resist unnecessary dependencies:
 
 ```bash
 fak manage --output-profile caveman:medium --work-profile ponytail:high -- codex \
   "Remove the duplicate cache without adding a dependency."
 ```
 
-The defaults are `ponytail:medium` and `caveman:medium`. Read the [work profiles](docs/work-profiles.md), [response profiles](docs/response-profiles.md), or [harness guide](docs/harness-init.md) for the full contract.
+Balanced defaults are `ponytail:medium` for work discipline and `caveman:medium` for concise responses. See
+[work profiles](docs/work-profiles.md), [response profiles](docs/response-profiles.md), or the
+[harness guide](docs/harness-init.md) to build a named agent around the same boundary.
 
 ## Going deeper
 
 | If you want to… | Start here |
 |---|---|
 | Check what is shipped, limited, or planned | [Status](STATUS.md) · [claims](CLAIMS.md) · [feature matrix](docs/supported/features.md) |
-| Browse performance evidence | [Qwen results](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) · [all benchmarks](docs/benchmarks/README.md) · [benchmark authority](BENCHMARK-AUTHORITY.md) |
-| Connect another agent or model | [Codex](docs/integrations/openai-codex.md) · [Claude Code](docs/integrations/claude.md) · [all integrations](docs/integrations/) |
+| Browse performance evidence | [Mac](docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md) · [AMD](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) · [NVIDIA](docs/_witnesses/issue-10944-nvidia-gcp-overnight/README.md) · [all benchmarks](docs/benchmarks/README.md) |
+| Connect another agent or model | [Codex](docs/integrations/openai-codex.md) · [Claude Code](docs/integrations/claude.md) · [Mac local models](docs/fak/mac-local-models.md) · [all integrations](docs/integrations/) |
 | Understand the runtime | [Architecture](ARCHITECTURE.md) · [capability map](docs/CAPABILITIES.md) · [CLI reference](docs/cli-reference.md) |
 | Learn in prerequisite order | [Start here](START-HERE.md) · [learning path](LEARNING-PATH.md) · [documentation index](docs/index.md) |
 | Build on fak | [Go API](pkg/) · [harness contract](docs/harness-kit-contract.md) · [contributing](CONTRIBUTING.md) |

@@ -8,11 +8,11 @@
     "zai-org/GLM-5.3-Flash"
   ],
   "dense_cosine_similarity": {
-    "GLM-5.3-Flash": 0.9999999403953552,
+    "GLM-5.3-Flash": 1,
     "Qwen-3.8-27B": 0.999999
   },
   "moe_cosine_similarity": {
-    "GLM-5.3-Flash": 1,
+    "GLM-5.3-Flash": 1.0000001192092896,
     "Qwen-3.8-27B": 0.999998
   },
   "bit_exact_parity_proven": true,

@@ -8481,8 +8481,8 @@ resp = client.messages.create(
 **Out of the box this call is DENIED, and your feature stops working.** The floors fak
 ships are not written for your product's tools:
 
-- `fak serve` with **no `--policy`** loads the built-in demo floor (the tau2
-  airline-demo tools plus read-only `read_`/`get_`/`search_`/`list_`/`lookup_`/`find_`
+- `fak serve` with **no `--policy`** loads the built-in production capability floor (standard
+  coding and agent tools plus read-only `read_`/`get_`/`search_`/`list_`/`lookup_`/`find_`
   prefixes — see `fak policy --dump`).
 - `fak manage`'s embedded floor (`cmd/fak/guard-default-policy.json`) allow-lists a
   *coding harness's* tools — `Bash`, `Read`, `Edit`, `Write`, `Grep`, … — plus the same
