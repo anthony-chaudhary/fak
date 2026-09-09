@@ -488,3 +488,88 @@ func TestCronOpenCodePassthrough(t *testing.T) {
 		t.Errorf("expected stdout to contain receipt JSON, got: %s", outStr)
 	}
 }
+
+func TestCronOpenCodeUntilExpiration(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "opencode_until_expired.jsonl")
+	var stdout, stderr bytes.Buffer
+
+	cmdArgs := []string{"echo", "should-not-run"}
+
+	// Set deadline in the past relative to --at
+	atTime := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	untilTime := time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC)
+
+	opts := ScheduledOpenCodeOptions{
+		Job:         "job-expired",
+		Ledger:      ledger,
+		Interval:    1 * time.Hour,
+		At:          atTime.Format(time.RFC3339),
+		Until:       untilTime.Format(time.RFC3339),
+		Command:     cmdArgs,
+		Stdout:      &stdout,
+		Stderr:      &stderr,
+		EmitReceipt: true,
+	}
+
+	receipt, err := RunScheduledOpenCode(opts)
+	if err != nil {
+		t.Fatalf("unexpected harness error: %v", err)
+	}
+
+	if receipt.Outcome != "expired" {
+		t.Errorf("expected outcome 'expired', got %q", receipt.Outcome)
+	}
+	if receipt.ExitCode != 0 {
+		t.Errorf("expected exit_code 0, got %d", receipt.ExitCode)
+	}
+	if receipt.DurationMS != 0 {
+		t.Errorf("expected duration_ms 0, got %d", receipt.DurationMS)
+	}
+
+	// Verify ledger recorded expired receipt
+	receipts, err := cronReadOpenCodeReceipts(ledger)
+	if err != nil {
+		t.Fatalf("cronReadOpenCodeReceipts error: %v", err)
+	}
+	if len(receipts) != 1 {
+		t.Fatalf("expected 1 receipt in ledger, got %d", len(receipts))
+	}
+	if receipts[0].Outcome != "expired" {
+		t.Errorf("expected ledger outcome 'expired', got %q", receipts[0].Outcome)
+	}
+}
+
+func TestCronOpenCodeUntilActive(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "opencode_until_active.jsonl")
+	var stdout, stderr bytes.Buffer
+
+	cmdArgs := []string{"echo", `{"session_id": "ses_active_123"}`}
+
+	// Set deadline in the future relative to --at
+	atTime := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	untilTime := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+
+	opts := ScheduledOpenCodeOptions{
+		Job:         "job-active",
+		Ledger:      ledger,
+		Interval:    1 * time.Hour,
+		At:          atTime.Format(time.RFC3339),
+		Until:       untilTime.Format(time.RFC3339),
+		Command:     cmdArgs,
+		Stdout:      &stdout,
+		Stderr:      &stderr,
+		EmitReceipt: true,
+	}
+
+	receipt, err := RunScheduledOpenCode(opts)
+	if err != nil {
+		t.Fatalf("unexpected harness error: %v", err)
+	}
+
+	if receipt.Outcome != "succeeded" {
+		t.Errorf("expected outcome 'succeeded', got %q", receipt.Outcome)
+	}
+	if receipt.SessionID != "ses_active_123" {
+		t.Errorf("expected session_id 'ses_active_123', got %q", receipt.SessionID)
+	}
+}
