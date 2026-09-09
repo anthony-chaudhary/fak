@@ -9,15 +9,28 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 )
+
+func TestReasonRegistryCoexistsWithAdjudicator(t *testing.T) {
+	if got := abi.ReasonName(adjudicator.ReasonTestTamperRefused); got != adjudicator.ReasonTestTamperRefusedName {
+		t.Fatalf("ReasonName(%d) = %q, want %q", adjudicator.ReasonTestTamperRefused, got, adjudicator.ReasonTestTamperRefusedName)
+	}
+	if got := abi.ReasonName(ReasonCircularDependency); got != ReasonCircularDependencyName {
+		t.Fatalf("ReasonName(%d) = %q, want %q", ReasonCircularDependency, got, ReasonCircularDependencyName)
+	}
+	if ReasonCircularDependency == adjudicator.ReasonTestTamperRefused {
+		t.Fatalf("package-owned reason codes collide at %d", ReasonCircularDependency)
+	}
+}
 
 // TestGym_MultiAgentPeerContextScenarios verifies closed-loop multi-agent simulation scenarios
 // covering:
-// 1. Fan-out / fan-in multi-agent simulation across concurrent simulated workers.
-// 2. Circular query deadlock detection (detecting cycles in peer dependency / query requests
-//    and asserting structured CIRCULAR_DEPENDENCY refusal).
-// 3. Taint preservation across context queries (asserting tainted peer context retains quarantine status).
-// 4. Closed-loop multi-agent scenario execution and MultiAgentReceipt verification.
+//  1. Fan-out / fan-in multi-agent simulation across concurrent simulated workers.
+//  2. Circular query deadlock detection (detecting cycles in peer dependency / query requests
+//     and asserting structured CIRCULAR_DEPENDENCY refusal).
+//  3. Taint preservation across context queries (asserting tainted peer context retains quarantine status).
+//  4. Closed-loop multi-agent scenario execution and MultiAgentReceipt verification.
 func TestGym_MultiAgentPeerContextScenarios(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
