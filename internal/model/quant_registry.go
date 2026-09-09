@@ -125,7 +125,7 @@ func resetDefaultQuantDescriptors() {
 		name  string
 		dtype compute.Dtype
 	}{
-		{kindIQ3XXS, "IQ3_XXS", 0},
+		{kindIQ3XXS, "IQ3_XXS", compute.IQ3_XXS},
 		{kindIQ4XS, "IQ4_XS", 0},
 		{kindIQ2XXS, "IQ2_XXS", 0},
 		{kindIQ2XS, "IQ2_XS", 0},
@@ -204,4 +204,121 @@ func RegisteredQuantDescriptors() []QuantDescriptor {
 // This is primarily intended for test isolation.
 func ResetDefaultQuantDescriptors() {
 	resetDefaultQuantDescriptors()
+}
+
+// IQ3XXSCapabilityBackend is the optional capability interface that a device backend
+// implements to declare native execution and staging support for IQ3_XXS weights.
+type IQ3XXSCapabilityBackend interface {
+	SupportsIQ3XXS() bool
+}
+
+// IQ3XXSHALRefusalReason represents a closed-vocabulary failure reason for IQ3_XXS HAL admission.
+type IQ3XXSHALRefusalReason string
+
+const (
+	IQ3XXSRefusalNilBackend       IQ3XXSHALRefusalReason = "NIL_BACKEND"
+	IQ3XXSRefusalNoCapability     IQ3XXSHALRefusalReason = "NO_BACKEND_CAPABILITY"
+	IQ3XXSRefusalCapabilityDenied IQ3XXSHALRefusalReason = "CAPABILITY_DENIED"
+	IQ3XXSRefusalHALNotRegistered IQ3XXSHALRefusalReason = "HAL_NOT_REGISTERED"
+)
+
+// IQ3XXSHALAdmissionRefusal is the typed, fail-closed refusal returned when
+// IQ3_XXS HAL admission cannot be granted.
+type IQ3XXSHALAdmissionRefusal struct {
+	Kind   kQuantKind
+	Dtype  compute.Dtype
+	Reason IQ3XXSHALRefusalReason
+	Detail string
+}
+
+func (e *IQ3XXSHALAdmissionRefusal) Error() string {
+	return fmt.Sprintf("model: IQ3_XXS HAL admission refused (kind=%s, dtype=%s): %s - %s",
+		e.Kind, e.Dtype, e.Reason, e.Detail)
+}
+
+// IQ3XXSHALAdmissionVerdict represents the result of evaluating IQ3_XXS HAL admission.
+type IQ3XXSHALAdmissionVerdict struct {
+	Admitted bool
+	Dtype    compute.Dtype
+	Refusal  *IQ3XXSHALAdmissionRefusal
+}
+
+// AdmitIQ3XXSHAL evaluates the model-to-HAL admission contract for IQ3_XXS weights.
+// By default, execution remains denied until a capable backend (implementing
+// IQ3XXSCapabilityBackend with SupportsIQ3XXS() == true) is provided or a registered
+// HAL descriptor is present.
+func AdmitIQ3XXSHAL(be compute.Backend) IQ3XXSHALAdmissionVerdict {
+	desc, ok := LookupQuantDescriptor(kindIQ3XXS)
+	dtype := compute.IQ3_XXS
+	if ok && desc.Dtype() != 0 {
+		dtype = desc.Dtype()
+	}
+
+	if be == nil {
+		return IQ3XXSHALAdmissionVerdict{
+			Admitted: false,
+			Dtype:    dtype,
+			Refusal: &IQ3XXSHALAdmissionRefusal{
+				Kind:   kindIQ3XXS,
+				Dtype:  dtype,
+				Reason: IQ3XXSRefusalNilBackend,
+				Detail: "nil compute backend provided",
+			},
+		}
+	}
+
+	// 1. Check if backend implements explicit capability
+	capable, isCapable := be.(IQ3XXSCapabilityBackend)
+	if isCapable && capable.SupportsIQ3XXS() {
+		return IQ3XXSHALAdmissionVerdict{
+			Admitted: true,
+			Dtype:    dtype,
+		}
+	}
+
+	// 2. Check if descriptor in registry was explicitly registered to support HAL
+	if ok && desc.SupportsHAL() {
+		return IQ3XXSHALAdmissionVerdict{
+			Admitted: true,
+			Dtype:    dtype,
+		}
+	}
+
+	var reason IQ3XXSHALRefusalReason = IQ3XXSRefusalNoCapability
+	var detail = "backend does not implement SupportsIQ3XXS capability"
+	if isCapable && !capable.SupportsIQ3XXS() {
+		reason = IQ3XXSRefusalCapabilityDenied
+		detail = "backend explicitly reported SupportsIQ3XXS() == false"
+	}
+
+	return IQ3XXSHALAdmissionVerdict{
+		Admitted: false,
+		Dtype:    dtype,
+		Refusal: &IQ3XXSHALAdmissionRefusal{
+			Kind:   kindIQ3XXS,
+			Dtype:  dtype,
+			Reason: reason,
+			Detail: detail,
+		},
+	}
+}
+
+// AdmitHALQuant evaluates the model-to-HAL admission contract for a quantized format.
+// Returns the compute.Dtype if admitted, or a typed refusal error if denied.
+func AdmitHALQuant(kind kQuantKind, be compute.Backend) (compute.Dtype, error) {
+	if kind == kindIQ3XXS {
+		v := AdmitIQ3XXSHAL(be)
+		if !v.Admitted {
+			return v.Dtype, v.Refusal
+		}
+		return v.Dtype, nil
+	}
+	desc, ok := LookupQuantDescriptor(kind)
+	if !ok {
+		return 0, fmt.Errorf("model: quant kind %s not registered", kind)
+	}
+	if !desc.SupportsHAL() {
+		return desc.Dtype(), fmt.Errorf("model: quant kind %s does not support device HAL staging", kind)
+	}
+	return desc.Dtype(), nil
 }
