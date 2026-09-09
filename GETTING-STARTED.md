@@ -266,5 +266,6 @@ For runtime connection issues, tool refusals, or upstream HTTP errors, consult t
 ## Next steps
 
 - Connect your existing agent: see the [integration guides](docs/integrations/README.md) for recipes covering Claude Code, Codex, Cursor, and custom harnesses.
+- Run parallel subagents: see the [subagents guide](docs/subagents-guide.md) for orchestrating concurrent multi-agent fanout with `fak up` and zero-cold-start cache reuse.
 - Find your specific task: browse the [task router](START-HERE.md) to navigate directly to authoritative documentation for your workflow.
 - Walk through the full tutorial: follow the [guided first session](docs/fak/tutorial.md) for detailed explanations and captured terminal outputs.

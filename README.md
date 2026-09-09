@@ -60,6 +60,9 @@ Experience raw in-kernel inference speed and concurrent multi-agent fanout on an
    ```
    Runs four co-batched subagents over a 30,000-token shared prefix, witnessing 18,000+ tokens/sec aggregate throughput and >95% cache hit rate with bit-exact logit parity (`cosine = 1.000000`).
 
+> [!TIP]
+> **New to subagents?** Follow the [Subagents Guide](docs/subagents-guide.md) to launch `fak up` and run parallel cohorts with shared-prefix cache reuse.
+
 Or wrap the agent you already run with one command. In this example, fak forwards Codex subscription credentials with no API key required and blocks tools outside the allowed policy. The capability floor stops unsafe calls without breaking the task:
 
 ```bash
@@ -150,7 +153,7 @@ Balanced defaults are `ponytail:medium` for work discipline and `caveman:medium`
 |---|---|
 | Check what is shipped, limited, or planned | [Status](STATUS.md) · [claims](CLAIMS.md) · [feature matrix](docs/supported/features.md) |
 | Browse performance evidence | [Mac](docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md) · [AMD](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) · [NVIDIA](docs/_witnesses/issue-10944-nvidia-gcp-overnight/README.md) · [all benchmarks](docs/benchmarks/README.md) |
-| Connect another agent or model | [Codex](docs/integrations/openai-codex.md) · [Claude Code](docs/integrations/claude.md) · [Mac local models](docs/fak/mac-local-models.md) · [all integrations](docs/integrations/) |
+| Connect another agent or model | [Codex](docs/integrations/openai-codex.md) · [Claude Code](docs/integrations/claude.md) · [subagents](docs/subagents-guide.md) · [Mac local models](docs/fak/mac-local-models.md) · [all integrations](docs/integrations/) |
 | Understand the runtime | [Architecture](ARCHITECTURE.md) · [capability map](docs/CAPABILITIES.md) · [CLI reference](docs/cli-reference.md) |
 | Learn in prerequisite order | [Start here](START-HERE.md) · [learning path](LEARNING-PATH.md) · [documentation index](docs/index.md) |
 | Build on fak | [Go API](pkg/) · [harness contract](docs/harness-kit-contract.md) · [contributing](CONTRIBUTING.md) |

@@ -174,25 +174,68 @@ func fitServeGGUFCPUOffloadOnDevice(ws *ggufload.WeightSource, be compute.Backen
 	return compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFDeviceHeadroom)
 }
 
-func serveGGUFMemoryPlan(ws *ggufload.WeightSource, f32Resident bool, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
+func resolveHostServeLoadArm(ws *ggufload.WeightSource, f32Resident bool) serveLoadArm {
+	if f32Resident {
+		return serveLoadArmF32
+	}
+	if ws == nil {
+		return serveLoadArmQuantProfileQ8
+	}
+	quant := ggufload.ClassifyTensorQuant(ws.File.Tensors)
+	if os.Getenv("FAK_Q4K") != "" && quant.Q4KResident && quant.Recipe != "UD-Q2_K_XL" {
+		return serveLoadArmResidentQ4K
+	}
+	return serveLoadArmQuantProfileQ8
+}
+
+func resolveDeviceServeLoadArm(ws *ggufload.WeightSource, be compute.Backend, f32Resident bool) serveLoadArm {
+	if f32Resident {
+		return serveLoadArmF32
+	}
+	if be == nil {
+		return resolveHostServeLoadArm(ws, false)
+	}
+	if ws == nil {
+		return serveLoadArmResidentQ4K
+	}
+	quant := ggufload.ClassifyTensorQuant(ws.File.Tensors)
+	if serveArtifactResidentQ4K(be, quant) {
+		return serveLoadArmResidentQ4K
+	}
+	if be.Caps().UploadDtype {
+		return serveLoadArmQuantProfileQ8
+	}
+	return serveLoadArmF32
+}
+
+func serveGGUFMemoryPlanForArm(ws *ggufload.WeightSource, arm serveLoadArm, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
 	if ws == nil {
 		return nil, nil
 	}
 	var plan compute.MemoryPlan
-	if f32Resident {
-		weights, err := ws.EstimateF32LoadMemoryPlan()
-		if err != nil {
-			return nil, err
-		}
-		plan = append(plan, weights...)
-	} else {
-		weights, err := ws.EstimateLoadMemoryPlan()
-		if err != nil {
-			return nil, err
-		}
-		plan = append(plan, weights...)
+	var weights compute.MemoryPlan
+	var err error
+	switch arm {
+	case serveLoadArmF32:
+		weights, err = ws.EstimateF32LoadMemoryPlan()
+	case serveLoadArmQuantProfileQ8:
+		weights, err = ws.EstimateQ8LoadMemoryPlan()
+	default:
+		weights, err = ws.EstimateLoadMemoryPlan()
 	}
+	if err != nil {
+		return nil, err
+	}
+	plan = append(plan, weights...)
 	return appendServeGGUFDevicePlan(ws, plan, contextBudgetTokens, fit), nil
+}
+
+func serveGGUFMemoryPlan(ws *ggufload.WeightSource, f32Resident bool, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
+	arm := serveLoadArmResidentQ4K
+	if f32Resident {
+		arm = serveLoadArmF32
+	}
+	return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, fit)
 }
 
 // serveGGUFCPUOffloadMemoryPlan plans the --cpu-offload-experts split: dense/router/attention
@@ -272,14 +315,22 @@ func serveContextTokenOverride(contextBudgetTokens int) int {
 // headroom — parity with the device path's fit plan. Fail-open: a platform that cannot report
 // host memory loads exactly as before.
 func fitServeGGUFPathOnHost(ggufPath string, f32Resident bool, contextBudgetTokens int) error {
+	total, free, known := compute.HostSystemMemoryInfo()
+	return fitServeGGUFPathOnReportedHost(ggufPath, f32Resident, contextBudgetTokens, total, free, known)
+}
+
+func fitServeGGUFPathOnReportedHost(ggufPath string, f32Resident bool, contextBudgetTokens int, total, free int64, known bool) error {
 	if ggufPath == "" {
 		return nil
 	}
-	plan, err := serveGGUFPathMemoryPlan(ggufPath, f32Resident, contextBudgetTokens, serveHostFitBudget())
+	plan, err := withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
+		arm := resolveHostServeLoadArm(ws, f32Resident)
+		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, serveHostFitBudget())
+	})
 	if err != nil {
 		return err
 	}
-	return compute.RefuseMemoryPlanIfTooBigForHost(plan, serveGGUFHostHeadroom)
+	return compute.RefuseMemoryPlanIfTooBigForReportedHost(plan, total, free, known, serveGGUFHostHeadroom)
 }
 
 // refuseIfTooBigOnDevice applies the device-headroom refusal to a freshly-built plan —
@@ -311,7 +362,10 @@ func withGGUFWeights(ggufPath string, plan func(*ggufload.WeightSource) (compute
 }
 
 func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Resident bool, contextBudgetTokens int) (compute.MemoryPlan, error) {
-	plan, err := serveGGUFPathMemoryPlan(ggufPath, f32Resident, contextBudgetTokens, serveDeviceFitBudget(be))
+	plan, err := withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
+		arm := resolveDeviceServeLoadArm(ws, be, f32Resident)
+		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, serveDeviceFitBudget(be))
+	})
 	if err == nil {
 		plan = applyDeviceWeightBudget(plan, be)
 	}

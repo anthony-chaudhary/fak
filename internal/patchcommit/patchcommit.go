@@ -11,7 +11,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
@@ -30,6 +32,8 @@ const (
 	ReasonIndexRace = "PATCH_INDEX_RACE"
 	// ReasonVerify indicates that pre-commit hooks, commit-msg hooks, or read-back validation failed.
 	ReasonVerify = "PATCH_VERIFY_FAILED"
+	// ReasonPhantomDeletionRisk indicates that a requested or staged deletion targets files introduced by a recent disjoint integrate merge.
+	ReasonPhantomDeletionRisk = "PHANTOM_DELETION_RISK"
 )
 
 // Options configures a patch commit transaction, specifying repository path, patch input, and targets.
@@ -98,6 +102,13 @@ func Commit(ctx context.Context, opts Options) (Result, error) {
 		return res, nil
 	}
 
+	// Phantom deletion guard: verify that requested paths, staged deletions, or patch deletions
+	// do not target paths introduced by a recent disjoint integrate merge commit.
+	if detail, fired, _ := CheckPhantomDeletionRisk(ctx, root, paths, patch); fired {
+		res.Reason, res.Detail = ReasonPhantomDeletionRisk, detail
+		return res, nil
+	}
+
 	// The candidate patch must still describe the exact owned postimage in the
 	// live worktree. Reverse-checking the patch catches an overlapping peer edit
 	// before any commit object or ref is written while permitting disjoint dirty
@@ -159,6 +170,21 @@ func Commit(ctx context.Context, opts Options) (Result, error) {
 	if !sameStrings(candidatePaths, paths) {
 		res.Reason, res.Detail = ReasonPatchPaths, fmt.Sprintf("patch changes %v; explicit allowlist is %v", candidatePaths, paths)
 		return res, nil
+	}
+	if tmpDiff, err := tmp.run(ctx, "diff", "--cached", "--name-status", parent); err == nil {
+		var tmpDeleted []string
+		for _, line := range strings.Split(tmpDiff, "\n") {
+			fields := strings.Split(strings.TrimSpace(line), "\t")
+			if len(fields) >= 2 && strings.TrimSpace(fields[0]) == "D" {
+				tmpDeleted = append(tmpDeleted, filepath.ToSlash(filepath.Clean(strings.TrimSpace(fields[1]))))
+			}
+		}
+		if len(tmpDeleted) > 0 {
+			if detail, fired, _ := CheckPhantomDeletionRisk(ctx, root, tmpDeleted, nil); fired {
+				res.Reason, res.Detail = ReasonPhantomDeletionRisk, detail
+				return res, nil
+			}
+		}
 	}
 	tree, err := oneLine(tmp.run(ctx, "write-tree"))
 	if err != nil {
@@ -333,4 +359,293 @@ func forbiddenPatchForm(patch []byte) bool {
 		}
 	}
 	return false
+}
+
+// DisjointMergeDetails records metadata and introduced paths for a disjoint integrate merge.
+type DisjointMergeDetails struct {
+	SHA       string
+	Subject   string
+	Timestamp int64
+	Paths     map[string]bool
+}
+
+// FindRecentDisjointIntegrateMerge inspects recent commits up to maxCommits (default: 5) starting from HEAD.
+// If an immediate parent merge commit (or recent commit) is a "disjoint integrate" merge within maxAge (default: 24h),
+// it returns its details along with the paths added or modified in that merge commit.
+func FindRecentDisjointIntegrateMerge(ctx context.Context, dir string, maxCommits int, maxAge time.Duration) (*DisjointMergeDetails, error) {
+	if maxCommits <= 0 {
+		maxCommits = 5
+	}
+	if dir == "" {
+		dir = "."
+	}
+	args := []string{"log", fmt.Sprintf("-n%d", maxCommits), "--format=%H\t%P\t%ct\t%s", "HEAD"}
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	windowgate.ConfigureBackgroundCommand(cmd)
+	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "\t")
+		if len(parts) < 4 {
+			continue
+		}
+		sha := strings.TrimSpace(parts[0])
+		parents := strings.Fields(parts[1])
+		tsStr := strings.TrimSpace(parts[2])
+		subject := strings.TrimSpace(parts[3])
+
+		if len(parents) < 2 {
+			continue // not a merge commit
+		}
+
+		if !strings.Contains(strings.ToLower(subject), "disjoint integrate") {
+			continue
+		}
+
+		var ts int64
+		if parsed, err := strconv.ParseInt(tsStr, 10, 64); err == nil && parsed > 0 {
+			ts = parsed
+			if maxAge > 0 {
+				commitTime := time.Unix(ts, 0)
+				if time.Since(commitTime) > maxAge {
+					continue // outside recent turns window
+				}
+			}
+		}
+
+		// Found a matching disjoint integrate merge commit. Now find all paths added or modified in it.
+		mergePaths := make(map[string]bool)
+		for _, p := range parents {
+			diffCmd := exec.CommandContext(ctx, "git", "diff-tree", "-r", "--no-renames", "--name-status", p, sha)
+			diffCmd.Dir = dir
+			windowgate.ConfigureBackgroundCommand(diffCmd)
+			diffCmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
+			diffOut, err := diffCmd.Output()
+			if err != nil {
+				continue
+			}
+			for _, dLine := range strings.Split(string(diffOut), "\n") {
+				dLine = strings.TrimSpace(dLine)
+				if dLine == "" {
+					continue
+				}
+				fields := strings.Split(dLine, "\t")
+				if len(fields) < 2 {
+					continue
+				}
+				status := strings.TrimSpace(fields[0])
+				path := filepath.ToSlash(filepath.Clean(strings.TrimSpace(fields[1])))
+				if strings.HasPrefix(status, "A") || strings.HasPrefix(status, "M") || strings.HasPrefix(status, "R") || strings.HasPrefix(status, "C") {
+					mergePaths[path] = true
+				}
+			}
+		}
+
+		if len(mergePaths) > 0 {
+			return &DisjointMergeDetails{
+				SHA:       sha,
+				Subject:   subject,
+				Timestamp: ts,
+				Paths:     mergePaths,
+			}, nil
+		}
+	}
+	return nil, nil
+}
+
+// StagedDeletions returns repository-relative paths currently staged as deleted in the index.
+func StagedDeletions(ctx context.Context, dir string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "git", "diff", "--cached", "--name-status")
+	cmd.Dir = dir
+	windowgate.ConfigureBackgroundCommand(cmd)
+	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	var deleted []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Split(line, "\t")
+		if len(fields) >= 2 && strings.TrimSpace(fields[0]) == "D" {
+			p := filepath.ToSlash(filepath.Clean(strings.TrimSpace(fields[1])))
+			deleted = append(deleted, p)
+		}
+	}
+	return deleted, nil
+}
+
+// RequestedDeletions returns repository-relative paths among the requested paths that represent deletions.
+func RequestedDeletions(ctx context.Context, dir string, paths []string) ([]string, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	var deleted []string
+	seen := make(map[string]bool)
+
+	// Check git diff HEAD --name-status -- <paths>
+	args := append([]string{"diff", "--name-status", "HEAD", "--"}, paths...)
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	windowgate.ConfigureBackgroundCommand(cmd)
+	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
+	if out, err := cmd.Output(); err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			fields := strings.Split(line, "\t")
+			if len(fields) >= 2 && strings.TrimSpace(fields[0]) == "D" {
+				p := filepath.ToSlash(filepath.Clean(strings.TrimSpace(fields[1])))
+				if !seen[p] {
+					seen[p] = true
+					deleted = append(deleted, p)
+				}
+			}
+		}
+	}
+
+	// Also check working tree file existence vs HEAD: if missing on disk but exists in HEAD
+	for _, p := range paths {
+		p = filepath.ToSlash(filepath.Clean(strings.TrimSpace(p)))
+		if seen[p] {
+			continue
+		}
+		full := filepath.Join(dir, filepath.FromSlash(p))
+		if _, err := os.Stat(full); os.IsNotExist(err) {
+			chk := exec.CommandContext(ctx, "git", "cat-file", "-e", "HEAD:"+p)
+			chk.Dir = dir
+			windowgate.ConfigureBackgroundCommand(chk)
+			chk.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
+			if chk.Run() == nil {
+				seen[p] = true
+				deleted = append(deleted, p)
+			}
+		}
+	}
+
+	return deleted, nil
+}
+
+// PatchDeletedPaths inspects unified diff patch content and returns all paths that the patch deletes.
+func PatchDeletedPaths(patch []byte) []string {
+	if len(patch) == 0 {
+		return nil
+	}
+	var deleted []string
+	lines := strings.Split(string(patch), "\n")
+	var currentPath string
+	for _, line := range lines {
+		line = strings.TrimRight(line, "\r")
+		if strings.HasPrefix(line, "diff --git a/") {
+			parts := strings.Split(line, " ")
+			if len(parts) >= 3 && strings.HasPrefix(parts[2], "a/") {
+				currentPath = strings.TrimPrefix(parts[2], "a/")
+			}
+		} else if strings.HasPrefix(line, "--- a/") {
+			currentPath = strings.TrimPrefix(line, "--- a/")
+		}
+		if (line == "+++ /dev/null" || strings.HasPrefix(line, "deleted file mode")) && currentPath != "" {
+			deleted = append(deleted, filepath.ToSlash(filepath.Clean(currentPath)))
+		}
+	}
+	seen := make(map[string]bool)
+	var deduped []string
+	for _, d := range deleted {
+		if !seen[d] {
+			seen[d] = true
+			deduped = append(deduped, d)
+		}
+	}
+	return deduped
+}
+
+func isPathCovered(p string, trees []string) bool {
+	if len(trees) == 0 {
+		return true
+	}
+	p = filepath.ToSlash(filepath.Clean(p))
+	for _, t := range trees {
+		t = filepath.ToSlash(filepath.Clean(t))
+		if t == "." || t == "" || t == p || strings.HasPrefix(p, strings.TrimSuffix(t, "/")+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckPhantomDeletionRisk inspects staged and requested deletions against paths introduced
+// by a recent disjoint integrate merge commit. If any deleted path was added or modified
+// in that merge commit, it returns fired=true with a structured recovery instruction.
+func CheckPhantomDeletionRisk(ctx context.Context, dir string, requestedPaths []string, patch []byte) (string, bool, error) {
+	if strings.ToLower(os.Getenv("FAK_PHANTOM_DELETION_CHECK")) == "off" || os.Getenv("FAK_DISABLE_PHANTOM_DELETIONS") == "1" {
+		return "", false, nil
+	}
+
+	mergeInfo, err := FindRecentDisjointIntegrateMerge(ctx, dir, 5, 24*time.Hour)
+	if err != nil || mergeInfo == nil || len(mergeInfo.Paths) == 0 {
+		return "", false, nil
+	}
+
+	staged, _ := StagedDeletions(ctx, dir)
+	requested, _ := RequestedDeletions(ctx, dir, requestedPaths)
+	fromPatch := PatchDeletedPaths(patch)
+
+	var deletions []string
+	if len(requestedPaths) > 0 {
+		for _, p := range staged {
+			if isPathCovered(p, requestedPaths) {
+				deletions = append(deletions, p)
+			}
+		}
+		deletions = append(deletions, requested...)
+		for _, p := range fromPatch {
+			if isPathCovered(p, requestedPaths) {
+				deletions = append(deletions, p)
+			}
+		}
+	} else {
+		deletions = append(deletions, staged...)
+		deletions = append(deletions, requested...)
+		deletions = append(deletions, fromPatch...)
+	}
+	var conflicts []string
+	seen := make(map[string]bool)
+	for _, p := range deletions {
+		p = filepath.ToSlash(filepath.Clean(p))
+		if seen[p] {
+			continue
+		}
+		if mergeInfo.Paths[p] {
+			seen[p] = true
+			conflicts = append(conflicts, p)
+		}
+	}
+
+	if len(conflicts) == 0 {
+		return "", false, nil
+	}
+
+	sort.Strings(conflicts)
+	shortSHA := mergeInfo.SHA
+	if len(shortSHA) > 12 {
+		shortSHA = shortSHA[:12]
+	}
+	detail := fmt.Sprintf("phantom deletion risk: path(s) %v staged or requested for deletion were added or modified in recent disjoint integrate merge commit %s (%q). Recovery: restore missing files using `git checkout HEAD -- %s` or run `fak sync reconcile --apply`",
+		conflicts, shortSHA, mergeInfo.Subject, strings.Join(conflicts, " "))
+	return detail, true, nil
 }

@@ -32,8 +32,11 @@ func serveDeviceResidentQ4K(backend compute.Backend) bool {
 
 // serveArtifactResidentQ4K gates the runtime load path on both device capability and
 // the encodings in the artifact itself. Backend capability alone must never relabel a
-// Q8_0 checkpoint as resident Q4_K.
+// Q8_0 or UD-Q2_K_XL checkpoint as resident Q4_K.
 func serveArtifactResidentQ4K(backend compute.Backend, artifact ggufload.ArtifactQuant) bool {
+	if artifact.Recipe == "UD-Q2_K_XL" {
+		return false
+	}
 	return artifact.Q4KResident && serveDeviceResidentQ4K(backend)
 }
 
@@ -406,9 +409,32 @@ func refuseStreamedQ4KMetalCapacity(total int64, known, freeCPU bool) error {
 	return fmt.Errorf("fak serve: METAL_STREAM_Q4K_PEAK_TOO_BIG: mode=%s native streamed Q4_K startup requires %d bytes (%.2f GiB), host has %d bytes (%.2f GiB); use a larger-memory Mac", mode, required, float64(required)/(1<<30), total, float64(total)/(1<<30))
 }
 
+type serveLoadArm string
+
+const (
+	serveLoadArmResidentQ4K    serveLoadArm = "resident-q4k"
+	serveLoadArmQuantProfileQ8 serveLoadArm = "quant-profile-q8"
+	serveLoadArmF32            serveLoadArm = "f32"
+)
+
+func resolveMetalServeLoadArm(ws *ggufload.WeightSource) serveLoadArm {
+	if ws == nil {
+		return serveLoadArmResidentQ4K
+	}
+	quant := ggufload.ClassifyTensorQuant(ws.File.Tensors)
+	if quant.Q4KResident && quant.Recipe != "UD-Q2_K_XL" && os.Getenv("FAK_Q4K") != "0" {
+		return serveLoadArmResidentQ4K
+	}
+	return serveLoadArmQuantProfileQ8
+}
+
 func refuseOversubscribedMetalGGUF(path string) error {
+	total, _, known := compute.HostSystemMemoryInfo()
+	return refuseOversubscribedMetalGGUFForHost(path, total, known)
+}
+
+func refuseOversubscribedMetalGGUFForHost(path string, total int64, known bool) error {
 	if os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1" {
-		total, _, known := compute.HostSystemMemoryInfo()
 		return refuseStreamedQ4KMetalCapacity(total, known, os.Getenv("FAK_Q4K_FREE_CPU") == "1")
 	}
 	ws, err := ggufload.OpenWeights(path)
@@ -416,12 +442,17 @@ func refuseOversubscribedMetalGGUF(path string) error {
 		return err
 	}
 	defer ws.Close()
-	plan, err := ws.EstimateLoadMemoryPlan()
+	arm := resolveMetalServeLoadArm(ws)
+	var plan compute.MemoryPlan
+	if arm == serveLoadArmQuantProfileQ8 {
+		plan, err = ws.EstimateQ8LoadMemoryPlan()
+	} else {
+		plan, err = ws.EstimateLoadMemoryPlan()
+	}
 	if err != nil {
 		return err
 	}
 	steady := plan.Total()
-	total, _, known := compute.HostSystemMemoryInfo()
 	peak, refuse := metalGGUFPeakCapacity(true, steady, total, known)
 	if !refuse {
 		return nil

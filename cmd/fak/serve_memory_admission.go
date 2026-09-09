@@ -54,7 +54,13 @@ func estimateMetalModelMemoryBounds(ggufPath string) localadmission.MemoryPlan {
 			ws, err := ggufload.OpenWeights(trimmed)
 			if err == nil {
 				defer ws.Close()
-				plan, err := ws.EstimateLoadMemoryPlan()
+				arm := resolveMetalServeLoadArm(ws)
+				var plan compute.MemoryPlan
+				if arm == serveLoadArmQuantProfileQ8 {
+					plan, err = ws.EstimateQ8LoadMemoryPlan()
+				} else {
+					plan, err = ws.EstimateLoadMemoryPlan()
+				}
 				if err == nil && plan.Total() > 0 {
 					steady := plan.Total()
 					total, _, known := compute.HostSystemMemoryInfo()
