@@ -129,6 +129,63 @@ func readVulkanPackedHalf(src []uint32, logicalIndex int) uint16 {
 	return uint16(word >> 16)
 }
 
+// VulkanPackedKVStorageFormat names one plane in the asymmetric Vulkan KV
+// append contract. These names deliberately distinguish the #11909
+// TurboQuant Q8_0 wire format from compute's existing GGML Q8_0 format; Q4_0
+// is not a substitute for Turbo4.
+type VulkanPackedKVStorageFormat string
+
+// VulkanPackedKVStorageOwner names the allocator responsible for every
+// resident plane in the contract.
+type VulkanPackedKVStorageOwner string
+
+const (
+	VulkanPackedKVTurboQ8Key      VulkanPackedKVStorageFormat = "turboquant_q8_0"
+	VulkanPackedKVTurbo4Value     VulkanPackedKVStorageFormat = "turbo4_lloyd_max"
+	VulkanPackedKVF32PreRoPEKey   VulkanPackedKVStorageFormat = "f32_pre_rope"
+	VulkanPackedKVDeviceOwnership VulkanPackedKVStorageOwner  = "vulkan_device"
+)
+
+// VulkanPackedKVProofLevel separates a software storage contract from a
+// source-bound physical execution receipt.
+type VulkanPackedKVProofLevel string
+
+const (
+	VulkanPackedKVSoftwareContract VulkanPackedKVProofLevel = "software_contract"
+)
+
+// VulkanPackedKVAppendContract is the typed admission and storage layout for
+// the Strix asymmetric append path. It is not an execution receipt: device
+// dispatch, consumer wiring, traffic counters, and physical promotion remain
+// required before the runtime can claim that the contract was executed.
+type VulkanPackedKVAppendContract struct {
+	Schema                 string                      `json:"schema"`
+	Arch                   string                      `json:"arch"`
+	Positions              int                         `json:"positions"`
+	NumKVHeads             int                         `json:"num_kv_heads"`
+	HeadDim                int                         `json:"head_dim"`
+	ElementsPerRow         int64                       `json:"elements_per_row"`
+	BlockElements          int64                       `json:"block_elements"`
+	KeyFormat              VulkanPackedKVStorageFormat `json:"key_format"`
+	ValueFormat            VulkanPackedKVStorageFormat `json:"value_format"`
+	RawKeyFormat           VulkanPackedKVStorageFormat `json:"raw_key_format"`
+	StorageOwner           VulkanPackedKVStorageOwner  `json:"storage_owner"`
+	KeyBlockBytes          int64                       `json:"key_block_bytes"`
+	ValueBlockBytes        int64                       `json:"value_block_bytes"`
+	RawKeyBlockBytes       int64                       `json:"raw_key_block_bytes"`
+	KeyBytesPerToken       int64                       `json:"key_bytes_per_token"`
+	ValueBytesPerToken     int64                       `json:"value_bytes_per_token"`
+	RawKeyBytesPerToken    int64                       `json:"raw_key_bytes_per_token"`
+	ResidentBytesPerToken  int64                       `json:"resident_bytes_per_token"`
+	ResidentBytes          int64                       `json:"resident_bytes"`
+	DevicePackingRequired  bool                        `json:"device_packing_required"`
+	HostCodecAllowed       bool                        `json:"host_codec_allowed"`
+	FallbackAllowed        bool                        `json:"fallback_allowed"`
+	ConsumerABIReady       bool                        `json:"consumer_abi_ready"`
+	PhysicalPromotionReady bool                        `json:"physical_promotion_ready"`
+	ProofLevel             VulkanPackedKVProofLevel    `json:"proof_level"`
+}
+
 // VulkanKVScratchpad manages a contiguous, transposed scratchpad in GPU UMA memory sized
 // to hold active dequantized KV tiles for full-attention layers on AMD Strix Halo (gfx1151).
 //

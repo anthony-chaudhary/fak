@@ -13,6 +13,78 @@ import (
 	"testing"
 )
 
+// TestVulkanPackedKVAppendStrix witnesses the independent software contract
+// slice for #12399. It does not claim device execution or physical promotion;
+// those remain false until the cgo Vulkan append and consumer ABI are wired.
+func TestVulkanPackedKVAppendStrix(t *testing.T) {
+	const (
+		nKV     = 8
+		headDim = 128
+	)
+	var bytesPerToken int64
+	for _, positions := range []int{512, 32768} {
+		contract, err := PlanVulkanPackedKVAppendStrix(RADVTargetArchGfx1151, positions, nKV, headDim)
+		if err != nil {
+			t.Fatalf("PlanVulkanPackedKVAppendStrix(%d): %v", positions, err)
+		}
+		if contract.KeyFormat != VulkanPackedKVTurboQ8Key || contract.KeyBlockBytes != 36 {
+			t.Fatalf("Q8 key contract = %q/%d bytes, want turboquant_q8_0/36", contract.KeyFormat, contract.KeyBlockBytes)
+		}
+		if contract.ValueFormat != VulkanPackedKVTurbo4Value || contract.ValueBlockBytes != 20 {
+			t.Fatalf("Turbo4 value contract = %q/%d bytes, want turbo4_lloyd_max/20", contract.ValueFormat, contract.ValueBlockBytes)
+		}
+		if contract.RawKeyFormat != VulkanPackedKVF32PreRoPEKey || contract.RawKeyBlockBytes != 128 {
+			t.Fatalf("raw-key contract = %q/%d bytes, want f32_pre_rope/128", contract.RawKeyFormat, contract.RawKeyBlockBytes)
+		}
+		if contract.StorageOwner != VulkanPackedKVDeviceOwnership {
+			t.Fatalf("storage owner = %q, want %q", contract.StorageOwner, VulkanPackedKVDeviceOwnership)
+		}
+		if !contract.DevicePackingRequired || contract.HostCodecAllowed || contract.FallbackAllowed {
+			t.Fatalf("native admission contract = device:%t host:%t fallback:%t, want true/false/false",
+				contract.DevicePackingRequired, contract.HostCodecAllowed, contract.FallbackAllowed)
+		}
+		if contract.ConsumerABIReady || contract.PhysicalPromotionReady || contract.ProofLevel != VulkanPackedKVSoftwareContract {
+			t.Fatalf("proof state = consumer:%t physical:%t level:%q, want false/false/software_contract",
+				contract.ConsumerABIReady, contract.PhysicalPromotionReady, contract.ProofLevel)
+		}
+		if contract.ResidentBytes != int64(positions)*contract.ResidentBytesPerToken {
+			t.Fatalf("resident bytes = %d, want %d", contract.ResidentBytes, int64(positions)*contract.ResidentBytesPerToken)
+		}
+		if bytesPerToken == 0 {
+			bytesPerToken = contract.ResidentBytesPerToken
+		} else if contract.ResidentBytesPerToken != bytesPerToken {
+			t.Fatalf("bytes/token changed with context: got %d want %d", contract.ResidentBytesPerToken, bytesPerToken)
+		}
+	}
+
+	for _, tc := range []struct {
+		name      string
+		arch      string
+		positions int
+		nKV       int
+		headDim   int
+	}{
+		{name: "wrong_arch", arch: "gfx1100", positions: 512, nKV: nKV, headDim: headDim},
+		{name: "zero_positions", arch: RADVTargetArchGfx1151, positions: 0, nKV: nKV, headDim: headDim},
+		{name: "unaligned_row", arch: RADVTargetArchGfx1151, positions: 512, nKV: 1, headDim: 31},
+		{name: "resident_overflow", arch: RADVTargetArchGfx1151, positions: math.MaxInt, nKV: 1, headDim: math.MaxInt - 31},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := PlanVulkanPackedKVAppendStrix(tc.arch, tc.positions, tc.nKV, tc.headDim); err == nil {
+				t.Fatal("expected fail-closed admission error")
+			}
+		})
+	}
+	if math.MaxInt > math.MaxInt32 {
+		// This block-aligned row has a true storage cost above MaxInt64;
+		// previously the byte sum wrapped to a small positive value.
+		overflowHeadDim := int64(3208129404123400288)
+		if _, err := PlanVulkanPackedKVAppendStrix(RADVTargetArchGfx1151, 1, 1, int(overflowHeadDim)); err == nil {
+			t.Fatal("expected fail-closed row-storage overflow error")
+		}
+	}
+}
+
 func TestVulkanFP16KVNoF32Expansion(t *testing.T) {
 	const (
 		capacityPos         = 2
