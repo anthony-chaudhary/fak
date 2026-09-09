@@ -164,7 +164,11 @@ func CountPathsOutsideTrees(changed, trees []string) int {
 }
 
 func expandLandPaths(wtPath, diffRef string, requested []string, git GitRunner) ([]string, error) {
-	args := []string{"ls-files", "--cached", "--others", "--exclude-standard", "--"}
+	// Intent-to-add is needed only for untracked files: tracked files are already
+	// visible to git diff. Including --cached here expands a declared directory or
+	// wildcard into every tracked descendant and can turn a zero-delta land into an
+	// enormous (and unnecessary) git add -N invocation.
+	args := []string{"ls-files", "--others", "--exclude-standard", "--"}
 	args = append(args, requested...)
 	rc, out := run(git, wtPath, args)
 	if rc != 0 {
@@ -183,14 +187,21 @@ func expandLandPaths(wtPath, diffRef string, requested []string, git GitRunner) 
 		return nil, fmt.Errorf("could not inspect declared land paths — fail open")
 	}
 	changed := strings.Fields(changedOut)
+	if len(changed) == 0 {
+		// An entirely clean declared tree is a valid worker no-op. Keep the empty
+		// expansion distinct from the partial-land case below so Land can emit its
+		// existing typed no-net-diff receipt without relaxing path admission when
+		// any change is actually present.
+		return nil, nil
+	}
 	expanded := make([]string, 0, len(changed))
 	seen := make(map[string]bool)
 	for _, req := range requested {
 		matched := false
-		cleanReq := strings.TrimSuffix(filepath.ToSlash(filepath.Clean(req)), "/")
+		cleanReq := normalizeFenceGlob(req)
 		for _, name := range changed {
-			cleanName := filepath.ToSlash(filepath.Clean(name))
-			if cleanName == cleanReq || strings.HasPrefix(cleanName, cleanReq+"/") {
+			cleanName := normalizeFencePath(name)
+			if matchFenceGlob(cleanReq, cleanName) {
 				matched = true
 				if !seen[cleanName] {
 					seen[cleanName] = true
@@ -245,6 +256,11 @@ func LandProspectiveVerified(root, wtPath, baseSHA, commitMsgFile string, paths 
 	return land(root, wtPath, baseSHA, commitMsgFile, paths, verify, prospectiveVerify, git, opts...)
 }
 
+func landNoOpResult(diffRef string) Result {
+	return Result{OK: true, Code: LandResultNoOp, Applied: false, Committed: false,
+		Reason: "no net diff in worktree vs " + diffRef + " to land"}
+}
+
 func land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, prospectiveVerify ProspectiveVerifyHook, git GitRunner, opts ...LandOption) (res Result) {
 	cfg := newLandConfig(opts)
 	tracker := newLandProgressTracker(cfg)
@@ -270,6 +286,13 @@ func land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 		if err != nil {
 			return Result{OK: false, Reason: err.Error()}
 		}
+		if len(paths) == 0 {
+			// A non-empty declaration that expands to nothing is a clean scoped
+			// worker, not an invitation to perform whole-worktree mutations. Exit
+			// before fence stripping; originally omitted paths retain the legacy
+			// whole-worktree behavior below.
+			return landNoOpResult(diffRef)
+		}
 	}
 	stripWorktreeWIPFences(wtPath, paths)
 	rc, diff := run(git, wtPath, []string{"diff", "--binary", diffRef})
@@ -279,8 +302,7 @@ func land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	if strings.TrimSpace(diff) == "" {
 		// No net change since the base: the worker landed nothing. The caller's
 		// commit-witness (dos commit-audit) decides whether the slot was productive.
-		return Result{OK: true, Code: LandResultNoOp, Applied: false, Committed: false,
-			Reason: "no net diff in worktree vs " + diffRef + " to land"}
+		return landNoOpResult(diffRef)
 	}
 	checkBase := strings.TrimSpace(baseSHA)
 	if checkBase == "" {

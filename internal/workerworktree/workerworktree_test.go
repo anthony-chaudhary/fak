@@ -553,6 +553,105 @@ func TestReapCheckedAcceptsOnlyByteEquivalentDirtyPaths(t *testing.T) {
 
 // ---- Land ----------------------------------------------------------------- //
 
+func TestExpandLandPathsZeroDeltaSkipsTrackedIntentToAdd(t *testing.T) {
+	wt := t.TempDir()
+	tracked := filepath.Join(wt, "cmd", "fak", "main.go")
+	if err := os.MkdirAll(filepath.Dir(tracked), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const fenced = "//go:build wip_runtime\n\npackage main\n"
+	if err := os.WriteFile(tracked, []byte(fenced), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var calls [][]string
+	git := func(_ string, args []string) (int, string) {
+		calls = append(calls, append([]string(nil), args...))
+		switch gitVerb(args) {
+		case "ls-files":
+			if contains(args, "--cached") {
+				var tracked strings.Builder
+				for i := 0; i < 2_000; i++ {
+					tracked.WriteString("cmd/fak/tracked-")
+					tracked.WriteString(string(rune('a' + i%26)))
+					tracked.WriteString(".go\n")
+				}
+				return 0, tracked.String()
+			}
+			return 0, ""
+		case "diff":
+			return 0, ""
+		default:
+			return 0, ""
+		}
+	}
+
+	res := Land("/trunk", wt, "base", "", []string{"cmd/fak/**"}, nil, git)
+	if !res.OK || res.Code != LandResultNoOp || res.Applied || res.Committed {
+		t.Fatalf("zero-delta declared tree should reach typed no-op: %+v", res)
+	}
+	got, err := os.ReadFile(tracked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != fenced {
+		t.Fatalf("clean declared tree was mutated before no-op: got %q, want %q", got, fenced)
+	}
+	for _, call := range calls {
+		if contains(call, "--cached") {
+			t.Fatalf("tracked files must not be intent-to-add candidates: %v", call)
+		}
+		if gitVerb(call) == "add" {
+			t.Fatalf("clean tracked tree must not invoke git add -N: %v", call)
+		}
+	}
+}
+
+func TestExpandLandPathsRecursiveGlobAdmission(t *testing.T) {
+	t.Run("tracked descendant", func(t *testing.T) {
+		g := newFakeGit().
+			reply("ls-files", 0, "").
+			reply("diff", 0, "cmd/fak/main.go\n")
+		got, err := expandLandPaths("/wt", "base", []string{"cmd/fak/**"}, g.run)
+		if err != nil {
+			t.Fatalf("tracked descendant should match recursive tree: %v", err)
+		}
+		if len(got) != 1 || got[0] != "cmd/fak/main.go" {
+			t.Fatalf("expanded paths = %v, want tracked descendant", got)
+		}
+		if adds := g.callsWithPrefix("add"); len(adds) != 0 {
+			t.Fatalf("tracked descendant must not be intent-to-add: %v", adds)
+		}
+	})
+
+	t.Run("untracked descendant", func(t *testing.T) {
+		g := newFakeGit().
+			reply("ls-files", 0, "cmd/fak/new.go\n").
+			reply("add", 0, "").
+			reply("diff", 0, "cmd/fak/new.go\n")
+		got, err := expandLandPaths("/wt", "base", []string{"cmd/fak/**"}, g.run)
+		if err != nil {
+			t.Fatalf("untracked descendant should match recursive tree: %v", err)
+		}
+		if len(got) != 1 || got[0] != "cmd/fak/new.go" {
+			t.Fatalf("expanded paths = %v, want untracked descendant", got)
+		}
+		adds := g.callsWithPrefix("add", "-N", "--")
+		if len(adds) != 1 || !contains(adds[0], "cmd/fak/new.go") {
+			t.Fatalf("untracked descendant should be the sole intent-to-add candidate: %v", adds)
+		}
+	})
+
+	t.Run("out of lane", func(t *testing.T) {
+		g := newFakeGit().
+			reply("ls-files", 0, "").
+			reply("diff", 0, "internal/workerworktree/land.go\n")
+		if _, err := expandLandPaths("/wt", "base", []string{"cmd/fak/**"}, g.run); err == nil {
+			t.Fatal("nonzero change outside the declared tree must retain partial-land refusal")
+		}
+	})
+}
+
 func TestLandLandsDiffOntoTrunkByPathSignedOff(t *testing.T) {
 	// Exercises the shared-index baseline apply+commit mechanics; force both #3619
 	// safety gates off (default-ON since #3619) so this fake need not stub them.
