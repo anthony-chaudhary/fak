@@ -414,7 +414,7 @@ func land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 
 	landingOp := func() Result {
 		if prospectiveVerify != nil {
-			r, _ := landIsolatedProspectiveVerified(root, wtPath, diff, msgFile, paths, prospectiveVerify, verify, git, isolatedGitEnv, cfg)
+			r, _ := landIsolatedProspectiveVerified(root, wtPath, diff, msgFile, paths, prospectiveVerify, verify, git, isolatedGitEnv, cfg, checkBase)
 			r.DroppedOutOfLane = droppedOutOfLane
 			if r.OK && r.Committed {
 				r.Code = LandResultSuccess
@@ -430,7 +430,7 @@ func land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 				r, _ := isolatedLandReconciliation(wtPath, "path-scoped land paths are required", "set explicit paths or explicitly disable isolated landing")
 				return r
 			}
-			r, _ := landIsolated(root, wtPath, diff, msgFile, paths, verify, git, isolatedGitEnv, cfg)
+			r, _ := landIsolated(root, wtPath, diff, msgFile, paths, verify, git, isolatedGitEnv, cfg, checkBase)
 			r.DroppedOutOfLane = droppedOutOfLane
 			if r.OK && r.Committed {
 				r.Code = LandResultSuccess
@@ -560,13 +560,22 @@ func writePatch(diff string) (string, func(), error) {
 	return f.Name(), func() { os.Remove(f.Name()) }, nil
 }
 
-func parseIsolatedArgs(args []any) (VerifyHook, GitRunner, GitEnvRunner, landConfig) {
+func parseIsolatedArgs(args []any) (VerifyHook, GitRunner, GitEnvRunner, landConfig, string) {
 	var (
-		verify VerifyHook
-		git    GitRunner
-		genv   GitEnvRunner
-		cfg    landConfig
+		verify  VerifyHook
+		git     GitRunner
+		genv    GitEnvRunner
+		cfg     landConfig
+		baseSHA string
 	)
+	var rest []any
+	for _, a := range args {
+		if s, ok := a.(string); ok && s != "" {
+			baseSHA = strings.TrimSpace(s)
+		} else {
+			rest = append(rest, a)
+		}
+	}
 	toVerify := func(a any) VerifyHook {
 		if a == nil {
 			return nil
@@ -618,34 +627,34 @@ func parseIsolatedArgs(args []any) (VerifyHook, GitRunner, GitEnvRunner, landCon
 		return landConfig{}
 	}
 
-	switch len(args) {
+	switch len(rest) {
 	case 0:
 	case 1:
-		git = toGit(args[0])
+		git = toGit(rest[0])
 	case 2:
-		git = toGit(args[0])
-		genv = toGenv(args[1])
+		git = toGit(rest[0])
+		genv = toGenv(rest[1])
 	case 3:
-		if c, ok := args[2].(landConfig); ok {
-			git = toGit(args[0])
-			genv = toGenv(args[1])
+		if c, ok := rest[2].(landConfig); ok {
+			git = toGit(rest[0])
+			genv = toGenv(rest[1])
 			cfg = c
-		} else if c, ok := args[2].(*landConfig); ok && c != nil {
-			git = toGit(args[0])
-			genv = toGenv(args[1])
+		} else if c, ok := rest[2].(*landConfig); ok && c != nil {
+			git = toGit(rest[0])
+			genv = toGenv(rest[1])
 			cfg = *c
 		} else {
-			verify = toVerify(args[0])
-			git = toGit(args[1])
-			genv = toGenv(args[2])
+			verify = toVerify(rest[0])
+			git = toGit(rest[1])
+			genv = toGenv(rest[2])
 		}
 	default:
-		verify = toVerify(args[0])
-		git = toGit(args[1])
-		genv = toGenv(args[2])
-		cfg = toCfg(args[3])
+		verify = toVerify(rest[0])
+		git = toGit(rest[1])
+		genv = toGenv(rest[2])
+		cfg = toCfg(rest[3])
 	}
-	return verify, git, genv, cfg
+	return verify, git, genv, cfg, baseSHA
 }
 
 // landIsolated is the race-free layer-2 land (#3547). It stages the worker diff into a
@@ -677,7 +686,7 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 }
 
 func landIsolatedProspectiveVerified(root, wtPath, diff, msgFile string, paths []string, prospectiveVerify ProspectiveVerifyHook, args ...any) (Result, bool) {
-	verify, git, genv, cfg := parseIsolatedArgs(args)
+	verify, git, genv, cfg, baseSHA := parseIsolatedArgs(args)
 	tracker := cfg.tracker
 	finishIsolationAdmission := beginLandPhase(tracker, "isolated-admission", 0)
 	isolationAdmissionActive := true
@@ -697,6 +706,15 @@ func landIsolatedProspectiveVerified(root, wtPath, diff, msgFile string, paths [
 	oldHEAD := strings.TrimSpace(head)
 	if rc != 0 || oldHEAD == "" {
 		return isolatedLandReconciliation(wtPath, "could not resolve trunk HEAD", head)
+	}
+	initialBase := baseSHA
+	if initialBase == "" {
+		if in, err := LoadIntent(wtPath); err == nil {
+			initialBase = strings.TrimSpace(in.BaseSHA)
+		}
+	}
+	if initialBase == "" {
+		initialBase = oldHEAD
 	}
 	// commit-tree runs no hook and adds no signoff; compose Signed-off-by ourselves to
 	// preserve the baseline `commit -s`. Unresolved identity is a terminal refusal.
@@ -909,13 +927,91 @@ func landIsolatedProspectiveVerified(root, wtPath, diff, msgFile string, paths [
 			continue
 		}
 		// The ref moved but the shared working tree still holds OLD content for `paths`
-		// (we never touched it). Sync just those paths so trunk builders see the landed
-		// change, matching the baseline post-state. A sync failure does NOT unland.
+		// and any intermediate peer commits landed since initial base.
+		// Sync worker paths and any un-conflicted remote paths so trunk builders see a complete tree (#12574).
 		detail := "cas-attempts=" + strconv.Itoa(attempt) + "/" + strconv.Itoa(attempts) + "; recovery-ref=" + recoveryRef
-		coArgs := append([]string{"checkout", newCommit, "--"}, paths...)
 		finishSync := beginLandPhase(tracker, "working-tree-sync", attempt)
+		syncPaths := append([]string(nil), paths...)
+		syncPathSet := make(map[string]bool, len(paths))
+		for _, p := range paths {
+			norm := filepath.Clean(filepath.ToSlash(strings.TrimSpace(p)))
+			if norm != "" && norm != "." {
+				syncPathSet[norm] = true
+			}
+		}
+
+		isWorkerPath := func(cand string) bool {
+			cand = filepath.Clean(filepath.ToSlash(strings.TrimSpace(cand)))
+			if syncPathSet[cand] {
+				return true
+			}
+			for _, p := range paths {
+				norm := filepath.Clean(filepath.ToSlash(strings.TrimSpace(p)))
+				if norm != "" && norm != "." && (cand == norm || strings.HasPrefix(cand, norm+"/")) {
+					return true
+				}
+			}
+			return false
+		}
+
+		if initialBase != "" && initialBase != newCommit {
+			diffRC, diffOut := run(git, root, []string{"diff", "--name-only", "--diff-filter=d", initialBase, newCommit})
+			if diffRC == 0 && strings.TrimSpace(diffOut) != "" {
+				var peerPaths []string
+				seenPeer := make(map[string]bool)
+				for _, line := range strings.Fields(diffOut) {
+					p := filepath.Clean(filepath.ToSlash(strings.TrimSpace(line)))
+					if p == "" || p == "." || isWorkerPath(p) || seenPeer[p] {
+						continue
+					}
+					seenPeer[p] = true
+					peerPaths = append(peerPaths, p)
+				}
+
+				if len(peerPaths) > 0 {
+					statusArgs := append([]string{"status", "--porcelain", "--"}, peerPaths...)
+					statusRC, statusOut := run(git, root, statusArgs)
+					conflicted := make(map[string]bool)
+					if statusRC == 0 {
+						for _, line := range strings.Split(strings.ReplaceAll(statusOut, "\r\n", "\n"), "\n") {
+							trimmed := strings.TrimRight(line, "\r\n")
+							if strings.TrimSpace(trimmed) == "" || len(trimmed) < 4 {
+								continue
+							}
+							isConflicted := strings.HasPrefix(trimmed, "??") ||
+								trimmed[1] == 'M' || trimmed[1] == 'U' ||
+								trimmed[0] == 'U' || strings.HasPrefix(trimmed, "AA") ||
+								strings.HasPrefix(trimmed, "DD")
+							if isConflicted {
+								p := strings.TrimSpace(trimmed[3:])
+								if idx := strings.Index(p, " -> "); idx != -1 {
+									p = strings.TrimSpace(p[idx+4:])
+								}
+								p = strings.Trim(p, "\"")
+								p = filepath.Clean(filepath.ToSlash(p))
+								if p != "" {
+									conflicted[p] = true
+								}
+							}
+						}
+						for _, peerPath := range peerPaths {
+							if !conflicted[peerPath] && !syncPathSet[peerPath] {
+								syncPathSet[peerPath] = true
+								syncPaths = append(syncPaths, peerPath)
+							}
+						}
+					}
+				}
+			}
+		}
+
+		coArgs := append([]string{"checkout", newCommit, "--"}, syncPaths...)
 		if rc, out := run(git, root, coArgs); rc != 0 {
 			detail += "; landed " + shortSHA(newCommit) + " but working-tree sync failed: " + tail(out, 200)
+			if len(syncPaths) > len(paths) {
+				fallbackArgs := append([]string{"checkout", newCommit, "--"}, paths...)
+				_, _ = run(git, root, fallbackArgs)
+			}
 		}
 		finishSync()
 		return Result{OK: true, Code: LandResultSuccess, Applied: true, Committed: true,
