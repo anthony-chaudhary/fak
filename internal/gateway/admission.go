@@ -197,6 +197,8 @@ const (
 	// VerdictExpired: the individual request's DecodeTTL expired while waiting or decoding,
 	// shedding only this request without killing the scheduler or other requests.
 	VerdictExpired
+	// VerdictRefused: the request envelope is statically impossible (e.g. req.Tokens > capacity).
+	VerdictRefused
 )
 
 // String renders a verdict as its lowercase token; an out-of-range value renders
@@ -213,6 +215,8 @@ func (v AdmissionVerdict) String() string {
 		return "denied"
 	case VerdictExpired:
 		return "expired"
+	case VerdictRefused:
+		return "refused"
 	}
 	return "unknown"
 }
@@ -228,6 +232,8 @@ func (v AdmissionVerdict) HTTPStatus() int {
 		return http.StatusForbidden
 	case VerdictExpired:
 		return http.StatusGatewayTimeout
+	case VerdictRefused:
+		return http.StatusBadRequest
 	default:
 		return 0
 	}
@@ -247,6 +253,7 @@ type AdmissionStats struct {
 	Shed          int64 // cumulative requests shed under overload — 429 (counter)
 	Denied        int64 // cumulative requests rejected by a trust verdict (counter)
 	Expired       int64 // cumulative requests expired by DecodeTTL (counter)
+	Refused       int64 // cumulative requests refused for impossible envelopes (counter)
 }
 
 // AdmissionController is the admission/priority/fairness gate over the native loop. The
@@ -596,7 +603,10 @@ func (c *AdmissionController) Offer(req SeqRequest) AdmissionVerdict {
 		c.stats.Denied++
 		return VerdictDenied
 	}
-	if check := c.impossibleBudgetLocked(req); check.status >= batchBudgetExhausted {
+	if check := c.impossibleBudgetLocked(req); check.status == batchBudgetImpossible {
+		c.stats.Refused++
+		return VerdictRefused
+	} else if check.status >= batchBudgetExhausted {
 		c.stats.Shed++
 		return VerdictShed
 	}
@@ -646,7 +656,11 @@ func (c *AdmissionController) Acquire(ctx context.Context, req SeqRequest) (*Adm
 		c.mu.Unlock()
 		return nil, &AdmissionError{Verdict: VerdictDenied, Reason: req.Trust.Reason}
 	}
-	if check := c.impossibleBudgetLocked(req); check.status >= batchBudgetExhausted {
+	if check := c.impossibleBudgetLocked(req); check.status == batchBudgetImpossible {
+		c.stats.Refused++
+		c.mu.Unlock()
+		return nil, &AdmissionError{Verdict: VerdictRefused, Budget: check.budget, Reason: check.reason}
+	} else if check.status >= batchBudgetExhausted {
 		c.stats.Shed++
 		c.mu.Unlock()
 		return nil, &AdmissionError{Verdict: VerdictShed, Budget: check.budget, Reason: check.reason}
@@ -1201,6 +1215,7 @@ func (c *AdmissionController) WriteMetrics(b *strings.Builder) {
 	writeCounter(b, schedMetricPrefix+"queued_total", "Requests placed on the waiting queue.", st.Queued)
 	writeCounter(b, schedMetricPrefix+"shed_total", "Requests shed under overload (waiting queue at bound; HTTP 429).", st.Shed)
 	writeCounter(b, schedMetricPrefix+"denied_total", "Requests rejected by a per-tenant trust verdict.", st.Denied)
+	writeCounter(b, schedMetricPrefix+"refused_total", "Requests refused for impossible request envelopes (HTTP 400).", st.Refused)
 }
 
 // SetWarmupCapacity records a byte-measured warmup probe.
@@ -1619,6 +1634,12 @@ func admissionErrorStatus(err error) (status int, code, msg string, ok bool) {
 		return 0, "", "", false
 	}
 	switch ae.Verdict {
+	case VerdictRefused:
+		reason := strings.TrimSpace(ae.Reason)
+		if reason == "" {
+			reason = "request envelope exceeds capacity"
+		}
+		return http.StatusBadRequest, "context_length_exceeded", reason, true
 	case VerdictShed:
 		msg := "scheduler overloaded — back off and retry"
 		// A token-rate shed (#2019) names the provider cap that fired so the client's

@@ -12,6 +12,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -76,14 +77,66 @@ func newServeStartupMessage(source, kind, level, text string) gateway.StartupMes
 	return gateway.StartupMessage{Source: source, Kind: kind, Level: level, Text: text}
 }
 
-// serveNativeAdmissionPolicy changes only the token axis of the gateway's
-// shipping policy. Keeping the other axes derived from DefaultAdmissionPolicy
-// prevents this operator declaration from drifting scheduler semantics.
-func serveNativeAdmissionPolicy(sf *serveFlags) (gateway.AdmissionPolicy, error) {
-	if sf == nil || sf.nativeAdmissionTokenBudget == nil {
-		return gateway.DefaultAdmissionPolicy(), errors.New("--native-admission-token-budget is unavailable")
+// isExplicitFlag reports whether flag `name` was explicitly passed on the command line.
+func (sf *serveFlags) isExplicitFlag(name string) bool {
+	if sf == nil {
+		return false
 	}
-	return nativeAdmissionPolicyForBudget(*sf.nativeAdmissionTokenBudget)
+	if sf.explicit != nil && sf.explicit[name] {
+		return true
+	}
+	if sf.fs != nil {
+		explicit := false
+		sf.fs.Visit(func(f *flag.Flag) {
+			if f.Name == name {
+				explicit = true
+			}
+		})
+		return explicit
+	}
+	return false
+}
+
+// serveNativeAdmissionPolicy changes only the token axis of the gateway's
+// shipping policy. When --native-admission-token-budget is omitted, it auto-derives
+// TokenBudget from the configured model context window (--ctx / --context-budget-tokens).
+// Explicit --native-admission-token-budget declarations take strict precedence.
+func serveNativeAdmissionPolicy(sf *serveFlags) (gateway.AdmissionPolicy, error) {
+	if sf == nil {
+		return gateway.DefaultAdmissionPolicy(), errors.New("serve flags are nil")
+	}
+	policy := gateway.DefaultAdmissionPolicy()
+	explicitBudget := sf.isExplicitFlag("native-admission-token-budget")
+
+	if explicitBudget {
+		if sf.nativeAdmissionTokenBudget == nil {
+			return policy, errors.New("--native-admission-token-budget is unavailable")
+		}
+		if *sf.nativeAdmissionTokenBudget <= 0 {
+			return policy, fmt.Errorf("--native-admission-token-budget must be positive (got %d)", *sf.nativeAdmissionTokenBudget)
+		}
+		policy.TokenBudget = *sf.nativeAdmissionTokenBudget
+		policy.TokenBudgetProvenance = "explicit"
+
+		if sf.contextBudgetTokens != nil && *sf.contextBudgetTokens > 0 && policy.TokenBudget < *sf.contextBudgetTokens {
+			fmt.Fprintf(os.Stderr, "fak serve: WARNING: explicit --native-admission-token-budget (%d) is smaller than configured model context window (%d); requests near full context may be shed\n", policy.TokenBudget, *sf.contextBudgetTokens)
+		}
+		return policy, nil
+	}
+
+	if sf.contextBudgetTokens != nil && *sf.contextBudgetTokens > 0 {
+		policy.TokenBudget = *sf.contextBudgetTokens
+		policy.TokenBudgetProvenance = "context"
+		return policy, nil
+	}
+
+	if sf.nativeAdmissionTokenBudget != nil && *sf.nativeAdmissionTokenBudget > 0 {
+		policy.TokenBudget = *sf.nativeAdmissionTokenBudget
+		policy.TokenBudgetProvenance = "default"
+		return policy, nil
+	}
+
+	return policy, nil
 }
 
 // nativeAdmissionPolicyForBudget is the one seam every launcher that runs the
