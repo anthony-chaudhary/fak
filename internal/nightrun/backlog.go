@@ -114,7 +114,7 @@ func benchValue(b benchcatalog.Bench) Value {
 // on-box-re-measure items); add a row here when a new measured datum is blocked
 // on hardware/credentials, the same additive-leaf discipline the kernel uses.
 func witnessTasks() []Task {
-	return []Task{
+	tasks := []Task{
 		{
 			ID:          "witness-qwen38-27b-metal-auto-gateway-sweep",
 			Title:       "auto-collect the Mac Qwen3.8-27B Metal serving curve sweep: decode, longgen, prefill sweep, and 2-stream concurrency against the fak serve gateway",
@@ -283,19 +283,31 @@ func witnessTasks() []Task {
 			RecheckDays: 7,
 			Doc:         "docs/research/micro-context-fabrics.md",
 		},
-		{
-			ID:          "witness-strix-halo-subkernels-ablations",
-			Title:       "physical validation and differential ablation of Vulkan compute sub-kernels (argmax, matmul_f32, q8_matmul, q4k_matmul, rmsnorm, swiglu) on AMD Strix Halo APU (gfx1151, 40 CUs, 64GB UMA)",
-			Source:      SourceWitness,
-			Value:       ValueFrontier,
-			Requires:    nil,
-			Run:         "go run ./cmd/fak-dev amd-strix-validate --subkernels=all --ablate=all --json",
-			Acceptance:  "a fak.strix.validation/v1 artifact with verdict PASS across all subkernels and ablations, logit cosine >= 0.999900, and verified digest",
-			RecheckDays: 7,
-			TimeoutSec:  120,
-			Doc:         "docs/fleet-compute-nodes.md",
-		},
 	}
+
+	// Ten distinct task ids give the Strix box ten independently schedulable and
+	// ledgered full-matrix passes per weekly cadence. Each pass selects the live
+	// validator catalogs with all/all, so catalog growth automatically receives the
+	// same multiplier. Nightrun executes this from the clean deployed checkout on
+	// the appliance: --committed-only both binds the evidence to source and avoids
+	// dispatching a peer-dirty controller checkout. --evidence-only is owned by
+	// prerequisite #12496; it makes a valid aggregate v2 receipt successful while
+	// preserving promotion_credit_eligible=false rather than claiming promotion credit.
+	for pass := 1; pass <= 10; pass++ {
+		tasks = append(tasks, Task{
+			ID:          fmt.Sprintf("witness-strix-halo-full-matrix-soak-%02d", pass),
+			Title:       fmt.Sprintf("AMD Strix Halo weekly physical full-matrix soak pass %02d/10 (all Vulkan subkernels and ablations on gfx1151)", pass),
+			Source:      SourceWitness,
+			Value:       ValueCoverage,
+			Requires:    []Requirement{ReqStrix},
+			Run:         "go run ./cmd/fak-dev amd-strix-validate --committed-only --subkernels=all --ablate=all --timeout=600 --admission-timeout=30 --evidence-only --json",
+			Acceptance:  "a valid source-bound fak.strix.validation/v2 physical full-matrix artifact covering every subkernel and ablation in the current validator catalogs, with promotion_credit_eligible=false preserved (evidence only; no promotion credit claim)",
+			RecheckDays: 7,
+			TimeoutSec:  900,
+			Doc:         "docs/fleet-compute-nodes.md",
+		})
+	}
+	return tasks
 }
 
 // loadOverlay reads the optional operator/agent overlay file: a JSON array of
