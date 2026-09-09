@@ -573,6 +573,7 @@ func parallelVerifyTree(
 	}
 
 	if matchRoot == -1 {
+		preserveUnacceptedBranches(target, committed, tree, nil, tBase, rows)
 		target.evictKV(tBase, N)
 		return VerificationResult{
 			AcceptedTokens:  nil,
@@ -625,6 +626,7 @@ func parallelVerifyTree(
 		acceptedTokens[i] = tree.Nodes[idx].Token
 	}
 
+	preserveUnacceptedBranches(target, committed, tree, acceptedIndices, tBase, rows)
 	target.evictKV(tBase, N)
 	for _, tok := range acceptedTokens {
 		target.Step(tok)
@@ -651,6 +653,7 @@ type SpeculativeEngineConfig struct {
 	SanitizeRepetition bool
 	TreeMode           bool
 	MaxBranches        int
+	BranchCache        *SpeculativeBranchCache
 }
 
 // DefaultSpeculativeEngineConfig returns standard greedy production defaults.
@@ -684,6 +687,7 @@ type SpeculativeEngine struct {
 	sanitizer        *RepetitionPenaltySanitizer
 	stats            SpeculativeEngineStats
 	lastLogits       []float32
+	branchCache      *SpeculativeBranchCache
 }
 
 // NewSpeculativeEngine creates a unified speculative decoding engine backed by a target Session.
@@ -698,11 +702,38 @@ func NewSpeculativeEngine(target *Session, primary ProposalGenerator, cfg Specul
 		primaryGenerator: primary,
 		cfg:              cfg,
 		sanitizer:        sanitizer,
+		branchCache:      cfg.BranchCache,
 	}
 	if primary != nil {
 		eng.generators[primary.Name()] = primary
 	}
+	if eng.branchCache != nil && target != nil {
+		AttachBranchCache(target, eng.branchCache)
+	}
 	return eng
+}
+
+// BranchCache returns the engine's attached branch cache, or nil.
+func (e *SpeculativeEngine) BranchCache() *SpeculativeBranchCache {
+	if e == nil {
+		return nil
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.branchCache
+}
+
+// SetBranchCache dynamically attaches a branch cache to the speculative engine.
+func (e *SpeculativeEngine) SetBranchCache(c *SpeculativeBranchCache) {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.branchCache = c
+	if e.target != nil {
+		AttachBranchCache(e.target, c)
+	}
 }
 
 // NewSpeculativeEngineWithVerifier creates an engine backed by a DraftVerifier capability contract.
