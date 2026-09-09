@@ -2,9 +2,129 @@ package amdgpu
 
 import (
 	"fmt"
+	"math"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestStrixPowerFrontierReceipt(t *testing.T) {
+	validReceipt := func() *StrixPowerFrontierReceipt {
+		r := &StrixPowerFrontierReceipt{
+			Schema:    StrixPowerFrontierSchema,
+			Simulated: true,
+			Identity: StrixPowerFrontierIdentity{
+				Engine:                "fak-native",
+				Backend:               "vulkan",
+				Device:                DefaultStrixHaloArch,
+				Concurrency:           1,
+				SourceCommit:          "471e52ec8",
+				ExecutableSHA256:      strings.Repeat("a", 64),
+				BuildID:               "test-build",
+				DriverID:              "test-radv",
+				PowerController:       "test-power1-cap",
+				ModelArtifactSHA256:   StrixPowerFrontierModelSHA256,
+				TensorInventorySHA256: strings.Repeat("b", 64),
+				PromptSHA256:          StrixPowerFrontierPromptSHA256,
+			},
+			PromptTokens:            StrixPowerFrontierPromptTokens,
+			AcceptedTokensPerTrial:  StrixPowerFrontierAcceptedTokens,
+			PredeclaredPPTWatts:     []int{45, 65, 85},
+			Repetitions:             StrixPowerFrontierMinRepetitions,
+			DeclaredMaxCVPercent:    5,
+			PriorPowerSetting:       "65000000\n",
+			RestoredPowerSetting:    "65000000\n",
+			RestorationAttempted:    true,
+			RestoreReadbackVerified: true,
+		}
+		sequence := 0
+		for repetition := 0; repetition < r.Repetitions; repetition++ {
+			for position := range r.PredeclaredPPTWatts {
+				pointIndex := position
+				if repetition%2 == 1 {
+					pointIndex = len(r.PredeclaredPPTWatts) - 1 - position
+				}
+				ppt := r.PredeclaredPPTWatts[pointIndex]
+				elapsed := int64(4*time.Second + time.Duration(ppt)*time.Millisecond)
+				energyStart := uint64(1_000_000_000 + sequence*100_000_000)
+				energyEnd := energyStart + uint64(40_000_000+ppt*100_000)
+				r.Trials = append(r.Trials, StrixPowerFrontierTrial{
+					PPTWatts:               ppt,
+					Repetition:             repetition,
+					Sequence:               sequence,
+					AcceptedTokens:         StrixPowerFrontierAcceptedTokens,
+					ElapsedNanoseconds:     elapsed,
+					EnergyStartMicrojoules: energyStart,
+					EnergyEndMicrojoules:   energyEnd,
+					TokensPerSecond:        float64(StrixPowerFrontierAcceptedTokens) / (float64(elapsed) / 1e9),
+					JoulesPerToken:         (float64(energyEnd-energyStart) / 1e6) / StrixPowerFrontierAcceptedTokens,
+					GPUClockMHz:            2200 + float64(ppt),
+					TemperatureC:           55 + float64(ppt)/10,
+					Throttled:              ppt == 85,
+					QualityPassed:          true,
+					SettleMilliseconds:     1000,
+					CooldownMilliseconds:   1000,
+				})
+				sequence++
+			}
+		}
+		if err := r.Seal(); err != nil {
+			t.Fatalf("Seal() error = %v", err)
+		}
+		return r
+	}
+
+	if err := validReceipt().Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*StrixPowerFrontierReceipt)
+		want   string
+	}{
+		{"physical claim", func(r *StrixPowerFrontierReceipt) { r.Simulated = false }, ErrPhysicalExecutionUnwitnessed.Error()},
+		{"selected default", func(r *StrixPowerFrontierReceipt) { r.SelectedPPTWatts = 65 }, ErrPhysicalExecutionUnwitnessed.Error()},
+		{"incomplete repetitions", func(r *StrixPowerFrontierReceipt) { r.Repetitions = 4 }, "below minimum"},
+		{"overflowing shape", func(r *StrixPowerFrontierReceipt) {
+			r.PredeclaredPPTWatts = []int{1, 2, 3, 4}
+			r.Repetitions = int(^uint(0)>>1)/2 + 1
+			r.Trials = nil
+		}, "trial count"},
+		{"non-interleaved order", func(r *StrixPowerFrontierReceipt) { r.Trials[3].PPTWatts = 45 }, "PPT order"},
+		{"non-finite telemetry", func(r *StrixPowerFrontierReceipt) { r.Trials[0].GPUClockMHz = math.NaN() }, "finite positive telemetry"},
+		{"wrong accepted count", func(r *StrixPowerFrontierReceipt) { r.Trials[0].AcceptedTokens = 127 }, "accepted tokens"},
+		{"foreign engine", func(r *StrixPowerFrontierReceipt) { r.Identity.Engine = "llama.cpp" }, "identity must be"},
+		{"CPU backend", func(r *StrixPowerFrontierReceipt) { r.Identity.Backend = "cpu" }, "identity must be"},
+		{"fallback", func(r *StrixPowerFrontierReceipt) { r.Trials[0].FallbackCount = 1 }, "fallback count"},
+		{"quality failure", func(r *StrixPowerFrontierReceipt) { r.Trials[0].QualityPassed = false }, "quality gate"},
+		{"authored rate", func(r *StrixPowerFrontierReceipt) { r.Trials[0].TokensPerSecond++ }, "throughput reconciliation"},
+		{"loose variance gate", func(r *StrixPowerFrontierReceipt) { r.DeclaredMaxCVPercent = 5.1 }, "declared CV"},
+		{"high measured variance", func(r *StrixPowerFrontierReceipt) {
+			r.Trials[0].ElapsedNanoseconds *= 2
+			r.Trials[0].TokensPerSecond = float64(StrixPowerFrontierAcceptedTokens) / (float64(r.Trials[0].ElapsedNanoseconds) / 1e9)
+		}, "throughput CV"},
+		{"restore mismatch", func(r *StrixPowerFrontierReceipt) { r.RestoredPowerSetting = "85000000\n" }, "restore read-back mismatch"},
+		{"restore failed", func(r *StrixPowerFrontierReceipt) { r.RestoreError = "permission denied" }, "restoration failed"},
+		{"tampered digest", func(r *StrixPowerFrontierReceipt) { r.Identity.DriverID = "other-radv" }, "digest mismatch"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := validReceipt()
+			tt.mutate(r)
+			if tt.name != "tampered digest" && tt.name != "physical claim" && tt.name != "selected default" && tt.name != "non-finite telemetry" {
+				if err := r.Seal(); err != nil {
+					t.Fatalf("Seal() error = %v", err)
+				}
+			}
+			err := r.Validate()
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Validate() error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
 
 func TestWorkloadGovernor_StateTransitions(t *testing.T) {
 	var executedCommands []string
