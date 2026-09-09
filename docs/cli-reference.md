@@ -537,6 +537,32 @@ Unknown or not-yet selections fail before the run. Response profiles do not chan
 
 `fak agent --work-profile standard|ponytail:{low|medium|high}` independently selects implementation-policy pressure. `standard` is the off/default state; `ponytail:*` expands to the fak-native canonical form. Mix it with `--output-style` without either axis implying the other. See [Work profiles](work-profiles.md).
 
+## `fak agent` subagents and effort slider
+
+`fak agent` enables kernel-mediated child subagent tools (`task_spawn`, `task_wait`, `task_status`, `task_cancel`) **by default** (`--subagents=true`). Subagents take advantage of in-process Context MMU zero-copy session branching, RadixKV prefix sharing (97%+ reuse), and continuous batching with stationary KV memory during tool execution.
+
+The unified `--effort` slider sets both model thinking tokens and child task capacity:
+- `low` / `fast`: 1 worker, 256 thinking tokens, single-pass execution.
+- `medium` / `standard` (default): 2 active workers, 4 backlog, 1024 thinking tokens (adaptive).
+- `high` / `rigor`: 4 active workers, 8 backlog, 2048 thinking tokens, 3-tier pipeline with repro test first.
+- `ultra` / `ultracode`: 16 active workers, 64 backlog, 4096 thinking tokens, UltraCode mode across tree-disjoint lanes under `dos arbitrate` leases and conserved token envelopes.
+
+```bash
+# Default run with subagents on and medium/standard effort:
+fak agent --task "Fix flaky test in internal/agent"
+
+# High-rigor run with 4 workers and failing reproduction test first:
+fak agent --effort high --task "Investigate deadlock in session table"
+
+# Full UltraCode fleet mode across tree-disjoint lanes:
+fak agent --effort ultra --task "Refactor gateway protocol adapters"
+
+# Disable subagents for a single-agent sandbox run:
+fak agent --subagents=false --task "Lint markdown docs"
+```
+
+See [Native Harness Subagents & Effort Slider](../architecture/native-harness-subagents-default-and-effort-slider.md) for full architectural specifications, memory models, and empirical benchmarks.
+
 ## Verbs
 
 The command surface has two executable boundaries. The shipped **`fak` runtime** is

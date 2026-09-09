@@ -43,8 +43,8 @@ func TestEffortSampleOptions(t *testing.T) {
 	})
 }
 
-// TestResolveEffortBudgetTiers verifies static effort tier resolution.
-func TestResolveEffortBudgetTiers(t *testing.T) {
+// TestResolveEffortBudget verifies static effort tier resolution.
+func TestResolveEffortBudget(t *testing.T) {
 	cases := []struct {
 		effort string
 		want   int
@@ -57,6 +57,14 @@ func TestResolveEffortBudgetTiers(t *testing.T) {
 		{"MEDIUM", BudgetTierMedium},
 		{EffortTierHigh, BudgetTierHigh},
 		{"High", BudgetTierHigh},
+		{EffortTierUltra, BudgetTierUltra},
+		{"ultra", BudgetTierUltra},
+		{"Ultra", BudgetTierUltra},
+		{"ULTRA", BudgetTierUltra},
+		{EffortTierUltracode, BudgetTierUltra},
+		{"ultracode", BudgetTierUltra},
+		{"Ultracode", BudgetTierUltra},
+		{"ULTRACODE", BudgetTierUltra},
 		{EffortTierBalanced, BudgetBalancedDefault},
 		{"Balanced", BudgetBalancedDefault},
 		{EffortTierAdaptive, BudgetBalancedDefault},
@@ -71,6 +79,11 @@ func TestResolveEffortBudgetTiers(t *testing.T) {
 			t.Errorf("ResolveEffortBudget(%q, nil) = %d, want %d", tc.effort, got, tc.want)
 		}
 	}
+}
+
+// TestResolveEffortBudgetTiers preserves backwards compatibility with the original test name.
+func TestResolveEffortBudgetTiers(t *testing.T) {
+	TestResolveEffortBudget(t)
 }
 
 // TestResolveEffortExplicitBudgetOverride verifies explicit budget overrides win when set and >= 0.
@@ -514,6 +527,12 @@ func TestResolveReasoningProfile(t *testing.T) {
 		{"medium", EffortTierMedium, BudgetTierMedium},
 		{"low", EffortTierLow, BudgetTierLow},
 		{"none", EffortTierNone, BudgetTierNone},
+		{EffortTierUltra, EffortTierUltra, BudgetTierUltra},
+		{EffortTierUltracode, EffortTierUltra, BudgetTierUltra},
+		{"ultra", EffortTierUltra, BudgetTierUltra},
+		{"ultracode", EffortTierUltra, BudgetTierUltra},
+		{"ULTRA", EffortTierUltra, BudgetTierUltra},
+		{"ULTRACODE", EffortTierUltra, BudgetTierUltra},
 	}
 
 	for _, tc := range cases {
@@ -798,6 +817,184 @@ func TestRoutineTurnClassificationTypedFailure(t *testing.T) {
 			}
 			if got := IsRoutineTurn(messages); got != !tc.wantError {
 				t.Fatalf("routine=%v want=%v", got, !tc.wantError)
+			}
+		})
+	}
+}
+
+// TestResolveSubagentEffortProfile verifies mapping of all effort tiers to SubagentEffortProfile fields.
+func TestResolveSubagentEffortProfile(t *testing.T) {
+	cases := []struct {
+		tier           string
+		wantMaxActive  int
+		wantMaxBacklog int
+		wantFanout     int
+		wantPipeline   bool
+		wantLeases     bool
+		wantIsUltra    bool
+		wantEnabled    bool
+		wantTier       string
+	}{
+		{
+			tier:           "none",
+			wantMaxActive:  0,
+			wantMaxBacklog: 0,
+			wantFanout:     1,
+			wantPipeline:   false,
+			wantLeases:     false,
+			wantIsUltra:    false,
+			wantEnabled:    false,
+			wantTier:       EffortTierNone,
+		},
+		{
+			tier:           "low",
+			wantMaxActive:  1,
+			wantMaxBacklog: 2,
+			wantFanout:     1,
+			wantPipeline:   false,
+			wantLeases:     false,
+			wantIsUltra:    false,
+			wantEnabled:    true,
+			wantTier:       EffortTierLow,
+		},
+		{
+			tier:           "fast",
+			wantMaxActive:  1,
+			wantMaxBacklog: 2,
+			wantFanout:     1,
+			wantPipeline:   false,
+			wantLeases:     false,
+			wantIsUltra:    false,
+			wantEnabled:    true,
+			wantTier:       EffortTierLow,
+		},
+		{
+			tier:           "medium",
+			wantMaxActive:  2,
+			wantMaxBacklog: 4,
+			wantFanout:     2,
+			wantPipeline:   false,
+			wantLeases:     false,
+			wantIsUltra:    false,
+			wantEnabled:    true,
+			wantTier:       EffortTierMedium,
+		},
+		{
+			tier:           "med",
+			wantMaxActive:  2,
+			wantMaxBacklog: 4,
+			wantFanout:     2,
+			wantPipeline:   false,
+			wantLeases:     false,
+			wantIsUltra:    false,
+			wantEnabled:    true,
+			wantTier:       EffortTierMedium,
+		},
+		{
+			tier:           "balanced",
+			wantMaxActive:  2,
+			wantMaxBacklog: 4,
+			wantFanout:     2,
+			wantPipeline:   false,
+			wantLeases:     false,
+			wantIsUltra:    false,
+			wantEnabled:    true,
+			wantTier:       EffortTierMedium,
+		},
+		{
+			tier:           "adaptive",
+			wantMaxActive:  2,
+			wantMaxBacklog: 4,
+			wantFanout:     2,
+			wantPipeline:   false,
+			wantLeases:     false,
+			wantIsUltra:    false,
+			wantEnabled:    true,
+			wantTier:       EffortTierMedium,
+		},
+		{
+			tier:           "standard",
+			wantMaxActive:  2,
+			wantMaxBacklog: 4,
+			wantFanout:     2,
+			wantPipeline:   false,
+			wantLeases:     false,
+			wantIsUltra:    false,
+			wantEnabled:    true,
+			wantTier:       EffortTierMedium,
+		},
+		{
+			tier:           "high",
+			wantMaxActive:  4,
+			wantMaxBacklog: 8,
+			wantFanout:     4,
+			wantPipeline:   true,
+			wantLeases:     true,
+			wantIsUltra:    false,
+			wantEnabled:    true,
+			wantTier:       EffortTierHigh,
+		},
+		{
+			tier:           "rigor",
+			wantMaxActive:  4,
+			wantMaxBacklog: 8,
+			wantFanout:     4,
+			wantPipeline:   true,
+			wantLeases:     true,
+			wantIsUltra:    false,
+			wantEnabled:    true,
+			wantTier:       EffortTierHigh,
+		},
+		{
+			tier:           "ultra",
+			wantMaxActive:  16,
+			wantMaxBacklog: 64,
+			wantFanout:     8,
+			wantPipeline:   true,
+			wantLeases:     true,
+			wantIsUltra:    true,
+			wantEnabled:    true,
+			wantTier:       EffortTierUltra,
+		},
+		{
+			tier:           "ultracode",
+			wantMaxActive:  16,
+			wantMaxBacklog: 64,
+			wantFanout:     8,
+			wantPipeline:   true,
+			wantLeases:     true,
+			wantIsUltra:    true,
+			wantEnabled:    true,
+			wantTier:       EffortTierUltra,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.tier, func(t *testing.T) {
+			got := ResolveSubagentEffortProfile(tc.tier)
+			if got.MaxActiveTasks != tc.wantMaxActive {
+				t.Errorf("MaxActiveTasks = %d, want %d", got.MaxActiveTasks, tc.wantMaxActive)
+			}
+			if got.MaxBacklogTasks != tc.wantMaxBacklog {
+				t.Errorf("MaxBacklogTasks = %d, want %d", got.MaxBacklogTasks, tc.wantMaxBacklog)
+			}
+			if got.DefaultFanout != tc.wantFanout {
+				t.Errorf("DefaultFanout = %d, want %d", got.DefaultFanout, tc.wantFanout)
+			}
+			if got.PipelineCohorts != tc.wantPipeline {
+				t.Errorf("PipelineCohorts = %v, want %v", got.PipelineCohorts, tc.wantPipeline)
+			}
+			if got.RequireLeases != tc.wantLeases {
+				t.Errorf("RequireLeases = %v, want %v", got.RequireLeases, tc.wantLeases)
+			}
+			if got.IsUltra != tc.wantIsUltra {
+				t.Errorf("IsUltra = %v, want %v", got.IsUltra, tc.wantIsUltra)
+			}
+			if got.SubagentsEnabled != tc.wantEnabled {
+				t.Errorf("SubagentsEnabled = %v, want %v", got.SubagentsEnabled, tc.wantEnabled)
+			}
+			if got.Tier != tc.wantTier {
+				t.Errorf("Tier = %q, want %q", got.Tier, tc.wantTier)
 			}
 		})
 	}

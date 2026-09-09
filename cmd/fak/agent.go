@@ -44,6 +44,7 @@ type agentFlags struct {
 	codeWorkspace         *string
 	sysTools              *bool
 	mcpTools              *bool
+	subagents             *bool
 	routeManifest         *string
 	routeAccounts         *string
 	keepAwake             *string
@@ -70,7 +71,7 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.consoleConfig = fs.String("console-config", defaultTUIConsoleFile(), "persisted operator preferences (default: FAK_CONSOLE_FILE, else ~/.fak/console.json)")
 	af.workProfile = fs.String("work-profile", agentDefaultWorkProfile, "implementation policy: ponytail:{low|medium|high}|standard; defaults to ponytail:medium, standard disables it (see `fak agent profiles`)")
 	af.reasoningProfile = fs.String("reasoning-profile", agent.ReasoningProfileDefault, "named reasoning profile: default|baseline|deep-reason (default: default)")
-	af.effort = fs.String("effort", "", "reasoning effort for model inference: none|low|medium|balanced|adaptive|high")
+	af.effort = fs.String("effort", "", "reasoning and subagent effort: none|low|fast|medium|med|standard|balanced|adaptive|high|rigor|ultra|ultracode (default: balanced/medium with subagents active)")
 	af.thinkingBudget = fs.Int("thinking-budget", -1, "explicit thinking token budget ceiling (>=0 overrides --effort; 0 disables thinking)")
 	af.provider = fs.String("provider", "openai", "provider transcript wire: openai, openai-responses, astra, anthropic, gemini, or xai")
 	af.baseURL = fs.String("base-url", "", "provider base URL (OpenAI-compatible: .../v1; Gemini native: .../v1beta; Anthropic native: https://api.anthropic.com)")
@@ -89,6 +90,7 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.codeWorkspace = fs.String("code-workspace", "", "override the workspace root for default-on bounded repository code tools")
 	af.sysTools = fs.Bool("sys-tools", true, "arm safe read-only system and web utility tools (get_time, fetch_web, web_search); use --sys-tools=false to disable")
 	af.mcpTools = fs.Bool("mcp-tools", true, "arm native fak MCP features (fak_read, fak_tools_search, fak_adjudicate, fak_syscall); use --mcp-tools=false to disable")
+	af.subagents = fs.Bool("subagents", true, "arm kernel-mediated child subagent task tools (task_spawn, task_wait, task_status, task_cancel); enabled by default")
 	af.routeManifest = fs.String("route-manifest", "", "model-routing policy to install for the fak arm; each tool call is classified and a single-model PICK binds abi.ToolCall.Engine before kernel submit")
 	af.routeAccounts = fs.String("route-accounts", "", "model-account roster used to resolve routed model ids to account-bound engine routes")
 	af.keepAwake = fs.String("keep-awake", KeepAwakeOff, "prevent OS sleep during execution: off|while-active|always (default off)")
@@ -341,6 +343,16 @@ func runAgent(argv []string) {
 		must(mcpErr)
 		defer agent.DisarmMCPTools()
 		catalog = append(catalog, mcpCatalog...)
+	}
+	if *af.subagents {
+		prof := agent.ResolveSubagentEffortProfile(*af.effort)
+		if prof.SubagentsEnabled {
+			taskCatalog, taskErr := agent.ArmTaskToolsWithLimits(prof.MaxActiveTasks, prof.MaxBacklogTasks)
+			must(taskErr)
+			defer agent.DisarmTaskTools()
+			catalog = append(catalog, taskCatalog...)
+			runOpts = append(runOpts, agent.WithTaskToolsLimits(prof.MaxActiveTasks, prof.MaxBacklogTasks))
+		}
 	}
 	if len(catalog) > 0 {
 		runOpts = append(runOpts, agent.WithToolCatalog(catalog))

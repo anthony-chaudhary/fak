@@ -168,6 +168,16 @@ The gateway fronts any OpenAI-compatible upstream (a local engine or a cloud pro
 | `longctxbench` ultra-long-context work floor | Shipped | Closed-form, contention-free token and FLOP floors for the >100k-token regime; eliminates ~10× vs naive re-prefill for one session, ~40×+ for a 5-agent fleet. |
 | `longctxbench` live wall-clock validation | Simulated | The live wall-clock validation at >100k needs a model resident on a bench node and is not run on the build box; the floor arithmetic stands independently. |
 
+## Native agent harness and subagent execution
+
+| Feature | Status | What it does |
+|---|---|---|
+| Native harness subagents by default | Shipped | Child task tools (`task_spawn`, `task_wait`, `task_status`, `task_cancel`) are enabled by default across `fak agent` and `fak harness` (#11414, #11840). |
+| Unified subagent effort slider | Shipped | 4-tier scale (`low/fast`, `med/standard`, `high/rigor`, `ultra/ultracode`) synchronizing model thinking tokens (0 to 4096) with subagent concurrency (1 to 16 tasks) and lane lease constraints. |
+| RadixKV subagent prefix sharing | Shipped | Subagents share root coordinator prefix via radix trie; eliminates $N \times P$ prompt prefill, achieving $\ge 97\%$ prompt cache reuse and $<13\text{ ms}$ TTFT. |
+| Context MMU zero-copy context sharing | Shipped | Child subagent context branches share parent memory pages via copy-on-write page table aliasing under UMA. |
+| Co-located continuous batching | Shipped | Stationary KV cache during tool I/O yields execution compute without reprefills or memory swaps upon tool completion. |
+
 ## Stewards and the RSI ship-gate
 
 | Feature | Status | What it does |

@@ -52,6 +52,9 @@ func main() {
 	if code, handled := runStrixKnownHostsBrokerEarly(os.Stdout, os.Stderr, os.Args[1:], amdgpu.RunStrixKnownHostsBrokerChild); handled {
 		os.Exit(code)
 	}
+	if code, handled := runCapabilityAutoUpgradeEarly(os.Stdin, os.Stdout, os.Stderr, os.Args); handled {
+		os.Exit(code)
+	}
 	start := time.Now()
 	verb, argv := parseVerbArgv()
 	defer recoverUsage(&verb, &argv, start)

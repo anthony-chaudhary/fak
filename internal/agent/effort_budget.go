@@ -9,17 +9,23 @@ import (
 
 // Effort tier constants defining model reasoning capacity allocations.
 const (
-	EffortTierNone     = "none"
-	EffortTierLow      = "low"
-	EffortTierMedium   = "medium"
-	EffortTierBalanced = "balanced"
-	EffortTierAdaptive = "adaptive"
-	EffortTierHigh     = "high"
+	EffortTierNone      = "none"
+	EffortTierLow       = "low"
+	EffortTierFast      = "fast"
+	EffortTierMedium    = "medium"
+	EffortTierBalanced  = "balanced"
+	EffortTierAdaptive  = "adaptive"
+	EffortTierStandard  = "standard"
+	EffortTierHigh      = "high"
+	EffortTierRigor     = "rigor"
+	EffortTierUltra     = "ultra"
+	EffortTierUltracode = "ultracode"
 
 	BudgetTierNone            = 0
 	BudgetTierLow             = 256
 	BudgetTierMedium          = 1024
 	BudgetTierHigh            = 2048
+	BudgetTierUltra           = 4096
 	BudgetBalancedRoutineTool = 0
 	BudgetBalancedError       = 1536
 	BudgetBalancedDefault     = 768
@@ -149,11 +155,13 @@ func ResolveReasoningProfile(profile string) (effort string, budget int) {
 		return EffortTierMedium, BudgetTierMedium
 	case ReasoningProfileDeepReason, "deepreason", "deep_reason":
 		return EffortTierHigh, BudgetTierHigh
-	case EffortTierHigh:
+	case EffortTierUltra, EffortTierUltracode:
+		return EffortTierUltra, BudgetTierUltra
+	case EffortTierHigh, EffortTierRigor:
 		return EffortTierHigh, BudgetTierHigh
-	case EffortTierMedium:
+	case EffortTierMedium, "med", EffortTierBalanced, EffortTierAdaptive, EffortTierStandard:
 		return EffortTierMedium, BudgetTierMedium
-	case EffortTierLow:
+	case EffortTierLow, EffortTierFast:
 		return EffortTierLow, BudgetTierLow
 	case EffortTierNone:
 		return EffortTierNone, BudgetTierNone
@@ -229,9 +237,9 @@ func ResolveEffortBudget(effort string, explicitBudget *int, turnContext ...Turn
 	switch tier {
 	case EffortTierNone:
 		return BudgetTierNone
-	case EffortTierLow:
+	case EffortTierLow, EffortTierFast:
 		return BudgetTierLow
-	case EffortTierMedium, ReasoningProfileDefault, ReasoningProfileBaseline:
+	case EffortTierMedium, "med", EffortTierStandard, ReasoningProfileDefault, ReasoningProfileBaseline:
 		for _, ta := range turnContext {
 			if ta.IsError() {
 				return BudgetBalancedError
@@ -243,8 +251,10 @@ func ResolveEffortBudget(effort string, explicitBudget *int, turnContext ...Turn
 			}
 		}
 		return BudgetTierMedium
-	case EffortTierHigh, ReasoningProfileDeepReason:
+	case EffortTierHigh, EffortTierRigor, ReasoningProfileDeepReason:
 		return BudgetTierHigh
+	case EffortTierUltra, EffortTierUltracode:
+		return BudgetTierUltra
 	case EffortTierBalanced, EffortTierAdaptive:
 		// Error recovery takes precedence over routine inspection.
 		for _, ta := range turnContext {
@@ -260,5 +270,73 @@ func ResolveEffortBudget(effort string, explicitBudget *int, turnContext ...Turn
 		return BudgetBalancedDefault
 	default:
 		return 0
+	}
+}
+
+// SubagentEffortProfile defines the execution posture and capacity for child subagents
+// corresponding to the harness effort/size slider (low, med, high, ultra).
+type SubagentEffortProfile struct {
+	Tier             string `json:"tier"`
+	SubagentsEnabled bool   `json:"subagents_enabled"`
+	MaxActiveTasks   int    `json:"max_active_tasks"`
+	MaxBacklogTasks  int    `json:"max_backlog_tasks"`
+	DefaultFanout    int    `json:"default_fanout"`
+	PipelineCohorts  bool   `json:"pipeline_cohorts"`
+	RequireLeases    bool   `json:"require_leases"`
+	IsUltra          bool   `json:"is_ultra"`
+}
+
+// ResolveSubagentEffortProfile maps an effort slider level (low, med, high, ultra, ultracode)
+// to its subagent execution profile and capacity parameters.
+func ResolveSubagentEffortProfile(effort string) SubagentEffortProfile {
+	tier := strings.ToLower(strings.TrimSpace(effort))
+	switch tier {
+	case EffortTierNone:
+		return SubagentEffortProfile{
+			Tier:             EffortTierNone,
+			SubagentsEnabled: false,
+			MaxActiveTasks:   0,
+			MaxBacklogTasks:  0,
+			DefaultFanout:    1,
+		}
+	case EffortTierLow, EffortTierFast:
+		return SubagentEffortProfile{
+			Tier:             EffortTierLow,
+			SubagentsEnabled: true,
+			MaxActiveTasks:   1,
+			MaxBacklogTasks:  2,
+			DefaultFanout:    1,
+		}
+	case EffortTierHigh, EffortTierRigor, ReasoningProfileDeepReason, "deepreason", "deep_reason":
+		return SubagentEffortProfile{
+			Tier:             EffortTierHigh,
+			SubagentsEnabled: true,
+			MaxActiveTasks:   4,
+			MaxBacklogTasks:  8,
+			DefaultFanout:    4,
+			PipelineCohorts:  true,
+			RequireLeases:    true,
+		}
+	case EffortTierUltra, EffortTierUltracode:
+		return SubagentEffortProfile{
+			Tier:             EffortTierUltra,
+			SubagentsEnabled: true,
+			MaxActiveTasks:   16,
+			MaxBacklogTasks:  64,
+			DefaultFanout:    8,
+			PipelineCohorts:  true,
+			RequireLeases:    true,
+			IsUltra:          true,
+		}
+	case "", EffortTierMedium, EffortTierBalanced, EffortTierAdaptive, EffortTierStandard, ReasoningProfileDefault, ReasoningProfileBaseline:
+		fallthrough
+	default:
+		return SubagentEffortProfile{
+			Tier:             EffortTierMedium,
+			SubagentsEnabled: true,
+			MaxActiveTasks:   2,
+			MaxBacklogTasks:  4,
+			DefaultFanout:    2,
+		}
 	}
 }
