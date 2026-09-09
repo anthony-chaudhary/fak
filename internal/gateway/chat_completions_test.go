@@ -71,6 +71,9 @@ func TestConfiguredInKernelPlannerLeavesIneligiblePathsUnchanged(t *testing.T) {
 }
 
 func TestChatCompletionsMetalMTPSpeculativeHeaderAndDispatch(t *testing.T) {
+	if !model.Qwen35MetalGDNPreprojectedSequenceAvailable() {
+		t.Skip("Metal hybrid prefill requires darwin/arm64 with cgo")
+	}
 	abi.RegisterEngine(modelengine.EngineID, modelengine.Default)
 	t.Setenv("FAK_INKERNEL_RADIX", "off")
 	t.Setenv("FAK_INKERNEL_MAX_TOKENS", "4")
@@ -133,6 +136,9 @@ func TestChatCompletionsMetalMTPSpeculativeHeaderAndDispatch(t *testing.T) {
 }
 
 func TestChatCompletionsMetalMTPStreamingHeaderAndDispatch(t *testing.T) {
+	if !model.Qwen35MetalGDNPreprojectedSequenceAvailable() {
+		t.Skip("Metal hybrid prefill requires darwin/arm64 with cgo")
+	}
 	abi.RegisterEngine(modelengine.EngineID, modelengine.Default)
 	t.Setenv("FAK_INKERNEL_RADIX", "off")
 	t.Setenv("FAK_INKERNEL_MAX_TOKENS", "4")
