@@ -428,3 +428,193 @@ func assertFailedMetalMTPReceipt(t *testing.T, coord *MetalMTPCoordinator) {
 		t.Fatalf("failed panel receipt=%+v present=%v", receipt, ok)
 	}
 }
+
+// newMetalMTPCoordinatorUDQ2KXLFixture matches the real UD-Q2_K_XL target inventory:
+// dense down projections stay resident Q2_K while the remaining majority projections
+// use Q4_K and the output head is resident Q6_K / Q4_K.
+func newMetalMTPCoordinatorUDQ2KXLFixture(t *testing.T) *Model {
+	t.Helper()
+	setQ4KSDOTForTest(false)
+	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+	cfg := qwen35HybridQ4KTestCfg()
+	m := NewSynthetic(cfg)
+	m.Quantize()
+	fillQ4KMajorityExceptDown(t, m, cfg)
+	fillDownProjQ2KResident(t, m, cfg)
+	m.kqw["lm_head.weight"] = randomQ6KTensor(cfg.VocabSize, cfg.HiddenSize, 3804)
+	return m
+}
+
+func fillDownProjQ2KResident(tb testing.TB, m *Model, cfg Config) {
+	tb.Helper()
+	if m.kqw == nil {
+		m.kqw = map[string]*kQuantTensor{}
+	}
+	for l := 0; l < cfg.NumLayers; l++ {
+		name := layerName(l, "mlp.down_proj.weight")
+		meta, ok := m.manifest[name]
+		if !ok {
+			tb.Fatalf("fillDownProjQ2KResident: %s missing from manifest", name)
+		}
+		out, in := meta.Shape[0], meta.Shape[len(meta.Shape)-1]
+		if in%qkK != 0 {
+			tb.Fatalf("fillDownProjQ2KResident: %s reduction dim %d not a multiple of %d", name, in, qkK)
+		}
+		raw := randomQ2KTensor(out, in, int64(12460+l))
+		m.kqw[name] = quantizeKQuantFromRaw(raw, out, in, kindQ2K)
+	}
+}
+
+func newPreparedMetalMTPUDQ2KXLSession(t *testing.T, m *Model) (*Session, []float32) {
+	t.Helper()
+	s := m.NewSession()
+	s.Q4K, s.MetalQ4K = true, true
+	s.captureTargetHidden = true
+	prompt := make([]int, 8)
+	for i := range prompt {
+		prompt[i] = (i*19 + 7) % m.Cfg.VocabSize
+	}
+	before := s.Prefill(prompt)
+	return s, before
+}
+
+// TestMetalMTPCoordinatorUDQ2KXLParity proves that the Metal MTP coordinator draft-verify-rollback
+// loop executes over the resident UD-Q2_K_XL tensor mixture with exact greedy temperature-zero parity
+// against the unspeculated target decode baseline.
+func TestMetalMTPCoordinatorUDQ2KXLParity(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("Metal unavailable")
+	}
+	m := newMetalMTPCoordinatorUDQ2KXLFixture(t)
+	ctx := context.Background()
+
+	// Clear Q2_K Metal cache to track fresh upload and dispatch
+	metalQ4KMu.Lock()
+	delete(metalQ2KW, m)
+	metalQ4KMu.Unlock()
+
+	for acceptedCount := 0; acceptedCount <= qwen35MetalMTPVerifyPanelTokens; acceptedCount++ {
+		acceptedCount := acceptedCount
+		t.Run(fmt.Sprintf("accepted_%d", acceptedCount), func(t *testing.T) {
+			target, boundary := newPreparedMetalMTPUDQ2KXLSession(t, m)
+			oracle, oracleBoundary := newPreparedMetalMTPUDQ2KXLSession(t, m)
+			want, _ := newPreparedMetalMTPUDQ2KXLSession(t, m)
+			defer target.Close()
+			defer oracle.Close()
+			defer want.Close()
+
+			greedy := make([]int, qwen35MetalMTPVerifyPanelTokens+1)
+			logits := oracleBoundary
+			for i := range greedy {
+				greedy[i] = argmaxF32(logits)
+				logits = oracle.Step(greedy[i])
+			}
+			draft := append([]int(nil), greedy[:qwen35MetalMTPVerifyPanelTokens]...)
+			if acceptedCount < len(draft) {
+				draft[acceptedCount] = (draft[acceptedCount] + 1) % m.Cfg.VocabSize
+			}
+
+			coord, err := target.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer coord.Close()
+			coord.SetDrafter(NewMTPProposalGeneratorWithFn(func(context.Context, []int, int) ([]int, error) {
+				return append([]int(nil), draft...), nil
+			}))
+			mmu := &mockMTPRecorder{}
+			coord.SetMMU(mmu, fmt.Sprintf("metal-p4-udq2kxl-%d", acceptedCount))
+
+			accepted, bonus, next, err := coord.StepRound(ctx, nil, boundary)
+			if err != nil {
+				t.Fatalf("StepRound UD-Q2_K_XL: %v", err)
+			}
+			if !slices.Equal(accepted, greedy[:acceptedCount]) || bonus != greedy[acceptedCount] {
+				t.Fatalf("emitted accepted=%v bonus=%d, want accepted=%v bonus=%d", accepted, bonus, greedy[:acceptedCount], greedy[acceptedCount])
+			}
+
+			var wantNext []float32
+			for _, token := range greedy[:acceptedCount+1] {
+				wantNext = want.Step(token)
+			}
+			if argmaxF32(next) != argmaxF32(wantNext) {
+				t.Fatalf("next argmax=%d want %d", argmaxF32(next), argmaxF32(wantNext))
+			}
+
+			stats := coord.Stats()
+			if stats.TotalProposed != len(draft) || stats.TotalAccepted != acceptedCount {
+				t.Fatalf("stats proposed/accepted = %d/%d, want %d/%d", stats.TotalProposed, stats.TotalAccepted, len(draft), acceptedCount)
+			}
+			if stats.CommittedPages != acceptedCount {
+				t.Fatalf("committed pages = %d, want %d", stats.CommittedPages, acceptedCount)
+			}
+		})
+	}
+
+	// Verify that Metal Q2_K weights were uploaded and dispatched across target layers
+	metalQ4KMu.Lock()
+	q2kW := metalQ2KW[m]
+	metalQ4KMu.Unlock()
+	if len(q2kW) == 0 {
+		t.Fatal("expected resident Metal Q2_K weights in metalQ2KW, got 0")
+	}
+	for l := 0; l < m.Cfg.NumLayers; l++ {
+		name := layerName(l, "mlp.down_proj.weight")
+		if q2kW[name] == nil {
+			t.Fatalf("missing resident Metal Q2_K weight handle for %s", name)
+		}
+	}
+}
+
+// TestMetalMTPDraftVerifyRollbackLoopQ2K verifies the complete draft-verify-rollback loop
+// under resident Q2_K weights, confirming bit-exact sequence identity with the unspeculated
+// reference decode baseline and atomic Context-MMU tracking.
+func TestMetalMTPDraftVerifyRollbackLoopQ2K(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("Metal unavailable")
+	}
+	m := newMetalMTPCoordinatorUDQ2KXLFixture(t)
+	prompt := []int{0, 1, 2}
+	const maxNew = 8
+	ctx := context.Background()
+
+	// 1. Reference unspeculated decode
+	refSes := m.NewSession()
+	refSes.Q4K, refSes.MetalQ4K = true, true
+	t.Cleanup(refSes.Close)
+	wantTokens := refSes.Generate(prompt, maxNew)
+
+	// 2. Speculative Metal MTP decode
+	specSes := m.NewSession()
+	specSes.Q4K, specSes.MetalQ4K = true, true
+	t.Cleanup(specSes.Close)
+	coord, err := specSes.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
+	if err != nil {
+		t.Fatalf("NewMetalMTPCoordinator failed: %v", err)
+	}
+	t.Cleanup(func() { _ = coord.Close() })
+
+	cm := &mockMTPRecorder{}
+	coord.SetMMU(cm, "test-metal-mtp-q2k-session")
+
+	gotTokens, err := coord.Generate(ctx, prompt, maxNew)
+	if err != nil {
+		t.Fatalf("coord.Generate failed: %v", err)
+	}
+
+	// 3. Exact greedy parity
+	if !reflect.DeepEqual(gotTokens, wantTokens) {
+		t.Fatalf("output sequence mismatch:\n got:  %v\n want: %v", gotTokens, wantTokens)
+	}
+
+	stats := coord.Stats()
+	if stats.TotalGenerated < maxNew {
+		t.Fatalf("expected total generated >= %d, got %d", maxNew, stats.TotalGenerated)
+	}
+	if stats.CommittedPages != stats.TotalAccepted {
+		t.Fatalf("Context-MMU committed pages %d != total accepted %d", stats.CommittedPages, stats.TotalAccepted)
+	}
+	if stats.FreedPages != stats.TotalRollbacks {
+		t.Fatalf("Context-MMU freed pages %d != total rollbacks %d", stats.FreedPages, stats.TotalRollbacks)
+	}
+}
