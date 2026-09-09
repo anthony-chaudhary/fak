@@ -531,6 +531,9 @@ func quantizeKQuantFromRaw(raw []byte, out, in int, kind kQuantKind) *kQuantTens
 	if len(raw) != want {
 		panic("model: resident expert quant payload size mismatch")
 	}
+	if kind == kindQ6K {
+		raw = pageAlignResidentBytes(raw)
+	}
 	return &kQuantTensor{out: out, in: in, nblk: nblk, kind: kind, raw: raw}
 }
 

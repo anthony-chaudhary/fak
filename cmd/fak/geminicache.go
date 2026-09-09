@@ -22,7 +22,7 @@ func runGeminiCache(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak geminicache", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
-	model := fs.String("model", "models/gemini-2.5-flash", "Gemini model identifier")
+	model := fs.String("model", "models/gemini-3.8-flash", "Gemini model identifier")
 	account := fs.String("account", "default", "account label")
 	project := fs.String("project", "", "GCP project identifier")
 	location := fs.String("location", "us-central1", "GCP location")

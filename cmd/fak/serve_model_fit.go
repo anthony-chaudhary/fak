@@ -182,7 +182,7 @@ func resolveHostServeLoadArm(ws *ggufload.WeightSource, f32Resident bool) serveL
 		return serveLoadArmQuantProfileQ8
 	}
 	quant := ggufload.ClassifyTensorQuant(ws.File.Tensors)
-	if os.Getenv("FAK_Q4K") != "" && quant.Q4KResident && quant.Recipe != "UD-Q2_K_XL" {
+	if (quant.Q4KResident || quant.Recipe == "UD-Q2_K_XL") && (serveDeviceResidentQ4K(nil) || (os.Getenv("FAK_Q4K") != "" && os.Getenv("FAK_Q4K") != "0")) {
 		return serveLoadArmResidentQ4K
 	}
 	return serveLoadArmQuantProfileQ8

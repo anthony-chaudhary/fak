@@ -35,6 +35,7 @@ int  mg_q4k_q8_gemv_group(const int* q4_wids, int nq4, const float* x, float* q4
                            mg_execution_event* event);
 void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y, mg_execution_event* event);
 int  mg_q6k_upload(const unsigned char* raw, int out, int in);
+int  mg_q6k_upload_nocopy(const unsigned char* raw, int out, int in);
 void mg_q6k_release(int wid);
 int  mg_q6k_live_count(void);
 void mg_q6k_gemv(int wid, const float* x, float* y, mg_execution_event* event);
@@ -628,9 +629,11 @@ type Q6KWeight struct {
 // q6kSharedWeight owns one native Q6_K slot. Distinct Q6KWeight handles can share it while
 // retaining independent, idempotent Release lifecycles (the target-model/MTP-head case).
 type q6kSharedWeight struct {
-	id    C.int
-	refs  int
-	epoch uint64
+	id     C.int
+	refs   int
+	epoch  uint64
+	pin    *runtime.Pinner
+	noCopy bool
 }
 
 // q6kRegistryMu is the lifetime boundary for the native Q6_K registry and every Go handle
@@ -641,6 +644,7 @@ type q6kSharedWeight struct {
 var (
 	q6kRegistryMu    sync.RWMutex
 	q6kRegistryEpoch uint64
+	q6kSharedWeights = map[*q6kSharedWeight]struct{}{}
 )
 
 func q6kWeightValidLocked(w *Q6KWeight) bool {
@@ -648,9 +652,18 @@ func q6kWeightValidLocked(w *Q6KWeight) bool {
 		w.shared.refs > 0 && w.shared.epoch == q6kRegistryEpoch
 }
 
+// UploadQ6KGoOwned uploads a Go-heap-owned Q6_K payload. The raw backing MUST belong to the Go
+// heap and MUST NOT be mutated while this handle or any handle returned by Share remains live.
+// External mmap and other borrowed memory must use UploadQ6K.
+func UploadQ6KGoOwned(raw []byte, out, in int) *Q6KWeight {
+	return UploadQ6K(raw, out, in)
+}
+
 // UploadQ6K makes a row-major Q6_K payload (verbatim GGUF super-block bytes, length
 // out*(in/256)*210) resident for the GPU and returns a handle, or nil if the backend is
-// unavailable, in is not a multiple of 256, or the payload is short / the table is full.
+// unavailable, in is not a multiple of 256, or the payload is short / the table is full. A
+// page-aligned, page-rounded backing is pinned and shared with Metal; other inputs retain the
+// established copied-buffer fallback.
 func UploadQ6K(raw []byte, out, in int) *Q6KWeight {
 	if !Available() || in <= 0 || in%256 != 0 || out <= 0 {
 		return nil
@@ -662,12 +675,37 @@ func UploadQ6K(raw []byte, out, in int) *Q6KWeight {
 	raw = raw[:need]
 	q6kRegistryMu.Lock()
 	defer q6kRegistryMu.Unlock()
-	id := C.mg_q6k_upload((*C.uchar)(unsafe.Pointer(&raw[0])), C.int(out), C.int(in))
+	var pin *runtime.Pinner
+	noCopy := false
+	page := os.Getpagesize()
+	rounded := need
+	if page > 1 && need%page != 0 {
+		rounded += page - need%page
+	}
+	aligned := page <= 1 || uintptr(unsafe.Pointer(&raw[0]))%uintptr(page) == 0
+	if aligned && cap(raw) >= rounded {
+		pin = new(runtime.Pinner)
+		pin.Pin(&raw[0])
+	}
+	id := C.int(-1)
+	if pin != nil {
+		id = C.mg_q6k_upload_nocopy((*C.uchar)(unsafe.Pointer(&raw[0])), C.int(out), C.int(in))
+		noCopy = id >= 0
+		if !noCopy {
+			pin.Unpin()
+			pin = nil
+		}
+	}
+	if id < 0 {
+		id = C.mg_q6k_upload((*C.uchar)(unsafe.Pointer(&raw[0])), C.int(out), C.int(in))
+	}
 	if id < 0 {
 		return nil
 	}
 	runtime.KeepAlive(raw)
-	return &Q6KWeight{id: id, Out: out, In: in, shared: &q6kSharedWeight{id: id, refs: 1, epoch: q6kRegistryEpoch}}
+	shared := &q6kSharedWeight{id: id, refs: 1, epoch: q6kRegistryEpoch, pin: pin, noCopy: noCopy}
+	q6kSharedWeights[shared] = struct{}{}
+	return &Q6KWeight{id: id, Out: out, In: in, shared: shared}
 }
 
 // ID returns the backend handle for this matrix.
@@ -723,6 +761,11 @@ func (w *Q6KWeight) Release() {
 	}
 	if shared.refs == 0 && shared.id >= 0 {
 		C.mg_q6k_release(shared.id)
+		if shared.pin != nil {
+			shared.pin.Unpin()
+			shared.pin = nil
+		}
+		delete(q6kSharedWeights, shared)
 		shared.id = -1
 	}
 }
@@ -1035,6 +1078,14 @@ func ResetQ4K() {
 	defer q4kExecutionMu.Unlock()
 	C.mg_q4k_reset()
 	q6kRegistryEpoch++
+	for shared := range q6kSharedWeights {
+		if shared.pin != nil {
+			shared.pin.Unpin()
+			shared.pin = nil
+		}
+		shared.id = -1
+		delete(q6kSharedWeights, shared)
+	}
 	for id, pinned := range q4kPins {
 		pinned.pin.Unpin()
 		delete(q4kPins, id)

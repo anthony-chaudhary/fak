@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -76,4 +78,70 @@ func TestExplicitInkernelEngineRemainsFakNative(t *testing.T) {
 		}
 	}
 	t.Fatalf("inkernel capabilities = %v, want engine.inkernel", driver.Caps())
+}
+
+func TestServeEngineResolution(t *testing.T) {
+	// Case 1: When --gguf is passed without explicit --engine, the engine resolves to "inkernel".
+	fs, sf := newServeFlagSet()
+	if err := fs.Parse([]string{"--gguf", "test.gguf"}); err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+	resolveServeEngine(sf, explicitFlagNames(fs), false)
+	if got := *sf.engineID; got != "inkernel" {
+		t.Fatalf("when --gguf passed without --engine: engine = %q, want %q", got, "inkernel")
+	}
+
+	// Case 2: When --gguf is passed WITH explicit --engine mock, the engine respects "mock".
+	fs2, sf2 := newServeFlagSet()
+	if err := fs2.Parse([]string{"--gguf", "test.gguf", "--engine", "mock"}); err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+	resolveServeEngine(sf2, explicitFlagNames(fs2), false)
+	if got := *sf2.engineID; got != "mock" {
+		t.Fatalf("when --gguf passed with explicit --engine mock: engine = %q, want %q", got, "mock")
+	}
+
+	// Case 3: When no --gguf and no --engine is passed, the engine defaults to "mock".
+	fs3, sf3 := newServeFlagSet()
+	if err := fs3.Parse([]string{}); err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+	resolveServeEngine(sf3, explicitFlagNames(fs3), false)
+	if got := *sf3.engineID; got != "mock" {
+		t.Fatalf("when neither --gguf nor --engine passed: engine = %q, want %q", got, "mock")
+	}
+
+	// Case 4: When in-kernel model is loaded without explicit --engine, the engine resolves to "inkernel".
+	fs4, sf4 := newServeFlagSet()
+	if err := fs4.Parse([]string{}); err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+	resolveServeEngine(sf4, explicitFlagNames(fs4), true)
+	if got := *sf4.engineID; got != "inkernel" {
+		t.Fatalf("when inKernelLoaded=true without --engine: engine = %q, want %q", got, "inkernel")
+	}
+}
+
+func TestDefaultModelUpgradedToGemini38(t *testing.T) {
+	// 1. chat default model
+	_, cf := newChatFlagSet()
+	if got := *cf.model; got != "gemini-3.8-flash" {
+		t.Fatalf("chat default model = %q, want gemini-3.8-flash", got)
+	}
+
+	// 2. agent default model
+	_, af := newAgentFlagSet()
+	if got := *af.model; got != "gemini-3.8-flash" {
+		t.Fatalf("agent default model = %q, want gemini-3.8-flash", got)
+	}
+
+	// 3. geminicache default model
+	var buf bytes.Buffer
+	rc := runGeminiCache(&buf, io.Discard, []string{"--prefix", "test", "--json"})
+	if rc != 0 {
+		t.Fatalf("runGeminiCache returned exit code %d", rc)
+	}
+	if !strings.Contains(buf.String(), "models/gemini-3.8-flash") {
+		t.Fatalf("geminicache output did not contain models/gemini-3.8-flash: %s", buf.String())
+	}
 }

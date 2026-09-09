@@ -141,6 +141,25 @@ func (r *TokenReservation) cancel() {
 	r.once.Do(func() { r.gate.settle(r.id, ratelimit.TokenUsage{}) })
 }
 
+// Grow requests additional output token capacity for an in-flight reservation during generation (#5268).
+func (r *TokenReservation) Grow(additionalOutputTokens int) error {
+	if r == nil || r.gate == nil || additionalOutputTokens <= 0 {
+		return nil
+	}
+	if err := r.gate.Grow(r.id, additionalOutputTokens); err != nil {
+		return err
+	}
+	r.estimate.OutputTokens += int64(additionalOutputTokens)
+	if r.linked != nil {
+		if err := r.linked.Grow(additionalOutputTokens); err != nil {
+			_ = r.gate.Grow(r.id, -additionalOutputTokens)
+			r.estimate.OutputTokens -= int64(additionalOutputTokens)
+			return err
+		}
+	}
+	return nil
+}
+
 // Admit checks one call's estimated footprint against the window's remaining budget and,
 // on admission, reserves it. A refusal is the typed served-path *AdmissionError
 // (VerdictShed → HTTP 429 via admissionErrorStatus — shed HERE instead of a 429 storm at
@@ -159,6 +178,47 @@ func (g *TokenRateGate) Admit(estimate ratelimit.TokenUsage) (*TokenReservation,
 	g.seq++
 	g.reserved[g.seq] = estimate
 	return &TokenReservation{gate: g, id: g.seq, estimate: estimate}, nil
+}
+
+// Grow requests additional output token capacity for an active reservation during generation (#5268).
+func (g *TokenRateGate) Grow(id uint64, additionalOutputTokens int) error {
+	if g == nil || additionalOutputTokens == 0 {
+		return nil
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.rollWindowLocked()
+
+	cur, ok := g.reserved[id]
+	if !ok {
+		return fmt.Errorf("reservation %d not found", id)
+	}
+
+	if additionalOutputTokens < 0 {
+		sub := int64(-additionalOutputTokens)
+		if sub > cur.OutputTokens {
+			sub = cur.OutputTokens
+		}
+		cur.OutputTokens -= sub
+		g.reserved[id] = cur
+		return nil
+	}
+
+	delta := ratelimit.TokenUsage{
+		OutputTokens: int64(additionalOutputTokens),
+	}
+	load := g.loadLocked()
+	// The reservation is already in-flight, so decrement concurrency to avoid double-counting.
+	if load.Concurrent > 0 {
+		load.Concurrent--
+	}
+	if d := g.policy.Caps.Decide(load, delta); !d.Admit {
+		return &AdmissionError{Verdict: VerdictShed, Reason: tokenShedReason(g.subject, d, g.policy.Window)}
+	}
+
+	cur.OutputTokens += int64(additionalOutputTokens)
+	g.reserved[id] = cur
+	return nil
 }
 
 // TokenRateSnapshot is the gate's current window state — the observability surface a
@@ -257,18 +317,27 @@ func tokenUsageFromAgent(u agent.Usage) ratelimit.TokenUsage {
 // estimateServedTokenUsage is the admission-time estimate of one served turn's provider
 // token footprint, split input vs output for the per-dimension caps: the same chars/4
 // prompt heuristic the scheduler gate charges (estimateServedAdmissionTokens), with the
-// request's max_tokens as the planned output ceiling (floor 1, matching that gate's
-// unset-max posture). The whole prompt estimate is charged as UNCACHED input —
-// conservative: an estimate can never borrow headroom from an unproven cache hit.
+// request's max_tokens capped at DefaultPreallocCeiling (anti-hog preallocation cap, #5268).
 func estimateServedTokenUsage(messages []agent.Message, tools []agent.ToolDef, maxTokens int) ratelimit.TokenUsage {
+	return estimateServedTokenUsageWithCap(messages, tools, maxTokens, DefaultPreallocCeiling)
+}
+
+// estimateServedTokenUsageWithCap estimates the provider token footprint, capping output tokens
+// at preallocCeiling (<=0 defaults to DefaultPreallocCeiling).
+func estimateServedTokenUsageWithCap(messages []agent.Message, tools []agent.ToolDef, maxTokens int, preallocCeiling int) ratelimit.TokenUsage {
 	chars := servedPromptChars(messages, tools)
 	input := int64(chars / 4)
 	if chars > 0 && input == 0 {
 		input = 1
 	}
+	if preallocCeiling <= 0 {
+		preallocCeiling = DefaultPreallocCeiling
+	}
 	output := int64(maxTokens)
 	if output <= 0 {
 		output = 1
+	} else if output > int64(preallocCeiling) {
+		output = int64(preallocCeiling)
 	}
 	return ratelimit.NewTokenUsage(input, 0, output)
 }

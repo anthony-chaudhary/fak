@@ -38,13 +38,10 @@ func serveDeviceResidentQ4K(backend compute.Backend) bool {
 }
 
 // serveArtifactResidentQ4K gates the runtime load path on both device capability and
-// the encodings in the artifact itself. Backend capability alone must never relabel a
-// Q8_0 or UD-Q2_K_XL checkpoint as resident Q4_K.
+// the encodings in the artifact itself. Backend capability alone must never relabel an
+// all-Q8_0 checkpoint as resident Q4_K.
 func serveArtifactResidentQ4K(backend compute.Backend, artifact ggufload.ArtifactQuant) bool {
-	if artifact.Recipe == "UD-Q2_K_XL" {
-		return false
-	}
-	return artifact.Q4KResident && serveDeviceResidentQ4K(backend)
+	return (artifact.Q4KResident || artifact.Recipe == "UD-Q2_K_XL") && serveDeviceResidentQ4K(backend)
 }
 
 func serveQuantProvenance(artifact ggufload.ArtifactQuant, residentQ4K bool) gateway.StartupMessage {
@@ -440,7 +437,7 @@ func resolveMetalServeLoadArm(ws *ggufload.WeightSource) serveLoadArm {
 		return serveLoadArmResidentQ4K
 	}
 	quant := ggufload.ClassifyTensorQuant(ws.File.Tensors)
-	if quant.Q4KResident && quant.Recipe != "UD-Q2_K_XL" && os.Getenv("FAK_Q4K") != "0" {
+	if (quant.Q4KResident || quant.Recipe == "UD-Q2_K_XL") && os.Getenv("FAK_Q4K") != "0" {
 		return serveLoadArmResidentQ4K
 	}
 	return serveLoadArmQuantProfileQ8

@@ -65,8 +65,15 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/kvbudget"
 	"github.com/anthony-chaudhary/fak/internal/session"
 )
+
+// DefaultPreallocCeiling is the per-request ceiling on generation tokens preallocated
+// at admission (anti-hog preallocation cap, #5268; field-borrow from TGI v3).
+// A request with max_tokens above this ceiling preallocates up to this ceiling at
+// admission, top-up re-admitting in chunks via Grow as it generates.
+const DefaultPreallocCeiling = 1024
 
 // AdmissionPolicy holds the admission knobs. Each cap is disabled by a non-positive value
 // (so a test can isolate a single axis); DefaultAdmissionPolicy fills shipping defaults.
@@ -77,6 +84,8 @@ type AdmissionPolicy struct {
 	// TokenBudget caps the sum of the running set's token footprints (the num-batched-tokens
 	// admission budget; until paged KV lands this is the whole budget). ≤0 disables it.
 	TokenBudget int
+	// TokenBudgetProvenance tracks the source of the token budget ("default", "measured", or "explicit").
+	TokenBudgetProvenance string
 	// MaxWaiting bounds the waiting queue. A request that cannot be admitted now is shed
 	// (429) once the queue is at this bound — the backpressure limit. ≤0 = unbounded
 	// (never sheds; the historical "queue forever" behavior).
@@ -91,20 +100,48 @@ type AdmissionPolicy struct {
 	// by one for every AgingRounds rounds it is passed over. ≤0 disables aging (raw
 	// priority stands and a higher-priority flood can starve a low-priority waiter).
 	AgingRounds int
+	// PreallocCeiling caps the generation tokens preallocated at admission time
+	// (anti-hog preallocation cap, #5268). Decouples the preallocated generation
+	// budget from requested max_tokens. ≤0 defaults to DefaultPreallocCeiling.
+	PreallocCeiling int
 }
 
 // DefaultAdmissionPolicy returns the shipping defaults: a 256-sequence running cap (the
 // vLLM V1 default), an 8192-token batched-admission budget, a 1024-deep waiting bound
-// before shedding, a 65536-token queued volume cap, and aging every round so no waiter
-// is ever starved.
+// before shedding, a 65536-token queued volume cap, aging every round so no waiter
+// is ever starved, and a 1024-token generation preallocation ceiling (#5268).
 func DefaultAdmissionPolicy() AdmissionPolicy {
 	return AdmissionPolicy{
-		MaxNumSeqs:      256,
-		TokenBudget:     8192,
-		MaxWaiting:      1024,
-		MaxQueuedTokens: 65536,
-		AgingRounds:     1,
+		MaxNumSeqs:            256,
+		TokenBudget:           8192,
+		TokenBudgetProvenance: "default",
+		MaxWaiting:            1024,
+		MaxQueuedTokens:       65536,
+		AgingRounds:           1,
+		PreallocCeiling:       DefaultPreallocCeiling,
 	}
+}
+
+func (p AdmissionPolicy) preallocCeiling() int {
+	if p.PreallocCeiling <= 0 {
+		return DefaultPreallocCeiling
+	}
+	return p.PreallocCeiling
+}
+
+func (c *AdmissionController) preallocCeiling() int {
+	if c == nil {
+		return DefaultPreallocCeiling
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.policy.preallocCeiling()
+}
+
+// WarmupCapacityReporter is the optional interface a planner implements when it
+// can report measured warmup capacity directly.
+type WarmupCapacityReporter interface {
+	WarmupCapacity() (kvbudget.WarmupCapacity, bool)
 }
 
 // AdmissionTrust is the per-tenant trust/SLA verdict hook (the L3 governance seam,
@@ -160,6 +197,8 @@ const (
 	// VerdictExpired: the individual request's DecodeTTL expired while waiting or decoding,
 	// shedding only this request without killing the scheduler or other requests.
 	VerdictExpired
+	// VerdictRefused: the request envelope is statically impossible (e.g. req.Tokens > capacity).
+	VerdictRefused
 )
 
 // String renders a verdict as its lowercase token; an out-of-range value renders
@@ -176,6 +215,8 @@ func (v AdmissionVerdict) String() string {
 		return "denied"
 	case VerdictExpired:
 		return "expired"
+	case VerdictRefused:
+		return "refused"
 	}
 	return "unknown"
 }
@@ -191,6 +232,8 @@ func (v AdmissionVerdict) HTTPStatus() int {
 		return http.StatusForbidden
 	case VerdictExpired:
 		return http.StatusGatewayTimeout
+	case VerdictRefused:
+		return http.StatusBadRequest
 	default:
 		return 0
 	}
@@ -210,6 +253,7 @@ type AdmissionStats struct {
 	Shed          int64 // cumulative requests shed under overload — 429 (counter)
 	Denied        int64 // cumulative requests rejected by a trust verdict (counter)
 	Expired       int64 // cumulative requests expired by DecodeTTL (counter)
+	Refused       int64 // cumulative requests refused for impossible envelopes (counter)
 }
 
 // AdmissionController is the admission/priority/fairness gate over the native loop. The
@@ -244,7 +288,64 @@ type waitEntry struct {
 
 // NewAdmissionController builds a gate under the given policy.
 func NewAdmissionController(p AdmissionPolicy) *AdmissionController {
+	if p.TokenBudgetProvenance == "" {
+		p.TokenBudgetProvenance = "default"
+	}
 	return newAdmissionControllerWithBudgets(p, admissionBatchBudgets(p)...)
+}
+
+// Policy returns a snapshot of the configured admission policy.
+func (c *AdmissionController) Policy() AdmissionPolicy {
+	if c == nil {
+		return AdmissionPolicy{}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.policy
+}
+
+// TokenBudgetProvenance returns the provenance of the admission token budget ("default", "measured", or "explicit").
+func (c *AdmissionController) TokenBudgetProvenance() string {
+	if c == nil {
+		return ""
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	prov := c.policy.TokenBudgetProvenance
+	if prov == "" {
+		return "default"
+	}
+	return prov
+}
+
+// SetTokenBudgetWithProvenance updates the token budget and records its provenance.
+func (c *AdmissionController) SetTokenBudgetWithProvenance(budget int, provenance string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.policy.TokenBudget = budget
+	c.policy.TokenBudgetProvenance = provenance
+	c.syncTokenBudgetLocked()
+}
+
+func (c *AdmissionController) syncTokenBudgetLocked() {
+	budgets := make([]batchBudget, 0, len(c.budgets)+1)
+	for _, b := range c.budgets {
+		if b == nil {
+			continue
+		}
+		check := b(batchBudgetSnapshot{}, SeqRequest{})
+		if check.budget == "tokens" {
+			continue
+		}
+		budgets = append(budgets, b)
+	}
+	if c.policy.TokenBudget > 0 {
+		budgets = append(budgets, tokenBatchBudget(c.policy.TokenBudget))
+	}
+	c.budgets = budgets
 }
 
 // SetMaxWaiting dynamically updates the waiting queue admission limit.
@@ -386,6 +487,30 @@ type AdmissionLease struct {
 	once     sync.Once
 }
 
+// Grow tops up the lease's token footprint by additionalTokens (issue #5268, TGI anti-hog
+// borrow). When a long generation consumes its preallocated chunk and continues, Grow
+// re-admits the next chunk against the live scheduler budget (and any token rate gate)
+// instead of reserving the whole worst-case upfront. Partial failures roll back cleanly.
+func (l *AdmissionLease) Grow(additionalTokens int) error {
+	if l == nil || additionalTokens == 0 {
+		return nil
+	}
+	if l.ctl != nil && l.traceID != "" {
+		if err := l.ctl.Grow(l.traceID, additionalTokens); err != nil {
+			return err
+		}
+	}
+	if l.tokenRes != nil {
+		if err := l.tokenRes.Grow(additionalTokens); err != nil {
+			if l.ctl != nil && l.traceID != "" {
+				l.ctl.refund(l.traceID, additionalTokens)
+			}
+			return err
+		}
+	}
+	return nil
+}
+
 // Release frees the admitted request's token/sequence budget and promotes waiters. A
 // token reservation never settled with real usage keeps its conservative estimate
 // (TokenReservation.Release).
@@ -402,12 +527,21 @@ func (l *AdmissionLease) Release() {
 }
 
 // SettleUsage feeds the provider's real, normalized usage back into the token-rate
-// gate's window (#2019) the moment a completion reports it, replacing the admission-time
-// estimate. Safe on a nil lease or one with no token reservation; the scheduler slot
-// itself is still freed by Release.
+// gate's window (#2019) and the admission controller (#5268) the moment a completion
+// reports it, replacing the admission-time estimate. Safe on a nil lease or one with no
+// token reservation; the scheduler slot itself is still freed by Release.
 func (l *AdmissionLease) SettleUsage(u agent.Usage) {
 	if l == nil {
 		return
+	}
+	if l.ctl != nil && l.traceID != "" {
+		total := u.TotalTokens
+		if total <= 0 {
+			total = u.PromptTokens + u.CompletionTokens
+		}
+		if total > 0 {
+			l.ctl.Settle(l.traceID, total)
+		}
 	}
 	l.tokenRes.Settle(tokenUsageFromAgent(u))
 }
@@ -469,13 +603,16 @@ func (c *AdmissionController) Offer(req SeqRequest) AdmissionVerdict {
 		c.stats.Denied++
 		return VerdictDenied
 	}
-	if c.impossibleBudgetLocked(req).status == batchBudgetExhausted {
+	if check := c.impossibleBudgetLocked(req); check.status == batchBudgetImpossible {
+		c.stats.Refused++
+		return VerdictRefused
+	} else if check.status >= batchBudgetExhausted {
 		c.stats.Shed++
 		return VerdictShed
 	}
 	// Fast path: nobody is waiting and there is headroom now — admit immediately so an
 	// idle/underloaded node does not pay a Schedule round to serve its first requests.
-	if len(c.waiting) == 0 && c.batchBudgetStatusLocked(req).status != batchBudgetExhausted {
+	if len(c.waiting) == 0 && c.batchBudgetStatusLocked(req).status < batchBudgetExhausted {
 		c.admitLocked(req)
 		return VerdictAdmitted
 	}
@@ -519,12 +656,16 @@ func (c *AdmissionController) Acquire(ctx context.Context, req SeqRequest) (*Adm
 		c.mu.Unlock()
 		return nil, &AdmissionError{Verdict: VerdictDenied, Reason: req.Trust.Reason}
 	}
-	if check := c.impossibleBudgetLocked(req); check.status == batchBudgetExhausted {
+	if check := c.impossibleBudgetLocked(req); check.status == batchBudgetImpossible {
+		c.stats.Refused++
+		c.mu.Unlock()
+		return nil, &AdmissionError{Verdict: VerdictRefused, Budget: check.budget, Reason: check.reason}
+	} else if check.status >= batchBudgetExhausted {
 		c.stats.Shed++
 		c.mu.Unlock()
 		return nil, &AdmissionError{Verdict: VerdictShed, Budget: check.budget, Reason: check.reason}
 	}
-	if len(c.waiting) == 0 && c.batchBudgetStatusLocked(req).status != batchBudgetExhausted {
+	if len(c.waiting) == 0 && c.batchBudgetStatusLocked(req).status < batchBudgetExhausted {
 		c.admitLocked(req)
 		c.mu.Unlock()
 		return &AdmissionLease{ctl: c, traceID: req.TraceID}, nil
@@ -604,7 +745,7 @@ func (c *AdmissionController) scheduleLocked() []SeqRequest {
 		var admitted []SeqRequest
 		for _, e := range c.waiting {
 			check := c.batchBudgetStatusLocked(e.req)
-			if check.status == batchBudgetExhausted {
+			if check.status >= batchBudgetExhausted {
 				break // head-of-line: do not let a lower-priority request skip a blocked one
 			}
 			c.admitLocked(e.req)
@@ -686,7 +827,7 @@ func (c *AdmissionController) scheduleLocked() []SeqRequest {
 
 		e := c.waiting[winnerIdx]
 		check := c.batchBudgetStatusLocked(e.req)
-		if check.status == batchBudgetExhausted {
+		if check.status >= batchBudgetExhausted {
 			break
 		}
 
@@ -847,6 +988,131 @@ func (c *AdmissionController) cancelAdmission(traceID string) {
 	}
 }
 
+// Grow tops up the token budget held by a currently running request by additionalTokens
+// (issue #5268). It checks whether adding additionalTokens fits within TokenBudget (and
+// fleet_tokens if c.pool != nil), updates req.Tokens += additionalTokens and c.tokens += additionalTokens,
+// and returns nil or an *AdmissionError with VerdictShed if budget exhausted. Negative tokens
+// refunds tokens back to the budget and wakes waiters via scheduleLocked.
+func (c *AdmissionController) Grow(traceID string, additionalTokens int) error {
+	if c == nil || additionalTokens == 0 {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	req, ok := c.running[traceID]
+	if !ok {
+		for tid, r := range c.running {
+			if baseTraceID(tid) == traceID {
+				traceID = tid
+				req = r
+				ok = true
+				break
+			}
+		}
+	}
+	if !ok {
+		return fmt.Errorf("trace %q not running", traceID)
+	}
+
+	if additionalTokens < 0 {
+		tokens := -additionalTokens
+		if tokens > req.Tokens {
+			tokens = req.Tokens
+		}
+		req.Tokens -= tokens
+		c.running[traceID] = req
+		c.tokens -= tokens
+		if c.tokens < 0 {
+			c.tokens = 0
+		}
+		if c.pool != nil {
+			c.pool.Return(tokens)
+		}
+		c.scheduleLocked()
+		return nil
+	}
+
+	if c.policy.TokenBudget > 0 && c.tokens+additionalTokens > c.policy.TokenBudget {
+		c.stats.Shed++
+		return &AdmissionError{
+			Verdict: VerdictShed,
+			Budget:  "tokens",
+			Reason:  fmt.Sprintf("scheduler token budget exhausted (%d in use + %d requested > %d)", c.tokens, additionalTokens, c.policy.TokenBudget),
+		}
+	}
+
+	if c.pool != nil {
+		rem := c.pool.Remaining()
+		if rem >= 0 && rem < additionalTokens {
+			c.stats.Shed++
+			return &AdmissionError{
+				Verdict: VerdictShed,
+				Budget:  "fleet_tokens",
+				Reason:  fmt.Sprintf("session pool budget exhausted (%d remaining < %d requested)", rem, additionalTokens),
+			}
+		}
+		granted, ok := c.pool.Draw(additionalTokens)
+		if !ok {
+			c.pool.Return(granted)
+			c.stats.Shed++
+			return &AdmissionError{
+				Verdict: VerdictShed,
+				Budget:  "fleet_tokens",
+				Reason:  fmt.Sprintf("session pool budget exhausted (%d remaining < %d requested)", rem, additionalTokens),
+			}
+		}
+	}
+
+	req.Tokens += additionalTokens
+	c.running[traceID] = req
+	c.tokens += additionalTokens
+	return nil
+}
+
+// Settle reconciles req.Tokens and c.tokens with actual usage if over-estimated,
+// freeing excess tokens back to the controller budget and promoting queued waiters (#5268).
+func (c *AdmissionController) Settle(traceID string, actualTokens int) {
+	if c == nil || actualTokens <= 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	req, ok := c.running[traceID]
+	if !ok {
+		for tid, r := range c.running {
+			if baseTraceID(tid) == traceID {
+				traceID = tid
+				req = r
+				ok = true
+				break
+			}
+		}
+	}
+	if !ok {
+		return
+	}
+
+	if actualTokens < req.Tokens {
+		diff := req.Tokens - actualTokens
+		req.Tokens = actualTokens
+		c.running[traceID] = req
+		c.tokens -= diff
+		if c.tokens < 0 {
+			c.tokens = 0
+		}
+		if c.pool != nil {
+			c.pool.Return(diff)
+		}
+		c.scheduleLocked()
+	}
+}
+
+func (c *AdmissionController) refund(traceID string, tokens int) {
+	_ = c.Grow(traceID, -tokens)
+}
+
 // impossibleBudgetLocked reports a capacity constraint that cannot become
 // satisfiable by waiting: the composed fold still exhausts on an otherwise
 // empty running set. Caller holds c.mu.
@@ -933,6 +1199,12 @@ func (c *AdmissionController) WriteMetrics(b *strings.Builder) {
 	fmt.Fprintf(b, "%swaiting %d\n", schedMetricPrefix, st.Waiting)
 	writeHelpType(b, schedMetricPrefix+"tokens_in_use", "Token admission budget currently held by the running set.", "gauge")
 	fmt.Fprintf(b, "%stokens_in_use %d\n", schedMetricPrefix, st.TokensInUse)
+	writeHelpType(b, schedMetricPrefix+"token_budget", "Configured token admission budget (0 = uncapped).", "gauge")
+	prov := c.policy.TokenBudgetProvenance
+	if prov == "" {
+		prov = "default"
+	}
+	fmt.Fprintf(b, "%stoken_budget{provenance=\"%s\"} %d\n", schedMetricPrefix, prov, c.policy.TokenBudget)
 	writeHelpType(b, schedMetricPrefix+"queued_tokens", "Token volume across sequences currently waiting for admission.", "gauge")
 	fmt.Fprintf(b, "%squeued_tokens %d\n", schedMetricPrefix, st.QueuedTokens)
 	writeHelpType(b, schedMetricPrefix+"max_num_seqs", "Configured max-num-seqs running-set cap (0 = uncapped).", "gauge")
@@ -943,6 +1215,215 @@ func (c *AdmissionController) WriteMetrics(b *strings.Builder) {
 	writeCounter(b, schedMetricPrefix+"queued_total", "Requests placed on the waiting queue.", st.Queued)
 	writeCounter(b, schedMetricPrefix+"shed_total", "Requests shed under overload (waiting queue at bound; HTTP 429).", st.Shed)
 	writeCounter(b, schedMetricPrefix+"denied_total", "Requests rejected by a per-tenant trust verdict.", st.Denied)
+	writeCounter(b, schedMetricPrefix+"refused_total", "Requests refused for impossible request envelopes (HTTP 400).", st.Refused)
+}
+
+// SetWarmupCapacity records a byte-measured warmup probe.
+func (s *Server) SetWarmupCapacity(cap kvbudget.WarmupCapacity) {
+	if s == nil {
+		return
+	}
+	s.admissionMu.Lock()
+	s.warmupCapacity = &cap
+	ctl := s.admissionCtl
+	fraction := s.warmupReserveFraction
+	s.admissionMu.Unlock()
+
+	if ctl != nil && ctl.TokenBudgetProvenance() != "explicit" {
+		if fraction <= 0 {
+			fraction = kvbudget.DefaultReserveFraction
+		}
+		derived := cap.DeriveTokenBudget(fraction)
+		if derived.Derived() {
+			ctl.SetTokenBudgetWithProvenance(int(derived.TokenBudget), "measured")
+		}
+	}
+}
+
+// SetWarmupBlockCapacity records a block-measured warmup probe.
+func (s *Server) SetWarmupBlockCapacity(cap kvbudget.WarmupBlockCapacity) {
+	if s == nil {
+		return
+	}
+	s.admissionMu.Lock()
+	s.warmupBlockCapacity = &cap
+	ctl := s.admissionCtl
+	fraction := s.warmupReserveFraction
+	s.admissionMu.Unlock()
+
+	if ctl != nil && ctl.TokenBudgetProvenance() != "explicit" {
+		if fraction <= 0 {
+			fraction = kvbudget.DefaultReserveFraction
+		}
+		derived := cap.DeriveTokenBudget(fraction)
+		if derived.Derived() {
+			ctl.SetTokenBudgetWithProvenance(int(derived.TokenBudget), "measured")
+		}
+	}
+}
+
+// SetWarmupReserveFraction configures the reserve fraction withheld from measured capacity.
+func (s *Server) SetWarmupReserveFraction(fraction float64) {
+	if s == nil {
+		return
+	}
+	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
+	s.warmupReserveFraction = fraction
+}
+
+// WarmupCapacity returns the measured warmup capacity and true if available.
+func (s *Server) WarmupCapacity() (kvbudget.WarmupCapacity, bool) {
+	if s == nil {
+		return kvbudget.WarmupCapacity{}, false
+	}
+	s.admissionMu.RLock()
+	defer s.admissionMu.RUnlock()
+	if s.warmupCapacity != nil {
+		return *s.warmupCapacity, true
+	}
+	if s.planner != nil {
+		if r, ok := s.planner.(WarmupCapacityReporter); ok {
+			return r.WarmupCapacity()
+		}
+		if r, ok := s.planner.(interface {
+			WarmupCapacity() kvbudget.WarmupCapacity
+		}); ok {
+			return r.WarmupCapacity(), true
+		}
+		if r, ok := s.planner.(agent.KVMemoryReporter); ok {
+			st := r.KVMemoryStats()
+			if st.BytesPerToken > 0 {
+				usable := st.FitBudgetBytes
+				if usable <= 0 {
+					usable = st.CapacityFreeBytes
+				}
+				if usable <= 0 {
+					usable = st.CapacityTotalBytes
+				}
+				if usable > 0 {
+					return kvbudget.WarmupCapacity{
+						UsableBytes:   usable,
+						BytesPerToken: st.BytesPerToken,
+					}, true
+				}
+			}
+		}
+	}
+	return kvbudget.WarmupCapacity{}, false
+}
+
+// WarmupDerivedBudget calculates the token budget derived from measured warmup capacity.
+func (s *Server) WarmupDerivedBudget() (kvbudget.DerivedBudget, bool) {
+	if s == nil {
+		return kvbudget.DerivedBudget{}, false
+	}
+	s.admissionMu.RLock()
+	cap := s.warmupCapacity
+	blockCap := s.warmupBlockCapacity
+	fraction := s.warmupReserveFraction
+	p := s.planner
+	s.admissionMu.RUnlock()
+
+	if fraction <= 0 {
+		fraction = kvbudget.DefaultReserveFraction
+	}
+
+	if cap != nil {
+		derived := cap.DeriveTokenBudget(fraction)
+		if derived.Derived() {
+			return derived, true
+		}
+	}
+	if blockCap != nil {
+		derived := blockCap.DeriveTokenBudget(fraction)
+		if derived.Derived() {
+			return derived, true
+		}
+	}
+	if p != nil {
+		if r, ok := p.(WarmupCapacityReporter); ok {
+			if c, okCap := r.WarmupCapacity(); okCap {
+				derived := c.DeriveTokenBudget(fraction)
+				if derived.Derived() {
+					return derived, true
+				}
+			}
+		} else if r, ok := p.(interface {
+			WarmupCapacity() kvbudget.WarmupCapacity
+		}); ok {
+			c := r.WarmupCapacity()
+			derived := c.DeriveTokenBudget(fraction)
+			if derived.Derived() {
+				return derived, true
+			}
+		}
+		if r, ok := p.(interface {
+			WarmupBlockCapacity() (kvbudget.WarmupBlockCapacity, bool)
+		}); ok {
+			if bc, okBC := r.WarmupBlockCapacity(); okBC {
+				derived := bc.DeriveTokenBudget(fraction)
+				if derived.Derived() {
+					return derived, true
+				}
+			}
+		} else if r, ok := p.(interface {
+			WarmupBlockCapacity() kvbudget.WarmupBlockCapacity
+		}); ok {
+			bc := r.WarmupBlockCapacity()
+			derived := bc.DeriveTokenBudget(fraction)
+			if derived.Derived() {
+				return derived, true
+			}
+		}
+		if r, ok := p.(agent.KVMemoryReporter); ok {
+			st := r.KVMemoryStats()
+			if st.BytesPerToken > 0 {
+				usable := st.FitBudgetBytes
+				if usable <= 0 {
+					usable = st.CapacityFreeBytes
+				}
+				if usable <= 0 {
+					usable = st.CapacityTotalBytes
+				}
+				if usable > 0 {
+					c := kvbudget.WarmupCapacity{UsableBytes: usable, BytesPerToken: st.BytesPerToken}
+					derived := c.DeriveTokenBudget(fraction)
+					if derived.Derived() {
+						return derived, true
+					}
+				}
+			}
+		}
+	}
+	return kvbudget.DerivedBudget{}, false
+}
+
+// SetMaxTotalTokens sets the configured upper bound on total tokens.
+func (s *Server) SetMaxTotalTokens(n int) {
+	if s == nil {
+		return
+	}
+	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
+	s.maxTotalTokens = n
+}
+
+// CheckMaxTotalTokens validates that n does not exceed the admission controller's token budget.
+func (s *Server) CheckMaxTotalTokens(n int) error {
+	if s == nil {
+		return nil
+	}
+	s.admissionMu.RLock()
+	ctl := s.admissionCtl
+	s.admissionMu.RUnlock()
+	if n > 0 && ctl != nil {
+		budget := ctl.Policy().TokenBudget
+		if n > budget {
+			return fmt.Errorf("max_total_tokens (%d) exceeds admission token budget (%d); decrease --max-batch-prefill-tokens or --max-total-tokens", n, budget)
+		}
+	}
+	return nil
 }
 
 // SetAdmissionController wires the native serving admission gate (#35) onto the Server so its
@@ -966,6 +1447,19 @@ func (s *Server) SetAdmissionController(c *AdmissionController) {
 		}
 		if s.pool != nil {
 			c.SetFleet(s.pool)
+		}
+		if c.Policy().TokenBudgetProvenance != "explicit" {
+			if derived, ok := s.WarmupDerivedBudget(); ok && derived.Derived() {
+				c.SetTokenBudgetWithProvenance(int(derived.TokenBudget), "measured")
+			}
+		}
+		s.admissionMu.RLock()
+		maxTokens := s.maxTotalTokens
+		s.admissionMu.RUnlock()
+		if maxTokens > 0 {
+			if err := s.CheckMaxTotalTokens(maxTokens); err != nil && s.logf != nil {
+				s.logf("gateway: %v", err)
+			}
 		}
 	}
 }
@@ -1094,13 +1588,24 @@ func servedPromptChars(messages []agent.Message, tools []agent.ToolDef) int {
 }
 
 func estimateServedAdmissionTokens(messages []agent.Message, tools []agent.ToolDef, maxTokens int) int {
+	return estimateServedAdmissionTokensWithCap(messages, tools, maxTokens, DefaultPreallocCeiling)
+}
+
+func estimateServedAdmissionTokensWithCap(messages []agent.Message, tools []agent.ToolDef, maxTokens int, preallocCeiling int) int {
 	chars := servedPromptChars(messages, tools)
 	tokens := chars / 4
 	if chars > 0 && tokens == 0 {
 		tokens = 1
 	}
+	if preallocCeiling <= 0 {
+		preallocCeiling = DefaultPreallocCeiling
+	}
 	if maxTokens > 0 {
-		tokens += maxTokens
+		gen := maxTokens
+		if gen > preallocCeiling {
+			gen = preallocCeiling
+		}
+		tokens += gen
 	} else {
 		tokens++
 	}
@@ -1129,6 +1634,12 @@ func admissionErrorStatus(err error) (status int, code, msg string, ok bool) {
 		return 0, "", "", false
 	}
 	switch ae.Verdict {
+	case VerdictRefused:
+		reason := strings.TrimSpace(ae.Reason)
+		if reason == "" {
+			reason = "request envelope exceeds capacity"
+		}
+		return http.StatusBadRequest, "context_length_exceeded", reason, true
 	case VerdictShed:
 		msg := "scheduler overloaded — back off and retry"
 		// A token-rate shed (#2019) names the provider cap that fired so the client's

@@ -28,6 +28,8 @@ import (
 // ProductionExecutor binds Runner to the real fak-native GGUF and Metal paths.
 type ProductionExecutor struct{}
 
+func (ProductionExecutor) Memory() (MemorySnapshot, error) { return observeMemory() }
+
 func (ProductionExecutor) Preflight(_ context.Context, cfg Config) (Preflight, error) {
 	ws, err := ggufload.OpenWeights(cfg.ArtifactPath)
 	if err != nil {
@@ -58,8 +60,10 @@ func (ProductionExecutor) Preflight(_ context.Context, cfg Config) (Preflight, e
 		}
 		fileBytes += stat.Size()
 	}
-	// The direct Q4_K path currently retains host and Metal copies. Include a
-	// second payload plus 4 GiB for session state and transient load buffers.
+	// Keep the established conservative two-payload bound until an accepted
+	// streamed-residency startup witness supports a smaller measured peak. The
+	// production loader may avoid a host copy; this header-only estimate does not
+	// promote that mechanism into a 36 GiB fit claim.
 	peak := payload
 	if payload <= (math.MaxInt64-(4<<30))/2 {
 		peak = payload*2 + 4<<30
@@ -130,7 +134,7 @@ func (ProductionExecutor) Prepare(ctx context.Context, cfg Config) (Prepared, er
 	priorRetain := model.RetainMTP
 	model.SetRetainMTP(true)
 	q6Before := liveQ6KWeights()
-	m, err := ggufload.LoadModelQ4KContext(ctx, cfg.ArtifactPath)
+	m, err := loadProductionModel(ctx, cfg.ArtifactPath)
 	if err != nil {
 		model.SetRetainMTP(priorRetain)
 		return nil, fmt.Errorf("mtpbench: Q4_K_M load: %w", err)
@@ -153,6 +157,13 @@ func (ProductionExecutor) Prepare(ctx context.Context, cfg Config) (Prepared, er
 		WorkloadSHA256: workloadHash, EnvelopeSHA256: envelopeHash,
 	}
 	return &productionPrepared{model: m, identity: identity, retainBefore: priorRetain, q6Before: q6Before}, nil
+}
+
+// loadProductionModel keeps the checkpoint open for lazy dense Q4_K weights and
+// transfers that lifetime to Model.CloseWeights. The loader's existing mmap
+// selector still decides whether eligible spans use mapped or ReaderAt backing.
+func loadProductionModel(ctx context.Context, path string) (*model.Model, error) {
+	return ggufload.LoadModelQ4KStreamedDenseContext(ctx, path, nil)
 }
 
 var shardPattern = regexp.MustCompile(`^(.*-)(\d+)(-of-)(\d+)(\.gguf)$`)

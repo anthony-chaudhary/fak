@@ -306,8 +306,8 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	// host registered), observable at /v1/fak/loops and via fak_bgloop_* metrics.
 	s.startLoops(ctx)
 	if s.logf != nil {
-		s.logf("fak gateway listening on http://%s  (engine=%s model=%s vdso=%v auth=%v)",
-			ln.Addr(), s.engineID, s.model, s.k.VDSOEnabled(), s.requireKey != "")
+		s.logf("fak gateway listening on http://%s (planner=%s engine=%s model=%s vdso=%v auth=%v)",
+			ln.Addr(), plannerKind(s.planner), s.engineID, s.model, s.k.VDSOEnabled(), s.requireKey != "")
 		if !s.warmup.pending() {
 			s.logf("[READY] fak gateway is ready to accept requests on http://%s", ln.Addr())
 		}
@@ -1402,6 +1402,8 @@ func writeErrCode(w http.ResponseWriter, status int, code, msg string) {
 
 func errType(status int) string {
 	switch {
+	case status == http.StatusBadRequest:
+		return "invalid_request_error"
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
 		return "authentication_error"
 	case status == http.StatusTooManyRequests:

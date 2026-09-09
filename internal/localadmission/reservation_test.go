@@ -33,7 +33,7 @@ func TestReservationLifecycleAccountsStartupAndSteadySeparately(t *testing.T) {
 		t.Fatalf("first=%+v err=%v", first, err)
 	}
 	blocked, err := store.Reserve(ctx, reservationRequest(102, 50, 20, 100, PressureNormal))
-	if err != nil || blocked.Admit || blocked.Reason != "aggregate_capacity" || blocked.ReservedBytes != 60 {
+	if err != nil || blocked.Admit || blocked.Reason != "aggregate_capacity" || blocked.ReservedBytes != 60 || blocked.RemedyHint == "" {
 		t.Fatalf("blocked=%+v err=%v", blocked, err)
 	}
 	steady, err := store.MarkSteady(ctx, first.Reservation.ID)
@@ -244,3 +244,65 @@ func (b *lockedBuffer) Bytes() []byte {
 	return append([]byte(nil), b.b...)
 }
 func (b *lockedBuffer) String() string { return string(b.Bytes()) }
+
+func TestReservationStoreActiveAndTotal(t *testing.T) {
+	dir := t.TempDir()
+	store := NewReservationStore(dir)
+	ctx := context.Background()
+
+	// Initially zero
+	total, err := store.TotalReservedBytes(ctx)
+	if err != nil {
+		t.Fatalf("TotalReservedBytes: %v", err)
+	}
+	if total != 0 {
+		t.Fatalf("expected 0 total, got %d", total)
+	}
+
+	// Make a reservation
+	dec, err := store.Reserve(ctx, reservationRequest(os.Getpid(), 30, 20, 100, PressureNormal))
+	if err != nil || !dec.Admit {
+		t.Fatalf("reserve: %v, dec=%+v", err, dec)
+	}
+
+	active, err := store.ActiveReservations(ctx)
+	if err != nil {
+		t.Fatalf("ActiveReservations: %v", err)
+	}
+	if len(active) != 1 || active[0].HeldBytes != 30 {
+		t.Fatalf("unexpected active reservations: %+v", active)
+	}
+
+	total, err = store.TotalReservedBytes(ctx)
+	if err != nil {
+		t.Fatalf("TotalReservedBytes: %v", err)
+	}
+	if total != 30 {
+		t.Fatalf("expected 30 total, got %d", total)
+	}
+
+	// Mark steady
+	_, err = store.MarkSteady(ctx, dec.Reservation.ID)
+	if err != nil {
+		t.Fatalf("MarkSteady: %v", err)
+	}
+	total, err = store.TotalReservedBytes(ctx)
+	if err != nil {
+		t.Fatalf("TotalReservedBytes after steady: %v", err)
+	}
+	if total != 20 {
+		t.Fatalf("expected 20 total, got %d", total)
+	}
+
+	// Release
+	if err := store.Release(ctx, dec.Reservation.ID); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	total, err = store.TotalReservedBytes(ctx)
+	if err != nil {
+		t.Fatalf("TotalReservedBytes after release: %v", err)
+	}
+	if total != 0 {
+		t.Fatalf("expected 0 total after release, got %d", total)
+	}
+}

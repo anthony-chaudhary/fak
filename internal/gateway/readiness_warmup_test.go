@@ -264,3 +264,51 @@ func TestInferenceGatedDuringWarmup(t *testing.T) {
 		t.Fatalf("POST /v1/messages post-warmup status = %d, want 200; body=%s", res.StatusCode, string(body))
 	}
 }
+
+type warmupReporterPlanner struct {
+	*agent.MockPlanner
+	stats agent.KVMemoryStats
+}
+
+func (p *warmupReporterPlanner) KVMemoryStats() agent.KVMemoryStats {
+	return p.stats
+}
+
+// TestRunWarmupDerivesAdmissionTokenBudget tests that RunWarmup probes the planner's KV memory
+// capacity and dynamically derives the admission controller's TokenBudget (issue #5266).
+func TestRunWarmupDerivesAdmissionTokenBudget(t *testing.T) {
+	srv := newTestServer(t)
+	mock := agent.NewMockPlanner("test-model")
+	srv.planner = &warmupReporterPlanner{
+		MockPlanner: mock,
+		stats: agent.KVMemoryStats{
+			FitBudgetBytes: 100_000,
+			BytesPerToken:  10,
+		},
+	}
+	ctl := NewAdmissionController(DefaultAdmissionPolicy())
+	srv.SetAdmissionController(ctl)
+
+	if got, want := ctl.Policy().TokenBudget, 9000; got != want {
+		// SetAdmissionController already queried planner and set 9000 if reporter present
+		t.Logf("SetAdmissionController immediately derived TokenBudget = %d", got)
+	}
+
+	// Reset to default to verify RunWarmup specifically updates it
+	ctl.SetTokenBudgetWithProvenance(8192, "default")
+	srv.admissionMu.Lock()
+	srv.warmupCapacity = nil
+	srv.admissionMu.Unlock()
+
+	_, err := srv.RunWarmup(context.Background())
+	if err != nil {
+		t.Fatalf("RunWarmup err: %v", err)
+	}
+
+	if got, want := ctl.Policy().TokenBudget, 9000; got != want {
+		t.Fatalf("post-warmup TokenBudget = %d, want %d", got, want)
+	}
+	if got, want := ctl.TokenBudgetProvenance(), "measured"; got != want {
+		t.Fatalf("post-warmup TokenBudgetProvenance = %q, want 'measured'", got)
+	}
+}
