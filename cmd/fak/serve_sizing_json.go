@@ -57,14 +57,18 @@ type serveSizingPool struct {
 // the selected serve arm would admit against, plus the warnings a live boot would
 // print or refuse on. Warnings never empty-marshal to null (always an array).
 type serveSizingArtifact struct {
-	Version             string                 `json:"version"`
-	Model               string                 `json:"model"`
-	Arm                 string                 `json:"arm"`
-	ContextBudgetTokens int                    `json:"context_budget_tokens"` // 0 = auto-sized to the box
-	Demands             []serveSizingDemandRow `json:"demands"`
-	Tiers               serveSizingTierRollup  `json:"tiers"`
-	Pools               []serveSizingPool      `json:"pools"`
-	Warnings            []string               `json:"warnings"`
+	Version                     string                 `json:"version"`
+	Model                       string                 `json:"model"`
+	Arm                         string                 `json:"arm"`
+	NativeContextTokens         int                    `json:"native_context_tokens"`
+	ContextBudgetTokens         int                    `json:"context_budget_tokens"` // deprecated load-plan alias for NativeContextTokens
+	ModelDeclaredContextTokens  int                    `json:"model_declared_context_tokens"`
+	ResolvedNativeContextTokens int                    `json:"resolved_native_context_tokens"`
+	NativeContextSource         string                 `json:"native_context_source"`
+	Demands                     []serveSizingDemandRow `json:"demands"`
+	Tiers                       serveSizingTierRollup  `json:"tiers"`
+	Pools                       []serveSizingPool      `json:"pools"`
+	Warnings                    []string               `json:"warnings"`
 }
 
 // serveSizingArm names the load arm loadServeInKernelModel's switch would select for
@@ -86,31 +90,50 @@ func serveSizingArm(be compute.Backend, cpuOffloadExperts bool) string {
 	}
 }
 
+// serveSizingArmForSelected labels the already resolved load arm without
+// independently guessing from the platform or environment. Metal reuses the
+// existing device arm names because it is the selected device execution path.
+func serveSizingArmForSelected(be compute.Backend, cpuOffloadExperts, useMetal bool, arm serveLoadArm) string {
+	if be != nil && cpuOffloadExperts {
+		return "device-resident-q4k-cpu-offload-experts"
+	}
+	prefix := "cpu"
+	if be != nil || useMetal {
+		prefix = "device"
+	}
+	switch arm {
+	case serveLoadArmResidentQ4K:
+		return prefix + "-resident-q4k"
+	case serveLoadArmF32:
+		return prefix + "-f32"
+	default:
+		return prefix + "-lean-q8"
+	}
+}
+
 // buildServeSizingArtifact sizes the SAME classed demands the selected serve arm's
 // fit check builds (serveGGUFMemoryPlan / serveGGUFCPUOffloadMemoryPlan, header-only,
 // alloc-free) and folds them into the versioned artifact. A demand set that a live
 // boot would REFUSE is reported in warnings[] instead of failing: the dry-run's job
 // is inspection, so it always emits.
-func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpuOffloadExperts bool, contextBudgetTokens int, model string, diskBytes int64) (serveSizingArtifact, error) {
+func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpuOffloadExperts bool, requestedNativeContextTokens int, model string, diskBytes int64) (serveSizingArtifact, error) {
 	warnings := []string{}
-	var demands compute.MemoryPlan
-	var err error
-	switch {
-	case be != nil && cpuOffloadExperts:
-		if !be.Caps().UploadDtype {
-			warnings = append(warnings, fmt.Sprintf("--cpu-offload-experts requires backend %q to advertise quantized UploadDtype (Q8_0 upload); a live serve refuses this combination", be.Name()))
-		}
-		// The sizing dry-run inspects a single unsharded process, so it plans the whole
-		// routed-expert set (ranks=1) — the same demands a non-EP serve boot would build.
-		demands, err = serveGGUFCPUOffloadMemoryPlan(ws, 1, contextBudgetTokens, serveDeviceFitBudget(be))
-	case be != nil:
-		demands, err = serveGGUFMemoryPlan(ws, !be.Caps().UploadDtype, contextBudgetTokens, serveDeviceFitBudget(be))
-	default:
-		demands, err = serveGGUFMemoryPlan(ws, false, contextBudgetTokens, serveHostFitBudget())
+	if be != nil && cpuOffloadExperts && !be.Caps().UploadDtype {
+		warnings = append(warnings, fmt.Sprintf("--cpu-offload-experts requires backend %q to advertise quantized UploadDtype (Q8_0 upload); a live serve refuses this combination", be.Name()))
 	}
+	useMetal := be == nil && serveMetalAvailable()
+	selectedArm := resolveServeNativeContextLoadArm(ws, be, useMetal)
+	quant := ggufload.ClassifyTensorQuant(ws.File.Tensors)
+	cpuOffloadActive := be != nil && cpuOffloadExperts && quant.Q4KResident
+	weights, fit, err := serveNativeContextSizingInputs(ws, be, cpuOffloadExperts, useMetal, 1)
 	if err != nil {
 		return serveSizingArtifact{}, err
 	}
+	resolution, contextPlan, err := resolveServeNativeContext(ws, weights, fit, requestedNativeContextTokens)
+	if err != nil {
+		return serveSizingArtifact{}, err
+	}
+	demands := append(append(compute.MemoryPlan(nil), weights...), contextPlan...)
 
 	// Re-run the arm's admission checks and downgrade any refusal to a warning: the
 	// operator reading this artifact wants to SEE the shortfall, not lose the numbers.
@@ -184,14 +207,18 @@ func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpu
 	})
 
 	return serveSizingArtifact{
-		Version:             serveSizingVersion,
-		Model:               model,
-		Arm:                 serveSizingArm(be, cpuOffloadExperts),
-		ContextBudgetTokens: contextBudgetTokens,
-		Demands:             rows,
-		Tiers:               tiers,
-		Pools:               pools,
-		Warnings:            warnings,
+		Version:                     serveSizingVersion,
+		Model:                       model,
+		Arm:                         serveSizingArmForSelected(be, cpuOffloadActive, useMetal, selectedArm),
+		NativeContextTokens:         resolution.RequestedTokens,
+		ContextBudgetTokens:         resolution.RequestedTokens,
+		ModelDeclaredContextTokens:  resolution.ModelDeclaredTokens,
+		ResolvedNativeContextTokens: resolution.ResolvedTokens,
+		NativeContextSource:         resolution.Source,
+		Demands:                     rows,
+		Tiers:                       tiers,
+		Pools:                       pools,
+		Warnings:                    warnings,
 	}, nil
 }
 
@@ -227,7 +254,7 @@ func runServeSizingJSON(sf *serveFlags) {
 	if st, statErr := os.Stat(*sf.ggufPath); statErr == nil {
 		diskBytes = st.Size()
 	}
-	art, err := buildServeSizingArtifact(ws, be, *sf.cpuOffloadExperts, sf.effectiveAdmissionTokenBudget(), *sf.ggufPath, diskBytes)
+	art, err := buildServeSizingArtifact(ws, be, *sf.cpuOffloadExperts, *sf.nativeContextTokens, *sf.ggufPath, diskBytes)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "fak serve: --plan-json:", err)
 		os.Exit(1)

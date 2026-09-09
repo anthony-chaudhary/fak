@@ -1,6 +1,38 @@
 {
   "rows": [
     {
+      "id": "native-context-resolution",
+      "canonical": "resolveServeNativeContext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The native serve startup resolver combines the requested nativeContextTokens ceiling, model metadata, and serveNativeContextSizingInputs for the selected load arm to produce one enforced context window before tensor payload loading.",
+      "distinction": "Resolves the native model window from metadata and memory estimates; it does not allocate conversation spans like ctxplan or debit the managed session's lifetime context budget. The scheduler's concurrent admission budget remains a separate resource control.",
+      "distinct_from": ["context-window", "ctxplan", "native-context-refusal"],
+      "aliases": ["nativecontexttokens", "servenativecontextsizinginputs"],
+      "grounding": "resolveServeNativeContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/native-long-context.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "native-context-memory-plan",
+      "canonical": "PerContextMemoryPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "ContextSizeConfig.PerContextMemoryPlan projects model geometry and a context token count into classed KV and scratch memory demands. Native serve combines this contextPlan with its selected load arm's weight demands for memory sizing and plan JSON.",
+      "distinction": "Projects per-context memory demand at a given token count; AutoSizeContextPlan chooses the fitting count. This is a compute MemoryPlan, not ctxplan's selection of resident conversation spans.",
+      "distinct_from": ["x-plan-memoryplan", "x2-plan-autosizecontextplan", "ctxplan"],
+      "aliases": ["contextplan"],
+      "grounding": "PerContextMemoryPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/native-long-context.md",
+      "parent": "x-plan-memoryplan",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
       "id": "native-context-refusal",
       "canonical": "InKernelContextLengthError",
       "family": "context-ctx",

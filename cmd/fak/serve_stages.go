@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -46,9 +47,11 @@ type serveRuntime struct {
 	startupMessages []gateway.StartupMessage
 	explicitFlags   map[string]bool
 
-	chatBackend compute.Backend
-	useMetal    bool
-	ep          epRankConfig
+	chatBackend             compute.Backend
+	useMetal                bool
+	ep                      epRankConfig
+	nativeContext           serveNativeContextResolution
+	nativeAdmissionExplicit bool
 
 	inKernelModel *fakmodel.Model
 	inKernelQ4K   bool
@@ -99,9 +102,10 @@ func (sf *serveFlags) isExplicitFlag(name string) bool {
 }
 
 // serveNativeAdmissionPolicy changes only the token axis of the gateway's
-// shipping policy. When --native-admission-token-budget is omitted, it auto-derives
-// TokenBudget from the configured model context window (--ctx / --context-budget-tokens).
-// Explicit --native-admission-token-budget declarations take strict precedence.
+// shipping policy. A resolved local model window is copied into the flag value
+// before controller construction; --context-budget-tokens remains a separate
+// managed-session lifetime budget. Explicit scheduler declarations take strict
+// precedence and are protected from measured warmup replacement by provenance.
 func serveNativeAdmissionPolicy(sf *serveFlags) (gateway.AdmissionPolicy, error) {
 	if sf == nil {
 		return gateway.DefaultAdmissionPolicy(), errors.New("serve flags are nil")
@@ -118,26 +122,29 @@ func serveNativeAdmissionPolicy(sf *serveFlags) (gateway.AdmissionPolicy, error)
 		}
 		policy.TokenBudget = *sf.nativeAdmissionTokenBudget
 		policy.TokenBudgetProvenance = "explicit"
-
-		if sf.contextBudgetTokens != nil && *sf.contextBudgetTokens > 0 && policy.TokenBudget < *sf.contextBudgetTokens {
-			fmt.Fprintf(os.Stderr, "fak serve: WARNING: explicit --native-admission-token-budget (%d) is smaller than configured model context window (%d); requests near full context may be shed\n", policy.TokenBudget, *sf.contextBudgetTokens)
-		}
-		return policy, nil
-	}
-
-	if sf.contextBudgetTokens != nil && *sf.contextBudgetTokens > 0 {
-		policy.TokenBudget = *sf.contextBudgetTokens
-		policy.TokenBudgetProvenance = "context"
 		return policy, nil
 	}
 
 	if sf.nativeAdmissionTokenBudget != nil && *sf.nativeAdmissionTokenBudget > 0 {
 		policy.TokenBudget = *sf.nativeAdmissionTokenBudget
-		policy.TokenBudgetProvenance = "default"
+		policy.TokenBudgetProvenance = sf.nativeAdmissionProvenance
+		if policy.TokenBudgetProvenance == "" {
+			policy.TokenBudgetProvenance = "default"
+		}
 		return policy, nil
 	}
 
 	return policy, nil
+}
+
+func effectiveNativeAdmissionTokenBudget(sf *serveFlags, explicitlySet bool, resolvedContextTokens int) int {
+	if sf == nil {
+		return 0
+	}
+	if explicitlySet || resolvedContextTokens <= 0 {
+		return sf.effectiveAdmissionTokenBudget()
+	}
+	return resolvedContextTokens
 }
 
 // nativeAdmissionPolicyForBudget is the one seam every launcher that runs the
@@ -328,16 +335,93 @@ func (rt *serveRuntime) resolveCompute(sf *serveFlags) {
 	// flip cleanly activates the fully-wired HAL capture/replay path. No-op on a non-cuda build.
 	if *sf.cudaGraph {
 		compute.EnableCUDAGraph()
-		// Size the fixed device-KV prealloc to the served context so a real prompt never grows
-		// the cache mid-capture (a cudaMalloc during capture is illegal — #932). Off-budget (0)
-		// leaves the decode-bench default (1024). The prealloc is real VRAM (3 buffers × KV-heads
-		// × head-dim × positions × 4B/layer), so an operator who wants a large graph context must
-		// budget VRAM for it (or pair with the Q4_K weight lever to free room).
-		compute.SetCUDAGraphKVCapacity(*sf.contextBudgetTokens)
-		rt.addStartupMessage(newServeStartupMessage("serve", "cuda-graph", "info",
-			fmt.Sprintf("decode replay enabled; KV graph capacity=%d positions", max(*sf.contextBudgetTokens, 1024))))
 	}
 	rt.chatBackend, rt.useMetal, rt.ep = chatBackend, useMetal, ep
+}
+
+// resolveNativeContext reads only GGUF metadata and sizing estimates. It runs
+// before loadServeInKernelModel, so an invalid explicit ceiling cannot trigger a
+// tensor payload read or device allocation.
+func (rt *serveRuntime) resolveNativeContext(sf *serveFlags, ranks int) error {
+	requested := *sf.nativeContextTokens
+	resolution, _, err := resolveServeNativeContext(nil, nil, serveFitBudget{}, requested)
+	if err != nil {
+		return err
+	}
+	path := strings.TrimSpace(*sf.ggufPath)
+	if path != "" {
+		if info, statErr := os.Stat(path); statErr == nil && info.IsDir() {
+			resolution, err = resolveServeNativeContextDirectory(path, requested)
+			if err != nil {
+				return err
+			}
+		} else {
+			ws, openErr := ggufload.OpenWeights(path)
+			if openErr != nil {
+				return openErr
+			}
+			defer ws.Close()
+			weights, fit, inputErr := serveNativeContextSizingInputs(ws, rt.chatBackend, *sf.cpuOffloadExperts, rt.useMetal, ranks)
+			if inputErr != nil {
+				return inputErr
+			}
+			resolution, _, err = resolveServeNativeContext(ws, weights, fit, requested)
+			if err != nil {
+				return err
+			}
+			cfg, _ := ws.File.Config()
+			logServeAutoSizedContext(cfg.ContextSizeConfig(), weights, fit, fit.avail(), requested, resolution.ResolvedTokens)
+		}
+	}
+	rt.nativeContext = resolution
+	*sf.nativeAdmissionTokenBudget = effectiveNativeAdmissionTokenBudget(sf, rt.nativeAdmissionExplicit, resolution.ResolvedTokens)
+	if rt.nativeAdmissionExplicit {
+		sf.nativeAdmissionProvenance = "explicit"
+		if resolution.ResolvedTokens > 0 && *sf.nativeAdmissionTokenBudget < resolution.ResolvedTokens {
+			fmt.Fprintf(os.Stderr, "fak serve: WARNING: explicit --native-admission-token-budget (%d) is smaller than resolved native model context window (%d); requests near full context may be shed\n", *sf.nativeAdmissionTokenBudget, resolution.ResolvedTokens)
+		}
+	} else if resolution.ResolvedTokens > 0 {
+		sf.nativeAdmissionProvenance = "context"
+	} else {
+		sf.nativeAdmissionProvenance = "default"
+	}
+	if err := validateServeMaxTotalTokens(sf, *sf.nativeAdmissionTokenBudget); err != nil {
+		return err
+	}
+	if *sf.cudaGraph {
+		compute.SetCUDAGraphKVCapacity(resolution.ResolvedTokens)
+		rt.addStartupMessage(newServeStartupMessage("serve", "cuda-graph", "info",
+			fmt.Sprintf("decode replay enabled; KV graph capacity=%d positions", max(resolution.ResolvedTokens, 1024))))
+	}
+	rt.addStartupMessage(newServeStartupMessage("serve", "native-context-window", "info",
+		fmt.Sprintf("native context requested=%d model_declared=%d resolved=%d source=%s",
+			resolution.RequestedTokens, resolution.ModelDeclaredTokens, resolution.ResolvedTokens, resolution.Source)))
+	return nil
+}
+
+func resolveServeNativeContextDirectory(dir string, requested int) (serveNativeContextResolution, error) {
+	resolution, _, err := resolveServeNativeContext(nil, nil, serveFitBudget{}, requested)
+	if err != nil {
+		return resolution, err
+	}
+	configPath := filepath.Join(dir, "config.json")
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		return resolution, fmt.Errorf("safetensors: read config %s: %w", configPath, err)
+	}
+	var cfg fakmodel.Config
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return resolution, fmt.Errorf("safetensors: parse config %s: %w", configPath, err)
+	}
+	resolution.ModelDeclaredTokens = cfg.MaxPositionEmbeddings
+	if requested > 0 && resolution.ModelDeclaredTokens > 0 && requested > resolution.ModelDeclaredTokens {
+		return resolution, fmt.Errorf("--native-context-tokens %d exceeds model-declared context window %d", requested, resolution.ModelDeclaredTokens)
+	}
+	if requested == 0 {
+		resolution.ResolvedTokens = resolution.ModelDeclaredTokens
+		resolution.Source = "model-metadata"
+	}
+	return resolution, nil
 }
 
 // loadModel eagerly loads the GGUF weights and the in-kernel tokenizer before the
@@ -351,6 +435,11 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 	// not the load's: a mistyped --n-cpu-moe refuses here rather than after the weights are
 	// resident. Carried to the planner through agent.ExpertSpillEnv (serve_ncpumoe.go).
 	must(applyServeNCPUMoE(*sf.nCPUMoE))
+	expertRanks := 1
+	if rt.ep.sharded {
+		expertRanks = rt.ep.ranks
+	}
+	must(rt.resolveNativeContext(sf, expertRanks))
 
 	pf, err := preflightServeBackendForward(*sf.ggufPath, rt.chatBackend)
 	must(err)
@@ -394,18 +483,13 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 		rt.addStartupMessage(newServeStartupMessage("expert-parallel", "shard-residency", "info",
 			fmt.Sprintf("rank %d/%d loads experts [%d,%d) of %d resident", rt.ep.rank, rt.ep.ranks, shard.Lo, shard.Hi, numExperts)))
 	}
-	expertRanks := 1
-	if rt.ep.sharded {
-		expertRanks = rt.ep.ranks
-	}
 	if *sf.ggufPath != "" && rt.useMetal {
 		if err := refuseOversubscribedMetalGGUF(*sf.ggufPath); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
 	}
-	effectiveTokens := sf.effectiveAdmissionTokenBudget()
-	inKernelModel, inKernelQ4K, loadProfile, loadPhase := loadServeInKernelModel(*sf.ggufPath, rt.chatBackend, *sf.cpuOffloadExperts, effectiveTokens, expertShard, expertRanks)
+	inKernelModel, inKernelQ4K, loadProfile, loadPhase := loadServeInKernelModel(*sf.ggufPath, rt.chatBackend, *sf.cpuOffloadExperts, rt.nativeContext.ResolvedTokens, expertShard, expertRanks)
 	if loadPhase.Name != "" {
 		rt.startupPhases = append(rt.startupPhases, loadPhase)
 	}
@@ -461,7 +545,7 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 	// listener and letting rank r OOM uploading its band. Fail-open on cpu-ref / a non-probing backend
 	// (the load above already gated host/aggregate fit); this adds only the per-rank VRAM check the
 	// rank-count + Caps().Collective gate above does not make (#971).
-	if err := refuseEPPlanIfUnfit(inKernelModel, rt.chatBackend, *sf.expertParallel, effectiveTokens); err != nil {
+	if err := refuseEPPlanIfUnfit(inKernelModel, rt.chatBackend, *sf.expertParallel, rt.nativeContext.ResolvedTokens); err != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: --expert-parallel %d does not fit resident across the GPUs: %v\n", *sf.expertParallel, err)
 		os.Exit(2)
 	}
