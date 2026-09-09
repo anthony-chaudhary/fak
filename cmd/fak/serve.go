@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/l3kv"
+	"github.com/anthony-chaudhary/fak/internal/macobs"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/researcharm"
 	"github.com/anthony-chaudhary/fak/internal/session"
@@ -148,10 +150,9 @@ type serveFlags struct {
 	opencode                     *bool
 	opencodeConfig               *bool
 	writeOpencodeConfig          *bool
-	pi                           *bool
-	piConfig                     *bool
-	writePiConfig                *bool
-	piConfigPath                 *string
+	claude                       *bool
+	claudeConfig                 *bool
+	writeClaudeConfig            *bool
 	routeManifest                *string
 	routeAccounts                *string
 	ggufPath                     *string
@@ -233,14 +234,6 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.claude = fs.Bool("claude", false, "one-touch Claude Code setup: write or update .claude/settings.json in the current workspace with this server's backend environment")
 	sf.claudeConfig = fs.Bool("claude-config", false, "print .claude/settings.json configuration for this server and exit without binding a listener")
 	sf.writeClaudeConfig = fs.Bool("write-claude-config", false, "write or update .claude/settings.json in the current workspace with this server's backend environment and exit without binding a listener")
-	sf.pi = fs.Bool("pi", false, "one-touch Pi setup: write or update ~/.pi/agent/models.json with this server's provider config")
-	sf.piConfig = fs.Bool("pi-config", false, "print Pi models.json provider configuration for this server and exit without binding a listener")
-	sf.writePiConfig = fs.Bool("write-pi-config", false, "write or update ~/.pi/agent/models.json with this server's provider config and exit without binding a listener")
-	sf.piConfigPath = fs.String("pi-config-path", "", "custom destination path or directory for Pi models.json (default: ~/.pi/agent/models.json)")
-	sf.codex = fs.Bool("codex", false, "one-touch Codex setup: write or update config.toml with this server's provider config")
-	sf.codexConfig = fs.Bool("codex-config", false, "print Codex config.toml configuration for this server and exit without binding a listener")
-	sf.writeCodexConfig = fs.Bool("write-codex-config", false, "write or update config.toml with this server's provider config and exit without binding a listener")
-	sf.codexConfigPath = fs.String("codex-config-path", "", "custom destination path for Codex config.toml (default: $CODEX_HOME/config.toml or ~/.codex/config.toml)")
 	sf.apiKeyEnv = fs.String("api-key-env", "", "env var holding the upstream API key (proxy mode)")
 	sf.streamProgressTimeout = fs.Duration("stream-progress-timeout", agent.DefaultStreamProgressTimeout, "proxy mode: end a STREAMING upstream turn that has stayed warm this long without a single frame that advances it (#5486). Keepalive frames (a ping, an SSE comment, an empty-delta chunk) re-arm the inter-byte deadline but are NOT progress, so a generation wedged behind a live socket otherwise rides the 600s whole-request ceiling. DEFAULT-ON at agent.DefaultStreamProgressTimeout (300s), which sits above the worst prefill-to-first-token gap on a large cached prompt and above any extended-thinking pause (thinking streams content deltas, which do count as progress). Pass 0 to DISABLE the deadline — the escape hatch when a provider's prefill legitimately outlasts the window. A positive value outside [5s, 600s] is not honored as a real window: the default is used instead, so a typo never silently becomes a different deadline. Inert on the non-streaming path and on the offline mock planner.")
 	sf.engineCacheEngine = fs.String("engine-cache-engine", "", "self-hosted upstream cache reset engine for quarantined provider-bound tool results: sglang|vllm (empty disables)")
@@ -398,7 +391,7 @@ func cmdServe(argv []string) {
 	}
 	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
 		if *sf.ggufPath == "" && strings.TrimSpace(*sf.baseURL) == "" && len(sf.replicaBaseURLs.Values()) == 0 {
-			if *sf.opencode || *sf.pi || *sf.claude || *sf.codex || *sf.metal {
+			if *sf.opencode || *sf.claude || *sf.metal {
 				*sf.ggufPath = "default"
 				*sf.metal = true
 				if *sf.model == "mock" || *sf.model == "" {
@@ -485,19 +478,19 @@ func cmdServe(argv []string) {
 		runServeOpenCodeConfig(sf, os.Stderr, true)
 	}
 
-	// --pi-config: emit Pi models.json provider configuration and exit before load.
-	if *sf.piConfig {
-		runServePiConfig(sf, os.Stdout, false)
+	// --claude-config: emit .claude/settings.json configuration and exit before load.
+	if *sf.claudeConfig {
+		runServeClaudeConfig(sf, os.Stdout, false)
 		return
 	}
-	// --write-pi-config: write or update Pi models.json and exit before load.
-	if *sf.writePiConfig {
-		runServePiConfig(sf, os.Stderr, true)
+	// --write-claude-config: write or update .claude/settings.json in the current workspace and exit before load.
+	if *sf.writeClaudeConfig {
+		runServeClaudeConfig(sf, os.Stderr, true)
 		return
 	}
-	// --pi: ensure Pi models.json is configured before booting listener.
-	if *sf.pi {
-		runServePiConfig(sf, os.Stderr, true)
+	// --claude: ensure .claude/settings.json is configured before booting listener.
+	if *sf.claude {
+		runServeClaudeConfig(sf, os.Stderr, true)
 	}
 
 	// Advisory (#3094): a serve launched from a non-fak cwd silently indexes whatever
@@ -882,6 +875,24 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 	if gov != nil {
 		srv.SetSpendGovernor(gov, scopeOf)
 		srv.AddStartupMessages(gateway.StartupMessage{Source: "serve", Kind: "spend-cap", Level: "info", Text: fmt.Sprintf("spend cap armed on %d scope budget(s)", len(sf.spendCap.Values()))})
+	}
+	if rt.useMetal || (sf.memoryGovernor != nil && *sf.memoryGovernor) || os.Getenv("FAK_MEMORY_GOVERNOR") == "1" {
+		hw := macobs.CollectHardware(context.Background())
+		cfg := macobs.DefaultHeadroomConfig()
+		var govOpts []macobs.GovernorOption
+		if rawCeiling := os.Getenv("FAK_WIRED_MEMORY_CEILING_BYTES"); rawCeiling != "" {
+			if ceilingBytes, err := strconv.ParseUint(rawCeiling, 10, 64); err == nil && ceilingBytes > 0 {
+				govOpts = append(govOpts, macobs.WithGovernorCeilingBytes(ceilingBytes))
+			}
+		}
+		memGov := macobs.NewMemoryGovernor(hw, cfg, govOpts...)
+		srv.SetMemoryGovernor(memGov)
+		srv.AddStartupMessages(gateway.StartupMessage{
+			Source: "serve",
+			Kind:   "memory-governor",
+			Level:  "info",
+			Text:   fmt.Sprintf("zero-swap memory governor armed (wired ceiling: %d MB, 24-agent target)", memGov.Telemetry().WiredMemoryCeilingBytes/(1024*1024)),
+		})
 	}
 	rt.srv = srv
 }
