@@ -4,6 +4,7 @@ package llamacppinterop
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -17,11 +18,13 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/qwen38quantrun"
+	"golang.org/x/sys/unix"
 )
 
 func TestStrixComparatorAuthorityBindsApprovedReferenceAndAcceptedConnection(t *testing.T) {
@@ -279,6 +282,9 @@ func TestStrixComparatorAuthorityBindsApprovedReferenceAndAcceptedConnection(t *
 	if err != nil || !exchange.Valid() {
 		t.Fatalf("bind accepted exchange: capability=%v err=%v", exchange, err)
 	}
+	if window, err := exchange.BeginResourceWindow(context.Background()); err == nil || window != nil {
+		t.Fatalf("generic mapped dependencies minted RADV resource window: window=%v err=%v", window, err)
+	}
 	if _, err := json.Marshal(exchange); err == nil {
 		t.Fatal("exchange capability marshaled")
 	}
@@ -368,6 +374,9 @@ func TestStrixComparatorAuthorityBindsApprovedReferenceAndAcceptedConnection(t *
 	if secondExchange.Valid() || !closedDuringFinalScan {
 		t.Fatal("connection close during final inspection retained exchange authority")
 	}
+	if window, err := secondExchange.BeginResourceWindow(context.Background()); err == nil || window != nil {
+		t.Fatalf("closed socket minted resource window: window=%v err=%v", window, err)
+	}
 	secondPlatform.state.exchangeHook = nil
 	if !exchange.Valid() {
 		t.Fatal("final-inspection close test damaged the original exchange authority")
@@ -391,6 +400,9 @@ func TestStrixComparatorAuthorityBindsApprovedReferenceAndAcceptedConnection(t *
 	}
 	if exchange.Valid() {
 		t.Fatal("child exit retained exchange authority")
+	}
+	if window, err := exchange.BeginResourceWindow(context.Background()); err == nil || window != nil {
+		t.Fatalf("exited child minted resource window: window=%v err=%v", window, err)
 	}
 
 	childExitAddress := filepath.Join(dir, "child-exit.address")
@@ -1115,4 +1127,226 @@ func TestOpenStrixComparatorAuthorityPinsExecutedFiles(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestStrixComparatorResourceAuthorityFailsClosedWithoutOwnedRADVActivity(t *testing.T) {
+	if got, err := new(StrixComparatorExchangeAuthority).BeginResourceWindow(nil); err == nil || got != nil {
+		t.Fatalf("nil-context begin result = (%v, %v)", got, err)
+	}
+	if got, err := new(StrixComparatorExchangeAuthority).BeginResourceWindow(context.Background()); err == nil || got != nil {
+		t.Fatalf("zero exchange begin result = (%v, %v)", got, err)
+	}
+	if got, err := new(StrixComparatorResourceWindow).Finalize(); err == nil || got != nil {
+		t.Fatalf("zero resource-window finalize result = (%v, %v)", got, err)
+	}
+	if _, err := json.Marshal(new(StrixComparatorResourceWindow)); err == nil {
+		t.Fatal("resource window unexpectedly marshaled")
+	}
+	if _, err := json.Marshal(new(StrixComparatorResourceAuthority)); err == nil {
+		t.Fatal("resource authority unexpectedly marshaled")
+	}
+	if observation, ok := new(StrixComparatorResourceAuthority).Observation(); ok || observation != (StrixComparatorResourceObservation{}) {
+		t.Fatalf("zero resource authority disclosed observation: (%+v, %v)", observation, ok)
+	}
+
+	platform := &linuxStrixComparatorExchangeAuthority{}
+	exchange := &StrixComparatorExchangeAuthority{mu: new(sync.Mutex), platform: platform}
+	exchange.self = exchange
+	if got, err := exchange.BeginResourceWindow(context.Background()); err == nil || got != nil {
+		t.Fatalf("unowned exchange begin result = (%v, %v)", got, err)
+	}
+
+	if _, err := parseStrixDRMFDInfo([]byte("pos:\t0\n")); err == nil {
+		t.Fatal("non-DRM fdinfo unexpectedly yielded resource identity")
+	}
+	implementationDir := t.TempDir()
+	genericPath := filepath.Join(implementationDir, "generic-amdgpu-elf")
+	if err := os.WriteFile(genericPath, append([]byte{0x7f, 'E', 'L', 'F'}, []byte("generic amdgpu Vulkan implementation")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	genericFile, err := os.Open(genericPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer genericFile.Close() //nolint:errcheck // test-owned file
+	if got := detectPinnedStrixRADVImplementation([]*strixPinnedIdentity{{file: genericFile, digest: strings.Repeat("d", 64), mapIt: true}}); got != "" {
+		t.Fatalf("generic AMDGPU ELF mislabeled as RADV: %q", got)
+	}
+	radvPath := filepath.Join(implementationDir, "observed-radv-elf")
+	if err := os.WriteFile(radvPath, append([]byte{0x7f, 'E', 'L', 'F'}, []byte("radv_device\x00vk_icdGetInstanceProcAddr")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	radvFile, err := os.Open(radvPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer radvFile.Close() //nolint:errcheck // test-owned file
+	wantRADVDigest := strings.Repeat("e", 64)
+	if got := detectPinnedStrixRADVImplementation([]*strixPinnedIdentity{{file: radvFile, digest: wantRADVDigest, mapIt: true}}); got != wantRADVDigest {
+		t.Fatalf("observed held RADV identity = %q, want %q", got, wantRADVDigest)
+	}
+	validFDInfo := []byte("drm-driver:\tamdgpu\ndrm-pdev:\t0000:c5:00.0\ndrm-client-id:\t7\ndrm-memory-vram:\t4 KiB\ndrm-memory-gtt:\t8 KiB\ndrm-engine-gfx:\t11 ns\n")
+	parsed, err := parseStrixDRMFDInfo(validFDInfo)
+	if err != nil || parsed.deviceBytes != 12*1024 || parsed.engineActiveNS != 11 {
+		t.Fatalf("parse authoritative DRM fdinfo = (%+v, %v)", parsed, err)
+	}
+	duplicate := append(append([]byte(nil), validFDInfo...), []byte("drm-client-id:\t8\n")...)
+	if _, err := parseStrixDRMFDInfo(duplicate); err == nil {
+		t.Fatal("contradictory duplicate DRM identity unexpectedly passed")
+	}
+	if err := validateStrixDRMOwners(map[int]int{101: 1, 202: 1}, 101); err == nil {
+		t.Fatal("shared DRM client identity unexpectedly passed ownership check")
+	}
+	initial := strixComparatorResourceSnapshot{processPeakBytes: 8, deviceBytes: 16, engineActiveNS: 32, engineCounters: map[string]uint64{"drm-engine-gfx": 12, "drm-engine-compute": 20}, drmFD: 4, drmClientID: "7", drmPDev: "0000:c5:00.0", renderTarget: "/dev/dri/renderD128", renderDevice: 123, radvIdentity: "radv-owned"}
+	if got, err := finalizeStrixResourceObservation(initial, initial, initial.processPeakBytes, initial.deviceBytes); err == nil || got != (StrixComparatorResourceObservation{}) {
+		t.Fatalf("zero-activity finalization = (%+v, %v)", got, err)
+	}
+	reset := initial
+	reset.engineActiveNS = 111
+	reset.engineCounters = map[string]uint64{"drm-engine-gfx": 11, "drm-engine-compute": 100}
+	if err := validateStrixResourceProgress(initial, initial, reset); err == nil {
+		t.Fatal("one reset GPU-engine counter masked by another increase unexpectedly passed")
+	}
+	contradictory := initial
+	contradictory.drmClientID = "8"
+	if err := validateStrixResourceProgress(initial, initial, contradictory); err == nil {
+		t.Fatal("changed DRM client identity unexpectedly passed")
+	}
+
+	pidfd, err := unix.PidfdOpen(os.Getpid(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(pidfd) //nolint:errcheck // test-owned descriptor
+	process, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := &linuxStrixComparatorAuthority{cmd: &exec.Cmd{Process: process}, pidfd: pidfd, radvDigest: strings.Repeat("a", 64)}
+	reference := strixComparatorApprovedReference{loaderSetSHA256: strings.Repeat("b", 64), dependencySetSHA256: strings.Repeat("c", 64)}
+	if got, err := inspectStrixComparatorResources(state, reference, false); err == nil || got.processPeakBytes != 0 {
+		t.Fatalf("live process without child-owned render fd sample = (%+v, %v)", got, err)
+	}
+	exited := exec.Command("/bin/sh", "-c", "sleep 0.01")
+	if err := exited.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exitedPidfd, err := unix.PidfdOpen(exited.Process.Pid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(exitedPidfd) //nolint:errcheck // test-owned descriptor
+	if err := exited.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	exitedState := &linuxStrixComparatorAuthority{cmd: exited, pidfd: exitedPidfd, radvDigest: strings.Repeat("a", 64)}
+	if got, err := inspectStrixComparatorResources(exitedState, reference, false); err == nil || got.processPeakBytes != 0 {
+		t.Fatalf("exited child resource sample = (%+v, %v)", got, err)
+	}
+
+	if err := claimStrixResourceWindowLocked(state); err != nil {
+		t.Fatal(err)
+	}
+	if err := claimStrixResourceWindowLocked(state); err == nil {
+		t.Fatal("overlapping child resource window unexpectedly admitted")
+	}
+	window := &linuxStrixComparatorResourceWindow{exchange: &linuxStrixComparatorExchangeAuthority{state: state, reference: reference}, stop: make(chan struct{}), done: make(chan struct{}), ctx: context.Background()}
+	go window.sample()
+	deadline := time.Now().Add(time.Second)
+	for {
+		window.mu.Lock()
+		sampled := window.sampleErr != nil
+		window.mu.Unlock()
+		if sampled {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("production sampler did not record its fail-closed no-DRM result")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := window.cancel(); err != nil {
+		t.Fatal(err)
+	}
+	if state.resourceActive {
+		t.Fatal("cancelled resource window retained the exclusive child slot")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	state.resourceActive = true
+	abandoned := &linuxStrixComparatorResourceWindow{exchange: &linuxStrixComparatorExchangeAuthority{state: state, reference: reference}, stop: make(chan struct{}), done: make(chan struct{}), ctx: ctx}
+	go abandoned.sample()
+	cancel()
+	select {
+	case <-abandoned.done:
+	case <-time.After(time.Second):
+		t.Fatal("context-cancelled resource sampler leaked its goroutine")
+	}
+	if state.resourceActive {
+		t.Fatal("context-cancelled resource window retained the exclusive child slot")
+	}
+
+	visibleMount := []byte("36 25 0:32 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw\n")
+	if err := verifyStrixGlobalProcMount(visibleMount); err != nil {
+		t.Fatalf("visible proc mount rejected: %v", err)
+	}
+	hiddenMount := []byte("36 25 0:32 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw,hidepid=2\n")
+	if err := verifyStrixGlobalProcMount(hiddenMount); err == nil {
+		t.Fatal("hidepid=2 proc mount unexpectedly authorized complete DRM-owner enumeration")
+	}
+	if owners, err := strixDRMClientOwnersWithMountInfo(os.Getpid(), "0000:c5:00.0", "7", hiddenMount); err == nil || owners != nil {
+		t.Fatalf("ownership scan with hidden process population = (%v, %v)", owners, err)
+	}
+	nestedMaskedMount := append(append([]byte(nil), visibleMount...), []byte("47 36 0:44 / /proc/202/fdinfo rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw\n")...)
+	if err := verifyStrixGlobalProcMount(nestedMaskedMount); err == nil {
+		t.Fatal("nested tmpfs mount masking /proc/202/fdinfo unexpectedly proved global process visibility")
+	}
+	if owners, err := strixDRMClientOwnersWithMountInfo(os.Getpid(), "0000:c5:00.0", "7", nestedMaskedMount); err == nil || owners != nil {
+		t.Fatalf("ownership scan with nested masked process fdinfo = (%v, %v)", owners, err)
+	}
+	if err := verifyStrixGlobalProcMount([]byte("37 25 0:33 / /sys rw - sysfs sysfs rw\n")); err == nil {
+		t.Fatal("missing authoritative proc mount unexpectedly proved global process visibility")
+	}
+
+	finalizeContext, cancelFinalize := context.WithCancel(context.Background())
+	state.resourceActive = true
+	finalizeStop := make(chan struct{})
+	finalizeDone := make(chan struct{})
+	duringFinalize := &linuxStrixComparatorResourceWindow{exchange: &linuxStrixComparatorExchangeAuthority{state: state, reference: reference}, stop: finalizeStop, done: finalizeDone, ctx: finalizeContext}
+	go func() {
+		<-finalizeStop
+		cancelFinalize()
+		close(finalizeDone)
+	}()
+	if got, err := duringFinalize.finalize(); err == nil || got != nil {
+		t.Fatalf("cancellation during sampler join minted authority: (%v, %v)", got, err)
+	}
+	if state.resourceActive {
+		t.Fatal("cancelled finalization retained the exclusive child slot")
+	}
+
+	bothReadyContext, cancelBothReady := context.WithCancel(context.Background())
+	cancelBothReady()
+	state.resourceActive = true
+	bothReady := &linuxStrixComparatorResourceWindow{
+		exchange: &linuxStrixComparatorExchangeAuthority{state: state, reference: reference},
+		stop:     make(chan struct{}),
+		done:     make(chan struct{}),
+		ctx:      bothReadyContext,
+	}
+	bothReady.stopOnce.Do(func() { close(bothReady.stop) })
+	go bothReady.sample()
+	<-bothReady.done
+	if got, err := bothReady.finalize(); err == nil || got != nil {
+		t.Fatalf("simultaneously ready stop and cancellation minted authority: (%v, %v)", got, err)
+	}
+	if state.resourceActive {
+		t.Fatal("simultaneously ready stop and cancellation retained the exclusive child slot")
+	}
+
+	mintContext, cancelMint := context.WithCancel(context.Background())
+	beforeMint := &linuxStrixComparatorResourceWindow{ctx: mintContext, testBeforeMint: cancelMint}
+	complete := StrixComparatorResourceObservation{ProcessPeakBytes: 1, DevicePeakBytes: 1, GPUEngineActiveNS: 1, RADVDeviceIdentity: "observed"}
+	if got, err := beforeMint.mintResourceAuthority(complete); err == nil || got != nil {
+		t.Fatalf("cancellation at final mint boundary produced authority: (%v, %v)", got, err)
+	}
 }
