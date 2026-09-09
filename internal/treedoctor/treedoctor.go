@@ -318,9 +318,15 @@ func Sweep(ctx context.Context, run Runner, opts Options, apply bool) (Report, [
 			continue
 		}
 		if apply {
+			_, _, _ = run(ctx, opts.RepoRoot, "worktree", "unlock", w.Path)
 			if _, _, err := run(ctx, opts.RepoRoot, "worktree", "remove", "--force", w.Path); err == nil {
 				actions = append(actions, "pruned "+kind+" "+w.Path)
 				prunedWorktree = true
+			} else {
+				if _, _, pErr := run(ctx, opts.RepoRoot, "worktree", "prune"); pErr == nil {
+					actions = append(actions, "pruned "+kind+" "+w.Path+" via prune")
+					prunedWorktree = true
+				}
 			}
 		} else {
 			actions = append(actions, "would prune "+kind+" "+w.Path)
