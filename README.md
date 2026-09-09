@@ -4,15 +4,15 @@
 
 # fak — the fast local runtime for coding agents
 
-**fak is the agent runtime for local model serving, prefix caching, and zero-cold-start subagent fanout.**
+**fak is the agent runtime for local model serving, prefix caching, and subagent workflows.**
 
-> **In short:** run coding agents locally with zero-cold-start subagent fanout and cache reuse, protected by a default-deny capability floor (blocking unauthorized actions).
+> **In short:** run coding agents against a local model with shared-cache primitives and a default-deny capability floor for unauthorized actions.
 
 ## Try fak
 
 Install with `curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh` (or `go install github.com/anthony-chaudhary/fak/cmd/fak@latest`).
 
-Experience raw in-kernel inference speed and concurrent multi-agent fanout:
+Try local model serving and the multi-agent workflow:
 
 1. Raw inference speed (`fak up`):
    Auto-probes unified memory with `macfit` and reserves headroom to prevent swapping. Starts the local OpenAI-compatible endpoint on `:8080` and opens an interactive chat REPL (use `fak up --mock` for zero-download verification with no key, model, or GPU):
@@ -20,16 +20,9 @@ Experience raw in-kernel inference speed and concurrent multi-agent fanout:
    fak up
    # -> [READY] fak up running on http://127.0.0.1:8080
    ```
-   ```
-   [READY] fak up running on http://127.0.0.1:8080
-     • Model: 27B (qwen3.8-27b-q4_k_m) | Context: 65536 tokens | Headroom: 33.3%
-   you> Explain context caching in one line
-   fak> The Context MMU shares paged KV blocks across runs for sub-millisecond reuse.
-        [telemetry: 76.1 tok/s | 64 tokens | 840ms | context: 128/65536]
-   ```
-   Ask any question to observe raw Apple Silicon Metal generation speed with per-token telemetry.
+   Ask any question to see the throughput and context telemetry observed for that run.
 
-2. Batched subagent speed (`fak opencode`):
+2. Parallel agent workflow (`fak opencode`):
    In another terminal (or backgrounding `fak up --headless`), launch OpenCode:
    ```bash
    fak opencode
@@ -38,19 +31,20 @@ Experience raw in-kernel inference speed and concurrent multi-agent fanout:
    ```
    "Using parallel subagents, audit the packages under internal/ and report their status"
    ```
-   OpenCode spawns four concurrent subagents (`worker`, `researcher`, `explore`, `tester`). Instead of re-reading 25k tokens of repo rules (`AGENTS.md`) and tools sequentially (100k tokens of cold-start lag), `fak` warms the shared prefix once ($O(1)$ memory cloning). All four subagents decode co-batched in parallel with zero cold start.
-   Live split-pane telemetry displays real-time agent fanout and cache reuse:
-   ```
-   fak-turn ok prov=24.8k tok (88% of prompt) fak=0 tok cache=healthy_cache
-   [fak info] 4 active · 4 subagents · 4 in-flight · 88% x-agent reuse · 4.1× speedup
-   ```
+   OpenCode decides whether and how to delegate the prompt. `fak up` provides the local
+   serving, prefix-cache, and batching machinery for those requests. The live
+   OpenCode-to-native-engine proof remains tracked in [#12307](https://github.com/anthony-chaudhary/fak/issues/12307).
 
-3. Deterministic verification benchmark:
-   Measure the subagent fanout speedup directly on your host in seconds:
+3. Offline architecture simulation (`[SIMULATED]`):
+   Exercise the context-MMU shared-prefix fork and inspect the modeled fanout receipt:
    ```bash
    fak bench subagent --concurrency=4
    ```
-   Runs four co-batched subagents over a 30,000-token shared prefix, witnessing 18,000+ tokens/sec aggregate throughput and >95% cache hit rate with bit-exact logit parity (`cosine = 1.000000`).
+   This command defaults to `--simulated=true`. It forks a synthetic 30,000-token prefix
+   and models device timing, cache traffic, and logit similarity. It does not launch
+   OpenCode workers, load a model, or execute a native GPU batch. Check the receipt's
+   `Provenance: simulation` line. Physical runner attachment and the on-device campaign
+   remain tracked in [#12097](https://github.com/anthony-chaudhary/fak/issues/12097).
 
 > [!TIP]
 > New to subagents? Follow the [Subagents Guide](docs/subagents-guide.md) to launch `fak up` and run parallel cohorts with shared-prefix cache reuse.
