@@ -650,7 +650,7 @@ func (m *Model) metalQ6KWeight(name string, qt *kQuantTensor) *metalgemm.Q6KWeig
 			}
 		}
 	}
-	w := metalgemm.UploadQ6K(qt.raw, qt.out, qt.in)
+	w := metalgemm.UploadQ6KGoOwned(qt.raw, qt.out, qt.in)
 	tbl[name] = w
 	return w
 }
