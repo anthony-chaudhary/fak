@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -21,6 +23,95 @@ func snapshotSyncDrainSeams(t *testing.T) {
 	t.Cleanup(func() {
 		syncDrainWindow, syncDrainStranded, syncDrainFlush, syncDrainNow, syncCaptureSource = win, strand, flush, now, cap
 	})
+}
+
+func TestSyncDrainPrunesOnlyPublishedQueueEntries(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		published bool
+		queueKind string
+		wantCode  int
+		wantCount int
+	}{
+		{name: "published", published: true, queueKind: "published", wantCode: syncExitOK},
+		{name: "not published", queueKind: "local", wantCode: syncExitRefused, wantCount: 1},
+		{name: "ancestry indeterminate", queueKind: "unknown", wantCode: syncExitRefused, wantCount: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshotSyncDrainSeams(t)
+			repo := t.TempDir()
+			for _, args := range [][]string{
+				{"init", "-q", "-b", "main"}, {"config", "user.email", "test@example.com"}, {"config", "user.name", "Test"},
+			} {
+				if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+					t.Fatalf("git %v: %v: %s", args, err, out)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(repo, "file"), []byte("one"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			for _, args := range [][]string{{"add", "file"}, {"commit", "-q", "-m", "published"}} {
+				if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+					t.Fatalf("git %v: %v: %s", args, err, out)
+				}
+			}
+			publishedSHA, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out, err := exec.Command("git", "-C", repo, "update-ref", "refs/remotes/origin/main", string(bytes.TrimSpace(publishedSHA))).CombinedOutput(); err != nil {
+				t.Fatalf("update remote ref: %v: %s", err, out)
+			}
+			queueSHA := string(bytes.TrimSpace(publishedSHA))
+			if tc.queueKind == "local" {
+				if err := os.WriteFile(filepath.Join(repo, "file"), []byte("two"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				for _, args := range [][]string{{"add", "file"}, {"commit", "-q", "-m", "local"}} {
+					if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+						t.Fatalf("git %v: %v: %s", args, err, out)
+					}
+				}
+				localSHA, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+				if err != nil {
+					t.Fatal(err)
+				}
+				queueSHA = string(bytes.TrimSpace(localSHA))
+			} else if tc.queueKind == "unknown" {
+				queueSHA = "0123456789012345678901234567890123456789"
+			}
+			qp := filepath.Join(repo, "queue.json")
+			if err := saveSyncDrainQueue(qp, syncDrainQueue{Entries: []syncDrainEntry{{SHA: queueSHA, Subject: "already handled"}}, Attempts: 2}); err != nil {
+				t.Fatal(err)
+			}
+			windowCalls, flushCalls := 0, 0
+			syncDrainStranded = func(context.Context, syncDrainConfig) ([]syncDrainEntry, error) { return nil, nil }
+			syncDrainWindow = func(context.Context, syncDrainConfig) syncDrainWindowVerdict {
+				windowCalls++
+				return syncDrainWindowVerdict{Reason: "peer merge in flight: behind", PeerState: "behind"}
+			}
+			syncDrainFlush = func(context.Context, syncDrainConfig) (safesync.PushResult, error) {
+				flushCalls++
+				return safesync.PushResult{}, nil
+			}
+
+			var out, errb bytes.Buffer
+			code := runSyncDrain(&out, &errb, syncDrainConfig{repo: repo, remote: "origin", branch: "main", queuePath: qp, asJSON: true})
+			if code != tc.wantCode {
+				t.Fatalf("exit=%d want=%d stderr=%s", code, tc.wantCode, errb.String())
+			}
+			persisted, err := loadSyncDrainQueue(qp)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(persisted.Entries) != tc.wantCount {
+				t.Fatalf("persisted entries=%d want=%d", len(persisted.Entries), tc.wantCount)
+			}
+			if tc.published && (windowCalls != 0 || flushCalls != 0 || persisted.Attempts != 0) {
+				t.Fatalf("published-only queue read window=%d flush=%d persisted=%+v; want direct idle", windowCalls, flushCalls, persisted)
+			}
+		})
+	}
 }
 
 func decodeSyncDrainReport(t *testing.T, b []byte) syncDrainReport {
