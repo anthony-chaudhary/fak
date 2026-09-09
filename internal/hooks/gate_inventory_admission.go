@@ -19,8 +19,10 @@ import (
 
 const (
 	gateClearInventoryAdmissionName = "CLEAR_INVENTORY_ADMISSION"
-	inventoryModeEnv                = "FLEET_INVENTORY_GUARD"
-	inventoryEscapeEnv              = "ALLOW_UNINVENTORIED_STUB"
+	// ReasonClearInventoryRequired is the closed refusal token declared in dos.toml.
+	ReasonClearInventoryRequired = "CLEAR_INVENTORY_REQUIRED"
+	inventoryModeEnv             = "FLEET_INVENTORY_GUARD"
+	inventoryEscapeEnv           = "ALLOW_UNINVENTORIED_STUB"
 )
 
 var (
