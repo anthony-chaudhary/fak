@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -32,11 +33,56 @@ var richDashboardProbeClient = &http.Client{Timeout: richDashboardProbeTimeout}
 
 var dashboardDockerAvailable = dockerprocess.Available
 
-type richDashboardLink struct {
+type RichDashboardLink struct {
 	UID         string
 	Title       string
 	Description string
 	Category    string
+}
+
+type richDashboardLink = RichDashboardLink
+
+// ApplianceDashboardCatalog returns the canonical 6 dashboards provisioned by
+// AMD Strix Halo bare-metal appliances.
+func ApplianceDashboardCatalog() []RichDashboardLink {
+	return []RichDashboardLink{
+		{
+			UID:         "fak-strix-index",
+			Title:       "FAK Strix | Observability Index",
+			Description: "Master index, high-level KPIs, and full catalog navigation",
+			Category:    "appliance",
+		},
+		{
+			UID:         "fak-strix-appliance",
+			Title:       "FAK Strix | Appliance health",
+			Description: "Host CPU, 120GB UMA VRAM/GTT, DRM GPU, thermal/power sensors",
+			Category:    "appliance",
+		},
+		{
+			UID:         "fak-strix-serving",
+			Title:       "FAK Strix | Serving performance",
+			Description: "Model output token rates (tok/s), latency, request routes",
+			Category:    "appliance",
+		},
+		{
+			UID:         "fak-strix-cache",
+			Title:       "FAK Strix | Cache and recovery",
+			Description: "Radix KV prefix reuse, prompt token hits, uptime",
+			Category:    "appliance",
+		},
+		{
+			UID:         "fak-strix-cluster",
+			Title:       "FAK Strix | Multi-node cluster fleet",
+			Description: "Federated metrics, USB4 40G P2P latency, P/D TTFT/TPOT",
+			Category:    "appliance",
+		},
+		{
+			UID:         "fak-strix-agents",
+			Title:       "FAK Strix | Live Agent Instances & Guarded Harnesses",
+			Description: "Live agent supervision, capability floor verdicts, MMU cache reuse, two-tier governor",
+			Category:    "appliance",
+		},
+	}
 }
 
 var richDashboardLinks = []richDashboardLink{
@@ -94,19 +140,33 @@ type richDashboardManager struct {
 	stop            func(context.Context, richDashboardStack) error
 	probe           func(context.Context, string) error
 	startedAt       time.Time
+
+	links      []RichDashboardLink
+	uids       map[string]struct{}
+	defaultUID string
+
+	proxyGrafana bool
+	proxyPrefix  string
+	proxy        http.Handler
 }
 
 type richDashboardSnapshot struct {
 	State     string
 	Reason    string
 	URL       string
+	Key       string
 	StartedAt time.Time
 }
 
 type RichDashboardConfig struct {
-	BaseURL     string
-	ComposePath string
-	Disabled    bool
+	BaseURL            string
+	ComposePath        string
+	Disabled           bool
+	Catalog            []RichDashboardLink
+	DefaultUID         string
+	ApplianceProfile   bool
+	ProxyGrafana       bool
+	ProxyGrafanaPrefix string
 }
 
 type richDashboardStack struct {
@@ -127,6 +187,33 @@ func newRichDashboardManager(cfg RichDashboardConfig) *richDashboardManager {
 	m.start = startBundledGrafana
 	m.stop = stopBundledGrafana
 	m.probe = probeGrafana
+
+	var catalog []RichDashboardLink
+	var defaultUID string
+	if cfg.ApplianceProfile && len(cfg.Catalog) == 0 {
+		catalog = ApplianceDashboardCatalog()
+		defaultUID = "fak-strix-index"
+	} else if len(cfg.Catalog) > 0 {
+		catalog = cfg.Catalog
+		defaultUID = cfg.DefaultUID
+		if defaultUID == "" && len(catalog) > 0 {
+			defaultUID = catalog[0].UID
+		}
+	} else {
+		catalog = richDashboardLinks
+		defaultUID = richDashboardDefaultUID
+	}
+	if cfg.DefaultUID != "" {
+		defaultUID = cfg.DefaultUID
+	}
+	uids := make(map[string]struct{}, len(catalog))
+	for _, link := range catalog {
+		uids[link.UID] = struct{}{}
+	}
+	m.links = catalog
+	m.uids = uids
+	m.defaultUID = defaultUID
+
 	if cfg.Disabled {
 		m.state = "disabled"
 		m.reason = "Rich dashboards are disabled by explicit gateway configuration. The lightweight live dashboard remains available."
@@ -137,7 +224,66 @@ func newRichDashboardManager(cfg RichDashboardConfig) *richDashboardManager {
 			m.reason = "FAK_GRAFANA_URL must be an http(s) URL without credentials."
 		}
 	}
+	if cfg.ProxyGrafana {
+		m.proxyGrafana = true
+		prefix := strings.TrimSpace(cfg.ProxyGrafanaPrefix)
+		if prefix == "" {
+			prefix = "/grafana"
+		}
+		prefix = "/" + strings.Trim(prefix, "/")
+		m.proxyPrefix = prefix
+
+		targetStr := strings.TrimSpace(cfg.BaseURL)
+		if targetStr == "" {
+			targetStr = "http://127.0.0.1:3000"
+		}
+		targetURL, err := url.Parse(targetStr)
+		if err != nil || targetURL.Scheme == "" || targetURL.Host == "" {
+			targetURL, _ = url.Parse("http://127.0.0.1:3000")
+		}
+		m.proxy = newGrafanaReverseProxy(targetURL, prefix)
+	}
 	return m
+}
+
+func (m *richDashboardManager) catalog() []RichDashboardLink {
+	if m == nil || len(m.links) == 0 {
+		return append([]RichDashboardLink(nil), richDashboardLinks...)
+	}
+	return append([]RichDashboardLink(nil), m.links...)
+}
+
+func (m *richDashboardManager) getDefaultUID() string {
+	if m == nil || m.defaultUID == "" {
+		return richDashboardDefaultUID
+	}
+	return m.defaultUID
+}
+
+func (m *richDashboardManager) hasUID(uid string) bool {
+	if m == nil {
+		_, ok := richDashboardUIDs[uid]
+		return ok
+	}
+	_, ok := m.uids[uid]
+	return ok
+}
+
+func (m *richDashboardManager) destination(base, uid string) (string, error) {
+	if !m.hasUID(uid) {
+		return "", errors.New("unknown dashboard")
+	}
+	trimmed := strings.TrimSpace(base)
+	if strings.HasPrefix(trimmed, "/") && !strings.HasPrefix(trimmed, "//") {
+		cleanBase := strings.TrimRight(trimmed, "/")
+		return cleanBase + "/d/" + uid, nil
+	}
+	u, err := safeDashboardBaseURL(trimmed)
+	if err != nil {
+		return "", err
+	}
+	u.Path = strings.TrimRight(u.Path, "/") + "/d/" + uid
+	return u.String(), nil
 }
 
 func safeDashboardBaseURL(raw string) (*url.URL, error) {
@@ -440,12 +586,98 @@ func richDashboardDestination(base, uid string) (string, error) {
 	if _, ok := richDashboardUIDs[uid]; !ok {
 		return "", errors.New("unknown dashboard")
 	}
-	u, err := safeDashboardBaseURL(base)
+	trimmed := strings.TrimSpace(base)
+	if strings.HasPrefix(trimmed, "/") && !strings.HasPrefix(trimmed, "//") {
+		cleanBase := strings.TrimRight(trimmed, "/")
+		return cleanBase + "/d/" + uid, nil
+	}
+	u, err := safeDashboardBaseURL(trimmed)
 	if err != nil {
 		return "", err
 	}
 	u.Path = strings.TrimRight(u.Path, "/") + "/d/" + uid
 	return u.String(), nil
+}
+
+func isLoopbackHost(host string) bool {
+	h := stripPort(host)
+	h = strings.ToLower(h)
+	if h == "localhost" || h == "localhost." {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}
+
+func stripPort(host string) string {
+	h := strings.TrimSpace(host)
+	if sh, _, err := net.SplitHostPort(h); err == nil {
+		h = sh
+	}
+	h = strings.TrimPrefix(h, "[")
+	h = strings.TrimSuffix(h, "]")
+	return strings.TrimSpace(h)
+}
+
+func clientDashboardBaseURL(base string, r *http.Request) string {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = bundledGrafanaURL
+	}
+	u, err := url.Parse(base)
+	if err != nil {
+		return base
+	}
+	if !isLoopbackHost(stripPort(u.Host)) {
+		return strings.TrimRight(base, "/")
+	}
+	if r == nil || strings.TrimSpace(r.Host) == "" || isLoopbackHost(stripPort(r.Host)) {
+		return strings.TrimRight(base, "/")
+	}
+
+	clientHost := stripPort(r.Host)
+	if clientHost == "" {
+		return strings.TrimRight(base, "/")
+	}
+	if strings.Contains(clientHost, ":") && !strings.HasPrefix(clientHost, "[") {
+		clientHost = "[" + clientHost + "]"
+	}
+
+	port := u.Port()
+	if port == "" {
+		port = "3000"
+	}
+
+	scheme := "http"
+	if r.TLS != nil || (r.Header != nil && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")) {
+		scheme = "https"
+	}
+
+	path := strings.TrimRight(u.Path, "/")
+	target := fmt.Sprintf("%s://%s:%s%s", scheme, clientHost, port, path)
+	return strings.TrimRight(target, "/")
+}
+
+func (m *richDashboardManager) clientBaseURL(r *http.Request) string {
+	if m == nil {
+		return clientDashboardBaseURL("", r)
+	}
+	m.mu.Lock()
+	if m.proxyGrafana {
+		prefix := m.proxyPrefix
+		if prefix == "" {
+			prefix = "/grafana"
+		}
+		m.mu.Unlock()
+		return prefix
+	}
+	base := m.baseURL
+	m.mu.Unlock()
+	return clientDashboardBaseURL(base, r)
+}
+
+func clientBaseURL(base string, r *http.Request) string {
+	return clientDashboardBaseURL(base, r)
 }
 
 var richDashboardPage = template.Must(template.New("rich-dashboard").Parse(`<!doctype html>
@@ -454,10 +686,13 @@ var richDashboardPage = template.Must(template.New("rich-dashboard").Parse(`<!do
 <style>body{margin:0;background:#0b1020;color:#edf2ff;font:16px/1.5 system-ui,sans-serif}main{width:min(680px,calc(100% - 32px));margin:12vh auto;padding:28px;border:1px solid #2a3652;border-radius:16px;background:#141b2d}a{color:#8eb5ff}.state{color:#76e6c5;font-weight:700;text-transform:uppercase;letter-spacing:.08em}.error{color:#ffb4a8}</style></head>
 <body><main><div class="state {{if or (eq .State "unavailable") (eq .State "disabled")}}error{{end}}" role="status">{{.State}}</div><h1>Rich dashboards</h1>
 {{if eq .State "starting"}}<p>Checking for a healthy Grafana, then starting the bundled Compose stack on demand if needed. FAK does not start Docker Desktop.</p><p>A stack started by this gateway stops with the gateway; an already-healthy Grafana is adopted and left running. After a Docker or host restart, start Docker and the gateway, then click a rich dashboard again.</p>
-{{else}}<p>{{.Reason}}</p>{{end}}<p><a href="/">Return to the lightweight live dashboard</a></p></main></body></html>`))
+{{else}}<p>{{.Reason}}</p>{{end}}{{if eq .State "unavailable"}}<p>If connecting over an SSH tunnel, ensure both ports are forwarded: <code>ssh -L 8080:localhost:8080 -L 3000:localhost:3000 &lt;host&gt;</code></p>{{end}}<p><a href="/{{if .Key}}?key={{.Key}}{{end}}">Return to the lightweight live dashboard</a></p></main></body></html>`))
 
 func (s *Server) handleRichDashboard(w http.ResponseWriter, r *http.Request) bool {
 	if r.URL.Query().Get("dashboard") != "rich" {
+		return false
+	}
+	if s == nil || s.richDashboards == nil {
 		return false
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -467,15 +702,25 @@ func (s *Server) handleRichDashboard(w http.ResponseWriter, r *http.Request) boo
 	}
 	uid := strings.TrimSpace(r.URL.Query().Get("uid"))
 	if uid == "" {
-		uid = richDashboardDefaultUID
+		if s.richDashboards != nil {
+			uid = s.richDashboards.getDefaultUID()
+		} else {
+			uid = richDashboardDefaultUID
+		}
 	}
-	if _, ok := richDashboardUIDs[uid]; !ok {
+	if s.richDashboards != nil {
+		if !s.richDashboards.hasUID(uid) {
+			http.Error(w, "unknown rich dashboard", http.StatusBadRequest)
+			return true
+		}
+	} else if _, ok := richDashboardUIDs[uid]; !ok {
 		http.Error(w, "unknown rich dashboard", http.StatusBadRequest)
 		return true
 	}
 	snap := s.richDashboards.ensure()
 	if snap.State == "ready" {
-		destination, err := richDashboardDestination(snap.URL, uid)
+		clientBase := s.richDashboards.clientBaseURL(r)
+		destination, err := s.richDashboards.destination(clientBase, uid)
 		if err == nil {
 			recordDashboardAdoption("rich_ready")
 			http.Redirect(w, r, destination, http.StatusSeeOther)
@@ -490,6 +735,88 @@ func (s *Server) handleRichDashboard(w http.ResponseWriter, r *http.Request) boo
 	if r.Method == http.MethodHead {
 		return true
 	}
+	key := strings.TrimSpace(r.URL.Query().Get("key"))
+	if key == "" {
+		if cred, ok := gatewayCredential(r); ok {
+			key = strings.TrimSpace(cred)
+		}
+	}
+	snap.Key = key
 	_ = richDashboardPage.Execute(w, snap)
 	return true
+}
+
+func newGrafanaReverseProxy(target *url.URL, prefix string) *httputil.ReverseProxy {
+	cleanPrefix := "/" + strings.Trim(strings.TrimSpace(prefix), "/")
+	if cleanPrefix == "/" {
+		cleanPrefix = ""
+	}
+	director := func(req *http.Request) {
+		origHost := req.Host
+		if origHost == "" {
+			origHost = req.URL.Host
+		}
+		origProto := "http"
+		if req.TLS != nil || strings.EqualFold(req.Header.Get("X-Forwarded-Proto"), "https") {
+			origProto = "https"
+		}
+
+		req.URL.Scheme = target.Scheme
+		req.URL.Host = target.Host
+
+		// Strip prefix from Path
+		stripPath := req.URL.Path
+		if cleanPrefix != "" && strings.HasPrefix(stripPath, cleanPrefix) {
+			stripPath = strings.TrimPrefix(stripPath, cleanPrefix)
+		}
+		if !strings.HasPrefix(stripPath, "/") {
+			stripPath = "/" + stripPath
+		}
+		targetPath := strings.TrimRight(target.Path, "/")
+		req.URL.Path = targetPath + stripPath
+
+		// Strip prefix from RawPath
+		if req.URL.RawPath != "" {
+			stripRaw := req.URL.RawPath
+			if cleanPrefix != "" && strings.HasPrefix(stripRaw, cleanPrefix) {
+				stripRaw = strings.TrimPrefix(stripRaw, cleanPrefix)
+			}
+			if !strings.HasPrefix(stripRaw, "/") {
+				stripRaw = "/" + stripRaw
+			}
+			req.URL.RawPath = targetPath + stripRaw
+		} else {
+			req.URL.RawPath = ""
+		}
+
+		// Query parameters: preserve inbound query parameters, merging with target query if present
+		if target.RawQuery == "" {
+			// keep req.URL.RawQuery as is
+		} else if req.URL.RawQuery == "" {
+			req.URL.RawQuery = target.RawQuery
+		} else {
+			req.URL.RawQuery = target.RawQuery + "&" + req.URL.RawQuery
+		}
+
+		// Forwarded headers
+		if req.Header.Get("X-Forwarded-Host") == "" && origHost != "" {
+			req.Header.Set("X-Forwarded-Host", origHost)
+		}
+		if req.Header.Get("X-Forwarded-Proto") == "" {
+			req.Header.Set("X-Forwarded-Proto", origProto)
+		}
+		if cleanPrefix != "" {
+			req.Header.Set("X-Forwarded-Prefix", cleanPrefix)
+		}
+	}
+	return &httputil.ReverseProxy{
+		Director:      director,
+		FlushInterval: -1,
+	}
+}
+
+// NewGrafanaReverseProxy creates a reverse proxy for Grafana forwarding to target
+// and stripping prefix from request paths.
+func NewGrafanaReverseProxy(target *url.URL, prefix string) *httputil.ReverseProxy {
+	return newGrafanaReverseProxy(target, prefix)
 }
