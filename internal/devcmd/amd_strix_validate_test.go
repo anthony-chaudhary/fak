@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -113,6 +114,34 @@ func creditableAMDStrixReceipt(t *testing.T, opts amdgpu.StrixValidationOpts) *a
 	}
 	if !r.CreditEligible() {
 		t.Fatal("test receipt is not credit eligible")
+	}
+	return r
+}
+
+func noncreditFullMatrixLikeAMDStrixReceipt(t *testing.T, opts amdgpu.StrixValidationOpts) *amdgpu.StrixValidationReceipt {
+	t.Helper()
+	r := creditableAMDStrixReceipt(t, opts)
+	evidence := r.Subkernels[0].Evidence
+	r.Subkernels = append(r.Subkernels, amdgpu.StrixSubkernelResult{
+		Name:       "matmul_f32",
+		Status:     "PASS",
+		DurationUS: 1,
+		Iterations: 1,
+		ParityEvents: []amdgpu.StrixParityEvent{
+			amdgpu.NewCosineMaxAbsParityEvent("fak-native/vulkan", 1, true, 0.999995, 0.999900, 0.0012, 0.01),
+		},
+		Evidence: evidence,
+	})
+	r.SelectedCount, r.ExecutedCount = 2, 2
+	r.SelectedSubkernels, r.ExecutedSubkernels = 2, 2
+	manifest := sha256.Sum256([]byte("subkernel:argmax:" + evidence.CommandSHA256 + "\nsubkernel:matmul_f32:" + evidence.CommandSHA256 + "\n"))
+	r.Provenance.ExecutionManifestSHA256 = "sha256:" + hex.EncodeToString(manifest[:])
+	r.Digest, _ = r.ComputeDigest()
+	if err := r.Validate(); err != nil {
+		t.Fatalf("full-matrix-like evidence receipt is invalid: %v", err)
+	}
+	if r.CreditEligible() {
+		t.Fatal("full-matrix-like evidence receipt unexpectedly earned narrow promotion credit")
 	}
 	return r
 }
@@ -315,14 +344,16 @@ func TestRunAMDStrixValidateV1IsReadableButNonCreditInBothModes(t *testing.T) {
 	}{
 		{"json", []string{"--json", "--committed-only", "--subkernels=argmax", "--ablate=none"}},
 		{"human", []string{"--committed-only", "--subkernels=argmax", "--ablate=none"}},
+		{"evidence_json", []string{"--evidence-only", "--json", "--committed-only", "--subkernels=argmax", "--ablate=none"}},
+		{"evidence_human", []string{"--evidence-only", "--committed-only", "--subkernels=argmax", "--ablate=none"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			if code := RunAMDStrixValidate(&stdout, &stderr, tc.args); code != 1 {
 				t.Fatalf("exit=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 			}
-			if !strings.Contains(stderr.String(), "not eligible for current v2") {
-				t.Fatalf("missing non-credit reason: %s", stderr.String())
+			if !strings.Contains(stderr.String(), "not eligible for current v2") && !strings.Contains(stderr.String(), "not current physical Strix schema") {
+				t.Fatalf("missing current-v2 rejection reason: %s", stderr.String())
 			}
 		})
 	}
@@ -337,7 +368,7 @@ func TestRunAMDStrixValidateInvalidReceiptFailsBothOutputModes(t *testing.T) {
 		r.Digest = "sha256:tampered"
 		return r, nil
 	}
-	for _, args := range [][]string{{"--json", "--committed-only"}, {"--committed-only"}} {
+	for _, args := range [][]string{{"--json", "--committed-only"}, {"--committed-only"}, {"--evidence-only", "--json", "--committed-only"}, {"--evidence-only", "--committed-only"}} {
 		var stdout, stderr bytes.Buffer
 		if code := RunAMDStrixValidate(&stdout, &stderr, args); code != 1 || !strings.Contains(stderr.String(), "invariant validation failed") {
 			t.Fatalf("args=%v exit=%d stderr=%s", args, code, stderr.String())
@@ -358,11 +389,105 @@ func TestRunAMDStrixValidateRejectsResealedGitRefMismatchInBothModes(t *testing.
 		}
 		return r, nil
 	}
-	for _, args := range [][]string{{"--json", "--committed-only"}, {"--committed-only"}} {
+	for _, args := range [][]string{{"--json", "--committed-only"}, {"--committed-only"}, {"--evidence-only", "--json", "--committed-only"}, {"--evidence-only", "--committed-only"}} {
 		var stdout, stderr bytes.Buffer
 		if code := RunAMDStrixValidate(&stdout, &stderr, args); code != 1 || !strings.Contains(stderr.String(), "receipt GitRef") {
 			t.Fatalf("args=%v exit=%d stderr=%s", args, code, stderr.String())
 		}
+	}
+}
+
+func TestRunAMDStrixValidateEvidenceOnlyAcceptsValidNoncreditReceipt(t *testing.T) {
+	_, digest := stubAMDStrixCandidate(t, []byte("candidate"))
+	origRun := runStrixValidationFn
+	defer func() { runStrixValidationFn = origRun }()
+	runStrixValidationFn = func(_ context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+		return noncreditFullMatrixLikeAMDStrixReceipt(t, opts), nil
+	}
+
+	var strictOut, strictErr bytes.Buffer
+	if code := RunAMDStrixValidate(&strictOut, &strictErr, []string{"--json", "--committed-only"}); code != 1 {
+		t.Fatalf("strict exit=%d stderr=%s stdout=%s", code, strictErr.String(), strictOut.String())
+	}
+	if !strings.Contains(strictErr.String(), "not eligible for current v2 promotion credit") || !strings.Contains(strictOut.String(), `"promotion_credit_eligible": false`) {
+		t.Fatalf("strict mode did not fail closed with marker: stderr=%s stdout=%s", strictErr.String(), strictOut.String())
+	}
+
+	var jsonOut, jsonErr bytes.Buffer
+	if code := RunAMDStrixValidate(&jsonOut, &jsonErr, []string{"--evidence-only", "--json", "--committed-only"}); code != 0 {
+		t.Fatalf("evidence JSON exit=%d stderr=%s stdout=%s", code, jsonErr.String(), jsonOut.String())
+	}
+	var output struct {
+		amdgpu.StrixValidationReceipt
+		PromotionCreditEligible bool `json:"promotion_credit_eligible"`
+	}
+	decoder := json.NewDecoder(&jsonOut)
+	if err := decoder.Decode(&output); err != nil {
+		t.Fatalf("decode evidence JSON: %v\n%s", err, jsonOut.String())
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		t.Fatalf("evidence JSON has trailing data: err=%v trailing=%v", err, trailing)
+	}
+	if output.PromotionCreditEligible {
+		t.Fatal("full-matrix-like evidence was marked promotion-credit eligible")
+	}
+	if err := output.StrixValidationReceipt.Validate(); err != nil {
+		t.Fatalf("embedded receipt does not validate: %v", err)
+	}
+	if output.Schema != amdgpu.StrixValidationSchemaV2 || output.Provenance.GitTip != testStrixTip || output.Provenance.GitRef != digest || output.Provenance.SourceArchiveSHA256 != digest {
+		t.Fatalf("embedded receipt is not source-bound: schema=%q tip=%q git_ref=%q source=%q", output.Schema, output.Provenance.GitTip, output.Provenance.GitRef, output.Provenance.SourceArchiveSHA256)
+	}
+
+	var humanOut, humanErr bytes.Buffer
+	if code := RunAMDStrixValidate(&humanOut, &humanErr, []string{"--evidence-only", "--committed-only"}); code != 0 {
+		t.Fatalf("evidence human exit=%d stderr=%s stdout=%s", code, humanErr.String(), humanOut.String())
+	}
+	if !strings.Contains(humanOut.String(), "Verdict:     PASS (valid evidence; promotion non-credit)") || !strings.Contains(humanOut.String(), "promotion_credit_eligible: false") {
+		t.Fatalf("evidence human output lacks non-credit marker: %s", humanOut.String())
+	}
+}
+
+func TestRunAMDStrixValidateEvidenceOnlyRejectsRunErrorAndMarksFailure(t *testing.T) {
+	stubAMDStrixCandidate(t, []byte("candidate"))
+	origRun := runStrixValidationFn
+	defer func() { runStrixValidationFn = origRun }()
+	runStrixValidationFn = func(_ context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+		return noncreditFullMatrixLikeAMDStrixReceipt(t, opts), fmt.Errorf("transport completion failed")
+	}
+	var stdout, stderr bytes.Buffer
+	if code := RunAMDStrixValidate(&stdout, &stderr, []string{"--evidence-only", "--json", "--committed-only"}); code != 1 {
+		t.Fatalf("exit=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "transport completion failed") || !strings.Contains(stdout.String(), `"promotion_credit_eligible": false`) {
+		t.Fatalf("run failure was not preserved and marked non-credit: stderr=%s stdout=%s", stderr.String(), stdout.String())
+	}
+}
+
+func TestRunAMDStrixValidateEvidenceOnlyRejectsNonPassVerdicts(t *testing.T) {
+	stubAMDStrixCandidate(t, []byte("candidate"))
+	origRun := runStrixValidationFn
+	defer func() { runStrixValidationFn = origRun }()
+	for _, verdict := range []string{"FAIL", "SKIPPED"} {
+		t.Run(verdict, func(t *testing.T) {
+			runStrixValidationFn = func(_ context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+				r := creditableAMDStrixReceipt(t, opts)
+				r.Verdict = verdict
+				r.Verified = false
+				r.Digest, _ = r.ComputeDigest()
+				if err := r.Validate(); err != nil {
+					t.Fatalf("non-PASS fixture must be integrity-valid: %v", err)
+				}
+				return r, nil
+			}
+			var stdout, stderr bytes.Buffer
+			if code := RunAMDStrixValidate(&stdout, &stderr, []string{"--evidence-only", "--json", "--committed-only"}); code != 1 {
+				t.Fatalf("exit=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+			}
+			if !strings.Contains(stderr.String(), "is not PASS") || !strings.Contains(stdout.String(), `"promotion_credit_eligible": false`) {
+				t.Fatalf("non-PASS receipt was not rejected and marked non-credit: stderr=%s stdout=%s", stderr.String(), stdout.String())
+			}
+		})
 	}
 }
 
