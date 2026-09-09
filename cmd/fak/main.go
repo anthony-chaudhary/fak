@@ -276,8 +276,6 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		cmdCodex(args)
 	case "opencode":
 		cmdOpencode(args)
-	case "claude":
-		cmdClaude(args)
 	case "codex-mcp-health":
 		cmdCodexMCPHealth(args)
 	case "loop":
