@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -17,7 +18,21 @@ type AblationArmSpec struct {
 	Execute     func(ctx context.Context, target *StrixTarget) (StrixAblationResult, error)
 }
 
-var strixAblationCatalog = []struct{ name, dimension string }{{"cpu_vs_vulkan_gpu", "target"}, {"fused_vs_discrete_norm_matmul", "topology"}, {"quant_q4k_vs_q8_vs_f32", "quantization"}, {"quant_q2k_vs_q4k", "quantization"}, {"device_local_vs_host_visible", "residency"}, {"strided_vs_contiguized_f16_kv", "layout"}, {"prefill_sequence_vs_serial", "prefill"}, {"decode_resident_vs_host_fallback", "decode"}}
+const (
+	embeddingGatherAblationName   = "batched-copy"
+	embeddingGatherAblationSchema = "fak.strix.embedding-gather-ablation/v1"
+	embeddingGatherAblationEngine = "fak-native"
+	embeddingGatherBaselineArm    = "per-token-copy"
+)
+
+type strixAblationCatalogEntry struct{ name, dimension string }
+
+var strixAblationCatalog = []strixAblationCatalogEntry{{"cpu_vs_vulkan_gpu", "target"}, {"fused_vs_discrete_norm_matmul", "topology"}, {"quant_q4k_vs_q8_vs_f32", "quantization"}, {"quant_q2k_vs_q4k", "quantization"}, {"device_local_vs_host_visible", "residency"}, {"strided_vs_contiguized_f16_kv", "layout"}, {"prefill_sequence_vs_serial", "prefill"}, {"decode_resident_vs_host_fallback", "decode"}}
+
+// Opt-in ablations require a purpose-built structured event. Keeping them out
+// of the empty/default sweep avoids turning unrelated Strix validation into a
+// request for evidence its selected compute test cannot emit.
+var strixOptInAblationCatalog = []strixAblationCatalogEntry{{embeddingGatherAblationName, "embedding"}}
 
 func validateAblationSelectors(selected []string) (int, error) {
 	if len(selected) == 0 {
@@ -26,6 +41,10 @@ func validateAblationSelectors(selected []string) (int, error) {
 	sel := map[string]bool{}
 	known := map[string]bool{}
 	for _, a := range strixAblationCatalog {
+		known[a.name] = true
+		known[a.dimension] = true
+	}
+	for _, a := range strixOptInAblationCatalog {
 		known[a.name] = true
 		known[a.dimension] = true
 	}
@@ -43,6 +62,11 @@ func validateAblationSelectors(selected []string) (int, error) {
 	}
 	count := 0
 	for _, a := range strixAblationCatalog {
+		if sel[a.name] || sel[a.dimension] {
+			count++
+		}
+	}
+	for _, a := range strixOptInAblationCatalog {
 		if sel[a.name] || sel[a.dimension] {
 			count++
 		}
@@ -121,6 +145,12 @@ func RunStrixAblations(ctx context.Context, target *StrixTarget, selected []stri
 			Description: "Device-resident full attention & GDN decode vs host-roundtrip fallback on AMD Radeon 8060S Vulkan",
 			Execute:     runDecodeResidentAblation,
 		},
+		{
+			Name:        embeddingGatherAblationName,
+			Dimension:   "embedding",
+			Description: "Per-token embedding row copies vs one batched Vulkan multi-region copy",
+			Execute:     runEmbeddingGatherBatchedCopyAblation,
+		},
 	}
 
 	selectedMap := make(map[string]bool)
@@ -130,6 +160,9 @@ func RunStrixAblations(ctx context.Context, target *StrixTarget, selected []stri
 
 	results := make([]StrixAblationResult, 0, len(arms))
 	for _, arm := range arms {
+		if len(selected) == 0 && arm.Name == embeddingGatherAblationName {
+			continue
+		}
 		if len(selected) > 0 && !selectedMap[arm.Name] && !selectedMap[arm.Dimension] {
 			continue
 		}
@@ -355,6 +388,128 @@ func extractAblationMetrics(out string, feature string, baselineAliases, candida
 	}
 
 	return res, nil
+}
+
+type embeddingGatherAblationArm struct {
+	Name        string  `json:"name"`
+	SamplesUS   []int64 `json:"samples_us"`
+	Submissions *uint64 `json:"submissions"`
+	Bytes       *uint64 `json:"bytes"`
+}
+
+type embeddingGatherAblationEvent struct {
+	Schema        string                     `json:"schema"`
+	Feature       string                     `json:"feature"`
+	Selector      string                     `json:"selector"`
+	Engine        string                     `json:"engine"`
+	FallbackCount *int                       `json:"fallback_count"`
+	ExactParity   *bool                      `json:"exact_parity"`
+	BaselineArm   embeddingGatherAblationArm `json:"baseline_arm"`
+	CandidateArm  embeddingGatherAblationArm `json:"candidate_arm"`
+}
+
+func parseEmbeddingGatherAblationEvent(out string) (embeddingGatherAblationEvent, error) {
+	var event embeddingGatherAblationEvent
+	candidates := findJSONEventCandidates(out, embeddingGatherAblationSchema)
+	if len(candidates) != 1 {
+		return event, fmt.Errorf("amdgpu: expected exactly one %s event, found %d", embeddingGatherAblationSchema, len(candidates))
+	}
+	if err := json.Unmarshal([]byte(candidates[0]), &event); err != nil {
+		return event, fmt.Errorf("amdgpu: malformed embedding gather ablation event: %w", err)
+	}
+	if event.Schema != embeddingGatherAblationSchema || event.Feature != embeddingGatherAblationName || event.Selector != embeddingGatherSelector {
+		return event, fmt.Errorf("amdgpu: embedding gather ablation identity mismatch (schema=%q feature=%q selector=%q)", event.Schema, event.Feature, event.Selector)
+	}
+	if event.Engine != embeddingGatherAblationEngine {
+		return event, fmt.Errorf("amdgpu: embedding gather ablation requires engine=%q, got %q", embeddingGatherAblationEngine, event.Engine)
+	}
+	if event.FallbackCount == nil || *event.FallbackCount != 0 {
+		return event, fmt.Errorf("amdgpu: embedding gather ablation requires explicit fallback_count=0")
+	}
+	if event.ExactParity == nil || !*event.ExactParity {
+		return event, fmt.Errorf("amdgpu: embedding gather ablation requires explicit exact_parity=true")
+	}
+	if event.BaselineArm.Name != embeddingGatherBaselineArm || event.CandidateArm.Name != embeddingGatherAblationName {
+		return event, fmt.Errorf("amdgpu: embedding gather ablation arm mismatch (baseline=%q candidate=%q)", event.BaselineArm.Name, event.CandidateArm.Name)
+	}
+	if len(event.BaselineArm.SamplesUS) < 5 || len(event.CandidateArm.SamplesUS) < 5 || len(event.BaselineArm.SamplesUS) != len(event.CandidateArm.SamplesUS) {
+		return event, fmt.Errorf("amdgpu: embedding gather ablation requires at least five paired samples per arm (baseline=%d candidate=%d)", len(event.BaselineArm.SamplesUS), len(event.CandidateArm.SamplesUS))
+	}
+	for armName, samples := range map[string][]int64{
+		event.BaselineArm.Name:  event.BaselineArm.SamplesUS,
+		event.CandidateArm.Name: event.CandidateArm.SamplesUS,
+	} {
+		for _, sample := range samples {
+			if sample <= 0 {
+				return event, fmt.Errorf("amdgpu: embedding gather ablation arm %q contains non-positive latency", armName)
+			}
+		}
+	}
+	if event.BaselineArm.Submissions == nil || event.CandidateArm.Submissions == nil ||
+		*event.BaselineArm.Submissions == 0 || *event.CandidateArm.Submissions == 0 ||
+		*event.BaselineArm.Submissions <= *event.CandidateArm.Submissions {
+		return event, fmt.Errorf("amdgpu: embedding gather ablation requires explicit reduced non-zero submissions")
+	}
+	if event.BaselineArm.Bytes == nil || event.CandidateArm.Bytes == nil ||
+		*event.BaselineArm.Bytes == 0 || *event.CandidateArm.Bytes == 0 ||
+		*event.BaselineArm.Bytes != *event.CandidateArm.Bytes {
+		return event, fmt.Errorf("amdgpu: embedding gather ablation requires explicit equal non-zero transferred bytes")
+	}
+	return event, nil
+}
+
+func medianEmbeddingGatherLatency(samples []int64) int64 {
+	ordered := append([]int64(nil), samples...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i] < ordered[j] })
+	mid := len(ordered) / 2
+	if len(ordered)%2 != 0 {
+		return ordered[mid]
+	}
+	return ordered[mid-1] + (ordered[mid]-ordered[mid-1])/2
+}
+
+func runEmbeddingGatherBatchedCopyAblation(ctx context.Context, target *StrixTarget) (StrixAblationResult, error) {
+	fail := func(err error) (StrixAblationResult, error) {
+		return StrixAblationResult{Dimension: "embedding", Feature: embeddingGatherAblationName, Verdict: "REGRESSION"}, err
+	}
+	out, dur, err := executeStrixAblationCommandFn(ctx, target, "FAK_VULKAN_EMBEDDING_GATHER_ABLATION=1", "^"+embeddingGatherTestName+"$")
+	if err != nil || !strings.Contains(out, "PASS") {
+		return fail(fmt.Errorf("embedding gather ablation execution failed: %v\n%s", err, truncateOutput(out, 200)))
+	}
+	if _, err := ParseStrixSubkernelParity(out, embeddingGatherSelector); err != nil {
+		return fail(fmt.Errorf("embedding gather ablation parity event rejected: %w", err))
+	}
+	event, err := parseEmbeddingGatherAblationEvent(out)
+	if err != nil {
+		return fail(err)
+	}
+	baselineUS := medianEmbeddingGatherLatency(event.BaselineArm.SamplesUS)
+	candidateUS := medianEmbeddingGatherLatency(event.CandidateArm.SamplesUS)
+	speedup := float64(baselineUS) / float64(candidateUS)
+	verdict := "REGRESSION"
+	if speedup >= 1.05 {
+		verdict = "VERIFIED_LIFT"
+	} else if speedup >= .99 {
+		verdict = "PARITY_MATCH"
+	}
+	return completeAblationEvidence(ctx, target, out, dur, StrixAblationResult{
+		Dimension: "embedding",
+		Feature:   embeddingGatherAblationName,
+		BaselineArm: StrixArmResult{
+			Name:      event.BaselineArm.Name,
+			LatencyUS: baselineUS,
+			Samples:   len(event.BaselineArm.SamplesUS),
+		},
+		CandidateArm: StrixArmResult{
+			Name:      event.CandidateArm.Name,
+			LatencyUS: candidateUS,
+			Samples:   len(event.CandidateArm.SamplesUS),
+		},
+		Speedup:      speedup,
+		LiftRatio:    speedup,
+		CosineParity: 1,
+		Verdict:      verdict,
+	}), nil
 }
 
 // 1. Target Arm: CPU Reference vs Vulkan GPU on Q4_K GEMV

@@ -15,6 +15,8 @@ import (
 const (
 	StrixSubkernelParitySchema = "fak.strix.subkernel-parity/v1"
 	StrixVulkanEngine          = "fak-native/vulkan"
+	embeddingGatherSelector    = "qwen35-embedding-gather"
+	embeddingGatherTestName    = "TestQwen35VulkanEmbeddingGatherOneDispatch"
 )
 
 // Closed oracle kind vocabulary
@@ -449,6 +451,17 @@ var DefaultSubkernelParityContracts = map[string]SubkernelParityContract{
 			RequireFinite: true,
 		},
 	},
+	embeddingGatherSelector: {
+		Selector:       embeddingGatherSelector,
+		TestName:       embeddingGatherTestName,
+		OracleKind:     OracleMaxAbs,
+		Engine:         StrixVulkanEngine,
+		DeviceObserved: true,
+		Bounds: SubkernelParityBounds{
+			MaxAbsDelta:   floatPtr(0),
+			RequireFinite: true,
+		},
+	},
 	"f16_kv_contiguize": {
 		Selector:       "f16_kv_contiguize",
 		TestName:       "TestRADVContiguizeShader",
@@ -595,6 +608,12 @@ var DefaultSubkernelSpecs = []SubkernelSpec{
 		Description: "Whole-sequence Qwen3.5 hybrid prefill on Vulkan",
 		TestPattern: "^TestVulkanQwen35SequenceQuantizedPanelsMatchCPU$",
 		Category:    "prefill",
+	},
+	{
+		Name:        embeddingGatherSelector,
+		Description: "Qwen3.5 resident embedding-table row gather using one Vulkan multi-region copy",
+		TestPattern: "^" + embeddingGatherTestName + "$",
+		Category:    "embedding",
 	},
 	{
 		Name:        "f16_kv_contiguize",
@@ -901,19 +920,25 @@ func executionEvidenceFromOutput(out string, sb SourceBinding) StrixExecutionEvi
 
 // findParityEventCandidates scans output for candidate subkernel parity JSON blocks.
 func findParityEventCandidates(output string) []string {
+	return findJSONEventCandidates(output, "subkernel-parity")
+}
+
+// findJSONEventCandidates extracts balanced JSON objects containing token from
+// noisy `go test -v` output. Callers remain responsible for schema and semantic
+// validation; this helper only preserves the complete structured envelope.
+func findJSONEventCandidates(output, token string) []string {
 	var candidates []string
-	schemaToken := "subkernel-parity"
 	idx := 0
 	for {
-		pos := strings.Index(output[idx:], schemaToken)
+		pos := strings.Index(output[idx:], token)
 		if pos == -1 {
 			break
 		}
-		schemaIdx := idx + pos
+		tokenIdx := idx + pos
 
 		// Scan backward to find the opening '{'
 		openBrace := -1
-		for i := schemaIdx; i >= idx; i-- {
+		for i := tokenIdx; i >= idx; i-- {
 			if output[i] == '{' {
 				openBrace = i
 				break
@@ -921,8 +946,8 @@ func findParityEventCandidates(output string) []string {
 		}
 
 		if openBrace == -1 {
-			candidates = append(candidates, output[schemaIdx:schemaIdx+len(schemaToken)])
-			idx = schemaIdx + len(schemaToken)
+			candidates = append(candidates, output[tokenIdx:tokenIdx+len(token)])
+			idx = tokenIdx + len(token)
 			continue
 		}
 
