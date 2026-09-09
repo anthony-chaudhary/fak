@@ -9,24 +9,211 @@ import (
 )
 
 type mockMTPRecorder struct {
-	records   int
-	commits   int
-	rollbacks int
+	records     int
+	commits     int
+	rollbacks   int
+	recordErr   error
+	commitErr   error
+	rollbackErr error
 }
 
 func (m *mockMTPRecorder) RecordMTPDraft(sessionID string, tokens []int32) error {
 	m.records++
-	return nil
+	return m.recordErr
 }
 
 func (m *mockMTPRecorder) CommitMTPDraft(sessionID string, accepted int) (int, int, error) {
 	m.commits++
-	return accepted, 0, nil
+	return accepted, 0, m.commitErr
 }
 
 func (m *mockMTPRecorder) RollbackMTPDraft(sessionID string) (int, error) {
 	m.rollbacks++
-	return 0, nil
+	return 0, m.rollbackErr
+}
+
+type faultMetalMTPSnapshot struct {
+	base            metalMTPTargetSnapshot
+	cloneErr        error
+	restoreErr      error
+	cloneRestoreErr error
+}
+
+func (s *faultMetalMTPSnapshot) Clone() (metalMTPTargetSnapshot, error) {
+	if s.cloneErr != nil {
+		return nil, s.cloneErr
+	}
+	clone, err := s.base.Clone()
+	if err != nil {
+		return nil, err
+	}
+	return &faultMetalMTPSnapshot{base: clone, restoreErr: s.cloneRestoreErr}, nil
+}
+
+func (s *faultMetalMTPSnapshot) Restore(target *Session) error {
+	if err := s.base.Restore(target); err != nil {
+		return err
+	}
+	return s.restoreErr
+}
+
+func (s *faultMetalMTPSnapshot) Close() { s.base.Close() }
+
+func hasMetalMTPCheckpointOperation(err error, operation MetalMTPCheckpointOperation) bool {
+	if err == nil {
+		return false
+	}
+	if checkpointErr, ok := err.(*MetalMTPCheckpointError); ok && checkpointErr.Operation == operation {
+		return true
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, nested := range joined.Unwrap() {
+			if hasMetalMTPCheckpointOperation(nested, operation) {
+				return true
+			}
+		}
+		return false
+	}
+	return hasMetalMTPCheckpointOperation(errors.Unwrap(err), operation)
+}
+
+func hasMetalMTPSnapshotOperation(err error, operation MetalMTPSnapshotOperation) bool {
+	if err == nil {
+		return false
+	}
+	if snapshotErr, ok := err.(*MetalMTPSnapshotError); ok && snapshotErr.Operation == operation {
+		return true
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, nested := range joined.Unwrap() {
+			if hasMetalMTPSnapshotOperation(nested, operation) {
+				return true
+			}
+		}
+		return false
+	}
+	return hasMetalMTPSnapshotOperation(errors.Unwrap(err), operation)
+}
+
+func assertMetalMTPTargetRestored(t *testing.T, target *Session, wantCache *KVCache, wantHidden [][]float32, wantHiddenTokens []int) {
+	t.Helper()
+	assertKVCacheUnchanged(t, "Metal MTP failed round", wantCache, target.Cache)
+	target.targetHiddenMu.RLock()
+	defer target.targetHiddenMu.RUnlock()
+	if !reflect.DeepEqual(target.targetHidden, wantHidden) || !reflect.DeepEqual(target.targetHiddenTokens, wantHiddenTokens) {
+		t.Fatalf("Metal MTP failed round leaked target hidden state: hidden=%d/%d tokens=%v/%v",
+			len(target.targetHidden), len(wantHidden), target.targetHiddenTokens, wantHiddenTokens)
+	}
+}
+
+func newMetalMTPFailureRound(t *testing.T) (*MetalMTPCoordinator, *Session, []int, []float32, *KVCache, [][]float32, []int) {
+	t.Helper()
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	target := m.NewSession()
+	t.Cleanup(target.Close)
+	prompt := []int{0, 1, 2}
+	boundary := target.Prefill(prompt)
+	wantCache := target.Cache.Clone()
+	target.targetHiddenMu.RLock()
+	wantHidden := cloneTargetHidden(target.targetHidden)
+	wantHiddenTokens := append([]int(nil), target.targetHiddenTokens...)
+	target.targetHiddenMu.RUnlock()
+
+	coord, err := target.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
+	if err != nil {
+		t.Fatalf("NewMetalMTPCoordinator failed: %v", err)
+	}
+	t.Cleanup(func() { _ = coord.Close() })
+	first := (argmaxF32(boundary) + 1) % m.Cfg.VocabSize
+	second := (first + 1) % m.Cfg.VocabSize
+	coord.SetDrafter(NewMTPProposalGeneratorWithFn(func(context.Context, []int, int) ([]int, error) {
+		return []int{first, second}, nil
+	}))
+	return coord, target, prompt, boundary, wantCache, wantHidden, wantHiddenTokens
+}
+
+func TestMetalMTPCheckpointFailuresFailClosed(t *testing.T) {
+	recordErr := errors.New("sentinel record failure")
+	commitErr := errors.New("sentinel commit failure")
+	rollbackErr := errors.New("sentinel rollback failure")
+
+	tests := []struct {
+		name      string
+		recorder  *mockMTPRecorder
+		want      error
+		operation MetalMTPCheckpointOperation
+	}{
+		{name: "record", recorder: &mockMTPRecorder{recordErr: recordErr}, want: recordErr, operation: MetalMTPCheckpointRecord},
+		{name: "commit", recorder: &mockMTPRecorder{commitErr: commitErr}, want: commitErr, operation: MetalMTPCheckpointCommit},
+		{name: "rollback", recorder: &mockMTPRecorder{recordErr: recordErr, rollbackErr: rollbackErr}, want: rollbackErr, operation: MetalMTPCheckpointRollback},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			coord, target, prompt, boundary, wantCache, wantHidden, wantHiddenTokens := newMetalMTPFailureRound(t)
+			coord.SetMMU(tt.recorder, "fail-closed-session")
+
+			_, _, _, err := coord.StepRound(context.Background(), prompt, boundary)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("StepRound error = %v, want sentinel %v", err, tt.want)
+			}
+			if !hasMetalMTPCheckpointOperation(err, tt.operation) {
+				t.Fatalf("StepRound error = %v, want typed checkpoint operation %q", err, tt.operation)
+			}
+			assertMetalMTPTargetRestored(t, target, wantCache, wantHidden, wantHiddenTokens)
+		})
+	}
+}
+
+func TestMetalMTPSnapshotFailuresFailClosed(t *testing.T) {
+	cloneErr := errors.New("sentinel snapshot clone failure")
+	restoreErr := errors.New("sentinel snapshot restore failure")
+
+	tests := []struct {
+		name      string
+		want      error
+		operation MetalMTPSnapshotOperation
+		wrap      func(metalMTPTargetSnapshot) metalMTPTargetSnapshot
+	}{
+		{
+			name:      "clone",
+			want:      cloneErr,
+			operation: MetalMTPSnapshotClone,
+			wrap: func(base metalMTPTargetSnapshot) metalMTPTargetSnapshot {
+				return &faultMetalMTPSnapshot{base: base, cloneErr: cloneErr}
+			},
+		},
+		{
+			name:      "restore",
+			want:      restoreErr,
+			operation: MetalMTPSnapshotRestore,
+			wrap: func(base metalMTPTargetSnapshot) metalMTPTargetSnapshot {
+				return &faultMetalMTPSnapshot{base: base, cloneRestoreErr: restoreErr}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			coord, target, prompt, boundary, wantCache, wantHidden, wantHiddenTokens := newMetalMTPFailureRound(t)
+			coord.captureTarget = func(target *Session) (metalMTPTargetSnapshot, error) {
+				base, err := captureMetalMTPTargetSnapshot(target)
+				if err != nil {
+					return nil, err
+				}
+				return tt.wrap(base), nil
+			}
+
+			_, _, _, err := coord.StepRound(context.Background(), prompt, boundary)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("StepRound error = %v, want sentinel %v", err, tt.want)
+			}
+			if !hasMetalMTPSnapshotOperation(err, tt.operation) {
+				t.Fatalf("StepRound error = %v, want typed snapshot operation %q", err, tt.operation)
+			}
+			assertMetalMTPTargetRestored(t, target, wantCache, wantHidden, wantHiddenTokens)
+		})
+	}
 }
 
 // TestMetalMTPDraftVerifyRollbackLoop is the comprehensive witness test for Issue #12238:

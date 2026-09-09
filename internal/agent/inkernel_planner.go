@@ -28,6 +28,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
@@ -177,6 +178,7 @@ type InKernelPlanner struct {
 	speculativeEngine *model.SpeculativeEngine
 	specDraftDepth    int
 
+	metalMTPMu          sync.Mutex
 	metalMTPCoordinator *model.MetalMTPCoordinator
 	mtpCanaryMu         sync.RWMutex
 	mtpCanaryManager    *model.Qwen38MTPCanaryManager
@@ -1030,6 +1032,8 @@ func (p *InKernelPlanner) generateReusedMetalMTP(
 	if err = ctx.Err(); err != nil {
 		return inKernelGenerateResult{}, err
 	}
+	p.metalMTPMu.Lock()
+	defer p.metalMTPMu.Unlock()
 
 	reuse := p.tree != nil && inKernelPlannerPrefixReuseSupported(p.m, p.backend)
 	var s *model.Session
@@ -1105,6 +1109,13 @@ func (p *InKernelPlanner) generateReusedMetalMTP(
 	td := time.Now()
 	coord := p.metalMTPCoordinator
 	coord.SetTargetSession(s)
+	checkpointMgr := ctxmmu.NewCheckpointManager(nil, nil, nil, nil)
+	const sessionID = "metal-mtp"
+	if _, checkpointErr := checkpointMgr.SaveInPlaceCheckpoint(sessionID); checkpointErr != nil {
+		return inKernelGenerateResult{}, fmt.Errorf("agent: initialize Metal MTP checkpoint %q: %w", sessionID, checkpointErr)
+	}
+	coord.SetMMU(checkpointMgr, sessionID)
+	defer coord.SetMMU(nil, "")
 
 	// Enforce greedy temperature-zero tripwire
 	if tripErr := coord.CheckSamplingTripwire(temp, freqPenalty); tripErr != nil {
