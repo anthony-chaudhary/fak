@@ -3,18 +3,23 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/rawdecode"
@@ -27,6 +32,244 @@ func setRawDecodeExecutableProvenanceForTest(t *testing.T, observed rawDecodeExe
 		return observed, err
 	}
 	t.Cleanup(func() { observeRawDecodeExecutableProvenance = previous })
+}
+
+// This tiny native model is a receipt-mapping fixture, not quality or hardware evidence.
+func rawDecodeOutputTextFixture(t *testing.T, tokens, merges []string) rawdecode.Request {
+	t.Helper()
+	var b bytes.Buffer
+	write := func(value any) {
+		t.Helper()
+		if err := binary.Write(&b, binary.LittleEndian, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	str := func(value string) { write(uint64(len(value))); b.WriteString(value) }
+	tensors := []struct {
+		name string
+		dims []uint64
+	}{
+		{"token_embd.weight", []uint64{32, 3}},
+		{"output_norm.weight", []uint64{32}},
+		{"output.weight", []uint64{32, 3}},
+		{"blk.0.attn_norm.weight", []uint64{32}},
+		{"blk.0.attn_q.weight", []uint64{32, 32}},
+		{"blk.0.attn_k.weight", []uint64{32, 32}},
+		{"blk.0.attn_v.weight", []uint64{32, 32}},
+		{"blk.0.attn_output.weight", []uint64{32, 32}},
+		{"blk.0.ffn_norm.weight", []uint64{32}},
+		{"blk.0.ffn_gate.weight", []uint64{32, 32}},
+		{"blk.0.ffn_up.weight", []uint64{32, 32}},
+		{"blk.0.ffn_down.weight", []uint64{32, 32}},
+	}
+	b.WriteString(ggufload.Magic)
+	write(uint32(ggufload.Version))
+	write(uint64(len(tensors)))
+	write(uint64(10))
+	for _, kv := range []struct{ key, value string }{{"general.architecture", "qwen2"}, {"tokenizer.ggml.pre", "qwen2"}} {
+		str(kv.key)
+		write(uint32(ggufload.TypeString))
+		str(kv.value)
+	}
+	for _, kv := range []struct {
+		key   string
+		value uint32
+	}{{"qwen2.embedding_length", 32}, {"qwen2.block_count", 1}, {"qwen2.attention.head_count", 1}, {"qwen2.feed_forward_length", 32}} {
+		str(kv.key)
+		write(uint32(ggufload.TypeUint32))
+		write(kv.value)
+	}
+	for _, kv := range []struct {
+		key    string
+		values []string
+	}{{"tokenizer.ggml.tokens", tokens}, {"tokenizer.ggml.merges", merges}} {
+		str(kv.key)
+		write(uint32(ggufload.TypeArray))
+		write(uint32(ggufload.TypeString))
+		write(uint64(len(kv.values)))
+		for _, value := range kv.values {
+			str(value)
+		}
+	}
+	for _, kv := range []struct {
+		key   string
+		value float32
+	}{{"qwen2.attention.layer_norm_rms_epsilon", 1e-5}, {"qwen2.rope.freq_base", 10000}} {
+		str(kv.key)
+		write(uint32(ggufload.TypeFloat32))
+		write(kv.value)
+	}
+	var offset uint64
+	for _, tensor := range tensors {
+		str(tensor.name)
+		write(uint32(len(tensor.dims)))
+		elements := uint64(1)
+		for _, dim := range tensor.dims {
+			write(dim)
+			elements *= dim
+		}
+		write(uint32(ggufload.TensorF32))
+		write(offset)
+		offset += elements * 4
+	}
+	for b.Len()%32 != 0 {
+		b.WriteByte(0)
+	}
+	for _, tensor := range tensors {
+		elements := uint64(1)
+		for _, dim := range tensor.dims {
+			elements *= dim
+		}
+		for i := uint64(0); i < elements; i++ {
+			value := float32(0)
+			if tensor.name == "token_embd.weight" || strings.Contains(tensor.name, "norm.weight") {
+				value = 1
+			}
+			if tensor.name == "output.weight" {
+				value = float32(i / 32)
+			}
+			write(value)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "output-text.gguf")
+	if err := os.WriteFile(path, b.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return rawdecode.Request{ArtifactPath: path, ExpectedArtifactSHA256: fmt.Sprintf("%x", sha256.Sum256(b.Bytes())),
+		BackendName: "cpu-ref", PromptTokenIDs: []int{0}, ContextLimit: 2, GeneratedTokenLimit: 1, Repetitions: 2, IgnoreEOS: true}
+}
+
+// Alter only final native CPU logits to witness individually sealed but unstable
+// repetitions. This is deliberately not a numerical-parity or performance claim.
+type rawDecodeOutputSequenceBackend struct {
+	compute.Backend
+	ids   []int
+	reads int
+}
+
+func (b *rawDecodeOutputSequenceBackend) Read(tensor compute.Tensor) []float32 {
+	out := b.Backend.Read(tensor)
+	if len(out) == 3 && len(b.ids) > 0 {
+		out = make([]float32, 3)
+		out[b.ids[b.reads%len(b.ids)]] = 1
+		b.reads++
+	}
+	return out
+}
+
+func TestRawDecodePhysicalReceiptMapsOnlyStableObservedOutputText(t *testing.T) {
+	setRawDecodeExecutableProvenanceForTest(t, rawDecodeExecutableProvenance{}, errors.New("unavailable"))
+	t.Setenv("FAK_GGUF_MMAP", "0")
+	t.Setenv("FAK_PAGED_KV", "0")
+	base, ok := compute.Lookup("cpu-ref")
+	if !ok {
+		t.Fatal("missing native CPU backend")
+	}
+	backend := &rawDecodeOutputSequenceBackend{Backend: base}
+	compute.Register(backend)
+	t.Cleanup(func() { compute.Register(base) })
+	run := func(t *testing.T, req rawdecode.Request) rawdecode.Execution {
+		t.Helper()
+		backend.reads = 0
+		execution, err := rawdecode.Execute(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return execution
+	}
+	assertNoCredit := func(t *testing.T, got rawDecodePhysicalReceiptAttempt, text string) {
+		t.Helper()
+		if got.Status != "UNAVAILABLE" || got.CreditEligible || got.Receipt != nil || got.Observed.OutputText != text {
+			t.Fatalf("want non-creditable text %q, got status=%s credit=%v receipt=%v text=%q reason=%s", text, got.Status, got.CreditEligible, got.Receipt != nil, got.Observed.OutputText, got.Reason)
+		}
+	}
+	req := rawDecodeOutputTextFixture(t, []string{"a", "b", "ab"}, []string{"a b"})
+	execution := run(t, req)
+	for i := range execution.Runs {
+		observation, ok := execution.OutputTextObservation(i)
+		text, textOK := observation.Text()
+		if !ok || !textOK || text != "ab" {
+			t.Fatalf("fixture repetition %d lacks real output authority: %q", i, text)
+		}
+		text = "caller replacement"
+		again, _ := observation.Text()
+		if again != "ab" {
+			t.Fatalf("text accessor aliases caller value %q", text)
+		}
+	}
+	t.Run("stable-real-output", func(t *testing.T) {
+		got := rawDecodePhysicalReceipt(execution)
+		assertNoCredit(t, got, "ab")
+		if !slices.Equal(got.Observed.OutputTokenIDs, []int32{2}) || len(got.Observed.Runs) != 2 {
+			t.Fatal("canonical token/repetition mapping missing")
+		}
+		for _, repetition := range got.Observed.Runs {
+			if !slices.Equal(repetition.OutputTokenIDs, got.Observed.OutputTokenIDs) {
+				t.Fatal("report IDs drifted")
+			}
+		}
+		got.Observed.OutputTokenIDs[0] = 0
+		got.Observed.Runs[0].OutputTokenIDs[0] = 0
+		legacy := rawDecodeRepOutputs(execution)
+		legacy[0].generatedTokens[0] = 0
+		assertNoCredit(t, rawDecodePhysicalReceipt(execution, legacy), "ab")
+	})
+	other := run(t, req)
+	for name, mutate := range map[string]func(*rawdecode.Execution){
+		"public-token":     func(e *rawdecode.Execution) { e.Runs[0].GeneratedTokens[0] = 1 },
+		"public-prefill":   func(e *rawdecode.Execution) { e.Runs[0].PrefillOutputID = 1 },
+		"request-binding":  func(e *rawdecode.Execution) { e.ContextLimit++ },
+		"artifact-binding": func(e *rawdecode.Execution) { e.ArtifactSHA256 = strings.Repeat("a", 64) },
+		"model-binding":    func(e *rawdecode.Execution) { e.ModelConfig.RopeTheta++ },
+		"repetition-count": func(e *rawdecode.Execution) { e.Runs = e.Runs[:1] },
+		"permutation":      func(e *rawdecode.Execution) { e.Runs[0], e.Runs[1] = e.Runs[1], e.Runs[0] },
+		"transplant":       func(e *rawdecode.Execution) { e.Runs[0] = other.Runs[0] },
+		"constructed":      func(e *rawdecode.Execution) { e.Runs[0] = rawdecode.Run{GeneratedTokens: []int{2}, PrefillOutputID: 2} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := run(t, req)
+			mutate(&candidate)
+			assertNoCredit(t, rawDecodePhysicalReceipt(candidate), "")
+		})
+	}
+	for _, tc := range []struct {
+		name           string
+		tokens, merges []string
+	}{
+		{"missing-tokenizer", []string{"a", "b", "ab"}, nil},
+		{"empty-token", []string{"a", "b", ""}, []string{"a b"}},
+		{"invalid-utf8", []string{"a", "b", "ÿ"}, []string{"a b"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := run(t, rawDecodeOutputTextFixture(t, tc.tokens, tc.merges))
+			if _, ok := candidate.OutputTextObservation(0); ok {
+				t.Fatal("malformed fixture unexpectedly has text authority")
+			}
+			assertNoCredit(t, rawDecodePhysicalReceipt(candidate), "")
+		})
+	}
+	for _, tc := range []struct {
+		name     string
+		tokens   []string
+		wantText []string
+	}{
+		{"unstable-text", []string{"a", "b", "ab"}, []string{"b", "ab"}},
+		{"same-text-different-ids", []string{"a", "b", "b"}, []string{"b", "b"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend.ids = []int{1, 2}
+			defer func() { backend.ids = nil }()
+			candidate := run(t, rawDecodeOutputTextFixture(t, tc.tokens, []string{"a b"}))
+			for i := range candidate.Runs {
+				observation, ok := candidate.OutputTextObservation(i)
+				text, textOK := observation.Text()
+				if !ok || !textOK || text != tc.wantText[i] || !slices.Equal(candidate.Runs[i].GeneratedTokens, []int{i + 1}) {
+					t.Fatalf("fixture must seal unstable output %d: %q", i, text)
+				}
+			}
+			assertNoCredit(t, rawDecodePhysicalReceipt(candidate), "")
+		})
+	}
 }
 
 func syntheticTestConfig() model.Config {
@@ -298,6 +541,8 @@ type observedRawDecodeTestBackend struct {
 	compute.Backend
 	identity      compute.BackendRuntimeIdentity
 	snapshotCalls int
+	windowBegins  int
+	windowEnds    int
 }
 
 func (b *observedRawDecodeTestBackend) Name() string { return compute.Qwen38VulkanDecodeBackend }
@@ -310,10 +555,42 @@ func (b *observedRawDecodeTestBackend) BackendExecutionSnapshot() (compute.Backe
 			Q4KMatmulDispatches: uint64(b.snapshotCalls),
 			DispatchSubmits:     uint64(b.snapshotCalls),
 		},
-		DeviceMemoryObserved:   true,
-		DeviceMemoryTotalBytes: 64 << 30,
-		DeviceMemoryFreeBytes:  48 << 30,
+		DeviceMemoryObserved:      true,
+		DeviceMemoryTotalBytes:    64 << 30,
+		DeviceMemoryFreeBytes:     48 << 30,
+		TransferCountersObserved:  true,
+		DeviceAllocationObserved:  true,
+		DeviceAllocationLiveBytes: 1024,
 	}, nil
+}
+
+func (b *observedRawDecodeTestBackend) BeginBackendExecutionWindow() (compute.BackendExecutionWindow, error) {
+	before, err := b.BackendExecutionSnapshot()
+	if err != nil {
+		return nil, err
+	}
+	b.windowBegins++
+	return &observedRawDecodeTestWindow{backend: b, before: before}, nil
+}
+
+type observedRawDecodeTestWindow struct {
+	backend *observedRawDecodeTestBackend
+	before  compute.BackendExecutionSnapshot
+	ended   bool
+}
+
+func (w *observedRawDecodeTestWindow) End() (compute.BackendExecutionObservation, error) {
+	if w.ended {
+		return compute.BackendExecutionObservation{}, errors.New("test execution window ended twice")
+	}
+	w.ended = true
+	w.backend.windowEnds++
+	after, err := w.backend.BackendExecutionSnapshot()
+	if err != nil {
+		return compute.BackendExecutionObservation{}, err
+	}
+	// Explicit fixture-owned peak; endpoint snapshots do not prove a real peak.
+	return compute.BackendExecutionWindowDelta(w.before, after, after.DeviceAllocationLiveBytes, 2048)
 }
 
 func TestRawDecodeVulkanNameDoesNotClaimPhysicalEngineIdentity(t *testing.T) {
@@ -498,6 +775,9 @@ func TestExecuteRawDecodeObservesHostAfterEveryRealRepetitionAndFailsClosed(t *t
 			}
 			if backend.snapshotCalls != calls*2 {
 				t.Fatalf("observer call %d preceded %d snapshots, want post-execution call after %d", calls, backend.snapshotCalls, calls*2)
+			}
+			if backend.windowBegins != calls || backend.windowEnds != calls {
+				t.Fatalf("host observation %d must follow its completed execution window: begins=%d ends=%d", calls, backend.windowBegins, backend.windowEnds)
 			}
 			if observerErr != nil {
 				return compute.VulkanHostEnvironment{}, observerErr

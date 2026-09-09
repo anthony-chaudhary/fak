@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
@@ -443,6 +444,28 @@ func rawDecodePhysicalReceipt(execution rawdecode.Execution, _ ...[]rawRepOutput
 	if allParityObserved {
 		observed.CPUModelParity = &allParityPassed
 	}
+	// The output accessor binds artifact decoding to the same generation seal,
+	// ordinal and accepted IDs validated above. Publish text only after every
+	// deterministic repetition agrees with the canonical report, byte for byte.
+	// This supplies text provenance only; #12096 still owns physical authority.
+	var outputText string
+	for i := range execution.Runs {
+		textObservation, observationAvailable := execution.OutputTextObservation(i)
+		text, textAvailable := textObservation.Text()
+		if !observationAvailable || !textAvailable || text == "" || !utf8.ValidString(text) {
+			return unavailable(fmt.Sprintf("raw decode output text observation unavailable for repetition %d", i+1))
+		}
+		if !slices.Equal(generations[i].outputTokenIDs, observed.Runs[i].OutputTokenIDs) ||
+			!slices.Equal(generations[i].outputTokenIDs, observed.OutputTokenIDs) {
+			return unavailable(fmt.Sprintf("raw decode output text token IDs differ from canonical report for repetition %d", i+1))
+		}
+		if i == 0 {
+			outputText = text
+		} else if text != outputText {
+			return unavailable(fmt.Sprintf("raw decode output text differs between repetitions 1 and %d", i+1))
+		}
+	}
+	observed.OutputText = outputText
 	receipt, err := compute.BuildQwen38VulkanDecodeReceipt(observed)
 	if err != nil {
 		return unavailable(err.Error())
