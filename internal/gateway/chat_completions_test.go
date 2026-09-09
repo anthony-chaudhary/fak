@@ -1,5 +1,3 @@
-//go:build wip_metal_mtp
-
 package gateway
 
 import (
@@ -11,9 +9,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/modelengine"
 )
 
 func TestConfiguredInKernelPlannerEnablesSelectedMetalMTP(t *testing.T) {
@@ -71,6 +71,7 @@ func TestConfiguredInKernelPlannerLeavesIneligiblePathsUnchanged(t *testing.T) {
 }
 
 func TestChatCompletionsMetalMTPSpeculativeHeaderAndDispatch(t *testing.T) {
+	abi.RegisterEngine(modelengine.EngineID, modelengine.Default)
 	t.Setenv("FAK_INKERNEL_RADIX", "off")
 	t.Setenv("FAK_INKERNEL_MAX_TOKENS", "4")
 
@@ -132,6 +133,7 @@ func TestChatCompletionsMetalMTPSpeculativeHeaderAndDispatch(t *testing.T) {
 }
 
 func TestChatCompletionsMetalMTPStreamingHeaderAndDispatch(t *testing.T) {
+	abi.RegisterEngine(modelengine.EngineID, modelengine.Default)
 	t.Setenv("FAK_INKERNEL_RADIX", "off")
 	t.Setenv("FAK_INKERNEL_MAX_TOKENS", "4")
 
@@ -203,6 +205,7 @@ func TestChatCompletionsMetalMTPStreamingHeaderAndDispatch(t *testing.T) {
 }
 
 func TestChatCompletionsWithoutMetalMTPDoesNotEmitHeader(t *testing.T) {
+	abi.RegisterEngine(modelengine.EngineID, modelengine.Default)
 	t.Setenv("FAK_INKERNEL_RADIX", "off")
 	t.Setenv("FAK_INKERNEL_MAX_TOKENS", "2")
 

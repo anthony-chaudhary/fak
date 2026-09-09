@@ -413,6 +413,9 @@ func New(cfg Config) (*Server, error) {
 			ikp.SetRestoreStash(s.stashRestore)
 		}
 	}
+	if s.metalMTPCoord == nil {
+		s.metalMTPCoord = s.activeMetalMTPCoordinator()
+	}
 
 	return s, nil
 }
@@ -796,7 +799,13 @@ func newInKernelChatPlanner(cfg Config, modelID string, logf func(string, ...any
 	if !plannerCfg.DeferColdTools && cfg.DeferColdTools {
 		plannerCfg.DeferColdTools = cfg.DeferColdTools
 	}
-	return agent.NewInKernelPlannerWithConfig(cfg.InKernelModel, cfg.Tokenizer, modelID, cfg.InKernelQ4K, cfg.Backend, cfg.Metal, plannerCfg)
+	ikp := agent.NewInKernelPlannerWithConfig(cfg.InKernelModel, cfg.Tokenizer, modelID, cfg.InKernelQ4K, cfg.Backend, cfg.Metal, plannerCfg)
+	if shouldEnableMetalMTP(cfg) {
+		if err := ikp.EnableMetalMTP(); err != nil {
+			logf("gateway: failed to enable Metal MTP coordinator: %v", err)
+		}
+	}
+	return ikp
 }
 
 func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner, error) {
