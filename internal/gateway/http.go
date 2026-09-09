@@ -1402,6 +1402,8 @@ func writeErrCode(w http.ResponseWriter, status int, code, msg string) {
 
 func errType(status int) string {
 	switch {
+	case status == http.StatusBadRequest:
+		return "invalid_request_error"
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
 		return "authentication_error"
 	case status == http.StatusTooManyRequests:
