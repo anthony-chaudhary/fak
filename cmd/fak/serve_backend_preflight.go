@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -129,6 +131,22 @@ type ServeStrixHaloPreflightResult struct {
 	DeviceName        string
 }
 
+// strixHaloPreflightLogWriter is an optional sink for tests to capture preflight log lines.
+var strixHaloPreflightLogWriter io.Writer
+
+func logStrixHaloPreflight(format string, args ...any) {
+	var msg string
+	if len(args) == 0 {
+		msg = format
+	} else {
+		msg = fmt.Sprintf(format, args...)
+	}
+	if strixHaloPreflightLogWriter != nil {
+		fmt.Fprintln(strixHaloPreflightLogWriter, msg)
+	}
+	log.Print(msg)
+}
+
 // preflightServeStrixHalo probes for AMD Strix Halo (GFX1151) APU silicon via environment
 // overrides, DRM sysfs inspection, or backend device name.
 func preflightServeStrixHalo(be compute.Backend) ServeStrixHaloPreflightResult {
@@ -140,7 +158,17 @@ func preflightServeStrixHalo(be compute.Backend) ServeStrixHaloPreflightResult {
 func preflightServeStrixHaloWithSysfs(be compute.Backend, sysfsRoot string) ServeStrixHaloPreflightResult {
 	var deviceName string
 	if be != nil {
-		deviceName = be.Name()
+		if be.Name() == "cpu-ref" || be.Name() == "cpu" {
+			logStrixHaloPreflight("fak serve: APU acceleration is skipped for CPU inference")
+			return ServeStrixHaloPreflightResult{Detected: false}
+		}
+		if computestrix.IsStrixHaloArch(be.Tier()) {
+			deviceName = be.Tier()
+		} else if computestrix.IsStrixHaloArch(be.Name()) {
+			deviceName = be.Name()
+		} else if be.Name() != "vulkan" {
+			return ServeStrixHaloPreflightResult{Detected: false}
+		}
 	}
 
 	detected, matchedName, err := computestrix.DetectGFX1151WithDeviceName(sysfsRoot, deviceName)

@@ -20,9 +20,20 @@ import (
 type servePreflightBackend struct {
 	compute.Backend
 	name string
+	tier string
 }
 
 func (b *servePreflightBackend) Name() string { return b.name }
+
+func (b *servePreflightBackend) Tier() string {
+	if b.tier != "" {
+		return b.tier
+	}
+	if b.Backend != nil {
+		return b.Backend.Tier()
+	}
+	return ""
+}
 
 type servePreflightMarkerBackend struct{ *servePreflightBackend }
 
@@ -48,6 +59,10 @@ func (*servePreflightGDNBackend) Qwen35GDNDecode(
 
 func newServePreflightBackend(name string) *servePreflightBackend {
 	return &servePreflightBackend{Backend: compute.Default(), name: name}
+}
+
+func newServePreflightBackendWithTier(name, tier string) *servePreflightBackend {
+	return &servePreflightBackend{Backend: compute.Default(), name: name, tier: tier}
 }
 
 func servePreflightHeader(t *testing.T, arch string, r io.ReaderAt) *ggufload.WeightSource {
@@ -475,6 +490,37 @@ func TestServeBackendPreflight_StrixHaloActivation(t *testing.T) {
 	if res4.DeviceName != "AMD Radeon 8060S Graphics (gfx1151)" {
 		t.Fatalf("got device name %q", res4.DeviceName)
 	}
+
+	// Case 4b: Vulkan backend with tier containing gfx1151 matches directly without DRM sysfs
+	beVulkan := newServePreflightBackendWithTier("vulkan", "integrated:AMD Radeon 8060S Graphics (gfx1151)")
+	resVulkan := preflightServeStrixHaloWithSysfs(beVulkan, t.TempDir())
+	if !resVulkan.Detected {
+		t.Fatal("expected detected=true via Vulkan backend tier without DRM sysfs")
+	}
+	if resVulkan.DeviceName != "integrated:AMD Radeon 8060S Graphics (gfx1151)" {
+		t.Fatalf("got device name %q, want %q", resVulkan.DeviceName, "integrated:AMD Radeon 8060S Graphics (gfx1151)")
+	}
+	if resVulkan.UMAPointerManager == nil || resVulkan.MALLTiler == nil {
+		t.Fatal("expected initialized UMAPointerManager and MALLTiler for Vulkan Strix Halo backend")
+	}
+
+	// Case 4c: CPU backend guards against APU acceleration even with mock DRM sysfs present
+	var logBuf strings.Builder
+	strixHaloPreflightLogWriter = &logBuf
+	defer func() { strixHaloPreflightLogWriter = nil }()
+
+	beCPU := newServePreflightBackend("cpu-ref")
+	resCPU := preflightServeStrixHaloWithSysfs(beCPU, tmpSysfs)
+	if resCPU.Detected {
+		t.Fatal("expected detected=false for CPU backend despite DRM sysfs presence")
+	}
+	if resCPU.UMAPointerManager != nil || resCPU.MALLTiler != nil {
+		t.Fatal("expected nil subsystems for CPU backend")
+	}
+	if !strings.Contains(logBuf.String(), "APU acceleration is skipped for CPU inference") {
+		t.Fatalf("expected skip log message, got %q", logBuf.String())
+	}
+	strixHaloPreflightLogWriter = nil
 
 	// Case 5: Graceful fallback on non-Strix hardware with zero errors and no crash
 	beCUDA := newServePreflightBackend("cuda")
