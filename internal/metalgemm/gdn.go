@@ -36,6 +36,8 @@ void mg_gdn_state_release(int owner);
 int mg_gdn_live_buffers(void);
 int mg_gdn_owner_capacity(void);
 uint64_t mg_gdn_current_allocated_size(void);
+void mg_gdn_set_force_baseline(int force);
+int mg_test_run_shuffle(const float *in, float *out);
 */
 import "C"
 
@@ -438,3 +440,27 @@ func gdnOwnerCapacity() int { return int(C.mg_gdn_owner_capacity()) }
 // Keep it package-private: allocation policy remains owned by Metal, while the test
 // needs to distinguish completed transient resources from persistent GDN state.
 func gdnCurrentAllocatedBytes() uint64 { return uint64(C.mg_gdn_current_allocated_size()) }
+
+// SetGDNForceBaseline controls whether to force the baseline recurrent kernel
+// instead of the packed 8-row kernel for benchmarking.
+func SetGDNForceBaseline(force bool) {
+	if force {
+		C.mg_gdn_set_force_baseline(1)
+	} else {
+		C.mg_gdn_set_force_baseline(0)
+	}
+}
+
+// IsGDNPackedBTreeEligible reports whether the head dimensions meet the requirements
+// for the 8-row B-tree SIMDgroup packed recurrence kernel (kHd == 128 && vHd % 8 == 0).
+func IsGDNPackedBTreeEligible(kHd, vHd int) bool {
+	return kHd == 128 && vHd > 0 && vHd%8 == 0
+}
+
+// RunTestShuffle executes the 4-lane intra-row butterfly shuffle test kernel on device.
+func RunTestShuffle(in, out []float32) bool {
+	if len(in) < 32 || len(out) < 32 {
+		return false
+	}
+	return C.mg_test_run_shuffle((*C.float)(unsafe.Pointer(&in[0])), (*C.float)(unsafe.Pointer(&out[0]))) == 1
+}
