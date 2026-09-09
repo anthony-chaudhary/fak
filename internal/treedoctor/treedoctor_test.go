@@ -36,7 +36,7 @@ func (f *fakeGit) run(_ context.Context, dir string, args ...string) (string, in
 		return "", 1, nil
 	case len(args) >= 2 && args[0] == "status" && args[1] == "--porcelain":
 		return f.dirty[dir], 0, nil
-	case len(args) >= 2 && args[0] == "worktree" && (args[1] == "remove" || args[1] == "prune"):
+	case len(args) >= 2 && args[0] == "worktree" && (args[1] == "remove" || args[1] == "prune" || args[1] == "unlock"):
 		return "", 0, nil
 	}
 	return "", 0, nil
@@ -202,6 +202,41 @@ func TestSweepWorkerWorktree(t *testing.T) {
 	}
 	if joined := strings.Join(actions, "\n"); !strings.Contains(joined, orphan) {
 		t.Fatalf("sweep actions %v do not name the reaped orphan", actions)
+	}
+}
+
+func TestSweepUnlocksAndPrunesLockedWorktree(t *testing.T) {
+	main := t.TempDir()
+	now := time.Now()
+	lockedOrphan := filepath.Join(t.TempDir(), "fak-worker-wt-locked")
+	f := filepath.Join(lockedOrphan, "a.go")
+	if err := os.MkdirAll(lockedOrphan, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f, []byte("package a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeAt(t, f, now.Add(-time.Hour))
+
+	git := &fakeGit{
+		listOut:  listPorcelain([2]string{main, "1111"}, [2]string{lockedOrphan, "2222"}),
+		ancestor: map[string]bool{lockedOrphan: false},
+	}
+
+	_, actions := Sweep(context.Background(), git.run, Options{RepoRoot: main, Now: now}, true)
+
+	unlocked := false
+	for _, c := range git.calls {
+		if len(c) >= 4 && c[1] == "worktree" && c[2] == "unlock" && c[3] == lockedOrphan {
+			unlocked = true
+			break
+		}
+	}
+	if !unlocked {
+		t.Fatalf("sweep did not attempt `git worktree unlock` for locked worktree: %v", git.calls)
+	}
+	if joined := strings.Join(actions, "\n"); !strings.Contains(joined, lockedOrphan) {
+		t.Fatalf("sweep actions %v do not name the reaped locked orphan", actions)
 	}
 }
 

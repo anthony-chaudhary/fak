@@ -9,10 +9,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelengine"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
+
+var serveMetalAvailable = metalgemm.Available
 
 func serveDenseKQuantOptions(backend compute.Backend) []ggufload.Q4KLoadOption {
 	if backend == nil {
@@ -22,7 +25,11 @@ func serveDenseKQuantOptions(backend compute.Backend) []ggufload.Q4KLoadOption {
 }
 
 func serveDeviceResidentQ4K(backend compute.Backend) bool {
-	if backend == nil || !backend.Caps().UploadDtype {
+	if backend != nil {
+		if !backend.Caps().UploadDtype {
+			return false
+		}
+	} else if !serveMetalAvailable() {
 		return false
 	}
 	// Resident Q4_K is the efficient device representation; FAK_Q4K=0 remains the
@@ -157,24 +164,35 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		must(compute.RefuseHostScopedPlanIfTooBigForHost(memPlan, serveGGUFHostHeadroom))
 		return loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend, loadMessages, q4kOpts...)
 	case residentQ4K:
-		// Standard-arch device serve: hold raw Q4_K matmul tensors RESIDENT on the
-		// device (dequant fused into the GEMM tile, no Q4_K->f32->Q8 round-trip), instead of the
-		// legacy Q8 rollback below. The resident path loads ~0.56 B/param instead of Q8's
-		// ~1 B/param, nearly halving weight VRAM (#949). No expert offload here (that is the
-		// cpuOffloadExperts arm) — all weights are device-resident, so the fit uses the
-		// non-offload device plan (EstimateLoadMemoryPlan, quant-aware), same helper the Q8 arm
-		// uses; only the loader differs. A backend without UploadDtype falls through to the Q8/
-		// f32 arms unchanged (the device Q4_K GEMM needs the quantized-upload seam).
-		loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", fmt.Sprintf("GGUF device load -> resident Q4_K on backend %q (raw super-blocks, dequant-fused GEMM, ~0.56 B/param vs Q8 ~1 B/param)", backend.Name())))
-		var memPlan compute.MemoryPlan
-		var err error
-		if residentRanks > 1 {
-			memPlan, err = fitAndPlanServeGGUFExpertParallelPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens)
-		} else {
-			memPlan, err = fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, false, contextBudgetTokens)
+		if backend != nil {
+			// Standard-arch device serve: hold raw Q4_K matmul tensors RESIDENT on the
+			// device (dequant fused into the GEMM tile, no Q4_K->f32->Q8 round-trip), instead of the
+			// legacy Q8 rollback below. The resident path loads ~0.56 B/param instead of Q8's
+			// ~1 B/param, nearly halving weight VRAM (#949). No expert offload here (that is the
+			// cpuOffloadExperts arm) — all weights are device-resident, so the fit uses the
+			// non-offload device plan (EstimateLoadMemoryPlan, quant-aware), same helper the Q8 arm
+			// uses; only the loader differs. A backend without UploadDtype falls through to the Q8/
+			// f32 arms unchanged (the device Q4_K GEMM needs the quantized-upload seam).
+			loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", fmt.Sprintf("GGUF device load -> resident Q4_K on backend %q (raw super-blocks, dequant-fused GEMM, ~0.56 B/param vs Q8 ~1 B/param)", backend.Name())))
+			var memPlan compute.MemoryPlan
+			var err error
+			if residentRanks > 1 {
+				memPlan, err = fitAndPlanServeGGUFExpertParallelPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens)
+			} else {
+				memPlan, err = fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, false, contextBudgetTokens)
+			}
+			must(err)
+			return loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend, loadMessages, q4kOpts...)
 		}
-		must(err)
-		return loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend, loadMessages, q4kOpts...)
+		// Apple-Silicon Metal resident load (backend is nil, Metal device available):
+		// hold raw Q4_K / k-quant weights RESIDENT in Unified Memory (raw super-blocks, resident decode,
+		// dequant-fused Metal MSL GEMM kernels), eliminating the silent CPU Q8 dequantization loop.
+		must(fitServeGGUFPathOnHost(ggufPath, false, contextBudgetTokens))
+		loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", "GGUF Apple-Silicon Metal load -> resident quantized weights in Unified Memory (raw super-blocks, resident decode, ~0.56 B/param vs Q8 ~1 B/param)"))
+		mm, prof, loadNanos := loadResidentQ4KProfiled(ggufPath, tLoad, q4kOpts...)
+		loadMessages = append(loadMessages, serveStartupMessage("resident-layout", "info", fakmodel.FormatResidentReport(mm.ResidentReport())))
+		profile := withServeStartupMessages(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k", ggufPath, loadNanos)), loadMessages...)
+		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 	case backend != nil:
 		loadMessages = append(loadMessages, serveQuantProvenance(artifactQuant, false))
 		if backend.Caps().UploadDtype {
@@ -210,7 +228,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 			Bottleneck: "f32-load",
 		}), memPlan, backend), loadMessages...)
 		return mm, false, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
-	case os.Getenv("FAK_Q4K") != "" && artifactQuant.Q4KResident:
+	case (os.Getenv("FAK_Q4K") != "" && os.Getenv("FAK_Q4K") != "0") && artifactQuant.Q4KResident:
 		// CPU-path memory-fit pre-flight (#974): refuse cleanly with a typed FitTooBig BEFORE the
 		// all-resident load can drive MemAvailable to ~0 and OOM-wedge the host (parity with the
 		// device path's fit plan). Fail-open where host RAM is not probeable.
