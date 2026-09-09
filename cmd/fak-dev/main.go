@@ -156,6 +156,14 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunFactoryMigrate(stdout, stderr, argv[1:])
 	case "bench-subagent-fanout", "subagent-fanout-bench":
 		return runBenchSubagentFanout(stdout, stderr, argv[1:])
+	case "gate":
+		return devcmd.RunCompanionGate(stdout, stderr, argv[1:])
+	case "provenance":
+		return devcmd.RunCompanionProvenance(stdout, stderr, argv[1:])
+	case "audit-leak", "auditleak", "leak-audit":
+		return devcmd.RunCompanionAuditLeak(stdout, stderr, argv[1:])
+	case "ticket", "tickets":
+		return devcmd.RunCompanionTicket(stdout, stderr, argv[1:])
 	default:
 		fmt.Fprintf(stderr, "fak-dev: unknown command %q\n", argv[0])
 		fmt.Fprintln(stderr, "run 'fak-dev help' for repository-development commands")
@@ -244,6 +252,12 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  factory-migrate [status|list|next|audit-boundary|scaffold] [flags] audit and track autonomous dev factory Python to Go migration")
 	fmt.Fprintln(w, "  bench-subagent-fanout [flags]          apples-to-apples subagent fanout benchmark harness (SGLang/vLLM/FAK)")
 	fmt.Fprintln(w, "  version                               print fak-dev build identity")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "companion tooling (when fak-private is present):")
+	fmt.Fprintln(w, "  gate [check|query|explain] [flags]    run 5-gate import encapsulation and placement verification")
+	fmt.Fprintln(w, "  provenance [audit|mint|status] [flags] cryptographic context separation & dual-context provenance")
+	fmt.Fprintln(w, "  audit-leak [--staged|--all]           scan repository additions/tree for secrets and private tokens")
+	fmt.Fprintln(w, "  ticket [list|show|next] [flags]       discover, inspect, and read tickets from companion fak-private")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "The serving/guard product surface is the separately buildable 'fak' artifact.")
 }
