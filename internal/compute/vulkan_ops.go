@@ -8,6 +8,75 @@ import (
 	"math"
 )
 
+// PlanVulkanPackedKVAppendStrix validates and sizes the first asymmetric
+// append contract without pretending that the Vulkan dispatch already exists.
+// Keys and values use the #11909 TurboQuant ABI (f32 scale plus 32 int8 codes
+// or 16 packed nibbles), and the
+// pre-RoPE raw-key shadow remains F32 for exact re-RoPE ownership.
+func PlanVulkanPackedKVAppendStrix(arch string, positions, nKV, headDim int) (VulkanPackedKVAppendContract, error) {
+	if !isStrixHaloArch(arch) {
+		return VulkanPackedKVAppendContract{}, fmt.Errorf("vulkan: packed KV append requires gfx1151 / Strix Halo (got %q)", arch)
+	}
+	if positions <= 0 || nKV <= 0 || headDim <= 0 {
+		return VulkanPackedKVAppendContract{}, fmt.Errorf("vulkan: invalid packed KV append shape positions=%d nKV=%d headDim=%d", positions, nKV, headDim)
+	}
+
+	const (
+		blockElements    int64 = 32
+		keyBlockBytes    int64 = 4 + blockElements // f32 scale + int8 codes
+		valueBlockBytes  int64 = 4 + blockElements/2
+		rawKeyBlockBytes int64 = blockElements * 4
+	)
+	nKV64, headDim64 := int64(nKV), int64(headDim)
+	if nKV64 > math.MaxInt64/headDim64 {
+		return VulkanPackedKVAppendContract{}, fmt.Errorf("vulkan: packed KV append row size overflows int64")
+	}
+	elementsPerRow := nKV64 * headDim64
+	if elementsPerRow%blockElements != 0 {
+		return VulkanPackedKVAppendContract{}, fmt.Errorf("vulkan: packed KV append row %d is not block-%d aligned", elementsPerRow, blockElements)
+	}
+	blocksPerRow := elementsPerRow / blockElements
+	bytesPerBlock := keyBlockBytes + valueBlockBytes + rawKeyBlockBytes
+	if blocksPerRow > math.MaxInt64/bytesPerBlock {
+		return VulkanPackedKVAppendContract{}, fmt.Errorf("vulkan: packed KV append row storage overflows int64")
+	}
+	keyBytesPerToken := blocksPerRow * keyBlockBytes
+	valueBytesPerToken := blocksPerRow * valueBlockBytes
+	rawKeyBytesPerToken := blocksPerRow * rawKeyBlockBytes
+	residentBytesPerToken := blocksPerRow * bytesPerBlock
+	if int64(positions) > math.MaxInt64/residentBytesPerToken {
+		return VulkanPackedKVAppendContract{}, fmt.Errorf("vulkan: packed KV append resident size overflows int64")
+	}
+
+	return VulkanPackedKVAppendContract{
+		Schema:                 "fak-vulkan-packed-kv-append-contract/1",
+		Arch:                   RADVTargetArchGfx1151,
+		Positions:              positions,
+		NumKVHeads:             nKV,
+		HeadDim:                headDim,
+		ElementsPerRow:         elementsPerRow,
+		BlockElements:          blockElements,
+		KeyFormat:              VulkanPackedKVTurboQ8Key,
+		ValueFormat:            VulkanPackedKVTurbo4Value,
+		RawKeyFormat:           VulkanPackedKVF32PreRoPEKey,
+		StorageOwner:           VulkanPackedKVDeviceOwnership,
+		KeyBlockBytes:          keyBlockBytes,
+		ValueBlockBytes:        valueBlockBytes,
+		RawKeyBlockBytes:       rawKeyBlockBytes,
+		KeyBytesPerToken:       keyBytesPerToken,
+		ValueBytesPerToken:     valueBytesPerToken,
+		RawKeyBytesPerToken:    rawKeyBytesPerToken,
+		ResidentBytesPerToken:  residentBytesPerToken,
+		ResidentBytes:          int64(positions) * residentBytesPerToken,
+		DevicePackingRequired:  true,
+		HostCodecAllowed:       false,
+		FallbackAllowed:        false,
+		ConsumerABIReady:       false,
+		PhysicalPromotionReady: false,
+		ProofLevel:             VulkanPackedKVSoftwareContract,
+	}, nil
+}
+
 // DequantizeKVScratchpad dequantizes quantized Q8_0 and Q4_0 KV blocks exactly once into
 // the transposed scratchpad memory per attention pass, eliminating redundant per-head dequantization.
 func DequantizeKVScratchpad(scratch *VulkanKVScratchpad, rawK, rawV []byte) error {
