@@ -5,6 +5,7 @@ import (
 	"math"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -41,6 +42,7 @@ var errInjectedQwen35GDN = errors.New("injected Qwen35 GDN operation failure")
 // so wrapper Read/Host counters expose only forbidden model-side fallback.
 type recordingQwen35Backend struct {
 	compute.Backend
+	lifecycleMu     sync.Mutex
 	model           *Model
 	reference       *Session
 	linearLayers    []int
@@ -111,12 +113,16 @@ func (b *recordingQwen35Backend) Read(t compute.Tensor) []float32 {
 }
 
 func (b *recordingQwen35Backend) Free(t compute.Tensor) {
+	b.lifecycleMu.Lock()
 	b.freeCalls[t.Buf()]++
+	b.lifecycleMu.Unlock()
 	b.Backend.Free(t)
 }
 
 func (b *recordingQwen35Backend) CloneTensor(t compute.Tensor) (compute.Tensor, error) {
+	b.lifecycleMu.Lock()
 	b.cloneCalls++
+	b.lifecycleMu.Unlock()
 	cloner, ok := b.Backend.(compute.TensorCloner)
 	if !ok {
 		return compute.Tensor{}, errors.New("recording backend cannot clone tensor")
@@ -517,9 +523,272 @@ func TestQwen35PrefixSnapshotClonesAndRestoresAllHybridDeviceState(t *testing.T)
 	if restored.qwen35HAL == nil || len(restored.qwen35HAL.layers) != len(s.qwen35HAL.layers) {
 		t.Fatal("recurrent state omitted")
 	}
+	if be.cloneCalls != 0 {
+		t.Fatalf("snapshot clone eagerly copied recurrent tensors: clone calls=%d, want 0", be.cloneCalls)
+	}
+}
+
+func TestQwen35RecurrentSnapshotCopyOnWriteIsolation(t *testing.T) {
+	type pairImage struct {
+		conv, recurrent         compute.Buffer
+		convData, recurrentData []float32
+	}
+
+	m := NewSynthetic(qwen35HybridTestCfg())
+	be := newRecordingQwen35Backend(m)
+	root, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root.Prefill([]int{3, 7, 11})
 	linear := len(be.linearLayers)
-	if be.cloneCalls < 4*linear {
-		t.Fatalf("clone calls=%d want at least %d", be.cloneCalls, 4*linear)
+	if linear == 0 {
+		t.Fatal("test model has no recurrent layers")
+	}
+	image := func(s *Session, layer int) pairImage {
+		t.Helper()
+		s.qwen35HAL.mu.Lock()
+		defer s.qwen35HAL.mu.Unlock()
+		state := &s.qwen35HAL.layers[layer]
+		return pairImage{
+			conv: state.conv.Buf(), recurrent: state.recurrent.Buf(),
+			convData:      append([]float32(nil), be.Backend.Read(state.conv)...),
+			recurrentData: append([]float32(nil), be.Backend.Read(state.recurrent)...),
+		}
+	}
+	assertBitsEqual := func(label string, got, want []float32) {
+		t.Helper()
+		if len(got) != len(want) {
+			t.Fatalf("%s elements=%d, want %d", label, len(got), len(want))
+		}
+		for i := range got {
+			if math.Float32bits(got[i]) != math.Float32bits(want[i]) {
+				t.Fatalf("%s changed at %d: got %08x want %08x", label, i, math.Float32bits(got[i]), math.Float32bits(want[i]))
+			}
+		}
+	}
+	allStateBuffers := make(map[compute.Buffer]struct{})
+	captureBuffers := func(s *Session) {
+		t.Helper()
+		for _, layer := range be.linearLayers {
+			got := image(s, layer)
+			allStateBuffers[got.conv] = struct{}{}
+			allStateBuffers[got.recurrent] = struct{}{}
+		}
+	}
+
+	baseline := make(map[int]pairImage, linear)
+	for _, layer := range be.linearLayers {
+		baseline[layer] = image(root, layer)
+	}
+	captureBuffers(root)
+	root.qwen35HAL.sequenceAccepted = true
+	root.qwen35HAL.sequenceFailure = errors.New("session-local sentinel")
+	root.qwen35HAL.prefillRoute.RequestedPath = "session-local"
+	root.qwen35HAL.qsaGatheredK = []float32{1}
+
+	snap, err := root.PrefixSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sibling, err := snap.Clone()
+	if err != nil {
+		snap.Close()
+		t.Fatal(err)
+	}
+	if be.cloneCalls != 0 {
+		t.Fatalf("read-only sibling snapshots made %d eager tensor copies, want 0", be.cloneCalls)
+	}
+	for name, q := range map[string]*qwen35HALState{"snapshot": snap.qwen35, "sibling": sibling.qwen35} {
+		if q.sequenceAccepted || q.sequenceFailure != nil || q.prefillRoute.RequestedPath != "" || q.qsaGatheredK != nil {
+			t.Fatalf("%s shared session-local sequence/QSA/receipt state: %#v", name, q)
+		}
+	}
+
+	branchA, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatal(err)
+	}
+	captureBuffers(branchA)
+	branchB, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		branchA.Close()
+		t.Fatal(err)
+	}
+	captureBuffers(branchB)
+	if err := snap.Restore(branchA); err != nil {
+		t.Fatal(err)
+	}
+	if err := sibling.Restore(branchB); err != nil {
+		t.Fatal(err)
+	}
+	snap.Close()
+	snap.Close()
+	sibling.Close()
+	sibling.Close()
+
+	beforeFirstWrite := be.cloneCalls
+	branchA.Step(13)
+	if got, want := be.cloneCalls-beforeFirstWrite, 2*linear; got != want {
+		t.Fatalf("branch A first write tensor copies=%d, want one pair per layer (%d)", got, want)
+	}
+	captureBuffers(branchA)
+	for _, layer := range be.linearLayers {
+		if got, original := image(branchA, layer), baseline[layer]; got.conv == original.conv || got.recurrent == original.recurrent {
+			t.Fatalf("branch A layer %d retained shared state on first write", layer)
+		}
+	}
+	branchA.Step(17)
+	if be.cloneCalls != beforeFirstWrite+2*linear {
+		t.Fatalf("branch A second write cloned again: clone calls=%d want %d", be.cloneCalls, beforeFirstWrite+2*linear)
+	}
+	branchABeforeB := make(map[int]pairImage, linear)
+	for _, layer := range be.linearLayers {
+		branchABeforeB[layer] = image(branchA, layer)
+		got, original := image(branchB, layer), baseline[layer]
+		if got.conv != original.conv || got.recurrent != original.recurrent {
+			t.Fatalf("untouched branch B layer %d changed identity before first write", layer)
+		}
+		assertBitsEqual("untouched branch B convolution layer "+itoa(layer), got.convData, original.convData)
+		assertBitsEqual("untouched branch B recurrent layer "+itoa(layer), got.recurrentData, original.recurrentData)
+	}
+
+	beforeBranchB := be.cloneCalls
+	branchB.Step(19)
+	if got, want := be.cloneCalls-beforeBranchB, 2*linear; got != want {
+		t.Fatalf("branch B first write tensor copies=%d, want %d", got, want)
+	}
+	captureBuffers(branchB)
+	for _, layer := range be.linearLayers {
+		gotA, beforeB := image(branchA, layer), branchABeforeB[layer]
+		if gotA.conv != beforeB.conv || gotA.recurrent != beforeB.recurrent {
+			t.Fatalf("branch B write changed branch A layer %d identity", layer)
+		}
+		assertBitsEqual("branch A convolution after branch B write layer "+itoa(layer), gotA.convData, beforeB.convData)
+		assertBitsEqual("branch A recurrent after branch B write layer "+itoa(layer), gotA.recurrentData, beforeB.recurrentData)
+		gotB := image(branchB, layer)
+		if gotA.conv == gotB.conv || gotA.recurrent == gotB.recurrent || (reflect.DeepEqual(gotA.convData, gotB.convData) && reflect.DeepEqual(gotA.recurrentData, gotB.recurrentData)) {
+			t.Fatalf("branch A/B layer %d did not isolate identity and bytes", layer)
+		}
+		got, original := image(root, layer), baseline[layer]
+		if got.conv != original.conv || got.recurrent != original.recurrent {
+			t.Fatalf("untouched root layer %d changed identity", layer)
+		}
+		assertBitsEqual("untouched convolution layer "+itoa(layer), got.convData, original.convData)
+		assertBitsEqual("untouched recurrent layer "+itoa(layer), got.recurrentData, original.recurrentData)
+	}
+
+	// Two siblings may reach first write together. Per-owner locking serializes the
+	// refcount transition while each branch receives its own physical pair.
+	concurrentSnap, err := root.PrefixSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	concurrentSibling, err := concurrentSnap.Clone()
+	if err != nil {
+		t.Fatal(err)
+	}
+	concurrentA, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatal(err)
+	}
+	captureBuffers(concurrentA)
+	concurrentB, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatal(err)
+	}
+	captureBuffers(concurrentB)
+	if err := concurrentSnap.Restore(concurrentA); err != nil {
+		t.Fatal(err)
+	}
+	if err := concurrentSibling.Restore(concurrentB); err != nil {
+		t.Fatal(err)
+	}
+	concurrentSnap.Close()
+	concurrentSibling.Close()
+	firstLayer := be.linearLayers[0]
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	mutatePair := func(conv, recurrent compute.Tensor, delta float32) {
+		convData := be.Backend.Read(conv)
+		recurrentData := be.Backend.Read(recurrent)
+		convData[0] += delta
+		recurrentData[0] += delta
+	}
+	mutateScalar := func(s *Session, delta float32) {
+		<-start
+		_, _, _, mutateErr := s.qwen35HAL.mutateLayer(be, firstLayer, func(conv, recurrent compute.Tensor) (compute.Tensor, compute.Tensor, compute.Tensor, error) {
+			mutatePair(conv, recurrent, delta)
+			return compute.Tensor{}, conv, recurrent, nil
+		})
+		errs <- mutateErr
+	}
+	mutateWholeSequence := func(s *Session, delta float32) {
+		<-start
+		_, mutateErr := s.qwen35HAL.mutateSequence(be, func(states []compute.Qwen35SequenceState) (compute.Qwen35SequencePrefillResult, error) {
+			state := states[firstLayer]
+			mutatePair(state.Conv, state.Recurrent, delta)
+			return compute.Qwen35SequencePrefillResult{}, nil
+		})
+		errs <- mutateErr
+	}
+	beforeConcurrent := be.cloneCalls
+	go mutateWholeSequence(concurrentA, 2)
+	go mutateScalar(concurrentB, 3)
+	close(start)
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, want := be.cloneCalls-beforeConcurrent, 2*linear+2; got != want {
+		t.Fatalf("concurrent sequence/scalar first writes copied %d tensors, want %d", got, want)
+	}
+	captureBuffers(concurrentA)
+	captureBuffers(concurrentB)
+	aImage, bImage := image(concurrentA, firstLayer), image(concurrentB, firstLayer)
+	if aImage.conv == bImage.conv || aImage.recurrent == bImage.recurrent {
+		t.Fatal("concurrent branches share a post-write state handle")
+	}
+
+	stale, err := root.PrefixSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleTarget, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatal(err)
+	}
+	captureBuffers(staleTarget)
+	root.cacheGeometryMu.Lock()
+	root.cacheGeometryEpoch++
+	root.cacheGeometryMu.Unlock()
+	if err := stale.Restore(staleTarget); err == nil || !strings.Contains(err.Error(), "stale prefix snapshot") {
+		t.Fatalf("stale restore error=%v, want ownership-preserving refusal", err)
+	}
+	if stale.qwen35 == nil || stale.Cache == nil {
+		t.Fatal("stale restore transferred ownership before refusing")
+	}
+
+	// The shared owner remembers its allocating backend; final release does not
+	// depend on the snapshot/session wrapper still carrying that pointer.
+	branchA.qwen35HAL.free(nil)
+	branchA.qwen35HAL = nil
+	branchA.Close()
+	branchA.Close()
+	branchB.Close()
+	branchB.Close()
+	concurrentA.Close()
+	concurrentB.Close()
+	staleTarget.Close()
+	stale.Close()
+	stale.Close()
+	root.Close()
+	root.Close()
+	for buffer := range allStateBuffers {
+		if got := be.freeCalls[buffer]; got != 1 {
+			t.Fatalf("recurrent state %p freed %d times, want exactly once", buffer, got)
+		}
 	}
 }
 
@@ -554,8 +823,8 @@ func TestQwen35PrefixSnapshotHostRoundTripOwnsCompleteHybridState(t *testing.T) 
 	}
 	freeBefore := totalFreeCalls(be)
 	snap.Close()
-	if totalFreeCalls(be) <= freeBefore {
-		t.Fatal("closing the hot snapshot did not release its backend-owned tensors")
+	if got := totalFreeCalls(be); got != freeBefore {
+		t.Fatalf("closing a shared read-only snapshot freed live recurrent tensors: frees=%d, want %d", got, freeBefore)
 	}
 
 	restored, err := host.Restore()
