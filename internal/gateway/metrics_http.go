@@ -1,9 +1,12 @@
 package gateway
 
 import (
+	"bufio"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"runtime"
 	"strings"
@@ -109,6 +112,24 @@ func (r *statusRecorder) Flush() {
 	if f, ok := r.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+// Hijack implements http.Hijacker by forwarding to the wrapped ResponseWriter
+// when it implements http.Hijacker, supporting protocol switches such as WebSockets.
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := r.ResponseWriter.(http.Hijacker); ok {
+		if r.status == 0 {
+			r.status = http.StatusSwitchingProtocols
+		}
+		return hj.Hijack()
+	}
+	return nil, nil, errors.New("underlying ResponseWriter does not implement http.Hijacker")
+}
+
+// Unwrap returns the underlying ResponseWriter, allowing http.ResponseController
+// to inspect and call methods on wrapped ResponseWriters.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
 }
 
 func (s *Server) withMetrics(next http.Handler) http.Handler {
