@@ -3,6 +3,7 @@ package dispatchorder
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -846,6 +847,85 @@ func TestBlockedByMutualCycleLowestIDDispatches(t *testing.T) {
 	}
 	if r.KeepCount != 1 || r.BlockedCount != 1 {
 		t.Fatalf("counts = keep %d blocked %d, want 1/1 (cycle resolves, never deadlocks)", r.KeepCount, r.BlockedCount)
+	}
+}
+
+// TestBlockedByCycleBreakerPreservesExternalBlocker proves cycle recovery is scoped to the
+// cycle itself. The lowest-ID member of a three-node SCC may ignore its intra-SCC edge, but an
+// independent open prerequisite still holds it. Once that external prerequisite closes, the
+// same deterministic member is released and the dependency graph can make forward progress.
+func TestBlockedByCycleBreakerPreservesExternalBlocker(t *testing.T) {
+	withExternal := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "103", Key: "103", BlockedBy: []string{"101"}},
+		{ID: "900", Key: "900"},
+		{ID: "101", Key: "101", BlockedBy: []string{"102", "900"}},
+		{ID: "102", Key: "102", BlockedBy: []string{"103"}},
+	}})
+	if dispoOf(withExternal, "101") != DispBlocked {
+		t.Fatalf("101 disposition = %q, want blocked by external prerequisite", dispoOf(withExternal, "101"))
+	}
+	var breaker Ranked
+	for _, row := range withExternal.Order {
+		if row.ID == "101" {
+			breaker = row
+			break
+		}
+	}
+	if got, want := breaker.BlockedByOpen, []string{"900"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("101 open blockers = %v, want only external blocker %v", got, want)
+	}
+	if got := withExternal.Pick(); got != "900" {
+		t.Fatalf("pick with external prerequisite open = %q, want 900", got)
+	}
+
+	afterExternalCloses := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "103", Key: "103", BlockedBy: []string{"101"}},
+		{ID: "101", Key: "101", BlockedBy: []string{"102", "900"}},
+		{ID: "102", Key: "102", BlockedBy: []string{"103"}},
+	}})
+	if got := afterExternalCloses.Pick(); got != "101" {
+		t.Fatalf("pick after external prerequisite closes = %q, want deterministic cycle breaker 101", got)
+	}
+	if dispoOf(afterExternalCloses, "101") != DispKeep || afterExternalCloses.KeepCount != 1 || afterExternalCloses.BlockedCount != 2 {
+		t.Fatalf("released cycle = keep %d blocked %d disposition(101)=%q, want 1/2/keep",
+			afterExternalCloses.KeepCount, afterExternalCloses.BlockedCount, dispoOf(afterExternalCloses, "101"))
+	}
+}
+
+// TestBlockedByCycleBreakerInheritsMemberExternalBlocker covers the external-edge shape that is
+// not declared directly by the breaker. A cyclic component is one scheduling unit: if any member
+// still waits on an open prerequisite outside the SCC, no member may dispatch ahead of it.
+func TestBlockedByCycleBreakerInheritsMemberExternalBlocker(t *testing.T) {
+	withExternal := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "101", Key: "101", BlockedBy: []string{"102"}},
+		{ID: "102", Key: "102", BlockedBy: []string{"103", "900"}},
+		{ID: "103", Key: "103", BlockedBy: []string{"101"}},
+		{ID: "900", Key: "900"},
+	}})
+	if got := withExternal.Pick(); got != "900" {
+		t.Fatalf("pick with member external prerequisite open = %q, want 900", got)
+	}
+	var breaker Ranked
+	for _, row := range withExternal.Order {
+		if row.ID == "101" {
+			breaker = row
+			break
+		}
+	}
+	if breaker.Disposition != DispBlocked {
+		t.Fatalf("101 disposition = %q, want blocked by component-external prerequisite", breaker.Disposition)
+	}
+	if got, want := breaker.BlockedByOpen, []string{"900"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("101 inherited open blockers = %v, want %v", got, want)
+	}
+
+	afterExternalCloses := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "101", Key: "101", BlockedBy: []string{"102"}},
+		{ID: "102", Key: "102", BlockedBy: []string{"103", "900"}},
+		{ID: "103", Key: "103", BlockedBy: []string{"101"}},
+	}})
+	if got := afterExternalCloses.Pick(); got != "101" {
+		t.Fatalf("pick after member external prerequisite closes = %q, want 101", got)
 	}
 }
 
