@@ -506,18 +506,25 @@ func isFixSubject(s string) bool {
 	return strings.HasPrefix(lower, "fix(") || strings.HasPrefix(lower, "fix:")
 }
 
-func verifyWorkerLandSymptom(wtPath string) workerworktree.Result {
+func workerLandSymptomUnwitnessed(detail string) workerworktree.Result {
+	return workerworktree.Result{
+		OK:     false,
+		Code:   "SYMPTOM_UNWITNESSED",
+		Reason: "SYMPTOM_UNWITNESSED: fix commit must include a test that fails on parent and passes on fix (red-then-green); bypass only with --unsafe-skip-symptom-witness",
+		Detail: detail,
+	}
+}
+
+func verifyWorkerLandSymptom(wtPath, ref string) workerworktree.Result {
 	resolver := witness.NewWithRunner(nil, wtPath)
-	outcome := resolver.ResolveSymptom(context.Background(), "HEAD", true)
+	outcome := resolver.ResolveSymptom(context.Background(), ref, true)
 	switch outcome {
 	case abi.WitnessConfirmed:
 		return workerworktree.Result{OK: true}
+	case abi.WitnessRefuted:
+		return workerLandSymptomUnwitnessed("symptom witness was refuted")
 	default:
-		return workerworktree.Result{
-			OK:     false,
-			Code:   "SYMPTOM_UNWITNESSED",
-			Reason: "SYMPTOM_UNWITNESSED: fix commit must include a test that fails on parent and passes on fix (red-then-green); bypass only with --unsafe-skip-symptom-witness",
-		}
+		return workerLandSymptomUnwitnessed("symptom witness abstained")
 	}
 }
 
@@ -781,12 +788,7 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 
 	// Mandatory fail-to-pass symptom witness for fix(*) commits (#10926)
 	subj := worktreeCommitSubject(worktreeDir, strings.TrimSpace(*baseSHA), strings.TrimSpace(*msgFile))
-	if isFixSubject(subj) && !*unsafeSkipSymptomWitness {
-		symptomRes := verifyWorkerLandSymptom(worktreeDir)
-		if !symptomRes.OK {
-			return symptomRes, 1
-		}
-	}
+	requireSymptomWitness := isFixSubject(subj) && !*unsafeSkipSymptomWitness
 
 	var hook workerworktree.VerifyHook
 	switch strings.ToLower(strings.TrimSpace(*verify)) {
@@ -812,6 +814,18 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 	}
 	timeoutSet := flagWasSet(fs, "disambiguation-timeout-ms")
 	res, err := withWorkerLandDisambiguationTimeout(*disambiguationTimeoutMS, timeoutSet, func() workerworktree.Result {
+		if requireSymptomWitness {
+			prospectiveVerify := func(dir string, materializationErr error) workerworktree.Result {
+				if materializationErr != nil {
+					return workerLandSymptomUnwitnessed(materializationErr.Error())
+				}
+				return verifyWorkerLandSymptom(dir, "HEAD")
+			}
+			return workerworktree.LandProspectiveVerified(
+				repoRoot, worktreeDir, strings.TrimSpace(*baseSHA), strings.TrimSpace(*msgFile),
+				[]string(paths), hook, prospectiveVerify, nil, opts...,
+			)
+		}
 		return workerworktree.Land(repoRoot, worktreeDir, strings.TrimSpace(*baseSHA), strings.TrimSpace(*msgFile), []string(paths), hook, nil, opts...)
 	})
 	if err != nil {
@@ -819,6 +833,9 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 			OK: false, Code: workerworktree.DisambiguationTimeoutCode,
 			Reason: "configure worker land disambiguation timeout: " + err.Error(),
 		}
+	}
+	if !res.OK && res.Code == "SYMPTOM_UNWITNESSED" {
+		return res, 1
 	}
 	return res, 0
 }
