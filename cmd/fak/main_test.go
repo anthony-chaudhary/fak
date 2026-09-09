@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
+	"github.com/anthony-chaudhary/fak/internal/amdgpu"
 	"github.com/anthony-chaudhary/fak/internal/cdb"
 	"github.com/anthony-chaudhary/fak/internal/ifc"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
@@ -18,6 +21,109 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ratelimit"
 	"github.com/anthony-chaudhary/fak/internal/recall"
 )
+
+func TestStrixKnownHostsBrokerEarlyDispatch(t *testing.T) {
+	usagePath := filepath.Join(t.TempDir(), "usage.jsonl")
+	if err := os.WriteFile(usagePath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAK_USAGE_LOG", "on")
+	t.Setenv("FAK_USAGE_LOG_PATH", usagePath)
+
+	const (
+		endpoint   = "127.0.0.1:49152"
+		capability = "capability-secret-that-must-never-be-recorded"
+		entry      = "strix-halo-fak.local ssh-ed25519 canonical-entry\n"
+	)
+
+	t.Run("not handled", func(t *testing.T) {
+		called := false
+		code, handled := runStrixKnownHostsBrokerEarly(io.Discard, io.Discard, []string{"help"}, func(string, string, io.Writer) error {
+			called = true
+			return nil
+		})
+		if code != 0 || handled || called {
+			t.Fatalf("code=%d handled=%v child_called=%v", code, handled, called)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code, handled := runStrixKnownHostsBrokerEarly(&stdout, &stderr, []string{amdgpu.StrixKnownHostsOperand, endpoint, capability}, func(gotEndpoint, gotCapability string, output io.Writer) error {
+			if gotEndpoint != endpoint || gotCapability != capability {
+				t.Fatalf("broker arguments = %q, %q", gotEndpoint, gotCapability)
+			}
+			_, err := io.WriteString(output, entry)
+			return err
+		})
+		if code != 0 || !handled || stdout.String() != entry || stderr.Len() != 0 {
+			t.Fatalf("code=%d handled=%v stdout=%q stderr=%q", code, handled, stdout.String(), stderr.String())
+		}
+	})
+
+	t.Run("malformed", func(t *testing.T) {
+		called := false
+		child := func(string, string, io.Writer) error {
+			called = true
+			return nil
+		}
+		for _, argv := range [][]string{
+			{amdgpu.StrixKnownHostsOperand},
+			{amdgpu.StrixKnownHostsOperand, endpoint},
+			{amdgpu.StrixKnownHostsOperand, endpoint, capability, "duplicate"},
+			{amdgpu.StrixKnownHostsOperand, "", capability},
+			{amdgpu.StrixKnownHostsOperand, endpoint, ""},
+		} {
+			var stdout, stderr bytes.Buffer
+			code, handled := runStrixKnownHostsBrokerEarly(&stdout, &stderr, argv, child)
+			if code != 2 || !handled || stdout.Len() != 0 || stderr.String() != "STRIX_HOST_TRUST_REFUSED\n" {
+				t.Fatalf("code=%d handled=%v stdout=%q stderr=%q", code, handled, stdout.String(), stderr.String())
+			}
+		}
+		if called {
+			t.Fatal("malformed invocation reached broker child")
+		}
+	})
+
+	t.Run("refused", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code, handled := runStrixKnownHostsBrokerEarly(&stdout, &stderr, []string{amdgpu.StrixKnownHostsOperand, endpoint, capability}, func(_ string, _ string, output io.Writer) error {
+			_, _ = io.WriteString(output, "raw-line")
+			return errors.New("raw-line " + endpoint + " " + capability)
+		})
+		if code != 1 || !handled || stdout.Len() != 0 || stderr.String() != "STRIX_HOST_TRUST_REFUSED\n" {
+			t.Fatalf("code=%d handled=%v stdout=%q stderr=%q", code, handled, stdout.String(), stderr.String())
+		}
+		combined := stdout.String() + stderr.String()
+		for _, forbidden := range []string{endpoint, capability, "raw-line", "usage", "unknown verb", "help"} {
+			if strings.Contains(strings.ToLower(combined), strings.ToLower(forbidden)) {
+				t.Fatalf("broker refusal leaked %q in %q", forbidden, combined)
+			}
+		}
+	})
+
+	source, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	callAt := bytes.Index(source, []byte("if code, handled := runStrixKnownHostsBrokerEarly"))
+	exitAt := bytes.Index(source, []byte("os.Exit(code)"))
+	if callAt < 0 || exitAt < callAt {
+		t.Fatalf("main does not immediately terminate handled broker dispatch: call=%d exit=%d", callAt, exitAt)
+	}
+	for _, marker := range []string{"start := time.Now()", "parseVerbArgv()", "recoverUsage(", "resolveEarlyDispatch("} {
+		if at := bytes.Index(source, []byte(marker)); at < 0 || callAt >= at {
+			t.Fatalf("broker dispatch at %d must precede %q at %d", callAt, marker, at)
+		}
+	}
+	data, err := os.ReadFile(usagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != 0 {
+		t.Fatalf("hidden broker wrote usage telemetry: %q", data)
+	}
+}
 
 // TestApplyRuntimeInstallsRateCap is the issue-#699 acceptance witness (criterion
 // 3): applyRuntime pushes the manifest rate_limit into the governor singleton, an

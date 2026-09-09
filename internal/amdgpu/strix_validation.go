@@ -681,6 +681,14 @@ func RunStrixValidation(ctx context.Context, opts StrixValidationOpts) (*StrixVa
 		}
 	}
 	receipt.Provenance.ExecutionManifestSHA256 = executionManifestDigest(receipt)
+	if receipt.Verified {
+		if e := receipt.authorizePhysicalCredit(); e != nil {
+			receipt.Verified = false
+			receipt.Verdict = "FAIL"
+			receipt.Failures = append(receipt.Failures, e.Error())
+			validationErr = e
+		}
+	}
 	receipt.Digest, _ = receipt.ComputeDigest()
 	if receipt.Verified {
 		if e := receipt.Validate(); e != nil {

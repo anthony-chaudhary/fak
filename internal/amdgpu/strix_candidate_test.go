@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -522,6 +523,7 @@ func TestEvaluateReceipt(t *testing.T) {
 	receipt.SelectedAblations = 2
 	receipt.ExecutedAblations = 2
 	receipt.Provenance.ExecutionManifestSHA256 = executionManifestDigest(receipt)
+	authorizeStrixReceiptForTest(t, receipt)
 
 	digest, err := receipt.ComputeDigest()
 	if err != nil {
@@ -529,18 +531,18 @@ func TestEvaluateReceipt(t *testing.T) {
 	}
 	receipt.Digest = digest
 
-	comparisons, err := reg.EvaluateReceipt(receipt)
-	if err != nil {
-		t.Fatalf("unexpected error evaluating receipt: %v", err)
+	if err := receipt.Validate(); err != nil || !receipt.authenticatedPass() {
+		t.Fatalf("ablation receipt must be structurally valid and authenticated: %v", err)
 	}
-
-	if len(comparisons) != 2 {
-		t.Fatalf("expected 2 comparisons, got %d", len(comparisons))
+	if receipt.CreditEligible() {
+		t.Fatal("ablation-bearing receipt must not be credit eligible")
 	}
-	for _, c := range comparisons {
-		if c.Verdict != VerdictPromoted {
-			t.Errorf("receipt comparison for %s verdict = %q, want PROMOTED", c.CandidateID, c.Verdict)
-		}
+	before := reg.Scoreboard()
+	if comparisons, err := reg.EvaluateReceipt(receipt); err == nil || len(comparisons) != 0 {
+		t.Fatalf("ineligible ablation receipt was evaluated: comparisons=%d err=%v", len(comparisons), err)
+	}
+	if after := reg.Scoreboard(); !reflect.DeepEqual(after, before) {
+		t.Fatalf("rejected receipt mutated scoreboard: before=%v after=%v", before, after)
 	}
 }
 
@@ -774,8 +776,8 @@ func TestStrixValidationBenchmarkArtifact(t *testing.T) {
 			t.Fatalf("synthetic receipt should validate: %v", err)
 		}
 		reg := NewStrixCandidateRegistry()
-		if _, err := reg.EvaluateReceipt(receipt); err != nil {
-			t.Fatalf("EvaluateReceipt failed on valid synthetic receipt: %v", err)
+		if _, err := reg.EvaluateReceipt(receipt); err == nil {
+			t.Fatal("EvaluateReceipt accepted an ineligible synthetic ablation receipt")
 		}
 
 		// Tampered digest fails closed

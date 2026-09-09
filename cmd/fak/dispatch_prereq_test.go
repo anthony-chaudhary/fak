@@ -269,3 +269,27 @@ func TestDispatchWaveNewlyUnblockedLeadsOrdinarySameTier(t *testing.T) {
 		t.Fatalf("run targets = %+v, want newly unblocked issue 20", price.RunTargets)
 	}
 }
+
+func TestDispatchPrereq_Dependencies(t *testing.T) {
+	// 1. "Start blocked by: #101" blocks pickup of #102.
+	bodyStartBlocked := "## Scope / tree\ninternal/bar\n\nStart blocked by: #101\n"
+	blocked := dispatchtick.CandidateBlockedBy(bodyStartBlocked)
+	if !reflect.DeepEqual(blocked, []string{"101"}) {
+		t.Fatalf("CandidateBlockedBy = %v, want [101]", blocked)
+	}
+	gotBlocked := holdOpenPrereqForRoute(prereqPayload(blocked))
+	if len(openPrereqBlockedSkipped(gotBlocked)) != 1 {
+		t.Fatalf("want #102 held with BLOCKED_BY_OPEN_PREREQ, got %d holds", len(openPrereqBlockedSkipped(gotBlocked)))
+	}
+
+	// 2. Advisory ('Coordinates with:') and promotion ('Promotion requires:') never gate pickup.
+	bodyAdvisoryPromotion := "## Scope / tree\ninternal/bar\n\nCoordinates with: #101\nPromotion requires: #101\n"
+	nonBlocked := dispatchtick.CandidateBlockedBy(bodyAdvisoryPromotion)
+	if len(nonBlocked) != 0 {
+		t.Fatalf("CandidateBlockedBy for advisory/promotion = %v, want empty", nonBlocked)
+	}
+	gotNonBlocked := holdOpenPrereqForRoute(prereqPayload(nonBlocked))
+	if len(openPrereqBlockedSkipped(gotNonBlocked)) != 0 {
+		t.Fatalf("advisory/promotion must never produce BLOCKED_BY_OPEN_PREREQ, got %+v", openPrereqBlockedSkipped(gotNonBlocked))
+	}
+}
