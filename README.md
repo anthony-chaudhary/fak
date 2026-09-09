@@ -4,29 +4,21 @@
 
 # fak — the fast local runtime for coding agents
 
-**fak is an agent runtime: one binary puts a fast, cache-accelerated boundary between your coding agent and every tool call.**
+**fak is the agent runtime for local model serving, prefix caching, and zero-cold-start subagent fanout.**
 
 > **In short:** run coding agents locally with zero-cold-start subagent fanout and cache reuse, protected by a default-deny capability floor (blocking unauthorized actions).
 
 ## Try fak
 
-Run the offline proof with no key, model, or GPU:
+Install with `curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh` (or `go install github.com/anthony-chaudhary/fak/cmd/fak@latest`).
 
-```bash
-go build -o fak ./cmd/fak
-./fak agent --offline  # -> task completed (booked)
-```
-
-The poisoned result and destructive operation are blocked; safe tasks complete normally.
-
-### See raw speed and batched agents (Mac or any host)
-
-Experience raw in-kernel inference speed and concurrent multi-agent fanout on any Mac:
+Experience raw in-kernel inference speed and concurrent multi-agent fanout:
 
 1. Raw inference speed (`fak up`):
-   Auto-probes unified memory with `macfit`, reserves headroom to prevent swapping, starts the local OpenAI-compatible endpoint on `:8080`, and opens an interactive chat REPL (use `fak up --mock` for instant zero-download verification):
+   Auto-probes unified memory with `macfit` and reserves headroom to prevent swapping. Starts the local OpenAI-compatible endpoint on `:8080` and opens an interactive chat REPL (use `fak up --mock` for zero-download verification with no key, model, or GPU):
    ```bash
    fak up
+   # -> [READY] fak up running on http://127.0.0.1:8080
    ```
    ```
    [READY] fak up running on http://127.0.0.1:8080
@@ -61,15 +53,17 @@ Experience raw in-kernel inference speed and concurrent multi-agent fanout on an
    Runs four co-batched subagents over a 30,000-token shared prefix, witnessing 18,000+ tokens/sec aggregate throughput and >95% cache hit rate with bit-exact logit parity (`cosine = 1.000000`).
 
 > [!TIP]
-> **New to subagents?** Follow the [Subagents Guide](docs/subagents-guide.md) to launch `fak up` and run parallel cohorts with shared-prefix cache reuse.
+> New to subagents? Follow the [Subagents Guide](docs/subagents-guide.md) to launch `fak up` and run parallel cohorts with shared-prefix cache reuse.
 
-Or wrap the agent you already run with one command. In this example, fak forwards Codex subscription credentials with no API key required and blocks tools outside the allowed policy. The capability floor stops unsafe calls without breaking the task:
+### Governance for external agents (`fak guard`)
+
+Already running Claude Code or Codex? Wrap the agent you already run with one command to add a default-deny capability floor. fak forwards Codex subscription credentials with no API key required and blocks tools outside the allowed policy without breaking the task:
 
 ```bash
 fak guard -- codex
 ```
 
-The agent keeps working inside that boundary. See the [interactive showcase](docs/showcase.html) for the guided tour.
+In-kernel policy adjudication checks every tool call in under a microsecond before execution. See the [interactive showcase](docs/showcase.html) for a guided tour, or run `fak agent --offline` (# -> task completed) to inspect policy decisions with zero setup.
 
 ## Latest hardware results — 2026-09-08
 
@@ -88,8 +82,8 @@ Read the status column before comparing rates: results compare matched envelopes
 
 Use the [benchmark index](docs/benchmarks/README.md) for hardware history and model-specific
 results. Use [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md) for claim boundaries and canonical
-receipts. For newcomer Mac guidance, running local models (Qwen3.8), and head-to-head Apple Silicon Metal measurements, see the
-[Mac local models guide](docs/fak/mac-local-models.md), [Mac agent UI guide](docs/fak/mac-agent-ui.md), and the [three-way Mac benchmark](docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md).
+receipts. For Mac local model setup and head-to-head Apple Silicon Metal measurements, see the
+[Mac local models guide](docs/fak/mac-local-models.md) and the [three-way Mac benchmark](docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md). For agent UI workflows, see the [Mac agent UI guide](docs/fak/mac-agent-ui.md).
 
 ## Open-source memory overflow landscape
 
@@ -106,7 +100,7 @@ Most LLM serving engines treat memory overflow as a slow host-memory fallback wi
 
 ## Why run coding agents on fak
 
-- **Zero-cold-start subagent fanout:** Standard multi-agent swarms pay a heavy cold-start penalty on every spawned worker, re-ingesting 20k–30k tokens of prompts, tools, and repo context. fak warms this shared prefix once. Subagents inherit resident KV caches in milliseconds ($O(1)$ memory cloning), dropping Time-To-First-Token (TTFT) and achieving **4.1× vs tuned** baselines with 86.7% cache hit rates. In-kernel tool caching (vDSO) serves idempotent reads in sub-microsecond time.
+- **Zero-cold-start subagent fanout:** Standard multi-agent swarms pay a heavy cold-start penalty on every spawned worker, re-ingesting 20k–30k tokens of prompts, tools, and repo context. fak warms this shared prefix once. Subagents inherit resident KV caches in milliseconds ($O(1)$ memory cloning), dropping Time-To-First-Token (TTFT) and achieving 4.1× vs tuned baselines with 86.7% cache hit rates. In-kernel tool caching (vDSO) serves idempotent reads in sub-microsecond time.
 - **Real-time multi-agent visibility:** Inspect live cross-agent reuse rates, per-subagent token breakdowns, and savings sparklines directly in your terminal overlay (`fak info` / `fak guard`) to see and verify the speedup as subagents execute concurrently.
 - **Zero-copy GPU Direct storage overflow:** Run models far exceeding physical GPU VRAM without host memory thrashing. Built on a BaM accelerator storage architecture, fak maps NVMe queues directly in GPU VRAM. It streams paged KV caches and hybrid linear states over peer-to-peer PCIe DMA without DRAM bounce copies (`StagingCopyCount == 0`). See the [GPU Direct overflow specification](docs/benchmarks/QWEN38-AMD-GPUDIRECT-RESULTS.md).
 - **Local execution on your hardware:** Run models directly with native inference across Apple Silicon, AMD, and NVIDIA. New work prioritizes Qwen3.8 with resident quantization and prefix reuse. Cut token bills and keep your code private on your own machine.
@@ -118,9 +112,9 @@ Native inference provides direct execution on local silicon, with external engin
 
 fak is organized around a focused four-tier default priority hierarchy:
 
-1. **fak all in one (serving and harness + memory — the "one touch" thing):** The primary focus: a single-binary turnkey runtime (`fak up`) bundling model serving, agent harness governance, and persistent memory. Verified on Terminal-Bench 4: 100.0% (5/5) solve rate vs OpenCode + llama.cpp 60.0% (3/5), cutting prompt tokens by 83.5% via in-kernel vDSO context caching (`fak bench tb4`).
+1. **fak all in one (serving and harness + memory — the "one touch" thing):** The primary focus: a single-binary deployment (`fak up`) bundling model serving, agent harness governance, and persistent memory. Verified on Terminal-Bench 4: 100.0% (5/5) solve rate vs OpenCode + llama.cpp 60.0% (3/5), cutting prompt tokens by 83.5% via in-kernel vDSO context caching (`fak bench tb4`).
 2. **fak serving only:** High-performance model inference runtime (`fak serve`), disaggregated gateway, KV-cache context acceleration, and native model execution.
-3. **fak harness only:** Standalone agent governance substrate (`fak guard`), default-deny capability floor, and tool adjudication over external models.
+3. **fak harness only:** Standalone agent governance (`fak guard`) with a default-deny capability floor and tool adjudication over external models.
 4. **other things:** Standalone utilities, peripheral tools, benchmarks, and off-spine extensions.
 
 ## Install and configure
@@ -139,13 +133,13 @@ fak agent profiles
 Tune agent execution with built-in work and output profiles that cut token waste and resist unnecessary dependencies:
 
 ```bash
-fak manage --output-profile caveman:medium --work-profile ponytail:high -- codex \
+fak guard --output-profile caveman:medium --work-profile ponytail:high -- codex \
   "Remove the duplicate cache without adding a dependency."
 ```
 
 Balanced defaults are `ponytail:medium` for work discipline and `caveman:medium` for concise responses. See
 [work profiles](docs/work-profiles.md), [response profiles](docs/response-profiles.md), or the
-[harness guide](docs/harness-init.md) to build a named agent around the same boundary.
+[harness guide](docs/harness-init.md) to build a named agent on the runtime.
 
 ## Going deeper
 
@@ -160,4 +154,4 @@ Balanced defaults are `ponytail:medium` for work discipline and `caveman:medium`
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-09-08 vs VERSION 0.54.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-08 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
+<!-- readme-verified: 2026-09-09 vs VERSION 0.54.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-09 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->

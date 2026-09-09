@@ -182,6 +182,32 @@ func TestProbeLANNodeHTTPHealthz(t *testing.T) {
 	}
 }
 
+func TestProbeLANNodeAutoDiscoversCanonicalStrix(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Setenv("FAK_STRIX_HOST", "")
+	t.Setenv("FAK_LAN_HOST", "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	info := probeLANNode(ctx, "", []string{ts.Listener.Addr().String()})
+	if info.Status != LANNodeOnline || !info.Reachable {
+		t.Fatalf("empty-config canonical discovery = %+v, want reachable ONLINE", info)
+	}
+	if info.Transport != "http_healthz" {
+		t.Fatalf("transport = %q, want http_healthz", info.Transport)
+	}
+	if info.Host != "<LAN_IP>" || strings.Contains(info.Endpoint, "127.0.0.1") {
+		t.Fatalf("auto-discovered telemetry was not scrubbed: host=%q endpoint=%q", info.Host, info.Endpoint)
+	}
+}
+
 func TestProbeLANNodeSSHReachable(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -265,7 +291,7 @@ func TestProbeLANNodeUnconfigured(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	info := ProbeLANNode(ctx, "")
+	info := probeLANNode(ctx, "", nil)
 	if info.Status != LANNodeUnconfigured {
 		t.Errorf("expected status %s, got %s", LANNodeUnconfigured, info.Status)
 	}
