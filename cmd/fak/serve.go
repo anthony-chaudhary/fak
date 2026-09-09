@@ -98,7 +98,7 @@ func serveStreamProgressTimeout(d time.Duration) time.Duration {
 func configureServeToolEngines() {
 	// Serve exposes fak_read over MCP even when it is not running the demo agent loop.
 	// Register only the confined read miss engine; agent.Configure would also install
-	// the demo airline tool policy and is intentionally not part of serve startup.
+	// the demo tool policy and is intentionally not part of serve startup.
 	agent.RegisterReadEngine("")
 }
 
@@ -114,6 +114,7 @@ type serveFlags struct {
 	baseURL                      *string
 	replicaBaseURLs              repeatedStringFlag
 	model                        *string
+	mock                         *bool
 	apiKeyEnv                    *string
 	streamProgressTimeout        *time.Duration
 	engineCacheEngine            *string
@@ -220,6 +221,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.baseURL = fs.String("base-url", "", "upstream provider base URL for the /v1/chat/completions proxy (empty = offline mock planner)")
 	fs.Var(&sf.replicaBaseURLs, "replica-base-url", "additional upstream provider base URL for a static round-robin replica fleet; repeat for N replicas. If --base-url is set, it is replica 1. Each replica's identity defaults to a stable endpoint-derived id (replica-<digest>) so the same upstream keeps its metric/residency labels regardless of flag order or a dropped peer; pass name=URL to pin an operator-chosen id.")
 	sf.model = fs.String("model", "mock", "model id (advertised by /v1/models; used for the upstream call)")
+	sf.mock = fs.Bool("mock", false, "run with deterministic offline mock planner (scripted responses, no model execution)")
 	sf.opencode = fs.Bool("opencode", false, "one-touch OpenCode setup: write or update opencode.json in the current workspace with this server's provider config")
 	sf.opencodeConfig = fs.Bool("opencode-config", false, "print opencode.json provider configuration for this server and exit without binding a listener")
 	sf.writeOpencodeConfig = fs.Bool("write-opencode-config", false, "write or update opencode.json in the current workspace with this server's provider config and exit without binding a listener")
@@ -248,7 +250,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.llamaServer = fs.String("llama-server", "llama-server", "versioned llama-server binary used only by explicit --qwen38-runtime llama-mtp benchmark/reference interoperability")
 	sf.llamaStartupTimeout = fs.Duration("llama-startup-timeout", 2*time.Minute, "bounded readiness timeout for a fak-owned llama-server child")
 	sf.cudaGraph = fs.Bool("cuda-graph", false, "with --backend cuda: capture each decode token's whole op stream into a CUDA graph and replay it as ONE launch instead of N kernel launches (#483), the per-token launch-overhead lever for large single-stream decode (e.g. Qwen3.6-27B on an A100). OFF by default (a measured no-win on a tiny 0.5B/L4 where launch overhead is already small); witness tok/s before/after on YOUR node before relying on it. Equivalent to FAK_CUDA_GRAPH=1; inert on a non-cuda build or CPU backend.")
-	sf.policyPath = fs.String("policy", "", "capability-floor manifest to load (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
+	sf.policyPath = fs.String("policy", "", "capability-floor manifest to load (default: the built-in production capability floor; see `fak policy --dump`)")
 	sf.profile = fs.String("profile", "", "permission profile: dev|prod|audit (env: FAK_PROFILE)")
 	sf.policyCanaryTurns = fs.Int("policy-canary-turns", 0, "after a policy reload, roll back when this many consecutive requests are denied; 0 disables the canary")
 	sf.policyCheck = fs.Bool("policy-check", false, "validate --policy and exit without binding a listener")
@@ -298,13 +300,13 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.otlpEndpoint = fs.String("otlp-traces-endpoint", "", "optional OTLP/HTTP endpoint; appends /v1/traces")
 	sf.debugStats = fs.Bool("debug-stats", false, "print ONE compact, payload-free line per served turn to stderr: request/cache_read/cache_creation tokens plus current/previous/average/median/high/low cache savings, the compaction action, and the resetScore SHADOW health (healthy_cache|cache_decay|stale_prefix|cooldown|unknown_provider). Independent of --log (#793); default off.")
 	sf.dojoMode = fs.Bool("dojo", false, "enable live dojo mode: write a start-marker for each serve session into the live-episode corpus (.dojo/live-episodes/ under the workspace root) for issue #956. NOTE: live-episode scoring is not yet wired into `fak dojo run` (which today scores Claude Code transcripts passed via --corpus), so this records the boundary but does not yet feed the scorer.")
-	sf.native = fs.Bool("native", false, "NATIVE HARNESS (#1316/#1837): drive fak's OWN agent loop for every /v1/messages turn instead of the single-shot proxy turn. Both buffered and `stream: true` requests stay on the owned native path; streaming drives agent.RunArmStream and renders its text deltas plus typed lifecycle progress as Anthropic SSE and does not fall through to the proxy. If streaming cannot be safely emitted â a response writer that cannot flush, a planner that does not support streaming, or an armed answer stop-gate (a rejected answer must never leak as a delta) â the request degrades to the buffered native handler — the same owned loop, one response instead of deltas. The in-kernel syscall boundary remains the sole tool path, and ArmMetrics ride on the response `fak.native_arm` extension. Off by default (the proxy path is byte-for-byte unchanged).")
+	sf.native = fs.Bool("native", false, "drive fak's own agent loop for /v1/messages instead of the proxy. Both buffered and `stream: true` requests stay on the owned native path; streaming drives agent.RunArmStream and renders its text deltas plus typed lifecycle progress as Anthropic SSE and does not fall through to the proxy. If streaming cannot be safely emitted — a response writer that cannot flush, a planner that does not support streaming, or an armed answer stop-gate (a rejected answer must never leak as a delta) — the request degrades to the buffered native handler — the same owned loop, one response instead of deltas. The in-kernel syscall boundary remains the sole tool path, and ArmMetrics ride on the response `fak.native_arm` extension. Off by default (the proxy path is byte-for-byte unchanged).")
 	sf.nativeMaxTurns = fs.Int("native-max-turns", gateway.DefaultNativeMaxTurns, "with --native: cap the owned loop's model round-trips per served request (<=0 uses the built-in default)")
-	sf.nativeAdmissionTokenBudget = fs.Int("native-admission-token-budget", gateway.DefaultAdmissionPolicy().TokenBudget, "with a fak-native in-kernel model: cap the total token footprint admitted by the request scheduler; must be positive (default 8192)")
-	sf.nativeCodeWorkspace = fs.String("native-code-workspace", "", "override the workspace root for default-on kernel Read/Write/Edit/Bash/Grep/Glob (requires --native)")
-	sf.nativeCodeTools = fs.Bool("native-code-tools", true, "with --native, arm bounded kernel Read/Write/Edit/Bash/Grep/Glob in the current workspace; use --native-code-tools=false to disable")
-	sf.nativeSpeculate = fs.Bool("native-speculate", false, "enable effect-free coding speculation (requires --native-code-workspace)")
-	sf.vdsoProxyFill = fs.Bool("vdso-proxy-fill", false, "warm the vDSO from ADMITTED inbound tool_result blocks on the proxy path: an allowed, read-only-shaped result the client sends back fills (tool,args)->result so a LATER identical read is served inline (no client re-execution). Off by default — sound only when the principal is named and writes that touch the same resource reach fak (a proxy-closed world), so it is an explicit operator opt-in. Scoped per-principal; never fills a Shareable or write-shaped tool.")
+	sf.nativeAdmissionTokenBudget = fs.Int("native-admission-token-budget", gateway.DefaultAdmissionPolicy().TokenBudget, "with in-kernel model: cap admitted token footprint. Must be positive (default 8192)")
+	sf.nativeCodeWorkspace = fs.String("native-code-workspace", "", "override workspace root for kernel coding tools. Requires --native.")
+	sf.nativeCodeTools = fs.Bool("native-code-tools", true, "arm bounded kernel coding tools in current workspace. Default true; pass false to disable.")
+	sf.nativeSpeculate = fs.Bool("native-speculate", false, "enable effect-free coding speculation. Requires --native-code-workspace.")
+	sf.vdsoProxyFill = fs.Bool("vdso-proxy-fill", false, "warm vDSO from admitted inbound tool_result blocks. Off by default — sound only when the principal is named and writes that touch the same resource reach fak (a proxy-closed world), so it is an explicit operator opt-in. Scoped per-principal; never fills a Shareable or write-shaped tool.")
 	sf.metricsSnapshot = fs.Duration("metrics-snapshot", 0, "periodically append an interim gateway-usage counter snapshot (internal/gatewayusageledger, .fak/nightrun/gateway-usage.jsonl) while this long-lived `fak serve` is up, so a crash before a clean exit still leaves a trail (#1610). 0 (default) disables periodic snapshots; the exit-time snapshot is always written regardless of this flag.")
 	sf.fleetBus = fs.Bool("fleet-bus", false, "JOIN THE FLEET CONTROL BUS (#5600, epic #5599): announce this serve as a control-plane instance on the shared bus and drain directives from it every --fleet-bus-interval, so one `fak fleet control send` reaches every live instance at once — the cross-PROCESS fan-out the per-gateway `sessionctl` broadcast and the display-only `fleetspine` each stop short of. Each drained directive is applied through the SAME writes the single-session verbs ride (steer ⇒ the a2achan operator turn, needs --native; pause/resume/cancel/terminate/throttle ⇒ session.Table.Transition) and every one draws an ACK carrying what this process OBSERVED change — the return path that lets the control point say \"3 of 4 applied, 1 refused STEER_NO_OWNED_LOOP\" instead of \"sent\". Exactly-once under at-least-once redelivery is keyed by the instance identity: the default fixed HTTP listen address survives a restart and remains distinct from simultaneous serves on other addresses; --stdio, --addr :0, or an unusable address fall back to a process-local identity and therefore do not promise restart dedup. Off by default (arming a control plane must be stated); the bus directory is --fleet-bus-dir.")
 	sf.fleetBusDir = fs.String("fleet-bus-dir", "", "with --fleet-bus: the shared bus directory (default: FAK_FLEET_BUS, else <FLEET_STATE_DIR>/bus, else beside the fleet registry). On one machine a directory IS a real cross-process control plane; it is an honest cross-HOST one only where the directory itself is shared (a UNC path, an SMB/NFS mount) — which is what FLEET_STATE_DIR already exists to point at.")
@@ -363,7 +365,10 @@ func cmdServe(argv []string) {
 		manifestPresent = true
 	}
 	tParse := time.Now()
-	_ = fs.Parse(argv)
+	if err := parseServeArgs(fs, sf, argv); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(2)
+	}
 	parseDur := time.Since(tParse)
 	durability := resolveServeSessionState(*sf.sessionStatePath, os.Getenv)
 	*sf.sessionStatePath = durability.Path
@@ -429,6 +434,10 @@ func cmdServe(argv []string) {
 	rt := &serveRuntime{t0: t0, toolPlugins: toolPlugins, toolPreferences: toolPreferences, startupPhases: []gateway.StartupPhase{
 		{Name: "flag-parse", Dur: parseDur},
 	}}
+	if err := resolveServeModelOrPrompt(sf, explicit, os.Stdin, os.Stderr, guardFdIsTerminal(int(os.Stdin.Fd()))); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
 	rt.resolveServeModelSources(sf)
 	// --policy-check: validate the manifest and exit, binding no listener.
 	if *sf.policyCheck {
