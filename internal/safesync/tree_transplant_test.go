@@ -2,6 +2,7 @@ package safesync
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -89,6 +90,12 @@ func TestSyntheticTreeTransplantDisjoint(t *testing.T) {
 	if treeBase != "base content" {
 		t.Errorf("base.txt in merge tree = %q, want %q", treeBase, "base content")
 	}
+
+	// 5) Incoming disjoint file A must exist in the working directory (checked out).
+	gotA := readFile(t, filepath.Join(repo, "a.txt"))
+	if gotA != "file A content\n" {
+		t.Errorf("a.txt in working tree = %q, want %q", gotA, "file A content\n")
+	}
 }
 
 func TestRouteReconciliationDisjointTransplantWithDirtyWorkingTree(t *testing.T) {
@@ -158,6 +165,12 @@ func TestRouteReconciliationDisjointTransplantWithDirtyWorkingTree(t *testing.T)
 	if showLocal != "local B content" {
 		t.Errorf("b_local.txt = %q, want %q", showLocal, "local B content")
 	}
+
+	// Verify incoming remote file is checked out to the working directory
+	gotRemote := readFile(t, filepath.Join(clone, "a_remote.txt"))
+	if gotRemote != "remote A content\n" {
+		t.Errorf("a_remote.txt in working tree = %q, want %q", gotRemote, "remote A content\n")
+	}
 }
 
 func TestSyntheticTreeTransplantDetachedHEAD(t *testing.T) {
@@ -225,5 +238,79 @@ func TestSyntheticTreeTransplantConflictError(t *testing.T) {
 	_, err := TransplantDisjointTree(ctx, repo, "main", headSHA, targetSHA, "refs/heads/feature")
 	if err == nil {
 		t.Fatalf("expected conflict error from TransplantDisjointTree, got nil")
+	}
+}
+
+func TestSyntheticTreeTransplantCheckoutIncomingPaths(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init", "-b", "main")
+	git(t, repo, "config", "core.autocrlf", "false")
+	git(t, repo, "config", "user.name", "test")
+	git(t, repo, "config", "user.email", "test@example.com")
+
+	writeFile(t, filepath.Join(repo, "base.txt"), "base\n")
+	writeFile(t, filepath.Join(repo, "remote_mod.txt"), "remote base\n")
+	writeFile(t, filepath.Join(repo, "local_mod.txt"), "local base\n")
+	git(t, repo, "add", "base.txt", "remote_mod.txt", "local_mod.txt")
+	git(t, repo, "commit", "-m", "base commit")
+
+	// Target commit adds pkg/nested.txt and modifies remote_mod.txt
+	git(t, repo, "checkout", "-b", "feature")
+	if err := os.MkdirAll(filepath.Join(repo, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(repo, "pkg", "nested.txt"), "incoming nested\n")
+	writeFile(t, filepath.Join(repo, "remote_mod.txt"), "remote modified\n")
+	git(t, repo, "add", "pkg/nested.txt", "remote_mod.txt")
+	git(t, repo, "commit", "-m", "feature commit")
+	targetSHA := revString(t, repo, "feature")
+
+	// Main modifies local_mod.txt (disjoint from feature)
+	git(t, repo, "checkout", "main")
+	writeFile(t, filepath.Join(repo, "local_mod.txt"), "local modified commit\n")
+	git(t, repo, "add", "local_mod.txt")
+	git(t, repo, "commit", "-m", "main commit")
+	headSHA := revString(t, repo, "main")
+
+	// Dirty uncommitted edits in working tree
+	writeFile(t, filepath.Join(repo, "local_mod.txt"), "local modified dirty\n")
+	writeFile(t, filepath.Join(repo, "dirty.txt"), "dirty untracked\n")
+
+	ctx := context.Background()
+	newCommitSHA, err := TransplantDisjointTree(ctx, repo, "main", headSHA, targetSHA, "refs/heads/feature")
+	if err != nil {
+		t.Fatalf("TransplantDisjointTree failed: %v", err)
+	}
+	if newCommitSHA == "" {
+		t.Fatalf("expected non-empty newCommitSHA")
+	}
+
+	// 1. Incoming added file exists in working tree
+	if got := readFile(t, filepath.Join(repo, "pkg", "nested.txt")); got != "incoming nested\n" {
+		t.Errorf("nested.txt = %q, want %q", got, "incoming nested\n")
+	}
+
+	// 2. Incoming modified file updated in working tree
+	if got := readFile(t, filepath.Join(repo, "remote_mod.txt")); got != "remote modified\n" {
+		t.Errorf("remote_mod.txt = %q, want %q", got, "remote modified\n")
+	}
+
+	// 3. Local dirty uncommitted edits preserved (NOT clobbered)
+	if got := readFile(t, filepath.Join(repo, "local_mod.txt")); got != "local modified dirty\n" {
+		t.Errorf("local_mod.txt = %q, want %q", got, "local modified dirty\n")
+	}
+
+	// 4. Dirty untracked file preserved
+	if got := readFile(t, filepath.Join(repo, "dirty.txt")); got != "dirty untracked\n" {
+		t.Errorf("dirty.txt = %q, want %q", got, "dirty untracked\n")
+	}
+
+	// 5. git status does NOT have any phantom deletions
+	status := gitOutput(t, repo, "status", "--porcelain")
+	for _, line := range strings.Split(strings.TrimSpace(status), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "D ") || strings.HasPrefix(line, " D") {
+			t.Errorf("unexpected deletion in git status: %q\nfull status:\n%s", line, status)
+		}
 	}
 }
