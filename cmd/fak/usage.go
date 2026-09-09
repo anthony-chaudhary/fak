@@ -39,7 +39,23 @@ func usageWallText() string {
 }
 
 const usageCoreText = `usage:
-  fak run       --trace FILE [--engine inkernel] [--vdso=true] [--policy FILE]
+  fak run       <model> [prompt] [flags]
+  fak run       --trace FILE [--engine ID] [--vdso=true] [--policy FILE]
+                (RUN IN-KERNEL MODEL CHAT/REPL OR REPLAY TRACE:
+                 Execute an in-kernel local model or replay a recorded tool-call trace.
+                 Chat / REPL mode:
+                   fak run <model> [prompt]
+                   Loads the model directly into fak's in-kernel engine for an
+                   interactive chat REPL (Ctrl-D to exit) or one-shot prompt completion.
+                   <model> is a known model alias (e.g. qwen38, smollm2; see 'fak ls'),
+                   an hf://owner/repo/model.gguf URI, or a local .gguf file.
+                   On every turn, witnessed KV-prefix cache reuse is printed to stderr.
+                 Trace replay mode:
+                   fak run --trace FILE (or 'fak replay --trace FILE')
+                   Replays a recorded JSON tool-call trace through the kernel
+                   adjudicator and vDSO fast path offline.)
+  fak replay    --trace FILE [--engine ID] [--vdso=true] [--policy FILE]
+                (unambiguous explicit spelling for trace replay; see 'fak run --trace')
   fak launch   [install|uninstall|default|enable|disable|status|doctor] [claude|codex] [--direct]
   fak harness model-set resolve --intent PATH --inventory PATH --out PATH [--json]
   fak harness model-set inspect --lock PATH [--receipt PATH] [--json]

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -16,6 +17,201 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
+
+type runAction int
+
+const (
+	runActionUsage runAction = iota // bare / missing required args
+	runActionHelp                   // -h or --help
+	runActionTrace                  // trace replay
+	runActionChat                   // in-kernel model chat / REPL
+)
+
+type runFlags struct {
+	// Chat / model controls
+	backendName      *string
+	system           *string
+	maxTokens        *int
+	temp             *float64
+	topP             *float64
+	topK             *int
+	frequencyPenalty *float64
+	presencePenalty  *float64
+	effort           *string
+	thinkingBudget   *int
+	quiet            *bool
+	nativeFlags      nativeControlFlags
+
+	// Trace controls
+	trace      *string
+	engineID   *string
+	vdso       *bool
+	policyPath *string
+}
+
+type chatModelConfig struct {
+	modelRef         string
+	prompt           string
+	backendName      string
+	system           string
+	maxTokens        int
+	temp             float64
+	topP             float64
+	topK             int
+	frequencyPenalty float64
+	presencePenalty  float64
+	effort           string
+	thinkingBudget   int
+	quiet            bool
+	nativeFlags      nativeControlFlags
+}
+
+type parsedRunCommand struct {
+	action     runAction
+	errMessage string
+	modelRef   string
+	prompt     string
+	chatConfig chatModelConfig
+	tracePath  string
+	engineID   string
+	vdso       bool
+	policyPath string
+}
+
+func newRunFlagSet(name string, errorHandling flag.ErrorHandling) (*flag.FlagSet, *runFlags) {
+	fs := flag.NewFlagSet(name, errorHandling)
+	verbFlagUsage(fs, "run")
+	flags := &runFlags{}
+
+	// Chat / model controls
+	flags.backendName = fs.String("backend", "", "compute backend for decode: empty = the CPU reference path; a registered device like 'cuda' runs through the GPU HAL (needs a -tags cuda build + a reachable GPU)")
+	flags.nativeFlags = registerRunNativeControlFlags(fs)
+	flags.system = fs.String("system", "", "optional system prompt prepended to the conversation")
+	flags.maxTokens = fs.Int("max-tokens", 512, "maximum number of tokens to generate per turn")
+	flags.temp = fs.Float64("temp", 0, "sampling temperature (0 = greedy/deterministic)")
+	flags.topP = fs.Float64("top-p", 0, "nucleus-sampling cutoff (0 = off)")
+	flags.topK = fs.Int("top-k", 0, "top-k truncation (0 = full distribution)")
+	flags.frequencyPenalty = fs.Float64("frequency-penalty", 0, "penalize tokens in proportion to their generated count (0 = off)")
+	flags.presencePenalty = fs.Float64("presence-penalty", 0, "penalize tokens already generated this turn (0 = off)")
+	flags.effort = fs.String("effort", "", "reasoning effort for model inference: none|low|medium|balanced|adaptive|high")
+	flags.thinkingBudget = fs.Int("thinking-budget", -1, "explicit thinking token budget ceiling (>=0 overrides --effort; 0 disables thinking)")
+	flags.quiet = fs.Bool("quiet", false, "suppress the per-turn cache-value summary line on stderr (the kernel's WITNESSED KV-prefix reuse)")
+
+	// Trace replay controls
+	flags.trace = fs.String("trace", "", "path to a trace JSON file to replay through the kernel")
+	flags.engineID = fs.String("engine", "mock", "engine id for trace replay (default: mock; inkernel: the explicit fak-native model path; cassette)")
+	flags.vdso = fs.Bool("vdso", true, "enable the vDSO fast path for trace replay")
+	flags.policyPath = fs.String("policy", "", "load the capability floor from a manifest (default: the built-in production capability floor; see `fak policy --dump`)")
+
+	return fs, flags
+}
+
+func parseRunArgs(fs *flag.FlagSet, flags *runFlags, argv []string) (parsedRunCommand, error) {
+	if len(argv) == 0 {
+		return parsedRunCommand{
+			action:     runActionUsage,
+			errMessage: "fak run: model or --trace is required",
+		}, nil
+	}
+
+	var modelRef string
+	var prompt string
+
+	if !strings.HasPrefix(argv[0], "-") {
+		// Model specified as the first argument: fak run <model> [flags] [prompt]
+		modelRef = argv[0]
+		if err := fs.Parse(argv[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return parsedRunCommand{action: runActionHelp}, nil
+			}
+			return parsedRunCommand{}, err
+		}
+		if flags.trace != nil && *flags.trace != "" {
+			return parsedRunCommand{
+				action:     runActionUsage,
+				errMessage: "fak run: --trace cannot be combined with a model argument",
+			}, nil
+		}
+		prompt = strings.TrimSpace(strings.Join(fs.Args(), " "))
+	} else {
+		// Flag specified as first argument: fak run [flags] [model] [prompt]
+		if err := fs.Parse(argv); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return parsedRunCommand{action: runActionHelp}, nil
+			}
+			return parsedRunCommand{}, err
+		}
+		if flags.trace != nil && *flags.trace != "" {
+			return parsedRunCommand{
+				action:     runActionTrace,
+				tracePath:  *flags.trace,
+				engineID:   *flags.engineID,
+				vdso:       *flags.vdso,
+				policyPath: *flags.policyPath,
+			}, nil
+		}
+		args := fs.Args()
+		if len(args) == 0 {
+			return parsedRunCommand{
+				action:     runActionUsage,
+				errMessage: "fak run: model is required (or pass --trace FILE)",
+			}, nil
+		}
+		modelRef = args[0]
+		prompt = strings.TrimSpace(strings.Join(args[1:], " "))
+	}
+
+	return parsedRunCommand{
+		action:   runActionChat,
+		modelRef: modelRef,
+		prompt:   prompt,
+		chatConfig: chatModelConfig{
+			modelRef:         modelRef,
+			prompt:           prompt,
+			backendName:      *flags.backendName,
+			system:           *flags.system,
+			maxTokens:        *flags.maxTokens,
+			temp:             *flags.temp,
+			topP:             *flags.topP,
+			topK:             *flags.topK,
+			frequencyPenalty: *flags.frequencyPenalty,
+			presencePenalty:  *flags.presencePenalty,
+			effort:           *flags.effort,
+			thinkingBudget:   *flags.thinkingBudget,
+			quiet:            *flags.quiet,
+			nativeFlags:      flags.nativeFlags,
+		},
+	}, nil
+}
+
+func runUnifiedRun(argv []string) {
+	fs, flags := newRunFlagSet("run", flag.ContinueOnError)
+	cmd, err := parseRunArgs(fs, flags, argv)
+	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fs.Usage()
+			os.Exit(0)
+		}
+		os.Exit(2)
+	}
+	switch cmd.action {
+	case runActionHelp:
+		os.Exit(0)
+	case runActionUsage:
+		fmt.Fprintln(os.Stderr, cmd.errMessage)
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "usage: fak run <model> [prompt] [flags]")
+		fmt.Fprintln(os.Stderr, "       fak run --trace FILE [flags]")
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "Run an in-kernel model chat/REPL, or replay a recorded tool-call trace.")
+		fmt.Fprintln(os.Stderr, "See 'fak run --help' or 'fak help run' for details.")
+		os.Exit(2)
+	case runActionTrace:
+		executeTraceReplay(cmd.tracePath, cmd.engineID, cmd.vdso, cmd.policyPath)
+	case runActionChat:
+		executeChatModel(cmd.chatConfig)
+	}
+}
 
 // runChatModel is the `fak run <model> [prompt]` chat path — the daemon-less,
 // Ollama-style one-shot/REPL surface. It loads a model directly into fak's
@@ -31,68 +227,40 @@ import (
 // here is the in-kernel engine (prefix reuse, quantized resident decode) in one
 // static binary with no server to stand up.
 func runChatModel(argv []string) {
-	fs := flag.NewFlagSet("run", flag.ExitOnError)
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: fak run <model> [prompt]")
-		fmt.Fprintln(os.Stderr, "  <model>  a model alias (see `fak ls`), an hf://owner/repo/file.gguf URI, or a .gguf path")
-		fmt.Fprintln(os.Stderr, "  [prompt] one-shot prompt; omit it for an interactive REPL")
-		fmt.Fprintln(os.Stderr, "  (this is `fak run` CHAT mode; `fak run --trace FILE` / `fak replay` is the trace replayer)")
-		fs.PrintDefaults()
-	}
-	backendName := fs.String("backend", "", "compute backend for decode: empty = the CPU reference path; a registered device like 'cuda' runs through the GPU HAL (needs a -tags cuda build + a reachable GPU)")
-	runNativeFlags := registerRunNativeControlFlags(fs)
-	system := fs.String("system", "", "optional system prompt prepended to the conversation")
-	maxTokens := fs.Int("max-tokens", 512, "maximum number of tokens to generate per turn")
-	temp := fs.Float64("temp", 0, "sampling temperature (0 = greedy/deterministic)")
-	topP := fs.Float64("top-p", 0, "nucleus-sampling cutoff (0 = off)")
-	topK := fs.Int("top-k", 0, "top-k truncation (0 = full distribution)")
-	frequencyPenalty := fs.Float64("frequency-penalty", 0, "penalize tokens in proportion to their generated count (0 = off)")
-	presencePenalty := fs.Float64("presence-penalty", 0, "penalize tokens already generated this turn (0 = off)")
-	effort := fs.String("effort", "", "reasoning effort for model inference: none|low|medium|balanced|adaptive|high")
-	thinkingBudget := fs.Int("thinking-budget", -1, "explicit thinking token budget ceiling (>=0 overrides --effort; 0 disables thinking)")
-	// fak's core value-add — KV-prefix reuse — is invisible by default everywhere else
-	// (#333: only --debug-stats or /metrics show it). On the daemon-less `fak run` front
-	// door we print a one-line WITNESSED cache-value summary per turn to STDERR (never
-	// stdout, so the model answer stays pipe-clean) so a developer SEES the prefix the
-	// kernel served from cache instead of recomputed. --quiet silences it for scripting.
-	quiet := fs.Bool("quiet", false, "suppress the per-turn cache-value summary line on stderr (the kernel's WITNESSED KV-prefix reuse)")
+	runUnifiedRun(argv)
+}
 
-	// argv[0] is the model ref (a non-flag, guaranteed by the cmdRun dispatch); the
-	// rest are flags and/or the prompt words. Parse the flags out of argv[1:].
-	modelRef := argv[0]
-	if err := fs.Parse(argv[1:]); err != nil {
-		os.Exit(2)
+func executeChatModel(cfg chatModelConfig) {
+	if cfg.nativeFlags.prefillChunk != nil {
+		if err := validateNativeQwenQ4KPrefillChunk(*cfg.nativeFlags.prefillChunk); err != nil {
+			fmt.Fprintln(os.Stderr, "fak run:", err)
+			os.Exit(2)
+		}
 	}
-	if err := validateNativeQwenQ4KPrefillChunk(*runNativeFlags.prefillChunk); err != nil {
-		fmt.Fprintln(os.Stderr, "fak run:", err)
-		os.Exit(2)
-	}
-	prompt := strings.TrimSpace(strings.Join(fs.Args(), " "))
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	planner := buildRunPlanner(ctx, modelRef, *backendName, runNativeFlags.config())
+	planner := buildRunPlanner(ctx, cfg.modelRef, cfg.backendName, cfg.nativeFlags.config())
 
 	var extraOpts []agent.SampleOpt
-	if *effort != "" {
-		extraOpts = append(extraOpts, agent.WithReasoningEffort(*effort))
+	if cfg.effort != "" {
+		extraOpts = append(extraOpts, agent.WithReasoningEffort(cfg.effort))
 	}
-	if *thinkingBudget >= 0 {
-		extraOpts = append(extraOpts, agent.WithThinkingBudget(*thinkingBudget))
+	if cfg.thinkingBudget >= 0 {
+		extraOpts = append(extraOpts, agent.WithThinkingBudget(cfg.thinkingBudget))
 	}
-	opts := runSampleOpts(*maxTokens, *temp, *topP, *topK, *frequencyPenalty, *presencePenalty, extraOpts...)
-	if prompt != "" {
+	opts := runSampleOpts(cfg.maxTokens, cfg.temp, cfg.topP, cfg.topK, cfg.frequencyPenalty, cfg.presencePenalty, extraOpts...)
+	if cfg.prompt != "" {
 		// One-shot: answer and exit.
-		runChatTurn(ctx, planner, *system, nil, prompt, opts, !*quiet)
+		runChatTurn(ctx, planner, cfg.system, nil, cfg.prompt, opts, !cfg.quiet)
 	} else {
 		// REPL: interactive session.
-		runChatREPL(ctx, planner, *system, opts, !*quiet)
+		runChatREPL(ctx, planner, cfg.system, opts, !cfg.quiet)
 	}
 	// Append cache-value observation to ledger (epic #1072, issue #1075).
 	stats := cacheobs.Default.Snapshot()
 	if stats.Turns > 0 {
-		_ = cachevalueledger.Append("run", modelRef, nightrunLedgerPath(cachevalueledger.DefaultLedgerRel), stats)
+		_ = cachevalueledger.Append("run", cfg.modelRef, nightrunLedgerPath(cachevalueledger.DefaultLedgerRel), stats)
 	}
 	// #1303 names this exit point alongside guard_child.go/serve.go for the Track-2
 	// appendObservedCacheSavings(sessionType, provider, context, gateway.AdjudicationSummary)

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/committedtree"
 	"github.com/anthony-chaudhary/fak/internal/gitdaily"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
 	"github.com/anthony-chaudhary/fak/internal/treedoctor"
@@ -102,6 +103,12 @@ func runGitDaily(stdout, stderr io.Writer, argv []string) int {
 	goTmpRoot := strings.TrimSpace(*goTmpDir)
 	if goTmpRoot == "" {
 		goTmpRoot = treedoctor.GoTmpRootFromEnv(os.Getenv)
+	}
+	if goTmpRoot == "" {
+		scratchGoTmp := filepath.Join(repoRoot, "_scratch", "go-tmp")
+		if fi, err := os.Stat(scratchGoTmp); err == nil && fi.IsDir() {
+			goTmpRoot = scratchGoTmp
+		}
 	}
 	goCacheRoot := treedoctor.GoCacheRootFromEnv(os.Getenv, os.UserCacheDir)
 	goCacheOptions := treedoctor.GoCacheOptions{ActiveBuild: treedoctor.ActiveGoBuild}
@@ -206,6 +213,9 @@ func runGitDaily(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 
+	if opts.Apply {
+		_, _, _ = committedtree.ReapStale("", committedtree.DefaultStaleTreeAge)
+	}
 	res := gitDailyRun(context.Background(), gitdaily.Runner(gitRunner), opts)
 
 	if *asJSON {
