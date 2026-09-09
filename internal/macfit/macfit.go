@@ -1,11 +1,16 @@
 package macfit
 
 import (
+	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"math"
 	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -224,6 +229,13 @@ func SelectModelTier(memoryBytes uint64) ModelTier {
 	return StandardTiers[len(StandardTiers)-1]
 }
 
+// TurnkeyOptions configures turnkey model sizing, supporting dynamic memory pressure and display buffer accounting.
+type TurnkeyOptions struct {
+	AvailableBytes     uint64 // live available memory in bytes (0 = auto-detect via compute.HostSystemMemoryInfo)
+	DisplayBufferBytes uint64 // display buffer reservation in bytes (0 = auto-detect)
+	StaticOnly         bool   // disable dynamic memory clamping (preserves standard static sizing)
+}
+
 // TurnkeyProfile describes the sizing calculation for turnkey model provisioning.
 type TurnkeyProfile struct {
 	Schema              string    `json:"schema"`
@@ -235,11 +247,114 @@ type TurnkeyProfile struct {
 	ContextBudgetTokens uint64    `json:"context_budget_tokens"`
 	KVBytesPerToken     uint64    `json:"kv_bytes_per_token"`
 	KVPoolBytes         uint64    `json:"kv_pool_bytes"`
+	AvailableBytes      uint64    `json:"available_bytes,omitempty"`
+	DisplayBufferBytes  uint64    `json:"display_buffer_bytes,omitempty"`
+	MemoryPressure      bool      `json:"memory_pressure,omitempty"`
+}
+
+// DefaultDisplayBufferReservePerDisplay is the estimated memory reserved by WindowServer
+// for high-DPI display compositing and surface backing stores per attached active display.
+const DefaultDisplayBufferReservePerDisplay = 1 * GiB
+
+// MinDisplayBufferReserve is the baseline display compositor reservation for the primary display.
+const MinDisplayBufferReserve = 512 * 1024 * 1024 // 512 MiB
+
+// DetectDisplayBufferBytes estimates the memory reserved by macOS WindowServer and display
+// compositors for active displays.
+//
+// Precedence:
+// 1. FAK_UP_DISPLAY_BUFFER_BYTES environment variable override.
+// 2. FAK_UP_DISPLAYS environment variable override (count * DefaultDisplayBufferReservePerDisplay).
+// 3. Platform inspection: on macOS, inspect active framebuffer displays via ioreg.
+// 4. Fallback default: MinDisplayBufferReserve on darwin, 0 elsewhere.
+func DetectDisplayBufferBytes() uint64 {
+	if v := os.Getenv("FAK_UP_DISPLAY_BUFFER_BYTES"); v != "" {
+		if n, err := strconv.ParseUint(v, 10, 64); err == nil {
+			return n
+		}
+	}
+	if v := os.Getenv("FAK_UP_DISPLAYS"); v != "" {
+		if n, err := strconv.ParseUint(v, 10, 64); err == nil && n > 0 {
+			return n * DefaultDisplayBufferReservePerDisplay
+		}
+	}
+	return detectDisplayBuffersPlatform()
+}
+
+func detectDisplayBuffersPlatform() uint64 {
+	if runtime.GOOS != "darwin" {
+		return 0
+	}
+	cmd := exec.Command("/usr/sbin/ioreg", "-c", "IOMobileFramebufferShim", "-r", "-k", "DisplayWidth")
+	out, err := cmd.Output()
+	if err != nil {
+		cmd = exec.Command("ioreg", "-c", "IOMobileFramebufferShim", "-r", "-k", "DisplayWidth")
+		out, err = cmd.Output()
+	}
+	if err == nil && len(out) > 0 {
+		if total := parseIOMobileFramebufferOutput(out); total > 0 {
+			return total
+		}
+	}
+	return MinDisplayBufferReserve
+}
+
+func parseIOMobileFramebufferOutput(out []byte) uint64 {
+	var totalReservation uint64
+	var currentWidth, currentHeight uint64
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "+-o IOMobileFramebufferShim") {
+			if currentWidth > 0 && currentHeight > 0 {
+				totalReservation += displayReservation(currentWidth, currentHeight)
+				currentWidth, currentHeight = 0, 0
+			}
+		}
+		if val, ok := parseDisplayDimension(line, "\"DisplayWidth\" = "); ok {
+			currentWidth = val
+		} else if val, ok := parseDisplayDimension(line, "\"DisplayHeight\" = "); ok {
+			currentHeight = val
+		}
+	}
+	if currentWidth > 0 && currentHeight > 0 {
+		totalReservation += displayReservation(currentWidth, currentHeight)
+	}
+	return totalReservation
+}
+
+func parseDisplayDimension(line, prefix string) (uint64, bool) {
+	idx := strings.Index(line, prefix)
+	if idx == -1 {
+		return 0, false
+	}
+	rest := strings.TrimSpace(line[idx+len(prefix):])
+	val, err := strconv.ParseUint(rest, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return val, true
+}
+
+func displayReservation(width, height uint64) uint64 {
+	pixels := width * height
+	bytesPerFrame := pixels * 4
+	res := (bytesPerFrame * 8) + (256 * 1024 * 1024)
+	if res < MinDisplayBufferReserve {
+		res = MinDisplayBufferReserve
+	}
+	return res
 }
 
 // ConfigureTurnkey auto-selects the optimal model tier and context budget for a given
-// memory size, guaranteeing >= 20% memory headroom to prevent swap.
+// memory size, guaranteeing >= 20% memory headroom to prevent swap. It inspects dynamic
+// available memory and display buffer reservations to prevent swap thrashing under active memory pressure.
 func ConfigureTurnkey(memoryBytes uint64) (TurnkeyProfile, error) {
+	return ConfigureTurnkeyWithOptions(memoryBytes, TurnkeyOptions{})
+}
+
+// ConfigureTurnkeyWithOptions selects the optimal model tier and context budget with explicit or auto-detected options.
+func ConfigureTurnkeyWithOptions(memoryBytes uint64, opts TurnkeyOptions) (TurnkeyProfile, error) {
 	if memoryBytes == 0 {
 		return TurnkeyProfile{}, errors.New("memory bytes must be positive")
 	}
@@ -250,6 +365,44 @@ func ConfigureTurnkey(memoryBytes uint64) (TurnkeyProfile, error) {
 		reserveBytes = 1
 	}
 	usableBytes := memoryBytes - reserveBytes
+
+	// Check if dynamic adjustment is disabled.
+	isStatic := opts.StaticOnly || os.Getenv("FAK_UP_STATIC_ONLY") == "1"
+
+	var availableBytes uint64
+	var displayBufferBytes uint64
+	var memoryPressure bool
+
+	if !isStatic {
+		if opts.AvailableBytes > 0 {
+			availableBytes = opts.AvailableBytes
+		} else if v := os.Getenv("FAK_UP_AVAILABLE_BYTES"); v != "" {
+			if n, err := strconv.ParseUint(v, 10, 64); err == nil && n > 0 {
+				availableBytes = n
+			}
+		}
+
+		if opts.DisplayBufferBytes > 0 {
+			displayBufferBytes = opts.DisplayBufferBytes
+		} else if v := os.Getenv("FAK_UP_DISPLAY_BUFFER_BYTES"); v != "" {
+			if n, err := strconv.ParseUint(v, 10, 64); err == nil {
+				displayBufferBytes = n
+			}
+		}
+
+		// Auto-detection when running live without explicit overrides:
+		if availableBytes == 0 {
+			if os.Getenv("FAK_UP_MEMORY_BYTES") == "" {
+				hostTotal, hostFree, known := compute.HostSystemMemoryInfo()
+				if known && hostTotal > 0 && memoryBytes == uint64(hostTotal) && hostFree > 0 {
+					availableBytes = uint64(hostFree)
+					if displayBufferBytes == 0 {
+						displayBufferBytes = DetectDisplayBufferBytes()
+					}
+				}
+			}
+		}
+	}
 
 	// 2. Select the optimal model tier that fits within usableBytes.
 	tier := SelectModelTier(memoryBytes)
@@ -268,12 +421,40 @@ func ConfigureTurnkey(memoryBytes uint64) (TurnkeyProfile, error) {
 	}
 
 	// 3. Allocate remaining usable memory for KV cache pool.
-	kvPoolBytes := usableBytes - tier.WeightBytes
+	staticKVBytes := usableBytes - tier.WeightBytes
 
 	// KV bytes per token (FP16 = 2 bytes per element, key + value = 2).
 	kvpt, err := mul(2, tier.Layers, tier.KVHeads, tier.HeadDim, 2)
 	if err != nil {
 		return TurnkeyProfile{}, err
+	}
+
+	kvPoolBytes := staticKVBytes
+
+	// Dynamic capacity accounting & KV cache clamping:
+	// Working spine: compute.HostSystemMemoryInfo -> dynamic available memory read -> display buffer reservation subtraction -> tier and context sizing -> safe execution plan.
+	if availableBytes > 0 {
+		var netAvailable uint64
+		if availableBytes > displayBufferBytes {
+			netAvailable = availableBytes - displayBufferBytes
+		}
+
+		if netAvailable > tier.WeightBytes {
+			headroomForKV := netAvailable - tier.WeightBytes
+			if headroomForKV < staticKVBytes {
+				memoryPressure = true
+				safetyMargin := (headroomForKV * 15) / 100
+				safeKVBytes := headroomForKV - safetyMargin
+				if safeKVBytes < kvPoolBytes {
+					kvPoolBytes = safeKVBytes
+				}
+			}
+		} else {
+			// Severe memory pressure: weights consume net available memory.
+			// Clamp KV pool to minimal floor to prevent runaway allocation.
+			memoryPressure = true
+			kvPoolBytes = 512 * kvpt
+		}
 	}
 
 	// 4. Calculate maximum context tokens that fit in the pool.
@@ -294,6 +475,22 @@ func ConfigureTurnkey(memoryBytes uint64) (TurnkeyProfile, error) {
 		contextBudget = maxTokens
 	}
 
+	// Memory pressure signals trigger conservative context budget reductions instead of swap thrashing.
+	if memoryPressure {
+		if contextBudget > 8192 {
+			contextBudget = 8192
+		}
+		if kvPoolBytes < 2*GiB && contextBudget > 2048 {
+			contextBudget = 2048
+		}
+		if kvPoolBytes < 1*GiB && contextBudget > 1024 {
+			contextBudget = 1024
+		}
+		if contextBudget == 0 {
+			contextBudget = 512
+		}
+	}
+
 	// 5. Total used memory = weights + KV cache context budget.
 	usedKVBytes := contextBudget * kvpt
 	allocatedBytes := tier.WeightBytes + usedKVBytes
@@ -310,20 +507,62 @@ func ConfigureTurnkey(memoryBytes uint64) (TurnkeyProfile, error) {
 		ContextBudgetTokens: contextBudget,
 		KVBytesPerToken:     kvpt,
 		KVPoolBytes:         kvPoolBytes,
+		AvailableBytes:      availableBytes,
+		DisplayBufferBytes:  displayBufferBytes,
+		MemoryPressure:      memoryPressure,
 	}, nil
 }
 
-// DetectUnifiedMemory inspects Apple Silicon physical memory.
-// It checks FAK_UP_MEMORY_BYTES override, then queries host system memory info.
-func DetectUnifiedMemory() (uint64, error) {
+// DetectUnifiedMemoryInfo reports both physical total and live available memory on Apple Silicon.
+//
+// Precedence:
+// 1. FAK_UP_MEMORY_BYTES override for total memory.
+// 2. FAK_UP_AVAILABLE_BYTES override for available memory.
+// 3. Live memory inspection via compute.HostSystemMemoryInfo().
+// 4. Default fallback: 16 GiB total, 80% available.
+func DetectUnifiedMemoryInfo() (total, available uint64, err error) {
 	if v := os.Getenv("FAK_UP_MEMORY_BYTES"); v != "" {
-		if n, err := strconv.ParseUint(v, 10, 64); err == nil && n > 0 {
-			return n, nil
+		if n, parseErr := strconv.ParseUint(v, 10, 64); parseErr == nil && n > 0 {
+			total = n
 		}
 	}
-	total, _, known := compute.HostSystemMemoryInfo()
-	if known && total > 0 {
-		return uint64(total), nil
+	if v := os.Getenv("FAK_UP_AVAILABLE_BYTES"); v != "" {
+		if n, parseErr := strconv.ParseUint(v, 10, 64); parseErr == nil && n > 0 {
+			available = n
+		}
 	}
-	return 16 * GiB, nil
+
+	hostTotal, hostFree, known := compute.HostSystemMemoryInfo()
+	if total == 0 {
+		if known && hostTotal > 0 {
+			total = uint64(hostTotal)
+		} else {
+			total = 16 * GiB
+		}
+	}
+
+	if available == 0 {
+		if v := os.Getenv("FAK_UP_MEMORY_BYTES"); v != "" {
+			// When total memory is explicitly overridden in tests without FAK_UP_AVAILABLE_BYTES,
+			// assume standard unconstrained 80% usable capacity.
+			available = (total * 80) / 100
+		} else if known && hostFree > 0 {
+			available = uint64(hostFree)
+			if available > total {
+				available = total
+			}
+		} else {
+			available = (total * 80) / 100
+		}
+	}
+
+	return total, available, nil
+}
+
+// DetectUnifiedMemory inspects Apple Silicon physical memory.
+// It reports physical total memory for backwards-compatibility with callers expecting (uint64, error).
+// Call DetectUnifiedMemoryInfo to inspect both total and live available memory.
+func DetectUnifiedMemory() (uint64, error) {
+	total, _, err := DetectUnifiedMemoryInfo()
+	return total, err
 }
