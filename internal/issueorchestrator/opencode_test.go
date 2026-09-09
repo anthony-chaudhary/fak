@@ -246,9 +246,11 @@ func TestFormatOpencodePrompt_ShiftLeftSoftwareFirst(t *testing.T) {
 
 	prompt := FormatOpencodePrompt(iss)
 
-	// 1. Verifies that for a hardware-relevant issue, the software witness / landing pipeline index appears before Physical hardware validation: index in prompt.
+	// 1. Verifies that software verification & landing instructions strictly precede physical hardware guidance.
 	idxSoftwareWitness := strings.Index(prompt, "deterministic software witness")
 	idxPipeline := strings.Index(prompt, "Mandatory 4-Phase Delivery and Landing Pipeline")
+	idxLanding := strings.Index(prompt, "Phase 3 [Autonomous Safe Git Landing")
+	idxReceipt := strings.Index(prompt, "Phase 4 [Receipt]")
 	idxHw := strings.Index(prompt, "Physical hardware validation:")
 
 	if idxSoftwareWitness == -1 {
@@ -256,6 +258,12 @@ func TestFormatOpencodePrompt_ShiftLeftSoftwareFirst(t *testing.T) {
 	}
 	if idxPipeline == -1 {
 		t.Fatalf("prompt missing Mandatory 4-Phase Delivery and Landing Pipeline:\n%s", prompt)
+	}
+	if idxLanding == -1 {
+		t.Fatalf("prompt missing landing instructions:\n%s", prompt)
+	}
+	if idxReceipt == -1 {
+		t.Fatalf("prompt missing receipt instructions:\n%s", prompt)
 	}
 	if idxHw == -1 {
 		t.Fatalf("prompt missing Physical hardware validation for hardware-relevant issue:\n%s", prompt)
@@ -266,16 +274,25 @@ func TestFormatOpencodePrompt_ShiftLeftSoftwareFirst(t *testing.T) {
 	if idxPipeline >= idxHw {
 		t.Fatalf("expected 4-phase landing pipeline (idx %d) before hardware validation (idx %d)", idxPipeline, idxHw)
 	}
+	if idxLanding >= idxHw {
+		t.Fatalf("expected landing instructions (idx %d) before hardware validation (idx %d)", idxLanding, idxHw)
+	}
+	if idxReceipt >= idxHw {
+		t.Fatalf("expected receipt instructions (idx %d) before hardware validation (idx %d)", idxReceipt, idxHw)
+	}
 
-	// 2. Verifies prompt contains "PENDING_HARDWARE" and "green software increment".
+	// 2. Verifies PENDING_HARDWARE is required and green software increment must land.
 	if !strings.Contains(prompt, "PENDING_HARDWARE") {
 		t.Fatalf("prompt missing 'PENDING_HARDWARE':\n%s", prompt)
 	}
-	if !strings.Contains(prompt, "green software increment") {
-		t.Fatalf("prompt missing 'green software increment':\n%s", prompt)
+	if !strings.Contains(prompt, "green software increment must still land") {
+		t.Fatalf("prompt missing 'green software increment must still land':\n%s", prompt)
 	}
 
-	// 3. Verifies prompt contains coordination edges distinction ("alignment assumptions", "typed pickup block").
+	// 3. Verifies coordination edges / open dependencies are alignment assumptions unless typed start-blocking.
+	if !strings.Contains(prompt, "treat open dependencies as alignment assumptions unless typed start-blocking") {
+		t.Fatalf("prompt missing coordination edge alignment instruction:\n%s", prompt)
+	}
 	if !strings.Contains(prompt, "alignment assumptions") {
 		t.Fatalf("prompt missing 'alignment assumptions':\n%s", prompt)
 	}
@@ -283,17 +300,63 @@ func TestFormatOpencodePrompt_ShiftLeftSoftwareFirst(t *testing.T) {
 		t.Fatalf("prompt missing 'typed pickup block':\n%s", prompt)
 	}
 
-	// 4. Verifies prompt contains collision narrowing ("disjoint slice", "BLOCKED").
-	if !strings.Contains(prompt, "disjoint slice") {
-		t.Fatalf("prompt missing 'disjoint slice':\n%s", prompt)
+	// 4. Verifies path collision requires narrowing and re-arbitration before BLOCKED.
+	if !strings.Contains(prompt, "narrow and re-arbitrate a declared disjoint slice before reporting blocked") {
+		t.Fatalf("prompt missing path collision re-arbitration instruction:\n%s", prompt)
 	}
-	if !strings.Contains(prompt, "BLOCKED") {
-		t.Fatalf("prompt missing 'BLOCKED':\n%s", prompt)
+	if !strings.Contains(prompt, "BLOCKED is permitted only when no executable disjoint slice remains") {
+		t.Fatalf("prompt missing BLOCKED condition:\n%s", prompt)
 	}
 
 	// 5. Verifies software-first sequence explicitly stated.
 	seq := "failing deterministic contract -> smallest implementation -> focused validation -> guarded software landing -> physical qualification"
 	if !strings.Contains(prompt, seq) {
 		t.Fatalf("prompt missing software-first sequence %q:\n%s", seq, prompt)
+	}
+}
+
+func TestShiftLeftPromptOrdering(t *testing.T) {
+	issHw := Issue{
+		Number: 12253,
+		Title:  "perf: accelerate Strix Halo GEMM",
+		Lane:   "compute",
+		Paths:  []string{"internal/compute/gemm.go"},
+	}
+	promptHw := FormatOpencodePrompt(issHw)
+
+	// Verification Commands < Instructions < Deterministic witness < 4-Phase Pipeline < Phase 3 < Phase 4 < Physical hardware validation
+	idxVerify := strings.Index(promptHw, "Verification Commands:")
+	idxInst := strings.Index(promptHw, "Instructions:")
+	idxWitness := strings.Index(promptHw, "deterministic software witness")
+	idxPipeline := strings.Index(promptHw, "Mandatory 4-Phase Delivery and Landing Pipeline")
+	idxLanding := strings.Index(promptHw, "Phase 3 [Autonomous Safe Git Landing")
+	idxReceipt := strings.Index(promptHw, "Phase 4 [Receipt]")
+	idxHw := strings.Index(promptHw, "Physical hardware validation:")
+
+	if idxVerify == -1 || idxInst == -1 || idxWitness == -1 || idxPipeline == -1 || idxLanding == -1 || idxReceipt == -1 || idxHw == -1 {
+		t.Fatalf("one or more sections missing in prompt:\n%s", promptHw)
+	}
+
+	if !(idxVerify < idxInst && idxInst < idxWitness && idxWitness < idxPipeline && idxPipeline < idxLanding && idxLanding < idxReceipt && idxReceipt < idxHw) {
+		t.Fatalf("incorrect section ordering in prompt:\nverify=%d, inst=%d, witness=%d, pipe=%d, land=%d, receipt=%d, hw=%d",
+			idxVerify, idxInst, idxWitness, idxPipeline, idxLanding, idxReceipt, idxHw)
+	}
+
+	// Software-only issue has no physical hardware guidance
+	issSw := Issue{
+		Number: 12254,
+		Title:  "fix(ctxmmu): fix cache leak",
+		Lane:   "ctxmmu",
+		Paths:  []string{"internal/ctxmmu/cache.go"},
+	}
+	promptSw := FormatOpencodePrompt(issSw)
+	if strings.Contains(promptSw, "Physical hardware validation:") {
+		t.Fatalf("software-only issue should not contain Physical hardware validation:\n%s", promptSw)
+	}
+	if !strings.Contains(promptSw, "deterministic software witness") {
+		t.Fatalf("software-only issue should still contain deterministic software witness instruction:\n%s", promptSw)
+	}
+	if !strings.Contains(promptSw, "Mandatory 4-Phase Delivery and Landing Pipeline") {
+		t.Fatalf("software-only issue should still contain 4-Phase Delivery and Landing Pipeline:\n%s", promptSw)
 	}
 }
