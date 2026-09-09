@@ -39,10 +39,6 @@ func cmdClaudeMacFak(argv []string) {
 	os.Exit(runClaudeMacFak(os.Stdout, os.Stderr, argv))
 }
 
-func cmdClaude(argv []string) {
-	cmdClaudeMacFak(argv)
-}
-
 // claudeMacUnconfiguredGateway reports the refusal text for the ONE failure a
 // first-time reader of the README's Mac showcase actually hits: they run
 // `fak mac` having configured nothing, so --gateway-url is still the public-safe
