@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/pkg/sysproc"
 )
 
@@ -60,6 +62,16 @@ func (w *WorktreeContext) EnvList() []string {
 	return res
 }
 
+// ContractProvider supplies active contracts for janitor sweeps.
+type ContractProvider func(ctx context.Context) ([]leaseref.ContractRecord, error)
+
+// AutoSweepConfig configures automatic janitor sweeps on allocation threshold.
+type AutoSweepConfig struct {
+	Threshold        int              // Max allocations before triggering auto-sweep (e.g. 10)
+	DebounceWindow   time.Duration    // Coalesce window (e.g. 50ms)
+	ContractProvider ContractProvider // Supplies active contracts
+}
+
 // Option configures Manager.
 type Option func(*Manager)
 
@@ -77,12 +89,29 @@ func WithWorktreesDir(dir string) Option {
 	}
 }
 
+// WithAutoSweep configures automatic janitor sweeps on allocation threshold.
+func WithAutoSweep(cfg *AutoSweepConfig) Option {
+	return func(m *Manager) {
+		m.autoSweepCfg = cfg
+	}
+}
+
 // Manager allocates, deallocates, and sanitizes ephemeral ticket worktrees.
 type Manager struct {
 	mu           sync.Mutex
 	repoRoot     string
 	worktreesDir string
 	runner       Runner
+
+	autoSweepCfg   *AutoSweepConfig
+	allocCounter   uint64
+	sweepRunning   int32
+	sweepTriggerCh chan struct{}
+	stopCh         chan struct{}
+	loopDone       chan struct{}
+	cancelLoop     context.CancelFunc
+	stopOnce       sync.Once
+	sweepWg        sync.WaitGroup
 }
 
 // NewManager creates a worktree manager for repoRoot.
@@ -94,6 +123,14 @@ func NewManager(repoRoot string, opts ...Option) *Manager {
 	}
 	for _, opt := range opts {
 		opt(m)
+	}
+	if m.autoSweepCfg != nil {
+		m.sweepTriggerCh = make(chan struct{}, 1)
+		m.stopCh = make(chan struct{})
+		m.loopDone = make(chan struct{})
+		ctx, cancel := context.WithCancel(context.Background())
+		m.cancelLoop = cancel
+		go m.runJanitorLoop(ctx)
 	}
 	return m
 }
@@ -176,6 +213,16 @@ func (m *Manager) Allocate(ctx context.Context, ticketID, baseCommit string) (*W
 		"GIT_WORK_TREE": wtPath,
 	}
 
+	if m.autoSweepCfg != nil {
+		count := atomic.AddUint64(&m.allocCounter, 1)
+		if m.autoSweepCfg.Threshold > 0 && count%uint64(m.autoSweepCfg.Threshold) == 0 {
+			select {
+			case m.sweepTriggerCh <- struct{}{}:
+			default:
+			}
+		}
+	}
+
 	return &WorktreeContext{
 		TicketID:    cleanID,
 		Path:        wtPath,
@@ -239,4 +286,96 @@ func (m *Manager) Deallocate(ctx context.Context, ticketID string, keepBranch bo
 // It is equivalent to Deallocate(ctx, ticketID, false).
 func (m *Manager) Release(ctx context.Context, ticketID string) error {
 	return m.Deallocate(ctx, ticketID, false)
+}
+
+// runJanitorLoop runs a debounced background loop executing sweeps when triggered.
+func (m *Manager) runJanitorLoop(ctx context.Context) {
+	defer close(m.loopDone)
+
+	debounce := 50 * time.Millisecond
+	if m.autoSweepCfg != nil && m.autoSweepCfg.DebounceWindow > 0 {
+		debounce = m.autoSweepCfg.DebounceWindow
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-m.stopCh:
+			return
+		case <-m.sweepTriggerCh:
+		}
+
+		// Debounce: coalesce rapid allocation triggers
+		timer := time.NewTimer(debounce)
+		coalescing := true
+		for coalescing {
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-m.stopCh:
+				timer.Stop()
+				return
+			case <-m.sweepTriggerCh:
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(debounce)
+			case <-timer.C:
+				coalescing = false
+			}
+		}
+
+		// Asynchronously execute sweep if no sweep is currently running
+		if atomic.CompareAndSwapInt32(&m.sweepRunning, 0, 1) {
+			m.sweepWg.Add(1)
+			go func() {
+				defer m.sweepWg.Done()
+				defer atomic.StoreInt32(&m.sweepRunning, 0)
+
+				var contracts []leaseref.ContractRecord
+				if m.autoSweepCfg != nil && m.autoSweepCfg.ContractProvider != nil {
+					sweepCtx, sweepCancel := context.WithTimeout(ctx, 15*time.Second)
+					defer sweepCancel()
+					c, err := m.autoSweepCfg.ContractProvider(sweepCtx)
+					if err != nil {
+						// Fail-closed: do not sweep if contract status cannot be proven
+						return
+					}
+					contracts = c
+					_, _ = m.Sweep(sweepCtx, contracts)
+				} else {
+					sweepCtx, sweepCancel := context.WithTimeout(ctx, 15*time.Second)
+					defer sweepCancel()
+					_, _ = m.Sweep(sweepCtx, contracts)
+				}
+			}()
+		}
+	}
+}
+
+// Stop cleanly terminates the background janitor loop if started.
+func (m *Manager) Stop() {
+	m.stopOnce.Do(func() {
+		if m.cancelLoop != nil {
+			m.cancelLoop()
+		}
+		if m.stopCh != nil {
+			close(m.stopCh)
+		}
+		if m.loopDone != nil {
+			<-m.loopDone
+		}
+		m.sweepWg.Wait()
+	})
+}
+
+// Close terminates the background janitor loop and satisfies io.Closer.
+func (m *Manager) Close() error {
+	m.Stop()
+	return nil
 }

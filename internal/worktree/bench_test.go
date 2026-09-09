@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -65,9 +66,9 @@ func BenchmarkJanitorSweep(b *testing.B) {
 	}
 	tmpDir := b.TempDir()
 	worktreesDir := filepath.Join(tmpDir, ".worktrees")
-	_ = os.MkdirAll(filepath.Join(worktreesDir, "active-1"), 0755)
-	_ = os.MkdirAll(filepath.Join(worktreesDir, "active-2"), 0755)
-	_ = os.MkdirAll(filepath.Join(worktreesDir, "orphan-1"), 0755)
+	_ = os.MkdirAll(filepath.Join(worktreesDir, "ticket-active-1"), 0755)
+	_ = os.MkdirAll(filepath.Join(worktreesDir, "ticket-active-2"), 0755)
+	_ = os.MkdirAll(filepath.Join(worktreesDir, "ticket-orphan-1"), 0755)
 
 	mgr := NewManager(tmpDir, WithRunner(mockRunner))
 	ctx := context.Background()
@@ -98,4 +99,80 @@ func BenchmarkJanitorSweep(b *testing.B) {
 			b.Fatalf("expected non-nil report")
 		}
 	}
+}
+
+func BenchmarkAllocateThroughput_WithAutoSweep(b *testing.B) {
+	mockRunner := func(ctx context.Context, dir string, env []string, args ...string) (string, string, error) {
+		if len(args) > 0 && args[0] == "rev-parse" {
+			return "c001cafe\n", "", nil
+		}
+		return "", "", nil
+	}
+	tmpDir := b.TempDir()
+	cfg := &AutoSweepConfig{
+		Threshold:      10,
+		DebounceWindow: 5 * time.Millisecond,
+		ContractProvider: func(ctx context.Context) ([]leaseref.ContractRecord, error) {
+			return nil, nil
+		},
+	}
+	mgr := NewManager(tmpDir, WithRunner(mockRunner), WithAutoSweep(cfg))
+	defer mgr.Close()
+	ctx := context.Background()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ticketID := fmt.Sprintf("bench-auto-%d", i)
+		wt, err := mgr.Allocate(ctx, ticketID, "c001cafe")
+		if err != nil {
+			b.Fatalf("allocate failed: %v", err)
+		}
+		if wt == nil {
+			b.Fatalf("expected non-nil WorktreeContext")
+		}
+	}
+}
+
+func BenchmarkParallelAllocateAndAutoSweep(b *testing.B) {
+	mockRunner := func(ctx context.Context, dir string, env []string, args ...string) (string, string, error) {
+		if len(args) > 0 && args[0] == "rev-parse" {
+			return "c001cafe\n", "", nil
+		}
+		return "", "", nil
+	}
+	tmpDir := b.TempDir()
+	cfg := &AutoSweepConfig{
+		Threshold:      10,
+		DebounceWindow: 5 * time.Millisecond,
+		ContractProvider: func(ctx context.Context) ([]leaseref.ContractRecord, error) {
+			return nil, nil
+		},
+	}
+	mgr := NewManager(tmpDir, WithRunner(mockRunner), WithAutoSweep(cfg))
+	defer mgr.Close()
+	ctx := context.Background()
+
+	var counter uint64
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			id := atomic.AddUint64(&counter, 1)
+			ticketID := fmt.Sprintf("par-%d", id)
+			wt, err := mgr.Allocate(ctx, ticketID, "c001cafe")
+			if err != nil {
+				b.Errorf("allocate failed: %v", err)
+				return
+			}
+			if wt == nil {
+				b.Errorf("expected non-nil WorktreeContext")
+				return
+			}
+			if err := mgr.Release(ctx, ticketID); err != nil {
+				b.Errorf("release failed: %v", err)
+				return
+			}
+		}
+	})
 }
