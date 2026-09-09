@@ -9,7 +9,7 @@
 // against local source; a real consumer would `require` a tagged version.
 module github.com/anthony-chaudhary/fak/examples/mobile-ffi
 
-go 1.26
+go 1.26.0
 
 require github.com/anthony-chaudhary/fak v0.0.0
 

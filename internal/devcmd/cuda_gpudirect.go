@@ -120,8 +120,17 @@ func probeOrPopulateCUDATopology(sysfsRoot string) *compute.CUDAPCIeTopologyDisc
 
 	if len(disco.GPUs) == 0 {
 		disco.GPUs = append(disco.GPUs, defaultCUDAGPU)
-	}
-	if len(disco.NVMeDevices) == 0 {
+		hasDefaultNVMe := false
+		for _, n := range disco.NVMeDevices {
+			if n.Model == defaultNVMeStorage.Model {
+				hasDefaultNVMe = true
+				break
+			}
+		}
+		if !hasDefaultNVMe {
+			disco.NVMeDevices = append(disco.NVMeDevices, defaultNVMeStorage)
+		}
+	} else if len(disco.NVMeDevices) == 0 {
 		disco.NVMeDevices = append(disco.NVMeDevices, defaultNVMeStorage)
 	}
 	return disco
