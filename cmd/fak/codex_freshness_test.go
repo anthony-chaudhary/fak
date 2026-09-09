@@ -791,7 +791,11 @@ func stubCodexFreshness(t *testing.T, assessment codexFreshnessAssessment) func(
 	codexFreshnessNow = func() time.Time { return time.Date(2026, 8, 29, 20, 0, 0, 0, time.UTC) }
 	codexFreshnessCacheDir = func() (string, error) { return cacheDir, nil }
 	codexFreshnessUserConfigDir = func() (string, error) { return filepath.Join(cacheDir, "no-config"), nil }
-	codexFreshnessRunningCommit = func() string { return "0123456789abcdef0123456789abcdef01234567" }
+	running := "0123456789abcdef0123456789abcdef01234567"
+	if assessment.RunningCommit != "" {
+		running = assessment.RunningCommit
+	}
+	codexFreshnessRunningCommit = func() string { return running }
 	codexFreshnessInspect = func(_, _ string) codexFreshnessInspection { return codexFreshnessInspection{Assessment: assessment} }
 	codexFreshnessUpdate = func(_, _ string) (string, error) { return "", errors.New("unexpected update") }
 	codexFreshnessReexec = func(_ string, _ []string, _ string) error { return errors.New("unexpected reexec") }
@@ -936,5 +940,251 @@ func TestLoadCodexFreshnessConfig(t *testing.T) {
 	got, err := loadCodexFreshnessConfig()
 	if err != nil || got.MaxAge != "25m" || got.Force == nil || !*got.Force {
 		t.Fatalf("config=%+v err=%v", got, err)
+	}
+}
+
+func TestCodexFreshnessSelfUpdateUnbuildableTrunkFallsBackToViableBinary(t *testing.T) {
+	const (
+		running = "0123456789abcdef0123456789abcdef01234567"
+		target  = "89abcdef0123456789abcdef0123456789abcdef"
+	)
+	restore := stubCodexFreshness(t, codexFreshnessAssessment{
+		Verdict:       codexFreshnessBehind,
+		RunningCommit: running,
+		TargetCommit:  target,
+	})
+	defer restore()
+
+	updateCalls := 0
+	codexFreshnessUpdate = func(_, _ string) (string, error) {
+		updateCalls++
+		return "", errors.New(`exit status 1: self-update receipt status is "gate_failed": compile error: build failed`)
+	}
+
+	readEnd, writeEnd, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalStderr := os.Stderr
+	os.Stderr = writeEnd
+	args, code, stop := runCodexFreshnessAdmission([]string{"--model", "gpt-5"})
+	_ = writeEnd.Close()
+	os.Stderr = originalStderr
+	captured, readErr := io.ReadAll(readEnd)
+	_ = readEnd.Close()
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+
+	if code != 0 || stop {
+		t.Fatalf("code=%d stop=%v, want fallback to viable binary (code 0, stop false)", code, stop)
+	}
+	if !reflect.DeepEqual(args, []string{"--model", "gpt-5"}) {
+		t.Fatalf("args=%v, want %v", args, []string{"--model", "gpt-5"})
+	}
+	stderrStr := string(captured)
+	wantWarn := "WARNING: self-update failed because origin/main is not buildable:"
+	wantContinue := "continuing with installed binary 0123456789ab. Pass '--freshness-gate off' to suppress this check."
+	if !strings.Contains(stderrStr, wantWarn) {
+		t.Fatalf("stderr=%q, want it to contain %q", stderrStr, wantWarn)
+	}
+	if !strings.Contains(stderrStr, wantContinue) {
+		t.Fatalf("stderr=%q, want it to contain %q", stderrStr, wantContinue)
+	}
+	if updateCalls != 1 {
+		t.Fatalf("updateCalls=%d, want 1", updateCalls)
+	}
+
+	// Run a second time: codexFreshnessUpdate should NOT be called because backoff lease is valid.
+	args2, code2, stop2 := runCodexFreshnessAdmission([]string{"--model", "gpt-5"})
+	if code2 != 0 || stop2 {
+		t.Fatalf("run 2: code=%d stop=%v", code2, stop2)
+	}
+	if !reflect.DeepEqual(args2, []string{"--model", "gpt-5"}) {
+		t.Fatalf("run 2: args=%v, want %v", args2, []string{"--model", "gpt-5"})
+	}
+	if updateCalls != 1 {
+		t.Fatalf("run 2: updateCalls=%d, want 1 (should be skipped due to backoff lease)", updateCalls)
+	}
+}
+
+func TestCodexFreshnessSelfUpdateUnbuildableTrunkStrictRefuses(t *testing.T) {
+	const (
+		running = "0123456789abcdef0123456789abcdef01234567"
+		target  = "89abcdef0123456789abcdef0123456789abcdef"
+	)
+	restore := stubCodexFreshness(t, codexFreshnessAssessment{
+		Verdict:       codexFreshnessBehind,
+		RunningCommit: running,
+		TargetCommit:  target,
+	})
+	defer restore()
+
+	t.Setenv("FAK_CODEX_FRESHNESS_STRICT", "1")
+
+	codexFreshnessUpdate = func(_, _ string) (string, error) {
+		return "", errors.New(`exit status 1: self-update receipt status is "gate_failed": compile error: build failed`)
+	}
+
+	readEnd, writeEnd, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalStderr := os.Stderr
+	os.Stderr = writeEnd
+	_, code, stop := runCodexFreshnessAdmission([]string{"--model", "gpt-5"})
+	_ = writeEnd.Close()
+	os.Stderr = originalStderr
+	captured, readErr := io.ReadAll(readEnd)
+	_ = readEnd.Close()
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+
+	if code != 1 || !stop {
+		t.Fatalf("code=%d stop=%v, want strict refusal (code 1, stop true)", code, stop)
+	}
+	stderrStr := string(captured)
+	wantRefused := "freshness admission refused: self-update failed:"
+	if !strings.Contains(stderrStr, wantRefused) {
+		t.Fatalf("stderr=%q, want it to contain %q", stderrStr, wantRefused)
+	}
+}
+
+func TestCodexFreshnessSelfUpdatePreservesRefusalWhenNotViableOrNotBuildError(t *testing.T) {
+	const (
+		validRunning = "0123456789abcdef0123456789abcdef01234567"
+		target       = "89abcdef0123456789abcdef0123456789abcdef"
+	)
+
+	for _, tc := range []struct {
+		name       string
+		assessment codexFreshnessAssessment
+		updateErr  error
+	}{
+		{
+			name: "not viable binary with build breakage",
+			assessment: codexFreshnessAssessment{
+				Verdict:       codexFreshnessBehind,
+				RunningCommit: "dev-dirty",
+				TargetCommit:  target,
+			},
+			updateErr: errors.New(`exit status 1: self-update receipt status is "gate_failed": compile error: build failed`),
+		},
+		{
+			name: "viable binary with non-build error",
+			assessment: codexFreshnessAssessment{
+				Verdict:       codexFreshnessBehind,
+				RunningCommit: validRunning,
+				TargetCommit:  target,
+			},
+			updateErr: errors.New("network unreachable: dial tcp timeout"),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			restore := stubCodexFreshness(t, tc.assessment)
+			defer restore()
+
+			codexFreshnessUpdate = func(_, _ string) (string, error) {
+				return "", tc.updateErr
+			}
+
+			readEnd, writeEnd, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			originalStderr := os.Stderr
+			os.Stderr = writeEnd
+			_, code, stop := runCodexFreshnessAdmission([]string{"--model", "gpt-5"})
+			_ = writeEnd.Close()
+			os.Stderr = originalStderr
+			captured, readErr := io.ReadAll(readEnd)
+			_ = readEnd.Close()
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+
+			if code != 1 || !stop {
+				t.Fatalf("code=%d stop=%v, want refusal (code 1, stop true)", code, stop)
+			}
+			stderrStr := string(captured)
+			wantRefused := "freshness admission refused: self-update failed:"
+			if !strings.Contains(stderrStr, wantRefused) {
+				t.Fatalf("stderr=%q, want it to contain %q", stderrStr, wantRefused)
+			}
+		})
+	}
+}
+
+func TestCodexFreshnessBackoffLeaseExpiration(t *testing.T) {
+	const (
+		running = "0123456789abcdef0123456789abcdef01234567"
+		target  = "89abcdef0123456789abcdef0123456789abcdef"
+	)
+	now := time.Date(2026, 8, 29, 20, 0, 0, 0, time.UTC)
+	backoffPath := filepath.Join(t.TempDir(), "test.backoff")
+
+	if err := codexFreshnessWriteBackoff(backoffPath, now, running, target); err != nil {
+		t.Fatalf("write backoff: %v", err)
+	}
+
+	if !codexFreshnessBackoffValid(backoffPath, now, running) {
+		t.Fatal("expected backoff to be valid at write time")
+	}
+	if !codexFreshnessBackoffValid(backoffPath, now.Add(9*time.Minute), running) {
+		t.Fatal("expected backoff to be valid at 9m")
+	}
+	if codexFreshnessBackoffValid(backoffPath, now.Add(10*time.Minute), running) {
+		t.Fatal("expected backoff to be expired at 10m")
+	}
+	if codexFreshnessBackoffValid(backoffPath, now.Add(11*time.Minute), running) {
+		t.Fatal("expected backoff to be expired at 11m")
+	}
+	if codexFreshnessBackoffValid(backoffPath, now.Add(1*time.Minute), "fedcba9876543210fedcba9876543210fedcba98") {
+		t.Fatal("expected backoff to be invalid for mismatched running commit")
+	}
+
+	restore := stubCodexFreshness(t, codexFreshnessAssessment{
+		Verdict:       codexFreshnessBehind,
+		RunningCommit: running,
+		TargetCommit:  target,
+	})
+	defer restore()
+
+	statePath := codexFreshnessTestStatePath(t)
+	if err := codexFreshnessWriteBackoff(statePath+".backoff", codexFreshnessNow(), running, target); err != nil {
+		t.Fatalf("write backoff for state: %v", err)
+	}
+
+	updateCalled := false
+	codexFreshnessUpdate = func(_, _ string) (string, error) {
+		updateCalled = true
+		return target, nil
+	}
+
+	args, code, stop := runCodexFreshnessAdmission([]string{"--model", "gpt-5"})
+	if code != 0 || stop || updateCalled {
+		t.Fatalf("code=%d stop=%v updateCalled=%v, want backoff to bypass update", code, stop, updateCalled)
+	}
+	if !reflect.DeepEqual(args, []string{"--model", "gpt-5"}) {
+		t.Fatalf("args=%v, want gpt-5", args)
+	}
+
+	// With --freshness-force: bypasses valid backoff and triggers codexFreshnessUpdate
+	updateCalled = false
+	codexFreshnessReexec = func(_ string, _ []string, _ string) error { return nil }
+	_, code, stop = runCodexFreshnessAdmission([]string{"--freshness-force", "--model", "gpt-5"})
+	if !updateCalled {
+		t.Fatal("expected --freshness-force to bypass valid backoff and call codexFreshnessUpdate")
+	}
+
+	// When backoff is expired (>10m ago), normal runCodexFreshnessAdmission triggers codexFreshnessUpdate
+	updateCalled = false
+	if err := codexFreshnessWriteBackoff(statePath+".backoff", codexFreshnessNow().Add(-11*time.Minute), running, target); err != nil {
+		t.Fatalf("write expired backoff: %v", err)
+	}
+	_, code, stop = runCodexFreshnessAdmission([]string{"--model", "gpt-5"})
+	if !updateCalled {
+		t.Fatal("expected expired backoff (>10m) to trigger codexFreshnessUpdate")
 	}
 }
