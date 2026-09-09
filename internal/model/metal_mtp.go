@@ -851,13 +851,18 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 	baseLen := c.target.Cache.Len()
 	_ = baseLen
 	var rows [][]float32
+	isBatched := false
 	if verifyForwardBatchedOK(c.target) {
 		rawRows := c.target.VerifyForward(drafts, nil, nil)
-		rows = make([][]float32, len(rawRows))
-		for i, r := range rawRows {
-			rows[i] = append([]float32(nil), r...)
+		if len(rawRows) == len(drafts) {
+			rows = make([][]float32, len(rawRows))
+			for i, r := range rawRows {
+				rows[i] = append([]float32(nil), r...)
+			}
+			isBatched = true
 		}
-	} else {
+	}
+	if !isBatched {
 		rows = make([][]float32, len(drafts))
 		for i, tok := range drafts {
 			stepLogits := c.target.Step(tok)
@@ -925,6 +930,21 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 			_, _ = c.checkpointMgr.RollbackMTPDraft(c.sessionID)
 		}
 		_ = snap.Restore(c.target)
+		c.lastTargetVerification = MetalMTPTargetVerificationReceipt{
+			TargetVerificationReceipt: TargetVerificationReceipt{
+				Schema:                       targetVerificationReceiptSchema,
+				Engine:                       targetVerificationEngine,
+				Path:                         targetVerificationDecodePath,
+				OneOperation:                 false,
+				TargetVerificationOperations: 0,
+				TargetDecodeSteps:            len(drafts),
+				DraftTokens:                  len(drafts),
+				AcceptedTokens:               0,
+				RejectedTokens:               len(drafts),
+				DowngradeReason:              c.tripwireReason,
+			},
+		}
+		c.hasTargetVerification = true
 		return nil, -1, nil, tripErr
 	}
 
@@ -971,6 +991,39 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 		}
 		_, _, _ = c.governor.ObserveStep(obs)
 	}
+
+	path := targetVerificationDecodePath
+	targetOps := 0
+	targetSteps := len(drafts)
+	downgradeReason := ""
+	if isBatched {
+		path = targetVerificationBatchedPath
+		targetOps = 1
+		targetSteps = 0
+	} else {
+		downgradeReason = "unsupported wide-M target shape; fell back to serial decode"
+	}
+	c.lastTargetVerification = MetalMTPTargetVerificationReceipt{
+		TargetVerificationReceipt: TargetVerificationReceipt{
+			Schema:                       targetVerificationReceiptSchema,
+			Engine:                       targetVerificationEngine,
+			Path:                         path,
+			OneOperation:                 isBatched,
+			TargetVerificationOperations: targetOps,
+			TargetDecodeSteps:            targetSteps,
+			DraftTokens:                  len(drafts),
+			AcceptedTokens:               numAccepted,
+			RejectedTokens:               len(drafts) - numAccepted,
+			DowngradeReason:              downgradeReason,
+			Accounting: SpeculativeCostAccounting{
+				Setup:              SpeculativeCostComponent{Nanoseconds: time.Since(start).Nanoseconds(), Measured: true},
+				TargetVerification: SpeculativeCostComponent{Nanoseconds: time.Since(start).Nanoseconds(), Measured: true},
+				KnownMemoryBytes:   snap.ResidentBytes(),
+				MemoryMeasured:     true,
+			},
+		},
+	}
+	c.hasTargetVerification = true
 
 	return accTokens, bonusTok, nextLogits, nil
 }
@@ -1198,13 +1251,18 @@ func (c *MetalMTPCoordinator) stepRoundTreeLocked(start time.Time, target0 int, 
 
 	// Single-pass verification forward across all tree candidates
 	var rows [][]float32
+	isBatched := false
 	if verifyForwardBatchedOK(c.target) {
 		rawRows := c.target.VerifyForward(ids, pos, allow)
-		rows = make([][]float32, len(rawRows))
-		for i, r := range rawRows {
-			rows[i] = append([]float32(nil), r...)
+		if len(rawRows) == N {
+			rows = make([][]float32, len(rawRows))
+			for i, r := range rawRows {
+				rows[i] = append([]float32(nil), r...)
+			}
+			isBatched = true
 		}
-	} else {
+	}
+	if !isBatched {
 		// Fallback verification: step through candidate sequence
 		rows = make([][]float32, N)
 		for i, tok := range ids {
@@ -1337,6 +1395,39 @@ func (c *MetalMTPCoordinator) stepRoundTreeLocked(start time.Time, target0 int, 
 		}
 		_, _, _ = c.governor.ObserveStep(obs)
 	}
+
+	treePath := targetVerificationDecodePath
+	treeTargetOps := 0
+	treeTargetSteps := N
+	treeDowngradeReason := ""
+	if isBatched {
+		treePath = targetVerificationBatchedPath
+		treeTargetOps = 1
+		treeTargetSteps = 0
+	} else {
+		treeDowngradeReason = "unsupported wide-M tree target shape; fell back to serial decode"
+	}
+	c.lastTargetVerification = MetalMTPTargetVerificationReceipt{
+		TargetVerificationReceipt: TargetVerificationReceipt{
+			Schema:                       targetVerificationReceiptSchema,
+			Engine:                       targetVerificationEngine,
+			Path:                         treePath,
+			OneOperation:                 isBatched,
+			TargetVerificationOperations: treeTargetOps,
+			TargetDecodeSteps:            treeTargetSteps,
+			DraftTokens:                  N,
+			AcceptedTokens:               numAccepted,
+			RejectedTokens:               N - numAccepted,
+			DowngradeReason:              treeDowngradeReason,
+			Accounting: SpeculativeCostAccounting{
+				Setup:              SpeculativeCostComponent{Nanoseconds: time.Since(start).Nanoseconds(), Measured: true},
+				TargetVerification: SpeculativeCostComponent{Nanoseconds: time.Since(start).Nanoseconds(), Measured: true},
+				KnownMemoryBytes:   snap.ResidentBytes(),
+				MemoryMeasured:     true,
+			},
+		},
+	}
+	c.hasTargetVerification = true
 
 	return acceptedTokens, bonusTok, nextLogits, nil
 }
