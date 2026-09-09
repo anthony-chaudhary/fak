@@ -90,11 +90,11 @@ func TestBeginServedAdmissionRejectsRequestLargerThanTokenBudget(t *testing.T) {
 	if !errors.As(err, &admissionErr) {
 		t.Fatalf("beginServedAdmission err = %v, want typed AdmissionError", err)
 	}
-	if admissionErr.Verdict != VerdictShed || admissionErr.Reason != "request tokens 64 exceed scheduler token budget 32" {
+	if admissionErr.Verdict != VerdictRefused || admissionErr.Reason != "request tokens 64 exceed scheduler token budget 32" {
 		t.Fatalf("admission error = %+v, want exact impossible-envelope reason", admissionErr)
 	}
-	if stats := server.admissionCtl.Stats(); stats.Waiting != 0 || stats.Shed != 1 {
-		t.Fatalf("admission stats = %+v, want waiting=0 shed=1", stats)
+	if stats := server.admissionCtl.Stats(); stats.Waiting != 0 || stats.Refused != 1 {
+		t.Fatalf("admission stats = %+v, want waiting=0 refused=1", stats)
 	}
 }
 func TestBeginServedAdmissionSeam(t *testing.T) {

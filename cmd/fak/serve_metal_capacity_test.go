@@ -184,7 +184,15 @@ func TestMetalGGUFPeakCapacityAlignsWithLoadArm(t *testing.T) {
 	q4kPath := filepath.Join(dir, "qwen38-27b-q4km.gguf")
 	writeSynth27BGGUF(t, q4kPath, false)
 
-	t.Run("UD-Q2_K_XL expands to Q8 and refuses 36 GiB Mac", func(t *testing.T) {
+	t.Run("UD-Q2_K_XL admits resident on 36 GiB Mac", func(t *testing.T) {
+		err := refuseOversubscribedMetalGGUFForHost(udPath, 36*gib, true)
+		if err != nil {
+			t.Fatalf("resident load of 27B UD-Q2_K_XL must be admitted on 36 GiB host, got error: %v", err)
+		}
+	})
+
+	t.Run("UD-Q2_K_XL with FAK_Q4K=0 expands to Q8 and refuses 36 GiB Mac", func(t *testing.T) {
+		t.Setenv("FAK_Q4K", "0")
 		err := refuseOversubscribedMetalGGUFForHost(udPath, 36*gib, true)
 		if err == nil {
 			t.Fatal("expanding Q8 load of 27B UD-Q2_K_XL must be refused on 36 GiB host, got nil")
@@ -194,7 +202,8 @@ func TestMetalGGUFPeakCapacityAlignsWithLoadArm(t *testing.T) {
 		}
 	})
 
-	t.Run("UD-Q2_K_XL expands to Q8 and admits on 128 GiB Mac", func(t *testing.T) {
+	t.Run("UD-Q2_K_XL with FAK_Q4K=0 expands to Q8 and admits on 128 GiB Mac", func(t *testing.T) {
+		t.Setenv("FAK_Q4K", "0")
 		err := refuseOversubscribedMetalGGUFForHost(udPath, 128*gib, true)
 		if err != nil {
 			t.Fatalf("expanding Q8 load of 27B UD-Q2_K_XL must be admitted on 128 GiB host, got error: %v", err)

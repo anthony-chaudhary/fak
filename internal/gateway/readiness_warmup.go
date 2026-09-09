@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/kvbudget"
 )
 
 // readiness_warmup.go is the #3051 warmup-TIMING gate on the local-model
@@ -153,6 +154,39 @@ func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 	_, err := s.planner.Complete(ctx, msgs, nil, agent.WithMaxTokens(1))
 	d := time.Since(start)
 	s.MarkWarmupComplete(d)
+
+	if rep, ok := s.planner.(agent.KVMemoryReporter); ok {
+		st := rep.KVMemoryStats()
+		if st.BytesPerToken > 0 {
+			usable := st.FitBudgetBytes
+			if usable <= 0 {
+				usable = st.CapacityFreeBytes
+			}
+			if usable <= 0 {
+				usable = st.CapacityTotalBytes
+			}
+			if usable > 0 {
+				s.SetWarmupCapacity(kvbudget.WarmupCapacity{
+					UsableBytes:   usable,
+					BytesPerToken: st.BytesPerToken,
+				})
+			}
+		}
+	} else if rep, ok := s.planner.(WarmupCapacityReporter); ok {
+		if c, okCap := rep.WarmupCapacity(); okCap {
+			s.SetWarmupCapacity(c)
+		}
+	} else if rep, ok := s.planner.(interface {
+		WarmupCapacity() kvbudget.WarmupCapacity
+	}); ok {
+		s.SetWarmupCapacity(rep.WarmupCapacity())
+	} else if rep, ok := s.planner.(interface {
+		WarmupBlockCapacity() (kvbudget.WarmupBlockCapacity, bool)
+	}); ok {
+		if bc, okBC := rep.WarmupBlockCapacity(); okBC {
+			s.SetWarmupBlockCapacity(bc)
+		}
+	}
 	return d, err
 }
 

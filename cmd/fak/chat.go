@@ -56,7 +56,7 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 	cf := &chatFlags{}
 	cf.provider = fs.String("provider", "openai", "provider transcript wire: openai, anthropic, gemini, or xai")
 	cf.baseURL = fs.String("base-url", "", "provider base URL (empty => offline mock planner; no upstream)")
-	cf.model = fs.String("model", "gemini-2.5-flash", "model id")
+	cf.model = fs.String("model", "gemini-3.8-flash", "model id")
 	cf.apiKeyEnv = fs.String("api-key-env", "GEMINI_API_KEY", "env var holding the API key")
 	cf.codexAuth = fs.Bool("codex-auth", false, "explicitly reuse a Codex-managed ChatGPT login read-only; Codex owns renewal")
 	cf.codexHome = fs.String("codex-home", "", "Codex credential home for --codex-auth (default: existing discovery)")

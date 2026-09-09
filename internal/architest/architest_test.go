@@ -87,6 +87,7 @@ var tier = map[string]int{
 	"stallpage":              2, // durable deduped operator page for stallscan reboot high-water; imports stallscan(1)+choicetriage(1)+flock, off the hot path.
 	"agenticbench":           3, // #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
 	"agentxbench":            3, // AgentX benchmark runner, request lifecycle phase decomposition, and interactivity metrics (#8774, #8775); stdlib-only.
+	"mtpbench":               3, // Qwen3.8 native MTP physical benchmark runner; composes ggufload/model (tier 2) and metalgemm (tier 1).
 	"ailuminate":             1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
 	"apihostprobe":           1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
 	"accountprobe":           1, // pure account-probe ledger reader (probe_ledger.jsonl): last-probe-by-account + probe recency for the roster fresh-probe fold; stdlib-only, imports nothing internal, off the hot path.

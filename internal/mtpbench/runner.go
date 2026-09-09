@@ -248,6 +248,7 @@ type Report struct {
 	SpeedupRatio        float64            `json:"speedup_ratio"`
 	TokenVectorsEqual   bool               `json:"token_vectors_equal"`
 	MemoryBefore        MemorySnapshot     `json:"memory_before"`
+	MemoryAfterPrepare  MemorySnapshot     `json:"memory_after_prepare"`
 	MemoryPeak          MemorySnapshot     `json:"memory_peak"`
 	MemoryAfter         MemorySnapshot     `json:"memory_after"`
 	Cleanup             CleanupReceipt     `json:"cleanup"`
@@ -266,6 +267,7 @@ type Prepared interface {
 
 type Executor interface {
 	Preflight(context.Context, Config) (Preflight, error)
+	Memory() (MemorySnapshot, error)
 	Prepare(context.Context, Config) (Prepared, error)
 }
 
@@ -297,6 +299,15 @@ func (r Runner) Run(ctx context.Context, cfg Config) (report Report, err error) 
 		report.Failure = err.Error()
 		return report, err
 	}
+	report.MemoryBefore, err = r.Executor.Memory()
+	if err != nil {
+		report.Failure = fmt.Sprintf("mtpbench: pre-prepare memory observation: %v", err)
+		return report, errors.New(report.Failure)
+	}
+	if memoryErr := validateMemory(report.MemoryBefore); memoryErr != nil {
+		report.Failure = memoryErr.Error()
+		return report, memoryErr
+	}
 	prepared, prepErr := r.Executor.Prepare(ctx, cfg)
 	if prepErr != nil {
 		report.Failure = prepErr.Error()
@@ -312,21 +323,26 @@ func (r Runner) Run(ctx context.Context, cfg Config) (report Report, err error) 
 			report.Failure = err.Error()
 		}
 	}()
+	report.MemoryAfterPrepare, err = prepared.Memory()
+	if err != nil {
+		report.Failure = fmt.Sprintf("mtpbench: post-prepare memory observation: %v", err)
+		return report, errors.New(report.Failure)
+	}
+	if memoryErr := validateMemory(report.MemoryAfterPrepare); memoryErr != nil {
+		report.Failure = memoryErr.Error()
+		return report, memoryErr
+	}
+	report.MemoryPeak = maxMemory(report.MemoryBefore, report.MemoryAfterPrepare)
+	if report.MemoryAfterPrepare.SwapUsedBytes > report.MemoryBefore.SwapUsedBytes {
+		err = errors.New("mtpbench: swap grew during model preparation")
+		report.Failure = err.Error()
+		return report, err
+	}
 	report.Identity = prepared.Identity()
 	if identityErr := validateIdentity(report.Identity); identityErr != nil {
 		report.Failure = identityErr.Error()
 		return report, identityErr
 	}
-	report.MemoryBefore, err = prepared.Memory()
-	if err != nil {
-		report.Failure = fmt.Sprintf("mtpbench: initial memory observation: %v", err)
-		return report, errors.New(report.Failure)
-	}
-	if memoryErr := validateMemory(report.MemoryBefore); memoryErr != nil {
-		report.Failure = memoryErr.Error()
-		return report, memoryErr
-	}
-	report.MemoryPeak = report.MemoryBefore
 	now := time.Now()
 	if r.Now != nil {
 		now = r.Now()
@@ -404,8 +420,8 @@ func (r Runner) Run(ctx context.Context, cfg Config) (report Report, err error) 
 		report.Failure = memoryErr.Error()
 		return report, memoryErr
 	}
-	if report.MemoryAfter.CurrentRSSBytes > report.MemoryBefore.CurrentRSSBytes || report.MemoryAfter.SwapUsedBytes > report.MemoryBefore.SwapUsedBytes {
-		err = errors.New("mtpbench: current RSS/swap did not restore to the pre-sample envelope")
+	if report.MemoryAfter.CurrentRSSBytes > report.MemoryAfterPrepare.CurrentRSSBytes || report.MemoryAfter.SwapUsedBytes > report.MemoryBefore.SwapUsedBytes {
+		err = errors.New("mtpbench: RSS did not restore to the post-prepare envelope or swap to the pre-prepare envelope")
 		report.Failure = err.Error()
 		return report, err
 	}

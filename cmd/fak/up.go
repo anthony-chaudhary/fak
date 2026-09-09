@@ -131,13 +131,19 @@ func runAllInOneUp(argv []string) {
 		os.Exit(2)
 	}
 
+	explicit := explicitFlagNames(fs)
+	resolvedEngine := *engineID
+	if !explicit["engine"] && !*mock {
+		resolvedEngine = "inkernel"
+	}
+
 	cfg := allinone.Config{
 		LockPath:        *lockPath,
 		BundlePath:      *bundlePath,
 		BundleVerifyKey: *bundleVerifyKey,
 		Addr:            *addr,
 		PolicyPath:      *policyPath,
-		Engine:          *engineID,
+		Engine:          resolvedEngine,
 		DryRun:          *dryRun,
 		Mock:            *mock,
 	}
@@ -205,9 +211,15 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	memoryGiB := fs.Float64("memory-gib", 0, "override detected unified memory in GiB")
 	modelOverride := fs.String("model", "", "override auto-selected model tier (e.g. 7B, 27B, 70B)")
 	contextOverride := fs.Uint64("context", 0, "override auto-selected context budget tokens")
+	engineID := fs.String("engine", "mock", "model engine ID")
 
 	if err := fs.Parse(argv); err != nil {
 		os.Exit(2)
+	}
+
+	explicit := explicitFlagNames(fs)
+	if explicit["engine"] && *engineID == "mock" {
+		*mock = true
 	}
 
 	var memoryBytes uint64
@@ -241,6 +253,13 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	}
 
 	if *dryRun {
+		modelRef := plan.Tier.ModelID
+		if modelRef == "" {
+			modelRef = modelreg.DefaultAlias
+		}
+		ref := resolveTurnkeyModelRef(modelRef)
+		resolvedURI, _ := modelreg.Resolve(ref)
+
 		if *asJSON {
 			enc := json.NewEncoder(stdout)
 			enc.SetIndent("", "  ")
@@ -250,6 +269,9 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 		fmt.Fprintln(stdout, "fak up — Apple Silicon Turnkey Execution Plan")
 		fmt.Fprintf(stdout, "Unified Memory : %.1f GiB\n", float64(plan.MemoryBytes)/float64(macfit.GiB))
 		fmt.Fprintf(stdout, "Model Tier     : %s (%s, quant: %s)\n", plan.Tier.Name, plan.Tier.ModelID, plan.Tier.QuantTier)
+		if resolvedURI != "" {
+			fmt.Fprintf(stdout, "Resolved URI   : %s\n", resolvedURI)
+		}
 		fmt.Fprintf(stdout, "Weights Size   : %.2f GiB\n", float64(plan.Tier.WeightBytes)/float64(macfit.GiB))
 		fmt.Fprintf(stdout, "Context Budget : %d tokens (KV: %.2f GiB)\n", plan.ContextBudgetTokens, float64(plan.ContextBudgetTokens*plan.KVBytesPerToken)/float64(macfit.GiB))
 		fmt.Fprintf(stdout, "Headroom       : %.1f%% (>= 20.0%% guaranteed to prevent swap)\n", plan.HeadroomRatio*100)
@@ -307,6 +329,7 @@ func printTurnkeyReady(w io.Writer, ver, addr string, plan macfit.TurnkeyProfile
 type turnkeyServer struct {
 	plan         macfit.TurnkeyProfile
 	mock         bool
+	engineID     string
 	planner      *agent.InKernelPlanner
 	listener     net.Listener
 	boundAddr    string
@@ -440,9 +463,15 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 		return nil, fmt.Errorf("listen on %s: %w", addr, err)
 	}
 
+	engineID := "inkernel"
+	if mock {
+		engineID = "mock"
+	}
+
 	ts := &turnkeyServer{
 		plan:      plan,
 		mock:      mock,
+		engineID:  engineID,
 		planner:   planner,
 		listener:  ln,
 		boundAddr: ln.Addr().String(),
@@ -471,6 +500,7 @@ func (s *turnkeyServer) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status":         "ok",
 		"mode":           "turnkey",
+		"engine":         s.engineID,
 		"tier":           s.plan.Tier.Name,
 		"model":          s.plan.Tier.ModelID,
 		"headroom_ratio": s.plan.HeadroomRatio,

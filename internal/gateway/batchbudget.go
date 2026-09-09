@@ -26,10 +26,13 @@ const (
 	batchBudgetReached
 	// batchBudgetExhausted means the request does not fit and must not be admitted.
 	batchBudgetExhausted
+	// batchBudgetImpossible means the request statically exceeds total capacity
+	// and can never fit even on an idle controller.
+	batchBudgetImpossible
 )
 
 func (s batchBudgetStatus) valid() bool {
-	return s >= batchBudgetAvailable && s <= batchBudgetExhausted
+	return s >= batchBudgetAvailable && s <= batchBudgetImpossible
 }
 
 // batchBudgetSnapshot is the immutable admission state presented to every
@@ -90,7 +93,7 @@ func evaluateBatchBudget(budget batchBudget, state batchBudgetSnapshot, req SeqR
 			reason: fmt.Sprintf("batch budget %q returned invalid status %d", check.budget, check.status),
 		}
 	}
-	if check.status == batchBudgetExhausted && check.reason == "" {
+	if (check.status == batchBudgetExhausted || check.status == batchBudgetImpossible) && check.reason == "" {
 		check.reason = fmt.Sprintf("batch budget %q exhausted", check.budget)
 	}
 	return check
@@ -142,17 +145,17 @@ func tokenBatchBudget(capacity int) batchBudget {
 	return func(state batchBudgetSnapshot, req SeqRequest) batchBudgetCheck {
 		next := state.tokens + req.Tokens
 		switch {
-		case next > capacity:
-			reason := fmt.Sprintf("scheduler token budget exhausted (%d in use + %d requested > %d)", state.tokens, req.Tokens, capacity)
-			if state.tokens == 0 && req.Tokens > capacity {
-				// Preserve the established live-boundary refusal text for an
-				// envelope that can never fit, even on an idle controller.
-				reason = fmt.Sprintf("request tokens %d exceed scheduler token budget %d", req.Tokens, capacity)
+		case req.Tokens > capacity:
+			return batchBudgetCheck{
+				status: batchBudgetImpossible,
+				budget: "tokens",
+				reason: fmt.Sprintf("request tokens %d exceed scheduler token budget %d", req.Tokens, capacity),
 			}
+		case next > capacity:
 			return batchBudgetCheck{
 				status: batchBudgetExhausted,
 				budget: "tokens",
-				reason: reason,
+				reason: fmt.Sprintf("scheduler token budget exhausted (%d in use + %d requested > %d)", state.tokens, req.Tokens, capacity),
 			}
 		case next == capacity:
 			return batchBudgetCheck{status: batchBudgetReached, budget: "tokens"}

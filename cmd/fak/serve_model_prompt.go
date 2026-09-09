@@ -125,8 +125,9 @@ func resolveServeModelOrPrompt(sf *serveFlags, explicit map[string]bool, in io.R
 		return nil
 	}
 
-	// 2. Explicit --model mock.
-	if explicit["model"] && sf.model != nil && strings.EqualFold(strings.TrimSpace(*sf.model), "mock") {
+	// 2. Explicit --model mock or --engine mock.
+	if (explicit["model"] && sf.model != nil && strings.EqualFold(strings.TrimSpace(*sf.model), "mock")) ||
+		(explicit["engine"] && sf.engineID != nil && strings.EqualFold(strings.TrimSpace(*sf.engineID), "mock")) {
 		if sf.mock != nil {
 			*sf.mock = true
 		}

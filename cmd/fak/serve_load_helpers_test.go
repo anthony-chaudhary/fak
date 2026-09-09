@@ -37,8 +37,12 @@ func TestServeArtifactResidentQ4KUsesArtifactNotArmLabel(t *testing.T) {
 	}
 	t.Setenv("FAK_Q4K", "1")
 	udq2 := ggufload.ArtifactQuant{Name: "UD-Q2_K_XL", Recipe: "UD-Q2_K_XL", Q4KResident: true}
+	if !serveArtifactResidentQ4K(backend, udq2) {
+		t.Fatal("UD-Q2_K_XL artifact must select resident loading when backend and environment enable it")
+	}
+	t.Setenv("FAK_Q4K", "0")
 	if serveArtifactResidentQ4K(backend, udq2) {
-		t.Fatal("UD-Q2_K_XL artifact must not select resident Q4_K even when Q4KResident flag is true")
+		t.Fatal("FAK_Q4K=0 must retain the Q8 staging rollback for UD-Q2_K_XL")
 	}
 }
 
