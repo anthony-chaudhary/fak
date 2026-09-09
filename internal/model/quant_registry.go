@@ -245,8 +245,7 @@ type IQ3XXSHALAdmissionVerdict struct {
 
 // AdmitIQ3XXSHAL evaluates the model-to-HAL admission contract for IQ3_XXS weights.
 // By default, execution remains denied until a capable backend (implementing
-// IQ3XXSCapabilityBackend with SupportsIQ3XXS() == true) is provided or a registered
-// HAL descriptor is present.
+// IQ3XXSCapabilityBackend with SupportsIQ3XXS() == true) is provided.
 func AdmitIQ3XXSHAL(be compute.Backend) IQ3XXSHALAdmissionVerdict {
 	desc, ok := LookupQuantDescriptor(kindIQ3XXS)
 	dtype := compute.IQ3_XXS
@@ -269,37 +268,35 @@ func AdmitIQ3XXSHAL(be compute.Backend) IQ3XXSHALAdmissionVerdict {
 
 	// 1. Check if backend implements explicit capability
 	capable, isCapable := be.(IQ3XXSCapabilityBackend)
-	if isCapable && capable.SupportsIQ3XXS() {
+	if !isCapable {
 		return IQ3XXSHALAdmissionVerdict{
-			Admitted: true,
+			Admitted: false,
 			Dtype:    dtype,
+			Refusal: &IQ3XXSHALAdmissionRefusal{
+				Kind:   kindIQ3XXS,
+				Dtype:  dtype,
+				Reason: IQ3XXSRefusalNoCapability,
+				Detail: "backend does not implement SupportsIQ3XXS capability",
+			},
 		}
 	}
 
-	// 2. Check if descriptor in registry was explicitly registered to support HAL
-	if ok && desc.SupportsHAL() {
+	if !capable.SupportsIQ3XXS() {
 		return IQ3XXSHALAdmissionVerdict{
-			Admitted: true,
+			Admitted: false,
 			Dtype:    dtype,
+			Refusal: &IQ3XXSHALAdmissionRefusal{
+				Kind:   kindIQ3XXS,
+				Dtype:  dtype,
+				Reason: IQ3XXSRefusalCapabilityDenied,
+				Detail: "backend explicitly reported SupportsIQ3XXS() == false",
+			},
 		}
-	}
-
-	var reason IQ3XXSHALRefusalReason = IQ3XXSRefusalNoCapability
-	var detail = "backend does not implement SupportsIQ3XXS capability"
-	if isCapable && !capable.SupportsIQ3XXS() {
-		reason = IQ3XXSRefusalCapabilityDenied
-		detail = "backend explicitly reported SupportsIQ3XXS() == false"
 	}
 
 	return IQ3XXSHALAdmissionVerdict{
-		Admitted: false,
+		Admitted: true,
 		Dtype:    dtype,
-		Refusal: &IQ3XXSHALAdmissionRefusal{
-			Kind:   kindIQ3XXS,
-			Dtype:  dtype,
-			Reason: reason,
-			Detail: detail,
-		},
 	}
 }
 
