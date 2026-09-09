@@ -708,6 +708,11 @@
         },
         {
             "command": "fak version modules",
+            "output_contains": "internal/computebuild",
+            "lane": "computebuild"
+        },
+        {
+            "command": "fak version modules",
             "output_contains": "internal/computetrace",
             "lane": "computetrace"
         },
@@ -3028,6 +3033,11 @@
         },
         {
             "command": "fak version modules",
+            "output_contains": "internal/qwen38campaign",
+            "lane": "qwen38campaign"
+        },
+        {
+            "command": "fak version modules",
             "output_contains": "internal/qwen38ladder",
             "lane": "qwen38ladder"
         },
@@ -4435,6 +4445,11 @@
             "command": "fak version modules",
             "output_contains": "internal/workspin",
             "lane": "workspin"
+        },
+        {
+            "command": "fak version modules",
+            "output_contains": "internal/worktree",
+            "lane": "worktree"
         },
         {
             "command": "fak version modules",
