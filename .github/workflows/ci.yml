@@ -937,6 +937,7 @@ jobs:
     if: github.event_name != 'workflow_dispatch'
     name: race detector · go test -race ./...
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       GOTOOLCHAIN: auto
       # Keep race compilation under the same hosted-runner process ceiling.
