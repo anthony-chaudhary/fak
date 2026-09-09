@@ -51,7 +51,30 @@ func (s *Session) VerifyForward(ids []int, pos []int, allow func(q, k int) bool)
 		}
 		return s.verifyForwardSequential(ids) // chain fallback: correct, universal, not single-pass
 	}
+	if isMetalQwenHybridVerifyEnvelope(s) {
+		return s.verifyForwardQwenHybrid(ids, pos, allow)
+	}
 	return s.verifyForwardBatched(ids, pos, allow)
+}
+
+func (s *Session) verifyForwardQwenHybrid(ids []int, pos []int, allow func(q, k int) bool) [][]float32 {
+	if allow != nil {
+		return nil // tree verify needs masked batched attention; unsupported regime for recurrent GDN
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	if qwen35MTPMetalP4Verify != nil && len(ids) == 4 && s.MetalQ4K {
+		rows, _, _, accepted, err := qwen35MTPMetalP4Verify(s, ids)
+		if accepted && err == nil {
+			return rows
+		}
+	}
+	rows, err := s.qwen35VerifyPanel(ids, nil)
+	if err != nil {
+		return s.verifyForwardSequential(ids)
+	}
+	return rows
 }
 
 const (
@@ -166,7 +189,7 @@ func (s *Session) verifyForwardOneOperation(ids []int, boundaryLogits []float32,
 	if s == nil || s.M == nil || s.Cache == nil {
 		return nil, receipt, targetVerificationDowngrade("target session or host cache is unavailable")
 	}
-	if verifyForwardBatchedOK(s) {
+	if forward == nil && verifyForwardBatchedOK(s) && !isMetalQwenHybridVerifyEnvelope(s) {
 		finishSetup()
 		started := time.Now()
 		rows = s.verifyForwardBatched(ids, nil, nil)
@@ -180,6 +203,9 @@ func (s *Session) verifyForwardOneOperation(ids []int, boundaryLogits []float32,
 	prefix, reason := qwen38OneOperationPrefix(s)
 	if reason != "" {
 		return nil, receipt, targetVerificationDowngrade(reason)
+	}
+	if len(prefix) == 0 {
+		return nil, receipt, targetVerificationDowngrade("target token lineage prefix is empty")
 	}
 	if len(boundaryLogits) != s.M.Cfg.VocabSize {
 		return nil, receipt, targetVerificationDowngrade(fmt.Sprintf(
@@ -222,16 +248,17 @@ func (s *Session) verifyForwardOneOperation(ids []int, boundaryLogits []float32,
 }
 
 func qwen38OneOperationPrefix(s *Session) ([]int, string) {
-	if !s.M.Cfg.IsQwen35Hybrid() {
+	if !s.M.Cfg.IsQwen35Hybrid() && !s.M.Cfg.isQwen35TextFamily() {
 		return nil, "target architecture is not the witnessed Qwen3.8 hybrid"
 	}
 	if s.Backend != nil || s.Quant || s.Q4 || s.Q4K || s.F16 || s.GPTQ ||
-		s.Metal || s.MetalQ4K || s.PrecisionPolicy != nil {
-		return nil, "only the native f32 Qwen3.8 target is admitted"
+		s.MetalQ4K || s.PrecisionPolicy != nil {
+		return nil, "only the native f32/Metal Qwen3.8 target is admitted"
 	}
 	cfg := s.M.Cfg
 	if cfg.IsMoE() || cfg.DenseMLP || cfg.Alibi || cfg.BlockTopology != PreNorm ||
-		!cfg.AttnOutputGate || !cfg.NormGain1p {
+		!cfg.AttnOutputGate || !cfg.NormGain1p || cfg.LayerNorm || cfg.hasLayerSpecificRopeTheta() ||
+		cfg.usesMLAMoELayout() {
 		return nil, "Qwen3.8 target topology is outside the witnessed dense PreNorm hybrid envelope"
 	}
 	if s.Cache.lineage.fault != "" {
@@ -297,11 +324,41 @@ func (s *Session) verifyForwardSequential(ids []int) [][]float32 {
 	return out
 }
 
-// verifyForwardBatchedOK reports whether the batched f32 PreNorm verify path supports this
-// session. It mirrors the dispatch in Prefill (kv.go): the plain PreNorm standard path with
-// no backend / quant / MoE / Alibi / Qwen-hybrid / non-PreNorm / per-layer-RoPE.
+// isMetalQwenHybridVerifyEnvelope reports whether s is inside the explicitly supported
+// Metal / native Qwen hybrid verification envelope.
+func isMetalQwenHybridVerifyEnvelope(s *Session) bool {
+	if s == nil || s.M == nil || s.Cache == nil {
+		return false
+	}
+	cfg := s.M.Cfg
+	if !cfg.IsQwen35Hybrid() && !cfg.isQwen35TextFamily() {
+		return false
+	}
+	if s.Backend != nil || s.PrecisionPolicy != nil || s.GPTQ || s.Q4 || s.F16 || s.Quant || s.Q4K || s.MetalQ4K {
+		return false
+	}
+	if cfg.IsMoE() || cfg.DenseMLP || cfg.Alibi || cfg.BlockTopology != PreNorm ||
+		!cfg.AttnOutputGate || !cfg.NormGain1p || cfg.LayerNorm || cfg.hasLayerSpecificRopeTheta() ||
+		cfg.usesMLAMoELayout() {
+		return false
+	}
+	if s.M.lora != nil || cfg.EnableResidualHook || s.activeTap() != nil {
+		return false
+	}
+	return true
+}
+
+// verifyForwardBatchedOK reports whether the single-pass batched verify path supports this
+// session. It covers both the standard plain PreNorm f32 path and the explicitly supported
+// Metal / quantized / native Qwen3.8 hybrid verification envelope.
 func verifyForwardBatchedOK(s *Session) bool {
-	if s.Backend != nil || s.Quant || s.Q4 || s.Q4K || s.GPTQ || s.Metal || s.PrecisionPolicy != nil {
+	if s == nil || s.M == nil || s.Cache == nil {
+		return false
+	}
+	if isMetalQwenHybridVerifyEnvelope(s) {
+		return true
+	}
+	if s.Backend != nil || s.Quant || s.Q4 || s.Q4K || s.GPTQ || s.Metal || s.MetalQ4K || s.PrecisionPolicy != nil {
 		return false
 	}
 	cfg := s.M.Cfg

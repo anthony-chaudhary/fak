@@ -986,3 +986,255 @@ func TestMetalWideMSpeculativeTreeVerification_M16_M24(t *testing.T) {
 		}
 	})
 }
+
+// TestMetalMTPWideMUsesBatchedVerifier is the witness test for Issue #12349:
+// It proves:
+//  1. The explicitly supported Metal/Qwen hybrid envelope is admitted by verifyForwardBatchedOK.
+//  2. MetalMTPCoordinator selects single-pass batched verification (OneOperation=true, Path=targetVerificationBatchedPath)
+//     rather than falling back to a serial Step loop.
+//  3. Batched verification logits and session cache state match serial step verification bit-for-bit.
+//  4. Unsupported shapes (e.g. F16) fall back cleanly to typed fak-native serial decode (OneOperation=false, Path=targetVerificationDecodePath).
+func TestMetalMTPWideMUsesBatchedVerifier(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	prompt := []int{0, 1, 2}
+	ctx := context.Background()
+
+	t.Run("admitted_hybrid_envelope_selects_batched_dispatch_with_serial_parity", func(t *testing.T) {
+		target := m.NewSession()
+		target.captureTargetHidden = true
+		t.Cleanup(target.Close)
+		boundary := target.Prefill(prompt)
+
+		// Precondition: hybrid session in the supported envelope must be admitted
+		if !verifyForwardBatchedOK(target) {
+			t.Fatal("precondition failed: verifyForwardBatchedOK rejected admitted Qwen hybrid session")
+		}
+
+		// K=3 draft depth exercises wide-M batched verification path
+		coord, err := target.NewMetalMTPCoordinator(MetalMTPConfig{DraftDepth: 3, FallbackToSerial: true})
+		if err != nil {
+			t.Fatalf("NewMetalMTPCoordinator failed: %v", err)
+		}
+		t.Cleanup(func() { _ = coord.Close() })
+
+		draft := []int{3, 5, 7}
+		coord.SetDrafter(NewMTPProposalGeneratorWithFn(func(context.Context, []int, int) ([]int, error) {
+			return append([]int(nil), draft...), nil
+		}))
+
+		// Step round with candidate proposal
+		accepted, bonus, nextLogits, err := coord.StepRound(ctx, nil, boundary)
+		if err != nil {
+			t.Fatalf("StepRound failed: %v", err)
+		}
+
+		// 1. Prove batched dispatch was selected
+		receipt, ok := coord.LastTargetVerificationReceipt()
+		if !ok {
+			t.Fatal("expected LastTargetVerificationReceipt to be present")
+		}
+		if !receipt.OneOperation {
+			t.Fatalf("receipt.OneOperation = %v, want true (batched verification)", receipt.OneOperation)
+		}
+		if receipt.TargetVerificationOperations != 1 {
+			t.Fatalf("receipt.TargetVerificationOperations = %d, want 1", receipt.TargetVerificationOperations)
+		}
+		if receipt.TargetDecodeSteps != 0 {
+			t.Fatalf("receipt.TargetDecodeSteps = %d, want 0", receipt.TargetDecodeSteps)
+		}
+		if receipt.Path != targetVerificationBatchedPath {
+			t.Fatalf("receipt.Path = %q, want %q", receipt.Path, targetVerificationBatchedPath)
+		}
+		if receipt.Engine != targetVerificationEngine {
+			t.Fatalf("receipt.Engine = %q, want %q", receipt.Engine, targetVerificationEngine)
+		}
+
+		// 2. Prove logits and state parity against serial decode
+		serialRef := m.NewSession()
+		serialRef.captureTargetHidden = true
+		t.Cleanup(serialRef.Close)
+		serialBoundary := serialRef.Prefill(prompt)
+		target0 := argmaxF32(serialBoundary)
+
+		serialRows := make([][]float32, len(draft))
+		for i, tok := range draft {
+			serialRows[i] = serialRef.Step(tok)
+		}
+		serialTargetArgmax := make([]int, len(draft)+1)
+		serialTargetArgmax[0] = target0
+		for i, r := range serialRows {
+			serialTargetArgmax[i+1] = argmaxF32(r)
+		}
+		wantAccepted, wantBonus, tripErr := TripwireVerify(draft, serialTargetArgmax, serialBoundary, serialRows)
+		if tripErr != nil {
+			t.Fatalf("serial TripwireVerify failed: %v", tripErr)
+		}
+
+		if !reflect.DeepEqual(accepted, wantAccepted) {
+			t.Fatalf("accepted tokens mismatch: got %v, want %v", accepted, wantAccepted)
+		}
+		if bonus != wantBonus {
+			t.Fatalf("bonus token mismatch: got %d, want %d", bonus, wantBonus)
+		}
+
+		// Replay exact accepted branch + bonus token on ground truth session
+		oracle := m.NewSession()
+		oracle.captureTargetHidden = true
+		t.Cleanup(oracle.Close)
+		oracle.Prefill(prompt)
+		for _, tok := range wantAccepted {
+			oracle.Step(tok)
+		}
+		oracleBonusLogits := oracle.Step(wantBonus)
+
+		// Assert nextLogits emitted from StepRound matches oracle bonus logits
+		for i := range nextLogits {
+			if math.Float32bits(nextLogits[i]) != math.Float32bits(oracleBonusLogits[i]) {
+				t.Fatalf("nextLogits[%d] mismatch against oracle: got %v, want %v", i, nextLogits[i], oracleBonusLogits[i])
+			}
+		}
+
+		// Verify subsequent continuation steps match between speculative and oracle sessions
+		for step := 0; step < 3; step++ {
+			nextTok := argmaxF32(nextLogits)
+			nextLogits = target.Step(nextTok)
+			wantNext := oracle.Step(nextTok)
+			for i := range nextLogits {
+				if math.Float32bits(nextLogits[i]) != math.Float32bits(wantNext[i]) {
+					t.Fatalf("step %d continuation logit[%d] mismatch: got %v, want %v", step, i, nextLogits[i], wantNext[i])
+				}
+			}
+		}
+	})
+
+	t.Run("metal_flag_admitted_in_hybrid_envelope", func(t *testing.T) {
+		metalTarget := m.NewSession()
+		metalTarget.captureTargetHidden = true
+		t.Cleanup(metalTarget.Close)
+		boundary := metalTarget.Prefill(prompt)
+		metalTarget.Metal = true
+
+		if !verifyForwardBatchedOK(metalTarget) {
+			t.Fatal("precondition failed: verifyForwardBatchedOK rejected session with Metal=true in hybrid envelope")
+		}
+
+		coord, err := metalTarget.NewMetalMTPCoordinator(MetalMTPConfig{DraftDepth: 2, FallbackToSerial: true})
+		if err != nil {
+			t.Fatalf("NewMetalMTPCoordinator failed: %v", err)
+		}
+		t.Cleanup(func() { _ = coord.Close() })
+
+		draft := []int{3, 5}
+		coord.SetDrafter(NewMTPProposalGeneratorWithFn(func(context.Context, []int, int) ([]int, error) {
+			return append([]int(nil), draft...), nil
+		}))
+
+		_, _, _, err = coord.StepRound(ctx, nil, boundary)
+		if err != nil {
+			t.Fatalf("StepRound failed: %v", err)
+		}
+
+		receipt, ok := coord.LastTargetVerificationReceipt()
+		if !ok {
+			t.Fatal("expected LastTargetVerificationReceipt to be present")
+		}
+		if !receipt.OneOperation {
+			t.Fatalf("receipt.OneOperation = %v, want true", receipt.OneOperation)
+		}
+		if receipt.Path != targetVerificationBatchedPath {
+			t.Fatalf("receipt.Path = %q, want %q", receipt.Path, targetVerificationBatchedPath)
+		}
+	})
+
+	t.Run("verify_forward_batched_matches_serial_step_logits_and_cache", func(t *testing.T) {
+		draft := []int{4, 8, 12, 16}
+
+		// Serial baseline session
+		serial := m.NewSession()
+		t.Cleanup(serial.Close)
+		serial.Prefill(prompt)
+		wantRows := make([][]float32, len(draft))
+		for i, tok := range draft {
+			wantRows[i] = serial.Step(tok)
+		}
+
+		// Batched VerifyForward session
+		target := m.NewSession()
+		t.Cleanup(target.Close)
+		target.Prefill(prompt)
+
+		gotRows := target.VerifyForward(draft, nil, nil)
+		if len(gotRows) != len(wantRows) {
+			t.Fatalf("VerifyForward returned %d rows, want %d", len(gotRows), len(wantRows))
+		}
+
+		for j := range wantRows {
+			a, b := wantRows[j], gotRows[j]
+			if len(a) != len(b) {
+				t.Fatalf("pos %d logit width %d != %d", j, len(a), len(b))
+			}
+			for i := range a {
+				if math.Float32bits(a[i]) != math.Float32bits(b[i]) {
+					t.Fatalf("pos %d logit[%d]: serial %v != verify %v", j, i, a[i], b[i])
+				}
+			}
+		}
+
+		if target.Cache.Len() != serial.Cache.Len() {
+			t.Fatalf("cache len mismatch: got %d, want %d", target.Cache.Len(), serial.Cache.Len())
+		}
+		for i := range serial.Cache.pos {
+			if target.Cache.pos[i] != serial.Cache.pos[i] {
+				t.Fatalf("pos[%d] mismatch: got %d, want %d", i, target.Cache.pos[i], serial.Cache.pos[i])
+			}
+		}
+	})
+
+	t.Run("unsupported_shapes_fallback_to_typed_fak_native_serial_decode", func(t *testing.T) {
+		unsupported := m.NewSession()
+		unsupported.F16 = true
+		unsupported.captureTargetHidden = true
+		t.Cleanup(unsupported.Close)
+		uBoundary := unsupported.Prefill(prompt)
+
+		// F16 must be rejected from batched verify
+		if verifyForwardBatchedOK(unsupported) {
+			t.Fatal("expected verifyForwardBatchedOK to reject F16 session")
+		}
+
+		coord, err := unsupported.NewMetalMTPCoordinator(MetalMTPConfig{DraftDepth: 2, FallbackToSerial: true})
+		if err != nil {
+			t.Fatalf("NewMetalMTPCoordinator failed: %v", err)
+		}
+		t.Cleanup(func() { _ = coord.Close() })
+
+		coord.SetDrafter(NewMTPProposalGeneratorWithFn(func(context.Context, []int, int) ([]int, error) {
+			return []int{3, 5}, nil
+		}))
+
+		_, _, _, err = coord.StepRound(ctx, nil, uBoundary)
+		if err != nil {
+			t.Fatalf("StepRound on unsupported shape failed: %v", err)
+		}
+
+		receipt, ok := coord.LastTargetVerificationReceipt()
+		if !ok {
+			t.Fatal("expected LastTargetVerificationReceipt to be present")
+		}
+		if receipt.OneOperation {
+			t.Fatalf("receipt.OneOperation = true on unsupported shape, want false")
+		}
+		if receipt.TargetDecodeSteps != 2 {
+			t.Fatalf("receipt.TargetDecodeSteps = %d, want 2", receipt.TargetDecodeSteps)
+		}
+		if receipt.TargetVerificationOperations != 0 {
+			t.Fatalf("receipt.TargetVerificationOperations = %d, want 0", receipt.TargetVerificationOperations)
+		}
+		if receipt.Path != targetVerificationDecodePath {
+			t.Fatalf("receipt.Path = %q, want %q", receipt.Path, targetVerificationDecodePath)
+		}
+		if receipt.Engine != targetVerificationEngine {
+			t.Fatalf("receipt.Engine = %q, want %q", receipt.Engine, targetVerificationEngine)
+		}
+	})
+}
