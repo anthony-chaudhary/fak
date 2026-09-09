@@ -403,14 +403,21 @@ func TestQ6KNoCopyResidency(t *testing.T) {
 	x := q4kTestVector(in, 0x12664)
 	before := make([]float32, out)
 	w.GEMV(x, before)
+	// Synchronized test-only contract violation: mutate and restore before Share solely to
+	// prove that the physical Metal buffer aliases this Go-owned backing. Production callers
+	// must keep it immutable for the complete shared-handle lifetime.
 	aligned[208] ^= 0x40
 	after := make([]float32, out)
 	w.GEMV(x, after)
 	if slices.Equal(before, after) {
-		t.Fatal("mutating aligned Q6_K backing did not change Metal GEMV output")
+		t.Fatal("mutating explicit Go-owned Q6_K backing did not change Metal GEMV output")
 	}
 	aligned[208] ^= 0x40
-
+	restored := make([]float32, out)
+	w.GEMV(x, restored)
+	if !slices.Equal(before, restored) {
+		t.Fatal("restoring explicit Go-owned Q6_K backing did not restore Metal GEMV output")
+	}
 	alias := w.Share()
 	if alias == nil || LiveQ6KWeights() != 1 {
 		t.Fatal("Share did not preserve one native Q6_K slot")
@@ -426,21 +433,26 @@ func TestQ6KNoCopyResidency(t *testing.T) {
 		t.Fatalf("live Q6_K weights after final release = %d, want 0", got)
 	}
 
-	unalignedBacking := make([]byte, rounded+page+1)
-	unalignedOffset := int((uintptr(page)-uintptr(unsafe.Pointer(&unalignedBacking[0]))%uintptr(page))%uintptr(page)) + 1
-	unaligned := unalignedBacking[unalignedOffset : unalignedOffset+need]
-	copy(unaligned, q6kTestRaw(out, in, 0x12664))
-	copied := UploadQ6K(unaligned, out, in)
+	external, err := AllocateMetalMTPSharedBuffer(need)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copy(external, q6kTestRaw(out, in, 0x12664))
+	copied := UploadQ6K(external, out, in)
 	if copied == nil || copied.shared == nil || copied.shared.noCopy {
-		t.Fatalf("unaligned UploadQ6K = %#v, want copied fallback", copied)
+		t.Fatalf("mmap-backed UploadQ6K = %#v, want copied residency", copied)
 	}
 	copiedBefore := make([]float32, out)
 	copied.GEMV(x, copiedBefore)
-	unaligned[208] ^= 0x40
-	copiedAfter := make([]float32, out)
-	copied.GEMV(x, copiedAfter)
-	if !slices.Equal(copiedBefore, copiedAfter) {
-		t.Fatal("copied Q6_K fallback unexpectedly aliases caller backing")
+	if err := FreeMetalMTPSharedBuffer(external); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		copiedAfter := make([]float32, out)
+		copied.GEMV(x, copiedAfter)
+		if !slices.Equal(copiedBefore, copiedAfter) {
+			t.Fatalf("copied Q6_K changed after caller unmapped backing on repeat %d", i)
+		}
 	}
 	copied.Release()
 

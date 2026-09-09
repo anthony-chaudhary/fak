@@ -652,19 +652,24 @@ func q6kWeightValidLocked(w *Q6KWeight) bool {
 		w.shared.refs > 0 && w.shared.epoch == q6kRegistryEpoch
 }
 
-// UploadQ6KGoOwned uploads a Go-heap-owned Q6_K payload. The raw backing MUST belong to the Go
-// heap and MUST NOT be mutated while this handle or any handle returned by Share remains live.
-// External mmap and other borrowed memory must use UploadQ6K.
-func UploadQ6KGoOwned(raw []byte, out, in int) *Q6KWeight {
-	return UploadQ6K(raw, out, in)
-}
-
 // UploadQ6K makes a row-major Q6_K payload (verbatim GGUF super-block bytes, length
 // out*(in/256)*210) resident for the GPU and returns a handle, or nil if the backend is
-// unavailable, in is not a multiple of 256, or the payload is short / the table is full. A
-// page-aligned, page-rounded backing is pinned and shared with Metal; other inputs retain the
-// established copied-buffer fallback.
+// unavailable, in is not a multiple of 256, or the payload is short / the table is full. Metal
+// owns an independent copy, so the caller may mutate or release raw after this call returns.
 func UploadQ6K(raw []byte, out, in int) *Q6KWeight {
+	return uploadQ6K(raw, out, in, false)
+}
+
+// UploadQ6KGoOwned opts a Go-heap-owned Q6_K payload into Metal no-copy residency when its
+// pointer is page-aligned and its capacity covers the page-rounded logical bytes. The raw backing
+// MUST belong to the Go heap and MUST NOT be mutated while this handle or any handle returned by
+// Share remains live. External mmap and other borrowed memory must use UploadQ6K. Ineligible
+// Go-owned storage safely retains the copied-buffer fallback.
+func UploadQ6KGoOwned(raw []byte, out, in int) *Q6KWeight {
+	return uploadQ6K(raw, out, in, true)
+}
+
+func uploadQ6K(raw []byte, out, in int, allowNoCopy bool) *Q6KWeight {
 	if !Available() || in <= 0 || in%256 != 0 || out <= 0 {
 		return nil
 	}
@@ -683,7 +688,7 @@ func UploadQ6K(raw []byte, out, in int) *Q6KWeight {
 		rounded += page - need%page
 	}
 	aligned := page <= 1 || uintptr(unsafe.Pointer(&raw[0]))%uintptr(page) == 0
-	if aligned && cap(raw) >= rounded {
+	if allowNoCopy && aligned && cap(raw) >= rounded {
 		pin = new(runtime.Pinner)
 		pin.Pin(&raw[0])
 	}
