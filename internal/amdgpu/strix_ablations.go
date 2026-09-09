@@ -416,9 +416,25 @@ func extractExplicitProfileSampleCounts(out string) (int, int, error) {
 			var raw struct {
 				Baseline  int `json:"baseline_samples"`
 				Candidate int `json:"candidate_samples"`
+				Samples   []struct {
+					Warmup bool `json:"warmup"`
+				} `json:"samples"`
 			}
-			if json.Unmarshal([]byte(line[i:]), &raw) == nil && raw.Baseline > 0 && raw.Candidate > 0 {
-				return raw.Baseline, raw.Candidate, nil
+			if json.Unmarshal([]byte(line[i:]), &raw) == nil {
+				if raw.Baseline > 0 && raw.Candidate > 0 {
+					return raw.Baseline, raw.Candidate, nil
+				}
+				if len(raw.Samples) > 0 {
+					candidateCount := 0
+					for _, s := range raw.Samples {
+						if !s.Warmup {
+							candidateCount++
+						}
+					}
+					if candidateCount > 0 {
+						return 1, candidateCount, nil
+					}
+				}
 			}
 		}
 	}

@@ -604,9 +604,29 @@ var DefaultSubkernelSpecs = []SubkernelSpec{
 	},
 }
 
-// DefaultCreditableSubkernelSelectors is intentionally narrower than the
-// selector catalog until each production test emits its registered oracle.
-var DefaultCreditableSubkernelSelectors = []string{"argmax"}
+// DefaultCreditableSubkernelSelectors registers the verified physical Vulkan compute
+// sub-kernels that run on the live AMD Strix Halo appliance and earn parity credit.
+var DefaultCreditableSubkernelSelectors = []string{
+	"argmax",
+	"matmul_f32",
+	"matmul2_f32",
+	"matmul3_f32",
+	"q8_matmul",
+	"q8_matmul_wide",
+	"q8_matmul_vocab",
+	"q4k_matmul",
+	"q2k_matmul",
+	"rmsnorm",
+	"rmsnorm_matmul",
+	"rmsnorm_matmul2",
+	"rmsnorm_matmul3",
+	"swiglu",
+	"swiglu_matmul_add",
+	"rope",
+	"attention",
+	"qwen35_gdn_decode",
+	"qwen35_gdn_preprojected",
+}
 
 var executeOneSubkernelFn = executeOneSubkernel
 
@@ -739,7 +759,7 @@ func executeOneSubkernel(ctx context.Context, target *StrixTarget, spec Subkerne
 
 	if err != nil {
 		res.Status = "FAIL"
-		res.Error = fmt.Sprintf("execution failed: %v\n%s", err, truncateOutput(outputStr, 200))
+		res.Error = fmt.Sprintf("execution failed: %v\n%s", err, truncateOutput(outputStr, 2000))
 		return res
 	}
 

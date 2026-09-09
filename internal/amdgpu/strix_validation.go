@@ -406,7 +406,7 @@ func buildStrixAdmissionCommand(target *StrixTarget, sb SourceBinding, testCmd s
 	if leaseWait <= 0 {
 		leaseWait = 30
 	}
-	verify := `test "sha256:$(sha256sum ` + shellQuote(sb.WorkDir+"/build/compute.test") + ` | awk '{print $1}')" = ` + shellQuote(sb.BinarySHA256) + ` && test "sha256:$(find ` + shellQuote(sb.WorkDir+"/build/spirv") + ` -type f -name '*.spv' -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')" = ` + shellQuote(sb.ShaderBundleSHA256)
+	verify := `test "sha256:$(sha256sum ` + shellQuote(sb.WorkDir+"/build/compute.test") + ` | cut -f1 -d' ')" = ` + shellQuote(sb.BinarySHA256) + ` && test "sha256:$(cd ` + shellQuote(sb.WorkDir) + ` && find build/spirv -type f -name '*.spv' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -f1 -d' ')" = ` + shellQuote(sb.ShaderBundleSHA256)
 	deviceCmd := `timeout --signal=TERM --kill-after=5s 60s bash -c ` + shellQuote(testCmd)
 	semantic := verify + "; " + deviceCmd
 	inner := `echo FAK_STRIX_ADMISSION_ACQUIRED=1; trap 'echo FAK_STRIX_ADMISSION_RELEASED=1' EXIT; ` + verify + ` || exit 1; echo FAK_STRIX_ARTIFACT_REHASH=1; echo FAK_STRIX_ENGINE=fak-native/vulkan; echo FAK_STRIX_DEVICE_TIMEOUT_MS=60000; echo FAK_STRIX_DEVICE=` + shellQuote(target.GPUName+"|"+target.TargetISA) + `; ` + deviceCmd

@@ -62,6 +62,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunAMDStrixPackage(stdout, stderr, argv[1:])
 	case "amd-strix-validate", "strix-validate":
 		return devcmd.RunAMDStrixValidate(stdout, stderr, argv[1:])
+	case "amd-strix-hil", "strix-hil":
+		return devcmd.RunAMDStrixHIL(stdout, stderr, argv[1:])
 	case "amd-strix-probe", "strix-probe":
 		return devcmd.RunAMDStrixProbe(stdout, stderr, argv[1:])
 	case "amd-gpudirect":
