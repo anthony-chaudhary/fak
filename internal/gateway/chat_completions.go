@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
@@ -146,9 +147,30 @@ func shouldEnableMetalMTP(cfg Config) bool {
 	if !isModelHybrid(cfg.InKernelModel) {
 		return false
 	}
-	spec := strings.ToLower(strings.TrimSpace(os.Getenv("FAK_SPECULATIVE")))
-	altSpec := strings.ToLower(strings.TrimSpace(os.Getenv("SPECULATIVE")))
-	return cfg.MetalMTP || spec == "mtp" || altSpec == "mtp"
+	return cfg.MetalMTP || speculativeModeSelected("mtp")
+}
+
+// shouldEnableNGramSpeculative reports whether the operator explicitly selected
+// prompt n-gram speculation for the supported resident Qwen Vulkan route.
+func shouldEnableNGramSpeculative(cfg Config) bool {
+	if cfg.InKernelModel == nil || cfg.Backend == nil || cfg.Metal || !cfg.InKernelQ4K {
+		return false
+	}
+	if !isModelHybrid(cfg.InKernelModel) || !strings.EqualFold(strings.TrimSpace(cfg.Backend.Name()), "vulkan") {
+		return false
+	}
+	backend, ok := cfg.Backend.(compute.Qwen35SequenceAllLogitsBackend)
+	if !ok || backend.Qwen35SequenceAllLogitsPath() != compute.Qwen35SequenceAllLogitsPath {
+		return false
+	}
+	return speculativeModeSelected("ngram")
+}
+
+func speculativeModeSelected(mode string) bool {
+	want := strings.ToLower(strings.TrimSpace(mode))
+	primary := strings.ToLower(strings.TrimSpace(os.Getenv("FAK_SPECULATIVE")))
+	alternate := strings.ToLower(strings.TrimSpace(os.Getenv("SPECULATIVE")))
+	return want != "" && (primary == want || alternate == want)
 }
 
 // isModelHybrid checks whether the model has linear attention layers (Qwen 3.5/3.8 hybrid architecture).

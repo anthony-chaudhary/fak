@@ -805,6 +805,13 @@ func newInKernelChatPlanner(cfg Config, modelID string, logf func(string, ...any
 			logf("gateway: failed to enable Metal MTP coordinator: %v", err)
 		}
 	}
+	if shouldEnableNGramSpeculative(cfg) {
+		ikp.EnableSpeculativeDecoding(model.NewNGramProposalGenerator(model.NgramDrafter{
+			Enabled:  true,
+			MaxDraft: 4,
+		}), 4)
+		logf("gateway: enabled prompt n-gram speculation with resident Vulkan target verification")
+	}
 	return ikp
 }
 

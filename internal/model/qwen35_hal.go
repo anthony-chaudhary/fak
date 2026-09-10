@@ -1052,12 +1052,13 @@ type Qwen35MTPDepth4VerificationResult struct {
 	ThroughputTokS        float64                                `json:"throughput_tok_s"`
 	AcceptanceRate        float64                                `json:"acceptance_rate"`
 	ExpectedTokensPerStep float64                                `json:"expected_tokens_per_step"`
+	VerificationReceipt   TargetVerificationReceipt              `json:"verification_receipt"`
 	Logits                []float32                              `json:"-"`
 }
 
-// Qwen35MTPDepth4CausalTreeVerifyResult executes single-pass native MTP depth K=4 causal tree
-// verification in qwen35_hal.go, evaluating 4 candidate tokens in parallel during a single base-model
-// weight read pass using a packed 4 x 4 causal verification tree mask in LDS.
+// Qwen35MTPDepth4CausalTreeVerifyResult is the compatibility entry for a K=4
+// greedy draft. It reports only execution facts supplied by the target
+// transaction. Throughput and physical weight traffic remain unmeasured.
 func (s *Session) Qwen35MTPDepth4CausalTreeVerifyResult(ctx context.Context, drafts [4]int) (Qwen35MTPDepth4VerificationResult, error) {
 	if err := ctx.Err(); err != nil {
 		return Qwen35MTPDepth4VerificationResult{}, err
@@ -1066,134 +1067,35 @@ func (s *Session) Qwen35MTPDepth4CausalTreeVerifyResult(ctx context.Context, dra
 		return Qwen35MTPDepth4VerificationResult{}, errors.New("model: nil session or model in Qwen35MTPDepth4CausalTreeVerify")
 	}
 
-	// 1. Pack 4 x 4 causal verification tree mask for LDS
-	treeMask := compute.MTPK4CausalVerificationTreeMask()
-
-	if s.M.Cfg.VocabSize > 0 {
-		for i := 0; i < 4; i++ {
-			if drafts[i] < 0 || drafts[i] >= s.M.Cfg.VocabSize {
-				drafts[i] = ((drafts[i] % s.M.Cfg.VocabSize) + s.M.Cfg.VocabSize) % s.M.Cfg.VocabSize
-			}
-		}
+	if len(s.lastLogits) != s.M.Cfg.VocabSize {
+		return Qwen35MTPDepth4VerificationResult{}, errors.New("model: Qwen3.8 K=4 compatibility verification requires boundary logits; call SetLastLogits or VerifyGreedyDeviceDraft")
 	}
-
-	if s.Cache == nil {
-		s.Cache = NewKVCache(s.M.Cfg)
+	verified, err := s.VerifyGreedyDeviceDraft(ctx, drafts[:], s.lastLogits)
+	if err != nil {
+		return Qwen35MTPDepth4VerificationResult{}, err
 	}
-	basePos := s.Cache.Len()
-
-	// 2. Prepare single-pass micro-batch weight verification across CUs
-	inDim := s.M.Cfg.HiddenSize
-	if inDim <= 0 {
-		inDim = 64
+	s.lastLogits = append(s.lastLogits[:0], verified.NextLogits...)
+	nextTokens := append([]int(nil), verified.Accepted...)
+	nextTokens = append(nextTokens, verified.Correction)
+	accepted := len(verified.Accepted)
+	rollback := 4 - accepted
+	if verified.Receipt.TargetVerificationOperations == 0 && verified.Receipt.TargetDecodeSteps == 0 {
+		// Boundary rejection did not create provisional target state.
+		rollback = 0
 	}
-	outDim := inDim
-	draftEmbeddings := make([][]float32, 4)
-	for i := 0; i < 4; i++ {
-		emb, embErr := s.TokenEmbedding(drafts[i])
-		if embErr == nil && len(emb) == inDim {
-			draftEmbeddings[i] = emb
-		} else {
-			draftEmbeddings[i] = make([]float32, inDim)
-			for j := 0; j < inDim; j++ {
-				draftEmbeddings[i][j] = float32((drafts[i]+1)*(j+1)) * 0.001
-			}
-		}
-	}
-
-	var weights []float32
-	if meta, ok := s.M.manifest["lm_head.weight"]; ok && meta.Shape != nil && len(meta.Shape) == 2 && meta.Shape[0]*meta.Shape[1] == len(s.M.tensor("lm_head.weight")) {
-		w := s.M.tensor("lm_head.weight")
-		outDim = meta.Shape[0]
-		inDim = meta.Shape[1]
-		weights = w
-	} else {
-		outDim = s.M.Cfg.VocabSize
-		if outDim <= 0 {
-			outDim = compute.StrixHaloComputeUnits
-		}
-		if outDim%compute.StrixHaloComputeUnits != 0 {
-			outDim = ((outDim + compute.StrixHaloComputeUnits - 1) / compute.StrixHaloComputeUnits) * compute.StrixHaloComputeUnits
-		}
-		weights = make([]float32, outDim*inDim)
-		for j := range weights {
-			weights[j] = 0.01
-		}
-	}
-
-	_, audit, auditErr := compute.MTPK4MicroBatchVerify(weights, outDim, inDim, draftEmbeddings, treeMask)
-	if auditErr != nil {
-		audit = compute.MTPMicroBatchVerificationAudit{
-			TargetArch:                 compute.Wave32TargetArch,
-			DraftDepthK:                4,
-			ComputeUnitsEngaged:        compute.StrixHaloComputeUnits,
-			WavefrontSize:              compute.StrixHaloWavefrontSize,
-			LPDDR5XBytesReadSinglePass: int64(len(weights)*4 + 4*inDim*4),
-			LPDDR5XBytesReadSequential: int64(4*len(weights)*4 + 4*inDim*4),
-			WeightReuseRatio:           4.0,
-			ArithmeticIntensity:        2.0,
-			TotalFLOPs:                 int64(2 * 4 * outDim * inDim),
-			CausalTreeMaskApplied:      true,
-			LDSAllocationBytes:         2048,
-		}
-	}
-
-	// 3. Forward the 4 candidate tokens under the causal tree mask
-	var targetTokens []int
-	var lastLogits []float32
-	if len(s.lastLogits) > 0 {
-		t0 := argmaxF32(s.lastLogits)
-		targetTokens = append(targetTokens, t0)
-	}
-	for i := 0; i < 4; i++ {
-		if !compute.IsCausalVerificationMaskAllowed(i, i) {
-			return Qwen35MTPDepth4VerificationResult{}, errors.New("model: causal tree mask violation")
-		}
-		logits := s.Step(drafts[i])
-		lastLogits = logits
-		predToken := argmaxF32(logits)
-		targetTokens = append(targetTokens, predToken)
-	}
-	s.lastLogits = lastLogits
-
-	// 4. Evaluate sequential draft acceptance and determine rollback
-	evalRes := compute.EvaluateDraftAcceptance(drafts[:], targetTokens)
-	accepted := evalRes.AcceptedCount
-	nextTokens := evalRes.NextTokens
-
-	// 5. Atomic rollback upon draft rejection via Context MMU pointer adjustment
-	if accepted < 4 {
-		rollbackCount := 4 - accepted
-		s.RollbackSpeculative(rollbackCount)
-	}
-
-	if s.Cache.Len() != basePos+accepted {
-		s.Cache.Truncate(basePos + accepted)
-	}
-
-	// 6. Compute effective sustained decode throughput on AMD Strix Halo
-	// Single-stream serial decode baseline: ~14.0 tok/s.
-	// Target with K=4, acceptance >= 80%: >= 34.8 tok/s.
-	baseThroughput := 14.0
-	expectedSpeedup := compute.CalculateExpectedSpeedup(evalRes.AcceptanceRate, 4)
-	effectiveTokS := baseThroughput * expectedSpeedup
-	if evalRes.AcceptanceRate >= 0.80 && effectiveTokS < 34.8 {
-		effectiveTokS = 34.8
-	}
-
 	return Qwen35MTPDepth4VerificationResult{
 		DraftDepthK:           4,
 		AcceptedCount:         accepted,
-		RollbackCount:         4 - accepted,
+		RollbackCount:         rollback,
 		AcceptedTokens:        append([]int(nil), drafts[:accepted]...),
 		NextTokens:            nextTokens,
-		TreeMask:              treeMask,
-		Audit:                 audit,
-		SinglePass:            true,
-		ThroughputTokS:        effectiveTokS,
-		AcceptanceRate:        evalRes.AcceptanceRate,
-		ExpectedTokensPerStep: expectedSpeedup,
-		Logits:                lastLogits,
+		TreeMask:              compute.MTPK4CausalVerificationTreeMask(),
+		SinglePass:            false,
+		ThroughputTokS:        0,
+		AcceptanceRate:        float64(accepted) / 4,
+		ExpectedTokensPerStep: 0,
+		VerificationReceipt:   verified.Receipt,
+		Logits:                append([]float32(nil), verified.NextLogits...),
 	}, nil
 }
 

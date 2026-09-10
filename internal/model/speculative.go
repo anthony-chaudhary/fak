@@ -1001,6 +1001,12 @@ func (e *SpeculativeEngine) Stats() SpeculativeEngineStats {
 
 // RecordVerification updates execution statistics for an externally driven verification round.
 func (e *SpeculativeEngine) RecordVerification(generated, accepted, rollback int) {
+	e.RecordVerificationOutcome(generated, accepted, rollback, true)
+}
+
+// RecordVerificationOutcome updates execution statistics for an externally
+// driven verification round after its correction/bonus emission decision.
+func (e *SpeculativeEngine) RecordVerificationOutcome(generated, accepted, rollback int, bonusEmitted bool) {
 	if e == nil {
 		return
 	}
@@ -1008,7 +1014,9 @@ func (e *SpeculativeEngine) RecordVerification(generated, accepted, rollback int
 	defer e.mu.Unlock()
 	e.stats.DraftTokensGenerated += generated
 	e.stats.DraftTokensAccepted += accepted
-	e.stats.BonusTokensEmitted++
+	if bonusEmitted {
+		e.stats.BonusTokensEmitted++
+	}
 	e.stats.VerificationRounds++
 	e.stats.RollbackTokensCount += rollback
 	if e.stats.VerificationRounds > 0 {

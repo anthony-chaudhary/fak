@@ -78,13 +78,17 @@ func (s *Session) verifyForwardQwenHybrid(ids []int, pos []int, allow func(q, k 
 }
 
 const (
-	targetVerificationReceiptSchema   = "fak-target-verification/1"
-	targetVerificationEngine          = "fak-native"
-	targetVerificationBatchedPath     = "fak-native/batched-target-verify-v1"
-	targetVerificationQwen38Path      = "fak-native/f32/qwen3.8-whole-sequence-target-verify-v1"
-	targetVerificationQwen38PanelPath = "fak-native/f32/qwen3.8-incremental-target-verify-v1"
-	targetVerificationDecodePath      = "fak-native/ordinary-target-decode-v1"
-	qwen38VerifyBoundaryTolerance     = float32(2e-5)
+	targetVerificationReceiptSchema      = "fak-target-verification/1"
+	targetVerificationEngine             = "fak-native"
+	targetVerificationBatchedPath        = "fak-native/batched-target-verify-v1"
+	targetVerificationQwen38Path         = "fak-native/f32/qwen3.8-whole-sequence-target-verify-v1"
+	targetVerificationQwen38PanelPath    = "fak-native/f32/qwen3.8-incremental-target-verify-v1"
+	targetVerificationQwen38DevicePath   = "fak-native/device/qwen3.8-sequence-target-verify-v1"
+	targetVerificationBoundaryRejectPath = "fak-native/boundary-target-reject-v1"
+	// Kept as the explicit panel spelling for internal callers and tests.
+	targetVerificationQwen38DevicePanelPath = targetVerificationQwen38DevicePath
+	targetVerificationDecodePath            = "fak-native/ordinary-target-decode-v1"
+	qwen38VerifyBoundaryTolerance           = float32(2e-5)
 )
 
 // verifyQwen35MTPPanel owns timing for the incremental production verifier.
@@ -92,6 +96,9 @@ const (
 // resident memory. Only actually retained transaction state enters KnownMemoryBytes;
 // process peak memory and the inclusive acceptance run remain separately measured.
 func (s *Session) verifyQwen35MTPPanel(ids []int, boundaryLogits []float32) (rows [][]float32, receipt TargetVerificationReceipt, err error) {
+	if qwen35DevicePanelAdvertised(s) {
+		return s.verifyQwen35DevicePanel(ids, boundaryLogits)
+	}
 	receipt = TargetVerificationReceipt{Schema: targetVerificationReceiptSchema, Engine: targetVerificationEngine, Path: targetVerificationDecodePath, DraftTokens: len(ids)}
 	setup := time.Now()
 	err = s.admitQwen35VerifyPanel(ids)
