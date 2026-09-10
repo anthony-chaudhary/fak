@@ -80,11 +80,11 @@ func TestVulkanObservationWindowNativeAccountingStructure(t *testing.T) {
 	if strings.Contains(reuse, "trackDeviceAllocation") || strings.Contains(reuse, "untrackDeviceAllocation") {
 		t.Fatal("reusing a pooled buffer must not change live VkDeviceMemory accounting")
 	}
-	h2d := sourceSection(t, source, "void copyHostToDevice", "void copyDeviceToHost")
+	h2d := sourceSection(t, source, "void copyHostToDevice", "int copyDeviceToHost")
 	if strings.Index(h2d, "endSubmitWait(cmd);") > strings.Index(h2d, "checkedCounterAdd(g_h2dCount") {
 		t.Fatal("H2D counters must advance only after successful submission completion")
 	}
-	d2h := sourceSection(t, source, "void copyDeviceToHost", "// ---- SPIR-V")
+	d2h := sourceSection(t, source, "int copyDeviceToHost", "// ---- SPIR-V")
 	if strings.Index(d2h, "memcpy(host") > strings.Index(d2h, "checkedCounterAdd(g_d2hCount") {
 		t.Fatal("D2H counters must advance only after the host copy completes")
 	}

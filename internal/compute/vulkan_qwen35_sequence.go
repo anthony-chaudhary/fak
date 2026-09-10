@@ -50,6 +50,9 @@ func (v *vulkanBackend) validateQwen35VulkanSequence(req Qwen35SequencePrefillRe
 	if req.Path != Qwen35SequencePrefillPath || len(req.TokenIDs) == 0 || len(req.TokenIDs) > math.MaxInt32 || req.StartPos < 0 || req.StartPos > math.MaxInt32-len(req.TokenIDs) {
 		return fail("request", "invalid capability, empty token panel, or invalid position range")
 	}
+	if req.CapturePrefixReplay && (!req.NeedAllLogits || len(req.TokenIDs) > 4) {
+		return fail("request", "prefix replay capture requires all-row logits and 1..4 tokens")
+	}
 	for _, d := range []int{req.Hidden, req.Intermediate, req.NumHeads, req.NumKVHeads, req.HeadDim, req.RotaryDim, req.NumKeyHeads, req.NumValueHeads, req.KeyHeadDim, req.ValueHeadDim, req.ConvKernel} {
 		if d <= 0 || int64(d) > math.MaxInt32 {
 			return fail("geometry", "dimensions must be positive signed shader integers")
@@ -542,6 +545,7 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 		}
 	}
 	attention := 0
+	var replayProjections []vulkanQwen35ReplayProjection
 	for i, layer := range req.Layers {
 		layerIndex, stage = i, "input-norm"
 		C.fvk_batch_begin()
@@ -550,6 +554,9 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 		if layer.Linear {
 			stage = "gdn-projections"
 			mixed, z, beta, alpha := mul(layer.GDNInQKV, n), mul(layer.GDNInZ, n), mul(layer.GDNInB, n), mul(layer.GDNInA, n)
+			if req.CapturePrefixReplay {
+				replayProjections = append(replayProjections, vulkanQwen35ReplayProjection{layer: i, mixed: mixed, z: z, beta: beta, alpha: alpha})
+			}
 			core, _ := v.devTr([]int{tokens, valueDim}, F32)
 			stage = "gdn-sequence"
 			s := req.States[i]
@@ -606,7 +613,8 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 		if err = check(C.fvk_batch_flush_status()); err != nil {
 			return result, err
 		}
-		v.qwen35VulkanSequenceReleaseLocked(start, x)
+		keep := append([]Tensor{x}, qwen35ReplayProjectionTensors(replayProjections)...)
+		v.qwen35VulkanSequenceReleaseLocked(start, keep...)
 	}
 	layerIndex, stage = -1, "output-norm"
 	C.fvk_batch_begin()
@@ -637,7 +645,24 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 	for pos := req.StartPos; pos < req.StartPos+tokens; pos++ {
 		kv.pos = append(kv.pos, pos)
 	}
-	v.qwen35VulkanSequenceReleaseLocked(start, last, logits, logitsRows)
-	result = Qwen35SequencePrefillResult{LastHidden: last, Logits: logits, LogitsRows: logitsRows, Tokens: tokens, Transfers: Qwen35SequenceTransferCounters{H2DBytes: h2d, D2HBytes: d2h, ActivationH2DBytes: h2d, ActivationD2HBytes: d2h}}
+	keep := append([]Tensor{last, logits, logitsRows}, qwen35ReplayProjectionTensors(replayProjections)...)
+	v.qwen35VulkanSequenceReleaseLocked(start, keep...)
+	var prefixReplay Qwen35SequencePrefixReplay
+	if req.CapturePrefixReplay {
+		checkpoint := &vulkanQwen35PrefixReplay{
+			backend: v, kv: kv, startPos: req.StartPos, tokens: tokens, kvWidth: kvWidth,
+			convDim: convDim, valueDim: valueDim, numKeyHeads: req.NumKeyHeads, numValueHeads: req.NumValueHeads,
+			keyHeadDim: req.KeyHeadDim, valueHeadDim: req.ValueHeadDim, convKernel: req.ConvKernel, rmsEpsilon: req.RMSNormEpsilon,
+			layers: append([]Qwen35SequenceLayer(nil), req.Layers...), states: append([]Qwen35SequenceState(nil), req.States...),
+			projections: replayProjections,
+		}
+		owned, detachErr := v.qwen35DetachReplayBuffersLocked(replayProjections)
+		if detachErr != nil {
+			return result, detachErr
+		}
+		checkpoint.owned = owned
+		prefixReplay = checkpoint
+	}
+	result = Qwen35SequencePrefillResult{LastHidden: last, Logits: logits, LogitsRows: logitsRows, PrefixReplay: prefixReplay, Tokens: tokens, Transfers: Qwen35SequenceTransferCounters{H2DBytes: h2d, D2HBytes: d2h, ActivationH2DBytes: h2d, ActivationD2HBytes: d2h}}
 	return result, nil
 }

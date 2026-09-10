@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/polymodel"
 )
 
@@ -113,12 +114,14 @@ type qwen35MTPTargetTransaction struct {
 	step          func(int) []float32
 	receipt       TargetVerificationReceipt
 	checkpoint    Qwen35MetalMTPCheckpoint
+	prefixReplay  compute.Qwen35SequencePrefixReplay
 	panelReceipt  *Qwen35MetalMTPVerifyPanelReceipt
 	closed        bool
 	closeCount    int
 	verifyStarted bool
 	verifiedLive  bool
 	lastLogits    []float32
+	verifiedRows  [][]float32
 	beforeHALStep int
 	beforeHALWarm bool
 }
@@ -148,6 +151,12 @@ func beginQwen35MTPTargetTransaction(target *Session, beforeLogits []float32) (*
 				tx.verifiedLive = err == nil
 				return rows, receipt, err
 			}
+		}
+		if qwen35DevicePanelAdvertised(target) {
+			rows, checkpoint, receipt, err := target.verifyQwen35DevicePanelTransaction(draft, tx.beforeLogits, true)
+			tx.prefixReplay = checkpoint
+			tx.verifiedLive = err == nil
+			return rows, receipt, err
 		}
 		rows, receipt, err := target.verifyQwen35MTPPanel(draft, tx.beforeLogits)
 		tx.verifiedLive = err == nil
@@ -185,6 +194,11 @@ func (tx *qwen35MTPTargetTransaction) Verify(draft []int) (rows [][]float32, err
 	tx.receipt = receipt
 	var downgrade *TargetVerificationDowngradeError
 	if errors.As(verifyErr, &downgrade) {
+		if errors.Is(verifyErr, errQwen35DeviceTargetHiddenDowngrade) {
+			tx.receipt.DowngradeReason = downgrade.Reason
+			tx.finish()
+			return nil, verifyErr
+		}
 		started := time.Now()
 		rows = tx.target.verifyForwardSequential(draft)
 		tx.receipt.Path = targetVerificationDecodePath
@@ -202,6 +216,13 @@ func (tx *qwen35MTPTargetTransaction) Verify(draft []int) (rows [][]float32, err
 	if tx.verifiedLive {
 		tx.lastLogits = append([]float32(nil), rows[len(rows)-1]...)
 		tx.receipt.Accounting.KnownMemoryBytes += int64(len(tx.lastLogits)) * 4
+		if tx.prefixReplay != nil {
+			tx.verifiedRows = make([][]float32, len(rows))
+			for i := range rows {
+				tx.verifiedRows[i] = append([]float32(nil), rows[i]...)
+				tx.receipt.Accounting.KnownMemoryBytes += int64(len(tx.verifiedRows[i])) * 4
+			}
+		}
 	}
 	return rows, nil
 }
@@ -215,6 +236,12 @@ func (tx *qwen35MTPTargetTransaction) Commit(accepted int) (logits []float32, er
 	}
 	tx.receipt.AcceptedTokens = accepted
 	tx.receipt.RejectedTokens = len(tx.draft) - accepted
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			logits = nil
+			err = tx.rollbackFailure("commit replay", fmt.Errorf("%v", recovered))
+		}
+	}()
 	if tx.verifiedLive && accepted == len(tx.draft) {
 		started := time.Now()
 		logits = tx.lastLogits
@@ -224,6 +251,20 @@ func (tx *qwen35MTPTargetTransaction) Commit(accepted int) (logits []float32, er
 		tx.finish()
 		tx.receipt.Accounting.Synchronization = measuredSpeculativeCost(started)
 		tx.receipt.Accounting.Rollback.Measured = true // no rollback required
+		return logits, nil
+	}
+	if tx.verifiedLive && accepted > 0 && accepted < len(tx.draft) && tx.prefixReplay != nil {
+		started := time.Now()
+		logits, err = tx.commitPrefixReplay(accepted)
+		if err != nil {
+			return nil, tx.rollbackFailure("commit recurrent prefix repair", err)
+		}
+		tx.receipt.RecurrentRepairTokens = accepted
+		// This wall time includes state reset, recurrent repair, its terminal
+		// fence, and the KV metadata cut. Leave Rollback unmeasured rather than
+		// inventing a split between operations submitted in the same batch.
+		tx.receipt.Accounting.Synchronization = measuredSpeculativeCost(started)
+		tx.finish()
 		return logits, nil
 	}
 	rollback, err := tx.snapshot.Clone()
@@ -247,21 +288,63 @@ func (tx *qwen35MTPTargetTransaction) Commit(accepted int) (logits []float32, er
 	tx.snapshot.Close()
 	tx.snapshot = rollback
 	logits = append([]float32(nil), tx.beforeLogits...)
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			logits = nil
-			err = tx.rollbackFailure("commit replay", fmt.Errorf("%v", recovered))
-		}
-	}()
 	started := time.Now()
 	// Synchronization includes accepted-prefix Step replay; TargetDecodeSteps
 	// describes verification execution, not these separately timed commit steps.
 	for _, token := range tx.draft[:accepted] {
 		logits = tx.step(token)
+		tx.receipt.FullTargetReplaySteps++
 	}
 	tx.receipt.Accounting.Synchronization = measuredSpeculativeCost(started)
 	tx.finish()
 	return logits, nil
+}
+
+func (tx *qwen35MTPTargetTransaction) commitPrefixReplay(accepted int) ([]float32, error) {
+	tx.target.cacheGeometryMu.RLock()
+	defer tx.target.cacheGeometryMu.RUnlock()
+	if err := tx.validatePrefixReplayCommit(accepted); err != nil {
+		return nil, err
+	}
+	before := make([]compute.Qwen35SequenceState, len(tx.snapshot.qwen35.layers))
+	for i, state := range tx.snapshot.qwen35.layers {
+		before[i] = compute.Qwen35SequenceState{Conv: state.conv, Recurrent: state.recurrent}
+	}
+	if err := tx.prefixReplay.CommitPrefix(accepted, before); err != nil {
+		return nil, err
+	}
+	prefix := len(tx.snapshot.halLineage.ids)
+	tx.target.halLineage.ids = tx.target.halLineage.ids[:prefix+accepted]
+	tx.target.halStep = tx.beforeHALStep + accepted
+	tx.target.halLogitsWarm = tx.beforeHALWarm || accepted > 0
+	return append([]float32(nil), tx.verifiedRows[accepted-1]...), nil
+}
+
+func (tx *qwen35MTPTargetTransaction) validatePrefixReplayCommit(accepted int) error {
+	if tx.snapshot == nil || tx.snapshot.qwen35 == nil || tx.target == nil || tx.target.halKV == nil || tx.target.qwen35HAL == nil {
+		return errors.New("model: prefix replay needs complete live and snapshot device state")
+	}
+	if accepted < 1 || accepted >= len(tx.draft) || len(tx.verifiedRows) != len(tx.draft) || len(tx.snapshot.qwen35.layers) != len(tx.target.qwen35HAL.layers) {
+		return errors.New("model: prefix replay draft, row, or recurrent layer count mismatch")
+	}
+	prefix := len(tx.snapshot.halLineage.ids)
+	if tx.snapshot.halLineage.fault != "" || tx.target.halLineage.fault != "" || len(tx.target.halLineage.ids) != prefix+len(tx.draft) || tx.target.halKV.Len() != prefix+len(tx.draft) {
+		return errors.New("model: prefix replay live KV and token lineage do not cover the speculative panel")
+	}
+	for i, token := range tx.snapshot.halLineage.ids {
+		if tx.target.halLineage.ids[i] != token {
+			return errors.New("model: prefix replay live token lineage differs from the snapshot prefix")
+		}
+	}
+	for i, token := range tx.draft {
+		if token < 0 || uint64(token) > uint64(^uint32(0)) || tx.target.halLineage.ids[prefix+i] != uint32(token) {
+			return errors.New("model: prefix replay token lineage differs from the verified draft")
+		}
+	}
+	if len(tx.verifiedRows[accepted-1]) == 0 {
+		return errors.New("model: prefix replay accepted boundary logits are unavailable")
+	}
+	return nil
 }
 
 func (tx *qwen35MTPTargetTransaction) rollbackFailure(stage string, cause error) error {
@@ -318,13 +401,18 @@ func (tx *qwen35MTPTargetTransaction) finish() {
 	if tx.closed {
 		return
 	}
-	tx.snapshot.Close()
-	tx.snapshot = nil
+	if tx.prefixReplay != nil {
+		tx.prefixReplay.Close()
+		tx.prefixReplay = nil
+	}
 	if tx.checkpoint != nil {
 		tx.checkpoint.Close()
 		tx.checkpoint = nil
 	}
+	tx.snapshot.Close()
+	tx.snapshot = nil
 	tx.lastLogits = nil
+	tx.verifiedRows = nil
 	tx.closed = true
 	tx.closeCount++
 }
