@@ -198,6 +198,8 @@ func (c *KVCache) Clone() *KVCache {
 // CloneWithReserve is Clone plus spare per-layer capacity for extra future positions.
 // Fleet serving knows the planned decode/result tail length; reserving it here avoids
 // re-copying the already-cloned prefix on the first append and on later growth steps.
+// In a hybrid model, reserve capacity is only allocated on full-attention layers where
+// token-indexed KV exists; recurrent layers remain unallocated or preserve existing KV.
 func (c *KVCache) CloneWithReserve(extraPositions int) *KVCache {
 	if extraPositions < 0 {
 		extraPositions = 0
@@ -219,15 +221,31 @@ func (c *KVCache) CloneWithReserve(extraPositions int) *KVCache {
 		n.msa = c.msa.cloneWithReserve(c.cfg, extraPositions)
 	}
 	for l := range c.K {
+		if c.cfg.isLinearAttnLayer(l) {
+			n.K[l] = cloneFloat32PreserveCap(c.K[l])
+			if l < len(c.Kraw) {
+				n.Kraw[l] = cloneFloat32PreserveCap(c.Kraw[l])
+			}
+			if l < len(c.V) {
+				n.V[l] = cloneFloat32PreserveCap(c.V[l])
+			}
+			continue
+		}
 		n.K[l] = cloneFloat32WithReserve(c.K[l], extraFloats)
-		n.Kraw[l] = cloneFloat32WithReserve(c.Kraw[l], extraFloats)
-		n.V[l] = cloneFloat32WithReserve(c.V[l], extraFloats)
+		if l < len(c.Kraw) {
+			n.Kraw[l] = cloneFloat32WithReserve(c.Kraw[l], extraFloats)
+		}
+		if l < len(c.V) {
+			n.V[l] = cloneFloat32WithReserve(c.V[l], extraFloats)
+		}
 	}
 	return n
 }
 
 // Reserve grows this cache's spare capacity for extra future positions while preserving
 // its exact current contents. It does not change Len().
+// In a hybrid model, reserve capacity is only added on full-attention layers where
+// token-indexed KV exists; recurrent layers remain unallocated or preserve existing KV.
 func (c *KVCache) Reserve(extraPositions int) {
 	if extraPositions <= 0 {
 		return
@@ -236,9 +254,16 @@ func (c *KVCache) Reserve(extraPositions int) {
 	c.pos = reserveInts(c.pos, extraPositions)
 	c.lineage.reserve(extraPositions)
 	for l := range c.K {
+		if c.cfg.isLinearAttnLayer(l) {
+			continue
+		}
 		c.K[l] = reserveFloat32(c.K[l], extraFloats)
-		c.Kraw[l] = reserveFloat32(c.Kraw[l], extraFloats)
-		c.V[l] = reserveFloat32(c.V[l], extraFloats)
+		if l < len(c.Kraw) {
+			c.Kraw[l] = reserveFloat32(c.Kraw[l], extraFloats)
+		}
+		if l < len(c.V) {
+			c.V[l] = reserveFloat32(c.V[l], extraFloats)
+		}
 	}
 	if c.glm != nil {
 		c.glm.reserve(c.cfg, extraPositions)
@@ -248,8 +273,21 @@ func (c *KVCache) Reserve(extraPositions int) {
 	}
 }
 
+func cloneFloat32PreserveCap(src []float32) []float32 {
+	if src == nil {
+		return nil
+	}
+	dst := make([]float32, len(src), cap(src))
+	copy(dst, src)
+	return dst
+}
+
 func cloneFloat32WithReserve(src []float32, extra int) []float32 {
-	dst := make([]float32, len(src), len(src)+extra)
+	c := len(src) + extra
+	if cap(src) > c {
+		c = cap(src)
+	}
+	dst := make([]float32, len(src), c)
 	copy(dst, src)
 	return dst
 }
