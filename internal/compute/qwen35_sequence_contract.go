@@ -11,6 +11,16 @@ const Qwen35SequencePrefillPath = "qwen35-hybrid-sequence-prefill-v1"
 // this exact identity before model may replace the full [vocab, hidden] table.
 const Qwen35SequenceEmbeddingRowsPath = "qwen35-hybrid-sequence-embedding-rows-v1"
 
+// Qwen35SequenceAllLogitsPath identifies the optional final-projection extension
+// which returns one device-resident logits row per input token.
+const Qwen35SequenceAllLogitsPath = "qwen35-hybrid-sequence-all-logits-v1"
+
+// Qwen35SequenceAllLogitsBackend prevents callers from setting NeedAllLogits on
+// sequence implementations that predate the all-row result contract.
+type Qwen35SequenceAllLogitsBackend interface {
+	Qwen35SequenceAllLogitsPath() string
+}
+
 // Qwen35SequenceEmbeddingRowsBackend is the structural marker for bounded prompt
 // embedding panels. The operation itself remains Qwen35SequencePrefill; the marker
 // prevents an older backend from interpreting a row panel as a vocabulary table.
@@ -154,6 +164,9 @@ type Qwen35SequencePrefillRequest struct {
 	RMSNormEpsilon       float32
 	RoPEThetaForLayer    []float64
 	NeedLogits           bool
+	// NeedAllLogits requests one output-logit row for every input token. The
+	// rows stay device-resident; callers explicitly decide whether to read them.
+	NeedAllLogits bool
 }
 
 // Qwen35SequencePrefillResult returns only resident products. KV and recurrent
@@ -161,6 +174,7 @@ type Qwen35SequencePrefillRequest struct {
 type Qwen35SequencePrefillResult struct {
 	LastHidden Tensor
 	Logits     Tensor
+	LogitsRows Tensor
 	Tokens     int
 	Transfers  Qwen35SequenceTransferCounters
 }

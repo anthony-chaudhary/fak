@@ -42,6 +42,7 @@ type guardStartupView struct {
 	handoffCfg           guardTaskHandoffConfig
 	codexInstall         guardCodexInstall
 	piInstall            guardPiInstall
+	opencodeInstall      openCodeConfigInstall
 	mcpInstall           guardMCPInstall
 	debugStatsStderr     bool
 	debugStats           bool
@@ -118,6 +119,7 @@ func renderGuardStartupReport(v guardStartupView) string {
 		}
 		printGuardCodexNote(&startupReport, v.codexInstall)
 		printGuardPiNote(&startupReport, v.piInstall)
+		printGuardOpenCodeNote(&startupReport, v.opencodeInstall)
 		printGuardMCPNote(&startupReport, v.mcpInstall)
 		printGuardCapabilitiesNote(&startupReport, v.mcpInstall)
 		switch {

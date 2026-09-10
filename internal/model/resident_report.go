@@ -25,10 +25,15 @@ type ResidentReport struct {
 	Q2KEmbedTensors int   `json:"q2k_embed_tensors"`
 	Q2KEmbedBytes   int64 `json:"q2k_embed_bytes"`
 	Q2KEmbedParams  int64 `json:"q2k_embed_params"`
+	// Q4KEmbed* is the packed Q4_K embedding table. It remains separate from
+	// Q4K* because row-gather embeddings are excluded from decode weight traffic.
+	Q4KEmbedTensors int   `json:"q4k_embed_tensors"`
+	Q4KEmbedBytes   int64 `json:"q4k_embed_bytes"`
+	Q4KEmbedParams  int64 `json:"q4k_embed_params"`
 	F32Tensors      int   `json:"f32_tensors"` // small f32 manifest tensors (norms, embed, biases)
 	F32Bytes        int64 `json:"f32_bytes"`   // their resident bytes
 
-	TotalResidentBytes int64 `json:"total_resident_bytes"` // q4k + q8 + kquant + q2k_embed + f32
+	TotalResidentBytes int64 `json:"total_resident_bytes"` // q4k + q8 + kquant + packed embeds + f32
 	// DecodeBytesPerToken is the weight-byte stream one batch=1 decode step walks: every
 	// matmul weight (q4k + q8) is read exactly once per generated token, so this is the
 	// bandwidth-bound number that sets the decode tok/s ceiling (tok/s ≈ memBW / this).
@@ -71,15 +76,21 @@ func (m *Model) ResidentReport() *ResidentReport {
 		r.KQuantParams += int64(len(qt.raw) / qt.kind.blockBytes() * qt.kind.blockWeights())
 	}
 	if m.Q2KEmbedding != nil {
-		r.Q2KEmbedTensors = 1
-		r.Q2KEmbedBytes = int64(m.Q2KEmbedding.Bytes())
-		r.Q2KEmbedParams = int64(m.Q2KEmbedding.Vocab()) * int64(m.Q2KEmbedding.Hidden())
+		if m.Q2KEmbedding.Format() == "Q4_K" {
+			r.Q4KEmbedTensors = 1
+			r.Q4KEmbedBytes = int64(m.Q2KEmbedding.Bytes())
+			r.Q4KEmbedParams = int64(m.Q2KEmbedding.Vocab()) * int64(m.Q2KEmbedding.Hidden())
+		} else {
+			r.Q2KEmbedTensors = 1
+			r.Q2KEmbedBytes = int64(m.Q2KEmbedding.Bytes())
+			r.Q2KEmbedParams = int64(m.Q2KEmbedding.Vocab()) * int64(m.Q2KEmbedding.Hidden())
+		}
 	}
 	for _, meta := range m.manifest {
 		r.F32Tensors++
 		r.F32Bytes += int64(meta.Nbytes)
 	}
-	r.TotalResidentBytes = r.Q4KBytes + r.Q8Bytes + r.KQuantBytes + r.Q2KEmbedBytes + r.F32Bytes
+	r.TotalResidentBytes = r.Q4KBytes + r.Q8Bytes + r.KQuantBytes + r.Q2KEmbedBytes + r.Q4KEmbedBytes + r.F32Bytes
 	// The matmul weights read per decode token = all of q4kw + q8w + kqw (the LM head is in
 	// one of them; every projection + MLP weight streams once). This is the decode bandwidth.
 	// Embedding is a row-gather (hidden·4 B), not a full stream, so it is excluded; norms
@@ -162,6 +173,8 @@ func FormatResidentReport(r *ResidentReport) string {
 	embedStr := ""
 	if r.Q2KEmbedTensors > 0 {
 		embedStr = "  Q2_K_embed=" + itoa(r.Q2KEmbedTensors) + "/" + fmtFloat(mib(r.Q2KEmbedBytes)) + "MiB"
+	} else if r.Q4KEmbedTensors > 0 {
+		embedStr = "  Q4_K_embed=" + itoa(r.Q4KEmbedTensors) + "/" + fmtFloat(mib(r.Q4KEmbedBytes)) + "MiB"
 	}
 	return "resident: Q4_K=" + itoa(r.Q4KTensors) + " tensors/" + fmtFloat(mib(r.Q4KBytes)) + "MiB" +
 		"  rawExpertQuant=" + itoa(r.KQuantTensors) + "/" + fmtFloat(mib(r.KQuantBytes)) + "MiB" +

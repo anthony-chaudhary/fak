@@ -1346,6 +1346,17 @@ func cmdManageCommand(commandName string, argv []string) {
 	if err != nil {
 		abortChildWiring(cancel, "Pi extension setup", err, 1)
 	}
+	var opencodeInstall openCodeConfigInstall
+	if guardIsOpencode(launchPlan.agentBaseName()) {
+		var opencodeEnv [][2]string
+		opencodeLimits := discoverGuardOpenCodeModelLimits(gwURL, *model)
+		opencodeModel := *model
+		if strings.TrimSpace(opencodeModel) == "" {
+			opencodeModel = opencodeLimits.ID
+		}
+		opencodeEnv, opencodeInstall = installGuardOpenCodeConfig(launchPlan.executableCommand(), gwURL, opencodeModel, os.Getenv, opencodeLimits)
+		injected = append(injected, opencodeEnv...)
+	}
 	injected = append(injected, guardClaudeAutoCompactWindowInjection(up, *model, command)...)
 	// Headless workers: make editor/pager-opening git forms (a `git commit` with no message
 	// source, incl. a `-m` after `--`; `git rebase -i`) fail fast instead of hanging on a
@@ -1399,6 +1410,7 @@ func cmdManageCommand(commandName string, argv []string) {
 		handoffCfg:           handoffCfg,
 		codexInstall:         codexInstall,
 		piInstall:            piInstall,
+		opencodeInstall:      opencodeInstall,
 		mcpInstall:           mcpInstall,
 		debugStatsStderr:     debugStatsStderr,
 		debugStats:           *debugStats,

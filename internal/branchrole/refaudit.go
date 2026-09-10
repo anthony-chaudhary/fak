@@ -286,6 +286,11 @@ var refClassByExactPath = map[string]string{
 
 	"tools/demo_robustness_scorecard.py": RefClassPublicGuard,
 
+	"cmd/fak/completion.go":            RefClassPublicFrontDoor,
+	"cmd/fak/garden_loop.go":           RefClassDevelopmentSource,
+	"internal/macbench/agentic_mtp.go": RefClassDevelopmentSource,
+	"internal/macbench/validation.go":  RefClassDevelopmentSource,
+
 	"tools/bench_node.README.md": RefClassFixture,
 	"tools/gcp_bench.py":         RefClassFixture,
 }

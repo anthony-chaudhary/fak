@@ -162,8 +162,6 @@ var changeDetectorBaseline = []string{
 	"internal/frontierswe/task_test.go",
 	"internal/gateway/harness_coherence_test.go",
 	"internal/gateway/mcp_batch_test.go",
-	"internal/gateway/native_code_health_test.go",
-	"internal/gateway/native_serve_loop_test.go",
 	"internal/gateway/openai_parity_test.go",
 	"internal/gateway/session_move_test.go",
 	"internal/ggufload/dequant_reuse_test.go",

@@ -406,14 +406,22 @@ void destroyBuffer(Buffer* b) {
 
 Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlags usage);
 
+bool g_debugD2HStagingFailureOnce = false;
+
 size_t stageCapacity(size_t bytes) {
     size_t cap = 64 * 1024;
     while (cap < bytes && cap <= (((size_t)-1) / 2)) cap *= 2;
     return cap < bytes ? bytes : cap;
 }
 
-Buffer* stagingBuffer(size_t bytes) {
+Buffer* stagingBuffer(size_t bytes, int* failureStatus = nullptr) {
+    if (failureStatus) *failureStatus = VK_SUCCESS;
     if (bytes == 0) return nullptr;
+    if (failureStatus && g_debugD2HStagingFailureOnce) {
+        g_debugD2HStagingFailureOnce = false;
+        *failureStatus = FVK_D2H_STAGING_ALLOCATION_FAILED;
+        return nullptr;
+    }
     if (g_stage && g_stageCap >= bytes && g_stageMapped) return g_stage;
 
     if (g_stage) {
@@ -428,7 +436,10 @@ Buffer* stagingBuffer(size_t bytes) {
     g_stage = allocBuffer(cap,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
-    if (!g_stage) return nullptr;
+    if (!g_stage) {
+        if (failureStatus) *failureStatus = FVK_D2H_STAGING_ALLOCATION_FAILED;
+        return nullptr;
+    }
     VkResult r = vkMapMemory(g_dev, g_stage->mem, 0, cap, 0, &g_stageMapped);
     if (r != VK_SUCCESS || !g_stageMapped) {
         fprintf(stderr, "fak-vulkan: vkMapMemory(stage %zu bytes) failed VkResult=%d\n", cap, (int)r);
@@ -436,6 +447,9 @@ Buffer* stagingBuffer(size_t bytes) {
         g_stage = nullptr;
         g_stageMapped = nullptr;
         g_stageCap = 0;
+        if (failureStatus) {
+            *failureStatus = r == VK_SUCCESS ? FVK_D2H_STAGING_ALLOCATION_FAILED : (int)r;
+        }
         return nullptr;
     }
     g_stageCap = cap;
@@ -883,19 +897,24 @@ void copyHostToDevice(Buffer* dst, const void* host, size_t bytes) {
     }
 }
 
-void copyDeviceToHost(void* host, Buffer* src, size_t bytes) {
-    if (bytes == 0 || !host || !src) return;
-    Buffer* stage = stagingBuffer(bytes);
-    if (!stage) return;
+int copyDeviceToHost(void* host, Buffer* src, size_t bytes) {
+    if (bytes == 0) return VK_SUCCESS;
+    if (!host || !src) return VK_ERROR_INITIALIZATION_FAILED;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    int stagingStatus = VK_SUCCESS;
+    Buffer* stage = stagingBuffer(bytes, &stagingStatus);
+    if (!stage) return stagingStatus == VK_SUCCESS ? FVK_D2H_STAGING_ALLOCATION_FAILED : stagingStatus;
     VkCommandBuffer cmd = beginCmd();
     VkBufferCopy region{0, 0, bytes};
     vkCmdCopyBuffer(cmd, src->buf, stage->buf, 1, &region);
     dpOneShot(g_dp.oneShotD2H);
     endSubmitWait(cmd);
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
     memcpy(host, g_stageMapped, bytes);
     if (!checkedCounterAdd(g_d2hCount, 1) || !checkedCounterAdd(g_d2hBytes, bytes)) {
         g_transferCountersValid = false;
     }
+    return VK_SUCCESS;
 }
 
 // ---- SPIR-V load + pipeline build ----------------------------------------------
@@ -1556,9 +1575,14 @@ void fvk_debug_restore_fail_after_submits(int successful_submits) {
 
 // d2h is a true host fence (the final logits Read): flush the recorded batch so the compute
 // has actually executed, then copy device->host.
-void fvk_d2h(void* h, const void* d, size_t bytes) {
+int fvk_d2h(void* h, const void* d, size_t bytes) {
     if (g_batching) batchFlush();
-    copyDeviceToHost(h, B((void*)d), bytes);
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    return copyDeviceToHost(h, B((void*)d), bytes);
+}
+
+void fvk_debug_d2h_staging_failure_once(int enabled) {
+    g_debugD2HStagingFailureOnce = enabled != 0;
 }
 
 // device->device copies (RoPE's copy-then-rotate, the KV append) are RECORDED into the open

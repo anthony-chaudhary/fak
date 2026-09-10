@@ -1041,9 +1041,39 @@ func (v *vulkanBackend) Read(t Tensor) []float32 {
 	return readF32Tensor(t, func(buf Buffer, out []float32) {
 		db := buf.(*vulkanBuf)
 		if len(out) > 0 {
-			C.fvk_d2h(unsafe.Pointer(&out[0]), db.ptr, C.size_t(len(out)*4))
+			status := int(C.fvk_d2h(unsafe.Pointer(&out[0]), db.ptr, C.size_t(len(out)*4)))
+			if status != 0 {
+				panic(vulkanReadError(status))
+			}
 		}
 	})
+}
+
+func vulkanReadError(status int) *BackendError {
+	class := VulkanClassSubmissionFailed
+	sentinel := ErrVulkanSubmissionFailed
+	message := fmt.Sprintf("device-to-host copy failed with native status %d", status)
+	switch status {
+	case -4: // VK_ERROR_DEVICE_LOST
+		class = VulkanClassDeviceLost
+		sentinel = ErrVulkanDeviceLost
+		message = fmt.Sprintf("device lost during device-to-host copy (native status %d)", status)
+	case -1, -2: // VK_ERROR_OUT_OF_HOST_MEMORY, VK_ERROR_OUT_OF_DEVICE_MEMORY
+		class = VulkanClassAllocationFailed
+		sentinel = ErrVulkanAllocationFailed
+		message = fmt.Sprintf("device-to-host staging allocation failed (native status %d)", status)
+	case int(C.FVK_D2H_STAGING_ALLOCATION_FAILED):
+		class = VulkanClassAllocationFailed
+		sentinel = ErrVulkanAllocationFailed
+		message = "device-to-host staging allocation failed (native cause unavailable)"
+	}
+	return &BackendError{
+		Backend: "vulkan",
+		Class:   class,
+		Site:    "Read",
+		Message: message,
+		Err:     sentinel,
+	}
 }
 
 // CloneTensor makes an independently owned device-to-device copy for persistent
