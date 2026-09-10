@@ -3,6 +3,6 @@
 package compute
 
 /*
-#cgo LDFLAGS: -lvulkan -lstdc++
+#cgo LDFLAGS: -lvulkan -lstdc++ -lm
 */
 import "C"
