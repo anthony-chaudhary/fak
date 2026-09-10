@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -909,6 +910,7 @@ func (s *Session) qwen35SequencePrefillRequestWithEmbedding(ids []int, needLogit
 		Hidden: cfg.HiddenSize, Intermediate: cfg.IntermediateSize, NumHeads: cfg.NumHeads, NumKVHeads: cfg.NumKVHeads,
 		HeadDim: cfg.HeadDim, RotaryDim: cfg.rotaryDim(), NumKeyHeads: nK, NumValueHeads: nV, KeyHeadDim: kHd, ValueHeadDim: vHd,
 		ConvKernel: cfg.LinearConvKernelDim, RMSNormEpsilon: float32(cfg.RMSNormEps), RoPEThetaForLayer: make([]float64, cfg.NumLayers), NeedLogits: needLogits,
+		CaptureRawHidden: s.captureTargetHidden,
 	}
 	for l := 0; l < cfg.NumLayers; l++ {
 		req.RoPEThetaForLayer[l] = cfg.ropeThetaForLayer(l)
@@ -955,6 +957,19 @@ func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.
 	seq, advertised, err := qwen35SequencePrefillBackend(s.Backend)
 	if err != nil || !advertised {
 		return compute.Qwen35SequencePrefillResult{}, advertised, err
+	}
+	if s.captureTargetHidden {
+		raw, ok := s.Backend.(compute.Qwen35SequenceRawHiddenBackend)
+		if !ok {
+			// Preserve exact capture semantics on older backends by taking the
+			// ordinary scalar HAL path, which reads the raw residual before norm.
+			return compute.Qwen35SequencePrefillResult{}, false, nil
+		}
+		if raw.Qwen35SequenceRawHiddenPath() != compute.Qwen35SequenceRawHiddenPath {
+			return compute.Qwen35SequencePrefillResult{}, true, &UnsupportedSequencePrefillError{
+				Backend: s.Backend.Name(), Path: raw.Qwen35SequenceRawHiddenPath(), Reason: "wrong raw-hidden capability identity",
+			}
+		}
 	}
 	embedShape := []int{s.M.Cfg.VocabSize, s.M.Cfg.HiddenSize}
 	packedRows := s.M.Q2KEmbedding != nil
@@ -1045,6 +1060,11 @@ func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.
 	if result.Tokens != len(ids) || s.halKV.Len() != startPos+len(ids) || result.LastHidden.Buf() == nil || !result.LastHidden.Ready() || (needLogits && (result.Logits.Buf() == nil || !result.Logits.Ready())) {
 		return result, true, &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardQwen35GDN, Path: compute.Qwen35SequencePrefillPath, Layer: -1, Stage: "sequence result", Cause: fmt.Errorf("malformed result: tokens=%d want=%d kv_len=%d want=%d", result.Tokens, len(ids), s.halKV.Len(), startPos+len(ids))}
 	}
+	if s.captureTargetHidden {
+		if err := s.captureQwen35SequenceRawHidden(ids, startPos, result.RawHiddenRows); err != nil {
+			return result, true, &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardQwen35GDN, Path: compute.Qwen35SequencePrefillPath, Layer: -1, Stage: "sequence raw hidden", Cause: err}
+		}
+	}
 	s.qwen35HAL.prefillRoute = Qwen35SequencePrefillRouteStatus{
 		RequestedPath:               compute.Qwen35SequencePrefillPath,
 		EffectivePath:               compute.Qwen35SequencePrefillPath,
@@ -1053,6 +1073,27 @@ func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.
 		EmbeddingPanelBytes:         panelBytes,
 	}
 	return result, true, nil
+}
+
+func (s *Session) captureQwen35SequenceRawHidden(ids []int, startPos int, raw compute.Tensor) error {
+	hidden := s.M.Cfg.HiddenSize
+	if raw.Buf() == nil || !raw.Ready() || len(raw.Shape) != 2 || raw.Shape[0] != len(ids) || raw.Shape[1] != hidden {
+		return fmt.Errorf("malformed raw-hidden result: shape=%v want=[%d %d]", raw.Shape, len(ids), hidden)
+	}
+	flat := s.Backend.Read(raw)
+	if len(flat) != len(ids)*hidden {
+		return fmt.Errorf("read %d raw-hidden values, want %d", len(flat), len(ids)*hidden)
+	}
+	for offset, value := range flat {
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			return fmt.Errorf("raw-hidden row %d contains a non-finite value", offset/hidden)
+		}
+	}
+	for row, token := range ids {
+		values := flat[row*hidden : (row+1)*hidden]
+		s.rememberTargetHidden(startPos+row, token, values)
+	}
+	return nil
 }
 
 // Qwen35MTPDepth4VerificationResult holds the outcome of an MTP depth K=4 causal tree

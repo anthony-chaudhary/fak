@@ -15,6 +15,8 @@ import (
 	"unsafe"
 )
 
+var _ Qwen35SequenceRawHiddenBackend = (*vulkanBackend)(nil)
+
 func (*vulkanBackend) Qwen35SequencePrefillPath() string { return Qwen35SequencePrefillPath }
 
 func (*vulkanBackend) Qwen35SequenceEmbeddingRowsPath() string {
@@ -22,6 +24,8 @@ func (*vulkanBackend) Qwen35SequenceEmbeddingRowsPath() string {
 }
 
 func (*vulkanBackend) Qwen35SequenceAllLogitsPath() string { return Qwen35SequenceAllLogitsPath }
+
+func (*vulkanBackend) Qwen35SequenceRawHiddenPath() string { return Qwen35SequenceRawHiddenPath }
 
 func qwen35VulkanSequenceError(stage string, layer int, reason string) error {
 	return &Qwen35SequenceError{Stage: stage, Layer: layer, Reason: reason}
@@ -645,7 +649,13 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 	for pos := req.StartPos; pos < req.StartPos+tokens; pos++ {
 		kv.pos = append(kv.pos, pos)
 	}
-	keep := append([]Tensor{last, logits, logitsRows}, qwen35ReplayProjectionTensors(replayProjections)...)
+	keep := []Tensor{last, logits, logitsRows}
+	var rawHiddenRows Tensor
+	if req.CaptureRawHidden {
+		rawHiddenRows = x
+		keep = append(keep, rawHiddenRows)
+	}
+	keep = append(keep, qwen35ReplayProjectionTensors(replayProjections)...)
 	v.qwen35VulkanSequenceReleaseLocked(start, keep...)
 	var prefixReplay Qwen35SequencePrefixReplay
 	if req.CapturePrefixReplay {
@@ -663,6 +673,6 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 		checkpoint.owned = owned
 		prefixReplay = checkpoint
 	}
-	result = Qwen35SequencePrefillResult{LastHidden: last, Logits: logits, LogitsRows: logitsRows, PrefixReplay: prefixReplay, Tokens: tokens, Transfers: Qwen35SequenceTransferCounters{H2DBytes: h2d, D2HBytes: d2h, ActivationH2DBytes: h2d, ActivationD2HBytes: d2h}}
+	result = Qwen35SequencePrefillResult{LastHidden: last, RawHiddenRows: rawHiddenRows, Logits: logits, LogitsRows: logitsRows, PrefixReplay: prefixReplay, Tokens: tokens, Transfers: Qwen35SequenceTransferCounters{H2DBytes: h2d, D2HBytes: d2h, ActivationH2DBytes: h2d, ActivationD2HBytes: d2h}}
 	return result, nil
 }

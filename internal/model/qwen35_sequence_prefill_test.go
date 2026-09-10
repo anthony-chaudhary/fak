@@ -486,11 +486,12 @@ func TestQwen35SequencePrefill_PathAttributionAndStepSync(t *testing.T) {
 	t.Run("step-sync-and-target-hidden-capture", func(t *testing.T) {
 		m := NewSynthetic(qwen35HybridTestCfg())
 		be := newSequencePrefillBackend(m)
-		testHidden := make([]float32, m.Cfg.HiddenSize)
-		for i := range testHidden {
-			testHidden[i] = float32(i + 1)
+		// Poison LastHidden so this test cannot pass by treating the normalized
+		// sequence output as the raw pre-final-norm MTP history.
+		be.lastHiddenData = make([]float32, m.Cfg.HiddenSize)
+		for i := range be.lastHiddenData {
+			be.lastHiddenData[i] = float32(i + 1)
 		}
-		be.lastHiddenData = testHidden
 
 		s, err := m.NewBackendSessionChecked(be)
 		if err != nil {
@@ -508,6 +509,10 @@ func TestQwen35SequencePrefill_PathAttributionAndStepSync(t *testing.T) {
 		}
 
 		ids := []int{3, 7, 11}
+		oracle := m.NewSession()
+		oracle.captureTargetHidden = true
+		defer oracle.Close()
+		oracle.Prefill(ids)
 		logits := s.prefillHAL(ids, true)
 		if len(logits) != m.Cfg.VocabSize {
 			t.Fatalf("logits len = %d, want %d", len(logits), m.Cfg.VocabSize)
@@ -518,30 +523,41 @@ func TestQwen35SequencePrefill_PathAttributionAndStepSync(t *testing.T) {
 		if !s.halLogitsWarm {
 			t.Fatal("halLogitsWarm = false, want true after prefillHAL with wantLogits=true")
 		}
+		if be.calls != 0 || be.gdnCalls == 0 {
+			t.Fatalf("raw-hidden-incapable backend sequence/scalar calls=%d/%d, want 0/>0", be.calls, be.gdnCalls)
+		}
 
-		// Verify TargetHiddenAt captures result.LastHidden at pos = halKV.Len() - 1
+		// The compatibility route executes scalar target steps and captures every
+		// raw row. Its history must match the independent CPU target oracle.
+		for pos := range ids {
+			gotHidden, err := s.TargetHiddenAt(pos)
+			if err != nil {
+				t.Fatalf("TargetHiddenAt(%d): %v", pos, err)
+			}
+			wantHidden, err := oracle.TargetHiddenAt(pos)
+			if err != nil {
+				t.Fatalf("oracle TargetHiddenAt(%d): %v", pos, err)
+			}
+			assertFloat32BitsEqual(t, fmt.Sprintf("fallback raw hidden row %d", pos), gotHidden, wantHidden)
+		}
+
+		// Verify defensive copy: modifying returned slice does not mutate session cache
 		lastPos := s.halKV.Len() - 1
 		gotHidden, err := s.TargetHiddenAt(lastPos)
 		if err != nil {
 			t.Fatalf("TargetHiddenAt(%d): %v", lastPos, err)
 		}
-		if len(gotHidden) != len(testHidden) {
-			t.Fatalf("TargetHiddenAt len = %d, want %d", len(gotHidden), len(testHidden))
+		wantHidden, err := oracle.TargetHiddenAt(lastPos)
+		if err != nil {
+			t.Fatalf("oracle TargetHiddenAt(%d): %v", lastPos, err)
 		}
-		for i := range testHidden {
-			if gotHidden[i] != testHidden[i] {
-				t.Fatalf("TargetHiddenAt[%d] = %g, want %g", i, gotHidden[i], testHidden[i])
-			}
-		}
-
-		// Verify defensive copy: modifying returned slice does not mutate session cache
 		gotHidden[0] = 9999.0
 		againHidden, err := s.TargetHiddenAt(lastPos)
 		if err != nil {
 			t.Fatalf("TargetHiddenAt(%d) again: %v", lastPos, err)
 		}
-		if againHidden[0] != testHidden[0] {
-			t.Fatalf("TargetHiddenAt returned mutable reference, again[0]=%g want %g", againHidden[0], testHidden[0])
+		if againHidden[0] != wantHidden[0] {
+			t.Fatalf("TargetHiddenAt returned mutable reference, again[0]=%g want %g", againHidden[0], wantHidden[0])
 		}
 
 		// Verify bounds checks on TargetHiddenAt
@@ -556,6 +572,7 @@ func TestQwen35SequencePrefill_PathAttributionAndStepSync(t *testing.T) {
 
 		// Test second prefill with wantLogits=false
 		moreIDs := []int{13, 17}
+		oracle.PrefillNoLogits(moreIDs)
 		noLogits := s.prefillHAL(moreIDs, false)
 		if noLogits != nil {
 			t.Fatalf("expected nil logits with wantLogits=false, got len=%d", len(noLogits))
@@ -565,6 +582,17 @@ func TestQwen35SequencePrefill_PathAttributionAndStepSync(t *testing.T) {
 		}
 		if !s.halLogitsWarm {
 			t.Fatal("halLogitsWarm should remain true")
+		}
+		for pos := len(ids); pos < len(ids)+len(moreIDs); pos++ {
+			gotHidden, err := s.TargetHiddenAt(pos)
+			if err != nil {
+				t.Fatalf("no-logits TargetHiddenAt(%d): %v", pos, err)
+			}
+			wantHidden, err := oracle.TargetHiddenAt(pos)
+			if err != nil {
+				t.Fatalf("no-logits oracle TargetHiddenAt(%d): %v", pos, err)
+			}
+			assertFloat32BitsEqual(t, fmt.Sprintf("no-logits fallback raw hidden row %d", pos), gotHidden, wantHidden)
 		}
 	})
 }

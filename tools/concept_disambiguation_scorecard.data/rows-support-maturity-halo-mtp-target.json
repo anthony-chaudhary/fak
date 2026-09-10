@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "halo-mtp-target-qwen35-mtp-spec-decode-unsupported-error",
+      "canonical": "Qwen35 MTP spec-decode unsupported error",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Qwen35MTPSpecDecodeUnsupportedError is the typed model-layer admission refusal returned before native Qwen3.8 MTP depth-N decoding mutates an unsupported target session.",
+      "distinction": "It reports that the requested MTP target or draft envelope is unsupported; it does not claim general support and it is not Qwen35MTPForwardError, which reports failure while executing an admitted MTP forward.",
+      "distinct_from": [
+        "support"
+      ],
+      "aliases": [],
+      "grounding": "Qwen35MTPSpecDecodeUnsupportedError",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

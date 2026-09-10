@@ -8,11 +8,11 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
-const qwen35DeviceVerifyMaxDraft = 4
-
 var errQwen35DeviceTargetHiddenDowngrade = &TargetVerificationDowngradeError{
 	Reason: "device target verification cannot preserve raw target-hidden history",
 }
+
+const qwen35DeviceVerifyMaxDraft = 4
 
 func qwen35DevicePanelAdvertised(s *Session) bool {
 	if s == nil || s.Backend == nil {
@@ -57,10 +57,6 @@ func (s *Session) verifyQwen35DevicePanelTransaction(ids []int, boundaryLogits [
 		receipt.Accounting.Setup = measuredSpeculativeCost(setup)
 		return nil, nil, receipt, targetVerificationDowngrade("device target verification requires a live Qwen3.8 hybrid backend session")
 	}
-	if s.captureTargetHidden {
-		receipt.Accounting.Setup = measuredSpeculativeCost(setup)
-		return nil, nil, receipt, errQwen35DeviceTargetHiddenDowngrade
-	}
 	s.cacheGeometryMu.RLock()
 	defer s.cacheGeometryMu.RUnlock()
 	if !s.M.Cfg.IsQwen35Hybrid() {
@@ -91,6 +87,10 @@ func (s *Session) verifyQwen35DevicePanelTransaction(ids []int, boundaryLogits [
 	allRows, allRowsOK := s.Backend.(compute.Qwen35SequenceAllLogitsBackend)
 	if err == nil && (!allRowsOK || allRows.Qwen35SequenceAllLogitsPath() != compute.Qwen35SequenceAllLogitsPath) {
 		err = targetVerificationDowngrade("backend does not advertise Qwen3.8 all-row final projection")
+	}
+	rawHidden, rawHiddenOK := s.Backend.(compute.Qwen35SequenceRawHiddenBackend)
+	if err == nil && s.captureTargetHidden && (!rawHiddenOK || rawHidden.Qwen35SequenceRawHiddenPath() != compute.Qwen35SequenceRawHiddenPath) {
+		err = errQwen35DeviceTargetHiddenDowngrade
 	}
 	if err == nil {
 		if _, split := s.validateDenseGPULayers(); split {
@@ -133,6 +133,7 @@ func (s *Session) verifyQwen35DevicePanelTransaction(ids []int, boundaryLogits [
 	}
 	request.NeedAllLogits = true
 	request.CapturePrefixReplay = capturePrefixReplay && prefixCapabilityOK
+	request.CaptureRawHidden = s.captureTargetHidden
 	receipt.Accounting.Setup = measuredSpeculativeCost(setup)
 
 	startPos := s.halKV.Len()
@@ -157,6 +158,13 @@ func (s *Session) verifyQwen35DevicePanelTransaction(ids []int, boundaryLogits [
 		receipt.Accounting.TargetVerification = measuredSpeculativeCost(started)
 		return nil, prefixReplay, receipt, fmt.Errorf("model: malformed Qwen3.8 device verification result: tokens=%d want=%d kv_len=%d want=%d logits_shape=%v", result.Tokens, len(ids), s.halKV.Len(), startPos+len(ids), result.LogitsRows.Shape)
 	}
+	if request.CaptureRawHidden {
+		if err := s.captureQwen35SequenceRawHidden(ids, startPos, result.RawHiddenRows); err != nil {
+			receipt.Accounting.TargetVerification = measuredSpeculativeCost(started)
+			return nil, prefixReplay, receipt, fmt.Errorf("model: Qwen3.8 device verification raw hidden: %w", err)
+		}
+		receipt.Accounting.KnownMemoryBytes += int64(len(ids)*s.M.Cfg.HiddenSize) * 4
+	}
 	flat := s.Backend.Read(result.LogitsRows)
 	if len(flat) != len(ids)*vocab {
 		receipt.Accounting.TargetVerification = measuredSpeculativeCost(started)
@@ -177,7 +185,57 @@ func (s *Session) verifyQwen35DevicePanelTransaction(ids []int, boundaryLogits [
 	}
 	s.halStep += len(ids)
 	s.halLogitsWarm = true
+	if prefixReplay != nil && request.CaptureRawHidden {
+		prefixReplay = &qwen35TargetHiddenPrefixReplay{
+			inner: prefixReplay, target: s, base: startPos, tokens: append([]int(nil), ids...),
+		}
+	}
 	receipt.Accounting.TargetVerification = measuredSpeculativeCost(started)
 	receipt.OneOperation = true
 	return rows, prefixReplay, receipt, nil
+}
+
+// qwen35TargetHiddenPrefixReplay couples the compute-side recurrent/KV cut with
+// the host copy of MTP's raw target-hidden history. Full acceptance never calls
+// CommitPrefix; zero acceptance and abort restore the transaction snapshot.
+type qwen35TargetHiddenPrefixReplay struct {
+	inner  compute.Qwen35SequencePrefixReplay
+	target *Session
+	base   int
+	tokens []int
+}
+
+func (r *qwen35TargetHiddenPrefixReplay) CommitPrefix(accepted int, before []compute.Qwen35SequenceState) error {
+	if r == nil || r.inner == nil || r.target == nil || accepted < 1 || accepted >= len(r.tokens) {
+		return fmt.Errorf("model: invalid Qwen3.8 target-hidden prefix commit")
+	}
+	r.target.targetHiddenMu.RLock()
+	complete := len(r.target.targetHidden) == r.base+len(r.tokens) && len(r.target.targetHiddenTokens) == r.base+len(r.tokens)
+	if complete {
+		for i, token := range r.tokens {
+			if len(r.target.targetHidden[r.base+i]) == 0 || r.target.targetHiddenTokens[r.base+i] != token {
+				complete = false
+				break
+			}
+		}
+	}
+	r.target.targetHiddenMu.RUnlock()
+	if !complete {
+		return fmt.Errorf("model: Qwen3.8 raw target-hidden panel does not cover the verified draft")
+	}
+	if err := r.inner.CommitPrefix(accepted, before); err != nil {
+		return err
+	}
+	r.target.targetHiddenMu.Lock()
+	r.target.targetHidden = r.target.targetHidden[:r.base+accepted]
+	r.target.targetHiddenTokens = r.target.targetHiddenTokens[:r.base+accepted]
+	r.target.targetHiddenMu.Unlock()
+	return nil
+}
+
+func (r *qwen35TargetHiddenPrefixReplay) Close() {
+	if r != nil && r.inner != nil {
+		r.inner.Close()
+		r.inner = nil
+	}
 }
