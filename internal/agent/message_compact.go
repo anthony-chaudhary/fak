@@ -292,6 +292,11 @@ var DefaultHotToolNames = map[string]bool{
 	"Glob": true, "Grep": true, "TodoWrite": true, "Task": true,
 	"WebFetch": true, "WebSearch": true, "NotebookEdit": true,
 	"ToolSearch": true,
+	// These lowercase names are owned by fak's native coding harness. Keeping
+	// them resident is required because the in-kernel path cannot fault a
+	// filtered definition back in through the synthetic ToolSearch tool.
+	"apply_patch": true,
+	ToolTaskSpawn: true, ToolTaskWait: true, ToolTaskStatus: true, ToolTaskCancel: true,
 }
 
 // DeferColdToolDefs filters out cold tools from the advertised tools list and ensures
