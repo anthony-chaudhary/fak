@@ -216,6 +216,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/fak/arms/lease", s.handleFakArmsLease)
 	mux.HandleFunc("/v1/fak/arms/limits", s.handleFakArmsLimits)
 	mux.HandleFunc("/a2a/v1/director/digest", s.handleA2AGetDirectorDigest)
+	if s.richDashboards != nil && s.richDashboards.proxyGrafana && s.richDashboards.proxy != nil {
+		prefix := s.richDashboards.proxyPrefix
+		if prefix == "" {
+			prefix = "/grafana"
+		}
+		prefix = "/" + strings.Trim(prefix, "/")
+		mux.Handle(prefix+"/", s.richDashboards.proxy)
+	}
 	return s.withMetrics(s.withAuth(mux))
 }
 
@@ -463,6 +471,16 @@ func (s *Server) authExempt(r *http.Request) bool {
 	}
 	if readScopedPath(r) {
 		return requestFromLoopback(r)
+	}
+	if s.richDashboards != nil && s.richDashboards.proxyGrafana && requestFromLoopback(r) {
+		prefix := s.richDashboards.proxyPrefix
+		if prefix == "" {
+			prefix = "/grafana"
+		}
+		prefix = "/" + strings.Trim(prefix, "/")
+		if r.URL.Path == prefix || strings.HasPrefix(r.URL.Path, prefix+"/") {
+			return true
+		}
 	}
 	return false
 }

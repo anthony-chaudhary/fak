@@ -220,6 +220,7 @@ type serveFlags struct {
 	fleetBusID                   *string
 	fleetBusInterval             *time.Duration
 	keepAwake                    *string
+	applianceObservability       *bool
 	maxTotalTokens               *int
 	maxBatchPrefillTokens        *int
 	fs                           *flag.FlagSet
@@ -237,6 +238,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.maxTotalTokens = fs.Int("max-total-tokens", 0, "upper bound on a request's total tokens (prompt + max_new_tokens). Must not exceed admission token budget.")
 	sf.maxBatchPrefillTokens = fs.Int("max-batch-prefill-tokens", 0, "upper bound on batch prefill tokens (alias / companion to max-total-tokens)")
 	sf.configPath = fs.String("config", "", "load reviewable deployment defaults from fak.toml (explicit flags override; no implicit ambient lookup)")
+	sf.applianceObservability = fs.Bool("appliance-observability", false, "activate appliance Grafana dashboard catalog profile (fak-strix-*) and default routing to fak-strix-index")
 	sf.printEffectiveConfig = fs.Bool("print-effective-config", false, "print supported effective serve configuration with value provenance, then exit without binding a listener")
 	sf.addr = fs.String("addr", "127.0.0.1:8080", "HTTP listen address (OpenAI + fak + /mcp surface); ignored with --stdio")
 	sf.stdio = fs.Bool("stdio", false, "serve MCP over stdin/stdout (newline-delimited JSON-RPC) instead of HTTP")
@@ -956,6 +958,9 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		// and is translated here into that resolver's negative encoding; every other value
 		// (including the 300s default) passes through untouched.
 		StreamProgressTimeout: serveStreamProgressTimeout(*sf.streamProgressTimeout),
+		RichDashboards: gateway.RichDashboardConfig{
+			ApplianceProfile: *sf.applianceObservability || rt.strixPreflight.Detected,
+		},
 	})
 	must(err)
 	srv.AddStartupMessages(startupMessages...)
