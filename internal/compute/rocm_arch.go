@@ -660,18 +660,19 @@ func HasQSASparseRowGather() bool {
 
 // QSASparseGatherConfig captures tuned hardware parameters for QSA sparse row gather on ROCm / RDNA 3.5.
 type QSASparseGatherConfig struct {
-	Arch                string  `json:"arch"`
-	TopKTokens          int     `json:"top_k_tokens"`
-	LocalTailTokens     int     `json:"local_tail_tokens"`
-	TotalGatherTokens   int     `json:"total_gather_tokens"`
-	BlockSize           int     `json:"block_size"`
-	TileSize            int     `json:"tile_size"`
-	NumTiles            int     `json:"num_tiles"`
-	RadixLDSBytes       int     `json:"radix_lds_bytes"`
-	GatherScratchBytes  int     `json:"gather_scratch_bytes"`
-	FitsInInfinityCache bool    `json:"fits_in_infinity_cache"`
-	MaxWavesPerCU       int     `json:"max_waves_per_cu"`
-	BandwidthSavingEst  float64 `json:"bandwidth_saving_est"`
+	Arch                   string  `json:"arch"`
+	TopKTokens             int     `json:"top_k_tokens"`
+	LocalTailTokens        int     `json:"local_tail_tokens"`
+	TotalGatherTokens      int     `json:"total_gather_tokens"`
+	BlockSize              int     `json:"block_size"`
+	TileSize               int     `json:"tile_size"`
+	NumTiles               int     `json:"num_tiles"`
+	RadixLDSBytes          int     `json:"radix_lds_bytes"`
+	GatherScratchBytes     int     `json:"gather_scratch_bytes"`
+	FitsInInfinityCache    bool    `json:"fits_in_infinity_cache"`
+	CachePlanningAvailable bool    `json:"cache_planning_available"`
+	MaxWavesPerCU          int     `json:"max_waves_per_cu"`
+	BandwidthSavingEst     float64 `json:"bandwidth_saving_est"`
 }
 
 // TuneQSASparseGather computes hardware-optimal LDS, tile geometry, and scratch allocation for QSA.
@@ -721,6 +722,70 @@ func (a ROCmArch) TuneQSASparseGather(headDim, numKVHeads, dtypeBytes int) QSASp
 		FitsInInfinityCache: fitsL3,
 		MaxWavesPerCU:       maxWaves,
 		BandwidthSavingEst:  0.55,
+	}
+}
+
+// TuneQSASparseGatherWithProfile sizes QSA scratch using explicit backend
+// memory facts. Unknown cache capacity never inherits the gfx1151 limit.
+func (a ROCmArch) TuneQSASparseGatherWithProfile(profile DeviceMemoryProfile, headDim, numKVHeads, dtypeBytes int) QSASparseGatherConfig {
+	if headDim <= 0 {
+		headDim = 256
+	}
+	if numKVHeads <= 0 {
+		numKVHeads = 2
+	}
+	if dtypeBytes <= 0 {
+		dtypeBytes = 2 // FP16/BF16 default
+	}
+
+	totalGather := QSAMaxGatherTokens
+	numTiles := (totalGather + QSATileSize - 1) / QSATileSize
+	alignedGather := numTiles * QSATileSize
+
+	// Account for K and V as separately aligned buffers. An incomplete profile
+	// or unrepresentable request is ineligible for cache planning.
+	rawPerBuffer, rawSizeKnown := checkedPositiveInt64Product(int64(alignedGather), int64(numKVHeads), int64(headDim), int64(dtypeBytes))
+	alignedPerBuffer, alignedSizeKnown := alignInt64(rawPerBuffer, profile.StorageAlignmentBytes)
+	scratchBytes64, scratchSizeKnown := checkedPositiveInt64Product(2, alignedPerBuffer)
+	scratchSizeKnown = rawSizeKnown && alignedSizeKnown && scratchSizeKnown && scratchBytes64 <= int64(^uint(0)>>1)
+	scratchBytes := 0
+	if scratchSizeKnown {
+		scratchBytes = int(scratchBytes64)
+	}
+
+	// Radix top-k histogram in LDS: 256 bins * 4 bytes = 1024 bytes (or 2048 on 64-lane)
+	radixLDS := 0
+	if profile.SubgroupWidthKnown && profile.SubgroupWidth == 32 {
+		radixLDS = 1024
+	} else if profile.SubgroupWidthKnown && profile.SubgroupWidth == 64 {
+		radixLDS = 2048
+	}
+
+	identityMatches := profile.Architecture != "" && (a.GFX == "" || normalizeGFX(a.GFX) == normalizeGFX(profile.Architecture))
+	cachePlanningAvailable := identityMatches && scratchSizeKnown && profile.CachePlanningAvailable()
+	fitsL3 := cachePlanningAvailable && int64(scratchBytes) <= profile.CacheCapacityBytes
+
+	maxWaves := 0
+	if profile.SubgroupWidthKnown && profile.SubgroupWidth == 64 {
+		maxWaves = 16
+	} else if profile.SubgroupWidthKnown && profile.SubgroupWidth == 32 {
+		maxWaves = 32
+	}
+
+	return QSASparseGatherConfig{
+		Arch:                   profile.Architecture,
+		TopKTokens:             QSABaseTopKTokens,
+		LocalTailTokens:        QSALocalTailTokens,
+		TotalGatherTokens:      alignedGather,
+		BlockSize:              QSABlockSize,
+		TileSize:               QSATileSize,
+		NumTiles:               numTiles,
+		RadixLDSBytes:          radixLDS,
+		GatherScratchBytes:     scratchBytes,
+		FitsInInfinityCache:    fitsL3,
+		CachePlanningAvailable: cachePlanningAvailable,
+		MaxWavesPerCU:          maxWaves,
+		BandwidthSavingEst:     0.55,
 	}
 }
 
