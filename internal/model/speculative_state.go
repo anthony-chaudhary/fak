@@ -39,6 +39,8 @@ type TargetVerificationReceipt struct {
 	RejectedTokens               int                       `json:"rejected_tokens"`
 	TargetVerificationOperations int                       `json:"target_verification_operations"`
 	TargetDecodeSteps            int                       `json:"target_decode_steps"`
+	FullTargetReplaySteps        int                       `json:"full_target_replay_steps"`
+	RecurrentRepairTokens        int                       `json:"recurrent_repair_tokens"`
 	OneOperation                 bool                      `json:"one_operation"`
 	Accounting                   SpeculativeCostAccounting `json:"accounting"`
 	Shape                        *SpeculativeShape         `json:"shape,omitempty"`

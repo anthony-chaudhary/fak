@@ -418,7 +418,7 @@ func runStrixTargetCommand(ctx context.Context, target *StrixTarget, command str
 	if target.Mode == "local" {
 		cmd = exec.CommandContext(ctx, "bash", "-c", command)
 	} else {
-		cmd = exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", target.Host, command)
+		return runStrixSSHCommand(ctx, target.Host, 10*time.Second, command, stdin)
 	}
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
@@ -562,6 +562,11 @@ func failedReceipt(opts StrixValidationOpts, target StrixTarget, message string,
 }
 
 func RunStrixValidation(ctx context.Context, opts StrixValidationOpts) (*StrixValidationReceipt, error) {
+	if opts.Host != "" {
+		if err := validateStrixSSHDestination(opts.Host); err != nil {
+			return failedReceipt(opts, StrixTarget{}, err.Error(), err), err
+		}
+	}
 	if opts.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)

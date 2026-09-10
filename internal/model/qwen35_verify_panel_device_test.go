@@ -161,7 +161,7 @@ func newDevicePanelTestSession(t *testing.T, m *Model) (*Session, *devicePanelTe
 		t.Fatal(err)
 	}
 	backend.target = target
-	target.captureTargetHidden = true
+	target.captureTargetHidden = false
 	t.Cleanup(target.Close)
 	return target, backend
 }

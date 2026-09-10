@@ -56,6 +56,8 @@ type speculativeABSample struct {
 	TPOTNS                    int64           `json:"tpot_ns"`
 	DraftNS                   int64           `json:"draft_ns"`
 	TargetVerificationNS      int64           `json:"target_verification_ns"`
+	SynchronizationNS         int64           `json:"synchronization_ns"`
+	RollbackNS                int64           `json:"rollback_ns"`
 	TargetSequenceInvocations int             `json:"target_sequence_invocations"`
 	BoundaryRejectRounds      int             `json:"boundary_reject_rounds"`
 	OrdinaryTargetSteps       int             `json:"ordinary_target_steps"`
@@ -63,6 +65,7 @@ type speculativeABSample struct {
 	AcceptedTokens            int             `json:"accepted_tokens"`
 	RejectedTokens            int             `json:"rejected_tokens"`
 	ReplayedTokens            int             `json:"replayed_tokens"`
+	RecurrentRepairTokens     int             `json:"recurrent_repair_tokens"`
 	ZeroAcceptRounds          int             `json:"zero_accept_rounds"`
 	PartialAcceptRounds       int             `json:"partial_accept_rounds"`
 	FullAcceptRounds          int             `json:"full_accept_rounds"`
@@ -89,13 +92,17 @@ type speculativeABSample struct {
 }
 
 type receiptSample struct {
-	DraftTokens      int    `json:"draft_tokens"`
-	AcceptedTokens   int    `json:"accepted_tokens"`
-	Path             string `json:"path"`
-	OneOperation     bool   `json:"one_operation"`
-	TargetOperations int    `json:"target_operations"`
-	WallNS           int64  `json:"wall_ns"`
-	ReceiptNS        int64  `json:"receipt_ns"`
+	DraftTokens           int    `json:"draft_tokens"`
+	AcceptedTokens        int    `json:"accepted_tokens"`
+	Path                  string `json:"path"`
+	OneOperation          bool   `json:"one_operation"`
+	TargetOperations      int    `json:"target_operations"`
+	WallNS                int64  `json:"wall_ns"`
+	ReceiptNS             int64  `json:"receipt_ns"`
+	SynchronizationNS     int64  `json:"synchronization_ns"`
+	RollbackNS            int64  `json:"rollback_ns"`
+	FullTargetReplaySteps int    `json:"full_target_replay_steps"`
+	RecurrentRepairTokens int    `json:"recurrent_repair_tokens"`
 }
 
 type speculativeABSummary struct {
@@ -114,6 +121,10 @@ type speculativeABSummary struct {
 	DraftedTokens      int           `json:"drafted_tokens"`
 	AcceptedTokens     int           `json:"accepted_tokens"`
 	RejectedTokens     int           `json:"rejected_tokens"`
+	FullReplaySteps    int           `json:"full_target_replay_steps"`
+	RecurrentRepairs   int           `json:"recurrent_repair_tokens"`
+	SynchronizationNS  int64         `json:"synchronization_ns"`
+	RollbackNS         int64         `json:"rollback_ns"`
 	ExpectedD2HBytes   int64         `json:"expected_d2h_logits_bytes"`
 	ObservedD2HBytes   uint64        `json:"observed_d2h_bytes"`
 	Fallbacks          uint64        `json:"backend_fallbacks"`
@@ -132,6 +143,21 @@ type durationCI95 struct {
 	HighNS int64 `json:"high_ns"`
 }
 
+type speculativeABPairedSummary struct {
+	Workload           string        `json:"workload"`
+	Samples            int           `json:"samples"`
+	DeltaDefinition    string        `json:"delta_definition"`
+	TotalP50DeltaNS    int64         `json:"total_p50_delta_ns"`
+	TotalP90DeltaNS    int64         `json:"total_p90_delta_ns"`
+	DecodeP50DeltaNS   int64         `json:"decode_p50_delta_ns"`
+	DecodeP90DeltaNS   int64         `json:"decode_p90_delta_ns"`
+	CI95Measured       bool          `json:"ci95_measured"`
+	TotalP50DeltaCI95  *durationCI95 `json:"total_p50_delta_ci95,omitempty"`
+	TotalP90DeltaCI95  *durationCI95 `json:"total_p90_delta_ci95,omitempty"`
+	DecodeP50DeltaCI95 *durationCI95 `json:"decode_p50_delta_ci95,omitempty"`
+	DecodeP90DeltaCI95 *durationCI95 `json:"decode_p90_delta_ci95,omitempty"`
+}
+
 func TestSpeculativeABBootstrapCI95IsDeterministicAndN1IsUnmeasured(t *testing.T) {
 	values := []int64{10, 20, 30, 40, 50}
 	seed := bootstrapSeed("ordinary", "copy-heavy-code-edit", "total-p50")
@@ -143,6 +169,14 @@ func TestSpeculativeABBootstrapCI95IsDeterministicAndN1IsUnmeasured(t *testing.T
 	one := summarizeAB("ordinary", "diagnostic", []speculativeABSample{{TotalNS: 10, TTFTNS: 4, DecodeNS: 6}})
 	if one.CI95Measured || one.TotalP50CI95 != nil || one.TotalP90CI95 != nil || one.TTFTP50CI95 != nil || one.TTFTP90CI95 != nil || one.DecodeP50CI95 != nil || one.DecodeP90CI95 != nil {
 		t.Fatalf("N=1 summary fabricated confidence interval: %+v", one)
+	}
+	paired := summarizePairedAB("deterministic", []speculativeABSample{
+		{TotalNS: 10, DecodeNS: 8}, {TotalNS: 20, DecodeNS: 16}, {TotalNS: 30, DecodeNS: 24}, {TotalNS: 40, DecodeNS: 32}, {TotalNS: 50, DecodeNS: 40},
+	}, []speculativeABSample{
+		{TotalNS: 8, DecodeNS: 7}, {TotalNS: 17, DecodeNS: 14}, {TotalNS: 26, DecodeNS: 21}, {TotalNS: 35, DecodeNS: 28}, {TotalNS: 44, DecodeNS: 35},
+	})
+	if !paired.CI95Measured || paired.TotalP50DeltaNS != -4 || paired.DecodeP50DeltaNS != -3 || paired.TotalP50DeltaCI95 == nil || paired.DecodeP90DeltaCI95 == nil {
+		t.Fatalf("paired delta summary=%+v", paired)
 	}
 	good := "```go\npackage retry\nconst retryDelay=20\nfunc wait(attempt int) int { if attempt < 1 { return retryDelay }; return attempt*retryDelay }\n```"
 	if ok, reason := copyEditTaskCorrect(good); !ok {
@@ -240,10 +274,10 @@ func TestQwen35DeviceSpeculativeRealCheckpointAB(t *testing.T) {
 
 		// One unreported warm-up per arm establishes weight/pipeline residency. Every
 		// measured run below still uses a fresh KV and recurrent-state session.
-		if _, err := runOrdinaryAB(context.Background(), m, backend, prompt, minInt(4, maxNew), workload.Name, -1, revision, modified, stopIDs); err != nil {
+		if _, err := runOrdinaryAB(context.Background(), m, backend, prompt, maxNew, workload.Name, -1, revision, modified, stopIDs); err != nil {
 			t.Fatalf("ordinary warm-up %s: %v", workload.Name, err)
 		}
-		if _, err := runSpeculativeAB(context.Background(), m, backend, prompt, minInt(4, maxNew), workload.Name, -1, revision, modified, stopIDs); err != nil {
+		if _, err := runSpeculativeAB(context.Background(), m, backend, prompt, maxNew, workload.Name, -1, revision, modified, stopIDs); err != nil {
 			t.Fatalf("speculative warm-up %s: %v", workload.Name, err)
 		}
 
@@ -301,6 +335,7 @@ func TestQwen35DeviceSpeculativeRealCheckpointAB(t *testing.T) {
 		}
 		logJSON(t, summarizeAB("ordinary", workload.Name, ordinary))
 		logJSON(t, summarizeAB("speculative-ngram-k4", workload.Name, speculative))
+		logJSON(t, summarizePairedAB(workload.Name, ordinary, speculative))
 	}
 }
 
@@ -430,7 +465,7 @@ func runSpeculativeAB(ctx context.Context, m *model.Model, backend compute.Backe
 		}
 		switch r.Path {
 		case qwen35BoundaryRejectPath:
-			if accepted != 0 || r.AcceptedTokens != 0 || r.RejectedTokens != len(draft) || r.TargetVerificationOperations != 0 || r.TargetDecodeSteps != 0 || r.OneOperation || r.DowngradeReason != "" || verified.TargetLogits != nil || verified.Correction != argmax(boundary) || !equalFloat32(verified.NextLogits, boundary) {
+			if accepted != 0 || r.AcceptedTokens != 0 || r.RejectedTokens != len(draft) || r.TargetVerificationOperations != 0 || r.TargetDecodeSteps != 0 || r.FullTargetReplaySteps != 0 || r.RecurrentRepairTokens != 0 || r.OneOperation || r.DowngradeReason != "" || verified.TargetLogits != nil || verified.Correction != argmax(boundary) || !equalFloat32(verified.NextLogits, boundary) {
 				return result, fmt.Errorf("non-qualifying boundary rejection: result=%+v receipt=%+v", verified, r)
 			}
 			result.BoundaryRejectRounds++
@@ -456,12 +491,20 @@ func runSpeculativeAB(ctx context.Context, m *model.Model, backend compute.Backe
 		result.DraftedTokens += len(draft)
 		result.AcceptedTokens += accepted
 		result.RejectedTokens += len(draft) - accepted
+		wantRepair := 0
 		if accepted > 0 && accepted < len(draft) {
-			result.ReplayedTokens += accepted
+			wantRepair = accepted
 		}
+		if r.FullTargetReplaySteps != 0 || r.RecurrentRepairTokens != wantRepair {
+			return result, fmt.Errorf("non-qualifying partial commit accounting: accepted=%d draft=%d receipt=%+v", accepted, len(draft), r)
+		}
+		result.ReplayedTokens += r.FullTargetReplaySteps
+		result.RecurrentRepairTokens += r.RecurrentRepairTokens
 		result.KHistogram[len(draft)]++
 		result.TargetVerificationNS += verifyWall.Nanoseconds()
-		result.Receipts = append(result.Receipts, receiptSample{DraftTokens: len(draft), AcceptedTokens: accepted, Path: r.Path, OneOperation: r.OneOperation, TargetOperations: r.TargetVerificationOperations, WallNS: verifyWall.Nanoseconds(), ReceiptNS: r.Accounting.TargetVerification.Nanoseconds})
+		result.SynchronizationNS += r.Accounting.Synchronization.Nanoseconds
+		result.RollbackNS += r.Accounting.Rollback.Nanoseconds
+		result.Receipts = append(result.Receipts, receiptSample{DraftTokens: len(draft), AcceptedTokens: accepted, Path: r.Path, OneOperation: r.OneOperation, TargetOperations: r.TargetVerificationOperations, WallNS: verifyWall.Nanoseconds(), ReceiptNS: r.Accounting.TargetVerification.Nanoseconds, SynchronizationNS: r.Accounting.Synchronization.Nanoseconds, RollbackNS: r.Accounting.Rollback.Nanoseconds, FullTargetReplaySteps: r.FullTargetReplaySteps, RecurrentRepairTokens: r.RecurrentRepairTokens})
 		switch {
 		case accepted == 0:
 			result.ZeroAcceptRounds++
@@ -662,6 +705,10 @@ func summarizeAB(arm, workload string, samples []speculativeABSample) speculativ
 		result.DraftedTokens += sample.DraftedTokens
 		result.AcceptedTokens += sample.AcceptedTokens
 		result.RejectedTokens += sample.RejectedTokens
+		result.FullReplaySteps += sample.ReplayedTokens
+		result.RecurrentRepairs += sample.RecurrentRepairTokens
+		result.SynchronizationNS += sample.SynchronizationNS
+		result.RollbackNS += sample.RollbackNS
 		result.ExpectedD2HBytes += sample.ExpectedD2HLogitsBytes
 		result.ObservedD2HBytes += sample.D2HBytes
 		result.Fallbacks += sample.BackendFallbacks
@@ -678,6 +725,36 @@ func summarizeAB(arm, workload string, samples []speculativeABSample) speculativ
 		result.TTFTP90CI95 = bootstrapDurationCI95(ttfts, 0.90, bootstrapSeed(arm, workload, "ttft-p90"))
 		result.DecodeP50CI95 = bootstrapDurationCI95(decodes, 0.50, bootstrapSeed(arm, workload, "decode-p50"))
 		result.DecodeP90CI95 = bootstrapDurationCI95(decodes, 0.90, bootstrapSeed(arm, workload, "decode-p90"))
+	}
+	return result
+}
+
+func summarizePairedAB(workload string, ordinary, speculative []speculativeABSample) speculativeABPairedSummary {
+	n := len(ordinary)
+	if len(speculative) < n {
+		n = len(speculative)
+	}
+	totalDeltas := make([]int64, n)
+	decodeDeltas := make([]int64, n)
+	for i := 0; i < n; i++ {
+		totalDeltas[i] = speculative[i].TotalNS - ordinary[i].TotalNS
+		decodeDeltas[i] = speculative[i].DecodeNS - ordinary[i].DecodeNS
+	}
+	result := speculativeABPairedSummary{
+		Workload:         workload,
+		Samples:          n,
+		DeltaDefinition:  "speculative_ngram_k4_minus_ordinary; negative_is_faster",
+		TotalP50DeltaNS:  percentile(totalDeltas, 0.50),
+		TotalP90DeltaNS:  percentile(totalDeltas, 0.90),
+		DecodeP50DeltaNS: percentile(decodeDeltas, 0.50),
+		DecodeP90DeltaNS: percentile(decodeDeltas, 0.90),
+	}
+	if n >= 5 {
+		result.CI95Measured = true
+		result.TotalP50DeltaCI95 = bootstrapDurationCI95(totalDeltas, 0.50, bootstrapSeed("paired", workload, "total-p50"))
+		result.TotalP90DeltaCI95 = bootstrapDurationCI95(totalDeltas, 0.90, bootstrapSeed("paired", workload, "total-p90"))
+		result.DecodeP50DeltaCI95 = bootstrapDurationCI95(decodeDeltas, 0.50, bootstrapSeed("paired", workload, "decode-p50"))
+		result.DecodeP90DeltaCI95 = bootstrapDurationCI95(decodeDeltas, 0.90, bootstrapSeed("paired", workload, "decode-p90"))
 	}
 	return result
 }

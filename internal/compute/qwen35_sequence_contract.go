@@ -15,6 +15,25 @@ const Qwen35SequenceEmbeddingRowsPath = "qwen35-hybrid-sequence-embedding-rows-v
 // which returns one device-resident logits row per input token.
 const Qwen35SequenceAllLogitsPath = "qwen35-hybrid-sequence-all-logits-v1"
 
+// Qwen35SequencePrefixReplayPath identifies the optional transaction extension
+// which retains the GDN projections needed to commit a causal prefix without
+// rerunning the complete model for its accepted tokens.
+const Qwen35SequencePrefixReplayPath = "qwen35-hybrid-sequence-prefix-replay-v1"
+
+// Qwen35SequencePrefixReplay owns request-detached projection tensors until its
+// transaction either commits a prefix or closes. Before is borrowed from the
+// caller's intact pre-round snapshot and remains caller-owned.
+type Qwen35SequencePrefixReplay interface {
+	CommitPrefix(accepted int, before []Qwen35SequenceState) error
+	Close()
+}
+
+// Qwen35SequencePrefixReplayBackend prevents callers from requesting retained
+// projections from sequence implementations without the matching lifecycle.
+type Qwen35SequencePrefixReplayBackend interface {
+	Qwen35SequencePrefixReplayPath() string
+}
+
 // Qwen35SequenceAllLogitsBackend prevents callers from setting NeedAllLogits on
 // sequence implementations that predate the all-row result contract.
 type Qwen35SequenceAllLogitsBackend interface {
@@ -167,14 +186,19 @@ type Qwen35SequencePrefillRequest struct {
 	// NeedAllLogits requests one output-logit row for every input token. The
 	// rows stay device-resident; callers explicitly decide whether to read them.
 	NeedAllLogits bool
+	// CapturePrefixReplay retains only the GDN projection panels required to
+	// repair a partially accepted causal prefix. It is valid for 1..4 tokens
+	// together with NeedAllLogits.
+	CapturePrefixReplay bool
 }
 
 // Qwen35SequencePrefillResult returns only resident products. KV and recurrent
 // state are mutated in place and therefore are not replaceable result values.
 type Qwen35SequencePrefillResult struct {
-	LastHidden Tensor
-	Logits     Tensor
-	LogitsRows Tensor
-	Tokens     int
-	Transfers  Qwen35SequenceTransferCounters
+	LastHidden   Tensor
+	Logits       Tensor
+	LogitsRows   Tensor
+	PrefixReplay Qwen35SequencePrefixReplay
+	Tokens       int
+	Transfers    Qwen35SequenceTransferCounters
 }
