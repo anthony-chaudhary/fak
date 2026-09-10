@@ -45,6 +45,35 @@ func vk(t *testing.T) *vulkanBackend {
 	return b.(*vulkanBackend)
 }
 
+func TestVulkanDeviceMemoryDoesNotBlockWhileCommandStreamBusy(t *testing.T) {
+	// Telemetry must remain readable while an inference dispatch owns the
+	// command stream. This test does not initialize or submit work to a GPU.
+	backend := &vulkanBackend{totalMem: 24 << 30}
+	type memory struct {
+		total, free int64
+		known       bool
+	}
+	result := make(chan memory, 1)
+	vulkanMu.Lock()
+	go func() {
+		total, free, known := DeviceMemoryInfo(backend)
+		result <- memory{total, free, known}
+	}()
+	select {
+	case got := <-result:
+		vulkanMu.Unlock()
+		if got.total != 24<<30 || got.free != FreeUnknown || !got.known {
+			t.Fatalf("busy device capacity = %+v; want known total and explicitly unknown free bytes", got)
+		}
+	case <-time.After(time.Second):
+		vulkanMu.Unlock()
+		// Allow the old blocking implementation to exit before reporting its
+		// failure so this regression never leaves the shared mutex locked.
+		<-result
+		t.Fatal("memory telemetry blocked behind an active command stream")
+	}
+}
+
 func TestVulkanDispatchProfileDisabledIsZero(t *testing.T) {
 	if os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") == "1" {
 		t.Skip("profiling enabled for this process")

@@ -581,7 +581,15 @@ func (v *vulkanBackend) DeviceMemory() (total, free int64, known bool) {
 	if v == nil || v.totalMem <= 0 {
 		return 0, FreeUnknown, false
 	}
-	vulkanMu.Lock()
+	// Capacity reads also feed synchronous observability paths such as /metrics.
+	// A Vulkan dispatch holds vulkanMu while the driver waits for GPU completion;
+	// blocking here therefore makes an otherwise healthy HTTP server unscrapeable
+	// for the full dispatch. Total memory is immutable after backend creation, so
+	// preserve that legitimate value and report only the volatile free value as
+	// unavailable while the command stream is busy.
+	if !vulkanMu.TryLock() {
+		return v.totalMem, FreeUnknown, true
+	}
 	defer vulkanMu.Unlock()
 	if v.haveMemoryBudget {
 		var budget C.uint64_t
