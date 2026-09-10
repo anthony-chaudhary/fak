@@ -23,6 +23,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/fleetspine"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/goalpark"
+	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/guard"
 	"github.com/anthony-chaudhary/fak/internal/guardsessions"
 	"github.com/anthony-chaudhary/fak/internal/harnessres"
@@ -151,7 +152,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	ggufPath := fs.String("gguf", "", "run a SMALL MODEL IN-KERNEL as the local upstream — no API key, no network, no second server. fak loads these GGUF weights into its OWN engine and serves them to the wrapped agent, so the whole `local model + your coding harness + kernel floor` stack is ONE command (`fak guard --gguf qwen2.5:7b -- claude`). Accepts a model alias (`fak ls`), an hf://owner/repo/file.gguf URI (downloaded on demand), or a local .gguf path. Every tool call the agent proposes is still adjudicated by the same capability floor and recorded in the same audit journal — only the inference moves onto YOUR box. Alone, the local model IS the upstream (mutually exclusive with --remote-serve); with --alongside or an explicit --base-url it serves ALONGSIDE the API upstream instead (see --alongside).")
 	alongside := fs.Bool("alongside", false, "with --gguf: serve the small local model ALONGSIDE the API upstream instead of REPLACING it (the dual planner). The wrapped agent's normal turns proxy to the provider exactly as a plain `fak guard` session (same OAuth/passthrough, same prompt-cache preservation), while any request addressed to the --gguf model's alias — or the literal model id \"local\" — decodes in-kernel on your box with no upstream call and no tokens billed (e.g. point a cheap subagent tier at it). Implied by --gguf + an explicit --base-url.")
 	localAuto := fs.Bool("local", false, "auto-detect a local OpenAI-compatible model server you are ALREADY running (Ollama, LM Studio, Qwen3.6 dogfood, or llama.cpp) and wire guard's upstream to it with zero flags — `fak guard --local -- codex` becomes a governed local coding loop with no base-URL hunting. Probes, fail-soft (~300ms each), Ollama (127.0.0.1:11434, honors OLLAMA_HOST), then LM Studio (127.0.0.1:1234), then Qwen3.6 dogfood (127.0.0.1:8131), then llama.cpp (127.0.0.1:8080); the first live one wins and a coding-tuned served model is preferred. If --gguf is ALSO passed it wins (that is the no-server in-kernel path); if nothing is detected and no --gguf, fak fails loud with how to start a server. Mutually exclusive with --base-url / --remote-serve.")
-	gpuBackend := fs.String("backend", "", "with --gguf: compute backend for the in-kernel decode — empty = the CPU reference path; a registered device like 'cuda' runs prefill+decode through the GPU HAL (needs a -tags cuda build AND a reachable GPU). Fails loud if named but unavailable, so a typo never silently runs on CPU.")
+	gpuBackend := fs.String("backend", "", "with --gguf: compute backend for in-kernel decode; --backend overrides FAK_BACKEND. Use 'auto', 'cpu', or a registered name. Omitted/auto selects usable Vulkan on Linux/Windows, preserves registered Metal auto-selection on Darwin, and otherwise uses CPU. An unavailable named backend fails loud.")
 	gpudirectOverflow := fs.Bool("gpudirect-overflow", true, "with --gguf: enable AMD GPU Direct / NVMe P2PDMA zero-copy storage for KV cache and layer overflow handling (bypasses CPU bounce buffers on VRAM saturation; default on)")
 	_ = gpudirectOverflow
 	guardNativeFlags := registerGuardNativeControlFlags(fs)
@@ -755,7 +756,10 @@ func cmdManageCommand(commandName string, argv []string) {
 			}
 			*ggufPath = resolved
 		}
-		if strings.TrimSpace(*gpuBackend) == "" && runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		requestedBackend := strings.ToLower(strings.TrimSpace(*gpuBackend))
+		envBackend := strings.ToLower(strings.TrimSpace(os.Getenv("FAK_BACKEND")))
+		autoBackend := requestedBackend == "auto" || (requestedBackend == "" && (envBackend == "" || envBackend == "auto"))
+		if autoBackend && runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
 			if _, found := compute.Lookup("metal"); found {
 				*gpuBackend = "metal"
 			}
@@ -773,8 +777,25 @@ func cmdManageCommand(commandName string, argv []string) {
 			fmt.Fprintln(os.Stderr, "fak guard:", err)
 			os.Exit(2)
 		}
-		inKernelModel, inKernelQ4K, loadProfile, loadPhase = loadServeInKernelModel(*ggufPath, chatBackend, false, contextBudgetLimit, nil, 1)
+		load := func() {
+			inKernelModel, inKernelQ4K, loadProfile, loadPhase = loadServeInKernelModel(*ggufPath, chatBackend, false, contextBudgetLimit, nil, 1)
+		}
+		var residencyRelease func()
+		if chatBackend != nil && chatBackend.Name() == "vulkan" {
+			var leaseErr error
+			residencyRelease, leaseErr = loadLocalLauncherModelWithVulkanLease(true, *ggufPath, gpulease.Options{}, load)
+			if leaseErr != nil {
+				fmt.Fprintln(os.Stderr, "fak guard: Vulkan model residency:", leaseErr)
+				os.Exit(1)
+			}
+			defer residencyRelease()
+		} else {
+			load()
+		}
 		if inKernelModel == nil {
+			if residencyRelease != nil {
+				residencyRelease()
+			}
 			fmt.Fprintf(os.Stderr, "fak guard: failed to load %q into the in-kernel engine\n", *ggufPath)
 			os.Exit(1)
 		}
@@ -783,6 +804,9 @@ func cmdManageCommand(commandName string, argv []string) {
 		inKernelTok, tokOK = resolveServeTokenizer(*tokPath, *ggufPath)
 		tokenizerLoadDur = time.Since(tTok)
 		if !tokOK || inKernelTok == nil {
+			if residencyRelease != nil {
+				residencyRelease()
+			}
 			fmt.Fprintf(os.Stderr, "fak guard: %q has no usable tokenizer; pass --tokenizer or use a GGUF with an embedded tokenizer\n", *ggufPath)
 			os.Exit(1)
 		}

@@ -274,7 +274,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.remoteKVToken = fs.String("remote-kv-token", "", "remote KV store auth token (default: FAK_REMOTE_KV_TOKEN or FAK_BLOB_HTTP_TOKEN)")
 	sf.remoteKVTimeout = fs.Duration("remote-kv-timeout", l3kv.DefaultRemoteKVTimeout, "remote KV connectivity probe timeout")
 	sf.engineID = fs.String("engine", "mock", "registered engine id that fak_syscall dispatches an allowed call to: mock, inkernel, vllm, sglang, llm-d, dynamo, or another registered driver (default: mock; select inkernel explicitly for fak-native model execution)")
-	sf.backendName = fs.String("backend", "", "compute backend for the in-kernel chat decode (with --gguf, no --base-url): empty = the CPU reference path; a registered device name like 'cuda' runs prefill+decode through the GPU HAL. Requires a `-tags cuda` build AND a reachable GPU at runtime; fails loud if named but unavailable so a typo never silently runs on CPU.")
+	sf.backendName = fs.String("backend", "", "compute backend for the in-kernel chat decode (with --gguf, no --base-url): --backend overrides FAK_BACKEND; use 'auto', 'cpu', or a registered name. Omitted/auto selects usable Vulkan on Linux/Windows, preserves Metal auto-selection on Darwin, and otherwise uses CPU. Vulkan requires -tags vulkan plus FAK_VULKAN_SPIRV; an unavailable named backend fails loud.")
 	nativeControls := registerNativeControlFlags(fs)
 	sf.nativeQwenQ4KPrefillChunk = nativeControls.prefillChunk
 	sf.nativeQwen35MetalGDNSequence = nativeControls.qwen35GDNSequence
@@ -697,8 +697,10 @@ func resolveServeEngine(sf *serveFlags, explicit map[string]bool, inKernelLoaded
 	}
 }
 
-// isServeVulkan reports only an exact, explicitly parsed --backend=vulkan.
-// Proxy modes remain lease-free because they delegate model residency.
+// isServeVulkan reports whether the shared native selector resolved a usable
+// Vulkan backend. Proxy modes remain lease-free because they delegate model
+// residency. Keeping admission on the same resolver prevents automatic or
+// FAK_BACKEND-selected Vulkan from loading local weights without its GPU lease.
 func isServeVulkan(sf *serveFlags) bool {
 	if sf == nil || sf.backendName == nil {
 		return false
@@ -706,7 +708,8 @@ func isServeVulkan(sf *serveFlags) bool {
 	if sf.baseURL != nil && *sf.baseURL != "" {
 		return false
 	}
-	return *sf.backendName == "vulkan"
+	backend, err := resolveServeChatBackend(*sf.backendName)
+	return err == nil && backend != nil && backend.Name() == "vulkan"
 }
 
 // warnIfNotFakWorkspace emits a loud stderr advisory when the serve cwd is not inside a

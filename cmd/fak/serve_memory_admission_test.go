@@ -549,101 +549,75 @@ func TestVulkanServiceProcessLeaseLifetime(t *testing.T) {
 }
 
 func TestIsServeVulkan(t *testing.T) {
+	t.Setenv("FAK_BACKEND", "")
 	if isServeVulkan(nil) {
 		t.Error("nil serve flags should not be vulkan")
 	}
 
 	backendName := "vulkan"
-	sf := &serveFlags{backendName: &backendName}
-	if !isServeVulkan(sf) {
-		t.Error("sf with backendName=vulkan should be vulkan")
-	}
-
-	upperBackend := "VULKAN"
-	sfUpper := &serveFlags{backendName: &upperBackend}
-	if isServeVulkan(sfUpper) {
-		t.Error("sf with backendName=VULKAN should not be exact vulkan")
-	}
-
-	spacedBackend := " vulkan "
-	sfSpaced := &serveFlags{backendName: &spacedBackend}
-	if isServeVulkan(sfSpaced) {
-		t.Error("sf with whitespace-padded backendName should not be exact vulkan")
-	}
-
-	otherBackend := "metal"
-	sfOther := &serveFlags{backendName: &otherBackend}
-	if isServeVulkan(sfOther) {
-		t.Error("sf with backendName=metal should not be vulkan")
-	}
-
-	emptyBackend := ""
-	sfEmpty := &serveFlags{backendName: &emptyBackend}
-	if isServeVulkan(sfEmpty) {
-		t.Error("empty backendName should not derive Vulkan identity from runtime state")
-	}
-
 	baseURL := "http://127.0.0.1:8080/v1"
 	sfProxy := &serveFlags{backendName: &backendName, baseURL: &baseURL}
 	if isServeVulkan(sfProxy) {
 		t.Error("sf with baseURL should not be vulkan (proxy mode is lease-free)")
 	}
 
+	cpu := "cpu"
+	if isServeVulkan(&serveFlags{backendName: &cpu}) {
+		t.Error("explicit CPU floor should not be vulkan")
+	}
+	unknown := "definitely-not-a-backend"
+	if isServeVulkan(&serveFlags{backendName: &unknown}) {
+		t.Error("unavailable backend should not be vulkan")
+	}
 	if isServeVulkan(&serveFlags{}) {
 		t.Error("nil backendName should not be vulkan")
 	}
 }
 
-func TestLoadServeModelWithVulkanLeaseUsesExactBackendAndGGUF(t *testing.T) {
+func TestLoadServeModelWithVulkanLeaseUsesEffectiveBackendAndGGUF(t *testing.T) {
+	autoLease := runtime.GOOS == "linux" || runtime.GOOS == "windows"
 	tests := []struct {
-		name      string
-		backend   string
-		gguf      string
-		model     string
-		baseURL   string
-		wantLease bool
+		name       string
+		backend    string
+		envBackend string
+		registered string
+		gguf       string
+		baseURL    string
+		wantLease  bool
 	}{
-		{name: "exact local Vulkan GGUF", backend: "vulkan", gguf: "model.gguf", model: "mock", wantLease: true},
-		{name: "empty GGUF never substitutes default model", backend: "vulkan", model: "mock"},
-		{name: "uppercase backend rejected", backend: "VULKAN", gguf: "model.gguf"},
-		{name: "whitespace backend rejected", backend: " vulkan ", gguf: "model.gguf"},
-		{name: "runtime identity unavailable without exact flag", gguf: "model.gguf"},
-		{name: "proxy bypass", backend: "vulkan", gguf: "model.gguf", baseURL: "http://127.0.0.1:8080/v1"},
-		{name: "CPU reference bypass", gguf: "model.gguf"},
-		{name: "exact nonempty whitespace GGUF admits before load validation", backend: "vulkan", gguf: " ", wantLease: true},
+		{name: "explicit local Vulkan GGUF", backend: "vulkan", registered: "vulkan", gguf: "model.gguf", wantLease: true},
+		{name: "empty GGUF never substitutes default model", backend: "vulkan", registered: "vulkan"},
+		{name: "uppercase backend normalized", backend: "VULKAN", registered: "vulkan", gguf: "model.gguf", wantLease: true},
+		{name: "whitespace backend normalized", backend: " vulkan ", registered: "vulkan", gguf: "model.gguf", wantLease: true},
+		{name: "automatic registered Vulkan", registered: "vulkan", gguf: "model.gguf", wantLease: autoLease},
+		{name: "environment Vulkan", envBackend: "vulkan", registered: "vulkan", gguf: "model.gguf", wantLease: true},
+		{name: "proxy bypass", backend: "vulkan", registered: "vulkan", gguf: "model.gguf", baseURL: "http://127.0.0.1:8080/v1"},
+		{name: "CPU reference bypass", backend: "cpu", registered: "vulkan", gguf: "model.gguf"},
+		{name: "nonempty whitespace GGUF admits before load validation", backend: "vulkan", registered: "vulkan", gguf: " ", wantLease: true},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "gpu.lease")
-			backend, gguf, model, baseURL := tc.backend, tc.gguf, tc.model, tc.baseURL
-			sf := &serveFlags{backendName: &backend, ggufPath: &gguf, model: &model, baseURL: &baseURL}
-			loads := 0
-
-			if !tc.wantLease {
-				held, err := gpulease.Acquire(gpulease.Options{Path: path, NoWait: true})
-				if err != nil {
-					t.Fatalf("hold unrelated lease: %v", err)
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestServeBackendAutoChild$")
+			cmd.Env = backendAutoChildEnvironment(map[string]string{
+				backendAutoChildEnv:                 "1",
+				"FAK_TEST_SERVE_BACKEND_ACTION":     "lease-load",
+				"FAK_TEST_SERVE_BACKEND_REQUESTED":  tc.backend,
+				"FAK_TEST_SERVE_BACKEND_REGISTERED": tc.registered,
+				"FAK_TEST_SERVE_BACKEND_BASE_URL":   tc.baseURL,
+				"FAK_TEST_SERVE_BACKEND_GGUF":       tc.gguf,
+				"FAK_TEST_SERVE_BACKEND_LEASE_PATH": filepath.Join(t.TempDir(), "gpu.lease"),
+				"FAK_TEST_SERVE_BACKEND_WANT":       strconv.FormatBool(tc.wantLease),
+				"FAK_BACKEND":                       tc.envBackend,
+				"FAK_VULKAN_SPIRV":                  "",
+			})
+			if out, err := cmd.CombinedOutput(); err != nil {
+				if ctx.Err() != nil {
+					t.Fatalf("child lease lifecycle timed out: %v", ctx.Err())
 				}
-				defer held.Release()
-			}
-
-			release, err := loadServeModelWithVulkanLease(sf, gpulease.Options{Path: path}, func() { loads++ })
-			if err != nil {
-				t.Fatalf("serve admission: %v", err)
-			}
-			defer release()
-			if loads != 1 {
-				t.Fatalf("load callback calls = %d, want 1", loads)
-			}
-
-			if tc.wantLease {
-				if competing, err := gpulease.Acquire(gpulease.Options{Path: path, NoWait: true}); !errors.Is(err, gpulease.ErrBusy) {
-					if err == nil {
-						competing.Release()
-					}
-					t.Fatalf("exact Vulkan GGUF did not retain lease: %v", err)
-				}
+				t.Fatalf("child lease lifecycle failed: %v\n%s", err, out)
 			}
 		})
 	}

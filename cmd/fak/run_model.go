@@ -13,7 +13,9 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
+	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
+	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
@@ -86,7 +88,7 @@ func newRunFlagSet(name string, errorHandling flag.ErrorHandling) (*flag.FlagSet
 	flags := &runFlags{}
 
 	// Chat / model controls
-	flags.backendName = fs.String("backend", "", "compute backend for decode: empty = the CPU reference path; a registered device like 'cuda' runs through the GPU HAL (needs a -tags cuda build + a reachable GPU)")
+	flags.backendName = fs.String("backend", "", "compute backend for decode: --backend overrides FAK_BACKEND; use 'auto', 'cpu', or a registered name. Omitted/auto selects usable Vulkan on Linux/Windows, preserves Metal auto-selection on Darwin, and otherwise uses CPU. Vulkan requires -tags vulkan plus FAK_VULKAN_SPIRV; an unavailable named backend fails loud.")
 	flags.metal = fs.Bool("metal", false, "run the in-kernel chat through the Apple-Silicon Metal GPU forward (auto-selected on darwin/arm64 with a usable Metal device; mutually exclusive with --backend)")
 	flags.nativeFlags = registerRunNativeControlFlags(fs)
 	flags.system = fs.String("system", "", "optional system prompt prepended to the conversation")
@@ -244,7 +246,10 @@ func executeChatModel(cfg chatModelConfig) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	planner := buildRunPlanner(ctx, cfg.modelRef, cfg.backendName, cfg.metal, cfg.nativeFlags.config())
+	planner, residencyRelease := buildRunPlanner(ctx, cfg.modelRef, cfg.backendName, cfg.metal, cfg.nativeFlags.config())
+	if residencyRelease != nil {
+		defer residencyRelease()
+	}
 
 	var extraOpts []agent.SampleOpt
 	if cfg.effort != "" {
@@ -335,7 +340,7 @@ func resolveRunMetal(flag, env bool, backendName string) (bool, error) {
 	return use, nil
 }
 
-func buildRunPlanner(ctx context.Context, modelRef, backendName string, metalFlag bool, nativeConfig nativeControlConfig) *agent.InKernelPlanner {
+func buildRunPlanner(ctx context.Context, modelRef, backendName string, metalFlag bool, nativeConfig nativeControlConfig) (*agent.InKernelPlanner, func()) {
 	ref, expanded := modelreg.Resolve(modelRef)
 	if expanded {
 		fmt.Fprintf(os.Stderr, "fak run: %s → %s\n", modelRef, ref)
@@ -368,17 +373,37 @@ func buildRunPlanner(ctx context.Context, modelRef, backendName string, metalFla
 		fmt.Fprintf(os.Stderr, "fak run: %v\n", err)
 		os.Exit(2)
 	}
-	inKernelModel, q4k, _, _ := loadServeInKernelModel(ref, backend, false, 0, nil, 1)
+	var inKernelModel *fakmodel.Model
+	var q4k bool
+	var residencyRelease func()
+	load := func() {
+		inKernelModel, q4k, _, _ = loadServeInKernelModel(ref, backend, false, 0, nil, 1)
+	}
+	if backend != nil && backend.Name() == "vulkan" {
+		residencyRelease, err = loadLocalLauncherModelWithVulkanLease(true, ref, gpulease.Options{}, load)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "fak run: Vulkan model residency:", err)
+			os.Exit(1)
+		}
+	} else {
+		load()
+	}
 	if inKernelModel == nil {
+		if residencyRelease != nil {
+			residencyRelease()
+		}
 		fmt.Fprintf(os.Stderr, "fak run: failed to load %q into the in-kernel engine\n", ref)
 		os.Exit(1)
 	}
 	tok, ok := resolveServeTokenizer("", ref)
 	if !ok || tok == nil {
+		if residencyRelease != nil {
+			residencyRelease()
+		}
 		fmt.Fprintf(os.Stderr, "fak run: %q has no usable tokenizer; pass a GGUF with an embedded tokenizer\n", ref)
 		os.Exit(1)
 	}
-	return agent.NewInKernelPlannerWithConfig(inKernelModel, tok, modelRef, q4k, backend, useMetal, nativeConfig.Planner)
+	return agent.NewInKernelPlannerWithConfig(inKernelModel, tok, modelRef, q4k, backend, useMetal, nativeConfig.Planner), residencyRelease
 }
 
 // runSampleOpts folds the CLI sampling flags into planner SampleOpts. Sampling and

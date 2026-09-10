@@ -155,8 +155,10 @@ against the serve path):
   weights — it holds eligible matmul tensors raw and engages the int8-SDOT decode GEMV,
   for **~10× faster load** than the default lean-Q8 round-trip. The default path stays
   byte-identical when the env is unset.
-- **`FAK_BACKEND`** picks the compute backend (`cuda`, `metal`, `vulkan`, `cpu`); it is
-  auto-detected if unset.
+- **`FAK_BACKEND`** selects `auto`, `cpu`, or a registered compute backend such as
+  `cuda` or `vulkan`; `--backend` takes precedence. Automatic selection uses an
+  initialized Vulkan backend on Linux/Windows, automatic Metal on supported Apple
+  hosts, and otherwise CPU. Require Metal with `--metal` or `FAK_METAL`.
 - **`FAK_WORKERS`** caps matmul parallelism (defaults to `GOMAXPROCS`) — pin it to leave
   cores for other tenants on a shared box.
 - **`FAK_INKERNEL_MAX_TOKENS`** (default `256`), **`FAK_INKERNEL_TEMP`** (default `0`),

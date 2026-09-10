@@ -228,7 +228,7 @@ session control-verb writes, and from the live Paused→Running resume the
 |----------|-------------|
 | `FAK_MODEL_DIR` | Path to a model export directory. When set, the in-kernel engine loads from this export instead of using the synthetic checkpoint. |
 | `FAK_Q4K` | When set to `1`, uses the direct-resident-Q4_K path for Qwen3.6-27B Q4_K_M models (SDOT int8 decode GEMV path, ~10× faster load). |
-| `FAK_BACKEND` | Compute backend selection. Options: `cuda`, `metal`, `vulkan`, `cpu`. Default is auto-detected. |
+| `FAK_BACKEND` | Native compute selection: `auto`, `cpu`, or a registered name such as `vulkan` or `cuda`. `--backend` takes precedence. Automatic selection uses initialized Vulkan on Linux/Windows, automatic Metal on supported Apple hosts, and otherwise CPU. Require Metal with `--metal` or `FAK_METAL`; it is not a compute-registry name. Vulkan registration requires the build tag and `FAK_VULKAN_SPIRV`. |
 | `FAK_CUDA_GRAPH` | When set to `1`, enables CUDA-graph decode path on CUDA backend. |
 | `FAK_CUDA_F16` | When set to `1`, enables f16 computation paths in CUDA benchmarks. |
 | `FAK_CUDA_Q8` | When set to `1`, enables Q8 computation paths in CUDA benchmarks. |

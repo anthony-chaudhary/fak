@@ -23,6 +23,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/allinone"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
 	"github.com/anthony-chaudhary/fak/internal/macfit"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
@@ -327,17 +328,21 @@ func printTurnkeyReady(w io.Writer, ver, addr string, plan macfit.TurnkeyProfile
 }
 
 type turnkeyServer struct {
-	plan         macfit.TurnkeyProfile
-	mock         bool
-	engineID     string
-	planner      agent.Planner
-	listener     net.Listener
-	boundAddr    string
-	httpServer   *http.Server
-	requestCount int64
-	totalTokens  int64
-	mu           sync.Mutex
-	stopping     bool
+	plan             macfit.TurnkeyProfile
+	mock             bool
+	engineID         string
+	planner          agent.Planner
+	listener         net.Listener
+	boundAddr        string
+	httpServer       *http.Server
+	residencyRelease func()
+	requestCount     int64
+	totalTokens      int64
+	mu               sync.Mutex
+	stopping         bool
+	releaseRequested bool
+	activeRequests   int
+	residencyOnce    sync.Once
 }
 
 func (s *turnkeyServer) Addr() string {
@@ -357,11 +362,61 @@ func (s *turnkeyServer) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
 	s.stopping = true
 	s.mu.Unlock()
-	return s.httpServer.Shutdown(ctx)
+	err := s.httpServer.Shutdown(ctx)
+	if err == nil {
+		s.requestResidencyRelease()
+	}
+	return err
 }
 
 func (s *turnkeyServer) Close() error {
-	return s.httpServer.Close()
+	// Close does not wait for active handlers, so gate new chat work first. After
+	// a successful close, the last active handler releases residency; an idle
+	// server releases immediately. A failed close retains residency for safety.
+	s.mu.Lock()
+	s.stopping = true
+	s.mu.Unlock()
+	err := s.httpServer.Close()
+	if err == nil {
+		s.requestResidencyRelease()
+	}
+	return err
+}
+
+func (s *turnkeyServer) releaseResidency() {
+	if s.residencyRelease != nil {
+		s.residencyOnce.Do(s.residencyRelease)
+	}
+}
+
+func (s *turnkeyServer) requestResidencyRelease() {
+	s.mu.Lock()
+	s.releaseRequested = true
+	idle := s.activeRequests == 0
+	s.mu.Unlock()
+	if idle {
+		s.releaseResidency()
+	}
+}
+
+func (s *turnkeyServer) beginChatRequest() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopping {
+		return false
+	}
+	s.activeRequests++
+	return true
+}
+
+func (s *turnkeyServer) endChatRequest() {
+	s.mu.Lock()
+	s.activeRequests--
+	release := s.releaseRequested && s.activeRequests == 0
+	s.mu.Unlock()
+	if release {
+		s.releaseResidency()
+	}
 }
 
 func newInKernelChatPlanner(model *fakmodel.Model, tok *tokenizer.Tokenizer, modelID string, q4k bool, backend compute.Backend, metal bool) *agent.InKernelPlanner {
@@ -410,6 +465,13 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 	}
 
 	var planner *agent.InKernelPlanner
+	var residencyRelease func()
+	residencyHandedOff := false
+	defer func() {
+		if residencyRelease != nil && !residencyHandedOff {
+			residencyRelease()
+		}
+	}()
 	if !mock {
 		if len(custom) > 0 && custom[0] != nil {
 			planner = custom[0]
@@ -438,7 +500,19 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 			}
 			useMetal, _ := resolveServeMetal(false, false, "")
 
-			m, q4k, _, _ := loadServeInKernelModel(ref, backend, false, contextTokens, nil, 1)
+			var m *fakmodel.Model
+			var q4k bool
+			load := func() {
+				m, q4k, _, _ = loadServeInKernelModel(ref, backend, false, contextTokens, nil, 1)
+			}
+			if backend != nil && backend.Name() == "vulkan" {
+				residencyRelease, err = loadLocalLauncherModelWithVulkanLease(true, ref, gpulease.Options{}, load)
+				if err != nil {
+					return nil, fmt.Errorf("Vulkan model residency: %w", err)
+				}
+			} else {
+				load()
+			}
 			if m == nil {
 				return nil, fmt.Errorf("failed to load %q into the in-kernel engine", ref)
 			}
@@ -474,12 +548,13 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 	}
 
 	ts := &turnkeyServer{
-		plan:      plan,
-		mock:      mock,
-		engineID:  engineID,
-		planner:   servedPlanner,
-		listener:  ln,
-		boundAddr: ln.Addr().String(),
+		plan:             plan,
+		mock:             mock,
+		engineID:         engineID,
+		planner:          servedPlanner,
+		listener:         ln,
+		boundAddr:        ln.Addr().String(),
+		residencyRelease: residencyRelease,
 	}
 
 	mux := http.NewServeMux()
@@ -496,6 +571,7 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 		_ = ts.httpServer.Serve(ln)
 	}()
 
+	residencyHandedOff = true
 	return ts, nil
 }
 
@@ -580,6 +656,11 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !s.beginChatRequest() {
+		http.Error(w, "server stopping", http.StatusServiceUnavailable)
+		return
+	}
+	defer s.endChatRequest()
 
 	var req chatCompletionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

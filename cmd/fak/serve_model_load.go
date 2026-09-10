@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
+	"runtime"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -135,44 +137,117 @@ func toGatewayLoadMemoryCapacity(scope string, total, free int64, known bool) ga
 	return cap
 }
 
-// loadServeInKernelModel eagerly loads the GGUF weights (when ggufPath is set) BEFORE the
-// listener binds, so the load counts toward time-to-ready and its phase breakdown reaches
-// /metrics rather than being a lazy cost on first request. It returns the resident model
-// (nil if no --gguf), whether the direct-resident-Q4_K path was taken, the load profile for
-// /metrics, and the model-load startup phase (zero Name when no load happened). The path
-// selection mirrors cmd/fakchat with one device-specific split: a device --backend that
-// advertises quantized upload takes the lean-Q8 load, because the served planner runs
-// Session.Quant=true and the HAL can consume Q8_0 directly. Backends without UploadDtype keep
-// the F32 fallback until they can consume quantized resident weights. FAK_Q4K takes the
-// direct-resident-Q4_K CPU path, and the CPU default is the lean-Q8 round-trip; the Q8 path
-// stays byte-identical when the env is unset.
-func resolveServeChatBackend(backendName string) (compute.Backend, error) {
-	backendName = strings.TrimSpace(backendName)
-	if backendName == "" {
-		return nil, nil
+// Backend selection lives in the native CLI host rather than internal/compute so
+// the portable registry stays independent of process environment and runtime OS.
+const (
+	serveBackendAuto = "auto"
+	serveBackendCPU  = "cpu"
+)
+
+type serveBackendLookup func(string) (compute.Backend, error)
+
+// serveBackendSelection is the side-effect-free result shared by the compute-HAL
+// and Apple-Silicon Metal resolvers. The CPU floor is represented by name "cpu"
+// and a nil backend because the served model's ordinary Session owns that path.
+type serveBackendSelection struct {
+	name     string
+	backend  compute.Backend
+	source   string
+	explicit bool
+}
+
+// resolveServeBackendSelection applies the native backend policy without touching
+// process globals, so callers can prove it with an injected registry and GOOS.
+// An explicit --backend (including "auto") wins FAK_BACKEND. Linux and Windows
+// automatic selection probes only Vulkan: registration already proves that the
+// tagged backend initialized a usable device. Darwin leaves automatic execution to
+// the existing metalgemm seam. The documented "cpu" name is the portable opt-out.
+func resolveServeBackendSelection(requested, envValue, goos string, lookup serveBackendLookup) (serveBackendSelection, error) {
+	requested = strings.ToLower(strings.TrimSpace(requested))
+	envValue = strings.ToLower(strings.TrimSpace(envValue))
+	goos = strings.ToLower(strings.TrimSpace(goos))
+	explicit := requested != ""
+
+	name := requested
+	source := "explicit"
+	if name == "" {
+		name = envValue
+		source = "env"
 	}
-	be, found := compute.Lookup(backendName)
+	if name == "" {
+		name = serveBackendAuto
+		source = "auto"
+	}
+
+	if name == serveBackendAuto {
+		switch goos {
+		case "darwin":
+			return serveBackendSelection{name: "metal", source: "auto", explicit: explicit}, nil
+		case "linux", "windows":
+			be, err := lookup("vulkan")
+			if err == nil && be != nil {
+				return serveBackendSelection{name: "vulkan", backend: be, source: "auto", explicit: explicit}, nil
+			}
+		}
+		return serveBackendSelection{name: serveBackendCPU, source: "default", explicit: explicit}, nil
+	}
+	if name == serveBackendCPU {
+		return serveBackendSelection{name: name, source: source, explicit: explicit}, nil
+	}
+
+	selection := serveBackendSelection{name: name, source: source, explicit: explicit}
+	be, err := lookup(name)
+	if err != nil || be == nil {
+		if err == nil {
+			err = fmt.Errorf("backend lookup returned no backend")
+		}
+		selector := "--backend"
+		if source == "env" {
+			selector = "FAK_BACKEND"
+		}
+		return selection, fmt.Errorf("fak serve: %s %q is not available: %w", selector, name, err)
+	}
+	selection.backend = be
+	return selection, nil
+}
+
+func lookupRegisteredServeBackend(name string) (compute.Backend, error) {
+	be, found := compute.Lookup(name)
 	if !found {
-		return nil, fmt.Errorf("fak serve: --backend %q is not available (registered backends: %v). A device backend needs both a matching build tag (e.g. -tags %s) and a reachable device at runtime.", backendName, compute.Registered(), backendName)
+		return nil, fmt.Errorf("registered backends: %v; a device backend needs both a matching build tag (e.g. -tags %s) and a reachable device at runtime", compute.Registered(), name)
 	}
 	return be, nil
 }
 
+func resolveServeChatBackend(backendName string) (compute.Backend, error) {
+	selection, err := resolveServeBackendSelection(backendName, os.Getenv("FAK_BACKEND"), runtime.GOOS, lookupRegisteredServeBackend)
+	return selection.backend, err
+}
+
 // writeBackendUnavailableBail renders the BACKEND_UNAVAILABLE bail for a --backend
-// this binary never registered. Shared by the serve entry points so both report
+// or FAK_BACKEND name this binary never registered. Shared by the serve entry points so both report
 // the same knobs; resolveServeChatBackend fails for exactly this one reason, so a
 // non-nil error from it is always this bail.
 //
 // The name is not silently downgraded to CPU: a typo that quietly served on the
 // wrong device would misreport every throughput number taken from that run.
 func writeBackendUnavailableBail(w io.Writer, verb, backendName string) {
+	backendName = strings.ToLower(strings.TrimSpace(backendName))
+	fromEnv := backendName == ""
+	if fromEnv {
+		backendName = strings.ToLower(strings.TrimSpace(os.Getenv("FAK_BACKEND")))
+	}
+	selector := "--backend"
+	knob := bailFlag("backend", backendName).want(fmt.Sprintf("one of %v, %q, or %q", compute.Registered(), serveBackendAuto, serveBackendCPU))
+	if fromEnv {
+		selector = "FAK_BACKEND"
+		knob = bailEnv("FAK_BACKEND", backendName).want(fmt.Sprintf("one of %v, %q, %q, or unset for platform automatic selection", compute.Registered(), serveBackendAuto, serveBackendCPU))
+	}
 	writeConfigBail(w, configBail{
 		Verb:    verb,
 		Reason:  bailBackendUnavailable,
-		Summary: fmt.Sprintf("--backend %q is not registered in this binary", backendName),
-		Knobs: []bailKnob{
-			bailFlag("backend", backendName).want(fmt.Sprintf("one of %v, or omit --backend to serve on the CPU path", compute.Registered())),
-		},
+		Summary: fmt.Sprintf("%s %q is not registered in this binary", selector, backendName),
+		Knobs:   []bailKnob{knob},
 		// Keep the build-tag half of the original message: "not registered" reads
 		// as a runtime/device problem, but the usual cause is a binary compiled
 		// without the tag, which no amount of checking the device will reveal.
@@ -186,14 +261,25 @@ func writeBackendUnavailableBail(w io.Writer, verb, backendName string) {
 // case from CPU fallback to a fail-loud error. The error distinguishes a wrong build
 // (`metalgemm.Compiled()` false → build on Apple Silicon with cgo) from a right build with
 // no device (`Available()` false). Metal is the CPU-session seam (the served session keeps
-// s.Backend nil and gets s.Metal=true), so it is mutually exclusive with a device --backend.
+// s.Backend nil and gets s.Metal=true), so it is mutually exclusive with a selected compute backend.
 // Kept side-effect free (no os.Exit) so the decision is unit-testable; on a non-Metal build
 // metalgemm.Available()/Compiled() are the stub's deterministic false.
 func resolveServeMetal(flag, env bool, backendName string) (bool, error) {
 	requested := flag || env
-	if strings.TrimSpace(backendName) != "" {
+	selection, selectionErr := resolveServeBackendSelection(backendName, os.Getenv("FAK_BACKEND"), runtime.GOOS, lookupRegisteredServeBackend)
+	// The main compute resolver reports explicit --backend failures first. Propagate
+	// environment failures here as well so direct callers cannot turn a bad
+	// FAK_BACKEND value into automatic Metal by accident.
+	if selectionErr != nil && strings.TrimSpace(backendName) == "" {
+		return false, selectionErr
+	}
+	if requested && selection.explicit {
+		return false, fmt.Errorf("fak serve: --metal and --backend %q are mutually exclusive — Metal is the Apple-Silicon CPU-session forward, not a compute HAL device. Pass one.", backendName)
+	}
+	backendSelected := selection.backend != nil || selection.source == "explicit" || selection.source == "env"
+	if backendSelected {
 		if requested {
-			return false, fmt.Errorf("fak serve: --metal and --backend %q are mutually exclusive — Metal is the Apple-Silicon CPU-session forward, not a compute HAL device. Pass one.", backendName)
+			return false, fmt.Errorf("fak serve: Metal and FAK_BACKEND=%q are mutually exclusive — Metal is the Apple-Silicon CPU-session forward, not a compute HAL device. Select one.", selection.name)
 		}
 		return false, nil
 	}
