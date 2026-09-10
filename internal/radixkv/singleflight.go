@@ -207,10 +207,7 @@ func (g *PrefixFlightGroup) CoalesceNS(ctx context.Context, ns string, prefix []
 	if node == nil {
 		return nil, nil, leader, nil
 	}
-	kv := node.KV()
-	if !leader && kv != nil {
-		kv = kv.Clone()
-	}
+	kv := node.CloneKV()
 	logits := node.Logits()
 	g.Done(node)
 	return kv, logits, leader, nil
