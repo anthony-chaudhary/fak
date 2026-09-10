@@ -20,9 +20,11 @@ import (
 type servePreflightBackend struct {
 	compute.Backend
 	name string
+	tier string
 }
 
 func (b *servePreflightBackend) Name() string { return b.name }
+func (b *servePreflightBackend) Tier() string { return b.tier }
 
 type servePreflightMarkerBackend struct{ *servePreflightBackend }
 
@@ -554,5 +556,40 @@ func TestServeBackendPreflight_StrixHaloActivation(t *testing.T) {
 		for err := range errCh {
 			t.Errorf("concurrent preflight error: %v", err)
 		}
+	}
+
+	// Case 7: CPU backend guard - even on Strix Halo hardware with valid DRM sysfs (0x1002:0x1586),
+	// non-GPU/CPU backends ("cpu-ref", "cpu") must return Detected: false to prevent false APU activation.
+	beCPURef := newServePreflightBackend("cpu-ref")
+	resCPURef := preflightServeStrixHaloWithSysfs(beCPURef, tmpSysfs)
+	if resCPURef.Detected {
+		t.Fatal("expected detected=false for cpu-ref backend even with Strix Halo sysfs present")
+	}
+	if resCPURef.UMAPointerManager != nil || resCPURef.MALLTiler != nil {
+		t.Fatal("expected nil subsystems for cpu-ref backend")
+	}
+
+	beCPU := newServePreflightBackend("cpu")
+	resCPU := preflightServeStrixHaloWithSysfs(beCPU, tmpSysfs)
+	if resCPU.Detected {
+		t.Fatal("expected detected=false for cpu backend even with Strix Halo sysfs present")
+	}
+	if resCPU.UMAPointerManager != nil || resCPU.MALLTiler != nil {
+		t.Fatal("expected nil subsystems for cpu backend")
+	}
+
+	// Case 8: Vulkan backend tier inspection - be.Name() is "vulkan", but be.Tier() advertises
+	// GFX1151 / 8060S silicon, activating Strix Halo preflight without sysfs fallthrough.
+	beVulkanStrix := &servePreflightBackend{
+		Backend: compute.Default(),
+		name:    "vulkan",
+		tier:    "integrated:AMD Radeon 8060S Graphics (gfx1151)",
+	}
+	resVulkan := preflightServeStrixHaloWithSysfs(beVulkanStrix, t.TempDir())
+	if !resVulkan.Detected {
+		t.Fatal("expected detected=true for vulkan backend advertising Strix Halo tier")
+	}
+	if resVulkan.UMAPointerManager == nil || resVulkan.MALLTiler == nil {
+		t.Fatal("expected active UMAPointerManager and MALLTiler for vulkan Strix backend")
 	}
 }
