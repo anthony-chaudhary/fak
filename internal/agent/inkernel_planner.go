@@ -176,6 +176,11 @@ type InKernelPlanner struct {
 
 	speculativeEngine *model.SpeculativeEngine
 	specDraftDepth    int
+	vulkanMTP         bool
+	// vulkanMTPDraftFactory is request-scoped: each invocation binds one draft
+	// cache to the live target session used by that request. Tests in this
+	// package replace it to witness lifecycle behavior without Vulkan hardware.
+	vulkanMTPDraftFactory func(*model.Session, int) (model.ProposalGenerator, func(), error)
 
 	metalMTPMu          sync.Mutex
 	metalMTPCoordinator *model.MetalMTPCoordinator
@@ -226,11 +231,11 @@ func (p *InKernelPlanner) StreamingSupported() bool { return true }
 func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
 	completion, err := p.Complete(ctx, messages, tools, opts...)
 	if err != nil {
-		return nil, err
+		return completion, err
 	}
 	if sink != nil && completion.Message.Content != "" {
 		if err := sink(completion.Message.Content); err != nil {
-			return nil, err
+			return completion, err
 		}
 	}
 	return completion, nil
@@ -616,7 +621,42 @@ type inKernelGenerateResult struct {
 	prefillS, decodeS float64
 	stopped           bool
 	batchReceipt      InKernelBatchReceipt
+	vulkanMTP         *VulkanMTPExecution
 }
+
+// VulkanMTPExecution is the request-local execution receipt for the resident
+// Vulkan MTP route. It is attached to Completion so the gateway reports what
+// the completed request actually ran instead of reading mutable planner state.
+type VulkanMTPExecution struct {
+	Engine         string
+	Backend        string
+	RequestedDepth int
+	EffectiveDepth int
+	ProposalRounds int
+	ProposedTokens int
+	AcceptedTokens int
+	RejectedTokens int
+	RollbackTokens int
+	// The target counters below cover observed resident-device verification
+	// receipts. They do not include ordinary target work after a downgrade.
+	TargetOperations      int
+	TargetDecodeSteps     int
+	FullTargetReplaySteps int
+	RecurrentRepairTokens int
+	Used                  bool
+	DowngradeReason       string
+	Cancelled             bool
+	Elapsed               time.Duration
+}
+
+const (
+	vulkanMTPExecutionEngine             = "mtp-vulkan"
+	vulkanMTPDowngradeConstructorRefused = "constructor-refused"
+	vulkanMTPDowngradeEmptyProposal      = "empty-proposal"
+	vulkanMTPDowngradeProposalError      = "proposal-error"
+	vulkanMTPDowngradeTargetVerifier     = "target-verifier-downgrade"
+	vulkanMTPDowngradeCancelled          = "cancelled"
+)
 
 func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, measurementOpt ...*nativeInferenceMeasurement) (res inKernelGenerateResult, err error) {
 	defer func() {
@@ -663,6 +703,7 @@ func (p *InKernelPlanner) greedySpeculativeRequestEligible(temp float64, logitBi
 // SetSpeculativeEngine configures the speculative decoding engine for this planner.
 func (p *InKernelPlanner) SetSpeculativeEngine(eng *model.SpeculativeEngine) {
 	p.speculativeEngine = eng
+	p.vulkanMTP = false
 }
 
 // SpeculativeEngine returns the configured speculative decoding engine, if any.
@@ -680,12 +721,39 @@ func (p *InKernelPlanner) EnableSpeculativeDecoding(gen model.ProposalGenerator,
 	cfg.MaxDraft = draftDepth
 	cfg.Temperature = p.temp
 	p.speculativeEngine = model.NewSpeculativeEngine(nil, gen, cfg)
+	p.vulkanMTP = false
+}
+
+// EnableVulkanMTP enables request-bound resident Vulkan MTP drafting. The
+// draft session itself is constructed only after the request's target session
+// exists, so mutable draft state is never shared across requests.
+func (p *InKernelPlanner) EnableVulkanMTP(draftDepth int) error {
+	if draftDepth <= 0 {
+		draftDepth = model.Qwen35MTPMaxDraftDepth
+	}
+	if draftDepth > model.Qwen35MTPMaxDraftDepth {
+		return fmt.Errorf("agent: Vulkan MTP draft depth %d exceeds supported maximum %d", draftDepth, model.Qwen35MTPMaxDraftDepth)
+	}
+	p.specDraftDepth = draftDepth
+	cfg := model.DefaultSpeculativeEngineConfig()
+	cfg.MaxDraft = draftDepth
+	cfg.Temperature = p.temp
+	p.speculativeEngine = model.NewSpeculativeEngine(nil, nil, cfg)
+	p.vulkanMTP = true
+	return nil
+}
+
+// VulkanMTPEnabled reports planner admission only. Request responses use the
+// VulkanMTPExecution receipt to distinguish actual execution from downgrade.
+func (p *InKernelPlanner) VulkanMTPEnabled() bool {
+	return p != nil && p.vulkanMTP && p.speculativeEngine != nil
 }
 
 // DisableSpeculativeDecoding disables speculative decoding on this planner.
 func (p *InKernelPlanner) DisableSpeculativeDecoding() {
 	p.speculativeEngine = nil
 	p.specDraftDepth = 0
+	p.vulkanMTP = false
 }
 
 // SetMetalMTPCoordinator configures an explicit MetalMTPCoordinator on this planner.
@@ -813,7 +881,42 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	emit func(int) bool,
 	measurementOpt ...*nativeInferenceMeasurement,
 ) (res inKernelGenerateResult, err error) {
+	// Keep request-local route evidence when a backend panic is converted to the
+	// same typed device error as the outer decode boundary. Recovering only in
+	// generateReusedRecovering would discard this function's named result.
+	defer func() {
+		if r := recover(); r != nil {
+			if e, ok := recoverDevicePanic(r); ok {
+				err = e
+				return
+			}
+			panic(r)
+		}
+	}()
 	promptTok := len(ids)
+	var mtpExecution *VulkanMTPExecution
+	if p.VulkanMTPEnabled() {
+		backendName := ""
+		if p.backend != nil {
+			backendName = p.backend.Name()
+		}
+		mtpExecution = &VulkanMTPExecution{
+			Engine:         vulkanMTPExecutionEngine,
+			Backend:        backendName,
+			RequestedDepth: p.specDraftDepth,
+		}
+		started := time.Now()
+		defer func() {
+			mtpExecution.Elapsed = time.Since(started)
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				mtpExecution.Cancelled = true
+				if mtpExecution.DowngradeReason == "" {
+					mtpExecution.DowngradeReason = vulkanMTPDowngradeCancelled
+				}
+			}
+			res.vulkanMTP = mtpExecution
+		}()
+	}
 	var measurement *nativeInferenceMeasurement
 	if len(measurementOpt) > 0 {
 		measurement = measurementOpt[0]
@@ -905,8 +1008,53 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		matched = 0
 		s = p.newSpeculativeSession()
 	}
-	defer s.Close()
+	defer func() { s.Close() }()
 	p.configureNativeSession(s)
+
+	eng := p.speculativeEngine
+	proposalGenerator := eng.PrimaryGenerator()
+	if mtpExecution != nil {
+		var closeDraft func()
+		proposalGenerator, closeDraft, err = p.newVulkanMTPProposalGenerator(s, p.specDraftDepth)
+		if err != nil && closeDraft != nil {
+			closeDraft()
+			closeDraft = nil
+		}
+		if err != nil && matched > 0 {
+			// A snapshot created before raw-hidden capture was enabled cannot bind a
+			// resident MTP draft. Rebuild from a fresh target before prompt prefill;
+			// the failed constructor leaves the restored target unchanged.
+			s.Close()
+			s = p.newSpeculativeSession()
+			p.configureNativeSession(s)
+			matched = 0
+			cachedLogits = nil
+			sourceTier = radixkv.SnapshotTierMiss
+			skipExactDeviceL1Readmission = false
+			proposalGenerator, closeDraft, err = p.newVulkanMTPProposalGenerator(s, p.specDraftDepth)
+			if err != nil && closeDraft != nil {
+				closeDraft()
+				closeDraft = nil
+			}
+		}
+		if err == nil && proposalGenerator == nil {
+			if closeDraft != nil {
+				closeDraft()
+				closeDraft = nil
+			}
+			err = model.ErrSpeculativeNilGenerator
+		}
+		if err != nil {
+			mtpExecution.DowngradeReason = vulkanMTPDowngradeConstructorRefused
+			proposalGenerator = nil
+			err = nil
+		} else if closeDraft != nil {
+			mtpExecution.EffectiveDepth = p.specDraftDepth
+			defer closeDraft()
+		} else {
+			mtpExecution.EffectiveDepth = p.specDraftDepth
+		}
+	}
 
 	p.recordTurnTax(promptTok, cacheable, matched)
 
@@ -973,8 +1121,6 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	// Speculative decoding loop
 	measurement.startDecodeTrace()
 	td := time.Now()
-	eng := p.speculativeEngine
-
 	committed := append([]int(nil), ids...)
 	var counts []int32
 	if freqPenalty != 0 || presPenalty != 0 {
@@ -997,19 +1143,23 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 
 		// Propose speculative candidate tokens
 		var proposal model.DraftProposal
-		if eng.PrimaryGenerator() != nil {
+		if proposalGenerator != nil {
 			roundDraft := maxDraft
 			if remaining := maxNew - gen; roundDraft > remaining {
 				roundDraft = remaining
 			}
 			var propErr error
-			proposal, propErr = eng.PrimaryGenerator().Propose(ctx, committed, roundDraft)
+			proposal, propErr = proposalGenerator.Propose(ctx, committed, roundDraft)
 			if propErr != nil {
 				if ctxErr := ctx.Err(); ctxErr != nil {
 					err = ctxErr
 					break
 				}
 				proposal = model.DraftProposal{}
+				if mtpExecution != nil {
+					mtpExecution.DowngradeReason = vulkanMTPDowngradeProposalError
+					proposalGenerator = nil
+				}
 			} else if proposal.Tree == nil && len(proposal.Tokens) > roundDraft {
 				proposal.Tokens = append([]int(nil), proposal.Tokens[:roundDraft]...)
 			}
@@ -1020,6 +1170,10 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 
 		// If proposal has no tokens and no tree, fall back to single-step autoregressive
 		if len(proposal.Tokens) == 0 && proposal.Tree == nil {
+			if mtpExecution != nil && proposalGenerator != nil {
+				mtpExecution.DowngradeReason = vulkanMTPDowngradeEmptyProposal
+				proposalGenerator = nil
+			}
 			next := sampleLogitsWithPenalty(curLogits, temp, topP, topK, logitBias, freqPenalty, presPenalty, counts, rng)
 			if next < 0 || stops[next] {
 				stopped = true
@@ -1051,10 +1205,32 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		}
 
 		// Evaluate candidate proposal using parallel verification kernel
-		vRes, vErr := verifyGreedySpeculativeRound(ctx, s, committed, proposal, curLogits, eng.Sanitizer(), counts)
+		if mtpExecution != nil {
+			mtpExecution.Used = true
+			mtpExecution.ProposalRounds++
+			mtpExecution.ProposedTokens += len(proposal.Tokens)
+		}
+		vRes, deviceReceipt, vErr := verifyGreedySpeculativeRoundObserved(ctx, s, committed, proposal, curLogits, eng.Sanitizer(), counts)
 		if vErr != nil {
 			err = vErr
 			break
+		}
+		if mtpExecution != nil {
+			mtpExecution.AcceptedTokens += vRes.NumAccepted
+			mtpExecution.RejectedTokens += len(proposal.Tokens) - vRes.NumAccepted
+			mtpExecution.RollbackTokens += vRes.RollbackKVCount
+			if deviceReceipt == nil {
+				mtpExecution.DowngradeReason = vulkanMTPDowngradeTargetVerifier
+				// The generic verifier completed this round exactly. Stop drafting
+				// now instead of retrying an unavailable resident verifier on every
+				// remaining token.
+				proposalGenerator = nil
+			} else {
+				mtpExecution.TargetOperations += deviceReceipt.TargetVerificationOperations
+				mtpExecution.TargetDecodeSteps += deviceReceipt.TargetDecodeSteps
+				mtpExecution.FullTargetReplaySteps += deviceReceipt.FullTargetReplaySteps
+				mtpExecution.RecurrentRepairTokens += deviceReceipt.RecurrentRepairTokens
+			}
 		}
 		var acceptedChoiceLogits [][]float32
 		var bonusChoiceLogits []float32
@@ -1167,6 +1343,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		prefillS:   prefillS,
 		decodeS:    decodeS,
 		stopped:    stopped,
+		vulkanMTP:  mtpExecution,
 	}, err
 }
 
@@ -1175,6 +1352,17 @@ func (p *InKernelPlanner) newSpeculativeSession() *model.Session {
 		return p.m.NewBackendSession(p.backend)
 	}
 	return p.m.NewSession()
+}
+
+func (p *InKernelPlanner) newVulkanMTPProposalGenerator(target *model.Session, depth int) (model.ProposalGenerator, func(), error) {
+	if p.vulkanMTPDraftFactory != nil {
+		return p.vulkanMTPDraftFactory(target, depth)
+	}
+	draft, err := model.NewQwen35MTPDraftSession(target, depth)
+	if err != nil {
+		return nil, nil, err
+	}
+	return model.NewMTPProposalGenerator(draft), draft.Close, nil
 }
 
 // verifyGreedySpeculativeRound selects the strict resident-device transaction
@@ -1190,6 +1378,19 @@ func verifyGreedySpeculativeRound(
 	sanitizer *model.RepetitionPenaltySanitizer,
 	counts []int32,
 ) (model.VerificationResult, error) {
+	result, _, err := verifyGreedySpeculativeRoundObserved(ctx, target, committed, proposal, lastLogits, sanitizer, counts)
+	return result, err
+}
+
+func verifyGreedySpeculativeRoundObserved(
+	ctx context.Context,
+	target *model.Session,
+	committed []int,
+	proposal model.DraftProposal,
+	lastLogits []float32,
+	sanitizer *model.RepetitionPenaltySanitizer,
+	counts []int32,
+) (model.VerificationResult, *model.TargetVerificationReceipt, error) {
 	if qwen35DeviceVerifierAvailable(target) && proposal.Tree == nil && len(proposal.Tokens) > 0 {
 		device, err := target.VerifyGreedyDeviceDraft(ctx, proposal.Tokens, lastLogits)
 		if err == nil {
@@ -1205,13 +1406,14 @@ func verifyGreedySpeculativeRound(
 				NumAccepted:     len(device.Accepted),
 				RollbackKVCount: rollback,
 				TargetLogits:    device.TargetLogits,
-			}, nil
+			}, &device.Receipt, nil
 		}
 		if !errors.Is(err, model.ErrTargetVerificationDowngrade) {
-			return model.VerificationResult{}, err
+			return model.VerificationResult{}, nil, err
 		}
 	}
-	return model.ParallelVerifyKernel(ctx, target, committed, proposal, lastLogits, sanitizer, counts)
+	result, err := model.ParallelVerifyKernel(ctx, target, committed, proposal, lastLogits, sanitizer, counts)
+	return result, nil, err
 }
 
 // speculativeVerificationChoiceLogits maps each emitted target decision back to
@@ -1462,10 +1664,10 @@ func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []
 		return res, nil
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return inKernelGenerateResult{}, ctxErr
+		return res, ctxErr
 	}
 	if !p.prepareDeviceOOMRetry(err) {
-		return inKernelGenerateResult{}, err
+		return res, err
 	}
 	if onRetry != nil {
 		onRetry()
@@ -1711,6 +1913,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		genRes, err = generate(ctx)
 	}
 	if err != nil {
+		if genRes.vulkanMTP != nil {
+			return &Completion{VulkanMTP: genRes.vulkanMTP}, err
+		}
 		return nil, err
 	}
 	gen, promptTok, matched, prefillS, decodeS, stopped := genRes.gen, genRes.promptTok, genRes.matched, genRes.prefillS, genRes.decodeS, genRes.stopped
@@ -1807,6 +2012,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		FinishReason:  finishReason,
 		ProviderCache: &compReuseEntry,
 		Usage:         Usage{PromptTokens: promptTok, CompletionTokens: gen, TotalTokens: promptTok + gen, PromptTokensDetails: &UsageTokenDetails{CachedTokens: matched}},
+		VulkanMTP:     genRes.vulkanMTP,
 	}
 	if sp.NativeInferenceReceipt {
 		comp.NativeInference = p.buildNativeInferenceReceipt(measurement, prefillS, decodeS)
