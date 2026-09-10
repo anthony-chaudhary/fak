@@ -544,6 +544,7 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 	mux.HandleFunc("/readyz", ts.handleReadyz)
 	mux.HandleFunc("/v1/models", ts.handleModels)
 	mux.HandleFunc("/v1/chat/completions", ts.handleChatCompletions)
+	mux.HandleFunc("/v1/fak/tokenize", ts.handleTokenize)
 
 	ts.httpServer = &http.Server{
 		Handler: mux,
@@ -592,6 +593,11 @@ func (s *turnkeyServer) handleModels(w http.ResponseWriter, r *http.Request) {
 		row["context_length"] = contextWindow
 		row["context_window"] = contextWindow
 		row["max_output_tokens"] = turnkeyMaxOutputTokens(uint64(contextWindow))
+	}
+	if turnkeyPromptEncodingAvailable(s) {
+		row["fak_capabilities"] = map[string]any{
+			"prompt_tokenization": map[string]any{"endpoint": "/v1/fak/tokenize"},
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -657,22 +663,7 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 	var nativeReceipt *fakmodel.NativeInferenceReceipt
 
 	if !s.mock && s.planner != nil {
-		var sampleOpts []agent.SampleOpt
-		if req.MaxTokens > 0 {
-			maxTokens := min(req.MaxTokens, turnkeyMaxOutputTokens(s.plan.ContextBudgetTokens))
-			sampleOpts = append(sampleOpts, agent.WithMaxTokens(maxTokens))
-		}
-		if req.Temperature != nil {
-			sampleOpts = append(sampleOpts, agent.WithTemperature(req.Temperature))
-		}
-		sampleOpts = append(sampleOpts,
-			agent.WithTopP(req.TopP),
-			agent.WithToolChoice(req.ToolChoice),
-			agent.WithResponseFormat(req.ResponseFormat),
-			agent.WithLogitBias(req.LogitBias),
-			agent.WithFrequencyPenalty(req.FrequencyPenalty),
-			agent.WithPresencePenalty(req.PresencePenalty),
-		)
+		sampleOpts := turnkeyChatSampleOpts(req, s.plan.ContextBudgetTokens)
 		if req.Fak != nil {
 			sampleOpts = append(sampleOpts, agent.WithNativeInferenceReceipt(req.Fak.NativeInferenceReceipt))
 		}
