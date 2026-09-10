@@ -12,6 +12,20 @@ import (
 
 type qwen35IdentityBackend struct{ compute.Backend }
 
+type namedIdentityBackend struct {
+	compute.Backend
+	name string
+}
+
+func (b *namedIdentityBackend) Name() string { return b.name }
+
+type pathIdentityBackend struct {
+	*namedIdentityBackend
+	path string
+}
+
+func (b *pathIdentityBackend) Qwen35GDNPath() string { return b.path }
+
 func (b *qwen35IdentityBackend) Name() string { return "cuda" }
 func (*qwen35IdentityBackend) Qwen35GDNPath() string {
 	return model.Qwen35GDNCUDAPath
@@ -33,6 +47,46 @@ func TestInKernelExecutionIdentityQwen35CUDA(t *testing.T) {
 	backend, path := p.executionIdentity()
 	if backend != "cuda" || path != model.Qwen35GDNCUDAPath {
 		t.Fatalf("executionIdentity() = backend=%q path=%q, want cuda/%q", backend, path, model.Qwen35GDNCUDAPath)
+	}
+}
+
+func TestInKernelExecutionIdentityQwen35VulkanUsesBackendMarker(t *testing.T) {
+	m := model.NewSynthetic(model.Config{LayerTypes: []string{"linear_attention"}})
+	backend := &pathIdentityBackend{
+		namedIdentityBackend: &namedIdentityBackend{Backend: compute.Default(), name: "vulkan"},
+		path:                 model.Qwen35GDNVulkanPath,
+	}
+	gotBackend, gotPath := (&InKernelPlanner{m: m, backend: backend}).executionIdentity()
+	if gotBackend != "vulkan" || gotPath != model.Qwen35GDNVulkanPath {
+		t.Fatalf("executionIdentity() = backend=%q path=%q, want vulkan/%q", gotBackend, gotPath, model.Qwen35GDNVulkanPath)
+	}
+}
+
+func TestInKernelExecutionIdentityQwen35UnqualifiedDeviceStaysGeneric(t *testing.T) {
+	m := model.NewSynthetic(model.Config{LayerTypes: []string{"linear_attention"}})
+	tests := []struct {
+		name    string
+		backend compute.Backend
+	}{
+		{
+			name:    "markerless",
+			backend: &namedIdentityBackend{Backend: compute.Default(), name: "vulkan"},
+		},
+		{
+			name: "unknown marker",
+			backend: &pathIdentityBackend{
+				namedIdentityBackend: &namedIdentityBackend{Backend: compute.Default(), name: "vulkan"},
+				path:                 "vulkan/qwen35-gdn-unknown-v0",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotBackend, gotPath := (&InKernelPlanner{m: m, backend: tt.backend}).executionIdentity()
+			if gotBackend != "vulkan" || gotPath != "device/generic" {
+				t.Fatalf("executionIdentity() = backend=%q path=%q, want vulkan/device/generic", gotBackend, gotPath)
+			}
+		})
 	}
 }
 
