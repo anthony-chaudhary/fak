@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,8 +51,25 @@ func TestOpencodeLauncherProbeWiring(t *testing.T) {
 	if !strings.Contains(out, "--pure") {
 		t.Errorf("expected --pure in dry-run stdout: %s", out)
 	}
-	if !strings.Contains(out, "--dangerously-skip-permissions") {
-		t.Errorf("expected --dangerously-skip-permissions for unattended probe in dry-run stdout: %s", out)
+	if strings.Contains(out, "--dangerously-skip-permissions") {
+		t.Errorf("unexpected retired --dangerously-skip-permissions flag in dry-run stdout: %s", out)
+	}
+}
+
+func TestOpencodeLauncherSkipPermissionsFalsePreservesNativePrompts(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	var stdout, stderr bytes.Buffer
+	code := runOpencode(&stdout, &stderr, []string{
+		"--dry-run",
+		"--probe", "say hello from test",
+		"--skip-permissions=false",
+	})
+	if code != 0 {
+		t.Fatalf("runOpencode returned %d, stderr: %s", code, stderr.String())
+	}
+	if out := stdout.String(); strings.Contains(out, "--auto") || strings.Contains(out, "--dangerously-skip-permissions") {
+		t.Fatalf("--skip-permissions=false emitted an OpenCode permission bypass flag: %s", out)
 	}
 }
 
@@ -213,4 +232,97 @@ func TestOpencodeLauncherVerifiesSnapshotWarning(t *testing.T) {
 	if strings.Contains(stderr.String(), "warning:") {
 		t.Fatalf("expected warning to be suppressed with --quiet, got: %s", stderr.String())
 	}
+}
+
+func TestOpencodeLauncherModelDefault(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	var stdout, stderr bytes.Buffer
+	args := []string{"--dry-run", "--split", "off"}
+	code := runOpencode(&stdout, &stderr, args)
+	if code != 0 {
+		t.Fatalf("runOpencode returned %d, stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "--model") {
+		t.Errorf("expected --model in dry-run stdout: %s", out)
+	}
+}
+
+func TestOpencodeLauncherAutoDetectedModelWiring(t *testing.T) {
+	t.Run("buildOpencodeLaunchArgv wires detected model", func(t *testing.T) {
+		opts := opencodeLaunchOptions{
+			splitMode:  "off",
+			splitWhere: "bottom",
+			model:      "qwen2.5-coder:7b",
+		}
+		argv := buildOpencodeLaunchArgv("fak", opts)
+		foundModel := false
+		for i, arg := range argv {
+			if arg == "--model" && i+1 < len(argv) && argv[i+1] == "qwen2.5-coder:7b" {
+				foundModel = true
+				break
+			}
+		}
+		if !foundModel {
+			t.Errorf("buildOpencodeLaunchArgv missing '--model qwen2.5-coder:7b', got argv: %v", argv)
+		}
+	})
+
+	t.Run("buildOpencodeLaunchArgv omits model flag when empty", func(t *testing.T) {
+		opts := opencodeLaunchOptions{
+			splitMode:  "off",
+			splitWhere: "bottom",
+			model:      "",
+		}
+		argv := buildOpencodeLaunchArgv("fak", opts)
+		for _, arg := range argv {
+			if arg == "--model" {
+				t.Errorf("buildOpencodeLaunchArgv unexpectedly included '--model' when model was empty: %v", argv)
+			}
+		}
+	})
+
+	t.Run("runOpencode auto-detects local backend model", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/tags" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"models":[{"name":"qwen2.5-coder:7b"}]}`))
+				return
+			}
+			http.NotFound(w, r)
+		}))
+		defer ts.Close()
+
+		t.Setenv("OLLAMA_HOST", ts.URL)
+		t.Setenv("OPENAI_API_KEY", "")
+
+		var stdout, stderr bytes.Buffer
+		args := []string{"--dry-run", "--split", "off"}
+		code := runOpencode(&stdout, &stderr, args)
+		if code != 0 {
+			t.Fatalf("runOpencode returned %d, stderr: %s", code, stderr.String())
+		}
+		out := stdout.String()
+		if !strings.Contains(out, "--model qwen2.5-coder:7b") {
+			t.Errorf("expected '--model qwen2.5-coder:7b' in dry-run stdout: %s", out)
+		}
+		errOut := stderr.String()
+		if !strings.Contains(errOut, "auto-connected to local Ollama") || !strings.Contains(errOut, "qwen2.5-coder:7b") {
+			t.Errorf("expected auto-connection diagnostics in stderr: %s", errOut)
+		}
+	})
+
+	t.Run("runOpencode with explicit model flag overrides auto-detection", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		args := []string{"--dry-run", "--split", "off", "--model", "custom-model:32b"}
+		code := runOpencode(&stdout, &stderr, args)
+		if code != 0 {
+			t.Fatalf("runOpencode returned %d, stderr: %s", code, stderr.String())
+		}
+		out := stdout.String()
+		if !strings.Contains(out, "--model custom-model:32b") {
+			t.Errorf("expected '--model custom-model:32b' in dry-run stdout: %s", out)
+		}
+	})
 }

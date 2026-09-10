@@ -191,3 +191,19 @@ func TestGuardStartupProfileRowsRenderForFullAndLaunchFailure(t *testing.T) {
 		}
 	}
 }
+
+func TestGuardStartupReportCarriesOpenCodeNote(t *testing.T) {
+	view := guardStartupView{
+		opencodeInstall: openCodeConfigInstall{
+			Applied:    true,
+			ProviderID: "fak",
+			BaseURL:    "http://127.0.0.1:8080/v1",
+			Model:      "fak/qwen38:27b",
+		},
+	}
+	report := renderGuardStartupReport(view)
+	want := "fak guard: OpenCode session wired via OPENCODE_CONFIG_CONTENT (provider=fak, base_url=http://127.0.0.1:8080/v1, model=fak/qwen38:27b) — root settings unaffected\n"
+	if !strings.Contains(report, want) {
+		t.Fatalf("startup report missing OpenCode note:\nwant: %q\ngot:\n%s", want, report)
+	}
+}
