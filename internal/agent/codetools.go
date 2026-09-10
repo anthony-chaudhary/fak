@@ -2,12 +2,91 @@ package agent
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
+	"strings"
 	"sync"
 	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/codetools"
 )
+
+// codeReadObservations owns the optimistic-concurrency versions learned by one
+// RunArm. It deliberately captures the armed toolset and keeps no process-global
+// version state, so a parent, child, or later run must perform its own Read.
+type codeReadObservations struct {
+	tools    *codetools.Toolset
+	versions map[string]string
+}
+
+func newCodeReadObservations() *codeReadObservations {
+	tools := armedCodeTools.Load()
+	if tools == nil {
+		return nil
+	}
+	return &codeReadObservations{tools: tools, versions: make(map[string]string)}
+}
+
+func (o *codeReadObservations) bind(tool, rawArgs string) string {
+	if o == nil || o.tools == nil {
+		return rawArgs
+	}
+	key, ok := o.tools.MutationObservationKey(tool, []byte(rawArgs))
+	if !ok {
+		return rawArgs
+	}
+	version, ok := o.versions[key]
+	if !ok {
+		return rawArgs
+	}
+	bound, ok := codetools.BindObservedVersion(tool, []byte(rawArgs), version)
+	if !ok {
+		return rawArgs
+	}
+	return string(bound)
+}
+
+func (o *codeReadObservations) commit(tool, rawArgs, content string, failed, denied bool) {
+	if o == nil || o.tools == nil {
+		return
+	}
+	switch tool {
+	case codetools.ToolRead:
+		if failed || denied {
+			return
+		}
+		var result struct {
+			FilePath string `json:"file_path"`
+			Version  string `json:"version"`
+		}
+		if json.Unmarshal([]byte(content), &result) != nil || !isFullFileVersion(result.Version) {
+			return
+		}
+		key, ok := o.tools.ReadObservationKey(result.FilePath)
+		if ok {
+			o.versions[key] = result.Version
+		}
+	case codetools.ToolWrite, codetools.ToolEdit:
+		key, ok := o.tools.MutationObservationKey(tool, []byte(rawArgs))
+		if !ok {
+			return
+		}
+		// A successful mutation creates a new version that was not observed by Read.
+		// A stale refusal proves this observation can no longer authorize a retry.
+		if (!failed && !denied) || strings.Contains(content, codetools.CodeStaleVersion) {
+			delete(o.versions, key)
+		}
+	}
+}
+
+func isFullFileVersion(version string) bool {
+	if !strings.HasPrefix(version, "fv1:") || len(version) != len("fv1:")+64 {
+		return false
+	}
+	_, err := hex.DecodeString(strings.TrimPrefix(version, "fv1:"))
+	return err == nil
+}
 
 // codetools.go — arming the kernel-mediated coding filesystem tools (Read/Write/Edit/Grep/Glob) on the
 // owned loop (#6703, child of #6658).

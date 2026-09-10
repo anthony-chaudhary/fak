@@ -578,3 +578,226 @@ func TestIntegratedCodeToolWitnessArtifact(t *testing.T) {
 		t.Fatalf("process=%q", processed)
 	}
 }
+
+// literalCASPlanner deliberately does not call bindLatestCodeToolVersion.
+// The model's literal omission is the behavior under test.
+type literalCASPlanner struct {
+	firstTurn *Completion
+	trace     []traceEvent
+	script    []codeToolScript
+	next      int
+	before    func(int, []Message)
+	messages  []Message
+}
+
+func (p *literalCASPlanner) Model() string { return "literal-cas-witness" }
+func (p *literalCASPlanner) Complete(_ context.Context, messages []Message, _ []ToolDef, _ ...SampleOpt) (*Completion, error) {
+	p.messages = append([]Message(nil), messages...)
+	if p.before != nil {
+		p.before(p.next, messages)
+	}
+	if p.next == 0 && p.firstTurn != nil {
+		p.next++
+		return p.firstTurn, nil
+	}
+	if p.next >= len(p.script) {
+		return &Completion{Message: Message{Content: "done"}}, nil
+	}
+	step := p.script[p.next]
+	p.next++
+	return toolCallTurn(step.tool, step.args), nil
+}
+
+func runLiteralCASLoop(t *testing.T, catalog []ToolDef, p *literalCASPlanner) ArmMetrics {
+	t.Helper()
+	var trace []traceEvent
+	metrics, err := RunArm(context.Background(), p, "Update value.txt as requested using repository code tools.",
+		true, len(p.script)+2, &trace, WithToolCatalog(catalog))
+	if err != nil {
+		t.Fatalf("RunArm: %v", err)
+	}
+	p.trace = append([]traceEvent(nil), trace...)
+	return metrics
+}
+
+func armLiteralCASFixture(t *testing.T) (string, []ToolDef) {
+	t.Helper()
+	// Isolate this fixture from process-global read results left by earlier tests.
+	vdso.Default.BumpWorld()
+	root := t.TempDir()
+	for _, name := range []string{"value.txt", "other.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("old"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	catalog, err := ArmCodeTools(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(DisarmCodeTools)
+	return root, catalog
+}
+
+func assertLiteralCASBytes(t *testing.T, root, name, want string) {
+	t.Helper()
+	got, err := os.ReadFile(filepath.Join(root, name))
+	if err != nil || string(got) != want {
+		t.Fatalf("%s = %q, %v; want %q", name, got, err, want)
+	}
+}
+
+func literalCASToolOutput(messages []Message) string {
+	var out strings.Builder
+	for _, m := range messages {
+		if m.Role == "tool" {
+			out.WriteString(m.Content)
+			out.WriteByte('\n')
+		}
+	}
+	return out.String()
+}
+
+func TestOwnedLoopCASObservationBindsLiteralMissingFields(t *testing.T) {
+	for _, tc := range []struct{ name, tool, args string }{
+		{"write", codetools.ToolWrite, `{"file_path":"value.txt","content":"new"}`},
+		{"overwrite", codetools.ToolWrite, `{"file_path":"value.txt","content":"new","mode":"overwrite"}`},
+		{"upsert", codetools.ToolWrite, `{"file_path":"value.txt","content":"new","mode":"upsert"}`},
+		{"edit", codetools.ToolEdit, `{"file_path":"value.txt","old_string":"old","new_string":"new"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, catalog := armLiteralCASFixture(t)
+			p := &literalCASPlanner{script: []codeToolScript{
+				{codetools.ToolRead, `{"file_path":"./value.txt"}`},
+				{tc.tool, tc.args},
+			}}
+			metrics := runLiteralCASLoop(t, catalog, p)
+			assertLiteralCASBytes(t, root, "value.txt", "new")
+			if metrics.Denies != 0 || metrics.ToolErrors != 0 {
+				t.Fatalf("valid observed mutation refused: %+v; %s", metrics, literalCASToolOutput(p.messages))
+			}
+		})
+	}
+}
+
+func TestOwnedLoopCASObservationPreservesExplicitVersion(t *testing.T) {
+	root, catalog := armLiteralCASFixture(t)
+	p := &literalCASPlanner{script: []codeToolScript{
+		{codetools.ToolRead, `{"file_path":"value.txt"}`},
+		{codetools.ToolWrite, `{"file_path":"value.txt","content":"new","mode":"overwrite","expected_version":"fv1:deliberately-wrong"}`},
+	}}
+	runLiteralCASLoop(t, catalog, p)
+	assertLiteralCASBytes(t, root, "value.txt", "old")
+	if !strings.Contains(literalCASToolOutput(p.messages), codetools.CodeStaleVersion) {
+		t.Fatalf("explicit wrong version was not preserved/refused: %s", literalCASToolOutput(p.messages))
+	}
+}
+
+func TestOwnedLoopCASObservationStillRejectsPeerWrite(t *testing.T) {
+	root, catalog := armLiteralCASFixture(t)
+	p := &literalCASPlanner{script: []codeToolScript{
+		{codetools.ToolRead, `{"file_path":"value.txt"}`},
+		{codetools.ToolWrite, `{"file_path":"value.txt","content":"new"}`},
+	}}
+	p.before = func(turn int, _ []Message) {
+		if turn != 1 {
+			return
+		}
+		if err := os.WriteFile(filepath.Join(root, "value.txt"), []byte("peer"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		vdso.Default.BumpWorld()
+	}
+	runLiteralCASLoop(t, catalog, p)
+	assertLiteralCASBytes(t, root, "value.txt", "peer")
+	if !strings.Contains(literalCASToolOutput(p.messages), codetools.CodeStaleVersion) {
+		t.Fatalf("concurrent write not reported stale: %s", literalCASToolOutput(p.messages))
+	}
+}
+
+func TestOwnedLoopCASObservationIsPathBound(t *testing.T) {
+	root, catalog := armLiteralCASFixture(t)
+	p := &literalCASPlanner{script: []codeToolScript{
+		{codetools.ToolRead, `{"file_path":"value.txt"}`},
+		{codetools.ToolWrite, `{"file_path":"other.txt","content":"new"}`},
+	}}
+	runLiteralCASLoop(t, catalog, p)
+	assertLiteralCASBytes(t, root, "value.txt", "old")
+	assertLiteralCASBytes(t, root, "other.txt", "old")
+}
+
+func TestOwnedLoopCASObservationDoesNotCrossRunArm(t *testing.T) {
+	root, catalog := armLiteralCASFixture(t)
+	parent := &literalCASPlanner{script: []codeToolScript{{codetools.ToolRead, `{"file_path":"value.txt"}`}}}
+	runLiteralCASLoop(t, catalog, parent)
+	child := &literalCASPlanner{script: []codeToolScript{{codetools.ToolWrite, `{"file_path":"value.txt","content":"new"}`}}}
+	runLiteralCASLoop(t, catalog, child)
+	assertLiteralCASBytes(t, root, "value.txt", "old")
+}
+
+func TestOwnedLoopCASObservationRejectsUnknownMutationFields(t *testing.T) {
+	root, catalog := armLiteralCASFixture(t)
+	p := &literalCASPlanner{script: []codeToolScript{
+		{codetools.ToolRead, `{"file_path":"value.txt"}`},
+		{codetools.ToolEdit, `{"file_path":"value.txt","old_string":"old","new_string":"new","new_version":"made-up"}`},
+	}}
+	runLiteralCASLoop(t, catalog, p)
+	assertLiteralCASBytes(t, root, "value.txt", "old")
+	if !strings.Contains(literalCASToolOutput(p.messages), "MALFORMED") {
+		t.Fatalf("unknown fields not refused: %s", literalCASToolOutput(p.messages))
+	}
+}
+
+func TestOwnedLoopCASObservationPreservesExplicitEmptyFields(t *testing.T) {
+	for _, tc := range []struct{ name, tool, args string }{
+		{"write_empty_version", codetools.ToolWrite, `{"file_path":"value.txt","content":"new","mode":"overwrite","expected_version":""}`},
+		{"write_null_version", codetools.ToolWrite, `{"file_path":"value.txt","content":"new","mode":"overwrite","expected_version":null}`},
+		{"write_empty_mode", codetools.ToolWrite, `{"file_path":"value.txt","content":"new","mode":""}`},
+		{"write_null_mode", codetools.ToolWrite, `{"file_path":"value.txt","content":"new","mode":null}`},
+		{"edit_empty_version", codetools.ToolEdit, `{"file_path":"value.txt","old_string":"old","new_string":"new","expected_version":""}`},
+		{"edit_null_version", codetools.ToolEdit, `{"file_path":"value.txt","old_string":"old","new_string":"new","expected_version":null}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, catalog := armLiteralCASFixture(t)
+			p := &literalCASPlanner{script: []codeToolScript{
+				{codetools.ToolRead, `{"file_path":"value.txt"}`},
+				{tc.tool, tc.args},
+			}}
+			runLiteralCASLoop(t, catalog, p)
+			assertLiteralCASBytes(t, root, "value.txt", "old")
+			found := false
+			for _, event := range p.trace {
+				if event.Tool == tc.tool {
+					found = true
+					if event.RawArgs != tc.args {
+						t.Fatalf("explicit fields changed before dispatch: got %s want %s", event.RawArgs, tc.args)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("missing mutation dispatch witness")
+			}
+			output := literalCASToolOutput(p.messages)
+			if !strings.Contains(output, "MALFORMED") && !strings.Contains(output, codetools.CodeStaleVersion) {
+				t.Fatalf("explicit invalid field was not refused: %s", output)
+			}
+		})
+	}
+}
+
+func TestOwnedLoopCASObservationBindsReadThenWriteInSameTurn(t *testing.T) {
+	root, catalog := armLiteralCASFixture(t)
+	readArgs := `{"file_path":"value.txt"}`
+	writeArgs := `{"file_path":"value.txt","content":"new"}`
+	p := &literalCASPlanner{
+		script: []codeToolScript{{codetools.ToolRead, readArgs}},
+		firstTurn: &Completion{Message: Message{Role: RoleAssistant, ToolCalls: []ToolCall{
+			{ID: "read-first", Function: Func{Name: codetools.ToolRead, Arguments: readArgs}},
+			{ID: "write-after-read", Function: Func{Name: codetools.ToolWrite, Arguments: writeArgs}},
+		}}},
+	}
+	metrics := runLiteralCASLoop(t, catalog, p)
+	assertLiteralCASBytes(t, root, "value.txt", "new")
+	if metrics.Denies != 0 || metrics.ToolErrors != 0 {
+		t.Fatalf("same-turn observed mutation refused: %+v; %s", metrics, literalCASToolOutput(p.messages))
+	}
+}

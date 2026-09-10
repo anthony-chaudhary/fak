@@ -182,6 +182,94 @@ func decodeArgs(body []byte, v any) *Refusal {
 	return nil
 }
 
+// ReadObservationKey returns the same canonical mutation identity used by the
+// guarded filesystem engine. Callers may use it to scope an observation without
+// reproducing platform-specific path, case, or symlink normalization.
+func (t *Toolset) ReadObservationKey(path string) (string, bool) {
+	target, refusal := t.resolveMutation(path)
+	if refusal != nil {
+		return "", false
+	}
+	return target.Key, true
+}
+
+// MutationObservationKey strictly decodes a Write or Edit and resolves its target
+// through the engine's canonical mutation path. Unknown fields and malformed paths
+// return false, leaving the original call for the normal closed validation path.
+func (t *Toolset) MutationObservationKey(tool string, body []byte) (string, bool) {
+	var path string
+	switch tool {
+	case ToolWrite:
+		var args WriteArgs
+		if decodeArgs(body, &args) != nil {
+			return "", false
+		}
+		path = args.FilePath
+	case ToolEdit:
+		var args EditArgs
+		if decodeArgs(body, &args) != nil {
+			return "", false
+		}
+		path = args.FilePath
+	default:
+		return "", false
+	}
+	if strings.TrimSpace(path) == "" {
+		return "", false
+	}
+	return t.ReadObservationKey(path)
+}
+
+// BindObservedVersion fills only fields omitted by a model after a successful Read.
+// Explicit mode and version semantics stay authoritative, and strict decode ensures
+// unknown fields are never erased by the rewrite.
+func BindObservedVersion(tool string, body []byte, version string) ([]byte, bool) {
+	if version == "" {
+		return body, false
+	}
+	switch tool {
+	case ToolWrite:
+		var args WriteArgs
+		if decodeArgs(body, &args) != nil || jsonFieldPresent(body, "expected_version") {
+			return body, false
+		}
+		switch args.Mode {
+		case "":
+			if jsonFieldPresent(body, "mode") {
+				return body, false
+			}
+			args.Mode = "overwrite"
+		case "overwrite", "upsert":
+		case "create":
+			return body, false
+		default:
+			return body, false
+		}
+		args.ExpectedVersion = version
+		bound, err := json.Marshal(args)
+		return bound, err == nil
+	case ToolEdit:
+		var args EditArgs
+		if decodeArgs(body, &args) != nil || jsonFieldPresent(body, "expected_version") {
+			return body, false
+		}
+		args.ExpectedVersion = version
+		bound, err := json.Marshal(args)
+		return bound, err == nil
+	default:
+		return body, false
+	}
+}
+
+func jsonFieldPresent(body []byte, field string) bool {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(body, &fields) != nil {
+		return false
+	}
+	_, ok := fields[field]
+	return ok
+}
+
 // ToolDef is one entry in the catalog a caller advertises to a planner: the tool's name,
 // what it does, its JSON-Schema parameters, and whether it is read-only. ReadOnly is part
 // of the DEFINITION rather than a caller's annotation because it is the same bit CallMeta
@@ -202,7 +290,7 @@ func Catalog() []ToolDef {
 	return []ToolDef{
 		{
 			Name:        ToolRead,
-			Description: "Read a file from the workspace. Returns content and an opaque version for guarded mutation, optionally windowed by line offset and limit.",
+			Description: "Read a file from the workspace. Returns content and an opaque version for guarded mutation, optionally windowed by line offset and limit. In the same agent run, omit expected_version from a later Write or Edit so the exact observed version is bound automatically.",
 			Parameters: json.RawMessage(`{"type":"object","properties":{` +
 				`"file_path":{"type":"string","description":"workspace-relative or absolute path inside the workspace"},` +
 				`"offset":{"type":"integer","description":"1-based first line to return"},` +
@@ -223,14 +311,14 @@ func Catalog() []ToolDef {
 		},
 		{
 			Name:        ToolWrite,
-			Description: "Atomically create or replace a workspace file. overwrite requires the version returned by Read; upsert creates when absent and requires that version when replacing.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"content":{"type":"string"},"mode":{"type":"string","enum":["create","overwrite","upsert"]},"expected_version":{"type":"string","description":"opaque version returned by Read; required for overwrite and for upsert when the target exists"}},"required":["file_path","content","mode"],"additionalProperties":false}`),
+			Description: "Atomically create or replace a workspace file. After Read in the same agent run, omit mode and expected_version to overwrite with the exact observed version. Direct create calls require mode=create and no version; direct overwrite calls require mode and version.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"content":{"type":"string"},"mode":{"type":"string","enum":["create","overwrite","upsert"]},"expected_version":{"type":"string","description":"opaque version returned by Read; omit after a successful same-run Read"}},"required":["file_path","content"],"additionalProperties":false}`),
 			ReadOnly:    false,
 		},
 		{
 			Name:        ToolEdit,
-			Description: "Atomically replace exact text in the file version returned by Read, or refuse when that observation is stale.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"},"expected_version":{"type":"string","description":"opaque version returned by Read"}},"required":["file_path","old_string","new_string","expected_version"],"additionalProperties":false}`),
+			Description: "Atomically replace exact text in a file. After Read in the same agent run, omit expected_version so the exact observed version is bound automatically; direct calls must provide it.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"},"expected_version":{"type":"string","description":"opaque version returned by Read; omit after a successful same-run Read"}},"required":["file_path","old_string","new_string"],"additionalProperties":false}`),
 			ReadOnly:    false,
 		},
 		{
