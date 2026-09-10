@@ -184,6 +184,7 @@ type ServingTrackConfig struct {
 	Model      string       `json:"model,omitempty"`
 	APIKey     string       `json:"-"`
 	APIKeyEnv  string       `json:"api_key_env,omitempty"`
+	ProjectArm string       `json:"project_arm,omitempty"`
 	Replicas   int          `json:"replicas,omitempty"`
 }
 
@@ -231,27 +232,39 @@ type ServingTrackResult struct {
 	Reason     string          `json:"reason,omitempty"`
 	BaseURL    string          `json:"base_url,omitempty"`
 	MetricsURL string          `json:"metrics_url,omitempty"`
+	ProjectArm string          `json:"project_arm,omitempty"`
 	PlanScript string          `json:"plan_script,omitempty"`
 	Samples    []ServingSample `json:"samples,omitempty"`
 	Stats      ServingStats    `json:"stats"`
 }
 
+// ServingUsage retains only token counts observed on this request's response.
+// Every field is nullable so an omitted provider counter stays distinguishable
+// from a witnessed zero.
+type ServingUsage struct {
+	PromptTokens     *int `json:"prompt_tokens"`
+	CompletionTokens *int `json:"completion_tokens"`
+	TotalTokens      *int `json:"total_tokens"`
+	CachedTokens     *int `json:"cached_tokens"`
+}
+
 type ServingSample struct {
-	ID                    string    `json:"id"`
-	Status                string    `json:"status"`
-	Error                 string    `json:"error,omitempty"`
-	ErrorClass            string    `json:"error_class,omitempty"`
-	HTTPStatus            int       `json:"http_status,omitempty"`
-	StreamMode            string    `json:"stream_mode,omitempty"`
-	TTFTMillis            *float64  `json:"ttft_ms,omitempty"`
-	ITLMillis             []float64 `json:"itl_ms,omitempty"`
-	TPOTMillis            *float64  `json:"tpot_ms,omitempty"`
-	EndToEndMillis        float64   `json:"end_to_end_ms"`
-	OutputEvents          int       `json:"output_events"`
-	OutputTokenEstimate   int       `json:"output_token_estimate"`
-	OutputTokensExact     *int      `json:"output_tokens_exact,omitempty"`
-	OutputTokenCountBasis string    `json:"output_token_count_basis,omitempty"`
-	PromptTokensEstimate  int       `json:"prompt_tokens_estimate"`
+	ID                    string        `json:"id"`
+	Status                string        `json:"status"`
+	Error                 string        `json:"error,omitempty"`
+	ErrorClass            string        `json:"error_class,omitempty"`
+	HTTPStatus            int           `json:"http_status,omitempty"`
+	StreamMode            string        `json:"stream_mode,omitempty"`
+	TTFTMillis            *float64      `json:"ttft_ms,omitempty"`
+	ITLMillis             []float64     `json:"itl_ms,omitempty"`
+	TPOTMillis            *float64      `json:"tpot_ms,omitempty"`
+	EndToEndMillis        float64       `json:"end_to_end_ms"`
+	OutputEvents          int           `json:"output_events"`
+	OutputTokenEstimate   int           `json:"output_token_estimate"`
+	OutputTokensExact     *int          `json:"output_tokens_exact,omitempty"`
+	OutputTokenCountBasis string        `json:"output_token_count_basis,omitempty"`
+	PromptTokensEstimate  int           `json:"prompt_tokens_estimate"`
+	Usage                 *ServingUsage `json:"usage"`
 }
 
 type ServingStats struct {
@@ -380,6 +393,7 @@ func measureTrack(ctx context.Context, cfg ServingParityConfig, tc ServingTrackC
 		Track:      track,
 		BaseURL:    tc.BaseURL,
 		MetricsURL: tc.MetricsURL,
+		ProjectArm: tc.ProjectArm,
 		PlanScript: script,
 	}
 	if strings.TrimSpace(tc.BaseURL) == "" {
@@ -461,6 +475,9 @@ func MeasureSSERequest(ctx context.Context, client *http.Client, tc ServingTrack
 		"max_tokens":  req.MaxOutputTokens,
 		"temperature": 0,
 		"stream":      true,
+		"stream_options": map[string]bool{
+			"include_usage": true,
+		},
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -479,6 +496,9 @@ func MeasureSSERequest(ctx context.Context, client *http.Client, tc ServingTrack
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
+	if arm := strings.TrimSpace(tc.ProjectArm); arm != "" {
+		httpReq.Header.Set("X-Fak-Project-Arm", arm)
+	}
 	if key := tc.APIKey; key != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+key)
 	} else if tc.APIKeyEnv != "" {
@@ -514,7 +534,8 @@ func MeasureSSERequest(ctx context.Context, client *http.Client, tc ServingTrack
 		sample.StreamMode = "non_sse"
 		sample.EndToEndMillis = millis(time.Since(start))
 		sample.Status = "ok"
-		content, exactTokens := completionContentAndUsage(b)
+		content, exactTokens, usage := completionContentAndUsage(b)
+		sample.Usage = usage
 		if exactTokens != nil {
 			sample.OutputTokensExact = exactTokens
 			sample.OutputTokenEstimate = *exactTokens
@@ -549,6 +570,9 @@ func MeasureSSERequest(ctx context.Context, client *http.Client, tc ServingTrack
 		}
 		if chunk.OutputTokens != nil {
 			sample.OutputTokensExact = chunk.OutputTokens
+		}
+		if chunk.Usage != nil {
+			sample.Usage = chunk.Usage
 		}
 		if !chunk.HasContent {
 			continue
@@ -595,6 +619,39 @@ type servingStreamChunk struct {
 	Content      string
 	HasContent   bool
 	OutputTokens *int
+	Usage        *ServingUsage
+}
+
+type servingUsageWire struct {
+	PromptTokens        *int `json:"prompt_tokens"`
+	InputTokens         *int `json:"input_tokens"`
+	CompletionTokens    *int `json:"completion_tokens"`
+	OutputTokens        *int `json:"output_tokens"`
+	TotalTokens         *int `json:"total_tokens"`
+	PromptTokensDetails *struct {
+		CachedTokens *int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+	InputTokensDetails *struct {
+		CachedTokens *int `json:"cached_tokens"`
+	} `json:"input_tokens_details"`
+}
+
+func (u *servingUsageWire) observed() *ServingUsage {
+	if u == nil {
+		return nil
+	}
+	cached := (*int)(nil)
+	if u.PromptTokensDetails != nil && u.PromptTokensDetails.CachedTokens != nil {
+		cached = intPtr(*u.PromptTokensDetails.CachedTokens)
+	} else if u.InputTokensDetails != nil && u.InputTokensDetails.CachedTokens != nil {
+		cached = intPtr(*u.InputTokensDetails.CachedTokens)
+	}
+	return &ServingUsage{
+		PromptTokens:     usageTokenCount(u.PromptTokens, u.InputTokens),
+		CompletionTokens: usageTokenCount(u.CompletionTokens, u.OutputTokens),
+		TotalTokens:      copyTokenCount(u.TotalTokens),
+		CachedTokens:     cached,
+	}
 }
 
 func streamChunk(data string) (servingStreamChunk, bool) {
@@ -605,15 +662,16 @@ func streamChunk(data string) (servingStreamChunk, bool) {
 			} `json:"delta"`
 			Text string `json:"text"`
 		} `json:"choices"`
-		Usage struct {
-			CompletionTokens *int `json:"completion_tokens"`
-			OutputTokens     *int `json:"output_tokens"`
-		} `json:"usage"`
+		Usage *servingUsageWire `json:"usage"`
 	}
 	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 		return servingStreamChunk{Content: data, HasContent: true}, true
 	}
-	out := servingStreamChunk{OutputTokens: usageTokenCount(chunk.Usage.CompletionTokens, chunk.Usage.OutputTokens)}
+	usage := chunk.Usage.observed()
+	out := servingStreamChunk{Usage: usage}
+	if usage != nil {
+		out.OutputTokens = copyTokenCount(usage.CompletionTokens)
+	}
 	for _, ch := range chunk.Choices {
 		if ch.Delta.Content != "" {
 			out.Content = ch.Delta.Content
@@ -626,10 +684,10 @@ func streamChunk(data string) (servingStreamChunk, bool) {
 			return out, true
 		}
 	}
-	return out, out.OutputTokens != nil
+	return out, out.OutputTokens != nil || out.Usage != nil
 }
 
-func completionContentAndUsage(data []byte) (string, *int) {
+func completionContentAndUsage(data []byte) (string, *int, *ServingUsage) {
 	var doc struct {
 		Choices []struct {
 			Message struct {
@@ -637,20 +695,21 @@ func completionContentAndUsage(data []byte) (string, *int) {
 			} `json:"message"`
 			Text string `json:"text"`
 		} `json:"choices"`
-		Usage struct {
-			CompletionTokens *int `json:"completion_tokens"`
-			OutputTokens     *int `json:"output_tokens"`
-		} `json:"usage"`
+		Usage *servingUsageWire `json:"usage"`
 	}
 	if err := json.Unmarshal(data, &doc); err != nil {
-		return string(data), nil
+		return string(data), nil, nil
 	}
 	var b strings.Builder
 	for _, ch := range doc.Choices {
 		b.WriteString(ch.Message.Content)
 		b.WriteString(ch.Text)
 	}
-	return b.String(), usageTokenCount(doc.Usage.CompletionTokens, doc.Usage.OutputTokens)
+	usage := doc.Usage.observed()
+	if usage == nil {
+		return b.String(), nil, nil
+	}
+	return b.String(), copyTokenCount(usage.CompletionTokens), usage
 }
 
 func usageTokenCount(completionTokens, outputTokens *int) *int {
@@ -661,6 +720,13 @@ func usageTokenCount(completionTokens, outputTokens *int) *int {
 		return intPtr(*outputTokens)
 	}
 	return nil
+}
+
+func copyTokenCount(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	return intPtr(*value)
 }
 
 func classifyServingRequestError(err error) string {

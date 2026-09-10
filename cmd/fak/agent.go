@@ -14,7 +14,6 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
-	"github.com/anthony-chaudhary/fak/internal/codetools"
 	"github.com/anthony-chaudhary/fak/internal/dropin"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
@@ -408,8 +407,6 @@ func runAgent(argv []string) {
 	if *af.subagents {
 		prof := agent.ResolveSubagentEffortProfile(*af.effort)
 		if prof.SubagentsEnabled {
-			var taskCatalog []agent.ToolDef
-			var taskErr error
 			if isNative {
 				childOpts := []agent.RunOption{
 					agent.WithProvider(*af.provider),
@@ -429,13 +426,13 @@ func runAgent(argv []string) {
 					catalog,
 					adjudicator.Default.PolicySnapshot(),
 				)
-				taskCatalog, taskErr = agent.ArmTaskToolsWithRunner(prof.MaxActiveTasks, prof.MaxBacklogTasks, runner)
+				runOpts = append(runOpts, agent.WithChildTaskRunner(prof.MaxActiveTasks, prof.MaxBacklogTasks, runner))
 			} else {
-				taskCatalog, taskErr = agent.ArmTaskToolsWithLimits(prof.MaxActiveTasks, prof.MaxBacklogTasks)
+				taskCatalog, taskErr := agent.ArmTaskToolsWithLimits(prof.MaxActiveTasks, prof.MaxBacklogTasks)
+				must(taskErr)
+				defer agent.DisarmTaskTools()
+				catalog = append(catalog, taskCatalog...)
 			}
-			must(taskErr)
-			defer agent.DisarmTaskTools()
-			catalog = append(catalog, taskCatalog...)
 		}
 	}
 	if len(catalog) > 0 {
@@ -548,8 +545,6 @@ func agentEffortRunOptions(af *agentFlags) []agent.RunOption {
 	return opts
 }
 
-const maxNativeChildTurns = 10
-
 type nativeChildPlanner struct {
 	agent.Planner
 	allowed map[string]struct{}
@@ -569,50 +564,11 @@ func (p nativeChildPlanner) Complete(ctx context.Context, messages []agent.Messa
 }
 
 func newNativeChildTaskRunner(planner agent.Planner, maxTurns int, baseOpts []agent.RunOption, parentCatalog []agent.ToolDef, policy adjudicator.Policy) agent.ChildTaskRunner {
-	if maxTurns <= 0 {
-		maxTurns = 1
-	}
-	if maxTurns > maxNativeChildTurns {
-		maxTurns = maxNativeChildTurns
-	}
-	return func(ctx context.Context, req agent.ChildTaskRunRequest) (any, error) {
-		catalog := nativeChildToolCatalog(parentCatalog, req.ReadOnly)
-		allowed := make(map[string]struct{}, len(catalog))
-		for _, def := range catalog {
-			allowed[def.Function.Name] = struct{}{}
-		}
-		childPlanner := nativeChildPlanner{Planner: planner, allowed: allowed}
-		opts := append([]agent.RunOption(nil), baseOpts...)
-		opts = append(opts,
-			agent.WithPolicySnapshot(policy),
-			agent.WithToolCatalog(catalog),
-		)
-		metrics, err := agent.RunArm(ctx, childPlanner, req.Prompt, true, maxTurns, nil, opts...)
-		if err != nil {
-			return nil, err
-		}
-		return metrics.FinalAnswer, nil
-	}
+	return agent.NewNativeChildTaskRunner(planner, maxTurns, baseOpts, parentCatalog, policy)
 }
 
 func nativeChildToolCatalog(parent []agent.ToolDef, readOnly bool) []agent.ToolDef {
-	out := make([]agent.ToolDef, 0, len(parent))
-	for _, def := range parent {
-		name := def.Function.Name
-		switch name {
-		case agent.ToolTaskSpawn, agent.ToolTaskWait, agent.ToolTaskStatus, agent.ToolTaskCancel:
-			continue
-		}
-		if readOnly {
-			switch name {
-			case codetools.ToolRead, codetools.ToolGrep, codetools.ToolGlob:
-			default:
-				continue
-			}
-		}
-		out = append(out, def)
-	}
-	return out
+	return agent.NativeChildToolCatalog(parent, readOnly)
 }
 
 func agentReasoningProfileRunOption(af *agentFlags) agent.RunOption {

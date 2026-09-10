@@ -165,6 +165,7 @@ type TaskState struct {
 	rootCtx     context.Context
 	rootCancel  context.CancelFunc
 	cancels     map[string]context.CancelFunc
+	executions  sync.WaitGroup
 	closed      bool
 }
 
@@ -180,7 +181,14 @@ func NewTaskStateWithRunner(runner ChildTaskRunner) *TaskState {
 }
 
 func newTaskState(runner ChildTaskRunner) *TaskState {
-	rootCtx, rootCancel := context.WithCancel(context.Background())
+	return newTaskStateWithContext(context.Background(), runner)
+}
+
+func newTaskStateWithContext(parent context.Context, runner ChildTaskRunner) *TaskState {
+	if parent == nil {
+		parent = context.Background()
+	}
+	rootCtx, rootCancel := context.WithCancel(parent)
 	return &TaskState{
 		tasks:       make(map[string]*TaskItem),
 		order:       make([]string, 0),
@@ -336,9 +344,11 @@ func (s *TaskState) startTask(taskID string) {
 		SubagentType: item.SubagentType,
 		ReadOnly:     item.ReadOnly,
 	}
+	s.executions.Add(1)
 	s.mu.Unlock()
 
 	go func() {
+		defer s.executions.Done()
 		result, err := runner(ctx, req)
 		_ = s.finishTask(taskID, result, err)
 	}()
@@ -466,6 +476,17 @@ func (s *TaskState) Close() {
 	}
 	s.cancels = make(map[string]context.CancelFunc)
 	s.mu.Unlock()
+}
+
+// closeAndWait is the run-owned cleanup boundary. Close remains non-blocking for
+// legacy callers; a scoped RunArm additionally joins its own admitted runners so
+// no child effects survive the parent invocation.
+func (s *TaskState) closeAndWait() {
+	if s == nil {
+		return
+	}
+	s.Close()
+	s.executions.Wait()
 }
 
 // Wait waits for target child tasks to reach a terminal state or timeout.
@@ -772,7 +793,10 @@ type taskEngine struct {
 func (e *taskEngine) Caps() []abi.Capability { return nil }
 func (e *taskEngine) WeightBearing() bool    { return false }
 
-func (e *taskEngine) getState() *TaskState {
+func (e *taskEngine) getState(ctx context.Context) *TaskState {
+	if st := taskStateFromContext(ctx); st != nil {
+		return st
+	}
 	if e != nil && e.state != nil {
 		return e.state
 	}
@@ -781,7 +805,7 @@ func (e *taskEngine) getState() *TaskState {
 
 func (e *taskEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
 	body, _ := decodeCallArgs(ctx, c.Args)
-	st := e.getState()
+	st := e.getState(ctx)
 	if st == nil {
 		errResp, _ := json.Marshal(map[string]any{"status": "error", "error": "task tools are unarmed"})
 		return engineResult(ctx, c, body, errResp, true, RungNameTask), nil
@@ -846,8 +870,8 @@ type taskToolGate struct{}
 
 func (taskToolGate) Caps() []abi.Capability { return nil }
 
-func (taskToolGate) Adjudicate(_ context.Context, c *abi.ToolCall) abi.Verdict {
-	if c == nil || armedTaskTools.Load() == nil {
+func (taskToolGate) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
+	if c == nil || (taskStateFromContext(ctx) == nil && armedTaskTools.Load() == nil) {
 		return abi.Verdict{Kind: abi.VerdictDefer, By: RungNameTask}
 	}
 	switch c.Tool {
@@ -874,6 +898,76 @@ var (
 	taskEnginesOnce  sync.Once
 	activeTaskEngine *taskEngine
 )
+
+type taskStateContextKey struct{}
+
+type childTaskRunConfig struct {
+	maxActive  int
+	maxBacklog int
+	runner     ChildTaskRunner
+}
+
+// WithChildTaskRunner gives one RunArm invocation its own bounded child task
+// namespace. The state is created when the arm starts, inherited by kernel
+// dispatch through context, and cancelled and joined before the arm returns.
+func WithChildTaskRunner(maxActive, maxBacklog int, runner ChildTaskRunner) RunOption {
+	return func(c *runConfig) {
+		c.childTasks = &childTaskRunConfig{
+			maxActive:  maxActive,
+			maxBacklog: maxBacklog,
+			runner:     runner,
+		}
+		c.taskTools = true
+	}
+}
+
+func (c *runConfig) bindChildTaskState(ctx context.Context) context.Context {
+	if c == nil || c.childTasks == nil {
+		return ctx
+	}
+	st := newTaskStateWithContext(ctx, c.childTasks.runner)
+	st.SetLimits(c.childTasks.maxActive, c.childTasks.maxBacklog)
+	c.taskState = st
+	registerTaskToolRuntime()
+	return withTaskState(ctx, st)
+}
+
+func (c *runConfig) closeChildTaskState() {
+	if c == nil || c.taskState == nil {
+		return
+	}
+	c.taskState.closeAndWait()
+	c.taskState = nil
+}
+
+func withTaskState(ctx context.Context, state *TaskState) context.Context {
+	if state == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, taskStateContextKey{}, state)
+}
+
+func taskStateFromContext(ctx context.Context) *TaskState {
+	if ctx == nil {
+		return nil
+	}
+	state, _ := ctx.Value(taskStateContextKey{}).(*TaskState)
+	return state
+}
+
+func registerTaskToolRuntime() {
+	taskEnginesOnce.Do(func() {
+		activeTaskEngine = &taskEngine{}
+		abi.RegisterEngine(EngineTaskSpawn, activeTaskEngine)
+		abi.RegisterEngine(EngineTaskWait, activeTaskEngine)
+		abi.RegisterEngine(EngineTaskStatus, activeTaskEngine)
+		abi.RegisterEngine(EngineTaskCancel, activeTaskEngine)
+	})
+
+	taskGateOnce.Do(func() {
+		abi.RegisterAdjudicator(taskToolRank, taskToolGate{})
+	})
+}
 
 // SetLimits updates the max active and backlog capacity limits.
 func (s *TaskState) SetLimits(maxActive, maxBacklog int) {
@@ -926,17 +1020,7 @@ func ArmTaskToolsWithRunner(maxActive, maxBacklog int, runner ChildTaskRunner) (
 		old.Close()
 	}
 
-	taskEnginesOnce.Do(func() {
-		activeTaskEngine = &taskEngine{}
-		abi.RegisterEngine(EngineTaskSpawn, activeTaskEngine)
-		abi.RegisterEngine(EngineTaskWait, activeTaskEngine)
-		abi.RegisterEngine(EngineTaskStatus, activeTaskEngine)
-		abi.RegisterEngine(EngineTaskCancel, activeTaskEngine)
-	})
-
-	taskGateOnce.Do(func() {
-		abi.RegisterAdjudicator(taskToolRank, taskToolGate{})
-	})
+	registerTaskToolRuntime()
 
 	return TaskToolCatalog(), nil
 }
@@ -1094,7 +1178,7 @@ func taskToolMeta(tool string) (map[string]string, bool) {
 	case ToolTaskStatus:
 		return map[string]string{
 			"readOnlyHint":   "true",
-			"idempotentHint": "true",
+			"idempotentHint": "false",
 			"consistency":    "BEST_EFFORT",
 		}, true
 	case ToolTaskCancel:
@@ -1114,5 +1198,9 @@ func taskToolAllow() []string {
 	if armedTaskTools.Load() == nil {
 		return nil
 	}
+	return taskToolNames()
+}
+
+func taskToolNames() []string {
 	return []string{ToolTaskSpawn, ToolTaskWait, ToolTaskStatus, ToolTaskCancel}
 }

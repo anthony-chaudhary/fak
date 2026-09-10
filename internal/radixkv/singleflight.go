@@ -42,33 +42,27 @@ type flightPromise struct {
 	logits    []float32
 	err       error
 	followers int
+	waiters   int
+	namespace string
+	tokens    []int
+	sequence  uint64
 }
 
-// PrefixFlightGroup coalesces concurrent prefill computations for identical
-// prompt prefixes across multiple subagents in a fleet (#11633).
-//
-// When an orchestrator launches parallel subagents (e.g. explore, tester, general, worker),
-// 80–95% of their prompt context (system prompt, repo map, instructions, type definitions)
-// is identical. Independent prefills for each subagent trigger redundant GEMM compute blasts,
-// saturating memory bus bandwidth and GPU/host memory.
-//
-// PrefixFlightGroup solves this with a Leader/Follower pattern:
-//  1. The first subagent to request an uncached prefix registers the in-flight promise (Leader)
-//     and executes the prefill pass once.
-//  2. Concurrent subagents requesting the same prefix (Followers) block on the completion
-//     signal (<-ready) instead of issuing duplicate GEMM prefills.
-//  3. Zero-Copy Suffix Forking: Upon completion broadcast, all subagents attach to the shared
-//     physical prefix node and fork their private suffix leaf branches with zero duplicate VRAM.
-//  4. Fault Tolerance: Leader panics, context cancellations, or failures broadcast immediately
-//     so followers never hang.
+// PrefixFlightGroup coordinates concurrent exact-prefix and value-qualified
+// shared-prefix prefills. Tree-backed exact-prefix methods retain node leases;
+// standalone shared-prefix followers receive independently owned KV clones and
+// account for their copy cost. Leader failure or panic wakes every follower.
 type PrefixFlightGroup struct {
-	mu        sync.Mutex
-	treeMu    sync.Mutex
-	tree      *Tree
-	lock      sync.Locker
-	flights   map[string]*flightPromise
-	coalesced atomic.Int64
-	leaders   atomic.Int64
+	mu         sync.Mutex
+	treeMu     sync.Mutex
+	tree       *Tree
+	lock       sync.Locker
+	flights    map[string]*flightPromise
+	shared     map[uint64]*flightPromise
+	nextSeq    uint64
+	coalesced  atomic.Int64
+	leaders    atomic.Int64
+	cloneBytes atomic.Int64
 }
 
 // NewPrefixFlightGroup creates a new prefix singleflight group attached to the given tree.
@@ -213,13 +207,213 @@ func (g *PrefixFlightGroup) CoalesceNS(ctx context.Context, ns string, prefix []
 	if node == nil {
 		return nil, nil, leader, nil
 	}
-	kv := node.KV()
-	if !leader && kv != nil {
-		kv = kv.Clone()
-	}
+	kv := node.CloneKV()
 	logits := node.Logits()
 	g.Done(node)
 	return kv, logits, leader, nil
+}
+
+// CoalesceSharedPrefixNS coalesces a cold prefill with a concurrent request in
+// the same namespace when the shared work justifies waiting for the leader's
+// divergent suffix. Unlike CoalesceNS, prompts need not be identical.
+//
+// A follower joins only when the common prefix is at least minShared tokens and
+// the leader-only suffix is no longer than that common prefix. Among eligible
+// leaders it prefers the greatest common-minus-divergent surplus, then the
+// longer common prefix, then the earlier registration. The leader receives the
+// live result returned by fn with matched == 0. A follower receives an
+// independently owned KV clone truncated to matched tokens. Partial matches
+// never return logits; exact matches receive a logits copy.
+func (g *PrefixFlightGroup) CoalesceSharedPrefixNS(ctx context.Context, ns string, tokens []int, minShared int, fn PrefillFunc) (*model.KVCache, []float32, int, bool, error) {
+	if len(tokens) == 0 {
+		return nil, nil, 0, false, nil
+	}
+	if minShared < 1 {
+		minShared = 1
+	}
+
+	retries := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, 0, false, err
+		}
+		g.mu.Lock()
+		if g.shared == nil {
+			g.shared = make(map[uint64]*flightPromise)
+		}
+		candidate, matched := g.bestSharedPrefixFlightLocked(ns, tokens, minShared)
+		if candidate == nil {
+			g.nextSeq++
+			candidate = &flightPromise{
+				ready:     make(chan struct{}),
+				err:       ErrFlightAbandoned,
+				namespace: ns,
+				tokens:    append([]int(nil), tokens...),
+				sequence:  g.nextSeq,
+			}
+			g.shared[candidate.sequence] = candidate
+			g.leaders.Add(1)
+			g.mu.Unlock()
+
+			kv, logits, err := g.runSharedPrefixLeader(ctx, candidate, fn)
+			return kv, logits, 0, true, err
+		}
+
+		candidate.followers++
+		candidate.waiters++
+		g.coalesced.Add(1)
+		ready := candidate.ready
+		g.mu.Unlock()
+
+		cancelled := false
+		select {
+		case <-ctx.Done():
+			cancelled = true
+		case <-ready:
+		}
+		g.releaseSharedPrefixWaiter(candidate)
+		if cancelled {
+			return nil, nil, 0, false, ctx.Err()
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, nil, 0, false, err
+		}
+
+		if candidate.err != nil {
+			if retries == 0 && ctx.Err() == nil {
+				retries++
+				continue
+			}
+			return nil, nil, 0, false, candidate.err
+		}
+		if candidate.kv == nil || candidate.kv.Len() < matched {
+			return nil, nil, 0, false, fmt.Errorf("%w: incomplete shared-prefix KV", ErrFlightFailed)
+		}
+		// A recurrent cache cannot discard the leader-only suffix safely. Fail
+		// open to the caller's cold path without claiming a realized match.
+		if matched < candidate.kv.Len() && candidate.kv.CanEvict() != nil {
+			return nil, nil, 0, false, nil
+		}
+
+		kv := candidate.kv.Clone()
+		g.cloneBytes.Add(kv.ClonePayloadBytes())
+		if matched < kv.Len() {
+			want := kv.Len() - matched
+			removed, evictErr := kv.TryEvict(matched, want)
+			if evictErr != nil || removed != want {
+				return nil, nil, 0, false, nil
+			}
+		}
+		var logits []float32
+		if matched == len(tokens) && matched == len(candidate.tokens) {
+			logits = append([]float32(nil), candidate.logits...)
+		}
+		return kv, logits, matched, false, nil
+	}
+}
+
+func (g *PrefixFlightGroup) bestSharedPrefixFlightLocked(ns string, tokens []int, minShared int) (*flightPromise, int) {
+	var best *flightPromise
+	bestMatched, bestSurplus := 0, 0
+	for _, candidate := range g.shared {
+		if candidate == nil || candidate.namespace != ns {
+			continue
+		}
+		matched := commonTokenPrefix(tokens, candidate.tokens)
+		leaderSuffix := len(candidate.tokens) - matched
+		if matched < minShared || leaderSuffix > matched {
+			continue
+		}
+		surplus := matched - leaderSuffix
+		if best == nil || surplus > bestSurplus ||
+			(surplus == bestSurplus && matched > bestMatched) ||
+			(surplus == bestSurplus && matched == bestMatched && candidate.sequence < best.sequence) {
+			best, bestMatched, bestSurplus = candidate, matched, surplus
+		}
+	}
+	return best, bestMatched
+}
+
+func commonTokenPrefix(a, b []int) int {
+	n := min(len(a), len(b))
+	for i := 0; i < n; i++ {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	return n
+}
+
+func (g *PrefixFlightGroup) runSharedPrefixLeader(ctx context.Context, f *flightPromise, fn PrefillFunc) (kv *model.KVCache, logits []float32, err error) {
+	completed := false
+	defer func() {
+		if completed {
+			return
+		}
+		r := recover()
+		panicErr := fmt.Errorf("radixkv: leader prefill panicked: %v", r)
+		g.finishSharedPrefixFlight(f, nil, nil, panicErr)
+		panic(r)
+	}()
+
+	kv, logits, err = fn(ctx)
+	if err == nil && (kv == nil || kv.Len() != len(f.tokens)) {
+		err = fmt.Errorf("%w: leader returned incomplete KV", ErrFlightFailed)
+	}
+	if err != nil {
+		g.finishSharedPrefixFlight(f, nil, nil, err)
+		completed = true
+		return nil, nil, err
+	}
+
+	// Avoid the publication clone for an uncontended cold request. Once a
+	// follower exists, clone before waking it or returning control to leader
+	// decode, so later mutation of the live session cannot affect the handoff.
+	g.mu.Lock()
+	waiters := f.waiters
+	if waiters == 0 {
+		if current := g.shared[f.sequence]; current == f {
+			delete(g.shared, f.sequence)
+		}
+		f.kv = nil
+		f.logits = nil
+		f.err = nil
+		closeReady(f.ready)
+		g.mu.Unlock()
+		completed = true
+		return kv, logits, nil
+	}
+	g.mu.Unlock()
+	var publishedKV *model.KVCache
+	var publishedLogits []float32
+	publishedKV = kv.Clone()
+	g.cloneBytes.Add(publishedKV.ClonePayloadBytes())
+	publishedLogits = append([]float32(nil), logits...)
+	g.finishSharedPrefixFlight(f, publishedKV, publishedLogits, nil)
+	completed = true
+	return kv, logits, nil
+}
+
+func (g *PrefixFlightGroup) finishSharedPrefixFlight(f *flightPromise, kv *model.KVCache, logits []float32, err error) {
+	g.mu.Lock()
+	if current := g.shared[f.sequence]; current == f {
+		delete(g.shared, f.sequence)
+	}
+	f.kv = kv
+	f.logits = logits
+	f.err = err
+	closeReady(f.ready)
+	g.mu.Unlock()
+}
+
+func (g *PrefixFlightGroup) releaseSharedPrefixWaiter(f *flightPromise) {
+	g.mu.Lock()
+	f.waiters--
+	if f.waiters < 0 {
+		g.mu.Unlock()
+		panic("radixkv: shared-prefix waiter released more than once")
+	}
+	g.mu.Unlock()
 }
 
 // CoalescePrefix looks up prefix in the attached tree under namespace ns.
@@ -434,11 +628,17 @@ func (g *PrefixFlightGroup) Leaders() int64 {
 	return g.leaders.Load()
 }
 
+// ClonePayloadBytes reports the cumulative KV payload bytes copied for shared-
+// prefix publication and follower handoff over this group's lifetime.
+func (g *PrefixFlightGroup) ClonePayloadBytes() int64 {
+	return g.cloneBytes.Load()
+}
+
 // InFlight returns the number of prefix prefill operations currently active.
 func (g *PrefixFlightGroup) InFlight() int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return len(g.flights)
+	return len(g.flights) + len(g.shared)
 }
 
 // Tree returns the underlying radix tree, or nil if none was configured.

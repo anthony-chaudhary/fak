@@ -324,12 +324,42 @@ func ConfiguredPosture() adjudicator.Posture {
 // purpose, so configuring the process-global Default instances is safe; Go test
 // binaries are per-package, so this never leaks across packages.)
 func Configure() {
+	configureRuntime(true)
+}
+
+func configureRuntime(installPolicy bool) {
 	abi.RegisterEngine("localtools", localEngine{})
 	// The real filesystem-read engine behind the fak_read MCP tool (#795): the miss path
 	// for a Read routed through the kernel, confined to the working tree. The vDSO serves a
 	// fresh hit before this ever runs. Confined to the process cwd by default.
 	RegisterReadEngine("")
 
+	if installPolicy {
+		adjudicator.Default.SetPolicy(configuredAgentPolicy())
+	}
+
+	// Grammar for convert_currency: declare the canonical params + the synonym
+	// aliases the rung repairs in-syscall. NO strict preflight schema for this tool
+	// (so preflight defers and the grammar Transform survives the fold; a preflight
+	// Deny would otherwise out-rank the repair).
+	g := grammar.Grammar{
+		Params: []grammar.Param{
+			{Name: "from_currency", Type: "string", Required: true},
+			{Name: "to_currency", Type: "string", Required: true},
+			{Name: "amount", Type: "number", Required: true},
+		},
+		Aliases: map[string]string{
+			"from": "from_currency", "source": "from_currency", "from_cur": "from_currency",
+			"to": "to_currency", "target": "to_currency", "to_cur": "to_currency",
+		},
+	}
+	grammar.Default.Add(toolConvert, g)
+
+	// Strict schemas for the tools where a missing field is a hard error (rung-1).
+	preflight.Default.SetSchema(toolGetUser, preflight.Schema{Required: map[string]preflight.FieldType{"user_id": preflight.TypeString}})
+}
+
+func configuredAgentPolicy() adjudicator.Policy {
 	// The loop's tool allowlist. The airline fixture's six are the historical set; the
 	// coding read tools are folded in only when ArmCodeTools has armed them (#6703), so
 	// an unarmed loop's policy is byte-for-byte the historical policy. They must be named
@@ -359,8 +389,7 @@ func Configure() {
 
 	activePostureMu.RLock()
 	defer activePostureMu.RUnlock()
-
-	adjudicator.Default.SetPolicy(adjudicator.Policy{
+	return adjudicator.Policy{
 		Posture: activePosture,
 		Allow:   allow,
 		Deny: map[string]abi.ReasonCode{
@@ -378,27 +407,7 @@ func Configure() {
 		// paths now deny a self-edit into any witness tree.
 		SelfModifyGlobs: adjudicator.DefaultPolicy().SelfModifyGlobs,
 		RedactFields:    []string{"password", "secret", "api_key", "token"},
-	})
-
-	// Grammar for convert_currency: declare the canonical params + the synonym
-	// aliases the rung repairs in-syscall. NO strict preflight schema for this tool
-	// (so preflight defers and the grammar Transform survives the fold; a preflight
-	// Deny would otherwise out-rank the repair).
-	g := grammar.Grammar{
-		Params: []grammar.Param{
-			{Name: "from_currency", Type: "string", Required: true},
-			{Name: "to_currency", Type: "string", Required: true},
-			{Name: "amount", Type: "number", Required: true},
-		},
-		Aliases: map[string]string{
-			"from": "from_currency", "source": "from_currency", "from_cur": "from_currency",
-			"to": "to_currency", "target": "to_currency", "to_cur": "to_currency",
-		},
 	}
-	grammar.Default.Add(toolConvert, g)
-
-	// Strict schemas for the tools where a missing field is a hard error (rung-1).
-	preflight.Default.SetSchema(toolGetUser, preflight.Schema{Required: map[string]preflight.FieldType{"user_id": preflight.TypeString}})
 }
 
 func itoa(n int) string { return fmt.Sprintf("%d", n) }

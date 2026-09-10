@@ -208,11 +208,16 @@ func (v *VDSO) PromotedTools() []string {
 	return reg.Tools()
 }
 
-// isReadOnly reports whether a tool call is read-only, checking static rules first
-// and falling back to dynamic runtime read-only promotions.
+// isReadOnly reports cache eligibility. Explicit replay hints are authoritative;
+// tool-name inference and runtime promotion apply only when neither hint is supplied.
 func (v *VDSO) isReadOnly(c *abi.ToolCall) bool {
 	if c == nil || destructive(c) {
 		return false
+	}
+	_, hasReadHint := c.Meta["readOnlyHint"]
+	_, hasIdempotentHint := c.Meta["idempotentHint"]
+	if hasReadHint || hasIdempotentHint {
+		return metaTrue(c, "readOnlyHint") && metaTrue(c, "idempotentHint")
 	}
 	if isReadOnlyCall(c) {
 		return true

@@ -63,6 +63,7 @@ type armRunner struct {
 	envelopeSeq             uint64
 	envelopeMu              sync.Mutex
 	streamingFSM            *StreamingToolFSM
+	codeReads               *codeReadObservations
 }
 
 func (r *armRunner) emitEnvelope(eventType harnesskit.EventType, payload any) {
@@ -808,6 +809,10 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 		if tool == toolBook && strings.Contains(content, "confirmation") && !strings.Contains(content, `"error"`) {
 			r.metrics.TaskCompleted = true
 		}
+		if r.codeReads == nil {
+			r.codeReads = newCodeReadObservations()
+		}
+		r.codeReads.commit(tool, rawArgs, content, isToolResultFailure(res.isErr, ev.Verdict, content), isDenied)
 		if r.cfg.goalAnchor != nil {
 			if isToolResultFailure(res.isErr, ev.Verdict, content) {
 				r.cfg.goalAnchor.RecordRecoveryTurn()
@@ -858,6 +863,9 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 		effect := toolEffectFor(tc.Function.Name)
 		index := len(scheduled)
 		call := tc
+		if r.codeReads == nil {
+			r.codeReads = newCodeReadObservations()
+		}
 		scheduled = append(scheduled, scheduledToolCall{
 			call:   call,
 			effect: effect,
@@ -898,7 +906,9 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 				}
 			},
 			run: func(context.Context) (string, error) {
-				res := execOne(call)
+				boundCall := call
+				boundCall.Function.Arguments = r.codeReads.bind(boundCall.Function.Name, boundCall.Function.Arguments)
+				res := execOne(boundCall)
 				executed[index] = res
 				return res.content, nil
 			},

@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/codetools"
 )
+
+const toolReceiptDetailRuneCap = 256
 
 // tool_receipt.go — TYPED tool-result receipts for fak's OWNED loop (#2414).
 //
@@ -73,8 +76,30 @@ func denyToolReceipt(result *abi.Result, v abi.Verdict) ToolReceipt {
 			fix = v.Meta["dry_run_hint"]
 		}
 		rc.Fix = fix
+		// Coding-tool refusals already carry a caller-safe diagnostic: Refusal.Detail
+		// contains validation context or an operand spelling the caller supplied, never
+		// file contents. Return that bounded diagnostic to the owned planner so it can
+		// correct malformed arguments without weakening the strict decode or path policy.
+		if v.By == codetools.RungName {
+			rc.Detail = boundedToolReceiptDetail(v.Meta["detail"])
+		}
 	}
 	return rc
+}
+
+func boundedToolReceiptDetail(detail string) string {
+	runes := 0
+	trimAt := 0
+	for i := range detail {
+		if runes == toolReceiptDetailRuneCap-1 {
+			trimAt = i
+		}
+		if runes == toolReceiptDetailRuneCap {
+			return detail[:trimAt] + "…"
+		}
+		runes++
+	}
+	return detail
 }
 
 func metaVal(r *abi.Result, k string) string {
