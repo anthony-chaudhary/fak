@@ -315,20 +315,22 @@ func DiscoverStrixTarget(ctx context.Context, hostOverride string) (*StrixTarget
 	if host == "" {
 		host = DefaultStrixHost
 	}
-
-	// 3. Check scratch cache
-	if cached, ok := loadPresenceCache(host); ok {
-		return cached, nil
+	if err := validateStrixSSHDestination(host); err != nil {
+		return nil, err
 	}
 
-	// 4. Remote probe via SSH
+	// Cached presence never substitutes for a fresh trust admission. A remote
+	// probe establishes the invocation-bound host-key snapshot before use.
 	target, err := probeRemoteStrix(ctx, host)
 	if err != nil {
-		// Try fallback mDNS if default strix1 failed and no explicit override
-		if hostOverride == "" && host == DefaultStrixHost {
-			if fbTarget, fbErr := probeRemoteStrix(ctx, FallbackStrixMDNS); fbErr == nil && fbTarget.Reachable {
+		if hostOverride == "" && host == DefaultStrixHost && errors.Is(err, errStrixSSHRetryable) {
+			fbTarget, fbErr := probeRemoteStrix(ctx, FallbackStrixMDNS)
+			if fbErr == nil && fbTarget.Reachable {
 				savePresenceCache(fbTarget)
 				return fbTarget, nil
+			}
+			if errors.Is(fbErr, ErrStrixHostTrustRefused) {
+				err = fbErr
 			}
 		}
 		// Return unreached target
@@ -477,26 +479,18 @@ info["vulkan_icd"] = "/usr/share/vulkan/icd.d/radeon_icd.json"
 print(json.dumps(info))
 '`
 
-	cmd := exec.CommandContext(probeCtx, "ssh",
-		"-o", "BatchMode=yes",
-		"-o", "ConnectTimeout=2",
-		"-o", "StrictHostKeyChecking=accept-new",
-		host,
-		probeCmd,
-	)
-	windowgate.ConfigureBackgroundCommand(cmd)
-	out, err := cmd.Output()
+	out, err := runStrixSSHCommand(probeCtx, host, 2*time.Second, probeCmd, nil)
 	rtt := time.Since(start).Seconds() * 1000.0
 
 	if err != nil {
-		return nil, fmt.Errorf("ssh probe to %s failed: %w", host, err)
+		return nil, err
 	}
 
 	var target StrixTarget
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	lastLine := lines[len(lines)-1]
 	if err := json.Unmarshal([]byte(lastLine), &target); err != nil {
-		return nil, fmt.Errorf("failed to parse probe output from %s: %w", host, err)
+		return nil, strixTrustRefused("invalid ssh response")
 	}
 
 	target.Mode = "ssh"
