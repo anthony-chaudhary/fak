@@ -149,6 +149,12 @@ type Qwen35MetalForwardSequenceReceipt struct {
 	GPUMilliseconds       float64                          `json:"gpu_milliseconds"`
 	WaitMilliseconds      float64                          `json:"wait_milliseconds"`
 	StateIdentity         *Qwen35MetalStateIdentityReceipt `json:"state_identity,omitempty"`
+	SelectedPanels        int                              `json:"selected_panels,omitempty"`
+	ExecutedPanels        int                              `json:"executed_panels,omitempty"`
+	FallbackCount         int                              `json:"fallback_count,omitempty"`
+	Device                string                           `json:"device,omitempty"`
+	SourceRevision        string                           `json:"source_revision,omitempty"`
+	ArtifactSHA256        string                           `json:"artifact_sha256,omitempty"`
 }
 
 type qwen35MetalForwardSequenceRunner interface {
@@ -271,20 +277,71 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 	}
 	var hidden []float32
 	if s.qwen35HAL != nil && s.qwen35HAL.sequenceAccepted {
-		if runner, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalForwardSequenceRunner); ok && len(ids) == 32 {
-			var receipt Qwen35MetalForwardSequenceReceipt
-			var accepted bool
-			var err error
-			hidden, receipt, accepted, err = runner.Qwen35MetalForwardSequence(s, ids)
-			_ = receipt
-			if accepted {
-				if err != nil {
-					panic(s.failQwen35MetalForwardSequence(err))
+		if runner, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalForwardSequenceRunner); ok {
+			const panelTokens = 32
+			nPanels := len(ids) / panelTokens
+			if nPanels > 0 {
+				base := s.Cache.Len()
+				if base+len(ids) > 4096 {
+					panic(s.failQwen35MetalForwardSequence(fmt.Errorf("metalgemm: P32 graph attention context %d exceeds 4096", base+len(ids))))
 				}
-				if !wantLogits {
-					return nil, true
+				var agg Qwen35MetalForwardSequenceReceipt
+				var aggValid bool
+				selectedPanels := nPanels
+				executedPanels := 0
+				for p := 0; p < nPanels; p++ {
+					panelIDs := ids[p*panelTokens : (p+1)*panelTokens]
+					h, receipt, accepted, err := runner.Qwen35MetalForwardSequence(s, panelIDs)
+					if !accepted {
+						break
+					}
+					if err != nil {
+						panic(s.failQwen35MetalForwardSequence(err))
+					}
+					hidden = h
+					executedPanels++
+					if !aggValid {
+						agg = receipt
+						agg.SelectedPanels = selectedPanels
+						agg.ExecutedPanels = 1
+						agg.FallbackCount = 0
+						agg.Device = metalgemm.DeviceName()
+						agg.SourceRevision = os.Getenv("FAK_SOURCE_REVISION")
+						agg.ArtifactSHA256 = os.Getenv("FAK_ARTIFACT_SHA256")
+						aggValid = true
+					} else {
+						agg.ExecutedPanels++
+						agg.Tokens += receipt.Tokens
+						agg.CommandBuffers += receipt.CommandBuffers
+						agg.Encoders += receipt.Encoders
+						agg.IntermediateWaits += receipt.IntermediateWaits
+						agg.IntermediateReadbacks += receipt.IntermediateReadbacks
+						agg.TerminalWaits += receipt.TerminalWaits
+						agg.TerminalReadbacks += receipt.TerminalReadbacks
+						agg.HostUploadBytes += receipt.HostUploadBytes
+						agg.HostReadbackBytes += receipt.HostReadbackBytes
+						agg.Committed = agg.Committed && receipt.Committed
+						agg.CompletedWait = agg.CompletedWait && receipt.CompletedWait
+						agg.TimingAvailable = agg.TimingAvailable && receipt.TimingAvailable
+						agg.GPUMilliseconds += receipt.GPUMilliseconds
+						agg.WaitMilliseconds += receipt.WaitMilliseconds
+						if receipt.StateIdentity != nil {
+							agg.StateIdentity = receipt.StateIdentity
+						}
+					}
 				}
-				return s.headResident(hidden), true
+				if executedPanels > 0 {
+					rem := ids[nPanels*panelTokens:]
+					if len(rem) > 0 {
+						hidden = s.prefillQwen35HybridQ4KHidden(rem)
+						agg.Tokens += len(rem)
+					}
+					s.qwen35HAL.setMetalForwardReceipt(agg)
+					if !wantLogits {
+						return nil, true
+					}
+					return s.headResident(hidden), true
+				}
 			}
 		}
 	}
@@ -304,6 +361,7 @@ func (s *Session) failQwen35MetalForwardSequence(cause error) error {
 	backend := q.sequenceBackend
 	states := q.sequenceLayers
 	q.sequenceLayers = nil
+	q.metalForwardReceipt = nil
 	for _, state := range states {
 		if state.valid() && backend != nil {
 			_ = backend.FreeQwen35GDNAuxState(state)
@@ -340,6 +398,21 @@ func (s *Session) Qwen35MetalForwardSequenceStatus() Qwen35MetalForwardSequenceR
 	}
 	base.SelectorState = Qwen35MetalSequenceSelectorOn
 	base.EvidenceState = Qwen35MetalSequenceEvidenceUnavailable
+	if s.qwen35HAL != nil {
+		if agg, ok := s.qwen35HAL.getMetalForwardReceipt(); ok && agg.Available {
+			agg.SelectorState = Qwen35MetalSequenceSelectorOn
+			if runner, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalForwardSequenceRunner); ok {
+				if r, ok := runner.Qwen35MetalForwardSequenceReceipt(); ok && r.StateIdentity != nil {
+					if agg.StateIdentity == nil || agg.StateIdentity.BindingSHA256 != r.StateIdentity.BindingSHA256 {
+						agg.StateIdentity = r.StateIdentity
+						agg.HostUploadBytes += r.StateIdentity.GDNStateH2DBytes
+						agg.HostReadbackBytes += r.StateIdentity.GDNStateD2HBytes
+					}
+				}
+			}
+			return agg
+		}
+	}
 	runner, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalForwardSequenceRunner)
 	if !ok {
 		return base
