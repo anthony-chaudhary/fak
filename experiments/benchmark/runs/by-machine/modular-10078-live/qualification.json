@@ -1,0 +1,73 @@
+{
+  "schema": "fak.modular-capture-qualification/v1",
+  "issue": 10078,
+  "verdict": "invalid",
+  "reason_codes": [
+    "CAPACITY_PROVENANCE_INCOMPLETE",
+    "REQUESTS_REFUSED_ABOVE_EFFECTIVE_CAPACITY",
+    "SETUP_COST_DOMINATES"
+  ],
+  "hardware_witnessed": true,
+  "qualified_peak_claim": false,
+  "qualified_sla_knee_claim": false,
+  "capture_source_commit": "6e1c5eb7c4c998211ba6764b7314e3eff0682594",
+  "native_source_commit": "d3dd8447de3707afbc05bc450812cbce3858b66b",
+  "engine_snapshot_digest": "sha256:b36f69694e5a1fbaa9cce6a5072214ac2fbb0b4c4f72a0d2c88d643167093d25",
+  "identity_checks": {
+    "binary_sha256_unchanged": true,
+    "model_sha256_unchanged": true,
+    "service_process_and_start_unchanged": true,
+    "native_smokes_exact_output": true,
+    "native_backend": "vulkan",
+    "native_fallback_active": false,
+    "kernel_selection_digest_unchanged": true
+  },
+  "requested_points": [
+    1,
+    2,
+    4,
+    8,
+    16,
+    32
+  ],
+  "requests_per_point": 32,
+  "quality": {
+    "requested": 192,
+    "http_200_exact_output": 176,
+    "http_429": 16,
+    "output_drift_among_successes": 0,
+    "qualified_in_capacity_points": [
+      1,
+      2,
+      4,
+      8,
+      16
+    ],
+    "out_of_effective_capacity_points": [
+      32
+    ]
+  },
+  "capacity": {
+    "original_declared_downstream_scheduler_capacity": 256,
+    "observed_earlier_arm_capacity": 16,
+    "effective_capacity": 16,
+    "arm_limit_unchanged": true,
+    "observation_file": "effective-capacity.json"
+  },
+  "cost": {
+    "total_goal_to_capture_elapsed_seconds": 3817.4465692043304,
+    "measurement_seconds": 213.8882205,
+    "runner_setup_seconds": 0.0010419,
+    "scope": "Goal-to-capture includes backlog audit, historical receipt correction, endpoint/trust investigation, resource wait, worktree preparation, capture recipe construction and checks. It is total observed setup elapsed time, not a minimal steady-state rerun cost."
+  },
+  "measurement_limits": [
+    "Each concurrency point is one bounded run with32 requested samples; no repeated-run throughput confidence interval was measured.",
+    "P50/P90/P95/P99 are client-visible first content event and end-to-end distributions. Confidence intervals are unmeasured.",
+    "The native stream emitted one content event per successful response. Inter-token latency and TPOT are unmeasured.",
+    "No saturation or SLA knee is certified. Raw capture summary is retained as a diagnostic and must be read with this qualification."
+  ],
+  "raw_capture_sha256": "55ac25c9d2dd70c4957bcd0b277815fb1c855135ec69ae529986bfc57dfc13b3",
+  "public_receipt_transformation": "Removed only the local absolute artifact path; diagnostic point data and original summary are retained.",
+  "public_receipt_sha256": "b3326d7b56e6628962ba7050300e0fd6eb272a58a37b60376d640f09bbf12b6f",
+  "public_scrub": "No endpoint, hostname, address, credential, absolute path, unrelated arm, or raw internal log is included."
+}

@@ -365,6 +365,10 @@ func EvaluateServingSweep(report *ServingSweepReport) error {
 			if trackPoint.MeasurementStatus == "" {
 				trackPoint.MeasurementStatus = trackPoint.Status
 			}
+			if trackPoint.MeasurementStatus == "measured" && trackPoint.Stats.Failed > 0 {
+				invalidateServingSweepPoint(trackPoint, "measurement_incomplete", "failed requests prevent a comparable serving measurement")
+				continue
+			}
 			if trackPoint.MeasurementStatus != "measured" || trackPoint.Stats.OK <= 0 {
 				markServingSweepNotMeasured(trackPoint, "measurement_missing", "track produced no successful measured requests")
 				continue
@@ -437,7 +441,7 @@ func summarizeServingSweepTrack(report *ServingSweepReport, track ServingTrack) 
 		summary.Reason = hardInvalid
 		summary.PeakStatus = string(sweepcert.FindingInvalid)
 		summary.SLAStatus = string(sweepcert.FindingInvalid)
-		summary.SLAReason = "identity/capacity invalidity prevents a sweep claim"
+		summary.SLAReason = "identity, capacity, or measurement invalidity prevents a sweep claim"
 		return summary
 	}
 	evidence, selections, err := servingSweepEvidence(report, track)
@@ -519,7 +523,7 @@ func servingSweepEvidence(report *ServingSweepReport, track ServingTrack) (sweep
 	}
 	evidence := sweepcert.Evidence{
 		Envelope: envelope, EnvelopeDigest: digest,
-		DeclaredInvalidReasons: []string{"contract_missing", "workload_identity_mismatch", "model_identity_mismatch", "engine_identity_unknown", "engine_identity_mismatch", "capacity_unknown", "capacity_identity_mismatch", "capacity_exceeded"},
+		DeclaredInvalidReasons: []string{"contract_missing", "workload_identity_mismatch", "model_identity_mismatch", "engine_identity_unknown", "engine_identity_mismatch", "capacity_unknown", "capacity_identity_mismatch", "capacity_exceeded", "measurement_incomplete"},
 	}
 	selections := make(map[string]*ServingSweepSelection)
 	for _, coordinate := range coordinates {
@@ -580,7 +584,8 @@ func hardServingSweepInvalidity(code string) bool {
 		"engine_identity_mismatch",
 		"capacity_unknown",
 		"capacity_identity_mismatch",
-		"capacity_exceeded":
+		"capacity_exceeded",
+		"measurement_incomplete":
 		return true
 	default:
 		return false

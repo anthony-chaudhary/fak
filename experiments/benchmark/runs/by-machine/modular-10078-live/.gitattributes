@@ -1,0 +1,2 @@
+# Preserve original JSON bytes and recognize captured CRLF line endings.
+*.json -text whitespace=trailing-space,space-before-tab,cr-at-eol

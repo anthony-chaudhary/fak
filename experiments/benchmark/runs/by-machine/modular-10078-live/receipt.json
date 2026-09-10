@@ -1,0 +1,433 @@
+{
+  "schema": "fak.serving-sweep.v1",
+  "generated_at": "2026-09-10T06:42:51Z",
+  "machine_id": "qwen38-native-vulkan-single-gpu",
+  "model": "Qwen3.8-27B-Q4_K_M",
+  "workload": {
+    "digest": "sha256:dcebedea257fe3a3fee3f97c0f019b30961cc44d30b5b45b46fe962df756fa38",
+    "requests": 32,
+    "concurrencies": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      32
+    ]
+  },
+  "contracts": [
+    {
+      "track": "ours",
+      "model": "Qwen3.8-27B-Q4_K_M",
+      "engine": "fak-native",
+      "engine_receipt_digest": "sha256:b36f69694e5a1fbaa9cce6a5072214ac2fbb0b4c4f72a0d2c88d643167093d25",
+      "batch_capacity": 256,
+      "capacity_source": "explicit-admission-budget-and-max-seqs-bound-to-engine-snapshot"
+    }
+  ],
+  "sla": {},
+  "points": [
+    {
+      "concurrency": 1,
+      "workload_digest": "sha256:dcebedea257fe3a3fee3f97c0f019b30961cc44d30b5b45b46fe962df756fa38",
+      "tracks": [
+        {
+          "track": "ours",
+          "status": "valid",
+          "measurement_status": "measured",
+          "model": "Qwen3.8-27B-Q4_K_M",
+          "engine": "fak-native",
+          "engine_receipt_digest": "sha256:b36f69694e5a1fbaa9cce6a5072214ac2fbb0b4c4f72a0d2c88d643167093d25",
+          "batch_capacity": 256,
+          "capacity_source": "explicit-admission-budget-and-max-seqs-bound-to-engine-snapshot",
+          "stats": {
+            "requests": 32,
+            "ok": 32,
+            "failed": 0,
+            "ttft_ms": {
+              "status": "measured",
+              "unit": "ms",
+              "p50": 775.779,
+              "p90": 793.248,
+              "p95": 803.663,
+              "p99": 817.933
+            },
+            "itl_ms": {
+              "status": "not_measured",
+              "unit": "ms",
+              "reason": "no inter-token measurements"
+            },
+            "tpot_ms": {
+              "status": "not_measured",
+              "unit": "ms",
+              "reason": "no TPOT measurements"
+            },
+            "end_to_end_ms": {
+              "status": "measured",
+              "unit": "ms",
+              "p50": 778.286,
+              "p90": 793.248,
+              "p95": 803.663,
+              "p99": 819.488
+            },
+            "throughput_tok_s": {
+              "status": "measured",
+              "unit": "usage.completion_tokens/s",
+              "value": 5.134
+            },
+            "goodput_rps": {
+              "status": "measured",
+              "unit": "requests/s",
+              "value": 1.283
+            },
+            "prefix_cache_hit_rate": {
+              "status": "not_measured",
+              "unit": "ratio",
+              "reason": "no metrics URL configured"
+            },
+            "token_count_basis": "usage.completion_tokens"
+          }
+        }
+      ]
+    },
+    {
+      "concurrency": 2,
+      "workload_digest": "sha256:dcebedea257fe3a3fee3f97c0f019b30961cc44d30b5b45b46fe962df756fa38",
+      "tracks": [
+        {
+          "track": "ours",
+          "status": "valid",
+          "measurement_status": "measured",
+          "model": "Qwen3.8-27B-Q4_K_M",
+          "engine": "fak-native",
+          "engine_receipt_digest": "sha256:b36f69694e5a1fbaa9cce6a5072214ac2fbb0b4c4f72a0d2c88d643167093d25",
+          "batch_capacity": 256,
+          "capacity_source": "explicit-admission-budget-and-max-seqs-bound-to-engine-snapshot",
+          "stats": {
+            "requests": 32,
+            "ok": 32,
+            "failed": 0,
+            "ttft_ms": {
+              "status": "measured",
+              "unit": "ms",
+              "p50": 1549.069,
+              "p90": 1582.073,
+              "p95": 1599.268,
+              "p99": 1609.251
+            },
+            "itl_ms": {
+              "status": "not_measured",
+              "unit": "ms",
+              "reason": "no inter-token measurements"
+            },
+            "tpot_ms": {
+              "status": "not_measured",
+              "unit": "ms",
+              "reason": "no TPOT measurements"
+            },
+            "end_to_end_ms": {
+              "status": "measured",
+              "unit": "ms",
+              "p50": 1551.286,
+              "p90": 1584.585,
+              "p95": 1599.268,
+              "p99": 1609.251
+            },
+            "throughput_tok_s": {
+              "status": "measured",
+              "unit": "usage.completion_tokens/s",
+              "value": 5.148
+            },
+            "goodput_rps": {
+              "status": "measured",
+              "unit": "requests/s",
+              "value": 1.287
+            },
+            "prefix_cache_hit_rate": {
+              "status": "not_measured",
+              "unit": "ratio",
+              "reason": "no metrics URL configured"
+            },
+            "token_count_basis": "usage.completion_tokens"
+          }
+        }
+      ]
+    },
+    {
+      "concurrency": 4,
+      "workload_digest": "sha256:dcebedea257fe3a3fee3f97c0f019b30961cc44d30b5b45b46fe962df756fa38",
+      "tracks": [
+        {
+          "track": "ours",
+          "status": "valid",
+          "measurement_status": "measured",
+          "model": "Qwen3.8-27B-Q4_K_M",
+          "engine": "fak-native",
+          "engine_receipt_digest": "sha256:b36f69694e5a1fbaa9cce6a5072214ac2fbb0b4c4f72a0d2c88d643167093d25",
+          "batch_capacity": 256,
+          "capacity_source": "explicit-admission-budget-and-max-seqs-bound-to-engine-snapshot",
+          "stats": {
+            "requests": 32,
+            "ok": 32,
+            "failed": 0,
+            "ttft_ms": {
+              "status": "measured",
+              "unit": "ms",
+              "p50": 3164.861,
+              "p90": 15625.212,
+              "p95": 15841.967,
+              "p99": 15944.512
+            },
+            "itl_ms": {
+              "status": "not_measured",
+              "unit": "ms",
+              "reason": "no inter-token measurements"
+            },
+            "tpot_ms": {
+              "status": "not_measured",
+              "unit": "ms",
+              "reason": "no TPOT measurements"
+            },
+            "end_to_end_ms": {
+              "status": "measured",
+              "unit": "ms",
+              "p50": 3171.268,
+              "p90": 15632.962,
+              "p95": 15845.477,
+              "p99": 15950.848
+            },
+            "throughput_tok_s": {
+              "status": "measured",
+              "unit": "usage.completion_tokens/s",
+              "value": 3.243
+            },
+            "goodput_rps": {
+              "status": "measured",
+              "unit": "requests/s",
+              "value": 0.051
+            },
+            "prefix_cache_hit_rate": {
+              "status": "not_measured",
+              "unit": "ratio",
+              "reason": "no metrics URL configured"
+            },
+            "token_count_basis": "usage.completion_tokens"
+          }
+        }
+      ]
+    },
+    {
+      "concurrency": 8,
+      "workload_digest": "sha256:dcebedea257fe3a3fee3f97c0f019b30961cc44d30b5b45b46fe962df756fa38",
+      "tracks": [
+        {
+          "track": "ours",
+          "status": "valid",
+          "measurement_status": "measured",
+          "model": "Qwen3.8-27B-Q4_K_M",
+          "engine": "fak-native",
+          "engine_receipt_digest": "sha256:b36f69694e5a1fbaa9cce6a5072214ac2fbb0b4c4f72a0d2c88d643167093d25",
+          "batch_capacity": 256,
+          "capacity_source": "explicit-admission-budget-and-max-seqs-bound-to-engine-snapshot",
+          "stats": {
+            "requests": 32,
+            "ok": 32,
+            "failed": 0,
+            "ttft_ms": {
+              "status": "measured",
+              "unit": "ms",
+              "p50": 6893.6,
+              "p90": 17962.655,
+              "p95": 26963.089,
+              "p99": 27081.453
+            },
+            "itl_ms": {
+              "status": "not_measured",
+              "unit": "ms",
+              "reason": "no inter-token measurements"
+            },
+            "tpot_ms": {
+              "status": "not_measured",
+              "unit": "ms",
+              "reason": "no TPOT measurements"
+            },
+            "end_to_end_ms": {
+              "status": "measured",
+              "unit": "ms",
+              "p50": 6898.469,
+              "p90": 17969.659,
+              "p95": 26968.396,
+              "p99": 27087.15
+            },
+            "throughput_tok_s": {
+              "status": "measured",
+              "unit": "usage.completion_tokens/s",
+              "value": 2.671
+            },
+            "goodput_rps": {
+              "status": "measured",
+              "unit": "requests/s",
+              "value": 0.042
+            },
+            "prefix_cache_hit_rate": {
+              "status": "not_measured",
+              "unit": "ratio",
+              "reason": "no metrics URL configured"
+            },
+            "token_count_basis": "usage.completion_tokens"
+          }
+        }
+      ]
+    },
+    {
+      "concurrency": 16,
+      "workload_digest": "sha256:dcebedea257fe3a3fee3f97c0f019b30961cc44d30b5b45b46fe962df756fa38",
+      "tracks": [
+        {
+          "track": "ours",
+          "status": "valid",
+          "measurement_status": "measured",
+          "model": "Qwen3.8-27B-Q4_K_M",
+          "engine": "fak-native",
+          "engine_receipt_digest": "sha256:b36f69694e5a1fbaa9cce6a5072214ac2fbb0b4c4f72a0d2c88d643167093d25",
+          "batch_capacity": 256,
+          "capacity_source": "explicit-admission-budget-and-max-seqs-bound-to-engine-snapshot",
+          "stats": {
+            "requests": 32,
+            "ok": 32,
+            "failed": 0,
+            "ttft_ms": {
+              "status": "measured",
+              "unit": "ms",
+              "p50": 13002.606,
+              "p90": 51417.105,
+              "p95": 51437.542,
+              "p99": 51461.071
+            },
+            "itl_ms": {
+              "status": "not_measured",
+              "unit": "ms",
+              "reason": "no inter-token measurements"
+            },
+            "tpot_ms": {
+              "status": "not_measured",
+              "unit": "ms",
+              "reason": "no TPOT measurements"
+            },
+            "end_to_end_ms": {
+              "status": "measured",
+              "unit": "ms",
+              "p50": 13002.606,
+              "p90": 51423.692,
+              "p95": 51437.542,
+              "p99": 51461.071
+            },
+            "throughput_tok_s": {
+              "status": "measured",
+              "unit": "usage.completion_tokens/s",
+              "value": 1.989
+            },
+            "goodput_rps": {
+              "status": "measured",
+              "unit": "requests/s",
+              "value": 0.031
+            },
+            "prefix_cache_hit_rate": {
+              "status": "not_measured",
+              "unit": "ratio",
+              "reason": "no metrics URL configured"
+            },
+            "token_count_basis": "usage.completion_tokens"
+          }
+        }
+      ]
+    },
+    {
+      "concurrency": 32,
+      "workload_digest": "sha256:dcebedea257fe3a3fee3f97c0f019b30961cc44d30b5b45b46fe962df756fa38",
+      "tracks": [
+        {
+          "track": "ours",
+          "status": "valid",
+          "measurement_status": "measured",
+          "model": "Qwen3.8-27B-Q4_K_M",
+          "engine": "fak-native",
+          "engine_receipt_digest": "sha256:b36f69694e5a1fbaa9cce6a5072214ac2fbb0b4c4f72a0d2c88d643167093d25",
+          "batch_capacity": 256,
+          "capacity_source": "explicit-admission-budget-and-max-seqs-bound-to-engine-snapshot",
+          "stats": {
+            "requests": 32,
+            "ok": 16,
+            "failed": 16,
+            "ttft_ms": {
+              "status": "measured",
+              "unit": "ms",
+              "p50": 6253.63,
+              "p90": 11574.619,
+              "p95": 12332.087,
+              "p99": 12332.087
+            },
+            "itl_ms": {
+              "status": "not_measured",
+              "unit": "ms",
+              "reason": "no inter-token measurements"
+            },
+            "tpot_ms": {
+              "status": "not_measured",
+              "unit": "ms",
+              "reason": "no TPOT measurements"
+            },
+            "end_to_end_ms": {
+              "status": "measured",
+              "unit": "ms",
+              "p50": 6253.63,
+              "p90": 11580.373,
+              "p95": 12332.087,
+              "p99": 12332.087
+            },
+            "throughput_tok_s": {
+              "status": "measured",
+              "unit": "usage.completion_tokens/s",
+              "value": 5.189
+            },
+            "goodput_rps": {
+              "status": "measured",
+              "unit": "requests/s",
+              "value": 0.162
+            },
+            "prefix_cache_hit_rate": {
+              "status": "not_measured",
+              "unit": "ratio",
+              "reason": "no metrics URL configured"
+            },
+            "token_count_basis": "usage.completion_tokens"
+          }
+        }
+      ]
+    }
+  ],
+  "tracks": [
+    {
+      "track": "ours",
+      "status": "measured",
+      "valid_points": 6,
+      "envelope_digest": "sha256:b38e8ad05b91ec584219a63f39e52f8e63c1d56f65723ffcee7a52a677658730",
+      "peak_status": "right_censored",
+      "peak": {
+        "concurrency": 32,
+        "throughput_tok_s": 5.189,
+        "goodput_rps": 0.162,
+        "ttft_p99_ms": 12332.087
+      },
+      "sla_status": "not_configured",
+      "sla_reason": "no p99 latency budget configured; no SLA knee claimed"
+    }
+  ],
+  "honesty": {
+    "comparable_point_rule": "workload digest, model, engine, engine receipt, capacity, and capacity source must match the declared track contract",
+    "capacity_rule": "a point above batch capacity, or with unknown capacity provenance, is invalid and cannot support peak or knee claims",
+    "peak_rule": "peak is the maximum measured token throughput across at least two comparable valid points; ties choose lower concurrency",
+    "sla_knee_rule": "when p99 budgets are configured, the knee is the maximum-throughput valid point satisfying every configured budget; ties choose lower concurrency",
+    "unknown_rule": "failed, sparse, invalid, or missing measurements remain not_measured/invalid and are never converted to zero"
+  }
+}

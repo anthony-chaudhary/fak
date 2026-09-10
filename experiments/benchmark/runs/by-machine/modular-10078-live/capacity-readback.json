@@ -1,0 +1,27 @@
+{
+  "schema": "fak.modular-capacity-readback/v1",
+  "audited_at_utc": "2026-09-10T06:46:50.008266+00:00",
+  "source_commit": "d3dd8447de3707afbc05bc450812cbce3858b66b",
+  "source_seam": "internal/gateway/admission.go:1573 servedPromptChars and estimateServedAdmissionTokensWithCap",
+  "message_content_bytes": 68,
+  "message_role_bytes": 10,
+  "total_prompt_bytes": 78,
+  "max_output_tokens": 16,
+  "preallocation_ceiling": 1024,
+  "reserved_tokens_per_request": 35,
+  "observed_during_sweep": {
+    "running": 8,
+    "tokens_in_use": 280,
+    "waiting": 0,
+    "queued_tokens": 0,
+    "shed_total": 0,
+    "refused_total": 0
+  },
+  "token_budget": 65536,
+  "token_budget_provenance": "explicit",
+  "max_num_seqs": 256,
+  "verified_admission_capacity": 256,
+  "formula": "min(256, floor(65536 / (floor(78 / 4) + 16)))",
+  "correction": "The immutable pre-run snapshot omitted role bytes in its reservation estimate. Its capacity result remains unchanged after the correction. All submitted concurrencies are <=32.",
+  "capacity_scope": "HTTP admission envelope, not physical GPU batch size"
+}
