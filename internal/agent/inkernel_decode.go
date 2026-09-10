@@ -39,38 +39,6 @@ func (p *InKernelPlanner) configureNativeSession(s *model.Session) {
 	}
 }
 
-func packedQ4KRequestReserveSupported(p *InKernelPlanner, s *model.Session) bool {
-	if p == nil || p.m == nil || s == nil || s.M == nil || s.Cache == nil ||
-		s.M.Q2KEmbedding == nil || s.M.Q2KEmbedding.Format() != "Q4_K" {
-		return false
-	}
-	return s.M.Cfg.IsQwen35Hybrid() && !s.M.Cfg.IsMoE() &&
-		p.backend == nil && p.q4k && p.metal &&
-		s.Backend == nil && s.Q4K && s.Metal && s.MetalQ4K &&
-		!s.Q4 && !s.F16 && !s.GPTQ && s.PrecisionPolicy == nil &&
-		s.DenseGPULayers == 0 && s.GPULayers == 0
-}
-
-func requestReserveExtra(promptTokens, maxNew, resident int) int {
-	if promptTokens < 0 || maxNew < 0 || resident < 0 ||
-		maxNew > int(^uint(0)>>1)-promptTokens {
-		return 0
-	}
-	if extra := promptTokens + maxNew - resident; extra > 0 {
-		return extra
-	}
-	return 0
-}
-
-func (p *InKernelPlanner) preReservePackedQ4KRequest(s *model.Session, promptTokens, maxNew int) {
-	if !packedQ4KRequestReserveSupported(p, s) {
-		return
-	}
-	if extra := requestReserveExtra(promptTokens, maxNew, s.Cache.Len()); extra > 0 {
-		s.Reserve(extra)
-	}
-}
-
 func (p *InKernelPlanner) generateReused(ids []int, maxNew int, temp, topP float64, topK int, stops map[int]bool, emit func(int) bool) (gen, promptTok, matched int, prefillS, decodeS float64, stopped bool) {
 	gen, promptTok, matched, prefillS, decodeS, stopped, _ = p.generateReusedContext(context.Background(), ids, maxNew, temp, topP, topK, stops, emit)
 	return
@@ -208,7 +176,6 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		defer s.Close()
 	}
 	p.configureNativeSession(s)
-	p.preReservePackedQ4KRequest(s, len(ids), maxNew)
 	qwen35MetalStateIdentityEnabled := false
 	if shouldEnableQwen35MetalStateIdentity(p, measurement, ids, matched, cachedLogits) {
 		if enableErr := s.EnableQwen35MetalStateIdentityReceipt(ids); enableErr != nil {

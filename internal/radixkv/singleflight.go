@@ -393,11 +393,11 @@ func (g *PrefixFlightGroup) ForkSuffix(
 	if err != nil {
 		return nil, isLeader, err
 	}
+	defer g.Done(pNode)
 
 	if len(suffix) == 0 {
 		return pNode, isLeader, nil
 	}
-	defer g.Done(pNode)
 
 	fullKV, logits, err := suffixFn(ctx, pNode)
 	if err != nil {

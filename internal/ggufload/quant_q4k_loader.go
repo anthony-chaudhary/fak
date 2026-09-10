@@ -67,7 +67,6 @@ type q4kLoadOptions struct {
 	residentDenseKQuant  bool
 	residentDenseQ2K     bool
 	residentQ2KEmbedding bool
-	residentQ4KEmbedding bool
 	streamedExperts      bool
 	streamedExpertBytes  int64
 	streamedDenseQ4K     bool
@@ -80,12 +79,6 @@ type Q4KLoadOption func(*q4kLoadOptions)
 // raw Q2_K packed format for on-demand row gathering, skipping full F32 expansion.
 func WithQ2KEmbeddingResident(enabled bool) Q4KLoadOption {
 	return func(o *q4kLoadOptions) { o.residentQ2KEmbedding = enabled }
-}
-
-// WithQ4KEmbeddingResident controls whether an eligible Q4_K token embedding table stays
-// in its source format for bounded row gathering. It is intentionally default-off.
-func WithQ4KEmbeddingResident(enabled bool) Q4KLoadOption {
-	return func(o *q4kLoadOptions) { o.residentQ4KEmbedding = enabled }
 }
 
 // WithDenseKQuantResident controls whether eligible dense Q5_K/Q6_K/IQ tensors stay in
@@ -152,9 +145,6 @@ func resolveQ4KLoadOptions(cfg model.Config, opts []Q4KLoadOption) (q4kLoadOptio
 		if opt != nil {
 			opt(&out)
 		}
-	}
-	if out.residentQ2KEmbedding && out.residentQ4KEmbedding {
-		return out, fmt.Errorf("gguf: Q2_K and Q4_K resident embedding modes are mutually exclusive")
 	}
 	if out.streamedExperts {
 		if out.streamedExpertBytes < 0 {
@@ -323,20 +313,11 @@ func (s *WeightSource) shapeAndBytesOrFail(info TensorInfo, tw *tensorWork) (sha
 }
 
 func (s *WeightSource) validateResidentQ2KEmbedding(cfg model.Config) error {
-	return s.validateResidentPackedEmbedding(cfg, TensorQ2_K, blockQ2KBytes)
-}
-
-func (s *WeightSource) validateResidentQ4KEmbedding(cfg model.Config) error {
-	return s.validateResidentPackedEmbedding(cfg, TensorQ4_K, blockQ4KBytes)
-}
-
-func (s *WeightSource) validateResidentPackedEmbedding(cfg model.Config, wantType TensorType, blockBytes uint64) error {
-	format := wantType.String()
 	if !cfg.IsQwen35Hybrid() || cfg.IsMoE() {
-		return fmt.Errorf("gguf: resident %s embedding requires a dense Qwen3.5-family hybrid model", format)
+		return fmt.Errorf("gguf: resident Q2_K embedding requires a dense Qwen3.5-family hybrid model")
 	}
 	if cfg.TieWordEmbeddings {
-		return fmt.Errorf("gguf: resident %s embedding requires untied word embeddings", format)
+		return fmt.Errorf("gguf: resident Q2_K embedding requires untied word embeddings")
 	}
 	var (
 		embInfo *TensorInfo
@@ -354,13 +335,13 @@ func (s *WeightSource) validateResidentPackedEmbedding(cfg model.Config, wantTyp
 		return fmt.Errorf("gguf: token_embd.weight tensor missing")
 	}
 	if outInfo == nil {
-		return fmt.Errorf("gguf: resident %s embedding requires distinct output.weight", format)
+		return fmt.Errorf("gguf: resident Q2_K embedding requires distinct output.weight")
 	}
 	if embInfo.FileOffset == outInfo.FileOffset && embInfo.Offset == outInfo.Offset {
 		return fmt.Errorf("gguf: output.weight is aliased to token_embd.weight")
 	}
-	if embInfo.Type != wantType {
-		return fmt.Errorf("gguf: token_embd.weight is %s, want %s", embInfo.Type, format)
+	if embInfo.Type != TensorQ2_K {
+		return fmt.Errorf("gguf: token_embd.weight is %s, want Q2_K", embInfo.Type)
 	}
 	shape, err := modelShapeFromGGUFDims(embInfo.Name, embInfo.Dims)
 	if err != nil {
@@ -379,7 +360,7 @@ func (s *WeightSource) validateResidentPackedEmbedding(cfg model.Config, wantTyp
 	if hidden%qkK != 0 {
 		return fmt.Errorf("gguf: token_embd.weight hidden dimension %d is not divisible by %d", hidden, qkK)
 	}
-	wantPayload := uint64(vocab) * (uint64(hidden) / qkK) * blockBytes
+	wantPayload := uint64(vocab) * (uint64(hidden) / qkK) * blockQ2KBytes
 	payloadBytes, err := tensorPayloadBytes(*embInfo)
 	if err != nil {
 		return err
@@ -418,11 +399,6 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 	}
 	if loadOpts.residentQ2KEmbedding {
 		if err := s.validateResidentQ2KEmbedding(cfg); err != nil {
-			return nil, err
-		}
-	}
-	if loadOpts.residentQ4KEmbedding {
-		if err := s.validateResidentQ4KEmbedding(cfg); err != nil {
 			return nil, err
 		}
 	}
@@ -568,14 +544,6 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 			}
 		case pt.q2kEmbed:
 			embed, err := model.NewQ2KEmbedding(pt.raw, pt.shape[0], pt.shape[1])
-			if err != nil {
-				return err
-			}
-			if err := builder.SetQ2KEmbedding(embed); err != nil {
-				return err
-			}
-		case pt.q4kEmbed:
-			embed, err := model.NewQ4KEmbedding(pt.raw, pt.shape[0], pt.shape[1])
 			if err != nil {
 				return err
 			}
@@ -916,15 +884,6 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 		}
 		tw.acctType, tw.acctExpert, tw.acctBytes, tw.acctTensors, tw.acctResident = info.Type.String(), false, tensorOnDiskBytes(info), 1, true
 		tw.pending = []pendingTensor{{q2kEmbed: true, name: canon, shape: shape, raw: raw}}
-		return tw
-	}
-	if loadOpts.residentQ4KEmbedding && info.Name == "token_embd.weight" {
-		shape, raw, ok := s.shapeAndBytesOrFail(info, &tw)
-		if !ok {
-			return tw
-		}
-		tw.acctType, tw.acctExpert, tw.acctBytes, tw.acctTensors, tw.acctResident = info.Type.String(), false, tensorOnDiskBytes(info), 1, true
-		tw.pending = []pendingTensor{{q4kEmbed: true, name: canon, shape: shape, raw: raw}}
 		return tw
 	}
 	if loadOpts.streamedDenseQ4K && info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, canon) {

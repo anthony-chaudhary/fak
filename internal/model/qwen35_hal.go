@@ -60,7 +60,6 @@ type qwen35HALState struct {
 	qsaGatheredV        []float32
 	qsaBlockScores      []float32
 	qsaScores           [][]float32
-	metalForwardReceipt *Qwen35MetalForwardSequenceReceipt
 }
 
 const (
@@ -233,27 +232,11 @@ func (q *qwen35HALState) freeSequence() {
 	// even when a backend reports a teardown error or re-enters a failure path.
 	q.sequenceBackend = nil
 	q.sequenceLayers = nil
-	q.metalForwardReceipt = nil
 	for _, state := range states {
 		if state.valid() {
 			_ = backend.FreeQwen35GDNAuxState(state)
 		}
 	}
-}
-
-func (q *qwen35HALState) setMetalForwardReceipt(r Qwen35MetalForwardSequenceReceipt) {
-	if q == nil {
-		return
-	}
-	cloned := r
-	q.metalForwardReceipt = &cloned
-}
-
-func (q *qwen35HALState) getMetalForwardReceipt() (Qwen35MetalForwardSequenceReceipt, bool) {
-	if q == nil || q.metalForwardReceipt == nil {
-		return Qwen35MetalForwardSequenceReceipt{}, false
-	}
-	return *q.metalForwardReceipt, true
 }
 
 func (s *Session) closeQwen35HALState() {

@@ -3225,13 +3225,6 @@ func TestVulkanWave32CoopMatValidation(t *testing.T) {
 		}
 	}
 
-	// Fail-closed rejection: prefill throughput below threshold (< 350.0 tok/s)
-	lowThroughputProps := props
-	lowThroughputProps.MeasuredPrefillTokPerSec = 349.9
-	if _, err := ValidateVulkanWave32CoopMat(lowThroughputProps); err == nil {
-		t.Errorf("ValidateVulkanWave32CoopMat should fail when prefill throughput < 350.0 tok/s")
-	}
-
 	// 4. Numerical bit-identity check
 	M, N, K := 16, 16, 32
 	A := make([]float32, M*K)

@@ -57,7 +57,6 @@ type inKernelCoalesceRequest struct {
 	proceed      chan error
 	result       chan inKernelCoalesceResult
 	done         chan struct{}
-	drain        chan struct{}
 	decodePass   atomic.Uint32
 	receipt      InKernelBatchReceipt
 	closes       atomic.Uint32
@@ -78,7 +77,6 @@ func (p *InKernelPlanner) runCoalescedGenerate(ctx context.Context, run func(con
 		proceed:      make(chan error, 1),
 		result:       make(chan inKernelCoalesceResult, 1),
 		done:         make(chan struct{}),
-		drain:        make(chan struct{}, 1),
 		receiptReady: make(chan struct{}),
 	}
 	p.coalesceMu.Lock()
@@ -97,15 +95,6 @@ func (p *InKernelPlanner) runCoalescedGenerate(ctx context.Context, run func(con
 			runtime.Gosched()
 		}
 		p.drainCoalescedGenerates()
-	} else {
-		select {
-		case <-req.drain:
-			p.drainCoalescedGenerates()
-		case out := <-req.result:
-			<-req.receiptReady
-			out.result.batchReceipt = req.receipt
-			return out.result, out.err
-		}
 	}
 	out := <-req.result
 	<-req.receiptReady
@@ -114,31 +103,22 @@ func (p *InKernelPlanner) runCoalescedGenerate(ctx context.Context, run func(con
 }
 
 func (p *InKernelPlanner) drainCoalescedGenerates() {
-	p.coalesceMu.Lock()
-	n := len(p.coalesceReady)
-	if n == 0 {
-		p.coalesceRunning = false
+	for {
+		p.coalesceMu.Lock()
+		n := len(p.coalesceReady)
+		if n == 0 {
+			p.coalesceRunning = false
+			p.coalesceMu.Unlock()
+			return
+		}
+		if n > inKernelDecodeCohortMax {
+			n = inKernelDecodeCohortMax
+		}
+		cohort := append([]*inKernelCoalesceRequest(nil), p.coalesceReady[:n]...)
+		p.coalesceReady = p.coalesceReady[n:]
 		p.coalesceMu.Unlock()
-		return
+		p.runDecodeCohort(cohort)
 	}
-	if n > inKernelDecodeCohortMax {
-		n = inKernelDecodeCohortMax
-	}
-	cohort := append([]*inKernelCoalesceRequest(nil), p.coalesceReady[:n]...)
-	p.coalesceReady = p.coalesceReady[n:]
-	p.coalesceMu.Unlock()
-	p.runDecodeCohort(cohort)
-
-	p.coalesceMu.Lock()
-	if len(p.coalesceReady) == 0 {
-		p.coalesceRunning = false
-	} else {
-		// Keep ownership live across the handoff so arrivals cannot elect a second
-		// drainer. Only the first unprocessed request receives the one-slot baton;
-		// it drains the next cohort in its own Complete stack.
-		p.coalesceReady[0].drain <- struct{}{}
-	}
-	p.coalesceMu.Unlock()
 }
 
 func (p *InKernelPlanner) runDecodeCohort(cohort []*inKernelCoalesceRequest) {
