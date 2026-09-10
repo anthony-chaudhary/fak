@@ -327,7 +327,7 @@ func runOpencodeConfig(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	if (*halo || *strix) && *model == projectassets.DefaultOpenCodeModelID {
-		*model = projectassets.ResolveDynamicHaloModel(".")
+		*model = projectassets.ResolveDynamicHaloModel(*dir)
 	}
 	baseURL := *addr
 	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {

@@ -20,11 +20,11 @@ func TestRunServeCodexConfigPreview(t *testing.T) {
 	runServeCodexConfig(sf, &buf, false)
 
 	out := buf.String()
-	if !strings.Contains(out, `model_provider = "fak"`) {
-		t.Errorf("expected model_provider in preview: %s", out)
+	if strings.Contains(out, `model_provider = "fak"`) {
+		t.Errorf("expected preview NOT to hijack model_provider: %s", out)
 	}
-	if !strings.Contains(out, `model = "qwen38:27b-q4"`) {
-		t.Errorf("expected model in preview: %s", out)
+	if !strings.Contains(out, `[model_providers.fak]`) {
+		t.Errorf("expected [model_providers.fak] in preview: %s", out)
 	}
 	if !strings.Contains(out, `base_url = "http://127.0.0.1:8080/v1"`) {
 		t.Errorf("expected base_url in preview: %s", out)

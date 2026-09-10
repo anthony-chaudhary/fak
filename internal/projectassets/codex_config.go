@@ -25,6 +25,8 @@ const (
 )
 
 // GenerateCodexConfig generates the TOML configuration block for Codex model_providers.fak.
+// It explicitly omits top-level model_provider = "fak" so that local Codex continues to use
+// its normal default provider, allowing fak codex to use -c model_provider=fak independently.
 func GenerateCodexConfig(baseURL, modelID, wireAPI, envKey string) string {
 	baseURL = strings.TrimSpace(baseURL)
 	if baseURL == "" {
@@ -44,8 +46,6 @@ func GenerateCodexConfig(baseURL, modelID, wireAPI, envKey string) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("model_provider = %q\n", DefaultCodexProviderID))
-	sb.WriteString(fmt.Sprintf("model = %q\n\n", modelID))
 	sb.WriteString(fmt.Sprintf("[model_providers.%s]\n", DefaultCodexProviderID))
 	sb.WriteString("name = \"fak serve\"\n")
 	sb.WriteString(fmt.Sprintf("base_url = %q\n", baseURL))
@@ -56,8 +56,8 @@ func GenerateCodexConfig(baseURL, modelID, wireAPI, envKey string) string {
 
 // ResolveCodexConfigFile resolves the path to Codex's config.toml in priority order:
 // 1. explicit codexHome or config file path
-// 2. $CODEX_HOME/config.toml
-// 3. workspace directory containing .codex/config.toml or config.toml
+// 2. workspace directory containing .codex/config.toml or config.toml
+// 3. $CODEX_HOME/config.toml
 // 4. ~/.codex/config.toml (standard default)
 func ResolveCodexConfigFile(codexHome, dir string) string {
 	if h := strings.TrimSpace(codexHome); h != "" {
@@ -66,13 +66,6 @@ func ResolveCodexConfigFile(codexHome, dir string) string {
 			return h
 		}
 		return filepath.Join(h, "config.toml")
-	}
-	if envHome := strings.TrimSpace(os.Getenv("CODEX_HOME")); envHome != "" {
-		envHome = expandTilde(envHome)
-		if strings.HasSuffix(strings.ToLower(envHome), ".toml") {
-			return envHome
-		}
-		return filepath.Join(envHome, "config.toml")
 	}
 	if d := strings.TrimSpace(dir); d != "" {
 		d = expandTilde(d)
@@ -92,6 +85,13 @@ func ResolveCodexConfigFile(codexHome, dir string) string {
 		}
 		return cand2
 	}
+	if envHome := strings.TrimSpace(os.Getenv("CODEX_HOME")); envHome != "" {
+		envHome = expandTilde(envHome)
+		if strings.HasSuffix(strings.ToLower(envHome), ".toml") {
+			return envHome
+		}
+		return filepath.Join(envHome, "config.toml")
+	}
 	if uHome, err := os.UserHomeDir(); err == nil && uHome != "" {
 		return filepath.Join(uHome, ".codex", "config.toml")
 	}
@@ -108,8 +108,10 @@ func expandTilde(p string) string {
 }
 
 // EnsureCodexProviderConfig ensures config.toml contains the "fak" provider table pointing
-// to baseURL with modelID, wireAPI, and envKey, setting model_provider = "fak", while preserving
-// all existing tables and comments.
+// to baseURL with wireAPI and envKey, while preserving all existing tables and comments.
+// It explicitly DOES NOT hijack top-level model_provider (which breaks normal local Codex
+// sessions expecting OpenAI/ChatGPT credentials), and actively removes model_provider = "fak"
+// if previously injected. fak codex uses -c model_provider=fak dynamically per invocation.
 func EnsureCodexProviderConfig(targetPath, baseURL, modelID, wireAPI, envKey string) (bool, error) {
 	targetPath = strings.TrimSpace(targetPath)
 	if targetPath == "" {
@@ -165,49 +167,29 @@ func EnsureCodexProviderConfig(targetPath, baseURL, modelID, wireAPI, envKey str
 
 	modified := false
 
-	// Check / update top-level model_provider and model
+	// Sanitize top-level model_provider:
+	// If model_provider was previously set to "fak", strip it so local Codex is not hijacked.
+	// We deliberately do NOT set or overwrite model_provider or model at the top level.
 	topEnd := findFirstTOMLSectionHeader(lines)
 	if topEnd < 0 {
 		topEnd = len(lines)
 	}
 
-	modelProvLine := fmt.Sprintf("model_provider = %q", DefaultCodexProviderID)
-	modelLine := fmt.Sprintf("model = %q", modelID)
-
 	mpIdx := findKeyInLines(lines[:topEnd], "model_provider")
 	if mpIdx >= 0 {
-		if strings.TrimSpace(lines[mpIdx]) != modelProvLine {
-			lines[mpIdx] = modelProvLine
-			modified = true
-		}
-	} else {
-		// Insert at top
-		lines = append([]string{modelProvLine}, lines...)
-		modified = true
-		topEnd++
-		if startIdx >= 0 {
-			startIdx++
-			endIdx++
-		}
-	}
-
-	mIdx := findKeyInLines(lines[:topEnd], "model")
-	if mIdx >= 0 {
-		if strings.TrimSpace(lines[mIdx]) != modelLine {
-			lines[mIdx] = modelLine
-			modified = true
-		}
-	} else {
-		// Insert after model_provider
-		insertAt := 1
-		if insertAt > topEnd {
-			insertAt = topEnd
-		}
-		lines = append(lines[:insertAt], append([]string{modelLine}, lines[insertAt:]...)...)
-		modified = true
-		if startIdx >= 0 {
-			startIdx++
-			endIdx++
+		trimmed := strings.TrimSpace(lines[mpIdx])
+		parts := strings.SplitN(trimmed, "=", 2)
+		if len(parts) == 2 {
+			val := strings.Trim(strings.TrimSpace(parts[1]), "\"'")
+			if val == DefaultCodexProviderID {
+				lines = append(lines[:mpIdx], lines[mpIdx+1:]...)
+				modified = true
+				topEnd--
+				if startIdx > mpIdx {
+					startIdx--
+					endIdx--
+				}
+			}
 		}
 	}
 
