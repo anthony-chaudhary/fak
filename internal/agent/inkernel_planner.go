@@ -94,6 +94,10 @@ type InKernelPlanner struct {
 	mu         sync.Mutex
 	tree       *radixkv.Tree
 	scopedTree *radixkv.ScopedTree
+	// prefixFlights bridges the cold lookup-to-admission gap for concurrent
+	// plain-CPU requests. Its zero value is ready for constructor and bare-test
+	// planners alike; persistent ownership remains in tree/scopedTree.
+	prefixFlights radixkv.PrefixFlightGroup
 
 	// devMu serializes the WHOLE device forward pass (Prefill + the decode loop) when a
 	// backend or native Metal is wired. These accelerators have one shared command stream and

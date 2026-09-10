@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -588,4 +589,514 @@ func TestPrefixFlightGroupStandalone(t *testing.T) {
 	if coalesced := g.Coalesced(); coalesced != numSubagents-1 {
 		t.Fatalf("expected %d coalesced, got %d", numSubagents-1, coalesced)
 	}
+}
+
+type sharedPrefixFlightResult struct {
+	kv      *model.KVCache
+	logits  []float32
+	matched int
+	leader  bool
+	err     error
+}
+
+func sharedPrefixTestIDs(n int, seed uint64) []int {
+	ids := make([]int, n)
+	state := seed + 1
+	for i := range ids {
+		state = state*6364136223846793005 + 1442695040888963407
+		ids[i] = 1 + int(state%61)
+	}
+	return ids
+}
+
+func sharedPrefixTestPrompt(common []int, suffixLen, marker int, seed uint64) []int {
+	suffix := sharedPrefixTestIDs(suffixLen, seed)
+	suffix[0] = marker
+	return append(append([]int(nil), common...), suffix...)
+}
+
+func awaitSharedPrefixCondition(t *testing.T, what string, ok func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !ok() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		runtime.Gosched()
+	}
+}
+
+func receiveSharedPrefixResult(t *testing.T, ch <-chan sharedPrefixFlightResult) sharedPrefixFlightResult {
+	t.Helper()
+	select {
+	case result := <-ch:
+		return result
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for prefix-flight result")
+		return sharedPrefixFlightResult{}
+	}
+}
+
+// TestPrefixFlightGroupSharedPrefixContract is the behavioral contract for
+// transient CPU prefill reuse. Distinct prompts may share only valuable work,
+// and every waiter receives independently owned state.
+func TestPrefixFlightGroupSharedPrefixContract(t *testing.T) {
+	t.Run("distinct siblings clone a valuable prefix", func(t *testing.T) {
+		m := newSyntheticTiny()
+		g := NewPrefixFlightGroup(nil)
+		common := sharedPrefixTestIDs(128, 1)
+		prompts := [][]int{
+			sharedPrefixTestPrompt(common, 80, 7, 2),
+			sharedPrefixTestPrompt(common, 90, 8, 3),
+			sharedPrefixTestPrompt(common, 100, 9, 4),
+		}
+
+		entered := make(chan struct{})
+		release := make(chan struct{})
+		leaderResult := make(chan sharedPrefixFlightResult, 1)
+		var callbacks atomic.Int64
+		var publishedBytes atomic.Int64
+		leaderSession := m.NewSession()
+		go func() {
+			kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(context.Background(), "tenant/a", prompts[0], 64, func(context.Context) (*model.KVCache, []float32, error) {
+				callbacks.Add(1)
+				close(entered)
+				<-release
+				logits := leaderSession.Prefill(prompts[0])
+				publishedBytes.Store(leaderSession.Cache.ClonePayloadBytes())
+				return leaderSession.Cache, logits, nil
+			})
+			if err == nil {
+				leaderSession.Step(5)
+				leaderSession.Cache.Truncate(1)
+			}
+			leaderResult <- sharedPrefixFlightResult{kv: kv, logits: logits, matched: matched, leader: leader, err: err}
+		}()
+		<-entered
+
+		followers := make([]chan sharedPrefixFlightResult, 2)
+		for i := range followers {
+			followers[i] = make(chan sharedPrefixFlightResult, 1)
+			prompt := prompts[i+1]
+			go func(out chan<- sharedPrefixFlightResult) {
+				kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(context.Background(), "tenant/a", prompt, 64, func(context.Context) (*model.KVCache, []float32, error) {
+					callbacks.Add(1)
+					s := m.NewSession()
+					return s.Cache, s.Prefill(prompt), nil
+				})
+				out <- sharedPrefixFlightResult{kv: kv, logits: logits, matched: matched, leader: leader, err: err}
+			}(followers[i])
+		}
+		awaitSharedPrefixCondition(t, "two followers to join", func() bool { return g.Coalesced() == 2 })
+		close(release)
+
+		leader := receiveSharedPrefixResult(t, leaderResult)
+		if leader.err != nil || !leader.leader || leader.matched != 0 {
+			t.Fatalf("leader result=%+v, want leader with matched=0", leader)
+		}
+		got := make([]sharedPrefixFlightResult, 2)
+		for i := range got {
+			got[i] = receiveSharedPrefixResult(t, followers[i])
+			if got[i].err != nil || got[i].leader || got[i].matched != len(common) {
+				t.Fatalf("follower %d result=%+v, want matched=%d follower", i, got[i], len(common))
+			}
+			if got[i].kv == nil || got[i].kv.Len() != len(common) {
+				t.Fatalf("follower %d KV len=%v, want %d", i, got[i].kv, len(common))
+			}
+			if got[i].logits != nil {
+				t.Fatalf("follower %d received partial-prefix logits", i)
+			}
+			lineageSession := m.SessionFromPrefix(got[i].kv)
+			if _, err := lineageSession.VerifyTokenLineage(common); err != nil {
+				t.Fatalf("follower %d tail removal did not preserve token lineage: %v", i, err)
+			}
+		}
+		if callbacks.Load() != 1 {
+			t.Fatalf("prefill callbacks=%d, want 1", callbacks.Load())
+		}
+		bytesPerClone := publishedBytes.Load()
+		if bytesPerClone <= 0 || g.ClonePayloadBytes() != 3*bytesPerClone {
+			t.Fatalf("clone payload bytes=%d, want publication plus two follower clones=%d", g.ClonePayloadBytes(), 3*bytesPerClone)
+		}
+		got[0].kv.Truncate(64)
+		if got[1].kv.Len() != len(common) {
+			t.Fatalf("follower KV aliases sibling: len=%d want %d", got[1].kv.Len(), len(common))
+		}
+	})
+
+	t.Run("shorter exact follower never receives longer-leader logits", func(t *testing.T) {
+		m := newSyntheticTiny()
+		g := NewPrefixFlightGroup(nil)
+		short := sharedPrefixTestIDs(128, 5)
+		long := sharedPrefixTestPrompt(short, 80, 7, 6)
+		entered, release := make(chan struct{}), make(chan struct{})
+		leaderDone := make(chan sharedPrefixFlightResult, 1)
+		go func() {
+			s := m.NewSession()
+			kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(context.Background(), "tenant/a", long, 64, func(context.Context) (*model.KVCache, []float32, error) {
+				close(entered)
+				<-release
+				return s.Cache, s.Prefill(long), nil
+			})
+			leaderDone <- sharedPrefixFlightResult{kv, logits, matched, leader, err}
+		}()
+		<-entered
+		followerDone := make(chan sharedPrefixFlightResult, 1)
+		go func() {
+			kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(context.Background(), "tenant/a", short, 64, func(context.Context) (*model.KVCache, []float32, error) {
+				return nil, nil, errors.New("shorter follower ran callback")
+			})
+			followerDone <- sharedPrefixFlightResult{kv, logits, matched, leader, err}
+		}()
+		awaitSharedPrefixCondition(t, "shorter exact follower to join", func() bool { return g.Coalesced() == 1 })
+		close(release)
+		if result := receiveSharedPrefixResult(t, leaderDone); result.err != nil {
+			t.Fatal(result.err)
+		}
+		result := receiveSharedPrefixResult(t, followerDone)
+		if result.err != nil || result.leader || result.matched != len(short) || result.kv == nil || result.kv.Len() != len(short) {
+			t.Fatalf("shorter follower result leader=%v matched=%d kv=%v err=%v", result.leader, result.matched, result.kv, result.err)
+		}
+		if result.logits != nil {
+			t.Fatal("shorter exact follower received logits for the longer leader prompt")
+		}
+		if _, err := m.SessionFromPrefix(result.kv).VerifyTokenLineage(short); err != nil {
+			t.Fatalf("shorter follower lineage: %v", err)
+		}
+	})
+
+	t.Run("recurrent partial tail falls back cold", func(t *testing.T) {
+		cfg := model.Config{
+			HiddenSize: 32, NumLayers: 4, NumHeads: 4, NumKVHeads: 2, HeadDim: 8,
+			IntermediateSize: 64, VocabSize: 64, RMSNormEps: 1e-5, RopeTheta: 10000, EOSTokenID: -1,
+			LayerTypes:          []string{"linear_attention", "linear_attention", "linear_attention", "full_attention"},
+			LinearConvKernelDim: 3, LinearKeyHeadDim: 8, LinearNumKeyHeads: 2,
+			LinearValueHeadDim: 8, LinearNumValueHeads: 4, AttnOutputGate: true,
+			FullAttentionInterval: 4, NormGain1p: true, TieWordEmbeddings: true,
+		}
+		m := model.NewSynthetic(cfg)
+		g := NewPrefixFlightGroup(nil)
+		common := sharedPrefixTestIDs(128, 7)
+		long := sharedPrefixTestPrompt(common, 80, 7, 8)
+		follower := sharedPrefixTestPrompt(common, 90, 8, 9)
+		entered, release := make(chan struct{}), make(chan struct{})
+		leaderDone := make(chan sharedPrefixFlightResult, 1)
+		go func() {
+			s := m.NewSession()
+			kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(context.Background(), "tenant/a", long, 64, func(context.Context) (*model.KVCache, []float32, error) {
+				close(entered)
+				<-release
+				return s.Cache, s.Prefill(long), nil
+			})
+			leaderDone <- sharedPrefixFlightResult{kv, logits, matched, leader, err}
+		}()
+		<-entered
+		followerDone := make(chan sharedPrefixFlightResult, 1)
+		go func() {
+			kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(context.Background(), "tenant/a", follower, 64, func(context.Context) (*model.KVCache, []float32, error) {
+				return nil, nil, errors.New("joined recurrent follower ran callback")
+			})
+			followerDone <- sharedPrefixFlightResult{kv, logits, matched, leader, err}
+		}()
+		awaitSharedPrefixCondition(t, "recurrent follower to join", func() bool { return g.Coalesced() == 1 })
+		close(release)
+		if result := receiveSharedPrefixResult(t, leaderDone); result.err != nil {
+			t.Fatal(result.err)
+		}
+		result := receiveSharedPrefixResult(t, followerDone)
+		if result.err != nil || result.leader || result.matched != 0 || result.kv != nil || result.logits != nil {
+			t.Fatalf("unsupported recurrent partial restore did not fall back cold: leader=%v matched=%d kv=%v logits=%d err=%v", result.leader, result.matched, result.kv, len(result.logits), result.err)
+		}
+	})
+
+	t.Run("admission floor and saved-work ratio", func(t *testing.T) {
+		for _, tc := range []struct {
+			name       string
+			commonLen  int
+			leaderTail int
+		}{
+			{name: "below floor", commonLen: 63, leaderTail: 32},
+			{name: "leader tail exceeds common", commonLen: 128, leaderTail: 129},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				m := newSyntheticTiny()
+				g := NewPrefixFlightGroup(nil)
+				common := sharedPrefixTestIDs(tc.commonLen, 10)
+				a := sharedPrefixTestPrompt(common, tc.leaderTail, 7, 11)
+				b := sharedPrefixTestPrompt(common, 70, 8, 12)
+				entered, release := make(chan struct{}), make(chan struct{})
+				leaderDone := make(chan sharedPrefixFlightResult, 1)
+				go func() {
+					kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(context.Background(), "tenant/a", a, 64, func(context.Context) (*model.KVCache, []float32, error) {
+						close(entered)
+						<-release
+						s := m.NewSession()
+						return s.Cache, s.Prefill(a), nil
+					})
+					leaderDone <- sharedPrefixFlightResult{kv, logits, matched, leader, err}
+				}()
+				<-entered
+				s := m.NewSession()
+				kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(context.Background(), "tenant/a", b, 64, func(context.Context) (*model.KVCache, []float32, error) {
+					return s.Cache, s.Prefill(b), nil
+				})
+				if err != nil || !leader || matched != 0 || kv == nil || logits == nil {
+					t.Fatalf("low-value request unexpectedly followed: leader=%v matched=%d err=%v", leader, matched, err)
+				}
+				if g.Coalesced() != 0 {
+					t.Fatalf("low-value coalesced=%d, want 0", g.Coalesced())
+				}
+				close(release)
+				if result := receiveSharedPrefixResult(t, leaderDone); result.err != nil {
+					t.Fatal(result.err)
+				}
+			})
+		}
+	})
+
+	t.Run("rank saved work before raw common length", func(t *testing.T) {
+		m := newSyntheticTiny()
+		g := NewPrefixFlightGroup(nil)
+		base := sharedPrefixTestIDs(120, 20)
+		extra := sharedPrefixTestIDs(8, 21)
+		longCommon := append(append([]int(nil), base...), extra...)
+		longLeader := sharedPrefixTestPrompt(longCommon, 128, 7, 22)
+		shortLeader := append([]int(nil), base...)
+		follower := sharedPrefixTestPrompt(longCommon, 72, 9, 23)
+		releaseLong, releaseShort := make(chan struct{}), make(chan struct{})
+		enteredLong, enteredShort := make(chan struct{}), make(chan struct{})
+		done := make(chan sharedPrefixFlightResult, 2)
+		start := func(tokens []int, entered chan struct{}, release chan struct{}) {
+			go func() {
+				kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(context.Background(), "tenant/a", tokens, 64, func(context.Context) (*model.KVCache, []float32, error) {
+					close(entered)
+					<-release
+					s := m.NewSession()
+					return s.Cache, s.Prefill(tokens), nil
+				})
+				done <- sharedPrefixFlightResult{kv, logits, matched, leader, err}
+			}()
+		}
+		start(longLeader, enteredLong, releaseLong)
+		<-enteredLong
+		start(shortLeader, enteredShort, releaseShort)
+		<-enteredShort
+		followerDone := make(chan sharedPrefixFlightResult, 1)
+		go func() {
+			s := m.NewSession()
+			kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(context.Background(), "tenant/a", follower, 64, func(context.Context) (*model.KVCache, []float32, error) {
+				return s.Cache, s.Prefill(follower), nil
+			})
+			followerDone <- sharedPrefixFlightResult{kv, logits, matched, leader, err}
+		}()
+		awaitSharedPrefixCondition(t, "ranked follower to join", func() bool { return g.Coalesced() == 1 })
+		close(releaseShort)
+		result := receiveSharedPrefixResult(t, followerDone)
+		if result.err != nil || result.leader || result.matched != len(base) {
+			t.Fatalf("ranked result leader=%v matched=%d err=%v, want shorter 120-token flight with greater saved-work surplus", result.leader, result.matched, result.err)
+		}
+		close(releaseLong)
+		for range 2 {
+			if result := receiveSharedPrefixResult(t, done); result.err != nil {
+				t.Fatal(result.err)
+			}
+		}
+	})
+
+	t.Run("namespace cancellation and failed leader cleanup", func(t *testing.T) {
+		m := newSyntheticTiny()
+		common := sharedPrefixTestIDs(128, 30)
+		a := sharedPrefixTestPrompt(common, 80, 7, 31)
+		b := sharedPrefixTestPrompt(common, 90, 8, 32)
+
+		t.Run("namespace isolation", func(t *testing.T) {
+			g := NewPrefixFlightGroup(nil)
+			entered, release := make(chan struct{}), make(chan struct{})
+			done := make(chan sharedPrefixFlightResult, 1)
+			go func() {
+				kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(context.Background(), "tenant/a", a, 64, func(context.Context) (*model.KVCache, []float32, error) {
+					close(entered)
+					<-release
+					s := m.NewSession()
+					return s.Cache, s.Prefill(a), nil
+				})
+				done <- sharedPrefixFlightResult{kv, logits, matched, leader, err}
+			}()
+			<-entered
+			s := m.NewSession()
+			_, _, matched, leader, err := g.CoalesceSharedPrefixNS(context.Background(), "tenant/b", b, 64, func(context.Context) (*model.KVCache, []float32, error) {
+				return s.Cache, s.Prefill(b), nil
+			})
+			if err != nil || !leader || matched != 0 || g.Coalesced() != 0 {
+				t.Fatalf("cross-namespace request joined: leader=%v matched=%d coalesced=%d err=%v", leader, matched, g.Coalesced(), err)
+			}
+			close(release)
+			if result := receiveSharedPrefixResult(t, done); result.err != nil {
+				t.Fatal(result.err)
+			}
+		})
+
+		t.Run("follower cancellation", func(t *testing.T) {
+			g := NewPrefixFlightGroup(nil)
+			entered, release := make(chan struct{}), make(chan struct{})
+			leaderDone := make(chan sharedPrefixFlightResult, 1)
+			go func() {
+				kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(context.Background(), "tenant/a", a, 64, func(context.Context) (*model.KVCache, []float32, error) {
+					close(entered)
+					<-release
+					s := m.NewSession()
+					return s.Cache, s.Prefill(a), nil
+				})
+				leaderDone <- sharedPrefixFlightResult{kv, logits, matched, leader, err}
+			}()
+			<-entered
+			ctx, cancel := context.WithCancel(context.Background())
+			followerDone := make(chan sharedPrefixFlightResult, 1)
+			go func() {
+				kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(ctx, "tenant/a", b, 64, func(context.Context) (*model.KVCache, []float32, error) {
+					return nil, nil, errors.New("cancelled follower ran callback")
+				})
+				followerDone <- sharedPrefixFlightResult{kv, logits, matched, leader, err}
+			}()
+			awaitSharedPrefixCondition(t, "cancellable follower to join", func() bool { return g.Coalesced() == 1 })
+			cancel()
+			if result := receiveSharedPrefixResult(t, followerDone); !errors.Is(result.err, context.Canceled) {
+				t.Fatalf("follower cancellation err=%v", result.err)
+			}
+			close(release)
+			if result := receiveSharedPrefixResult(t, leaderDone); result.err != nil {
+				t.Fatal(result.err)
+			}
+			if g.InFlight() != 0 {
+				t.Fatalf("in-flight entries=%d after cancellation", g.InFlight())
+			}
+		})
+
+		t.Run("cancel before call and ready race avoid clone", func(t *testing.T) {
+			g := NewPrefixFlightGroup(nil)
+			cancelled, cancel := context.WithCancel(context.Background())
+			cancel()
+			var callbacks atomic.Int64
+			if kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(cancelled, "tenant/a", a, 64, func(context.Context) (*model.KVCache, []float32, error) {
+				callbacks.Add(1)
+				return nil, nil, nil
+			}); !errors.Is(err, context.Canceled) || kv != nil || logits != nil || matched != 0 || leader || callbacks.Load() != 0 || g.InFlight() != 0 {
+				t.Fatalf("pre-cancel result leader=%v matched=%d kv=%v logits=%d callbacks=%d in_flight=%d err=%v", leader, matched, kv, len(logits), callbacks.Load(), g.InFlight(), err)
+			}
+
+			entered, release := make(chan struct{}), make(chan struct{})
+			leaderDone := make(chan sharedPrefixFlightResult, 1)
+			go func() {
+				s := m.NewSession()
+				kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(context.Background(), "tenant/a", a, 64, func(context.Context) (*model.KVCache, []float32, error) {
+					close(entered)
+					<-release
+					logits := s.Prefill(a)
+					return s.Cache, logits, nil
+				})
+				leaderDone <- sharedPrefixFlightResult{kv, logits, matched, leader, err}
+			}()
+			<-entered
+			ctx, cancelRace := context.WithCancel(context.Background())
+			followerDone := make(chan sharedPrefixFlightResult, 1)
+			go func() {
+				kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(ctx, "tenant/a", b, 64, func(context.Context) (*model.KVCache, []float32, error) {
+					return nil, nil, errors.New("cancelled ready-race follower ran callback")
+				})
+				followerDone <- sharedPrefixFlightResult{kv, logits, matched, leader, err}
+			}()
+			awaitSharedPrefixCondition(t, "ready-race follower to join", func() bool { return g.Coalesced() == 1 })
+			cancelRace()
+			close(release)
+			if result := receiveSharedPrefixResult(t, followerDone); !errors.Is(result.err, context.Canceled) {
+				t.Fatalf("ready-race follower err=%v", result.err)
+			}
+			if result := receiveSharedPrefixResult(t, leaderDone); result.err != nil {
+				t.Fatal(result.err)
+			}
+			if got := g.ClonePayloadBytes(); got != 0 {
+				t.Fatalf("all followers cancelled before completion but flight cloned %d payload bytes", got)
+			}
+		})
+
+		for _, failure := range []struct {
+			name string
+			run  func() error
+		}{
+			{name: "error", run: func() error { return errors.New("leader failed") }},
+			{name: "cancelled", run: func() error { return context.Canceled }},
+		} {
+			t.Run("leader "+failure.name+" permits one retry", func(t *testing.T) {
+				g := NewPrefixFlightGroup(nil)
+				entered, release := make(chan struct{}), make(chan struct{})
+				leaderDone := make(chan sharedPrefixFlightResult, 1)
+				go func() {
+					kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(context.Background(), "tenant/a", a, 64, func(context.Context) (*model.KVCache, []float32, error) {
+						close(entered)
+						<-release
+						return nil, nil, failure.run()
+					})
+					leaderDone <- sharedPrefixFlightResult{kv, logits, matched, leader, err}
+				}()
+				<-entered
+				var retries atomic.Int64
+				followerDone := make(chan sharedPrefixFlightResult, 1)
+				go func() {
+					kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(context.Background(), "tenant/a", b, 64, func(context.Context) (*model.KVCache, []float32, error) {
+						retries.Add(1)
+						s := m.NewSession()
+						return s.Cache, s.Prefill(b), nil
+					})
+					followerDone <- sharedPrefixFlightResult{kv, logits, matched, leader, err}
+				}()
+				awaitSharedPrefixCondition(t, "retrying follower to join", func() bool { return g.Coalesced() == 1 })
+				close(release)
+				if result := receiveSharedPrefixResult(t, leaderDone); result.err == nil {
+					t.Fatal("failed leader returned nil error")
+				}
+				result := receiveSharedPrefixResult(t, followerDone)
+				if result.err != nil || !result.leader || result.matched != 0 || retries.Load() != 1 {
+					t.Fatalf("retry result leader=%v matched=%d retries=%d err=%v", result.leader, result.matched, retries.Load(), result.err)
+				}
+				if g.InFlight() != 0 {
+					t.Fatalf("in-flight entries=%d after retry", g.InFlight())
+				}
+			})
+		}
+
+		t.Run("leader panic drains flight", func(t *testing.T) {
+			g := NewPrefixFlightGroup(nil)
+			entered, release := make(chan struct{}), make(chan struct{})
+			leaderRecovered := make(chan any, 1)
+			go func() {
+				defer func() { leaderRecovered <- recover() }()
+				_, _, _, _, _ = g.CoalesceSharedPrefixNS(context.Background(), "tenant/a", a, 64, func(context.Context) (*model.KVCache, []float32, error) {
+					close(entered)
+					<-release
+					panic("leader panic")
+				})
+			}()
+			<-entered
+			followerDone := make(chan sharedPrefixFlightResult, 1)
+			go func() {
+				s := m.NewSession()
+				kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(context.Background(), "tenant/a", b, 64, func(context.Context) (*model.KVCache, []float32, error) {
+					return s.Cache, s.Prefill(b), nil
+				})
+				followerDone <- sharedPrefixFlightResult{kv, logits, matched, leader, err}
+			}()
+			awaitSharedPrefixCondition(t, "panic follower to join", func() bool { return g.Coalesced() == 1 })
+			close(release)
+			if recovered := <-leaderRecovered; recovered == nil {
+				t.Fatal("leader panic was not propagated")
+			}
+			result := receiveSharedPrefixResult(t, followerDone)
+			if result.err != nil || !result.leader || result.matched != 0 {
+				t.Fatalf("post-panic retry leader=%v matched=%d err=%v", result.leader, result.matched, result.err)
+			}
+			if g.InFlight() != 0 {
+				t.Fatalf("in-flight entries=%d after panic", g.InFlight())
+			}
+		})
+	})
 }

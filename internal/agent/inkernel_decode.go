@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -16,6 +17,28 @@ import (
 )
 
 const inKernelQwenQ4KPrefillChunkTokens = 512
+const inKernelCPUPrefixFlightMinShared = 64
+
+const inKernelLegacyPrefixFlightNamespace = "legacy/unscoped"
+
+// inKernelPrefixFlightNamespace follows the same tenant ownership boundary as
+// ScopedTree.AdmitPrivate. Agent identity is intentionally omitted so sibling
+// agents within one authenticated tenant can share prefill work; unscoped
+// legacy calls live in a disjoint namespace.
+func inKernelPrefixFlightNamespace(ctx context.Context) string {
+	if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped {
+		return "private/tenant/" + owner.Tenant
+	}
+	return inKernelLegacyPrefixFlightNamespace
+}
+
+func (p *InKernelPlanner) cpuPrefixFlightEligible(reuse bool, matched int) bool {
+	// The bounded CPU cohort qualified coalescing only with one runnable Go P.
+	// Multi-P prefill keeps its existing concurrent path until clone and wait
+	// overhead are shown to pay back there as well.
+	return p != nil && reuse && matched == 0 && p.backend == nil && !p.metal &&
+		p.speculativeEngine == nil && p.metalMTPCoordinator == nil && runtime.GOMAXPROCS(0) == 1
+}
 
 type inKernelPrefillSession interface {
 	PrefillNoLogits([]int)
@@ -259,11 +282,11 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	}
 
 	// 1b) RECORD this turn's cache decision (#1538, inkernel_turntax.go). This is the seam the
-	// turn-tax planner is defined on: the lookup has run and every servability/trust gate above
-	// has settled (`matched` is final, and a prefix that matched but could not be served is still
+	// turn-tax planner is defined on: the persistent lookup has run and every servability/trust
+	// gate above has settled (a prefix that matched but could not be served is still
 	// visible as cacheable > 0 with matched == 0), while NO prefill or decode compute has happened
-	// yet — so the decision is made from signals known ahead of the work. One append per turn that
-	// reaches this seam, on the reuse path and the cold path alike.
+	// yet. Transient CPU flight reuse settles during step 2 and does not rewrite this ahead-of-work
+	// persistent-cache decision. One append per turn that reaches this seam.
 	p.recordTurnTax(promptTok, cacheable, matched)
 
 	// 2) Prefill ONLY the divergent suffix (the whole prompt on a miss). Device hybrid
@@ -275,6 +298,53 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	logits := cachedLogits
 	if logits == nil {
 		tp := time.Now()
+		flightPrefilled := false
+		if p.cpuPrefixFlightEligible(reuse, matched) && s.Cache != nil && s.Cache.CanEvict() == nil {
+			var flightKV *model.KVCache
+			var flightMatched int
+			var flightLeader bool
+			flightKV, logits, flightMatched, flightLeader, err = p.prefixFlights.CoalesceSharedPrefixNS(
+				ctx,
+				inKernelPrefixFlightNamespace(ctx),
+				ids,
+				inKernelCPUPrefixFlightMinShared,
+				func(runCtx context.Context) (*model.KVCache, []float32, error) {
+					flightLogits, prefillErr := p.prefillDivergentSuffix(runCtx, s, ids, measurement)
+					return s.Cache, flightLogits, prefillErr
+				},
+			)
+			if err != nil {
+				return
+			}
+			if flightLeader {
+				flightPrefilled = true
+			} else if flightKV != nil && flightMatched > 0 {
+				// The flight helper returned a request-owned clone. Preserve this
+				// session's request-local configuration while replacing its empty KV.
+				s.Cache = flightKV
+				p.preReservePackedQ4KRequest(s, len(ids), maxNew)
+				matched = flightMatched
+				if cacheable < matched {
+					cacheable = matched
+				}
+				// DeviceL1 is the existing enum label for process-local hot reuse;
+				// this handoff is CPU memory and makes no physical-device claim.
+				sourceTier = radixkv.SnapshotTierDeviceL1
+				// An exact handoff without logits needs the same last-token refeed as
+				// an exact persistent-cache hit. If recurrent state cannot truncate,
+				// discard the handoff and follow the ordinary cold path.
+				if matched >= len(ids) && logits == nil {
+					if inKernelRefeedLastTokenForExactHit(s, len(ids)) {
+						matched = len(ids) - 1
+					} else {
+						s.Cache = model.NewKVCache(p.m.Cfg)
+						p.preReservePackedQ4KRequest(s, len(ids), maxNew)
+						matched = 0
+						sourceTier = radixkv.SnapshotTierMiss
+					}
+				}
+			}
+		}
 		prefillAt := matched
 		checkpoint := inKernelAdaptiveSnapshotCheckpoint(prefillAt, cacheable, len(ids))
 		if reuse && p.backend != nil && checkpoint > prefillAt {
@@ -293,7 +363,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			}
 			prefillAt = checkpoint
 		}
-		if prefillAt < len(ids) {
+		if !flightPrefilled && prefillAt < len(ids) {
 			logits, err = p.prefillDivergentSuffix(ctx, s, ids[prefillAt:], measurement)
 			if err != nil {
 				return
