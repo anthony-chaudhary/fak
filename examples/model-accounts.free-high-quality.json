@@ -1,0 +1,69 @@
+{
+  "version": "fak-accounts/v1",
+  "accounts": [
+    {
+      "id": "free-groq",
+      "kind": "openai",
+      "base_url": "https://api.groq.com/openai/v1",
+      "cred_env": "FAK_GROQ_API_KEY",
+      "label": "Groq free tier for Qwen3.6 27B (request/token capped; key in FAK_GROQ_API_KEY)",
+      "requests_per_minute": 30,
+      "requests_per_day": 1000,
+      "tokens_per_minute": 8000,
+      "tokens_per_day": 200000
+    },
+    {
+      "id": "free-openrouter",
+      "kind": "openrouter",
+      "cred_env": "OPENROUTER_API_KEY",
+      "label": "OpenRouter free pool via auto route (key in OPENROUTER_API_KEY; pin :free ids at bind time)"
+    },
+    {
+      "id": "free-gemini",
+      "kind": "gemini",
+      "cred_env": "GEMINI_API_KEY",
+      "label": "Google AI Studio free tier, native Gemini wire (key in GEMINI_API_KEY)"
+    },
+    {
+      "id": "free-gemini-vertex",
+      "kind": "openai",
+      "base_url": "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/YOUR_GCP_PROJECT/locations/us-central1/endpoints/openapi",
+      "cred_env": "FAK_GEMINI_GCP_KEY",
+      "label": "Gemini free/burst via Vertex OpenAI-compatible endpoint (GCP access token in FAK_GEMINI_GCP_KEY)"
+    },
+    {
+      "id": "free-opencode",
+      "kind": "openai",
+      "base_url": "https://opencode.ai/zen/go/v1",
+      "cred_env": "OPENCODE_GO_API_KEY",
+      "label": "OpenCode Go trial seat (key in OPENCODE_GO_API_KEY)"
+    }
+  ],
+  "bindings": [
+    {
+      "model": "free-coding",
+      "account": "free-groq",
+      "upstream_model": "qwen/qwen3.6-27b"
+    },
+    {
+      "model": "free-reasoning",
+      "account": "free-gemini",
+      "upstream_model": "gemini-3-pro"
+    },
+    {
+      "model": "free-flash",
+      "account": "free-gemini-vertex",
+      "upstream_model": "google/gemini-3.5-flash"
+    },
+    {
+      "model": "free-auto",
+      "account": "free-openrouter",
+      "upstream_model": "openrouter/auto"
+    },
+    {
+      "model": "free-ox",
+      "account": "free-opencode",
+      "upstream_model": "ox-alpha-free"
+    }
+  ]
+}
