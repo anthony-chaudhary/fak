@@ -251,6 +251,19 @@ func (v *vulkanBackend) VulkanDebugSetRestoreFailureAfterSubmits(successfulSubmi
 	C.fvk_debug_restore_fail_after_submits(C.int(successfulSubmits))
 }
 
+// VulkanDebugSetD2HStagingFailureOnce makes the next device-to-host copy return
+// the shim's unattributed staging-allocation failure. It is a one-shot test seam;
+// passing false disarms a pending injection during test cleanup.
+func (v *vulkanBackend) VulkanDebugSetD2HStagingFailureOnce(enabled bool) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	var value C.int
+	if enabled {
+		value = 1
+	}
+	C.fvk_debug_d2h_staging_failure_once(value)
+}
+
 func (v *vulkanBackend) VulkanDebugRestoreActive() bool {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()

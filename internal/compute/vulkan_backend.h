@@ -48,7 +48,13 @@ void *fvk_malloc(size_t bytes);
 void *fvk_malloc_hostvis(size_t bytes);
 void fvk_free(void *d);
 void fvk_h2d(void *d, const void *h, size_t bytes);
-void fvk_d2h(void *h, const void *d, size_t bytes);
+/* fvk_d2h returns 0 only after the requested bytes reached host memory. Negative
+ * values preserve VkResult failures when one is available. The positive private
+ * status identifies an otherwise-unattributed staging allocation failure. */
+#define FVK_D2H_STAGING_ALLOCATION_FAILED 1
+int fvk_d2h(void *h, const void *d, size_t bytes);
+/* One-shot deterministic failure injection for backend tests. */
+void fvk_debug_d2h_staging_failure_once(int enabled);
 void fvk_d2d(void *dst, const void *src, size_t bytes);
 /* fvk_d2d_off copies `bytes` from src[0..] into dst at byte offset dst_off — the
  * device-resident KV append (write a new K/V row at the tail of the layer buffer). */
