@@ -132,6 +132,31 @@ func TestCompanionBridge_MissingCompanion(t *testing.T) {
 	if !strings.Contains(stdout.String(), "Usage: fak-dev audit-leak") {
 		t.Errorf("expected usage in stdout for --help, got: %s", stdout.String())
 	}
+
+	// 7. RunCompanionStrix without --help
+	stdout.Reset()
+	stderr.Reset()
+	code = RunCompanionStrix(&stdout, &stderr, []string{"key"})
+	if code != 1 {
+		t.Errorf("expected exit code 1 for missing companion, got %d", code)
+	}
+	if !strings.Contains(stderr.String(), "fak-dev strix: companion repository (fak-private) not found. Set FAK_PRIVATE_ROOT or clone fak-private as sibling.") {
+		t.Errorf("unexpected stderr: %s", stderr.String())
+	}
+
+	// 8. RunCompanionStrix with --help
+	stdout.Reset()
+	stderr.Reset()
+	code = RunCompanionStrix(&stdout, &stderr, []string{"--help"})
+	if code != 0 {
+		t.Errorf("expected exit code 0 for --help on missing companion, got %d", code)
+	}
+	if !strings.Contains(stdout.String(), "fak-dev strix: companion repository (fak-private) not found") {
+		t.Errorf("expected notice in stdout for --help, got: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Usage: fak-dev strix") {
+		t.Errorf("expected usage in stdout for --help, got: %s", stdout.String())
+	}
 }
 
 func TestCompanionBridge_InvocationHelpers(t *testing.T) {
@@ -237,5 +262,16 @@ func TestCompanionBridge_Live(t *testing.T) {
 	code = RunCompanionAuditLeak(&stdout, &stderr, []string{"--staged"})
 	if code != 0 {
 		t.Fatalf("audit-leak --staged failed with code %d. stderr: %s", code, stderr.String())
+	}
+
+	// 7. Strix --help
+	stdout.Reset()
+	stderr.Reset()
+	code = RunCompanionStrix(&stdout, &stderr, []string{"--help"})
+	if code != 0 {
+		t.Fatalf("strix --help failed with code %d. stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Usage: fak-dev strix") {
+		t.Errorf("unexpected strix --help output: %s", stdout.String())
 	}
 }
