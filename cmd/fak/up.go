@@ -330,7 +330,7 @@ type turnkeyServer struct {
 	plan         macfit.TurnkeyProfile
 	mock         bool
 	engineID     string
-	planner      *agent.InKernelPlanner
+	planner      agent.Planner
 	listener     net.Listener
 	boundAddr    string
 	httpServer   *http.Server
@@ -349,7 +349,8 @@ func (s *turnkeyServer) Plan() macfit.TurnkeyProfile {
 }
 
 func (s *turnkeyServer) Planner() *agent.InKernelPlanner {
-	return s.planner
+	planner, _ := s.planner.(*agent.InKernelPlanner)
+	return planner
 }
 
 func (s *turnkeyServer) Shutdown(ctx context.Context) error {
@@ -467,12 +468,16 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 	if mock {
 		engineID = "mock"
 	}
+	var servedPlanner agent.Planner
+	if planner != nil {
+		servedPlanner = planner
+	}
 
 	ts := &turnkeyServer{
 		plan:      plan,
 		mock:      mock,
 		engineID:  engineID,
-		planner:   planner,
+		planner:   servedPlanner,
 		listener:  ln,
 		boundAddr: ln.Addr().String(),
 	}
@@ -521,8 +526,8 @@ func (s *turnkeyServer) handleModels(w http.ResponseWriter, r *http.Request) {
 		"owned_by":   "fak",
 		"permission": []any{},
 	}
-	if s.planner != nil {
-		if contextWindow := s.planner.ContextWindow(); contextWindow > 0 {
+	if planner, ok := s.planner.(interface{ ContextWindow() int }); ok {
+		if contextWindow := planner.ContextWindow(); contextWindow > 0 {
 			row["context_length"] = contextWindow
 		}
 	}
