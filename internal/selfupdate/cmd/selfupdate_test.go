@@ -1147,7 +1147,15 @@ func TestDiscoverRepoRoot_ChildFakInCWD(t *testing.T) {
 	if discovered == "" {
 		t.Fatal("discoverRepoRoot failed to find child fak directory")
 	}
-	if !strings.EqualFold(filepath.Clean(discovered), filepath.Clean(fakDir)) {
+	discClean, err := filepath.EvalSymlinks(discovered)
+	if err != nil {
+		discClean = filepath.Clean(discovered)
+	}
+	fakClean, err := filepath.EvalSymlinks(fakDir)
+	if err != nil {
+		fakClean = filepath.Clean(fakDir)
+	}
+	if !strings.EqualFold(discClean, fakClean) {
 		t.Fatalf("discoverRepoRoot() = %q, want %q", discovered, fakDir)
 	}
 }

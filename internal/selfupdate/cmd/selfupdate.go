@@ -2,9 +2,7 @@ package selfupdatecmd
 
 import (
 	"context"
-	"crypto/rand"
 	"debug/buildinfo"
-	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -561,30 +559,25 @@ func selfUpdateGateRunner(runner selfinstall.Runner) selfinstall.Runner {
 // perfectly converged — the success code is decoupled from whether an update happened. Every
 // exit path therefore emits exactly one greppable `self-update: outcome=<cause>` line, so the
 // tick leaves a durable, machine-readable record of WHICH of those four things it did.
-type selfUpdateOutcome string
+type selfUpdateOutcome = selfupdate.Outcome
 
 const (
-	outcomeInstalled      selfUpdateOutcome = "installed"      // target swapped to a fresh gated build
-	outcomeMetadataOnly   selfUpdateOutcome = "metadata_only"  // selected provenance advanced; binary bytes did not
-	outcomeTargetCurrent  selfUpdateOutcome = "target-current" // --target already at origin/main
-	outcomeSelfFresh      selfUpdateOutcome = "self-fresh"     // SELF mode, running binary is trunk tip
-	outcomeSelfAhead      selfUpdateOutcome = "self-ahead"     // SELF mode, local build newer than trunk
-	outcomeSelfLocal      selfUpdateOutcome = "self-local"     // SELF mode, dirty/unstamped/diverged
-	outcomeSelfUnknown    selfUpdateOutcome = "self-unknown"   // SELF mode, freshness unresolvable
-	outcomeBusy           selfUpdateOutcome = "busy"           // single-flight lock held by a live build
-	outcomeCheckOnly      selfUpdateOutcome = "check-only"     // --check reported and exited
-	outcomeGateFailed     selfUpdateOutcome = "gate-failed"    // build/vet/smoke refused the candidate
-	outcomePrepareFailed  selfUpdateOutcome = "prepare-failed" // could not stage the origin/main worktree
-	outcomeRolledBack     selfUpdateOutcome = "rolled-back"    // activation failed and all changed targets were restored
-	outcomeRollbackFailed selfUpdateOutcome = "rollback-failed"
-	outcomeHandoffRefused selfUpdateOutcome = "handoff-refused" // activation failed and at least one restore failed
-	// outcomeHotCopyDivergent: everything this tick was allowed to swap landed, but the role
-	// census still shows a declared hot copy on another build (typically the audit-only repo-root
-	// gate binary). Distinct from sibling-stale, which is a FAILED swap (#6508).
-	outcomeHotCopyDivergent selfUpdateOutcome = "hot-copy-divergent"
-	// outcomePinSkew: the binary executing this tick is not the reviewed one the scheduled task
-	// pinned, so it refused to adjudicate the fleet's binary at all (#6508).
-	outcomePinSkew selfUpdateOutcome = "pin-skew"
+	outcomeInstalled        selfUpdateOutcome = selfupdate.OutcomeInstalled
+	outcomeMetadataOnly     selfUpdateOutcome = selfupdate.OutcomeMetadataOnly
+	outcomeTargetCurrent    selfUpdateOutcome = selfupdate.OutcomeTargetCurrent
+	outcomeSelfFresh        selfUpdateOutcome = selfupdate.OutcomeSelfFresh
+	outcomeSelfAhead        selfUpdateOutcome = selfupdate.OutcomeSelfAhead
+	outcomeSelfLocal        selfUpdateOutcome = selfupdate.OutcomeSelfLocal
+	outcomeSelfUnknown      selfUpdateOutcome = selfupdate.OutcomeSelfUnknown
+	outcomeBusy             selfUpdateOutcome = selfupdate.OutcomeBusy
+	outcomeCheckOnly        selfUpdateOutcome = selfupdate.OutcomeCheckOnly
+	outcomeGateFailed       selfUpdateOutcome = selfupdate.OutcomeGateFailed
+	outcomePrepareFailed    selfUpdateOutcome = selfupdate.OutcomePrepareFailed
+	outcomeRolledBack       selfUpdateOutcome = selfupdate.OutcomeRolledBack
+	outcomeRollbackFailed   selfUpdateOutcome = selfupdate.OutcomeRollbackFailed
+	outcomeHandoffRefused   selfUpdateOutcome = selfupdate.OutcomeHandoffRefused
+	outcomeHotCopyDivergent selfUpdateOutcome = selfupdate.OutcomeHotCopyDivergent
+	outcomePinSkew          selfUpdateOutcome = selfupdate.OutcomePinSkew
 )
 
 func selfUpdateTransactionDetail(err error, rollbackErrors []error) string {
@@ -647,124 +640,29 @@ func emitSelfUpdateCheckOutcome(target, detail string, freshness binstamp.Freshn
 	selfUpdateJSON = nil
 }
 
-const selfUpdateReceiptSchema = "fak.self-update.receipt/v1"
+const selfUpdateReceiptSchema = selfupdate.ReceiptSchema
 
-type selfUpdateReceipt struct {
-	Schema          string                     `json:"schema"`
-	SchemaVersion   int                        `json:"schema_version"`
-	CorrelationID   string                     `json:"correlation_id"`
-	Status          string                     `json:"status"`
-	OldRevision     *string                    `json:"old_revision"`
-	NewRevision     *string                    `json:"new_revision"`
-	Targets         []selfUpdateReceiptTarget  `json:"targets"`
-	Attempted       int                        `json:"attempted"`
-	Changed         int                        `json:"changed"`
-	RollbackStatus  string                     `json:"rollback_status"`
-	RollbackErrors  []string                   `json:"rollback_errors"`
-	RestartRequired bool                       `json:"restart_required"`
-	NextCommand     string                     `json:"next_command"`
-	Detail          string                     `json:"detail,omitempty"`
-	BuildProvenance *selfUpdateBuildProvenance `json:"build_provenance,omitempty"`
-	Transfer        *selfUpdateTransferReceipt `json:"transfer,omitempty"`
-	Handoff         *selfUpdateHandoffReceipt  `json:"handoff,omitempty"`
-	TotalMS         int64                      `json:"total_ms"`
-	PhaseMS         selfUpdatePhaseMS          `json:"phase_ms"`
-}
-
-type selfUpdateReceiptTarget struct {
-	Role                    string `json:"role"`
-	Path                    string `json:"path"`
-	CompatibilityGroup      string `json:"compatibility_group,omitempty"`
-	DesiredArtifactDigest   string `json:"desired_artifact_digest,omitempty"`
-	InstalledArtifactDigest string `json:"installed_artifact_digest,omitempty"`
-	Acquisition             string `json:"acquisition,omitempty"`
-	Activation              string `json:"activation,omitempty"`
-	Rollback                string `json:"rollback,omitempty"`
-}
-
-type selfUpdateBuildProvenance struct {
-	SourceCommit         string            `json:"source_commit"`
-	ArtifactSourceCommit string            `json:"artifact_source_commit"`
-	BuildInputDigest     string            `json:"build_input_digest"`
-	BuildEnvelope        map[string]string `json:"build_envelope"`
-	ArtifactDigest       string            `json:"artifact_digest"`
-	ArtifactSize         int64             `json:"artifact_size"`
-	AppVersion           string            `json:"app_version"`
-	Reused               bool              `json:"reused"`
-}
-
-// selfUpdatePhaseMS is a fixed-shape object rather than a map so receipt consumers always see
-// the same phase vocabulary, including zeroes for phases an early exit did not reach.
-type selfUpdatePhaseMS struct {
-	Check     int64 `json:"check"`
-	Lock      int64 `json:"lock"`
-	Cleanup   int64 `json:"cleanup"`
-	Prepare   int64 `json:"prepare"`
-	Companion int64 `json:"companion"`
-	Build     int64 `json:"build"`
-	Vet       int64 `json:"vet"`
-	Smoke     int64 `json:"smoke"`
-	Install   int64 `json:"install"`
-	Verify    int64 `json:"verify"`
-	Handoff   int64 `json:"handoff"`
-}
-
-type selfUpdatePhase string
+type selfUpdateReceipt = selfupdate.Receipt
+type selfUpdateReceiptTarget = selfupdate.ReceiptTarget
+type selfUpdateBuildProvenance = selfupdate.BuildProvenance
+type selfUpdatePhaseMS = selfupdate.PhaseMS
+type selfUpdatePhase = selfupdate.Phase
 
 const (
-	selfUpdatePhaseCheck     selfUpdatePhase = "check"
-	selfUpdatePhaseLock      selfUpdatePhase = "lock"
-	selfUpdatePhaseCleanup   selfUpdatePhase = "cleanup"
-	selfUpdatePhasePrepare   selfUpdatePhase = "prepare"
-	selfUpdatePhaseCompanion selfUpdatePhase = "companion"
-	selfUpdatePhaseBuild     selfUpdatePhase = "build"
-	selfUpdatePhaseVet       selfUpdatePhase = "vet"
-	selfUpdatePhaseSmoke     selfUpdatePhase = "smoke"
-	selfUpdatePhaseInstall   selfUpdatePhase = "install"
-	selfUpdatePhaseVerify    selfUpdatePhase = "verify"
-	selfUpdatePhaseHandoff   selfUpdatePhase = "handoff"
+	selfUpdatePhaseCheck     selfUpdatePhase = selfupdate.PhaseCheck
+	selfUpdatePhaseLock      selfUpdatePhase = selfupdate.PhaseLock
+	selfUpdatePhaseCleanup   selfUpdatePhase = selfupdate.PhaseCleanup
+	selfUpdatePhasePrepare   selfUpdatePhase = selfupdate.PhasePrepare
+	selfUpdatePhaseCompanion selfUpdatePhase = selfupdate.PhaseCompanion
+	selfUpdatePhaseBuild     selfUpdatePhase = selfupdate.PhaseBuild
+	selfUpdatePhaseVet       selfUpdatePhase = selfupdate.PhaseVet
+	selfUpdatePhaseSmoke     selfUpdatePhase = selfupdate.PhaseSmoke
+	selfUpdatePhaseInstall   selfUpdatePhase = selfupdate.PhaseInstall
+	selfUpdatePhaseVerify    selfUpdatePhase = selfupdate.PhaseVerify
+	selfUpdatePhaseHandoff   selfUpdatePhase = selfupdate.PhaseHandoff
 )
 
-var selfUpdatePhaseOrder = [...]selfUpdatePhase{
-	selfUpdatePhaseCheck,
-	selfUpdatePhaseLock,
-	selfUpdatePhaseCleanup,
-	selfUpdatePhasePrepare,
-	selfUpdatePhaseCompanion,
-	selfUpdatePhaseBuild,
-	selfUpdatePhaseVet,
-	selfUpdatePhaseSmoke,
-	selfUpdatePhaseInstall,
-	selfUpdatePhaseVerify,
-	selfUpdatePhaseHandoff,
-}
-
-func (p *selfUpdatePhaseMS) set(phase selfUpdatePhase, value int64) {
-	switch phase {
-	case selfUpdatePhaseCheck:
-		p.Check = value
-	case selfUpdatePhaseLock:
-		p.Lock = value
-	case selfUpdatePhaseCleanup:
-		p.Cleanup = value
-	case selfUpdatePhasePrepare:
-		p.Prepare = value
-	case selfUpdatePhaseCompanion:
-		p.Companion = value
-	case selfUpdatePhaseBuild:
-		p.Build = value
-	case selfUpdatePhaseVet:
-		p.Vet = value
-	case selfUpdatePhaseSmoke:
-		p.Smoke = value
-	case selfUpdatePhaseInstall:
-		p.Install = value
-	case selfUpdatePhaseVerify:
-		p.Verify = value
-	case selfUpdatePhaseHandoff:
-		p.Handoff = value
-	}
-}
+var selfUpdatePhaseOrder = selfupdate.PhaseOrder
 
 type selfUpdateTimingSnapshot struct {
 	totalMS       int64
@@ -876,7 +774,7 @@ func finishSelfUpdateTiming() selfUpdateTimingSnapshot {
 	dominantDuration := selfUpdateTimingState.elapsed[dominant]
 	for _, phase := range selfUpdatePhaseOrder {
 		elapsed := selfUpdateTimingState.elapsed[phase]
-		phaseMS.set(phase, elapsed.Milliseconds())
+		phaseMS.Set(phase, elapsed.Milliseconds())
 		if elapsed > dominantDuration {
 			dominant = phase
 			dominantDuration = elapsed
@@ -1000,11 +898,7 @@ func beginSelfUpdateOutput(enabled bool, verbose ...bool) {
 }
 
 func randomSelfUpdateCorrelationID() string {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err == nil {
-		return hex.EncodeToString(b[:])
-	}
-	return fmt.Sprintf("pid-%d", os.Getpid())
+	return selfupdate.RandomCorrelationID()
 }
 
 func newSelfUpdateReceipt(cause selfUpdateOutcome, target, detail string) selfUpdateReceipt {
@@ -1012,68 +906,28 @@ func newSelfUpdateReceipt(cause selfUpdateOutcome, target, detail string) selfUp
 }
 
 func newSelfUpdateReceiptWithTiming(cause selfUpdateOutcome, target, detail string, timing selfUpdateTimingSnapshot) selfUpdateReceipt {
-	status := "current"
-	rollbackStatus := "not_attempted"
-	restartRequired := false
-	nextCommand := "fak version"
-	switch cause {
-	case outcomeInstalled:
-		status = "updated"
-	case outcomeMetadataOnly:
-		status = "current"
-	case outcomeGateFailed:
-		status, nextCommand = "gate_failed", "fak self-update"
-	case outcomePrepareFailed:
-		status, nextCommand = "prepare_failed", "fak self-update"
-	case outcomePinSkew:
-		status, nextCommand = "pin_skew", "fak self-update --check"
-	case outcomeRolledBack:
-		status, rollbackStatus, nextCommand = "rolled_back", "succeeded", "fak self-update"
-	case outcomeRollbackFailed:
-		status, rollbackStatus, nextCommand = "rollback_failed", "failed", "fak self-update --check"
-	case outcomeBusy:
-		status, nextCommand = "busy", "fak self-update"
-	case outcomeCheckOnly:
-		// A check-only receipt describes freshness rather than an installation effect.
-		// Comparing the two revisions keeps the JSON contract honest for operators and
-		// automation: a stale, non-mutating check must not claim the binary is current.
-		if oldRevision, newRevision := strings.TrimSpace(selfUpdateReceiptOldRevision), strings.TrimSpace(selfUpdateReceiptNewRevision); oldRevision != "" && newRevision != "" && oldRevision != newRevision {
-			status, nextCommand = string(selfupdate.StatusStale), "fak self-update"
-		}
-	case outcomeHotCopyDivergent:
-		status, nextCommand = string(selfupdate.StatusDivergent), "fak self-update"
-	case outcomeHandoffRefused:
-		status, nextCommand = "handoff_refused", "fak self-update --check"
-	case selfUpdateOutcome("restart_required"):
-		status, restartRequired, nextCommand = "restart_required", true, "fak self-update --check"
+	builder := selfupdate.NewBuilder().
+		SetCorrelationID(selfUpdateCorrelationID()).
+		SetRevisions(selfUpdateReceiptOldRevision, selfUpdateReceiptNewRevision).
+		SetTargets(selfUpdateReceiptTargets).
+		SetCounts(selfUpdateReceiptAttempted, selfUpdateReceiptChanged).
+		SetHandoff(selfUpdateReceiptHandoff).
+		SetBuildProvenance(selfUpdateReceiptBuildProvenance).
+		SetTransfer(selfUpdateReceiptTransfer)
+
+	disposition := selfUpdateCandidateCacheDispositionSnapshot()
+	if disposition.State != "" {
+		builder.SetCandidateCache(&selfupdate.CandidateCacheDisposition{
+			State:  selfupdate.CandidateCacheState(disposition.State),
+			Reason: disposition.Reason,
+		})
 	}
-	rollbackErrors := []string{}
-	if status == "rollback_failed" && strings.TrimSpace(detail) != "" {
-		rollbackErrors = append(rollbackErrors, detail)
-	}
-	targets := append([]selfUpdateReceiptTarget(nil), selfUpdateReceiptTargets...)
-	if len(targets) == 0 && strings.TrimSpace(target) != "" && target != "<self>" {
-		targets = append(targets, selfUpdateReceiptTarget{Role: "primary", Path: filepath.ToSlash(filepath.Clean(target))})
-	}
-	if targets == nil {
-		targets = []selfUpdateReceiptTarget{}
-	}
-	return selfUpdateReceipt{
-		Schema: selfUpdateReceiptSchema, SchemaVersion: 1, CorrelationID: selfUpdateCorrelationID(), Status: status,
-		OldRevision: optionalRevision(selfUpdateReceiptOldRevision), NewRevision: optionalRevision(selfUpdateReceiptNewRevision),
-		Targets: targets, Attempted: selfUpdateReceiptAttempted, Changed: selfUpdateReceiptChanged, RollbackStatus: rollbackStatus,
-		RollbackErrors: rollbackErrors, RestartRequired: restartRequired, NextCommand: nextCommand, Handoff: selfUpdateReceiptHandoff,
-		BuildProvenance: selfUpdateReceiptBuildProvenance,
-		Transfer:        selfUpdateReceiptTransfer,
-		Detail:          strings.TrimSpace(detail), TotalMS: timing.totalMS, PhaseMS: timing.phaseMS,
-	}
+
+	return builder.BuildWithTiming(cause, target, detail, timing.totalMS, timing.phaseMS)
 }
 
 func optionalRevision(revision string) *string {
-	if strings.TrimSpace(revision) == "" {
-		return nil
-	}
-	return &revision
+	return selfupdate.OptionalRevision(revision)
 }
 
 // selfUpdateSkipOutcome names WHY a tick decided not to build, mirroring the branches of the
