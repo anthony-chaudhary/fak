@@ -44,6 +44,13 @@ func serveArtifactResidentQ4K(backend compute.Backend, artifact ggufload.Artifac
 	return (artifact.Q4KResident || artifact.Recipe == "UD-Q2_K_XL") && serveDeviceResidentQ4K(backend)
 }
 
+// serveQwen38Q4KEmbeddingResident limits packed Q4_K embedding residency to the
+// exact Qwen3.8-27B artifact on the native Metal resident-Q4_K path. Other
+// artifacts and explicit backends retain the loader's default F32 embedding.
+func serveQwen38Q4KEmbeddingResident(backend compute.Backend, ggufPath string, residentQ4K bool) bool {
+	return backend == nil && residentQ4K && serveMetalAvailable() && isWitnessedQwen38Q4KM(ggufPath)
+}
+
 func serveQuantProvenance(artifact ggufload.ArtifactQuant, residentQ4K bool) gateway.StartupMessage {
 	resident, session := "Q8_0", "Q8_0"
 	if residentQ4K {
@@ -112,6 +119,9 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 	// tensors. Route those mixed-quant dense weights through the loader's dequant-to-Q8 arm;
 	// otherwise they are stranded in the host-only k-quant store and warmup cannot resolve them.
 	q4kOpts = append(q4kOpts, serveDenseKQuantOptions(backend)...)
+	if serveQwen38Q4KEmbeddingResident(backend, ggufPath, residentQ4K) {
+		q4kOpts = append(q4kOpts, ggufload.WithQ4KEmbeddingResident(true))
+	}
 	if expertShard != nil {
 		q4kOpts = append(q4kOpts, ggufload.WithExpertShard(expertShard.Lo, expertShard.Hi))
 		must(serveShardSeamRefusal(backend, cpuOffloadExperts, serveShardSeamEnvQ4K() && artifactQuant.Q4KResident))

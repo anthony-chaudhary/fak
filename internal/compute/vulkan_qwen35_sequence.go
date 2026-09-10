@@ -47,6 +47,10 @@ func qwen35VulkanSequenceSize(dims ...int) (int, bool) {
 	return int(n), true
 }
 
+func qwen35VulkanSequenceDispatchLimit(groups int64, maxGroups uint64) bool {
+	return groups > 0 && maxGroups > 0 && uint64(groups) <= maxGroups
+}
+
 func (v *vulkanBackend) validateQwen35VulkanSequence(req Qwen35SequencePrefillRequest) (*vulkanKV, error) {
 	fail := func(stage, reason string) (*vulkanKV, error) {
 		return nil, qwen35VulkanSequenceError(stage, -1, reason)
@@ -86,9 +90,12 @@ func (v *vulkanBackend) validateQwen35VulkanSequence(req Qwen35SequencePrefillRe
 	if !qOK || !kvOK || qWidth > math.MaxInt32/2 {
 		return fail("geometry", "attention projection width overflows shader indexing")
 	}
-	// These kernels dispatch in X only. The Vulkan guaranteed limit keeps
-	// preflight portable even on devices whose implementation allows more.
-	const maxGroups = 65535
+	// These kernels dispatch in X only. Use the selected device's actual limit;
+	// Vulkan's minimum guarantee is not a ceiling on capable devices.
+	maxGroups := uint64(C.fvk_max_compute_work_group_count_x())
+	if maxGroups == 0 {
+		return fail("geometry", "Vulkan X workgroup limit is unavailable")
+	}
 	for _, groups := range []int64{
 		int64(len(req.TokenIDs)) * int64(req.NumHeads),
 		int64(req.NumValueHeads), (int64(convDim) + 63) / 64,
@@ -96,8 +103,8 @@ func (v *vulkanBackend) validateQwen35VulkanSequence(req Qwen35SequencePrefillRe
 		(int64(len(req.TokenIDs))*int64(req.Hidden) + 255) / 256,
 		(int64(len(req.TokenIDs))*int64(req.Intermediate) + 255) / 256,
 	} {
-		if groups > maxGroups {
-			return fail("geometry", "sequence exceeds portable Vulkan X workgroup limit")
+		if !qwen35VulkanSequenceDispatchLimit(groups, maxGroups) {
+			return fail("geometry", "sequence exceeds device Vulkan X workgroup limit")
 		}
 	}
 	for _, dims := range [][]int{
@@ -264,8 +271,8 @@ func (v *vulkanBackend) validateQwen35VulkanSequence(req Qwen35SequencePrefillRe
 			case Q4_K, Q2_K:
 				groups = (rows*int64(op.shape[0]) + 63) / 64
 			}
-			if groups > maxGroups {
-				return bad("projection exceeds portable Vulkan X workgroup limit")
+			if !qwen35VulkanSequenceDispatchLimit(groups, maxGroups) {
+				return bad("projection exceeds device Vulkan X workgroup limit")
 			}
 			switch op.t.Dtype {
 			case F32:

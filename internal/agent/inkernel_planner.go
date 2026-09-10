@@ -2206,8 +2206,13 @@ func (p *InKernelPlanner) executionIdentity() (backend, forwardPath string) {
 	if p.m != nil && p.m.Cfg.IsQwen35Hybrid() {
 		if p.backend != nil {
 			// Model.NewBackendSession has already validated the structural GDN
-			// contract before this request can complete. Name its stable path here.
-			forwardPath = model.Qwen35GDNCUDAPath
+			// contract before this request can complete. Preserve the selected
+			// backend's path instead of labeling every device as CUDA.
+			if gdn, ok := p.backend.(interface{ Qwen35GDNPath() string }); ok {
+				if path := gdn.Qwen35GDNPath(); model.IsSupportedQwen35GDNPath(path) {
+					forwardPath = path
+				}
+			}
 		} else if p.metal && p.qwen35MetalGDNExecuted.Load() {
 			forwardPath = model.Qwen35MetalGDNSequenceForwardPath
 		} else if p.metal {

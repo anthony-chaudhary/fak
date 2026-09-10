@@ -1,0 +1,18 @@
+{
+  "rows": [{
+    "id": "qwen-device-identity-path-predicate",
+    "canonical": "IsSupportedQwen35GDNPath (Qwen GDN execution identity allowlist)",
+    "family": "support-maturity",
+    "kind": "symbol",
+    "definition": "The model predicate accepts the closed set of implemented Qwen GDN execution path identifiers. Native agent receipts use it to preserve the selected backend marker without inventing a CUDA identity for other devices.",
+    "distinction": "This predicate validates an execution path identifier. KVPrefixReuseSupported describes whether an architecture's cache represents a complete reusable prefix. Neither predicate supplies a hardware performance witness.",
+    "distinct_from": ["kvprefixreusesupported"],
+    "aliases": ["IsSupportedQwen35GDNPath"],
+    "grounding": "IsSupportedQwen35GDNPath",
+    "grounding_kind": "symbol",
+    "glossary_anchor": "docs/concepts/disambiguation-support-maturity.md",
+    "parent": "",
+    "verdict": "crystal",
+    "gaps": []
+  }]
+}

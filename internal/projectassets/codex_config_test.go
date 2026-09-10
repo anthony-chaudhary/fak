@@ -9,11 +9,8 @@ import (
 
 func TestGenerateCodexConfig(t *testing.T) {
 	out := GenerateCodexConfig("http://127.0.0.1:8080/v1", "qwen38:27b-q4", "responses", "OPENAI_API_KEY")
-	if !strings.Contains(out, `model_provider = "fak"`) {
-		t.Errorf("missing model_provider = \"fak\": %s", out)
-	}
-	if !strings.Contains(out, `model = "qwen38:27b-q4"`) {
-		t.Errorf("missing model = \"qwen38:27b-q4\": %s", out)
+	if strings.Contains(out, `model_provider = "fak"`) {
+		t.Errorf("GenerateCodexConfig must NOT contain top-level model_provider = \"fak\": %s", out)
 	}
 	if !strings.Contains(out, `[model_providers.fak]`) {
 		t.Errorf("missing [model_providers.fak]: %s", out)
@@ -43,8 +40,8 @@ func TestEnsureCodexProviderConfigFresh(t *testing.T) {
 		t.Fatalf("failed to read created config: %v", err)
 	}
 	content := string(data)
-	if !strings.Contains(content, `model_provider = "fak"`) {
-		t.Errorf("missing model_provider in config: %s", content)
+	if strings.Contains(content, `model_provider = "fak"`) {
+		t.Errorf("created config must NOT contain model_provider in config: %s", content)
 	}
 	if !strings.Contains(content, `[model_providers.fak]`) {
 		t.Errorf("missing [model_providers.fak] in config: %s", content)
@@ -66,6 +63,7 @@ func TestEnsureCodexProviderConfigPreservesExisting(t *testing.T) {
 
 	initial := `# Top level comment
 approval_policy = "never"
+model = "gpt-6-astra"
 
 [mcp_servers.my_custom]
 command = "npx"
@@ -97,6 +95,9 @@ base_url = "https://api.example.com/v1"
 	if !strings.Contains(content, `approval_policy = "never"`) {
 		t.Errorf("lost approval_policy: %s", content)
 	}
+	if !strings.Contains(content, `model = "gpt-6-astra"`) {
+		t.Errorf("lost user model: %s", content)
+	}
 	if !strings.Contains(content, `[mcp_servers.my_custom]`) {
 		t.Errorf("lost mcp_servers.my_custom: %s", content)
 	}
@@ -104,9 +105,53 @@ base_url = "https://api.example.com/v1"
 		t.Errorf("lost model_providers.other: %s", content)
 	}
 
-	// Check new content
-	if !strings.Contains(content, `model_provider = "fak"`) {
-		t.Errorf("missing model_provider = \"fak\": %s", content)
+	// Must NOT hijack model_provider
+	if strings.Contains(content, `model_provider = "fak"`) {
+		t.Errorf("must NOT add model_provider = \"fak\": %s", content)
+	}
+	if !strings.Contains(content, `[model_providers.fak]`) {
+		t.Errorf("missing [model_providers.fak]: %s", content)
+	}
+}
+
+func TestEnsureCodexProviderConfigRemovesHijackedModelProvider(t *testing.T) {
+	tmp := t.TempDir()
+	targetPath := filepath.Join(tmp, "config.toml")
+
+	initial := `model_provider = "fak"
+model = "gpt-6-astra"
+approval_policy = "never"
+
+[mcp_servers.fak]
+command = "fak"
+args = ["serve", "--stdio"]
+`
+	if err := os.WriteFile(targetPath, []byte(initial), 0644); err != nil {
+		t.Fatalf("failed to write initial: %v", err)
+	}
+
+	modified, err := EnsureCodexProviderConfig(targetPath, "http://127.0.0.1:8080/v1", "qwen38:27b-q4", "responses", "OPENAI_API_KEY")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !modified {
+		t.Fatalf("expected modified=true when cleaning up hijacked model_provider")
+	}
+
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+	content := string(data)
+
+	if strings.Contains(content, `model_provider = "fak"`) {
+		t.Errorf("failed to remove hijacked model_provider = \"fak\": %s", content)
+	}
+	if !strings.Contains(content, `model = "gpt-6-astra"`) {
+		t.Errorf("lost user model: %s", content)
+	}
+	if !strings.Contains(content, `approval_policy = "never"`) {
+		t.Errorf("lost approval_policy: %s", content)
 	}
 	if !strings.Contains(content, `[model_providers.fak]`) {
 		t.Errorf("missing [model_providers.fak]: %s", content)
@@ -114,6 +159,7 @@ base_url = "https://api.example.com/v1"
 }
 
 func TestResolveCodexConfigFile(t *testing.T) {
+	t.Setenv("CODEX_HOME", "")
 	tmp := t.TempDir()
 	// Test explicit dir with .codex/config.toml
 	codexDir := filepath.Join(tmp, ".codex")

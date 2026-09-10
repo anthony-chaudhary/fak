@@ -402,3 +402,38 @@ func TestOpencodeLauncherHaloDynamicModel(t *testing.T) {
 	}
 }
 
+func TestOpencodeConfigHaloDynamicModelFromDir(t *testing.T) {
+	tmp := t.TempDir()
+	initialConfig := `{"model": "fak/qwen-2.5-coder-7b"}`
+	if err := os.WriteFile(filepath.Join(tmp, "opencode.json"), []byte(initialConfig), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("FAK_HALO_MODEL", "")
+	t.Setenv("FAK_MODEL", "")
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"config", "--halo", "--write", "--dir", tmp}
+	code := runOpencode(&stdout, &stderr, args)
+	if code != 0 {
+		t.Fatalf("runOpencode config --halo returned %d, stderr: %s", code, stderr.String())
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmp, "opencode.json"))
+	if err != nil {
+		t.Fatalf("failed to read created config: %v", err)
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("failed to parse config: %v", err)
+	}
+	if parsed["model"] != "fak/qwen-2.5-coder-7b" {
+		t.Errorf("expected model fak/qwen-2.5-coder-7b, got %v", parsed["model"])
+	}
+	prov := parsed["provider"].(map[string]interface{})
+	fak := prov["fak"].(map[string]interface{})
+	models := fak["models"].(map[string]interface{})
+	if models["qwen-2.5-coder-7b"] == nil {
+		t.Errorf("expected qwen-2.5-coder-7b in models: %v", models)
+	}
+}

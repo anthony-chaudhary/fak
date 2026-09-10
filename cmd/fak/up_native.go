@@ -61,15 +61,16 @@ func (r *turnkeyNativeResources) Close() error {
 }
 
 type turnkeyNativeLoadDeps struct {
-	resolveBackend func() (compute.Backend, error)
-	resolveMetal   func() (bool, error)
-	admitAndLoad   func(bool, string, func()) (func(), error)
-	refusePeak     func(string) error
-	loadModel      func(string, compute.Backend, int) (*fakmodel.Model, bool, *gateway.ModelLoadProfile)
-	loadTokenizer  func(string) (*tokenizer.Tokenizer, bool)
-	newPlanner     func(*fakmodel.Model, *tokenizer.Tokenizer, string, bool, compute.Backend, bool, int) *agent.InKernelPlanner
-	hostMemory     func() (int64, int64, bool)
-	metalResidency func() (int, int)
+	resolveBackend     func() (compute.Backend, error)
+	resolveMetal       func() (bool, error)
+	admitAndLoad       func(bool, string, func()) (func(), error)
+	admitVulkanAndLoad func(string, func()) (func(), error)
+	refusePeak         func(string) error
+	loadModel          func(string, compute.Backend, int) (*fakmodel.Model, bool, *gateway.ModelLoadProfile)
+	loadTokenizer      func(string) (*tokenizer.Tokenizer, bool)
+	newPlanner         func(*fakmodel.Model, *tokenizer.Tokenizer, string, bool, compute.Backend, bool, int) *agent.InKernelPlanner
+	hostMemory         func() (int64, int64, bool)
+	metalResidency     func() (int, int)
 }
 
 func defaultTurnkeyNativeLoadDeps() turnkeyNativeLoadDeps {
@@ -79,6 +80,9 @@ func defaultTurnkeyNativeLoadDeps() turnkeyNativeLoadDeps {
 		refusePeak:     refuseOversubscribedMetalGGUF,
 		admitAndLoad: func(metal bool, path string, load func()) (func(), error) {
 			return loadLocalLauncherModelWithMetalLease(metal, path, gpulease.Options{}, load)
+		},
+		admitVulkanAndLoad: func(path string, load func()) (func(), error) {
+			return loadLocalLauncherModelWithVulkanLease(true, path, gpulease.Options{}, load)
 		},
 		loadModel: func(path string, backend compute.Backend, contextTokens int) (*fakmodel.Model, bool, *gateway.ModelLoadProfile) {
 			m, q4k, profile, _ := loadServeInKernelModel(path, backend, false, contextTokens, nil, 1)
@@ -119,9 +123,15 @@ func loadTurnkeyNativeResourcesWith(_ context.Context, modelPath, modelID string
 	var model *fakmodel.Model
 	var q4k bool
 	var profile *gateway.ModelLoadProfile
-	release, err := deps.admitAndLoad(metal, modelPath, func() {
+	load := func() {
 		model, q4k, profile = deps.loadModel(modelPath, backend, contextTokens)
-	})
+	}
+	var release func()
+	if backend != nil && backend.Name() == "vulkan" && deps.admitVulkanAndLoad != nil {
+		release, err = deps.admitVulkanAndLoad(modelPath, load)
+	} else {
+		release, err = deps.admitAndLoad(metal, modelPath, load)
+	}
 	if err != nil {
 		return nil, err
 	}

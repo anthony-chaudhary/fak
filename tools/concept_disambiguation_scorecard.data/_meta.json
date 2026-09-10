@@ -8469,6 +8469,11 @@
           "category": "incidental",
           "reason": "setter in a2a director",
           "token": "SetDirectorEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal checkpoint-boundary helper for existing prefix reuse",
+          "token": "inKernelAdaptiveSnapshotCheckpoint"
         }
       ],
       "id": "gateway-engine",
@@ -8554,6 +8559,7 @@
         "getTimeEngine",
         "globEngine",
         "grepEngine",
+        "inKernelAdaptiveSnapshotCheckpoint",
         "inKernelCoalesceContextKey",
         "inKernelCoalesceRequest",
         "inKernelCoalesceResult",
@@ -10528,6 +10534,11 @@
           "category": "incidental",
           "reason": "compaction summary helper in prompt ordering",
           "token": "RenderInvariantPrefix"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal minimum context constant for existing quality gate",
+          "token": "freeQualityContextFloor"
         }
       ],
       "exclude": [
@@ -10604,6 +10615,7 @@
         "fak_fleet_repo_pulse_context_tokens_saved_total",
         "fak_gateway_compaction_thrash_sessions_total",
         "formatGuardCompactionWitness",
+        "freeQualityContextFloor",
         "guardCompactionAnchorFirst",
         "guardCompactionAnchorHead",
         "guardCompactionAnchorMode",

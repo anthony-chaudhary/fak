@@ -310,9 +310,10 @@ func loadLocalLauncherModelWithVulkanLease(useVulkan bool, ggufPath string, opts
 	}, nil
 }
 
-// loadServeModelWithVulkanLease is the cmdServe admission seam. Only an exact
-// --backend=vulkan paired with an exact nonempty --gguf can acquire residency;
-// --model is advertised/delegated identity and never substitutes for local bytes.
+// loadServeModelWithVulkanLease is the cmdServe admission seam. Any backend
+// selector that resolves to usable Vulkan, paired with an exact nonempty --gguf,
+// acquires residency; --model is advertised/delegated identity and never
+// substitutes for local bytes.
 func loadServeModelWithVulkanLease(sf *serveFlags, opts gpulease.Options, load func()) (release func(), err error) {
 	ggufPath := ""
 	if sf != nil && sf.ggufPath != nil {

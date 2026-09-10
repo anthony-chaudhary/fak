@@ -305,8 +305,6 @@ func TestRunCodexConfigCommand(t *testing.T) {
 	}
 	content := out.String()
 	for _, want := range []string{
-		`model_provider = "fak"`,
-		`model = "qwen38:27b-q4"`,
 		`[model_providers.fak]`,
 		`base_url = "http://127.0.0.1:8080/v1"`,
 		`wire_api = "responses"`,
@@ -314,6 +312,9 @@ func TestRunCodexConfigCommand(t *testing.T) {
 		if !strings.Contains(content, want) {
 			t.Errorf("runCodexConfig output missing %q:\n%s", want, content)
 		}
+	}
+	if strings.Contains(content, `model_provider = "fak"`) {
+		t.Errorf("runCodexConfig output must NOT contain model_provider = \"fak\": %s", content)
 	}
 
 	// Test with --write in temporary directory
@@ -333,6 +334,9 @@ func TestRunCodexConfigCommand(t *testing.T) {
 	data, err := os.ReadFile(writtenPath)
 	if err != nil {
 		t.Fatalf("failed to read written config: %v", err)
+	}
+	if strings.Contains(string(data), `model_provider = "fak"`) {
+		t.Errorf("written config must NOT contain model_provider = \"fak\": %s", string(data))
 	}
 	if !strings.Contains(string(data), `[model_providers.fak]`) {
 		t.Errorf("written config missing provider: %s", string(data))

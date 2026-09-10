@@ -1,0 +1,132 @@
+{
+  "version": "fak-route/v1",
+  "default": {
+    "members": [
+      {
+        "model": "free-coding",
+        "role": "primary"
+      }
+    ],
+    "reason": "free-tier default: unmatched work lands on the strongest free coding model"
+  },
+  "rules": [
+    {
+      "name": "free-ultrahard-reasoning",
+      "match": {
+        "min_complexity": "high"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "free-reasoning"
+          }
+        ],
+        "reason": "high-complexity work -\u003e strongest free reasoning model"
+      }
+    },
+    {
+      "name": "free-destructive-delete",
+      "match": {
+        "aspect": "tool_call",
+        "tool": "delete_*"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "free-reasoning"
+          }
+        ],
+        "reason": "destructive tool call -\u003e strongest free model, never a fast seat"
+      }
+    },
+    {
+      "name": "free-destructive-drop",
+      "match": {
+        "aspect": "tool_call",
+        "tool": "drop_*"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "free-reasoning"
+          }
+        ],
+        "reason": "destructive tool call -\u003e strongest free model, never a fast seat"
+      }
+    },
+    {
+      "name": "free-normal-coding",
+      "match": {
+        "min_complexity": "medium"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "free-coding"
+          }
+        ],
+        "reason": "ordinary medium-and-up work -\u003e strongest free coding model (ahead of the cheap rule: the floor matches up)"
+      }
+    },
+    {
+      "name": "free-cheap-flash",
+      "match": {
+        "min_complexity": "low"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "free-flash"
+          }
+        ],
+        "reason": "low-complexity aspect -\u003e high-quality free flash model"
+      }
+    },
+    {
+      "name": "free-read-flash",
+      "match": {
+        "aspect": "tool_call",
+        "tool": "read_*"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "free-flash"
+          }
+        ],
+        "reason": "read-shaped tool call -\u003e high-quality free flash model"
+      }
+    },
+    {
+      "name": "free-search-flash",
+      "match": {
+        "aspect": "tool_call",
+        "tool": "search_*"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "free-flash"
+          }
+        ],
+        "reason": "search tool call -\u003e high-quality free flash model"
+      }
+    },
+    {
+      "name": "free-short-interactive",
+      "match": {
+        "aspect": "request",
+        "max_prompt_tokens": 4096,
+        "latency": "interactive"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "free-flash"
+          }
+        ],
+        "reason": "short interactive turn -\u003e high-quality free flash model"
+      }
+    }
+  ]
+}

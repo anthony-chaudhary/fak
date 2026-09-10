@@ -328,19 +328,20 @@ func printTurnkeyReady(w io.Writer, ver, addr string, plan macfit.TurnkeyProfile
 }
 
 type turnkeyServer struct {
-	plan         macfit.TurnkeyProfile
-	mock         bool
-	engineID     string
-	planner      agent.Planner
-	native       *turnkeyNativeResources
-	listener     net.Listener
-	boundAddr    string
-	httpServer   *http.Server
-	requestCount int64
-	totalTokens  int64
-	mu           sync.Mutex
-	requests     sync.WaitGroup
-	stopping     bool
+	plan             macfit.TurnkeyProfile
+	mock             bool
+	engineID         string
+	planner          agent.Planner
+	native           *turnkeyNativeResources
+	listener         net.Listener
+	boundAddr        string
+	httpServer       *http.Server
+	requestCount     int64
+	totalTokens      int64
+	mu               sync.Mutex
+	stopping         bool
+	releaseRequested bool
+	activeRequests   int
 }
 
 func (s *turnkeyServer) Addr() string {
@@ -362,17 +363,49 @@ func (s *turnkeyServer) Shutdown(ctx context.Context) error {
 	if err := s.httpServer.Shutdown(ctx); err != nil {
 		return err
 	}
-	s.requests.Wait()
-	return s.native.Close()
+	return s.requestNativeRelease()
 }
 
 func (s *turnkeyServer) Close() error {
+	// Close does not wait for active handlers. Gate new chat work first, then
+	// release native residency after the final active handler exits.
 	s.mu.Lock()
 	s.stopping = true
 	s.mu.Unlock()
 	httpErr := s.httpServer.Close()
-	s.requests.Wait()
-	return errors.Join(httpErr, s.native.Close())
+	releaseErr := s.requestNativeRelease()
+	return errors.Join(httpErr, releaseErr)
+}
+
+func (s *turnkeyServer) requestNativeRelease() error {
+	s.mu.Lock()
+	s.releaseRequested = true
+	idle := s.activeRequests == 0
+	s.mu.Unlock()
+	if idle {
+		return s.native.Close()
+	}
+	return nil
+}
+
+func (s *turnkeyServer) beginChatRequest() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopping {
+		return false
+	}
+	s.activeRequests++
+	return true
+}
+
+func (s *turnkeyServer) endChatRequest() {
+	s.mu.Lock()
+	s.activeRequests--
+	release := s.releaseRequested && s.activeRequests == 0
+	s.mu.Unlock()
+	if release {
+		_ = s.native.Close()
+	}
 }
 
 func newInKernelChatPlanner(model *fakmodel.Model, tok *tokenizer.Tokenizer, modelID string, q4k bool, backend compute.Backend, metal bool) *agent.InKernelPlanner {
@@ -565,15 +598,11 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	s.mu.Lock()
-	if s.stopping {
-		s.mu.Unlock()
+	if !s.beginChatRequest() {
 		http.Error(w, "server is shutting down", http.StatusServiceUnavailable)
 		return
 	}
-	s.requests.Add(1)
-	s.mu.Unlock()
-	defer s.requests.Done()
+	defer s.endChatRequest()
 
 	var req gateway.ChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

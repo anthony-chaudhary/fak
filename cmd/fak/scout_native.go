@@ -139,7 +139,7 @@ func loadNativeScoutPlanner(ctx context.Context, modelRef string, nativeConfig n
 	if _, err := os.Stat(ref); err != nil {
 		return nil, fmt.Errorf("scout: model %q is not a known alias, an hf:// URI, or an existing .gguf path", modelRef)
 	}
-	backend, err := resolveServeChatBackend("")
+	backend, err := resolveServeChatBackend("cpu")
 	if err != nil {
 		return nil, fmt.Errorf("scout: backend: %w", err)
 	}
@@ -154,8 +154,8 @@ func loadNativeScoutPlanner(ctx context.Context, modelRef string, nativeConfig n
 	if !ok || tok == nil {
 		return nil, fmt.Errorf("scout: %q has no usable tokenizer; pass a GGUF with an embedded tokenizer", ref)
 	}
-	// metal=false: this first cut targets the CPU reference path (the preferred device
-	// at this size class per the survey) and the cuda HAL, exactly like `fak run`.
+	// metal=false: this first cut stays on the CPU reference path, the preferred
+	// device at this size class per the survey. It has no residency-lifetime hook.
 	return newNativeScoutInKernelPlanner(model, tok, modelRef, q4k, backend, nativeConfig), nil
 }
 

@@ -80,7 +80,6 @@ func CleanModelPrefix(m string) string {
 	return m
 }
 
-
 // OpenCodeProviderConfig defines the OpenAI-compatible provider structure for OpenCode.
 type OpenCodeProviderConfig struct {
 	NPM     string                 `json:"npm"`
@@ -257,12 +256,19 @@ func EnsureOpenCodeProviderConfig(root, baseURL, modelID string) (bool, error) {
 		}
 	}
 
-	// If agent.tier.fast exists, ensure it is wired to the local Halo model with provider prefix
 	if existingAgents, ok := raw["agent"].(map[string]interface{}); ok {
+		targetModel := "fak/" + modelID
 		if fastAgent, ok := existingAgents["agent.tier.fast"].(map[string]interface{}); ok {
 			curModel, _ := fastAgent["model"].(string)
-			if curModel == "" || curModel == DefaultOpenCodeHaloModelID {
-				fastAgent["model"] = "fak/" + DefaultOpenCodeHaloModelID
+			if curModel == "" || curModel == DefaultOpenCodeHaloModelID || curModel == modelID || curModel == "fak/"+DefaultOpenCodeHaloModelID {
+				fastAgent["model"] = targetModel
+				modified = true
+			}
+		}
+		if balancedAgent, ok := existingAgents["agent.tier.balanced"].(map[string]interface{}); ok {
+			curModel, _ := balancedAgent["model"].(string)
+			if curModel == "" || curModel == DefaultOpenCodeHaloModelID || curModel == modelID || curModel == "fak/"+DefaultOpenCodeHaloModelID {
+				balancedAgent["model"] = targetModel
 				modified = true
 			}
 		}

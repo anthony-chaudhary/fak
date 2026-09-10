@@ -105,6 +105,7 @@ func TestServeMetalFlagDefaultsFalse(t *testing.T) {
 // and every other build/device state falls back to CPU. Explicit --metal/FAK_METAL still errors
 // when unavailable, mirroring resolveServeChatBackend.
 func TestResolveServeMetal(t *testing.T) {
+	t.Setenv("FAK_BACKEND", "")
 	// Not requested -> runtime auto-select only when a usable Metal device is present.
 	if use, err := resolveServeMetal(false, false, ""); use != metalgemm.Available() || err != nil {
 		t.Fatalf("neither flag nor env: got (%v,%v), want (%v,nil)", use, err, metalgemm.Available())

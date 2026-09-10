@@ -4,6 +4,7 @@ package compute
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -359,6 +360,64 @@ func TestVulkanQwen35SequenceGeometryValidation(t *testing.T) {
 	}
 }
 
+func TestVulkanQwen35SequenceRejectsUnavailableDeviceLimit(t *testing.T) {
+	const childEnv = "FAK_TEST_VULKAN_QWEN35_MISSING_LIMIT_CHILD"
+	if os.Getenv(childEnv) != "1" {
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatalf("os.Executable: %v", err)
+		}
+		cmd := exec.Command(exe, "-test.run=^TestVulkanQwen35SequenceRejectsUnavailableDeviceLimit$")
+		for _, entry := range os.Environ() {
+			upper := strings.ToUpper(entry)
+			if strings.HasPrefix(upper, "FAK_VULKAN_SPIRV=") || strings.HasPrefix(upper, childEnv+"=") {
+				continue
+			}
+			cmd.Env = append(cmd.Env, entry)
+		}
+		cmd.Env = append(cmd.Env, childEnv+"=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("no-device subprocess failed: %v\n%s", err, out)
+		}
+		return
+	}
+	if _, registered := Lookup("vulkan"); registered {
+		t.Fatal("Vulkan backend registered after FAK_VULKAN_SPIRV was removed")
+	}
+	v := &vulkanBackend{}
+	req := Qwen35SequencePrefillRequest{
+		Path:              Qwen35SequencePrefillPath,
+		TokenIDs:          []int{1},
+		Hidden:            Qwen35DenseHidden,
+		Intermediate:      Qwen35DenseIntermediate,
+		NumHeads:          Qwen35DenseQueryHeads,
+		NumKVHeads:        Qwen35DenseKVHeads,
+		HeadDim:           Qwen35DenseHeadDim,
+		RotaryDim:         Qwen35DenseHeadDim / 4,
+		NumKeyHeads:       Qwen35DenseGDNGroups,
+		NumValueHeads:     Qwen35DenseGDNRank,
+		KeyHeadDim:        Qwen35DenseGDNState,
+		ValueHeadDim:      Qwen35DenseGDNState,
+		ConvKernel:        Qwen35DenseGDNConv,
+		RMSNormEpsilon:    1e-6,
+		Layers:            make([]Qwen35SequenceLayer, 4),
+		States:            make([]Qwen35SequenceState, 4),
+		RoPEThetaForLayer: []float64{1e7, 1e7, 1e7, 1e7},
+	}
+	for layer := range req.Layers {
+		req.Layers[layer].Linear = (layer+1)%4 != 0
+	}
+
+	_, err := v.validateQwen35VulkanSequence(req)
+	var sequenceErr *Qwen35SequenceError
+	if !errors.As(err, &sequenceErr) {
+		t.Fatalf("error = %v, want typed Qwen35SequenceError", err)
+	}
+	if sequenceErr.Stage != "geometry" || sequenceErr.Reason != "Vulkan X workgroup limit is unavailable" {
+		t.Fatalf("error = %+v, want explicit fail-closed unavailable device limit", sequenceErr)
+	}
+}
+
 func TestVulkanQwen35SequenceParityOracleFormat(t *testing.T) {
 	raw, err := formatQwen35SequenceParityOracle(1.5e-3, true, 4)
 	if err != nil {
@@ -702,11 +761,7 @@ func TestStrixQwen35ParityEmitterContract(t *testing.T) {
 // and key changes while comparing the production table path with both the
 // retained scalar Vulkan path and an independent scalar CPU oracle.
 func TestQwen35PartialRoPETableParity(t *testing.T) {
-	b, ok := Lookup("vulkan")
-	if !ok {
-		t.Fatal("real Vulkan device required; fak-native/vulkan backend is not registered")
-	}
-	v := b.(*vulkanBackend)
+	v := vk(t)
 	const scalarEnv = "FAK_VULKAN_QWEN35_PARTIAL_ROPE_SCALAR_REFERENCE"
 	t.Setenv(scalarEnv, "0")
 
