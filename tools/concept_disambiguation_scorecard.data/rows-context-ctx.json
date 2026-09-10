@@ -39,7 +39,7 @@
       "kind": "symbol",
       "definition": "The native planner's typed refusal when rendered prompt tokens plus reserved output tokens exceed its effective context window. HTTP adapters expose the same refusal as context_length_exceeded with status 400 before native execution.",
       "distinction": "The refusal reports a request that exceeds the context-window ceiling; it is not the ceiling itself or the ctxplan allocator that places resident spans within it. Scheduler pressure is a separate resource refusal and can reject a request before native context validation.",
-      "distinct_from": ["context-window", "ctxplan"],
+      "distinct_from": ["context-window", "ctxplan", "refuse-context-length-helper"],
       "aliases": ["context_length_exceeded"],
       "grounding": "InKernelContextLengthError",
       "grounding_kind": "symbol",
@@ -263,7 +263,7 @@
       "kind": "concept",
       "definition": "The model's hard token budget that the planner allocates resident spans within.",
       "distinction": "The hard token BUDGET - NOT ctxplan (which allocates within it) and NOT recall (the overflow store it spills to).",
-      "distinct_from": ["ctxplan", "recall"],
+      "distinct_from": ["ctxplan", "recall", "refuse-context-length-helper"],
       "aliases": ["contextlength"],
       "grounding": "contextwindow",
       "grounding_kind": "symbol",
@@ -287,6 +287,26 @@
       "parent": "contextchangerequest",
       "verdict": "defined",
       "gaps": ["ContextChange (apply) vs ContextChangeRequest (the request) is defined-only"]
+    }
+  ,
+    {
+      "id": "refuse-context-length-helper",
+      "canonical": "refuseContextLength (native admission helper)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "refuseContextLength is the native planner helper that compares an exact rendered prompt token count plus its reserved output tokens with the effective model context limit before prefill or decode.",
+      "distinction": "This is the enforcement helper, not context-window (the hard budget it reads) and not native-context-refusal (the typed error value it returns when the request exceeds that budget).",
+      "distinct_from": [
+        "context-window",
+        "native-context-refusal"
+      ],
+      "aliases": [],
+      "grounding": "refusecontextlength",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }

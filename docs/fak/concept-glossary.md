@@ -517,3 +517,10 @@ MaxKernelBufferBindCount is the per-command Metal indirect-command-buffer descri
 The agent loop run option that pins one caller-supplied adjudicator policy value so Configure cannot replace the capability floor during that run, including native child-task execution.
 
 **Distinct from:** It binds an already-compiled policy to one RunArm invocation; it neither compiles a manifest nor mutates the process-global adjudicator policy.
+
+
+### refuseContextLength (native admission helper)
+
+refuseContextLength is the native planner helper that compares an exact rendered prompt token count plus its reserved output tokens with the effective model context limit before prefill or decode.
+
+**Distinct from:** This is the enforcement helper, not context-window (the hard budget it reads) and not native-context-refusal (the typed error value it returns when the request exceeds that budget).

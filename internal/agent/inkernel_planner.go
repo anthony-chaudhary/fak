@@ -1783,10 +1783,6 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		}
 		requestStarted = time.Now()
 	}
-	maxNew := p.maxNew
-	if sp.MaxTokens != nil && *sp.MaxTokens > 0 {
-		maxNew = *sp.MaxTokens
-	}
 	temp := p.temp
 	if sp.Temperature != nil {
 		temp = *sp.Temperature
@@ -1819,12 +1815,12 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	if sp.NativeInferenceReceipt && (temp != 0 || topP != 0 || topK > 0 || len(logitBias) > 0 || freqPenalty != 0 || presPenalty != 0) {
 		return nil, &model.NativeInferenceReceiptUnsupportedError{Reason: "requires greedy sampling over unmodified logits"}
 	}
-	messages, tools, _ = p.ApplyPromptShrink(ctx, messages, tools, opts...)
-	chat := renderInKernelChatMLRequest(messages, tools, p.m.Cfg, sp.ResponseFormat, sp.ToolChoice, sp)
-	ids, err := p.tok.Encode(chat)
+	prepared, err := p.preparePrompt(ctx, messages, tools, sp, opts...)
 	if err != nil {
 		return nil, err
 	}
+	messages, tools = prepared.messages, prepared.tools
+	chat, ids, maxNew := prepared.rendered, prepared.ids, prepared.maxNew
 	if err := p.refuseContextLength(len(ids), maxNew); err != nil {
 		return nil, err
 	}
