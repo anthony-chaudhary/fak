@@ -65,6 +65,25 @@ func ConfigureHostMemoryLimit(fraction float64) (applied int64, changed bool) {
 	return target, true
 }
 
+// ConfigureHostMemoryLimitBytes applies an exact Go runtime memory limit when
+// the process does not already have an explicit limit. It does not derive or
+// override the requested byte count from host sizing or environment fractions.
+func ConfigureHostMemoryLimitBytes(target int64) (applied int64, changed bool) {
+	memLimitMu.Lock()
+	defer memLimitMu.Unlock()
+
+	current := debug.SetMemoryLimit(-1)
+	if _, explicit := os.LookupEnv("GOMEMLIMIT"); explicit || (current >= 0 && current < math.MaxInt64) {
+		return current, false
+	}
+	if target <= 0 || target >= math.MaxInt64 {
+		return current, false
+	}
+
+	debug.SetMemoryLimit(target)
+	return target, true
+}
+
 // ConfigureRuntimeMemoryLimit is an alias for ConfigureHostMemoryLimit.
 func ConfigureRuntimeMemoryLimit(fraction float64) (applied int64, changed bool) {
 	return ConfigureHostMemoryLimit(fraction)

@@ -1,66 +1,92 @@
 #version 450
-// One independent workgroup per query token/head. Online softmax tiles bound
-// scratch independently of the prefix length; no quadratic score allocation.
+// One independent workgroup processes each query token/head while preserving
+// the decode attention arithmetic: a 128-lane tree reduction for every Q.K
+// score, sequential online softmax, and final division. Matching that operation
+// order prevents small attention drift from being amplified by later activation
+// quantization.
 layout(local_size_x = 128) in;
-layout(std430,binding=0) readonly buffer Q { float q[]; };
-layout(std430,binding=1) readonly buffer K { float k[]; };
-layout(std430,binding=2) readonly buffer V { float v[]; };
-layout(std430,binding=3) writeonly buffer O { float o[]; };
-layout(push_constant) uniform PC {
-    int tokens; int prefix; int heads; int kvHeads; int hd; float scale;
+
+layout(std430, binding = 0) readonly buffer Qbuf { float Q[]; };
+layout(std430, binding = 1) readonly buffer Kbuf { float K[]; };
+layout(std430, binding = 2) readonly buffer Vbuf { float V[]; };
+layout(std430, binding = 3) writeonly buffer Obuf { float Outp[]; };
+
+layout(push_constant) uniform Push {
+    int tokens;
+    int prefix;
+    int heads;
+    int kvHeads;
+    int hd;
+    float scale;
 } pc;
-shared float query[1024];
-shared float scores[128];
-shared float red[128];
+
+shared float qs[1024];
+const uint RED_STRIDE = 32u + 2u;
+shared float red[4u * RED_STRIDE];
+
+uint red_idx(uint i) {
+    return (i / 32u) * RED_STRIDE + (i % 32u);
+}
+
 void main() {
-    uint tid = gl_LocalInvocationID.x;
     uint row = gl_WorkGroupID.x;
-    uint token = row / uint(pc.heads), head = row % uint(pc.heads);
+    uint token = row / uint(pc.heads);
+    uint h = row % uint(pc.heads);
     if (token >= uint(pc.tokens)) return;
-    uint kvHead = head / uint(pc.heads / pc.kvHeads);
-    uint width = uint(pc.kvHeads * pc.hd), base = row * uint(pc.hd);
+
+    uint tid = gl_LocalInvocationID.x;
+    int grp = pc.heads / pc.kvHeads;
+    int kvh = int(h) / grp;
+    int width = pc.kvHeads * pc.hd;
+    uint qbase = row * uint(pc.hd);
     uint count = uint(pc.prefix) + token + 1u;
-    float acc[8];
-    for (uint j=0u; j<8u; ++j) acc[j] = 0.0;
-    for (uint d=tid; d<uint(pc.hd); d+=128u) query[d] = q[base+d];
-    barrier();
-    float maxScore = -3.402823466e38, denominator = 0.0;
-    for (uint tile=0u; tile<count; tile+=128u) {
-        uint key = tile + tid;
-        float score = -3.402823466e38;
-        if (key < count) {
-            score = 0.0;
-            uint kb = key * width + kvHead * uint(pc.hd);
-            for (uint d=0u; d<uint(pc.hd); ++d) score += query[d] * k[kb+d];
-            score *= pc.scale;
-        }
-        red[tid] = score;
-        barrier();
-        for (uint s=64u; s>0u; s>>=1u) {
-            if (tid<s) red[tid] = max(red[tid], red[tid+s]);
-            barrier();
-        }
-        float nextMax = max(maxScore, red[0]);
-        float correction = exp(maxScore-nextMax);
-        float weight = key<count ? exp(score-nextMax) : 0.0;
-        // All lanes must consume the shared maximum before red is reused.
-        barrier();
-        scores[tid] = weight;
-        red[tid] = weight;
-        barrier();
-        for (uint s=64u; s>0u; s>>=1u) {
-            if (tid<s) red[tid] += red[tid+s];
-            barrier();
-        }
-        denominator = denominator*correction + red[0];
-        for (uint d=tid; d<uint(pc.hd); d+=128u) {
-            float sum = 0.0;
-            for (uint j=0u; j<min(128u,count-tile); ++j)
-                sum += scores[j]*v[(tile+j)*width+kvHead*uint(pc.hd)+d];
-            acc[d/128u] = acc[d/128u]*correction + sum;
-        }
-        maxScore = nextMax;
-        barrier();
+
+    for (uint d = tid; d < uint(pc.hd); d += 128u) {
+        qs[d] = Q[qbase + d];
     }
-    for (uint d=tid; d<uint(pc.hd); d+=128u) o[base+d] = acc[d/128u]/denominator;
+    barrier();
+
+    float m = -3.402823466e38;
+    float l = 0.0;
+    float acc[8];
+    for (uint k = 0u; k < 8u; ++k) acc[k] = 0.0;
+
+    for (uint j = 0u; j < count; ++j) {
+        uint kbase = j * uint(width) + uint(kvh * pc.hd);
+
+        float partial = 0.0;
+        for (uint d = tid; d < uint(pc.hd); d += 128u) {
+            partial += qs[d] * K[kbase + d];
+        }
+        red[red_idx(tid)] = partial;
+        barrier();
+
+        for (uint s = 64u; s > 0u; s >>= 1u) {
+            if (tid < s) {
+                red[red_idx(tid)] += red[red_idx(tid + s)];
+            }
+            barrier();
+        }
+
+        float score = red[red_idx(0u)] * pc.scale;
+        barrier();
+
+        float m_new = max(m, score);
+        float corr = (l > 0.0) ? exp(m - m_new) : 0.0;
+        float p = exp(score - m_new);
+        l = l * corr + p;
+
+        uint k = 0u;
+        for (uint d = tid; d < uint(pc.hd); d += 128u) {
+            acc[k] = acc[k] * corr + p * V[kbase + d];
+            k++;
+        }
+        m = m_new;
+    }
+
+    uint k = 0u;
+    for (uint d = tid; d < uint(pc.hd); d += 128u) {
+        Outp[qbase + d] = (l > 0.0) ? (acc[k] / l) : 0.0;
+        k++;
+    }
 }

@@ -29,24 +29,21 @@ func TestResidentQ6KPageAlignment(t *testing.T) {
 	}
 	const out, in = 257, 256
 	n := out * (in / qkK) * q6kBlockBytes
-	backing := make([]byte, n+page)
-	base := uintptr(unsafe.Pointer(&backing[0]))
-	off := 1
-	if (base+uintptr(off))%uintptr(page) == 0 {
-		off++
-	}
-	raw := backing[off : off+n]
+	raw := makePageAlignedResidentBytes(n)
 	for i := range raw {
 		raw[i] = byte(i * 29)
 	}
 	original := append([]byte(nil), raw...)
 
 	qt := quantizeKQuantFromRaw(raw, out, in, kindQ6K)
+	if unsafe.SliceData(qt.raw) == unsafe.SliceData(raw) {
+		t.Fatal("resident Q6_K retained caller-owned storage")
+	}
 	if len(qt.raw) != n || !bytes.Equal(qt.raw, original) {
 		t.Fatalf("resident Q6_K payload changed: len=%d want=%d equal=%v", len(qt.raw), n, bytes.Equal(qt.raw, original))
 	}
 	if !bytes.Equal(raw, original) {
-		t.Fatal("resident Q6_K alignment mutated caller bytes")
+		t.Fatal("resident Q6_K adoption mutated caller bytes")
 	}
 	if uintptr(unsafe.Pointer(&qt.raw[0]))%uintptr(page) != 0 {
 		t.Fatalf("resident Q6_K pointer is not page aligned")
@@ -55,9 +52,9 @@ func TestResidentQ6KPageAlignment(t *testing.T) {
 		t.Fatalf("resident Q6_K cap=%d, want at least page-rounded %d", cap(qt.raw), pageRoundResidentLen(n, page))
 	}
 
-	aligned := makePageAlignedResidentBytes(n)
-	if got := quantizeKQuantFromRaw(aligned, out, in, kindQ6K).raw; unsafe.SliceData(got) != unsafe.SliceData(aligned) {
-		t.Fatal("eligible aligned Q6_K storage was copied")
+	raw[0] ^= 0xff
+	if !bytes.Equal(qt.raw, original) {
+		t.Fatal("mutating caller storage changed resident Q6_K bytes")
 	}
 }
 

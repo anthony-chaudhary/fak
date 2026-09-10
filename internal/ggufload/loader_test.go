@@ -2,6 +2,7 @@ package ggufload
 
 import (
 	"math"
+	"os"
 	"runtime/debug"
 	"testing"
 
@@ -121,4 +122,48 @@ func TestGGUFLoadMemoryLimitPreserved(t *testing.T) {
 			t.Fatalf("gc count = %d, want 1", pacer.GCCount())
 		}
 	})
+}
+
+func TestConfigureHostMemoryLimitBytesPreservesExplicitLimits(t *testing.T) {
+	origLimit := debug.SetMemoryLimit(-1)
+	defer debug.SetMemoryLimit(origLimit)
+	t.Setenv("GOMEMLIMIT", "")
+	if err := os.Unsetenv("GOMEMLIMIT"); err != nil {
+		t.Fatal(err)
+	}
+
+	const target = int64(3_221_225_472)
+	debug.SetMemoryLimit(math.MaxInt64)
+	applied, changed := ConfigureHostMemoryLimitBytes(target)
+	if !changed || applied != target {
+		t.Fatalf("unlimited runtime: applied, changed = %d, %v; want %d, true", applied, changed, target)
+	}
+	if current := debug.SetMemoryLimit(-1); current != target {
+		t.Fatalf("runtime memory limit = %d, want applied target %d", current, target)
+	}
+
+	debug.SetMemoryLimit(0)
+	applied, changed = ConfigureHostMemoryLimitBytes(target)
+	if changed || applied != 0 {
+		t.Fatalf("finite runtime limit: applied, changed = %d, %v; want 0, false", applied, changed)
+	}
+	if current := debug.SetMemoryLimit(-1); current != 0 {
+		t.Fatalf("finite runtime limit changed to %d; want 0", current)
+	}
+
+	debug.SetMemoryLimit(math.MaxInt64)
+	t.Setenv("GOMEMLIMIT", "7GiB")
+	applied, changed = ConfigureHostMemoryLimitBytes(target)
+	if changed || applied != math.MaxInt64 {
+		t.Fatalf("GOMEMLIMIT: applied, changed = %d, %v; want %d, false", applied, changed, int64(math.MaxInt64))
+	}
+	if current := debug.SetMemoryLimit(-1); current != math.MaxInt64 {
+		t.Fatalf("runtime memory limit changed under GOMEMLIMIT to %d", current)
+	}
+
+	t.Setenv("GOMEMLIMIT", "")
+	applied, changed = ConfigureHostMemoryLimitBytes(target)
+	if changed || applied != math.MaxInt64 {
+		t.Fatalf("empty-present GOMEMLIMIT: applied, changed = %d, %v; want %d, false", applied, changed, int64(math.MaxInt64))
+	}
 }

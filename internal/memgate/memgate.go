@@ -33,6 +33,11 @@ type Memory struct {
 	WiredBytes      int64
 	CompressedBytes int64
 	AvailableBytes  int64
+	// Pressure is a current OS pressure observation when PressureKnown is true.
+	// Occupancy counters remain separate because wired/compressed bytes can stay
+	// high after active pressure has cleared.
+	Pressure      Pressure
+	PressureKnown bool
 }
 
 // Holder describes an active operating system process consuming memory above the reporting threshold.
@@ -53,11 +58,15 @@ type Snapshot struct {
 	CompressedGB   float64  `json:"compressed_gb"`
 	SafetyMarginGB float64  `json:"safety_margin_gb"`
 	HighWired      bool     `json:"high_wired"`
-	Holders        []Holder `json:"holders"`
-	Note           string   `json:"note"`
-	RequireGB      float64  `json:"require_gb,omitempty"`
-	Admit          *bool    `json:"admit,omitempty"`
-	ShortfallGB    float64  `json:"shortfall_gb,omitempty"`
+	Pressure       Pressure `json:"pressure"`
+	// PressureObserved distinguishes a recognized current OS signal from the
+	// conservative occupancy fallback used when that probe is unavailable.
+	PressureObserved bool     `json:"pressure_observed"`
+	Holders          []Holder `json:"holders"`
+	Note             string   `json:"note"`
+	RequireGB        float64  `json:"require_gb,omitempty"`
+	Admit            *bool    `json:"admit,omitempty"`
+	ShortfallGB      float64  `json:"shortfall_gb,omitempty"`
 }
 
 // ParseDarwin converts macOS vm_stat output and page configuration into structured memory statistics.
@@ -92,6 +101,26 @@ func ParseDarwin(vmStat string, pageSize, total int64) Memory {
 		WiredBytes:      wired,
 		CompressedBytes: compressed,
 		AvailableBytes:  max64(free+inactive+speculative+purgeable-int64(SafetyMarginGB*1e9), 0),
+	}
+}
+
+// ParseDarwinPressure parses the current memorystatus pressure level exposed by
+// kern.memorystatus_vm_pressure_level. The values are Darwin's NORMAL/WARN/CRITICAL
+// dispatch flags; any other or malformed value leaves the optional probe unknown.
+func ParseDarwinPressure(raw string) (Pressure, bool) {
+	level, err := strconv.ParseUint(strings.TrimSpace(raw), 10, 64)
+	if err != nil {
+		return PressureUnknown, false
+	}
+	switch level {
+	case 1:
+		return PressureNormal, true
+	case 2:
+		return PressureWarning, true
+	case 4:
+		return PressureCritical, true
+	default:
+		return PressureUnknown, false
 	}
 }
 
@@ -176,28 +205,39 @@ func BuildSnapshot(platform string, mem Memory, holders []Holder) Snapshot {
 	if totalGB > 0 {
 		highWired = wiredGB/totalGB > HighWiredFraction
 	}
+	pressure, pressureObserved := observedPressure(mem)
 	note := "ok"
 	if highWired {
-		note = "wired > 40% of RAM - a Metal/GPU model is likely resident in unified memory; 'available' does NOT include wired, so a new CPU model load may still OOM against the GPU resident. Stop the GPU holder first."
+		if pressureObserved {
+			note = fmt.Sprintf("wired > 40%% of RAM - a Metal/GPU model is likely resident in unified memory; current OS pressure is %s, so admission also checks allocatable capacity", pressure)
+		} else {
+			note = "wired > 40% of RAM - a Metal/GPU model is likely resident in unified memory; current OS pressure is unavailable, so admission conservatively treats this occupancy as critical. Stop the GPU holder first."
+		}
 	}
 	return Snapshot{
-		Platform:       platform,
-		TotalGB:        round2(totalGB),
-		FreeGB:         round2(float64(mem.FreeBytes) / 1e9),
-		AvailableGB:    round2(float64(mem.AvailableBytes) / 1e9),
-		PurgeableGB:    round2(float64(mem.PurgeableBytes) / 1e9),
-		WiredGB:        round2(wiredGB),
-		CompressedGB:   round2(float64(mem.CompressedBytes) / 1e9),
-		SafetyMarginGB: SafetyMarginGB,
-		HighWired:      highWired,
-		Holders:        holders,
-		Note:           note,
+		Platform:         platform,
+		TotalGB:          round2(totalGB),
+		FreeGB:           round2(float64(mem.FreeBytes) / 1e9),
+		AvailableGB:      round2(float64(mem.AvailableBytes) / 1e9),
+		PurgeableGB:      round2(float64(mem.PurgeableBytes) / 1e9),
+		WiredGB:          round2(wiredGB),
+		CompressedGB:     round2(float64(mem.CompressedBytes) / 1e9),
+		SafetyMarginGB:   SafetyMarginGB,
+		HighWired:        highWired,
+		Pressure:         pressure,
+		PressureObserved: pressureObserved,
+		Holders:          holders,
+		Note:             note,
 	}
 }
 
-// Evaluate compares requested gigabytes against available capacity and wired memory constraints.
+// Evaluate compares requested gigabytes against available capacity and current
+// pressure. When no current pressure signal exists it preserves the historical
+// conservative high-wired fallback.
 func Evaluate(s Snapshot, requireGB float64) Snapshot {
-	ok := s.AvailableGB >= requireGB && !s.HighWired
+	pressureBlocked := s.PressureObserved && s.Pressure == PressureCritical
+	fallbackBlocked := !s.PressureObserved && s.HighWired
+	ok := s.AvailableGB >= requireGB && !pressureBlocked && !fallbackBlocked
 	s.RequireGB = requireGB
 	s.Admit = &ok
 	if requireGB > s.AvailableGB {
@@ -224,7 +264,14 @@ func ReadMemory() (Memory, error) {
 		}
 		pageSize, _ := strconv.ParseInt(strings.TrimSpace(ps), 10, 64)
 		totalBytes, _ := strconv.ParseInt(strings.TrimSpace(total), 10, 64)
-		return ParseDarwin(vm, pageSize, totalBytes), nil
+		mem := ParseDarwin(vm, pageSize, totalBytes)
+		// Pressure is optional: older Darwin versions or restricted environments
+		// may not expose this sysctl, in which case callers retain their existing
+		// conservative occupancy fallback.
+		if raw, pressureErr := runOut("sysctl", "-n", "kern.memorystatus_vm_pressure_level"); pressureErr == nil {
+			mem.Pressure, mem.PressureKnown = ParseDarwinPressure(raw)
+		}
+		return mem, nil
 	case "linux":
 		b, err := os.ReadFile("/proc/meminfo")
 		if err != nil {
