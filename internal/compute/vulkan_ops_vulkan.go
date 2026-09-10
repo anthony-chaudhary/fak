@@ -12,6 +12,7 @@ import "C"
 
 import (
 	"fmt"
+	"log"
 	"math"
 	"unsafe"
 )
@@ -105,14 +106,163 @@ func (v *vulkanBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, 
 	return out
 }
 
-// SpecVerifyAttention on vulkanBackend falls back to the CPU reference (#11100).
+// SpecVerifyAttention executes ordinary linear causal verification with the
+// native tree-attention pipeline. qLen is intentionally unrestricted here.
 func (be *vulkanBackend) SpecVerifyAttention(q, k, v, out *Tensor, qLen, kvLen, nH, nHkv, d int) error {
-	ref, ok := Default().(SpecVerifyBackend)
-	if !ok {
-		return fmt.Errorf("compute: Default backend does not implement SpecVerifyBackend")
+	if err := validateVulkanVerifyAttention(q, k, v, qLen, kvLen, nH, nHkv, d); err != nil {
+		return fmt.Errorf("compute: SpecVerifyAttention %w", err)
 	}
-	return ref.SpecVerifyAttention(q, k, v, out, qLen, kvLen, nH, nHkv, d)
+	return be.runVulkanVerifyAttention(q, k, v, out, nil, qLen, kvLen, nH, nHkv, d, 1)
 }
+
+// TreeVerifyAttention executes packed-mask tree verification entirely on the
+// Vulkan device. Only the compact mask rows cross from host memory.
+func (be *vulkanBackend) TreeVerifyAttention(q, k, v, out *Tensor, maskRows []uint32, qLen, kvLen, nH, nHkv, d int) error {
+	if err := validateTreeVerifyAttention(q, k, v, out, maskRows, qLen, kvLen, nH, nHkv, d); err != nil {
+		return err
+	}
+	if err := validateVulkanVerifyBuffers(q, k, v); err != nil {
+		return fmt.Errorf("compute: TreeVerifyAttention %w", err)
+	}
+	return be.runVulkanVerifyAttention(q, k, v, out, maskRows, qLen, kvLen, nH, nHkv, d, 0)
+}
+
+func validateVulkanVerifyAttention(q, k, v *Tensor, qLen, kvLen, nH, nHkv, d int) error {
+	if q == nil || k == nil || v == nil {
+		return fmt.Errorf("nil tensor argument")
+	}
+	if qLen <= 0 || kvLen < qLen {
+		return fmt.Errorf("invalid lengths qLen=%d kvLen=%d", qLen, kvLen)
+	}
+	if nH <= 0 || nHkv <= 0 || nH%nHkv != 0 {
+		return fmt.Errorf("invalid heads nH=%d nHkv=%d", nH, nHkv)
+	}
+	if d <= 0 || d > 1024 {
+		return fmt.Errorf("head dim %d outside [1,1024]", d)
+	}
+	if q.Numel() != qLen*nH*d || k.Numel() != kvLen*nHkv*d || v.Numel() != kvLen*nHkv*d {
+		return fmt.Errorf("tensor dimensions do not match qLen=%d kvLen=%d nH=%d nHkv=%d d=%d", qLen, kvLen, nH, nHkv, d)
+	}
+	return validateVulkanVerifyBuffers(q, k, v)
+}
+
+func validateVulkanVerifyBuffers(tensors ...*Tensor) error {
+	for _, tensor := range tensors {
+		if tensor.Dtype != F32 {
+			return fmt.Errorf("tensor dtype %v is not F32", tensor.Dtype)
+		}
+		buf, ok := tensor.buf.(*vulkanBuf)
+		if !ok || buf == nil || buf.ptr == nil {
+			return fmt.Errorf("input tensor is not allocated on the Vulkan device")
+		}
+	}
+	return nil
+}
+
+func (be *vulkanBackend) runVulkanVerifyAttention(q, k, v, out *Tensor, maskRows []uint32, qLen, kvLen, nH, nHkv, d, mode int) error {
+	if out == nil {
+		return fmt.Errorf("compute: Vulkan verify attention nil output tensor")
+	}
+	if err := validateVulkanVerifyOutput(out, qLen, nH, d); err != nil {
+		return err
+	}
+	if C.fvk_have_tree_attention() == 0 {
+		log.Printf("compute: Vulkan tree-attention pipeline unavailable; using CPU reference")
+		return be.fallbackVulkanVerifyAttention(q, k, v, out, maskRows, qLen, kvLen, nH, nHkv, d, mode)
+	}
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+
+	expected := qLen * nH * d
+	allocated := false
+	if out.buf == nil {
+		devOut, _ := be.devTr([]int{qLen, nH, d}, F32)
+		*out = devOut
+		allocated = true
+	} else {
+		buf, ok := out.buf.(*vulkanBuf)
+		if !ok || buf == nil || buf.ptr == nil {
+			return fmt.Errorf("compute: Vulkan verify attention output tensor is not allocated on the Vulkan device")
+		}
+		if out.Dtype != F32 || out.Numel() != expected || len(out.Shape) != 3 || out.Shape[0] != qLen || out.Shape[1] != nH || out.Shape[2] != d {
+			return fmt.Errorf("compute: Vulkan verify attention output must be F32 [%d,%d,%d]", qLen, nH, d)
+		}
+	}
+
+	var maskPtr *C.uint32_t
+	if len(maskRows) != 0 {
+		maskPtr = (*C.uint32_t)(unsafe.Pointer(&maskRows[0]))
+	}
+	rc := int(C.fvk_tree_attention_f32(
+		be.vp(*q), be.vp(*k), be.vp(*v), be.vp(*out), maskPtr,
+		C.int(qLen), C.int(kvLen), C.int(nH), C.int(nHkv), C.int(d),
+		C.float(1/math.Sqrt(float64(d))), C.int(mode)))
+	if rc != 0 {
+		if allocated {
+			buf := out.buf.(*vulkanBuf)
+			C.fvk_free(buf.ptr)
+			buf.ptr = nil
+			for i := len(be.transient) - 1; i >= 0; i-- {
+				if be.transient[i] == buf {
+					be.transient = append(be.transient[:i], be.transient[i+1:]...)
+					break
+				}
+			}
+			*out = Tensor{}
+		}
+		return fmt.Errorf("compute: Vulkan verify attention dispatch failed: %d", rc)
+	}
+	return nil
+}
+
+func validateVulkanVerifyOutput(out *Tensor, qLen, nH, d int) error {
+	if out.buf == nil {
+		if len(out.Shape) != 0 {
+			return fmt.Errorf("compute: Vulkan verify attention output without storage must be a zero Tensor")
+		}
+		return nil
+	}
+	buf, ok := out.buf.(*vulkanBuf)
+	if !ok || buf == nil || buf.ptr == nil {
+		return fmt.Errorf("compute: Vulkan verify attention output tensor is not allocated on the Vulkan device")
+	}
+	if out.Dtype != F32 || out.Layout != RowMajor || len(out.Shape) != 3 || out.Shape[0] != qLen || out.Shape[1] != nH || out.Shape[2] != d {
+		return fmt.Errorf("compute: Vulkan verify attention output must be live row-major F32 [%d,%d,%d]", qLen, nH, d)
+	}
+	return nil
+}
+
+func (be *vulkanBackend) fallbackVulkanVerifyAttention(q, k, v, out *Tensor, maskRows []uint32, qLen, kvLen, nH, nHkv, d, mode int) error {
+	ref, ok := Default().(*cpuBackend)
+	if !ok {
+		return fmt.Errorf("compute: CPU reference backend unavailable for Vulkan verify attention")
+	}
+	qHost := NewF32(ref, append([]int(nil), q.Shape...), be.Read(*q))
+	kHost := NewF32(ref, append([]int(nil), k.Shape...), be.Read(*k))
+	vHost := NewF32(ref, append([]int(nil), v.Shape...), be.Read(*v))
+	var hostOut Tensor
+	var err error
+	if mode == 0 {
+		err = ref.TreeVerifyAttention(&qHost, &kHost, &vHost, &hostOut, maskRows, qLen, kvLen, nH, nHkv, d)
+	} else {
+		err = ref.SpecVerifyAttention(&qHost, &kHost, &vHost, &hostOut, qLen, kvLen, nH, nHkv, d)
+	}
+	if err != nil {
+		return err
+	}
+	outValues := ref.Read(hostOut)
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	if out.buf == nil {
+		devOut, _ := be.devTr([]int{qLen, nH, d}, F32)
+		*out = devOut
+	}
+	C.fvk_h2d(be.vp(*out), unsafe.Pointer(&outValues[0]), C.size_t(len(outValues)*F32.Bytes()))
+	return nil
+}
+
+var _ SpecVerifyBackend = (*vulkanBackend)(nil)
+var _ TreeVerifyBackend = (*vulkanBackend)(nil)
 
 var _ BatchedPrefillBackend = (*vulkanBackend)(nil)
 

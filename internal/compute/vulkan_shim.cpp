@@ -241,7 +241,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q6K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_TREE_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q6K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -262,7 +262,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
         return g_dp.otherSwiGLU;
     case K_ADD: case K_ADD_BIAS:
         return g_dp.otherAdd;
-    case K_ATTENTION: case K_QWEN35_CAUSAL_ATTENTION_PANEL:
+    case K_ATTENTION: case K_TREE_ATTENTION: case K_QWEN35_CAUSAL_ATTENTION_PANEL:
         return g_dp.otherAttention;
     case K_ARGMAX: case K_ARGMAX_PAIRS:
         return g_dp.otherArgmax;
@@ -323,6 +323,11 @@ bool g_q4k_wave32_required_subgroup = false;
 int g_have_coopmat = 0;
 // Portable packed Q6_K is optional so older SPIR-V bundles remain loadable.
 int g_have_q6k_matmul = 0;
+// Tree attention requires subgroup arithmetic. Its pipeline and tiny coherent
+// packed-mask buffer are optional so older bundles/devices still initialize.
+int g_have_tree_attention = 0;
+Buffer* g_tree_attention_mask = nullptr;
+void* g_tree_attention_mask_mapped = nullptr;
 
 VkDescriptorPool g_descpool = VK_NULL_HANDLE;
 
@@ -1150,21 +1155,21 @@ void recycleDescriptorSet(DescriptorSetRecord rec) {
 }
 
 // dispatch: bind `bufs` (nbuf of them) + push constants, run groupsX*groupsY workgroups.
-void dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX, uint32_t groupsY = 1) {
+bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX, uint32_t groupsY = 1) {
     if (k.nbuf > MAX_DISPATCH_BUFS) {
         fprintf(stderr, "fak-vulkan: dispatch skipped; kernel has %d buffers, max %d\n",
                 k.nbuf, MAX_DISPATCH_BUFS);
-        return;
+        return false;
     }
     for (int i = 0; i < k.nbuf; ++i) {
         if (!bufs[i]) {
             fprintf(stderr, "fak-vulkan: dispatch skipped; buffer %d is null\n", i);
-            return;
+            return false;
         }
     }
     DescriptorSetRecord rec = acquireDescriptorSet(k);
     if (!rec.set) {
-        return;
+        return false;
     }
     bool sameBindings = rec.nbuf == k.nbuf;
     for (int i = 0; i < k.nbuf; ++i) {
@@ -1204,7 +1209,7 @@ void dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
         vkCmdDispatch(g_batchCmd, groupsX, groupsY, 1);
         g_batchSets.push_back(rec);
         ++g_batchOps;
-        return;
+        return true;
     }
 
     // Unbatched: one-shot submit + fence (the original per-op path).
@@ -1217,6 +1222,7 @@ void dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
     dpOneShot(g_dp.oneShotCompute);
     endSubmitWait(cmd);
     recycleDescriptorSet(rec);
+    return true;
 }
 
 inline Buffer* B(const void* h) { return (Buffer*)h; }
@@ -1247,6 +1253,7 @@ int fvk_device_identity(char* name, int namelen, uint32_t* vendor_id,
 int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_qwen35_gdn_q8_in_proj = 0;
     g_have_q6k_matmul = 0;
+    g_have_tree_attention = 0;
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.pApplicationName = "fak";
     app.apiVersion = VK_API_VERSION_1_2;
@@ -1492,6 +1499,26 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     ok &= buildKernel(g_kern[K_ADD],       P("add.spv"),       2, sizeof(int));
     ok &= buildKernel(g_kern[K_ADD_BIAS],  P("add_bias.spv"),  2, 2 * sizeof(int));
     ok &= buildKernel(g_kern[K_ATTENTION], P("attention.spv"), 5, 6 * sizeof(int) + sizeof(float));
+    if (haveSubgroupBasic && haveSubgroupArithmetic &&
+        buildKernel(g_kern[K_TREE_ATTENTION], P("tree_attention.spv"), 5,
+                    6 * sizeof(int) + sizeof(float))) {
+        g_tree_attention_mask = allocBuffer(
+            32 * sizeof(uint32_t),
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            STORAGE_USAGE);
+        if (g_tree_attention_mask &&
+            vkMapMemory(g_dev, g_tree_attention_mask->mem, 0,
+                        32 * sizeof(uint32_t), 0,
+                        &g_tree_attention_mask_mapped) == VK_SUCCESS &&
+            g_tree_attention_mask_mapped) {
+            memset(g_tree_attention_mask_mapped, 0, 32 * sizeof(uint32_t));
+            g_have_tree_attention = 1;
+        } else {
+            if (g_tree_attention_mask) destroyBuffer(g_tree_attention_mask);
+            g_tree_attention_mask = nullptr;
+            g_tree_attention_mask_mapped = nullptr;
+        }
+    }
     ok &= buildKernel(g_kern[K_ARGMAX],    P("argmax.spv"),    2, sizeof(int));
     ok &= buildKernel(g_kern[K_ARGMAX_PAIRS], P("argmax_pairs.spv"), 3, sizeof(int));
     ok &= buildKernel(g_kern[K_QWEN35_GDN_CONV], P("qwen35_gdn_conv.spv"), 4, 3 * sizeof(int));
@@ -1860,6 +1887,7 @@ int fvk_have_qwen35_gdn_q8_in_proj(void) { return g_have_qwen35_gdn_q8_in_proj; 
 int fvk_have_glm_kda_wave32(void) { return g_have_glm_kda_wave32; }
 int fvk_have_cooperative_matrix(void) { return g_have_coopmat; }
 int fvk_have_q6k_matmul(void) { return g_have_q6k_matmul; }
+int fvk_have_tree_attention(void) { return g_have_tree_attention; }
 uint32_t fvk_max_compute_work_group_count_x(void) { return g_maxComputeWorkGroupCountX; }
 uint64_t fvk_max_buffer_bytes(void) { return (uint64_t)g_maxBufferBytes; }
 uint64_t fvk_max_storage_buffer_range(void) { return (uint64_t)g_maxStorageBufferRange; }
@@ -2310,6 +2338,48 @@ void fvk_attention_f32(const void* dQ, const void* dK, const void* dV, void* dOu
     pc.mode = 2;
     dispatch(g_kern[K_ATTENTION], bufs, &pc, sizeof(pc), (uint32_t)nH);
     fvk_free(scratch);
+}
+
+int fvk_tree_attention_f32(const void* q, const void* k, const void* v, void* out,
+                           const uint32_t* mask_rows, int qLen, int kvLen,
+                           int nH, int nHkv, int d, float scale, int mode) {
+    if (!g_have_tree_attention || g_kern[K_TREE_ATTENTION].pipe == VK_NULL_HANDLE ||
+        !g_tree_attention_mask || !g_tree_attention_mask_mapped) {
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (!q || !k || !v || !out || qLen <= 0 || kvLen < qLen ||
+        nH <= 0 || nHkv <= 0 || nH % nHkv != 0 || d <= 0 || d > 1024 ||
+        (mode != 0 && mode != 1) || (mode == 0 && (!mask_rows || qLen > 32))) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    uint64_t groups = (uint64_t)qLen * (uint64_t)nH;
+    if (groups == 0 || groups > g_maxComputeWorkGroupCountX || groups > UINT32_MAX) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    bool resumeBatch = g_batching;
+    if (resumeBatch) batchFlush();
+    if (g_submissionStatus != VK_SUCCESS) {
+        return (int)g_submissionStatus;
+    }
+    memset(g_tree_attention_mask_mapped, 0, 32 * sizeof(uint32_t));
+    if (mode == 0) {
+        memcpy(g_tree_attention_mask_mapped, mask_rows,
+               (size_t)qLen * sizeof(uint32_t));
+    }
+
+    struct PC {
+        int qLen, kvLen, nH, nHkv, d;
+        float scale;
+        int mode;
+    } pc{qLen, kvLen, nH, nHkv, d, scale, mode};
+    Buffer* bufs[5] = {B((void*)q), B((void*)k), B((void*)v), B(out),
+                       g_tree_attention_mask};
+    bool recorded = dispatch(g_kern[K_TREE_ATTENTION], bufs, &pc, sizeof(pc),
+                             (uint32_t)groups);
+    int status = recorded ? (int)g_submissionStatus : (int)VK_ERROR_INITIALIZATION_FAILED;
+    if (resumeBatch && status == VK_SUCCESS) batchBegin();
+    return status;
 }
 
 int fvk_argmax_f32(const void* dLogits, int n) {

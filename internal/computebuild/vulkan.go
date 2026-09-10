@@ -36,6 +36,7 @@ var VulkanShaders = []string{
 	"add",
 	"add_bias",
 	"attention",
+	"tree_attention",
 	"argmax",
 	"argmax_pairs",
 	"q8_matmul",

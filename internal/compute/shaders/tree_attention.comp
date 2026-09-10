@@ -1,0 +1,103 @@
+#version 450
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
+// Native speculative verification attention. One 128-lane workgroup handles
+// one query/head pair. Mode 0 consumes a packed uint32 tree row (qLen <= 32);
+// mode 1 applies the ordinary linear causal mask for any positive qLen.
+layout(local_size_x = 128) in;
+
+layout(std430, binding = 0) readonly buffer Qbuf { float Q[]; };
+layout(std430, binding = 1) readonly buffer Kbuf { float K[]; };
+layout(std430, binding = 2) readonly buffer Vbuf { float V[]; };
+layout(std430, binding = 3) writeonly buffer Obuf { float Outp[]; };
+layout(std430, binding = 4) readonly buffer Maskbuf { uint MaskRows[]; };
+
+layout(push_constant) uniform Push {
+    int qLen;
+    int kvLen;
+    int nH;
+    int nHkv;
+    int d;
+    float scale;
+    int mode;
+} pc;
+
+shared float qs[1024];
+// Vulkan guarantees at least four subgroup lanes, so a 128-lane workgroup has
+// no more than 32 subgroup partials. This remains portable across Wave32 and
+// Wave64 while keeping the dot-product reduction to two workgroup barriers.
+shared float subgroupSums[32];
+shared float dotScore;
+
+void main() {
+    uint row = gl_WorkGroupID.x;
+    uint qi = row / uint(pc.nH);
+    uint h = row % uint(pc.nH);
+    if (qi >= uint(pc.qLen)) return;
+
+    uint tid = gl_LocalInvocationID.x;
+    uint group = uint(pc.nH / pc.nHkv);
+    uint kvh = h / group;
+    uint kvWidth = uint(pc.nHkv * pc.d);
+    uint qbase = row * uint(pc.d);
+    uint prefix = uint(pc.kvLen - pc.qLen);
+
+    for (uint dim = tid; dim < uint(pc.d); dim += 128u) {
+        qs[dim] = Q[qbase + dim];
+    }
+    barrier();
+
+    float runningMax = -3.402823466e38;
+    float runningSum = 0.0;
+    float acc[8];
+    for (uint i = 0u; i < 8u; ++i) acc[i] = 0.0;
+
+    for (uint key = 0u; key < uint(pc.kvLen); ++key) {
+        bool allowed;
+        if (key < prefix) {
+            allowed = true;
+        } else if (pc.mode == 1) {
+            allowed = key - prefix <= qi;
+        } else {
+            uint candidate = key - prefix;
+            allowed = candidate < 32u && (MaskRows[qi] & (1u << candidate)) != 0u;
+        }
+        if (!allowed) continue;
+
+        uint kbase = key * kvWidth + kvh * uint(pc.d);
+        float partial = 0.0;
+        for (uint dim = tid; dim < uint(pc.d); dim += 128u) {
+            partial += qs[dim] * K[kbase + dim];
+        }
+        float subgroupSum = subgroupAdd(partial);
+        if (subgroupElect()) subgroupSums[gl_SubgroupID] = subgroupSum;
+        barrier();
+
+        if (tid == 0u) {
+            float workgroupSum = 0.0;
+            for (uint subgroup = 0u; subgroup < gl_NumSubgroups; ++subgroup) {
+                workgroupSum += subgroupSums[subgroup];
+            }
+            dotScore = workgroupSum;
+        }
+        barrier();
+
+        float score = dotScore * pc.scale;
+        float nextMax = max(runningMax, score);
+        float correction = runningSum > 0.0 ? exp(runningMax - nextMax) : 0.0;
+        float probability = exp(score - nextMax);
+        runningSum = runningSum * correction + probability;
+        uint slot = 0u;
+        for (uint dim = tid; dim < uint(pc.d); dim += 128u) {
+            acc[slot] = acc[slot] * correction + probability * V[kbase + dim];
+            ++slot;
+        }
+        runningMax = nextMax;
+    }
+
+    uint slot = 0u;
+    for (uint dim = tid; dim < uint(pc.d); dim += 128u) {
+        Outp[qbase + dim] = acc[slot] / runningSum;
+        ++slot;
+    }
+}

@@ -189,6 +189,15 @@ void fvk_add_bias_f32(void *dDst, const void *dBias, int rows, int width);
 void fvk_attention_f32(const void *dQ, const void *dK, const void *dV, void *dOut,
                        int nPos, int nH, int nKV, int hd, float scale);
 
+/* Optional native speculative-verification attention pipeline. mode=0 applies
+ * qLen packed uint32 tree-mask rows (qLen <= 32); mode=1 applies the ordinary
+ * linear causal mask and permits any positive qLen. Only pipeline absence may
+ * select the CPU reference; a failed native dispatch returns nonzero. */
+int fvk_have_tree_attention(void);
+int fvk_tree_attention_f32(const void *q, const void *k, const void *v, void *out,
+                           const uint32_t *mask_rows, int qLen, int kvLen,
+                           int nH, int nHkv, int d, float scale, int mode);
+
 /* argmax over logits[n]: returns the SMALLEST index attaining the maximum value (the
  * cpuref first-max tie-break), copied back to the host as the single scalar fence. */
 int fvk_argmax_f32(const void *dLogits, int n);
