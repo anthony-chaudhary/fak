@@ -61,7 +61,7 @@ func TestClassifyTargetTensorQuantExcludesExactQwen38TrailingMTPBlock(t *testing
 func TestClassifyTargetTensorQuantKnownQwen38Q4KMHeader(t *testing.T) {
 	path := os.Getenv("FAK_QWEN38_Q4KM_GGUF")
 	if path == "" {
-		path = "/Users/anthony/fak-issue8394-20260821/_bench/models/Qwen3.8-27B-Q4_K_M.gguf"
+		t.Skip("set FAK_QWEN38_Q4KM_GGUF to validate a local Qwen3.8-27B-Q4_K_M artifact header")
 	}
 	if info, err := os.Stat(path); err != nil || info.IsDir() {
 		t.Skip("known Qwen3.8-27B-Q4_K_M artifact header is unavailable")
