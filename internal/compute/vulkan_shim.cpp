@@ -34,6 +34,15 @@
 #include <vector>
 #include <unordered_map>
 #include <atomic>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 struct DispatchProfileCounters {
     std::atomic<uint64_t> compute{0}, q4k{0}, q2k{0}, other{0};
@@ -73,6 +82,7 @@ uint32_t          g_maxComputeWorkGroupCountX = 0;
 VkDeviceSize      g_totalDeviceLocalMemory = 0;
 bool              g_haveMemoryBudget = false;
 bool              g_batching = false;
+void              batchBegin();
 void              batchFlush();
 VkResult          g_submissionStatus = VK_SUCCESS;
 std::atomic<uint64_t> g_h2dBytes{0};
@@ -97,6 +107,17 @@ bool checkedCounterAdd(std::atomic<uint64_t>& counter, uint64_t value) {
     }
     counter.store(current + value, std::memory_order_relaxed);
     return true;
+}
+
+bool environmentFlagEnabled(const char* name) {
+#ifdef _WIN32
+    char value[2]{};
+    DWORD length = GetEnvironmentVariableA(name, value, (DWORD)sizeof(value));
+    return length == 1 && value[0] == '1';
+#else
+    const char* value = std::getenv(name);
+    return value && value[0] == '1' && value[1] == '\0';
+#endif
 }
 
 bool memoryTypeUsesDeviceLocalHeap(uint32_t memoryType) {
@@ -708,6 +729,127 @@ size_t scratchCapacity(size_t bytes) {
 }
 
 Buffer*                       g_gdn_conv_out = nullptr;
+
+struct PartialRoPECacheEntry {
+    uint32_t thetaBits = 0;
+    int rotary = 0;
+    size_t positions = 0;
+    Buffer* table = nullptr;
+    std::vector<float> inverseFrequency;
+};
+
+std::vector<PartialRoPECacheEntry> g_partialRoPECaches;
+
+void freePartialRoPECaches() {
+    for (auto& entry : g_partialRoPECaches) {
+        if (entry.table) destroyBuffer(entry.table);
+    }
+    g_partialRoPECaches.clear();
+    clearDescriptorBindingCache();
+}
+
+Buffer* partialRoPETable(float theta, int rotary, size_t requiredPositions) {
+    uint32_t thetaBits = 0;
+    static_assert(sizeof(thetaBits) == sizeof(theta), "float key must be exact");
+    memcpy(&thetaBits, &theta, sizeof(thetaBits));
+
+    PartialRoPECacheEntry* found = nullptr;
+    for (auto& entry : g_partialRoPECaches) {
+        if (entry.thetaBits == thetaBits && entry.rotary == rotary) {
+            found = &entry;
+            break;
+        }
+    }
+    if (!found) {
+        g_partialRoPECaches.push_back(PartialRoPECacheEntry{});
+        found = &g_partialRoPECaches.back();
+        found->thetaBits = thetaBits;
+        found->rotary = rotary;
+        found->inverseFrequency.resize((size_t)rotary / 2);
+        for (size_t pair = 0; pair < found->inverseFrequency.size(); ++pair) {
+            found->inverseFrequency[pair] = std::pow(theta,
+                -2.0f * (float)pair / (float)rotary);
+        }
+    }
+    if (found->table && found->positions >= requiredPositions) return found->table;
+
+    const size_t pairs = (size_t)rotary / 2;
+    if (pairs == 0) return nullptr;
+    size_t maxPositions = std::numeric_limits<size_t>::max() / pairs / (2 * sizeof(float));
+    // The shader forms the flattened table subscript in uint arithmetic.
+    const size_t shaderMaxPositions = (size_t)std::numeric_limits<uint32_t>::max() / pairs;
+    if (shaderMaxPositions < maxPositions) maxPositions = shaderMaxPositions;
+    if (g_maxBufferBytes > 0) {
+        const size_t deviceMaxPositions = (size_t)g_maxBufferBytes / pairs / (2 * sizeof(float));
+        if (deviceMaxPositions < maxPositions) maxPositions = deviceMaxPositions;
+    }
+    if (requiredPositions > maxPositions) return nullptr;
+
+    size_t capacity = found->positions ? found->positions : 64;
+    if (capacity > maxPositions) capacity = maxPositions;
+    while (capacity < requiredPositions) {
+        if (capacity > maxPositions / 2) {
+            capacity = maxPositions;
+            break;
+        }
+        capacity *= 2;
+    }
+    if (capacity < requiredPositions) return nullptr;
+    const size_t floats = capacity * pairs * 2;
+    const size_t bytes = floats * sizeof(float);
+    if ((g_maxBufferBytes > 0 && (VkDeviceSize)bytes > g_maxBufferBytes) ||
+        bytes > (size_t)std::numeric_limits<VkDeviceSize>::max()) {
+        return nullptr;
+    }
+
+    // A recorded batch may still reference the old table. Complete it before replacing
+    // that allocation, then resume batching for the caller's next operation.
+    const bool resumeBatch = g_batching;
+    if (resumeBatch) batchFlush();
+    VkMemoryPropertyFlags hostvis =
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    Buffer* replacement = allocBuffer(bytes, hostvis, STORAGE_USAGE);
+    if (!replacement) {
+        if (resumeBatch) batchBegin();
+        return nullptr;
+    }
+    void* mapped = nullptr;
+    VkResult mappedResult = vkMapMemory(g_dev, replacement->mem, 0, bytes, 0, &mapped);
+    if (mappedResult != VK_SUCCESS || !mapped) {
+        destroyBuffer(replacement);
+        if (resumeBatch) batchBegin();
+        return nullptr;
+    }
+    float* values = static_cast<float*>(mapped);
+    if (found->table && found->positions > 0) {
+        void* oldMapped = nullptr;
+        const size_t oldBytes = found->positions * pairs * 2 * sizeof(float);
+        VkResult oldMappedResult = vkMapMemory(g_dev, found->table->mem, 0, oldBytes, 0, &oldMapped);
+        if (oldMappedResult != VK_SUCCESS || !oldMapped) {
+            vkUnmapMemory(g_dev, replacement->mem);
+            destroyBuffer(replacement);
+            if (resumeBatch) batchBegin();
+            return nullptr;
+        }
+        memcpy(values, oldMapped, oldBytes);
+        vkUnmapMemory(g_dev, found->table->mem);
+    }
+    for (size_t pos = found->positions; pos < capacity; ++pos) {
+        for (size_t pair = 0; pair < pairs; ++pair) {
+            const float angle = (float)pos * found->inverseFrequency[pair];
+            const size_t offset = (pos * pairs + pair) * 2;
+            values[offset] = std::sin(angle);
+            values[offset + 1] = std::cos(angle);
+        }
+    }
+    vkUnmapMemory(g_dev, replacement->mem);
+    if (found->table) destroyBuffer(found->table);
+    found->table = replacement;
+    found->positions = capacity;
+    clearDescriptorBindingCache();
+    if (resumeBatch) batchBegin();
+    return found->table;
+}
 
 Buffer* gdnConvOutScratch(size_t bytes) {
     if (bytes == 0) bytes = 4;
@@ -1359,7 +1501,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         ok &= buildKernel(g_kern[K_GLM_KDA_WAVE32], P("glm_kda_recurrent_wave32.spv"), 7, sizeof(int), 32);
     }
     ok &= buildKernel(g_kern[K_QWEN35_SPLIT_QG_PANEL], P("qwen35_split_qg_panel.spv"), 3, 3 * sizeof(int));
-    ok &= buildKernel(g_kern[K_QWEN35_PARTIAL_ROPE_PANEL], P("qwen35_partial_rope_panel.spv"), 4, 6 * sizeof(int) + sizeof(float));
+    ok &= buildKernel(g_kern[K_QWEN35_PARTIAL_ROPE_PANEL], P("qwen35_partial_rope_panel.spv"), 5, 7 * sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_QWEN35_CAUSAL_ATTENTION_PANEL], P("qwen35_causal_attention_panel.spv"), 4, 5 * sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_SIGMOID_MUL], P("sigmoid_mul.spv"), 2, sizeof(int));
     ok &= buildKernel(g_kern[K_Q4K_MATMUL], P("q4k_matmul.spv"), 3, 3 * sizeof(int));
@@ -1755,6 +1897,7 @@ void fvk_trim_pool(void) {
     if (g_batching) batchFlush();
     drainPool();
     freeGdnScratch();
+    freePartialRoPECaches();
     releaseWeightArena();
 }
 
@@ -2290,9 +2433,20 @@ extern "C" int fvk_qwen35_partial_rope_panel_f32(const void* q, const void* k,
         return 2;
     uint64_t count = (uint64_t)tokens*((uint64_t)nQHeads+nKHeads)*headDim;
     if (count>2147483647u) return 2;
-    struct { int tokens,startPos,qHeads,kHeads,hd,rotary; float theta; }
-        pc{tokens,startPos,nQHeads,nKHeads,headDim,rotaryDim,(float)theta};
-    Buffer* bufs[] = {B(q),B(k),B(qOut),B(kOut)};
+    const float tableTheta = (float)theta;
+    if (!std::isfinite(tableTheta) || tableTheta <= 0) return 2;
+    const int scalarReference = environmentFlagEnabled(
+        "FAK_VULKAN_QWEN35_PARTIAL_ROPE_SCALAR_REFERENCE");
+    Buffer* table = B((void*)q); // Valid fifth descriptor; scalar arm never reads it.
+    if (!scalarReference && rotaryDim > 0) {
+        const uint64_t endPosition = (uint64_t)startPos + (uint64_t)tokens;
+        if (endPosition > (uint64_t)std::numeric_limits<size_t>::max()) return 2;
+        table = partialRoPETable(tableTheta, rotaryDim, (size_t)endPosition);
+        if (!table) return 3;
+    }
+    struct { int tokens,startPos,qHeads,kHeads,hd,rotary; float theta; int scalarReference; }
+        pc{tokens,startPos,nQHeads,nKHeads,headDim,rotaryDim,tableTheta,scalarReference};
+    Buffer* bufs[] = {B(q),B(k),B(qOut),B(kOut),table};
     dispatch(g_kern[K_QWEN35_PARTIAL_ROPE_PANEL],bufs,&pc,sizeof(pc),(uint32_t)((count+255)/256));
     return (int)g_submissionStatus;
 }
