@@ -591,6 +591,21 @@ func newNativeChildTaskRunner(planner agent.Planner, maxTurns int, baseOpts []ag
 		if err != nil {
 			return nil, err
 		}
+		if metrics.HitTurnCap {
+			return nil, fmt.Errorf("native child task: turn cap reached after %d turns without completion", metrics.Turns)
+		}
+		if metrics.CircuitBreakerTripped {
+			return nil, fmt.Errorf("native child task: circuit breaker stopped execution: %s", metrics.CircuitBreakerReason)
+		}
+		if metrics.StoppedBySession != "" {
+			return nil, fmt.Errorf("native child task: stopped without completion: %s", metrics.StoppedBySession)
+		}
+		if metrics.GracefulDrained {
+			return nil, fmt.Errorf("native child task: graceful drain synthesized a summary without completion")
+		}
+		if strings.TrimSpace(metrics.FinalAnswer) == "" {
+			return nil, fmt.Errorf("native child task: ended without a final answer")
+		}
 		return metrics.FinalAnswer, nil
 	}
 }
