@@ -219,9 +219,13 @@ func (c *KVCache) CloneWithReserve(extraPositions int) *KVCache {
 		n.msa = c.msa.cloneWithReserve(c.cfg, extraPositions)
 	}
 	for l := range c.K {
-		n.K[l] = cloneFloat32WithReserve(c.K[l], extraFloats)
-		n.Kraw[l] = cloneFloat32WithReserve(c.Kraw[l], extraFloats)
-		n.V[l] = cloneFloat32WithReserve(c.V[l], extraFloats)
+		reserve := extraFloats
+		if !c.reserveTokenKVLayer(l) {
+			reserve = 0
+		}
+		n.K[l] = cloneFloat32WithReserve(c.K[l], reserve)
+		n.Kraw[l] = cloneFloat32WithReserve(c.Kraw[l], reserve)
+		n.V[l] = cloneFloat32WithReserve(c.V[l], reserve)
 	}
 	return n
 }
@@ -236,6 +240,9 @@ func (c *KVCache) Reserve(extraPositions int) {
 	c.pos = reserveInts(c.pos, extraPositions)
 	c.lineage.reserve(extraPositions)
 	for l := range c.K {
+		if !c.reserveTokenKVLayer(l) {
+			continue
+		}
 		c.K[l] = reserveFloat32(c.K[l], extraFloats)
 		c.Kraw[l] = reserveFloat32(c.Kraw[l], extraFloats)
 		c.V[l] = reserveFloat32(c.V[l], extraFloats)
@@ -246,6 +253,17 @@ func (c *KVCache) Reserve(extraPositions int) {
 	if c.msa != nil {
 		c.msa.reserve(c.cfg, extraPositions)
 	}
+}
+
+// reserveTokenKVLayer reports whether future token-indexed K/Kraw/V rows can be
+// appended at layer. Hybrid recurrent layers hold fixed state instead, so empty
+// token-KV planes stay empty. Pre-existing rows are conservatively preserved and
+// reserved as an impossible-state fallback rather than silently dropping data.
+func (c *KVCache) reserveTokenKVLayer(layer int) bool {
+	if !c.cfg.IsQwen35Hybrid() || !c.cfg.isLinearAttnLayer(layer) {
+		return true
+	}
+	return len(c.K[layer]) > 0 || len(c.Kraw[layer]) > 0 || len(c.V[layer]) > 0
 }
 
 func cloneFloat32WithReserve(src []float32, extra int) []float32 {

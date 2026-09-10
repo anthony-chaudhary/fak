@@ -288,6 +288,9 @@ func buildQwen35GGUFFixture(t *testing.T, arch string, dim, vocab int, embType, 
 	writeKVFloat32(&b, prefix+"attention.layer_norm_rms_epsilon", 1e-6)
 
 	embBlkBytes := blockQ2KBytes
+	if embType == TensorQ4_K {
+		embBlkBytes = blockQ4KBytes
+	}
 	if embType == TensorF32 {
 		embBlkBytes = 4
 	}
@@ -299,6 +302,8 @@ func buildQwen35GGUFFixture(t *testing.T, arch string, dim, vocab int, embType, 
 	outBlkBytes := 144 // Q4_K
 	if outType == TensorQ2_K {
 		outBlkBytes = blockQ2KBytes
+	} else if outType == TensorQ6_K {
+		outBlkBytes = blockQ6KBytes
 	}
 	outBytes := (vocab * dim / 256) * outBlkBytes
 
@@ -355,6 +360,17 @@ func buildQwen35GGUFFixture(t *testing.T, arch string, dim, vocab int, embType, 
 			binary.LittleEndian.PutUint16(embPayload[i+80:], 0x3C00) // d = 1.0
 			binary.LittleEndian.PutUint16(embPayload[i+82:], 0)      // min = 0
 		}
+	} else if embType == TensorQ4_K && vocab > 1 {
+		rowBytes := (dim / 256) * blockQ4KBytes
+		blk := embPayload[rowBytes : rowBytes+blockQ4KBytes]
+		copy(blk[:4], []byte{0x00, 0x38, 0x00, 0x34}) // d=0.5, dmin=0.25
+		copy(blk[4:16], []byte{0x41, 0x42, 0x83, 0xc4, 0x45, 0x86, 0x87, 0xc8, 0x51, 0x62, 0x73, 0x84})
+		for group := 0; group < 4; group++ {
+			for lane := 0; lane < 32; lane++ {
+				low := byte(lane % 16)
+				blk[16+group*32+lane] = low | (15-low)<<4
+			}
+		}
 	}
 	writePayloadAt(0, embPayload)
 
@@ -370,6 +386,52 @@ func buildQwen35GGUFFixture(t *testing.T, arch string, dim, vocab int, embType, 
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestWithQ4KEmbeddingResidentLoad(t *testing.T) {
+	const dim, vocab = 256, 3
+	path := buildQwen35GGUFFixture(t, "qwen35", dim, vocab, TensorQ4_K, TensorQ6_K, false, false)
+
+	mOpt, err := LoadModelQ4KProfileOptions(path, nil, WithQ4KEmbeddingResident(true), WithDenseKQuantResident(true))
+	if err != nil {
+		t.Fatalf("opt-in Q4_K embedding load: %v", err)
+	}
+	if mOpt.Q2KEmbedding == nil || mOpt.Q2KEmbedding.Format() != "Q4_K" {
+		t.Fatalf("packed embedding format = %v, want Q4_K", mOpt.Q2KEmbedding)
+	}
+	if got, want := mOpt.Q2KEmbedding.Bytes(), vocab*blockQ4KBytes; got != want {
+		t.Fatalf("packed embedding bytes = %d, want %d", got, want)
+	}
+	report := mOpt.ResidentReport()
+	if report.Q4KEmbedTensors != 1 || report.Q4KEmbedBytes != int64(vocab*blockQ4KBytes) || report.Q2KEmbedTensors != 0 {
+		t.Fatalf("resident embedding report = %+v", report)
+	}
+	if mOpt.HasF32("model.embed_tokens.weight") {
+		t.Fatal("opt-in Q4_K embedding expanded to F32")
+	}
+	row := make([]float32, dim)
+	if err := mOpt.Q2KEmbedding.GatherRow(1, row, 1); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []float32{-1.25, -0.75, -0.25, 0.25} {
+		if row[i] != want {
+			t.Fatalf("middle row[%d] = %v, want independently derived %v", i, row[i], want)
+		}
+	}
+	if !mOpt.HasKQuant("lm_head.weight") {
+		t.Fatal("distinct Q6_K output head was not preserved")
+	}
+	if raw, ok := mOpt.KQuantRaw("lm_head.weight"); !ok || len(raw) != vocab*blockQ6KBytes {
+		t.Fatalf("Q6_K output bytes = %d, %v; want %d, true", len(raw), ok, vocab*blockQ6KBytes)
+	}
+
+	mDefault, err := LoadModelQ4KProfileOptions(path, nil, WithDenseKQuantResident(true))
+	if err != nil {
+		t.Fatalf("default Q4_K embedding load: %v", err)
+	}
+	if mDefault.Q2KEmbedding != nil || !mDefault.HasF32("model.embed_tokens.weight") {
+		t.Fatal("default load must keep Q4_K embedding expanded as F32")
+	}
 }
 
 func TestWithQ2KEmbeddingResidentRejections(t *testing.T) {
