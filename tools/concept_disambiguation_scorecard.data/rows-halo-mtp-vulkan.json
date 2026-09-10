@@ -1,0 +1,64 @@
+{
+  "rows": [
+    {
+      "id": "halo-mtp-attention-qwen35fullattentionhal",
+      "canonical": "qwen35FullAttentionHAL (resident Qwen3.5 full-attention step)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The internal/model Session method that executes one ordinary Qwen3.5 full-attention layer through the compute HAL over a device-resident residual and the session KV store; the retained MTP draft reuses it for its decoder layer.",
+      "distinction": "It is the runtime operation for one full-attention step, not FullAttentionInterval, which describes where full-attention layers occur in a hybrid stack.",
+      "distinct_from": [
+        "x-attention-fullattention"
+      ],
+      "aliases": [
+        "qwen35FullAttentionHAL"
+      ],
+      "grounding": "qwen35FullAttentionHAL",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-attention.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "halo-mtp-support-supportsq6kmatmul",
+      "canonical": "SupportsQ6KMatMul (native packed Q6_K capability predicate)",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "The compute-backend predicate that reports whether the loaded Vulkan bundle contains a usable native packed Q6_K-to-F32 matrix-multiply pipeline before the retained MTP route allocates resident tensors.",
+      "distinction": "It reports availability of one optional compute kernel in the active backend; KVPrefixReuseSupported instead reports whether an architecture's KV cache completely represents a reusable session prefix.",
+      "distinct_from": [
+        "kvprefixreusesupported"
+      ],
+      "aliases": [
+        "SupportsQ6KMatMul"
+      ],
+      "grounding": "SupportsQ6KMatMul",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-support-maturity.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "halo-mtp-support-unsupportedqwen35mtpdrafterror",
+      "canonical": "UnsupportedQwen35MTPDraftError (resident MTP typed refusal)",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "The typed fail-closed error returned when the retained Qwen3.5/Qwen3.8 MTP draft path cannot admit the requested backend, checkpoint tensor layout, decoder topology, or device-residency contract.",
+      "distinction": "It is a runtime admission refusal for the retained MTP draft path; UnsupportedArchError is a load-time refusal for an entire model architecture that fak does not implement.",
+      "distinct_from": [
+        "c729-unsupported-arch-error"
+      ],
+      "aliases": [
+        "UnsupportedQwen35MTPDraftError"
+      ],
+      "grounding": "UnsupportedQwen35MTPDraftError",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-support-maturity.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
@@ -33,14 +34,17 @@ func (e *Qwen35MTPForwardError) Error() string {
 // mutated. The retained checkpoint payload and shared target LM head remain
 // immutable and are reused without copying.
 type Qwen35MTPForward struct {
-	target       *Model
-	draft        *Session
-	mat          matKernel
-	tensorFormat Qwen38MTPTensorFormat
-	lastPos      int
-	closed       bool
-	closeOnce    sync.Once
-	vocabFilter  *DraftVocabFilter
+	target          *Model
+	draft           *Session
+	mat             matKernel
+	tensorFormat    Qwen38MTPTensorFormat
+	lastPos         int
+	closed          bool
+	closeOnce       sync.Once
+	vocabFilter     *DraftVocabFilter
+	resident        compute.Qwen35MTPDraftBackend
+	transferCounter compute.Qwen35MTPTransferCounter
+	receipt         Qwen35MTPForwardReceipt
 }
 
 // NewQwen35MTPForward binds the exact mtp.layers.0 namespace to the shared Qwen
@@ -49,8 +53,32 @@ type Qwen35MTPForward struct {
 // (and the existing per-format Metal dispatch on Apple Silicon); the original
 // uniform-F32/BF16 layout remains unchanged. Other mixtures are refused.
 func (m *Model) NewQwen35MTPForward() (*Qwen35MTPForward, error) {
+	return m.newQwen35MTPForward(nil)
+}
+
+// NewQwen35MTPForwardWithBackend constructs the same retained draft head on an
+// explicitly selected resident backend. The backend must advertise the exact
+// MTP fusion path and physical transfer counters; unsupported implementations
+// are refused before any draft position executes.
+func (m *Model) NewQwen35MTPForwardWithBackend(be compute.Backend) (*Qwen35MTPForward, error) {
+	if be == nil {
+		return nil, &compute.UnsupportedQwen35MTPDraftError{Path: compute.Qwen35MTPDraftPath, Stage: "backend admission", Reason: "a non-nil backend is required"}
+	}
+	return m.newQwen35MTPForward(be)
+}
+
+func (m *Model) newQwen35MTPForward(be compute.Backend) (*Qwen35MTPForward, error) {
 	if m == nil {
 		return nil, qwen35MTPStateError("model", "non-nil model", "nil")
+	}
+	var resident compute.Qwen35MTPDraftBackend
+	var counter compute.Qwen35MTPTransferCounter
+	if be != nil {
+		var capabilityErr error
+		resident, counter, capabilityErr = qwen35MTPDraftCapability(be)
+		if capabilityErr != nil {
+			return nil, capabilityErr
+		}
 	}
 	if !m.holdModelWeights() {
 		return nil, qwen35MTPStateError("model weights", "open checkpoint weights", "closing or closed")
@@ -79,9 +107,26 @@ func (m *Model) NewQwen35MTPForward() (*Qwen35MTPForward, error) {
 	// Qwen3.8's retained MTP decoder is a full-attention layer. The target may
 	// be hybrid, but its layer_types indices describe target layers, not this
 	// separately named draft layer.
-	cfg.LayerTypes = []string{"full_attention"}
+	if be == nil {
+		cfg.LayerTypes = []string{"full_attention"}
+	} else {
+		// The retained decoder is unconditionally full attention. Leave the target
+		// layer classification out of the resident draft config so the target's
+		// long-context QSA host-gather heuristic cannot intercept this exact dense
+		// device path.
+		cfg.LayerTypes = nil
+	}
 
 	aliases := make(map[string]tensorMeta, len(qwen35MTPDecoderAliases)+2)
+	for _, name := range []string{
+		"mtp.fc.weight",
+		"mtp.pre_fc_norm_hidden.weight",
+		"mtp.pre_fc_norm_embedding.weight",
+	} {
+		if meta, ok := m.manifest[name]; ok {
+			aliases[name] = meta
+		}
+	}
 	for dst, src := range qwen35MTPDecoderAliases {
 		if meta, ok := m.manifest[src]; ok {
 			aliases[dst] = meta
@@ -152,15 +197,53 @@ func (m *Model) NewQwen35MTPForward() (*Qwen35MTPForward, error) {
 	draft := &Session{M: draftModel, Cache: NewKVCache(cfg)}
 	var mat matKernel = f32Kernel{draftModel}
 	if layout.Format == Qwen38MTPFormatQ4K {
+		// The admitted Q4_K_M inventory is intentionally mixed: mtp.fc is
+		// Q8_0 while v/down/head are Q6_K. Enable every resident HAL resolver;
+		// matWeightHAL still selects each tensor's exact retained store.
+		if be != nil {
+			draft.Quant = true
+		}
 		draft.Q4K = true
 		// The non-Darwin implementation is an explicit CPU-native no-op. On Apple
 		// Silicon this selects the existing resident Q4_K Metal dispatch.
 		draft.MetalQ4K = true
 		mat = sessionQ4KKernel{s: draft}
 	}
+	if be != nil {
+		var halKV compute.KVStore
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					halKV = nil
+				}
+			}()
+			halKV = newHALKVStore(be, cfg)
+		}()
+		if halKV == nil {
+			return nil, &compute.UnsupportedQwen35MTPDraftError{Backend: be.Name(), Path: compute.Qwen35MTPDraftPath, Stage: "KV allocation", Reason: "backend did not create a dedicated draft KV store"}
+		}
+		draft.Backend = be
+		draft.halKV = halKV
+		draft.halW = make(map[string]compute.Tensor)
+		draft.borrowedHALW = make(map[string]struct{})
+	}
 	draft.initMixedQKV()
+	forward := &Qwen35MTPForward{
+		target: m, draft: draft, mat: mat, tensorFormat: layout.Format, lastPos: -1,
+		resident: resident, transferCounter: counter,
+	}
+	if be != nil {
+		forward.receipt.Path = compute.Qwen35MTPDraftPath
+		forward.receipt.Backend = be.Name()
+		forward.receipt.TransferCounterScope = "backend-global counter deltas; exclusive execution required for per-draft attribution"
+		if err := forward.initResidentMTP(); err != nil {
+			held = false
+			forward.Close()
+			return nil, err
+		}
+	}
 	held = false
-	return &Qwen35MTPForward{target: m, draft: draft, mat: mat, tensorFormat: layout.Format, lastPos: -1}, nil
+	return forward, nil
 }
 
 // Close releases the target checkpoint lifetime held by this draft head.
@@ -171,11 +254,18 @@ func (f *Qwen35MTPForward) Close() {
 	f.closeOnce.Do(func() {
 		f.closed = true
 		if f.draft != nil {
-			if f.tensorFormat == Qwen38MTPFormatQ4K && f.draft.M != nil {
+			draftModel := f.draft.M
+			if f.resident == nil && f.tensorFormat == Qwen38MTPFormatQ4K && draftModel != nil {
 				releaseModelQ4KHandles(f.draft.M)
 				f.draft.M.releaseMetalQ8Residency()
 			}
 			f.draft.Close()
+			if f.resident != nil && draftModel != nil {
+				// Resident weights are memoized on the short-lived aliased draft
+				// model. Close that model-owned pool after the session drops its
+				// borrowed handles so rebase/recreate cannot accumulate VRAM.
+				_ = draftModel.CloseWeights()
+			}
 		}
 		if f.target != nil {
 			f.target.releaseWeightSession()
@@ -201,6 +291,10 @@ func (f *Qwen35MTPForward) Forward(pos int, priorHidden, currentEmbedding []floa
 	}
 	if pos <= f.lastPos {
 		return nil, qwen35MTPStateError("position", fmt.Sprintf("greater than %d", f.lastPos), fmt.Sprint(pos))
+	}
+	if f.resident != nil {
+		_, logits, err := f.residentForwardFeedback(pos, priorHidden, currentEmbedding)
+		return logits, err
 	}
 
 	x, err := f.qwen38MTPFuse(priorHidden, currentEmbedding)
