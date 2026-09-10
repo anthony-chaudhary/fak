@@ -184,3 +184,49 @@ func TestOpsScheduleStatusLive(t *testing.T) {
 		t.Errorf("expected all 3 workloads in --status output, got:\n%s", out)
 	}
 }
+
+func TestOpsScheduleLaunchdEnvironment(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runOpsSchedule(&stdout, &stderr, []string{
+		"--target", "launchd",
+		"--interval-issue", "10m",
+		"--interval-debt", "15m",
+		"--interval-sync", "1h",
+		"--dry-run",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("expected code 0, got %d (stderr: %s)", code, stderr.String())
+	}
+
+	var report OpsScheduleReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("failed to decode report JSON: %v", err)
+	}
+
+	if len(report.Tasks) == 0 {
+		t.Fatalf("expected tasks in report")
+	}
+
+	for _, task := range report.Tasks {
+		def := task.Definition
+		if !strings.Contains(def, "<key>WorkingDirectory</key>") {
+			t.Errorf("task %s launchd plist missing WorkingDirectory", task.TaskName)
+		}
+		if !strings.Contains(def, "<key>EnvironmentVariables</key>") {
+			t.Errorf("task %s launchd plist missing EnvironmentVariables", task.TaskName)
+		}
+		if !strings.Contains(def, "<key>PATH</key>") {
+			t.Errorf("task %s launchd plist missing PATH in EnvironmentVariables", task.TaskName)
+		}
+		if !strings.Contains(def, "<key>HOME</key>") {
+			t.Errorf("task %s launchd plist missing HOME in EnvironmentVariables", task.TaskName)
+		}
+		if !strings.Contains(def, "<string>--workdir</string>") {
+			t.Errorf("task %s launchd plist missing --workdir in ProgramArguments", task.TaskName)
+		}
+		if !strings.Contains(def, "Library/Logs/fak") && !strings.Contains(def, "/tmp/") {
+			t.Errorf("task %s launchd plist missing valid log path", task.TaskName)
+		}
+	}
+}
