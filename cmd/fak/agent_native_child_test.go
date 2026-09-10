@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/codetools"
@@ -80,49 +82,87 @@ func containsNativeChildTool(names []string, want string) bool {
 
 func TestNativeChildRunnerReusesPlannerModelAndPolicy(t *testing.T) {
 	t.Cleanup(agent.Configure)
-	planner := &nativeChildCapturePlanner{model: "qwen3.8-27b-q4km"}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "value.txt"), []byte("owned-policy-fixture"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agent.ArmCodeTools(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(agent.DisarmCodeTools)
+	planner := &nativeChildFloorPlanner{nativeChildCapturePlanner: nativeChildCapturePlanner{model: "qwen3.8-27b-q4km"}}
 	var boundary agent.ModelRequestBoundary
 	parentCatalog := []agent.ToolDef{
-		nativeChildTestTool(codetools.ToolRead),
-		nativeChildTestTool(codetools.ToolWrite),
-		nativeChildTestTool(agent.ToolTaskSpawn),
+		nativeChildTestTool(codetools.ToolRead), nativeChildTestTool(codetools.ToolGrep),
+		nativeChildTestTool(codetools.ToolWrite), nativeChildTestTool(agent.ToolTaskSpawn),
 	}
 	policy := adjudicator.Policy{
 		Posture: adjudicator.PostureFailClosed,
 		Allow:   map[string]bool{codetools.ToolRead: true},
+		Deny:    map[string]abi.ReasonCode{codetools.ToolGrep: abi.ReasonPolicyBlock},
 	}
-	runner := newNativeChildTaskRunner(
-		planner,
-		1,
-		[]agent.RunOption{
-			agent.WithProvider("openai"),
-			agent.WithBaseURL("http://127.0.0.1:8080/v1"),
-			agent.WithModelRequestObserver(func(got agent.ModelRequestBoundary) error {
-				boundary = got
-				return nil
-			}),
-		},
-		parentCatalog,
-		policy,
-	)
-
+	adjudicator.Default.SetPolicy(adjudicator.Policy{Posture: adjudicator.PostureFailClosed, Allow: map[string]bool{"outside-child-sentinel": true}})
+	runner := newNativeChildTaskRunner(planner, 4, []agent.RunOption{
+		agent.WithProvider("openai"), agent.WithBaseURL("http://127.0.0.1:8080/v1"),
+		agent.WithModelRequestObserver(func(got agent.ModelRequestBoundary) error { boundary = got; return nil }),
+	}, parentCatalog, policy)
 	result, err := runner(context.Background(), agent.ChildTaskRunRequest{Prompt: "inspect", ReadOnly: true})
 	if err != nil {
 		t.Fatalf("native child runner: %v", err)
 	}
-	if result != "child complete" || planner.calls != 1 {
+	if result != "child complete" || planner.calls != 3 {
 		t.Fatalf("result=%v planner calls=%d", result, planner.calls)
 	}
 	if boundary.Model != planner.model {
-		t.Fatalf("child model = %q, want inherited planner model %q", boundary.Model, planner.model)
+		t.Fatalf("child model=%q want inherited %q", boundary.Model, planner.model)
 	}
-	if got := nativeChildToolNames(boundary.Tools); strings.Join(got, ",") != codetools.ToolRead {
-		t.Fatalf("model-bound child tools = %v, want only Read", got)
+	if got := nativeChildToolNames(boundary.Tools); strings.Join(got, ",") != "Read,Grep" {
+		t.Fatalf("model-bound child tools=%v want Read,Grep", got)
 	}
-	snapshot := adjudicator.Default.PolicySnapshot()
-	if snapshot.Posture != policy.Posture || !snapshot.Allow[codetools.ToolRead] || snapshot.Allow[codetools.ToolWrite] {
-		t.Fatalf("child policy snapshot = %+v, want caller floor", snapshot)
+	var read, refused string
+	for _, message := range planner.messages {
+		if message.Role != agent.RoleTool {
+			continue
+		}
+		if message.Name == codetools.ToolRead {
+			read = message.Content
+		}
+		if message.Name == codetools.ToolGrep {
+			refused = message.Content
+		}
 	}
+	if !strings.Contains(read, "owned-policy-fixture") {
+		t.Fatalf("allowed Read did not execute through the owned loop: %s", read)
+	}
+	var denial agent.ToolReceipt
+	if err := json.Unmarshal([]byte(refused), &denial); err != nil || denial.Reason != "POLICY_BLOCK" || denial.Status != agent.ToolResultError {
+		t.Fatalf("caller-denied Grep was not refused: %s (%v)", refused, err)
+	}
+	global := adjudicator.Default.PolicySnapshot()
+	if len(global.Allow) != 1 || !global.Allow["outside-child-sentinel"] {
+		t.Fatalf("child mutated global policy: allow=%v", global.Allow)
+	}
+}
+
+type nativeChildFloorPlanner struct {
+	nativeChildCapturePlanner
+	messages []agent.Message
+}
+
+func (p *nativeChildFloorPlanner) Complete(_ context.Context, messages []agent.Message, tools []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+	p.calls++
+	p.tools = append([]agent.ToolDef(nil), tools...)
+	p.messages = append([]agent.Message(nil), messages...)
+	var tool, args string
+	switch p.calls {
+	case 1:
+		tool, args = codetools.ToolRead, `{"file_path":"value.txt"}`
+	case 2:
+		tool, args = codetools.ToolGrep, `{"pattern":"fixture"}`
+	default:
+		return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: "child complete"}}, nil
+	}
+	return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, ToolCalls: []agent.ToolCall{{ID: tool, Function: agent.Func{Name: tool, Arguments: args}}}}}, nil
 }
 
 func TestNativeChildPlannerRejectsMutationBeforeDispatch(t *testing.T) {

@@ -224,6 +224,9 @@ type runConfig struct {
 	toolCatalog    []ToolDef
 	todoTools      bool
 	taskTools      bool
+	childTasks     *childTaskRunConfig
+	taskState      *TaskState
+	isolatedPolicy *adjudicator.Policy
 	contextControl bool
 	systemPrompt   string
 	memoryDigest   string
@@ -288,6 +291,13 @@ func WithPolicySnapshot(p adjudicator.Policy) RunOption {
 	return func(c *runConfig) {
 		snap := p
 		c.policySnapshot = &snap
+	}
+}
+
+func withIsolatedPolicy(p adjudicator.Policy) RunOption {
+	return func(c *runConfig) {
+		snap := p
+		c.isolatedPolicy = &snap
 	}
 }
 

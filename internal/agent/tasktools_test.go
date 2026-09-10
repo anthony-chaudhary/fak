@@ -134,7 +134,7 @@ func TestTaskCatalogArmDisarm(t *testing.T) {
 	}
 
 	statusMeta, ok := taskToolMeta(ToolTaskStatus)
-	if !ok || statusMeta["consistency"] != "BEST_EFFORT" || statusMeta["readOnlyHint"] != "true" || statusMeta["idempotentHint"] != "true" {
+	if !ok || statusMeta["consistency"] != "BEST_EFFORT" || statusMeta["readOnlyHint"] != "true" || statusMeta["idempotentHint"] != "false" {
 		t.Errorf("unexpected taskToolMeta for task_status: ok=%v, meta=%v", ok, statusMeta)
 	}
 

@@ -557,6 +557,8 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 	if cfg.trace == "" {
 		cfg.trace = "agent"
 	}
+	ctx = cfg.bindChildTaskState(ctx)
+	defer cfg.closeChildTaskState()
 	// Mid-flight mailbox (#5158): seal the verb mailbox on EVERY return path once the arm
 	// finishes, so a finished run refuses further mid-flight verbs with the closed
 	// terminal-session token. Nil-safe: no mailbox wired => a no-op.
@@ -567,11 +569,41 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 	}
 	var k *kernel.Kernel
 	if fak {
-		Configure()
-		if cfg.policySnapshot != nil {
-			adjudicator.Default.SetPolicy(*cfg.policySnapshot)
+		isolated := cfg.taskState != nil || cfg.isolatedPolicy != nil
+		configureRuntime(!isolated)
+		if !isolated {
+			if cfg.policySnapshot != nil {
+				adjudicator.Default.SetPolicy(*cfg.policySnapshot)
+			}
+			k = kernel.New("localtools")
+		} else {
+			policy := configuredAgentPolicy()
+			if cfg.policySnapshot != nil {
+				policy = *cfg.policySnapshot
+			}
+			if cfg.isolatedPolicy != nil {
+				policy = *cfg.isolatedPolicy
+			}
+			if cfg.taskState != nil {
+				allow := make(map[string]bool, len(policy.Allow)+4)
+				for name, admitted := range policy.Allow {
+					allow[name] = admitted
+				}
+				for _, name := range taskToolNames() {
+					if _, denied := policy.Deny[name]; !denied {
+						allow[name] = true
+					}
+				}
+				policy.Allow = allow
+			}
+			chain := append([]abi.Adjudicator(nil), abi.Adjudicators()...)
+			for i, rung := range chain {
+				if rung == adjudicator.Default {
+					chain[i] = adjudicator.New(policy)
+				}
+			}
+			k = kernel.New("localtools", kernel.WithAdjudicators(chain))
 		}
-		k = kernel.New("localtools")
 		k.SetVDSO(true)
 	}
 	// Suspend-and-resume speculation driver (#1318): non-nil only on the fak arm when a
