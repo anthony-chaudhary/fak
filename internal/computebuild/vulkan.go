@@ -283,7 +283,7 @@ func CompareReceiptProvenance(a, b *ComputeBuildReceipt) error {
 	return nil
 }
 
-const vulkanV2ModuleCount = 43
+const vulkanV2ModuleCount = 44
 
 var unavailableVulkanV2Causality = []string{
 	"historical_source_cleanliness",

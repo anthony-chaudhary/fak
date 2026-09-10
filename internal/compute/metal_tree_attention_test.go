@@ -2,13 +2,32 @@
 
 package compute
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
-func TestTreeSpecVerifyAttentionMetalParity(t *testing.T) {
-	be, ref := metalOrSkip(t), Default()
+func treeMetalOrRequired(t *testing.T) *metalBackend {
+	t.Helper()
+	registered, ok := Lookup("metal")
+	if !ok {
+		if os.Getenv("FAK_METAL_TREE_ATTENTION_REQUIRE_DEVICE") == "1" {
+			t.Fatal("required Metal device is not registered")
+		}
+		t.Skip("metal backend not registered (no reachable Metal device)")
+	}
+	be, ok := registered.(*metalBackend)
+	if !ok {
+		t.Fatalf("registered Metal backend has type %T, want *metalBackend", registered)
+	}
 	if !metalTreeAttentionAvailable() {
 		t.Fatal("Metal backend registered without the native tree-attention pipeline")
 	}
+	return be
+}
+
+func TestTreeSpecVerifyAttentionMetalParity(t *testing.T) {
+	be, ref := treeMetalOrRequired(t), Default()
 	const qLen, prefix, nH, nHkv, d = 4, 3, 4, 2, 64
 	qRef, kRef, vRef := treeSpecFixture(ref, qLen, prefix, nH, nHkv, d, 12729)
 	var want Tensor
@@ -25,10 +44,7 @@ func TestTreeSpecVerifyAttentionMetalParity(t *testing.T) {
 }
 
 func TestTreeSpecVerifyAttentionMetalLinearRegression(t *testing.T) {
-	be, ref := metalOrSkip(t), Default()
-	if !metalTreeAttentionAvailable() {
-		t.Fatal("Metal backend registered without the native tree-attention pipeline")
-	}
+	be, ref := treeMetalOrRequired(t), Default()
 	const qLen, prefix, nH, nHkv, d = 4, 2, 4, 2, 16
 	qRef, kRef, vRef := treeSpecFixture(ref, qLen, prefix, nH, nHkv, d, 12730)
 	var want Tensor
@@ -49,7 +65,7 @@ func TestTreeSpecVerifyAttentionMetalLinearRegression(t *testing.T) {
 }
 
 func TestTreeSpecVerifyAttentionMetalLinearBeyondMaskLimit(t *testing.T) {
-	be, ref := metalOrSkip(t), Default()
+	be, ref := treeMetalOrRequired(t), Default()
 	const qLen, prefix, nH, nHkv, d = 33, 1, 2, 1, 16
 	qRef, kRef, vRef := treeSpecFixture(ref, qLen, prefix, nH, nHkv, d, 12731)
 	var want Tensor
@@ -66,16 +82,17 @@ func TestTreeSpecVerifyAttentionMetalLinearBeyondMaskLimit(t *testing.T) {
 }
 
 func TestTreeSpecVerifyAttentionMetalBoundaryShapes(t *testing.T) {
-	be, ref := metalOrSkip(t), Default()
-	if !metalTreeAttentionAvailable() {
-		t.Fatal("Metal backend registered without the native tree-attention pipeline")
-	}
+	be, ref := treeMetalOrRequired(t), Default()
 	for _, tc := range []struct {
 		name    string
 		qLen, d int
-	}{{"bit31_odd_d37", 32, 37}, {"wide_d256", 4, 256}} {
+	}{{"bit31_odd_d37", 32, 37}, {"wide_d256", 4, 256}, {"max_d1024", 2, 1024}} {
 		t.Run(tc.name, func(t *testing.T) {
 			qRef, kRef, vRef := treeSpecFixture(ref, tc.qLen, 1, 2, 1, tc.d, lcg(13000+tc.qLen+tc.d))
+			var want Tensor
+			if err := ref.(TreeVerifyAttentionBackend).TreeVerifyAttention(&qRef, &kRef, &vRef, &want, linearTreeMask(tc.qLen), tc.qLen, tc.qLen+1, 2, 1, tc.d); err != nil {
+				t.Fatal(err)
+			}
 			q, k, value := be.Upload(qRef, F32), be.Upload(kRef, F32), be.Upload(vRef, F32)
 			var out Tensor
 			defer func() { be.Free(q); be.Free(k); be.Free(value); be.Free(out) }()
@@ -85,6 +102,7 @@ func TestTreeSpecVerifyAttentionMetalBoundaryShapes(t *testing.T) {
 			if out.Dtype != F32 || len(out.Shape) != 3 || out.Shape[0] != tc.qLen || out.Shape[1] != 2 || out.Shape[2] != tc.d {
 				t.Fatalf("output contract dtype=%v shape=%v", out.Dtype, out.Shape)
 			}
+			requireTreeApprox(t, ref.Read(want), be.Read(out), 0.9999, 1e-4)
 		})
 	}
 	qRef, kRef, vRef := treeSpecFixture(ref, 4, 1, 2, 1, 16, 13100)
