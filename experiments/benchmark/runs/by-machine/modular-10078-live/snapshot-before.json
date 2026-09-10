@@ -1,0 +1,137 @@
+{
+  "schema": "fak.modular-hardware-snapshot/v1",
+  "timestamp_utc": "2026-09-10T06:39:31.241115+00:00",
+  "health": {
+    "engine": "inkernel",
+    "model": "Qwen3.8-27B-Q4_K_M",
+    "ok": true,
+    "planner": "inkernel",
+    "time_to_ready_ms": 4559
+  },
+  "kernel": "7.2.3-arch1-3",
+  "binary_sha256": "19c8a2d918993a13e71cbfa0f845168b928177f08a253407708cf62d9c06f517",
+  "binary_version": "dev\nbuild: d3dd8447de37  (committed 2026-09-10T03:01:05Z)\ngo: go1.27.0-X:nodwarf5  linux/amd64",
+  "model_bytes": 17106775008,
+  "model_mtime_ns": 1788824107732773310,
+  "gpu": [
+    {
+      "vendor": "0x1002",
+      "device": "0x1586",
+      "gpu_busy_percent": "0",
+      "mem_info_vram_total": "68719476736",
+      "mem_info_vram_used": "21546946560",
+      "power_dpm_force_performance_level": "manual",
+      "pp_dpm_sclk": [
+        "2: 2900Mhz *"
+      ],
+      "pp_dpm_mclk": [
+        "2: 1000Mhz *"
+      ],
+      "temp1_input": 46000
+    }
+  ],
+  "admission_metrics": [
+    "fak_sched_running 0",
+    "fak_sched_waiting 0",
+    "fak_sched_tokens_in_use 0",
+    "fak_sched_token_budget{provenance=\"explicit\"} 65536",
+    "fak_sched_queued_tokens 0",
+    "fak_sched_max_num_seqs 256",
+    "fak_sched_shed_total 0",
+    "fak_sched_refused_total 0"
+  ],
+  "service_state": [
+    "SubState=running",
+    "ActiveEnterTimestamp=Thu 2026-09-10 06:04:04 UTC",
+    "MainPID=663614"
+  ],
+  "fixed_workload_smoke": {
+    "id": "chatcmpl-fak-1789022371240577030",
+    "object": "chat.completion",
+    "created": 1789022371,
+    "model": "Qwen3.8-27B-Q4_K_M",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "red green blue yellow"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 29,
+      "completion_tokens": 4,
+      "total_tokens": 33,
+      "prompt_tokens_details": {}
+    },
+    "fak": {
+      "native_inference_receipt": {
+        "token_ids": [
+          1114,
+          5983,
+          6105,
+          13358
+        ],
+        "token_logprobs": [
+          -0.0002740864114977622,
+          -6.729109085102389e-05,
+          -7.924734199829319e-05,
+          -6.192801080309824e-05
+        ],
+        "prefill_seconds": 2.130824043,
+        "ttft_seconds": 2.169419113,
+        "decode_seconds": 0.676968892,
+        "model": "Qwen3.8-27B-Q4_K_M",
+        "engine": "inkernel",
+        "planner": "inkernel",
+        "owner": "fak",
+        "backend": "vulkan",
+        "forward_path": "cuda/qwen35-gdn-ssm-decode-v1",
+        "q4k": true,
+        "fallback_active": false,
+        "prefill_chunk_tokens": 128,
+        "kernel_selection": {
+          "schema": "fak.kernel-selection/v1",
+          "model_ref": "Qwen3.8-27B-Q4_K_M",
+          "backend": "vulkan",
+          "forward_path": "cuda/qwen35-gdn-ssm-decode-v1",
+          "quantization": "Q4_K",
+          "prefill_chunk_tokens": 128,
+          "cpu_offload_experts": 0,
+          "q4k_gate_up_output_slab": false
+        },
+        "kernel_selection_digest": "sha256:afcb2e135cafb80a24595c65d41132e3788b7b9543ccbbaa3e7add59aa533e93",
+        "qwen35_sequence_prefill_route": {
+          "prefill_calls": 1,
+          "observed_calls": 1,
+          "complete": true,
+          "native_performance_qualifying": true,
+          "status": {
+            "requested_path": "qwen35-hybrid-sequence-prefill-v1",
+            "effective_path": "qwen35-hybrid-sequence-prefill-v1",
+            "fallback_active": false,
+            "native_performance_qualifying": true,
+            "embedding_panel_bytes": 593920
+          }
+        }
+      }
+    }
+  },
+  "model_sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+  "hash_seconds": 8.79877942299936,
+  "source_commit": "d3dd8447de3707afbc05bc450812cbce3858b66b",
+  "runner_source_commit": "6e1c5eb7c4c998211ba6764b7314e3eff0682594",
+  "capacity_calculation": {
+    "max_num_seqs": 256,
+    "token_budget": 65536,
+    "budget_provenance": "explicit",
+    "request_text_chars": 68,
+    "max_output_tokens": 16,
+    "reserved_tokens_per_request": 33,
+    "capacity": 256,
+    "formula": "min(256, floor(65536 / (floor(68 / 4) + 16)))",
+    "scope": "HTTP admission envelope; this is not a physical GPU batch-size assertion"
+  }
+}

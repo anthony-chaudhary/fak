@@ -190,15 +190,22 @@ type Qwen35SequencePrefillRequest struct {
 	// repair a partially accepted causal prefix. It is valid for 1..4 tokens
 	// together with NeedAllLogits.
 	CapturePrefixReplay bool
+	// CaptureRawHidden retains the final [tokens, hidden] residual panel before
+	// output normalization. Callers must first verify the raw-hidden capability
+	// and consume the device tensor before retiring request resources.
+	CaptureRawHidden bool
 }
 
 // Qwen35SequencePrefillResult returns only resident products. KV and recurrent
 // state are mutated in place and therefore are not replaceable result values.
+// LastHidden retains its existing post-output-normalization semantics;
+// RawHiddenRows, when requested, contains the pre-output-normalization panel.
 type Qwen35SequencePrefillResult struct {
-	LastHidden   Tensor
-	Logits       Tensor
-	LogitsRows   Tensor
-	PrefixReplay Qwen35SequencePrefixReplay
-	Tokens       int
-	Transfers    Qwen35SequenceTransferCounters
+	LastHidden    Tensor
+	RawHiddenRows Tensor
+	Logits        Tensor
+	LogitsRows    Tensor
+	PrefixReplay  Qwen35SequencePrefixReplay
+	Tokens        int
+	Transfers     Qwen35SequenceTransferCounters
 }

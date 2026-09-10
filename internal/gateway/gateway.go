@@ -805,7 +805,13 @@ func newInKernelChatPlanner(cfg Config, modelID string, logf func(string, ...any
 			logf("gateway: failed to enable Metal MTP coordinator: %v", err)
 		}
 	}
-	if shouldEnableNGramSpeculative(cfg) {
+	if shouldEnableVulkanMTP(cfg) {
+		if err := ikp.EnableVulkanMTP(model.Qwen35MTPMaxDraftDepth); err != nil {
+			logf("gateway: failed to enable resident Vulkan MTP: %v", err)
+		} else {
+			logf("gateway: enabled request-bound resident Vulkan MTP with resident target verification")
+		}
+	} else if shouldEnableNGramSpeculative(cfg) {
 		ikp.EnableSpeculativeDecoding(model.NewNGramProposalGenerator(model.NgramDrafter{
 			Enabled:  true,
 			MaxDraft: 4,
@@ -1349,7 +1355,7 @@ func (s *Server) complete(ctx context.Context, trace string, messages []agent.Me
 		if _, _, _, ok := inKernelOOMObservation(err); ok {
 			s.observePlannerRequestMemory()
 		}
-		return nil, err
+		return comp, err
 	}
 	s.metrics.observeInferenceUsageServed(s.servedLocalityOf(opts), comp.Usage, comp.FinishReason, dur)
 	s.observePlannerRequestMemory()
@@ -1395,7 +1401,10 @@ func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, mes
 	defer lease.Release()
 	comp, err := s.complete(ctx, turn.traceID, messages, tools, opts...)
 	if err != nil {
-		return nil, err
+		// Preserve request-local execution metadata on failures. Callers still
+		// receive the original error, while buffered/streaming HTTP paths can
+		// report an actual speculative route or typed downgrade in headers.
+		return comp, err
 	}
 	// The provider's real usage is now known — settle the token-rate window with it
 	// (#2019), replacing the admission-time estimate.

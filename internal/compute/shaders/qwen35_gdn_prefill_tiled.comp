@@ -1,0 +1,246 @@
+#version 450
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_shuffle : require
+
+// Blocked-sequential Qwen GatedDeltaNet prefill for Wave32-class Vulkan devices.
+//
+// One workgroup owns 32 value dimensions of one value head. Eight adjacent
+// lanes cooperate on one value dimension: every lane keeps 16 of the 128 state
+// elements in registers for the entire prompt. Q/K panels are staged once per
+// 16-token sub-block, so the recurrent state is read and written once per
+// prompt instead of once per token. The token loop remains sequential and
+// preserves the exact GatedDeltaNet update order.
+//
+// This first pass writes the unnormalised recurrent readout to binding 8. A
+// separate qwen35_gdn_prefill_norm dispatch applies the whole-128-value-head
+// RMS norm and SiLU gate. The split is required because four independent value
+// blocks cannot safely synchronize through workgroup memory.
+//
+// Dispatch: ceil(vHd / 32) x nV x 1. The optimized route requires
+// kHd == 128, vHd == 128, and a subgroup size of at least 8. The shader keeps
+// bounds checks so final token blocks are valid for every positive token count.
+layout(local_size_x = 32, local_size_y = 8, local_size_z = 1) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer ConvOut { float convOut[]; };
+layout(std430, set = 0, binding = 1) readonly buffer Z       { float z[]; };
+layout(std430, set = 0, binding = 2) readonly buffer B       { float beta[]; };
+layout(std430, set = 0, binding = 3) readonly buffer A       { float alpha[]; };
+layout(std430, set = 0, binding = 4) readonly buffer ALog    { float aLog[]; };
+layout(std430, set = 0, binding = 5) readonly buffer DTBias  { float dtBias[]; };
+layout(std430, set = 0, binding = 6) readonly buffer Norm    { float norm[]; };
+layout(std430, set = 0, binding = 7) buffer State            { float state[]; };
+layout(std430, set = 0, binding = 8) writeonly buffer Readout { float readout[]; };
+
+layout(push_constant) uniform PC {
+    int tokens;
+    int convDim;
+    int nK;
+    int nV;
+    int kHd;
+    int vHd;
+    float eps;
+} pc;
+
+const int TOKEN_BLOCK = 32;
+const int TOKEN_SUBBLOCK = 16;
+const int VALUE_BLOCK = 32;
+const int KEY_DIM = 128;
+
+// 16-token Q/K panels plus one 32-token value block use 20.4 KiB of LDS.
+shared float shQ[TOKEN_SUBBLOCK * KEY_DIM];
+shared float shK[TOKEN_SUBBLOCK * KEY_DIM];
+shared float shV[TOKEN_BLOCK * VALUE_BLOCK];
+shared float shQInv[TOKEN_SUBBLOCK];
+shared float shKInv[TOKEN_SUBBLOCK];
+shared float shAV[TOKEN_BLOCK];
+shared float shBV[TOKEN_BLOCK];
+
+float softplus(float x) {
+    return x > 20.0 ? x : log(1.0 + exp(x));
+}
+
+// Adjacent groups of eight lanes are independent. XOR distances 1, 2, and 4
+// never cross an eight-lane boundary inside a subgroup.
+float reduce8(float value) {
+    value += subgroupShuffleXor(value, 1u);
+    value += subgroupShuffleXor(value, 2u);
+    value += subgroupShuffleXor(value, 4u);
+    return value;
+}
+
+void main() {
+    int tid = int(gl_LocalInvocationIndex);
+    // Derive recurrence ownership from subgroup built-ins. Vulkan does not
+    // promise that linear local invocation indices map monotonically onto
+    // subgroup lanes, even when the requested subgroup size is Wave32.
+    int lane8 = int(gl_SubgroupInvocationID & 7u);
+    int dvLocal = int(gl_SubgroupID * (gl_SubgroupSize / 8u) +
+        (gl_SubgroupInvocationID >> 3u));
+    int dv = int(gl_WorkGroupID.x) * VALUE_BLOCK + dvLocal;
+    int h = int(gl_WorkGroupID.y);
+
+    // The integration selector admits only the production 128x128 geometry.
+    // Retain guards so accidental direct dispatch cannot address outside the
+    // supplied buffers.
+    bool geometryOK = pc.tokens > 0 && pc.kHd == KEY_DIM && pc.vHd == KEY_DIM &&
+        pc.nK > 0 && pc.nV > 0 && pc.nV % pc.nK == 0 &&
+        gl_SubgroupSize >= 8u;
+    if (!geometryOK || h >= pc.nV) {
+        return;
+    }
+
+    bool activeDV = dv < pc.vHd;
+    int repeat = pc.nV / pc.nK;
+    int kh = h / repeat;
+    int keyBase = kh * pc.kHd;
+    int valueBase = 2 * pc.nK * pc.kHd + h * pc.vHd;
+    int kLane = lane8;
+
+    // Each lane owns kLane + 8*j for j in [0,16). This striped assignment
+    // gives the eight cooperating lanes distinct LDS banks for every vector
+    // component while collectively covering the full 128-element column.
+    vec4 st0 = vec4(0.0);
+    vec4 st1 = vec4(0.0);
+    vec4 st2 = vec4(0.0);
+    vec4 st3 = vec4(0.0);
+    if (activeDV) {
+        st0 = vec4(
+            state[(h * pc.kHd + kLane + 8 * 0) * pc.vHd + dv],
+            state[(h * pc.kHd + kLane + 8 * 1) * pc.vHd + dv],
+            state[(h * pc.kHd + kLane + 8 * 2) * pc.vHd + dv],
+            state[(h * pc.kHd + kLane + 8 * 3) * pc.vHd + dv]);
+        st1 = vec4(
+            state[(h * pc.kHd + kLane + 8 * 4) * pc.vHd + dv],
+            state[(h * pc.kHd + kLane + 8 * 5) * pc.vHd + dv],
+            state[(h * pc.kHd + kLane + 8 * 6) * pc.vHd + dv],
+            state[(h * pc.kHd + kLane + 8 * 7) * pc.vHd + dv]);
+        st2 = vec4(
+            state[(h * pc.kHd + kLane + 8 * 8) * pc.vHd + dv],
+            state[(h * pc.kHd + kLane + 8 * 9) * pc.vHd + dv],
+            state[(h * pc.kHd + kLane + 8 * 10) * pc.vHd + dv],
+            state[(h * pc.kHd + kLane + 8 * 11) * pc.vHd + dv]);
+        st3 = vec4(
+            state[(h * pc.kHd + kLane + 8 * 12) * pc.vHd + dv],
+            state[(h * pc.kHd + kLane + 8 * 13) * pc.vHd + dv],
+            state[(h * pc.kHd + kLane + 8 * 14) * pc.vHd + dv],
+            state[(h * pc.kHd + kLane + 8 * 15) * pc.vHd + dv]);
+    }
+
+    for (int t0 = 0; t0 < pc.tokens; t0 += TOKEN_BLOCK) {
+        int blockTokens = min(TOKEN_BLOCK, pc.tokens - t0);
+
+        // Stage V and the two scalar recurrence gates for the whole block.
+        for (int item = tid; item < blockTokens * VALUE_BLOCK; item += 256) {
+            int bt = item / VALUE_BLOCK;
+            int blockDV = item - bt * VALUE_BLOCK;
+            int globalDV = int(gl_WorkGroupID.x) * VALUE_BLOCK + blockDV;
+            float vv = 0.0;
+            if (globalDV < pc.vHd) {
+                vv = convOut[(t0 + bt) * pc.convDim + valueBase + globalDV];
+            }
+            shV[item] = vv;
+        }
+        if (tid < blockTokens) {
+            int t = t0 + tid;
+            float av = exp(-exp(aLog[h]) * softplus(alpha[t * pc.nV + h] + dtBias[h]));
+            shAV[tid] = av;
+            shBV[tid] = 1.0 / (1.0 + exp(-beta[t * pc.nV + h]));
+        }
+        barrier();
+
+        for (int sub = 0; sub < blockTokens; sub += TOKEN_SUBBLOCK) {
+            int subTokens = min(TOKEN_SUBBLOCK, blockTokens - sub);
+
+            // Stage raw Q/K once for all 32 value dimensions in this block.
+            for (int item = tid; item < subTokens * KEY_DIM; item += 256) {
+                int st = item / KEY_DIM;
+                int ki = item - st * KEY_DIM;
+                int base = (t0 + sub + st) * pc.convDim;
+                shQ[item] = convOut[base + keyBase + ki];
+                shK[item] = convOut[base + pc.nK * pc.kHd + keyBase + ki];
+            }
+            barrier();
+
+            // One lane per token computes each fixed-epsilon Q/K norm. Tokens
+            // are independent here, so up to sixteen norms execute in parallel.
+            if (tid < subTokens) {
+                float q2 = 0.0;
+                float k2 = 0.0;
+                int row = tid * KEY_DIM;
+                for (int ki = 0; ki < KEY_DIM; ++ki) {
+                    float qv = shQ[row + ki];
+                    float kv = shK[row + ki];
+                    q2 += qv * qv;
+                    k2 += kv * kv;
+                }
+                shQInv[tid] = inversesqrt(q2 + 1e-6) * inversesqrt(float(KEY_DIM));
+                shKInv[tid] = inversesqrt(k2 + 1e-6);
+            }
+            barrier();
+
+            // No workgroup barrier is needed inside the causal recurrence.
+            // Each eight-lane group communicates only through subgroup shuffles.
+            for (int st = 0; st < subTokens; ++st) {
+                int bt = sub + st;
+                int row = st * KEY_DIM;
+                float qi = shQInv[st];
+                float ki = shKInv[st];
+                vec4 kv0 = vec4(shK[row + kLane + 8 * 0], shK[row + kLane + 8 * 1], shK[row + kLane + 8 * 2], shK[row + kLane + 8 * 3]) * ki;
+                vec4 kv1 = vec4(shK[row + kLane + 8 * 4], shK[row + kLane + 8 * 5], shK[row + kLane + 8 * 6], shK[row + kLane + 8 * 7]) * ki;
+                vec4 kv2 = vec4(shK[row + kLane + 8 * 8], shK[row + kLane + 8 * 9], shK[row + kLane + 8 * 10], shK[row + kLane + 8 * 11]) * ki;
+                vec4 kv3 = vec4(shK[row + kLane + 8 * 12], shK[row + kLane + 8 * 13], shK[row + kLane + 8 * 14], shK[row + kLane + 8 * 15]) * ki;
+
+                float av = shAV[bt];
+                st0 *= av;
+                st1 *= av;
+                st2 *= av;
+                st3 *= av;
+
+                float kvmem = reduce8(dot(st0, kv0) + dot(st1, kv1) + dot(st2, kv2) + dot(st3, kv3));
+                float delta = 0.0;
+                if (lane8 == 0 && activeDV) {
+                    delta = (shV[bt * VALUE_BLOCK + dvLocal] - kvmem) * shBV[bt];
+                }
+                uint subgroupBase = gl_SubgroupInvocationID & ~7u;
+                delta = subgroupShuffle(delta, subgroupBase);
+
+                st0 += kv0 * delta;
+                st1 += kv1 * delta;
+                st2 += kv2 * delta;
+                st3 += kv3 * delta;
+
+                vec4 qv0 = vec4(shQ[row + kLane + 8 * 0], shQ[row + kLane + 8 * 1], shQ[row + kLane + 8 * 2], shQ[row + kLane + 8 * 3]) * qi;
+                vec4 qv1 = vec4(shQ[row + kLane + 8 * 4], shQ[row + kLane + 8 * 5], shQ[row + kLane + 8 * 6], shQ[row + kLane + 8 * 7]) * qi;
+                vec4 qv2 = vec4(shQ[row + kLane + 8 * 8], shQ[row + kLane + 8 * 9], shQ[row + kLane + 8 * 10], shQ[row + kLane + 8 * 11]) * qi;
+                vec4 qv3 = vec4(shQ[row + kLane + 8 * 12], shQ[row + kLane + 8 * 13], shQ[row + kLane + 8 * 14], shQ[row + kLane + 8 * 15]) * qi;
+                float outv = reduce8(dot(st0, qv0) + dot(st1, qv1) + dot(st2, qv2) + dot(st3, qv3));
+                if (lane8 == 0 && activeDV) {
+                    readout[(t0 + bt) * pc.nV * pc.vHd + h * pc.vHd + dv] = outv;
+                }
+            }
+            barrier();
+        }
+        barrier();
+    }
+
+    // In-place writeback preserves the existing persistent-state ABI and all
+    // nonzero incoming state. Every invocation owns disjoint (head,k,dv) cells.
+    if (activeDV) {
+        state[(h * pc.kHd + kLane + 8 * 0) * pc.vHd + dv] = st0.x;
+        state[(h * pc.kHd + kLane + 8 * 1) * pc.vHd + dv] = st0.y;
+        state[(h * pc.kHd + kLane + 8 * 2) * pc.vHd + dv] = st0.z;
+        state[(h * pc.kHd + kLane + 8 * 3) * pc.vHd + dv] = st0.w;
+        state[(h * pc.kHd + kLane + 8 * 4) * pc.vHd + dv] = st1.x;
+        state[(h * pc.kHd + kLane + 8 * 5) * pc.vHd + dv] = st1.y;
+        state[(h * pc.kHd + kLane + 8 * 6) * pc.vHd + dv] = st1.z;
+        state[(h * pc.kHd + kLane + 8 * 7) * pc.vHd + dv] = st1.w;
+        state[(h * pc.kHd + kLane + 8 * 8) * pc.vHd + dv] = st2.x;
+        state[(h * pc.kHd + kLane + 8 * 9) * pc.vHd + dv] = st2.y;
+        state[(h * pc.kHd + kLane + 8 * 10) * pc.vHd + dv] = st2.z;
+        state[(h * pc.kHd + kLane + 8 * 11) * pc.vHd + dv] = st2.w;
+        state[(h * pc.kHd + kLane + 8 * 12) * pc.vHd + dv] = st3.x;
+        state[(h * pc.kHd + kLane + 8 * 13) * pc.vHd + dv] = st3.y;
+        state[(h * pc.kHd + kLane + 8 * 14) * pc.vHd + dv] = st3.z;
+        state[(h * pc.kHd + kLane + 8 * 15) * pc.vHd + dv] = st3.w;
+    }
+}

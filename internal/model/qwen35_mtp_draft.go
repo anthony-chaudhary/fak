@@ -48,17 +48,24 @@ type Qwen35MTPDraftSession struct {
 	coverageThreshold float32
 }
 
-// NewQwen35MTPDraftSession binds a fresh native Qwen3.8 MTP cache to an already
-// evaluated target session. Unsupported depths, target paths, and checkpoint
-// shapes fail before either session is mutated.
+// NewQwen35MTPDraftSession binds a native Qwen3.8 MTP cache to the target's
+// backend. Prefer constructing it on a fresh target before Prefill: successful
+// construction enables exact raw-hidden capture for the prompt and subsequent
+// target steps. A warm target is accepted only when complete captured hidden
+// rows and token lineage already cover its resident prefix.
 func NewQwen35MTPDraftSession(target *Session, depth int) (*Qwen35MTPDraftSession, error) {
-	return newQwen35MTPDraftSession(target, depth, nil)
+	var be compute.Backend
+	if target != nil {
+		be = target.Backend
+	}
+	return newQwen35MTPDraftSession(target, depth, be)
 }
 
 // NewQwen35MTPDraftSessionWithBackend binds the retained draft head to an
-// explicit resident backend while leaving the F32 target session and its cache
-// untouched. The caller supplies the target's exact pre-final-normalization
-// hidden state through the established draft-step boundary.
+// explicit resident backend. A CPU target may use this form with a distinct
+// draft backend; a device target must use its own backend. As with the default
+// constructor, successful setup enables raw-hidden capture on a fresh target,
+// while a warm target must already carry complete captured history.
 func NewQwen35MTPDraftSessionWithBackend(target *Session, depth int, be compute.Backend) (*Qwen35MTPDraftSession, error) {
 	if be == nil {
 		return nil, &compute.UnsupportedQwen35MTPDraftError{Path: compute.Qwen35MTPDraftPath, Stage: "backend admission", Reason: "a non-nil backend is required"}
@@ -70,6 +77,9 @@ func newQwen35MTPDraftSession(target *Session, depth int, be compute.Backend) (*
 	if err := validateQwen35MTPDepthNTarget(target, depth, false); err != nil {
 		return nil, err
 	}
+	if target.Backend != nil && be != target.Backend {
+		return nil, &Qwen35MTPSpecDecodeUnsupportedError{Reason: "resident Vulkan target and MTP draft must use the same backend"}
+	}
 	var forward *Qwen35MTPForward
 	var err error
 	if be == nil {
@@ -78,6 +88,10 @@ func newQwen35MTPDraftSession(target *Session, depth int, be compute.Backend) (*
 		forward, err = target.M.NewQwen35MTPForwardWithBackend(be)
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := qwen35MTPPrepareTargetCapture(target); err != nil {
+		forward.Close()
 		return nil, err
 	}
 	return &Qwen35MTPDraftSession{
@@ -336,10 +350,10 @@ func (d *Qwen35MTPDraftSession) Close() {
 }
 
 func (d *Qwen35MTPDraftSession) syncCommitted(committed []int) (err error) {
-	if !qwen35MTPTargetHasEvaluatedPrefix(d.target, committed) {
+	if !qwen35MTPDepthNTargetHasEvaluatedPrefix(d.target, committed) {
 		return fmt.Errorf(
 			"model: target hidden for unevaluated committed prefix length %d is unavailable (cache=%d hidden=%d)",
-			len(committed), d.target.Cache.Len(), len(d.target.targetHiddenTokens),
+			len(committed), qwen35MTPResidentPrefixLen(d.target), len(d.target.targetHiddenTokens),
 		)
 	}
 	if !tokenPrefix(d.processed, committed) {
@@ -549,17 +563,20 @@ func specDecodeGreedyQwen35MTPDepthNMeasured(target *Session, prompt []int, n, d
 			return polymodel.SpecDecodeRun{}, err
 		}
 	}
-
-	target.captureTargetHidden = true
+	draftSession, err := build(target, depth)
+	if err != nil {
+		return polymodel.SpecDecodeRun{}, err
+	}
+	defer draftSession.Close()
 	targetLogits := target.Prefill(prompt)
 	if len(targetLogits) == 0 {
 		return polymodel.SpecDecodeRun{}, errors.New("model: Qwen3.8 MTP target returned empty prompt logits")
 	}
 	advanceTarget := func(committed []int) error {
-		if !qwen35MTPTargetMatchesCommitted(target, committed) {
+		if !qwen35MTPDepthNTargetMatchesCommitted(target, committed) {
 			return errors.New("model: Qwen3.8 MTP live target diverged from committed prefix")
 		}
-		for _, token := range committed[target.Cache.Len():] {
+		for _, token := range committed[qwen35MTPResidentPrefixLen(target):] {
 			targetLogits = target.Step(token)
 			if len(targetLogits) == 0 {
 				return errors.New("model: Qwen3.8 MTP target returned empty decode logits")
@@ -567,12 +584,6 @@ func specDecodeGreedyQwen35MTPDepthNMeasured(target *Session, prompt []int, n, d
 		}
 		return nil
 	}
-
-	draftSession, err := build(target, depth)
-	if err != nil {
-		return polymodel.SpecDecodeRun{}, err
-	}
-	defer draftSession.Close()
 
 	var runtimeErr error
 	var pending *qwen35MTPTargetTransaction
@@ -695,11 +706,14 @@ func validateQwen35MTPDepthNTarget(target *Session, depth int, requireFresh bool
 			depth, Qwen35MTPMaxDraftDepth,
 		)}
 	}
-	if target.Cache == nil || requireFresh && target.Cache.Len() != 0 {
+	if target.Cache == nil || requireFresh && qwen35MTPResidentPrefixLen(target) != 0 {
 		return &Qwen35MTPSpecDecodeUnsupportedError{Reason: "target session must be fresh; pass the complete prompt explicitly"}
 	}
-	if target.Backend != nil || target.Quant || target.Q4 || target.Q4K || target.F16 || target.GPTQ ||
-		target.Metal || target.MetalQ4K || target.PrecisionPolicy != nil {
+	if target.Backend != nil {
+		if err := validateQwen35MTPVulkanTarget(target); err != nil {
+			return err
+		}
+	} else if target.Quant || target.Q4 || target.Q4K || target.F16 || target.GPTQ || target.Metal || target.MetalQ4K || target.PrecisionPolicy != nil {
 		return &Qwen35MTPSpecDecodeUnsupportedError{Reason: "only the native f32 target path has exact pre-final-norm hidden capture; production quant formats remain #9985"}
 	}
 	mode, err := target.M.Qwen35MTPMode(false)

@@ -417,6 +417,10 @@ type Completion struct {
 	// the logits/decode seam, never reconstructed from text or gateway timing.
 	NativeInference *model.NativeInferenceReceipt
 	InKernelBatch   *InKernelBatchReceipt
+	// VulkanMTP is populated only when this request selected the resident Vulkan
+	// MTP route. It reports actual execution or a typed target-decode downgrade;
+	// callers must not infer execution from planner configuration.
+	VulkanMTP *VulkanMTPExecution
 	// DecodeTrace is populated only for an explicitly requested in-kernel decode.
 	// Its events are authored at the native token-commit seam; proxy text and SSE
 	// fragments are never eligible sources.

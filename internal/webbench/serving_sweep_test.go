@@ -75,6 +75,66 @@ func TestEvaluateServingSweepSelectsCapacityValidPeakAndSLAKnee(t *testing.T) {
 	}
 }
 
+func TestEvaluateServingSweepPartialMeasurementIsInvalidAndCannotClaimPeakOrKnee(t *testing.T) {
+	report := syntheticSweepReport([]syntheticSweepPoint{
+		{concurrency: 1, throughput: 10, ttftP99: 20, itlP99: 5},
+		{concurrency: 2, throughput: 18, ttftP99: 30, itlP99: 6},
+		{concurrency: 4, throughput: 50, ttftP99: 40, itlP99: 7},
+		{concurrency: 8, throughput: 24, ttftP99: 120, itlP99: 10},
+	})
+	partial := &report.Points[2].Tracks[0]
+	partial.Stats.Failed = 1
+	if err := EvaluateServingSweep(report); err != nil {
+		t.Fatal(err)
+	}
+	if partial.Status != "invalid" || partial.ReasonCode != "measurement_incomplete" {
+		t.Fatalf("partial point = %#v, want typed invalid measurement_incomplete", partial)
+	}
+	if partial.Stats.ThroughputTokensS.Value == nil || *partial.Stats.ThroughputTokensS.Value != 50 {
+		t.Fatal("partial point throughput observation was discarded")
+	}
+	for _, point := range report.Points {
+		if point.Concurrency == 4 {
+			continue
+		}
+		if got := point.Tracks[0].Status; got != "valid" {
+			t.Fatalf("complete point at concurrency %d = %q, want valid", point.Concurrency, got)
+		}
+	}
+	summary := report.Tracks[0]
+	if summary.ValidPoints != 3 {
+		t.Fatalf("valid points = %d, want 3 complete points", summary.ValidPoints)
+	}
+	if !strings.Contains(summary.Reason, "failed requests") || strings.Contains(summary.Reason, "undeclared") {
+		t.Fatalf("partial sweep summary reason = %q, want failed-request explanation", summary.Reason)
+	}
+	if summary.PeakStatus != "invalid" || summary.Peak != nil {
+		t.Fatalf("partial point allowed peak claim: status %q peak %#v", summary.PeakStatus, summary.Peak)
+	}
+	if summary.SLAStatus != "invalid" || summary.SLAKnee != nil {
+		t.Fatalf("partial point allowed SLA knee claim: status %q knee %#v", summary.SLAStatus, summary.SLAKnee)
+	}
+	evidence, _, err := servingSweepEvidence(report, TrackOurs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declaredMeasurementIncomplete := false
+	for _, reason := range evidence.DeclaredInvalidReasons {
+		if reason == "measurement_incomplete" {
+			declaredMeasurementIncomplete = true
+			break
+		}
+	}
+	if !declaredMeasurementIncomplete {
+		t.Fatal("serving sweep evidence does not declare measurement_incomplete")
+	}
+	for _, claim := range []string{"ours peak throughput is 50 tok/s", "ours SLA knee is concurrency 4"} {
+		if err := ValidateServingSweepClaim(claim, report); err == nil || !strings.Contains(err.Error(), "failed requests") || strings.Contains(err.Error(), "undeclared invalid reason") {
+			t.Fatalf("ValidateServingSweepClaim(%q) error = %v, want failed-request refusal", claim, err)
+		}
+	}
+}
+
 func TestEvaluateServingSweepCensorsMonotonicTerminalPeakBeforeCapacity(t *testing.T) {
 	report := syntheticSweepReport([]syntheticSweepPoint{
 		{concurrency: 1, throughput: 10, ttftP99: 20, itlP99: 5},

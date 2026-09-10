@@ -63,6 +63,9 @@ type VerificationResult struct {
 	NumAccepted     int
 	RollbackKVCount int
 	TargetLogits    [][]float32
+	// LastAcceptedLogits identifies the final accepted tree node's logits when
+	// accepted nodes are not contiguous in TargetLogits panel order.
+	LastAcceptedLogits []float32
 }
 
 // DeriveMask computes the N x N causal attention mask for the candidate tree.

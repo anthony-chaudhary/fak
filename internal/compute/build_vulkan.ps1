@@ -131,6 +131,8 @@ function Build-Shaders {
     $shaders += "flash_attn_dequant"
     $shaders += "qwen35_gdn_tiled_transpose"
     $shaders += "qwen35_gdn_q8_in_proj"
+    $shaders += "qwen35_gdn_prefill_tiled"
+    $shaders += "qwen35_gdn_prefill_norm"
     $shaders += "coopmat_wave32_wmma"
     $shaders += "q4k_matmul_wave32"
     $shaders += "q6k_matmul"

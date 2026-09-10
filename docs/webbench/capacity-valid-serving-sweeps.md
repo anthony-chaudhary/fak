@@ -37,22 +37,26 @@ Under `EvaluateServingSweep` (`internal/webbench/serving_sweep.go`), the followi
 
 ## 4. Benchmark Execution Command
 
-The canonical command to capture a certified capacity sweep on lab GPU compute:
+The canonical command to capture a capacity-valid sweep must use the verified model, endpoint, batch capacity, and engine receipt from the run being claimed. Do not reuse historical digests or capacity values unless the current setup, model, quality envelope, and provenance receipt prove they still apply.
 
 ```bash
 fak webbench serving \
   --dataset testdata/webbench/sample-tasks.jsonl \
-  --endpoints ours=http://127.0.0.1:8000/v1 \
-  --concurrencies 1,2,4,8,16 \
-  --batch-capacities ours=32 \
-  --capacity-sources ours=declared-manifest \
+  --tracks ours \
+  --endpoints ours="${VERIFIED_ENDPOINT_URL}" \
+  --concurrencies "${VERIFIED_CONCURRENCY_RANGE}" \
+  --batch-capacities ours="${VERIFIED_BATCH_CAPACITY}" \
+  --capacity-sources ours="${VERIFIED_CAPACITY_SOURCE}" \
   --engines ours=fak-native \
-  --engine-receipts ours=sha256:c3b5dc1b4e0fb9682547890ef93c5d8869f0ab59218d6e32bc502f9e4210d7a4 \
+  --model "${VERIFIED_MODEL}" \
+  --engine-receipts ours="sha256:${VERIFIED_ENGINE_RECEIPT_SHA256}" \
   --ttft-p99-budget-ms 2000 \
   --itl-p99-budget-ms 100 \
-  --out docs/_witnesses/issue-10078-webbench-qwen38-capacity-sweep/receipt.json
+  --out "${VERIFIED_RECEIPT_PATH}"
 ```
 
 ## 5. Witness Evidence
 
-A captured witness receipt is recorded in `docs/_witnesses/issue-10078-webbench-qwen38-capacity-sweep/receipt.json`, certifying Qwen 3.8 27B serving performance across concurrency levels 1 through 16 under declared batch capacity of 32 on lab GPU hardware.
+The historical receipt at `docs/_witnesses/issue-10078-webbench-qwen38-capacity-sweep/receipt.json` is retained as an unmodified historical artifact. It does not currently certify Qwen 3.8 serving performance for `fak#10078`: the current parity gate rejects the artifact with `fewer than two comparable valid points: positive measured token throughput is required`. The factual readback for that refusal is recorded in `experiments/benchmark/runs/by-machine/modular-10078-readback/validation.json`.
+
+`fak#10078` remains open until a new or revalidated receipt passes the current gate with hardware witnessed execution, at least two comparable in-capacity points with positive measured output-token throughput, an identity-stable workload and engine receipt, quality/setup provenance, setup and measurement overhead accounting, an attached capacity manifest or probe, independent remote commit and artifact ancestry, and range evidence showing rise, plateau, and bounded tail behavior for the claimed capacity envelope.

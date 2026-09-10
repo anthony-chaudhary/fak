@@ -623,6 +623,13 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		reqModel = s.model
 	}
 	applyChatCompletionSpeculativeHeaders(w, s, reqModel)
+	if req.Stream && s.isVulkanMTPEnabled(reqModel) && chatRequestVulkanMTPEligible(req) {
+		// The buffered in-kernel stream opens before decode completes. Declare
+		// trailers now, then populate them from the request-local execution
+		// receipt after completion; configuration alone never claims MTP ran.
+		w.Header().Add("Trailer", HeaderSpeculative)
+		w.Header().Add("Trailer", HeaderSpeculativeDowngrade)
+	}
 	if decodeTraceRequested && !s.chatDecodeTraceSupported(req.Model) {
 		writeErr(w, http.StatusBadRequest, "fak_decode_trace requires a fak-native model route")
 		return
@@ -725,6 +732,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		agent.WithNativeDecodeTokenIDs(decodeTokenIDsRequested),
 	)
 	if err != nil {
+		if comp != nil {
+			applyVulkanMTPExecutionHeaders(w, comp.VulkanMTP)
+		}
 		s.renderTurnDebugError(reqTrace, "openai_chat_completions", err, time.Since(began))
 		// Map the upstream failure to an honest status. Log the detail for the operator
 		// but return a GENERIC message — the planner error embeds up to 400 bytes of the
@@ -744,6 +754,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		s.writeUpstreamErr(w, err)
 		return
 	}
+	applyVulkanMTPExecutionHeaders(w, comp.VulkanMTP)
 
 	asst := comp.Message
 	asst.Role = agent.RoleAssistant

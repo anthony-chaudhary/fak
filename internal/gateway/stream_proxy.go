@@ -312,6 +312,8 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		agent.WithToolChoice(req.ToolChoice),
 		agent.WithLogitBias(req.LogitBias),
 		agent.WithGuidedDecode(req.GuidedDecodeFields()),
+		agent.WithFrequencyPenalty(req.FrequencyPenalty),
+		agent.WithPresencePenalty(req.PresencePenalty),
 	}
 	lease, ok := s.admitStreamedTurn(ctx, w, "stream", sessionTurn, req.Messages, req.Tools, sampleMaxTokens(opts))
 	if !ok {
@@ -322,6 +324,12 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	began := time.Now()
 	comp, err := sp.CompleteStream(ctx, utf8Fragments.write, req.Messages, req.Tools, opts...)
 	stopHB()
+	if comp != nil {
+		// CompleteStream may return after the response was committed. The declared
+		// trailer fields make this request-local execution receipt observable on
+		// both successful and failed live streams.
+		applyVulkanMTPExecutionHeaders(w, comp.VulkanMTP)
+	}
 	if err != nil {
 		if _, _, _, ok := inKernelOOMObservation(err); ok {
 			s.observePlannerRequestMemory()

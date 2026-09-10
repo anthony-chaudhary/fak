@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"runtime"
 
@@ -692,7 +693,7 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 	// full-attention correctness bridge performs bounded host readback for partial RoPE /
 	// output gating. Neither is legal inside a reusable graph capture.
 	gpuLayers, isSplit := s.validateDenseGPULayers()
-	canGraph = canGraph && !cfg.IsQwen35Hybrid() && !isSplit
+	canGraph = canGraph && !s.captureTargetHidden && !cfg.IsQwen35Hybrid() && !isSplit
 	capturing := false
 	if canGraph && mode != halNoLogits && s.halLogitsWarm {
 		runtime.LockOSThread()
@@ -879,6 +880,18 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 		}
 		return s.uploadHostF32([]int{len(logits)}, logits, compute.MemoryActivation, "hal-split-logits"), 0
 	}
+	if s.captureTargetHidden {
+		rawHidden := be.Read(x)
+		if len(rawHidden) != H {
+			panic(fmt.Sprintf("model: compute backend %s returned raw target hidden width %d, want %d", be.Name(), len(rawHidden), H))
+		}
+		for _, value := range rawHidden {
+			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+				panic(fmt.Sprintf("model: compute backend %s returned non-finite raw target hidden", be.Name()))
+			}
+		}
+		s.rememberTargetHidden(pos, id, rawHidden)
+	}
 
 	return s.halFinalLogits(x, mode, capturing, useQ8Weights, finishGraph)
 }
@@ -981,9 +994,6 @@ func (s *Session) prefillHAL(ids []int, wantLogits bool) []float32 {
 			s.halLogitsWarm = true
 		}
 		s.halStep += len(ids)
-		if s.captureTargetHidden && result.LastHidden.Ready() {
-			s.rememberTargetHidden(s.halKV.Len()-1, ids[len(ids)-1], s.Backend.Read(result.LastHidden))
-		}
 		s.retireRequestResources()
 		return logits
 	}

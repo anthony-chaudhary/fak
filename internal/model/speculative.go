@@ -601,7 +601,10 @@ func parallelVerifyTree(
 	for {
 		nextChild := -1
 		for _, childIdx := range tree.Nodes[cur].Children {
-			if childIdx >= 0 && childIdx < N && tree.Nodes[childIdx].Token == pred {
+			if childIdx >= 0 && childIdx < N &&
+				tree.Nodes[childIdx].Parent == cur &&
+				tree.Nodes[childIdx].Depth == len(acceptedIndices) &&
+				tree.Nodes[childIdx].Token == pred {
 				nextChild = childIdx
 				break
 			}
@@ -627,18 +630,51 @@ func parallelVerifyTree(
 	}
 
 	preserveUnacceptedBranches(target, committed, tree, acceptedIndices, tBase, rows)
-	target.evictKV(tBase, N)
-	for _, tok := range acceptedTokens {
-		target.Step(tok)
+	// VerifyForward appended every tree node in panel order. Keep the selected
+	// root-to-leaf path resident by compacting those rows into linear decode order;
+	// replay is retained only as the conservative fallback for a cache/layout that
+	// cannot prove the tree-compaction contract.
+	compacted := validAcceptedTreePath(tree, acceptedIndices)
+	if compacted {
+		compacted = PruneAndCompactTreeKV(target.Cache, tBase, acceptedIndices, N) == nil
+	}
+	if !compacted {
+		target.evictKV(tBase, N)
+		for _, tok := range acceptedTokens {
+			target.Step(tok)
+		}
 	}
 
 	return VerificationResult{
-		AcceptedTokens:  acceptedTokens,
-		CorrectionToken: pred,
-		NumAccepted:     len(acceptedTokens),
-		RollbackKVCount: N - len(acceptedTokens),
-		TargetLogits:    rows,
+		AcceptedTokens:     acceptedTokens,
+		CorrectionToken:    pred,
+		NumAccepted:        len(acceptedTokens),
+		RollbackKVCount:    N - len(acceptedTokens),
+		TargetLogits:       rows,
+		LastAcceptedLogits: rows[cur],
 	}, nil
+}
+
+// validAcceptedTreePath proves that acceptedIndices names one contiguous
+// root-to-leaf path whose logical positions are prefix+depth. The KV compactor
+// deliberately accepts indices rather than the tree, so this topology check
+// remains at the verifier boundary that owns both values.
+func validAcceptedTreePath(tree *CandidateTree, acceptedIndices []int) bool {
+	if tree == nil || len(acceptedIndices) == 0 {
+		return false
+	}
+	parent := -1
+	for depth, idx := range acceptedIndices {
+		if idx < 0 || idx >= len(tree.Nodes) {
+			return false
+		}
+		node := tree.Nodes[idx]
+		if node.Parent != parent || node.Depth != depth {
+			return false
+		}
+		parent = idx
+	}
+	return true
 }
 
 // SpeculativeEngineConfig configures the coordinator runtime parameters.
@@ -912,7 +948,9 @@ func (e *SpeculativeEngine) Step(
 	}
 
 	// 4. Update next logits: if tokens accepted, use last accepted token logits, else lastLogits
-	if res.NumAccepted > 0 && len(res.TargetLogits) >= res.NumAccepted {
+	if res.NumAccepted > 0 && len(res.LastAcceptedLogits) > 0 {
+		nextLogits = res.LastAcceptedLogits
+	} else if res.NumAccepted > 0 && len(res.TargetLogits) >= res.NumAccepted {
 		nextLogits = res.TargetLogits[res.NumAccepted-1]
 	} else {
 		nextLogits = lastLogits

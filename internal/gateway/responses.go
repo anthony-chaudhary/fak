@@ -1,11 +1,14 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -57,9 +60,10 @@ type ResponsesRequest struct {
 	Temperature     *float64        `json:"temperature,omitempty"`
 	TopP            *float64        `json:"top_p,omitempty"`
 	Stream          bool            `json:"stream,omitempty"`
-	// PreviousResponseID is accepted and ignored: fak does not (yet) persist a
-	// server-side response store, so a client threading conversation state must send
-	// the full input each turn (the same posture the chat wire has — it is stateless).
+	// Store controls whether this completed response may be addressed by a later
+	// previous_response_id. Omitted follows the Responses API default and stores it;
+	// explicit false leaves no continuation state behind.
+	Store              *bool  `json:"store,omitempty"`
 	PreviousResponseID string `json:"previous_response_id,omitempty"`
 }
 
@@ -236,6 +240,25 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if s.checkWarmupPending(w) {
 		return
 	}
+	// The temporary EP bridge mirrors the original request body to rank-local
+	// followers. Continuation state is process-local, so a follower cannot resolve a
+	// front-rank response ID and would miss the collective. Refuse this unsupported
+	// combination before releasing any follower.
+	if r.Header.Get(epFollowerHeader) == "" && len(epFanoutURLsFromEnv(epRouteResponses)) > 0 {
+		raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxTranscriptBody))
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(raw))
+		var meta struct {
+			PreviousResponseID string `json:"previous_response_id"`
+		}
+		if json.Unmarshal(raw, &meta) == nil && strings.TrimSpace(meta.PreviousResponseID) != "" {
+			writeErr(w, http.StatusBadRequest, "previous_response_id is unavailable with expert-parallel request fanout")
+			return
+		}
+	}
 	// Release the EP follower ranks BEFORE this rank enters the decode, onto THIS wire's
 	// own route (#5528). Same placement and same reasoning as the chat, legacy and
 	// Anthropic wires: after the method check, before anything reads the body.
@@ -257,7 +280,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if !decodeRequestBody(w, r, &req) {
 		return
 	}
-	messages, err := decodeResponsesInput(req.Input, req.Instructions)
+	currentMessages, err := decodeResponsesInput(req.Input, "")
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "input: "+err.Error())
 		return
@@ -265,9 +288,33 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	// An empty/missing input is a CLIENT error, mirroring the chat wire's
 	// empty-messages floor — reject here rather than spending an upstream round-trip
 	// on a degenerate request.
-	if len(messages) == 0 {
+	if len(currentMessages) == 0 && strings.TrimSpace(req.Instructions) == "" {
 		writeErr(w, http.StatusBadRequest, "input: field required")
 		return
+	}
+	owner := strings.TrimSpace(principalFromContext(r.Context()))
+	messages := currentMessages
+	var priorMessages []agent.Message
+	continued := strings.TrimSpace(req.PreviousResponseID) != ""
+	if continued {
+		prior, ok := s.responsesContinuationState().Get(strings.TrimSpace(req.PreviousResponseID), owner, time.Now())
+		if !ok {
+			// Keep unknown and wrong-owner IDs indistinguishable so this endpoint does
+			// not become a response-existence oracle across isolation principals.
+			writeErr(w, http.StatusBadRequest, "previous response not found")
+			return
+		}
+		priorMessages = prior
+		messages = append(priorMessages, currentMessages...)
+	}
+	storeResponse := req.Store == nil || *req.Store
+	var continuationBase []agent.Message
+	persistResponse := func(id string, asst agent.Message) {
+		if !storeResponse || r.Context().Err() != nil {
+			return
+		}
+		stored := append(continuationBase, asst)
+		_ = s.responsesContinuationState().Put(id, owner, stored, time.Now())
 	}
 	if rejectInvalidSampling(w, validateResponsesSampling(req)) {
 		return
@@ -304,33 +351,44 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if !admitted {
 		return
 	}
+	ctx = context.WithValue(ctx, responsesRestoreContextKey{}, restoreContinuation)
+	// Retain historical assistant calls so a new tool result can recover its
+	// originating name/arguments, while excluding historical result messages that
+	// already crossed the floor. New results remain the only mutable tail.
+	admissionMessages, admissionCurrentOffset := responsesContinuationAdmissionProjection(priorMessages, currentMessages)
+	resultAdmissions, err := s.admitInboundResults(ctx, admissionMessages, tools, reqTrace)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "upstream cache invalidation failed")
+		return
+	}
+	currentMessages = cloneResponsesMessages(admissionMessages[admissionCurrentOffset:])
+	settleResponsesContinuationResults(messages, currentMessages)
+	// Retain the admitted client conversation before prompt-only canonicalization,
+	// elision, compaction, automatic restore, or denial recovery. Internal synthetic
+	// turns never become client history, and quarantined bytes never reappear raw.
+	if storeResponse {
+		continuationBase = append(cloneResponsesMessages(priorMessages), currentMessages...)
+	}
 	if len(messages) > 0 {
 		messages = CanonicalizePromptOrder(messages)
 	}
 	if len(tools) > 1 {
 		tools = CanonicalizeToolDefs(tools)
 	}
-	ctx = context.WithValue(ctx, responsesRestoreContextKey{}, restoreContinuation)
-	resultAdmissions, err := s.admitInboundResults(ctx, messages, tools, reqTrace)
-	if err != nil {
-		writeErr(w, http.StatusBadGateway, "upstream cache invalidation failed")
-		return
-	}
 	if note := lowInfoReceiptFuseNote(resultAdmissions); note != "" {
+		asst := agent.Message{Role: agent.RoleAssistant, Content: note}
 		resp := responsesResponse{
-			ID:        "resp_fak_" + itoa(uint64(time.Now().UnixNano())),
-			Object:    "response",
-			CreatedAt: time.Now().Unix(),
-			Model:     reqModel,
-			Status:    "completed",
-			Output: responsesOutputFromAssistant(agent.Message{
-				Role:    agent.RoleAssistant,
-				Content: note,
-			}),
+			ID:         newResponsesID(),
+			Object:     "response",
+			CreatedAt:  time.Now().Unix(),
+			Model:      reqModel,
+			Status:     "completed",
+			Output:     responsesOutputFromAssistant(asst),
 			OutputText: note,
 			Usage:      responsesUsage{},
 			Fak:        fakExtFrom(nil, resultAdmissions),
 		}
+		persistResponse(resp.ID, asst)
 		if req.Stream {
 			s.writeResponsesStream(w, resp)
 		} else {
@@ -382,6 +440,8 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set(SubturnYieldHeader, "true")
 		resp := makeSubturnYieldResponse(reqModel, resultAdmissions)
+		resp.ID = newResponsesID()
+		persistResponse(resp.ID, responsesAssistantMessage(resp))
 		if req.Stream {
 			s.writeResponsesStream(w, resp)
 		} else {
@@ -535,7 +595,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	s.logInferenceTurn(reqTrace, "openai_responses", false, comp.Usage, finish, time.Since(began), false)
 
 	resp := responsesResponse{
-		ID:         "resp_fak_" + itoa(uint64(time.Now().UnixNano())),
+		ID:         newResponsesID(),
 		Object:     "response",
 		CreatedAt:  time.Now().Unix(),
 		Model:      respModel,
@@ -564,10 +624,101 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if len(turnAdjs) > 0 || len(resultAdmissions) > 0 {
 		resp.Fak = &FakExt{Adjudications: turnAdjs, ResultAdmissions: resultAdmissions}
 	}
+	// Publish the finalized immutable state before revealing the response ID. A
+	// client may issue its continuation as soon as it receives response.completed;
+	// retaining first prevents an intermittent unknown-parent race. A delivery that
+	// later disconnects may conservatively remain addressable until the bounded TTL.
+	persistResponse(resp.ID, asst)
 	if req.Stream {
 		s.writeResponsesStream(w, resp)
 	} else {
 		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func newResponsesID() string {
+	var entropy [16]byte
+	if _, err := rand.Read(entropy[:]); err == nil {
+		return "resp_fak_" + hex.EncodeToString(entropy[:])
+	}
+	// crypto/rand failure is exceptional; the monotonic process timestamp remains
+	// reject-on-duplicate at insertion, so it cannot overwrite an existing response.
+	return "resp_fak_" + itoa(uint64(time.Now().UnixNano()))
+}
+
+func responsesAssistantMessage(resp responsesResponse) agent.Message {
+	out := agent.Message{Role: agent.RoleAssistant, Content: resp.OutputText}
+	for _, item := range resp.Output {
+		if item.Type != "function_call" {
+			continue
+		}
+		out.ToolCalls = append(out.ToolCalls, agent.ToolCall{
+			ID:   item.CallID,
+			Type: "function",
+			Function: agent.Func{
+				Name: item.Name, Namespace: item.Namespace, Arguments: item.Arguments,
+			},
+		})
+	}
+	return out
+}
+
+// responsesContinuationAdmissionProjection supplies historical assistant calls for
+// call-ID origin lookup and the current input for admission. Historical tool results
+// are deliberately absent, so their admission effects cannot run twice.
+func responsesContinuationAdmissionProjection(prior, current []agent.Message) ([]agent.Message, int) {
+	needed := make(map[string]struct{})
+	for _, message := range current {
+		if message.Role == agent.RoleTool && message.ToolCallID != "" {
+			needed[message.ToolCallID] = struct{}{}
+		}
+	}
+	history := make([]agent.Message, 0, len(needed))
+	// Walk newest-first so a reused call ID binds to its nearest historical origin.
+	for i := len(prior) - 1; i >= 0 && len(needed) > 0; i-- {
+		message := prior[i]
+		if message.Role != agent.RoleAssistant {
+			continue
+		}
+		var calls []agent.ToolCall
+		for _, call := range message.ToolCalls {
+			if _, ok := needed[call.ID]; !ok {
+				continue
+			}
+			calls = append(calls, call)
+			delete(needed, call.ID)
+		}
+		if len(calls) > 0 {
+			message.ToolCalls = calls
+			history = append(history, cloneResponsesMessages([]agent.Message{message})[0])
+		}
+	}
+	projection := make([]agent.Message, len(history), len(history)+len(current))
+	for i := range history {
+		projection[len(history)-1-i] = history[i]
+	}
+	offset := len(history)
+	projection = append(projection, cloneResponsesMessages(current)...)
+	return projection, offset
+}
+
+// settleResponsesContinuationResults carries admission rewrites into the authoritative
+// model input while preserving any budget/coherence seed inserted during request admit.
+func settleResponsesContinuationResults(messages, current []agent.Message) {
+	used := make([]bool, len(messages))
+	for currentIndex := len(current) - 1; currentIndex >= 0; currentIndex-- {
+		settled := current[currentIndex]
+		if settled.Role != agent.RoleTool {
+			continue
+		}
+		for i := len(messages) - 1; i >= 0; i-- {
+			if used[i] || messages[i].Role != agent.RoleTool || messages[i].ToolCallID != settled.ToolCallID {
+				continue
+			}
+			messages[i] = cloneResponsesMessages([]agent.Message{settled})[0]
+			used[i] = true
+			break
+		}
 	}
 }
 

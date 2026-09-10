@@ -1,0 +1,218 @@
+{
+  "schema": "fak.modular-capture-validation/v1",
+  "checked_utc": "2026-09-10T07:08:04.022920+00:00",
+  "native_source_commit": "d3dd8447de3707afbc05bc450812cbce3858b66b",
+  "implementation_base_commit": "6e1c5eb7c4c998211ba6764b7314e3eff0682594",
+  "regression": {
+    "test": "TestEvaluateServingSweepPartialMeasurementIsInvalidAndCannotClaimPeakOrKnee",
+    "red_on_parent": true,
+    "red_reason": "point with failed requests remained valid instead of measurement_incomplete",
+    "green_package_command": "go test ./internal/webbench -count=1",
+    "green_package_exit": 0,
+    "implementation_context_fingerprint": "sha256:795afe89a9e08e7a6fb5fba725a635ddd7353285857b6ee4d1ab77ed232028fb",
+    "test_context_fingerprint": "sha256:3e157cb3db9b33375e4340a59a14b4e1e58ccec1eb13ab7fd770ccbb278c1b41",
+    "separation_verdict": "SEPARATED",
+    "fingerprint_scope": "agent context identity labels, not hashes of hidden model state"
+  },
+  "scoped_validation": {
+    "schema": "fak-validate/1",
+    "mode": "full",
+    "ref": "HEAD",
+    "tip": "6e1c5eb7c4c998211ba6764b7314e3eff0682594",
+    "mine": [
+      "docs/tickets/modular-inspired/TICKET-10078.md",
+      "experiments/benchmark/runs/by-machine/modular-10078-live/.gitattributes",
+      "experiments/benchmark/runs/by-machine/modular-10078-live/README.md",
+      "experiments/benchmark/runs/by-machine/modular-10078-live/capacity-readback.json",
+      "experiments/benchmark/runs/by-machine/modular-10078-live/capture.go",
+      "experiments/benchmark/runs/by-machine/modular-10078-live/effective-capacity.json",
+      "experiments/benchmark/runs/by-machine/modular-10078-live/launch.json",
+      "experiments/benchmark/runs/by-machine/modular-10078-live/qualification.json",
+      "experiments/benchmark/runs/by-machine/modular-10078-live/quality.json",
+      "experiments/benchmark/runs/by-machine/modular-10078-live/readback.go",
+      "experiments/benchmark/runs/by-machine/modular-10078-live/receipt.json",
+      "experiments/benchmark/runs/by-machine/modular-10078-live/snapshot-after.json",
+      "experiments/benchmark/runs/by-machine/modular-10078-live/snapshot-before.json",
+      "experiments/benchmark/runs/by-machine/modular-10078-live/software-validation.json",
+      "experiments/benchmark/runs/by-machine/modular-10078-live/workload.json",
+      "internal/webbench/serving_sweep.go",
+      "internal/webbench/serving_sweep_test.go"
+    ],
+    "tested": [
+      "github.com/anthony-chaudhary/fak/internal/webbench"
+    ],
+    "runner": "wsl.exe bash -lc go test",
+    "ok": true,
+    "partial": false,
+    "timed_out": false,
+    "timeout_ms": 240000,
+    "elapsed_ms": 87008,
+    "phases": [
+      {
+        "name": "resolve_root",
+        "status": "ok",
+        "elapsed_ms": 0
+      },
+      {
+        "name": "resolve_ref",
+        "status": "ok",
+        "elapsed_ms": 66
+      },
+      {
+        "name": "wsl_preflight",
+        "status": "ok",
+        "elapsed_ms": 5372
+      },
+      {
+        "name": "normalize_mine",
+        "status": "ok",
+        "elapsed_ms": 7
+      },
+      {
+        "name": "extract_tip",
+        "status": "ok",
+        "elapsed_ms": 45850
+      },
+      {
+        "name": "base_graph",
+        "status": "skipped",
+        "elapsed_ms": 0,
+        "detail": "no deleted owned paths"
+      },
+      {
+        "name": "overlay",
+        "status": "ok",
+        "elapsed_ms": 596
+      },
+      {
+        "name": "gofmt",
+        "status": "ok",
+        "elapsed_ms": 1575
+      },
+      {
+        "name": "list_graph",
+        "status": "ok",
+        "elapsed_ms": 3493
+      },
+      {
+        "name": "test_select",
+        "status": "ok",
+        "elapsed_ms": 1
+      },
+      {
+        "name": "build",
+        "status": "ok",
+        "elapsed_ms": 15207
+      },
+      {
+        "name": "vet",
+        "status": "ok",
+        "elapsed_ms": 7501
+      },
+      {
+        "name": "test",
+        "status": "ok",
+        "elapsed_ms": 7325
+      }
+    ],
+    "skipped_phases": [],
+    "overlays": {
+      "checked": [
+        "docs/tickets/modular-inspired/TICKET-10078.md",
+        "experiments/benchmark/runs/by-machine/modular-10078-live/.gitattributes",
+        "experiments/benchmark/runs/by-machine/modular-10078-live/README.md",
+        "experiments/benchmark/runs/by-machine/modular-10078-live/capacity-readback.json",
+        "experiments/benchmark/runs/by-machine/modular-10078-live/capture.go",
+        "experiments/benchmark/runs/by-machine/modular-10078-live/effective-capacity.json",
+        "experiments/benchmark/runs/by-machine/modular-10078-live/launch.json",
+        "experiments/benchmark/runs/by-machine/modular-10078-live/qualification.json",
+        "experiments/benchmark/runs/by-machine/modular-10078-live/quality.json",
+        "experiments/benchmark/runs/by-machine/modular-10078-live/readback.go",
+        "experiments/benchmark/runs/by-machine/modular-10078-live/receipt.json",
+        "experiments/benchmark/runs/by-machine/modular-10078-live/snapshot-after.json",
+        "experiments/benchmark/runs/by-machine/modular-10078-live/snapshot-before.json",
+        "experiments/benchmark/runs/by-machine/modular-10078-live/software-validation.json",
+        "experiments/benchmark/runs/by-machine/modular-10078-live/workload.json",
+        "internal/webbench/serving_sweep.go",
+        "internal/webbench/serving_sweep_test.go"
+      ],
+      "skipped": []
+    },
+    "failures": []
+  },
+  "fixed_library_readback": {
+    "claim_gate_reason": "serving peak claim for ours refused: failed requests prevent a comparable serving measurement; rerun with at least two in-capacity identity-stable points",
+    "claim_gate_refused": true,
+    "points": [
+      {
+        "concurrency": 1,
+        "failed": 0,
+        "ok": 32,
+        "reason_code": "",
+        "requests": 32,
+        "status": "valid"
+      },
+      {
+        "concurrency": 2,
+        "failed": 0,
+        "ok": 32,
+        "reason_code": "",
+        "requests": 32,
+        "status": "valid"
+      },
+      {
+        "concurrency": 4,
+        "failed": 0,
+        "ok": 32,
+        "reason_code": "",
+        "requests": 32,
+        "status": "valid"
+      },
+      {
+        "concurrency": 8,
+        "failed": 0,
+        "ok": 32,
+        "reason_code": "",
+        "requests": 32,
+        "status": "valid"
+      },
+      {
+        "concurrency": 16,
+        "failed": 0,
+        "ok": 32,
+        "reason_code": "",
+        "requests": 32,
+        "status": "valid"
+      },
+      {
+        "concurrency": 32,
+        "failed": 16,
+        "ok": 16,
+        "reason_code": "measurement_incomplete",
+        "requests": 32,
+        "status": "invalid"
+      }
+    ],
+    "schema": "fak.modular-software-readback/v1",
+    "track_summaries": [
+      {
+        "track": "ours",
+        "status": "invalid",
+        "reason": "failed requests prevent a comparable serving measurement",
+        "valid_points": 5,
+        "peak_status": "invalid",
+        "sla_status": "invalid",
+        "sla_reason": "identity, capacity, or measurement invalidity prevents a sweep claim"
+      }
+    ]
+  },
+  "publication_checks": {
+    "staged_public_leak_audit": "passed",
+    "native_commit_exists_on_remote": true,
+    "new_commit_remote_ancestry": "to be independently read back after landing"
+  },
+  "source_sha256": {
+    "internal/webbench/serving_sweep.go": "dce023955882b7170eae3a5b6f5c19edbffe066a97f24d04e9e8a1307a9d3d89",
+    "internal/webbench/serving_sweep_test.go": "ae39ca3177bab1219440f0d05a4085ebd14d86b38b7c75a898ce60f39ec8d40b"
+  }
+}

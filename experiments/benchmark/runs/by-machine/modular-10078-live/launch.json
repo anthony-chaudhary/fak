@@ -1,0 +1,18 @@
+{
+  "started_utc": "2026-09-10T06:42:49.446574+00:00",
+  "goal_started_unix": 1789018752,
+  "total_pre_measurement_elapsed_seconds": 3817.4465692043304,
+  "engine_receipt_digest": "sha256:b36f69694e5a1fbaa9cce6a5072214ac2fbb0b4c4f72a0d2c88d643167093d25",
+  "capacity": 256,
+  "global_timeout_seconds": 600,
+  "requests_per_point": 32,
+  "concurrencies": [
+    1,
+    2,
+    4,
+    8,
+    16,
+    32
+  ],
+  "hardware_leased": true
+}

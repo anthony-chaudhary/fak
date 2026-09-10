@@ -1,0 +1,52 @@
+{
+  "rows": [
+    {
+      "id": "device-cache-planning-available",
+      "canonical": "CachePlanningAvailable (device memory facts are sufficient)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "DeviceMemoryProfile.CachePlanningAvailable in internal/compute/device_memory_profile.go requires established positive cache capacity, allocation alignment, and subgroup width before ROCm QSA or Vulkan scratch policy can make a cache-bounded planning decision (#12440).",
+      "distinction": "This predicate checks whether the device facts needed for planning are available. DeviceCacheTileTokens then computes a tile size from those facts. Neither operation establishes physical cache residency or performs a device allocation.",
+      "distinct_from": ["device-cache-tile-tokens", "hardware-aware-cache"],
+      "aliases": [],
+      "grounding": "CachePlanningAvailable",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "device-cache-capacity-bytes",
+      "canonical": "CacheCapacityBytes (established device cache budget)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "DeviceMemoryProfile.CacheCapacityBytes in internal/compute/device_memory_profile.go records the selected device's established cache capacity in bytes. Consumers must also check CacheCapacityKnown; a numeric zero or an unknown device is not a default Halo capacity (#12440).",
+      "distinction": "This is the device capacity input to scratch policy, not the bytes currently allocated or a measured cache occupancy. DeviceCacheTileTokens uses this budget to calculate a bounded K/V tile; CachePlanningAvailable requires it alongside alignment and subgroup facts.",
+      "distinct_from": ["device-cache-tile-tokens", "device-cache-planning-available", "hardware-aware-cache"],
+      "aliases": [],
+      "grounding": "CacheCapacityBytes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "device-cache-tile-tokens",
+      "canonical": "DeviceCacheTileTokens (profile-bounded K/V scratch capacity)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "DeviceCacheTileTokens in internal/compute/device_memory_profile.go computes the largest subgroup-aligned token count whose separately aligned K and V buffers fit the explicit device cache budget. Missing facts, invalid sizes, and arithmetic overflow produce an unavailable result (#12440).",
+      "distinction": "This is a software sizing calculation using an established DeviceMemoryProfile, not the KV cache that stores tensors. CachePlanningAvailable checks prerequisite facts without calculating a tile. The computed fit is not a measurement of physical cache residency.",
+      "distinct_from": ["device-cache-planning-available", "kv-cache", "hardware-aware-cache"],
+      "aliases": [],
+      "grounding": "DeviceCacheTileTokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

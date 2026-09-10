@@ -503,3 +503,10 @@ Per-file Codex compacted event receipts measuring supported explicit transcript 
 MaxKernelBufferBindCount is the per-command Metal indirect-command-buffer descriptor limit for bound kernel buffer arguments.
 
 **Distinct from:** It bounds buffer argument slots encoded by one Metal ICB command; kernel denotes the broader compute implementation, execution path, or subsystem.
+
+
+### Qwen35 MTP spec-decode unsupported error
+
+`Qwen35MTPSpecDecodeUnsupportedError` is the typed model-layer admission refusal returned before native Qwen3.8 MTP depth-N decoding mutates an unsupported target session.
+
+**Distinct from:** It reports that the requested MTP target or draft envelope is unsupported; it does not claim general support and it is not `Qwen35MTPForwardError`, which reports failure while executing an admitted MTP forward.

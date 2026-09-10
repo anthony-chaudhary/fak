@@ -623,6 +623,18 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 			writeTurnkeyInferenceError(w, err)
 			return
 		}
+		if comp.ToolCallsDropped && len(comp.Message.ToolCalls) == 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]any{
+					"message": "upstream tool-call format not recognized; refusing to skip adjudication",
+					"type":    "server_error",
+					"code":    "tool_call_conformance",
+				},
+			})
+			return
+		}
 		answer = comp.Message
 		if answer.Role == "" {
 			answer.Role = agent.RoleAssistant
