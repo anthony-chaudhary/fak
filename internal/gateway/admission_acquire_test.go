@@ -70,6 +70,86 @@ func TestAcquireLeaseBoundaryShedsAndDenies(t *testing.T) {
 	}
 }
 
+func TestAcquireCancellationReschedulesEligibleFollower(t *testing.T) {
+	ctl := NewAdmissionController(AdmissionPolicy{
+		MaxNumSeqs:  3,
+		TokenBudget: 10,
+		MaxWaiting:  2,
+		AgingRounds: 1,
+	})
+
+	running, err := ctl.Acquire(context.Background(), SeqRequest{TraceID: "running", Tokens: 6})
+	if err != nil || running == nil {
+		t.Fatalf("running Acquire = (%v, %v), want lease", running, err)
+	}
+	defer running.Release()
+
+	type acquireResult struct {
+		lease *AdmissionLease
+		err   error
+	}
+	headCtx, cancelHead := context.WithCancel(context.Background())
+	defer cancelHead()
+	headResult := make(chan acquireResult, 1)
+	go func() {
+		lease, acquireErr := ctl.Acquire(headCtx, SeqRequest{TraceID: "head", Tokens: 5})
+		headResult <- acquireResult{lease: lease, err: acquireErr}
+	}()
+	if !awaitAdmissionWaiting(ctl, 1, 2*time.Second) {
+		t.Fatalf("blocked head never queued; stats=%+v", ctl.Stats())
+	}
+
+	followerCtx, cancelFollower := context.WithCancel(context.Background())
+	defer cancelFollower()
+	followerResult := make(chan acquireResult, 1)
+	go func() {
+		lease, acquireErr := ctl.Acquire(followerCtx, SeqRequest{TraceID: "follower", Tokens: 4})
+		followerResult <- acquireResult{lease: lease, err: acquireErr}
+	}()
+	if !awaitAdmissionWaiting(ctl, 2, 2*time.Second) {
+		t.Fatalf("fitting follower never queued behind head; stats=%+v", ctl.Stats())
+	}
+	if stats := ctl.Stats(); stats.Running != 1 || stats.Waiting != 2 || stats.TokensInUse != 6 || stats.QueuedTokens != 9 {
+		t.Fatalf("live-head HOL stats = %+v, want running=1 waiting=2 tokens=6 queued_tokens=9", stats)
+	}
+
+	// The older five-token request cannot fit in the four remaining tokens, so the
+	// younger four-token request must not jump it while the head remains live. Once
+	// the head disconnects, the fitting follower must be promoted by that cancellation;
+	// this test intentionally does not call Schedule or release the running lease here.
+	cancelHead()
+	select {
+	case got := <-headResult:
+		if got.lease != nil || !errors.Is(got.err, context.Canceled) {
+			t.Fatalf("canceled head Acquire = (%v, %v), want (nil, context.Canceled)", got.lease, got.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("blocked head did not observe cancellation; stats=%+v", ctl.Stats())
+	}
+
+	var follower *AdmissionLease
+	select {
+	case got := <-followerResult:
+		if got.err != nil || got.lease == nil {
+			t.Fatalf("follower Acquire = (%v, %v), want promoted lease", got.lease, got.err)
+		}
+		follower = got.lease
+	case <-time.After(2 * time.Second):
+		t.Fatalf("fitting follower remained blocked after head cancellation; stats=%+v", ctl.Stats())
+	}
+
+	if stats := ctl.Stats(); stats.Running != 2 || stats.Waiting != 0 || stats.TokensInUse != 10 || stats.QueuedTokens != 0 {
+		t.Fatalf("post-cancel stats = %+v, want running=2 waiting=0 tokens=10 queued_tokens=0", stats)
+	}
+	follower.Release()
+	follower.Release() // cleanup is idempotent and must not underflow the budget.
+	running.Release()
+	running.Release()
+	if stats := ctl.Stats(); stats.Running != 0 || stats.Waiting != 0 || stats.TokensInUse != 0 || stats.QueuedTokens != 0 {
+		t.Fatalf("final stats = %+v, want all live budgets released", stats)
+	}
+}
+
 // TestBeginServedAdmissionSeam witnesses the Server-level admission seam: with a controller
 // wired it admits an underloaded request and returns a releasable lease; with no controller
 // attached it is inert (nil lease, nil error) and the historical request path is byte-for-byte

@@ -976,6 +976,8 @@ func (c *AdmissionController) cancelAdmission(traceID string) {
 				c.queuedTokens = 0
 			}
 			c.waiting = append(c.waiting[:i], c.waiting[i+1:]...)
+			// Removing a blocked queue head can make existing capacity usable.
+			c.scheduleLocked()
 			return
 		}
 	}
