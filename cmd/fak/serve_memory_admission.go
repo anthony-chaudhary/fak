@@ -18,6 +18,22 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/memgate"
 )
 
+// streamedQ4KFreeCPUReservationPeakBytes is the candidate reservation bound
+// for the exact Qwen3.8-27B Q4_K_M streamed FreeCPU profile. The two #8964 runs
+// peaked at 17,085,792 and 17,895,520 KiB RSS; 20 GiB rounds above the larger
+// readiness observation with margin. The first bounded run must still monitor
+// swap and measured RSS. This is distinct from the 36 GiB minimum host-size gate
+// and does not qualify another model, load recipe, or context envelope.
+const streamedQ4KFreeCPUReservationPeakBytes int64 = 20 << 30
+
+const qwen38Q4KMArtifactBytes int64 = 17106775008
+
+func isWitnessedQwen38Q4KM(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Size() == qwen38Q4KMArtifactBytes &&
+		strings.EqualFold(filepath.Base(path), "Qwen3.8-27B-Q4_K_M.gguf")
+}
+
 var serveReadMemory = memgate.ReadMemory
 
 func defaultLocalReservationDir() string {
@@ -65,17 +81,27 @@ func estimateMetalModelMemoryBounds(ggufPath string) localadmission.MemoryPlan {
 				}
 				if err == nil && plan.Total() > 0 {
 					steady := plan.Total()
-					total, _, known := compute.HostSystemMemoryInfo()
 					if os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1" {
-						reqPeak, _, _ := streamedQ4KMetalCapacity(total, known, os.Getenv("FAK_Q4K_FREE_CPU") == "1")
-						if reqPeak < steady {
-							reqPeak = steady
+						// streamedQ4KMetalCapacity is a minimum HOST-size gate derived from
+						// swap behavior (36/44 GiB), not this process's startup RSS. The
+						// reservation plane compares StartupPeakBytes with currently
+						// allocatable memory. Preserve that conservative legacy value except
+						// for the one exact artifact/profile with a separate process-RSS
+						// witness; refuseOversubscribedMetalGGUF still owns the host floor.
+						total, _, known := compute.HostSystemMemoryInfo()
+						processPeak, _, _ := streamedQ4KMetalCapacity(total, known, os.Getenv("FAK_Q4K_FREE_CPU") == "1")
+						if processPeak > 0 && os.Getenv("FAK_Q4K_FREE_CPU") == "1" && isWitnessedQwen38Q4KM(ggufPath) {
+							processPeak = streamedQ4KFreeCPUReservationPeakBytes
+						}
+						if processPeak < steady {
+							processPeak = steady
 						}
 						return localadmission.MemoryPlan{
-							StartupPeakBytes: reqPeak,
+							StartupPeakBytes: processPeak,
 							SteadyBytes:      steady,
 						}
 					}
+					total, _, known := compute.HostSystemMemoryInfo()
 					var peak int64
 					if arm == serveLoadArmResidentQ4K {
 						// Resident quant on Metal loads weights directly into resident buffers.

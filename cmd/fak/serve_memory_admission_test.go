@@ -707,6 +707,36 @@ func TestLoadLocalLauncherModelWithMetalLeaseRefusesExpandingQ8LoadOn36GBHost(t 
 	})
 }
 
+func TestStreamedQ4KReservationUsesProcessPeakNotHostFloor(t *testing.T) {
+	t.Setenv("FAK_STREAM_Q4K", "1")
+	t.Setenv("FAK_Q4K_FREE_CPU", "1")
+	t.Setenv("FAK_Q4K", "1")
+
+	path := filepath.Join(t.TempDir(), "Qwen3.8-27B-Q4_K_M.gguf")
+	writeSynth27BGGUF(t, path, false)
+	if err := os.Truncate(path, qwen38Q4KMArtifactBytes); err != nil {
+		t.Fatal(err)
+	}
+	plan := estimateMetalModelMemoryBounds(path)
+	if plan.StartupPeakBytes != streamedQ4KFreeCPUReservationPeakBytes {
+		t.Fatalf("reservation startup peak = %d, want conservative FreeCPU process bound %d", plan.StartupPeakBytes, streamedQ4KFreeCPUReservationPeakBytes)
+	}
+	if plan.SteadyBytes <= 0 || plan.SteadyBytes > plan.StartupPeakBytes {
+		t.Fatalf("invalid reservation bounds: %+v", plan)
+	}
+	required, refuse, mode := streamedQ4KMetalCapacity(36<<30, true, true)
+	if required != 36<<30 || refuse || mode != streamedQ4KModeFreeCPU {
+		t.Fatalf("host floor = (%d, %v, %q), want (%d, false, %q)", required, refuse, mode, int64(36<<30), streamedQ4KModeFreeCPU)
+	}
+	otherPath := filepath.Join(filepath.Dir(path), "unwitnessed-q4.gguf")
+	if err := os.Rename(path, otherPath); err != nil {
+		t.Fatal(err)
+	}
+	if other := estimateMetalModelMemoryBounds(otherPath); other.StartupPeakBytes != 36<<30 {
+		t.Fatalf("unmatched streamed profile startup peak = %d, want preserved 36 GiB host-floor reservation", other.StartupPeakBytes)
+	}
+}
+
 func TestLoadLocalLauncherModelWithMetalLeaseWarningPressureAdvisory(t *testing.T) {
 	origRead := serveReadMemory
 	defer func() { serveReadMemory = origRead }()
