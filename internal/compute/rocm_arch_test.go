@@ -672,25 +672,45 @@ func TestROCmArchCompilerFlagsGfx1151Wave32(t *testing.T) {
 		t.Errorf("flags %+v missing --offload-arch=gfx1151", flags)
 	}
 
-	// Verify discrete desktop RDNA 3 (gfx1100) does not receive -mcpu=gfx1151
-	rdna3, ok := LookupROCmArch("gfx1100")
-	if !ok {
-		t.Fatal("LookupROCmArch(gfx1100) not found")
-	}
-	for _, f := range rdna3.CompilerFlags() {
-		if f == "-mcpu=gfx1151" {
-			t.Errorf("gfx1100 unexpectedly includes -mcpu=gfx1151: %v", rdna3.CompilerFlags())
+	// Verify discrete desktop RDNA 3 (gfx1100, gfx1102) receives -mwavefrontsize32 and does not receive -mcpu=gfx1151
+	for _, target := range []string{"gfx1100", "gfx1102"} {
+		rdna3, ok := LookupROCmArch(target)
+		if !ok {
+			t.Fatalf("LookupROCmArch(%s) not found", target)
+		}
+		rFlags := rdna3.CompilerFlags()
+		hasWave32 := false
+		for _, f := range rFlags {
+			if f == "-mwavefrontsize32" {
+				hasWave32 = true
+			}
+			if f == "-mcpu=gfx1151" {
+				t.Errorf("%s unexpectedly includes -mcpu=gfx1151: %v", target, rFlags)
+			}
+		}
+		if !hasWave32 {
+			t.Errorf("%s missing -mwavefrontsize32: %v", target, rFlags)
 		}
 	}
 
-	// Verify CDNA (gfx90a) does not receive -mwavefrontsize32 or -mcpu=gfx1151
-	cdna, ok := LookupROCmArch("gfx90a")
-	if !ok {
-		t.Fatal("LookupROCmArch(gfx90a) not found")
-	}
-	for _, f := range cdna.CompilerFlags() {
-		if f == "-mcpu=gfx1151" || f == "-mwavefrontsize32" {
-			t.Errorf("gfx90a unexpectedly includes RDNA flags: %v", cdna.CompilerFlags())
+	// Verify CDNA (gfx90a, gfx942, gfx908) receives -mwavefrontsize64 and does not receive -mwavefrontsize32 or -mcpu=gfx1151
+	for _, target := range []string{"gfx90a", "gfx942", "gfx908"} {
+		cdna, ok := LookupROCmArch(target)
+		if !ok {
+			t.Fatalf("LookupROCmArch(%s) not found", target)
+		}
+		cFlags := cdna.CompilerFlags()
+		hasWave64 := false
+		for _, f := range cFlags {
+			if f == "-mwavefrontsize64" {
+				hasWave64 = true
+			}
+			if f == "-mcpu=gfx1151" || f == "-mwavefrontsize32" {
+				t.Errorf("%s unexpectedly includes RDNA flags: %v", target, cFlags)
+			}
+		}
+		if !hasWave64 {
+			t.Errorf("%s missing -mwavefrontsize64: %v", target, cFlags)
 		}
 	}
 }
