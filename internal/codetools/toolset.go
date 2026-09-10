@@ -121,6 +121,7 @@ type Config struct {
 	Limits               Limits
 	Policy               Policy
 	FocusedCommands      bool     // restrict Bash to the browser coding spine command set
+	ExactCommandsOnly    bool     // restrict Bash to byte-exact entries in ExactAllowedCommands
 	ExactAllowedCommands []string // explicit commands permitted under FocusedCommands
 }
 
@@ -133,6 +134,7 @@ type Toolset struct {
 	limits               Limits
 	policy               Policy
 	focusedCommands      bool
+	exactCommandsOnly    bool
 	exactAllowedCommands []string
 	mutationMu           sync.Mutex
 	mutationLocks        map[string]*mutationLock
@@ -183,8 +185,9 @@ func New(cfg Config) (*Toolset, error) {
 	}
 	return &Toolset{
 		root: abs, evalRoot: evalRoot, limits: cfg.Limits.normalize(), policy: pol,
-		focusedCommands: cfg.FocusedCommands, exactAllowedCommands: exactAllowedCommands,
-		mutationLocks: map[string]*mutationLock{},
+		focusedCommands: cfg.FocusedCommands, exactCommandsOnly: cfg.ExactCommandsOnly,
+		exactAllowedCommands: exactAllowedCommands,
+		mutationLocks:        map[string]*mutationLock{},
 	}, nil
 }
 
