@@ -35,6 +35,8 @@ type localBackend struct {
 	// modelsPath is the GET route that lists served models, relative to base. Ollama uses
 	// its native /api/tags; the OpenAI-compatible servers use /v1/models.
 	modelsPath string
+	// healthPath is an optional GET probe route (e.g. "/healthz") used to verify server identity.
+	healthPath string
 	// parseModels extracts the served model ids from the modelsPath response body. Each
 	// backend speaks a slightly different JSON shape, so the decode lives with the backend.
 	parseModels func([]byte) []string
@@ -46,6 +48,13 @@ type localBackend struct {
 // (OLLAMA_HOST for Ollama) rather than baked here, so this stays a pure data table.
 func guardLocalBackends() []localBackend {
 	return []localBackend{
+		{
+			name:        "FAK Strix Halo",
+			base:        "http://127.0.0.1:8080",
+			modelsPath:  "/v1/models",
+			healthPath:  "/healthz",
+			parseModels: parseOpenAIModels,
+		},
 		{
 			name:        "Ollama",
 			base:        "http://127.0.0.1:11434",
@@ -212,8 +221,15 @@ const guardLocalProbeTimeout = 300 * time.Millisecond
 // the I/O half; the decision half is guardChooseLocalBackend.
 func guardDetectLocalBackend() (base, model, label string, found bool) {
 	backends := guardLocalBackends()
-	// Apply env overrides on the backend bases (Ollama honors OLLAMA_HOST).
+	// Apply env overrides on the backend bases (Ollama honors OLLAMA_HOST, Halo honors FAK_HALO_HOST/FAK_STRIX_HOST).
 	for i := range backends {
+		if backends[i].name == "FAK Strix Halo" {
+			if h := os.Getenv("FAK_HALO_HOST"); h != "" {
+				backends[i].base = guardNormalizeHost(h, "8080")
+			} else if h := os.Getenv("FAK_STRIX_HOST"); h != "" {
+				backends[i].base = guardNormalizeHost(h, "8080")
+			}
+		}
 		if backends[i].name == "Ollama" {
 			if h := guardOllamaHostBase(os.Getenv("OLLAMA_HOST")); h != "" {
 				backends[i].base = h
@@ -233,6 +249,16 @@ func guardDetectLocalBackend() (base, model, label string, found bool) {
 // server is up; even a 404 on the models route still proves a listener). The model list is
 // parsed best-effort from a 200 body.
 func guardProbeLocalBackend(client *http.Client, b localBackend) localProbeResult {
+	if b.healthPath != "" {
+		hresp, herr := client.Get(strings.TrimRight(b.base, "/") + b.healthPath)
+		if herr != nil || (hresp.StatusCode != http.StatusOK && hresp.StatusCode != http.StatusNoContent) {
+			if hresp != nil {
+				_ = hresp.Body.Close()
+			}
+			return localProbeResult{backend: b, live: false}
+		}
+		_ = hresp.Body.Close()
+	}
 	resp, err := client.Get(strings.TrimRight(b.base, "/") + b.modelsPath)
 	if err != nil {
 		return localProbeResult{backend: b, live: false}
@@ -252,7 +278,24 @@ func guardProbeLocalBackend(client *http.Client, b localBackend) localProbeResul
 		}
 		res.models = b.parseModels(buf)
 	}
+	if len(res.models) == 0 && b.name == "FAK Strix Halo" {
+		res.models = []string{"qwen-2.5-coder-32b-instruct"}
+	}
 	return res
+}
+
+func guardNormalizeHost(host, defaultPort string) string {
+	h := strings.TrimSpace(host)
+	if h == "" {
+		return ""
+	}
+	if !strings.HasPrefix(h, "http://") && !strings.HasPrefix(h, "https://") {
+		if !strings.Contains(h, ":") && defaultPort != "" {
+			h = h + ":" + defaultPort
+		}
+		h = "http://" + h
+	}
+	return strings.TrimRight(h, "/")
 }
 
 // guardOllamaHostBase normalizes an OLLAMA_HOST value into a bare base URL fak can probe.
@@ -291,9 +334,9 @@ func guardLocalDetectedBanner(label, base, model string) string {
 func guardLocalNothingDetectedMessage() string {
 	return fmt.Sprintf(
 		"fak guard --local: no local model server detected on the conventional ports "+
-			"(Ollama %s, LM Studio %s, Qwen3.6 dogfood %s, llama.cpp %s).\n"+
-			"  Start one (e.g. `ollama run %s`), or use the no-server in-kernel path: `fak guard --gguf %s -- <agent>`.",
-		"127.0.0.1:11434", "127.0.0.1:1234", "127.0.0.1:8131", "127.0.0.1:8080",
+			"(FAK Strix Halo %s, Ollama %s, LM Studio %s, Qwen3.6 dogfood %s, llama.cpp %s).\n"+
+			"  Start one (e.g. `fak serve` or `ollama run %s`), or use the no-server in-kernel path: `fak guard --gguf %s -- <agent>`.",
+		"127.0.0.1:8080", "127.0.0.1:11434", "127.0.0.1:1234", "127.0.0.1:8131", "127.0.0.1:8080",
 		"qwen2.5-coder:7b", "qwen2.5-coder:3b",
 	)
 }

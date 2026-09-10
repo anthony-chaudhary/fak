@@ -14,6 +14,9 @@ const DefaultOpenCodeBaseURL = "http://127.0.0.1:8080/v1"
 // DefaultOpenCodeModelID is the default served model identifier for local inference.
 const DefaultOpenCodeModelID = "fak-local"
 
+// DefaultOpenCodeHaloModelID is the primary served model identifier for AMD Strix Halo local inference.
+const DefaultOpenCodeHaloModelID = "qwen-2.5-coder-32b-instruct"
+
 // OpenCodeProviderConfig defines the OpenAI-compatible provider structure for OpenCode.
 type OpenCodeProviderConfig struct {
 	NPM     string                 `json:"npm"`
@@ -33,6 +36,21 @@ func GenerateOpenCodeConfig(baseURL, modelID string) ([]byte, error) {
 		modelID = DefaultOpenCodeModelID
 	}
 
+	modelsMap := map[string]interface{}{
+		modelID: map[string]interface{}{
+			"name": modelID,
+		},
+	}
+	if modelID != DefaultOpenCodeHaloModelID {
+		modelsMap[DefaultOpenCodeHaloModelID] = map[string]interface{}{
+			"name": "Qwen 2.5 Coder 32B Instruct (Local Halo)",
+			"limit": map[string]interface{}{
+				"context": float64(131072),
+				"output":  float64(8192),
+			},
+		}
+	}
+
 	cfg := map[string]interface{}{
 		"$schema":  "https://opencode.ai/config.json",
 		"snapshot": false,
@@ -43,11 +61,7 @@ func GenerateOpenCodeConfig(baseURL, modelID string) ([]byte, error) {
 				"options": map[string]interface{}{
 					"baseURL": baseURL,
 				},
-				"models": map[string]interface{}{
-					modelID: map[string]interface{}{
-						"name": modelID,
-					},
-				},
+				"models": modelsMap,
 			},
 		},
 	}
@@ -123,6 +137,29 @@ func EnsureOpenCodeProviderConfig(root, baseURL, modelID string) (bool, error) {
 		modified = true
 	}
 
+	// Retrieve existing models in provider "fak" if present
+	existingModels := make(map[string]interface{})
+	if existingFak, ok := providerMap["fak"].(map[string]interface{}); ok {
+		if em, ok := existingFak["models"].(map[string]interface{}); ok {
+			for k, v := range em {
+				existingModels[k] = v
+			}
+		}
+	}
+
+	existingModels[modelID] = map[string]interface{}{
+		"name": modelID,
+	}
+	if _, ok := existingModels[DefaultOpenCodeHaloModelID]; !ok {
+		existingModels[DefaultOpenCodeHaloModelID] = map[string]interface{}{
+			"name": "Qwen 2.5 Coder 32B Instruct (Local Halo)",
+			"limit": map[string]interface{}{
+				"context": float64(131072),
+				"output":  float64(8192),
+			},
+		}
+	}
+
 	// Build target fak provider map
 	targetFak := map[string]interface{}{
 		"npm":  "@ai-sdk/openai-compatible",
@@ -130,11 +167,7 @@ func EnsureOpenCodeProviderConfig(root, baseURL, modelID string) (bool, error) {
 		"options": map[string]interface{}{
 			"baseURL": baseURL,
 		},
-		"models": map[string]interface{}{
-			modelID: map[string]interface{}{
-				"name": modelID,
-			},
-		},
+		"models": existingModels,
 	}
 
 	// Check if fak provider needs updating
@@ -148,6 +181,17 @@ func EnsureOpenCodeProviderConfig(root, baseURL, modelID string) (bool, error) {
 		if string(existingBytes) != string(targetBytes) {
 			providerMap["fak"] = targetFak
 			modified = true
+		}
+	}
+
+	// If agent.tier.fast exists, ensure it is wired to the local Halo model with provider prefix
+	if existingAgents, ok := raw["agent"].(map[string]interface{}); ok {
+		if fastAgent, ok := existingAgents["agent.tier.fast"].(map[string]interface{}); ok {
+			curModel, _ := fastAgent["model"].(string)
+			if curModel == "" || curModel == DefaultOpenCodeHaloModelID {
+				fastAgent["model"] = "fak/" + DefaultOpenCodeHaloModelID
+				modified = true
+			}
 		}
 	}
 

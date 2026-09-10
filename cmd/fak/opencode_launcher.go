@@ -34,6 +34,7 @@ type opencodeLaunchOptions struct {
 	noAudit         bool
 	quiet           bool
 	localAuto       bool
+	halo            bool
 	metal           bool
 	ggufPath        string
 	gpuBackend      string
@@ -75,6 +76,8 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 	noAudit := fs.Bool("no-audit", false, "disable guard's decision journal")
 	quiet := fs.Bool("quiet", false, "suppress guard's startup banner and exit summary")
 	localAuto := fs.Bool("local", false, "auto-detect a local OpenAI-compatible model server for guard's upstream")
+	halo := fs.Bool("halo", false, "target local AMD Strix Halo appliance server (http://127.0.0.1:8080/v1)")
+	strix := fs.Bool("strix", false, "alias for --halo")
 	metal := fs.Bool("metal", false, "with --gguf: require Apple Silicon Metal GPU acceleration")
 	ggufPath := fs.String("gguf", "", "run a local in-kernel GGUF model as guard's upstream")
 	gpuBackend := fs.String("backend", "", "with --gguf: compute backend")
@@ -96,6 +99,31 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 	if err := validateOpencodeLaunchSplit(*splitMode, *splitWhere); err != nil {
 		fmt.Fprintf(stderr, "fak opencode: %v\n", err)
 		return 2
+	}
+
+	if *halo || *strix {
+		if *baseURL == "" {
+			host := os.Getenv("FAK_HALO_HOST")
+			if host == "" {
+				host = os.Getenv("FAK_STRIX_HOST")
+			}
+			if host == "" {
+				host = "127.0.0.1:8080"
+			}
+			if !strings.HasPrefix(host, "http://") && !strings.HasPrefix(host, "https://") {
+				host = "http://" + host
+			}
+			if !strings.HasSuffix(host, "/v1") {
+				host = strings.TrimSuffix(host, "/") + "/v1"
+			}
+			*baseURL = host
+		}
+		if *model == "" {
+			*model = projectassets.DefaultOpenCodeHaloModelID
+		}
+		if !*quiet {
+			fmt.Fprintf(stderr, "fak opencode: targeting local Halo server at %s (model: %s)\n", *baseURL, *model)
+		}
 	}
 	*ggufPath = pathutil.ExpandTilde(*ggufPath)
 	*tokenizerPath = pathutil.ExpandTilde(*tokenizerPath)
@@ -130,6 +158,10 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 					if !*quiet {
 						fmt.Fprintln(stderr, "fak opencode: no local model server running — assuming in-kernel model (qwen38:27b) with Metal GPU acceleration (one-touch)")
 					}
+				} else {
+					if *model == "" {
+						*model = projectassets.DefaultOpenCodeHaloModelID
+					}
 				}
 			}
 		}
@@ -151,6 +183,7 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 		noAudit:         *noAudit,
 		quiet:           *quiet,
 		localAuto:       *localAuto,
+		halo:            *halo || *strix,
 		metal:           *metal,
 		ggufPath:        *ggufPath,
 		gpuBackend:      *gpuBackend,
@@ -286,10 +319,15 @@ func runOpencodeConfig(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	addr := fs.String("addr", "127.0.0.1:8080", "fak serve gateway listen address")
 	model := fs.String("model", projectassets.DefaultOpenCodeModelID, "served model ID")
+	halo := fs.Bool("halo", false, "configure opencode.json for local AMD Strix Halo server")
+	strix := fs.Bool("strix", false, "alias for --halo")
 	write := fs.Bool("write", false, "write or update opencode.json in the current workspace")
 	dir := fs.String("dir", ".", "workspace directory containing opencode.json")
 	if !parseFlags(fs, argv) {
 		return 2
+	}
+	if (*halo || *strix) && *model == projectassets.DefaultOpenCodeModelID {
+		*model = projectassets.DefaultOpenCodeHaloModelID
 	}
 	baseURL := *addr
 	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {

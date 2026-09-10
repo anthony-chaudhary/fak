@@ -4,9 +4,13 @@
   "autoupdate": false,
   "snapshot": false,
   "subagent_depth": 2,
-  "instructions": ["AGENTS.md"],
+  "instructions": [
+    "AGENTS.md"
+  ],
   "skills": {
-    "paths": [".agents/skills"]
+    "paths": [
+      ".agents/skills"
+    ]
   },
   "agent": {
     "build": {
@@ -61,7 +65,9 @@
   "mcp": {
     "dos": {
       "type": "local",
-      "command": ["dos-mcp"],
+      "command": [
+        "dos-mcp"
+      ],
       "environment": {
         "PYTHONIOENCODING": "utf-8"
       },
@@ -69,7 +75,14 @@
     },
     "fak": {
       "type": "local",
-      "command": ["fak", "serve", "--stdio", "--defer-tools=true", "--policy", "examples/opencode-policy.json"],
+      "command": [
+        "fak",
+        "serve",
+        "--stdio",
+        "--defer-tools=true",
+        "--policy",
+        "examples/opencode-policy.json"
+      ],
       "environment": {},
       "enabled": true
     }
@@ -79,8 +92,13 @@
       "disabled": true
     },
     "fak-go": {
-      "command": ["fak", "lsp"],
-      "extensions": [".go"]
+      "command": [
+        "fak",
+        "lsp"
+      ],
+      "extensions": [
+        ".go"
+      ]
     }
   },
   "permission": {
@@ -92,5 +110,37 @@
     "dos*": "allow",
     "fak_*": "allow",
     "dos_*": "allow"
+  },
+  "provider": {
+    "fak": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "FAK Strix Halo (local)",
+      "options": {
+        "baseURL": "http://127.0.0.1:8080/v1"
+      },
+      "models": {
+        "qwen-2.5-coder-32b-instruct": {
+          "name": "Qwen 2.5 Coder 32B Instruct (Local Halo)",
+          "limit": {
+            "context": 131072,
+            "output": 8192
+          }
+        },
+        "Qwen3.8-27B-UD-Q2_K_XL": {
+          "name": "Qwen 3.8 27B UD Q2_K_XL (Local Halo)",
+          "limit": {
+            "context": 32768,
+            "output": 8192
+          }
+        },
+        "fak-local": {
+          "name": "FAK Local Serving",
+          "limit": {
+            "context": 32768,
+            "output": 8192
+          }
+        }
+      }
+    }
   }
 }

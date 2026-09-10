@@ -127,3 +127,43 @@ func TestEnsureOpenCodeProviderConfigPreservesExisting(t *testing.T) {
 		t.Errorf("expected updated baseURL, got %v", opts["baseURL"])
 	}
 }
+
+func TestEnsureOpenCodeProviderConfigWiresHaloFastTier(t *testing.T) {
+	tmp := t.TempDir()
+	initialConfig := `{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "agent.tier.fast": {
+      "model": "qwen-2.5-coder-32b-instruct"
+    }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(tmp, "opencode.json"), []byte(initialConfig), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	modified, err := EnsureOpenCodeProviderConfig(tmp, "http://127.0.0.1:8080/v1", DefaultOpenCodeHaloModelID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !modified {
+		t.Fatalf("expected modified=true")
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmp, "opencode.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatal(err)
+	}
+
+	agents := parsed["agent"].(map[string]interface{})
+	fast := agents["agent.tier.fast"].(map[string]interface{})
+	if fast["model"] != "fak/qwen-2.5-coder-32b-instruct" {
+		t.Errorf("expected fast tier model to be wired to fak/qwen-2.5-coder-32b-instruct, got %v", fast["model"])
+	}
+}
+
