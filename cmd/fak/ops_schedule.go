@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -256,15 +257,15 @@ Flags:
 		descDebt := fmt.Sprintf("Fak automated OpenCode debt-orchestrator burndown (%s, every %s)", taskNameDebt, formatOpsDuration(*intervalDebt))
 		descSync := fmt.Sprintf("Fak automated OpenCode git-sync (%s, every %s)", taskNameSync, formatOpsDuration(*intervalSync))
 
-		if err := enrollOpsTask(ctx, target, taskNameIssue, descIssue, *intervalIssue, *runHours, issueArgs); err != nil {
+		if err := enrollOpsTask(ctx, target, taskNameIssue, descIssue, *intervalIssue, *runHours, issueArgs, absRoot); err != nil {
 			fmt.Fprintf(stderr, "ops schedule: failed to enroll %s: %v\n", taskNameIssue, err)
 			return 1
 		}
-		if err := enrollOpsTask(ctx, target, taskNameDebt, descDebt, *intervalDebt, *runHours, debtArgs); err != nil {
+		if err := enrollOpsTask(ctx, target, taskNameDebt, descDebt, *intervalDebt, *runHours, debtArgs, absRoot); err != nil {
 			fmt.Fprintf(stderr, "ops schedule: failed to enroll %s: %v\n", taskNameDebt, err)
 			return 1
 		}
-		if err := enrollOpsTask(ctx, target, taskNameSync, descSync, *intervalSync, *runHours, syncArgs); err != nil {
+		if err := enrollOpsTask(ctx, target, taskNameSync, descSync, *intervalSync, *runHours, syncArgs, absRoot); err != nil {
 			fmt.Fprintf(stderr, "ops schedule: failed to enroll %s: %v\n", taskNameSync, err)
 			return 1
 		}
@@ -340,7 +341,7 @@ func buildOpsCronRunArgs(fakBin, repoRoot, companionRoot, workload, jobName stri
 					commandPrompt = "/debt-orchestrator"
 				}
 				childCmd = []string{
-					"opencode", "run",
+					resolveOpencodeExecutable(), "run",
 					"--dir", repoRoot,
 					"--format", "json",
 					commandPrompt,
@@ -355,7 +356,7 @@ func buildOpsCronRunArgs(fakBin, repoRoot, companionRoot, workload, jobName stri
 			commandPrompt = "/debt-orchestrator"
 		}
 		childCmd = []string{
-			"opencode", "run",
+			resolveOpencodeExecutable(), "run",
 			"--dir", repoRoot,
 			"--format", "json",
 			commandPrompt,
@@ -369,6 +370,7 @@ func buildOpsCronRunArgs(fakBin, repoRoot, companionRoot, workload, jobName stri
 		"--interval", intervalStr,
 		"--timeout", timeoutStr,
 		"--interrupt-ceiling", timeoutStr,
+		"--workdir", repoRoot,
 		"--",
 	}
 	return append(runArgs, childCmd...)
@@ -454,7 +456,36 @@ func resolveFakExecutable(explicit, repoRoot string) string {
 	return exeName
 }
 
-func enrollOpsTask(ctx context.Context, target, taskName, desc string, interval time.Duration, runHours int, args []string) error {
+func resolveOpencodeExecutable() string {
+	if explicit := strings.TrimSpace(os.Getenv("OPENCODE_BIN")); explicit != "" {
+		if _, err := os.Stat(explicit); err == nil {
+			return explicit
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		userBin := filepath.Join(home, ".opencode", "bin", "opencode")
+		if runtime.GOOS == "windows" {
+			userBin += ".exe"
+		}
+		if _, err := os.Stat(userBin); err == nil {
+			return userBin
+		}
+	}
+	for _, cand := range []string{
+		"/opt/homebrew/bin/opencode",
+		"/usr/local/bin/opencode",
+	} {
+		if _, err := os.Stat(cand); err == nil {
+			return cand
+		}
+	}
+	if found, err := exec.LookPath("opencode"); err == nil {
+		return found
+	}
+	return "opencode"
+}
+
+func enrollOpsTask(ctx context.Context, target, taskName, desc string, interval time.Duration, runHours int, args []string, repoRoot string) error {
 	switch target {
 	case "taskscheduler":
 		sec := int64(interval.Seconds())
@@ -501,7 +532,7 @@ Register-ScheduledTask -TaskName '%s' -Action $action -Trigger $trigger -Setting
 		return exec.CommandContext(ctx, "systemctl", "--user", "enable", "--now", unit+".timer").Run()
 
 	case "launchd":
-		plistContent := opsRenderLaunchd(taskName, interval, args)
+		plistContent := opsRenderLaunchd(taskName, interval, args, repoRoot)
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return err
@@ -600,12 +631,57 @@ func queryOpsTaskStatus(ctx context.Context, target, taskName, workload string, 
 			item.Registered = true
 			item.Status = "Ready"
 			item.Detail = "loaded"
+			outStr := string(out)
+			if strings.Contains(outStr, "\"LastExitStatus\" = ") {
+				idx := strings.Index(outStr, "\"LastExitStatus\" = ")
+				sub := outStr[idx+len("\"LastExitStatus\" = "):]
+				if semi := strings.Index(sub, ";"); semi > 0 {
+					codeStr := strings.TrimSpace(sub[:semi])
+					if code, parseErr := strconv.Atoi(codeStr); parseErr == nil && code != 0 {
+						exitCode := code
+						if exitCode > 255 {
+							exitCode = exitCode >> 8
+						}
+						item.Status = "Failed"
+						item.Detail = fmt.Sprintf("last exit status %d", exitCode)
+					}
+				}
+			}
+			if item.Status == "Ready" && item.Ledger != "" {
+				if lastOutcome, ok := readLastOpsLedgerOutcome(item.Ledger); ok {
+					if lastOutcome == "failed" || lastOutcome == "timeout" {
+						item.Status = "Failed"
+						item.Detail = fmt.Sprintf("last ledger outcome: %s", lastOutcome)
+					}
+				}
+			}
 		} else {
 			item.Detail = strings.TrimSpace(string(out))
 		}
 	}
 
 	return item
+}
+
+func readLastOpsLedgerOutcome(path string) (string, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err == nil {
+			if outcome, ok := m["outcome"].(string); ok && outcome != "" {
+				return outcome, true
+			}
+		}
+	}
+	return "", false
 }
 
 func generateOpsDefinition(target, taskName, workload string, interval, timeout time.Duration, runHours int, args []string, repoRoot, companionRoot string) OpsScheduleTaskItem {
@@ -629,7 +705,7 @@ func generateOpsDefinition(target, taskName, workload string, interval, timeout 
 	case "systemd":
 		fmt.Fprint(&buf, opsRenderSystemd(strings.ToLower(taskName), desc, interval, args))
 	case "launchd":
-		fmt.Fprint(&buf, opsRenderLaunchd(taskName, interval, args))
+		fmt.Fprint(&buf, opsRenderLaunchd(taskName, interval, args, repoRoot))
 	}
 
 	item.Definition = buf.String()
@@ -674,7 +750,7 @@ func opsRenderSystemd(label, desc string, interval time.Duration, args []string)
 	return b.String()
 }
 
-func opsRenderLaunchd(label string, interval time.Duration, args []string) string {
+func opsRenderLaunchd(label string, interval time.Duration, args []string, repoRoot string) string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	fmt.Fprintf(&b, "<!-- Written by: fak ops schedule — install: launchctl load -w %s.plist -->\n", label)
@@ -688,8 +764,32 @@ func opsRenderLaunchd(label string, interval time.Duration, args []string) strin
 	b.WriteString("    </array>\n")
 	fmt.Fprintf(&b, "    <key>StartInterval</key>\n    <integer>%d</integer>\n", int64(interval.Seconds()))
 	b.WriteString("    <key>RunAtLoad</key>\n    <false/>\n")
-	fmt.Fprintf(&b, "    <key>StandardOutPath</key>\n    <string>/tmp/%s.log</string>\n", opsXMLEscape(label))
-	fmt.Fprintf(&b, "    <key>StandardErrorPath</key>\n    <string>/tmp/%s.err</string>\n", opsXMLEscape(label))
+	if strings.TrimSpace(repoRoot) != "" {
+		fmt.Fprintf(&b, "    <key>WorkingDirectory</key>\n    <string>%s</string>\n", opsXMLEscape(strings.TrimSpace(repoRoot)))
+	}
+	homeDir, _ := os.UserHomeDir()
+	b.WriteString("    <key>EnvironmentVariables</key>\n    <dict>\n")
+	if homeDir != "" {
+		fmt.Fprintf(&b, "      <key>HOME</key>\n      <string>%s</string>\n", opsXMLEscape(homeDir))
+	}
+	activePath := os.Getenv("PATH")
+	if activePath == "" {
+		if homeDir != "" {
+			activePath = fmt.Sprintf("/opt/homebrew/bin:%s/.local/bin:%s/.opencode/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", homeDir, homeDir)
+		} else {
+			activePath = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+		}
+	}
+	fmt.Fprintf(&b, "      <key>PATH</key>\n      <string>%s</string>\n", opsXMLEscape(activePath))
+	b.WriteString("    </dict>\n")
+	logDir := "/tmp"
+	if homeDir != "" {
+		userLogDir := filepath.Join(homeDir, "Library", "Logs", "fak")
+		_ = os.MkdirAll(userLogDir, 0755)
+		logDir = userLogDir
+	}
+	fmt.Fprintf(&b, "    <key>StandardOutPath</key>\n    <string>%s/%s.log</string>\n", opsXMLEscape(logDir), opsXMLEscape(label))
+	fmt.Fprintf(&b, "    <key>StandardErrorPath</key>\n    <string>%s/%s.err</string>\n", opsXMLEscape(logDir), opsXMLEscape(label))
 	b.WriteString("  </dict>\n</plist>\n")
 	return b.String()
 }
