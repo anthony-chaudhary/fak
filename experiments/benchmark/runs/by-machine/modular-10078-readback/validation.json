@@ -1,0 +1,35 @@
+{
+  "schema": "fak.issue10078.validation-readback.v1",
+  "generated_at_utc": "2026-09-10T05:56:15Z",
+  "issue": "fak#10078",
+  "issue_status": "open",
+  "inspected_artifact": {
+    "path": "docs/_witnesses/issue-10078-webbench-qwen38-capacity-sweep/receipt.json",
+    "sha256": "039b93fa20c56c524be01c66a5b5f34ee050e782c7d135cfa0076fe1d1743daf",
+    "source_artifact_commit": "dfeed4a43553b852429d1c8ea31f3d6032eab8b3"
+  },
+  "validation": {
+    "command": "fak webbench parity-gate --claim-file docs/webbench/capacity-valid-serving-sweeps.md --artifact docs/_witnesses/issue-10078-webbench-qwen38-capacity-sweep/receipt.json",
+    "observed_exit_code": 1,
+    "observed_refusal": "serving claim gate: serving peak claim for ours refused: fewer than two comparable valid points: positive measured token throughput is required; rerun with at least two in-capacity identity-stable points"
+  },
+  "missing_witness_fields": [
+    "current validator-accepted serving sweep receipt",
+    "hardware witnessed execution evidence",
+    "identity-stable workload provenance for the claimed run",
+    "identity-stable fak-native engine receipt for the claimed run",
+    "quality envelope evidence for the claimed model and decoding setup",
+    "setup provenance tying model, endpoint, engine, capacity, and receipt to the same run",
+    "setup and measurement overhead accounting",
+    "attached capacity manifest or probe for the claimed run",
+    "independent remote commit and artifact ancestry"
+  ],
+  "missing_range_evidence": [
+    "at least two comparable in-capacity points with positive measured output-token throughput",
+    "rise and plateau evidence across the tested concurrency span",
+    "bounded tail behavior under the stated p99 TTFT and ITL budgets",
+    "concurrency span sufficient to support the claimed capacity behavior without relying on historical constants"
+  ],
+  "hardware_witnessed": false,
+  "conclusion": "The historical artifact is preserved but currently unverified by the serving parity gate; it does not resolve fak#10078."
+}
