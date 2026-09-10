@@ -33,7 +33,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          go test -json ./internal/compute -run '^TestTreeSpecVerifyAttention' -count=1 -timeout=180s 2>&1 \
+          go test -json ./internal/compute -run '^(TestTreeSpecVerifyAttention|TestMetalAttention)' -count=1 -timeout=180s 2>&1 \
             | tee "$RUNNER_TEMP/metal-tree-attention.json"
 
       - name: Upload Metal tree-attention receipt
