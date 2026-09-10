@@ -106,6 +106,7 @@ type pendingTensor struct {
 	canonicalMTPQ4K  bool       // already-reordered canonical MTP q/k; use the narrow model entry point
 	canonicalMTPFCQ8 bool       // exact canonical MTP fusion projection; preserve source Q8_0
 	q2kEmbed         bool       // true -> model.NewQ2KEmbedding(raw) -> builder.SetQ2KEmbedding
+	q4kEmbed         bool       // true -> model.NewQ4KEmbedding(raw) -> builder.SetQ2KEmbedding
 	lazyQ4K          bool
 	sourceInfo       TensorInfo
 	lazyReader       io.ReaderAt
