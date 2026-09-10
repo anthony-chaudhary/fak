@@ -72,6 +72,15 @@ const (
 	// Qwen35SequencePrefillDeclineEmbeddingRowsUnsupported records that a backend
 	// supports whole-sequence prefill but not compact pre-gathered embedding rows.
 	Qwen35SequencePrefillDeclineEmbeddingRowsUnsupported = "packed-embedding-row-panel-unsupported"
+	// Qwen35SequencePrefillDeclineF32EmbeddingPanelCap records that the compact
+	// F32 prompt-row panel itself exceeds the backend's single-buffer ceiling.
+	Qwen35SequencePrefillDeclineF32EmbeddingPanelCap = "f32-embedding-row-panel-exceeds-device-buffer-cap"
+	// Qwen35SequencePrefillDeclineF32EmbeddingRowsUnsupported records that an
+	// oversized F32 table could use a compact panel, but the backend lacks that contract.
+	Qwen35SequencePrefillDeclineF32EmbeddingRowsUnsupported = "f32-embedding-row-panel-unsupported"
+	// Qwen35SequencePrefillDeclineOutputHeadCap records that row-gathering the
+	// input would still leave request construction with an oversized output head.
+	Qwen35SequencePrefillDeclineOutputHeadCap = "output-head-exceeds-device-buffer-cap"
 )
 
 // Qwen35SequencePrefillRouteStatus is the session-local effective route marker
@@ -931,39 +940,51 @@ func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.
 		return compute.Qwen35SequencePrefillResult{}, advertised, err
 	}
 	embedShape := []int{s.M.Cfg.VocabSize, s.M.Cfg.HiddenSize}
-	if s.M.Q2KEmbedding != nil {
+	packedRows := s.M.Q2KEmbedding != nil
+	if packedRows {
 		embedShape = []int{len(ids), s.M.Q2KEmbedding.Hidden()}
 	} else if meta, ok := s.M.manifest["model.embed_tokens.weight"]; ok && len(meta.Shape) == 2 {
 		embedShape = meta.Shape
 	}
-	embedBytes, validEmbedShape := f32TensorBytes(embedShape)
-	if !deviceEmbeddingTableFits(s.Backend, embedShape) {
-		packedRows := s.M.Q2KEmbedding != nil
+	useEmbeddingRows := packedRows || !deviceEmbeddingTableFits(s.Backend, embedShape)
+	panelShape := []int{len(ids), s.M.Cfg.HiddenSize}
+	panelBytes, validPanelShape := f32TensorBytes(panelShape)
+	if useEmbeddingRows && (!validPanelShape || !deviceEmbeddingTableFits(s.Backend, panelShape)) {
+		declineReason := Qwen35SequencePrefillDeclineEmbeddingCap
+		if !packedRows {
+			declineReason = Qwen35SequencePrefillDeclineF32EmbeddingPanelCap
+		}
 		s.qwen35HAL.prefillRoute = Qwen35SequencePrefillRouteStatus{
 			RequestedPath:       compute.Qwen35SequencePrefillPath,
 			EffectivePath:       Qwen35SequencePrefillFallbackPath,
-			DeclineReason:       Qwen35SequencePrefillDeclineEmbeddingCap,
+			DeclineReason:       declineReason,
 			FallbackActive:      true,
 			PackedEmbeddingRows: packedRows,
-		}
-		if validEmbedShape && packedRows {
-			s.qwen35HAL.prefillRoute.EmbeddingPanelBytes = embedBytes
+			EmbeddingPanelBytes: panelBytes,
 		}
 		return compute.Qwen35SequencePrefillResult{}, false, nil
 	}
-	if _, isSplit := s.validateDenseGPULayers(); isSplit {
+	if useEmbeddingRows && !packedRows && !s.qwen35SequenceOutputHeadFits() {
+		s.qwen35HAL.prefillRoute = Qwen35SequencePrefillRouteStatus{
+			RequestedPath:       compute.Qwen35SequencePrefillPath,
+			EffectivePath:       Qwen35SequencePrefillFallbackPath,
+			DeclineReason:       Qwen35SequencePrefillDeclineOutputHeadCap,
+			FallbackActive:      true,
+			EmbeddingPanelBytes: panelBytes,
+		}
 		return compute.Qwen35SequencePrefillResult{}, false, nil
 	}
-	request := compute.Qwen35SequencePrefillRequest{}
-	panelBytes := int64(0)
-	if packed := s.M.Q2KEmbedding; packed != nil {
-		panelBytes = embedBytes
+	if useEmbeddingRows {
 		rows, ok := s.Backend.(compute.Qwen35SequenceEmbeddingRowsBackend)
 		if !ok {
+			declineReason := Qwen35SequencePrefillDeclineEmbeddingRowsUnsupported
+			if !packedRows {
+				declineReason = Qwen35SequencePrefillDeclineF32EmbeddingRowsUnsupported
+			}
 			s.qwen35HAL.prefillRoute = Qwen35SequencePrefillRouteStatus{
 				RequestedPath: compute.Qwen35SequencePrefillPath, EffectivePath: Qwen35SequencePrefillFallbackPath,
-				DeclineReason: Qwen35SequencePrefillDeclineEmbeddingRowsUnsupported, FallbackActive: true,
-				PackedEmbeddingRows: true, EmbeddingPanelBytes: panelBytes,
+				DeclineReason: declineReason, FallbackActive: true,
+				PackedEmbeddingRows: packedRows, EmbeddingPanelBytes: panelBytes,
 			}
 			return compute.Qwen35SequencePrefillResult{}, false, nil
 		}
@@ -972,14 +993,29 @@ func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.
 				Backend: s.Backend.Name(), Path: rows.Qwen35SequenceEmbeddingRowsPath(), Reason: "wrong embedding-row capability identity",
 			}
 		}
-		data, gatherErr := packed.GatherRows(ids, s.M.Cfg.embedScale())
+	}
+	if _, isSplit := s.validateDenseGPULayers(); isSplit {
+		return compute.Qwen35SequencePrefillResult{}, false, nil
+	}
+	request := compute.Qwen35SequencePrefillRequest{}
+	if useEmbeddingRows {
+		data, gatherErr := s.qwen35EmbeddingRows(ids)
 		if gatherErr != nil {
-			return compute.Qwen35SequencePrefillResult{}, true, &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardQwen35GDN, Path: compute.Qwen35SequencePrefillPath, Layer: -1, Stage: "packed embedding row gather", Cause: gatherErr}
+			stage := "F32 embedding row gather"
+			if packedRows {
+				stage = "packed embedding row gather"
+			}
+			return compute.Qwen35SequencePrefillResult{}, true, &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardQwen35GDN, Path: compute.Qwen35SequencePrefillPath, Layer: -1, Stage: stage, Cause: gatherErr}
 		}
-		panel := s.uploadHostF32([]int{len(ids), packed.Hidden()}, data, compute.MemoryActivation, "qwen35-sequence-q2k-embedding-rows")
+		uploadSite := "qwen35-sequence-f32-embedding-rows"
+		if packedRows {
+			uploadSite = "qwen35-sequence-q2k-embedding-rows"
+		}
+		panel := s.uploadHostF32(panelShape, data, compute.MemoryActivation, uploadSite)
 		defer s.Backend.Free(panel)
-		request = s.qwen35SequencePrefillRequestWithEmbedding(ids, needLogits, panel, true, packed.Vocab())
+		request = s.qwen35SequencePrefillRequestWithEmbedding(ids, needLogits, panel, true, s.M.Cfg.VocabSize)
 	} else {
+		panelBytes = 0
 		request = s.qwen35SequencePrefillRequest(ids, needLogits)
 	}
 	startPos := s.halKV.Len()
