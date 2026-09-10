@@ -27,7 +27,23 @@ type NativeInferenceReceipt struct {
 	// Qwen35MetalStateIdentity is present only for an explicitly requested native
 	// receipt whose fresh exact-P32 Metal session sealed model-owned state identity.
 	Qwen35MetalStateIdentity   *Qwen35MetalStateIdentityReceipt      `json:"qwen35_metal_state_identity,omitempty"`
+	Qwen35SequencePrefillRoute *NativeSequencePrefillRouteReceipt    `json:"qwen35_sequence_prefill_route,omitempty"`
 	CUDAImmutableWeightUploads *NativeCUDAImmutableWeightUploadDelta `json:"cuda_immutable_weight_uploads,omitempty"`
+}
+
+// NativeSequencePrefillRouteReceipt aggregates the route decisions observed for
+// every prefill call executed by one request. Status is the representative
+// observed decision: the first fallback or other non-qualifying decision is
+// sticky. Its packed-row fields describe only that represented call, not all
+// calls in a mixed request. NativePerformanceQualifying summarizes only those
+// model route decisions; it does not claim numerical parity or hardware
+// qualification.
+type NativeSequencePrefillRouteReceipt struct {
+	PrefillCalls                int                               `json:"prefill_calls"`
+	ObservedCalls               int                               `json:"observed_calls"`
+	Complete                    bool                              `json:"complete"`
+	NativePerformanceQualifying bool                              `json:"native_performance_qualifying"`
+	Status                      *Qwen35SequencePrefillRouteStatus `json:"status,omitempty"`
 }
 
 // NativeCUDAImmutableWeightUploadCounters is one cumulative CUDA-backend

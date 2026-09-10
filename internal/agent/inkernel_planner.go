@@ -861,7 +861,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		tp := time.Now()
 		prefillAt := matched
 		if prefillAt < len(ids) {
-			rawLogits, err := p.prefillDivergentSuffix(ctx, s, ids[prefillAt:])
+			rawLogits, err := p.prefillDivergentSuffix(ctx, s, ids[prefillAt:], measurementOpt...)
 			if err != nil {
 				return inKernelGenerateResult{}, err
 			}
@@ -1081,7 +1081,7 @@ func (p *InKernelPlanner) generateReusedMetalMTP(
 		tp := time.Now()
 		prefillAt := matched
 		if prefillAt < len(ids) {
-			rawLogits, err := p.prefillDivergentSuffix(ctx, s, ids[prefillAt:])
+			rawLogits, err := p.prefillDivergentSuffix(ctx, s, ids[prefillAt:], measurementOpt...)
 			if err != nil {
 				return inKernelGenerateResult{}, err
 			}
@@ -1641,6 +1641,7 @@ func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferen
 		NativeSelectionDigest:      nativeSelectionDigest,
 		Qwen35MetalForwardSequence: qwen35MetalForwardSequence,
 		Qwen35MetalStateIdentity:   qwen35MetalStateIdentity,
+		Qwen35SequencePrefillRoute: cloneNativeSequencePrefillRouteReceipt(measurement.qwen35SequencePrefillRoute),
 		CUDAImmutableWeightUploads: cudaImmutableWeightUploads,
 	}
 }
