@@ -1,6 +1,7 @@
 package memgate
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -100,4 +101,82 @@ func TestAdmissionSampleForFailsClosedAndClassifiesPressure(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestObservedDarwinPressureOverridesOccupancyFallback pins #12701: wired and
+// compressed byte counts describe occupancy, while the Darwin memorystatus level
+// reports current pressure. A recognized live level therefore takes precedence;
+// the old conservative occupancy rule remains the fallback when that probe is absent.
+func TestObservedDarwinPressureOverridesOccupancyFallback(t *testing.T) {
+	// JSON setup keeps this regression source-compatible with the pre-fix Memory
+	// shape: old code ignores the two new fields and exhibits the false refusal.
+	var base Memory
+	if err := json.Unmarshal([]byte(`{
+		"TotalBytes":20000000000,
+		"AvailableBytes":5000000000,
+		"WiredBytes":9000000000,
+		"CompressedBytes":4000000000,
+		"Pressure":"normal",
+		"PressureKnown":true
+	}`), &base); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("normal pressure admits fitting load despite high occupancy", func(t *testing.T) {
+		if got := AdmissionSampleFor(base); got.Pressure != PressureNormal {
+			t.Fatalf("admission pressure=%q, want normal", got.Pressure)
+		}
+		snap := BuildSnapshot("darwin", base, nil)
+		var fields map[string]any
+		raw, err := json.Marshal(snap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if fields["pressure_observed"] != true || fields["pressure"] != string(PressureNormal) {
+			t.Fatalf("snapshot pressure fields=%v, want normal/true", fields)
+		}
+		if got := Evaluate(snap, 4); got.Admit == nil || !*got.Admit {
+			t.Fatalf("fitting load refused under observed normal pressure: %+v", got)
+		}
+	})
+
+	t.Run("critical pressure refuses fitting load", func(t *testing.T) {
+		mem := base
+		if err := json.Unmarshal([]byte(`{
+			"WiredBytes":100,
+			"CompressedBytes":100,
+			"Pressure":"critical"
+		}`), &mem); err != nil {
+			t.Fatal(err)
+		}
+		if got := AdmissionSampleFor(mem); got.Pressure != PressureCritical {
+			t.Fatalf("admission pressure=%q, want critical", got.Pressure)
+		}
+		if got := Evaluate(BuildSnapshot("darwin", mem, nil), 4); got.Admit == nil || *got.Admit {
+			t.Fatalf("critical pressure admitted load: %+v", got)
+		}
+	})
+
+	t.Run("capacity shortfall still refuses under normal pressure", func(t *testing.T) {
+		got := Evaluate(BuildSnapshot("darwin", base, nil), 6)
+		if got.Admit == nil || *got.Admit || got.ShortfallGB != 1 {
+			t.Fatalf("short load capacity gate=%+v, want one GB refusal", got)
+		}
+	})
+
+	t.Run("missing pressure probe preserves occupancy fallback", func(t *testing.T) {
+		mem := base
+		if err := json.Unmarshal([]byte(`{"PressureKnown":false}`), &mem); err != nil {
+			t.Fatal(err)
+		}
+		if got := AdmissionSampleFor(mem); got.Pressure != PressureCritical {
+			t.Fatalf("fallback admission pressure=%q, want critical", got.Pressure)
+		}
+		if got := Evaluate(BuildSnapshot("darwin", mem, nil), 4); got.Admit == nil || *got.Admit {
+			t.Fatalf("missing-probe occupancy fallback admitted load: %+v", got)
+		}
+	})
 }

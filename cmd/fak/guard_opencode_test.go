@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -337,5 +338,402 @@ func TestGuardOpenCodeAuditJournalVerification(t *testing.T) {
 	}
 	if lastRow.Tool != "edit" || lastRow.Verdict != "DENY" {
 		t.Errorf("last row: tool=%q verdict=%q, want edit/DENY", lastRow.Tool, lastRow.Verdict)
+	}
+}
+
+func TestGuardOpenCodeConfigInjection(t *testing.T) {
+	command := []string{"opencode"}
+	gwURL := "http://127.0.0.1:54321"
+	modelID := "qwen38"
+	getenv := func(string) string { return "" }
+
+	injected, install := installGuardOpenCodeConfig(command, gwURL, modelID, getenv)
+
+	if !install.Applied {
+		t.Fatalf("install.Applied = false, want true")
+	}
+	if install.ProviderID != "fak" {
+		t.Errorf("install.ProviderID = %q, want %q", install.ProviderID, "fak")
+	}
+	if install.Model != "fak/qwen38" {
+		t.Errorf("install.Model = %q, want %q", install.Model, "fak/qwen38")
+	}
+	if install.BaseURL != "http://127.0.0.1:54321/v1" {
+		t.Errorf("install.BaseURL = %q, want %q", install.BaseURL, "http://127.0.0.1:54321/v1")
+	}
+
+	envMap := make(map[string]string)
+	for _, pair := range injected {
+		envMap[pair[0]] = pair[1]
+	}
+
+	configRaw, ok := envMap["OPENCODE_CONFIG_CONTENT"]
+	if !ok || strings.TrimSpace(configRaw) == "" {
+		t.Fatalf("injected missing OPENCODE_CONFIG_CONTENT: %v", injected)
+	}
+	if keyVal, ok := envMap["OPENAI_API_KEY"]; !ok || keyVal != "fak-guard-placeholder" {
+		t.Errorf("injected OPENAI_API_KEY = %q, want %q", keyVal, "fak-guard-placeholder")
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal([]byte(configRaw), &config); err != nil {
+		t.Fatalf("failed to unmarshal OPENCODE_CONFIG_CONTENT JSON: %v", err)
+	}
+
+	if got := config["model"]; got != "fak/qwen38" {
+		t.Errorf("config.model = %v, want %q", got, "fak/qwen38")
+	}
+	if got := config["small_model"]; got != "fak/qwen38" {
+		t.Errorf("config.small_model = %v, want %q", got, "fak/qwen38")
+	}
+
+	providerMap, ok := config["provider"].(map[string]any)
+	if !ok {
+		t.Fatalf("config.provider is not a map: %T", config["provider"])
+	}
+	fakProvider, ok := providerMap["fak"].(map[string]any)
+	if !ok {
+		t.Fatalf("config.provider.fak is not a map: %T", providerMap["fak"])
+	}
+	if got := fakProvider["npm"]; got != "@ai-sdk/openai-compatible" {
+		t.Errorf("fakProvider.npm = %v, want %q", got, "@ai-sdk/openai-compatible")
+	}
+	optionsMap, ok := fakProvider["options"].(map[string]any)
+	if !ok {
+		t.Fatalf("fakProvider.options is not a map: %T", fakProvider["options"])
+	}
+	if got := optionsMap["baseURL"]; got != "{env:OPENAI_BASE_URL}" {
+		t.Errorf("options.baseURL = %v, want %q", got, "{env:OPENAI_BASE_URL}")
+	}
+	if got := optionsMap["apiKey"]; got != "{env:OPENAI_API_KEY}" {
+		t.Errorf("options.apiKey = %v, want %q", got, "{env:OPENAI_API_KEY}")
+	}
+
+	modelsMap, ok := fakProvider["models"].(map[string]any)
+	if !ok {
+		t.Fatalf("fakProvider.models is not a map: %T", fakProvider["models"])
+	}
+	if _, ok := modelsMap["qwen38"]; !ok {
+		t.Errorf("modelsMap missing qwen38")
+	}
+
+	commonAliases := []string{
+		"fak-local",
+		"qwen38:27b",
+		"glm-5.2",
+		"glm-5.3-flash",
+		"qwen2.5-coder:7b",
+		"qwen2.5-coder:32b",
+	}
+	for _, alias := range commonAliases {
+		if _, ok := modelsMap[alias]; !ok {
+			t.Errorf("modelsMap missing common alias %q", alias)
+		}
+	}
+}
+
+func TestGuardOpenCodeConfigPreservesExplicitModelLimits(t *testing.T) {
+	existing := `{"provider":{"fak":{"options":{"custom":"kept"},"models":{"qwen38":{"name":"Custom Qwen","limit":{"context":8192,"output":512},"custom":"kept"}}}}}`
+	injected, install := installGuardOpenCodeConfig([]string{"opencode"}, "http://127.0.0.1:54321", "qwen38", func(key string) string {
+		if key == "OPENCODE_CONFIG_CONTENT" {
+			return existing
+		}
+		return ""
+	})
+	if !install.Applied {
+		t.Fatal("OpenCode config injection was not applied")
+	}
+	var config map[string]any
+	if err := json.Unmarshal([]byte(injected[0][1]), &config); err != nil {
+		t.Fatal(err)
+	}
+	provider := config["provider"].(map[string]any)["fak"].(map[string]any)
+	model := provider["models"].(map[string]any)["qwen38"].(map[string]any)
+	limit := model["limit"].(map[string]any)
+	if limit["context"] != float64(8192) || limit["output"] != float64(512) || model["name"] != "Custom Qwen" || model["custom"] != "kept" {
+		t.Fatalf("explicit model fields changed: %#v", model)
+	}
+	if provider["options"].(map[string]any)["custom"] != "kept" {
+		t.Fatalf("explicit provider options changed: %#v", provider["options"])
+	}
+}
+
+func TestDiscoverGuardOpenCodeModelLimits(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"data":[{"id":"local","context_length":8192,"max_output_tokens":512}]}`)
+	}))
+	defer server.Close()
+	got := discoverGuardOpenCodeModelLimits(server.URL, "local")
+	if got.ID != "local" || got.Context != 8192 || got.Output != 512 {
+		t.Fatalf("discovered limits = %+v", got)
+	}
+}
+
+func TestGuardOpenCodeExistingConfigContentPreserved(t *testing.T) {
+	existingJSON := `{
+		"permission": "allow",
+		"instructions": ["AGENTS.md"],
+		"custom_setting": 42,
+		"provider": {
+			"anthropic": {
+				"name": "Anthropic",
+				"npm": "@ai-sdk/anthropic"
+			}
+		},
+		"model": "anthropic/claude-3-5-sonnet",
+		"small_model": "anthropic/claude-3-5-haiku"
+	}`
+
+	getenv := func(k string) string {
+		if k == "OPENCODE_CONFIG_CONTENT" {
+			return existingJSON
+		}
+		return ""
+	}
+
+	injected, install := installGuardOpenCodeConfig([]string{"opencode"}, "http://127.0.0.1:54321", "qwen38", getenv)
+	if !install.Applied {
+		t.Fatalf("install.Applied = false, want true")
+	}
+
+	envMap := make(map[string]string)
+	for _, pair := range injected {
+		envMap[pair[0]] = pair[1]
+	}
+
+	configRaw := envMap["OPENCODE_CONFIG_CONTENT"]
+	var config map[string]any
+	if err := json.Unmarshal([]byte(configRaw), &config); err != nil {
+		t.Fatalf("failed to unmarshal config: %v", err)
+	}
+
+	if got := config["permission"]; got != "allow" {
+		t.Errorf("config.permission = %v, want %q", got, "allow")
+	}
+	instructions, ok := config["instructions"].([]any)
+	if !ok || len(instructions) != 1 || instructions[0] != "AGENTS.md" {
+		t.Errorf("config.instructions = %v, want [AGENTS.md]", config["instructions"])
+	}
+	if got := config["custom_setting"]; got != float64(42) {
+		t.Errorf("config.custom_setting = %v, want 42", got)
+	}
+
+	if got := config["model"]; got != "fak/qwen38" {
+		t.Errorf("config.model = %v, want %q", got, "fak/qwen38")
+	}
+	if got := config["small_model"]; got != "fak/qwen38" {
+		t.Errorf("config.small_model = %v, want %q", got, "fak/qwen38")
+	}
+
+	providerMap, ok := config["provider"].(map[string]any)
+	if !ok {
+		t.Fatalf("provider is not a map")
+	}
+	if _, ok := providerMap["anthropic"]; !ok {
+		t.Errorf("existing provider 'anthropic' was not preserved in provider map")
+	}
+	if _, ok := providerMap["fak"]; !ok {
+		t.Errorf("provider 'fak' was not merged into provider map")
+	}
+}
+
+func TestGuardOpenCodeModelOverrideFromCommand(t *testing.T) {
+	t.Run("-m flag override", func(t *testing.T) {
+		command := []string{"opencode", "-m", "my-custom-model"}
+		injected, install := installGuardOpenCodeConfig(command, "http://127.0.0.1:54321", "", nil)
+		if !install.Applied {
+			t.Fatalf("install.Applied = false, want true")
+		}
+		if install.Model != "fak/my-custom-model" {
+			t.Errorf("install.Model = %q, want %q", install.Model, "fak/my-custom-model")
+		}
+
+		var config map[string]any
+		for _, pair := range injected {
+			if pair[0] == "OPENCODE_CONFIG_CONTENT" {
+				_ = json.Unmarshal([]byte(pair[1]), &config)
+			}
+		}
+		providerMap := config["provider"].(map[string]any)
+		fakProvider := providerMap["fak"].(map[string]any)
+		modelsMap := fakProvider["models"].(map[string]any)
+		if _, ok := modelsMap["my-custom-model"]; !ok {
+			t.Errorf("modelsMap missing my-custom-model")
+		}
+	})
+
+	t.Run("--model=fak/another-model flag override", func(t *testing.T) {
+		command := []string{"opencode", "--model=fak/another-model"}
+		injected, install := installGuardOpenCodeConfig(command, "http://127.0.0.1:54321", "", nil)
+		if !install.Applied {
+			t.Fatalf("install.Applied = false, want true")
+		}
+		if install.Model != "fak/another-model" {
+			t.Errorf("install.Model = %q, want %q", install.Model, "fak/another-model")
+		}
+
+		var config map[string]any
+		for _, pair := range injected {
+			if pair[0] == "OPENCODE_CONFIG_CONTENT" {
+				_ = json.Unmarshal([]byte(pair[1]), &config)
+			}
+		}
+		providerMap := config["provider"].(map[string]any)
+		fakProvider := providerMap["fak"].(map[string]any)
+		modelsMap := fakProvider["models"].(map[string]any)
+		if _, ok := modelsMap["another-model"]; !ok {
+			t.Errorf("modelsMap missing another-model")
+		}
+	})
+
+	t.Run("explicit modelID preserves command model in models map", func(t *testing.T) {
+		command := []string{"opencode", "-m", "my-custom-model"}
+		injected, install := installGuardOpenCodeConfig(command, "http://127.0.0.1:54321", "primary-model", nil)
+		if !install.Applied {
+			t.Fatalf("install.Applied = false, want true")
+		}
+		if install.Model != "fak/primary-model" {
+			t.Errorf("install.Model = %q, want %q", install.Model, "fak/primary-model")
+		}
+
+		var config map[string]any
+		for _, pair := range injected {
+			if pair[0] == "OPENCODE_CONFIG_CONTENT" {
+				_ = json.Unmarshal([]byte(pair[1]), &config)
+			}
+		}
+		providerMap := config["provider"].(map[string]any)
+		fakProvider := providerMap["fak"].(map[string]any)
+		modelsMap := fakProvider["models"].(map[string]any)
+		if _, ok := modelsMap["primary-model"]; !ok {
+			t.Errorf("modelsMap missing primary-model")
+		}
+		if _, ok := modelsMap["my-custom-model"]; !ok {
+			t.Errorf("modelsMap missing my-custom-model from command args")
+		}
+	})
+}
+
+func TestGuardOpenCodeNonOpencodeIgnored(t *testing.T) {
+	cases := []struct {
+		name    string
+		command []string
+	}{
+		{"claude", []string{"claude"}},
+		{"bash", []string{"bash"}},
+		{"empty", []string{}},
+		{"other binary", []string{"python", "script.py"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			injected, install := installGuardOpenCodeConfig(tc.command, "http://127.0.0.1:54321", "qwen38", nil)
+			if install.Applied {
+				t.Errorf("%s: install.Applied = true, want false", tc.name)
+			}
+			if install.Reason != "non-opencode-child" {
+				t.Errorf("%s: install.Reason = %q, want %q", tc.name, install.Reason, "non-opencode-child")
+			}
+			if len(injected) != 0 {
+				t.Errorf("%s: expected no injected env, got %v", tc.name, injected)
+			}
+		})
+	}
+}
+
+func TestGuardOpenCodeSafetyRootSettingsUntouched(t *testing.T) {
+	mockHome := t.TempDir()
+	t.Setenv("HOME", mockHome)
+	t.Setenv("USERPROFILE", mockHome)
+
+	workDir := t.TempDir()
+	t.Chdir(workDir)
+
+	// Pre-create ~/.config/opencode/opencode.json with sentinel content
+	userConfigDir := filepath.Join(mockHome, ".config", "opencode")
+	if err := os.MkdirAll(userConfigDir, 0755); err != nil {
+		t.Fatalf("mkdir userConfigDir: %v", err)
+	}
+	userConfigFile := filepath.Join(userConfigDir, "opencode.json")
+	sentinelUserContent := []byte(`{"sentinel": "user-level"}`)
+	if err := os.WriteFile(userConfigFile, sentinelUserContent, 0644); err != nil {
+		t.Fatalf("write userConfigFile: %v", err)
+	}
+	userStatBefore, err := os.Stat(userConfigFile)
+	if err != nil {
+		t.Fatalf("stat userConfigFile: %v", err)
+	}
+
+	// Pre-create ./opencode.json with sentinel content in working directory
+	workspaceConfigFile := filepath.Join(workDir, "opencode.json")
+	sentinelWorkContent := []byte(`{"sentinel": "workspace-level"}`)
+	if err := os.WriteFile(workspaceConfigFile, sentinelWorkContent, 0644); err != nil {
+		t.Fatalf("write workspaceConfigFile: %v", err)
+	}
+	workStatBefore, err := os.Stat(workspaceConfigFile)
+	if err != nil {
+		t.Fatalf("stat workspaceConfigFile: %v", err)
+	}
+
+	// Call installGuardOpenCodeConfig
+	injected, install := installGuardOpenCodeConfig([]string{"opencode"}, "http://127.0.0.1:54321", "qwen38", nil)
+	if !install.Applied {
+		t.Fatalf("install.Applied = false, want true")
+	}
+	if len(injected) == 0 {
+		t.Fatalf("expected injected env pairs")
+	}
+
+	// Verify user config file was NOT touched or modified
+	userStatAfter, err := os.Stat(userConfigFile)
+	if err != nil {
+		t.Fatalf("userConfigFile stat after: %v", err)
+	}
+	if userStatAfter.ModTime() != userStatBefore.ModTime() || userStatAfter.Size() != userStatBefore.Size() {
+		t.Errorf("userConfigFile modtime or size changed: was %v / %d, now %v / %d",
+			userStatBefore.ModTime(), userStatBefore.Size(), userStatAfter.ModTime(), userStatAfter.Size())
+	}
+	userContentAfter, err := os.ReadFile(userConfigFile)
+	if err != nil {
+		t.Fatalf("read userConfigFile after: %v", err)
+	}
+	if string(userContentAfter) != string(sentinelUserContent) {
+		t.Errorf("userConfigFile content modified: got %s, want %s", userContentAfter, sentinelUserContent)
+	}
+
+	// Verify workspace config file was NOT touched or modified
+	workStatAfter, err := os.Stat(workspaceConfigFile)
+	if err != nil {
+		t.Fatalf("workspaceConfigFile stat after: %v", err)
+	}
+	if workStatAfter.ModTime() != workStatBefore.ModTime() || workStatAfter.Size() != workStatBefore.Size() {
+		t.Errorf("workspaceConfigFile modtime or size changed: was %v / %d, now %v / %d",
+			workStatBefore.ModTime(), workStatBefore.Size(), workStatAfter.ModTime(), workStatAfter.Size())
+	}
+	workContentAfter, err := os.ReadFile(workspaceConfigFile)
+	if err != nil {
+		t.Fatalf("read workspaceConfigFile after: %v", err)
+	}
+	if string(workContentAfter) != string(sentinelWorkContent) {
+		t.Errorf("workspaceConfigFile content modified: got %s, want %s", workContentAfter, sentinelWorkContent)
+	}
+
+	// Also test the clean-slate case: files do not exist before call -> must not be created
+	cleanHome := t.TempDir()
+	cleanWorkDir := t.TempDir()
+	t.Setenv("HOME", cleanHome)
+	t.Setenv("USERPROFILE", cleanHome)
+	t.Chdir(cleanWorkDir)
+
+	_, installClean := installGuardOpenCodeConfig([]string{"opencode"}, "http://127.0.0.1:54321", "qwen38", nil)
+	if !installClean.Applied {
+		t.Fatalf("installClean.Applied = false, want true")
+	}
+
+	if _, err := os.Stat(filepath.Join(cleanHome, ".config", "opencode", "opencode.json")); !os.IsNotExist(err) {
+		t.Errorf("expected ~/.config/opencode/opencode.json to not exist, got err: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cleanWorkDir, "opencode.json")); !os.IsNotExist(err) {
+		t.Errorf("expected ./opencode.json to not exist, got err: %v", err)
 	}
 }

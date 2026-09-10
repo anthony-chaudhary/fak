@@ -60,7 +60,7 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 	verbFlagUsage(fs, "opencode")
 	dryRun := fs.Bool("dry-run", false, "print the guarded OpenCode command and exit without launching")
 	probePrompt := fs.String("probe", "", "run a single headless probe turn with this prompt and exit")
-	skipPermissions := fs.Bool("skip-permissions", true, "pass --dangerously-skip-permissions to opencode child when running unattended")
+	skipPermissions := fs.Bool("skip-permissions", true, "pass --auto to the OpenCode child when running unattended")
 	pure := fs.Bool("pure", false, "pass --pure to opencode child to prevent reading untracked global state")
 	auto := fs.Bool("auto", false, "pass --auto to opencode child for non-interactive execution")
 	splitMode := fs.String("split", "auto", "open the 20% fak-info pane when possible: auto|on|off")
@@ -110,6 +110,9 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 		if os.Getenv("OPENAI_API_KEY") == "" {
 			if base, modelID, label, found := guardDetectLocalBackend(); found {
 				*localAuto = true
+				if *model == "" {
+					*model = modelID
+				}
 				if !*quiet {
 					fmt.Fprintf(stderr, "fak opencode: auto-connected to local %s at %s (model: %s) (one-touch)\n", label, base, modelID)
 				}
@@ -117,6 +120,9 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 				// On Apple Silicon macOS, if no local server is running and no API key is set, assume gguf default with Metal!
 				if runtime.GOOS == "darwin" {
 					*ggufPath = "default"
+					if *model == "" {
+						*model = "qwen38:27b"
+					}
 					if runtime.GOARCH == "arm64" {
 						*gpuBackend = "metal"
 						*metal = true
@@ -234,14 +240,11 @@ func buildOpencodeLaunchArgv(fakBin string, o opencodeLaunchOptions) []string {
 	argv = append(argv, "--", "opencode")
 	if o.probePrompt != "" {
 		argv = append(argv, "run", o.probePrompt, "--format", "json")
-		if o.auto || o.probePrompt != "" {
+		if o.auto || o.skipPermissions {
 			argv = append(argv, "--auto")
 		}
 		if o.pure {
 			argv = append(argv, "--pure")
-		}
-		if o.skipPermissions {
-			argv = append(argv, "--dangerously-skip-permissions")
 		}
 	}
 	return append(argv, o.passthrough...)

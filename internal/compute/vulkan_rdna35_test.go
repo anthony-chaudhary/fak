@@ -1069,11 +1069,11 @@ func TestRDNA35_MicroArchitecturalOptimizations(t *testing.T) {
 }
 
 // TestQ8MatMulAndAttentionLDSPad2 verifies Acceptance Criteria 1, 2, and 3 for Issue #611:
-// 1. [SW-VERIFIED] internal/compute/shaders/q8_matmul.comp implements Pad-2 stride alignment (+2 elements per 32-element row) for shared activation buffers.
+// 1. [SW-VERIFIED] internal/compute/shaders/q8_matmul.comp uses a valid 16-byte-aligned cooperative int8 matrix stride.
 // 2. [SW-VERIFIED] internal/compute/shaders/attention.comp implements Pad-2 stride alignment for shared reduction arrays.
-// 3. [SW-VERIFIED] Bank conflict elimination reduces max conflict depth from 32-way to 2-way and preserves cosine >= 0.999 parity.
+// 3. [SW-VERIFIED] The synthetic float-row Pad-2 bank model reduces max conflict depth from 32-way to 2-way, and the Q8 arithmetic simulation preserves cosine >= 0.999 parity.
 func TestQ8MatMulAndAttentionLDSPad2(t *testing.T) {
-	// 1. Verify q8_matmul.comp contains Pad-2 stride alignment tokens
+	// 1. Verify q8_matmul.comp uses a cooperative-matrix-valid aligned stride.
 	q8PathCandidates := []string{
 		filepath.Join("shaders", "q8_matmul.comp"),
 		filepath.Join("internal", "compute", "shaders", "q8_matmul.comp"),
@@ -1091,8 +1091,8 @@ func TestQ8MatMulAndAttentionLDSPad2(t *testing.T) {
 	}
 
 	q8RequiredTokens := []string{
-		"const uint LDS_PAD_2 = 2u;",
-		"const uint STRIDE_K = BLOCK + LDS_PAD_2;",
+		"const uint LDS_PAD_16 = 16u;",
+		"const uint STRIDE_K = BLOCK + LDS_PAD_16;",
 		"shared int8_t  ldsXq[TILE_M * STRIDE_K];",
 		"shared float   ldsX_f32[TILE_M * STRIDE_K];",
 		"ldsX_f32[r * STRIDE_K + c] = val;",
@@ -1103,8 +1103,11 @@ func TestQ8MatMulAndAttentionLDSPad2(t *testing.T) {
 	}
 	for _, tok := range q8RequiredTokens {
 		if !strings.Contains(q8Content, tok) {
-			t.Errorf("q8_matmul.comp missing required Pad-2 stride token: %q", tok)
+			t.Errorf("q8_matmul.comp missing required aligned cooperative stride token: %q", tok)
 		}
+	}
+	if strings.Contains(q8Content, "const uint LDS_PAD_2 = 2u;") {
+		t.Error("q8_matmul.comp retains invalid 34-byte cooperative int8 matrix stride")
 	}
 
 	// 2. Verify attention.comp contains Pad-2 stride alignment tokens
@@ -1138,7 +1141,7 @@ func TestQ8MatMulAndAttentionLDSPad2(t *testing.T) {
 		}
 	}
 
-	// 3. Verify LDS bank conflict elimination:
+	// 3. Verify the synthetic float-row Pad-2 bank model used by attention:
 	// Unpadded 32-element row stride causes all 32 lanes in Wave32 to collide on a single bank (32-way conflict).
 	// Pad-2 stride (34 elements) spreads lanes across 16 banks with max conflict depth 2 (no 8-way/16-way stalls).
 	unpaddedReport := AnalyzeLDSBankConflicts(32, false)
@@ -1160,7 +1163,7 @@ func TestQ8MatMulAndAttentionLDSPad2(t *testing.T) {
 		t.Errorf("padded MaxConflictDepth = %d >= 8 (8-bank conflict stalls not eliminated)", paddedReport.MaxConflictDepth)
 	}
 
-	// 4. Parity verification: simulated 2D block-tiled Wave32 cooperative matrix GEMM with Pad-2 stride
+	// 4. Verify Q8 GEMM arithmetic independently of physical cooperative-load alignment.
 	outDim, inDim, P := 64, 64, 16
 	rng := rand.New(rand.NewSource(611))
 	nblk := inDim / 32
@@ -1199,5 +1202,5 @@ func TestQ8MatMulAndAttentionLDSPad2(t *testing.T) {
 	if cosSim < 0.999 {
 		t.Fatalf("simulated Pad-2 Q8 GEMM cosine = %.8f, want >= 0.999", cosSim)
 	}
-	t.Logf("LDS Pad-2 stride alignment verified: Q8 cosine=%.8f (gate >= 0.999)", cosSim)
+	t.Logf("Q8 source uses a valid 48-byte cooperative stride; simulated arithmetic cosine=%.8f (gate >= 0.999)", cosSim)
 }

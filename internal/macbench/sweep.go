@@ -216,9 +216,8 @@ func CollectHardware(ctx context.Context, runner CommandRunner) SweepHardware {
 		runner = DefaultCommandRunner
 	}
 	hw := SweepHardware{
-		SoCModel:           "Apple Silicon",
-		UnifiedMemoryBytes: 38654705664, // 36 GiB default
-		ThermalState:       "NOMINAL",
+		SoCModel:     "Apple Silicon",
+		ThermalState: "UNKNOWN",
 	}
 
 	// 1. SoC Model via sysctl
@@ -261,20 +260,31 @@ func CollectHardware(ctx context.Context, runner CommandRunner) SweepHardware {
 
 func parseThermalState(out string) string {
 	lower := strings.ToLower(out)
-	if strings.Contains(lower, "no thermal warning level has been recorded") {
-		return "NOMINAL"
-	}
+	noWarningRecorded := strings.Contains(lower, "no thermal warning level has been recorded")
 	level := 0
+	observedLevel := false
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.Contains(line, "CPU_Thermal_Level") || strings.Contains(line, "GPU_Thermal_Level") || strings.Contains(line, "Thermal warning level") {
-			parts := strings.Split(line, "=")
-			if len(parts) >= 2 {
-				if v, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil && v > level {
-					level = v
-				}
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) != 2 {
+				return "UNKNOWN"
+			}
+			v, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+			if err != nil || v < 0 {
+				return "UNKNOWN"
+			}
+			observedLevel = true
+			if v > level {
+				level = v
 			}
 		}
+	}
+	if !observedLevel {
+		if noWarningRecorded {
+			return "NOMINAL"
+		}
+		return "UNKNOWN"
 	}
 	switch {
 	case level == 0:
@@ -286,7 +296,7 @@ func parseThermalState(out string) string {
 	case level >= 3:
 		return "CRITICAL"
 	default:
-		return "NOMINAL"
+		return "UNKNOWN"
 	}
 }
 
@@ -791,7 +801,8 @@ func ValidateSweepReport(r SweepReport) error {
 	require(strings.TrimSpace(r.Hardware.SoCModel) != "", "hardware.soc_model", "must not be empty")
 	require(r.Hardware.GPUCores > 0, "hardware.gpu_cores", "must be positive")
 	require(r.Hardware.UnifiedMemoryBytes > 0, "hardware.unified_memory_bytes", "must be positive")
-	require(strings.TrimSpace(r.Hardware.ThermalState) != "", "hardware.thermal_state", "must not be empty")
+	thermalState := strings.TrimSpace(r.Hardware.ThermalState)
+	require(thermalState == "NOMINAL" || thermalState == "FAIR" || thermalState == "SERIOUS" || thermalState == "CRITICAL", "hardware.thermal_state", "must be a known state")
 
 	require(len(r.DecodeLengths) > 0, "decode_lengths", "must not be empty")
 	require(len(r.PrefillLengths) > 0, "prefill_lengths", "must not be empty")

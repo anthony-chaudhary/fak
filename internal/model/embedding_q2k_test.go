@@ -2,6 +2,7 @@ package model
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -15,6 +16,81 @@ func makeTestQ2KPayload(vocab, hidden int) []byte {
 	}
 	pinResidentQuantScales(raw, vocab, nblk, kindQ2K)
 	return raw
+}
+
+func TestQ4KEmbeddingMiddleRowMatchesIndependentValues(t *testing.T) {
+	const vocab, hidden = 3, 5120
+	raw := make([]byte, vocab*(hidden/qkK)*q4kBlockBytes)
+	rowBytes := (hidden / qkK) * q4kBlockBytes
+	blk := raw[rowBytes : rowBytes+q4kBlockBytes]
+	copy(blk[:4], []byte{0x00, 0x38, 0x00, 0x34}) // d=0.5, dmin=0.25
+	copy(blk[4:16], []byte{0x41, 0x42, 0x83, 0xc4, 0x45, 0x86, 0x87, 0xc8, 0x51, 0x62, 0x73, 0x84})
+	for group := 0; group < 4; group++ {
+		for lane := 0; lane < 32; lane++ {
+			low := byte(lane % 16)
+			blk[16+group*32+lane] = low | (15-low)<<4
+		}
+	}
+
+	embed, err := NewQ4KEmbedding(raw, vocab, hidden)
+	if err != nil {
+		t.Fatalf("NewQ4KEmbedding: %v", err)
+	}
+	if embed.Format() != "Q4_K" || embed.Bytes() != len(raw) {
+		t.Fatalf("format/bytes = %q/%d, want Q4_K/%d", embed.Format(), embed.Bytes(), len(raw))
+	}
+	raw[rowBytes] ^= 0xff // constructor owns its packed backing
+	got := make([]float32, hidden)
+	if err := embed.GatherRow(1, got, 1); err != nil {
+		t.Fatal(err)
+	}
+	wantStart := []float32{-1.25, 13.5, -1.75, 28, -5.25, 125.5, -9.75, 376}
+	wantLane15 := []float32{6.25, -1.5, 20.75, -2, 122.25, -9.5, 252.75, -14}
+	for sub := range wantStart {
+		for _, check := range []struct {
+			lane int
+			want float32
+		}{{0, wantStart[sub]}, {15, wantLane15[sub]}} {
+			idx := sub*32 + check.lane
+			if got[idx] != check.want {
+				t.Fatalf("middle row subblock %d lane %d = %v, want %v", sub, check.lane, got[idx], check.want)
+			}
+		}
+	}
+	for i, value := range got[qkK:] {
+		if value != 0 {
+			t.Fatalf("middle row later block value[%d] = %v, want 0", i+qkK, value)
+		}
+	}
+	rows, err := embed.GatherRows([]int{1, 1}, 1)
+	if err != nil || len(rows) != 2*hidden || maxAbsDelta(rows[:hidden], rows[hidden:]) != 0 {
+		t.Fatalf("repeated middle gather len=%d err=%v", len(rows), err)
+	}
+	if err := embed.GatherRow(-1, got, 1); err == nil {
+		t.Fatal("negative token ID succeeded")
+	}
+	if err := embed.GatherRow(vocab, got, 1); err == nil {
+		t.Fatal("past-end token ID succeeded")
+	}
+	if err := embed.GatherRow(1, got[:hidden-1], 1); err == nil {
+		t.Fatal("short destination succeeded")
+	}
+	m := &Model{
+		manifest:     map[string]tensorMeta{},
+		q8w:          map[string]*q8Tensor{},
+		q4kw:         map[string]*q4kTensor{},
+		kqw:          map[string]*kQuantTensor{},
+		Q2KEmbedding: embed,
+	}
+	report := m.ResidentReport()
+	if report.Q4KEmbedTensors != 1 || report.Q4KEmbedBytes != int64(len(raw)) ||
+		report.Q4KEmbedParams != int64(vocab*hidden) || report.Q2KEmbedTensors != 0 ||
+		report.TotalResidentBytes != int64(len(raw)) || report.DecodeBytesPerToken != 0 {
+		t.Fatalf("Q4_K resident report = %+v", report)
+	}
+	if rendered := FormatResidentReport(report); !strings.Contains(rendered, "Q4_K_embed=1/") {
+		t.Fatalf("resident report does not identify Q4_K embedding: %s", rendered)
+	}
 }
 
 func TestQ2KEmbeddingGatherRowMatchesScalarRef(t *testing.T) {

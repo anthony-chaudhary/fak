@@ -290,6 +290,79 @@ func TestCollectHardwareDiscoversAppleGPUCores(t *testing.T) {
 	}
 }
 
+func TestCollectHardwarePreservesUnknownTelemetry(t *testing.T) {
+	tests := []struct {
+		name        string
+		memory      string
+		thermal     string
+		memoryErr   bool
+		thermalErr  bool
+		wantMemory  uint64
+		wantThermal string
+	}{
+		{
+			name:        "observed_m3",
+			memory:      "38654705664\n",
+			thermal:     "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded\n",
+			wantMemory:  38654705664,
+			wantThermal: "NOMINAL",
+		},
+		{
+			name:        "unavailable_is_unknown",
+			memoryErr:   true,
+			thermalErr:  true,
+			wantThermal: "UNKNOWN",
+		},
+		{
+			name:        "malformed_is_unknown",
+			memory:      "not-a-number\n",
+			thermal:     "CPU_Thermal_Level = hot\n",
+			wantThermal: "UNKNOWN",
+		},
+		{
+			name:        "no_warning_does_not_hide_serious_level",
+			memory:      "38654705664\n",
+			thermal:     "Note: No thermal warning level has been recorded\nCPU_Thermal_Level = 2\n",
+			wantMemory:  38654705664,
+			wantThermal: "SERIOUS",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := func(_ context.Context, name string, args ...string) ([]byte, error) {
+				full := name + " " + strings.Join(args, " ")
+				switch {
+				case strings.Contains(full, "sysctl -n machdep.cpu.brand_string"):
+					return []byte("Apple M3 Pro\n"), nil
+				case strings.Contains(full, "sysctl -n hw.memsize"):
+					if tc.memoryErr {
+						return nil, fmt.Errorf("memory telemetry unavailable")
+					}
+					return []byte(tc.memory), nil
+				case strings.Contains(full, "pmset -g therm"):
+					if tc.thermalErr {
+						return nil, fmt.Errorf("thermal telemetry unavailable")
+					}
+					return []byte(tc.thermal), nil
+				case strings.Contains(full, "system_profiler SPDisplaysDataType -json"):
+					return []byte(`{"SPDisplaysDataType":[{"spdisplays_vendor":"sppci_vendor_Apple","sppci_bus":"spdisplays_builtin","sppci_cores":"18","sppci_device_type":"spdisplays_gpu"}]}`), nil
+				default:
+					return nil, fmt.Errorf("unexpected command: %s", full)
+				}
+			}
+
+			hw := CollectHardware(context.Background(), runner)
+			if hw.UnifiedMemoryBytes != tc.wantMemory {
+				t.Errorf("UnifiedMemoryBytes=%d, want %d", hw.UnifiedMemoryBytes, tc.wantMemory)
+			}
+			if hw.ThermalState != tc.wantThermal {
+				t.Errorf("ThermalState=%q, want %q", hw.ThermalState, tc.wantThermal)
+			}
+		})
+	}
+}
+
 func TestValidateSweepReport_FailsClosed(t *testing.T) {
 	valid := SweepReport{
 		Schema:      SweepSchema,
@@ -340,6 +413,7 @@ func TestValidateSweepReport_FailsClosed(t *testing.T) {
 		{"zero_gpu_cores", func(r *SweepReport) { r.Hardware.GPUCores = 0 }},
 		{"zero_memory", func(r *SweepReport) { r.Hardware.UnifiedMemoryBytes = 0 }},
 		{"empty_thermal", func(r *SweepReport) { r.Hardware.ThermalState = "" }},
+		{"unknown_thermal", func(r *SweepReport) { r.Hardware.ThermalState = "UNKNOWN" }},
 		{"missing_decode_length", func(r *SweepReport) { r.DecodeLengths = []int{16, 32} }},
 		{"missing_prefill_length", func(r *SweepReport) { r.PrefillLengths = []int{128} }},
 		{"empty_measurements", func(r *SweepReport) { r.Measurements = nil }},

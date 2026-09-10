@@ -25,8 +25,9 @@ type AdmissionSample struct {
 }
 
 // AdmissionSampleFor classifies a parsed host memory reading without rounding.
-// Missing capacity is unknown and high wired/compressed memory is critical so
-// callers can fail closed before invoking a loader.
+// Missing capacity is unknown. A recognized current OS pressure signal takes
+// precedence over persistent occupancy; otherwise high wired/compressed memory
+// remains the conservative fallback before invoking a loader.
 func AdmissionSampleFor(mem Memory) AdmissionSample {
 	s := AdmissionSample{
 		TotalBytes:       mem.TotalBytes,
@@ -39,6 +40,10 @@ func AdmissionSampleFor(mem Memory) AdmissionSample {
 		s.Pressure = PressureUnknown
 		return s
 	}
+	if pressure, ok := observedPressure(mem); ok {
+		s.Pressure = pressure
+		return s
+	}
 	wired := float64(mem.WiredBytes) / float64(mem.TotalBytes)
 	compressed := float64(mem.CompressedBytes) / float64(mem.TotalBytes)
 	switch {
@@ -48,4 +53,19 @@ func AdmissionSampleFor(mem Memory) AdmissionSample {
 		s.Pressure = PressureWarning
 	}
 	return s
+}
+
+// observedPressure returns only recognized, current OS pressure observations.
+// Keeping the known bit separate means a zero-value Memory never masquerades as
+// a healthy host and callers can retain their established fallback behavior.
+func observedPressure(mem Memory) (Pressure, bool) {
+	if !mem.PressureKnown {
+		return PressureUnknown, false
+	}
+	switch mem.Pressure {
+	case PressureNormal, PressureWarning, PressureCritical:
+		return mem.Pressure, true
+	default:
+		return PressureUnknown, false
+	}
 }
