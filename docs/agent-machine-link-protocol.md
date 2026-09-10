@@ -213,7 +213,7 @@ python3 tools/fleet_agent_link.py request agent.info
 python3 tools/fleet_agent_link.py call-local agent.ping
 python3 tools/fleet_agent_link.py remote-command \
   --cwd /path/to/fleet-laptop-proof \
-  --shell bash
+  --shell posix
 python3 tools/fleet_agent_link.py a2a-card \
   --url https://fleet.example.com/a2a \
   --scope read
