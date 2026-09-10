@@ -84,7 +84,7 @@ usage:
 
   fak webbench serving --dataset FILE [--tracks ours,sglang,vllm,fak-fronts-fleet]
         [--endpoints track=http://host/v1,...] [--metrics track=http://host/metrics,...]
-        [--model MODEL] [--agents 100] [--concurrency 16]
+        [--model MODEL] [--project-arm NAME] [--agents 100] [--concurrency 16]
         [--concurrencies 1,2,4,8 --batch-capacities track=N,...]
         [--engines track=ENGINE,... --engine-receipts track=sha256:DIGEST,...]
         [--capacity-sources track=SOURCE,...] [--out FILE]
@@ -364,6 +364,7 @@ func cmdWebbenchServing(argv []string) {
 	itlP99BudgetMS := fs.Int("itl-p99-budget-ms", 0, "optional sweep ITL p99 budget; 0 emits no SLA-knee claim for ITL")
 	timeoutSec := fs.Int("timeout-sec", 60, "per-request timeout in seconds")
 	apiKeyEnv := fs.String("api-key-env", "", "optional env var containing a bearer token for all endpoints")
+	projectArm := fs.String("project-arm", "", "optional project arm sent as X-Fak-Project-Arm on every inference request")
 	replicas := fs.Int("replicas", 1, "replica count described by the fak-fronts-fleet plan script")
 	sharedPrefix := fs.String("shared-prefix", "", "override the shared prefix used across all requests")
 	out := fs.String("out", "", "write artifact JSON here (default: by-machine dated run dir)")
@@ -414,6 +415,7 @@ func cmdWebbenchServing(argv []string) {
 			MetricsURL: metrics[tr],
 			Model:      *model,
 			APIKeyEnv:  *apiKeyEnv,
+			ProjectArm: *projectArm,
 			Replicas:   *replicas,
 		})
 	}
