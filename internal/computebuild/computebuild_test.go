@@ -16,8 +16,8 @@ import (
 )
 
 func TestVulkanShadersCompleteness(t *testing.T) {
-	if len(VulkanShaders) != 43 {
-		t.Fatalf("expected 43 Vulkan shaders, got %d", len(VulkanShaders))
+	if len(VulkanShaders) != 45 {
+		t.Fatalf("expected 45 Vulkan shaders, got %d", len(VulkanShaders))
 	}
 
 	seen := make(map[string]bool)
@@ -42,6 +42,7 @@ func TestVulkanShadersCompleteness(t *testing.T) {
 		"glm_kda_recurrent_reread", "glm_kda_recurrent_wave32",
 		"flash_attn_dequant", "qwen35_gdn_tiled_transpose", "coopmat_wave32_wmma",
 		"rmsnorm_q4k_matmul2", "swiglu_q4k_matmul_add",
+		"qwen35_gdn_prefill_tiled", "qwen35_gdn_prefill_norm",
 	}
 
 	for i, exp := range expectedShaders {

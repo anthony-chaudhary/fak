@@ -1,0 +1,65 @@
+#version 450
+
+// Final whole-head normalization pass for qwen35_gdn_prefill_tiled.comp.
+//
+// Binding numbers and push constants match qwen35_gdn_recurrent.comp so the
+// integration can reuse its descriptor layout. Binding 0 is the temporary raw
+// readout produced by the tiled recurrence; bindings 1, 6, and 8 retain their
+// original Z, Norm, and Core meanings.
+//
+// Dispatch: nV x tokens x 1. One 128-thread workgroup owns one
+// (token,value-head) row. Lane zero sums in ascending dimension order, matching
+// the original shader's RMS accumulation order.
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer Readout { float readout[]; };
+layout(std430, set = 0, binding = 1) readonly buffer Z       { float z[]; };
+layout(std430, set = 0, binding = 2) readonly buffer B       { float beta[]; };
+layout(std430, set = 0, binding = 3) readonly buffer A       { float alpha[]; };
+layout(std430, set = 0, binding = 4) readonly buffer ALog    { float aLog[]; };
+layout(std430, set = 0, binding = 5) readonly buffer DTBias  { float dtBias[]; };
+layout(std430, set = 0, binding = 6) readonly buffer Norm    { float norm[]; };
+layout(std430, set = 0, binding = 7) readonly buffer State   { float state[]; };
+layout(std430, set = 0, binding = 8) writeonly buffer Core   { float core[]; };
+
+layout(push_constant) uniform PC {
+    int tokens;
+    int convDim;
+    int nK;
+    int nV;
+    int kHd;
+    int vHd;
+    float eps;
+} pc;
+
+shared float row[128];
+shared float rmsInv;
+
+float silu(float x) {
+    return x / (1.0 + exp(-x));
+}
+
+void main() {
+    int d = int(gl_LocalInvocationID.x);
+    int h = int(gl_WorkGroupID.x);
+    int t = int(gl_WorkGroupID.y);
+    if (h >= pc.nV || t >= pc.tokens || pc.vHd != 128) {
+        return;
+    }
+
+    int base = t * pc.nV * pc.vHd + h * pc.vHd;
+    float value = readout[base + d];
+    row[d] = value;
+    barrier();
+
+    if (d == 0) {
+        float sum = 0.0;
+        for (int i = 0; i < 128; ++i) {
+            sum += row[i] * row[i];
+        }
+        rmsInv = inversesqrt(sum / 128.0 + pc.eps);
+    }
+    barrier();
+
+    core[base + d] = norm[d] * (value * rmsInv) * silu(z[base + d]);
+}

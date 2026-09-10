@@ -241,7 +241,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q6K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q6K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -267,6 +267,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_ARGMAX: case K_ARGMAX_PAIRS:
         return g_dp.otherArgmax;
     case K_QWEN35_GDN_Q8_IN_PROJ: case K_QWEN35_GDN_CONV: case K_QWEN35_GDN_RECURRENT:
+    case K_QWEN35_GDN_PREFILL_TILED: case K_QWEN35_GDN_PREFILL_NORM:
     case K_GLM_KDA_REREAD: case K_GLM_KDA_WAVE32:
         return g_dp.otherGDN;
     case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_COUNT:
@@ -320,6 +321,14 @@ int g_have_glm_kda_wave32 = 0;
 // Wave32 cooperative Q4_K decode kernel (subgroup arithmetic + effective/required subgroup size 32).
 int g_have_q4k_wave32 = 0;
 bool g_q4k_wave32_required_subgroup = false;
+// Optional, default-off recurrent prefill variant. All access is serialized by
+// the Go Vulkan mutex, including debug mode/counter operations.
+int g_have_gdn_prefill_tiled = 0;
+bool g_gdn_prefill_required_subgroup = false;
+uint32_t g_gdn_prefill_max_groups_y = 0;
+int g_gdn_prefill_mode = -1;
+uint64_t g_gdn_prefill_tiled_calls = 0;
+uint64_t g_gdn_prefill_scalar_calls = 0;
 int g_have_coopmat = 0;
 // Portable packed Q6_K is optional so older SPIR-V bundles remain loadable.
 int g_have_q6k_matmul = 0;
@@ -729,6 +738,7 @@ size_t scratchCapacity(size_t bytes) {
 }
 
 Buffer*                       g_gdn_conv_out = nullptr;
+Buffer*                       g_gdn_prefill_readout = nullptr;
 
 struct PartialRoPECacheEntry {
     uint32_t thetaBits = 0;
@@ -874,10 +884,37 @@ Buffer* gdnConvOutScratch(size_t bytes) {
     return g_gdn_conv_out;
 }
 
+// Keep one grow-only readout allocation across layers and calls. Flush before
+// replacing a buffer referenced by recorded commands, then resume recording.
+Buffer* gdnPrefillReadoutScratch(size_t bytes) {
+    if (bytes == 0 || (g_maxBufferBytes > 0 && bytes > g_maxBufferBytes)) return nullptr;
+    if (g_gdn_prefill_readout && g_gdn_prefill_readout->bytes >= bytes) return g_gdn_prefill_readout;
+    const bool resumeBatch = g_batching;
+    if (g_gdn_prefill_readout) {
+        if (resumeBatch) batchFlush();
+        destroyBuffer(g_gdn_prefill_readout);
+        g_gdn_prefill_readout = nullptr;
+        clearDescriptorBindingCache();
+    }
+    size_t cap = scratchCapacity(bytes);
+    if (g_maxBufferBytes > 0 && cap > g_maxBufferBytes) cap = bytes;
+    g_gdn_prefill_readout = allocBuffer(cap, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, STORAGE_USAGE);
+    if (!g_gdn_prefill_readout && cap != bytes) {
+        g_gdn_prefill_readout = allocBuffer(bytes, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, STORAGE_USAGE);
+    }
+    if (resumeBatch && !g_batching) batchBegin();
+    return g_gdn_prefill_readout;
+}
+
 void freeGdnScratch() {
     if (g_gdn_conv_out) {
         destroyBuffer(g_gdn_conv_out);
         g_gdn_conv_out = nullptr;
+        clearDescriptorBindingCache();
+    }
+    if (g_gdn_prefill_readout) {
+        destroyBuffer(g_gdn_prefill_readout);
+        g_gdn_prefill_readout = nullptr;
         clearDescriptorBindingCache();
     }
 }
@@ -1150,21 +1187,21 @@ void recycleDescriptorSet(DescriptorSetRecord rec) {
 }
 
 // dispatch: bind `bufs` (nbuf of them) + push constants, run groupsX*groupsY workgroups.
-void dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX, uint32_t groupsY = 1) {
+bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX, uint32_t groupsY = 1) {
     if (k.nbuf > MAX_DISPATCH_BUFS) {
         fprintf(stderr, "fak-vulkan: dispatch skipped; kernel has %d buffers, max %d\n",
                 k.nbuf, MAX_DISPATCH_BUFS);
-        return;
+        return false;
     }
     for (int i = 0; i < k.nbuf; ++i) {
         if (!bufs[i]) {
             fprintf(stderr, "fak-vulkan: dispatch skipped; buffer %d is null\n", i);
-            return;
+            return false;
         }
     }
     DescriptorSetRecord rec = acquireDescriptorSet(k);
     if (!rec.set) {
-        return;
+        return false;
     }
     bool sameBindings = rec.nbuf == k.nbuf;
     for (int i = 0; i < k.nbuf; ++i) {
@@ -1204,7 +1241,7 @@ void dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
         vkCmdDispatch(g_batchCmd, groupsX, groupsY, 1);
         g_batchSets.push_back(rec);
         ++g_batchOps;
-        return;
+        return true;
     }
 
     // Unbatched: one-shot submit + fence (the original per-op path).
@@ -1217,6 +1254,7 @@ void dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
     dpOneShot(g_dp.oneShotCompute);
     endSubmitWait(cmd);
     recycleDescriptorSet(rec);
+    return g_submissionStatus == VK_SUCCESS;
 }
 
 inline Buffer* B(const void* h) { return (Buffer*)h; }
@@ -1380,7 +1418,19 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
          (effectiveSubgroup32 || requiredSubgroup32)) ? 1 : 0;
     g_q4k_wave32_required_subgroup = (g_have_q4k_wave32 && requiredSubgroup32);
 
-    bool needSubgroupControl = (g_have_glm_kda_wave32 != 0) || g_q4k_wave32_required_subgroup || (g_have_coopmat != 0);
+    bool haveSubgroupShuffle =
+        (subgroupBasicProps.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0 &&
+        (subgroupBasicProps.supportedOperations & VK_SUBGROUP_FEATURE_SHUFFLE_BIT) != 0;
+    const auto& limits = props2.properties.limits;
+    g_gdn_prefill_max_groups_y = limits.maxComputeWorkGroupCount[1];
+    g_have_gdn_prefill_tiled =
+        (haveSubgroupBasic && haveSubgroupShuffle && (effectiveSubgroup32 || requiredSubgroup32) &&
+         limits.maxComputeWorkGroupInvocations >= 256 && limits.maxComputeWorkGroupSize[0] >= 128 &&
+         limits.maxComputeWorkGroupSize[1] >= 8 && limits.maxComputeSharedMemorySize >= 20864 &&
+         limits.maxComputeWorkGroupCount[0] >= 48 && limits.maxComputeWorkGroupCount[1] >= 48) ? 1 : 0;
+    g_gdn_prefill_required_subgroup = g_have_gdn_prefill_tiled && requiredSubgroup32;
+
+    bool needSubgroupControl = (g_have_glm_kda_wave32 != 0) || g_q4k_wave32_required_subgroup || g_gdn_prefill_required_subgroup || (g_have_coopmat != 0);
     if (needSubgroupControl) {
 #ifdef VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME
         enabledDeviceExts.push_back(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
@@ -1433,7 +1483,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         enabledDeviceExts.clear();
         g_haveMemoryBudget = false;
         g_have_coopmat = 0;
-        needSubgroupControl = (g_have_glm_kda_wave32 != 0) || g_q4k_wave32_required_subgroup;
+        needSubgroupControl = (g_have_glm_kda_wave32 != 0) || g_q4k_wave32_required_subgroup || g_gdn_prefill_required_subgroup;
         if (needSubgroupControl) {
 #ifdef VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME
             enabledDeviceExts.push_back(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
@@ -1496,6 +1546,12 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     ok &= buildKernel(g_kern[K_ARGMAX_PAIRS], P("argmax_pairs.spv"), 3, sizeof(int));
     ok &= buildKernel(g_kern[K_QWEN35_GDN_CONV], P("qwen35_gdn_conv.spv"), 4, 3 * sizeof(int));
     ok &= buildKernel(g_kern[K_QWEN35_GDN_RECURRENT], P("qwen35_gdn_recurrent.spv"), 9, 6 * sizeof(int) + sizeof(float));
+    if (g_have_gdn_prefill_tiled) {
+        const uint32_t subgroup = g_gdn_prefill_required_subgroup ? 32 : 0;
+        const bool tiled = buildKernel(g_kern[K_QWEN35_GDN_PREFILL_TILED], P("qwen35_gdn_prefill_tiled.spv"), 9, 6 * sizeof(int) + sizeof(float), subgroup);
+        const bool norm = buildKernel(g_kern[K_QWEN35_GDN_PREFILL_NORM], P("qwen35_gdn_prefill_norm.spv"), 9, 6 * sizeof(int) + sizeof(float));
+        g_have_gdn_prefill_tiled = tiled && norm;
+    }
     if (g_have_glm_kda_wave32) {
         ok &= buildKernel(g_kern[K_GLM_KDA_REREAD], P("glm_kda_recurrent_reread.spv"), 7, sizeof(int), 32);
         ok &= buildKernel(g_kern[K_GLM_KDA_WAVE32], P("glm_kda_recurrent_wave32.spv"), 7, sizeof(int), 32);
@@ -2326,6 +2382,24 @@ int fvk_argmax_f32(const void* dLogits, int n) {
 
 } // extern "C"
 
+extern "C" int fvk_debug_gdn_prefill_tiled_available(void) {
+    return g_ready && g_have_gdn_prefill_tiled;
+}
+
+extern "C" void fvk_debug_gdn_prefill_tiled_mode(int mode) {
+    g_gdn_prefill_mode = (mode == -1 || mode == 1) ? mode : 0;
+}
+
+extern "C" void fvk_debug_gdn_prefill_tiled_reset(void) {
+    g_gdn_prefill_tiled_calls = 0;
+    g_gdn_prefill_scalar_calls = 0;
+}
+
+extern "C" void fvk_debug_gdn_prefill_tiled_snapshot(uint64_t* tiled, uint64_t* scalar) {
+    if (tiled) *tiled = g_gdn_prefill_tiled_calls;
+    if (scalar) *scalar = g_gdn_prefill_scalar_calls;
+}
+
 extern "C" int fvk_qwen35_gdn_preprojected_f32(
     const void* mixed, const void* z, const void* beta, const void* alpha,
     const void* conv1d, const void* a_log, const void* dt_bias, const void* norm,
@@ -2337,12 +2411,37 @@ extern "C" int fvk_qwen35_gdn_preprojected_f32(
         return 2;
     Buffer* conv_out = gdnConvOutScratch((size_t)tokens * conv_dim * sizeof(float));
     if (!conv_out) return 3;
+    const char* optIn = std::getenv("FAK_VULKAN_GDN_PREFILL_TILED");
+    const bool requested = g_gdn_prefill_mode == 1 ||
+        (g_gdn_prefill_mode == -1 && optIn && optIn[0] == '1' && optIn[1] == '\0');
+    const bool tiled = requested && g_have_gdn_prefill_tiled &&
+        tokens >= 8 && (uint32_t)tokens <= g_gdn_prefill_max_groups_y &&
+        n_k == 16 && n_v == 48 && k_hd == 128 && v_hd == 128 && conv_dim == 10240;
+    Buffer* readout = nullptr;
+    if (tiled) {
+        readout = gdnPrefillReadoutScratch((size_t)tokens * n_v * v_hd * sizeof(float));
+        // Once selected, resource failure is an error, never a silent replay
+        // after a partially updated recurrent or convolution state.
+        if (!readout) return 4;
+    }
     struct ConvPC { int tokens, conv_dim, kernel; } cpc{tokens, conv_dim, kernel};
     Buffer* cbufs[4] = {B((void*)mixed), B((void*)conv1d), B(conv_state), conv_out};
-    dispatch(g_kern[K_QWEN35_GDN_CONV], cbufs, &cpc, sizeof(cpc), (uint32_t)((conv_dim + 63) / 64));
+    if (!dispatch(g_kern[K_QWEN35_GDN_CONV], cbufs, &cpc, sizeof(cpc), (uint32_t)((conv_dim + 63) / 64))) return 5;
     struct RecPC { int tokens, conv_dim, n_k, n_v, k_hd, v_hd; float eps; } rpc{tokens, conv_dim, n_k, n_v, k_hd, v_hd, eps};
     Buffer* rbufs[9] = {conv_out, B((void*)z), B((void*)beta), B((void*)alpha), B((void*)a_log), B((void*)dt_bias), B((void*)norm), B(recurrent_state), B(core)};
-    dispatch(g_kern[K_QWEN35_GDN_RECURRENT], rbufs, &rpc, sizeof(rpc), (uint32_t)n_v);
+    if (tiled) {
+        rbufs[8] = readout;
+        if (!dispatch(g_kern[K_QWEN35_GDN_PREFILL_TILED], rbufs, &rpc, sizeof(rpc), 4, (uint32_t)n_v)) return 6;
+        // dispatch inserts the compute write/read barrier when recording a
+        // batch; one-shot dispatches wait for completion before this pass.
+        rbufs[0] = readout;
+        rbufs[8] = B(core);
+        if (!dispatch(g_kern[K_QWEN35_GDN_PREFILL_NORM], rbufs, &rpc, sizeof(rpc), (uint32_t)n_v, (uint32_t)tokens)) return 7;
+        ++g_gdn_prefill_tiled_calls;
+    } else {
+        if (!dispatch(g_kern[K_QWEN35_GDN_RECURRENT], rbufs, &rpc, sizeof(rpc), (uint32_t)n_v)) return 8;
+        ++g_gdn_prefill_scalar_calls;
+    }
     return 0;
 }
 
