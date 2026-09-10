@@ -384,3 +384,21 @@ func TestOpencodeConfigHaloFlag(t *testing.T) {
 	}
 }
 
+func TestOpencodeLauncherHaloDynamicModel(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("FAK_HALO_HOST", "")
+	t.Setenv("FAK_STRIX_HOST", "")
+	t.Setenv("FAK_HALO_MODEL", "my-custom-qwen-70b")
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"--dry-run", "--split", "off", "--halo"}
+	code := runOpencode(&stdout, &stderr, args)
+	if code != 0 {
+		t.Fatalf("runOpencode --halo returned %d, stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "--model my-custom-qwen-70b") {
+		t.Errorf("expected dynamic model in dry-run stdout: %s", out)
+	}
+}
+

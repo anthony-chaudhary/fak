@@ -4,6 +4,7 @@
   "autoupdate": false,
   "snapshot": false,
   "subagent_depth": 2,
+  "model": "fak/qwen-2.5-coder-32b-instruct",
   "instructions": [
     "AGENTS.md"
   ],

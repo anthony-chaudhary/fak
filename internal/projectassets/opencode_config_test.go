@@ -167,3 +167,39 @@ func TestEnsureOpenCodeProviderConfigWiresHaloFastTier(t *testing.T) {
 	}
 }
 
+func TestResolveDynamicHaloModel(t *testing.T) {
+	t.Run("defaults to main tier qwen when empty", func(t *testing.T) {
+		tmp := t.TempDir()
+		t.Setenv("FAK_HALO_MODEL", "")
+		t.Setenv("FAK_MODEL", "")
+		got := ResolveDynamicHaloModel(tmp)
+		if got != DefaultOpenCodeHaloModelID {
+			t.Errorf("got %q, want %q", got, DefaultOpenCodeHaloModelID)
+		}
+	})
+
+	t.Run("resolves from FAK_HALO_MODEL env", func(t *testing.T) {
+		tmp := t.TempDir()
+		t.Setenv("FAK_HALO_MODEL", "fak/Qwen3.8-27B-UD-Q2_K_XL")
+		t.Setenv("FAK_MODEL", "")
+		got := ResolveDynamicHaloModel(tmp)
+		if got != "Qwen3.8-27B-UD-Q2_K_XL" {
+			t.Errorf("got %q, want %q", got, "Qwen3.8-27B-UD-Q2_K_XL")
+		}
+	})
+
+	t.Run("resolves from opencode.json config", func(t *testing.T) {
+		tmp := t.TempDir()
+		t.Setenv("FAK_HALO_MODEL", "")
+		t.Setenv("FAK_MODEL", "")
+		cfg := `{"model": "fak/qwen-2.5-coder-7b"}`
+		if err := os.WriteFile(filepath.Join(tmp, "opencode.json"), []byte(cfg), 0644); err != nil {
+			t.Fatal(err)
+		}
+		got := ResolveDynamicHaloModel(tmp)
+		if got != "qwen-2.5-coder-7b" {
+			t.Errorf("got %q, want %q", got, "qwen-2.5-coder-7b")
+		}
+	})
+}
+
