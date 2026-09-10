@@ -119,6 +119,8 @@ type qwen35MTPTargetTransaction struct {
 	verifyStarted bool
 	verifiedLive  bool
 	lastLogits    []float32
+	beforeHALStep int
+	beforeHALWarm bool
 }
 
 func beginQwen35MTPTargetTransaction(target *Session, beforeLogits []float32) (*qwen35MTPTargetTransaction, error) {
@@ -132,7 +134,7 @@ func beginQwen35MTPTargetTransaction(target *Session, beforeLogits []float32) (*
 	}
 	tx := &qwen35MTPTargetTransaction{
 		target: target, snapshot: snapshot, beforeLogits: append([]float32(nil), beforeLogits...),
-		step: target.Step,
+		step: target.Step, beforeHALStep: target.halStep, beforeHALWarm: target.halLogitsWarm,
 	}
 	tx.verify = func(draft []int) ([][]float32, TargetVerificationReceipt, error) {
 		if qwen35MTPMetalP4Verify != nil {
@@ -217,6 +219,8 @@ func (tx *qwen35MTPTargetTransaction) Commit(accepted int) (logits []float32, er
 		started := time.Now()
 		logits = tx.lastLogits
 		tx.lastLogits = nil // transfer the independent logits row to the caller
+		tx.target.halStep = tx.beforeHALStep + accepted
+		tx.target.halLogitsWarm = tx.beforeHALWarm || accepted > 0
 		tx.finish()
 		tx.receipt.Accounting.Synchronization = measuredSpeculativeCost(started)
 		tx.receipt.Accounting.Rollback.Measured = true // no rollback required
@@ -224,8 +228,7 @@ func (tx *qwen35MTPTargetTransaction) Commit(accepted int) (logits []float32, er
 	}
 	rollback, err := tx.snapshot.Clone()
 	if err != nil {
-		tx.finish()
-		return nil, fmt.Errorf("model: preserve Qwen3.8 MTP commit rollback: %w", err)
+		return nil, tx.rollbackFailure("preserve commit rollback", err)
 	}
 	if tx.receipt.Path == targetVerificationQwen38Path && tx.receipt.OneOperation {
 		// The cacheless Qwen3.8 whole-sequence operation never mutated the live
@@ -291,6 +294,10 @@ func (tx *qwen35MTPTargetTransaction) restore() error {
 		checkpointErr = tx.checkpoint.Restore()
 	}
 	snapshotErr := tx.snapshot.Restore(tx.target)
+	if snapshotErr == nil {
+		tx.target.halStep = tx.beforeHALStep
+		tx.target.halLogitsWarm = tx.beforeHALWarm
+	}
 	if checkpointErr != nil || snapshotErr != nil {
 		return fmt.Errorf("model: restore Qwen3.8 MTP target transaction: %w", errors.Join(checkpointErr, snapshotErr))
 	}
