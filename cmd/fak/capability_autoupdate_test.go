@@ -232,8 +232,8 @@ func TestCapabilityAutoUpgradeReexecMarkerIsOneGeneration(t *testing.T) {
 }
 
 func TestCapabilityAutoUpgradePathAttestationIsOSAware(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows paths are intentionally case-insensitive")
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		t.Skip("case-insensitive filesystems treat distinct casing as the same file")
 	}
 	dir := t.TempDir()
 	lower := filepath.Join(dir, "fak")
