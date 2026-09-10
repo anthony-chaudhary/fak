@@ -50,6 +50,7 @@ func TestDetectGFX1151_EnvOverride(t *testing.T) {
 
 func TestDetectGFX1151_DeviceName(t *testing.T) {
 	os.Unsetenv("FAK_STRIX_GFX1151_OVERRIDE")
+	tmpDir := t.TempDir()
 
 	cases := []struct {
 		devName string
@@ -65,7 +66,7 @@ func TestDetectGFX1151_DeviceName(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		detected, name, err := DetectGFX1151WithDeviceName("", tc.devName)
+		detected, name, err := DetectGFX1151WithDeviceName(tmpDir, tc.devName)
 		if err != nil {
 			t.Errorf("unexpected error for %q: %v", tc.devName, err)
 		}

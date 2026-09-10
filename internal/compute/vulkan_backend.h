@@ -87,6 +87,9 @@ int fvk_have_q8(void);
 int fvk_have_qwen35_gdn_q8_in_proj(void);
 int fvk_have_glm_kda_wave32(void);
 int fvk_have_cooperative_matrix(void);
+/* Q6_K availability is tied to the optional q6k_matmul SPIR-V module. */
+int fvk_have_q6k_matmul(void);
+uint32_t fvk_max_compute_work_group_count_x(void);
 /* Per-resource storage-buffer cap discovered at init. fvk_max_buffer_bytes is the effective
  * single-buffer ceiling fak must respect: min(maxStorageBufferRange, maxMemoryAllocationSize)
  * when both are known, otherwise the known cap, or 0 when unknown. */
@@ -251,6 +254,8 @@ int fvk_glm_kda_step_f32(
     void* state, const void* q, const void* k, const void* value,
     const void* alpha, const void* beta, void* output, int heads, int variant);
 void fvk_q4k_matmul_f32(const void *dQ4K, const void *dX, void *dY, int out, int in, int P);
+void fvk_q6k_matmul_f32(const void *dQ6K, const void *dX, void *dY,
+                        int out, int in, int P);
 void fvk_rmsnorm_q4k_matmul2_f32(const void *dW0, const void *dW1, const void *dX, const void *dNorm,
                                  void *dY0, void *dY1, int out0, int out1, int in, int P, float eps);
 void fvk_swiglu_q4k_matmul_add_f32(const void *dW, const void *dG, const void *dU,

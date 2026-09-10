@@ -415,61 +415,98 @@ func BenchmarkQwen38GatedDeltaNetStep(b *testing.B) {
 	}
 }
 
-// TestMTPForwardSpeculativeMTP verifies speculative Multi-Token Prediction (K=4)
-// micro-batching on gfx1151 with causal tree mask and O(1) Context MMU rollback.
+// TestMTPForwardSpeculativeMTP verifies that the K=4 compatibility wrapper
+// produces the same greedy tokens and continuation state as ordinary decoding.
 func TestMTPForwardSpeculativeMTP(t *testing.T) {
 	cfg := qwen35HybridTestCfg()
 	m := NewSynthetic(cfg)
 	ctx := context.Background()
 
 	prompt := []int{3, 7, 11, 5}
+	oracle := m.NewSession()
+	oracleLogits := oracle.Prefill(prompt)
+	if len(oracleLogits) != cfg.VocabSize {
+		t.Fatalf("oracle prefill logits = %d, want %d", len(oracleLogits), cfg.VocabSize)
+	}
+	var drafts [4]int
+	for i := range drafts {
+		drafts[i] = argmaxF32(oracleLogits)
+		oracleLogits = oracle.Step(drafts[i])
+	}
+	wantNext := append(drafts[:], argmaxF32(oracleLogits))
+
 	s := m.NewSession()
-	_ = s.Prefill(prompt)
+	boundary := s.Prefill(prompt)
+	s.SetLastLogits(boundary)
 
 	basePos := s.Cache.Len()
 	if basePos != len(prompt) {
 		t.Fatalf("base cache len = %d, want %d", basePos, len(prompt))
 	}
 
-	// 1. Propose 4 draft tokens
-	drafts := [4]int{17, 19, 23, 29}
+	// 1. Verify an ordinary greedy K=4 draft through the compatibility wrapper.
 	accepted, nextTokens, err := ForwardSpeculativeMTP(ctx, s, drafts)
 	if err != nil {
 		t.Fatalf("ForwardSpeculativeMTP failed: %v", err)
 	}
-
-	if accepted < 0 || accepted > 4 {
-		t.Errorf("accepted = %d, want between 0 and 4", accepted)
+	if accepted != len(drafts) {
+		t.Fatalf("accepted = %d, want %d", accepted, len(drafts))
 	}
-
-	// Invariant: s.Cache.Len() must equal basePos + accepted
-	if s.Cache.Len() != basePos+accepted {
-		t.Errorf("s.Cache.Len() = %d, want basePos (%d) + accepted (%d) = %d",
-			s.Cache.Len(), basePos, accepted, basePos+accepted)
+	if len(nextTokens) != len(wantNext) {
+		t.Fatalf("len(nextTokens) = %d, want %d", len(nextTokens), len(wantNext))
 	}
-
-	// Next tokens should include accepted tokens plus the next target token
-	if len(nextTokens) != accepted+1 && !(accepted == 4 && len(nextTokens) >= 4) {
-		t.Errorf("len(nextTokens) = %d, want %d", len(nextTokens), accepted+1)
+	for i := range wantNext {
+		if nextTokens[i] != wantNext[i] {
+			t.Fatalf("nextTokens[%d] = %d, want ordinary token %d", i, nextTokens[i], wantNext[i])
+		}
+	}
+	if s.Cache.Len() != oracle.Cache.Len() {
+		t.Fatalf("speculative cache len = %d, want ordinary cache len %d", s.Cache.Len(), oracle.Cache.Len())
+	}
+	gotContinuation := s.Step(wantNext[len(wantNext)-1])
+	wantContinuation := oracle.Step(wantNext[len(wantNext)-1])
+	if len(gotContinuation) != len(wantContinuation) {
+		t.Fatalf("continuation logits = %d, want %d", len(gotContinuation), len(wantContinuation))
+	}
+	for i := range wantContinuation {
+		if math.Float32bits(gotContinuation[i]) != math.Float32bits(wantContinuation[i]) {
+			t.Fatalf("continuation logits[%d] = %08x, want ordinary %08x", i, math.Float32bits(gotContinuation[i]), math.Float32bits(wantContinuation[i]))
+		}
 	}
 
 	// 2. Test context cancellation
+	beforeCancelLen := s.Cache.Len()
 	cancCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, _, err = ForwardSpeculativeMTP(cancCtx, s, drafts)
 	if err == nil {
 		t.Errorf("expected error on cancelled context, got nil")
 	}
+	if s.Cache.Len() != beforeCancelLen {
+		t.Fatalf("cancelled verification changed cache len to %d, want %d", s.Cache.Len(), beforeCancelLen)
+	}
 
 	// 3. Test method invocation on Model
 	s2 := m.NewSession()
-	_ = s2.Prefill(prompt)
+	boundary2 := s2.Prefill(prompt)
+	s2.SetLastLogits(boundary2)
 	acc2, next2, err2 := m.ForwardSpeculativeMTP(ctx, s2, drafts)
 	if err2 != nil {
 		t.Fatalf("m.ForwardSpeculativeMTP failed: %v", err2)
 	}
 	if acc2 != accepted || len(next2) != len(nextTokens) {
-		t.Errorf("method vs function mismatch: acc2=%d (want %d), len(next2)=%d (want %d)",
+		t.Fatalf("method vs function mismatch: acc2=%d (want %d), len(next2)=%d (want %d)",
 			acc2, accepted, len(next2), len(nextTokens))
+	}
+	for i := range nextTokens {
+		if next2[i] != nextTokens[i] {
+			t.Fatalf("method nextTokens[%d] = %d, want function token %d", i, next2[i], nextTokens[i])
+		}
+	}
+	gotMethodContinuation := s2.Step(wantNext[len(wantNext)-1])
+	for i := range wantContinuation {
+		if math.Float32bits(gotMethodContinuation[i]) != math.Float32bits(wantContinuation[i]) {
+			t.Fatalf("method continuation logits[%d] = %08x, want ordinary %08x", i, math.Float32bits(gotMethodContinuation[i]), math.Float32bits(wantContinuation[i]))
+		}
 	}
 }

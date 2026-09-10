@@ -164,6 +164,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunCompanionAuditLeak(stdout, stderr, argv[1:])
 	case "ticket", "tickets":
 		return devcmd.RunCompanionTicket(stdout, stderr, argv[1:])
+	case "strix":
+		return devcmd.RunCompanionStrix(stdout, stderr, argv[1:])
 	default:
 		fmt.Fprintf(stderr, "fak-dev: unknown command %q\n", argv[0])
 		fmt.Fprintln(stderr, "run 'fak-dev help' for repository-development commands")
@@ -258,6 +260,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  provenance [audit|mint|status] [flags] cryptographic context separation & dual-context provenance")
 	fmt.Fprintln(w, "  audit-leak [--staged|--all]           scan repository additions/tree for secrets and private tokens")
 	fmt.Fprintln(w, "  ticket [list|show|next] [flags]       discover, inspect, and read tickets from companion fak-private")
+	fmt.Fprintln(w, "  strix [key|status|perf|bench] [flags] control and query AMD Strix Halo appliance (proxied to companion cmd/fak-strix)")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "The serving/guard product surface is the separately buildable 'fak' artifact.")
 }

@@ -44,7 +44,7 @@ func TestVulkanQwen35DeviceVerificationAllRowsAndContinuationMatchCPU(t *testing
 		t.Fatal(err)
 	}
 	defer device.Close()
-	device.captureTargetHidden = true
+	device.captureTargetHidden = false
 	serial := m.NewSession()
 	serial.captureTargetHidden = true
 	defer serial.Close()
@@ -98,7 +98,7 @@ func TestVulkanQwen35DeviceTransactionAcceptsOnlyCommittedPrefix(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer device.Close()
-			device.captureTargetHidden = true
+			device.captureTargetHidden = false
 			serial := m.NewSession()
 			serial.captureTargetHidden = true
 			defer func() { serial.Close() }()
@@ -131,10 +131,7 @@ func TestVulkanQwen35DeviceTransactionAcceptsOnlyCommittedPrefix(t *testing.T) {
 			if _, err := tx.Commit(accepted); err != nil {
 				t.Fatal(err)
 			}
-			wantSteps := accepted
-			if accepted == len(draft) {
-				wantSteps = 0
-			}
+			wantSteps := 0
 			if steps != wantSteps {
 				t.Fatalf("Step replay=%d want=%d", steps, wantSteps)
 			}

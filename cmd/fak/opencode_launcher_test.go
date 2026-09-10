@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -326,3 +327,78 @@ func TestOpencodeLauncherAutoDetectedModelWiring(t *testing.T) {
 		}
 	})
 }
+
+func TestOpencodeLauncherHaloFlag(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("FAK_HALO_HOST", "")
+	t.Setenv("FAK_STRIX_HOST", "")
+
+	for _, flag := range []string{"--halo", "--strix"} {
+		t.Run(flag, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			args := []string{"--dry-run", "--split", "off", flag}
+			code := runOpencode(&stdout, &stderr, args)
+			if code != 0 {
+				t.Fatalf("runOpencode %s returned %d, stderr: %s", flag, code, stderr.String())
+			}
+			out := stdout.String()
+			if !strings.Contains(out, "--base-url http://127.0.0.1:8080/v1") {
+				t.Errorf("expected '--base-url http://127.0.0.1:8080/v1' in dry-run stdout: %s", out)
+			}
+			if !strings.Contains(out, "--model qwen-2.5-coder-32b-instruct") {
+				t.Errorf("expected '--model qwen-2.5-coder-32b-instruct' in dry-run stdout: %s", out)
+			}
+			errOut := stderr.String()
+			if !strings.Contains(errOut, "targeting local Halo server") {
+				t.Errorf("expected targeting diagnostics in stderr: %s", errOut)
+			}
+		})
+	}
+}
+
+func TestOpencodeConfigHaloFlag(t *testing.T) {
+	tmp := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	args := []string{"config", "--halo", "--write", "--dir", tmp}
+	code := runOpencode(&stdout, &stderr, args)
+	if code != 0 {
+		t.Fatalf("runOpencode config --halo returned %d, stderr: %s", code, stderr.String())
+	}
+	data, err := os.ReadFile(filepath.Join(tmp, "opencode.json"))
+	if err != nil {
+		t.Fatalf("failed to read created config: %v", err)
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("failed to parse config: %v", err)
+	}
+	prov := parsed["provider"].(map[string]interface{})
+	fak := prov["fak"].(map[string]interface{})
+	opts := fak["options"].(map[string]interface{})
+	if opts["baseURL"] != "http://127.0.0.1:8080/v1" {
+		t.Errorf("expected baseURL http://127.0.0.1:8080/v1, got %v", opts["baseURL"])
+	}
+	models := fak["models"].(map[string]interface{})
+	if models["qwen-2.5-coder-32b-instruct"] == nil {
+		t.Errorf("expected qwen-2.5-coder-32b-instruct in models: %v", models)
+	}
+}
+
+func TestOpencodeLauncherHaloDynamicModel(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("FAK_HALO_HOST", "")
+	t.Setenv("FAK_STRIX_HOST", "")
+	t.Setenv("FAK_HALO_MODEL", "my-custom-qwen-70b")
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"--dry-run", "--split", "off", "--halo"}
+	code := runOpencode(&stdout, &stderr, args)
+	if code != 0 {
+		t.Fatalf("runOpencode --halo returned %d, stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "--model my-custom-qwen-70b") {
+		t.Errorf("expected dynamic model in dry-run stdout: %s", out)
+	}
+}
+

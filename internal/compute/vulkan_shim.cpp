@@ -34,6 +34,15 @@
 #include <vector>
 #include <unordered_map>
 #include <atomic>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 struct DispatchProfileCounters {
     std::atomic<uint64_t> compute{0}, q4k{0}, q2k{0}, other{0};
@@ -69,9 +78,11 @@ bool              g_ready    = false;
 VkDeviceSize      g_maxStorageBufferRange = 0;
 VkDeviceSize      g_maxMemoryAllocationSize = 0;
 VkDeviceSize      g_maxBufferBytes = 0;
+uint32_t          g_maxComputeWorkGroupCountX = 0;
 VkDeviceSize      g_totalDeviceLocalMemory = 0;
 bool              g_haveMemoryBudget = false;
 bool              g_batching = false;
+void              batchBegin();
 void              batchFlush();
 VkResult          g_submissionStatus = VK_SUCCESS;
 std::atomic<uint64_t> g_h2dBytes{0};
@@ -96,6 +107,17 @@ bool checkedCounterAdd(std::atomic<uint64_t>& counter, uint64_t value) {
     }
     counter.store(current + value, std::memory_order_relaxed);
     return true;
+}
+
+bool environmentFlagEnabled(const char* name) {
+#ifdef _WIN32
+    char value[2]{};
+    DWORD length = GetEnvironmentVariableA(name, value, (DWORD)sizeof(value));
+    return length == 1 && value[0] == '1';
+#else
+    const char* value = std::getenv(name);
+    return value && value[0] == '1' && value[1] == '\0';
+#endif
 }
 
 bool memoryTypeUsesDeviceLocalHeap(uint32_t memoryType) {
@@ -219,7 +241,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q6K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -227,7 +249,7 @@ Kernel g_kern[K_COUNT];
 std::atomic<uint64_t>& dpOtherFamily(KId id) {
     switch (id) {
     case K_MATMUL: case K_MATMUL_ADD: case K_MATMUL_ARGMAX: case K_MATMUL_ARGMAX_BLOCKS:
-    case K_MATMUL2: case K_MATMUL3: case K_Q8_MATMUL: case K_Q8_MATMUL_DECODE: case K_Q8_MATMUL2: case K_Q8_MATMUL3:
+    case K_MATMUL2: case K_MATMUL3: case K_Q8_MATMUL: case K_Q8_MATMUL_DECODE: case K_Q8_MATMUL2: case K_Q8_MATMUL3: case K_Q6K_MATMUL:
         return g_dp.otherMatmul;
     case K_RMSNORM: case K_RMSNORM_MATMUL: case K_RMSNORM_MATMUL2: case K_RMSNORM_MATMUL3:
     case K_RMSNORM_MATMUL_ARGMAX_BLOCKS: case K_RMSNORM_Q8_MATMUL2: case K_RMSNORM_Q8_MATMUL3:
@@ -299,6 +321,8 @@ int g_have_glm_kda_wave32 = 0;
 int g_have_q4k_wave32 = 0;
 bool g_q4k_wave32_required_subgroup = false;
 int g_have_coopmat = 0;
+// Portable packed Q6_K is optional so older SPIR-V bundles remain loadable.
+int g_have_q6k_matmul = 0;
 
 VkDescriptorPool g_descpool = VK_NULL_HANDLE;
 
@@ -706,6 +730,127 @@ size_t scratchCapacity(size_t bytes) {
 
 Buffer*                       g_gdn_conv_out = nullptr;
 
+struct PartialRoPECacheEntry {
+    uint32_t thetaBits = 0;
+    int rotary = 0;
+    size_t positions = 0;
+    Buffer* table = nullptr;
+    std::vector<float> inverseFrequency;
+};
+
+std::vector<PartialRoPECacheEntry> g_partialRoPECaches;
+
+void freePartialRoPECaches() {
+    for (auto& entry : g_partialRoPECaches) {
+        if (entry.table) destroyBuffer(entry.table);
+    }
+    g_partialRoPECaches.clear();
+    clearDescriptorBindingCache();
+}
+
+Buffer* partialRoPETable(float theta, int rotary, size_t requiredPositions) {
+    uint32_t thetaBits = 0;
+    static_assert(sizeof(thetaBits) == sizeof(theta), "float key must be exact");
+    memcpy(&thetaBits, &theta, sizeof(thetaBits));
+
+    PartialRoPECacheEntry* found = nullptr;
+    for (auto& entry : g_partialRoPECaches) {
+        if (entry.thetaBits == thetaBits && entry.rotary == rotary) {
+            found = &entry;
+            break;
+        }
+    }
+    if (!found) {
+        g_partialRoPECaches.push_back(PartialRoPECacheEntry{});
+        found = &g_partialRoPECaches.back();
+        found->thetaBits = thetaBits;
+        found->rotary = rotary;
+        found->inverseFrequency.resize((size_t)rotary / 2);
+        for (size_t pair = 0; pair < found->inverseFrequency.size(); ++pair) {
+            found->inverseFrequency[pair] = std::pow(theta,
+                -2.0f * (float)pair / (float)rotary);
+        }
+    }
+    if (found->table && found->positions >= requiredPositions) return found->table;
+
+    const size_t pairs = (size_t)rotary / 2;
+    if (pairs == 0) return nullptr;
+    size_t maxPositions = std::numeric_limits<size_t>::max() / pairs / (2 * sizeof(float));
+    // The shader forms the flattened table subscript in uint arithmetic.
+    const size_t shaderMaxPositions = (size_t)std::numeric_limits<uint32_t>::max() / pairs;
+    if (shaderMaxPositions < maxPositions) maxPositions = shaderMaxPositions;
+    if (g_maxBufferBytes > 0) {
+        const size_t deviceMaxPositions = (size_t)g_maxBufferBytes / pairs / (2 * sizeof(float));
+        if (deviceMaxPositions < maxPositions) maxPositions = deviceMaxPositions;
+    }
+    if (requiredPositions > maxPositions) return nullptr;
+
+    size_t capacity = found->positions ? found->positions : 64;
+    if (capacity > maxPositions) capacity = maxPositions;
+    while (capacity < requiredPositions) {
+        if (capacity > maxPositions / 2) {
+            capacity = maxPositions;
+            break;
+        }
+        capacity *= 2;
+    }
+    if (capacity < requiredPositions) return nullptr;
+    const size_t floats = capacity * pairs * 2;
+    const size_t bytes = floats * sizeof(float);
+    if ((g_maxBufferBytes > 0 && (VkDeviceSize)bytes > g_maxBufferBytes) ||
+        bytes > (size_t)std::numeric_limits<VkDeviceSize>::max()) {
+        return nullptr;
+    }
+
+    // A recorded batch may still reference the old table. Complete it before replacing
+    // that allocation, then resume batching for the caller's next operation.
+    const bool resumeBatch = g_batching;
+    if (resumeBatch) batchFlush();
+    VkMemoryPropertyFlags hostvis =
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    Buffer* replacement = allocBuffer(bytes, hostvis, STORAGE_USAGE);
+    if (!replacement) {
+        if (resumeBatch) batchBegin();
+        return nullptr;
+    }
+    void* mapped = nullptr;
+    VkResult mappedResult = vkMapMemory(g_dev, replacement->mem, 0, bytes, 0, &mapped);
+    if (mappedResult != VK_SUCCESS || !mapped) {
+        destroyBuffer(replacement);
+        if (resumeBatch) batchBegin();
+        return nullptr;
+    }
+    float* values = static_cast<float*>(mapped);
+    if (found->table && found->positions > 0) {
+        void* oldMapped = nullptr;
+        const size_t oldBytes = found->positions * pairs * 2 * sizeof(float);
+        VkResult oldMappedResult = vkMapMemory(g_dev, found->table->mem, 0, oldBytes, 0, &oldMapped);
+        if (oldMappedResult != VK_SUCCESS || !oldMapped) {
+            vkUnmapMemory(g_dev, replacement->mem);
+            destroyBuffer(replacement);
+            if (resumeBatch) batchBegin();
+            return nullptr;
+        }
+        memcpy(values, oldMapped, oldBytes);
+        vkUnmapMemory(g_dev, found->table->mem);
+    }
+    for (size_t pos = found->positions; pos < capacity; ++pos) {
+        for (size_t pair = 0; pair < pairs; ++pair) {
+            const float angle = (float)pos * found->inverseFrequency[pair];
+            const size_t offset = (pos * pairs + pair) * 2;
+            values[offset] = std::sin(angle);
+            values[offset + 1] = std::cos(angle);
+        }
+    }
+    vkUnmapMemory(g_dev, replacement->mem);
+    if (found->table) destroyBuffer(found->table);
+    found->table = replacement;
+    found->positions = capacity;
+    clearDescriptorBindingCache();
+    if (resumeBatch) batchBegin();
+    return found->table;
+}
+
 Buffer* gdnConvOutScratch(size_t bytes) {
     if (bytes == 0) bytes = 4;
     if (g_gdn_conv_out && g_gdn_conv_out->bytes >= bytes) return g_gdn_conv_out;
@@ -1101,6 +1246,7 @@ int fvk_device_identity(char* name, int namelen, uint32_t* vendor_id,
 
 int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_qwen35_gdn_q8_in_proj = 0;
+    g_have_q6k_matmul = 0;
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.pApplicationName = "fak";
     app.apiVersion = VK_API_VERSION_1_2;
@@ -1139,6 +1285,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_maxStorageBufferRange = props2.properties.limits.maxStorageBufferRange;
     g_maxMemoryAllocationSize = maint3.maxMemoryAllocationSize;
     g_maxBufferBytes = g_maxStorageBufferRange;
+    g_maxComputeWorkGroupCountX = props2.properties.limits.maxComputeWorkGroupCount[0];
     if (g_maxMemoryAllocationSize > 0 &&
         (g_maxBufferBytes == 0 || g_maxMemoryAllocationSize < g_maxBufferBytes)) {
         g_maxBufferBytes = g_maxMemoryAllocationSize;
@@ -1354,7 +1501,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         ok &= buildKernel(g_kern[K_GLM_KDA_WAVE32], P("glm_kda_recurrent_wave32.spv"), 7, sizeof(int), 32);
     }
     ok &= buildKernel(g_kern[K_QWEN35_SPLIT_QG_PANEL], P("qwen35_split_qg_panel.spv"), 3, 3 * sizeof(int));
-    ok &= buildKernel(g_kern[K_QWEN35_PARTIAL_ROPE_PANEL], P("qwen35_partial_rope_panel.spv"), 4, 6 * sizeof(int) + sizeof(float));
+    ok &= buildKernel(g_kern[K_QWEN35_PARTIAL_ROPE_PANEL], P("qwen35_partial_rope_panel.spv"), 5, 7 * sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_QWEN35_CAUSAL_ATTENTION_PANEL], P("qwen35_causal_attention_panel.spv"), 4, 5 * sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_SIGMOID_MUL], P("sigmoid_mul.spv"), 2, sizeof(int));
     ok &= buildKernel(g_kern[K_Q4K_MATMUL], P("q4k_matmul.spv"), 3, 3 * sizeof(int));
@@ -1364,6 +1511,8 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
             g_have_q4k_wave32 = 0;
         }
     }
+    g_have_q6k_matmul = buildKernel(g_kern[K_Q6K_MATMUL], P("q6k_matmul.spv"),
+                                    3, 3 * sizeof(int)) ? 1 : 0;
     buildKernel(g_kern[K_RMSNORM_Q4K_MATMUL2], P("rmsnorm_q4k_matmul2.spv"), 6, 4 * sizeof(int) + sizeof(float));
     buildKernel(g_kern[K_SWIGLU_Q4K_MATMUL_ADD], P("swiglu_q4k_matmul_add.spv"), 4, 3 * sizeof(int));
     ok &= buildKernel(g_kern[K_Q2K_MATMUL], P("q2k_matmul.spv"), 7, 4 * sizeof(int) + sizeof(float));
@@ -1710,6 +1859,8 @@ int fvk_have_q8(void) { return g_have_q8; }
 int fvk_have_qwen35_gdn_q8_in_proj(void) { return g_have_qwen35_gdn_q8_in_proj; }
 int fvk_have_glm_kda_wave32(void) { return g_have_glm_kda_wave32; }
 int fvk_have_cooperative_matrix(void) { return g_have_coopmat; }
+int fvk_have_q6k_matmul(void) { return g_have_q6k_matmul; }
+uint32_t fvk_max_compute_work_group_count_x(void) { return g_maxComputeWorkGroupCountX; }
 uint64_t fvk_max_buffer_bytes(void) { return (uint64_t)g_maxBufferBytes; }
 uint64_t fvk_max_storage_buffer_range(void) { return (uint64_t)g_maxStorageBufferRange; }
 uint64_t fvk_max_memory_allocation_size(void) { return (uint64_t)g_maxMemoryAllocationSize; }
@@ -1746,6 +1897,7 @@ void fvk_trim_pool(void) {
     if (g_batching) batchFlush();
     drainPool();
     freeGdnScratch();
+    freePartialRoPECaches();
     releaseWeightArena();
 }
 
@@ -2281,9 +2433,20 @@ extern "C" int fvk_qwen35_partial_rope_panel_f32(const void* q, const void* k,
         return 2;
     uint64_t count = (uint64_t)tokens*((uint64_t)nQHeads+nKHeads)*headDim;
     if (count>2147483647u) return 2;
-    struct { int tokens,startPos,qHeads,kHeads,hd,rotary; float theta; }
-        pc{tokens,startPos,nQHeads,nKHeads,headDim,rotaryDim,(float)theta};
-    Buffer* bufs[] = {B(q),B(k),B(qOut),B(kOut)};
+    const float tableTheta = (float)theta;
+    if (!std::isfinite(tableTheta) || tableTheta <= 0) return 2;
+    const int scalarReference = environmentFlagEnabled(
+        "FAK_VULKAN_QWEN35_PARTIAL_ROPE_SCALAR_REFERENCE");
+    Buffer* table = B((void*)q); // Valid fifth descriptor; scalar arm never reads it.
+    if (!scalarReference && rotaryDim > 0) {
+        const uint64_t endPosition = (uint64_t)startPos + (uint64_t)tokens;
+        if (endPosition > (uint64_t)std::numeric_limits<size_t>::max()) return 2;
+        table = partialRoPETable(tableTheta, rotaryDim, (size_t)endPosition);
+        if (!table) return 3;
+    }
+    struct { int tokens,startPos,qHeads,kHeads,hd,rotary; float theta; int scalarReference; }
+        pc{tokens,startPos,nQHeads,nKHeads,headDim,rotaryDim,tableTheta,scalarReference};
+    Buffer* bufs[] = {B(q),B(k),B(qOut),B(kOut),table};
     dispatch(g_kern[K_QWEN35_PARTIAL_ROPE_PANEL],bufs,&pc,sizeof(pc),(uint32_t)((count+255)/256));
     return (int)g_submissionStatus;
 }
@@ -2351,6 +2514,14 @@ extern "C" void fvk_q4k_matmul_f32(const void* dQ4K, const void* dX, void* dY,
     struct PC { int out, in, p; } pc{out, in, P};
     Buffer* bufs[3] = {B((void*)dQ4K), B((void*)dX), B(dY)};
     dispatch(g_kern[K_Q4K_MATMUL], bufs, &pc, sizeof(pc), (uint32_t)(((size_t)out * P + 63) / 64));
+}
+extern "C" void fvk_q6k_matmul_f32(const void* dQ6K, const void* dX, void* dY,
+                                    int out, int in, int P) {
+    if (!g_have_q6k_matmul || g_kern[K_Q6K_MATMUL].pipe == VK_NULL_HANDLE) return;
+    struct PC { int out, in, p; } pc{out, in, P};
+    Buffer* bufs[3] = {B((void*)dQ6K), B((void*)dX), B(dY)};
+    dispatch(g_kern[K_Q6K_MATMUL], bufs, &pc, sizeof(pc),
+             (uint32_t)(((size_t)out * (size_t)P + 63) / 64));
 }
 extern "C" void fvk_q2k_matmul_f32(const void* dQ2K, const void* dX, void* dY,
                           int out, int in, int P) {

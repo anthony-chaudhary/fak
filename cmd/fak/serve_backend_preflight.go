@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	computestrix "github.com/anthony-chaudhary/fak/internal/compute/strix"
@@ -140,7 +141,20 @@ func preflightServeStrixHalo(be compute.Backend) ServeStrixHaloPreflightResult {
 func preflightServeStrixHaloWithSysfs(be compute.Backend, sysfsRoot string) ServeStrixHaloPreflightResult {
 	var deviceName string
 	if be != nil {
+		name := strings.ToLower(strings.TrimSpace(be.Name()))
+		if name == "cpu-ref" || name == "cpu" || strings.HasPrefix(name, "cpu-") || strings.HasPrefix(name, "cpu/") {
+			return ServeStrixHaloPreflightResult{
+				Detected: false,
+			}
+		}
 		deviceName = be.Name()
+		if tier := be.Tier(); tier != "" {
+			if deviceName == "" {
+				deviceName = tier
+			} else {
+				deviceName = deviceName + " " + tier
+			}
+		}
 	}
 
 	detected, matchedName, err := computestrix.DetectGFX1151WithDeviceName(sysfsRoot, deviceName)

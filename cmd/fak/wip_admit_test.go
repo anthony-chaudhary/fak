@@ -278,3 +278,30 @@ func writeWipAgingReadiness(t *testing.T, repo string, now time.Time) string {
 	}
 	return path
 }
+
+func TestWipAdmitHelpMatchesSessionFlag(t *testing.T) {
+	var topOut bytes.Buffer
+	wipUsage(&topOut)
+	topHelp := topOut.String()
+
+	if strings.Contains(topHelp, "--self <session>") {
+		t.Errorf("top-level wip help still documents unsupported --self flag: %s", topHelp)
+	}
+	wantTop := "fak wip admit [-C <repo>] --session <session>"
+	if !strings.Contains(topHelp, wantTop) {
+		t.Errorf("top-level wip help missing %q", wantTop)
+	}
+
+	var subOut, subErr bytes.Buffer
+	code := runWip(&subOut, &subErr, []string{"admit", "--help"})
+	if code != 0 {
+		t.Fatalf("wip admit --help code=%d stderr=%s", code, subErr.String())
+	}
+	subHelp := subErr.String()
+	if !strings.Contains(subHelp, "-session") {
+		t.Errorf("wip admit --help missing -session flag documentation: %s", subHelp)
+	}
+	if strings.Contains(subHelp, "-self") {
+		t.Errorf("wip admit --help should not document -self flag: %s", subHelp)
+	}
+}

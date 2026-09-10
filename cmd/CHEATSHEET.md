@@ -33,3 +33,15 @@ A decision table for the 13 benchmark/diagnostic tools in `cmd/`. Each entry car
 ## Detailed writeups
 
 (Per‑tool `*-RESULTS.md` files will be linked here once produced.)
+
+## Companion Strix Halo Appliance Tooling (`fak-dev strix` / `fak-private`)
+
+When working from the `fak` repository, commands for the physical AMD Strix Halo appliance (`192.168.1.208` / `strix-halo-fak.local`) are accessible via `fak-dev`:
+
+| Action | Invocation from `fak` | Invocation from `fak-private` | Notes |
+|---|---|---|---|
+| Gateway Key | `go run ./cmd/fak-dev strix key` | `go run ./cmd/fak-strix key` | Prints `FAK_GATEWAY_KEY` (from `/etc/fak/gateway.env`) |
+| Health Check | `curl http://192.168.1.208:8080/healthz` | `curl http://192.168.1.208:8080/healthz` | **Unauthenticated** (NO key needed) |
+| Appliance Status | `go run ./cmd/fak-dev strix status` | `go run ./cmd/fak-strix status` | Probes unit, models, systemd, and LAN endpoints |
+| Compact Telemetry | `go run ./cmd/fak-dev strix perf --compact` | `go run ./cmd/fak-strix perf --compact` | 1-line token-compact telemetry (<25 tokens) |
+| SSH into Appliance | `ssh -F ../fak-private/tools/ssh_config.strix strix-agent` | `ssh -F tools/ssh_config.strix strix-agent` | Headless batch mode, zero token waste |

@@ -63,7 +63,7 @@ Flags:
 	intervalSync := fs.Duration("interval-sync", 1*time.Hour, "cadence for landing & git-sync merge")
 	timeoutIssue := fs.Duration("timeout-issue", 25*time.Minute, "timeout for issue-orchestrator runs")
 	timeoutDebt := fs.Duration("timeout-debt", 25*time.Minute, "timeout for debt-orchestrator runs")
-	timeoutSync := fs.Duration("timeout-sync", 8*time.Minute, "timeout for git-sync runs")
+	timeoutSync := fs.Duration("timeout-sync", 15*time.Minute, "timeout for git-sync runs")
 	runHours := fs.Int("run-hours", 24, "repetition duration limit in hours (default: 24)")
 	taskPrefix := fs.String("task-prefix", "FakOps", "task identifier prefix")
 	fakBinFlag := fs.String("fak-bin", "", "explicit path to fak binary")

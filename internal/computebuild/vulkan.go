@@ -48,6 +48,7 @@ var VulkanShaders = []string{
 	"qwen35_gdn_recurrent",
 	"q4k_matmul",
 	"q4k_matmul_wave32",
+	"q6k_matmul",
 	"q2k_matmul",
 	"qwen35_split_qg_panel",
 	"qwen35_partial_rope_panel",
@@ -281,7 +282,7 @@ func CompareReceiptProvenance(a, b *ComputeBuildReceipt) error {
 	return nil
 }
 
-const vulkanV2ModuleCount = 42
+const vulkanV2ModuleCount = 43
 
 var unavailableVulkanV2Causality = []string{
 	"historical_source_cleanliness",

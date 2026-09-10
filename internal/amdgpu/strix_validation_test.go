@@ -21,6 +21,22 @@ import (
 const testTip = "0123456789abcdef0123456789abcdef01234567"
 const testHash = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
+func installStrixDiscoveryFixture(t *testing.T, target *StrixTarget) {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "_scratch"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	data, err := json.Marshal(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := newStrixSSHTransportFixture(t)
+	fixture.output = data
+	installStrixSSHTransportFixture(t, fixture)
+}
+
 func validStrixExecutionEvidence() StrixExecutionEvidence {
 	exit := 0
 	return StrixExecutionEvidence{SourceArchiveSHA256: testHash, BinarySHA256: testHash, ShaderBundleSHA256: testHash, CommandSHA256: testHash, DeviceIdentity: "AMD Radeon 8060S Graphics|gfx1151", EngineIdentity: "fak-native/vulkan", ArtifactRehashed: true, DeviceTimeoutMS: 60000, LeasePathSHA256: testHash, AdmissionWaitMS: 30000, Acquired: true, Released: true, AcquireOrdinal: 1, ReleaseOrdinal: 2, ExitCode: &exit, RawOutputSHA256: testHash, RawOutputBytes: 1}
@@ -456,8 +472,6 @@ func TestStrixValidationOrchestrator(t *testing.T) {
 }
 
 func TestRunStrixValidation_SourceBindingMissingWhenRequired(t *testing.T) {
-	defer ClearPresenceCache()
-
 	target := &StrixTarget{
 		Mode:         "ssh",
 		Host:         "test-strix-sim-src",
@@ -468,7 +482,7 @@ func TestRunStrixValidation_SourceBindingMissingWhenRequired(t *testing.T) {
 		ComputeUnits: 40,
 		DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
 	}
-	SavePresenceCache(target)
+	installStrixDiscoveryFixture(t, target)
 
 	ctx := context.Background()
 	opts := StrixValidationOpts{
@@ -506,8 +520,6 @@ func TestRunStrixValidation_SourceBindingMissingWhenRequired(t *testing.T) {
 }
 
 func TestRunStrixValidation_LegacyCheckoutBindingCannotEarnV2Credit(t *testing.T) {
-	defer ClearPresenceCache()
-
 	origVerify := verifySourceBindingFn
 	defer func() {
 		verifySourceBindingFn = origVerify
@@ -527,7 +539,7 @@ func TestRunStrixValidation_LegacyCheckoutBindingCannotEarnV2Credit(t *testing.T
 		ComputeUnits: 40,
 		DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
 	}
-	SavePresenceCache(target)
+	installStrixDiscoveryFixture(t, target)
 
 	ctx := context.Background()
 	opts := StrixValidationOpts{
@@ -996,9 +1008,8 @@ func TestStageRejectsDigestMatchingUnsafeCandidateArchive(t *testing.T) {
 }
 
 func TestRunStrixValidationCleanupUsesFreshContextExactlyOnce(t *testing.T) {
-	defer ClearPresenceCache()
 	target := &StrixTarget{Mode: "ssh", Host: "cleanup-test", Reachable: true, GPUName: "AMD Radeon 8060S Graphics", TargetISA: "gfx1151"}
-	SavePresenceCache(target)
+	installStrixDiscoveryFixture(t, target)
 	origStage, origCleanup, origExec := stageStrixCandidateFn, cleanupStrixCandidateFn, executeOneSubkernelFn
 	defer func() {
 		stageStrixCandidateFn = origStage
@@ -1060,9 +1071,8 @@ func TestBuildStrixAdmissionCommandStopsOnArtifactMismatch(t *testing.T) {
 }
 
 func TestRunStrixValidationRejectsInvalidAdmissionBeforeStaging(t *testing.T) {
-	defer ClearPresenceCache()
 	target := &StrixTarget{Mode: "ssh", Host: "admission-test", Reachable: true, GPUName: "AMD Radeon 8060S Graphics", TargetISA: "gfx1151"}
-	SavePresenceCache(target)
+	installStrixDiscoveryFixture(t, target)
 	orig := stageStrixCandidateFn
 	defer func() { stageStrixCandidateFn = orig }()
 	called := false

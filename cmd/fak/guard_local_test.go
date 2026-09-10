@@ -72,6 +72,15 @@ func TestGuardChooseLocalBackendPrecedence(t *testing.T) {
 			wantFound: false,
 		},
 		{
+			name:      "FAK Strix Halo server wins when live",
+			live:      map[string]bool{"FAK Strix Halo": true, "Ollama": true},
+			models:    map[string][]string{"FAK Strix Halo": {"qwen-2.5-coder-32b-instruct"}, "Ollama": {"llama3"}},
+			wantBase:  guardOpenAIV1Base("http://127.0.0.1:8080"),
+			wantModel: "qwen-2.5-coder-32b-instruct",
+			wantLabel: "FAK Strix Halo",
+			wantFound: true,
+		},
+		{
 			name:      "only llama.cpp live",
 			live:      map[string]bool{"llama.cpp": true},
 			models:    map[string][]string{"llama.cpp": {"local-model"}},

@@ -63,6 +63,9 @@ func applyServeManifestDefaults(sf *serveFlags, m deploymanifest.Manifest) {
 	if m.Present("observability", "bind") {
 		*sf.addr = m.Observability.Bind
 	}
+	if m.Present("observability", "appliance_profile") {
+		*sf.applianceObservability = m.Observability.ApplianceProfile
+	}
 }
 
 func explicitFlagNames(fs *flag.FlagSet) map[string]bool {
@@ -114,7 +117,8 @@ func buildServeManifestSpecs() map[string]serveManifestSpec {
 		"auth.allow_lan":         {flagName: "allow-lan", reason: "mapped directly to allow unauthenticated access from local network"},
 		"auth.require_key_env":   {flagName: "require-key-env", reason: "mapped directly to serve authentication"},
 		"budgets.default_tokens": {flagName: "context-budget-tokens", reason: "mapped directly to the default session token budget"},
-		"observability.bind":     {flagName: "addr", reason: "mapped directly to the serve listener"},
+		"observability.appliance_profile": {flagName: "appliance-observability", reason: "mapped directly to appliance dashboard catalog selection"},
+		"observability.bind":              {flagName: "addr", reason: "mapped directly to the serve listener"},
 		"observability.metrics":  {appliedValue: true, hasAppliedValue: true, reason: "the gateway serves its metrics surface whenever serve is running", nextAction: "use fak up when endpoint enablement becomes topology-selectable"},
 		"policy.floor":           {flagName: "policy", reason: "mapped directly to the capability-floor path"},
 		"policy.inline":          {reason: "serve accepts a policy path, not unmaterialized inline policy", nextAction: "write the policy to a reviewed file and set policy.floor"},

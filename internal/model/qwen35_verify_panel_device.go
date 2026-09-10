@@ -10,6 +10,10 @@ import (
 
 const qwen35DeviceVerifyMaxDraft = 4
 
+var errQwen35DeviceTargetHiddenDowngrade = &TargetVerificationDowngradeError{
+	Reason: "device target verification cannot preserve raw target-hidden history",
+}
+
 func qwen35DevicePanelAdvertised(s *Session) bool {
 	if s == nil || s.Backend == nil {
 		return false
@@ -22,6 +26,26 @@ func qwen35DevicePanelAdvertised(s *Session) bool {
 // one bounded sequence invocation and reads back only its K logits rows. Its
 // caller owns the pre-round PrefixSnapshot and must commit or restore it.
 func (s *Session) verifyQwen35DevicePanel(ids []int, boundaryLogits []float32) (rows [][]float32, receipt TargetVerificationReceipt, err error) {
+	rows, checkpoint, receipt, err := s.verifyQwen35DevicePanelTransaction(ids, boundaryLogits, false)
+	if checkpoint != nil {
+		checkpoint.Close()
+	}
+	return rows, receipt, err
+}
+
+// verifyQwen35DevicePanelTransaction optionally transfers an independently
+// owned prefix-replay checkpoint to the target transaction. An older backend
+// continues to use the exact restore plus full-Step commit path.
+func (s *Session) verifyQwen35DevicePanelTransaction(ids []int, boundaryLogits []float32, capturePrefixReplay bool) (rows [][]float32, prefixReplay compute.Qwen35SequencePrefixReplay, receipt TargetVerificationReceipt, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if prefixReplay != nil {
+				prefixReplay.Close()
+				prefixReplay = nil
+			}
+			panic(recovered)
+		}
+	}()
 	receipt = TargetVerificationReceipt{
 		Schema:      targetVerificationReceiptSchema,
 		Engine:      targetVerificationEngine,
@@ -31,7 +55,11 @@ func (s *Session) verifyQwen35DevicePanel(ids []int, boundaryLogits []float32) (
 	setup := time.Now()
 	if s == nil || s.M == nil || s.Backend == nil || s.halKV == nil || s.qwen35HAL == nil {
 		receipt.Accounting.Setup = measuredSpeculativeCost(setup)
-		return nil, receipt, targetVerificationDowngrade("device target verification requires a live Qwen3.8 hybrid backend session")
+		return nil, nil, receipt, targetVerificationDowngrade("device target verification requires a live Qwen3.8 hybrid backend session")
+	}
+	if s.captureTargetHidden {
+		receipt.Accounting.Setup = measuredSpeculativeCost(setup)
+		return nil, nil, receipt, errQwen35DeviceTargetHiddenDowngrade
 	}
 	s.cacheGeometryMu.RLock()
 	defer s.cacheGeometryMu.RUnlock()
@@ -69,12 +97,16 @@ func (s *Session) verifyQwen35DevicePanel(ids []int, boundaryLogits []float32) (
 			err = targetVerificationDowngrade("device target verification excludes split host/device layer placement")
 		}
 	}
+	prefixCapability, prefixCapabilityOK := s.Backend.(compute.Qwen35SequencePrefixReplayBackend)
+	if err == nil && capturePrefixReplay && prefixCapabilityOK && prefixCapability.Qwen35SequencePrefixReplayPath() != compute.Qwen35SequencePrefixReplayPath {
+		err = targetVerificationDowngrade("backend advertises the wrong Qwen3.8 prefix-replay capability identity")
+	}
 	receipt.Accounting.Setup = measuredSpeculativeCost(setup)
 	if err != nil {
-		return nil, receipt, err
+		return nil, nil, receipt, err
 	}
 	if !s.qwen35SequenceOutputHeadFits() {
-		return nil, receipt, targetVerificationDowngrade("device target output head exceeds the backend buffer cap")
+		return nil, nil, receipt, targetVerificationDowngrade("device target output head exceeds the backend buffer cap")
 	}
 
 	embedShape := []int{s.M.Cfg.VocabSize, s.M.Cfg.HiddenSize}
@@ -87,11 +119,11 @@ func (s *Session) verifyQwen35DevicePanel(ids []int, boundaryLogits []float32) (
 	if s.M.Q2KEmbedding != nil || !deviceEmbeddingTableFits(s.Backend, embedShape) {
 		embeddingRows, ok := s.Backend.(compute.Qwen35SequenceEmbeddingRowsBackend)
 		if !ok || embeddingRows.Qwen35SequenceEmbeddingRowsPath() != compute.Qwen35SequenceEmbeddingRowsPath {
-			return nil, receipt, targetVerificationDowngrade("bounded target embeddings require the resident embedding-row operation")
+			return nil, nil, receipt, targetVerificationDowngrade("bounded target embeddings require the resident embedding-row operation")
 		}
 		data, gatherErr := s.qwen35EmbeddingRows(ids)
 		if gatherErr != nil {
-			return nil, receipt, fmt.Errorf("model: gather Qwen3.8 device verification embeddings: %w", gatherErr)
+			return nil, nil, receipt, fmt.Errorf("model: gather Qwen3.8 device verification embeddings: %w", gatherErr)
 		}
 		panel := s.uploadHostF32([]int{len(ids), s.M.Cfg.HiddenSize}, data, compute.MemoryActivation, "qwen35-device-verify-embedding-rows")
 		defer s.Backend.Free(panel)
@@ -100,6 +132,7 @@ func (s *Session) verifyQwen35DevicePanel(ids []int, boundaryLogits []float32) (
 		request = s.qwen35SequencePrefillRequest(ids, false)
 	}
 	request.NeedAllLogits = true
+	request.CapturePrefixReplay = capturePrefixReplay && prefixCapabilityOK
 	receipt.Accounting.Setup = measuredSpeculativeCost(setup)
 
 	startPos := s.halKV.Len()
@@ -110,19 +143,24 @@ func (s *Session) verifyQwen35DevicePanel(ids []int, boundaryLogits []float32) (
 	receipt.Path = targetVerificationQwen38DevicePath
 	receipt.TargetVerificationOperations = 1
 	result, callErr := seq.Qwen35SequencePrefill(request)
+	prefixReplay = result.PrefixReplay
 	if callErr != nil {
 		receipt.Accounting.TargetVerification = measuredSpeculativeCost(started)
-		return nil, receipt, &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardQwen35GDN, Path: compute.Qwen35SequencePrefillPath, Layer: -1, Stage: "device target verification", Cause: callErr}
+		return nil, prefixReplay, receipt, &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardQwen35GDN, Path: compute.Qwen35SequencePrefillPath, Layer: -1, Stage: "device target verification", Cause: callErr}
+	}
+	if request.CapturePrefixReplay && prefixReplay == nil {
+		receipt.Accounting.TargetVerification = measuredSpeculativeCost(started)
+		return nil, nil, receipt, fmt.Errorf("model: Qwen3.8 device verification omitted its admitted prefix-replay checkpoint")
 	}
 	vocab := s.M.Cfg.VocabSize
 	if result.Tokens != len(ids) || s.halKV.Len() != startPos+len(ids) || result.LastHidden.Buf() == nil || !result.LastHidden.Ready() || result.LogitsRows.Buf() == nil || !result.LogitsRows.Ready() || len(result.LogitsRows.Shape) != 2 || result.LogitsRows.Shape[0] != len(ids) || result.LogitsRows.Shape[1] != vocab {
 		receipt.Accounting.TargetVerification = measuredSpeculativeCost(started)
-		return nil, receipt, fmt.Errorf("model: malformed Qwen3.8 device verification result: tokens=%d want=%d kv_len=%d want=%d logits_shape=%v", result.Tokens, len(ids), s.halKV.Len(), startPos+len(ids), result.LogitsRows.Shape)
+		return nil, prefixReplay, receipt, fmt.Errorf("model: malformed Qwen3.8 device verification result: tokens=%d want=%d kv_len=%d want=%d logits_shape=%v", result.Tokens, len(ids), s.halKV.Len(), startPos+len(ids), result.LogitsRows.Shape)
 	}
 	flat := s.Backend.Read(result.LogitsRows)
 	if len(flat) != len(ids)*vocab {
 		receipt.Accounting.TargetVerification = measuredSpeculativeCost(started)
-		return nil, receipt, fmt.Errorf("model: Qwen3.8 device verification read %d logits, want %d", len(flat), len(ids)*vocab)
+		return nil, prefixReplay, receipt, fmt.Errorf("model: Qwen3.8 device verification read %d logits, want %d", len(flat), len(ids)*vocab)
 	}
 	// rows below retain one host copy after the backend tensor is retired. This
 	// is known live result memory, not a process-peak or transfer-bandwidth claim.
@@ -133,7 +171,7 @@ func (s *Session) verifyQwen35DevicePanel(ids []int, boundaryLogits []float32) (
 		for _, value := range rows[i] {
 			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
 				receipt.Accounting.TargetVerification = measuredSpeculativeCost(started)
-				return nil, receipt, ErrSpeculativeNonFiniteLogits
+				return nil, prefixReplay, receipt, ErrSpeculativeNonFiniteLogits
 			}
 		}
 	}
@@ -141,5 +179,5 @@ func (s *Session) verifyQwen35DevicePanel(ids []int, boundaryLogits []float32) (
 	s.halLogitsWarm = true
 	receipt.Accounting.TargetVerification = measuredSpeculativeCost(started)
 	receipt.OneOperation = true
-	return rows, receipt, nil
+	return rows, prefixReplay, receipt, nil
 }

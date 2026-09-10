@@ -698,6 +698,160 @@ func TestStrixQwen35ParityEmitterContract(t *testing.T) {
 	})
 }
 
+// TestQwen35PartialRoPETableParity exercises one cache through growth, reuse,
+// and key changes while comparing the production table path with both the
+// retained scalar Vulkan path and an independent scalar CPU oracle.
+func TestQwen35PartialRoPETableParity(t *testing.T) {
+	b, ok := Lookup("vulkan")
+	if !ok {
+		t.Fatal("real Vulkan device required; fak-native/vulkan backend is not registered")
+	}
+	v := b.(*vulkanBackend)
+	const scalarEnv = "FAK_VULKAN_QWEN35_PARTIAL_ROPE_SCALAR_REFERENCE"
+	t.Setenv(scalarEnv, "0")
+
+	type ropeCase struct {
+		name               string
+		tokens, startPos   int
+		qHeads, kHeads     int
+		headDim, rotaryDim int
+		theta              float64
+	}
+	// The order is intentional: grow a key, reuse it at a lower position, then
+	// change rotary width and theta before returning to the original key.
+	cases := []ropeCase{
+		{name: "grow-original-key", tokens: 3, startPos: 37, qHeads: 3, kHeads: 2, headDim: 16, rotaryDim: 8, theta: 10000},
+		{name: "change-rotary-key", tokens: 3, startPos: 11, qHeads: 2, kHeads: 2, headDim: 16, rotaryDim: 12, theta: 10000},
+		{name: "change-theta-key", tokens: 2, startPos: 23, qHeads: 3, kHeads: 1, headDim: 16, rotaryDim: 8, theta: 1e6},
+		{name: "regrow-original-key", tokens: 2, startPos: 129, qHeads: 2, kHeads: 2, headDim: 16, rotaryDim: 8, theta: 10000},
+		{name: "reuse-grown-original-key", tokens: 2, startPos: 5, qHeads: 2, kHeads: 1, headDim: 16, rotaryDim: 8, theta: 10000},
+		{name: "model-width-high-position", tokens: 2, startPos: 4093, qHeads: 2, kHeads: 1, headDim: 128, rotaryDim: 64, theta: 1e6},
+	}
+
+	const tolerance = 2e-3
+	for caseIndex, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			q := make([]float32, tc.tokens*tc.qHeads*tc.headDim)
+			k := make([]float32, tc.tokens*tc.kHeads*tc.headDim)
+			for i := range q {
+				q[i] = float32(math.Sin(float64((caseIndex+1)*101+i*7))) * 0.75
+			}
+			for i := range k {
+				k[i] = float32(math.Cos(float64((caseIndex+1)*137+i*11))) * 0.625
+			}
+
+			run := func(reference bool) ([]float32, []float32) {
+				if reference {
+					if err := os.Setenv(scalarEnv, "1"); err != nil {
+						t.Fatalf("enable scalar reference: %v", err)
+					}
+				} else if err := os.Setenv(scalarEnv, "0"); err != nil {
+					t.Fatalf("enable cached table: %v", err)
+				}
+				dq := v.Upload(NewF32(Default(), []int{tc.tokens, tc.qHeads * tc.headDim}, q), F32)
+				dk := v.Upload(NewF32(Default(), []int{tc.tokens, tc.kHeads * tc.headDim}, k), F32)
+				defer v.Free(dq)
+				defer v.Free(dk)
+				qr, kr := v.PartialRoPEQK(dq, dk, tc.startPos, tc.qHeads, tc.kHeads, tc.headDim, tc.rotaryDim, tc.theta)
+				defer v.Free(qr)
+				defer v.Free(kr)
+				gotQ, gotK := v.Read(qr), v.Read(kr)
+				for i, got := range v.Read(dq) {
+					if got != q[i] {
+						t.Fatalf("Q input mutated at %d: got=%g want=%g", i, got, q[i])
+					}
+				}
+				for i, got := range v.Read(dk) {
+					if got != k[i] {
+						t.Fatalf("K input mutated at %d: got=%g want=%g", i, got, k[i])
+					}
+				}
+				return gotQ, gotK
+			}
+
+			cachedQ, cachedK := run(false)
+			refQ, refK := run(true)
+			check := func(label string, input, cached, reference []float32, heads int) {
+				if len(cached) != len(input) || len(reference) != len(input) {
+					t.Fatalf("%s length: input=%d cached=%d reference=%d", label, len(input), len(cached), len(reference))
+				}
+				half := tc.rotaryDim / 2
+				for i, got := range cached {
+					dim := i % tc.headDim
+					if math.IsNaN(float64(got)) || math.IsInf(float64(got), 0) ||
+						math.IsNaN(float64(reference[i])) || math.IsInf(float64(reference[i]), 0) {
+						t.Fatalf("%s output[%d] is not finite: cached=%g reference=%g", label, i, got, reference[i])
+					}
+					if dim >= tc.rotaryDim {
+						if got != input[i] || reference[i] != input[i] {
+							t.Fatalf("%s unrotated tail[%d]: input=%g cached=%g reference=%g", label, i, input[i], got, reference[i])
+						}
+						continue
+					}
+					rowWidth := heads * tc.headDim
+					token := i / rowWidth
+					base := i - dim
+					pair := dim % half
+					a, b := input[base+pair], input[base+pair+half]
+					angle := float64(tc.startPos+token) * math.Pow(tc.theta, -2*float64(pair)/float64(tc.rotaryDim))
+					want := float64(a) * math.Cos(angle)
+					if dim < half {
+						want -= float64(b) * math.Sin(angle)
+					} else {
+						want = float64(b)*math.Cos(angle) + float64(a)*math.Sin(angle)
+					}
+					if delta := math.Abs(float64(got) - float64(reference[i])); delta > tolerance+2e-4*math.Abs(float64(reference[i])) {
+						t.Fatalf("%s cached/reference[%d] delta=%g cached=%g reference=%g", label, i, delta, got, reference[i])
+					}
+					if delta := math.Abs(float64(got) - want); delta > tolerance+2e-4*math.Abs(want) {
+						t.Fatalf("%s cached/CPU[%d] delta=%g cached=%g want=%g", label, i, delta, got, want)
+					}
+				}
+			}
+			check("Q", q, cachedQ, refQ, tc.qHeads)
+			check("K", k, cachedK, refK, tc.kHeads)
+		})
+	}
+
+	t.Run("scalar-route-proof", func(t *testing.T) {
+		const startPos = 1_000_000_000 // Valid int32 position; too large for a bounded device table.
+		q := []float32{0.25, -0.5, 0.75, -1}
+		k := []float32{-0.125, 0.375, -0.625, 0.875}
+		dq := v.Upload(NewF32(Default(), []int{4}, q), F32)
+		dk := v.Upload(NewF32(Default(), []int{4}, k), F32)
+		defer v.Free(dq)
+		defer v.Free(dk)
+
+		if err := os.Setenv(scalarEnv, "0"); err != nil {
+			t.Fatalf("enable cached table: %v", err)
+		}
+		func() {
+			defer func() {
+				got := recover()
+				if got == nil || !strings.Contains(fmt.Sprint(got), "failed closed with status 3") {
+					t.Fatalf("cached oversized-table panic = %v, want status 3", got)
+				}
+			}()
+			v.PartialRoPEQK(dq, dk, startPos, 1, 1, 4, 2, 10000)
+		}()
+
+		if err := os.Setenv(scalarEnv, "1"); err != nil {
+			t.Fatalf("enable scalar reference: %v", err)
+		}
+		qr, kr := v.PartialRoPEQK(dq, dk, startPos, 1, 1, 4, 2, 10000)
+		defer v.Free(qr)
+		defer v.Free(kr)
+		for label, values := range map[string][]float32{"Q": v.Read(qr), "K": v.Read(kr)} {
+			for i, value := range values {
+				if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+					t.Fatalf("%s scalar route output[%d]=%g is not finite", label, i, value)
+				}
+			}
+		}
+	})
+	t.Logf("engine=fak-native/vulkan device=%s cases=%d cache_growth=true cache_reuse=true cache_key_changes=true scalar_route_proved=true finite=true tails_identical=true", v.Tier(), len(cases))
+}
+
 // TestQwen35VulkanSequenceKVReserveGeometric validates the guarded geometric sequence-KV reservation
 // policy (#12548). It feeds multiple chunk sizes, asserts logical positions and capacity bounds,
 // verifies logarithmic D2D copy scaling over exact-growth pre-reservation, tests single-resource

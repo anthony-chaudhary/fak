@@ -174,8 +174,8 @@ func TestPresentDistinguishesDeclaredValuesFromDefaults(t *testing.T) {
 
 func TestKnownAndDeclaredKeysAreStableAndComplete(t *testing.T) {
 	keys := KnownKeys()
-	if len(keys) != 33 {
-		t.Fatalf("KnownKeys count = %d, want 33", len(keys))
+	if len(keys) != 34 {
+		t.Fatalf("KnownKeys count = %d, want 34", len(keys))
 	}
 	for i := 1; i < len(keys); i++ {
 		if keys[i-1].Dotted() >= keys[i].Dotted() {
@@ -252,5 +252,49 @@ func TestFakTomlAuthAllowLAN(t *testing.T) {
 	mNil := mTrue.WithOverrides(Overrides{})
 	if !mNil.Auth.AllowLAN {
 		t.Errorf("nil override should preserve manifest AllowLAN=true")
+	}
+}
+
+func TestFakTomlObservabilityApplianceProfile(t *testing.T) {
+	d := Defaults()
+	if d.Observability.ApplianceProfile {
+		t.Fatalf("default ApplianceProfile = true, want false")
+	}
+	if d.Present("observability", "appliance_profile") {
+		t.Fatalf("default ApplianceProfile must not be marked present")
+	}
+
+	mTrue, err := Parse([]byte("[observability]\nappliance_profile = true\n"))
+	if err != nil {
+		t.Fatalf("Parse(appliance_profile = true) failed: %v", err)
+	}
+	if !mTrue.Observability.ApplianceProfile {
+		t.Errorf("mTrue.Observability.ApplianceProfile = false, want true")
+	}
+	if !mTrue.Present("observability", "appliance_profile") {
+		t.Errorf("observability.appliance_profile not marked present")
+	}
+
+	mFalse, err := Parse([]byte("[observability]\nappliance_profile = false\n"))
+	if err != nil {
+		t.Fatalf("Parse(appliance_profile = false) failed: %v", err)
+	}
+	if mFalse.Observability.ApplianceProfile {
+		t.Errorf("mFalse.Observability.ApplianceProfile = true, want false")
+	}
+	if !mFalse.Present("observability", "appliance_profile") {
+		t.Errorf("observability.appliance_profile not marked present")
+	}
+
+	trueVal := true
+	mOverriddenTrue := mFalse.WithOverrides(Overrides{ApplianceProfile: &trueVal})
+	if !mOverriddenTrue.Observability.ApplianceProfile {
+		t.Errorf("override ApplianceProfile=true failed")
+	}
+
+	falseVal := false
+	mOverriddenFalse := mTrue.WithOverrides(Overrides{ApplianceProfile: &falseVal})
+	if mOverriddenFalse.Observability.ApplianceProfile {
+		t.Errorf("override ApplianceProfile=false failed")
 	}
 }

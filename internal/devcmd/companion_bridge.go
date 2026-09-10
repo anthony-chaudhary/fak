@@ -434,3 +434,64 @@ func writeAuditLeakHelp(w io.Writer) {
 	fmt.Fprintln(w, "  --staged      Scan staged additions (default)")
 	fmt.Fprintln(w, "  --all         Scan full working tree")
 }
+
+// RunCompanionStrix proxies to cmd/fak-strix in the companion root.
+// Invokes: go -C <privRoot> run ./cmd/fak-strix <argv>
+// Passes through stdout, stderr, and exit code.
+// Handles missing companion gracefully.
+func RunCompanionStrix(stdout, stderr io.Writer, argv []string) int {
+	_, privRoot := ResolveCompanionRoots()
+	isHelp := false
+	for _, a := range argv {
+		if a == "--help" || a == "-h" || a == "help" {
+			isHelp = true
+			break
+		}
+	}
+
+	if privRoot == "" {
+		if isHelp {
+			fmt.Fprintln(stdout, "fak-dev strix: companion repository (fak-private) not found. Set FAK_PRIVATE_ROOT or clone fak-private as sibling.")
+			writeStrixHelp(stdout)
+			return 0
+		}
+		fmt.Fprintln(stderr, "fak-dev strix: companion repository (fak-private) not found. Set FAK_PRIVATE_ROOT or clone fak-private as sibling.")
+		return 1
+	}
+
+	if isHelp && len(argv) == 1 {
+		writeStrixHelp(stdout)
+		return 0
+	}
+
+	subArgs := []string{"-C", privRoot, "run", "./cmd/fak-strix"}
+	subArgs = append(subArgs, argv...)
+
+	cmd := exec.Command("go", subArgs...)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	cmd.Stdin = os.Stdin
+
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return exitErr.ExitCode()
+		}
+		fmt.Fprintf(stderr, "fak-dev strix: failed to execute companion fak-strix: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func writeStrixHelp(w io.Writer) {
+	fmt.Fprintln(w, "Usage: fak-dev strix <subcommand> [flags]")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Control, monitor, and query AMD Strix Halo appliance (proxied to companion cmd/fak-strix).")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Subcommands:")
+	fmt.Fprintln(w, "  key               Display appliance gateway bearer key (from /etc/fak/gateway.env)")
+	fmt.Fprintln(w, "  status            Display comprehensive appliance status, health, and models")
+	fmt.Fprintln(w, "  perf              Display high-density token-compact performance metrics (--compact)")
+	fmt.Fprintln(w, "  bench             Trigger reproducible inference performance benchmarks")
+	fmt.Fprintln(w, "  upgrade           Automated in-place upgrade and remote compilation")
+	fmt.Fprintln(w, "  grafana           Print Grafana observability URLs and credentials")
+}
