@@ -118,6 +118,10 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		var tier radixkv.SnapshotTier
 		var sourceScope radixkv.ShareScope
 		if scopedLookup {
+			cacheable, err = p.scopedTree.MatchLen(owner, ids)
+			if err != nil {
+				return
+			}
 			if p.backend != nil {
 				matchedSnapshot, cachedLogits, m, sourceScope, tier, err = p.scopedTree.LookupSnapshotTieredContext(ctx, owner, ids)
 			} else {
@@ -128,6 +132,9 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			if p.backend != nil {
 				b, snap, legacyMatched, lookupTier, lookupErr := p.tree.LookupSnapshotTieredContext(ctx, ids)
 				matchedSnapshot, m, err = snap, legacyMatched, lookupErr
+				if b != nil {
+					cacheable = b.Plen()
+				}
 				tier = lookupTier
 				if m >= len(ids) {
 					cachedLogits = b.Logits()
@@ -136,6 +143,9 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			} else {
 				b, legacyMatched := p.tree.Lookup(ids)
 				m = legacyMatched
+				if b != nil {
+					cacheable = b.Plen()
+				}
 				if k := b.KV(); k != nil {
 					matchedKV = k.Clone()
 					if m >= len(ids) {
@@ -149,11 +159,21 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		if err != nil {
 			return
 		}
-		// The lookup-side (cacheability) half of the #3390 split: m tokens matched the
-		// radix index at this instant, whether or not the servability checks below (nil
-		// KV, exact-hit refeed, unsupported truncate) let all of them be served. The
-		// realized `matched` can only stay at or fall below this.
-		cacheable = m
+		// Cached logits describe the distribution after the exact cached prefix.
+		// A partial hit must prefill its divergent suffix before sampling; scoped
+		// snapshot lookup returns the ancestor's logits for observability, so do
+		// not let those logits accidentally bypass the suffix forward.
+		if m < len(ids) {
+			cachedLogits = nil
+		}
+		// The lookup-side (cacheability) half of the #3390 split is the longest
+		// structurally visible token prefix. m is narrower: the prefix backed by a
+		// restorable KV/snapshot. Separate scoped visibility lookups can race only
+		// toward a longer restorable prefix, so keep cacheable at least m. The realized
+		// `matched` can only stay at or fall below this structural upper bound.
+		if cacheable < m {
+			cacheable = m
+		}
 		if matchedSnapshot != nil {
 			s = p.m.NewBackendSession(p.backend)
 			if err = matchedSnapshot.Restore(s); err != nil {
@@ -256,7 +276,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	if logits == nil {
 		tp := time.Now()
 		prefillAt := matched
-		checkpoint := inKernelSnapshotCheckpoint(prefillAt, len(ids))
+		checkpoint := inKernelAdaptiveSnapshotCheckpoint(prefillAt, cacheable, len(ids))
 		if reuse && p.backend != nil && checkpoint > prefillAt {
 			logits, err = p.prefillDivergentSuffix(ctx, s, ids[prefillAt:checkpoint], measurement)
 			if err != nil {
@@ -852,6 +872,21 @@ func inKernelSnapshotCheckpoint(matched, promptTokens int) int {
 		return 0
 	}
 	return checkpoint
+}
+
+// inKernelAdaptiveSnapshotCheckpoint materializes a restorable device snapshot
+// at the deepest block fully contained in a structurally shared prefix. Recurrent
+// snapshots cannot be synthesized by splitting a later leaf, so this repairs the
+// boundary for the next sibling while retaining the historical one-checkpoint
+// limit and strict-before-prompt fallback.
+func inKernelAdaptiveSnapshotCheckpoint(matched, cacheable, promptTokens int) int {
+	if cacheable > matched && cacheable < promptTokens {
+		checkpoint := (cacheable / inKernelSnapshotCheckpointTokens) * inKernelSnapshotCheckpointTokens
+		if checkpoint > matched {
+			return checkpoint
+		}
+	}
+	return inKernelSnapshotCheckpoint(matched, promptTokens)
 }
 
 // admitPrefixSnapshot transfers snapshot ownership to the same scoped/unscoped tree

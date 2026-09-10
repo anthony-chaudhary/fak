@@ -70,6 +70,32 @@ func (s *ScopedTree) FlightGroup() *PrefixFlightGroup {
 	return NewPrefixFlightGroupWithLocker(s.tree, s.lock)
 }
 
+// MatchLen returns the longest token prefix visible to owner across agent,
+// tenant, and explicitly promoted fleet scopes. It reports structural cache
+// identity only: callers must still use Lookup/LookupSnapshot to determine
+// whether the matched prefix has a reusable KV payload.
+func (s *ScopedTree) MatchLen(owner CacheIdentity, tokens []int) (int, error) {
+	if strings.TrimSpace(owner.Tenant) == "" {
+		return 0, ErrCacheIdentity
+	}
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	best := 0
+	for _, scope := range []ShareScope{ScopeAgent, ScopeTenant, ScopeFleet} {
+		if scope == ScopeAgent && strings.TrimSpace(owner.Agent) == "" {
+			continue
+		}
+		ns, err := scopeNamespace(scope, owner)
+		if err != nil {
+			continue
+		}
+		if matched := s.tree.MatchLenNS(ns, tokens); matched > best {
+			best = matched
+		}
+	}
+	return best, nil
+}
+
 func scopeNamespace(scope ShareScope, owner CacheIdentity) (string, error) {
 	tenant := strings.TrimSpace(owner.Tenant)
 	agent := strings.TrimSpace(owner.Agent)
