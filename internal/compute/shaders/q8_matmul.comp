@@ -19,10 +19,10 @@
 //   - Wave (1,1): tokens [16..31], outputs [16..31]
 //
 // For each K-block of 32 weights:
-//   1. Cooperatively stage 32 token rows of X (1024 floats) into LDS with Pad-2 stride (34 floats/row).
+//   1. Cooperatively stage 32 token rows of X (1024 floats) into LDS with a 48-element row stride.
 //   2. Cooperatively stage 32 output rows of Wcodes (1024 int8 codes) transposed into LDS [32 x 32].
 //   3. Stage per-block scales Wscale (32 floats) into LDS.
-//   4. Quantize X row-by-row into LDS Xq [32 x 34] int8 codes and per-row scale Xs [32].
+//   4. Quantize X row-by-row into LDS Xq [32 x 48] int8 codes and per-row scale Xs [32].
 //   5. Execute Wave32 WMMA 16x16x16 INT8 cooperative matrix multiply in two 16-element halves (K=0..15 and K=16..31),
 //      accumulating into int32 registers.
 //   6. Store cooperative matrix tile to LDS and accumulate scaled partial sums:
@@ -35,8 +35,10 @@ layout(local_size_x = 32, local_size_y = 4, local_size_z = 1) in;
 const uint TILE_M = 32u;
 const uint TILE_N = 32u;
 const uint BLOCK = 32u;
-const uint LDS_PAD_2 = 2u;
-const uint STRIDE_K = BLOCK + LDS_PAD_2;
+// Cooperative int8 matrix loads require a 16-byte-aligned pointer and stride.
+// Keep one aligned padding quantum to retain row skew without the invalid 34-byte stride.
+const uint LDS_PAD_16 = 16u;
+const uint STRIDE_K = BLOCK + LDS_PAD_16;
 
 shared int8_t  ldsXq[TILE_M * STRIDE_K];
 shared int8_t  ldsTileW[BLOCK * TILE_N];
@@ -60,9 +62,9 @@ int8_t q8round(float x) {
 }
 
 void main() {
-    uint waveID = gl_LocalInvocationID.y;
-    uint laneID = gl_LocalInvocationID.x;
-    uint threadID = waveID * 32u + laneID;
+    uint waveID = gl_SubgroupID;
+    uint laneID = gl_SubgroupInvocationID;
+    uint threadID = gl_LocalInvocationIndex;
 
     uint waveRow = (waveID / 2u) * 16u;
     uint waveCol = (waveID % 2u) * 16u;
