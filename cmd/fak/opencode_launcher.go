@@ -119,7 +119,7 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 			*baseURL = host
 		}
 		if *model == "" {
-			*model = projectassets.DefaultOpenCodeHaloModelID
+			*model = projectassets.ResolveDynamicHaloModel(".")
 		}
 		if !*quiet {
 			fmt.Fprintf(stderr, "fak opencode: targeting local Halo server at %s (model: %s)\n", *baseURL, *model)
@@ -160,7 +160,7 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 					}
 				} else {
 					if *model == "" {
-						*model = projectassets.DefaultOpenCodeHaloModelID
+						*model = projectassets.ResolveDynamicHaloModel(".")
 					}
 				}
 			}
@@ -327,7 +327,7 @@ func runOpencodeConfig(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	if (*halo || *strix) && *model == projectassets.DefaultOpenCodeModelID {
-		*model = projectassets.DefaultOpenCodeHaloModelID
+		*model = projectassets.ResolveDynamicHaloModel(".")
 	}
 	baseURL := *addr
 	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {

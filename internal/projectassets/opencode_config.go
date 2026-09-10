@@ -17,6 +17,70 @@ const DefaultOpenCodeModelID = "fak-local"
 // DefaultOpenCodeHaloModelID is the primary served model identifier for AMD Strix Halo local inference.
 const DefaultOpenCodeHaloModelID = "qwen-2.5-coder-32b-instruct"
 
+// ResolveDynamicHaloModel dynamically resolves the default Halo model identifier.
+// It checks FAK_HALO_MODEL, FAK_MODEL, opencode.json in root (inspecting top-level model,
+// provider.fak models, and model tier profiles), falling back to DefaultOpenCodeHaloModelID.
+func ResolveDynamicHaloModel(root string) string {
+	if m := os.Getenv("FAK_HALO_MODEL"); strings.TrimSpace(m) != "" {
+		return CleanModelPrefix(m)
+	}
+	if m := os.Getenv("FAK_MODEL"); strings.TrimSpace(m) != "" {
+		return CleanModelPrefix(m)
+	}
+	if root == "" {
+		root = "."
+	}
+	cfgPath := filepath.Join(root, "opencode.json")
+	if data, err := os.ReadFile(cfgPath); err == nil {
+		var raw struct {
+			Model             string `json:"model"`
+			ModelTierProfiles struct {
+				Fast struct {
+					ModelID string `json:"model_id"`
+				} `json:"fast"`
+				Balanced struct {
+					ModelID string `json:"model_id"`
+				} `json:"balanced"`
+			} `json:"model_tier_profiles"`
+			Provider map[string]struct {
+				Models map[string]interface{} `json:"models"`
+			} `json:"provider"`
+		}
+		if json.Unmarshal(data, &raw) == nil {
+			if raw.ModelTierProfiles.Fast.ModelID != "" {
+				return CleanModelPrefix(raw.ModelTierProfiles.Fast.ModelID)
+			}
+			if raw.ModelTierProfiles.Balanced.ModelID != "" {
+				return CleanModelPrefix(raw.ModelTierProfiles.Balanced.ModelID)
+			}
+			if raw.Model != "" {
+				return CleanModelPrefix(raw.Model)
+			}
+			if fakProv, ok := raw.Provider["fak"]; ok && len(fakProv.Models) > 0 {
+				for k := range fakProv.Models {
+					if strings.Contains(strings.ToLower(k), "coder") || strings.Contains(strings.ToLower(k), "qwen") {
+						return k
+					}
+				}
+				for k := range fakProv.Models {
+					return k
+				}
+			}
+		}
+	}
+	return DefaultOpenCodeHaloModelID
+}
+
+// CleanModelPrefix strips provider prefix (e.g. "fak/qwen-2.5-coder-32b-instruct" -> "qwen-2.5-coder-32b-instruct").
+func CleanModelPrefix(m string) string {
+	m = strings.TrimSpace(m)
+	if idx := strings.Index(m, "/"); idx != -1 {
+		return m[idx+1:]
+	}
+	return m
+}
+
+
 // OpenCodeProviderConfig defines the OpenAI-compatible provider structure for OpenCode.
 type OpenCodeProviderConfig struct {
 	NPM     string                 `json:"npm"`
@@ -32,8 +96,8 @@ func GenerateOpenCodeConfig(baseURL, modelID string) ([]byte, error) {
 		baseURL = DefaultOpenCodeBaseURL
 	}
 	modelID = strings.TrimSpace(modelID)
-	if modelID == "" {
-		modelID = DefaultOpenCodeModelID
+	if modelID == "" || modelID == DefaultOpenCodeModelID {
+		modelID = ResolveDynamicHaloModel(".")
 	}
 
 	modelsMap := map[string]interface{}{
@@ -54,6 +118,7 @@ func GenerateOpenCodeConfig(baseURL, modelID string) ([]byte, error) {
 	cfg := map[string]interface{}{
 		"$schema":  "https://opencode.ai/config.json",
 		"snapshot": false,
+		"model":    "fak/" + modelID,
 		"provider": map[string]interface{}{
 			"fak": map[string]interface{}{
 				"npm":  "@ai-sdk/openai-compatible",
@@ -80,8 +145,8 @@ func EnsureOpenCodeProviderConfig(root, baseURL, modelID string) (bool, error) {
 		baseURL = DefaultOpenCodeBaseURL
 	}
 	modelID = strings.TrimSpace(modelID)
-	if modelID == "" {
-		modelID = DefaultOpenCodeModelID
+	if modelID == "" || modelID == DefaultOpenCodeModelID {
+		modelID = ResolveDynamicHaloModel(root)
 	}
 
 	configPath := filepath.Join(root, "opencode.json")
@@ -122,6 +187,14 @@ func EnsureOpenCodeProviderConfig(root, baseURL, modelID string) (bool, error) {
 	if _, ok := raw["$schema"]; !ok {
 		raw["$schema"] = "https://opencode.ai/config.json"
 		modified = true
+	}
+
+	// Ensure top-level model is set to the main tier model if missing or pointing to fak provider
+	if curModel, ok := raw["model"].(string); !ok || curModel == "" || strings.HasPrefix(curModel, "fak/") {
+		if curModel != "fak/"+modelID {
+			raw["model"] = "fak/" + modelID
+			modified = true
+		}
 	}
 
 	// Retrieve or initialize provider map
