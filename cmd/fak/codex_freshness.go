@@ -25,6 +25,9 @@ const (
 	codexFreshnessMaxAgeEnv     = "FAK_CODEX_FRESHNESS_MAX_AGE"
 	codexFreshnessForceEnv      = "FAK_CODEX_FRESHNESS_FORCE"
 	codexFreshnessReceiptSchema = "fak.codex-freshness.v1"
+	codexFreshnessStrictEnv     = "FAK_CODEX_FRESHNESS_STRICT"
+	codexFreshnessBackoffTTL    = 10 * time.Minute
+	codexFreshnessBackoffSchema = "fak.codex-freshness-backoff.v1"
 )
 
 const (
@@ -38,6 +41,13 @@ type codexFreshnessConfig struct {
 }
 
 type codexFreshnessLease struct {
+	Schema        string    `json:"schema"`
+	CheckedAt     time.Time `json:"checked_at"`
+	RunningCommit string    `json:"running_commit"`
+	TargetCommit  string    `json:"target_commit"`
+}
+
+type codexFreshnessBackoff struct {
 	Schema        string    `json:"schema"`
 	CheckedAt     time.Time `json:"checked_at"`
 	RunningCommit string    `json:"running_commit"`
@@ -230,8 +240,13 @@ func runCodexFreshnessAdmission(args []string) ([]string, int, bool) {
 		return nil, 1, true
 	}
 	runningCommit := strings.TrimSpace(codexFreshnessRunningCommit())
-	if !policy.Force && codexFreshnessLeaseValidFor(statePath+".json", codexFreshnessNow(), policy.MaxAge, runningCommit) {
-		return filtered, 0, false
+	if !policy.Force {
+		if codexFreshnessLeaseValidFor(statePath+".json", codexFreshnessNow(), policy.MaxAge, runningCommit) {
+			return filtered, 0, false
+		}
+		if codexFreshnessBackoffValid(statePath+".backoff", codexFreshnessNow(), runningCommit) {
+			return filtered, 0, false
+		}
 	}
 	claimed, err := codexFreshnessAcquireClaim(statePath+".lock", codexFreshnessNow())
 	if err != nil {
@@ -257,6 +272,7 @@ func runCodexFreshnessAdmission(args []string) ([]string, int, bool) {
 	switch inspection.Assessment.Verdict {
 	case codexFreshnessFresh:
 		consumeCodexFreshnessReexecMarker()
+		_ = os.Remove(statePath + ".backoff")
 		if err := codexFreshnessWriteReceipt(statePath+".json", codexFreshnessNow(), inspection.Assessment.RunningCommit, inspection.Assessment.TargetCommit); err != nil {
 			fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: persist freshness lease: %v\n", err)
 			return nil, 1, true
@@ -278,11 +294,26 @@ func runCodexFreshnessAdmission(args []string) ([]string, int, bool) {
 		if err != nil {
 			if strings.Contains(err.Error(), "target updated successfully") {
 				fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: %v\n", err)
-			} else {
-				fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: self-update failed: %v\n", err)
+				return nil, 1, true
 			}
+			if isCodexFreshnessBuildBreakage(err) && isCodexFreshnessViableRuntime(inspection.Assessment, runningCommit) {
+				if isCodexFreshnessStrict() {
+					fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: self-update failed: %v\n", err)
+					return nil, 1, true
+				}
+				viableSHA := running
+				if viableSHA == "" || viableSHA == "unknown" {
+					viableSHA = shortFreshnessID(runningCommit)
+				}
+				fmt.Fprintf(os.Stderr, "fak codex: WARNING: self-update failed because origin/main is not buildable: %v\n", err)
+				fmt.Fprintf(os.Stderr, "fak codex: continuing with installed binary %s. Pass '--freshness-gate off' to suppress this check.\n", viableSHA)
+				_ = codexFreshnessWriteBackoff(statePath+".backoff", codexFreshnessNow(), runningCommit, inspection.Assessment.TargetCommit)
+				return filtered, 0, false
+			}
+			fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: self-update failed: %v\n", err)
 			return nil, 1, true
 		}
+		_ = os.Remove(statePath + ".backoff")
 		if err := codexFreshnessWriteReceipt(statePath+".json", codexFreshnessNow(), installedCommit, installedCommit); err != nil {
 			fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: persist freshness lease: %v\n", err)
 			return nil, 1, true
@@ -541,6 +572,71 @@ func codexFreshnessWriteReceipt(path string, now time.Time, runningCommit, targe
 		return err
 	}
 	return writeFileAtomic(path, append(raw, '\n'), 0o600)
+}
+
+func isCodexFreshnessBuildBreakage(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "gate_failed") ||
+		strings.Contains(msg, "gate-failed") ||
+		strings.Contains(msg, "gate failed") ||
+		strings.Contains(msg, "compilation") ||
+		strings.Contains(msg, "not buildable") ||
+		strings.Contains(msg, "build failed")
+}
+
+func isCodexFreshnessStrict() bool {
+	v := strings.TrimSpace(os.Getenv(codexFreshnessStrictEnv))
+	if v == "" {
+		return false
+	}
+	if v == "1" {
+		return true
+	}
+	b, err := strconv.ParseBool(v)
+	return err == nil && b
+}
+
+func isCodexFreshnessViableRuntime(assessment codexFreshnessAssessment, runningCommit string) bool {
+	if assessment.Verdict != codexFreshnessBehind {
+		return false
+	}
+	return isFullGitCommit(strings.TrimSpace(assessment.RunningCommit)) && isFullGitCommit(strings.TrimSpace(runningCommit))
+}
+
+func codexFreshnessWriteBackoff(path string, now time.Time, runningCommit, targetCommit string) error {
+	raw, err := json.Marshal(codexFreshnessBackoff{
+		Schema:        codexFreshnessBackoffSchema,
+		CheckedAt:     now.UTC(),
+		RunningCommit: strings.TrimSpace(runningCommit),
+		TargetCommit:  strings.TrimSpace(targetCommit),
+	})
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return writeFileAtomic(path, append(raw, '\n'), 0o600)
+}
+
+func codexFreshnessBackoffValid(path string, now time.Time, runningCommit string) bool {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var backoff codexFreshnessBackoff
+	if json.Unmarshal(raw, &backoff) != nil || backoff.Schema != codexFreshnessBackoffSchema || backoff.CheckedAt.IsZero() || backoff.CheckedAt.After(now) {
+		return false
+	}
+	running := strings.TrimSpace(runningCommit)
+	backoffRunning := strings.TrimSpace(backoff.RunningCommit)
+	if running == "" || backoffRunning == "" || !strings.EqualFold(running, backoffRunning) {
+		return false
+	}
+	return now.Sub(backoff.CheckedAt) < codexFreshnessBackoffTTL
 }
 
 func codexFreshnessAcquireClaim(path string, now time.Time) (bool, error) {
