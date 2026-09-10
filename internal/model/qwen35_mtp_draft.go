@@ -6,6 +6,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/polymodel"
 )
 
@@ -34,6 +35,7 @@ type Qwen35MTPDraftConfig struct {
 // hidden into the next MTP step.
 type Qwen35MTPDraftSession struct {
 	target            *Session
+	backend           compute.Backend
 	depth             int
 	forward           *Qwen35MTPForward
 	step              qwen35MTPDraftStep
@@ -50,15 +52,37 @@ type Qwen35MTPDraftSession struct {
 // evaluated target session. Unsupported depths, target paths, and checkpoint
 // shapes fail before either session is mutated.
 func NewQwen35MTPDraftSession(target *Session, depth int) (*Qwen35MTPDraftSession, error) {
+	return newQwen35MTPDraftSession(target, depth, nil)
+}
+
+// NewQwen35MTPDraftSessionWithBackend binds the retained draft head to an
+// explicit resident backend while leaving the F32 target session and its cache
+// untouched. The caller supplies the target's exact pre-final-normalization
+// hidden state through the established draft-step boundary.
+func NewQwen35MTPDraftSessionWithBackend(target *Session, depth int, be compute.Backend) (*Qwen35MTPDraftSession, error) {
+	if be == nil {
+		return nil, &compute.UnsupportedQwen35MTPDraftError{Path: compute.Qwen35MTPDraftPath, Stage: "backend admission", Reason: "a non-nil backend is required"}
+	}
+	return newQwen35MTPDraftSession(target, depth, be)
+}
+
+func newQwen35MTPDraftSession(target *Session, depth int, be compute.Backend) (*Qwen35MTPDraftSession, error) {
 	if err := validateQwen35MTPDepthNTarget(target, depth, false); err != nil {
 		return nil, err
 	}
-	forward, err := target.M.NewQwen35MTPForward()
+	var forward *Qwen35MTPForward
+	var err error
+	if be == nil {
+		forward, err = target.M.NewQwen35MTPForward()
+	} else {
+		forward, err = target.M.NewQwen35MTPForwardWithBackend(be)
+	}
 	if err != nil {
 		return nil, err
 	}
 	return &Qwen35MTPDraftSession{
 		target:  target,
+		backend: be,
 		depth:   depth,
 		forward: forward,
 		step:    qwen35MTPForwardFeedback,
@@ -417,7 +441,13 @@ func (d *Qwen35MTPDraftSession) recreateForward() error {
 	if d.forward != nil {
 		d.forward.Close()
 	}
-	forward, err := d.target.M.NewQwen35MTPForward()
+	var forward *Qwen35MTPForward
+	var err error
+	if d.backend == nil {
+		forward, err = d.target.M.NewQwen35MTPForward()
+	} else {
+		forward, err = d.target.M.NewQwen35MTPForwardWithBackend(d.backend)
+	}
 	if err != nil {
 		d.forward = nil
 		return err
@@ -466,6 +496,9 @@ func qwen35MTPForwardFeedback(f *Qwen35MTPForward, pos int, priorHidden, current
 	}
 	if pos <= f.lastPos {
 		return nil, nil, qwen35MTPStateError("position", fmt.Sprintf("greater than %d", f.lastPos), fmt.Sprint(pos))
+	}
+	if f.resident != nil {
+		return f.residentForwardFeedback(pos, priorHidden, currentEmbedding)
 	}
 
 	x, err := f.qwen38MTPFuse(priorHidden, currentEmbedding)

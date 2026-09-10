@@ -133,6 +133,7 @@ function Build-Shaders {
     $shaders += "qwen35_gdn_q8_in_proj"
     $shaders += "coopmat_wave32_wmma"
     $shaders += "q4k_matmul_wave32"
+    $shaders += "q6k_matmul"
     $shaders += "rmsnorm_q4k_matmul2"
     $shaders += "swiglu_q4k_matmul_add"
     foreach ($s in $shaders) {

@@ -1,0 +1,85 @@
+#version 450
+
+// q6k_matmul.comp - portable GGML Q6_K matrix multiplication.
+//
+// Y[P,outDim] = X[P,inDim] * W[outDim,inDim]^T. W remains in the
+// checkpoint's packed Q6_K representation: every 256 weights occupy 210
+// bytes (128 ql, 64 qh, 16 signed scales, and one little-endian f16 d).
+// Byte-addressed loads are assembled from uint words because a 210-byte
+// superblock gives every other block a two-byte-aligned start. The host pads
+// the complete packed allocation to four bytes so the last word load stays
+// inside its descriptor range.
+layout(local_size_x = 64) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer Q6K { uint raw[]; };
+layout(std430, set = 0, binding = 1) readonly buffer X   { float x[]; };
+layout(std430, set = 0, binding = 2) writeonly buffer Y  { float y[]; };
+
+layout(push_constant) uniform PC {
+    int outDim;
+    int inDim;
+    int tokens;
+} pc;
+
+uint byteAt(uint offset) {
+    uint word = raw[offset >> 2u];
+    return (word >> ((offset & 3u) * 8u)) & 255u;
+}
+
+int signedByteAt(uint offset) {
+    int value = int(byteAt(offset));
+    return value >= 128 ? value - 256 : value;
+}
+
+float halfAt(uint offset) {
+    uint bits = byteAt(offset) | (byteAt(offset + 1u) << 8u);
+    return unpackHalf2x16(bits).x;
+}
+
+void main() {
+    uint globalIndex = gl_GlobalInvocationID.x;
+    uint outDim = uint(pc.outDim);
+    uint row = globalIndex % outDim;
+    uint token = globalIndex / outDim;
+    if (token >= uint(pc.tokens)) return;
+
+    uint blocks = uint(pc.inDim) / 256u;
+    float sum = 0.0;
+    for (uint sb = 0u; sb < blocks; ++sb) {
+        uint base = (row * blocks + sb) * 210u;
+        float d = halfAt(base + 208u);
+        uint xBlock = token * uint(pc.inDim) + sb * 256u;
+
+        // This order mirrors dequantQ6K in quant_q4k.go: two 128-value
+        // halves, then the four interleaved 32-value groups for each lane.
+        for (int segment = 0; segment < 2; ++segment) {
+            uint ql = base + uint(segment * 64);
+            uint qh = base + 128u + uint(segment * 32);
+            uint scales = base + 192u + uint(segment * 8);
+            uint valueBase = xBlock + uint(segment * 128);
+
+            for (int lane = 0; lane < 32; ++lane) {
+                int scaleGroup = lane / 16;
+                uint low0 = byteAt(ql + uint(lane));
+                uint low1 = byteAt(ql + uint(lane + 32));
+                uint high = byteAt(qh + uint(lane));
+
+                int q1 = int((low0 & 15u) | (((high >> 0u) & 3u) << 4u)) - 32;
+                int q2 = int((low1 & 15u) | (((high >> 2u) & 3u) << 4u)) - 32;
+                int q3 = int((low0 >> 4u) | (((high >> 4u) & 3u) << 4u)) - 32;
+                int q4 = int((low1 >> 4u) | (((high >> 6u) & 3u) << 4u)) - 32;
+
+                int s1 = signedByteAt(scales + uint(scaleGroup));
+                int s2 = signedByteAt(scales + uint(scaleGroup + 2));
+                int s3 = signedByteAt(scales + uint(scaleGroup + 4));
+                int s4 = signedByteAt(scales + uint(scaleGroup + 6));
+
+                sum += ((d * float(s1)) * float(q1)) * x[valueBase + uint(lane)];
+                sum += ((d * float(s2)) * float(q2)) * x[valueBase + uint(lane + 32)];
+                sum += ((d * float(s3)) * float(q3)) * x[valueBase + uint(lane + 64)];
+                sum += ((d * float(s4)) * float(q4)) * x[valueBase + uint(lane + 96)];
+            }
+        }
+    }
+    y[token * outDim + row] = sum;
+}

@@ -16,8 +16,8 @@ import (
 )
 
 func TestVulkanShadersCompleteness(t *testing.T) {
-	if len(VulkanShaders) != 42 {
-		t.Fatalf("expected 42 Vulkan shaders, got %d", len(VulkanShaders))
+	if len(VulkanShaders) != 43 {
+		t.Fatalf("expected 43 Vulkan shaders, got %d", len(VulkanShaders))
 	}
 
 	seen := make(map[string]bool)
@@ -36,7 +36,7 @@ func TestVulkanShadersCompleteness(t *testing.T) {
 		"attention", "argmax", "argmax_pairs", "q8_matmul",
 		"q8_matmul2", "q8_matmul3", "rmsnorm_q8_matmul2", "rmsnorm_q8_matmul3",
 		"swiglu_q8_matmul_add", "qwen35_gdn_conv", "qwen35_gdn_recurrent",
-		"q4k_matmul", "q4k_matmul_wave32", "q2k_matmul", "qwen35_split_qg_panel",
+		"q4k_matmul", "q4k_matmul_wave32", "q6k_matmul", "q2k_matmul", "qwen35_split_qg_panel",
 		"qwen35_partial_rope_panel", "qwen35_causal_attention_panel",
 		"sigmoid_mul", "q8_matmul_decode",
 		"glm_kda_recurrent_reread", "glm_kda_recurrent_wave32",
