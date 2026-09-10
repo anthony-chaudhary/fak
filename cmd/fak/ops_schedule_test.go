@@ -142,7 +142,7 @@ func TestOpsScheduleDryRunJSON(t *testing.T) {
 	}
 
 	t3 := report.Tasks[2]
-	if t3.Workload != "git-sync" || t3.Interval != "1h" || t3.Timeout != "8m" {
+	if t3.Workload != "git-sync" || t3.Interval != "1h" || t3.Timeout != "15m" {
 		t.Errorf("unexpected task 3: %+v", t3)
 	}
 	if !strings.Contains(t3.Definition, "Register-ScheduledTask") {
