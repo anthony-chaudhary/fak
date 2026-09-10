@@ -55,8 +55,66 @@ package model
 
 import (
 	"math"
+	"os"
+	"strings"
 	"testing"
 )
+
+const attnInnerLoopShareProfileEnv = "FAK_ATTN_SHARE_MEASURE"
+
+const (
+	routineAttnSharePrefillLen   = 16
+	routineAttnShareDecodePrompt = 16
+	routineAttnShareDecodeSteps  = 2
+
+	explicitAttnSharePrefillLen   = 384
+	explicitAttnShareDecodePrompt = 384
+	explicitAttnShareDecodeSteps  = 24
+)
+
+type attnInnerLoopShareWorkload struct {
+	prefillLen   int
+	decodePrompt int
+	decodeSteps  int
+	isExplicit   bool
+	skip         bool
+	skipReason   string
+}
+
+func resolveAttnInnerLoopShareWorkload(envVal string, short bool) attnInnerLoopShareWorkload {
+	norm := strings.ToLower(strings.TrimSpace(envVal))
+	isExplicit := false
+	switch norm {
+	case "1", "true", "yes", "on":
+		isExplicit = true
+	}
+
+	if isExplicit {
+		if short {
+			return attnInnerLoopShareWorkload{
+				prefillLen:   explicitAttnSharePrefillLen,
+				decodePrompt: explicitAttnShareDecodePrompt,
+				decodeSteps:  explicitAttnShareDecodeSteps,
+				isExplicit:   true,
+				skip:         true,
+				skipReason:   "skipping explicit long CPU attention profiling workload under -short",
+			}
+		}
+		return attnInnerLoopShareWorkload{
+			prefillLen:   explicitAttnSharePrefillLen,
+			decodePrompt: explicitAttnShareDecodePrompt,
+			decodeSteps:  explicitAttnShareDecodeSteps,
+			isExplicit:   true,
+		}
+	}
+
+	return attnInnerLoopShareWorkload{
+		prefillLen:   routineAttnSharePrefillLen,
+		decodePrompt: routineAttnShareDecodePrompt,
+		decodeSteps:  routineAttnShareDecodeSteps,
+		isExplicit:   false,
+	}
+}
 
 // representative head geometry for the score-dot microbench / tolerance witness: head_dim
 // 128 is the Llama/Qwen norm and a clean multiple of fdot's 8-wide body.
@@ -110,16 +168,25 @@ func attnShareModel() *Model {
 }
 
 // TestAttnInnerLoopShareIsMeasured is the #1129 required-first-step witness: it profiles a
-// long-context prefill AND a decode run and quotes attention's measured share of each. The
+// prefill AND a decode run and quotes attention's measured share of each. The
 // assertions are structural (attention IS attributed, with real work, as a sane fraction);
 // the deterministic MAC share + the (machine-dependent) time share are both logged so the
 // verdict above is grounded in numbers from this box. The realistic absolute shares on a real
 // model are in MODEL-BASELINE-RESULTS.md (Act 5): attn ~23-27% of prefill, ~1.2% of DECODE.
+//
+// By default, a routine bounded workload (P=16, decode steps=2) executes quickly to serve as a fast
+// structural regression witness. Set FAK_ATTN_SHARE_MEASURE=1 (e.g.
+// `FAK_ATTN_SHARE_MEASURE=1 go test -v ./internal/model -run '^TestAttnInnerLoopShareIsMeasured$'`)
+// to run the explicit long-context profiling workload (P=384, decode steps=24), which is skipped under -short.
 func TestAttnInnerLoopShareIsMeasured(t *testing.T) {
+	wl := resolveAttnInnerLoopShareWorkload(os.Getenv(attnInnerLoopShareProfileEnv), testing.Short())
+	if wl.skip {
+		t.Skip(wl.skipReason)
+	}
+
 	m := attnShareModel()
 
-	const prefillLen = 384 // long-enough context that the O(P^2) attn loop is a visible cliff
-	pp := m.ProfilePrefill(prefillLen)
+	pp := m.ProfilePrefill(wl.prefillLen)
 	attnPctP, attnMACsP, okP := opShare(pp, opAttn)
 	if !okP {
 		t.Fatalf("prefill profile did not attribute the %q op-class — attention share unmeasured", opAttn)
@@ -131,8 +198,7 @@ func TestAttnInnerLoopShareIsMeasured(t *testing.T) {
 		t.Fatalf("prefill attn time share = %.2f%%, outside [0,100] — profiler attribution broken", attnPctP)
 	}
 
-	const decodePrompt, decodeSteps = 384, 24
-	pd := m.ProfileDecode(decodePrompt, decodeSteps)
+	pd := m.ProfileDecode(wl.decodePrompt, wl.decodeSteps)
 	attnPctD, attnMACsD, okD := opShare(pd, opAttn)
 	if !okD {
 		t.Fatalf("decode profile did not attribute the %q op-class — attention share unmeasured", opAttn)
@@ -154,9 +220,13 @@ func TestAttnInnerLoopShareIsMeasured(t *testing.T) {
 	oprojP, _, _ := opShare(pp, opOProj)
 	qkvP, _, _ := opShare(pp, opQKVProj)
 	t.Logf("#1129 MEASURE prefill P=%d: attn MAC=%.1f%% time=%.1f%% (MACs=%d) | qkv_proj time=%.1f%% o_proj time=%.1f%% bottleneck=%q",
-		prefillLen, macFrac(attnMACsP, pp.TotalMACs), attnPctP, attnMACsP, qkvP, oprojP, pp.Bottleneck)
+		wl.prefillLen, macFrac(attnMACsP, pp.TotalMACs), attnPctP, attnMACsP, qkvP, oprojP, pp.Bottleneck)
 	t.Logf("#1129 MEASURE decode  P=%d steps=%d: attn MAC=%.1f%% time=%.1f%% (MACs=%d) bottleneck=%q",
-		decodePrompt, decodeSteps, macFrac(attnMACsD, pd.TotalMACs), attnPctD, attnMACsD, pd.Bottleneck)
+		wl.decodePrompt, wl.decodeSteps, macFrac(attnMACsD, pd.TotalMACs), attnPctD, attnMACsD, pd.Bottleneck)
+	if !wl.isExplicit {
+		t.Logf("routine bounded witness executed (prefill=%d, decodePrompt=%d, decodeSteps=%d); set %s=1 to run full measurement",
+			wl.prefillLen, wl.decodePrompt, wl.decodeSteps, attnInnerLoopShareProfileEnv)
+	}
 	// The DETERMINISTIC, geometry-driven witness is the MAC share. The synthetic wall-time
 	// share is NOT representative of a real deployment and must not be read as one: this
 	// micro-model's projection GEMVs are tiny and the profiler times each op separately, which
@@ -269,4 +339,164 @@ func BenchmarkAttnWeightedSum(b *testing.B) {
 		}
 	}
 	_ = o
+}
+
+func TestAttnInnerLoopShareWorkloadRouting(t *testing.T) {
+	cases := []struct {
+		name         string
+		envVal       string
+		short        bool
+		wantPrefill  int
+		wantPrompt   int
+		wantSteps    int
+		wantExplicit bool
+		wantSkip     bool
+		wantReason   string
+	}{
+		{
+			name:         "default empty env non-short",
+			envVal:       "",
+			short:        false,
+			wantPrefill:  routineAttnSharePrefillLen,
+			wantPrompt:   routineAttnShareDecodePrompt,
+			wantSteps:    routineAttnShareDecodeSteps,
+			wantExplicit: false,
+			wantSkip:     false,
+		},
+		{
+			name:         "default empty env short",
+			envVal:       "",
+			short:        true,
+			wantPrefill:  routineAttnSharePrefillLen,
+			wantPrompt:   routineAttnShareDecodePrompt,
+			wantSteps:    routineAttnShareDecodeSteps,
+			wantExplicit: false,
+			wantSkip:     false,
+		},
+		{
+			name:         "explicit 1 non-short",
+			envVal:       "1",
+			short:        false,
+			wantPrefill:  explicitAttnSharePrefillLen,
+			wantPrompt:   explicitAttnShareDecodePrompt,
+			wantSteps:    explicitAttnShareDecodeSteps,
+			wantExplicit: true,
+			wantSkip:     false,
+		},
+		{
+			name:         "explicit 1 short",
+			envVal:       "1",
+			short:        true,
+			wantPrefill:  explicitAttnSharePrefillLen,
+			wantPrompt:   explicitAttnShareDecodePrompt,
+			wantSteps:    explicitAttnShareDecodeSteps,
+			wantExplicit: true,
+			wantSkip:     true,
+			wantReason:   "skipping explicit long CPU attention profiling workload under -short",
+		},
+		{
+			name:         "truthy variant true",
+			envVal:       "true",
+			short:        false,
+			wantPrefill:  explicitAttnSharePrefillLen,
+			wantPrompt:   explicitAttnShareDecodePrompt,
+			wantSteps:    explicitAttnShareDecodeSteps,
+			wantExplicit: true,
+			wantSkip:     false,
+		},
+		{
+			name:         "truthy variant YES with whitespace",
+			envVal:       "  YES  ",
+			short:        false,
+			wantPrefill:  explicitAttnSharePrefillLen,
+			wantPrompt:   explicitAttnShareDecodePrompt,
+			wantSteps:    explicitAttnShareDecodeSteps,
+			wantExplicit: true,
+			wantSkip:     false,
+		},
+		{
+			name:         "truthy variant On",
+			envVal:       "On",
+			short:        false,
+			wantPrefill:  explicitAttnSharePrefillLen,
+			wantPrompt:   explicitAttnShareDecodePrompt,
+			wantSteps:    explicitAttnShareDecodeSteps,
+			wantExplicit: true,
+			wantSkip:     false,
+		},
+		{
+			name:         "falsy 0",
+			envVal:       "0",
+			short:        false,
+			wantPrefill:  routineAttnSharePrefillLen,
+			wantPrompt:   routineAttnShareDecodePrompt,
+			wantSteps:    routineAttnShareDecodeSteps,
+			wantExplicit: false,
+			wantSkip:     false,
+		},
+		{
+			name:         "falsy false",
+			envVal:       "false",
+			short:        false,
+			wantPrefill:  routineAttnSharePrefillLen,
+			wantPrompt:   routineAttnShareDecodePrompt,
+			wantSteps:    routineAttnShareDecodeSteps,
+			wantExplicit: false,
+			wantSkip:     false,
+		},
+		{
+			name:         "falsy no",
+			envVal:       "no",
+			short:        false,
+			wantPrefill:  routineAttnSharePrefillLen,
+			wantPrompt:   routineAttnShareDecodePrompt,
+			wantSteps:    routineAttnShareDecodeSteps,
+			wantExplicit: false,
+			wantSkip:     false,
+		},
+		{
+			name:         "falsy off",
+			envVal:       "off",
+			short:        false,
+			wantPrefill:  routineAttnSharePrefillLen,
+			wantPrompt:   routineAttnShareDecodePrompt,
+			wantSteps:    routineAttnShareDecodeSteps,
+			wantExplicit: false,
+			wantSkip:     false,
+		},
+		{
+			name:         "falsy invalid",
+			envVal:       "invalid",
+			short:        false,
+			wantPrefill:  routineAttnSharePrefillLen,
+			wantPrompt:   routineAttnShareDecodePrompt,
+			wantSteps:    routineAttnShareDecodeSteps,
+			wantExplicit: false,
+			wantSkip:     false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wl := resolveAttnInnerLoopShareWorkload(tc.envVal, tc.short)
+			if wl.prefillLen != tc.wantPrefill {
+				t.Errorf("prefillLen = %d, want %d", wl.prefillLen, tc.wantPrefill)
+			}
+			if wl.decodePrompt != tc.wantPrompt {
+				t.Errorf("decodePrompt = %d, want %d", wl.decodePrompt, tc.wantPrompt)
+			}
+			if wl.decodeSteps != tc.wantSteps {
+				t.Errorf("decodeSteps = %d, want %d", wl.decodeSteps, tc.wantSteps)
+			}
+			if wl.isExplicit != tc.wantExplicit {
+				t.Errorf("isExplicit = %v, want %v", wl.isExplicit, tc.wantExplicit)
+			}
+			if wl.skip != tc.wantSkip {
+				t.Errorf("skip = %v, want %v", wl.skip, tc.wantSkip)
+			}
+			if tc.wantReason != "" && wl.skipReason != tc.wantReason {
+				t.Errorf("skipReason = %q, want %q", wl.skipReason, tc.wantReason)
+			}
+		})
+	}
 }
