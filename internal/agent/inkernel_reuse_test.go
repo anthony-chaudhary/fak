@@ -592,7 +592,7 @@ func TestInKernelPoisonEvictionForcesReprefill(t *testing.T) {
 	bad := append(append([]int{}, sys...), synthIDs(cfg.VocabSize, 8, 12)...) // a poisoned tool-result tail
 
 	decode(p, good, 4) // cache the benign turn
-	_, mBad := decode(p, bad, 4)
+	badGenerated, mBad := decode(p, bad, 4)
 	if mBad != len(sys) {
 		t.Fatalf("the poisoned turn should reuse the shared prefix, matched %d want %d", mBad, len(sys))
 	}
@@ -603,9 +603,13 @@ func TestInKernelPoisonEvictionForcesReprefill(t *testing.T) {
 		t.Fatalf("poisoned turn not fully cached: %d/%d", got, len(bad))
 	}
 
+	badEvaluated := append(append([]int(nil), bad...), badGenerated[:len(badGenerated)-1]...)
+	if got := p.cachedPrefixLen(badEvaluated); got != len(badEvaluated) {
+		t.Fatalf("poisoned evaluated continuation not cached before quarantine: %d/%d", got, len(badEvaluated))
+	}
 	freed := p.evictPoisonedIDs(bad) // the quarantine verdict
-	if want := len(bad) - len(sys); freed != want {
-		t.Fatalf("evicted %d tokens, want %d (the poisoned tail only)", freed, want)
+	if want := len(bad) - len(sys) + len(badGenerated) - 1; freed != want {
+		t.Fatalf("evicted %d tokens, want %d (poisoned tail plus its evaluated generated descendants)", freed, want)
 	}
 
 	if got := p.cachedPrefixLen(good); got != len(good) {
@@ -613,6 +617,9 @@ func TestInKernelPoisonEvictionForcesReprefill(t *testing.T) {
 	}
 	if got := p.cachedPrefixLen(bad); got != len(sys) {
 		t.Errorf("poisoned KV survived: cached %d, want %d (only the shared prefix)", got, len(sys))
+	}
+	if got := p.cachedPrefixLen(badEvaluated); got != len(sys) {
+		t.Errorf("poisoned generated continuation survived: cached %d, want %d (only the shared prefix)", got, len(sys))
 	}
 	if _, m := decode(p, bad, 4); m != len(sys) {
 		t.Errorf("next turn on the poisoned transcript reused %d, want %d (must re-prefill the poison)", m, len(sys))

@@ -332,10 +332,17 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		maxNew:      maxNew,
 		measurement: measurement,
 	}
+	if reuse {
+		// A continuation is cacheable only after its token has actually crossed the
+		// model forward boundary. Keep this nil when reuse is off so the ordinary
+		// decode path pays no allocation or append cost.
+		ln.forwarded = make([]int, 0, min(max(0, maxNew-1), inKernelSnapshotCheckpointTokens))
+	}
 	measurement.startDecodeTrace()
 	td := time.Now()
+	var coalescedErr error
 	if coordinated, coordinateErr := coalescedDecode(ctx, ln); coordinated {
-		err = coordinateErr
+		coalescedErr = coordinateErr
 	} else if p.batchDecode {
 		// Opt-in: drive this one request through the shared continuous-batch step. For B==1
 		// StepBatchActive is exactly Seqs[0].Step, so the served tokens are unchanged.
@@ -344,7 +351,17 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		inKernelDecodeSerial(ctx, ln)
 	}
 	gen, stopped, err = ln.gen, ln.stopped, ln.err
+	if err == nil {
+		err = coalescedErr
+	}
 	decodeS = time.Since(td).Seconds()
+	if err == nil && ctx.Err() == nil && len(ln.forwarded) > 0 {
+		// Output has already been emitted successfully. Snapshot/admission is a
+		// best-effort acceleration for the next turn and must not turn that response
+		// into a failure. forwarded excludes every sampled token that did not receive
+		// a Step (maxNew, emit-stop, and token-ID stop terminals).
+		p.admitGeneratedContinuation(ctx, s, ids, ln.forwarded, ln.logits)
+	}
 	// 5) R6/#5617: fold this request's activated-expert residency into the serve-scoped ledger while
 	// the session is still alive — the `defer s.Close()` above takes the ring, and with it every
 	// counter the offload ladder built, the moment this function returns. The token count is what
@@ -448,6 +465,9 @@ type decodeLane struct {
 	presPenalty float64
 	maxNew      int
 	measurement *nativeInferenceMeasurement
+	// forwarded contains generated tokens whose Session.Step (or active batched
+	// equivalent) completed. A non-nil empty slice arms continuation tracking.
+	forwarded []int
 
 	gen     int
 	stopped bool
@@ -681,10 +701,16 @@ func inKernelDecodeSerial(ctx context.Context, ln *decodeLane) {
 		}
 		if ln.measurement == nil || ln.measurement.traceNow == nil {
 			ln.logits = ln.s.Step(next)
+			if ln.forwarded != nil {
+				ln.forwarded = append(ln.forwarded, next)
+			}
 			continue
 		}
 		started := ln.measurement.traceNow()
 		ln.logits = ln.s.Step(next)
+		if ln.forwarded != nil {
+			ln.forwarded = append(ln.forwarded, next)
+		}
 		if err := ln.measurement.recordForwardTiming(ln.gen, NativeForwardSessionStep, 1, ln.measurement.traceNow().Sub(started)); err != nil {
 			ln.err, ln.done = err, true
 			return
@@ -771,6 +797,9 @@ func inKernelDecodeLanesBatched(ctx context.Context, lanes []*decodeLane, m *mod
 		for i := range lanes {
 			if active[i] {
 				lanes[i].logits = out[i]
+				if lanes[i].forwarded != nil {
+					lanes[i].forwarded = append(lanes[i].forwarded, ids[i])
+				}
 			}
 		}
 	}
@@ -806,6 +835,47 @@ func (p *InKernelPlanner) admitPrefixSnapshot(ctx context.Context, ids []int, sn
 		p.tree.Done(leaf)
 	}
 	return err
+}
+
+// admitGeneratedContinuation admits the exact state the decoder already owns after
+// successful forwards. It deliberately does not Step the last emitted token merely to
+// extend the cache: generation semantics and model work remain unchanged.
+func (p *InKernelPlanner) admitGeneratedContinuation(ctx context.Context, s *model.Session, prompt, forwarded []int, logits []float32) {
+	if p == nil || p.tree == nil || s == nil || len(forwarded) == 0 || ctx.Err() != nil {
+		return
+	}
+	tokens := make([]int, 0, len(prompt)+len(forwarded))
+	tokens = append(tokens, prompt...)
+	tokens = append(tokens, forwarded...)
+	if ctx.Err() != nil {
+		return
+	}
+	if p.backend != nil {
+		snap, err := s.PrefixSnapshot()
+		if err != nil {
+			return
+		}
+		if ctx.Err() != nil || snap.Tokens != len(tokens) {
+			snap.Close()
+			return
+		}
+		if err := p.admitPrefixSnapshot(ctx, tokens, snap, logits); err != nil {
+			snap.Close()
+		}
+		return
+	}
+	if s.Cache == nil || s.Cache.Len() != len(tokens) {
+		return
+	}
+	if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped && p.scopedTree != nil {
+		_ = p.scopedTree.AdmitPrivate(owner, tokens, s.Cache, logits)
+		return
+	}
+	p.mu.Lock()
+	b, matched := p.tree.Lookup(tokens)
+	leaf := p.tree.InsertCloneWithLogits(b, tokens[matched:], s.Cache, logits)
+	p.tree.Done(leaf)
+	p.mu.Unlock()
 }
 
 func (p *InKernelPlanner) sessionFromPrefixClone(prefix *model.KVCache) *model.Session {
