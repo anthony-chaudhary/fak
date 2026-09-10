@@ -680,8 +680,9 @@ func TestQwen35QSASparseRowGather(t *testing.T) {
 	}
 }
 
-// TestQwen35MTPDepth4SpeculativeLoop witnesses native MTP depth K=4 causal tree verification
-// evaluating 4 candidate tokens in parallel during a single base-model weight read pass.
+// TestQwen35MTPDepth4SpeculativeLoop pins the compatibility wrapper to the
+// execution facts reported by its target transaction. It must not manufacture
+// physical throughput, occupancy, or weight-reuse claims.
 func TestQwen35MTPDepth4SpeculativeLoop(t *testing.T) {
 	cfg := qwen35HybridTestCfg()
 	m := NewSynthetic(cfg)
@@ -689,7 +690,8 @@ func TestQwen35MTPDepth4SpeculativeLoop(t *testing.T) {
 
 	prompt := []int{5, 12, 19, 26}
 	s := m.NewSession()
-	_ = s.Prefill(prompt)
+	boundary := s.Prefill(prompt)
+	s.SetLastLogits(boundary)
 	basePos := s.Cache.Len()
 
 	// 1. Execute speculative verification pass with K=4 draft proposals
@@ -699,12 +701,15 @@ func TestQwen35MTPDepth4SpeculativeLoop(t *testing.T) {
 		t.Fatalf("Qwen35MTPDepth4CausalTreeVerifyResult failed: %v", err)
 	}
 
-	// 2. Validate K=4 and single-pass execution contract
+	// 2. Validate K=4 and the deliberately unclaimed performance fields.
 	if res.DraftDepthK != 4 {
 		t.Errorf("DraftDepthK = %d, want 4", res.DraftDepthK)
 	}
-	if !res.SinglePass {
-		t.Errorf("SinglePass = false, want true (single weight read pass)")
+	if res.SinglePass {
+		t.Error("SinglePass = true without a physical single-pass witness")
+	}
+	if res.ThroughputTokS != 0 || res.ExpectedTokensPerStep != 0 {
+		t.Errorf("unmeasured performance fields = throughput %f expected_tokens_per_step %f, want zeros", res.ThroughputTokS, res.ExpectedTokensPerStep)
 	}
 
 	// 3. Validate packed 4x4 causal verification tree mask in LDS
@@ -723,15 +728,9 @@ func TestQwen35MTPDepth4SpeculativeLoop(t *testing.T) {
 		}
 	}
 
-	// 4. Validate Strix Halo single-pass weight reuse and 40 CU occupancy
-	if !res.Audit.CausalTreeMaskApplied {
-		t.Errorf("Audit.CausalTreeMaskApplied = false, want true")
-	}
-	if res.Audit.ComputeUnitsEngaged != compute.StrixHaloComputeUnits {
-		t.Errorf("Audit.ComputeUnitsEngaged = %d, want %d", res.Audit.ComputeUnitsEngaged, compute.StrixHaloComputeUnits)
-	}
-	if res.Audit.WeightReuseRatio < 1.0 {
-		t.Errorf("Audit.WeightReuseRatio = %f, want >= 1.0", res.Audit.WeightReuseRatio)
+	// 4. The compatibility result carries no synthetic hardware audit.
+	if res.Audit != (compute.MTPMicroBatchVerificationAudit{}) {
+		t.Errorf("unmeasured hardware audit = %+v, want zero value", res.Audit)
 	}
 
 	// 5. Validate atomic rollback and KV cache invariant: Len == basePos + accepted
@@ -739,18 +738,35 @@ func TestQwen35MTPDepth4SpeculativeLoop(t *testing.T) {
 		t.Errorf("s.Cache.Len() = %d, want basePos (%d) + accepted (%d) = %d",
 			s.Cache.Len(), basePos, res.AcceptedCount, basePos+res.AcceptedCount)
 	}
-	if res.RollbackCount != 4-res.AcceptedCount {
-		t.Errorf("RollbackCount = %d, want %d", res.RollbackCount, 4-res.AcceptedCount)
+	// 6. Validate the concrete verification receipt instead of inferring device work.
+	receipt := res.VerificationReceipt
+	if receipt.Schema != targetVerificationReceiptSchema || receipt.Engine != targetVerificationEngine || receipt.DraftTokens != 4 {
+		t.Fatalf("verification receipt identity = %+v", receipt)
 	}
-
-	// 6. Validate sustained throughput scaling on >= 80% draft acceptance
-	if res.AcceptanceRate >= 0.80 && res.ThroughputTokS < 34.8 {
-		t.Errorf("throughput = %f tok/s, want >= 34.8 tok/s at >= 80%% acceptance", res.ThroughputTokS)
+	if receipt.Path == targetVerificationBoundaryRejectPath {
+		if res.AcceptedCount != 0 || res.RollbackCount != 0 || receipt.AcceptedTokens != 0 || receipt.RejectedTokens != 4 || receipt.OneOperation || receipt.TargetVerificationOperations != 0 || receipt.TargetDecodeSteps != 0 || receipt.DowngradeReason != "" {
+			t.Fatalf("boundary rejection fabricated rollback or target work: result=%+v receipt=%+v", res, receipt)
+		}
+	} else if receipt.OneOperation {
+		if res.RollbackCount != 4-res.AcceptedCount || receipt.AcceptedTokens != res.AcceptedCount || receipt.RejectedTokens != res.RollbackCount {
+			t.Fatalf("one-operation accepted/rejected/rollback = %d/%d/%d, want %d/%d/%d", receipt.AcceptedTokens, receipt.RejectedTokens, res.RollbackCount, res.AcceptedCount, 4-res.AcceptedCount, 4-res.AcceptedCount)
+		}
+		if receipt.TargetVerificationOperations != 1 || receipt.TargetDecodeSteps != 0 {
+			t.Fatalf("one-operation receipt has operations/decode steps %d/%d, want 1/0", receipt.TargetVerificationOperations, receipt.TargetDecodeSteps)
+		}
+	} else {
+		if res.RollbackCount != 4-res.AcceptedCount || receipt.AcceptedTokens != res.AcceptedCount || receipt.RejectedTokens != res.RollbackCount {
+			t.Fatalf("ordinary accepted/rejected/rollback = %d/%d/%d, want %d/%d/%d", receipt.AcceptedTokens, receipt.RejectedTokens, res.RollbackCount, res.AcceptedCount, 4-res.AcceptedCount, 4-res.AcceptedCount)
+		}
+		if receipt.Path != targetVerificationDecodePath || receipt.TargetDecodeSteps != 4 || receipt.DowngradeReason == "" {
+			t.Fatalf("ordinary-decode receipt is not an explicit downgrade: %+v", receipt)
+		}
 	}
 
 	// 7. Verify helper Qwen35MTPDepth4CausalTreeVerify returns matched counts
 	s2 := m.NewSession()
-	_ = s2.Prefill(prompt)
+	boundary2 := s2.Prefill(prompt)
+	s2.SetLastLogits(boundary2)
 	acc2, next2, err2 := s2.Qwen35MTPDepth4CausalTreeVerify(ctx, drafts)
 	if err2 != nil {
 		t.Fatalf("s2.Qwen35MTPDepth4CausalTreeVerify failed: %v", err2)
@@ -762,7 +778,8 @@ func TestQwen35MTPDepth4SpeculativeLoop(t *testing.T) {
 
 	// 8. Verify Model method wrapper
 	s3 := m.NewSession()
-	_ = s3.Prefill(prompt)
+	boundary3 := s3.Prefill(prompt)
+	s3.SetLastLogits(boundary3)
 	acc3, next3, err3 := m.Qwen35MTPDepth4CausalTreeVerify(ctx, s3, drafts)
 	if err3 != nil {
 		t.Fatalf("m.Qwen35MTPDepth4CausalTreeVerify failed: %v", err3)

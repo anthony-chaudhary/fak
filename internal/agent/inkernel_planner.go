@@ -634,7 +634,7 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 	} else if p.metalMTPCoordinator != nil {
 		targetOnly = true
 	}
-	if !targetOnly && p.speculativeEngine != nil {
+	if !targetOnly && p.greedySpeculativeRequestEligible(temp, logitBias, freqPenalty, presPenalty) {
 		return p.generateReusedSpeculative(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
 	}
 	gen, promptTok, cacheable, matched, sourceTier, prefillS, decodeS, stopped, err := p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
@@ -651,6 +651,13 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 		decodeS:    decodeS,
 		stopped:    stopped,
 	}, nil
+}
+
+// greedySpeculativeRequestEligible keeps the target verifier's exact-greedy
+// contract at the request boundary. Sampling and score transforms retain the
+// ordinary target path; top-p and top-k are inert when temperature is zero.
+func (p *InKernelPlanner) greedySpeculativeRequestEligible(temp float64, logitBias model.LogitBias, freqPenalty, presPenalty float64) bool {
+	return p.speculativeEngine != nil && temp <= 0 && len(logitBias) == 0 && freqPenalty == 0 && presPenalty == 0
 }
 
 // SetSpeculativeEngine configures the speculative decoding engine for this planner.
@@ -807,6 +814,10 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	measurementOpt ...*nativeInferenceMeasurement,
 ) (res inKernelGenerateResult, err error) {
 	promptTok := len(ids)
+	var measurement *nativeInferenceMeasurement
+	if len(measurementOpt) > 0 {
+		measurement = measurementOpt[0]
+	}
 	if promptTok == 0 {
 		return inKernelGenerateResult{}, nil
 	}
@@ -819,35 +830,80 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	var cachedLogits []float32
 	var matched, cacheable int
 	var sourceTier radixkv.SnapshotTier
+	skipExactDeviceL1Readmission := false
 
 	if reuse {
-		p.mu.Lock()
-		b, m := p.tree.Lookup(ids)
-		cacheable = m
-		matched = m
-		if k := b.KV(); k != nil {
-			s = p.sessionFromPrefixClone(k)
-			if m >= len(ids) {
-				cachedLogits = b.Logits()
+		owner, scoped := prefixCacheIdentityFromContext(ctx)
+		scopedLookup := scoped && p.scopedTree != nil
+		var matchedKV *model.KVCache
+		var matchedSnapshot *model.PrefixSnapshot
+		var m int
+		var tier radixkv.SnapshotTier
+		var sourceScope radixkv.ShareScope
+		if scopedLookup {
+			if p.backend != nil {
+				matchedSnapshot, cachedLogits, m, sourceScope, tier, err = p.scopedTree.LookupSnapshotTieredContext(ctx, owner, ids)
+			} else {
+				matchedKV, cachedLogits, m, _, err = p.scopedTree.Lookup(owner, ids)
 			}
+		} else {
+			p.mu.Lock()
+			if p.backend != nil {
+				b, snap, legacyMatched, lookupTier, lookupErr := p.tree.LookupSnapshotTieredContext(ctx, ids)
+				matchedSnapshot, m, err = snap, legacyMatched, lookupErr
+				tier = lookupTier
+				if m >= len(ids) {
+					cachedLogits = b.Logits()
+				}
+				p.tree.Done(b)
+			} else {
+				b, legacyMatched := p.tree.Lookup(ids)
+				m = legacyMatched
+				if k := b.KV(); k != nil {
+					matchedKV = k.Clone()
+					if m >= len(ids) {
+						cachedLogits = b.Logits()
+					}
+				}
+				p.tree.Done(b)
+			}
+			p.mu.Unlock()
+		}
+		if err != nil {
+			return inKernelGenerateResult{}, err
+		}
+		cacheable = m
+		if matchedSnapshot != nil {
+			s = p.m.NewBackendSession(p.backend)
+			if err = matchedSnapshot.Restore(s); err != nil {
+				matchedSnapshot.Close()
+				s.Close()
+				return inKernelGenerateResult{}, err
+			}
+			matchedSnapshot.Close()
+			matched, sourceTier = m, tier
+		} else if matchedKV != nil {
+			s = p.sessionFromPrefixClone(matchedKV)
+			matched = m
 			sourceTier = radixkv.SnapshotTierDeviceL1
 		}
-		p.tree.Done(b)
-		p.mu.Unlock()
 
 		if s != nil && matched >= len(ids) && cachedLogits == nil {
 			if inKernelRefeedLastTokenForExactHit(s, len(ids)) {
 				matched = len(ids) - 1
 			} else {
+				s.Close()
 				s, matched = nil, 0
 				sourceTier = radixkv.SnapshotTierMiss
 			}
 		}
+		skipExactDeviceL1Readmission = ((!scopedLookup) || (scopedLookup && (sourceScope == radixkv.ScopeTenant || sourceScope == radixkv.ScopeAgent))) &&
+			matchedSnapshot != nil && matched == len(ids) && cachedLogits != nil && sourceTier == radixkv.SnapshotTierDeviceL1
 	}
 
 	if s == nil {
 		matched = 0
-		s = p.m.NewSession()
+		s = p.newSpeculativeSession()
 	}
 	defer s.Close()
 	p.configureNativeSession(s)
@@ -860,6 +916,19 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	if logits == nil {
 		tp := time.Now()
 		prefillAt := matched
+		checkpoint := inKernelSnapshotCheckpoint(prefillAt, len(ids))
+		if reuse && p.backend != nil && checkpoint > prefillAt {
+			logits = s.Prefill(ids[prefillAt:checkpoint])
+			checkpointSnapshot, snapshotErr := s.PrefixSnapshot()
+			if snapshotErr != nil {
+				return inKernelGenerateResult{}, snapshotErr
+			}
+			if admitErr := p.admitPrefixSnapshot(ctx, ids[:checkpoint], checkpointSnapshot, logits); admitErr != nil {
+				checkpointSnapshot.Close()
+				return inKernelGenerateResult{}, admitErr
+			}
+			prefillAt = checkpoint
+		}
 		if prefillAt < len(ids) {
 			rawLogits, err := p.prefillDivergentSuffix(ctx, s, ids[prefillAt:], measurementOpt...)
 			if err != nil {
@@ -877,19 +946,34 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 
 	// Admit full prompt to prefix cache BEFORE speculative decode mutates cache
 	if reuse {
-		p.mu.Lock()
-		b, m := p.tree.Lookup(ids)
-		leaf := p.tree.InsertCloneWithLogits(b, ids[m:], s.Cache, logits)
-		p.tree.Done(leaf)
-		p.mu.Unlock()
-		p.noteKVPrefixAdmitted()
+		if p.backend != nil {
+			if !skipExactDeviceL1Readmission {
+				snapshot, snapshotErr := s.PrefixSnapshot()
+				if snapshotErr != nil {
+					return inKernelGenerateResult{}, snapshotErr
+				}
+				if admitErr := p.admitPrefixSnapshot(ctx, ids, snapshot, logits); admitErr != nil {
+					snapshot.Close()
+					return inKernelGenerateResult{}, admitErr
+				}
+			}
+		} else if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped && p.scopedTree != nil {
+			if admitErr := p.scopedTree.AdmitPrivate(owner, ids, s.Cache, logits); admitErr != nil {
+				return inKernelGenerateResult{}, admitErr
+			}
+		} else {
+			p.mu.Lock()
+			b, m := p.tree.Lookup(ids)
+			leaf := p.tree.InsertCloneWithLogits(b, ids[m:], s.Cache, logits)
+			p.tree.Done(leaf)
+			p.mu.Unlock()
+		}
 	}
 
 	// Speculative decoding loop
+	measurement.startDecodeTrace()
 	td := time.Now()
 	eng := p.speculativeEngine
-	eng.SetTargetSession(s)
-	eng.SetLastLogits(logits)
 
 	committed := append([]int(nil), ids...)
 	var counts []int32
@@ -914,11 +998,24 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		// Propose speculative candidate tokens
 		var proposal model.DraftProposal
 		if eng.PrimaryGenerator() != nil {
-			var propErr error
-			proposal, propErr = eng.PrimaryGenerator().Propose(ctx, committed, maxDraft)
-			if propErr != nil {
-				proposal = model.DraftProposal{}
+			roundDraft := maxDraft
+			if remaining := maxNew - gen; roundDraft > remaining {
+				roundDraft = remaining
 			}
+			var propErr error
+			proposal, propErr = eng.PrimaryGenerator().Propose(ctx, committed, roundDraft)
+			if propErr != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					err = ctxErr
+					break
+				}
+				proposal = model.DraftProposal{}
+			} else if proposal.Tree == nil && len(proposal.Tokens) > roundDraft {
+				proposal.Tokens = append([]int(nil), proposal.Tokens[:roundDraft]...)
+			}
+		}
+		if err = ctx.Err(); err != nil {
+			break
 		}
 
 		// If proposal has no tokens and no tree, fall back to single-step autoregressive
@@ -928,36 +1025,66 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 				stopped = true
 				break
 			}
+			if err = measurement.record(curLogits, next); err != nil {
+				break
+			}
 			if counts != nil && next < len(counts) {
 				counts[next]++
 			}
 			emitStopped := emit != nil && emit(next)
 			gen++
 			committed = append(committed, next)
+			if err = measurement.recordDecodeTrace(gen, next); err != nil {
+				break
+			}
 			if emitStopped || gen == maxNew {
 				stopped = emitStopped
 				break
 			}
+			if emit != nil {
+				if err = ctx.Err(); err != nil {
+					break
+				}
+			}
 			curLogits = s.Step(next)
-			eng.SetLastLogits(curLogits)
 			continue
 		}
 
 		// Evaluate candidate proposal using parallel verification kernel
-		vRes, vErr := model.ParallelVerifyKernel(ctx, s, committed, proposal, curLogits, eng.Sanitizer(), counts)
+		vRes, vErr := verifyGreedySpeculativeRound(ctx, s, committed, proposal, curLogits, eng.Sanitizer(), counts)
 		if vErr != nil {
 			err = vErr
 			break
 		}
-		eng.RecordVerification(len(proposal.Tokens), vRes.NumAccepted, vRes.RollbackKVCount)
+		var acceptedChoiceLogits [][]float32
+		var bonusChoiceLogits []float32
+		if measurement != nil {
+			var choiceErr error
+			acceptedChoiceLogits, bonusChoiceLogits, choiceErr = speculativeVerificationChoiceLogits(proposal, vRes, curLogits)
+			if choiceErr != nil {
+				err = choiceErr
+				eng.RecordVerificationOutcome(len(proposal.Tokens), vRes.NumAccepted, vRes.RollbackKVCount, false)
+				break
+			}
+		}
 
 		// Accept verified tokens
 		roundStopped := false
-		for _, tok := range vRes.AcceptedTokens {
+		for i, tok := range vRes.AcceptedTokens {
+			if err = ctx.Err(); err != nil {
+				roundStopped = true
+				break
+			}
 			if tok < 0 || stops[tok] {
 				roundStopped = true
 				stopped = true
 				break
+			}
+			if measurement != nil {
+				if err = measurement.record(acceptedChoiceLogits[i], tok); err != nil {
+					roundStopped = true
+					break
+				}
 			}
 			if counts != nil && tok < len(counts) {
 				counts[tok]++
@@ -965,22 +1092,44 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 			emitStopped := emit != nil && emit(tok)
 			gen++
 			committed = append(committed, tok)
+			if err = measurement.recordDecodeTrace(gen, tok); err != nil {
+				roundStopped = true
+				break
+			}
 			if emitStopped || gen == maxNew {
 				roundStopped = true
 				stopped = emitStopped
 				break
 			}
+			if emit != nil {
+				if err = ctx.Err(); err != nil {
+					roundStopped = true
+					break
+				}
+			}
 		}
 
 		if roundStopped || gen == maxNew {
+			eng.RecordVerificationOutcome(len(proposal.Tokens), vRes.NumAccepted, vRes.RollbackKVCount, false)
 			break
 		}
 
 		// Bonus / correction token
+		if err = ctx.Err(); err != nil {
+			eng.RecordVerificationOutcome(len(proposal.Tokens), vRes.NumAccepted, vRes.RollbackKVCount, false)
+			break
+		}
 		bonus := vRes.CorrectionToken
 		if bonus < 0 || stops[bonus] {
 			stopped = true
+			eng.RecordVerificationOutcome(len(proposal.Tokens), vRes.NumAccepted, vRes.RollbackKVCount, false)
 			break
+		}
+		if measurement != nil {
+			if err = measurement.record(bonusChoiceLogits, bonus); err != nil {
+				eng.RecordVerificationOutcome(len(proposal.Tokens), vRes.NumAccepted, vRes.RollbackKVCount, false)
+				break
+			}
 		}
 		if counts != nil && bonus < len(counts) {
 			counts[bonus]++
@@ -988,14 +1137,23 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		emitStopped := emit != nil && emit(bonus)
 		gen++
 		committed = append(committed, bonus)
+		if err = measurement.recordDecodeTrace(gen, bonus); err != nil {
+			eng.RecordVerificationOutcome(len(proposal.Tokens), vRes.NumAccepted, vRes.RollbackKVCount, true)
+			break
+		}
+		eng.RecordVerificationOutcome(len(proposal.Tokens), vRes.NumAccepted, vRes.RollbackKVCount, true)
 		if emitStopped || gen == maxNew {
 			stopped = emitStopped
 			break
 		}
+		if emit != nil {
+			if err = ctx.Err(); err != nil {
+				break
+			}
+		}
 
 		// Advance target session with bonus token
 		curLogits = s.Step(bonus)
-		eng.SetLastLogits(curLogits)
 	}
 
 	decodeS := time.Since(td).Seconds()
@@ -1010,6 +1168,109 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		decodeS:    decodeS,
 		stopped:    stopped,
 	}, err
+}
+
+func (p *InKernelPlanner) newSpeculativeSession() *model.Session {
+	if p.backend != nil {
+		return p.m.NewBackendSession(p.backend)
+	}
+	return p.m.NewSession()
+}
+
+// verifyGreedySpeculativeRound selects the strict resident-device transaction
+// for a bounded linear draft. A typed capability downgrade retains the existing
+// verifier, whose linear fallback is ordinary target decode. Other device errors
+// propagate instead of being hidden behind a second execution.
+func verifyGreedySpeculativeRound(
+	ctx context.Context,
+	target *model.Session,
+	committed []int,
+	proposal model.DraftProposal,
+	lastLogits []float32,
+	sanitizer *model.RepetitionPenaltySanitizer,
+	counts []int32,
+) (model.VerificationResult, error) {
+	if qwen35DeviceVerifierAvailable(target) && proposal.Tree == nil && len(proposal.Tokens) > 0 {
+		device, err := target.VerifyGreedyDeviceDraft(ctx, proposal.Tokens, lastLogits)
+		if err == nil {
+			rollback := len(proposal.Tokens) - len(device.Accepted)
+			if device.Receipt.TargetVerificationOperations == 0 && device.Receipt.TargetDecodeSteps == 0 {
+				// A known-boundary first-token rejection performs no target
+				// mutation, so there is no speculative state to roll back.
+				rollback = 0
+			}
+			return model.VerificationResult{
+				AcceptedTokens:  device.Accepted,
+				CorrectionToken: device.Correction,
+				NumAccepted:     len(device.Accepted),
+				RollbackKVCount: rollback,
+				TargetLogits:    device.TargetLogits,
+			}, nil
+		}
+		if !errors.Is(err, model.ErrTargetVerificationDowngrade) {
+			return model.VerificationResult{}, err
+		}
+	}
+	return model.ParallelVerifyKernel(ctx, target, committed, proposal, lastLogits, sanitizer, counts)
+}
+
+// speculativeVerificationChoiceLogits maps each emitted target decision back to
+// the logits that selected it. Linear proposals use the round boundary followed
+// by the preceding target row. Tree proposals follow the accepted parent chain.
+func speculativeVerificationChoiceLogits(
+	proposal model.DraftProposal,
+	result model.VerificationResult,
+	boundary []float32,
+) (accepted [][]float32, bonus []float32, err error) {
+	accepted = make([][]float32, len(result.AcceptedTokens))
+	if proposal.Tree == nil {
+		bonus = boundary
+		for i := range result.AcceptedTokens {
+			if i == 0 {
+				accepted[i] = boundary
+			} else {
+				if i-1 >= len(result.TargetLogits) {
+					return nil, nil, fmt.Errorf("speculative verification returned %d target rows for %d accepted tokens", len(result.TargetLogits), len(result.AcceptedTokens))
+				}
+				accepted[i] = result.TargetLogits[i-1]
+			}
+		}
+		if len(result.AcceptedTokens) > 0 {
+			row := len(result.AcceptedTokens) - 1
+			if row >= len(result.TargetLogits) {
+				return nil, nil, fmt.Errorf("speculative verification returned %d target rows for correction after %d accepted tokens", len(result.TargetLogits), len(result.AcceptedTokens))
+			}
+			bonus = result.TargetLogits[row]
+		}
+		return accepted, bonus, nil
+	}
+
+	parent := -1
+	next := boundary
+	for i, token := range result.AcceptedTokens {
+		accepted[i] = next
+		nodeIndex := -1
+		for candidate, node := range proposal.Tree.Nodes {
+			if node.Parent == parent && node.Token == token {
+				nodeIndex = candidate
+				break
+			}
+		}
+		if nodeIndex < 0 || nodeIndex >= len(result.TargetLogits) {
+			return nil, nil, fmt.Errorf("speculative tree result does not map accepted token %d at depth %d to a target row", token, i)
+		}
+		parent = nodeIndex
+		next = result.TargetLogits[nodeIndex]
+	}
+	return accepted, next, nil
+}
+
+func qwen35DeviceVerifierAvailable(target *model.Session) bool {
+	if target == nil || target.M == nil || target.Backend == nil || !target.M.Cfg.IsQwen35Hybrid() {
+		return false
+	}
+	backend, ok := target.Backend.(compute.Qwen35SequenceAllLogitsBackend)
+	return ok && backend.Qwen35SequenceAllLogitsPath() == compute.Qwen35SequenceAllLogitsPath
 }
 
 func (p *InKernelPlanner) generateReusedMetalMTP(

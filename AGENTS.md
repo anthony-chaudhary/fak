@@ -29,6 +29,13 @@ both `fak` and `fak-private` companion repositories to prevent interface skew (`
 and lease/queue stalls (`refs/fak/locks/*`). If scope is ambiguous, stay in FAK.
 Under the **Companion-Aware Dev Harness**, local development in `fak` is first-class and automatically governed by companion tooling: when `fak-private` is present side-by-side (via `../fak-private`, `go.work`, or `FAK_PRIVATE_ROOT`), `fak` pre-commit hooks run 5-gate boundary checks (`cmd/fak-boundary`) and secret leak audits (`tools/scrub_public_copy.py`) by default, while `fak-dev gate`, `fak-dev provenance`, `fak-dev audit-leak`, and `fak-dev ticket` bridge directly to companion tools without requiring directory switches. Full architecture specification: [`docs/architecture/companion-dev-harness.md`](docs/architecture/companion-dev-harness.md).
 
+## Mandatory Automated Public OSS Placement for New Work
+
+All new core engine work belongs in this open-source repository (`fak`) by default:
+- **Core Engine in Public by Default:** Model inference runtime (`cmd/fak/serve.go`, `internal/engine`), context window MMU (`internal/ctxmmu`), compute acceleration HALs (Metal, ROCm, Vulkan, AVX-512 in `internal/compute/`), model weight loaders (GGUF, SafeTensors in `internal/model/`), tool capability floors, frozen ABIs (`pkg/abi`), and client SDKs (`pkg/fakclient`, `pkg/scorecard`) are open-source.
+- **Automated Default Action (Zero-Hesitation Mandate):** When any new work, feature, optimization, or bugfix in these domains is requested, agents and contributors must execute, test, and land it directly in `fak` automatically without waiting for explicit permission or defaulting to private repos.
+- **Boundary Invariant:** Core engine mechanisms commoditize hardware complements and drive developer adoption. Proprietary commercial policy (margin ledgers, credit settlement) and the autonomous software factory (dispatch queues, worktree flows, scorecards) belong in `fak-private`, but all engine primitives remain public.
+
 ## Divide and conquer: Delegate real work; keep the coordinator context clean
 
 Use guarded headless agents or an equivalent isolated worker for every substantive

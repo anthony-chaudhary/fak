@@ -21,6 +21,8 @@ func (*vulkanBackend) Qwen35SequenceEmbeddingRowsPath() string {
 	return Qwen35SequenceEmbeddingRowsPath
 }
 
+func (*vulkanBackend) Qwen35SequenceAllLogitsPath() string { return Qwen35SequenceAllLogitsPath }
+
 func qwen35VulkanSequenceError(stage string, layer int, reason string) error {
 	return &Qwen35SequenceError{Stage: stage, Layer: layer, Reason: reason}
 }
@@ -124,6 +126,12 @@ func (v *vulkanBackend) validateQwen35VulkanSequence(req Qwen35SequencePrefillRe
 	}
 	if int64(vocab) > math.MaxInt32 || int64(vocab)*4 > int64(^uint(0)>>1) || singleResourceCapExceeded(vocab*4, v.maxBufferBytes) {
 		return fail("geometry", "output vector exceeds shader/device allocation limits")
+	}
+	if req.NeedAllLogits {
+		panel, ok := qwen35VulkanSequenceSize(len(req.TokenIDs), vocab)
+		if !ok || int64(panel)*4 > int64(^uint(0)>>1) || singleResourceCapExceeded(panel*4, v.maxBufferBytes) {
+			return fail("geometry", "output panel exceeds shader/device allocation limits")
+		}
 	}
 	for _, id := range req.TokenIDs {
 		if id < 0 || id >= vocab {
@@ -238,6 +246,9 @@ func (v *vulkanBackend) validateQwen35VulkanSequence(req Qwen35SequencePrefillRe
 			rows := int64(len(req.TokenIDs))
 			if op.name == "output" {
 				rows = 1
+				if req.NeedAllLogits {
+					rows = int64(len(req.TokenIDs))
+				}
 			}
 			groups := rows
 			switch op.t.Dtype {
@@ -602,11 +613,18 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 	lastRaw, _ := v.devTr([]int{req.Hidden}, F32)
 	C.fvk_d2d_range(v.vp(lastRaw), 0, v.vp(x), C.size_t((tokens-1)*req.Hidden*4), C.size_t(req.Hidden*4))
 	last := norm(lastRaw, req.OutputNorm, 1)
-	var logits Tensor
+	var logits, logitsRows Tensor
 	if req.NeedLogits {
 		stage = "output-head"
 		logits = v.qwen35VulkanSequenceMatMulLocked(req.Output, last, 1)
 		logits.Shape = []int{req.Output.Shape[0]}
+	}
+	if req.NeedAllLogits {
+		stage = "output-all-norm"
+		all := norm(x, req.OutputNorm, tokens)
+		stage = "output-all-head"
+		logitsRows = v.qwen35VulkanSequenceMatMulLocked(req.Output, all, tokens)
+		logitsRows.Shape = []int{tokens, req.Output.Shape[0]}
 	}
 	stage = "final-fence"
 	if err = check(C.fvk_batch_flush_status()); err != nil {
@@ -619,7 +637,7 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 	for pos := req.StartPos; pos < req.StartPos+tokens; pos++ {
 		kv.pos = append(kv.pos, pos)
 	}
-	v.qwen35VulkanSequenceReleaseLocked(start, last, logits)
-	result = Qwen35SequencePrefillResult{LastHidden: last, Logits: logits, Tokens: tokens, Transfers: Qwen35SequenceTransferCounters{H2DBytes: h2d, D2HBytes: d2h, ActivationH2DBytes: h2d, ActivationD2HBytes: d2h}}
+	v.qwen35VulkanSequenceReleaseLocked(start, last, logits, logitsRows)
+	result = Qwen35SequencePrefillResult{LastHidden: last, Logits: logits, LogitsRows: logitsRows, Tokens: tokens, Transfers: Qwen35SequenceTransferCounters{H2DBytes: h2d, D2HBytes: d2h, ActivationH2DBytes: h2d, ActivationD2HBytes: d2h}}
 	return result, nil
 }
