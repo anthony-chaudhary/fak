@@ -539,17 +539,19 @@ func (s *turnkeyServer) handleModels(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type chatCompletionMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
+// Keep the turnkey wire message identical to the planner's canonical OpenAI
+// message shape. In particular, assistant tool_calls and role=tool correlation
+// fields must survive a client -> planner -> client continuation unchanged.
+type chatCompletionMessage = agent.Message
 
 type chatCompletionRequest struct {
 	Model       string                  `json:"model"`
 	Messages    []chatCompletionMessage `json:"messages"`
+	Tools       []agent.ToolDef         `json:"tools,omitempty"`
+	ToolChoice  json.RawMessage         `json:"tool_choice,omitempty"`
 	Stream      bool                    `json:"stream"`
 	MaxTokens   int                     `json:"max_tokens"`
-	Temperature float64                 `json:"temperature"`
+	Temperature *float64                `json:"temperature,omitempty"`
 }
 
 type chatCompletionChoice struct {
@@ -595,41 +597,47 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 	totalTokens := 0
 	finishReason := "stop"
 	var answerText string
+	var answerToolCalls []agent.ToolCall
 
 	if !s.mock && s.planner != nil {
-		agentMsgs := make([]agent.Message, len(req.Messages))
-		for i, m := range req.Messages {
-			agentMsgs[i] = agent.Message{
-				Role:    m.Role,
-				Content: m.Content,
-			}
-		}
+		agentMsgs := append([]agent.Message(nil), req.Messages...)
 		var sampleOpts []agent.SampleOpt
 		if req.MaxTokens > 0 {
 			sampleOpts = append(sampleOpts, agent.WithMaxTokens(req.MaxTokens))
 		}
-		if req.Temperature > 0 {
-			t := req.Temperature
-			sampleOpts = append(sampleOpts, agent.WithTemperature(&t))
+		if req.Temperature != nil {
+			sampleOpts = append(sampleOpts, agent.WithTemperature(req.Temperature))
 		}
-		comp, err := s.planner.Complete(r.Context(), agentMsgs, nil, sampleOpts...)
+		if len(req.ToolChoice) > 0 {
+			sampleOpts = append(sampleOpts, agent.WithToolChoice(req.ToolChoice))
+		}
+		comp, err := s.planner.Complete(r.Context(), agentMsgs, req.Tools, sampleOpts...)
 		if err != nil {
 			writeTurnkeyInferenceError(w, err)
 			return
 		}
+		if comp.ToolCallsDropped && len(comp.Message.ToolCalls) == 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]any{
+					"message": "upstream tool-call format not recognized; refusing to skip adjudication",
+					"type":    "server_error",
+					"code":    "tool_call_conformance",
+				},
+			})
+			return
+		}
 		answerText = comp.Message.Content
+		answerToolCalls = comp.Message.ToolCalls
 		promptTokens = comp.Usage.PromptTokens
 		compTokens = comp.Usage.CompletionTokens
 		totalTokens = comp.Usage.TotalTokens
 		if comp.FinishReason != "" {
 			finishReason = comp.FinishReason
 		}
-		if compTokens == 0 && answerText != "" {
-			compTokens = len(strings.Fields(answerText))
-			if compTokens == 0 {
-				compTokens = 1
-			}
-			totalTokens = promptTokens + compTokens
+		if len(answerToolCalls) > 0 {
+			finishReason = "tool_calls"
 		}
 	} else {
 		lastUserContent := ""
@@ -693,7 +701,21 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 		}
 
 		sendChunk(map[string]any{"role": "assistant"}, nil)
-		sendChunk(map[string]any{"content": answerText}, nil)
+		if answerText != "" {
+			sendChunk(map[string]any{"content": answerText}, nil)
+		}
+		if len(answerToolCalls) > 0 {
+			toolCalls := make([]map[string]any, 0, len(answerToolCalls))
+			for i, call := range answerToolCalls {
+				toolCalls = append(toolCalls, map[string]any{
+					"index":    i,
+					"id":       call.ID,
+					"type":     call.Type,
+					"function": call.Function,
+				})
+			}
+			sendChunk(map[string]any{"tool_calls": toolCalls}, nil)
+		}
 		stop := finishReason
 		sendChunk(map[string]any{}, &stop)
 		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
@@ -714,8 +736,9 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 			{
 				Index: 0,
 				Message: chatCompletionMessage{
-					Role:    "assistant",
-					Content: answerText,
+					Role:      "assistant",
+					Content:   answerText,
+					ToolCalls: answerToolCalls,
 				},
 				FinishReason: finishReason,
 			},
