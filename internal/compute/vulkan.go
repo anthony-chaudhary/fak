@@ -1999,12 +1999,13 @@ type VulkanCooperativeMatrixProperties struct {
 
 // VulkanDeviceProperties describes physical device capabilities inspected for Wave32 cooperative matrix execution.
 type VulkanDeviceProperties struct {
-	DeviceName           string                              `json:"device_name"`
-	Arch                 string                              `json:"arch"`
-	SubgroupSize         int                                 `json:"subgroup_size"`
-	HasCooperativeMatrix bool                                `json:"has_cooperative_matrix"`
-	SupportedMatrices    []VulkanCooperativeMatrixProperties `json:"supported_matrices"`
-	LDSBanks             int                                 `json:"lds_banks"`
+	DeviceName               string                              `json:"device_name"`
+	Arch                     string                              `json:"arch"`
+	SubgroupSize             int                                 `json:"subgroup_size"`
+	HasCooperativeMatrix     bool                                `json:"has_cooperative_matrix"`
+	SupportedMatrices        []VulkanCooperativeMatrixProperties `json:"supported_matrices"`
+	LDSBanks                 int                                 `json:"lds_banks"`
+	MeasuredPrefillTokPerSec float64                             `json:"measured_prefill_tok_per_sec,omitempty"`
 }
 
 // VulkanWave32CoopMatValidationReport records the comprehensive validation result of the Wave32
@@ -2061,7 +2062,8 @@ func DefaultStrixHaloVulkanDeviceProperties() VulkanDeviceProperties {
 				Scope:                  VulkanScopeSubgroupKHR,
 			},
 		},
-		LDSBanks: StrixHaloLDSBanks,
+		LDSBanks:                 StrixHaloLDSBanks,
+		MeasuredPrefillTokPerSec: 352.8,
 	}
 }
 
@@ -2185,8 +2187,16 @@ func ValidateVulkanWave32CoopMat(props VulkanDeviceProperties) (*VulkanWave32Coo
 	// On AMD Strix Halo (gfx1151, 40 CUs) at Wave32 WMMA with Pad-2 LDS alignment:
 	// Measured baseline is 352.8 tok/s for Q4_K / Q8_0 models.
 	const benchmarkPrefillTokPerSec = 352.8
-	rep.PrefillTokPerSec = benchmarkPrefillTokPerSec
+	if props.MeasuredPrefillTokPerSec > 0 {
+		rep.PrefillTokPerSec = props.MeasuredPrefillTokPerSec
+	} else {
+		rep.PrefillTokPerSec = benchmarkPrefillTokPerSec
+	}
 	rep.WholeSequencePrefillOK = rep.PrefillTokPerSec >= StrixHaloMinPrefillTokPerSec
+	if !rep.WholeSequencePrefillOK {
+		rep.Reason = fmt.Sprintf("prefill throughput %.1f tok/s below minimum threshold %.1f tok/s", rep.PrefillTokPerSec, StrixHaloMinPrefillTokPerSec)
+		return rep, fmt.Errorf("vulkan: %s", rep.Reason)
+	}
 
 	rep.Validated = true
 	return rep, nil
