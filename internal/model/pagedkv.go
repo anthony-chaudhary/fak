@@ -118,6 +118,16 @@ func (p *PagedKVPool) alloc() int {
 		return id
 	}
 	id := len(p.blocks)
+	// Reserve one free-list slot alongside every newly-created physical block.
+	// Returning an exclusively-owned tail page can then remain allocation-free;
+	// the allocator, rather than latency-sensitive compaction/eviction, pays for
+	// free-list growth.
+	if cap(p.free) < id+1 {
+		capacity := 2 * (id + 1)
+		free := make([]int, len(p.free), capacity)
+		copy(free, p.free)
+		p.free = free
+	}
 	p.blocks = append(p.blocks, make([]float32, p.blockFloats()))
 	p.ref = append(p.ref, 1)
 	return id

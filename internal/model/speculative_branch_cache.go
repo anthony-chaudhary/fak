@@ -728,11 +728,12 @@ func evaluateTreeLogitsAndCommit(
 	}
 
 	return VerificationResult{
-		AcceptedTokens:  acceptedTokens,
-		CorrectionToken: pred,
-		NumAccepted:     len(acceptedTokens),
-		RollbackKVCount: N - len(acceptedTokens),
-		TargetLogits:    rows,
+		AcceptedTokens:     acceptedTokens,
+		CorrectionToken:    pred,
+		NumAccepted:        len(acceptedTokens),
+		RollbackKVCount:    N - len(acceptedTokens),
+		TargetLogits:       rows,
+		LastAcceptedLogits: rows[cur],
 	}, nil
 }
 
