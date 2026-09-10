@@ -529,6 +529,14 @@ func (s *Session) validatePackedQ2KEmbeddingGuards() {
 	if s == nil || s.M == nil || s.M.Q2KEmbedding == nil {
 		return
 	}
+	// The dense Qwen Metal-Q4_K path gathers embedding rows on the host before its
+	// resident projection kernels run; keep admission restricted to that route.
+	if s.M.Q2KEmbedding.Format() == "Q4_K" && s.M.Cfg.IsQwen35Hybrid() && !s.M.Cfg.IsMoE() &&
+		s.Backend == nil && s.Q4K && s.Metal && s.MetalQ4K &&
+		!s.Q4 && !s.F16 && !s.GPTQ && s.PrecisionPolicy == nil &&
+		s.DenseGPULayers == 0 && s.GPULayers == 0 {
+		return
+	}
 	if s.Metal || s.MetalQ4K || s.Q4 || s.F16 || s.GPTQ || s.PrecisionPolicy != nil || s.DenseGPULayers != 0 || s.GPULayers != 0 {
 		panic("model: resident Q2_K embedding does not support Metal/MetalQ4K/Q4/F16/GPTQ/PrecisionPolicy or GPU layer offload")
 	}
