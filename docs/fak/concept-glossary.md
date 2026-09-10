@@ -510,3 +510,10 @@ MaxKernelBufferBindCount is the per-command Metal indirect-command-buffer descri
 `Qwen35MTPSpecDecodeUnsupportedError` is the typed model-layer admission refusal returned before native Qwen3.8 MTP depth-N decoding mutates an unsupported target session.
 
 **Distinct from:** It reports that the requested MTP target or draft envelope is unsupported; it does not claim general support and it is not `Qwen35MTPForwardError`, which reports failure while executing an admitted MTP forward.
+
+
+### WithPolicySnapshot (agent run option)
+
+The agent loop run option that pins one caller-supplied adjudicator policy value so Configure cannot replace the capability floor during that run, including native child-task execution.
+
+**Distinct from:** It binds an already-compiled policy to one RunArm invocation; it neither compiles a manifest nor mutates the process-global adjudicator policy.

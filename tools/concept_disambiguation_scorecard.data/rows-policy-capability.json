@@ -39,7 +39,7 @@
       "kind": "symbol",
       "definition": "The in-memory decision table compiled from a manifest, holding allow-lists, deny maps, arg predicates, posture, and secret patterns the adjudicator consults.",
       "distinction": "The COMPILED in-memory table - NOT the manifest (the on-disk JSON) and NOT the adjudicator (the enforcer that reads it).",
-      "distinct_from": ["policy-manifest", "adjudicator", "policy-capability-t-policy", "admissionpolicy"],
+      "distinct_from": ["policy-manifest", "adjudicator", "policy-capability-t-policy", "admissionpolicy", "agent-with-policy-snapshot"],
       "aliases": ["compiled policy"],
       "grounding": "policy",
       "grounding_kind": "symbol",

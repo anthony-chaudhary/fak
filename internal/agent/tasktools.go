@@ -44,6 +44,9 @@ const (
 	DefaultMaxActiveTasks  = 16
 	DefaultMaxBacklogTasks = 64
 	DefaultMaxTotalTasks   = 100
+
+	DefaultTaskWaitTimeout = 2 * time.Minute
+	MaxTaskWaitTimeout     = 10 * time.Minute
 )
 
 // TaskItem represents a single managed child task within the harness.
@@ -81,6 +84,19 @@ type TaskSpawnReceipt struct {
 	CreatedAt    time.Time `json:"created_at,omitempty"`
 	Error        string    `json:"error,omitempty"`
 }
+
+// ChildTaskRunRequest is the immutable work envelope handed to an admitted child.
+type ChildTaskRunRequest struct {
+	TaskID       string
+	Prompt       string
+	Description  string
+	SubagentType string
+	ReadOnly     bool
+}
+
+// ChildTaskRunner executes one admitted child. Implementations must stop when ctx
+// is cancelled and return only after all child effects have ceased.
+type ChildTaskRunner func(ctx context.Context, req ChildTaskRunRequest) (any, error)
 
 // TaskWaitRequest defines parameters for task_wait.
 type TaskWaitRequest struct {
@@ -145,10 +161,26 @@ type TaskState struct {
 	taskSeq     int64
 	doneChans   map[string]chan struct{}
 	closeOnce   map[string]*sync.Once
+	runner      ChildTaskRunner
+	rootCtx     context.Context
+	rootCancel  context.CancelFunc
+	cancels     map[string]context.CancelFunc
+	closed      bool
 }
 
 // NewTaskState returns an empty initialized TaskState.
 func NewTaskState() *TaskState {
+	return newTaskState(nil)
+}
+
+// NewTaskStateWithRunner returns an initialized TaskState which executes
+// admitted work through runner. A nil runner preserves intent-only behavior.
+func NewTaskStateWithRunner(runner ChildTaskRunner) *TaskState {
+	return newTaskState(runner)
+}
+
+func newTaskState(runner ChildTaskRunner) *TaskState {
+	rootCtx, rootCancel := context.WithCancel(context.Background())
 	return &TaskState{
 		tasks:       make(map[string]*TaskItem),
 		order:       make([]string, 0),
@@ -157,6 +189,10 @@ func NewTaskState() *TaskState {
 		maxBacklog:  DefaultMaxBacklogTasks,
 		doneChans:   make(map[string]chan struct{}),
 		closeOnce:   make(map[string]*sync.Once),
+		runner:      runner,
+		rootCtx:     rootCtx,
+		rootCancel:  rootCancel,
+		cancels:     make(map[string]context.CancelFunc),
 	}
 }
 
@@ -173,20 +209,26 @@ func (s *TaskState) Spawn(req TaskSpawnRequest) (TaskSpawnReceipt, error) {
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	if s.closed {
+		s.mu.Unlock()
+		err := fmt.Errorf("task state is closed")
+		return TaskSpawnReceipt{Status: "error", Error: err.Error()}, err
+	}
 
 	// Scoped idempotency check
 	if req.IdempotencyKey != "" {
 		if existingID, ok := s.idempotency[req.IdempotencyKey]; ok {
 			if existing, found := s.tasks[existingID]; found {
-				return TaskSpawnReceipt{
+				receipt := TaskSpawnReceipt{
 					Status:       "accepted",
 					TaskID:       existing.ID,
 					SubagentType: existing.SubagentType,
 					ReadOnly:     existing.ReadOnly,
 					Idempotent:   true,
 					CreatedAt:    existing.CreatedAt,
-				}, nil
+				}
+				s.mu.Unlock()
+				return receipt, nil
 			}
 		}
 	}
@@ -194,18 +236,22 @@ func (s *TaskState) Spawn(req TaskSpawnRequest) (TaskSpawnReceipt, error) {
 	// Check total capacity
 	if len(s.tasks) >= DefaultMaxTotalTasks {
 		err := fmt.Errorf("task capacity exceeded: total tasks (%d) reached maximum (%d)", len(s.tasks), DefaultMaxTotalTasks)
+		s.mu.Unlock()
 		return TaskSpawnReceipt{Status: "error", Error: err.Error()}, err
 	}
 
 	// Check active + backlog capacity
-	activeCount := 0
+	runningCount := s.activeReservationsLocked()
+	pendingCount := 0
 	for _, t := range s.tasks {
-		if t.State == TaskStateRunning || t.State == TaskStatePending {
-			activeCount++
+		switch t.State {
+		case TaskStatePending:
+			pendingCount++
 		}
 	}
-	if activeCount >= s.maxActive+s.maxBacklog {
+	if runningCount+pendingCount >= s.maxActive+s.maxBacklog {
 		err := fmt.Errorf("task admission rejected: active + backlog capacity reached (%d)", s.maxActive+s.maxBacklog)
+		s.mu.Unlock()
 		return TaskSpawnReceipt{Status: "error", Error: err.Error()}, err
 	}
 
@@ -214,6 +260,7 @@ func (s *TaskState) Spawn(req TaskSpawnRequest) (TaskSpawnReceipt, error) {
 	if taskID != "" {
 		if _, exists := s.tasks[taskID]; exists {
 			err := fmt.Errorf("task %q already exists", taskID)
+			s.mu.Unlock()
 			return TaskSpawnReceipt{Status: "error", Error: err.Error()}, err
 		}
 	} else {
@@ -227,7 +274,7 @@ func (s *TaskState) Spawn(req TaskSpawnRequest) (TaskSpawnReceipt, error) {
 	}
 
 	state := TaskStateRunning
-	if activeCount >= s.maxActive {
+	if runningCount >= s.maxActive {
 		state = TaskStatePending
 	}
 
@@ -250,13 +297,175 @@ func (s *TaskState) Spawn(req TaskSpawnRequest) (TaskSpawnReceipt, error) {
 	s.doneChans[taskID] = make(chan struct{})
 	s.closeOnce[taskID] = &sync.Once{}
 
-	return TaskSpawnReceipt{
+	receipt := TaskSpawnReceipt{
 		Status:       "accepted",
 		TaskID:       taskID,
 		SubagentType: subagentType,
 		ReadOnly:     req.ReadOnly,
 		CreatedAt:    item.CreatedAt,
-	}, nil
+	}
+	shouldStart := state == TaskStateRunning && s.runner != nil
+	s.mu.Unlock()
+	if shouldStart {
+		s.startTask(taskID)
+	}
+	return receipt, nil
+}
+
+func (s *TaskState) startTask(taskID string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	item, ok := s.tasks[taskID]
+	if !ok || s.closed || s.runner == nil || item.State != TaskStateRunning {
+		s.mu.Unlock()
+		return
+	}
+	if _, started := s.cancels[taskID]; started {
+		s.mu.Unlock()
+		return
+	}
+	ctx, cancel := context.WithCancel(s.rootCtx)
+	s.cancels[taskID] = cancel
+	runner := s.runner
+	req := ChildTaskRunRequest{
+		TaskID:       item.ID,
+		Prompt:       item.Prompt,
+		Description:  item.Description,
+		SubagentType: item.SubagentType,
+		ReadOnly:     item.ReadOnly,
+	}
+	s.mu.Unlock()
+
+	go func() {
+		result, err := runner(ctx, req)
+		_ = s.finishTask(taskID, result, err)
+	}()
+}
+
+func (s *TaskState) finishTask(taskID string, result any, runErr error) error {
+	if s == nil {
+		return fmt.Errorf("task state is nil")
+	}
+	s.mu.Lock()
+	item, exists := s.tasks[taskID]
+	if !exists {
+		s.mu.Unlock()
+		return fmt.Errorf("task %q not found", taskID)
+	}
+	if isTerminalTaskState(item.State) {
+		_, wasRunning := s.cancels[taskID]
+		delete(s.cancels, taskID)
+		var promoted []string
+		if wasRunning {
+			promoted = s.promotePendingLocked()
+		}
+		s.mu.Unlock()
+		for _, id := range promoted {
+			s.startTask(id)
+		}
+		return nil
+	}
+	if cancel := s.cancels[taskID]; cancel != nil {
+		cancel()
+		delete(s.cancels, taskID)
+	}
+	if runErr != nil {
+		item.State = TaskStateFailed
+		item.Error = runErr.Error()
+	} else {
+		item.State = TaskStateCompleted
+		item.Result = result
+	}
+	item.CompletedAt = time.Now().UTC()
+	s.closeTaskLocked(taskID)
+	promoted := s.promotePendingLocked()
+	s.mu.Unlock()
+	for _, id := range promoted {
+		s.startTask(id)
+	}
+	return nil
+}
+
+func isTerminalTaskState(state string) bool {
+	switch state {
+	case TaskStateCompleted, TaskStateFailed, TaskStateCancelled, TaskStateTimedOut:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *TaskState) closeTaskLocked(taskID string) {
+	if once, ok := s.closeOnce[taskID]; ok {
+		once.Do(func() {
+			if ch, found := s.doneChans[taskID]; found {
+				close(ch)
+			}
+		})
+	}
+}
+
+func (s *TaskState) activeReservationsLocked() int {
+	active := len(s.cancels)
+	for id, item := range s.tasks {
+		if item.State != TaskStateRunning {
+			continue
+		}
+		if _, started := s.cancels[id]; !started {
+			active++
+		}
+	}
+	return active
+}
+
+func (s *TaskState) promotePendingLocked() []string {
+	if s.closed || s.runner == nil {
+		return nil
+	}
+	running := s.activeReservationsLocked()
+	if running >= s.maxActive {
+		return nil
+	}
+	promoted := make([]string, 0, s.maxActive-running)
+	for _, id := range s.order {
+		item := s.tasks[id]
+		if item.State != TaskStatePending {
+			continue
+		}
+		item.State = TaskStateRunning
+		promoted = append(promoted, id)
+		running++
+		if running >= s.maxActive {
+			break
+		}
+	}
+	return promoted
+}
+
+// Close cancels all admitted children and prevents further spawns.
+func (s *TaskState) Close() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	s.closed = true
+	s.rootCancel()
+	for id, item := range s.tasks {
+		if !isTerminalTaskState(item.State) {
+			item.State = TaskStateCancelled
+			item.Error = "task tools disarmed"
+			item.CompletedAt = time.Now().UTC()
+			s.closeTaskLocked(id)
+		}
+	}
+	s.cancels = make(map[string]context.CancelFunc)
+	s.mu.Unlock()
 }
 
 // Wait waits for target child tasks to reach a terminal state or timeout.
@@ -266,6 +475,7 @@ func (s *TaskState) Wait(ctx context.Context, req TaskWaitRequest) (TaskWaitRece
 	}
 
 	s.mu.RLock()
+	hasRunner := s.runner != nil
 	var targets []string
 	if req.TaskID != "" {
 		targets = append(targets, req.TaskID)
@@ -319,12 +529,19 @@ func (s *TaskState) Wait(ctx context.Context, req TaskWaitRequest) (TaskWaitRece
 	}
 	s.mu.RUnlock()
 
+	waitTimeout := time.Duration(req.TimeoutMs) * time.Millisecond
+	if hasRunner && waitTimeout <= 0 {
+		waitTimeout = DefaultTaskWaitTimeout
+	}
+	if waitTimeout > MaxTaskWaitTimeout {
+		waitTimeout = MaxTaskWaitTimeout
+	}
 	timedOut := false
 	if len(pendingTargets) > 0 {
 		var timer *time.Timer
 		var timerC <-chan time.Time
-		if req.TimeoutMs > 0 {
-			timer = time.NewTimer(time.Duration(req.TimeoutMs) * time.Millisecond)
+		if waitTimeout > 0 {
+			timer = time.NewTimer(waitTimeout)
 			defer timer.Stop()
 			timerC = timer.C
 		}
@@ -481,22 +698,25 @@ func (s *TaskState) Cancel(req TaskCancelRequest) (TaskCancelReceipt, error) {
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	item, exists := s.tasks[taskID]
 	if !exists {
+		s.mu.Unlock()
 		err := fmt.Errorf("task %q not found", taskID)
 		return TaskCancelReceipt{Status: "not_found", TaskID: taskID, Error: err.Error()}, err
 	}
 
-	if item.State == TaskStateCompleted || item.State == TaskStateFailed || item.State == TaskStateCancelled || item.State == TaskStateTimedOut {
-		return TaskCancelReceipt{
+	if isTerminalTaskState(item.State) {
+		receipt := TaskCancelReceipt{
 			Status:    item.State,
 			TaskID:    taskID,
 			Cancelled: false,
-		}, nil
+		}
+		s.mu.Unlock()
+		return receipt, nil
 	}
 
+	wasRunning := item.State == TaskStateRunning
 	item.State = TaskStateCancelled
 	item.CompletedAt = time.Now().UTC()
 	if req.Reason != "" {
@@ -505,51 +725,26 @@ func (s *TaskState) Cancel(req TaskCancelRequest) (TaskCancelReceipt, error) {
 		item.Error = "task cancelled by operator"
 	}
 
-	if once, ok := s.closeOnce[taskID]; ok {
-		once.Do(func() {
-			if ch, ok := s.doneChans[taskID]; ok {
-				close(ch)
-			}
-		})
+	cancel := s.cancels[taskID]
+	if !wasRunning {
+		delete(s.cancels, taskID)
 	}
-
-	return TaskCancelReceipt{
+	s.closeTaskLocked(taskID)
+	receipt := TaskCancelReceipt{
 		Status:    "cancelled",
 		TaskID:    taskID,
 		Cancelled: true,
-	}, nil
+	}
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	return receipt, nil
 }
 
 // CompleteTask transitions a task to completed or failed state with optional result payload.
 func (s *TaskState) CompleteTask(taskID string, result any, err error) error {
-	if s == nil {
-		return fmt.Errorf("task state is nil")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	item, exists := s.tasks[taskID]
-	if !exists {
-		return fmt.Errorf("task %q not found", taskID)
-	}
-
-	if err != nil {
-		item.State = TaskStateFailed
-		item.Error = err.Error()
-	} else {
-		item.State = TaskStateCompleted
-		item.Result = result
-	}
-	item.CompletedAt = time.Now().UTC()
-
-	if once, ok := s.closeOnce[taskID]; ok {
-		once.Do(func() {
-			if ch, ok := s.doneChans[taskID]; ok {
-				close(ch)
-			}
-		})
-	}
-	return nil
+	return s.finishTask(taskID, result, err)
 }
 
 // GetTasks returns a copy of all current tasks.
@@ -714,14 +909,22 @@ func ArmTaskTools() ([]ToolDef, error) {
 // ArmTaskToolsWithLimits initializes the native child task tools with explicit capacity limits,
 // registers their engines, installs the adjudicator gate once, and returns planner ToolDefs.
 func ArmTaskToolsWithLimits(maxActive, maxBacklog int) ([]ToolDef, error) {
-	st := NewTaskState()
+	return ArmTaskToolsWithRunner(maxActive, maxBacklog, nil)
+}
+
+// ArmTaskToolsWithRunner arms bounded task execution through runner. Passing a
+// nil runner preserves the intent-only task lifecycle used by legacy callers.
+func ArmTaskToolsWithRunner(maxActive, maxBacklog int, runner ChildTaskRunner) ([]ToolDef, error) {
+	st := NewTaskStateWithRunner(runner)
 	if maxActive > 0 {
 		st.maxActive = maxActive
 	}
 	if maxBacklog > 0 {
 		st.maxBacklog = maxBacklog
 	}
-	armedTaskTools.Store(st)
+	if old := armedTaskTools.Swap(st); old != nil {
+		old.Close()
+	}
 
 	taskEnginesOnce.Do(func() {
 		activeTaskEngine = &taskEngine{}
@@ -740,7 +943,9 @@ func ArmTaskToolsWithLimits(maxActive, maxBacklog int) ([]ToolDef, error) {
 
 // DisarmTaskTools unarms the task tools, restoring the inactive state.
 func DisarmTaskTools() {
-	armedTaskTools.Store(nil)
+	if old := armedTaskTools.Swap(nil); old != nil {
+		old.Close()
+	}
 }
 
 // GetActiveTaskState returns the active TaskState, or nil if unarmed.

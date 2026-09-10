@@ -200,7 +200,8 @@
         "adjudicator",
         "policy-capability-mempolicy",
         "policy-capability-t-policy",
-        "x-policy-capability-defaultresetpolicy"
+        "x-policy-capability-defaultresetpolicy",
+        "agent-with-policy-snapshot"
       ],
       "aliases": [],
       "grounding": "setpolicy",

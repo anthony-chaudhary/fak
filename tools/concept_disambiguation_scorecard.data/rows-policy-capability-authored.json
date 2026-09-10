@@ -18,5 +18,27 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "agent-with-policy-snapshot",
+      "canonical": "WithPolicySnapshot (agent run option)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The agent loop run option that pins one caller-supplied adjudicator policy value so Configure cannot replace the capability floor during that run, including native child-task execution.",
+      "distinction": "It binds an already-compiled policy to one RunArm invocation; it neither compiles a manifest nor mutates the process-global adjudicator policy.",
+      "distinct_from": [
+        "policy-loaded",
+        "x-policy-capability-setpolicy"
+      ],
+      "aliases": [
+        "withpolicysnapshot"
+      ],
+      "grounding": "withpolicysnapshot",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }
