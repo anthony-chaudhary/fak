@@ -36,6 +36,7 @@ static id<MTLComputePipelineState> g_swiglu;
 static id<MTLComputePipelineState> g_add;
 static id<MTLComputePipelineState> g_addbias;
 static id<MTLComputePipelineState> g_attention;
+static id<MTLComputePipelineState> g_tree_attention;
 static id<MTLComputePipelineState> g_argmax;
 
 // Embedded Metal Shading Language source for the elementwise/reduction kernels. The GEMM
@@ -193,6 +194,69 @@ static const char *kShaderSrc =
     "    result[0] = bi;\n"
     "}\n";
 
+static const char *kTreeShaderSrc =
+    "#include <metal_stdlib>\n"
+    "using namespace metal;\n"
+    "kernel void tree_verify_attention_f32(device const float* q [[buffer(0)]],\n"
+    "                                      device const float* K [[buffer(1)]],\n"
+    "                                      device const float* V [[buffer(2)]],\n"
+    "                                      device float* outp [[buffer(3)]],\n"
+    "                                      constant uint* masks [[buffer(4)]],\n"
+    "                                      constant int& qLen [[buffer(5)]],\n"
+    "                                      constant int& kvLen [[buffer(6)]],\n"
+    "                                      constant int& nH [[buffer(7)]],\n"
+    "                                      constant int& nKV [[buffer(8)]],\n"
+    "                                      constant int& hd [[buffer(9)]],\n"
+    "                                      constant float& scale [[buffer(10)]],\n"
+    "                                      constant int& linear [[buffer(11)]],\n"
+    "                                      uint groupID [[threadgroup_position_in_grid]],\n"
+    "                                      uint tid [[thread_position_in_threadgroup]]) {\n"
+    "    int qi = (int)groupID / nH;\n"
+    "    int h = (int)groupID % nH;\n"
+    "    if (qi >= qLen) return;\n"
+    "    int kvh = h / (nH / nKV);\n"
+    "    int kvw = nKV * hd;\n"
+    "    int prefix = kvLen - qLen;\n"
+    "    int qbase = (qi * nH + h) * hd;\n"
+    "    threadgroup float cachedQ[1024];\n"
+    "    threadgroup float subgroupSums[4];\n"
+    "    for (int x = (int)tid; x < hd; x += 128) cachedQ[x] = q[qbase + x];\n"
+    "    threadgroup_barrier(mem_flags::mem_threadgroup);\n"
+    "    uint lane = tid & 31u;\n"
+    "    uint subgroup = tid >> 5u;\n"
+    "    float m = -3.402823466e38f;\n"
+    "    float sum = 0.0f;\n"
+    "    float acc[8] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};\n"
+    "    for (int j = 0; j < kvLen; ++j) {\n"
+    "        int candidate = j - prefix;\n"
+    "        bool visible = j < prefix;\n"
+    "        if (!visible) {\n"
+    "            if (linear != 0) visible = candidate <= qi;\n"
+    "            else visible = candidate >= 0 && candidate < 32 && (masks[qi] & (1u << (uint)candidate)) != 0;\n"
+    "        }\n"
+    "        if (!visible) continue;\n"
+    "        int kb = j * kvw + kvh * hd;\n"
+    "        float partial = 0.0f;\n"
+    "        for (int x = (int)tid; x < hd; x += 128) partial += cachedQ[x] * K[kb + x];\n"
+    "        float reduced = simd_sum(partial);\n"
+    "        if (lane == 0u) subgroupSums[subgroup] = reduced;\n"
+    "        threadgroup_barrier(mem_flags::mem_threadgroup);\n"
+    "        float score = subgroupSums[0] + subgroupSums[1] + subgroupSums[2] + subgroupSums[3];\n"
+    "        score *= scale;\n"
+    "        float nm = max(m, score);\n"
+    "        float oldScale = sum > 0.0f ? exp(m - nm) : 0.0f;\n"
+    "        float weight = exp(score - nm);\n"
+    "        int slot = 0;\n"
+    "        for (int x = (int)tid; x < hd; x += 128, ++slot) acc[slot] = acc[slot] * oldScale + weight * V[kb + x];\n"
+    "        sum = sum * oldScale + weight;\n"
+    "        m = nm;\n"
+    "        threadgroup_barrier(mem_flags::mem_threadgroup);\n"
+    "    }\n"
+    "    float inv = sum > 0.0f ? 1.0f / sum : 0.0f;\n"
+    "    int slot = 0;\n"
+    "    for (int x = (int)tid; x < hd; x += 128, ++slot) outp[qbase + x] = acc[slot] * inv;\n"
+    "}\n";
+
 static id<MTLComputePipelineState> make_pso(id<MTLLibrary> lib, const char *fname) {
     NSString *n = [NSString stringWithUTF8String:fname];
     id<MTLFunction> fn = [lib newFunctionWithName:n]; // +1
@@ -257,6 +321,19 @@ int fmetal_init(char *name, int namelen) {
         }
         if (!g_attention) {
             g_attention = make_pso(lib, "attention_f32");
+        }
+        // Tree verification is optional: compile its pipeline independently so a
+        // device/compiler that rejects SIMD-group support does not disable Metal.
+        NSString *treeSource = [NSString stringWithUTF8String:kTreeShaderSrc];
+        MTLCompileOptions *treeOpts = [[MTLCompileOptions alloc] init];
+        NSError *treeErr = nil;
+        id<MTLLibrary> treeLib = [gDev newLibraryWithSource:treeSource options:treeOpts error:&treeErr];
+        [treeOpts release];
+        if (treeLib != nil) {
+            g_tree_attention = make_pso(treeLib, "tree_verify_attention_f32");
+            [treeLib release];
+        } else {
+            NSLog(@"fak metal: optional tree attention MSL compile failed; CPU fallback active: %@", treeErr);
         }
         [lib release];
         if (!g_rmsnorm || !g_rope || !g_swiglu || !g_add || !g_addbias || !g_attention || !g_argmax) {
@@ -669,6 +746,62 @@ void fmetal_attention_f32(void *dQ, void *dK, void *dV, void *dOut,
     }
     fmetal_command_receipt receipt;
     (void)fmetal_command_finish(owner, &receipt);
+}
+
+static int fmetal_verify_attention_f32(void *dQ, void *dK, void *dV, void *dOut,
+                                       const unsigned int *maskRows, int linear,
+                                       int qLen, int kvLen, int nH, int nKV, int hd, float scale) {
+    if (gQueue == nil || g_tree_attention == nil || dQ == NULL || dK == NULL ||
+        dV == NULL || dOut == NULL || qLen <= 0 || kvLen < qLen || nH <= 0 ||
+        nKV <= 0 || nH % nKV != 0 || hd <= 0 || (!linear && maskRows == NULL)) return 1;
+    @autoreleasepool {
+        unsigned int zeroMasks[32] = {0};
+        const unsigned int *rows = maskRows != NULL ? maskRows : zeroMasks;
+        NSUInteger rowBytes = (NSUInteger)(linear ? 1 : qLen) * sizeof(unsigned int);
+        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+        id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
+        if (cb == nil || enc == nil) return 2;
+        [enc setComputePipelineState:g_tree_attention];
+        [enc setBuffer:(id<MTLBuffer>)dQ offset:0 atIndex:0];
+        [enc setBuffer:(id<MTLBuffer>)dK offset:0 atIndex:1];
+        [enc setBuffer:(id<MTLBuffer>)dV offset:0 atIndex:2];
+        [enc setBuffer:(id<MTLBuffer>)dOut offset:0 atIndex:3];
+        [enc setBytes:rows length:rowBytes atIndex:4];
+        [enc setBytes:&qLen length:sizeof(int) atIndex:5];
+        [enc setBytes:&kvLen length:sizeof(int) atIndex:6];
+        [enc setBytes:&nH length:sizeof(int) atIndex:7];
+        [enc setBytes:&nKV length:sizeof(int) atIndex:8];
+        [enc setBytes:&hd length:sizeof(int) atIndex:9];
+        [enc setBytes:&scale length:sizeof(float) atIndex:10];
+        [enc setBytes:&linear length:sizeof(int) atIndex:11];
+        if (g_tree_attention.maxTotalThreadsPerThreadgroup < 128 ||
+            g_tree_attention.threadExecutionWidth != 32) {
+            [enc endEncoding];
+            return 4;
+        }
+        [enc dispatchThreadgroups:MTLSizeMake((NSUInteger)(qLen * nH), 1, 1)
+             threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
+        [enc endEncoding];
+        [cb commit];
+        [cb waitUntilCompleted];
+        return cb.status == MTLCommandBufferStatusCompleted ? 0 : 3;
+    }
+}
+
+int fmetal_tree_attention_available(void) {
+    return g_tree_attention != nil && g_tree_attention.maxTotalThreadsPerThreadgroup >= 128 &&
+           g_tree_attention.threadExecutionWidth == 32;
+}
+
+int fmetal_spec_verify_attention_f32(void *dQ, void *dK, void *dV, void *dOut,
+                                     int qLen, int kvLen, int nH, int nKV, int hd, float scale) {
+    return fmetal_verify_attention_f32(dQ, dK, dV, dOut, NULL, 1, qLen, kvLen, nH, nKV, hd, scale);
+}
+
+int fmetal_tree_verify_attention_f32(void *dQ, void *dK, void *dV, void *dOut,
+                                     const unsigned int *maskRows,
+                                     int qLen, int kvLen, int nH, int nKV, int hd, float scale) {
+    return fmetal_verify_attention_f32(dQ, dK, dV, dOut, maskRows, 0, qLen, kvLen, nH, nKV, hd, scale);
 }
 
 int fmetal_argmax_f32(void *dLogits, int n) {

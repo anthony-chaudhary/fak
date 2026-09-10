@@ -92,6 +92,16 @@ void fmetal_add_bias_f32(void *dDst, void *dBias, int rows, int width);
 void fmetal_attention_f32(void *dQ, void *dK, void *dV, void *dOut,
                           int nPos, int nH, int nKV, int hd, float scale);
 
+/* Speculative verification attention. The tree variant consumes qLen packed uint32
+ * mask rows; prefix keys [0,kvLen-qLen) remain unconditionally visible. Both calls
+ * keep Q/K/V/output resident and synchronously submit one native Metal kernel. */
+int fmetal_spec_verify_attention_f32(void *dQ, void *dK, void *dV, void *dOut,
+                                     int qLen, int kvLen, int nH, int nKV, int hd, float scale);
+int fmetal_tree_verify_attention_f32(void *dQ, void *dK, void *dV, void *dOut,
+                                     const unsigned int *maskRows,
+                                     int qLen, int kvLen, int nH, int nKV, int hd, float scale);
+int fmetal_tree_attention_available(void);
+
 /* argmax over logits[n]: returns the SMALLEST index attaining the maximum value (the
  * cpuref first-max tie-break), copied back to the host as the single scalar fence. */
 int fmetal_argmax_f32(void *dLogits, int n);

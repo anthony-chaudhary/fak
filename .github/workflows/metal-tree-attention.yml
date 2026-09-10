@@ -1,0 +1,44 @@
+name: metal-tree-attention
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - internal/compute/metal.go
+      - internal/compute/metal_shim.m
+      - internal/compute/metal_backend.h
+      - internal/compute/tree_attention*.go
+      - internal/compute/metal_tree_attention_test.go
+      - .github/workflows/metal-tree-attention.yml
+
+permissions:
+  contents: read
+
+jobs:
+  tree-attention:
+    runs-on: macos-latest
+    env:
+      CGO_ENABLED: "1"
+      GOTOOLCHAIN: auto
+      FAK_METAL_TREE_ATTENTION_REQUIRE_DEVICE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Run native Metal tree-attention parity
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -json ./internal/compute -run '^TestTreeSpecVerifyAttention' -count=1 -timeout=180s 2>&1 \
+            | tee "$RUNNER_TEMP/metal-tree-attention.json"
+
+      - name: Upload Metal tree-attention receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tree-attention-metal-receipt
+          path: ${{ runner.temp }}/metal-tree-attention.json
+          if-no-files-found: error

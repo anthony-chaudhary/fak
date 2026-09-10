@@ -30,6 +30,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"sync"
 	"time"
@@ -110,6 +111,30 @@ type metalBackend struct {
 	// all at a token boundary so steady-state decode stops paying newBuffer per op. Guarded
 	// by metalMu (every appender holds it).
 	transient []*metalBuf
+}
+
+var _ SpecVerifyBackend = (*metalBackend)(nil)
+var _ TreeVerifyBackend = (*metalBackend)(nil)
+
+func metalTreeAttentionAvailable() bool {
+	return C.fmetal_tree_attention_available() != 0
+}
+
+func validateMetalVerifyOutput(out *Tensor, shape []int, operation string) (allocate bool, err error) {
+	if out.buf == nil {
+		if out.be != nil || len(out.Shape) != 0 || out.Quant != nil || out.Dtype != F32 || out.Layout != RowMajor {
+			return false, fmt.Errorf("compute: %s output is partially initialized", operation)
+		}
+		return true, nil
+	}
+	b, ok := out.buf.(*metalBuf)
+	if !ok || b == nil || b.ptr == nil {
+		return false, fmt.Errorf("compute: %s output is not live Metal-resident storage", operation)
+	}
+	if out.Dtype != F32 || out.Layout != RowMajor || !sameShape(out.Shape, shape) {
+		return false, fmt.Errorf("compute: %s output must be Metal F32 with shape %v", operation, shape)
+	}
+	return false, nil
 }
 
 // Recycle frees every transient op-output buffer allocated since the last Recycle. The HAL
@@ -687,13 +712,138 @@ func (c *metalBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, g
 	return out
 }
 
-// SpecVerifyAttention on metalBackend falls back to the CPU reference (#11100).
 func (c *metalBackend) SpecVerifyAttention(q, k, v, out *Tensor, qLen, kvLen, nH, nHkv, d int) error {
-	ref, ok := Default().(SpecVerifyBackend)
-	if !ok {
-		return fmt.Errorf("compute: Default backend does not implement SpecVerifyBackend")
+	if q == nil || k == nil || v == nil || out == nil {
+		return fmt.Errorf("compute: SpecVerifyAttention nil tensor argument")
 	}
-	return ref.SpecVerifyAttention(q, k, v, out, qLen, kvLen, nH, nHkv, d)
+	if qLen <= 0 || kvLen < qLen || nH <= 0 || nHkv <= 0 || nH%nHkv != 0 || d <= 0 || d > 1024 {
+		return fmt.Errorf("compute: SpecVerifyAttention invalid dimensions qLen=%d kvLen=%d nH=%d nHkv=%d d=%d", qLen, kvLen, nH, nHkv, d)
+	}
+	expectedQ, expectedKV := qLen*nH*d, kvLen*nHkv*d
+	if q.Numel() != expectedQ || k.Numel() != expectedKV || v.Numel() != expectedKV {
+		return fmt.Errorf("compute: SpecVerifyAttention tensor shape mismatch")
+	}
+	if q.Dtype != F32 || k.Dtype != F32 || v.Dtype != F32 {
+		return fmt.Errorf("compute: SpecVerifyAttention Metal requires F32 inputs")
+	}
+	if b, ok := q.buf.(*metalBuf); !ok || b == nil || b.ptr == nil {
+		return fmt.Errorf("compute: SpecVerifyAttention q is not Metal-resident")
+	}
+	if b, ok := k.buf.(*metalBuf); !ok || b == nil || b.ptr == nil {
+		return fmt.Errorf("compute: SpecVerifyAttention k is not Metal-resident")
+	}
+	if b, ok := v.buf.(*metalBuf); !ok || b == nil || b.ptr == nil {
+		return fmt.Errorf("compute: SpecVerifyAttention v is not Metal-resident")
+	}
+	allocate, err := validateMetalVerifyOutput(out, []int{qLen, nH, d}, "SpecVerifyAttention")
+	if err != nil {
+		return err
+	}
+	if !metalTreeAttentionAvailable() {
+		return c.verifyAttentionCPUFallback(q, k, v, out, nil, qLen, kvLen, nH, nHkv, d, false)
+	}
+	metalMu.Lock()
+	defer metalMu.Unlock()
+	var allocated *metalBuf
+	if allocate {
+		devOut, newBuf := c.devTr([]int{qLen, nH, d}, F32)
+		*out = devOut
+		allocated = newBuf
+	}
+	rc := int(C.fmetal_spec_verify_attention_f32(c.mb(*q), c.mb(*k), c.mb(*v), c.mb(*out), C.int(qLen), C.int(kvLen), C.int(nH), C.int(nHkv), C.int(d), C.float(1/math.Sqrt(float64(d)))))
+	if rc != 0 {
+		if allocated != nil {
+			C.fmetal_free(allocated.ptr)
+			allocated.ptr = nil
+			c.transient = c.transient[:len(c.transient)-1]
+			*out = Tensor{}
+		}
+		return fmt.Errorf("compute: fmetal_spec_verify_attention_f32 failed rc=%d", rc)
+	}
+	return nil
+}
+
+func (c *metalBackend) TreeVerifyAttention(q, k, v, out *Tensor, maskRows []uint32, qLen, kvLen, nH, nHkv, d int) error {
+	if err := validateTreeVerifyAttention(q, k, v, out, maskRows, qLen, kvLen, nH, nHkv, d); err != nil {
+		return err
+	}
+	if q.Dtype != F32 || k.Dtype != F32 || v.Dtype != F32 {
+		return fmt.Errorf("compute: TreeVerifyAttention Metal requires F32 inputs")
+	}
+	if b, ok := q.buf.(*metalBuf); !ok || b == nil || b.ptr == nil {
+		return fmt.Errorf("compute: TreeVerifyAttention q is not Metal-resident")
+	}
+	if b, ok := k.buf.(*metalBuf); !ok || b == nil || b.ptr == nil {
+		return fmt.Errorf("compute: TreeVerifyAttention k is not Metal-resident")
+	}
+	if b, ok := v.buf.(*metalBuf); !ok || b == nil || b.ptr == nil {
+		return fmt.Errorf("compute: TreeVerifyAttention v is not Metal-resident")
+	}
+	allocate, err := validateMetalVerifyOutput(out, []int{qLen, nH, d}, "TreeVerifyAttention")
+	if err != nil {
+		return err
+	}
+	if !metalTreeAttentionAvailable() {
+		return c.verifyAttentionCPUFallback(q, k, v, out, maskRows, qLen, kvLen, nH, nHkv, d, true)
+	}
+	metalMu.Lock()
+	defer metalMu.Unlock()
+	var allocated *metalBuf
+	if allocate {
+		devOut, newBuf := c.devTr([]int{qLen, nH, d}, F32)
+		*out = devOut
+		allocated = newBuf
+	}
+	rc := int(C.fmetal_tree_verify_attention_f32(c.mb(*q), c.mb(*k), c.mb(*v), c.mb(*out), (*C.uint)(unsafe.Pointer(&maskRows[0])), C.int(qLen), C.int(kvLen), C.int(nH), C.int(nHkv), C.int(d), C.float(1/math.Sqrt(float64(d)))))
+	if rc != 0 {
+		if allocated != nil {
+			C.fmetal_free(allocated.ptr)
+			allocated.ptr = nil
+			c.transient = c.transient[:len(c.transient)-1]
+			*out = Tensor{}
+		}
+		return fmt.Errorf("compute: fmetal_tree_verify_attention_f32 failed rc=%d", rc)
+	}
+	return nil
+}
+
+func (c *metalBackend) verifyAttentionCPUFallback(q, k, v, out *Tensor, maskRows []uint32, qLen, kvLen, nH, nHkv, d int, tree bool) error {
+	started := time.Now()
+	ref, ok := Default().(*cpuBackend)
+	if !ok {
+		return fmt.Errorf("compute: Metal verify-attention pipeline unavailable and CPU reference unavailable")
+	}
+	hq := NewF32(ref, []int{qLen, nH, d}, c.Read(*q))
+	hk := NewF32(ref, []int{kvLen, nHkv, d}, c.Read(*k))
+	hv := NewF32(ref, []int{kvLen, nHkv, d}, c.Read(*v))
+	var hostOut Tensor
+	var err error
+	operation := "spec_verify_attention"
+	if tree {
+		operation = "tree_verify_attention"
+		err = ref.TreeVerifyAttention(&hq, &hk, &hv, &hostOut, maskRows, qLen, kvLen, nH, nHkv, d)
+	} else {
+		err = ref.SpecVerifyAttention(&hq, &hk, &hv, &hostOut, qLen, kvLen, nH, nHkv, d)
+	}
+	if err != nil {
+		return err
+	}
+	values := ref.Read(hostOut)
+	metalMu.Lock()
+	devOut := *out
+	if out.buf == nil {
+		devOut, _ = c.devTr([]int{qLen, nH, d}, F32)
+	}
+	C.fmetal_h2d(c.mb(devOut), unsafe.Pointer(&values[0]), C.size_t(len(values)*4))
+	metalMu.Unlock()
+	*out = devOut
+	computetrace.Record(computetrace.Event{
+		Operation: operation, Backend: c.Name(), Device: c.Tier(), Kernel: "cpu_reference_fallback",
+		StartedAt: started, DurationNS: time.Since(started).Nanoseconds(), TimerDomain: "host",
+		Route: "metal_optional_pipeline_unavailable", InputDType: "f32", OutputDType: "f32",
+		Status: "fallback", ProvenanceDigest: computetrace.Digest("metal", operation, "cpu_fallback"),
+	})
+	return nil
 }
 
 // PrefillBatch executes batched prompt prefill across a sequence panel (P x D) in 1 pass on Metal GPU (#11036).
