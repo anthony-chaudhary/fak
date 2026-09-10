@@ -3,12 +3,19 @@
 package amdgpu
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -50,6 +57,245 @@ const (
 	DefaultProbeTimeout = 3 * time.Second
 	StrixPresenceFile   = "_scratch/strix_presence.json"
 )
+
+var strixSSHHostnameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
+
+var (
+	errStrixSSHRetryable         = errors.New("STRIX_SSH_REMOTE_UNAVAILABLE")
+	errStrixSSHRemoteUnavailable = fmt.Errorf("%w: %w", ErrStrixHostTrustRefused, errStrixSSHRetryable)
+)
+
+type strixSSHBroker interface {
+	KnownHostsCommand() (string, error)
+	Close() error
+}
+
+type strixSSHTransportDeps struct {
+	startBroker    func() (strixSSHBroker, error)
+	lookPath       func(string) (string, error)
+	executable     func() (string, error)
+	lstat          func(string) (os.FileInfo, error)
+	sameFile       func(os.FileInfo, os.FileInfo) bool
+	fileDigest     func(string) ([sha256.Size]byte, error)
+	commandContext func(context.Context, string, ...string) *exec.Cmd
+	combinedOutput func(*exec.Cmd) ([]byte, error)
+	environ        func() []string
+}
+
+var strixSSHDeps = strixSSHTransportDeps{
+	startBroker: func() (strixSSHBroker, error) {
+		return StartStrixKnownHostsBroker()
+	},
+	lookPath:       exec.LookPath,
+	executable:     os.Executable,
+	lstat:          os.Lstat,
+	sameFile:       os.SameFile,
+	fileDigest:     digestStrixExecutable,
+	commandContext: exec.CommandContext,
+	combinedOutput: func(cmd *exec.Cmd) ([]byte, error) { return cmd.CombinedOutput() },
+	environ:        os.Environ,
+}
+
+type strixSSHCommand struct {
+	ctx      context.Context
+	cmd      *exec.Cmd
+	broker   strixSSHBroker
+	sshPath  string
+	sshInfo  os.FileInfo
+	sshHash  [sha256.Size]byte
+	selfPath string
+	selfInfo os.FileInfo
+	selfHash [sha256.Size]byte
+	deps     strixSSHTransportDeps
+}
+
+func isNilStrixSSHBroker(broker strixSSHBroker) bool {
+	if broker == nil {
+		return true
+	}
+	value := reflect.ValueOf(broker)
+	return (value.Kind() == reflect.Chan || value.Kind() == reflect.Func || value.Kind() == reflect.Interface || value.Kind() == reflect.Map || value.Kind() == reflect.Ptr || value.Kind() == reflect.Slice) && value.IsNil()
+}
+
+func validateStrixSSHDestination(host string) error {
+	if len(host) == 0 || len(host) > 253 || strings.HasPrefix(host, "-") {
+		return strixTrustRefused("invalid ssh destination")
+	}
+	if net.ParseIP(host) != nil || strixSSHHostnameRE.MatchString(host) {
+		return nil
+	}
+	return strixTrustRefused("invalid ssh destination")
+}
+
+func digestStrixExecutable(path string) ([sha256.Size]byte, error) {
+	var digest [sha256.Size]byte
+	f, err := os.Open(path)
+	if err != nil {
+		return digest, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return digest, err
+	}
+	copy(digest[:], h.Sum(nil))
+	return digest, nil
+}
+
+func observeStrixExecutable(path string, deps strixSSHTransportDeps) (os.FileInfo, [sha256.Size]byte, error) {
+	var zero [sha256.Size]byte
+	if deps.lstat == nil || deps.sameFile == nil || deps.fileDigest == nil || !filepath.IsAbs(path) || filepath.Clean(path) != path || strings.ContainsAny(path, "\x00\r\n%") {
+		return nil, zero, strixTrustRefused("unsafe executable")
+	}
+	info, err := deps.lstat(path)
+	if err != nil || info == nil || !info.Mode().IsRegular() {
+		return nil, zero, strixTrustRefused("unsafe executable")
+	}
+	digest, err := deps.fileDigest(path)
+	if err != nil {
+		return nil, zero, strixTrustRefused("unsafe executable")
+	}
+	after, err := deps.lstat(path)
+	if err != nil || after == nil || !after.Mode().IsRegular() || !deps.sameFile(info, after) || !sameStrixExecutableMetadata(info, after) {
+		return nil, zero, strixTrustRefused("executable changed")
+	}
+	return after, digest, nil
+}
+
+func sameStrixExecutableMetadata(a, b os.FileInfo) bool {
+	return a != nil && b != nil && a.Mode() == b.Mode() && a.Size() == b.Size() && a.ModTime().Equal(b.ModTime())
+}
+
+func strixSSHChildEnvironment(env []string) []string {
+	allowed := map[string]bool{
+		"COMSPEC": true, "SYSTEMROOT": true, "WINDIR": true,
+		"TEMP": true, "TMP": true,
+	}
+	clean := make([]string, 0, len(env))
+	seen := make(map[string]bool, len(allowed))
+	for _, item := range env {
+		name, _, ok := strings.Cut(item, "=")
+		upper := strings.ToUpper(name)
+		if !ok || !allowed[upper] || seen[upper] {
+			continue
+		}
+		seen[upper] = true
+		clean = append(clean, item)
+	}
+	return clean
+}
+
+func newStrixSSHCommand(ctx context.Context, host string, connectTimeout time.Duration, command string, stdin []byte, deps strixSSHTransportDeps) (_ *strixSSHCommand, err error) {
+	if ctx == nil || deps.startBroker == nil || deps.lookPath == nil || deps.executable == nil || deps.lstat == nil || deps.sameFile == nil || deps.fileDigest == nil || deps.commandContext == nil || deps.combinedOutput == nil || deps.environ == nil {
+		return nil, strixTrustRefused("invalid ssh transport")
+	}
+	if err := validateStrixSSHDestination(host); err != nil {
+		return nil, err
+	}
+	sshPath, err := deps.lookPath("ssh")
+	if err != nil {
+		return nil, strixTrustRefused("ssh executable unavailable")
+	}
+	sshInfo, sshHash, err := observeStrixExecutable(sshPath, deps)
+	if err != nil {
+		return nil, err
+	}
+	selfPath, err := deps.executable()
+	if err != nil {
+		return nil, strixTrustRefused("unsafe executable")
+	}
+	selfInfo, selfHash, err := observeStrixExecutable(selfPath, deps)
+	if err != nil {
+		return nil, err
+	}
+	broker, startErr := deps.startBroker()
+	if isNilStrixSSHBroker(broker) {
+		return nil, strixTrustRefused("host trust unavailable")
+	}
+	if startErr != nil {
+		if closeErr := broker.Close(); closeErr != nil {
+			return nil, strixTrustRefused("broker cleanup failed")
+		}
+		return nil, strixTrustRefused("host trust unavailable")
+	}
+	keepBroker := false
+	defer func() {
+		if !keepBroker {
+			if closeErr := broker.Close(); closeErr != nil {
+				err = strixTrustRefused("broker cleanup failed")
+			}
+		}
+	}()
+	knownHostsCommand, err := broker.KnownHostsCommand()
+	if err != nil || knownHostsCommand == "" || strings.ContainsAny(knownHostsCommand, "\x00\r\n%") {
+		return nil, strixTrustRefused("host trust unavailable")
+	}
+	seconds := int64(connectTimeout / time.Second)
+	if seconds < 1 || connectTimeout != time.Duration(seconds)*time.Second {
+		return nil, strixTrustRefused("invalid ssh timeout")
+	}
+	args := []string{
+		"-F", "none",
+		"-o", "BatchMode=yes",
+		"-o", "ConnectTimeout=" + strconv.FormatInt(seconds, 10),
+		"-o", "StrictHostKeyChecking=yes",
+		"-o", "UserKnownHostsFile=none",
+		"-o", "GlobalKnownHostsFile=none",
+		"-o", "VerifyHostKeyDNS=no",
+		"-o", "HostKeyAlias=" + StrixKnownHostsAlias,
+		"-o", "UpdateHostKeys=no",
+		"-o", "KnownHostsCommand=" + knownHostsCommand,
+		"--", host, command,
+	}
+	cmd := deps.commandContext(ctx, sshPath, args...)
+	if cmd == nil {
+		return nil, strixTrustRefused("ssh command unavailable")
+	}
+	cmd.Env = strixSSHChildEnvironment(deps.environ())
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
+	windowgate.ConfigureBackgroundCommand(cmd)
+	keepBroker = true
+	return &strixSSHCommand{ctx: ctx, cmd: cmd, broker: broker, sshPath: sshPath, sshInfo: sshInfo, sshHash: sshHash, selfPath: selfPath, selfInfo: selfInfo, selfHash: selfHash, deps: deps}, nil
+}
+
+func (c *strixSSHCommand) combinedOutput() (out []byte, err error) {
+	if c == nil || c.cmd == nil || c.broker == nil {
+		return nil, strixTrustRefused("invalid ssh command")
+	}
+	defer func() {
+		if closeErr := c.broker.Close(); closeErr != nil {
+			out = nil
+			err = strixTrustRefused("broker cleanup failed")
+		}
+	}()
+	sshNow, sshHash, sshErr := observeStrixExecutable(c.sshPath, c.deps)
+	selfNow, selfHash, selfErr := observeStrixExecutable(c.selfPath, c.deps)
+	if sshErr != nil || selfErr != nil || !c.deps.sameFile(c.sshInfo, sshNow) || !sameStrixExecutableMetadata(c.sshInfo, sshNow) || sshHash != c.sshHash || !c.deps.sameFile(c.selfInfo, selfNow) || !sameStrixExecutableMetadata(c.selfInfo, selfNow) || selfHash != c.selfHash {
+		return nil, strixTrustRefused("executable changed")
+	}
+	out, err = c.deps.combinedOutput(c.cmd)
+	if err != nil {
+		if c.ctx.Err() != nil {
+			return nil, strixTrustRefused("ssh execution canceled")
+		}
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return nil, errStrixSSHRemoteUnavailable
+		}
+		return nil, strixTrustRefused("ssh start failed")
+	}
+	return out, nil
+}
+
+func runStrixSSHCommand(ctx context.Context, host string, connectTimeout time.Duration, command string, stdin []byte) ([]byte, error) {
+	invocation, err := newStrixSSHCommand(ctx, host, connectTimeout, command, stdin, strixSSHDeps)
+	if err != nil {
+		return nil, err
+	}
+	return invocation.combinedOutput()
+}
 
 // DiscoverStrixTarget finds a local or remote AMD Strix Halo appliance.
 func DiscoverStrixTarget(ctx context.Context, hostOverride string) (*StrixTarget, error) {

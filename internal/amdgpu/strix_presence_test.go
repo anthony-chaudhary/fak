@@ -2,10 +2,44 @@ package amdgpu
 
 import (
 	"context"
+	"errors"
 	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
+
+func TestStrixValidationRejectsUntrustedSSH(t *testing.T) {
+	shimDir := t.TempDir()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sshName := "ssh"
+	if runtime.GOOS == "windows" {
+		sshName += ".exe"
+	}
+	selfBytes, err := os.ReadFile(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(shimDir, sshName), selfBytes, 0o700); err != nil {
+		t.Fatalf("create inert ssh test executable: %v", err)
+	}
+	t.Setenv("PATH", shimDir)
+	t.Setenv(StrixKnownHostsFileEnv, "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	out, err := runStrixTargetCommand(ctx, &StrixTarget{Mode: "ssh", Host: "safe-host"}, "true", nil)
+	if !errors.Is(err, ErrStrixHostTrustRefused) {
+		t.Fatalf("runStrixTargetCommand() output=%q err=%v, want typed trust refusal before SSH start", out, err)
+	}
+	if len(out) != 0 {
+		t.Fatalf("untrusted SSH returned output %q", out)
+	}
+}
 
 func TestStrixPresenceCacheRoundtrip(t *testing.T) {
 	defer func() {
