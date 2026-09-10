@@ -38,13 +38,10 @@ func serveDeviceResidentQ4K(backend compute.Backend) bool {
 }
 
 // serveArtifactResidentQ4K gates the runtime load path on both device capability and
-// the encodings in the artifact itself. Backend capability alone must never relabel a
-// Q8_0 or UD-Q2_K_XL checkpoint as resident Q4_K.
+// the encodings in the artifact itself. Backend capability alone must never relabel an
+// all-Q8_0 checkpoint as resident Q4_K.
 func serveArtifactResidentQ4K(backend compute.Backend, artifact ggufload.ArtifactQuant) bool {
-	if artifact.Recipe == "UD-Q2_K_XL" {
-		return false
-	}
-	return artifact.Q4KResident && serveDeviceResidentQ4K(backend)
+	return (artifact.Q4KResident || artifact.Recipe == "UD-Q2_K_XL") && serveDeviceResidentQ4K(backend)
 }
 
 func serveQuantProvenance(artifact ggufload.ArtifactQuant, residentQ4K bool) gateway.StartupMessage {
@@ -187,7 +184,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		// Apple-Silicon Metal resident load (backend is nil, Metal device available):
 		// hold raw Q4_K / k-quant weights RESIDENT in Unified Memory (raw super-blocks, resident decode,
 		// dequant-fused Metal MSL GEMM kernels), eliminating the silent CPU Q8 dequantization loop.
-		must(fitServeGGUFPathOnHost(ggufPath, false, contextBudgetTokens))
+		must(fitServeGGUFPathOnHostForArm(ggufPath, serveLoadArmResidentQ4K, contextBudgetTokens))
 		loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", "GGUF Apple-Silicon Metal load -> resident quantized weights in Unified Memory (raw super-blocks, resident decode, ~0.56 B/param vs Q8 ~1 B/param)"))
 		mm, prof, loadNanos := loadResidentQ4KProfiled(ggufPath, tLoad, q4kOpts...)
 		loadMessages = append(loadMessages, serveStartupMessage("resident-layout", "info", fakmodel.FormatResidentReport(mm.ResidentReport())))
@@ -440,7 +437,7 @@ func resolveMetalServeLoadArm(ws *ggufload.WeightSource) serveLoadArm {
 		return serveLoadArmResidentQ4K
 	}
 	quant := ggufload.ClassifyTensorQuant(ws.File.Tensors)
-	if quant.Q4KResident && quant.Recipe != "UD-Q2_K_XL" && os.Getenv("FAK_Q4K") != "0" {
+	if (quant.Q4KResident || quant.Recipe == "UD-Q2_K_XL") && os.Getenv("FAK_Q4K") != "0" {
 		return serveLoadArmResidentQ4K
 	}
 	return serveLoadArmQuantProfileQ8

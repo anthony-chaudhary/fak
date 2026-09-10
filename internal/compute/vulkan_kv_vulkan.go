@@ -26,26 +26,100 @@ func (v *vulkanBackend) NewKV(cfg KVConfig) KVStore {
 type vslice struct {
 	ptr      unsafe.Pointer
 	len, cap int
+	backing  *vulkanKVBacking
+}
+
+// vulkanKVBacking is the allocation shared by metadata-only KV clones. All access is
+// serialized by vulkanMu. highWater is the greatest float offset written: a clone at
+// highWater may append into unused capacity without affecting readers whose local len ends
+// at the old high-water mark. A writer whose len trails highWater must detach first because
+// another fork already owns the tail it would overwrite.
+type vulkanKVBacking struct {
+	ptr       unsafe.Pointer
+	cap       int
+	refs      int
+	highWater int
+}
+
+func (d *vslice) adoptBacking() {
+	if d.backing == nil && d.ptr != nil {
+		d.backing = &vulkanKVBacking{ptr: d.ptr, cap: d.cap, refs: 1, highWater: d.len}
+	}
+}
+
+func (v *vulkanBackend) makeVSliceWritable(d *vslice, need int, preserve bool, what string) {
+	ncap := d.cap
+	if ncap < need {
+		ncap = d.cap*2 + (need - d.len)
+		if ncap < need {
+			ncap = need
+		}
+	}
+	v.makeVSliceWritableCapacity(d, need, ncap, preserve, what)
+}
+
+// makeVSliceWritableCapacity is the exact-capacity form used by callers that already
+// applied their own guarded growth policy, such as Qwen sequence prefill.
+func (v *vulkanBackend) makeVSliceWritableCapacity(d *vslice, need, ncap int, preserve bool, what string) {
+	d.adoptBacking()
+	if d.backing != nil && d.backing.refs == 1 && need <= d.cap {
+		// Any tail beyond this sole owner's visible length is unreachable and may be
+		// reclaimed by its next append or rewrite.
+		d.backing.highWater = d.len
+		return
+	}
+	if d.backing == nil && need <= d.cap {
+		return
+	}
+	if ncap < need {
+		ncap = need
+	}
+	var np unsafe.Pointer
+	if ncap > 0 {
+		np = v.dallocKVFor(ncap*F32.Bytes(), what).ptr
+		if preserve && d.len > 0 {
+			C.fvk_d2d(np, d.ptr, C.size_t(d.len*4))
+		}
+	}
+	d.releaseBacking()
+	d.ptr, d.cap = np, ncap
+	if np != nil {
+		d.backing = &vulkanKVBacking{ptr: np, cap: ncap, refs: 1, highWater: d.len}
+	}
+}
+
+func (d *vslice) releaseBacking() {
+	d.adoptBacking()
+	if d.backing != nil {
+		d.backing.refs--
+		if d.backing.refs == 0 && d.backing.ptr != nil {
+			C.fvk_free(d.backing.ptr)
+		}
+	}
+	d.ptr, d.cap, d.backing = nil, 0, nil
 }
 
 func (v *vulkanBackend) growAppend(d *vslice, srcPtr unsafe.Pointer, nFloats int, what string) {
-	if d.len+nFloats > d.cap {
-		ncap := d.cap*2 + nFloats
-		np := v.dallocKVFor(ncap*F32.Bytes(), what).ptr
-		if d.len > 0 {
-			C.fvk_d2d(unsafe.Pointer(np), d.ptr, C.size_t(d.len*4))
-		}
-		if d.ptr != nil {
-			C.fvk_free(d.ptr)
-		}
-		d.ptr = unsafe.Pointer(np)
-		d.cap = ncap
+	need := d.len + nFloats
+	d.adoptBacking()
+	// Shared storage is appendable only at the allocation's frontier. The first fork to
+	// claim the tail advances highWater; every sibling still at the old len then detaches.
+	if d.backing != nil && d.backing.refs == 1 && need <= d.cap {
+		d.backing.highWater = d.len // discard an unreachable tail left by a released sibling
+	} else if d.backing != nil && d.len == d.backing.highWater && need <= d.cap {
+		// safe append into bytes outside every other owner's visible range
+	} else {
+		v.makeVSliceWritable(d, need, true, what)
 	}
 	// append the new row at byte offset d.len within the (possibly grown) layer buffer.
 	// d.ptr is an OPAQUE Buffer* handle, not a base address, so the destination offset must
 	// be expressed to the shim (fvk_d2d_off) — pointer arithmetic on d.ptr would be garbage.
 	C.fvk_d2d_off(d.ptr, C.size_t(d.len*4), srcPtr, C.size_t(nFloats*4))
 	d.len += nFloats
+	d.adoptBacking()
+	if d.backing != nil && d.len > d.backing.highWater {
+		d.backing.highWater = d.len
+	}
 }
 
 type vulkanKV struct {
@@ -160,26 +234,30 @@ func (k *vulkanKV) Evict(from, n int) int {
 	return end - from
 }
 
-// Clone deep-copies the cache (each layer's key, pre-RoPE key, and value buffers copied
-// D2D into fresh device allocations) so a forked decode can reuse a shared prefix.
+// Clone shares immutable visible prefixes. Writers detach only when they would overwrite a
+// tail another fork has claimed; the first append at the shared high-water is zero-copy.
 func (k *vulkanKV) Clone() KVStore {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	n := &vulkanKV{be: k.be, cfg: k.cfg,
 		K: make([]vslice, len(k.K)), Kraw: make([]vslice, len(k.Kraw)), V: make([]vslice, len(k.V)),
 		pos: append([]int(nil), k.pos...)}
-	cp := func(dst, src *vslice, what string) {
-		if src.len == 0 {
-			return
+	share := func(dst, src *vslice) {
+		src.adoptBacking()
+		if src.backing != nil && src.backing.refs == 1 {
+			// A sole owner may have survived a divergent sibling. Its invisible tail is
+			// not part of the new clone's prefix and must not reserve the frontier.
+			src.backing.highWater = src.len
 		}
-		np := k.be.dallocKVFor(src.len*F32.Bytes(), what).ptr
-		C.fvk_d2d(unsafe.Pointer(np), src.ptr, C.size_t(src.len*4))
-		dst.ptr, dst.len, dst.cap = unsafe.Pointer(np), src.len, src.len
+		*dst = *src
+		if src.backing != nil {
+			src.backing.refs++
+		}
 	}
 	for l := range k.K {
-		cp(&n.K[l], &k.K[l], "KV key cache clone layer "+strconv.Itoa(l))
-		cp(&n.Kraw[l], &k.Kraw[l], "KV pre-RoPE key cache clone layer "+strconv.Itoa(l))
-		cp(&n.V[l], &k.V[l], "KV value cache clone layer "+strconv.Itoa(l))
+		share(&n.K[l], &k.K[l])
+		share(&n.Kraw[l], &k.Kraw[l])
+		share(&n.V[l], &k.V[l])
 	}
 	return n
 }
@@ -205,7 +283,8 @@ func (k *vulkanKV) Free() {
 		k.scratchpad = nil
 	}
 	releaseKVDeviceSlices(k.K, k.Kraw, k.V, &k.pos, func(d *vslice) {
-		releaseDeviceSlice(&d.ptr, &d.len, &d.cap, func(pointer unsafe.Pointer) { C.fvk_free(pointer) })
+		d.releaseBacking()
+		d.len = 0
 	})
 }
 
@@ -254,15 +333,19 @@ func (k *vulkanKV) readVS(d *vslice) []float32 {
 
 func (k *vulkanKV) writeVS(d *vslice, data []float32, what string) {
 	need := len(data)
-	if need > d.cap {
-		if d.ptr != nil {
-			C.fvk_free(d.ptr)
-		}
-		d.ptr = k.be.dallocKVFor(need*F32.Bytes(), what).ptr
-		d.cap = need
+	// Rewrites start at offset zero, so any shared owner must detach even when capacity fits.
+	d.adoptBacking()
+	if d.backing != nil && d.backing.refs > 1 {
+		k.be.makeVSliceWritable(d, need, false, what)
+	} else if need > d.cap {
+		k.be.makeVSliceWritable(d, need, false, what)
 	}
 	if need > 0 {
 		C.fvk_h2d(d.ptr, unsafe.Pointer(&data[0]), C.size_t(need*4))
 	}
 	d.len = need
+	d.adoptBacking()
+	if d.backing != nil {
+		d.backing.highWater = need
+	}
 }

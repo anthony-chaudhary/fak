@@ -408,14 +408,7 @@ func (v *vulkanBackend) qwen35SequenceReserveGeometric(cache *vslice, need int, 
 		return
 	}
 	ncap := v.qwen35SequenceKVGeometricCapacity(cache.cap, need)
-	b := v.dallocKVFor(ncap*4, what)
-	if cache.len > 0 {
-		C.fvk_d2d(b.ptr, cache.ptr, C.size_t(cache.len*4))
-	}
-	if cache.ptr != nil {
-		C.fvk_free(cache.ptr)
-	}
-	cache.ptr, cache.cap = b.ptr, ncap
+	v.makeVSliceWritableCapacity(cache, need, ncap, true, what)
 }
 
 // qwen35SequenceUploadKVFloatsForTest copies host float32s into a cache vslice at float offset offsetFloats.
@@ -425,7 +418,11 @@ func (v *vulkanBackend) qwen35SequenceUploadKVFloatsForTest(cache *vslice, offse
 	}
 	src := v.Upload(NewF32(Default(), []int{len(data)}, data), F32)
 	defer v.Free(src)
+	v.makeVSliceWritable(cache, cache.cap, true, "Qwen sequence KV test upload")
 	C.fvk_d2d_off(cache.ptr, C.size_t(offsetFloats*4), v.vp(src), C.size_t(len(data)*4))
+	if end := offsetFloats + len(data); cache.backing != nil && end > cache.backing.highWater {
+		cache.backing.highWater = end
+	}
 }
 
 // qwen35SequenceReadKVFloatsForTest reads back countFloats float32s from a cache vslice at float offset 0.
@@ -447,9 +444,7 @@ func (v *vulkanBackend) qwen35SequenceCausalAttentionForTest(qrPtr, kPtr, vPtr, 
 // qwen35SequenceFreeVsliceForTest releases device memory associated with a vslice.
 func (v *vulkanBackend) qwen35SequenceFreeVsliceForTest(cache *vslice) {
 	if cache != nil && cache.ptr != nil {
-		C.fvk_free(cache.ptr)
-		cache.ptr = nil
-		cache.cap = 0
+		cache.releaseBacking()
 		cache.len = 0
 	}
 }

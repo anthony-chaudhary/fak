@@ -13,6 +13,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/kvbudget"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
@@ -643,5 +644,54 @@ func TestAdmissionWeightedFairScheduling(t *testing.T) {
 		if admitted[i].TraceID != w {
 			t.Fatalf("admitted[%d] = %q, want %q", i, admitted[i].TraceID, w)
 		}
+	}
+}
+
+// TestAdmissionTokenBudgetMeasuredFromWarmupCapacity tests acceptance criteria for issue #5266:
+// deriving admission token budget from measured warmup capacity.
+func TestAdmissionTokenBudgetMeasuredFromWarmupCapacity(t *testing.T) {
+	// AC 1: Native serve with measurable KV capacity sets TokenBudget from measurement (not 8192), witnessed deterministically:
+	srv := newTestServer(t)
+	srv.SetWarmupCapacity(kvbudget.WarmupCapacity{UsableBytes: 100_000, BytesPerToken: 10})
+	ctl := NewAdmissionController(DefaultAdmissionPolicy())
+	srv.SetAdmissionController(ctl)
+
+	if got, want := ctl.Policy().TokenBudget, 9000; got != want {
+		t.Fatalf("ctl.Policy().TokenBudget = %d, want %d", got, want)
+	}
+	if got, want := ctl.TokenBudgetProvenance(), "measured"; got != want {
+		t.Fatalf("ctl.TokenBudgetProvenance() = %q, want %q", got, want)
+	}
+	wantMetric1 := `fak_sched_token_budget{provenance="measured"} 9000`
+	if metrics := srv.renderMetrics(); !strings.Contains(metrics, wantMetric1) {
+		t.Fatalf("renderMetrics() missing %q, got:\n%s", wantMetric1, metrics)
+	}
+
+	// AC 2: Serve with no measurable capacity is byte-for-byte unchanged:
+	srv2 := newTestServer(t)
+	ctl2 := NewAdmissionController(DefaultAdmissionPolicy())
+	srv2.SetAdmissionController(ctl2)
+
+	if got, want := ctl2.Policy().TokenBudget, 8192; got != want {
+		t.Fatalf("ctl2.Policy().TokenBudget = %d, want %d", got, want)
+	}
+	if got, want := ctl2.TokenBudgetProvenance(), "default"; got != want {
+		t.Fatalf("ctl2.TokenBudgetProvenance() = %q, want %q", got, want)
+	}
+	wantMetric2 := `fak_sched_token_budget{provenance="default"} 8192`
+	if metrics2 := srv2.renderMetrics(); !strings.Contains(metrics2, wantMetric2) {
+		t.Fatalf("srv2.renderMetrics() missing %q, got:\n%s", wantMetric2, metrics2)
+	}
+
+	// AC 3: Over-budget max_total_tokens fails fast with actionable message:
+	err := srv.CheckMaxTotalTokens(10000)
+	if err == nil {
+		t.Fatal("CheckMaxTotalTokens(10000) = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "max_total_tokens (10000) exceeds admission token budget") {
+		t.Fatalf("err %q does not contain expected prefix", err.Error())
+	}
+	if !strings.Contains(err.Error(), "decrease --max-batch-prefill-tokens or --max-total-tokens") {
+		t.Fatalf("err %q does not contain expected remediation advice", err.Error())
 	}
 }

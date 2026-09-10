@@ -983,6 +983,31 @@ int mg_q6k_upload(const unsigned char* raw, int out, int in) {
     return MG_Q6_BASE + idx;
 }
 
+// mg_q6k_upload_nocopy binds page-aligned, page-rounded caller-owned Q6_K bytes directly.
+// The Go owner pins the backing until the final shared handle releases this Metal buffer.
+int mg_q6k_upload_nocopy(const unsigned char* raw, int out, int in) {
+    if (raw == NULL || gDev == nil) return -1;
+    if (!q4k_init()) return -1;
+    if (in <= 0 || in % 256 != 0 || out <= 0) return -1;
+    int idx = q6k_slot();
+    if (idx < 0) return -1;
+    int nblk = in / 256;
+    long bytes = (long)out * nblk * 210;
+    long page = sysconf(_SC_PAGESIZE);
+    long buffer_bytes = bytes;
+    if (page > 1 && bytes % page != 0) buffer_bytes += page - bytes % page;
+    id<MTLBuffer> b = [gDev newBufferWithBytesNoCopy:(void*)raw
+                                              length:(NSUInteger)buffer_bytes
+                                             options:MTLResourceStorageModeShared
+                                         deallocator:nil];
+    if (b == nil) return -1;
+    gQ6[idx].buf = CFBridgingRetain(b);
+    gQ6[idx].out = out;
+    gQ6[idx].in = in;
+    gQ6[idx].nblk = nblk;
+    return MG_Q6_BASE + idx;
+}
+
 // mg_q6k_release drops one native Q6_K residency slot. Interior tombstones are reusable, so
 // transient MTP aliases and model teardown cannot exhaust the fixed registry over time.
 void mg_q6k_release(int wid) {

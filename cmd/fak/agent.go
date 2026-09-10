@@ -75,7 +75,7 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.thinkingBudget = fs.Int("thinking-budget", -1, "explicit thinking token budget ceiling (>=0 overrides --effort; 0 disables thinking)")
 	af.provider = fs.String("provider", "openai", "provider transcript wire: openai, openai-responses, astra, anthropic, gemini, or xai")
 	af.baseURL = fs.String("base-url", "", "provider base URL (OpenAI-compatible: .../v1; Gemini native: .../v1beta; Anthropic native: https://api.anthropic.com)")
-	af.model = fs.String("model", "gemini-2.5-flash", "model id")
+	af.model = fs.String("model", "gemini-3.8-flash", "model id")
 	af.apiKeyEnv = fs.String("api-key-env", "GEMINI_API_KEY", "env var holding the API key")
 	af.anthropicAuth = fs.String("anthropic-auth", "auto", "(--provider anthropic) how to present the credential: auto (sniff the token shape - correct for api.anthropic.com), bearer, or x-api-key. Pass bearer for a THIRD-PARTY Anthropic-compatible endpoint whose tenant token is not an sk-ant-* key: auto would send x-api-key and the call would 401 even with a correct base URL, model, and body")
 	af.offline = fs.Bool("offline", false, "use the deterministic mock planner (no network)")

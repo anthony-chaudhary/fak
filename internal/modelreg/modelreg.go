@@ -113,6 +113,18 @@ var Catalog = map[string]string{
 	"qwen38:27b-fp8":      "hf://Qwen/Qwen3.8-27B-FP8",
 	"qwen38:27b-q2k":      "hf://unsloth/Qwen3.8-27B-GGUF@4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-UD-Q2_K_XL.gguf",
 	"qwen38:27b-ud-q2kxl": "hf://unsloth/Qwen3.8-27B-GGUF@4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-UD-Q2_K_XL.gguf",
+	// Qwen3.8-70B is a high-capacity dense hybrid model for >=64GB unified memory tiers.
+	// Q4_K_M is the canonical quantized artifact for the Apple Silicon Mac provisioner (fak up).
+	"qwen38:70b":        "hf://unsloth/Qwen3.8-70B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-70B-Q4_K_M.gguf",
+	"qwen38:70b-q4":     "hf://unsloth/Qwen3.8-70B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-70B-Q4_K_M.gguf",
+	"qwen38:70b-q4_k_m": "hf://unsloth/Qwen3.8-70B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-70B-Q4_K_M.gguf",
+	"qwen38:70b-q4km":   "hf://unsloth/Qwen3.8-70B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-70B-Q4_K_M.gguf",
+	"qwen38:70b-fp8":    "hf://Qwen/Qwen3.8-70B-FP8",
+	// Standard turnkey tier aliases from macfit:
+	"qwen3.8-70b-q4_k_m": "hf://unsloth/Qwen3.8-70B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-70B-Q4_K_M.gguf",
+	"qwen3.8-27b-q4_k_m": "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
+	"qwen3.8-7b-q4_k_m":  "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+	"qwen3.8-3b-q4_k_m":  "hf://bartowski/Qwen2.5-Coder-3B-Instruct-GGUF/Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf",
 	// Ornith 1.0 — DeepReinforce's MIT-licensed Qwen3.5-family agentic-coding models
 	// (released 2026-06-25, HF org deepreinforce-ai; the collection is exactly 7 public
 	// repos — 9B/35B/397B + GGUF/FP8 siblings, NO 31B). Bare "ornith" and "ornith:9b-gguf"
@@ -160,6 +172,14 @@ var codingAliases = map[string]bool{
 	"qwen38:27b-fp8":      true,
 	"qwen38:27b-q2k":      true,
 	"qwen38:27b-ud-q2kxl": true,
+	"qwen38:70b":          true,
+	"qwen38:70b-q4":       true,
+	"qwen38:70b-q4_k_m":   true,
+	"qwen38:70b-q4km":     true,
+	"qwen38:70b-fp8":      true,
+	"qwen3.8-70b-q4_k_m":  true,
+	"qwen3.8-27b-q4_k_m":  true,
+	"qwen3.8-3b-q4_k_m":   true,
 }
 
 // DefaultLocalCodingAlias is the model `fak guard --local`/`--gguf` picks when the user

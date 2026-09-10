@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"testing"
@@ -118,6 +119,16 @@ func TestAgentBufferPoolConcurrentContention(t *testing.T) {
 	codetools.ResetBufferPoolMetrics()
 	const workers = 20
 	const opsPerWorker = 50
+	// sync.Pool may discard every retained buffer at a GC boundary. Hold GC for
+	// this bounded measurement window so Allocations measures contention-driven
+	// pool growth within one retention epoch rather than permitted GC eviction.
+	oldGCPercent := debug.SetGCPercent(-1)
+	gcRestored := false
+	t.Cleanup(func() {
+		if !gcRestored {
+			debug.SetGCPercent(oldGCPercent)
+		}
+	})
 
 	var wg sync.WaitGroup
 	wg.Add(workers)
@@ -141,6 +152,8 @@ func TestAgentBufferPoolConcurrentContention(t *testing.T) {
 	}
 
 	wg.Wait()
+	debug.SetGCPercent(oldGCPercent)
+	gcRestored = true
 
 	m := codetools.GetBufferPoolMetrics()
 	wantAcquires := uint64(workers * opsPerWorker)

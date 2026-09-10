@@ -16,6 +16,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessversion"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/kv"
+	"github.com/anthony-chaudhary/fak/internal/kvbudget"
 	"github.com/anthony-chaudhary/fak/internal/macobs"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
@@ -1033,6 +1034,11 @@ type Server struct {
 	// race a /metrics scrape that reads it.
 	admissionMu  sync.RWMutex
 	admissionCtl *AdmissionController
+
+	warmupCapacity        *kvbudget.WarmupCapacity
+	warmupBlockCapacity   *kvbudget.WarmupBlockCapacity
+	warmupReserveFraction float64
+	maxTotalTokens        int
 
 	// tokenRateGate is the optional HOST-LEVEL provider-token admission gate (#2019,
 	// token_admission.go): a rolling-window TPM/ITPM/OTPM + concurrency budget the served

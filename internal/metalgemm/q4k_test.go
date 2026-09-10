@@ -5,6 +5,8 @@ package metalgemm
 import (
 	"bytes"
 	"math"
+	"os"
+	"slices"
 	"testing"
 	"unsafe"
 )
@@ -370,4 +372,99 @@ func TestMetalMTPBufferResidency(t *testing.T) {
 	if err := FreeMetalMTPSharedBuffer(buf); err != nil {
 		t.Fatalf("FreeMetalMTPSharedBuffer failed: %v", err)
 	}
+}
+
+func TestQ6KNoCopyResidency(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	ResetQ4K()
+	t.Cleanup(ResetQ4K)
+
+	const out, in = 4, 256
+	need := out * (in / 256) * 210
+	page := os.Getpagesize()
+	rounded := need
+	if rounded%page != 0 {
+		rounded += page - rounded%page
+	}
+	backing := make([]byte, rounded+page)
+	offset := int((uintptr(page) - uintptr(unsafe.Pointer(&backing[0]))%uintptr(page)) % uintptr(page))
+	aligned := backing[offset : offset+need]
+	copy(aligned, q6kTestRaw(out, in, 0x12664))
+
+	w := UploadQ6KGoOwned(aligned, out, in)
+	if w == nil || w.shared == nil || !w.shared.noCopy {
+		t.Fatalf("aligned UploadQ6K = %#v, want no-copy residency", w)
+	}
+	if got := LiveQ6KWeights(); got != 1 {
+		t.Fatalf("live Q6_K weights after upload = %d, want 1", got)
+	}
+	x := q4kTestVector(in, 0x12664)
+	before := make([]float32, out)
+	w.GEMV(x, before)
+	// Synchronized test-only contract violation: mutate and restore before Share solely to
+	// prove that the physical Metal buffer aliases this Go-owned backing. Production callers
+	// must keep it immutable for the complete shared-handle lifetime.
+	aligned[208] ^= 0x40
+	after := make([]float32, out)
+	w.GEMV(x, after)
+	if slices.Equal(before, after) {
+		t.Fatal("mutating explicit Go-owned Q6_K backing did not change Metal GEMV output")
+	}
+	aligned[208] ^= 0x40
+	restored := make([]float32, out)
+	w.GEMV(x, restored)
+	if !slices.Equal(before, restored) {
+		t.Fatal("restoring explicit Go-owned Q6_K backing did not restore Metal GEMV output")
+	}
+	alias := w.Share()
+	if alias == nil || LiveQ6KWeights() != 1 {
+		t.Fatal("Share did not preserve one native Q6_K slot")
+	}
+	w.Release()
+	aliasOut := make([]float32, out)
+	alias.GEMV(x, aliasOut)
+	if !slices.Equal(before, aliasOut) || LiveQ6KWeights() != 1 {
+		t.Fatal("reverse release invalidated the live Q6_K alias")
+	}
+	alias.Release()
+	if got := LiveQ6KWeights(); got != 0 {
+		t.Fatalf("live Q6_K weights after final release = %d, want 0", got)
+	}
+
+	external, err := AllocateMetalMTPSharedBuffer(need)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copy(external, q6kTestRaw(out, in, 0x12664))
+	copied := UploadQ6K(external, out, in)
+	if copied == nil || copied.shared == nil || copied.shared.noCopy {
+		t.Fatalf("mmap-backed UploadQ6K = %#v, want copied residency", copied)
+	}
+	copiedBefore := make([]float32, out)
+	copied.GEMV(x, copiedBefore)
+	if err := FreeMetalMTPSharedBuffer(external); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		copiedAfter := make([]float32, out)
+		copied.GEMV(x, copiedAfter)
+		if !slices.Equal(copiedBefore, copiedAfter) {
+			t.Fatalf("copied Q6_K changed after caller unmapped backing on repeat %d", i)
+		}
+	}
+	copied.Release()
+
+	resetWeight := UploadQ6KGoOwned(aligned, out, in)
+	if resetWeight == nil || resetWeight.shared == nil || !resetWeight.shared.noCopy {
+		t.Fatalf("reset-path UploadQ6K = %#v, want no-copy residency", resetWeight)
+	}
+	resetAlias := resetWeight.Share()
+	ResetQ4K()
+	if resetWeight.ID() >= 0 || resetAlias.ID() >= 0 || LiveQ6KWeights() != 0 {
+		t.Fatal("ResetQ4K left stale Q6_K handles or native residency live")
+	}
+	resetAlias.Release()
+	resetWeight.Release()
 }

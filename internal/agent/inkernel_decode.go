@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
@@ -224,7 +225,10 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		prefillAt := matched
 		checkpoint := inKernelSnapshotCheckpoint(prefillAt, len(ids))
 		if reuse && p.backend != nil && checkpoint > prefillAt {
-			logits = s.Prefill(ids[prefillAt:checkpoint])
+			logits, err = p.prefillDivergentSuffix(ctx, s, ids[prefillAt:checkpoint], measurement)
+			if err != nil {
+				return
+			}
 			var checkpointSnapshot *model.PrefixSnapshot
 			checkpointSnapshot, err = s.PrefixSnapshot()
 			if err != nil {
@@ -237,7 +241,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			prefillAt = checkpoint
 		}
 		if prefillAt < len(ids) {
-			logits, err = p.prefillDivergentSuffix(ctx, s, ids[prefillAt:])
+			logits, err = p.prefillDivergentSuffix(ctx, s, ids[prefillAt:], measurement)
 			if err != nil {
 				return
 			}
@@ -352,31 +356,61 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 }
 
 // prefillDivergentSuffix bounds the temporary prompt panels used by the resident
-// Qwen hybrid Q4_K path. #9066 proves that PrefillNoLogits and Prefill append the
-// same KV, convolution, recurrent, and position state at nonzero cache positions;
-// only the last chunk needs the distribution consumed by decode. Other forward
-// paths keep the historical single Prefill call because they do not share that
-// append proof.
-func (p *InKernelPlanner) prefillDivergentSuffix(ctx context.Context, s inKernelPrefillSession, ids []int) ([]float32, error) {
-	chunkTokens := p.effectiveQwenQ4KPrefillChunkTokens()
-	if !p.qwenQ4KPrefillChunkTarget() || len(ids) <= chunkTokens {
-		return s.Prefill(ids), nil
-	}
-	for len(ids) > chunkTokens {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		s.PrefillNoLogits(ids[:chunkTokens])
-		ids = ids[chunkTokens:]
+// Qwen hybrid Q4_K path and makes each completed panel a cancellation boundary.
+// #9066 proves the append equivalence for the resident CPU route; only the last
+// chunk needs the distribution consumed by decode. A device route is admitted
+// only when its backend implements the complete native sequence operation and
+// advertises both the sequence and bounded embedding-row capability identities.
+// This is a source-level capability gate, not hardware parity evidence. Other
+// forward paths keep the historical single Prefill call because they do not share
+// the required append contract.
+func (p *InKernelPlanner) prefillDivergentSuffix(ctx context.Context, s inKernelPrefillSession, ids []int, measurementOpt ...*nativeInferenceMeasurement) ([]float32, error) {
+	var measurement *nativeInferenceMeasurement
+	if len(measurementOpt) > 0 {
+		measurement = measurementOpt[0]
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return s.Prefill(ids), nil
+	chunkTokens := p.effectiveQwenQ4KPrefillChunkTokens()
+	if !p.qwenQ4KPrefillChunkTarget() || len(ids) <= chunkTokens {
+		logits := s.Prefill(ids)
+		recordQwen35SequencePrefillRoute(measurement, s, len(ids))
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return logits, nil
+	}
+	for len(ids) > chunkTokens {
+		chunk := ids[:chunkTokens]
+		s.PrefillNoLogits(chunk)
+		recordQwen35SequencePrefillRoute(measurement, s, len(chunk))
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		ids = ids[chunkTokens:]
+	}
+	logits := s.Prefill(ids)
+	recordQwen35SequencePrefillRoute(measurement, s, len(ids))
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return logits, nil
 }
 
 func (p *InKernelPlanner) qwenQ4KPrefillChunkTarget() bool {
-	return p != nil && p.m != nil && p.backend == nil && p.q4k && p.m.Cfg.IsQwen35Hybrid()
+	if p == nil || p.m == nil || !p.q4k || !p.m.Cfg.IsQwen35Hybrid() {
+		return false
+	}
+	if p.backend == nil {
+		return true
+	}
+	sequence, ok := p.backend.(model.Qwen35SequencePrefillBackend)
+	if !ok || sequence.Qwen35SequencePrefillPath() != compute.Qwen35SequencePrefillPath {
+		return false
+	}
+	rows, ok := p.backend.(compute.Qwen35SequenceEmbeddingRowsBackend)
+	return ok && rows.Qwen35SequenceEmbeddingRowsPath() == compute.Qwen35SequenceEmbeddingRowsPath
 }
 
 func (p *InKernelPlanner) effectiveQwenQ4KPrefillChunkTokens() int {
@@ -469,6 +503,7 @@ type nativeInferenceMeasurement struct {
 	decodeTokenIDs                      []int
 	qwen35MetalForwardSequence          model.Qwen35MetalForwardSequenceReceipt
 	qwen35MetalStateIdentity            *model.Qwen35MetalStateIdentityReceipt
+	qwen35SequencePrefillRoute          *model.NativeSequencePrefillRouteReceipt
 	cudaImmutableWeightUploadsBefore    model.NativeCUDAImmutableWeightUploadCounters
 	cudaImmutableWeightUploadsAvailable bool
 }
@@ -485,6 +520,7 @@ func (m *nativeInferenceMeasurement) reset() {
 	m.decodeTokenIDs = m.decodeTokenIDs[:0]
 	m.qwen35MetalForwardSequence = model.Qwen35MetalForwardSequenceReceipt{}
 	m.qwen35MetalStateIdentity = nil
+	m.qwen35SequencePrefillRoute = nil
 }
 
 func (m *nativeInferenceMeasurement) record(logits []float32, token int) error {

@@ -1,6 +1,7 @@
 package mtpbench
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -24,10 +25,77 @@ type fakeExecutor struct{ prepared *fakePrepared }
 func (f fakeExecutor) Preflight(context.Context, Config) (Preflight, error) {
 	return Preflight{Schema: Schema + ".preflight", LoadPayload: false}, nil
 }
-func (f fakeExecutor) Prepare(context.Context, Config) (Prepared, error) { return f.prepared, nil }
+func (f fakeExecutor) Prepare(context.Context, Config) (Prepared, error) {
+	if f.prepared != nil {
+		f.prepared.prepares++
+		if f.prepared.onPrepare != nil {
+			f.prepared.onPrepare()
+		}
+	}
+	return f.prepared, nil
+}
+func (f fakeExecutor) Memory() (MemorySnapshot, error) {
+	if f.prepared != nil {
+		return f.prepared.Memory()
+	}
+	return MemorySnapshot{CurrentRSSBytes: 10, SwapUsedBytes: 2, RSSAvailable: true, SwapAvailable: true}, nil
+}
+
+func TestRunnerRejectsStartupSwapGrowth(t *testing.T) {
+	before := MemorySnapshot{CurrentRSSBytes: 10, SwapUsedBytes: 2, RSSAvailable: true, SwapAvailable: true}
+	wantBefore := before
+	after := MemorySnapshot{CurrentRSSBytes: 20, SwapUsedBytes: 9, RSSAvailable: true, SwapAvailable: true}
+	p := &fakePrepared{cleanup: goodCleanup(), memory: &before}
+	p.onPrepare = func() {
+		*p.memory = after
+	}
+	ex := fakeExecutor{prepared: p}
+	report, err := (Runner{Executor: ex}).Run(context.Background(), validConfig())
+	if err == nil || !strings.Contains(err.Error(), "swap grew during model preparation") {
+		t.Fatalf("err=%v, want startup swap rejection", err)
+	}
+	if p.prepares != 1 || p.closes != 1 || p.warms != 0 || p.runs != 0 {
+		t.Fatalf("prepare/cleanup/warm/runs=(%d,%d,%d,%d), want (1,1,0,0)", p.prepares, p.closes, p.warms, p.runs)
+	}
+	if report.MemoryBefore != wantBefore {
+		t.Fatalf("memory before=%+v, want %+v", report.MemoryBefore, wantBefore)
+	}
+	raw, marshalErr := json.Marshal(report)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	if !bytes.Contains(raw, []byte(`"memory_after_prepare":{"current_rss_bytes":20,"swap_used_bytes":9`)) {
+		t.Fatalf("failed-startup report omitted post-prepare memory evidence: %s", raw)
+	}
+}
+
+func TestRunnerAllowsRSSAbovePrePrepareWhenItRestoresBelowPostPrepare(t *testing.T) {
+	pre := MemorySnapshot{CurrentRSSBytes: 10, SwapUsedBytes: 2, RSSAvailable: true, SwapAvailable: true}
+	wantPre := pre
+	post := MemorySnapshot{CurrentRSSBytes: 20, SwapUsedBytes: 2, RSSAvailable: true, SwapAvailable: true}
+	final := MemorySnapshot{CurrentRSSBytes: 15, SwapUsedBytes: 2, RSSAvailable: true, SwapAvailable: true}
+	p := &fakePrepared{cleanup: goodCleanup(), memory: &pre, memoryAfterClose: &final}
+	p.onPrepare = func() { *p.memory = post }
+	report, err := (Runner{Executor: fakeExecutor{prepared: p}}).Run(context.Background(), validConfig())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if report.MemoryBefore != wantPre || report.MemoryAfter != final {
+		t.Fatalf("memory evidence before/final = %+v/%+v", report.MemoryBefore, report.MemoryAfter)
+	}
+	raw, marshalErr := json.Marshal(report)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	if !bytes.Contains(raw, []byte(`"memory_after_prepare":{"current_rss_bytes":20,"swap_used_bytes":2`)) {
+		t.Fatalf("successful report omitted post-prepare memory evidence: %s", raw)
+	}
+}
 
 type fakePrepared struct {
 	runs             int
+	prepares         int
+	warms            int
 	closes           int
 	mutate           func(int, string, *Observation)
 	cleanup          CleanupReceipt
@@ -35,9 +103,10 @@ type fakePrepared struct {
 	memory           *MemorySnapshot
 	memoryAfterClose *MemorySnapshot
 	memoryErr        error
+	onPrepare        func()
 }
 
-func (f *fakePrepared) Warm(context.Context, string, []int, int) error { return nil }
+func (f *fakePrepared) Warm(context.Context, string, []int, int) error { f.warms++; return nil }
 func (f *fakePrepared) Run(_ context.Context, arm string, _ []int, generated int) (Observation, error) {
 	f.runs++
 	d := 2 * time.Second
@@ -248,6 +317,9 @@ func TestNewFailClosedGates(t *testing.T) {
 		p := &fakePrepared{cleanup: goodCleanup(), memory: &m}
 		if _, err := (Runner{Executor: fakeExecutor{p}}).Run(context.Background(), validConfig()); err == nil {
 			t.Fatal("accepted unavailable swap")
+		}
+		if p.prepares != 0 || p.closes != 0 || p.warms != 0 || p.runs != 0 {
+			t.Fatalf("work after unavailable pre-observation: prepares=%d closes=%d warms=%d runs=%d", p.prepares, p.closes, p.warms, p.runs)
 		}
 	})
 	t.Run("memory not restored", func(t *testing.T) {
@@ -577,6 +649,9 @@ type failingExecutor struct{}
 
 func (failingExecutor) Preflight(context.Context, Config) (Preflight, error) {
 	return Preflight{}, errPrepare
+}
+func (failingExecutor) Memory() (MemorySnapshot, error) {
+	return MemorySnapshot{CurrentRSSBytes: 10, SwapUsedBytes: 2, RSSAvailable: true, SwapAvailable: true}, nil
 }
 func (failingExecutor) Prepare(context.Context, Config) (Prepared, error) { return nil, errPrepare }
 func goodCleanup() CleanupReceipt {

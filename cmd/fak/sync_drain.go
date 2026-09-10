@@ -8,9 +8,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/flock"
 	"github.com/anthony-chaudhary/fak/internal/safesync"
 )
 
@@ -86,10 +88,11 @@ type syncDrainConfig struct {
 // Seams (overridden in tests): the window read, the stranded-commit enumeration, the flush push,
 // and the clock. Package-level vars mirror sync.go's syncAheadAudit / syncWorktree convention.
 var (
-	syncDrainWindow   = defaultSyncDrainWindow
-	syncDrainStranded = defaultSyncDrainStranded
-	syncDrainFlush    = defaultSyncDrainFlush
-	syncDrainNow      = func() int64 { return time.Now().Unix() }
+	syncDrainWindow    = defaultSyncDrainWindow
+	syncDrainStranded  = defaultSyncDrainStranded
+	syncDrainFlush     = defaultSyncDrainFlush
+	syncDrainPublished = defaultSyncDrainPublished
+	syncDrainNow       = func() int64 { return time.Now().Unix() }
 )
 
 // runSyncDrain is the pure core: load the queue, read the window, and either flush (green) or
@@ -98,6 +101,12 @@ var (
 // held, syncExitInternal on a queue I/O fault.
 func runSyncDrain(stdout, stderr io.Writer, cfg syncDrainConfig) int {
 	ctx := context.Background()
+	unlock, err := lockSyncDrainQueue(cfg.queuePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak sync drain: %v\n", err)
+		return syncExitInternal
+	}
+	defer unlock()
 	queue, err := loadSyncDrainQueue(cfg.queuePath)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak sync drain: %v\n", err)
@@ -110,6 +119,8 @@ func runSyncDrain(stdout, stderr io.Writer, cfg syncDrainConfig) int {
 	}
 	now := syncDrainNow()
 	report := syncDrainReport{Schema: syncDrainSchema}
+
+	queue.Entries = prunePublishedSyncDrainEntries(ctx, cfg, queue.Entries)
 
 	// Nothing stranded and nothing already queued — a clean idle tick. Short-circuit BEFORE the
 	// (expensive) window read: reading the trunk build witness when there is nothing to flush is
@@ -186,6 +197,64 @@ func runSyncDrain(stdout, stderr io.Writer, cfg syncDrainConfig) int {
 		code = syncExitOK
 	}
 	return emitSyncDrainReport(stdout, stderr, report, cfg.asJSON, code)
+}
+
+func lockSyncDrainQueue(path string) (func(), error) {
+	if strings.TrimSpace(path) == "" {
+		return func() {}, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, fmt.Errorf("create queue directory: %w", err)
+	}
+	f, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open queue lock: %w", err)
+	}
+	if err := flock.TryLock(f); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("lock queue: %w", err)
+	}
+	return func() {
+		_ = flock.Unlock(f)
+		_ = f.Close()
+	}, nil
+}
+
+func prunePublishedSyncDrainEntries(ctx context.Context, cfg syncDrainConfig, entries []syncDrainEntry) []syncDrainEntry {
+	out := entries[:0]
+	for _, entry := range entries {
+		published, err := syncDrainPublished(ctx, cfg, entry.SHA)
+		if err != nil || !published {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+func defaultSyncDrainPublished(ctx context.Context, cfg syncDrainConfig, sha string) (bool, error) {
+	remote := cfg.remote
+	if remote == "" {
+		remote = "origin"
+	}
+	branch := cfg.branch
+	if branch == "" {
+		branch = syncDrainCurrentBranch(ctx, cfg.repo)
+	}
+	if branch == "" || strings.TrimSpace(sha) == "" {
+		return false, nil
+	}
+	cmd := exec.CommandContext(ctx, "git", "merge-base", "--is-ancestor", sha, remote+"/"+branch)
+	cmd.Dir = cfg.repo
+	configureDispatchHelperCommand(cmd)
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, err
 }
 
 // emitSyncDrainReport writes the report (JSON or human) and returns okCode, or syncExitInternal on

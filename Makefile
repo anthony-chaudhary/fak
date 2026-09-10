@@ -9,6 +9,8 @@ GO ?= go
 TEST_DURATION_LEDGER ?= .fak/test-duration-ledger.json
 TEST_PACKAGE_BUDGET ?= 30s
 TEST_TEST_BUDGET ?= 5s
+SMOKE_FAK ?= ./fak
+SMOKE_AGENT_REPORT ?= .fak/smoke-agent.json
 ARCHITEST_GATE_RE ?= ^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRootImportsNothingInternal|TestSingleOpenAIChatClient)$$
 
 # ci is THE local green gate (AGENTS.md: "Green = make ci"). It must stay aligned with
@@ -184,18 +186,20 @@ bench:
 
 # mac-perf: on-device shift-left performance gate for Apple Silicon Metal & Mac inference.
 # Benchmarks tok/s decode and prefill throughput on the native Metal engine and validates
-# the 3-way Mac comparison packet.
+# the 3-way Mac comparison packet and 24-agent MTP benchmark packet.
 mac-perf: build
 	@echo "== Mac Shift-Left Performance Verification =="
 	@go test -v ./internal/macbench -run '^TestValidateComparisonPacketNodeMacOSA$$'
 	@go test -v ./internal/macbench -run '^TestValidateMTPComparisonPacketNodeMacOSA$$'
+	@go test -v ./internal/macbench -run '^TestValidateFixtureComparison$$'
+	@go test -v ./internal/macbench -run '^TestValidateAgenticMTPPacket_NodeMacOSA$$'
 	@go test -v ./internal/model -run '^$$' -bench '^BenchmarkMetalQ2KGemv$$'
 	@go test -v ./internal/model -run '^$$' -bench '^BenchmarkMetalQ2KGemmSteady$$'
 	@go test -v ./internal/model -run '^$$' -bench '^BenchmarkMetalQ4KGemv$$'
 	@go test -v ./internal/model -run '^$$' -bench '^BenchmarkMetalQ4KGemmSteady$$'
 	@./fak macbench validate-comparison --input experiments/benchmark/runs/by-machine/node-macos-a/20260903T050000Z-macbench-threeway/packet.json --json
-	@./fak macbench validate-mtp-comparison --input experiments/benchmark/runs/by-machine/node-macos-a/20260908T160000Z-macbench-mtp/packet.json --json
-	@echo "mac-perf OK (Apple Silicon Metal tok/s, prefill, and 4-way MTP comparative performance verified)"
+	@./fak macbench validate-agentic-mtp --input experiments/benchmark/runs/by-machine/node-macos-a/20260908T170000Z-macbench-agentic-mtp/packet.json --json
+	@echo "mac-perf OK (Apple Silicon Metal tok/s, prefill, and 24-agent MTP comparative performance verified)"
 
 # status: the cross-domain "where do we stand right now?" rollup — folds git +
 # benchmarks + work + industry into ONE control-pane view (the sibling of
@@ -260,10 +264,15 @@ dogfood-test:
 # smoke-exec: fast real-world hermetic CLI smoke test on the freshly built binary.
 # Proves binary linkage, policy adjudication, allow/deny verdicts, and offline agent execution.
 smoke-exec: build
-	./fak version
-	./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}" | grep -q "verdict=DENY"
-	./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb --args "{}" | grep -q "verdict=ALLOW"
-	./fak agent --offline --out .fak/smoke-agent.json >/dev/null 2>&1 || true
+	$(SMOKE_FAK) version
+	$(SMOKE_FAK) preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}" | grep -q "verdict=DENY"
+	$(SMOKE_FAK) preflight --policy examples/customer-support-readonly-policy.json --tool search_kb --args "{}" | grep -q "verdict=ALLOW"
+	@mkdir -p "$(dir $(SMOKE_AGENT_REPORT))"
+	@rm -f "$(SMOKE_AGENT_REPORT)"
+	@$(SMOKE_FAK) agent --offline --out "$(SMOKE_AGENT_REPORT)" >/dev/null
+	@test -s "$(SMOKE_AGENT_REPORT)" || { echo "smoke-exec: offline agent produced no report" >&2; exit 1; }
+	@grep -q '"both_completed": true' "$(SMOKE_AGENT_REPORT)" || { echo "smoke-exec: offline agent did not complete both arms" >&2; exit 1; }
+	@grep -q '"live": false' "$(SMOKE_AGENT_REPORT)" || { echo "smoke-exec: agent report is not the offline witness" >&2; exit 1; }
 	@echo "smoke-exec OK (real-world CLI execution verified)"
 
 # smoke: end-to-end real-world smoke testing across binary execution and dogfood launcher tests.

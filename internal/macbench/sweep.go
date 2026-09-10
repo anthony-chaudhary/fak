@@ -217,7 +217,6 @@ func CollectHardware(ctx context.Context, runner CommandRunner) SweepHardware {
 	}
 	hw := SweepHardware{
 		SoCModel:           "Apple Silicon",
-		GPUCores:           16,
 		UnifiedMemoryBytes: 38654705664, // 36 GiB default
 		ThermalState:       "NOMINAL",
 	}
@@ -249,8 +248,13 @@ func CollectHardware(ctx context.Context, runner CommandRunner) SweepHardware {
 		hw.ThermalState = parseThermalState(string(out))
 	}
 
-	// 4. GPU Cores inference
-	hw.GPUCores = inferGPUCores(hw.SoCModel)
+	// 4. GPU cores from system_profiler's structured display inventory. Only a
+	// single built-in Apple GPU qualifies; missing or ambiguous data stays unknown.
+	if out, err := runner(ctx, "system_profiler", "SPDisplaysDataType", "-json"); err == nil {
+		hw.GPUCores = parseAppleGPUCores(out)
+	} else if out, err := runner(ctx, "/usr/sbin/system_profiler", "SPDisplaysDataType", "-json"); err == nil {
+		hw.GPUCores = parseAppleGPUCores(out)
+	}
 
 	return hw
 }
@@ -286,30 +290,35 @@ func parseThermalState(out string) string {
 	}
 }
 
-func inferGPUCores(soc string) int {
-	upper := strings.ToUpper(soc)
-	switch {
-	case strings.Contains(upper, "M4 MAX"):
-		return 40
-	case strings.Contains(upper, "M4 PRO"):
-		return 20
-	case strings.Contains(upper, "M4"):
-		return 10
-	case strings.Contains(upper, "M3 MAX"):
-		return 30
-	case strings.Contains(upper, "M3 PRO"):
-		return 18
-	case strings.Contains(upper, "M3"):
-		return 10
-	case strings.Contains(upper, "M2 MAX") || strings.Contains(upper, "M1 MAX"):
-		return 30
-	case strings.Contains(upper, "M2 PRO") || strings.Contains(upper, "M1 PRO"):
-		return 16
-	case strings.Contains(upper, "M2") || strings.Contains(upper, "M1"):
-		return 8
-	default:
-		return 16
+func parseAppleGPUCores(out []byte) int {
+	var report struct {
+		Displays []struct {
+			Vendor     string          `json:"spdisplays_vendor"`
+			Bus        string          `json:"sppci_bus"`
+			DeviceType string          `json:"sppci_device_type"`
+			Cores      json.RawMessage `json:"sppci_cores"`
+		} `json:"SPDisplaysDataType"`
 	}
+	if err := json.Unmarshal(out, &report); err != nil {
+		return 0
+	}
+
+	cores := 0
+	for _, display := range report.Displays {
+		if display.Vendor != "sppci_vendor_Apple" || display.Bus != "spdisplays_builtin" || display.DeviceType != "spdisplays_gpu" {
+			continue
+		}
+		var raw string
+		if err := json.Unmarshal(display.Cores, &raw); err != nil {
+			return 0
+		}
+		observed, err := strconv.Atoi(raw)
+		if err != nil || observed <= 0 || cores != 0 {
+			return 0
+		}
+		cores = observed
+	}
+	return cores
 }
 
 func executeArm(ctx context.Context, opts SweepOptions, arm, phase string, promptTokens, outputTokens int) SweepMeasurement {

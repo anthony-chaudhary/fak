@@ -66,6 +66,52 @@ type serveFitBudget struct {
 	Headroom float64
 }
 
+type serveNativeContextResolution struct {
+	RequestedTokens     int    `json:"requested_tokens"`
+	ModelDeclaredTokens int    `json:"model_declared_tokens"`
+	ResolvedTokens      int    `json:"resolved_tokens"`
+	Source              string `json:"source"`
+}
+
+func validateServeNativeContextTokens(tokens int) error {
+	if tokens < 0 {
+		return fmt.Errorf("--native-context-tokens must be 0 (auto) or positive (got %d)", tokens)
+	}
+	return nil
+}
+
+// resolveServeNativeContext is the header-only authority for the native model
+// window. weights and fit are the selected load arm's exact sizing inputs, so
+// auto mode returns the same token count later used to build the load plan.
+func resolveServeNativeContext(ws *ggufload.WeightSource, weights compute.MemoryPlan, fit serveFitBudget, requested int) (serveNativeContextResolution, compute.MemoryPlan, error) {
+	resolution := serveNativeContextResolution{RequestedTokens: requested, Source: "auto"}
+	if err := validateServeNativeContextTokens(requested); err != nil {
+		return resolution, nil, err
+	}
+	if requested > 0 {
+		resolution.Source = "explicit"
+		resolution.ResolvedTokens = requested
+	}
+	if ws == nil {
+		return resolution, nil, nil
+	}
+	cfg, err := ws.File.Config()
+	if err != nil {
+		return resolution, nil, err
+	}
+	csc := cfg.ContextSizeConfig()
+	resolution.ModelDeclaredTokens = csc.MaxContext
+	if requested > 0 && csc.MaxContext > 0 && requested > csc.MaxContext {
+		return resolution, nil, fmt.Errorf("--native-context-tokens %d exceeds model-declared context window %d", requested, csc.MaxContext)
+	}
+	override := -1
+	if requested > 0 {
+		override = requested
+	}
+	resolution.ResolvedTokens, _ = compute.AutoSizeContextPlan(csc, weights, fit.avail(), override)
+	return resolution, csc.PerContextMemoryPlan(resolution.ResolvedTokens), nil
+}
+
 // avail is the headroom-adjusted budget passed to compute.AutoSizeContextPlan — byte-identical to
 // the budget the matching RefuseMemoryPlanIfTooBig* check computes (same compute.BudgetAfterHeadroom
 // formula), so a context derived against it provably passes that check. An unknown base yields
@@ -182,7 +228,7 @@ func resolveHostServeLoadArm(ws *ggufload.WeightSource, f32Resident bool) serveL
 		return serveLoadArmQuantProfileQ8
 	}
 	quant := ggufload.ClassifyTensorQuant(ws.File.Tensors)
-	if os.Getenv("FAK_Q4K") != "" && quant.Q4KResident && quant.Recipe != "UD-Q2_K_XL" {
+	if (quant.Q4KResident || quant.Recipe == "UD-Q2_K_XL") && (serveDeviceResidentQ4K(nil) || (os.Getenv("FAK_Q4K") != "" && os.Getenv("FAK_Q4K") != "0")) {
 		return serveLoadArmResidentQ4K
 	}
 	return serveLoadArmQuantProfileQ8
@@ -208,26 +254,63 @@ func resolveDeviceServeLoadArm(ws *ggufload.WeightSource, be compute.Backend, f3
 	return serveLoadArmF32
 }
 
+// serveNativeContextSizingInputs returns the header-derived weight plan and
+// memory ceiling for the load arm this process will actually take.
+func serveNativeContextSizingInputs(ws *ggufload.WeightSource, be compute.Backend, cpuOffloadExperts, useMetal bool, ranks int) (compute.MemoryPlan, serveFitBudget, error) {
+	if ws == nil {
+		return nil, serveFitBudget{}, nil
+	}
+	quant := ggufload.ClassifyTensorQuant(ws.File.Tensors)
+	if be != nil && cpuOffloadExperts && quant.Q4KResident {
+		weights, err := ws.EstimateCPUOffloadExpertsExpertParallelMemoryPlan(max(ranks, 1))
+		return weights, serveDeviceFitBudget(be), err
+	}
+	arm := resolveServeNativeContextLoadArm(ws, be, useMetal)
+	if be != nil {
+		if ranks > 1 && arm == serveLoadArmResidentQ4K {
+			weights, err := ws.EstimateExpertParallelLoadMemoryPlan(ranks)
+			return weights, serveExpertParallelDeviceFitBudget(be), err
+		}
+		weights, err := serveGGUFWeightMemoryPlanForArm(ws, arm)
+		return applyDeviceWeightBudget(weights, be), serveDeviceFitBudget(be), err
+	}
+	weights, err := serveGGUFWeightMemoryPlanForArm(ws, arm)
+	return weights, serveHostFitBudget(), err
+}
+
+func resolveServeNativeContextLoadArm(ws *ggufload.WeightSource, be compute.Backend, useMetal bool) serveLoadArm {
+	if be != nil {
+		return resolveDeviceServeLoadArm(ws, be, false)
+	}
+	if useMetal {
+		return resolveMetalServeLoadArm(ws)
+	}
+	return resolveHostServeLoadArm(ws, false)
+}
+
 func serveGGUFMemoryPlanForArm(ws *ggufload.WeightSource, arm serveLoadArm, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
 	if ws == nil {
 		return nil, nil
 	}
-	var plan compute.MemoryPlan
-	var weights compute.MemoryPlan
-	var err error
-	switch arm {
-	case serveLoadArmF32:
-		weights, err = ws.EstimateF32LoadMemoryPlan()
-	case serveLoadArmQuantProfileQ8:
-		weights, err = ws.EstimateQ8LoadMemoryPlan()
-	default:
-		weights, err = ws.EstimateLoadMemoryPlan()
-	}
+	weights, err := serveGGUFWeightMemoryPlanForArm(ws, arm)
 	if err != nil {
 		return nil, err
 	}
-	plan = append(plan, weights...)
-	return appendServeGGUFDevicePlan(ws, plan, contextBudgetTokens, fit), nil
+	return appendServeGGUFDevicePlan(ws, weights, contextBudgetTokens, fit), nil
+}
+
+func serveGGUFWeightMemoryPlanForArm(ws *ggufload.WeightSource, arm serveLoadArm) (compute.MemoryPlan, error) {
+	if ws == nil {
+		return nil, nil
+	}
+	switch arm {
+	case serveLoadArmF32:
+		return ws.EstimateF32LoadMemoryPlan()
+	case serveLoadArmQuantProfileQ8:
+		return ws.EstimateQ8LoadMemoryPlan()
+	default:
+		return ws.EstimateLoadMemoryPlan()
+	}
 }
 
 func serveGGUFMemoryPlan(ws *ggufload.WeightSource, f32Resident bool, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
@@ -266,18 +349,18 @@ func appendServeGGUFDevicePlan(ws *ggufload.WeightSource, plan compute.MemoryPla
 	}
 	// Delegate to the single context auto-sizer (#1049) so the serve boot path sizes its
 	// KV+scratch plan exactly as the in-kernel per-request planner does. #1046: pass the real
-	// (headroom-adjusted) memory ceiling so that when no --context-budget-tokens is set the sizer
+	// (headroom-adjusted) memory ceiling so that when no native context override is set the sizer
 	// derives the LARGEST context that fits this box — instead of sizing against the full
 	// MaxPositionEmbeddings window and refusing — and log the derived size for the operator.
-	csc := cfg.ContextSizeConfig()
 	avail := fit.avail()
+	csc := cfg.ContextSizeConfig()
 	tokens, ctxPlan := compute.AutoSizeContextPlan(csc, plan, avail, serveContextTokenOverride(contextBudgetTokens))
 	logServeAutoSizedContext(csc, plan, fit, avail, contextBudgetTokens, tokens)
 	return append(plan, ctxPlan...)
 }
 
 // logServeAutoSizedContext prints the #1046 one-line auto-size record when the boot path DERIVED a
-// context (no --context-budget-tokens, and a probeable memory ceiling) that is smaller than the
+// context (no --native-context-tokens override, and a probeable memory ceiling) that is smaller than the
 // model's full declared window — the case the operator needs to see, because the full window would
 // have overflowed the box and refused. It is silent when an explicit budget was given, when the
 // ceiling is unprobeable (the full window is kept, unchanged), or when the full window already fits
@@ -292,7 +375,7 @@ func logServeAutoSizedContext(csc compute.ContextSizeConfig, weights compute.Mem
 		headroom = 0
 	}
 	fmt.Fprintf(os.Stderr,
-		"fak: auto-sized context to %d tokens (kv=%s, weights=%s, headroom=%s) — no --context-budget-tokens set; the model's full %d-token window would overflow the %s fit budget\n",
+		"fak: auto-sized context to %d tokens (kv=%s, weights=%s, headroom=%s) — --native-context-tokens=0 selected auto sizing; the model's full %d-token window would overflow the %s fit budget\n",
 		tokens, bytesText(uint64(max(kv, 0))), bytesText(uint64(max(weights.DeviceTotal(), 0))),
 		bytesText(uint64(headroom)), csc.MaxContext, bytesText(uint64(max(avail, 0))))
 }
@@ -317,6 +400,27 @@ func serveContextTokenOverride(contextBudgetTokens int) int {
 func fitServeGGUFPathOnHost(ggufPath string, f32Resident bool, contextBudgetTokens int) error {
 	total, free, known := compute.HostSystemMemoryInfo()
 	return fitServeGGUFPathOnReportedHost(ggufPath, f32Resident, contextBudgetTokens, total, free, known)
+}
+
+// fitServeGGUFPathOnHostForArm checks a host/unified-memory load whose runtime
+// arm has already been selected. Metal uses this after choosing resident Q4_K,
+// so its admission plan cannot silently fall back to the host Q8 estimate.
+func fitServeGGUFPathOnHostForArm(ggufPath string, arm serveLoadArm, contextBudgetTokens int) error {
+	total, free, known := compute.HostSystemMemoryInfo()
+	return fitServeGGUFPathOnReportedHostForArm(ggufPath, arm, contextBudgetTokens, total, free, known)
+}
+
+func fitServeGGUFPathOnReportedHostForArm(ggufPath string, arm serveLoadArm, contextBudgetTokens int, total, free int64, known bool) error {
+	if ggufPath == "" {
+		return nil
+	}
+	plan, err := withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
+		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, serveHostFitBudget())
+	})
+	if err != nil {
+		return err
+	}
+	return compute.RefuseMemoryPlanIfTooBigForReportedHost(plan, total, free, known, serveGGUFHostHeadroom)
 }
 
 func fitServeGGUFPathOnReportedHost(ggufPath string, f32Resident bool, contextBudgetTokens int, total, free int64, known bool) error {

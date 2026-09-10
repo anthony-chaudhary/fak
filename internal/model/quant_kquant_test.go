@@ -1,8 +1,11 @@
 package model
 
 import (
+	"bytes"
 	"encoding/binary"
+	"os"
 	"testing"
+	"unsafe"
 )
 
 // lcgBytes fills b with a deterministic LCG byte stream (no math/rand dependency / seed flake).
@@ -18,6 +21,45 @@ func lcgBytes(b []byte, seed uint64) {
 // super-block's scale field so random code bytes decode to FINITE values (a random f16 d could be
 // inf/NaN and break the bit-exact compare).
 const f16One = 0x3C00
+
+func TestResidentQ6KPageAlignment(t *testing.T) {
+	page := os.Getpagesize()
+	if page <= 1 {
+		t.Skip("page size unavailable")
+	}
+	const out, in = 257, 256
+	n := out * (in / qkK) * q6kBlockBytes
+	backing := make([]byte, n+page)
+	base := uintptr(unsafe.Pointer(&backing[0]))
+	off := 1
+	if (base+uintptr(off))%uintptr(page) == 0 {
+		off++
+	}
+	raw := backing[off : off+n]
+	for i := range raw {
+		raw[i] = byte(i * 29)
+	}
+	original := append([]byte(nil), raw...)
+
+	qt := quantizeKQuantFromRaw(raw, out, in, kindQ6K)
+	if len(qt.raw) != n || !bytes.Equal(qt.raw, original) {
+		t.Fatalf("resident Q6_K payload changed: len=%d want=%d equal=%v", len(qt.raw), n, bytes.Equal(qt.raw, original))
+	}
+	if !bytes.Equal(raw, original) {
+		t.Fatal("resident Q6_K alignment mutated caller bytes")
+	}
+	if uintptr(unsafe.Pointer(&qt.raw[0]))%uintptr(page) != 0 {
+		t.Fatalf("resident Q6_K pointer is not page aligned")
+	}
+	if cap(qt.raw) < pageRoundResidentLen(n, page) {
+		t.Fatalf("resident Q6_K cap=%d, want at least page-rounded %d", cap(qt.raw), pageRoundResidentLen(n, page))
+	}
+
+	aligned := makePageAlignedResidentBytes(n)
+	if got := quantizeKQuantFromRaw(aligned, out, in, kindQ6K).raw; unsafe.SliceData(got) != unsafe.SliceData(aligned) {
+		t.Fatal("eligible aligned Q6_K storage was copied")
+	}
+}
 
 // refKQuantMatRows is the reference resident-k-quant GEMV: dequant each super-block via the SAME
 // per-block routine, materialize the full f32 row, then the SAME fixed-order 4-accumulator dot.

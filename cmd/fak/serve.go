@@ -180,6 +180,7 @@ type serveFlags struct {
 	sessionStatePath             *string
 	sessionRegistry              *string
 	contextBudgetTokens          *int
+	nativeContextTokens          *int
 	resetOnBudget                *bool
 	cpuOffloadExperts            *bool
 	nCPUMoE                      *string
@@ -208,6 +209,7 @@ type serveFlags struct {
 	native                       *bool
 	nativeMaxTurns               *int
 	nativeAdmissionTokenBudget   *int
+	nativeAdmissionProvenance    string
 	nativeCodeWorkspace          *string
 	nativeCodeTools              *bool
 	nativeSpeculate              *bool
@@ -219,6 +221,10 @@ type serveFlags struct {
 	fleetBusInterval             *time.Duration
 	keepAwake                    *string
 	applianceObservability       *bool
+	maxTotalTokens               *int
+	maxBatchPrefillTokens        *int
+	fs                           *flag.FlagSet
+	explicit                     map[string]bool
 }
 
 // newServeFlagSet defines the full `fak serve` flag surface and returns the set
@@ -228,6 +234,9 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	verbFlagUsage(fs, "serve")
 	configureServeHelp(fs)
 	sf := &serveFlags{}
+	sf.fs = fs
+	sf.maxTotalTokens = fs.Int("max-total-tokens", 0, "upper bound on a request's total tokens (prompt + max_new_tokens). Must not exceed admission token budget.")
+	sf.maxBatchPrefillTokens = fs.Int("max-batch-prefill-tokens", 0, "upper bound on batch prefill tokens (alias / companion to max-total-tokens)")
 	sf.configPath = fs.String("config", "", "load reviewable deployment defaults from fak.toml (explicit flags override; no implicit ambient lookup)")
 	sf.applianceObservability = fs.Bool("appliance-observability", false, "activate appliance Grafana dashboard catalog profile (fak-strix-*) and default routing to fak-strix-index")
 	sf.printEffectiveConfig = fs.Bool("print-effective-config", false, "print supported effective serve configuration with value provenance, then exit without binding a listener")
@@ -308,6 +317,8 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.sessionStatePath = fs.String("session-state", "", "COLD-RESUME the per-session DRIVE state across a process restart (#629): a fleet-snapshot file this `fak serve` RESTORES at boot — re-attaching every session at the budget/priority/run-state/pace it held, not its defaults (a STOPPED session reloads STOPPED with its reason, never silently RUNNING) — and REWRITES on a clean shutdown. Empty (default) = off, byte-for-byte today's path. Distinct from the live Paused→Running resume the /v1/fak/session control verbs already do.")
 	sf.sessionRegistry = fs.String("session-registry", "", "SCOPE THE SESSIONS THIS SERVE CAN REACH (#5825). The session table is hydrated from this registry, and that table is what a fanned lifecycle op writes through — so this path, not --fleet-bus-dir, is what decides whose sessions `fak fleet control send --op pause --all` touches. --fleet-bus-dir scopes only the BUS; a serve pointed at a private bus directory still adopts every session in this registry, which is how a rehearsal once paused 12 sessions belonging to other workers. Empty keeps today's behaviour: the shared per-user default (FAK_SESSION_REGISTRY, else <UserConfigDir>/fak/session-registry.json), the correct reach for a real fleet. Name a path to adopt and persist only your own sessions — the safe way to rehearse on a shared host. Use 'off' for a pure in-memory table that adopts nothing and persists nothing.")
 	sf.contextBudgetTokens = fs.Int("context-budget-tokens", 0, "seed the default session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
+	fs.IntVar(sf.contextBudgetTokens, "ctx", 0, "alias for --context-budget-tokens: managed-session lifetime prompt/context-token budget")
+	sf.nativeContextTokens = fs.Int("native-context-tokens", 0, "with --gguf: native model context window in prompt plus reserved output tokens (0 = auto-size from model metadata and memory headroom)")
 	sf.resetOnBudget = fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
 	sf.cpuOffloadExperts = fs.Bool("cpu-offload-experts", false, "with --gguf --backend: keep the MoE expert GEMMs on host RAM while dense projections + router + attention run on the device — the `--n-cpu-moe` hybrid that lets a model whose experts dwarf VRAM (e.g. GLM-5.2 Q4 ~424GB experts) serve at all on a smaller VRAM pool. The device load uses the memory-lean Q8 quantize-at-load path when the backend advertises quantized upload; otherwise it falls back to F32 weights until that backend implements UploadDtype.")
 	sf.nCPUMoE = fs.String(serveNCPUMoEFlag, "", "with --gguf --backend: GRADE the expert spill instead of taking --cpu-offload-experts' all-or-nothing split (#5628, epic #5606). `auto` sizes the number of host-spilled MoE layers against the device budget compute.DeviceMemoryInfo measures, keeping the rest device-resident behind a bounded expert ring; `N` spills exactly N MoE layers; `off` (the default) is the ungraded placement --cpu-offload-experts alone makes, byte-for-byte. Spelled as llama.cpp spells it, so a working --n-cpu-moe number carries over. A grade that is not auto/off/a count >= 0 REFUSES the launch here, before the multi-minute load — a misspelled grade must never fall back to a placement the operator did not choose. Equivalent to "+agent.ExpertSpillEnv+"; passing the flag WINS over that env var, including an explicit `off`.")
@@ -330,7 +341,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.dojoMode = fs.Bool("dojo", false, "enable live dojo mode: write a start-marker for each serve session into the live-episode corpus (.dojo/live-episodes/ under the workspace root) for issue #956. NOTE: live-episode scoring is not yet wired into `fak dojo run` (which today scores Claude Code transcripts passed via --corpus), so this records the boundary but does not yet feed the scorer.")
 	sf.native = fs.Bool("native", false, "drive fak's own agent loop for /v1/messages instead of the proxy. Both buffered and `stream: true` requests stay on the owned native path; streaming drives agent.RunArmStream and renders its text deltas plus typed lifecycle progress as Anthropic SSE and does not fall through to the proxy. If streaming cannot be safely emitted — a response writer that cannot flush, a planner that does not support streaming, or an armed answer stop-gate (a rejected answer must never leak as a delta) — the request degrades to the buffered native handler — the same owned loop, one response instead of deltas. The in-kernel syscall boundary remains the sole tool path, and ArmMetrics ride on the response `fak.native_arm` extension. Off by default (the proxy path is byte-for-byte unchanged).")
 	sf.nativeMaxTurns = fs.Int("native-max-turns", gateway.DefaultNativeMaxTurns, "with --native: cap the owned loop's model round-trips per served request (<=0 uses the built-in default)")
-	sf.nativeAdmissionTokenBudget = fs.Int("native-admission-token-budget", gateway.DefaultAdmissionPolicy().TokenBudget, "with in-kernel model: cap admitted token footprint. Must be positive (default 8192)")
+	sf.nativeAdmissionTokenBudget = fs.Int("native-admission-token-budget", gateway.DefaultAdmissionPolicy().TokenBudget, "with in-kernel model: cap admitted token footprint. Must be positive (when not explicitly set, follows the resolved native context; 8192 is the unresolved/no-local-model fallback)")
 	sf.nativeCodeWorkspace = fs.String("native-code-workspace", "", "override workspace root for kernel coding tools. Requires --native.")
 	sf.nativeCodeTools = fs.Bool("native-code-tools", true, "arm bounded kernel coding tools in current workspace. Default true; pass false to disable.")
 	sf.nativeSpeculate = fs.Bool("native-speculate", false, "enable effect-free coding speculation. Requires --native-code-workspace.")
@@ -345,16 +356,40 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 }
 
 func (sf *serveFlags) effectiveAdmissionTokenBudget() int {
-	if sf == nil {
+	if sf == nil || sf.nativeAdmissionTokenBudget == nil {
 		return 0
 	}
-	if sf.contextBudgetTokens != nil && *sf.contextBudgetTokens > 0 {
-		return *sf.contextBudgetTokens
-	}
-	if sf.nativeAdmissionTokenBudget != nil && *sf.nativeAdmissionTokenBudget > 0 {
+	if *sf.nativeAdmissionTokenBudget > 0 {
 		return *sf.nativeAdmissionTokenBudget
 	}
 	return 0
+}
+
+func (sf *serveFlags) effectiveMaxTotalTokens() int {
+	if sf == nil {
+		return 0
+	}
+	if sf.maxTotalTokens != nil && *sf.maxTotalTokens > 0 {
+		return *sf.maxTotalTokens
+	}
+	if sf.maxBatchPrefillTokens != nil && *sf.maxBatchPrefillTokens > 0 {
+		return *sf.maxBatchPrefillTokens
+	}
+	return 0
+}
+
+func serveNativePlannerConfigWithContext(sf *serveFlags, resolvedContextTokens int) agent.InKernelPlannerConfig {
+	cfg := serveNativePlannerConfig(sf)
+	cfg.ContextTokens = resolvedContextTokens
+	return cfg
+}
+
+func validateServeMaxTotalTokens(sf *serveFlags, admissionTokenBudget int) error {
+	maxTokens := sf.effectiveMaxTotalTokens()
+	if maxTokens > 0 && admissionTokenBudget > 0 && maxTokens > admissionTokenBudget {
+		return fmt.Errorf("max_total_tokens (%d) exceeds admission token budget (%d); decrease --max-batch-prefill-tokens or --max-total-tokens", maxTokens, admissionTokenBudget)
+	}
+	return nil
 }
 
 func effectiveServeConfigWithQwen38Runtime(sf *serveFlags, m deploymanifest.Manifest, hasManifest bool, explicit map[string]bool) effectiveServeConfigReport {
@@ -402,6 +437,7 @@ func cmdServe(argv []string) {
 	*sf.sessionStatePath = durability.Path
 
 	explicit := explicitFlagNames(fs)
+	sf.explicit = explicit
 	toolPlugins, toolPreferences, err := compileToolPluginConfig(manifest)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: config %s: %v\n", configPath, err)
@@ -441,11 +477,31 @@ func cmdServe(argv []string) {
 		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
 		os.Exit(2)
 	}
-	if _, err := serveNativeAdmissionPolicy(sf); err != nil {
+	policy, err := serveNativeAdmissionPolicy(sf)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
 		os.Exit(2)
 	}
+	if err := validateServeNativeContextTokens(*sf.nativeContextTokens); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
+	if sf.isExplicitFlag("native-admission-token-budget") {
+		if err := validateServeMaxTotalTokens(sf, policy.TokenBudget); err != nil {
+			fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+			os.Exit(2)
+		}
+	}
 	if *sf.printEffectiveConfig {
+		// Effective-config inspection stays model-I/O-free. Validate an explicit
+		// scheduler envelope, or the unresolved fallback when no local model was
+		// named; a local auto-sized model is checked after header resolution.
+		if !sf.isExplicitFlag("native-admission-token-budget") && strings.TrimSpace(*sf.ggufPath) == "" {
+			if err := validateServeMaxTotalTokens(sf, policy.TokenBudget); err != nil {
+				fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+				os.Exit(2)
+			}
+		}
 		if err := json.NewEncoder(os.Stdout).Encode(effectiveServeConfigWithQwen38Runtime(sf, manifest, manifestPresent, explicit)); err != nil {
 			fmt.Fprintf(os.Stderr, "fak serve: print effective config: %v\n", err)
 			os.Exit(1)
@@ -459,9 +515,10 @@ func cmdServe(argv []string) {
 		}
 	}
 
-	rt := &serveRuntime{t0: t0, toolPlugins: toolPlugins, toolPreferences: toolPreferences, startupPhases: []gateway.StartupPhase{
-		{Name: "flag-parse", Dur: parseDur},
-	}}
+	rt := &serveRuntime{t0: t0, toolPlugins: toolPlugins, toolPreferences: toolPreferences,
+		explicitFlags: explicit, nativeAdmissionExplicit: explicit["native-admission-token-budget"], startupPhases: []gateway.StartupPhase{
+			{Name: "flag-parse", Dur: parseDur},
+		}}
 	if err := resolveServeModelOrPrompt(sf, explicit, os.Stdin, os.Stderr, guardFdIsTerminal(int(os.Stdin.Fd()))); err != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
 		os.Exit(2)
@@ -617,10 +674,27 @@ func cmdServe(argv []string) {
 	rt.configureEPDecode()
 	rt.resolveSessionPlane(sf)
 	rt.resolveObservers(sf)
+	resolveServeEngine(sf, explicit, rt.inKernelModel != nil)
 	rt.buildGateway(sf)
 	rt.wireGateway(sf)
 	rt.addStartupMessage(serveDurabilityStartupMessage(durability))
 	rt.run(sf)
+}
+
+// resolveServeEngine selects the appropriate engine ID. If --engine was not explicitly
+// passed by the operator, and in-kernel weights are configured or loaded (e.g. --gguf is set
+// or in-kernel model weights are resident), it automatically defaults sf.engineID to "inkernel"
+// rather than leaving the default "mock".
+func resolveServeEngine(sf *serveFlags, explicit map[string]bool, inKernelLoaded bool) {
+	if sf == nil || sf.engineID == nil {
+		return
+	}
+	if explicit != nil && explicit["engine"] {
+		return
+	}
+	if (sf.ggufPath != nil && *sf.ggufPath != "") || inKernelLoaded {
+		*sf.engineID = "inkernel"
+	}
 }
 
 // isServeVulkan reports only an exact, explicitly parsed --backend=vulkan.
@@ -720,7 +794,9 @@ func loadServeRouteFile[T any](flagName, path, want string, load func(string) (T
 // server from the resolved planes, and arms the admission controller for a pure
 // in-kernel serve.
 func (rt *serveRuntime) buildGateway(sf *serveFlags) {
+	resolveServeEngine(sf, rt.explicitFlags, rt.inKernelModel != nil)
 	startupMessages := append([]gateway.StartupMessage(nil), rt.startupMessages...)
+	nativePlannerConfig := serveNativePlannerConfigWithContext(sf, rt.nativeContext.ResolvedTokens)
 	// Resolve the optional model-routing policy. Off by default: an empty --route-manifest
 	// leaves routeMan nil, so gateway.New gets a nil RouteManifest and Engine stays unset —
 	// byte-for-byte the pre-routing behavior. A malformed file fails loud here rather than
@@ -799,7 +875,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		InKernelModel:                rt.inKernelModel,
 		Tokenizer:                    rt.inKernelTok,
 		InKernelQ4K:                  rt.inKernelQ4K,
-		InKernelPlanner:              serveNativePlannerConfig(sf),
+		InKernelPlanner:              nativePlannerConfig,
 		Backend:                      rt.chatBackend,
 		CPUOffloadExperts:            *sf.cpuOffloadExperts,
 		Metal:                        rt.useMetal,
@@ -896,6 +972,13 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		must(err)
 		srv.SetAdmissionController(controller)
 		srv.AddStartupMessages(message)
+	}
+	if maxTokens := sf.effectiveMaxTotalTokens(); maxTokens > 0 {
+		srv.SetMaxTotalTokens(maxTokens)
+		if err := srv.CheckMaxTotalTokens(maxTokens); err != nil {
+			fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+			os.Exit(2)
+		}
 	}
 	// Control-plane SPEND CAP (#4859, the CLI half of #3273): --spend-cap builds the
 	// governor, --spend-scope-trace the trace->ScopeKey resolver, and --budget-webhook is

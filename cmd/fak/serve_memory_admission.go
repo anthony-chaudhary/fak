@@ -18,6 +18,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/memgate"
 )
 
+var serveReadMemory = memgate.ReadMemory
+
 func defaultLocalReservationDir() string {
 	if dir := os.Getenv("FAK_RESERVATION_DIR"); dir != "" {
 		return dir
@@ -74,9 +76,17 @@ func estimateMetalModelMemoryBounds(ggufPath string) localadmission.MemoryPlan {
 							SteadyBytes:      steady,
 						}
 					}
-					peak, _ := metalGGUFPeakCapacity(true, steady, total, known)
-					if peak <= steady {
-						peak = int64(float64(steady) * metalGGUFObservedPeakMultiplier)
+					var peak int64
+					if arm == serveLoadArmResidentQ4K {
+						// Resident quant on Metal loads weights directly into resident buffers.
+						// Sizing startup peak to steady plus staging scratch (1 GiB) prevents
+						// spurious aggregate_capacity refusals against allocatable RAM.
+						peak = steady + (1 << 30)
+					} else {
+						peak, _ = metalGGUFPeakCapacity(true, steady, total, known)
+						if peak <= steady {
+							peak = int64(float64(steady) * metalGGUFObservedPeakMultiplier)
+						}
 					}
 					if peak < steady {
 						peak = steady
@@ -124,7 +134,7 @@ func loadLocalLauncherModelWithMetalLease(useMetal bool, ggufPath string, opts g
 			path = gpulease.DefaultPath()
 		}
 		if errors.Is(err, gpulease.ErrBusy) {
-			return func() {}, fmt.Errorf("fak local launcher: Metal residency admission refused before model load: %w; stop the holder process and retry, or run a CPU/non-Metal serve", err)
+			return func() {}, fmt.Errorf("fak local launcher: Metal residency admission refused before model load: %w; stop the holder process and retry, or run a CPU/non-Metal serve; inspect active leases with 'fak doctor serve' or release %s", err, path)
 		}
 		return func() {}, fmt.Errorf("fak local launcher: acquire Metal residency lease %s before model load: %w", path, err)
 	}
@@ -136,10 +146,19 @@ func loadLocalLauncherModelWithMetalLease(useMetal bool, ggufPath string, opts g
 	var resID string
 	retainLease := os.Getenv("FAK_NATIVE_ADMISSION") != "aggregate"
 
-	if !exclusiveMode {
-		mem, memErr := memgate.ReadMemory()
-		if memErr == nil && mem.TotalBytes > 0 {
-			sample := memgate.AdmissionSampleFor(mem)
+	mem, memErr := serveReadMemory()
+	if memErr == nil && mem.TotalBytes > 0 {
+		sample := memgate.AdmissionSampleFor(mem)
+		if localadmission.Pressure(sample.Pressure) == localadmission.PressureWarning {
+			compPct := 0.0
+			if sample.TotalBytes > 0 {
+				compPct = float64(sample.CompressedBytes) / float64(sample.TotalBytes) * 100.0
+			}
+			allocGiB := float64(sample.AllocatableBytes) / (1 << 30)
+			fmt.Fprintf(os.Stderr, "fak local launcher: advisory: ambient memory pressure is warning (compressed %.1f%%, %.2f GiB allocatable); close background apps if paging occurs\n", compPct, allocGiB)
+		}
+
+		if !exclusiveMode {
 			req := localadmission.ReservationRequest{
 				OwnerPID: os.Getpid(),
 				Plan:     plan,
@@ -162,10 +181,18 @@ func loadLocalLauncherModelWithMetalLease(useMetal bool, ggufPath string, opts g
 			if !dec.Admit {
 				lease.Release()
 				hint := dec.RemedyHint
-				if hint != "" {
-					return func() {}, fmt.Errorf("fak local launcher: local memory reservation refused: %s (%s)", dec.Reason, hint)
+				if hint == "" {
+					avail := dec.CapacityBytes - dec.ReservedBytes
+					if avail < 0 {
+						avail = 0
+					}
+					hint = fmt.Sprintf("requested startup peak %.2f GiB (steady %.2f GiB) exceeds available allocatable capacity %.2f GiB (active reservations %.2f GiB)",
+						float64(dec.RequestedPeakBytes)/(1<<30),
+						float64(plan.SteadyBytes)/(1<<30),
+						float64(avail)/(1<<30),
+						float64(dec.ReservedBytes)/(1<<30))
 				}
-				return func() {}, fmt.Errorf("fak local launcher: local memory reservation refused: %s", dec.Reason)
+				return func() {}, fmt.Errorf("fak local launcher: local memory reservation refused: %s (%s)", dec.Reason, hint)
 			}
 			if dec.Reservation != nil {
 				resID = dec.Reservation.ID
