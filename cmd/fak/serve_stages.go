@@ -15,6 +15,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -377,9 +378,7 @@ func (rt *serveRuntime) resolveNativeContext(sf *serveFlags, ranks int) error {
 	*sf.nativeAdmissionTokenBudget = effectiveNativeAdmissionTokenBudget(sf, rt.nativeAdmissionExplicit, resolution.ResolvedTokens)
 	if rt.nativeAdmissionExplicit {
 		sf.nativeAdmissionProvenance = "explicit"
-		if resolution.ResolvedTokens > 0 && *sf.nativeAdmissionTokenBudget < resolution.ResolvedTokens {
-			fmt.Fprintf(os.Stderr, "fak serve: WARNING: explicit --native-admission-token-budget (%d) is smaller than resolved native model context window (%d); requests near full context may be shed\n", *sf.nativeAdmissionTokenBudget, resolution.ResolvedTokens)
-		}
+		serveExplicitBudgetWarning(os.Stderr, *sf.nativeAdmissionTokenBudget, resolution.ResolvedTokens)
 	} else if resolution.ResolvedTokens > 0 {
 		sf.nativeAdmissionProvenance = "context"
 	} else {
@@ -397,6 +396,20 @@ func (rt *serveRuntime) resolveNativeContext(sf *serveFlags, ranks int) error {
 		fmt.Sprintf("native context requested=%d model_declared=%d resolved=%d source=%s",
 			resolution.RequestedTokens, resolution.ModelDeclaredTokens, resolution.ResolvedTokens, resolution.Source)))
 	return nil
+}
+
+// serveExplicitBudgetWarning prints the operator diagnostic when an explicit
+// --native-admission-token-budget sits below the resolved native model context
+// window: requests near the full resolved window would be shed (429) under the
+// smaller running-set cap. It stays silent for a non-positive budget (the
+// startup validator refuses those before this runs) or a non-positive window
+// (nothing resolved to warn against), and reports whether it warned.
+func serveExplicitBudgetWarning(w io.Writer, budget, window int) bool {
+	if budget <= 0 || window <= 0 || budget >= window {
+		return false
+	}
+	fmt.Fprintf(w, "fak serve: WARNING: explicit --native-admission-token-budget (%d) is smaller than resolved native model context window (%d); requests near full context may be shed\n", budget, window)
+	return true
 }
 
 func resolveServeNativeContextDirectory(dir string, requested int) (serveNativeContextResolution, error) {

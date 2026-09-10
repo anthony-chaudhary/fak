@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -221,4 +223,95 @@ func TestServeAdmissionTokenBudgetMaterializesResolvedModelWindow(t *testing.T) 
 			t.Fatalf("explicit scheduler envelope error = %v, want %q", err, want)
 		}
 	})
+}
+
+// TestServeAdmissionTokenBudgetInheritsContextWindow pins the three derivation
+// outcomes at the materialization seam: an omitted budget follows the resolved
+// model context window, an explicit budget strictly wins over it, and a window
+// that never resolves falls back to the shipping default.
+func TestServeAdmissionTokenBudgetInheritsContextWindow(t *testing.T) {
+	tests := []struct {
+		name           string
+		flags          []string
+		explicit       bool
+		resolvedWindow int
+		provenance     string
+		wantBudget     int
+		wantProvenance string
+	}{
+		{name: "omitted budget follows large resolved model window", explicit: false, resolvedWindow: 65536, provenance: "context", wantBudget: 65536, wantProvenance: "context"},
+		{name: "explicit budget wins over large resolved model window", flags: []string{"--native-admission-token-budget", "16384"}, explicit: true, resolvedWindow: 65536, provenance: "explicit", wantBudget: 16384, wantProvenance: "explicit"},
+		{name: "unresolved window keeps shipping default", explicit: false, resolvedWindow: 0, provenance: "default", wantBudget: 8192, wantProvenance: "default"},
+		{name: "explicit budget kept with unresolved window", flags: []string{"--native-admission-token-budget", "16384"}, explicit: true, resolvedWindow: 0, provenance: "explicit", wantBudget: 16384, wantProvenance: "explicit"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fs, sf := newServeFlagSet()
+			if len(tc.flags) > 0 {
+				if err := fs.Parse(tc.flags); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := effectiveNativeAdmissionTokenBudget(sf, tc.explicit, tc.resolvedWindow); got != tc.wantBudget {
+				t.Fatalf("effectiveNativeAdmissionTokenBudget(explicit=%v, window=%d) = %d, want %d", tc.explicit, tc.resolvedWindow, got, tc.wantBudget)
+			}
+			*sf.nativeAdmissionTokenBudget = tc.wantBudget
+			sf.nativeAdmissionProvenance = tc.provenance
+			policy, err := serveNativeAdmissionPolicy(sf)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if policy.TokenBudget != tc.wantBudget || policy.TokenBudgetProvenance != tc.wantProvenance {
+				t.Fatalf("admission policy = %+v, want budget %d provenance %q", policy, tc.wantBudget, tc.wantProvenance)
+			}
+		})
+	}
+}
+
+// TestServeAdmissionTokenBudgetWarningBelowContext pins the operator diagnostic
+// for an explicit --native-admission-token-budget below the resolved model
+// window: the warning fires with the exact diagnostic text while the explicit
+// budget stays strictly in charge of the admission policy.
+func TestServeAdmissionTokenBudgetWarningBelowContext(t *testing.T) {
+	tests := []struct {
+		name       string
+		budget     int
+		window     int
+		wantWarned bool
+		wantText   string
+	}{
+		{name: "explicit budget below context warns and stays in charge", budget: 16384, window: 65536, wantWarned: true, wantText: "WARNING: explicit --native-admission-token-budget (16384) is smaller than resolved native model context window (65536)"},
+		{name: "budget equal to window is silent", budget: 65536, window: 65536},
+		{name: "budget above window is silent", budget: 131072, window: 65536},
+		{name: "non-positive budget is silent", budget: 0, window: 65536},
+		{name: "unresolved window is silent", budget: 16384, window: 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var stderr bytes.Buffer
+			warned := serveExplicitBudgetWarning(&stderr, tc.budget, tc.window)
+			if warned != tc.wantWarned {
+				t.Fatalf("serveExplicitBudgetWarning(%d, %d) warned = %v, want %v (stderr = %q)", tc.budget, tc.window, warned, tc.wantWarned, stderr.String())
+			}
+			if tc.wantWarned && !strings.Contains(stderr.String(), tc.wantText) {
+				t.Fatalf("warning = %q, want it to contain %q", stderr.String(), tc.wantText)
+			}
+			if !tc.wantWarned && stderr.String() != "" {
+				t.Fatalf("warning = %q, want silence", stderr.String())
+			}
+			if tc.wantWarned {
+				fs, sf := newServeFlagSet()
+				if err := fs.Parse([]string{"--native-admission-token-budget", strconv.Itoa(tc.budget)}); err != nil {
+					t.Fatal(err)
+				}
+				policy, err := serveNativeAdmissionPolicy(sf)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if policy.TokenBudget != tc.budget || policy.TokenBudgetProvenance != "explicit" {
+					t.Fatalf("admission policy after warning = %+v, want explicit budget %d still used", policy, tc.budget)
+				}
+			}
+		})
+	}
 }
