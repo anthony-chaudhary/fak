@@ -231,18 +231,29 @@ func (p *InKernelPlanner) NativeDecodeTraceSupported() bool { return true }
 // progress still arrives independently from the owned loop.
 func (p *InKernelPlanner) StreamingSupported() bool { return true }
 
-// CompleteStream emits assistant prose while leaving tool calls buffered for adjudication.
+// CompleteStream emits assistant PROSE to sink incrementally while the turn decodes,
+// holding every tool-call span through post-decode lifting and never exposing tool-token
+// text before adjudication can see it (the StreamingPlanner contract, stream.go).
+// Mechanically it binds the sink into the decode path's existing per-token emit seam
+// (generateReusedWithOOMRetry → the per-token emit closure in Complete), so each decoded
+// piece of assistant prose is forwarded as it is produced — the same live token flow
+// cmd/fakchat's streamDecode gives the direct process path, not one post-hoc delta.
+// When no sink is provided (or the decode runs one of the speculative paths, whose
+// draft-verify rounds batch tokens), the stream degrades to the buffered projection —
+// one fragment after the turn completes — and the returned Completion is unchanged.
+//
+// The sink observes the RAW incrementally decoded model text; the final Completion
+// carries the POST-PROCESSED turn (reasoning split, tool-call lift) exactly as the
+// buffered Complete produces it for the same prompt + seed. runArmStream wraps this raw
+// sink with the post-decode projection (loop_project.go), so its emitted deltas land in
+// the client's view of Content.
 func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
-	completion, err := p.Complete(ctx, messages, tools, opts...)
-	if err != nil {
-		return completion, err
+	if sink == nil {
+		return p.Complete(ctx, messages, tools, opts...)
 	}
-	if sink != nil && completion.Message.Content != "" {
-		if err := sink(completion.Message.Content); err != nil {
-			return completion, err
-		}
-	}
-	return completion, nil
+	return p.Complete(ctx, messages, tools, append(opts, WithDecodeTokenObserver(func(tokenPiece, rawText string) {
+		_ = sink(tokenPiece)
+	}))...)
 }
 
 // SetPromptShrinkLevers configures the prompt-shrink levers for this planner.
@@ -1852,6 +1863,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			if tb != nil && tb.Observe(piece) {
 				sb.WriteString("\n</think>\n\n")
 			}
+			if sp.DecodeTokenObserver != nil {
+				sp.DecodeTokenObserver(piece, "")
+			}
 		}
 		if trimmed, hit := checkStop(sb.String(), sp.Stop); hit {
 			sb.Reset()
@@ -1878,7 +1892,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		}
 	}
 	var measurement *nativeInferenceMeasurement
-	if sp.NativeInferenceReceipt || sp.DecodeTrace || sp.NativeDecodeTokenIDs {
+	if sp.NativeInferenceReceipt || (sp.DecodeTrace && sp.DecodeTokenObserver == nil) || sp.NativeDecodeTokenIDs {
 		measurement = &nativeInferenceMeasurement{
 			startedAt:             requestStarted,
 			inferenceDisabled:     !sp.NativeInferenceReceipt,
@@ -1903,7 +1917,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			if effectiveBudget > 0 {
 				tb = NewThinkBudget(effectiveBudget, startInSpan)
 			}
-			measurement.reset()
+			if measurement != nil {
+				measurement.reset()
+			}
 		}, measurement)
 	}
 	var genRes inKernelGenerateResult
@@ -1980,13 +1996,20 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 
 	// Split a Qwen3.5 reasoning block off the decoded text BEFORE it becomes Content
 	// (and before the tool-call lift below reads it). A reasoning model (Ornith) opens
-	// the turn with <think>…</think> then the final answer; renderChatMLTools does NOT
-	// pre-seed the open tag, so the model emits both. splitReasoning is the in-kernel
+	// the turn with the open reasoning tag, then its final answer; renderChatMLTools does
+	// NOT pre-seed the open tag, so the model emits both. splitReasoning is the in-kernel
 	// equivalent of vLLM's --reasoning-parser qwen3: the reasoning lands in
-	// ReasoningContent and only the post-</think> answer flows into Content (and thus
-	// into Claude Code's context). It is gated — a non-reasoning turn (no think tags)
+	// ReasoningContent and only the post-reasoning answer flows into Content (and thus
+	// into Claude Code's context). It is gated — a non-reasoning turn (no reasoning tags)
 	// returns the decoded text untouched, so this is byte-identical to today for any
-	// model that does not emit <think>.
+	// model that does not open a reasoning span.
+	//
+	// Raw-observer junction: the raw-text callback (rawText) carries the byte-identical
+	// buffer the post-decode pipeline is about to consume, issued BEFORE splitReasoning
+	// reads it. It is not called at all when no observer was requested.
+	if sp.DecodeTokenObserver != nil {
+		sp.DecodeTokenObserver("", sb.String())
+	}
 	reasoning, content := splitReasoning(sb.String())
 	for strings.Contains(content, thinkClose) {
 		idx := strings.Index(content, thinkClose)
@@ -2021,7 +2044,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		receipt := genRes.batchReceipt
 		comp.InKernelBatch = &receipt
 	}
-	if sp.DecodeTrace {
+	if sp.DecodeTrace && measurement != nil {
 		events := make([]NativeDecodeTraceEvent, len(measurement.traceEvents))
 		copy(events, measurement.traceEvents)
 		comp.DecodeTrace = &NativeDecodeTrace{
@@ -2030,7 +2053,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			Events: events,
 		}
 	}
-	if sp.NativeDecodeTokenIDs {
+	if sp.NativeDecodeTokenIDs && measurement != nil {
 		comp.NativeDecodeTokenIDs = &NativeDecodeTokenIDs{
 			Schema:   NativeDecodeTokenIDsSchema,
 			Engine:   NativeDecodeTokenIDsEngine,

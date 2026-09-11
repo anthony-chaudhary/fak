@@ -163,6 +163,21 @@ func WithNativeDecodeTokenIDs(enabled bool) SampleOpt {
 	}
 }
 
+// WithDecodeTokenObserver hooks the in-kernel decode loop's existing per-token emit
+// seam. It enables the internal decode trace (the seam it binds to) and invokes observe
+// once per emitted token: tokenPiece is the just-decoded single-token text captured at
+// the moment of emission, and rawText is the fully decoded turn as the buffered
+// post-decode pipeline returns it — empty on the speculative decode paths, which never
+// run that pipeline (their callers treat rawText as best-effort). The best-effort view
+// runs on the caller's goroutine after decode returns.
+// Observe runs synchronously inside decode and must not block.
+func WithDecodeTokenObserver(observe func(tokenPiece, rawText string)) SampleOpt {
+	return func(sp *SampleParams) {
+		sp.DecodeTokenObserver = observe
+		sp.DecodeTrace = true
+	}
+}
+
 // WithGuidedDecode sets the per-request provider-native guided-decode carriers.
 // It is intentionally narrower than RawRequestBody/ExtraBody: callers pass only the
 // allowlisted structured-output fields parsed from the client request, and the

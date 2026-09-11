@@ -530,6 +530,14 @@ type SampleParams struct {
 	// NativeDecodeTokenIDs requests the lightweight token-ID companion to a decode
 	// trace. It is valid only when DecodeTrace is also requested.
 	NativeDecodeTokenIDs bool
+	// DecodeTokenObserver, when non-nil, binds the in-kernel decode loop's per-token
+	// emit seam: the observer fires on the caller's goroutine after decode with the
+	// full decoded text, and STREAMING observers requested through
+	// WithDecodeTokenObserver fire per token synchronously inside decode. It is the
+	// token observation path CompleteStream is defined on; set it through
+	// WithDecodeTokenObserver (which also enables DecodeTrace, the seam it binds to).
+	// Never forwarded on any HTTP wire — observation is planner-internal only.
+	DecodeTokenObserver func(tokenPiece, rawText string)
 	// CompactHistoryBudget overrides the planner's configured compaction budget for this request.
 	CompactHistoryBudget *int
 	// ElideStaleReads overrides the planner's configured stale-read elision for this request.
