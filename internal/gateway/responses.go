@@ -468,6 +468,22 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 
 	began := time.Now()
+	// LIVE passthrough (#12765): a stream:true client whose planner can stream the
+	// Responses wire live gets the SSE events incrementally as upstream deltas arrive
+	// (same event schema + sequence discipline as writeResponsesStream). Falling
+	// through keeps the buffered path, which synthesizes the same events, as the
+	// in-order fallback. messages here is the FINAL stabilized slice the buffered
+	// completeServed call below receives, so admission sees the same turn.
+	if req.Stream {
+		if s.streamResponsesLive(ctx, w, reqModel, reqTrace, sessionTurn, resultAdmissions, responsesLiveTurn{
+			messages:   messages,
+			tools:      tools,
+			sampleOpts: sampleOpts,
+		}, restoreContinuation, persistResponse) {
+			return
+		}
+		// fall through to the buffered path: it synthesizes the same events (writeResponsesStream)
+	}
 	comp, err := s.completeServed(ctx, sessionTurn, messages, tools, sampleOpts...)
 	if err != nil {
 		s.renderTurnDebugError(reqTrace, "openai_responses", err, time.Since(began))
