@@ -215,10 +215,22 @@ func TestStructuredMCPResultReachesProvider(t *testing.T) {
 			t.Fatalf("write lock file: %v", err)
 		}
 
+		// Real mode: an engine driver is required; the mock path is the explicit
+		// opt-in. The test helper env reaches the MCP child via ComponentEnv, never
+		// baked into production launch env.
 		cfg := Config{
-			LockPath:     lockFile,
-			Addr:         "127.0.0.1:0",
-			EngineDriver: eng,
+			LockPath: lockFile,
+			Addr:     "127.0.0.1:0",
+			ComponentEnv: []string{
+				testHelperEnv + "=1",
+				"MOCK_SERVER_ID=" + testServerID,
+			},
+		}
+		if eng != nil {
+			cfg.EngineDriver = eng
+		} else {
+			cfg.Engine = "mock"
+			cfg.Mock = true
 		}
 
 		sup, err := NewSupervisor(cfg)

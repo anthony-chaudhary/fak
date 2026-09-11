@@ -1,6 +1,13 @@
 package allinone
 
-import "github.com/anthony-chaudhary/fak/internal/abi"
+import (
+	"errors"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
+)
+
+// ErrEngineUnconfigured is the typed failure when real mode has no engine configured.
+var ErrEngineUnconfigured = errors.New("allinone: engine unconfigured: set cfg.Engine, cfg.EngineDriver, or explicit mock")
 
 // Config defines the execution parameters for the all-in-one bootstrap orchestrator.
 type Config struct {
@@ -11,6 +18,7 @@ type Config struct {
 	PolicyPath      string           `json:"policy_path"`
 	Engine          string           `json:"engine"`
 	EngineDriver    abi.EngineDriver `json:"-"`
+	ComponentEnv    []string         `json:"-"` // extra env for launched MCP component processes (e.g. test helpers)
 	DryRun          bool             `json:"dry_run"`
 	Mock            bool             `json:"mock"`
 }

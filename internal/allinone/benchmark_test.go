@@ -439,9 +439,10 @@ func BenchmarkSupervisor_ChildProcessTracking_Subprocess(b *testing.B) {
 	}
 
 	sup, err := NewSupervisor(Config{
-		LockPath: lockPath,
-		Addr:     "127.0.0.1:0",
-		Mock:     true,
+		LockPath:     lockPath,
+		Addr:         "127.0.0.1:0",
+		Mock:         true,
+		ComponentEnv: []string{testHelperEnv + "=1", "MOCK_SERVER_ID=" + testServerID},
 	})
 	if err != nil {
 		b.Fatalf("NewSupervisor: %v", err)

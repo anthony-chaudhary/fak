@@ -314,10 +314,11 @@ func TestAirGapBootstrap_ZeroEgress(t *testing.T) {
 
 	// 5. Boot using allinone.NewSupervisor with bundle path
 	cfg := allinone.Config{
-		BundlePath: bundlePath,
-		Addr:       "127.0.0.1:0",
-		Engine:     "mock",
-		Mock:       true,
+		BundlePath:   bundlePath,
+		Addr:         "127.0.0.1:0",
+		Engine:       "mock",
+		Mock:         true,
+		ComponentEnv: []string{"GO_WANT_HELPER_PROCESS=1"},
 	}
 	sup, err := allinone.NewSupervisor(cfg)
 	if err != nil {

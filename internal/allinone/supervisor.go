@@ -436,7 +436,8 @@ func (s *Supervisor) DryRunTopology() (*TopologySpec, error) {
 		} else if s.cfg.Mock {
 			eng = "mock"
 		} else {
-			eng = "mock"
+			// Real mode with no engine: report the truth; Start fails fast.
+			eng = "unconfigured"
 		}
 	}
 
@@ -522,10 +523,33 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	}
 	s.memory = memJournal
 	s.health.SetStatus(SubsystemMemoryStore, true, "")
+	if memPath == "" || memPath == "in-memory" {
+		// Disclosure: entries recorded into an in-memory store are lost on shutdown.
+		disclosure, _ := json.Marshal(map[string]string{
+			"memory_store": "in-memory",
+			"note":         "non-durable: entries lost on shutdown",
+		})
+		_ = memJournal.Append(MemoryEntry{
+			Timestamp: time.Now(),
+			Type:      "lifecycle.disclosure",
+			Data:      disclosure,
+		})
+	}
 
 	// 3. Initialize MCP Broker and register declared tools
 	broker := mcpbroker.NewBroker()
 	s.broker = broker
+
+	// Fail-fast component capability contract: a declared MCP component that
+	// cannot be located or launched degrades the broker subsystem — it is never
+	// silently replaced with a fabricated echo stand-in. Echo fabrication is
+	// reserved for explicit mock mode, where the mock lock owns that contract.
+	brokerHealthy := true
+	brokerErrs := []string{}
+	degradeBroker := func(format string, args ...any) {
+		brokerHealthy = false
+		brokerErrs = append(brokerErrs, fmt.Sprintf(format, args...))
+	}
 
 	for _, c := range lock.Components {
 		if !isMCPComponent(c) {
@@ -533,6 +557,7 @@ func (s *Supervisor) Start(ctx context.Context) error {
 		}
 		serverID := c.ID
 		var launched bool
+		var launchErr error
 		cmdPath := c.Source
 		if cmdPath != "" {
 			candidates := []string{
@@ -554,21 +579,51 @@ func (s *Supervisor) Start(ctx context.Context) error {
 						Name:    serverID,
 						Command: candidate,
 						Args:    c.Adapters,
-						Env:     append(os.Environ(), "GO_WANT_HELPER_PROCESS=1", "MOCK_SERVER_ID="+serverID),
+						Env:     s.cfg.ComponentEnv,
 					}
 					if _, err := broker.LaunchSupervisor(ctx, supCfg); err == nil {
 						launched = true
+						launchErr = nil
 						break
+					} else {
+						launchErr = err
 					}
 				}
 			}
 		}
 
 		if !launched {
-			_ = broker.RegisterServer(mcpbroker.ServerConfig{
+			var reason string
+			if launchErr != nil {
+				reason = fmt.Sprintf("component %s launch failed: %v", serverID, launchErr)
+			} else {
+				reason = fmt.Sprintf("component %s launch failed: binary %q not found", serverID, cmdPath)
+			}
+			if s.memory != nil {
+				data, _ := json.Marshal(map[string]any{
+					"component_id": serverID,
+					"source":       cmdPath,
+					"error":        reason,
+				})
+				_ = s.memory.Append(MemoryEntry{
+					Timestamp: time.Now(),
+					Type:      "component.degraded",
+					Data:      data,
+				})
+			}
+			// Echo fabrication is reserved for explicit mock mode: the operator
+			// opted into a stand-in world. Real mode degrades the broker instead.
+			if !s.cfg.Mock && s.cfg.Engine != "mock" {
+				degradeBroker("%s", reason)
+				continue
+			}
+
+			if err := broker.RegisterServer(mcpbroker.ServerConfig{
 				ID:   serverID,
 				Name: serverID,
-			})
+			}); err != nil {
+				degradeBroker("component %s register server: %v", serverID, err)
+			}
 
 			tools := c.Provides
 			if len(tools) == 0 {
@@ -584,7 +639,7 @@ func (s *Supervisor) Start(ctx context.Context) error {
 
 			for _, toolName := range tools {
 				namespaced := mcpbroker.NamespaceTool(serverID, toolName)
-				_ = broker.RegisterTool(mcpbroker.ToolRegistration{
+				if err := broker.RegisterTool(mcpbroker.ToolRegistration{
 					Name:        namespaced,
 					ServerID:    serverID,
 					Description: "MCP tool " + toolName,
@@ -595,21 +650,31 @@ func (s *Supervisor) Start(ctx context.Context) error {
 							Content:  json.RawMessage(fmt.Sprintf(`{"status":"ok","tool":%q,"echo":%s}`, req.Tool, string(req.Arguments))),
 						}, nil
 					},
-				})
+				}); err != nil {
+					degradeBroker("component %s register tool %s: %v", serverID, namespaced, err)
+				}
 			}
 		}
 	}
-	s.health.SetStatus(SubsystemMCPBroker, true, "")
+	if brokerHealthy {
+		s.health.SetStatus(SubsystemMCPBroker, true, "")
+	} else {
+		s.health.SetStatus(SubsystemMCPBroker, false, strings.Join(brokerErrs, "; "))
+	}
 
-	// 4. Initialize model engine
+	// 4. Initialize model engine. Real mode requires an explicitly configured
+	// engine: an empty Engine never silently falls back to the mock.
 	mockChat := false
 	if s.cfg.EngineDriver != nil {
 		s.engine = s.cfg.EngineDriver
 		s.health.SetStatus(SubsystemInference, true, "")
-	} else if s.cfg.Mock || s.cfg.Engine == "mock" || s.cfg.Engine == "" {
+	} else if s.cfg.Mock || s.cfg.Engine == "mock" {
 		s.engine = &engine.Mock{}
 		mockChat = true
 		s.health.SetStatus(SubsystemInference, true, "")
+	} else if s.cfg.Engine == "" {
+		s.health.SetStatus(SubsystemInference, false, ErrEngineUnconfigured.Error())
+		return ErrEngineUnconfigured
 	} else {
 		eng := abi.Engine(s.cfg.Engine)
 		if eng == nil {
