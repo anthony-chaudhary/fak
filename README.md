@@ -160,6 +160,19 @@ Balanced defaults are `ponytail:medium` for work discipline and `caveman:medium`
 | Learn in prerequisite order | [Start here](START-HERE.md) · [learning path](LEARNING-PATH.md) · [documentation index](docs/index.md) |
 | Build on fak | [Go API](pkg/) · [harness contract](docs/harness-kit-contract.md) · [contributing](CONTRIBUTING.md) |
 
+## Commercial serving
+
+We run one of your repetitive repo workloads — test-candidate generation — on a
+managed, metered inference route, and we prove it against your current baseline
+on your acceptance criteria before you pay for ongoing operation. Qualification
+is a two-week pilot on one workload with a continue/stop recommendation. This is
+not production-ready; production is a later, gated decision. Flat monthly fee for
+the qualification pilot, metered operation afterwards. To start, open an issue in
+this repository using the "commercial serving" inquiry template wording — describe
+your workload. Replies route into a managed pipeline ledger (channel=oss).
+
+Provenance: gtm-t08 commercial-serving touchpoint.
+
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-09-09 vs VERSION 0.54.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-09 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
+<!-- readme-verified: 2026-09-11 vs VERSION 0.54.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-09 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
