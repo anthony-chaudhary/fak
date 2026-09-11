@@ -162,12 +162,12 @@ func (m *gatewayMetrics) servingEmitterRows() []ServingMetricRow {
 	return rows
 }
 
-func (s *Server) writeServingMetrics(b *strings.Builder, inf inferenceSnapshot) {
+func (s *Server) writeServingMetricsWithStats(b *strings.Builder, inf inferenceSnapshot, kvStats agent.KVMemoryStats, kvOK bool) {
 	if s == nil || b == nil || s.metrics == nil {
 		return
 	}
 	var rows []ServingMetricRow
-	if row, ok := s.nativeServingMetricRow(inf); ok {
+	if row, ok := s.nativeServingMetricRow(inf, kvStats, kvOK); ok {
 		rows = append(rows, row)
 	}
 	rows = append(rows, s.metrics.servingEmitterRows()...)
@@ -202,7 +202,7 @@ func (s *Server) writeServingMetrics(b *strings.Builder, inf inferenceSnapshot) 
 		rows, func(r ServingMetricRow) ServingGauge { return r.PrefixCacheHitRate })
 }
 
-func (s *Server) nativeServingMetricRow(inf inferenceSnapshot) (ServingMetricRow, bool) {
+func (s *Server) nativeServingMetricRow(inf inferenceSnapshot, kvStats agent.KVMemoryStats, kvOK bool) (ServingMetricRow, bool) {
 	row := ServingMetricRow{
 		Labels: ServingMetricLabels{
 			Worker: "local",
@@ -236,8 +236,8 @@ func (s *Server) nativeServingMetricRow(inf inferenceSnapshot) (ServingMetricRow
 		ok = true
 	}
 
-	if reporter, okReporter := s.planner.(agent.KVMemoryReporter); okReporter {
-		if util, okUtil := nativeKVUtilization(reporter.KVMemoryStats()); okUtil {
+	if kvOK {
+		if util, okUtil := nativeKVUtilization(kvStats); okUtil {
 			row.KVUtilization = ServingGaugeValue(util)
 			ok = true
 		}

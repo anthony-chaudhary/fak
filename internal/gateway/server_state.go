@@ -547,6 +547,15 @@ type Server struct {
 	// live HTTPPlanner/ReplicaRouter when BaseURL/ReplicaBaseURLs are set, else the
 	// offline MockPlanner. Settable in-package for tests.
 	planner agent.Planner
+	// kvStatsMu guards kvStatsCache/kvStatsAt/kvStatsValid, the scrape-scoped
+	// fraud-avoidance cache for the planner's KV memory reporter. The reporter's
+	// snapshot is expensive on a ROCm/Strix box (hipMemGetInfo under rocmMu), so a
+	// scrape reuses a snapshot younger than kvStatsCacheTTL instead of re-probing
+	// the device twice per scrape.
+	kvStatsMu    sync.Mutex
+	kvStatsCache agent.KVMemoryStats
+	kvStatsAt    time.Time
+	kvStatsValid bool
 	// servedSide is the deployment-constant serving locality selectChatPlanner
 	// resolved for the deployments that do NOT proxy: self-hosted for the in-kernel
 	// model, unknown for the mock. servedLocality reads it. The zero value is the
