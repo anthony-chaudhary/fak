@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -126,6 +127,15 @@ type heartbeatConfig struct {
 	eventsEmitted int64
 	inflightID    uint64
 	note          func(id uint64, prefillTicks, decodeTicks uint64)
+	// ProgressHeartbeat atomics (#12760): lock-free per-request compute
+	// progress so the observation plane can read prefill and decode liveness
+	// without taking h.mu on the tick path. Chunk counts grow monotonically
+	// for the life of the stream; the nanotime stamps mark the last tick of
+	// each phase (zero means that phase has not ticked yet).
+	prefillChunks        uint64
+	decodeChunks         uint64
+	lastPrefillTickNanos int64
+	lastDecodeTickNanos  int64
 }
 
 // attachProgress binds this stream's ticks to its live-registry row.
@@ -137,6 +147,7 @@ func (h *heartbeatConfig) attachProgress(metrics *gatewayMetrics, id uint64) {
 	h.inflightID = id
 	h.note = metrics.SetInflightProgress
 	h.mu.Unlock()
+	metrics.RegisterProgress(id, h)
 	metrics.TouchInflightProgress(id)
 }
 
@@ -155,19 +166,16 @@ func newHeartbeatConfig() *heartbeatConfig {
 }
 
 // markStreamStart marks the moment the first token was emitted (stream committed).
-// The prefill phase is then visibly complete: one prefill tick folds onto the
-// observation row (a Touch when no sink is bound).
+// The prefill phase is then visibly complete: one atomic prefill tick folds onto
+// the observation row (counters still advance when no sink is bound).
 func (h *heartbeatConfig) markStreamStart() {
 	h.mu.Lock()
 	if !h.started {
 		h.started = true
 		h.streamStart = time.Now()
 		h.lastEvent = h.streamStart
-		note, id := h.note, h.inflightID
 		h.mu.Unlock()
-		if note != nil {
-			note(id, 1, 0)
-		}
+		h.TickPrefillChunk()
 		return
 	}
 	h.mu.Unlock()
@@ -185,11 +193,71 @@ func (h *heartbeatConfig) recordEvent(byteCount int) {
 	h.bytesEmitted += int64(byteCount)
 	h.eventsEmitted++
 	h.lastEvent = time.Now()
-	note, id, dec := h.note, h.inflightID, uint64(h.eventsEmitted)
 	h.mu.Unlock()
-	if note != nil {
-		note(id, 1, dec)
+	h.TickDecode()
+}
+
+// Tick records generic stream liveness without advancing either phase count:
+// both phase ages refresh from the same nanotime so a keep-alive never reads
+// as a one-sided stall. Allocation-free; atomics only, then one fold.
+func (h *heartbeatConfig) Tick() {
+	if h == nil {
+		return
 	}
+	now := time.Now().UnixNano()
+	atomic.StoreInt64(&h.lastPrefillTickNanos, now)
+	atomic.StoreInt64(&h.lastDecodeTickNanos, now)
+	h.foldProgress()
+}
+
+// TickPrefillChunk records one prefill chunk and folds it onto the live
+// registry row of this request. Allocation-free; atomics only, then one fold.
+func (h *heartbeatConfig) TickPrefillChunk() {
+	if h == nil {
+		return
+	}
+	atomic.AddUint64(&h.prefillChunks, 1)
+	atomic.StoreInt64(&h.lastPrefillTickNanos, time.Now().UnixNano())
+	h.foldProgress()
+}
+
+// TickDecode records one decode event and folds it onto the live registry
+// row of this request. Allocation-free; atomics only, then one fold.
+func (h *heartbeatConfig) TickDecode() {
+	if h == nil {
+		return
+	}
+	atomic.AddUint64(&h.decodeChunks, 1)
+	atomic.StoreInt64(&h.lastDecodeTickNanos, time.Now().UnixNano())
+	h.foldProgress()
+}
+
+// foldProgress pushes the current atomic chunk counts onto the attached
+// live-registry row, a no-op when no sink is bound. The note and id pair is
+// published once by attachProgress; the short mutex hold reuses the existing
+// markStreamStart and recordEvent pattern while the counters above stay
+// lock-free.
+func (h *heartbeatConfig) foldProgress() {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	note, id := h.note, h.inflightID
+	h.mu.Unlock()
+	if note == nil || id == 0 {
+		return
+	}
+	note(id, atomic.LoadUint64(&h.prefillChunks), atomic.LoadUint64(&h.decodeChunks))
+}
+
+// progressSnapshot returns the current atomic counters for tests and the
+// observation merge without taking h.mu.
+func (h *heartbeatConfig) progressSnapshot() (prefill, decode uint64, prefillNanos, decodeNanos int64) {
+	if h == nil {
+		return 0, 0, 0, 0
+	}
+	return atomic.LoadUint64(&h.prefillChunks), atomic.LoadUint64(&h.decodeChunks),
+		atomic.LoadInt64(&h.lastPrefillTickNanos), atomic.LoadInt64(&h.lastDecodeTickNanos)
 }
 
 // emitHeartbeat writes a heartbeat comment frame if heartbeats are enabled and stream has started.
