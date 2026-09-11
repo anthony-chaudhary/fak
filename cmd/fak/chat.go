@@ -400,7 +400,7 @@ func runChat(in io.Reader, out io.Writer, planner agent.Planner, maxTurns int, o
 		currentConv := append(history, agent.Message{Role: agent.RoleUser, Content: line})
 		turnOpts := append([]agent.RunOption{agent.WithConversation(currentConv)}, opts...)
 
-		m, calls, err := agent.RunGovernedArm(ctx(), planner, line, maxTurns, turnOpts...)
+		m, calls, err := agent.RunGovernedArmStream(ctx(), planner, line, maxTurns, streamAssistantTo(out), turnOpts...)
 		if err != nil {
 			renderChatTermination(out, err)
 			continue
@@ -417,6 +417,24 @@ func runChat(in io.Reader, out io.Writer, planner agent.Planner, maxTurns int, o
 			turn, m.Turns, m.EngineCalls, m.Denies, m.VDSOHits)
 
 		history = append(currentConv, agent.Message{Role: agent.RoleAssistant, Content: m.FinalAnswer})
+	}
+}
+
+// streamAssistantTo returns a StreamSink that writes assistant content deltas
+// straight to out as they arrive — plain text, no colors, no TUI — so fak chat
+// shows prose the moment the model emits it. The sink is nil-safe: a nil sink
+// selects the loop's internal discard behavior and the buffered final answer is
+// still printed after adjudication.
+func streamAssistantTo(out io.Writer) agent.StreamSink {
+	if out == nil {
+		return nil
+	}
+	return func(delta string) error {
+		if delta == "" {
+			return nil
+		}
+		_, err := io.WriteString(out, delta)
+		return err
 	}
 }
 
