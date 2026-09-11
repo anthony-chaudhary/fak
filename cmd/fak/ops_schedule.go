@@ -501,6 +501,7 @@ Register-ScheduledTask -TaskName '%s' -Action $action -Trigger $trigger -Setting
 `, opsPSQuote(execPath), opsPSQuote(argString), sec, runHours, opsPSQuote(taskName), opsPSQuote(desc))
 
 		cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", psScript)
+		configureDispatchHelperCommand(cmd)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("powershell Register-ScheduledTask: %w (%s)", err, strings.TrimSpace(string(out)))
@@ -557,6 +558,7 @@ func unregisterOpsTask(ctx context.Context, target, taskName string) error {
 	switch target {
 	case "taskscheduler":
 		cmd := exec.CommandContext(ctx, "schtasks", "/Delete", "/TN", taskName, "/F")
+		configureDispatchHelperCommand(cmd)
 		out, err := cmd.CombinedOutput()
 		if err != nil && !strings.Contains(string(out), "cannot find") {
 			return fmt.Errorf("schtasks /Delete: %w (%s)", err, strings.TrimSpace(string(out)))
@@ -601,7 +603,9 @@ func queryOpsTaskStatus(ctx context.Context, target, taskName, workload string, 
 
 	switch target {
 	case "taskscheduler":
-		out, err := exec.CommandContext(ctx, "schtasks", "/Query", "/TN", taskName, "/FO", "CSV").CombinedOutput()
+		cmd := exec.CommandContext(ctx, "schtasks", "/Query", "/TN", taskName, "/FO", "CSV")
+		configureDispatchHelperCommand(cmd)
+		out, err := cmd.CombinedOutput()
 		if err == nil {
 			item.Registered = true
 			item.Status = "Ready"
