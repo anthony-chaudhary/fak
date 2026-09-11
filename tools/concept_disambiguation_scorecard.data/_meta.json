@@ -14641,6 +14641,26 @@
           "category": "incidental",
           "reason": "cargo cult prefix check",
           "token": "isCargoCultCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Helper applies the existing MemoryPlan admission contract to a supplied host budget; introduces no new plan concept.",
+          "token": "refuseHostPlanAgainstFit"
+        },
+        {
+          "category": "incidental",
+          "reason": "Helper applies existing MemoryPlan admission to a device snapshot; introduces no new plan concept.",
+          "token": "refuseDevicePlanAgainstFit"
+        },
+        {
+          "category": "incidental",
+          "reason": "Reported-capacity variant of the existing MemoryPlan refusal API, preserving scoped admission semantics.",
+          "token": "RefuseMemoryPlanIfTooBigForReportedDevice"
+        },
+        {
+          "category": "incidental",
+          "reason": "Shared scoped MemoryPlan fit helper with injected device capacity; no additional planning abstraction.",
+          "token": "fitsMemoryPlanByScopeWithDevice"
         }
       ],
       "exclude": [
@@ -14735,6 +14755,7 @@
         "RecoveryReplan",
         "RefusalPlanContract",
         "RefusalPlanSchema",
+        "RefuseMemoryPlanIfTooBigForReportedDevice",
         "RefuseMemoryPlanIfTooBigForReportedHost",
         "RemoteDrainCandidate",
         "RoleCandidate",
@@ -14796,6 +14817,7 @@
         "deriveSelfUpdateCandidateCacheDisposition",
         "dispatchWaveExecutionPlanWithSize",
         "fitandplanserveggufexpertparallelpathondevice",
+        "fitsMemoryPlanByScopeWithDevice",
         "fixturePlanner",
         "foldCandidate",
         "hostPlan",
@@ -14834,6 +14856,8 @@
         "plants",
         "processClassPlane",
         "recoveryJournalCandidates",
+        "refuseDevicePlanAgainstFit",
+        "refuseHostPlanAgainstFit",
         "register_bench_plan_doc",
         "relationCandidates",
         "removeCandidate",

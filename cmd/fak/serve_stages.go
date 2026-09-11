@@ -53,6 +53,11 @@ type serveRuntime struct {
 	ep                      epRankConfig
 	nativeContext           serveNativeContextResolution
 	nativeAdmissionExplicit bool
+	// fitBudget is the host/device memory snapshot measured ONCE in resolveNativeContext and
+	// reused by the load-time fit, so the context the auto-sizer derives and the admission that
+	// judges it are computed against the SAME probe. Nil means "not measured" (e.g. a
+	// SafeTensors directory) and the load re-probes as before.
+	fitBudget *serveFitBudget
 
 	inKernelModel *fakmodel.Model
 	inKernelQ4K   bool
@@ -366,6 +371,7 @@ func (rt *serveRuntime) resolveNativeContext(sf *serveFlags, ranks int) error {
 			if inputErr != nil {
 				return inputErr
 			}
+			rt.fitBudget = &fit
 			resolution, _, err = resolveServeNativeContext(ws, weights, fit, requested)
 			if err != nil {
 				return err
@@ -502,7 +508,7 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 			os.Exit(2)
 		}
 	}
-	inKernelModel, inKernelQ4K, loadProfile, loadPhase := loadServeInKernelModel(*sf.ggufPath, rt.chatBackend, *sf.cpuOffloadExperts, rt.nativeContext.ResolvedTokens, expertShard, expertRanks)
+	inKernelModel, inKernelQ4K, loadProfile, loadPhase := loadServeInKernelModel(*sf.ggufPath, rt.chatBackend, *sf.cpuOffloadExperts, rt.nativeContext.ResolvedTokens, expertShard, expertRanks, rt.fitBudget)
 	if loadPhase.Name != "" {
 		rt.startupPhases = append(rt.startupPhases, loadPhase)
 	}

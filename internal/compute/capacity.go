@@ -618,8 +618,18 @@ func FitsMemoryPlan(b Backend, plan MemoryPlan, headroom float64) (verdict FitVe
 }
 
 func fitsMemoryPlanByScope(b Backend, plan MemoryPlan, headroom float64) (scope MemoryScope, verdict FitVerdict, avail int64, want int64) {
+	total, free, known := DeviceMemoryInfo(b)
+	return fitsMemoryPlanByScopeWithDevice(b, plan, headroom, total, free, known)
+}
+
+// fitsMemoryPlanByScopeWithDevice is fitsMemoryPlanByScope with an INJECTED device snapshot:
+// the caller supplies the (total, free, known) already measured instead of re-probing the live
+// device. Host-scoped demands still consult the backend, unchanged. This is the scoped core the
+// reported-device refusal shares, so a plan sized against one probe is judged against that same
+// probe rather than a later, independently-read one.
+func fitsMemoryPlanByScopeWithDevice(b Backend, plan MemoryPlan, headroom float64, devTotal, devFree int64, devKnown bool) (scope MemoryScope, verdict FitVerdict, avail int64, want int64) {
 	deviceWant := plan.DeviceTotal()
-	deviceVerdict, deviceAvail := FitsOnDevice(b, deviceWant, headroom)
+	deviceVerdict, deviceAvail := fitsWithinReportedMemory(devTotal, devFree, devKnown, deviceWant, headroom)
 	if deviceVerdict == FitTooBig {
 		return MemoryScopeDevice, deviceVerdict, deviceAvail, deviceWant
 	}
@@ -766,6 +776,28 @@ func RefuseIfTooBig(b Backend, wantBytes int64, headroom float64) error {
 // plan so a caller can render targeted remedies instead of a generic OOM.
 func RefuseMemoryPlanIfTooBig(b Backend, plan MemoryPlan, headroom float64) error {
 	scope, verdict, avail, want := fitsMemoryPlanByScope(b, plan, headroom)
+	if verdict != FitTooBig {
+		return nil
+	}
+	epochDigest := plan.EpochDigest()
+	if epochDigest == "" {
+		if ep, ok := BackendCurrentEpoch(b); ok {
+			epochDigest = ep.Digest
+		}
+	}
+	return &FitError{Verdict: verdict, Want: want, Avail: avail, Demands: cloneMemoryPlan(plan), Scope: scope, EpochDigest: epochDigest}
+}
+
+// RefuseMemoryPlanIfTooBigForReportedDevice is the injectable, exported twin of
+// RefuseMemoryPlanIfTooBig: the caller supplies an already-measured device memory snapshot
+// instead of reading the live device. It exists because a plan is SIZED against one probe and
+// JUDGED against another, and free memory drifts between them (Darwin/Linux MemAvailable is
+// live); a context auto-sized to fill the first probe then fails the second by a few MiB and the
+// serve refuses to launch. Passing the same (total, free, known) the sizing used makes the
+// derivation and the admission provably agree. Host-scoped demands still consult the backend and
+// the contract stays fail-open: an unknown device capacity can never produce a refusal.
+func RefuseMemoryPlanIfTooBigForReportedDevice(b Backend, plan MemoryPlan, total, free int64, known bool, headroom float64) error {
+	scope, verdict, avail, want := fitsMemoryPlanByScopeWithDevice(b, plan, headroom, total, free, known)
 	if verdict != FitTooBig {
 		return nil
 	}

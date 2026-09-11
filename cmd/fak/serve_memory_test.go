@@ -567,7 +567,7 @@ func TestFitServeGGUFPathOnHostRefusesExpandingQ8Load(t *testing.T) {
 	writeSynth27BGGUF(t, udPath, true)
 
 	// In resident mode, 27B UD-Q2_K_XL weights (~9.53 GiB) admit on 36 GiB host.
-	if err := fitServeGGUFPathOnReportedHost(udPath, false, 0, 36*gib, 36*gib, true); err != nil {
+	if err := fitServeGGUFPathOnReportedHost(udPath, false, 0, 36*gib, 36*gib, true, nil); err != nil {
 		t.Fatalf("fitServeGGUFPathOnHost should admit resident 27B UD-Q2_K_XL on 36 GiB host: %v", err)
 	}
 
@@ -577,7 +577,7 @@ func TestFitServeGGUFPathOnHostRefusesExpandingQ8Load(t *testing.T) {
 	// But runtime arm executes LoadModelQuantProfile, expanding to ~31.27 GiB resident weights.
 	// 31.27 GiB > 30.6 GiB allocatable, so it must refuse with FitTooBig.
 	t.Setenv("FAK_Q4K", "0")
-	err := fitServeGGUFPathOnReportedHost(udPath, false, 0, 36*gib, 36*gib, true)
+	err := fitServeGGUFPathOnReportedHost(udPath, false, 0, 36*gib, 36*gib, true, nil)
 	if err == nil {
 		t.Fatal("fitServeGGUFPathOnHost must refuse expanding Q8 load of 27B model on 36 GiB host, got nil")
 	}
@@ -593,7 +593,7 @@ func TestFitServeGGUFPathOnHostRefusesExpandingQ8Load(t *testing.T) {
 	}
 
 	// On a larger 64 GiB host, allocatable budget is 54.4 GiB, which admits the ~31.27 GiB plan.
-	if err := fitServeGGUFPathOnReportedHost(udPath, false, 0, 64*gib, 64*gib, true); err != nil {
+	if err := fitServeGGUFPathOnReportedHost(udPath, false, 0, 64*gib, 64*gib, true, nil); err != nil {
 		t.Fatalf("fitServeGGUFPathOnHost should admit expanding Q8 load on 64 GiB host: %v", err)
 	}
 }

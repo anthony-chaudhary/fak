@@ -161,7 +161,7 @@ func TestServeLoadModelMetalResidentDefault(t *testing.T) {
 		serveMetalAvailable = func() bool { return true }
 		t.Setenv("FAK_Q4K", "")
 
-		model, q4k, profile, phase := loadServeInKernelModel(q4kPath, nil, false, 0, nil, 1)
+		model, q4k, profile, phase := loadServeInKernelModel(q4kPath, nil, false, 0, nil, 1, nil)
 		if model == nil {
 			t.Fatal("expected non-nil model")
 		}
@@ -193,7 +193,7 @@ func TestServeLoadModelMetalResidentDefault(t *testing.T) {
 		serveMetalAvailable = func() bool { return true }
 		t.Setenv("FAK_Q4K", "0")
 
-		model, q4k, profile, _ := loadServeInKernelModel(q4kPath, nil, false, 0, nil, 1)
+		model, q4k, profile, _ := loadServeInKernelModel(q4kPath, nil, false, 0, nil, 1, nil)
 		if model == nil {
 			t.Fatal("expected non-nil model")
 		}
@@ -212,7 +212,7 @@ func TestServeLoadModelMetalResidentDefault(t *testing.T) {
 		serveMetalAvailable = func() bool { return true }
 		t.Setenv("FAK_Q4K", "")
 
-		model, q4k, profile, _ := loadServeInKernelModel(q8Path, nil, false, 0, nil, 1)
+		model, q4k, profile, _ := loadServeInKernelModel(q8Path, nil, false, 0, nil, 1, nil)
 		if model == nil {
 			t.Fatal("expected non-nil model")
 		}

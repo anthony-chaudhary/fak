@@ -305,6 +305,9 @@ func TestServeNativeContextDeviceSizingMatchesWeightBudgetedLoadPlan(t *testing.
 }
 
 func TestServeNativeContextMetalHostFitUsesSelectedResidentArm(t *testing.T) {
+	origMetalAvailable := serveMetalAvailable
+	t.Cleanup(func() { serveMetalAvailable = origMetalAvailable })
+	serveMetalAvailable = func() bool { return false }
 	t.Setenv("FAK_Q4K", "")
 	const contextTokens = 16
 	path := createTestQ4KGGUF(t)
@@ -334,11 +337,22 @@ func TestServeNativeContextMetalHostFitUsesSelectedResidentArm(t *testing.T) {
 	if residentPlan.Total() > usable || q8Plan.Total() <= usable {
 		t.Fatalf("fixture does not distinguish resident and Q8 plans: resident=%d q8=%d usable=%d", residentPlan.Total(), q8Plan.Total(), usable)
 	}
-	if err := fitServeGGUFPathOnReportedHostForArm(path, arm, contextTokens, reportedTotal, reportedTotal, true); err != nil {
+	if err := fitServeGGUFPathOnReportedHostForArm(path, arm, contextTokens, reportedTotal, reportedTotal, true, nil); err != nil {
 		t.Fatalf("selected Metal resident plan should fit reported unified memory: %v", err)
 	}
-	if err := fitServeGGUFPathOnReportedHost(path, false, contextTokens, reportedTotal, reportedTotal, true); err == nil {
+	if err := fitServeGGUFPathOnReportedHost(path, false, contextTokens, reportedTotal, reportedTotal, true, nil); err == nil {
 		t.Fatal("legacy CPU Q8 plan unexpectedly fit the same reported host; test no longer distinguishes the Metal arm")
+	}
+
+	// An injected sizing snapshot must win over the separately reported values so the load-time
+	// admission cannot disagree with the context resolution after host memory drifts.
+	fit := &serveFitBudget{Base: reportedTotal, Headroom: serveGGUFHostHeadroom}
+	if err := fitServeGGUFPathOnReportedHostForArm(path, arm, contextTokens, 1, 1, true, fit); err != nil {
+		t.Fatalf("injected fitting host snapshot should override later tiny report: %v", err)
+	}
+	fit = &serveFitBudget{Base: 1, Headroom: serveGGUFHostHeadroom}
+	if err := fitServeGGUFPathOnReportedHostForArm(path, arm, contextTokens, reportedTotal, reportedTotal, true, fit); err == nil {
+		t.Fatal("injected undersized host snapshot should override later fitting report")
 	}
 }
 

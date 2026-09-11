@@ -146,7 +146,7 @@ func loadNativeScoutPlanner(ctx context.Context, modelRef string, nativeConfig n
 	if err := applyNativeControls(backend, nativeConfig); err != nil {
 		return nil, fmt.Errorf("scout: native controls: %w", err)
 	}
-	model, q4k, _, _ := loadServeInKernelModel(ref, backend, false, 0, nil, 1)
+	model, q4k, _, _ := loadServeInKernelModel(ref, backend, false, 0, nil, 1, nil)
 	if model == nil {
 		return nil, fmt.Errorf("scout: failed to load %q into the in-kernel engine", ref)
 	}

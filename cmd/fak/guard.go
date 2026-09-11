@@ -778,7 +778,7 @@ func cmdManageCommand(commandName string, argv []string) {
 			os.Exit(2)
 		}
 		load := func() {
-			inKernelModel, inKernelQ4K, loadProfile, loadPhase = loadServeInKernelModel(*ggufPath, chatBackend, false, contextBudgetLimit, nil, 1)
+			inKernelModel, inKernelQ4K, loadProfile, loadPhase = loadServeInKernelModel(*ggufPath, chatBackend, false, contextBudgetLimit, nil, 1, nil)
 		}
 		var residencyRelease func()
 		if chatBackend != nil && chatBackend.Name() == "vulkan" {

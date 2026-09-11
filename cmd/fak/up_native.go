@@ -81,7 +81,7 @@ func defaultTurnkeyNativeLoadDeps() turnkeyNativeLoadDeps {
 			return loadLocalLauncherModelWithMetalLease(metal, path, gpulease.Options{}, load)
 		},
 		loadModel: func(path string, backend compute.Backend, contextTokens int) (*fakmodel.Model, bool, *gateway.ModelLoadProfile) {
-			m, q4k, profile, _ := loadServeInKernelModel(path, backend, false, contextTokens, nil, 1)
+			m, q4k, profile, _ := loadServeInKernelModel(path, backend, false, contextTokens, nil, 1, nil)
 			return m, q4k, profile
 		},
 		loadTokenizer:  func(path string) (*tokenizer.Tokenizer, bool) { return resolveServeTokenizer("", path) },

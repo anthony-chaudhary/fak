@@ -138,7 +138,7 @@ func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpu
 	// Re-run the arm's admission checks and downgrade any refusal to a warning: the
 	// operator reading this artifact wants to SEE the shortfall, not lose the numbers.
 	if be != nil {
-		if ferr := compute.RefuseMemoryPlanIfTooBig(be, demands, serveGGUFDeviceHeadroom); ferr != nil {
+		if ferr := compute.RefuseMemoryPlanIfTooBigForReportedDevice(be, demands, fit.Base, fit.Base, fit.Base > 0, fit.Headroom); ferr != nil {
 			warnings = append(warnings, "device fit would refuse: "+ferr.Error())
 		}
 		if cpuOffloadExperts {
@@ -150,7 +150,9 @@ func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpu
 			warnings = append(warnings, fmt.Sprintf("backend %q reports no device capacity — device fit checks fail open", be.Name()))
 		}
 	} else {
-		if ferr := compute.RefuseMemoryPlanIfTooBigForHost(demands, serveGGUFHostHeadroom); ferr != nil {
+		// Judge against the SAME measured budget the artifact sized the context against, so the
+		// dry-run and a live boot cannot disagree on a few MiB of probe drift.
+		if ferr := compute.RefuseMemoryPlanIfTooBigForReportedHost(demands, fit.Base, fit.Base, fit.Base > 0, fit.Headroom); ferr != nil {
 			warnings = append(warnings, "host fit would refuse: "+ferr.Error())
 		}
 	}
@@ -193,17 +195,21 @@ func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpu
 			FreeBytes:     max(free, 0),
 			CapacityKnown: known,
 			Headroom:      serveGGUFDeviceHeadroom,
-			UsableBytes:   max(serveDeviceFitBudget(be).avail(), 0),
+			UsableBytes:   max(fit.avail(), 0),
 		})
 	}
 	hostTotal, hostFree, hostKnown := compute.HostSystemMemoryInfo()
+	hostFit := serveHostFitBudgetFromReported(hostTotal, hostFree, hostKnown, nil)
+	if be == nil {
+		hostFit = fit
+	}
 	pools = append(pools, serveSizingPool{
 		Pool:          "host",
 		TotalBytes:    max(hostTotal, 0),
 		FreeBytes:     max(hostFree, 0),
 		CapacityKnown: hostKnown,
 		Headroom:      serveGGUFHostHeadroom,
-		UsableBytes:   max(serveHostFitBudget().avail(), 0),
+		UsableBytes:   max(hostFit.avail(), 0),
 	})
 
 	return serveSizingArtifact{

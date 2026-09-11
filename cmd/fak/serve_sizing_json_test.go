@@ -19,6 +19,9 @@ type sizingNamedBackend struct{ serveCapBackend }
 func (sizingNamedBackend) Name() string { return "testdev" }
 
 func TestServeSizingArtifactCPUArm(t *testing.T) {
+	origMetalAvailable := serveMetalAvailable
+	t.Cleanup(func() { serveMetalAvailable = origMetalAvailable })
+	serveMetalAvailable = func() bool { return false }
 	t.Setenv("FAK_Q4K", "")
 	ws := serveSynthConfiguredWeightSource(t)
 	art, err := buildServeSizingArtifact(ws, nil, false, 16, "synthetic.gguf", 4321)
@@ -85,6 +88,14 @@ func TestServeSizingArtifactDeviceArmRefusalBecomesWarning(t *testing.T) {
 	wantUsable := compute.BudgetAfterHeadroom(1<<19, serveGGUFDeviceHeadroom)
 	if art.Pools[0].UsableBytes != wantUsable {
 		t.Fatalf("device usable_bytes = %d, want the BudgetAfterHeadroom number %d", art.Pools[0].UsableBytes, wantUsable)
+	}
+	host := art.Pools[1]
+	var wantHostUsable int64
+	if host.CapacityKnown && host.TotalBytes > 0 {
+		wantHostUsable = compute.BudgetAfterHeadroom(host.FreeBytes, serveGGUFHostHeadroom)
+	}
+	if host.UsableBytes != wantHostUsable {
+		t.Fatalf("host usable_bytes = %d, want host-reported budget %d (device usable=%d)", host.UsableBytes, wantHostUsable, art.Pools[0].UsableBytes)
 	}
 }
 

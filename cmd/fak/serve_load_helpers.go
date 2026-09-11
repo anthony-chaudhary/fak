@@ -70,7 +70,7 @@ func newServeLoadProfiler() *ggufload.LoadProfiler {
 	return p
 }
 
-func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloadExperts bool, contextBudgetTokens int, expertShard *ggufload.ExpertShard, expertRanks int) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
+func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloadExperts bool, contextBudgetTokens int, expertShard *ggufload.ExpertShard, expertRanks int, fit *serveFitBudget) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
 	if modelPath == "" {
 		return nil, false, nil, gateway.StartupPhase{}
 	}
@@ -151,7 +151,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		// host-scope refusal below over-refuses ~ranks-fold, and it does so BEFORE the authoritative
 		// rank-local gate (refuseEPPlanIfUnfit) ever runs. residentRanks is 1 for every unsharded
 		// serve, which plans exactly as before.
-		memPlan, err := fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens)
+		memPlan, err := fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens, fit)
 		must(err)
 		// #971 blocker 3: the dense weights fit-checked above land in VRAM, but the routed MoE
 		// experts (~424 GiB for GLM-5.2 Q4_K) are pinned in HOST RAM — and a device backend does not
@@ -174,9 +174,9 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 			var memPlan compute.MemoryPlan
 			var err error
 			if residentRanks > 1 {
-				memPlan, err = fitAndPlanServeGGUFExpertParallelPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens)
+				memPlan, err = fitAndPlanServeGGUFExpertParallelPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens, fit)
 			} else {
-				memPlan, err = fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, false, contextBudgetTokens)
+				memPlan, err = fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, false, contextBudgetTokens, fit)
 			}
 			must(err)
 			return loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend, loadMessages, q4kOpts...)
@@ -184,7 +184,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		// Apple-Silicon Metal resident load (backend is nil, Metal device available):
 		// hold raw Q4_K / k-quant weights RESIDENT in Unified Memory (raw super-blocks, resident decode,
 		// dequant-fused Metal MSL GEMM kernels), eliminating the silent CPU Q8 dequantization loop.
-		must(fitServeGGUFPathOnHostForArm(ggufPath, serveLoadArmResidentQ4K, contextBudgetTokens))
+		must(fitServeGGUFPathOnHostForArm(ggufPath, serveLoadArmResidentQ4K, contextBudgetTokens, fit))
 		loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", "GGUF Apple-Silicon Metal load -> resident quantized weights in Unified Memory (raw super-blocks, resident decode, ~0.56 B/param vs Q8 ~1 B/param)"))
 		mm, prof, loadNanos := loadResidentQ4KProfiled(ggufPath, tLoad, q4kOpts...)
 		loadMessages = append(loadMessages, serveStartupMessage("resident-layout", "info", fakmodel.FormatResidentReport(mm.ResidentReport())))
@@ -197,7 +197,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 			// the f32 resident path. The served planner runs Session.Quant=true, so this
 			// is the memory-lean representation it will actually execute.
 			loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", fmt.Sprintf("GGUF device load -> mixed precision on backend %q (Q8 resident weights, f32 activations/KV)", backend.Name())))
-			memPlan, err := fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, false, contextBudgetTokens)
+			memPlan, err := fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, false, contextBudgetTokens, fit)
 			must(err)
 			prof := newServeLoadProfiler()
 			mm, err := ggufload.LoadModelQuantProfile(ggufPath, prof)
@@ -210,7 +210,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		// Backends without quantized upload still need f32-resident weights; a lean-Q8
 		// model would drop the f32 matmul weights they fall back to.
 		loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", fmt.Sprintf("GGUF device load -> f32 resident weights on backend %q (backend has no quantized UploadDtype)", backend.Name())))
-		memPlan, err := fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, true, contextBudgetTokens)
+		memPlan, err := fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, true, contextBudgetTokens, fit)
 		must(err)
 		mm, err := ggufload.LoadModel(ggufPath)
 		must(err)
@@ -229,7 +229,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		// CPU-path memory-fit pre-flight (#974): refuse cleanly with a typed FitTooBig BEFORE the
 		// all-resident load can drive MemAvailable to ~0 and OOM-wedge the host (parity with the
 		// device path's fit plan). Fail-open where host RAM is not probeable.
-		must(fitServeGGUFPathOnHost(ggufPath, false, contextBudgetTokens))
+		must(fitServeGGUFPathOnHost(ggufPath, false, contextBudgetTokens, fit))
 		// Pure-CPU reference serve via the direct-resident-Q4_K loader. That loader already
 		// routes the mixed Q5_K/Q6_K experts (GLM-5.2's ~417 GB bulk) to a raw-resident byte
 		// copy keyed on the GGUF quant type — the SAME resident-K-quant lever the device
@@ -247,7 +247,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 	default:
 		// CPU-path memory-fit pre-flight (#974): same clean FitTooBig refusal as the FAK_Q4K arm
 		// above, so the default lean CPU serve cannot OOM-wedge the host either.
-		must(fitServeGGUFPathOnHost(ggufPath, false, contextBudgetTokens))
+		must(fitServeGGUFPathOnHost(ggufPath, false, contextBudgetTokens, fit))
 		prof := newServeLoadProfiler()
 		mm, err := ggufload.LoadModelQuantProfile(ggufPath, prof)
 		must(err)

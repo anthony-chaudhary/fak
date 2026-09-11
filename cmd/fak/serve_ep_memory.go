@@ -24,13 +24,22 @@ func fitServeGGUFExpertParallelOnDevice(ws *ggufload.WeightSource, be compute.Ba
 	return compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFExpertParallelDeviceHeadroom)
 }
 
-func fitAndPlanServeGGUFExpertParallelPathOnDevice(ggufPath string, be compute.Backend, ranks, contextBudgetTokens int) (compute.MemoryPlan, error) {
-	plan, err := serveGGUFExpertParallelPathMemoryPlan(ggufPath, ranks, contextBudgetTokens, serveExpertParallelDeviceFitBudget(be))
+func fitAndPlanServeGGUFExpertParallelPathOnDevice(ggufPath string, be compute.Backend, ranks, contextBudgetTokens int, override *serveFitBudget) (compute.MemoryPlan, error) {
+	fit := serveExpertParallelDeviceFitBudget(be)
+	if override != nil {
+		fit = *override
+	}
+	plan, err := serveGGUFExpertParallelPathMemoryPlan(ggufPath, ranks, contextBudgetTokens, fit)
 	if err != nil {
 		return nil, err
 	}
 	if be == nil {
 		return plan, nil
+	}
+	if override != nil {
+		// Judge against the SAME device snapshot the rank plan was sized against; a later live
+		// probe can read slightly less free memory and turn a fitting context into a false refusal.
+		return refuseDevicePlanAgainstFit(be, plan, fit)
 	}
 	return plan, compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFExpertParallelDeviceHeadroom)
 }

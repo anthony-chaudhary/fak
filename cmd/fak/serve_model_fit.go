@@ -151,6 +151,41 @@ func serveFitBudgetBase(total, free int64, known bool) int64 {
 	return free
 }
 
+// serveHostFitBudgetFromReported pins host sizing and host admission to ONE measured snapshot.
+// An injected override (the resolve pass's snapshot, threaded through the load) wins verbatim, so
+// the two stages cannot disagree; otherwise the caller's (total, free, known) is used instead of a
+// second live HostSystemMemoryInfo probe. A zero Base stays "unprobeable" and fails open upstream.
+func serveHostFitBudgetFromReported(total, free int64, known bool, override *serveFitBudget) serveFitBudget {
+	if override != nil {
+		return *override
+	}
+	return serveFitBudget{Base: serveFitBudgetBase(total, free, known), Headroom: serveGGUFHostHeadroom}
+}
+
+// serveDeviceFitBudgetFromReported is the device counterpart: an injected override wins, else the
+// live device probe. It exists so the device arm's sizing and admission share one snapshot.
+func serveDeviceFitBudgetFromReported(be compute.Backend, override *serveFitBudget) serveFitBudget {
+	if override != nil {
+		return *override
+	}
+	return serveDeviceFitBudget(be)
+}
+
+// refuseHostPlanAgainstFit judges a pure-CPU host plan against the SAME measured budget it was
+// sized against. Base<=0 means the ceiling was unprobeable -> fail open, exactly as a live probe.
+func refuseHostPlanAgainstFit(plan compute.MemoryPlan, fit serveFitBudget) error {
+	if fit.Base <= 0 {
+		return nil
+	}
+	return compute.RefuseMemoryPlanIfTooBigForReportedHost(plan, fit.Base, fit.Base, true, fit.Headroom)
+}
+
+// refuseDevicePlanAgainstFit is the device arm's counterpart of refuseHostPlanAgainstFit. Base<=0
+// leaves device capacity unknown. Host-scoped demands still consult the reported-device refusal.
+func refuseDevicePlanAgainstFit(be compute.Backend, plan compute.MemoryPlan, fit serveFitBudget) (compute.MemoryPlan, error) {
+	return plan, compute.RefuseMemoryPlanIfTooBigForReportedDevice(be, plan, fit.Base, fit.Base, fit.Base > 0, fit.Headroom)
+}
+
 type deviceWeightBudgetBackend interface {
 	DeviceWeightBudget() (bytes int64, enabled bool)
 }
@@ -397,55 +432,60 @@ func serveContextTokenOverride(contextBudgetTokens int) int {
 // refuses with a typed FitTooBig naming the shortfall when the plan exceeds MemAvailable less
 // headroom — parity with the device path's fit plan. Fail-open: a platform that cannot report
 // host memory loads exactly as before.
-func fitServeGGUFPathOnHost(ggufPath string, f32Resident bool, contextBudgetTokens int) error {
+func fitServeGGUFPathOnHost(ggufPath string, f32Resident bool, contextBudgetTokens int, fit *serveFitBudget) error {
 	total, free, known := compute.HostSystemMemoryInfo()
-	return fitServeGGUFPathOnReportedHost(ggufPath, f32Resident, contextBudgetTokens, total, free, known)
+	return fitServeGGUFPathOnReportedHost(ggufPath, f32Resident, contextBudgetTokens, total, free, known, fit)
 }
 
 // fitServeGGUFPathOnHostForArm checks a host/unified-memory load whose runtime
 // arm has already been selected. Metal uses this after choosing resident Q4_K,
 // so its admission plan cannot silently fall back to the host Q8 estimate.
-func fitServeGGUFPathOnHostForArm(ggufPath string, arm serveLoadArm, contextBudgetTokens int) error {
+func fitServeGGUFPathOnHostForArm(ggufPath string, arm serveLoadArm, contextBudgetTokens int, fit *serveFitBudget) error {
 	total, free, known := compute.HostSystemMemoryInfo()
-	return fitServeGGUFPathOnReportedHostForArm(ggufPath, arm, contextBudgetTokens, total, free, known)
+	return fitServeGGUFPathOnReportedHostForArm(ggufPath, arm, contextBudgetTokens, total, free, known, fit)
 }
 
-func fitServeGGUFPathOnReportedHostForArm(ggufPath string, arm serveLoadArm, contextBudgetTokens int, total, free int64, known bool) error {
+func fitServeGGUFPathOnReportedHostForArm(ggufPath string, arm serveLoadArm, contextBudgetTokens int, total, free int64, known bool, override *serveFitBudget) error {
 	if ggufPath == "" {
 		return nil
 	}
+	fit := serveHostFitBudgetFromReported(total, free, known, override)
 	plan, err := withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
-		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, serveHostFitBudget())
+		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, fit)
 	})
 	if err != nil {
 		return err
 	}
-	return compute.RefuseMemoryPlanIfTooBigForReportedHost(plan, total, free, known, serveGGUFHostHeadroom)
+	return refuseHostPlanAgainstFit(plan, fit)
 }
 
-func fitServeGGUFPathOnReportedHost(ggufPath string, f32Resident bool, contextBudgetTokens int, total, free int64, known bool) error {
+func fitServeGGUFPathOnReportedHost(ggufPath string, f32Resident bool, contextBudgetTokens int, total, free int64, known bool, override *serveFitBudget) error {
 	if ggufPath == "" {
 		return nil
 	}
+	fit := serveHostFitBudgetFromReported(total, free, known, override)
 	plan, err := withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
 		arm := resolveHostServeLoadArm(ws, f32Resident)
-		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, serveHostFitBudget())
+		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, fit)
 	})
 	if err != nil {
 		return err
 	}
-	return compute.RefuseMemoryPlanIfTooBigForReportedHost(plan, total, free, known, serveGGUFHostHeadroom)
+	return refuseHostPlanAgainstFit(plan, fit)
 }
 
 // refuseIfTooBigOnDevice applies the device-headroom refusal to a freshly-built plan —
 // the err-check + nil-backend passthrough + RefuseMemoryPlanIfTooBig tail the two
 // fitAndPlan…OnDevice helpers share.
-func refuseIfTooBigOnDevice(plan compute.MemoryPlan, err error, be compute.Backend) (compute.MemoryPlan, error) {
+func refuseIfTooBigOnDevice(plan compute.MemoryPlan, err error, be compute.Backend, override *serveFitBudget) (compute.MemoryPlan, error) {
 	if err != nil {
 		return nil, err
 	}
 	if be == nil {
 		return plan, nil
+	}
+	if override != nil {
+		return refuseDevicePlanAgainstFit(be, plan, *override)
 	}
 	return plan, compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFDeviceHeadroom)
 }
@@ -465,15 +505,15 @@ func withGGUFWeights(ggufPath string, plan func(*ggufload.WeightSource) (compute
 	return plan(ws)
 }
 
-func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Resident bool, contextBudgetTokens int) (compute.MemoryPlan, error) {
+func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Resident bool, contextBudgetTokens int, override *serveFitBudget) (compute.MemoryPlan, error) {
 	plan, err := withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
 		arm := resolveDeviceServeLoadArm(ws, be, f32Resident)
-		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, serveDeviceFitBudget(be))
+		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, serveDeviceFitBudgetFromReported(be, override))
 	})
 	if err == nil {
 		plan = applyDeviceWeightBudget(plan, be)
 	}
-	return refuseIfTooBigOnDevice(plan, err, be)
+	return refuseIfTooBigOnDevice(plan, err, be, override)
 }
 
 // fitAndPlanServeGGUFCPUOffloadPathOnDevice keeps serveDeviceFitBudget's generic device headroom
@@ -481,9 +521,9 @@ func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Res
 // experts are host-resident, so the device side is the dense remainder plus KV — not the tight
 // resident-EP case 0.05 exists for. ranks changes which routed bytes are charged, never the
 // headroom.
-func fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath string, be compute.Backend, ranks, contextBudgetTokens int) (compute.MemoryPlan, error) {
-	plan, err := serveGGUFCPUOffloadPathMemoryPlan(ggufPath, ranks, contextBudgetTokens, serveDeviceFitBudget(be))
-	return refuseIfTooBigOnDevice(plan, err, be)
+func fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath string, be compute.Backend, ranks, contextBudgetTokens int, override *serveFitBudget) (compute.MemoryPlan, error) {
+	plan, err := serveGGUFCPUOffloadPathMemoryPlan(ggufPath, ranks, contextBudgetTokens, serveDeviceFitBudgetFromReported(be, override))
+	return refuseIfTooBigOnDevice(plan, err, be, override)
 }
 
 func serveGGUFPathMemoryPlan(ggufPath string, f32Resident bool, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {

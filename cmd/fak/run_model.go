@@ -377,7 +377,7 @@ func buildRunPlanner(ctx context.Context, modelRef, backendName string, metalFla
 	var q4k bool
 	var residencyRelease func()
 	load := func() {
-		inKernelModel, q4k, _, _ = loadServeInKernelModel(ref, backend, false, 0, nil, 1)
+		inKernelModel, q4k, _, _ = loadServeInKernelModel(ref, backend, false, 0, nil, 1, nil)
 	}
 	if backend != nil && backend.Name() == "vulkan" {
 		residencyRelease, err = loadLocalLauncherModelWithVulkanLease(true, ref, gpulease.Options{}, load)
