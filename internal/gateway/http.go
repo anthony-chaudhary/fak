@@ -408,6 +408,14 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 	want := sha256.Sum256([]byte(s.requireKey))
 	wantRead := sha256.Sum256([]byte(s.readBearer))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The X-Fak-Auth-Scope guard (#12761) runs BEFORE the bearer check so a
+		// scope-refused request answers 403 without ever consulting credentials.
+		// An absent header falls through unchanged (the legacy path is byte-for-
+		// byte identical); enforceAuthScope returns false only when it already
+		// wrote the 403 scope_forbidden response.
+		if !s.enforceAuthScope(w, r) {
+			return
+		}
 		if (s.requireKey != "" || s.keyset != nil) && !s.authExempt(r) {
 			tok, ok := gatewayCredential(r)
 			got := sha256.Sum256([]byte(tok))

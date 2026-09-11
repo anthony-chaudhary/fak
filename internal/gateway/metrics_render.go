@@ -259,6 +259,7 @@ func (s *Server) renderMetrics() string {
 	fmt.Fprintf(&b, "fak_gateway_inflight_requests %d\n", atomic.LoadInt64(&m.inflight))
 	writeInflightRequestMetrics(&b, m)
 
+	writeScopeRefusalMetrics(&b, m)
 	writeHelpType(&b, "fak_gateway_build_info", "Static fak gateway build and runtime labels.", "gauge")
 	fmt.Fprintf(&b, "fak_gateway_build_info{version=\"%s\",engine=\"%s\",model=\"%s\",vdso=\"%s\"} 1\n",
 		promQuote(s.version), promQuote(s.engineID), promQuote(s.model), promQuote(strconv.FormatBool(s.k.VDSOEnabled())))
@@ -1437,5 +1438,33 @@ func (m *gatewayMetrics) writeCacheBreakMetrics(b *strings.Builder) {
 		"Cold-rebuild token cost of cache breaks this session, labeled by closed cause. Each break's cost is the warm prompt prefix that had to be re-prefilled.", "counter")
 	for _, t := range report.ByCause {
 		fmt.Fprintf(b, "%s{cause=\"%s\"} %d\n", metrics.CacheBreakCostMetric, promQuote(string(t.Cause)), t.CostTokens)
+	}
+}
+
+// writeScopeRefusalMetrics renders the auth-scope refusal family (#12761): each
+// X-Fak-Auth-Scope claim the gateway refused with 403 scope_forbidden, keyed by
+// the declared scope (read/write-normalized) and the coarse route class the
+// refusal happened on (observation/observation_requests/admin/other), so an
+// operator can tell an observation-polling watcher from someone probing the
+// admin plane. Snapshot under the lock, then render in sorted (scope,
+// route_class) order so the scrape is byte-stable; a refusal-free session
+// renders the header alone.
+func writeScopeRefusalMetrics(b *strings.Builder, m *gatewayMetrics) {
+	snap := m.scopeRefusalSnapshot()
+	writeHelpType(b, "fak_gateway_scope_refusals_total",
+		"Requests refused by the X-Fak-Auth-Scope guard with 403 scope_forbidden, by declared scope and route class (observation, observation_requests, admin, other). A read-scoped agent hitting a mutating verb or any /v1/admin route lands here.",
+		"counter")
+	keys := make([]scopeRefusalKey, 0, len(snap))
+	for k := range snap {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].scope != keys[j].scope {
+			return keys[i].scope < keys[j].scope
+		}
+		return keys[i].routeClass < keys[j].routeClass
+	})
+	for _, k := range keys {
+		fmt.Fprintf(b, "fak_gateway_scope_refusals_total{scope=%q,route_class=%q} %d\n", k.scope, k.routeClass, snap[k])
 	}
 }
