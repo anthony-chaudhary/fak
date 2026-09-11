@@ -219,10 +219,14 @@ fak run qwen38 "Explain KV cache in one line"
 
 ### B. Apple Silicon Metal GPU acceleration (`fak serve` + `fak chat`)
 
-On macOS, leverage Apple Silicon Metal GPU decode/prefill and in-kernel RadixAttention prefix caching. Metal GPU acceleration and resident Q4_K tensor decoding are enabled by default on Apple Silicon:
+On macOS, `fak serve` can use Apple Silicon Metal GPU decode/prefill with in-kernel RadixAttention prefix caching — but only in a build with the Metal backend compiled in. Plain release archives are pure-Go (CGO_ENABLED=0) and serve on CPU; they print a `backend=cpu (…)` skip-reason line at startup. Metal is not enabled by default in them. Three ways to get a Metal-capable binary:
+
+1. **`./install.sh --variant metal`** — installs `fak_<VERSION>_darwin_arm64_metal.tar.gz`, a CGO darwin/arm64 (Apple Silicon) release asset with the Metal backend compiled in; macOS Apple Silicon only. The asset begins landing with this release cycle — if it is missing for your version, use option 2.
+2. **Build from source with `CGO_ENABLED=1`** — see the [Mac local models guide](docs/fak/mac-local-models.md) for the build and qualification steps.
+3. **NVIDIA GPUs** ship as the separate ghcr `-cuda` container image instead — see the [deployment guide](docs/fak/deployment-guide.md).
 
 ```bash
-# Terminal 1: start the native Metal GPU server (model alias auto-resolved, Metal auto-selected)
+# Terminal 1: start the server (Metal auto-selected only when the build supports it and the device qualifies)
 fak serve --gguf qwen38:27b-q4
 
 # Terminal 2: chat with it (auto-connects to local server and detects model)

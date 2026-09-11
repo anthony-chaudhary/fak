@@ -118,9 +118,9 @@ Each provider is one of the two primitives above. The provider-specific part is 
 | Provider | Primitive you rent | Shape 1 (in-kernel) | Shape 2 (proxy) |
 |---|---|---|---|
 | **CoreWeave** | CKS (managed k8s) | `kubectl apply -k deploy/k8s/overlays/gpu` | `kubectl apply -k deploy/k8s` + your vLLM Deployment |
-| **Lambda Cloud** | On-demand GPU VM, or their managed k8s | VM: `install.sh` + a systemd unit running `fak serve … --engine inkernel --backend cuda`, or `docker run --gpus all`. k8s: the GPU overlay | VM/k8s: static `fak` in front of local vLLM |
+| **Lambda Cloud** | On-demand GPU VM, or their managed k8s | VM (docker-only for GPU): `docker run --gpus all` with a `-cuda` image — the `install.sh` release binary has no CUDA backend, so never point it at `--backend cuda`. k8s: the GPU overlay | VM/k8s: static `fak` in front of local vLLM |
 | **RunPod** | GPU Pod (container-native) | Launch the `-cuda` image as the pod image with the `serve … --engine inkernel --backend cuda` command; expose 8080 as an HTTP port | Two containers/templates: vLLM + the static `fak` image |
-| **Crusoe** | GPU VM, or managed k8s | Same two doors as Lambda (VM: `install.sh`+systemd or `docker --gpus all`; k8s: the GPU overlay) | Static `fak` in front of local vLLM |
+| **Crusoe** | GPU VM, or managed k8s | Same two doors as Lambda (VM: docker-only for GPU via `docker --gpus all` + a `-cuda` image; k8s: the GPU overlay) | Static `fak` in front of local vLLM |
 | **Vast.ai** | Marketplace GPU instance (Docker-native, most heterogeneous) | Launch the `-cuda` image as the instance image, map 8080 — ship the **default all-arch build**, since the card changes with every bid | Static `fak` in front of local vLLM |
 | **Nebius** | GPU VM, or managed k8s | Same two doors as Lambda | Static `fak` in front of local vLLM |
 
@@ -134,7 +134,7 @@ and report, not a verified claim. Parent epic: [#1678](https://github.com/anthon
 | Provider | End-to-end witness | What is actually established | Provider-side prerequisite `fak` does not install |
 |---|---|---|---|
 | **CoreWeave** | `not yet` | The GPU overlay applies as a self-contained stack; CKS is standard k8s + GPU nodes | NVIDIA device plugin / GPU Operator on the pool (CKS ships it); a `.gguf` on the `fak-weights` claim |
-| **Lambda Cloud** | `not yet` | `install.sh` + systemd and `docker run --gpus all` are the repo's documented VM paths | NVIDIA driver + Container Toolkit on the VM image |
+| **Lambda Cloud** | `not yet` | `docker run --gpus all` with a `-cuda` image is the documented VM path (the `install.sh` binary is CPU-only — docker-only for GPU serving) | NVIDIA driver + Container Toolkit on the VM image |
 | **RunPod** | `not yet` | Container-native: takes an image + command, which is what both shapes need | A pod template exposing 8080 as an HTTP port |
 | **Crusoe** | `not yet` | Same two doors as Lambda; no Crusoe-specific step is known to be required | NVIDIA driver + Container Toolkit (VM) or device plugin (k8s) |
 | **Vast.ai** | `not yet` | Marketplace instances are Docker-native | Nothing extra with the default all-arch image; a narrowed `CUDA_ARCH` build must match the card you win |
@@ -148,10 +148,11 @@ pool. Both shapes are pure `kubectl apply -k` — the GPU overlay for in-kernel,
 base for a co-located engine. Confirm `nvidia.com/gpu` is allocatable before you apply:
 `kubectl get nodes -o json | jq '.items[].status.allocatable'`.
 
-**Lambda Cloud.** Two doors. On a bare on-demand GPU **VM**, install the binary with the
-repo's `install.sh`, drop a systemd unit that runs `fak serve … --require-key-env …`, or
-skip systemd and `docker run --gpus all` the CUDA image. On Lambda's **managed k8s**, use
-the GPU overlay exactly as CoreWeave.
+**Lambda Cloud.** Two doors. On a bare on-demand GPU **VM**, run the CUDA image with
+`docker run --gpus all` (plus `--require-key-env` and your policy JSON) — the release
+`install.sh` binary is CPU-only, so docker is the only in-kernel-GPU door on a VM — and
+drop a systemd unit around `fak serve … --require-key-env …` only when you serve the
+CPU/proxy shape. On Lambda's **managed k8s**, use the GPU overlay exactly as CoreWeave.
 
 **RunPod / Vast.ai.** Container-native marketplaces — you hand them an image and a
 command, not a VM to configure. Point the pod/instance at your `-cuda` build with the
@@ -161,7 +162,7 @@ included — so this is the one place to ship the **default all-arch image** rat
 a narrowed `CUDA_ARCH` build.
 
 **Crusoe / Nebius.** GPU VMs or managed k8s — identical to the Lambda doors: VM →
-`install.sh`+systemd or `docker --gpus all`; k8s → the GPU overlay.
+docker-only for GPU (`docker --gpus all` + a `-cuda` image); k8s → the GPU overlay.
 
 ## Always set the auth floor
 

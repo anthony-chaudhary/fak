@@ -245,8 +245,10 @@ instead — a CUDA-runtime variant of the same two-stage build, published alongs
 the default image as the `-cuda` tag:
 
 ```bash
-# Pull (a tagged release publishes both):
-docker pull ghcr.io/anthony-chaudhary/fak:0.47.0-cuda
+# Pull — a `-cuda` tag only exists for versions whose release published it; check
+# https://github.com/anthony-chaudhary/fak/pkgs/container/fak/versions
+# (currently only 0.55.0-cuda — prefer `cuda-latest` unless you need the pinned one):
+docker pull ghcr.io/anthony-chaudhary/fak:cuda-latest
 
 # Or build locally, picking the arch that matches the rented card
 # (sm_80 A100, sm_89 Ada/L4 default, sm_90 H100/H200, sm_100 B200/GB200):
@@ -255,7 +257,7 @@ docker build -f Dockerfile.cuda --build-arg CUDA_ARCH=sm_90 -t fak:cuda .
 # Run with the NVIDIA Container Toolkit (--gpus requires it on the host):
 docker run --rm --gpus all -p 8080:8080 \
   -v /models:/models:ro \
-  ghcr.io/anthony-chaudhary/fak:0.47.0-cuda \
+  ghcr.io/anthony-chaudhary/fak:cuda-latest \
   serve --addr 0.0.0.0:8080 --gguf /models/model.gguf \
   --engine inkernel --backend cuda
 ```

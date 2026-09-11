@@ -6,8 +6,14 @@
 # Downloads the prebuilt static binary for your OS/arch from the latest GitHub
 # release (attached by .github/workflows/release-artifacts.yml), verifies its
 # SHA-256 against the release's SHA256SUMS, and installs it onto your PATH. No
-# clone, no Go toolchain, no cgo. POSIX sh; needs curl (or wget), tar, and
-# sha256sum (or shasum).
+# clone, no Go toolchain; the default cpu variant is pure-Go with no cgo.
+# POSIX sh; needs curl (or wget), tar, and sha256sum (or shasum).
+#
+# Variant (command-line):
+#   --variant cpu     pure-Go build, runs everywhere (default)
+#   --variant metal   darwin/arm64 (Apple Silicon) only - CGO build with the Metal
+#                     backend compiled in, published as
+#                     fak_<VERSION>_darwin_arm64_metal.tar.gz
 #
 # Knobs (environment):
 #   FAK_VERSION       pin a version, e.g. 0.24.0 (default: latest release)
@@ -17,6 +23,23 @@
 #                     install, and releases (default: anthony-chaudhary/fak;
 #                     FAK_REPO is a back-compat alias)
 set -eu
+
+# --- variant selection (--variant cpu|metal) ------------------------------------
+VARIANT=cpu
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --variant)
+      [ $# -ge 2 ] || { printf 'install.sh: --variant requires an argument (cpu|metal)\n' >&2; exit 2; }
+      VARIANT="$2"; shift 2 ;;
+    --variant=*) VARIANT="${1#--variant=}"; shift ;;
+    -h|--help) sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) printf 'install.sh: unknown argument %s — usage: install.sh [--variant cpu|metal]\n' "$1" >&2; exit 2 ;;
+  esac
+done
+case "$VARIANT" in
+  cpu|metal) : ;;
+  *) printf 'install.sh: unknown variant %s — usage: install.sh [--variant cpu|metal]\n' "$VARIANT" >&2; exit 2 ;;
+esac
 
 # Single source of truth for every published URL (clone, install, releases).
 PUBLISH_REPO="${PUBLISH_REPO:-${FAK_REPO:-anthony-chaudhary/fak}}"
@@ -55,15 +78,27 @@ esac
 # is now a published .tar.gz target, including linux/arm64 (Raspberry Pi / Jetson / arm64
 # gateway). Windows already errored in the OS case above (it ships a .zip, not this tarball).
 
+# The metal variant is a CGO darwin/arm64-only release asset; say so plainly elsewhere.
+if [ "$VARIANT" = "metal" ]; then
+  if [ "$GOOS" != "darwin" ] || [ "$GOARCH" != "arm64" ]; then
+    printf 'install.sh: the metal variant supports darwin/arm64 (Apple Silicon) only; this host is %s/%s — use the default cpu variant or build from source with CGO_ENABLED=1\n' "$GOOS" "$GOARCH" >&2
+    exit 2
+  fi
+fi
+
 # On macOS, prefer Homebrew when available unless an explicit install dir, version pin,
 # or direct binary download is requested.
 if [ "$GOOS" = "darwin" ] && have brew && [ -z "${FAK_INSTALL_DIR:-}" ] && [ -z "${FAK_VERSION:-}" ] && [ "${FAK_PREFER_DIRECT:-0}" != "1" ]; then
-  printf 'install.sh: macOS detected with Homebrew available — attempting install via Homebrew\n' >&2
-  if brew install anthony-chaudhary/tap/fak 2>/dev/null || brew install fak 2>/dev/null; then
-    printf 'install.sh: Homebrew install OK\n' >&2
-    exit 0
+  if brew tap-info anthony-chaudhary/tap >/dev/null 2>&1; then
+    printf 'install.sh: macOS detected with Homebrew available — attempting install via Homebrew\n' >&2
+    if brew install anthony-chaudhary/tap/fak 2>/dev/null || brew install fak 2>/dev/null; then
+      printf 'install.sh: Homebrew install OK\n' >&2
+      exit 0
+    fi
+    printf 'install.sh: Homebrew install failed; proceeding with direct binary download\n' >&2
+  else
+    printf 'install.sh: skipping Homebrew (tap %s is not installed); using the direct release archive\n' "$PUBLISH_REPO" >&2
   fi
-  printf 'install.sh: Homebrew tap not reachable; proceeding with direct binary download\n' >&2
 fi
 
 # --- resolve version -----------------------------------------------------------
@@ -76,15 +111,24 @@ if [ -z "$VERSION" ]; then
   [ -n "$VERSION" ] || err "could not resolve the latest release tag from ${API}/releases/latest"
 fi
 TAG="v${VERSION}"
-NAME="fak_${VERSION}_${GOOS}_${GOARCH}"
+if [ "$VARIANT" = "metal" ]; then
+  # Metal ships as its own CGO-built asset, separate from the pure-Go cpu archive.
+  NAME="fak_${VERSION}_darwin_arm64_metal"
+else
+  NAME="fak_${VERSION}_${GOOS}_${GOARCH}"
+fi
 ARCHIVE="${NAME}.tar.gz"
 
 # --- download + verify ---------------------------------------------------------
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 printf 'install.sh: downloading %s (%s)\n' "$ARCHIVE" "$TAG" >&2
-fetch "${DL}/${TAG}/${ARCHIVE}" "${tmp}/${ARCHIVE}" \
-  || err "download failed — does release ${TAG} carry a ${GOOS}/${GOARCH} asset? See ${API}/releases"
+if ! fetch "${DL}/${TAG}/${ARCHIVE}" "${tmp}/${ARCHIVE}"; then
+  if [ "$VARIANT" = "metal" ]; then
+    err "the metal asset ${ARCHIVE} was not found for release ${TAG} — install the cpu variant (default) or build from source with CGO_ENABLED=1 for Metal. See ${API}/releases"
+  fi
+  err "download failed — does release ${TAG} carry a ${GOOS}/${GOARCH} asset? See ${API}/releases"
+fi
 
 # Prefer the aggregate SHA256SUMS; fall back to the per-asset .sha256. `sha256sum`
 # writes "<hash> *<name>" (a `*` binary-mode marker), so match the name as a field

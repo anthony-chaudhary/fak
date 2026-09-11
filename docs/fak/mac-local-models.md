@@ -27,10 +27,15 @@ description: "How to run local models (Qwen3.8-27B and peers) natively on Apple 
 ## Build and qualify the native Metal binary
 
 Metal support is compiled only into a native `darwin/arm64` build with CGo enabled. The
-release archive is currently a pure-Go build: it can serve on CPU, but it cannot pass this
-Metal qualification. Install Xcode Command Line Tools and Go 1.26+, then build from a clean
+default release archive is a pure-Go build: it can serve on CPU, but it cannot pass this
+Metal qualification. (The `install.sh --variant metal` path installs a separate CGO
+darwin/arm64 asset with Metal compiled in for versions that publish it; everything below
+builds the same thing from source.) Install Xcode Command Line Tools and Go 1.26+, then build from a clean
 committed checkout (or a managed worker) to a unique temporary path and inspect the actual
 Mac and backend:
+A pure-Go binary never fails silently: `fak serve`, `fak run`, and `fak up` stamp a
+`backend=cpu (metal-not-compiled)` or `backend=cpu (metal-no-device)` skip-reason line at startup, and
+`fak gpucheck -backend metal` exits non-zero with the same two-state reason.
 
 ```bash
 xcode-select -p
