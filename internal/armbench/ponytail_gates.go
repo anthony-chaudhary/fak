@@ -26,7 +26,7 @@ const PonytailGatesRevision = PonytailRevision
 
 const (
 	ponytailNativeMediumArm    = "native_medium"
-	ponytailNativeMediumDigest = "sha256:0a7486dad11285dec807af6937a195107b6accd1ba5e420841e74f3800dc6d52"
+	ponytailNativeMediumDigest = "sha256:d452b71356574fbb2701364f95d4cb8cfc4a946e895eb0c5da6e5c9328a696ff"
 )
 
 var ponytailBenchmarkArms = []string{"baseline", "caveman", "ponytail", ponytailNativeMediumArm}

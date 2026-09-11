@@ -219,3 +219,44 @@ func TestWorkProfileAutonomousGitSyncPushDirective(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkProfileNativeDefaultsCarryAutonomousActionBias(t *testing.T) {
+	// The DEFAULT work profile must not pause for clarifying questions: the autonomous
+	// action-bias directive is carried by the native profiles (which WorkProfileDefault
+	// "ponytail:medium" resolves to) as well as the headless ones, so a default agent
+	// completes work to verified completion instead of asking. Witnesses the default-facing
+	// half of #11519.
+	for _, name := range []string{
+		"ponytail:low", "ponytail:medium", "ponytail:high",
+		"ponytail:native:low", "ponytail:native:medium", "ponytail:native:high",
+	} {
+		got := DescribeWorkProfile(name)
+		if !got.Known || !got.Applied {
+			t.Fatalf("DescribeWorkProfile(%q) not applied: %+v", name, got)
+		}
+		if !strings.Contains(got.Segment, AutonomousActionBiasDirective) {
+			t.Fatalf("native profile %q missing AutonomousActionBiasDirective: %q", name, got.Segment)
+		}
+		if !strings.Contains(got.Segment, AutonomousActionBiasNativeLeadIn) {
+			t.Fatalf("native profile %q missing mode-neutral lead-in: %q", name, got.Segment)
+		}
+		// Safety carve-outs must survive the autonomy default.
+		for _, required := range []string{"security", "correct", "tests", "evidence"} {
+			if !strings.Contains(strings.ToLower(got.Segment), required) {
+				t.Errorf("native profile %q omits safety carve-out %q", name, required)
+			}
+		}
+	}
+}
+
+func TestWorkProfileFromEnvDefaultCarriesAutonomousActionBias(t *testing.T) {
+	// The unset-env default is what a DeepSeek-class default agent receives; it must
+	// carry the no-questions directive.
+	got := WorkProfileFromEnv(func(string) string { return "" })
+	if !got.Applied || got.Profile != WorkProfilePonytailNativeMed {
+		t.Fatalf("default readout = %+v", got)
+	}
+	if !strings.Contains(got.Segment, AutonomousActionBiasDirective) {
+		t.Fatalf("default work profile missing AutonomousActionBiasDirective: %q", got.Segment)
+	}
+}
