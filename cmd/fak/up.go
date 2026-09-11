@@ -52,7 +52,7 @@ func printUpHelp(w io.Writer) {
 	fmt.Fprintln(w, "  --bundle <path>             path to .fakpack bundle [all-in-one mode]")
 	fmt.Fprintln(w, "  --bundle-verify-key <key>   optional public key / signature verification key for bundle")
 	fmt.Fprintln(w, "  --policy <path>             path to security policy file")
-	fmt.Fprintln(w, "  --engine <engine>           model engine ID (default: mock)")
+	fmt.Fprintln(w, "  --engine <engine>           model engine ID (default: inkernel; mock only with --mock)")
 	fmt.Fprintln(w, "  --help, -h                  show this help message")
 }
 
@@ -125,7 +125,7 @@ func runAllInOneUp(argv []string) {
 	bundleVerifyKey := fs.String("bundle-verify-key", "", "optional verification key for bundle")
 	addr := fs.String("addr", "127.0.0.1:4000", "address to bind HTTP server")
 	policyPath := fs.String("policy", "", "path to security policy file")
-	engineID := fs.String("engine", "mock", "model engine ID")
+	engineID := fs.String("engine", "inkernel", "model engine ID (default inkernel; mock only with --mock)")
 	dryRun := fs.Bool("dry-run", false, "validate topology and print execution plan without running")
 	mock := fs.Bool("mock", false, "enable mock engine and test components")
 
@@ -135,8 +135,8 @@ func runAllInOneUp(argv []string) {
 
 	explicit := explicitFlagNames(fs)
 	resolvedEngine := *engineID
-	if !explicit["engine"] && !*mock {
-		resolvedEngine = "inkernel"
+	if *mock && !explicit["engine"] {
+		resolvedEngine = "mock"
 	}
 
 	cfg := allinone.Config{
@@ -215,7 +215,7 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	memoryGiB := fs.Float64("memory-gib", 0, "override detected unified memory in GiB")
 	modelOverride := fs.String("model", "", "override auto-selected model tier (e.g. 7B, 27B, 70B)")
 	contextOverride := fs.Uint64("context", 0, "override auto-selected context budget tokens")
-	engineID := fs.String("engine", "mock", "model engine ID")
+	engineID := fs.String("engine", "inkernel", "model engine ID (default inkernel; mock only with --mock)")
 
 	if err := fs.Parse(argv); err != nil {
 		os.Exit(2)

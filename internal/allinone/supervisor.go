@@ -392,7 +392,7 @@ func (s *Supervisor) validateLockOrBundle() (*lockv2.Lock, string, error) {
 		return &lock, lockID, nil
 	}
 
-	if s.cfg.Mock {
+	if s.cfg.IsMock() {
 		mockLock := &lockv2.Lock{
 			Schema: lockv2.ProductLockSchemaV2,
 			ID:     "mock-lock-id",
@@ -411,6 +411,8 @@ func (s *Supervisor) validateLockOrBundle() (*lockv2.Lock, string, error) {
 
 // DryRunTopology inspects and validates the target deployment topology without binding network or launching processes.
 func (s *Supervisor) DryRunTopology() (*TopologySpec, error) {
+	// DryRunTopology reports the topology truthfully (including ResolvedEngine
+	// "unconfigured"); Start enforces the Validate contract.
 	lock, lockID, err := s.validateLockOrBundle()
 	if err != nil {
 		return nil, err
@@ -427,7 +429,7 @@ func (s *Supervisor) DryRunTopology() (*TopologySpec, error) {
 			mcpServers = append(mcpServers, c.ID)
 		}
 	}
-	if len(mcpServers) == 0 && (s.cfg.Mock || s.cfg.Engine == "mock") {
+	if len(mcpServers) == 0 && s.cfg.IsMock() {
 		mcpServers = []string{"mock-mcp-server"}
 	}
 
@@ -440,17 +442,8 @@ func (s *Supervisor) DryRunTopology() (*TopologySpec, error) {
 		}
 	}
 
-	eng := s.cfg.Engine
-	if eng == "" {
-		if s.cfg.EngineDriver != nil {
-			eng = "custom"
-		} else if s.cfg.Mock {
-			eng = "mock"
-		} else {
-			// Real mode with no engine: report the truth; Start fails fast.
-			eng = "unconfigured"
-		}
-	}
+	// Default-real guardrail: report the truth; Start fails fast on "unconfigured".
+	eng := s.cfg.ResolvedEngine()
 
 	addr := s.cfg.Addr
 	if addr == "" {
@@ -477,6 +470,14 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	s.running = true
 	s.stopping = false
 	s.mu.Unlock()
+
+	// Default-real guardrail: fail fast on a missing lock or bundle, an
+	// unconfigured engine, or a contradictory mock selection before binding
+	// any listener or launching any child process.
+	if err := s.cfg.Validate(); err != nil {
+		s.health.SetStatus(SubsystemHTTP, false, err.Error())
+		return err
+	}
 
 	// 1. Validate lock or bundle
 	lock, _, err := s.validateLockOrBundle()
@@ -624,7 +625,7 @@ func (s *Supervisor) Start(ctx context.Context) error {
 			}
 			// Echo fabrication is reserved for explicit mock mode: the operator
 			// opted into a stand-in world. Real mode degrades the broker instead.
-			if !s.cfg.Mock && s.cfg.Engine != "mock" {
+			if !s.cfg.IsMock() {
 				degradeBroker("%s", reason)
 				continue
 			}
@@ -679,7 +680,7 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	if s.cfg.EngineDriver != nil {
 		s.engine = s.cfg.EngineDriver
 		s.health.SetStatus(SubsystemInference, true, "")
-	} else if s.cfg.Mock || s.cfg.Engine == "mock" {
+	} else if s.cfg.IsMock() {
 		s.engine = &engine.Mock{}
 		mockChat = true
 		s.health.SetStatus(SubsystemInference, true, "")

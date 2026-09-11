@@ -54,3 +54,57 @@ type ChildProcessInfo struct {
 	Crashed  bool   `json:"crashed"`
 	Restarts int    `json:"restarts"`
 }
+
+// DefaultEngine is the real-model default: the fak-native in-kernel backend.
+// The zero value ("") is NOT defaulted - it fails fast with
+// ErrEngineUnconfigured so a missing engine can never silently become a mock.
+const DefaultEngine = "inkernel"
+
+// MockEngineID is the only engine id that selects the offline mock driver.
+// It is honored only as an explicit opt-in (cfg.Mock or Engine == "mock").
+const MockEngineID = "mock"
+
+// IsMock reports whether the config explicitly opts into mock mode.
+// Mock mode is NEVER a default: it requires cfg.Mock or Engine == "mock".
+func (c Config) IsMock() bool {
+	return c.Mock || c.Engine == MockEngineID
+}
+
+// ResolvedEngine returns the effective engine label for topology reporting:
+// a configured engine id, "custom" for an injected driver, "mock" for explicit
+// mock mode, or "unconfigured" for real mode with nothing configured (Start
+// fails fast with ErrEngineUnconfigured; it never falls back to a mock).
+func (c Config) ResolvedEngine() string {
+	if c.Engine != "" {
+		return c.Engine
+	}
+	if c.EngineDriver != nil {
+		return "custom"
+	}
+	if c.Mock {
+		return MockEngineID
+	}
+	return "unconfigured"
+}
+
+// Validate enforces the default-real capability contract: real mode requires a
+// lock or bundle, an explicitly configured engine (id or driver), and no mock
+// selection; mock mode requires the explicit opt-in and never activates by
+// default. Returns nil when Start or DryRunTopology may proceed.
+func (c Config) Validate() error {
+	if !c.IsMock() {
+		if c.LockPath == "" && c.BundlePath == "" {
+			return errors.New("allinone: either lock_path or bundle_path must be specified (or explicit mock opt-in)")
+		}
+		if c.Engine == "" && c.EngineDriver == nil {
+			return ErrEngineUnconfigured
+		}
+		return nil
+	}
+	// Explicit mock mode: an engine id other than "mock" combined with the
+	// mock flag is contradictory - refuse rather than guess which wins.
+	if c.Mock && c.Engine != "" && c.Engine != MockEngineID {
+		return errors.New("allinone: cfg.Mock with explicit Engine " + c.Engine + ": use Engine \"mock\" or a real engine, not both")
+	}
+	return nil
+}
