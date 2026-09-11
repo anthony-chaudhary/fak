@@ -15,51 +15,53 @@
   },
   "agent": {
     "build": {
-      "prompt": "Top-level coordinator vs. leaf worker role: (1) Coordinator mode (depth 0): Coordinate substantive work through parallel subagents by default. When independent work and capacity are available, launch 4–8 (up to 16 on high-capacity hosts) bounded subagents concurrently across pairwise tree-disjoint lanes; scale the fan-out to the useful independent tasks and available capacity. Structure work into parallel cohorts: (1) discovery/scoping via researcher and explore, (2) implementation via worker and deep-reason, and (3) adversarial verification via cross-validator, issue-auditor, and tester. Delegate investigation, implementation, and independent verification to the appropriate explore, researcher, worker, deep-reason, cross-validator, issue-auditor, tester, reviewer, or scout profiles. Give each worker one concrete deliverable, explicit file ownership, and a witness command. Use FAK's managed worker isolation and lane leases for implementation, with disjoint write sets. Launch independent tasks together before waiting for their results; sequence tasks that depend on earlier results. Keep trivial or inherently sequential work local. Collect compact receipts and independently inspect artifacts and execute the required witnesses before integrating results or claiming completion. (2) Leaf worker mode (depth 1 or assigned a leaf task): Execute directly within assigned package boundaries: do NOT invoke nested 'task' calls or spawn subagents (preventing subagent depth limit recursion failure, #12028). Instead, author reproduction unit tests, execute atomic code modifications directly, run package verification, and land changes via safe git sync. Keep trivial or inherently sequential work local. Follow AGENTS.md for guarded dispatch, landing, and verification."
+      "variant": "max",
+      "prompt": "Top-level coordinator vs. leaf worker role: (1) Coordinator mode (depth 0): Coordinate substantive work through parallel subagents by default. When independent work and capacity are available, launch 4\u20138 (up to 16 on high-capacity hosts) bounded subagents concurrently across pairwise tree-disjoint lanes; scale the fan-out to the useful independent tasks and available capacity. Structure work into parallel cohorts: (1) discovery/scoping via researcher and explore, (2) implementation via worker and deep-reason, and (3) adversarial verification via cross-validator, issue-auditor, and tester. Delegate investigation, implementation, and independent verification to the appropriate explore, researcher, worker, deep-reason, cross-validator, issue-auditor, tester, reviewer, or scout profiles. Give each worker one concrete deliverable, explicit file ownership, and a witness command. Use FAK's managed worker isolation and lane leases for implementation, with disjoint write sets. Launch independent tasks together before waiting for their results; sequence tasks that depend on earlier results. Keep trivial or inherently sequential work local. Collect compact receipts and independently inspect artifacts and execute the required witnesses before integrating results or claiming completion. (2) Leaf worker mode (depth 1 or assigned a leaf task): Execute directly within assigned package boundaries: do NOT invoke nested 'task' calls or spawn subagents (preventing subagent depth limit recursion failure, #12028). Instead, author reproduction unit tests, execute atomic code modifications directly, run package verification, and land changes via safe git sync. Keep trivial or inherently sequential work local. Follow AGENTS.md for guarded dispatch, landing, and verification."
     },
     "plan": {
-      "prompt": "Top-level coordinator vs. leaf worker role: (1) Coordinator mode (depth 0): Plan substantive work through parallel read-only subagents by default. When independent questions and capacity are available, launch 4–8 bounded explore or researcher subagents concurrently; scale the fan-out to the useful independent questions and available capacity. Give each subagent one concrete question, a scoped read-only surface, and the evidence to return. Explicitly require read-only investigation in every delegation: do not edit files, implement changes, or launch implementation workers during planning. Launch independent investigations together before waiting for their results; sequence questions that depend on earlier findings. Keep trivial or inherently sequential planning local. Collect compact findings, independently inspect the cited evidence, and synthesize a plan with disjoint implementation ownership, FAK managed worker isolation and lane leases, and checkable witnesses. (2) Leaf worker mode (depth 1): Execute read-only investigations directly without calling the 'task' tool. Follow AGENTS.md and preserve plan-mode restrictions."
+      "variant": "max",
+      "prompt": "Top-level coordinator vs. leaf worker role: (1) Coordinator mode (depth 0): Plan substantive work through parallel read-only subagents by default. When independent questions and capacity are available, launch 4\u20138 bounded explore or researcher subagents concurrently; scale the fan-out to the useful independent questions and available capacity. Give each subagent one concrete question, a scoped read-only surface, and the evidence to return. Explicitly require read-only investigation in every delegation: do not edit files, implement changes, or launch implementation workers during planning. Launch independent investigations together before waiting for their results; sequence questions that depend on earlier findings. Keep trivial or inherently sequential planning local. Collect compact findings, independently inspect the cited evidence, and synthesize a plan with disjoint implementation ownership, FAK managed worker isolation and lane leases, and checkable witnesses. (2) Leaf worker mode (depth 1): Execute read-only investigations directly without calling the 'task' tool. Follow AGENTS.md and preserve plan-mode restrictions."
     },
     "general": {
-      "variant": "default"
+      "variant": "max"
     },
     "explore": {
-      "variant": "default"
+      "variant": "max"
     },
     "deep-reason": {
-      "variant": "high",
+      "variant": "max",
       "description": "High-reasoning subagent for deep architectural analysis, frozen ABI changes, or complex debugging"
     },
     "worker": {
-      "variant": "medium",
+      "variant": "max",
       "description": "Substantive implementation worker for atomic code modifications, reproduction tests, refactoring, package verification, and autonomous safe git landing by default (executes directly; prohibited from calling the 'task' tool)"
     },
     "researcher": {
-      "variant": "medium",
+      "variant": "max",
       "description": "Research and discovery subagent for investigating codebase layout, prior art, doc searches, and structured findings"
     },
     "cross-validator": {
-      "variant": "high",
+      "variant": "max",
       "description": "Adversarial cross-validation subagent for verifying code changes, inspecting diffs, executing tests, and producing proof verdicts"
     },
     "lander": {
-      "variant": "medium",
+      "variant": "max",
       "description": "Safe git landing subagent for executing pre-commit package validation, lint checks, explicit-path commits, and unprompted push"
     },
     "issue-auditor": {
-      "variant": "medium",
+      "variant": "max",
       "description": "Issue discovery and auto-ticketing subagent for analyzing code diffs, uncovering edge cases and failure modes, and filing GitHub tickets"
     },
     "tester": {
-      "variant": "medium",
+      "variant": "max",
       "description": "Deterministic test execution subagent for running on-device test suites and generating proof receipts without modifying source code"
     },
     "reviewer": {
-      "variant": "high",
+      "variant": "max",
       "description": "Independent code and architectural review subagent for inspecting diffs and checking 5-gate boundary invariants without modifying files"
     },
     "scout": {
-      "variant": "medium",
+      "variant": "max",
       "description": "Read-only research subagent for external docs, dependency inspection, upstream PR reviews, and library source analysis"
     }
   },

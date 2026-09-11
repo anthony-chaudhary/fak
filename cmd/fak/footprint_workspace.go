@@ -207,16 +207,15 @@ func evaluateWorkspaceFootprint(root string) workspaceFootprintReport {
 	}
 	highThinkingRoutine := false
 	for _, name := range []string{"build", "general", "explore"} {
-		if ag, ok := ocConfig.Agent[name]; ok && ag.Variant == "high" {
+		if ag, ok := ocConfig.Agent[name]; ok && ag.Variant != "" && ag.Variant != "default" {
 			highThinkingRoutine = true
 			break
 		}
 	}
-	thinkingDetail := "routine agents on default variant"
+	thinkingDetail := "routine agents on max variant (operator-pinned elevated effort)"
 	if highThinkingRoutine {
 		currentThinkingTok = 10000
-		thinkingDetail = "routine agents on high variant (bloat)"
-		findings = append(findings, "Set build, general, and explore subagents to variant 'default' in opencode.json to avoid ~8,000 thinking tokens per turn")
+		findings = append(findings, "workspace pins a non-default variant on build/general/explore (operator max-effort posture); the ~8,000 thinking-token/turn saving only returns when variant 'default' is restored")
 	}
 	savedThinkingTok := baselineThinkingTok - currentThinkingTok
 	if savedThinkingTok < 0 {
