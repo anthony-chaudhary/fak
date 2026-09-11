@@ -456,6 +456,49 @@ type gatewayMetrics struct {
 	// ZERO fak verbs (the #3093 unused-substrate pathology). Atomic, off the deny-all lock —
 	// a one-increment-per-tools/call path with no coupling to the stop families.
 	fakVerbCalls uint64
+
+	// scopeRefusalsMu guards the auth-scope refusal family (#12761): each
+	// X-Fak-Auth-Scope claim the gateway refused with 403 scope_forbidden, keyed
+	// by (scope, route_class) so an operator can tell an observation-polling
+	// watcher from someone probing the admin plane. Refusals run from the auth
+	// middleware on every request path; kept on its own lock off the families
+	// above - a zero-or-one-increment-per-agent-refusal hot path.
+	scopeRefusalsMu sync.Mutex
+	scopeRefusals   map[scopeRefusalKey]uint64
+}
+
+// scopeRefusalKey is the closed label set of fak_gateway_scope_refusals_total:
+// the declared scope plus the coarse route class the refusal happened on.
+type scopeRefusalKey struct {
+	scope      string
+	routeClass string
+}
+
+// observeScopeRefusal records one refused request in place, before the 403 is
+// written, so a scrape taken mid-storm still sees the refusal exactly once.
+func (m *gatewayMetrics) observeScopeRefusal(scope, routeClass string) {
+	if scope == "" || routeClass == "" {
+		return
+	}
+	m.scopeRefusalsMu.Lock()
+	defer m.scopeRefusalsMu.Unlock()
+	if m.scopeRefusals == nil {
+		m.scopeRefusals = map[scopeRefusalKey]uint64{}
+	}
+	m.scopeRefusals[scopeRefusalKey{scope: scope, routeClass: routeClass}]++
+}
+
+// scopeRefusalSnapshot copies the live refusal map under its lock so the
+// scrape renders in sorted (scope, route_class) order without holding a
+// hot-path lock for the duration of the write.
+func (m *gatewayMetrics) scopeRefusalSnapshot() map[scopeRefusalKey]uint64 {
+	m.scopeRefusalsMu.Lock()
+	defer m.scopeRefusalsMu.Unlock()
+	snap := make(map[scopeRefusalKey]uint64, len(m.scopeRefusals))
+	for k, v := range m.scopeRefusals {
+		snap[k] = v
+	}
+	return snap
 }
 
 type inflightEntry struct {

@@ -191,7 +191,9 @@ func runAllInOneUp(argv []string) {
 		supAddr = "http://" + supAddr
 	}
 	fmt.Printf("\n%s fak up %s running on %s\n", readyBadge, ver, supAddr)
-	fmt.Printf("  • OpenAI-compatible endpoint: %s/v1/chat/completions\n", supAddr)
+	if sup.ServesChatCompletions() {
+		fmt.Printf("  • OpenAI-compatible endpoint: %s/v1/chat/completions\n", supAddr)
+	}
 	fmt.Printf("  • Agent sessions endpoint:    %s/v1/fak/agent/sessions\n", supAddr)
 	fmt.Printf("  • Health check endpoint:      %s/healthz\n\n", supAddr)
 	_ = os.Stdout.Sync()
