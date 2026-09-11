@@ -454,22 +454,13 @@ func (s *KVStore) AllocatePage(key CacheKey) (*Page, error) {
 		return nil, ErrStoreClosed
 	}
 
-	keyStr := key.String()
-	if existingID, exists := s.keyIndex[keyStr]; exists {
-		if page, ok := s.pages[existingID]; ok {
-			page.Touch()
-			return page.Clone(), nil
-		}
-	}
-
-	if err := s.ensureCapacityLocked(1); err != nil {
-		return nil, err
-	}
-
-	return s.allocatePageInternalLocked(key)
+	return s.ensurePageLocked(key)
 }
 
 // AllocateBatch allocates multiple pages atomically under a single store lock.
+// Cache-key identity is preserved: a key that is already resident, or that repeats
+// within the batch, aliases the canonical page rather than allocating a new one,
+// and capacity planning counts only unique absent keys.
 func (s *KVStore) AllocateBatch(keys []CacheKey) ([]*Page, error) {
 	if len(keys) == 0 {
 		return nil, nil
@@ -486,19 +477,52 @@ func (s *KVStore) AllocateBatch(keys []CacheKey) ([]*Page, error) {
 		return nil, ErrStoreClosed
 	}
 
-	if err := s.ensureCapacityLocked(len(keys)); err != nil {
+	newKeys := make([]CacheKey, 0, len(keys))
+	seen := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		if _, exists := s.keyIndex[k.String()]; exists {
+			continue
+		}
+		keyStr := k.String()
+		if _, dup := seen[keyStr]; dup {
+			continue
+		}
+		seen[keyStr] = struct{}{}
+		newKeys = append(newKeys, k)
+	}
+
+	if err := s.ensureCapacityLocked(len(newKeys)); err != nil {
 		return nil, err
 	}
 
 	pages := make([]*Page, 0, len(keys))
 	for _, k := range keys {
-		p, err := s.allocatePageInternalLocked(k)
+		p, err := s.ensurePageLocked(k)
 		if err != nil {
 			return nil, err
 		}
 		pages = append(pages, p)
 	}
 	return pages, nil
+}
+
+// ensurePageLocked resolves a single key against the canonical key index: a key
+// that is already resident aliases its existing page, otherwise one page is
+// planned and allocated. Callers must hold s.mu for writing.
+func (s *KVStore) ensurePageLocked(key CacheKey) (*Page, error) {
+	keyStr := key.String()
+	if existingID, exists := s.keyIndex[keyStr]; exists {
+		if page, ok := s.pages[existingID]; ok {
+			page.Touch()
+			return page.Clone(), nil
+		}
+	}
+
+	if err := s.ensureCapacityLocked(1); err != nil {
+		return nil, err
+	}
+
+	return s.allocatePageInternalLocked(key)
 }
 
 func (s *KVStore) allocatePageInternalLocked(key CacheKey) (*Page, error) {
