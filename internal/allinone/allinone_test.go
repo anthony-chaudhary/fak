@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/fakpack"
 )
@@ -252,6 +253,203 @@ func TestAllInOneBootstrapLifecycle(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(string(journalData)), "\n")
 	if len(lines) < 2 {
 		t.Fatalf("expected multiple journal entries, got %d lines", len(lines))
+	}
+}
+
+// TestUpLockModeAdvertisedRoutes pins the HTTP contract of the lock-mode
+// all-in-one supervisor: every endpoint the `fak up` ready banner advertises
+// must be registered, and the mock chat route must satisfy the OpenAI
+// completion envelope (issue #12616). It boots the lock-mode supervisor
+// directly (v2 product-lock fixture, mock engine, loopback ephemeral port) —
+// the same machinery that runAllInOneUp drives — and never touches the
+// turnkey server helper.
+func TestUpLockModeAdvertisedRoutes(t *testing.T) {
+	dir := t.TempDir()
+	journalFile := filepath.Join(dir, "memory-journal.jsonl")
+	lockFile := filepath.Join(dir, "harness.lock.json")
+
+	lockContent := `{
+  "schema": "fak.harness-product-lock/v2",
+  "id": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "platforms": [
+    {"os": "linux", "arch": "amd64"},
+    {"os": "windows", "arch": "amd64"}
+  ],
+  "budget": {
+    "context_tokens": 2048,
+    "memory_mib": 256,
+    "workers": 1
+  },
+  "components": [
+    {
+      "id": "weather-service",
+      "version": "1.0.0",
+      "digest": "sha256:1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff",
+      "source": "mcp/weather",
+      "provider": "mcp",
+      "provides": ["get_forecast"]
+    }
+  ],
+  "assets": [
+    {
+      "kind": "memory",
+      "id": "file-journal",
+      "value": ` + jsonQuote(journalFile) + `
+    }
+  ]
+}`
+	if err := os.WriteFile(lockFile, []byte(lockContent), 0600); err != nil {
+		t.Fatalf("write lock file: %v", err)
+	}
+
+	cfg := Config{
+		LockPath: lockFile,
+		Addr:     "127.0.0.1:0",
+		Engine:   "mock",
+		Mock:     true,
+	}
+
+	sup, err := NewSupervisor(cfg)
+	if err != nil {
+		t.Fatalf("NewSupervisor: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := sup.Start(ctx); err != nil {
+		t.Fatalf("Start supervisor: %v", err)
+	}
+	defer func() {
+		_ = sup.Shutdown(context.Background())
+	}()
+
+	addr := sup.Addr()
+	if addr == "" {
+		t.Fatal("supervisor boundAddr is empty")
+	}
+	baseURL := "http://" + addr
+
+	// Bounded readiness polling: /healthz must become 200 with a subsystems
+	// payload; never sleep unboundedly.
+	deadline := time.Now().Add(5 * time.Second)
+	var health HealthResponse
+	var lastStatus int
+	var lastErr error
+	for {
+		resp, err := http.Get(baseURL + "/healthz")
+		if err == nil {
+			lastStatus = resp.StatusCode
+			if resp.StatusCode == http.StatusOK {
+				if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
+					resp.Body.Close()
+					t.Fatalf("decode /healthz: %v", err)
+				}
+				resp.Body.Close()
+				break
+			}
+			resp.Body.Close()
+		} else {
+			lastErr = err
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("/healthz not ready within deadline (last status=%d err=%v)", lastStatus, lastErr)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if health.Status != "ok" {
+		t.Fatalf("health status = %q, want 'ok'", health.Status)
+	}
+	if len(health.Subsystems) == 0 {
+		t.Fatal("expected /healthz subsystems payload, got empty map")
+	}
+
+	// POST /v1/chat/completions returns the OpenAI-compatible mock envelope.
+	chatBody := `{"model":"audit","messages":[{"role":"user","content":"hello"}]}`
+	chatResp, err := http.Post(baseURL+"/v1/chat/completions", "application/json", strings.NewReader(chatBody))
+	if err != nil {
+		t.Fatalf("POST /v1/chat/completions: %v", err)
+	}
+	if chatResp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(chatResp.Body)
+		chatResp.Body.Close()
+		t.Fatalf("POST /v1/chat/completions status = %d, want 200; body: %s", chatResp.StatusCode, raw)
+	}
+	var chat map[string]any
+	if err := json.NewDecoder(chatResp.Body).Decode(&chat); err != nil {
+		t.Fatalf("decode chat completion body as JSON object: %v", err)
+	}
+	_ = chatResp.Body.Close()
+	if chat["object"] != "chat.completion" {
+		t.Fatalf("chat object = %v, want chat.completion", chat["object"])
+	}
+	if id, _ := chat["id"].(string); !strings.HasPrefix(id, "chatcmpl-") {
+		t.Fatalf("chat id = %v, want chatcmpl- prefix", chat["id"])
+	}
+	choices, ok := chat["choices"].([]any)
+	if !ok || len(choices) != 1 {
+		t.Fatalf("chat choices = %#v, want exactly one choice", chat["choices"])
+	}
+	choice, _ := choices[0].(map[string]any)
+	if choice == nil {
+		t.Fatalf("chat choice = %#v, want object", choices[0])
+	}
+	msg, _ := choice["message"].(map[string]any)
+	if msg == nil {
+		t.Fatalf("choice message = %#v, want object", choice["message"])
+	}
+	if msg["role"] != "assistant" {
+		t.Fatalf("message role = %v, want assistant", msg["role"])
+	}
+	content, _ := msg["content"].(string)
+	if strings.TrimSpace(content) == "" {
+		t.Fatalf("message content = %q, want non-empty", content)
+	}
+	if choice["finish_reason"] != "stop" {
+		t.Fatalf("finish_reason = %v, want stop", choice["finish_reason"])
+	}
+	usage, _ := chat["usage"].(map[string]any)
+	if usage == nil {
+		t.Fatalf("usage block missing from envelope: %v", chat["usage"])
+	}
+	if usage["prompt_tokens"] == nil || usage["completion_tokens"] == nil || usage["total_tokens"] == nil {
+		t.Fatalf("usage token counts missing: %#v", usage)
+	}
+
+	// GET /v1/chat/completions is registered but POST-only: expect 405.
+	getResp, err := http.Get(baseURL + "/v1/chat/completions")
+	if err != nil {
+		t.Fatalf("GET /v1/chat/completions: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, getResp.Body)
+	_ = getResp.Body.Close()
+	if getResp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("GET /v1/chat/completions status = %d, want 405", getResp.StatusCode)
+	}
+
+	// POST with an invalid JSON body: expect 400.
+	badResp, err := http.Post(baseURL+"/v1/chat/completions", "application/json", strings.NewReader("{not json"))
+	if err != nil {
+		t.Fatalf("POST /v1/chat/completions invalid JSON: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, badResp.Body)
+	_ = badResp.Body.Close()
+	if badResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("POST invalid JSON status = %d, want 400", badResp.StatusCode)
+	}
+
+	// /v1/fak/agent/sessions must stay registered (non-404 proves the mux
+	// entry; a bare GET answers 405).
+	sessResp, err := http.Get(baseURL + "/v1/fak/agent/sessions")
+	if err != nil {
+		t.Fatalf("GET /v1/fak/agent/sessions: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, sessResp.Body)
+	_ = sessResp.Body.Close()
+	if sessResp.StatusCode == http.StatusNotFound {
+		t.Fatal("/v1/fak/agent/sessions not registered (got 404)")
+	}
+	if sessResp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("GET /v1/fak/agent/sessions status = %d, want 405", sessResp.StatusCode)
 	}
 }
 

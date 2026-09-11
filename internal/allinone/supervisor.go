@@ -602,11 +602,13 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	s.health.SetStatus(SubsystemMCPBroker, true, "")
 
 	// 4. Initialize model engine
+	mockChat := false
 	if s.cfg.EngineDriver != nil {
 		s.engine = s.cfg.EngineDriver
 		s.health.SetStatus(SubsystemInference, true, "")
 	} else if s.cfg.Mock || s.cfg.Engine == "mock" || s.cfg.Engine == "" {
 		s.engine = &engine.Mock{}
+		mockChat = true
 		s.health.SetStatus(SubsystemInference, true, "")
 	} else {
 		eng := abi.Engine(s.cfg.Engine)
@@ -623,6 +625,13 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.Handle("/healthz", s.health.Handler())
 	mux.HandleFunc("/v1/fak/agent/sessions", s.handleAgentWire)
+	// The ready banner advertises an OpenAI-compatible chat endpoint; under the
+	// mock path serve a bounded deterministic envelope so the advertised URL is
+	// truthful (issue #12616). Real/custom-engine paths are unchanged: no implicit
+	// proxy route is installed for them.
+	if mockChat {
+		mux.HandleFunc("/v1/chat/completions", s.handleMockChatCompletions)
+	}
 
 	addr := s.cfg.Addr
 	if addr == "" {
@@ -826,6 +835,128 @@ func (s *Supervisor) handleAgentWire(w http.ResponseWriter, r *http.Request) {
 		})
 		_ = s.memory.Flush()
 	}
+}
+
+// mockChatRequest is the bounded subset of the OpenAI chat-completions request
+// the mock route understands; unknown fields are ignored.
+type mockChatRequest struct {
+	Model    string          `json:"model"`
+	Messages json.RawMessage `json:"messages"`
+}
+
+// handleMockChatCompletions serves POST /v1/chat/completions with a
+// deterministic, non-streaming OpenAI-compatible mock completion envelope. It
+// is registered only on the mock engine path so the ready banner's advertised
+// URL is truthful (issue #12616); no real inference, streaming, or planner
+// wiring. Non-POST requests are rejected with 405; non-JSON or empty bodies
+// with 400.
+func (s *Supervisor) handleMockChatCompletions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	s.mu.RLock()
+	stopping := s.stopping
+	s.mu.RUnlock()
+	if stopping {
+		http.Error(w, "server shutting down", http.StatusServiceUnavailable)
+		return
+	}
+
+	s.activeSessions.Add(1)
+	defer s.activeSessions.Done()
+
+	var req mockChatRequest
+	dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+	if err := dec.Decode(&req); err != nil || !json.Valid(req.Messages) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
+				"message": "invalid request body: expected a JSON chat completion request",
+				"type":    "invalid_request_error",
+				"code":    "invalid_request",
+			},
+		})
+		return
+	}
+
+	model := req.Model
+	if model == "" {
+		model = "mock"
+	}
+
+	content := "[mock] " + mockLastUserContent(req.Messages)
+	if content == "[mock] " {
+		content = "[mock] (no user message)"
+	}
+
+	// Bounded deterministic token estimate for the mock envelope.
+	promptTokens := 4 * mockCountRoles(req.Messages)
+	if promptTokens <= 0 {
+		promptTokens = 8
+	}
+	compTokens := len(strings.Fields(content)) + 1
+	totalTokens := promptTokens + compTokens
+
+	created := time.Now().Unix()
+	resp := map[string]any{
+		"id":      fmt.Sprintf("chatcmpl-mock-%d", created),
+		"object":  "chat.completion",
+		"created": created,
+		"model":   model,
+		"choices": []any{
+			map[string]any{
+				"index": 0,
+				"message": map[string]any{
+					"role":    "assistant",
+					"content": content,
+				},
+				"finish_reason": "stop",
+			},
+		},
+		"usage": map[string]any{
+			"prompt_tokens":     promptTokens,
+			"completion_tokens": compTokens,
+			"total_tokens":      totalTokens,
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// mockLastUserContent extracts the last non-empty user-role message content
+// from a raw OpenAI "messages" JSON array. Unsupported content shapes are
+// skipped; it never errors.
+func mockLastUserContent(raw json.RawMessage) string {
+	var msgs []struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &msgs); err != nil {
+		return ""
+	}
+	var last string
+	for _, m := range msgs {
+		if m.Role == "user" && m.Content != "" {
+			last = m.Content
+		}
+	}
+	return last
+}
+
+// mockCountRoles counts the OpenAI messages present in a raw "messages" JSON
+// array (bounded deterministic prompt-token estimate for the mock envelope).
+func mockCountRoles(raw json.RawMessage) int {
+	var msgs []json.RawMessage
+	if err := json.Unmarshal(raw, &msgs); err != nil {
+		return 0
+	}
+	return len(msgs)
 }
 
 // Shutdown gracefully stops the supervisor, stops the HTTP server, drains active sessions,
