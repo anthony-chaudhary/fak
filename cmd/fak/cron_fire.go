@@ -222,6 +222,11 @@ func cronFireSlot(at time.Time, interval time.Duration) string {
 func cronTickLock(path string, wait, ttl time.Duration) (release func() error, err error) {
 	deadline := time.Now().Add(wait)
 	for {
+		if dir := filepath.Dir(path); dir != "" && dir != "." {
+			if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
+				return nil, fmt.Errorf("tick lock %s: %w", path, mkErr)
+			}
+		}
 		cerr := exclusivefile.CreatePIDTime(path)
 		if cerr == nil {
 			return func() error {
