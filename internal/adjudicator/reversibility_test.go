@@ -175,14 +175,42 @@ func TestReversibilityClassifiesCommands(t *testing.T) {
 			want: ReversibilityReversible,
 		},
 		{
-			// Scope guard: the carve-out is gh api/gh repo only — the rest of the gh
-			// surface stays operator-relaxed. gh pr create / gh issue create remain
-			// reversible (own authenticated GitHub, reversible in practice), so the
-			// fix did not sweep them back under the gate.
-			name: "gh pr create stays reversible (relaxation intact)",
+			// Withdrawn relaxation (operator decision, 2026-09-11): `gh pr create`
+			// is escalated outward-facing — an agent-opened PR is unattended
+			// landing work that rebase-decays beside a direct-to-trunk protocol.
+			// The pr-create-bash family match fires on the segment HEAD pair, so
+			// env/wrapper prefixes do not hide it.
+			name: "gh pr create is outward-facing (relaxation withdrawn)",
 			tool: "Bash",
 			args: map[string]any{"command": `gh pr create --title fix --body details`},
+			want: ReversibilityOutwardFacing,
+		},
+		{
+			name: "env-wrapped gh pr create is outward-facing",
+			tool: "Bash",
+			args: map[string]any{"command": `GH_TOKEN=x gh pr create --fill`},
+			want: ReversibilityOutwardFacing,
+		},
+		{
+			// gh pr READS stay on the relaxed surface.
+			name: "gh pr view stays reversible",
+			tool: "Bash",
+			args: map[string]any{"command": `gh pr view 12 --json state`},
 			want: ReversibilityReversible,
+		},
+		{
+			// A quoted MENTION of pr create (commit message, grep pattern) must
+			// not classify — the family reads the quote-aware segment view.
+			name: "commit message mentioning gh pr create is reversible",
+			tool: "Bash",
+			args: map[string]any{"command": `git commit -m "docs: never run gh pr create unattended"`},
+			want: ReversibilityReversible,
+		},
+		{
+			name: "git push of a pr-named branch is not pr create",
+			tool: "Bash",
+			args: map[string]any{"command": `git push origin codex/pr-create-fix`},
+			want: ReversibilityOutwardFacing,
 		},
 		{
 			// Regression guard: the git-CLI write path this issue is about stays

@@ -26,6 +26,7 @@ var familyRemedyCommands = map[string][]string{
 	"http-write":        {}, // "use a read-only request" — no single command
 	"messaging-tool":    {"fak slack send -c ops hi"},
 	"pr-create-tool":    {}, // "the host's draft or dry-run path" — host-specific
+	"pr-create-bash":    {}, // "landing is operator-authorized direct to trunk" — prose hint, no runnable PR-forming command
 	"fs-destroy":        {"Remove-Item -WhatIf ./build", "git clean -nd"},
 	"git-destroy":       {"git status", "git clean -nd"},
 	"infra-destroy":     {"terraform plan -destroy", "kubectl diff -f x.yaml", "kubectl delete --dry-run=server -f x.yaml"},

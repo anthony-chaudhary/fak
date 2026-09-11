@@ -318,13 +318,22 @@ func classifyAgainstFamilies(families []reversibilityFamily, tool, cmd string) (
 // stay first, in redirect-priority order.
 //
 // Most of the `gh` surface is deliberately NOT a family (operator decision,
-// 2026-07-05): issue/pr/release create·comment·edit·close·reopen·merge·upload
+// 2026-07-05): issue/release create·comment·edit·close·reopen·merge·upload
 // targets the operator's OWN authenticated GitHub and is reversible in practice
-// (issues/PRs edit·close·reopen; a release can be deleted), so the preview-confirm
+// (issues edit·close·reopen; a release can be deleted), so the preview-confirm
 // pause was pure friction on routine fleet work — the #2650/#2651 confirm-loop
 // lesson — while the Claude Code allow-list already admits `Bash(gh …)`.
 //
-// The ONE carve-out is the gh-write family below (#3560): `gh api` with a write
+// Pull-request creation is the ONE withdrawn relaxation (operator decision,
+// 2026-09-11): the pr-create family below re-escalates `gh pr create` to
+// outward-facing because an agent-opened PR is not operator-requested landing
+// work — it sits unattended, its checks fail, and it rebase-decays beside a
+// trunk that lands direct through the fak-flow lease/land protocol (the
+// audited stuck-PR classes on both repos: private fak/ticket-866 · 814 · 812
+// · 729, public fak/ticket-12733 and codex/issue-12550). `gh pr` READS
+// (list/view/status/checks/diff) stay reversible.
+//
+// The gh-write carve-out remains (#3560): `gh api` with a write
 // method (--method/-X POST|PUT|PATCH|DELETE) and `gh repo fork|rename|delete` are
 // re-escalated to the SAME outward-facing class as `git push`, because those
 // escape the relaxation's premise. `gh api` mutations reach ARBITRARY third-party
@@ -437,6 +446,18 @@ var reversibilityFamilies = []reversibilityFamily{
 		class:        ReversibilityOutwardFacing,
 		toolContains: []string{"create_pr", "pr_create"},
 		hint:         "preview the pull request title, body, and target branch with the host's draft or dry-run path before confirming creation",
+	},
+	// pr-create-bash re-escalates the Bash `gh pr create` form (operator
+	// decision, 2026-09-11): an agent-opened PR is not operator-requested
+	// landing work — it sits unattended while the trunk lands direct through
+	// the lease/land protocol, so the fleet no longer carries this capability.
+	// Matched on the segment HEAD pair so `git push origin pr-branch` and a
+	// quoted mention inside a commit message stay clear.
+	{
+		name:     "pr-create-bash",
+		class:    ReversibilityOutwardFacing,
+		matchCmd: func(in familyMatchInput) bool { return ghPRCreate(in.segs) },
+		hint:     "landing is operator-authorized direct to trunk via the lease/land protocol (fak-flow land); do not open a pull request unless the operator explicitly asked for one `",
 	},
 	{
 		name:  "fs-destroy",
@@ -671,6 +692,31 @@ func ghWriteMutation(cmd string) bool {
 			if len(fields) >= 3 && ghRepoSubMutates(fields[2]) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// ghPRCreate reports whether any single command segment is a `gh pr create`
+// invocation. It reads the quote-aware segment view (not the whole-command
+// scan) so a quoted MENTION of the form — in a commit message, a grep pattern —
+// stays clear, while env-assignment and wrapper heads are stripped the same way
+// ghWriteMutation strips them.
+func ghPRCreate(segs [][]string) bool {
+	for _, seg := range segs {
+		if len(seg) < 3 {
+			continue
+		}
+		i := 0
+		for i < len(seg) &&
+			(envAssignmentRE.MatchString(seg[i]) || commandWrapperHeads[strings.ToLower(seg[i])]) {
+			i++
+		}
+		if rest := seg[i:]; len(rest) >= 3 &&
+			ghHead(rest[0]) == "gh" &&
+			strings.EqualFold(rest[1], "pr") &&
+			strings.EqualFold(rest[2], "create") {
+			return true
 		}
 	}
 	return false
