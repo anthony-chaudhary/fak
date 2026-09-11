@@ -49,6 +49,14 @@ jobs:
           # Build amd64
           GOOS=darwin GOARCH=amd64 OUT="dist/amd64/fak" VERSION="${VERSION}" sh scripts/build.sh
 
+          # Build darwin/arm64 with the Metal GPU backend. The per-command CGO_ENABLED=1
+          # overrides the job-level CGO_ENABLED=0; internal/compute/metal.go is gated on
+          # `darwin && arm64 && cgo` and compiles by default once cgo is on (no extra tag),
+          # linking Metal.framework + MetalPerformanceShaders.framework (witnessed locally
+          # via `otool -L`). build.sh is CGO-agnostic (env passthrough) so no changes there.
+          mkdir -p dist/arm64-metal
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 OUT="dist/arm64-metal/fak" VERSION="${VERSION}" sh scripts/build.sh
+
           # Create Universal macOS binary combining arm64 and amd64 using lipo
           lipo -create -output dist/universal/fak dist/arm64/fak dist/amd64/fak
           file dist/universal/fak
@@ -98,18 +106,43 @@ jobs:
           fi
 
       - name: Package Universal and per-arch Archives
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           set -euo pipefail
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           VERSION="${TAG#v}"
+          # Coordination constant: the Metal asset filename is referenced verbatim by the
+          # docs/install.sh wave; do not rename without syncing that wave. Defined once here
+          # and handed to the upload step via the METAL_ARCHIVE/METAL_SUM env exports below.
+          METAL_ASSET_NAME="fak_${VERSION}_darwin_arm64_metal.tar.gz"
 
           # Package universal binary
           cp LICENSE GETTING-STARTED.md dist/universal/
           ( cd dist/universal && tar -czf "../fak_${VERSION}_darwin_universal.tar.gz" . )
-          shasum -a 256 "dist/fak_${VERSION}_darwin_universal.tar.gz" > "dist/fak_${VERSION}_darwin_universal.tar.gz.sha256"
+          # Emit the .sha256 sidecar with the BARE filename in its content (run shasum from
+          # inside dist/): `sha256sum -c` resolves names relative to the sidecar's directory,
+          # so a dist/-prefixed hash line breaks verification (quarantined v0.55.0).
+          ( cd dist && shasum -a 256 "fak_${VERSION}_darwin_universal.tar.gz" > "fak_${VERSION}_darwin_universal.tar.gz.sha256" )
+
+          # Package the Metal-enabled darwin/arm64 binary as a separate release asset.
+          # Same ad-hoc codesign posture as the universal fallback path (no cert configured):
+          # NOTARY GAP: this asset is NOT covered by the Developer ID / notarization steps
+          # above; tighten only if the Metal build is promoted to the default download.
+          if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            codesign --force --options runtime --sign "$APPLE_SIGNING_IDENTITY" --timestamp dist/arm64-metal/fak || true
+          else
+            codesign --force --options runtime --sign - dist/arm64-metal/fak || true
+          fi
+          cp LICENSE GETTING-STARTED.md dist/arm64-metal/
+          ( cd dist/arm64-metal && tar -czf "../${METAL_ASSET_NAME}" . )
+          # Bare-filename sidecar content, same reasoning as the universal sidecar above.
+          ( cd dist && shasum -a 256 "${METAL_ASSET_NAME}" > "${METAL_ASSET_NAME}.sha256" )
 
           echo "UNIVERSAL_ARCHIVE=dist/fak_${VERSION}_darwin_universal.tar.gz" >> "$GITHUB_ENV"
           echo "UNIVERSAL_SUM=dist/fak_${VERSION}_darwin_universal.tar.gz.sha256" >> "$GITHUB_ENV"
+          echo "METAL_ARCHIVE=dist/${METAL_ASSET_NAME}" >> "$GITHUB_ENV"
+          echo "METAL_SUM=dist/${METAL_ASSET_NAME}.sha256" >> "$GITHUB_ENV"
 
       - name: Upload Universal Binary to GitHub Release
         env:
@@ -124,6 +157,7 @@ jobs:
             sleep 5
           done
           gh release upload "$TAG" "$UNIVERSAL_ARCHIVE" "$UNIVERSAL_SUM" --clobber
+          gh release upload "$TAG" "$METAL_ARCHIVE" "$METAL_SUM" --clobber
 
       - name: Validate Homebrew Formula and Executable Functionality
         run: |
@@ -134,3 +168,9 @@ jobs:
           ./dist/universal/fak completion bash >/dev/null
           ./dist/universal/fak completion zsh >/dev/null
           ./dist/universal/fak completion fish >/dev/null
+          # Smoke the Metal build: version must answer. `fak backends` is landing from a
+          # companion worker in this wave, so keep that probe NON-FATAL (|| echo) until it
+          # ships, then tighten to a hard grep -i metal assertion.
+          ./dist/arm64-metal/fak version
+          ./dist/arm64-metal/fak completion bash >/dev/null
+          ( ./dist/arm64-metal/fak backends 2>/dev/null | grep -i metal ) || echo "metal backend probe not available yet"
