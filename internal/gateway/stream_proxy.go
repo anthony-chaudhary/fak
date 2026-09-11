@@ -110,6 +110,11 @@ func estimateTokens(text string) int {
 }
 
 // heartbeatConfig holds the configuration for stream progress heartbeats (#10672).
+// progress, when set, is the per-request observation sink: every tick the
+// heartbeat path makes (phase boundary, content event) folds onto this
+// request's live-registry row via SetInflightProgress, so
+// /v1/fak/observation/requests answers "wedged vs working" from the SAME
+// signal fate-side heartbeats report. nil keeps the registry row silent.
 type heartbeatConfig struct {
 	enabled       bool
 	interval      time.Duration
@@ -119,6 +124,20 @@ type heartbeatConfig struct {
 	lastEvent     time.Time
 	bytesEmitted  int64
 	eventsEmitted int64
+	inflightID    uint64
+	note          func(id uint64, prefillTicks, decodeTicks uint64)
+}
+
+// attachProgress binds this stream's ticks to its live-registry row.
+func (h *heartbeatConfig) attachProgress(metrics *gatewayMetrics, id uint64) {
+	if h == nil || metrics == nil || id == 0 {
+		return
+	}
+	h.mu.Lock()
+	h.inflightID = id
+	h.note = metrics.SetInflightProgress
+	h.mu.Unlock()
+	metrics.TouchInflightProgress(id)
 }
 
 // newHeartbeatConfig creates a heartbeat config from environment.
@@ -136,24 +155,40 @@ func newHeartbeatConfig() *heartbeatConfig {
 }
 
 // markStreamStart marks the moment the first token was emitted (stream committed).
+// The prefill phase is then visibly complete: one prefill tick folds onto the
+// observation row (a Touch when no sink is bound).
 func (h *heartbeatConfig) markStreamStart() {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if !h.started {
 		h.started = true
 		h.streamStart = time.Now()
 		h.lastEvent = h.streamStart
+		note, id := h.note, h.inflightID
+		h.mu.Unlock()
+		if note != nil {
+			note(id, 1, 0)
+		}
+		return
 	}
+	h.mu.Unlock()
 }
 
-// recordEvent records that a content event was emitted.
+// recordEvent records that a content event was emitted. The decode tick
+// count rides the same fold so the row's decode_progress grows with the
+// stream the client is actually receiving.
 func (h *heartbeatConfig) recordEvent(byteCount int) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.started {
-		h.bytesEmitted += int64(byteCount)
-		h.eventsEmitted++
-		h.lastEvent = time.Now()
+	if !h.started {
+		h.mu.Unlock()
+		return
+	}
+	h.bytesEmitted += int64(byteCount)
+	h.eventsEmitted++
+	h.lastEvent = time.Now()
+	note, id, dec := h.note, h.inflightID, uint64(h.eventsEmitted)
+	h.mu.Unlock()
+	if note != nil {
+		note(id, 1, dec)
 	}
 }
 
@@ -231,8 +266,12 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		}
 	}
 
-	// Heartbeat config for typed progress heartbeats (#10672).
+	// Heartbeat config for typed progress heartbeats (#10672). The same tick
+	// path also feeds this request's live-registry row via the inflight id the
+	// metrics wrapper stamped on the context, so the observation snapshot and
+	// the client-facing heartbeats can never disagree about liveness.
 	hb := newHeartbeatConfig()
+	hb.attachProgress(s.metrics, inflightIDFromCtx(ctx))
 	var hbTicker *time.Ticker
 	var hbStop chan struct{}
 	var hbStopped chan struct{}

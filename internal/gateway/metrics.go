@@ -457,6 +457,14 @@ type gatewayMetrics struct {
 type inflightEntry struct {
 	route string
 	start time.Time
+	// prefProg / decProg are the per-request progress tick counts wired from
+	// the same ProgressHeartbeat path that reports live-stream progress; a
+	// zero for both is a request whose wire has no observable tick. touched
+	// is the last-progress marker (unix nano): zero means never ticked -
+	// the field "wedged vs working" is read from.
+	prefProg uint64
+	decProg  uint64
+	touched  int64
 }
 
 type httpMetricKey struct {
@@ -1236,29 +1244,86 @@ func (m *gatewayMetrics) endInflight(id uint64) {
 	m.inflightMu.Unlock()
 }
 
-// RequestSnapshot is one live in-flight request's observability record: the
-// registry id, the serving route it entered by, and its start wall-clock plus
-// elapsed milliseconds at snapshot time. Payload-free by construction (route +
-// timing only, the privacy floor the /v1/fak observation family holds), so a
-// watcher can answer "what is being served right now, and for how long".
+// SetInflightProgress folds the per-request progress tick pair (prefill ticks,
+// decode ticks) into the live registry entry keyed by the beginInflight id.
+// Sourced from the same ProgressHeartbeat path (stream_proxy.go hb.recordEvent /
+// messages_stream_passthrough.go content-delta relay) that reports live-stream
+// progress fate-side. A nil receiver, a zero id, or an id already retired by
+// endInflight is a no-op; the wire never resurrects a row for a dead id.
+func (m *gatewayMetrics) SetInflightProgress(id uint64, pref, dec uint64) {
+	if m == nil || id == 0 {
+		return
+	}
+	m.inflightMu.Lock()
+	if e, ok := m.inflightReq[id]; ok {
+		e.prefProg = pref
+		e.decProg = dec
+		e.touched = time.Now().UnixNano()
+		m.inflightReq[id] = e
+	}
+	m.inflightMu.Unlock()
+}
+
+// TouchInflightProgress marks a live request as still moving without new tick
+// counts: the prefill/decode phase boundary (markStreamStart) and silent
+// keep-alive ticks ride through here so last-progress-age stays truthful even
+// when a phase delivers no new counts.
+func (m *gatewayMetrics) TouchInflightProgress(id uint64) {
+	m.SetInflightProgress(id, 0, 0)
+}
+
+// RequestSnapshot is one live in-flight request's observability record, the
+// fak.observation.requests.v1 row shape: registry id, serving route, live
+// state, start age, and (progress opt-in) the prefill/decode tick counts plus
+// last-progress age. Payload-free by construction (route + timing only, the
+// privacy floor the /v1/fak observation family holds), so a watcher can answer
+// "what is being served right now, for how long, still moving or wedged".
 type RequestSnapshot struct {
 	// ID is the beginInflight registry token; unique among LIVE entries but
 	// reused across the process lifetime once a request retires.
 	ID uint64 `json:"id"`
 	// Route is the metrics label (routeForMetrics), not a raw URL.
 	Route string `json:"route"`
-	// StartUnixNanos is the request's start wall-clock, UnixNano form.
-	StartUnixNanos int64 `json:"start_unix_nanos"`
-	// ElapsedMs is milliseconds since StartUnixNanos at snapshot time.
-	ElapsedMs int64 `json:"elapsed_ms"`
+	// State is the per-request lifecycle position visible to the registry:
+	// "active" from beginInflight until endInflight - the only state v1 emits;
+	// a retired request is removed by endInflight, never projected.
+	State string `json:"state"`
+	// StartAgeMs is milliseconds since the request entered the registry,
+	// floored at 100ms so a just-registered row never reports a flaky
+	// sub-resolution age (two snapshots one tick apart must agree it started).
+	StartAgeMs int64 `json:"start_age_ms"`
+	// Progress fields ride the progress=1 opt-in when the handler merges them;
+	// without opt-in they stay zero and the handler omits them entirely.
+	// PrefProg / DecProg are the ProgressHeartbeat tick counts; TouchedUnixNanos
+	// is the last-progress wall clock where zero means the wire never ticked
+	// this request; LastProgressAgeMs is milliseconds since that tick (a nil
+	// pointer encodes the never-ticked null the schema calls for).
+	PrefProg          uint64 `json:"prefill_progress,omitempty"`
+	DecProg           uint64 `json:"decode_progress,omitempty"`
+	TouchedUnixNanos  int64  `json:"last_progress_unix_nanos,omitempty"`
+	LastProgressAgeMs *int64 `json:"last_progress_age_ms,omitempty"`
+}
+
+// inflightAgeFloorMs is the snapshot age floor: a beginInflight-to-snapshot
+// window below this (and a negative one - clock skew) reads as the floor so
+// the "for how long" answer is never a flaky 0.
+const inflightAgeFloorMs = 100
+
+// inflightAgeMsFloor clamps a raw registry age to the reporting floor.
+func inflightAgeMsFloor(ageMs int64) int64 {
+	if ageMs < inflightAgeFloorMs {
+		return inflightAgeFloorMs
+	}
+	return ageMs
 }
 
 // SnapshotInflight copies the live-request registry under inflightMu and
-// projects it oldest-first (StartUnixNanos ascending, registry order, since
-// beginInflight mints monotonic ids for monotonically non-decreasing starts).
-// ElapsedMs is measured against now, so a caller pacing two snapshots sees it
-// grow. A nil receiver, the same default beginInflight/endInflight honor,
-// yields an empty (non-nil) slice, never a panic.
+// projects it oldest-first (start age descending; ties by ascending id, which
+// regains registry order since beginInflight mints monotonic ids for
+// monotonically non-decreasing starts). StartAgeMs is measured against now,
+// so a caller pacing two snapshots sees it grow. A nil receiver, the same
+// default beginInflight/endInflight honor, yields an empty (non-nil) slice,
+// never a panic.
 func (m *gatewayMetrics) SnapshotInflight(now time.Time) []RequestSnapshot {
 	out := []RequestSnapshot{}
 	if m == nil {
@@ -1267,16 +1332,31 @@ func (m *gatewayMetrics) SnapshotInflight(now time.Time) []RequestSnapshot {
 	m.inflightMu.Lock()
 	out = make([]RequestSnapshot, 0, len(m.inflightReq))
 	for id, e := range m.inflightReq {
-		out = append(out, RequestSnapshot{
-			ID:             id,
-			Route:          e.route,
-			StartUnixNanos: e.start.UnixNano(),
-			ElapsedMs:      now.Sub(e.start).Milliseconds(),
-		})
+		row := RequestSnapshot{
+			ID:         id,
+			Route:      e.route,
+			State:      "active",
+			StartAgeMs: inflightAgeMsFloor(now.Sub(e.start).Milliseconds()),
+		}
+		if e.touched != 0 {
+			row.PrefProg = e.prefProg
+			row.DecProg = e.decProg
+			row.TouchedUnixNanos = e.touched
+			age := now.UnixNano() - e.touched
+			if age < 0 {
+				age = 0
+			}
+			lp := age / int64(time.Millisecond)
+			row.LastProgressAgeMs = &lp
+		}
+		out = append(out, row)
 	}
 	m.inflightMu.Unlock()
 	sort.Slice(out, func(i, j int) bool {
-		return out[i].StartUnixNanos < out[j].StartUnixNanos
+		if out[i].StartAgeMs != out[j].StartAgeMs {
+			return out[i].StartAgeMs > out[j].StartAgeMs
+		}
+		return out[i].ID < out[j].ID
 	})
 	return out
 }

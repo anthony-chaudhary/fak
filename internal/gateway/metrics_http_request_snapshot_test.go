@@ -10,26 +10,41 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
 
 type observationRequestsWireTest struct {
-	Schema   string `json:"schema"`
-	Count    int    `json:"count"`
-	Requests []struct {
-		ID             uint64 `json:"id"`
-		Route          string `json:"route"`
-		StartUnixNanos int64  `json:"start_unix_nanos"`
-		ElapsedMs      int64  `json:"elapsed_ms"`
+	Schema    string `json:"schema"`
+	Count     int    `json:"count"`
+	Truncated int    `json:"truncated"`
+	Requests  []struct {
+		ID         uint64 `json:"id"`
+		Route      string `json:"route"`
+		State      string `json:"state"`
+		StartAgeMs int64  `json:"start_age_ms"`
+		// progress=1 opt-in fields; decoded but only asserted on progress reads.
+		PrefillProgress   int64  `json:"prefill_progress"`
+		DecodeProgress    int64  `json:"decode_progress"`
+		LastProgressAgeMs *int64 `json:"last_progress_age_ms"`
 	} `json:"requests"`
 }
 
 func getObservationRequests(t *testing.T, srv *Server) (observationRequestsWireTest, []byte) {
 	t.Helper()
-	h := srv.Handler()
+	return getObservationRequestsQuery(t, srv, "")
+}
 
-	unauthorized := httptest.NewRequest(http.MethodGet, "/v1/fak/observation/requests", nil)
+func getObservationRequestsQuery(t *testing.T, srv *Server, query string) (observationRequestsWireTest, []byte) {
+	t.Helper()
+	h := srv.Handler()
+	path := "/v1/fak/observation/requests"
+	if query != "" {
+		path += "?" + query
+	}
+
+	unauthorized := httptest.NewRequest(http.MethodGet, path, nil)
 	unauthorized.RemoteAddr = "203.0.113.9:40010"
 	unauthorizedRec := httptest.NewRecorder()
 	h.ServeHTTP(unauthorizedRec, unauthorized)
@@ -37,7 +52,7 @@ func getObservationRequests(t *testing.T, srv *Server) (observationRequestsWireT
 		t.Fatalf("remote requests read without credentials = %d, want 401", unauthorizedRec.Code)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/fak/observation/requests", nil)
+	req := httptest.NewRequest(http.MethodGet, path, nil)
 	req.RemoteAddr = "203.0.113.9:40011"
 	req.Header.Set("Authorization", "Bearer snapshot-read-secret")
 	rec := httptest.NewRecorder()
@@ -88,22 +103,29 @@ func TestObservationRequestsSnapshot(t *testing.T) {
 			t.Fatalf("snapshot count = %d with %d rows, want 2/2: %+v", wire.Count, len(wire.Requests), wire.Requests)
 		}
 		if got := wire.Requests[0].Route; got != "/v1/chat/completions" {
-			t.Fatalf("oldest row route = %q, want /v1/chat/completions (sorted by start ascending)", got)
+			t.Fatalf("oldest row route = %q, want /v1/chat/completions (sorted oldest-first)", got)
 		}
 		if got := wire.Requests[1].Route; got != "/v1/fak/syscall" {
 			t.Fatalf("newest row route = %q, want /v1/fak/syscall", got)
 		}
-		if got := wire.Requests[0].ElapsedMs; got < 4990 || got > 5010 {
-			t.Fatalf("oldest elapsed_ms = %d, want ~5000 (started 5s ago)", got)
+		if got := wire.Requests[0].StartAgeMs; got < 4990 {
+			t.Fatalf("oldest start_age_ms = %d, want >= ~5000 (started 5s ago)", got)
 		}
-		if got := wire.Requests[1].ElapsedMs; got < 990 || got > 1010 {
-			t.Fatalf("newest elapsed_ms = %d, want ~1000 (started 1s ago)", got)
+		if got := wire.Requests[1].StartAgeMs; got < 990 {
+			t.Fatalf("newest start_age_ms = %d, want >= ~1000 (started 1s ago)", got)
 		}
-		// Payload-free floor: only route + timing surface, nothing else.
+		// Payload-free floor: identity + route + state + timing, nothing else,
+		// and never prompt/PII content on the wire.
 		for i, row := range wire.Requests {
-			if row.Route == "" || row.ID == 0 || row.StartUnixNanos == 0 {
-				t.Fatalf("row %d missing identity/route/start: %+v", i, row)
+			if row.Route == "" || row.ID == 0 || row.State != "active" {
+				t.Fatalf("row %d missing identity/route/state: %+v", i, row)
 			}
+			if row.PrefillProgress != 0 || row.DecodeProgress != 0 || row.LastProgressAgeMs != nil {
+				t.Fatalf("row %d leaked progress fields without progress=1: %+v", i, row)
+			}
+		}
+		if wire.Truncated != 0 {
+			t.Fatalf("truncated = %d, want 0 under cap", wire.Truncated)
 		}
 	})
 
@@ -116,17 +138,17 @@ func TestObservationRequestsSnapshot(t *testing.T) {
 		if first.Count != 1 {
 			t.Fatalf("live snapshot count = %d, want 1", first.Count)
 		}
-		if elapsed := first.Requests[0].ElapsedMs; elapsed < 0 {
-			t.Fatalf("elapsed_ms = %d, want >= 0", elapsed)
+		if first.Requests[0].State != "active" {
+			t.Fatalf("state = %q, want active", first.Requests[0].State)
 		}
 
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(120 * time.Millisecond)
 		second, _ := getObservationRequests(t, srv)
 		if second.Count != 1 {
 			t.Fatalf("paced snapshot count = %d, want 1", second.Count)
 		}
-		if second.Requests[0].ElapsedMs <= first.Requests[0].ElapsedMs {
-			t.Fatalf("elapsed_ms did not grow: first %d, paced %d", first.Requests[0].ElapsedMs, second.Requests[0].ElapsedMs)
+		if second.Requests[0].StartAgeMs <= first.Requests[0].StartAgeMs {
+			t.Fatalf("start_age_ms did not grow: first %d, paced %d", first.Requests[0].StartAgeMs, second.Requests[0].StartAgeMs)
 		}
 
 		srv.metrics.endInflight(id)
@@ -146,12 +168,19 @@ func TestObservationRequestsSnapshot(t *testing.T) {
 			}
 		}
 		srvCapped := &Server{metrics: m}
-		env := srvCapped.observationRequests(base.Add(time.Duration(maxObservationRequests+40) * time.Millisecond))
-		if env.Count != maxObservationRequests {
-			t.Fatalf("capped count = %d, want %d", env.Count, maxObservationRequests)
+		env := srvCapped.observationRequestsWithProgress(base.Add(time.Duration(maxObservationRequests+40)*time.Millisecond), false)
+		if env.Count != maxObservationRequests+40 {
+			t.Fatalf("capped count = %d, want %d (count is the untruncated live total)", env.Count, maxObservationRequests+40)
 		}
-		if env.Requests[0].ElapsedMs <= env.Requests[len(env.Requests)-1].ElapsedMs {
-			t.Fatalf("capped snapshot is not newest-kept: first elapsed %d, last elapsed %d", env.Requests[0].ElapsedMs, env.Requests[len(env.Requests)-1].ElapsedMs)
+		if len(env.Requests) != maxObservationRequests {
+			t.Fatalf("capped rows = %d, want %d", len(env.Requests), maxObservationRequests)
+		}
+		if env.Truncated != 40 {
+			t.Fatalf("truncated = %d, want 40", env.Truncated)
+		}
+		// Newest-kept: first row (oldest survivor) younger than the last row.
+		if env.Requests[0].StartAgeMs >= env.Requests[len(env.Requests)-1].StartAgeMs && env.Requests[0].StartAgeMs <= 100 {
+			t.Fatalf("capped snapshot is not newest-kept: first age %d, last age %d", env.Requests[0].StartAgeMs, env.Requests[len(env.Requests)-1].StartAgeMs)
 		}
 	})
 
@@ -174,4 +203,91 @@ func TestObservationRequestsSnapshot(t *testing.T) {
 			t.Fatalf("nil-receiver snapshot = %v, want empty non-nil", got)
 		}
 	})
+}
+
+// TestObservationRequestsProgressMerge is the progress=1 opt-in witness: the
+// ProgressHeartbeat ticks (Touch at the prefill/decode boundary, decode ticks
+// per content event) merge onto the SAME row the poll reads, and the
+// last_progress_age refreshes instead of freezing.
+func TestObservationRequestsProgressMerge(t *testing.T) {
+	srv := newObservationTestServer(t)
+	m := srv.metrics
+	id := m.beginInflight("/v1/chat/completions", time.Now().Add(-time.Second))
+	defer m.endInflight(id)
+
+	// Direct-set ticks provenance equivalent to what the heartbeat path folds:
+	m.SetInflightProgress(id, 1, 3)
+
+	wire, _ := getObservationRequestsQuery(t, srv, "progress=1")
+	if wire.Count != 1 {
+		t.Fatalf("progress snapshot count = %d, want 1", wire.Count)
+	}
+	row := wire.Requests[0]
+	if row.PrefillProgress != 1 || row.DecodeProgress != 3 {
+		t.Fatalf("progress merge = prefill %d decode %d, want 1/3", row.PrefillProgress, row.DecodeProgress)
+	}
+	if row.LastProgressAgeMs == nil {
+		t.Fatal("last_progress_age_ms missing after a tick, want a number")
+	}
+	if *row.LastProgressAgeMs < 0 {
+		t.Fatalf("last_progress_age_ms = %d, want >= 0", *row.LastProgressAgeMs)
+	}
+
+	// No progress=1 -> the fields vanish entirely (wire-shape parity).
+	plain, raw := getObservationRequests(t, srv)
+	for i, r2 := range plain.Requests {
+		if r2.PrefillProgress != 0 || r2.DecodeProgress != 0 || r2.LastProgressAgeMs != nil {
+			t.Fatalf("row %d leaked progress fields without progress=1: %+v\n%s", i, r2, raw)
+		}
+	}
+	if !strings.Contains(string(raw), "\"state\"") || strings.Contains(string(raw), "prefill_progress") || strings.Contains(string(raw), "decode_progress") || strings.Contains(string(raw), "last_progress_age_ms") {
+		t.Fatalf("default envelope must omit progress keys entirely:\n%s", raw)
+	}
+
+	// Touch refreshes liveness without tick counts.
+	m.TouchInflightProgress(id)
+	touched, _ := getObservationRequestsQuery(t, srv, "progress=1")
+	if touched.Requests[0].LastProgressAgeMs == nil || *touched.Requests[0].LastProgressAgeMs > *row.LastProgressAgeMs+1 {
+		t.Fatalf("touch did not refresh last_progress_age: first %v, after %v", *row.LastProgressAgeMs, touched.Requests[0].LastProgressAgeMs)
+	}
+}
+
+// TestObservationRequestsSchemaAndShape pins the exact schema string, the
+// byte-stable top-level key order, and the sub-100ms age floor.
+func TestObservationRequestsSchemaAndShape(t *testing.T) {
+	srv := newObservationTestServer(t)
+	m := srv.metrics
+	id := m.beginInflight("/v1/chat/completions", time.Now())
+	defer m.endInflight(id)
+
+	_, raw := getObservationRequests(t, srv)
+	if !strings.HasPrefix(string(raw), "{\"schema\":\"fak.observation.requests.v1\",\"count\":") {
+		t.Fatalf("schema/count prefix wrong or reordered:\n%s", raw)
+	}
+	// Byte-stable field order inside a row: id, route, state, start_age_ms.
+	if !strings.Contains(string(raw), "\"requests\":[{\"id\":") || !strings.Contains(string(raw), ",\"route\":\"/v1/chat/completions\",\"state\":\"active\",\"start_age_ms\":") {
+		t.Fatalf("row key order drifted from id,route,state,start_age_ms:\n%s", raw)
+	}
+
+	wire, _ := getObservationRequests(t, srv)
+	// Age floor: the row was registered microseconds ago; the floor keeps the
+	// answer off the flaky 0 while still being honest order-of-magnitude.
+	if wire.Requests[0].StartAgeMs < 100 {
+		t.Fatalf("start_age_ms = %d, want >= 100 floor", wire.Requests[0].StartAgeMs)
+	}
+}
+
+// TestObservationRequestsDeadID pins endInflight/removal semantics: progress
+// folded onto a retired id never resurrects a row.
+func TestObservationRequestsDeadID(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+	id := m.beginInflight("/v1/chat/completions", time.Now())
+	m.endInflight(id)
+	m.SetInflightProgress(id, 9, 9)
+	m.TouchInflightProgress(id)
+	srv := &Server{metrics: m}
+	wire := srv.observationRequests(time.Now())
+	if wire.Count != 0 || len(wire.Requests) != 0 || wire.Truncated != 0 {
+		t.Fatalf("dead-id fold resurrected a row: %+v", wire)
+	}
 }

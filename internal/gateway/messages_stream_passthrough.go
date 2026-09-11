@@ -172,6 +172,7 @@ func (p *anthropicPassthrough) start() {
 	}
 	p.started = true
 	p.hb = newHeartbeatConfig()
+	p.hb.attachProgress(p.s.metrics, inflightIDFromCtx(p.r.Context()))
 	if p.hb.enabled {
 		p.hbTicker = time.NewTicker(p.hb.interval)
 		p.hbDone = make(chan struct{})

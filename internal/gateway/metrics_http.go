@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bufio"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -149,6 +150,11 @@ func (s *Server) withMetrics(next http.Handler) http.Handler {
 		if route != "/metrics" && route != "/v1/fak/observation" && route != "/v1/fak/observation/requests" {
 			liveID := s.metrics.beginInflight(route, start)
 			defer s.metrics.endInflight(liveID)
+			// The live registry id rides the request context so the per-request
+			// progress wiring (ProgressHeartbeat ticks -> SetInflightProgress)
+			// can fold its ticks onto THIS request's row without a new side
+			// table; discovery is a single context read, no hot-path allocation.
+			r = r.WithContext(withInflightID(r.Context(), liveID))
 		}
 		traceID := ensureHTTPTrace(s, w, r)
 		rec := &statusRecorder{ResponseWriter: w}
@@ -436,6 +442,20 @@ func routeForMetrics(path string) string {
 	}
 }
 
+// inflightIDCtxKey carries the beginInflight registry token of the live
+// request whose context it rides, so the stream-progress tick path can fold
+// per-request prefill/decode counts onto its own registry row.
+type inflightIDCtxKey struct{}
+
+func withInflightID(ctx context.Context, id uint64) context.Context {
+	return context.WithValue(ctx, inflightIDCtxKey{}, id)
+}
+
+func inflightIDFromCtx(ctx context.Context) uint64 {
+	id, _ := ctx.Value(inflightIDCtxKey{}).(uint64)
+	return id
+}
+
 // observationRequestsSchemaV1 is the compatibility contract for the
 // per-request in-flight read: the same wire versioning posture as the
 // aggregate /v1/fak/observation snapshot.
@@ -448,31 +468,40 @@ const observationRequestsSchemaV1 = "fak.observation.requests.v1"
 const maxObservationRequests = 256
 
 // observationRequestsWire is the JSON envelope of GET
-// /v1/fak/observation/requests: a schema tag, the record count (equal to len
-// (requests) — a clean zero is data, not a null), and the in-flight records
-// sorted oldest-first with the newest 256 kept.
+// /v1/fak/observation/requests: the schema tag, count = the number of LIVE
+// in-flight rows in the registry at snapshot time (the drop-oldest cap hides
+// rows from requests[] but count still answers "how busy is the box"; a clean
+// zero is data, not a null), truncated = how many rows the cap dropped, and
+// the rows sorted oldest-first with the newest kept.
 type observationRequestsWire struct {
-	Schema   string            `json:"schema"`
-	Count    int               `json:"count"`
-	Requests []RequestSnapshot `json:"requests"`
+	Schema    string            `json:"schema"`
+	Count     int               `json:"count"`
+	Truncated int               `json:"truncated"`
+	Requests  []RequestSnapshot `json:"requests"`
 }
 
 // handleFakObservationRequests is the per-request arm of the observation
 // family (/v1/fak/observation carries the aggregate envelopes): a bounded,
 // point-in-time copy of the live-request registry. Payload-free by
 // construction (route + timing only). Read scope follows the same auth floor
-// as the aggregate read.
+// as the aggregate read. progress=1 opts into the per-request
+// prefill/decode/last-progress fields riding each row.
 func (s *Server) handleFakObservationRequests(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.observationRequests(time.Now()))
+	writeJSON(w, http.StatusOK, s.observationRequestsWithProgress(time.Now(), r.URL.Query().Get("progress") == "1"))
 }
 
-// observationRequests builds the wire envelope from the registry snapshot.
-// Split from the handler so the envelope shape and the oldest-dropping cap
-// are testable without an HTTP round-trip.
+// observationRequests is the progress=0 envelope: identity/route/timing only.
 func (s *Server) observationRequests(now time.Time) observationRequestsWire {
+	return s.observationRequestsWithProgress(now, false)
+}
+
+// observationRequestsWithProgress builds the wire envelope from the registry
+// snapshot. Split from the handler so the envelope shape, the drop-oldest cap,
+// and the progress merge are testable without an HTTP round-trip.
+func (s *Server) observationRequestsWithProgress(now time.Time, withProgress bool) observationRequestsWire {
 	// newObservationTestServer-style nil tolerance: a Server whose metrics
 	// was never allocated observes an idle (empty) registry, mirroring the
 	// aggregate read's posture.
@@ -481,25 +510,31 @@ func (s *Server) observationRequests(now time.Time) observationRequestsWire {
 		m = newGatewayMetrics(now)
 	}
 	reqs := m.SnapshotInflight(now)
-	if len(reqs) > maxObservationRequests {
-		// SnapshotInflight is oldest-first; the cap keeps the newest.
+	// Count_everything, cap_the_rows: the watcher poll answers BOTH "what is
+	// running" (bounded rows, freshest kept) and "how busy" (untruncated count).
+	truncated := 0
+	total := len(reqs)
+	if total > maxObservationRequests {
+		truncated = total - maxObservationRequests
 		reqs = reqs[len(reqs)-maxObservationRequests:]
 	}
-	if reqs == nil {
-		reqs = []RequestSnapshot{}
+	out := make([]RequestSnapshot, len(reqs))
+	for i, row := range reqs {
+		if withProgress {
+			out[i] = row
+		} else {
+			out[i] = RequestSnapshot{
+				ID:         row.ID,
+				Route:      row.Route,
+				State:      row.State,
+				StartAgeMs: row.StartAgeMs,
+			}
+		}
 	}
-	// Serve a defensive copy on a non-nil backing array: the wire slice
-	// handed to writeJSON must neither alias a future snapshot's backing
-	// array nor encode as null when idle (a clean zero is [], not null).
-	if reqs == nil {
-		reqs = []RequestSnapshot{}
-	}
-	copyReqs := make([]RequestSnapshot, len(reqs))
-	copy(copyReqs, reqs)
-	reqs = copyReqs
 	return observationRequestsWire{
-		Schema:   observationRequestsSchemaV1,
-		Count:    len(reqs),
-		Requests: reqs,
+		Schema:    observationRequestsSchemaV1,
+		Count:     total,
+		Truncated: truncated,
+		Requests:  out,
 	}
 }
