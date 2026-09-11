@@ -303,11 +303,12 @@ func (s *Server) renderMetrics() string {
 	}
 	writeBlobMetrics(&b)
 	writeKVPrefixMetrics(&b)
-	s.writeKVMemoryMetrics(&b)
+	kvStats, kvOK := s.kvMemoryStatsOnce()
+	s.writeKVMemoryMetricsWithStats(&b, kvStats, kvOK)
 	s.writeRequestMemoryMetrics(&b)
 	m.writeRequestMemoryAggregateMetrics(&b)
 	inf := m.writeInferenceMetrics(&b)
-	s.writeServingMetrics(&b, inf)
+	s.writeServingMetricsWithStats(&b, inf, kvStats, kvOK)
 	m.writeHarnessMetrics(&b)  // fak_harness_* — the guard harness's own CPU/mem/IO (epic #2044)
 	m.writeLogvaultMetrics(&b) // fak_logvault_* — vault last-capture age/footprint/verify mismatches (#2455)
 	s.writeNativePDMetrics(&b) // #28: native prefill/decode role-split telemetry, when a cluster is wired
@@ -827,15 +828,48 @@ func writeCacheAttributionMetrics(b *strings.Builder, s MechanismSavings) {
 	fmt.Fprintf(b, "fak_cache_avoided_calls_by_mechanism_total{owner=\"fak\",mechanism=\"vdso\"} %d\n", s.FakVDSOAvoidedCalls)
 }
 
-func (s *Server) writeKVMemoryMetrics(b *strings.Builder) {
+const kvStatsCacheTTL = 2 * time.Second
+
+// kvMemoryStatsOnce returns the planner's KV memory snapshot, memoized for
+// kvStatsCacheTTL. ok=false when the planner does not implement KVMemoryReporter.
+// Called once per scrape and shared by writeKVMemoryMetricsWithStats and
+// writeServingMetricsWithStats so the expensive reporter runs at most once per
+// scrape and at most once per TTL. The reporter runs outside kvStatsMu: a
+// concurrent miss is not coalesced (each concurrent scrape probes once), but no
+// caller ever holds the lock across the probe.
+//
+// The TTL is stamped at probe COMPLETION, not start. The probe can itself take
+// longer than the TTL on a ROCm box (hipMemGetInfo under load); stamping the
+// start would make the entry already-expired when written and re-probe on every
+// scrape, defeating the cache exactly where it is needed.
+func (s *Server) kvMemoryStatsOnce() (agent.KVMemoryStats, bool) {
 	if s == nil || s.planner == nil {
-		return
+		return agent.KVMemoryStats{}, false
 	}
 	reporter, ok := s.planner.(agent.KVMemoryReporter)
 	if !ok {
+		return agent.KVMemoryStats{}, false
+	}
+	s.kvStatsMu.Lock()
+	if s.kvStatsValid && time.Since(s.kvStatsAt) < kvStatsCacheTTL {
+		st := s.kvStatsCache
+		s.kvStatsMu.Unlock()
+		return st, true
+	}
+	s.kvStatsMu.Unlock()
+	st := reporter.KVMemoryStats()
+	s.kvStatsMu.Lock()
+	s.kvStatsCache = st
+	s.kvStatsAt = time.Now()
+	s.kvStatsValid = true
+	s.kvStatsMu.Unlock()
+	return st, true
+}
+
+func (s *Server) writeKVMemoryMetricsWithStats(b *strings.Builder, st agent.KVMemoryStats, ok bool) {
+	if s == nil || !ok {
 		return
 	}
-	st := reporter.KVMemoryStats()
 	class := strings.TrimSpace(st.MemoryClass)
 	if class == "" {
 		class = "kv_cache"
