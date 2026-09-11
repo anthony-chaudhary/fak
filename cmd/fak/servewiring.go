@@ -71,6 +71,7 @@ type wiringRow struct {
 // the serve.go-sets check is skipped for those (tracked by Flag presence instead).
 var servewiringData = []wiringRow{
 	{"reloadcanary", "--policy-canary-turns", "PolicyCanaryTurns", verdictOffByDefault, "internal/gateway/policy_canary.go:7", "after a reload, rolls back on the configured consecutive deny-all streak; zero disables the canary"},
+	{"richdashboards", "--appliance-observability", "RichDashboards", verdictWired, "internal/gateway/gateway.go:315", "installs the lazy rich-dashboard manager and single-port proxy from the serve-selected dashboard configuration"},
 	{"otlp", "--otlp-traces-endpoint", "OTLPEndpoint", verdictOffByDefault, "internal/gateway/gateway.go:2081", "enables bounded asynchronous OTLP/HTTP JSON trace export; empty disables it"},
 	{"orgaudit", "(organization audit config)", "OrgAudit", verdictOffByDefault, "internal/gateway/gateway.go:2085", "enables enrolled privacy-screened adjudication receipts; zero config disables it"},
 	{"trajctlmetrics", "(trajectory metrics observer)", "TrajctlMetrics", verdictOffByDefault, "internal/gateway/metrics.go", "projects bounded objective health onto /metrics when configured"},
@@ -249,7 +250,10 @@ func scanFieldSet(src, startMarker, endMarker string, re *regexp.Regexp) map[str
 	return out
 }
 
-var assignRe = regexp.MustCompile(`(?m)^\s*([A-Z][A-Za-z0-9]*):\s+`)
+// A gofmt-formatted top-level gateway.Config field is indented by exactly two tabs in serve.go.
+// Requiring that depth prevents fields of nested literals (for example
+// RichDashboards.ApplianceProfile) from being flattened into fictitious gateway.Config fields.
+var assignRe = regexp.MustCompile(`(?m)^\t\t([A-Z][A-Za-z0-9]*):\s+`)
 
 // serveConfigAssignments returns the set of gateway.Config field names assigned inside the
 // gateway.New(gateway.Config{...}) literal in serve.go.
