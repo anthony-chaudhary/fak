@@ -176,6 +176,17 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 			}
 		}
 	}
+	if runtime.GOOS != "windows" && *opencodeBin == "opencode" {
+		// Cron/launchd children inherit a minimal PATH that misses user-local
+		// install dirs. Resolve the well-known binary locations when the bare
+		// name is not on PATH so the guarded launch does not fail spuriously;
+		// guard leaves explicit paths (containing a separator) to exec.
+		if _, lookErr := exec.LookPath(*opencodeBin); lookErr != nil {
+			if native := resolvePOSIXOpenCodeBinary(""); native != "" {
+				*opencodeBin = native
+			}
+		}
+	}
 	argv := []string{tuiExecutable(), "guard", "--provider", *provider, "--split", "off", "--model", *model}
 	for _, pair := range [][2]string{{"--base-url", *baseURL}, {"--api-key-env", *apiKeyEnv}, {"--policy", *policy}, {"--audit", *audit}} {
 		if pair[1] != "" {
@@ -465,4 +476,29 @@ func writeOpsRunReceipt(path string, receipt opsRunReceipt) error {
 		return err
 	}
 	return os.Rename(temp, path)
+}
+
+// resolvePOSIXOpenCodeBinary returns the first existing non-directory opencode
+// binary among the well-known install locations (official installer, user-local
+// bin, Homebrew), or "" when none is present. home may be empty to auto-detect.
+func resolvePOSIXOpenCodeBinary(home string) string {
+	if strings.TrimSpace(home) == "" {
+		if h, err := os.UserHomeDir(); err == nil {
+			home = h
+		}
+	}
+	candidates := []string{}
+	if home != "" {
+		candidates = append(candidates,
+			filepath.Join(home, ".opencode", "bin", "opencode"),
+			filepath.Join(home, ".local", "bin", "opencode"),
+		)
+	}
+	candidates = append(candidates, "/opt/homebrew/bin/opencode", "/usr/local/bin/opencode")
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -465,5 +466,35 @@ func TestOpsRunReceiptTimedOutFallback(t *testing.T) {
 	}
 	if r.Lifecycle[0].ChildState != "unknown" {
 		t.Fatalf("lifecycle child_state = %q, want unknown", r.Lifecycle[0].ChildState)
+	}
+}
+
+func TestResolvePOSIXOpenCodeBinary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX-only install-location resolver")
+	}
+	home := t.TempDir()
+	if got := resolvePOSIXOpenCodeBinary(home); got != "" {
+		t.Fatalf("expected empty resolution for dir without installs, got %q", got)
+	}
+	official := filepath.Join(home, ".opencode", "bin", "opencode")
+	if err := os.MkdirAll(filepath.Dir(official), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(official, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := resolvePOSIXOpenCodeBinary(home); got != official {
+		t.Fatalf("got %q, want %q", got, official)
+	}
+	// A directory at the candidate path must not resolve.
+	if err := os.Remove(official); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(official, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := resolvePOSIXOpenCodeBinary(home); got != "" {
+		t.Fatalf("directory candidate must not resolve, got %q", got)
 	}
 }
