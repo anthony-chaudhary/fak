@@ -792,6 +792,8 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		cmdCachevalue(args)
 	case "cachesweep":
 		os.Exit(runCachesweep(os.Stdout, os.Stderr, args))
+	case "cache":
+		cmdCache(args)
 	case "sweep-speculative":
 		cmdSweepSpeculative(args)
 	case "savings":
