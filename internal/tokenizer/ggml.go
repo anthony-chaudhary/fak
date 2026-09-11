@@ -86,7 +86,8 @@ func FromGGML(tokens, merges []string, tokenTypes []int32, pre string) (*Tokeniz
 	// kind (#4265): the GGUF hint maps to the kind, the resolver returns the splitter and
 	// the metaspace flag together. Adding a family is one kind + one resolver case, picked
 	// up here and by the JSON path alike, so the two loaders can never silently diverge.
-	split, metaspace := resolvePreTokenizer(ggmlPreTokKind(pre))
+	preKind := ggmlPreTokKind(pre)
+	split, metaspace := resolvePreTokenizer(preKind)
 
 	return &Tokenizer{
 		idToToken:        idToToken,
@@ -95,6 +96,7 @@ func FromGGML(tokens, merges []string, tokenTypes []int32, pre string) (*Tokeniz
 		addedByContent:   specialByContent,
 		specialByContent: specialByContent,
 		mergeRank:        mergeRank,
+		preTokKind:       preKind,
 		split:            split,
 		metaspace:        metaspace,
 	}, nil

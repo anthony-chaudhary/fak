@@ -1,6 +1,9 @@
 package tokenizer
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 )
@@ -37,12 +41,15 @@ type Tokenizer struct {
 	addedByContent   []specialToken
 	specialByContent []specialToken
 	mergeRank        map[tokenPair]int
+	preTokKind       preTokKind
 	split            func(string) []string
 	// metaspace selects SentencePiece-style tokenization (Gemma 4): the vocab/merges
 	// use ▁ (U+2581) for a space and store literal UTF-8 rather than the GPT-2 byte-level
 	// alphabet, so encode replaces spaces with ▁ (no byte-level remap) and decode maps ▁
 	// back to a space. false (default) keeps the GPT-2 ByteLevel path.
-	metaspace bool
+	metaspace    bool
+	identityOnce sync.Once
+	identity     string
 }
 
 // metaspaceRune is SentencePiece's visible space marker U+2581 (▁).
@@ -235,7 +242,8 @@ func ParseJSON(b []byte) (*Tokenizer, error) {
 	// kind; before unification it had no GLM-4 branch and silently routed a GLM-4
 	// tokenizer.json to the Qwen splitter (wrong digit grouping) — the FromGGML path
 	// avoided the drift, so the same model tokenized differently by load path.
-	split, metaspace := resolvePreTokenizer(jsonPreTokKind(doc.PreTokenizer))
+	preKind := jsonPreTokKind(doc.PreTokenizer)
+	split, metaspace := resolvePreTokenizer(preKind)
 
 	return &Tokenizer{
 		idToToken:        idToToken,
@@ -244,9 +252,83 @@ func ParseJSON(b []byte) (*Tokenizer, error) {
 		addedByContent:   addedByContent,
 		specialByContent: specialByContent,
 		mergeRank:        mergeRank,
+		preTokKind:       preKind,
 		split:            split,
 		metaspace:        metaspace,
 	}, nil
+}
+
+// Identity returns a canonical digest of every field that affects Encode. It
+// identifies operational tokenizer behavior rather than a source path or model.
+func (t *Tokenizer) Identity() string {
+	if t == nil {
+		return ""
+	}
+	t.identityOnce.Do(func() {
+		h := sha256.New()
+		writeIdentityPart(h, "fak.tokenizer.operational.v1")
+		writeIdentityPart(h, fmt.Sprint(int(t.preTokKind)))
+		writeIdentityPart(h, fmt.Sprint(t.metaspace))
+		for id, token := range t.idToToken {
+			writeIdentityPart(h, fmt.Sprintf("token:%d", id))
+			writeIdentityPart(h, token)
+		}
+		tokenKeys := make([]string, 0, len(t.tokenToID))
+		for token := range t.tokenToID {
+			tokenKeys = append(tokenKeys, token)
+		}
+		sort.Strings(tokenKeys)
+		for _, token := range tokenKeys {
+			writeIdentityPart(h, "lookup:"+token)
+			writeIdentityPart(h, fmt.Sprint(t.tokenToID[token]))
+		}
+		type rankedPair struct {
+			pair tokenPair
+			rank int
+		}
+		merges := make([]rankedPair, 0, len(t.mergeRank))
+		for pair, rank := range t.mergeRank {
+			merges = append(merges, rankedPair{pair: pair, rank: rank})
+		}
+		sort.Slice(merges, func(i, j int) bool {
+			if merges[i].rank != merges[j].rank {
+				return merges[i].rank < merges[j].rank
+			}
+			if merges[i].pair.left != merges[j].pair.left {
+				return merges[i].pair.left < merges[j].pair.left
+			}
+			return merges[i].pair.right < merges[j].pair.right
+		})
+		for _, merge := range merges {
+			writeIdentityPart(h, fmt.Sprintf("merge:%d", merge.rank))
+			writeIdentityPart(h, merge.pair.left)
+			writeIdentityPart(h, merge.pair.right)
+		}
+		// Preserve this slice's effective match order. Equal-length duplicate
+		// entries can select different IDs, so re-sorting would hide behavior.
+		for _, token := range t.addedByContent {
+			writeIdentityPart(h, fmt.Sprintf("added:%d", token.id))
+			writeIdentityPart(h, token.content)
+		}
+		specialIDs := make([]int, 0, len(t.special))
+		for id := range t.special {
+			specialIDs = append(specialIDs, id)
+		}
+		sort.Ints(specialIDs)
+		for _, id := range specialIDs {
+			writeIdentityPart(h, fmt.Sprintf("special:%d", id))
+			writeIdentityPart(h, t.special[id])
+		}
+		t.identity = "sha256:" + hex.EncodeToString(h.Sum(nil))
+	})
+	return t.identity
+}
+
+func writeIdentityPart(h interface{ Write([]byte) (int, error) }, value string) {
+	var size [8]byte
+	binary.BigEndian.PutUint64(size[:], uint64(len(value)))
+	_, _ = h.Write(size[:])
+	_, _ = h.Write([]byte(value))
 }
 
 // Encode applies the HF fast ByteLevel-BPE path this leaf supports: added special

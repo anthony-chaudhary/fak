@@ -24,6 +24,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
 	"github.com/anthony-chaudhary/fak/internal/macfit"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
@@ -328,19 +329,22 @@ func printTurnkeyReady(w io.Writer, ver, addr string, plan macfit.TurnkeyProfile
 }
 
 type turnkeyServer struct {
-	plan         macfit.TurnkeyProfile
-	mock         bool
-	engineID     string
-	planner      agent.Planner
-	native       *turnkeyNativeResources
-	listener     net.Listener
-	boundAddr    string
-	httpServer   *http.Server
-	requestCount int64
-	totalTokens  int64
-	mu           sync.Mutex
-	requests     sync.WaitGroup
-	stopping     bool
+	plan             macfit.TurnkeyProfile
+	mock             bool
+	engineID         string
+	planner          agent.Planner
+	native           *turnkeyNativeResources
+	listener         net.Listener
+	boundAddr        string
+	httpServer       *http.Server
+	residencyRelease func()
+	requestCount     int64
+	totalTokens      int64
+	mu               sync.Mutex
+	stopping         bool
+	releaseRequested bool
+	activeRequests   int
+	residencyOnce    sync.Once
 }
 
 func (s *turnkeyServer) Addr() string {
@@ -359,20 +363,63 @@ func (s *turnkeyServer) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
 	s.stopping = true
 	s.mu.Unlock()
-	if err := s.httpServer.Shutdown(ctx); err != nil {
-		return err
+	err := s.httpServer.Shutdown(ctx)
+	if err == nil {
+		s.requestResidencyRelease()
 	}
-	s.requests.Wait()
-	return s.native.Close()
+	return err
 }
 
 func (s *turnkeyServer) Close() error {
+	// Close does not wait for active handlers. The final handler releases native
+	// resources and their admission lease after a successful server close.
 	s.mu.Lock()
 	s.stopping = true
 	s.mu.Unlock()
-	httpErr := s.httpServer.Close()
-	s.requests.Wait()
-	return errors.Join(httpErr, s.native.Close())
+	err := s.httpServer.Close()
+	if err == nil {
+		s.requestResidencyRelease()
+	}
+	return err
+}
+
+func (s *turnkeyServer) releaseResidency() {
+	s.residencyOnce.Do(func() {
+		if s.residencyRelease != nil {
+			s.residencyRelease()
+		}
+		_ = s.native.Close()
+	})
+}
+
+func (s *turnkeyServer) requestResidencyRelease() {
+	s.mu.Lock()
+	s.releaseRequested = true
+	idle := s.activeRequests == 0
+	s.mu.Unlock()
+	if idle {
+		s.releaseResidency()
+	}
+}
+
+func (s *turnkeyServer) beginChatRequest() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopping {
+		return false
+	}
+	s.activeRequests++
+	return true
+}
+
+func (s *turnkeyServer) endChatRequest() {
+	s.mu.Lock()
+	s.activeRequests--
+	release := s.releaseRequested && s.activeRequests == 0
+	s.mu.Unlock()
+	if release {
+		s.releaseResidency()
+	}
 }
 
 func newInKernelChatPlanner(model *fakmodel.Model, tok *tokenizer.Tokenizer, modelID string, q4k bool, backend compute.Backend, metal bool) *agent.InKernelPlanner {
@@ -441,8 +488,24 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 				return nil, fmt.Errorf("model %q (%s) is not a known alias, an hf:// URI, or an existing .gguf path", plan.Tier.ModelID, ref)
 			}
 
+			deps := defaultTurnkeyNativeLoadDeps()
+			resolveBackend := deps.resolveBackend
+			admitMetal := deps.admitAndLoad
+			var selectedBackend compute.Backend
+			deps.resolveBackend = func() (compute.Backend, error) {
+				backend, err := resolveBackend()
+				selectedBackend = backend
+				return backend, err
+			}
+			deps.admitAndLoad = func(metal bool, path string, load func()) (func(), error) {
+				if selectedBackend != nil && selectedBackend.Name() == "vulkan" {
+					return loadLocalLauncherModelWithVulkanLease(true, path, gpulease.Options{}, load)
+				}
+				return admitMetal(metal, path, load)
+			}
+
 			var err error
-			native, err = loadTurnkeyNativeResources(ctx, ref, plan.Tier.ModelID, contextTokens)
+			native, err = loadTurnkeyNativeResourcesWith(ctx, ref, plan.Tier.ModelID, contextTokens, deps)
 			if err != nil {
 				return nil, err
 			}
@@ -466,7 +529,6 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 	if mock {
 		engineID = "mock"
 	}
-
 	ts := &turnkeyServer{
 		plan:      plan,
 		mock:      mock,
@@ -482,6 +544,7 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 	mux.HandleFunc("/readyz", ts.handleReadyz)
 	mux.HandleFunc("/v1/models", ts.handleModels)
 	mux.HandleFunc("/v1/chat/completions", ts.handleChatCompletions)
+	mux.HandleFunc("/v1/fak/tokenize", ts.handleTokenize)
 
 	ts.httpServer = &http.Server{
 		Handler: mux,
@@ -531,6 +594,11 @@ func (s *turnkeyServer) handleModels(w http.ResponseWriter, r *http.Request) {
 		row["context_window"] = contextWindow
 		row["max_output_tokens"] = turnkeyMaxOutputTokens(uint64(contextWindow))
 	}
+	if turnkeyPromptEncodingAvailable(s) {
+		row["fak_capabilities"] = map[string]any{
+			"prompt_tokenization": map[string]any{"endpoint": "/v1/fak/tokenize"},
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -565,15 +633,11 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	s.mu.Lock()
-	if s.stopping {
-		s.mu.Unlock()
-		http.Error(w, "server is shutting down", http.StatusServiceUnavailable)
+	if !s.beginChatRequest() {
+		http.Error(w, "server stopping", http.StatusServiceUnavailable)
 		return
 	}
-	s.requests.Add(1)
-	s.mu.Unlock()
-	defer s.requests.Done()
+	defer s.endChatRequest()
 
 	var req gateway.ChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -599,22 +663,7 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 	var nativeReceipt *fakmodel.NativeInferenceReceipt
 
 	if !s.mock && s.planner != nil {
-		var sampleOpts []agent.SampleOpt
-		if req.MaxTokens > 0 {
-			maxTokens := min(req.MaxTokens, turnkeyMaxOutputTokens(s.plan.ContextBudgetTokens))
-			sampleOpts = append(sampleOpts, agent.WithMaxTokens(maxTokens))
-		}
-		if req.Temperature != nil {
-			sampleOpts = append(sampleOpts, agent.WithTemperature(req.Temperature))
-		}
-		sampleOpts = append(sampleOpts,
-			agent.WithTopP(req.TopP),
-			agent.WithToolChoice(req.ToolChoice),
-			agent.WithResponseFormat(req.ResponseFormat),
-			agent.WithLogitBias(req.LogitBias),
-			agent.WithFrequencyPenalty(req.FrequencyPenalty),
-			agent.WithPresencePenalty(req.PresencePenalty),
-		)
+		sampleOpts := turnkeyChatSampleOpts(req, s.plan.ContextBudgetTokens)
 		if req.Fak != nil {
 			sampleOpts = append(sampleOpts, agent.WithNativeInferenceReceipt(req.Fak.NativeInferenceReceipt))
 		}
@@ -647,7 +696,9 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 		if comp.FinishReason != "" {
 			finishReason = comp.FinishReason
 		}
-		if compTokens == 0 && answer.Content != "" {
+		if len(answer.ToolCalls) > 0 {
+			finishReason = "tool_calls"
+		} else if compTokens == 0 && answer.Content != "" {
 			compTokens = len(strings.Fields(answer.Content))
 			if compTokens == 0 {
 				compTokens = 1

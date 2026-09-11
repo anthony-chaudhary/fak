@@ -1783,10 +1783,6 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		}
 		requestStarted = time.Now()
 	}
-	maxNew := p.maxNew
-	if sp.MaxTokens != nil && *sp.MaxTokens > 0 {
-		maxNew = *sp.MaxTokens
-	}
 	temp := p.temp
 	if sp.Temperature != nil {
 		temp = *sp.Temperature
@@ -1819,12 +1815,12 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	if sp.NativeInferenceReceipt && (temp != 0 || topP != 0 || topK > 0 || len(logitBias) > 0 || freqPenalty != 0 || presPenalty != 0) {
 		return nil, &model.NativeInferenceReceiptUnsupportedError{Reason: "requires greedy sampling over unmodified logits"}
 	}
-	messages, tools, _ = p.ApplyPromptShrink(ctx, messages, tools, opts...)
-	chat := renderInKernelChatMLRequest(messages, tools, p.m.Cfg, sp.ResponseFormat, sp.ToolChoice, sp)
-	ids, err := p.tok.Encode(chat)
+	prepared, err := p.preparePrompt(ctx, messages, tools, sp, opts...)
 	if err != nil {
 		return nil, err
 	}
+	messages, tools = prepared.messages, prepared.tools
+	chat, ids, maxNew := prepared.rendered, prepared.ids, prepared.maxNew
 	if err := p.refuseContextLength(len(ids), maxNew); err != nil {
 		return nil, err
 	}
@@ -2206,8 +2202,13 @@ func (p *InKernelPlanner) executionIdentity() (backend, forwardPath string) {
 	if p.m != nil && p.m.Cfg.IsQwen35Hybrid() {
 		if p.backend != nil {
 			// Model.NewBackendSession has already validated the structural GDN
-			// contract before this request can complete. Name its stable path here.
-			forwardPath = model.Qwen35GDNCUDAPath
+			// contract before this request can complete. Preserve the selected
+			// backend's path instead of labeling every device as CUDA.
+			if gdn, ok := p.backend.(interface{ Qwen35GDNPath() string }); ok {
+				if path := gdn.Qwen35GDNPath(); model.IsSupportedQwen35GDNPath(path) {
+					forwardPath = path
+				}
+			}
 		} else if p.metal && p.qwen35MetalGDNExecuted.Load() {
 			forwardPath = model.Qwen35MetalGDNSequenceForwardPath
 		} else if p.metal {
