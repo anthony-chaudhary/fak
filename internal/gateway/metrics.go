@@ -41,6 +41,10 @@ type gatewayMetrics struct {
 	inflightMu  sync.Mutex
 	inflightReq map[uint64]inflightEntry
 	inflightSeq uint64
+	// progressReg is the live-heartbeat table (#12760) keyed by the
+	// beginInflight request id. attachProgress registers at stream start and
+	// endInflight unregisters at completion or cancel.
+	progressReg ProgressRegistry
 
 	// inferenceMu guards the model-inference accumulators. These count the REAL
 	// generation work every served chat/messages turn does (token counts, finish
@@ -465,6 +469,11 @@ type inflightEntry struct {
 	prefProg uint64
 	decProg  uint64
 	touched  int64
+	// prefTouched and decTouched are the per-phase last-tick markers (unix
+	// nano) backing the progress=1 per-phase ages. Zero means that phase has
+	// never ticked on this request; TouchInflightProgress refreshes both.
+	prefTouched int64
+	decTouched  int64
 }
 
 type httpMetricKey struct {
@@ -1221,6 +1230,54 @@ func (s *Server) logInferenceTurnWithContextEvent(traceID, wire string, stream b
 	}
 }
 
+// ProgressRegistry is the per-gateway live-heartbeat table keyed by the
+// beginInflight request id (#12760): attachProgress registers the heartbeat of
+// a stream at start, endInflight unregisters it at completion or cancel, so
+// the observation plane can always resolve a live row to its tick source.
+// Guarded by its own mutex, never held across a registry fold.
+type ProgressRegistry struct {
+	mu sync.Mutex
+	hb map[uint64]*heartbeatConfig
+}
+
+// RegisterProgress binds hb to id for the life of the stream. Nil-safe: a nil
+// receiver, a zero id, or a nil heartbeat is a no-op. Re-registering an id
+// replaces the prior heartbeat.
+func (m *gatewayMetrics) RegisterProgress(id uint64, hb *heartbeatConfig) {
+	if m == nil || id == 0 || hb == nil {
+		return
+	}
+	m.progressReg.mu.Lock()
+	if m.progressReg.hb == nil {
+		m.progressReg.hb = map[uint64]*heartbeatConfig{}
+	}
+	m.progressReg.hb[id] = hb
+	m.progressReg.mu.Unlock()
+}
+
+// UnregisterProgress drops the heartbeat bound to id. Always safe to call,
+// including for ids that were never registered or already retired.
+func (m *gatewayMetrics) UnregisterProgress(id uint64) {
+	if m == nil || id == 0 {
+		return
+	}
+	m.progressReg.mu.Lock()
+	delete(m.progressReg.hb, id)
+	m.progressReg.mu.Unlock()
+}
+
+// ProgressFor resolves the live heartbeat registered for id, reporting false
+// for unknown or already retired ids.
+func (m *gatewayMetrics) ProgressFor(id uint64) (*heartbeatConfig, bool) {
+	if m == nil || id == 0 {
+		return nil, false
+	}
+	m.progressReg.mu.Lock()
+	hb, ok := m.progressReg.hb[id]
+	m.progressReg.mu.Unlock()
+	return hb, ok
+}
+
 // beginInflight records a request as live and returns a token to release it with.
 // The returned id is 0 when m is nil so endInflight is always safe to defer.
 func (m *gatewayMetrics) beginInflight(route string, start time.Time) uint64 {
@@ -1242,6 +1299,7 @@ func (m *gatewayMetrics) endInflight(id uint64) {
 	m.inflightMu.Lock()
 	delete(m.inflightReq, id)
 	m.inflightMu.Unlock()
+	m.UnregisterProgress(id)
 }
 
 // SetInflightProgress folds the per-request progress tick pair (prefill ticks,
@@ -1250,15 +1308,25 @@ func (m *gatewayMetrics) endInflight(id uint64) {
 // messages_stream_passthrough.go content-delta relay) that reports live-stream
 // progress fate-side. A nil receiver, a zero id, or an id already retired by
 // endInflight is a no-op; the wire never resurrects a row for a dead id.
+// The per-phase stamps (prefTouched, decTouched) advance only when that phase
+// carries a nonzero count, so progress=1 can tell prefill-stalled from
+// decode-stalled.
 func (m *gatewayMetrics) SetInflightProgress(id uint64, pref, dec uint64) {
 	if m == nil || id == 0 {
 		return
 	}
+	now := time.Now().UnixNano()
 	m.inflightMu.Lock()
 	if e, ok := m.inflightReq[id]; ok {
 		e.prefProg = pref
 		e.decProg = dec
-		e.touched = time.Now().UnixNano()
+		e.touched = now
+		if pref > 0 {
+			e.prefTouched = now
+		}
+		if dec > 0 {
+			e.decTouched = now
+		}
 		m.inflightReq[id] = e
 	}
 	m.inflightMu.Unlock()
@@ -1267,9 +1335,21 @@ func (m *gatewayMetrics) SetInflightProgress(id uint64, pref, dec uint64) {
 // TouchInflightProgress marks a live request as still moving without new tick
 // counts: the prefill/decode phase boundary (markStreamStart) and silent
 // keep-alive ticks ride through here so last-progress-age stays truthful even
-// when a phase delivers no new counts.
+// when a phase delivers no new counts. Counts are preserved; only the
+// liveness markers advance.
 func (m *gatewayMetrics) TouchInflightProgress(id uint64) {
-	m.SetInflightProgress(id, 0, 0)
+	if m == nil || id == 0 {
+		return
+	}
+	now := time.Now().UnixNano()
+	m.inflightMu.Lock()
+	if e, ok := m.inflightReq[id]; ok {
+		e.touched = now
+		e.prefTouched = now
+		e.decTouched = now
+		m.inflightReq[id] = e
+	}
+	m.inflightMu.Unlock()
 }
 
 // RequestSnapshot is one live in-flight request's observability record, the
@@ -1302,6 +1382,15 @@ type RequestSnapshot struct {
 	DecProg           uint64 `json:"decode_progress,omitempty"`
 	TouchedUnixNanos  int64  `json:"last_progress_unix_nanos,omitempty"`
 	LastProgressAgeMs *int64 `json:"last_progress_age_ms,omitempty"`
+	// PrefillChunks and DecodeChunks mirror the folded per-phase tick counts
+	// while LastPrefillAgeMs and LastDecodeAgeMs measure per-phase liveness,
+	// so a watcher can tell prefill-stalled from decode-stalled. Zero and nil
+	// mean unknown; the progress=0 projection drops them so the T1 envelope
+	// stays byte-identical.
+	PrefillChunks    uint64 `json:"prefill_chunks,omitempty"`
+	DecodeChunks     uint64 `json:"decode_chunks,omitempty"`
+	LastPrefillAgeMs *int64 `json:"last_prefill_age_ms,omitempty"`
+	LastDecodeAgeMs  *int64 `json:"last_decode_age_ms,omitempty"`
 }
 
 // inflightAgeFloorMs is the snapshot age floor: a beginInflight-to-snapshot
@@ -1348,6 +1437,24 @@ func (m *gatewayMetrics) SnapshotInflight(now time.Time) []RequestSnapshot {
 			}
 			lp := age / int64(time.Millisecond)
 			row.LastProgressAgeMs = &lp
+			if e.prefTouched != 0 {
+				row.PrefillChunks = e.prefProg
+				pa := now.UnixNano() - e.prefTouched
+				if pa < 0 {
+					pa = 0
+				}
+				pam := pa / int64(time.Millisecond)
+				row.LastPrefillAgeMs = &pam
+			}
+			if e.decTouched != 0 {
+				row.DecodeChunks = e.decProg
+				da := now.UnixNano() - e.decTouched
+				if da < 0 {
+					da = 0
+				}
+				dam := da / int64(time.Millisecond)
+				row.LastDecodeAgeMs = &dam
+			}
 		}
 		out = append(out, row)
 	}
