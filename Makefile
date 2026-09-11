@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build build-all cross-build-harnessres clean vet architest-gate test test-fast test-integration test-airgap smoke-build test-fast-build-regression test-affected test-durations test-race bench mac-perf status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent dogfood-test smoke-exec smoke performance-rsi-health vcache-gate cache-default-readiness gitdaily-score claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept cuda-occupancy
+.PHONY: ci build build-all cross-build-harnessres clean vet architest-gate test test-fast test-integration test-airgap smoke-build test-fast-build-regression test-affected test-durations test-race bench mac-perf status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent dogfood-test smoke-exec smoke performance-rsi-health vcache-gate cache-default-readiness gitdaily-score claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests metal-check cuda-check cuda-build cuda-test cuda-accept cuda-occupancy
 
 VERIFY_LOOP_BUDGET ?= 30s
 SMOKE_BUILD_BUDGET ?= 2m
@@ -200,6 +200,16 @@ mac-perf: build
 	@./fak macbench validate-comparison --input experiments/benchmark/runs/by-machine/node-macos-a/20260903T050000Z-macbench-threeway/packet.json --json
 	@./fak macbench validate-agentic-mtp --input experiments/benchmark/runs/by-machine/node-macos-a/20260908T170000Z-macbench-agentic-mtp/packet.json --json
 	@echo "mac-perf OK (Apple Silicon Metal tok/s, prefill, and 24-agent MTP comparative performance verified)"
+
+# metal-check: the fail-loud cgo device/build gate for the Metal prefill backend
+# (internal/metalgemm). Verifies cgo, Xcode CLT, clang, and the go toolchain on
+# darwin/arm64, then compiles-and-runs the cmd/metalprobe/linkcheck cgo probe leaf
+# and prints one verdict. Missing prerequisite => exit 1 naming it; compiled-but-no-
+# device is a labeled CPU-fallback pass; any other GOOS/GOARCH (windows/amd64
+# included) is a portable not-applicable exit 0. Deterministic, GPU-optional.
+metal-check:
+	@go run ./cmd/metalprobe
+	@echo "metal-check OK"
 
 # status: the cross-domain "where do we stand right now?" rollup — folds git +
 # benchmarks + work + industry into ONE control-pane view (the sibling of
