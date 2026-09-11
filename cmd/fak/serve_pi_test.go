@@ -27,8 +27,8 @@ func TestServePiConfigPrintsSnippet(t *testing.T) {
 	if !strings.Contains(out, `"openai-completions"`) {
 		t.Errorf("expected openai-completions in output: %s", out)
 	}
-	if !strings.Contains(out, `"DeveloperRole": false`) {
-		t.Errorf("expected DeveloperRole: false in output: %s", out)
+	if !strings.Contains(out, `"supportsDeveloperRole": false`) {
+		t.Errorf("expected supportsDeveloperRole: false in output: %s", out)
 	}
 }
 
