@@ -149,6 +149,7 @@ type Supervisor struct {
 	httpServer *http.Server
 	listener   net.Listener
 	boundAddr  string
+	mockChat   bool
 	unpackDir  string
 
 	activeSessions sync.WaitGroup
@@ -197,6 +198,16 @@ func (s *Supervisor) Addr() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.boundAddr
+}
+
+// ServesChatCompletions reports whether the supervisor HTTP mux registers the
+// OpenAI-compatible /v1/chat/completions route. Only the explicit mock path
+// serves it; real and custom-engine modes install no implicit proxy route, so
+// callers must check this before advertising the endpoint.
+func (s *Supervisor) ServesChatCompletions() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.mockChat
 }
 
 // TrackChildProcesses inspects all child processes declared in the supervisor topology
@@ -685,6 +696,8 @@ func (s *Supervisor) Start(ctx context.Context) error {
 		s.engine = eng
 		s.health.SetStatus(SubsystemInference, true, "")
 	}
+
+	s.mockChat = mockChat
 
 	// 5. Initialize HTTP Server and routes
 	mux := http.NewServeMux()
