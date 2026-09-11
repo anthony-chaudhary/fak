@@ -4,7 +4,7 @@
   "autoupdate": false,
   "snapshot": false,
   "subagent_depth": 2,
-  "model": "fak/qwen-2.5-coder-32b-instruct",
+  "model": "hive-ai/zai-org/glm-5.3-flash",
   "instructions": [
     "AGENTS.md"
   ],
@@ -113,6 +113,23 @@
     "dos_*": "allow"
   },
   "provider": {
+    "hive-ai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Hive AI (Z.ai GLM-5.3-Flash)",
+      "options": {
+        "apiKey": "{env:HIVE_API_KEY}",
+        "baseURL": "https://api-cdn.thehive.ai/api/v3"
+      },
+      "models": {
+        "zai-org/glm-5.3-flash": {
+          "name": "Z.ai GLM-5.3-Flash",
+          "limit": {
+            "context": 1048576,
+            "output": 131072
+          }
+        }
+      }
+    },
     "fak": {
       "npm": "@ai-sdk/openai-compatible",
       "name": "FAK Strix Halo (local)",
