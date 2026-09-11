@@ -22,8 +22,19 @@ const (
 	WorkProfilePonytailHeadlessHigh = "ponytail:headless:high"
 )
 
-// AutonomousActionBiasDirective defines the prompt contract prohibiting conversational pauses in unattended/headless mode (#11519).
+// AutonomousActionBiasDirective defines the prompt contract prohibiting conversational
+// pauses. It is applied in BOTH modes: unattended/headless runs carry it verbatim (#11519),
+// and the DEFAULT native profile now carries it too so a DeepSeek-class default agent
+// completes work to verified completion instead of pausing to ask clarifying questions.
+// The "interactive" wording is deliberate even in attended runs: the standing operator
+// preference is autonomous completion by default, with the escalate-on-authority carve-out
+// (credentials, destructive/irreversible actions, policy) still refusing to act when a
+// human decision is genuinely required.
 const AutonomousActionBiasDirective = "Never stop to ask interactive questions; resolve ambiguities by minimal reversible action and checkable artifacts."
+
+// AutonomousActionBiasNativeLeadIn is the mode-neutral lead-in for the native/attended
+// default profile so the directive reads correctly outside unattended runs.
+const AutonomousActionBiasNativeLeadIn = "Operate with autonomous action bias: "
 
 // AutonomousActionBiasFragment aliases AutonomousActionBiasDirective.
 const AutonomousActionBiasFragment = AutonomousActionBiasDirective
@@ -66,16 +77,19 @@ type WorkProfileReadout struct {
 
 var workProfileFragments = map[string]string{
 	WorkProfilePonytailNativeLow: `Work profile: Ponytail-inspired, native, low intensity.
+Operate with autonomous action bias: Never stop to ask interactive questions; resolve ambiguities by minimal reversible action and checkable artifacts.
 Before adding machinery, briefly check whether existing code, configuration, or deletion solves the task more simply. Prefer the smallest correct implementation.
 When encountering ambiguity, prioritize minimal reversible action and test verification over freezing or speculation. Focus on single atomic reproduction tests, prohibit sprawling 20-test suites when 1 witness suffices, and prevent token exhaustion.
 This profile never overrides explicit requirements, repository instructions, policy, security, compatibility, migrations, tests, diagnostics, or evidence.`,
 	WorkProfilePonytailNativeMed: `Work profile: Ponytail-inspired, native, medium intensity.
+Operate with autonomous action bias: Never stop to ask interactive questions; resolve ambiguities by minimal reversible action and checkable artifacts.
 Challenge unnecessary additions. In order, consider: no code change, deletion, configuration, existing project primitives, standard library, then new machinery. Stop at the first option that completely and correctly satisfies the task. When the user or task explicitly requests implementing, adding, or modifying functionality, bypass 'no code change' and proceed to the minimal correct implementation.
 When encountering ambiguity, prioritize minimal reversible action and test verification over freezing or speculation. Calibrate test breadth: focus on single atomic reproduction tests, prohibit sprawling 20-test suites when 1 witness suffices, and prevent token exhaustion.
 Divide and conquer: decompose substantive or multi-component tasks into atomic single-concern units or isolated subagents; keep coordinator context clean, isolate file sets, and integrate only witnessed results.
 Ship green work autonomously: synchronize safely with trunk before and during work, verify green with on-device tests, stage-and-commit by explicit path, and push verified commits unprompted.
 Do not optimize for fewer lines alone. Preserve explicit requirements, repository instructions, policy, security, correctness, compatibility, migrations, tests, diagnostics, and evidence.`,
 	WorkProfilePonytailNativeHigh: `Work profile: Ponytail-inspired, native, high intensity.
+Operate with autonomous action bias: Never stop to ask interactive questions; resolve ambiguities by minimal reversible action and checkable artifacts.
 Actively resist accidental complexity. State the required outcome, test the simplest viable route, and prefer deletion or reuse over addition. Use configuration before code, project primitives before dependencies, and standard library before new abstractions. Add machinery only when the simpler rung cannot meet the requirement; stop once the smallest complete solution is witnessed.
 When encountering ambiguity, prioritize minimal reversible action and test verification over freezing or speculation. Calibrate test breadth strictly: focus on single atomic reproduction tests, prohibit sprawling 20-test suites when 1 witness suffices, avoid speculative matrix coverage, and prevent token exhaustion.
 Divide and conquer: decompose substantive or multi-component tasks into atomic single-concern units or isolated subagents; keep coordinator context clean, isolate file sets, and integrate only witnessed results.

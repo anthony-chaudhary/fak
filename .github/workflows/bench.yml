@@ -60,13 +60,15 @@ jobs:
         run: |
           go test \
             -run='^$' \
-            -bench='^(BenchmarkDecide|BenchmarkAdjudicateArgScaling|BenchmarkRegistryReadScaling|BenchmarkScreenBytesBenign|BenchmarkAdmitBenign|BenchmarkPropose|BenchmarkApply|BenchmarkWorkflowMemory)$' \
+            -bench='^(BenchmarkDecide|BenchmarkAdjudicateArgScaling|BenchmarkRegistryReadScaling|BenchmarkScreenBytesBenign|BenchmarkAdmitBenign|BenchmarkPropose|BenchmarkApply|BenchmarkWorkflowMemory|BenchmarkDecodeEmitCheckStop|BenchmarkDecodeEmitAccumulate|BenchmarkElideStaleReadScan|BenchmarkMetricsObserveHTTP|BenchmarkSSEChunkFlush)$' \
             -benchmem -count=6 -timeout=10m \
             ./internal/adjudicator/... \
             ./internal/abi/... \
             ./internal/ctxmmu/... \
             ./internal/wirescreen/... \
             ./internal/contextq/... \
+            ./internal/agent/... \
+            ./internal/gateway/... \
             | tee bench-results.txt
           echo "--- benchmark lines ---"
           grep -E '^(Benchmark|goos|goarch|pkg|cpu)' bench-results.txt || true
