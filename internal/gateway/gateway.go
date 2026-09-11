@@ -1399,7 +1399,7 @@ func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, mes
 		return nil, err
 	}
 	defer lease.Release()
-	comp, err := s.complete(ctx, turn.traceID, messages, tools, opts...)
+	comp, err := s.completeWithFirstTokenWatchdog(ctx, turn.traceID, messages, tools, opts...)
 	if err != nil {
 		// Preserve request-local execution metadata on failures. Callers still
 		// receive the original error, while buffered/streaming HTTP paths can
@@ -1411,4 +1411,35 @@ func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, mes
 	lease.SettleUsage(comp.Usage)
 	s.debitServedSessionTurn(ctx, turn, comp.Usage, time.Since(began), messages)
 	return comp, nil
+}
+
+// completeWithFirstTokenWatchdog runs the buffered planner call under a bounded FIRST-TOKEN
+// window. A buffered completion writes no byte until completeServed returns, so for a
+// buffered turn the first token IS the completion — there is nothing else to observe while
+// the planner prefill runs. The window is the streaming default (agent.FirstTokenWatchdogTimeout),
+// so a wedged or slow-prefill planner fails loud as a typed UpstreamStalledError{first-token}
+// (mapped by upstreamErrorStatus to the same 504 upstream_stalled surface) instead of hanging
+// silently for the whole planner timeout.
+//
+// The planner call stays on the CALLING goroutine — it must not move to a watchdog goroutine,
+// because complete's recover re-panics non-evict panics for the outermost withMetrics handler
+// to contain and record (#2336), and a panic raised on a helper goroutine would bypass that
+// recovery and crash the process instead. The deadline is therefore enforced through a derived
+// context: a ctx-honoring planner (the in-kernel decode parks on ctx.Done) unblocks at the
+// window, and the elapsed derived deadline is converted to the typed first-token error. A
+// genuine client cancel (ctx.Err() != nil) is returned as the ctx error, never misreported as
+// a first-token stall.
+func (s *Server) completeWithFirstTokenWatchdog(ctx context.Context, traceID string, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	window := agent.FirstTokenWatchdogTimeout()
+	if s.firstTokenWatchdog != nil {
+		window = s.firstTokenWatchdog()
+	}
+	wctx, cancel := context.WithTimeout(ctx, window)
+	defer cancel()
+	comp, err := s.complete(wctx, traceID, messages, tools, opts...)
+	if err != nil && ctx.Err() == nil && errors.Is(wctx.Err(), context.DeadlineExceeded) &&
+		(errors.Is(err, context.DeadlineExceeded) || errors.Is(err, agent.ErrUpstreamStalled)) {
+		return nil, agent.NewFirstTokenStalledError(window)
+	}
+	return comp, err
 }
