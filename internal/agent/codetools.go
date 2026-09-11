@@ -84,17 +84,18 @@ func ArmFocusedCodeTools(root string) ([]ToolDef, error) {
 
 // ArmCodeToolsWithSkills arms coding tools and discovers skills in root plus extraDirs.
 func ArmCodeToolsWithSkills(root string, focused bool, extraDirs ...string) ([]ToolDef, error) {
-	return armCodeToolsFull(root, focused, true, nil, extraDirs...)
+	return armCodeToolsFull(root, focused, false, true, nil, extraDirs...)
 }
 
 func armCodeTools(root string, focused bool) ([]ToolDef, error) {
-	return armCodeToolsFull(root, focused, true, nil)
+	return armCodeToolsFull(root, focused, false, true, nil)
 }
 
 // CodeToolsOptions configures coding tools and skills arming.
 type CodeToolsOptions struct {
 	Root                 string
 	Focused              bool
+	ExactCommandsOnly    bool
 	EnableSkills         bool
 	SkillsDir            string
 	ExtraDirs            []string
@@ -111,7 +112,7 @@ func ArmCodeToolsWithOptions(opts CodeToolsOptions) ([]ToolDef, error) {
 		extraDirs = append(extraDirs, opts.SkillsDir)
 	}
 	extraDirs = append(extraDirs, opts.ExtraDirs...)
-	defs, err := armCodeToolsFull(opts.Root, opts.Focused, opts.EnableSkills, opts.ExactAllowedCommands, extraDirs...)
+	defs, err := armCodeToolsFull(opts.Root, opts.Focused, opts.ExactCommandsOnly, opts.EnableSkills, opts.ExactAllowedCommands, extraDirs...)
 	if err != nil {
 		return nil, err
 	}
@@ -133,10 +134,11 @@ func ArmCodeToolsWithOptions(opts CodeToolsOptions) ([]ToolDef, error) {
 	return defs, nil
 }
 
-func armCodeToolsFull(root string, focused bool, enableSkills bool, exactAllowedCommands []string, extraDirs ...string) ([]ToolDef, error) {
+func armCodeToolsFull(root string, focused, exactCommandsOnly, enableSkills bool, exactAllowedCommands []string, extraDirs ...string) ([]ToolDef, error) {
 	ts, err := codetools.New(codetools.Config{
 		Root:                 root,
 		FocusedCommands:      focused,
+		ExactCommandsOnly:    exactCommandsOnly,
 		ExactAllowedCommands: exactAllowedCommands,
 	})
 	if err != nil {

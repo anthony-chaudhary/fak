@@ -64,7 +64,10 @@ func (t *Toolset) bash(ctx context.Context, body []byte) ([]byte, bool) {
 	if r := decodeArgs(body, &a); r != nil {
 		return r.JSON(), true
 	}
-	if t.focusedCommands && !(focusedCommandAllowed(a.Command) || t.exactCommandAllowed(a.Command)) {
+	if t.exactCommandsOnly && !t.exactCommandAllowed(a.Command) {
+		return refuse(CodeCommandDeny, "command is outside the exact command allowlist").JSON(), true
+	}
+	if !t.exactCommandsOnly && t.focusedCommands && !(focusedCommandAllowed(a.Command) || t.exactCommandAllowed(a.Command)) {
 		return refuse(CodeCommandDeny, "command is outside the focused coding allowlist").JSON(), true
 	}
 	if r := a.Validate(); r != nil {
