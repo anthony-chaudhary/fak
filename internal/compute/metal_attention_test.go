@@ -131,12 +131,18 @@ func TestMetalAttentionPipelineBarriers(t *testing.T) {
 }
 
 // TestMetalAttentionExecution verifies numerical correctness of threadgroup-tiled
-// FlashAttention against cpuref reference when Metal device is available.
+// FlashAttention against cpuref reference when Metal device is available. Guarded by
+// the same fail-loud contract as metalOrSkip: with FAK_METAL_REQUIRE_DEVICE=1 an
+// unregistered device is a hard failure naming the availability verdict, never a silent
+// downgrade to CPU that the cosine parity gate could not catch.
 func TestMetalAttentionExecution(t *testing.T) {
 	mb := Pick("metal")
 	be, ok := mb.(*metalBackend)
-	if !ok {
-		t.Log("Metal backend device not registered on this host; hardware-gated execution deferred to physical node (software witness verified)")
+	if fatal, skip := metalGuardVerdict(ok, mb.Tier()); fatal != "" || skip != "" {
+		if fatal != "" {
+			t.Fatal(fatal)
+		}
+		t.Log(skip)
 		return
 	}
 

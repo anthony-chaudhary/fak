@@ -104,11 +104,19 @@ func TestMetalMatMulRejectsEitherNonF32OperandBeforeDeviceUse(t *testing.T) {
 // (compute_test.go). The synth harness is mtl-prefixed so it never collides with the
 // cuda-tagged copy in a hypothetical combined-tags build.
 
+// metalAvailabilityVerdict and metalGuardVerdict live in metal_guard_test.go (build-tag-free)
+// so the fail-loud guard contract is testable on every host via the metalgemm stub.
+
+// metalOrSkip is the Metal build of the vk(t) helper: same fail-loud guard contract,
+// so a Metal regression routed to CPU cannot silently pass as a skip.
 func metalOrSkip(t *testing.T) *metalBackend {
 	be := Pick("metal")
 	mb, ok := be.(*metalBackend)
-	if !ok {
-		t.Skip("metal backend not registered (no reachable Metal device)")
+	if fatal, skip := metalGuardVerdict(ok, mb.Tier()); fatal != "" || skip != "" {
+		if fatal != "" {
+			t.Fatal(fatal)
+		}
+		t.Skip(skip)
 	}
 	if RequireReference(mb) {
 		t.Fatal("metal backend must be Approx, not Reference")
@@ -720,5 +728,58 @@ func TestMetalAttention(t *testing.T) {
 			}
 			t.Logf("nPos=%d cosine=%.8f maxAbs=%.2e", nPos, c, mtlMaxAbsDelta(outRef, outMt))
 		})
+	}
+}
+
+// TestMetalGuardRequireDeviceFailsLoudOnMetalLessHost pins the fail-loud guard contract
+// on the decision core (GG#12783). Pick one branch per env shape, chosen against the real
+// availability verdict, so the test exercises the guard on every host:
+//   - stub build (`FAK_METAL_REQUIRE_DEVICE=1`, no registered device) → fatal with the
+//     "built without darwin/arm64 cgo" two-state reason;
+//   - darwin/arm64 device-less host → fatal with "no usable Metal device";
+//   - registered device (vacuous here) → pass-through, nothing to guard.
+func TestMetalGuardRequireDeviceFailsLoudOnMetalLessHost(t *testing.T) {
+	_, registered := Lookup("metal")
+	if registered {
+		t.Skip("metal backend registered on this host; fail-loud path is vacuous here")
+	}
+	t.Setenv("FAK_METAL_REQUIRE_DEVICE", "1")
+	fatal, skip := metalGuardVerdict(false, "")
+	if fatal == "" || skip != "" {
+		t.Fatalf("guard with FAK_METAL_REQUIRE_DEVICE=1 on unregistered device = (%q, %q), want fatal naming the reason, no skip", fatal, skip)
+	}
+	if !strings.Contains(fatal, "required Metal device is not registered") ||
+		(!strings.Contains(fatal, "built without darwin/arm64 cgo") && !strings.Contains(fatal, "no usable Metal device")) {
+		t.Fatalf("fatal %q must name the two-state availability reason (compiled-out OR no device)", fatal)
+	}
+}
+
+// TestMetalGuardUnsetEnvPreservesSkip pins the unset-env byte-compatibility rung: without
+// FAK_METAL_REQUIRE_DEVICE an unregistered device must still be a plain skip with the
+// original message, so CPU-only CI sees zero test churn.
+func TestMetalGuardUnsetEnvPreservesSkip(t *testing.T) {
+	_, registered := Lookup("metal")
+	if registered {
+		t.Skip("metal backend registered on this host; skip path is vacuous here")
+	}
+	t.Setenv("FAK_METAL_REQUIRE_DEVICE", "")
+	fatal, skip := metalGuardVerdict(false, "")
+	if skip != "metal backend not registered (no reachable Metal device)" || fatal != "" {
+		t.Fatalf("guard with guard unset on unregistered device = (%q, %q), want the original skip verbatim, no fatal", fatal, skip)
+	}
+}
+
+// TestMetalGuardExpectDeviceTierMismatch pins the tier-match rung: with the guard armed
+// and FAK_METAL_EXPECT_DEVICE naming a tier the registered device's label does not
+// contain, the guard must fail with expected vs actual names.
+func TestMetalGuardExpectDeviceTierMismatch(t *testing.T) {
+	if _, registered := Lookup("metal"); !registered {
+		t.Skip("no metal backend registered on this host; tier-match path is device-gated")
+	}
+	t.Setenv("FAK_METAL_REQUIRE_DEVICE", "1")
+	t.Setenv("FAK_METAL_EXPECT_DEVICE", "DefinitelyNotThisTierLabel")
+	fatal, skip := metalGuardVerdict(true, Pick("metal").Tier())
+	if fatal == "" || skip != "" || !strings.Contains(fatal, "DefinitelyNotThisTierLabel") {
+		t.Fatalf("guard with mismatched FAK_METAL_EXPECT_DEVICE = (%q, %q), want fatal naming the expected tier", fatal, skip)
 	}
 }
