@@ -50,6 +50,38 @@ else
     pass "no .sha256 sidecars -> verifier fails"
 fi
 
+# --- v0.55.0 regression: dist/-prefixed checksum lines ------------------------
+# release-macos.yml ran shasum from dist/, so the universal sidecar's CONTENT
+# (and any aggregate line folded from it) names the archive
+# "dist/fak_X_darwin_universal.tar.gz". Verified from the flat assets dir that
+# made `sha256sum -c` look for <assets>/dist/... -> "No such file or
+# directory" -> the whole verify job red -> the release quarantined
+# (v0.55.0 run 102720128853). The verifier now normalizes one leading dist/
+# off the name field; these cases pin that both aggregate and sidecar forms
+# verify clean, while real corruption and malformed lines still fail.
+v55="$tmpd/v55"
+mkdir -p "$v55"
+echo "universal payload" >"$v55/fak_0.55.0_darwin_universal.tar.gz"
+vh="$(cd "$v55" && sha256sum fak_0.55.0_darwin_universal.tar.gz | cut -d' ' -f1)"
+printf '%s  dist/fak_0.55.0_darwin_universal.tar.gz\n' "$vh" >"$v55/SHA256SUMS"
+printf '%s  dist/fak_0.55.0_darwin_universal.tar.gz\n' "$vh" >"$v55/fak_0.55.0_darwin_universal.tar.gz.sha256"
+if bash "$SCRIPT" "$v55" >/dev/null 2>&1; then
+    pass "dist/-prefixed aggregate + sidecar verify clean (v0.55.0 regression)"
+else
+    fail "dist/-prefixed checksum lines should verify clean after normalization"
+fi
+
+mixed="$tmpd/mixed"
+mkdir -p "$mixed"
+echo "mixed payload" >"$mixed/a.tar.gz"
+mh="$(cd "$mixed" && sha256sum a.tar.gz | cut -d' ' -f1)"
+printf '%s  a.tar.gz\n%s  dist/a.tar.gz\n' "$mh" "$mh" >"$mixed/SHA256SUMS"
+printf '%s  a.tar.gz\n' "$mh" >"$mixed/a.tar.gz.sha256"
+if bash "$SCRIPT" "$mixed" >/dev/null 2>&1; then
+    pass "mixed bare + dist/-prefixed aggregate verifies clean"
+else
+    fail "mixed bare + dist/-prefixed aggregate should verify clean"
+fi
 echo
 if [[ "$fails" -eq 0 ]]; then
     echo "ALL PASS"
