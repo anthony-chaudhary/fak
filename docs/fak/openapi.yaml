@@ -1385,7 +1385,52 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+
+  /v1/fak/observation/requests:
+    get:
+      tags: [fak-native]
+      summary: Snapshot every live in-flight request (id, route, start, elapsed)
+      description: |
+        The per-request arm of the observation family (`/v1/fak/observation`
+        carries the aggregate source envelopes): one point-in-time copy of the
+        gateway's live-request registry, so an agent or operator watcher can
+        answer "what is being served right now, for how long" without scraping
+        `/metrics` text. Records are sorted oldest-first by start time; beyond
+        the 256-record cap the newest entries are kept.
+
+        The route contains timing and the metrics route label only: no
+        payloads, URLs, credentials, prompts, or transcript text. It uses the
+        same observability auth floor as `/v1/fak/observation` and
+        `/metrics`: loopback reads may be anonymous; off-box reads require
+        the gateway bearer or the read-scoped bearer.
+      responses:
+        '200':
+          description: The versioned in-flight request snapshot (possibly empty while idle).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schema, count, requests]
+                properties:
+                  schema: { type: string }
+                  count:
+                    type: integer
+                    description: Number of records in `requests` (a clean zero is data).
+                  requests:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, route, start_unix_nanos, elapsed_ms]
+                      properties:
+                        id: { type: integer }
+                        route: { type: string }
+                        start_unix_nanos: { type: integer }
+                        elapsed_ms: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
   /v1/fak/loops:
+
     get:
       tags: [fak-native]
       summary: Snapshot every supervised in-kernel background loop

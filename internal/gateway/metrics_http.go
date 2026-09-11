@@ -142,7 +142,11 @@ func (s *Server) withMetrics(next http.Handler) http.Handler {
 		// only after it completes into the latency histogram. route is derived from
 		// the path up front (routeForMetrics is pure), matching the completion-time
 		// label below.
-		if route != "/metrics" {
+		// The self-observation reads are excluded along with /metrics: the
+		// watcher polls /v1/fak/observation/requests on a cadence, and its own
+		// 24/7 row would drown the served traffic it exists to inspect and
+		// dominate fak_gateway_inflight_max_age_seconds (metrics_render.go).
+		if route != "/metrics" && route != "/v1/fak/observation" && route != "/v1/fak/observation/requests" {
 			liveID := s.metrics.beginInflight(route, start)
 			defer s.metrics.endInflight(liveID)
 		}
@@ -419,7 +423,7 @@ func routeForMetrics(path string) string {
 		"/v1/fak/syscall", "/v1/fak/adjudicate", "/v1/fak/admit",
 		"/v1/fak/changes", "/v1/fak/session/changes", "/v1/fak/revoke", "/v1/fak/policy/reload",
 		"/v1/fak/route/reload", "/v1/fak/trace/reset", "/v1/models", "/mcp", "/healthz", "/metrics",
-		"/debug/vars":
+		"/debug/vars", "/v1/fak/observation", "/v1/fak/observation/requests":
 		return path
 	default:
 		if strings.HasPrefix(path, "/v1/fak/") {
@@ -429,5 +433,73 @@ func routeForMetrics(path string) string {
 			return "/v1beta/*"
 		}
 		return "other"
+	}
+}
+
+// observationRequestsSchemaV1 is the compatibility contract for the
+// per-request in-flight read: the same wire versioning posture as the
+// aggregate /v1/fak/observation snapshot.
+const observationRequestsSchemaV1 = "fak.observation.requests.v1"
+
+// maxObservationRequests bounds the per-request read: the watcher wants "what
+// is running right now", not an unbounded dump. Beyond the cap the OLDEST
+// entries are dropped (the newest-by-start records survive), so a saturated
+// gateway still answers the question about the freshest traffic.
+const maxObservationRequests = 256
+
+// observationRequestsWire is the JSON envelope of GET
+// /v1/fak/observation/requests: a schema tag, the record count (equal to len
+// (requests) — a clean zero is data, not a null), and the in-flight records
+// sorted oldest-first with the newest 256 kept.
+type observationRequestsWire struct {
+	Schema   string            `json:"schema"`
+	Count    int               `json:"count"`
+	Requests []RequestSnapshot `json:"requests"`
+}
+
+// handleFakObservationRequests is the per-request arm of the observation
+// family (/v1/fak/observation carries the aggregate envelopes): a bounded,
+// point-in-time copy of the live-request registry. Payload-free by
+// construction (route + timing only). Read scope follows the same auth floor
+// as the aggregate read.
+func (s *Server) handleFakObservationRequests(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	writeJSON(w, http.StatusOK, s.observationRequests(time.Now()))
+}
+
+// observationRequests builds the wire envelope from the registry snapshot.
+// Split from the handler so the envelope shape and the oldest-dropping cap
+// are testable without an HTTP round-trip.
+func (s *Server) observationRequests(now time.Time) observationRequestsWire {
+	// newObservationTestServer-style nil tolerance: a Server whose metrics
+	// was never allocated observes an idle (empty) registry, mirroring the
+	// aggregate read's posture.
+	m := s.metrics
+	if m == nil {
+		m = newGatewayMetrics(now)
+	}
+	reqs := m.SnapshotInflight(now)
+	if len(reqs) > maxObservationRequests {
+		// SnapshotInflight is oldest-first; the cap keeps the newest.
+		reqs = reqs[len(reqs)-maxObservationRequests:]
+	}
+	if reqs == nil {
+		reqs = []RequestSnapshot{}
+	}
+	// Serve a defensive copy on a non-nil backing array: the wire slice
+	// handed to writeJSON must neither alias a future snapshot's backing
+	// array nor encode as null when idle (a clean zero is [], not null).
+	if reqs == nil {
+		reqs = []RequestSnapshot{}
+	}
+	copyReqs := make([]RequestSnapshot, len(reqs))
+	copy(copyReqs, reqs)
+	reqs = copyReqs
+	return observationRequestsWire{
+		Schema:   observationRequestsSchemaV1,
+		Count:    len(reqs),
+		Requests: reqs,
 	}
 }

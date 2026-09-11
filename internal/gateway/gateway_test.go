@@ -688,7 +688,7 @@ func TestMetricsAndVarsLoopbackExempt(t *testing.T) {
 	}
 	h := srv.Handler()
 
-	for _, path := range []string{"/metrics", "/debug/vars", "/v1/fak/observation"} {
+	for _, path := range []string{"/metrics", "/debug/vars", "/v1/fak/observation", "/v1/fak/observation/requests"} {
 		// Loopback peer, no token -> allowed.
 		loop := httptest.NewRecorder()
 		rl := httptest.NewRequest("GET", path, nil)

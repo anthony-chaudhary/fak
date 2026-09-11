@@ -137,6 +137,10 @@ func (s *Server) routeTable() []gatewayRoute {
 		// point-in-time set of typed source envelopes for sessions, cache
 		// attribution, managed-cache posture, and harness resources.
 		{"/v1/fak/observation", s.handleFakObservation},
+		// /v1/fak/observation/requests is the per-request arm of the observation
+		// family: one bounded snapshot of the live-request registry (id, route,
+		// start, elapsed). GET, read-only, payload-free (route + timing only).
+		{"/v1/fak/observation/requests", s.handleFakObservationRequests},
 		{"/v1/fak/fleet", s.handleFakFleet},
 		// /v1/fak/tasks is the read-only process task-manager snapshot. Inert (404)
 		// unless a host installs a provider via SetTasksSnapshotProvider and the
@@ -507,7 +511,7 @@ func requestFromLAN(r *http.Request) bool {
 // surface here widens both at once, which is the intent.
 func readScopedPath(r *http.Request) bool {
 	switch r.URL.Path {
-	case "/metrics", "/debug/vars", "/v1/fak/observation", "/v1/fak/arms", "/v1/fak/arms/traffic":
+	case "/metrics", "/debug/vars", "/v1/fak/observation", "/v1/fak/observation/requests", "/v1/fak/arms", "/v1/fak/arms/traffic":
 		return true
 	}
 	return false

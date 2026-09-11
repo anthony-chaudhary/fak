@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1233,6 +1234,51 @@ func (m *gatewayMetrics) endInflight(id uint64) {
 	m.inflightMu.Lock()
 	delete(m.inflightReq, id)
 	m.inflightMu.Unlock()
+}
+
+// RequestSnapshot is one live in-flight request's observability record: the
+// registry id, the serving route it entered by, and its start wall-clock plus
+// elapsed milliseconds at snapshot time. Payload-free by construction (route +
+// timing only, the privacy floor the /v1/fak observation family holds), so a
+// watcher can answer "what is being served right now, and for how long".
+type RequestSnapshot struct {
+	// ID is the beginInflight registry token; unique among LIVE entries but
+	// reused across the process lifetime once a request retires.
+	ID uint64 `json:"id"`
+	// Route is the metrics label (routeForMetrics), not a raw URL.
+	Route string `json:"route"`
+	// StartUnixNanos is the request's start wall-clock, UnixNano form.
+	StartUnixNanos int64 `json:"start_unix_nanos"`
+	// ElapsedMs is milliseconds since StartUnixNanos at snapshot time.
+	ElapsedMs int64 `json:"elapsed_ms"`
+}
+
+// SnapshotInflight copies the live-request registry under inflightMu and
+// projects it oldest-first (StartUnixNanos ascending, registry order, since
+// beginInflight mints monotonic ids for monotonically non-decreasing starts).
+// ElapsedMs is measured against now, so a caller pacing two snapshots sees it
+// grow. A nil receiver, the same default beginInflight/endInflight honor,
+// yields an empty (non-nil) slice, never a panic.
+func (m *gatewayMetrics) SnapshotInflight(now time.Time) []RequestSnapshot {
+	out := []RequestSnapshot{}
+	if m == nil {
+		return out
+	}
+	m.inflightMu.Lock()
+	out = make([]RequestSnapshot, 0, len(m.inflightReq))
+	for id, e := range m.inflightReq {
+		out = append(out, RequestSnapshot{
+			ID:             id,
+			Route:          e.route,
+			StartUnixNanos: e.start.UnixNano(),
+			ElapsedMs:      now.Sub(e.start).Milliseconds(),
+		})
+	}
+	m.inflightMu.Unlock()
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].StartUnixNanos < out[j].StartUnixNanos
+	})
+	return out
 }
 
 func newLatencyCounter() *latencyCounter {
