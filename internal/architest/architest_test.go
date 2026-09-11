@@ -1554,6 +1554,7 @@ var chatEndpointRole = map[string]string{
 	"agent":             "the single outbound chat-completions client (HTTPPlanner)",
 	"engine":            "the narrow vLLM EngineDriver adapter speaking vLLM's OpenAI-compatible generation surface",
 	"gateway":           "the inbound /v1/chat/completions server route (adjudication proxy)",
+	"allinone":          "the inbound mock /v1/chat/completions server of the all-in-one supervisor (bounded deterministic envelope so the ready banner's advertised URL is truthful, issue #12616; not a live client/planner)",
 	"openaiadapter":     "the inbound authenticated app-migration compatibility server (not a live planner)",
 	"chatrelay":         "the off-path Slack bridge client to a served in-kernel model (not a live planner)",
 	"webbench":          "the off-path serving-parity benchmark client (not a live planner)",
