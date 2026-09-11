@@ -865,6 +865,12 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		cmdDormancy(args)
 	case "version", "-v", "--version":
 		cmdVersion(os.Stdout)
+	case "backends":
+		// The shipped-binary backend registry probe (`fak backends`): one
+		// registered-backend name per line, or a JSON array via --json. It lives
+		// in cmd/fak because release archives ship ONLY this binary — the
+		// release gate runs the extracted binary's own registry, not the tree's.
+		os.Exit(runBackends(os.Stdout, os.Stderr, args))
 	case "-h", "--help", "help":
 		cmdHelp(args)
 	default:

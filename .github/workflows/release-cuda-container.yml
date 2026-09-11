@@ -113,3 +113,15 @@ jobs:
             *"${{ steps.meta.outputs.version }}"*) echo "ok: CUDA image reports ${{ steps.meta.outputs.version }}" ;;
             *) echo "::error::CUDA image fak version mismatch: got '$got', want '${{ steps.meta.outputs.version }}'"; exit 1 ;;
           esac
+          # Backend registry probe INSIDE the container: `fak backends --json` must
+          # be a non-empty JSON array containing `cuda` — a CUDA-tagged image that
+          # ships no cuda backend is not the asset it claims to be. Minimal
+          # addition only: this workflow currently fails for unrelated upstream
+          # reasons (see the check/exists gate above); this asserts the registry,
+          # it does not attempt a broader workflow repair.
+          blj="$(docker run --rm "$IMAGE" backends --json 2>/dev/null || true)"
+          echo "container fak backends --json -> ${blj}"
+          if ! echo "$blj" | python3 -c 'import json,sys; a=json.load(sys.stdin); sys.exit(0 if isinstance(a,list) and a and "cuda" in a else 1)' 2>/dev/null; then
+            echo "::error::CUDA image 'fak backends --json' is not a non-empty JSON array containing cuda: '$blj'"; exit 1
+          fi
+          echo "ok: CUDA image reports a live backend registry including cuda"
