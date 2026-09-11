@@ -14,6 +14,7 @@ package agent
 // this file factors it into a Planner so the gateway can serve it on both wires.
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -1768,6 +1769,148 @@ func inKernelOOMRetryTrigger(err error) (class string, bytes uint64, site string
 	return class, bytes, site
 }
 
+// incrementalStopScanner is the decode loop's per-turn delta accrual state for the
+// string-suffix Stop probe. Instead of materializing the whole accumulated text every
+// token (the old per-token sb.String() was O(N) per token => O(N^2) per completion;
+// issue #922 witnessed ~19x ns/token growth from 1024 to 8192 tokens), it accrues the
+// exact bytes appended to the accumulator into a bounded tail window of the longest
+// stop length and fingerprints only that window per token — O(maxStop) per token,
+// O(N) total string work per completion. Fires identically to checkStop: non-empty
+// stops only, suffix match, longest match wins, and only once len(stop) bytes have
+// actually been appended (no false fire on a short window). maxStop <= 0 (no stop
+// strings at all) degenerates to a no-op so the default no-stop decode path pays zero
+// probe cost; the caller-level checkStop (hoisted empty-set early-out) stays the
+// authoritative trim, re-derived once per completion on the rare fire path.
+type incrementalStopScanner struct {
+	// tail is the last min(total, maxStop) bytes of the accumulator — the window the
+	// per-token probe fingerprints (len(tail) <= maxStop, the invariant tests pin).
+	tail []byte
+	// hist holds up to maxStop bytes immediately PRECEDING tail. It exists for the fire
+	// path: a trim removes bytes from the END of the accumulator, so the window must
+	// move BACK by len(matched) to remain the true suffix. Trimming "\n\n" from "\n\n\n"
+	// leaves "\n" whose window is one byte OLDER than the pre-trim window; without hist
+	// that byte is unrecoverable and the next "\n" would miss the "\n\n" fire. hist is
+	// never part of the visible window, so the bounded-tail invariant still holds.
+	hist  []byte
+	stops []string
+	total int
+}
+
+// newIncrementalStopScanner builds a scanner over the non-empty stop strings.
+// maxStop is the length of the longest non-empty stop string (the caller derives it
+// from the same request); it bounds the retained tail window and the per-token scan.
+func newIncrementalStopScanner(maxStop int, stop []string) *incrementalStopScanner {
+	s := &incrementalStopScanner{}
+	if maxStop <= 0 {
+		return s
+	}
+	s.tail = make([]byte, 0, maxStop)
+	s.hist = make([]byte, 0, maxStop)
+	for _, str := range stop {
+		if str != "" {
+			s.stops = append(s.stops, str)
+		}
+	}
+	return s
+}
+
+// pushTail appends b to the logical sequence (hist+tail) while keeping tail at exactly
+// the last min(logicalLen, cap(tail)) bytes and hist at up to cap(tail) bytes before it.
+// Only the last 2*cap bytes can matter (a trim removes at most cap bytes from the end),
+// so the work is O(maxStop) per call regardless of piece length.
+func (s *incrementalStopScanner) pushTail(b []byte) {
+	need := cap(s.tail)
+	histLen, tailLen := len(s.hist), len(s.tail)
+	total := histLen + tailLen + len(b)
+	start := total - 2*need
+	if start < 0 {
+		start = 0
+	}
+	n := total - start
+	buf := make([]byte, n)
+	for i := 0; i < n; i++ {
+		j := start + i
+		switch {
+		case j < histLen:
+			buf[i] = s.hist[j]
+		case j < histLen+tailLen:
+			buf[i] = s.tail[j-histLen]
+		default:
+			buf[i] = b[j-histLen-tailLen]
+		}
+	}
+	if n <= need {
+		s.hist = s.hist[:0]
+		s.tail = append(s.tail[:0], buf...)
+		return
+	}
+	s.hist = append(s.hist[:0], buf[:n-need]...)
+	s.tail = append(s.tail[:0], buf[n-need:]...)
+}
+
+// appendPiece accrues the exact bytes appended to the decode accumulator this token
+// into the bounded tail window and re-fingerprints it (bytes.HasSuffix over at most
+// maxStop bytes). Callers pass everything that was written to the accumulator — the
+// token piece plus any budget-forced reasoning close — so the window sees precisely
+// what checkStop would see over the whole buffer. The retained tail never exceeds
+// maxStop, yet every fire the whole-buffer probe would report is still reported:
+// a stop match lives entirely inside the last maxStop bytes once enough of them exist.
+//
+// On a fire the scanner trims the LONGEST matching stop from its own logical tail,
+// mirroring checkStop's maximal trim of the accumulator. The caller never calls reset()
+// on the ordinary fire path, so a scanner that kept the matched bytes would fire again
+// on the next piece although checkStop (over the now-trimmed accumulator) would not.
+// Refilling the window from hist keeps it an exact suffix of the caller's trimmed
+// accumulator, so every future fire agrees and no retained byte is lost.
+func (s *incrementalStopScanner) appendPiece(piece string) bool {
+	if len(s.stops) == 0 {
+		return false
+	}
+	s.total += len(piece)
+	s.pushTail([]byte(piece))
+	best := ""
+	for _, str := range s.stops {
+		if len(str) <= len(s.tail) && len(str) > len(best) && bytes.HasSuffix(s.tail, []byte(str)) {
+			best = str
+		}
+	}
+	if best == "" {
+		return false
+	}
+	// Trim the matched stop from the tail, then refill from hist so the window is again
+	// the last maxStop bytes of the trimmed accumulator.
+	drop := len(best)
+	if drop >= len(s.tail) {
+		drop -= len(s.tail)
+		s.tail = s.tail[:0]
+		if drop >= len(s.hist) {
+			s.hist = s.hist[:0]
+		} else {
+			s.hist = s.hist[:len(s.hist)-drop]
+		}
+	} else {
+		s.tail = s.tail[:len(s.tail)-drop]
+	}
+	need := cap(s.tail) - len(s.tail)
+	if need > len(s.hist) {
+		need = len(s.hist)
+	}
+	if need > 0 {
+		refill := s.hist[len(s.hist)-need:]
+		s.tail = append(s.tail, refill...)
+		s.hist = s.hist[:len(s.hist)-need]
+	}
+	return true
+}
+
+// reset re-initializes the scanner for a start-over retry turn, mirroring the
+// accumulator's own reset (same fire decisions as a freshly constructed scanner).
+func (s *incrementalStopScanner) reset() {
+	s.tail = s.tail[:0]
+	s.hist = s.hist[:0]
+	s.total = 0
+}
+
 func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (comp *Completion, err error) {
 	// An in-kernel device-allocation failure (e.g. OOM on a small GPU under a large Claude
 	// Code system prompt) panics deep below a CGO boundary with no error channel. Recover it
@@ -1856,21 +1999,39 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	// echoed back, matching the HTTP wires). Factoring decode into this closure keeps the
 	// token-level reuse/decode core (generateReused) tokenizer-free, so the candidate-#13
 	// reuse and #14 eviction are witnessable on a synthetic model with no tokenizer fixture.
+	//
+	// Delta accrual: tokens append into the accumulator once; the stop probe scans only a
+	// bounded tail window (the longest stop length) per token instead of re-materializing
+	// the whole buffer per token — O(N) total string work per completion instead of
+	// O(N^2) (issue #922). The fire path's whole-buffer checkStop stays the authoritative
+	// longest-match trim and runs once per completion; with no stop strings the scanner
+	// is a no-op and checkStop's hoisted empty-set early-out ends the probe at O(1).
 	var sb strings.Builder
+	maxStop := 0
+	for _, s := range sp.Stop {
+		if s != "" && len(s) > maxStop {
+			maxStop = len(s)
+		}
+	}
+	scanner := newIncrementalStopScanner(maxStop, sp.Stop)
 	emit := func(next int) bool {
 		if piece, derr := p.tok.Decode([]int{next}); derr == nil {
 			sb.WriteString(piece)
+			appended := piece
 			if tb != nil && tb.Observe(piece) {
 				sb.WriteString("\n</think>\n\n")
+				appended += "\n</think>\n\n"
 			}
 			if sp.DecodeTokenObserver != nil {
 				sp.DecodeTokenObserver(piece, "")
 			}
-		}
-		if trimmed, hit := checkStop(sb.String(), sp.Stop); hit {
-			sb.Reset()
-			sb.WriteString(trimmed)
-			return true
+			if scanner.appendPiece(appended) {
+				if trimmed, hit := checkStop(sb.String(), sp.Stop); hit {
+					sb.Reset()
+					sb.WriteString(trimmed)
+					return true
+				}
+			}
 		}
 		return false
 	}
@@ -1914,6 +2075,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	generate := func(runCtx context.Context) (inKernelGenerateResult, error) {
 		return p.generateReusedWithOOMRetry(runCtx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, func() {
 			sb.Reset()
+			scanner.reset()
 			if effectiveBudget > 0 {
 				tb = NewThinkBudget(effectiveBudget, startInSpan)
 			}

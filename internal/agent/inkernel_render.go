@@ -18,8 +18,12 @@ import (
 // is NOT echoed in the returned content. The LONGEST matching stop wins so the trim
 // is maximal, and an empty stop string is ignored (it would otherwise match every
 // text and truncate every turn to nothing). An empty stop set never fires, so the
-// default in-kernel path is byte-for-byte the pre-seam behavior.
+// default in-kernel path is byte-for-byte the pre-seam behavior; the empty-set
+// early-out is hoisted FIRST so a no-stop decode turn never materializes text at all.
 func checkStop(text string, stop []string) (string, bool) {
+	if len(stop) == 0 {
+		return text, false
+	}
 	best := ""
 	for _, s := range stop {
 		if s == "" {
