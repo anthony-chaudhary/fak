@@ -13,6 +13,9 @@ package main
 
 import (
 	"flag"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"strings"
 	"testing"
 
@@ -38,11 +41,102 @@ func TestDeferColdToolsFlagDeclaredOnBothDoors(t *testing.T) {
 // front doors: the parsed value must actually reach gateway.Config.DeferColdTools, or the flag is
 // inert (dead-lever). Guard sets it from the local *deferColdTools; serve from *sf.deferColdTools.
 func TestDeferColdToolsWiredIntoGatewayConfig(t *testing.T) {
-	if !strings.Contains(readEntrypoint(t, "guard.go"), "DeferColdTools: *deferColdTools,") {
-		t.Errorf("guard.go must set gateway Config DeferColdTools: *deferColdTools (wire the parsed flag through)")
+	for _, door := range []struct {
+		file     string
+		receiver string
+	}{
+		{file: "guard.go"},
+		{file: "serve.go", receiver: "sf"},
+	} {
+		if !hasDeferColdToolsGatewayWiring(t, readEntrypoint(t, door.file), door.receiver) {
+			t.Errorf("%s must wire the parsed deferColdTools flag into gateway.Config.DeferColdTools", door.file)
+		}
 	}
-	if !strings.Contains(readEntrypoint(t, "serve.go"), "DeferColdTools: *sf.deferColdTools,") {
-		t.Errorf("serve.go must set gateway Config DeferColdTools: *sf.deferColdTools (wire the parsed flag through)")
+}
+
+// hasDeferColdToolsGatewayWiring checks a real gateway.Config key/value pair.
+// An empty receiver selects *deferColdTools; otherwise require *receiver.deferColdTools.
+func hasDeferColdToolsGatewayWiring(t *testing.T, source, receiver string) bool {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), "entrypoint.go", source, 0)
+	if err != nil {
+		t.Fatalf("parse entrypoint: %v", err)
+	}
+	found := false
+	ast.Inspect(file, func(node ast.Node) bool {
+		literal, ok := node.(*ast.CompositeLit)
+		if !ok {
+			return true
+		}
+		config, ok := literal.Type.(*ast.SelectorExpr)
+		if !ok || config.Sel.Name != "Config" {
+			return true
+		}
+		pkg, ok := config.X.(*ast.Ident)
+		if !ok || pkg.Name != "gateway" {
+			return true
+		}
+		for _, element := range literal.Elts {
+			field, ok := element.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			key, ok := field.Key.(*ast.Ident)
+			if !ok || key.Name != "DeferColdTools" {
+				continue
+			}
+			value, ok := field.Value.(*ast.StarExpr)
+			if !ok {
+				continue
+			}
+			if receiver == "" {
+				name, ok := value.X.(*ast.Ident)
+				found = found || (ok && name.Name == "deferColdTools")
+				continue
+			}
+			selector, ok := value.X.(*ast.SelectorExpr)
+			if !ok || selector.Sel.Name != "deferColdTools" {
+				continue
+			}
+			name, ok := selector.X.(*ast.Ident)
+			found = found || (ok && name.Name == receiver)
+		}
+		return true
+	})
+	return found
+}
+
+func TestDeferColdToolsGatewayWiringMatcher(t *testing.T) {
+	for _, fixture := range []struct {
+		name     string
+		source   string
+		receiver string
+		want     bool
+	}{
+		{"guard compact", "var _ = gateway.Config{DeferColdTools:*deferColdTools}", "", true},
+		{"serve aligned", "var _ = gateway.Config{\n\tDeferColdTools:  *sf.deferColdTools,\n}", "sf", true},
+		{"guard formatted", "var _ = &gateway.Config{\nDeferColdTools: /* parsed flag */ *deferColdTools,\n}", "", true},
+		{"serve compact", "var _ = gateway.Config{DeferColdTools:*sf.deferColdTools}", "sf", true},
+		{"false", "var _ = gateway.Config{DeferColdTools:false}", "", false},
+		{"true", "var _ = gateway.Config{DeferColdTools:true}", "sf", false},
+		{"wrong variable", "var _ = gateway.Config{DeferColdTools:*other}", "", false},
+		{"wrong receiver", "var _ = gateway.Config{DeferColdTools:*other.deferColdTools}", "sf", false},
+		{"wrong selector", "var _ = gateway.Config{DeferColdTools:*sf.other}", "sf", false},
+		{"guard rejects serve", "var _ = gateway.Config{DeferColdTools:*sf.deferColdTools}", "", false},
+		{"serve rejects guard", "var _ = gateway.Config{DeferColdTools:*deferColdTools}", "sf", false},
+		{"missing dereference", "var _ = gateway.Config{DeferColdTools:deferColdTools}", "", false},
+		{"wrong field", "var _ = gateway.Config{Other:*deferColdTools}", "", false},
+		{"wrong package", "var _ = other.Config{DeferColdTools:*deferColdTools}", "", false},
+		{"wrong type", "var _ = gateway.Other{DeferColdTools:*deferColdTools}", "", false},
+		{"comment only", "// gateway.Config{DeferColdTools: *deferColdTools,}\nvar _ = gateway.Config{}", "", false},
+		{"string only", "var _ = \"gateway.Config{DeferColdTools: *sf.deferColdTools,}\"", "sf", false},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			got := hasDeferColdToolsGatewayWiring(t, "package main\n"+fixture.source, fixture.receiver)
+			if got != fixture.want {
+				t.Errorf("wiring matched = %v, want %v", got, fixture.want)
+			}
+		})
 	}
 }
 
