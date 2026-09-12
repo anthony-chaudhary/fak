@@ -3,6 +3,7 @@ package treedoctor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -99,6 +100,72 @@ func TestDiagnoseClassifiesWorktrees(t *testing.T) {
 	}
 }
 
+func TestSweepRequiresCleanStatusBeforeRemovingMergedWorktree(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		status       string
+		statusCode   int
+		statusErr    error
+		wantDirty    int
+		wantArchive  bool
+		wantPrunable bool
+	}{
+		{name: "tracked and untracked changes", status: " M tracked.go\n?? unfinished.go\n", wantDirty: 2, wantArchive: true, wantPrunable: true},
+		{name: "status nonzero exit", statusCode: 128, wantDirty: -1},
+		{name: "status runner failure", statusErr: errors.New("status unavailable"), wantDirty: -1},
+		{name: "clean merged tree", wantPrunable: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			main := t.TempDir()
+			wt := filepath.Join(t.TempDir(), "ordinary-merged")
+			if err := os.MkdirAll(wt, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Now()
+			writeAt(t, filepath.Join(wt, "tracked.go"), now.Add(-time.Hour))
+			writeAt(t, filepath.Join(wt, "unfinished.go"), now.Add(-time.Hour))
+			for _, apply := range []bool{false, true} {
+				git := &fakeGit{
+					listOut:  listPorcelain([2]string{main, "aaa"}, [2]string{wt, "bbb"}),
+					ancestor: map[string]bool{wt: true},
+				}
+				run := func(ctx context.Context, dir string, args ...string) (string, int, error) {
+					out, code, err := git.run(ctx, dir, args...)
+					if dir == wt && len(args) >= 2 && args[0] == "status" && args[1] == "--porcelain" {
+						return tc.status, tc.statusCode, tc.statusErr
+					}
+					return out, code, err
+				}
+				rep, actions := Sweep(context.Background(), run, Options{RepoRoot: main, Now: now}, apply)
+				if len(rep.Worktrees) != 2 {
+					t.Fatalf("apply=%v: worktrees = %+v", apply, rep.Worktrees)
+				}
+				got := rep.Worktrees[1]
+				if got.IsWorker || !got.Merged || got.Live || got.DirtyN != tc.wantDirty || got.Archive != tc.wantArchive || got.Prunable != tc.wantPrunable {
+					t.Fatalf("apply=%v: unsafe classification: %+v", apply, got)
+				}
+				if tc.wantDirty < 0 && got.Keep == "" {
+					t.Fatalf("apply=%v: missing reason for keeping unreadable status", apply)
+				}
+				if tc.wantArchive && !strings.Contains(strings.Join(actions, "\n"), "archive required before pruning") {
+					t.Fatalf("apply=%v: missing archive requirement: %v", apply, actions)
+				}
+				var unlocked, removed bool
+				for _, call := range git.calls {
+					if len(call) < 4 || call[1] != "worktree" || call[len(call)-1] != wt {
+						continue
+					}
+					unlocked = unlocked || call[2] == "unlock"
+					removed = removed || call[2] == "remove"
+				}
+				wantMutation := apply && tc.wantPrunable && !tc.wantArchive
+				if unlocked != wantMutation || removed != wantMutation {
+					t.Fatalf("apply=%v: unlocked=%v removed=%v, want both %v; calls=%v", apply, unlocked, removed, wantMutation, git.calls)
+				}
+			}
+		})
+	}
+}
 func TestSweepPreservesDirtyOrphanWorkerUntilArchived(t *testing.T) {
 	main := t.TempDir()
 	now := time.Now()
