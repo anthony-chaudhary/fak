@@ -239,6 +239,7 @@ func New(cfg Config) (*Server, error) {
 		exposeUpstreamErrorDetail:    cfg.ExposeUpstreamErrorDetail,
 		denialRecoveryOff:            cfg.DenialRecoveryOff,
 		upstreamBadRequestNotify:     cfg.UpstreamBadRequestNotify,
+		upstreamFailureObserver:      cfg.UpstreamFailureObserver,
 		version:                      version,
 		logf:                         logf,
 		debugStatsf:                  cfg.DebugStatsf,
