@@ -430,3 +430,74 @@ func TestRunServeDoctorModelFlag(t *testing.T) {
 		t.Errorf("finding %q missing model name", fitRow.Finding)
 	}
 }
+
+// TestServeReadinessVulkanRow pins the gpu-vulkan row classifier: an absent or
+// non-applicable probe yields no row (table shape preserved); an available loader
+// is green with the decoded API version in the finding; an unavailable loader is a
+// yellow (never a red) with the typed kind visible and an install remediation.
+func TestServeReadinessVulkanRow(t *testing.T) {
+	if row := serveVulkanRow(serveHostFacts{}); row != nil {
+		t.Fatalf("nil Vulkan fact should yield no row, got %+v", row)
+	}
+	if row := serveVulkanRow(serveHostFacts{Vulkan: &vulkanLoaderFacts{Applicable: false}}); row != nil {
+		t.Fatalf("Applicable=false should yield no row, got %+v", row)
+	}
+
+	okRow := serveVulkanRow(serveHostFacts{Vulkan: &vulkanLoaderFacts{
+		Applicable: true, Available: true, Version: "1.3.275", Detail: "vulkan-1.dll",
+	}})
+	if okRow == nil || okRow.Check != "gpu-vulkan" {
+		t.Fatalf("available loader: got %+v, want a gpu-vulkan row", okRow)
+	}
+	if okRow.Status != sevOK || okRow.Tier != "Ready" {
+		t.Errorf("available loader status/tier = %q/%q, want ok/Ready", okRow.Status, okRow.Tier)
+	}
+	if !strings.Contains(okRow.Finding, "1.3.275") {
+		t.Errorf("available finding should name the API version, got %q", okRow.Finding)
+	}
+	if okRow.Remediation != "" {
+		t.Errorf("green row must carry no remediation, got %q", okRow.Remediation)
+	}
+
+	warnRow := serveVulkanRow(serveHostFacts{Vulkan: &vulkanLoaderFacts{
+		Applicable: true, Available: false, Kind: "loader", Detail: "load Vulkan system DLL \"vulkan-1.dll\": not found",
+	}})
+	if warnRow == nil || warnRow.Check != "gpu-vulkan" {
+		t.Fatalf("unavailable loader: got %+v, want a gpu-vulkan row", warnRow)
+	}
+	if warnRow.Status != sevWarn || warnRow.Tier != "Marginal" {
+		t.Errorf("unavailable loader status/tier = %q/%q, want warn/Marginal (never fail)", warnRow.Status, warnRow.Tier)
+	}
+	if !strings.Contains(warnRow.Finding, "kind=loader") {
+		t.Errorf("unavailable finding should surface the typed kind, got %q", warnRow.Finding)
+	}
+	if !strings.Contains(warnRow.Remediation, "install the Vulkan loader") {
+		t.Errorf("unavailable row should carry an install remediation, got %q", warnRow.Remediation)
+	}
+
+	// The full fold includes the row when Applicable and omits it when nil.
+	withVulkan := buildServeReadiness(serveHostFacts{
+		Arch: "amd64", ISA: "avx512",
+		Vulkan: &vulkanLoaderFacts{Applicable: true, Available: false, Kind: "loader", Detail: "x"},
+	})
+	found := false
+	for _, r := range withVulkan.Rows {
+		if r.Check == "gpu-vulkan" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("buildServeReadiness should include the gpu-vulkan row when Applicable")
+	}
+	// A warn row (not fail) must keep the rollup out of Unready.
+	if withVulkan.Rollup == "Unready" {
+		t.Errorf("a Vulkan warn must not roll the report up to Unready, got %q", withVulkan.Rollup)
+	}
+
+	withoutVulkan := buildServeReadiness(serveHostFacts{Arch: "amd64", ISA: "avx512"})
+	for _, r := range withoutVulkan.Rows {
+		if r.Check == "gpu-vulkan" {
+			t.Fatal("buildServeReadiness should omit the gpu-vulkan row when Vulkan is nil")
+		}
+	}
+}
