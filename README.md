@@ -106,10 +106,13 @@ receipts. For Mac local model setup and head-to-head Apple Silicon Metal measure
   the wiring and qualification limits; a default-valued flag alone proves neither.
 - **Run on your own hardware:** Native backends target Apple Silicon, AMD, and
   NVIDIA with different support envelopes — and different delivery channels:
-  Apple Silicon Metal via `install.sh --variant metal` (darwin/arm64 asset) or a
-  source build with `CGO_ENABLED=1`; NVIDIA CUDA via the ghcr `-cuda` container
-  image; AMD via a source build with `-tags vulkan` (no official artifact ships
-  the Vulkan backend yet). Default release archives are pure-Go and serve on CPU.
+  The installer defaults to Apple Silicon Metal on darwin/arm64 and bundled Vulkan
+  on linux/amd64, including AMD Strix Halo. NVIDIA users are directed to
+  `ghcr.io/anthony-chaudhary/fak:cuda-latest` with `--gpus all`.
+  CPU archives are secondary references selected with `--variant cpu`.
+  These GPU-first archive changes require a release carrying the GPU assets;
+  historical v0.54.0 lacks them. Missing GPU assets fail with an actionable message.
+  Apple acceleration is fak-native Metal; MLX is a comparison runtime.
   New native-performance work prefers Qwen3.8. Choose a supported model/backend
   and measure the actual local workflow.
 - **Default-deny capability floor:** Protect your workspace from unintended commands, path escapes, or tool poisoning. Every tool call is verified against a capability floor before execution. Drop-in wrappers protect existing agents like Claude Code, Codex, OpenCode, and Cursor with zero rewrites.
