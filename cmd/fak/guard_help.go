@@ -75,7 +75,7 @@ var guardFlagGroups = []guardFlagGroup{
 		"anthropic-oauth", "oauth-token-env", "env", "require-key-env", "rotate",
 	}},
 	{"Policy, floor & audit", []string{
-		"policy", "posture", "profile", "self-modify", "allow-tool", "dump-policy", "dump-strict-policy", "audit", "log", "landlock-hooks", "toolcall-control",
+		"policy", "posture", "profile", "sandbox", "self-modify", "allow-tool", "dump-policy", "dump-strict-policy", "audit", "log", "landlock-hooks", "toolcall-control",
 	}},
 	{"Token economy (cache & context savers)", []string{
 		"compact-history-budget", "compact-anchor-head", "assume-session-turns",
@@ -89,6 +89,7 @@ var guardFlagGroups = []guardFlagGroup{
 	}},
 	{"Budgets, resets & session governance", []string{
 		"context-budget-tokens", "max-duration", "budget-envelope",
+		"soft-deadline-lead", "commit-grace-period", "child-stop-grace",
 		"reset-on-budget", "restart-on-budget", "restart-limit", "restart-seed-dir", "restart-seed-handback",
 		"session-id", "session-pressure-gate",
 	}},
@@ -103,7 +104,7 @@ var guardFlagGroups = []guardFlagGroup{
 		"native-q4k-gateup-slab", "native-prefix-profile", "vulkan-q4k-profile", "vulkan-stage-q4k",
 	}},
 	{"Child-harness wiring (Claude / Codex)", []string{
-		"codex-config", "codex-home", "codex-loop-gate", "codex-loop-gate-limit",
+		"codex-config", "codex-home", "approve-for-me", "codex-loop-gate", "codex-loop-gate-limit",
 		"codex-loop-gate-since-hours", "mcp-register", "pi-extension", "expose-profile", "output-profile", "work-profile",
 	}},
 	{"Fleet control bus", []string{
