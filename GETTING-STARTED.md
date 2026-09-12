@@ -41,10 +41,15 @@ Download prebuilt binaries from the [latest release](https://github.com/anthony-
 | Method | Command |
 |---|---|
 | One-liner (Linux/macOS) | `curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh \| sh` |
-| Manual download | Download `fak_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows), extract, and move `fak` to your `PATH`. |
-| Docker | `docker build -t fak https://github.com/anthony-chaudhary/fak.git` |
+| Manual download | Select the Metal or Vulkan GPU archive in [INSTALL.md](INSTALL.md); preserve Vulkan `spirv/` beside `fak`. |
+| NVIDIA CUDA | `docker run --rm --gpus all ghcr.io/anthony-chaudhary/fak:cuda-latest version` |
 
-Supported release targets: linux (amd64/arm64), darwin (amd64/arm64), and windows (amd64).
+The installer defaults to Apple Silicon Metal or Linux amd64 Vulkan, including
+AMD Strix Halo. The Vulkan archive requires GNU glibc 2.39+ (Ubuntu 24.04+),
+the system Vulkan loader, and a compatible GPU driver. CPU builds are secondary references (`--variant cpu`). These
+GPU-first defaults require a release carrying the GPU archives; historical
+v0.54.0 lacks them. Missing assets produce an error with source-build or explicit
+CPU-reference instructions. Packaging does not establish model/GPU qualification.
 
 To verify SLSA build provenance:
 
@@ -219,9 +224,11 @@ fak run qwen38 "Explain KV cache in one line"
 
 ### B. Apple Silicon Metal GPU acceleration (`fak serve` + `fak chat`)
 
-On macOS, `fak serve` can use Apple Silicon Metal GPU decode/prefill with in-kernel RadixAttention prefix caching — but only in a build with the Metal backend compiled in. Plain release archives are pure-Go (CGO_ENABLED=0) and serve on CPU; they print a `backend=cpu (…)` skip-reason line at startup. Metal is not enabled by default in them. Three ways to get a Metal-capable binary:
+On Apple Silicon, the installer selects the native Metal GPU archive by default.
+The backend must still be qualified on the actual machine and supported model.
+CPU reference archives cannot provide Metal acceleration. Ways to obtain a GPU build:
 
-1. **`./install.sh --variant metal`** — installs `fak_<VERSION>_darwin_arm64_metal.tar.gz`, a CGO darwin/arm64 (Apple Silicon) release asset with the Metal backend compiled in; macOS Apple Silicon only. The asset begins landing with this release cycle — if it is missing for your version, use option 2.
+1. **`sh install.sh`** — installs `fak_<VERSION>_darwin_arm64_metal.tar.gz`, a CGO darwin/arm64 (Apple Silicon) release asset with the Metal backend compiled in; macOS Apple Silicon only. The asset begins landing with this release cycle — if it is missing for your version, use option 2.
 2. **Build from source with `CGO_ENABLED=1`** — see the [Mac local models guide](docs/fak/mac-local-models.md) for the build and qualification steps.
 3. **NVIDIA GPUs** ship as the separate ghcr `-cuda` container image instead — see the [deployment guide](docs/fak/deployment-guide.md).
 
