@@ -29,13 +29,18 @@ func fastPathLookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) {
 // fastPathLookupProofSource retains real vDSO provenance from the same lookup
 // that supplies the response. Consumers still enforce freshness and result gates.
 func fastPathLookupProofSource(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool, bool) {
+	r, ok, receipt := fastPathLookupReceipt(ctx, c)
+	return r, ok, receipt.Matches(r)
+}
+
+func fastPathLookupReceipt(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool, *vdso.LookupReceipt) {
 	ctx, receipt := vdso.WithLookupReceipt(ctx)
 	for _, fp := range abi.FastPaths() {
 		if r, ok := fp.Lookup(ctx, c); ok {
-			return r, true, receipt.Matches(r)
+			return r, true, receipt
 		}
 	}
-	return nil, false, false
+	return nil, false, receipt
 }
 
 const ReasonLoopBodyUnwitnessed = "LOOP_DONE_UNWITNESSED"
@@ -166,7 +171,8 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 		// (abi.FastPaths() -> the wired vDSO), not vdso.Default directly, so the seam
 		// respects whatever instance the gateway wired (production vdso.Default, or a
 		// fresh per-test vDSO). A miss returns ok=false and executes nothing.
-		res, ok, proofSource := fastPathLookupProofSource(ctx, c2)
+		res, ok, proofReceipt := fastPathLookupReceipt(ctx, c2)
+		proofSource := proofReceipt.Matches(res)
 		if !ok || res == nil {
 			pass = append(pass, tc) // miss -> normal adjudication path, unchanged
 			continue
@@ -194,6 +200,7 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 		servedHits++
 		if proofSource {
 			FeatureActivationTrackerFromContext(ctx).RecordActivation(FeatureVDSO, FeatureOutcomeUsed)
+			s.recordVDSOServeProof(ctx, c2, body, proofReceipt, res)
 		}
 		adjs = append(adjs, ToolAdjudication{ToolCallID: tc.ID, Tool: tool, ArgsDigest: argsDigest, Admitted: true,
 			Verdict: WireVerdict{Kind: "ALLOW", Reason: "SERVED_INLINE", By: "vdso"}})

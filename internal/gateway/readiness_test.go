@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -48,9 +49,17 @@ func TestReadyzRequiresStartupAndReusesHealthState(t *testing.T) {
 
 func TestGatewayReadyLogging(t *testing.T) {
 	abi.RegisterEngine("mock", engine.MockEngine)
+	var loggedMu sync.Mutex
 	var logged []string
 	logf := func(format string, args ...any) {
+		loggedMu.Lock()
+		defer loggedMu.Unlock()
 		logged = append(logged, fmt.Sprintf(format, args...))
+	}
+	snapshotLogs := func() []string {
+		loggedMu.Lock()
+		defer loggedMu.Unlock()
+		return append([]string(nil), logged...)
 	}
 	cfg := Config{
 		EngineID: "mock",
@@ -67,6 +76,7 @@ func TestGatewayReadyLogging(t *testing.T) {
 		t.Fatalf("net.Listen: %v", err)
 	}
 	defer ln.Close()
+	listenAddr := ln.Addr().String()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -79,8 +89,8 @@ func TestGatewayReadyLogging(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	foundReady := false
 	for time.Now().Before(deadline) {
-		for _, line := range logged {
-			if strings.Contains(line, "[READY]") && strings.Contains(line, ln.Addr().String()) {
+		for _, line := range snapshotLogs() {
+			if strings.Contains(line, "[READY]") && strings.Contains(line, listenAddr) {
 				foundReady = true
 				break
 			}
@@ -95,7 +105,7 @@ func TestGatewayReadyLogging(t *testing.T) {
 	_ = <-serveErr
 
 	if !foundReady {
-		t.Fatalf("expected [READY] in logs for %s, got: %v", ln.Addr().String(), logged)
+		t.Fatalf("expected [READY] in logs for %s, got: %v", listenAddr, snapshotLogs())
 	}
 }
 

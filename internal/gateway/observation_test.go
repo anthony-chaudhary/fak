@@ -24,6 +24,7 @@ type observationSnapshotWire struct {
 		CacheAttribution guardvars.ObservationEnvelope `json:"cache_attribution"`
 		ManagedCache     guardvars.ObservationEnvelope `json:"managed_cache"`
 		Harness          guardvars.ObservationEnvelope `json:"harness"`
+		FeaturesProof    guardvars.ObservationEnvelope `json:"features_proof"`
 	} `json:"sources"`
 }
 
@@ -302,6 +303,7 @@ func assertObservationBoundary(t *testing.T, snapshot observationSnapshotWire) {
 		"cache_attribution": snapshot.Sources.CacheAttribution,
 		"managed_cache":     snapshot.Sources.ManagedCache,
 		"harness":           snapshot.Sources.Harness,
+		"features_proof":    snapshot.Sources.FeaturesProof,
 	} {
 		if err := envelope.Validate(); err != nil {
 			t.Errorf("%s envelope invalid: %v", name, err)

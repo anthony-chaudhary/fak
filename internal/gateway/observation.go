@@ -51,6 +51,7 @@ type ObservationSnapshotSources struct {
 	CacheAttribution guardvars.ObservationEnvelope `json:"cache_attribution"`
 	ManagedCache     guardvars.ObservationEnvelope `json:"managed_cache"`
 	Harness          guardvars.ObservationEnvelope `json:"harness"`
+	FeaturesProof    guardvars.ObservationEnvelope `json:"features_proof"`
 }
 
 // ObservationSessionData is the payload-free live-session projection shared
@@ -124,6 +125,10 @@ func (s *Server) buildObservationSnapshot(
 	}
 
 	harness, harnessEnvelope := s.captureObservationHarness(now, boundary)
+	proofAvailability, proofReason := guardvars.AvailabilityObserved, ""
+	if s.featureProofCollector() == nil {
+		proofAvailability, proofReason = guardvars.AvailabilityUnavailable, "FEATURE_PROOF_NOT_CONFIGURED"
+	}
 
 	return observationSnapshotBuild{
 		Snapshot: ObservationSnapshot{
@@ -158,6 +163,10 @@ func (s *Server) buildObservationSnapshot(
 					managedReason,
 				),
 				Harness: harnessEnvelope,
+				FeaturesProof: newObservationEnvelope(
+					"features_proof", "gateway.feature_proof", boundary, "",
+					proofAvailability, s.featureProofCollector().Snapshot(), proofReason,
+				),
 			},
 		},
 		Sessions:         sessions,
