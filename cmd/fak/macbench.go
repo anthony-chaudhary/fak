@@ -21,6 +21,9 @@ import (
 func cmdMacBench(argv []string) { os.Exit(runMacBench(os.Stdout, os.Stderr, argv)) }
 
 func runMacBench(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && (argv[0] == "ensure-runs" || argv[0] == "ensure") {
+		return runMacBenchEnsureRuns(stdout, stderr, argv[1:])
+	}
 	if len(argv) > 0 && (argv[0] == "load-drive" || argv[0] == "load-driver") {
 		return runMacBenchLoadDrive(stdout, stderr, argv[1:])
 	}
@@ -112,6 +115,48 @@ func runMacBench(stdout, stderr io.Writer, argv []string) int {
 	}
 	if rep.HasErrors() {
 		return 1
+	}
+	return 0
+}
+
+func runMacBenchEnsureRuns(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("macbench ensure-runs", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if err := macbench.EnsureNodeMacOSABenchmarkRuns(); err != nil {
+		fmt.Fprintf(stderr, "fak macbench ensure-runs: %v\n", err)
+		return 1
+	}
+	threeWay, err := macbench.EnsureNodeMacOSAThreeWayRun()
+	if err != nil {
+		fmt.Fprintf(stderr, "fak macbench ensure-runs: %v\n", err)
+		return 1
+	}
+	agenticMTP, err := macbench.EnsureNodeMacOSAAgenticMTPRun()
+	if err != nil {
+		fmt.Fprintf(stderr, "fak macbench ensure-runs: %v\n", err)
+		return 1
+	}
+	result := struct {
+		Schema           string `json:"schema"`
+		OK               bool   `json:"ok"`
+		ThreeWayPacket   string `json:"three_way_packet"`
+		AgenticMTPPacket string `json:"agentic_mtp_packet"`
+		Regenerated      bool   `json:"regenerated"`
+	}{
+		Schema:           "fak.macbench.ensure-runs.v1",
+		OK:               true,
+		ThreeWayPacket:   threeWay,
+		AgenticMTPPacket: agenticMTP,
+		Regenerated:      true,
+	}
+	if *asJSON {
+		_ = writeIndentedJSONNoEscape(stdout, result)
+	} else {
+		fmt.Fprintf(stdout, "ENSURED three_way=%s agentic_mtp=%s\n", threeWay, agenticMTP)
 	}
 	return 0
 }
