@@ -26,12 +26,35 @@ type DeepSeekV41QuantConfig struct {
 	ExpertDtype     string `json:"expert_dtype"`
 }
 
+// DeepSeekV41AttentionGeometry retains the exact decoder/attention envelope a
+// native V4.1 forward consumes. It is metadata only and enables no execution.
+type DeepSeekV41AttentionGeometry struct {
+	NumLayers           int `json:"num_hidden_layers"`
+	HiddenSize          int `json:"hidden_size"`
+	NumHeads            int `json:"num_attention_heads"`
+	NumKVHeads          int `json:"num_key_value_heads"`
+	HeadDim             int `json:"head_dim"`
+	QKRopeHeadDim       int `json:"qk_rope_head_dim"`
+	QLoraRank           int `json:"q_lora_rank"`
+	OLoraRank           int `json:"o_lora_rank"`
+	OGroups             int `json:"o_groups"`
+	NumExperts          int `json:"n_routed_experts"`
+	NSharedExperts      int `json:"n_shared_experts"`
+	NumExpertsPerTok    int `json:"num_experts_per_tok"`
+	MoEIntermediateSize int `json:"moe_intermediate_size"`
+}
+
 // DeepSeekV41Config holds V4.1-only metadata which must not be folded into the
 // older deepseek_v4 profile. The slices are copied from the nested text_config.
 type DeepSeekV41Config struct {
 	WrapperModelType string
 	TextModelType    string
 	Quantization     DeepSeekV41QuantConfig
+
+	// Attention retains the decoder/attention execution axes as a single typed
+	// envelope. It is metadata only: later native leaves read these instead of
+	// reaching into the flat Config.
+	Attention DeepSeekV41AttentionGeometry
 
 	KVSourceLayerIDs       []int
 	IndexSourceLayerIDs    []int
@@ -96,6 +119,20 @@ type deepSeekV41TextMetadata struct {
 	DSparkMarkovRank          int     `json:"dspark_markov_rank"`
 	DSparkNumRoutedExperts    int     `json:"dspark_n_routed_experts"`
 	DSparkNumExpertsPerTok    int     `json:"dspark_num_experts_per_tok"`
+
+	NumHiddenLayers     int `json:"num_hidden_layers"`
+	HiddenSize          int `json:"hidden_size"`
+	NumAttentionHeads   int `json:"num_attention_heads"`
+	NumKeyValueHeads    int `json:"num_key_value_heads"`
+	HeadDim             int `json:"head_dim"`
+	QKRopeHeadDim       int `json:"qk_rope_head_dim"`
+	QLoraRank           int `json:"q_lora_rank"`
+	OLoraRank           int `json:"o_lora_rank"`
+	OGroups             int `json:"o_groups"`
+	NRoutedExperts      int `json:"n_routed_experts"`
+	NSharedExperts      int `json:"n_shared_experts"`
+	NumExpertsPerTok    int `json:"num_experts_per_tok"`
+	MoEIntermediateSize int `json:"moe_intermediate_size"`
 }
 
 // MarshalJSON reconstructs the V4.1 wrapper from current Config fields. Other
@@ -134,7 +171,27 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		DSparkMarkovRank          int     `json:"dspark_markov_rank"`
 		DSparkNumRoutedExperts    int     `json:"dspark_n_routed_experts"`
 		DSparkNumExpertsPerTok    int     `json:"dspark_num_experts_per_tok"`
+
+		NumHiddenLayers     int `json:"num_hidden_layers"`
+		HiddenSize          int `json:"hidden_size"`
+		NumAttentionHeads   int `json:"num_attention_heads"`
+		NumKeyValueHeads    int `json:"num_key_value_heads"`
+		HeadDim             int `json:"head_dim"`
+		QKRopeHeadDim       int `json:"qk_rope_head_dim"`
+		QLoraRank           int `json:"q_lora_rank"`
+		OLoraRank           int `json:"o_lora_rank"`
+		OGroups             int `json:"o_groups"`
+		NRoutedExperts      int `json:"n_routed_experts"`
+		NSharedExperts      int `json:"n_shared_experts"`
+		NumExpertsPerTok    int `json:"num_experts_per_tok"`
+		MoEIntermediateSize int `json:"moe_intermediate_size"`
 	}
+	// The attention axes are derived from the flat Config (parseDeepSeekV41Metadata
+	// rebuilds them from c), so emit them from the same source of truth. Reading
+	// m.Attention here would let a hand-built Config emit a document whose nested
+	// text_config disagrees with its top-level geometry; reparse would then silently
+	// overwrite the caller's Attention. Emitting from text keeps marshal/unmarshal
+	// symmetric and the axes genuinely round-trippable.
 	nested := textEnvelope{
 		configAlias:      configAlias(text),
 		KVSourceLayerIDs: m.KVSourceLayerIDs, IndexSourceLayerIDs: m.IndexSourceLayerIDs,
@@ -144,6 +201,12 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		EngramMaxNgramSize: m.EngramMaxNgramSize, EngramVocabSize: m.EngramVocabSize,
 		EngramNHeads: m.EngramNHeads, EngramHeadDim: m.EngramHeadDim,
 		EngramPadTokenID: m.EngramPadTokenID, EngramCompressedVocabSize: m.EngramCompressedVocabSize,
+		NumHiddenLayers: text.NumLayers, HiddenSize: text.HiddenSize,
+		NumAttentionHeads: text.NumHeads, NumKeyValueHeads: text.NumKVHeads,
+		HeadDim: text.HeadDim, QKRopeHeadDim: text.QKRopeHeadDim,
+		QLoraRank: text.QLoraRank, OLoraRank: text.OLoraRank, OGroups: text.OGroups,
+		NRoutedExperts: text.NumExperts, NSharedExperts: text.NSharedExperts,
+		NumExpertsPerTok: text.NumExpertsPerTok, MoEIntermediateSize: text.MoEIntermediateSize,
 	}
 	if d := m.DSpark; d != nil {
 		nested.NumNextNPredictLayers = d.NextNPredictLayers
@@ -227,6 +290,21 @@ func parseDeepSeekV41Metadata(root, text []byte, c Config) (*DeepSeekV41Config, 
 		EngramHeadDim:             nested.EngramHeadDim,
 		EngramPadTokenID:          nested.EngramPadTokenID,
 		EngramCompressedVocabSize: nested.EngramCompressedVocabSize,
+		Attention: DeepSeekV41AttentionGeometry{
+			NumLayers:           c.NumLayers,
+			HiddenSize:          c.HiddenSize,
+			NumHeads:            c.NumHeads,
+			NumKVHeads:          c.NumKVHeads,
+			HeadDim:             c.HeadDim,
+			QKRopeHeadDim:       c.QKRopeHeadDim,
+			QLoraRank:           c.QLoraRank,
+			OLoraRank:           c.OLoraRank,
+			OGroups:             c.OGroups,
+			NumExperts:          c.NumExperts,
+			NSharedExperts:      c.NSharedExperts,
+			NumExpertsPerTok:    c.NumExpertsPerTok,
+			MoEIntermediateSize: c.MoEIntermediateSize,
+		},
 	}
 	if v := envelope.VisionConfig; v != nil {
 		m.Vision = &DeepSeekV41VisionConfig{
@@ -281,6 +359,7 @@ func admitDeepSeekV41Published(c Config, m *DeepSeekV41Config) error {
 		{"engram layers", v41EqualInts(m.EngramLayerIDs, []int{1, 14}) && v41EqualInts(m.EngramNumEmbeddings, []int{384006168, 384016682}), fmt.Sprintf("layers=%v embeddings=%v", m.EngramLayerIDs, m.EngramNumEmbeddings)},
 		{"engram geometry", m.EngramMaxNgramSize == 4 && m.EngramVocabSize == 16000000 && m.EngramNHeads == 8 && m.EngramHeadDim == 256 && m.EngramPadTokenID == 2 && m.EngramCompressedVocabSize == 99092, fmt.Sprintf("ngram=%d vocab=%d heads=%d dim=%d pad=%d compressed=%d", m.EngramMaxNgramSize, m.EngramVocabSize, m.EngramNHeads, m.EngramHeadDim, m.EngramPadTokenID, m.EngramCompressedVocabSize)},
 		{"quantization", m.Quantization.Method == "fp8" && m.Quantization.Activation == "dynamic" && v41EqualInts(m.Quantization.WeightBlockSize, []int{32, 32}) && m.Quantization.ScaleFormat == "ue8m0" && m.Quantization.ExpertDtype == "fp4", fmt.Sprintf("method=%s activation=%s block=%v scale=%s expert=%s", m.Quantization.Method, m.Quantization.Activation, m.Quantization.WeightBlockSize, m.Quantization.ScaleFormat, m.Quantization.ExpertDtype)},
+		{"decoder/attention axes retained", m.Attention == (DeepSeekV41AttentionGeometry{NumLayers: 40, HiddenSize: 5120, NumHeads: 64, NumKVHeads: 1, HeadDim: 512, QKRopeHeadDim: 64, QLoraRank: 1280, OLoraRank: 1024, OGroups: 8, NumExperts: 384, NSharedExperts: 1, NumExpertsPerTok: 6, MoEIntermediateSize: 2304}), fmt.Sprintf("layers=%d hidden=%d heads=%d kv_heads=%d head_dim=%d rope=%d qrank=%d orank=%d groups=%d experts=%d shared=%d topk=%d width=%d", m.Attention.NumLayers, m.Attention.HiddenSize, m.Attention.NumHeads, m.Attention.NumKVHeads, m.Attention.HeadDim, m.Attention.QKRopeHeadDim, m.Attention.QLoraRank, m.Attention.OLoraRank, m.Attention.OGroups, m.Attention.NumExperts, m.Attention.NSharedExperts, m.Attention.NumExpertsPerTok, m.Attention.MoEIntermediateSize)},
 	}
 	for _, check := range checks {
 		if !check.ok {
