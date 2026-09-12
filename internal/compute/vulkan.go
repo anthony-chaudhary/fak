@@ -134,7 +134,7 @@ func (v *vulkanBackend) q4kHomeLocked(wb *vulkanBuf) (unsafe.Pointer, bool) {
 	return ptr, true
 }
 func init() {
-	spirv := os.Getenv("FAK_VULKAN_SPIRV")
+	spirv := resolveVulkanSPIRVDir(os.Getenv("FAK_VULKAN_SPIRV"), os.Executable, filepath.EvalSymlinks, os.Stat)
 	if spirv == "" {
 		return
 	}

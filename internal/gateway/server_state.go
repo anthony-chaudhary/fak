@@ -399,6 +399,11 @@ type Server struct {
 	// field it copies.
 	denialRecoveryOff        bool
 	upstreamBadRequestNotify func(detail string)
+	// upstreamFailureObserver is the host's bounded, sanitized terminal-failure sink
+	// (Config.UpstreamFailureObserver), retained so a gateway-onset terminal failure at a
+	// served wire boundary (e.g. an HTTP 200 whose completion fails to decode) can emit
+	// ONE truthful receipt the transport observer never saw (#11567). nil = off.
+	upstreamFailureObserver   func(UpstreamFailureReceipt)
 	version                  string
 	logf                     func(format string, args ...any)
 	debugStatsf              func(format string, args ...any) // optional per-turn human debug sink (#793); nil = off

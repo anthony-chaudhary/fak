@@ -474,6 +474,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.renderTurnDebugError(reqTrace, "openai_responses", err, time.Since(began))
 		s.logf("gateway: upstream model error: %v", err)
+		s.emitResponsesTerminalReceipt(r, reqTrace, err)
 		s.writeUpstreamErr(w, err)
 		return
 	}
@@ -1391,4 +1392,43 @@ func (s *Server) Planner() agent.Planner {
 		return nil
 	}
 	return s.planner
+}
+
+// emitResponsesTerminalReceipt emits ONE terminal UpstreamFailureReceipt when a served
+// Responses turn fails at the GATEWAY boundary with a failure the transport observer could
+// NOT have witnessed (#11567). The transport observer (upstream_observe.go) records
+// transport round-trip errors, provider HTTP >= 400 statuses, and mid-body read errors —
+// every failure that has a transport-layer counterpart. But an upstream that answers
+// HTTP 200 and then yields an unusable completion (empty choices, undecodable body) fails
+// ABOVE the transport, so it left counters incremented by writeUpstreamErr with NO receipt
+// at all: a live guard showed 97 upstream errors classified "other" and a journal carrying
+// no terminal receipt for them. This closes that gap, without double-emitting: it fires
+// ONLY for an UNCLASSIFIED (upstreamErrorKind == "other") failure, i.e. exactly the class
+// with no transport witness, so a provider status / unreachable / stalled / in-kernel
+// failure keeps its single existing observation. Sanitized and bounded like every receipt.
+func (s *Server) emitResponsesTerminalReceipt(r *http.Request, reqTrace string, err error) {
+	if s == nil || s.upstreamFailureObserver == nil || err == nil {
+		return
+	}
+	if upstreamErrorKind(err) != "other" {
+		return
+	}
+	rec := UpstreamFailureReceipt{
+		EmittingLayer: "gateway",
+		Method:        http.MethodPost,
+		PathClass:     "/v1/responses",
+		Outcome:       "terminal",
+		Confidence:    "high",
+		Evidence:      "gateway terminal failure above the transport (2xx response, unusable completion)",
+		Cause:         boundedCause(err.Error()),
+		TraceID:       reqTrace,
+	}
+	if r != nil {
+		rec.Method, rec.PathClass = r.Method, "/v1/responses"
+		rec.SessionID, rec.CallID = boundedHeader(r.Header, "X-Fak-Session-Id"), boundedHeader(r.Header, "X-Fak-Call-Id")
+		if rec.TraceID == "" {
+			rec.TraceID = boundedHeader(r.Header, "Traceparent")
+		}
+	}
+	s.upstreamFailureObserver(rec)
 }
