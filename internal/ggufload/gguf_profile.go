@@ -56,6 +56,20 @@ type LoadPathStat struct {
 	DequantBytes    int64  `json:"dequant_bytes,omitempty"`
 }
 
+// LoadMemorySample is one point-in-time host-memory observation taken at an
+// already-emitted load progress point. It is a sparse sample, not an exact
+// allocation trace or proof of the process's true peak.
+type LoadMemorySample struct {
+	TensorOrdinal   int    `json:"tensor_ordinal"`
+	ElapsedNanos    int64  `json:"elapsed_nanos"`
+	RSSBytes        int64  `json:"rss_bytes,omitempty"`
+	HostAvailBytes  *int64 `json:"host_avail_bytes,omitempty"`
+	Constrained     bool   `json:"constrained,omitempty"`
+	PolicyFreeBytes int64  `json:"policy_free_bytes,omitempty"`
+	PolicyNodes     string `json:"policy_nodes,omitempty"`
+	PolicyLabel     string `json:"policy_label,omitempty"`
+}
+
 // LoadProfile is a machine-readable load-phase report for modelbench. It is scoped
 // to the pure GGUF->resident-model path, not tokenizer or inference.
 type LoadProfile struct {
@@ -74,6 +88,14 @@ type LoadProfile struct {
 	// the durable twin of AlertWriter: a serve can show these after readiness without
 	// replaying ordinary percentage progress through the user's terminal.
 	Alerts []LoadAlert `json:"alerts,omitempty"`
+	// MemorySamples retains at most the first 255 emitted progress observations plus
+	// the latest one. MaxSampledRSSBytes is the maximum across every observed sample,
+	// including samples displaced by the bounded retention policy; it is not an exact
+	// allocation peak.
+	MemorySamples         []LoadMemorySample `json:"memory_samples,omitempty"`
+	MemorySamplesObserved int                `json:"memory_samples_observed"`
+	MemorySamplesDropped  int                `json:"memory_samples_dropped"`
+	MaxSampledRSSBytes    int64              `json:"max_sampled_rss_bytes,omitempty"`
 }
 
 // LoadAlert is one safety-relevant condition observed during model startup. Kind and
@@ -123,8 +145,14 @@ type LoadProfiler struct {
 	// loadPaths tallies the per-quant-type resident-vs-dequant breakdown. Written only by
 	// the serial load collector (one goroutine), so it needs no lock even under the parallel
 	// load pipeline.
-	loadPaths map[loadPathKey]*LoadPathStat
+	loadPaths             map[loadPathKey]*LoadPathStat
+	memorySamples         []LoadMemorySample
+	memorySamplesObserved int
+	memorySamplesDropped  int
+	maxSampledRSSBytes    int64
 }
+
+const maxLoadMemorySamples = 256
 
 // NewLoadProfiler returns an enabled load profiler that records per-phase timings and
 // keeps the top 16 slowest tensors by default.
@@ -211,6 +239,7 @@ func (p *LoadProfiler) emitProgress() {
 		rate = gb / s
 	}
 	mem := hostMemStatus()
+	p.recordMemorySample(n, elapsed, mem)
 	if n == 1 {
 		p.emitMemPreflight(mem)
 	}
@@ -219,6 +248,42 @@ func (p *LoadProfiler) emitProgress() {
 			pct, n, p.Total, gb, elapsed.Round(time.Second), rate, memSuffix(mem))
 	}
 	p.emitMemCliffWarning(mem)
+}
+
+// recordMemorySample persists the memory value already collected for an emitted
+// progress point. It performs no probe and preserves the latest observation when
+// the bounded sample history is full.
+func (p *LoadProfiler) recordMemorySample(tensorOrdinal int, elapsed time.Duration, mem compute.HostMemStatus) {
+	if p == nil {
+		return
+	}
+	sample := LoadMemorySample{
+		TensorOrdinal: tensorOrdinal,
+		ElapsedNanos:  elapsed.Nanoseconds(),
+		Constrained:   mem.Constrained,
+		PolicyNodes:   mem.PolicyNodes,
+		PolicyLabel:   mem.PolicyLabel,
+	}
+	if mem.RSS > 0 {
+		sample.RSSBytes = mem.RSS
+		if mem.RSS > p.maxSampledRSSBytes {
+			p.maxSampledRSSBytes = mem.RSS
+		}
+	}
+	if mem.HostAvail >= 0 {
+		available := mem.HostAvail
+		sample.HostAvailBytes = &available
+	}
+	if mem.PolicyFree > 0 {
+		sample.PolicyFreeBytes = mem.PolicyFree
+	}
+	p.memorySamplesObserved++
+	if len(p.memorySamples) < maxLoadMemorySamples {
+		p.memorySamples = append(p.memorySamples, sample)
+		return
+	}
+	p.memorySamples[maxLoadMemorySamples-1] = sample
+	p.memorySamplesDropped++
 }
 
 func (p *LoadProfiler) alertWriter() io.Writer {
@@ -361,11 +426,24 @@ func (p *LoadProfiler) Snapshot(mode, source string, totalNanos int64) *LoadProf
 		}
 	}
 	out := &LoadProfile{
-		Mode:        mode,
-		Source:      source,
-		TensorCount: len(p.tensors),
-		TotalNanos:  totalNanos,
-		TotalMS:     float64(totalNanos) / 1e6,
+		Mode:                  mode,
+		Source:                source,
+		TensorCount:           len(p.tensors),
+		TotalNanos:            totalNanos,
+		TotalMS:               float64(totalNanos) / 1e6,
+		MemorySamplesObserved: p.memorySamplesObserved,
+		MemorySamplesDropped:  p.memorySamplesDropped,
+		MaxSampledRSSBytes:    p.maxSampledRSSBytes,
+	}
+	if len(p.memorySamples) > 0 {
+		out.MemorySamples = make([]LoadMemorySample, len(p.memorySamples))
+		copy(out.MemorySamples, p.memorySamples)
+		for i := range out.MemorySamples {
+			if available := out.MemorySamples[i].HostAvailBytes; available != nil {
+				cloned := *available
+				out.MemorySamples[i].HostAvailBytes = &cloned
+			}
+		}
 	}
 	for _, key := range p.order {
 		src := p.stat[key]
