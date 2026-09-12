@@ -1614,20 +1614,25 @@ func matchGlob(path string, globs []string) string {
 	if path == "" {
 		return ""
 	}
+	// Tool arguments use the client's path dialect, which may differ from the
+	// gateway host. Normalize both separators explicitly so a Windows-style
+	// filePath cannot evade a protected tree fragment on a Unix server.
+	path = strings.ReplaceAll(path, `\`, "/")
 	for _, g := range globs {
 		if g == "" {
 			continue
 		}
-		if g[0] != '.' {
-			if strings.Contains(path, g) {
+		match := strings.ReplaceAll(g, `\`, "/")
+		if match[0] != '.' {
+			if strings.Contains(path, match) {
 				return g
 			}
-			if strings.HasSuffix(g, "/") && treeDirFragmentIn(path, strings.TrimSuffix(g, "/")) {
+			if strings.HasSuffix(match, "/") && treeDirFragmentIn(path, strings.TrimSuffix(match, "/")) {
 				return g
 			}
 			continue
 		}
-		if dotfileFragmentIn(path, g) {
+		if dotfileFragmentIn(path, match) {
 			return g
 		}
 	}
