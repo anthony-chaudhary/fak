@@ -53,6 +53,7 @@ var Commands = []Command{
 	{Name: "readme-visual-audit", Owner: "dev", Handler: "devcmd.RunReadmeVisualAudit", SourceOrigin: "internal/devcmd/readme_visual_audit.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "refactor-verify", Owner: "dev", Handler: "devcmd.RunRefactorVerify", SourceOrigin: "internal/devcmd/refactorverify.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "sessiondiag", Owner: "dev", Handler: "devcmd.RunSessionDiag", SourceOrigin: "internal/devcmd/sessiondiag.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
+	{Name: "strix", Owner: "dev", Handler: "devcmd.RunCompanionStrix", SourceOrigin: "internal/devcmd/companion_bridge.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "study-adjacency", Owner: "dev", Handler: "devcmd.RunStudyAdjacency", SourceOrigin: "internal/devcmd/study_adjacency.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "study-classify", Owner: "dev", Handler: "devcmd.RunStudyClassify", SourceOrigin: "internal/devcmd/study_classify.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "study-forge", Owner: "dev", Handler: "devcmd.RunStudyForge", SourceOrigin: "internal/devcmd/study_forge.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},

@@ -10,8 +10,12 @@ import (
 )
 
 const (
-	Schema      = "fak-config-surface/1"
-	MaxKeys     = 33
+	Schema = "fak-config-surface/1"
+	// MaxKeys is the operator-facing budget for fak.toml knobs. 34 as of the
+	// appliance dashboard catalog profile (observability.appliance_profile,
+	// gateway fe5026fad): one deliberate, described, defaulted posture switch,
+	// not knob-per-feature creep. Raising it is a conscious-review decision.
+	MaxKeys     = 34
 	MaxPostures = 8
 )
 
