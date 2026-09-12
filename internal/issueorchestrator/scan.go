@@ -57,6 +57,17 @@ func DecodeIssues(b []byte) ([]Issue, error) {
 		return nil, fmt.Errorf("empty issue payload")
 	}
 
+	// GitHub issue rows carry a "body" field holding the routing contract. The
+	// internal []Issue transport has no body field, so Go's decoder silently
+	// drops it and would return a lossy Issue with empty key/lane/paths. Route
+	// such payloads through IssueDraft whenever a body is present, independent
+	// of whether labels are empty.
+	if payloadCarriesDraftBody(b) {
+		if drafts, err := decodeIssueDrafts(b); err == nil && len(drafts) > 0 {
+			return drafts, nil
+		}
+	}
+
 	// 1. Try decoding as []Issue directly
 	var directIssues []Issue
 	if err := json.Unmarshal(b, &directIssues); err == nil && len(directIssues) > 0 && directIssues[0].Title != "" {
@@ -64,32 +75,7 @@ func DecodeIssues(b []byte) ([]Issue, error) {
 	}
 
 	// 2. Try decoding as []issuepolicy.IssueDraft
-	var drafts []issuepolicy.IssueDraft
-	if err := json.Unmarshal(b, &drafts); err == nil && len(drafts) > 0 {
-		var issues []Issue
-		for _, d := range drafts {
-			cand := issuepolicy.CandidateFromIssueDraft(d)
-			rev := issuepolicy.ReviewIssueDraft(d, issuepolicy.Options{})
-			var lbls []string
-			for _, l := range d.Labels {
-				if l.Name != "" {
-					lbls = append(lbls, l.Name)
-				}
-			}
-			issues = append(issues, Issue{
-				Number:          d.Number,
-				Key:             cand.Key,
-				Title:           d.Title,
-				Lane:            rev.Lane,
-				Paths:           append([]string(nil), rev.Paths...),
-				ExpectedSteps:   rev.ExpectedSteps,
-				Labels:          lbls,
-				URL:             d.URL,
-				Centrality:      string(cand.ProblemFrame.Centrality),
-				ProblemFrame:    cand.ProblemFrame,
-				Dispatchability: rev.Dispatchability,
-			})
-		}
+	if issues, err := decodeIssueDrafts(b); err == nil && len(issues) > 0 {
 		return issues, nil
 	}
 
@@ -219,4 +205,58 @@ func DecodeIssues(b []byte) ([]Issue, error) {
 	}
 
 	return nil, fmt.Errorf("unable to parse issue payload into known issue, draft, or candidate schemas")
+}
+
+// payloadCarriesDraftBody reports whether the raw payload is a JSON array of
+// objects that carry a GitHub "body" field, which the internal []Issue
+// transport cannot represent. Such payloads must be decoded as IssueDraft so
+// the routing contract in the body is honored.
+func payloadCarriesDraftBody(b []byte) bool {
+	var rows []map[string]json.RawMessage
+	if err := json.Unmarshal(b, &rows); err != nil || len(rows) == 0 {
+		return false
+	}
+	for _, row := range rows {
+		if _, ok := row["body"]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// decodeIssueDrafts decodes a JSON array of GitHub issue rows into Issues via
+// the issuepolicy draft contract, parsing the body routing block and labels.
+func decodeIssueDrafts(b []byte) ([]Issue, error) {
+	var drafts []issuepolicy.IssueDraft
+	if err := json.Unmarshal(b, &drafts); err != nil {
+		return nil, err
+	}
+	if len(drafts) == 0 {
+		return nil, fmt.Errorf("empty draft payload")
+	}
+	var issues []Issue
+	for _, d := range drafts {
+		cand := issuepolicy.CandidateFromIssueDraft(d)
+		rev := issuepolicy.ReviewIssueDraft(d, issuepolicy.Options{})
+		var lbls []string
+		for _, l := range d.Labels {
+			if l.Name != "" {
+				lbls = append(lbls, l.Name)
+			}
+		}
+		issues = append(issues, Issue{
+			Number:          d.Number,
+			Key:             cand.Key,
+			Title:           d.Title,
+			Lane:            rev.Lane,
+			Paths:           append([]string(nil), rev.Paths...),
+			ExpectedSteps:   rev.ExpectedSteps,
+			Labels:          lbls,
+			URL:             d.URL,
+			Centrality:      string(cand.ProblemFrame.Centrality),
+			ProblemFrame:    cand.ProblemFrame,
+			Dispatchability: rev.Dispatchability,
+		})
+	}
+	return issues, nil
 }
