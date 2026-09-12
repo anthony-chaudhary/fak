@@ -88,6 +88,7 @@ var verbManifest = []Verb{
 	{Name: "arch", Synopsis: "architecture preflight verification and component boundary enforcement", Lane: "cmd"},
 	{Name: "architecture", Synopsis: "analyze dependency tiers, violations, fan-out, depth, and blast radius for a leaf or workspace", Lane: "cmd"},
 	{Name: "armbench", Synopsis: "run provenance-locked paired benchmark arms from one immutable manifest", Lane: "cmd", Doc: "docs/armbench.md"},
+	{Name: "baseline-arms", Synopsis: "record, compare, leaderboard, and audit Apple-Silicon baseline/ablation arms", Lane: "cmd"},
 	{Name: "assume", Synopsis: "check a declared assumption against its witness: seat-launchable (doctor claim vs accounts-next authority)", Lane: "cmd"},
 	{Name: "attest", Synopsis: "compliance attestation generator: prove the policy capability floor from preflight", Lane: "cmd"},
 	{Name: "audit", Synopsis: "audit-trail consumer: verify/export a fak guard decision journal's hash chain", Lane: "cmd"},
