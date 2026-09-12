@@ -309,9 +309,12 @@ func TestDebtOrchestratorCLI(t *testing.T) {
 }
 
 func TestDebtOrchestratorCLIDualRepo(t *testing.T) {
+	publicRoot := setupDebtLaneWaveWorkspace(t)
+	privateRoot := setupDebtLaneWaveWorkspace(t)
 	var stdout, stderr bytes.Buffer
 	code := runDebtOrchestrator(&stdout, &stderr, []string{
-		"--workspace", repoRoot(),
+		"--workspace", publicRoot,
+		"--private-root", privateRoot,
 		"--target-repo", "both",
 		"--wave-size", "6",
 		"--max-waves", "3",
@@ -333,23 +336,32 @@ func TestDebtOrchestratorCLIDualRepo(t *testing.T) {
 	}
 
 	// Verify repo tags exist on lanes in the plan
-	foundFak := false
+	foundFak, foundPrivate := false, false
 	for _, w := range plan.Waves {
 		for _, l := range w.Lanes {
 			if l.Repo == "fak" {
 				foundFak = true
+			}
+			if l.Repo == "fak-private" {
+				foundPrivate = true
 			}
 		}
 	}
 	if !foundFak {
 		t.Errorf("expected to find at least one lane with repo 'fak'")
 	}
+	if !foundPrivate {
+		t.Errorf("expected to find at least one lane with repo fak-private")
+	}
 }
 
 func TestDebtLanesCLITargetRepoPrivate(t *testing.T) {
+	publicRoot := setupDebtLaneWaveWorkspace(t)
+	privateRoot := setupDebtLaneWaveWorkspace(t)
 	var stdout, stderr bytes.Buffer
 	code := runDebtLanes(&stdout, &stderr, []string{
-		"--workspace", repoRoot(),
+		"--workspace", publicRoot,
+		"--private-root", privateRoot,
 		"--target-repo", "fak-private",
 		"--json",
 	})
