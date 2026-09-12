@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -130,6 +131,103 @@ func TestDeepSeekV41RejectsMalformedCoupledMetadataAndPreservesOtherFamilies(t *
 			t.Fatalf("unrelated family changed: cfg=%#v err=%v", cfg, err)
 		}
 	}
+}
+
+func TestDeepSeekV41ExposesTypedAttentionAxes(t *testing.T) {
+	_, cfg := readDeepSeekV41Config(t)
+	if cfg.DeepSeekV41 == nil {
+		t.Fatal("official config did not retain typed V4.1 metadata")
+	}
+	want := DeepSeekV41AttentionGeometry{
+		NumLayers: 40, HiddenSize: 5120, NumHeads: 64, NumKVHeads: 1, HeadDim: 512,
+		QKRopeHeadDim: 64, QLoraRank: 1280, OLoraRank: 1024, OGroups: 8,
+		NumExperts: 384, NSharedExperts: 1, NumExpertsPerTok: 6, MoEIntermediateSize: 2304,
+	}
+	if got := cfg.DeepSeekV41.Attention; got != want {
+		t.Fatalf("attention geometry=%+v want=%+v", got, want)
+	}
+}
+
+func TestDeepSeekV41AttentionAxesSurviveRoundTrip(t *testing.T) {
+	_, cfg := readDeepSeekV41Config(t)
+	encoded, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var roundTrip Config
+	if err := json.Unmarshal(encoded, &roundTrip); err != nil {
+		t.Fatalf("round-trip official config: %v", err)
+	}
+	if roundTrip.DeepSeekV41 == nil {
+		t.Fatal("round trip lost V4.1 metadata")
+	}
+	want := DeepSeekV41AttentionGeometry{
+		NumLayers: 40, HiddenSize: 5120, NumHeads: 64, NumKVHeads: 1, HeadDim: 512,
+		QKRopeHeadDim: 64, QLoraRank: 1280, OLoraRank: 1024, OGroups: 8,
+		NumExperts: 384, NSharedExperts: 1, NumExpertsPerTok: 6, MoEIntermediateSize: 2304,
+	}
+	if got := roundTrip.DeepSeekV41.Attention; got != want {
+		t.Fatalf("round trip attention geometry=%+v want=%+v", got, want)
+	}
+}
+
+func TestDeepSeekV41RejectsMalformedAttentionGeometry(t *testing.T) {
+	raw, _ := readDeepSeekV41Config(t)
+	malformed := bytes.Replace(raw, []byte(`"o_groups": 8`), []byte(`"o_groups": 7`), 1)
+	if bytes.Equal(malformed, raw) {
+		t.Fatal("fixture did not contain the expected o_groups value")
+	}
+	var cfg Config
+	if err := json.Unmarshal(malformed, &cfg); !errors.Is(err, ErrV41ConfigAdmission) {
+		t.Fatalf("error=%v want ErrV41ConfigAdmission", err)
+	}
+}
+
+// TestDeepSeekV41AttentionAxesMarshalFromFlatConfig pins the marshal/parse
+// symmetry the typed axes depend on: MarshalJSON emits the nested text_config
+// geometry from the same flat fields parseDeepSeekV41Metadata derives Attention
+// from. A hand-built Config whose DeepSeekV41.Attention disagrees with its flat
+// geometry must therefore still emit a self-consistent document, and a reparse
+// must not silently overwrite the caller's flat geometry with a stale Attention.
+func TestDeepSeekV41AttentionAxesMarshalFromFlatConfig(t *testing.T) {
+	raw, cfg := readDeepSeekV41Config(t)
+	// Stale typed envelope: the caller hand-set a wrong Attention while the flat
+	// geometry (the source parse reads) stays official.
+	cfg.DeepSeekV41.Attention.HiddenSize = 1
+	cfg.DeepSeekV41.Attention.OGroups = 99
+
+	encoded, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The emitted nested text_config must carry the flat geometry, not the stale
+	// typed envelope. Compare against a marshal of the untouched config so the
+	// assertion is independent of the exact key set.
+	clean, err := json.Marshal(mustReadDeepSeekV41Config(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(encoded, clean) {
+		t.Fatalf("stale typed Attention changed the emitted document:\n got=%s\nwant=%s", encoded, clean)
+	}
+
+	var roundTrip Config
+	if err := json.Unmarshal(raw, &roundTrip); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := roundTrip.DeepSeekV41.Attention, (DeepSeekV41AttentionGeometry{
+		NumLayers: 40, HiddenSize: 5120, NumHeads: 64, NumKVHeads: 1, HeadDim: 512,
+		QKRopeHeadDim: 64, QLoraRank: 1280, OLoraRank: 1024, OGroups: 8,
+		NumExperts: 384, NSharedExperts: 1, NumExpertsPerTok: 6, MoEIntermediateSize: 2304,
+	}); got != want {
+		t.Fatalf("reparse attention geometry=%+v want=%+v", got, want)
+	}
+}
+
+func mustReadDeepSeekV41Config(t *testing.T) Config {
+	t.Helper()
+	_, cfg := readDeepSeekV41Config(t)
+	return cfg
 }
 
 func TestDeepSeekV41NativeLoadersRefuseBeforeWeightIO(t *testing.T) {
