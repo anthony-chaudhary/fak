@@ -482,7 +482,7 @@ func TestSBOMDriftGateCatchesMutations(t *testing.T) {
 		{
 			name: "go.mod stops requiring a module the SBOM still lists",
 			goMod: func(s string) string {
-				return strings.Replace(s, "require golang.org/x/sys v0.46.0 // indirect", "", 1)
+				return strings.Replace(s, "require golang.org/x/sys v0.48.0", "", 1)
 			},
 			sbom: identity,
 			want: []driftID{{driftExtra, "golang.org/x/sys"}},
@@ -500,16 +500,16 @@ func TestSBOMDriftGateCatchesMutations(t *testing.T) {
 			name:  "SBOM entry half-edited: proxy download URL left at the old version",
 			goMod: identity,
 			sbom: func(s string) string {
-				return strings.Replace(s, "golang.org/x/sys/@v/v0.46.0.zip",
+				return strings.Replace(s, "golang.org/x/sys/@v/v0.48.0.zip",
 					"golang.org/x/sys/@v/v0.45.0.zip", 1)
 			},
 			want: []driftID{{driftDownload, "golang.org/x/sys"}},
 		},
 		{
-			name: "an indirect requirement becomes direct and the SBOM still says indirect",
+			name: "a direct requirement becomes indirect and the SBOM still says direct",
 			goMod: func(s string) string {
-				return strings.Replace(s, "require golang.org/x/sys v0.46.0 // indirect",
-					"require golang.org/x/sys v0.46.0", 1)
+				return strings.Replace(s, "require golang.org/x/sys v0.48.0",
+					"require golang.org/x/sys v0.48.0 // indirect", 1)
 			},
 			sbom: identity,
 			want: []driftID{{driftDirectness, "golang.org/x/sys"}},

@@ -10,7 +10,7 @@
       "Tool: go-list-m-all",
       "Organization: fak project"
     ],
-    "comment": "Generated from the build inputs at commit 1a9fcd5ad, Go toolchain go1.26.5. Regenerate and re-verify with the commands in docs/air-gapped-deployment-kit.md#regenerate-and-verify-this-sbom. The authoritative source is `go version -m <binary>`, which reports the module set actually linked into the shipped artifact; `go list -m all` and go.sum agree with it at this commit."
+    "comment": "Original release metadata from the build inputs at commit 1a9fcd5ad, Go toolchain go1.26.5. Dependency entries re-cut from go.mod and go.sum at commit e3678041b; x/sys v0.48.0 module zip and license verified from the local module cache. Regenerate and re-verify with the commands in docs/air-gapped-deployment-kit.md#regenerate-and-verify-this-sbom. The authoritative source is `go version -m <binary>`, which reports the module set actually linked into the shipped artifact. The dependency re-cut records source inputs, not a new binary build witness."
   },
   "packages": [
     {
@@ -54,19 +54,19 @@
     {
       "SPDXID": "SPDXRef-Package-golang-org-x-sys",
       "name": "golang.org/x/sys",
-      "versionInfo": "v0.46.0",
-      "downloadLocation": "https://proxy.golang.org/golang.org/x/sys/@v/v0.46.0.zip",
+      "versionInfo": "v0.48.0",
+      "downloadLocation": "https://proxy.golang.org/golang.org/x/sys/@v/v0.48.0.zip",
       "filesAnalyzed": false,
       "licenseConcluded": "BSD-3-Clause",
       "licenseDeclared": "BSD-3-Clause",
       "copyrightText": "NOASSERTION",
       "supplier": "Organization: Go project (golang.org/x extended standard library)",
-      "sourceInfo": "Indirect requirement in go.mod (pulled in by golang.org/x/term). go.sum module digest: h1:noSf2Fq6F8DBgS+LysIkx7rIExoNHJsxOAtPp4rthXw= (dirhash H1, base64 SHA-256 over the module zip; not a hex file checksum, so it is recorded here rather than as an SPDX checksum field). go.mod digest: h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=",
+      "sourceInfo": "Direct requirement in go.mod. go.sum module digest: h1:bbX/i/6MgT9BVLM9RT1thmxL04yeTAhbEz4SyadbXoo= (dirhash H1, base64 SHA-256 over the module zip; not a hex file checksum, so it is recorded here rather than as an SPDX checksum field). go.mod digest: h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=",
       "externalRefs": [
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:golang/golang.org/x/sys@v0.46.0"
+          "referenceLocator": "pkg:golang/golang.org/x/sys@v0.48.0"
         }
       ]
     }
@@ -81,6 +81,11 @@
       "spdxElementId": "SPDXRef-Package-fak",
       "relationshipType": "DEPENDS_ON",
       "relatedSpdxElement": "SPDXRef-Package-golang-org-x-term"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-fak",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-golang-org-x-sys"
     },
     {
       "spdxElementId": "SPDXRef-Package-golang-org-x-term",
