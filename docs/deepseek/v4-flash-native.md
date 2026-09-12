@@ -55,3 +55,44 @@ DSpark speculative decoding is a separate stage. Disabling or skipping DSpark ha
 3. Add an official-layout reference fixture for mHC, per-layer compression, grouped output projection, and next-token parity.
 4. Load the full pinned checkpoint and produce a bounded, reproducible target-model token with DSpark disabled, recording a parity receipt.
 5. Qualify DSpark independently, including its three published MTP stages and acceptance behavior.
+
+
+## Checkpoint admission and per-node memory budget (V4.1)
+
+The budget below is derived from two cited measured byte counts for the official
+[`DeepSeek-V4.1-Flash`](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/tree/dba1be0a40aa45a94ad051997016db3960a90277)
+checkpoint at revision `dba1be0a40aa45a94ad051997016db3960a90277`:
+
+- Total checkpoint: **510,296,708,312 bytes** across the official 48 weight shards.
+- Engram embeddings (the two tables for layer IDs `{1,14}`): **202,758,032,400 bytes**.
+- Backbone weights are the remainder: 510,296,708,312 - 202,758,032,400 = **307,538,675,912 bytes**.
+
+The Engram tables are accounted separately from the backbone so an admission
+check can see the embedding share explicitly; the two resident shares always sum
+to the per-node resident total (no double count, no omission).
+
+Per-node placement budget under full residency (`fraction = 1.0`) and streamed
+residency (the documented `fraction = 0.25`, i.e. a quarter held resident and the
+rest streamed from disk), all values are `ceil` byte counts:
+
+| Nodes | Fraction | Resident bytes | Engram resident | Backbone resident |
+|-------|----------|----------------|-----------------|-------------------|
+| 1     | 1.00     | 510,296,708,312 | 202,758,032,400 | 307,538,675,912 |
+| 1     | 0.25     | 127,574,177,078 | 50,689,508,100 | 76,884,668,978 |
+| 3     | 1.00     | 170,098,902,771 | 67,586,010,800 | 102,512,891,971 |
+| 3     | 0.25     | 42,524,725,693 | 16,896,502,700 | 25,628,222,993 |
+
+These numbers come from `DeepSeekV41BudgetForNodes` in
+`internal/model/v41_budget.go`; `AdmitDeepSeekV41Checkpoint` refuses a
+checkpoint larger than the per-node resident budget before any large allocation.
+
+**This is a placement and admission budget, not a distributed-execution
+witness.** It makes no physical performance, throughput, or multi-node
+readiness claim, and it does not assert that any node can actually serve the
+model.
+
+Witness command:
+
+```sh
+go test ./internal/model -run TestV41Budget -count=1
+```
