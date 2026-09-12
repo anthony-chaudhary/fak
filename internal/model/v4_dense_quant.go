@@ -32,7 +32,7 @@ func quantizeV4DenseFP8TensorInto(
 	}
 	weightName := role.weightName
 	scaleName := strings.TrimSuffix(weightName, ".weight") + ".scale"
-	weightEntry, scaleEntry, err := v4DenseFP8PairEntries(weightName, scaleName, role.shape, hdr)
+	weightEntry, scaleEntry, err := v4DenseFP8PairEntries(weightName, scaleName, role.shape, hdr, m.Cfg)
 	if err != nil {
 		return true, err
 	}
@@ -58,7 +58,7 @@ func quantizeV4DenseFP8TensorInto(
 	return true, nil
 }
 
-func v4DenseFP8PairEntries(weightName, scaleName string, wantWeight [2]int, hdr map[string]json.RawMessage) (stEntry, stEntry, error) {
+func v4DenseFP8PairEntries(weightName, scaleName string, wantWeight [2]int, hdr map[string]json.RawMessage, cfg Config) (stEntry, stEntry, error) {
 	weightRaw, ok := hdr[weightName]
 	if !ok {
 		return stEntry{}, stEntry{}, fmt.Errorf("safetensors: V4 dense FP8 pair is missing %s", weightName)
@@ -82,6 +82,14 @@ func v4DenseFP8PairEntries(weightName, scaleName string, wantWeight [2]int, hdr 
 	}
 	if len(weightEntry.Shape) != 2 {
 		return stEntry{}, stEntry{}, fmt.Errorf("safetensors: V4 dense weight %s shape %v, want rank-2", weightName, weightEntry.Shape)
+	}
+	if strings.HasSuffix(weightName, "attn.wo_a.weight") {
+		// The grouped output projection is the one role whose flat row axis is a
+		// derived grouped geometry, so check it against the config before the
+		// hardcoded published-shape table, which would otherwise mask the mismatch.
+		if _, err := v4ValidateGroupedWoAWeightShape(cfg, weightEntry.Shape[0], weightEntry.Shape[1]); err != nil {
+			return stEntry{}, stEntry{}, err
+		}
 	}
 	if !sameShape(weightEntry.Shape, wantWeight[:]) {
 		return stEntry{}, stEntry{}, fmt.Errorf("safetensors: V4 dense weight %s shape %v, want published shape %v", weightName, weightEntry.Shape, wantWeight)

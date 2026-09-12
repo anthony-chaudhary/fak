@@ -71,16 +71,21 @@ func TestParseMacOSResourceIncidentRejectsMalformedReports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Normalize line endings before applying the LF-delimited mutations below.
+	// A Windows checkout with core.autocrlf=true materializes the fixture with
+	// CRLF endings, which would make the "\n"-terminated needles no-ops and
+	// leave the "missing action" / "duplicate pid" subcases unmutilated.
+	normalized := strings.ReplaceAll(string(data), "\r\n", "\n")
 	tests := map[string][]byte{
-		"missing action": []byte(strings.Replace(string(data), "Action taken:    none\n", "", 1)),
-		"duplicate pid":  []byte(strings.Replace(string(data), "PID:             20870\n", "PID:             20870\nPID:             20870\n", 1)),
-		"wrong event":    []byte(strings.Replace(string(data), "disk writes", "application hang", 1)),
-		"wrong action":   []byte(strings.Replace(string(data), "Action taken:    none", "Action taken:    terminate", 1)),
-		"bad uuid":       []byte(strings.Replace(string(data), "7D5CFA95-4B8D-3CEF-DD58-D6BC242B7AA1", "not-a-uuid", 1)),
+		"missing action": []byte(strings.Replace(normalized, "Action taken:    none\n", "", 1)),
+		"duplicate pid":  []byte(strings.Replace(normalized, "PID:             20870\n", "PID:             20870\nPID:             20870\n", 1)),
+		"wrong event":    []byte(strings.Replace(normalized, "disk writes", "application hang", 1)),
+		"wrong action":   []byte(strings.Replace(normalized, "Action taken:    none", "Action taken:    terminate", 1)),
+		"bad uuid":       []byte(strings.Replace(normalized, "7D5CFA95-4B8D-3CEF-DD58-D6BC242B7AA1", "not-a-uuid", 1)),
 		"wrong stack end": []byte(strings.Replace(
-			string(data), "write + 8 (libsystem_kernel.dylib + 1234)", "close + 8 (libsystem_kernel.dylib + 1234)", 1,
+			normalized, "write + 8 (libsystem_kernel.dylib + 1234)", "close + 8 (libsystem_kernel.dylib + 1234)", 1,
 		)),
-		"duration mismatch": []byte(strings.Replace(string(data), "over 641 seconds", "over 300 seconds", 1)),
+		"duration mismatch": []byte(strings.Replace(normalized, "over 641 seconds", "over 300 seconds", 1)),
 	}
 	for name, fixture := range tests {
 		t.Run(name, func(t *testing.T) {
