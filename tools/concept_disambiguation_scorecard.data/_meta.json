@@ -10528,6 +10528,16 @@
           "category": "incidental",
           "reason": "compaction summary helper in prompt ordering",
           "token": "RenderInvariantPrefix"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private context storage key for the admitted chat route binding; it introduces no separate context mechanism.",
+          "token": "chatRouteContextKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal one-shot telemetry flag consumer for a decoded context-view event; clears the recorded trace flag after logging and does not create, admit, or transform model context.",
+          "token": "consumeDecodedCtxViewEvent"
         }
       ],
       "exclude": [
@@ -10572,6 +10582,7 @@
         "capturedSelfcheckContexts",
         "cctx",
         "cellContext",
+        "chatRouteContextKey",
         "codexWorkflowDefaultContext",
         "collectDogfoodKernelValue",
         "compactionContractFrom",
@@ -10586,6 +10597,7 @@
         "compaction_checkpoint_conflation_rejected",
         "compaction_recovered",
         "compactions",
+        "consumeDecodedCtxViewEvent",
         "context",
         "contextBucket",
         "context_buckets",

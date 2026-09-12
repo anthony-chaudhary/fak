@@ -126,7 +126,7 @@ func (s *Server) handleGeminiGenerateContent(w http.ResponseWriter, r *http.Requ
 	// streaming arm too.
 	//
 	// Inert on a single-rank serve (FAK_EP_FANOUT_ADDRS unset yields no follower URLs).
-	waitEPFanout, ok := s.startEPFanoutFollowers(w, r, epRouteGeminiGenerateContent)
+	releaseEPFanout, waitEPFanout, ok := s.prepareChatEPFanout(w, r, epRouteGeminiGenerateContent)
 	if !ok {
 		return
 	}
@@ -154,6 +154,13 @@ func (s *Server) handleGeminiGenerateContent(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	stream := req.Stream || method == "streamGenerateContent"
+	r, ok = s.prepareChatRoute(w, r, model)
+	if !ok {
+		return
+	}
+	if !releaseEPFanout(r) {
+		return
+	}
 
 	ctx, reqTrace, sessionTurn, ok, canceled := s.beginServedRequest(w, r)
 	if canceled {

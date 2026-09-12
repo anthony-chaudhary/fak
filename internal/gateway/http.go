@@ -617,7 +617,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		r = r.WithContext(ctx)
 	}
-	waitEPFanout, ok := s.startEPFanoutFollowers(w, r, epRouteChatCompletions)
+	releaseEPFanout, waitEPFanout, ok := s.prepareChatEPFanout(w, r, epRouteChatCompletions)
 	if !ok {
 		return
 	}
@@ -644,6 +644,13 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	if routedModel != "" {
 		req.Model = routedModel
+	}
+	r, ok = s.prepareChatRoute(w, r, req.Model)
+	if !ok {
+		return
+	}
+	if !releaseEPFanout(r) {
+		return
 	}
 	receiptRequested := req.Fak != nil && req.Fak.NativeInferenceReceipt
 	decodeTraceRequested := req.FakDecodeTrace

@@ -552,3 +552,17 @@ Serve feature catalog identifier for the deterministic mock-planner configuratio
 Serve runtime field retaining detected Strix appliance capabilities for gateway configuration and hardware-derived feature provenance.
 
 **Distinct from:** DispatchPreflight admits a worker launch; strixPreflight records serving-host detection and does not grant dispatch or tool-call permission.
+
+
+### chatPlanner
+
+chatPlanner selects the planner stored in the admitted request binding, falling back to the gateway boot planner only when no binding exists.
+
+**Distinct from:** DualPlanner selects between its local and proxy legs from a model alias; chatPlanner selects an already admitted roster-specific transport without making a new account choice.
+
+
+### chatRouteFromContext
+
+chatRouteFromContext retrieves the admitted chat account binding from the current request context, or nil when the request uses the boot planner unchanged.
+
+**Distinct from:** principalFromContext extracts the authenticated tenant identity used to admit an account; chatRouteFromContext retrieves the resulting transport binding and does not authenticate or resolve an account.

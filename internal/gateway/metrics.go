@@ -1185,6 +1185,15 @@ func (s *Server) logInferenceTurnWithContextEvent(traceID, wire string, stream b
 	if s == nil {
 		return
 	}
+	s.logInferenceTurnForModel(traceID, wire, s.model, stream, usage, finishReason, dur, compacted, contextEvent)
+}
+
+// logInferenceTurnForModel records an explicitly selected upstream model while
+// the wire response can retain the client's public model alias.
+func (s *Server) logInferenceTurnForModel(traceID, wire, model string, stream bool, usage agent.Usage, finishReason string, dur time.Duration, compacted, contextEvent bool) {
+	if s == nil {
+		return
+	}
 	// #2179: attribute this turn's cache-creation write to the 1h tier when the
 	// managed-cache TTL-upgrade rung was already active for the session. GATEWAY-
 	// ATTRIBUTED, not provider-reported — the Anthropic usage block never splits 5m
@@ -1237,7 +1246,7 @@ func (s *Server) logInferenceTurnWithContextEvent(traceID, wire string, stream b
 		"event":                       "gateway_inference_turn",
 		"wire":                        wire,
 		"stream":                      stream,
-		"model":                       s.model,
+		"model":                       model,
 		"finish_reason":               finishReason,
 		"duration_ms":                 float64(dur.Microseconds()) / 1000.0,
 		"prompt_tokens":               usage.PromptTokens,

@@ -1,14 +1,12 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -240,28 +238,9 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if s.checkWarmupPending(w) {
 		return
 	}
-	// The temporary EP bridge mirrors the original request body to rank-local
-	// followers. Continuation state is process-local, so a follower cannot resolve a
-	// front-rank response ID and would miss the collective. Refuse this unsupported
-	// combination before releasing any follower.
-	if r.Header.Get(epFollowerHeader) == "" && len(epFanoutURLsFromEnv(epRouteResponses)) > 0 {
-		raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxTranscriptBody))
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
-			return
-		}
-		r.Body = io.NopCloser(bytes.NewReader(raw))
-		var meta struct {
-			PreviousResponseID string `json:"previous_response_id"`
-		}
-		if json.Unmarshal(raw, &meta) == nil && strings.TrimSpace(meta.PreviousResponseID) != "" {
-			writeErr(w, http.StatusBadRequest, "previous_response_id is unavailable with expert-parallel request fanout")
-			return
-		}
-	}
 	// Release the EP follower ranks BEFORE this rank enters the decode, onto THIS wire's
-	// own route (#5528). Same placement and same reasoning as the chat, legacy and
-	// Anthropic wires: after the method check, before anything reads the body.
+	// own route (#5528). Retain the original body before decoding; with a roster,
+	// release waits for account admission and occurs only on the boot-model path.
 	//
 	// ONE release covers the whole HTTP turn, including the #5212 denial-recovery sample
 	// below. That second completeServed is a second forward pass, but it is not a second
@@ -271,7 +250,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	// they are already running.
 	//
 	// Inert on a single-rank serve (FAK_EP_FANOUT_ADDRS unset yields no follower URLs).
-	waitEPFanout, ok := s.startEPFanoutFollowers(w, r, epRouteResponses)
+	releaseEPFanout, waitEPFanout, ok := s.prepareChatEPFanout(w, r, epRouteResponses)
 	if !ok {
 		return
 	}
@@ -339,9 +318,16 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	tools := responsesToolsToToolDefs(req.Tools)
 
 	reqModel := strings.TrimSpace(req.Model)
+	r, ok = s.prepareChatRoute(w, r, reqModel)
+	if !ok {
+		return
+	}
+	if !releaseEPFanout(r) {
+		return
+	}
 	if reqModel == "" {
 		reqModel = s.model
-	} else if s.isForceResponsesStream() && isUnsupportedChatGPTModel(reqModel) {
+	} else if chatRouteFromContext(r.Context()) == nil && s.isForceResponsesStream() && isUnsupportedChatGPTModel(reqModel) {
 		s.logf("gateway: model %q is not supported by Codex ChatGPT subscription upstream; adapting to configured default %q", reqModel, s.model)
 		reqModel = s.model
 	}
