@@ -538,6 +538,7 @@ func TestQwen35PrefillAndStepCPUContinuation(t *testing.T) {
 		NumHeads:         2,
 		NumKVHeads:       2,
 		HeadDim:          128,
+		RopeTheta:        10000,
 		RMSNormEps:       1e-6,
 	}
 	m := NewSynthetic(cfg)

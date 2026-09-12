@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -539,11 +540,21 @@ func TestCronOpenCodeUntilExpiration(t *testing.T) {
 	}
 }
 
+func TestCronOpenCodeSessionHelper(t *testing.T) {
+	if os.Getenv("FAK_CRON_SESSION_HELPER") != "1" {
+		return
+	}
+	if _, err := os.Stdout.WriteString(`{"session_id": "ses_active_123"}` + "\n"); err != nil {
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
 func TestCronOpenCodeUntilActive(t *testing.T) {
 	ledger := filepath.Join(t.TempDir(), "opencode_until_active.jsonl")
 	var stdout, stderr bytes.Buffer
 
-	cmdArgs := []string{"echo", `{"session_id": "ses_active_123"}`}
+	cmdArgs := []string{os.Args[0], "-test.run=^TestCronOpenCodeSessionHelper$"}
 
 	// Set deadline in the future relative to --at
 	atTime := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
@@ -556,6 +567,7 @@ func TestCronOpenCodeUntilActive(t *testing.T) {
 		At:          atTime.Format(time.RFC3339),
 		Until:       untilTime.Format(time.RFC3339),
 		Command:     cmdArgs,
+		Env:         []string{"FAK_CRON_SESSION_HELPER=1"},
 		Stdout:      &stdout,
 		Stderr:      &stderr,
 		EmitReceipt: true,
@@ -567,7 +579,7 @@ func TestCronOpenCodeUntilActive(t *testing.T) {
 	}
 
 	if receipt.Outcome != "succeeded" {
-		t.Errorf("expected outcome 'succeeded', got %q", receipt.Outcome)
+		t.Errorf("expected outcome 'succeeded', got %q (exit_code: %d, stderr: %s)", receipt.Outcome, receipt.ExitCode, stderr.String())
 	}
 	if receipt.SessionID != "ses_active_123" {
 		t.Errorf("expected session_id 'ses_active_123', got %q", receipt.SessionID)
