@@ -29,9 +29,12 @@ description: "How to run local models (Qwen3.8-27B and peers) natively on Apple 
 Metal support is compiled into the native `darwin/arm64` build with CGo enabled.
 The installer now selects the Metal archive by default on Apple Silicon; CPU
 archives require explicit `--variant cpu` and cannot pass Metal qualification.
-These defaults need a release carrying the GPU archive (historical v0.54.0 lacks
-it); a missing asset produces an actionable error. The commands below build and
-qualify the native backend from source. MLX remains a comparison runtime.
+The v0.54.0 Metal archive is available as a backfill from its exact tagged source,
+without creating a new release. On Apple Silicon, use `FAK_VERSION=0.54.0 sh install.sh`
+to select it. Missing assets for other versions produce an actionable error.
+Vulkan publication remains pending its release and hardware gate. The commands
+below build and qualify the native Metal backend from source. MLX remains a
+comparison runtime.
 Install Xcode Command Line Tools and Go 1.26+, then build from a clean
 committed checkout (or a managed worker) to a unique temporary path and inspect the actual
 Mac and backend:

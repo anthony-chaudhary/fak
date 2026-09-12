@@ -79,14 +79,15 @@ func issueCreateShiftLeftScope(body string) (string, error) {
 // issueCreateResult is the --json shape: the rendered gh argv is always included (even on
 // a dry run) so a caller can see exactly what would run or did run.
 type issueCreateResult struct {
-	OK     bool     `json:"ok"`
-	DryRun bool     `json:"dry_run"`
-	Title  string   `json:"title"`
-	Repo   string   `json:"repo,omitempty"`
-	Labels []string `json:"labels,omitempty"`
-	Args   []string `json:"args"`
-	URL    string   `json:"url,omitempty"`
-	Error  string   `json:"error,omitempty"`
+	OK     bool                  `json:"ok"`
+	DryRun bool                  `json:"dry_run"`
+	Title  string                `json:"title"`
+	Repo   string                `json:"repo,omitempty"`
+	Labels []string              `json:"labels,omitempty"`
+	Args   []string              `json:"args"`
+	URL    string                `json:"url,omitempty"`
+	Error  string                `json:"error,omitempty"`
+	Scrub  issueScrubVerdictJSON `json:"scrub"`
 }
 
 func runIssueCreate(stdout, stderr io.Writer, argv []string) int {
@@ -157,6 +158,7 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 	targetEnvelope := fs.String("target-envelope", "", "production target envelope entries (required unless body declares them)")
 	witnessedEnvelope := fs.String("witnessed-envelope", "", "directly witnessed envelope entries (required unless body declares them)")
 	rawBody := fs.Bool("raw-body", false, "do not append/review project-work metadata (only for non-dispatchable administrative issues)")
+	privateRoot := fs.String("private-root", "", "path to the private companion repo root (default: FAK_PRIVATE_DIR or FAK_PRIVATE_ROOT env, else sibling ../fak-private)")
 	category := fs.String("category", "", "explicit category for baseline-aware dispatch")
 	layer := fs.String("layer", "", "ordered layer within --category")
 	repo := fs.String("repo", "", "owner/name override (default: gh infers from cwd)")
@@ -195,6 +197,15 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 		fmt.Fprintln(stderr, "fak-dev issue create: --body or --body-file is required")
 		return 2
 	}
+	// Leak-scrub gate (fak-private #931): before ANY gh POST and before every other
+	// contract assay — including the dry run, whose out-of-repo output can contain the
+	// title/body and render locally. Publish-only-when-clean, fail-closed when the
+	// scrubber is absent; --raw-body bypasses project metadata, never this gate.
+	result := &issueCreateResult{DryRun: *dryRun, Title: *title, Repo: *repo}
+	if code, refused := runIssueCreateScrubGate(stdout, stderr, result, *privateRoot, *title, resolvedBody, *asJSON); refused {
+		return code
+	}
+
 	if !*rawBody {
 		var err error
 		resolvedBody, err = issueCreateShiftLeftScope(resolvedBody)
@@ -249,14 +260,15 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 		args = append(args, "--repo", *repo)
 	}
 
-	result := issueCreateResult{DryRun: *dryRun, Title: *title, Repo: *repo, Labels: labelList, Args: args}
+	result.Labels = labelList
+	result.Args = args
 
 	if *dryRun {
 		result.OK = true
 		if *asJSON {
 			return encodeJSONOrFail(stdout, stderr, result, "fak-dev issue create")
 		}
-		fmt.Fprintf(stdout, "fak-dev issue create --dry-run: would run `gh %s`\n", strings.Join(args, " "))
+		fmt.Fprintf(stdout, "fak-dev issue create --dry-run: scrub clean; would run `gh %s`\n", strings.Join(args, " "))
 		return 0
 	}
 

@@ -3,6 +3,7 @@ package devcmd
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,7 +24,7 @@ func TestIssueCreateShiftLeftScopeRequiresBothDecisions(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out, errb bytes.Buffer
-			code := runIssueCreateWith(&out, &errb, []string{"--title", "t", "--body", tc.body, "--dry-run"}, nil)
+			code := runIssueCreateWithCleanScrub(&out, &errb, []string{"--title", "t", "--body", tc.body, "--dry-run"}, nil)
 			if code != 2 || !strings.Contains(errb.String(), tc.want) {
 				t.Fatalf("code=%d stderr=%q, want %q", code, errb.String(), tc.want)
 			}
@@ -34,7 +35,7 @@ func TestIssueCreateShiftLeftScopeRequiresBothDecisions(t *testing.T) {
 func TestIssueCreateShiftLeftScopeCanonicalizesLegacyHeadings(t *testing.T) {
 	body := "## Parent context\n#99\n\n## In scope\nChange -> real seam -> observable outcome -> witness.\n\n## Out of scope\nDo not add unrelated polish." + validIssueCreateProblemFrame("Core")
 	var out, errb bytes.Buffer
-	code := runIssueCreateWith(&out, &errb, []string{
+	code := runIssueCreateWithCleanScrub(&out, &errb, []string{
 		"--title", "scoped", "--body", body,
 		"--estimate-points", "1", "--parent-baseline-points", "1",
 		"--target-envelope", "- acceptance pass rate: = 100 percent",
@@ -64,7 +65,7 @@ func TestIssueCreateDryRunDoesNotInvokeRunner(t *testing.T) {
 		return "https://example.test/issues/1", "", true
 	}
 	var out, errb bytes.Buffer
-	code := runIssueCreateWith(&out, &errb, []string{
+	code := runIssueCreateWithCleanScrub(&out, &errb, []string{
 		"--title", "feat: per-session activity cell",
 		"--body", "add a pane row",
 		"--raw-body", "--dry-run",
@@ -87,7 +88,7 @@ func TestIssueCreateBuildsExpectedGHArgs(t *testing.T) {
 		return "https://example.test/issues/9", "", true
 	}
 	var out, errb bytes.Buffer
-	code := runIssueCreateWith(&out, &errb, []string{
+	code := runIssueCreateWithCleanScrub(&out, &errb, []string{
 		"--title", "feat: thing",
 		"--body", "body text",
 		"--labels", "agent-handoff,next-step",
@@ -122,7 +123,7 @@ func TestIssueCreateBodyFileReadsContent(t *testing.T) {
 		return "https://example.test/issues/2", "", true
 	}
 	var out, errb bytes.Buffer
-	code := runIssueCreateWith(&out, &errb, []string{
+	code := runIssueCreateWithCleanScrub(&out, &errb, []string{
 		"--title", "t",
 		"--body-file", path, "--raw-body",
 	}, runner)
@@ -142,7 +143,7 @@ func TestIssueCreateRequiresTitleAndBody(t *testing.T) {
 	}
 	for _, argv := range cases {
 		var out, errb bytes.Buffer
-		code := runIssueCreateWith(&out, &errb, argv, func(args []string) (string, string, bool) {
+		code := runIssueCreateWithCleanScrub(&out, &errb, argv, func(args []string) (string, string, bool) {
 			t.Fatalf("runner must not be called for invalid flags: %v", args)
 			return "", "", false
 		})
@@ -157,7 +158,7 @@ func TestIssueCreateReportsGHFailure(t *testing.T) {
 		return "", "HTTP 422: validation failed", false
 	}
 	var out, errb bytes.Buffer
-	code := runIssueCreateWith(&out, &errb, []string{"--title", "t", "--body", "b", "--raw-body"}, runner)
+	code := runIssueCreateWithCleanScrub(&out, &errb, []string{"--title", "t", "--body", "b", "--raw-body"}, runner)
 	if code != 1 {
 		t.Fatalf("exit=%d, want 1", code)
 	}
@@ -171,7 +172,7 @@ func TestIssueCreateJSONOutput(t *testing.T) {
 		return "https://example.test/issues/3", "", true
 	}
 	var out, errb bytes.Buffer
-	code := runIssueCreateWith(&out, &errb, []string{"--title", "t", "--body", "b", "--raw-body", "--json"}, runner)
+	code := runIssueCreateWithCleanScrub(&out, &errb, []string{"--title", "t", "--body", "b", "--raw-body", "--json"}, runner)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, errb.String())
 	}
@@ -190,7 +191,7 @@ func validIssueCreateProblemFrame(class string) string {
 
 func TestIssueCreateDefaultsProjectWorkToProduction(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := runIssueCreateWith(&stdout, &stderr, []string{"--title", "scoped", "--body", "## Parent context\n#4638\n\n## Core through-line\nChange -> seam -> outcome -> witness.\n\n## Gold-plating boundary\nDo not add unrelated polish." + validIssueCreateProblemFrame("Core"), "--estimate-points", "3", "--parent-baseline-points", "8", "--target-envelope", "- paths: >= 1 command", "--witnessed-envelope", "- paths: 1 command", "--dry-run", "--json"}, nil)
+	code := runIssueCreateWithCleanScrub(&stdout, &stderr, []string{"--title", "scoped", "--body", "## Parent context\n#4638\n\n## Core through-line\nChange -> seam -> outcome -> witness.\n\n## Gold-plating boundary\nDo not add unrelated polish." + validIssueCreateProblemFrame("Core"), "--estimate-points", "3", "--parent-baseline-points", "8", "--target-envelope", "- paths: >= 1 command", "--witnessed-envelope", "- paths: 1 command", "--dry-run", "--json"}, nil)
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
@@ -214,7 +215,7 @@ func TestIssueCreateDefaultsProjectWorkToProduction(t *testing.T) {
 func TestIssueCreatePreservesExplicitDemo(t *testing.T) {
 	body := "## Parent context\n#4638\n\n## Core through-line\nChange -> seam -> outcome -> witness.\n\n## Gold-plating boundary\nDo not add unrelated polish.\n\n## Work estimate\nEstimate: 1 point.\n\n## Overall completion contribution\nContribution: 1/8 points.\n\n## Completion standard\ndemo" + validIssueCreateProblemFrame("Peripheral")
 	var stdout, stderr bytes.Buffer
-	code := runIssueCreateWith(&stdout, &stderr, []string{"--title", "demo", "--body", body, "--dry-run", "--json"}, nil)
+	code := runIssueCreateWithCleanScrub(&stdout, &stderr, []string{"--title", "demo", "--body", body, "--dry-run", "--json"}, nil)
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
@@ -230,7 +231,7 @@ func TestIssueCreatePreservesExplicitDemo(t *testing.T) {
 
 func TestIssueCreateRefusesMissingProjectWorkNumbers(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := runIssueCreateWith(&stdout, &stderr, []string{"--title", "unknown", "--body", "## Core through-line\nChange -> seam -> outcome -> witness.\n\n## Gold-plating boundary\nDo not add unrelated polish." + validIssueCreateProblemFrame("Stewardship (release obligation)"), "--dry-run"}, nil)
+	code := runIssueCreateWithCleanScrub(&stdout, &stderr, []string{"--title", "unknown", "--body", "## Core through-line\nChange -> seam -> outcome -> witness.\n\n## Gold-plating boundary\nDo not add unrelated polish." + validIssueCreateProblemFrame("Stewardship (release obligation)"), "--dry-run"}, nil)
 	if code != 2 || !strings.Contains(stderr.String(), "estimate-points") {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
@@ -265,7 +266,7 @@ func TestIssueCreateClassificationValidatesTrackedBaseline(t *testing.T) {
 
 func TestIssueCreateDryRunEmitsCategoryLayer(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := runIssueCreateWith(&stdout, &stderr, []string{"--title", "next depth", "--body", "body", "--category", "agent-work-profile", "--layer", "provider-effectiveness", "--dry-run", "--raw-body", "--json"}, nil)
+	code := runIssueCreateWithCleanScrub(&stdout, &stderr, []string{"--title", "next depth", "--body", "body", "--category", "agent-work-profile", "--layer", "provider-effectiveness", "--dry-run", "--raw-body", "--json"}, nil)
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
@@ -298,7 +299,7 @@ func TestIssueCreateScrubsProtectedTitleAndBodyFile(t *testing.T) {
 		return "https://example.invalid/7\n", "", true
 	}
 	var out, errb bytes.Buffer
-	if code := runIssueCreateWith(&out, &errb, []string{"--title", "move " + cpu + " to " + gpu, "--body-file", bodyFile, "--raw-body"}, runner); code != 0 {
+	if code := runIssueCreateWithCleanScrub(&out, &errb, []string{"--title", "move " + cpu + " to " + gpu, "--body-file", bodyFile, "--raw-body"}, runner); code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, errb.String())
 	}
 	joined := strings.Join(got, "\n")
@@ -312,7 +313,7 @@ func TestIssueCreateRequiresCanonicalProblemFrameBeforeMutation(t *testing.T) {
 	called := false
 	runner := func([]string) (string, string, bool) { called = true; return "", "", true }
 	var out, errb bytes.Buffer
-	code := runIssueCreateWith(&out, &errb, []string{"--title", "t", "--body", body}, runner)
+	code := runIssueCreateWithCleanScrub(&out, &errb, []string{"--title", "t", "--body", body}, runner)
 	if code != 2 || called {
 		t.Fatalf("code=%d called=%v stderr=%s", code, called, errb.String())
 	}
@@ -329,7 +330,7 @@ func TestIssueCreateAcceptsAllCanonicalCentralityClasses(t *testing.T) {
 		t.Run(class, func(t *testing.T) {
 			body := "## Parent context\n#1\n\n## Core through-line\nChange -> seam -> outcome -> witness.\n\n## Gold-plating boundary\nNo extras." + validIssueCreateProblemFrame(class)
 			var out, errb bytes.Buffer
-			code := runIssueCreateWith(&out, &errb, []string{"--title", "t", "--body", body, "--estimate-points", "1", "--parent-baseline-points", "1", "--target-envelope", "- paths: >= 1 command", "--witnessed-envelope", "- paths: 1 command", "--dry-run"}, nil)
+			code := runIssueCreateWithCleanScrub(&out, &errb, []string{"--title", "t", "--body", body, "--estimate-points", "1", "--parent-baseline-points", "1", "--target-envelope", "- paths: >= 1 command", "--witnessed-envelope", "- paths: 1 command", "--dry-run"}, nil)
 			if code != 0 {
 				t.Fatalf("code=%d stderr=%s", code, errb.String())
 			}
@@ -342,7 +343,7 @@ func TestIssueCreateMalformedProblemFrameReturnsCanonicalRepair(t *testing.T) {
 	called := false
 	runner := func([]string) (string, string, bool) { called = true; return "", "", true }
 	var out, errb bytes.Buffer
-	code := runIssueCreateWith(&out, &errb, []string{"--title", "t", "--body", body}, runner)
+	code := runIssueCreateWithCleanScrub(&out, &errb, []string{"--title", "t", "--body", body}, runner)
 	if code != 2 || called {
 		t.Fatalf("code=%d called=%v stderr=%s", code, called, errb.String())
 	}
@@ -356,7 +357,7 @@ func TestIssueCreateMalformedProblemFrameReturnsCanonicalRepair(t *testing.T) {
 func TestIssueCreateShiftLeftDefaultLabels(t *testing.T) {
 	body := "## Parent context\n#1\n\n## Core through-line\nChange -> seam -> outcome -> witness.\n\n## Gold-plating boundary\nNo extras." + validIssueCreateProblemFrame("Core")
 	var stdout, stderr bytes.Buffer
-	code := runIssueCreateWith(&stdout, &stderr, []string{
+	code := runIssueCreateWithCleanScrub(&stdout, &stderr, []string{
 		"--title", "feat(model): decompress MoE quant experts",
 		"--body", body,
 		"--estimate-points", "1",
@@ -397,7 +398,7 @@ func TestIssueCreateAuditDiscoverabilityBlocksNonDispatchable(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := runIssueCreateWith(&out, &errb, []string{
+	code := runIssueCreateWithCleanScrub(&out, &errb, []string{
 		"--title", "feat: incomplete issue",
 		"--body", body,
 		"--estimate-points", "1",
@@ -429,7 +430,7 @@ func TestIssueCreateAuditDiscoverabilityBypassFlags(t *testing.T) {
 		return "https://example.test/issues/11", "", true
 	}
 	var out, errb bytes.Buffer
-	code := runIssueCreateWith(&out, &errb, []string{
+	code := runIssueCreateWithCleanScrub(&out, &errb, []string{
 		"--title", "feat: bypass test",
 		"--body", body,
 		"--estimate-points", "1",
@@ -446,7 +447,7 @@ func TestIssueCreateAuditDiscoverabilityBypassFlags(t *testing.T) {
 	called = false
 	out.Reset()
 	errb.Reset()
-	code = runIssueCreateWith(&out, &errb, []string{
+	code = runIssueCreateWithCleanScrub(&out, &errb, []string{
 		"--title", "feat: allow non dispatchable",
 		"--body", body,
 		"--estimate-points", "1",
@@ -468,7 +469,7 @@ func TestIssueCreateAuditDiscoverabilityAllowsDispatchable(t *testing.T) {
 		return "https://example.test/issues/12", "", true
 	}
 	var out, errb bytes.Buffer
-	code := runIssueCreateWith(&out, &errb, []string{
+	code := runIssueCreateWithCleanScrub(&out, &errb, []string{
 		"--title", "feat(compute): dispatchable issue",
 		"--body", body,
 		"--estimate-points", "1",
@@ -479,4 +480,15 @@ func TestIssueCreateAuditDiscoverabilityAllowsDispatchable(t *testing.T) {
 	if code != 0 || !called {
 		t.Fatalf("code=%d called=%v stderr=%s", code, called, errb.String())
 	}
+}
+
+// These tests exercise issue policy and argv after a clean scrub verdict.
+// Gate refusal and the real subprocess have separate fixtures.
+func runIssueCreateWithCleanScrub(stdout, stderr io.Writer, argv []string, runner issueCreateRunner) int {
+	previous := issueScrubGateHook
+	issueScrubGateHook = func(_, _, _ string) issueScrubGateVerdict {
+		return issueScrubGateVerdict{Ran: true, Clean: true}
+	}
+	defer func() { issueScrubGateHook = previous }()
+	return runIssueCreateWith(stdout, stderr, argv, runner)
 }
