@@ -156,6 +156,55 @@ func TestBuildAsOfReportsAgenticDefaultWindow(t *testing.T) {
 	}
 }
 
+// TestReviewedDecisionsSnapshot pins the public accessor: sorted by flag, exactly one
+// entry per name, and mutually exclusive ON/OFF membership. compact-anchor-head must be
+// present with On==true, proving the stale OFF duplication was retired.
+func TestReviewedDecisionsSnapshot(t *testing.T) {
+	got := ReviewedDecisions()
+	byName := map[string]ReviewedDecision{}
+	for i, d := range got {
+		if i > 0 && got[i-1].Flag > d.Flag {
+			t.Fatalf("ReviewedDecisions not sorted by flag: %q before %q", got[i-1].Flag, d.Flag)
+		}
+		if _, dup := byName[d.Flag]; dup {
+			t.Fatalf("duplicate flag in ReviewedDecisions: %q", d.Flag)
+		}
+		byName[d.Flag] = d
+	}
+	if len(byName) != len(offWithReason)+len(onWithReason) {
+		t.Fatalf("ReviewedDecisions has %d entries, want %d", len(byName), len(offWithReason)+len(onWithReason))
+	}
+	for flag := range offWithReason {
+		if d, ok := byName[flag]; !ok || d.On {
+			t.Fatalf("OFF flag %q must project On=false", flag)
+		}
+	}
+	for flag := range onWithReason {
+		if d, ok := byName[flag]; !ok || !d.On {
+			t.Fatalf("ON flag %q must project On=true", flag)
+		}
+	}
+	head, ok := byName["compact-anchor-head"]
+	if !ok {
+		t.Fatal("compact-anchor-head must be present in ReviewedDecisions")
+	}
+	if !head.On {
+		t.Fatal("compact-anchor-head must project On=true (the ON rationale is authoritative)")
+	}
+}
+
+// TestNoFlagInBothRegistries pins the registry-contradiction invariant: a value-flag may
+// be reviewed default-OFF (offWithReason) OR reviewed default-ON (onWithReason), never both.
+// The two tables assert opposite postures, so a shared key is an incoherent dual encoding --
+// the exact #1122 defect (compact-anchor-head once sat in both). This is the public half of
+// the cross-repo invariant; platform/featureindex carries the private half. It fails the
+// moment any flag name is reintroduced into both maps.
+func TestNoFlagInBothRegistries(t *testing.T) {
+	if shared := registryOverlap(); len(shared) != 0 {
+		t.Fatalf("flags reviewed in BOTH registries (contradictory ON/OFF default): %v", shared)
+	}
+}
+
 // --- Check 2: cross-context default parity (VALUE_FLAG_CONTEXT_DRIFT) ---------------------
 
 func TestContextParity_DriftIsDebt(t *testing.T) {
