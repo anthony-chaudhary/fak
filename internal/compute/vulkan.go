@@ -11,6 +11,7 @@ package compute
 /*
 #cgo CFLAGS: -I${SRCDIR}
 #cgo LDFLAGS: -L${SRCDIR} -lfakvulkan
+#cgo linux LDFLAGS: -lm
 #include <stdlib.h>
 #include "vulkan_backend.h"
 // Issue-local adapter while the shared Vulkan C ABI remains stable: the fused Q2_K
@@ -1246,6 +1247,22 @@ func (v *vulkanBackend) SupportsQ6KMatMul() bool {
 	return v != nil && C.fvk_have_q6k_matmul() != 0
 }
 
+// VulkanQ4KTiledF32Available reports whether the loaded shader bundle contains
+// the exact-FP32 tiled Q4_K prefill pipeline.
+func (v *vulkanBackend) VulkanQ4KTiledF32Available() bool {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return v != nil && C.fvk_have_q4k_tiled_fp32() != 0
+}
+
+// VulkanDebugQ4KTiledF32Dispatches returns the process-lifetime count of Q4_K
+// prefill operations that selected the exact-FP32 tiled pipeline.
+func (v *vulkanBackend) VulkanDebugQ4KTiledF32Dispatches() uint64 {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return uint64(C.fvk_q4k_tiled_fp32_dispatches())
+}
+
 func (v *vulkanBackend) VulkanDebugBatchActive() bool {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -1319,6 +1336,34 @@ func (v *vulkanBackend) ensureQ4KStageLocked(bytes int) unsafe.Pointer {
 }
 
 func (v *vulkanBackend) q4kMatMulLocked(w, x, y Tensor, out, in, P int) {
+	arm := strings.TrimSpace(strings.ToLower(os.Getenv("FAK_VULKAN_Q4K_ARM")))
+	armMode := 0
+	if arm == "candidate" || arm == "wave32" || arm == "1" {
+		armMode = 1
+	} else if arm == "scalar" || arm == "0" {
+		armMode = 2
+	} else {
+		wave32 := strings.TrimSpace(strings.ToLower(os.Getenv("FAK_VULKAN_Q4K_WAVE32")))
+		if wave32 == "1" || wave32 == "true" {
+			armMode = 1
+		}
+	}
+	C.fvk_set_q4k_arm_mode(C.int(armMode))
+	tiledMode := 0
+	if armMode == 2 {
+		tiledMode = 2
+	} else {
+		switch strings.TrimSpace(strings.ToLower(os.Getenv("FAK_VULKAN_Q4K_TILED_FP32"))) {
+		case "":
+			// Automatic admission awaits current-source hardware qualification.
+		case "candidate":
+			tiledMode = 1
+		default:
+			tiledMode = 2
+		}
+	}
+	C.fvk_set_q4k_tiled_fp32_mode(C.int(tiledMode))
+
 	wb := w.buf.(*vulkanBuf)
 	if v.q4kProfile {
 		v.profileQ4KMatMulLocked(wb.n, wb.hostVisibleWeight, v.debugBufferDeviceLocal(wb))

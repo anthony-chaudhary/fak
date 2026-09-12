@@ -90,6 +90,12 @@ int fvk_have_cooperative_matrix(void);
 /* Q6_K availability is tied to the optional q6k_matmul SPIR-V module. */
 int fvk_have_q6k_matmul(void);
 uint32_t fvk_max_compute_work_group_count_x(void);
+/* Exact-FP32 tiled Q4_K prefill is optional. Availability requires the
+ * 32x4 workgroup, 2 KiB shared-memory footprint, and a loaded pipeline. */
+int fvk_have_q4k_tiled_fp32(void);
+uint64_t fvk_q4k_tiled_fp32_dispatches(void);
+void fvk_set_q4k_arm_mode(int mode);
+void fvk_set_q4k_tiled_fp32_mode(int mode);
 /* Per-resource storage-buffer cap discovered at init. fvk_max_buffer_bytes is the effective
  * single-buffer ceiling fak must respect: min(maxStorageBufferRange, maxMemoryAllocationSize)
  * when both are known, otherwise the known cap, or 0 when unknown. */

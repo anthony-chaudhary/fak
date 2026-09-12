@@ -1,0 +1,132 @@
+#version 450
+
+// Q4_K prefill GEMM for 32-token panels. Each 128-thread workgroup stages
+// eight activations and eight decoded weights per output at a time, reusing
+// them across a 32x32 output tile. Each output uses the scalar Q4_K shader's
+// eight FP32 accumulation chains and final fold, without cooperative matrices.
+layout(local_size_x = 32, local_size_y = 4, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) readonly buffer Q4K { uint raw[]; };
+layout(set = 0, binding = 1) readonly buffer X { float x[]; };
+layout(set = 0, binding = 2) writeonly buffer Y { float y[]; };
+layout(push_constant) uniform PC { int outDim; int inDim; int tokens; } pc;
+
+const uint TILE_M = 32u;
+const uint TILE_N = 32u;
+const uint STAGE_K = 8u;
+
+shared float ldsX[TILE_M * STAGE_K];
+shared float ldsW[TILE_N * STAGE_K];
+
+uint byteAt(uint off) {
+    uint word = raw[off >> 2u];
+    return (word >> ((off & 3u) * 8u)) & 255u;
+}
+
+float halfAt(uint off) {
+    uint bits = byteAt(off) | (byteAt(off + 1u) << 8u);
+    return unpackHalf2x16(bits).x;
+}
+
+void scaleMin(uint base, uint group, out uint scale, out uint minimum) {
+    if (group < 4u) {
+        scale = byteAt(base + group) & 63u;
+        minimum = byteAt(base + group + 4u) & 63u;
+        return;
+    }
+    uint j = group - 4u;
+    scale = (byteAt(base + group + 4u) & 15u) |
+        ((byteAt(base + j) >> 6u) << 4u);
+    minimum = (byteAt(base + group + 4u) >> 4u) |
+        ((byteAt(base + group) >> 6u) << 4u);
+}
+
+float dequantQ4K(uint row, uint col, uint blocks) {
+    uint superBlock = col >> 8u;
+    uint base = (row * blocks + superBlock) * 144u;
+    float d = halfAt(base);
+    float dmin = halfAt(base + 2u);
+    uint within = col & 255u;
+    uint group = within >> 5u;
+    uint lane = within & 31u;
+    uint scale, minimum;
+    scaleMin(base + 4u, group, scale, minimum);
+    uint packed = byteAt(base + 16u + (group >> 1u) * 32u + lane);
+    uint code = (group & 1u) == 0u ? (packed & 15u) : (packed >> 4u);
+    precise float scaled = d * float(scale);
+    precise float offset = dmin * float(minimum);
+    return scaled * float(code) - offset;
+}
+
+uint stageWithin(uint pair, uint word, uint k) {
+    uint groupBase = pair * 64u;
+    if (k < 4u) {
+        return groupBase + word * 4u + k;
+    }
+    return groupBase + 32u + word * 4u + (k - 4u);
+}
+
+void main() {
+    uint thread = gl_LocalInvocationIndex;
+    uint tileToken = gl_WorkGroupID.y * TILE_M;
+    uint tileOutput = gl_WorkGroupID.x * TILE_N;
+    uint blocks = uint(pc.inDim) >> 8u;
+    float sums[64];
+    for (uint i = 0u; i < 64u; ++i) {
+        sums[i] = 0.0;
+    }
+
+    for (uint sb = 0u; sb < blocks; ++sb) {
+        for (uint pair = 0u; pair < 4u; ++pair) {
+            for (uint word = 0u; word < 8u; ++word) {
+                for (uint i = thread; i < TILE_M * STAGE_K; i += 128u) {
+                    uint tokenOffset = i / STAGE_K;
+                    uint k = i % STAGE_K;
+                    uint token = tileToken + tokenOffset;
+                    uint inputCol = sb * 256u + stageWithin(pair, word, k);
+                    ldsX[i] = token < uint(pc.tokens)
+                        ? x[token * uint(pc.inDim) + inputCol]
+                        : 0.0;
+                }
+                for (uint i = thread; i < TILE_N * STAGE_K; i += 128u) {
+                    uint outputOffset = i / STAGE_K;
+                    uint k = i % STAGE_K;
+                    uint outputCol = tileOutput + outputOffset;
+                    uint inputCol = sb * 256u + stageWithin(pair, word, k);
+                    ldsW[i] = outputCol < uint(pc.outDim)
+                        ? dequantQ4K(outputCol, inputCol, blocks)
+                        : 0.0;
+                }
+                barrier();
+
+                for (uint owned = 0u; owned < 8u; ++owned) {
+                    uint linear = thread + owned * 128u;
+                    uint tokenOffset = linear / TILE_N;
+                    uint outputOffset = linear % TILE_N;
+                    for (uint k = 0u; k < STAGE_K; ++k) {
+                        uint chain = owned * STAGE_K + k;
+                        sums[chain] = fma(ldsW[outputOffset * STAGE_K + k],
+                            ldsX[tokenOffset * STAGE_K + k], sums[chain]);
+                    }
+                }
+                barrier();
+            }
+        }
+    }
+
+    for (uint owned = 0u; owned < 8u; ++owned) {
+        uint linear = thread + owned * 128u;
+        uint tokenOffset = linear / TILE_N;
+        uint outputOffset = linear % TILE_N;
+        uint token = tileToken + tokenOffset;
+        uint outputCol = tileOutput + outputOffset;
+        if (token < uint(pc.tokens) && outputCol < uint(pc.outDim)) {
+            uint chain = owned * STAGE_K;
+            precise float sum = ((sums[chain] + sums[chain + 1u]) +
+                (sums[chain + 2u] + sums[chain + 3u])) +
+                ((sums[chain + 4u] + sums[chain + 5u]) +
+                (sums[chain + 6u] + sums[chain + 7u]));
+            y[token * uint(pc.outDim) + outputCol] = sum;
+        }
+    }
+}

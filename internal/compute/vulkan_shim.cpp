@@ -79,6 +79,7 @@ VkDeviceSize      g_maxStorageBufferRange = 0;
 VkDeviceSize      g_maxMemoryAllocationSize = 0;
 VkDeviceSize      g_maxBufferBytes = 0;
 uint32_t          g_maxComputeWorkGroupCountX = 0;
+uint32_t          g_maxComputeWorkGroupCountY = 0;
 VkDeviceSize      g_totalDeviceLocalMemory = 0;
 bool              g_haveMemoryBudget = false;
 bool              g_batching = false;
@@ -241,7 +242,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q6K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_TILED_FP32, K_Q4K_MATMUL_WAVE32, K_Q6K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -270,7 +271,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_QWEN35_GDN_PREFILL_TILED: case K_QWEN35_GDN_PREFILL_NORM:
     case K_GLM_KDA_REREAD: case K_GLM_KDA_WAVE32:
         return g_dp.otherGDN;
-    case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_COUNT:
+    case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_TILED_FP32: case K_Q4K_MATMUL_WAVE32: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_COUNT:
         return g_dp.otherUnclassified;
     }
     return g_dp.otherUnclassified;
@@ -279,7 +280,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
 static inline void dpDispatch(const Kernel& k) {
     if (!g_dp_on) return;
     const KId id = static_cast<KId>(&k - g_kern);
-    if (id == K_Q4K_MATMUL || id == K_Q4K_MATMUL_WAVE32) {
+    if (id == K_Q4K_MATMUL || id == K_Q4K_MATMUL_TILED_FP32 || id == K_Q4K_MATMUL_WAVE32) {
         g_dp.q4k.fetch_add(1, std::memory_order_relaxed);
     } else if (id == K_Q2K_MATMUL || id == K_RMSNORM_Q2K_MATMUL2) {
         g_dp.q2k.fetch_add(1, std::memory_order_relaxed);
@@ -332,6 +333,10 @@ uint64_t g_gdn_prefill_scalar_calls = 0;
 int g_have_coopmat = 0;
 // Portable packed Q6_K is optional so older SPIR-V bundles remain loadable.
 int g_have_q6k_matmul = 0;
+int g_have_q4k_tiled_fp32 = 0;
+std::atomic<uint64_t> g_q4k_tiled_fp32_dispatches{0};
+int g_q4k_tiled_fp32_mode = -1;
+bool g_is_strix_halo = false;
 
 VkDescriptorPool g_descpool = VK_NULL_HANDLE;
 
@@ -1285,6 +1290,8 @@ int fvk_device_identity(char* name, int namelen, uint32_t* vendor_id,
 int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_qwen35_gdn_q8_in_proj = 0;
     g_have_q6k_matmul = 0;
+    g_have_q4k_tiled_fp32 = 0;
+    g_is_strix_halo = false;
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.pApplicationName = "fak";
     app.apiVersion = VK_API_VERSION_1_2;
@@ -1309,6 +1316,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_phys = chosen;
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(g_phys, &props);
+    g_is_strix_halo = props.vendorID == 0x1002u && props.deviceID == 0x1586u;
     VkPhysicalDeviceMaintenance3Properties maint3{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES};
     VkPhysicalDeviceSubgroupSizeControlPropertiesEXT subgroupProps{
@@ -1324,6 +1332,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_maxMemoryAllocationSize = maint3.maxMemoryAllocationSize;
     g_maxBufferBytes = g_maxStorageBufferRange;
     g_maxComputeWorkGroupCountX = props2.properties.limits.maxComputeWorkGroupCount[0];
+    g_maxComputeWorkGroupCountY = props2.properties.limits.maxComputeWorkGroupCount[1];
     if (g_maxMemoryAllocationSize > 0 &&
         (g_maxBufferBytes == 0 || g_maxMemoryAllocationSize < g_maxBufferBytes)) {
         g_maxBufferBytes = g_maxMemoryAllocationSize;
@@ -1403,7 +1412,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     }
 #endif
 
-    bool isGfx1151 = props.vendorID == 0x1002u && props.deviceID == 0x1586u;
+    bool isGfx1151 = g_is_strix_halo;
     bool haveSubgroupBasic =
         (subgroupBasicProps.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0 &&
         (subgroupBasicProps.supportedOperations & VK_SUBGROUP_FEATURE_BASIC_BIT) != 0;
@@ -1561,6 +1570,18 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     ok &= buildKernel(g_kern[K_QWEN35_CAUSAL_ATTENTION_PANEL], P("qwen35_causal_attention_panel.spv"), 4, 5 * sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_SIGMOID_MUL], P("sigmoid_mul.spv"), 2, sizeof(int));
     ok &= buildKernel(g_kern[K_Q4K_MATMUL], P("q4k_matmul.spv"), 3, 3 * sizeof(int));
+    constexpr uint32_t q4kTiledWorkgroupInvocations = 32u * 4u;
+    constexpr uint32_t q4kTiledSharedBytes = 2u * 32u * 8u * sizeof(float);
+    const bool q4kTiledLimits =
+        props.limits.maxComputeWorkGroupInvocations >= q4kTiledWorkgroupInvocations &&
+        props.limits.maxComputeWorkGroupSize[0] >= 32u &&
+        props.limits.maxComputeWorkGroupSize[1] >= 4u &&
+        props.limits.maxComputeSharedMemorySize >= q4kTiledSharedBytes;
+    if (q4kTiledLimits) {
+        g_have_q4k_tiled_fp32 = buildKernel(
+            g_kern[K_Q4K_MATMUL_TILED_FP32], P("q4k_matmul_tiled_fp32.spv"),
+            3, 3 * sizeof(int)) ? 1 : 0;
+    }
     if (g_have_q4k_wave32) {
         uint32_t reqSize = g_q4k_wave32_required_subgroup ? 32 : 0;
         if (!buildKernel(g_kern[K_Q4K_MATMUL_WAVE32], P("q4k_matmul_wave32.spv"), 3, 3 * sizeof(int), reqSize)) {
@@ -1917,6 +1938,10 @@ int fvk_have_glm_kda_wave32(void) { return g_have_glm_kda_wave32; }
 int fvk_have_cooperative_matrix(void) { return g_have_coopmat; }
 int fvk_have_q6k_matmul(void) { return g_have_q6k_matmul; }
 uint32_t fvk_max_compute_work_group_count_x(void) { return g_maxComputeWorkGroupCountX; }
+int fvk_have_q4k_tiled_fp32(void) { return g_have_q4k_tiled_fp32; }
+uint64_t fvk_q4k_tiled_fp32_dispatches(void) {
+    return g_q4k_tiled_fp32_dispatches.load(std::memory_order_relaxed);
+}
 uint64_t fvk_max_buffer_bytes(void) { return (uint64_t)g_maxBufferBytes; }
 uint64_t fvk_max_storage_buffer_range(void) { return (uint64_t)g_maxStorageBufferRange; }
 uint64_t fvk_max_memory_allocation_size(void) { return (uint64_t)g_maxMemoryAllocationSize; }
@@ -2573,16 +2598,46 @@ extern "C" int fvk_sigmoid_mul_f32(void* x, const void* gate, int n) {
     dispatch(g_kern[K_SIGMOID_MUL],bufs,&n,sizeof(n),(uint32_t)(((uint64_t)n+255)/256));
     return (int)g_submissionStatus;
 }
-static int g_q4k_arm_mode = 0; // 0 = default, 1 = candidate, 2 = scalar
+// -1 lets direct native callers use the legacy environment contract. Go sets a
+// non-negative mode before every Q4_K dispatch so runtime os.Setenv changes are
+// visible even when the platform C runtime maintains a separate environment.
+static int g_q4k_arm_mode = -1; // 0 = default, 1 = candidate, 2 = scalar
 
 extern "C" void fvk_set_q4k_arm_mode(int mode) {
     g_q4k_arm_mode = mode;
 }
 
+extern "C" void fvk_set_q4k_tiled_fp32_mode(int mode) {
+    g_q4k_tiled_fp32_mode = mode;
+}
+
+static inline bool q4KScalarForced() {
+    if (g_q4k_arm_mode >= 0) return g_q4k_arm_mode == 2;
+    const char* arm = std::getenv("FAK_VULKAN_Q4K_ARM");
+    return arm && (strcmp(arm, "scalar") == 0 || strcmp(arm, "0") == 0);
+}
+
+static inline bool useQ4KTiledF32(int out, int P) {
+    if (!g_have_q4k_tiled_fp32 || g_kern[K_Q4K_MATMUL_TILED_FP32].pipe == VK_NULL_HANDLE ||
+        out <= 0 || P <= 1 || q4KScalarForced()) {
+        return false;
+    }
+    const uint64_t groupsX = (static_cast<uint64_t>(out) + 31u) / 32u;
+    const uint64_t groupsY = (static_cast<uint64_t>(P) + 31u) / 32u;
+    if (groupsX > g_maxComputeWorkGroupCountX || groupsY > g_maxComputeWorkGroupCountY) return false;
+    if (g_q4k_tiled_fp32_mode >= 0) {
+        if (g_q4k_tiled_fp32_mode == 1) return true;
+        if (g_q4k_tiled_fp32_mode == 2) return false;
+        return false; // Current-source hardware qualification is still pending.
+    }
+    const char* arm = std::getenv("FAK_VULKAN_Q4K_TILED_FP32");
+    if (arm && *arm) return strcmp(arm, "candidate") == 0;
+    return false; // Current-source hardware qualification is still pending.
+}
+
 static inline bool useQ4KWave32(int P) {
     if (!g_have_q4k_wave32 || P != 1) return false;
-    if (g_q4k_arm_mode == 1) return true;
-    if (g_q4k_arm_mode == 2) return false;
+    if (g_q4k_arm_mode >= 0) return g_q4k_arm_mode == 1;
     const char* arm = std::getenv("FAK_VULKAN_Q4K_ARM");
     if (arm) {
         if (strcmp(arm, "scalar") == 0 || strcmp(arm, "0") == 0) return false;
@@ -2603,6 +2658,15 @@ extern "C" int fvk_have_q4k_wave32(void) {
 
 extern "C" void fvk_q4k_matmul_f32(const void* dQ4K, const void* dX, void* dY,
                          int out, int in, int P) {
+    if (useQ4KTiledF32(out, P)) {
+        struct PC { int out, in, p; } pc{out, in, P};
+        Buffer* bufs[3] = {B((void*)dQ4K), B((void*)dX), B(dY)};
+        uint32_t groupsX = ((uint32_t)out + 31u) / 32u;
+        uint32_t groupsY = ((uint32_t)P + 31u) / 32u;
+        dispatch(g_kern[K_Q4K_MATMUL_TILED_FP32], bufs, &pc, sizeof(pc), groupsX, groupsY);
+        g_q4k_tiled_fp32_dispatches.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
     if (useQ4KWave32(P)) {
         struct PC { int out, in, p; } pc{out, in, P};
         Buffer* bufs[3] = {B((void*)dQ4K), B((void*)dX), B(dY)};

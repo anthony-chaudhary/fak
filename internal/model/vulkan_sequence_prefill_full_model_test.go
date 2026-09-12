@@ -20,7 +20,7 @@ import (
 )
 
 type standaloneQ4DispatchWitness interface {
-	VulkanDebugQ4KCoopMatDispatches() uint64
+	VulkanDebugQ4KTiledF32Dispatches() uint64
 }
 
 type standaloneSequenceArm struct {
@@ -28,7 +28,7 @@ type standaloneSequenceArm struct {
 	PrefillNanoseconds   int64                                  `json:"prefill_nanoseconds"`
 	ContinuationNS       []int64                                `json:"continuation_nanoseconds"`
 	GeneratedTokenIDs    []int                                  `json:"generated_token_ids"`
-	CoopMatDispatches    *uint64                                `json:"q4_cooperative_dispatches"`
+	TiledF32Dispatches   *uint64                                `json:"q4_tiled_fp32_dispatches"`
 	Route                model.Qwen35SequencePrefillRouteStatus `json:"route"`
 	ExecutionMode        string                                 `json:"execution_mode"`
 	PrefillCosine        float64                                `json:"prefill_cosine,omitempty"`
@@ -61,7 +61,7 @@ func TestVulkanFullModelSequencePrefillStandalone(t *testing.T) {
 	}
 	qx, qy, qz := q8.Q8MatMul2DDispatchGrid(5120, 32)
 	t.Setenv("FAK_VULKAN_Q4K_ARM", "scalar")
-	t.Setenv("FAK_VULKAN_Q4K_COOPMAT", "")
+	t.Setenv("FAK_VULKAN_Q4K_TILED_FP32", "off")
 	digest := standaloneHashArtifact(t, path)
 	if expected := os.Getenv("FAK_QWEN38_GGUF_SHA256"); expected != "" && !strings.EqualFold(digest, expected) {
 		t.Fatal("checkpoint SHA-256 mismatch")
@@ -90,7 +90,7 @@ func TestVulkanFullModelSequencePrefillStandalone(t *testing.T) {
 		"q8_native_dispatch_grid_out5120_p32":   [3]int{qx, qy, qz},
 		"q8_native_cooperative_route_available": qx == 160 && qy == 1 && qz == 1,
 		"quality_gate":                          map[string]float64{"cosine_min": .99999, "relative_l2_max": 1e-4},
-		"q4_cooperative_candidate":              "disabled",
+		"q4_tiled_fp32_candidate":               "disabled",
 		"q4_dispatch_counter_available":         counterAvailable,
 	}
 	logRecord := func(phase string, record map[string]any) {
@@ -112,8 +112,8 @@ func TestVulkanFullModelSequencePrefillStandalone(t *testing.T) {
 		} else {
 			result, err = standaloneRunArm(m, be, arm, prompt, 4)
 		}
-		if err == nil && result.CoopMatDispatches != nil && *result.CoopMatDispatches != 0 {
-			err = fmt.Errorf("%s unexpectedly used %d Q4 cooperative dispatches", arm, *result.CoopMatDispatches)
+		if err == nil && result.TiledF32Dispatches != nil && *result.TiledF32Dispatches != 0 {
+			err = fmt.Errorf("%s unexpectedly used %d Q4 tiled FP32 dispatches", arm, *result.TiledF32Dispatches)
 		}
 		if err != nil {
 			logRecord("execution_failure", map[string]any{"passed": false, "arm": result, "error": err.Error()})
@@ -192,11 +192,11 @@ func TestVulkanFullModelSequencePrefillStandalone(t *testing.T) {
 func standaloneRunArm(m *model.Model, be compute.Backend, arm string, prompt []int, continuation int) (standaloneSequenceArm, error) {
 	result := standaloneSequenceArm{Name: arm}
 	oldArm, hadArm := os.LookupEnv("FAK_VULKAN_Q4K_ARM")
-	oldCandidate, hadCandidate := os.LookupEnv("FAK_VULKAN_Q4K_COOPMAT")
+	oldCandidate, hadCandidate := os.LookupEnv("FAK_VULKAN_Q4K_TILED_FP32")
 	_ = os.Setenv("FAK_VULKAN_Q4K_ARM", "scalar")
-	_ = os.Unsetenv("FAK_VULKAN_Q4K_COOPMAT")
+	_ = os.Setenv("FAK_VULKAN_Q4K_TILED_FP32", "off")
 	defer standaloneRestoreEnv("FAK_VULKAN_Q4K_ARM", oldArm, hadArm)
-	defer standaloneRestoreEnv("FAK_VULKAN_Q4K_COOPMAT", oldCandidate, hadCandidate)
+	defer standaloneRestoreEnv("FAK_VULKAN_Q4K_TILED_FP32", oldCandidate, hadCandidate)
 
 	s, err := m.NewBackendSessionChecked(be)
 	if err != nil {
@@ -246,10 +246,10 @@ func standaloneRunArm(m *model.Model, be compute.Backend, arm string, prompt []i
 	if measured {
 		after, _ := standaloneQ4Count(be)
 		if after < before {
-			return result, fmt.Errorf("%s Q4 cooperative dispatch counter regressed", arm)
+			return result, fmt.Errorf("%s Q4 tiled FP32 dispatch counter regressed", arm)
 		}
 		delta := after - before
-		result.CoopMatDispatches = &delta
+		result.TiledF32Dispatches = &delta
 	}
 	return result, nil
 }
@@ -303,10 +303,10 @@ func standaloneRunSplit(m *model.Model, be compute.Backend, prompt []int) (stand
 	if measured {
 		after, _ := standaloneQ4Count(be)
 		if after < before {
-			return result, fmt.Errorf("split Q4 cooperative dispatch counter regressed")
+			return result, fmt.Errorf("split Q4 tiled FP32 dispatch counter regressed")
 		}
 		delta := after - before
-		result.CoopMatDispatches = &delta
+		result.TiledF32Dispatches = &delta
 	}
 	return result, nil
 }
@@ -316,7 +316,7 @@ func standaloneQ4Count(be compute.Backend) (uint64, bool) {
 	if !ok {
 		return 0, false
 	}
-	return w.VulkanDebugQ4KCoopMatDispatches(), true
+	return w.VulkanDebugQ4KTiledF32Dispatches(), true
 }
 
 func standaloneCompareArms(t *testing.T, got *standaloneSequenceArm, want standaloneSequenceArm) []string {
