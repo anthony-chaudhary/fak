@@ -51,8 +51,8 @@ func DefaultPolicy() Policy {
 	return Policy{
 		Allow: map[string]bool{
 			// Standard coding tools
-			"Bash": true, "BashOutput": true, "KillShell": true, "PowerShell": true,
-			"Read": true, "Edit": true, "Write": true, "NotebookEdit": true,
+			"Bash": true, "bash": true, "BashOutput": true, "KillShell": true, "PowerShell": true,
+			"Read": true, "Edit": true, "edit": true, "Write": true, "write": true, "NotebookEdit": true,
 			"Glob": true, "Grep": true, "LS": true, "TodoWrite": true,
 			"Task": true, "WebFetch": true, "WebSearch": true,
 			"ExitPlanMode": true, "Skill": true, "SlashCommand": true,
