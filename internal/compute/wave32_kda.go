@@ -1193,7 +1193,7 @@ func TiledDepthwiseConv1DChannelMajor(
 			for t := 0; t < T; t++ {
 				inVal := input[inBase+t]
 				acc := w0*h0 + w1*h1 + w2*h2 + w3*inVal
-				output[outBase+t] = Silu(acc)
+				output[outBase+t] = acc / (1 + float32(math.Exp(float64(-acc))))
 				h0 = h1
 				h1 = h2
 				h2 = inVal
@@ -1222,7 +1222,7 @@ func TiledDepthwiseConv1DChannelMajor(
 				acc += convW[wBase+j] * h[j]
 			}
 			acc += convW[wBase+hist] * inVal
-			output[outBase+t] = Silu(acc)
+			output[outBase+t] = acc / (1 + float32(math.Exp(float64(-acc))))
 
 			if hist > 0 {
 				for j := 0; j < hist-1; j++ {
