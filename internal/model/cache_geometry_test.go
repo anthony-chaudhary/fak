@@ -2,11 +2,81 @@ package model
 
 import (
 	"errors"
+	"math"
 	"testing"
 )
 
 func geometryTestConfig() Config {
 	return Config{NumLayers: 2, NumKVHeads: 2, HeadDim: 4}
+}
+
+func TestMemoryComponentPlanConservesBytes(t *testing.T) {
+	components := []MemoryComponent{
+		{Kind: MemoryComponentKV, Bytes: 96},
+		{Kind: MemoryComponentRecurrent, Bytes: 32},
+		{Kind: MemoryComponentExpert, Bytes: 16},
+		{Kind: MemoryComponentScratch, Bytes: 8},
+	}
+	plan, err := PlanMemoryComponents(components, 152)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.TotalBytes != 152 || len(plan.Components) != len(components) {
+		t.Fatalf("plan = %+v, want four components totaling 152 bytes", plan)
+	}
+	for i, want := range components {
+		if plan.Components[i] != want {
+			t.Fatalf("component %d = %+v, want %+v", i, plan.Components[i], want)
+		}
+	}
+	components[0].Bytes = 1
+	if plan.Components[0].Bytes != 96 {
+		t.Fatal("plan retained the caller's mutable component slice")
+	}
+	empty, err := PlanMemoryComponents(nil, 0)
+	if err != nil || empty.TotalBytes != 0 || len(empty.Components) != 0 {
+		t.Fatalf("empty plan = %+v, err=%v", empty, err)
+	}
+
+	for _, tc := range []struct {
+		name       string
+		components []MemoryComponent
+		budget     int64
+	}{
+		{"duplicate zero-byte kind", []MemoryComponent{{Kind: MemoryComponentKV}, {Kind: MemoryComponentKV}}, 1},
+		{"over budget", []MemoryComponent{{Kind: MemoryComponentKV, Bytes: 2}}, 1},
+		{"overflow", []MemoryComponent{{Kind: MemoryComponentKV, Bytes: math.MaxInt64}, {Kind: MemoryComponentScratch, Bytes: 1}}, math.MaxInt64},
+		{"invalid budget", nil, -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := PlanMemoryComponents(tc.components, tc.budget)
+			var rebuildErr *CacheRebuildError
+			if !errors.As(err, &rebuildErr) || rebuildErr.Reason != CacheRebuildInvalidBudget {
+				t.Fatalf("error = %v, want %s", err, CacheRebuildInvalidBudget)
+			}
+		})
+	}
+
+	cfg := geometryTestConfig()
+	legacy, err := planCacheGeometry(cfg, CacheGeometryRequest{
+		ExpertRingBytes:   17,
+		KVCapacityTokens:  3,
+		DeviceBudgetBytes: 1 << 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compat, err := PlanMemoryComponents([]MemoryComponent{
+		{Kind: MemoryComponentKV, Bytes: legacy.KVBytes},
+		{Kind: MemoryComponentRecurrent, Bytes: legacy.RecurrentBytes},
+		{Kind: MemoryComponentExpert, Bytes: legacy.ExpertRingBytes},
+	}, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compat.TotalBytes != legacy.TotalBytes || legacy.TotalBytes != 17+576 {
+		t.Fatalf("legacy total=%d component total=%d, want %d", legacy.TotalBytes, compat.TotalBytes, 17+576)
+	}
 }
 
 func TestPlanCacheGeometryRejectsOvercommit(t *testing.T) {
