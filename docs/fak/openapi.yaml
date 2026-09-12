@@ -72,6 +72,31 @@ tags:
     description: Liveness, metrics, diagnostics (`/healthz`, `/metrics`, `/debug/vars`).
 
 paths:
+  /v1/fak/features/proof:
+    get:
+      tags: [Operational]
+      summary: Read bounded proofs from executed feature producers
+      description: |
+        Returns process-local receipts and cumulative counters for applied Anthropic
+        history compaction, Anthropic tool-result elision, and accepted identified
+        vDSO serves. supported_features describes these producer capabilities, not
+        observed execution or coverage of the entire feature catalog. Empty receipts
+        never prove execution; eviction affects retention, not cumulative counters.
+        Only byte quantities and SHA-256 digests are retained. Token quantities are
+        labeled estimates. Cache duration_saved_ns is null because matched original
+        execution timing is unavailable. Proof generation failures do not interrupt
+        the underlying request and earn no verified savings. Responses use no-store.
+        Uses the gateway's read-scoped observability authorization.
+      responses:
+        '200':
+          description: Current proof receipts and cumulative statistics
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeatureProofSummary' }
+        '401':
+          description: Authentication required by the configured gateway
+        '405':
+          description: Only GET is supported (Allow header is GET)
   /v1/fak/features:
     get:
       summary: Read the evaluated runtime feature catalog
@@ -2845,7 +2870,7 @@ components:
       type: object
       required: [schema, observed_at, sources]
       description: |
-        One point-in-time gateway observation boundary. The four required
+        One point-in-time gateway observation boundary. The five required
         source envelopes are always present, so omission never has to stand in
         for source health.
       properties:
@@ -2858,12 +2883,127 @@ components:
           description: The gateway's shared HTTP snapshot boundary.
         sources:
           type: object
-          required: [sessions, cache_attribution, managed_cache, harness]
+          required: [sessions, cache_attribution, managed_cache, harness, features_proof]
           properties:
             sessions: { $ref: '#/components/schemas/ObservationEnvelope' }
             cache_attribution: { $ref: '#/components/schemas/ObservationEnvelope' }
             managed_cache: { $ref: '#/components/schemas/ObservationEnvelope' }
             harness: { $ref: '#/components/schemas/ObservationEnvelope' }
+            features_proof: { $ref: '#/components/schemas/ObservationEnvelope' }
+
+    FeatureProofSummary:
+      type: object
+      required: [schema, supported_features, receipts, evicted_receipts, counters, counters_scope, retained_window]
+      properties:
+        schema: { type: string, enum: [fak-feature-proof/1] }
+        supported_features:
+          type: array
+          description: Producer coverage, independent of enablement or execution.
+          items: { type: string, enum: [compact_history, elide_results, vdso] }
+        receipts:
+          type: array
+          maxItems: 256
+          description: Chronological retained receipts; default capacity is 128.
+          items: { $ref: '#/components/schemas/FeatureProofReceipt' }
+        evicted_receipts: { type: integer, minimum: 0 }
+        counters_scope: { type: string, enum: [collector_lifetime] }
+        retained_window:
+          type: object
+          description: Aggregates recomputed exclusively from currently retained receipts, excluding evicted observations.
+          required: [receipt_count, first_sequence, last_sequence, counters]
+          properties:
+            receipt_count: { type: integer, minimum: 0, maximum: 256 }
+            first_sequence: { type: integer, minimum: 0, description: Zero when no receipt is retained. }
+            last_sequence: { type: integer, minimum: 0, description: Zero when no receipt is retained. }
+            counters:
+              type: array
+              items: { $ref: '#/components/schemas/FeatureProofCounter' }
+        counters:
+          type: array
+          description: Cumulative since collector creation, unaffected by eviction.
+          items: { $ref: '#/components/schemas/FeatureProofCounter' }
+
+    FeatureProofCounter:
+      type: object
+      required: [feature, outcome, count, saved_bytes]
+      properties:
+        feature: { type: string, enum: [compact_history, elide_results, vdso] }
+        outcome: { type: string, enum: [verified, proof_failed] }
+        count: { type: integer, minimum: 0 }
+        saved_bytes: { type: integer, minimum: 0, description: Zero for failed proofs and cache serves. }
+
+    FeatureProofReceipt:
+      type: object
+      required: [schema, sequence, observed_at, feature, outcome]
+      description: |
+        Verified receipts contain either rewrite or cache. Failed receipts carry
+        PROOF_GENERATION_FAILED and a closed failure detail, with no partial proof.
+      properties:
+        schema: { type: string, enum: [fak-feature-proof/1] }
+        sequence: { type: integer, minimum: 1 }
+        observed_at: { type: string, format: date-time }
+        feature: { type: string, enum: [compact_history, elide_results, vdso] }
+        outcome: { type: string, enum: [verified, proof_failed] }
+        reason: { type: string, enum: [PROOF_GENERATION_FAILED] }
+        failure:
+          type: string
+          enum: [INVALID_BYTE_DELTA, INVALID_PROTECTED_BOUNDS, PREFIX_MISMATCH, SUFFIX_MISMATCH, INVALID_TOKEN_EVIDENCE, ANCHOR_UNAVAILABLE, INVALID_BODY, INVALID_CACHE_EVIDENCE, SOURCE_UNAVAILABLE]
+        rewrite: { $ref: '#/components/schemas/FeatureRewriteProof' }
+        cache: { $ref: '#/components/schemas/FeatureCacheProof' }
+
+    FeatureRewriteProof:
+      type: object
+      required: [serialization_method, protected_regions_kind, pre_bytes, post_bytes, shed_bytes, pre_sha256, post_sha256, prefix_bytes, suffix_bytes, pre_prefix_sha256, post_prefix_sha256, pre_suffix_sha256, post_suffix_sha256, pre_tokens, post_tokens, token_method]
+      properties:
+        serialization_method: { type: string, enum: [anthropic_request_json, typed_messages_json] }
+        protected_regions_kind:
+          type: string
+          enum: [cache_anchor_and_trailing_json, shared_whole_messages]
+          description: Native shared whole-message regions establish JSON byte preservation, not tokenizer or KV-cache identity.
+        pre_bytes: { type: integer, minimum: 0 }
+        post_bytes: { type: integer, minimum: 0 }
+        shed_bytes: { type: integer, minimum: 1, description: Exact pre_bytes minus post_bytes. }
+        pre_sha256: { type: string }
+        post_sha256: { type: string }
+        prefix_bytes: { type: integer, minimum: 0, description: Native shared regions may be empty; Anthropic anchor verification requires a positive length. }
+        suffix_bytes: { type: integer, minimum: 0 }
+        pre_prefix_sha256: { type: string }
+        post_prefix_sha256: { type: string }
+        pre_suffix_sha256: { type: string }
+        post_suffix_sha256: { type: string }
+        pre_tokens: { type: integer, minimum: 0, nullable: true }
+        post_tokens: { type: integer, minimum: 0, nullable: true }
+        token_method:
+          type: string
+          enum: ['', anthropic_estimate, typed_message_estimate]
+          description: Empty only when both token quantities are unavailable.
+
+    FeatureCacheProof:
+      type: object
+      required: [hit_count, adjudication_verdict, identity_sha256, payload_sha256, cache_witness_hash, witness_kind, duration_saved_ns, duration_reason, duration_basis, historical_engine_ns, current_lookup_ns]
+      description: |
+        Binds the actual gateway call identity digest to its served payload digest.
+        This is not the internal cache key and does not expose private cache epochs.
+      properties:
+        hit_count: { type: integer, enum: [1] }
+        adjudication_verdict:
+          type: object
+          properties:
+            kind: { type: string, enum: [ALLOW] }
+            reason: { type: string, enum: [SERVED_INLINE] }
+            by: { type: string, enum: [vdso] }
+        identity_sha256: { type: string }
+        payload_sha256: { type: string }
+        cache_witness_hash: { type: string }
+        witness_kind: { type: string, enum: [gateway_call_result_sha256] }
+        duration_saved_ns:
+          type: integer
+          nullable: true
+          description: Signed historical_engine_ns minus current_lookup_ns; negative estimates are preserved. Null without a trusted prior engine measurement. This is not a measurement of the counterfactual avoided execution.
+        duration_reason: { type: string, enum: [MATCHED_TIMING_UNAVAILABLE, HISTORICAL_TIMING_ESTIMATE] }
+        duration_basis: { type: string, enum: ['', historical_engine_minus_current_lookup_estimate] }
+        historical_engine_ns: { type: integer, minimum: 1, nullable: true, description: Actual prior kernel engine span stored atomically with this resident cache entry. }
+        current_lookup_ns: { type: integer, minimum: 0, nullable: true, description: Monotonic duration of the actual successful vDSO lookup. }
 
     SessionChangeEvent:
       description: |

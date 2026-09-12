@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **414** (clarity 0 + coverage 414) |
-| **Crystal-clear concepts (and climbing)** | **1098** crystal of 2823 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2936 / 3350** (87.6% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **1102** crystal of 2827 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2938 / 3352** (87.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 218 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **84** of 4039 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **84** of 4045 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 91.9/100 (grade A) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2823 concepts - score 91.9/100 (grade A) - disambiguation-debt 414
+concept-disambiguation chart - 2827 concepts - score 91.9/100 (grade A) - disambiguation-debt 414
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ##################.......... 1098
+  * crystal       ##################.......... 1102
   o defined       ############################ 1725
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -40,13 +40,13 @@ clarity ladder (count of concepts, best -> fog):
 
 clarity mix by family (each cell = one concept):
   attention        *****************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (83 concept(s); 17 crystal)
-  cache            *************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (277 concept(s); 97 crystal)
+  cache            **************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (278 concept(s); 98 crystal)
   context-ctx      ****************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (233 concept(s); 76 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         **********************************ooooooooooooooooooooo (55 concept(s); 34 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            *****************oooooooooooooooooooooooooooooooo (49 concept(s); 17 crystal)
-  gateway-engine   *****************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (170 concept(s); 53 crystal)
+  gateway-engine   ******************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (171 concept(s); 54 crystal)
   guard-gate       ****************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (449 concept(s); 208 crystal)
   layout           **********ooooooooo (19 concept(s); 10 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
@@ -59,16 +59,16 @@ clarity mix by family (each cell = one concept):
   support-maturity *******************************************oooooooooooooooooooooo (65 concept(s); 43 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
-  witness-proof    *********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (161 concept(s); 81 crystal)
+  witness-proof    ***********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (163 concept(s); 83 crystal)
 
 coverage by family (positioned / discovered):
   plan             ########################.... 422/501
   session-runtime  ########################.... 278/328
-  cache            #########################... 322/359
+  cache            #########################... 323/360
   gateway-engine   ########################.... 210/246
   context-ctx      #########################... 249/283
   policy-capability #########################... 218/246
-  witness-proof    ########################.... 164/191
+  witness-proof    ########################.... 165/192
   guard-gate       ###########################. 507/532
   pool             ##################.......... 40/64
   render-materialize #########################... 215/237
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [############################....] 87.6%  (2936/3350 confusable tokens positioned)
+namespace coverage  [############################....] 87.6%  (2938/3352 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 218
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 218/218
 
-name index: 4039 lookup name(s) -> 2823 concept(s), 84 ambiguous
+name index: 4045 lookup name(s) -> 2827 concept(s), 84 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **218 / 218** (218 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1938 / 5036 |
+| Boundaries drawn (mutual / total) | 1948 / 5046 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4039 over 2823 concepts |
+| Lookup names indexed | 4045 over 2827 concepts |
 | Lookup names landing on several concepts | 84 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2823 |
+| Concepts carrying a contrast set | 2827 |
 
 ## The concepts (best verdict first)
 
@@ -237,6 +237,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | cache | **CacheCapacityBytes (established device cache budget)** - DeviceMemoryProfile.CacheCapacityBytes in internal/compute/device_memory_profile.go records the selected device's established cache capacity in bytes. Consumers must also check CacheCapacityKnown; a numeric zero or an unknown device is not a default Halo capacity (#12440). |
 | * | crystal | symbol | cache | **DeviceCacheTileTokens (profile-bounded K/V scratch capacity)** - DeviceCacheTileTokens in internal/compute/device_memory_profile.go computes the largest subgroup-aligned token count whose separately aligned K and V buffers fit the explicit device cache budget. Missing facts, invalid sizes, and arithmetic overflow produce an unavailable result (#12440). |
 | * | crystal | symbol | cache | **RelaunchCacheAffinityEnv** - The resume-package Go const holding the FAK_RESUME_CACHE_AFFINITY env-var name; the watchdog relaunch threads RelaunchCacheAffinityKey(session) onto the child env under this key (#5189). |
+| * | crystal | symbol | cache | **FeatureCacheProof** - Quantitative accepted-vDSO-hit evidence binding the actual gateway call identity digest to its served payload digest; measured resident entries also carry a signed historical-engine-minus-current-lookup estimate. |
 | * | crystal | config | cache | **CacheTTL1h** - CacheTTL1h (internal/gateway/cache_pricing.go) is the extended 1-hour ephemeral provider prompt-cache TTL tier, priced above the 5-minute default. |
 | * | crystal | symbol | cache | **UpgradeAnthropicStableCacheTTL1h** - UpgradeAnthropicStableCacheTTL1h (internal/agent/anthropic_cachebp.go) rewrites an Anthropic request body to upgrade stable cache_control breakpoints to the 1h TTL tier, returning a typed upgrade outcome. |
 | * | crystal | metric | cache | **fak_gateway_cache_ttl_upgrade_total** - fak_gateway_cache_ttl_upgrade_total is the /metrics counter witnessing managed-cache TTL upgrades by outcome label. |
@@ -445,6 +446,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | subsystem | gateway-engine | **model (in-kernel model)** - The in-kernel inference core: a pure-Go forward pass that runs chat token decode over a loaded GGUF checkpoint across several architectures and quant schemes. |
 | * | crystal | symbol | gateway-engine | **engines registry** - The runtime registry (abi.Registry.engines) that maps engine IDs to their EngineDriver implementations: the kernel's dispatch table of all registered inference backends. |
 | * | crystal | symbol | gateway-engine | **fak_gateway_kv_prefix_prompt_tokens_by_source_total** - The gateway's per-turn split of in-kernel prompt tokens by PROVENANCE source (local_compute / local_cache_hit / external_kv_transfer), orthogonal to the reuse-depth family; the three sum to the by-source prompt tokens. external_kv_transfer isolates the disaggregation dividend — tokens a remote / L3 KV tier served that a single box would otherwise have re-prefilled. |
+| * | crystal | symbol | gateway-engine | **FieldCompletionTiming** - Opaque completion attestation minted by the kernel around an actual successful engine execution, binding a measured wall-clock duration to the exact call and result contents. |
 | * | crystal | subsystem | gateway-engine | **inkernel_expert_spill.go (served graded expert-spill seam)** - inkernel_expert_spill.go is the agent planner seam that resolves a loaded model’s graded MoE expert-spill placement once from operator intent and measured device budget, then applies that placement to each request session. |
 | * | crystal | symbol | gateway-engine | **InKernelQwenQ4KPrefillChunkConfigError (deferred native-prefill bounds error)** - InKernelQwenQ4KPrefillChunkConfigError is the typed error retained when an explicit resident-Qwen Q4_K prefill chunk size lies outside 128..8192; a targeted request returns it before tokenization or model execution. |
 | * | crystal | metric | gateway-engine | **fak_gateway_inference_output_tokens_per_second (blended generation throughput)** - fak_gateway_inference_output_tokens_per_second is the gateway Prometheus gauge for cumulative completion tokens divided by full inference wall-clock across served turns, including prefill time. |
@@ -1170,6 +1172,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | witness-proof | **WitnessToolDescriptors** - The conceptbench witness constant (WitnessToolDescriptors, bound to mcp.go toolDescriptors()) naming the ResolveTool referee surface a scenario grades against. |
 | * | crystal | symbol | witness-proof | **LookupReceipt (per-call real vDSO source identity)** - An opaque, call-local receipt written only by successful real VDSO.Lookup execution and bound to the exact returned abi.Result pointer. WithLookupReceipt transports it through context, including production tier wrappers, and Matches checks that identity after the caller's acceptance gates. A later real lookup clears earlier evidence, including on a miss. |
 | * | crystal | symbol | witness-proof | **NativeCompactionObservation** - A bounded value summary of the actual native typed-message compaction cut, published to request observers only after successful native generation consumes the prepared prompt. It records exact typed-message JSON byte counts and hashes, explicitly estimated message tokens, and shared whole-message regions without retaining prompt or restore payloads. |
+| * | crystal | symbol | witness-proof | **FeatureProofReceipt** - Bounded process-local observation of applied Anthropic or native typed compaction, result elision, or accepted real-vDSO serving, retaining quantitative digests or an explicit proof-generation failure. |
+| * | crystal | symbol | witness-proof | **FeatureRewriteWitness** - Input to the pure Anthropic byte-rewrite verifier specifying protected prefix and suffix bounds, exact claimed byte delta and labeled token estimates. |
 | * | crystal | symbol | witness-proof | **guardCompactionWitness (durable per-session compaction-health row)** - cmd/fak/guard_compaction_witness.go guardCompactionWitness: the durable per-session compaction-health row `fak guard` appends at session exit -- {schema, recorded_at, session, anchor_mode, fired, bailed, off, anchor_starved, solvency_forced, shed_tokens, budget, cache_read_at_fire, bail_reasons} folded from the one gateway.Server that guard constructs and tears down per launch, and pinned to the append-only JSONL .fak/nightrun/compaction-health.jsonl so 'did compaction fire for THAT session?' outlives the process that measured it. |
 | * | crystal | symbol | witness-proof | **DisambiguationWitnesses (worker-land scorecard proof bundle)** - DisambiguationWitnesses is the workerworktree landing receipt that groups the before, isolated-worktree, and post-apply concept-scorecard witnesses under one shared timeout authority. |
 | * | crystal | symbol | witness-proof | **q2_0_witness_test** - The stub-build (non-Apple-Silicon) test file q2_0_witness_test.go: it pins the ternary Q2_0 reference's math obligations -- bit layout, ternary code set, round-trip error bound, and ref-GEMV-vs-dense parity -- in every build that cannot execute the Metal kernel. |
@@ -3097,8 +3101,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 24 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3098/5036 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2823 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3098/5046 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2827 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3107,7 +3111,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4039 lookup name(s) resolves - 84 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4045 lookup name(s) resolves - 84 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3116,11 +3120,11 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---:|---:|---:|
 | plan | 422 | 501 | 79 |
 | session-runtime | 278 | 328 | 50 |
-| cache | 322 | 359 | 37 |
+| cache | 323 | 360 | 37 |
 | gateway-engine | 210 | 246 | 36 |
 | context-ctx | 249 | 283 | 34 |
 | policy-capability | 218 | 246 | 28 |
-| witness-proof | 164 | 191 | 27 |
+| witness-proof | 165 | 192 | 27 |
 | guard-gate | 507 | 532 | 25 |
 | pool | 40 | 64 | 24 |
 | render-materialize | 215 | 237 | 22 |

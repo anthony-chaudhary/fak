@@ -53,6 +53,7 @@ type gatewayRoute struct {
 func (s *Server) routeTable() []gatewayRoute {
 	return []gatewayRoute{
 		{"/v1/fak/features", s.handleFeatures},
+		{"/v1/fak/features/proof", s.handleFeatureProof},
 		{"/", s.handleHome},
 		// A2A Agent-to-Agent protocol surface (#1019).
 		{"/a2a/v1/messages", s.handleA2ASendMessage},
@@ -231,7 +232,7 @@ func (s *Server) Handler() http.Handler {
 		prefix = "/" + strings.Trim(prefix, "/")
 		mux.Handle(prefix+"/", s.richDashboards.proxy)
 	}
-	return s.withFeatureActivations(s.withMetrics(s.withAuth(mux)))
+	return s.withFeatureActivations(s.withMetrics(s.withAuth(s.withNativeFeatureProof(mux))))
 }
 
 // ListenAndServe binds the HTTP surface on addr, then serves it via Serve until
@@ -543,7 +544,7 @@ func requestFromLAN(r *http.Request) bool {
 // surface here widens both at once, which is the intent.
 func readScopedPath(r *http.Request) bool {
 	switch r.URL.Path {
-	case "/metrics", "/debug/vars", "/v1/fak/observation", "/v1/fak/observation/requests", "/v1/fak/arms", "/v1/fak/arms/traffic":
+	case "/v1/fak/features/proof", "/metrics", "/debug/vars", "/v1/fak/observation", "/v1/fak/observation/requests", "/v1/fak/arms", "/v1/fak/arms/traffic":
 		return true
 	}
 	return false

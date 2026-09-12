@@ -27,6 +27,7 @@ type gatewayMetrics struct {
 	featureActivations featureActivationMetrics
 	start              time.Time
 	inflight           int64
+	featureProof       *FeatureProofCollector
 
 	mu         sync.Mutex
 	http       map[httpMetricKey]*latencyCounter
@@ -585,7 +586,9 @@ type latencyCounter struct {
 }
 
 func newGatewayMetrics(now time.Time) *gatewayMetrics {
+	proof, _ := NewFeatureProofCollector(DefaultFeatureProofCapacity)
 	return &gatewayMetrics{
+		featureProof:             proof,
 		start:                    now,
 		http:                     map[httpMetricKey]*latencyCounter{},
 		operations:               map[operationMetricKey]*latencyCounter{},

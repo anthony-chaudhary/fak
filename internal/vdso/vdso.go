@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/kernel"
 )
 
 // DefaultCacheSize is the tier-2 LRU capacity (unit 35 RSI tweak target).
@@ -329,6 +330,7 @@ func (v *VDSO) MissReasons() map[string]uint64 {
 }
 
 type entry struct {
+	historicalEngineNS  int64 // trusted prior engine span; zero means unavailable, never persisted
 	key                 string
 	ref                 abi.Ref
 	witness             string                  // external world-state witness this entry was admitted under ("" = none)
@@ -607,11 +609,14 @@ func servedTaint(c *abi.ToolCall) abi.TaintLabel {
 // Lookup is the FastPath entry (unit 30: consulted before the adjudicator). It
 // tries tier 1, then tier 3, then tier 2; a miss returns ok=false.
 func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (result *abi.Result, hit bool) {
+	var historicalEngineNS int64
 	if receipt := lookupReceiptFromContext(ctx); receipt != nil {
-		receipt.result.Store(nil)
+		receipt.snapshot.Store(nil)
+		started := time.Now()
 		defer func() {
 			if hit && result != nil {
-				receipt.result.Store(result)
+				receipt.snapshot.Store(&lookupObservation{result: result,
+					historicalEngineNS: historicalEngineNS, lookupNS: time.Since(started).Nanoseconds()})
 			}
 		}()
 	}
@@ -703,6 +708,7 @@ func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (result *abi.Result,
 			filledAt := e.filledAt
 			replication := e.replication
 			producerDiagnostics := e.producerDiagnostics
+			historicalEngineNS = e.historicalEngineNS
 			fPath := e.filePath
 			cHash := e.contentHash
 			v.mu.Unlock()
@@ -851,7 +857,8 @@ func (v *VDSO) Emit(ev abi.Event) {
 		}
 		return
 	}
-	_, _ = v.StoreResult(context.Background(), c, r)
+	engineNS, _ := kernel.CompletionTimingNanos(ev)
+	_, _ = v.storeResult(context.Background(), c, r, engineNS)
 }
 
 // StoreResult inserts one eligible completed read into the current tier-2 store,
@@ -859,6 +866,10 @@ func (v *VDSO) Emit(ev abi.Event) {
 // receipt exposes partial replication; Emit uses this same seam but cannot return
 // its receipt through the abi.Emitter interface.
 func (v *VDSO) StoreResult(ctx context.Context, c *abi.ToolCall, r *abi.Result) (ResultStoreReceipt, error) {
+	return v.storeResult(ctx, c, r, 0)
+}
+
+func (v *VDSO) storeResult(ctx context.Context, c *abi.ToolCall, r *abi.Result, historicalEngineNS int64) (ResultStoreReceipt, error) {
 	if c == nil || r == nil || r.Status != abi.StatusOK || destructive(c) {
 		return ResultStoreReceipt{}, nil
 	}
@@ -932,7 +943,7 @@ func (v *VDSO) StoreResult(ctx context.Context, c *abi.ToolCall, r *abi.Result) 
 	var key string
 	receipt, err := writeThroughResult(ctx, r.Payload, func(_ context.Context, ref abi.Ref) (bool, error) {
 		var stored bool
-		key, stored = v.storeResidentResult(c, args, ref, wit, producerDiagnostics)
+		key, stored = v.storeResidentResultWithTiming(c, args, ref, wit, producerDiagnostics, historicalEngineNS)
 		return stored, nil
 	}, durable)
 	receipt.ProducerDiagnostics = producerDiagnostics
@@ -1028,6 +1039,10 @@ func writeThroughResult(ctx context.Context, ref abi.Ref, current residentResult
 }
 
 func (v *VDSO) storeResidentResult(c *abi.ToolCall, args []byte, ref abi.Ref, witness, producerDiagnostics string) (string, bool) {
+	return v.storeResidentResultWithTiming(c, args, ref, witness, producerDiagnostics, 0)
+}
+
+func (v *VDSO) storeResidentResultWithTiming(c *abi.ToolCall, args []byte, ref abi.Ref, witness, producerDiagnostics string, historicalEngineNS int64) (string, bool) {
 	if !toolCacheIdentityKnown(c) {
 		return "", false
 	}
@@ -1049,6 +1064,7 @@ func (v *VDSO) storeResidentResult(c *abi.ToolCall, args []byte, ref abi.Ref, wi
 		}
 		fPath, fMtime, fSize, fHash, isDir, _ := extractFileValidation(c, args)
 		e := &entry{
+			historicalEngineNS:  historicalEngineNS,
 			key:                 key,
 			ref:                 ref,
 			witness:             witness,

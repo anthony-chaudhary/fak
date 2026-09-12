@@ -601,3 +601,31 @@ An opaque, call-local receipt written only by successful real VDSO.Lookup execut
 A bounded value summary of the actual native typed-message compaction cut, published to request observers only after successful native generation consumes the prepared prompt. It records exact typed-message JSON byte counts and hashes, explicitly estimated message tokens, and shared whole-message regions without retaining prompt or restore payloads.
 
 **Distinct from:** FeatureActivationTracker retains used identifiers, while this producer summary supplies quantities to the separate FeatureProofReceipt collector. Its shared regions do not certify KV cache anchors, estimates are not tokenizer counts, and byte reduction is not measured time savings. EncodePrompt, idle cuts, and failed generation publish no observation; proof capture failure does not erase actual compaction use. LookupReceipt identifies a real vDSO result and has a different producer.
+
+
+### FeatureProofReceipt
+
+Bounded process-local observation of applied Anthropic or native typed compaction, result elision, or accepted real-vDSO serving, retaining quantitative digests or an explicit proof-generation failure.
+
+**Distinct from:** Each receipt ties an executed feature to byte or lookup evidence. Catalog configuration and activation headers alone do not prove savings; the transient LookupReceipt establishes only exact-result provenance. This observation does not persist settlement evidence or authorize execution.
+
+
+### FeatureCacheProof
+
+Quantitative accepted-vDSO-hit evidence binding the actual gateway call identity digest to its served payload digest; measured resident entries also carry a signed historical-engine-minus-current-lookup estimate.
+
+**Distinct from:** LookupReceipt authenticates an exact result transiently. This bounded proof records the accepted hit and explicit timing basis without claiming an internal cache key or a measured counterfactual saving. Unmeasured entries retain null timing quantities.
+
+
+### FeatureRewriteWitness
+
+Input to the pure Anthropic byte-rewrite verifier specifying protected prefix and suffix bounds, exact claimed byte delta and labeled token estimates.
+
+**Distinct from:** The witness is verifier input rather than proof that execution occurred. The structural producer selects the real regions; the verifier checks their byte equality and measured delta before a FeatureProofReceipt can retain the result. Native typed-message observations use separately labeled representation evidence.
+
+
+### FieldCompletionTiming
+
+Opaque completion attestation minted by the kernel around an actual successful engine execution, binding a measured wall-clock duration to the exact call and result contents.
+
+**Distinct from:** Gateway counters aggregate observations; this transient attestation authenticates one prior execution measurement. A cache-hit duration estimate additionally requires the exact resident entry and current lookup receipt; it does not measure an avoided counterfactual execution.

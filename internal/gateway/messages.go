@@ -829,8 +829,12 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 	// PINNED floor (PIN_EVICT_REFUSED, body forwarded unchanged), then verifies a fired plan still
 	// carries every pinned page byte-identical, retrying against the evictable set only when it does
 	// not. A body with no classifiable eviction domain delegates straight through.
-	out, outcome := s.compactWithSurvivalClasses(req.Raw, opts, trace)
+	before := req.Raw
+	out, outcome := s.compactWithSurvivalClasses(before, opts, trace)
 	req.Raw = out
+	if outcome.Reason == agent.CompactReasonNone {
+		s.recordAnthropicRewriteProof(FeatureCompactHistory, before, out, opts.Anchor, len(before)-len(out))
+	}
 	s.metrics.observeCompaction(outcome, false)
 	// Restore handle: when this fire tombstoned the session's originating task, the outcome carries
 	// the dropped turn's bytes and the sha256-hex handle the stub embedded. Stash digest→bytes under
@@ -949,8 +953,12 @@ func (s *Server) maybeElideAnthropicRaw(req *agent.AnthropicMessagesRequest) (fi
 	if s.elideResultBytes <= 0 {
 		return false // configured OFF
 	}
-	out, outcome := agent.ElideAnthropicResultsWithOutcome(req.Raw, s.elideResultBytes)
+	before := req.Raw
+	out, outcome := agent.ElideAnthropicResultsWithOutcome(before, s.elideResultBytes)
 	req.Raw = out
+	if outcome.Reason == agent.ElideReasonNone {
+		s.recordAnthropicRewriteProof(FeatureElideResults, before, out, agent.CompactAnchorFirstBP, outcome.ShedBytes)
+	}
 	s.metrics.observeUncachedTrim(outcome)
 	return outcome.Reason == agent.ElideReasonNone
 }

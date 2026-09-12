@@ -1292,6 +1292,26 @@
           "category": "incidental",
           "reason": "Ops config field for Go build cache",
           "token": "GoCacheMinAge"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed failure detail of FeatureCacheProof validation; it declares missing or invalid evidence and defines neither a cache implementation nor a separate proof.",
+          "token": "INVALID_CACHE_EVIDENCE"
+        },
+        {
+          "category": "incidental",
+          "reason": "Go constant for the closed invalid-cache-evidence failure on FeatureProofReceipt, not a new cache or admission authority.",
+          "token": "FeatureProofInvalidCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Domain-separated digest field on FeatureCacheProof binding the gateway call identity and served payload; not an internal cache key or independent cache.",
+          "token": "CacheWitnessHash"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed FeatureRewriteProof provenance label for the existing Anthropic structural verifier; it names protected JSON regions and does not introduce a cache.",
+          "token": "cache_anchor_and_trailing_json"
         }
       ],
       "id": "cache",
@@ -1323,6 +1343,7 @@
         "CacheValueBaseline",
         "CacheValueFacts",
         "CacheValueGateDebtKey",
+        "CacheWitnessHash",
         "CacheWriteCost",
         "CachedInputShare",
         "CalibrationStatus",
@@ -1341,10 +1362,12 @@
         "FAK_TOKEN_CACHE_TEMP_GRACE",
         "FAK_WORKER_COUPLING_CACHE_LOAD_MAX",
         "FAK_WORKER_COUPLING_CACHE_MAX",
+        "FeatureProofInvalidCache",
         "FreshRuntimeConstants",
         "GoCacheHighBytes",
         "GoCacheLowBytes",
         "GoCacheMinAge",
+        "INVALID_CACHE_EVIDENCE",
         "InputCached",
         "InputCachedPerMillion",
         "InputUncached",
@@ -1414,6 +1437,7 @@
         "cacheValueLedger",
         "cacheWitnessReadback",
         "cacheWitnessServer",
+        "cache_anchor_and_trailing_json",
         "cache_bytes",
         "cache_creation_span",
         "cache_evictions",
@@ -3702,6 +3726,11 @@
           "category": "false-positive",
           "reason": "The gateway prefix matches the guard-gate lexical family, but this is a request-use observation counter positioned in gateway-engine; it performs no authorization or gating.",
           "token": "fak_gateway_feature_used_requests_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire discriminator naming FeatureCacheProof's digest construction; it is neither an authorization guard nor a gate.",
+          "token": "gateway_call_result_sha256"
         }
       ],
       "exclude": [
@@ -3871,6 +3900,7 @@
         "gatewayOverview",
         "gatewayPluginExecutor",
         "gatewayPluginFloor",
+        "gateway_call_result_sha256",
         "gating",
         "guardAllowDropExpired",
         "guardAllowExpiryStamp",
@@ -7687,12 +7717,18 @@
           "category": "incidental",
           "reason": "substring matching for refuted witness",
           "token": "refut"
+        },
+        {
+          "category": "incidental",
+          "reason": "Digest field within the positioned FeatureCacheProof; it is computed from accepted call/result evidence and is not an independent witness source.",
+          "token": "CacheWitnessHash"
         }
       ],
       "id": "witness-proof",
       "ignore": [
         "ActionRequireWitness",
         "Attestation",
+        "CacheWitnessHash",
         "ClaimUnwitnessedCount",
         "ComputeDomainProof",
         "CoreLockWitnessTrailer",
@@ -8480,6 +8516,46 @@
           "category": "incidental",
           "reason": "Implementation variant of existing routeEngine that forwards request observation context; selected engine routing semantics are unchanged and the observed-use concept is FeatureActivationTracker.",
           "token": "routeEngineWithContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Collector method recording an already-accepted proven vDSO serve; it neither performs lookup nor dispatches an execution engine.",
+          "token": "RecordVDSOServe"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire discriminator for hashing the actual gateway call identity and served result; not a gateway transport, execution engine or internal cache key.",
+          "token": "gateway_call_result_sha256"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private adapter computing proof identity after real lookup provenance and acceptance checks; it neither dispatches tools nor grants execution authority.",
+          "token": "recordVDSOServeProof"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private FeatureCacheProof recorder combining validated resident-entry timing and the actual lookup duration; it is not an engine or independent timing authority.",
+          "token": "recordVDSOServeMeasured"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed duration_basis label on FeatureCacheProof for signed prior measured engine duration minus current lookup duration; it is an estimate, not a new engine or counterfactual measurement.",
+          "token": "historical_engine_minus_current_lookup_estimate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Scalar prior engine duration authenticated by FieldCompletionTiming and retained with one bounded vDSO cache entry; it is not a separate execution engine.",
+          "token": "historicalEngineNS"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local scalar returned by CompletionTimingNanos or LookupReceipt.Timing; it transports validated timing evidence without defining a new engine.",
+          "token": "engineNS"
+        },
+        {
+          "category": "incidental",
+          "reason": "Open event-field key of the positioned FieldCompletionTiming attestation; the literal transports that existing private measurement and defines no independent engine.",
+          "token": "kernel_completion_timing"
         }
       ],
       "id": "gateway-engine",
@@ -8519,6 +8595,7 @@
         "PrivateAgentBEngineCalls",
         "ProfiledKernelActiveTime",
         "Qwen38NativeEngine",
+        "RecordVDSOServe",
         "RegisterEngines",
         "RemotePlacement",
         "SessionAffinityGateway",
@@ -8539,6 +8616,7 @@
         "dogfoodKernelValue",
         "editEngine",
         "engineFor",
+        "engineNS",
         "engineTokensPerCall",
         "engine_source",
         "engineer",
@@ -8561,10 +8639,13 @@
         "gatewayOverview",
         "gatewayPluginExecutor",
         "gatewayPluginFloor",
+        "gateway_call_result_sha256",
         "gateways",
         "getTimeEngine",
         "globEngine",
         "grepEngine",
+        "historicalEngineNS",
+        "historical_engine_minus_current_lookup_estimate",
         "inKernelCoalesceContextKey",
         "inKernelCoalesceRequest",
         "inKernelCoalesceResult",
@@ -8578,6 +8659,7 @@
         "kernelSession",
         "kernelValue",
         "kernel_100ns",
+        "kernel_completion_timing",
         "kernels",
         "kernelwiki",
         "microCacheKernel32",
@@ -8592,6 +8674,8 @@
         "pgKernel32",
         "publicGatewayURL",
         "query_public_policy",
+        "recordVDSOServeMeasured",
+        "recordVDSOServeProof",
         "remoteEngine",
         "remoteTarget",
         "renderinkernelchatmlrequest",
@@ -10630,6 +10714,11 @@
           "category": "incidental",
           "reason": "Private SHA256 formatting helper for the positioned NativeCompactionObservation digests; not a model-context or cache mechanism.",
           "token": "nativeCompactionHash"
+        },
+        {
+          "category": "incidental",
+          "reason": "Gateway adapter that records the existing NativeCompactionObservation scalar evidence after successful completion; it neither manages context nor performs compaction.",
+          "token": "recordNativeCompaction"
         }
       ],
       "exclude": [
@@ -10761,6 +10850,7 @@
         "recordCompactionRestore",
         "recordCompactionThrash",
         "recordGuardCompactionWitness",
+        "recordNativeCompaction",
         "repository_context",
         "requestContext",
         "routeEngineWithContext",
@@ -12218,6 +12308,21 @@
           "category": "incidental",
           "reason": "Carrying-cost driver label in a debt record, not a support-maturity status concept.",
           "token": "unsupported_variant_count"
+        },
+        {
+          "category": "incidental",
+          "reason": "FeatureProofSummary field listing the collector's three producer capabilities; it does not assert execution, catalog-wide support or maturity.",
+          "token": "SupportedFeatures"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private validation error rejecting features outside this collector's fixed coverage; it makes no product support or maturity claim.",
+          "token": "errFeatureProofUnsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed error spelling for rejecting a collector feature ID outside the supported producer set, not a system capability verdict.",
+          "token": "UNSUPPORTED_PROOF_FEATURE"
         }
       ],
       "exclude": [
@@ -12335,6 +12440,7 @@
         "SupportInactive",
         "SupportLocalOnly",
         "SupportPartial",
+        "SupportedFeatures",
         "SupportsRoutedExpertKQuant",
         "TestMaturityBaselinePromotionIsWitnessGatedAndImmediatelyEnforced",
         "TierStatusSupported",
@@ -12347,6 +12453,7 @@
         "UNSUPPORTED_COMBINATION",
         "UNSUPPORTED_FORMAT",
         "UNSUPPORTED_MEDIA_TYPE",
+        "UNSUPPORTED_PROOF_FEATURE",
         "UNSUPPORTED_SESSION_KIND",
         "UnsupportedFields",
         "VerdictParityOK",
@@ -12377,6 +12484,7 @@
         "coveragediscipline",
         "defaultscoreparitytol",
         "enumerable_domain_coverage",
+        "errFeatureProofUnsupported",
         "errInterleaveUnsupported",
         "errMaturity",
         "errmmapunsupported",
@@ -12651,6 +12759,11 @@
           "category": "incidental",
           "reason": "internal radixkv priority eviction policy constant",
           "token": "EvictionPriority"
+        },
+        {
+          "category": "incidental",
+          "reason": "Counter of overwritten bounded proof-ring entries; it does not evict model context, cache entries or durable evidence.",
+          "token": "EvictedReceipts"
         }
       ],
       "id": "evict",
@@ -12664,6 +12777,7 @@
         "EvictHotKVPrefix",
         "EvictHotSnapshot",
         "EvictedByteCount",
+        "EvictedReceipts",
         "EvictionPolicyFIFO",
         "EvictionPolicyLRU",
         "EvictionPriority",
