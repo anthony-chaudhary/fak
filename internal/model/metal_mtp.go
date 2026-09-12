@@ -430,6 +430,17 @@ func (c *MetalMTPCoordinator) TargetSession() *Session {
 	return c.target
 }
 
+// sessionBackedTarget returns the target Session backing a session-derived MTP
+// proposal generator, or nil for a function-based injected drafter. It is used
+// to distinguish a target-derived injected drafter (which must not survive a
+// target switch) from a genuinely target-independent one.
+func (g *MTPProposalGenerator) sessionBackedTarget() *Session {
+	if g == nil || g.session == nil {
+		return nil
+	}
+	return g.session.target
+}
+
 // SetTargetSession updates the target model session.
 func (c *MetalMTPCoordinator) SetTargetSession(s *Session) {
 	c.generationMu.Lock()
@@ -441,11 +452,28 @@ func (c *MetalMTPCoordinator) SetTargetSession(s *Session) {
 	}
 	// draftSes is present only for the coordinator-created drafter. It is bound
 	// to target hidden history and therefore must never survive a request target
-	// switch. An injected drafter has no draftSes owner and is intentionally
-	// preserved across switches.
+	// switch.
 	if c.draftSes != nil {
 		c.draftSes.Close()
 		c.draftSes = nil
+		c.drafter = nil
+	} else if gen, ok := c.drafter.(*MTPProposalGenerator); ok && gen.sessionBackedTarget() != nil {
+		// An injected session-backed drafter is derived from the old target's
+		// hidden history and must not survive the switch. Release its backing
+		// draft session (idempotent) and clear the wrapper so
+		// ensureDrafterLocked rebuilds a fresh owned drafter for the new target.
+		// A genuinely target-independent injected drafter (function-based, or a
+		// sidecar/ngram generator) has no target-derived backing session and is
+		// intentionally preserved.
+		//
+		// Boundary: only a bare session-backed *MTPProposalGenerator is caught.
+		// A target-derived generator wrapped in a container (e.g.
+		// *CachedBranchProposalGenerator) would escape; SetDrafter has no
+		// production caller today, so this is a documented limit, not a defended
+		// seam. See #12347.
+		if gen.session != nil {
+			gen.session.Close()
+		}
 		c.drafter = nil
 	}
 	c.draftState = &MTPDraftTracker{DraftDepth: c.cfg.DraftDepth}

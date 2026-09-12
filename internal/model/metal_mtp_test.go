@@ -354,6 +354,125 @@ func TestMetalMTPCoordinatorTargetSwitchPreservesInjectedDrafter(t *testing.T) {
 	}
 }
 
+func TestMetalMTPTargetReplacementRebuildsDrafter(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	promptA, promptB := []int{0, 1, 2}, []int{7, 3, 5, 1}
+
+	first := m.NewSession()
+	coord, err := first.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = coord.Close() })
+
+	if got := mustMetalMTPGenerate(t, coord, promptA, 6); len(got) == 0 {
+		t.Fatal("first request produced no tokens")
+	}
+	oldDraft := coord.draftSes
+	oldGen := coord.drafter
+	if oldDraft == nil || oldGen == nil || oldDraft.target != first {
+		t.Fatal("first request did not own a drafter bound to its target")
+	}
+
+	second := m.NewSession()
+	t.Cleanup(second.Close)
+	coord.SetTargetSession(second)
+	first.Close()
+
+	got := mustMetalMTPGenerate(t, coord, promptB, 6)
+	wantB := m.NewSession()
+	t.Cleanup(wantB.Close)
+	if want := wantB.Generate(promptB, 6); !reflect.DeepEqual(got, want) {
+		t.Fatalf("replacement-target output=%v want %v", got, want)
+	}
+
+	if !oldDraft.closed {
+		t.Fatal("target switch left the prior request draft session live")
+	}
+	if gen, ok := oldGen.(*MTPProposalGenerator); ok && gen.session != nil {
+		oldDraft.Propose(promptA)
+		if err := gen.session.Err(); !errors.Is(err, ErrQwen35MTPDrafterClosed) {
+			t.Fatalf("old session-backed drafter did not latch closed: %v", err)
+		}
+	}
+	if coord.drafter == oldGen {
+		t.Fatal("target switch left the stale injected drafter in place")
+	}
+	if coord.draftSes == nil || coord.draftSes == oldDraft || coord.draftSes.target != second {
+		t.Fatal("target switch did not rebuild a fresh owned drafter bound to the new target")
+	}
+	if coord.TargetSession() != second {
+		t.Fatal("coordinator target was not replaced")
+	}
+}
+
+// TestMetalMTPTargetReplacementRebuildsInjectedSessionDrafter is the Issue #12347
+// witness for the session-backed INJECTED drafter residual branch in
+// SetTargetSession. Unlike TestMetalMTPTargetReplacementRebuildsDrafter, which
+// covers the coordinator-owned path (c.draftSes != nil), this test injects a
+// session-backed generator via SetDrafter. SetDrafter closes+nils c.draftSes but
+// leaves c.drafter pointing at the wrapper, so the pre-fix code saw draftSes ==
+// nil and kept the stale drafter, returning ErrQwen35MTPDrafterClosed on the next
+// round instead of rebuilding a fresh owned drafter for the replacement target.
+func TestMetalMTPTargetReplacementRebuildsInjectedSessionDrafter(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	promptB := []int{7, 3, 5, 1}
+
+	first := m.NewSession()
+	coord, err := first.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = coord.Close() })
+
+	draft, err := NewQwen35MTPDraftSession(first, 4)
+	if err != nil {
+		t.Fatalf("NewQwen35MTPDraftSession: %v", err)
+	}
+	injected := NewMTPProposalGenerator(draft)
+	coord.SetDrafter(injected)
+
+	// Precondition that makes the residual branch reachable: SetDrafter released
+	// the coordinator-owned draft session and installed the injected wrapper.
+	if coord.draftSes != nil || coord.drafter != injected {
+		t.Fatalf("SetDrafter precondition failed: draftSes=%v drafter==injected:%v", coord.draftSes, coord.drafter == injected)
+	}
+
+	second := m.NewSession()
+	t.Cleanup(second.Close)
+	coord.SetTargetSession(second)
+	first.Close()
+
+	if coord.drafter == injected {
+		t.Fatal("target switch left the stale injected session-backed drafter in place")
+	}
+	if injected.session != nil && !injected.session.closed {
+		t.Fatal("target switch did not release the injected session-backed draft session")
+	}
+	if !draft.closed {
+		t.Fatal("injected session-backed draft session was not closed on target switch")
+	}
+	if coord.draftSes == nil || coord.draftSes.target != second {
+		t.Fatal("target switch did not rebuild a fresh owned drafter bound to the new target")
+	}
+	if coord.TargetSession() != second {
+		t.Fatal("coordinator target was not replaced")
+	}
+
+	got := mustMetalMTPGenerate(t, coord, promptB, 6)
+	wantB := m.NewSession()
+	t.Cleanup(wantB.Close)
+	if want := wantB.Generate(promptB, 6); !reflect.DeepEqual(got, want) {
+		t.Fatalf("replacement-target output=%v want %v", got, want)
+	}
+
+	// No use-after-close: the released draft session latches closed.
+	draft.Propose([]int{0, 1, 2})
+	if err := draft.Err(); !errors.Is(err, ErrQwen35MTPDrafterClosed) {
+		t.Fatalf("released injected draft session did not latch closed: %v", err)
+	}
+}
+
 func TestMetalMTPCoordinatorConcurrentTargetSwitchKeepsDrafterAndTargetTogether(t *testing.T) {
 	m := qwen38HybridMTPEnabledSyntheticModel(t)
 	initial := m.NewSession()
