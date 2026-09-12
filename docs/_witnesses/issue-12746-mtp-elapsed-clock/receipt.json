@@ -1,4 +1,4 @@
-﻿{
+{
   "schema": "fak-witness-receipt/1",
   "issue": "https://github.com/anthony-chaudhary/fak/issues/12746",
   "test": "TestInKernelPlannerVulkanMTPExecutionReceiptAccountsResidentTransaction",
