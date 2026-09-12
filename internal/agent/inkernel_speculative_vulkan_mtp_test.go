@@ -346,8 +346,10 @@ func TestInKernelPlannerVulkanMTPExecutionReceiptAccountsResidentTransaction(t *
 		// The target chooses 7 at every row. The first token is accepted and 8 is
 		// rejected, giving the planner a controlled partial-commit receipt.
 		return model.NewMTPProposalGeneratorWithFn(func(context.Context, []int, int) ([]int, error) {
-			// Keep the synthetic transaction wider than the host clock tick so the
-			// receipt's positive elapsed-time invariant is portable across timers.
+			// Guarantee a real monotonic tick so the receipt's positive elapsed-time
+			// invariant holds portably, including coarse Windows timers (#12746):
+			// production measures a true time.Since(started), so the synthetic request
+			// must outlast the host clock's observable resolution.
 			time.Sleep(time.Millisecond)
 			return []int{7, 8}, nil
 		}), func() { closeCalls++ }, nil
