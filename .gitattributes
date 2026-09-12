@@ -44,3 +44,9 @@ internal/policy/testdata/redteam_floor_report.md text eol=lf
 # Armbench caveman inputs are SHA-256 addressed; keep LF line endings across all OS checkouts (#12010).
 docs/_witnesses/armbench-caveman-native/inputs/** text eol=lf
 
+# DeepSeek pinned-config fixtures are SHA-256 addressed by
+# internal/model/{v41,v4_flash}_config_test.go, which hash raw checkout bytes.
+# Under core.autocrlf=true a Windows checkout rewrites them to CRLF and both
+# provenance tests fail against the unchanged upstream digests (#12888).
+internal/model/testdata/deepseek_v41_flash_config.json text eol=lf
+internal/model/testdata/deepseek_v4_flash_config.json text eol=lf
