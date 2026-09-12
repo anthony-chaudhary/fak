@@ -46,15 +46,17 @@ import (
 	"time"
 )
 
-// stallKindIdle, stallKindNoProgress, and stallKindMaxDuration name WHICH deadline tripped
-// a stallReader, carried on UpstreamStalledError so the operator log separates "the upstream
-// went silent on the wire" from "the upstream kept the socket warm with keepalives but never
-// advanced the turn" from "the stream outlived its absolute max-duration budget". All three
-// are stalls to the gateway (a 504 upstream_stalled); only the cause differs.
+// stallKindIdle, stallKindNoProgress, stallKindMaxDuration, and stallKindFirstToken name WHICH
+// deadline tripped a stallReader, carried on UpstreamStalledError so the operator log separates
+// "the upstream went silent on the wire" from "the upstream kept the socket warm with keepalives
+// but never advanced the turn" from "the stream outlived its absolute max-duration budget" from
+// "a BUFFERED completion produced no first token within the watchdog window". All four are stalls
+// to the gateway (a 504 upstream_stalled); only the cause differs.
 const (
 	stallKindIdle        = "idle"
 	stallKindNoProgress  = "no-progress"
 	stallKindMaxDuration = "max-duration"
+	stallKindFirstToken  = "first-token"
 )
 
 // ErrUpstreamStalled is the sentinel a streaming read returns when the upstream produced
@@ -91,6 +93,8 @@ func (e *UpstreamStalledError) Error() string {
 		return fmt.Sprintf("planner: upstream stalled after %s with no content progress (keepalives only)", e.Idle)
 	case stallKindMaxDuration:
 		return fmt.Sprintf("planner: upstream stream ended by max-duration bound after %s", e.Idle)
+	case stallKindFirstToken:
+		return fmt.Sprintf("planner: no first token within %s (buffered first-token watchdog)", e.Idle)
 	default:
 		return fmt.Sprintf("planner: upstream stalled after %s idle", e.Idle)
 	}
@@ -98,6 +102,24 @@ func (e *UpstreamStalledError) Error() string {
 
 // Unwrap returns the underlying ErrUpstreamStalled sentinel for errors.Is/As.
 func (e *UpstreamStalledError) Unwrap() error { return e.Err }
+
+// NewFirstTokenStalledError builds the typed first-token watchdog error emitted when a
+// BUFFERED planner call produces no completion (no first token) within the watchdog window.
+func NewFirstTokenStalledError(window time.Duration) *UpstreamStalledError {
+	return &UpstreamStalledError{Idle: window, Kind: stallKindFirstToken, Err: ErrUpstreamStalled}
+}
+
+// IsFirstTokenStall reports whether err is (or wraps) the buffered first-token watchdog error.
+func IsFirstTokenStall(err error) bool {
+	var e *UpstreamStalledError
+	return errors.As(err, &e) && e.Kind == stallKindFirstToken
+}
+
+// FirstTokenWatchdogTimeout is the bounded first-token window for the buffered completion
+// path. It reuses the stream idle window (FAK_STREAM_STALL_TIMEOUT_S, default 60s, clamped
+// [5s,600s]) so the buffered and streaming paths share one operator-tunable deadline and no
+// second knob can drift from it.
+func FirstTokenWatchdogTimeout() time.Duration { return streamStallTimeout() }
 
 // stallReader wraps a streaming response body with an inter-byte (idle) deadline. A
 // single time.AfterFunc timer is re-armed before each Read and stopped after it returns;

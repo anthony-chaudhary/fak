@@ -207,6 +207,28 @@ func TestStreamStallSentinelDistinctFromEOF(t *testing.T) {
 	}
 }
 
+// TestFirstTokenStalledErrorKindAndMessage pins the buffered first-token watchdog error's
+// kind, operator-facing message, sentinel unwrap, and predicate, so the gateway's distinct
+// 504 message arm keys on a stable contract.
+func TestFirstTokenStalledErrorKindAndMessage(t *testing.T) {
+	err := NewFirstTokenStalledError(60 * time.Second)
+	if err.Kind != "first-token" {
+		t.Fatalf("Kind = %q, want first-token", err.Kind)
+	}
+	if !strings.Contains(err.Error(), "first token") {
+		t.Fatalf("message = %q, want it to name the first token", err.Error())
+	}
+	if !errors.Is(err, ErrUpstreamStalled) {
+		t.Fatalf("errors.Is(err, ErrUpstreamStalled) = false, err = %v", err)
+	}
+	if !IsFirstTokenStall(err) {
+		t.Fatalf("IsFirstTokenStall(err) = false, err = %v", err)
+	}
+	if IsFirstTokenStall(&UpstreamStalledError{Idle: 60 * time.Second}) {
+		t.Fatal("IsFirstTokenStall must be false for the zero/kindless idle stall")
+	}
+}
+
 // TestStreamStallTimeoutClamp pins streamStallTimeout's env parse + clamp band, the same
 // shape plannerTimeout uses: unset -> 60s default, in-band honored, out-of-band / unparseable
 // fall back to the default.

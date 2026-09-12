@@ -1132,6 +1132,10 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 	// error". Placed before the status/fallthrough cases for the same reason as unreachable.
 	var stalled *agent.UpstreamStalledError
 	if errors.As(err, &stalled) {
+		if agent.IsFirstTokenStall(err) {
+			return http.StatusGatewayTimeout, "upstream_stalled",
+				"upstream stalled — no first token within the first-token watchdog window (long prefill or wedged model); the request was terminated instead of hanging"
+		}
 		return http.StatusGatewayTimeout, "upstream_stalled",
 			"upstream stalled — the model or provider opened the stream then went silent within the idle window"
 	}
