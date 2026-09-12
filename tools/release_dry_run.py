@@ -34,6 +34,8 @@ RELEASE_SUBSTRATE_TESTS = (
     "tools/release_decide_test.py",
     "tools/stable_release_context_test.py",
     "tools/stable_release_promote_test.py",
+    "tools/release_artifacts_workflow_test.py",
+    "tools/cuda_arch_targets_test.py",
 )
 
 FAST_RELEASE_SUBSTRATE_TESTS = (
@@ -46,6 +48,8 @@ FAST_RELEASE_SUBSTRATE_TESTS = (
     "tools/release_cadence_workflow_test.py",
     "tools/release_status_test.py",
     "tools/release_lock_test.py",
+    "tools/release_artifacts_workflow_test.py",
+    "tools/cuda_arch_targets_test.py",
 )
 
 
@@ -143,10 +147,15 @@ def run_release_tests_at_ref(root: Path, ref: str, *, keep_worktree: bool = Fals
         ok = True
         rows: list[dict] = []
         for test in present:
-            code, out = run([sys.executable, test], cwd=wt, timeout=300)
+            command = [sys.executable, test]
+            code, out = run(command, cwd=wt, timeout=300)
             row = {
                 "test": test,
+                "command": command,
                 "exit_code": code,
+                "contract": "artifact" if test.endswith("release_artifacts_workflow_test.py") else (
+                    "cuda" if test.endswith("cuda_arch_targets_test.py") else None
+                ),
                 "tail": "\n".join(out.splitlines()[-8:]),
             }
             rows.append(row)
@@ -205,7 +214,9 @@ def main(argv: list[str] | None = None) -> int:
             if error:
                 print(f"  workflow UNPARSEABLE: {path}: {error}")
         for failure in (verdict.get("suite") or {}).get("failures", []):
-            print(f"  {failure.get('test')}: exit {failure.get('exit_code')}")
+            contract = failure.get("contract")
+            label = f" [{contract} contract]" if contract else ""
+            print(f"  {failure.get('test')}{label}: exit {failure.get('exit_code')}")
     return 0 if verdict.get("ok") else 1
 
 
