@@ -31,6 +31,8 @@ type turnkeyNativeResources struct {
 }
 
 type turnkeyNativeStartup struct {
+	MetalLive           bool                     `json:"metal_live"`
+	MetalCompiled       bool                     `json:"metal_compiled"`
 	HostTotalBefore     int64                    `json:"host_total_before_bytes,omitempty"`
 	HostAvailableBefore int64                    `json:"host_available_before_bytes,omitempty"`
 	HostTotalAfter      int64                    `json:"host_total_after_bytes,omitempty"`
@@ -62,7 +64,7 @@ func (r *turnkeyNativeResources) Close() error {
 
 type turnkeyNativeLoadDeps struct {
 	resolveBackend func() (compute.Backend, error)
-	resolveMetal   func() (bool, error)
+	resolveMetal   func() (serveMetalDecision, error)
 	admitAndLoad   func(bool, string, func()) (func(), error)
 	refusePeak     func(string) error
 	loadModel      func(string, compute.Backend, int) (*fakmodel.Model, bool, *gateway.ModelLoadProfile)
@@ -75,7 +77,7 @@ type turnkeyNativeLoadDeps struct {
 func defaultTurnkeyNativeLoadDeps() turnkeyNativeLoadDeps {
 	return turnkeyNativeLoadDeps{
 		resolveBackend: func() (compute.Backend, error) { return resolveServeChatBackend("") },
-		resolveMetal:   func() (bool, error) { return resolveServeMetal(false, false, "") },
+		resolveMetal:   func() (serveMetalDecision, error) { return resolveServeMetalDecision(false, false, "") },
 		refusePeak:     refuseOversubscribedMetalGGUF,
 		admitAndLoad: func(metal bool, path string, load func()) (func(), error) {
 			return loadLocalLauncherModelWithMetalLease(metal, path, gpulease.Options{}, load)
@@ -106,10 +108,11 @@ func loadTurnkeyNativeResourcesWith(_ context.Context, modelPath, modelID string
 	if err != nil {
 		return nil, fmt.Errorf("backend: %w", err)
 	}
-	metal, err := deps.resolveMetal()
+	metalDecision, err := deps.resolveMetal()
 	if err != nil {
 		return nil, err
 	}
+	metal := metalDecision.live
 	if metal {
 		if err := deps.refusePeak(modelPath); err != nil {
 			return nil, err
@@ -143,6 +146,8 @@ func loadTurnkeyNativeResourcesWith(_ context.Context, modelPath, modelID string
 	if deps.metalResidency != nil {
 		startup.MetalLiveQ6Weights, startup.MetalLiveQ8Weights = deps.metalResidency()
 	}
+	startup.MetalLive = metalDecision.live
+	startup.MetalCompiled = metalgemm.Compiled()
 	tok, ok := deps.loadTokenizer(modelPath)
 	if !ok || tok == nil {
 		_ = model.CloseWeights()

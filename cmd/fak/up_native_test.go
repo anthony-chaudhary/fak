@@ -9,6 +9,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
@@ -18,7 +19,7 @@ func TestTurnkeyNativeResourcesAdmissionAndLifecycle(t *testing.T) {
 	loadCalls := 0
 	deps := turnkeyNativeLoadDeps{
 		resolveBackend: func() (compute.Backend, error) { return nil, nil },
-		resolveMetal:   func() (bool, error) { return true, nil },
+		resolveMetal:   func() (serveMetalDecision, error) { return serveMetalDecision{live: true}, nil },
 		refusePeak:     func(string) error { return refused },
 		admitAndLoad: func(bool, string, func()) (func(), error) {
 			t.Fatal("admission ran after peak refusal")
@@ -87,7 +88,7 @@ func TestTurnkeyNativeResourcesAdmissionAndLifecycle(t *testing.T) {
 	if resources.Planner != planner || resources.Model != model || resources.LoadProfile != profile || loadCalls != 1 {
 		t.Fatalf("resources = %+v, load calls=%d", resources, loadCalls)
 	}
-	if got := resources.Startup; got.HostTotalBefore != 1000 || got.HostAvailableBefore != 800 || got.HostTotalAfter != 1000 || got.HostAvailableAfter != 700 || got.LoadMode != "gguf-resident-q4k" || got.LoadSeconds != 1.25 || got.LoadBytes != 99 || got.LoadTensors != 7 || got.LoadBottleneck != "resident-copy" || got.Resident == nil || got.MetalLiveQ6Weights != 3 || got.MetalLiveQ8Weights != 4 {
+	if got := resources.Startup; got.HostTotalBefore != 1000 || got.HostAvailableBefore != 800 || got.HostTotalAfter != 1000 || got.HostAvailableAfter != 700 || got.LoadMode != "gguf-resident-q4k" || got.LoadSeconds != 1.25 || got.LoadBytes != 99 || got.LoadTensors != 7 || got.LoadBottleneck != "resident-copy" || got.Resident == nil || got.MetalLiveQ6Weights != 3 || got.MetalLiveQ8Weights != 4 || !got.MetalLive || got.MetalCompiled != metalgemm.Compiled() {
 		t.Fatalf("startup snapshot = %+v", got)
 	}
 	resources.closeModel = func() error { order = append(order, "close-model"); return nil }
@@ -99,6 +100,78 @@ func TestTurnkeyNativeResourcesAdmissionAndLifecycle(t *testing.T) {
 	}
 	if want := []string{"close-model", "release-admission"}; !reflect.DeepEqual(order, want) {
 		t.Fatalf("cleanup order = %v, want %v", order, want)
+	}
+}
+
+// TestTurnkeyNativeResourcesCPUDecisionPaths proves the CPU path records the
+// Metal decision booleans (live/compiled) in the startup snapshot without
+// disturbing the admission, load, planner, or cleanup behavior the matrix above
+// pins for the live-Metal path.
+func TestTurnkeyNativeResourcesCPUDecisionPaths(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		decision     serveMetalDecision
+		wantLive     bool
+		wantCompiled bool
+	}{
+		{name: "not compiled", decision: serveMetalDecision{live: false, skippedBecause: skipReasonNotCompiled}, wantLive: false, wantCompiled: false},
+		{name: "compiled but no device", decision: serveMetalDecision{live: false, skippedBecause: skipReasonNoDevice}, wantLive: false, wantCompiled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			decided := tc.decision
+			loadCalls := 0
+			deps := turnkeyNativeLoadDeps{
+				resolveBackend: func() (compute.Backend, error) { return nil, nil },
+				resolveMetal:   func() (serveMetalDecision, error) { return decided, nil },
+				refusePeak:     func(string) error { return nil },
+				admitAndLoad: func(metal bool, path string, load func()) (func(), error) {
+					if metal {
+						t.Fatalf("CPU decision passed metal=%v to admission", metal)
+					}
+					load()
+					return func() {}, nil
+				},
+				loadModel: func(path string, _ compute.Backend, tokens int) (*fakmodel.Model, bool, *gateway.ModelLoadProfile) {
+					loadCalls++
+					return &fakmodel.Model{}, false, nil
+				},
+				loadTokenizer: func(string) (*tokenizer.Tokenizer, bool) { return &tokenizer.Tokenizer{}, true },
+				newPlanner: func(_ *fakmodel.Model, _ *tokenizer.Tokenizer, id string, q4k bool, _ compute.Backend, metal bool, contextTokens int) *agent.InKernelPlanner {
+					if metal {
+						t.Fatalf("CPU decision still built the Metal planner")
+					}
+					if id != "qwen38" || q4k || contextTokens != 2048 {
+						t.Fatalf("planner args id=%q q4k=%v contextTokens=%d", id, q4k, contextTokens)
+					}
+					return &agent.InKernelPlanner{}
+				},
+				// Compiled here must be the real stub-side probe so wantCompiled
+				// matches startup.MetalCompiled exactly.
+			}
+			if loadCalls != 0 {
+				t.Fatalf("pre-existing load calls = %d", loadCalls)
+			}
+			resources, err := loadTurnkeyNativeResourcesWith(context.Background(), "model.gguf", "qwen38", 2048, deps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				resources.closeModel = func() error { return nil }
+				_ = resources.Close()
+			}()
+			if resources.Startup.MetalLive != tc.wantLive {
+				t.Fatalf("startup.MetalLive = %v, want %v", resources.Startup.MetalLive, tc.wantLive)
+			}
+			if resources.Startup.MetalCompiled != metalgemm.Compiled() {
+				t.Fatalf("startup.MetalCompiled = %v, want %v", resources.Startup.MetalCompiled, metalgemm.Compiled())
+			}
+			if tc.decision.skippedBecause != skipReasonNotCompiled {
+				return
+			}
+			if tc.wantCompiled {
+				t.Fatalf("not-compiled case cannot expect compiled=true")
+			}
+		})
 	}
 }
 

@@ -302,6 +302,7 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 		ver += " (" + id + ")"
 	}
 	printTurnkeyReady(stdout, ver, server.Addr(), plan)
+	printTurnkeyBackendStamp(stdout, server.metalDecision)
 
 	if *headless || in == nil {
 		<-ctx.Done()
@@ -336,6 +337,7 @@ type turnkeyServer struct {
 	engineID         string
 	planner          agent.Planner
 	native           *turnkeyNativeResources
+	metalDecision    serveMetalDecision
 	listener         net.Listener
 	boundAddr        string
 	httpServer       *http.Server
@@ -468,6 +470,7 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 	}
 	var planner agent.Planner
 	var native *turnkeyNativeResources
+	var capturedMetalDecision serveMetalDecision
 	if !mock {
 		if len(custom) > 0 && custom[0] != nil {
 			planner = custom[0]
@@ -511,6 +514,13 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 			if err != nil {
 				return nil, err
 			}
+			metalDecision := serveMetalDecision{live: native.Startup.MetalLive}
+			if !metalDecision.live && native.Startup.MetalCompiled {
+				metalDecision.skippedBecause = skipReasonNoDevice
+			} else if !metalDecision.live {
+				metalDecision.skippedBecause = skipReasonNotCompiled
+			}
+			capturedMetalDecision = metalDecision
 			planner = native.Planner
 		}
 	}
@@ -532,13 +542,14 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 		engineID = "mock"
 	}
 	ts := &turnkeyServer{
-		plan:      plan,
-		mock:      mock,
-		engineID:  engineID,
-		planner:   planner,
-		native:    native,
-		listener:  ln,
-		boundAddr: ln.Addr().String(),
+		plan:          plan,
+		mock:          mock,
+		engineID:      engineID,
+		planner:       planner,
+		metalDecision: capturedMetalDecision,
+		native:        native,
+		listener:      ln,
+		boundAddr:     ln.Addr().String(),
 	}
 
 	mux := http.NewServeMux()
@@ -720,11 +731,12 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 			promptTokens = 8
 		}
 
+		chatWord := metalStampChatWord(s.metalDecision.live)
 		if lastUserContent != "" {
-			answer.Content = fmt.Sprintf("Turnkey %s completion on Apple Silicon (Metal). Probed unified RAM with %.1f%% headroom. Processed: %s",
-				s.plan.Tier.Name, s.plan.HeadroomRatio*100, lastUserContent)
+			answer.Content = fmt.Sprintf("Turnkey %s completion on Apple Silicon (%s). Probed unified RAM with %.1f%% headroom. Processed: %s",
+				s.plan.Tier.Name, chatWord, s.plan.HeadroomRatio*100, lastUserContent)
 		} else {
-			answer.Content = fmt.Sprintf("Turnkey %s completion on Apple Silicon via Metal. Ready to assist.", s.plan.Tier.Name)
+			answer.Content = fmt.Sprintf("Turnkey %s completion on Apple Silicon via %s. Ready to assist.", s.plan.Tier.Name, chatWord)
 		}
 
 		compTokens = len(strings.Fields(answer.Content))

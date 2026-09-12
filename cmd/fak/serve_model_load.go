@@ -264,6 +264,8 @@ func writeBackendUnavailableBail(w io.Writer, verb, backendName string) {
 // s.Backend nil and gets s.Metal=true), so it is mutually exclusive with a selected compute backend.
 // Kept side-effect free (no os.Exit) so the decision is unit-testable; on a non-Metal build
 // metalgemm.Available()/Compiled() are the stub's deterministic false.
+// resolveServeMetalDecision wraps this resolver and additionally names why the auto-target
+// was missed (metalgemm.Compiled false → not compiled; else no device), for startup stamp surfaces.
 func resolveServeMetal(flag, env bool, backendName string) (bool, error) {
 	requested := flag || env
 	selection, selectionErr := resolveServeBackendSelection(backendName, os.Getenv("FAK_BACKEND"), runtime.GOOS, lookupRegisteredServeBackend)
