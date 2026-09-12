@@ -2268,16 +2268,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/macromailbox",
-            "lane": "macromailbox"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/macrostate",
-            "lane": "macrostate"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/managedinventory",
             "lane": "managedinventory"
         },
