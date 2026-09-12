@@ -188,6 +188,13 @@ func (c *cpuBackend) MatMul(w, x Tensor) Tensor {
 		for o := 0; o < out; o++ {
 			y[o] = q2kRowDot(raw[o*rowBytes:(o+1)*rowBytes], xf, buf)
 		}
+	case IQ2_XXS:
+		raw := i8AsBytes(w.buf.(HostBuffer).I8())
+		rowBytes := (in / iq2xxsSuper) * iq2xxsSuperBlock
+		buf := make([]float32, iq2xxsSuper)
+		for o := 0; o < out; o++ {
+			y[o] = iq2xxsRowDot(raw[o*rowBytes:(o+1)*rowBytes], xf, buf)
+		}
 	case Q2_0:
 		blk := w.Quant.Block
 		raw := i8AsBytes(c.i8(w))
@@ -267,6 +274,16 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 			row := raw[o*rowBytes : (o+1)*rowBytes]
 			for t := 0; t < P; t++ {
 				Y[t*out+o] = q2kRowDot(row, Xf[t*in:t*in+in], buf)
+			}
+		}
+	case IQ2_XXS:
+		raw := i8AsBytes(w.buf.(HostBuffer).I8())
+		rowBytes := (in / iq2xxsSuper) * iq2xxsSuperBlock
+		buf := make([]float32, iq2xxsSuper)
+		for o := 0; o < out; o++ {
+			row := raw[o*rowBytes : (o+1)*rowBytes]
+			for t := 0; t < P; t++ {
+				Y[t*out+o] = iq2xxsRowDot(row, Xf[t*in:t*in+in], buf)
 			}
 		}
 	case Q2_0:

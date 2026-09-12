@@ -26,7 +26,7 @@ func TestQuantRegistryBuiltinRegistration(t *testing.T) {
 		{kindQ4_0, "Q4_0", 0, false, q4_0BlockBytes, q4_0BlockWeights},
 		{kindIQ3XXS, "IQ3_XXS", compute.IQ3_XXS, false, iq3xxsBlockBytes, qkK},
 		{kindIQ4XS, "IQ4_XS", 0, false, iq4xsBlockBytes, qkK},
-		{kindIQ2XXS, "IQ2_XXS", 0, false, iq2xxsBlockBytes, qkK},
+		{kindIQ2XXS, "IQ2_XXS", compute.IQ2_XXS, false, iq2xxsBlockBytes, qkK},
 		{kindIQ2XS, "IQ2_XS", 0, false, iq2xsBlockBytes, qkK},
 		{kindIQ1S, "IQ1_S", 0, false, iq1sBlockBytes, qkK},
 		{kindIQ2S, "IQ2_S", 0, false, iq2sBlockBytes, qkK},
@@ -613,5 +613,151 @@ func TestIQ3SHALAdmissionRequiresRegisteredCapability(t *testing.T) {
 	}
 	if admittedDtype != compute.IQ3_S {
 		t.Errorf("admittedDtype = %v, want compute.IQ3_S", admittedDtype)
+	}
+}
+
+type mockIQ2XXSCapableBackend struct {
+	compute.Backend
+	capable bool
+}
+
+func (m *mockIQ2XXSCapableBackend) SupportsIQ2XXS() bool {
+	return m.capable
+}
+
+func TestIQ2XXSHALAdmissionRequiresRegisteredCapability(t *testing.T) {
+	ResetDefaultQuantDescriptors()
+	defer ResetDefaultQuantDescriptors()
+
+	// 1. Exact block metadata
+	desc, ok := LookupQuantDescriptor(kindIQ2XXS)
+	if !ok {
+		t.Fatalf("LookupQuantDescriptor(kindIQ2XXS) not found")
+	}
+	if desc.Name() != "IQ2_XXS" {
+		t.Errorf("Name = %q, want %q", desc.Name(), "IQ2_XXS")
+	}
+	if desc.Kind() != kindIQ2XXS {
+		t.Errorf("Kind = %v, want %v", desc.Kind(), kindIQ2XXS)
+	}
+	if desc.BlockBytes() != iq2xxsBlockBytes {
+		t.Errorf("BlockBytes = %d, want %d (iq2xxsBlockBytes)", desc.BlockBytes(), iq2xxsBlockBytes)
+	}
+	if desc.BlockBytes() != 66 {
+		t.Errorf("BlockBytes = %d, want 66", desc.BlockBytes())
+	}
+	if desc.BlockWeights() != qkK {
+		t.Errorf("BlockWeights = %d, want %d (qkK=256)", desc.BlockWeights(), qkK)
+	}
+	if desc.KeyPrefix() != "kquant-raw:" {
+		t.Errorf("KeyPrefix = %q, want 'kquant-raw:'", desc.KeyPrefix())
+	}
+
+	// 2. Stable dtype identity
+	if desc.Dtype() != compute.IQ2_XXS {
+		t.Fatalf("desc.Dtype() = %v, want compute.IQ2_XXS", desc.Dtype())
+	}
+	if compute.IQ2_XXS.String() != "iq2_xxs" {
+		t.Errorf("IQ2_XXS.String() = %q, want 'iq2_xxs'", compute.IQ2_XXS.String())
+	}
+	if !compute.IQ2_XXS.Quantized() {
+		t.Errorf("IQ2_XXS.Quantized() = false, want true")
+	}
+	if compute.IQ2_XXS.Bytes() != 1 {
+		t.Errorf("IQ2_XXS.Bytes() = %d, want 1", compute.IQ2_XXS.Bytes())
+	}
+
+	// 3. Default state is fail-closed (HALSupported == false)
+	if desc.SupportsHAL() {
+		t.Fatalf("IQ2_XXS default descriptor must NOT support HAL before capability is registered")
+	}
+	if SupportsHALKQuant(kindIQ2XXS) {
+		t.Fatalf("SupportsHALKQuant(kindIQ2XXS) must be false by default")
+	}
+
+	// 4. Typed refusal without capability
+	// 4a. Nil backend
+	vNil := AdmitIQ2XXSHAL(nil)
+	if vNil.Admitted {
+		t.Fatalf("AdmitIQ2XXSHAL(nil) admitted, want refusal")
+	}
+	if vNil.Refusal == nil || vNil.Refusal.Reason != IQ2XXSRefusalNilBackend {
+		t.Fatalf("AdmitIQ2XXSHAL(nil) refusal = %v, want reason %s", vNil.Refusal, IQ2XXSRefusalNilBackend)
+	}
+
+	// 4b. Incapable default backend
+	defaultBE := compute.Default()
+	vDefault := AdmitIQ2XXSHAL(defaultBE)
+	if vDefault.Admitted {
+		t.Fatalf("AdmitIQ2XXSHAL(defaultBE) admitted without capability, want refusal")
+	}
+	if vDefault.Refusal == nil || vDefault.Refusal.Reason != IQ2XXSRefusalNoCapability {
+		t.Fatalf("AdmitIQ2XXSHAL(defaultBE) refusal = %v, want reason %s", vDefault.Refusal, IQ2XXSRefusalNoCapability)
+	}
+	if vDefault.Dtype != compute.IQ2_XXS {
+		t.Errorf("vDefault.Dtype = %v, want compute.IQ2_XXS", vDefault.Dtype)
+	}
+
+	// 4c. Backend explicitly denying capability
+	deniedBE := &mockIQ2XXSCapableBackend{Backend: compute.Default(), capable: false}
+	vDenied := AdmitIQ2XXSHAL(deniedBE)
+	if vDenied.Admitted {
+		t.Fatalf("AdmitIQ2XXSHAL(deniedBE) admitted, want refusal")
+	}
+	if vDenied.Refusal == nil || vDenied.Refusal.Reason != IQ2XXSRefusalCapabilityDenied {
+		t.Fatalf("AdmitIQ2XXSHAL(deniedBE) refusal = %v, want reason %s", vDenied.Refusal, IQ2XXSRefusalCapabilityDenied)
+	}
+
+	// 4d. Typed refusal via AdmitHALQuant
+	_, err := AdmitHALQuant(kindIQ2XXS, defaultBE)
+	if err == nil {
+		t.Fatalf("AdmitHALQuant(kindIQ2XXS, defaultBE) want typed refusal, got nil")
+	}
+	var refusal *IQ2XXSHALAdmissionRefusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("AdmitHALQuant error %T is not *IQ2XXSHALAdmissionRefusal", err)
+	}
+
+	// 4e. Fail-closed: descriptor with HALSupported: true must NOT bypass backend capability requirement
+	capableDesc := BaseQuantDescriptor{
+		QuantKind:     kindIQ2XXS,
+		QuantName:     "IQ2_XXS",
+		ComputeDtype:  compute.IQ2_XXS,
+		Prefix:        "kquant-raw:",
+		HALSupported:  true,
+		BytesPerBlk:   iq2xxsBlockBytes,
+		WeightsPerBlk: qkK,
+	}
+	RegisterQuantDescriptor(capableDesc)
+	if !SupportsHALKQuant(kindIQ2XXS) {
+		t.Fatalf("SupportsHALKQuant(kindIQ2XXS) must be true after registering descriptor with HALSupported")
+	}
+	vBypass := AdmitIQ2XXSHAL(defaultBE)
+	if vBypass.Admitted {
+		t.Fatalf("AdmitIQ2XXSHAL(defaultBE) must not admit when backend lacks capability even if descriptor has HALSupported")
+	}
+	if vBypass.Refusal == nil || vBypass.Refusal.Reason != IQ2XXSRefusalNoCapability {
+		t.Fatalf("AdmitIQ2XXSHAL(defaultBE) refusal = %v, want %s", vBypass.Refusal, IQ2XXSRefusalNoCapability)
+	}
+
+	// 5. Admission only when a matching backend capability is injected
+	capableBE := &mockIQ2XXSCapableBackend{Backend: compute.Default(), capable: true}
+	vCapable := AdmitIQ2XXSHAL(capableBE)
+	if !vCapable.Admitted {
+		t.Fatalf("AdmitIQ2XXSHAL(capableBE) refused: %v, want admitted", vCapable.Refusal)
+	}
+	if vCapable.Dtype != compute.IQ2_XXS {
+		t.Errorf("vCapable.Dtype = %v, want compute.IQ2_XXS", vCapable.Dtype)
+	}
+	if vCapable.Refusal != nil {
+		t.Errorf("vCapable.Refusal = %v, want nil", vCapable.Refusal)
+	}
+
+	admittedDtype, err := AdmitHALQuant(kindIQ2XXS, capableBE)
+	if err != nil {
+		t.Fatalf("AdmitHALQuant(kindIQ2XXS, capableBE) returned error: %v", err)
+	}
+	if admittedDtype != compute.IQ2_XXS {
+		t.Errorf("admittedDtype = %v, want compute.IQ2_XXS", admittedDtype)
 	}
 }

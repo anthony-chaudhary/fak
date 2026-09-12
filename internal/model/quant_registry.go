@@ -127,7 +127,7 @@ func resetDefaultQuantDescriptors() {
 	}{
 		{kindIQ3XXS, "IQ3_XXS", compute.IQ3_XXS},
 		{kindIQ4XS, "IQ4_XS", 0},
-		{kindIQ2XXS, "IQ2_XXS", 0},
+		{kindIQ2XXS, "IQ2_XXS", compute.IQ2_XXS},
 		{kindIQ2XS, "IQ2_XS", 0},
 		{kindIQ1S, "IQ1_S", 0},
 		{kindIQ2S, "IQ2_S", 0},
@@ -317,6 +317,13 @@ func AdmitHALQuant(kind kQuantKind, be compute.Backend) (compute.Dtype, error) {
 		}
 		return v.Dtype, nil
 	}
+	if kind == kindIQ2XXS {
+		v := AdmitIQ2XXSHAL(be)
+		if !v.Admitted {
+			return v.Dtype, v.Refusal
+		}
+		return v.Dtype, nil
+	}
 	desc, ok := LookupQuantDescriptor(kind)
 	if !ok {
 		return 0, fmt.Errorf("model: quant kind %s not registered", kind)
@@ -416,6 +423,100 @@ func AdmitIQ3SHAL(be compute.Backend) IQ3SHALAdmissionVerdict {
 	}
 
 	return IQ3SHALAdmissionVerdict{
+		Admitted: true,
+		Dtype:    dtype,
+	}
+}
+
+// IQ2XXSCapabilityBackend is the optional capability interface that a device backend
+// implements to declare native execution and staging support for IQ2_XXS weights.
+type IQ2XXSCapabilityBackend interface {
+	SupportsIQ2XXS() bool
+}
+
+// IQ2XXSHALRefusalReason represents a closed-vocabulary failure reason for IQ2_XXS HAL admission.
+type IQ2XXSHALRefusalReason string
+
+const (
+	IQ2XXSRefusalNilBackend       IQ2XXSHALRefusalReason = "NIL_BACKEND"
+	IQ2XXSRefusalNoCapability     IQ2XXSHALRefusalReason = "NO_BACKEND_CAPABILITY"
+	IQ2XXSRefusalCapabilityDenied IQ2XXSHALRefusalReason = "CAPABILITY_DENIED"
+	IQ2XXSRefusalHALNotRegistered IQ2XXSHALRefusalReason = "HAL_NOT_REGISTERED"
+)
+
+// IQ2XXSHALAdmissionRefusal is the typed, fail-closed refusal returned when
+// IQ2_XXS HAL admission cannot be granted.
+type IQ2XXSHALAdmissionRefusal struct {
+	Kind   kQuantKind
+	Dtype  compute.Dtype
+	Reason IQ2XXSHALRefusalReason
+	Detail string
+}
+
+func (e *IQ2XXSHALAdmissionRefusal) Error() string {
+	return fmt.Sprintf("model: IQ2_XXS HAL admission refused (kind=%s, dtype=%s): %s - %s",
+		e.Kind, e.Dtype, e.Reason, e.Detail)
+}
+
+// IQ2XXSHALAdmissionVerdict represents the result of evaluating IQ2_XXS HAL admission.
+type IQ2XXSHALAdmissionVerdict struct {
+	Admitted bool
+	Dtype    compute.Dtype
+	Refusal  *IQ2XXSHALAdmissionRefusal
+}
+
+// AdmitIQ2XXSHAL evaluates the model-to-HAL admission contract for IQ2_XXS weights.
+// By default, execution remains denied until a capable backend (implementing
+// IQ2XXSCapabilityBackend with SupportsIQ2XXS() == true) is provided.
+func AdmitIQ2XXSHAL(be compute.Backend) IQ2XXSHALAdmissionVerdict {
+	desc, ok := LookupQuantDescriptor(kindIQ2XXS)
+	dtype := compute.IQ2_XXS
+	if ok && desc.Dtype() != 0 {
+		dtype = desc.Dtype()
+	}
+
+	if be == nil {
+		return IQ2XXSHALAdmissionVerdict{
+			Admitted: false,
+			Dtype:    dtype,
+			Refusal: &IQ2XXSHALAdmissionRefusal{
+				Kind:   kindIQ2XXS,
+				Dtype:  dtype,
+				Reason: IQ2XXSRefusalNilBackend,
+				Detail: "nil compute backend provided",
+			},
+		}
+	}
+
+	// 1. Check if backend implements explicit capability
+	capable, isCapable := be.(IQ2XXSCapabilityBackend)
+	if !isCapable {
+		return IQ2XXSHALAdmissionVerdict{
+			Admitted: false,
+			Dtype:    dtype,
+			Refusal: &IQ2XXSHALAdmissionRefusal{
+				Kind:   kindIQ2XXS,
+				Dtype:  dtype,
+				Reason: IQ2XXSRefusalNoCapability,
+				Detail: "backend does not implement SupportsIQ2XXS capability",
+			},
+		}
+	}
+
+	if !capable.SupportsIQ2XXS() {
+		return IQ2XXSHALAdmissionVerdict{
+			Admitted: false,
+			Dtype:    dtype,
+			Refusal: &IQ2XXSHALAdmissionRefusal{
+				Kind:   kindIQ2XXS,
+				Dtype:  dtype,
+				Reason: IQ2XXSRefusalCapabilityDenied,
+				Detail: "backend explicitly reported SupportsIQ2XXS() == false",
+			},
+		}
+	}
+
+	return IQ2XXSHALAdmissionVerdict{
 		Admitted: true,
 		Dtype:    dtype,
 	}
