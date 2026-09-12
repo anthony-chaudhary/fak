@@ -355,6 +355,9 @@ type Model struct {
 // exactly once. On a Llama-shaped checkpoint with no aliases and no fused tensor,
 // both steps are no-ops, so this path stays bit-identical for non-Phi models.
 func newModel(cfg Config, man map[string]tensorMeta, raw []byte) (*Model, error) {
+	if err := refuseDeepSeekV41Native(cfg); err != nil {
+		return nil, err
+	}
 	if cfg.IsDeepSeekV4() {
 		if err := AdmitDeepSeekV4Config(cfg); err != nil {
 			return nil, err
@@ -436,6 +439,9 @@ func Load(dir string) (*Model, error) {
 	if err := readJSON(filepath.Join(dir, "config.json"), &cfg); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
+	if err := refuseDeepSeekV41Native(cfg); err != nil {
+		return nil, err
+	}
 	var man map[string]tensorMeta
 	if err := readJSON(filepath.Join(dir, "manifest.json"), &man); err != nil {
 		return nil, fmt.Errorf("manifest: %w", err)
@@ -452,6 +458,9 @@ func Load(dir string) (*Model, error) {
 // NewFromF32Tensors packs decoded source-format tensors into the same little-endian f32
 // raw+manifest layout that Load and LoadSafetensors produce.
 func NewFromF32Tensors(cfg Config, tensors []NamedTensorF32) (*Model, error) {
+	if err := refuseDeepSeekV41Native(cfg); err != nil {
+		return nil, err
+	}
 	man := make(map[string]tensorMeta, len(tensors))
 	var raw []byte
 	off := 0

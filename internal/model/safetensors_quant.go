@@ -90,6 +90,9 @@ func LoadSafetensorsQuant(path string, cfg Config, opts ...LoadOption) (*Model, 
 // V4 lazy-expert path, and ErrV4ConfigAdmission propagates unchanged. Only once the config is
 // admitted are the caller's load options resolved.
 func admitQuantLoad(cfg Config, opts []LoadOption) (loadOptions, error) {
+	if err := refuseDeepSeekV41Native(cfg); err != nil {
+		return loadOptions{}, err
+	}
 	if cfg.IsDeepSeekV4() {
 		if err := AdmitDeepSeekV4Config(cfg); err != nil {
 			return loadOptions{}, err
