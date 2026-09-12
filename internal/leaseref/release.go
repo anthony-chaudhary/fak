@@ -26,7 +26,9 @@ package leaseref
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -37,18 +39,36 @@ import (
 // anonymous) holder refuses STALE_LEASE; a ref that advanced between the read and
 // the CAS delete refuses LEASE_CONTENDED (re-read and retry).
 func (s *Store) ReleaseFenced(ctx context.Context, id, holder string, generation int64, now time.Time) (FenceVerdict, error) {
+	return s.releaseFenced(ctx, "", id, holder, generation, now)
+}
+
+func (s *Store) releaseFenced(ctx context.Context, remote, id, holder string, generation int64, now time.Time) (FenceVerdict, error) {
 	ref, oldOID, hasRef, err := s.resolveLeaseRef(ctx, id)
 	if err != nil {
 		return FenceVerdict{}, err
 	}
 	v := FenceVerdict{Presented: generation}
 	if !hasRef {
+		if remote != "" {
+			if err := s.releaseRemoteRef(ctx, remote, ref, ""); err != nil {
+				if errors.Is(err, errRemoteReleaseContended) {
+					v.Reason = ReasonLeaseContended
+					v.Detail = "remote lease changed; release refused and local lease retained"
+					return v, nil
+				}
+				return v, err
+			}
+		}
 		// Idempotent: the desired post-state (no lease) already holds.
 		v.OK = true
 		v.Detail = "lease " + id + " already absent (released or reaped)"
 		return v, nil
 	}
-	cur, err := s.readRef(ctx, ref)
+	readTarget := ref
+	if remote != "" {
+		readTarget = oldOID
+	}
+	cur, err := s.readRef(ctx, readTarget)
 	if err != nil {
 		return FenceVerdict{}, err
 	}
@@ -68,6 +88,17 @@ func (s *Store) ReleaseFenced(ctx context.Context, id, holder string, generation
 			v.Reason = ReasonStaleLease
 			v.Detail = fmt.Sprintf("lease %s is live at generation %d; presented generation %d is stale — halt and reacquire before releasing", id, cur.Generation, generation)
 			return v, nil
+		}
+	}
+
+	if remote != "" {
+		if err := s.releaseRemoteRef(ctx, remote, ref, oldOID); err != nil {
+			if errors.Is(err, errRemoteReleaseContended) {
+				v.Reason = ReasonLeaseContended
+				v.Detail = "remote lease changed; release refused and local lease retained"
+				return v, nil
+			}
+			return v, err
 		}
 	}
 
@@ -116,4 +147,64 @@ func (s *Store) writeHistoryRecord(ctx context.Context, id string, generation in
 	}
 	_, err := s.putBlobRef(ctx, ref, hr)
 	return err
+}
+
+// ReleaseFencedRemote deletes only the holder-validated remote object before the
+// local CAS deletion. A configured but unavailable remote fails without releasing
+// locally; an unconfigured remote preserves standalone local-only behavior.
+// If history persistence or local CAS fails after remote deletion, the remote
+// remains released and local state is retained; retry rechecks both sides.
+// This is deletion fencing, not distributed acquisition arbitration.
+func (s *Store) ReleaseFencedRemote(ctx context.Context, remote, id, holder string, generation int64, now time.Time) (FenceVerdict, error) {
+	if !validRemote(remote) {
+		return FenceVerdict{}, fmt.Errorf("leaseref: invalid remote %q", remote)
+	}
+	_, code, err := s.run(ctx, s.dir, "remote", "get-url", remote)
+	if err != nil {
+		return FenceVerdict{}, err
+	}
+	if code == 2 {
+		return s.ReleaseFenced(ctx, id, holder, generation, now)
+	}
+	if code != 0 {
+		return FenceVerdict{}, fmt.Errorf("leaseref: remote lookup exited %d", code)
+	}
+	return s.releaseFenced(ctx, remote, id, holder, generation, now)
+}
+
+var errRemoteReleaseContended = errors.New("leaseref: remote lease changed")
+
+func (s *Store) releaseRemoteRef(ctx context.Context, remote, ref, oldOID string) error {
+	out, code, err := s.run(ctx, s.dir, "ls-remote", "--refs", remote, ref)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return fmt.Errorf("leaseref: remote release lookup exited %d; local lease retained", code)
+	}
+	fields := strings.Fields(out)
+	if len(fields) == 0 {
+		return nil
+	}
+	if len(fields) != 2 || fields[0] != oldOID || fields[1] != ref {
+		return errRemoteReleaseContended
+	}
+	// The expected object fences a replacement arriving after ls-remote. Never
+	// use a wildcard, prune, or unconditional force push for a release.
+	_, code, err = s.run(ctx, s.dir, "push", "--force-with-lease="+ref+":"+oldOID, remote, ":"+ref)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		// Distinguish a proven replacement from transport/server failure.
+		current, probeCode, probeErr := s.run(ctx, s.dir, "ls-remote", "--refs", remote, ref)
+		if probeErr == nil && probeCode == 0 {
+			fields := strings.Fields(current)
+			if len(fields) == 2 && fields[1] == ref && fields[0] != oldOID {
+				return errRemoteReleaseContended
+			}
+		}
+		return fmt.Errorf("leaseref: fenced remote release exited %d; local lease retained", code)
+	}
+	return nil
 }

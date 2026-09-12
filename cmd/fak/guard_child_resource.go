@@ -54,6 +54,8 @@ type guardResourcePolicy struct {
 	Stop              <-chan struct{}
 }
 
+type guardSystemMemoryCollector func() (procguard.MemorySnapshot, bool, string)
+
 type guardResourceDecision struct {
 	Stop             bool
 	Reason           string
@@ -264,6 +266,24 @@ func guardResourcePolicyConfigured() guardResourcePolicy {
 		p.ReasoningPosture = normalizeGuardReasoningPosture(posture)
 	}
 	return p
+}
+
+// guardStartChildAfterSystemCommitAdmission applies the runtime guard's exact
+// commit reserve before invoking the child starter. Unsupported platforms
+// abstain; supported telemetry failures refuse because unknown capacity is not
+// evidence that a new child can safely consume the reserve.
+func guardStartChildAfterSystemCommitAdmission(policy guardResourcePolicy, collect guardSystemMemoryCollector, start func() error) (bool, error) {
+	snapshot, supported, detail := collect()
+	if supported {
+		if strings.TrimSpace(detail) != "" {
+			return false, fmt.Errorf("CHILD_RESOURCE_COLLECTOR_FAILURE: system commit headroom inspection failed: %s", scrubGuardResourceDetail(detail))
+		}
+		decision := procguard.EvaluateSystemCommitHeadroom(snapshot, policy.effectiveMinSystemHeadroom())
+		if decision.Refuse {
+			return false, fmt.Errorf("%s: observed %d bytes is at/below required %d bytes", decision.Reason, decision.ObservedBytes, decision.RequiredBytes)
+		}
+	}
+	return true, start()
 }
 
 func guardTreeRSSDefault(hostPhysicalBytes uint64) uint64 {

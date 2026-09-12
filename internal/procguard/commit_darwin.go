@@ -13,6 +13,10 @@ import (
 
 const darwinMemorySnapshotAttempts = 3
 
+func collectSystemMemorySnapshot() (MemorySnapshot, bool, string) {
+	return MemorySnapshot{}, false, "system commit accounting unsupported on this platform"
+}
+
 func collectMemorySnapshot(rootPID int) (MemorySnapshot, bool, string) {
 	snapshot, detail := collectDarwinMemorySnapshotWithCollectors(rootPID, CollectProcesses, CollectRelations, darwinProcessAlive)
 	if rootPID > 0 && snapshot.RootPID == 0 {

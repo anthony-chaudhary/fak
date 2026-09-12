@@ -59,6 +59,22 @@ func TestCollectMemorySnapshotOwnProcessPhysicalMemory(t *testing.T) {
 	}
 }
 
+func TestSystemCommitSnapshotIsSystemOnly(t *testing.T) {
+	s, supported, detail := CollectSystemMemorySnapshot()
+	if !supported || detail != "" {
+		t.Fatalf("supported=%v detail=%q snapshot=%+v", supported, detail, s)
+	}
+	if s.Metric != MemoryMetricCommit || s.SystemLimit == 0 || s.SystemBytes == 0 {
+		t.Fatalf("invalid system commit snapshot: %+v", s)
+	}
+	if s.RootPID != 0 || s.TreeBytes != 0 || len(s.Processes) != 0 {
+		t.Fatalf("system-only snapshot included process-tree accounting: %+v", s)
+	}
+	if s.HostPhysicalBytes == 0 || s.HostPhysicalAvailableBytes > s.HostPhysicalBytes {
+		t.Fatalf("invalid physical-memory context: %+v", s)
+	}
+}
+
 func TestWindowsCommitOwnedPIDsRejectsStalePPIDEdges(t *testing.T) {
 	parentPID := func(pid int) *int { return &pid }
 	rows := []Proc{
