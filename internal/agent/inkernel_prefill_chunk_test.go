@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -197,6 +198,187 @@ func TestInKernelQwenQ4KPrefillChunkReceiptReadback(t *testing.T) {
 	if got := nonTarget.nativeInferencePrefillChunkTokens(); got != 0 {
 		t.Fatalf("non-target receipt prefill_chunk_tokens = %d, want 0 (not applicable)", got)
 	}
+}
+
+type panelCapPrefillBackend struct {
+	compute.Backend
+	bufferBytes int64
+}
+
+func (b panelCapPrefillBackend) MaxWeightBufferBytes() int64 { return b.bufferBytes }
+
+func (panelCapPrefillBackend) Qwen35SequencePrefillPath() string {
+	return compute.Qwen35SequencePrefillPath
+}
+
+func (panelCapPrefillBackend) Qwen35SequenceEmbeddingRowsPath() string {
+	return compute.Qwen35SequenceEmbeddingRowsPath
+}
+
+func (panelCapPrefillBackend) Qwen35SequencePrefill(compute.Qwen35SequencePrefillRequest) (compute.Qwen35SequencePrefillResult, error) {
+	panic("test capability marker must not execute")
+}
+
+func TestQwenPrefillMaxTokenPanelWidthUsesWidestPanel(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  model.Config
+		want int64
+	}{
+		{
+			name: "gdn gate wider than intermediate",
+			cfg: model.Config{
+				HiddenSize: 64, IntermediateSize: 100,
+				NumHeads: 2, NumKVHeads: 1, HeadDim: 8,
+				LinearNumKeyHeads: 3, LinearKeyHeadDim: 20,
+				LinearNumValueHeads: 2, LinearValueHeadDim: 20,
+			},
+			want: 160, // 2*(3*20) + 2*20
+		},
+		{
+			name: "doubled q gate wider than intermediate",
+			cfg: model.Config{
+				HiddenSize: 64, IntermediateSize: 100,
+				NumHeads: 9, NumKVHeads: 1, HeadDim: 8,
+				LinearNumKeyHeads: 1, LinearKeyHeadDim: 8,
+				LinearNumValueHeads: 1, LinearValueHeadDim: 8,
+			},
+			want: 144, // 2*(9*8)
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := qwenPrefillMaxTokenPanelWidth(tt.cfg)
+			if !ok || got != tt.want {
+				t.Fatalf("qwenPrefillMaxTokenPanelWidth() = (%d, %v), want (%d, true)", got, ok, tt.want)
+			}
+		})
+	}
+}
+
+func TestInKernelQwenQ4KPrefillChunkDeviceCap(t *testing.T) {
+	cfg := model.Config{
+		LayerTypes: []string{"linear_attention"},
+		HiddenSize: 64, IntermediateSize: 100,
+		NumHeads: 2, NumKVHeads: 1, HeadDim: 8,
+		LinearNumKeyHeads: 3, LinearKeyHeadDim: 20,
+		LinearNumValueHeads: 2, LinearValueHeadDim: 20,
+	}
+	const widest = int64(160)
+	const rowBytes = widest * 4
+	newPlanner := func(configured int, capBytes int64) *InKernelPlanner {
+		backend := panelCapPrefillBackend{Backend: compute.Default(), bufferBytes: capBytes}
+		return NewInKernelPlannerWithConfig(&model.Model{Cfg: cfg}, nil, "qwen-panel-cap", true, backend, false, InKernelPlannerConfig{QwenQ4KPrefillChunkTokens: configured})
+	}
+
+	t.Run("unset preserves historical default", func(t *testing.T) {
+		p := newPlanner(0, rowBytes*64)
+		if got := p.effectiveQwenQ4KPrefillChunkTokens(); got != inKernelQwenQ4KPrefillChunkTokens {
+			t.Fatalf("effective chunk = %d, want unchanged default %d", got, inKernelQwenQ4KPrefillChunkTokens)
+		}
+	})
+	t.Run("explicit smaller request is unchanged", func(t *testing.T) {
+		p := newPlanner(128, rowBytes*256)
+		if got := p.effectiveQwenQ4KPrefillChunkTokens(); got != 128 {
+			t.Fatalf("effective chunk = %d, want configured 128", got)
+		}
+	})
+	t.Run("explicit large request uses exact device cap", func(t *testing.T) {
+		p := newPlanner(8192, rowBytes*777+rowBytes-1)
+		if got := p.effectiveQwenQ4KPrefillChunkTokens(); got != 777 {
+			t.Fatalf("effective chunk = %d, want floor(buffer/row) 777", got)
+		}
+	})
+	t.Run("device cap below configured minimum is exact", func(t *testing.T) {
+		p := newPlanner(8192, rowBytes*64+rowBytes-1)
+		if got := p.effectiveQwenQ4KPrefillChunkTokens(); got != 64 {
+			t.Fatalf("effective chunk = %d, want floor(buffer/row) 64", got)
+		}
+	})
+}
+
+func TestInKernelQwenQ4KPrefillPanelCannotFitRefusesBeforeTokenization(t *testing.T) {
+	cfg := model.Config{
+		LayerTypes: []string{"linear_attention"},
+		HiddenSize: 64, IntermediateSize: 100,
+		NumHeads: 2, NumKVHeads: 1, HeadDim: 8,
+		LinearNumKeyHeads: 3, LinearKeyHeadDim: 20,
+		LinearNumValueHeads: 2, LinearValueHeadDim: 20,
+	}
+	const rowBytes = int64(160 * 4)
+	backend := panelCapPrefillBackend{Backend: compute.Default(), bufferBytes: rowBytes - 1}
+	p := NewInKernelPlannerWithConfig(&model.Model{Cfg: cfg}, nil, "qwen-panel-refusal", true, backend, false, InKernelPlannerConfig{QwenQ4KPrefillChunkTokens: 8192})
+
+	// The planner deliberately has no tokenizer. Reaching tokenization would panic;
+	// capacity admission must return the typed refusal first.
+	_, err := p.Complete(context.Background(), []Message{{Role: RoleUser, Content: "must not tokenize"}}, nil)
+	var capacityErr *qwenQ4KPrefillPanelCapacityError
+	if !errors.As(err, &capacityErr) {
+		t.Fatalf("Complete error = %T %v, want *qwenQ4KPrefillPanelCapacityError", err, err)
+	}
+	if capacityErr.BufferBytes != rowBytes-1 || capacityErr.RowBytes != rowBytes {
+		t.Fatalf("capacity error = %+v, want buffer=%d row=%d", capacityErr, rowBytes-1, rowBytes)
+	}
+}
+
+func TestQwenPrefillMaxTokenPanelWidthRejectsInvalidDimensions(t *testing.T) {
+	valid := model.Config{
+		LayerTypes: []string{"linear_attention"},
+		HiddenSize: 64, IntermediateSize: 100,
+		NumHeads: 2, NumKVHeads: 1, HeadDim: 8,
+		LinearNumKeyHeads: 3, LinearKeyHeadDim: 20,
+		LinearNumValueHeads: 2, LinearValueHeadDim: 20,
+	}
+	maxInt := int(^uint(0) >> 1)
+	tests := []struct {
+		name       string
+		requires64 bool
+		edit       func(*model.Config)
+	}{
+		{name: "missing hidden", edit: func(cfg *model.Config) { cfg.HiddenSize = 0 }},
+		{name: "negative intermediate", edit: func(cfg *model.Config) { cfg.IntermediateSize = -1 }},
+		{name: "q projection overflow", requires64: true, edit: func(cfg *model.Config) { cfg.NumHeads, cfg.HeadDim = maxInt, 2 }},
+		{name: "gdn composite overflow", requires64: true, edit: func(cfg *model.Config) {
+			cfg.LinearNumKeyHeads, cfg.LinearKeyHeadDim = maxInt, 1
+			cfg.LinearNumValueHeads, cfg.LinearValueHeadDim = 1, 1
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.requires64 && strconv.IntSize != 64 {
+				t.Skip("overflow fixture requires a 64-bit int")
+			}
+			cfg := valid
+			tt.edit(&cfg)
+			if got, ok := qwenPrefillMaxTokenPanelWidth(cfg); ok || got != 0 {
+				t.Fatalf("qwenPrefillMaxTokenPanelWidth() = (%d, %v), want (0, false)", got, ok)
+			}
+			backend := panelCapPrefillBackend{Backend: compute.Default(), bufferBytes: 1 << 20}
+			p := NewInKernelPlannerWithConfig(&model.Model{Cfg: cfg}, nil, "qwen-invalid-panel", true, backend, false, InKernelPlannerConfig{QwenQ4KPrefillChunkTokens: 8192})
+			bounded, capacityErr := p.deviceBoundedQwenQ4KPrefillChunkTokens()
+			if bounded != 0 || capacityErr == nil || capacityErr.Reason != "model panel dimensions are invalid or overflow int64" {
+				t.Fatalf("device bound = (%d, %+v), want typed invalid-dimension refusal", bounded, capacityErr)
+			}
+		})
+	}
+
+	t.Run("float32 row byte overflow", func(t *testing.T) {
+		if strconv.IntSize != 64 {
+			t.Skip("overflow fixture requires a 64-bit int")
+		}
+		cfg := valid
+		cfg.HiddenSize = maxInt / 2
+		widest, ok := qwenPrefillMaxTokenPanelWidth(cfg)
+		if !ok || widest != int64(maxInt/2) {
+			t.Fatalf("panel width = (%d, %v), want (%d, true)", widest, ok, maxInt/2)
+		}
+		backend := panelCapPrefillBackend{Backend: compute.Default(), bufferBytes: 1 << 20}
+		p := NewInKernelPlannerWithConfig(&model.Model{Cfg: cfg}, nil, "qwen-overflow-panel", true, backend, false, InKernelPlannerConfig{QwenQ4KPrefillChunkTokens: 8192})
+		bounded, capacityErr := p.deviceBoundedQwenQ4KPrefillChunkTokens()
+		if bounded != 0 || capacityErr == nil || capacityErr.Reason != "widest float32 token row overflows int64 bytes" {
+			t.Fatalf("device bound = (%d, %+v), want typed float32-row overflow refusal", bounded, capacityErr)
+		}
+	})
 }
 
 func TestInKernelQwenQ4KBoundedPrefillLeavesOtherPathsSingleCall(t *testing.T) {
