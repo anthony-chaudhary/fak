@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/cluster"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
@@ -50,6 +52,8 @@ func cmdCluster(args []string) {
 		os.Exit(2)
 	}
 	switch args[0] {
+	case "info":
+		cmdClusterInfo(args[1:])
 	case "selftest":
 		cmdClusterSelftest(args[1:])
 	case "coordinator":
@@ -68,9 +72,10 @@ func cmdCluster(args []string) {
 func clusterUsage(w *os.File) {
 	fmt.Fprint(w, `usage: fak cluster <subcommand>
 
-Run a real cross-node collective over fak's DistComm process group (host float32).
+Run cross-node collectives and inspect local Thunderbolt 5 / RDMA configuration.
 
 subcommands:
+  info           report local Thunderbolt ports, RDMA status, and bridge conflicts
   selftest       spin the ranks over a loopback socket on this box and assert the
                  result is bit-exact vs the in-process LocalCollective reference
   coordinator    rank 0: listen, accept the workers, run the collective
@@ -91,6 +96,62 @@ worker flags:
   --rank R       this worker's rank in [1,size)
   --timeout DUR  how long to keep retrying the dial (default 30s)
 `)
+}
+
+type clusterInfoReport struct {
+	Schema         string                     `json:"schema"`
+	Source         string                     `json:"source"`
+	ProofScope     string                     `json:"proof_scope"`
+	DiscoveryError string                     `json:"discovery_error,omitempty"`
+	Discovery      *cluster.LocalTB5Discovery `json:"discovery"`
+}
+
+func cmdClusterInfo(args []string) {
+	fs := flag.NewFlagSet("cluster info", flag.ExitOnError)
+	jsonOutput := fs.Bool("json", false, "emit machine-readable JSON")
+	_ = fs.Parse(args)
+
+	discovery, discoveryErr := cluster.DiscoverLocalTB5RDMA()
+	if discovery == nil {
+		fmt.Fprintf(os.Stderr, "fak cluster info: local discovery failed: %v\n", discoveryErr)
+		os.Exit(1)
+	}
+
+	report := clusterInfoReport{
+		Schema:     "fak.cluster-local-discovery/1",
+		Source:     "local_system_discovery",
+		ProofScope: "configuration_only_not_data_transfer_or_working_mesh",
+		Discovery:  discovery,
+	}
+	if discoveryErr != nil {
+		report.DiscoveryError = discoveryErr.Error()
+	}
+	if *jsonOutput {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fmt.Fprintf(os.Stderr, "fak cluster info: encode report: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	fmt.Println("=== Thunderbolt 5 / RDMA Local Discovery ===")
+	fmt.Println("Proof scope: local configuration only; this does not prove data transfer or a working mesh.")
+	fmt.Printf("Thunderbolt 5 ports: %d (all discovered Thunderbolt ports: %d)\n", len(discovery.TB5Ports), len(discovery.Ports))
+	fmt.Printf("RDMA enabled: %t (status: %s)\n", discovery.RDMAEnabled, discovery.RDMAStatus)
+	if discovery.HasBridgeConflict {
+		fmt.Printf("bridge0 conflict: detected (members: %s)\n", strings.Join(discovery.BridgeMembers, ", "))
+	} else {
+		fmt.Println("bridge0 conflict: none detected")
+	}
+	fmt.Printf("Local prerequisites flag: %t\n", discovery.MeshReady)
+	for _, warning := range discovery.Warnings {
+		fmt.Printf("warning: %s\n", warning)
+	}
+	if discoveryErr != nil {
+		fmt.Printf("discovery error: %v\n", discoveryErr)
+	}
 }
 
 // parseVec parses a comma-separated float32 vector. An empty string is the empty
