@@ -50,7 +50,8 @@
       "definition": "internal/agent's StreamingPlanner is the optional interface a Planner advertises (CompleteStream/StreamingSupported) when it can emit completion tokens incrementally.",
       "distinction": "It is a capability interface a planner may also implement, NOT a concrete planner like HTTPPlanner nor the gateway's Anthropic SSE bridge streamAnthropicPlannerLive.",
       "distinct_from": [
-        "HTTPPlanner (agent client)"
+        "HTTPPlanner (agent client)",
+        "gateway-engine-inkernel-token-stream-flag"
       ],
       "aliases": [],
       "grounding": "streamingplanner",

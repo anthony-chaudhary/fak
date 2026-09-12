@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "gateway-engine-inkernel-token-stream-flag",
+      "canonical": "FAK_STREAM_INKERNEL_PER_TOKEN",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Default-off environment switch that makes InKernelPlanner.CompleteStream forward committed token pieces during decode; disabled, the sink receives the completed content in one buffered delta.",
+      "distinction": "This switch selects emission timing for the concrete in-kernel planner; StreamingPlanner is the generic capability interface implemented by multiple planners and does not enable this opt-in policy.",
+      "distinct_from": [
+        "x-plan-streamingplanner"
+      ],
+      "aliases": [],
+      "grounding": "FAK_STREAM_INKERNEL_PER_TOKEN",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

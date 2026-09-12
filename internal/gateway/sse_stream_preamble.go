@@ -4,8 +4,9 @@ package gateway
 // every buffered streaming surface the gateway serves (#5514, generalizing #5399).
 //
 // #5399 fixed the buffered chat stream: a stream:true turn served by a Complete-only
-// planner (agent.InKernelPlanner is not an agent.StreamingPlanner, so streamChatLive
-// declines every in-kernel serve) used to put its FIRST byte — status line, headers,
+// planner (agent.InKernelPlanner now implements agent.StreamingPlanner and takes
+// streamChatLive's live path; streamChatLive still declines every planner that does not)
+// used to put its FIRST byte — status line, headers,
 // opening chunk — on the wire only after completeServed returned the whole turn. For the
 // duration of a sharded multi-rank decode the client could not tell an accepted
 // streaming request from a dead socket; 1120+ seconds on the original 8-rank GLM-5.2 EP

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -37,6 +38,7 @@ func (s *streamProjectionSink) completeFinalize(comp *Completion) {
 // N-token turn must reach the sink as N>=2 fragments, not one post-hoc blob. Fail if a
 // regression collapses the per-token emit seam back into the single-blob projection.
 func TestInKernelPlannerStreamsPerTokenFragments(t *testing.T) {
+	t.Setenv("FAK_STREAM_INKERNEL_PER_TOKEN", "1")
 	m := model.NewSynthetic(tinyConcurrencyConfig())
 	m.Quantize()
 	p := NewInKernelPlanner(m, loadProbeTok(t), "tiny-stream-fragments", false, nil, false)
@@ -61,6 +63,7 @@ func TestInKernelPlannerStreamsPerTokenFragments(t *testing.T) {
 // re-decoded against the same tokenizer — the property the loop's projection needs to
 // replay them as content deltas.
 func TestInKernelPlannerStreamParityConcatenatedDeltasEqualsBufferedText(t *testing.T) {
+	t.Setenv("FAK_STREAM_INKERNEL_PER_TOKEN", "1")
 	m := model.NewSynthetic(tinyConcurrencyConfig())
 	m.Quantize()
 	tok := loadProbeTok(t)
@@ -74,9 +77,11 @@ func TestInKernelPlannerStreamParityConcatenatedDeltasEqualsBufferedText(t *test
 	}
 
 	var raw strings.Builder
+	fragmentCount := 0
 	streamed, err := NewInKernelPlanner(m, tok, "tiny-stream-parity-streamed", false, nil, false).CompleteStream(
 		context.Background(), func(delta string) error {
 			raw.WriteString(delta)
+			fragmentCount++
 			return nil
 		}, messages, nil, WithMaxTokens(8))
 	if err != nil {
@@ -106,13 +111,85 @@ func TestInKernelPlannerStreamParityConcatenatedDeltasEqualsBufferedText(t *test
 	if streamedText == "" && buffered.Message.Content != "" {
 		t.Fatal("a non-empty buffered completion produced an empty raw token stream")
 	}
-	streamedPieces := strings.Split(streamedText, "")
-	_ = streamedPieces
-	// The raw stream cannot equal the whole completion in ONE fragment — that is the
-	// regression this ticket exists to kill. Two planner instances (buffered vs streamed)
-	// split at the same token boundaries, so the streamed turn reaches the sink per token.
-	fragmentCount := len(strings.Split(strings.TrimSuffix(streamedText, ""), ""))
+	if streamedText != buffered.Message.Content {
+		t.Fatalf("streamed bytes %q != buffered content %q", streamedText, buffered.Message.Content)
+	}
 	if buffered.Message.Content != "" && fragmentCount < 2 {
 		t.Fatalf("the streamed raw text was a single %d-char blob, not per-token deltas", len(streamedText))
+	}
+}
+
+// TestInKernelTokenStreamFlagGatesPerToken is the #920 witness for the opt-in gate:
+// FAK_STREAM_INKERNEL_PER_TOKEN=1 forwards the live per-token decode seam (>=2
+// fragments for a multi-token turn), while the default OFF projects the finished turn
+// as AT MOST one post-hoc delta whose bytes equal the returned Completion's Content.
+func TestInKernelTokenStreamFlagGatesPerToken(t *testing.T) {
+	const prompt = "a b c d e"
+
+	t.Run("on-per-token-forwarding", func(t *testing.T) {
+		t.Setenv("FAK_STREAM_INKERNEL_PER_TOKEN", "1")
+		m := model.NewSynthetic(tinyConcurrencyConfig())
+		m.Quantize()
+		p := NewInKernelPlanner(m, loadProbeTok(t), "tiny-token-stream-on", false, nil, false)
+
+		var fragments []string
+		comp, err := p.CompleteStream(context.Background(), func(delta string) error {
+			fragments = append(fragments, delta)
+			return nil
+		}, []Message{{Role: RoleUser, Content: prompt}}, nil, WithMaxTokens(6))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(fragments) < 2 {
+			t.Fatalf("flag ON: %d-token completion produced %d sink fragments, want >=2 (fragments=%q)", comp.Usage.CompletionTokens, len(fragments), fragments)
+		}
+	})
+
+	t.Run("off-one-posthoc-delta", func(t *testing.T) {
+		t.Setenv("FAK_STREAM_INKERNEL_PER_TOKEN", "")
+		m := model.NewSynthetic(tinyConcurrencyConfig())
+		m.Quantize()
+		p := NewInKernelPlanner(m, loadProbeTok(t), "tiny-token-stream-off", false, nil, false)
+
+		var fragments []string
+		comp, err := p.CompleteStream(context.Background(), func(delta string) error {
+			fragments = append(fragments, delta)
+			return nil
+		}, []Message{{Role: RoleUser, Content: prompt}}, nil, WithMaxTokens(6))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(fragments) > 1 {
+			t.Fatalf("flag OFF: sink received %d fragments, want at most 1 (%q)", len(fragments), fragments)
+		}
+		if comp.Message.Content != "" {
+			if len(fragments) != 1 {
+				t.Fatalf("flag OFF: non-empty completion %q produced %d fragments, want exactly 1", comp.Message.Content, len(fragments))
+			}
+			if fragments[0] != comp.Message.Content {
+				t.Fatalf("flag OFF: post-hoc delta %q != Completion content %q", fragments[0], comp.Message.Content)
+			}
+		}
+	})
+}
+
+// Sink failures must be returned unchanged and stop further deliveries in either mode.
+func TestInKernelTokenStreamSinkError(t *testing.T) {
+	for _, flag := range []string{"", "1"} {
+		t.Run("flag="+flag, func(t *testing.T) {
+			t.Setenv("FAK_STREAM_INKERNEL_PER_TOKEN", flag)
+			m := model.NewSynthetic(tinyConcurrencyConfig())
+			m.Quantize()
+			p := NewInKernelPlanner(m, loadProbeTok(t), "tiny-stream-sink-error", false, nil, false)
+			want := errors.New("sink disconnected")
+			calls := 0
+			_, err := p.CompleteStream(context.Background(), func(string) error {
+				calls++
+				return want
+			}, []Message{{Role: RoleUser, Content: "a b c d e"}}, nil, WithMaxTokens(6))
+			if !errors.Is(err, want) || calls != 1 {
+				t.Fatalf("sink error = %v, calls = %d; want %v and one call", err, calls, want)
+			}
+		})
 	}
 }

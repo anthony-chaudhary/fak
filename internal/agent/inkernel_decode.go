@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -1033,6 +1034,18 @@ func inKernelRefeedLastTokenForExactHit(s *model.Session, promptLen int) bool {
 	}
 	removed, err := s.Cache.TryEvict(promptLen-1, 1)
 	return err == nil && removed == 1 && s.Cache.Len() == promptLen-1
+}
+
+// inKernelPerTokenStreamEnabled reports whether CompleteStream forwards each
+// committed token piece to the sink as it decodes (opt-in), or projects the
+// finished turn as one post-hoc delta (the default, byte-identical to trunk).
+func inKernelPerTokenStreamEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_STREAM_INKERNEL_PER_TOKEN"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func envInt(key string, def int) int {
