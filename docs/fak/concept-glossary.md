@@ -531,3 +531,24 @@ refuseContextLength is the native planner helper that compares an exact rendered
 Default-off environment switch that makes InKernelPlanner.CompleteStream forward committed token pieces during decode; disabled, the sink receives the completed content in one buffered delta.
 
 **Distinct from:** This switch selects emission timing for the concrete in-kernel planner; StreamingPlanner is the generic capability interface implemented by multiple planners and does not enable this opt-in policy.
+
+
+### FAK_ABLATE_UNCACHED_TRIM
+
+Environment switch that supplies the default result-elision byte threshold when no positive explicit threshold is configured.
+
+**Distinct from:** FeatureUncachedTrim names the ablation mechanism; this environment variable configures its default threshold and does not prove that a request used it.
+
+
+### FeatureMockPlanner
+
+Serve feature catalog identifier for the deterministic mock-planner configuration and its evaluated enablement state.
+
+**Distinct from:** MockPlanner is the executable offline planner; FeatureMockPlanner is the catalog key describing whether that planner is configured or installed.
+
+
+### strixPreflight
+
+Serve runtime field retaining detected Strix appliance capabilities for gateway configuration and hardware-derived feature provenance.
+
+**Distinct from:** DispatchPreflight admits a worker launch; strixPreflight records serving-host detection and does not grant dispatch or tool-call permission.

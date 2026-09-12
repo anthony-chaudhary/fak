@@ -39,6 +39,7 @@ var specPathFor = map[string]string{
 	"/v1/messages/count_tokens":     "/v1/messages/count_tokens",
 	"/v1beta/":                      "/v1beta/models/{model}:generateContent",
 	"/v1/fak/syscall":               "/v1/fak/syscall",
+	"/v1/fak/features":              "/v1/fak/features",
 	"/v1/fak/adjudicate":            "/v1/fak/adjudicate",
 	"/v1/fak/admit":                 "/v1/fak/admit",
 	"/v1/fak/cache/posture":         "/v1/fak/cache/posture",

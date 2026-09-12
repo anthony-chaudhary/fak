@@ -1,0 +1,60 @@
+{
+  "rows": [
+    {
+      "id": "catalog12581-uncached-trim-env",
+      "canonical": "FAK_ABLATE_UNCACHED_TRIM",
+      "family": "cache",
+      "kind": "config",
+      "definition": "Environment switch that supplies the default result-elision byte threshold when no positive explicit threshold is configured.",
+      "distinction": "FeatureUncachedTrim names the ablation mechanism; this environment variable configures its default threshold and does not prove that a request used it.",
+      "distinct_from": [
+        "cov5304-feature-uncached-trim"
+      ],
+      "aliases": [],
+      "grounding": "FAK_ABLATE_UNCACHED_TRIM",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "catalog12581-mock-planner-feature",
+      "canonical": "FeatureMockPlanner",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Serve feature catalog identifier for the deterministic mock-planner configuration and its evaluated enablement state.",
+      "distinction": "MockPlanner is the executable offline planner; FeatureMockPlanner is the catalog key describing whether that planner is configured or installed.",
+      "distinct_from": [
+        "x-plan-mockplanner"
+      ],
+      "aliases": [],
+      "grounding": "FeatureMockPlanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "catalog12581-strix-preflight",
+      "canonical": "strixPreflight",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Serve runtime field retaining detected Strix appliance capabilities for gateway configuration and hardware-derived feature provenance.",
+      "distinction": "DispatchPreflight admits a worker launch; strixPreflight records serving-host detection and does not grant dispatch or tool-call permission.",
+      "distinct_from": [
+        "x2-policy-capability-dispatchpreflight"
+      ],
+      "aliases": [],
+      "grounding": "strixPreflight",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
