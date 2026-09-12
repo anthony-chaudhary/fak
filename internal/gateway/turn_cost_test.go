@@ -12,6 +12,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/sessionledger"
 	"github.com/anthony-chaudhary/fak/pkg/turncost"
 )
 
@@ -248,10 +249,20 @@ func TestTurnCostReceiptAndCompletionLifecycle(t *testing.T) {
 		t.Fatalf("backend phase attribution: %+v", rec.Phases)
 	}
 	metrics := srv.renderMetrics()
-	for _, want := range []string{`fak_turn_cost_turns_total{surface="buffered"} 1`, `fak_turn_cost_phase_samples_total{surface="buffered",phase="ledger"} 1`} {
-		if !strings.Contains(metrics, want) {
-			t.Fatalf("completion missing %s", want)
-		}
+	const completedTurns = `fak_turn_cost_turns_total{surface="buffered"} 1`
+	if !strings.Contains(metrics, completedTurns) {
+		t.Fatalf("completion missing %s", completedTurns)
+	}
+	ledger, err := sessionledger.OpenDefault()
+	if err != nil {
+		t.Fatalf("open session ledger: %v", err)
+	}
+	chain, err := ledger.Chain("cost-lifecycle")
+	if err != nil {
+		t.Fatalf("read completed turn chain: %v", err)
+	}
+	if len(chain) == 0 || chain[len(chain)-1].Kind != "turn_complete" {
+		t.Fatalf("ledger chain does not end in turn_complete: %+v", chain)
 	}
 }
 

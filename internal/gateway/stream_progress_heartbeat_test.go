@@ -35,12 +35,13 @@ const hbBudget = 4 * time.Second
 // pre-first-token window where the gateway has not yet committed a response and must not
 // write a heartbeat.
 type hbProbePlanner struct {
-	model          string
-	firstFragment  string
-	secondFragment string
-	pause          time.Duration
-	failAfterPause error
-	parkFirst      bool
+	model           string
+	firstFragment   string
+	secondFragment  string
+	pause           time.Duration
+	postCommitPause time.Duration
+	failAfterPause  error
+	parkFirst       bool
 
 	joinedOnce  sync.Once
 	releaseOnce sync.Once
@@ -102,6 +103,15 @@ func (p *hbProbePlanner) CompleteStream(ctx context.Context, sink agent.StreamSi
 		return nil, err
 	}
 	p.joinedOnce.Do(func() { close(p.joined) })
+	if p.parkFirst && p.postCommitPause > 0 {
+		t := time.NewTimer(p.postCommitPause)
+		defer t.Stop()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-t.C:
+		}
+	}
 	if !p.parkFirst {
 		if err := p.park(ctx); err != nil {
 			return nil, err
@@ -271,6 +281,7 @@ func TestStreamChatLiveHeartbeatSilentBeforeFirstToken(t *testing.T) {
 	t.Setenv("FAK_STREAM_HEARTBEAT_S", "1")
 	silent := newHBProbePlanner("test-model", "late ", "tail", 2500*time.Millisecond, nil)
 	silent.parkFirst = true
+	silent.postCommitPause = 1200 * time.Millisecond
 
 	srv := newTestServer(t)
 	srv.planner = silent
@@ -309,7 +320,22 @@ func TestStreamChatLiveHeartbeatSilentBeforeFirstToken(t *testing.T) {
 	if got := opening.Choices[0].Delta.Role; got != agent.RoleAssistant {
 		t.Fatalf("opening delta role = %q, want assistant", got)
 	}
+	var heartbeatDataFrames []string
+	heartbeatLine := waitHeartbeat(t, tap,
+		"no legal heartbeat arrived during the deterministic post-commit pause", &heartbeatDataFrames)
+	heartbeat := decodeHeartbeat(t, heartbeatLine)
+	if heartbeat.Phase != "mid_stream" {
+		t.Fatalf("post-commit heartbeat phase = %q, want mid_stream", heartbeat.Phase)
+	}
+	if heartbeat.BytesEmitted < int64(len("late ")) || heartbeat.EventsEmitted < 1 {
+		t.Fatalf("post-commit heartbeat did not report streamed progress: %+v", heartbeat)
+	}
+	if strings.Contains(heartbeatLine, "late ") {
+		t.Fatal("post-commit heartbeat carried streamed content")
+	}
+
 	rest := tap.drain(t, 15*time.Second)
+	rest = append(heartbeatDataFrames, rest...)
 	var content strings.Builder
 	sawDone := false
 	for _, line := range rest {
@@ -318,7 +344,18 @@ func TestStreamChatLiveHeartbeatSilentBeforeFirstToken(t *testing.T) {
 			continue
 		}
 		if strings.HasPrefix(line, ": fak-heartbeat") {
-			t.Fatalf("heartbeat on the wire after first token on the parkFirst stream: %q", line)
+			hb := decodeHeartbeat(t, line)
+			if hb.Phase != "mid_stream" || hb.BytesEmitted < int64(len("late ")) || hb.EventsEmitted < 1 {
+				t.Fatalf("invalid post-commit heartbeat: %+v", hb)
+			}
+			if strings.Contains(line, "late ") {
+				t.Fatal("post-commit heartbeat carried streamed content")
+			}
+			if hb.ElapsedMS < heartbeat.ElapsedMS || hb.BytesEmitted < heartbeat.BytesEmitted || hb.EventsEmitted < heartbeat.EventsEmitted {
+				t.Fatalf("post-commit heartbeat counters regressed: previous=%+v current=%+v", heartbeat, hb)
+			}
+			heartbeat = hb
+			continue
 		}
 		chunk := decodeSSEChunk(t, line)
 		content.WriteString(chunk.Choices[0].Delta.Content)
