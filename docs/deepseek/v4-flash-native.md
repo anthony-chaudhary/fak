@@ -5,7 +5,7 @@ description: "Evidence-bounded status for native DeepSeek-V4-Flash-0731 support 
 
 # DeepSeek V4 Flash native readiness
 
-**Status on 2026-09-09:** the native Flash component tests and the broader DeepSeek/V4 regression tests pass under [fak issue #12659](https://github.com/anthony-chaudhary/fak/issues/12659). `fak` does not yet provide a verified full-token generation path for DeepSeek-V4-Flash-0731.
+**Status on 2026-09-12:** the native Flash component tests, the broader DeepSeek/V4 regression tests, and the complete `internal/model` package suite pass under [fak issue #12659](https://github.com/anthony-chaudhary/fak/issues/12659) at revision `5fc0aab6fd0fc678b29f3efaf31a50e53d4badb4` (the package gate was independently reproduced at `056f7ded22f24fc0bbdd8a6daa2f40f58568bc2e` and `1e8087f67aec3dfabf97a0a49cf440d7095c6e6e` on the way in). `fak` does not yet provide a verified full-token generation path for DeepSeek-V4-Flash-0731.
 
 ## Pinned public reference
 
@@ -21,7 +21,7 @@ Issue #12659 adds admission tests for the official Flash configuration and rejec
 
 The native routed-expert tests exercise routing, selected-expert tensor reads, dequantization, SwiGLU expert execution, and weighted expert composition with small fixtures. The tests also exercise the real Flash packed dimensions: `w1`/`w3` weights `[2048,2048]` with scales `[2048,128]`, and `w2` weights `[4096,1024]` with scales `[4096,64]`. They pin signed FP4 nibble decoding and the 32-value scale boundary while still using deterministic test bytes.
 
-The full `internal/model` suite remains red from four Qwen35 failures reproduced on the unchanged base commit `2cb0d145dfcf9fadf5b5ad7f29811ed93dada6c5`: CPU continuation produces NaNs, and three batched/chunked linear-attention comparisons differ. The related work is tracked in [#12433](https://github.com/anthony-chaudhary/fak/issues/12433) and [#11987](https://github.com/anthony-chaudhary/fak/issues/11987). The scoped Flash and DeepSeek/V4 tests, plus `go vet ./internal/model`, pass; this is not a claim that the whole package is green.
+**Package gate restored, 2026-09-12:** the previously-red full `internal/model` suite now passes. At base commit `2cb0d145dfcf9fadf5b5ad7f29811ed93dada6c5` four Qwen35 failures were reproduced (CPU continuation produced non-finite logits, and three batched/chunked linear-attention comparisons differed). Those were pre-existing test-fixture defects unrelated to the V4 admission/hash/quant change: the continuation fixture was fixed by `507106d9e` ("test(model): set RoPE theta in Qwen continuation fixture", `Fixes #12433`, `EXEMPT_TEST_ONLY`, production model code unchanged). On source revision `5fc0aab6fd0fc678b29f3efaf31a50e53d4badb4`, `go test ./internal/model -count=1` passes (exit 0, 320.8s) and all four Qwen35 tests pass; the same gate was independently reproduced at `1e8087f67aec3dfabf97a0a49cf440d7095c6e6e` (248.7s) and `056f7ded22f24fc0bbdd8a6daa2f40f58568bc2e` (207.7s); `go vet ./internal/model` also passes. The scoped Flash and DeepSeek/V4 tests remain green. This closes the focused-plus-package regression checkbox for [#12659](https://github.com/anthony-chaudhary/fak/issues/12659); it is still not a claim that the model can generate a token.
 
 Run the focused component tests on Windows with:
 
