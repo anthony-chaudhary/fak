@@ -20,6 +20,62 @@ var _ VulkanQwen35GDNConvTiledChannelTransposer = (*vulkanBackend)(nil)
 
 func (v *vulkanBackend) Qwen35GDNPath() string { return qwen35GDNVulkanPath }
 
+// tryQwen35GDNQ8PanelProjectionsLocked preserves F32 activations while sharing
+// each panel tile across four Q8 weight projections. The caller owns vulkanMu.
+// Unsupported operands leave allocation ownership and device state unchanged.
+func (v *vulkanBackend) tryQwen35GDNQ8PanelProjectionsLocked(
+	x, w0, w1, w2, w3 Tensor,
+) (y0, y1, y2, y3 Tensor, fused bool, err error) {
+	composed := func() (Tensor, Tensor, Tensor, Tensor, bool, error) {
+		v.q8GDNComposedInProjCalls++
+		return Tensor{}, Tensor{}, Tensor{}, Tensor{}, false, nil
+	}
+	if !v.haveQ8 || C.fvk_have_qwen35_gdn_q8_panel() == 0 || x.Dtype != F32 || len(x.Shape) != 2 {
+		return composed()
+	}
+	tokens, hidden := x.Shape[0], x.Shape[1]
+	xb, ok := x.buf.(*vulkanBuf)
+	if !ok || xb == nil || xb.ptr == nil || tokens <= 1 || hidden <= 0 || hidden%32 != 0 ||
+		hidden > math.MaxInt32 || tokens > math.MaxInt32/hidden {
+		return composed()
+	}
+	weights := [...]Tensor{w0, w1, w2, w3}
+	var bufs [4]*vulkanBuf
+	totalOut := 0
+	for i, weight := range weights {
+		buf, ok := weight.buf.(*vulkanBuf)
+		if !ok || buf == nil || buf.ptr == nil || buf.scalePtr == nil || len(buf.q8Chunks) != 0 ||
+			weight.Dtype != Q8_0 || weight.Quant == nil || weight.Quant.Block != 32 ||
+			len(weight.Shape) != 2 || weight.Shape[1] != hidden || weight.Shape[0] <= 0 ||
+			weight.Shape[0] > math.MaxInt32/hidden || weight.Shape[0] > math.MaxInt32/tokens ||
+			weight.Shape[0] > math.MaxInt32-31-totalOut {
+			return composed()
+		}
+		totalOut += weight.Shape[0]
+		bufs[i] = buf
+	}
+	start := len(v.transient)
+	y0, _ = v.devTr([]int{tokens, w0.Shape[0]}, F32)
+	y1, _ = v.devTr([]int{tokens, w1.Shape[0]}, F32)
+	y2, _ = v.devTr([]int{tokens, w2.Shape[0]}, F32)
+	y3, _ = v.devTr([]int{tokens, w3.Shape[0]}, F32)
+	status := int(C.fvk_qwen35_gdn_q8_panel_f32(
+		bufs[0].ptr, bufs[0].scalePtr, bufs[1].ptr, bufs[1].scalePtr,
+		bufs[2].ptr, bufs[2].scalePtr, bufs[3].ptr, bufs[3].scalePtr,
+		xb.ptr, v.vp(y0), v.vp(y1), v.vp(y2), v.vp(y3),
+		C.int(w0.Shape[0]), C.int(w1.Shape[0]), C.int(w2.Shape[0]), C.int(w3.Shape[0]),
+		C.int(hidden), C.int(tokens)))
+	if status != 0 {
+		// Retire pending uses before returning allocations to the pool.
+		C.fvk_batch_flush_status()
+		v.qwen35VulkanSequenceReleaseLocked(start)
+		return Tensor{}, Tensor{}, Tensor{}, Tensor{}, false,
+			fmt.Errorf("compute: Vulkan GDN Q8 panel projection failed closed (code %d)", status)
+	}
+	v.q8GDNFusedInProjCalls++
+	return y0, y1, y2, y3, true, nil
+}
+
 // Qwen35GDNPreprojected runs the causal convolution and recurrent GDN panel on
 // Vulkan-resident tensors. Both auxiliary states are updated in place. When
 // vectorized GDN is disabled (via backend option or FAK_DISABLE_VECTOR_GDN),

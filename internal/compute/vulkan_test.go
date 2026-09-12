@@ -45,6 +45,159 @@ func vk(t *testing.T) *vulkanBackend {
 	return b.(*vulkanBackend)
 }
 
+func TestVulkanQwen38GDNFourProjectionFusionStrix(t *testing.T) {
+	if os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") != "1" {
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, exe, "-test.run=^TestVulkanQwen38GDNFourProjectionFusionStrix$", "-test.v")
+		for _, entry := range os.Environ() {
+			if !strings.HasPrefix(entry, "FAK_VULKAN_DISPATCH_PROFILE=") {
+				cmd.Env = append(cmd.Env, entry)
+			}
+		}
+		cmd.Env = append(cmd.Env, "FAK_VULKAN_DISPATCH_PROFILE=1")
+		out, err := cmd.CombinedOutput()
+		t.Logf("profile subprocess: %s", out)
+		if err != nil {
+			t.Fatalf("profile subprocess: %v", err)
+		}
+		return
+	}
+	v := vk(t)
+	const tokens, hidden = 9, 2080 // Cross both the 8-token tile and 2,048-column decode window.
+	widths := []int{97, 65, 33, 17}
+	xHost := make([]float32, tokens*hidden)
+	for i := range xHost {
+		xHost[i] = float32(math.Sin(float64(i+1)*0.17)) * 0.125
+	}
+	x := v.UploadClass(NewF32(cpu(), []int{tokens, hidden}, xHost), F32, MemoryActivation, "GDN panel witness")
+	t.Cleanup(func() { v.Free(x) })
+	var weights [4]Tensor
+	var decoded [4][]float32
+	for j, width := range widths {
+		values := make([]float32, width*hidden)
+		for i := range values {
+			values[i] = float32(math.Cos(float64(i+13*j)*0.13)) * 0.03125
+		}
+		q := QuantizeQ8(cpu(), []int{width, hidden}, values, 32)
+		codes := q.buf.(HostBuffer).I8()
+		decoded[j] = make([]float32, len(codes))
+		for i, code := range codes {
+			decoded[j][i] = float32(code) * q.Quant.Scale[i/32]
+		}
+		weights[j] = v.UploadClass(q, Q8_0, MemoryWeights, "GDN panel weights")
+		w := weights[j]
+		t.Cleanup(func() { v.Free(w) })
+	}
+	v.VulkanDebugResetDispatchProfile()
+	v.VulkanDebugResetGDNProfile()
+	vulkanMu.Lock()
+	start := len(v.transient)
+	y0, y1, y2, y3, fused, err := v.tryQwen35GDNQ8PanelProjectionsLocked(x, weights[0], weights[1], weights[2], weights[3])
+	allocated := len(v.transient) - start
+	vulkanMu.Unlock()
+	if err != nil || !fused {
+		t.Fatalf("required panel operation unavailable or failed: fused=%v err=%v", fused, err)
+	}
+	got := []Tensor{y0, y1, y2, y3}
+	for _, y := range got {
+		y := y
+		t.Cleanup(func() { v.Free(y) })
+	}
+	if allocated != 4 {
+		t.Fatalf("allocated %d transients, want four independent owners", allocated)
+	}
+	for j, y := range got {
+		ptr := y.buf.(*vulkanBuf).ptr
+		if !slices.Equal(y.Shape, []int{tokens, widths[j]}) || ptr == nil || ptr == x.buf.(*vulkanBuf).ptr {
+			t.Fatalf("projection %d shape/ownership mismatch: %v", j, y.Shape)
+		}
+		for k := 0; k < j; k++ {
+			if ptr == got[k].buf.(*vulkanBuf).ptr {
+				t.Fatalf("projection %d aliases %d", j, k)
+			}
+		}
+		for _, w := range weights {
+			wb := w.buf.(*vulkanBuf)
+			if ptr == wb.ptr || ptr == wb.scalePtr {
+				t.Fatal("projection aliases packed weight storage")
+			}
+		}
+		values := v.Read(y)
+		for row := 0; row < tokens; row++ {
+			for out := 0; out < widths[j]; out++ {
+				var want float64
+				for k := 0; k < hidden; k++ {
+					want += float64(xHost[row*hidden+k]) * float64(decoded[j][out*hidden+k])
+				}
+				value := float64(values[row*widths[j]+out])
+				// Retain the existing GDN projection max-absolute oracle floor.
+				if math.IsNaN(value) || math.IsInf(value, 0) || math.Abs(value-want) > 1e-5 {
+					t.Fatalf("projection %d row %d out %d: got %g want %g (max delta 1e-5)", j, row, out, value, want)
+				}
+			}
+		}
+	}
+	if p := v.VulkanDebugDispatchProfileSnapshot(); p.ComputeDispatches != 1 || p.OtherGDNDispatches != 1 {
+		t.Fatalf("fused dispatch profile: %+v", p)
+	}
+	if f, c := v.VulkanDebugGDNProjectionProfileSnapshot(); f != 1 || c != 0 {
+		t.Fatalf("fused/composed probes %d/%d, want 1/0", f, c)
+	}
+	if !slices.Equal(v.Read(x), xHost) {
+		t.Fatal("projection modified shared input")
+	}
+	v.VulkanDebugResetDispatchProfile()
+	for _, w := range weights {
+		y := v.MatMul(w, x)
+		v.Read(y)
+		v.Free(y)
+	}
+	if p := v.VulkanDebugDispatchProfileSnapshot(); p.ComputeDispatches != 4 {
+		t.Fatalf("composed dispatch profile: %+v", p)
+	}
+	// Invalid operands must leave existing outputs intact without allocation.
+	xOne := x
+	xOne.Shape = []int{1, hidden}
+	badWeight := weights[0]
+	badWeight.Shape = []int{widths[0], hidden - 32}
+	for _, bad := range []struct{ x, w Tensor }{
+		{xOne, weights[0]},
+		{NewF32(cpu(), x.Shape, xHost), weights[0]},
+		{x, badWeight},
+	} {
+		v.VulkanDebugResetDispatchProfile()
+		vulkanMu.Lock()
+		before := len(v.transient)
+		_, _, _, _, accepted, probeErr := v.tryQwen35GDNQ8PanelProjectionsLocked(bad.x, bad.w, weights[1], weights[2], weights[3])
+		after := len(v.transient)
+		vulkanMu.Unlock()
+		if probeErr != nil || accepted || before != after || v.VulkanDebugDispatchProfileSnapshot().ComputeDispatches != 0 {
+			t.Fatal("unsupported panel changed allocation/dispatch state")
+		}
+	}
+	// Releasing one owner cannot invalidate a sibling; recycling retires all
+	// transients while the durable input and packed weights remain valid.
+	sibling := v.Read(y1)
+	v.Free(y0)
+	if !slices.Equal(v.Read(y1), sibling) {
+		t.Fatal("freeing qkv invalidated z")
+	}
+	v.Recycle()
+	for _, y := range got {
+		if y.buf.(*vulkanBuf).ptr != nil {
+			t.Fatal("recycle retained a projection allocation")
+		}
+	}
+	if !slices.Equal(v.Read(x), xHost) {
+		t.Fatal("recycle invalidated durable input")
+	}
+}
+
 func TestVulkanDispatchProfileDisabledIsZero(t *testing.T) {
 	if os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") == "1" {
 		t.Skip("profiling enabled for this process")

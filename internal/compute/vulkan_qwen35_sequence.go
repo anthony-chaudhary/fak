@@ -564,7 +564,19 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 		var branch Tensor
 		if layer.Linear {
 			stage = "gdn-projections"
-			mixed, z, beta, alpha := mul(layer.GDNInQKV, n), mul(layer.GDNInZ, n), mul(layer.GDNInB, n), mul(layer.GDNInA, n)
+			var mixed, z, beta, alpha Tensor
+			fused := false
+			// Keep the F32 panel candidate opt-in until source-bound model and
+			// physical qualification retain it. Decode and other dtypes compose.
+			if os.Getenv("FAK_VULKAN_GDN_Q8_PANEL") == "1" {
+				mixed, z, beta, alpha, fused, err = v.tryQwen35GDNQ8PanelProjectionsLocked(n, layer.GDNInQKV, layer.GDNInZ, layer.GDNInB, layer.GDNInA)
+				if err != nil {
+					return result, qwen35VulkanSequenceError(stage, layerIndex, err.Error())
+				}
+			}
+			if !fused {
+				mixed, z, beta, alpha = mul(layer.GDNInQKV, n), mul(layer.GDNInZ, n), mul(layer.GDNInB, n), mul(layer.GDNInA, n)
+			}
 			if req.CapturePrefixReplay {
 				replayProjections = append(replayProjections, vulkanQwen35ReplayProjection{layer: i, mixed: mixed, z: z, beta: beta, alpha: alpha})
 			}

@@ -1,0 +1,65 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+#extension GL_EXT_shader_8bit_storage : require
+
+// Four Q8_0 weight projections share an F32 activation tile. Unlike the decode
+// kernel, this panel never quantizes activations. Each group owns 8 token rows
+// by 32 rows in the concatenated output space, with separate output buffers.
+layout(local_size_x = 256) in;
+layout(std430, binding = 0) readonly buffer W0q { int8_t W0codes[]; };
+layout(std430, binding = 1) readonly buffer W0s { float W0scale[]; };
+layout(std430, binding = 2) readonly buffer W1q { int8_t W1codes[]; };
+layout(std430, binding = 3) readonly buffer W1s { float W1scale[]; };
+layout(std430, binding = 4) readonly buffer W2q { int8_t W2codes[]; };
+layout(std430, binding = 5) readonly buffer W2s { float W2scale[]; };
+layout(std430, binding = 6) readonly buffer W3q { int8_t W3codes[]; };
+layout(std430, binding = 7) readonly buffer W3s { float W3scale[]; };
+layout(std430, binding = 8) readonly buffer Xb { float X[]; };
+layout(std430, binding = 9) writeonly buffer Y0b { float Y0[]; };
+layout(std430, binding = 10) writeonly buffer Y1b { float Y1[]; };
+layout(std430, binding = 11) writeonly buffer Y2b { float Y2[]; };
+layout(std430, binding = 12) writeonly buffer Y3b { float Y3[]; };
+layout(push_constant) uniform Push { int out0; int out1; int out2; int out3; int inDim; int tokens; } pc;
+
+shared float tileX[8 * 32];
+shared float tileW[32 * 32];
+
+void main() {
+    uint tid = gl_LocalInvocationID.x;
+    uint token = gl_WorkGroupID.y * 8u + tid / 32u;
+    uint outputRow = gl_WorkGroupID.x * 32u + tid % 32u;
+    uint out0 = uint(pc.out0), out1 = uint(pc.out1), out2 = uint(pc.out2);
+    uint totalOut = out0 + out1 + out2 + uint(pc.out3);
+    uint hidden = uint(pc.inDim), blocks = hidden / 32u;
+    float acc = 0.0;
+    for (uint b = 0u; b < blocks; ++b) {
+        tileX[tid] = token < uint(pc.tokens) ? X[token * hidden + b * 32u + tid % 32u] : 0.0;
+        for (uint i = tid; i < 1024u; i += 256u) {
+            uint o = gl_WorkGroupID.x * 32u + i / 32u;
+            uint k = b * 32u + i % 32u;
+            float w = 0.0;
+            if (o < out0) {
+                w = float(W0codes[o * hidden + k]) * W0scale[o * blocks + b];
+            } else if (o < out0 + out1) {
+                o -= out0;
+                w = float(W1codes[o * hidden + k]) * W1scale[o * blocks + b];
+            } else if (o < out0 + out1 + out2) {
+                o -= out0 + out1;
+                w = float(W2codes[o * hidden + k]) * W2scale[o * blocks + b];
+            } else if (o < totalOut) {
+                o -= out0 + out1 + out2;
+                w = float(W3codes[o * hidden + k]) * W3scale[o * blocks + b];
+            }
+            tileW[i] = w;
+        }
+        barrier();
+        for (uint k = 0u; k < 32u; ++k)
+            acc += tileX[(tid / 32u) * 32u + k] * tileW[(tid % 32u) * 32u + k];
+        barrier();
+    }
+    if (token >= uint(pc.tokens) || outputRow >= totalOut) return;
+    if (outputRow < out0) Y0[token * out0 + outputRow] = acc;
+    else if (outputRow < out0 + out1) Y1[token * out1 + outputRow - out0] = acc;
+    else if (outputRow < out0 + out1 + out2) Y2[token * out2 + outputRow - out0 - out1] = acc;
+    else Y3[token * uint(pc.out3) + outputRow - out0 - out1 - out2] = acc;
+}

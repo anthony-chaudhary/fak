@@ -241,7 +241,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q6K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q6K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_QWEN35_GDN_Q8_PANEL, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -267,7 +267,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_ARGMAX: case K_ARGMAX_PAIRS:
         return g_dp.otherArgmax;
     case K_QWEN35_GDN_Q8_IN_PROJ: case K_QWEN35_GDN_CONV: case K_QWEN35_GDN_RECURRENT:
-    case K_QWEN35_GDN_PREFILL_TILED: case K_QWEN35_GDN_PREFILL_NORM:
+    case K_QWEN35_GDN_Q8_PANEL: case K_QWEN35_GDN_PREFILL_TILED: case K_QWEN35_GDN_PREFILL_NORM:
     case K_GLM_KDA_REREAD: case K_GLM_KDA_WAVE32:
         return g_dp.otherGDN;
     case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_COUNT:
@@ -315,6 +315,7 @@ int g_have_q8 = 0;
 // The four-projection GDN specialization is optional even when generic Q8 is
 // available: an absent or rejected pipeline must preserve the composed path.
 int g_have_qwen35_gdn_q8_in_proj = 0;
+int g_have_qwen35_gdn_q8_panel = 0;
 // Fixed-size GLM KDA kernels require an explicitly requested 32-lane subgroup.
 // A local size of 128 alone is not a Wave32 contract: RADV may otherwise choose Wave64.
 int g_have_glm_kda_wave32 = 0;
@@ -1284,6 +1285,7 @@ int fvk_device_identity(char* name, int namelen, uint32_t* vendor_id,
 
 int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_qwen35_gdn_q8_in_proj = 0;
+    g_have_qwen35_gdn_q8_panel = 0;
     g_have_q6k_matmul = 0;
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.pApplicationName = "fak";
@@ -1598,6 +1600,12 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
             13, 5 * sizeof(int)) ? 1 : 0;
     }
 
+    if (g_have_q8 && limits.maxComputeWorkGroupInvocations >= 256 &&
+        limits.maxComputeWorkGroupSize[0] >= 256 && limits.maxComputeSharedMemorySize >= 5120) {
+        g_have_qwen35_gdn_q8_panel = buildKernel(
+            g_kern[K_QWEN35_GDN_Q8_PANEL], P("qwen35_gdn_q8_panel.spv"),
+            13, 6 * sizeof(int)) ? 1 : 0;
+    }
     g_ready = true;
     return 0;
 }
@@ -2045,6 +2053,57 @@ void fvk_q8_matmul3_f32(const void* dW0codes, const void* dW0scale,
     uint32_t totalOut = (uint32_t)(out0 + out1 + out2);
     uint32_t outGroups = (totalOut + 255u) / 256u;
     dispatch(g_kern[K_Q8_MATMUL3], bufs, &pc, sizeof(pc), (uint32_t)P * outGroups);
+}
+
+int fvk_have_qwen35_gdn_q8_panel(void) { return g_have_qwen35_gdn_q8_panel; }
+
+int fvk_qwen35_gdn_q8_panel_f32(
+    const void* dW0codes, const void* dW0scale,
+    const void* dW1codes, const void* dW1scale,
+    const void* dW2codes, const void* dW2scale,
+    const void* dW3codes, const void* dW3scale,
+    const void* dX, void* dY0, void* dY1, void* dY2, void* dY3,
+    int out0, int out1, int out2, int out3, int in, int tokens) {
+    if (!g_ready) return 1;
+    if (!g_have_qwen35_gdn_q8_panel ||
+        g_kern[K_QWEN35_GDN_Q8_PANEL].pipe == VK_NULL_HANDLE) return 3;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (out0 <= 0 || out1 <= 0 || out2 <= 0 || out3 <= 0 || in <= 0 ||
+        (in & 31) != 0 || tokens <= 1) return 2;
+    uint64_t in64 = (uint64_t)in, rows = (uint64_t)tokens;
+    uint64_t blocks = in64 / 32u;
+    uint64_t outs[4] = {(uint64_t)out0, (uint64_t)out1, (uint64_t)out2, (uint64_t)out3};
+    const void* codes[4] = {dW0codes, dW1codes, dW2codes, dW3codes};
+    const void* scales[4] = {dW0scale, dW1scale, dW2scale, dW3scale};
+    void* outputs[4] = {dY0, dY1, dY2, dY3};
+    if (!dX || rows * in64 > INT32_MAX || rows * in64 * sizeof(float) > B(dX)->bytes) return 2;
+    uint64_t totalOut = 0;
+    for (int i = 0; i < 4; ++i) {
+        if (!codes[i] || !scales[i] || !outputs[i] || outs[i] * in64 > INT32_MAX ||
+            outs[i] * rows > INT32_MAX) return 2;
+        if (outs[i] * in64 > B(codes[i])->bytes ||
+            outs[i] * blocks * sizeof(float) > B(scales[i])->bytes ||
+            outs[i] * rows * sizeof(float) > B(outputs[i])->bytes) return 2;
+        if (outputs[i] == dX) return 2;
+        for (int j = 0; j < 4; ++j) {
+            if (outputs[i] == codes[j] || outputs[i] == scales[j] ||
+                (i != j && outputs[i] == outputs[j])) return 2;
+        }
+        totalOut += outs[i];
+    }
+    if (totalOut > INT32_MAX - 31u) return 2;
+    uint64_t groupsX = (totalOut + 31u) / 32u, groupsY = (rows + 7u) / 8u;
+    if (groupsX > g_maxComputeWorkGroupCountX || groupsY > g_gdn_prefill_max_groups_y) return 2;
+    struct { int out0, out1, out2, out3, inDim, tokens; } pc{out0, out1, out2, out3, in, tokens};
+    Buffer* bufs[13] = {
+        B(dW0codes), B(dW0scale), B(dW1codes), B(dW1scale),
+        B(dW2codes), B(dW2scale), B(dW3codes), B(dW3scale),
+        B(dX), B(dY0), B(dY1), B(dY2), B(dY3),
+    };
+    if (!dispatch(g_kern[K_QWEN35_GDN_Q8_PANEL], bufs, &pc, sizeof(pc),
+                  (uint32_t)groupsX, (uint32_t)groupsY))
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    return (int)g_submissionStatus;
 }
 
 int fvk_qwen35_gdn_q8_in_proj_f32(
