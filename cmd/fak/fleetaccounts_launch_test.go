@@ -47,7 +47,7 @@ func TestExecuteFleetLaunchRejectsPromptHookFalseSuccess(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	d := fleetaccounts.LaunchDecision{OK: true, Product: "codex", Argv: []string{"fak", "guarded-codex"}}
-	if code := executeFleetLaunch(d, nil, &stdout, &stderr, []string{"GO_WANT_FLEET_LAUNCH_HELPER=blocked"}); code != 70 {
+	if code := executeFleetLaunch(d, nil, &stdout, &stderr, fleetLaunchTestEnv(t, "GO_WANT_FLEET_LAUNCH_HELPER=blocked")); code != 70 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "PROMPT_HOOK_BLOCK") {
@@ -66,13 +66,21 @@ func TestExecuteFleetLaunchAcceptsCompletedAssistantAndOverlaysAccountHome(t *te
 		OK: true, Product: "codex", Argv: []string{"fak", "guarded-codex"},
 		Env: map[string]string{"CODEX_HOME": "/accounts/two"},
 	}
-	base := []string{"PATH=/bin", "CODEX_HOME=/accounts/one", "GO_WANT_FLEET_LAUNCH_HELPER=success"}
+	base := fleetLaunchTestEnv(t, "PATH=/bin", "CODEX_HOME=/accounts/one", "GO_WANT_FLEET_LAUNCH_HELPER=success")
 	if code := executeFleetLaunch(d, nil, &stdout, &stderr, base); code != 0 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if strings.Count(stdout.String(), `"type":"item.completed"`) != 1 {
 		t.Fatalf("captured event not preserved: %q", stdout.String())
 	}
+}
+
+// fleetLaunchTestEnv keeps child TestMain storage writable without inheriting the
+// developer environment. Explicit launch environments need temp paths on Windows (#12832).
+func fleetLaunchTestEnv(t *testing.T, entries ...string) []string {
+	t.Helper()
+	tempDir := t.TempDir()
+	return append([]string{"TMP=" + tempDir, "TEMP=" + tempDir, "TMPDIR=" + tempDir}, entries...)
 }
 
 func fleetLaunchHelperCommand(_ string, _ ...string) *exec.Cmd {
@@ -122,7 +130,7 @@ func TestExecuteFleetLaunchRecordsGuardedAuthFailure(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	d := fleetaccounts.LaunchDecision{OK: true, Account: ".codex-four", Product: "codex", Argv: []string{"fak"}}
-	env := []string{"GO_WANT_FLEET_LAUNCH_HELPER=auth"}
+	env := fleetLaunchTestEnv(t, "GO_WANT_FLEET_LAUNCH_HELPER=auth")
 	if code := executeFleetLaunch(d, nil, &stdout, &stderr, env); code != 70 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
