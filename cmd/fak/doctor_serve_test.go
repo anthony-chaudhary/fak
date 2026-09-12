@@ -330,9 +330,17 @@ func TestServeReservationsRow(t *testing.T) {
 }
 
 func TestResolveDoctorTargetModelPreflight(t *testing.T) {
+	// Characterize uncached fallback behavior independently of developer model caches.
+	t.Setenv("FAK_MODELS_DIR", t.TempDir())
+	t.Setenv("FAK_MODEL_DIR", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Chdir(t.TempDir())
+	t.Setenv("FAK_Q4K", "1")
 	gib := float64(int64(1) << 30)
 
-	// Test aliases (which may resolve from local cache or fallback)
+	// Test aliases without local cache entries.
 	var f1 serveHostFacts
 	resolveDoctorTargetModel(&f1, "qwen38", "")
 	if f1.ModelName != "qwen38" {
