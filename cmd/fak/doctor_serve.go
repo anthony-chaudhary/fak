@@ -52,23 +52,37 @@ const sevFail = "fail"
 // field is a plain measured fact so the classification stays pure and tests can
 // drive any green/yellow/red combination without real hardware.
 type serveHostFacts struct {
-	Arch          string  `json:"arch"`        // GOARCH: "amd64", "arm64", …
-	ISA           string  `json:"isa"`         // best detected SIMD feature: "amx","avx512","avx2","sse","neon","asimd","scalar",""
-	ModelBytes    int64   `json:"model_bytes"` // resident weight bytes the target model needs (0 = unknown)
-	FreeBytes     int64   `json:"free_bytes"`  // free device/host memory the model would load into
-	MemKnown      bool    `json:"mem_known"`   // whether FreeBytes was actually probeable
-	NUMANodes     int     `json:"numa_nodes"`  // online NUMA node count (0 = topology unreadable)
-	Headroom      float64 `json:"headroom"`    // fit headroom fraction reserved for KV/activations (0..1)
-	TotalBytes    int64   `json:"total_bytes,omitempty"`
-	Pressure      string  `json:"pressure,omitempty"`
-	WiredBytes    int64   `json:"wired_bytes,omitempty"`
-	CompBytes     int64   `json:"compressed_bytes,omitempty"`
-	ReservedBytes int64   `json:"reserved_bytes,omitempty"`
-	ActiveLeases  int     `json:"active_leases,omitempty"`
-	GPULeaseHeld  bool    `json:"gpu_lease_held,omitempty"`
-	GPULeasePath  string  `json:"gpu_lease_path,omitempty"`
-	ModelName     string  `json:"model_name,omitempty"`
-	ModelArm      string  `json:"model_arm,omitempty"`
+	Arch          string             `json:"arch"`        // GOARCH: "amd64", "arm64", …
+	ISA           string             `json:"isa"`         // best detected SIMD feature: "amx","avx512","avx2","sse","neon","asimd","scalar",""
+	ModelBytes    int64              `json:"model_bytes"` // resident weight bytes the target model needs (0 = unknown)
+	FreeBytes     int64              `json:"free_bytes"`  // free device/host memory the model would load into
+	MemKnown      bool               `json:"mem_known"`   // whether FreeBytes was actually probeable
+	NUMANodes     int                `json:"numa_nodes"`  // online NUMA node count (0 = topology unreadable)
+	Headroom      float64            `json:"headroom"`    // fit headroom fraction reserved for KV/activations (0..1)
+	TotalBytes    int64              `json:"total_bytes,omitempty"`
+	Pressure      string             `json:"pressure,omitempty"`
+	WiredBytes    int64              `json:"wired_bytes,omitempty"`
+	CompBytes     int64              `json:"compressed_bytes,omitempty"`
+	ReservedBytes int64              `json:"reserved_bytes,omitempty"`
+	ActiveLeases  int                `json:"active_leases,omitempty"`
+	GPULeaseHeld  bool               `json:"gpu_lease_held,omitempty"`
+	GPULeasePath  string             `json:"gpu_lease_path,omitempty"`
+	ModelName     string             `json:"model_name,omitempty"`
+	ModelArm      string             `json:"model_arm,omitempty"`
+	Vulkan        *vulkanLoaderFacts `json:"vulkan,omitempty"`
+}
+
+// vulkanLoaderFacts carries the cgo-free Vulkan loader probe outcome as a plain
+// injected fact, so the readiness fold stays pure: Applicable is false off
+// Windows (or when the probe is N/A) and the row is omitted entirely; Available
+// is true only when the loader answered with a valid API version; Kind names the
+// typed loader/symbol/call/zero-version/malformed-version failure otherwise.
+type vulkanLoaderFacts struct {
+	Applicable bool   `json:"applicable"`
+	Available  bool   `json:"available"`
+	Version    string `json:"version,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+	Detail     string `json:"detail,omitempty"`
 }
 
 // serveReadinessRow is one row of the serve-readiness table: a named check, its
@@ -317,12 +331,55 @@ func serveNUMARow(f serveHostFacts) serveReadinessRow {
 	return row
 }
 
+// serveVulkanRow classifies the cgo-free Vulkan loader probe. It returns nil when
+// the probe did not apply (non-Windows host, or unprobed), so the readiness table
+// keeps its existing shape there. A loader that answered with a valid API version
+// is green; an absent or broken loader/GPU runtime is a yellow, NOT a red:
+// serving on CPU (or another accelerator) is legitimate, so a missing Vulkan
+// runtime must not mark the host Unready — it only warns the operator that the
+// Vulkan accelerator lane is unavailable.
+func serveVulkanRow(f serveHostFacts) *serveReadinessRow {
+	if f.Vulkan == nil || !f.Vulkan.Applicable {
+		return nil
+	}
+	row := &serveReadinessRow{Check: "gpu-vulkan"}
+	if f.Vulkan.Available {
+		row.Status = sevOK
+		loader := f.Vulkan.Detail
+		if loader == "" {
+			loader = "system"
+		}
+		version := f.Vulkan.Version
+		if version == "" {
+			version = "unknown"
+		}
+		row.Finding = fmt.Sprintf("Vulkan loader %s ready — API %s", loader, version)
+	} else {
+		row.Status = sevWarn
+		kind := f.Vulkan.Kind
+		if kind == "" {
+			kind = "unknown"
+		}
+		detail := f.Vulkan.Detail
+		if detail == "" {
+			detail = "no further detail"
+		}
+		row.Finding = fmt.Sprintf("Vulkan loader unavailable (kind=%s): %s", kind, detail)
+		row.Remediation = "install the Vulkan loader / GPU vendor driver so the Vulkan accelerator lane is usable; on Windows this means vulkan-1.dll from the GPU vendor driver"
+	}
+	row.Tier = serveTierLabel(row.Status)
+	return row
+}
+
 // buildServeReadiness folds the injected host facts into the full readiness table:
 // the rows, the rolled-up worst tier, and the count of non-green rows. Pure
 // — no I/O — so tests assert the whole report directly.
 func buildServeReadiness(f serveHostFacts) serveReadinessReport {
 	rep := serveReadinessReport{Facts: f}
 	rep.Rows = []serveReadinessRow{serveISARow(f)}
+	if vRow := serveVulkanRow(f); vRow != nil {
+		rep.Rows = append(rep.Rows, *vRow)
+	}
 	if pRow := servePressureRow(f); pRow != nil {
 		rep.Rows = append(rep.Rows, *pRow)
 	}
@@ -395,6 +452,8 @@ func probeServeHost(modelBytes int64, headroom float64) serveHostFacts {
 	} else if err == nil {
 		lease.Release()
 	}
+
+	facts.Vulkan = probeVulkanLoaderFacts()
 
 	return facts
 }
