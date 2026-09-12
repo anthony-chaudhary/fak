@@ -127,7 +127,16 @@ func callName(call *ast.CallExpr) string {
 
 // TestNoHardcodedPortBindingsInTests verifies test files across the repo do not bind hardcoded ports.
 func TestNoHardcodedPortBindingsInTests(t *testing.T) {
-	root := repoRoot(t)
+	violations, err := scanTestHygieneTree(repoRoot(t))
+	if err != nil {
+		t.Fatalf("walk repo: %v", err)
+	}
+	for _, v := range violations {
+		t.Errorf("violation: %s", v)
+	}
+}
+
+func scanTestHygieneTree(root string) ([]testHygieneViolation, error) {
 	var violations []testHygieneViolation
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
@@ -136,7 +145,9 @@ func TestNoHardcodedPortBindingsInTests(t *testing.T) {
 		}
 		if info.IsDir() {
 			name := info.Name()
-			if name == ".git" || name == "vendor" || name == "_scratch" || name == "node_modules" {
+			// Operational copies and compiler caches are not repository source.
+			switch name {
+			case ".git", "vendor", "_scratch", "node_modules", ".worktrees", ".fak", ".gocache", ".gotmp":
 				return filepath.SkipDir
 			}
 			return nil
@@ -158,12 +169,52 @@ func TestNoHardcodedPortBindingsInTests(t *testing.T) {
 		return nil
 	})
 
-	if err != nil {
-		t.Fatalf("walk repo: %v", err)
-	}
+	return violations, err
+}
 
+// TestTestHygieneTreePrunesOperationalDirectories preserves source coverage without
+// requiring Git tracking, while excluding copies and caches from the walk.
+func TestTestHygieneTreePrunesOperationalDirectories(t *testing.T) {
+	root := t.TempDir()
+	const source = `package fixture
+import "net"
+func bind() { net.Listen("tcp", ":8080") }
+`
+	paths := []string{
+		"new_test.go",
+		"internal/untracked/new_test.go",
+		"internal/.source/new_test.go",
+		".worktrees/ticket-copy/copied_test.go",
+		".fak/cache/copied_test.go",
+		".gocache/copied_test.go",
+		".gotmp/copied_test.go",
+		"internal/nested/.worktrees/ticket-copy/copied_test.go",
+	}
+	for _, rel := range paths {
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	violations, err := scanTestHygieneTree(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{}
+	for _, rel := range paths[:3] {
+		want[filepath.Join(root, filepath.FromSlash(rel))] = true
+	}
 	for _, v := range violations {
-		t.Errorf("violation: %s", v)
+		if !want[v.File] || v.Kind != "hardcoded-port" {
+			t.Fatalf("unexpected violation: %+v", v)
+		}
+		delete(want, v.File)
+	}
+	if len(want) != 0 {
+		t.Fatalf("source tests were not scanned: %v", want)
 	}
 }
 
