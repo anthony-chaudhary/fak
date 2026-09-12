@@ -103,15 +103,14 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: fak
-          # The CUDA image variant (Dockerfile.cuda, #2661). `cuda-latest` tracks
-          # the newest release; pin `<version>-cuda` for reproducible deploys (see
-          # the kustomization.yaml `images:` example). NOTE: the first versioned
-          # -cuda tag publishes with the first release cut after Dockerfile.cuda
-          # landed (it is not in the v0.37.0 tree); until then build your own:
+          # The CUDA image variant (Dockerfile.cuda, #2661). `cuda-latest` is the
+          # moving tag; versioned -cuda tags are published (e.g. 0.55.0-cuda) —
+          # pin `<version>-cuda` for reproducible deploys (see the
+          # kustomization.yaml `images:` example). The published image compiles
+          # kernels for EVERY arch in internal/compute/cuda_arch.txt (sm_80 A100,
+          # sm_89 Ada/L4, sm_90 H100/H200, sm_100 B200/GB200, sm_120 RTX 50xx)
+          # plus a compute_120 PTX floor. Narrow to one arch with:
           #   docker build -f Dockerfile.cuda --build-arg CUDA_ARCH=sm_90 -t REGISTRY/fak:cuda .
-          # The published image compiles kernels for ONE arch (default sm_89,
-          # Ada/L4) — match your rented card (sm_80 A100, sm_90 H100/H200,
-          # sm_100 B200) or build your own.
           image: ghcr.io/anthony-chaudhary/fak:cuda-latest
           args:
             - serve

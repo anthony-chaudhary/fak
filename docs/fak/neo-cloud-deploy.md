@@ -47,13 +47,17 @@ No upstream provider, so no provider key and no `--base-url`. This needs the GPU
 image, built from [`Dockerfile.cuda`](https://github.com/anthony-chaudhary/fak/blob/main/Dockerfile.cuda)
 (the default `Dockerfile` stays the lean, GPU-free static image for Shape 2).
 
-> **Image status (read this first).** The versioned `-cuda` image is **not yet published**
-> — the first `<version>-cuda` tag publishes with the first release cut after
-> `Dockerfile.cuda` landed (via `.github/workflows/release-cuda-container.yml`). Until
-> then, **build your own**. The plain build takes no arch flag and covers every
-> supported card:
+> **Image status (read this first).** The versioned `-cuda` image **is published**
+> now — `0.55.0-cuda` is live on ghcr, and every release cut onwards publishes a
+> matching `<version>-cuda` tag via `.github/workflows/release-cuda-container.yml`.
+> **Pull `ghcr.io/anthony-chaudhary/fak:cuda-latest`** for the moving tag, or pin
+> `ghcr.io/anthony-chaudhary/fak:0.55.0-cuda` when you need a fixed version. You can
+> still **build your own** (air-gapped cluster, private mirror, or a narrowed arch) —
+> the plain build takes no arch flag and covers every supported card:
 >
 > ```bash
+> docker pull ghcr.io/anthony-chaudhary/fak:cuda-latest
+> # …or build locally:
 > docker build -f Dockerfile.cuda -t REGISTRY/fak:cuda .
 > ```
 >
@@ -89,8 +93,8 @@ The overlay ([`deploy/k8s/overlays/gpu/`](https://github.com/anthony-chaudhary/f
 documented in [`deploy/k8s/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/deploy/k8s/README.md))
 assumes two prerequisites `fak` does **not** install: the NVIDIA device plugin (or GPU
 Operator) is already on the cluster, and a `.gguf` is loaded onto the `fak-weights`
-claim at `/weights/model.gguf`. Pin `<version>-cuda` in its `kustomization.yaml`
-`images:` block once a versioned tag exists.
+claim at `/weights/model.gguf`. Pin `<version>-cuda` (e.g. `0.55.0-cuda`) in its
+`kustomization.yaml` `images:` block, or track `cuda-latest` for the moving tag.
 
 ### Shape 2 — proxy in front of a co-located model server
 
@@ -182,13 +186,15 @@ today versus what still needs a live run.
   image, and the GPU overlay (#2662) applies as a self-contained k8s stack. Both are in
   the tree and their recipes above are copied from the manifests, not invented.
 - **Not yet witnessed end-to-end.** No per-provider "fak decoding on a rented GPU on
-  provider X" run is captured here yet, and the versioned `-cuda` image is not yet
-  published. Treat every provider recipe as a **dogfood path**: run it, and report the
-  result back so the row can earn promotion evidence.
-- **Promotion evidence (what moves this toward gen/now):** a published `<version>-cuda`
-  tag from `release-cuda-container.yml`, plus at least one witnessed end-to-end run per
-  provider (a gateway answering an adjudicated request from a `.gguf` on that provider's
-  GPU). Demotion/retirement evidence: if the neo-cloud in-kernel path is superseded by
+  provider X" run is captured here yet. The versioned `-cuda` image itself **is**
+  published (`0.55.0-cuda`, plus `cuda-latest`). Treat every provider recipe as a
+  **dogfood path**: run it, and report the result back so the row can earn promotion
+  evidence.
+- **Promotion evidence (what moves this toward gen/now):** a witnessed end-to-end run
+  per provider (a gateway answering an adjudicated request from a `.gguf` on that
+  provider's GPU). The published `<version>-cuda` tag requirement is now met by
+  `release-cuda-container.yml` (witnessed by its post-push ghcr manifest check).
+  Demotion/retirement evidence: if the neo-cloud in-kernel path is superseded by
   the binding-layer control plane in the
   [reference architecture](https://github.com/anthony-chaudhary/fak/blob/main/docs/vendor/neo-cloud-reference-architecture.md), this quickstart
   folds into that page instead of standing alone.

@@ -117,13 +117,14 @@ curl -s http://127.0.0.1:8080/healthz   # 200 only AFTER the model is loaded
 
 **Image tag.** The manifest pulls `ghcr.io/anthony-chaudhary/fak:cuda-latest` — the
 CUDA variant built from [`Dockerfile.cuda`](../../Dockerfile.cuda) (#2661) that the
-release workflow publishes as `<version>-cuda` + `cuda-latest`. Pin the versioned tag
-(the `images:` example in the overlay's kustomization) for reproducible deploys. Two
-caveats: the first versioned `-cuda` tag ships with the first release cut **after**
-`Dockerfile.cuda` landed (it is not in the v0.37.0 tree) — until then build and push
-your own; and the published image compiles kernels for **one** compute capability
-(default `sm_89`, Ada/L4) — for A100 (`sm_80`), H100/H200 (`sm_90`), or B200
-(`sm_100`), build with `--build-arg CUDA_ARCH=...`.
+release workflow publishes as `<version>-cuda` + `cuda-latest`. Versioned `-cuda`
+tags are published (e.g. `0.55.0-cuda`); `cuda-latest` is the moving tag. Pin
+`<version>-cuda` (the `images:` example in the overlay's kustomization) for
+reproducible deploys. The published image compiles kernels for **every** arch in
+[`internal/compute/cuda_arch.txt`](../../internal/compute/cuda_arch.txt) — `sm_80`
+(A100), `sm_89` (Ada/L4), `sm_90` (H100/H200), `sm_100` (B200/GB200), `sm_120`
+(RTX 50xx) — plus a `compute_120` PTX floor. Passing `--build-arg CUDA_ARCH=sm_90`
+narrows the build to that one arch.
 
 **Probes.** `/healthz` still drives liveness **and** readiness — it answers 200 only
 once the model is loaded. The overlay raises `initialDelaySeconds` (600 s liveness,

@@ -2,16 +2,22 @@
 #
 # Companion to release-container.yml (which always publishes the lean distroless static
 # image on a v* tag — that stays the default `:latest` and is untouched by this file). This
-# workflow additionally publishes a CUDA-capable image built from Dockerfile.cuda when that
-# file exists in the tagged tree (see #2661/#2684). Until the CUDA Dockerfile lands, this
-# workflow is inert: the `check` job looks for Dockerfile.cuda and the `cuda-image` job is
-# gated on it being present, so ordinary releases — and this workflow's own introduction —
-# publish nothing extra and cannot fail on a missing Dockerfile.
+# workflow additionally publishes a CUDA-capable image built from Dockerfile.cuda. It fires
+# on a v* tag, on a weekly schedule (so a stale `-cuda` image is refreshed off the tag
+# cadence), and on workflow_dispatch for a manual rebuild of any existing tag.
+# Dockerfile.cuda is present in-tree, so the `cuda-image` job runs; the `check` gate that
+# looks for it remains so a tree without that file publishes nothing extra instead of
+# failing on its absence.
 name: release-cuda-container
 
 on:
   push:
     tags: ["v*"]
+  # Weekly off-peak rebuild so a stale `-cuda` image (e.g. after a CUDA base bump
+  # that only touched Dockerfile.cuda) is refreshed without waiting for a release.
+  # Distinctive minute (repo convention uses varied minutes like "47 9 * * 1").
+  schedule:
+    - cron: "23 7 * * 1"
   workflow_dispatch:
     inputs:
       tag:
@@ -23,7 +29,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-cuda-container-${{ github.ref_name }}
+  # Key on the tag being (re)built, not on github.ref_name: a manual dispatch and the
+  # weekly schedule both report the DEFAULT BRANCH as ref_name ("main"), so keying on
+  # ref_name would serialize an old-tag rebuild behind the weekly job for no reason.
+  # Mirrors release-artifacts.yml / release-macos.yml.
+  group: release-cuda-container-${{ github.event.inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -32,10 +42,57 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       exists: ${{ steps.check.outputs.exists }}
+      ref: ${{ steps.resolve.outputs.ref }}
+      version: ${{ steps.resolve.outputs.version }}
     steps:
+      # Resolve the tag to build BEFORE checkout, so every event shape (tag push,
+      # manual dispatch, weekly schedule) feeds one canonical `ref` forward:
+      #   • push of v*      -> the pushed tag (github.ref_name)
+      #   • workflow_dispatch -> the required `tag` input
+      #   • schedule        -> github.ref_name is the DEFAULT BRANCH (e.g. "main"),
+      #     not a tag, so discover the newest released v* tag instead. Fail loud
+      #     if none can be resolved rather than building a garbage version.
+      - name: Resolve tag to (re)build
+        id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="$INPUT_TAG"
+          elif [ "$EVENT_NAME" = "schedule" ]; then
+            TAG=""
+          else
+            TAG="$REF_NAME"
+          fi
+          if [ -z "$TAG" ]; then
+            # Schedule path: discover the newest released v* tag. This step runs before
+            # checkout, so query the remote's tag refs directly with git ls-remote (the
+            # ubuntu runner has git). Anonymous ls-remote is sufficient because this
+            # repository is public; a private mirror would need an auth header here.
+            TAG="$(git ls-remote --tags --refs "https://github.com/${{ github.repository }}.git" 'v*' \
+              | awk -F/ '{print $NF}' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | sort -V | tail -1 || true)"
+          fi
+          if [ -z "$TAG" ]; then
+            echo "::error::could not resolve a vX.Y.Z tag to (re)build (event=$EVENT_NAME)"; exit 1
+          fi
+          # Every event shape (not just the schedule auto-discovery above) must feed a
+          # canonical vX.Y.Z tag forward. A dispatch of a bare branch name (e.g. "main")
+          # would otherwise publish a meaningless `main-cuda` tag, so validate here too.
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::refusing to build a non-vX.Y.Z tag: '$TAG' (event=$EVENT_NAME)"; exit 1
+          fi
+          VERSION="${TAG#v}"
+          echo "ref=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "resolved ref=${TAG} version=${VERSION}"
+
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ steps.resolve.outputs.ref }}
 
       - name: Dockerfile.cuda presence
         id: check
@@ -61,15 +118,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ needs.check.outputs.ref }}
           fetch-depth: 0
 
       - name: Resolve version + lowercase image ref
         id: meta
         run: |
           set -euo pipefail
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          VERSION="${TAG#v}"
+          VERSION="${{ needs.check.outputs.version }}"
           # ghcr image paths must be lowercase; the owner login may carry uppercase.
           OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
           IMAGE="ghcr.io/${OWNER}/fak"
@@ -103,25 +159,56 @@ jobs:
             org.opencontainers.image.version=${{ steps.meta.outputs.version }}
             io.modelcontextprotocol.server.name=io.github.anthony-chaudhary/fak
 
-      - name: Smoke — fak version inside the CUDA image
+      - name: Verify the published versioned tag is fetchable from ghcr
         run: |
           set -euo pipefail
           IMAGE="${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}-cuda"
+          # Post-push witness: the versioned `-cuda` tag must actually be pullable.
+          # `docker manifest inspect` reads the registry, not the local daemon, and
+          # fails loud when the tag is absent — the issue's own acceptance check.
+          if ! docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "::error::published CUDA tag is not fetchable from ghcr: $IMAGE"; exit 1
+          fi
+          echo "ok: $IMAGE is fetchable from ghcr"
+
+      - name: Smoke — fak version inside the CUDA image
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          IMAGE: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}-cuda
+        run: |
+          set -euo pipefail
           got="$(docker run --rm "$IMAGE" version 2>/dev/null | head -1 || true)"
           echo "container fak version -> ${got}"
           case "$got" in
-            *"${{ steps.meta.outputs.version }}"*) echo "ok: CUDA image reports ${{ steps.meta.outputs.version }}" ;;
-            *) echo "::error::CUDA image fak version mismatch: got '$got', want '${{ steps.meta.outputs.version }}'"; exit 1 ;;
+            *"$VERSION"*) echo "ok: CUDA image reports $VERSION" ;;
+            *) echo "::error::CUDA image fak version mismatch: got '$got', want '$VERSION'"; exit 1 ;;
           esac
-          # Backend registry probe INSIDE the container: `fak backends --json` must
-          # be a non-empty JSON array containing `cuda` — a CUDA-tagged image that
-          # ships no cuda backend is not the asset it claims to be. Minimal
-          # addition only: this workflow currently fails for unrelated upstream
-          # reasons (see the check/exists gate above); this asserts the registry,
-          # it does not attempt a broader workflow repair.
-          blj="$(docker run --rm "$IMAGE" backends --json 2>/dev/null || true)"
-          echo "container fak backends --json -> ${blj}"
-          if ! echo "$blj" | python3 -c 'import json,sys; a=json.load(sys.stdin); sys.exit(0 if isinstance(a,list) and a and "cuda" in a else 1)' 2>/dev/null; then
-            echo "::error::CUDA image 'fak backends --json' is not a non-empty JSON array containing cuda: '$blj'"; exit 1
+
+      # In-image CUDA assertion. This runs on a GPU-LESS ubuntu-latest runner, so it
+      # must NOT probe device reachability: internal/compute/cuda.go's init() only
+      # registers the "cuda" backend after fcuda_init() finds a live device
+      # (cuda_kernels.cu returns early when cudaGetDeviceCount()==0). Asserting
+      # `fak backends --json` contains cuda here would fail on EVERY run. Instead we
+      # prove the two GPU-independent facts that make the asset what it claims to be:
+      #   1. the binary was COMPILED with the `cuda` build tag (runtime-capabilities
+      #      reports build_tags from debug.ReadBuildInfo — no device needed); and
+      #   2. the shipped binary is dynamically LINKED against the CUDA runtime
+      #      (libcudart ships in the `-runtime` base image; libcuda.so, the driver,
+      #      is intentionally injected only at `docker run --gpus`).
+      # What this cannot prove without a GPU: that kernels execute — that is the
+      # `--gpus all` device lane (tools/cuda_acceptance.sh, windows-cuda.yml).
+      - name: Assert CUDA build path is in the published image
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}-cuda
+        run: |
+          set -euo pipefail
+          caps="$(docker run --rm --entrypoint fak "$IMAGE" runtime-capabilities 2>/dev/null || true)"
+          echo "container fak runtime-capabilities -> ${caps}"
+          if ! echo "$caps" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if "cuda" in (d.get("build_tags") or []) else 1)' 2>/dev/null; then
+            echo "::error::CUDA image binary lacks the 'cuda' build tag: '$caps'"; exit 1
           fi
-          echo "ok: CUDA image reports a live backend registry including cuda"
+          echo "ok: CUDA image binary was compiled with the cuda build tag"
+          if ! docker run --rm --entrypoint sh "$IMAGE" -c 'ldd /usr/local/bin/fak 2>/dev/null | grep -q libcudart'; then
+            echo "::error::CUDA image fak is not linked against libcudart — the cuda runtime linkage is missing"; exit 1
+          fi
+          echo "ok: CUDA image fak is dynamically linked against libcudart"

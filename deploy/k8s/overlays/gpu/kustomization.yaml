@@ -17,8 +17,8 @@ resources:
   - fak-gpu.yaml
 
 # fak-gpu.yaml defaults to the moving `cuda-latest` tag. Pin the versioned -cuda
-# tag (published by .github/workflows/release-cuda-container.yml on each release
-# cut after Dockerfile.cuda landed) for reproducible deploys:
+# tag (published by .github/workflows/release-cuda-container.yml on every release
+# cut — e.g. 0.55.0-cuda) for reproducible deploys:
 #   images:
 #     - name: ghcr.io/anthony-chaudhary/fak
 #       newTag: "<version>-cuda"

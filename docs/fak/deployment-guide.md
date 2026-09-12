@@ -245,13 +245,13 @@ instead — a CUDA-runtime variant of the same two-stage build, published alongs
 the default image as the `-cuda` tag:
 
 ```bash
-# Pull — a `-cuda` tag only exists for versions whose release published it; check
-# https://github.com/anthony-chaudhary/fak/pkgs/container/fak/versions
-# (currently only 0.55.0-cuda — prefer `cuda-latest` unless you need the pinned one):
+# Pull — a `-cuda` tag is published for each release cut since Dockerfile.cuda landed
+# (check https://github.com/anthony-chaudhary/fak/pkgs/container/fak/versions; e.g.
+# 0.55.0-cuda is live). Prefer `cuda-latest` for the moving tag, or pin `<version>-cuda`:
 docker pull ghcr.io/anthony-chaudhary/fak:cuda-latest
 
 # Or build locally, picking the arch that matches the rented card
-# (sm_80 A100, sm_89 Ada/L4 default, sm_90 H100/H200, sm_100 B200/GB200):
+# (sm_80 A100, sm_89 Ada/L4, sm_90 H100/H200, sm_100 B200/GB200, sm_120 RTX 50xx):
 docker build -f Dockerfile.cuda --build-arg CUDA_ARCH=sm_90 -t fak:cuda .
 
 # Run with the NVIDIA Container Toolkit (--gpus requires it on the host):
@@ -262,11 +262,15 @@ docker run --rm --gpus all -p 8080:8080 \
   --engine inkernel --backend cuda
 ```
 
-This image does **not** support sm_120 (RTX 50-series / consumer Blackwell) —
-`internal/compute` has no sm_120 kernel variant yet, so rent a datacenter card
-(A100/L4/H100/H200/B200/GB200). Model coverage in-kernel is exactly what
+The image **does** compile `sm_120` (RTX 50-series / consumer Blackwell) —
+`internal/compute/cuda_arch.txt` lists it alongside `sm_80/sm_89/sm_90/sm_100`, and the
+builder emits a cubin for every arch in that file (plus a `compute_120` PTX floor). What
+is *not* guaranteed is the GPU box's runtime: the host NVIDIA driver and Container Toolkit
+must be new enough to load a `sm_120` cubin, and in-kernel model coverage is exactly what
 [`internal/compute`](https://github.com/anthony-chaudhary/fak/tree/main/internal/compute)
-already proves — this image ships the runtime, not new kernel coverage.
+already proves — this image ships the runtime, not new kernel coverage. If a `sm_120` pod
+won't decode, check driver/Toolkit version and card support before assuming the image
+lacks the arch.
 
 ---
 

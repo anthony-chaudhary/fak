@@ -1,1 +1,1 @@
-/goal use sub agents. Complete this issue anthony-chaudhary/fak#12759 in the public repo at C:\work\fak (work only there). use sub agents.
+/goal use sub agents. Complete this issue 12792. use sub agents.

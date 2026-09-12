@@ -11,9 +11,10 @@
 #       serve --addr 0.0.0.0:8080 --gguf /models/model.gguf \
 #       --engine inkernel --backend cuda
 #
-# Compute-capability floor: the builder compiles internal/compute's CUDA kernels
-# for ONE arch via --build-arg CUDA_ARCH (default sm_89). The authoritative set
-# is internal/compute/cuda_arch.txt and this image validates the argument against it:
+# Compute-capability floor: with --build-arg CUDA_ARCH unset the builder compiles
+# internal/compute's CUDA kernels for EVERY arch in the authoritative
+# internal/compute/cuda_arch.txt (plus a compute_<last> PTX floor); passing
+# CUDA_ARCH narrows the build to that one arch, validated against that file:
 #   docker build -f Dockerfile.cuda --build-arg CUDA_ARCH=sm_120 -t fak:cuda .
 #
 # CUDA 12.8 is pinned to match the toolchain internal/compute/setup_cuda_wsl.sh
