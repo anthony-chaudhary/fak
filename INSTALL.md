@@ -30,9 +30,12 @@ build Vulkan from source for older distributions.
 CPU reference archives remain available for `linux/amd64`, `linux/arm64`,
 `darwin/amd64`, `darwin/arm64`, and `windows/amd64`.
 
-These GPU-first archive changes take effect in a release carrying those assets;
-historical v0.54.0 has neither GPU archive. Until such a release is available,
-build the selected backend from source or explicitly request a CPU reference.
+The Metal archive is available on v0.54.0, backfilled from the exact tagged
+source; this adds an asset to the existing release, not a new version. This
+backfill is SHA-256-verified and ad-hoc-signed; it has no SLSA attestation or
+Apple notarization. Its checksum verifies download integrity, not source provenance.
+Vulkan publication remains pending its release and hardware gate. For Vulkan until then,
+build from source or explicitly request a CPU reference.
 A packaged backend still needs qualification on the actual model and GPU.
 
 ---
@@ -76,14 +79,14 @@ Knobs (environment variables):
 
 | Variable | Effect | Default |
 | --- | --- | --- |
-| `FAK_VERSION` | Pin a version, e.g. `0.55.0` | latest release |
+| `FAK_VERSION` | Pin a version, e.g. `0.54.0` for Metal | latest release |
 | `FAK_INSTALL_DIR` | Install target directory | `/usr/local/bin` if writable, else `~/.local/bin` |
 | `FAK_REPO` | `owner/repo` override | `anthony-chaudhary/fak` |
 
-Example — pin a version into a user-local dir:
+Example — install the available v0.54.0 Metal build on Apple Silicon into a user-local dir:
 
 ```sh
-FAK_VERSION=RELEASE_WITH_GPU_ASSETS FAK_INSTALL_DIR="$HOME/.local/bin" \
+FAK_VERSION=0.54.0 FAK_INSTALL_DIR="$HOME/.local/bin" \
   sh -c 'curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh'
 ```
 

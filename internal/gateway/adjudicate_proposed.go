@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -71,6 +72,12 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 	for _, tc := range calls {
 		tool := tc.Function.Name
 		argsDigest := guardrsi.ArgsDigest(tc.Function.Arguments)
+		if strings.EqualFold(tool, "read") && conflictingReadPathArguments(tc.Function.Arguments) {
+			dropped++
+			adjs = append(adjs, ToolAdjudication{ToolCallID: tc.ID, Tool: tool, ArgsDigest: argsDigest, Admitted: false,
+				Verdict: WireVerdict{Kind: "DENY", Reason: "MALFORMED", Disposition: "RETRYABLE"}})
+			continue
+		}
 		// Responses consumes gateway-owned restores as structured model input.
 		// Client-owned restores retain their call ID and ordinary MCP execution;
 		// converting either kind into assistant prose would terminate the task.
@@ -514,6 +521,12 @@ func (s *Server) adjudicateProposed(ctx context.Context, calls []agent.ToolCall,
 		tool := tc.Function.Name
 		s.observePrunedToolProposal(reqTrace, tool)
 		argsDigest := guardrsi.ArgsDigest(tc.Function.Arguments)
+		if strings.EqualFold(tool, "read") && conflictingReadPathArguments(tc.Function.Arguments) {
+			dropped++
+			adjs = append(adjs, ToolAdjudication{ToolCallID: tc.ID, Tool: tool, ArgsDigest: argsDigest, Admitted: false,
+				Verdict: WireVerdict{Kind: "DENY", Reason: "MALFORMED", Disposition: "RETRYABLE"}})
+			continue
+		}
 		seq := s.nextOriginSeq()
 		wv, repaired, aerr := s.adjudicateWithSeq(ctx, tool, tc.Function.Arguments, false, "", reqTrace, seq)
 		if aerr != nil {
@@ -536,7 +549,7 @@ func (s *Server) adjudicateProposed(ctx context.Context, calls []agent.ToolCall,
 				// execution stays in the client and retains its original tool name,
 				// so restore its path spelling without undoing repaired values.
 				if wv.By == "monitor/read_to_fak_read" && strings.EqualFold(tool, "read") {
-					repaired = clientReadArguments(tc.Function.Arguments, repaired)
+					repaired = clientReadArguments(ctx, tool, tc.Function.Arguments, repaired)
 				}
 				tc.Function.Arguments = repaired
 				adj.RepairedArguments = json.RawMessage(repaired)
@@ -558,9 +571,36 @@ func (s *Server) adjudicateProposed(ctx context.Context, calls []agent.ToolCall,
 	return kept, adjs, dropped
 }
 
-func clientReadArguments(original, repaired string) string {
+type clientToolSchemasContextKey struct{}
+
+func withClientToolSchemas(ctx context.Context, tools []agent.ToolDef) context.Context {
+	if len(tools) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, clientToolSchemasContextKey{}, tools)
+}
+
+func clientReadArguments(ctx context.Context, tool, original, repaired string) string {
 	var before, after map[string]json.RawMessage
 	if json.Unmarshal([]byte(original), &before) != nil || json.Unmarshal([]byte(repaired), &after) != nil || after == nil {
+		return repaired
+	}
+	if conflictingReadPathArguments(original) {
+		return repaired
+	}
+	if alias, bound, ambiguous := advertisedReadPathArgument(ctx, tool); bound {
+		if ambiguous || alias == "file_path" {
+			return repaired
+		}
+		value, present := after["file_path"]
+		if !present {
+			return repaired
+		}
+		after[alias] = value
+		delete(after, "file_path")
+		if encoded, err := json.Marshal(after); err == nil {
+			return string(encoded)
+		}
 		return repaired
 	}
 	if _, canonical := before["file_path"]; canonical {
@@ -580,6 +620,63 @@ func clientReadArguments(original, repaired string) string {
 		break
 	}
 	return repaired
+}
+
+func advertisedReadPathArgument(ctx context.Context, tool string) (alias string, bound, ambiguous bool) {
+	tools, _ := ctx.Value(clientToolSchemasContextKey{}).([]agent.ToolDef)
+	for _, def := range tools {
+		if !strings.EqualFold(def.Function.Name, tool) {
+			continue
+		}
+		bound = true
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if json.Unmarshal(def.Function.Parameters, &schema) != nil {
+			return "", true, true
+		}
+		declared := ""
+		for _, candidate := range []string{"file_path", "filePath", "path"} {
+			if _, ok := schema.Properties[candidate]; !ok {
+				continue
+			}
+			if declared != "" && declared != candidate {
+				return "", true, true
+			}
+			declared = candidate
+		}
+		if declared == "" || (alias != "" && alias != declared) {
+			return "", true, true
+		}
+		alias = declared
+	}
+	if bound && alias == "" {
+		ambiguous = true
+	}
+	return alias, bound, ambiguous
+}
+
+func conflictingReadPathArguments(raw string) bool {
+	var args map[string]json.RawMessage
+	if json.Unmarshal([]byte(raw), &args) != nil {
+		return false
+	}
+	var first json.RawMessage
+	for _, key := range []string{"file_path", "filePath", "path"} {
+		value, ok := args[key]
+		if !ok {
+			continue
+		}
+		if first == nil {
+			first = value
+			continue
+		}
+		var a, b any
+		if json.Unmarshal(first, &a) != nil || json.Unmarshal(value, &b) != nil || !reflect.DeepEqual(a, b) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) adjudicateProposedTurn(ctx context.Context, asst agent.Message, reqTrace string) (kept []agent.ToolCall, adjs []ToolAdjudication, dropped int, servedText string, servedHits int, bodyRefused bool) {

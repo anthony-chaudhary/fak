@@ -68,3 +68,25 @@ def test_default_build_is_fatbin_with_highest_arch_ptx_floor():
     assert 'code=compute_${cc}' in docker
     assert highest == "120"
     assert 'ARCH="${FAK_CUDA_ARCH:-}"' in build
+
+
+# The dry-run gate runs this file as a bare script (`python3 tools/…`), not under
+# pytest; without a self-runner that invocation is a vacuous green (zero tests run),
+# so a perversion of any contract above would gate nothing (#12488).
+def _run_all() -> int:
+    fns = [v for k, v in sorted(globals().items())
+           if k.startswith("test_") and callable(v)]
+    failed = 0
+    for fn in fns:
+        try:
+            fn()
+            print(f"ok   {fn.__name__}")
+        except AssertionError as exc:
+            failed += 1
+            print(f"FAIL {fn.__name__}: {exc}")
+    print(f"\n{len(fns) - failed}/{len(fns)} passed")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_run_all())
