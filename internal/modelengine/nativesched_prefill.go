@@ -4,8 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"sync"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelperfobs"
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
@@ -55,6 +58,8 @@ type nativeSchedulerEvent struct {
 	ChunkStart int
 	ChunkLen   int
 	Token      int
+	// ModelExecutionWall includes host work and device synchronization.
+	ModelExecutionWall time.Duration
 }
 
 // PrefixTree abstracts prefix residency queries for NativeScheduler.
@@ -532,6 +537,17 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 	}
 
 	start := ln.promptCursor
+	// Reject static configuration before detaching a session or doing model work.
+	var wallCeiling time.Duration
+	if raw := os.Getenv("FAK_QWEN_PREFILL_WALL_CEILING_MS"); raw != "" {
+		ceilingMs, err := strconv.Atoi(raw)
+		if err != nil || ceilingMs <= 0 || ceilingMs > int(compute.DefaultMaxExecutionCeilingMs) {
+			ln.finish(nil, fmt.Errorf("FAK_QWEN_PREFILL_WALL_CEILING_MS must be in [1, %d]", int(compute.DefaultMaxExecutionCeilingMs)))
+			s.mu.Unlock()
+			return
+		}
+		wallCeiling = time.Duration(ceilingMs) * time.Millisecond
+	}
 	if start < 0 || start >= len(ln.prompt) || ln.prefillChunkTokens < nativeQwenPrefillMinChunkTokens {
 		ln.finish(nil, errNativeSchedulerLaneNotDecodeReady)
 		s.mu.Unlock()
@@ -562,7 +578,8 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 	} else {
 		sess.PrefillNoLogits(chunk)
 	}
-	s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhasePrefill, s.now().Sub(prefillStarted))
+	prefillWall := s.now().Sub(prefillStarted)
+	s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhasePrefill, prefillWall)
 
 	s.mu.Lock()
 	if !s.livePrefillLaneLocked(ln) || !ln.restoreSessionFromModelLocked(sess) {
@@ -587,6 +604,18 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 	// promptLen doubles as the existing preemption accountant's live token count.
 	// It reaches the full input length only as chunks become resident in KV.
 	ln.promptLen = end
+	// Contract the existing budget only; admission and decode interleaving stay
+	// under their existing scheduler policy. Wall timing grants no GPU claim.
+	if wallCeiling > 0 {
+		nextTokens, pacingErr := compute.BoundModelPrefillChunk(max(len(chunk), nativeQwenPrefillMinChunkTokens), nativeQwenPrefillMinChunkTokens, compute.ModelPrefillWallFeedback{Duration: prefillWall, Ceiling: wallCeiling})
+		if pacingErr != nil {
+			ln.finish(nil, pacingErr)
+			s.mu.Unlock()
+			s.observeEvent(nativeSchedulerEvent{Iteration: iteration, Kind: nativeSchedulerEventPrefill, Lane: ln, State: schedLanePrefilling, ChunkStart: start, ChunkLen: len(chunk), ModelExecutionWall: prefillWall})
+			return
+		}
+		ln.prefillChunkTokens = min(ln.prefillChunkTokens, nextTokens)
+	}
 	if final {
 		ln.logits = logits
 		ln.state = schedLaneDecode
@@ -595,12 +624,13 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 	s.mu.Unlock()
 
 	s.observeEvent(nativeSchedulerEvent{
-		Iteration:  iteration,
-		Kind:       nativeSchedulerEventPrefill,
-		Lane:       ln,
-		State:      schedLanePrefilling,
-		ChunkStart: start,
-		ChunkLen:   len(chunk),
+		Iteration:          iteration,
+		Kind:               nativeSchedulerEventPrefill,
+		Lane:               ln,
+		State:              schedLanePrefilling,
+		ChunkStart:         start,
+		ChunkLen:           len(chunk),
+		ModelExecutionWall: prefillWall,
 	})
 
 	// A test observer or Close may cancel immediately after the chunk publication.

@@ -5,7 +5,96 @@ import (
 	"errors"
 	"math"
 	"testing"
+	"time"
 )
+
+// Synthetic executor feedback proves the controller contract, not physical
+// throughput or the promotion gate in #12397.
+func TestPhysicalFeedbackPrefillChunkController(t *testing.T) {
+	s, err := NewDeepContextPrefillScheduler(ProfileSingleSequenceDeepContext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, initial := range []int{256, 512, 1024} {
+		s.profile.DefaultChunkTokens = initial
+		for _, prompt := range []int{1000, 5000, 8000, 10000, 25000, 32000} {
+			completed, previous, calls := 0, initial, 0
+			receipt, err := s.ExecuteWithPhysicalFeedback(context.Background(), prompt,
+				func(ctx context.Context, c PrefillChunk) (PhysicalPrefillFeedback, error) {
+					if c.StartToken != completed || c.Index != calls || c.TokenCount <= 0 || c.TokenCount > s.profile.MaxChunkTokens {
+						t.Fatalf("invalid partition: %+v after %d", c, completed)
+					}
+					if calls > 0 && c.TokenCount > previous+max(1, previous/4) {
+						t.Fatal("unbounded growth")
+					}
+					completed += c.TokenCount
+					previous = c.TokenCount
+					calls++
+					return PhysicalPrefillFeedback{GPUDuration: 100 * time.Millisecond, MemoryKnown: true, MemoryHeadroomBytes: 1 << 30, IncrementalBytesPerToken: 1024}, nil
+				}, nil, nil)
+			if err != nil || !receipt.CompletedClean || completed != prompt || receipt.ChunksExecuted != calls {
+				t.Fatalf("execute: %+v, %v", receipt, err)
+			}
+		}
+	}
+	s.profile.DefaultChunkTokens = 1024
+	unknownMemory, err := s.physicalFeedbackChunk(1024, 8000, 1, 1024, PhysicalPrefillFeedback{GPUDuration: 1500 * time.Millisecond})
+	if err != nil || unknownMemory.TokenCount != 682 {
+		t.Fatalf("timing-only contraction: %+v %v", unknownMemory, err)
+	}
+	for _, tc := range []struct {
+		duration time.Duration
+		headroom uint64
+		want     int
+	}{
+		{100 * time.Millisecond, 1 << 30, 1280},
+		{1500 * time.Millisecond, 1 << 30, 682},
+		{100 * time.Millisecond, 300 * 1024, 300},
+	} {
+		c, err := s.physicalFeedbackChunk(1024, 8000, 1, 1024, PhysicalPrefillFeedback{GPUDuration: tc.duration, MemoryKnown: true, MemoryHeadroomBytes: tc.headroom, IncrementalBytesPerToken: 1024})
+		if err != nil || c.TokenCount != tc.want {
+			t.Fatalf("duration=%s memory=%d: tokens=%d want=%d err=%v", tc.duration, tc.headroom, c.TokenCount, tc.want, err)
+		}
+	}
+	baseline, err := s.PlanSchedule(8000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	receipt, err := s.ExecuteWithPhysicalFeedback(context.Background(), 8000, func(_ context.Context, c PrefillChunk) (PhysicalPrefillFeedback, error) {
+		if c != baseline.Chunks[calls] {
+			t.Fatal("missing feedback changed deterministic plan")
+		}
+		calls++
+		return PhysicalPrefillFeedback{}, nil
+	}, nil, nil)
+	if err != nil || !receipt.CompletedClean {
+		t.Fatalf("fallback: %+v %v", receipt, err)
+	}
+	for _, duration := range []time.Duration{100 * time.Millisecond, 3 * time.Second} {
+		calls = 0
+		receipt, err = s.ExecuteWithPhysicalFeedback(context.Background(), 8000, func(_ context.Context, c PrefillChunk) (PhysicalPrefillFeedback, error) {
+			calls++
+			return PhysicalPrefillFeedback{GPUDuration: duration, MemoryKnown: true, MemoryHeadroomBytes: 0, IncrementalBytesPerToken: 1024}, nil
+		}, nil, nil)
+		if err == nil || receipt.CompletedClean || calls != 1 {
+			t.Fatalf("unsafe feedback continued: %+v %v calls=%d", receipt, err, calls)
+		}
+		want := ErrPhysicalPrefillMemoryHeadroom
+		if duration == 3*time.Second {
+			want = ErrWatchdogSafetyViolation
+		}
+		if !errors.Is(err, want) || receipt.ChunksExecuted != 1 || receipt.CompletedTokens != 1024 {
+			t.Fatalf("accounting or typed error: %+v %v", receipt, err)
+		}
+	}
+	receipt, err = s.ExecuteWithPhysicalFeedback(context.Background(), 1000, func(context.Context, PrefillChunk) (PhysicalPrefillFeedback, error) {
+		return PhysicalPrefillFeedback{GPUDuration: 3 * time.Second}, nil
+	}, nil, nil)
+	if !errors.Is(err, ErrWatchdogSafetyViolation) || receipt.CompletedClean || receipt.ChunksExecuted != 1 || receipt.CompletedTokens != 1000 {
+		t.Fatalf("final completed breach: %+v %v", receipt, err)
+	}
+}
 
 // TestWatchdogPrefillScheduler runs the comprehensive test suite for Issue #11904:
 // watchdog-paced chunked prefill submission scheduler for deep context on AMD APUs.

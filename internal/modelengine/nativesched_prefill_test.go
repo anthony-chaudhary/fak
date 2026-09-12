@@ -15,6 +15,80 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
 
+// Runs the resident model path with a deterministic clock to verify pacing;
+// this CPU fixture is not a physical GPU throughput witness.
+func TestNativeSchedulerModelWallPrefillFeedback(t *testing.T) {
+	t.Setenv("FAK_QWEN_PREFILL_WALL_CEILING_MS", "1000")
+	m := nativeSchedulerPrefillModel(t)
+	s := newNativeScheduler(m, nativeSchedulerPrefillPrepare(map[string][]int{"long": nativeSchedulerQwenPrompt(128)}))
+	if err := s.SetQwenPrefillMaxTokensPerIteration(64); err != nil {
+		t.Fatal(err)
+	}
+	nativeSchedulerBeginManualDrain(t, s)
+	defer nativeSchedulerEndManualDrain(s)
+	ln := nativeSchedulerAdmitLane(t, s, "long")
+	now := time.Unix(1, 0)
+	s.now = func() time.Time { now = now.Add(800 * time.Millisecond); return now }
+	nativeSchedulerDriveIteration(t, s)
+	if ln.promptCursor != 64 || ln.prefillChunkTokens != 40 {
+		t.Fatalf("cursor=%d next=%d, want64/40", ln.promptCursor, ln.prefillChunkTokens)
+	}
+	nativeSchedulerDriveIteration(t, s)
+	if ln.promptCursor != 104 || ln.prefillChunkTokens != 25 {
+		t.Fatalf("cursor=%d next=%d, want104/25", ln.promptCursor, ln.prefillChunkTokens)
+	}
+	nativeSchedulerDriveIteration(t, s)
+	if ln.promptCursor != 128 || ln.state != schedLaneDecode {
+		t.Fatalf("final cursor=%d state=%v", ln.promptCursor, ln.state)
+	}
+	for _, tc := range []struct {
+		name, ceiling                     string
+		elapsed                           time.Duration
+		wantCursor, wantCalls, wantBudget int
+	}{
+		{"invalid", "invalid", 800 * time.Millisecond, 0, 0, 64},
+		{"disabled", "", 1500 * time.Millisecond, 64, 1, 64},
+		{"breach", "1000", 1500 * time.Millisecond, 64, 1, 64},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("FAK_QWEN_PREFILL_WALL_CEILING_MS", tc.ceiling)
+			s := newNativeScheduler(m, nativeSchedulerPrefillPrepare(map[string][]int{"long": nativeSchedulerQwenPrompt(128)}))
+			if err := s.SetQwenPrefillMaxTokensPerIteration(64); err != nil {
+				t.Fatal(err)
+			}
+			nativeSchedulerBeginManualDrain(t, s)
+			defer nativeSchedulerEndManualDrain(s)
+			ln := nativeSchedulerAdmitLane(t, s, "long")
+			now := time.Unix(1, 0)
+			s.now = func() time.Time { now = now.Add(tc.elapsed); return now }
+			calls, observed := 0, 0
+			s.beforeModelExecute = func(k nativeSchedulerEventKind, _ *schedLane) {
+				if k == nativeSchedulerEventPrefill {
+					calls++
+				}
+			}
+			s.observeNativeEvent = func(e nativeSchedulerEvent) {
+				if e.Kind == nativeSchedulerEventPrefill {
+					observed++
+					if e.ModelExecutionWall != tc.elapsed {
+						t.Fatal("wrong duration attribution")
+					}
+				}
+			}
+			nativeSchedulerDriveIteration(t, s)
+			if ln.promptCursor != tc.wantCursor || calls != tc.wantCalls || observed != tc.wantCalls || ln.prefillChunkTokens != tc.wantBudget {
+				t.Fatalf("cursor=%d calls=%d observed=%d budget=%d", ln.promptCursor, calls, observed, ln.prefillChunkTokens)
+			}
+			if tc.name == "breach" {
+				nativeSchedulerDriveIteration(t, s)
+				if calls != 1 {
+					t.Fatal("executed after breach")
+				}
+			}
+		})
+	}
+}
+
 func TestNativeSchedulerInterleavesBoundedQwenPrefill(t *testing.T) {
 	const budget = nativeQwenPrefillMinChunkTokens
 	shortPrompt := nativeSchedulerQwenPrompt(budget)

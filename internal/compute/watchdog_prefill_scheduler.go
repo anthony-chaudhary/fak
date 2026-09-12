@@ -90,6 +90,13 @@ var (
 
 	// ErrVulkanDecodeQueueFull indicates bounded decode-ready admission backpressure.
 	ErrVulkanDecodeQueueFull = errors.New("watchdog: Vulkan decode-priority queue full")
+
+	// ErrPhysicalPrefillMemoryHeadroom indicates an observed budget cannot hold
+	// the next minimum-size chunk. The executor must not be called again.
+	ErrPhysicalPrefillMemoryHeadroom = errors.New("watchdog: insufficient physical prefill memory headroom")
+
+	// ErrInvalidPhysicalPrefillFeedback indicates malformed device telemetry.
+	ErrInvalidPhysicalPrefillFeedback = errors.New("watchdog: invalid physical prefill feedback")
 )
 
 // VulkanDecodeQueueFullError reports the exact bounded-queue state at rejection.
@@ -678,6 +685,136 @@ type InterChunkHook func(ctx context.Context, chunk PrefillChunk, report Progres
 // ChunkExecutor executes a single prefill chunk command buffer on hardware or simulator.
 type ChunkExecutor func(ctx context.Context, chunk PrefillChunk) error
 
+// PhysicalPrefillFeedback describes the just-completed, synchronized GPU chunk.
+// GPUDuration must exclude host queueing, progress hooks and decode work. Zero
+// duration means unavailable. MemoryHeadroomBytes is allocatable headroom after
+// completion, net of the caller's reserve; IncrementalBytesPerToken is a
+// conservative bound for additional residency/scratch at the next context depth.
+// MemoryKnown distinguishes an exhausted budget from missing instrumentation.
+type PhysicalPrefillFeedback struct {
+	GPUDuration              time.Duration
+	MemoryKnown              bool
+	MemoryHeadroomBytes      uint64
+	IncrementalBytesPerToken uint64
+}
+
+// PhysicalPrefillExecutor returns only after the chunk's GPU fence completes.
+// The caller owns timing/memory instrumentation; wall-clock timing of an async
+// enqueue is not a valid sample. Execution errors are never retried as fallback.
+type PhysicalPrefillExecutor func(context.Context, PrefillChunk) (PhysicalPrefillFeedback, error)
+
+// ModelPrefillWallFeedback measures synchronous model execution, including CPU
+// work and device synchronization. It is not a GPU timestamp or qualification.
+type ModelPrefillWallFeedback struct {
+	Duration time.Duration
+	Ceiling  time.Duration
+}
+
+// BoundModelPrefillChunk contracts the next chunk from measured model wall time.
+// Without a device memory sample it cannot grow beyond the previous chunk. The
+// caller retains its configured admission ceiling and owns minimum-size legality.
+func BoundModelPrefillChunk(previous, minimum int, sample ModelPrefillWallFeedback) (int, error) {
+	if previous < minimum || minimum <= 0 || sample.Duration < 0 || sample.Ceiling <= 0 || sample.Ceiling > time.Duration(DefaultMaxExecutionCeilingMs)*time.Millisecond {
+		return 0, ErrInvalidPhysicalPrefillFeedback
+	}
+	if sample.Duration > sample.Ceiling {
+		return 0, fmt.Errorf("%w: model execution wall duration %s exceeds %s", ErrWatchdogSafetyViolation, sample.Duration, sample.Ceiling)
+	}
+	if sample.Duration == 0 {
+		return previous, nil
+	}
+	tokens := prefillDurationTokenTarget(previous, previous, float64(sample.Ceiling)/2, float64(sample.Duration))
+	return max(minimum, tokens), nil
+}
+
+func prefillDurationTokenTarget(previous, maximum int, target, measured float64) int {
+	return int(math.Min(float64(maximum), float64(previous)*(target/measured)))
+}
+
+// ExecuteWithPhysicalFeedback opts into bounded, per-execution adaptation. It
+// leaves the default planner unchanged and preserves decode-priority boundaries.
+// Missing telemetry uses deterministic analytical pacing. A measured ceiling
+// breach stops subsequent submissions; it cannot undo an already-running chunk.
+// Physical qualification is required before a serving caller enables this path.
+func (s *WatchdogPrefillScheduler) ExecuteWithPhysicalFeedback(ctx context.Context, promptTokens int, executor PhysicalPrefillExecutor, hook InterChunkHook, queue *VulkanDecodePriorityQueue) (*ExecutionReceipt, error) {
+	if math.IsNaN(s.profile.MaxExecutionCeilingMs) || math.IsInf(s.profile.MaxExecutionCeilingMs, 0) {
+		return nil, ErrInvalidChunkingProfile
+	}
+	if executor == nil {
+		return nil, errors.New("physical prefill executor is required")
+	}
+	plan, err := s.PlanSchedule(promptTokens)
+	if err != nil {
+		return nil, err
+	}
+	var sample PhysicalPrefillFeedback
+	previousTokens := 0
+	next := func(start, index int) (PrefillChunk, error) {
+		return s.physicalFeedbackChunk(start, promptTokens-start, index, previousTokens, sample)
+	}
+	run := func(ctx context.Context, c PrefillChunk) error {
+		var err error
+		sample, err = executor(ctx, c)
+		previousTokens = c.TokenCount
+		return err
+	}
+	after := func(PrefillChunk) error {
+		// Check even the final sample: clean completion must not hide a breach.
+		if sample.GPUDuration < 0 || (sample.MemoryKnown && sample.IncrementalBytesPerToken == 0) {
+			return ErrInvalidPhysicalPrefillFeedback
+		}
+		if float64(sample.GPUDuration)/float64(time.Millisecond) > s.profile.MaxExecutionCeilingMs {
+			return fmt.Errorf("%w: measured GPU duration %s exceeds %.2f ms", ErrWatchdogSafetyViolation, sample.GPUDuration, s.profile.MaxExecutionCeilingMs)
+		}
+		return nil
+	}
+	return s.executePrefill(ctx, plan, run, hook, queue, next, after)
+}
+
+func (s *WatchdogPrefillScheduler) physicalFeedbackChunk(start, remaining, index, previousTokens int, sample PhysicalPrefillFeedback) (PrefillChunk, error) {
+	p := s.profile
+	tokens := p.DefaultChunkTokens
+	// Aim below the ceiling, with at most 25% exploration per completed chunk.
+	// Invalid/missing measurements never increase the analytical default.
+	if previousTokens > 0 && sample.GPUDuration > 0 {
+		measuredMs := float64(sample.GPUDuration) / float64(time.Millisecond)
+		growthLimit := previousTokens + max(1, previousTokens/4)
+		// Clamp before converting to int, including durations near one nanosecond.
+		tokens = prefillDurationTokenTarget(previousTokens, min(growthLimit, p.MaxChunkTokens), p.MaxExecutionCeilingMs*0.5, measuredMs)
+		if !sample.MemoryKnown || sample.IncrementalBytesPerToken == 0 {
+			// Timing alone can justify contraction, never exploration growth.
+			tokens = min(tokens, previousTokens, p.DefaultChunkTokens)
+		}
+	}
+	tokens = min(remaining, p.MaxChunkTokens, max(p.MinChunkTokens, tokens))
+	if sample.MemoryKnown {
+		if sample.IncrementalBytesPerToken == 0 {
+			return PrefillChunk{}, ErrInvalidPhysicalPrefillFeedback
+		}
+		limit := sample.MemoryHeadroomBytes / sample.IncrementalBytesPerToken
+		if limit < uint64(min(p.MinChunkTokens, remaining)) {
+			return PrefillChunk{}, ErrPhysicalPrefillMemoryHeadroom
+		}
+		if limit < uint64(tokens) {
+			tokens = int(limit)
+		}
+	}
+	if p.EnableAdaptivePacing {
+		tokens = s.adaptivelyScaleChunk(start, tokens, remaining, p.BatchSize, p.MaxExecutionCeilingMs)
+	}
+	f, r, w, d, c, m, bound := s.EstimateChunkPacing(start, tokens, p.BatchSize)
+	if math.IsNaN(d) || math.IsInf(d, 0) || d > p.MaxExecutionCeilingMs {
+		return PrefillChunk{}, fmt.Errorf("%w: next chunk estimated %.2f ms", ErrWatchdogSafetyViolation, d)
+	}
+	last := tokens == remaining
+	yield := YieldPoint{Type: FenceTypeSignalFence, FenceID: uint64(index + 1), FlushL2Cache: start+tokens >= ContiguizationMinContext, HostInterruptWait: true}
+	if last {
+		yield.Type = FenceTypeFullYield
+		yield.FlushL2Cache, yield.DrainPipeline, yield.YieldHostCPU = true, true, true
+	}
+	return PrefillChunk{Index: index, StartToken: start, TokenCount: tokens, EstimatedFLOPs: f, EstimatedBytesRead: r, EstimatedBytesWrite: w, EstimatedTotalBytes: r + w, EstimatedDurationMs: d, ComputeTimeMs: c, MemoryTimeMs: m, IsMemoryBound: bound, Yield: yield, IsLastChunk: last}, nil
+}
+
 // VulkanDecodeSubmission is one ready decode command-buffer submission. The
 // prefill schedule is the other queue class; it always resumes after at most one decode.
 type VulkanDecodeSubmission func(ctx context.Context) error
@@ -799,6 +936,7 @@ func (q *VulkanDecodePriorityQueue) executeOne(ctx context.Context) (bool, error
 // ExecutionReceipt records the actual execution telemetry of a prefill schedule.
 type ExecutionReceipt struct {
 	TotalTokens               int           `json:"total_tokens"`
+	CompletedTokens           int           `json:"completed_tokens"`
 	ChunksExecuted            int           `json:"chunks_executed"`
 	DecodeSubmissionsExecuted int           `json:"decode_submissions_executed"`
 	TotalElapsed              time.Duration `json:"total_elapsed"`
@@ -1174,6 +1312,10 @@ func (s *WatchdogPrefillScheduler) ExecuteWithDecodePriority(
 	hook InterChunkHook,
 	decodeQueue *VulkanDecodePriorityQueue,
 ) (*ExecutionReceipt, error) {
+	return s.executePrefill(ctx, schedule, executor, hook, decodeQueue, nil, nil)
+}
+
+func (s *WatchdogPrefillScheduler) executePrefill(ctx context.Context, schedule *PrefillSchedule, executor ChunkExecutor, hook InterChunkHook, decodeQueue *VulkanDecodePriorityQueue, next func(int, int) (PrefillChunk, error), after func(PrefillChunk) error) (*ExecutionReceipt, error) {
 	if schedule == nil || len(schedule.Chunks) == 0 {
 		return nil, ErrEmptySchedule
 	}
@@ -1188,7 +1330,7 @@ func (s *WatchdogPrefillScheduler) ExecuteWithDecodePriority(
 	startTime := time.Now()
 	completedTokens := 0
 
-	for i, chunk := range schedule.Chunks {
+	for i := 0; (next == nil && i < len(schedule.Chunks)) || (next != nil && completedTokens < schedule.TotalTokens); i++ {
 		// Check cancellation context before each chunk submission
 		if err := ctx.Err(); err != nil {
 			receipt.Cancelled = true
@@ -1198,6 +1340,22 @@ func (s *WatchdogPrefillScheduler) ExecuteWithDecodePriority(
 			return receipt, receipt.Error
 		}
 
+		var chunk PrefillChunk
+		if next == nil {
+			if i >= len(schedule.Chunks) {
+				receipt.Error = errors.New("prefill schedule ended before total tokens")
+				return receipt, receipt.Error
+			}
+			chunk = schedule.Chunks[i]
+		} else {
+			var err error
+			chunk, err = next(completedTokens, i)
+			if err != nil {
+				receipt.TotalElapsed = time.Since(startTime)
+				receipt.Error = err
+				return receipt, err
+			}
+		}
 		// Execute the prefill chunk
 		if executor != nil {
 			if err := executor(ctx, chunk); err != nil {
@@ -1209,14 +1367,24 @@ func (s *WatchdogPrefillScheduler) ExecuteWithDecodePriority(
 		}
 
 		completedTokens += chunk.TokenCount
+		receipt.CompletedTokens = completedTokens
 		receipt.ChunksExecuted++
+		// A successful fenced executor completed physical work even when its
+		// telemetry forbids further submissions. Account it before the safe stop.
+		if after != nil {
+			if err := after(chunk); err != nil {
+				receipt.TotalElapsed = time.Since(startTime)
+				receipt.Error = err
+				return receipt, err
+			}
+		}
 
 		elapsed := time.Since(startTime)
 		pct := (float64(completedTokens) / float64(schedule.TotalTokens)) * 100.0
 
 		// Estimate remaining time based on remaining chunks
 		remainingMs := 0.0
-		for j := i + 1; j < len(schedule.Chunks); j++ {
+		for j := i + 1; next == nil && j < len(schedule.Chunks); j++ {
 			remainingMs += schedule.Chunks[j].EstimatedDurationMs
 		}
 		estRemaining := time.Duration(remainingMs * float64(time.Millisecond))
@@ -1230,6 +1398,11 @@ func (s *WatchdogPrefillScheduler) ExecuteWithDecodePriority(
 			EstimatedRemaining: estRemaining,
 			PercentComplete:    pct,
 			CurrentChunk:       chunk,
+		}
+		// Future physical samples can change the partition. Zero means unknown;
+		// the analytical plan's original chunk count is not observed progress.
+		if next != nil {
+			report.TotalChunks = 0
 		}
 
 		// Invoke inter-chunk hook (ISR interleaving / progress update)
