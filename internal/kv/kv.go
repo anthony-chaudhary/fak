@@ -1087,17 +1087,39 @@ func (s *KVStore) evictCandidatesLocked(count int, policy EvictionPolicy) (int, 
 	return toEvict, nil
 }
 
+// evictableCountLocked reports how many resident pages may currently be
+// reclaimed (i.e. are not pinned). Callers must hold s.mu.
+func (s *KVStore) evictableCountLocked() int {
+	count := 0
+	for _, page := range s.pages {
+		if !page.IsPinned() {
+			count++
+		}
+	}
+	return count
+}
+
 func (s *KVStore) ensureCapacityLocked(needed int) error {
 	if s.cfg.MaxPages <= 0 {
 		return nil
 	}
 
+	// Preflight the admission before any destructive eviction: a batch that can
+	// never fit, or that would need more evictions than there are unpinned
+	// pages, must be rejected without removing resident pages.
+	if needed > s.cfg.MaxPages {
+		return ErrCapacityExceeded
+	}
 	available := s.cfg.MaxPages - len(s.pages)
 	if available >= needed {
 		return nil
 	}
 
 	toFree := needed - available
+	if s.evictableCountLocked() < toFree {
+		return ErrCapacityExceeded
+	}
+
 	freed, err := s.evictCandidatesLocked(toFree, s.cfg.EvictionPolicy)
 	if err != nil {
 		return err
