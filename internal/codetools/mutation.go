@@ -303,7 +303,7 @@ func atomicReplace(path string, body []byte, existed bool, perm fs.FileMode) err
 		return err
 	}
 	if existed {
-		if err = os.Rename(tmp, path); err != nil {
+		if err = renameReplacing(tmp, path); err != nil {
 			return err
 		}
 	} else {
