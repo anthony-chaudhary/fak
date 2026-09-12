@@ -649,3 +649,94 @@ func TestInPlaceCheckpoint_EdgeCasesAndConvenienceFunctions(t *testing.T) {
 	}
 	_ = ReapExpiredCheckpoints(time.Now())
 }
+
+// TestMTPCheckpointPageOwnershipLifecycle proves the real COW page ownership
+// lifecycle across MTP checkpoint draft rounds: rejected draft pages release
+// immediately, retained accepted pages keep a releasing owner through a draft
+// replacement and descriptor cleanup, and the original COW owner release
+// returns allocated bytes toward the pre-checkpoint baseline.
+func TestMTPCheckpointPageOwnershipLifecycle(t *testing.T) {
+	cowTable := NewCOWPageTable()
+	cm := NewCheckpointManager(nil, nil, nil, cowTable)
+
+	sessionID := "mtp-page-ownership"
+	sess, err := cowTable.RegisterSession(sessionID)
+	if err != nil {
+		t.Fatalf("RegisterSession failed: %v", err)
+	}
+
+	// Real COW pages: append enough tokens to allocate multiple 64-token blocks.
+	tokens := make([]int, 192)
+	for i := range tokens {
+		tokens[i] = 3000 + i
+	}
+	if err := sess.AppendTokens(tokens); err != nil {
+		t.Fatalf("AppendTokens failed: %v", err)
+	}
+
+	realPages := make([]*PageBlock, 0, sess.PageCount())
+	sess.mu.RLock()
+	realPages = append(realPages, sess.Blocks...)
+	sess.mu.RUnlock()
+	if len(realPages) < 2 {
+		t.Fatalf("expected >=2 real COW pages, got %d", len(realPages))
+	}
+
+	baselineAlloc := cowTable.TotalAllocatedBytes()
+	baselineRefs := make(map[*PageBlock]int32, len(realPages))
+	for _, blk := range realPages {
+		baselineRefs[blk] = blk.RefCount()
+	}
+
+	// Save checkpoint: pins the COW blocks (one retain each).
+	desc, err := cm.SaveInPlaceCheckpoint(sessionID)
+	if err != nil {
+		t.Fatalf("SaveInPlaceCheckpoint failed: %v", err)
+	}
+	for _, blk := range realPages {
+		if got, want := blk.RefCount(), baselineRefs[blk]+1; got != want {
+			t.Fatalf("after save: block %d refcount %d, want %d", blk.ID, got, want)
+		}
+	}
+
+	// Round 1: register a draft that speculatively retains the real pages.
+	cm.RecordMTPDraftPages(sessionID, []int32{10, 11, 12, 13}, realPages...)
+
+	// Accept the first two tokens; the rejected tail must release immediately.
+	// The draft registered four page slots, the last of which is nil.
+	wantFreed := len(realPages) - 2 + 1
+	if _, freed, err := cm.CommitMTPDraft(sessionID, 2); err != nil {
+		t.Fatalf("CommitMTPDraft failed: %v", err)
+	} else if freed != wantFreed {
+		t.Fatalf("expected %d rejected pages freed, got %d", wantFreed, freed)
+	}
+	for _, blk := range realPages[2:] {
+		if got, want := blk.RefCount(), baselineRefs[blk]+1; got != want {
+			t.Fatalf("rejected block %d refcount %d, want %d (draft retain released)", blk.ID, got, want)
+		}
+	}
+
+	// Round 2: replacing the draft list must not orphan the accepted pages'
+	// retain from round 1; a new accepted prefix takes its place.
+	cm.RecordMTPDraftPages(sessionID, []int32{20, 21}, realPages[:2]...)
+	if _, _, err := cm.CommitMTPDraft(sessionID, 2); err != nil {
+		t.Fatalf("CommitMTPDraft round 2 failed: %v", err)
+	}
+
+	// Descriptor cleanup must release every draft retain it still owns.
+	desc.ReleasePins()
+
+	// Original COW owner release: the last reference drops and bytes return.
+	if err := sess.Release(); err != nil {
+		t.Fatalf("Release failed: %v", err)
+	}
+
+	for _, blk := range realPages {
+		if got := blk.RefCount(); got != 0 {
+			t.Fatalf("block %d refcount %d after full cleanup, want 0 (leaked retain)", blk.ID, got)
+		}
+	}
+	if got := cowTable.TotalAllocatedBytes(); got >= baselineAlloc {
+		t.Fatalf("allocated bytes %d did not return below baseline %d", got, baselineAlloc)
+	}
+}

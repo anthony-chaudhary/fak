@@ -237,9 +237,12 @@ func (s *MTPDraftState) RecordDraft(tokens []int32, pages ...*PageBlock) {
 	s.AcceptedCount = 0
 	s.RollbackOccurred = false
 
-	// If there were existing uncommitted draft pages, free them first to prevent leaks
+	// Release every retained owner reference from the prior draft round,
+	// including pages that were committed. The draft state is the owning
+	// retainer for those references; a later round or ReleasePins must be able
+	// to release them, so a committed page must never be orphaned here.
 	for _, dp := range s.DraftPages {
-		if dp != nil && !dp.Committed {
+		if dp != nil {
 			if dp.PageBlock != nil {
 				dp.PageBlock.Release()
 				dp.PageBlock = nil
@@ -385,7 +388,7 @@ func (d *SessionDescriptor) releasePinsLocked() {
 		}
 	}
 	for _, dp := range d.MTPState.DraftPages {
-		if dp != nil && !dp.Committed {
+		if dp != nil {
 			if dp.PageBlock != nil {
 				dp.PageBlock.Release()
 				dp.PageBlock = nil
