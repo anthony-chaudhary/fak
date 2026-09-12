@@ -186,7 +186,10 @@ func (c *Context) EvictColdest(targetPositions int) []EvictedSpan {
 			break
 		}
 		ema, id := s.EMA, s.ID
-		n := c.evict(s)
+		n, removed := c.evict(s)
+		if !removed {
+			continue
+		}
 		out = append(out, EvictedSpan{ID: id, EMA: ema, Positions: n})
 		freed += n
 	}

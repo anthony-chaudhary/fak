@@ -166,8 +166,8 @@ func (c *Context) AdmitResult(ctx context.Context, id, tool string, ids []int, b
 	v = c.gate.Admit(ctx, call, res)
 	seg.Class = ctxmmu.NormalizeDurabilityClass(v.Meta[ctxmmu.DurabilityKey])
 	if v.Kind == abi.VerdictQuarantine {
-		c.evict(seg)
-		return v, true, nil
+		_, removed := c.evict(seg)
+		return v, removed, nil
 	}
 	return v, false, logits
 }
@@ -178,7 +178,8 @@ func (c *Context) AdmitResult(ctx context.Context, id, tool string, ids []int, b
 func (c *Context) Quarantine(id string) (evicted int, ok bool) {
 	for _, s := range c.segs {
 		if s.ID == id && !s.Held {
-			return c.evict(s), true
+			n, removed := c.evict(s)
+			return n, removed
 		}
 	}
 	return 0, false
@@ -213,8 +214,7 @@ func (c *Context) Expire(nowUnix int64) (evicted int) {
 		if s.ExpiresAtUnix <= 0 || s.ExpiresAtUnix > nowUnix {
 			continue
 		}
-		c.evict(s)
-		if s.Held {
+		if _, removed := c.evict(s); removed {
 			evicted++
 		}
 	}
@@ -245,8 +245,9 @@ func (c *Context) Compact(ctx context.Context, ids []string, summaryID, tool str
 		if _, ok := want[s.ID]; !ok {
 			continue
 		}
-		c.evict(s)
-		swapped++
+		if _, removed := c.evict(s); removed {
+			swapped++
+		}
 	}
 	c.Append(summaryID, tool, summaryIDs)
 	return v, swapped
@@ -275,8 +276,9 @@ func (c *Context) ApplyPlan(plan ctxplan.Plan) (evicted int) {
 			continue
 		}
 		if elide[seg.ID] {
-			c.evict(seg)
-			evicted++
+			if _, removed := c.evict(seg); removed {
+				evicted++
+			}
 		}
 	}
 	return evicted
@@ -285,9 +287,9 @@ func (c *Context) ApplyPlan(plan ctxplan.Plan) (evicted int) {
 // evict drops a segment's span from the kernel-owned cache and renumbers the
 // ledger so every segment after it shifts down by the evicted length — keeping
 // the ledger consistent with model.KVCache.Evict's own compaction.
-func (c *Context) evict(seg *Segment) int {
-	if ce, ok := c.kv.(interface{ CanEvict() error }); ok && ce.CanEvict() != nil {
-		return 0
+func (c *Context) evict(seg *Segment) (removed int, ok bool) {
+	if ce, can := c.kv.(interface{ CanEvict() error }); can && ce.CanEvict() != nil {
+		return 0, false
 	}
 	n := c.kv.Evict(seg.From, seg.Len)
 	c.external = append(c.external, cachemeta.PlanExternalInvalidations(seg.KV, c.meta)...)
@@ -319,7 +321,7 @@ func (c *Context) evict(seg *Segment) int {
 	seg.trajHead = 0
 	seg.trajLen = 0
 	seg.expertHist = nil
-	return n
+	return n, true
 }
 
 func (c *Context) invalidateReferences(kv cachemeta.EntryID) {
