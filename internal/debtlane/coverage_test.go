@@ -730,12 +730,13 @@ func Run() {
 		t.Fatal(err)
 	}
 
-	// 4. unsupported root: unsupported_root/data.txt
+	// 4. unsupported root: unsupported_root/data.go (source-bearing, so it
+	// still yields an unsupported-surface-root finding after phantom-root filtering)
 	unsupportedDir := filepath.Join(tmp, "unsupported_root")
 	if err := os.MkdirAll(unsupportedDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(unsupportedDir, "data.txt"), []byte("random data\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(unsupportedDir, "data.go"), []byte("package unsupported\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

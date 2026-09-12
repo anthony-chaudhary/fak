@@ -145,6 +145,7 @@ type Evidence struct {
 	RequiredWorkload       string             `json:"required_workload,omitempty"`
 	RequiredQuality        string             `json:"required_quality,omitempty"`
 	PerfProofReason        string             `json:"perf_proof_reason,omitempty"`
+	Generated              bool               `json:"generated,omitempty"` // Machine-generated artifact: excluded from debt lanes.
 }
 
 // DebtLane represents a dedicated maturity debt lane for one single unit of work.
