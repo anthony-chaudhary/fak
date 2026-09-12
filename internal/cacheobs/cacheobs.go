@@ -115,6 +115,12 @@ type Observer struct {
 	srcLocalCompute     uint64
 	srcLocalHit         uint64
 	srcExternalTransfer uint64
+	// srcUnknown books served tokens with NO provenance witness (#12886), fed only by the
+	// atomic labeled-source tap when it is given no source evidence. It is deliberately NOT
+	// one of the three known buckets so a legacy turn's un-witnessed provenance can never be
+	// counted as a local compute (a miss) or a local hit (a cache win); the legacy
+	// ObserveBySource tap never feeds it, so existing global-source readings are unchanged.
+	srcUnknown uint64
 	// tierRows / tierStatus are the EXPLICIT-TIER axis (#6422, tiers.go): per
 	// (tier, operation, backend class) request/hit/miss/error/byte/latency counters, plus
 	// each tier's collection status so an UNSUPPORTED tier reports as such instead of as a
@@ -201,6 +207,18 @@ func (o *Observer) ObservePreempted(promptTokens, cacheablePrefixTokens, reusedP
 // above 1. The label row books the SAME clamped values as the globals, so cross-label
 // sums always reconcile (the never-desync invariant).
 func (o *Observer) observeAttributed(labels Labels, promptTokens, cacheablePrefixTokens, reusedPrefixTokens, preemptedLostTokens, eligiblePromptTokens int) {
+	o.observeAttributedSource(labels, promptTokens, cacheablePrefixTokens, reusedPrefixTokens, preemptedLostTokens, eligiblePromptTokens, nil, false)
+}
+
+// observeAttributedSource is the single locked accumulation core shared by every depth-axis
+// tap AND the atomic labeled-source tap (#12886). It books the #3390 lookup-vs-realized
+// clamps, the #3895 miss-cause split, the #3391 eligibility denominator and label row, and
+// (when bookSource is set) the SOURCE axis — global and per-label — ALL under one o.mu
+// acquisition. When bookSource is set, src carries the caller's provenance split and a nil
+// src books the turn's reuse as explicit UNKNOWN rather than nothing, so an un-witnessed
+// turn can never be silently classified as a local hit or a local compute. Legacy depth-only
+// taps pass bookSource == false, so their global-source reading is byte-for-byte unchanged.
+func (o *Observer) observeAttributedSource(labels Labels, promptTokens, cacheablePrefixTokens, reusedPrefixTokens, preemptedLostTokens, eligiblePromptTokens int, src *SourceSplit, bookSource bool) {
 	if o == nil || promptTokens <= 0 {
 		return
 	}
@@ -244,6 +262,21 @@ func (o *Observer) observeAttributed(labels Labels, promptTokens, cacheablePrefi
 	lt.promptTokens = saturatingAddU64(lt.promptTokens, uint64(promptTokens))
 	lt.eligibleTokens = saturatingAddU64(lt.eligibleTokens, uint64(eligiblePromptTokens))
 	lt.reusedTokens = saturatingAddU64(lt.reusedTokens, uint64(reusedPrefixTokens))
+	// #12886: book the SOURCE axis (global and per-label) inside the SAME critical section
+	// as the depth and label counters above, so a caller never has to compose separate
+	// locking calls to see depth and source coherently. Only the atomic labeled-source tap
+	// sets bookSource; legacy depth taps leave both axes exactly as they were.
+	if bookSource {
+		compute, hit, external, unknown := sourceBuckets(src, reusedPrefixTokens)
+		o.observeSourceLocked(SourceLocalCompute, compute)
+		o.observeSourceLocked(SourceLocalHit, hit)
+		o.observeSourceLocked(SourceExternalTransfer, external)
+		o.observeSourceLocked(SourceUnknown, unknown)
+		lt.srcLocalCompute = saturatingAddU64(lt.srcLocalCompute, compute)
+		lt.srcLocalHit = saturatingAddU64(lt.srcLocalHit, hit)
+		lt.srcExternalTransfer = saturatingAddU64(lt.srcExternalTransfer, external)
+		lt.srcUnknown = saturatingAddU64(lt.srcUnknown, unknown)
+	}
 	switch {
 	case ratio >= FrozenFloor:
 		o.frozen = saturatingAddU64(o.frozen, 1)
@@ -417,6 +450,13 @@ func (o *Observer) Snapshot() Stats {
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	return o.snapshotLocked()
+}
+
+// snapshotLocked derives the depth-axis snapshot from the live counters. Caller holds o.mu,
+// so the derived ratios are consistent with the totals they came from and, on the combined
+// path (#12886), with the source and label readings taken under the same lock.
+func (o *Observer) snapshotLocked() Stats {
 	s := Stats{
 		Turns:                    o.turns,
 		PromptTokens:             o.promptTokens,
