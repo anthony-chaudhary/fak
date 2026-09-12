@@ -137,6 +137,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		cmdPack(args)
 	case "armbench":
 		cmdArmbench(args)
+	case "baseline-arms":
+		cmdBaselineArms(args)
 	case "api-host":
 		cmdAPIHost(args)
 	case "question-ledger":

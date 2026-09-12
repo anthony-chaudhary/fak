@@ -58,6 +58,7 @@ var maintainerDevCommands = []string{
 	"backends",
 	"backend",
 	"balance",
+	"baseline-arms",
 	"bench",
 	"bench-effort",
 	"bench-ingest",

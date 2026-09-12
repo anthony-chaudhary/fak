@@ -70,7 +70,7 @@ _fak() {
         cword=$COMP_CWORD
     fi
 
-    local commands="ablate agent api-host architecture armbench attest audit bench build capabilities catchup codex codex-resume completion component compute config coordinate disambiguation doctor egress fanout glm52-prefill-sweep godsplit-plan harness help hook info info-fleet launch lifecycle llmd-smoke ls manage model opencode pack pi policy preflight progress ps pull quantbench question-ledger recall recover redteam replay resume run scratch-janitor self-update serve session session-audit sessionjournal signal stale-work study task tasks temp-artifacts test-quality tier-calibrate tool-width top tree-doctor trunk-build-probe ultracode value-chain version windows-setup wip work-delivery workspin"
+    local commands="ablate agent api-host architecture armbench attest audit baseline-arms bench build capabilities catchup codex codex-resume completion component compute config coordinate disambiguation doctor egress fanout glm52-prefill-sweep godsplit-plan harness help hook info info-fleet launch lifecycle llmd-smoke ls manage model opencode pack pi policy preflight progress ps pull quantbench question-ledger recall recover redteam replay resume run scratch-janitor self-update serve session session-audit sessionjournal signal stale-work study task tasks temp-artifacts test-quality tier-calibrate tool-width top tree-doctor trunk-build-probe ultracode value-chain version windows-setup wip work-delivery workspin"
 
     if [[ $cword -eq 1 ]]; then
         COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
