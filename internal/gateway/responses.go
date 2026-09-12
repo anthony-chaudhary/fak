@@ -1299,9 +1299,17 @@ func (s *Server) writeResponsesStream(w http.ResponseWriter, resp responsesRespo
 		nextSeq++
 	}
 
-	// response.completed: terminal event with optional fak extension and incomplete details.
-	// Codex 0.142.4 treats a stream that closes before this event as incomplete and retries.
-	writeResponseEvent("response.completed", resp)
+	// Terminal event with optional fak extension and incomplete details. The event NAME
+	// mirrors the response status: an `incomplete` response (length truncation, guard block,
+	// or the sub-turn yield valve #11764) terminates the stream with `response.incomplete`,
+	// so a client whose planner never reached a genuine finish cannot read a fabricated
+	// `response.completed` as a finished model answer. Codex 0.142.4 treats a stream that
+	// closes before a terminal event as incomplete and retries.
+	terminalEvent := "response.completed"
+	if resp.Status == "incomplete" {
+		terminalEvent = "response.incomplete"
+	}
+	writeResponseEvent(terminalEvent, resp)
 
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()

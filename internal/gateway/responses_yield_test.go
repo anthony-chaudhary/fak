@@ -106,11 +106,17 @@ func TestResponsesSubturnYieldExceedsThresholds(t *testing.T) {
 		t.Fatalf("decode response JSON: %v", err)
 	}
 
-	if resp.Status != "completed" {
-		t.Fatalf("expected resp.Status == completed, got %q", resp.Status)
+	// #11764: the yield response is NOT a fabricated model completion. The surviving
+	// runaway/resource control is the typed terminal state (incomplete + subturn_yield),
+	// not a fake completed/stop.
+	if resp.Status != "incomplete" {
+		t.Fatalf("expected resp.Status == incomplete, got %q", resp.Status)
 	}
-	if resp.FinishReason != "stop" && resp.FinishReason != "yield" {
-		t.Fatalf("expected resp.FinishReason stop or yield, got %q", resp.FinishReason)
+	if resp.FinishReason != "yield" {
+		t.Fatalf("expected resp.FinishReason yield, got %q", resp.FinishReason)
+	}
+	if resp.IncompleteDetails == nil || resp.IncompleteDetails.Reason != responsesSubturnYieldIncompleteReason {
+		t.Fatalf("expected incomplete_details.reason == %q, got %+v", responsesSubturnYieldIncompleteReason, resp.IncompleteDetails)
 	}
 	if !strings.Contains(resp.OutputText, SubturnYieldMessage) {
 		t.Fatalf("expected OutputText to contain %q, got %q", SubturnYieldMessage, resp.OutputText)
@@ -754,5 +760,124 @@ func TestResponsesSubturnYieldExplicitOptInHTTP(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestResponsesSubturnYieldDoesNotFabricateCompletion is the #11764 regression:
+// when the sub-turn yield valve intercepts a turn, an ordinary Responses client that
+// does not understand X-Fak-Subturn-Yield must NOT receive a fabricated successful
+// model completion. The RESPONSE-level status must be `incomplete` with a typed reason,
+// and the streaming terminal event must be `response.incomplete` (not
+// `response.completed`). The explicit runaway/resource controls (header, message,
+// upstream suppression) stay effective.
+func TestResponsesSubturnYieldDoesNotFabricateCompletion(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		name := "json"
+		if stream {
+			name = "sse"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("FAK_RESPONSES_SUBTURN_YIELD", "true")
+			t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOKENS", "1000")
+			t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOOL_CALLS", "5")
+
+			srv := newTestServer(t)
+			planner := &capturingYieldPlanner{}
+			srv.planner = planner
+
+			ts := httptest.NewServer(srv.Handler())
+			defer ts.Close()
+
+			inputItems := []any{
+				map[string]any{"type": "message", "role": "user", "content": "run long subturn tasks"},
+			}
+			for i := 0; i < 6; i++ {
+				inputItems = append(inputItems,
+					map[string]any{"type": "function_call", "call_id": "call_" + itoa(uint64(i)), "name": "tool_action"},
+					map[string]any{"type": "function_call_output", "call_id": "call_" + itoa(uint64(i)), "output": "tool result data: " + strings.Repeat("A", 800)},
+				)
+			}
+			body, err := json.Marshal(map[string]any{"model": "test-model", "stream": stream, "input": inputItems})
+			if err != nil {
+				t.Fatal(err)
+			}
+			httpResp, err := http.Post(ts.URL+"/v1/responses", "application/json", bytes.NewReader(body))
+			if err != nil {
+				t.Fatalf("POST /v1/responses: %v", err)
+			}
+			defer httpResp.Body.Close()
+			raw, _ := io.ReadAll(httpResp.Body)
+			if httpResp.StatusCode != http.StatusOK {
+				t.Fatalf("status=%d body=%s", httpResp.StatusCode, raw)
+			}
+			wire := string(raw)
+
+			// Existing safety controls remain effective.
+			if got := httpResp.Header.Get(SubturnYieldHeader); got != "true" {
+				t.Fatalf("yield header = %q, want true", got)
+			}
+			if planner.called {
+				t.Fatal("upstream planner must not run on yield")
+			}
+			if !strings.Contains(wire, SubturnYieldMessage) {
+				t.Fatalf("yield message missing from wire: %s", wire)
+			}
+
+			assertIncomplete := func(r responsesResponse, ctx string) {
+				t.Helper()
+				if r.Status == "completed" {
+					t.Fatalf("%s: fabricated successful completion on yield wire (#11764): %s", ctx, wire)
+				}
+				if r.Status != "incomplete" {
+					t.Fatalf("%s: response status = %q, want incomplete", ctx, r.Status)
+				}
+				if r.FinishReason != "yield" {
+					t.Fatalf("%s: finish_reason = %q, want yield", ctx, r.FinishReason)
+				}
+				if r.IncompleteDetails == nil || r.IncompleteDetails.Reason != responsesSubturnYieldIncompleteReason {
+					t.Fatalf("%s: incomplete_details = %+v, want reason %q", ctx, r.IncompleteDetails, responsesSubturnYieldIncompleteReason)
+				}
+			}
+
+			if !stream {
+				var resp responsesResponse
+				if err := json.Unmarshal(raw, &resp); err != nil {
+					t.Fatalf("decode response JSON: %v: %s", err, wire)
+				}
+				assertIncomplete(resp, "json")
+				return
+			}
+
+			// Streaming: the terminal event must be response.incomplete, not response.completed.
+			if strings.Contains(wire, "response.completed") {
+				t.Fatalf("streaming yield must not emit response.completed: %s", wire)
+			}
+			if !strings.Contains(wire, "event: response.incomplete") {
+				t.Fatalf("streaming yield must emit a response.incomplete terminal event: %s", wire)
+			}
+			var terminal responsesResponse
+			found := false
+			for _, frame := range strings.Split(wire, "\n\n") {
+				if !strings.Contains(frame, "event: response.incomplete") {
+					continue
+				}
+				idx := strings.Index(frame, "data: ")
+				if idx < 0 {
+					continue
+				}
+				var envelope struct {
+					Response responsesResponse `json:"response"`
+				}
+				if err := json.Unmarshal([]byte(strings.TrimSpace(frame[idx+len("data: "):])), &envelope); err != nil {
+					t.Fatalf("decode incomplete event: %v: %s", err, frame)
+				}
+				terminal = envelope.Response
+				found = true
+			}
+			if !found {
+				t.Fatalf("no response.incomplete event parsed: %s", wire)
+			}
+			assertIncomplete(terminal, "sse")
+		})
 	}
 }

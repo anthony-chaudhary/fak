@@ -24,6 +24,13 @@ const (
 
 	// SubturnYieldMessage is the synthetic concluding prompt returned to trigger native context compaction.
 	SubturnYieldMessage = "Context threshold reached (resident sub-turn token yield valve activated). Concluding current turn; client-managed compaction and continuation are required. Please summarize progress and resume from the latest state."
+
+	// responsesSubturnYieldIncompleteReason is the typed Responses `incomplete_details.reason`
+	// stamped when the yield valve intercepts a turn. It keeps the synthetic yield response
+	// from masquerading as a genuine model completion for clients that do not understand
+	// X-Fak-Subturn-Yield (#11764): status=incomplete + this reason is the wire distinction
+	// between "the model is done" and "the gateway yielded for compaction".
+	responsesSubturnYieldIncompleteReason = "subturn_yield"
 )
 
 // resolveSubturnYieldThresholds returns the configurable thresholds for sub-turn tokens and tool calls.
@@ -254,16 +261,20 @@ func shouldYieldResponsesSubturn(messages []agent.Message, tools []agent.ToolDef
 	return false, estTokens, toolCallCount
 }
 
-// makeSubturnYieldResponse constructs the synthetic completed response that instructs
-// the harness/agent to trigger native context compaction.
+// makeSubturnYieldResponse constructs the synthetic terminal response that instructs
+// the harness/agent to trigger native context compaction. It is deliberately NOT a
+// fabricated successful completion: status=incomplete + a typed reason + finish_reason
+// "yield" keep a client that does not understand X-Fak-Subturn-Yield from reading the
+// yield as a genuine `completed`/`stop` model answer (#11764).
 func makeSubturnYieldResponse(reqModel string, admissions []ResultAdmission) responsesResponse {
 	resp := responsesResponse{
-		ID:           "resp_fak_" + itoa(uint64(time.Now().UnixNano())),
-		Object:       "response",
-		CreatedAt:    time.Now().Unix(),
-		Model:        reqModel,
-		Status:       "completed",
-		FinishReason: "stop",
+		ID:                "resp_fak_" + itoa(uint64(time.Now().UnixNano())),
+		Object:            "response",
+		CreatedAt:         time.Now().Unix(),
+		Model:             reqModel,
+		Status:            "incomplete",
+		FinishReason:      "yield",
+		IncompleteDetails: &responsesIncomplete{Reason: responsesSubturnYieldIncompleteReason},
 		Output: responsesOutputFromAssistant(agent.Message{
 			Role:    agent.RoleAssistant,
 			Content: SubturnYieldMessage,
