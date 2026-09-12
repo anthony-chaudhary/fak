@@ -492,6 +492,10 @@ type affinityTarget struct {
 	deadline time.Time
 }
 
+// defaultAffinityMax bounds the session-affinity map so transient session ids that
+// are never queried again cannot grow it without limit in a long-running server.
+const defaultAffinityMax = 10_000
+
 type CacheAwarePolicy struct {
 	mu          sync.Mutex
 	index       *PrefixResidencyIndex
@@ -500,6 +504,7 @@ type CacheAwarePolicy struct {
 	tierWeights TierWeights
 	decode      decodeFootprintRouteState
 	affinityTTL time.Duration
+	affinityMax int
 	affinities  map[string]affinityTarget
 	now         func() time.Time
 }
@@ -522,6 +527,7 @@ func NewCacheAwarePolicy(index *PrefixResidencyIndex, skew SkewThreshold) *Cache
 		skew:        skew,
 		decode:      newDecodeFootprintRouteState(DefaultDecodeFootprintConfig()),
 		affinityTTL: 5 * time.Minute,
+		affinityMax: defaultAffinityMax,
 		affinities:  make(map[string]affinityTarget),
 	}
 }
@@ -550,6 +556,79 @@ func (p *CacheAwarePolicy) WithAffinityTTL(ttl time.Duration) *CacheAwarePolicy 
 	return p
 }
 
+// WithAffinityMax sets the maximum number of retained session affinities. Values
+// <= 0 restore the default bound. Callers must hold the policy lock or call this
+// before concurrent use.
+func (p *CacheAwarePolicy) WithAffinityMax(max int) *CacheAwarePolicy {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if max <= 0 {
+		max = defaultAffinityMax
+	}
+	p.affinityMax = max
+	return p
+}
+
+// affinityEvictBudget bounds the per-call scan used to make room for a new
+// affinity entry, so a server at capacity never pays an O(capacity) cost on the
+// serving hot path. The budget grows with capacity but stays a small fraction of
+// it, so a bounded number of calls fully drains expired entries.
+func (p *CacheAwarePolicy) affinityEvictBudget(max int) int {
+	budget := max / 64
+	if budget < 16 {
+		budget = 16
+	}
+	if budget > 512 {
+		budget = 512
+	}
+	return budget
+}
+
+// evictAffinityLocked makes room for one new affinity entry when the map is at
+// capacity. It scans at most affinityEvictBudget entries: expired entries are
+// dropped, and if none of the visited entries has expired one is removed as the
+// capacity victim. Go's randomized map iteration keeps the victim spread across
+// one-shot keys, so a stream of transient session ids cannot grow the map without
+// bound. Callers must hold p.mu.
+func (p *CacheAwarePolicy) evictAffinityLocked() {
+	max := p.affinityMax
+	if max <= 0 {
+		max = defaultAffinityMax
+	}
+	if len(p.affinities) < max {
+		return
+	}
+	now := p.clock()
+	budget := p.affinityEvictBudget(max)
+	fallback := ""
+	visited := 0
+	for k, v := range p.affinities {
+		if visited >= budget {
+			break
+		}
+		visited++
+		if now.After(v.deadline) {
+			delete(p.affinities, k)
+			if len(p.affinities) < max {
+				return
+			}
+			continue
+		}
+		if fallback == "" || k < fallback {
+			fallback = k
+		}
+	}
+	if fallback == "" {
+		for k := range p.affinities {
+			fallback = k
+			break
+		}
+	}
+	if fallback != "" {
+		delete(p.affinities, fallback)
+	}
+}
+
 // SetAffinity associates an affinity key with a target worker.
 func (p *CacheAwarePolicy) SetAffinity(key, worker string) {
 	key = strings.TrimSpace(key)
@@ -566,6 +645,7 @@ func (p *CacheAwarePolicy) SetAffinity(key, worker string) {
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
 	}
+	p.evictAffinityLocked()
 	p.affinities[key] = affinityTarget{
 		worker:   worker,
 		deadline: p.clock().Add(ttl),
@@ -788,6 +868,7 @@ func (p *CacheAwarePolicy) PickWithAffinity(candidates []PlannerReplica, prefix 
 				targetL := p.effectiveLoad(entry.worker, load)
 				overloaded := targetL-minL >= p.skew.AbsLoad && float64(targetL) >= p.skew.RelLoad*float64(mathx.MaxInt(minL, 1))
 				if !overloaded {
+					p.evictAffinityLocked()
 					p.affinities[trimmed] = affinityTarget{
 						worker:   entry.worker,
 						deadline: p.clock().Add(ttl),
@@ -802,6 +883,7 @@ func (p *CacheAwarePolicy) PickWithAffinity(candidates []PlannerReplica, prefix 
 	chosenName := p.chooseWorkerLocked(names, prefix, load)
 	p.index.Observe(chosenName, prefix)
 	if trimmed != "" {
+		p.evictAffinityLocked()
 		p.affinities[trimmed] = affinityTarget{
 			worker:   chosenName,
 			deadline: p.clock().Add(ttl),
