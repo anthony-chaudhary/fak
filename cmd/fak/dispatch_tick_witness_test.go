@@ -533,6 +533,7 @@ func layer2DowngradeTick(t *testing.T, modelDowngrade bool) (map[string]any, str
 	t.Setenv("FLEET_WORKER_FALLBACK_MODEL", "claude-opus-4-8,claude-sonnet-5")
 	withWitnessStubs(t, func(string, int, string) string { return "" }, "", "")
 	root := t.TempDir()
+	assertPrepared := installDispatchManagedFixture(t, root)
 	if out, err := exec.Command("git", "init", "-q", root).CombinedOutput(); err != nil {
 		t.Skipf("git init failed: %v %s", err, out)
 	}
@@ -546,6 +547,7 @@ func layer2DowngradeTick(t *testing.T, modelDowngrade bool) (map[string]any, str
 	oldSpawner := dispatchIssueWorkerSpawner
 	launchSpawnBroker = func(a launchBrokerAttempt) launchBrokerGrant { return allowLaunchBrokerGrant(a, "unit-test-allow") }
 	dispatchIssueWorkerSpawner = func(command []string, env map[string]string, cwd, rd string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA, stdinPayload string, probeS float64) (dispatchSpawnResult, error) {
+		assertDispatchManagedFixtureSpawn(t, root, cwd, env)
 		logPath := filepath.Join(rd, "resolve-12-20260704-060606.log")
 		if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 			t.Fatalf("mkdir runs dir: %v", err)
@@ -569,6 +571,8 @@ func layer2DowngradeTick(t *testing.T, modelDowngrade bool) (map[string]any, str
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("bad json: %v\n%s", err, out)
 	}
+	t.Cleanup(func() { releaseInProcessLaneLease(root, mapAt(got, "lease")) })
+	assertPrepared(got)
 	return got, runsDir
 }
 

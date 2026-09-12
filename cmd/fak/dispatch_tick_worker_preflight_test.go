@@ -653,6 +653,7 @@ func TestDispatchTransientStartupRealChildProgress(t *testing.T) {
 
 func TestDispatchTransientStartupCLIOnce(t *testing.T) {
 	root, _ := dispatchCodexGateFixture(t, false)
+	assertPrepared := installDispatchManagedFixture(t, root)
 	if out, err := exec.Command("git", "-C", root, "init", "-q").CombinedOutput(); err != nil {
 		t.Fatalf("git init: %s %v", out, err)
 	}
@@ -677,6 +678,7 @@ func TestDispatchTransientStartupCLIOnce(t *testing.T) {
 		return allowLaunchBrokerGrant(a, "unit-test-allow")
 	}
 	dispatchIssueWorkerSpawner = func(argv []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA, stdinPayload string, probeS float64) (dispatchSpawnResult, error) {
+		assertDispatchManagedFixtureSpawn(t, root, cwd, env)
 		launches++
 		capturedCommand = append([]string(nil), argv...)
 		capturedEnv = copyStringMap(env)
@@ -704,6 +706,7 @@ func TestDispatchTransientStartupCLIOnce(t *testing.T) {
 		t.Fatalf("decode: %v\n%s", err, out)
 	}
 	t.Cleanup(func() { releaseInProcessLaneLease(root, mapAt(got, "lease")) })
+	assertPrepared(got)
 	preflight := mapAt(got, "worker_preflight")
 	if got["action"] != "startup_inconclusive" || dispatchMapString(preflight, "verdict") != dispatchWorkerPreflightTransientUpstream {
 		t.Fatalf("launch receipt = %#v", got)
