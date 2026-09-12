@@ -162,14 +162,19 @@ jobs:
   checksums:
     name: aggregate SHA256SUMS
     needs: build
+    outputs:
+      cpu_digest: ${{ steps.fold.outputs.cpu_digest }}
+      cuda_digest: ${{ steps.fold.outputs.cuda_digest }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 65
     permissions:
       contents: write
+      packages: read # verify the same-tag CUDA image before release promotion
       id-token: write # SLSA build-provenance attestation of the aggregate SHA256SUMS (#1372)
       attestations: write # write the attestation to the repo's attestation store
     steps:
       - name: Fold per-asset sums into one SHA256SUMS
+        id: fold
         env:
           GH_TOKEN: ${{ github.token }}
           # No checkout in this job, so `gh` cannot infer the repo from a git
@@ -179,6 +184,11 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          CUDA_IMAGE="ghcr.io/${OWNER}/fak:${VERSION}-cuda"
+          CPU_IMAGE="ghcr.io/${OWNER}/fak:${VERSION}"
+          CPU_VARIANT_IMAGE="ghcr.io/${OWNER}/fak:${VERSION}-cpu"
           # `needs: build` means the page should already exist, but guard anyway so
           # a manual workflow_dispatch re-run can't race a freshly created release.
           for i in $(seq 1 24); do
@@ -191,29 +201,60 @@ jobs:
           # Pull the per-asset .sha256 files back down and concatenate them. Each line
           # is already in `<hash>  <archive>` form, which the installer verifies against.
           #
-          # The macOS universal sidecar is uploaded by the separate release-macos
-          # workflow, which races this fold: on v0.53.0 the published SHA256SUMS went
-          # out with the universal line MISSING entirely. Poll (bounded, ~3 min,
-          # 15s interval) for it before folding; if it truly never appears keep the
-          # aggregate valid for everything present, but leave a loud ::warning:: so
-          # the gap is visible instead of shipping silently. The universal archive
-          # itself is still completeness-checked by the verify-release job below.
+          # GPU artifacts are uploaded by separate platform workflows, which race
+          # this fold: on v0.53.0 the published SHA256SUMS went
+          # out with the universal line MISSING entirely. Platform workflows can
+          # take 30+ minutes, so poll for up to one hour before folding. Missing GPU
+          # assets fail closed: checksums are not uploaded and Latest cannot advance.
           fold_attempt=1
-          fold_max=12
+          fold_max=120
+          fold_ok=0
           while [ "$fold_attempt" -le "$fold_max" ]; do
             gh release download "$TAG" --dir "$tmp" --pattern '*.sha256' --clobber
-            if [ -e "$tmp/fak_${VERSION}_darwin_universal.tar.gz.sha256" ]; then
-              echo "universal sidecar present (fold attempt ${fold_attempt}/${fold_max})"
+            if [ -e "$tmp/fak_${VERSION}_darwin_universal.tar.gz.sha256" ] && \
+               [ -e "$tmp/fak_${VERSION}_darwin_arm64_metal.tar.gz.sha256" ] && \
+               [ -e "$tmp/fak_${VERSION}_linux_amd64_vulkan.tar.gz.sha256" ] && \
+               docker manifest inspect "$CUDA_IMAGE" >/dev/null 2>&1 && \
+               docker manifest inspect "$CPU_IMAGE" >/dev/null 2>&1 && \
+               docker manifest inspect "$CPU_VARIANT_IMAGE" >/dev/null 2>&1; then
+              fold_ok=1
+              echo "required platform and GPU sidecars present (fold attempt ${fold_attempt}/${fold_max})"
               break
             fi
             if [ "$fold_attempt" -eq "$fold_max" ]; then
-              echo "::warning::SHA256SUMS folded WITHOUT the darwin universal sidecar after ${fold_max} attempts (~3 min) - release-macos.yml may have failed or not run; SHA256SUMS stays valid for the sidecars that exist"
               break
             fi
-            echo "universal sidecar not up yet (attempt ${fold_attempt}/${fold_max}); waiting 15s for release-macos.yml..."
-            sleep 15
+            echo "required platform/GPU artifacts not up yet (attempt ${fold_attempt}/${fold_max}); waiting 30s for platform workflows..."
+            sleep 30
             fold_attempt=$((fold_attempt + 1))
           done
+          if [ "$fold_ok" -ne 1 ]; then
+            echo "::error::required platform/GPU artifacts missing after ${fold_max} attempts; refusing to publish incomplete SHA256SUMS"
+            exit 1
+          fi
+          # Do not accept mere tag visibility: reproduce the CUDA workflow's
+          # post-push build/link assertions against the exact versioned image.
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker pull "$CUDA_IMAGE"
+          docker pull "$CPU_IMAGE"
+          docker pull "$CPU_VARIANT_IMAGE"
+          cuda_digest="$(docker image inspect "$CUDA_IMAGE" --format '{{ index .RepoDigests 0 }}')"
+          cpu_digest="$(docker image inspect "$CPU_IMAGE" --format '{{ index .RepoDigests 0 }}')"
+          cpu_variant_digest="$(docker image inspect "$CPU_VARIANT_IMAGE" --format '{{ index .RepoDigests 0 }}')"
+          if [ "${cpu_digest#*@}" != "${cpu_variant_digest#*@}" ]; then
+            echo "::error::CPU compatibility and explicit reference tags resolve to different digests"
+            exit 1
+          fi
+          cuda_caps="$(docker run --rm --entrypoint fak "$cuda_digest" runtime-capabilities)"
+          echo "$cuda_caps" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if "cuda" in (d.get("build_tags") or []) else 1)'
+          cuda_version="$(docker run --rm --entrypoint fak "$cuda_digest" version 2>/dev/null | head -1)"
+          if [ "$cuda_version" != "$VERSION" ]; then
+            echo "::error::CUDA image version mismatch: got '$cuda_version', want '$VERSION'"
+            exit 1
+          fi
+          docker run --rm --entrypoint sh "$cuda_digest" -c 'ldd /usr/local/bin/fak | grep -q libcudart'
+          echo "cpu_digest=${cpu_digest}" >> "$GITHUB_OUTPUT"
+          echo "cuda_digest=${cuda_digest}" >> "$GITHUB_OUTPUT"
           cat "$tmp"/*.sha256 | sort -k2 > "$tmp/SHA256SUMS"
           echo "== SHA256SUMS =="
           cat "$tmp/SHA256SUMS"
@@ -249,15 +290,29 @@ jobs:
     # artifact (not the source tree) on purpose — that is what a consumer gets.
     name: verify published artifacts
     needs: checksums
+    # Run even when aggregation fails so this job can quarantine a release whose
+    # required GPU artifact never arrived. Without always(), GitHub skips the job
+    # and leaves the release page eligible for Latest despite the failed gate.
+    if: ${{ always() }}
+    concurrency:
+      group: release-promotion-${{ github.repository }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write # quarantine a release that fails post-publish verification
+      packages: write # assign verified mutable OCI aliases by digest
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       GOTOOLCHAIN: auto
     steps:
+      - name: require complete artifact aggregation
+        if: ${{ needs.checksums.result != 'success' }}
+        run: |
+          echo "::error::artifact aggregation failed; required CPU/GPU release set is incomplete"
+          exit 1
+
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
@@ -266,6 +321,15 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: verify published archives and checksums
         id: verify_published_assets
@@ -289,6 +353,8 @@ jobs:
             "fak_${VERSION}_darwin_arm64.tar.gz"
             "fak_${VERSION}_windows_amd64.zip"
             "fak_${VERSION}_darwin_universal.tar.gz"
+            "fak_${VERSION}_darwin_arm64_metal.tar.gz"
+            "fak_${VERSION}_linux_amd64_vulkan.tar.gz"
           )
 
           # Settle asset propagation before judging completeness. `needs: checksums`
@@ -464,7 +530,28 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
           release_id="$(gh release view "$TAG" --json databaseId --jq .databaseId)"
+          CURRENT_LATEST="$(gh release view --json tagName --jq .tagName 2>/dev/null || true)"
+          if [ -n "$CURRENT_LATEST" ]; then
+            NEWEST="$(printf '%s\n%s\n' "$CURRENT_LATEST" "$TAG" | sort -V | tail -n1)"
+            if [ "$NEWEST" != "$TAG" ]; then
+              echo "release $TAG verified but is older than current Latest $CURRENT_LATEST; preserving the newer default"
+              gh api -X PATCH "repos/${GH_REPO}/releases/${release_id}" \
+                -F prerelease=false \
+                -f make_latest=false \
+                --silent
+              exit 0
+            fi
+          fi
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          IMAGE="ghcr.io/${OWNER}/fak"
+          CPU_DIGEST="${{ needs.checksums.outputs.cpu_digest }}"
+          CUDA_DIGEST="${{ needs.checksums.outputs.cuda_digest }}"
+          [ -n "$CPU_DIGEST" ] && [ -n "$CUDA_DIGEST" ]
+          docker buildx imagetools create --tag "${IMAGE}:cpu-latest" "$CPU_DIGEST"
+          docker buildx imagetools create --tag "${IMAGE}:cuda-latest" "$CUDA_DIGEST"
+          docker buildx imagetools create --tag "${IMAGE}:latest" "$CUDA_DIGEST"
           gh api -X PATCH "repos/${GH_REPO}/releases/${release_id}" \
             -F prerelease=false \
             -f make_latest=true \

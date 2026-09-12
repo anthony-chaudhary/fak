@@ -2,7 +2,9 @@
 #
 # Companion to release-artifacts.yml (which attaches cross-compiled binaries to the
 # release). On a `v*` tag push this builds the repo Dockerfile and pushes
-# `ghcr.io/<owner>/fak:<version>` and `:latest`. That image is what the Official MCP
+# `ghcr.io/<owner>/fak:<version>` and `:<version>-cpu`. The unqualified version remains
+# the Official MCP Registry compatibility reference; mutable aliases are assigned by the
+# aggregate verifier after the complete CPU/GPU release passes. That image is what the Official MCP
 # Registry (modelcontextprotocol/registry) lists as the `oci` package in server.json —
 # ownership is proved by the `LABEL io.modelcontextprotocol.server.name` baked into the
 # Dockerfile. The actual registry publish (`mcp-publisher login github && publish`) is a
@@ -80,7 +82,7 @@ jobs:
             APP_VERSION=${{ steps.meta.outputs.version }}
           tags: |
             ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}
-            ${{ steps.meta.outputs.image }}:latest
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}-cpu
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.version=${{ steps.meta.outputs.version }}
