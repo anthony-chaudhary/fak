@@ -14,8 +14,54 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/internal/recall"
 	"github.com/anthony-chaudhary/fak/internal/session"
+	"github.com/anthony-chaudhary/fak/internal/taskmgr"
 	"github.com/anthony-chaudhary/fak/internal/trajectory"
 )
+
+func TestIndexedWitnessDisappearanceRefusesRead(t *testing.T) {
+	for _, indexed := range []bool{true, false} {
+		name := "originally-absent"
+		if indexed {
+			name = "indexed-then-deleted"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			in := buildInput(t, name)
+			if indexed {
+				in.Witness = []WitnessEntry{{EffectID: "completed-effect", Record: taskmgr.WitnessRecord{VerifiedState: taskmgr.VerifiedDone}}}
+			}
+			if _, err := DumpDir(dir, in); err != nil {
+				t.Fatal(err)
+			}
+			img, err := LoadDir(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, part := range img.Meta.Parts {
+				found = found || part.Name == WitnessFile
+			}
+			if found != indexed {
+				t.Fatalf("witness indexed = %v, want %v", found, indexed)
+			}
+			if indexed {
+				if !img.VerifiedDone("completed-effect") {
+					t.Fatal("loaded image lost VerifiedDone evidence")
+				}
+				if err := os.Remove(filepath.Join(dir, WitnessFile)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			entries, err := img.Witness()
+			if indexed && err == nil {
+				t.Fatal("Witness accepted disappearance of indexed completion evidence")
+			}
+			if !indexed && (err != nil || len(entries) != 0) {
+				t.Fatalf("originally absent witness = %v, %v; want empty, nil", entries, err)
+			}
+		})
+	}
+}
 
 const (
 	benignAccount = `{"user_id":"mia_li_3668","tier":"gold","refund_fee":"25 EUR","status":"active"}`

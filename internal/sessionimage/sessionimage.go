@@ -355,16 +355,21 @@ func indexPartsAndStamp(dir string, now int64) ([]Part, int64, error) {
 	return parts, now, nil
 }
 
-// readImageSidecar reads one versioned JSON sidecar of an image directory back. An absent file is
-// not an error — it means the image simply carries no record of that kind — so it yields a nil
-// slice and a nil error. The bytes were already integrity-checked by LoadDir/verifyParts before
+// readImageSidecar reads one versioned JSON sidecar of an image directory back. An absent file
+// yields a nil slice and a nil error unless it is listed in the supplied integrity index.
+// An indexed file must remain readable. The bytes were already integrity-checked by LoadDir/verifyParts before
 // any of these readers is reachable, so this re-reads them only to decode. A version mismatch
 // fails closed; `label` names the record in that refusal, so each sidecar keeps its own wording,
 // and `unpack` lifts the version + entries out of that sidecar's own set type.
-func readImageSidecar[S any, E any](dir, file, label string, unpack func(S) (string, []E)) ([]E, error) {
+func readImageSidecar[S any, E any](dir, file, label string, unpack func(S) (string, []E), parts ...Part) ([]E, error) {
 	b, err := os.ReadFile(filepath.Join(dir, file))
 	if err != nil {
 		if os.IsNotExist(err) {
+			for _, part := range parts {
+				if part.Name == file {
+					return nil, fmt.Errorf("sessionimage: missing indexed %s: %w", file, err)
+				}
+			}
 			return nil, nil
 		}
 		return nil, err
