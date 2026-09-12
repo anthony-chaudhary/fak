@@ -606,7 +606,15 @@ func servedTaint(c *abi.ToolCall) abi.TaintLabel {
 
 // Lookup is the FastPath entry (unit 30: consulted before the adjudicator). It
 // tries tier 1, then tier 3, then tier 2; a miss returns ok=false.
-func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) {
+func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (result *abi.Result, hit bool) {
+	if receipt := lookupReceiptFromContext(ctx); receipt != nil {
+		receipt.result.Store(nil)
+		defer func() {
+			if hit && result != nil {
+				receipt.result.Store(result)
+			}
+		}()
+	}
 	atomic.AddInt64(&v.lookups, 1)
 	if !toolCacheIdentityKnown(c) {
 		return v.missed(c, MissMissingHints)

@@ -342,10 +342,11 @@ func (p *InKernelPlanner) ApplyPromptShrink(ctx context.Context, messages []Mess
 	}
 
 	return ApplyTypedPromptShrinkLevers(messages, tools, TypedPromptShrinkConfig{
-		CompactHistoryBudget: compactBudget,
-		ElideStaleReads:      elideStale,
-		DeferColdTools:       deferTools,
-		RestoreStash:         stash,
+		CompactHistoryBudget:    compactBudget,
+		ElideStaleReads:         elideStale,
+		DeferColdTools:          deferTools,
+		RestoreStash:            stash,
+		observeNativeCompaction: nativeCompactionObserver(ctx) != nil,
 	})
 }
 
@@ -2129,6 +2130,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		return nil, err
 	}
 	gen, promptTok, matched, prefillS, decodeS, stopped := genRes.gen, genRes.promptTok, genRes.matched, genRes.prefillS, genRes.decodeS, genRes.stopped
+	observeNativeCompaction(ctx, prepared.nativeCompaction)
 	// finishReason is honest about WHY decode ended: "stop" when a token-ID stop or a
 	// per-request Stop sequence fired, "length" when maxNew was the only limit hit.
 	finishReason := "length"

@@ -231,7 +231,7 @@ func (s *Server) Handler() http.Handler {
 		prefix = "/" + strings.Trim(prefix, "/")
 		mux.Handle(prefix+"/", s.richDashboards.proxy)
 	}
-	return s.withMetrics(s.withAuth(mux))
+	return s.withFeatureActivations(s.withMetrics(s.withAuth(mux)))
 }
 
 // ListenAndServe binds the HTTP surface on addr, then serves it via Serve until
@@ -632,7 +632,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	// Stamp the causal input on the untouched wire envelope before admission
 	// transforms, request routing, planner selection, or model execution.
-	inputTriggerRoute, routedModel, err := s.admitAndRouteChatInputTrigger(req)
+	inputTriggerRoute, routedModel, err := s.admitAndRouteChatInputTriggerWithContext(r.Context(), req)
 	if err != nil {
 		if errors.Is(err, errInvalidExplicitInputTrigger) {
 			writeErr(w, http.StatusBadRequest, "invalid input_trigger")

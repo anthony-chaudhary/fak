@@ -24,11 +24,12 @@ type PromptEncoding struct {
 }
 
 type preparedPrompt struct {
-	messages []Message
-	tools    []ToolDef
-	rendered string
-	ids      []int
-	maxNew   int
+	messages         []Message
+	tools            []ToolDef
+	rendered         string
+	ids              []int
+	maxNew           int
+	nativeCompaction *NativeCompactionObservation
 }
 
 // EncodePrompt applies the same request options, prompt shrink, renderer, and
@@ -75,7 +76,7 @@ func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message,
 	if err := ctx.Err(); err != nil {
 		return preparedPrompt{}, err
 	}
-	messages, tools, _ = p.ApplyPromptShrink(ctx, messages, tools, opts...)
+	messages, tools, shrink := p.ApplyPromptShrink(ctx, messages, tools, opts...)
 	rendered := renderInKernelChatMLRequest(messages, tools, p.m.Cfg, sp.ResponseFormat, sp.ToolChoice, sp)
 	ids, err := p.tok.Encode(rendered)
 	if err != nil {
@@ -85,7 +86,7 @@ func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message,
 	if sp.MaxTokens != nil && *sp.MaxTokens > 0 {
 		maxNew = *sp.MaxTokens
 	}
-	return preparedPrompt{messages: messages, tools: tools, rendered: rendered, ids: ids, maxNew: maxNew}, nil
+	return preparedPrompt{messages: messages, tools: tools, rendered: rendered, ids: ids, maxNew: maxNew, nativeCompaction: shrink.nativeCompaction}, nil
 }
 
 func inKernelPromptRendererID(cfg model.Config, sp SampleParams) string {

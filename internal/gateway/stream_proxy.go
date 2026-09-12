@@ -198,6 +198,27 @@ func (h *heartbeatConfig) recordEvent(byteCount int) {
 	h.TickDecode()
 }
 
+// recordStreamEvent publishes the first Chat content event together with the
+// heartbeat start state, after the opening role has committed. A pending ticker
+// can therefore never observe a started Chat stream with empty event counters.
+func (h *heartbeatConfig) recordStreamEvent(byteCount int) {
+	h.mu.Lock()
+	first := !h.started
+	now := time.Now()
+	if first {
+		h.started = true
+		h.streamStart = now
+	}
+	h.bytesEmitted += int64(byteCount)
+	h.eventsEmitted++
+	h.lastEvent = now
+	h.mu.Unlock()
+	if first {
+		h.TickPrefillChunk()
+	}
+	h.TickDecode()
+}
+
 // Tick records generic stream liveness without advancing either phase count:
 // both phase ages refresh from the same nanotime so a keep-alive never reads
 // as a one-sided stall. Allocation-free; atomics only, then one fold.
@@ -386,7 +407,6 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 			return nil
 		}
 		started = true
-		hb.markStreamStart()
 		h := w.Header()
 		h.Set("Content-Type", "text/event-stream")
 		h.Set("Cache-Control", "no-cache")
@@ -401,7 +421,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		if err := start(); err != nil {
 			return err
 		}
-		hb.recordEvent(len(contentDelta))
+		hb.recordStreamEvent(len(contentDelta))
 		var werr error
 		timePhase(sessionTurn.turnCost, turncost.PhaseStream, func() {
 			werr = writeSSEData(w, chunk(ChatDelta{Content: contentDelta}, nil, nil))

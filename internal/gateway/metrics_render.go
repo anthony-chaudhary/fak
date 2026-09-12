@@ -249,6 +249,7 @@ func (s *Server) renderMetrics() string {
 	}
 	httpRows, opRows := m.snapshot()
 	var b strings.Builder
+	m.featureActivations.Render(&b)
 
 	writeHelpType(&b, "fak_gateway_up", "Whether the fak gateway process is scrapeable.", "gauge")
 	fmt.Fprintln(&b, "fak_gateway_up 1")

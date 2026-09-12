@@ -14,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
+	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
 
 // fastPathLookup probes the registered vDSO fast paths (the same abi.FastPaths()
@@ -21,12 +22,20 @@ import (
 // It is the served-turn analogue of the kernel's fast-path loop — Lookup-only, so a
 // miss executes nothing — and respects whichever vDSO instance the gateway wired.
 func fastPathLookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) {
+	r, ok, _ := fastPathLookupProofSource(ctx, c)
+	return r, ok
+}
+
+// fastPathLookupProofSource retains real vDSO provenance from the same lookup
+// that supplies the response. Consumers still enforce freshness and result gates.
+func fastPathLookupProofSource(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool, bool) {
+	ctx, receipt := vdso.WithLookupReceipt(ctx)
 	for _, fp := range abi.FastPaths() {
 		if r, ok := fp.Lookup(ctx, c); ok {
-			return r, true
+			return r, true, receipt.Matches(r)
 		}
 	}
-	return nil, false
+	return nil, false, false
 }
 
 const ReasonLoopBodyUnwitnessed = "LOOP_DONE_UNWITNESSED"
@@ -157,7 +166,7 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 		// (abi.FastPaths() -> the wired vDSO), not vdso.Default directly, so the seam
 		// respects whatever instance the gateway wired (production vdso.Default, or a
 		// fresh per-test vDSO). A miss returns ok=false and executes nothing.
-		res, ok := fastPathLookup(ctx, c2)
+		res, ok, proofSource := fastPathLookupProofSource(ctx, c2)
 		if !ok || res == nil {
 			pass = append(pass, tc) // miss -> normal adjudication path, unchanged
 			continue
@@ -183,6 +192,9 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 		}
 		served = append(served, servedToolLine(tool, body, res.Meta))
 		servedHits++
+		if proofSource {
+			FeatureActivationTrackerFromContext(ctx).RecordActivation(FeatureVDSO, FeatureOutcomeUsed)
+		}
 		adjs = append(adjs, ToolAdjudication{ToolCallID: tc.ID, Tool: tool, ArgsDigest: argsDigest, Admitted: true,
 			Verdict: WireVerdict{Kind: "ALLOW", Reason: "SERVED_INLINE", By: "vdso"}})
 	}
