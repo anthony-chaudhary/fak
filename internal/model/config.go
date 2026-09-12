@@ -197,6 +197,20 @@ type Config struct {
 	ScoringFunc         string  `json:"scoring_func,omitempty"`
 	TopKMethod          string  `json:"topk_method,omitempty"`
 
+	// MoELayout names an explicit expert-dispatch layout when a checkpoint declares
+	// one beyond the default routed-MoE path. DeepSeek-V4 W4A4 checkpoints declare
+	// "w4a4_megamoe" (SGLang v0.5.19 --enable-w4a4-megamoe). Empty keeps every legacy
+	// checkpoint on the byte-identical path; a non-empty value is a claim that MUST
+	// carry the coherent descriptor below, and AdmitDeepSeekV4Config fails closed if
+	// it does not. The weight format is deliberately restricted to MXFP4 (block 32,
+	// E8M0 scale) — the only W4A4 layout fak admits today — so an unknown or
+	// unimplemented quantization descriptor is refused before weight I/O. These
+	// fields are admission metadata: no dispatch path consumes them yet.
+	MoELayout             string `json:"moe_layout,omitempty"`
+	MoEWeightFormat       string `json:"moe_weight_format,omitempty"`
+	MoEBlockScaleElements int    `json:"moe_block_scale_elements,omitempty"`
+	MoEBlockScaleEncoding string `json:"moe_block_scale_encoding,omitempty"`
+
 	// Multi-Token-Prediction (MTP) self-speculation head metadata. Older MoE families
 	// declare num_nextn_predict_layers; Qwen3.5-text-family checkpoints declare
 	// mtp_num_hidden_layers and whether the head owns dedicated embeddings. GLM-5.2 (glm_moe_dsa) and

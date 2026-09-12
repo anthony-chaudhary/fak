@@ -57,6 +57,13 @@ func AdmitDeepSeekV4Config(c Config) error {
 			v4ConfigCheck{"o_lora_rank", c.OLoraRank == 1024, c.OLoraRank},
 		)
 	}
+	if c.MoELayout != "" {
+		checks = append(checks, v4ConfigCheck{
+			"moe_layout",
+			isDeepSeekV4MegaMoELayout(c),
+			fmt.Sprintf("layout=%s format=%s block_scale=%d/%s", c.MoELayout, c.MoEWeightFormat, c.MoEBlockScaleElements, c.MoEBlockScaleEncoding),
+		})
+	}
 	for _, check := range checks {
 		if !check.ok {
 			return fmt.Errorf("%w: %s=%v", ErrV4ConfigAdmission, check.name, check.got)
@@ -72,6 +79,21 @@ func isDeepSeekV4FlashProfile(c Config) bool {
 		c.NumExperts == 256 &&
 		c.MoEIntermediateSize == 2048 &&
 		c.RoutedScalingFactor == 1.5
+}
+
+// deepSeekV4MegaMoELayout is the only expert-dispatch layout fak admits today:
+// SGLang v0.5.19's W4A4 MegaMoE with MXFP4 weights, a 32-element block scale, and
+// an E8M0 (pure power-of-two) shared scale. The pair is checked as a unit because a
+// MXFP4 payload decoded with an NVFP4 scale stride would read every scale block at
+// the wrong offset. Keep the vocabulary aligned with FP4FormatMXFP4 / FP4ScaleE8M0
+// in fp4meta.go so the two descriptor surfaces never drift apart.
+const deepSeekV4MegaMoELayout = "w4a4_megamoe"
+
+func isDeepSeekV4MegaMoELayout(c Config) bool {
+	return c.MoELayout == deepSeekV4MegaMoELayout &&
+		FP4Format(c.MoEWeightFormat) == FP4FormatMXFP4 &&
+		c.MoEBlockScaleElements == 32 &&
+		FP4ScaleEncoding(c.MoEBlockScaleEncoding) == FP4ScaleE8M0
 }
 
 func isDeepSeekV4FlashCompressSchedule(got []int) bool {
