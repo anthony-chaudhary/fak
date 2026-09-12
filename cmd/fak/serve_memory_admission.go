@@ -34,6 +34,18 @@ func isWitnessedQwen38Q4KM(path string) bool {
 		strings.EqualFold(filepath.Base(path), "Qwen3.8-27B-Q4_K_M.gguf")
 }
 
+// qwen38UDQ2KXLArtifactBytes is the exact byte size of the canonical upstream
+// Qwen3.8-27B-UD-Q2_K_XL.gguf artifact (9,828,981,664 bytes) pinned in #11961.
+// The gate pairs the size with the exact filename so a renamed or truncated file
+// is never admitted by coincidence.
+const qwen38UDQ2KXLArtifactBytes int64 = 9828981664
+
+func isWitnessedQwen38UDQ2KXL(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Size() == qwen38UDQ2KXLArtifactBytes &&
+		strings.EqualFold(filepath.Base(path), "Qwen3.8-27B-UD-Q2_K_XL.gguf")
+}
+
 var serveReadMemory = memgate.ReadMemory
 
 func defaultLocalReservationDir() string {

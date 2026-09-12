@@ -37,6 +37,29 @@ func TestServeQwen38PackedEmbeddingRouting(t *testing.T) {
 		}
 	})
 
+	t.Run("exact UD-Q2_K_XL artifact on native Metal retains packed Q2_K rows", func(t *testing.T) {
+		path := writeServePackedQ2KEmbeddingFixture(t, "Qwen3.8-27B-UD-Q2_K_XL.gguf")
+		m, residentQ4K, _, _ := loadServeInKernelModel(path, nil, false, 0, nil, 1, nil)
+		if m == nil || !residentQ4K {
+			t.Fatalf("serve load = model %v residentQ4K=%v, want non-nil/true", m, residentQ4K)
+		}
+		if m.Q2KEmbedding == nil || m.Q2KEmbedding.Format() != "Q2_K" {
+			t.Fatalf("token embedding = %v, want packed Q2_K", m.Q2KEmbedding)
+		}
+		if m.HasF32("model.embed_tokens.weight") {
+			t.Fatal("selected UD-Q2_K_XL artifact expanded token embedding to F32")
+		}
+	})
+
+	t.Run("UD-Q2_K_XL recipe but unwitnessed file keeps prior F32 layout", func(t *testing.T) {
+		path := writeServePackedQ2KEmbeddingFixture(t, "Qwen3.8-27B-UD-Q2_K_XL-shard2.gguf")
+		m, residentQ4K, _, _ := loadServeInKernelModel(path, nil, false, 0, nil, 1, nil)
+		if m == nil || !residentQ4K {
+			t.Fatalf("serve load = model %v residentQ4K=%v, want non-nil/true", m, residentQ4K)
+		}
+		assertServeEmbeddingExpanded(t, m.Q2KEmbedding, m.HasF32("model.embed_tokens.weight"))
+	})
+
 	t.Run("different artifact keeps prior F32 layout", func(t *testing.T) {
 		path := writeServePackedEmbeddingFixture(t, "other-Q4_K_M.gguf", false)
 		m, residentQ4K, _, _ := loadServeInKernelModel(path, nil, false, 0, nil, 1, nil)
@@ -48,6 +71,16 @@ func TestServeQwen38PackedEmbeddingRouting(t *testing.T) {
 
 	t.Run("explicit backend keeps prior F32 layout", func(t *testing.T) {
 		path := writeServePackedEmbeddingFixture(t, "Qwen3.8-27B-Q4_K_M.gguf", true)
+		backend := serveCapBackend{Backend: compute.Default(), uploadDtype: true}
+		m, residentQ4K, _, _ := loadServeInKernelModel(path, backend, false, 0, nil, 1, nil)
+		if m == nil || !residentQ4K {
+			t.Fatalf("serve load = model %v residentQ4K=%v, want non-nil/true", m, residentQ4K)
+		}
+		assertServeEmbeddingExpanded(t, m.Q2KEmbedding, m.HasF32("model.embed_tokens.weight"))
+	})
+
+	t.Run("explicit backend on UD-Q2_K_XL keeps prior F32 layout", func(t *testing.T) {
+		path := writeServePackedQ2KEmbeddingFixture(t, "Qwen3.8-27B-UD-Q2_K_XL.gguf")
 		backend := serveCapBackend{Backend: compute.Default(), uploadDtype: true}
 		m, residentQ4K, _, _ := loadServeInKernelModel(path, backend, false, 0, nil, 1, nil)
 		if m == nil || !residentQ4K {
@@ -75,6 +108,60 @@ func assertServeEmbeddingExpanded(t *testing.T, packed *fakmodel.Q2KEmbedding, h
 	if !hasF32 {
 		t.Fatal("non-target token embedding missing prior F32 layout")
 	}
+}
+
+// writeServePackedQ2KEmbeddingFixture writes the smallest dense Qwen hybrid GGUF
+// whose token_embd.weight is Q2_K (matching the UD-Q2_K_XL artifact) plus a Q4_K
+// tensor so the artifact stays on the resident-Q4_K serve arm. It is truncated to
+// the exact witnessed UD-Q2_K_XL byte size so the file-name/size gate admits it,
+// without allocating or reading a 27B checkpoint.
+func writeServePackedQ2KEmbeddingFixture(t *testing.T, base string) string {
+	t.Helper()
+	const (
+		dim          = 256
+		vocab        = 3
+		q2BlockBytes = 84
+		q4BlockBytes = 144
+		q6BlockBytes = 210
+	)
+	embedBytes := uint64(vocab * q2BlockBytes)
+	outputBytes := uint64(vocab * q6BlockBytes)
+	linearBytes := uint64(dim * q4BlockBytes)
+	align32 := func(n uint64) uint64 { return (n + 31) &^ 31 }
+
+	var b bytes.Buffer
+	writeMinimalHeaderForTest(&b, 5, 10)
+	writeKVStringForTest(&b, "general.architecture", "qwen35")
+	writeKVUint32ForTest(&b, "general.alignment", 32)
+	writeKVUint32ForTest(&b, "qwen35.embedding_length", dim)
+	writeKVUint32ForTest(&b, "qwen35.block_count", 2)
+	writeKVUint32ForTest(&b, "qwen35.attention.head_count", 1)
+	writeKVUint32ForTest(&b, "qwen35.attention.head_count_kv", 1)
+	writeKVUint32ForTest(&b, "qwen35.full_attention_interval", 4)
+	writeKVUint32ForTest(&b, "qwen35.attention.key_length", dim)
+	writeKVUint32ForTest(&b, "qwen35.feed_forward_length", dim)
+	writeKVFloat32ForTest(&b, "qwen35.attention.layer_norm_rms_epsilon", 1e-6)
+
+	offset := uint64(0)
+	writeTensorInfoForTest(&b, "token_embd.weight", []uint64{dim, vocab}, uint32(ggufload.TensorQ2_K), offset)
+	offset = align32(offset + embedBytes)
+	writeTensorInfoForTest(&b, "output.weight", []uint64{dim, vocab}, uint32(ggufload.TensorQ6_K), offset)
+	offset = align32(offset + outputBytes)
+	for _, name := range []string{"blk.0.attn_v.weight", "blk.0.ffn_up.weight", "blk.0.ffn_down.weight"} {
+		writeTensorInfoForTest(&b, name, []uint64{dim, dim}, uint32(ggufload.TensorQ4_K), offset)
+		offset = align32(offset + linearBytes)
+	}
+	padToAlignmentForTest(&b, 32)
+	b.Write(make([]byte, int(offset)))
+
+	path := filepath.Join(t.TempDir(), base)
+	if err := os.WriteFile(path, b.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(path, qwen38UDQ2KXLArtifactBytes); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 // writeServePackedEmbeddingFixture writes the smallest dense Qwen hybrid GGUF
