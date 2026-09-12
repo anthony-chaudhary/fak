@@ -1,0 +1,24 @@
+﻿{
+  "schema": "fak-witness-receipt/1",
+  "issue": "https://github.com/anthony-chaudhary/fak/issues/12746",
+  "test": "TestInKernelPlannerVulkanMTPExecutionReceiptAccountsResidentTransaction",
+  "package": "github.com/anthony-chaudhary/fak/internal/agent",
+  "command": "GOWORK=off go test ./internal/agent -run '^TestInKernelPlannerVulkanMTPExecutionReceiptAccountsResidentTransaction$' -count=25 -v",
+  "repetitions": 25,
+  "passed": 25,
+  "failed": 0,
+  "exit_code": 0,
+  "elapsed_zero_failures": 0,
+  "package_test_command": "GOWORK=off go test ./internal/agent -count=1 -timeout 15m",
+  "package_test_outcome": "PASS",
+  "package_test_duration_sec": 158.7,
+  "package_test_exit_code": 0,
+  "host_os": "Microsoft Windows NT 10.0.26200.0",
+  "go_version": "go version go1.26.0 windows/amd64",
+  "generated_at_utc": "2026-09-12T20:40:48.5510791Z",
+  "files": [
+    "mtp-count25.log",
+    "agent-package.log",
+    "receipt.json"
+  ]
+}
