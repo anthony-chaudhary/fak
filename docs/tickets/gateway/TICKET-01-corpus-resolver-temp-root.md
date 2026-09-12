@@ -4,6 +4,14 @@
 
 ## Current state
 
+The negative fixture now changes into an empty temporary directory and resolves
+the relative path `child`. The resolver visits `child` and `.`, where
+`filepath.Dir(".") == "."` terminates the walk. Both visited directories are
+module-free; physical ancestors outside this relative chain are never searched.
+The existing resolver and three synthetic-module cases are unchanged.
+
+## Original failure
+
 `TestCalibrationDriftCorpusResolvesTheTrackedMirror/no_module_root_resolves_nothing`
 assumes `t.TempDir()` is outside every Go module. Managed worker validation may
 place temporary directories beneath the detached worktree, so
@@ -66,19 +74,19 @@ not weaken the assertion into a skip.
 
 ## Done condition
 
-- [ ] The no-module-root case constructs an ancestor chain that cannot contain
+- [x] The no-module-root case constructs an ancestor chain that cannot contain
       the checkout's `go.mod`.
-- [ ] The live-only, tracked-only, and both-present synthetic module cases retain
+- [x] The live-only, tracked-only, and both-present synthetic module cases retain
       their #5406 behavior.
-- [ ] The focused test passes both with the normal host temp directory and with
+- [x] The focused test passes both with the normal host temp directory and with
       `GOTMPDIR` rooted beneath the repository.
-- [ ] The scoped gateway suite passes in a managed detached worktree.
+- [x] The scoped gateway suite passes in a managed detached worktree.
 
 ## Definition of Done
 
-- [ ] The test verdict is independent of `GOTMPDIR`/`TEMP`/`TMP` placement.
-- [ ] Production corpus resolution is unchanged.
-- [ ] No private host path appears in test output or committed fixtures.
+- [x] The test verdict is independent of `GOTMPDIR`/`TEMP`/`TMP` placement.
+- [x] Production corpus resolution is unchanged.
+- [x] No private host path appears in test output or committed fixtures.
 
 ## Acceptance gate
 
@@ -89,7 +97,7 @@ in a managed worktree.
 ## Closure binding
 
 The DCO-signed resolving commit closes the created public issue and carries
-`(fak agent)`.
+`(fak gateway)`.
 
 ## Witness
 
@@ -157,6 +165,21 @@ development
 ## Tracking and validation update
 
 Tracked by [#12670](https://github.com/anthony-chaudhary/fak/issues/12670).
-The full gateway suite passes when the task-specific `GOTMPDIR`, `TEMP`, and
-`TMP` directories are outside the checkout. This isolates the fixture defect;
-it does not fix the repository-local temporary-directory case.
+
+The read-only baseline at `d49abccee991b2bc6aea9a819e9829b05a9d1823`
+passed all four focused subtests with normal WSL temp placement. With
+`GOTMPDIR` and `TMPDIR` pointing beneath the checkout (`internal/gateway`),
+the negative subtest failed at line 329 while the other three passed.
+This is the captured pre-change RED witness, run with WSL Go 1.26.6 and
+`FAK_FAST=0` so the app-provisioned detached worktree was tested directly.
+
+After the fixture change, the same focused command passed all four subtests
+with normal WSL temp placement (package result: 0.128s) and with `GOTMPDIR`,
+`TMPDIR`, `TEMP`, and `TMP` pointing to `internal/gateway` beneath the checkout
+(package result: 1.493s). Both runs used `-count=1 -v`, WSL Go 1.26.6, and
+`FAK_FAST=0`; the repository-local run also set `GOWORK=off`. The successful
+test output contains no host paths. Timings identify the receipts and are not
+performance claims.
+
+The strict full gateway suite passed on base `24d99052e14ccf0ce93a005becb3288ff3a24fcb` plus the two separate test-fixture patches (#12670 and #12825) in a durable Linux LF managed worktree: package result 69.177s, exit 0. `FAK_STRICT_SERVE_LATENCY=1` kept all three latency gates active; all four corpus resolver subtests passed with `GOTMPDIR` inside the worktree. No latency threshold or skip was changed.
+This test-and-documentation change uses `EXEMPT_TEST_ONLY` provenance.

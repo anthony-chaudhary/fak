@@ -1,10 +1,56 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
+	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
+
+func TestClusterInfoSubprocess(t *testing.T) {
+	if format := os.Getenv("FAK_CLUSTER_INFO_TEST_CHILD"); format != "" {
+		args := []string{"info"}
+		if format == "json" {
+			args = append(args, "--json")
+		}
+		cmdCluster(args)
+		os.Exit(0)
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestClusterInfoSubprocess$")
+	cmd.Env = append(os.Environ(), "FAK_CLUSTER_INFO_TEST_CHILD=json")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("cluster info subprocess: %v", err)
+	}
+	var report clusterInfoReport
+	if err := json.Unmarshal(out, &report); err != nil {
+		t.Fatalf("decode cluster info output %q: %v", out, err)
+	}
+	if report.Schema != "fak.cluster-local-discovery/1" || report.Source != "local_system_discovery" {
+		t.Fatalf("unexpected provenance: schema=%q source=%q", report.Schema, report.Source)
+	}
+	if report.ProofScope != "configuration_only_not_data_transfer_or_working_mesh" {
+		t.Fatalf("proof_scope = %q", report.ProofScope)
+	}
+	if report.Discovery == nil {
+		t.Fatal("cluster info omitted discovery payload")
+	}
+
+	cmd = exec.Command(os.Args[0], "-test.run=^TestClusterInfoSubprocess$")
+	cmd.Env = append(os.Environ(), "FAK_CLUSTER_INFO_TEST_CHILD=text")
+	out, err = cmd.Output()
+	if err != nil {
+		t.Fatalf("cluster info text subprocess: %v", err)
+	}
+	text := string(out)
+	if !strings.Contains(text, "Local Discovery") || !strings.Contains(text, "does not prove data transfer or a working mesh") {
+		t.Fatalf("cluster info text lacks honest proof scope: %q", text)
+	}
+}
 
 // cluster_test.go — gates `fak cluster`, the runnable multi-node collective. The
 // command is a thin shell over internal/model's DistComm (whose own tests prove the
