@@ -802,6 +802,9 @@ func ResidentQ4KEligible(cfg Config, canon string) bool {
 // be stored as a resident raw-quant block (a 2-D quant weight that is not a fused QKV /
 // gate_up projection). ok==false with err==nil means "skip, not eligible" (idempotent).
 func (b *QuantBuilder) residentQuantTarget(canon string, shape []int) (name string, ok bool, err error) {
+	if err := b.refuseV41(); err != nil {
+		return "", false, err
+	}
 	if b.built {
 		return "", false, fmt.Errorf("model: QuantBuilder already built")
 	}
@@ -853,6 +856,9 @@ func (b *QuantBuilder) AddResidentQ4K(canon string, shape []int, raw []byte) err
 func (b *QuantBuilder) AddCanonicalMTPQ4K(canon string, shape []int, raw []byte) error {
 	if b == nil || b.m == nil {
 		return fmt.Errorf("model: nil QuantBuilder")
+	}
+	if err := b.refuseV41(); err != nil {
+		return err
 	}
 	if b.built {
 		return fmt.Errorf("model: QuantBuilder already built")
@@ -935,6 +941,9 @@ func (b *QuantBuilder) AddCanonicalMTPQ4K(canon string, shape []int, raw []byte)
 func (b *QuantBuilder) AddCanonicalMTPFCQ8(canon string, shape []int, raw []byte) error {
 	if b == nil || b.m == nil {
 		return fmt.Errorf("model: nil QuantBuilder")
+	}
+	if err := b.refuseV41(); err != nil {
+		return err
 	}
 	if b.built {
 		return fmt.Errorf("model: QuantBuilder already built")
