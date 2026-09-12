@@ -674,6 +674,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			},
 		})
 	}
+	ctx = withClientToolSchemas(ctx, req.Tools)
 
 	// True streaming fast path: when the client asked to stream AND the planner can
 	// stream this wire, forward the upstream tokens live for a real time-to-first-token
