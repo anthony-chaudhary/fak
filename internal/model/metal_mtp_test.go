@@ -1238,3 +1238,76 @@ func TestMetalMTPWideMUsesBatchedVerifier(t *testing.T) {
 		}
 	})
 }
+
+// TestMetalMTPProposeCancellationLeavesTargetUntouched is the repro witness for
+// #12348: a cancellation returned by the drafter must propagate to the caller as
+// the SAME error, not be swallowed into a draft miss that then steps the target.
+//
+// The propose function returns context.Canceled while the context handed to
+// StepRound is still live, so StepRound's own ctx.Err() pre-check (metal_mtp.go:700)
+// cannot mask the defect: execution reaches the drafter and its error surfaces at
+// the `pErr != nil` draft-miss branch (metal_mtp.go:749), which on the unfixed code
+// steals a target step and bumps totalGenerated. On the fixed code the error is
+// returned with target state and counters untouched.
+func TestMetalMTPProposeCancellationLeavesTargetUntouched(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	prompt := []int{0, 1, 2}
+
+	target := m.NewSession()
+	t.Cleanup(target.Close)
+	boundary := target.Prefill(prompt)
+
+	coord, err := target.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
+	if err != nil {
+		t.Fatalf("NewMetalMTPCoordinator failed: %v", err)
+	}
+	t.Cleanup(func() { _ = coord.Close() })
+
+	coord.SetDrafter(NewMTPProposalGeneratorWithFn(func(ctx context.Context, committed []int, maxDraft int) ([]int, error) {
+		return nil, context.Canceled
+	}))
+
+	committed := append([]int(nil), prompt...)
+	statsBefore := coord.Stats()
+	cacheLenBefore := target.Cache.Len()
+
+	accepted, bonus, nextLogits, err := coord.StepRound(context.Background(), committed, boundary)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("StepRound swallowed drafter cancellation: err=%v, want context.Canceled", err)
+	}
+	if accepted != nil {
+		t.Fatalf("accepted = %v, want nil on cancellation", accepted)
+	}
+	if nextLogits != nil {
+		t.Fatalf("nextLogits = %v, want nil on cancellation", nextLogits)
+	}
+	if bonus != -1 {
+		t.Fatalf("bonus = %d, want -1 on cancellation", bonus)
+	}
+	// The whole counter surface must be frozen: a cancellation is not a draft
+	// round, so nothing may be proposed, accepted, rolled back, or paged.
+	statsAfter := coord.Stats()
+	if statsAfter.TotalGenerated != statsBefore.TotalGenerated {
+		t.Fatalf("TotalGenerated advanced on cancellation: got %d, want %d", statsAfter.TotalGenerated, statsBefore.TotalGenerated)
+	}
+	if statsAfter.TotalProposed != statsBefore.TotalProposed {
+		t.Fatalf("TotalProposed advanced on cancellation: got %d, want %d", statsAfter.TotalProposed, statsBefore.TotalProposed)
+	}
+	if statsAfter.TotalAccepted != statsBefore.TotalAccepted {
+		t.Fatalf("TotalAccepted advanced on cancellation: got %d, want %d", statsAfter.TotalAccepted, statsBefore.TotalAccepted)
+	}
+	if statsAfter.TotalRollbacks != statsBefore.TotalRollbacks {
+		t.Fatalf("TotalRollbacks advanced on cancellation: got %d, want %d", statsAfter.TotalRollbacks, statsBefore.TotalRollbacks)
+	}
+	if statsAfter.CommittedPages != statsBefore.CommittedPages || statsAfter.FreedPages != statsBefore.FreedPages {
+		t.Fatalf("draft pages advanced on cancellation: committed %d->%d, freed %d->%d",
+			statsBefore.CommittedPages, statsAfter.CommittedPages, statsBefore.FreedPages, statsAfter.FreedPages)
+	}
+	if statsAfter.InFallback != statsBefore.InFallback {
+		t.Fatalf("fallback mode flipped on cancellation: %v -> %v", statsBefore.InFallback, statsAfter.InFallback)
+	}
+	if got := target.Cache.Len(); got != cacheLenBefore {
+		t.Fatalf("target Cache.Len advanced on cancellation: got %d, want %d", got, cacheLenBefore)
+	}
+}
