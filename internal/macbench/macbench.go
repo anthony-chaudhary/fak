@@ -499,18 +499,77 @@ type Options struct {
 	Concurrency   int
 	HTTPClient    *http.Client
 	Now           func() time.Time
+	// MinPrefillTPS and MinDecodeTPS are optional ABSOLUTE throughput floors,
+	// in tokens/second. When positive, Run grades the report against them and
+	// records a SLO verdict (Report.SLO). Zero (the default) disables the gate,
+	// so every existing caller keeps byte-identical behavior.
+	MinPrefillTPS float64
+	MinDecodeTPS  float64
 }
 
 type Report struct {
-	Schema      string   `json:"schema"`
-	GeneratedAt string   `json:"generated_at"`
-	Suite       Suite    `json:"suite"`
-	Gateway     string   `json:"gateway"`
-	Model       string   `json:"model"`
-	Health      Health   `json:"health"`
-	Rows        []Row    `json:"rows,omitempty"`
-	Headline    string   `json:"headline,omitempty"`
-	Errors      []string `json:"errors,omitempty"`
+	Schema      string      `json:"schema"`
+	GeneratedAt string      `json:"generated_at"`
+	Suite       Suite       `json:"suite"`
+	Gateway     string      `json:"gateway"`
+	Model       string      `json:"model"`
+	Health      Health      `json:"health"`
+	Rows        []Row       `json:"rows,omitempty"`
+	SLO         *SLOVerdict `json:"slo,omitempty"`
+	// GPUUtilPct is the sampled device_utilization_pct observed during the run
+	// (0 = not sampled). It is populated by the CLI caller (fak macbench) from
+	// the platform observability collector, so this package stays dependency-free.
+	GPUUtilPct float64  `json:"gpu_utilization_pct,omitempty"`
+	Headline   string   `json:"headline,omitempty"`
+	Errors     []string `json:"errors,omitempty"`
+}
+
+// SLOVerdict is the ABSOLUTE throughput grade for a macbench run. It is
+// populated only when the caller set a positive MinPrefillTPS/MinDecodeTPS
+// floor; under the default (zero) options it is nil and the report is
+// byte-identical to the pre-SLO envelope. BestPrefillTPS/BestDecodeTPS are the
+// best row of that kind seen in the run (the headline number a human reads).
+type SLOVerdict struct {
+	Schema         string  `json:"schema"`
+	MinPrefillTPS  float64 `json:"min_prefill_tps"`
+	MinDecodeTPS   float64 `json:"min_decode_tps"`
+	BestPrefillTPS float64 `json:"best_prefill_tps,omitempty"`
+	BestDecodeTPS  float64 `json:"best_decode_tps,omitempty"`
+	PrefillOK      bool    `json:"prefill_ok"`
+	DecodeOK       bool    `json:"decode_ok"`
+	OK             bool    `json:"ok"`
+}
+
+// GradeSLO folds the best prefill and decode throughput observed in a report
+// against the absolute floors. A non-positive floor is treated as waived (OK).
+// It returns nil when neither floor was set, so the report stays SLO-free.
+func GradeSLO(rows []Row, minPrefill, minDecode float64) *SLOVerdict {
+	if minPrefill <= 0 && minDecode <= 0 {
+		return nil
+	}
+	var bestPre, bestDec float64
+	for _, r := range rows {
+		if r.Error != "" || r.HTTPStatus >= 400 {
+			continue
+		}
+		if r.PrefillTokensPerSecond > bestPre {
+			bestPre = r.PrefillTokensPerSecond
+		}
+		if r.TokensPerSecond > bestDec {
+			bestDec = r.TokensPerSecond
+		}
+	}
+	v := &SLOVerdict{
+		Schema:         "fak.macbench.slo.v1",
+		MinPrefillTPS:  minPrefill,
+		MinDecodeTPS:   minDecode,
+		BestPrefillTPS: bestPre,
+		BestDecodeTPS:  bestDec,
+	}
+	v.PrefillOK = minPrefill <= 0 || bestPre >= minPrefill
+	v.DecodeOK = minDecode <= 0 || bestDec >= minDecode
+	v.OK = v.PrefillOK && v.DecodeOK
+	return v
 }
 
 type Health struct {
@@ -786,6 +845,7 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 	}
 	sanitizeReportErrors(&rep, base)
 	rep.Headline = headline(rep.Rows)
+	rep.SLO = GradeSLO(rep.Rows, opts.MinPrefillTPS, opts.MinDecodeTPS)
 	return rep, nil
 }
 

@@ -68,7 +68,11 @@ type InKernelPlanner struct {
 	// qwenQ4KPrefillChunkTokens and its typed parse error are resolved once at
 	// construction. The error is request-gated to the exact resident hybrid path,
 	// so an unrelated model remains byte-for-byte on its historical forward.
-	qwenQ4KPrefillChunkTokens    int
+	qwenQ4KPrefillChunkTokens int
+	// qwenQ4KPrefillChunkExplicit records that the operator enabled the existing
+	// chunk-size experiment. Only that setting is capped to the device's widest
+	// single-allocation token panel; the unset default remains historical.
+	qwenQ4KPrefillChunkExplicit  bool
 	qwenQ4KPrefillChunkConfigErr *model.InKernelQwenQ4KPrefillChunkConfigError
 	qwen35MetalGDNSequence       bool
 	q4kGateUpOutputSlab          bool
@@ -1962,6 +1966,11 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	}()
 	if p.qwenQ4KPrefillChunkTarget() && p.qwenQ4KPrefillChunkConfigErr != nil {
 		return nil, p.qwenQ4KPrefillChunkConfigErr
+	}
+	if p.qwenQ4KPrefillChunkExplicit && p.qwenQ4KPrefillChunkTarget() {
+		if _, capacityErr := p.deviceBoundedQwenQ4KPrefillChunkTokens(); capacityErr != nil {
+			return nil, capacityErr
+		}
 	}
 	sp := applySampleOpts(opts...)
 	if sp.NativeDecodeTokenIDs && !sp.DecodeTrace {

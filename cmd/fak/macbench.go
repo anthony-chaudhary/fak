@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/macbench"
+	"github.com/anthony-chaudhary/fak/internal/macobs"
 )
 
 func cmdMacBench(argv []string) { os.Exit(runMacBench(os.Stdout, os.Stderr, argv)) }
@@ -67,6 +68,8 @@ func runMacBench(stdout, stderr io.Writer, argv []string) int {
 	decodeTokens := fs.String("decode-tokens", "16,32,64,128,256,512", "comma-separated max_tokens for decode-longgen")
 	prefillTokens := fs.String("prefill-tokens", "128,512,2048,4096", "comma-separated prompt-token targets for prefill-sweep")
 	concurrency := fs.Int("concurrency", 2, "concurrent requests for the 2stream suite")
+	minPrefillTPS := fs.Float64("min-prefill-tps", 0, "absolute prefill throughput floor in tokens/second; >0 fails the run when no row meets it (0 disables)")
+	minDecodeTPS := fs.Float64("min-decode-tps", 0, "absolute decode throughput floor in tokens/second; >0 fails the run when no row meets it (0 disables)")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -92,6 +95,7 @@ func runMacBench(stdout, stderr io.Writer, argv []string) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
+	gpuUtilBefore := sampleGPUUtilPct(ctx)
 	rep, err := macbench.Run(ctx, macbench.Options{
 		Gateway:       *gateway,
 		Model:         *model,
@@ -100,10 +104,17 @@ func runMacBench(stdout, stderr io.Writer, argv []string) int {
 		DecodeTokens:  dec,
 		PrefillTokens: pre,
 		Concurrency:   *concurrency,
+		MinPrefillTPS: *minPrefillTPS,
+		MinDecodeTPS:  *minDecodeTPS,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "fak macbench: %v\n", err)
 		return 1
+	}
+	gpuUtilAfter := sampleGPUUtilPct(ctx)
+	rep.GPUUtilPct = gpuUtilBefore
+	if gpuUtilAfter > rep.GPUUtilPct {
+		rep.GPUUtilPct = gpuUtilAfter
 	}
 	if *asJSON {
 		_ = writeIndentedJSONNoEscape(stdout, rep)
@@ -111,6 +122,11 @@ func runMacBench(stdout, stderr io.Writer, argv []string) int {
 		renderMacBench(stdout, rep)
 	}
 	if rep.HasErrors() {
+		return 1
+	}
+	if rep.SLO != nil && !rep.SLO.OK {
+		fmt.Fprintf(stderr, "fak macbench: SLO MISS best_prefill=%.1f tok/s (floor %.1f) best_decode=%.1f tok/s (floor %.1f)\n",
+			rep.SLO.BestPrefillTPS, rep.SLO.MinPrefillTPS, rep.SLO.BestDecodeTPS, rep.SLO.MinDecodeTPS)
 		return 1
 	}
 	return 0
@@ -1281,4 +1297,15 @@ func parseIntCSV(s string) ([]int, error) {
 		return nil, fmt.Errorf("at least one value is required")
 	}
 	return out, nil
+}
+
+// sampleGPUUtilPct reads the platform device_utilization_pct once (0 when the
+// collector is unavailable, e.g. non-darwin or a missing ioreg). It is
+// best-effort observability: a sampling error never fails the benchmark.
+func sampleGPUUtilPct(ctx context.Context) float64 {
+	snap, err := macobs.NewCollector().Observe(ctx)
+	if err != nil {
+		return 0
+	}
+	return snap.Hardware.DeviceUtilizationPct
 }
