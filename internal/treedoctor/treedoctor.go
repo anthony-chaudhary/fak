@@ -145,8 +145,8 @@ type WorktreeState struct {
 	IsSelfUpdate bool   `json:"is_self_update,omitempty"` // owned and collected by selfinstall's stricter GC
 	Merged       bool   `json:"merged"`                   // HEAD is an ancestor of Trunk (commits already on the trunk)
 	Live         bool   `json:"live"`                     // touched within LiveWindow — an active session, keep
-	DirtyN       int    `json:"dirty_n"`                  // count of uncommitted entries (informational)
-	Archive      bool   `json:"archive,omitempty"`        // dirty worker content must be archived before removal
+	DirtyN       int    `json:"dirty_n"`                  // count of uncommitted entries; -1 when status is unavailable
+	Archive      bool   `json:"archive,omitempty"`        // dirty content must be archived before removal
 	Prunable     bool   `json:"prunable"`                 // safe to remove: (Merged || IsWorker) && !Live && !IsMain
 	Keep         string `json:"keep,omitempty"`
 }
@@ -311,8 +311,8 @@ func Sweep(ctx context.Context, run Runner, opts Options, apply bool) (Report, [
 			kind = "orphan worker worktree"
 		}
 		if w.Archive {
-			// This lightweight Go sweep has no archive writer. Preserve dirty crashed-
-			// worker output and direct automation to the archive-capable doctor instead
+			// This lightweight Go sweep has no archive writer. Preserve dirty worktree
+			// output and direct automation to the archive-capable doctor instead
 			// of silently destroying it with `git worktree remove --force`.
 			actions = append(actions, "archive required before pruning "+kind+" "+w.Path)
 			continue
@@ -473,9 +473,10 @@ func diagnoseWorktrees(ctx context.Context, run Runner, repoRoot, trunk string, 
 		if _, code, aerr := run(ctx, wt.path, "merge-base", "--is-ancestor", "HEAD", trunk); aerr == nil && code == 0 {
 			s.Merged = true
 		}
-		// Dirty count (informational; does not gate the prune — a merged worktree's only
-		// uncommitted content is by definition not on the trunk and is scratch/stale).
-		if porc, _, derr := run(ctx, wt.path, "status", "--porcelain"); derr == nil {
+		// Merged ancestry covers commits, not uncommitted content. An unsuccessful
+		// status probe must remain unknown rather than making a tree appear clean.
+		s.DirtyN = -1
+		if porc, code, derr := run(ctx, wt.path, "status", "--porcelain"); derr == nil && code == 0 {
 			s.DirtyN = countLines(porc)
 		}
 		// Live? a recent touch or a live stamped owner means an active session.
@@ -499,17 +500,18 @@ func diagnoseWorktrees(ctx context.Context, run Runner, repoRoot, trunk string, 
 			if s.Keep == "" {
 				s.Keep = "live (touched within window)"
 			}
+		case s.DirtyN < 0:
+			s.Keep = "status unavailable"
 		case s.IsWorker:
-			// A fak-worker-wt-* worktree is throwaway editing space, but a crashed
-			// worker can leave its only useful diff here. Mark dirty trees for an
-			// archive-before-remove action; the CLI refuses to remove them otherwise.
-			s.Archive = s.DirtyN > 0
 			s.Prunable = true
 		case !s.Merged:
 			s.Keep = "not merged into " + trunk
 		default:
 			s.Prunable = true
 		}
+		// Any candidate can contain its only useful diff, regardless of its name
+		// or merged HEAD. Sweep must preserve that content until it is archived.
+		s.Archive = s.Prunable && s.DirtyN > 0
 		states = append(states, s)
 	}
 	return states
