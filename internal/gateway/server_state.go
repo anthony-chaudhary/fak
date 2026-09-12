@@ -508,6 +508,8 @@ type Server struct {
 	// startup is the one-time boot timeline (start -> ready, per-phase costs),
 	// exposed as fak_gateway_startup_* gauges. See startup.go.
 	startup *startupProfile
+	// stopping is monotonic for this server's lifecycle and leaves boot timing intact.
+	stopping atomic.Bool
 	// modelLoad is the optional boot-time weight-load breakdown set by the host via
 	// SetModelLoadProfile when it eagerly loads a model (fak serve --gguf). nil
 	// suppresses every fak_model_load_* metric. Guarded by modelLoadMu.

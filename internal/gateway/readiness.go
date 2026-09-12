@@ -27,8 +27,8 @@ func (c *readinessCapture) Write(p []byte) (int, error) {
 }
 
 // handleReady projects the existing health evaluation onto an orchestration
-// readiness endpoint. It adds only the listener/startup gate recorded by
-// MarkReady; model, warmup, served-failure, and provider gates remain owned by
+// readiness endpoint. It adds startup and stopping gates; model, warmup,
+// served-failure, and provider gates remain owned by
 // handleHealth.
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	capture := &readinessCapture{}
@@ -50,7 +50,11 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		"metrics":       startupReady,
 	}
 	ok, _ := health["ok"].(bool)
-	if !startupReady {
+	stopping := s != nil && s.stopping.Load()
+	if stopping {
+		health["stopping"] = true
+	}
+	if !startupReady || stopping {
 		ok = false
 		health["ok"] = false
 	}

@@ -13,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -260,6 +261,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 // its own listener and calls Serve directly. It mirrors net/http.Server's
 // ListenAndServe/Serve split.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
+	drainTimeout := parseHTTPDrainTimeout(os.Getenv("FAK_HTTP_DRAIN_TIMEOUT_S"))
 	// Record the address we actually bound so a served descriptor can name this
 	// process instead of a literal (#5642). This is the ONLY point where the chosen
 	// address is known — with an ephemeral ":0" bind the port does not exist until
@@ -334,15 +336,35 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	}
 	select {
 	case <-ctx.Done():
+		s.stopping.Store(true)
+		if s.logf != nil {
+			var inflight int64
+			if s.metrics != nil {
+				inflight = atomic.LoadInt64(&s.metrics.inflight)
+			}
+			s.logf("fak gateway shutdown: drain_timeout=%s inflight_requests=%d", drainTimeout, inflight)
+		}
 		// Join the background loops first (bounded), then drain the HTTP surface, so a
 		// wedged loop is reported rather than silently outliving the gateway.
 		s.stopLoops()
-		shctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shctx, cancel := context.WithTimeout(context.Background(), drainTimeout)
 		defer cancel()
 		return hs.Shutdown(shctx)
 	case err := <-errc:
 		return err
 	}
+}
+
+const defaultHTTPDrainTimeout = 5 * time.Second
+
+// parseHTTPDrainTimeout accepts positive whole seconds that fit in a Duration.
+// Invalid values retain the default so shutdown always has a finite deadline.
+func parseHTTPDrainTimeout(raw string) time.Duration {
+	n, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || n <= 0 || n > int64((1<<63-1)/time.Second) {
+		return defaultHTTPDrainTimeout
+	}
+	return time.Duration(n) * time.Second
 }
 
 // logfWriter adapts the gateway's structured logf onto io.Writer so an http.Server.ErrorLog
