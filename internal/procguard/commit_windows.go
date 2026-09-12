@@ -74,6 +74,16 @@ func collectMemorySnapshot(rootPID int) (MemorySnapshot, bool, string) {
 		s.TreeBytes += commit
 		s.Processes = append(s.Processes, MemoryProcess{PID: pid, PPID: ppid, Name: row.Name, CommandLine: row.Cmdline, Bytes: commit})
 	}
+	system, _, detail := collectSystemMemorySnapshot()
+	s.SystemBytes = system.SystemBytes
+	s.SystemLimit = system.SystemLimit
+	s.HostPhysicalBytes = system.HostPhysicalBytes
+	s.HostPhysicalAvailableBytes = system.HostPhysicalAvailableBytes
+	return s, true, detail
+}
+
+func collectSystemMemorySnapshot() (MemorySnapshot, bool, string) {
+	s := MemorySnapshot{Metric: MemoryMetricCommit}
 	var perf performanceInformation
 	perf.CB = unsafe.Sizeof(perf)
 	r, _, callErr := procGetPerformanceInfo.Call(uintptr(unsafe.Pointer(&perf)), perf.CB)
@@ -111,13 +121,11 @@ func windowsCommitOwnedPIDs(rootPID int, byPID map[int]Proc, children map[int][]
 }
 
 func hostPhysicalMemoryBytes() (uint64, string) {
-	var perf performanceInformation
-	perf.CB = unsafe.Sizeof(perf)
-	r, _, callErr := procGetPerformanceInfo.Call(uintptr(unsafe.Pointer(&perf)), perf.CB)
-	if r == 0 {
-		return 0, fmt.Sprintf("GetPerformanceInfo: %v", callErr)
+	s, _, detail := collectSystemMemorySnapshot()
+	if detail != "" {
+		return 0, detail
 	}
-	return uint64(perf.PhysicalTotal) * uint64(perf.PageSize), ""
+	return s.HostPhysicalBytes, ""
 }
 
 // processExitedDuringSnapshot recognizes the Windows result for a PID that vanished

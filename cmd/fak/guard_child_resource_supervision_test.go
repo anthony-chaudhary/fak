@@ -42,6 +42,111 @@ func guardHeadroomBreachForSupervisionTest() guardChildWaitEvent {
 	return guardChildWaitEvent{Kind: guardChildResourceLimit, Reason: guardResourceReason(decision), Resource: &decision}
 }
 
+func TestGuardPrelaunchSystemCommitHeadroom(t *testing.T) {
+	const required = uint64(10)
+	for _, tt := range []struct {
+		name         string
+		snapshot     procguard.MemorySnapshot
+		supported    bool
+		detail       string
+		wantStart    bool
+		wantErr      string
+		wantObserved string
+		wantRequired string
+		wantDetail   string
+		wantAbsent   string
+	}{
+		{
+			name:         "below reserve refuses before child work",
+			snapshot:     procguard.MemorySnapshot{Metric: procguard.MemoryMetricCommit, SystemBytes: 91, SystemLimit: 100, Processes: []procguard.MemoryProcess{{CommandLine: "fixture child arguments"}}},
+			supported:    true,
+			wantErr:      procguard.SystemCommitHeadroomReason,
+			wantObserved: "observed 9 bytes",
+			wantRequired: "required 10 bytes",
+			wantAbsent:   "fixture child arguments",
+		},
+		{
+			name:         "exact reserve refuses before child work",
+			snapshot:     procguard.MemorySnapshot{Metric: procguard.MemoryMetricCommit, SystemBytes: 90, SystemLimit: 100},
+			supported:    true,
+			wantErr:      procguard.SystemCommitHeadroomReason,
+			wantObserved: "observed 10 bytes",
+			wantRequired: "required 10 bytes",
+		},
+		{
+			name:      "above reserve starts",
+			snapshot:  procguard.MemorySnapshot{Metric: procguard.MemoryMetricCommit, SystemBytes: 89, SystemLimit: 100},
+			supported: true,
+			wantStart: true,
+		},
+		{
+			name:      "unsupported platform preserves launch",
+			detail:    "system commit accounting unsupported on this platform",
+			wantStart: true,
+		},
+		{
+			name:       "supported telemetry failure fails closed",
+			snapshot:   procguard.MemorySnapshot{Metric: procguard.MemoryMetricCommit},
+			supported:  true,
+			detail:     "GetPerformanceInfo failed",
+			wantErr:    "CHILD_RESOURCE_COLLECTOR_FAILURE",
+			wantDetail: "GetPerformanceInfo failed",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			collectorCalls := 0
+			starts := 0
+			providerRequests := 0
+			invoked, err := guardStartChildAfterSystemCommitAdmission(
+				guardResourcePolicy{MinSystemHeadroom: required},
+				func() (procguard.MemorySnapshot, bool, string) {
+					collectorCalls++
+					return tt.snapshot, tt.supported, tt.detail
+				},
+				func() error {
+					starts++
+					providerRequests++
+					return nil
+				},
+			)
+			if collectorCalls != 1 {
+				t.Fatalf("collector calls=%d, want 1", collectorCalls)
+			}
+			if invoked != tt.wantStart || starts != guardTestBoolInt(tt.wantStart) || providerRequests != guardTestBoolInt(tt.wantStart) {
+				t.Fatalf("invoked=%v starts=%d provider_requests=%d want_start=%v", invoked, starts, providerRequests, tt.wantStart)
+			}
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected admission error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("admission error=%v, want %q", err, tt.wantErr)
+			}
+			if tt.wantObserved != "" && !strings.Contains(err.Error(), tt.wantObserved) {
+				t.Fatalf("admission error=%q, want observed evidence %q", err, tt.wantObserved)
+			}
+			if tt.wantRequired != "" && !strings.Contains(err.Error(), tt.wantRequired) {
+				t.Fatalf("admission error=%q, want required evidence %q", err, tt.wantRequired)
+			}
+			if tt.wantDetail != "" && !strings.Contains(err.Error(), tt.wantDetail) {
+				t.Fatalf("admission error=%q, want telemetry detail %q", err, tt.wantDetail)
+			}
+			if tt.wantAbsent != "" && strings.Contains(err.Error(), tt.wantAbsent) {
+				t.Fatalf("admission error exposed process command: %q", err)
+			}
+		})
+	}
+}
+
+func guardTestBoolInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
+}
+
 func TestGuardChildResourceSupervisionContainsOnlyMeasuredBreaches(t *testing.T) {
 	inspectionFailure := guardInspectionFailureForSupervisionTest()
 	if guardChildResourceNeedsContainment(inspectionFailure) {

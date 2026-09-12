@@ -102,6 +102,13 @@ func CollectMemorySnapshot(rootPID int) (snapshot MemorySnapshot, supported bool
 	return collectMemorySnapshot(rootPID)
 }
 
+// CollectSystemMemorySnapshot returns operating-system-wide commit accounting
+// without requiring a child process to exist. supported=false means the host
+// does not expose system commit as a distinct metric.
+func CollectSystemMemorySnapshot() (snapshot MemorySnapshot, supported bool, detail string) {
+	return collectSystemMemorySnapshot()
+}
+
 // HostPhysicalMemoryBytes returns the host's installed physical memory when the
 // platform exposes it. Callers use this only to size a ceiling, never as a claim
 // about current system memory pressure.

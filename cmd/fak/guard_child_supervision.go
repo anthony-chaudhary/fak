@@ -382,10 +382,17 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
 		startupProgress.Phase("OS process start")
 		resourcePolicy := guardResourcePolicyConfigured()
-		job, startErr := windowgate.StartManagedAgentInNewJob(child, windowgate.ManagedJobConfig{MemoryLimitBytes: resourcePolicy.MaxTreeBytes})
+		var job *windowgate.JobObject
+		startInvoked, startErr := guardStartChildAfterSystemCommitAdmission(resourcePolicy, procguard.CollectSystemMemorySnapshot, func() error {
+			var err error
+			job, err = windowgate.StartManagedAgentInNewJob(child, windowgate.ManagedJobConfig{MemoryLimitBytes: resourcePolicy.MaxTreeBytes})
+			return err
+		})
 		if startErr != nil {
 			startupProgress.Abort()
-			terminalGuardChild(child, startErr, "launch_failed")
+			if startInvoked {
+				terminalGuardChild(child, startErr, "launch_failed")
+			}
 			finishGuardChildAndReport(startErr, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
@@ -619,12 +626,19 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
 		startupProgress.Phase("OS process start")
 		resourcePolicy := guardResourcePolicyConfigured()
-		job, err := windowgate.StartManagedAgentInNewJob(child, windowgate.ManagedJobConfig{MemoryLimitBytes: resourcePolicy.MaxTreeBytes})
+		var job *windowgate.JobObject
+		startInvoked, err := guardStartChildAfterSystemCommitAdmission(resourcePolicy, procguard.CollectSystemMemorySnapshot, func() error {
+			var startErr error
+			job, startErr = windowgate.StartManagedAgentInNewJob(child, windowgate.ManagedJobConfig{MemoryLimitBytes: resourcePolicy.MaxTreeBytes})
+			return startErr
+		})
 		if err != nil {
 			startupProgress.Abort()
 			// Start/containment failing IS a launch failure: either the child never ran, or
 			// StartInNewJob reaped it because the teardown invariant could not be armed.
-			guardDumpStartupReportOnLaunchFail(os.Stderr, srv, dumpStartupOnLaunchFail)
+			if startInvoked {
+				guardDumpStartupReportOnLaunchFail(os.Stderr, srv, dumpStartupOnLaunchFail)
+			}
 			finishGuardChildAndReport(err, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
