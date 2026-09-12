@@ -89,7 +89,7 @@ func TestMetalKVCacheRestoration(t *testing.T) {
 			result.ResumptionLatency, result.SpeedupRatio, result.RestoredTokens)
 	})
 
-	t.Run("TenXTTFTSpeedup", func(t *testing.T) {
+	t.Run("PerformanceAttributionStaysUnmeasuredWithoutBaseline", func(t *testing.T) {
 		mmu := ctxmmu.New()
 		pool := ctxmmu.NewSharedTokenPool()
 		forkMgr := ctxmmu.NewForkManager()
@@ -118,21 +118,20 @@ func TestMetalKVCacheRestoration(t *testing.T) {
 			t.Fatalf("RestoreMetalKV failed: %v", err)
 		}
 
-		// For 4096 tokens at canonical Mac default rate 48.54 tok/s:
-		// Cold prefill would take ~84.38 seconds.
-		// In-place restoration takes < 25 ms (typically < 100 µs).
-		// Speedup must comfortably exceed 10x.
-		if result.SpeedupRatio < ctxmmu.MinTargetSpeedupRatio {
-			t.Fatalf("SpeedupRatio = %.2fx, want >= %.1fx",
-				result.SpeedupRatio, ctxmmu.MinTargetSpeedupRatio)
+		// No run-bound cold-prefill baseline was supplied, so the receipt must
+		// stay explicitly unmeasured: never a fabricated 1.0x and never a ratio
+		// derived from a historical constant.
+		if result.SpeedupMeasured {
+			t.Fatalf("SpeedupMeasured = true, want false without a run-bound baseline")
+		}
+		if result.SpeedupRatio != 0 || result.EstimatedColdPrefill != 0 {
+			t.Fatalf("receipt = %+v, want explicitly unmeasured zero values", result)
 		}
 
-		if result.EstimatedColdPrefill <= 0 {
-			t.Fatalf("EstimatedColdPrefill = %v, want > 0", result.EstimatedColdPrefill)
+		// Functional restoration is independent of performance attribution.
+		if result.RestoredTokens != tokenCount {
+			t.Fatalf("RestoredTokens = %d, want %d", result.RestoredTokens, tokenCount)
 		}
-
-		t.Logf("4096-token session: cold prefill ~%v vs in-place restore %v -> %.2fx TTFT speedup",
-			result.EstimatedColdPrefill, result.ResumptionLatency, result.SpeedupRatio)
 	})
 
 	t.Run("CompactionCarryover", func(t *testing.T) {
@@ -300,8 +299,11 @@ func TestMetalKVCacheRestoration(t *testing.T) {
 		if metrics.TokensRestoredTotal != 512 {
 			t.Fatalf("TokensRestoredTotal = %d, want 512", metrics.TokensRestoredTotal)
 		}
-		if metrics.EstimatedPrefillSecondsSaved <= 0 {
-			t.Fatalf("EstimatedPrefillSecondsSaved = %f, want > 0", metrics.EstimatedPrefillSecondsSaved)
+		if metrics.EstimatedPrefillSecondsSaved != 0 {
+			t.Fatalf("EstimatedPrefillSecondsSaved = %f, want 0 without a measured baseline", metrics.EstimatedPrefillSecondsSaved)
+		}
+		if metrics.MeasuredRestorationsTotal != 0 {
+			t.Fatalf("MeasuredRestorationsTotal = %d, want 0 without a measured baseline", metrics.MeasuredRestorationsTotal)
 		}
 
 		prom := metrics.PrometheusMetrics()

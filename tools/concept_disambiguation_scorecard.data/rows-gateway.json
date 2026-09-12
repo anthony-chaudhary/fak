@@ -122,7 +122,9 @@
       "definition": "The gateway's per-turn split of in-kernel prompt tokens by PROVENANCE source (local_compute / local_cache_hit / external_kv_transfer), orthogonal to the reuse-depth family; the three sum to the by-source prompt tokens. external_kv_transfer isolates the disaggregation dividend — tokens a remote / L3 KV tier served that a single box would otherwise have re-prefilled.",
       "distinction": "Splits the SAME prompt tokens by WHERE reuse came from (source axis); distinct from x2-gateway-engine-fakgatewaykvprefix, the reuse-DEPTH family that measures HOW MUCH was reused.",
       "distinct_from": [
-        "x2-gateway-engine-fakgatewaykvprefix"
+        "x2-gateway-engine-fakgatewaykvprefix",
+        "gateway-feature-proof-receipt",
+        "kernel-completion-timing"
       ],
       "aliases": [],
       "grounding": "fak_gateway_kv_prefix_prompt_tokens_by_source_total",
@@ -187,6 +189,86 @@
       ],
       "aliases": [],
       "grounding": "fak_gateway_compaction_thrash_sessions_total",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "gateway-feature-proof-receipt",
+      "canonical": "FeatureProofReceipt",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "Bounded process-local observation of applied Anthropic or native typed compaction, result elision, or accepted real-vDSO serving, retaining quantitative digests or an explicit proof-generation failure.",
+      "distinction": "Each receipt ties an executed feature to byte or lookup evidence. Catalog configuration and activation headers alone do not prove savings; the transient LookupReceipt establishes only exact-result provenance. This observation does not persist settlement evidence or authorize execution.",
+      "distinct_from": [
+        "vdso-lookup-receipt",
+        "fakgatewaykvprefixprompttokensbysourcetotal"
+      ],
+      "aliases": [],
+      "grounding": "FeatureProofReceipt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "gateway-feature-cache-proof",
+      "canonical": "FeatureCacheProof",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Quantitative accepted-vDSO-hit evidence binding the actual gateway call identity digest to its served payload digest; measured resident entries also carry a signed historical-engine-minus-current-lookup estimate.",
+      "distinction": "LookupReceipt authenticates an exact result transiently. This bounded proof records the accepted hit and explicit timing basis without claiming an internal cache key or a measured counterfactual saving. Unmeasured entries retain null timing quantities.",
+      "distinct_from": [
+        "vdso-lookup-receipt"
+      ],
+      "aliases": [],
+      "grounding": "FeatureCacheProof",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "gateway-feature-rewrite-witness",
+      "canonical": "FeatureRewriteWitness",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "Input to the pure Anthropic byte-rewrite verifier specifying protected prefix and suffix bounds, exact claimed byte delta and labeled token estimates.",
+      "distinction": "The witness is verifier input rather than proof that execution occurred. The structural producer selects the real regions; the verifier checks their byte equality and measured delta before a FeatureProofReceipt can retain the result. Native typed-message observations use separately labeled representation evidence.",
+      "distinct_from": [
+        "vdso-lookup-receipt"
+      ],
+      "aliases": [],
+      "grounding": "FeatureRewriteWitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kernel-completion-timing",
+      "canonical": "FieldCompletionTiming",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Opaque completion attestation minted by the kernel around an actual successful engine execution, binding a measured wall-clock duration to the exact call and result contents.",
+      "distinction": "Gateway counters aggregate observations; this transient attestation authenticates one prior execution measurement. A cache-hit duration estimate additionally requires the exact resident entry and current lookup receipt; it does not measure an avoided counterfactual execution.",
+      "distinct_from": [
+        "fakgatewaykvprefixprompttokensbysourcetotal"
+      ],
+      "aliases": [
+        "kernel_completion_timing",
+        "CompletionTimingNanos"
+      ],
+      "grounding": "FieldCompletionTiming",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

@@ -80,7 +80,10 @@
       "distinct_from": [
         "world-state-witness",
         "gateway-feature-activation-tracker",
-        "native-compaction-observation"
+        "native-compaction-observation",
+        "gateway-feature-proof-receipt",
+        "gateway-feature-cache-proof",
+        "gateway-feature-rewrite-witness"
       ],
       "aliases": [
         "LookupReceipt",

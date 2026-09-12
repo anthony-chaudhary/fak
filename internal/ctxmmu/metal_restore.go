@@ -22,10 +22,6 @@ import (
 // unchanged prefix tokens, delivering >10x TTFT speedup.
 
 const (
-	// MacDefaultPrefillRateToksPerSec is the canonical Qwen3.8-27B Q4_K_M prefill throughput on
-	// the Mac hardware default (Apple M3 Pro 36GB, node-macos-a) from BENCHMARK-AUTHORITY.md row 2424.
-	MacDefaultPrefillRateToksPerSec float64 = 48.54
-
 	// MaxResumptionLatencyThreshold is the upper bound on zero-copy in-place restoration latency (<25ms).
 	MaxResumptionLatencyThreshold time.Duration = 25 * time.Millisecond
 
@@ -49,6 +45,7 @@ type MetalRestorationResult struct {
 	PhysicalBytesTransferred int64         `json:"physical_bytes_transferred"` // strictly 0 on UMA
 	EstimatedColdPrefill     time.Duration `json:"estimated_cold_prefill"`
 	SpeedupRatio             float64       `json:"speedup_ratio"`
+	SpeedupMeasured          bool          `json:"speedup_measured"`
 	PrefixHashHex            string        `json:"prefix_hash_hex"`
 	TargetArch               string        `json:"target_arch"`
 	RestoredAt               time.Time     `json:"restored_at"`
@@ -61,6 +58,7 @@ type MetalKVMetrics struct {
 	TotalResumptionLatency       time.Duration `json:"total_resumption_latency"`
 	EstimatedPrefillSecondsSaved float64       `json:"estimated_prefill_seconds_saved"`
 	AverageSpeedupRatio          float64       `json:"average_speedup_ratio"`
+	MeasuredRestorationsTotal    int64         `json:"measured_restorations_total"`
 }
 
 // PrometheusMetrics formats the metrics for the gateway Prometheus scrape endpoint.
@@ -184,13 +182,10 @@ func (r *MetalKVRestorer) RestoreMetalKV(sessionID string) (*MetalRestorationRes
 		tokens = desc.CommittedTokens
 	}
 
-	coldPrefillSec := float64(tokens) / MacDefaultPrefillRateToksPerSec
-	coldPrefillDur := time.Duration(coldPrefillSec * float64(time.Second))
-
-	speedup := 1.0
-	if latency > 0 {
-		speedup = coldPrefillDur.Seconds() / latency.Seconds()
-	}
+	// Performance attribution is only emitted when a caller supplies an explicit,
+	// run-bound cold-prefill baseline. Without one the fields remain explicitly
+	// unmeasured rather than falling back to a historical constant.
+	perf := deriveMetalRestorePerformance(tokens, latency, 0)
 
 	targetArch := AppleSiliconMetalTargetArch
 	if runtime.GOOS != "darwin" {
@@ -202,25 +197,53 @@ func (r *MetalKVRestorer) RestoreMetalKV(sessionID string) (*MetalRestorationRes
 		RestoredTokens:           tokens,
 		ResumptionLatency:        latency,
 		PhysicalBytesTransferred: 0, // strictly 0 on UMA
-		EstimatedColdPrefill:     coldPrefillDur,
-		SpeedupRatio:             speedup,
+		EstimatedColdPrefill:     perf.EstimatedColdPrefill,
+		SpeedupRatio:             perf.SpeedupRatio,
+		SpeedupMeasured:          perf.Measured,
 		PrefixHashHex:            desc.PrefixHashHex,
 		TargetArch:               targetArch,
 		RestoredAt:               time.Now(),
 	}
 
-	// Update aggregated metrics
+	// Update aggregated metrics. Unmeasured samples contribute functional
+	// counters but never inflate performance attribution.
 	r.mu.Lock()
 	r.metrics.RestorationsTotal++
 	r.metrics.TokensRestoredTotal += int64(tokens)
 	r.metrics.TotalResumptionLatency += latency
-	r.metrics.EstimatedPrefillSecondsSaved += coldPrefillSec
-	if r.metrics.RestorationsTotal > 0 {
-		r.metrics.AverageSpeedupRatio = (r.metrics.AverageSpeedupRatio*float64(r.metrics.RestorationsTotal-1) + speedup) / float64(r.metrics.RestorationsTotal)
+	if perf.Measured {
+		r.metrics.EstimatedPrefillSecondsSaved += perf.EstimatedColdPrefill.Seconds()
+		r.metrics.MeasuredRestorationsTotal++
+		r.metrics.AverageSpeedupRatio = (r.metrics.AverageSpeedupRatio*float64(r.metrics.MeasuredRestorationsTotal-1) + perf.SpeedupRatio) / float64(r.metrics.MeasuredRestorationsTotal)
 	}
 	r.mu.Unlock()
 
 	return result, nil
+}
+
+// metalRestorePerformance is the outcome of binding a restore duration and a
+// run-bound cold-prefill baseline to performance attribution. Measured is false
+// whenever either input is absent or non-positive, in which case both numeric
+// fields are zero and no ratio is claimed.
+type metalRestorePerformance struct {
+	EstimatedColdPrefill time.Duration
+	SpeedupRatio         float64
+	Measured             bool
+}
+
+// deriveMetalRestorePerformance is a pure calculation. A ratio is produced only
+// when both a positive cold-prefill baseline and a positive restore duration are
+// supplied; otherwise the result is explicitly unmeasured. It never substitutes a
+// historical constant for a missing baseline.
+func deriveMetalRestorePerformance(tokens int, restoreLatency, coldPrefillBaseline time.Duration) metalRestorePerformance {
+	if coldPrefillBaseline <= 0 || restoreLatency <= 0 {
+		return metalRestorePerformance{}
+	}
+	return metalRestorePerformance{
+		EstimatedColdPrefill: coldPrefillBaseline,
+		SpeedupRatio:         coldPrefillBaseline.Seconds() / restoreLatency.Seconds(),
+		Measured:             true,
+	}
 }
 
 // Metrics returns a snapshot of current Metal KV restoration metrics.

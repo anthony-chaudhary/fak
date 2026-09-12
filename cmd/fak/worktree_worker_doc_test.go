@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"io"
 	"os"
 	"strings"
 	"testing"
@@ -166,22 +164,26 @@ func TestCLIReference_WorktreeWorkerSection(t *testing.T) {
 // TestWorktreeWorkerUsage_HelpAndDoc verifies that the CLI usage output points
 // to the operator guide and lists all sub-commands.
 func TestWorktreeWorkerUsage_HelpAndDoc(t *testing.T) {
-	// Capture stderr output of worktreeWorkerUsage()
-	oldStderr := os.Stderr
-	r, w, err := os.Pipe()
+	// A regular file captures help of any length without filling an unread pipe.
+	capture, err := os.CreateTemp(t.TempDir(), "worker-usage-*")
 	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
+		t.Fatalf("create stderr capture: %v", err)
 	}
-	os.Stderr = w
+	oldStderr := os.Stderr
+	t.Cleanup(func() {
+		os.Stderr = oldStderr
+		capture.Close()
+	})
+	os.Stderr = capture
 
 	worktreeWorkerUsage()
-
-	w.Close()
 	os.Stderr = oldStderr
 
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-	usage := buf.String()
+	output, err := os.ReadFile(capture.Name())
+	if err != nil {
+		t.Fatalf("read stderr capture: %v", err)
+	}
+	usage := string(output)
 
 	if !strings.Contains(usage, "docs/managed-worker-worktrees.md") {
 		t.Errorf("worktreeWorkerUsage() does not mention docs/managed-worker-worktrees.md; got:\n%s", usage)

@@ -554,9 +554,14 @@ func (k *Kernel) Reap(ctx context.Context, h abi.SubmissionHandle) (*abi.Result,
 	if r.Call == nil {
 		r.Call = p.call
 	}
+	timing := attestCompletionTiming(p.call, r, engNs)
 	k.admitResult(ctx, p.call, r)
 	k.observeCompletedResult(ctx, p.call, r)
-	emit(abi.Event{Kind: abi.EvComplete, Call: p.call, Result: r, Fields: costFields(engNs, 0)})
+	fields := costFields(engNs, 0)
+	if timing != nil {
+		fields[FieldCompletionTiming] = timing
+	}
+	emit(abi.Event{Kind: abi.EvComplete, Call: p.call, Result: r, Fields: fields})
 	return r, nil
 }
 

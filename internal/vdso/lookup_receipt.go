@@ -11,7 +11,13 @@ import (
 // It is scoped to one call and must not be retained in a request history. Result
 // metadata cannot manufacture this evidence; only Lookup writes its private state.
 type LookupReceipt struct {
-	result atomic.Pointer[abi.Result]
+	snapshot atomic.Pointer[lookupObservation]
+}
+
+type lookupObservation struct {
+	result             *abi.Result
+	historicalEngineNS int64
+	lookupNS           int64
 }
 
 type lookupReceiptContextKey struct{}
@@ -31,7 +37,25 @@ func WithLookupReceipt(ctx context.Context) (context.Context, *LookupReceipt) {
 // latest successful real Lookup in this call. A subsequent real lookup clears
 // previous evidence, including on a miss. A zero or nil receipt matches nothing.
 func (r *LookupReceipt) Matches(result *abi.Result) bool {
-	return r != nil && result != nil && r.result.Load() == result
+	if r == nil || result == nil {
+		return false
+	}
+	value := r.snapshot.Load()
+	return value != nil && value.result == result
+}
+
+// Timing returns the prior measured engine span and current lookup span for the
+// exact accepted result. Only measured resident tier-2 entries supply a baseline;
+// static, restored, search-cache, and unmeasured results remain unavailable.
+func (r *LookupReceipt) Timing(result *abi.Result) (historicalEngineNS, lookupNS int64, ok bool) {
+	if r == nil || result == nil {
+		return 0, 0, false
+	}
+	value := r.snapshot.Load()
+	if value == nil || value.result != result || value.historicalEngineNS <= 0 || value.lookupNS < 0 {
+		return 0, 0, false
+	}
+	return value.historicalEngineNS, value.lookupNS, true
 }
 
 func lookupReceiptFromContext(ctx context.Context) *LookupReceipt {
