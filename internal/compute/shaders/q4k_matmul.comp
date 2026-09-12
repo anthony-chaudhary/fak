@@ -15,7 +15,19 @@ void main() {
     int token = globalIdx / pc.outDim;
     if (row >= pc.outDim || token >= pc.tokens) return;
     int blocks = pc.inDim / 256;
-    float sum = 0.0;
+    // Eight independent accumulation chains. The products and their evaluation
+    // order within each chain are unchanged from the scalar path; only the
+    // dependency structure differs, giving the compiler bounded instruction-level
+    // overlap across the long in=5120 / in=17408 decode rows. The eight partials
+    // are folded once at the end.
+    float acc0 = 0.0;
+    float acc1 = 0.0;
+    float acc2 = 0.0;
+    float acc3 = 0.0;
+    float acc4 = 0.0;
+    float acc5 = 0.0;
+    float acc6 = 0.0;
+    float acc7 = 0.0;
     for (int sb = 0; sb < blocks; ++sb) {
         uint baseWord = uint((row * blocks + sb) * 36);
         vec2 d_dm = unpackHalf2x16(raw[baseWord]);
@@ -60,18 +72,19 @@ void main() {
                 int lane = w * 4;
 
                 // 4 low nibbles for even group
-                sum += (d_sc_e * float(bitfieldExtract(qw, 0, 4)) - dm_mn_e) * x[xBase_even + lane + 0];
-                sum += (d_sc_e * float(bitfieldExtract(qw, 8, 4)) - dm_mn_e) * x[xBase_even + lane + 1];
-                sum += (d_sc_e * float(bitfieldExtract(qw, 16, 4)) - dm_mn_e) * x[xBase_even + lane + 2];
-                sum += (d_sc_e * float(bitfieldExtract(qw, 24, 4)) - dm_mn_e) * x[xBase_even + lane + 3];
+                acc0 += (d_sc_e * float(bitfieldExtract(qw, 0, 4)) - dm_mn_e) * x[xBase_even + lane + 0];
+                acc1 += (d_sc_e * float(bitfieldExtract(qw, 8, 4)) - dm_mn_e) * x[xBase_even + lane + 1];
+                acc2 += (d_sc_e * float(bitfieldExtract(qw, 16, 4)) - dm_mn_e) * x[xBase_even + lane + 2];
+                acc3 += (d_sc_e * float(bitfieldExtract(qw, 24, 4)) - dm_mn_e) * x[xBase_even + lane + 3];
 
                 // 4 high nibbles for odd group
-                sum += (d_sc_o * float(bitfieldExtract(qw, 4, 4)) - dm_mn_o) * x[xBase_odd + lane + 0];
-                sum += (d_sc_o * float(bitfieldExtract(qw, 12, 4)) - dm_mn_o) * x[xBase_odd + lane + 1];
-                sum += (d_sc_o * float(bitfieldExtract(qw, 20, 4)) - dm_mn_o) * x[xBase_odd + lane + 2];
-                sum += (d_sc_o * float(bitfieldExtract(qw, 28, 4)) - dm_mn_o) * x[xBase_odd + lane + 3];
+                acc4 += (d_sc_o * float(bitfieldExtract(qw, 4, 4)) - dm_mn_o) * x[xBase_odd + lane + 0];
+                acc5 += (d_sc_o * float(bitfieldExtract(qw, 12, 4)) - dm_mn_o) * x[xBase_odd + lane + 1];
+                acc6 += (d_sc_o * float(bitfieldExtract(qw, 20, 4)) - dm_mn_o) * x[xBase_odd + lane + 2];
+                acc7 += (d_sc_o * float(bitfieldExtract(qw, 28, 4)) - dm_mn_o) * x[xBase_odd + lane + 3];
             }
         }
     }
+    float sum = ((acc0 + acc1) + (acc2 + acc3)) + ((acc4 + acc5) + (acc6 + acc7));
     y[token * pc.outDim + row] = sum;
 }

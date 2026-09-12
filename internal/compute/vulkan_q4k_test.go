@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -211,6 +212,75 @@ func TestVulkanQ4KMatMulParityOracleFormat(t *testing.T) {
 	}
 }
 
+// TestVulkanQ4KLongDot exercises the scalar Q4_K row dot on the long
+// in=5120 / in=17408 decode shapes where a single loop-carried accumulator is
+// most exposed. The device result (now eight independent accumulation chains)
+// is compared against the canonical CPU Q4_K reference; the oracle is the CPU
+// path, not a duplicate of the shader arithmetic, so reassociation damage would
+// show up as a parity failure.
+func TestVulkanQ4KLongDot(t *testing.T) {
+	v := q4Device(t)
+	const out = 7 // odd row count crosses a 64-lane workgroup boundary
+	for _, in := range []int{5120, 17408} {
+		t.Run(fmtInt(in), func(t *testing.T) {
+			blocks := in / q4kSuper
+			raw := make([]byte, out*blocks*q4kSuperBlock)
+			rng := rand.New(rand.NewSource(int64(in) + 12685))
+			for b := 0; b < out*blocks; b++ {
+				randQ4KBlockC(rng, raw[b*q4kSuperBlock:(b+1)*q4kSuperBlock])
+			}
+			// Mixed-sign activations exercise cancellation across the eight chains.
+			x := make([]float32, in)
+			for i := range x {
+				x[i] = rng.Float32()*2 - 1
+			}
+			hw := NewQ4K(Default(), []int{out, in}, raw)
+			dw := v.Upload(hw, Q4_K)
+			defer v.Free(dw)
+			dx := v.Upload(NewF32(Default(), []int{in}, x), F32)
+			defer v.Free(dx)
+			dy := v.MatMul(dw, dx)
+			defer v.Free(dy)
+			got := v.Read(dy)
+			want := Default().Read(Default().MatMul(hw, NewF32(Default(), []int{in}, x)))
+			if len(got) != out || len(want) != out {
+				t.Fatalf("output len got=%d want=%d, expected %d", len(got), len(want), out)
+			}
+			for i := range got {
+				if math.IsNaN(float64(got[i])) || math.IsInf(float64(got[i]), 0) {
+					t.Fatalf("row %d is non-finite: %v", i, got[i])
+				}
+			}
+			if ga, wa := argmaxF32(got), argmaxF32(want); ga != wa {
+				t.Fatalf("argmax=%d want %d", ga, wa)
+			}
+			c := cosineC(got, want)
+			if c < 0.99999 {
+				t.Fatalf("cosine %.10f < 0.99999", c)
+			}
+			if l2 := relativeL2(got, want); l2 > 1e-4 {
+				t.Fatalf("relative L2 %.10f > 1e-4", l2)
+			}
+		})
+	}
+}
+
+func fmtInt(n int) string {
+	return strconv.Itoa(n)
+}
+
+func relativeL2(got, want []float32) float64 {
+	var num, den float64
+	for i := range want {
+		d := float64(got[i]) - float64(want[i])
+		num += d * d
+		den += float64(want[i]) * float64(want[i])
+	}
+	if den == 0 {
+		return 0
+	}
+	return math.Sqrt(num / den)
+}
 func TestStrixQuantParityEmitterContract(t *testing.T) {
 	t.Run("q4k_matmul", func(t *testing.T) {
 		TestVulkanQ4KMatMulParityOracleFormat(t)
