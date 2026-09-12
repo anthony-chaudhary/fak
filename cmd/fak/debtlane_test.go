@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -541,11 +542,26 @@ func TestDebtLanesCLICoverageReceipt(t *testing.T) {
 	if receipt.Schema != debtlane.CoverageReceiptSchema {
 		t.Errorf("expected schema %s, got %s", debtlane.CoverageReceiptSchema, receipt.Schema)
 	}
-	if receipt.TargetDepth != 15 {
-		t.Errorf("expected target depth 15, got %d", receipt.TargetDepth)
+	wantDimensions := make([]string, len(debtlane.StandardDetectorDimensions))
+	for i, dimension := range debtlane.StandardDetectorDimensions {
+		wantDimensions[i] = string(dimension)
 	}
-	if len(receipt.DeclaredDimensions) != 15 {
-		t.Errorf("expected 15 declared dimensions in receipt, got %d", len(receipt.DeclaredDimensions))
+	slices.Sort(wantDimensions)
+	if receipt.TargetDepth != len(wantDimensions) {
+		t.Errorf("expected target depth %d, got %d", len(wantDimensions), receipt.TargetDepth)
+	}
+	if !slices.Equal(receipt.DeclaredDimensions, wantDimensions) {
+		t.Errorf("declared dimensions = %v, want canonical sorted dimensions %v", receipt.DeclaredDimensions, wantDimensions)
+	}
+	seen := make(map[string]bool, len(receipt.DeclaredDimensions))
+	for _, dimension := range receipt.DeclaredDimensions {
+		if seen[dimension] {
+			t.Errorf("duplicate declared dimension %q", dimension)
+		}
+		seen[dimension] = true
+	}
+	if !seen[string(debtlane.DimUngatedPerformanceBenchmark)] {
+		t.Error("coverage receipt omitted ungated performance benchmark detector")
 	}
 }
 

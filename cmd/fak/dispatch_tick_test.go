@@ -15,6 +15,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 // dispatchTickFixtureCores / dispatchTickFixtureRAMMB / dispatchTickFixtureThreads are the
@@ -1112,9 +1113,82 @@ func TestDispatchCodexLoopGateRefusesCurrentDirectThread(t *testing.T) {
 	}
 }
 
+// installDispatchManagedFixture supplies only the preparation dependency of a
+// spawn-policy test. The real admission fold still runs, and the spawner remains fake.
+func installDispatchManagedFixture(t *testing.T, root string) func(map[string]any) {
+	t.Helper()
+	// Exercise the default, independent of an operator's explicit compatibility mode.
+	t.Setenv("FLEET_WORKER_WORKTREE", "")
+	if err := os.Unsetenv("FLEET_WORKER_WORKTREE"); err != nil {
+		t.Fatal(err)
+	}
+	roles := "[branch_roles]\ndevelopment_branch = \"dev\"\nrelease_branch = \"main\"\nrelease_source = \"dev\"\npublic_front_door = \"main\"\n"
+	if err := os.WriteFile(filepath.Join(root, "dos.toml"), []byte(roles), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workerDir := filepath.Join(root, "prepared-worker")
+	if err := os.MkdirAll(workerDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const preparedBase = "1234567890123456789012345678901234567890"
+	calls := 0
+	oldPrepare := prepareManagedWorkerWorktreeFunc
+	prepareManagedWorkerWorktreeFunc = func(gotRoot, lane, key, baseSHA, wtRoot string, git workerworktree.GitRunner) workerworktree.Result {
+		calls++
+		if gotRoot != root || lane != "docs" || key != "12" || baseSHA != "" || wtRoot != "" || git != nil {
+			t.Fatalf("prepare inputs = root %q lane %q key %q base %q worktree root %q custom git %t", gotRoot, lane, key, baseSHA, wtRoot, git != nil)
+		}
+		// Successful preparation includes an owner stamp; exercise the real handoff.
+		ownerPath := workerworktree.OwnerStampPath(workerDir)
+		if err := os.MkdirAll(filepath.Dir(ownerPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		stamp := `{"schema":"fak-worker-worktree-owner/1","pid":101,"lease_id":"resolve-docs","created_at":"2026-09-12T00:00:00Z"}`
+		if err := os.WriteFile(ownerPath, []byte(stamp), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return workerworktree.Result{OK: true, Path: workerDir, BaseSHA: preparedBase}
+	}
+	t.Cleanup(func() { prepareManagedWorkerWorktreeFunc = oldPrepare })
+	return func(receipt map[string]any) {
+		t.Helper()
+		if calls != 1 || receipt["worker_worktree"] != workerDir || receipt["worker_worktree_base_sha"] != preparedBase {
+			t.Fatalf("preparation receipt: calls=%d path=%v base=%v", calls, receipt["worker_worktree"], receipt["worker_worktree_base_sha"])
+		}
+		if receipt["worker_worktree_mode"] != worktreeModeManagedDefault || receipt["worker_worktree_unsafe_shared"] == true {
+			t.Fatalf("managed admission changed: mode=%v unsafe=%v", receipt["worker_worktree_mode"], receipt["worker_worktree_unsafe_shared"])
+		}
+		if pid := receipt["worker_owner_pid"]; pid == nil || pid != mapAt(receipt, "spawned")["pid"] {
+			t.Fatalf("owner handoff pid = %v, want fake spawned pid %v", pid, mapAt(receipt, "spawned")["pid"])
+		}
+		if receipt["branch_role_error"] != nil || receipt["development_branch"] != "dev" {
+			t.Fatalf("branch-role fixture: branch=%v error=%v", receipt["development_branch"], receipt["branch_role_error"])
+		}
+	}
+}
+
+func assertDispatchManagedFixtureSpawn(t *testing.T, root, cwd string, env map[string]string) {
+	t.Helper()
+	workerDir := filepath.Join(root, "prepared-worker")
+	if cwd != workerDir {
+		t.Fatalf("spawn cwd = %q, want prepared worker %q", cwd, workerDir)
+	}
+	for key, want := range map[string]string{
+		"DISPATCH_WORKSPACE":          workerDir,
+		workerworktree.WorktreeDirEnv: workerDir,
+		"GOCACHE":                     filepath.Join(workerDir, ".gocache"),
+		"GOTMPDIR":                    filepath.Join(workerDir, ".gotmp"),
+	} {
+		if env[key] != want {
+			t.Errorf("spawn env %s = %q, want %q", key, env[key], want)
+		}
+	}
+}
+
 func TestDispatchTickLiveFailsNonzeroEarlyExitAndPinsClaudeAccountEnv(t *testing.T) {
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
 	root := t.TempDir()
+	assertPrepared := installDispatchManagedFixture(t, root)
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "ambient-token-must-not-leak")
 
 	oldBroker := launchSpawnBroker
@@ -1125,6 +1199,7 @@ func TestDispatchTickLiveFailsNonzeroEarlyExitAndPinsClaudeAccountEnv(t *testing
 		return allowLaunchBrokerGrant(a, "unit-test-allow")
 	}
 	dispatchIssueWorkerSpawner = func(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA, stdinPayload string, probeS float64) (dispatchSpawnResult, error) {
+		assertDispatchManagedFixtureSpawn(t, root, cwd, env)
 		capturedEnv = copyStringMap(env)
 		capturedAccount = account
 		if account.Tag != "acct-preflight" {
@@ -1174,6 +1249,7 @@ func TestDispatchTickLiveFailsNonzeroEarlyExitAndPinsClaudeAccountEnv(t *testing
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("bad json: %v\n%s", err, out)
 	}
+	assertPrepared(got)
 	if got["action"] != "spawn_failed" || got["verdict"] != "SPAWN_FAILED" || got["ok"] != false {
 		t.Fatalf("early-exit result = action %v verdict %v ok %v", got["action"], got["verdict"], got["ok"])
 	}

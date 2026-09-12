@@ -1,6 +1,7 @@
 package main
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
@@ -82,26 +83,62 @@ func TestBuildDispatchGraphDiamond(t *testing.T) {
 	}
 }
 
-// TestBuildDispatchGraphCycle pins the 3-cycle: the engine breaks only 2-cycles, so a 3-cycle leaves
-// all three blocked (no root, no chain) and must surface in the dedicated cycles section.
+// TestBuildDispatchGraphCycle preserves the declared cycle while projecting the
+// scheduler's deterministic SCC root and dependent chain.
 func TestBuildDispatchGraphCycle(t *testing.T) {
 	g := buildDispatchGraph(graphPayload(
 		lanedRoute(201, "203"),
 		lanedRoute(202, "201"),
 		lanedRoute(203, "202"),
 	))
-	if len(g.Roots) != 0 {
-		t.Errorf("a pure 3-cycle has no dispatchable root, got roots %v", g.Roots)
+	if !reflect.DeepEqual(g.Roots, []int{201}) {
+		t.Fatalf("cycle recovery roots = %v, want [201]", g.Roots)
 	}
-	if len(g.Chains) != 0 {
-		t.Errorf("no root can reach a 3-cycle, so there are no chains, got %d", len(g.Chains))
+	if len(g.Chains) != 1 {
+		t.Fatalf("cycle recovery chains = %d, want one", len(g.Chains))
 	}
-	if len(g.Cycles) != 1 {
-		t.Fatalf("want exactly one cycle, got %v", g.Cycles)
+	node := g.Chains[0]
+	wantIDs := []int{201, 202, 203}
+	for i, id := range wantIDs {
+		if node.Issue != id {
+			t.Fatalf("chain depth %d issue = %d, want %d", i, node.Issue, id)
+		}
+		if i == 0 && len(node.BlockedBy) != 0 || i > 0 && !reflect.DeepEqual(node.BlockedBy, []int{wantIDs[i-1]}) {
+			t.Fatalf("chain issue %d has wrong prerequisites: %v", id, node.BlockedBy)
+		}
+		if i == len(wantIDs)-1 {
+			if len(node.Blocks) != 0 {
+				t.Fatalf("last cycle member still has children: %+v", node.Blocks)
+			}
+		} else {
+			if len(node.Blocks) != 1 {
+				t.Fatalf("chain issue %d has %d children, want one", id, len(node.Blocks))
+			}
+			node = node.Blocks[0]
+		}
 	}
-	cyc := g.Cycles[0]
-	if len(cyc) != 3 || cyc[0] != 201 || cyc[1] != 202 || cyc[2] != 203 {
-		t.Fatalf("cycle should be the sorted set {201,202,203}, got %v", cyc)
+	if g.Counts.Blocked != 2 || !reflect.DeepEqual(g.Cycles, [][]int{{201, 202, 203}}) {
+		t.Fatalf("cycle projection counts/cycles = %+v / %v", g.Counts, g.Cycles)
+	}
+	for _, id := range []int{201, 202, 203} {
+		if got := countChainNode(g.Chains, id); got != 1 {
+			t.Fatalf("cycle member %d appears %d times, want once", id, got)
+		}
+	}
+}
+
+func TestBuildDispatchGraphCyclePreservesExternalPrerequisite(t *testing.T) {
+	g := buildDispatchGraph(graphPayload(
+		dispatchtick.IssueRoute{Number: 199, Title: "unrouted prerequisite"},
+		lanedRoute(201, "203"),
+		lanedRoute(202, "201", "199"),
+		lanedRoute(203, "202"),
+	))
+	if len(g.Roots) != 0 || len(g.Chains) != 0 || g.Counts.Blocked != 3 {
+		t.Fatalf("external prerequisite must hold the SCC: %+v", g)
+	}
+	if !reflect.DeepEqual(g.Cycles, [][]int{{201, 202, 203}}) {
+		t.Fatalf("declared cycle must remain visible: %v", g.Cycles)
 	}
 }
 

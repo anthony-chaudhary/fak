@@ -16,10 +16,12 @@ import (
 
 func TestDispatchCommandExecutedLiveCodexAllowsGuardedSubscriptionChildFromUnguardedParent(t *testing.T) {
 	root, threadID := dispatchCodexGateFixture(t, false)
+	assertPrepared := installDispatchManagedFixture(t, root)
 	t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", "")
 
 	got, spawned, command := runDispatchCodexGateTick(t, root)
 	t.Cleanup(func() { releaseInProcessLaneLease(root, mapAt(got, "lease")) })
+	assertPrepared(got)
 	if !spawned {
 		t.Fatalf("guarded Codex child did not reach the live spawner: %#v", got)
 	}
@@ -51,6 +53,7 @@ func TestDispatchCommandExecutedLiveCodexAllowsGuardedSubscriptionChildFromUngua
 
 func TestDispatchTickCodexLoopGateDefaultOffSkipsAudit(t *testing.T) {
 	root, _ := dispatchCodexGateFixture(t, true)
+	assertPrepared := installDispatchManagedFixture(t, root)
 	t.Setenv("FLEET_CODEX_LOOP_GATE", "")
 	t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", healthyDispatchProvider(t)+"/v1")
 
@@ -63,6 +66,7 @@ func TestDispatchTickCodexLoopGateDefaultOffSkipsAudit(t *testing.T) {
 
 	got, spawned, _ := runDispatchCodexGateTickModeArgs(t, root, true)
 	t.Cleanup(func() { releaseInProcessLaneLease(root, mapAt(got, "lease")) })
+	assertPrepared(got)
 	if !spawned || got["action"] != "spawned" || got["ok"] != true {
 		t.Fatalf("default-off Codex dispatch did not spawn: spawned=%v receipt=%#v", spawned, got)
 	}
@@ -326,6 +330,7 @@ func runDispatchCodexGateTickModeArgs(t *testing.T, root string, live bool, extr
 		return allowLaunchBrokerGrant(a, "unit-test-allow")
 	}
 	dispatchIssueWorkerSpawner = func(argv []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA, stdinPayload string, probeS float64) (dispatchSpawnResult, error) {
+		assertDispatchManagedFixtureSpawn(t, root, cwd, env)
 		spawned = true
 		command = append([]string(nil), argv...)
 		logPath := filepath.Join(runsDir, "resolve-12-20260817-140000.log")
