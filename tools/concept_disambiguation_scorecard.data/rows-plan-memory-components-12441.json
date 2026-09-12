@@ -1,0 +1,24 @@
+{
+  "rows": [
+    {
+      "family": "plan",
+      "distinction": "This function validates requested memory component bytes; Plan (planner) selects resident spans, and planCacheGeometry adapts the validated total to the existing session rebuild recipe.",
+      "definition": "PlanMemoryComponents validates independently typed KV, recurrent, expert, and scratch byte descriptors and returns their exact total within a session device budget before any pool allocation.",
+      "canonical": "PlanMemoryComponents (session byte budget)",
+      "grounding_kind": "symbol",
+      "grounding": "PlanMemoryComponents",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "aliases": [
+        "PlanMemoryComponents"
+      ],
+      "gaps": [],
+      "id": "model-plan-memory-components",
+      "parent": "",
+      "distinct_from": [
+        "plan-planner"
+      ],
+      "kind": "symbol"
+    }
+  ]
+}

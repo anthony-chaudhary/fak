@@ -75,8 +75,7 @@ func planCacheGeometry(cfg Config, req CacheGeometryRequest) (CacheGeometry, err
 	if req.ExpertRingBytes < 0 || req.KVCapacityTokens < 1 || req.DeviceBudgetBytes < 1 {
 		return CacheGeometry{}, &CacheRebuildError{Reason: CacheRebuildInvalidBudget, Err: errors.New("expert bytes must be non-negative and KV capacity and device budget must be positive")}
 	}
-	stride := int64(cfg.NumKVHeads) * int64(cfg.HeadDim)
-	kv, ok := checkedMul(int64(cfg.NumLayers), int64(req.KVCapacityTokens), stride, 3, 4)
+	kv, ok := checkedMul(int64(cfg.NumLayers), int64(req.KVCapacityTokens), int64(cfg.NumKVHeads), int64(cfg.HeadDim), 3, 4)
 	if !ok {
 		return CacheGeometry{}, &CacheRebuildError{Reason: CacheRebuildInvalidBudget, Err: errors.New("KV geometry overflows int64")}
 	}
@@ -84,11 +83,16 @@ func planCacheGeometry(cfg Config, req CacheGeometryRequest) (CacheGeometry, err
 	if !ok {
 		return CacheGeometry{}, &CacheRebuildError{Reason: CacheRebuildInvalidBudget, Err: errors.New("recurrent geometry overflows int64")}
 	}
-	total, ok := checkedAdd(req.ExpertRingBytes, kv, recurrent)
-	if !ok || total > req.DeviceBudgetBytes {
-		return CacheGeometry{}, &CacheRebuildError{Reason: CacheRebuildInvalidBudget, Err: fmt.Errorf("requested %d bytes exceeds device budget %d", total, req.DeviceBudgetBytes)}
+	// Adapt the existing rebuild recipe to allocator-independent byte planning.
+	plan, err := PlanMemoryComponents([]MemoryComponent{
+		{Kind: MemoryComponentKV, Bytes: kv},
+		{Kind: MemoryComponentRecurrent, Bytes: recurrent},
+		{Kind: MemoryComponentExpert, Bytes: req.ExpertRingBytes},
+	}, req.DeviceBudgetBytes)
+	if err != nil {
+		return CacheGeometry{}, err
 	}
-	return CacheGeometry{ExpertRingBytes: req.ExpertRingBytes, KVCapacityTokens: req.KVCapacityTokens, KVBytes: kv, RecurrentBytes: recurrent, TotalBytes: total}, nil
+	return CacheGeometry{ExpertRingBytes: req.ExpertRingBytes, KVCapacityTokens: req.KVCapacityTokens, KVBytes: kv, RecurrentBytes: recurrent, TotalBytes: plan.TotalBytes}, nil
 }
 
 func checkedMul(v ...int64) (int64, bool) {
