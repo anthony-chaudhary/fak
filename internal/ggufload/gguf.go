@@ -226,6 +226,10 @@ type File struct {
 	Tensors          []TensorInfo
 	Alignment        uint64
 	TensorDataOffset int64
+	// DeepSeek41Engram retains the DeepSeek-V4.1-Flash Engram metadata read by
+	// applyDeepSeek41Config (deepseek41.go). model.Config has no Engram fields, so
+	// the axes live here; nil for every non-deepseek41 file.
+	DeepSeek41Engram *DeepSeek41Engram
 }
 
 // WeightSource binds a parsed File to the readers that hold its tensor bytes, routing

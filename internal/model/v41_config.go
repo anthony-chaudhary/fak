@@ -53,6 +53,13 @@ type DeepSeekV41Config struct {
 	EngramHeadDim             int
 	EngramPadTokenID          int
 	EngramCompressedVocabSize int
+
+	// Vision and DSpark retain the official checkpoint's fail-closed markers.
+	// They are metadata only: their presence turns a config into a vision or
+	// DSpark request that the typed Refuse* hooks reject, and neither admits an
+	// execution path. See v41_vision.go / v41_dspark.go.
+	Vision *DeepSeekV41VisionConfig
+	DSpark *DeepSeekV41DSparkConfig
 }
 
 // IsDeepSeekV41 reports either exact V4.1 wrapper/text identity. Parsed official
@@ -82,6 +89,13 @@ type deepSeekV41TextMetadata struct {
 	EngramHeadDim             int     `json:"engram_head_dim"`
 	EngramPadTokenID          int     `json:"engram_pad_token_id"`
 	EngramCompressedVocabSize int     `json:"engram_compressed_vocab_size"`
+	NumNextNPredictLayers     int     `json:"num_nextn_predict_layers"`
+	DSparkBlockSize           int     `json:"dspark_block_size"`
+	DSparkNoiseTokenID        int     `json:"dspark_noise_token_id"`
+	DSparkTargetLayerIDs      []int   `json:"dspark_target_layer_ids"`
+	DSparkMarkovRank          int     `json:"dspark_markov_rank"`
+	DSparkNumRoutedExperts    int     `json:"dspark_n_routed_experts"`
+	DSparkNumExpertsPerTok    int     `json:"dspark_num_experts_per_tok"`
 }
 
 // MarshalJSON reconstructs the V4.1 wrapper from current Config fields. Other
@@ -113,6 +127,13 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		EngramHeadDim             int     `json:"engram_head_dim"`
 		EngramPadTokenID          int     `json:"engram_pad_token_id"`
 		EngramCompressedVocabSize int     `json:"engram_compressed_vocab_size"`
+		NumNextNPredictLayers     int     `json:"num_nextn_predict_layers"`
+		DSparkBlockSize           int     `json:"dspark_block_size"`
+		DSparkNoiseTokenID        int     `json:"dspark_noise_token_id"`
+		DSparkTargetLayerIDs      []int   `json:"dspark_target_layer_ids"`
+		DSparkMarkovRank          int     `json:"dspark_markov_rank"`
+		DSparkNumRoutedExperts    int     `json:"dspark_n_routed_experts"`
+		DSparkNumExpertsPerTok    int     `json:"dspark_num_experts_per_tok"`
 	}
 	nested := textEnvelope{
 		configAlias:      configAlias(text),
@@ -124,18 +145,55 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		EngramNHeads: m.EngramNHeads, EngramHeadDim: m.EngramHeadDim,
 		EngramPadTokenID: m.EngramPadTokenID, EngramCompressedVocabSize: m.EngramCompressedVocabSize,
 	}
+	if d := m.DSpark; d != nil {
+		nested.NumNextNPredictLayers = d.NextNPredictLayers
+		nested.DSparkBlockSize = d.BlockSize
+		nested.DSparkNoiseTokenID = d.NoiseTokenID
+		nested.DSparkTargetLayerIDs = d.TargetLayerIDs
+		nested.DSparkMarkovRank = d.MarkovRank
+		nested.DSparkNumRoutedExperts = d.NumRoutedExperts
+		nested.DSparkNumExpertsPerTok = d.NumExpertsPerTok
+	}
+	type visionEnvelope struct {
+		ModelType         string `json:"model_type"`
+		NumHiddenLayers   int    `json:"num_hidden_layers"`
+		HiddenSize        int    `json:"hidden_size"`
+		NumAttentionHeads int    `json:"num_attention_heads"`
+		PatchSize         int    `json:"patch_size"`
+		MaxImageTokens    int    `json:"max_image_tokens"`
+	}
 	type wrapperEnvelope struct {
 		configAlias
 		Quantization DeepSeekV41QuantConfig `json:"quantization_config"`
 		TextConfig   textEnvelope           `json:"text_config"`
+		VisionConfig *visionEnvelope        `json:"vision_config,omitempty"`
 	}
-	return json.Marshal(wrapperEnvelope{configAlias(root), m.Quantization, nested})
+	var vision *visionEnvelope
+	if v := m.Vision; v != nil {
+		vision = &visionEnvelope{
+			ModelType:         v.ModelType,
+			NumHiddenLayers:   v.NumLayers,
+			HiddenSize:        v.HiddenSize,
+			NumAttentionHeads: v.NumHeads,
+			PatchSize:         v.PatchSize,
+			MaxImageTokens:    v.MaxImageTokens,
+		}
+	}
+	return json.Marshal(wrapperEnvelope{configAlias(root), m.Quantization, nested, vision})
 }
 
 func parseDeepSeekV41Metadata(root, text []byte, c Config) (*DeepSeekV41Config, error) {
 	var envelope struct {
 		ModelType    string                 `json:"model_type"`
 		Quantization DeepSeekV41QuantConfig `json:"quantization_config"`
+		VisionConfig *struct {
+			ModelType      string `json:"model_type"`
+			NumHiddenLayer int    `json:"num_hidden_layers"`
+			HiddenSize     int    `json:"hidden_size"`
+			NumHeads       int    `json:"num_attention_heads"`
+			PatchSize      int    `json:"patch_size"`
+			MaxImageTokens int    `json:"max_image_tokens"`
+		} `json:"vision_config"`
 	}
 	if err := json.Unmarshal(root, &envelope); err != nil {
 		return nil, err
@@ -169,6 +227,29 @@ func parseDeepSeekV41Metadata(root, text []byte, c Config) (*DeepSeekV41Config, 
 		EngramHeadDim:             nested.EngramHeadDim,
 		EngramPadTokenID:          nested.EngramPadTokenID,
 		EngramCompressedVocabSize: nested.EngramCompressedVocabSize,
+	}
+	if v := envelope.VisionConfig; v != nil {
+		m.Vision = &DeepSeekV41VisionConfig{
+			ModelType:      v.ModelType,
+			HiddenSize:     v.HiddenSize,
+			NumLayers:      v.NumHiddenLayer,
+			NumHeads:       v.NumHeads,
+			PatchSize:      v.PatchSize,
+			MaxImageTokens: v.MaxImageTokens,
+		}
+	}
+	if nested.NumNextNPredictLayers != 0 || nested.DSparkBlockSize != 0 || nested.DSparkNoiseTokenID != 0 ||
+		len(nested.DSparkTargetLayerIDs) > 0 || nested.DSparkMarkovRank != 0 ||
+		nested.DSparkNumRoutedExperts != 0 || nested.DSparkNumExpertsPerTok != 0 {
+		m.DSpark = &DeepSeekV41DSparkConfig{
+			NextNPredictLayers: nested.NumNextNPredictLayers,
+			BlockSize:          nested.DSparkBlockSize,
+			NoiseTokenID:       nested.DSparkNoiseTokenID,
+			TargetLayerIDs:     append([]int(nil), nested.DSparkTargetLayerIDs...),
+			MarkovRank:         nested.DSparkMarkovRank,
+			NumRoutedExperts:   nested.DSparkNumRoutedExperts,
+			NumExpertsPerTok:   nested.DSparkNumExpertsPerTok,
+		}
 	}
 	if err := admitDeepSeekV41Published(c, m); err != nil {
 		return nil, err

@@ -49,6 +49,12 @@ type Config struct {
 	HiddenActivation string            `json:"hidden_activation,omitempty"`
 	TensorAliases    map[string]string `json:"tensor_aliases,omitempty"`
 
+	// ImageTokenID is the wrapper's image placeholder id (image_token_id) when
+	// the checkpoint is multimodal. Zero when absent. It is retained as a
+	// fail-closed marker: a V4.1 config that declares it is a vision request
+	// the text-only forward must refuse (see v41_vision.go).
+	ImageTokenID int `json:"image_token_id"`
+
 	// EOSTokenID is the legacy scalar EOS id. EOSTokenIDs is the Llama-3.x form, where
 	// config.json emits eos_token_id as a LIST (e.g. [128001,128008,128009]); the custom
 	// UnmarshalJSON below accepts scalar-or-list and populates both, so an int loader

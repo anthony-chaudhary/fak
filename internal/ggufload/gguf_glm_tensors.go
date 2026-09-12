@@ -135,7 +135,7 @@ const (
 
 func archUsesGGUFBatchedMoEExperts(arch string) bool {
 	switch arch {
-	case "glm_moe_dsa", "qwen3moe", "deepseek2":
+	case "glm_moe_dsa", "qwen3moe", "deepseek2", "deepseek41":
 		return true
 	}
 	return false
@@ -214,7 +214,7 @@ func archShipsMTPOrVisionSidecar(arch string) bool {
 	if archUsesMLAMoELayout(arch) {
 		return true
 	}
-	return arch == "qwen35" || arch == "qwen35moe"
+	return arch == "qwen35" || arch == "qwen35moe" || arch == "deepseek41"
 }
 
 // glmMoeDsaSkipGGUFTensorForType reports whether a tensor should be dropped from byte-accounting

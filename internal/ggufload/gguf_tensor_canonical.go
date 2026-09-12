@@ -369,6 +369,22 @@ func CanonicalTensorNameArch(name, arch string) (string, bool) {
 			return "model.layers." + layer + "." + mapped, true
 		}
 	}
+	// deepseek41 (DeepSeek-V4.1-Flash) carries MLA latent projections, a learned
+	// indexer, grouped low-rank output, hyper-connection taps, and Engram tables.
+	// The 1:1 V4-specific suffixes map through deepseek41CanonicalSuffix; Engram
+	// suffixes come back under the dedicated model.engram.<L>. root and have their
+	// layer placeholder expanded here (the suffix map carries no layer argument).
+	// Everything else falls through to the shared base map. The batched routed
+	// experts are split 1->E by the loader BEFORE this map (see deepseek41BatchedExpert),
+	// and the router mlp.gate.weight is handled by the batched-MoE branch above.
+	if archIsDeepSeek41(arch) {
+		if mapped, ok := deepseek41CanonicalSuffix(suffix); ok {
+			if strings.HasPrefix(mapped, deepseek41EngramPrefix) {
+				return strings.Replace(mapped, deepseek41EngramLayerPlaceholder, layer, 1), true
+			}
+			return "model.layers." + layer + "." + mapped, true
+		}
+	}
 	// Gemma sandwich norm: ffn_norm is the PRE-feedforward norm and post_ffw_norm the
 	// POST-feedforward norm, distinct from the post-attention norm. The Llama default
 	// keeps ffn_norm == post_attention_layernorm (the single pre-MLP norm).

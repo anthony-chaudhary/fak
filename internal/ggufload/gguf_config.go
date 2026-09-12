@@ -254,6 +254,11 @@ func (f *File) Config() (model.Config, error) {
 			return model.Config{}, err
 		}
 	}
+	if archIsDeepSeek41(canonicalGGUFArch(arch)) {
+		if err := applyDeepSeek41Config(f, arch+".", &cfg, ropeDim); err != nil {
+			return model.Config{}, err
+		}
+	}
 	if arch == "qwen3moe" {
 		applyQwen3MoEConfig(f, p, &cfg)
 	}
@@ -303,6 +308,12 @@ func canonicalGGUFArch(arch string) string {
 		// backbone, no DSA indexer, so the Moonshot-branded spellings collapse onto
 		// "deepseek2" and ride the MLA+MoE forward instead of the #934 refusal.
 		return "deepseek2"
+	case "deepseek4", "deepseek-v4", "deepseek_v4", "deepseekv4", "deepseek41", "deepseek_v41", "deepseek-v41", "deepseek-v4.1", "deepseek_v41_text":
+		// DeepSeek-V4.1-Flash. llama.cpp ships a DEEPSEEK4 converter, so these are
+		// the sibling GGUF spellings of one family; all normalize onto the single
+		// internal arch "deepseek41", DISTINCT from "deepseek2" and the older
+		// "deepseek_v4" 0731 profile.
+		return "deepseek41"
 	case "bonsai", "ternary-bonsai", "qwen3.6", "qwen36", "qwen3.8", "qwen38", "qwen-3.8", "qwen-38":
 		return "qwen35"
 	}
