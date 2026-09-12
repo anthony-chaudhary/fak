@@ -558,14 +558,11 @@ func TestLeaserefAcquireReleaseRenewAmbientSync(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("leaseref release failed with code %d: %s", code, stderr.String())
 	}
-	if len(got) != 2 {
-		t.Fatalf("expected 2 sync calls for release (fetch then push), got %d: %+v", len(got), got)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 pre-release fetch (deletion is published separately), got %d: %+v", len(got), got)
 	}
 	if got[0].surface != loopdrive.LeaseRefSyncSurfaceLeaserefRelease || got[0].written {
 		t.Errorf("release first sync = %+v, want surface leaseref_release and written=false", got[0])
-	}
-	if got[1].surface != loopdrive.LeaseRefSyncSurfaceLeaserefRelease || !got[1].written {
-		t.Errorf("release second sync = %+v, want surface leaseref_release and written=true", got[1])
 	}
 }
 

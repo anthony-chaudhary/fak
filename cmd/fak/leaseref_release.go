@@ -27,7 +27,7 @@ func runLeaserefRelease(stdout, stderr io.Writer, argv []string) int {
 	id := fs.String("id", "", "lease id to release")
 	holder := fs.String("holder", "", "the holder identity that owns the lease")
 	gen := fs.Int64("generation", 0, "the fencing token from acquire (0 = don't check the token)")
-	force := fs.Bool("force", false, "operator override: delete the record without the holder check")
+	force := fs.Bool("force", false, "operator override: delete the local record without the holder check (remote release unsupported)")
 	announce := fs.String("announce", "", "public-safe lifecycle announcement: on, off, or offline")
 	announceIssue := fs.Int("announce-issue", 0, "coordination issue number for --announce=on")
 	announceRepo := fs.String("announce-repo", "", "owner/repo for --announce=on")
@@ -59,16 +59,24 @@ func runLeaserefRelease(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak leaseref release: %v\n", err)
 			return 1
 		}
-		ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceLeaserefRelease, store, "", true)
+		// Deletion has no wildcard publication step: a fetch would restore remote state.
 		ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceRelease, announceRec, resolveAmbientLeaserefConfig(*announce, *announceIssue, *announceRepo))
 		return emitLeaserefJSON(stdout, stderr, leaseref.FenceVerdict{
 			OK:     true,
-			Detail: "lease " + *id + " force-released (holder check skipped)",
+			Detail: "lease " + *id + " force-released locally (holder check skipped; remote unchanged)",
 		}, "release")
 	}
-	v, err := store.ReleaseFenced(context.Background(), *id, *holder, *gen, time.Now())
+	ctx, cancel := context.WithTimeout(context.Background(), ambientLeaseRefSyncBudget)
+	defer cancel()
+	var v leaseref.FenceVerdict
+	var err error
+	if ambientLeaseRefSyncEnabled() {
+		v, err = store.ReleaseFencedRemote(ctx, ambientLeaseRefSyncRemote(), *id, *holder, *gen, time.Now())
+	} else {
+		v, err = store.ReleaseFenced(ctx, *id, *holder, *gen, time.Now())
+	}
 	if err == nil && v.OK {
-		ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceLeaserefRelease, store, "", true)
+		// Deletion has no wildcard publication step: a fetch would restore remote state.
 		ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceRelease, announceRec, resolveAmbientLeaserefConfig(*announce, *announceIssue, *announceRepo))
 	}
 	return emitLeaserefResult(stdout, stderr, v, err, "fak leaseref release", "release", func(v leaseref.FenceVerdict) bool { return v.OK })
