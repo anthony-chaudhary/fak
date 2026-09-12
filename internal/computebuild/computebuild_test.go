@@ -16,8 +16,8 @@ import (
 )
 
 func TestVulkanShadersCompleteness(t *testing.T) {
-	if len(VulkanShaders) != 45 {
-		t.Fatalf("expected 45 Vulkan shaders, got %d", len(VulkanShaders))
+	if len(VulkanShaders) != 46 {
+		t.Fatalf("expected 46 Vulkan shaders, got %d", len(VulkanShaders))
 	}
 
 	seen := make(map[string]bool)
@@ -35,7 +35,7 @@ func TestVulkanShadersCompleteness(t *testing.T) {
 		"rope", "swiglu", "swiglu_matmul_add", "add", "add_bias",
 		"attention", "argmax", "argmax_pairs", "q8_matmul",
 		"q8_matmul2", "q8_matmul3", "rmsnorm_q8_matmul2", "rmsnorm_q8_matmul3",
-		"swiglu_q8_matmul_add", "qwen35_gdn_conv", "qwen35_gdn_recurrent",
+		"swiglu_q8_matmul_add", "qwen35_gdn_q8_in_proj", "qwen35_gdn_conv", "qwen35_gdn_recurrent",
 		"q4k_matmul", "q4k_matmul_wave32", "q6k_matmul", "q2k_matmul", "qwen35_split_qg_panel",
 		"qwen35_partial_rope_panel", "qwen35_causal_attention_panel",
 		"sigmoid_mul", "q8_matmul_decode",
@@ -64,6 +64,29 @@ func TestVulkanShadersCompleteness(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestVulkanQwen35GDNQ8InputProjectionLoaderIsRegistered(t *testing.T) {
+	const stem = "qwen35_gdn_q8_in_proj"
+	registered := 0
+	for _, shader := range VulkanShaders {
+		if shader == stem {
+			registered++
+		}
+	}
+	if registered != 1 {
+		t.Fatalf("%s registry entries=%d, want exactly 1", stem, registered)
+	}
+	if _, err := os.Stat(filepath.Join("..", "compute", "shaders", stem+".comp")); err != nil {
+		t.Fatalf("registered optional Q8 GDN input projection source: %v", err)
+	}
+	shim, err := os.ReadFile(filepath.Join("..", "compute", "vulkan_shim.cpp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(shim), `P("`+stem+`.spv")`) {
+		t.Fatalf("native optional loader does not request registered shader %s.spv", stem)
 	}
 }
 

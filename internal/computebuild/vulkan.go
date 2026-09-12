@@ -44,6 +44,7 @@ var VulkanShaders = []string{
 	"rmsnorm_q8_matmul2",
 	"rmsnorm_q8_matmul3",
 	"swiglu_q8_matmul_add",
+	"qwen35_gdn_q8_in_proj",
 	"qwen35_gdn_conv",
 	"qwen35_gdn_recurrent",
 	"q4k_matmul",
@@ -284,7 +285,7 @@ func CompareReceiptProvenance(a, b *ComputeBuildReceipt) error {
 	return nil
 }
 
-const vulkanV2ModuleCount = 45
+const vulkanV2ModuleCount = 46
 
 var unavailableVulkanV2Causality = []string{
 	"historical_source_cleanliness",
