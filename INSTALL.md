@@ -1,12 +1,10 @@
 # Installing `fak`
 
-`fak` is the Fused Agent Kernel — one static Go binary you
-put in front of your model so every tool call is adjudicated before it runs. It has
-an external dependency set of **two `golang.org/x` extended-standard-library modules**
-(`x/term`, and `x/sys` indirectly through it), pinned by a 4-line `go.sum` — no Python,
-no CUDA toolchain — so "install" really is just *get the binary onto the box*. This page
-is for an **external adopter**: you want `fak` on your machine or in your production
-image **without cloning the monorepo**.
+`fak` runs local models and governs agent tool calls. Public installation defaults
+prioritize useful GPU builds: Apple Silicon Metal, Linux amd64 Vulkan (including
+AMD Strix Halo), and the NVIDIA CUDA container. CPU builds are secondary references
+available through explicit selection. This page is for adopters installing without
+cloning the repository.
 
 Three supported paths, fastest first:
 
@@ -14,8 +12,7 @@ Three supported paths, fastest first:
    verified prebuilt binary.
 2. [Manual download](#2-manual-download) — grab the archive for your OS/arch from the
    GitHub release yourself.
-3. [Docker](#3-docker) — a tiny distroless image for "put `fak` in front of my model in
-   production".
+3. [Docker](#3-docker) — the NVIDIA CUDA image, or a CPU reference image.
 
 [What's in the binary](#whats-in-the-binary) answers the question the three paths above
 skip — why one ~13 MB binary carries hundreds of verbs, and which of them are yours. A
@@ -25,11 +22,21 @@ status](#about-go-install) are at the end.
 Next: once `fak` is on your PATH, the [first-session tutorial](docs/fak/tutorial.md)
 walks you from the binary to your first adjudicated tool call — fully offline, no key or GPU.
 
-The published targets are **`linux/amd64`, `linux/arm64`, `darwin/amd64`,
-`darwin/arm64`, `windows/amd64`** — the same pure-Go binary on a Raspberry Pi / Jetson /
-arm64 edge gateway as on a datacenter host. Each `vX.Y.Z` release attaches one archive
-per target plus a `SHA256SUMS` file; the release workflow that produces them is
-[`.github/workflows/release-artifacts.yml`](.github/workflows/release-artifacts.yml).
+The GPU archive contract is `darwin/arm64` Metal and `linux/amd64` Vulkan.
+Vulkan archives require GNU glibc 2.39+ (Ubuntu 24.04+), the system Vulkan
+loader (`libvulkan.so.1`), and a compatible GPU driver. They include a `spirv/`
+directory that must stay beside the binary. The installer rejects older glibc;
+build Vulkan from source for older distributions.
+CPU reference archives remain available for `linux/amd64`, `linux/arm64`,
+`darwin/amd64`, `darwin/arm64`, and `windows/amd64`.
+
+The Metal archive is available on v0.54.0, backfilled from the exact tagged
+source; this adds an asset to the existing release, not a new version. This
+backfill is SHA-256-verified and ad-hoc-signed; it has no SLSA attestation or
+Apple notarization. Its checksum verifies download integrity, not source provenance.
+Vulkan publication remains pending its release and hardware gate. For Vulkan until then,
+build from source or explicitly request a CPU reference.
+A packaged backend still needs qualification on the actual model and GPU.
 
 ---
 
@@ -39,11 +46,19 @@ per target plus a `SHA256SUMS` file; the release workflow that produces them is
 curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
 ```
 
-The installer ([`install.sh`](install.sh)) detects your OS/arch, downloads the prebuilt
-static binary for the **latest** release, **verifies its SHA-256 against the release's
-`SHA256SUMS`** (it refuses to install an unverified download), and drops `fak` onto your
-PATH. No clone, no Go toolchain, no cgo. It needs only POSIX `sh`, `curl` (or `wget`),
-`tar`, and `sha256sum` (or `shasum`).
+The installer ([`install.sh`](install.sh)) defaults to Metal on Apple Silicon and
+Vulkan on Linux amd64. If `nvidia-smi -L` detects NVIDIA, it prints the CUDA
+container command. Other platforms require explicit `--variant cpu` for a CPU
+reference. Missing GPU archives never silently fall back to CPU.
+
+Downloads are verified against `SHA256SUMS` before installation. Vulkan shader
+resources are installed to `spirv/` beside `fak`. The installer needs POSIX `sh`,
+`curl` (or `wget`), `tar`, and `sha256sum` (or `shasum`).
+
+```sh
+# Explicit CPU reference:
+curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh -s -- --variant cpu
+```
 
 Then confirm:
 
@@ -64,14 +79,14 @@ Knobs (environment variables):
 
 | Variable | Effect | Default |
 | --- | --- | --- |
-| `FAK_VERSION` | Pin a version, e.g. `0.55.0` | latest release |
+| `FAK_VERSION` | Pin a version, e.g. `0.54.0` for Metal | latest release |
 | `FAK_INSTALL_DIR` | Install target directory | `/usr/local/bin` if writable, else `~/.local/bin` |
 | `FAK_REPO` | `owner/repo` override | `anthony-chaudhary/fak` |
 
-Example — pin a version into a user-local dir:
+Example — install the available v0.54.0 Metal build on Apple Silicon into a user-local dir:
 
 ```sh
-FAK_VERSION=0.55.0 FAK_INSTALL_DIR="$HOME/.local/bin" \
+FAK_VERSION=0.54.0 FAK_INSTALL_DIR="$HOME/.local/bin" \
   sh -c 'curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh'
 ```
 
@@ -86,7 +101,9 @@ If you don't want to run an installer, take the archive straight from the
 [Releases page](https://github.com/anthony-chaudhary/fak/releases). Assets are named:
 
 ```
-fak_<version>_<os>_<arch>.tar.gz     # linux/darwin
+fak_<version>_darwin_arm64_metal.tar.gz   # Apple Silicon GPU
+fak_<version>_linux_amd64_vulkan.tar.gz   # Linux GPU, includes spirv/
+fak_<version>_<os>_<arch>.tar.gz          # CPU reference
 fak_<version>_<os>_<arch>.zip        # windows
 fak_<version>_<os>_<arch>.tar.gz.sha256
 SHA256SUMS                           # aggregate, all targets
@@ -95,10 +112,15 @@ SHA256SUMS                           # aggregate, all targets
 ### Linux / macOS
 
 ```sh
-VERSION=0.55.0
+VERSION=RELEASE_WITH_GPU_ASSETS
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')          # linux | darwin
 ARCH=$(uname -m); [ "$ARCH" = x86_64 ] && ARCH=amd64; [ "$ARCH" = aarch64 ] && ARCH=arm64
-ARCHIVE="fak_${VERSION}_${OS}_${ARCH}.tar.gz"
+case "${OS}/${ARCH}" in
+  darwin/arm64) BACKEND=metal ;;
+  linux/amd64) BACKEND=vulkan ;;
+  *) echo "Choose a supported GPU target or an explicit CPU reference archive"; exit 1 ;;
+esac
+ARCHIVE="fak_${VERSION}_${OS}_${ARCH}_${BACKEND}.tar.gz"
 BASE="https://github.com/anthony-chaudhary/fak/releases/download/v${VERSION}"
 
 curl -fsSLO "${BASE}/${ARCHIVE}"
@@ -114,11 +136,15 @@ gh attestation verify "${ARCHIVE}" --repo anthony-chaudhary/fak
 
 tar -xzf "${ARCHIVE}"        # extracts: fak, LICENSE, GETTING-STARTED.md
 chmod +x fak
-sudo mv fak /usr/local/bin/  # or any dir on your PATH
+sudo cp fak /usr/local/bin/  # or any dir on your PATH
+# Vulkan requires its bundled resources beside fak:
+if [ "$BACKEND" = vulkan ]; then sudo mkdir -p /usr/local/bin/spirv; sudo cp -R spirv/. /usr/local/bin/spirv/; fi
 fak version
 ```
 
 ### Windows (PowerShell)
+
+This is the secondary CPU reference build.
 
 ```powershell
 $Version = "0.55.0"
@@ -145,14 +171,18 @@ version even with no `VERSION` file alongside it.
 
 ## 3. Docker
 
-For "put `fak` in front of my model in production", build the image from the
-[`Dockerfile`](Dockerfile) at the repo root. It's a two-stage build: the pure-Go binary
-is compiled static (`CGO_ENABLED=0`) and copied into a `distroless/static` base, so the
-final image is just that base plus one ~13 MB binary — no shell, no package manager, no
-libc, running as nonroot. (That's the *governance surface*. A GPU token engine like vLLM
-or SGLang ships a multi-GB image — roughly 8–12 GB compressed in current tags — because it
-bundles CUDA and PyTorch by design. `fak` *fronts* that engine rather than containing it,
-so its own image stays tiny and cold-starts instantly.)
+For NVIDIA native inference, start with the GPU image on a host with NVIDIA
+Container Toolkit configured:
+
+```sh
+docker run --rm --gpus all ghcr.io/anthony-chaudhary/fak:cuda-latest version
+```
+
+Then run `serve` with a supported model mounted into the container. A version
+check confirms installation; it does not qualify inference on physical hardware.
+
+The root [`Dockerfile`](Dockerfile) builds the secondary CPU reference/governance
+image (`CGO_ENABLED=0`, distroless). For a gateway in front of another engine:
 
 ```sh
 docker build -t fak .
@@ -243,8 +273,9 @@ go build -o fak-dev ./cmd/fak-dev # maintainer-only repository tooling
 
 Adopters install and deploy only `fak`. Maintainers use `fak-dev` directly for repository checks and issue/docs tooling. The legacy `fak dev ...` spelling is a compatibility handoff to a sibling or `PATH`-installed `fak-dev`; it does not link those commands into the runtime.
 
-The default binary is pure Go with no cgo (the Vulkan compute backend is behind a build
-tag and absent from the default build), so it cross-compiles cleanly:
+For a secondary CPU reference build, disable CGo explicitly. Vulkan GPU source
+builds require `-tags vulkan` and shader resources; Apple Silicon Metal requires
+CGo. The CPU reference cross-compiles cleanly:
 
 ```sh
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o fak-linux-arm64 ./cmd/fak

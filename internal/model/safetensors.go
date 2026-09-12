@@ -253,6 +253,9 @@ func decodeSafetensorF32(name string, e stEntry, src []byte) ([]byte, error) {
 // streaming one source tensor at a time into the resident f32 Model. No torch in the loop.
 // Tied embeddings are handled by Model.lmHead (no lm_head tensor in the file).
 func LoadSafetensors(path string, cfg Config) (*Model, error) {
+	if err := refuseDeepSeekV41Native(cfg); err != nil {
+		return nil, err
+	}
 	sf, err := openSafetensorsFile(path)
 	if err != nil {
 		return nil, err
@@ -265,6 +268,9 @@ func LoadSafetensors(path string, cfg Config) (*Model, error) {
 // model.safetensors.index.json weight map, each shard is streamed into the same packed f32
 // Model representation as LoadSafetensors; otherwise it falls back to model.safetensors.
 func LoadSafetensorsDir(dir string, cfg Config) (*Model, error) {
+	if err := refuseDeepSeekV41Native(cfg); err != nil {
+		return nil, err
+	}
 	return loadSafetensorsDir(dir, cfg, openSafetensorsFile)
 }
 
@@ -297,6 +303,9 @@ func safetensorsIndexShards(idxPath string) (shards []string, weightMap map[stri
 }
 
 func loadSafetensorsDir(dir string, cfg Config, open safetensorsFileOpener) (*Model, error) {
+	if err := refuseDeepSeekV41Native(cfg); err != nil {
+		return nil, err
+	}
 	idxPath := filepath.Join(dir, "model.safetensors.index.json")
 	if _, err := os.Stat(idxPath); err != nil {
 		return loadSafetensorsFilePath(filepath.Join(dir, "model.safetensors"), cfg, open)
@@ -328,6 +337,9 @@ func loadSafetensorsDir(dir string, cfg Config, open safetensorsFileOpener) (*Mo
 }
 
 func loadSafetensorsFilePath(path string, cfg Config, open safetensorsFileOpener) (*Model, error) {
+	if err := refuseDeepSeekV41Native(cfg); err != nil {
+		return nil, err
+	}
 	sf, err := open(path)
 	if err != nil {
 		return nil, err
@@ -337,6 +349,9 @@ func loadSafetensorsFilePath(path string, cfg Config, open safetensorsFileOpener
 }
 
 func loadSafetensorsFile(sf *safetensorsFile, cfg Config) (*Model, error) {
+	if err := refuseDeepSeekV41Native(cfg); err != nil {
+		return nil, err
+	}
 	// Decode every tensor into one packed f32 buffer + manifest, mirroring the torch
 	// export's layout (offset = running byte position) so Model.tensor works as-is.
 	man := map[string]tensorMeta{}

@@ -1,7 +1,7 @@
 # Dockerfile.cuda — the in-kernel GPU-serving image (#2661).
 #
 # Companion to the default `Dockerfile` (which stays the lean, GPU-free distroless
-# static image for proxy mode and remains `:latest`). This image adds a CUDA
+# static image for proxy mode and remains available under explicit CPU tags). This image adds a CUDA
 # runtime so `fak serve --gguf ... --engine inkernel --backend cuda` can bind a
 # rented GPU on a neo cloud (CoreWeave / Lambda / Crusoe / RunPod / Vast) or a
 # local box with the NVIDIA Container Toolkit installed.

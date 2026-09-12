@@ -1,8 +1,8 @@
 # release-cuda-container.yml — publish the CUDA/GPU variant of the fak OCI image.
 #
-# Companion to release-container.yml (which always publishes the lean distroless static
-# image on a v* tag — that stays the default `:latest` and is untouched by this file). This
-# workflow additionally publishes a CUDA-capable image built from Dockerfile.cuda. It fires
+# Companion to release-container.yml. This workflow publishes the versioned CUDA image;
+# release-artifacts.yml assigns mutable `:latest`/`:cuda-latest` aliases by verified digest
+# only after the complete release passes. It fires
 # on a v* tag, on a weekly schedule (so a stale `-cuda` image is refreshed off the tag
 # cadence), and on workflow_dispatch for a manual rebuild of any existing tag.
 # Dockerfile.cuda is present in-tree, so the `cuda-image` job runs; the `check` gate that
@@ -153,7 +153,6 @@ jobs:
             APP_VERSION=${{ steps.meta.outputs.version }}
           tags: |
             ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}-cuda
-            ${{ steps.meta.outputs.image }}:cuda-latest
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.version=${{ steps.meta.outputs.version }}

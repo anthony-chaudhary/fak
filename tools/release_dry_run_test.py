@@ -174,6 +174,96 @@ class ReleaseDryRunTest(unittest.TestCase):
         self.assertIn(full, ci)
         self.assertLess(ci.index(fast), ci.index(full))
 
+    def _repo_with_tag_contracts(self, failing: str | None = None) -> Path:
+        root = self._repo()
+        fixture_paths = (
+            ".github/workflows/release-artifacts.yml",
+            ".github/workflows/release-macos.yml",
+            ".github/workflows/release-container.yml",
+            ".github/workflows/release-cuda-container.yml",
+            ".github/workflows/ci.yml",
+            "install.sh",
+            "Dockerfile",
+            "Dockerfile.cuda",
+            "Makefile",
+            "scripts/build.sh",
+            "internal/compute/cuda_arch.txt",
+            "internal/compute/build_cuda.sh",
+            "internal/compute/setup_cuda_wsl.sh",
+            "tools/build_cuda_windows.ps1",
+            "tools/release_artifacts_workflow_test.py",
+            "tools/cuda_arch_targets_test.py",
+        )
+        for path in fixture_paths:
+            target = root / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / path, target)
+
+        workflow_path = root / ".github/workflows/release-artifacts.yml"
+        workflow = workflow_path.read_text(encoding="utf-8")
+        if failing == "artifact":
+            workflow = workflow.replace(
+                "          - goos: darwin\n            goarch: arm64\n", "", 1)
+        write(workflow_path, workflow)
+        if failing == "cuda":
+            docker_path = root / "Dockerfile.cuda"
+            write(
+                docker_path,
+                docker_path.read_text(encoding="utf-8").replace("12.8.1", "12.4.1"),
+            )
+        git(root, "add", *fixture_paths)
+        git(root, "commit", "-m", "add tag contracts")
+        return root
+
+    def test_fast_dry_run_reports_artifact_contract_and_command(self) -> None:
+        root = self._repo_with_tag_contracts(failing="artifact")
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPT), "HEAD", "--fast", "--json"],
+            cwd=root, text=True, encoding="utf-8", capture_output=True,
+        )
+
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        failure = json.loads(proc.stdout)["suite"]["failures"][0]
+        self.assertEqual(failure["contract"], "artifact")
+        self.assertEqual(
+            failure["command"],
+            [sys.executable, "tools/release_artifacts_workflow_test.py"],
+        )
+
+    def test_fast_dry_run_labels_cuda_contract_failure(self) -> None:
+        root = self._repo_with_tag_contracts(failing="cuda")
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPT), "HEAD", "--fast", "--json"],
+            cwd=root, text=True, encoding="utf-8", capture_output=True,
+        )
+
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        failure = json.loads(proc.stdout)["suite"]["failures"][0]
+        self.assertEqual(failure["contract"], "cuda")
+        self.assertEqual(
+            failure["command"],
+            [sys.executable, "tools/cuda_arch_targets_test.py"],
+        )
+        human = subprocess.run(
+            [sys.executable, str(SCRIPT), "HEAD", "--fast"],
+            cwd=root, text=True, encoding="utf-8", capture_output=True,
+        )
+        self.assertEqual(human.returncode, 1, human.stdout + human.stderr)
+        self.assertIn(
+            "tools/cuda_arch_targets_test.py [cuda contract]: exit 1",
+            human.stdout,
+        )
+
+    def test_full_dry_run_runs_both_valid_tag_contracts(self) -> None:
+        rd = load()
+        verdict = rd.dry_run(self._repo_with_tag_contracts(), "HEAD")
+
+        self.assertTrue(verdict["ok"], verdict)
+        self.assertEqual(verdict["mode"], "full")
+        ran = {row["test"] for row in verdict["suite"]["tests"]}
+        self.assertIn("tools/release_artifacts_workflow_test.py", ran)
+        self.assertIn("tools/cuda_arch_targets_test.py", ran)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

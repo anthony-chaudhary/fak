@@ -20,6 +20,9 @@ import (
 // additive Stage-2 axes.
 type Config struct {
 	GLM5Next bool `json:"-"`
+	// DeepSeekV41 retains the nested V4.1 Flash metadata without aliasing the
+	// incompatible deepseek_v4 runtime profile. Nil for every other family.
+	DeepSeekV41 *DeepSeekV41Config `json:"-"`
 	// EnableResidualHook gates the activation-space write seam. Its zero value is off.
 	EnableResidualHook bool
 	residualHook       ResidualHook
@@ -437,6 +440,7 @@ type configJSONHints struct {
 // export_oracle.py flattens them to, so a re-export carries them with zero code change.
 func (c *Config) UnmarshalJSON(b []byte) error {
 	c.GLM5Next = isExactGLM5NextConfig(b)
+	c.DeepSeekV41 = nil
 	aux := struct {
 		*configAlias
 		EOS eosToken `json:"eos_token_id"`
@@ -489,7 +493,15 @@ func (c *Config) UnmarshalJSON(b []byte) error {
 	if len(c.EOSTokenIDs) > 0 {
 		c.EOSTokenID = c.EOSTokenIDs[0]
 	}
-	return c.deriveConfigAxes(hints)
+	if err := c.deriveConfigAxes(hints); err != nil {
+		return err
+	}
+	metadata, err := parseDeepSeekV41Metadata(b, lm, *c)
+	if err != nil {
+		return err
+	}
+	c.DeepSeekV41 = metadata
+	return nil
 }
 
 // promoteLongRope lifts a CLASSIC-key rope_scaling block of the named kind onto the flat

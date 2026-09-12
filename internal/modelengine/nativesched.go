@@ -427,6 +427,15 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 	}
 
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		// A shutdown that began during synchronous prefill has already retired the
+		// run loop; publishing this lane would orphan its request and KV-bearing
+		// session. Reject it and release the freshly created session exactly once.
+		cancel()
+		sess.Close()
+		return nil, errSchedClosed
+	}
 	s.seqNo++
 	ln.seqNo = s.seqNo
 	s.waiting = append(s.waiting, ln)
