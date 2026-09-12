@@ -47,7 +47,16 @@ func TestRichDashboardDormantUntilFirstClickThenRedirects(t *testing.T) {
 	defer m.close()
 	m.baseURL = "http://grafana.test"
 	var probes atomic.Int32
-	m.probe = func(context.Context, string) error { probes.Add(1); return nil }
+	probeRelease := make(chan struct{})
+	m.probe = func(ctx context.Context, _ string) error {
+		probes.Add(1)
+		select {
+		case <-probeRelease:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	s := testServerWithRichDashboards(t, m)
 
 	home := httptest.NewRecorder()
@@ -69,6 +78,9 @@ func TestRichDashboardDormantUntilFirstClickThenRedirects(t *testing.T) {
 		!strings.Contains(body, "After a Docker or host restart") {
 		t.Fatalf("first click = %d %q, want progress render", first.Code, first.Body.String())
 	}
+	// Keep activation pending until the progress render has been witnessed.
+	// An immediately successful probe can otherwise race ensure's snapshot.
+	close(probeRelease)
 	waitDashboardState(t, m, "ready")
 
 	ready := httptest.NewRecorder()

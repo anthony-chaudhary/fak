@@ -325,8 +325,15 @@ func TestCalibrationDriftCorpusResolvesTheTrackedMirror(t *testing.T) {
 	})
 
 	t.Run("no module root resolves nothing", func(t *testing.T) {
-		if got, ok := resolveCorpusFrom(t.TempDir()); ok {
-			t.Fatalf("resolved %q outside any module root", got)
+		t.Chdir(t.TempDir())
+		if err := os.Mkdir("child", 0o755); err != nil {
+			t.Fatalf("mkdir child: %v", err)
+		}
+		// Relative traversal visits child and then ".", where filepath.Dir
+		// reaches its fixed point. Neither directory has go.mod, and the walk
+		// cannot escape to a checkout enclosing the host's temporary directory.
+		if got, ok := resolveCorpusFrom("child"); ok || got != "" {
+			t.Fatal("resolved a corpus from the module-free relative ancestor chain")
 		}
 	})
 }
