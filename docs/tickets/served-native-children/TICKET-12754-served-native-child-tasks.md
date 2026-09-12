@@ -89,3 +89,5 @@ with the unchanged baseline implementation overlaid. The repaired assertion
 compares semantic copies with only tool duration excluded, preserving raw
 measurements and every lifecycle/outcome assertion. Its 30-run focused witness
 also passed.
+
+Landed and pushed: 6d960c89c875224c9fcfe0d77f4b7999cd4e937f. Parent guarded landing passed prospective and post-merge verification; public leak audit passed. Full gateway suite passed (64.807 s); focused Windows race passed (1.927 s), vet passed, and observer timing regression passed 30 repetitions. Ref #12754.
