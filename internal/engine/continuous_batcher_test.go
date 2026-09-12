@@ -547,3 +547,55 @@ func TestContinuousBatcher_ContextCancellation(t *testing.T) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }
+
+// TestContinuousBatcher_ClosePreservesBufferedToken verifies that Close() closes
+// the token channel WITHOUT draining an already-buffered token. A reader must
+// still observe the in-flight token before the channel reports closed.
+func TestContinuousBatcher_ClosePreservesBufferedToken(t *testing.T) {
+	cfg := DefaultContinuousBatcherConfig()
+	cfg.MaxSlots = 1
+
+	cb, err := NewContinuousBatcher(cfg)
+	if err != nil {
+		t.Fatalf("NewContinuousBatcher failed: %v", err)
+	}
+
+	ctx := context.Background()
+	if _, err := cb.Submit(&SubagentRequest{
+		SessionID:    "close-buffered",
+		PromptTokens: []int{7},
+		TargetTokens: 4,
+	}); err != nil {
+		t.Fatalf("Submit failed: %v", err)
+	}
+
+	if _, err := cb.Step(ctx); err != nil {
+		t.Fatalf("Step failed: %v", err)
+	}
+
+	slot, ok := cb.GetSlot("close-buffered")
+	if !ok {
+		t.Fatal("session close-buffered not found")
+	}
+	want := slot.LastToken
+
+	if err := cb.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+
+	select {
+	case got, open := <-slot.Tokens():
+		if !open {
+			t.Fatal("Close() drained the buffered token and closed tokenCh without delivering it")
+		}
+		if got != want {
+			t.Fatalf("buffered token = %d, want %d", got, want)
+		}
+	default:
+		t.Fatal("Close() did not deliver the buffered token")
+	}
+
+	if _, open := <-slot.Tokens(); open {
+		t.Fatal("tokenCh still open after Close(); Close() failed to close the channel")
+	}
+}
