@@ -30,7 +30,8 @@
       "definition": "internal/agent/mock.go's MockPlanner is a deterministic, offline agent.Planner that emulates a real planner with a fixed scripted sequence, used in CI and as cmd/fak/main.go's fallback.",
       "distinction": "It is scripted and offline, NOT a live network planner (HTTPPlanner) and NOT the internal/agenttest ScriptedPlanner test fixture.",
       "distinct_from": [
-        "HTTPPlanner (agent client)"
+        "HTTPPlanner (agent client)",
+        "catalog12581-mock-planner-feature"
       ],
       "aliases": [
         "newmockplanner"

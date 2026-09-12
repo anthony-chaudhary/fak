@@ -151,7 +151,7 @@
       "kind": "config",
       "definition": "internal/ablate/ablate.go: the ablation feature name 'uncached_trim' - the toggle whose effect on the workload is measured when trimming context that would not have been cache-hit anyway.",
       "distinction": "An ABLATION KNOB name (a feature under A/B measurement) - NOT the uncacheable planner case (a runtime condition) and NOT a token counter.",
-      "distinct_from": ["cov5304-uncacheable", "cov5304-cache-write-tokens", "x3-cache-uncachedtrim"],
+      "distinct_from": ["cov5304-uncacheable", "cov5304-cache-write-tokens", "x3-cache-uncachedtrim", "catalog12581-uncached-trim-env"],
       "aliases": ["uncached_trim"],
       "grounding": "FeatureUncachedTrim",
       "grounding_kind": "symbol",

@@ -802,6 +802,9 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 		if *sf.dojoMode {
 			if err := logDojoEpisodeStart("serve"); err != nil {
 				fmt.Fprintf(os.Stderr, "fak: --dojo episode logging failed: %v (continuing without dojo)\n", err)
+				updateServeFeature(rt.srv, gateway.FeatureDojo, gateway.FeatureRefusedUnavailable, "Dojo episode marker could not be written.")
+			} else {
+				updateServeFeature(rt.srv, gateway.FeatureDojo, gateway.FeatureConfiguredActive, "Dojo episode start marker written; live scoring is not wired.")
 			}
 		}
 	}
@@ -828,7 +831,11 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 
 	if *sf.keepAwake == KeepAwakeWhileActive {
 		stopKeepAwakeMonitor := startKeepAwakeActiveMonitor(ctx, serveSessions)
-		defer stopKeepAwakeMonitor()
+		updateServeFeature(rt.srv, gateway.FeatureKeepAwake, gateway.FeatureConfiguredActive, "While-active OS keep-awake monitor installed; lock acquisition follows session activity.")
+		defer func() {
+			stopKeepAwakeMonitor()
+			updateServeFeature(rt.srv, gateway.FeatureKeepAwake, gateway.FeatureConfiguredStandby, "While-active OS keep-awake monitor stopped.")
+		}()
 	}
 
 	// Everything a finished serve must leave behind, whichever transport served it. The stdio

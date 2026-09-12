@@ -407,6 +407,8 @@ type fleetBusArming struct {
 	unsupported []fleetbus.Op
 	// applier owns op meaning for this role.
 	applier fleetbus.Applier
+	// onStatus observes actual arming and presence publication outcomes.
+	onStatus func(gateway.FeatureState, string)
 }
 
 // startFleetBusLoop arms this serve as a bus INSTANCE. It is the serve-shaped call
@@ -415,6 +417,7 @@ type fleetBusArming struct {
 func startFleetBusLoop(ctx context.Context, busDir, instanceID string, interval time.Duration, tbl *session.Table, native bool, gwAppliers ...gwBusApplier) func() {
 	ap := &fleetBusApplier{tbl: tbl, native: native, durability: serveSessionDurability, ctx: ctx}
 	var addr string
+	var onStatus func(gateway.FeatureState, string)
 	if len(gwAppliers) != 0 {
 		ap.gateway = gwAppliers[0]
 		// The serve gateway applier already crosses this call boundary. Carry the
@@ -422,6 +425,9 @@ func startFleetBusLoop(ctx context.Context, busDir, instanceID string, interval 
 		// second loop entry point solely for one presence-record field.
 		if serve, ok := gwAppliers[0].(serveGwBusApplier); ok {
 			addr = serve.addr
+			onStatus = func(state gateway.FeatureState, description string) {
+				updateServeFeature(serve.srv, gateway.FeatureFleetBus, state, description)
+			}
 		}
 	}
 	return startFleetBusInstance(ctx, fleetBusArming{
@@ -433,6 +439,7 @@ func startFleetBusLoop(ctx context.Context, busDir, instanceID string, interval 
 		interval:   interval,
 		ops:        fleetBusAdvertisedOps(),
 		applier:    ap,
+		onStatus:   onStatus,
 	})
 }
 
@@ -449,6 +456,17 @@ func startFleetBusInstance(ctx context.Context, arm fleetBusArming) func() {
 	if strings.TrimSpace(arm.busDir) == "" {
 		return func() {}
 	}
+	report := func(state gateway.FeatureState, description string) {
+		if arm.onStatus != nil {
+			arm.onStatus(state, description)
+		}
+	}
+	armed := false
+	defer func() {
+		if !armed {
+			report(gateway.FeatureRefusedUnavailable, "Fleet bus validation or initialization failed.")
+		}
+	}()
 	prefix := strings.TrimSpace(arm.logPrefix)
 	if prefix == "" {
 		prefix = "fak"
@@ -489,10 +507,14 @@ func startFleetBusInstance(ctx context.Context, arm fleetBusArming) func() {
 	announce := func(now time.Time, prev fleetbus.Instance) fleetbus.Instance {
 		inst, r := stamp(now)
 		if r != nil {
+			report(gateway.FeatureConfiguredStandby, "Fleet bus could not renew its instance record.")
 			return prev
 		}
 		if err := bus.Announce(inst); err != nil {
 			fmt.Fprintf(os.Stderr, "%s: fleet-bus announce failed (non-fatal): %v\n", prefix, err)
+			report(gateway.FeatureConfiguredStandby, "Fleet bus loop configured, but presence publication failed.")
+		} else {
+			report(gateway.FeatureConfiguredActive, "Fleet bus instance presence published and control loop armed.")
 		}
 		return inst
 	}
@@ -510,7 +532,9 @@ func startFleetBusInstance(ctx context.Context, arm fleetBusArming) func() {
 	}
 
 	loopCtx, cancel := context.WithCancel(ctx)
+	armed = true
 	go func() {
+		defer report(gateway.FeatureConfiguredStandby, "Fleet bus control loop stopped.")
 		t := time.NewTicker(arm.interval)
 		defer t.Stop()
 		for {

@@ -58,7 +58,8 @@
       "distinct_from": [
         "preflight ladder",
         "adjudicator",
-        "supervisionpolicy"
+        "supervisionpolicy",
+        "catalog12581-strix-preflight"
       ],
       "aliases": [
         "preflightinput",

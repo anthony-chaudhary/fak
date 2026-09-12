@@ -4,15 +4,16 @@ package power
 
 /*
 #cgo LDFLAGS: -framework IOKit -framework CoreFoundation
+#include <stdint.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/pwr_mgt/IOPMLib.h>
 #include <IOKit/IOMessage.h>
 
 extern void goDarwinPowerCallback(void *refCon, io_service_t service, natural_t messageType, void *messageArgument);
 
-static io_connect_t registerDarwinPowerNotifications(IONotificationPortRef *notifyPort, io_object_t *notifierObject, CFRunLoopRef *runLoopRef) {
+static io_connect_t registerDarwinPowerNotifications(uintptr_t identity, IONotificationPortRef *notifyPort, io_object_t *notifierObject, CFRunLoopRef *runLoopRef) {
     io_connect_t rootPort;
-    rootPort = IORegisterForSystemPower(NULL, notifyPort, (IOServiceInterestCallback)goDarwinPowerCallback, notifierObject);
+    rootPort = IORegisterForSystemPower((void *)identity, notifyPort, (IOServiceInterestCallback)goDarwinPowerCallback, notifierObject);
     if (!rootPort) {
         return 0;
     }
@@ -58,10 +59,10 @@ static void stopDarwinRunLoop(CFRunLoopRef rl) {
     }
 }
 
-static unsigned int getMsgCanSleep() { return kIOMessageCanSystemSleep; }
-static unsigned int getMsgSystemWillSleep() { return kIOMessageSystemWillSleep; }
-static unsigned int getMsgSystemWillPowerOn() { return kIOMessageSystemWillPowerOn; }
-static unsigned int getMsgSystemHasPoweredOn() { return kIOMessageSystemHasPoweredOn; }
+// Exercise the callback ABI without registering or sending an OS notification.
+static void invokeDarwinPowerCallback(uintptr_t identity, unsigned int messageType, long argument) {
+    goDarwinPowerCallback((void *)identity, 0, messageType, (void *)(uintptr_t)argument);
+}
 */
 import "C"
 
@@ -69,64 +70,96 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"runtime/cgo"
 	"sync"
 	"time"
 	"unsafe"
 )
 
-var (
-	darwinCGORootPort  C.io_connect_t
-	darwinCGOMu        sync.Mutex
-	darwinCGOBroadcast func(PowerEvent)
+// Registration and teardown are serialized; callback ownership is carried by
+// IOKit's refCon, never a process-global "current listener".
+var darwinCGORegistrationMu sync.Mutex
+
+const (
+	darwinCanSleep     = uint32(C.kIOMessageCanSystemSleep)
+	darwinWillSleep    = uint32(C.kIOMessageSystemWillSleep)
+	darwinWillPowerOn  = uint32(C.kIOMessageSystemWillPowerOn)
+	darwinHasPoweredOn = uint32(C.kIOMessageSystemHasPoweredOn)
+)
+
+type darwinPowerPhase uint8
+
+const (
+	darwinAwake darwinPowerPhase = iota
+	darwinSleeping
+	darwinWaking
 )
 
 //export goDarwinPowerCallback
 func goDarwinPowerCallback(refCon unsafePointer, service C.io_service_t, messageType C.natural_t, messageArgument unsafePointer) {
-	msgType := uint32(messageType)
-	arg := C.long(uintptr(messageArgument))
+	l := cgo.Handle(uintptr(refCon)).Value().(*darwinCGOListener)
+	l.dispatchPowerMessage(uint32(messageType), int64(uintptr(messageArgument)))
+}
 
-	darwinCGOMu.Lock()
-	rootPort := darwinCGORootPort
-	broadcast := darwinCGOBroadcast
-	darwinCGOMu.Unlock()
+// invokeDarwinCallback enters the real C-to-Go callback with SDK message values.
+// Callers supplying synthetic arguments must install a per-listener ack sink.
+func invokeDarwinCallback(identity cgo.Handle, message uint32, argument int64) {
+	C.invokeDarwinPowerCallback(C.uintptr_t(identity), C.uint(message), C.long(argument))
+}
 
-	var event PowerEvent
-	event.Timestamp = time.Now()
-	event.Source = "iokit-cgo"
-
+// dispatchPowerMessage is the native callback dispatcher. A listener's run loop
+// delivers notifications serially. The acknowledgement sink is local to that
+// listener so injected dispatch never needs a real IOKit acknowledgement token.
+func (l *darwinCGOListener) dispatchPowerMessage(msgType uint32, arg int64) {
+	event := PowerEvent{Timestamp: time.Now(), Source: "iokit-cgo"}
 	switch msgType {
-	case uint32(C.getMsgCanSleep()):
-		// System queries whether sleep can occur. We allow it and emit SLEEP event.
-		event.Type = EventSleep
-		event.Details = "kIOMessageCanSystemSleep"
-		if rootPort != 0 {
-			C.allowDarwinPowerChange(rootPort, arg)
+	case darwinCanSleep:
+		l.acknowledge(arg)
+		return
+	case darwinWillSleep:
+		// Finalization also runs if a synchronous observer panics. Propagate the
+		// panic; this callback does not define an observer recovery policy.
+		defer l.acknowledge(arg)
+		if l.phase != darwinAwake {
+			return
 		}
-	case uint32(C.getMsgSystemWillSleep()):
-		// System will sleep. Acknowledge notification and emit SLEEP event.
+		l.phase = darwinSleeping
 		event.Type = EventSleep
 		event.Details = "kIOMessageSystemWillSleep"
-		if rootPort != 0 {
-			C.allowDarwinPowerChange(rootPort, arg)
+	case darwinWillPowerOn:
+		if l.phase == darwinSleeping {
+			l.phase = darwinWaking
 		}
-	case uint32(C.getMsgSystemWillPowerOn()):
-		event.Type = EventWake
-		event.Details = "kIOMessageSystemWillPowerOn"
-	case uint32(C.getMsgSystemHasPoweredOn()):
+		return
+	case darwinHasPoweredOn:
+		if l.phase == darwinAwake {
+			return
+		}
+		l.phase = darwinAwake
 		event.Type = EventWake
 		event.Details = "kIOMessageSystemHasPoweredOn"
 	default:
 		return
 	}
-
-	if broadcast != nil {
-		broadcast(event)
-	}
+	l.broadcaster.Broadcast(event)
 }
+
+func (l *darwinCGOListener) acknowledge(arg int64) {
+	if l.ack != nil {
+		l.ack(arg)
+		return
+	}
+	C.allowDarwinPowerChange(l.rootPort, C.long(arg))
+}
+
+// resetCycle is called only before a registration's run loop starts.
+func (l *darwinCGOListener) resetCycle() { l.phase = darwinAwake }
 
 type unsafePointer = unsafe.Pointer
 
 type darwinCGOListener struct {
+	phase       darwinPowerPhase
+	ack         func(int64)
 	mu          sync.Mutex
 	broadcaster *PowerBroadcaster
 	rootPort    C.io_connect_t
@@ -157,6 +190,10 @@ func (l *darwinCGOListener) Start(ctx context.Context) error {
 		return fmt.Errorf("iokit listener already running")
 	}
 	l.running = true
+	l.stopped = false
+	l.ready = make(chan struct{})
+	l.done = make(chan struct{})
+	l.resetCycle()
 	l.mu.Unlock()
 
 	errCh := make(chan error, 1)
@@ -166,11 +203,8 @@ func (l *darwinCGOListener) Start(ctx context.Context) error {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 
-		darwinCGOMu.Lock()
-		darwinCGOBroadcast = func(e PowerEvent) {
-			l.broadcaster.Broadcast(e)
-		}
-		darwinCGOMu.Unlock()
+		identity := cgo.NewHandle(l)
+		defer identity.Delete()
 
 		var (
 			np  C.IONotificationPortRef
@@ -178,11 +212,16 @@ func (l *darwinCGOListener) Start(ctx context.Context) error {
 			rl  C.CFRunLoopRef
 		)
 
-		port := C.registerDarwinPowerNotifications(&np, &obj, &rl)
+		darwinCGORegistrationMu.Lock()
+		port := C.registerDarwinPowerNotifications(C.uintptr_t(identity), &np, &obj, &rl)
+		darwinCGORegistrationMu.Unlock()
 		if port == 0 {
-			errCh <- fmt.Errorf("IORegisterForSystemPower failed")
+			l.mu.Lock()
+			l.running = false
 			close(l.ready)
 			close(l.done)
+			l.mu.Unlock()
+			errCh <- fmt.Errorf("IORegisterForSystemPower failed")
 			return
 		}
 
@@ -191,10 +230,6 @@ func (l *darwinCGOListener) Start(ctx context.Context) error {
 		l.notifyPort = np
 		l.notifierObj = obj
 		l.runLoop = rl
-
-		darwinCGOMu.Lock()
-		darwinCGORootPort = port
-		darwinCGOMu.Unlock()
 
 		l.mu.Unlock()
 
@@ -215,14 +250,12 @@ func (l *darwinCGOListener) Start(ctx context.Context) error {
 		l.notifierObj = 0
 		l.runLoop = 0
 
-		darwinCGOMu.Lock()
-		darwinCGORootPort = 0
-		darwinCGOMu.Unlock()
-
+		darwinCGORegistrationMu.Lock()
 		C.deregisterDarwinPowerNotifications(rootPort, notifyPort, notifierObj, runLoop)
-		l.mu.Unlock()
-
+		darwinCGORegistrationMu.Unlock()
 		close(l.done)
+		l.running = false
+		l.mu.Unlock()
 	}()
 
 	select {
@@ -246,6 +279,7 @@ func (l *darwinCGOListener) Stop() error {
 	}
 	l.stopped = true
 	rl := l.runLoop
+	done := l.done
 	l.mu.Unlock()
 
 	if rl != 0 {
@@ -253,7 +287,7 @@ func (l *darwinCGOListener) Stop() error {
 	}
 
 	select {
-	case <-l.done:
+	case <-done:
 	case <-time.After(2 * time.Second):
 	}
 
