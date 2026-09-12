@@ -404,6 +404,9 @@ func TestMultiSessionSharedTokenPool(t *testing.T) {
 
 	// Planner that holds in-flight requests until released
 	holdCh := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseHeld := func() { releaseOnce.Do(func() { close(holdCh) }) }
+	defer releaseHeld()
 	srv.planner = plannerFunc(func(ctx context.Context, msgs []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
 		<-holdCh
 		return &agent.Completion{
@@ -446,16 +449,28 @@ func TestMultiSessionSharedTokenPool(t *testing.T) {
 		}(i)
 	}
 
-	// Wait until at least 2 requests are admitted into running
-	for {
-		if admCtl.Stats().Running >= 2 {
-			break
+	// Keep both admitted requests in flight until every excess request has
+	// completed admission. Releasing as soon as two run lets late arrivals reuse
+	// their budget and makes the shedding assertion depend on scheduling.
+	early := make([]result, 0, 3)
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	for len(early) < 3 {
+		select {
+		case res := <-resCh:
+			early = append(early, res)
+			if res.status != http.StatusTooManyRequests {
+				t.Errorf("excess request %s returned %d before release: %s", res.traceID, res.status, res.body)
+			}
+		case <-deadline.C:
+			t.Fatal("excess requests did not finish admission while the pool was held")
 		}
-		time.Sleep(2 * time.Millisecond)
 	}
-
-	close(holdCh)
+	releaseHeld()
 	wg.Wait()
+	for _, res := range early {
+		resCh <- res
+	}
 	close(resCh)
 
 	var okCount, shed429Count int
