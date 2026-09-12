@@ -1550,6 +1550,7 @@ func TestRequestPathLeavesRegistered(t *testing.T) {
 // but lives outside internal/, so it is not scanned.
 var chatEndpointRole = map[string]string{
 	"agent":             "the single outbound chat-completions client (HTTPPlanner)",
+	"agentbench":        "the off-path bounded same-repository replay and burn benchmark client against a declared OpenAI-compatible endpoint (not a live planner)",
 	"engine":            "the narrow vLLM EngineDriver adapter speaking vLLM's OpenAI-compatible generation surface",
 	"gateway":           "the inbound /v1/chat/completions server route (adjudication proxy)",
 	"allinone":          "the inbound mock /v1/chat/completions server of the all-in-one supervisor (bounded deterministic envelope so the ready banner's advertised URL is truthful, issue #12616; not a live client/planner)",
