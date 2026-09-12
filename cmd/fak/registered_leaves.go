@@ -59,8 +59,6 @@ import (
 	_ "github.com/anthony-chaudhary/fak/internal/localappux"
 	_ "github.com/anthony-chaudhary/fak/internal/lookahead"
 	_ "github.com/anthony-chaudhary/fak/internal/loopunblock"
-	_ "github.com/anthony-chaudhary/fak/internal/macromailbox"
-	_ "github.com/anthony-chaudhary/fak/internal/macrostate"
 	_ "github.com/anthony-chaudhary/fak/internal/market"
 	_ "github.com/anthony-chaudhary/fak/internal/mcpbroker"
 	_ "github.com/anthony-chaudhary/fak/internal/memorycotravel"
