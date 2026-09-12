@@ -150,6 +150,11 @@ func (s *ReservationStore) Reserve(ctx context.Context, req ReservationRequest) 
 				float64(d.ReservedBytes)/(1<<30),
 			)
 		}
+		if d.ReservedBytes > 0 {
+			d.RemedyHint += "; wait for active reservations to release, or select a smaller model or quantization"
+		} else {
+			d.RemedyHint += "; select a smaller model or quantization"
+		}
 		if d.Reaped > 0 {
 			_ = s.writeLedger(ledger)
 		}
