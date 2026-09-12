@@ -96,3 +96,48 @@ Witness command:
 ```sh
 go test ./internal/model -run TestV41Budget -count=1
 ```
+
+## Independent component numeric oracle (V4 Flash 0731)
+
+`internal/model/v4_flash_oracle_test.go` adds a weight-free, checkpoint-independent
+scalar oracle for four pinned DeepSeek-V4-Flash-0731 component equations. Three
+sit against an existing production seam (scored/hash routing, packed FP4+E8M0
+decode, the per-layer compression schedule); two are forward-looking (four-stream
+mHC pre/post mixing with 20-iteration Sinkhorn, and the eight-group low-rank
+output projection) whose production forward paths do not exist yet. For those two
+the oracle is a transcription/regression pin, not a cross-implementation
+comparison. It is a plain in-order transcription of the pinned official
+artifact at revision `7872f01b1d1fe23eabc4c98b48bffcef5a386062` and reuses none of
+the production helpers. The checked-in expected values live in
+`internal/model/testdata/deepseek_v4_flash_oracle_expected.json`.
+
+Covered: sqrt-softplus scored routing (top-6, weights normalized and scaled by 1.5)
+and hash-layer weighting; four-stream mHC projection, the 20-iteration Sinkhorn
+normalization (an initial row-softmax over k with +hc_eps after the softmax, then
+one column normalization, then 19 alternating (row, column) iterations =
+`hc_sinkhorn_iters=20`, i.e. 20 row passes and 20 column passes total; the recorded
+fixture pass schedule begins at the first column normalization — the initial
+row-softmax is not recorded as a pass entry) and the
+`comb[dest][source]` application, including the pre-only `+hc_eps`; packed FP4 E2M1
+decoding with the E8M0 scale and the 32-value scale boundary; and the grouped
+low-rank output projection with an explicit per-group split — this exercises group
+ORIENTATION with a reduced geometry, not the production 4096/1024 dims, whose
+production shapes are asserted as constants elsewhere; plus the 46-entry
+per-layer compression schedule.
+
+Anti-vacuity tests prove the load-bearing axes are live: the sqrt-softplus weighting
+differs from softmax(raw logits); the mHC combination orientation is observably
+`comb[dest][source]`; the pre-only `+hc_eps` moves the result; the recorded Sinkhorn
+pass schedule is exactly one initial column normalization plus `iters-1` alternating
+(row, column) pairs (the initial row-softmax is deliberately unrecorded); and the
+grouped output projection differs from a flat matmul across groups.
+
+This is a component oracle only. The native V4 forward does not exist yet
+(`deepseek_v4` is excluded from `usesMLAMoELayout()`), so the full
+`Session.Prefill`/`Session.Step` integration witness is escalated separately.
+
+Witness command:
+
+```sh
+go test ./internal/model -run TestV4FlashOracle -count=1
+```
