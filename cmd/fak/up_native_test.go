@@ -181,3 +181,64 @@ func TestNewTurnkeyInKernelPlannerAppliesContextBudget(t *testing.T) {
 		t.Fatalf("planner context tokens = %d, want 4096", got)
 	}
 }
+
+// TestTurnkeyNativeEagerResidencyReported pins parts A/C: a live-Metal load invokes the eager
+// residency hook after weights are resident and BEFORE the startup residency probe, so a successful
+// promotion is reflected in the counts; a decline is recorded in metal_q8_residency_error instead of
+// being silently swallowed.
+func TestTurnkeyNativeEagerResidencyReported(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		eagerErr   error
+		wantErrMsg string
+	}{
+		{name: "promotion succeeds", eagerErr: nil, wantErrMsg: ""},
+		{name: "promotion declines", eagerErr: errors.New("no-copy alias declined: layer.0"), wantErrMsg: "no-copy alias declined: layer.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var order []string
+			deps := turnkeyNativeLoadDeps{
+				resolveBackend: func() (compute.Backend, error) { return nil, nil },
+				resolveMetal:   func() (serveMetalDecision, error) { return serveMetalDecision{live: true}, nil },
+				refusePeak:     func(string) error { return nil },
+				admitAndLoad: func(_ bool, _ string, load func()) (func(), error) {
+					load()
+					return func() {}, nil
+				},
+				loadModel: func(string, compute.Backend, int) (*fakmodel.Model, bool, *gateway.ModelLoadProfile) {
+					return &fakmodel.Model{}, true, nil
+				},
+				loadTokenizer: func(string) (*tokenizer.Tokenizer, bool) { return &tokenizer.Tokenizer{}, true },
+				newPlanner: func(*fakmodel.Model, *tokenizer.Tokenizer, string, bool, compute.Backend, bool, int) *agent.InKernelPlanner {
+					return &agent.InKernelPlanner{}
+				},
+				eagerMetalResidency: func(m *fakmodel.Model) error {
+					order = append(order, "eager")
+					if m == nil {
+						t.Fatal("eager hook received nil model")
+					}
+					return tc.eagerErr
+				},
+				metalResidency: func() (int, int) {
+					order = append(order, "probe")
+					return 2, 272
+				},
+			}
+			resources, err := loadTurnkeyNativeResourcesWith(context.Background(), "model.gguf", "qwen38", 2048, deps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resources.closeModel = func() error { return nil }
+			defer func() { _ = resources.Close() }()
+			if want := []string{"eager", "probe"}; !reflect.DeepEqual(order, want) {
+				t.Fatalf("call order = %v, want %v (eager must precede the startup residency probe)", order, want)
+			}
+			if resources.Startup.MetalLiveQ8Weights != 272 || resources.Startup.MetalLiveQ6Weights != 2 {
+				t.Fatalf("startup residency counts = q6:%d q8:%d, want 2/272", resources.Startup.MetalLiveQ6Weights, resources.Startup.MetalLiveQ8Weights)
+			}
+			if got := resources.Startup.MetalQ8ResidencyError; got != tc.wantErrMsg {
+				t.Fatalf("metal_q8_residency_error = %q, want %q", got, tc.wantErrMsg)
+			}
+		})
+	}
+}

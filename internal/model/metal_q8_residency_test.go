@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"os"
 	"reflect"
 	"testing"
@@ -85,21 +86,54 @@ func TestQwen38MetalQ8RuntimeInventoryRefusesDrift(t *testing.T) {
 
 func TestQ8AliasBudgetCountsPhysicalOwnerOnceAndRefusesOverride(t *testing.T) {
 	const GiB = int64(1) << 30
+	// The no-copy alias adds NO device bytes, so it is judged against metalQ8AliasFraction (0.97),
+	// not the additive-copy 0.90. A 23 GiB owner on a 27 GiB budget (0.852) fits; a 25 GiB owner
+	// (0.926) now also fits because it adds nothing new, unlike the additive Q8 copy.
 	if err := q8AliasFits(23*GiB, 27*GiB, ""); err != nil {
-		t.Fatalf("single physical 23 GiB owner should fit 90%% of 27 GiB: %v", err)
+		t.Fatalf("single physical 23 GiB owner should fit the alias headroom of 27 GiB: %v", err)
+	}
+	if err := q8AliasFits(25*GiB, 27*GiB, ""); err != nil {
+		t.Fatalf("no-copy 25 GiB owner (0.926) should fit alias headroom 0.97: %v", err)
 	}
 	for _, tc := range []struct {
+		name            string
 		resident, total int64
 		override        string
 	}{
-		{23 * GiB, 0, ""},
-		{25 * GiB, 27 * GiB, ""},
-		{23 * GiB, 27 * GiB, "1"},
-		{23 * GiB, 27 * GiB, "0"},
+		{"unknown device budget", 23 * GiB, 0, ""},
+		{"owner saturates device", 27 * GiB, 27 * GiB, ""},
+		{"negative footprint", -1, 27 * GiB, ""},
+		{"override rejected for evidence", 23 * GiB, 27 * GiB, "1"},
+		{"override off rejected too", 23 * GiB, 27 * GiB, "0"},
 	} {
-		if err := q8AliasFits(tc.resident, tc.total, tc.override); err == nil {
-			t.Fatalf("unproved alias admitted: resident=%d total=%d override=%q", tc.resident, tc.total, tc.override)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			err := q8AliasFits(tc.resident, tc.total, tc.override)
+			if err == nil {
+				t.Fatalf("unproved alias admitted: resident=%d total=%d override=%q", tc.resident, tc.total, tc.override)
+			}
+			var unavailable *MetalQ8ResidencyUnavailableError
+			if !errors.As(err, &unavailable) || unavailable.Reason == "" {
+				t.Fatalf("decline is not a fail-closed reasoned error: %T %v", err, err)
+			}
+		})
+	}
+}
+
+// TestQ6KUploadFitsKeepsAdditiveGuard pins that the eager Q6_K bulk upload uses the SAME 0.90
+// additive headroom as the #1087 Q8 copy and has no env override.
+func TestQ6KUploadFitsKeepsAdditiveGuard(t *testing.T) {
+	const GiB = int64(1) << 30
+	if q6kUploadFits(23*GiB, 4*GiB, 27*GiB) {
+		t.Fatal("additive Q6_K copy admitted past the 0.90 #1087 budget")
+	}
+	if !q6kUploadFits(23*GiB, 4*GiB, 96*GiB) {
+		t.Fatal("roomy device refused a fitting additive Q6_K copy")
+	}
+	if q6kUploadFits(1*GiB, 1*GiB, 0) {
+		t.Fatal("unknown device budget admitted an additive Q6_K copy")
+	}
+	if q6kUploadFits(1*GiB, 0, 96*GiB) {
+		t.Fatal("zero-byte Q6_K upload admitted")
 	}
 }
 
