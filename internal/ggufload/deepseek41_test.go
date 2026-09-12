@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -142,6 +143,97 @@ func TestDeepSeek41GGUFConfigMapsMetadata(t *testing.T) {
 	if got := f.DeepSeek41Engram.NumEmbeddings; len(got) != 2 || got[0] != wantEmb[0] || got[1] != wantEmb[1] {
 		t.Errorf("Engram.NumEmbeddings = %v, want %v", got, wantEmb)
 	}
+}
+
+// TestDeepSeek41GGUFReadsDS4EngramMetadata is the fail-before/pass-after
+// converter fixture for #12918. Keys and element types match antirez/ds4
+// deepseek41_metadata.py:115-123 at bd66c402070042bf0a79ad6ece8242de4c93680c.
+func TestDeepSeek41GGUFReadsDS4EngramMetadata(t *testing.T) {
+	meta := ds41Meta("deepseek41")
+	for _, key := range []string{
+		"engram_layer_ids", "engram_num_embeddings", "engram_max_ngram_size",
+		"engram_vocab_size", "engram_n_heads", "engram_head_dim",
+		"engram_pad_token_id", "engram_compressed_vocab_size",
+	} {
+		delete(meta, "deepseek41."+key)
+	}
+	meta["deepseek41.engram.encoding"] = Value{Type: TypeString, Value: "e4m3_e8m0_32_row264"}
+	meta["deepseek41.engram.layer_ids"] = intArrayValue(TypeUint32, []uint64{1, 14})
+	meta["deepseek41.engram.rows"] = intArrayValue(TypeUint32, []uint64{384006168, 384016682})
+	meta["deepseek41.engram.compressed_vocab_size"] = Value{Type: TypeUint32, Value: uint32(99092)}
+	meta["deepseek41.engram.pad_id"] = Value{Type: TypeUint32, Value: uint32(0)}
+	meta["deepseek41.engram.token_map"] = intArrayValue(TypeUint32, []uint64{7, 8, 9})
+	primes := make([]uint64, 48)
+	for i := range primes {
+		primes[i] = 16000057 + uint64(i)
+	}
+	meta["deepseek41.engram.primes"] = intArrayValue(TypeUint32, primes)
+	meta["deepseek41.engram.multipliers"] = intArrayValue(TypeUint64, []uint64{
+		35184372088831, 35184372088829, 35184372088827, 35184372088825,
+		35184372088823, 35184372088821, 35184372088819, 35184372088817,
+	})
+	// Conflicting provisional keys prove that presence, including a valid zero
+	// pad ID, never lets the legacy namespace override converter output.
+	meta["deepseek41.engram_layer_ids"] = intArrayValue(TypeUint32, []uint64{2})
+	meta["deepseek41.engram_num_embeddings"] = intArrayValue(TypeUint32, []uint64{99})
+	meta["deepseek41.engram_pad_token_id"] = Value{Type: TypeUint32, Value: uint32(99)}
+	meta["deepseek41.engram_compressed_vocab_size"] = Value{Type: TypeUint32, Value: uint32(1)}
+
+	f := &File{Metadata: meta}
+	if _, err := f.Config(); err != nil {
+		t.Fatalf("Config with ds4 converter keys: %v", err)
+	}
+	eng := f.DeepSeek41Engram
+	encoding, encodingOK := deepSeek41EngramField[string](eng, "Encoding")
+	tokenMap, tokenMapOK := deepSeek41EngramField[[]int](eng, "TokenMap")
+	primesGot, primesOK := deepSeek41EngramField[[]int](eng, "Primes")
+	multipliers, multipliersOK := deepSeek41EngramField[[]uint64](eng, "Multipliers")
+	if eng == nil || !encodingOK || encoding != "e4m3_e8m0_32_row264" || eng.MaxNgramSize != 4 || eng.NHeads != 8 ||
+		len(eng.LayerIDs) != 2 || len(eng.NumEmbeddings) != 2 || !tokenMapOK || len(tokenMap) != 3 ||
+		!primesOK || len(primesGot) != 48 || !multipliersOK || len(multipliers) != 8 || multipliers[0] != 35184372088831 ||
+		eng.PadTokenID != 0 || eng.CompressedVocabSize != 99092 {
+		t.Fatalf("ds4 Engram metadata not retained: %+v", eng)
+	}
+
+	delete(meta, "deepseek41.engram.layer_ids")
+	if _, err := (&File{Metadata: meta}).Config(); err == nil || !strings.Contains(err.Error(), "deepseek41.engram.layer_ids") {
+		t.Fatalf("partial converter metadata error = %v, want missing nested layer_ids despite legacy fallback", err)
+	}
+	meta["deepseek41.engram.layer_ids"] = intArrayValue(TypeUint32, []uint64{1, 14})
+
+	delete(meta, "deepseek41.engram.primes")
+	if _, err := (&File{Metadata: meta}).Config(); err == nil || !strings.Contains(err.Error(), "deepseek41.engram.primes") {
+		t.Fatalf("missing converter primes error = %v, want named key", err)
+	}
+}
+
+// deepSeek41EngramField keeps this symptom witness source-compatible with the
+// parent DeepSeek41Engram type. Missing fields are therefore a behavioral RED
+// instead of an unrelated parent compilation failure.
+func deepSeek41EngramField[T any](eng *DeepSeek41Engram, name string) (T, bool) {
+	var zero T
+	if eng == nil {
+		return zero, false
+	}
+	field := reflect.ValueOf(eng).Elem().FieldByName(name)
+	if !field.IsValid() || !field.CanInterface() {
+		return zero, false
+	}
+	value, ok := field.Interface().(T)
+	return value, ok
+}
+
+func intArrayValue(kind ValueType, values []uint64) Value {
+	items := make([]Value, len(values))
+	for i, value := range values {
+		switch kind {
+		case TypeUint32:
+			items[i] = Value{Type: kind, Value: uint32(value)}
+		case TypeUint64:
+			items[i] = Value{Type: kind, Value: value}
+		}
+	}
+	return Value{Type: TypeArray, Value: items}
 }
 
 // TestDeepSeek41GGUFCanonicalArchSpellings is witness (2): every sibling spelling

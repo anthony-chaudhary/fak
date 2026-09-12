@@ -1,5 +1,30 @@
 package ggufload
 
+// DeepSeek V4.1 Engram metadata names in this file are adapted from antirez/ds4
+// at bd66c402070042bf0a79ad6ece8242de4c93680c (gguf-tools/deepseek41_metadata.py).
+//
+// MIT License
+// Copyright (c) 2026 The ds4.c authors
+// Copyright (c) 2023-2026 The ggml authors
+// Copyright (c) 2023 DeepSeek
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 import (
 	"fmt"
 
@@ -29,8 +54,8 @@ import (
 //
 // TENSOR SUFFIXES: llama.cpp already ships a DeepSeek-V4 converter with
 // MODEL_ARCH.DEEPSEEK4 = "deepseek4", so the GGUF key/tensor spellings below are
-// firm, not guessed. The one exception is Engram (below), which has NO upstream
-// converter support and is labelled GUESSED.
+// firm, not guessed. Engram metadata follows antirez/ds4's MIT-licensed
+// deepseek41_metadata.py at bd66c402070042bf0a79ad6ece8242de4c93680c.
 
 // archIsDeepSeek41 reports whether arch is the canonical internal DeepSeek-V4.1
 // architecture. Callers must pass the canonicalGGUFArch-normalized string.
@@ -70,18 +95,28 @@ const (
 	ds41KeyHCEpsilon        = "hyper_connection.epsilon"
 	ds41KeySlidingWindow    = "attention.sliding_window"
 
-	// Engram metadata. GUESSED ? llama.cpp's deepseek4 converter emits NO Engram
-	// tensor or metadata key, so these spellings are fak's own provisional
-	// namespace under "<arch>."; reconcile if/when an upstream converter defines
-	// them. engram_layer_ids is an i32 array, engram_num_embeddings an i64 array.
-	ds41KeyEngramLayerIDs     = "engram_layer_ids"
-	ds41KeyEngramNumEmbedding = "engram_num_embeddings"
-	ds41KeyEngramMaxNgramSize = "engram_max_ngram_size"
-	ds41KeyEngramVocabSize    = "engram_vocab_size"
-	ds41KeyEngramNHeads       = "engram_n_heads"
-	ds41KeyEngramHeadDim      = "engram_head_dim"
-	ds41KeyEngramPadTokenID   = "engram_pad_token_id"
-	ds41KeyEngramCompVocab    = "engram_compressed_vocab_size"
+	// Engram metadata emitted by ds4's converter. The old flat provisional keys
+	// remain accepted below as a compatibility fallback, but new files should use
+	// this nested namespace and retain the converter-produced hash constants.
+	ds41KeyEngramEncoding     = "engram.encoding"
+	ds41KeyEngramLayerIDs     = "engram.layer_ids"
+	ds41KeyEngramNumEmbedding = "engram.rows"
+	ds41KeyEngramCompVocab    = "engram.compressed_vocab_size"
+	ds41KeyEngramPadTokenID   = "engram.pad_id"
+	ds41KeyEngramTokenMap     = "engram.token_map"
+	ds41KeyEngramPrimes       = "engram.primes"
+	ds41KeyEngramMultipliers  = "engram.multipliers"
+
+	// Pre-ds4 fak fixtures used these guessed flat spellings. Read them only when
+	// the converter-defined key is absent so real artifact metadata wins.
+	ds41LegacyEngramLayerIDs     = "engram_layer_ids"
+	ds41LegacyEngramNumEmbedding = "engram_num_embeddings"
+	ds41LegacyEngramMaxNgramSize = "engram_max_ngram_size"
+	ds41LegacyEngramVocabSize    = "engram_vocab_size"
+	ds41LegacyEngramNHeads       = "engram_n_heads"
+	ds41LegacyEngramHeadDim      = "engram_head_dim"
+	ds41LegacyEngramPadTokenID   = "engram_pad_token_id"
+	ds41LegacyEngramCompVocab    = "engram_compressed_vocab_size"
 )
 
 // deepseek41EngramPrefix is the dedicated canonical root the Engram tables map
@@ -97,12 +132,8 @@ const deepseek41EngramLayerPlaceholder = "<L>"
 // has no Engram fields, so these axes stay self-contained in ggufload ? the
 // header/metadata slice needs them only to validate the tables and route their
 // tensors to the dedicated namespace, never to size or dequantize them.
-//
-// GUESSED spellings (no upstream support ? see the file header): the field set
-// mirrors the pinned V4.1 text_config (engram_layer_ids, engram_num_embeddings,
-// engram_max_ngram_size, engram_vocab_size, engram_n_heads, engram_head_dim,
-// engram_pad_token_id, engram_compressed_vocab_size).
 type DeepSeek41Engram struct {
+	Encoding            string
 	LayerIDs            []int
 	NumEmbeddings       []int
 	MaxNgramSize        int
@@ -111,6 +142,9 @@ type DeepSeek41Engram struct {
 	HeadDim             int
 	PadTokenID          int
 	CompressedVocabSize int
+	TokenMap            []int
+	Primes              []int
+	Multipliers         []uint64
 }
 
 // applyDeepSeek41Config reads the deepseek41 MoE + MLA + indexer + compress/
@@ -211,16 +245,38 @@ func applyDeepSeek41Config(f *File, p string, cfg *model.Config, ropeDim int) er
 		cfg.HCEps = v
 	}
 
-	// ---- Engram (GUESSED; validated fail-loud) ------------------------------
+	// ---- Engram (ds4 converter keys; legacy flat keys are fallback-only) -----
 	eng := &DeepSeek41Engram{
 		LayerIDs:            intArrayOrNil(f, p+ds41KeyEngramLayerIDs),
 		NumEmbeddings:       intArrayOrNil(f, p+ds41KeyEngramNumEmbedding),
-		MaxNgramSize:        intValueOrZero(f, p+ds41KeyEngramMaxNgramSize),
-		VocabSize:           intValueOrZero(f, p+ds41KeyEngramVocabSize),
-		NHeads:              intValueOrZero(f, p+ds41KeyEngramNHeads),
-		HeadDim:             intValueOrZero(f, p+ds41KeyEngramHeadDim),
+		MaxNgramSize:        intValueOrZero(f, p+ds41LegacyEngramMaxNgramSize),
+		VocabSize:           intValueOrZero(f, p+ds41LegacyEngramVocabSize),
+		NHeads:              intValueOrZero(f, p+ds41LegacyEngramNHeads),
+		HeadDim:             intValueOrZero(f, p+ds41LegacyEngramHeadDim),
 		PadTokenID:          intValueOrZero(f, p+ds41KeyEngramPadTokenID),
 		CompressedVocabSize: intValueOrZero(f, p+ds41KeyEngramCompVocab),
+		TokenMap:            intArrayOrNil(f, p+ds41KeyEngramTokenMap),
+		Primes:              intArrayOrNil(f, p+ds41KeyEngramPrimes),
+		Multipliers:         uint64ArrayOrNil(f, p+ds41KeyEngramMultipliers),
+	}
+	eng.Encoding, _ = f.String(p + ds41KeyEngramEncoding)
+	if _, ok := f.Metadata[p+ds41KeyEngramLayerIDs]; !ok {
+		eng.LayerIDs = intArrayOrNil(f, p+ds41LegacyEngramLayerIDs)
+	}
+	if _, ok := f.Metadata[p+ds41KeyEngramNumEmbedding]; !ok {
+		eng.NumEmbeddings = intArrayOrNil(f, p+ds41LegacyEngramNumEmbedding)
+	}
+	if _, ok := f.Metadata[p+ds41KeyEngramPadTokenID]; !ok {
+		eng.PadTokenID = intValueOrZero(f, p+ds41LegacyEngramPadTokenID)
+	}
+	if _, ok := f.Metadata[p+ds41KeyEngramCompVocab]; !ok {
+		eng.CompressedVocabSize = intValueOrZero(f, p+ds41LegacyEngramCompVocab)
+	}
+	if len(eng.LayerIDs) > 0 && len(eng.Multipliers)%len(eng.LayerIDs) == 0 {
+		eng.MaxNgramSize = max(eng.MaxNgramSize, len(eng.Multipliers)/len(eng.LayerIDs))
+	}
+	if len(eng.LayerIDs) > 0 && eng.MaxNgramSize > 1 {
+		eng.NHeads = max(eng.NHeads, len(eng.Primes)/(len(eng.LayerIDs)*(eng.MaxNgramSize-1)))
 	}
 	if err := validateDeepSeek41Engram(f, p, cfg, eng); err != nil {
 		return err
@@ -240,28 +296,106 @@ func applyDeepSeek41Config(f *File, p string, cfg *model.Config, ropeDim int) er
 // geometry check. Only a file carrying real weights must resolve positive Engram
 // geometry for a shipped table.
 func validateDeepSeek41Engram(f *File, p string, cfg *model.Config, eng *DeepSeek41Engram) error {
+	converterKeys := hasDeepSeek41ConverterEngramMetadata(f, p)
+	if converterKeys {
+		for _, key := range []string{ds41KeyEngramLayerIDs, ds41KeyEngramNumEmbedding, ds41KeyEngramTokenMap, ds41KeyEngramPrimes} {
+			if !metadataArrayHasElementType(f, p+key, TypeUint32) {
+				return fmt.Errorf("gguf: deepseek41 converter key %s must be a uint32 array", p+key)
+			}
+		}
+		if !metadataArrayHasElementType(f, p+ds41KeyEngramMultipliers, TypeUint64) {
+			return fmt.Errorf("gguf: deepseek41 converter key %s must be a uint64 array", p+ds41KeyEngramMultipliers)
+		}
+		for _, key := range []string{ds41KeyEngramCompVocab, ds41KeyEngramPadTokenID} {
+			if value, ok := f.Metadata[p+key]; !ok || value.Type != TypeUint32 {
+				return fmt.Errorf("gguf: deepseek41 converter key %s must be uint32", p+key)
+			}
+		}
+	}
 	if len(eng.LayerIDs) == 0 {
 		return nil // no Engram declaration -> nothing to validate
 	}
+	layerKey, rowsKey := ds41LegacyEngramLayerIDs, ds41LegacyEngramNumEmbedding
+	if converterKeys {
+		layerKey, rowsKey = ds41KeyEngramLayerIDs, ds41KeyEngramNumEmbedding
+	}
 	if len(eng.NumEmbeddings) != len(eng.LayerIDs) {
 		return fmt.Errorf("gguf: deepseek41 declares %s=%v but %s has %d entries, want %d",
-			p+ds41KeyEngramLayerIDs, eng.LayerIDs, p+ds41KeyEngramNumEmbedding, len(eng.NumEmbeddings), len(eng.LayerIDs))
+			p+layerKey, eng.LayerIDs, p+rowsKey, len(eng.NumEmbeddings), len(eng.LayerIDs))
 	}
 	for i, id := range eng.LayerIDs {
 		if id < 0 || id >= cfg.NumLayers {
 			return fmt.Errorf("gguf: deepseek41 %s[%d]=%d is not a valid decoder layer index (block_count=%d)",
-				p+ds41KeyEngramLayerIDs, i, id, cfg.NumLayers)
+				p+layerKey, i, id, cfg.NumLayers)
+		}
+	}
+	if converterKeys {
+		required := []struct {
+			key string
+			ok  bool
+		}{
+			{ds41KeyEngramEncoding, eng.Encoding != ""},
+			{ds41KeyEngramCompVocab, eng.CompressedVocabSize > 0},
+			{ds41KeyEngramTokenMap, len(eng.TokenMap) > 0},
+			{ds41KeyEngramPrimes, len(eng.Primes) > 0},
+			{ds41KeyEngramMultipliers, len(eng.Multipliers) > 0},
+		}
+		for _, item := range required {
+			if !item.ok {
+				return fmt.Errorf("gguf: deepseek41 declares %s but required converter key %s is missing or malformed", p+ds41KeyEngramLayerIDs, p+item.key)
+			}
+		}
+		if eng.MaxNgramSize < 2 || eng.NHeads <= 0 || len(eng.Primes) != len(eng.LayerIDs)*(eng.MaxNgramSize-1)*eng.NHeads {
+			return fmt.Errorf("gguf: deepseek41 %s/%s hash geometry is inconsistent", p+ds41KeyEngramPrimes, p+ds41KeyEngramMultipliers)
 		}
 	}
 	if len(f.Tensors) > 0 && deepseek41HasEngramTable(f) {
-		if eng.NHeads <= 0 {
-			return fmt.Errorf("gguf: deepseek41 ships an Engram table tensor but %s=%d is not positive", p+ds41KeyEngramNHeads, eng.NHeads)
+		if !converterKeys && eng.NHeads <= 0 {
+			return fmt.Errorf("gguf: deepseek41 ships an Engram table tensor but %s=%d is not positive", p+ds41LegacyEngramNHeads, eng.NHeads)
 		}
-		if eng.HeadDim <= 0 {
-			return fmt.Errorf("gguf: deepseek41 ships an Engram table tensor but %s=%d is not positive", p+ds41KeyEngramHeadDim, eng.HeadDim)
+		if !converterKeys && eng.HeadDim <= 0 {
+			return fmt.Errorf("gguf: deepseek41 ships an Engram table tensor but %s=%d is not positive", p+ds41LegacyEngramHeadDim, eng.HeadDim)
 		}
 	}
 	return nil
+}
+
+// hasDeepSeek41ConverterEngramMetadata treats any key from ds4's nested Engram
+// namespace as a converter declaration. This prevents a partial converter
+// header from borrowing missing fields from the provisional flat namespace.
+func hasDeepSeek41ConverterEngramMetadata(f *File, p string) bool {
+	for _, key := range []string{
+		ds41KeyEngramEncoding,
+		ds41KeyEngramLayerIDs,
+		ds41KeyEngramNumEmbedding,
+		ds41KeyEngramCompVocab,
+		ds41KeyEngramPadTokenID,
+		ds41KeyEngramTokenMap,
+		ds41KeyEngramPrimes,
+		ds41KeyEngramMultipliers,
+	} {
+		if _, ok := f.Metadata[p+key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func metadataArrayHasElementType(f *File, key string, kind ValueType) bool {
+	v, ok := f.Metadata[key]
+	if !ok || v.Type != TypeArray {
+		return false
+	}
+	items, ok := v.Value.([]Value)
+	if !ok {
+		return false
+	}
+	for _, item := range items {
+		if item.Type != kind {
+			return false
+		}
+	}
+	return true
 }
 
 // deepseek41HasEngramTable reports whether the tensor directory contains any
@@ -299,6 +433,11 @@ func intArrayOrNil(f *File, key string) []int {
 		return v
 	}
 	return nil
+}
+
+func uint64ArrayOrNil(f *File, key string) []uint64 {
+	v, _ := metadataArray(f, key, valueUint64)
+	return v
 }
 
 // deepseek41CanonicalSuffix maps a DeepSeek-V4 per-layer GGUF tensor suffix (after
