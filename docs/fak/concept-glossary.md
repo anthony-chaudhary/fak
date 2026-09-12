@@ -566,3 +566,38 @@ chatPlanner selects the planner stored in the admitted request binding, falling 
 chatRouteFromContext retrieves the admitted chat account binding from the current request context, or nil when the request uses the boot planner unchanged.
 
 **Distinct from:** principalFromContext extracts the authenticated tenant identity used to admit an account; chatRouteFromContext retrieves the resulting transport binding and does not authenticate or resolve an account.
+
+
+### FeatureActivationTracker
+
+The request-owned, concurrent-safe observation of which closed ServeFeature identifiers actually executed. It captures configured active/standby identifiers at ingress separately from accepted uses and freezes the used set at request completion.
+
+**Distinct from:** FeatureCatalog describes evaluated configuration and provenance; this tracker records execution on one request. It neither enables a feature nor measures savings. LookupReceipt supplies ephemeral real-vDSO source identity, while FeatureProofReceipt records bounded quantitative evidence in the separate proof surface. None of these observations authorizes a tool or settles a financial claim.
+
+
+### X-Fak-Features request observation headers and final trailer
+
+The HTTP projection of one FeatureActivationTracker: X-Fak-Features-Enabled lists ingress configuration, X-Fak-Features-Used snapshots accepted use before the first final response commit, and the declared X-Fak-Features-Used-Final trailer reports completed execution after streaming finishes.
+
+**Distinct from:** Initial headers cannot report later execution and remain immutable after commit. The final trailer extends observation without buffering live SSE; an incomplete worker does not receive a complete final-use value. These identifier lists carry neither retained FeatureProofReceipt measurements nor settlement receipts, and Enabled never implies Used.
+
+
+### fak_gateway_feature_used_requests_total
+
+The cumulative Prometheus counter of requests that actually used each closed ServeFeature identifier. Request finalization folds each used identifier once, even when the mechanism executes repeatedly within the request; the feature label is bounded by the catalog.
+
+**Distinct from:** This counts requests with observed use, not configured features, number of individual executions, savings, or proof-verification outcomes. The gateway prefix identifies the HTTP serving subsystem and does not make this a security gate or a policy verdict.
+
+
+### LookupReceipt (per-call real vDSO source identity)
+
+An opaque, call-local receipt written only by successful real VDSO.Lookup execution and bound to the exact returned abi.Result pointer. WithLookupReceipt transports it through context, including production tier wrappers, and Matches checks that identity after the caller's acceptance gates. A later real lookup clears earlier evidence, including on a miss.
+
+**Distinct from:** This short-lived identity check retains no payload serialization, historical measurement, or settlement authority. It differs from a world-state witness that binds cache validity, from FeatureCatalog configuration, from activation identifier lists, and from retained FeatureProofReceipt quantitative evidence. Matching the real result does not replace freshness, screening, or result-admission checks; arbitrary FastPath metadata cannot manufacture the receipt.
+
+
+### NativeCompactionObservation
+
+A bounded value summary of the actual native typed-message compaction cut, published to request observers only after successful native generation consumes the prepared prompt. It records exact typed-message JSON byte counts and hashes, explicitly estimated message tokens, and shared whole-message regions without retaining prompt or restore payloads.
+
+**Distinct from:** FeatureActivationTracker retains used identifiers, while this producer summary supplies quantities to the separate FeatureProofReceipt collector. Its shared regions do not certify KV cache anchors, estimates are not tokenizer counts, and byte reduction is not measured time savings. EncodePrompt, idle cuts, and failed generation publish no observation; proof capture failure does not erase actual compaction use. LookupReceipt identifies a real vDSO result and has a different producer.

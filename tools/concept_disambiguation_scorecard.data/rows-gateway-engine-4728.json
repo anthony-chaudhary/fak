@@ -23,7 +23,7 @@
       "kind": "metric",
       "definition": "The Prometheus metric-name prefix grouping the cold-tool-deferral counters (fak_gateway_tool_defer_cold_total, fak_gateway_tool_defer_turns_total) the gateway emits when --defer-cold-tools marks cold tool definitions defer_loading on the outbound body.",
       "distinction": "The metric-name PREFIX/family for the tool-deferral counters, NOT the gateway subsystem itself and NOT fak_gateway_operations_total (the kernel-operation counter family).",
-      "distinct_from": ["gateway", "x-gateway-engine-fakgatewayoperationstotal"],
+      "distinct_from": ["gateway", "x-gateway-engine-fakgatewayoperationstotal", "gateway-feature-used-requests-total"],
       "aliases": ["fak_gateway_tool_defer"],
       "grounding": "fak_gateway_tool_defer",
       "grounding_kind": "metric",

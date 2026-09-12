@@ -339,10 +339,11 @@ func DeferColdToolDefs(tools []ToolDef) ([]ToolDef, int) {
 
 // TypedPromptShrinkConfig parameterizes the typed-messages prompt shrink pass.
 type TypedPromptShrinkConfig struct {
-	CompactHistoryBudget int
-	ElideStaleReads      bool
-	DeferColdTools       bool
-	RestoreStash         func(id, excerpt string, body []byte)
+	CompactHistoryBudget    int
+	ElideStaleReads         bool
+	DeferColdTools          bool
+	RestoreStash            func(id, excerpt string, body []byte)
+	observeNativeCompaction bool
 }
 
 // TypedPromptShrinkOutcome records what the prompt-shrink pass did.
@@ -351,6 +352,7 @@ type TypedPromptShrinkOutcome struct {
 	CompactOutcome    CompactOutcome
 	StaleReadsElided  int
 	ColdToolsDeferred int
+	nativeCompaction  *NativeCompactionObservation
 }
 
 // ApplyTypedPromptShrinkLevers runs all active prompt-shrink levers over typed messages and tools.
@@ -366,6 +368,7 @@ func ApplyTypedPromptShrinkLevers(messages []Message, tools []ToolDef, cfg Typed
 		}
 	}
 	if cfg.CompactHistoryBudget > 0 {
+		before := messages
 		var compOutcome CompactOutcome
 		messages, compOutcome = CompactMessagesWithOptions(messages, CompactOptions{
 			Budget:       cfg.CompactHistoryBudget,
@@ -373,6 +376,9 @@ func ApplyTypedPromptShrinkLevers(messages []Message, tools []ToolDef, cfg Typed
 		})
 		outcome.CompactOutcome = compOutcome
 		outcome.Compacted = (compOutcome.Reason == CompactReasonNone)
+		if cfg.observeNativeCompaction && outcome.Compacted && compOutcome.Dropped > 0 {
+			outcome.nativeCompaction = captureNativeCompaction(before, messages, compOutcome.Dropped)
+		}
 	}
 	if cfg.DeferColdTools {
 		var deferred int

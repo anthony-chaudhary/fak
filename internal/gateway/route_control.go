@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -104,6 +105,10 @@ func ReplayInputTriggerRouteReceipt(data []byte) (InputTriggerRouteReceipt, erro
 // transform, planner selection, or model call. Trigger metadata is gone before
 // the modelroute Subject is constructed.
 func (s *Server) admitAndRouteChatInputTrigger(req ChatRequest) (*InputTriggerRouteReceipt, string, error) {
+	return s.admitAndRouteChatInputTriggerWithContext(context.Background(), req)
+}
+
+func (s *Server) admitAndRouteChatInputTriggerWithContext(ctx context.Context, req ChatRequest) (*InputTriggerRouteReceipt, string, error) {
 	turn := make([]inputtrigger.Message, len(req.Messages))
 	for i, message := range req.Messages {
 		turn[i] = inputtrigger.Message{
@@ -153,6 +158,7 @@ func (s *Server) admitAndRouteChatInputTrigger(req ChatRequest) (*InputTriggerRo
 	if err := validateInputTriggerRouteReceipt(receipt); err != nil {
 		return nil, "", err
 	}
+	FeatureActivationTrackerFromContext(ctx).RecordActivation(FeatureRouteManifest, FeatureOutcomeUsed)
 	return &receipt, model, nil
 }
 

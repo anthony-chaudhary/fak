@@ -1434,6 +1434,7 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 		case <-ticker.C:
 			send("ping", map[string]any{"type": "ping"})
 		case <-r.Context().Done():
+			markFeatureActivationIncomplete(r.Context())
 			return
 		}
 	}
