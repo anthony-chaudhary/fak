@@ -524,3 +524,10 @@ The agent loop run option that pins one caller-supplied adjudicator policy value
 refuseContextLength is the native planner helper that compares an exact rendered prompt token count plus its reserved output tokens with the effective model context limit before prefill or decode.
 
 **Distinct from:** This is the enforcement helper, not context-window (the hard budget it reads) and not native-context-refusal (the typed error value it returns when the request exceeds that budget).
+
+
+### FAK_STREAM_INKERNEL_PER_TOKEN
+
+Default-off environment switch that makes InKernelPlanner.CompleteStream forward committed token pieces during decode; disabled, the sink receives the completed content in one buffered delta.
+
+**Distinct from:** This switch selects emission timing for the concrete in-kernel planner; StreamingPlanner is the generic capability interface implemented by multiple planners and does not enable this opt-in policy.

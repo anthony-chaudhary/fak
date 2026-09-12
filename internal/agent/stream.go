@@ -27,6 +27,11 @@ import (
 // does not, because content is the model's own prose, which the buffered path
 // forwards verbatim too. A non-nil error returned by the sink aborts the stream
 // (e.g. the client disconnected) and surfaces from CompleteStream.
+//
+// InKernelPlanner.CompleteStream forwards one delta per committed token ONLY when
+// FAK_STREAM_INKERNEL_PER_TOKEN is enabled (default off); otherwise it degrades to a
+// single post-hoc content delta after the buffered Complete finishes, byte-identical
+// to the pre-seam trunk. The interface below is unchanged by that switch.
 type StreamSink func(contentDelta string) error
 
 // StreamingPlanner is the optional capability a Planner advertises when it can
