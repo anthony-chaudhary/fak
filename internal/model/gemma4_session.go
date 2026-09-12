@@ -47,9 +47,9 @@ package model
 
 // KVPrefixReuseSupported reports whether a *KVCache is a COMPLETE prefix for a Session over
 // this Config — i.e. whether cloning the cache carries the whole of what the session already
-// ingested. It is true for every cached architecture, whose per-layer K/V rows are the entire
-// state, and false for the gemma4 recompute bridge, whose state is the token history
-// (gemma4Hist) and whose cache stays empty.
+// ingested. It is false for the gemma4 recompute bridge, whose state is the token history
+// (gemma4Hist) and whose cache stays empty. It is also false for DeepSeek V4.1 until its
+// Engram and shared-KV continuation state is included in prefix snapshots.
 //
 // It exists because "the cache is empty" is indistinguishable from "the cache is a valid
 // zero-length prefix" at every consumer: radixkv.truncatePrefix returns a non-nil zero-length
@@ -57,7 +57,7 @@ package model
 // So a reuser holding only a *KVCache cannot detect the difference and must ask the Config
 // (#5548). Splitting the rule out of the reuser keeps it from being re-derived — and re-missed
 // — at each of the several places that build a session from a cached prefix.
-func (c Config) KVPrefixReuseSupported() bool { return !c.isGemma4() }
+func (c Config) KVPrefixReuseSupported() bool { return !c.isGemma4() && !c.IsDeepSeekV41() }
 
 // gemma4SessionModeWired reports whether this Session's execution mode is one the gemma4
 // bridge actually runs. The bridge is the HOST resident path (residentKernel over whatever
