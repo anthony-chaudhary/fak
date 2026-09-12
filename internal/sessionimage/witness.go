@@ -73,10 +73,11 @@ func writeWitness(path string, entries []WitnessEntry) error {
 // Witness reads the persisted keep-bits back, or nil when the image carries none (a
 // session that completed no witnessed effect). The bytes were already integrity-checked
 // by LoadDir/verifyParts before this is reachable, so a returned entry is proven whole;
-// this re-reads them only to decode. A version mismatch fails closed.
+// this re-reads them only to decode. A version mismatch or disappearance of an
+// indexed witness fails closed.
 func (img *Image) Witness() ([]WitnessEntry, error) {
 	return readImageSidecar(img.Dir, WitnessFile, "witness",
-		func(s WitnessSet) (string, []WitnessEntry) { return s.Version, s.Entries })
+		func(s WitnessSet) (string, []WitnessEntry) { return s.Version, s.Entries }, img.Meta.Parts...)
 }
 
 // VerifiedDone is the one-call "already-completed?" a restore asks before re-firing an
