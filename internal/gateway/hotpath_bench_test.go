@@ -108,13 +108,16 @@ func TestSSEChunkFlushFlushes(t *testing.T) {
 // TestSSEChunkFlushPerChunkAllocsFlat asserts the per-chunk allocation floor does
 // not grow with completion length: the mean allocs/chunk at 4096 segments must be
 // no worse than at 64 segments (json.Marshal dominates and is size-independent
-// here). A reintroduced per-token full-buffer copy would make the long arm scale
-// with elapsed output and fail this.
+// here). Additional per-chunk allocations that grow with completion length
+// fail this check; it does not measure allocated byte volume.
 func TestSSEChunkFlushPerChunkAllocsFlat(t *testing.T) {
+	const measuredChunks = 204800
 	perChunk := func(segs int) float64 {
 		w := &flushRecorder{ResponseRecorder: httptest.NewRecorder()}
-		allocs := testing.AllocsPerRun(50, func() {
-			w.Body.Reset()
+		// A production ResponseWriter sends each chunk onward; retaining the full
+		// stream in the test recorder adds allocator work unrelated to writeSSEData.
+		w.Body = nil
+		allocs := testing.AllocsPerRun(measuredChunks/segs, func() {
 			for j := 0; j < segs; j++ {
 				if err := writeSSEData(w, map[string]string{"content": "token token "}); err != nil {
 					t.Fatal(err)
