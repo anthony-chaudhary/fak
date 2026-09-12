@@ -4,14 +4,16 @@ package gateway
 // (#5399, the remaining half of #4855).
 //
 // POST /v1/chat/completions with stream:true has two servers. The LIVE one
-// (streamChatLive) only exists for a planner that implements agent.StreamingPlanner;
-// agent.InKernelPlanner implements Complete ONLY, so the pure-fak in-kernel serve —
-// the exact topology the 8-rank GLM-5.2 EP report came from — declines it and
-// falls through to the buffered path. That path used to write its FIRST byte (status
-// line, headers, opening chunk, everything) only after completeServed returned the
-// whole turn. For the full duration of a sharded multi-rank decode the client could
-// not distinguish an accepted streaming request from a dead socket; on the original
-// report that was 1120+ seconds of silence.
+// (streamChatLive) serves any planner that implements agent.StreamingPlanner;
+// agent.InKernelPlanner now implements StreamingPlanner (its CompleteStream lives in
+// internal/agent/inkernel_planner.go), so the pure-fak in-kernel serve — the exact
+// topology the 8-rank GLM-5.2 EP report came from — takes the live path. The buffered
+// preamble below remains the fallback for Complete-ONLY planners (e.g. the modeled
+// collectivePlanner), whose first byte used to be written (status line, headers,
+// opening chunk, everything) only after completeServed returned the whole turn. For
+// the full duration of a sharded multi-rank decode such a client could not distinguish
+// an accepted streaming request from a dead socket; on the original report that was
+// 1120+ seconds of silence.
 //
 // chatStreamWriter splits that single write into two halves so the socket can prove
 // itself alive immediately:

@@ -239,9 +239,14 @@ func (p *InKernelPlanner) StreamingSupported() bool { return true }
 // (generateReusedWithOOMRetry → the per-token emit closure in Complete), so each decoded
 // piece of assistant prose is forwarded as it is produced — the same live token flow
 // cmd/fakchat's streamDecode gives the direct process path, not one post-hoc delta.
-// When no sink is provided (or the decode runs one of the speculative paths, whose
-// draft-verify rounds batch tokens), the stream degrades to the buffered projection —
-// one fragment after the turn completes — and the returned Completion is unchanged.
+//
+// This per-token forwarding is OPT-IN via FAK_STREAM_INKERNEL_PER_TOKEN (default off);
+// flag OFF is the buffered projection — the whole turn decodes with the plain Complete
+// (no observer, no forced DecodeTrace) and reaches the sink as AT MOST one post-hoc
+// content delta, byte-identical to the pre-seam trunk. When no sink is provided (or the
+// decode runs one of the speculative paths, whose draft-verify rounds batch tokens), the
+// stream likewise degrades to the buffered projection and the returned Completion is
+// unchanged.
 //
 // The sink observes the RAW incrementally decoded model text; the final Completion
 // carries the POST-PROCESSED turn (reasoning split, tool-call lift) exactly as the
@@ -252,9 +257,34 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 	if sink == nil {
 		return p.Complete(ctx, messages, tools, opts...)
 	}
-	return p.Complete(ctx, messages, tools, append(opts, WithDecodeTokenObserver(func(tokenPiece, rawText string) {
-		_ = sink(tokenPiece)
+	if !inKernelPerTokenStreamEnabled() {
+		// Default: the buffered projection. Decode the whole turn with the plain
+		// Complete (no observer, no forced DecodeTrace), then emit the finished
+		// content as one delta — byte-identical to the pre-seam trunk.
+		comp, err := p.Complete(ctx, messages, tools, opts...)
+		if err != nil {
+			return comp, err
+		}
+		if comp != nil && comp.Message.Content != "" {
+			return comp, sink(comp.Message.Content)
+		}
+		return comp, nil
+	}
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var sinkErr error
+	comp, err := p.Complete(streamCtx, messages, tools, append(opts, WithDecodeTokenObserver(func(tokenPiece, rawText string) {
+		if sinkErr != nil || tokenPiece == "" {
+			return
+		}
+		if sinkErr = sink(tokenPiece); sinkErr != nil {
+			cancel()
+		}
 	}))...)
+	if sinkErr != nil {
+		return comp, sinkErr
+	}
+	return comp, err
 }
 
 // SetPromptShrinkLevers configures the prompt-shrink levers for this planner.
