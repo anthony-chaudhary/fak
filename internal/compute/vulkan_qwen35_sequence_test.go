@@ -63,6 +63,49 @@ func formatQwen35SequenceParityOracle(maxAbsDelta float64, finiteOutput bool, ca
 	return json.Marshal(event)
 }
 
+type qwen35SequenceKVReserveParityEvent struct {
+	Schema         string                             `json:"schema"`
+	Selector       string                             `json:"selector"`
+	TestName       string                             `json:"test_name"`
+	OracleKind     string                             `json:"oracle_kind"`
+	Engine         string                             `json:"engine"`
+	DeviceObserved bool                               `json:"device_observed"`
+	CaseCount      int                                `json:"case_count"`
+	Passed         bool                               `json:"passed"`
+	Observed       qwen35SequenceParityOracleObserved `json:"observed"`
+	Bounds         qwen35SequenceParityOracleBounds   `json:"bounds"`
+}
+
+// formatQwen35SequenceKVReserveParity renders the fak.strix.subkernel-parity/v1
+// event for the geometric sequence-KV reservation selector registered by #12611.
+// The geometric and exact-growth reserves must produce bit-identical attention
+// output (max_abs_delta == 0) and finite values to earn physical parity credit.
+func formatQwen35SequenceKVReserveParity(maxAbsDelta float64, finiteOutput bool, caseCount int) ([]byte, error) {
+	if caseCount <= 0 {
+		caseCount = 1
+	}
+	passed := finiteOutput && maxAbsDelta <= 0
+	event := qwen35SequenceKVReserveParityEvent{
+		Schema:         "fak.strix.subkernel-parity/v1",
+		Selector:       "qwen35-sequence-kv",
+		TestName:       "TestQwen35VulkanSequenceKVReserveGeometric",
+		OracleKind:     "max_abs",
+		Engine:         "fak-native/vulkan",
+		DeviceObserved: true,
+		CaseCount:      caseCount,
+		Passed:         passed,
+		Observed: qwen35SequenceParityOracleObserved{
+			MaxAbsDelta:  maxAbsDelta,
+			FiniteOutput: finiteOutput,
+		},
+		Bounds: qwen35SequenceParityOracleBounds{
+			MaxAbsDelta:   0,
+			RequireFinite: true,
+		},
+	}
+	return json.Marshal(event)
+}
+
 // Three distinct rows and an output width crossing one workgroup expose token
 // addressing errors that a one-token decode or repeated input cannot detect.
 func TestVulkanQwen35SequenceQuantizedPanelsMatchCPU(t *testing.T) {
@@ -1156,7 +1199,12 @@ func TestQwen35VulkanSequenceKVReserveGeometric(t *testing.T) {
 		}
 
 		var maxDelta float64
+		allFinite := true
 		for i := range resExact {
+			if math.IsNaN(float64(resExact[i])) || math.IsInf(float64(resExact[i]), 0) ||
+				math.IsNaN(float64(resGeom[i])) || math.IsInf(float64(resGeom[i]), 0) {
+				allFinite = false
+			}
 			delta := math.Abs(float64(resExact[i] - resGeom[i]))
 			if delta > maxDelta {
 				maxDelta = delta
@@ -1165,6 +1213,12 @@ func TestQwen35VulkanSequenceKVReserveGeometric(t *testing.T) {
 				t.Fatalf("attention mismatch at %d: exact=%g geom=%g delta=%g", i, resExact[i], resGeom[i], delta)
 			}
 		}
+
+		oracleJSON, err := formatQwen35SequenceKVReserveParity(maxDelta, allFinite, 1)
+		if err != nil {
+			t.Fatalf("format sequence-KV reserve parity oracle: %v", err)
+		}
+		t.Logf("%s", oracleJSON)
 
 		t.Logf("Device KV reservation & attention output parity verified: tokens=%d maxDelta=%g logical_len=%d exact_cap=%d geom_cap=%d",
 			totalTokens, maxDelta, cacheGeomK.len, cacheExactK.cap, cacheGeomK.cap)

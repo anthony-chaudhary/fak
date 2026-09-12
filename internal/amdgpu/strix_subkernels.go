@@ -17,6 +17,8 @@ const (
 	StrixVulkanEngine          = "fak-native/vulkan"
 	embeddingGatherSelector    = "qwen35-embedding-gather"
 	embeddingGatherTestName    = "TestQwen35VulkanEmbeddingGatherOneDispatch"
+	sequenceKVSelector         = "qwen35-sequence-kv"
+	sequenceKVTestName         = "TestQwen35VulkanSequenceKVReserveGeometric"
 )
 
 // Closed oracle kind vocabulary
@@ -462,6 +464,17 @@ var DefaultSubkernelParityContracts = map[string]SubkernelParityContract{
 			RequireFinite: true,
 		},
 	},
+	sequenceKVSelector: {
+		Selector:       sequenceKVSelector,
+		TestName:       sequenceKVTestName,
+		OracleKind:     OracleMaxAbs,
+		Engine:         StrixVulkanEngine,
+		DeviceObserved: true,
+		Bounds: SubkernelParityBounds{
+			MaxAbsDelta:   floatPtr(0),
+			RequireFinite: true,
+		},
+	},
 	"f16_kv_contiguize": {
 		Selector:       "f16_kv_contiguize",
 		TestName:       "TestRADVContiguizeShader",
@@ -616,6 +629,12 @@ var DefaultSubkernelSpecs = []SubkernelSpec{
 		Category:    "embedding",
 	},
 	{
+		Name:        sequenceKVSelector,
+		Description: "Qwen3.5 geometric sequence-KV reservation with exact-growth attention parity",
+		TestPattern: "^" + sequenceKVTestName + "$",
+		Category:    "kv_cache",
+	},
+	{
 		Name:        "f16_kv_contiguize",
 		Description: "Pre-attention f16 KV cache contiguization (eliminates LPDDR5X channel camping)",
 		TestPattern: "^TestRADVContiguizeShader$",
@@ -645,6 +664,7 @@ var DefaultCreditableSubkernelSelectors = []string{
 	"attention",
 	"qwen35_gdn_decode",
 	"qwen35_gdn_preprojected",
+	sequenceKVSelector,
 }
 
 var executeOneSubkernelFn = executeOneSubkernel
