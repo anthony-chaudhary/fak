@@ -14,7 +14,17 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 )
 
+// guardAllowWatcherFailClosed isolates the deny expectations from the live posture
+// that the real built-in policy reloader intentionally preserves.
+func guardAllowWatcherFailClosed(t *testing.T) {
+	t.Helper()
+	prior := adjudicator.Default.PolicySnapshot()
+	t.Cleanup(func() { adjudicator.Default.SetPolicy(prior) })
+	adjudicator.Default.SetPolicy(adjudicator.Policy{Posture: adjudicator.PostureFailClosed})
+}
+
 func TestGuardAllowWatcherLiveAddRemoveAndMalformedLastGood(t *testing.T) {
+	guardAllowWatcherFailClosed(t)
 	dir := t.TempDir()
 	allowPath := filepath.Join(dir, "allow.json")
 	t.Setenv(guardAllowOverlayEnv, allowPath)
@@ -109,6 +119,7 @@ func TestGuardAllowWatcherRunStopsWithContext(t *testing.T) {
 }
 
 func TestGuardAllowWatcherReloadsSessionScope(t *testing.T) {
+	guardAllowWatcherFailClosed(t)
 	dir := t.TempDir()
 	old, err := os.Getwd()
 	if err != nil {
@@ -151,6 +162,7 @@ func TestGuardAllowWatcherReloadsSessionScope(t *testing.T) {
 }
 
 func TestGuardAllowWatcherRevokesAtTTLExpiryWithoutFileChange(t *testing.T) {
+	guardAllowWatcherFailClosed(t)
 	dir := t.TempDir()
 	allowPath := filepath.Join(dir, "allow.json")
 	t.Setenv(guardAllowOverlayEnv, allowPath)
