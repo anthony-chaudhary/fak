@@ -130,9 +130,10 @@ class ReleasePublishTest(unittest.TestCase):
         self.assertIn("--verify-tag", create)
         self.assertIn("--notes-file", create)
         self.assertNotIn("--notes", create)
-        # The stable cut is published as Latest explicitly, not left to GitHub's
-        # implicit highest-semver heuristic — keeps @latest from lagging HEAD.
-        self.assertIn("--latest", create)
+        # The page starts pending; the artifact verifier alone promotes it.
+        self.assertIn("--prerelease", create)
+        self.assertIn("--latest=false", create)
+        self.assertNotIn("--latest", create)
 
     def test_existing_release_is_idempotent(self) -> None:
         rp = load()

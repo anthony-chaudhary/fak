@@ -57,8 +57,10 @@ jobs:
           mkdir -p dist/arm64-metal
           GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 OUT="dist/arm64-metal/fak" VERSION="${VERSION}" sh scripts/build.sh
 
-          # Create Universal macOS binary combining arm64 and amd64 using lipo
-          lipo -create -output dist/universal/fak dist/arm64/fak dist/amd64/fak
+          # Apple Silicon is the useful default slice: include the Metal-enabled
+          # binary in the universal archive while retaining the CPU-only amd64
+          # reference slice for Intel Macs.
+          lipo -create -output dist/universal/fak dist/arm64-metal/fak dist/amd64/fak
           file dist/universal/fak
 
       - name: Sign macOS Universal Binary
@@ -78,11 +80,14 @@ jobs:
             echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
             security import certificate.p12 -k "$KEYCHAIN" -P "${APPLE_CERTIFICATE_PASS:-}" -T /usr/bin/codesign
             security set-key-partition-list -S apple-tool:,apple: -s -k "${APPLE_KEYCHAIN_PASS:-build}" "$KEYCHAIN"
+            codesign --force --options runtime --sign "$APPLE_SIGNING_IDENTITY" --timestamp dist/arm64-metal/fak
             codesign --force --options runtime --sign "$APPLE_SIGNING_IDENTITY" --timestamp dist/universal/fak
+            codesign --verify --verbose dist/arm64-metal/fak
             codesign --verify --verbose dist/universal/fak
           else
             echo "Apple signing identity not configured; signing ad-hoc for local/CI validation"
-            codesign --force --options runtime --sign - dist/universal/fak || true
+            codesign --force --options runtime --sign - dist/arm64-metal/fak
+            codesign --force --options runtime --sign - dist/universal/fak
           fi
 
       - name: Notarize macOS Binary with Apple
@@ -100,14 +105,19 @@ jobs:
               --password "$APPLE_PASSWORD" \
               --team-id "$APPLE_TEAM_ID" \
               --wait
+            ditto -c -k --keepParent dist/arm64-metal/fak dist/fak-metal.zip
+            xcrun notarytool submit dist/fak-metal.zip \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait
             xcrun stapler staple dist/universal/fak || true
+            xcrun stapler staple dist/arm64-metal/fak || true
           else
             echo "Apple notarization credentials not configured; skipping notarytool submission in unprovisioned environment"
           fi
 
       - name: Package Universal and per-arch Archives
-        env:
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           set -euo pipefail
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
@@ -125,15 +135,7 @@ jobs:
           # so a dist/-prefixed hash line breaks verification (quarantined v0.55.0).
           ( cd dist && shasum -a 256 "fak_${VERSION}_darwin_universal.tar.gz" > "fak_${VERSION}_darwin_universal.tar.gz.sha256" )
 
-          # Package the Metal-enabled darwin/arm64 binary as a separate release asset.
-          # Same ad-hoc codesign posture as the universal fallback path (no cert configured):
-          # NOTARY GAP: this asset is NOT covered by the Developer ID / notarization steps
-          # above; tighten only if the Metal build is promoted to the default download.
-          if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
-            codesign --force --options runtime --sign "$APPLE_SIGNING_IDENTITY" --timestamp dist/arm64-metal/fak || true
-          else
-            codesign --force --options runtime --sign - dist/arm64-metal/fak || true
-          fi
+          # Package the separately signed/notarized Metal-enabled darwin/arm64 binary.
           cp LICENSE GETTING-STARTED.md dist/arm64-metal/
           ( cd dist/arm64-metal && tar -czf "../${METAL_ASSET_NAME}" . )
           # Bare-filename sidecar content, same reasoning as the universal sidecar above.
@@ -144,7 +146,25 @@ jobs:
           echo "METAL_ARCHIVE=dist/${METAL_ASSET_NAME}" >> "$GITHUB_ENV"
           echo "METAL_SUM=dist/${METAL_ASSET_NAME}.sha256" >> "$GITHUB_ENV"
 
-      - name: Upload Universal Binary to GitHub Release
+      - name: Validate Homebrew Formula and Executable Functionality
+        run: |
+          set -euo pipefail
+          ruby -c Formula/fak.rb
+          # Test local execution and completions of built universal binary
+          ./dist/universal/fak version
+          ./dist/universal/fak completion bash >/dev/null
+          ./dist/universal/fak completion zsh >/dev/null
+          ./dist/universal/fak completion fish >/dev/null
+          # The public GPU artifact must contain the compiled native Metal path.
+          # The compute registry's `metal` entry is a separate opt-in MPS HAL and
+          # is not the default pure-MSL model path, so framework linkage is the
+          # correct packaged-binary assertion on hosted runners.
+          ./dist/arm64-metal/fak version
+          ./dist/arm64-metal/fak completion bash >/dev/null
+          otool -L ./dist/arm64-metal/fak | grep -q '/Metal.framework/'
+          otool -L ./dist/arm64-metal/fak | grep -q '/MetalPerformanceShaders.framework/'
+
+      - name: Upload validated macOS binaries to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -158,19 +178,3 @@ jobs:
           done
           gh release upload "$TAG" "$UNIVERSAL_ARCHIVE" "$UNIVERSAL_SUM" --clobber
           gh release upload "$TAG" "$METAL_ARCHIVE" "$METAL_SUM" --clobber
-
-      - name: Validate Homebrew Formula and Executable Functionality
-        run: |
-          set -euo pipefail
-          ruby -c Formula/fak.rb
-          # Test local execution and completions of built universal binary
-          ./dist/universal/fak version
-          ./dist/universal/fak completion bash >/dev/null
-          ./dist/universal/fak completion zsh >/dev/null
-          ./dist/universal/fak completion fish >/dev/null
-          # Smoke the Metal build: version must answer. `fak backends` is landing from a
-          # companion worker in this wave, so keep that probe NON-FATAL (|| echo) until it
-          # ships, then tighten to a hard grep -i metal assertion.
-          ./dist/arm64-metal/fak version
-          ./dist/arm64-metal/fak completion bash >/dev/null
-          ( ./dist/arm64-metal/fak backends 2>/dev/null | grep -i metal ) || echo "metal backend probe not available yet"

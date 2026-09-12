@@ -15,6 +15,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW = ROOT / ".github" / "workflows" / "release-artifacts.yml"
+MACOS_WORKFLOW = ROOT / ".github" / "workflows" / "release-macos.yml"
+CONTAINER_WORKFLOW = ROOT / ".github" / "workflows" / "release-container.yml"
+CUDA_CONTAINER_WORKFLOW = ROOT / ".github" / "workflows" / "release-cuda-container.yml"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 INSTALL_SH = ROOT / "install.sh"
 DOCKERFILE = ROOT / "Dockerfile"
@@ -23,7 +26,8 @@ DOCKERFILE = ROOT / "Dockerfile"
 # carrying the recipe inline, so those assertions follow it here.
 BUILD_SH = ROOT / "scripts" / "build.sh"
 
-# The exact target and asset sets published by the release workflow (#12209).
+# The exact target and asset sets published by the release workflow, plus the
+# macOS artifacts uploaded by the separate release-macos workflow.
 TARGETS = (
     ("linux", "amd64"),
     ("linux", "arm64"),
@@ -34,6 +38,10 @@ TARGETS = (
 ARCHIVES = tuple(
     f"fak_${{VERSION}}_{goos}_{goarch}{'.zip' if goos == 'windows' else '.tar.gz'}"
     for goos, goarch in TARGETS
+) + (
+    "fak_${VERSION}_darwin_universal.tar.gz",
+    "fak_${VERSION}_darwin_arm64_metal.tar.gz",
+    "fak_${VERSION}_linux_amd64_vulkan.tar.gz",
 )
 RELEASE_ASSETS = (*ARCHIVES, *(f"{archive}.sha256" for archive in ARCHIVES), "SHA256SUMS")
 LDFLAG = "-X github.com/anthony-chaudhary/fak/internal/appversion.BuildVersion="
@@ -106,6 +114,34 @@ class ReleaseArtifactsWorkflowTest(unittest.TestCase):
         self.assertIn('[ -s "${assets}/${archive}.sha256" ]', self.text)
         self.assertIn('[ -s "${assets}/SHA256SUMS" ]', self.text)
 
+    def test_waits_for_macos_gpu_checksum_before_aggregate(self) -> None:
+        self.assertIn('fak_${VERSION}_darwin_universal.tar.gz.sha256', self.text)
+        self.assertIn('fak_${VERSION}_darwin_arm64_metal.tar.gz.sha256', self.text)
+        self.assertIn('fak_${VERSION}_linux_amd64_vulkan.tar.gz.sha256', self.text)
+        self.assertIn('CUDA_IMAGE="ghcr.io/${OWNER}/fak:${VERSION}-cuda"', self.text)
+        self.assertIn('docker manifest inspect "$CUDA_IMAGE"', self.text)
+        self.assertIn('docker pull "$CUDA_IMAGE"', self.text)
+        self.assertIn('"cuda" in (d.get("build_tags") or [])', self.text)
+        self.assertIn("ldd /usr/local/bin/fak | grep -q libcudart", self.text)
+        self.assertIn("CUDA image version mismatch", self.text)
+        self.assertIn('cuda_digest=${cuda_digest}', self.text)
+        self.assertIn("fold_max=120", self.text)
+        self.assertIn('if [ "$fold_ok" -ne 1 ]', self.text)
+        self.assertIn("refusing to publish incomplete SHA256SUMS", self.text)
+
+    def test_macos_release_requires_native_metal_linkage(self) -> None:
+        text = MACOS_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("otool -L ./dist/arm64-metal/fak", text)
+        self.assertIn("/Metal.framework/", text)
+        self.assertIn("/MetalPerformanceShaders.framework/", text)
+        self.assertNotIn("dist/arm64-metal/fak backends | grep -qx metal", text)
+        self.assertNotIn("metal backend probe not available yet", text)
+        self.assertIn("dist/arm64-metal/fak dist/amd64/fak", text)
+        self.assertLess(
+            text.index("Validate Homebrew Formula and Executable Functionality"),
+            text.index("Upload validated macOS binaries to GitHub Release"),
+        )
+
     def test_static_no_cgo_build(self) -> None:
         # Static, reproducible, no cgo — the property that lets the binary run
         # anywhere and the distroless image stay tiny. CGO_ENABLED stays in the job
@@ -156,10 +192,32 @@ class ReleaseArtifactsWorkflowTest(unittest.TestCase):
         self.assertIn("Promote verified release to Latest", self.text)
         self.assertIn("-F prerelease=false", self.text)
         self.assertIn("-f make_latest=true", self.text)
+        self.assertIn("CURRENT_LATEST=", self.text)
+        self.assertIn("sort -V | tail -n1", self.text)
+        self.assertIn("preserving the newer default", self.text)
         # And it still demotes a failed one.
         self.assertIn("Quarantine failed release", self.text)
         self.assertIn("-F prerelease=true", self.text)
         self.assertIn("-f make_latest=false", self.text)
+
+    def test_failed_gpu_aggregation_still_quarantines_release(self) -> None:
+        self.assertIn("if: ${{ always() }}", self.text)
+        self.assertIn("needs.checksums.result != 'success'", self.text)
+        self.assertIn("artifact aggregation failed", self.text)
+
+    def test_mutable_oci_aliases_are_owned_by_serialized_verified_aggregate(self) -> None:
+        cpu = CONTAINER_WORKFLOW.read_text(encoding="utf-8")
+        cuda = CUDA_CONTAINER_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("steps.meta.outputs.version }}-cpu", cpu)
+        self.assertNotIn("steps.meta.outputs.image }}:latest", cpu)
+        self.assertIn("steps.meta.outputs.version }}-cuda", cuda)
+        self.assertNotIn("steps.meta.outputs.image }}:cuda-latest", cuda)
+        self.assertIn("release-promotion-${{ github.repository }}", self.text)
+        self.assertIn('CPU_DIGEST="${{ needs.checksums.outputs.cpu_digest }}"', self.text)
+        self.assertIn('CUDA_DIGEST="${{ needs.checksums.outputs.cuda_digest }}"', self.text)
+        self.assertIn('imagetools create --tag "${IMAGE}:cpu-latest" "$CPU_DIGEST"', self.text)
+        self.assertIn('imagetools create --tag "${IMAGE}:cuda-latest" "$CUDA_DIGEST"', self.text)
+        self.assertIn('imagetools create --tag "${IMAGE}:latest" "$CUDA_DIGEST"', self.text)
 
     def test_checksums_job_resolves_repo_without_checkout(self) -> None:
         # Regression #369: the aggregate-SHA256SUMS job has no checkout, so `gh`

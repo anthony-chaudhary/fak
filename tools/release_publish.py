@@ -222,14 +222,9 @@ def publish_release(root: Path, context: dict, *, execute: bool = False,
     with tempfile.TemporaryDirectory(prefix="fleet-release-notes-") as tmp:
         notes_path = Path(tmp) / f"{tag_name}.md"
         notes_path.write_text(note_text, encoding="utf-8", newline="")
-        # --latest is EXPLICIT, not implied. `gh release create` otherwise defers
-        # to GitHub's server-side heuristic (highest non-prerelease semver becomes
-        # Latest), which is fragile: a release created out of order, or one that a
-        # prior verify pass demoted to prerelease, silently leaves @latest lagging
-        # HEAD — the exact front-door rot this cadence exists to prevent (#1367).
-        # An agentic-cadence stable cut is the newest thing that should be Latest,
-        # so we assert it. A pre-release train would pass make_latest=false; today
-        # the cadence only cuts stable vX.Y.Z, so the default is the correct one.
+        # A new page is pending until every required CPU/GPU artifact is published
+        # and verified. release-artifacts.yml is the sole promotion authority; it
+        # clears prerelease and assigns Latest only after the complete release gate.
         code, out = runner([
             "gh",
             "release",
@@ -240,7 +235,8 @@ def publish_release(root: Path, context: dict, *, execute: bool = False,
             "--notes-file",
             str(notes_path),
             "--verify-tag",
-            "--latest",
+            "--prerelease",
+            "--latest=false",
         ])
     if code != 0:
         result["ok"] = False
