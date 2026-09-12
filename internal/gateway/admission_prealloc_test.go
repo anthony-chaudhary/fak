@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -12,17 +13,63 @@ import (
 )
 
 func TestEstimateServedAdmissionTokensPreallocCeiling(t *testing.T) {
+	if DefaultPreallocCeiling != 2048 {
+		t.Fatalf("default preallocation ceiling = %d, want 2048", DefaultPreallocCeiling)
+	}
 	TestEstimateServedAdmissionTokens_PreallocCeiling(t)
 }
 
+func TestAdmissionConfiguredPreallocReservesEveryBudget(t *testing.T) {
+	for _, ceiling := range []int{256, 4096} {
+		t.Run(fmt.Sprint(ceiling), func(t *testing.T) {
+			messages := []agent.Message{{Role: "user", Content: "Hello world!"}}
+			opts := []agent.SampleOpt{agent.WithMaxTokens(16384)}
+			ctl := NewAdmissionController(AdmissionPolicy{TokenBudget: 4 + ceiling, MaxNumSeqs: 1, PreallocCeiling: ceiling})
+			policy := TokenRatePolicy{Caps: ratelimit.TokenCaps{MaxTotalTokens: int64(4 + ceiling)}}
+			shared := NewTokenRateGate(policy)
+			principals := NewPrincipalTokenRates(policy, 0)
+			srv := &Server{admissionCtl: ctl, tokenRateGate: shared, principalTokenRates: principals}
+			lease, err := srv.beginServedAdmission(WithPrincipal(context.Background(), "tenant"), servedSessionTurn{traceID: "configured-prealloc"}, messages, nil, sampleMaxTokens(opts))
+			if err != nil {
+				t.Fatalf("large generation ceiling should fit the configured initial reservation: %v", err)
+			}
+			if lease == nil {
+				t.Fatal("admission returned no lease")
+			}
+			defer lease.Release()
+			if got := ctl.Stats().TokensInUse; got != 4+ceiling {
+				t.Fatalf("scheduler reservation = %d, want %d", got, 4+ceiling)
+			}
+			for name, snapshot := range map[string]TokenRateSnapshot{"provider": shared.Snapshot(), "principal": principals.SnapshotFor("tenant")} {
+				if snapshot.Reserved.InputTokens != 4 || snapshot.Reserved.OutputTokens != int64(ceiling) {
+					t.Errorf("%s reservation = %+v, want input=4 output=%d", name, snapshot.Reserved, ceiling)
+				}
+			}
+			if got := sampleMaxTokens(opts); got != 16384 {
+				t.Errorf("completion limit changed to %d, want 16384", got)
+			}
+			lease.SettleUsage(agent.Usage{PromptTokens: 4, CompletionTokens: 50, TotalTokens: 54})
+			for name, snapshot := range map[string]TokenRateSnapshot{"provider": shared.Snapshot(), "principal": principals.SnapshotFor("tenant")} {
+				if snapshot.Settled.InputTokens != 4 || snapshot.Settled.OutputTokens != 50 {
+					t.Errorf("%s settled usage = %+v, want input=4 output=50", name, snapshot.Settled)
+				}
+			}
+			lease.Release()
+			if got := ctl.Stats().TokensInUse; got != 0 {
+				t.Errorf("scheduler tokens after release = %d, want 0", got)
+			}
+		})
+	}
+}
+
 // Acceptance criterion 1: Unit test on estimateServedAdmissionTokens & estimateServedTokenUsage:
-// max_tokens = 120000 charges ~PreallocCeiling (1024 + prompt), not 120000.
+// max_tokens = 120000 charges ~PreallocCeiling (2048 + prompt), not 120000.
 func TestEstimateServedAdmissionTokens_PreallocCeiling(t *testing.T) {
 	msgs := []agent.Message{
 		{Role: "user", Content: "Hello world!"}, // 4 + 12 = 16 chars -> 4 tokens
 	}
 
-	// 1. Uncapped request with max_tokens = 120000 charges 4 + DefaultPreallocCeiling (1024) = 1028
+	// 1. Uncapped request with max_tokens = 120000 charges 4 + DefaultPreallocCeiling (2048) = 2052
 	got := estimateServedAdmissionTokens(msgs, nil, 120000)
 	want := 4 + DefaultPreallocCeiling
 	if got != want {
