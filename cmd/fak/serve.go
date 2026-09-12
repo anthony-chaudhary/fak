@@ -110,6 +110,7 @@ func configureServeToolEngines() {
 type serveFlags struct {
 	configPath                   *string
 	printEffectiveConfig         *bool
+	printFeatures                *bool
 	addr                         *string
 	stdio                        *bool
 	provider                     *string
@@ -240,6 +241,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.configPath = fs.String("config", "", "load reviewable deployment defaults from fak.toml (explicit flags override; no implicit ambient lookup)")
 	sf.applianceObservability = fs.Bool("appliance-observability", false, "activate appliance Grafana dashboard catalog profile (fak-strix-*) and default routing to fak-strix-index")
 	sf.printEffectiveConfig = fs.Bool("print-effective-config", false, "print supported effective serve configuration with value provenance, then exit without binding a listener")
+	sf.printFeatures = fs.Bool("print-features", false, "print the evaluated feature matrix and provenance before initialization, then exit without model I/O")
 	sf.addr = fs.String("addr", "127.0.0.1:8080", "HTTP listen address (OpenAI + fak + /mcp surface); ignored with --stdio")
 	sf.stdio = fs.Bool("stdio", false, "serve MCP over stdin/stdout (newline-delimited JSON-RPC) instead of HTTP")
 	sf.provider = fs.String("provider", "openai", "upstream provider transcript wire: openai, anthropic, gemini, or xai")
@@ -438,6 +440,27 @@ func cmdServe(argv []string) {
 
 	explicit := explicitFlagNames(fs)
 	sf.explicit = explicit
+	featureExplicit := explicitFlagNames(fs)
+	_, featurePositionals := partitionServeArgs(fs, argv)
+	if len(featurePositionals) > 0 {
+		if *sf.ggufPath != "" {
+			featureExplicit["gguf"] = true
+		}
+		if *sf.mock {
+			featureExplicit["mock"] = true
+		}
+	}
+	if *sf.printFeatures {
+		catalog, err := evaluateServeFeatures(sf, manifest, featureExplicit, os.Getenv, nil)
+		if err == nil {
+			err = json.NewEncoder(os.Stdout).Encode(catalog)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fak serve: print features: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	toolPlugins, toolPreferences, err := compileToolPluginConfig(manifest)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: config %s: %v\n", configPath, err)
@@ -677,6 +700,21 @@ func cmdServe(argv []string) {
 	resolveServeEngine(sf, explicit, rt.inKernelModel != nil)
 	rt.buildGateway(sf)
 	rt.wireGateway(sf)
+	catalog, err := evaluateServeFeatures(sf, manifest, featureExplicit, os.Getenv, rt)
+	if err == nil && keepAwakeReleaser != nil {
+		for i := range catalog.Features {
+			if catalog.Features[i].Feature == gateway.FeatureKeepAwake {
+				catalog.Features[i].State = gateway.FeatureConfiguredActive
+				catalog.Features[i].Description = "Process-lifetime OS keep-awake lock acquired."
+			}
+		}
+	}
+	if err == nil {
+		err = rt.srv.SetFeatureCatalog(catalog)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: feature catalog unavailable: %v\n", err)
+	}
 	rt.addStartupMessage(serveDurabilityStartupMessage(durability))
 	rt.run(sf)
 }

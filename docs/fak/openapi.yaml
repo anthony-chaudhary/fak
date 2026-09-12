@@ -72,6 +72,48 @@ tags:
     description: Liveness, metrics, diagnostics (`/healthz`, `/metrics`, `/debug/vars`).
 
 paths:
+  /v1/fak/features:
+    get:
+      summary: Read the evaluated runtime feature catalog
+      description: |
+        Point-in-time enablement for evaluated mechanisms, using the gateway's
+        configured authentication. Active means installed for eligible requests,
+        not exercised by a request. Standby includes unresolved prerequisites.
+        Descriptions contain no credential values. The CLI --print-features
+        emits this schema before initialization, with requested features standby.
+      responses:
+        '200':
+          description: Feature enablement matrix
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schema, features]
+                properties:
+                  schema:
+                    type: string
+                    enum: [fak-serve-features/1]
+                  features:
+                    type: array
+                    items:
+                      type: object
+                      required: [feature, state, provenance, description]
+                      properties:
+                        feature:
+                          type: string
+                          enum: [vdso, compact_history, compact_anchor_head, elide_results, context_view, positive_residual_substitution, vcache_anchor, defer_cold_tools, defer_tools, elide_stale_reads, policy_floor, inbound_auth, tool_exposure, route_manifest, route_accounts, engine_cache, remote_kv, device_backend, cuda_graph, metal, native_model, native_harness, native_speculate, memory_governor, appliance_observability, mock_planner, engine_cache_exact_span, allow_lan, budget_reset, cpu_offload_experts, gpudirect_overflow, notify_native, debug_stats, dojo, native_code_tools, vdso_proxy_fill, fleet_bus, native_metal_gdn_sequence, native_q4k_gateup_slab, vulkan_q4k_profile, vulkan_stage_q4k, keep_awake]
+                        state:
+                          type: string
+                          enum: [disabled, configured_active, configured_standby, refused_unavailable]
+                        provenance:
+                          type: string
+                          enum: [cli_flag, manifest, env_var, auto_default, hardware_probed]
+                        description:
+                          type: string
+        '401':
+          description: Authentication required by the configured gateway
+        '405':
+          description: Only GET is supported (Allow header is GET)
   /:
     get:
       tags: [Operational]

@@ -51,6 +51,7 @@ type gatewayRoute struct {
 // registration.
 func (s *Server) routeTable() []gatewayRoute {
 	return []gatewayRoute{
+		{"/v1/fak/features", s.handleFeatures},
 		{"/", s.handleHome},
 		// A2A Agent-to-Agent protocol surface (#1019).
 		{"/a2a/v1/messages", s.handleA2ASendMessage},
