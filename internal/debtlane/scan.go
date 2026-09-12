@@ -696,6 +696,12 @@ func recomputeLane(l *DebtLane) {
 	l.Health = EvaluateLaneHealth(*l)
 }
 
+// topLevelSourceRoots lists the top-level directories whose immediate
+// subdirectories are treated as source lanes during discovery. ADD NEW
+// TOP-LEVEL GO SOURCE ROOTS HERE: the discovery loop in discoverLanesFromDisk
+// iterates this slice, so a new root requires no edit to the loop body.
+var topLevelSourceRoots = []string{"internal", "pkg", "platform"}
+
 func discoverLanesFromDisk(root string, companionRoots ...string) ([]DebtLane, error) {
 	var compRoot string
 	if len(companionRoots) > 0 {
@@ -732,8 +738,11 @@ func discoverLanesFromDisk(root string, companionRoots ...string) ([]DebtLane, e
 		discovered[pkg] = true
 	}
 
-	for _, sub := range []string{"pkg", "platform"} {
-		subDir := filepath.Join(root, sub)
+	// Enumerate immediate subdirectories of every top-level source root that
+	// contains Go files. New top-level Go source roots are added to
+	// topLevelSourceRoots below -- the discovery loop body needs no edit.
+	for _, srcRoot := range topLevelSourceRoots {
+		subDir := filepath.Join(root, srcRoot)
 		if entries, err := os.ReadDir(subDir); err == nil {
 			for _, e := range entries {
 				if !e.IsDir() {
@@ -1605,9 +1614,36 @@ func readRuntimeProofs(root string) map[string]bool {
 	return set
 }
 
+// isHeavyNonSourceDir reports whether a directory name identifies a
+// non-source operational root that must never be walked during debt scanning.
+//
+// These roots are heavy by construction: worktree roots (.worktrees,
+// worktrees) hold full repository checkouts, so walking them multiplies the
+// scan by the number of active checkouts; fleet/dispatch/session/artifact
+// roots accumulate append-only run output; agent-memory, fleet, and
+// campaign roots carry large derived state. None of them contain first-party
+// source surfaces that debt lanes should inspect.
+//
+// Centralizing this list here (rather than inline at each call site) makes
+// future heavy roots shift-left safe: adding a new operational root is a
+// one-line change that automatically applies to every WalkDir in this file.
+func isHeavyNonSourceDir(name string) bool {
+	switch name {
+	case ".worktrees", "worktrees", "fleet-runs", "factory-cache",
+		"session-checkpoints", "artifacts", "_wip-preservation", "campaigns",
+		"outreach", "coverage", ".dispatch-runs", ".fak", ".dos", ".hypothesis",
+		"agent-memory", "fleet":
+		return true
+	}
+	return strings.HasPrefix(name, "dgxbridge-tail-readback-")
+}
+
 func shouldSkipDir(name string) bool {
-	return name == "testdata" || name == "vendor" || name == ".git" || name == "_scratch" ||
-		name == "generated" || name == "node_modules" || name == ".cache"
+	if name == "testdata" || name == "vendor" || name == ".git" || name == "_scratch" ||
+		name == "generated" || name == "node_modules" || name == ".cache" {
+		return true
+	}
+	return isHeavyNonSourceDir(name)
 }
 
 func isGeneratedArtifact(path string, content []byte) bool {
