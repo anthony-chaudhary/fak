@@ -1351,7 +1351,7 @@ func (s *Server) complete(ctx context.Context, trace string, messages []agent.Me
 	// req.Raw there).
 	messages = s.maybeElideMessages(messages)
 	start := time.Now()
-	comp, err = s.planner.Complete(ctx, messages, tools, opts...)
+	comp, err = s.chatPlanner(ctx).Complete(ctx, messages, tools, chatRouteOpts(ctx, opts)...)
 	dur := time.Since(start)
 	if err != nil {
 		if _, _, _, ok := inKernelOOMObservation(err); ok {
@@ -1359,7 +1359,13 @@ func (s *Server) complete(ctx context.Context, trace string, messages []agent.Me
 		}
 		return comp, err
 	}
-	s.metrics.observeInferenceUsageServed(s.servedLocalityOf(opts), comp.Usage, comp.FinishReason, dur)
+	var sample agent.SampleParams
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&sample)
+		}
+	}
+	s.metrics.observeInferenceUsageServed(s.chatServingLocality(ctx, sample.Model), comp.Usage, comp.FinishReason, dur)
 	s.observePlannerRequestMemory()
 	// The served turn has mutated the KV cache; relieve HBM pressure by demoting a hot span to
 	// the colder tier instead of dropping it (#1073, the live serve-path call site for the

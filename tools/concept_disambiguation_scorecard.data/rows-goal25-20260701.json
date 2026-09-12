@@ -8,7 +8,8 @@
       "definition": "DualPlanner (internal/gateway/dual_planner.go) is the gateway Planner that wraps an upstream proxy planner and a local planner behind one Planner interface, answering Model() with the proxy's identity.",
       "distinction": "A concrete gateway planner wiring for routing turns between two backends - not the planner-side Plan (the context layout the ctxplan planner produces).",
       "distinct_from": [
-        "plan-planner"
+        "plan-planner",
+        "gateway-chat-planner-5633"
       ],
       "aliases": [],
       "grounding": "DualPlanner",

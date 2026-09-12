@@ -263,7 +263,7 @@
       "kind": "symbol",
       "definition": "principalFromContext is the internal/gateway function returning the request-scoped isolation principal (or empty) from a Go context.Context - the per-principal boundary that scopes restore/spans reads to the caller's own trace.",
       "distinction": "The ISOLATION-principal extractor from a Go context.Context - not ContextChangeRequest (the recall mutation it gates) and not context-mmu (the result-admission gate, a different 'context' boundary).",
-      "distinct_from": ["contextchangerequest", "context-mmu"],
+      "distinct_from": ["contextchangerequest", "context-mmu", "gateway-chat-route-context-5633"],
       "aliases": [],
       "grounding": "principalFromContext",
       "grounding_kind": "symbol",

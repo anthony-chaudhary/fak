@@ -1,0 +1,41 @@
+{
+  "rows": [
+    {
+      "id": "gateway-chat-planner-5633",
+      "canonical": "chatPlanner",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "chatPlanner selects the planner stored in the admitted request binding, falling back to the gateway boot planner only when no binding exists.",
+      "distinction": "DualPlanner selects between its local and proxy legs from a model alias; chatPlanner selects an already admitted roster-specific transport without making a new account choice.",
+      "distinct_from": [
+        "x-goal25-plan-dualplanner"
+      ],
+      "aliases": [],
+      "grounding": "chatPlanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "gateway-chat-route-context-5633",
+      "canonical": "chatRouteFromContext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "chatRouteFromContext retrieves the admitted chat account binding from the current request context, or nil when the request uses the boot planner unchanged.",
+      "distinction": "principalFromContext extracts the authenticated tenant identity used to admit an account; chatRouteFromContext retrieves the resulting transport binding and does not authenticate or resolve an account.",
+      "distinct_from": [
+        "x-context-ctx-principalfromcontext"
+      ],
+      "aliases": [],
+      "grounding": "chatRouteFromContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
