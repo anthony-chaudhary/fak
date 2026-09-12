@@ -52,6 +52,70 @@ func TestReservationLifecycleAccountsStartupAndSteadySeparately(t *testing.T) {
 	}
 }
 
+func TestReservationAggregateCapacityRemedyHint(t *testing.T) {
+	const gib = int64(1 << 30)
+	ctx := context.Background()
+
+	t.Run("active reservation", func(t *testing.T) {
+		store := NewReservationStore(t.TempDir())
+		store.alive = func(int) bool { return true }
+		first, err := store.Reserve(ctx, reservationRequest(101, 6*gib, 3*gib, 10*gib, PressureNormal))
+		if err != nil || !first.Admit {
+			t.Fatalf("first=%+v err=%v", first, err)
+		}
+		blocked, err := store.Reserve(ctx, reservationRequest(102, 5*gib, 2*gib, 10*gib, PressureNormal))
+		if err != nil || blocked.Admit || blocked.Reason != "aggregate_capacity" {
+			t.Fatalf("blocked=%+v err=%v", blocked, err)
+		}
+		for _, want := range []string{
+			"requested startup peak 5.00 GiB",
+			"steady 2.00 GiB",
+			"available allocatable capacity 4.00 GiB",
+			"host total 10.00 GiB",
+			"active reservations 6.00 GiB",
+			"wait for active reservations to release",
+			"select a smaller model or quantization",
+		} {
+			if !strings.Contains(blocked.RemedyHint, want) {
+				t.Errorf("remedy hint %q does not contain %q", blocked.RemedyHint, want)
+			}
+		}
+	})
+
+	t.Run("no active reservation", func(t *testing.T) {
+		store := NewReservationStore(t.TempDir())
+		blocked, err := store.Reserve(ctx, reservationRequest(101, 12*gib, 8*gib, 10*gib, PressureNormal))
+		if err != nil || blocked.Admit || blocked.Reason != "aggregate_capacity" {
+			t.Fatalf("blocked=%+v err=%v", blocked, err)
+		}
+		if strings.Contains(blocked.RemedyHint, "wait for active reservations") {
+			t.Fatalf("remedy hint suggests waiting without an active reservation: %q", blocked.RemedyHint)
+		}
+		if !strings.Contains(blocked.RemedyHint, "select a smaller model or quantization") {
+			t.Fatalf("remedy hint does not identify a smaller fit: %q", blocked.RemedyHint)
+		}
+	})
+
+	t.Run("over-reserved availability clamps to zero", func(t *testing.T) {
+		store := NewReservationStore(t.TempDir())
+		store.alive = func(int) bool { return true }
+		first, err := store.Reserve(ctx, reservationRequest(101, 12*gib, 6*gib, 20*gib, PressureNormal))
+		if err != nil || !first.Admit {
+			t.Fatalf("first=%+v err=%v", first, err)
+		}
+		blocked, err := store.Reserve(ctx, reservationRequest(102, 1*gib, 1*gib, 10*gib, PressureNormal))
+		if err != nil || blocked.Admit || blocked.Reason != "aggregate_capacity" {
+			t.Fatalf("blocked=%+v err=%v", blocked, err)
+		}
+		if !strings.Contains(blocked.RemedyHint, "available allocatable capacity 0.00 GiB") {
+			t.Fatalf("remedy hint does not preserve clamped availability: %q", blocked.RemedyHint)
+		}
+		if strings.Contains(blocked.RemedyHint, "-") {
+			t.Fatalf("remedy hint contains negative availability: %q", blocked.RemedyHint)
+		}
+	})
+}
+
 func TestReservationFailsClosedBeforeCreatingLedger(t *testing.T) {
 	for _, pressure := range []Pressure{PressureUnknown, PressureCritical} {
 		t.Run(string(pressure), func(t *testing.T) {
