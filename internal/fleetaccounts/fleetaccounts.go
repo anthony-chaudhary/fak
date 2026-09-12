@@ -23,6 +23,7 @@
 package fleetaccounts
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -451,4 +452,188 @@ func accountRouteWeight(row Account, pol Policy) int {
 		}
 	}
 	return 0
+}
+
+// ---------------------------------------------------------------------------
+// Cross-provider reasoning configuration propagation (#11531)
+// ---------------------------------------------------------------------------
+//
+// A normalized effort is a REASONING INTENT, not an interchangeable wire enum: the same
+// intent means different things on each provider, and equal intent is not an equal-compute
+// promise (#11542). So this mapper never invents a shared enum it forwards verbatim; it
+// keeps a per-provider capability profile that declares BOTH the allowed normalized intents
+// AND an explicit unsupported outcome, and translates intent -> that provider's real wire
+// parameters. A provider that cannot express the intent returns Supported=false with a
+// typed reason, so a dispatcher can calibrate or refuse instead of sending a 400-bound body.
+
+// ReasoningEffort is the normalized cross-provider reasoning intent.
+type ReasoningEffort string
+
+const (
+	// ReasoningNone asks the provider to suppress reasoning where it supports that.
+	ReasoningNone ReasoningEffort = "none"
+	// ReasoningLow is shallow reasoning for routine tool loops.
+	ReasoningLow ReasoningEffort = "low"
+	// ReasoningMedium is the balanced default.
+	ReasoningMedium ReasoningEffort = "medium"
+	// ReasoningHigh is deep reasoning for planning and verification.
+	ReasoningHigh ReasoningEffort = "high"
+	// ReasoningXHigh is the deepest reasoning some frontier models accept.
+	ReasoningXHigh ReasoningEffort = "xhigh"
+)
+
+// ReasoningProvider identifies a wire contract this mapper can target. It is deliberately
+// the adapter family (the wire), not the vendor: OpenAI Responses and Chat Completions are
+// separate contracts even when one vendor serves both.
+type ReasoningProvider string
+
+const (
+	// ReasoningProviderOpenAIResponses is the OpenAI Responses API (`reasoning.effort`).
+	ReasoningProviderOpenAIResponses ReasoningProvider = "openai-responses"
+	// ReasoningProviderAnthropic is the Claude Messages API (extended thinking budget).
+	ReasoningProviderAnthropic ReasoningProvider = "anthropic"
+	// ReasoningProviderGemini is the Gemini generateContent API (`thinkingConfig`).
+	ReasoningProviderGemini ReasoningProvider = "gemini"
+)
+
+// ReasoningWire carries provider-specific JSON fragments. A caller must merge them
+// into its request at the appropriate level and separately admit the target model.
+// Serializing this value does not witness adapter integration or provider acceptance.
+//
+// Only the field for the selected provider is populated; a normalized intent the provider
+// cannot express yields an empty wire plus Supported=false, never a guessed fallback.
+type ReasoningWire struct {
+	// OpenAIResponses is the Responses API `reasoning` envelope.
+	OpenAIResponses *openAIResponsesReasoningWire `json:"reasoning,omitempty"`
+	// Anthropic is the Messages API `thinking` envelope.
+	Anthropic *anthropicThinkingWire `json:"thinking,omitempty"`
+	// Gemini is the generateContent `generationConfig.thinkingConfig` envelope.
+	Gemini *geminiThinkingConfigWire `json:"thinkingConfig,omitempty"`
+}
+
+type openAIResponsesReasoningWire struct {
+	Effort string `json:"effort,omitempty"`
+}
+
+type anthropicThinkingWire struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens,omitempty"`
+}
+
+type geminiThinkingConfigWire struct {
+	ThinkingLevel string `json:"thinkingLevel,omitempty"`
+}
+
+// ReasoningMapping is the mapper result for one (intent, provider) pair. When Supported is
+// false the caller must not dispatch a reasoning parameter; Reason names the boundary in the
+// closed vocabulary ("unsupported_effort", "unsupported_provider", "unknown_effort").
+type ReasoningMapping struct {
+	Provider  ReasoningProvider `json:"provider"`
+	Effort    ReasoningEffort   `json:"effort"`
+	Supported bool              `json:"supported"`
+	Reason    string            `json:"reason,omitempty"`
+	Wire      ReasoningWire     `json:"wire"`
+}
+
+// providerEffortProfile declares the intents this fragment mapper implements.
+// It is not a model capability registry; the dispatch caller must still check the
+// selected model's allowed values and request constraints.
+type providerEffortProfile struct {
+	allowed map[ReasoningEffort]bool
+}
+
+// anthropicThinkingBudgets maps a normalized intent to the Claude extended-thinking token
+// budget for the explicit-budget Messages contract. These are fixed mapping
+// choices, not calibrated equal-compute claims. Callers must select a model that
+// supports explicit budgets and provide a compatible output-token limit.
+var anthropicThinkingBudgets = map[ReasoningEffort]int{
+	ReasoningLow:    1024,
+	ReasoningMedium: 4096,
+	ReasoningHigh:   16384,
+	ReasoningXHigh:  32768,
+}
+
+// reasoningProfiles bounds this mapper's vocabulary; it makes no provider-wide
+// support guarantee. None is deliberately unsupported in the Responses profile
+// used for Astra (#11542). Gemini fragments belong inside generationConfig.
+var reasoningProfiles = map[ReasoningProvider]providerEffortProfile{
+	ReasoningProviderOpenAIResponses: {allowed: map[ReasoningEffort]bool{
+		ReasoningLow: true, ReasoningMedium: true, ReasoningHigh: true, ReasoningXHigh: true,
+	}},
+	ReasoningProviderAnthropic: {allowed: map[ReasoningEffort]bool{
+		ReasoningLow: true, ReasoningMedium: true, ReasoningHigh: true, ReasoningXHigh: true,
+	}},
+	ReasoningProviderGemini: {allowed: map[ReasoningEffort]bool{
+		ReasoningLow: true, ReasoningMedium: true, ReasoningHigh: true,
+	}},
+}
+
+// normalizeReasoningEffort accepts canonical intents with case/space normalization.
+// Other provider or harness settings are not interchangeable with these tiers.
+func normalizeReasoningEffort(effort string) ReasoningEffort {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "none":
+		return ReasoningNone
+	case "low":
+		return ReasoningLow
+	case "medium":
+		return ReasoningMedium
+	case "high":
+		return ReasoningHigh
+	case "xhigh":
+		return ReasoningXHigh
+	default:
+		return ""
+	}
+}
+
+// MapReasoningEffort translates a normalized reasoning intent into the exact wire
+// fragments this mapper implements. It returns Supported=false with a typed Reason for an
+// unknown intent, an unknown provider, or an intent the provider cannot express — never a
+// silent best-effort fallback.
+func MapReasoningEffort(effort string, provider ReasoningProvider) ReasoningMapping {
+	out := ReasoningMapping{Provider: provider}
+	norm := normalizeReasoningEffort(effort)
+	if norm == "" {
+		out.Reason = "unknown_effort"
+		return out
+	}
+	out.Effort = norm
+	profile, ok := reasoningProfiles[provider]
+	if !ok {
+		out.Reason = "unsupported_provider"
+		return out
+	}
+	if !profile.allowed[norm] {
+		out.Reason = "unsupported_effort"
+		return out
+	}
+	switch provider {
+	case ReasoningProviderOpenAIResponses:
+		out.Wire.OpenAIResponses = &openAIResponsesReasoningWire{Effort: string(norm)}
+	case ReasoningProviderAnthropic:
+		out.Wire.Anthropic = &anthropicThinkingWire{Type: "enabled", BudgetTokens: anthropicThinkingBudgets[norm]}
+	case ReasoningProviderGemini:
+		out.Wire.Gemini = &geminiThinkingConfigWire{ThinkingLevel: string(norm)}
+	}
+	out.Supported = true
+	return out
+}
+
+// MarshalWire renders a mapping's JSON fragment. It returns (nil, false) for an
+// unsupported or empty mapping. Gemini fragments belong inside generationConfig;
+// the other fragments belong at the request root. This does not validate a request.
+func (m ReasoningMapping) MarshalWire() (json.RawMessage, bool) {
+	if !m.Supported {
+		return nil, false
+	}
+	b, err := json.Marshal(m.Wire)
+	if err != nil {
+		return nil, false
+	}
+	// Empty envelope (no provider field set) is not a wire contract.
+	if string(b) == "{}" {
+		return nil, false
+	}
+	return b, true
 }
