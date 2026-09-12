@@ -17,6 +17,8 @@ const (
 	StrixVulkanEngine          = "fak-native/vulkan"
 	embeddingGatherSelector    = "qwen35-embedding-gather"
 	embeddingGatherTestName    = "TestQwen35VulkanEmbeddingGatherOneDispatch"
+	qwen35SequenceKVSelector   = "qwen35-sequence-kv"
+	qwen35SequenceKVTestName   = "TestQwen35VulkanSequenceKVReserveGeometric"
 )
 
 // Closed oracle kind vocabulary
@@ -451,6 +453,17 @@ var DefaultSubkernelParityContracts = map[string]SubkernelParityContract{
 			RequireFinite: true,
 		},
 	},
+	qwen35SequenceKVSelector: {
+		Selector:       qwen35SequenceKVSelector,
+		TestName:       qwen35SequenceKVTestName,
+		OracleKind:     OracleMaxAbs,
+		Engine:         StrixVulkanEngine,
+		DeviceObserved: true,
+		Bounds: SubkernelParityBounds{
+			MaxAbsDelta:   floatPtr(0),
+			RequireFinite: true,
+		},
+	},
 	embeddingGatherSelector: {
 		Selector:       embeddingGatherSelector,
 		TestName:       embeddingGatherTestName,
@@ -608,6 +621,12 @@ var DefaultSubkernelSpecs = []SubkernelSpec{
 		Description: "Whole-sequence Qwen3.5 hybrid prefill on Vulkan",
 		TestPattern: "^TestVulkanQwen35SequenceQuantizedPanelsMatchCPU$",
 		Category:    "prefill",
+	},
+	{
+		Name:        qwen35SequenceKVSelector,
+		Description: "Qwen3.5 Vulkan sequence KV geometric reserve parity",
+		TestPattern: "^" + qwen35SequenceKVTestName + "$",
+		Category:    "kv_cache",
 	},
 	{
 		Name:        embeddingGatherSelector,

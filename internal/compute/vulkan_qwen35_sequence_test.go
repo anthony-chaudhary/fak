@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"unsafe"
 )
 
 type qwen35SequenceParityOracleEvent struct {
@@ -57,6 +58,28 @@ func formatQwen35SequenceParityOracle(maxAbsDelta float64, finiteOutput bool, ca
 		},
 		Bounds: qwen35SequenceParityOracleBounds{
 			MaxAbsDelta:   2e-3,
+			RequireFinite: true,
+		},
+	}
+	return json.Marshal(event)
+}
+
+func formatQwen35SequenceKVReserveParityOracle(maxAbsDelta float64, finiteOutput bool) ([]byte, error) {
+	event := qwen35SequenceParityOracleEvent{
+		Schema:         "fak.strix.subkernel-parity/v1",
+		Selector:       "qwen35-sequence-kv",
+		TestName:       "TestQwen35VulkanSequenceKVReserveGeometric",
+		OracleKind:     "max_abs",
+		Engine:         "fak-native/vulkan",
+		DeviceObserved: true,
+		CaseCount:      1,
+		Passed:         finiteOutput && maxAbsDelta == 0,
+		Observed: qwen35SequenceParityOracleObserved{
+			MaxAbsDelta:  maxAbsDelta,
+			FiniteOutput: finiteOutput,
+		},
+		Bounds: qwen35SequenceParityOracleBounds{
+			MaxAbsDelta:   0,
 			RequireFinite: true,
 		},
 	}
@@ -1015,9 +1038,8 @@ func TestQwen35VulkanSequenceKVReserveGeometric(t *testing.T) {
 		}
 
 		// 5. Exact override via environment variable
-		os.Setenv("FAK_QWEN35_SEQUENCE_KV_EXACT", "1")
+		t.Setenv("FAK_QWEN35_SEQUENCE_KV_EXACT", "1")
 		capExact := v.qwen35SequenceKVGeometricCapacity(1000, 1500)
-		os.Unsetenv("FAK_QWEN35_SEQUENCE_KV_EXACT")
 		if capExact != 1500 {
 			t.Errorf("exact override cap = %d, want 1500", capExact)
 		}
@@ -1042,63 +1064,89 @@ func TestQwen35VulkanSequenceKVReserveGeometric(t *testing.T) {
 
 		// Generate reproducible pseudo-random key/value data
 		rng := rand.New(rand.NewSource(42))
+		allKRawData := make([]float32, totalTokens*kvWidth)
 		allKData := make([]float32, totalTokens*kvWidth)
 		allVData := make([]float32, totalTokens*kvWidth)
 		for i := range allKData {
+			allKRawData[i] = (rng.Float32()*2 - 1) * 0.5
 			allKData[i] = (rng.Float32()*2 - 1) * 0.5
 			allVData[i] = (rng.Float32()*2 - 1) * 0.5
 		}
 
-		// 1. Run exact reserve sequence
-		os.Setenv("FAK_QWEN35_SEQUENCE_KV_EXACT", "1")
-		var cacheExactK, cacheExactV vslice
-		defer v.qwen35SequenceFreeVsliceForTest(&cacheExactK)
-		defer v.qwen35SequenceFreeVsliceForTest(&cacheExactV)
-
-		exactStartPos := 0
-		for _, chunk := range chunkSizes {
-			need := (exactStartPos + chunk) * kvWidth
-			v.qwen35SequenceReserveGeometric(&cacheExactK, need, "exact-reserve-k")
-			v.qwen35SequenceReserveGeometric(&cacheExactV, need, "exact-reserve-v")
-			if cacheExactK.cap != need || cacheExactV.cap != need {
-				t.Fatalf("exact reserve cap: K=%d V=%d, want %d", cacheExactK.cap, cacheExactV.cap, need)
-			}
-			chunkK := allKData[exactStartPos*kvWidth : need]
-			chunkV := allVData[exactStartPos*kvWidth : need]
-			v.qwen35SequenceUploadKVFloatsForTest(&cacheExactK, exactStartPos*kvWidth, chunkK)
-			v.qwen35SequenceUploadKVFloatsForTest(&cacheExactV, exactStartPos*kvWidth, chunkV)
-			cacheExactK.len = need
-			cacheExactV.len = need
-			exactStartPos += chunk
+		type reserveRun struct {
+			caches            [3]vslice
+			bufferAllocations int
+			d2dCopies         uint64
+			d2dBytes          uint64
 		}
-		os.Unsetenv("FAK_QWEN35_SEQUENCE_KV_EXACT")
-
-		// 2. Run geometric reserve sequence
-		var cacheGeomK, cacheGeomV vslice
-		defer v.qwen35SequenceFreeVsliceForTest(&cacheGeomK)
-		defer v.qwen35SequenceFreeVsliceForTest(&cacheGeomV)
-
-		geomStartPos := 0
-		for _, chunk := range chunkSizes {
-			need := (geomStartPos + chunk) * kvWidth
-			v.qwen35SequenceReserveGeometric(&cacheGeomK, need, "geom-reserve-k")
-			v.qwen35SequenceReserveGeometric(&cacheGeomV, need, "geom-reserve-v")
-			if cacheGeomK.cap < need || cacheGeomV.cap < need {
-				t.Fatalf("geom reserve cap: K=%d V=%d < need %d", cacheGeomK.cap, cacheGeomV.cap, need)
+		run := func(exact bool) *reserveRun {
+			if exact {
+				t.Setenv("FAK_QWEN35_SEQUENCE_KV_EXACT", "1")
+			} else {
+				t.Setenv("FAK_QWEN35_SEQUENCE_KV_EXACT", "0")
 			}
-			chunkK := allKData[geomStartPos*kvWidth : need]
-			chunkV := allVData[geomStartPos*kvWidth : need]
-			v.qwen35SequenceUploadKVFloatsForTest(&cacheGeomK, geomStartPos*kvWidth, chunkK)
-			v.qwen35SequenceUploadKVFloatsForTest(&cacheGeomV, geomStartPos*kvWidth, chunkV)
-			cacheGeomK.len = need
-			cacheGeomV.len = need
-			geomStartPos += chunk
+			result := &reserveRun{}
+			t.Cleanup(func() {
+				for i := range result.caches {
+					v.qwen35SequenceFreeVsliceForTest(&result.caches[i])
+				}
+			})
+			planes := []*vslice{&result.caches[0], &result.caches[1], &result.caches[2]}
+			data := [][]float32{allKRawData, allKData, allVData}
+			startPos := 0
+			for _, chunk := range chunkSizes {
+				need := (startPos + chunk) * kvWidth
+				beforePtrs := [3]unsafe.Pointer{planes[0].ptr, planes[1].ptr, planes[2].ptr}
+				beforeLens := [3]int{planes[0].len, planes[1].len, planes[2].len}
+				window, err := v.BeginBackendExecutionWindow()
+				if err != nil {
+					t.Fatalf("begin reserve observation: %v", err)
+				}
+				for i, cache := range planes {
+					v.qwen35SequenceReserveGeometric(cache, need, fmt.Sprintf("%t-reserve-%d", exact, i))
+				}
+				observation, err := window.End()
+				if err != nil {
+					t.Fatalf("end reserve observation: %v", err)
+				}
+				result.d2dCopies += observation.Counters.D2DCopies
+				result.d2dBytes += observation.Counters.D2DBytes
+				for i, cache := range planes {
+					if cache.len != beforeLens[i] {
+						t.Fatalf("reserve changed plane %d logical len from %d to %d", i, beforeLens[i], cache.len)
+					}
+					if cache.ptr != beforePtrs[i] {
+						result.bufferAllocations++
+					}
+					if cache.cap < need || (exact && cache.cap != need) {
+						t.Fatalf("reserve plane %d cap=%d need=%d exact=%t", i, cache.cap, need, exact)
+					}
+					chunkData := data[i][startPos*kvWidth : need]
+					v.qwen35SequenceUploadKVFloatsForTest(cache, startPos*kvWidth, chunkData)
+					cache.len = need
+				}
+				startPos += chunk
+			}
+			return result
 		}
+
+		exact := run(true)
+		geom := run(false)
+		cacheExactKRaw, cacheExactK, cacheExactV := &exact.caches[0], &exact.caches[1], &exact.caches[2]
+		cacheGeomKRaw, cacheGeomK, cacheGeomV := &geom.caches[0], &geom.caches[1], &geom.caches[2]
+		if exact.bufferAllocations != 12 || exact.d2dCopies != 9 || exact.d2dBytes != 73_728 {
+			t.Fatalf("exact reserve observation: buffer allocations=%d d2d=%d/%d, want 12 and 9/73728", exact.bufferAllocations, exact.d2dCopies, exact.d2dBytes)
+		}
+		if geom.bufferAllocations != 9 || geom.d2dCopies != 6 || geom.d2dBytes != 36_864 {
+			t.Fatalf("geometric reserve observation: buffer allocations=%d d2d=%d/%d, want 9 and 6/36864", geom.bufferAllocations, geom.d2dCopies, geom.d2dBytes)
+		}
+		t.Logf("reserve counters exact_buffer_allocations=%d exact_d2d_copies=%d exact_d2d_bytes=%d geometric_buffer_allocations=%d geometric_d2d_copies=%d geometric_d2d_bytes=%d",
+			exact.bufferAllocations, exact.d2dCopies, exact.d2dBytes, geom.bufferAllocations, geom.d2dCopies, geom.d2dBytes)
 
 		// Logical lengths must match exactly
-		if cacheGeomK.len != cacheExactK.len || cacheGeomV.len != cacheExactV.len {
-			t.Fatalf("final len mismatch: geom K=%d V=%d, exact K=%d V=%d",
-				cacheGeomK.len, cacheGeomV.len, cacheExactK.len, cacheExactV.len)
+		if cacheGeomKRaw.len != cacheExactKRaw.len || cacheGeomK.len != cacheExactK.len || cacheGeomV.len != cacheExactV.len {
+			t.Fatalf("final len mismatch: geom Kraw/K/V=%d/%d/%d exact=%d/%d/%d",
+				cacheGeomKRaw.len, cacheGeomK.len, cacheGeomV.len, cacheExactKRaw.len, cacheExactK.len, cacheExactV.len)
 		}
 		// Geometric capacity must be >= exact capacity
 		if cacheGeomK.cap < cacheExactK.cap {
@@ -1106,19 +1154,13 @@ func TestQwen35VulkanSequenceKVReserveGeometric(t *testing.T) {
 		}
 
 		// 3. Verify exact float-by-float data identity between geometric and exact buffers
-		readExactK := v.qwen35SequenceReadKVFloatsForTest(&cacheExactK, totalTokens*kvWidth)
-		readGeomK := v.qwen35SequenceReadKVFloatsForTest(&cacheGeomK, totalTokens*kvWidth)
-		for i := 0; i < totalTokens*kvWidth; i++ {
-			if readExactK[i] != readGeomK[i] {
-				t.Fatalf("K buffer mismatch at float %d: exact=%g geom=%g", i, readExactK[i], readGeomK[i])
-			}
-		}
-
-		readExactV := v.qwen35SequenceReadKVFloatsForTest(&cacheExactV, totalTokens*kvWidth)
-		readGeomV := v.qwen35SequenceReadKVFloatsForTest(&cacheGeomV, totalTokens*kvWidth)
-		for i := 0; i < totalTokens*kvWidth; i++ {
-			if readExactV[i] != readGeomV[i] {
-				t.Fatalf("V buffer mismatch at float %d: exact=%g geom=%g", i, readExactV[i], readGeomV[i])
+		for plane, pair := range [][2]*vslice{{cacheExactKRaw, cacheGeomKRaw}, {cacheExactK, cacheGeomK}, {cacheExactV, cacheGeomV}} {
+			readExact := v.qwen35SequenceReadKVFloatsForTest(pair[0], totalTokens*kvWidth)
+			readGeom := v.qwen35SequenceReadKVFloatsForTest(pair[1], totalTokens*kvWidth)
+			for i := 0; i < totalTokens*kvWidth; i++ {
+				if readExact[i] != readGeom[i] {
+					t.Fatalf("plane %d buffer mismatch at float %d: exact=%g geom=%g", plane, i, readExact[i], readGeom[i])
+				}
 			}
 		}
 
@@ -1156,7 +1198,12 @@ func TestQwen35VulkanSequenceKVReserveGeometric(t *testing.T) {
 		}
 
 		var maxDelta float64
+		finiteOutput := true
 		for i := range resExact {
+			if math.IsNaN(float64(resExact[i])) || math.IsInf(float64(resExact[i]), 0) || math.IsNaN(float64(resGeom[i])) || math.IsInf(float64(resGeom[i]), 0) {
+				finiteOutput = false
+				t.Fatalf("attention output %d must be finite: exact=%g geom=%g", i, resExact[i], resGeom[i])
+			}
 			delta := math.Abs(float64(resExact[i] - resGeom[i]))
 			if delta > maxDelta {
 				maxDelta = delta
@@ -1165,6 +1212,11 @@ func TestQwen35VulkanSequenceKVReserveGeometric(t *testing.T) {
 				t.Fatalf("attention mismatch at %d: exact=%g geom=%g delta=%g", i, resExact[i], resGeom[i], delta)
 			}
 		}
+		oracleJSON, err := formatQwen35SequenceKVReserveParityOracle(maxDelta, finiteOutput)
+		if err != nil {
+			t.Fatalf("format KV reserve parity oracle: %v", err)
+		}
+		t.Logf("%s", oracleJSON)
 
 		t.Logf("Device KV reservation & attention output parity verified: tokens=%d maxDelta=%g logical_len=%d exact_cap=%d geom_cap=%d",
 			totalTokens, maxDelta, cacheGeomK.len, cacheExactK.cap, cacheGeomK.cap)

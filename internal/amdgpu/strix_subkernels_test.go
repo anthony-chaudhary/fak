@@ -166,6 +166,55 @@ func TestRunSubkernelTests_FailFastOnInvalidSelectors(t *testing.T) {
 	}
 }
 
+func TestQwen35SequenceKVSelectorContract(t *testing.T) {
+	specs, err := FilterSubkernelSpecs([]string{qwen35SequenceKVSelector})
+	if err != nil {
+		t.Fatalf("FilterSubkernelSpecs(%q): %v", qwen35SequenceKVSelector, err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("got %d specs, want 1", len(specs))
+	}
+	if got := specs[0]; got.Name != qwen35SequenceKVSelector || got.TestPattern != "^"+qwen35SequenceKVTestName+"$" || got.Category != "kv_cache" {
+		t.Fatalf("unexpected sequence KV spec: %+v", got)
+	}
+
+	contract, ok := LookupSubkernelParityContract(qwen35SequenceKVSelector)
+	if !ok {
+		t.Fatalf("missing parity contract for %q", qwen35SequenceKVSelector)
+	}
+	if contract.TestName != qwen35SequenceKVTestName || contract.OracleKind != OracleMaxAbs {
+		t.Fatalf("unexpected sequence KV contract identity: %+v", contract)
+	}
+	if contract.Engine != StrixVulkanEngine || !contract.DeviceObserved {
+		t.Fatalf("contract must require device-observed %q execution: %+v", StrixVulkanEngine, contract)
+	}
+	if contract.Bounds.MaxAbsDelta == nil || *contract.Bounds.MaxAbsDelta != 0 || !contract.Bounds.RequireFinite {
+		t.Fatalf("contract must require exact finite parity: %+v", contract.Bounds)
+	}
+
+	valid := `{"schema":"fak.strix.subkernel-parity/v1","selector":"qwen35-sequence-kv","test_name":"TestQwen35VulkanSequenceKVReserveGeometric","oracle_kind":"max_abs","engine":"fak-native/vulkan","device_observed":true,"case_count":1,"passed":true,"observed":{"max_abs_delta":0,"finite_output":true}}`
+	if _, err := ParseStrixSubkernelParity(valid, qwen35SequenceKVSelector); err != nil {
+		t.Fatalf("ParseStrixSubkernelParity(valid sequence KV event): %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		out  string
+		want error
+	}{
+		{name: "empty output", want: ErrSubkernelParityAbsent},
+		{name: "skipped test", out: "--- SKIP: " + qwen35SequenceKVTestName + " (0.00s)\nPASS", want: ErrSubkernelParityAbsent},
+		{name: "wrong engine", out: strings.Replace(valid, `"engine":"fak-native/vulkan"`, `"engine":"cpu-reference"`, 1), want: ErrSubkernelParityWrongEngine},
+		{name: "device not observed", out: strings.Replace(valid, `"device_observed":true`, `"device_observed":false`, 1), want: ErrSubkernelParityWrongEngine},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := ParseStrixSubkernelParity(tc.out, qwen35SequenceKVSelector); !errors.Is(err, tc.want) {
+				t.Fatalf("ParseStrixSubkernelParity() error = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestRunStrixValidation_UnknownSubkernel(t *testing.T) {
 	defer func() {
 		ClearPresenceCache()
