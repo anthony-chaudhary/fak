@@ -74,6 +74,12 @@ type Row struct {
 	CacheReadTokens     int64  `json:"cache_read_tokens"`
 	CacheCreationTokens int64  `json:"cache_creation_tokens"`
 	OutputTokens        int64  `json:"output_tokens"`
+	// Owner is the session's owner stamp (schema-additive, #10948): the
+	// tenant/agent identity per-session P&L attributes economics to. The
+	// ledger decodes fine without one (json leaves it empty on absent) and
+	// ScoreSessionPnL groups such rows under OwnerUnknown rather than
+	// dropping them, so unattributed sessions stay visible.
+	Owner string `json:"owner,omitempty"`
 }
 
 // Metrics is the per-session derived reading. The Known bits make the
