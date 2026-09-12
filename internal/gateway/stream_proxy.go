@@ -317,7 +317,7 @@ func (h *heartbeatConfig) emitHeartbeat(w http.ResponseWriter) bool {
 // last-event age). Heartbeats are SILENT before the first token (the response is not
 // committed yet) and contain NO prompt or output content.
 func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req ChatRequest, reqModel, reqTrace string, sessionTurn servedSessionTurn, resultAdmissions []ResultAdmission, inputTriggerRoute *InputTriggerRouteReceipt) bool {
-	sp, ok := s.planner.(agent.StreamingPlanner)
+	sp, ok := s.chatPlanner(ctx).(agent.StreamingPlanner)
 	if !ok || !sp.StreamingSupported() {
 		return false
 	}
@@ -437,7 +437,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	defer lease.Release()
 
 	began := time.Now()
-	comp, err := sp.CompleteStream(ctx, utf8Fragments.write, req.Messages, req.Tools, opts...)
+	comp, err := sp.CompleteStream(ctx, utf8Fragments.write, req.Messages, req.Tools, chatRouteOpts(ctx, opts)...)
 	stopHB()
 	s.recordBufferedTurnCost(sessionTurn, comp, began)
 	if comp != nil {

@@ -154,8 +154,8 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// both streaming arms — blocks for the whole multi-rank decode, and rank-local expert
 	// parallelism makes progress only if every rank runs the same forward pass. Without
 	// this, an Anthropic request left the front rank alone in a collective the other ranks
-	// were never released into. Placement matches the chat and legacy wires: after the
-	// method check, before anything reads the body (the helper reads and restores it).
+	// were never released into. Retain the bounded body before decoding; with a
+	// roster, release waits for admission and occurs only on the boot-model path.
 	//
 	// Inert on a single-rank serve — with FAK_EP_FANOUT_ADDRS unset there are no follower
 	// URLs and this is a no-op, which is why the gap survived. The consequence on real
@@ -177,14 +177,16 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// model.RunEPFollower (#4835), announced from Session.Prefill and Session.Step — which
 	// still has no serve wiring; until that lands, a native multi-rank serve enters its
 	// collectives on rank 0 alone.
-	if !s.native {
-		waitEPFanout, ok := s.startEPFanoutFollowers(w, r, epRouteMessages)
-		if !ok {
-			return
-		}
-		defer waitEPFanout()
+	releaseEPFanout, waitEPFanout, ok := s.prepareChatEPFanout(w, r, epRouteMessages)
+	if !ok {
+		return
 	}
+	defer waitEPFanout()
 	req, ok := s.readAnthropicMessagesRequest(w, r)
+	if !ok {
+		return
+	}
+	r, ok = s.prepareChatRoute(w, r, req.Model)
 	if !ok {
 		return
 	}
@@ -212,6 +214,9 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	}
 	if s.native {
 		s.serveNativeMessages(w, r, req, reqTrace)
+		return
+	}
+	if !releaseEPFanout(r) {
 		return
 	}
 	// The native path above owns its admission. Proxy requests enter the shared
@@ -249,7 +254,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		// is felt, not buffered away). It returns false only if the upstream stream never
 		// opened and nothing was written — then fall back to the buffered synth path,
 		// which is also the path for a local/mock upstream that cannot stream this wire.
-		if s.anthropicPassthroughFor(req.Model) && s.streamAnthropicPassthroughLive(w, r, req, reqTrace, sessionTurn, upstreamKey, upstreamBeta, compacted, contextEvent, hcoh) {
+		if chatRouteFromContext(r.Context()) == nil && s.anthropicPassthroughFor(req.Model) && s.streamAnthropicPassthroughLive(w, r, req, reqTrace, sessionTurn, upstreamKey, upstreamBeta, compacted, contextEvent, hcoh) {
 			return
 		}
 		// For non-Anthropic upstreams that still support the generic planner streaming
@@ -1126,7 +1131,7 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 	// are already in req.Raw; re-injecting them would change the cached prefix bytes).
 	// Per-request: a dual-mode request addressed to the LOCAL model must decode
 	// in-kernel, never ride raw bytes upstream.
-	if s.anthropicPassthroughFor(req.Model) {
+	if chatRouteFromContext(ctx) == nil && s.anthropicPassthroughFor(req.Model) {
 		opts = append(opts, agent.WithRawRequestBody(req.Raw), agent.WithUpstreamAPIKey(upstreamKey), agent.WithUpstreamBeta(upstreamBeta))
 		ctx = withDecodedCtxViewSuppressed(ctx)
 	}

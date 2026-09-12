@@ -92,10 +92,10 @@ func (s *Server) serveNativeMessages(w http.ResponseWriter, r *http.Request, req
 	stop := agent.AnthropicStopReason(nativeFinishReason(m), false)
 	usage := anthropicUsage{InputTokens: m.PromptTokens, OutputTokens: m.CompletionTokens}
 
-	s.logInferenceTurn(reqTrace, "anthropic_messages_native", false, agent.Usage{
+	s.observeNativeChatRoute(r.Context(), reqTrace, false, agent.Usage{
 		PromptTokens:     m.PromptTokens,
 		CompletionTokens: m.CompletionTokens,
-	}, stop, time.Since(began), false)
+	}, stop, time.Since(began))
 
 	arm := m // copy so the response holds a stable address, not a loop-local
 	writeJSON(w, http.StatusOK, anthropicMessageResponse{
@@ -134,7 +134,7 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	}
-	sp, ok := s.planner.(agent.StreamingPlanner)
+	sp, ok := s.chatPlanner(r.Context()).(agent.StreamingPlanner)
 	if cursorRaw == "" && (!ok || !sp.StreamingSupported()) {
 		s.serveNativeMessages(w, r, req, reqTrace)
 		return
@@ -247,10 +247,10 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 
 	stop := agent.AnthropicStopReason(nativeFinishReason(m), false)
 	usage := anthropicUsage{InputTokens: m.PromptTokens, OutputTokens: m.CompletionTokens}
-	s.logInferenceTurn(reqTrace, "anthropic_messages_native", false, agent.Usage{
+	s.observeNativeChatRoute(r.Context(), reqTrace, true, agent.Usage{
 		PromptTokens:     m.PromptTokens,
 		CompletionTokens: m.CompletionTokens,
-	}, stop, time.Since(began), false)
+	}, stop, time.Since(began))
 
 	arm := m
 	sendAnthropicTerminalWithNativeArm(send, stop, usage, &arm)
@@ -296,7 +296,7 @@ func (s *Server) runNativeArmSeed(ctx context.Context, seed nativeWireSeed, reqT
 	defer release()
 	opts = s.nativeChildTaskOptions(ctx, reqTrace, opts)
 	opts = append(opts, s.nativeSeedOptions(seed)...)
-	return agent.RunArm(ctx, s.planner, seed.Task, true, s.nativeMaxTurns, nil, opts...)
+	return agent.RunArm(ctx, s.chatPlanner(ctx), seed.Task, true, s.nativeMaxTurns, nil, opts...)
 }
 
 // runNativeArmStream drives the owned loop for one STREAMED request. onProgress (may be
@@ -343,13 +343,13 @@ func (s *Server) runNativeArmStreamSeed(ctx context.Context, seed nativeWireSeed
 		// A rejected final answer must never leak as an SSE delta. Buffer stop-gated
 		// turns through the non-streaming planner path and emit only the final answer
 		// whose declared witness passed.
-		m, err := agent.RunArm(ctx, s.planner, seed.Task, true, s.nativeMaxTurns, nil, opts...)
+		m, err := agent.RunArm(ctx, s.chatPlanner(ctx), seed.Task, true, s.nativeMaxTurns, nil, opts...)
 		if err == nil && m.FinalAnswer != "" && sink != nil {
 			err = sink(m.FinalAnswer)
 		}
 		return m, err
 	}
-	return agent.RunArmStream(ctx, s.planner, seed.Task, true, s.nativeMaxTurns, sink, nil, opts...)
+	return agent.RunArmStream(ctx, s.chatPlanner(ctx), seed.Task, true, s.nativeMaxTurns, sink, nil, opts...)
 }
 
 // nativeChildTaskOptions arms one request-local child namespace only when the

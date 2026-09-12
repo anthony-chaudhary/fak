@@ -24,7 +24,7 @@ import (
 // caller should fall back to streamAnthropicPending without anything having been
 // written. Once it admits inbound results or writes a response, it owns the request.
 func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string, sessionTurn servedSessionTurn) bool {
-	sp, ok := s.planner.(agent.StreamingPlanner)
+	sp, ok := s.chatPlanner(r.Context()).(agent.StreamingPlanner)
 	if !ok || !sp.StreamingSupported() {
 		return false
 	}
@@ -124,7 +124,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		return nil
 	}
 
-	opts := s.plannerSampleOpts(req, sessionTurn)
+	opts := chatRouteOpts(r.Context(), s.plannerSampleOpts(req, sessionTurn))
 	lease, ok := s.admitStreamedTurn(r.Context(), w, "messages stream", sessionTurn, req.Messages, req.Tools, sampleMaxTokens(opts))
 	if !ok {
 		return true
