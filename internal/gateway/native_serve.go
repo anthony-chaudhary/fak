@@ -28,6 +28,7 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -293,6 +294,7 @@ func (s *Server) runNativeArmSeed(ctx context.Context, seed nativeWireSeed, reqT
 	ensureGovernedRungs()
 	opts, release := s.nativeRunOptions(ctx, reqTrace)
 	defer release()
+	opts = s.nativeChildTaskOptions(ctx, reqTrace, opts)
 	opts = append(opts, s.nativeSeedOptions(seed)...)
 	return agent.RunArm(ctx, s.planner, seed.Task, true, s.nativeMaxTurns, nil, opts...)
 }
@@ -332,6 +334,7 @@ func (s *Server) runNativeArmStreamSeed(ctx context.Context, seed nativeWireSeed
 	ensureGovernedRungs()
 	opts, release := s.nativeRunOptions(ctx, reqTrace)
 	defer release()
+	opts = s.nativeChildTaskOptions(ctx, reqTrace, opts)
 	opts = append(opts, s.nativeSeedOptions(seed)...)
 	if onProgress != nil {
 		opts = append(opts, agent.WithProgressObserver(onProgress))
@@ -347,6 +350,59 @@ func (s *Server) runNativeArmStreamSeed(ctx context.Context, seed nativeWireSeed
 		return m, err
 	}
 	return agent.RunArmStream(ctx, s.planner, seed.Task, true, s.nativeMaxTurns, sink, nil, opts...)
+}
+
+// nativeChildTaskOptions arms one request-local child namespace only when the
+// owned native loop also has server-owned code tools. Each child inherits the
+// request's routing identity and trace carrier while receiving its own tool-call
+// trace. Parent conversation, final/session controls, mailbox, ledger hooks,
+// checkpoint, client-declared tools, and recursive child options stay outside
+// the child run.
+func (s *Server) nativeChildTaskOptions(ctx context.Context, reqTrace string, opts []agent.RunOption) []agent.RunOption {
+	if s == nil || !s.native || s.planner == nil || len(s.nativeCodeCatalog) == 0 {
+		return opts
+	}
+	policy := adjudicator.Default.PolicySnapshot()
+	principal := principalFromContext(ctx)
+	var routeOpts []agent.RunOption
+	if s.route != nil {
+		if mfst := s.route.Manifest(); mfst != nil {
+			routeOpts = append(routeOpts, agent.WithRouteManifest(mfst))
+		}
+	}
+	routeOpts = append(routeOpts,
+		agent.WithRouteAccounts(s.roster),
+		agent.WithRoutePrincipal(principal),
+	)
+	if hp, ok := s.planner.(*agent.HTTPPlanner); ok {
+		routeOpts = append(routeOpts,
+			agent.WithProvider(string(hp.Provider)),
+			agent.WithBaseURL(hp.BaseURL),
+		)
+	}
+	scope := randomHex(16)
+	runner := func(childCtx context.Context, req agent.ChildTaskRunRequest) (any, error) {
+		baseOpts := append([]agent.RunOption(nil), routeOpts...)
+		baseOpts = append(baseOpts, agent.WithSessionGate(agent.SessionGate{}, nativeChildTrace(reqTrace, scope, req.TaskID)))
+		childRunner := agent.NewNativeChildTaskRunner(
+			s.planner,
+			s.nativeMaxTurns,
+			baseOpts,
+			s.nativeCodeCatalog,
+			policy,
+		)
+		return childRunner(childCtx, req)
+	}
+	return append(opts, agent.WithChildTaskRunner(
+		agent.DefaultMaxActiveTasks,
+		agent.DefaultMaxBacklogTasks,
+		runner,
+	))
+}
+
+func nativeChildTrace(parentTrace, scope, taskID string) string {
+	sum := sha256.Sum256([]byte(parentTrace + "\x00" + scope + "\x00" + taskID))
+	return fmt.Sprintf("native-child-%x", sum[:16])
 }
 
 func (s *Server) nativeSeedOptions(seed nativeWireSeed) []agent.RunOption {
