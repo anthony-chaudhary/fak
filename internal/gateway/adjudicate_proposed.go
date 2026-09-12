@@ -518,17 +518,20 @@ func (s *Server) adjudicateProposed(ctx context.Context, calls []agent.ToolCall,
 	// agents pane's last_tool/idle deterministic and spares a time.Now() per call.
 	now := time.Now()
 	for _, tc := range calls {
-		tool := tc.Function.Name
-		s.observePrunedToolProposal(reqTrace, tool)
+		originalTool := tc.Function.Name
+		tool := advertisedClientToolName(ctx, originalTool)
+		tc.Function.Name = tool
+		s.observePrunedToolProposal(reqTrace, originalTool)
 		argsDigest := guardrsi.ArgsDigest(tc.Function.Arguments)
-		if strings.EqualFold(tool, "read") && conflictingReadPathArguments(tc.Function.Arguments) {
+		if conflictingClientToolArguments(tool, tc.Function.Arguments) {
 			dropped++
 			adjs = append(adjs, ToolAdjudication{ToolCallID: tc.ID, Tool: tool, ArgsDigest: argsDigest, Admitted: false,
 				Verdict: WireVerdict{Kind: "DENY", Reason: "MALFORMED", Disposition: "RETRYABLE"}})
 			continue
 		}
+		policyArguments := clientToolPolicyArguments(tool, tc.Function.Arguments)
 		seq := s.nextOriginSeq()
-		wv, repaired, aerr := s.adjudicateWithSeq(ctx, tool, tc.Function.Arguments, false, "", reqTrace, seq)
+		wv, repaired, aerr := s.adjudicateWithSeq(ctx, tool, policyArguments, false, "", reqTrace, seq)
 		if aerr != nil {
 			dropped++
 			adjs = append(adjs, ToolAdjudication{ToolCallID: tc.ID, Tool: tool, ArgsDigest: argsDigest, Admitted: false,
@@ -539,6 +542,7 @@ func (s *Server) adjudicateProposed(ctx context.Context, calls []agent.ToolCall,
 		switch wv.Kind {
 		case "ALLOW":
 			adj.Admitted = true
+			tc.Function.Arguments = clientToolArguments(ctx, tool, tc.Function.Arguments, tc.Function.Arguments)
 			s.rememberOriginSeqID(reqTrace, tc.ID, seq)
 			s.rememberOriginSeq(reqTrace, tool, tc.Function.Arguments, seq)
 			kept = append(kept, tc)
@@ -548,9 +552,7 @@ func (s *Server) adjudicateProposed(ctx context.Context, calls []agent.ToolCall,
 				// The in-kernel read redirect targets fak_read's schema. Here
 				// execution stays in the client and retains its original tool name,
 				// so restore its path spelling without undoing repaired values.
-				if wv.By == "monitor/read_to_fak_read" && strings.EqualFold(tool, "read") {
-					repaired = clientReadArguments(ctx, tool, tc.Function.Arguments, repaired)
-				}
+				repaired = clientToolArguments(ctx, tool, tc.Function.Arguments, repaired)
 				tc.Function.Arguments = repaired
 				adj.RepairedArguments = json.RawMessage(repaired)
 			}
@@ -580,27 +582,49 @@ func withClientToolSchemas(ctx context.Context, tools []agent.ToolDef) context.C
 	return context.WithValue(ctx, clientToolSchemasContextKey{}, tools)
 }
 
-func clientReadArguments(ctx context.Context, tool, original, repaired string) string {
+func clientToolArguments(ctx context.Context, tool, original, repaired string) string {
 	var before, after map[string]json.RawMessage
 	if json.Unmarshal([]byte(original), &before) != nil || json.Unmarshal([]byte(repaired), &after) != nil || after == nil {
 		return repaired
 	}
-	if conflictingReadPathArguments(original) {
+	groups := clientToolArgumentAliases(tool)
+	if len(groups) == 0 || conflictingArgumentAliases(before, groups) {
 		return repaired
 	}
-	if alias, bound, ambiguous := advertisedReadPathArgument(ctx, tool); bound {
-		if ambiguous || alias == "file_path" {
+	if properties, bound, ambiguous := advertisedToolProperties(ctx, tool); bound {
+		if ambiguous {
 			return repaired
 		}
-		value, present := after["file_path"]
-		if !present {
+		changed := false
+		for _, aliases := range groups {
+			declared := declaredArgumentAlias(properties, aliases)
+			if declared == "" {
+				return repaired
+			}
+			value, present, onlyAlias := argumentAliasValue(after, aliases)
+			if !present {
+				continue
+			}
+			if onlyAlias == declared {
+				continue
+			}
+			for _, alias := range aliases {
+				delete(after, alias)
+			}
+			after[declared] = value
+			changed = true
+		}
+		if !changed {
 			return repaired
 		}
-		after[alias] = value
-		delete(after, "file_path")
 		if encoded, err := json.Marshal(after); err == nil {
 			return string(encoded)
 		}
+		return repaired
+	}
+	// Preserve the pre-schema read repair fallback for clients that do not send
+	// tool definitions. It can restore only a spelling the model itself used.
+	if !strings.EqualFold(tool, "read") {
 		return repaired
 	}
 	if _, canonical := before["file_path"]; canonical {
@@ -622,47 +646,160 @@ func clientReadArguments(ctx context.Context, tool, original, repaired string) s
 	return repaired
 }
 
-func advertisedReadPathArgument(ctx context.Context, tool string) (alias string, bound, ambiguous bool) {
+// clientReadArguments retains the focused read-repair seam introduced by #12824.
+// The generic adapter delegates all standard coding tools through the same rules.
+func clientReadArguments(ctx context.Context, tool, original, repaired string) string {
+	return clientToolArguments(ctx, tool, original, repaired)
+}
+
+func advertisedClientToolName(ctx context.Context, source string) string {
 	tools, _ := ctx.Value(clientToolSchemasContextKey{}).([]agent.ToolDef)
 	for _, def := range tools {
-		if !strings.EqualFold(def.Function.Name, tool) {
+		if def.Function.Name == source {
+			return source
+		}
+	}
+	targets := map[string]string{"read_file": "read", "edit_file": "edit", "write_file": "write"}
+	target, ok := targets[source]
+	if !ok {
+		return source
+	}
+	count := 0
+	for _, def := range tools {
+		if def.Function.Name == target {
+			count++
+		}
+	}
+	if count == 1 {
+		return target
+	}
+	return source
+}
+
+func advertisedToolProperties(ctx context.Context, tool string) (map[string]json.RawMessage, bool, bool) {
+	tools, _ := ctx.Value(clientToolSchemasContextKey{}).([]agent.ToolDef)
+	var properties map[string]json.RawMessage
+	found := 0
+	for _, def := range tools {
+		if def.Function.Name != tool {
 			continue
 		}
-		bound = true
+		found++
 		var schema struct {
 			Properties map[string]json.RawMessage `json:"properties"`
 		}
-		if json.Unmarshal(def.Function.Parameters, &schema) != nil {
-			return "", true, true
+		if json.Unmarshal(def.Function.Parameters, &schema) != nil || schema.Properties == nil {
+			return nil, true, true
 		}
-		declared := ""
-		for _, candidate := range []string{"file_path", "filePath", "path"} {
-			if _, ok := schema.Properties[candidate]; !ok {
-				continue
-			}
-			if declared != "" && declared != candidate {
-				return "", true, true
-			}
-			declared = candidate
-		}
-		if declared == "" || (alias != "" && alias != declared) {
-			return "", true, true
-		}
-		alias = declared
+		properties = schema.Properties
 	}
-	if bound && alias == "" {
-		ambiguous = true
-	}
-	return alias, bound, ambiguous
+	return properties, found > 0, found > 1
 }
 
-func conflictingReadPathArguments(raw string) bool {
+func clientToolArgumentAliases(tool string) [][]string {
+	switch {
+	case strings.EqualFold(tool, "read"), strings.EqualFold(tool, "write"):
+		return [][]string{{"file_path", "filePath", "path"}}
+	case strings.EqualFold(tool, "edit"):
+		return [][]string{
+			{"file_path", "filePath", "path"},
+			{"old_string", "oldString"},
+			{"new_string", "newString"},
+		}
+	default:
+		return nil
+	}
+}
+
+func clientToolPolicyArguments(tool, raw string) string {
+	var args map[string]json.RawMessage
+	if json.Unmarshal([]byte(raw), &args) != nil || args == nil {
+		return raw
+	}
+	changed := false
+	for _, aliases := range clientToolArgumentAliases(tool) {
+		value, present, _ := argumentAliasValue(args, aliases)
+		if !present {
+			continue
+		}
+		for _, alias := range aliases {
+			if _, exists := args[alias]; exists {
+				continue
+			}
+			args[alias] = value
+			changed = true
+		}
+	}
+	if !changed {
+		return raw
+	}
+	if encoded, err := json.Marshal(args); err == nil {
+		return string(encoded)
+	}
+	return raw
+}
+
+func declaredArgumentAlias(properties map[string]json.RawMessage, aliases []string) string {
+	declared := ""
+	for _, alias := range aliases {
+		if _, ok := properties[alias]; !ok {
+			continue
+		}
+		if declared != "" {
+			return ""
+		}
+		declared = alias
+	}
+	return declared
+}
+
+func argumentAliasValue(args map[string]json.RawMessage, aliases []string) (json.RawMessage, bool, string) {
+	found := ""
+	count := 0
+	var value json.RawMessage
+	for _, alias := range aliases {
+		candidate, ok := args[alias]
+		if !ok {
+			continue
+		}
+		if count == 0 {
+			// The canonical alias is first. A repair may update it while the
+			// policy-only compatibility aliases retain their pre-repair value.
+			value = candidate
+		}
+		count++
+		found = alias
+	}
+	if count != 1 {
+		found = ""
+	}
+	return value, value != nil, found
+}
+
+func conflictingClientToolArguments(tool, raw string) bool {
 	var args map[string]json.RawMessage
 	if json.Unmarshal([]byte(raw), &args) != nil {
 		return false
 	}
+	return conflictingArgumentAliases(args, clientToolArgumentAliases(tool))
+}
+
+func conflictingReadPathArguments(raw string) bool {
+	return conflictingClientToolArguments("read", raw)
+}
+
+func conflictingArgumentAliases(args map[string]json.RawMessage, groups [][]string) bool {
+	for _, aliases := range groups {
+		if conflictingArgumentAliasGroup(args, aliases) {
+			return true
+		}
+	}
+	return false
+}
+
+func conflictingArgumentAliasGroup(args map[string]json.RawMessage, aliases []string) bool {
 	var first json.RawMessage
-	for _, key := range []string{"file_path", "filePath", "path"} {
+	for _, key := range aliases {
 		value, ok := args[key]
 		if !ok {
 			continue
