@@ -131,6 +131,9 @@ func (s *Server) prepareServedAnthropicRequest(ctx context.Context, r *http.Requ
 	// no marginal penalty and needs no horizon at all — the unflagged long-session firing
 	// path (#1407's cold case).
 	compacted, compactReason := s.compactAnthropicRawWithReason(req, sessionTurn.state.Budget.TurnsLeft, reqTrace)
+	if compacted {
+		FeatureActivationTrackerFromContext(ctx).RecordActivation(FeatureCompactHistory, FeatureOutcomeUsed)
+	}
 	// fakBail is the harness-coherence view of fak's own compaction this turn: "" for a clean fire
 	// AND for a healthy under_budget no-op, the real reason for any actual bail. Threaded into the
 	// observation below so the coordinator can count a sustained fak-bail streak (when it yields the
@@ -150,7 +153,9 @@ func (s *Server) prepareServedAnthropicRequest(ctx context.Context, r *http.Requ
 	// before the size shrinker means the stashed original is the FULL body, not an already head+tail-
 	// shrunk one, so a restore returns full fidelity. Same cache-prefix proof; OFF by default.
 	s.maybeElideStaleReads(req, reqTrace)
-	s.maybeElideAnthropicRaw(req)
+	if s.maybeElideAnthropicRaw(req) {
+		FeatureActivationTrackerFromContext(ctx).RecordActivation(FeatureElideResults, FeatureOutcomeUsed)
+	}
 	// Inbound twin of #555: prune tool DEFINITIONS the floor can never admit from the
 	// outbound tools[], keeping the cache_control prefix byte-identical (promptmmu). Runs
 	// after the history compaction (both rewrite req.Raw; tools[] and messages[] are

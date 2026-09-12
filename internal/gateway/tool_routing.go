@@ -182,7 +182,11 @@ func (s *Server) syscall(ctx context.Context, tool, rawArgs string, readOnly boo
 		wv = witnessScriptedFold(tc.Tool, env, wv)
 		return wv, env, nil
 	}
-	r, v := s.k.Syscall(ctx, tc)
+	lookupCtx, lookupReceipt := vdso.WithLookupReceipt(ctx)
+	r, v := s.k.Syscall(lookupCtx, tc)
+	if lookupReceipt.Matches(r) && v.Kind == abi.VerdictAllow && r.Status == abi.StatusOK && resultMeta(r)["admit"] != "quarantined" {
+		FeatureActivationTrackerFromContext(ctx).RecordActivation(FeatureVDSO, FeatureOutcomeUsed)
+	}
 	if v.Kind == abi.VerdictAllow && isCapabilitiesTool(tc.Tool) {
 		var capReq CapabilitiesRequest
 		argsBytes := resolveBytes(ctx, tc.Args)
@@ -572,7 +576,7 @@ func (s *Server) buildCall(ctx context.Context, tool, rawArgs string, readOnly b
 	// (#2528) the routed model id is BOUND through the roster to its account-resolved
 	// EngineRoute here, and an unresolvable id (unknown account, no binding + no default)
 	// fails LOUD — the call never dispatches on a silent default.
-	route, rerr := s.routeEngine(canonical, readOnly, meta)
+	route, rerr := s.routeEngineWithContext(ctx, canonical, readOnly, meta)
 	if rerr != nil {
 		return nil, rerr
 	}
@@ -609,6 +613,10 @@ func (s *Server) routeDecision(tool string, readOnly bool, meta map[string]strin
 // registered engine driver fails LOUD at dispatch ("no engine registered for route"),
 // never silently runs elsewhere.
 func (s *Server) routeEngine(tool string, readOnly bool, meta map[string]string) (string, error) {
+	return s.routeEngineWithContext(context.Background(), tool, readOnly, meta)
+}
+
+func (s *Server) routeEngineWithContext(ctx context.Context, tool string, readOnly bool, meta map[string]string) (string, error) {
 	began := time.Now()
 	d, ok := s.routeDecision(tool, readOnly, meta)
 	if !ok {
@@ -624,12 +632,17 @@ func (s *Server) routeEngine(tool string, readOnly bool, meta map[string]string)
 	// (pure-function routing, so tiny). nil metrics / nil routing accumulator => no-op.
 	s.metrics.observeRouteDecision(s.routeManifestVersion(), d, time.Since(began))
 	if d.Plan.IsEnsemble() {
+		FeatureActivationTrackerFromContext(ctx).RecordActivation(FeatureRouteManifest, FeatureOutcomeUsed)
 		return "", nil
 	}
 	// meta already carries the request's isolation principal (buildCall lowered it from
 	// ctx onto vdso.MetaPrincipal), so the residency arm reads the SAME principal the
 	// vDSO scopes its cache by — one identity, not two that could disagree.
-	return s.resolveRoute(d.Plan.Primary(), meta[vdso.MetaPrincipal])
+	route, err := s.resolveRoute(d.Plan.Primary(), meta[vdso.MetaPrincipal])
+	if err == nil && d.Plan.Primary() != "" {
+		FeatureActivationTrackerFromContext(ctx).RecordActivation(FeatureRouteManifest, FeatureOutcomeUsed)
+	}
+	return route, err
 }
 
 // resolveRoute maps a routed model id to the engine route bound to abi.ToolCall.Engine

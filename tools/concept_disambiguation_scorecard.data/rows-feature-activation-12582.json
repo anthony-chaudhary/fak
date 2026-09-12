@@ -1,0 +1,122 @@
+{
+  "rows": [
+    {
+      "id": "gateway-feature-activation-tracker",
+      "canonical": "FeatureActivationTracker",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The request-owned, concurrent-safe observation of which closed ServeFeature identifiers actually executed. It captures configured active/standby identifiers at ingress separately from accepted uses and freezes the used set at request completion.",
+      "distinction": "FeatureCatalog describes evaluated configuration and provenance; this tracker records execution on one request. It neither enables a feature nor measures savings. LookupReceipt supplies ephemeral real-vDSO source identity, while FeatureProofReceipt records bounded quantitative evidence in the separate proof surface. None of these observations authorizes a tool or settles a financial claim.",
+      "distinct_from": [
+        "gateway-feature-activation-headers",
+        "gateway-feature-used-requests-total",
+        "vdso-lookup-receipt",
+        "native-compaction-observation"
+      ],
+      "aliases": [
+        "FeatureActivationSnapshot"
+      ],
+      "grounding": "FeatureActivationTracker",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "gateway-feature-activation-headers",
+      "canonical": "X-Fak-Features request observation headers and final trailer",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The HTTP projection of one FeatureActivationTracker: X-Fak-Features-Enabled lists ingress configuration, X-Fak-Features-Used snapshots accepted use before the first final response commit, and the declared X-Fak-Features-Used-Final trailer reports completed execution after streaming finishes.",
+      "distinction": "Initial headers cannot report later execution and remain immutable after commit. The final trailer extends observation without buffering live SSE; an incomplete worker does not receive a complete final-use value. These identifier lists carry neither retained FeatureProofReceipt measurements nor settlement receipts, and Enabled never implies Used.",
+      "distinct_from": [
+        "gateway-feature-activation-tracker",
+        "gateway-feature-used-requests-total"
+      ],
+      "aliases": [
+        "HeaderFeaturesEnabled",
+        "HeaderFeaturesUsed",
+        "HeaderFeaturesUsedFinal",
+        "X-Fak-Features-Enabled",
+        "X-Fak-Features-Used",
+        "X-Fak-Features-Used-Final"
+      ],
+      "grounding": "HeaderFeaturesUsed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "gateway-feature-used-requests-total",
+      "canonical": "fak_gateway_feature_used_requests_total",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The cumulative Prometheus counter of requests that actually used each closed ServeFeature identifier. Request finalization folds each used identifier once, even when the mechanism executes repeatedly within the request; the feature label is bounded by the catalog.",
+      "distinction": "This counts requests with observed use, not configured features, number of individual executions, savings, or proof-verification outcomes. The gateway prefix identifies the HTTP serving subsystem and does not make this a security gate or a policy verdict.",
+      "distinct_from": [
+        "gateway-feature-activation-tracker",
+        "gateway-feature-activation-headers",
+        "gateway-engine-fakgatewaytooldefer"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_feature_used_requests_total",
+      "grounding_kind": "metric",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "vdso-lookup-receipt",
+      "canonical": "LookupReceipt (per-call real vDSO source identity)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "An opaque, call-local receipt written only by successful real VDSO.Lookup execution and bound to the exact returned abi.Result pointer. WithLookupReceipt transports it through context, including production tier wrappers, and Matches checks that identity after the caller's acceptance gates. A later real lookup clears earlier evidence, including on a miss.",
+      "distinction": "This short-lived identity check retains no payload serialization, historical measurement, or settlement authority. It differs from a world-state witness that binds cache validity, from FeatureCatalog configuration, from activation identifier lists, and from retained FeatureProofReceipt quantitative evidence. Matching the real result does not replace freshness, screening, or result-admission checks; arbitrary FastPath metadata cannot manufacture the receipt.",
+      "distinct_from": [
+        "world-state-witness",
+        "gateway-feature-activation-tracker",
+        "native-compaction-observation"
+      ],
+      "aliases": [
+        "LookupReceipt",
+        "WithLookupReceipt"
+      ],
+      "grounding": "LookupReceipt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "native-compaction-observation",
+      "canonical": "NativeCompactionObservation",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "A bounded value summary of the actual native typed-message compaction cut, published to request observers only after successful native generation consumes the prepared prompt. It records exact typed-message JSON byte counts and hashes, explicitly estimated message tokens, and shared whole-message regions without retaining prompt or restore payloads.",
+      "distinction": "FeatureActivationTracker retains used identifiers, while this producer summary supplies quantities to the separate FeatureProofReceipt collector. Its shared regions do not certify KV cache anchors, estimates are not tokenizer counts, and byte reduction is not measured time savings. EncodePrompt, idle cuts, and failed generation publish no observation; proof capture failure does not erase actual compaction use. LookupReceipt identifies a real vDSO result and has a different producer.",
+      "distinct_from": [
+        "gateway-feature-activation-tracker",
+        "vdso-lookup-receipt"
+      ],
+      "aliases": [
+        "WithNativeCompactionObserver",
+        "nativeCompactionObserver",
+        "observeNativeCompaction",
+        "captureNativeCompaction"
+      ],
+      "grounding": "NativeCompactionObservation",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

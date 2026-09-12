@@ -24,8 +24,9 @@ var gatewayLatencyBuckets = []float64{
 }
 
 type gatewayMetrics struct {
-	start    time.Time
-	inflight int64
+	featureActivations featureActivationMetrics
+	start              time.Time
+	inflight           int64
 
 	mu         sync.Mutex
 	http       map[httpMetricKey]*latencyCounter

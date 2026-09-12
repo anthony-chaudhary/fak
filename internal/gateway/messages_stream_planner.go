@@ -131,6 +131,8 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	}
 	defer lease.Release()
 
+	messages := s.maybePlanMessages(r.Context(), reqTrace, req.Messages)
+	messages = s.maybeElideMessagesWithContext(r.Context(), messages)
 	start()
 	if note := s.toolFailureNoteOnce(reqTrace, req.Messages); note != "" {
 		emitAnthropicTextBlock(sendLocked, &outIdx, note)
@@ -140,8 +142,6 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	}
 
 	guard := newLiftGuard(emitText)
-	messages := s.maybePlanMessages(r.Context(), reqTrace, req.Messages)
-	messages = s.maybeElideMessages(messages) // decoded-path elision for a local model (GLM/Qwen), default-on
 	began := time.Now()
 	stopPing := make(chan struct{})
 	pingDone := make(chan struct{})

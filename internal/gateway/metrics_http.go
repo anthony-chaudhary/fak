@@ -81,11 +81,14 @@ type statusRecorder struct {
 	bytes  int64
 }
 
-// WriteHeader records the FIRST status code written (later calls are ignored) and
-// forwards it to the wrapped ResponseWriter, so the metrics middleware can label the
-// request by the status actually sent.
+// WriteHeader forwards informational responses without committing request metrics;
+// the first final response determines the recorded status.
 func (r *statusRecorder) WriteHeader(status int) {
 	if r.status != 0 {
+		return
+	}
+	if status >= 100 && status < 200 && status != http.StatusSwitchingProtocols {
+		r.ResponseWriter.WriteHeader(status)
 		return
 	}
 	r.status = status
@@ -103,16 +106,40 @@ func (r *statusRecorder) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// Flush defaults the status to 200 if unset and flushes the wrapped ResponseWriter
-// when it implements http.Flusher, preserving streaming (SSE) behavior through the
-// recorder.
-func (r *statusRecorder) Flush() {
+// newStatusRecorder exposes Flush only when the underlying writer supports it.
+// The core remains available to the metrics and panic-recovery paths.
+func newStatusRecorder(w http.ResponseWriter) (*statusRecorder, http.ResponseWriter) {
+	r := &statusRecorder{ResponseWriter: w}
+	if _, ok := w.(http.Flusher); ok {
+		return r, &statusRecorderFlusher{statusRecorderFlushError: &statusRecorderFlushError{statusRecorder: r}}
+	}
+	if _, ok := w.(interface{ FlushError() error }); ok {
+		return r, &statusRecorderFlushError{statusRecorder: r}
+	}
+	return r, r
+}
+
+type statusRecorderFlushError struct {
+	*statusRecorder
+}
+
+func (r *statusRecorderFlushError) FlushError() error {
 	if r.status == 0 {
 		r.WriteHeader(http.StatusOK)
 	}
-	if f, ok := r.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
+	if f, ok := r.ResponseWriter.(interface{ FlushError() error }); ok {
+		return f.FlushError()
 	}
+	r.ResponseWriter.(http.Flusher).Flush()
+	return nil
+}
+
+type statusRecorderFlusher struct {
+	*statusRecorderFlushError
+}
+
+func (r *statusRecorderFlusher) Flush() {
+	_ = r.FlushError()
 }
 
 // Hijack implements http.Hijacker by forwarding to the wrapped ResponseWriter
@@ -157,7 +184,7 @@ func (s *Server) withMetrics(next http.Handler) http.Handler {
 			r = r.WithContext(withInflightID(r.Context(), liveID))
 		}
 		traceID := ensureHTTPTrace(s, w, r)
-		rec := &statusRecorder{ResponseWriter: w}
+		rec, responseWriter := newStatusRecorder(w)
 		// Record metrics + the request log for EVERY outcome, panic included, and contain a
 		// downstream handler panic HERE — the outermost fak-owned wrapper — instead of letting
 		// it unwind into net/http. net/http's own recovery writes a full goroutine stack to the
@@ -197,7 +224,7 @@ func (s *Server) withMetrics(next http.Handler) http.Handler {
 			}
 			s.logHTTPRequest(r, route, status, dur, rec.bytes, traceID)
 		}()
-		next.ServeHTTP(rec, r)
+		next.ServeHTTP(responseWriter, r)
 	})
 }
 
@@ -216,6 +243,9 @@ func (s *Server) logHTTPRequest(r *http.Request, route string, status int, dur t
 	}
 	if traceID != "" {
 		ev["trace_id"] = traceID
+	}
+	if tracker := FeatureActivationTrackerFromContext(r.Context()); tracker != nil {
+		ev["feature_used"] = tracker.Snapshot().Used
 	}
 	if ua := r.Header.Get("User-Agent"); ua != "" {
 		ev["user_agent"] = ua

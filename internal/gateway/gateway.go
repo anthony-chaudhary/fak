@@ -1247,11 +1247,18 @@ func elidedPrefixMask(fullHistory, planned []agent.Message) (mask []bool, ok boo
 // SHORTENS an old tool message, never empties a turn, recent working set protected), so this can
 // never break a turn or mutate the caller's slice.
 func (s *Server) maybeElideMessages(messages []agent.Message) []agent.Message {
+	return s.maybeElideMessagesWithContext(context.Background(), messages)
+}
+
+func (s *Server) maybeElideMessagesWithContext(ctx context.Context, messages []agent.Message) []agent.Message {
 	if s.elideResultBytes <= 0 || s.anthropicPassthrough() {
 		return messages
 	}
 	out, outcome := agent.ElideMessages(messages, s.elideResultBytes)
 	s.metrics.observeUncachedTrim(outcome)
+	if outcome.Elided > 0 && outcome.ShedBytes > 0 {
+		FeatureActivationTrackerFromContext(ctx).RecordActivation(FeatureElideResults, FeatureOutcomeUsed)
+	}
 	return out
 }
 
@@ -1349,7 +1356,7 @@ func (s *Server) complete(ctx context.Context, trace string, messages []agent.Me
 	// elision never fires. Shrinks old oversized tool-role content to head+tail; default-on,
 	// fail-safe, recent working set protected. No-op on the Anthropic passthrough (handled on
 	// req.Raw there).
-	messages = s.maybeElideMessages(messages)
+	messages = s.maybeElideMessagesWithContext(ctx, messages)
 	start := time.Now()
 	comp, err = s.chatPlanner(ctx).Complete(ctx, messages, tools, chatRouteOpts(ctx, opts)...)
 	dur := time.Since(start)

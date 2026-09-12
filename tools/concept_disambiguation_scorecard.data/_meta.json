@@ -3697,6 +3697,11 @@
           "category": "incidental",
           "reason": "reasoning posture helper in child resource guard",
           "token": "FAK_GUARD_REASONING_EFFORT"
+        },
+        {
+          "category": "false-positive",
+          "reason": "The gateway prefix matches the guard-gate lexical family, but this is a request-use observation counter positioned in gateway-engine; it performs no authorization or gating.",
+          "token": "fak_gateway_feature_used_requests_total"
         }
       ],
       "exclude": [
@@ -3705,6 +3710,7 @@
         "aggregateV2",
         "delegat",
         "deterministic_gates",
+        "fak_gateway_feature_used_requests_total",
         "gateway",
         "investigat",
         "litigated",
@@ -8469,6 +8475,11 @@
           "category": "incidental",
           "reason": "setter in a2a director",
           "token": "SetDirectorEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation variant of existing routeEngine that forwards request observation context; selected engine routing semantics are unchanged and the observed-use concept is FeatureActivationTracker.",
+          "token": "routeEngineWithContext"
         }
       ],
       "id": "gateway-engine",
@@ -8588,6 +8599,7 @@
         "resolveSpawnEngine",
         "response_vdso_memo",
         "revokeVDSOWitness",
+        "routeEngineWithContext",
         "selectorGateway",
         "serviceOpsEngine",
         "shrinkWireInKernel",
@@ -10538,6 +10550,86 @@
           "category": "incidental",
           "reason": "Internal one-shot telemetry flag consumer for a decoded context-view event; clears the recorded trace flag after logging and does not create, admit, or transform model context.",
           "token": "consumeDecodedCtxViewEvent"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private context transport key for the positioned FeatureActivationTracker request observation; it introduces no model-context or retention mechanism.",
+          "token": "featureActivationContextKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Accessor for the positioned FeatureActivationTracker carried by a Go request context; it adds no separate context-management behavior.",
+          "token": "FeatureActivationTrackerFromContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing decoded result-elision helper with request-context propagation so actual elision can update FeatureActivationTracker; the helper is not an additional elision or context policy.",
+          "token": "maybeElideMessagesWithContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Context-bearing variant of existing input-trigger route admission; forwards the request observation carrier without changing route selection or introducing a context-management mechanism.",
+          "token": "admitAndRouteChatInputTriggerWithContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local variable naming the derived Go context returned by WithLookupReceipt for one existing kernel syscall; the real concept is the positioned opaque LookupReceipt.",
+          "token": "lookupCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Context-bearing variant of the existing routeEngine helper, used to attribute a validated manifest pick to the request tracker; no new model-context mechanism.",
+          "token": "routeEngineWithContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private Go context key transporting the positioned per-call LookupReceipt; it neither retains model history nor defines a separate receipt.",
+          "token": "lookupReceiptContextKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private accessor for the positioned LookupReceipt inside VDSO.Lookup; request transport only, not an independent context or proof mechanism.",
+          "token": "lookupReceiptFromContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "The positioned native-compaction-observation value is quantitative producer evidence carried through a Go request context, not a model-context management policy.",
+          "token": "NativeCompactionObservation"
+        },
+        {
+          "category": "incidental",
+          "reason": "Registration and composition helper for the positioned native-compaction-observation callback; Go context transport adds no prompt retention or model-context policy.",
+          "token": "WithNativeCompactionObserver"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private Go request-context key transporting the positioned native-compaction-observation callback; no model-context management mechanism.",
+          "token": "nativeCompactionObserverKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private outcome and prepared-prompt fields carrying the positioned NativeCompactionObservation value from the actual typed cut to successful native completion; no additional model-context mechanism.",
+          "token": "nativeCompaction"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private accessor for the callback carried in Go context for the positioned NativeCompactionObservation; no separate model-context policy.",
+          "token": "nativeCompactionObserver"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private publication helper and capture-enable field for the positioned NativeCompactionObservation; neither defines an independent compaction mechanism.",
+          "token": "observeNativeCompaction"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private serializer and quantitative summary producer for the positioned NativeCompactionObservation; no separate context retention policy.",
+          "token": "captureNativeCompaction"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private SHA256 formatting helper for the positioned NativeCompactionObservation digests; not a model-context or cache mechanism.",
+          "token": "nativeCompactionHash"
         }
       ],
       "exclude": [
@@ -10560,12 +10652,14 @@
         "ContextualID",
         "ExtractCompactionSummary",
         "FAK_COMPACTION_THRASH_STOP",
+        "FeatureActivationTrackerFromContext",
         "FullContextInputTokens",
         "IsCopiedContext",
         "LookupSnapshotTieredContext",
         "MaxContextTokensForBudget",
         "MechanismStaleContext",
         "MetricFactRecall",
+        "NativeCompactionObservation",
         "RenderInvariantPrefix",
         "RestoreCalls",
         "RetainedContextBytes",
@@ -10575,10 +10669,13 @@
         "SensitiveContext",
         "TerminationContextLimit",
         "WithAffinity",
+        "WithNativeCompactionObserver",
         "WithTraceContext",
+        "admitAndRouteChatInputTriggerWithContext",
         "affinityContextKey",
         "appendGuardCompactionWitnessTo",
         "callCtx",
+        "captureNativeCompaction",
         "capturedSelfcheckContexts",
         "cctx",
         "cellContext",
@@ -10615,6 +10712,7 @@
         "ctxsleep",
         "fak_fleet_repo_pulse_context_tokens_saved_total",
         "fak_gateway_compaction_thrash_sessions_total",
+        "featureActivationContextKey",
         "formatGuardCompactionWitness",
         "guardCompactionAnchorFirst",
         "guardCompactionAnchorHead",
@@ -10632,10 +10730,19 @@
         "inspectCodexHookProfileContext",
         "laneCtx",
         "latestGuardCompactionWitness",
+        "lookupCtx",
+        "lookupReceiptContextKey",
+        "lookupReceiptFromContext",
+        "maybeElideMessagesWithContext",
+        "nativeCompaction",
+        "nativeCompactionHash",
+        "nativeCompactionObserver",
+        "nativeCompactionObserverKey",
         "newGuardCompactionWitness",
         "newTraceContext",
         "noteCompactionContract",
         "noteCtxValueTTL1hScope",
+        "observeNativeCompaction",
         "outboundTraceContext",
         "outboundTraceContextKey",
         "postCompactionPrefix",
@@ -10656,6 +10763,7 @@
         "recordGuardCompactionWitness",
         "repository_context",
         "requestContext",
+        "routeEngineWithContext",
         "sessionClientDescriptorForContext",
         "session_compaction_thrash",
         "setGuardCompactionAnchorMode",
