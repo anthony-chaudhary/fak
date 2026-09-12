@@ -1035,11 +1035,7 @@ func (cb *ContinuousBatcher) Close() error {
 			default:
 				close(slot.doneCh)
 			}
-			select {
-			case <-slot.tokenCh:
-			default:
-				close(slot.tokenCh)
-			}
+			close(slot.tokenCh)
 		}
 		slot.mu.Unlock()
 	}
