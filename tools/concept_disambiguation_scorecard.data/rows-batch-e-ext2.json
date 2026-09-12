@@ -365,6 +365,7 @@
         "RenderPlan",
         "render (verb)",
         "rendered-ctxplan",
+        "render-materialize-renderer-id-native-prompt",
         "x-ci-coverage-render-materialize-renderers",
         "x2-render-materialize-gitdailyrenderhealth",
         "issue10230-performance-rsi-debt"

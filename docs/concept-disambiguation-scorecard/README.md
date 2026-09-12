@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **414** (clarity 0 + coverage 414) |
-| **Crystal-clear concepts (and climbing)** | **1088** crystal of 2810 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2927 / 3341** (87.6% of the discovered confusable space) |
-| **Undrawn twin-pairs (drive to 0)** | **0** of 215 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **84** of 4014 indexed names |
+| **Crystal-clear concepts (and climbing)** | **1088** crystal of 2813 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2930 / 3344** (87.6% of the discovered confusable space) |
+| **Undrawn twin-pairs (drive to 0)** | **0** of 218 confusable name-pairs |
+| **Ambiguous lookup names (drive to 0)** | **84** of 4017 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 91.9/100 (grade A) |
 
@@ -28,11 +28,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2810 concepts - score 91.9/100 (grade A) - disambiguation-debt 414
+concept-disambiguation chart - 2813 concepts - score 91.9/100 (grade A) - disambiguation-debt 414
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ##################.......... 1088
-  o defined       ############################ 1722
+  o defined       ############################ 1725
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
@@ -53,7 +53,7 @@ clarity mix by family (each cell = one concept):
   plan             *********************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (360 concept(s); 117 crystal)
   policy-capability **********************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (199 concept(s); 94 crystal)
   pool             ******oooooooooooooooooooooooooooooooo (38 concept(s); 6 crystal)
-  render-materialize ******************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (195 concept(s); 42 crystal)
+  render-materialize ******************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (198 concept(s); 42 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
   session-runtime  *************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (247 concept(s); 85 crystal)
   support-maturity *******************************************oooooooooooooooooooooo (65 concept(s); 43 crystal)
@@ -71,7 +71,7 @@ coverage by family (positioned / discovered):
   witness-proof    ########################.... 164/191
   guard-gate       ###########################. 507/532
   pool             ##################.......... 40/64
-  render-materialize #########################... 212/234
+  render-materialize #########################... 215/237
   support-maturity ######################...... 74/93
   evict            #####################....... 55/73
   score-debt       ##########################.. 113/122
@@ -84,15 +84,15 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [############################....] 87.6%  (2927/3341 confusable tokens positioned)
+namespace coverage  [############################....] 87.6%  (2930/3344 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
-  mutual       ############################ 215
+  mutual       ############################ 218
   one-sided    ............................ 0
   undrawn      ............................ 0
-  pairs separated   [################################] 215/215
+  pairs separated   [################################] 218/218
 
-name index: 4014 lookup name(s) -> 2810 concept(s), 84 ambiguous
+name index: 4017 lookup name(s) -> 2813 concept(s), 84 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -114,11 +114,11 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 
 | Separation metric | Value |
 |---|---|
-| Confusable name-pairs discovered | 215 |
-| **Separated from each other (drive to all)** | **215 / 215** (215 mutual, 0 one-sided) |
+| Confusable name-pairs discovered | 218 |
+| **Separated from each other (drive to all)** | **218 / 218** (218 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1906 / 5002 |
+| Boundaries drawn (mutual / total) | 1912 / 5010 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4014 over 2810 concepts |
+| Lookup names indexed | 4017 over 2813 concepts |
 | Lookup names landing on several concepts | 84 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2810 |
+| Concepts carrying a contrast set | 2813 |
 
 ## The concepts (best verdict first)
 
@@ -2574,6 +2574,9 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | render-materialize | **RenderRepeatReport (tool-call repeat totals)** - internal/toolproc/repeatstream.go: writes the repeated-tool-call report - the top-N repeated calls and their totals, printing counts NOT bodies - to an io.Writer. |
 | o | defined | symbol | render-materialize | **renderResumeWatchdogStatus (resume-watchdog drain status)** - cmd/fak/resume_watchdog_runtime.go: writes the resume-watchdog drain status (stalled sessions the watchdog is nudging back to work) to an io.Writer. |
 | o | defined | metric | render-materialize | **fresh_rendered (memory-value scoring event)** - internal/memvaluescore/score.go: a memory-value scoring EVENT with weight x2 - a claim-verified orientation block that was actually delivered into a session (contrasted with stale_withheld x8 and lesson_distilled x4). |
+| o | defined | symbol | render-materialize | **RenderedSHA256 (native prompt receipt)** - NativeInferenceReceipt.RenderedSHA256 carries the lowercase SHA-256 digest of the exact rendered prompt bytes that were tokenized for an opt-in native inference receipt. |
+| o | defined | symbol | render-materialize | **RendererID (native prompt receipt)** - NativeInferenceReceipt.RendererID identifies the prompt template and thinking-policy variant that produced the rendered bytes recorded by an opt-in native inference receipt. |
+| o | defined | symbol | render-materialize | **inKernelPromptRendererID (prompt identity selector)** - agent.inKernelPromptRendererID selects the stable renderer identity from model configuration and sampling options for native prompt encoding and receipts. |
 | o | defined | symbol | render-materialize | **RenderJSON (device-spine serialization)** - internal/metrics RenderJSON serializes a DeviceMetrics snapshot into JSON bytes, omitting unread (nil) devices so the normalized-optional contract survives to the wire; a nil snapshot renders as an empty array, not null. |
 | o | defined | symbol | render-materialize | **RenderCSV (device-spine CSV)** - internal/metrics RenderCSV serializes a DeviceMetrics snapshot into spreadsheet-friendly CSV with a self-describing header row; a nil snapshot renders the header alone, not an error, and values use non-scientific formatting so large byte counts stay spreadsheet-friendly. |
 | o | defined | symbol | render-materialize | **RenderProm (device-spine Prometheus)** - internal/metrics RenderProm renders a DeviceMetrics snapshot as OpenMetrics/Prometheus text via the shared descriptor table, delegating to RenderOpenMetricsText; it is a stateless reader over the same snapshot RenderJSON consumes (the one-collection-path guarantee). |
@@ -3084,17 +3087,17 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 24 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3096/5002 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2810 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3098/5010 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2813 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
 | separation | `reference_resolves` | 100 | 0 | every distinct_from reference resolves to a real concept |
-| separation | `pair_separated` | 100 | 0 | all 215 confusable name-pair(s) are separated |
+| separation | `pair_separated` | 100 | 0 | all 218 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4014 lookup name(s) resolves - 84 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4017 lookup name(s) resolves - 84 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3110,7 +3113,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | witness-proof | 164 | 191 | 27 |
 | guard-gate | 507 | 532 | 25 |
 | pool | 40 | 64 | 24 |
-| render-materialize | 212 | 234 | 22 |
+| render-materialize | 215 | 237 | 22 |
 | support-maturity | 74 | 93 | 19 |
 | evict | 55 | 73 | 18 |
 | score-debt | 113 | 122 | 9 |

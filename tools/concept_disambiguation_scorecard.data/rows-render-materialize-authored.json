@@ -18,6 +18,68 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "render-materialize-rendered-sha256-native-prompt",
+      "canonical": "RenderedSHA256 (native prompt receipt)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "NativeInferenceReceipt.RenderedSHA256 carries the lowercase SHA-256 digest of the exact rendered prompt bytes that were tokenized for an opt-in native inference receipt.",
+      "distinction": "Identifies rendered prompt bytes; it is not the generated-token list, prompt-token list, tokenizer identity, or renderer identity.",
+      "distinct_from": [
+        "Rendered"
+      ],
+      "aliases": [
+        "renderedsha256"
+      ],
+      "grounding": "renderedsha256",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "render-materialize-renderer-id-native-prompt",
+      "canonical": "RendererID (native prompt receipt)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "NativeInferenceReceipt.RendererID identifies the prompt template and thinking-policy variant that produced the rendered bytes recorded by an opt-in native inference receipt.",
+      "distinction": "Identifies the prompt renderer contract; it is not the tokenizer, model, backend, or a scorecard Markdown projector.",
+      "distinct_from": [
+        "rendered-ctxplan",
+        "x-ci-coverage-render-materialize-renderers",
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [
+        "rendererid"
+      ],
+      "grounding": "rendererid",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "render-materialize-inkernel-prompt-renderer-id",
+      "canonical": "inKernelPromptRendererID (prompt identity selector)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "agent.inKernelPromptRendererID selects the stable renderer identity from model configuration and sampling options for native prompt encoding and receipts.",
+      "distinction": "Selects an identity string only; it does not render prompt bytes, tokenize them, or execute inference.",
+      "distinct_from": [
+        "render (verb)"
+      ],
+      "aliases": [
+        "inkernelpromptrendererid"
+      ],
+      "grounding": "inkernelpromptrendererid",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
     }
   ]
 }
