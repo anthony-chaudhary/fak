@@ -110,8 +110,9 @@ receipts. For Mac local model setup and head-to-head Apple Silicon Metal measure
   on linux/amd64, including AMD Strix Halo. NVIDIA users are directed to
   `ghcr.io/anthony-chaudhary/fak:cuda-latest` with `--gpus all`.
   CPU archives are secondary references selected with `--variant cpu`.
-  These GPU-first archive changes require a release carrying the GPU assets;
-  historical v0.54.0 lacks them. Missing GPU assets fail with an actionable message.
+  The Metal archive is available on v0.54.0, backfilled from that exact tag.
+  Vulkan publication remains pending its release and hardware gate. Missing GPU
+  assets fail with an actionable message.
   Apple acceleration is fak-native Metal; MLX is a comparison runtime.
   New native-performance work prefers Qwen3.8. Choose a supported model/backend
   and measure the actual local workflow.

@@ -46,10 +46,14 @@ Download prebuilt binaries from the [latest release](https://github.com/anthony-
 
 The installer defaults to Apple Silicon Metal or Linux amd64 Vulkan, including
 AMD Strix Halo. The Vulkan archive requires GNU glibc 2.39+ (Ubuntu 24.04+),
-the system Vulkan loader, and a compatible GPU driver. CPU builds are secondary references (`--variant cpu`). These
-GPU-first defaults require a release carrying the GPU archives; historical
-v0.54.0 lacks them. Missing assets produce an error with source-build or explicit
-CPU-reference instructions. Packaging does not establish model/GPU qualification.
+the system Vulkan loader, and a compatible GPU driver. CPU builds are secondary
+references (`--variant cpu`). The Metal archive is available on v0.54.0, backfilled
+from that exact tag without creating a new release. This backfill is SHA-256-verified
+and ad-hoc-signed; it has no SLSA attestation or Apple notarization. Its checksum
+verifies download integrity, not source provenance. Vulkan publication remains
+pending its release and hardware gate. Missing assets produce an error with
+source-build or explicit CPU-reference instructions. Packaging does not establish
+model/GPU qualification.
 
 To verify SLSA build provenance:
 
@@ -228,7 +232,7 @@ On Apple Silicon, the installer selects the native Metal GPU archive by default.
 The backend must still be qualified on the actual machine and supported model.
 CPU reference archives cannot provide Metal acceleration. Ways to obtain a GPU build:
 
-1. **`sh install.sh`** — installs `fak_<VERSION>_darwin_arm64_metal.tar.gz`, a CGO darwin/arm64 (Apple Silicon) release asset with the Metal backend compiled in; macOS Apple Silicon only. The asset begins landing with this release cycle — if it is missing for your version, use option 2.
+1. **`sh install.sh`** — installs `fak_<VERSION>_darwin_arm64_metal.tar.gz`, a CGO darwin/arm64 (Apple Silicon) release asset with the Metal backend compiled in; macOS Apple Silicon only. The asset is available on v0.54.0 as a backfill from its exact tagged source; if it is missing for another version, use option 2.
 2. **Build from source with `CGO_ENABLED=1`** — see the [Mac local models guide](docs/fak/mac-local-models.md) for the build and qualification steps.
 3. **NVIDIA GPUs** ship as the separate ghcr `-cuda` container image instead — see the [deployment guide](docs/fak/deployment-guide.md).
 
