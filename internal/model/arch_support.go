@@ -121,6 +121,12 @@ const (
 // case order mirrors forwardHiddenRows: gemma4, then MLA/MoE, then MiniMax MSA, then
 // the qwen35 GDN hybrid, with standard GQA as the default.
 func ClassifyForwardPath(cfg Config, man map[string]tensorMeta) (ForwardPathKind, error) {
+	// V4.1 has no generic forward path: refuse here, before it can classify as
+	// ForwardAttnSeqGQA and reach a forward over V4.1 geometry. The load gate
+	// refuses earlier; this is the independent forward-selection seam.
+	if err := refuseDeepSeekV41Native(cfg); err != nil {
+		return "", err
+	}
 	if cfg.GLM5Next {
 		if man == nil {
 			return "", &GLM5NextUnsupportedError{ModelType: glm5NextModelType, Architecture: glm5NextArchitecture}

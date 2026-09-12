@@ -245,26 +245,42 @@ func loadSafetensorsQuantDir(dir string, cfg Config, open safetensorsFileOpener,
 // can produce one decoded f32 tensor at a time (GGUF, safetensors shards) use it to
 // quantize resident matmul weights immediately and keep only the small f32 tensors.
 type QuantBuilder struct {
-	m     *Model
-	raw   []byte
-	off   int
-	tied  bool
-	built bool
+	m       *Model
+	raw     []byte
+	off     int
+	tied    bool
+	built   bool
+	refusal error
 }
 
 // NewQuantBuilder starts a memory-lean model build for already-decoded f32 tensors. tied
 // means model.embed_tokens.weight also serves as the LM head and should be quantized for
 // the head path while still remaining f32 for embedding lookup.
+//
+// A V4.1 config is refused fail-closed: the builder records the typed
+// ErrV41NativeUnsupported so every mutator and Build() report it before any weight is
+// folded into a *Model. This is the quant-on-load seam the GGUF path (internal/ggufload)
+// reaches via QuantModel/QuantModelQ4K, which never passes through the f32 loaders.
 func NewQuantBuilder(cfg Config, tied bool) *QuantBuilder {
-	return &QuantBuilder{
+	b := &QuantBuilder{
 		m:    &Model{Cfg: cfg, manifest: map[string]tensorMeta{}, q8w: map[string]*q8Tensor{}},
 		tied: tied,
 	}
+	b.refusal = refuseDeepSeekV41Native(cfg)
+	return b
+}
+
+// refuseV41 returns the sticky V4.1 refusal recorded at construction, if any.
+func (b *QuantBuilder) refuseV41() error {
+	return b.refusal
 }
 
 // AddF32Tensor adds one decoded source tensor. If it is a resident matmul weight the
 // builder stores only its Q8_0 copy; otherwise it appends it to the packed f32 blob.
 func (b *QuantBuilder) AddF32Tensor(name string, shape []int, data []float32) error {
+	if err := b.refuseV41(); err != nil {
+		return err
+	}
 	if b.built {
 		return fmt.Errorf("model: QuantBuilder already built")
 	}
@@ -280,6 +296,9 @@ func (b *QuantBuilder) AddF32Tensor(name string, shape []int, data []float32) er
 
 // SetQ2KEmbedding attaches a packed Q2_K embedding table to the model being built.
 func (b *QuantBuilder) SetQ2KEmbedding(embed *Q2KEmbedding) error {
+	if err := b.refuseV41(); err != nil {
+		return err
+	}
 	if b.built {
 		return fmt.Errorf("model: QuantBuilder already built")
 	}
@@ -293,6 +312,9 @@ func (b *QuantBuilder) SetQ2KEmbedding(embed *Q2KEmbedding) error {
 // Build finalizes the Model. The result is quant-only for the big matmul weights; callers
 // should use the Q8/cacheless paths that can read q8w for those tensors.
 func (b *QuantBuilder) Build() (*Model, error) {
+	if err := b.refuseV41(); err != nil {
+		return nil, err
+	}
 	if b.built {
 		return nil, fmt.Errorf("model: QuantBuilder already built")
 	}
