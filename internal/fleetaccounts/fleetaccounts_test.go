@@ -897,3 +897,58 @@ func mustParse(t *testing.T, s string) time.Time {
 	}
 	return *p
 }
+
+// TestCrossProviderReasoningEffortPropagation checks the #11531 mapper fragments.
+// It does not witness worker dispatch or model-specific capability admission.
+func TestCrossProviderReasoningEffortPropagation(t *testing.T) {
+	type want struct {
+		provider ReasoningProvider
+		json     string // the exact provider-specific wire fragment
+	}
+	cases := []want{
+		{ReasoningProviderOpenAIResponses, `{"reasoning":{"effort":"high"}}`},
+		{ReasoningProviderAnthropic, `{"thinking":{"type":"enabled","budget_tokens":16384}}`},
+		{ReasoningProviderGemini, `{"thinkingConfig":{"thinkingLevel":"high"}}`},
+	}
+	for _, tc := range cases {
+		m := MapReasoningEffort("high", tc.provider)
+		if !m.Supported {
+			t.Fatalf("%s: EffortHigh should be supported, got reason=%q", tc.provider, m.Reason)
+		}
+		raw, ok := m.MarshalWire()
+		if !ok {
+			t.Fatalf("%s: MarshalWire returned !ok for supported effort", tc.provider)
+		}
+		if string(raw) != tc.json {
+			t.Errorf("%s: wire = %s, want %s", tc.provider, raw, tc.json)
+		}
+	}
+
+	// An intent the provider cannot express is an explicit UNSUPPORTED outcome, never a
+	// silently substituted one: Responses rejects `none`, and Gemini has no `xhigh`.
+	if m := MapReasoningEffort("none", ReasoningProviderOpenAIResponses); m.Supported || m.Reason != "unsupported_effort" {
+		t.Errorf("openai-responses none = %+v, want unsupported_effort", m)
+	}
+	if m := MapReasoningEffort("xhigh", ReasoningProviderGemini); m.Supported || m.Reason != "unsupported_effort" {
+		t.Errorf("gemini xhigh = %+v, want unsupported_effort", m)
+	}
+	// Unknown intents/providers are typed, not defaulted.
+	if m := MapReasoningEffort("turbo", ReasoningProviderGemini); m.Reason != "unknown_effort" {
+		t.Errorf("unknown effort reason = %q, want unknown_effort", m.Reason)
+	}
+	if m := MapReasoningEffort("high", ReasoningProvider("mistral")); m.Reason != "unsupported_provider" {
+		t.Errorf("unknown provider reason = %q, want unsupported_provider", m.Reason)
+	}
+	// An unsupported mapping never marshals a body.
+	if raw, ok := MapReasoningEffort("none", ReasoningProviderOpenAIResponses).MarshalWire(); ok || raw != nil {
+		t.Errorf("unsupported MarshalWire = (%s,%v), want (nil,false)", raw, ok)
+	}
+	// These settings carry distinct intent elsewhere; silently substituting a
+	// fixed tier can change compute cost or discard adaptive behavior.
+	for _, effort := range []string{"minimal", "adaptive", "default", "balanced", "high-balanced", "max"} {
+		m := MapReasoningEffort(effort, ReasoningProviderOpenAIResponses)
+		if m.Supported || m.Reason != "unknown_effort" {
+			t.Errorf("%q mapped to %+v, want unknown_effort", effort, m)
+		}
+	}
+}
