@@ -335,11 +335,15 @@ func TestNativeStreamUnwiredLoopIsUnchanged(t *testing.T) {
 	if bareText != obsText {
 		t.Fatalf("streamed text differs with an observer wired: unwired=%q observed=%q", bareText, obsText)
 	}
-	bareJSON, err := json.Marshal(bareArm)
+	// Compare semantic outcomes; independently timed tool executions need not
+	// take identical wall-clock time. Preserve the raw measurements above.
+	bareComparable, obsComparable := bareArm, obsArm
+	bareComparable.ToolElapsedMs, obsComparable.ToolElapsedMs = 0, 0
+	bareJSON, err := json.Marshal(bareComparable)
 	if err != nil {
 		t.Fatalf("marshal unwired ArmMetrics: %v", err)
 	}
-	obsJSON, err := json.Marshal(obsArm)
+	obsJSON, err := json.Marshal(obsComparable)
 	if err != nil {
 		t.Fatalf("marshal observed ArmMetrics: %v", err)
 	}
