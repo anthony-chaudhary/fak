@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/pkg/turncost"
 )
 
 // incidentConfig holds the configuration for mid-stream incident packets.
@@ -320,6 +321,9 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	if !ok || !sp.StreamingSupported() {
 		return false
 	}
+	if sessionTurn.turnCost != nil {
+		sessionTurn.turnCost.Streaming = true
+	}
 	sw := newSyncResponseWriter(w)
 	w = sw
 	flusher := sw
@@ -398,7 +402,11 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 			return err
 		}
 		hb.recordEvent(len(contentDelta))
-		return writeSSEData(w, chunk(ChatDelta{Content: contentDelta}, nil, nil))
+		var werr error
+		timePhase(sessionTurn.turnCost, turncost.PhaseStream, func() {
+			werr = writeSSEData(w, chunk(ChatDelta{Content: contentDelta}, nil, nil))
+		})
+		return werr
 	}
 	// The sink streams prose through the lift-guard so a text-form tool-call dialect a
 	// model buries in content never reaches the wire before adjudication. Whatever the
@@ -431,6 +439,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	began := time.Now()
 	comp, err := sp.CompleteStream(ctx, utf8Fragments.write, req.Messages, req.Tools, opts...)
 	stopHB()
+	s.recordBufferedTurnCost(sessionTurn, comp, began)
 	if comp != nil {
 		// CompleteStream may return after the response was committed. The declared
 		// trailer fields make this request-local execution receipt observable on
@@ -578,7 +587,14 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		}
 	}
 	if len(kept) > 0 {
-		if err := writeSSEData(w, chunk(ChatDelta{ToolCalls: streamToolCalls(kept)}, nil, nil)); err != nil {
+		streamErr := func() error {
+			var werr error
+			timePhase(sessionTurn.turnCost, turncost.PhaseStream, func() {
+				werr = writeSSEData(w, chunk(ChatDelta{ToolCalls: streamToolCalls(kept)}, nil, nil))
+			})
+			return werr
+		}()
+		if streamErr != nil {
 			return true
 		}
 	}
@@ -587,7 +603,9 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	if len(adjs) > 0 || len(resultAdmissions) > 0 || inputTriggerRoute != nil {
 		final.Fak = &FakExt{Adjudications: adjs, ResultAdmissions: resultAdmissions, InputTriggerRoute: inputTriggerRoute}
 	}
-	_ = writeSSEData(w, final)
+	timePhase(sessionTurn.turnCost, turncost.PhaseStream, func() {
+		_ = writeSSEData(w, final)
+	})
 	writeSSEDone(w, flusher)
 	return true
 }

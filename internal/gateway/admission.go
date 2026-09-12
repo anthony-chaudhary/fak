@@ -67,6 +67,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/kvbudget"
 	"github.com/anthony-chaudhary/fak/internal/session"
+	"github.com/anthony-chaudhary/fak/pkg/turncost"
 )
 
 // DefaultPreallocCeiling is the per-request ceiling on generation tokens preallocated
@@ -1526,10 +1527,12 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 	var lease *AdmissionLease
 	if c != nil {
 		var err error
-		lease, err = c.Acquire(ctx, SeqRequest{
-			TraceID:  turn.traceID,
-			Priority: turn.state.Priority,
-			Tokens:   estimateServedAdmissionTokens(messages, tools, maxTokens),
+		timePhase(turn.turnCost, turncost.PhaseAdmission, func() {
+			lease, err = c.Acquire(ctx, SeqRequest{
+				TraceID:  turn.traceID,
+				Priority: turn.state.Priority,
+				Tokens:   estimateServedAdmissionTokens(messages, tools, maxTokens),
+			})
 		})
 		if err != nil {
 			return nil, err

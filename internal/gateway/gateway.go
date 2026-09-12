@@ -53,6 +53,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
+	"github.com/anthony-chaudhary/fak/pkg/turncost"
 )
 
 // New builds a Server. It validates that the ABI is wired (a resolver is
@@ -299,6 +300,7 @@ func New(cfg Config) (*Server, error) {
 		toolPages:                    ctxmmu.NewToolPageTable(nil), // nil ⇒ the process-global MMU pager (#2440)
 		metrics:                      newGatewayMetrics(time.Now()),
 		nativeReceiptMetrics:         nativeperf.NewReceiptMetrics(0),
+		turnCost:                     turncost.NewCollector(),
 		otlp:                         otlp,
 		orgAudit:                     orgAudit,
 		route:                        newRouteLive(cfg.RouteManifest),
@@ -1399,7 +1401,9 @@ func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, mes
 		return nil, err
 	}
 	defer lease.Release()
+	plannerBegan := time.Now()
 	comp, err := s.completeWithFirstTokenWatchdog(ctx, turn.traceID, messages, tools, opts...)
+	s.recordBufferedTurnCost(turn, comp, plannerBegan)
 	if err != nil {
 		// Preserve request-local execution metadata on failures. Callers still
 		// receive the original error, while buffered/streaming HTTP paths can

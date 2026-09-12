@@ -43,6 +43,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/internal/sessionledger"
+	"github.com/anthony-chaudhary/fak/pkg/turncost"
 )
 
 const (
@@ -58,6 +59,7 @@ type servedSessionTurn struct {
 	srv         *Server
 	govAdmitted bool
 	govAgentID  string
+	turnCost    *turncost.TurnCostRecord
 }
 
 // beginServedRequest establishes the request context and trace before admitting
@@ -156,7 +158,7 @@ func (s *Server) admitServedRequest(w http.ResponseWriter, r *http.Request, mess
 // shipped run-state admission guard. With neither hook, it is fail-open and leaves the
 // historical request path unchanged.
 func (s *Server) beginServedSessionTurn(ctx context.Context, trace string) (servedSessionTurn, bool, bool) {
-	turn := servedSessionTurn{traceID: trace, srv: s}
+	turn := servedSessionTurn{traceID: trace, srv: s, turnCost: newTurnCostRecord(false)}
 	appendSessionLedger(trace, "turn_begin", nil)
 	if trace == "" {
 		return turn, true, false
@@ -661,7 +663,7 @@ func turnLedgerSummary(req *agent.AnthropicMessagesRequest) []byte {
 }
 
 func (t servedSessionTurn) complete() {
-	appendSessionLedger(t.traceID, "turn_complete", nil)
+	timePhase(t.turnCost, turncost.PhaseLedger, func() { appendSessionLedger(t.traceID, "turn_complete", nil) })
 	if t.govAdmitted && t.srv != nil && t.govAgentID != "" {
 		t.srv.memoryGovernorRelease(t.govAgentID)
 	}

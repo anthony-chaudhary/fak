@@ -17,6 +17,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
+	"github.com/anthony-chaudhary/fak/pkg/turncost"
 )
 
 // maxBody bounds an inbound tool-args / MCP-frame body (defense against an
@@ -584,6 +585,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
+	turnCostBegan := time.Now()
 	if s.checkWarmupPending(w) {
 		return
 	}
@@ -654,6 +656,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !admitted {
 		return
 	}
+	sessionTurn.turnCost = newTurnCostRecord(req.Stream)
+	defer func() {
+		sessionTurn.complete()
+		s.finishTurnCost(sessionTurn, reqTrace, reqModel, turnCostBegan)
+	}()
 	req.Messages = messages
 	resultAdmissions, err := s.admitInboundResults(ctx, req.Messages, req.Tools, reqTrace)
 	if err != nil {
@@ -785,9 +792,12 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// this fix removes.
 	respModel := s.responseModel(comp.Model, reqModel, chatStreamModel(stream), "#5399")
 	s.logInferenceTurn(reqTrace, "openai_chat_completions", req.Stream, comp.Usage, finish, time.Since(began), false)
-	resp := s.buildChatResponse(comp, asst, finish, respModel, adjs, resultAdmissions, inputTriggerRoute, decodeTraceRequested, decodeTokenIDsRequested)
+	stampTurnCost(sessionTurn.turnCost, reqTrace, respModel, turnCostBegan)
+	resp := s.buildChatResponse(comp, asst, finish, respModel, adjs, resultAdmissions, inputTriggerRoute, decodeTraceRequested, decodeTokenIDsRequested, sessionTurn.turnCost)
 	if stream != nil {
-		writeChatCompletionStream(stream, resp)
+		timePhase(sessionTurn.turnCost, turncost.PhaseStream, func() {
+			writeChatCompletionStream(stream, resp)
+		})
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -905,7 +915,7 @@ func extractAffinityKey(r *http.Request, explicit string) string {
 	return ""
 }
 
-func (s *Server) buildChatResponse(comp *agent.Completion, asst agent.Message, finish, respModel string, adjs []ToolAdjudication, resultAdmissions []ResultAdmission, inputTriggerRoute *InputTriggerRouteReceipt, decodeTraceRequested, decodeTokenIDsRequested bool) ChatResponse {
+func (s *Server) buildChatResponse(comp *agent.Completion, asst agent.Message, finish, respModel string, adjs []ToolAdjudication, resultAdmissions []ResultAdmission, inputTriggerRoute *InputTriggerRouteReceipt, decodeTraceRequested, decodeTokenIDsRequested bool, turnCost *turncost.TurnCostRecord) ChatResponse {
 	resp := ChatResponse{
 		ID:      "chatcmpl-fak-" + itoa(uint64(time.Now().UnixNano())),
 		Object:  "chat.completion",
@@ -929,6 +939,11 @@ func (s *Server) buildChatResponse(comp *agent.Completion, asst agent.Message, f
 			resp.Fak = &FakExt{}
 		}
 		resp.Fak.NativeInferenceReceipt = comp.NativeInference
+		// The per-turn cost record rides the native receipt (#924): opt-in, so an
+		// ordinary turn's response bytes are unchanged whether the surface is on or off.
+		if turncost.Enabled() && turnCost != nil {
+			resp.Fak.TurnCost = turnCost
+		}
 	}
 	if decodeTraceRequested {
 		if resp.Fak == nil {

@@ -13,6 +13,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/numfmt"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
 	"github.com/anthony-chaudhary/fak/internal/toolshape"
+	"github.com/anthony-chaudhary/fak/pkg/turncost"
 )
 
 // ---------------------------------------------------------------------------
@@ -633,6 +634,10 @@ type FakExt struct {
 	// DecodeTrace is emitted only for an explicitly requested buffered fak-native
 	// turn. Its schema and engine fields make the provenance self-describing.
 	DecodeTrace *agent.NativeDecodeTrace `json:"decode_trace,omitempty"`
+	// TurnCost is the per-turn cost record (#924), emitted only when the surface is
+	// enabled and a record was collected. Omitted otherwise, so response bytes are
+	// unchanged when disabled.
+	TurnCost *turncost.TurnCostRecord `json:"turn_cost,omitempty"`
 }
 
 // CompactionContract is what a compaction boundary PROMISES the turn that continues past

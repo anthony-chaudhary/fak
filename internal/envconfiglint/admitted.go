@@ -596,4 +596,9 @@ var admittedPostFreeze = []string{
 	// internal/ggufload/loader.go — runtime Go memory limit knob.
 	// Relocates to: loader runtime memory config.
 	"GOMEMLIMIT",
+
+	// pkg/turncost — opt-in additive cost exposure (#924).
+	// Relocates to: serving observability configuration.
+	"FAK_TURN_COST",
+	"FAK_TURN_COST_STREAM",
 }

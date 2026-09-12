@@ -26,6 +26,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/rungobs"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
+	"github.com/anthony-chaudhary/fak/pkg/turncost"
 )
 
 // TraceResetResponse is the wire result of POST /v1/fak/trace/reset.
@@ -1105,6 +1106,8 @@ type Server struct {
 	// nativeReceiptMetrics projects authoritative per-request fak-native receipts
 	// into the shared /metrics surface. It never admits fallback-active receipts.
 	nativeReceiptMetrics *nativeperf.ReceiptMetrics
+
+	turnCost *turncost.Collector
 
 	// versionedConfig bundles the monotonic configuration epoch with the immutable
 	// ScalarConfig snapshot, enabling atomic single-pointer loads without torn reads.

@@ -315,6 +315,7 @@ func (s *Server) renderMetrics() string {
 	if s.nativeReceiptMetrics != nil {
 		b.WriteString(s.nativeReceiptMetrics.Prometheus(time.Now()))
 	}
+	s.writeTurnCostMetrics(&b)
 	m.writeVCacheMetrics(&b)
 	m.writeVCacheWarmthMetrics(&b)
 	m.writeVCacheWarmthDemotionMetrics(&b)
