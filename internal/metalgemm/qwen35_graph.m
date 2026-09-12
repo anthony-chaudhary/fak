@@ -12,7 +12,7 @@ extern void mg_graph_note_encoder(void *graph);
 extern int mg_graph_prompt(void *graph);
 extern int mg_graph_input(void *graph);
 
-static id<MTLComputePipelineState> qgNorm, qgAdd, qgSwiGLU, qgSplit, qgQK, qgAttn, qgLaneSplit, qgLaneQK, qgLaneAttn;
+static id<MTLComputePipelineState> qgNorm, qgAdd, qgSwiGLU, qgSplit, qgQK, qgAttn, qgAttnOnline, qgLaneSplit, qgLaneQK, qgLaneAttn;
 static BOOL qgAttempted, qgReady;
 
 static NSString *qgSource = @R"MSL(
@@ -69,6 +69,24 @@ kernel void qg_attn(device const float*q [[buffer(0)]],device const float*k [[bu
     if(lane<(uint)hd){float z=0;for(int j=0;j<upto;j++)z+=score[j]*v[((long)j*nKV+kh)*hd+lane];long i=((long)t*nH+h)*hd+lane;out[i]=(z/den)/(1.0f+exp(-gate[i]));}
 }
 
+// Long-context ordered attention uses the same register-resident online
+// softmax recurrence as split-KV FlashDecoding. One SIMDgroup owns a query
+// head, so attention state is O(head_dim) rather than O(context).
+kernel void qg_attn_online(device const float*q [[buffer(0)]],device const float*k [[buffer(1)]],device const float*v [[buffer(2)]],device const float*gate [[buffer(3)]],device float*out [[buffer(4)]],
+                           constant int&total [[buffer(5)]],constant int&base [[buffer(6)]],constant int&nH [[buffer(7)]],constant int&nKV [[buffer(8)]],constant int&hd [[buffer(9)]],constant float&scale [[buffer(10)]],
+                           uint2 group [[threadgroup_position_in_grid]],uint lane [[thread_index_in_simdgroup]]){
+    int h=(int)group.x,t=(int)group.y,kh=h/(nH/nKV),upto=min(total,base+t+1);float qr[8],acc[8];
+    for(int i=0;i<8;i++){int d=(int)lane+i*32;qr[i]=d<hd?q[((long)t*nH+h)*hd+d]:0.0f;acc[i]=0.0f;}
+    float m=-INFINITY,den=0.0f;
+    for(int j=0;j<upto;j++){
+        float partial=0.0f;for(int i=0;i<8;i++){int d=(int)lane+i*32;if(d<hd)partial+=qr[i]*k[((long)j*nKV+kh)*hd+d];}
+        float score=simd_sum(partial)*scale,newm=max(m,score),alpha=isfinite(m)?exp(m-newm):0.0f,p=exp(score-newm);
+        den=den*alpha+p;m=newm;
+        for(int i=0;i<8;i++){int d=(int)lane+i*32;if(d<hd)acc[i]=acc[i]*alpha+p*v[((long)j*nKV+kh)*hd+d];}
+    }
+    for(int i=0;i<8;i++){int d=(int)lane+i*32;if(d<hd){long ix=((long)t*nH+h)*hd+d;out[ix]=(acc[i]/den)/(1.0f+exp(-gate[ix]));}}
+}
+
 
 kernel void qg_lane_split(device const float*src [[buffer(0)]],device float*q [[buffer(1)]],device float*gate [[buffer(2)]],constant int&batch [[buffer(3)]],constant int&qwidth [[buffer(4)]],constant int&hd [[buffer(5)]],uint i [[thread_position_in_grid]]){if(i<(uint)(batch*qwidth)){int r=(int)i/qwidth,j=(int)i-r*qwidth,h=j/hd,d=j-h*hd;long base=(long)r*2*qwidth+(long)h*2*hd;q[i]=src[base+d];gate[i]=src[base+hd+d];}}
 
@@ -111,14 +129,15 @@ static int qg_init(void) {
         id<MTLComputePipelineState> split=qg_pipeline(library,@"qg_split",&error);
         id<MTLComputePipelineState> qk=qg_pipeline(library,@"qg_qk",&error);
         id<MTLComputePipelineState> attn=qg_pipeline(library,@"qg_attn",&error);
+        id<MTLComputePipelineState> attnOnline=qg_pipeline(library,@"qg_attn_online",&error);
         id<MTLComputePipelineState> laneSplit=qg_pipeline(library,@"qg_lane_split",&error);
         id<MTLComputePipelineState> laneQK=qg_pipeline(library,@"qg_lane_qk",&error);
         id<MTLComputePipelineState> laneAttn=qg_pipeline(library,@"qg_lane_attn",&error);
-        if(!norm||!add||!swiglu||!split||!qk||!attn||!laneSplit||!laneQK||!laneAttn){
+        if(!norm||!add||!swiglu||!split||!qk||!attn||!attnOnline||!laneSplit||!laneQK||!laneAttn){
             NSLog(@"qwen35 graph pipeline initialization failed: %@",error);
             return 0;
         }
-        qgNorm=norm;qgAdd=add;qgSwiGLU=swiglu;qgSplit=split;qgQK=qk;qgAttn=attn;
+        qgNorm=norm;qgAdd=add;qgSwiGLU=swiglu;qgSplit=split;qgQK=qk;qgAttn=attn;qgAttnOnline=attnOnline;
         qgLaneSplit=laneSplit;qgLaneQK=laneQK;qgLaneAttn=laneAttn;
         qgReady=YES;
         return 1;
@@ -128,7 +147,7 @@ static int qg_init(void) {
 int mg_qwen35_graph_ready(void){return qg_init();}
 static id<MTLBuffer> qg_host(const float*p,int n){return[gDev newBufferWithBytes:p length:(NSUInteger)n*sizeof(float) options:MTLResourceStorageModeShared];}
 static void qg_dispatch(id<MTLComputeCommandEncoder>e,id<MTLComputePipelineState>p,int n){int t=(int)p.maxTotalThreadsPerThreadgroup;if(t>n)t=n;if(t<1)t=1;[e dispatchThreads:MTLSizeMake((NSUInteger)n,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)t,1,1)];}
-static int qg_ordered_rows(void*g){int rows=mg_graph_prompt(g);return rows==2||rows==3||rows==4||rows==32?rows:0;}
+static int qg_ordered_rows(void*g){int rows=mg_graph_prompt(g);return rows==1||rows==2||rows==3||rows==4||rows==32?rows:0;}
 
 void *mg_qwen35_graph_norm(void*g,void*input,const float*w,int rows,int width,float eps,int gain1p,int lastOnly){if(!qg_init()||!g||!input||!w||rows<=0||width<=0||eps<=0||(lastOnly&&!qg_ordered_rows(g))||mg_graph_prompt(g)!=rows)return NULL;id<MTLCommandBuffer>cb=(__bridge id<MTLCommandBuffer>)mg_graph_command_buffer(g);id<MTLBuffer>x=(__bridge id<MTLBuffer>)input,wb=qg_host(w,width),y=(__bridge id<MTLBuffer>)mg_graph_alloc_result(g,lastOnly?width:rows*width);if(!cb||!x||!wb||!y)return NULL;id<MTLComputeCommandEncoder>e=[cb computeCommandEncoder];[e setComputePipelineState:qgNorm];[e setBuffer:x offset:0 atIndex:0];[e setBuffer:wb offset:0 atIndex:1];[e setBuffer:y offset:0 atIndex:2];[e setBytes:&width length:4 atIndex:3];[e setBytes:&eps length:4 atIndex:4];[e setBytes:&gain1p length:4 atIndex:5];int row=lastOnly?rows-1:-1;[e setBytes:&row length:4 atIndex:6];[e dispatchThreadgroups:MTLSizeMake(lastOnly?1:rows,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];[e endEncoding];return(__bridge void*)y;}
 int mg_qwen35_graph_add(void*g,void*xp,void*yp,int n){if(!qg_init()||!g||!xp||!yp||n<=0)return 0;id<MTLCommandBuffer>cb=(__bridge id<MTLCommandBuffer>)mg_graph_command_buffer(g);id<MTLComputeCommandEncoder>e=[cb computeCommandEncoder];[e setComputePipelineState:qgAdd];[e setBuffer:(__bridge id<MTLBuffer>)xp offset:0 atIndex:0];[e setBuffer:(__bridge id<MTLBuffer>)yp offset:0 atIndex:1];[e setBytes:&n length:4 atIndex:2];qg_dispatch(e,qgAdd,n);[e endEncoding];mg_graph_note_encoder(g);return 1;}
@@ -136,12 +155,12 @@ int mg_qwen35_graph_swiglu(void*g,void*gp,void*up,int n){if(!qg_init()||!g||!gp|
 int mg_qwen35_graph_split(void*g,void*srcp,int qwidth,int hd,void**qout,void**gateout){int rows=qg_ordered_rows(g);if(!qg_init()||!g||!srcp||!rows||qwidth<=0||hd<=0||!qout||!gateout)return 0;id<MTLBuffer>q=(__bridge id<MTLBuffer>)mg_graph_alloc_result(g,rows*qwidth),gate=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,rows*qwidth);if(!q||!gate)return 0;id<MTLCommandBuffer>cb=(__bridge id<MTLCommandBuffer>)mg_graph_command_buffer(g);id<MTLComputeCommandEncoder>e=[cb computeCommandEncoder];[e setComputePipelineState:qgSplit];[e setBuffer:(__bridge id<MTLBuffer>)srcp offset:0 atIndex:0];[e setBuffer:q offset:0 atIndex:1];[e setBuffer:gate offset:0 atIndex:2];[e setBytes:&qwidth length:4 atIndex:3];[e setBytes:&hd length:4 atIndex:4];[e setBytes:&rows length:4 atIndex:5];qg_dispatch(e,qgSplit,rows*qwidth);[e endEncoding];*qout=(__bridge void*)q;*gateout=(__bridge void*)gate;return 1;}
 
 int mg_qwen35_graph_attention(void*g,void*qp,void*kp,void*vp,void*gatep,const float*qw,const float*kw,const float*cosv,const float*sinv,const float*prefixK,const float*prefixV,int base,int nH,int nKV,int hd,int rotary,float scale,float qkEps,int gain1p,int qknorm,int qnw,int knw,void**outp,void**krawp,void**kpostp,void**vcurp){
-    int rows=qg_ordered_rows(g);if(!qg_init()||!g||!rows||!qp||!kp||!vp||!gatep||!qw||!kw||!cosv||!sinv||base<0||base+rows>4096||nH<1||nKV<1||hd<2||hd>256||(qnw!=hd&&qnw!=nH*hd)||(knw!=hd&&knw!=nKV*hd)||rotary<2||rotary>hd||rotary%2||qkEps<=0||!outp||!krawp||!kpostp||!vcurp)return 0;int qn=rows*nH*hd,kn=rows*nKV*hd,total=base+rows;
+    int rows=qg_ordered_rows(g);if(!qg_init()||!g||!rows||!qp||!kp||!vp||!gatep||!qw||!kw||!cosv||!sinv||base<0||base>INT_MAX-rows||nH<1||nKV<1||nH%nKV||hd<2||hd>256||nH>INT_MAX/hd||nKV>INT_MAX/hd||rotary<2||rotary>hd||rotary%2||!isfinite(scale)||scale<=0||!isfinite(qkEps)||qkEps<=0||!outp||!krawp||!kpostp||!vcurp)return 0;int qwidth=nH*hd,kvwidth=nKV*hd,total=base+rows;if((qnw!=hd&&qnw!=qwidth)||(knw!=hd&&knw!=kvwidth)||rows>INT_MAX/qwidth||rows>INT_MAX/kvwidth||total>INT_MAX/kvwidth||(NSUInteger)total*(NSUInteger)kvwidth>NSUIntegerMax/sizeof(float))return 0;int qn=rows*qwidth,kn=rows*kvwidth;
     id<MTLBuffer>qo=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,qn),kr=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,kn),kpo=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,kn),out=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,qn);id<MTLBuffer>qa=qg_host(qw,qnw),ka=qg_host(kw,knw);if(!qo||!kr||!kpo||!out||!qa||!ka)return 0;
     id<MTLBuffer>cbv=qg_host(cosv,rows*(rotary/2)),sbv=qg_host(sinv,rows*(rotary/2));if(!cbv||!sbv)return 0;id<MTLCommandBuffer>cb=(__bridge id<MTLCommandBuffer>)mg_graph_command_buffer(g);id<MTLComputeCommandEncoder>e=[cb computeCommandEncoder];[e setComputePipelineState:qgQK];[e setBuffer:(__bridge id<MTLBuffer>)qp offset:0 atIndex:0];[e setBuffer:(__bridge id<MTLBuffer>)kp offset:0 atIndex:1];[e setBuffer:qa offset:0 atIndex:2];[e setBuffer:ka offset:0 atIndex:3];[e setBuffer:qo offset:0 atIndex:4];[e setBuffer:kr offset:0 atIndex:5];[e setBuffer:kpo offset:0 atIndex:6];[e setBytes:&nH length:4 atIndex:7];[e setBytes:&nKV length:4 atIndex:8];[e setBytes:&hd length:4 atIndex:9];[e setBytes:&rotary length:4 atIndex:10];[e setBytes:&base length:4 atIndex:11];[e setBuffer:cbv offset:0 atIndex:12];[e setBuffer:sbv offset:0 atIndex:13];[e setBytes:&qkEps length:4 atIndex:14];[e setBytes:&gain1p length:4 atIndex:15];[e setBytes:&qknorm length:4 atIndex:16];[e setBytes:&qnw length:4 atIndex:17];[e setBytes:&knw length:4 atIndex:18];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)MAX(nH,nKV),rows,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];[e endEncoding];mg_graph_note_encoder(g);
     int prefixElems=base*nKV*hd;id<MTLBuffer>kall=[gDev newBufferWithLength:(NSUInteger)total*nKV*hd*sizeof(float) options:MTLResourceStorageModeShared],vall=[gDev newBufferWithLength:(NSUInteger)total*nKV*hd*sizeof(float) options:MTLResourceStorageModeShared];if(!kall||!vall)return 0;if(prefixElems){if(!prefixK||!prefixV)return 0;memcpy(kall.contents,prefixK,(size_t)prefixElems*sizeof(float));memcpy(vall.contents,prefixV,(size_t)prefixElems*sizeof(float));}
     id<MTLBlitCommandEncoder>b=[cb blitCommandEncoder];[b copyFromBuffer:kpo sourceOffset:0 toBuffer:kall destinationOffset:(NSUInteger)prefixElems*sizeof(float) size:(NSUInteger)kn*sizeof(float)];[b copyFromBuffer:(__bridge id<MTLBuffer>)vp sourceOffset:0 toBuffer:vall destinationOffset:(NSUInteger)prefixElems*sizeof(float) size:(NSUInteger)kn*sizeof(float)];[b endEncoding];mg_graph_note_encoder(g);
-    e=[cb computeCommandEncoder];[e setComputePipelineState:qgAttn];[e setBuffer:qo offset:0 atIndex:0];[e setBuffer:kall offset:0 atIndex:1];[e setBuffer:vall offset:0 atIndex:2];[e setBuffer:(__bridge id<MTLBuffer>)gatep offset:0 atIndex:3];[e setBuffer:out offset:0 atIndex:4];[e setBytes:&total length:4 atIndex:5];[e setBytes:&base length:4 atIndex:6];[e setBytes:&nH length:4 atIndex:7];[e setBytes:&nKV length:4 atIndex:8];[e setBytes:&hd length:4 atIndex:9];[e setBytes:&scale length:4 atIndex:10];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)nH,rows,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];[e endEncoding];mg_graph_note_encoder(g);
+    id<MTLComputePipelineState>attn=total<=4096?qgAttn:qgAttnOnline;e=[cb computeCommandEncoder];[e setComputePipelineState:attn];[e setBuffer:qo offset:0 atIndex:0];[e setBuffer:kall offset:0 atIndex:1];[e setBuffer:vall offset:0 atIndex:2];[e setBuffer:(__bridge id<MTLBuffer>)gatep offset:0 atIndex:3];[e setBuffer:out offset:0 atIndex:4];[e setBytes:&total length:4 atIndex:5];[e setBytes:&base length:4 atIndex:6];[e setBytes:&nH length:4 atIndex:7];[e setBytes:&nKV length:4 atIndex:8];[e setBytes:&hd length:4 atIndex:9];[e setBytes:&scale length:4 atIndex:10];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)nH,rows,1) threadsPerThreadgroup:MTLSizeMake(total<=4096?256:32,1,1)];[e endEncoding];mg_graph_note_encoder(g);
     *outp=(__bridge void*)out;*krawp=(__bridge void*)kr;*kpostp=(__bridge void*)kpo;*vcurp=vp;return 1;
 }
 

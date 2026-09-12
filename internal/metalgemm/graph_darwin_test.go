@@ -360,7 +360,7 @@ func TestProjectionGraphQwenOrderedPanelAttentionAndFinalNorm(t *testing.T) {
 		}
 	}
 
-	for _, rows := range []int{2, 3, 4, 32} {
+	for _, rows := range []int{1, 2, 3, 4, 32} {
 		t.Run(fmt.Sprintf("P%d", rows), func(t *testing.T) {
 			x := q4kTestVector(rows*input, int64(1223820+rows))
 			qgateHost := panelReference(qgateRaw, 2*qwidth, x, rows)
@@ -446,6 +446,128 @@ func TestProjectionGraphQwenOrderedPanelAttentionAndFinalNorm(t *testing.T) {
 			assertClose(t, "V", vHost, outputs[5])
 			assertClose(t, "all-row norm", normWant, outputs[6])
 			assertClose(t, "last-row norm", normWant[(rows-1)*qwidth:], outputs[7])
+		})
+	}
+}
+
+func TestProjectionGraphQwenOrderedLongContextAttention(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	defer ResetQ4K()
+	for _, tc := range []struct {
+		rows, hd, rotary, base int
+	}{{1, 256, 64, 4_095}, {1, 256, 64, 20_000}, {32, 32, 16, 20_000}} {
+		t.Run(fmt.Sprintf("P%d/hd%d/base%d", tc.rows, tc.hd, tc.base), func(t *testing.T) {
+			const input, nH, nKV = 256, 2, 1
+			rows, hd, rotary := tc.rows, tc.hd, tc.rotary
+			base := tc.base
+			qwidth, kvwidth := nH*hd, nKV*hd
+			qgateWeight := UploadQ4K(q4kTestRaw(2*qwidth, input, uint64(1157801+hd)), 2*qwidth, input)
+			kWeight := UploadQ4K(q4kTestRaw(kvwidth, input, uint64(1157802+hd)), kvwidth, input)
+			vWeight := UploadQ4K(q4kTestRaw(kvwidth, input, uint64(1157803+hd)), kvwidth, input)
+			if qgateWeight == nil || kWeight == nil || vWeight == nil {
+				t.Fatal("long-context Q4_K upload")
+			}
+			qnorm, knorm := make([]float32, hd), make([]float32, hd)
+			for i := range qnorm {
+				qnorm[i] = 0.85 + float32(i%7)*0.05
+				knorm[i] = 0.9 + float32(i%5)*0.04
+			}
+			prefixK, prefixV := make([]float32, base*kvwidth), make([]float32, base*kvwidth)
+			for token := 0; token < base; token++ {
+				// Rising magnitude and alternating phases force repeated online-max
+				// rescaling instead of reducing to a nearly uniform softmax.
+				amplitude := 0.2 + float32(token%257)*0.01
+				for dim := 0; dim < kvwidth; dim++ {
+					sign := float32(1)
+					if (token/257+dim/3)%2 != 0 {
+						sign = -1
+					}
+					prefixK[token*kvwidth+dim] = sign * amplitude * (0.5 + float32(dim%11)*0.07)
+					prefixV[token*kvwidth+dim] = float32((token*7+dim*13)%61-30) * 0.013
+				}
+			}
+			scale, qkEps := float32(1/math.Sqrt(float64(hd))), float32(1e-6)
+			x := q4kTestVector(rows*input, int64(1157810+rows))
+			cosv, sinv := make([]float32, rows*(rotary/2)), make([]float32, rows*(rotary/2))
+			for row := 0; row < rows; row++ {
+				for dim := 0; dim < rotary/2; dim++ {
+					angle := float64((base+row+1)*(dim+1)) * 0.0003
+					cosv[row*(rotary/2)+dim], sinv[row*(rotary/2)+dim] = float32(math.Cos(angle)), float32(math.Sin(angle))
+				}
+			}
+			g, err := BeginProjectionGraph(x, nil, nil, rows, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer g.Free()
+			qgate, err := g.EncodeQ4K(qgateWeight)
+			if err != nil {
+				t.Fatal(err)
+			}
+			k, err := g.EncodeQ4K(kWeight)
+			if err != nil {
+				t.Fatal(err)
+			}
+			v, err := g.EncodeQ4K(vWeight)
+			if err != nil {
+				t.Fatal(err)
+			}
+			q, gate, err := g.SplitGatedQ(qgate, qwidth, hd)
+			if err != nil {
+				t.Fatal(err)
+			}
+			attention, err := g.FullAttention(q, k, v, gate, qnorm, knorm, cosv, sinv, prefixK, prefixV, base, nH, nKV, hd, rotary, scale, qkEps, false, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			outputs, receipt, err := g.FinishRead(q, gate, k, v, attention.Output, attention.KRaw, attention.KPost)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !receipt.Committed || !receipt.CompletedWait || receipt.IntermediateWaits != 0 || receipt.IntermediateReadbacks != 0 || receipt.HostReadbacks != 1 {
+				t.Fatalf("long-context terminal receipt=%+v", receipt)
+			}
+			// Release the Metal K/V copies before the float64 oracle duplicates
+			// the prefix, keeping this physical microdose below 100 MB.
+			g.Free()
+			want, wantKRaw, wantKPost := qwenOrderedAttentionCPU(outputs[0], outputs[2], outputs[3], outputs[1], qnorm, knorm, cosv, sinv, prefixK, prefixV, rows, base, nH, nKV, hd, rotary, scale, qkEps, false)
+			assertClose := func(name string, got, want []float32) {
+				t.Helper()
+				var maxAbs, sumSquared, maxMagnitude, maxToleranceRatio float64
+				maxIndex, overTolerance := -1, 0
+				for i := range want {
+					if math.IsNaN(float64(got[i])) || math.IsInf(float64(got[i]), 0) {
+						t.Fatalf("%s[%d] is non-finite: %g", name, i, got[i])
+					}
+					delta := math.Abs(float64(got[i] - want[i]))
+					sumSquared += delta * delta
+					maxMagnitude = math.Max(maxMagnitude, math.Abs(float64(want[i])))
+					if delta > maxAbs {
+						maxAbs, maxIndex = delta, i
+					}
+					allowed := 8e-4 + 1e-5*math.Abs(float64(want[i]))
+					maxToleranceRatio = math.Max(maxToleranceRatio, delta/allowed)
+					if delta > allowed {
+						overTolerance++
+					}
+				}
+				cosine, _ := q4kTestCosineMaxRel(want, got)
+				if maxIndex >= 0 {
+					t.Logf("%s cosine=%g maxAbs=%g maxIndex=%d got=%g want=%g rmse=%g maxMagnitude=%g maxToleranceRatio=%g", name, cosine, maxAbs, maxIndex, got[maxIndex], want[maxIndex], math.Sqrt(sumSquared/float64(len(want))), maxMagnitude, maxToleranceRatio)
+				}
+				// The GPU recurrence accumulates in float while the independent
+				// oracle uses float64 over 20k logits. The 1e-5 relative term is
+				// over 100x tighter than the conservative float32 gamma(20k)
+				// accumulation bound; the absolute floor covers values near zero.
+				if cosine < 0.99999 || overTolerance != 0 {
+					t.Fatalf("%s cosine=%g maxAbs=%g maxToleranceRatio=%g overTolerance=%d/%d", name, cosine, maxAbs, maxToleranceRatio, overTolerance, len(want))
+				}
+			}
+			assertClose("attention", outputs[4], want)
+			assertClose("K raw", outputs[5], wantKRaw)
+			assertClose("K post", outputs[6], wantKPost)
 		})
 	}
 }
