@@ -445,6 +445,9 @@ func LoadEXL2(dir string) (*EXL2Model, error) {
 	if err := readJSON(cfgPath, &cfg); err != nil {
 		return nil, fmt.Errorf("exl2 load config: %w", err)
 	}
+	if err := refuseDeepSeekV41Native(cfg); err != nil {
+		return nil, err
+	}
 	stPath := filepath.Join(dir, "model.safetensors")
 	if _, err := os.Stat(stPath); err != nil {
 		return nil, fmt.Errorf("exl2 load: no model.safetensors in %s", dir)
@@ -458,6 +461,9 @@ func LoadEXL2(dir string) (*EXL2Model, error) {
 }
 
 func loadEXL2Safetensors(sf *safetensorsFile, cfg Config) (*EXL2Model, error) {
+	if err := refuseDeepSeekV41Native(cfg); err != nil {
+		return nil, err
+	}
 	exl2w := make(map[string]*exl2Tensor)
 	for name := range sf.hdr {
 		if name == "__metadata__" || !strings.HasSuffix(name, ".q_weight") {

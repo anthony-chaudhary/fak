@@ -192,6 +192,9 @@ func LoadAWQ(dir string) (*Model, error) {
 	if err := readJSON(cfgPath, &cfg); err != nil {
 		return nil, fmt.Errorf("awq load config: %w", err)
 	}
+	if err := refuseDeepSeekV41Native(cfg); err != nil {
+		return nil, err
+	}
 
 	// Try safetensors first, then pytorch bin
 	stPath := filepath.Join(dir, "model.safetensors")
@@ -213,6 +216,9 @@ func LoadAWQ(dir string) (*Model, error) {
 // checkpoints ship) is routed to the group-wise asymmetric loader; the legacy
 // "<name>_scale" symmetric stub is handled below for back-compat.
 func loadAWQSafetensors(path string, cfg Config) (*Model, error) {
+	if err := refuseDeepSeekV41Native(cfg); err != nil {
+		return nil, err
+	}
 	sf, err := openSafetensorsFile(path)
 	if err != nil {
 		return nil, err
@@ -321,6 +327,9 @@ func loadAWQSafetensors(path string, cfg Config) (*Model, error) {
 // fixture (absent here); the on-host witness is the pack/unpack round-trip plus the
 // FP32 cos>=0.995 oracle.
 func loadAWQGroupSafetensors(sf *safetensorsFile, cfg Config) (*Model, error) {
+	if err := refuseDeepSeekV41Native(cfg); err != nil {
+		return nil, err
+	}
 	awqg := make(map[string]*awqGroupTensor)
 
 	for name := range sf.hdr {
@@ -449,6 +458,9 @@ func bytesToU32LE(b []byte) []uint32 {
 // loadAWQPytorchBin loads AWQ weights from a pytorch_model.bin file.
 // This is a simplified loader for AutoAWK exports that use pytorch bin format.
 func loadAWQPytorchBin(path string, cfg Config) (*Model, error) {
+	if err := refuseDeepSeekV41Native(cfg); err != nil {
+		return nil, err
+	}
 	// Pytorch bin format loader would go here
 	// For now, redirect to safetensors with a helpful error
 	return nil, fmt.Errorf("awq load: pytorch_model.bin format not yet supported, please use safetensors export")
