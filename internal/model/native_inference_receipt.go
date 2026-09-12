@@ -7,6 +7,10 @@ package model
 type NativeInferenceReceipt struct {
 	TokenIDs              []int                   `json:"token_ids"`
 	TokenLogprobs         []float64               `json:"token_logprobs"`
+	PromptTokenIDs        []int                   `json:"prompt_token_ids,omitempty"`
+	TokenizerID           string                  `json:"tokenizer_id,omitempty"`
+	RendererID            string                  `json:"renderer_id,omitempty"`
+	RenderedSHA256        string                  `json:"rendered_sha256,omitempty"`
 	PrefillSeconds        float64                 `json:"prefill_seconds"`
 	TTFTSeconds           float64                 `json:"ttft_seconds"`
 	DecodeSeconds         float64                 `json:"decode_seconds"`

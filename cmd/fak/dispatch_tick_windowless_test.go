@@ -301,7 +301,9 @@ func TestDispatchWorkerLaunchAllocatesNoConsolePane(t *testing.T) {
 // lifecycle witness. The root crosses the real dispatch spawn seam with backend=codex,
 // then starts console-subsystem children named for the three process families observed
 // on the desktop. Every process reports its actual console attachment and window handle;
-// the job-backed hidden tree must stay invisible and leave no process or console host.
+// the hidden tree must stay invisible and leave no process or console host after
+// cooperative release. Dispatch does not own a kill-on-close job: the worker must
+// outlive its launcher (#9064); managed guard jobs witness forced cleanup separately.
 func TestDispatchCodexWorkerDescendantsStayOffDesktop(t *testing.T) {
 	switch os.Getenv(dispatchCodexConsoleRoleEnv) {
 	case "root":
@@ -475,7 +477,7 @@ func runDispatchCodexConsoleRoot(t *testing.T) {
 		childEnv := envMap(os.Environ())
 		childEnv[dispatchCodexConsoleRoleEnv] = "child"
 		childEnv[dispatchCodexConsoleLabelEnv] = label
-		delete(childEnv, dispatchWindowlessReleaseEnv)
+		// Dispatch owns no descendant job; release each helper cooperatively (#9064).
 		cmd := exec.Command(path, "-test.run=^TestDispatchCodexWorkerDescendantsStayOffDesktop$")
 		cmd.Env = envSliceFromMap(childEnv)
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr

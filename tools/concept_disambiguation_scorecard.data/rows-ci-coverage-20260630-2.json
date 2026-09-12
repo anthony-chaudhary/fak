@@ -51,7 +51,8 @@
    "distinction": "renderers the collection of pluggable render functions, not any single one; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
    "distinct_from": [
      "x2-render-materialize-renderer",
-     "rendered-ctxplan"
+     "rendered-ctxplan",
+     "render-materialize-renderer-id-native-prompt"
    ],
    "aliases": [],
    "grounding": "renderers",

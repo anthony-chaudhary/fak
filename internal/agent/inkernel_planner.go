@@ -16,6 +16,8 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -2230,7 +2232,13 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		VulkanMTP:     genRes.vulkanMTP,
 	}
 	if sp.NativeInferenceReceipt {
-		comp.NativeInference = p.buildNativeInferenceReceipt(measurement, prefillS, decodeS)
+		receipt := p.buildNativeInferenceReceipt(measurement, prefillS, decodeS)
+		renderedSum := sha256.Sum256([]byte(prepared.rendered))
+		receipt.PromptTokenIDs = append([]int(nil), prepared.ids...)
+		receipt.TokenizerID = p.tok.Identity()
+		receipt.RendererID = inKernelPromptRendererID(p.m.Cfg, sp)
+		receipt.RenderedSHA256 = hex.EncodeToString(renderedSum[:])
+		comp.NativeInference = receipt
 	}
 	if genRes.batchReceipt.CohortID != 0 {
 		receipt := genRes.batchReceipt

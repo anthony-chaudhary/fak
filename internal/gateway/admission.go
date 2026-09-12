@@ -74,7 +74,7 @@ import (
 // at admission (anti-hog preallocation cap, #5268; field-borrow from TGI v3).
 // A request with max_tokens above this ceiling preallocates up to this ceiling at
 // admission, top-up re-admitting in chunks via Grow as it generates.
-const DefaultPreallocCeiling = 1024
+const DefaultPreallocCeiling = 2048
 
 // AdmissionPolicy holds the admission knobs. Each cap is disabled by a non-positive value
 // (so a test can isolate a single axis); DefaultAdmissionPolicy fills shipping defaults.
@@ -110,7 +110,7 @@ type AdmissionPolicy struct {
 // DefaultAdmissionPolicy returns the shipping defaults: a 256-sequence running cap (the
 // vLLM V1 default), an 8192-token batched-admission budget, a 1024-deep waiting bound
 // before shedding, a 65536-token queued volume cap, aging every round so no waiter
-// is ever starved, and a 1024-token generation preallocation ceiling (#5268).
+// is ever starved, and a 2048-token generation preallocation ceiling (#5268).
 func DefaultAdmissionPolicy() AdmissionPolicy {
 	return AdmissionPolicy{
 		MaxNumSeqs:            256,
@@ -1524,6 +1524,7 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 	if c == nil && g == nil && b == nil {
 		return nil, nil
 	}
+	preallocCeiling := c.preallocCeiling()
 	var lease *AdmissionLease
 	if c != nil {
 		var err error
@@ -1531,14 +1532,14 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 			lease, err = c.Acquire(ctx, SeqRequest{
 				TraceID:  turn.traceID,
 				Priority: turn.state.Priority,
-				Tokens:   estimateServedAdmissionTokens(messages, tools, maxTokens),
+				Tokens:   estimateServedAdmissionTokensWithCap(messages, tools, maxTokens, preallocCeiling),
 			})
 		})
 		if err != nil {
 			return nil, err
 		}
 	}
-	estimate := estimateServedTokenUsage(messages, tools, maxTokens)
+	estimate := estimateServedTokenUsageWithCap(messages, tools, maxTokens, preallocCeiling)
 	var res *TokenReservation
 	if b != nil {
 		var err error
