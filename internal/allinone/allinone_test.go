@@ -2,6 +2,7 @@ package allinone
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -15,6 +16,149 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/fakpack"
 )
 
+// lifecycleWeatherServerID is the lock component id served by the real
+// helper-subprocess child in the mock-free lifecycle test.
+const (
+	lifecycleWeatherServerID  = "weather-service"
+	lifecycleWeatherHelperVar = "FAK_LIFECYCLE_WEATHER_HELPER"
+	lifecycleWeatherServerVar = "FAK_LIFECYCLE_WEATHER_SERVER"
+)
+
+func init() {
+	if os.Getenv(lifecycleWeatherHelperVar) == "1" && os.Getenv(lifecycleWeatherServerVar) == lifecycleWeatherServerID {
+		runLifecycleWeatherHelper()
+		os.Exit(0)
+	}
+}
+
+// TestLifecycleWeatherHelper is the helper subprocess entrypoint for the
+// mock-free lifecycle test, mirroring the proven contractEnvHelper pattern:
+// the lock component launches this test binary (os.Executable with a
+// -test.run adapter) and ComponentEnv activates the helper gate. In the
+// parent test process it always skips.
+func TestLifecycleWeatherHelper(t *testing.T) {
+	if os.Getenv(lifecycleWeatherHelperVar) != "1" || os.Getenv(lifecycleWeatherServerVar) != lifecycleWeatherServerID {
+		t.Skip("helper process only")
+		return
+	}
+	runLifecycleWeatherHelper()
+	os.Exit(0)
+}
+
+// runLifecycleWeatherHelper serves deterministic test data over MCP stdio.
+// tools/list advertises get_forecast and get_alerts; tools/call returns stub payloads.
+func runLifecycleWeatherHelper() {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			trimmed := bytes.TrimSpace(line)
+			if len(trimmed) > 0 {
+				var req struct {
+					JSONRPC string          `json:"jsonrpc"`
+					ID      json.RawMessage `json:"id"`
+					Method  string          `json:"method"`
+					Params  json.RawMessage `json:"params"`
+				}
+				if jsonErr := json.Unmarshal(trimmed, &req); jsonErr == nil {
+					switch req.Method {
+					case "initialize":
+						resp := map[string]any{
+							"jsonrpc": "2.0",
+							"id":      req.ID,
+							"result": map[string]any{
+								"protocolVersion": "2024-11-05",
+								"capabilities":    map[string]any{"tools": map[string]any{}},
+								"serverInfo":      map[string]any{"name": lifecycleWeatherServerID, "version": "1.0.0"},
+							},
+						}
+						data, _ := json.Marshal(resp)
+						_, _ = os.Stdout.Write(append(data, '\n'))
+
+					case "notifications/initialized":
+
+					case "tools/list":
+						resp := map[string]any{
+							"jsonrpc": "2.0",
+							"id":      req.ID,
+							"result": map[string]any{
+								"tools": []map[string]any{
+									{
+										"name":        "get_forecast",
+										"description": "Returns a stub weather forecast from the helper subprocess",
+										"inputSchema": map[string]any{"type": "object"},
+									},
+									{
+										"name":        "get_alerts",
+										"description": "Returns stub weather alerts from the helper subprocess",
+										"inputSchema": map[string]any{"type": "object"},
+									},
+								},
+							},
+						}
+						data, _ := json.Marshal(resp)
+						_, _ = os.Stdout.Write(append(data, '\n'))
+
+					case "tools/call":
+						var params struct {
+							Name      string          `json:"name"`
+							Arguments json.RawMessage `json:"arguments"`
+						}
+						_ = json.Unmarshal(req.Params, &params)
+						city := ""
+						if len(params.Arguments) > 0 {
+							var argsMap map[string]any
+							if argErr := json.Unmarshal(params.Arguments, &argsMap); argErr == nil {
+								if c, ok := argsMap["city"].(string); ok && c != "" {
+									city = c
+								} else if g, ok := argsMap["goal"].(string); ok && g != "" {
+									city = g
+								}
+							}
+						}
+						if city == "" {
+							city = "Seattle"
+						}
+						var text string
+						if strings.Contains(strings.ToLower(params.Name), "alert") {
+							text = "WEATHER_ALERTS:none:city=" + city + ":source=helper-subprocess"
+						} else {
+							text = "WEATHER_FORECAST:sunny-72F:city=" + city + ":source=helper-subprocess"
+						}
+						resp := map[string]any{
+							"jsonrpc": "2.0",
+							"id":      req.ID,
+							"result": map[string]any{
+								"content": []map[string]any{
+									{
+										"type": "text",
+										"text": text,
+									},
+								},
+								"isError": false,
+							},
+						}
+						data, _ := json.Marshal(resp)
+						_, _ = os.Stdout.Write(append(data, '\n'))
+
+					case "ping":
+						resp := map[string]any{
+							"jsonrpc": "2.0",
+							"id":      req.ID,
+							"result":  map[string]any{},
+						}
+						data, _ := json.Marshal(resp)
+						_, _ = os.Stdout.Write(append(data, '\n'))
+					}
+				}
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
 func TestUpBootstrap(t *testing.T) {
 	TestAllInOneBootstrapLifecycle(t)
 }
@@ -23,6 +167,10 @@ func TestAllInOneBootstrapLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	journalFile := filepath.Join(dir, "memory-journal.jsonl")
 	lockFile := filepath.Join(dir, "harness.lock.json")
+	exe, err := os.Executable()
+	if err != nil {
+		exe = os.Args[0]
+	}
 
 	lockContent := `{
   "schema": "fak.harness-product-lock/v2",
@@ -42,9 +190,10 @@ func TestAllInOneBootstrapLifecycle(t *testing.T) {
       "id": "weather-service",
       "version": "1.0.0",
       "digest": "sha256:1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff",
-      "source": "mcp/weather",
+      "source": ` + jsonQuote(exe) + `,
       "provider": "mcp",
-      "provides": ["get_forecast", "get_alerts"]
+      "provides": ["get_forecast", "get_alerts"],
+      "adapters": ["-test.run=TestLifecycleWeatherHelper"]
     }
   ],
   "assets": [
@@ -60,10 +209,13 @@ func TestAllInOneBootstrapLifecycle(t *testing.T) {
 	}
 
 	cfg := Config{
-		LockPath: lockFile,
-		Addr:     "127.0.0.1:0",
-		Engine:   "mock",
-		Mock:     true,
+		LockPath:     lockFile,
+		Addr:         "127.0.0.1:0",
+		EngineDriver: contractStubEngine{},
+		ComponentEnv: []string{
+			lifecycleWeatherHelperVar + "=1",
+			lifecycleWeatherServerVar + "=" + lifecycleWeatherServerID,
+		},
 	}
 
 	sup, err := NewSupervisor(cfg)
@@ -85,11 +237,11 @@ func TestAllInOneBootstrapLifecycle(t *testing.T) {
 	if !strings.Contains(plan.MemoryStore, "file-journal") {
 		t.Fatalf("expected MemoryStore to contain file-journal, got %q", plan.MemoryStore)
 	}
-	if plan.Engine != "mock" {
-		t.Fatalf("expected Engine 'mock', got %q", plan.Engine)
+	if plan.Engine != "custom" {
+		t.Fatalf("expected Engine 'custom', got %q", plan.Engine)
 	}
 
-	// 2. Boots test supervisor with mock model, MCP broker, and memory journal
+	// 2. Boots test supervisor with stub engine driver, real helper-subprocess child, and memory journal
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -144,6 +296,22 @@ func TestAllInOneBootstrapLifecycle(t *testing.T) {
 	if _, ok := sup.ChildProcessStatus("non-existent-server"); ok {
 		t.Fatal("expected non-existent process status ok=false")
 	}
+	weatherProc, ok := sup.ChildProcessStatus(lifecycleWeatherServerID)
+	if !ok || !weatherProc.Running || weatherProc.PID <= 0 {
+		t.Fatalf("expected running helper child for %q: %+v ok=%v", lifecycleWeatherServerID, weatherProc, ok)
+	}
+	foundForecast := false
+	for _, tool := range sup.Broker().ListTools() {
+		if tool.Name == "mcp__weather-service__get_forecast" {
+			foundForecast = true
+		}
+		if strings.Contains(tool.Name, "echo") {
+			t.Fatalf("fabricated echo tool %q registered; want only real helper tools", tool.Name)
+		}
+	}
+	if !foundForecast {
+		t.Fatal("expected namespaced tool mcp__weather-service__get_forecast from real helper child")
+	}
 
 	// 4. Submits request to /v1/fak/agent/sessions and verifies response
 	// Test A: goal without explicit tool
@@ -188,23 +356,38 @@ func TestAllInOneBootstrapLifecycle(t *testing.T) {
 		t.Fatalf("POST explicit tool status = %d, want 200", explicitResp.StatusCode)
 	}
 	seenCall := false
+	seenRealResult := false
+	fabricated := false
 	scanExp := bufio.NewScanner(explicitResp.Body)
 	for scanExp.Scan() {
 		var ev struct {
-			Event string          `json:"event"`
-			Tool  string          `json:"tool"`
-			Echo  json.RawMessage `json:"result"`
+			Event  string          `json:"event"`
+			Tool   string          `json:"tool"`
+			Result json.RawMessage `json:"result"`
 		}
 		if err := json.Unmarshal(scanExp.Bytes(), &ev); err != nil {
 			t.Fatalf("invalid NDJSON %q: %v", scanExp.Text(), err)
 		}
 		if ev.Event == "call" && ev.Tool == "mcp__weather-service__get_forecast" {
 			seenCall = true
+			resStr := string(ev.Result)
+			if strings.Contains(resStr, "WEATHER_FORECAST") && strings.Contains(resStr, "Seattle") {
+				seenRealResult = true
+			}
+			if strings.Contains(resStr, `"echo"`) {
+				fabricated = true
+			}
 		}
 	}
 	_ = explicitResp.Body.Close()
 	if !seenCall {
 		t.Fatal("expected brokered call event for mcp__weather-service__get_forecast")
+	}
+	if !seenRealResult {
+		t.Fatal("expected helper-subprocess stub result (WEATHER_FORECAST for Seattle) in call event; got none")
+	}
+	if fabricated {
+		t.Fatal("call result carries fabricated echo payload; want real helper-subprocess result")
 	}
 
 	// 5. Injects subsystem failure and verifies /healthz returns 503 Service Unavailable with failing component
