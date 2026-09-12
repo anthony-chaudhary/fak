@@ -132,13 +132,21 @@ func TestSessionRecoverPreviewNeedsNoFakDevExecutable(t *testing.T) {
 		t.Skip("Python is required by the current read-only SQLite inventory reader")
 	}
 	path := strings.Join([]string{filepath.Dir(os.Args[0]), filepath.Dir(python), os.Getenv("SystemRoot") + `\System32`, os.Getenv("SystemRoot")}, string(os.PathListSeparator))
-	cmd := exec.Command(os.Args[0], "-test.run=^TestSessionRecoverPreviewNeedsNoFakDevExecutable$", "-test.count=1")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSessionRecoverPreviewNeedsNoFakDevExecutable$", "-test.count=1", "-test.timeout=30s")
+	cmd.WaitDelay = time.Second
 	cmd.Dir = t.TempDir()
 	codexHome := filepath.Join(cmd.Dir, ".codex")
 	if err := os.Mkdir(codexHome, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cmd.Env = append(os.Environ(), "FAK_RECOVERY_INSTALLED_HELPER=1", "CODEX_HOME="+codexHome, "PATH="+path)
+	// Recovery also inventories non-Codex harness homes; keep the child off the
+	// operator's real session history even though CODEX_HOME is already isolated.
+	home := t.TempDir()
+	claudeHome := t.TempDir()
+	cmd.Env = append(os.Environ(), "FAK_RECOVERY_INSTALLED_HELPER=1", "CODEX_HOME="+codexHome, "PATH="+path,
+		"HOME="+home, "USERPROFILE="+home, "FLEET_USER_HOME="+home, "CLAUDE_CONFIG_DIR="+claudeHome)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("installed-style preview: %v\n%s", err, output)
