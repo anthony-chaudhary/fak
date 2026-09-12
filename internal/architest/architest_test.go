@@ -800,8 +800,6 @@ var tier = map[string]int{
 	"localappcontract":           1, // stdlib-only local application protocol contract.
 	"localappmetrics":            1, // stdlib-only local application metrics fold.
 	"localappux":                 1, // stdlib-only local application UX state renderer.
-	"macromailbox":               1, // stdlib-only authenticated macro mailbox primitive.
-	"macrostate":                 1, // stdlib-only deterministic macro-state contract.
 	"modelpack":                  1, // stdlib-only signed model-pack artifact contract.
 	"openaiadapter":              1, // stdlib-only authenticated OpenAI-compatible adapter contract.
 	"opensweharder":              1, // stdlib-only OpenSWE-hardening evidence contract.

@@ -469,7 +469,7 @@ concurrent = [
   "issuepolicy", "kquantbits", "kvint2eval", "kvquantquality", "kvvectoreval", "lanebeat",
   "launchshim", "learningmesh", "learningobservation", "lifecycleadapter", "lightgapscore", "lightroteval",
   "linefmt", "llamacppinterop", "localadmission", "localappcert", "localappcontract", "localapphelper",
-  "localappmetrics", "localappux", "macromailbox", "macrostate", "managedinventory", "markerblock",
+  "localappmetrics", "localappux", "managedinventory", "markerblock",
   "memoryindex", "microscaleeval", "modelloadplan", "modelpack", "modelsrc", "nativefirst",
   "nativeperf", "nativeperfartifact", "nativeperfbackend", "nativeperfcorrelation", "nativeperfcoverage", "nativeperfobscontract",
   "nativeperfslo", "numbermap", "openaiadapter", "opensweharder", "orchestration", "orientation",
@@ -1539,8 +1539,6 @@ localappcontract = ["internal/localappcontract/**"]
 localapphelper = ["internal/localapphelper/**"]
 localappmetrics = ["internal/localappmetrics/**"]
 localappux = ["internal/localappux/**"]
-macromailbox = ["internal/macromailbox/**"]
-macrostate = ["internal/macrostate/**"]
 managedinventory = ["internal/managedinventory/**"]
 markerblock = ["internal/markerblock/**"]
 memoryindex = ["internal/memoryindex/**"]
