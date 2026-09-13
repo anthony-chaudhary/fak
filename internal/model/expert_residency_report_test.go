@@ -1,10 +1,12 @@
 package model
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/pkg/moecache"
 )
 
 // expert_residency_report_test.go — the R6 witnesses for #5617 (epic #5606).
@@ -355,5 +357,136 @@ func TestMoEResidencyRegretIsReportedOnlyWhenAsked(t *testing.T) {
 	}
 	if rep.Regret.LRUGoodDecisionRatio < 0 || rep.Regret.LRUGoodDecisionRatio > 1 {
 		t.Fatalf("LRU good-decision ratio %.3f is outside [0,1]", rep.Regret.LRUGoodDecisionRatio)
+	}
+}
+
+// TestMoEResidencyTelemetryUnknownsAreNotZeros is the #1305 no-phantom-zero witness: a session with
+// no ring must report every ring-derived metric as Unknown("no-ring"), never a fabricated 0. This is
+// the discipline that distinguishes "not measured" from "measured as zero".
+func TestMoEResidencyTelemetryUnknownsAreNotZeros(t *testing.T) {
+	const H, E = 256, 6
+	m := expertRingTestModel(t, H, E)
+	s := expertRingSession(m, 0) // no ring: the unbounded halW path
+	rep := s.MoEResidency(MoEResidencyOptions{})
+	tel := rep.Telemetry()
+
+	if tel.Schema != moecache.Schema {
+		t.Fatalf("telemetry schema %q, want %q", tel.Schema, moecache.Schema)
+	}
+	if _, ok := tel.Find(moecache.TierDRAM); ok {
+		t.Fatal("ringless session emitted a DRAM tier; an absent ring must not fabricate a zeroed tier")
+	}
+	for name, got := range map[string]string{
+		"coverage.lookups":       tel.Coverage.Lookups.Reason,
+		"coverage.refusals":      tel.Coverage.Refusals.Reason,
+		"coverage.activated":     tel.Coverage.ActivatedExperts.Reason,
+		"coverage.covered":       tel.Coverage.ActivatedCovered.Reason,
+		"coverage.async_overlap": tel.Coverage.AsyncOverlap.Reason,
+	} {
+		if got != moecache.ReasonNoRing {
+			t.Fatalf("%s reason %q, want %q", name, got, moecache.ReasonNoRing)
+		}
+	}
+	if tel.Coverage.Lookups.Known || tel.Coverage.Refusals.Known || tel.Coverage.AsyncOverlap.Known {
+		t.Fatalf("ringless metrics reported known: %+v", tel.Coverage)
+	}
+
+	// Serialized form must carry no fabricated numbers for the ringless coverage signals.
+	b, err := json.Marshal(tel)
+	if err != nil {
+		t.Fatalf("marshal telemetry: %v", err)
+	}
+	var wire struct {
+		Coverage map[string]map[string]json.RawMessage `json:"coverage"`
+	}
+	if err := json.Unmarshal(b, &wire); err != nil {
+		t.Fatalf("unmarshal telemetry: %v\n%s", err, b)
+	}
+	for _, key := range []string{"lookups", "refusals", "async_overlap", "activated_experts"} {
+		if _, present := wire.Coverage[key]["value"]; present {
+			t.Fatalf("ringless %s serialized a value: %s", key, b)
+		}
+		if string(wire.Coverage[key]["known"]) != "false" {
+			t.Fatalf("ringless %s known=%s, want false: %s", key, wire.Coverage[key]["known"], b)
+		}
+	}
+}
+
+// TestMoEResidencyTelemetryKnownHitRate pins the live arithmetic: over a real ring window the DRAM
+// tier's hit rate is KNOWN and exactly Hits/(Hits+PageIns), the same rate the operator report derives.
+func TestMoEResidencyTelemetryKnownHitRate(t *testing.T) {
+	const H, E = 256, 6
+	m := expertRingTestModel(t, H, E)
+	m.Cfg.NumExpertsPerTok = 2
+	x := expertRingTestInput(H)
+	weight := expertRingWeightBytes(t, m)
+	s := expertRingSession(m, weight*6)
+	window := []int{0, 1, 2, 3, 0, 1, 4, 5, 0}
+	moeReportWindow(m, s, x, window)
+
+	rep := s.MoEResidency(MoEResidencyOptions{Tokens: int64(len(window))})
+	tel := rep.Telemetry()
+	dram, ok := tel.Find(moecache.TierDRAM)
+	if !ok {
+		t.Fatal("a session with a live ring emitted no DRAM tier")
+	}
+	rate, known := dram.HitRate.Get()
+	if !known {
+		t.Fatalf("hit rate is unknown over a window with %d hits + %d page-ins", rep.Ring.Hits, rep.Ring.PageIns)
+	}
+	want := float64(rep.Ring.Hits) / float64(rep.Ring.Hits+rep.Ring.PageIns)
+	if rate != want {
+		t.Fatalf("hit rate %.6f, want Hits/(Hits+PageIns)=%.6f", rate, want)
+	}
+	if v, k := dram.MissBytes.Get(); !k || v != rep.Ring.PageInBytes {
+		t.Fatalf("miss bytes %d known=%v, want ring page-in bytes %d", v, k, rep.Ring.PageInBytes)
+	}
+	if v, k := dram.EvictionCount.Get(); !k || v != int64(rep.Ring.Evictions) {
+		t.Fatalf("eviction count %d known=%v, want %d", v, k, rep.Ring.Evictions)
+	}
+	// The ring keeps no per-outcome byte counter, so the byte-weighted rate is honestly unknown
+	// rather than a fabricated 0.
+	if _, k := dram.ByteWeightedHitRate.Get(); k {
+		t.Fatal("byte-weighted hit rate reported a value the ring's counters cannot derive")
+	}
+	if _, k := dram.HitBytes.Get(); k {
+		t.Fatal("hit bytes reported as known without a per-hit byte counter")
+	}
+}
+
+// TestMoEResidencyTelemetryRegretHonesty pins the #4233 regret axis: absent when the replay was not
+// asked for (Unknown("no-replay-trace")), and KNOWN when a replay actually ran.
+func TestMoEResidencyTelemetryRegretHonesty(t *testing.T) {
+	const H, E = 256, 6
+	m := expertRingTestModel(t, H, E)
+	x := expertRingTestInput(H)
+	s := expertRingSession(m, expertRingWeightBytes(t, m)*6)
+	moeReportWindow(m, s, x, []int{0, 1, 2, 3, 0, 1, 2, 4, 0, 1})
+
+	quiet := s.MoEResidency(MoEResidencyOptions{}).Telemetry()
+	dram, ok := quiet.Find(moecache.TierDRAM)
+	if !ok {
+		t.Fatal("window emitted no DRAM tier")
+	}
+	if v, known := dram.BeladyRegret.Get(); known {
+		t.Fatalf("regret reported known=%v value=%v without a replay", known, v)
+	}
+	if dram.BeladyRegret.Reason != moecache.ReasonNoReplayTrace {
+		t.Fatalf("absent regret reason %q, want %q", dram.BeladyRegret.Reason, moecache.ReasonNoReplayTrace)
+	}
+
+	asked := s.MoEResidency(MoEResidencyOptions{Regret: true}).Telemetry()
+	dram, _ = asked.Find(moecache.TierDRAM)
+	regret, known := dram.BeladyRegret.Get()
+	if !known {
+		t.Fatal("regret reported unknown after a replay ran over a replayable trace")
+	}
+	// GoodDecisionRatio=1 means zero regret; the mapping must be the complement.
+	rep := s.MoEResidency(MoEResidencyOptions{Regret: true})
+	if rep.Regret == nil {
+		t.Fatal("regret replay produced no decision")
+	}
+	if want := 1 - rep.Regret.LRUGoodDecisionRatio; regret != want {
+		t.Fatalf("belady regret %.6f, want 1 - LRUGoodDecisionRatio = %.6f", regret, want)
 	}
 }
