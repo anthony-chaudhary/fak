@@ -395,6 +395,7 @@ type embeddingGatherAblationArm struct {
 	Name        string  `json:"name"`
 	SamplesUS   []int64 `json:"samples_us"`
 	Submissions *uint64 `json:"submissions"`
+	CopyCalls   *uint64 `json:"copy_calls"`
 	Bytes       *uint64 `json:"bytes"`
 }
 
@@ -448,8 +449,13 @@ func parseEmbeddingGatherAblationEvent(out string) (embeddingGatherAblationEvent
 	}
 	if event.BaselineArm.Submissions == nil || event.CandidateArm.Submissions == nil ||
 		*event.BaselineArm.Submissions == 0 || *event.CandidateArm.Submissions == 0 ||
-		*event.BaselineArm.Submissions <= *event.CandidateArm.Submissions {
-		return event, fmt.Errorf("amdgpu: embedding gather ablation requires explicit reduced non-zero submissions")
+		*event.BaselineArm.Submissions < *event.CandidateArm.Submissions {
+		return event, fmt.Errorf("amdgpu: embedding gather ablation requires explicit non-zero submissions without growth")
+	}
+	if event.BaselineArm.CopyCalls == nil || event.CandidateArm.CopyCalls == nil ||
+		*event.BaselineArm.CopyCalls == 0 || *event.CandidateArm.CopyCalls == 0 ||
+		*event.BaselineArm.CopyCalls <= *event.CandidateArm.CopyCalls {
+		return event, fmt.Errorf("amdgpu: embedding gather ablation requires explicit reduced non-zero copy calls")
 	}
 	if event.BaselineArm.Bytes == nil || event.CandidateArm.Bytes == nil ||
 		*event.BaselineArm.Bytes == 0 || *event.CandidateArm.Bytes == 0 ||

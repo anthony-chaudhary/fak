@@ -12,7 +12,8 @@ import (
 func embeddingGatherTestOutput(t *testing.T, mutate func(*embeddingGatherAblationEvent)) string {
 	t.Helper()
 	zero, exact := 0, true
-	baseSubmissions, candidateSubmissions := uint64(30), uint64(5)
+	baseSubmissions, candidateSubmissions := uint64(1), uint64(1)
+	baseCopyCalls, candidateCopyCalls := uint64(30), uint64(5)
 	baseBytes, candidateBytes := uint64(840), uint64(840)
 	event := embeddingGatherAblationEvent{
 		Schema:        embeddingGatherAblationSchema,
@@ -25,12 +26,14 @@ func embeddingGatherTestOutput(t *testing.T, mutate func(*embeddingGatherAblatio
 			Name:        embeddingGatherBaselineArm,
 			SamplesUS:   []int64{120, 116, 118, 121, 117},
 			Submissions: &baseSubmissions,
+			CopyCalls:   &baseCopyCalls,
 			Bytes:       &baseBytes,
 		},
 		CandidateArm: embeddingGatherAblationArm{
 			Name:        embeddingGatherAblationName,
 			SamplesUS:   []int64{82, 80, 81, 79, 83},
 			Submissions: &candidateSubmissions,
+			CopyCalls:   &candidateCopyCalls,
 			Bytes:       &candidateBytes,
 		},
 	}
@@ -126,7 +129,9 @@ func TestBatchedCopyAblationFailsClosedOnIncompleteEvidence(t *testing.T) {
 		{name: "parity not exact", mutate: func(e *embeddingGatherAblationEvent) { no := false; e.ExactParity = &no }},
 		{name: "external engine", mutate: func(e *embeddingGatherAblationEvent) { e.Engine = "llama.cpp" }},
 		{name: "submissions omitted", mutate: func(e *embeddingGatherAblationEvent) { e.CandidateArm.Submissions = nil }},
-		{name: "submissions not reduced", mutate: func(e *embeddingGatherAblationEvent) { *e.CandidateArm.Submissions = *e.BaselineArm.Submissions }},
+		{name: "submissions grown", mutate: func(e *embeddingGatherAblationEvent) { *e.CandidateArm.Submissions = *e.BaselineArm.Submissions + 1 }},
+		{name: "copy calls omitted", mutate: func(e *embeddingGatherAblationEvent) { e.CandidateArm.CopyCalls = nil }},
+		{name: "copy calls not reduced", mutate: func(e *embeddingGatherAblationEvent) { *e.CandidateArm.CopyCalls = *e.BaselineArm.CopyCalls }},
 		{name: "bytes omitted", mutate: func(e *embeddingGatherAblationEvent) { e.BaselineArm.Bytes = nil }},
 		{name: "bytes differ", mutate: func(e *embeddingGatherAblationEvent) { *e.CandidateArm.Bytes = *e.BaselineArm.Bytes - 1 }},
 	}
