@@ -111,6 +111,7 @@ func NewReservationStore(dir string) *ReservationStore {
 func (s *ReservationStore) Reserve(ctx context.Context, req ReservationRequest) (ReservationDecision, error) {
 	d := ReservationDecision{CapacityBytes: req.Host.AllocatableBytes, RequestedPeakBytes: req.Plan.StartupPeakBytes, Pressure: req.Host.Pressure}
 	if req.Host.Pressure == PressureUnknown {
+		d.Reaped = s.reapPersisted(ctx)
 		d.Reason = "pressure_unknown"
 		return d, nil
 	}
@@ -119,6 +120,7 @@ func (s *ReservationStore) Reserve(ctx context.Context, req ReservationRequest) 
 		if policy == "dev" {
 			d.AdmissionPolicy = "dev-override"
 		} else {
+			d.Reaped = s.reapPersisted(ctx)
 			d.Reason = "pressure_critical"
 			if req.Host.TotalBytes > 0 {
 				compPct := float64(req.Host.CompressedBytes) / float64(req.Host.TotalBytes) * 100.0
@@ -130,6 +132,7 @@ func (s *ReservationStore) Reserve(ctx context.Context, req ReservationRequest) 
 		}
 	}
 	if req.Host.AllocatableBytes <= 0 {
+		d.Reaped = s.reapPersisted(ctx)
 		d.Reason = "capacity_unknown"
 		return d, nil
 	}
@@ -295,6 +298,33 @@ func (s *ReservationStore) reap(in []Reservation) ([]Reservation, int) {
 		out = append(out, r)
 	}
 	return out, reaped
+}
+
+// reapPersisted locks the ledger, reaps dead-owner reservations, and persists
+// the result when anything was reaped. It is best-effort by design: a lock,
+// read, or write failure degrades to "nothing reaped" rather than an error, so
+// a failure to reclaim memory never converts an otherwise-clean refusal
+// (capacity_unknown / pressure_critical) into an opaque error or strips its
+// typed reason. It tolerates a missing ledger: readLedger returns an empty
+// ledger for os.ErrNotExist without creating reservations.json, so the
+// no-ledger-creation invariant on refusal paths is preserved even though s.lock
+// may create the enclosing directory.
+func (s *ReservationStore) reapPersisted(ctx context.Context) int {
+	unlock, err := s.lock(ctx)
+	if err != nil {
+		return 0
+	}
+	defer unlock()
+	ledger, err := s.readLedger()
+	if err != nil {
+		return 0
+	}
+	reaped := 0
+	ledger.Reservations, reaped = s.reap(ledger.Reservations)
+	if reaped > 0 {
+		_ = s.writeLedger(ledger)
+	}
+	return reaped
 }
 
 func (s *ReservationStore) lock(ctx context.Context) (func(), error) {

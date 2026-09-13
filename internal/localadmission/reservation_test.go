@@ -174,6 +174,102 @@ func TestReservationReapsDeadOwner(t *testing.T) {
 	}
 }
 
+func TestReservationReapsDeadOwnerOnShortCircuitPaths(t *testing.T) {
+	ctx := context.Background()
+
+	seedDeadOwner := func(t *testing.T) (string, *ReservationStore) {
+		dir := t.TempDir()
+		store := NewReservationStore(dir)
+		alive := map[int]bool{101: true, 102: true}
+		store.alive = func(pid int) bool { return alive[pid] }
+		first, err := store.Reserve(ctx, reservationRequest(101, 80, 60, 100, PressureNormal))
+		if err != nil || !first.Admit {
+			t.Fatalf("seed reserve=%+v err=%v", first, err)
+		}
+		alive[101] = false
+		return dir, store
+	}
+
+	assertLedgerReaped := func(t *testing.T, dir string) {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(dir, "reservations.json"))
+		if err != nil {
+			t.Fatalf("read ledger: %v", err)
+		}
+		var onDisk reservationLedger
+		if err := json.Unmarshal(b, &onDisk); err != nil {
+			t.Fatalf("decode ledger: %v", err)
+		}
+		for _, r := range onDisk.Reservations {
+			if r.OwnerPID == 101 {
+				t.Fatalf("dead owner 101 still persisted in ledger: %+v", onDisk.Reservations)
+			}
+		}
+	}
+
+	t.Run("capacity_unknown", func(t *testing.T) {
+		dir, store := seedDeadOwner(t)
+		req := reservationRequest(102, 1, 1, 100, PressureNormal)
+		req.Host.AllocatableBytes = 0
+		got, err := store.Reserve(ctx, req)
+		if err != nil || got.Admit || got.Reason != "capacity_unknown" {
+			t.Fatalf("decision=%+v err=%v", got, err)
+		}
+		if got.Reaped != 1 {
+			t.Fatalf("Reaped=%d want 1", got.Reaped)
+		}
+		assertLedgerReaped(t, dir)
+	})
+
+	t.Run("pressure_critical", func(t *testing.T) {
+		dir, store := seedDeadOwner(t)
+		req := reservationRequest(102, 80, 60, 100, PressureCritical)
+		got, err := store.Reserve(ctx, req)
+		if err != nil || got.Admit || got.Reason != "pressure_critical" {
+			t.Fatalf("decision=%+v err=%v", got, err)
+		}
+		if got.Reaped != 1 {
+			t.Fatalf("Reaped=%d want 1", got.Reaped)
+		}
+		assertLedgerReaped(t, dir)
+	})
+
+	// A corrupt or unreadable ledger must not turn a clean refusal into an
+	// opaque error or strip its typed reason: reaping is best-effort, so the
+	// refusal still carries capacity_unknown / pressure_critical.
+	t.Run("corrupt_ledger_keeps_typed_refusal", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			req  ReservationRequest
+			want string
+		}{
+			{"capacity_unknown", func() ReservationRequest {
+				r := reservationRequest(102, 1, 1, 100, PressureNormal)
+				r.Host.AllocatableBytes = 0
+				return r
+			}(), "capacity_unknown"},
+			{"pressure_critical", reservationRequest(102, 80, 60, 100, PressureCritical), "pressure_critical"},
+			{"pressure_unknown", reservationRequest(102, 1, 1, 100, PressureUnknown), "pressure_unknown"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				dir := t.TempDir()
+				if err := os.WriteFile(filepath.Join(dir, "reservations.json"), []byte("not json"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				store := NewReservationStore(dir)
+				store.alive = func(int) bool { return true }
+				got, err := store.Reserve(context.Background(), tc.req)
+				if err != nil {
+					t.Fatalf("best-effort reap should not error on a corrupt ledger: %v", err)
+				}
+				if got.Admit || got.Reason != tc.want || got.Reaped != 0 {
+					t.Fatalf("decision=%+v, want refusal reason %q with Reaped=0", got, tc.want)
+				}
+			})
+		}
+	})
+}
+
 func TestReservationStoresSerializeConcurrentCallers(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
