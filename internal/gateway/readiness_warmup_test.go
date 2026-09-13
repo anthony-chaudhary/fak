@@ -179,7 +179,7 @@ func TestRunWarmupNilPlannerReleasesGate(t *testing.T) {
 // force /readyz to 503 with warmup_pending, and MarkWarmupComplete must release it
 // to 200. The startup gate is satisfied first so this witnesses the warmup gate
 // specifically, not the startup gate.
-func TestReadyzGatesWhileWarming(t *testing.T) {
+func TestReadyGatingWhileWarming(t *testing.T) {
 	srv := newTestServer(t)
 	srv.planner = agent.NewMockPlanner("test-model")
 	srv.MarkReady()

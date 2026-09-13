@@ -10,7 +10,7 @@ import (
 // TestTurnkeyReadyzGatesWhileWarming proves /readyz cannot claim ready while the
 // boot warmup gate is armed-and-incomplete: it must return 503 with Retry-After
 // and "warming_up", and only flip to 200 "ready" after markReady.
-func TestTurnkeyReadyzGatesWhileWarming(t *testing.T) {
+func TestTurnkeyReadyGatingWhileWarming(t *testing.T) {
 	srv := &turnkeyServer{ready: &readinessGate{}}
 	srv.ready.armWarming()
 
@@ -52,7 +52,7 @@ func TestTurnkeyReadyzGatesWhileWarming(t *testing.T) {
 // TestTurnkeyHealthzReportsReadinessState proves /healthz stays a 200 liveness
 // signal but reports the truthful readiness state: warming -> ready:false,
 // status:"warming_up"; ready -> ready:true, status:"ok".
-func TestTurnkeyHealthzReportsReadinessState(t *testing.T) {
+func TestTurnkeyHealthzWarmingReportsNotReady(t *testing.T) {
 	srv := &turnkeyServer{ready: &readinessGate{}}
 	srv.ready.armWarming()
 
