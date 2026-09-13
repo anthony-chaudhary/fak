@@ -5,17 +5,17 @@ package parentwatch
 import (
 	"context"
 	"sync"
-	"syscall"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/processalive"
 )
 
-// ParentAlive reports whether parentPID is a live process.
+// ParentAlive reports whether parentPID is a live process. It delegates to the
+// shared, no-spawn, cross-platform probe in internal/processalive (POSIX signal
+// 0 on unix; a process-handle query on Windows), preserving the exact
+// semantics: positive live pid -> true; pid <= 0 -> false; reaped pid -> false.
 func ParentAlive(parentPID int) bool {
-	if parentPID <= 0 {
-		return false
-	}
-	err := syscall.Kill(parentPID, 0)
-	return err == nil || err == syscall.EPERM
+	return processalive.Check(parentPID)
 }
 
 // Watch returns a context canceled when parentPID exits. parentPID <= 1 means
