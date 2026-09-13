@@ -512,6 +512,69 @@ func firstByte(b []byte) byte {
 	return b[0]
 }
 
+// TestDeepSeek41GGUFMoEOnlyHeaderDerivesConfig is the fail-before/pass-after
+// witness for issue #12979. A real vcruz305 deepseek41 GGUF is MoE-only: it
+// declares expert_feed_forward_length (2304) and
+// expert_shared_feed_forward_length but NO dense feed_forward_length. Before the
+// fix Config() called requiredInt(p+"feed_forward_length") unconditionally and
+// refused every published artifact with
+// "gguf: missing deepseek41.feed_forward_length" before applyDeepSeek41Config
+// ran, so none of the V4.1 axes were reached.
+//
+// This fixture is the vcruz305 Engram key set with the dense FFN key REMOVED,
+// which is exactly how the real converter materializes. Config() must now derive
+// the dense width from the expert width, retain the Engram declaration, and reach
+// every V4.1 axis. A header declaring NEITHER width must still fail loud naming
+// the dense key.
+func TestDeepSeek41GGUFMoEOnlyHeaderDerivesConfig(t *testing.T) {
+	meta, p := vcruzEngramMeta()
+	delete(meta, p+"feed_forward_length")
+	meta[p+"expert_count"] = Value{Type: TypeUint64, Value: uint64(384)}
+	meta[p+"expert_used_count"] = Value{Type: TypeUint64, Value: uint64(6)}
+	meta[p+"expert_feed_forward_length"] = Value{Type: TypeUint64, Value: uint64(2304)}
+	meta[p+"expert_shared_count"] = Value{Type: TypeUint64, Value: uint64(1)}
+	meta[p+"expert_shared_feed_forward_length"] = Value{Type: TypeUint64, Value: uint64(2304)}
+
+	f := &File{Metadata: meta}
+	cfg, err := f.Config()
+	if err != nil {
+		t.Fatalf("Config on MoE-only deepseek41 header: %v (must derive the dense FFN width)", err)
+	}
+	if cfg.ModelType != "deepseek41" {
+		t.Fatalf("ModelType = %q, want deepseek41", cfg.ModelType)
+	}
+	// The dense width is derived from the expert width, and the MoE axis is read.
+	if cfg.IntermediateSize != 2304 {
+		t.Errorf("IntermediateSize = %d, want 2304 (derived from expert_feed_forward_length)", cfg.IntermediateSize)
+	}
+	if cfg.MoEIntermediateSize != 2304 {
+		t.Errorf("MoEIntermediateSize = %d, want 2304", cfg.MoEIntermediateSize)
+	}
+	// The V4.1-specific axes were actually reached (applyDeepSeek41Config ran).
+	if cfg.NumExperts != 384 || cfg.NumExpertsPerTok != 6 || cfg.NSharedExperts != 1 {
+		t.Errorf("MoE axes = experts:%d topk:%d shared:%d, want 384/6/1", cfg.NumExperts, cfg.NumExpertsPerTok, cfg.NSharedExperts)
+	}
+	if cfg.SharedIntermediateSize != 2304 {
+		t.Errorf("SharedIntermediateSize = %d, want 2304", cfg.SharedIntermediateSize)
+	}
+	if f.DeepSeek41Engram == nil {
+		t.Fatal("f.DeepSeek41Engram is nil; the Engram declaration was not retained")
+	}
+	if len(f.DeepSeek41Engram.LayerIDs) != 2 || f.DeepSeek41Engram.NHeads != 8 {
+		t.Errorf("Engram not retained: layer_ids=%v n_heads=%d", f.DeepSeek41Engram.LayerIDs, f.DeepSeek41Engram.NHeads)
+	}
+
+	// Fail-loud preservation: a header with NEITHER dense nor expert FFN width must
+	// still be refused, and the refusal must name the dense key.
+	delete(meta, p+"expert_feed_forward_length")
+	delete(meta, p+"expert_shared_feed_forward_length")
+	if _, err := (&File{Metadata: meta}).Config(); err == nil {
+		t.Fatal("Config accepted a header with neither dense nor expert feed_forward_length")
+	} else if !strings.Contains(err.Error(), "feed_forward_length") {
+		t.Fatalf("refusal %q does not name feed_forward_length", err)
+	}
+}
+
 // vcruzI32Array builds a GGUF INT32 metadata array (the width the vcruz305
 // converter writes for engram.layer_ids and engram.token_map).
 func vcruzI32Array(values []int32) Value {

@@ -139,7 +139,7 @@ func (f *File) Config() (model.Config, error) {
 	if err != nil {
 		return model.Config{}, err
 	}
-	ffn, err := f.requiredInt(p + "feed_forward_length")
+	ffn, err := requiredDenseFFNLen(f, p)
 	if err != nil {
 		return model.Config{}, err
 	}
@@ -318,6 +318,35 @@ func canonicalGGUFArch(arch string) string {
 		return "qwen35"
 	}
 	return arch
+}
+
+// requiredDenseFFNLen resolves the dense FFN width the generic Config() projection
+// needs. A real DeepSeek-V4.1-Flash GGUF is MoE-only: it declares
+// expert_feed_forward_length and expert_shared_feed_forward_length but no dense
+// feed_forward_length, so the unconditional dense-key read refused every published
+// vcruz305 deepseek41 artifact before the V4.1-specific axes were ever applied.
+//
+// For an architecture-prefixed MoE file that declares expert_feed_forward_length
+// but no dense feed_forward_length, derive the dense width from the expert width so
+// Config() can project model.Config; deepseek41's own applyDeepSeek41Config then
+// overwrites IntermediateSize with the true dense value when the converter writes
+// one. A file that declares NEITHER width still fails loud, naming the dense key.
+//
+// Non-V4.1 behavior is unchanged: only the exactly-missing dense key on an MoE
+// file takes the derive path, so a dense LLM still requires its own key.
+func requiredDenseFFNLen(f *File, p string) (int, error) {
+	if v, ok := f.Uint64(p + "feed_forward_length"); ok {
+		if v > uint64(math.MaxInt) {
+			return 0, fmt.Errorf("gguf: %sfeed_forward_length overflows int", p)
+		}
+		return int(v), nil
+	}
+	if _, ok := f.Metadata[p+glmKeyExpertFFNLength]; ok {
+		if v := intValueOrZero(f, p+glmKeyExpertFFNLength); v > 0 {
+			return v, nil
+		}
+	}
+	return 0, fmt.Errorf("gguf: missing %sfeed_forward_length", p)
 }
 
 // applyMoEExpertCounts reads the three shared MoE expert-axis GGUF scalars — expert count,
