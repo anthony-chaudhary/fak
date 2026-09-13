@@ -472,8 +472,23 @@ func (m *Model) requireV41NativeUnsupported(path string) {
 
 // Forward runs a full-prefill forward pass over token ids and returns every hidden
 // state + per-position logits. No KV cache (that is R2); this rung proves the math.
+//
+// A V4.1 config no longer takes the blanket requireV41NativeUnsupported fence:
+// v41_forward.go's stage-aware assembly now serves it. The config still admits
+// ONLY a fully-populated model; a weightless in-memory V4.1 *Model (the #12967
+// probe) fails closed at admission with an error wrapping
+// ErrV41NativeUnsupported, preserving that fence test unchanged.
 func (m *Model) Forward(ids []int) *Activations {
-	m.requireV41NativeUnsupported("Model.Forward")
+	if m.Cfg.IsDeepSeekV41() {
+		if err := m.v41ForwardAdmitted(); err != nil {
+			panic(err)
+		}
+		act, err := m.forwardV41(ids, nil)
+		if err != nil {
+			panic(err)
+		}
+		return act
+	}
 	// embedding lookup -> x[t] is the working hidden vector for position t
 	// (the arch embed scale applied inside embedBand).
 	return m.forwardHiddenRows(m.embedBand(ids))

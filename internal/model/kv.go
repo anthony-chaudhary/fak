@@ -481,6 +481,13 @@ type Session struct {
 	targetHiddenMu      sync.RWMutex
 	targetHidden        [][]float32
 	targetHiddenTokens  []int
+
+	// v41Forward is the session-owned continuation state for the DeepSeek V4.1 text
+	// forward (v41_forward.go, #12901). It carries the committed token history and a
+	// lazily-built V41AttentionState; the assembly is cacheless, so Prefill followed by
+	// Step recomputes the full history and stays consistent with one longer Forward. It
+	// is nil for every non-V4.1 session.
+	v41Forward *v41ForwardState
 }
 
 // NewSession starts a fresh generation session.
@@ -1034,7 +1041,9 @@ func (s *Session) Prefill(ids []int) []float32 {
 	if len(ids) == 0 {
 		return nil
 	}
-	s.requireV41NativeUnsupported("Session.Prefill")
+	if s.M.Cfg.IsDeepSeekV41() {
+		return s.prefillV41(ids)
+	}
 	s.cacheGeometryMu.RLock()
 	defer s.cacheGeometryMu.RUnlock()
 	s.validateDenseGPULayers()
@@ -1281,7 +1290,9 @@ func (s *Session) prefillTokenLoop(ids []int) []float32 {
 // sessions reuse their logits buffer; consume or copy the returned slice before the next
 // quantized Prefill/Step call on the same session.
 func (s *Session) Step(id int) []float32 {
-	s.requireV41NativeUnsupported("Session.Step")
+	if s.M.Cfg.IsDeepSeekV41() {
+		return s.stepV41(id)
+	}
 	s.cacheGeometryMu.RLock()
 	defer s.cacheGeometryMu.RUnlock()
 	s.validateDenseGPULayers()
