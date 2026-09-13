@@ -2,11 +2,81 @@ package parentwatch
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"testing"
 	"time"
 )
+
+// helperProcessEnv gates the re-exec'd test binary into a plain child process.
+// The value selects the child's lifetime: "block" waits for stdin EOF, "exit"
+// returns at once. This is a portable stand-in for sh/sleep (absent on
+// Windows) and lets the fixture terminate the child without process signals,
+// which are not portable across POSIX and Windows.
+const helperProcessEnv = "PARENTWATCH_HELPER_PROCESS"
+
+// TestHelperProcess is not a real test: it is the body of the portable child
+// fixture. It runs only when explicitly re-exec'd with helperProcessEnv set.
+func TestHelperProcess(t *testing.T) {
+	switch os.Getenv(helperProcessEnv) {
+	case "block":
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		os.Exit(0)
+	case "exit":
+		os.Exit(0)
+	}
+}
+
+// child is a live helper process plus the write end of its lifetime pipe.
+type child struct {
+	cmd   *exec.Cmd
+	stdin io.WriteCloser
+}
+
+// startBlockingChild starts a child that stays alive until terminate closes its
+// stdin pipe. Portable replacement for `sleep 30`.
+func startBlockingChild(t *testing.T) *child {
+	t.Helper()
+	stdin, childStdin, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=TestHelperProcess")
+	cmd.Env = append(os.Environ(), helperProcessEnv+"=block")
+	cmd.Stdin = childStdin
+	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		_ = childStdin.Close()
+		t.Fatalf("start helper child: %v", err)
+	}
+	_ = childStdin.Close()
+	return &child{cmd: cmd, stdin: stdin}
+}
+
+// terminate ends the child by closing its lifetime pipe and reaps it, so its
+// pid is guaranteed dead without platform-specific signal handling.
+func (c *child) terminate(t *testing.T) {
+	t.Helper()
+	_ = c.stdin.Close()
+	_ = c.cmd.Wait()
+}
+
+// runToExit starts a child that exits immediately, then reaps it so its pid is
+// guaranteed dead. Portable replacement for `sh -c "exit 0"`.
+func runToExit(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=TestHelperProcess")
+	cmd.Env = append(os.Environ(), helperProcessEnv+"=exit")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start helper child: %v", err)
+	}
+	pid := cmd.Process.Pid
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("reap helper child: %v", err)
+	}
+	return pid
+}
 
 func TestParentAlive(t *testing.T) {
 	if !ParentAlive(os.Getpid()) {
@@ -16,25 +86,15 @@ func TestParentAlive(t *testing.T) {
 		t.Fatal("ParentAlive(non-positive pid) = true, want false")
 	}
 
-	cmd := exec.Command("sh", "-c", "exit 0")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	pid := cmd.Process.Pid
-	if err := cmd.Wait(); err != nil {
-		t.Fatal(err)
-	}
+	pid := runToExit(t)
 	if ParentAlive(pid) {
 		t.Fatalf("ParentAlive(reaped pid %d) = true, want false", pid)
 	}
 }
 
 func TestWatchLiveParent(t *testing.T) {
-	cmd := exec.Command("sleep", "30")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	pid := cmd.Process.Pid
+	c := startBlockingChild(t)
+	pid := c.cmd.Process.Pid
 
 	ctx, stop := Watch(context.Background(), pid)
 	defer stop()
@@ -45,10 +105,7 @@ func TestWatchLiveParent(t *testing.T) {
 	case <-time.After(300 * time.Millisecond):
 	}
 
-	if err := cmd.Process.Kill(); err != nil {
-		t.Fatal(err)
-	}
-	_ = cmd.Wait()
+	c.terminate(t)
 
 	select {
 	case <-ctx.Done():
@@ -58,14 +115,7 @@ func TestWatchLiveParent(t *testing.T) {
 }
 
 func TestWatchAlreadyDeadParent(t *testing.T) {
-	cmd := exec.Command("sh", "-c", "exit 0")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	pid := cmd.Process.Pid
-	if err := cmd.Wait(); err != nil {
-		t.Fatal(err)
-	}
+	pid := runToExit(t)
 
 	ctx, stop := Watch(context.Background(), pid)
 	defer stop()
@@ -103,16 +153,10 @@ func TestWatchNoParent(t *testing.T) {
 }
 
 func TestStopIdempotent(t *testing.T) {
-	cmd := exec.Command("sleep", "30")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	}()
+	c := startBlockingChild(t)
+	defer c.terminate(t)
 
-	_, stop := Watch(context.Background(), cmd.Process.Pid)
+	_, stop := Watch(context.Background(), c.cmd.Process.Pid)
 	stop()
 	stop()
 }

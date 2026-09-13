@@ -553,7 +553,16 @@ func main() {
 	cacheGiB := flag.Float64("cache-gib", 128.0, "resident expert-cache budget (RAM tier over SSD), GiB. PLACEHOLDER — the epic's premise is host RAM smaller than the 414.5 GiB routed band")
 	batchesArg := flag.String("batches", "1,4,16,64,128", "comma-separated batch sizes (agent counts) to sweep")
 	artifactOut := flag.String("artifact-out", "", "optional shared benchcli JSON artifact path; stdout remains the historical PROJECTED Markdown")
+	traceIn := flag.String("trace-in", "", "path to a captured/re-derived expert-activation trace JSON; when set, replay it through the deterministic LRU witness instead of the synthetic sweep (empty = synthetic sweep, unchanged)")
+	traceArtifactOut := flag.String("trace-artifact-out", "", "optional JSON receipt path for -trace-in; carries the witness verbatim under {schema,witness}")
 	flag.Parse()
+
+	if path := strings.TrimSpace(*traceIn); path != "" {
+		if err := runTraceWitness(path, strings.TrimSpace(*traceArtifactOut), os.Stdout); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 
 	cfg := benchConfig{
 		Seed: *seed, Steps: *steps, Layers: *layers, Experts: *experts, TopK: *topk,

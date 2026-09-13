@@ -4,7 +4,7 @@
 # first time (offline-wait, host-key trust, ssh user/key, go toolchain, zsh-vs-bash, repo
 # selection, placement law). See tools/bench_nodes.example.json for the registry schema.
 #
-#   tools/bench_node.sh <node> ping|wait|info
+#   tools/bench_node.sh <node> ping|diagnose|wait|info
 #   tools/bench_node.sh <node> tests          # go test ggufload+model (correctness)
 #   tools/bench_node.sh <node> bench           # kernel-latency microbenches (ns/op)
 #   tools/bench_node.sh <node> kernels         # arm64 NEON quant hot-path: correctness gate +
@@ -39,7 +39,10 @@ for c in python3 python; do command -v "$c" >/dev/null 2>&1 && { PY="$c"; break;
 
 usage(){ cat >&2 <<'U'
 usage: bench_node.sh <node> <subcommand> [args]
-  ping            SSH-handshake reachability check (exit 0 = reachable)
+  ping            SSH-handshake reachability check (exit 0 = authorized)
+  diagnose        classify onboarding state: no-sshd|sshd-only|authorized|unknown
+                  (prints "ONBOARD-STATE <node> <state>" + a one-line remedy;
+                   no-sshd and sshd-only get DIFFERENT fixes, never conflated)
   wait            poll (SSH handshake, backoff) until reachable or BENCH_WAIT_MAX_S
   info            print resolved node facts (sanitized name only)
   cmd <shell...>  run an arbitrary command on the node (-> gitignored scratch)
@@ -185,6 +188,51 @@ fi
 
 reachable(){ remote_probe; }   # SSH handshake -- a node can answer ping with no sshd
 
+# --- onboarding-state classifier -------------------------------------------------------------
+# classify_onboard_state <exit_code> <stderr> -> no-sshd | sshd-only | authorized | unknown.
+# THE AUTHORITATIVE SPEC IS internal/benchcatalog/onboard_state.go:ClassifyOnboardState, and
+# internal/benchcatalog/bench_node_onboard_state_test.go is the LOCK. This bash mirror must
+# stay byte-for-byte in step with that Go mapping (same markers, same precedence: exit 0 ->
+# authorized; publickey denial -> sshd-only; connect/banner failure -> no-sshd; else unknown).
+# Keep the ORDER: an auth denial proves sshd answered, so a "Permission denied (publickey"
+# must win over any connect notice a multiplexer/proxy also emits.
+classify_onboard_state(){
+  local rc="$1" err="$2" low
+  low="$(printf '%s' "$err" | tr '[:upper:]' '[:lower:]')"
+  if [ "$rc" -eq 0 ]; then echo authorized; return 0; fi
+  case "$low" in
+    *"permission denied (publickey"*|*"too many authentication failures"*) echo sshd-only; return 0 ;;
+  esac
+  case "$low" in
+    *"connection refused"*|*"connection timed out"*|*"connection closed"*|*"operation timed out"*|\
+    *"no route to host"*|*"network is unreachable"*|*"host is down"*|*"connection reset"*|\
+    *"broken pipe"*|*"connection to"*|*"kex_exchange_identification"*|*"banner exchange"*|*"port 22:"*)
+      echo no-sshd; return 0 ;;
+  esac
+  echo unknown; return 0
+}
+
+# remedy for an onboarding state -- the whole point of the split is DIFFERENT next actions.
+onboard_remedy(){
+  case "$1" in
+    no-sshd)    echo "start sshd on the node and confirm :22 answers (a TCP probe, not ICMP) -- the driver key is not the problem yet" ;;
+    sshd-only)  echo "sshd is up; append the driver pubkey to the node account's authorized_keys, then re-run diagnose" ;;
+    authorized) echo "no action -- the driver key authenticates and the remote command runs" ;;
+    *)          echo "inspect the raw ssh stderr; the classifier could not tell a connect failure from an auth denial" ;;
+  esac
+}
+
+# probe the node capturing BOTH exit and stderr, then classify. Runs the SAME remote command
+# as remote_probe, so ping and diagnose cannot disagree about what "reachable" means.
+diagnose_onboard_state(){
+  local err rc state
+  err="$(ssh_node true 2>&1 >/dev/null)"; rc=$?
+  state="$(classify_onboard_state "$rc" "$err")"
+  printf 'ONBOARD-STATE %s %s\n' "$NODE" "$state"
+  printf 'ONBOARD-REMEDY %s\n' "$(onboard_remedy "$state")"
+  [ "$state" = "authorized" ]
+}
+
 do_wait(){
   local max="${BENCH_WAIT_MAX_S:-86400}" d=5 t=0
   echo "[wait] $NODE: SSH-handshake poll, backoff to 60s (cap ${max}s)..." >&2
@@ -249,6 +297,11 @@ case "$SUB" in
     ;;
   ping)
     if reachable; then echo "REACHABLE $NODE (as $SAN)"; else echo "UNREACHABLE $NODE" >&2; exit 3; fi
+    ;;
+  diagnose)
+    # Distinguish no-sshd (start sshd) from sshd-only (add the driver key) from authorized.
+    # ping's contract is unchanged: exit 0 ONLY when authorized.
+    diagnose_onboard_state || exit 3
     ;;
   wait)
     ensure_online || exit $?
