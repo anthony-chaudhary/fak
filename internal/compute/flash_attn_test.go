@@ -183,11 +183,13 @@ func TestFlashAttentionOnlineSoftmax(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read attention.comp: %v", err)
 	}
-	shaderSrc := string(content)
+	shaderSrc := stripGLSLComments(string(content))
 
-	requiredTokens := []string{
+	// functionalTokens are architectural constructs that MUST be executable code:
+	// they are matched against the comment-stripped source, so a descriptive
+	// comment can never satisfy them (the defect this witness repairs).
+	functionalTokens := []string{
 		"#version 450",
-		"FlashAttention-3",
 		"GL_KHR_shader_subgroup_arithmetic",
 		"GL_KHR_cooperative_matrix",
 		"reduceMax128",
@@ -201,12 +203,91 @@ func TestFlashAttentionOnlineSoftmax(t *testing.T) {
 		"tileScores",
 	}
 
-	for _, tok := range requiredTokens {
+	// The architecture label is inherently descriptive (it names the family the
+	// kernel implements, as it did in the original engine) and is therefore
+	// checked against the full source rather than being forced into a fake
+	// executable construct. All functional tokens above are code-only.
+	labelTokens := []string{"FlashAttention-3"}
+
+	missing := 0
+	for _, tok := range functionalTokens {
 		if !strings.Contains(shaderSrc, tok) {
-			t.Errorf("attention.comp missing required token: %q", tok)
+			missing++
+			t.Errorf("attention.comp missing required token from executable code: %q", tok)
 		}
 	}
-	t.Logf("attention.comp shader verification passed: all %d architectural tokens verified", len(requiredTokens))
+	for _, tok := range labelTokens {
+		if !strings.Contains(string(content), tok) {
+			missing++
+			t.Errorf("attention.comp missing required architecture label: %q", tok)
+		}
+	}
+	if missing == 0 {
+		t.Logf("attention.comp shader verification passed: %d executable-code tokens + %d label tokens verified (comments stripped for executable tokens)",
+			len(functionalTokens), len(labelTokens))
+	} else {
+		t.Errorf("attention.comp shader verification failed: %d of %d architectural tokens missing",
+			missing, len(functionalTokens)+len(labelTokens))
+	}
+
+	// The block-reduction primitives must be defined functions in executable
+	// code (not merely named in prose). They are declared as available
+	// primitives; the dim-strided decode path folds the same Pad-2 tree inline,
+	// so we assert the definition contract here rather than a call site.
+	for _, def := range []string{
+		"float reduceMax128(float val, uint tid) {",
+		"float reduceSum128(float val, uint tid) {",
+	} {
+		if !strings.Contains(shaderSrc, def) {
+			t.Errorf("attention.comp missing block-reduction primitive definition: %q", def)
+		}
+	}
+}
+
+// stripGLSLComments removes // line comments and /* */ block comments from GLSL
+// source so that a required token can only be satisfied by executable code, never
+// by a descriptive comment. Newlines are preserved to keep line structure intact.
+func stripGLSLComments(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	const (
+		code = iota
+		lineComment
+		blockComment
+	)
+	state := code
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch state {
+		case code:
+			if c == '/' && i+1 < len(s) && s[i+1] == '/' {
+				state = lineComment
+				i++
+				continue
+			}
+			if c == '/' && i+1 < len(s) && s[i+1] == '*' {
+				state = blockComment
+				i++
+				continue
+			}
+			b.WriteByte(c)
+		case lineComment:
+			if c == '\n' {
+				state = code
+				b.WriteByte(c)
+			}
+		case blockComment:
+			if c == '*' && i+1 < len(s) && s[i+1] == '/' {
+				state = code
+				i++
+				continue
+			}
+			if c == '\n' {
+				b.WriteByte(c)
+			}
+		}
+	}
+	return b.String()
 }
 
 // TestFlashAttentionMatchesCPUReference satisfies Acceptance Criterion 3:

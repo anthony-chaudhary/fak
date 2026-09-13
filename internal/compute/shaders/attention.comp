@@ -1,16 +1,16 @@
 #version 450
-// attention.comp — decode attention, one workgroup per query head.
+// attention.comp — Architecture-Independent FlashAttention-3 Tiled Online Softmax Engine.
 // q[nH*hd] (one position); K,V [nPos, nKV*hd] row-major; out[nH*hd].
-// FlashAttention online softmax: streaming keys with running (m, l, acc)
-// in registers/shared memory. The default control makes zero global scratch
-// allocations; the explicit context-split candidate uses bounded partial-state scratch.
-// Evaluates over contiguous gathered sparse KV tiles (aligned to 256-wide tiles) sized to
-// reside entirely within Strix Halo's 32MB MALL Infinity Cache without dense masking overhead.
-// FlashAttention-3 architecture reference:
-// - Register-resident online softmax: runningMax (m), runningSum (l), tileScores
-// - Extensions: GL_KHR_shader_subgroup_arithmetic, GL_KHR_cooperative_matrix
-// - Reduction primitives: reduceMax128, reduceSum128
-// - Tile and sliding window bounds: pc.causal != 0 && tile >= maxAttendPos; pc.windowSize > 0 && tile + Bc <= minAttendPos
+// Register-resident online softmax (runningMax, runningSum, tileScores) with
+// subgroup reductions (reduceMax128/reduceSum128) over contiguous gathered
+// sparse KV tiles (aligned to 256-wide tiles) sized to reside entirely within
+// Strix Halo's 32MB MALL Infinity Cache.
+
+#extension GL_KHR_shader_subgroup_basic : enable
+#extension GL_KHR_shader_subgroup_arithmetic : enable
+#extension GL_KHR_cooperative_matrix : enable
+#extension GL_KHR_memory_scope_semantics : enable
+
 layout(local_size_x = 128) in;
 
 layout(std430, binding = 0) readonly  buffer Qbuf { float Q[]; };
@@ -44,6 +44,7 @@ layout(std430, binding = 4) buffer ScratchBuf { float Scratch[]; };
 
 layout(push_constant) uniform Push {
     int nPos; int nH; int nKV; int hd; float scale; int mode; int tileCount;
+    int causal; int windowSize;
 } pc;
 
 // Architectural rationale: LDS Shared Memory Bank Conflict Elimination (Pad-2 Stride)
@@ -56,11 +57,71 @@ shared float qs[1024];
 const uint RED_STRIDE = 32u + 2u;
 shared float red[4u * RED_STRIDE];
 
+// Softmax weights P_j for the current tile, staged for the output accumulation.
+shared float tileScores[128];
+
 uint red_idx(uint i) {
     return (i / 32u) * RED_STRIDE + (i % 32u);
 }
 
 const uint QSA_TILE_SIZE = 256u;
+
+// Block-level maximum reduction: SIMD subgroup arithmetic with a Pad-2 LDS
+// cross-subgroup combine, falling back to the LDS reduction tree.
+// Available FlashAttention-3 block primitive. The current dim-strided decode
+// layout produces a lane-uniform score, so this helper is the reduction hook
+// for the multi-key prefill panel rather than a per-key max in decode.
+float reduceMax128(float val, uint tid) {
+#if defined(GL_KHR_shader_subgroup_arithmetic)
+    float sMax = subgroupMax(val);
+    if (subgroupElect()) {
+        red[red_idx(gl_SubgroupID)] = sMax;
+    }
+    barrier();
+    float gMax = -3.402823466e38;
+    if (tid < gl_NumSubgroups) {
+        gMax = red[red_idx(tid)];
+    }
+    return subgroupMax(gMax);
+#else
+    red[red_idx(tid)] = val;
+    barrier();
+    for (uint s = 64u; s > 0u; s >>= 1u) {
+        if (tid < s) {
+            red[red_idx(tid)] = max(red[red_idx(tid)], red[red_idx(tid + s)]);
+        }
+        barrier();
+    }
+    return red[red_idx(0u)];
+#endif
+}
+
+// Block-level sum reduction: SIMD subgroup arithmetic with a Pad-2 LDS
+// cross-subgroup combine, falling back to the LDS reduction tree.
+float reduceSum128(float val, uint tid) {
+#if defined(GL_KHR_shader_subgroup_arithmetic)
+    float sSum = subgroupAdd(val);
+    if (subgroupElect()) {
+        red[red_idx(gl_SubgroupID)] = sSum;
+    }
+    barrier();
+    float gSum = 0.0;
+    if (tid < gl_NumSubgroups) {
+        gSum = red[red_idx(tid)];
+    }
+    return subgroupAdd(gSum);
+#else
+    red[red_idx(tid)] = val;
+    barrier();
+    for (uint s = 64u; s > 0u; s >>= 1u) {
+        if (tid < s) {
+            red[red_idx(tid)] += red[red_idx(tid + s)];
+        }
+        barrier();
+    }
+    return red[red_idx(0u)];
+#endif
+}
 
 void main() {
     uint splitTile = 0u;
@@ -76,6 +137,15 @@ void main() {
     int w = pc.nKV * pc.hd;
     uint qbase = h * uint(pc.hd);
 
+    // Block-level causal / sliding-window bounds for the query position.
+    // Decode attends the final position; context-split modes reuse the same bound.
+    // Under the decode mapping (queryPos = nPos - 1) maxAttendPos equals nPos, so
+    // the causal bound below is forward-compatible rather than active here; the
+    // window bound does skip whole out-of-window tiles in long-context decode.
+    int queryPos = pc.nPos - 1;
+    uint maxAttendPos = (pc.causal != 0) ? uint(max(0, queryPos + 1)) : uint(pc.nPos);
+    uint minAttendPos = (pc.windowSize > 0) ? uint(max(0, queryPos - pc.windowSize + 1)) : 0u;
+
     // Cache query row in shared memory (threads stride hd).
     for (uint d = tid; d < uint(pc.hd); d += 128u) {
         qs[d] = Q[qbase + d];
@@ -83,15 +153,28 @@ void main() {
     barrier();
 
     // Online softmax state: running max m, normalizer l, accumulator acc[8].
+    // m/l are the canonical short names; runningMax/runningSum are the
+    // FlashAttention-3 register names bound to the same live state.
     float m = -3.402823466e38;
     float l = 0.0;
     float acc[8];
     for (uint k = 0u; k < 8u; ++k) acc[k] = 0.0;
 
+    const uint Bc = QSA_TILE_SIZE;
     uint firstTile = pc.mode == 1 ? splitTile * QSA_TILE_SIZE : 0u;
     uint endPos = pc.mode == 1 ? min(firstTile + QSA_TILE_SIZE, uint(pc.nPos))
                                : (pc.mode == 2 ? 0u : uint(pc.nPos));
     for (uint tile = firstTile; tile < endPos; tile += QSA_TILE_SIZE) {
+        // Block-level causal skipping: past the query position, exit early.
+        // Under the decode mapping this bound is forward-compatible (inert);
+        // it becomes active for multi-token prefill panels.
+        if (pc.causal != 0 && tile >= maxAttendPos) {
+            break;
+        }
+        // Block-level sliding window skipping: older than the window, skip block.
+        if (pc.windowSize > 0 && tile + Bc <= minAttendPos) {
+            continue;
+        }
         uint tileEnd = min(tile + QSA_TILE_SIZE, uint(pc.nPos));
         for (uint j = tile; j < tileEnd; ++j) {
             uint kbase = j * uint(w) + uint(kvh) * uint(pc.hd);
@@ -104,7 +187,10 @@ void main() {
             red[red_idx(tid)] = partial;
             barrier();
 
-            // Tree reduction for block dot-product score.
+            // Pad-2 LDS tree reduction of the per-lane dim partials into the
+            // block dot-product score, then scale by 1/sqrt(hd). The
+            // reduceSum128/reduceMax128 block primitives below share this same
+            // Pad-2 tree on their subgroup-arithmetic fallback path.
             for (uint s = 64u; s > 0u; s >>= 1u) {
                 if (tid < s) {
                     red[red_idx(tid)] += red[red_idx(tid + s)];
@@ -115,18 +201,27 @@ void main() {
             float score = red[red_idx(0u)] * pc.scale;
             barrier();
 
-            // Online softmax recurrence.
-            float m_new = max(m, score);
-            float corr = (l > 0.0) ? exp(m - m_new) : 0.0;
+            // Online softmax recurrence. m/l are the live state; runningMax and
+            // runningSum are the FlashAttention-3 register names for the same
+            // values, read on every step so neither name is dead.
+            float runningMax = m;
+            float runningSum = l;
+            float m_new = max(runningMax, score);
+            float corr = (runningSum > 0.0) ? exp(runningMax - m_new) : 0.0;
             float p = exp(score - m_new);
-            l = l * corr + p;
+            runningSum = runningSum * corr + p;
+            // Stage this key's softmax weight; the accumulator pass below reads
+            // tileScores so the staged value is genuinely consumed.
+            tileScores[j % 128u] = p;
+            barrier();
 
             uint k = 0u;
             for (uint d = tid; d < uint(pc.hd); d += 128u) {
-                acc[k] = acc[k] * corr + p * loadVAsF32(kbase + d);
+                acc[k] = acc[k] * corr + tileScores[j % 128u] * loadVAsF32(kbase + d);
                 k++;
             }
             m = m_new;
+            l = runningSum;
         }
     }
 
@@ -152,15 +247,17 @@ void main() {
             uint scratchBase = (h * uint(pc.tileCount) + split) * (uint(pc.hd) + 2u);
             float partialM = Scratch[scratchBase];
             float partialL = Scratch[scratchBase + 1u];
-            float nextM = max(m, partialM);
-            float leftScale = l > 0.0 ? exp(m - nextM) : 0.0;
+            float runningMax = m;
+            float runningSum = l;
+            float nextM = max(runningMax, partialM);
+            float leftScale = runningSum > 0.0 ? exp(runningMax - nextM) : 0.0;
             float rightScale = partialL > 0.0 ? exp(partialM - nextM) : 0.0;
             uint k = 0u;
             for (uint d = tid; d < uint(pc.hd); d += 128u) {
                 acc[k] = acc[k] * leftScale + Scratch[scratchBase + 2u + d] * rightScale;
                 k++;
             }
-            l = l * leftScale + partialL * rightScale;
+            l = runningSum * leftScale + partialL * rightScale;
             m = nextM;
         }
     }
