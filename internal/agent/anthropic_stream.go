@@ -146,7 +146,7 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		finishProvider := BeginProviderCall(req)
 		req.Header.Set("Accept", "text/event-stream")
 
-		r, derr := p.Client.Do(req)
+		r, derr := p.streamingClient().Do(req)
 		finishProvider(providerResponseStatus(r), derr)
 		if derr != nil {
 			// A deterministic dial failure (refused/NXDOMAIN/TLS) cannot be retried away —
