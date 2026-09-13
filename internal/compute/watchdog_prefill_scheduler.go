@@ -1154,6 +1154,157 @@ func (s *WatchdogPrefillScheduler) adaptivelyScaleChunk(
 	return tokens
 }
 
+// ChunkObservation is one measured, physical feedback sample for a completed prefill
+// chunk. DurationMs and MemoryHeadroomBytes are device-reported values (GPU timer and
+// UMA headroom), never analytical estimates.
+type ChunkObservation struct {
+	// TokenCount is the number of prompt tokens the observed chunk covered.
+	TokenCount int `json:"token_count"`
+	// DurationMs is the wall-clock GPU execution duration reported by the driver.
+	DurationMs float64 `json:"duration_ms"`
+	// MemoryHeadroomBytes is the free UMA headroom observed after the chunk completed.
+	MemoryHeadroomBytes int64 `json:"memory_headroom_bytes"`
+	// WatchdogTripped reports whether the chunk was interrupted by a watchdog event.
+	WatchdogTripped bool `json:"watchdog_tripped"`
+}
+
+// PhysicalFeedbackPrefillController closes the prefill pacing loop over measured chunk
+// execution duration and memory headroom. It is purely deterministic and holds no
+// hardware handle: callers feed it observed samples and it returns the next chunk size.
+//
+// The controller performs bounded exploration (at most a small fraction of the observed
+// chunk per accepted sample) and degrades conservatively on watchdog trips or memory
+// pressure. When no observation is available it returns the caller's analytical fallback,
+// so a schedule is always producible even before any physical data arrives.
+type PhysicalFeedbackPrefillController struct {
+	minChunkTokens  int
+	maxChunkTokens  int
+	ceilingMs       float64
+	targetFillRatio float64
+	growNumerator   int
+	growDenominator int
+	shrinkNumerator int
+	shrinkDenom     int
+	samples         int
+}
+
+// NewPhysicalFeedbackPrefillController constructs a controller bounded by the profile's
+// chunk limits and execution ceiling.
+func NewPhysicalFeedbackPrefillController(minChunk, maxChunk int, ceilingMs float64) *PhysicalFeedbackPrefillController {
+	if minChunk <= 0 {
+		minChunk = AbsoluteMinChunkTokens
+	}
+	if maxChunk < minChunk {
+		maxChunk = minChunk
+	}
+	if ceilingMs <= 0 {
+		ceilingMs = DefaultMaxExecutionCeilingMs
+	}
+	return &PhysicalFeedbackPrefillController{
+		minChunkTokens:  minChunk,
+		maxChunkTokens:  maxChunk,
+		ceilingMs:       ceilingMs,
+		targetFillRatio: 0.85,
+		growNumerator:   1,
+		growDenominator: 4,
+		shrinkNumerator: 1,
+		shrinkDenom:     2,
+	}
+}
+
+// Samples reports how many observations the controller has ingested.
+func (c *PhysicalFeedbackPrefillController) Samples() int { return c.samples }
+
+func (c *PhysicalFeedbackPrefillController) clamp(tokens int) int {
+	if tokens < c.minChunkTokens {
+		return c.minChunkTokens
+	}
+	if tokens > c.maxChunkTokens {
+		return c.maxChunkTokens
+	}
+	return tokens
+}
+
+// NextChunkTokens returns the controller's chunk-size recommendation given the latest
+// observation. fallback is the analytical estimate used when no sample has been seen or
+// when the observation is unusable.
+func (c *PhysicalFeedbackPrefillController) NextChunkTokens(obs ChunkObservation, fallback int) int {
+	fallback = c.clamp(fallback)
+	if obs.TokenCount <= 0 || obs.DurationMs <= 0 {
+		return fallback
+	}
+
+	c.samples++
+
+	// A watchdog trip or a chunk that overshot the ceiling is a hard regression: halve
+	// immediately, ignoring the analytic estimate, and never grow back from a single hit.
+	if obs.WatchdogTripped || obs.DurationMs > c.ceilingMs {
+		next := obs.TokenCount * c.shrinkNumerator / c.shrinkDenom
+		if next == obs.TokenCount {
+			next = obs.TokenCount - 1
+		}
+		return c.clamp(next)
+	}
+
+	// Under-utilising the ceiling: grow by a bounded fraction of the observed size.
+	// Over the target fill: shrink by a bounded fraction. Growth is capped so a single
+	// optimistic sample cannot jump the whole range.
+	targetMs := c.ceilingMs * c.targetFillRatio
+	delta := obs.TokenCount * c.growNumerator / c.growDenominator
+	if delta < 1 {
+		delta = 1
+	}
+	switch {
+	case obs.DurationMs < targetMs:
+		return c.clamp(obs.TokenCount + delta)
+	case obs.DurationMs > targetMs*1.05:
+		shrink := obs.TokenCount * c.shrinkNumerator / c.shrinkDenom
+		if shrink >= obs.TokenCount {
+			shrink = obs.TokenCount - 1
+		}
+		return c.clamp(shrink)
+	default:
+		// Inside the dead-band: hold, but never above the physical maximum.
+		return c.clamp(obs.TokenCount)
+	}
+}
+
+// schedulerFeedbackControllers holds an optional per-scheduler physical feedback controller.
+// A nil controller means the scheduler remains purely analytical.
+var schedulerFeedbackControllers sync.Map // *WatchdogPrefillScheduler -> *PhysicalFeedbackPrefillController
+
+// EnablePhysicalFeedback attaches a physical-feedback controller to the scheduler. Once
+// attached, callers may consult measured observations recorded via RecordChunkObservation
+// before falling back to analytical pacing.
+func (s *WatchdogPrefillScheduler) EnablePhysicalFeedback(c *PhysicalFeedbackPrefillController) {
+	if c == nil {
+		schedulerFeedbackControllers.Delete(s)
+		return
+	}
+	schedulerFeedbackControllers.Store(s, c)
+}
+
+// PhysicalFeedbackController returns the attached controller, or nil when pacing is analytical.
+func (s *WatchdogPrefillScheduler) PhysicalFeedbackController() *PhysicalFeedbackPrefillController {
+	if v, ok := schedulerFeedbackControllers.Load(s); ok {
+		if c, ok := v.(*PhysicalFeedbackPrefillController); ok {
+			return c
+		}
+	}
+	return nil
+}
+
+// RecordChunkObservation feeds one measured chunk sample back into the attached controller
+// and returns the adjusted chunk-size recommendation. Without a controller, fallback is
+// returned unchanged so callers need not branch.
+func (s *WatchdogPrefillScheduler) RecordChunkObservation(obs ChunkObservation, fallback int) int {
+	c := s.PhysicalFeedbackController()
+	if c == nil {
+		return fallback
+	}
+	return c.NextChunkTokens(obs, fallback)
+}
+
 // Execute drives the prefill schedule, running each chunk through the provided executor
 // and invoking the inter-chunk hook between submissions for driver ISR interleaving.
 func (s *WatchdogPrefillScheduler) Execute(

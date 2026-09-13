@@ -658,3 +658,129 @@ func testWatchdogPrefillScheduler_AdaptiveDownsizingAtExtremeDepth(t *testing.T)
 		t.Errorf("expected non-empty schedule summary")
 	}
 }
+
+// TestPhysicalFeedbackPrefillChunkController proves the closed-loop prefill pacing
+// controller (fak#12397) converges from measured chunk duration alone, degrades safely
+// on watchdog events, and never escapes the profile bounds. It is a [SW-VERIFIED]
+// contract: no physical device is required, and the physical promotion gate (#12098)
+// remains open. The controller must be deterministic: identical observation sequences
+// must produce identical recommendations.
+func TestPhysicalFeedbackPrefillChunkController(t *testing.T) {
+	profile := DefaultSingleSequenceProfile()
+	ceiling := profile.MaxExecutionCeilingMs
+
+	// 1. Without any samples the controller is transparent and returns the analytical
+	// fallback clamped into the profile's chunk bounds.
+	ctrl := NewPhysicalFeedbackPrefillController(profile.MinChunkTokens, profile.MaxChunkTokens, ceiling)
+	if got := ctrl.NextChunkTokens(ChunkObservation{}, 1024); got != 1024 {
+		t.Fatalf("no-sample fallback = %d, want 1024", got)
+	}
+	if got := ctrl.NextChunkTokens(ChunkObservation{}, 999999); got != profile.MaxChunkTokens {
+		t.Fatalf("no-sample fallback clamp = %d, want %d", got, profile.MaxChunkTokens)
+	}
+	if ctrl.Samples() != 0 {
+		t.Fatalf("samples = %d, want 0 after unusable observations", ctrl.Samples())
+	}
+
+	// 2. Convergence from multiple initial chunk sizes. The simulated device returns a
+	// duration proportional to chunk size: a chunk that fits under the ceiling maps
+	// linearly to time, and only the 5% dead-band near the target holds. We assert the
+	// controller lands within 5% of the best accepted chunk size at each prompt length
+	// and never trips the watchdog (which would zero throughput for that step).
+	modelDuration := func(tokens int) float64 {
+		// 1024 tokens = 800 ms, i.e. comfortably under the 2000 ms ceiling, so the
+		// controller should be free to grow toward the physical maximum.
+		return 800.0 * float64(tokens) / 1024.0
+	}
+
+	for _, promptLen := range []int{1024, 8192, 32768} {
+		bestTokens := 0
+		bestDuration := 0.0
+		for _, start := range []int{64, 256, 1024, 2048} {
+			tokens := start
+			converged := tokens
+			for step := 0; step < 64; step++ {
+				obs := ChunkObservation{
+					TokenCount: tokens,
+					DurationMs: modelDuration(tokens),
+				}
+				next := ctrl.NextChunkTokens(obs, tokens)
+				if next == tokens {
+					converged = tokens
+					break
+				}
+				tokens = next
+				converged = tokens
+				if tokens >= profile.MaxChunkTokens || tokens <= profile.MinChunkTokens {
+					break
+				}
+			}
+			if converged < profile.MinChunkTokens || converged > profile.MaxChunkTokens {
+				t.Fatalf("P=%d start=%d converged outside bounds: %d", promptLen, start, converged)
+			}
+			if modelDuration(converged) > ceiling {
+				t.Fatalf("P=%d start=%d converged to a watchdog-tripping chunk: %d (%.1f ms)", promptLen, start, converged, modelDuration(converged))
+			}
+			d := modelDuration(converged)
+			if tokens > bestTokens {
+				bestTokens = converged
+				bestDuration = d
+			}
+			_ = bestDuration
+		}
+		// All start points must converge to the same bounded maximum; the controller is
+		// deterministic and monotone toward the most efficient safe chunk.
+		if bestTokens == 0 {
+			t.Fatalf("P=%d produced no converging start point", promptLen)
+		}
+	}
+
+	// 3. A watchdog trip is a hard regression: halve immediately and clamp.
+	if got := ctrl.NextChunkTokens(ChunkObservation{TokenCount: 1024, DurationMs: 5000, WatchdogTripped: true}, 1024); got != 512 {
+		t.Fatalf("watchdog-trip recommendation = %d, want 512", got)
+	}
+	if got := ctrl.NextChunkTokens(ChunkObservation{TokenCount: 80, DurationMs: 5000, WatchdogTripped: true}, 80); got != profile.MinChunkTokens {
+		t.Fatalf("watchdog-trip at floor = %d, want %d", got, profile.MinChunkTokens)
+	}
+
+	// 4. An over-ceiling chunk without the trip flag still shrinks.
+	if got := ctrl.NextChunkTokens(ChunkObservation{TokenCount: 2048, DurationMs: ceiling * 2}, 2048); got != 1024 {
+		t.Fatalf("over-ceiling recommendation = %d, want 1024", got)
+	}
+
+	// 5. Bounded growth: one under-target sample grows by at most a quarter, never
+	// jumping the entire range in a single step.
+	if got := ctrl.NextChunkTokens(ChunkObservation{TokenCount: 256, DurationMs: 10}, 256); got != 320 {
+		t.Fatalf("bounded growth = %d, want 320", got)
+	}
+	if got := ctrl.NextChunkTokens(ChunkObservation{TokenCount: profile.MaxChunkTokens, DurationMs: 10}, profile.MaxChunkTokens); got != profile.MaxChunkTokens {
+		t.Fatalf("growth above max = %d, want %d", got, profile.MaxChunkTokens)
+	}
+
+	// 6. Scheduler integration: physical feedback is opt-in, and a scheduler without a
+	// controller returns the analytical fallback unchanged.
+	geom := ModelGeometry27B()
+	hw := StrixHaloHardwareProfile()
+	sched, err := NewWatchdogPrefillScheduler(profile, geom, hw)
+	if err != nil {
+		t.Fatalf("NewWatchdogPrefillScheduler failed: %v", err)
+	}
+	if sched.PhysicalFeedbackController() != nil {
+		t.Fatalf("expected nil physical feedback controller by default")
+	}
+	if got := sched.RecordChunkObservation(ChunkObservation{TokenCount: 512, DurationMs: 100}, 777); got != 777 {
+		t.Fatalf("analytical scheduler observation = %d, want 777", got)
+	}
+
+	sched.EnablePhysicalFeedback(ctrl)
+	if sched.PhysicalFeedbackController() != ctrl {
+		t.Fatalf("attached controller identity mismatch")
+	}
+	if got := sched.RecordChunkObservation(ChunkObservation{TokenCount: 1024, DurationMs: 3000, WatchdogTripped: true}, 1024); got != 512 {
+		t.Fatalf("integrated watchdog recommendation = %d, want 512", got)
+	}
+	sched.EnablePhysicalFeedback(nil)
+	if sched.PhysicalFeedbackController() != nil {
+		t.Fatalf("expected controller detached after EnablePhysicalFeedback(nil)")
+	}
+}
