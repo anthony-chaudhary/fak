@@ -143,7 +143,10 @@ func (s *Session) verifyQwen35DevicePanelTransaction(ids []int, boundaryLogits [
 	started := time.Now()
 	receipt.Path = targetVerificationQwen38DevicePath
 	receipt.TargetVerificationOperations = 1
-	result, callErr := seq.Qwen35SequencePrefill(request)
+	result, callErr := s.qwen35HAL.mutateSequence(s.Backend, func(states []compute.Qwen35SequenceState) (compute.Qwen35SequencePrefillResult, error) {
+		request.States = states
+		return seq.Qwen35SequencePrefill(request)
+	})
 	prefixReplay = result.PrefixReplay
 	if callErr != nil {
 		receipt.Accounting.TargetVerification = measuredSpeculativeCost(started)
