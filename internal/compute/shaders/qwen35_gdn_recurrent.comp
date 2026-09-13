@@ -22,6 +22,12 @@ shared float rmsInv;
 // dimension. qkSum broadcasts the two reduced norms after the tree.
 shared float qkPart[2][64];
 shared float qkSum[2];
+// Cooperative value-state RMS reduction scratch. The lane-0 serial walk of
+// readout[] left every other lane idle behind two barriers; each lane now
+// accumulates a strided slice of readout[d]^2, the shared tree reduces across
+// the group, and lane 0 broadcasts one rmsInv. The gated output equation is
+// unchanged and each value head still has exactly one normalization factor.
+shared float rmsPart[64];
 
 float silu(float x) { return x / (1.0 + exp(-x)); }
 float softplus(float x) { return x > 20.0 ? x : log(1.0 + exp(x)); }
@@ -90,10 +96,20 @@ void main() {
         }
         barrier();
 
+        // Cooperative value-state RMS reduction: each lane accumulates a
+        // strided slice of readout[]^2, then the shared tree reduces across the
+        // group and lane 0 broadcasts one rmsInv for this value head. This
+        // replaces the lane-0 serial walk that left the other 63 lanes idle.
+        float rmsPartial = 0.0;
+        for (int d = lane; d < pc.vHd; d += 64) rmsPartial += readout[d] * readout[d];
+        rmsPart[lane] = rmsPartial;
+        barrier();
+        for (int s = 32; s > 0; s >>= 1) {
+            if (lane < s) rmsPart[lane] += rmsPart[lane + s];
+            barrier();
+        }
         if (lane == 0) {
-            float sum = 0.0;
-            for (int d = 0; d < pc.vHd; ++d) sum += readout[d] * readout[d];
-            rmsInv = inversesqrt(sum / float(pc.vHd) + pc.eps);
+            rmsInv = inversesqrt(rmsPart[0] / float(pc.vHd) + pc.eps);
         }
         barrier();
 

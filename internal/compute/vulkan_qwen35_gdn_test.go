@@ -823,3 +823,174 @@ func TestQwen35GDNVulkanQKNormCooperativeReduction(t *testing.T) {
 		testGDN(t, 3, 1, 2, 4, 65, 3, true, .00025)
 	})
 }
+
+// TestQwen35GDNVulkanValueRMSParallelParity witnesses the Strix P0 leaf
+// "parallelize the GDN value-state RMS reduction"
+// (anthony-chaudhary/fak#12532): the post-recurrence RMS factor was produced by
+// a serial lane-0 walk of readout[] while the other 63 invocations waited
+// behind two barriers. Each lane now accumulates a strided slice of
+// readout[d]^2, the shared tree reduces across the group, and lane 0 broadcasts
+// one rmsInv per value head.
+//
+// The test is split so the source contract always runs (no GPU required) and
+// the numeric parity runs whenever a Vulkan device is present:
+//
+//  1. Shader-contract: the recurrent shader must contain the cooperative
+//     strided value-state accumulation + shared tree reduction and must NOT
+//     reintroduce the serial lane-0 walk over pc.vHd. This fails
+//     deterministically if the serialization returns.
+//  2. Numeric parity: executing the shader through Qwen35GDNPreprojected on
+//     deterministic Qwen3.8 GDN geometry, including non-power-of-two value
+//     widths, must match the scalar oracle within the established tolerance,
+//     proving the cooperative reduction preserves one exact normalization
+//     factor per value head.
+func TestQwen35GDNVulkanValueRMSParallelParity(t *testing.T) {
+	t.Run("ShaderContract", func(t *testing.T) {
+		candidates := []string{
+			"shaders/qwen35_gdn_recurrent.comp",
+			"internal/compute/shaders/qwen35_gdn_recurrent.comp",
+			filepath.Join("..", "internal", "compute", "shaders", "qwen35_gdn_recurrent.comp"),
+		}
+		var content, foundPath string
+		for _, p := range candidates {
+			data, err := os.ReadFile(p)
+			if err == nil {
+				content = string(data)
+				foundPath = p
+				break
+			}
+		}
+		if content == "" {
+			t.Fatalf("could not find qwen35_gdn_recurrent.comp in any candidate path: %v", candidates)
+		}
+
+		// Cooperative value-state RMS reduction seams the leaf requires.
+		requiredTokens := []string{
+			"shared float rmsPart[64];",
+			"float rmsPartial = 0.0;",
+			"for (int d = lane; d < pc.vHd; d += 64) rmsPartial += readout[d] * readout[d];",
+			"rmsPart[lane] = rmsPartial;",
+			"rmsPart[lane] += rmsPart[lane + s];",
+			"rmsInv = inversesqrt(rmsPart[0] / float(pc.vHd) + pc.eps);",
+		}
+		for _, tok := range requiredTokens {
+			if !strings.Contains(content, tok) {
+				t.Errorf("shader %s missing cooperative-RMS token %q", foundPath, tok)
+			}
+		}
+
+		// The serial lane-0 walk that must NOT come back: a single-threaded loop
+		// across the entire value-head dimension accumulating the RMS sum.
+		serialTokens := []string{
+			"if (lane == 0) {\n            float sum = 0.0;",
+			"for (int d = 0; d < pc.vHd; ++d) sum += readout[d] * readout[d];",
+			"rmsInv = inversesqrt(sum / float(pc.vHd) + pc.eps);",
+		}
+		for _, tok := range serialTokens {
+			if strings.Contains(content, tok) {
+				t.Errorf("shader %s reintroduced the serial lane-0 value-state RMS walk: %q", foundPath, tok)
+			}
+		}
+	})
+
+	// Numeric parity is device-gated: the source contract above is the
+	// deterministic software witness; this rung proves semantic preservation on
+	// a live Vulkan device (or is skipped when none is present).
+	t.Run("NumericParity", func(t *testing.T) {
+		be := vk(t)
+		if be == nil {
+			t.Skip("no Vulkan device available")
+		}
+
+		testGDN := func(t *testing.T, tokens, nK, nV, kHd, vHd, kernel int, nonzeroRecState bool, inputScale float32) {
+			t.Helper()
+			convDim := 2*nK*kHd + nV*vHd
+			valueDim := nV * vHd
+			mixed := make([]float32, tokens*convDim)
+			z := make([]float32, tokens*valueDim)
+			for i := range mixed {
+				mixed[i] = float32((i%17)-8) * inputScale
+			}
+			for i := range z {
+				z[i] = float32((i%23)-11) * .15
+			}
+			beta := make([]float32, tokens*nV)
+			alpha := make([]float32, tokens*nV)
+			for i := range beta {
+				beta[i] = float32((i%13)-6) * .2
+				alpha[i] = float32((i%11)-5) * .15
+			}
+			convW := make([]float32, convDim*kernel)
+			for c := 0; c < convDim; c++ {
+				convW[c*kernel] = .1
+				convW[c*kernel+1] = -.2
+				convW[c*kernel+2] = .7
+			}
+			aLog := make([]float32, nV)
+			dtBias := make([]float32, nV)
+			for h := 0; h < nV; h++ {
+				aLog[h] = -1.0 + float32(h)*0.1
+				dtBias[h] = 0.1 - float32(h)*0.05
+			}
+			norm := make([]float32, vHd)
+			for i := range norm {
+				norm[i] = .9 + float32(i%5)*.05
+			}
+			convStateHost := make([]float32, (kernel-1)*convDim)
+			for i := range convStateHost {
+				convStateHost[i] = float32((i%7)-3) * (inputScale * .8)
+			}
+			recStateHost := make([]float32, nV*kHd*vHd)
+			if nonzeroRecState {
+				for i := range recStateHost {
+					recStateHost[i] = float32((i%19)-9) * .03
+				}
+			}
+			upload := func(shape []int, data []float32, class MemoryClass, name string) Tensor {
+				tensor := be.UploadClass(NewF32(Default(), shape, data), F32, class, name)
+				t.Cleanup(func() { be.Free(tensor) })
+				return tensor
+			}
+			m := upload([]int{tokens, convDim}, mixed, MemoryActivation, "gdn mixed")
+			zt := upload([]int{tokens, valueDim}, z, MemoryActivation, "gdn z")
+			bt := upload([]int{tokens, nV}, beta, MemoryActivation, "gdn beta")
+			at := upload([]int{tokens, nV}, alpha, MemoryActivation, "gdn alpha")
+			cw := upload([]int{convDim, kernel}, convW, MemoryWeights, "gdn conv")
+			al := upload([]int{nV}, aLog, MemoryWeights, "gdn alog")
+			dt := upload([]int{nV}, dtBias, MemoryWeights, "gdn dt")
+			nw := upload([]int{vHd}, norm, MemoryWeights, "gdn norm")
+			cs := upload([]int{kernel - 1, convDim}, convStateHost, MemoryKVCache, "gdn conv state")
+			rs := upload([]int{nV, kHd, vHd}, recStateHost, MemoryKVCache, "gdn recurrent state")
+			out, err := be.Qwen35GDNPreprojected(m, zt, bt, at, cw, al, dt, nw, cs, rs, tokens, nK, nV, kHd, vHd, kernel, 1e-5)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { be.Free(out) })
+			got := be.Read(out)
+			want, _, _ := qwen35GDNPreprojectedOracle(mixed, z, beta, alpha, convW, aLog, dtBias, norm, convStateHost, recStateHost, tokens, nK, nV, kHd, vHd, kernel, 1e-5)
+			if len(got) != len(want) {
+				t.Fatalf("output length got=%d want=%d", len(got), len(want))
+			}
+			worst := 0.0
+			for i := range got {
+				if math.IsNaN(float64(got[i])) || math.IsInf(float64(got[i]), 0) {
+					t.Fatalf("output[%d] not finite: %g", i, got[i])
+				}
+				delta := math.Abs(float64(got[i] - want[i]))
+				if delta > worst {
+					worst = delta
+				}
+			}
+			if worst > 2e-4 {
+				t.Fatalf("parallel value-state RMS reduction changed output: worst max abs delta %g > 2e-4", worst)
+			}
+		}
+
+		// vHd=65 makes the strided accumulation span two passes per lane and
+		// leaves 63 of 64 lanes idle in the final (64th) slot, exercising the
+		// non-power-of-two logical width the current geometry supports.
+		testGDN(t, 2, 1, 1, 2, 65, 3, false, .025)
+		testGDN(t, 5, 2, 4, 4, 65, 3, true, .025)
+		testGDN(t, 3, 1, 2, 4, 65, 3, true, .00025)
+	})
+}
