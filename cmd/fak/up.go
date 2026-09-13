@@ -205,6 +205,75 @@ func runAllInOneUp(argv []string) {
 	_ = sup.Shutdown(shutdownTimeout)
 }
 
+// applyTurnkeyModelOverride applies a --model override to an already-planned
+// TurnkeyProfile. When the override names a known tier (case-insensitive), the
+// plan's ENTIRE geometry is replaced with that tier's StandardTiers entry and
+// the KV bytes-per-token, context bucket, and headroom are recomputed for the
+// new geometry so no stale auto-selected-tier accounting survives. When the
+// override is not a known tier (a raw .gguf path, an hf:// URI, or an arbitrary
+// alias), only the ModelID/Name labels change, preserving the historical
+// passthrough behavior. An explicit --context override is applied by the caller
+// afterwards, so it still wins over the recomputed bucket.
+func applyTurnkeyModelOverride(plan *macfit.TurnkeyProfile, memoryBytes uint64, modelOverride string) error {
+	tier, ok := macfit.LookupModelTier(modelOverride)
+	if !ok {
+		plan.Tier.ModelID = modelOverride
+		plan.Tier.Name = modelOverride
+		return nil
+	}
+
+	reserveBytes := (memoryBytes * 20) / 100
+	if reserveBytes == 0 {
+		reserveBytes = 1
+	}
+	// A named tier that cannot fit within 80% usable memory would otherwise emit a
+	// physically impossible plan (weights alone exceeding RAM) while still printing
+	// the ">= 20% headroom" guarantee. Refuse it exactly as the auto-selection path
+	// does, rather than silently carrying the base plan's stale headroom.
+	usableBytes := memoryBytes - reserveBytes
+	if tier.WeightBytes >= usableBytes {
+		return fmt.Errorf("model tier %s requires %.2f GiB but only %.2f GiB is usable on this host (20%% headroom reserved); choose a smaller tier or a raw .gguf/hf:// override",
+			tier.Name, float64(tier.WeightBytes)/float64(macfit.GiB), float64(usableBytes)/float64(macfit.GiB))
+	}
+
+	plan.Tier = tier
+	plan.ReserveBytes = reserveBytes
+
+	kvpt, err := macfit.KVBytesPerTokenForTier(tier, plan.KVPrecision)
+	if err != nil {
+		return err
+	}
+	plan.KVBytesPerToken = kvpt
+
+	kvPoolBytes := usableBytes - tier.WeightBytes
+	plan.KVPoolBytes = kvPoolBytes
+
+	maxTokens := uint64(0)
+	if kvpt > 0 {
+		maxTokens = kvPoolBytes / kvpt
+	}
+	var contextBudget uint64
+	for _, bucket := range []uint64{65536, 32768, 16384, 8192, 4096, 2048, 1024, 512} {
+		if maxTokens >= bucket {
+			contextBudget = bucket
+			break
+		}
+	}
+	// Falling back to maxTokens (when no standard bucket fits) also covers the
+	// empty-pool case: a hardcoded 512 floor could allocate more KV than the pool
+	// holds and quietly break the >= 20% headroom guarantee, so the context budget
+	// must never exceed what maxTokens actually permits.
+	if contextBudget == 0 {
+		contextBudget = maxTokens
+	}
+	plan.ContextBudgetTokens = contextBudget
+
+	allocatedBytes := tier.WeightBytes + (contextBudget * kvpt)
+	plan.HeadroomBytes = memoryBytes - allocatedBytes
+	plan.HeadroomRatio = float64(plan.HeadroomBytes) / float64(memoryBytes)
+	return nil
+}
+
 func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	fs := flag.NewFlagSet("up", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -245,8 +314,10 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	}
 
 	if *modelOverride != "" {
-		plan.Tier.ModelID = *modelOverride
-		plan.Tier.Name = *modelOverride
+		if err := applyTurnkeyModelOverride(&plan, memoryBytes, *modelOverride); err != nil {
+			fmt.Fprintf(stderr, "fak up: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	if *contextOverride > 0 {
 		plan.ContextBudgetTokens = *contextOverride

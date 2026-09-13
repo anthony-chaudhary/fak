@@ -468,6 +468,40 @@ func TestFakUpTurnkeyBootstrap(t *testing.T) {
 		}
 	})
 
+	// Issue #12986 red-then-green witness: `fak up --model 3B` must select the
+	// 3B tier's GEOMETRY, not merely relabel the auto-selected 27B. This drives
+	// the real dry-run CLI path (which exists before the fix), so on the parent
+	// commit the auto 27B budget (16 GiB / 64 layers) leaks through and the test
+	// fails; after the fix it reports the 3B geometry (2 GiB / 16 layers).
+	t.Run("ModelOverrideSelectsTierGeometry", func(t *testing.T) {
+		var out bytes.Buffer
+		var errOut bytes.Buffer
+		runTurnkeyUp(nil, &out, &errOut, []string{"--dry-run", "--memory-gib", "36", "--model", "3B", "--json"})
+		var plan macfit.TurnkeyProfile
+		if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
+			t.Fatalf("unmarshal override dry-run json: %v\noutput: %s\nerr: %s", err, out.String(), errOut.String())
+		}
+		if plan.Tier.Name != "3B" {
+			t.Fatalf("--model 3B plan tier name = %q, want 3B", plan.Tier.Name)
+		}
+		if plan.Tier.WeightBytes != 2*macfit.GiB {
+			t.Fatalf("--model 3B WeightBytes = %d (%.2f GiB), want %d (2.00 GiB); 16 GiB means the 27B geometry leaked",
+				plan.Tier.WeightBytes, float64(plan.Tier.WeightBytes)/float64(macfit.GiB), 2*macfit.GiB)
+		}
+		if plan.Tier.Layers != 16 {
+			t.Fatalf("--model 3B Layers = %d, want 16", plan.Tier.Layers)
+		}
+		// The stale 27B KV budget (Layers=64,KVHeads=4,HeadDim=128) must not survive:
+		// the 3B geometry is Layers=16,KVHeads=2,HeadDim=128 at FP16.
+		threeKV := uint64(2 * 16 * 2 * 128 * 2)
+		if plan.KVBytesPerToken != threeKV {
+			t.Fatalf("--model 3B KVBytesPerToken = %d, want %d (3B geometry)", plan.KVBytesPerToken, threeKV)
+		}
+		if plan.HeadroomRatio < 0.20 {
+			t.Fatalf("--model 3B headroom = %.3f, want >= 0.20", plan.HeadroomRatio)
+		}
+	})
+
 	// Scoped Acceptance Criterion 3: OpenAI-compatible completion endpoint answers successfully on loopback.
 	t.Run("OpenAICompatibleLoopbackCompletions", func(t *testing.T) {
 		plan, err := macfit.ConfigureTurnkey(36 * macfit.GiB)
@@ -851,5 +885,86 @@ func TestUpInKernelModelExecution(t *testing.T) {
 	_, loadErr := startTurnkeyServer(ctx, missingPlan, "127.0.0.1:0", false)
 	if loadErr == nil {
 		t.Fatal("startTurnkeyServer succeeded for nonexistent model, want error")
+	}
+}
+
+// TestApplyTurnkeyModelOverrideSwapsGeometry pins the issue-12986 contract:
+// `fak up --model <tier>` must select the named tier's GEOMETRY, not merely
+// relabel the auto-selected tier. On a 36 GiB box the auto tier is 27B, so a
+// "3B" override must drop WeightBytes to 2 GiB and Layers to 16 and recompute
+// KVBytesPerToken for the 3B geometry - while an unknown override (an alias,
+// .gguf path, or hf:// URI) keeps the label-only passthrough.
+func TestApplyTurnkeyModelOverrideSwapsGeometry(t *testing.T) {
+	// Drive the real dry-run CLI path (present before the fix) so this test
+	// compiles against the parent source and fails there, then passes on the
+	// fix. Issue #12986: `--model <tier>` must select the named tier's geometry.
+	parse := func(t *testing.T, argv ...string) macfit.TurnkeyProfile {
+		t.Helper()
+		var out, errOut bytes.Buffer
+		runTurnkeyUp(nil, &out, &errOut, append([]string{"--dry-run", "--memory-gib", "36"}, argv...))
+		var plan macfit.TurnkeyProfile
+		if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
+			t.Fatalf("unmarshal dry-run json: %v\noutput: %s\nerr: %s", err, out.String(), errOut.String())
+		}
+		return plan
+	}
+
+	base := parse(t, "--json")
+	if base.Tier.Name != "27B" {
+		t.Fatalf("auto tier on 36 GiB = %q, want 27B", base.Tier.Name)
+	}
+
+	three := parse(t, "--model", "3B", "--json")
+	if three.Tier.Name != "3B" || three.Tier.WeightBytes != 2*macfit.GiB || three.Tier.Layers != 16 {
+		t.Fatalf("--model 3B geometry = name %q weight %d layers %d; want 3B / %d / 16",
+			three.Tier.Name, three.Tier.WeightBytes, three.Tier.Layers, 2*macfit.GiB)
+	}
+	if three.KVBytesPerToken != uint64(2*16*2*128*2) {
+		t.Fatalf("--model 3B KVBytesPerToken = %d, want 3B geometry %d (not 27B %d)",
+			three.KVBytesPerToken, uint64(2*16*2*128*2), base.KVBytesPerToken)
+	}
+	allocated := three.Tier.WeightBytes + three.ContextBudgetTokens*three.KVBytesPerToken
+	if allocated+three.HeadroomBytes != 36*macfit.GiB {
+		t.Fatalf("3B allocated (%d) + headroom (%d) != 36 GiB", allocated, three.HeadroomBytes)
+	}
+	if three.HeadroomRatio < 0.20 {
+		t.Fatalf("3B headroom ratio = %.3f, want >= 0.20", three.HeadroomRatio)
+	}
+
+	twentySeven := parse(t, "--model", "27B", "--json")
+	if twentySeven.Tier.WeightBytes != 16*macfit.GiB {
+		t.Fatalf("--model 27B weight = %d, want %d", twentySeven.Tier.WeightBytes, 16*macfit.GiB)
+	}
+
+	// An unknown override keeps the label-only passthrough: the geometry stays at
+	// the auto-selected tier's.
+	unknown := parse(t, "--model", "qwen3.8-3b", "--json")
+	if unknown.Tier.WeightBytes != base.Tier.WeightBytes {
+		t.Fatalf("unknown override changed weight from %d to %d; want label-only passthrough", base.Tier.WeightBytes, unknown.Tier.WeightBytes)
+	}
+}
+
+// TestModelOverride3BSelectsGeometry is the standalone red-then-green regression
+// witness for issue #12986. It exercises ONLY the pre-existing dry-run CLI path,
+// so it compiles against the parent commit: there, `--model 3B` relabels the
+// auto-selected 27B tier and WeightBytes stays at 16 GiB, failing the assertion;
+// after the fix it reports the 3B geometry (2 GiB / 16 layers).
+func TestModelOverride3BSelectsGeometry(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	runTurnkeyUp(nil, &out, &errOut, []string{"--dry-run", "--memory-gib", "36", "--model", "3B", "--json"})
+	var plan macfit.TurnkeyProfile
+	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
+		t.Fatalf("unmarshal override dry-run json: %v\noutput: %s\nerr: %s", err, out.String(), errOut.String())
+	}
+	if plan.Tier.WeightBytes != 2*macfit.GiB {
+		t.Fatalf("--model 3B WeightBytes = %d (%.2f GiB), want %d (2.00 GiB); the auto 27B geometry leaked",
+			plan.Tier.WeightBytes, float64(plan.Tier.WeightBytes)/float64(macfit.GiB), 2*macfit.GiB)
+	}
+	if plan.Tier.Layers != 16 {
+		t.Fatalf("--model 3B Layers = %d, want 16", plan.Tier.Layers)
+	}
+	if plan.KVBytesPerToken != uint64(2*16*2*128*2) {
+		t.Fatalf("--model 3B KVBytesPerToken = %d, want the 3B geometry %d", plan.KVBytesPerToken, uint64(2*16*2*128*2))
 	}
 }

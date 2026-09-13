@@ -263,6 +263,33 @@ func SelectModelTier(memoryBytes uint64) ModelTier {
 	return StandardTiers[len(StandardTiers)-1]
 }
 
+// LookupModelTier resolves a friendly tier name (e.g. "3B", "27B") to its
+// StandardTiers geometry. It is case-insensitive on the Name field and
+// returns false when no tier matches.
+func LookupModelTier(name string) (ModelTier, bool) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return ModelTier{}, false
+	}
+	for _, tier := range StandardTiers {
+		if strings.EqualFold(tier.Name, trimmed) {
+			return tier, true
+		}
+	}
+	return ModelTier{}, false
+}
+
+// KVBytesPerTokenForTier exposes the per-token KV resident cost for a tier's
+// geometry at the given precision, so a caller that swaps in a replacement tier
+// can recompute a plan's KV accounting instead of carrying a stale value. An
+// empty precision is treated as FP16, matching ConfigureTurnkeyWithOptions.
+func KVBytesPerTokenForTier(tier ModelTier, prec model.KVPrecision) (uint64, error) {
+	if prec == "" {
+		prec = model.KVPrecisionFP16
+	}
+	return kvBytesPerToken(tier, prec)
+}
+
 // TurnkeyOptions configures turnkey model sizing, supporting dynamic memory pressure and display buffer accounting.
 type TurnkeyOptions struct {
 	AvailableBytes     uint64 // live available memory in bytes (0 = auto-detect via compute.HostSystemMemoryInfo)
