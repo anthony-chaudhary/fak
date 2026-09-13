@@ -247,6 +247,49 @@ func TestTurnkeyIncrementalStreamCancellationStopsPlanner(t *testing.T) {
 	}
 }
 
+// perTokenCapturingStreamPlanner records whether the turnkey streaming call site
+// requested true per-token forwarding, and returns a plain completion.
+type perTokenCapturingStreamPlanner struct {
+	perToken bool
+}
+
+func (p *perTokenCapturingStreamPlanner) Model() string            { return "local" }
+func (p *perTokenCapturingStreamPlanner) StreamingSupported() bool { return true }
+func (p *perTokenCapturingStreamPlanner) Complete(context.Context, []agent.Message, []agent.ToolDef, ...agent.SampleOpt) (*agent.Completion, error) {
+	return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: "hi"}}, nil
+}
+func (p *perTokenCapturingStreamPlanner) CompleteStream(_ context.Context, sink agent.StreamSink, _ []agent.Message, _ []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	var sp agent.SampleParams
+	for _, opt := range opts {
+		opt(&sp)
+	}
+	p.perToken = sp.PerTokenStream != nil && *sp.PerTokenStream
+	if err := sink("hi"); err != nil {
+		return nil, err
+	}
+	return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: "hi"}}, nil
+}
+
+// TestTurnkeyStreamRequestsPerTokenByDefault is the `fak up` default witness: the turnkey
+// streaming call site must pass WithPerTokenStream(true) so a real in-kernel planner
+// forwards live deltas without any env var. A planner that does not opt in (env off)
+// would collapse to one buffered delta, which is what this pins against.
+func TestTurnkeyStreamRequestsPerTokenByDefault(t *testing.T) {
+	t.Setenv("FAK_STREAM_INKERNEL_PER_TOKEN", "")
+	p := &perTokenCapturingStreamPlanner{}
+	ts := newTurnkeyStreamTestServer(p)
+	defer ts.Close()
+	resp := postTurnkeyStream(t, context.Background(), ts.URL)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if !p.perToken {
+		t.Fatalf("turnkey stream did not request per-token forwarding; body=%s", body)
+	}
+	if !bytes.Contains(body, []byte(`"content":"hi"`)) || !bytes.Contains(body, []byte("[DONE]")) {
+		t.Fatalf("stream did not deliver content: %s", body)
+	}
+}
+
 func TestTurnkeyStreamRemainder(t *testing.T) {
 	for _, tc := range []struct {
 		streamed, completed, want string

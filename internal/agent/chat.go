@@ -544,6 +544,11 @@ type SampleParams struct {
 	ElideStaleReads *bool
 	// DeferColdTools overrides the planner's configured cold tool deferral for this request.
 	DeferColdTools *bool
+	// PerTokenStream overrides the FAK_STREAM_INKERNEL_PER_TOKEN gate for THIS
+	// CompleteStream call: true forces the live per-token decode seam, false forces
+	// the buffered one-post-hoc-delta projection. A nil pointer keeps the package
+	// default (env-gated), so callers that never set it are byte-for-byte unchanged.
+	PerTokenStream *bool
 	// GuidedDecode carries provider-native guided-decode fields that are not part of
 	// the OpenAI core wire but are accepted by OpenAI-compatible ride engines such as
 	// vLLM/SGLang (`guided_json`, `guided_regex`, `guided_grammar`, `guided_choice`,

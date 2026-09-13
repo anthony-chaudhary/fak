@@ -102,7 +102,10 @@ func writeTurnkeySSEData(w io.Writer, value any) error {
 
 func (s *turnkeyServer) handleChatCompletionsStream(w http.ResponseWriter, r *http.Request, req gateway.ChatRequest, modelID string, sp agent.StreamingPlanner) {
 	stream := newTurnkeyChatStream(w, modelID)
-	opts := turnkeyChatSampleOpts(req, s.plan.ContextBudgetTokens)
+	// The turnkey path streams TRUE per-token deltas by default (no env var): ask the
+	// planner to forward each decoded prose piece live. toolSpanGuard inside
+	// CompleteStream holds explicit tool-call spans back for post-decode adjudication.
+	opts := append(turnkeyChatSampleOpts(req, s.plan.ContextBudgetTokens), agent.WithPerTokenStream(true))
 	comp, err := sp.CompleteStream(r.Context(), stream.contentDelta, req.Messages, req.Tools, opts...)
 	if err != nil {
 		if !stream.started {

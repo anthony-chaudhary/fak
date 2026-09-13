@@ -245,14 +245,19 @@ func (p *InKernelPlanner) StreamingSupported() bool { return true }
 // (generateReusedWithOOMRetry → the per-token emit closure in Complete), so each decoded
 // piece of assistant prose is forwarded as it is produced — the same live token flow
 // cmd/fakchat's streamDecode gives the direct process path, not one post-hoc delta.
+// A toolSpanGuard sits between that raw seam and the caller's sink: it holds text that
+// could open an explicit tool-call span, drops the span once confirmed, and forwards
+// only prose, so raw <tool_call>/<function_call>/<|python_tag|>/[TOOL_CALLS] markup is
+// never delivered as content before adjudication (toolSpanGuard, below).
 //
-// This per-token forwarding is OPT-IN via FAK_STREAM_INKERNEL_PER_TOKEN (default off);
-// flag OFF is the buffered projection — the whole turn decodes with the plain Complete
-// (no observer, no forced DecodeTrace) and reaches the sink as AT MOST one post-hoc
-// content delta, byte-identical to the pre-seam trunk. When no sink is provided (or the
-// decode runs one of the speculative paths, whose draft-verify rounds batch tokens), the
-// stream likewise degrades to the buffered projection and the returned Completion is
-// unchanged.
+// This per-token forwarding is OPT-IN via FAK_STREAM_INKERNEL_PER_TOKEN (default off) or
+// a per-call WithPerTokenStream(true), which the turnkey gateway passes so `fak up`
+// streams by default; flag OFF is the buffered projection — the whole turn decodes with
+// the plain Complete (no observer, no forced DecodeTrace) and reaches the sink as AT MOST
+// one post-hoc content delta, byte-identical to the pre-seam trunk. When no sink is
+// provided (or the decode runs one of the speculative paths, whose draft-verify rounds
+// batch tokens), the stream likewise degrades to the buffered projection and the returned
+// Completion is unchanged.
 //
 // The sink observes the RAW incrementally decoded model text; the final Completion
 // carries the POST-PROCESSED turn (reasoning split, tool-call lift) exactly as the
@@ -263,7 +268,14 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 	if sink == nil {
 		return p.Complete(ctx, messages, tools, opts...)
 	}
-	if !inKernelPerTokenStreamEnabled() {
+	// A per-call override (WithPerTokenStream) wins over the package-level env
+	// gate so the turnkey server streams by default while every other CompleteStream
+	// caller keeps the historical env-gated default exactly.
+	perToken := inKernelPerTokenStreamEnabled()
+	if sp := applySampleOpts(opts...); sp.PerTokenStream != nil {
+		perToken = *sp.PerTokenStream
+	}
+	if !perToken {
 		// Default: the buffered projection. Decode the whole turn with the plain
 		// Complete (no observer, no forced DecodeTrace), then emit the finished
 		// content as one delta — byte-identical to the pre-seam trunk.
@@ -279,18 +291,180 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var sinkErr error
+	guard := newToolSpanGuard(sink)
 	comp, err := p.Complete(streamCtx, messages, tools, append(opts, WithDecodeTokenObserver(func(tokenPiece, rawText string) {
 		if sinkErr != nil || tokenPiece == "" {
 			return
 		}
-		if sinkErr = sink(tokenPiece); sinkErr != nil {
+		if sinkErr = guard.feed(tokenPiece); sinkErr != nil {
 			cancel()
 		}
 	}))...)
+	if sinkErr == nil {
+		sinkErr = guard.flush()
+	}
 	if sinkErr != nil {
 		return comp, sinkErr
 	}
 	return comp, err
+}
+
+// toolSpanGuard sits between the in-kernel per-token decode seam and the client sink.
+// The decode seam forwards RAW text, before the post-decode tool-call lift strips
+// explicit tool-call markup; forwarding it verbatim would leak tool-call syntax into the
+// client's prose stream before adjudication ever sees a ToolCall. The guard therefore
+// holds text that could be the start of an explicit tool-call span, and once a span is
+// confirmed it DROPS it (the span is recovered post-decode by the tool-call lift and
+// returned in the final Completion, never as streamed content). Prose before and after a
+// span is forwarded normally, so the concatenated content remains a prefix of the final
+// post-lift Content the caller reconciles against.
+//
+// Only UNAMBIGUOUS tag/delimiter openers are guarded; a generic ``` fence or a bare `{`
+// is legitimate prose and is never suppressed. Partial openers split across token pieces
+// are held until they resolve (open) or definitively cannot be an opener (flushed).
+type toolSpanGuard struct {
+	emit    StreamSink
+	held    strings.Builder
+	span    strings.Builder
+	inSpan  bool
+	closers []string
+	cap     int
+}
+
+// toolSpanOpeners lists the explicit tool-call span openers the guard suppresses, each
+// paired with the closers that end its span. An opener with no closer drops to the end
+// of the turn (there is no reliable terminator in that dialect).
+var toolSpanOpeners = []struct {
+	open    string
+	closers []string
+}{
+	{open: "<tool_call>", closers: []string{"</tool_call>"}},
+	{open: "<function_call>", closers: []string{"</function_call>"}},
+	{open: "<|python_tag|>", closers: []string{"<|eom_id|>", "<|eot_id|>"}},
+	{open: "[TOOL_CALLS]", closers: nil},
+}
+
+const toolSpanGuardMaxBytes = 4 << 20
+
+func newToolSpanGuard(emit StreamSink) *toolSpanGuard {
+	return &toolSpanGuard{emit: emit, cap: toolSpanGuardMaxBytes}
+}
+
+// feed consumes one raw decoded piece and forwards only prose.
+func (g *toolSpanGuard) feed(piece string) error {
+	if g.inSpan {
+		g.span.WriteString(piece)
+		return g.drainSpan()
+	}
+	g.held.WriteString(piece)
+	return g.drainHeld()
+}
+
+// flush emits any held non-span text at end of turn. A confirmed span is never flushed.
+func (g *toolSpanGuard) flush() error {
+	if g.inSpan {
+		return nil
+	}
+	rest := g.held.String()
+	g.held.Reset()
+	return g.emitText(rest)
+}
+
+// drainSpan drops buffered span text through the first closer, then hands any trailing
+// text back to the prose scanner. A span that never closes (or an over-cap buffer) is
+// dropped to end of turn without ever reaching the sink.
+func (g *toolSpanGuard) drainSpan() error {
+	buf := g.span.String()
+	for _, closer := range g.closers {
+		if idx := strings.Index(buf, closer); idx >= 0 {
+			tail := buf[idx+len(closer):]
+			g.span.Reset()
+			g.inSpan = false
+			g.closers = nil
+			g.held.WriteString(tail)
+			return g.drainHeld()
+		}
+	}
+	if g.closers == nil || len(buf) > g.cap {
+		// No terminator will arrive: drop the rest of the turn.
+		g.span.Reset()
+	}
+	return nil
+}
+
+// drainHeld scans buffered prose for the earliest confirmed opener. Text before it is
+// emitted; the opener switches the guard into span mode. If the buffer ends in a partial
+// opener prefix, that suffix is held until the next piece resolves it.
+func (g *toolSpanGuard) drainHeld() error {
+	buf := g.held.String()
+	earliest := -1
+	var matched []string
+	for _, o := range toolSpanOpeners {
+		if idx := strings.Index(buf, o.open); idx >= 0 && (earliest < 0 || idx < earliest) {
+			earliest, matched = idx, o.closers
+		}
+	}
+	if earliest >= 0 {
+		if err := g.emitText(buf[:earliest]); err != nil {
+			return err
+		}
+		tail := buf[earliest+lenMatchedOpener(buf[earliest:]):]
+		g.held.Reset()
+		g.span.Reset()
+		g.span.WriteString(tail)
+		g.inSpan = true
+		g.closers = matched
+		return g.drainSpan()
+	}
+	if keep := partialOpenerSuffix(buf); keep > 0 {
+		if err := g.emitText(buf[:len(buf)-keep]); err != nil {
+			return err
+		}
+		rest := buf[len(buf)-keep:]
+		g.held.Reset()
+		g.held.WriteString(rest)
+		return nil
+	}
+	g.held.Reset()
+	return g.emitText(buf)
+}
+
+func (g *toolSpanGuard) emitText(text string) error {
+	if text == "" {
+		return nil
+	}
+	return g.emit(text)
+}
+
+// lenMatchedOpener returns the byte length of the opener that prefixes s, so the opener
+// itself is consumed into the span buffer (and later dropped) rather than re-scanned.
+func lenMatchedOpener(s string) int {
+	for _, o := range toolSpanOpeners {
+		if strings.HasPrefix(s, o.open) {
+			return len(o.open)
+		}
+	}
+	return 0
+}
+
+// partialOpenerSuffix returns the length of the longest suffix of s that is a proper
+// (non-empty, shorter-than-full) prefix of any guarded opener — the bytes that must be
+// held because the next piece may complete an opener.
+func partialOpenerSuffix(s string) int {
+	best := 0
+	for _, o := range toolSpanOpeners {
+		max := len(o.open) - 1
+		if max > len(s) {
+			max = len(s)
+		}
+		for n := max; n > best; n-- {
+			if strings.HasPrefix(o.open, s[len(s)-n:]) {
+				best = n
+				break
+			}
+		}
+	}
+	return best
 }
 
 // SetPromptShrinkLevers configures the prompt-shrink levers for this planner.

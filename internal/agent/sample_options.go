@@ -342,3 +342,12 @@ func WithDeferColdTools(enabled bool) SampleOpt {
 		sp.DeferColdTools = &enabled
 	}
 }
+
+// WithPerTokenStream overrides the FAK_STREAM_INKERNEL_PER_TOKEN gate for this
+// CompleteStream call. A nil pointer (the default, when this opt is not passed)
+// keeps the package's env-gated behavior, so only callers that opt in change.
+func WithPerTokenStream(enabled bool) SampleOpt {
+	return func(sp *SampleParams) {
+		sp.PerTokenStream = &enabled
+	}
+}

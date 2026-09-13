@@ -193,3 +193,129 @@ func TestInKernelTokenStreamSinkError(t *testing.T) {
 		})
 	}
 }
+
+// TestInKernelPerTokenStreamOptInDefaultsOn is the turnkey-default witness: with the env
+// gate OFF, a per-call WithPerTokenStream(true) (what cmd/fak up's streaming call site
+// passes) must still forward the live per-token seam — >=2 fragments for a multi-token
+// turn — so `fak up` streams true incremental deltas without an env var.
+func TestInKernelPerTokenStreamOptInDefaultsOn(t *testing.T) {
+	t.Setenv("FAK_STREAM_INKERNEL_PER_TOKEN", "")
+	m := model.NewSynthetic(tinyConcurrencyConfig())
+	m.Quantize()
+	p := NewInKernelPlanner(m, loadProbeTok(t), "tiny-per-token-optin", false, nil, false)
+
+	var fragments []string
+	comp, err := p.CompleteStream(context.Background(), func(delta string) error {
+		fragments = append(fragments, delta)
+		return nil
+	}, []Message{{Role: RoleUser, Content: "a b c d e"}}, nil, WithMaxTokens(6), WithPerTokenStream(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fragments) < 2 {
+		t.Fatalf("WithPerTokenStream(true) with env off: %d-token completion produced %d fragments, want >=2", comp.Usage.CompletionTokens, len(fragments))
+	}
+}
+
+// TestInKernelPerTokenStreamOptOutStaysBuffered is the byte-identical witness for the
+// explicit off-switch: WithPerTokenStream(false) overrides an env ON gate and degrades to
+// the single post-hoc projection, exactly the pre-seam behavior.
+func TestInKernelPerTokenStreamOptOutStaysBuffered(t *testing.T) {
+	t.Setenv("FAK_STREAM_INKERNEL_PER_TOKEN", "1")
+	m := model.NewSynthetic(tinyConcurrencyConfig())
+	m.Quantize()
+	p := NewInKernelPlanner(m, loadProbeTok(t), "tiny-per-token-optout", false, nil, false)
+
+	var fragments []string
+	comp, err := p.CompleteStream(context.Background(), func(delta string) error {
+		fragments = append(fragments, delta)
+		return nil
+	}, []Message{{Role: RoleUser, Content: "a b c d e"}}, nil, WithMaxTokens(6), WithPerTokenStream(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fragments) > 1 {
+		t.Fatalf("WithPerTokenStream(false) with env on: sink received %d fragments, want at most 1", len(fragments))
+	}
+	if comp.Message.Content != "" && (len(fragments) != 1 || fragments[0] != comp.Message.Content) {
+		t.Fatalf("explicit off: post-hoc delta %q != Completion content %q", fragments, comp.Message.Content)
+	}
+}
+
+// TestToolSpanGuardSuppressesToolCallMarkup is the tool-safety witness: a fake decode
+// observer emits a Hermes <tool_call> JSON span token-piece by token-piece between prose.
+// The guard must forward the leading and trailing PROSE and drop the ENTIRE span — the
+// opener, the JSON body, and the closer must never reach the client as content.
+func TestToolSpanGuardSuppressesToolCallMarkup(t *testing.T) {
+	const (
+		prefix = "I will read the file now. "
+		tool   = `<tool_call>{"name": "Read", "arguments": {"filePath": "secret.go"}}</tool_call>`
+		suffix = " Done."
+	)
+	// Split the tool span across pieces mid-token to prove partial-openers are held.
+	pieces := []string{prefix, `<tool_`, `call>{"name": "Read", `, `"arguments": {"filePath": "secret.go"}}`, `</tool_call>`, suffix}
+
+	var got strings.Builder
+	g := newToolSpanGuard(func(delta string) error {
+		got.WriteString(delta)
+		return nil
+	})
+	for _, piece := range pieces {
+		if err := g.feed(piece); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := g.flush(); err != nil {
+		t.Fatal(err)
+	}
+
+	streamed := got.String()
+	if strings.Contains(streamed, "<tool_call>") || strings.Contains(streamed, "secret.go") || strings.Contains(streamed, `"name"`) {
+		t.Fatalf("tool-call markup leaked into streamed content: %q", streamed)
+	}
+	want := prefix + suffix
+	if streamed != want {
+		t.Fatalf("streamed prose = %q, want %q (only prose, no span)", streamed, want)
+	}
+}
+
+// TestToolSpanGuardProseUnaffected proves the guard is inert on markup-free prose,
+// including legitimate braces, brackets, and partial tag-like text that never becomes a
+// tool call — so a normal turn streams byte-identically to the raw seam.
+func TestToolSpanGuardProseUnaffected(t *testing.T) {
+	const prose = "Here is JSON {\"a\": 1} and an array [1,2] and a fence ```go``` plus a <b>tag</b>."
+	chunks := []string{"Here is JSON {", "\"a\": 1} and an ", "array [1,2] and a fence ```go``` plus a <b>tag</b>."}
+
+	var got strings.Builder
+	g := newToolSpanGuard(func(delta string) error { got.WriteString(delta); return nil })
+	for _, c := range chunks {
+		if err := g.feed(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := g.flush(); err != nil {
+		t.Fatal(err)
+	}
+	if got.String() != prose {
+		t.Fatalf("markup-free prose was altered: %q, want %q", got.String(), prose)
+	}
+}
+
+// TestToolSpanGuardUnclosedSpanDropsToEnd proves an unclosed opener (a truncated or
+// malformed tool call) is dropped to end of turn and the leading prose still flows, so a
+// half-formed span can never leak its raw syntax.
+func TestToolSpanGuardUnclosedSpanDropsToEnd(t *testing.T) {
+	var got strings.Builder
+	g := newToolSpanGuard(func(delta string) error { got.WriteString(delta); return nil })
+	for _, c := range []string{"answer: ", "<tool_call>{\"name\": \"Bash\""} {
+		if err := g.feed(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := g.flush(); err != nil {
+		t.Fatal(err)
+	}
+	if got.String() != "answer: " {
+		t.Fatalf("unclosed span: streamed = %q, want %q", got.String(), "answer: ")
+	}
+}
