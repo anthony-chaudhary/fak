@@ -109,11 +109,40 @@ func isExpertWeight(name string) bool {
 	return isRoutedExpertWeight(name) || isSharedExpertWeight(name)
 }
 
-// CPUOffloadExpertWeight reports whether the canonical tensor name is routed to host RAM by
-// the CPU-offload expert split. It is exported so load-time memory planners can use the exact
-// same partition as the runtime split kernel.
+// CPUOffloadExpertWeight is the PLACEMENT predicate: it reports whether the canonical tensor name
+// is routed to host RAM by the CPU-offload expert split (which kernel runs the GEMM). It is exported
+// so load-time memory planners can use the exact same partition as the runtime split kernel.
+//
+// Placement and pageability are DISTINCT questions. This predicate decides WHERE an expert GEMM
+// runs; isPageableExpertWeight / PageableExpertWeight decide whether a bounded residency cache may
+// evict that weight. The two deliberately disagree on shared experts: a shared expert is
+// offload-PLACEABLE (host under --n-cpu-moe) but NEVER pageable, because it fires on every token
+// (hit rate 1.0) so evicting it could only cost. See PageableExpertWeight.
 func CPUOffloadExpertWeight(name string) bool {
 	return isExpertWeight(name)
+}
+
+// isPageableExpertWeight is the RESIDENCY predicate: it reports whether a bounded expert cache (the
+// routed-expert ring, expert_ring_hal.go) may page this weight in and EVICT it. Only per-token
+// ROUTED experts are pageable, because only they are sparse — the router selects a top-k per token,
+// so a bounded cache can hold the activated minority and page the rest.
+//
+// It is deliberately NARROWER than the placement predicate isExpertWeight. A SHARED expert is
+// offload-PLACEABLE (it runs on the host under --n-cpu-moe, so isExpertWeight and
+// CPUOffloadExpertWeight both return true) but it is NOT pageable: it fires every token, so its
+// cache hit rate is 1.0 and paging it out could only cost. Keeping the two questions on separate
+// predicates is what makes a future widening of isRoutedExpertWeight unable to silently make shared
+// experts evictable.
+func isPageableExpertWeight(name string) bool {
+	return isRoutedExpertWeight(name)
+}
+
+// PageableExpertWeight is the exported form of isPageableExpertWeight, for residency planners in
+// other packages that need the pageable set without reaching into the model internals. A caller
+// asking "may a bounded cache evict this weight?" uses this; a caller asking "which kernel runs this
+// GEMM?" uses CPUOffloadExpertWeight. Shared experts answer true to the latter and false to this.
+func PageableExpertWeight(name string) bool {
+	return isPageableExpertWeight(name)
 }
 
 // glmDsaMatKernel selects the matKernel the GLM-DSA forward runs its dense GEMMs through, in one

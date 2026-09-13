@@ -331,3 +331,68 @@ func TestGLMDsaCPUOffloadRoutesIndexSelection(t *testing.T) {
 	t.Logf("GLM-DSA index selection through --n-cpu-moe split on %q: %d DSAIndexSelect calls over %d scored keys during decode; argmax-exact, max|Δ|=%.3e vs all-host",
 		rec.Name(), calls-callsBefore, keys, d)
 }
+
+// TestSharedExpertIsNeverPageable is the #12971 witness: the two expert questions are SEPARATE.
+// isExpertWeight / CPUOffloadExpertWeight answer "which kernel runs this GEMM?" (placement) and
+// deliberately include the shared expert — a --n-cpu-moe split places it on host, and that stays.
+// isPageableExpertWeight / PageableExpertWeight answer "may a bounded residency cache EVICT this
+// weight?" and must EXCLUDE the shared expert: it fires on every token, so its cache hit rate is
+// 1.0 and paging it out can only cost.
+//
+// The failure this catches: a residency seam that reaches for the PLACEMENT predicate
+// (isExpertWeight / CPUOffloadExpertWeight) instead of the pageability predicate would let a
+// byte-budgeted cache evict the one expert class no token can do without.
+func TestSharedExpertIsNeverPageable(t *testing.T) {
+	shared := []string{
+		"model.layers.0.mlp.shared_experts.gate_proj.weight",
+		"model.layers.5.mlp.shared_experts.up_proj.weight",
+		"model.layers.9.mlp.shared_experts.down_proj.weight",
+	}
+	routed := []string{
+		expertName(0, 0, "gate_proj.weight"),
+		expertName(3, 7, "up_proj.weight"),
+		expertName(1, 2, "down_proj.weight"),
+	}
+
+	// Placement unchanged: a shared expert IS offload-placeable (host under --n-cpu-moe).
+	for _, n := range shared {
+		if !isExpertWeight(n) {
+			t.Errorf("isExpertWeight(%q) = false; shared experts remain host-PLACEABLE (placement must not change)", n)
+		}
+		if !CPUOffloadExpertWeight(n) {
+			t.Errorf("CPUOffloadExpertWeight(%q) = false; the placement predicate is unchanged", n)
+		}
+	}
+
+	// Residency: a shared expert is NEVER pageable — the load-bearing #12971 assertion.
+	for _, n := range shared {
+		if isPageableExpertWeight(n) {
+			t.Errorf("isPageableExpertWeight(%q) = true, want false — a shared expert fires every token and must never enter a bounded evictable cache", n)
+		}
+		if PageableExpertWeight(n) {
+			t.Errorf("PageableExpertWeight(%q) = true, want false (exported residency predicate)", n)
+		}
+	}
+
+	// Routed experts page normally — the class the ring bounds must not change.
+	for _, n := range routed {
+		if !isPageableExpertWeight(n) {
+			t.Errorf("isPageableExpertWeight(%q) = false, want true (routed experts are the pageable class)", n)
+		}
+		if !PageableExpertWeight(n) {
+			t.Errorf("PageableExpertWeight(%q) = false, want true (exported residency predicate)", n)
+		}
+	}
+
+	// The router/gate is a dense every-token GEMM: pageable for neither class.
+	if r := routerName(0); isPageableExpertWeight(r) {
+		t.Errorf("isPageableExpertWeight(%q) = true; the router is a dense every-token GEMM and must never be pageable", r)
+	}
+
+	// The pageable set is exactly the routed class — disjoint from the shared class.
+	for _, n := range append(append([]string{}, shared...), routed...) {
+		if isPageableExpertWeight(n) == isSharedExpertWeight(n) {
+			t.Errorf("%q: pageable and shared predicates disagree with the routed/shared partition", n)
+		}
+	}
+}

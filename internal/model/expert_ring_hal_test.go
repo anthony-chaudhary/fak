@@ -268,6 +268,46 @@ func TestExpertRingBoundsOnlyRoutedExperts(t *testing.T) {
 	}
 }
 
+// TestSharedExpertNeverEntersExpertRing is the #12971 real-path witness. It drives the actual
+// bounded staging entry point (weightHALStagedBounded) for a SHARED expert under a live ring budget,
+// and proves the shared expert takes PERMANENT residency — it never becomes a pageable ring resident,
+// so it can never be evicted. A routed expert staged in the same session DOES enter the ring, so the
+// bound is exercised, not merely never reached. This is the residency counterpart of
+// TestExpertRingBoundsOnlyRoutedExperts, stated as the #12971 invariant: shared experts are always-on
+// (hit rate 1.0), so they must never enter the evictable set.
+func TestSharedExpertNeverEntersExpertRing(t *testing.T) {
+	const H = 256
+	m := expertRingTestModel(t, H, 1)
+	perWeight := expertRingWeightBytes(t, m)
+	// A budget generous enough for several weights, so a ring WOULD admit a shared expert if the
+	// gate let it: this is the "run before the fix" configuration, not an undersized one.
+	s := expertRingSession(m, perWeight*8)
+
+	shared := "model.layers.0.mlp.shared_experts.gate_proj.weight"
+	// The fixture model carries no shared-expert tensor, so stage a routed expert's Q4_K payload
+	// under the shared name — the predicate reads the NAME, which is what is under test.
+	qt := m.q4kw[expertName(0, 0, "gate_proj.weight")]
+	s.weightHALQ4K(shared, qt)
+
+	if s.expertRing != nil && s.expertRing.isResident("q4k:"+shared) {
+		t.Fatal("a shared expert entered the bounded evictable ring — it fires every token and must never be pageable (#12971)")
+	}
+	if _, ok := s.halW["q4k:"+shared]; !ok {
+		t.Fatal("a shared expert did not take permanent residency")
+	}
+
+	// A routed expert staged in the SAME session still takes bounded ring residency: the routed
+	// offload path is unchanged, which is the second #12971 acceptance criterion.
+	routed := expertName(0, 0, "gate_proj.weight")
+	s.weightHALQ4K(routed, qt)
+	if s.expertRing == nil || !s.expertRing.isResident("q4k:"+routed) {
+		t.Fatal("a routed expert did not take bounded ring residency (routed pageability must be unchanged)")
+	}
+	if _, ok := s.halW["q4k:"+routed]; ok {
+		t.Fatal("the routed expert ALSO landed in the permanent memoizer")
+	}
+}
+
 // TestExpertRingDefaultOffIsUnchanged is the default-unchanged witness: at ExpertRingBytes == 0 —
 // every session in the tree today — no ring is built, routed experts memoize permanently in halW and
 // upload exactly once, and ExpertRing reports the honest "residency is whatever accumulated".

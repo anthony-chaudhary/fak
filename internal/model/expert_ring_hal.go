@@ -23,13 +23,14 @@ import "github.com/anthony-chaudhary/fak/internal/compute"
 // Neither has a bounded activated working set, so there was no seam where a residency policy, a
 // prefetch, a pin-set or a byte budget could attach on the live path. This file is that seam.
 //
-// What it does. When a session declares ExpertRingBytes > 0, staging a ROUTED expert weight
-// (isRoutedExpertWeight — `.mlp.experts.N.*`, NOT `.mlp.shared_experts.*`, keeping the #3212
-// distinction) goes through pagedRing.stage instead of halW: the handle is admitted under the byte
-// budget, the coldest unpinned expert is evicted and Freed to make room, and an evicted expert pages
-// back IN on its next activation. Every other weight — dense projections, attention, the router,
-// lm_head, and the SHARED expert every token uses — keeps its permanent halW residency, because those
-// are activated every token and evicting them could only cost.
+// What it does. When a session declares ExpertRingBytes > 0, staging a PAGEABLE expert weight
+// (isPageableExpertWeight — exactly the routed `.mlp.experts.N.*`, NOT `.mlp.shared_experts.*`,
+// keeping the #3212 distinction and making explicit that the always-on shared expert fires every
+// token and must never be evictable) goes through pagedRing.stage instead of halW: the handle is
+// admitted under the byte budget, the coldest unpinned expert is evicted and Freed to make room, and
+// an evicted expert pages back IN on its next activation. Every other weight — dense projections,
+// attention, the router, lm_head, and the SHARED expert every token uses — keeps its permanent halW
+// residency, because those are activated every token and evicting them could only cost.
 //
 // Prior-art: activation-aware expert orchestration over a bounded GPU tier is ktransformers'
 // GPU/CPU expert placement (https://github.com/kvcache-ai/ktransformers) and the 3-tier
@@ -59,7 +60,7 @@ func (s *Session) routedExpertRing(name string) *pagedRing {
 	if s == nil || s.ExpertRingBytes <= 0 || s.Backend == nil || s.halClosed {
 		return nil
 	}
-	if !isRoutedExpertWeight(name) {
+	if !isPageableExpertWeight(name) {
 		return nil
 	}
 	if s.expertRing == nil {
@@ -121,10 +122,10 @@ func (s *Session) weightHALStagedBounded(key, name string, mk func() compute.Ten
 			return t
 		}
 	}
-	// A routed expert that is outside a ring or refused by its bound remains session-local:
+	// A pageable (routed) expert that is outside a ring or refused by its bound remains session-local:
 	// sharing it here would turn the deliberately bounded expert tier into an unbounded
 	// model-lifetime memoizer. Dense/shared weights use model-lifetime immutable residency.
-	if isRoutedExpertWeight(name) {
+	if isPageableExpertWeight(name) {
 		if s.halW != nil {
 			if t, ok := s.halW[key]; ok {
 				return t
