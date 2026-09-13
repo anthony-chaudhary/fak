@@ -232,6 +232,16 @@ func NewExpertCheckpointTier(hostBytes int64) *ExpertCheckpointTier {
 // read of misaligned bytes. A split checkpoint calls this once per shard file, because each shard's
 // offsets are relative to its own file.
 func (t *ExpertCheckpointTier) AddShard(r io.ReaderAt, size int64, fused []FusedExpertTensor) error {
+	return t.AddShardData(r, size, nil, fused)
+}
+
+// AddShardData is AddShard plus an optional page-cache-visible mapped region backing r (#1302). When
+// data is non-empty and exactly size bytes, the shard's per-expert projections are read through the
+// page-cache-aware path (ggufExpertSource.enablePageCache / readExpertPageCache): a repeat read of an
+// already-faulted expert is served zero-copy from the mapping and moves no device bytes. A nil/empty
+// or mismatched data leaves the shard on the historical readExpert path byte-for-byte, which is the
+// default and the only arm reachable on a platform without an mmap impl (Windows).
+func (t *ExpertCheckpointTier) AddShardData(r io.ReaderAt, size int64, data []byte, fused []FusedExpertTensor) error {
 	if t == nil {
 		return fmt.Errorf("%w: nil tier", ErrGGUFExpertMetadata)
 	}
@@ -257,6 +267,10 @@ func (t *ExpertCheckpointTier) AddShard(r io.ReaderAt, size int64, fused []Fused
 	if err != nil {
 		return err
 	}
+	// Opt this shard's source into the page-cache-aware read path when its retained reader carries a
+	// mapped region exactly matching the declared extent (#1302). enablePageCache refuses a partial or
+	// over-long map, so a refusal here is the historical ReadAt path, not a silent mixed one.
+	src.enablePageCache(data)
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -366,8 +380,10 @@ func (t *ExpertCheckpointTier) fault(name string) (expertWeight, error) {
 	t.mu.Unlock()
 
 	// Issued OUTSIDE the lock: see the file header on why a duplicated concurrent read of identical
-	// bytes is the right trade against serializing every fleet fault behind one mutex.
-	raw, err := src.readExpert(entry.fused, entry.expert)
+	// bytes is the right trade against serializing every fleet fault behind one mutex. On a shard
+	// admitted to the page-cache path (#1302) readExpertPageCache is used, so a repeat fault of a
+	// warm expert moves zero device bytes; otherwise it is the historical readExpert path exactly.
+	raw, _, err := src.readExpertPageCache(entry.fused, entry.expert)
 	if err != nil {
 		t.mu.Lock()
 		t.failures, t.lastErr = t.failures+1, err

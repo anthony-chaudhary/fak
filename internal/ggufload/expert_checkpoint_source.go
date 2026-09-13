@@ -59,6 +59,14 @@ type FusedExpertShard struct {
 	Reader io.ReaderAt
 	Size   int64
 	Fused  []model.FusedExpertTensor
+	// Data is the page-cache-visible mapped region backing this shard when the
+	// retained reader is a FAK_GGUF_MMAP memory map (gguf_mmap.go) and the
+	// FAK_EXPERT_PAGECACHE opt-in is on (expert_pagecache.go, issue #1302); nil
+	// on the default os.Open path and on every platform without an mmap impl,
+	// including Windows. It lets the model tier adopt a zero-copy read-through
+	// path over the mapped file, and its nil-ness preserves the historical
+	// ReadAt path byte-for-byte.
+	Data []byte
 }
 
 // checkpointExpertQuant maps a GGUF tensor type onto the representation the checkpoint tier stages,
@@ -105,6 +113,10 @@ func (s *WeightSource) FusedExpertTensors() ([]FusedExpertShard, error) {
 	// the default path, *mmapReaderAt under FAK_GGUF_MMAP — gguf_mmap.go), so they are comparable
 	// map keys; a future non-pointer reader would need a shard index carried alongside instead.
 	at := make(map[io.ReaderAt]int)
+	// dataSet tracks, per shard group, the mapped region its FIRST resident tensor resolved to, so
+	// tensors that share a reader must also share the map (a mismatch is a malformed directory, not
+	// a decline). nil on the default os.Open path; only FAK_GGUF_MMAP shards carry a region.
+	dataSet := make(map[io.ReaderAt][]byte)
 	for i, info := range s.File.Tensors {
 		layer, proj, ok := glmMoeDsaBatchedExpert(info.Name)
 		if !ok {
@@ -135,8 +147,19 @@ func (s *WeightSource) FusedExpertTensors() ([]FusedExpertShard, error) {
 			continue
 		}
 		r, size := s.r, s.size
+		// Only carry a mapped region when the page-cache opt-in is on (#1302): mapping a shard is a
+		// load-wide storage decision, while adopting the map on the expert path is the behavior change,
+		// so it needs its own gate. Gate off (the default) leaves data nil and every consumer on the
+		// historical ReadAt path byte-for-byte.
+		var data []byte
 		if i < len(s.readerFor) && s.readerFor[i] != nil {
 			r, size = s.readerFor[i], s.sizeFor[i]
+		}
+		if expertPageCacheEnabled() {
+			data = s.data
+			if i < len(s.dataFor) && s.dataFor[i] != nil {
+				data = s.dataFor[i]
+			}
 		}
 		if r == nil {
 			return nil, fmt.Errorf("gguf: batched expert tensor %s has no shard reader", info.Name)
@@ -145,7 +168,10 @@ func (s *WeightSource) FusedExpertTensors() ([]FusedExpertShard, error) {
 		if !seen {
 			idx = len(shards)
 			at[r] = idx
-			shards = append(shards, FusedExpertShard{Reader: r, Size: size})
+			dataSet[r] = data
+			shards = append(shards, FusedExpertShard{Reader: r, Size: size, Data: data})
+		} else if dataSet[r] != nil && data != nil && !sameBytes(dataSet[r], data) {
+			return nil, fmt.Errorf("gguf: batched expert tensors sharing a shard reader resolved to different mapped regions")
 		}
 		shards[idx].Fused = append(shards[idx].Fused, model.FusedExpertTensor{
 			Name:    info.Name,
@@ -172,7 +198,12 @@ func buildExpertCheckpointTier(shards []FusedExpertShard, hostBytes int64) (*mod
 	}
 	tier := model.NewExpertCheckpointTier(hostBytes)
 	for _, sh := range shards {
-		if err := tier.AddShard(sh.Reader, sh.Size, sh.Fused); err != nil {
+		// AddShardData adopts the shard's mapped region when it carries one (#1302): a warm expert
+		// fault is then served zero-copy instead of re-read from the device. A shard with no mapping
+		// (the default os.Open path, and every platform without an mmap impl) passes nil and takes the
+		// historical ReadAt path byte-for-byte.
+		data, _ := pageCacheAdoption(sh, expertPageCacheEnabled())
+		if err := tier.AddShardData(sh.Reader, sh.Size, data, sh.Fused); err != nil {
 			return nil, err
 		}
 	}

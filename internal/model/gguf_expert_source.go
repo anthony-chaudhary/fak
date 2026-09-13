@@ -106,6 +106,10 @@ type ggufExpertSource struct {
 	r       io.ReaderAt
 	size    int64
 	tensors map[string]ggufExpertEntry
+	// page is the page-cache/mmap-aware read state (expert_pagecache.go, #1302). It is nil for
+	// every source that never called enablePageCache — the default — so an unmapped source carries
+	// no extra field traffic and every read takes the historical readExpert path byte-for-byte.
+	page *expertPageCacheState
 }
 
 // newGGUFExpertSource indexes the given fused-expert tensor descriptions over r, whose
