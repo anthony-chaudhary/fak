@@ -210,6 +210,10 @@ func (t *Tree) restoreSnapshotFromRemote(ctx context.Context, ns string, n *node
 		if n.snapshot == nil && n.hostSnapshot == nil {
 			n.cachedLogits = nil
 		}
+		// A remote L3 miss on a node whose hot and host copies are already gone
+		// drops the last complete copy. Clear the record incarnation here too, or
+		// a RecordHandle minted on admission would outlive the cached bytes.
+		t.invalidateRecordIfNoLocalCopy(n)
 		return nil, false, nil
 	}
 	t.l3RestoreBytes += int64(len(envelope))
