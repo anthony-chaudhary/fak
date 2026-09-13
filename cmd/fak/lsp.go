@@ -15,6 +15,7 @@ import (
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/codelint"
+	"github.com/anthony-chaudhary/fak/internal/parentwatch"
 )
 
 func cmdLSP(argv []string) {
@@ -28,7 +29,9 @@ func runLSP(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 		return rc
 	}
 	server := codelint.NewLSPServer(stdin, stdout, nil)
-	if err := server.Run(context.Background()); err != nil && !errors.Is(err, io.EOF) {
+	wctx, stop := parentwatch.Watch(context.Background(), os.Getppid())
+	defer stop()
+	if err := server.Run(wctx); err != nil && !errors.Is(err, io.EOF) {
 		fmt.Fprintf(stderr, "fak lsp: %v\n", err)
 		return 1
 	}

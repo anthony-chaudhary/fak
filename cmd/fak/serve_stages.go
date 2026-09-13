@@ -32,6 +32,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/l3kv"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
+	"github.com/anthony-chaudhary/fak/internal/parentwatch"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/session"
@@ -860,7 +861,13 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 	if *sf.stdio {
 		// MCP over stdio: stdout carries the protocol; the log package writes to
 		// stderr, so diagnostics never corrupt the frames.
-		if err := rt.srv.ServeStdio(ctx, os.Stdin, os.Stdout); err != nil && !errors.Is(err, context.Canceled) {
+		//
+		// stdio children of opencode reparent to launchd when their parent dies and
+		// leak; Watch cancels this ctx on the original parent's death so ServeStdio
+		// returns and the process exits instead of orphaning.
+		wctx, stopWatch := parentwatch.Watch(ctx, os.Getppid())
+		defer stopWatch()
+		if err := rt.srv.ServeStdio(wctx, os.Stdin, os.Stdout); err != nil && !errors.Is(err, context.Canceled) {
 			must(err)
 		}
 		persistServeExitObservations("stdio")

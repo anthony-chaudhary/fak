@@ -96,12 +96,31 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 	// The MCP-over-stdio loop is ready to serve frames; close the boot timeline.
 	s.MarkReady()
 	for {
+		// Fast path: a ctx already canceled before we block returns immediately.
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-		line, tooLong, err := readFrame(br, maxBody)
+		// The read runs in a goroutine so a blocked ReadByte (stdin held open
+		// with no data -- the orphan condition) cannot swallow cancellation. The
+		// channel is buffered so the reader never blocks on send after we return;
+		// the read goroutine may stay parked on ReadByte, which is acceptable for
+		// a process that is about to exit.
+		ch := make(chan readFrameResult, 1)
+		go func() {
+			l, tl, e := readFrame(br, maxBody)
+			ch <- readFrameResult{l, tl, e}
+		}()
+		var line []byte
+		var tooLong bool
+		var err error
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case r := <-ch:
+			line, tooLong, err = r.line, r.tooLong, r.err
+		}
 		if err != nil {
 			if err == io.EOF {
 				return nil
@@ -127,6 +146,14 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 			}
 		}
 	}
+}
+
+// readFrameResult carries one readFrame result off the reader goroutine so the
+// stdio loop can select it against ctx.Done().
+type readFrameResult struct {
+	line    []byte
+	tooLong bool
+	err     error
 }
 
 // readFrame reads one newline-delimited frame, capping growth at max bytes. If the

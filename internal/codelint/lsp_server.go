@@ -114,12 +114,30 @@ func NewLSPServer(r io.Reader, w io.Writer, reg *Registry) *LSPServer {
 // Run processes incoming LSP frames until EOF, context cancellation, or client exit.
 func (s *LSPServer) Run(ctx context.Context) error {
 	for {
+		// Fast path: a ctx already canceled before we block returns immediately.
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-		frame, err := readLSPFrame(s.reader)
+		// The frame read runs in a goroutine so a blocked read (stdin held open
+		// with no data -- the orphan condition) cannot swallow cancellation. The
+		// channel is buffered so the reader never blocks on send after we return;
+		// the read goroutine may stay parked on the underlying read, which is
+		// acceptable for a process that is about to exit.
+		ch := make(chan lspFrameResult, 1)
+		go func() {
+			f, e := readLSPFrame(s.reader)
+			ch <- lspFrameResult{frame: f, err: e}
+		}()
+		var frame []byte
+		var err error
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case r := <-ch:
+			frame, err = r.frame, r.err
+		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				return nil
@@ -330,6 +348,13 @@ func URIToPath(uri string) string {
 		p = filepath.FromSlash(p)
 	}
 	return p
+}
+
+// lspFrameResult carries one readLSPFrame result off the reader goroutine so the
+// loop can select it against ctx.Done().
+type lspFrameResult struct {
+	frame []byte
+	err   error
 }
 
 func readLSPFrame(r *bufio.Reader) ([]byte, error) {
