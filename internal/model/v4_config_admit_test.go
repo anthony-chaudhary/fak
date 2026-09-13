@@ -51,6 +51,52 @@ func TestAdmitDeepSeekV4ConfigFailsClosed(t *testing.T) {
 	}
 }
 
+// TestAdmitDeepSeekV4ConfigMegaMoELayout pins the SGLang v0.5.19 W4A4 MegaMoE
+// descriptor: a DeepSeek-V4 config that declares the MegaMoE layout must carry a
+// coherent (format, block-scale) pair, and every malformed/unknown descriptor must
+// fail closed through ErrV4ConfigAdmission. Without this check a V4 config could
+// name an unimplemented W4A4 layout and reach runtime weight I/O.
+func TestAdmitDeepSeekV4ConfigMegaMoELayout(t *testing.T) {
+	// A declared MegaMoE layout with a coherent MXFP4 (block 32 / E8M0) pair admits.
+	ok := pinnedV4Config()
+	ok.MoELayout = "w4a4_megamoe"
+	ok.MoEWeightFormat = "mxfp4"
+	ok.MoEBlockScaleElements = 32
+	ok.MoEBlockScaleEncoding = "e8m0"
+	if err := AdmitDeepSeekV4Config(ok); err != nil {
+		t.Fatalf("coherent megamoe descriptor rejected: %v", err)
+	}
+
+	// A config that names NO MegaMoE layout stays on the legacy path: the descriptor
+	// fields are ignored, so a pinned non-MegaMoE V4 config still admits unchanged.
+	legacy := pinnedV4Config()
+	if err := AdmitDeepSeekV4Config(legacy); err != nil {
+		t.Fatalf("legacy layout rejected: %v", err)
+	}
+
+	cases := map[string]func(*Config){
+		"unknown_layout":      func(c *Config) { c.MoELayout = "w4a4_mystery" },
+		"layout_blank_format": func(c *Config) { c.MoEWeightFormat = "" },
+		"format_not_mxfp4":    func(c *Config) { c.MoEWeightFormat = "nvfp4" },
+		"format_unknown":      func(c *Config) { c.MoEWeightFormat = "fp4" },
+		"scale_elements_0":    func(c *Config) { c.MoEBlockScaleElements = 0 },
+		"scale_elements_16":   func(c *Config) { c.MoEBlockScaleElements = 16 },
+		"scale_encoding_e4m3": func(c *Config) { c.MoEBlockScaleEncoding = "e4m3" },
+		"scale_encoding_blank": func(c *Config) {
+			c.MoEBlockScaleEncoding = ""
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := ok
+			mutate(&cfg)
+			if err := AdmitDeepSeekV4Config(cfg); !errors.Is(err, ErrV4ConfigAdmission) {
+				t.Fatalf("err=%v, want ErrV4ConfigAdmission", err)
+			}
+		})
+	}
+}
+
 func TestDeepSeekV4IdentityDoesNotAliasOtherArchitectures(t *testing.T) {
 	for _, kind := range []string{"deepseek2", "glm_moe_dsa", "gpt_oss", ""} {
 		cfg := Config{ModelType: kind}

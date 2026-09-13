@@ -212,12 +212,20 @@ func (t *Tree) releaseHostSnapshot(n *node) {
 	if n.snapshot == nil && n.remoteSnapshot == nil {
 		n.cachedLogits = nil
 	}
+	t.invalidateRecordIfNoLocalCopy(n)
 }
 
 func (t *Tree) releaseSnapshotPayload(n *node) {
 	t.releaseHotSnapshot(n)
 	t.releaseHostSnapshot(n)
 	t.releaseRemoteSnapshot(n)
+	// This aggregator is the last checkpoint of a full teardown: releaseHot and
+	// releaseHost each invalidate only after their own call, so a node whose sole
+	// surviving reference was remote L3 would still carry hasRecord=true once
+	// releaseRemoteSnapshot clears it. Re-check ALL three tiers here (idempotent)
+	// so EvictNode -> closeSubtreeSnapshots -> releaseSnapshotPayload kills a
+	// remote-only incarnation.
+	t.invalidateRecordIfNoLocalCopy(n)
 }
 
 func (t *Tree) findSnapshotByDigest(digest string) *node {

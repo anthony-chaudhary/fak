@@ -28,7 +28,7 @@ ARCHITEST_GATE_RE ?= ^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRoot
 # runs the model-free terminal witnesses from run-the-demos.md.
 # cuda-check is the GPU-free CUDA ABI/header preflight — deterministic, no CUDA toolkit,
 # so it joins the local gate the same way (the cuda-build.yml `static` job is its CI mirror).
-ci: build build-all cross-build-harnessres gofmt-check disambiguation-generated-check vet test claims-lint cache-headline-lint cachedoc-numbers-lint cache-default-readiness gitdaily-score salience dos-lint index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet cache-proving demo-smoke demo-headless-smoke dogfood-test smoke-exec test-integration gated-tests cuda-check
+ci: build build-all cross-build-harnessres gofmt-check disambiguation-generated-check vet test claims-lint cache-headline-lint cachedoc-numbers-lint cache-default-readiness gitdaily-score salience dos-lint index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet cache-proving demo-smoke demo-headless-smoke dogfood-test smoke-exec test-integration gated-tests cuda-check metal-check
 	@echo "CI OK"
 
 build:
@@ -197,6 +197,7 @@ mac-perf: build
 	@go test -v ./internal/model -run '^$$' -bench '^BenchmarkMetalQ2KGemmSteady$$'
 	@go test -v ./internal/model -run '^$$' -bench '^BenchmarkMetalQ4KGemv$$'
 	@go test -v ./internal/model -run '^$$' -bench '^BenchmarkMetalQ4KGemmSteady$$'
+	@./fak macbench ensure-runs --json
 	@./fak macbench validate-comparison --input experiments/benchmark/runs/by-machine/node-macos-a/20260903T050000Z-macbench-threeway/packet.json --json
 	@./fak macbench validate-agentic-mtp --input experiments/benchmark/runs/by-machine/node-macos-a/20260908T170000Z-macbench-agentic-mtp/packet.json --json
 	@echo "mac-perf OK (Apple Silicon Metal tok/s, prefill, and 24-agent MTP comparative performance verified)"

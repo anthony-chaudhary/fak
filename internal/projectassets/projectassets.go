@@ -660,6 +660,11 @@ func VerifyOpenCodeSnapshot(root string) error {
 // OpenCodePluginPath is the workspace-relative path to the OpenCode DOS proof guard plugin.
 const OpenCodePluginPath = ".opencode/plugins/dos-proof-guard.js"
 
+// DOSMinVersion is the minimum dos-kernel version whose lane_lease API the guard
+// probe is written against; DOS >= 0.22.0 removed the `strict` kwarg, so emitting
+// it raises TypeError and blocks every mutation.
+const DOSMinVersion = "0.22.0"
+
 // VerifyOpenCodePlugin asserts that .opencode/plugins/dos-proof-guard.js exists in root,
 // is non-empty, and enforces cross-harness lease admission before native OpenCode mutations.
 func VerifyOpenCodePlugin(root string) error {
@@ -683,6 +688,7 @@ func VerifyOpenCodePlugin(root string) error {
 		{"leaseref", "FAK leaseref admission verification"},
 		{"loop", "FAK loop region admission check"},
 		{"live_leases", "DOS live leases snapshot inspection"},
+		{"live_leases(cfg, expire_dead=True)", "DOS live_leases probe compatible with DOS >= " + DOSMinVersion + " (no strict kwarg)"},
 		{"arbitrate", "DOS lane lease arbitration check"},
 		{"timeout: 120000", "120s execution timeout"},
 		{"win32", "Windows platform binary extension check"},
@@ -691,6 +697,11 @@ func VerifyOpenCodePlugin(root string) error {
 		if !strings.Contains(content, req.pattern) {
 			return fmt.Errorf("opencode plugin %s missing %s (%q)", path, req.desc, req.pattern)
 		}
+	}
+	// DOS >= DOSMinVersion removed the strict kwarg from live_leases; a guard that
+	// still emits strict= raises TypeError at probe time and blocks every mutation.
+	if strings.Contains(content, "strict=") {
+		return fmt.Errorf("opencode plugin %s emits strict= in the DOS live_leases probe; incompatible with DOS >= %s (remove the strict kwarg)", path, DOSMinVersion)
 	}
 	return verifyOpenCodeGrep(root)
 }
@@ -988,10 +999,10 @@ export default async function dosProofGuardPlugin({ client, directory }) {
           throw new Error("[dos-proof-guard] FAK lease admission refused" + recovery);
         }
 
-        // DOS owns WAL parsing, corruption handling, expiry and locking. Older DOS
-        // versions reject strict=True, so a missing prerequisite blocks mutations.
+        // DOS owns WAL parsing, corruption handling, expiry and locking. DOS >= 0.22.0
+        // removed the strict kwarg; emitting it raises TypeError and blocks mutations.
         const snapshot = await jsonCommand("python", ["-c",
-          "import json,sys; from dos import config,lane_lease; cfg=config.load_workspace_config(sys.argv[1],gather_env=False); print(json.dumps(lane_lease.live_leases(cfg, strict=True, expire_dead=True)))", root], root);
+          "import json,sys; from dos import config,lane_lease; cfg=config.load_workspace_config(sys.argv[1],gather_env=False); print(json.dumps(lane_lease.live_leases(cfg, expire_dead=True)))", root], root);
         if (!Array.isArray(snapshot) || snapshot.some((row) => !row || typeof row.lane !== "string" || !Array.isArray(row.tree))) {
           throw new Error("[dos-proof-guard] Invalid DOS lease snapshot");
         }

@@ -46,6 +46,7 @@ type InKernelPlannerConfig struct {
 // NewInKernelPlannerWithConfig is the explicit configuration constructor for native planning.
 func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, modelID string, q4k bool, backend compute.Backend, metal bool, cfg InKernelPlannerConfig) *InKernelPlanner {
 	prefillChunkTokens, prefillChunkErr := resolveInKernelQwenQ4KPrefillChunkTokens(cfg.QwenQ4KPrefillChunkTokens)
+	prefillChunkExplicit := cfg.QwenQ4KPrefillChunkTokens != 0
 	p := &InKernelPlanner{
 		m:                            m,
 		tok:                          tok,
@@ -61,6 +62,7 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 		temp:                         envFloat("FAK_INKERNEL_TEMP", 0),
 		seed:                         int64(envInt("FAK_INKERNEL_SEED", 0)),
 		qwenQ4KPrefillChunkTokens:    prefillChunkTokens,
+		qwenQ4KPrefillChunkExplicit:  prefillChunkExplicit,
 		qwenQ4KPrefillChunkConfigErr: prefillChunkErr,
 		qwen35MetalGDNSequence:       cfg.Qwen35MetalGDNSequence,
 		q4kGateUpOutputSlab:          cfg.Q4KGateUpOutputSlab,

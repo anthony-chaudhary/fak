@@ -107,6 +107,41 @@ type node struct {
 	state     uint32        // lifecycle state (warm, computing prefill, failed, evicted); accessed atomically
 	ready     chan struct{} // completion broadcast for in-flight prefill promises
 	flightErr error         // terminal error if in-flight prefill failed or was abandoned
+
+	// recordGen is this node's local record incarnation: a monotonically increasing
+	// tree-scoped sequence stamped when InsertSnapshot ADMITS a complete local
+	// snapshot record, and cleared (with hasRecord) when the last complete local
+	// copy is logically evicted. A zero recordGen with hasRecord=false means the node
+	// owns no live record (a structural intermediate or a pure KV node). The pair is
+	// the radixkv analogue of ctxmmu's opaque monotonic allocation-incarnation handle
+	// (#12848): it never moves across a split, so a handle can never be inherited by a
+	// node that does not own the snapshot. Mutation is externally serialized, like the
+	// tree's other counters, so plain fields (no mutex) are sufficient.
+	recordGen uint64
+	hasRecord bool
+}
+
+// RecordHandle is a node-owned incarnation handle for a complete local snapshot
+// record. It is minted only when a complete PrefixSnapshot is admitted at a node
+// and is invalidated by replacement or by logical eviction of the record's last
+// complete local copy. A handle minted for a node whose record is later replaced
+// or evicted no longer validates.
+type RecordHandle struct {
+	node *node
+	gen  uint64
+}
+
+// Generation returns the monotonic record incarnation stamped into the handle.
+func (h RecordHandle) Generation() uint64 { return h.gen }
+
+// RecordHandle returns this node's current live record handle. ok is false when the
+// node owns no live admitted record (a structural intermediate, a pure KV node, or a
+// node whose record was replaced or logically evicted).
+func (n *node) RecordHandle() (RecordHandle, bool) {
+	if n == nil || !n.hasRecord || n.recordGen == 0 {
+		return RecordHandle{}, false
+	}
+	return RecordHandle{node: n, gen: n.recordGen}, true
 }
 
 var closedReadyChan = func() <-chan struct{} {
@@ -251,6 +286,7 @@ type Tree struct {
 	snapshotBytes        int64  // hot complete snapshots plus their cached final logits
 	hostSnapshotBytes    int64  // complete PrefixSnapshot payloads physically owned by host DRAM
 	clock                uint64 // logical access clock
+	recordSeq            uint64 // monotonic, never-reused record incarnation sequence (#12848)
 
 	l1Hits         int
 	l1Misses       int
@@ -577,6 +613,10 @@ func (t *Tree) split(parent, child *node, oi int) *node {
 		tier:      child.tier,
 		tierSet:   child.tierSet,
 	}
+	// Record ownership stays with the snapshot-bearing CHILD: mid is a fresh
+	// structural intermediate that owns no snapshot, so it must never inherit the
+	// child's record incarnation (#12848). child's recordGen/hasRecord are left
+	// untouched and remain valid after the edge is re-parented.
 	if child.retention != nil {
 		retCopy := *child.retention
 		mid.retention = &retCopy
@@ -789,7 +829,74 @@ func (t *Tree) InsertSnapshot(boundary *node, suffix []int, snap *model.PrefixSn
 	n.snapshot = snap
 	n.cachedLogits = append([]float32(nil), logits...)
 	t.snapshotBytes += incoming
+	// Successful admission of a complete local snapshot record mints a fresh
+	// incarnation. Re-admission on the same node (even with identical tokens) mints
+	// a NEW generation, which naturally invalidates every previously issued handle.
+	t.mintRecord(n)
 	return n, nil
+}
+
+// mintRecord stamps a fresh, never-reused record incarnation onto n. Called only
+// from InsertSnapshot's admitted branch, after the snapshot is installed.
+func (t *Tree) mintRecord(n *node) {
+	if n == nil {
+		return
+	}
+	t.recordSeq++
+	n.recordGen = t.recordSeq
+	n.hasRecord = true
+}
+
+// invalidateRecordIfNoLocalCopy clears n's record when NO complete local copy of
+// its snapshot remains (hot L1, host L2, and remote L3 all absent). This is the
+// boundary at which the record dies: a demotion that only moves the record between
+// tiers (hot -> host) leaves a local complete copy, so the incarnation survives.
+func (t *Tree) invalidateRecordIfNoLocalCopy(n *node) {
+	if n == nil || !n.hasRecord {
+		return
+	}
+	if n.snapshot == nil && n.hostSnapshot == nil && n.remoteSnapshot == nil {
+		n.hasRecord = false
+		n.recordGen = 0
+	}
+}
+
+// ValidateRecord reports whether h is the CURRENT live incarnation of a record
+// owned by a node that is still attached to t and still holds a complete local
+// snapshot copy. A replaced, evicted, or detached record's handle returns false.
+func (t *Tree) ValidateRecord(h RecordHandle) bool {
+	if t == nil || h.node == nil || !h.node.hasRecord || h.gen == 0 || h.gen != h.node.recordGen {
+		return false
+	}
+	if h.node.snapshot == nil && h.node.hostSnapshot == nil && h.node.remoteSnapshot == nil {
+		return false
+	}
+	return t.nodeAttached(h.node)
+}
+
+// nodeAttached reports whether n is still linked into t's radix tree: walking up its
+// parent links re-verifies each child slot and terminates at one of t's roots. A node
+// removed by removeLeaf/EvictNode fails the child-slot check at its former parent.
+func (t *Tree) nodeAttached(n *node) bool {
+	if t == nil || n == nil {
+		return false
+	}
+	for n.parent != nil {
+		p := n.parent
+		if len(n.key) == 0 || p.children[n.key[0]] != n {
+			return false
+		}
+		n = p
+	}
+	if n == t.root {
+		return true
+	}
+	for _, r := range t.nsRoots {
+		if r == n {
+			return true
+		}
+	}
+	return false
 }
 
 func snapshotResidentBytes(snap *model.PrefixSnapshot, logits []float32) int64 {
@@ -844,6 +951,9 @@ func (t *Tree) releaseHotSnapshot(n *node) {
 	if n.hostSnapshot == nil && n.remoteSnapshot == nil {
 		n.cachedLogits = nil
 	}
+	// The record follows the node across tiers: only drop the incarnation when this
+	// was the last complete local copy (no staged host / remote reference remains).
+	t.invalidateRecordIfNoLocalCopy(n)
 }
 
 // InsertWithLogits is Insert plus an optional exact-prefix logits payload. The logits are

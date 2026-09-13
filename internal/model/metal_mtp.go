@@ -746,6 +746,16 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 	// 3. Propose K draft tokens from resident MTP head (zero host memory copies)
 	start := time.Now()
 	prop, pErr := c.drafter.Propose(ctx, committed, activeDepth)
+	// Cancellation is an atomic no-op at the speculative boundary: return the
+	// same error with no target Step and no counter/state mutation. Check
+	// ctx.Err() first so a drafter that ignores ctx and returns a non-cancel
+	// error while the context is canceled is still treated as a cancellation.
+	if cerr := ctx.Err(); cerr != nil {
+		return nil, -1, nil, cerr
+	}
+	if pErr != nil && (errors.Is(pErr, context.Canceled) || errors.Is(pErr, context.DeadlineExceeded)) {
+		return nil, -1, nil, pErr
+	}
 	if pErr != nil || (len(prop.Tokens) < 1 && (prop.Tree == nil || len(prop.Tree.Nodes) < 1)) {
 		nextLogits = c.target.Step(target0)
 		elapsed := time.Since(start)

@@ -51,6 +51,17 @@ func serveQwen38Q4KEmbeddingResident(backend compute.Backend, ggufPath string, r
 	return backend == nil && residentQ4K && serveMetalAvailable() && isWitnessedQwen38Q4KM(ggufPath)
 }
 
+// serveQwen38Q2KEmbeddingResident limits packed Q2_K embedding residency to the
+// exact Qwen3.8-27B UD-Q2_K_XL artifact on the native Metal resident-Q4_K path.
+// The UD-Q2_K_XL token embedding is Q2_K (417,177,600 packed bytes) and would
+// otherwise expand to ~5.09 GB of F32 at startup (#11961). Other artifacts and
+// explicit backends retain the loader's default F32 embedding; the loader's own
+// validateResidentQ2KEmbedding gate refuses any artifact whose token_embd.weight
+// is not Q2_K rather than mislabeling it.
+func serveQwen38Q2KEmbeddingResident(backend compute.Backend, ggufPath string, residentQ4K bool) bool {
+	return backend == nil && residentQ4K && serveMetalAvailable() && isWitnessedQwen38UDQ2KXL(ggufPath)
+}
+
 func serveQuantProvenance(artifact ggufload.ArtifactQuant, residentQ4K bool) gateway.StartupMessage {
 	resident, session := "Q8_0", "Q8_0"
 	if residentQ4K {
@@ -121,6 +132,10 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 	q4kOpts = append(q4kOpts, serveDenseKQuantOptions(backend)...)
 	if serveQwen38Q4KEmbeddingResident(backend, ggufPath, residentQ4K) {
 		q4kOpts = append(q4kOpts, ggufload.WithQ4KEmbeddingResident(true))
+	} else if serveQwen38Q2KEmbeddingResident(backend, ggufPath, residentQ4K) {
+		// The witnessed UD-Q2_K_XL token embedding is Q2_K; keeping it packed
+		// avoids the ~5.09 GB F32 expansion that breached the 36 GiB envelope.
+		q4kOpts = append(q4kOpts, ggufload.WithQ2KEmbeddingResident(true))
 	}
 	if expertShard != nil {
 		q4kOpts = append(q4kOpts, ggufload.WithExpertShard(expertShard.Lo, expertShard.Hi))

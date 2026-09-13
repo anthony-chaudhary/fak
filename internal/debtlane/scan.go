@@ -1635,7 +1635,27 @@ func isHeavyNonSourceDir(name string) bool {
 		"agent-memory", "fleet":
 		return true
 	}
-	return strings.HasPrefix(name, "dgxbridge-tail-readback-")
+	if strings.HasPrefix(name, "dgxbridge-tail-readback-") {
+		return true
+	}
+	return isBuildOrToolingRoot(name)
+}
+
+func isBuildOrToolingRoot(name string) bool {
+	lower := strings.ToLower(name)
+	for _, prefix := range []string{".gocache", ".gotmp", ".cache", ".tmp", ".worker-cache", ".goal-runs"} {
+		if lower == prefix || strings.HasPrefix(lower, prefix+"-") {
+			return true
+		}
+	}
+	if strings.HasPrefix(name, ".") {
+		switch name {
+		case ".claude", ".agents", ".github":
+			return false
+		}
+		return true
+	}
+	return false
 }
 
 func shouldSkipDir(name string) bool {
@@ -1673,6 +1693,9 @@ func isGeneratedArtifact(path string, content []byte) bool {
 		return true
 	}
 	if strings.Contains(sampleStr, "@generated") {
+		return true
+	}
+	if strings.Contains(sampleStr, "generated-by: fak project-assets sync") {
 		return true
 	}
 	return false
@@ -1984,6 +2007,11 @@ func inspectSkillEvidence(skillDir, unitOfWork, laneName string) (Evidence, []Fi
 			})
 			return nil
 		}
+		if strings.EqualFold(d.Name(), "SKILL.md") && strings.Contains(string(data), "generated-by: fak project-assets sync") {
+			skillMdData = data
+			skillMdFound = true
+			return nil
+		}
 		if isGeneratedArtifact(path, data) {
 			return nil
 		}
@@ -1997,6 +2025,9 @@ func inspectSkillEvidence(skillDir, unitOfWork, laneName string) (Evidence, []Fi
 	})
 
 	if skillMdFound {
+		if strings.Contains(string(skillMdData), "generated-by: fak project-assets sync") {
+			ev.Generated = true
+		}
 		ev.HasCode = true
 		content := string(skillMdData)
 		if strings.HasPrefix(content, "---\n") {
@@ -2334,6 +2365,35 @@ func isStandardSurfaceRoot(name string) bool {
 		name == "examples" || name == "docs"
 }
 
+// isSourceBearingRoot reports whether a directory tree contains at least one
+// first-party source file. Unrecognized roots that hold only data (notes, JSON
+// dumps, logs) are not units-of-work and must not be charged an unsupported-root
+// debt lane.
+func isSourceBearingRoot(dir string) bool {
+	sourceExts := map[string]bool{
+		".go": true, ".py": true, ".sh": true, ".ps1": true, ".ts": true,
+		".tsx": true, ".js": true, ".jsx": true, ".rs": true, ".c": true,
+		".h": true, ".cc": true, ".cpp": true, ".java": true, ".rb": true,
+	}
+	found := false
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil || found {
+			return nil
+		}
+		if d.IsDir() {
+			if path != dir && shouldSkipDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if sourceExts[strings.ToLower(filepath.Ext(d.Name()))] {
+			found = true
+		}
+		return nil
+	})
+	return found
+}
+
 func discoverExpandedSurfaces(root string) ([]DebtLane, []FindingProvenance) {
 	var extra []DebtLane
 	var allFindings []FindingProvenance
@@ -2418,6 +2478,9 @@ func discoverExpandedSurfaces(root string) ([]DebtLane, []FindingProvenance) {
 			seenSkills[laneName] = true
 
 			ev, findings := inspectSkillEvidence(skillDir, unitPath, laneName)
+			if ev.Generated {
+				continue
+			}
 			allFindings = append(allFindings, findings...)
 			score, rung := EvaluateMaturityCurve(ev)
 			bounds := DefaultBoundsAndLimits(CriticalityStewardship)
@@ -2527,9 +2590,12 @@ func discoverExpandedSurfaces(root string) ([]DebtLane, []FindingProvenance) {
 			if isStandardSurfaceRoot(name) {
 				continue
 			}
+			absDir := filepath.Join(root, name)
+			if !isSourceBearingRoot(absDir) {
+				continue
+			}
 			// Unsupported root found
 			unitPath := name
-			absDir := filepath.Join(root, name)
 			ev, findings := inspectUnsupportedRootEvidence(absDir, unitPath, name)
 			allFindings = append(allFindings, findings...)
 			bounds := DefaultBoundsAndLimits(CriticalityStewardship)

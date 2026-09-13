@@ -218,13 +218,12 @@ func newQwenHybridSwapCache(cfg Config) *KVCache {
 }
 
 func qwenFullAttentionLayers(cfg Config) []int {
-	var out []int
-	for l := 0; l < cfg.NumLayers; l++ {
-		if !cfg.isLinearAttnLayer(l) {
-			out = append(out, l)
-		}
-	}
-	return out
+	// Route the full/linear classification through the per-layer hybrid cache-type
+	// registry (#942) instead of re-deriving it from cfg.isLinearAttnLayer here. For a
+	// qwen35 hybrid the layer_types taxonomy is exactly linear_attention/full_attention,
+	// so layout.SliceableLayers() returns the identical, ordered set of token-indexed
+	// layers - keeping the swap blob byte-for-byte what the bespoke loop produced.
+	return cfg.cacheLayout().SliceableLayers()
 }
 func qwenSwapCeilDiv(n, d int) int {
 	if n == 0 {

@@ -522,7 +522,7 @@ func (g *ProjectionGraph) qwenP32Input(input *GraphResult, width int) error {
 }
 
 func qwenOrderedPanel(rows int) bool {
-	return rows == 2 || rows == 3 || rows == 4 || rows == 32
+	return rows == 1 || rows == 2 || rows == 3 || rows == 4 || rows == 32
 }
 
 func (g *ProjectionGraph) RMSNorm(input *GraphResult, weight []float32, eps float32, gain1p bool) (*GraphResult, error) {
@@ -615,7 +615,7 @@ func (g *ProjectionGraph) FullAttention(q, k, v, gate *GraphResult, qnorm, knorm
 		return Qwen35GraphAttentionResult{}, errGraphTerminal
 	}
 	if !qwenOrderedPanel(g.p) {
-		return Qwen35GraphAttentionResult{}, fmt.Errorf("metalgemm: Qwen full-attention panel P=%d outside witnessed set {2,3,4,32}", g.p)
+		return Qwen35GraphAttentionResult{}, fmt.Errorf("metalgemm: Qwen full-attention panel P=%d outside witnessed set {1,2,3,4,32}", g.p)
 	}
 	qwidth, kvwidth := nH*hd, nKV*hd
 	for _, check := range []struct {

@@ -83,3 +83,11 @@ func (m *Model) metalQ8Weights() map[string]bool {
 }
 
 func (m *Model) releaseMetalQ8Residency() {}
+
+// EagerMetalQ8Residency is a no-op on non-Metal builds: there is no device, so there is nothing to
+// promote and no fail-closed reason to report.
+func (m *Model) EagerMetalQ8Residency() error { return nil }
+
+// MetalQ8ResidencyError reports that no eager Metal Q8 promotion exists on this build. attempted is
+// always false so the startup report prints no residency error on a pure-Go/non-Apple-Silicon host.
+func (m *Model) MetalQ8ResidencyError() (error, bool) { return nil, false }

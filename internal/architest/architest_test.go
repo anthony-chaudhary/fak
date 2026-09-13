@@ -869,6 +869,7 @@ var tier = map[string]int{
 	"hil":                        2, // Hardware-in-the-loop micro-dose execution and comparison audit leaf.
 	"cluster":                    1, // multi-Mac point-to-point mesh allocation and Thunderbolt 5 RDMA discovery (#12596).
 	"agentbench":                 5,
+	"beam":                       3, // beam-search primitive over the batched decode session (#12409): BeamIndirectionTable maps logical (beam,pos) to physical KV slots as pure integer moves, plus a thin driver over model.BatchSession.StepBatch; imports model(2), off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
@@ -1550,6 +1551,7 @@ func TestRequestPathLeavesRegistered(t *testing.T) {
 // but lives outside internal/, so it is not scanned.
 var chatEndpointRole = map[string]string{
 	"agent":             "the single outbound chat-completions client (HTTPPlanner)",
+	"agentbench":        "the off-path bounded same-repository replay and burn benchmark client against a declared OpenAI-compatible endpoint (not a live planner)",
 	"engine":            "the narrow vLLM EngineDriver adapter speaking vLLM's OpenAI-compatible generation surface",
 	"gateway":           "the inbound /v1/chat/completions server route (adjudication proxy)",
 	"allinone":          "the inbound mock /v1/chat/completions server of the all-in-one supervisor (bounded deterministic envelope so the ready banner's advertised URL is truthful, issue #12616; not a live client/planner)",

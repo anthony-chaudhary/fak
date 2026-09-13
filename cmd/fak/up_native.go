@@ -45,6 +45,11 @@ type turnkeyNativeStartup struct {
 	Resident            *fakmodel.ResidentReport `json:"resident,omitempty"`
 	MetalLiveQ6Weights  int                      `json:"metal_live_q6_weights"`
 	MetalLiveQ8Weights  int                      `json:"metal_live_q8_weights"`
+	// MetalQ8ResidencyError is the concrete fail-closed reason the exact Qwen3.8 no-copy Q8 band
+	// was not published at load time. Empty means either promotion succeeded or it was not
+	// applicable (Metal unavailable / not the exact hybrid). This makes a
+	// metal_live_q8_weights=0 report self-explaining instead of silent.
+	MetalQ8ResidencyError string `json:"metal_q8_residency_error,omitempty"`
 }
 
 func (r *turnkeyNativeResources) Close() error {
@@ -72,6 +77,10 @@ type turnkeyNativeLoadDeps struct {
 	newPlanner     func(*fakmodel.Model, *tokenizer.Tokenizer, string, bool, compute.Backend, bool, int) *agent.InKernelPlanner
 	hostMemory     func() (int64, int64, bool)
 	metalResidency func() (int, int)
+	// eagerMetalResidency promotes GPU Q8 (+Q6_K) residency at model-load time so the first
+	// request already finds the device full. It returns the fail-closed reason on decline, or
+	// nil when promotion succeeded or was not applicable.
+	eagerMetalResidency func(*fakmodel.Model) error
 }
 
 func defaultTurnkeyNativeLoadDeps() turnkeyNativeLoadDeps {
@@ -90,6 +99,12 @@ func defaultTurnkeyNativeLoadDeps() turnkeyNativeLoadDeps {
 		newPlanner:     newTurnkeyInKernelPlanner,
 		hostMemory:     compute.HostSystemMemoryInfo,
 		metalResidency: func() (int, int) { return metalgemm.LiveQ6KWeights(), metalgemm.LiveQ8Weights() },
+		eagerMetalResidency: func(m *fakmodel.Model) error {
+			if m == nil {
+				return nil
+			}
+			return m.EagerMetalQ8Residency()
+		},
 	}
 }
 
@@ -143,6 +158,15 @@ func loadTurnkeyNativeResourcesWith(_ context.Context, modelPath, modelID string
 		startup.LoadBottleneck = profile.Bottleneck
 	}
 	startup.Resident = model.ResidentReport()
+	if metal && deps.eagerMetalResidency != nil {
+		// Promote the exact Qwen3.8 no-copy Q8 band NOW, at load time, so the first request
+		// finds full device residency instead of paying the lazy first-prefill upload. A
+		// decline is surfaced (never silent) and is non-fatal: Q8 decode stays on the proven
+		// CPU qGemm8 path.
+		if err := deps.eagerMetalResidency(model); err != nil {
+			startup.MetalQ8ResidencyError = err.Error()
+		}
+	}
 	if deps.metalResidency != nil {
 		startup.MetalLiveQ6Weights, startup.MetalLiveQ8Weights = deps.metalResidency()
 	}

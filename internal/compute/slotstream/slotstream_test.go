@@ -2,6 +2,7 @@ package slotstream
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -133,13 +134,22 @@ func TestSlotStreamStreamingBandwidthAndDecodeRate(t *testing.T) {
 		t.Fatalf("achieved decode rate %.2f tok/s < 15.0 tok/s", tokS)
 	}
 
-	// Emit witness receipt
+	// The tracked historical hardware receipt must never be a write target of an
+	// ordinary package test: this test only exercises SIMULATED StreamPicks and
+	// its timings are host-dependent. Capture the tracked path and its bytes so
+	// the regression assertion below can prove the test leaves them untouched.
+	trackedReceiptPath := filepath.Join("..", "..", "..", "docs", "_witnesses", "issue-11105-slot-streaming", "receipt.json")
+	trackedBefore, trackedBeforeErr := os.ReadFile(trackedReceiptPath)
+
+	// Build a SIMULATION receipt. Provenance is explicit: engine is marked as
+	// simulated (not a physical `fak-native` claim) and VRAMEnclosedProven stays
+	// false so simulation cannot masquerade as hardware evidence.
 	receipt := SlotStreamingReceipt{
-		Schema:                 "fak-slot-streaming/v1",
+		Schema:                 "fak-slot-streaming-simulated/v1",
 		Issue:                  11105,
-		Role:                   "candidate",
-		Engine:                 "fak-native",
-		ModelArchitecture:      "Qwen3.8-Flash-Next 125B / GLM-5.3-Flash 320B",
+		Role:                   "simulation",
+		Engine:                 "simulated",
+		ModelArchitecture:      "SIMULATED (not physical hardware evidence)",
 		VRAMBudgetBytes:        DefaultVRAMBudgetBytes,
 		DenseTrunkBytes:        DefaultDenseTrunkBytes,
 		SlotsPerLayer:          slotsPerLayer,
@@ -149,20 +159,55 @@ func TestSlotStreamStreamingBandwidthAndDecodeRate(t *testing.T) {
 		AchievedDecodeTokS:     tokS,
 		MinBandwidthThreshold:  12.0,
 		MinDecodeRateThreshold: 15.0,
-		VRAMEnclosedProven:     true,
+		VRAMEnclosedProven:     false,
 	}
 
-	receiptDir := filepath.Join("..", "..", "..", "docs", "_witnesses", "issue-11105-slot-streaming")
-	if err := os.MkdirAll(receiptDir, 0755); err != nil {
-		t.Logf("note: could not create witness dir: %v", err)
-		return
-	}
+	receiptPath := filepath.Join(t.TempDir(), "receipt.json")
 	data, err := json.MarshalIndent(receipt, "", "  ")
 	if err != nil {
 		t.Fatalf("failed to marshal receipt: %v", err)
 	}
-	receiptPath := filepath.Join(receiptDir, "receipt.json")
 	if err := os.WriteFile(receiptPath, data, 0644); err != nil {
 		t.Fatalf("failed to write receipt: %v", err)
 	}
+	if err := verifySimulationReceiptProvenance(receipt); err != nil {
+		t.Fatalf("simulation receipt provenance is dishonest: %v", err)
+	}
+
+	// Optional explicit persistence: only when the operator asks for it via the
+	// environment. It still lands under a temp/out dir, never the tracked path.
+	if outDir := os.Getenv("FAK_SLOTSTREAM_WRITE_RECEIPT"); outDir != "" {
+		persistDir := filepath.Join(outDir, "issue-12809-slot-streaming-simulated")
+		if err := os.MkdirAll(persistDir, 0755); err != nil {
+			t.Fatalf("failed to create receipt out dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(persistDir, "receipt.json"), data, 0644); err != nil {
+			t.Fatalf("failed to persist receipt: %v", err)
+		}
+	}
+
+	// Regression: the tracked hardware-evidence receipt must be unchanged by
+	// this simulated test run (this is the fak#12809 invariant).
+	trackedAfter, trackedAfterErr := os.ReadFile(trackedReceiptPath)
+	if trackedBeforeErr == nil && trackedAfterErr != nil {
+		t.Fatalf("test removed tracked receipt %s: %v", trackedReceiptPath, trackedAfterErr)
+	}
+	if trackedBeforeErr == nil && trackedAfterErr == nil && string(trackedBefore) != string(trackedAfter) {
+		t.Fatalf("test overwrote tracked receipt %s with simulation data", trackedReceiptPath)
+	}
+}
+
+// verifySimulationReceiptProvenance asserts a simulated receipt never asserts
+// physical hardware execution or a physical engine identity.
+func verifySimulationReceiptProvenance(r SlotStreamingReceipt) error {
+	if r.Role != "simulation" {
+		return fmt.Errorf("role %q must be %q for a simulated receipt", r.Role, "simulation")
+	}
+	if r.Engine == "fak-native" {
+		return fmt.Errorf("simulated receipt must not claim physical engine %q", r.Engine)
+	}
+	if r.VRAMEnclosedProven {
+		return fmt.Errorf("simulated receipt must not assert VRAMEnclosedProven")
+	}
+	return nil
 }
