@@ -27,6 +27,7 @@ package ggufload
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -107,6 +108,14 @@ const (
 	ds41KeyEngramPrimes       = "engram.primes"
 	ds41KeyEngramMultipliers  = "engram.multipliers"
 
+	// vcruz305-dialect nested keys, absent from the ds4 dialect. The ds4 dialect
+	// writes encoding/rows/compressed_vocab_size instead of head_count/key_length/
+	// max_ngram_size/offsets.
+	ds41KeyEngramHeadCount    = "engram.head_count"
+	ds41KeyEngramKeyLength    = "engram.key_length"
+	ds41KeyEngramMaxNgramSize = "engram.max_ngram_size"
+	ds41KeyEngramOffsets      = "engram.offsets"
+
 	// Pre-ds4 fak fixtures used these guessed flat spellings. Read them only when
 	// the converter-defined key is absent so real artifact metadata wins.
 	ds41LegacyEngramLayerIDs     = "engram_layer_ids"
@@ -145,6 +154,7 @@ type DeepSeek41Engram struct {
 	TokenMap            []int
 	Primes              []int
 	Multipliers         []uint64
+	Offsets             []int
 }
 
 // applyDeepSeek41Config reads the deepseek41 MoE + MLA + indexer + compress/
@@ -249,15 +259,25 @@ func applyDeepSeek41Config(f *File, p string, cfg *model.Config, ropeDim int) er
 	eng := &DeepSeek41Engram{
 		LayerIDs:            intArrayOrNil(f, p+ds41KeyEngramLayerIDs),
 		NumEmbeddings:       intArrayOrNil(f, p+ds41KeyEngramNumEmbedding),
-		MaxNgramSize:        intValueOrZero(f, p+ds41LegacyEngramMaxNgramSize),
+		MaxNgramSize:        intValueOrZero(f, p+ds41KeyEngramMaxNgramSize),
 		VocabSize:           intValueOrZero(f, p+ds41LegacyEngramVocabSize),
-		NHeads:              intValueOrZero(f, p+ds41LegacyEngramNHeads),
-		HeadDim:             intValueOrZero(f, p+ds41LegacyEngramHeadDim),
+		NHeads:              intValueOrZero(f, p+ds41KeyEngramHeadCount),
+		HeadDim:             intValueOrZero(f, p+ds41KeyEngramKeyLength),
 		PadTokenID:          intValueOrZero(f, p+ds41KeyEngramPadTokenID),
 		CompressedVocabSize: intValueOrZero(f, p+ds41KeyEngramCompVocab),
 		TokenMap:            intArrayOrNil(f, p+ds41KeyEngramTokenMap),
 		Primes:              intArrayOrNil(f, p+ds41KeyEngramPrimes),
 		Multipliers:         uint64ArrayOrNil(f, p+ds41KeyEngramMultipliers),
+		Offsets:             intArrayOrNil(f, p+ds41KeyEngramOffsets),
+	}
+	if _, ok := f.Metadata[p+ds41KeyEngramMaxNgramSize]; !ok {
+		eng.MaxNgramSize = max(eng.MaxNgramSize, intValueOrZero(f, p+ds41LegacyEngramMaxNgramSize))
+	}
+	if _, ok := f.Metadata[p+ds41KeyEngramHeadCount]; !ok {
+		eng.NHeads = max(eng.NHeads, intValueOrZero(f, p+ds41LegacyEngramNHeads))
+	}
+	if _, ok := f.Metadata[p+ds41KeyEngramKeyLength]; !ok {
+		eng.HeadDim = max(eng.HeadDim, intValueOrZero(f, p+ds41LegacyEngramHeadDim))
 	}
 	eng.Encoding, _ = f.String(p + ds41KeyEngramEncoding)
 	if _, ok := f.Metadata[p+ds41KeyEngramLayerIDs]; !ok {
@@ -297,17 +317,30 @@ func applyDeepSeek41Config(f *File, p string, cfg *model.Config, ropeDim int) er
 // geometry for a shipped table.
 func validateDeepSeek41Engram(f *File, p string, cfg *model.Config, eng *DeepSeek41Engram) error {
 	converterKeys := hasDeepSeek41ConverterEngramMetadata(f, p)
+	vcruzKeys := hasDeepSeek41VcruzEngramMetadata(f, p)
 	if converterKeys {
-		for _, key := range []string{ds41KeyEngramLayerIDs, ds41KeyEngramNumEmbedding, ds41KeyEngramTokenMap, ds41KeyEngramPrimes} {
-			if !metadataArrayHasElementType(f, p+key, TypeUint32) {
-				return fmt.Errorf("gguf: deepseek41 converter key %s must be a uint32 array", p+key)
+		// The two converter dialects write the array keys at different natural
+		// widths: ds4 uses U32 arrays; vcruz uses I32 for layer_ids/token_map and
+		// U64 for primes/multipliers/offsets. Accept any integer element type so a
+		// real vcruz file is not falsely refused as "must be uint32"; still refuse a
+		// non-integer element.
+		arrayKeys := []string{ds41KeyEngramLayerIDs, ds41KeyEngramTokenMap, ds41KeyEngramPrimes, ds41KeyEngramMultipliers}
+		if !vcruzKeys {
+			// ds4 declares per-layer row counts; the vcruz dialect does not.
+			arrayKeys = append(arrayKeys, ds41KeyEngramNumEmbedding)
+		}
+		for _, key := range arrayKeys {
+			if !metadataArrayHasIntegerElement(f, p+key) {
+				return fmt.Errorf("gguf: deepseek41 converter key %s must be an integer array", p+key)
 			}
 		}
-		if !metadataArrayHasElementType(f, p+ds41KeyEngramMultipliers, TypeUint64) {
-			return fmt.Errorf("gguf: deepseek41 converter key %s must be a uint64 array", p+ds41KeyEngramMultipliers)
+		// offsets is vcruz-only: validate its width only when the key is present.
+		if _, ok := f.Metadata[p+ds41KeyEngramOffsets]; ok && !metadataArrayHasIntegerElement(f, p+ds41KeyEngramOffsets) {
+			return fmt.Errorf("gguf: deepseek41 converter key %s must be an integer array", p+ds41KeyEngramOffsets)
 		}
+		// ds4-only scalar keys: validate the width only when the key is present.
 		for _, key := range []string{ds41KeyEngramCompVocab, ds41KeyEngramPadTokenID} {
-			if value, ok := f.Metadata[p+key]; !ok || value.Type != TypeUint32 {
+			if value, ok := f.Metadata[p+key]; ok && value.Type != TypeUint32 {
 				return fmt.Errorf("gguf: deepseek41 converter key %s must be uint32", p+key)
 			}
 		}
@@ -319,7 +352,9 @@ func validateDeepSeek41Engram(f *File, p string, cfg *model.Config, eng *DeepSee
 	if converterKeys {
 		layerKey, rowsKey = ds41KeyEngramLayerIDs, ds41KeyEngramNumEmbedding
 	}
-	if len(eng.NumEmbeddings) != len(eng.LayerIDs) {
+	// The vcruz dialect carries no per-layer row counts, so enforce the pairing
+	// only for a file that actually declares the rows key.
+	if _, hasRows := f.Metadata[p+rowsKey]; hasRows && len(eng.NumEmbeddings) != len(eng.LayerIDs) {
 		return fmt.Errorf("gguf: deepseek41 declares %s=%v but %s has %d entries, want %d",
 			p+layerKey, eng.LayerIDs, p+rowsKey, len(eng.NumEmbeddings), len(eng.LayerIDs))
 	}
@@ -334,11 +369,22 @@ func validateDeepSeek41Engram(f *File, p string, cfg *model.Config, eng *DeepSee
 			key string
 			ok  bool
 		}{
-			{ds41KeyEngramEncoding, eng.Encoding != ""},
-			{ds41KeyEngramCompVocab, eng.CompressedVocabSize > 0},
 			{ds41KeyEngramTokenMap, len(eng.TokenMap) > 0},
 			{ds41KeyEngramPrimes, len(eng.Primes) > 0},
 			{ds41KeyEngramMultipliers, len(eng.Multipliers) > 0},
+		}
+		if !vcruzKeys {
+			// ds4-dialect-only keys; the vcruz dialect writes neither.
+			required = append(required,
+				struct {
+					key string
+					ok  bool
+				}{ds41KeyEngramEncoding, eng.Encoding != ""},
+				struct {
+					key string
+					ok  bool
+				}{ds41KeyEngramCompVocab, eng.CompressedVocabSize > 0},
+			)
 		}
 		for _, item := range required {
 			if !item.ok {
@@ -373,6 +419,10 @@ func hasDeepSeek41ConverterEngramMetadata(f *File, p string) bool {
 		ds41KeyEngramTokenMap,
 		ds41KeyEngramPrimes,
 		ds41KeyEngramMultipliers,
+		ds41KeyEngramHeadCount,
+		ds41KeyEngramKeyLength,
+		ds41KeyEngramMaxNgramSize,
+		ds41KeyEngramOffsets,
 	} {
 		if _, ok := f.Metadata[p+key]; ok {
 			return true
@@ -381,7 +431,29 @@ func hasDeepSeek41ConverterEngramMetadata(f *File, p string) bool {
 	return false
 }
 
-func metadataArrayHasElementType(f *File, key string, kind ValueType) bool {
+// hasDeepSeek41VcruzEngramMetadata reports whether the file carries a key unique
+// to the vcruz305 dialect (head_count / key_length / max_ngram_size / offsets).
+// That dialect writes none of ds4's encoding / rows / compressed_vocab_size keys,
+// so validation must not require them for a vcruz file.
+func hasDeepSeek41VcruzEngramMetadata(f *File, p string) bool {
+	for _, key := range []string{
+		ds41KeyEngramHeadCount,
+		ds41KeyEngramKeyLength,
+		ds41KeyEngramMaxNgramSize,
+		ds41KeyEngramOffsets,
+	} {
+		if _, ok := f.Metadata[p+key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// metadataArrayHasIntegerElement reports whether key is a GGUF integer array of
+// any element width (u8/u16/u32/u64/i8/i16/i32/i64). It is the dialect-neutral
+// predicate the V4.1 Engram guard uses: ds4 writes U32 arrays while vcruz writes
+// I32/U64 arrays for the same logical keys.
+func metadataArrayHasIntegerElement(f *File, key string) bool {
 	v, ok := f.Metadata[key]
 	if !ok || v.Type != TypeArray {
 		return false
@@ -391,7 +463,10 @@ func metadataArrayHasElementType(f *File, key string, kind ValueType) bool {
 		return false
 	}
 	for _, item := range items {
-		if item.Type != kind {
+		switch item.Type {
+		case TypeUint8, TypeUint16, TypeUint32, TypeUint64,
+			TypeInt8, TypeInt16, TypeInt32, TypeInt64:
+		default:
 			return false
 		}
 	}
@@ -492,13 +567,24 @@ func deepseek41CanonicalSuffix(suffix string) (string, bool) {
 }
 
 // deepseek41EngramSuffixName maps an Engram tensor suffix to its canonical
-// namespace leaf (engram_table / engram_key / engram_value), reporting whether the
-// suffix is an Engram table member. The canonical name is composed by
-// deepseek41CanonicalSuffix into model.engram.<L>.<leaf>.weight.
+// namespace leaf, reporting whether the suffix is an Engram table member. The
+// canonical name is composed by deepseek41CanonicalSuffix into
+// model.engram.<L>.<leaf>.weight.
+//
+// Two converter dialects emit different suffix sets:
+//   - ds4 (antirez): engram_table / engram_key / engram_value (bare, no ".weight").
+//   - vcruz305: engram_embd / engram_k / engram_q / engram_wkv (carrying ".weight",
+//     the GGUF form), matching the ggml enums ENGRAM_EMBD/K/Q/WKV.
+//
+// A trailing ".weight" is accepted and stripped uniformly so both dialect forms
+// resolve to the same canonical leaf, and neither falls through to a generic
+// attention/MLP canonical name.
 func deepseek41EngramSuffixName(suffix string) (string, bool) {
-	switch suffix {
-	case "engram_table", "engram_key", "engram_value":
-		return suffix, true
+	leaf := strings.TrimSuffix(suffix, ".weight")
+	switch leaf {
+	case "engram_table", "engram_key", "engram_value",
+		"engram_embd", "engram_k", "engram_q", "engram_wkv":
+		return leaf, true
 	}
 	return "", false
 }

@@ -511,3 +511,154 @@ func firstByte(b []byte) byte {
 	}
 	return b[0]
 }
+
+// vcruzI32Array builds a GGUF INT32 metadata array (the width the vcruz305
+// converter writes for engram.layer_ids and engram.token_map).
+func vcruzI32Array(values []int32) Value {
+	items := make([]Value, len(values))
+	for i, v := range values {
+		items[i] = Value{Type: TypeInt32, Value: v}
+	}
+	return Value{Type: TypeArray, Value: items}
+}
+
+// vcruzU64Array builds a GGUF UINT64 metadata array (engram.primes/offsets/multipliers).
+func vcruzU64Array(values []uint64) Value {
+	items := make([]Value, len(values))
+	for i, v := range values {
+		items[i] = Value{Type: TypeUint64, Value: v}
+	}
+	return Value{Type: TypeArray, Value: items}
+}
+
+// vcruzEngramMeta is the Engram header shape a real vcruz305-converted
+// deepseek41 GGUF writes: nine nested {arch}.engram.* keys, at their real value
+// types (layer_ids/token_map INT32, primes/offsets/multipliers UINT64,
+// head_count/key_length/max_ngram_size/pad_id UINT32), and NO
+// encoding/rows/compressed_vocab_size. The primes count obeys the published
+// hash geometry len(layer_ids)*(max_ngram_size-1)*head_count so the guard sees a
+// consistent declaration.
+func vcruzEngramMeta() (map[string]Value, string) {
+	const arch = "deepseek41"
+	p := arch + "."
+	primes := make([]uint64, 2*(4-1)*8)
+	for i := range primes {
+		primes[i] = 16000057 + uint64(i)
+	}
+	meta := map[string]Value{
+		"general.architecture":                 {Type: TypeString, Value: arch},
+		p + "embedding_length":                 {Type: TypeUint64, Value: uint64(5120)},
+		p + "block_count":                      {Type: TypeUint64, Value: uint64(40)},
+		p + "attention.head_count":             {Type: TypeUint64, Value: uint64(128)},
+		p + "feed_forward_length":              {Type: TypeUint64, Value: uint64(18432)},
+		p + "attention.layer_norm_rms_epsilon": {Type: TypeFloat32, Value: float32(1e-6)},
+
+		p + "engram.layer_ids":      vcruzI32Array([]int32{1, 14}),
+		p + "engram.head_count":     {Type: TypeUint32, Value: uint32(8)},
+		p + "engram.key_length":     {Type: TypeUint32, Value: uint32(256)},
+		p + "engram.max_ngram_size": {Type: TypeUint32, Value: uint32(4)},
+		p + "engram.primes":         vcruzU64Array(primes),
+		p + "engram.multipliers":    vcruzU64Array([]uint64{35184372088831, 35184372088829}),
+		p + "engram.offsets":        vcruzU64Array([]uint64{0, 1}),
+		p + "engram.token_map":      vcruzI32Array([]int32{7, 8, 9}),
+		p + "engram.pad_id":         {Type: TypeUint32, Value: uint32(0)},
+	}
+	return meta, p
+}
+
+// TestDeepSeek41GGUFReadsVcruzEngramMetadata is the fail-before/pass-after fixture
+// for the vcruz305 DeepSeek-V4.1-Flash-GGUF converter dialect. Before the
+// reconciliation the loader refused a valid file with
+// "deepseek41.engram.layer_ids must be a uint32 array" (the real converter writes
+// INT32) and left all four engram_* tensors unmapped.
+func TestDeepSeek41GGUFReadsVcruzEngramMetadata(t *testing.T) {
+	meta, _ := vcruzEngramMeta()
+	f := &File{Metadata: meta}
+	if _, err := f.Config(); err != nil {
+		t.Fatalf("Config with vcruz converter keys: %v", err)
+	}
+	eng := f.DeepSeek41Engram
+	if eng == nil {
+		t.Fatal("f.DeepSeek41Engram is nil; the vcruz Engram declaration was not retained")
+	}
+	if len(eng.LayerIDs) != 2 || eng.LayerIDs[0] != 1 || eng.LayerIDs[1] != 14 {
+		t.Errorf("Engram.LayerIDs = %v, want [1 14]", eng.LayerIDs)
+	}
+	if eng.NHeads != 8 {
+		t.Errorf("Engram.NHeads = %d, want 8 (engram.head_count)", eng.NHeads)
+	}
+	if eng.HeadDim != 256 {
+		t.Errorf("Engram.HeadDim = %d, want 256 (engram.key_length)", eng.HeadDim)
+	}
+	if eng.MaxNgramSize != 4 {
+		t.Errorf("Engram.MaxNgramSize = %d, want 4 (engram.max_ngram_size)", eng.MaxNgramSize)
+	}
+	if len(eng.TokenMap) != 3 || eng.TokenMap[0] != 7 {
+		t.Errorf("Engram.TokenMap = %v, want [7 8 9]", eng.TokenMap)
+	}
+	if len(eng.Primes) != 48 {
+		t.Errorf("Engram.Primes has %d entries, want 48", len(eng.Primes))
+	}
+	if len(eng.Multipliers) != 2 || eng.Multipliers[0] != 35184372088831 {
+		t.Errorf("Engram.Multipliers = %v, want the 47-bit odd constants", eng.Multipliers)
+	}
+	if len(eng.Offsets) != 2 || eng.Offsets[0] != 0 || eng.Offsets[1] != 1 {
+		t.Errorf("Engram.Offsets = %v, want [0 1]", eng.Offsets)
+	}
+	if eng.PadTokenID != 0 {
+		t.Errorf("Engram.PadTokenID = %d, want 0", eng.PadTokenID)
+	}
+	// The vcruz dialect writes no encoding/rows/compressed_vocab_size; they must
+	// not be fabricated from the absent keys.
+	if eng.Encoding != "" || eng.CompressedVocabSize != 0 {
+		t.Errorf("vcruz Engram fabricated ds4-only fields: encoding=%q compressed=%d", eng.Encoding, eng.CompressedVocabSize)
+	}
+}
+
+// TestDeepSeek41GGUFVcruzEngramTensorSuffixes proves the four real vcruz engram_*
+// tensor suffixes map into the dedicated model.engram.<L>.* namespace, and never
+// into a generic self_attn./mlp. name (which would let an Engram table fall
+// through to the wrong forward).
+func TestDeepSeek41GGUFVcruzEngramTensorSuffixes(t *testing.T) {
+	want := map[string]string{
+		"engram_embd": "model.engram.1.engram_embd.weight",
+		"engram_k":    "model.engram.1.engram_k.weight",
+		"engram_q":    "model.engram.1.engram_q.weight",
+		"engram_wkv":  "model.engram.1.engram_wkv.weight",
+	}
+	for suffix, wantName := range want {
+		got, ok := CanonicalTensorNameArch("blk.1."+suffix+".weight", "deepseek41")
+		if !ok {
+			t.Errorf("CanonicalTensorNameArch(blk.1.%s.weight, deepseek41) not mapped", suffix)
+			continue
+		}
+		if got != wantName {
+			t.Errorf("suffix %s canonical name = %q, want %q", suffix, got, wantName)
+		}
+		if strings.Contains(got, "self_attn.") || strings.Contains(got, "mlp.") {
+			t.Errorf("suffix %s mapped into a generic attention/MLP namespace: %q", suffix, got)
+		}
+	}
+}
+
+// TestDeepSeek41GGUFVcruzMalformedFailsLoud proves the reconciled reader still
+// fails closed: a vcruz file with inconsistent hash geometry, or with a
+// non-integer array where an integer array is required, is refused with the
+// offending key named.
+func TestDeepSeek41GGUFVcruzMalformedFailsLoud(t *testing.T) {
+	t.Run("inconsistent hash geometry", func(t *testing.T) {
+		meta, _ := vcruzEngramMeta()
+		// Drop primes below the required len(layer_ids)*(max_ngram-1)*head_count.
+		meta["deepseek41.engram.primes"] = vcruzU64Array([]uint64{16000057})
+		if _, err := (&File{Metadata: meta}).Config(); err == nil || !strings.Contains(err.Error(), "hash geometry") {
+			t.Fatalf("Config error = %v, want inconsistent hash geometry refusal", err)
+		}
+	})
+	t.Run("non-integer array", func(t *testing.T) {
+		meta, _ := vcruzEngramMeta()
+		meta["deepseek41.engram.layer_ids"] = Value{Type: TypeArray, Value: []Value{{Type: TypeString, Value: "not-an-int"}}}
+		if _, err := (&File{Metadata: meta}).Config(); err == nil || !strings.Contains(err.Error(), "deepseek41.engram.layer_ids") {
+			t.Fatalf("Config error = %v, want integer-array refusal naming layer_ids", err)
+		}
+	})
+}
