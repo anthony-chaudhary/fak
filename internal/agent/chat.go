@@ -679,8 +679,21 @@ type HTTPPlanner struct {
 	// fire, and one under the idle deadline would only mislabel a plain dead socket.
 	// Resolved by streamProgressWindow.
 	StreamProgressTimeout time.Duration
-	Client                *http.Client
-	QuarantineTranscript  bool
+	// StreamSoftProgressTimeout is the streaming SOFT no-progress DIAGNOSTIC deadline (#10638):
+	// how long a stream may stay silent (no turn-advancing frame, keepalives ignored) before the
+	// gateway captures an elapsed-since-progress / retry-attempt receipt WITHOUT ending a healthy
+	// turn. It always fires BEFORE the destructive StreamProgressTimeout above, which remains the
+	// hard client-survivable ceiling. Zero derives it from the hard window (hard/3); a NEGATIVE
+	// value disables the diagnostic; a positive value is honored when it lands in [5s, hard).
+	// Resolved by streamSoftProgressWindow.
+	StreamSoftProgressTimeout time.Duration
+	// SoftStallNotify, when non-nil, receives the soft-deadline diagnostic described above. It
+	// is the config-surface hook the gateway wires to write a durable incident/checkpoint packet;
+	// nil (every planner nobody configures) means the soft deadline is armed but silently drops
+	// its strike, so behavior is unchanged for callers that never opted in.
+	SoftStallNotify      func(SoftProgressStall)
+	Client               *http.Client
+	QuarantineTranscript bool
 
 	// CoherenceShaper, when non-nil, is applied to the outbound messages just before
 	// the request is marshaled — the GLM52-HOSTED-CACHE-COHERENCE §A4 hook. The agent

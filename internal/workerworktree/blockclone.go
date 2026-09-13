@@ -2,7 +2,10 @@ package workerworktree
 
 import (
 	"crypto/sha1"
+	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +16,100 @@ const (
 	gitWorktreeBackendName = "git-worktree"
 	blockCloneBackendName  = "block-clone"
 )
+
+// ErrBlockCloneUnsupported reports that the host platform or filesystem cannot
+// provide copy-on-write block/directory cloning, so callers should fall back.
+var ErrBlockCloneUnsupported = errors.New("block clone unsupported")
+
+// CloneTree clones the directory tree at src to dst using the host's native
+// copy-on-write clone primitive when available.
+func CloneTree(src, dst string) error { return cloneTree(src, dst) }
+
+// cloneTreeWalk recursively recreates src's tree at dst, cloning each regular
+// file with cloneFileBlocks and degrading to a byte copy when cloning is
+// unsupported. Directories and symlinks are recreated; device/fifo/socket
+// nodes are skipped. It is the shared fallback for the per-OS cloneTree.
+func cloneTreeWalk(src, dst string) error {
+	info, err := os.Lstat(src)
+	if err != nil {
+		return err
+	}
+	switch {
+	case info.IsDir():
+		if err := mkdirForClone(dst, info.Mode().Perm()); err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(src)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			if err := cloneTreeWalk(filepath.Join(src, entry.Name()), filepath.Join(dst, entry.Name())); err != nil {
+				return err
+			}
+		}
+		return nil
+	case info.Mode().IsRegular():
+		if err := cloneFileBlocks(src, dst); err == nil {
+			return nil
+		}
+		return copyFileBytes(src, dst, info.Mode().Perm())
+	case info.Mode()&os.ModeSymlink != 0:
+		target, err := os.Readlink(src)
+		if err != nil {
+			return err
+		}
+		return os.Symlink(target, dst)
+	default:
+		// Device/fifo/socket nodes are not cloned.
+		return nil
+	}
+}
+
+// mkdirForClone creates dst as a directory, or accepts it if it already exists
+// as a real directory. It deliberately uses Lstat: a pre-existing SYMLINK (or
+// any non-directory) at dst is an error, never followed or silently accepted.
+// Following a symlink would let the walk write source files outside the
+// destination tree, and accepting a non-directory would report a successful
+// clone of an empty source directory that never actually materialized.
+func mkdirForClone(dst string, perm os.FileMode) error {
+	if err := os.Mkdir(dst, perm); err == nil {
+		return nil
+	} else if !errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	existing, err := os.Lstat(dst)
+	if err != nil {
+		return err
+	}
+	if existing.Mode()&os.ModeSymlink != 0 {
+		return &os.PathError{Op: "clone", Path: dst, Err: errors.New("destination is a symlink, refusing to follow it")}
+	}
+	if !existing.IsDir() {
+		return &os.PathError{Op: "clone", Path: dst, Err: errors.New("destination exists and is not a directory")}
+	}
+	return nil
+}
+
+// copyFileBytes is the last-resort fallback when a filesystem cannot clone a
+// regular file. It preserves the source permission bits.
+func copyFileBytes(src, dst string, perm os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
+}
 
 type blockCloneProbe func(targetRoot string) error
 type blockCloneFile func(src, dst string) error

@@ -87,10 +87,15 @@ func (p *RadixKVPager) PageBytes(raw []byte) (tokens []int, pages int, nodeAlign
 	return tokens, pages, nodeAligned, nil
 }
 
-// Bind attaches the token path to the Radix tree and returns a non-zero,
-// address-stable uintptr handle for the bound node. Lookup leases the matched
-// boundary, Insert hangs the suffix, Done releases the lease so the bound path
-// stays LRU-evictable rather than pinned forever.
+// Bind attaches the token path to the Radix tree and returns a non-zero
+// uintptr handle for the bound node. Lookup leases the matched boundary, Insert
+// hangs the suffix, Done releases the lease so the bound path stays
+// LRU-evictable rather than pinned forever.
+//
+// The handle is an opaque receipt identity, not a live reference: once Done
+// drops the lease the node is refcount-0 and LRU-evictable, so a caller must
+// not dereference the uintptr after eviction (GC may recycle it). It is
+// returned only so a receipt can name the node it bound.
 func (p *RadixKVPager) Bind(tokens []int) (nodeRef uintptr, err error) {
 	if p == nil || len(tokens) == 0 {
 		return 0, nil
@@ -104,6 +109,8 @@ func (p *RadixKVPager) Bind(tokens []int) (nodeRef uintptr, err error) {
 		p.tree.Done(leaf)
 		nodeRef = uintptr(unsafe.Pointer(leaf))
 	} else if boundary != nil {
+		// Defensive: Insert returns boundary non-nil on an empty suffix or a
+		// refused insert, so this still names a bound node without leaking a lease.
 		p.tree.Done(boundary)
 		nodeRef = uintptr(unsafe.Pointer(boundary))
 	}

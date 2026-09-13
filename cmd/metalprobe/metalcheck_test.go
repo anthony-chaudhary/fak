@@ -1,6 +1,7 @@
 package main
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -341,6 +342,41 @@ func TestCanonicalLower(t *testing.T) {
 	for in, want := range cases {
 		if got := canonicalLower(in); got != want {
 			t.Fatalf("canonicalLower(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestHostRequirementsPopulatesAllPrereqs is the regression witness for the
+// metal-check false "Xcode Command Line Tools missing" failure: Run used to build
+// Requirements with only GoTool populated, so Adjudicate always saw XcodeCLT.OK and
+// Clang.OK as false and failed a correctly-configured host. hostRequirements is the
+// extracted wiring under test; it must populate every prerequisite field it gates on,
+// and on this darwin/arm64 host all three tools are present.
+func TestHostRequirementsPopulatesAllPrereqs(t *testing.T) {
+	req := hostRequirements(runtime.GOARCH)
+	if req.Goos != runtime.GOOS {
+		t.Fatalf("hostRequirements Goos = %q, want %q", req.Goos, runtime.GOOS)
+	}
+	if req.Goarch != runtime.GOARCH {
+		t.Fatalf("hostRequirements Goarch = %q, want %q", req.Goarch, runtime.GOARCH)
+	}
+	populated := []struct {
+		name string
+		got  ToolCheck
+	}{
+		{"GoTool", req.GoTool},
+		{"XcodeCLT", req.XcodeCLT},
+		{"Clang", req.Clang},
+	}
+	for _, tc := range populated {
+		if !tc.got.OK {
+			t.Errorf("hostRequirements left %s unpopulated: %+v", tc.name, tc.got)
+		}
+	}
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		if got := Adjudicate(req); got != 2 {
+			t.Fatalf("Adjudicate(hostRequirements) = %d, want 2 (prereqs satisfied) on a configured darwin/arm64 host; verdict=%q failure=%q",
+				got, PopulatedVerdict(req), PopulateFailure(req))
 		}
 	}
 }

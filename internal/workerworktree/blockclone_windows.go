@@ -71,3 +71,23 @@ func cloneFileBlocks(src, dst string) error {
 	}
 	return nil
 }
+
+// cloneTree clones the directory tree at src to dst. Windows has no single
+// recursive block clone for directories, so it walks the tree and clones each
+// regular file via FSCTL_DUPLICATE_EXTENTS_TO_FILE, degrading to a byte copy
+// when cloning is unsupported (e.g. ReFS vs NTFS). On error it removes a
+// destination this call created; a destination that already existed is left
+// untouched so pre-existing caller data is never destroyed.
+func cloneTree(src, dst string) error {
+	preExisting := false
+	if _, err := os.Lstat(dst); err == nil {
+		preExisting = true
+	}
+	if err := cloneTreeWalk(src, dst); err != nil {
+		if !preExisting {
+			_ = os.RemoveAll(dst)
+		}
+		return err
+	}
+	return nil
+}
