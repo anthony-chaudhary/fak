@@ -23,6 +23,27 @@
     }
 },
 {
+    "repository": "Azhu9701/ninfer-4090d",
+    "url": "https://github.com/Azhu9701/ninfer-4090d",
+    "status": "studied",
+    "priority": 1,
+    "why": "Windows RTX 4090 D Qwen3.8 serving dossier: claimed 114-SM wave grid alignment (112 CTA/0.98 wave), restart-based dynamic draft-depth controller, DirectStorage 1.3 disk cache, and a tool-call-drift salvage patch.",
+    "last_checked": "2026-09-03",
+    "checked_revision": "3eaa163cdac422da64fed5d42d17c31174a62206",
+    "stars_at_check": 0,
+    "last_push_at_check": "2026-09-03T18:42:46Z",
+    "study_note": "docs/notes/CONCEPT-STUDY-AZHU9701-NINFER-4090D-2026-09-03.md",
+    "receipt_id": "study_dbf8d303ad1ccc4ba93ef32e69ad905ac313e34696689924e1f79d793905d32d",
+    "inventory": {
+      "filed_issue_count": 1,
+      "issue_refs": [
+        "#12944"
+      ],
+      "mode": "standard",
+      "candidate_count": 4
+    }
+},
+{
     "repository": "vcruz305/GLM-5.3-Flash-EXL3-K2-DGX-Spark-recipe",
     "url": "https://github.com/vcruz305/GLM-5.3-Flash-EXL3-K2-DGX-Spark-recipe",
     "status": "studied",
