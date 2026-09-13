@@ -590,6 +590,16 @@ func (s *Session) requirePreNorm(path string) {
 	}
 }
 
+// requireV41NativeUnsupported fails closed at an in-memory session entrypoint for a
+// V4.1 config, mirroring Model.requireV41NativeUnsupported (forward.go). The loaders
+// and forward selection already refuse V4.1, but a session over a directly-constructed
+// V4.1 *Model could otherwise run the generic token loop and emit partial logits.
+func (s *Session) requireV41NativeUnsupported(path string) {
+	if err := refuseDeepSeekV41Native(s.M.Cfg); err != nil {
+		panic(fmt.Errorf("%s: %w", path, err))
+	}
+}
+
 func (s *Session) tappedLogitsAt(pos int, logits []float32) []float32 {
 	if tap := s.activeTap(); tap != nil && tap.wants(pos) {
 		tap.dumpLogits(pos, logits)
@@ -1024,6 +1034,7 @@ func (s *Session) Prefill(ids []int) []float32 {
 	if len(ids) == 0 {
 		return nil
 	}
+	s.requireV41NativeUnsupported("Session.Prefill")
 	s.cacheGeometryMu.RLock()
 	defer s.cacheGeometryMu.RUnlock()
 	s.validateDenseGPULayers()
@@ -1270,6 +1281,7 @@ func (s *Session) prefillTokenLoop(ids []int) []float32 {
 // sessions reuse their logits buffer; consume or copy the returned slice before the next
 // quantized Prefill/Step call on the same session.
 func (s *Session) Step(id int) []float32 {
+	s.requireV41NativeUnsupported("Session.Step")
 	s.cacheGeometryMu.RLock()
 	defer s.cacheGeometryMu.RUnlock()
 	s.validateDenseGPULayers()

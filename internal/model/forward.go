@@ -456,9 +456,24 @@ func (r rope) apply(hv []float32, p int) {
 	applyRopeRow(hv, r.cos[p], r.sin[p])
 }
 
+// requireV41NativeUnsupported fails closed at an in-memory forward entrypoint for a
+// V4.1 config. The loaders (#12891/#12933/#12902) and forward SELECTION
+// (ClassifyForwardPath) already refuse a V4.1 config, but a *Model built directly in
+// memory (NewFromF32Tensors, a deserialized state, or a future native leaf) can still
+// reach the generic layer()/token loop with V4.1 geometry. This is the last unguarded
+// seam before partial V4.1 work silently produces logits; it is the model-level
+// analogue of requirePreNorm. Do not remove it once a native forward lands — replace
+// it with the real forward in the owning leaf.
+func (m *Model) requireV41NativeUnsupported(path string) {
+	if err := refuseDeepSeekV41Native(m.Cfg); err != nil {
+		panic(fmt.Errorf("%s: %w", path, err))
+	}
+}
+
 // Forward runs a full-prefill forward pass over token ids and returns every hidden
 // state + per-position logits. No KV cache (that is R2); this rung proves the math.
 func (m *Model) Forward(ids []int) *Activations {
+	m.requireV41NativeUnsupported("Model.Forward")
 	// embedding lookup -> x[t] is the working hidden vector for position t
 	// (the arch embed scale applied inside embedBand).
 	return m.forwardHiddenRows(m.embedBand(ids))
