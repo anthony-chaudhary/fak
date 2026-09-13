@@ -478,6 +478,19 @@ func (moeFFN) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
 				// The host resident forward (GLM/EP/prefill): batch the experts' GEMVs into one
 				// parFor per projection (the same hostBatchedGLMExperts primitive glmMoeFFN uses).
 				batched = m.hostBatchedGLMExperts(layer, xf, delta, picks)
+			case splitKernel:
+				// The --n-cpu-moe hybrid: a splitKernel whose host side is a residentKernel is not
+				// matchable by the two concrete arms above, so without this arm a host-offloaded
+				// layer falls through to the per-expert loop even though every pick is host-resident
+				// (#12972). splitHostResidentExperts admits ONLY an all-host routed pick set, so a
+				// graded split with device-kept experts declines (batched stays false) and takes the
+				// loop. A sessionQ4KKernel never reaches this arm (matched above), so the Metal
+				// batched path is untouched. The default arm below stays "unknown kernel -> loop".
+				if splitHostResidentExperts(mat, layer, picks) {
+					batched = m.hostBatchedGLMExperts(layer, xf, delta, picks)
+				}
+			default:
+				// Unknown kernel: no batched host primitive models it, so take the proven loop.
 			}
 		}
 	}
@@ -580,8 +593,18 @@ func (glmMoeFFN) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
 	// below (TestBatchedExpertDeltaMatchesLoop). Any config the fast path does not model
 	// (non-resident expert shape, per-expert bias, active LoRA) declines it (writes nothing,
 	// returns false) and falls through to the proven per-expert loop.
+	//
+	// The --n-cpu-moe hybrid reaches this seam as splitKernel{host: residentKernel, ...}: the host
+	// side is a residentKernel but the concrete type is NOT, so the bare assertion below alone would
+	// miss it and run the ~3*K-dispatch per-expert loop. splitHostResidentExperts admits the split
+	// ONLY when every pick is host-routed, so a GRADED split with device-kept experts declines to the
+	// loop rather than stealing them to the host (#12972).
 	batched := false
 	if _, host := mat.(residentKernel); host {
+		if xf, ok := xn.([]float32); ok {
+			batched = m.hostBatchedGLMExperts(layer, xf, delta, picks)
+		}
+	} else if splitHostResidentExperts(mat, layer, picks) {
 		if xf, ok := xn.([]float32); ok {
 			batched = m.hostBatchedGLMExperts(layer, xf, delta, picks)
 		}

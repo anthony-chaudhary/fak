@@ -44,6 +44,43 @@ func (k splitKernel) mul(name string, x any, out, in int) []float32 {
 	return k.device.mul(name, x, out, in)
 }
 
+// splitHostResidentExperts reports whether the picked experts' batched GEMVs may run on the host,
+// when mat is a splitKernel (the --n-cpu-moe hybrid) whose host side is a residentKernel AND every
+// one of the picks (gate/up/down) is host-routed by the split's OWN predicate. The function is an
+// ADMISSION decision — bool only, no kernel handle — because the caller runs the Model-bound
+// hostBatchedGLMExperts(layer, …) primitive directly; that primitive reads m.q4kw/m.kqw by tensor
+// name and needs no kernel (the split's host residentKernel would be discarded anyway, which is
+// exactly what both production call sites already did). It returns false for any other kernel, for
+// a non-resident host, and — critically — for a GRADED split (ExpertSpillLayers) where any pick is
+// device-kept: the batched host primitive only models host-resident experts, so a mixed layer must
+// DECLINE to the per-expert loop rather than silently steal device-kept experts to the host (the
+// exact placement the operator's `--n-cpu-moe N` did NOT budget). This unifies the two
+// batched-expert fast paths with the split placement: without it a splitKernel misses both the
+// concrete `mat.(residentKernel)` assertion (glmMoeFFN.apply) and the type switch (moeFFN.apply), so
+// the measured ~1.8x batched primitive is unreachable on the offload-hybrid path (#12972).
+func splitHostResidentExperts(mat matKernel, layer int, picks []routePick) bool {
+	k, ok := mat.(splitKernel)
+	if !ok {
+		return false
+	}
+	// A hand-built splitKernel may carry a nil onHost (no host routing at all); treat that as a
+	// decline rather than panicking on the nil call below.
+	if k.onHost == nil {
+		return false
+	}
+	if _, ok := k.host.(residentKernel); !ok {
+		return false
+	}
+	for _, pk := range picks {
+		for _, suffix := range [...]string{"gate_proj.weight", "up_proj.weight", "down_proj.weight"} {
+			if !k.onHost(expertName(layer, pk.expert, suffix)) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // sparseAttend forwards GLM-DSA's sparse-attention compute to the DEVICE side: sparse attention is
 // dense per-head softmax(scale·q·k)·V over the host-selected keys — attention work, not an expert —
 // so it belongs with the dense projections on the GPU. glmDsaAttendCached type-asserts the active

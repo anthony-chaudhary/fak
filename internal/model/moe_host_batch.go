@@ -1,5 +1,7 @@
 package model
 
+import "sync/atomic"
+
 // moe_host_batch.go — lever 2: batch the GLM MoE host-expert dispatch.
 //
 // The per-expert loop (glmMoeFFN.apply -> expertSwiGLU) issues one parFor per
@@ -13,6 +15,64 @@ package model
 // reduction in the identical order, so the result is BIT-IDENTICAL to the loop (pinned by
 // TestBatchedExpertDeltaMatchesLoop); only the parFor dispatch COUNT changes (3 per layer
 // instead of ~3*K). See docs/notes/GLM52-DECODE-PATH-TO-10-TOKS-2026-06-27.md (lever 2).
+
+// hostBatchedExpert{Layers,Count} are the DISPATCH witness for hostBatchedGLMExperts. The
+// batched delta and the per-expert loop are BIT-IDENTICAL by design (same reduction, same
+// order — pinned by TestBatchedExpertDeltaMatchesLoop), so a numeric comparison CANNOT tell
+// which one ran, and a test asserting only bit-identity passes even when the `apply` wiring
+// that reaches the batch is deleted (#12972). Only a counter advanced on the batch's SUCCESS
+// path distinguishes the two dispatches.
+//
+// They are package-scoped atomics rather than a Model/Session field because hostBatchedGLMExperts
+// is Model-bound (it has no Session) and Model is declared in weights.go, outside this lane's
+// edit set; this mirrors the existing scalarGDNStepCalls dispatch-counter idiom (qwen35.go).
+// atomic increment is race-free under concurrent decode; the counters are process-global, so
+// tests reset them (resetHostBatchedExpertDispatch) before measuring, matching ScalarGDNStepCalls.
+//
+// hostBatchWitnessOn gates the whole witness so PRODUCTION PAYS ZERO: the batched fast path is the
+// hot decode path, and the scalarGDNStepCalls precedent sits on a REFERENCE path, so two atomics
+// per MoE layer here would tax the very path #12972 made reachable. It is a plain bool, read once
+// per batched dispatch, so disabled it is a single predictable branch the compiler folds — no
+// atomic, no cache-line write, no contention. It is written only by enableHostBatchWitness /
+// resetHostBatchedExpertDispatch, which tests call BEFORE the measured apply (this package has no
+// t.Parallel), and never concurrently with the read, so a plain bool is race-free by construction.
+var (
+	hostBatchedExpertLayers int64
+	hostBatchedExpertCount  int64
+	hostBatchWitnessOn      bool
+)
+
+// enableHostBatchWitness turns the host-batched dispatch witness ON for a test. Call it before the
+// measured apply; production never calls it, so the counter stays off and the fast path is untouched.
+func enableHostBatchWitness() {
+	hostBatchWitnessOn = true
+}
+
+// hostBatchedExpertDispatch returns (layers, experts) fired by hostBatchedGLMExperts since the
+// last reset. layers counts MoE-layer batch dispatches; experts is their summed top-k size.
+func hostBatchedExpertDispatch() (int64, int64) {
+	return atomic.LoadInt64(&hostBatchedExpertLayers), atomic.LoadInt64(&hostBatchedExpertCount)
+}
+
+// resetHostBatchedExpertDispatch zeroes the dispatch witness and ENABLES it, so a test can measure
+// one apply. Enabling here keeps the existing test calls working without a separate enable step.
+func resetHostBatchedExpertDispatch() {
+	enableHostBatchWitness()
+	atomic.StoreInt64(&hostBatchedExpertLayers, 0)
+	atomic.StoreInt64(&hostBatchedExpertCount, 0)
+}
+
+// recordHostBatchedExpertDispatch is called ONLY on hostBatchedGLMExperts's success path, so a
+// declined batch (K==0 writes nothing and returns true; any guard failure returns false) leaves
+// the witness untouched. The witness-off early return is the production fast path: one plain
+// predictable branch, zero atomics.
+func recordHostBatchedExpertDispatch(k int) {
+	if !hostBatchWitnessOn || k <= 0 {
+		return
+	}
+	atomic.AddInt64(&hostBatchedExpertLayers, 1)
+	atomic.AddInt64(&hostBatchedExpertCount, int64(k))
+}
 
 // batchExpertRows runs fn(e, rlo, rhi) for every (expert, contiguous row-range) chunk in the
 // flattened [0, K*rowsPer) index space, splitting each parFor work chunk on expert boundaries
@@ -164,6 +224,10 @@ func (m *Model) hostBatchedGLMExperts(layer int, xn, delta []float32, picks []ro
 		}
 		gate[i], up[i], down[i] = g, u, d
 	}
+	// SUCCESS path only: every guard above admitted this batch, so record the dispatch. A
+	// decline (LoRA, missing/mis-shaped resident tensor, per-expert bias) returns before here
+	// and writes nothing. This is the only non-numeric witness that the batched primitive ran.
+	recordHostBatchedExpertDispatch(K)
 	batchedExpertDelta(m.Cfg, picks, gate, up, down, xn, delta)
 	return true
 }
