@@ -15,6 +15,7 @@ var (
 	ErrSpeculativeTripwireDivergence = errors.New("model: speculative tripwire detected divergence from greedy argmax")
 	ErrSpeculativeNonFiniteLogits    = errors.New("model: speculative verification encountered non-finite logits")
 	ErrSpeculativeGeneratorNotFound  = errors.New("model: proposal generator not found")
+	ErrSpeculativeShortArgmaxVector  = errors.New("model: tripwire target argmax vector is too short for the draft")
 )
 
 // ProposalGenerator is the capability contract for speculative candidate proposal generators.
@@ -380,6 +381,14 @@ func TripwireVerify(draft []int, targetArgmax []int, lastLogits []float32, targe
 
 	if len(targetArgmax) == 0 {
 		return nil, 0, errors.New("model: empty target argmax in tripwire verification")
+	}
+
+	// The caller must supply one argmax slot per draft token plus a bonus slot.
+	// A short vector would otherwise index past its end below (#12422): refuse it
+	// with a typed error before any state is exposed rather than panicking.
+	if len(targetArgmax) < len(draft)+1 {
+		return nil, 0, fmt.Errorf("model: target argmax vector has %d slots for %d draft tokens (need %d): %w",
+			len(targetArgmax), len(draft), len(draft)+1, ErrSpeculativeShortArgmaxVector)
 	}
 
 	// 2. Step 0 verification: draft[0] must match targetArgmax[0] (argmax of lastLogits)
@@ -1031,11 +1040,13 @@ func (e *SpeculativeEngine) Generate(ctx context.Context, prompt []int, maxNew i
 	generated := make([]int, 0, maxNew)
 	for len(generated) < maxNew {
 		if err := ctx.Err(); err != nil {
+			e.reconcileCommittedState(target, len(prompt)+len(generated))
 			return generated, err
 		}
 
 		accepted, bonus, _, err := e.Step(ctx, committed, logits, counts)
 		if err != nil {
+			e.reconcileCommittedState(target, len(prompt)+len(generated))
 			return generated, err
 		}
 
@@ -1061,7 +1072,69 @@ func (e *SpeculativeEngine) Generate(ctx context.Context, prompt []int, maxNew i
 		}
 	}
 
+	// #12422: a Step can verify and accept a draft run longer than the remaining
+	// maxNew budget, leaving the target session's KV holding accepted tokens that
+	// this call never returns. Truncate the resident state to exactly the tokens
+	// emitted here so the caller's history and the reusable model state agree.
+	e.reconcileCommittedState(target, len(prompt)+len(generated))
+
 	return generated, nil
+}
+
+// reconcileCommittedState rolls back any resident speculative suffix the caller
+// did not receive, leaving the target session's KV holding exactly the first
+// keep positions. It is the single commit/rollback seam for a completed Generate
+// call (#12422); a no-op when the target already holds exactly keep positions.
+//
+// The resident length MUST be read from the same store evictKV mutates. evictKV
+// targets halKV only when Backend != nil && halKV != nil (token_lineage.go), so
+// this uses the identical predicate rather than a looser "halKV != nil" test:
+// reading a device length while evicting the host cache would evict by a stale
+// count (#12422 device-store counterexample).
+func (e *SpeculativeEngine) reconcileCommittedState(target *Session, keep int) {
+	if target == nil {
+		return
+	}
+	curr := target.speculativeResidentLen()
+	if curr <= keep {
+		return
+	}
+	target.evictKV(keep, curr-keep)
+}
+
+// speculativeResidentLen reports the resident KV length in the store that
+// evictKV will mutate. Its predicate is intentionally identical to evictKV's
+// (token_lineage.go): halKV is authoritative only for a backend session.
+func (s *Session) speculativeResidentLen() int {
+	if s == nil {
+		return 0
+	}
+	if s.Backend != nil && s.halKV != nil {
+		return s.halKV.Len()
+	}
+	if s.Cache != nil {
+		return s.Cache.Len()
+	}
+	return 0
+}
+
+// RollbackResidentSuffix rolls back the last n resident KV positions through the
+// store-aware eviction seam (#12422). Unlike RollbackSpeculative, which truncates
+// only the host Cache, this routes through evictKV so a backend/HAL session
+// releases its device store and lineage by the same indices. It is the rollback
+// the in-kernel planner uses to drop a verified-but-unemitted accepted suffix.
+func (s *Session) RollbackResidentSuffix(n int) {
+	if s == nil || n <= 0 {
+		return
+	}
+	curr := s.speculativeResidentLen()
+	if curr == 0 {
+		return
+	}
+	if n > curr {
+		n = curr
+	}
+	s.evictKV(curr-n, n)
 }
 
 // Stats returns a snapshot of speculative decoding statistics.
