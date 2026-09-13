@@ -14,6 +14,7 @@ package model
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 
@@ -47,6 +48,10 @@ var (
 	// metalQ8Exact records the immutable, all-or-nothing Qwen3.8 no-copy publication. Its order is
 	// the canonical 272-name runtime band and therefore also the reverse teardown order.
 	metalQ8Exact = map[*Model]*metalQ8ExactState{}
+	// metalQ6Exact records the immutable, all-or-nothing Q6_K band publication (fused-MLP down_proj
+	// + Q6_K LM/MTP head). Its names are the model's kindQ6K kqw keys; an exact-state error is
+	// cached so a metal_live_q6_weights=0 is never silent. Guarded by metalQ4KMu.
+	metalQ6Exact = map[*Model]*metalQ6ExactState{}
 	// freeCPUCopyAfterUpload, when set, drops qt.raw after a successful GPU upload for single
 	// residency. Default OFF: the CPU prefill/decode fallbacks (q4kGemm/q4kMatRows) still read
 	// qt.raw and panic on nil when the GPU path isn't taken for some tensor (#1067). Opt in with
@@ -61,6 +66,13 @@ var (
 type metalQ8ExactState struct {
 	names   []string
 	handles []*metalgemm.Q8Weight
+	err     error
+}
+
+type metalQ6ExactState struct {
+	names   []string
+	handles []*metalgemm.Q6KWeight
+	alias   bool
 	err     error
 }
 
@@ -624,6 +636,12 @@ func (s *Session) q4kFusedMLPBatch(gate, up, down []string, x []float32) [][]flo
 // metalQ6KWeight returns this model's GPU Q6_K handle for `name`, uploading the raw 210-B blocks
 // once (cached per *Model, nil cached too). The Q6_K resident store backs the fused MLP's down_proj
 // when a q4_k_m GGUF quantizes down to Q6_K; gate/up stay Q4_K via metalQ4KWeight.
+//
+// On Apple unified memory a page-aligned, Go-heap-owned Q6_K payload is ALIASED in place by
+// UploadQ6KGoOwned (no device copy, so it is not additive). When the payload cannot be aliased
+// (unaligned/borrowed) the handle owns a copied Metal buffer, which IS additive and must clear the
+// #1087 budget gate before upload. This per-tensor path is the lazy fallback; the eager band goes
+// through promoteMetalQ6Residency.
 func (m *Model) metalQ6KWeight(name string, qt *kQuantTensor) *metalgemm.Q6KWeight {
 	metalQ4KMu.Lock()
 	defer metalQ4KMu.Unlock()
@@ -651,9 +669,132 @@ func (m *Model) metalQ6KWeight(name string, qt *kQuantTensor) *metalgemm.Q6KWeig
 			}
 		}
 	}
+	if !m.metalQ6KUploadAllowedLocked(qt) {
+		tbl[name] = nil // cache the decline so a failed admission doesn't retry every token
+		return nil
+	}
 	w := metalgemm.UploadQ6KGoOwned(qt.raw, qt.out, qt.in)
 	tbl[name] = w
 	return w
+}
+
+// metalQ6KUploadAllowedLocked is the per-tensor admission for the lazy Q6_K upload. Caller holds
+// metalQ4KMu. An alias-eligible payload adds no device bytes, so it is judged only against the
+// activation/KV headroom (q6kAliasFits). A genuinely copied payload is judged by the additive
+// #1087 gate (q6kUploadFits) exactly as before. An unknown device budget declines the copy but a
+// provably-aligned alias still publishes — the alias cannot OOM the way a copy can.
+func (m *Model) metalQ6KUploadAllowedLocked(qt *kQuantTensor) bool {
+	deviceTotal := int64(0)
+	if total, ok := metalgemm.DeviceMemoryTotal(); ok {
+		deviceTotal = int64(total)
+	}
+	if metalgemm.Q6KCanAlias(qt.raw, qt.out, qt.in) {
+		return q6kAliasFits(m.ResidentReport().TotalResidentBytes, deviceTotal) == nil
+	}
+	return q6kUploadFits(m.ResidentReport().TotalResidentBytes, int64(len(qt.raw)), deviceTotal)
+}
+
+// q6kRuntimeNames returns the model's Q6_K band as a deterministic, sorted name list: every
+// kindQ6K kqw entry (fused-MLP down_proj plus the Q6_K LM/MTP head). Sorted so all-or-nothing
+// build and reverse teardown are reproducible.
+func (m *Model) q6kRuntimeNames() []string {
+	names := make([]string, 0, len(m.kqw))
+	for name, qt := range m.kqw {
+		if qt != nil && qt.kind == kindQ6K {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// promoteMetalQ6Residency publishes the complete Q6_K band as GPU residency once, all-or-nothing.
+// It PREFERS the no-copy alias: when every payload is page-aligned Go-heap storage, the band is
+// admitted by q6kAliasFits (activation/KV headroom only) and every handle must report NoCopy — a
+// band that silently fell back to copies is released rather than published under alias evidence.
+// When any payload is not alias-eligible, the band is a copied additive upload and keeps the
+// original #1087 q6kUploadFits gate. A decline caches the exact *MetalQ6ResidencyUnavailableError
+// on the *Model so metal_live_q6_weights=0 is never silent. Idempotent per model.
+func (m *Model) promoteMetalQ6Residency() error {
+	names := m.q6kRuntimeNames()
+	metalQ4KMu.Lock()
+	defer metalQ4KMu.Unlock()
+	if state, ok := metalQ6Exact[m]; ok {
+		return state.err
+	}
+	if len(names) == 0 {
+		metalQ6Exact[m] = &metalQ6ExactState{}
+		return nil
+	}
+	r := m.ResidentReport()
+	deviceTotal := int64(0)
+	if total, ok := metalgemm.DeviceMemoryTotal(); ok {
+		deviceTotal = int64(total)
+	}
+	allAlias := true
+	var copyBytes int64
+	for _, name := range names {
+		qt := m.kqw[name]
+		if metalgemm.Q6KCanAlias(qt.raw, qt.out, qt.in) {
+			continue
+		}
+		allAlias = false
+		copyBytes += int64(len(qt.raw))
+	}
+	if allAlias {
+		if err := q6kAliasFits(r.TotalResidentBytes, deviceTotal); err != nil {
+			metalQ6Exact[m] = &metalQ6ExactState{err: err}
+			return err
+		}
+	} else if !q6kUploadFits(r.TotalResidentBytes, copyBytes, deviceTotal) {
+		err := &MetalQ6ResidencyUnavailableError{Reason: fmt.Sprintf(
+			"additive Q6_K copy does not fit device budget: resident=%d + copied=%d > %.2f*deviceTotal=%d (some payloads are not page-aligned Go-owned storage)",
+			r.TotalResidentBytes, copyBytes, metalQ8UploadFraction, int64(metalQ8UploadFraction*float64(deviceTotal)))}
+		metalQ6Exact[m] = &metalQ6ExactState{err: err}
+		return err
+	}
+	handles, err := buildAllOrNothing(names, func(name string) (*metalgemm.Q6KWeight, error) {
+		qt := m.kqw[name]
+		if qt == nil || qt.kind != kindQ6K {
+			return nil, &MetalQ6ResidencyUnavailableError{Reason: "promised Q6_K projection is missing or wrong kind: " + name}
+		}
+		w := metalgemm.UploadQ6KGoOwned(qt.raw, qt.out, qt.in)
+		if w == nil {
+			return nil, &MetalQ6ResidencyUnavailableError{Reason: fmt.Sprintf(
+				"Q6_K Metal upload declined for %s: out=%d in=%d len(raw)=%d", name, qt.out, qt.in, len(qt.raw))}
+		}
+		if allAlias && !w.NoCopy() {
+			w.Release()
+			return nil, &MetalQ6ResidencyUnavailableError{Reason: "Q6_K handle for " + name + " is a copied buffer, not the required no-copy alias"}
+		}
+		return w, nil
+	}, func(w *metalgemm.Q6KWeight) { w.Release() })
+	if err != nil {
+		metalQ6Exact[m] = &metalQ6ExactState{err: err}
+		return err
+	}
+	tbl := make(map[string]*metalgemm.Q6KWeight, len(names))
+	for i, name := range names {
+		tbl[name] = handles[i]
+	}
+	metalQ6KW[m] = tbl // immutable publication: readers only retrieve handles after this assignment.
+	metalQ6Exact[m] = &metalQ6ExactState{names: append([]string(nil), names...), handles: handles, alias: allAlias}
+	return nil
+}
+
+// MetalQ6ResidencyError returns the cached fail-closed reason this model's Q6_K band promotion
+// declined, or nil if it was never attempted or succeeded.
+func (m *Model) MetalQ6ResidencyError() (error, bool) {
+	if m == nil {
+		return nil, false
+	}
+	metalQ4KMu.Lock()
+	defer metalQ4KMu.Unlock()
+	state, ok := metalQ6Exact[m]
+	if !ok || state == nil || state.err == nil {
+		return nil, false
+	}
+	return state.err, true
 }
 
 // metalQ2KWeight returns this model's GPU Q2_K handle for `name`, uploading the raw 84-B
@@ -825,12 +966,27 @@ func (m *Model) EagerMetalQ8Residency() error {
 	if m == nil || !metalgemm.Available() {
 		return nil
 	}
-	// Q6_K is a copied additive upload, so it is best-effort under the #1087 budget guard and
-	// never blocks the no-copy Q8 promotion.
-	if n, ok := m.metalQ6KWeights(); ok {
-		fmt.Fprintf(os.Stderr, "[metal-q8-residency] eager Q6_K upload: %d tensors GPU-resident\n", n)
-	} else {
-		fmt.Fprintf(os.Stderr, "[metal-q8-residency] eager Q6_K upload skipped: additive copy would exceed device budget (#1087 guard)\n")
+	// Q6_K is promoted by promoteMetalQ6Residency, which prefers the no-copy alias on unified
+	// memory (not additive) and falls back to the additive #1087 guard for copied uploads. A
+	// decline is best-effort and never blocks the no-copy Q8 promotion, but it is never silent.
+	q6kNames := m.q6kRuntimeNames()
+	switch n, ok := m.metalQ6KWeights(); {
+	case !ok:
+		if err, attempted := m.MetalQ6ResidencyError(); attempted {
+			fmt.Fprintf(os.Stderr, "[metal-q8-residency] eager Q6_K promotion declined (%d named tensors): %v\n", len(q6kNames), err)
+		} else {
+			fmt.Fprintf(os.Stderr, "[metal-q8-residency] eager Q6_K promotion unavailable for %d named tensors\n", len(q6kNames))
+		}
+	case len(q6kNames) == 0:
+		fmt.Fprintf(os.Stderr, "[metal-q8-residency] no Q6_K band present (0 named tensors)\n")
+	default:
+		route := "no-copy alias"
+		metalQ4KMu.Lock()
+		if st := metalQ6Exact[m]; st != nil && !st.alias {
+			route = "additive copy"
+		}
+		metalQ4KMu.Unlock()
+		fmt.Fprintf(os.Stderr, "[metal-q8-residency] eager Q6_K promotion published %d tensors GPU-resident (%s)\n", n, route)
 	}
 	// Q8 is the no-copy band. Only the exact 64-layer Qwen3.8 hybrid has a promised Q8 topology;
 	// for any other model promoteMetalQ8Residency returns its not-applicable guard reason, which
@@ -863,43 +1019,30 @@ func (m *Model) MetalQ8ResidencyError() (error, bool) {
 	return state.err, true
 }
 
-// metalQ6KWeights uploads the resident Q6_K projection store (the fused-MLP down_proj and the
-// Q6_K LM/MTP head when a q4_k_m GGUF quantizes them to Q6_K) to the GPU once at load time. It
-// mirrors metalQ6KWeight's copy semantics but is gated by the additive-copy budget predicate
-// q6kUploadFits so an eager Q6_K upload can never reopen the #1087 OOM. Returns the number of
-// tensors uploaded on success; ok is false (and nothing is uploaded) when the device budget cannot
-// absorb the additive copy, so the caller leaves Q6_K on its lazy guarded path.
+// metalQ6KWeights promotes the resident Q6_K band (the fused-MLP down_proj and the Q6_K LM/MTP
+// head when a q4_k_m GGUF quantizes them to Q6_K) to GPU residency once at load time. It delegates
+// to promoteMetalQ6Residency, which PREFERS the no-copy alias (page-aligned Go-owned payloads, not
+// additive) and keeps the additive q6kUploadFits #1087 gate as the fallback for genuinely copied
+// uploads. Returns the number of tensors GPU-resident; ok is false when the band was declined, with
+// the exact reason cached for MetalQ6ResidencyError.
 func (m *Model) metalQ6KWeights() (int, bool) {
 	if !metalgemm.Available() {
 		return 0, false
 	}
-	var q6kBytes int64
-	for _, qt := range m.kqw {
-		if qt != nil && qt.kind == kindQ6K {
-			q6kBytes += int64(len(qt.raw))
-		}
-	}
-	if q6kBytes == 0 {
+	names := m.q6kRuntimeNames()
+	if len(names) == 0 {
 		return 0, true
 	}
-	r := m.ResidentReport()
-	deviceTotal := int64(0)
-	if total, ok := metalgemm.DeviceMemoryTotal(); ok {
-		deviceTotal = int64(total)
-	}
-	if !q6kUploadFits(r.TotalResidentBytes, q6kBytes, deviceTotal) {
+	if err := m.promoteMetalQ6Residency(); err != nil {
 		return 0, false
 	}
-	n := 0
-	for name, qt := range m.kqw {
-		if qt == nil || qt.kind != kindQ6K {
-			continue
-		}
-		if m.metalQ6KWeight(name, qt) != nil {
-			n++
-		}
+	metalQ4KMu.Lock()
+	state := metalQ6Exact[m]
+	metalQ4KMu.Unlock()
+	if state != nil && len(state.handles) > 0 {
+		return len(state.handles), true
 	}
-	return n, true
+	return len(names), true
 }
 
 // metalQ4KWeights uploads all Q4_K projection weights for this model to the GPU once,
@@ -1087,6 +1230,8 @@ func releaseMetalQ4KResidency(m *Model) {
 	delete(metalQ4KW, m)
 	tblQ6K := metalQ6KW[m]
 	delete(metalQ6KW, m)
+	q6Exact := metalQ6Exact[m]
+	delete(metalQ6Exact, m)
 	tblQ2K := metalQ2KW[m]
 	delete(metalQ2KW, m)
 	metalQ4KMu.Unlock()
@@ -1095,9 +1240,17 @@ func releaseMetalQ4KResidency(m *Model) {
 			w.Release()
 		}
 	}
-	for _, w := range tblQ6K {
-		if w != nil {
-			w.Release()
+	// The promoted band owns the same handles as tblQ6K; releasing via the exact state keeps the
+	// alias pin lifetime explicit and matching the Q8 path. Fall back to the table for lazy handles.
+	if q6Exact != nil && len(q6Exact.handles) > 0 {
+		for i := len(q6Exact.handles) - 1; i >= 0; i-- {
+			q6Exact.handles[i].Release()
+		}
+	} else {
+		for _, w := range tblQ6K {
+			if w != nil {
+				w.Release()
+			}
 		}
 	}
 	for _, w := range tblQ2K {

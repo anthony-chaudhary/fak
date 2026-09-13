@@ -14,6 +14,14 @@ type Q6KWeight struct {
 	Out, In int
 }
 
+// NoCopy reports whether this handle aliases its caller-owned payload. The stub backend never
+// allocates device memory, so it is always false.
+func (w *Q6KWeight) NoCopy() bool { return false }
+
+// Q6KCanAlias reports whether UploadQ6KGoOwned would alias this payload. The stub backend has no
+// device, so no payload can be aliased.
+func Q6KCanAlias(raw []byte, out, in int) bool { return false }
+
 // EnsureFusedSwiGLUPipeline is a stub on non-darwin/non-arm64/non-cgo builds.
 func EnsureFusedSwiGLUPipeline() error {
 	return errors.New("metalgemm: fused swiglu not supported on this platform")

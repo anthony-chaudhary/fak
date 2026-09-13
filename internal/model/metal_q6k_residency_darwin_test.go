@@ -3,11 +3,15 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"math"
+	"os"
+	"slices"
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
@@ -505,5 +509,174 @@ func TestMetalQ6KReversedDuplicateBatchReleaseDoesNotDeadlock(t *testing.T) {
 	}
 	if got := metalgemm.LiveQ6KWeights(); got != base {
 		t.Fatalf("batch/release race left %d live Q6_K weights, want baseline %d", got, base)
+	}
+}
+
+// alignedQ6KTensor builds a resident kindQ6K tensor whose raw payload is page-aligned Go-heap
+// storage, the exact precondition UploadQ6KGoOwned/Q6KCanAlias require for no-copy residency. The
+// randomQ6KTensor helper deliberately returns an unaligned slice, so it pins the copy fallback.
+func alignedQ6KTensor(out, in int, seed int64) *kQuantTensor {
+	base := randomQ6KTensor(out, in, seed)
+	aligned := makePageAlignedResidentBytes(len(base.raw))
+	copy(aligned, base.raw)
+	if uintptr(unsafe.Pointer(&aligned[0]))%uintptr(os.Getpagesize()) != 0 {
+		panic("alignedQ6KTensor: allocation is not page-aligned")
+	}
+	base.raw = aligned
+	return base
+}
+
+// TestQ6KGoOwnedNoCopyAccessorWitnessesAlias pins deliverable (3)/(d): an aligned Go-owned Q6_K
+// payload yields a handle whose NoCopy() accessor is true and whose bytes alias the same underlying
+// memory (a mutation through the Go slice changes the GPU result), while an unaligned payload takes
+// the copied route and reports NoCopy()==false.
+func TestQ6KGoOwnedNoCopyAccessorWitnessesAlias(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("no Metal device available")
+	}
+	base := metalgemm.LiveQ6KWeights()
+	t.Cleanup(metalgemm.ResetQ4K)
+
+	const out, in = 4, qkK
+	aligned := alignedQ6KTensor(out, in, 0x6a11)
+	if !metalgemm.Q6KCanAlias(aligned.raw, out, in) {
+		t.Fatal("Q6KCanAlias declined a page-aligned Go-owned payload")
+	}
+	w := metalgemm.UploadQ6KGoOwned(aligned.raw, out, in)
+	if w == nil {
+		t.Fatal("UploadQ6KGoOwned returned nil for aligned payload")
+	}
+	defer w.Release()
+	if !w.NoCopy() {
+		t.Fatal("aligned UploadQ6KGoOwned handle reports NoCopy()==false")
+	}
+	if got := metalgemm.LiveQ6KWeights(); got != base+1 {
+		t.Fatalf("live Q6_K after aligned upload = %d, want %d", got, base+1)
+	}
+	x := randomVecF(in, 0x6a12)
+	before := make([]float32, out)
+	w.GEMV(x, before)
+	aligned.raw[208] ^= 0x40
+	after := make([]float32, out)
+	w.GEMV(x, after)
+	if slices.Equal(before, after) {
+		t.Fatal("mutating the explicit Go-owned backing did not change the Metal GEMV output; alias not witnessed")
+	}
+	aligned.raw[208] ^= 0x40
+
+	unaligned := randomQ6KTensor(out, in, 0x6a13)
+	if metalgemm.Q6KCanAlias(unaligned.raw, out, in) {
+		t.Fatal("Q6KCanAlias admitted an unaligned payload")
+	}
+	copied := metalgemm.UploadQ6KGoOwned(unaligned.raw, out, in)
+	if copied == nil {
+		t.Fatal("UploadQ6KGoOwned returned nil on the copied fallback")
+	}
+	defer copied.Release()
+	if copied.NoCopy() {
+		t.Fatal("unaligned UploadQ6KGoOwned handle reports NoCopy()==true; want copied route")
+	}
+	// The copied buffer is independent: mutating the Go slice must not change GPU output.
+	copiedBefore := make([]float32, out)
+	copied.GEMV(x, copiedBefore)
+	unaligned.raw[208] ^= 0x40
+	copiedAfter := make([]float32, out)
+	copied.GEMV(x, copiedAfter)
+	if !slices.Equal(copiedBefore, copiedAfter) {
+		t.Fatal("copied Q6_K changed after mutating the Go backing; copy independence violated")
+	}
+}
+
+// TestMetalQ6KPromotionPublishesNoCopyAliasBand pins deliverable (2)/(3)/(4) end to end: a model
+// whose whole Q6_K band is page-aligned promotes all-or-nothing as a no-copy alias, the band is
+// cached with alias=true, LiveQ6KWeights shows the published tensors, and the Metal GEMV matches
+// the CPU reference (numerical equivalence of the aliased path).
+func TestMetalQ6KPromotionPublishesNoCopyAliasBand(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("no Metal device available")
+	}
+	base := metalgemm.LiveQ6KWeights()
+	names := []string{"model.layers.0.mlp.down_proj.weight", "lm_head.weight"}
+	const out, in = 8, qkK
+	qt0 := alignedQ6KTensor(out, in, 0x6b01)
+	qt1 := alignedQ6KTensor(out, in, 0x6b02)
+	m := &Model{kqw: map[string]*kQuantTensor{names[0]: qt0, names[1]: qt1}}
+	t.Cleanup(func() {
+		releaseMetalQ4KResidency(m)
+		if got := metalgemm.LiveQ6KWeights(); got != base {
+			t.Errorf("cleanup left %d live Q6_K weights, want baseline %d", got, base)
+		}
+	})
+
+	n, ok := m.metalQ6KWeights()
+	if !ok || n != len(names) {
+		err, _ := m.MetalQ6ResidencyError()
+		t.Fatalf("metalQ6KWeights = (%d,%v), want (%d,true); err=%v", n, ok, len(names), err)
+	}
+	metalQ4KMu.Lock()
+	state := metalQ6Exact[m]
+	metalQ4KMu.Unlock()
+	if state == nil || !state.alias {
+		t.Fatalf("promotion state = %#v, want alias=true", state)
+	}
+	for _, name := range names {
+		w := m.metalQ6KWeight(name, m.kqw[name])
+		if w == nil || !w.NoCopy() {
+			t.Fatalf("promoted handle for %s is not a no-copy alias: %#v", name, w)
+		}
+	}
+	if got := metalgemm.LiveQ6KWeights(); got != base+len(names) {
+		t.Fatalf("live Q6_K after promotion = %d, want %d", got, base+len(names))
+	}
+	// Numerical equivalence: the aliased handle's GPU GEMV matches the CPU kQuant reference.
+	x := randomVecF(in, 0x6b03)
+	w := m.metalQ6KWeight(names[0], qt0)
+	got := make([]float32, out)
+	w.GEMV(x, got)
+	want := make([]float32, out)
+	kQuantMatRowsInto(qt0, x, want)
+	requireMetalQ6KClose(t, want, got, "aliased Q6_K promotion GEMV")
+}
+
+// TestMetalQ6KPromotionUnalignedTakesAdditiveRoute pins deliverable (2)/(b): when a payload cannot
+// be aliased (unaligned Go storage), promotion does NOT claim alias evidence — it falls back to the
+// additive route (alias=false) and still publishes a working handle. The pure additive OOM refusal
+// itself is pinned by TestQ6KAdditiveGateStillGuardsCopies.
+func TestMetalQ6KPromotionUnalignedTakesAdditiveRoute(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("no Metal device available")
+	}
+	base := metalgemm.LiveQ6KWeights()
+	name := "model.layers.0.mlp.down_proj.weight"
+	qt := randomQ6KTensor(8, qkK, 0x6c01) // deliberately unaligned -> copied route
+	m := &Model{kqw: map[string]*kQuantTensor{name: qt}}
+	t.Cleanup(func() { releaseMetalQ4KResidency(m) })
+
+	if err := m.promoteMetalQ6Residency(); err != nil {
+		// Only acceptable on a genuinely over-budget device; then it must be a typed refusal.
+		var unavailable *MetalQ6ResidencyUnavailableError
+		if !errors.As(err, &unavailable) {
+			t.Fatalf("unaligned promotion declined with %T %v, want *MetalQ6ResidencyUnavailableError", err, err)
+		}
+		if got := metalgemm.LiveQ6KWeights(); got != base {
+			t.Fatalf("refused promotion leaked %d live Q6_K weights (base %d)", got, base)
+		}
+		return
+	}
+	metalQ4KMu.Lock()
+	state := metalQ6Exact[m]
+	metalQ4KMu.Unlock()
+	if state == nil || state.alias {
+		t.Fatalf("unaligned promotion state = %#v, want alias=false (copied route)", state)
+	}
+	w := m.metalQ6KWeight(name, qt)
+	if w == nil {
+		t.Fatal("unaligned promotion published a nil handle")
+	}
+	if w.NoCopy() {
+		t.Fatal("unaligned promotion handle reports NoCopy()==true; want copied route")
+	}
+	if got := metalgemm.LiveQ6KWeights(); got != base+1 {
+		t.Fatalf("live Q6_K after additive promotion = %d, want %d", got, base+1)
 	}
 }

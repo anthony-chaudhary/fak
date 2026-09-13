@@ -669,6 +669,30 @@ func UploadQ6KGoOwned(raw []byte, out, in int) *Q6KWeight {
 	return uploadQ6K(raw, out, in, true)
 }
 
+// Q6KCanAlias reports whether UploadQ6KGoOwned would take the no-copy alias route for this payload:
+// the shape is valid, the logical bytes fit in raw, the first byte is OS-page aligned, and the
+// capacity covers the page-rounded logical bytes. It lets a caller ADMIT the alias budget before
+// uploading instead of allocating a 6 GiB copied buffer only to decline it. It is a pure predicate
+// and shares the exact eligibility arithmetic of uploadQ6K.
+func Q6KCanAlias(raw []byte, out, in int) bool {
+	if !Available() || in <= 0 || in%256 != 0 || out <= 0 || len(raw) == 0 {
+		return false
+	}
+	need := out * (in / 256) * 210
+	if len(raw) < need {
+		return false
+	}
+	page := os.Getpagesize()
+	if page <= 1 {
+		return true
+	}
+	rounded := need
+	if need%page != 0 {
+		rounded += page - need%page
+	}
+	return uintptr(unsafe.Pointer(&raw[0]))%uintptr(page) == 0 && cap(raw) >= rounded
+}
+
 func uploadQ6K(raw []byte, out, in int, allowNoCopy bool) *Q6KWeight {
 	if !Available() || in <= 0 || in%256 != 0 || out <= 0 {
 		return nil
@@ -773,6 +797,18 @@ func (w *Q6KWeight) Release() {
 		delete(q6kSharedWeights, shared)
 		shared.id = -1
 	}
+}
+
+// NoCopy reports whether this live handle aliases its caller-pinned raw Q6_K bytes through
+// newBufferWithBytesNoCopy instead of owning a copied Metal buffer. It mirrors Q4KWeight.NoCopy and
+// is the witness the model's Q6_K alias admission checks before publishing GPU residency.
+func (w *Q6KWeight) NoCopy() bool {
+	if w == nil {
+		return false
+	}
+	q6kRegistryMu.RLock()
+	defer q6kRegistryMu.RUnlock()
+	return q6kWeightValidLocked(w) && w.shared.noCopy
 }
 
 // LiveQ6KWeights returns the native table's occupied-slot count for lifecycle tests.

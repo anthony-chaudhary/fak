@@ -1,6 +1,9 @@
 package model
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 // TestQ8UploadFits pins the #1087-OOM budget gate: the additive Q8 GPU copy is declined when the
 // resident weights plus that copy would breach metalQ8UploadFraction of the device working-set
@@ -65,5 +68,57 @@ func TestQ8UploadFits(t *testing.T) {
 					c.resident, c.q8, c.deviceTotal, c.forceEnv, got, c.want)
 			}
 		})
+	}
+}
+
+// TestQ6KAliasFitsAdmitsUnifiedResidentBand pins the unified-memory admission for the Q6_K no-copy
+// alias: the band is judged only against activation/KV headroom (metalQ6AliasFraction), NOT the
+// additive resident+q6 sum. The witnessed failure was a 5.89 GiB Q6_K band (fused-MLP down_proj +
+// Q6_K head) refused by the additive gate while 15.92 GiB was already resident on a 36 GiB Mac; the
+// alias adds no device bytes, so it must be ADMITTED.
+func TestQ6KAliasFitsAdmitsUnifiedResidentBand(t *testing.T) {
+	const GiB = int64(1) << 30
+	gib := float64(GiB)
+	resident := int64(15.92 * gib)
+	q6 := int64(5.89 * gib)
+	device := int64(36 * GiB)
+	// The additive #1087 model on the same box is DECLINED at a 24 GiB working set, proving the two
+	// gates disagree — the alias is the path that admits.
+	if q6kUploadFits(resident, q6, int64(24*GiB)) {
+		t.Fatal("additive q6kUploadFits admitted 15.92+5.89 GiB on a 24 GiB budget; want refusal")
+	}
+	if err := q6kAliasFits(resident, device); err != nil {
+		t.Fatalf("q6kAliasFits(resident=%.2fGiB, device=36GiB) = %v, want nil (aliased band is not additive)", float64(resident)/gib, err)
+	}
+	// An already-saturating owner still fails closed and carries the concrete reason.
+	err := q6kAliasFits(int64(35.5*gib), device)
+	if err == nil {
+		t.Fatal("q6kAliasFits admitted a 35.5/36 GiB owner; want headroom refusal")
+	}
+	var unavailable *MetalQ6ResidencyUnavailableError
+	if !errors.As(err, &unavailable) || unavailable.Reason == "" {
+		t.Fatalf("q6kAliasFits decline = %#v, want *MetalQ6ResidencyUnavailableError with a reason", err)
+	}
+	if err := q6kAliasFits(resident, 0); err == nil {
+		t.Fatal("q6kAliasFits admitted an unknown device budget; want fail-closed refusal")
+	}
+}
+
+// TestQ6KAdditiveGateStillGuardsCopies pins that an unaligned/borrowed (copied) payload keeps the
+// exact #1087 additive behaviour: refused when resident+copy would breach 0.90*device, admitted
+// with room. The alias predicate must not be reachable for such a payload.
+func TestQ6KAdditiveGateStillGuardsCopies(t *testing.T) {
+	const GiB = int64(1) << 30
+	gib := float64(GiB)
+	resident := int64(15.92 * gib)
+	q6 := int64(5.89 * gib)
+	if q6kUploadFits(resident, q6, 36*GiB) == false {
+		t.Fatal("additive copy with room on a 36 GiB budget should fit")
+	}
+	if q6kUploadFits(resident, q6, int64(24*GiB)) == true {
+		t.Fatal("additive copy must be refused when resident+copy breaches 0.90*device")
+	}
+	if q6kUploadFits(resident, q6, 0) == true {
+		t.Fatal("additive copy must be refused when the device budget is unknown")
 	}
 }
