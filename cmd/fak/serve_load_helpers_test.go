@@ -14,6 +14,21 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
 
+func TestServeQuantBackendNameMapsMetalNativeArm(t *testing.T) {
+	if got := serveQuantBackendName(nil); got != "metal" {
+		t.Fatalf("serveQuantBackendName(nil) = %q, want metal (Apple-Silicon native resident arm)", got)
+	}
+	if got := serveQuantBackendName(compute.Default()); got != "cpu" {
+		t.Fatalf("serveQuantBackendName(non-nil backend) = %q, want cpu", got)
+	}
+}
+
+func TestServeRefuseUnsupportedQuantsNilOnBoundedCPU(t *testing.T) {
+	if err := serveRefuseUnsupportedQuants(nil, compute.Default()); err != nil {
+		t.Fatalf("serveRefuseUnsupportedQuants(nil, cpu) = %v, want nil", err)
+	}
+}
+
 func TestServeArtifactResidentQ4KUsesArtifactNotArmLabel(t *testing.T) {
 	t.Setenv("FAK_Q4K", "1")
 	backend := serveCapBackend{Backend: compute.Default(), uploadDtype: true}

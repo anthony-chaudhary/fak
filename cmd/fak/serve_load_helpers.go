@@ -90,6 +90,34 @@ func serveStartupMessage(kind, level, text string) gateway.StartupMessage {
 	return newServeStartupMessage("model-load", kind, level, text)
 }
 
+// serveQuantBackendName maps the serve load arm to the backend string the quant-capability
+// census uses: a nil backend is the Apple-Silicon Metal native resident path.
+func serveQuantBackendName(backend compute.Backend) string {
+	if backend == nil {
+		return "metal"
+	}
+	return "cpu"
+}
+
+// serveRefuseUnsupportedQuants enforces #12983: after a resident load, refuse to report
+// READY when any quant kind in the model has no active backend kernel on this arm, naming
+// every offending type, instead of letting the first turn hang in unbounded CPU dequant.
+// It returns the refusal error (nil when bounded). Callers must(err) it.
+//
+// The nil check is load-bearing: RefuseUnsupportedQuants returns the CONCRETE
+// *fakmodel.QuantCapabilityRefusal, and returning that directly as an error interface would
+// wrap a nil pointer into a non-nil error — every bounded (normal) load would then abort
+// under must(). Return the literal nil explicitly.
+func serveRefuseUnsupportedQuants(mm *fakmodel.Model, backend compute.Backend) error {
+	if mm == nil {
+		return nil
+	}
+	if ref := mm.RefuseUnsupportedQuants(serveQuantBackendName(backend)); ref != nil {
+		return ref
+	}
+	return nil
+}
+
 func withServeStartupMessages(p *gateway.ModelLoadProfile, messages ...gateway.StartupMessage) *gateway.ModelLoadProfile {
 	if p != nil {
 		p.Messages = append(p.Messages, messages...)
@@ -227,6 +255,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		must(fitServeGGUFPathOnHostForArm(ggufPath, serveLoadArmResidentQ4K, contextBudgetTokens, fit))
 		loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", "GGUF Apple-Silicon Metal load -> resident quantized weights in Unified Memory (raw super-blocks, resident decode, ~0.56 B/param vs Q8 ~1 B/param)"))
 		mm, prof, loadNanos := loadResidentQ4KProfiled(ggufPath, tLoad, q4kOpts...)
+		must(serveRefuseUnsupportedQuants(mm, nil))
 		loadMessages = append(loadMessages, serveStartupMessage("resident-layout", "info", fakmodel.FormatResidentReport(mm.ResidentReport())))
 		profile := withServeStartupMessages(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k", ggufPath, loadNanos)), loadMessages...)
 		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
@@ -242,6 +271,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 			prof := newServeLoadProfiler()
 			mm, err := ggufload.LoadModelQuantProfile(ggufPath, prof)
 			must(err)
+			must(serveRefuseUnsupportedQuants(mm, backend))
 			modelengine.Preload(mm)
 			loadNanos := time.Since(tLoad).Nanoseconds()
 			profile := withServeStartupMessages(withServeGGUFMemoryProfile(toGatewayLoadProfile(prof.Snapshot("gguf-lean-q8-device", ggufPath, loadNanos)), memPlan, backend), loadMessages...)
@@ -254,6 +284,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		must(err)
 		mm, err := ggufload.LoadModel(ggufPath)
 		must(err)
+		must(serveRefuseUnsupportedQuants(mm, backend))
 		modelengine.Preload(mm)
 		loadNanos := time.Since(tLoad).Nanoseconds()
 		profile := withServeStartupMessages(withServeGGUFMemoryProfile(toGatewayLoadProfile(&ggufload.LoadProfile{
@@ -281,6 +312,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		// the device cpu-offload case) so both the streamed summary and the gateway /metrics
 		// profile carry the resident-vs-dequant breakdown — the witness #975 needs.
 		mm, prof, loadNanos := loadResidentQ4KProfiled(ggufPath, tLoad, q4kOpts...)
+		must(serveRefuseUnsupportedQuants(mm, compute.Default()))
 		loadMessages = append(loadMessages, serveStartupMessage("resident-layout", "info", fakmodel.FormatResidentReport(mm.ResidentReport())))
 		profile := withServeStartupMessages(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k", ggufPath, loadNanos)), loadMessages...)
 		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
@@ -291,6 +323,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		prof := newServeLoadProfiler()
 		mm, err := ggufload.LoadModelQuantProfile(ggufPath, prof)
 		must(err)
+		must(serveRefuseUnsupportedQuants(mm, compute.Default()))
 		modelengine.Preload(mm)
 		loadNanos := time.Since(tLoad).Nanoseconds()
 		profile := withServeStartupMessages(toGatewayLoadProfile(prof.Snapshot("gguf-lean-q8", ggufPath, loadNanos)), loadMessages...)
@@ -328,6 +361,7 @@ func loadResidentQ4KProfiled(ggufPath string, tLoad time.Time, opts ...ggufload.
 // expert shard (see loadResidentQ4KProfiled).
 func loadResidentQ4KDevice(ggufPath string, tLoad time.Time, memPlan compute.MemoryPlan, backend compute.Backend, messages []gateway.StartupMessage, opts ...ggufload.Q4KLoadOption) (*fakmodel.Model, bool, *gateway.ModelLoadProfile, gateway.StartupPhase) {
 	mm, prof, loadNanos := loadResidentQ4KProfiled(ggufPath, tLoad, opts...)
+	must(serveRefuseUnsupportedQuants(mm, backend))
 	messages = append(messages, serveStartupMessage("resident-layout", "info", fakmodel.FormatResidentReport(mm.ResidentReport())))
 	profile := withServeStartupMessages(withServeGGUFMemoryProfile(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k-device", ggufPath, loadNanos)), memPlan, backend), messages...)
 	return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
