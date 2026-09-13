@@ -1426,6 +1426,51 @@ func TestMacBenchValidateAgenticMTP_OnDisk(t *testing.T) {
 	}
 }
 
+func TestMacBenchEnsureRunsFreshCheckout(t *testing.T) {
+	root := filepath.Join("..", "..")
+	threeWayDir := filepath.Join(root, "experiments", "benchmark", "runs", "by-machine", "node-macos-a", "20260903T050000Z-macbench-threeway")
+	agenticMTPDir := filepath.Join(root, "experiments", "benchmark", "runs", "by-machine", "node-macos-a", "20260908T170000Z-macbench-agentic-mtp")
+
+	// Simulate a fresh checkout: the packet dirs are gitignored and absent.
+	if err := os.RemoveAll(threeWayDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(agenticMTPDir); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runMacBench(&stdout, &stderr, []string{"ensure-runs", "--json"})
+	if code != 0 {
+		t.Fatalf("ensure-runs code=%d stderr=%s", code, stderr.String())
+	}
+
+	threeWayPath := filepath.Join(threeWayDir, "packet.json")
+	if _, err := os.Stat(threeWayPath); err != nil {
+		t.Fatalf("three-way packet not regenerated at %s: %v", threeWayPath, err)
+	}
+	agenticMTPPath := filepath.Join(agenticMTPDir, "packet.json")
+	if _, err := os.Stat(agenticMTPPath); err != nil {
+		t.Fatalf("agentic MTP packet not regenerated at %s: %v", agenticMTPPath, err)
+	}
+
+	var result struct {
+		Schema           string `json:"schema"`
+		OK               bool   `json:"ok"`
+		ThreeWayPacket   string `json:"three_way_packet"`
+		AgenticMTPPacket string `json:"agentic_mtp_packet"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("decode ensure-runs JSON: %v\n%s", err, stdout.String())
+	}
+	if result.Schema != "fak.macbench.ensure-runs.v1" || !result.OK {
+		t.Fatalf("unexpected ensure-runs result: %+v", result)
+	}
+	if result.ThreeWayPacket == "" || result.AgenticMTPPacket == "" {
+		t.Fatalf("ensure-runs did not report packet paths: %+v", result)
+	}
+}
+
 func TestMacBenchRunAgenticMTP_CLI(t *testing.T) {
 	// 1. Dry run output
 	var stdout, stderr bytes.Buffer

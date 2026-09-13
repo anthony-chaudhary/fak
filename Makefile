@@ -197,6 +197,7 @@ mac-perf: build
 	@go test -v ./internal/model -run '^$$' -bench '^BenchmarkMetalQ2KGemmSteady$$'
 	@go test -v ./internal/model -run '^$$' -bench '^BenchmarkMetalQ4KGemv$$'
 	@go test -v ./internal/model -run '^$$' -bench '^BenchmarkMetalQ4KGemmSteady$$'
+	@./fak macbench ensure-runs --json
 	@./fak macbench validate-comparison --input experiments/benchmark/runs/by-machine/node-macos-a/20260903T050000Z-macbench-threeway/packet.json --json
 	@./fak macbench validate-agentic-mtp --input experiments/benchmark/runs/by-machine/node-macos-a/20260908T170000Z-macbench-agentic-mtp/packet.json --json
 	@echo "mac-perf OK (Apple Silicon Metal tok/s, prefill, and 24-agent MTP comparative performance verified)"
