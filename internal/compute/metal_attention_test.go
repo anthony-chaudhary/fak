@@ -35,6 +35,7 @@ func TestMetalAttentionFlashContract(t *testing.T) {
 
 	requiredTokens := []string{
 		"kernel void attention_f32",
+		"attention_f32_impl",
 		"threadgroup_position_in_grid",
 		"threads_per_threadgroup",
 		"threadgroup float qs[256]",

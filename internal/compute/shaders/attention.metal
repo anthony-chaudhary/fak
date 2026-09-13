@@ -16,18 +16,16 @@
 #include <metal_stdlib>
 using namespace metal;
 
-kernel void attention_f32(device const float* q [[buffer(0)]],
-                          device const float* K [[buffer(1)]],
-                          device const float* V [[buffer(2)]],
-                          device float* outp [[buffer(3)]],
-                          constant int& nPos [[buffer(4)]],
-                          constant int& nH [[buffer(5)]],
-                          constant int& nKV [[buffer(6)]],
-                          constant int& hd [[buffer(7)]],
-                          constant float& scale [[buffer(8)]],
-                          uint h [[threadgroup_position_in_grid]],
-                          uint tid [[thread_position_in_threadgroup]],
-                          uint tg_size [[threads_per_threadgroup]]) {
+// attention_f32_impl — shared threadgroup-tiled FlashAttention body. MSL forbids
+// kernel-to-kernel calls, so the arithmetic lives in a plain device FUNCTION that
+// both kernel entrypoints below invoke. It takes plain values (not `constant int&`
+// buffer references) and uses no thread-position attributes.
+static inline void attention_f32_impl(device const float* q,
+                                      device const float* K,
+                                      device const float* V,
+                                      device float* outp,
+                                      int nPos, int nH, int nKV, int hd, float scale,
+                                      uint h, uint tid, uint tg_size) {
     if ((int)h >= nH) return;
 
     int grp = nH / nKV;
@@ -103,6 +101,21 @@ kernel void attention_f32(device const float* q [[buffer(0)]],
     }
 }
 
+kernel void attention_f32(device const float* q [[buffer(0)]],
+                          device const float* K [[buffer(1)]],
+                          device const float* V [[buffer(2)]],
+                          device float* outp [[buffer(3)]],
+                          constant int& nPos [[buffer(4)]],
+                          constant int& nH [[buffer(5)]],
+                          constant int& nKV [[buffer(6)]],
+                          constant int& hd [[buffer(7)]],
+                          constant float& scale [[buffer(8)]],
+                          uint h [[threadgroup_position_in_grid]],
+                          uint tid [[thread_position_in_threadgroup]],
+                          uint tg_size [[threads_per_threadgroup]]) {
+    attention_f32_impl(q, K, V, outp, nPos, nH, nKV, hd, scale, h, tid, tg_size);
+}
+
 // flash_attention_tiled_f32 — alias entrypoint for explicit threadgroup-tiled dispatch
 kernel void flash_attention_tiled_f32(device const float* q [[buffer(0)]],
                                       device const float* K [[buffer(1)]],
@@ -116,5 +129,5 @@ kernel void flash_attention_tiled_f32(device const float* q [[buffer(0)]],
                                       uint h [[threadgroup_position_in_grid]],
                                       uint tid [[thread_position_in_threadgroup]],
                                       uint tg_size [[threads_per_threadgroup]]) {
-    attention_f32(q, K, V, outp, nPos, nH, nKV, hd, scale, h, tid, tg_size);
+    attention_f32_impl(q, K, V, outp, nPos, nH, nKV, hd, scale, h, tid, tg_size);
 }
