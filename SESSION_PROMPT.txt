@@ -1,1 +1,1 @@
-/goal use sub agents. Complete this issue 12271. use sub agents.
+/goal use sub agents. Complete this issue 11491. use sub agents.

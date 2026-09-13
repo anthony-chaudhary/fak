@@ -172,6 +172,16 @@ const dispatchLeaseIDSidecarSuffix = ".lease-id"
 // Absent for a worker that ran in the shared trunk (isolation off / prepare failed).
 const dispatchWorktreeSidecarSuffix = ".worktree"
 const dispatchStartupBundleSidecarSuffix = ".startup.json"
+
+// dispatchPromptSidecarSuffix names the durable prompt artifact a detached worker
+// reads its prompt from when the backend cannot carry it on argv. Codex has no
+// --file prompt flag, so its issue prompt must travel on stdin; staging it to a
+// file and handing the child an *os.File fd (rather than an in-memory reader)
+// keeps the bytes intact even though the short-lived dispatch tick exits before
+// the guarded worker starts reading. An in-memory reader would need a copy
+// goroutine that dies with the tick, truncating the prompt to EOF and yielding
+// PROMPT_FUEL_MISSING (#11491). Opencode writes the same artifact for its --file.
+const dispatchPromptSidecarSuffix = ".prompt.txt"
 const dispatchStartupBundleSchema = "fleet-worker-startup-bundle/1"
 const dispatchCodexLoopGateDefaultSinceHours = 24
 const dispatchCodexLoopGateDefaultLimit = 20
@@ -983,6 +993,31 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		}
 		recordDispatchPayload(runsDir, opts.Backend, payload)
 		return finish(payload), nil
+	}
+	// A guarded Codex worker can still refuse AFTER the probe window closed: the
+	// guard persists/verifies prompt fuel only once it reaches prompt admission, and
+	// the 5s spawn probe returns alive:true while the guard is still in gateway/
+	// session setup. When that fuel read fails the guard writes a `could not run`
+	// PROMPT_FUEL_MISSING line to the durable worker log seconds later, so a receipt
+	// that already claimed SPAWNED outlives the worker's actual death (#11491). The
+	// log is durable and independent of the probe, so re-read it here — before the
+	// SPAWNED rung — and refuse durable launch success when the guard never reached
+	// prompt admission. Scoped to codex: it is the only dispatch backend whose prompt
+	// travels on stdin (claude uses argv, opencode a --file sidecar), so the check
+	// cannot misgrade another backend's unrelated log.
+	if opts.Backend == "codex" {
+		if class := dispatchSpawnLogClass(spawned.Log); class == dispatchtick.NoCommitPromptFuel {
+			payload["ok"] = false
+			payload["action"] = "spawn_failed"
+			payload["verdict"] = "SPAWN_FAILED"
+			payload["reason"] = fmt.Sprintf("%s worker pid %d for #%d refused before prompt admission: %s (%s)", opts.Backend, spawned.PID, target, promptFuelMissingReason, class)
+			payload["spawn_prompt_fuel"] = class
+			if !uncertainStartup {
+				releaseAbandonedLaneLease(root, lease, payload)
+			}
+			recordDispatchPayload(runsDir, opts.Backend, payload)
+			return finish(payload), nil
+		}
 	}
 	if uncertainStartup {
 		progressed := dispatchObserveStartup(spawned.Log, min(30*time.Second, time.Duration(opts.WorkerTimeoutS)*time.Second))

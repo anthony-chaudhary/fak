@@ -2045,6 +2045,13 @@ summary  = "An explicit policy rule or argument safety constraint denied the pro
 fix      = "Inspect the policy manifest (e.g. cmd/fak/guard-default-policy.json). Pick an allowed tool alternative or amend arguments to avoid destructive patterns (e.g. avoid `rm -rf`, `sudo`, or raw block device writes)."
 see_also = ["internal/adjudicator/decide.go", "internal/policy", "cmd/fak/guard-default-policy.json"]
 
+[reasons.PROMPT_FUEL_MISSING]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A guarded Codex/Claude dispatch worker reached prompt admission with no intact stdin prompt fuel -- the rendered issue prompt was empty or truncated before the guard could persist it. Floor: cmd/fak/guard_prompt_transport.go"
+fix      = "Re-dispatch the issue: the launch path stages the prompt to a durable <stem>.prompt.txt sidecar and hands the child a real file descriptor, so a short-lived launcher can no longer truncate stdin. If it recurs, inspect the worker .log tail for the quoted token, confirm the staged sidecar is non-empty, and verify the guard's replayable fuel under .dispatch-runs/prompt-fuel/."
+see_also = ["cmd/fak/guard_prompt_transport.go", "cmd/fak/dispatch_tick_worker.go", "docs/releases/v0.53.0.md"]
+
 [reasons.DEFAULT_DENY]
 category = "OPERATOR_GATE"
 refusal  = true

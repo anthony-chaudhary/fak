@@ -306,7 +306,7 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 	_ = fh.Sync()
 	stem := strings.TrimSuffix(outLog, filepath.Ext(outLog))
 	if backend == "opencode" && stdinPayload != "" {
-		promptPath := stem + ".prompt.txt"
+		promptPath := stem + dispatchPromptSidecarSuffix
 		if err := os.WriteFile(promptPath, []byte(stdinPayload), 0o600); err != nil {
 			_ = fh.Close()
 			return dispatchSpawnResult{}, err
@@ -314,11 +314,29 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 		command = dispatchAttachOpencodePromptFile(command, promptPath)
 		stdinPayload = ""
 	}
+	// Codex reads its prompt from stdin (argv ends in "-"), and the guarded worker
+	// is a detached process that outlives this short-lived tick. Handing it an
+	// in-memory reader would make os/exec spawn a copy goroutine owned by THIS
+	// process: the moment the tick exits, the pipe closes and the guard — which
+	// only starts draining stdin after its own gateway/session setup — reads a
+	// truncated or empty prompt and refuses with PROMPT_FUEL_MISSING (#11491).
+	// Stage the bytes to a durable artifact and hand the child a real *os.File fd,
+	// which the kernel keeps valid independent of the launcher's lifetime. The
+	// guard still persists/verifies its own replayable fuel from this stdin.
 	cmd := exec.Command(exe, command[1:]...)
 	cmd.Dir = cwd
 	cmd.Env = envSliceFromMap(env)
 	if stdinPayload != "" {
-		cmd.Stdin = strings.NewReader(stdinPayload)
+		stdinFile, err := stageDispatchPromptStdin(stem, stdinPayload)
+		if err != nil {
+			_ = fh.Close()
+			return dispatchSpawnResult{}, err
+		}
+		// The child inherits its own dup of the fd across exec; once Start returns
+		// the parent's handle is no longer needed, and closing it here keeps the
+		// launcher from leaking a descriptor per spawn.
+		defer stdinFile.Close()
+		cmd.Stdin = stdinFile
 	} else {
 		devNull, _ := os.Open(os.DevNull)
 		if devNull != nil {
@@ -382,6 +400,27 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 		res.EarlyExit = probeDispatchSpawn(cmd, outLog, probeS)
 	}
 	return res, nil
+}
+
+// stageDispatchPromptStdin writes the worker prompt to a durable sidecar beside
+// the run log and reopens it read-only, so a detached codex worker reads its
+// prompt from a real file descriptor rather than an in-memory reader whose copy
+// goroutine dies with the short-lived dispatch tick (#11491). Writing and
+// reopening (instead of handing back the write handle) mirrors the opencode
+// staging path and guarantees the child sees the full bytes from offset 0.
+func stageDispatchPromptStdin(stem, prompt string) (*os.File, error) {
+	if strings.TrimSpace(prompt) == "" {
+		return nil, fmt.Errorf("%s: dispatch prompt fuel is empty", promptFuelMissingReason)
+	}
+	promptPath := stem + dispatchPromptSidecarSuffix
+	if err := os.WriteFile(promptPath, []byte(prompt), 0o600); err != nil {
+		return nil, err
+	}
+	f, err := os.Open(promptPath)
+	if err != nil {
+		return nil, err
+	}
+	return f, nil
 }
 
 func dispatchAttachOpencodePromptFile(command []string, promptPath string) []string {
@@ -492,6 +531,15 @@ func dispatchEarlyExitClass(logPath string) string {
 	return dispatchtick.ClassifyNoCommitReason(tail, size)
 }
 
+// dispatchSpawnLogClass grades a freshly spawned worker's durable log with the same
+// classifier the witness sweep trusts, so the launch receipt can refuse durable success
+// for a refusal the 5s probe window closed before. Unlike dispatchEarlyExitClass it does
+// not collapse an empty log to NoCommitUnknown — the classifier already answers that.
+func dispatchSpawnLogClass(logPath string) string {
+	tail, size := dispatchWitnessLogTail(logPath)
+	return dispatchtick.ClassifyNoCommitReason(tail, size)
+}
+
 func dispatchEarlyExitSummary(class string) string {
 	switch class {
 	case dispatchtick.NoCommitAuthWall:
@@ -506,6 +554,8 @@ func dispatchEarlyExitSummary(class string) string {
 		return "guard self-modify refusal"
 	case dispatchtick.NoCommitPolicyBlock:
 		return "guard policy refusal"
+	case dispatchtick.NoCommitPromptFuel:
+		return "guarded prompt fuel missing (transport defect, not a model wall)"
 	case dispatchtick.NoCommitOffTrunk:
 		return "guard off-trunk refusal"
 	case dispatchtick.NoCommitBannerNoop:

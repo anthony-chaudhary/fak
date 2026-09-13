@@ -312,6 +312,30 @@ func TestGuardCodexPromptFuelWithoutDashArgvRelaunches(t *testing.T) {
 	}
 }
 
+// TestPromptFuelMissingTokenIsDeclaredInTheClosedVocabulary binds #11491's emitted
+// token to its dos.toml declaration, so `fak recover PROMPT_FUEL_MISSING` and
+// `dos man wedge PROMPT_FUEL_MISSING --explain` classify fak's own transport refusal
+// instead of answering UNCLASSIFIED prose drift.
+func TestPromptFuelMissingTokenIsDeclaredInTheClosedVocabulary(t *testing.T) {
+	body := repoDosToml(t)
+	header := "[reasons." + promptFuelMissingReason + "]"
+	i := strings.Index(body, header)
+	if i < 0 {
+		t.Fatalf("dos.toml declares no %s, so `dos man wedge %s --explain` answers UNCLASSIFIED: "+
+			"fak would emit a refusal token its own closed vocabulary does not recognise",
+			header, promptFuelMissingReason)
+	}
+	block := body[i+len(header):]
+	if j := strings.Index(block, "\n["); j >= 0 {
+		block = block[:j]
+	}
+	for _, want := range []string{"OPERATOR_GATE", "refusal", "summary", "fix", "see_also"} {
+		if !strings.Contains(block, want) {
+			t.Errorf("dos.toml %s is missing %q — an operator who hits this refusal gets no classification or next step", header, want)
+		}
+	}
+}
+
 func TestGuardClaudePromptFuelStdinRelaunches(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DISPATCH_WORKSPACE", root)

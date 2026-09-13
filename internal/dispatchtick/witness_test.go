@@ -47,6 +47,68 @@ func TestClassifyNoCommitReason(t *testing.T) {
 	}
 }
 
+// TestClassifyNoCommitReasonPromptFuel pins #11491: a guard that could not obtain
+// intact prompt fuel on stdin is a structural transport refusal, not a model wall,
+// so it must be named and must OUTRANK the model-switchable cases below it.
+func TestClassifyNoCommitReasonPromptFuel(t *testing.T) {
+	cases := []struct {
+		name string
+		tail string
+		want string
+	}{
+		{
+			name: "empty stdin fuel refusal",
+			tail: "fak guard: could not run \"codex\": PROMPT_FUEL_MISSING: guarded codex received empty prompt fuel\n",
+			want: NoCommitPromptFuel,
+		},
+		{
+			name: "missing stdin fuel refusal",
+			tail: "fak guard: could not run \"codex\": PROMPT_FUEL_MISSING: guarded codex requires prompt bytes on stdin\n",
+			want: NoCommitPromptFuel,
+		},
+		{
+			name: "tampered replay fuel refusal",
+			tail: "fak guard: could not run \"codex\": PROMPT_FUEL_TAMPERED: guarded prompt fuel digest mismatch\n",
+			want: NoCommitPromptFuel,
+		},
+		{
+			name: "fuel refusal outranks a co-occurring cap wall",
+			tail: "You've hit your usage limit\nfak guard: could not run \"codex\": PROMPT_FUEL_MISSING: guarded codex received empty prompt fuel\n",
+			want: NoCommitPromptFuel,
+		},
+		{
+			name: "fuel refusal outranks a co-occurring auth wall",
+			tail: "API Error: 401 Please run /login\nfak guard: could not run \"codex\": PROMPT_FUEL_MISSING: empty stdin\n",
+			want: NoCommitPromptFuel,
+		},
+		{
+			// #11491 self-classification guard: a worker whose TASK is to fix prompt-fuel
+			// transport prints the bare token from source, grep output, or a commit
+			// subject. That is not a guard refusal, so it must NOT be graded prompt_fuel.
+			name: "bare token from worker source or grep is not a refusal",
+			tail: "cmd/fak/guard_prompt_transport.go:19: promptFuelMissingReason = \"PROMPT_FUEL_MISSING\"\ncommitted fix(dispatch): handle PROMPT_FUEL_MISSING on relaunch\n",
+			want: NoCommitUnknown,
+		},
+		{
+			// A verbatim full-frame quote embedded mid-line (commit body, test golden,
+			// quoted diff) is not the guard's own line-leading stderr frame.
+			name: "verbatim frame quoted mid-line is not a refusal",
+			tail: "diff: +  body := \"fak guard: could not run \\\"codex\\\": PROMPT_FUEL_MISSING: empty\"\n",
+			want: NoCommitUnknown,
+		},
+		{
+			name: "unicode token in an unrelated healthy log is not a refusal",
+			tail: "worker ran and exited cleanly without the token\n",
+			want: NoCommitUnknown,
+		},
+	}
+	for _, tc := range cases {
+		if got := ClassifyNoCommitReason(tc.tail, int64(len(tc.tail))); got != tc.want {
+			t.Errorf("%s: ClassifyNoCommitReason = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 // TestGradeTestRun pins the #3838 test-run grader: the ONLY path to GREEN is a test
 // that actually ran AND passed. A runner that never fired (ran=false) grades UNRUN
 // regardless of the passed bit, so a disabled/faulted/no-test-package run can never

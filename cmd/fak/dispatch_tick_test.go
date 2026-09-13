@@ -1287,6 +1287,138 @@ func TestDispatchTickLiveFailsNonzeroEarlyExitAndPinsClaudeAccountEnv(t *testing
 	}
 }
 
+// TestDispatchTickRefusesSpawnedWhenPromptFuelMissingLate pins #11491 outcome B: a
+// guarded codex worker that refuses on PROMPT_FUEL_MISSING AFTER the 5s spawn probe
+// window has closed (early_exit.alive=true) must NOT be reported as durable launch
+// success. The receipt must be SPAWN_FAILED with the fuel token named.
+func TestDispatchTickRefusesSpawnedWhenPromptFuelMissingLate(t *testing.T) {
+	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	root := t.TempDir()
+	// Isolate the fixture workspace from this checkout's git ancestry: on a shared
+	// worktree t.TempDir() lands under the repo, letting `git rev-parse HEAD` ascend
+	// to the real trunk and feed a non-empty base SHA the managed fixture does not
+	// expect. A ceiling at the fixture's parent restores CI's /tmp isolation.
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(root))
+	assertPrepared := installDispatchManagedFixture(t, root)
+
+	oldBroker := launchSpawnBroker
+	oldSpawner := dispatchIssueWorkerSpawner
+	launchSpawnBroker = func(a launchBrokerAttempt) launchBrokerGrant {
+		return allowLaunchBrokerGrant(a, "unit-test-allow")
+	}
+	// The probe saw the process ALIVE at 5s (the lie), but the durable log already
+	// carries the guard's late refusal. The receipt must re-read the log and refuse.
+	dispatchIssueWorkerSpawner = func(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA, stdinPayload string, probeS float64) (dispatchSpawnResult, error) {
+		logPath := filepath.Join(runsDir, "resolve-11491-000000.log")
+		if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+			t.Fatalf("mkdir runs dir: %v", err)
+		}
+		body := []byte("# fak-spawn\nfak guard: could not run \"codex\": PROMPT_FUEL_MISSING: guarded codex received empty prompt fuel\n")
+		if err := os.WriteFile(logPath, body, 0o644); err != nil {
+			t.Fatalf("write fuel-refusal log: %v", err)
+		}
+		return dispatchSpawnResult{
+			PID:     5150,
+			Log:     logPath,
+			Issue:   issue,
+			Lane:    lane,
+			Backend: backend,
+			LeaseID: leaseID,
+			Tree:    tree,
+			Account: dispatchtick.AccountSidecar(account),
+			// alive=true models the probe returning before the guard died.
+			EarlyExit: map[string]any{"checked": true, "alive": true, "wait_s": probeS},
+		}, nil
+	}
+	t.Cleanup(func() {
+		launchSpawnBroker = oldBroker
+		dispatchIssueWorkerSpawner = oldSpawner
+	})
+
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--backend", "codex", "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--live", "--json")
+	if code == 0 {
+		t.Fatalf("exit = 0, want nonzero prompt-fuel refusal (stderr: %s)\n%s", errb, out)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out)
+	}
+	assertPrepared(got)
+	if got["action"] == "spawned" || got["verdict"] == "SPAWNED" {
+		t.Fatalf("late prompt-fuel refusal reported durable launch success: action %v verdict %v", got["action"], got["verdict"])
+	}
+	if got["action"] != "spawn_failed" || got["verdict"] != "SPAWN_FAILED" || got["ok"] != false {
+		t.Fatalf("prompt-fuel result = action %v verdict %v ok %v", got["action"], got["verdict"], got["ok"])
+	}
+	if reason := dispatchMapString(got, "reason"); !strings.Contains(reason, promptFuelMissingReason) {
+		t.Fatalf("reason = %q, want it to name %s", reason, promptFuelMissingReason)
+	}
+	if klass := dispatchMapString(got, "spawn_prompt_fuel"); klass != dispatchtick.NoCommitPromptFuel {
+		t.Fatalf("spawn_prompt_fuel = %q, want %q", klass, dispatchtick.NoCommitPromptFuel)
+	}
+}
+
+// TestDispatchTickDoesNotMisfireOnWorkerEditingFuelToken pins the #11491
+// self-classification guard: a HEALTHY codex worker whose assigned task is to fix
+// prompt-fuel transport prints the bare token from source/grep/commit text in its log
+// tail. That must NOT be graded as a guard refusal, or dispatch would refuse the very
+// worker fixing the bug.
+func TestDispatchTickDoesNotMisfireOnWorkerEditingFuelToken(t *testing.T) {
+	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	root := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(root))
+	assertPrepared := installDispatchManagedFixture(t, root)
+
+	oldBroker := launchSpawnBroker
+	oldSpawner := dispatchIssueWorkerSpawner
+	launchSpawnBroker = func(a launchBrokerAttempt) launchBrokerGrant {
+		return allowLaunchBrokerGrant(a, "unit-test-allow")
+	}
+	dispatchIssueWorkerSpawner = func(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA, stdinPayload string, probeS float64) (dispatchSpawnResult, error) {
+		logPath := filepath.Join(runsDir, "resolve-11491-healthy.log")
+		if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+			t.Fatalf("mkdir runs dir: %v", err)
+		}
+		// A healthy worker editing the fuel-transport source: the bare token appears,
+		// but there is no guard `could not run` refusal frame.
+		body := []byte("# fak-spawn\ncmd/fak/guard_prompt_transport.go:19: promptFuelMissingReason = \"PROMPT_FUEL_MISSING\"\ncommitted fix(dispatch): handle PROMPT_FUEL_MISSING on relaunch\n")
+		if err := os.WriteFile(logPath, body, 0o644); err != nil {
+			t.Fatalf("write healthy log: %v", err)
+		}
+		return dispatchSpawnResult{
+			PID:       6161,
+			Log:       logPath,
+			Issue:     issue,
+			Lane:      lane,
+			Backend:   backend,
+			LeaseID:   leaseID,
+			Tree:      tree,
+			Account:   dispatchtick.AccountSidecar(account),
+			EarlyExit: map[string]any{"checked": true, "alive": true, "wait_s": probeS},
+		}, nil
+	}
+	t.Cleanup(func() {
+		launchSpawnBroker = oldBroker
+		dispatchIssueWorkerSpawner = oldSpawner
+	})
+
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--backend", "codex", "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--live", "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 for a healthy token-editing worker (stderr: %s)\n%s", code, errb, out)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out)
+	}
+	assertPrepared(got)
+	if got["action"] != "spawned" || got["verdict"] != "SPAWNED" || got["ok"] != true {
+		t.Fatalf("healthy token-editing worker = action %v verdict %v ok %v, want SPAWNED", got["action"], got["verdict"], got["ok"])
+	}
+	if _, misfired := got["spawn_prompt_fuel"]; misfired {
+		t.Fatalf("healthy worker misfired as prompt-fuel refusal: %#v", got["spawn_prompt_fuel"])
+	}
+}
+
 func TestLaunchBrokerMetadataRedactsRawSecrets(t *testing.T) {
 	attempt := newLaunchBrokerAttempt("accounts_launch", "claude",
 		[]string{"claude", "--api-key", "sk-raw-argv", "--base-url=https://oauth-token@example.test/v1?api_key=sk-query"},

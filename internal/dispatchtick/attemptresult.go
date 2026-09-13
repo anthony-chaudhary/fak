@@ -108,10 +108,11 @@ func failKindForNoCommitReason(reason string) (modelroute.FailureKind, bool) {
 		// bypass by retry, and re-issuing it at the SAME rung hits the identical refusal, so
 		// neither direction is a retry worth making.
 		return modelroute.FailRefused, true
-	case NoCommitAuthWall, NoCommitUsageCap, NoCommitModelUnknown, NoCommitRateLimit, NoCommitBannerNoop:
+	case NoCommitAuthWall, NoCommitUsageCap, NoCommitModelUnknown, NoCommitRateLimit, NoCommitBannerNoop, NoCommitPromptFuel:
 		// Nothing reached a model that could try the work: a login/entitlement wall, a
-		// capacity or weekly-bucket wall, an id the account is not entitled to, or a worker
-		// that printed its banner and stopped. None of them is evidence about capability.
+		// capacity or weekly-bucket wall, an id the account is not entitled to, a worker
+		// that printed its banner and stopped, or a guard whose prompt fuel never
+		// arrived intact on stdin. None of them is evidence about capability.
 		return modelroute.FailTransport, true
 	default:
 		return modelroute.FailUnclassified, true

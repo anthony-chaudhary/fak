@@ -75,6 +75,7 @@ func GradeTestRun(ran, passed bool) string {
 const (
 	NoCommitSelfModify   = "self_modify"
 	NoCommitPolicyBlock  = "policy_block"
+	NoCommitPromptFuel   = "prompt_fuel"
 	NoCommitAuthWall     = "auth_wall"
 	NoCommitUsageCap     = "usage_cap"
 	NoCommitModelUnknown = "model_unknown"
@@ -102,6 +103,13 @@ var (
 	glmWallRE         = regexp.MustCompile(`(?i)Limit Exhausted|limit will reset at|usage limit reached`)
 	noopBannerRE      = regexp.MustCompile(`(?i)>\s*build\s*[·:]`)
 	offTrunkRefusalRE = regexp.MustCompile(`(?im)^(?:(?:fak(?: commit)?):\s*)?OFF_TRUNK(?:\s*:|\s+-)|^(?:commit|push)\s+refused:\s*OFF_TRUNK\b`)
+	// promptFuelRefusalRE anchors the guard's own refusal line rather than matching the
+	// bare token anywhere in the tail: a worker whose TASK is to fix prompt-fuel transport
+	// prints PROMPT_FUEL_MISSING from source/grep/commit text, and an unanchored match
+	// would misclassify that healthy worker as a refusal (#11491). The guard writes
+	// `fak guard: could not run "<agent>": PROMPT_FUEL_MISSING: ...` as its own line, so
+	// requiring the line-leading guard frame pins a genuine refusal.
+	promptFuelRefusalRE = regexp.MustCompile(`(?im)^fak guard: could not run\b[^\n]*PROMPT_FUEL_(?:MISSING|TAMPERED)`)
 )
 
 // WitnessRecord is one finished worker slot's graded verdict — the row the sweep
@@ -220,6 +228,12 @@ func ClassifyNoCommitReason(tail string, size int64) string {
 		return NoCommitSelfModify
 	case strings.Contains(tail, "POLICY_BLOCK"):
 		return NoCommitPolicyBlock
+	case promptFuelRefusalRE.MatchString(tail):
+		// The guarded worker refused before its first provider turn: dispatch could
+		// not deliver intact prompt fuel on stdin (#11491). This is a structural
+		// transport defect, not a model/account wall, so it outranks the
+		// model-switchable cases below — re-dispatch re-blocks until transport is fixed.
+		return NoCommitPromptFuel
 	case sessionsignals.NeedsLoginPrompt(tail) || sessionsignals.IsAuthError(tail):
 		return NoCommitAuthWall
 	case capBannerRE.MatchString(tail) || glmWallRE.MatchString(tail) || sessionsignals.IsLimitError(tail):
