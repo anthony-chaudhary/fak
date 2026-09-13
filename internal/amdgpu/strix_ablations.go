@@ -23,6 +23,7 @@ const (
 	embeddingGatherAblationSchema = "fak.strix.embedding-gather-ablation/v1"
 	embeddingGatherAblationEngine = "fak-native"
 	embeddingGatherBaselineArm    = "per-token-copy"
+	partialRoPEAblationName       = "precomputed-table"
 )
 
 type strixAblationCatalogEntry struct{ name, dimension string }
@@ -32,7 +33,7 @@ var strixAblationCatalog = []strixAblationCatalogEntry{{"cpu_vs_vulkan_gpu", "ta
 // Opt-in ablations require a purpose-built structured event. Keeping them out
 // of the empty/default sweep avoids turning unrelated Strix validation into a
 // request for evidence its selected compute test cannot emit.
-var strixOptInAblationCatalog = []strixAblationCatalogEntry{{embeddingGatherAblationName, "embedding"}}
+var strixOptInAblationCatalog = []strixAblationCatalogEntry{{embeddingGatherAblationName, "embedding"}, {partialRoPEAblationName, "positional"}}
 
 func validateAblationSelectors(selected []string) (int, error) {
 	if len(selected) == 0 {

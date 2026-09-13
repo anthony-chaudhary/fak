@@ -19,6 +19,8 @@ const (
 	embeddingGatherTestName    = "TestQwen35VulkanEmbeddingGatherOneDispatch"
 	sequenceKVSelector         = "qwen35-sequence-kv"
 	sequenceKVTestName         = "TestQwen35VulkanSequenceKVReserveGeometric"
+	partialRoPESelector        = "qwen35-partial-rope"
+	partialRoPETestName        = "TestQwen35PartialRoPETableParity"
 )
 
 // Closed oracle kind vocabulary
@@ -475,6 +477,17 @@ var DefaultSubkernelParityContracts = map[string]SubkernelParityContract{
 			RequireFinite: true,
 		},
 	},
+	partialRoPESelector: {
+		Selector:       partialRoPESelector,
+		TestName:       partialRoPETestName,
+		OracleKind:     OracleMaxAbs,
+		Engine:         StrixVulkanEngine,
+		DeviceObserved: true,
+		Bounds: SubkernelParityBounds{
+			MaxAbsDelta:   floatPtr(2e-3),
+			RequireFinite: true,
+		},
+	},
 	"f16_kv_contiguize": {
 		Selector:       "f16_kv_contiguize",
 		TestName:       "TestRADVContiguizeShader",
@@ -633,6 +646,12 @@ var DefaultSubkernelSpecs = []SubkernelSpec{
 		Description: "Qwen3.5 geometric sequence-KV reservation with exact-growth attention parity",
 		TestPattern: "^" + sequenceKVTestName + "$",
 		Category:    "kv_cache",
+	},
+	{
+		Name:        partialRoPESelector,
+		Description: "Qwen3.5/3.6 rotate-half partial RoPE with cached-table vs scalar-reference parity",
+		TestPattern: "^" + partialRoPETestName + "$",
+		Category:    "positional",
 	},
 	{
 		Name:        "f16_kv_contiguize",
