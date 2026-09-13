@@ -355,6 +355,69 @@ type turnkeyServer struct {
 	releaseRequested bool
 	activeRequests   int
 	residencyOnce    sync.Once
+	ready            *readinessGate
+}
+
+// readinessGate is a small package-main equivalent of the gateway warmup gate
+// (internal/gateway/readiness_warmup.go): it records whether a boot-time warmup
+// phase is still in flight so /healthz and /readyz can tell the TRUTH about
+// readiness instead of hardcoding ok/ready. The zero value means "not warming",
+// so a bare &turnkeyServer{} is ready — existing tests that construct one stay
+// byte-for-byte unaffected. Guarded by its own mutex; safe on a nil receiver.
+type readinessGate struct {
+	mu       sync.Mutex
+	armed    bool
+	complete bool
+}
+
+// armWarming declares that boot work (e.g. the synchronous model load) is in
+// flight and the server is not ready until markReady is called.
+func (g *readinessGate) armWarming() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.armed = true
+	g.complete = false
+}
+
+// markReady records that boot work finished and the server is ready. The first
+// completion wins; marking ready also overrides an armed gate.
+func (g *readinessGate) markReady() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.armed = true
+	g.complete = true
+}
+
+// pending reports whether readiness is being HELD for an incomplete warmup —
+// true only when the gate was armed and warmup has not completed. A never-armed
+// or already-complete gate returns false (readiness unaffected / already warm).
+func (g *readinessGate) pending() bool {
+	if g == nil {
+		return false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.armed && !g.complete
+}
+
+// readyState reports the readiness as a state string and a boolean: while
+// armed-and-incomplete it is ("warming_up", false); otherwise ready ("ok", true).
+func (g *readinessGate) readyState() (state string, isReady bool) {
+	if g == nil {
+		return "ok", true
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.armed && !g.complete {
+		return "warming_up", false
+	}
+	return "ok", true
 }
 
 func (s *turnkeyServer) Addr() string {
@@ -625,6 +688,10 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 	var planner agent.Planner
 	var native *turnkeyNativeResources
 	var capturedMetalDecision serveMetalDecision
+	// Declare the boot phase honestly: until the model/planner is constructed and
+	// the listener is about to bind, a readiness probe must not claim ready.
+	ready := &readinessGate{}
+	ready.armWarming()
 	if !mock {
 		if len(custom) > 0 && custom[0] != nil {
 			planner = custom[0]
@@ -693,6 +760,9 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 	if addr == "" {
 		addr = "127.0.0.1:8080"
 	}
+	// Boot work (model load + planner construction) is complete here; the server
+	// flips to ready immediately before binding the listener.
+	ready.markReady()
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		_ = native.Close()
@@ -712,6 +782,7 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 		native:        native,
 		listener:      ln,
 		boundAddr:     ln.Addr().String(),
+		ready:         ready,
 	}
 
 	mux := http.NewServeMux()
@@ -737,10 +808,16 @@ func (s *turnkeyServer) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	if s.native != nil {
 		nativeStartup = &s.native.Startup
 	}
+	readyState, isReady := s.ready.readyState()
+	status := "ok"
+	if !isReady {
+		status = readyState
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status":         "ok",
+		"status":         status,
+		"ready":          isReady,
 		"mode":           "turnkey",
 		"engine":         s.engineID,
 		"tier":           s.plan.Tier.Name,
@@ -751,9 +828,16 @@ func (s *turnkeyServer) handleHealthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *turnkeyServer) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	readyState, isReady := s.ready.readyState()
 	w.Header().Set("Content-Type", "application/json")
+	if !isReady {
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": readyState})
+		return
+	}
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"status":"ready"}`))
+	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ready"})
 }
 
 func (s *turnkeyServer) handleModels(w http.ResponseWriter, r *http.Request) {
