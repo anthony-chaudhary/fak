@@ -50,3 +50,9 @@ docs/_witnesses/armbench-caveman-native/inputs/** text eol=lf
 # provenance tests fail against the unchanged upstream digests (#12888).
 internal/model/testdata/deepseek_v41_flash_config.json text eol=lf
 internal/model/testdata/deepseek_v4_flash_config.json text eol=lf
+
+# The V4.1 MoE dispatch fixture is SHA-256 addressed by
+# internal/model/v41_moe_dispatch_bench_test.go, which hashes raw checkout bytes.
+# Under core.autocrlf=true a Windows checkout rewrites it to CRLF and the pinned
+# geometry digest fails locally while passing on Unix (#12973, same class as #12888).
+internal/model/testdata/v41_moe_dispatch_fixture.json text eol=lf
