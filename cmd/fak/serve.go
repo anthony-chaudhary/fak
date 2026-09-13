@@ -699,6 +699,14 @@ func cmdServe(argv []string) {
 	rt.resolveObservers(sf)
 	resolveServeEngine(sf, explicit, rt.inKernelModel != nil)
 	rt.buildGateway(sf)
+	// Stop the real-time unified-memory pressure governor (#12305) on the way out so its
+	// OS dispatch source/subscription does not leak. buildGateway attached it to rt.srv,
+	// which is already set when it returns; a nil governor (the default) is inert.
+	defer func() {
+		if g := rt.srv.UnifiedMemoryPressureGovernor(); g != nil {
+			_ = g.Stop()
+		}
+	}()
 	rt.wireGateway(sf)
 	catalog, err := evaluateServeFeatures(sf, manifest, featureExplicit, os.Getenv, rt)
 	if err == nil && keepAwakeReleaser != nil {
@@ -1052,6 +1060,32 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 			Kind:   "memory-governor",
 			Level:  "info",
 			Text:   fmt.Sprintf("zero-swap memory governor armed (wired ceiling: %d MB, 24-agent target)", memGov.Telemetry().WiredMemoryCeilingBytes/(1024*1024)),
+		})
+
+		// Real-time unified-memory pressure governor (#12305): subscribes to the Darwin
+		// DISPATCH_SOURCE_TYPE_MEMORYPRESSURE stream (simulated on non-Darwin) so CRITICAL
+		// pressure pauses batch admissions with a typed 429 CAPACITY_BACKOFF on the served
+		// request path. Additive on the same real-time path as the zero-swap governor above;
+		// no production OpenCodePageManager exists yet, so its page-manager slot stays nil
+		// (the governor tolerates it). Start is best-effort: a failed subscribe disables the
+		// accelerator rather than failing serve startup. cmdServe defers Stop off rt.srv so
+		// the dispatch source is not leaked.
+		govCfg := macobs.DefaultUnifiedMemoryGovernorConfig()
+		unifiedGov := macobs.NewUnifiedMemoryPressureGovernor(
+			macobs.NewPlatformMemoryPressureSubscriber(),
+			nil,
+			macobs.NewDefaultMTPDepthGovernor(govCfg.NominalMTPDepth, govCfg.ThrottledMTPDepth, govCfg.CriticalMTPDepth),
+			govCfg,
+		)
+		srv.SetUnifiedMemoryPressureGovernor(unifiedGov)
+		if err := unifiedGov.Start(context.Background()); err != nil {
+			fmt.Fprintf(os.Stderr, "fak serve: unified memory pressure governor unavailable: %v (continuing without real-time backpressure)\n", err)
+		}
+		srv.AddStartupMessages(gateway.StartupMessage{
+			Source: "serve",
+			Kind:   "unified-memory-governor",
+			Level:  "info",
+			Text:   fmt.Sprintf("unified memory pressure governor armed (MTP depth %d→%d→%d nominal/throttled/critical)", govCfg.NominalMTPDepth, govCfg.ThrottledMTPDepth, govCfg.CriticalMTPDepth),
 		})
 	}
 	rt.srv = srv

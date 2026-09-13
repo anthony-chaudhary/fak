@@ -43,14 +43,18 @@ type TraceResetResponse struct {
 // the monotonic revision the table bumps on every write; a client may round-trip it
 // as if_rev to reject a stale clobber (optimistic concurrency).
 type SessionState struct {
-	TraceID          string                  `json:"trace_id"`
-	Run              string                  `json:"run"`
-	TokensUsed       int                     `json:"tokens_used,omitempty"`
-	TokenUsage       int                     `json:"token_usage,omitempty"`
-	Budget           SessionBudget           `json:"budget"`
-	Priority         int                     `json:"priority"`
-	Pace             SessionPace             `json:"pace"`
-	Reason           string                  `json:"reason,omitempty"`
+	TraceID    string        `json:"trace_id"`
+	Run        string        `json:"run"`
+	TokensUsed int           `json:"tokens_used,omitempty"`
+	TokenUsage int           `json:"token_usage,omitempty"`
+	Budget     SessionBudget `json:"budget"`
+	Priority   int           `json:"priority"`
+	Pace       SessionPace   `json:"pace"`
+	Reason     string        `json:"reason,omitempty"`
+	// RetryAfterSec is the advisory back-off (whole seconds) for a capacity refusal.
+	// Only the real-time unified memory pressure governor (#12305) sets it; omitempty
+	// keeps every pre-existing session wire shape byte-for-byte unchanged.
+	RetryAfterSec    int                     `json:"retry_after_sec,omitempty"`
 	ContinuationID   string                  `json:"continuation_id,omitempty"`
 	ParentTrace      string                  `json:"parent_trace,omitempty"`
 	Generation       int                     `json:"generation,omitempty"`
@@ -403,18 +407,18 @@ type Server struct {
 	// (Config.UpstreamFailureObserver), retained so a gateway-onset terminal failure at a
 	// served wire boundary (e.g. an HTTP 200 whose completion fails to decode) can emit
 	// ONE truthful receipt the transport observer never saw (#11567). nil = off.
-	upstreamFailureObserver   func(UpstreamFailureReceipt)
-	version                  string
-	logf                     func(format string, args ...any)
-	debugStatsf              func(format string, args ...any) // optional per-turn human debug sink (#793); nil = off
-	turnCacheStatsMu         sync.Mutex
-	turnCacheStats           turnCacheHistory // successful-turn cache economics rendered by fak-turn
-	feed                     *coherenceFeed   // the cross-agent "what changed" feed (vdso coherence bus)
-	sessionFeed              *sessionFeed     // the drive-state revision feed (#630; host-pushed via PublishSessionRevision)
-	metrics                  *gatewayMetrics
-	otlp                     *otlpExporter
-	orgAudit                 *auditreceipt.Exporter
-	traceparentInvalid       uint64
+	upstreamFailureObserver func(UpstreamFailureReceipt)
+	version                 string
+	logf                    func(format string, args ...any)
+	debugStatsf             func(format string, args ...any) // optional per-turn human debug sink (#793); nil = off
+	turnCacheStatsMu        sync.Mutex
+	turnCacheStats          turnCacheHistory // successful-turn cache economics rendered by fak-turn
+	feed                    *coherenceFeed   // the cross-agent "what changed" feed (vdso coherence bus)
+	sessionFeed             *sessionFeed     // the drive-state revision feed (#630; host-pushed via PublishSessionRevision)
+	metrics                 *gatewayMetrics
+	otlp                    *otlpExporter
+	orgAudit                *auditreceipt.Exporter
+	traceparentInvalid      uint64
 	// toolPages is the tool catalog's home (#2440): each advertised tool schema is a
 	// content-hashed read-only page owned by the ctxmmu, registered at the
 	// maybeCompactInboundTools seam. The page table — not the transcript — is the
@@ -1098,6 +1102,13 @@ type Server struct {
 	// wired memory headroom and shared preamble state before allocating resources or proxying.
 	memoryGovernorMu sync.RWMutex
 	memoryGovernor   *macobs.MemoryGovernor
+
+	// unifiedMemoryGovernor is the optional real-time Apple Silicon unified memory
+	// pressure governor (#12305). When non-nil it is driven by a Darwin
+	// DISPATCH_SOURCE_TYPE_MEMORYPRESSURE subscriber; on CRITICAL pressure it pauses
+	// new batch admissions and the served boundary returns 429 CAPACITY_BACKOFF.
+	unifiedMemoryGovernorMu sync.RWMutex
+	unifiedMemoryGovernor   *macobs.UnifiedMemoryPressureGovernor
 
 	// preemptionMetrics is the optional native-serving KV preemption / swap / recompute
 	// metric writer (#31). nil leaves fak_sched_preempt_* absent; a host attaches the live

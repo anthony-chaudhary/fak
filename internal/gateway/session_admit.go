@@ -206,6 +206,15 @@ func (s *Server) beginServedSessionTurn(ctx context.Context, trace string) (serv
 		turn.govAdmitted = true
 		turn.govAgentID = agentID
 	}
+	// Real-time unified memory pressure governor (#12305):
+	// A Darwin DISPATCH_SOURCE_TYPE_MEMORYPRESSURE subscriber drives a governor that, on
+	// CRITICAL pressure, pauses new batch admissions. This returns 429 CAPACITY_BACKOFF to
+	// OpenCode through writeSessionRefusal so the serving daemon and the terminal survive
+	// instead of being SIGKILLed by Jetsam. Inert (nil) unless the host armed it.
+	if ref := s.unifiedMemoryGovernorRefusal(trace); ref != nil {
+		turn.state = *ref
+		return turn, false, false
+	}
 	var v SessionVerdict
 	hasDecide := false
 	if s.decideSession != nil {
@@ -500,6 +509,28 @@ func (s *Server) sessionAdmits(ctx context.Context, trace string) (bool, Session
 // operator's reason token (if any) rides the message.
 func writeSessionRefusal(w http.ResponseWriter, st SessionState) {
 	if w == nil {
+		return
+	}
+	// Real-time Apple Silicon unified memory pressure governor (#12305):
+	// On DISPATCH_MEMORYPRESSURE_CRITICAL the governor pauses batch admissions and the
+	// request is shed with a structured 429 CAPACITY_BACKOFF (not 409/503), so an OpenCode
+	// client backs off and retries instead of reading a terminal operator stop, and the
+	// serving daemon is never SIGKILLed by Jetsam. The body carries the closed code token.
+	if st.Reason == macobs.ReasonCapacityBackoff {
+		retry := st.RetryAfterSec
+		if retry <= 0 {
+			retry = macobs.DefaultUnifiedMemoryGovernorConfig().BackpressureRetrySec
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(retry))
+		writeJSON(w, macobs.StatusCapacityBackoff, map[string]any{
+			"error": map[string]any{
+				"message": "macOS kernel memory pressure CRITICAL; batch admissions paused to prevent Jetsam SIGKILL — retry after backoff",
+				"type":    errType(macobs.StatusCapacityBackoff),
+				"code":    macobs.CodeCapacityBackoff,
+				"param":   nil,
+			},
+			"reason": st.Reason,
+		})
 		return
 	}
 	// MemoryGovernor zero-swap backpressure (#12509):
