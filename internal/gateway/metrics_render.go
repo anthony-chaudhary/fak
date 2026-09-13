@@ -1045,6 +1045,7 @@ func (m *gatewayMetrics) writeUpstreamErrorMetrics(b *strings.Builder) {
 		fmt.Fprintf(b, "fak_gateway_upstream_errors_total{kind=\"%s\"} %d\n", promQuote(kind), snap[kind])
 	}
 	writeCounter(b, "fak_gateway_upstream_retries_total", "Upstream retry attempts — fak's exponential backoff in response to OBSERVED, provider-reported 429/5xx from the planner — since process start.", int64(atomic.LoadUint64(&m.upstreamRetries)))
+	writeCounter(b, "fak_gateway_soft_progress_stalls_total", "Soft no-progress diagnostics (#10638) — a stream went silent past the soft window and a content-free elapsed-since-progress/retry-attempt receipt was captured WITHOUT ending the turn — since process start.", int64(atomic.LoadUint64(&m.softProgressStalls)))
 	// The time twin of the retry counter: how much wall-clock the backoff loop slept between
 	// attempts. Always emitted (0 on a pushback-free session) so the panel exists from the
 	// first scrape — this is the answer to "how much of my slow session was the provider's

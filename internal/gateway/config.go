@@ -329,6 +329,19 @@ type Config struct {
 	// way every other serve knob does (0), and translates that 0 into the negative encoding
 	// above; see cmd/fak/serve.go:serveStreamProgressTimeout.
 	StreamProgressTimeout time.Duration
+	// StreamSoftProgressTimeout is the streaming SOFT no-progress DIAGNOSTIC deadline (#10638):
+	// how long a proxied stream may stay silent (keepalives ignored) before the gateway writes
+	// a content-free elapsed-since-progress / retry-attempt receipt, WITHOUT ending a healthy
+	// turn. It always fires before StreamProgressTimeout above, which remains the hard
+	// client-survivable ceiling. Carried verbatim onto every proxy planner and resolved there
+	// by agent.(*HTTPPlanner).streamSoftProgressWindow, so it uses that resolver's encoding
+	// exactly: ZERO means "derive from the hard window" (hard/3), a NEGATIVE value DISABLES the
+	// diagnostic, and a positive value is honored when it lands in [5s, hard) ? an out-of-band
+	// or non-earlier value falls back to the derived default so a soft strike always has lead
+	// time.
+	//
+	// `fak serve` feeds this from --stream-soft-progress-timeout.
+	StreamSoftProgressTimeout time.Duration
 	// PinUpstreamCredential makes the gateway authenticate the upstream with its OWN
 	// configured APIKey and IGNORE the inbound client's credential — the subscription
 	// path, where fak holds the real OAuth token and the wrapped client only sends a

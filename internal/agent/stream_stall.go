@@ -121,6 +121,18 @@ func IsFirstTokenStall(err error) bool {
 // second knob can drift from it.
 func FirstTokenWatchdogTimeout() time.Duration { return streamStallTimeout() }
 
+// SoftProgressStall is the evidence a soft no-progress deadline hands to its observer BEFORE
+// any destructive recovery (#10638). It mirrors the sanitized facts the offline audit consumes
+// (#10634): how long the TURN has been silent (ElapsedSinceProgress), the soft window that
+// elapsed, and how many retry attempts the upstream is on — so an operator can see a
+// stalled-but-alive turn, and its place in the retry budget, WITHOUT the gateway having killed
+// it. It carries counts and durations only: no prompt or output content ever appears in one.
+type SoftProgressStall struct {
+	ElapsedSinceProgress time.Duration
+	Window               time.Duration
+	RetryAttempt         int
+}
+
 // stallReader wraps a streaming response body with an inter-byte (idle) deadline. A
 // single time.AfterFunc timer is re-armed before each Read and stopped after it returns;
 // a Read that delivers bytes therefore resets the window, while a Read that blocks longer
@@ -158,6 +170,18 @@ type stallReader struct {
 	// outlive. Zero means OFF (the default, preserving all existing behavior).
 	maxDurationWindow time.Duration
 	maxDurationTimer  *time.Timer
+
+	// softProgressWindow/softProgressTimer are the SOFT, NON-TERMINAL twin of the progress
+	// deadline (#10638). It is armed and re-armed exactly like progressTimer, but its
+	// callback does NOT close the body: it captures a diagnostic/receipt (elapsed since the
+	// last progress, retry attempt) FIRST, then lets the stream keep running so the hard
+	// progressWindow remains the only thing that ends a healthy-but-slow turn. softFired
+	// makes it strike at most once per silent interval, so a minutes-long silence produces one
+	// checkpoint rather than a ticker storm; noteProgress clears it. Zero means OFF.
+	softProgressWindow time.Duration
+	softProgressTimer  *time.Timer
+	softFired          bool
+	onSoftStall        func(SoftProgressStall)
 
 	mu      sync.Mutex
 	tripped bool   // a timer fired and closed rc — the next Read error is a stall
@@ -220,10 +244,18 @@ func (s *stallReader) trip(kind string) {
 func (s *stallReader) noteProgress() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.progressTimer == nil || s.closed {
+	if s.closed {
 		return
 	}
-	s.progressTimer.Reset(s.progressWindow)
+	if s.progressTimer != nil {
+		s.progressTimer.Reset(s.progressWindow)
+	}
+	// A real progress frame resets the SOFT diagnostic interval too, and re-arms it for the
+	// next silence: progress is exactly the event that means "the last checkpoint is stale".
+	if s.softProgressTimer != nil {
+		s.softFired = false
+		s.softProgressTimer.Reset(s.softProgressWindow)
+	}
 }
 
 // stallCause names the deadline that tripped this reader and the window it enforced, so the
@@ -241,6 +273,55 @@ func (s *stallReader) stallCause() (string, time.Duration) {
 	default:
 		return stallKindIdle, s.window
 	}
+}
+
+// armSoftProgress attaches the SOFT, NON-TERMINAL no-progress deadline (#10638): after
+// softWindow without a turn-advancing frame, onStall is invoked ONCE with the elapsed silence
+// and the current retry attempt, and the stream is left RUNNING. It is the diagnostic rung
+// that must precede the destructive progress deadline: an operator gets a checkpoint and a
+// receipt while a slow-but-alive turn still has every chance to finish, instead of only a
+// terminal 5xx after the fact. A non-positive softWindow (or a nil callback) leaves the soft
+// deadline disabled, preserving the prior behavior byte-for-byte. retryAttempt reads the
+// per-call attempt count so the receipt names which attempt the silence fell on.
+func (s *stallReader) armSoftProgress(softWindow time.Duration, retryAttempt func() int, onStall func(SoftProgressStall)) {
+	if softWindow <= 0 || onStall == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	s.softProgressWindow = softWindow
+	s.onSoftStall = onStall
+	// Armed immediately: the clock on "no progress since the stream opened" starts at open,
+	// exactly like the hard progress deadline.
+	s.softProgressTimer = time.AfterFunc(softWindow, func() { s.softStrike(retryAttempt) })
+}
+
+// softStrike is the soft deadline's callback: it records the diagnostic ONCE per silent
+// interval and NEVER closes the body. It runs the observer OUTSIDE the mutex (the observer
+// writes a durable receipt and may block on IO) and re-arms only when the reader is still
+// open. Once the hard deadline later fires, trip() closes the body and any queued soft strike
+// sees closed and returns without a duplicate.
+func (s *stallReader) softStrike(retryAttempt func() int) {
+	s.mu.Lock()
+	if s.closed || s.softProgressTimer == nil || s.softFired {
+		s.mu.Unlock()
+		return
+	}
+	s.softFired = true
+	window := s.softProgressWindow
+	observer := s.onSoftStall
+	s.mu.Unlock()
+	if observer == nil {
+		return
+	}
+	attempt := 0
+	if retryAttempt != nil {
+		attempt = retryAttempt()
+	}
+	observer(SoftProgressStall{ElapsedSinceProgress: window, Window: window, RetryAttempt: attempt})
 }
 
 // Read arms the idle timer for window, performs one underlying Read, then stops the timer.
@@ -281,6 +362,9 @@ func (s *stallReader) Close() error {
 	}
 	if s.maxDurationTimer != nil {
 		s.maxDurationTimer.Stop()
+	}
+	if s.softProgressTimer != nil {
+		s.softProgressTimer.Stop()
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -349,6 +433,37 @@ func (p *HTTPPlanner) streamProgressWindow() time.Duration {
 		return p.StreamProgressTimeout
 	default:
 		return DefaultStreamProgressTimeout
+	}
+}
+
+// DefaultStreamSoftProgressRatio derives the soft no-progress diagnostic deadline from the
+// hard content-progress window when an operator has not set one: the soft strike lands at
+// this fraction of the hard window, so it always fires WELL BEFORE the destructive deadline
+// that ends the turn. A third of the hard window is late enough that normal long
+// prefills/thinking pauses never trip it, early enough that the diagnostic has real lead time.
+const DefaultStreamSoftProgressRatio = 3
+
+// streamSoftProgressWindow resolves the planner's configured soft no-progress deadline. Zero
+// (unconfigured) derives it from the hard window (hard/DefaultStreamSoftProgressRatio); a
+// NEGATIVE value is the explicit off switch; an in-band positive value is honored verbatim;
+// an out-of-band value falls back to the derived default. A soft window is never allowed to
+// reach or exceed the hard window — a soft deadline that fires no earlier than the hard one
+// would be a diagnostic with no lead time, so it is clamped to just under the hard window.
+func (p *HTTPPlanner) streamSoftProgressWindow(hard time.Duration) time.Duration {
+	if hard <= 0 {
+		return 0
+	}
+	switch {
+	case p.StreamSoftProgressTimeout < 0:
+		return 0
+	case p.StreamSoftProgressTimeout >= streamProgressMinWindow && p.StreamSoftProgressTimeout < hard:
+		return p.StreamSoftProgressTimeout
+	default:
+		derived := hard / DefaultStreamSoftProgressRatio
+		if derived <= 0 || derived >= hard {
+			derived = hard / 2
+		}
+		return derived
 	}
 }
 

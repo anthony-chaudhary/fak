@@ -337,6 +337,11 @@ func New(cfg Config) (*Server, error) {
 		hp.AuthRefreshNotify = s.onAuthRefresh
 		hp.ForbiddenRetryNotify = s.onForbiddenRetry
 		hp.AccountFailoverNotify = s.onAccountFailover
+		// #10638 soft no-progress diagnostic: capture elapsed-since-progress + retry-attempt
+		// evidence BEFORE the destructive hard deadline ends the turn. Wired here, beside the
+		// other planner hooks, so every reachable upstream (direct, replica fleet, dual proxy)
+		// carries it and a healthy-but-slow stream is never killed to produce the receipt.
+		hp.SoftStallNotify = s.onSoftProgressStall
 	})
 
 	// Build the in-kernel background-loop supervisor and register the built-in loops
@@ -598,6 +603,28 @@ func (s *Server) onUpstreamRetry(attempt, status int, wait time.Duration) {
 	}
 	if s.debugStatsf != nil {
 		s.debugStatsf("fak-turn retry attempt=%d status=%d wait=%s", attempt, status, wait.Round(100*time.Millisecond))
+	}
+}
+
+// onSoftProgressStall is the planner's SoftStallNotify hook (#10638): a stream stayed silent
+// (no turn-advancing frame; keepalives ignored) for the SOFT no-progress window, which always
+// fires BEFORE the hard client-survivable deadline. It captures a durable, content-free receipt
+// — elapsed-since-progress and retry attempt — and lets the turn KEEP RUNNING, so a slow but
+// alive stream still has every chance to finish. This is the diagnostic rung the sglang soft
+// watchdog pattern calls for: observe the wedge before any destructive intervention. The hard
+// deadline remains the only thing that ends the turn, and its truthful classification is
+// unchanged (#10415).
+func (s *Server) onSoftProgressStall(stall agent.SoftProgressStall) {
+	if s == nil {
+		return
+	}
+	if s.metrics != nil {
+		s.metrics.observeSoftProgressStall(stall)
+	}
+	s.writeSoftProgressStall(stall)
+	if s.debugStatsf != nil {
+		s.debugStatsf("fak-turn soft-no-progress elapsed=%s window=%s attempt=%d (turn continues; hard ceiling pending)",
+			stall.ElapsedSinceProgress.Round(time.Second), stall.Window.Round(time.Second), stall.RetryAttempt)
 	}
 }
 
@@ -876,6 +903,10 @@ func newConfiguredHTTPPlanner(cfg Config, model, dialURL string) (*agent.HTTPPla
 	// encoding (0 = the agent default, negative = disabled, out-of-band = the default), so a
 	// Config nobody configures leaves the planner at the 300s default byte-for-byte.
 	p.StreamProgressTimeout = cfg.StreamProgressTimeout
+	// #10638: the soft diagnostic deadline rides through the SAME verbatim encoding as the
+	// hard window above (0 = derive from hard, negative = off, positive = honored when earlier
+	// than hard), resolved by streamSoftProgressWindow at arm time.
+	p.StreamSoftProgressTimeout = cfg.StreamSoftProgressTimeout
 	wrapUpstreamObserver(p.Client, cfg.UpstreamResponseObserver, cfg.UpstreamTransportErrorObserver, cfg.UpstreamFailureObserver)
 	return p, nil
 }

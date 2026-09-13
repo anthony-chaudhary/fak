@@ -215,16 +215,25 @@ func ArePrereqsSatisfied(req Requirements) bool {
 	return Adjudicate(req) != 1
 }
 
-// Run executes the gate for the given goarch, returning the process exit code. All
-// host-specific lookups (env, toolchain) are performed here so the pure decision body
-// in Adjudicate stays table-testable.
-func Run(goarch string) int {
-	req := Requirements{
+// hostRequirements performs every host-specific lookup (env, toolchain) and bundles
+// them into the Requirements the pure Adjudicate decides over. It exists so Run's
+// prerequisite-population wiring is directly testable on the host it runs on.
+func hostRequirements(goarch string) Requirements {
+	return Requirements{
 		Goos:       runtime.GOOS,
 		Goarch:     goarch,
 		CgoEnabled: os.Getenv("CGO_ENABLED"),
 		GoTool:     checkGoTool(),
+		XcodeCLT:   checkXcodeCLT(),
+		Clang:      checkClang(),
 	}
+}
+
+// Run executes the gate for the given goarch, returning the process exit code. All
+// host-specific lookups (env, toolchain) are performed in hostRequirements so the
+// pure decision body in Adjudicate stays table-testable.
+func Run(goarch string) int {
+	req := hostRequirements(goarch)
 	if code := Adjudicate(req); code != 2 {
 		fmt.Println(PopulatedVerdict(req))
 		if code == 1 {

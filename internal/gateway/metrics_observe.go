@@ -61,6 +61,21 @@ func (m *gatewayMetrics) fakVerbCallsSnapshot() uint64 {
 	return atomic.LoadUint64(&m.fakVerbCalls)
 }
 
+// observeSoftProgressStall counts one soft no-progress diagnostic and records the elapsed
+// silence + retry attempt on the last-strike gauges (#10638). Atomic and off the request path,
+// called from the SoftStallNotify hook. Mirrors observeUpstreamRetry's placement so the
+// soft-deadline signal sits beside the other upstream observability folds.
+func (m *gatewayMetrics) observeSoftProgressStall(stall agent.SoftProgressStall) {
+	if m == nil {
+		return
+	}
+	atomic.AddUint64(&m.softProgressStalls, 1)
+	if stall.ElapsedSinceProgress > 0 {
+		atomic.StoreUint64(&m.softProgressStallElapsedNS, uint64(stall.ElapsedSinceProgress))
+	}
+	atomic.StoreUint64(&m.softProgressStallAttempt, uint64(stall.RetryAttempt))
+}
+
 // observeUpstreamAuthRefresh counts one 401 token-rotation self-heal by outcome ("recovered" /
 // "exhausted"), called from the AuthRefreshNotify hook. Off the request path, guarded by the
 // shared upstreamErrMu. An unknown outcome is ignored so a future caller typo cannot create a
