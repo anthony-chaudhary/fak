@@ -578,6 +578,20 @@ func decodeAppendF32Tensor(sf *safetensorsFile, name string, man map[string]tens
 	if err != nil {
 		return false, fmt.Errorf("safetensors: tensor %s: %w", name, err)
 	}
+	// Reject a tensor whose declared geometry disagrees with its payload length before it
+	// is stored under the declared shape: a header can claim shape [16 32] F32 (2048 bytes)
+	// while data_offsets cover only part of that, and decoding the short payload as the full
+	// shape turns a malformed checkpoint into a later out-of-bounds index (fak#12603). Dtypes
+	// this loader cannot size-check fall through to decodeSafetensorF32's dtype error.
+	if safetensorsWidthKnown(e.Dtype) {
+		want, ok := safetensorsShapeBytes(e)
+		if !ok {
+			return false, fmt.Errorf("safetensors: tensor %s shape %v overflows element count", name, e.Shape)
+		}
+		if len(src) != want {
+			return false, fmt.Errorf("safetensors: tensor %s shape %v %s implies %d bytes, payload has %d", name, e.Shape, e.Dtype, want, len(src))
+		}
+	}
 	f32, err := decodeSafetensorF32(name, e, src)
 	if err != nil {
 		return false, err
@@ -586,6 +600,37 @@ func decodeAppendF32Tensor(sf *safetensorsFile, name string, man map[string]tens
 	*raw = append(*raw, f32...)
 	*off += len(f32)
 	return false, nil
+}
+
+// safetensorsWidthKnown reports whether dtype has a fixed element width this loader can
+// size-check (BF16/F16/F32), distinguishing an unknown dtype from a shape that overflows.
+func safetensorsWidthKnown(dtype string) bool {
+	switch dtype {
+	case "BF16", "F16", "F32":
+		return true
+	default:
+		return false
+	}
+}
+
+// safetensorsShapeBytes returns the payload byte count implied by a tensor entry's declared
+// dtype and shape. ok is false when the shape product overflows int or the dtype has no fixed
+// element width here (callers decide separately whether that is an error).
+func safetensorsShapeBytes(e stEntry) (int, bool) {
+	var width int
+	switch e.Dtype {
+	case "BF16", "F16":
+		width = 2
+	case "F32":
+		width = 4
+	default:
+		return 0, false
+	}
+	elems, ok := checkedShapeProduct(e.Shape...)
+	if !ok {
+		return 0, false
+	}
+	return elems * width, true
 }
 
 var mxfp4Values = [16]float32{
