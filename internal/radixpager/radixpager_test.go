@@ -65,3 +65,48 @@ func TestNewRadixKVPagerDefaults(t *testing.T) {
 		t.Fatalf("default tree nil")
 	}
 }
+func TestBindRepeatedTokensReusesPath(t *testing.T) {
+	p := NewRadixKVPager(nil, 16, 64)
+	toks := []int{11, 22, 33}
+	first, err := p.Bind(toks)
+	if err != nil {
+		t.Fatalf("first Bind: %v", err)
+	}
+	if first == 0 {
+		t.Fatalf("first Bind returned zero ref")
+	}
+	second, err := p.Bind(toks)
+	if err != nil {
+		t.Fatalf("second Bind: %v", err)
+	}
+	if second == 0 {
+		t.Fatalf("second Bind returned zero ref")
+	}
+	if p.Tree() == nil {
+		t.Fatalf("tree nil after repeated Bind")
+	}
+}
+
+func TestBindEmptyTokensNoRef(t *testing.T) {
+	p := NewRadixKVPager(nil, 16, 64)
+	ref, err := p.Bind(nil)
+	if err != nil || ref != 0 {
+		t.Fatalf("empty Bind: ref=%x err=%v", ref, err)
+	}
+}
+
+func TestNilPagerSafe(t *testing.T) {
+	var p *RadixKVPager
+	if ref, err := p.Bind([]int{1}); err != nil || ref != 0 {
+		t.Fatalf("nil Bind: ref=%x err=%v", ref, err)
+	}
+	if _, _, _, _, err := p.AdmitRaw([]byte("x")); err != nil {
+		t.Fatalf("nil AdmitRaw: %v", err)
+	}
+	if p.AllocatedBlocks() != 0 || p.Alignment() != 0 || p.Tree() != nil {
+		t.Fatalf("nil pager accessors must be zero")
+	}
+	if _, _, _, err := p.PageBytes([]byte("x")); err != nil {
+		t.Fatalf("nil PageBytes: %v", err)
+	}
+}
