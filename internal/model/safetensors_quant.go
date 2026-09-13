@@ -245,12 +245,14 @@ func loadSafetensorsQuantDir(dir string, cfg Config, open safetensorsFileOpener,
 // can produce one decoded f32 tensor at a time (GGUF, safetensors shards) use it to
 // quantize resident matmul weights immediately and keep only the small f32 tensors.
 type QuantBuilder struct {
-	m       *Model
-	raw     []byte
-	off     int
-	tied    bool
-	built   bool
-	refusal error
+	m         *Model
+	raw       []byte
+	off       int
+	tied      bool
+	built     bool
+	started   bool
+	retainMTP *bool
+	refusal   error
 }
 
 // NewQuantBuilder starts a memory-lean model build for already-decoded f32 tensors. tied
@@ -275,6 +277,30 @@ func (b *QuantBuilder) refuseV41() error {
 	return b.refusal
 }
 
+// SetMTPRetention fixes this builder's MTP retention policy before tensor input.
+// Builders without an explicit policy retain the legacy global-default behavior.
+// The policy cannot be changed after configuration or after tensor input starts.
+func (b *QuantBuilder) SetMTPRetention(retain bool) error {
+	if b == nil || b.m == nil {
+		return fmt.Errorf("model: nil QuantBuilder")
+	}
+	if err := b.refuseV41(); err != nil {
+		return err
+	}
+	if b.built || b.started || b.retainMTP != nil {
+		return fmt.Errorf("model: QuantBuilder MTP retention must be configured once before tensor input")
+	}
+	b.retainMTP = &retain
+	return nil
+}
+
+func (b *QuantBuilder) mtpRetention() bool {
+	if b.retainMTP != nil {
+		return *b.retainMTP
+	}
+	return RetainMTP
+}
+
 // AddF32Tensor adds one decoded source tensor. If it is a resident matmul weight the
 // builder stores only its Q8_0 copy; otherwise it appends it to the packed f32 blob.
 func (b *QuantBuilder) AddF32Tensor(name string, shape []int, data []float32) error {
@@ -284,6 +310,7 @@ func (b *QuantBuilder) AddF32Tensor(name string, shape []int, data []float32) er
 	if b.built {
 		return fmt.Errorf("model: QuantBuilder already built")
 	}
+	b.started = true
 	elems, err := tensorShapeElems(name, shape)
 	if err != nil {
 		return err
@@ -291,7 +318,7 @@ func (b *QuantBuilder) AddF32Tensor(name string, shape []int, data []float32) er
 	if elems != len(data) {
 		return fmt.Errorf("model: tensor %s has %d values, shape wants %d", name, len(data), elems)
 	}
-	return quantizeDecodedFloatTensorInto(name, shape, data, nil, b.m, b.tied, &b.raw, &b.off)
+	return quantizeDecodedFloatTensorIntoWithRetention(name, shape, data, nil, b.m, b.tied, &b.raw, &b.off, b.mtpRetention())
 }
 
 // SetQ2KEmbedding attaches a packed Q2_K embedding table to the model being built.
@@ -302,6 +329,7 @@ func (b *QuantBuilder) SetQ2KEmbedding(embed *Q2KEmbedding) error {
 	if b.built {
 		return fmt.Errorf("model: QuantBuilder already built")
 	}
+	b.started = true
 	if b.m.Q2KEmbedding != nil {
 		return fmt.Errorf("model: Q2KEmbedding already set")
 	}
@@ -560,8 +588,12 @@ func quantizeDecodedTensorInto(name string, shape []int, fb []byte, m *Model, ti
 }
 
 func quantizeDecodedFloatTensorInto(name string, shape []int, f32 []float32, fb []byte, m *Model, tied bool, raw *[]byte, off *int) error {
+	return quantizeDecodedFloatTensorIntoWithRetention(name, shape, f32, fb, m, tied, raw, off, RetainMTP)
+}
+
+func quantizeDecodedFloatTensorIntoWithRetention(name string, shape []int, f32 []float32, fb []byte, m *Model, tied bool, raw *[]byte, off *int, retainMTP bool) error {
 	var keep bool
-	name, keep = quantSourceTensorName(m.Cfg, name)
+	name, keep = quantSourceTensorNameWithRetention(m.Cfg, name, retainMTP)
 	if !keep {
 		return nil
 	}
@@ -594,6 +626,10 @@ func quantizeDecodedFloatTensorInto(name string, shape []int, f32 []float32, fb 
 }
 
 func quantSourceTensorName(cfg Config, name string) (string, bool) {
+	return quantSourceTensorNameWithRetention(cfg, name, RetainMTP)
+}
+
+func quantSourceTensorNameWithRetention(cfg Config, name string, retainMTP bool) (string, bool) {
 	// GLM-family (glm_moe_dsa) and MiniMax-M3 checkpoints carry a multimodal vision
 	// encoder and an MTP head the quantized text forward never reads; drop them at the
 	// source-name gate exactly as skipLoadTensor does for the f32 path. The Qwen3.5
@@ -604,7 +640,7 @@ func quantSourceTensorName(cfg Config, name string) (string, bool) {
 		if strings.HasPrefix(name, "model.visual.") {
 			return "", false
 		}
-		if strings.HasPrefix(name, "mtp.") && !RetainMTP {
+		if strings.HasPrefix(name, "mtp.") && !retainMTP {
 			return "", false
 		}
 	}
@@ -617,7 +653,7 @@ func quantSourceTensorName(cfg Config, name string) (string, bool) {
 		name = "model." + name[len(lm):]
 	case strings.HasPrefix(name, "model.visual."):
 		return "", false
-	case strings.HasPrefix(name, "mtp.") && !RetainMTP:
+	case strings.HasPrefix(name, "mtp.") && !retainMTP:
 		return "", false
 	}
 	layer, suffix, ok := parseLayerTensorSuffix(name)

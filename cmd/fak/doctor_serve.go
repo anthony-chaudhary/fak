@@ -498,25 +498,23 @@ func resolveDoctorTargetModel(facts *serveHostFacts, modelName, ggufPath string)
 	}
 
 	if localPath != "" {
-		if ws, err := ggufload.OpenWeights(localPath); err == nil {
-			defer ws.Close()
-			arm := resolveMetalServeLoadArm(ws)
-			facts.ModelArm = string(arm)
-			var plan compute.MemoryPlan
-			if arm == serveLoadArmQuantProfileQ8 {
-				plan, _ = ws.EstimateQ8LoadMemoryPlan()
-			} else {
-				plan, _ = ws.EstimateLoadMemoryPlan()
-			}
-			if plan.Total() > 0 {
-				facts.ModelBytes = plan.Total()
-				return
-			}
-			if fi, err := os.Stat(localPath); err == nil {
-				facts.ModelBytes = fi.Size()
-				return
-			}
+		// Use the selected route's admission estimate: qualified transformed
+		// storage or the prior conservative payload estimate for an unqualified
+		// route. Other estimation errors remain unknown; neither estimate is a
+		// total physical-residency measurement.
+		facts.ModelBytes = 0
+		ws, err := ggufload.OpenWeights(localPath)
+		if err != nil {
+			return
 		}
+		defer ws.Close()
+		arm := resolveMetalServeLoadArm(ws)
+		facts.ModelArm = string(arm)
+		plan, err := serveGGUFWeightMemoryPlanForArm(ws, arm, serveQ4KFitOptions(localPath, ws, nil, arm)...)
+		if err == nil && plan.Total() > 0 {
+			facts.ModelBytes = plan.Total()
+		}
+		return
 	}
 
 	facts.ModelArm = string(serveLoadArmResidentQ4K)

@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/localadmission"
 )
 
@@ -499,5 +501,81 @@ func TestServeReadinessVulkanRow(t *testing.T) {
 		if r.Check == "gpu-vulkan" {
 			t.Fatal("buildServeReadiness should omit the gpu-vulkan row when Vulkan is nil")
 		}
+	}
+}
+func TestDoctorLocalGGUFResidentBytesMatchActualLoader(t *testing.T) {
+	t.Setenv("FAK_Q4K", "1")
+	t.Setenv("FAK_STREAM_Q4K", "")
+	t.Setenv("FAK_METAL_STREAM_Q4K", "")
+	t.Setenv("FAK_W3_MLP", "")
+	t.Setenv("FAK_GGUF_MMAP", "0")
+	for _, unsupported := range []bool{false, true} {
+		name := "supported-storage"
+		if unsupported {
+			name = "unqualified-architecture"
+		}
+		t.Run(name, func(t *testing.T) {
+			path := writeServePackedEmbeddingFixture(t, "doctor-local.gguf", false)
+			if unsupported {
+				b, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				b = bytes.ReplaceAll(b, []byte("qwen35"), []byte("gemma2"))
+				if err := os.WriteFile(path, b, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ws, err := ggufload.OpenWeights(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ws.Close()
+			cfg, err := ws.File.Config()
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantArch := "qwen35"
+			if unsupported {
+				wantArch = "gemma2"
+			}
+			if cfg.ModelType != wantArch || cfg.TieWordEmbeddings || resolveMetalServeLoadArm(ws) != serveLoadArmResidentQ4K {
+				t.Fatalf("unexpected fixture config/route: %+v", cfg)
+			}
+			const stored int64 = 3*256*144 + 3*210 + 3*256*4
+			if !unsupported {
+				m, err := ggufload.LoadModelQ4KProfileOptions(path, nil)
+				if err != nil {
+					t.Fatalf("actual software loader: %v", err)
+				}
+				defer m.CloseWeights()
+				if got := m.ResidentReport().TotalResidentBytes; got != stored {
+					t.Fatalf("actual stored=%d independent=%d", got, stored)
+				}
+				t.Logf("actual software loader stored=%d", stored)
+			}
+			facts := serveHostFacts{MemKnown: true, FreeBytes: stored - 1, Headroom: 0}
+			resolveDoctorTargetModel(&facts, "", path)
+			row := serveFitRow(facts)
+			if unsupported {
+				// Preserve the previous payload-based admission estimate without
+				// claiming it equals this unqualified architecture's stored weights.
+				const rawPayload int64 = 3*256*144 + 3*210 + 3*144
+				if facts.ModelBytes != rawPayload || facts.ModelArm != string(serveLoadArmResidentQ4K) || row.Status != sevOK {
+					t.Fatalf("unqualified local file must retain raw admission estimate: bytes=%d arm=%q row=%+v", facts.ModelBytes, facts.ModelArm, row)
+				}
+				facts.FreeBytes = rawPayload - 1
+				if below := serveFitRow(facts); below.Status != sevFail {
+					t.Errorf("fit row must refuse below the prior payload estimate: %+v", below)
+				}
+			} else {
+				if facts.ModelBytes != stored || facts.ModelArm != string(serveLoadArmResidentQ4K) {
+					t.Errorf("doctor bytes=%d arm=%q, actual stored=%d", facts.ModelBytes, facts.ModelArm, stored)
+				}
+				if row.Status != sevFail {
+					t.Errorf("fit row must refuse one byte below actual stored weights: %+v", row)
+				}
+			}
+		})
 	}
 }

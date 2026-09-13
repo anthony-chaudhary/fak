@@ -6,10 +6,12 @@ package main
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/ggufload"
 )
 
 // sizingNamedBackend gives the serveCapBackend capacity stub the Name() the
@@ -143,5 +145,79 @@ func TestServeDeviceResidentQ4KDefaultsOnWithRollback(t *testing.T) {
 	t.Setenv("FAK_Q4K", "")
 	if serveDeviceResidentQ4K(plain) {
 		t.Fatal("backend without quantized upload cannot select resident device Q4_K")
+	}
+}
+
+// Software storage and JSON-path witness; Metal availability selects the route
+// without executing GPU kernels or a full inference workload.
+func TestServeSizingJSONPreservesPackedEmbeddingPath(t *testing.T) {
+	original := serveMetalAvailable
+	serveMetalAvailable = func() bool { return true }
+	t.Cleanup(func() { serveMetalAvailable = original })
+	t.Setenv("FAK_Q4K", "1")
+	t.Setenv("FAK_STREAM_Q4K", "")
+	t.Setenv("FAK_METAL_STREAM_Q4K", "")
+	t.Setenv("FAK_W3_MLP", "")
+	t.Setenv("FAK_GGUF_MMAP", "0")
+	for _, exact := range []bool{true, false} {
+		name := "ordinary-name"
+		if exact {
+			name = "qualified-name-size"
+		}
+		t.Run(name, func(t *testing.T) {
+			base := "ordinary-q2.gguf"
+			if exact {
+				base = "Qwen3.8-27B-UD-Q2_K_XL.gguf"
+			}
+			path := writeServePackedQ2EmbeddingFixture(t, base, exact)
+			ws, err := ggufload.OpenWeights(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ws.Close()
+			opts := serveResidentQ4KLoadOptions(nil, path, true, ggufload.ClassifyTensorQuant(ws.File.Tensors))
+			model, err := ggufload.LoadModelQ4KProfileOptions(path, nil, opts...)
+			if err != nil {
+				t.Fatalf("actual software load: %v", err)
+			}
+			defer model.CloseWeights()
+			const projections int64 = 2*256*144 + 256*84 + 3*210
+			want := projections + 3*256*4
+			if exact {
+				want = projections + 3*84
+			}
+			if got := model.ResidentReport().TotalResidentBytes; got != want {
+				t.Fatalf("actual=%d independent=%d", got, want)
+			}
+			if (model.Q2KEmbedding != nil) != exact {
+				t.Fatal("actual packed embedding route did not follow path qualification")
+			}
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			art, err := buildServeSizingArtifact(ws, nil, false, 16, path, info.Size())
+			if err != nil {
+				t.Fatal(err)
+			}
+			wire, err := json.Marshal(art)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var decoded serveSizingArtifact
+			if err := json.Unmarshal(wire, &decoded); err != nil {
+				t.Fatal(err)
+			}
+			var weights int64
+			for _, demand := range decoded.Demands {
+				if demand.Class == string(compute.MemoryWeights) {
+					weights += demand.Bytes
+				}
+			}
+			t.Logf("actual selected storage=%d JSON weights=%d exact=%v", want, weights, exact)
+			if decoded.Model != path || decoded.Arm != "device-resident-q4k" || weights != want {
+				t.Fatalf("JSON dropped selected path storage: model=%q arm=%q weights=%d actual=%d", decoded.Model, decoded.Arm, weights, want)
+			}
+		})
 	}
 }

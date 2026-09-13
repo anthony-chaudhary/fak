@@ -16,6 +16,109 @@ type qwen38MTPFixtureTensor struct {
 	typ  TensorType
 }
 
+func TestQ4KLoaderMTPRetentionIsPerLoad(t *testing.T) {
+	globalBefore := model.RetainMTP
+	t.Cleanup(func() {
+		if model.RetainMTP != globalBefore {
+			t.Errorf("RetainMTP changed from %v to %v", globalBefore, model.RetainMTP)
+		}
+	})
+	var target []byte
+	for _, retain := range []bool{true, false, true} {
+		m, err := qwen38MTPFixture(t, "", nil).QuantModelQ4KProfileOptions(nil, WithMTPRetention(retain))
+		if err != nil {
+			t.Errorf("retain=%v load: %v", retain, err)
+			continue
+		}
+		t.Cleanup(func() { _ = m.CloseWeights() })
+		if model.RetainMTP != globalBefore {
+			t.Errorf("retain=%v mutated global", retain)
+		}
+		raw, ok := m.KQuantRaw("lm_head.weight")
+		if !ok {
+			t.Fatal("target Q6_K head missing")
+		}
+		if target == nil {
+			target = append([]byte(nil), raw...)
+		} else if !bytes.Equal(target, raw) {
+			t.Errorf("retain=%v changed target head bytes", retain)
+		}
+		for name, kind := range map[string]string{
+			"mtp.fc.weight":                        "Q8_0",
+			"mtp.layers.0.self_attn.q_proj.weight": "Q4_K",
+			"mtp.layers.0.self_attn.k_proj.weight": "Q4_K",
+			"mtp.layers.0.self_attn.v_proj.weight": "Q6_K",
+			"mtp.layers.0.self_attn.o_proj.weight": "Q4_K",
+			"mtp.layers.0.mlp.gate_proj.weight":    "Q4_K",
+			"mtp.layers.0.mlp.up_proj.weight":      "Q4_K",
+			"mtp.layers.0.mlp.down_proj.weight":    "Q6_K",
+		} {
+			present := m.HasQ4K(name) || m.HasKQuant(name) || m.HasQ8(name) || m.HasF32(name)
+			if present != retain {
+				t.Errorf("retain=%v %s (%s) present=%v", retain, name, kind, present)
+			}
+		}
+		for _, name := range qwen35MTPRequiredMaterialized {
+			if strings.Contains(name, "norm") && m.HasF32(name) != retain {
+				t.Errorf("retain=%v F32 %s present=%v", retain, name, m.HasF32(name))
+			}
+		}
+		layout, layoutErr := m.Qwen38MTPTensorLayout()
+		if retain {
+			if layoutErr != nil {
+				t.Errorf("retained complete mixed layout: %v", layoutErr)
+			} else if layout.Format != model.Qwen38MTPFormatQ4K || layout.TensorTypes["mtp.fc.weight"] != "Q8_0" || layout.TensorTypes["mtp.layers.0.mlp.down_proj.weight"] != "Q6_K" {
+				t.Errorf("retained mixed layout formats: %+v", layout)
+			}
+		} else if layoutErr == nil {
+			t.Error("explicit false unexpectedly produced complete MTP layout")
+		}
+	}
+	for _, retain := range []bool{true, false} {
+		m, err := qwen38MTPFixture(t, "blk.1.ffn_down.weight", nil).QuantModelQ4KProfileOptions(nil, WithMTPRetention(retain))
+		if m != nil {
+			_ = m.CloseWeights()
+		}
+		if retain && (err == nil || !strings.Contains(err.Error(), "incomplete retained Qwen MTP head")) {
+			t.Errorf("retained missing-role load error=%v, want incomplete head", err)
+		}
+		if !retain && err != nil {
+			t.Errorf("dropped missing-role load: %v", err)
+		}
+	}
+	t.Run("explicit false overrides legacy true", func(t *testing.T) {
+		// Intentionally nonparallel: only this compatibility case changes the
+		// legacy default, and it restores it before returning to the parent.
+		saved := model.RetainMTP
+		defer func() { model.RetainMTP = saved }()
+		model.RetainMTP = true
+		for _, explicitFalse := range []bool{false, true} {
+			var opts []Q4KLoadOption
+			if explicitFalse {
+				opts = []Q4KLoadOption{WithMTPRetention(false)}
+			}
+			m, err := qwen38MTPFixture(t, "", nil).QuantModelQ4KProfileOptions(nil, opts...)
+			if err != nil {
+				t.Fatalf("explicitFalse=%v load: %v", explicitFalse, err)
+			}
+			t.Cleanup(func() { _ = m.CloseWeights() })
+			if !model.RetainMTP {
+				t.Fatal("load changed the legacy true default")
+			}
+			for _, name := range qwen35MTPRequiredMaterialized {
+				present := m.HasQ4K(name) || m.HasKQuant(name) || m.HasQ8(name) || m.HasF32(name)
+				if present == explicitFalse {
+					t.Errorf("explicitFalse=%v %s present=%v", explicitFalse, name, present)
+				}
+			}
+			_, layoutErr := m.Qwen38MTPTensorLayout()
+			if (layoutErr == nil) == explicitFalse {
+				t.Errorf("explicitFalse=%v layout error=%v", explicitFalse, layoutErr)
+			}
+		}
+	})
+}
+
 func qwen38MTPFixture(t *testing.T, omit string, override map[string]TensorType) *WeightSource {
 	t.Helper()
 	const h = 256

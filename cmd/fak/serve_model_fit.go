@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -290,8 +291,10 @@ func resolveDeviceServeLoadArm(ws *ggufload.WeightSource, be compute.Backend, f3
 }
 
 // serveNativeContextSizingInputs returns the header-derived weight plan and
-// memory ceiling for the load arm this process will actually take.
-func serveNativeContextSizingInputs(ws *ggufload.WeightSource, be compute.Backend, cpuOffloadExperts, useMetal bool, ranks int) (compute.MemoryPlan, serveFitBudget, error) {
+// memory ceiling for the load arm this process will actually take. Production
+// callers pass the GGUF path so packed-embedding qualification matches loading;
+// callers without an artifact path retain default embedding storage.
+func serveNativeContextSizingInputs(ws *ggufload.WeightSource, be compute.Backend, cpuOffloadExperts, useMetal bool, ranks int, ggufPath ...string) (compute.MemoryPlan, serveFitBudget, error) {
 	if ws == nil {
 		return nil, serveFitBudget{}, nil
 	}
@@ -300,16 +303,20 @@ func serveNativeContextSizingInputs(ws *ggufload.WeightSource, be compute.Backen
 		weights, err := ws.EstimateCPUOffloadExpertsExpertParallelMemoryPlan(max(ranks, 1))
 		return weights, serveDeviceFitBudget(be), err
 	}
+	path := ""
+	if len(ggufPath) > 0 {
+		path = ggufPath[0]
+	}
 	arm := resolveServeNativeContextLoadArm(ws, be, useMetal)
 	if be != nil {
 		if ranks > 1 && arm == serveLoadArmResidentQ4K {
 			weights, err := ws.EstimateExpertParallelLoadMemoryPlan(ranks)
 			return weights, serveExpertParallelDeviceFitBudget(be), err
 		}
-		weights, err := serveGGUFWeightMemoryPlanForArm(ws, arm)
+		weights, err := serveGGUFWeightMemoryPlanForArm(ws, arm, serveQ4KFitOptions(path, ws, be, arm)...)
 		return applyDeviceWeightBudget(weights, be), serveDeviceFitBudget(be), err
 	}
-	weights, err := serveGGUFWeightMemoryPlanForArm(ws, arm)
+	weights, err := serveGGUFWeightMemoryPlanForArm(ws, arm, serveQ4KFitOptions(path, ws, nil, arm)...)
 	return weights, serveHostFitBudget(), err
 }
 
@@ -323,18 +330,18 @@ func resolveServeNativeContextLoadArm(ws *ggufload.WeightSource, be compute.Back
 	return resolveHostServeLoadArm(ws, false)
 }
 
-func serveGGUFMemoryPlanForArm(ws *ggufload.WeightSource, arm serveLoadArm, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
+func serveGGUFMemoryPlanForArm(ws *ggufload.WeightSource, arm serveLoadArm, contextBudgetTokens int, fit serveFitBudget, q4kOpts ...ggufload.Q4KLoadOption) (compute.MemoryPlan, error) {
 	if ws == nil {
 		return nil, nil
 	}
-	weights, err := serveGGUFWeightMemoryPlanForArm(ws, arm)
+	weights, err := serveGGUFWeightMemoryPlanForArm(ws, arm, q4kOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return appendServeGGUFDevicePlan(ws, weights, contextBudgetTokens, fit), nil
 }
 
-func serveGGUFWeightMemoryPlanForArm(ws *ggufload.WeightSource, arm serveLoadArm) (compute.MemoryPlan, error) {
+func serveGGUFWeightMemoryPlanForArm(ws *ggufload.WeightSource, arm serveLoadArm, q4kOpts ...ggufload.Q4KLoadOption) (compute.MemoryPlan, error) {
 	if ws == nil {
 		return nil, nil
 	}
@@ -343,9 +350,35 @@ func serveGGUFWeightMemoryPlanForArm(ws *ggufload.WeightSource, arm serveLoadArm
 		return ws.EstimateF32LoadMemoryPlan()
 	case serveLoadArmQuantProfileQ8:
 		return ws.EstimateQ8LoadMemoryPlan()
+	case serveLoadArmResidentQ4K:
+		plan, err := ws.EstimateQ4KLoadMemoryPlan(q4kOpts...)
+		if errors.Is(err, ggufload.ErrQ4KLoadEstimateUnsupported) {
+			// Unqualified routes retain their prior payload-based admission
+			// policy. This is not a transformed-storage estimate; keep the
+			// raw plan's provenance and the caller's historical peak bounds.
+			return ws.EstimateLoadMemoryPlan()
+		}
+		if err != nil {
+			return nil, fmt.Errorf("resident-Q4K weight admission: %w", err)
+		}
+		return plan, nil
 	default:
-		return ws.EstimateLoadMemoryPlan()
+		return nil, fmt.Errorf("unknown native weight load arm %q", arm)
 	}
+}
+
+// serveQ4KFitOptions uses the existing loader selectors for the known path and
+// backend. Pathless sizing uses default embedding storage; the path-based fit
+// still runs before allocation. Neither plan includes transient load peaks.
+func serveQ4KFitOptions(path string, ws *ggufload.WeightSource, be compute.Backend, arm serveLoadArm) []ggufload.Q4KLoadOption {
+	if arm != serveLoadArmResidentQ4K || ws == nil {
+		return nil
+	}
+	opts := serveResidentQ4KLoadOptions(be, path, true, ggufload.ClassifyTensorQuant(ws.File.Tensors))
+	if os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1" {
+		opts = append(opts, ggufload.WithStreamedDenseQ4K(true))
+	}
+	return opts
 }
 
 func serveGGUFMemoryPlan(ws *ggufload.WeightSource, f32Resident bool, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
@@ -353,7 +386,7 @@ func serveGGUFMemoryPlan(ws *ggufload.WeightSource, f32Resident bool, contextBud
 	if f32Resident {
 		arm = serveLoadArmF32
 	}
-	return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, fit)
+	return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, fit, serveQ4KFitOptions("", ws, nil, arm)...)
 }
 
 // serveGGUFCPUOffloadMemoryPlan plans the --cpu-offload-experts split: dense/router/attention
@@ -451,7 +484,7 @@ func fitServeGGUFPathOnReportedHostForArm(ggufPath string, arm serveLoadArm, con
 	}
 	fit := serveHostFitBudgetFromReported(total, free, known, override)
 	plan, err := withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
-		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, fit)
+		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, fit, serveQ4KFitOptions(ggufPath, ws, nil, arm)...)
 	})
 	if err != nil {
 		return err
@@ -466,7 +499,7 @@ func fitServeGGUFPathOnReportedHost(ggufPath string, f32Resident bool, contextBu
 	fit := serveHostFitBudgetFromReported(total, free, known, override)
 	plan, err := withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
 		arm := resolveHostServeLoadArm(ws, f32Resident)
-		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, fit)
+		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, fit, serveQ4KFitOptions(ggufPath, ws, nil, arm)...)
 	})
 	if err != nil {
 		return err
@@ -508,7 +541,7 @@ func withGGUFWeights(ggufPath string, plan func(*ggufload.WeightSource) (compute
 func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Resident bool, contextBudgetTokens int, override *serveFitBudget) (compute.MemoryPlan, error) {
 	plan, err := withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
 		arm := resolveDeviceServeLoadArm(ws, be, f32Resident)
-		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, serveDeviceFitBudgetFromReported(be, override))
+		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, serveDeviceFitBudgetFromReported(be, override), serveQ4KFitOptions(ggufPath, ws, be, arm)...)
 	})
 	if err == nil {
 		plan = applyDeviceWeightBudget(plan, be)

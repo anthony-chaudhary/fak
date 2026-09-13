@@ -126,7 +126,7 @@ func TestEstimateQ8LoadBytesCountsResidentQ8Expansion(t *testing.T) {
 		},
 		Tensors: []TensorInfo{
 			{Name: "token_embd.weight", Dims: []uint64{1024, 256}, Type: TensorF32},   // 262,144 elems * 4 = 1,048,576 B (F32 embedding)
-			{Name: "blk.0.attn_q.weight", Dims: []uint64{256, 256}, Type: TensorQ2_K}, // 65,536 elems * 34 / 32 = 69,632 B (Q8 matmul)
+			{Name: "blk.0.attn_q.weight", Dims: []uint64{256, 256}, Type: TensorQ2_K}, // 65,536 codes + 2,048 F32 scales = 73,728 B (native Q8 matmul)
 			{Name: "output_norm.weight", Dims: []uint64{256}, Type: TensorF32},        // 256 elems * 4 = 1,024 B (F32 norm)
 		},
 	}
@@ -138,7 +138,7 @@ func TestEstimateQ8LoadBytesCountsResidentQ8Expansion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EstimateQ8LoadBytes: %v", err)
 	}
-	want := int64(1048576 + 69632 + 1024)
+	want := int64(1048576 + 73728 + 1024)
 	if got != want {
 		t.Fatalf("EstimateQ8LoadBytes = %d, want %d", got, want)
 	}

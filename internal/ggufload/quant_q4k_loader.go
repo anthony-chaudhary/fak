@@ -71,10 +71,22 @@ type q4kLoadOptions struct {
 	streamedExperts      bool
 	streamedExpertBytes  int64
 	streamedDenseQ4K     bool
+	retainMTP            bool
 }
 
 // Q4KLoadOption configures the direct-resident-Q4_K GGUF load path.
 type Q4KLoadOption func(*q4kLoadOptions)
+
+// WithMTPRetention controls Qwen MTP head retention for this Q4K load. Omitting
+// it captures the legacy model.RetainMTP default when the load resolves options.
+// It does not change the process default or qualify retained-head memory admission.
+func WithMTPRetention(enabled bool) Q4KLoadOption {
+	return func(o *q4kLoadOptions) { o.setMTPRetention(enabled) }
+}
+
+func (o *q4kLoadOptions) setMTPRetention(enabled bool) {
+	o.retainMTP = enabled
+}
 
 // WithQ2KEmbeddingResident controls whether eligible Q2_K token embedding tables stay in
 // raw Q2_K packed format for on-demand row gathering, skipping full F32 expansion.
@@ -147,7 +159,7 @@ func probeQ4KLoadOptions(opts []Q4KLoadOption) q4kLoadOptions {
 }
 
 func resolveQ4KLoadOptions(cfg model.Config, opts []Q4KLoadOption) (q4kLoadOptions, error) {
-	out := q4kLoadOptions{residentDenseKQuant: true}
+	out := q4kLoadOptions{residentDenseKQuant: true, retainMTP: model.RetainMTP}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(&out)
@@ -454,8 +466,11 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 	}
 
 	builder := model.NewQuantBuilder(cfg, cfg.TieWordEmbeddings)
+	if err := builder.SetMTPRetention(loadOpts.retainMTP); err != nil {
+		return nil, err
+	}
 	kvbHalf := map[int]glmKVBHalf{} // MLA KV-b 2->1 merge buffer (see QuantModelProfile)
-	qwenMTPSeen := newQwen35MTPSeen(cfg)
+	qwenMTPSeen := newQwen35MTPSeenWithRetention(cfg, loadOpts.retainMTP)
 	p.SetTotal(len(s.File.Tensors))
 
 	// computeFn is the pure, concurrency-safe per-tensor work: it reads + dequantizes +
@@ -757,10 +772,10 @@ func reorderQwen35MTPQ4KRows(name string, raw []byte, shape []int, cfg model.Con
 	return dst, nil
 }
 
-func (s *WeightSource) computeQwen35MTPQ4KTensorWork(info TensorInfo, canon string, cfg model.Config, innerWorkers int, tickBytes int64) tensorWork {
+func (s *WeightSource) computeQwen35MTPQ4KTensorWork(info TensorInfo, canon string, cfg model.Config, innerWorkers int, tickBytes int64, retainMTP bool) tensorWork {
 	tw := tensorWork{tickBytes: tickBytes, mtpMaterialized: canon}
-	if !model.RetainMTP {
-		tw.err = fmt.Errorf("gguf: Qwen MTP tensor %s reached resident materialization without RetainMTP", info.Name)
+	if !retainMTP {
+		tw.err = fmt.Errorf("gguf: Qwen MTP tensor %s reached resident materialization without MTP retention", info.Name)
 		return tw
 	}
 	shape, raw, ok := s.shapeAndBytesOrFail(info, &tw)
@@ -823,11 +838,11 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 		tw.err = fmt.Errorf("gguf: FAK_W3_MLP refuses IQ3_XXS tensor %s outside dense MLP W3 band", info.Name)
 		return tw
 	}
-	if canon, handled := qwen35MTPMaterializationName(info.Name, cfg); handled {
+	if canon, handled := qwen35MTPMaterializationNameWithRetention(info.Name, cfg, loadOpts.retainMTP); handled {
 		if canon == "" {
 			return tw
 		}
-		return s.computeQwen35MTPQ4KTensorWork(info, canon, cfg, innerWorkers, tw.tickBytes)
+		return s.computeQwen35MTPQ4KTensorWork(info, canon, cfg, innerWorkers, tw.tickBytes, loadOpts.retainMTP)
 	}
 	if archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
 		return tw

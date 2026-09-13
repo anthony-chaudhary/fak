@@ -24,6 +24,21 @@ func serveDenseKQuantOptions(backend compute.Backend) []ggufload.Q4KLoadOption {
 	return []ggufload.Q4KLoadOption{ggufload.WithDenseKQuantResident(false)}
 }
 
+// serveResidentQ4KLoadOptions keeps loader and admission storage selection on
+// the same backend/artifact predicates. Sharding and streaming remain explicit
+// additions owned by their respective load paths.
+func serveResidentQ4KLoadOptions(backend compute.Backend, ggufPath string, residentQ4K bool, artifact ggufload.ArtifactQuant) []ggufload.Q4KLoadOption {
+	opts := serveDenseKQuantOptions(backend)
+	if serveQwen38Q4KEmbeddingResident(backend, ggufPath, residentQ4K) {
+		opts = append(opts, ggufload.WithQ4KEmbeddingResident(true))
+	} else if serveQwen38Q2KEmbeddingResident(backend, ggufPath, residentQ4K) {
+		// The witnessed UD-Q2_K_XL token embedding is Q2_K; keeping it packed
+		// avoids the ~5.09 GB F32 expansion that breached the 36 GiB envelope.
+		opts = append(opts, ggufload.WithQ2KEmbeddingResident(true))
+	}
+	return opts
+}
+
 func serveDeviceResidentQ4K(backend compute.Backend) bool {
 	if backend != nil {
 		if !backend.Caps().UploadDtype {
@@ -526,19 +541,47 @@ func refuseOversubscribedMetalGGUFForHost(path string, total int64, known bool) 
 	}
 	defer ws.Close()
 	arm := resolveMetalServeLoadArm(ws)
-	var plan compute.MemoryPlan
-	if arm == serveLoadArmQuantProfileQ8 {
-		plan, err = ws.EstimateQ8LoadMemoryPlan()
-	} else {
-		plan, err = ws.EstimateLoadMemoryPlan()
-	}
+	plan, rawBasis, err := serveMetalGGUFAdmissionWeights(path, ws)
 	if err != nil {
 		return err
 	}
 	steady := plan.Total()
-	peak, refuse := metalServeStartupPeakBytes(arm, steady, total, known)
+	// Expose the historical raw-payload floor as the steady basis for the
+	// resident arm so the shared peak helper keeps the observed
+	// overcommit protection while the transformed plan raises the floor.
+	peakBasis := steady
+	if arm == serveLoadArmResidentQ4K {
+		peakBasis = max(steady, rawBasis)
+	}
+	peak, refuse := metalServeStartupPeakBytes(arm, peakBasis, total, known)
 	if !refuse {
 		return nil
 	}
 	return fmt.Errorf("fak serve: METAL_GGUF_PEAK_TOO_BIG: estimated steady weights %.2f GiB, startup peak %.2f GiB (arm=%s), host has %.2f GiB; native Metal startup would overcommit unified memory before listener readiness; use a larger-memory Mac or a delegated quantized Metal engine", float64(steady)/(1<<30), float64(peak)/(1<<30), arm, float64(total)/(1<<30))
+}
+
+// serveMetalGGUFAdmissionWeights supplies the same weight admission estimate to
+// reservation and oversubscription: qualified transformed storage, or the prior
+// conservative raw-payload policy for an unqualified route. It returns the raw
+// payload basis separately because raw payload, not transformed storage, anchors
+// the historical startup peak. Neither number is exact physical residency.
+func serveMetalGGUFAdmissionWeights(path string, ws *ggufload.WeightSource) (compute.MemoryPlan, int64, error) {
+	arm := resolveMetalServeLoadArm(ws)
+	plan, err := serveGGUFWeightMemoryPlanForArm(ws, arm, serveQ4KFitOptions(path, ws, nil, arm)...)
+	if err != nil {
+		return nil, 0, err
+	}
+	steady := plan.Total()
+	if steady <= 0 {
+		return nil, 0, fmt.Errorf("empty Metal resident weight plan")
+	}
+	rawBasis := steady
+	if arm == serveLoadArmResidentQ4K {
+		payload, err := ws.EstimateLoadBytes()
+		if err != nil {
+			return nil, 0, err
+		}
+		rawBasis = payload
+	}
+	return plan, rawBasis, nil
 }

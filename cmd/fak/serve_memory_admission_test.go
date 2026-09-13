@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,7 +17,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
+	"github.com/anthony-chaudhary/fak/internal/localadmission"
 	"github.com/anthony-chaudhary/fak/internal/memgate"
 )
 
@@ -35,6 +38,7 @@ func TestLoadLocalLauncherModelWithMetalLeaseRefusesBeforeLoadAndReleasesAfterSe
 		os.Exit(0) // The OS, not an in-process Release call, drops the child flock.
 	}
 
+	modelPath := writeServePackedEmbeddingFixture(t, "lease-model.gguf", false)
 	path := filepath.Join(t.TempDir(), "gpu.lease")
 	t.Setenv("FAK_GPU_LEASE", path)
 	t.Setenv("FAK_RESERVATION_DIR", t.TempDir())
@@ -74,7 +78,7 @@ func TestLoadLocalLauncherModelWithMetalLeaseRefusesBeforeLoadAndReleasesAfterSe
 	}
 
 	loads := 0
-	release, err := loadLocalLauncherModelWithMetalLease(true, "qwen3.8-27b-q4_k_m.gguf", gpulease.Options{}, func() {
+	release, err := loadLocalLauncherModelWithMetalLease(true, modelPath, gpulease.Options{}, func() {
 		loads++
 	})
 	if err == nil {
@@ -100,7 +104,7 @@ func TestLoadLocalLauncherModelWithMetalLeaseRefusesBeforeLoadAndReleasesAfterSe
 		t.Fatalf("holder exit: %v; stderr=%s", err, childStderr.String())
 	}
 	waited = true
-	release, err = loadLocalLauncherModelWithMetalLease(true, "qwen3.8-27b-q4_k_m.gguf", gpulease.Options{}, func() {
+	release, err = loadLocalLauncherModelWithMetalLease(true, modelPath, gpulease.Options{}, func() {
 		loads++
 	})
 	if err != nil {
@@ -157,8 +161,9 @@ func TestLoadLocalLauncherModelWithMetalLeasePressurePolicy(t *testing.T) {
 	t.Setenv("FAK_GPU_LEASE", path)
 	t.Setenv("FAK_NATIVE_ADMISSION", "exclusive")
 
+	modelPath := writeServePackedEmbeddingFixture(t, "lease-model.gguf", false)
 	loaded := false
-	release, err := loadLocalLauncherModelWithMetalLease(true, "test.gguf", gpulease.Options{Path: path}, func() {
+	release, err := loadLocalLauncherModelWithMetalLease(true, modelPath, gpulease.Options{Path: path}, func() {
 		loaded = true
 	})
 	if err != nil {
@@ -691,7 +696,10 @@ func TestStreamedQ4KReservationUsesProcessPeakNotHostFloor(t *testing.T) {
 	if err := os.Truncate(path, qwen38Q4KMArtifactBytes); err != nil {
 		t.Fatal(err)
 	}
-	plan := estimateMetalModelMemoryBounds(path)
+	plan, err := estimateMetalModelMemoryBounds(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if plan.StartupPeakBytes != streamedQ4KFreeCPUReservationPeakBytes {
 		t.Fatalf("reservation startup peak = %d, want conservative FreeCPU process bound %d", plan.StartupPeakBytes, streamedQ4KFreeCPUReservationPeakBytes)
 	}
@@ -706,7 +714,11 @@ func TestStreamedQ4KReservationUsesProcessPeakNotHostFloor(t *testing.T) {
 	if err := os.Rename(path, otherPath); err != nil {
 		t.Fatal(err)
 	}
-	if other := estimateMetalModelMemoryBounds(otherPath); other.StartupPeakBytes != 36<<30 {
+	other, err := estimateMetalModelMemoryBounds(otherPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other.StartupPeakBytes != 36<<30 {
 		t.Fatalf("unmatched streamed profile startup peak = %d, want preserved 36 GiB host-floor reservation", other.StartupPeakBytes)
 	}
 }
@@ -764,5 +776,351 @@ func TestLoadLocalLauncherModelWithMetalLeaseWarningPressureAdvisory(t *testing.
 	}
 	if !strings.Contains(stderrOutput, "close background apps if paging occurs") {
 		t.Fatalf("stderr %q does not contain close background apps advice", stderrOutput)
+	}
+}
+
+// stubServeAllocatable replaces the host memory probe for the duration of the test so
+// the reservation capacity is deterministic. allocatable and total are injected bytes.
+func stubServeAllocatable(t *testing.T, total, allocatable int64) {
+	t.Helper()
+	orig := serveReadMemory
+	t.Cleanup(func() { serveReadMemory = orig })
+	serveReadMemory = func() (memgate.Memory, error) {
+		return memgate.Memory{
+			TotalBytes:      total,
+			FreeBytes:       allocatable,
+			AvailableBytes:  allocatable,
+			CompressedBytes: 0,
+			WiredBytes:      0,
+		}, nil
+	}
+}
+
+// TestLoadLocalLauncherModelWithMetalLeaseRefusesWhenWeightsFitButStateEnvelopeDoesNot
+// is the issue #9587 RED/GREEN witness. The weights-only plan for a small model fits the
+// injected allocatable capacity, but once FAK_ADMISSION_STATE_ENVELOPE=1 widens the
+// reservation to the aggregate session/cache envelope the same load must be REFUSED
+// before the loader runs. With the envelope off, the identical setup is ADMITTED, proving
+// the envelope — not the weights — changed the verdict.
+func TestLoadLocalLauncherModelWithMetalLeaseRefusesWhenWeightsFitButStateEnvelopeDoesNot(t *testing.T) {
+	const (
+		smallPeak      = 512 << 20 // 512 MiB weights-only startup peak
+		smallSteady    = 256 << 20 // 256 MiB weights-only steady
+		tightAllocable = 768 << 20 // 0.75 GiB: fits weights-only, not the state envelope
+		roomyAllocable = 64 << 30  // 64 GiB: envelope fits
+	)
+
+	t.Run("state envelope refuses a weights-only-fitting load", func(t *testing.T) {
+		stubServeAllocatable(t, 2<<30, tightAllocable)
+		resDir := filepath.Join(t.TempDir(), "reservations")
+		t.Setenv("FAK_RESERVATION_DIR", resDir)
+		t.Setenv("FAK_GPU_LEASE", filepath.Join(t.TempDir(), "gpu.lease"))
+		t.Setenv("FAK_ADMISSION_POLICY", "dev")
+		t.Setenv("FAK_NATIVE_ADMISSION", "aggregate")
+		t.Setenv("FAK_ADMISSION_STATE_ENVELOPE", "1")
+		t.Setenv("FAK_TEST_STARTUP_PEAK_BYTES", strconv.Itoa(smallPeak))
+		t.Setenv("FAK_TEST_STEADY_BYTES", strconv.Itoa(smallSteady))
+
+		loads := 0
+		release, err := loadLocalLauncherModelWithMetalLease(true, "small-state-heavy.gguf", gpulease.Options{}, func() {
+			loads++
+		})
+		if err == nil {
+			release()
+			t.Fatal("expected state-envelope reservation to refuse a weights-only-fitting load, got success")
+		}
+		if loads != 0 {
+			t.Fatalf("loader must not run on state-envelope refusal, got %d loads", loads)
+		}
+		if !strings.Contains(err.Error(), "aggregate_capacity") {
+			t.Fatalf("refusal %q does not name aggregate capacity", err)
+		}
+		if !strings.Contains(err.Error(), "exceeds available allocatable capacity") {
+			t.Fatalf("refusal %q does not carry the aggregate-capacity remedy hint", err)
+		}
+	})
+
+	t.Run("same load is admitted when the envelope is off", func(t *testing.T) {
+		stubServeAllocatable(t, 2<<30, tightAllocable)
+		t.Setenv("FAK_RESERVATION_DIR", filepath.Join(t.TempDir(), "reservations"))
+		t.Setenv("FAK_GPU_LEASE", filepath.Join(t.TempDir(), "gpu.lease"))
+		t.Setenv("FAK_ADMISSION_POLICY", "dev")
+		t.Setenv("FAK_NATIVE_ADMISSION", "aggregate")
+		t.Setenv("FAK_ADMISSION_STATE_ENVELOPE", "0")
+		t.Setenv("FAK_TEST_STARTUP_PEAK_BYTES", strconv.Itoa(smallPeak))
+		t.Setenv("FAK_TEST_STEADY_BYTES", strconv.Itoa(smallSteady))
+
+		loads := 0
+		release, err := loadLocalLauncherModelWithMetalLease(true, "small-state-heavy.gguf", gpulease.Options{}, func() {
+			loads++
+		})
+		if err != nil {
+			t.Fatalf("weights-only load should be admitted with the envelope off: %v", err)
+		}
+		defer release()
+		if loads != 1 {
+			t.Fatalf("weights-only load callback calls = %d, want 1", loads)
+		}
+	})
+
+	t.Run("fits and records class breakdown retained through steady", func(t *testing.T) {
+		stubServeAllocatable(t, 128<<30, roomyAllocable)
+		resDir := filepath.Join(t.TempDir(), "reservations")
+		t.Setenv("FAK_RESERVATION_DIR", resDir)
+		t.Setenv("FAK_GPU_LEASE", filepath.Join(t.TempDir(), "gpu.lease"))
+		t.Setenv("FAK_ADMISSION_POLICY", "dev")
+		t.Setenv("FAK_NATIVE_ADMISSION", "aggregate")
+		t.Setenv("FAK_ADMISSION_STATE_ENVELOPE", "1")
+		t.Setenv("FAK_TEST_STARTUP_PEAK_BYTES", strconv.Itoa(smallPeak))
+		t.Setenv("FAK_TEST_STEADY_BYTES", strconv.Itoa(smallSteady))
+
+		loads := 0
+		release, err := loadLocalLauncherModelWithMetalLease(true, "small-state-light.gguf", gpulease.Options{}, func() {
+			loads++
+		})
+		if err != nil {
+			t.Fatalf("state envelope should fit in roomy allocatable memory: %v", err)
+		}
+		defer release()
+		if loads != 1 {
+			t.Fatalf("load callback calls = %d, want 1", loads)
+		}
+
+		ledgerPath := filepath.Join(resDir, "reservations.json")
+		data, err := os.ReadFile(ledgerPath)
+		if err != nil {
+			t.Fatalf("read ledger: %v", err)
+		}
+		content := string(data)
+		if !strings.Contains(content, "kv_cache") {
+			t.Fatalf("ledger did not record the kv_cache class breakdown: %s", content)
+		}
+		if !strings.Contains(content, "steady") {
+			t.Fatalf("ledger did not retain the reservation through steady: %s", content)
+		}
+		if strings.Contains(content, "\"phase\": \"startup\"") {
+			t.Fatalf("ledger leaked a startup-phase reservation after MarkSteady: %s", content)
+		}
+	})
+}
+
+// TestEstimateModelStateEnvelopeIsMonotonicAndConservative pins the pure envelope helper:
+// it accounts for weights plus every enforced session plus cohort scratch, never reports
+// startup below steady, and grows with the session count.
+func TestEstimateModelStateEnvelopeIsMonotonicAndConservative(t *testing.T) {
+	const (
+		weights     = 256 << 20
+		tokenBudget = 8192
+	)
+	env := estimateModelStateEnvelope(weights, tokenBudget, 8)
+	if env.StartupPeakBytes() < env.SteadyBytes() {
+		t.Fatalf("startup peak %d < steady %d", env.StartupPeakBytes(), env.SteadyBytes())
+	}
+	if env.SteadyBytes() <= int64(weights) {
+		t.Fatalf("envelope steady %d must exceed weights alone %d", env.SteadyBytes(), weights)
+	}
+	classes := env.Classes()
+	if classes[localadmission.MemClassKVCache] <= 0 {
+		t.Fatalf("envelope classes missing kv_cache: %v", classes)
+	}
+	if classes[localadmission.MemClassActivation] <= 0 {
+		t.Fatalf("envelope classes missing activation scratch: %v", classes)
+	}
+	if classes[localadmission.MemClassWeights] <= 0 {
+		t.Fatalf("envelope classes missing weights: %v", classes)
+	}
+
+	one := estimateModelStateEnvelope(weights, tokenBudget, 1)
+	if one.SteadyBytes() >= env.SteadyBytes() {
+		t.Fatalf("envelope with 1 session (%d) must be smaller than 8 sessions (%d)", one.SteadyBytes(), env.SteadyBytes())
+	}
+}
+
+// TestSaturatingEnvelopeMulFailsTowardTooBig pins the overflow guard: a product
+// that would wrap must saturate high so the KV term stays conservative, never
+// collapse toward zero and under-reserve.
+func TestSaturatingEnvelopeMulFailsTowardTooBig(t *testing.T) {
+	if got := saturatingEnvelopeMul(0, 1<<20); got != 0 {
+		t.Fatalf("zero operand = %d, want 0", got)
+	}
+	if got := saturatingEnvelopeMul(-1, 1<<20); got != 0 {
+		t.Fatalf("negative operand = %d, want 0", got)
+	}
+	if got := saturatingEnvelopeMul(4, 5); got != 20 {
+		t.Fatalf("normal product = %d, want 20", got)
+	}
+	// Largest token budget * the per-token scalar overflows int64; the guard must
+	// return MaxInt64 rather than a wrapped, possibly-small value.
+	if got := saturatingEnvelopeMul(1<<47, stateEnvelopeKVBytesPerToken); got != int64(^uint64(0)>>1) {
+		t.Fatalf("overflowing product = %d, want MaxInt64", got)
+	}
+}
+
+// This regression calls the unchanged launcher seam, reads its real on-disk
+// reservation ledger during allocation and after downshift, and reacquires its
+// actual GPU lease after errors and cleanup.
+func TestMetalLauncherReservationUsesStoredWeightsAndReleasesOnEstimateError(t *testing.T) {
+	t.Setenv("FAK_Q4K", "1")
+	t.Setenv("FAK_STREAM_Q4K", "")
+	t.Setenv("FAK_METAL_STREAM_Q4K", "")
+	t.Setenv("FAK_TEST_STARTUP_PEAK_BYTES", "")
+	t.Setenv("FAK_TEST_STEADY_BYTES", "")
+	t.Setenv("FAK_NATIVE_ADMISSION", "aggregate")
+	t.Setenv("FAK_ADMISSION_POLICY", "dev")
+	original := serveReadMemory
+	serveReadMemory = func() (memgate.Memory, error) {
+		return memgate.Memory{TotalBytes: 64 << 30, AvailableBytes: 60 << 30}, nil
+	}
+	t.Cleanup(func() { serveReadMemory = original })
+	for _, name := range []string{"stored-weights", "unsupported-architecture", "malformed-header", "missing-file"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("FAK_RESERVATION_DIR", dir)
+			leasePath := filepath.Join(dir, "gpu.lease")
+			t.Setenv("FAK_GPU_LEASE", leasePath)
+			readLedger := func() []localadmission.Reservation {
+				t.Helper()
+				b, err := os.ReadFile(filepath.Join(dir, "reservations.json"))
+				if os.IsNotExist(err) {
+					return nil
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				var ledger struct {
+					Reservations []localadmission.Reservation `json:"reservations"`
+				}
+				if err := json.Unmarshal(b, &ledger); err != nil {
+					t.Fatal(err)
+				}
+				return ledger.Reservations
+			}
+			path := filepath.Join(dir, "missing.gguf")
+			const wantStored int64 = 3*256*144 + 3*210 + 3*256*4
+			wantSteady := wantStored
+			admitted := name == "stored-weights" || name == "unsupported-architecture"
+			if name == "stored-weights" {
+				path = writeServePackedEmbeddingFixture(t, "mixed-qwen.gguf", false)
+				// The startup peak is the shared
+				// metalServeStartupPeakBytes resident bound: max(transformed,
+				// raw payload) steady plus the 1 GiB staging scratch. Refuse one
+				// byte below it and admit exactly at it.
+				const rawPayload int64 = 3*256*144 + 3*210 + 3*144
+				peak := max(wantStored, rawPayload) + (1 << 30)
+				if err := refuseOversubscribedMetalGGUFForHost(path, peak, true); err != nil {
+					t.Errorf("historical/transformed peak boundary refused: %v", err)
+				}
+				if err := refuseOversubscribedMetalGGUFForHost(path, peak-1, true); err == nil || !strings.Contains(err.Error(), "METAL_GGUF_PEAK_TOO_BIG") {
+					t.Errorf("below the corrected weight peak bound: error=%v", err)
+				}
+
+			} else if name == "unsupported-architecture" {
+				// Gemma2 is outside this estimator's qualified architecture set.
+				// Keep a complete untied configuration and valid tensor directory;
+				// only the qualified estimator refuses; admission keeps its prior policy.
+				const rawPayload int64 = 3*256*144 + 3*210 + 3*144
+				wantSteady = rawPayload
+				path = writeServePackedEmbeddingFixture(t, "unqualified-gemma.gguf", false)
+				b, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				b = bytes.ReplaceAll(b, []byte("qwen35"), []byte("gemma2"))
+				if err := os.WriteFile(path, b, 0600); err != nil {
+					t.Fatal(err)
+				}
+				ws, err := ggufload.OpenWeights(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				cfg, cfgErr := ws.File.Config()
+				arm := resolveMetalServeLoadArm(ws)
+				_, estimateErr := ws.EstimateQ4KLoadMemoryPlan()
+				_ = ws.Close()
+				if cfgErr != nil || cfg.ModelType != "gemma2" || cfg.TieWordEmbeddings || arm != serveLoadArmResidentQ4K {
+					t.Fatalf("expected untied unqualified Gemma2 resident route: cfg=%+v arm=%q error=%v", cfg, arm, cfgErr)
+				}
+				if !errors.Is(estimateErr, ggufload.ErrQ4KLoadEstimateUnsupported) {
+					t.Fatalf("qualified estimator error=%v, want typed unsupported", estimateErr)
+				}
+				// The unqualified route falls back to the raw
+				// payload plan, still judged by the shared resident bound (raw
+				// steady plus the 1 GiB staging scratch).
+				if err := refuseOversubscribedMetalGGUFForHost(path, rawPayload+(1<<30), true); err != nil {
+					t.Errorf("historical raw-payload peak boundary refused: %v", err)
+				}
+				if err := refuseOversubscribedMetalGGUFForHost(path, rawPayload+(1<<30)-1, true); err == nil || !strings.Contains(err.Error(), "METAL_GGUF_PEAK_TOO_BIG") {
+					t.Errorf("below historical raw-payload peak: error=%v", err)
+				}
+			} else if name == "malformed-header" {
+				if err := os.WriteFile(path, []byte("invalid GGUF header"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			loads := 0
+			release, err := loadLocalLauncherModelWithMetalLease(true, path, gpulease.Options{}, func() {
+				loads++
+				if !admitted {
+					return
+				}
+				ledger := readLedger()
+				if len(ledger) != 1 {
+					t.Fatalf("startup ledger=%+v", ledger)
+				}
+				if ledger[0].Phase != "startup" || ledger[0].SteadyBytes != wantSteady || ledger[0].HeldBytes != ledger[0].StartupPeakBytes {
+					t.Errorf("startup reservation=%+v, admission basis=%d", ledger[0], wantSteady)
+				}
+				if wantPeak := max(wantSteady*7/2, wantSteady+(1<<30)); ledger[0].StartupPeakBytes != wantPeak {
+					t.Errorf("startup reservation=%d want historical peak/staging bound=%d", ledger[0].StartupPeakBytes, wantPeak)
+				}
+				if name == "unsupported-architecture" {
+					return // Callback execution and ledger witness admission, not exact Gemma storage.
+				}
+				m, loadErr := ggufload.LoadModelQ4KProfileOptions(path, nil)
+				if loadErr != nil {
+					t.Fatal(loadErr)
+				}
+				defer m.CloseWeights()
+				if got := m.ResidentReport().TotalResidentBytes; got != wantStored {
+					t.Fatalf("actual loader=%d, independent=%d", got, wantStored)
+				}
+			})
+			t.Cleanup(release)
+			if admitted {
+				if err != nil || loads != 1 {
+					t.Fatalf("load count=%d error=%v", loads, err)
+				}
+				ledger := readLedger()
+				if len(ledger) != 1 || ledger[0].Phase != "steady" || ledger[0].HeldBytes != wantSteady {
+					t.Errorf("steady ledger=%+v, admission basis=%d", ledger, wantSteady)
+				}
+			} else {
+				if err == nil || loads != 0 {
+					t.Errorf("invalid model reached load: callbacks=%d error=%v", loads, err)
+				}
+				if name == "missing-file" && !errors.Is(err, os.ErrNotExist) {
+					t.Errorf("missing-file estimate error=%v, want original path error", err)
+				}
+				// Check before calling returned cleanup: the failing seam itself must release.
+				if ledger := readLedger(); len(ledger) != 0 {
+					t.Errorf("failed estimate retained reservation: %+v", ledger)
+				}
+				reacquired, acquireErr := gpulease.Acquire(gpulease.Options{Path: leasePath, NoWait: true})
+				if acquireErr != nil {
+					t.Errorf("failed estimate retained lease: %v", acquireErr)
+				} else {
+					reacquired.Release()
+				}
+			}
+			release()
+			if ledger := readLedger(); len(ledger) != 0 {
+				t.Errorf("cleanup retained ledger: %+v", ledger)
+			}
+			reacquired, acquireErr := gpulease.Acquire(gpulease.Options{Path: leasePath, NoWait: true})
+			if acquireErr != nil {
+				t.Fatal(acquireErr)
+			}
+			reacquired.Release()
+		})
 	}
 }

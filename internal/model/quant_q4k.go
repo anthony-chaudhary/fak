@@ -808,7 +808,8 @@ func (b *QuantBuilder) residentQuantTarget(canon string, shape []int) (name stri
 	if b.built {
 		return "", false, fmt.Errorf("model: QuantBuilder already built")
 	}
-	name, keep := quantSourceTensorName(b.m.Cfg, canon)
+	b.started = true
+	name, keep := quantSourceTensorNameWithRetention(b.m.Cfg, canon, b.mtpRetention())
 	if !keep || !isQuantWeight(name) || len(shape) != 2 {
 		return "", false, nil
 	}
@@ -863,6 +864,7 @@ func (b *QuantBuilder) AddCanonicalMTPQ4K(canon string, shape []int, raw []byte)
 	if b.built {
 		return fmt.Errorf("model: QuantBuilder already built")
 	}
+	b.started = true
 	if !b.m.Cfg.isQwen35TextFamily() || b.m.Cfg.NumMTPLayers() != 1 || b.m.Cfg.MTPUseDedicatedEmbeddings {
 		return fmt.Errorf("model: canonical MTP Q4_K tensor requires an eligible one-layer shared-embedding Qwen3.8 config")
 	}
@@ -927,6 +929,9 @@ func (b *QuantBuilder) AddCanonicalMTPQ4K(canon string, shape []int, raw []byte)
 	if _, exists := b.m.manifest[canon]; exists {
 		return fmt.Errorf("model: canonical MTP Q4_K tensor %s already has a decoded representation", canon)
 	}
+	if b.retainMTP != nil && !*b.retainMTP {
+		return nil
+	}
 	if b.m.q4kw == nil {
 		b.m.q4kw = map[string]*q4kTensor{}
 	}
@@ -948,6 +953,7 @@ func (b *QuantBuilder) AddCanonicalMTPFCQ8(canon string, shape []int, raw []byte
 	if b.built {
 		return fmt.Errorf("model: QuantBuilder already built")
 	}
+	b.started = true
 	if canon != "mtp.fc.weight" {
 		return fmt.Errorf("model: canonical MTP FC Q8_0 tensor %q is not mtp.fc.weight", canon)
 	}
@@ -981,6 +987,9 @@ func (b *QuantBuilder) AddCanonicalMTPFCQ8(canon string, shape []int, raw []byte
 	}
 	if _, exists := b.m.manifest[canon]; exists {
 		return fmt.Errorf("model: canonical MTP FC Q8_0 tensor %s already has a decoded representation", canon)
+	}
+	if b.retainMTP != nil && !*b.retainMTP {
+		return nil
 	}
 	qt := newQ8Tensor(shape[0], shape[1], shape[1]/kindQ8_0.blockWeights())
 	for block := 0; block < blocks; block++ {

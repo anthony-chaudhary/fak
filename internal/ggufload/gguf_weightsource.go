@@ -21,6 +21,10 @@ import (
 // An empty canonical name means skip: default target-only loads, vision tensors, misplaced
 // NextN tensors, and unknown future sidecars never leak into the target manifest.
 func qwen35MTPMaterializationName(name string, cfg model.Config) (canonical string, handled bool) {
+	return qwen35MTPMaterializationNameWithRetention(name, cfg, model.RetainMTP)
+}
+
+func qwen35MTPMaterializationNameWithRetention(name string, cfg model.Config, retainMTP bool) (canonical string, handled bool) {
 	if cfg.ModelType != "qwen35" && cfg.ModelType != "qwen35moe" {
 		return "", false
 	}
@@ -35,7 +39,7 @@ func qwen35MTPMaterializationName(name string, cfg model.Config) (canonical stri
 	if layer < firstMTP || layer >= firstMTP+cfg.NumNextNPredictLayers {
 		return "", isGLMMoeDsaMTPTensor(name)
 	}
-	if !model.RetainMTP {
+	if !retainMTP {
 		return "", true
 	}
 
@@ -99,7 +103,11 @@ var qwen35MTPRequiredMaterialized = [...]string{
 }
 
 func newQwen35MTPSeen(cfg model.Config) map[string]bool {
-	if !model.RetainMTP || cfg.NumNextNPredictLayers == 0 || (cfg.ModelType != "qwen35" && cfg.ModelType != "qwen35moe") {
+	return newQwen35MTPSeenWithRetention(cfg, model.RetainMTP)
+}
+
+func newQwen35MTPSeenWithRetention(cfg model.Config, retainMTP bool) map[string]bool {
+	if !retainMTP || cfg.NumNextNPredictLayers == 0 || (cfg.ModelType != "qwen35" && cfg.ModelType != "qwen35moe") {
 		return nil
 	}
 	return make(map[string]bool, len(qwen35MTPRequiredMaterialized))

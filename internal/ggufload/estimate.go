@@ -1,6 +1,7 @@
 package ggufload
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -94,6 +95,180 @@ func (s *WeightSource) EstimateLoadMemoryPlan() (compute.MemoryPlan, error) {
 		byDType[dtype] += n
 	}
 	return ggufMemoryPlanByDType(compute.MemoryWeights, compute.MemoryScopeDevice, "gguf-load", byDType)
+}
+
+// ErrQ4KLoadEstimateUnsupported means the requested loader route has no qualified
+// transformed-weight estimate. Callers must preserve their previous admission
+// policy for that route; malformed supported inputs return other errors.
+var ErrQ4KLoadEstimateUnsupported = errors.New("gguf: Q4K load estimate unsupported")
+
+// EstimateQ4KLoadMemoryPlan estimates logical stored weights for dense
+// Llama, Qwen2 and Qwen3.5-family native loads using QuantModelQ4KProfileOptions
+// storage selection.
+// It reads only headers. The result excludes page-rounded allocation capacity,
+// staging lifetimes, device copies, KV/GDN state and driver overhead; it is not a
+// physical-memory or startup-peak bound. EstimateLoadMemoryPlan remains raw payload.
+func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute.MemoryPlan, error) {
+	if s == nil || s.File == nil {
+		return nil, fmt.Errorf("gguf: Q4K estimate requires a weight source")
+	}
+	cfg, err := s.File.Config()
+	if err != nil {
+		return nil, err
+	}
+	loadOpts, err := resolveQ4KLoadOptions(cfg, opts)
+	if err != nil {
+		return nil, err
+	}
+	standardDense := cfg.ModelType == "llama" || cfg.ModelType == "qwen2"
+	if (!cfg.IsQwen35Hybrid() && !standardDense) || cfg.IsMoE() {
+		return nil, fmt.Errorf("%w: requires dense Llama, Qwen2 or Qwen3.5-family weights", ErrQ4KLoadEstimateUnsupported)
+	}
+	if loadOpts.streamedDenseQ4K || loadOpts.streamedExperts || loadOpts.expertShardSet || model.W3MLPRequested() {
+		return nil, fmt.Errorf("%w: streaming, expert shards and W3 selection", ErrQ4KLoadEstimateUnsupported)
+	}
+	if loadOpts.residentQ2KEmbedding {
+		if err := s.validateResidentQ2KEmbedding(cfg); err != nil {
+			return nil, err
+		}
+	}
+	if loadOpts.residentQ4KEmbedding {
+		if err := s.validateResidentQ4KEmbedding(cfg); err != nil {
+			return nil, err
+		}
+	}
+	byDType := map[string]uint64{}
+	seen := map[string]bool{}
+	qwenMTPSeen := newQwen35MTPSeenWithRetention(cfg, loadOpts.retainMTP)
+	if qwenMTPSeen != nil && (cfg.NumMTPLayers() != 1 || cfg.MTPUseDedicatedEmbeddings) {
+		return nil, fmt.Errorf("%w: retained MTP requires one shared-embedding layer", ErrQ4KLoadEstimateUnsupported)
+	}
+	for _, info := range s.File.Tensors {
+		canon, qwenMTP := qwen35MTPMaterializationNameWithRetention(info.Name, cfg, loadOpts.retainMTP)
+		if qwenMTP {
+			if canon == "" {
+				continue
+			}
+		} else {
+			if archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
+				continue
+			}
+			var ok bool
+			canon, ok = CanonicalTensorNameArch(info.Name, cfg.ModelType)
+			if !ok {
+				// An unmapped tensor means this checkpoint is outside the qualified
+				// transformed-storage route. Leave the caller on its prior
+				// conservative raw-payload admission rather than claiming exactness.
+				return nil, fmt.Errorf("%w: no canonical mapping for %s", ErrQ4KLoadEstimateUnsupported, info.Name)
+			}
+			var keep bool
+			canon, keep = model.QuantSourceTensorName(cfg, canon)
+			if !keep {
+				continue
+			}
+		}
+		// Linear-attention QKV/gate names have already resolved to their native
+		// storage names. Remaining fused projections need a separate split-shape
+		// contract; counting their source shape alone would assume that contract.
+		if strings.HasSuffix(canon, ".self_attn.qkv_proj.weight") || strings.HasSuffix(canon, ".mlp.gate_up_proj.weight") {
+			return nil, fmt.Errorf("%w: fused projection %s", ErrQ4KLoadEstimateUnsupported, info.Name)
+		}
+		if seen[canon] {
+			return nil, fmt.Errorf("%w: duplicate canonical tensor %s", ErrQ4KLoadEstimateUnsupported, canon)
+		}
+		seen[canon] = true
+		shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
+		if err != nil {
+			return nil, err
+		}
+		if qwenMTP {
+			if err := validateQwen35MTPShape(canon, shape, cfg); err != nil {
+				return nil, err
+			}
+			wantType, matrix := qwen35MTPResidentTypes[canon]
+			if !matrix {
+				wantType = TensorF32
+			}
+			if info.Type != wantType {
+				return nil, fmt.Errorf("gguf: Qwen MTP tensor %s has type %s, want %s", canon, info.Type, wantType)
+			}
+			qwenMTPSeen[canon] = true
+		}
+		payload, err := tensorPayloadBytes(info)
+		if err != nil {
+			return nil, err
+		}
+		elems, err := tensorElems(info)
+		if err != nil {
+			return nil, err
+		}
+		packedEmbedding := info.Name == "token_embd.weight" && (loadOpts.residentQ2KEmbedding || loadOpts.residentQ4KEmbedding)
+		// The MTP loader preserves its closed Q4/Q6 matrix roles, including
+		// reordered q/k, independently of ordinary target residency options.
+		packedQ4 := info.Type == TensorQ4_K && (qwenMTP || model.ResidentQ4KEligible(cfg, canon))
+		blockWeights, _, residentable := residentExpertBlockGeometry(info.Type)
+		retainKQuant := loadOpts.residentDenseKQuant || (loadOpts.residentDenseQ2K && info.Type == TensorQ2_K)
+		packedKQuant := info.Type != TensorQ4_K && residentable &&
+			((qwenMTP && info.Type == TensorQ6_K) || (retainKQuant && model.ResidentKQuantEligible(cfg, canon)))
+		n, dtype := payload, ggufTensorDTypeLabel(info.Type)
+		switch {
+		case packedEmbedding:
+		case packedQ4 || packedKQuant:
+			if packedQ4 {
+				blockWeights = qkK
+			}
+			if len(shape) != 2 || blockWeights <= 0 || shape[1]%blockWeights != 0 {
+				return nil, fmt.Errorf("%w: packed tensor %s shape %v", ErrQ4KLoadEstimateUnsupported, info.Name, shape)
+			}
+		case len(shape) == 2 && (qwenMTP || model.IsQuantWeight(canon)):
+			if shape[1]%32 != 0 {
+				return nil, fmt.Errorf("gguf: Q4K estimate tensor %s has invalid Q8 reduction dimension", info.Name)
+			}
+			n, err = estimateNativeQ8LogicalBytes(elems)
+			dtype = "native-q8-f32-scales"
+		default:
+			if elems > math.MaxUint64/4 {
+				return nil, fmt.Errorf("gguf: Q4K estimate F32 bytes overflow")
+			}
+			n, dtype = elems*4, compute.F32.String()
+		}
+		if err != nil {
+			return nil, err
+		}
+		if byDType[dtype] > math.MaxUint64-n {
+			return nil, fmt.Errorf("gguf: Q4K estimate bytes overflow")
+		}
+		byDType[dtype] += n
+		// The default tied loader keeps F32 embedding rows for gathers and a
+		// separate native-Q8 copy for the output head. Charge both allocations.
+		if cfg.TieWordEmbeddings && canon == "model.embed_tokens.weight" && len(shape) == 2 {
+			if shape[1]%32 != 0 {
+				return nil, fmt.Errorf("gguf: tied embedding has invalid Q8 reduction dimension")
+			}
+			headBytes, err := estimateNativeQ8LogicalBytes(elems)
+			if err != nil {
+				return nil, err
+			}
+			const headDType = "native-q8-f32-scales"
+			if byDType[headDType] > math.MaxUint64-headBytes {
+				return nil, fmt.Errorf("gguf: Q4K tied head estimate bytes overflow")
+			}
+			byDType[headDType] += headBytes
+		}
+	}
+	if err := validateQwen35MTPMaterialized(qwenMTPSeen); err != nil {
+		return nil, err
+	}
+	return ggufMemoryPlanByDType(compute.MemoryWeights, compute.MemoryScopeDevice, "gguf-native-q4k-logical-weights", byDType)
+}
+
+func estimateNativeQ8LogicalBytes(elems uint64) (uint64, error) {
+	// Native stored scales are F32; GGUF Q8_0 wire scales are F16.
+	const residentBlockBytes = 32 + 4
+	if elems > (math.MaxUint64-31)/residentBlockBytes {
+		return 0, fmt.Errorf("gguf: estimated q8 load bytes overflow uint64")
+	}
+	return (elems*residentBlockBytes + 31) / 32, nil
 }
 
 // EstimateExpertParallelLoadMemoryPlan estimates the resident per-rank GGUF weight plan for an
@@ -351,7 +526,8 @@ func isGGUFMatmulWeight(name string) bool {
 
 // EstimateQ8LoadBytes reports the resident footprint of loading this GGUF through
 // LoadModelQuantProfile / QuantModelProfile. 2D matmul projection weights are quantized
-// to Q8_0 at ~1.0625 bytes/parameter (34/32 bytes per parameter), while unquantized
+// to native Q8 at 1.125 bytes/parameter (32 int8 codes plus one F32 scale per
+// 32-element block, matching model.newQ8Tensor and ResidentReport), while unquantized
 // embedding tables and normalization tensors are retained as float32 (4 bytes/element).
 // If word embeddings are tied, the embedding table is held both as float32 and quantized
 // into Q8_0.
@@ -390,10 +566,10 @@ func (s *WeightSource) EstimateQ8LoadBytes() (int64, error) {
 
 		var tensorBytes uint64
 		if q8Weight || tiedEmbedding {
-			if elems > (math.MaxUint64-31)/34 {
-				return 0, fmt.Errorf("gguf: estimated q8 load bytes overflow uint64")
+			q8Bytes, err := estimateNativeQ8LogicalBytes(elems)
+			if err != nil {
+				return 0, err
 			}
-			q8Bytes := (elems*34 + 31) / 32
 			tensorBytes += q8Bytes
 		}
 		if !q8Weight || tiedEmbedding {

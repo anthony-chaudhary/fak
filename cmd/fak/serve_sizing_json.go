@@ -125,7 +125,7 @@ func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpu
 	selectedArm := resolveServeNativeContextLoadArm(ws, be, useMetal)
 	quant := ggufload.ClassifyTensorQuant(ws.File.Tensors)
 	cpuOffloadActive := be != nil && cpuOffloadExperts && quant.Q4KResident
-	weights, fit, err := serveNativeContextSizingInputs(ws, be, cpuOffloadExperts, useMetal, 1)
+	weights, fit, err := serveNativeContextSizingInputs(ws, be, cpuOffloadExperts, useMetal, 1, model)
 	if err != nil {
 		return serveSizingArtifact{}, err
 	}

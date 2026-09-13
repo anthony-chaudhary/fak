@@ -367,7 +367,7 @@ func (rt *serveRuntime) resolveNativeContext(sf *serveFlags, ranks int) error {
 				return openErr
 			}
 			defer ws.Close()
-			weights, fit, inputErr := serveNativeContextSizingInputs(ws, rt.chatBackend, *sf.cpuOffloadExperts, rt.useMetal, ranks)
+			weights, fit, inputErr := serveNativeContextSizingInputs(ws, rt.chatBackend, *sf.cpuOffloadExperts, rt.useMetal, ranks, path)
 			if inputErr != nil {
 				return inputErr
 			}

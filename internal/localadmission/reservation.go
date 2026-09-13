@@ -13,7 +13,14 @@ import (
 	"time"
 )
 
-const reservationSchema = "fak-local-memory-reservations/1"
+// reservationSchema is the schema written to new ledgers. The class-breakdown
+// additions are additive, so /2 ledgers are strict supersets of /1; readLedger
+// still accepts legacy /1 ledgers (see legacyReservationSchemas).
+const reservationSchema = "fak-local-memory-reservations/2"
+
+// legacyReservationSchemas are read-compatible schemas retained so ledgers
+// written before the class breakdown was added keep loading.
+var legacyReservationSchemas = []string{"fak-local-memory-reservations/1"}
 
 type Pressure string
 
@@ -46,15 +53,21 @@ type ReservationRequest struct {
 	Plan     MemoryPlan      `json:"plan"`
 	Host     AdmissionSample `json:"host"`
 	Policy   string          `json:"policy,omitempty"`
+	// Classes is the optional class breakdown backing Plan, keyed by the
+	// producer's MemoryClass name (weights, kv_cache, activation, ...). String
+	// keys keep localadmission decoupled from compute while preserving the
+	// breakdown through MarkSteady for class-aware reconciliation.
+	Classes map[string]int64 `json:"classes,omitempty"`
 }
 
 type Reservation struct {
-	ID               string `json:"id"`
-	OwnerPID         int    `json:"owner_pid"`
-	StartupPeakBytes int64  `json:"startup_peak_bytes"`
-	SteadyBytes      int64  `json:"steady_bytes"`
-	HeldBytes        int64  `json:"held_bytes"`
-	Phase            string `json:"phase"`
+	ID               string           `json:"id"`
+	OwnerPID         int              `json:"owner_pid"`
+	StartupPeakBytes int64            `json:"startup_peak_bytes"`
+	SteadyBytes      int64            `json:"steady_bytes"`
+	HeldBytes        int64            `json:"held_bytes"`
+	Phase            string           `json:"phase"`
+	Classes          map[string]int64 `json:"classes,omitempty"`
 }
 
 type ReservationDecision struct {
@@ -164,7 +177,7 @@ func (s *ReservationStore) Reserve(ctx context.Context, req ReservationRequest) 
 	if err != nil {
 		return d, err
 	}
-	r := Reservation{ID: id, OwnerPID: req.OwnerPID, StartupPeakBytes: req.Plan.StartupPeakBytes, SteadyBytes: req.Plan.SteadyBytes, HeldBytes: req.Plan.StartupPeakBytes, Phase: "startup"}
+	r := Reservation{ID: id, OwnerPID: req.OwnerPID, StartupPeakBytes: req.Plan.StartupPeakBytes, SteadyBytes: req.Plan.SteadyBytes, HeldBytes: req.Plan.StartupPeakBytes, Phase: "startup", Classes: cloneClasses(req.Classes)}
 	ledger.Reservations = append(ledger.Reservations, r)
 	if err := s.writeLedger(ledger); err != nil {
 		return d, err
@@ -291,10 +304,38 @@ func (s *ReservationStore) readLedger() (reservationLedger, error) {
 	if err := json.Unmarshal(b, &l); err != nil {
 		return reservationLedger{}, fmt.Errorf("decode reservation ledger: %w", err)
 	}
-	if l.Schema != reservationSchema {
+	if !reservationSchemaKnown(l.Schema) {
 		return reservationLedger{}, fmt.Errorf("unsupported reservation ledger schema %q", l.Schema)
 	}
 	return l, nil
+}
+
+// reservationSchemaKnown reports whether a ledger schema is read-compatible:
+// the current schema or any retained legacy schema. Only truly unknown schemas
+// are rejected.
+func reservationSchemaKnown(schema string) bool {
+	if schema == reservationSchema {
+		return true
+	}
+	for _, legacy := range legacyReservationSchemas {
+		if schema == legacy {
+			return true
+		}
+	}
+	return false
+}
+
+// cloneClasses copies a class breakdown so a stored reservation cannot alias or
+// mutate the caller's map.
+func cloneClasses(in map[string]int64) map[string]int64 {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]int64, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func (s *ReservationStore) writeLedger(l reservationLedger) error {

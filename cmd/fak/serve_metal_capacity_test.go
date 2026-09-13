@@ -140,7 +140,7 @@ func writeSynth27BGGUF(t *testing.T, path string, isUDQ2KXL bool) {
 	}
 
 	nTensors := uint64(3)
-	nKV := uint64(3)
+	nKV := uint64(7)
 
 	_ = binary.Write(&b, binary.LittleEndian, nTensors)
 	_ = binary.Write(&b, binary.LittleEndian, nKV)
@@ -148,6 +148,13 @@ func writeSynth27BGGUF(t *testing.T, path string, isUDQ2KXL bool) {
 	writeKV("general.architecture", uint32(ggufload.TypeString), func() { writeString("qwen2") })
 	writeKV("qwen2.block_count", uint32(ggufload.TypeUint64), func() { _ = binary.Write(&b, binary.LittleEndian, uint64(1)) })
 	writeKV("general.alignment", uint32(ggufload.TypeUint32), func() { _ = binary.Write(&b, binary.LittleEndian, uint32(32)) })
+	// The route-aware estimator derives storage from Config, so this fixture must
+	// carry the keys a real qwen2 header declares. Raw-payload-only callers ignore
+	// them; adding them preserves every prior estimate byte-for-byte.
+	writeKV("qwen2.embedding_length", uint32(ggufload.TypeUint64), func() { _ = binary.Write(&b, binary.LittleEndian, uint64(5120)) })
+	writeKV("qwen2.attention.head_count", uint32(ggufload.TypeUint64), func() { _ = binary.Write(&b, binary.LittleEndian, uint64(1)) })
+	writeKV("qwen2.feed_forward_length", uint32(ggufload.TypeUint64), func() { _ = binary.Write(&b, binary.LittleEndian, uint64(5600000)) })
+	writeKV("qwen2.attention.layer_norm_rms_epsilon", uint32(ggufload.TypeFloat32), func() { _ = binary.Write(&b, binary.LittleEndian, float32(1e-6)) })
 
 	writeTensor := func(name string, dims []uint64, typ ggufload.TensorType, off uint64) {
 		writeString(name)
@@ -322,7 +329,9 @@ func TestResidentQ4KRefusalPathMatchesPlanPath(t *testing.T) {
 
 	// The plan path derives steady from the gguf and total from the host probe;
 	// mirror that derivation so the comparison uses the exact same operands.
-	steadyFor := func(path string) (serveLoadArm, int64) {
+	// #11962 routes the resident arm through the transformed admission plan, so
+	// the steady basis here is serveMetalGGUFAdmissionWeights, not the raw load plan.
+	steadyFor := func(path string) (serveLoadArm, int64, int64) {
 		ws, err := ggufload.OpenWeights(path)
 		if err != nil {
 			t.Fatalf("open %s: %v", path, err)
@@ -334,20 +343,28 @@ func TestResidentQ4KRefusalPathMatchesPlanPath(t *testing.T) {
 			if err != nil {
 				t.Fatalf("q8 plan: %v", err)
 			}
-			return arm, plan.Total()
+			return arm, plan.Total(), plan.Total()
 		}
-		plan, err := ws.EstimateLoadMemoryPlan()
+		plan, rawBasis, err := serveMetalGGUFAdmissionWeights(path, ws)
 		if err != nil {
-			t.Fatalf("load plan: %v", err)
+			t.Fatalf("admission plan: %v", err)
 		}
-		return arm, plan.Total()
+		steady := plan.Total()
+		peakBasis := steady
+		if arm == serveLoadArmResidentQ4K {
+			peakBasis = max(steady, rawBasis)
+		}
+		return arm, steady, peakBasis
 	}
 
 	for _, path := range []string{q4kPath, udPath} {
-		arm, steady := steadyFor(path)
+		arm, steady, peakBasis := steadyFor(path)
 		total, _, known := compute.HostSystemMemoryInfo()
-		wantPeak, _ := metalServeStartupPeakBytes(arm, steady, total, known)
-		got := estimateMetalModelMemoryBounds(path)
+		wantPeak, _ := metalServeStartupPeakBytes(arm, peakBasis, total, known)
+		got, err := estimateMetalModelMemoryBounds(path)
+		if err != nil {
+			t.Fatalf("%s: estimate: %v", filepath.Base(path), err)
+		}
 		if got.StartupPeakBytes != wantPeak {
 			t.Fatalf("%s: plan startup peak %d != shared-helper peak %d (arm=%s steady=%d total=%d known=%v)",
 				filepath.Base(path), got.StartupPeakBytes, wantPeak, arm, steady, total, known)

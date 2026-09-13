@@ -370,3 +370,88 @@ func TestReservationStoreActiveAndTotal(t *testing.T) {
 		t.Fatalf("expected 0 total after release, got %d", total)
 	}
 }
+
+func TestReservationRetainsClassBreakdownThroughSteady(t *testing.T) {
+	ctx := context.Background()
+	store := NewReservationStore(t.TempDir())
+	store.alive = func(int) bool { return true }
+
+	req := reservationRequest(os.Getpid(), 60, 30, 100, PressureNormal)
+	req.Classes = map[string]int64{"weights": 100, "kv_cache": 50, "scratchpad": 10}
+
+	dec, err := store.Reserve(ctx, req)
+	if err != nil || !dec.Admit {
+		t.Fatalf("reserve: err=%v dec=%+v", err, dec)
+	}
+	if got, want := dec.Reservation.Classes["weights"], int64(100); got != want {
+		t.Fatalf("reserved classes[weights]=%d want %d (%+v)", got, want, dec.Reservation.Classes)
+	}
+	if got, want := dec.Reservation.Classes["kv_cache"], int64(50); got != want {
+		t.Fatalf("reserved classes[kv_cache]=%d want %d", got, want)
+	}
+	if got, want := dec.Reservation.Classes["scratchpad"], int64(10); got != want {
+		t.Fatalf("reserved classes[scratchpad]=%d want %d", got, want)
+	}
+
+	steady, err := store.MarkSteady(ctx, dec.Reservation.ID)
+	if err != nil {
+		t.Fatalf("MarkSteady: %v", err)
+	}
+	if steady.HeldBytes != steady.SteadyBytes {
+		t.Fatalf("HeldBytes=%d want SteadyBytes=%d", steady.HeldBytes, steady.SteadyBytes)
+	}
+	for class, want := range req.Classes {
+		if got := steady.Classes[class]; got != want {
+			t.Fatalf("classes[%s]=%d want %d after MarkSteady (%+v)", class, got, want, steady.Classes)
+		}
+	}
+
+	active, err := store.ActiveReservations(ctx)
+	if err != nil || len(active) != 1 {
+		t.Fatalf("ActiveReservations: err=%v active=%+v", err, active)
+	}
+	if got := active[0].Classes["kv_cache"]; got != 50 {
+		t.Fatalf("persisted classes[kv_cache]=%d want 50", got)
+	}
+
+	if err := store.Release(ctx, dec.Reservation.ID); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	active, err = store.ActiveReservations(ctx)
+	if err != nil || len(active) != 0 {
+		t.Fatalf("after release: err=%v active=%+v", err, active)
+	}
+}
+
+func TestReadLedgerAcceptsLegacyV1Schema(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	ledger := reservationLedger{
+		Schema: "fak-local-memory-reservations/1",
+		Reservations: []Reservation{{
+			ID:               "legacy-reservation",
+			OwnerPID:         os.Getpid(),
+			StartupPeakBytes: 60,
+			SteadyBytes:      30,
+			HeldBytes:        30,
+			Phase:            "steady",
+		}},
+	}
+	b, err := json.MarshalIndent(ledger, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "reservations.json"), append(b, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	store := NewReservationStore(dir)
+	store.alive = func(int) bool { return true }
+	active, err := store.ActiveReservations(ctx)
+	if err != nil {
+		t.Fatalf("ActiveReservations on v1 ledger: %v", err)
+	}
+	if len(active) != 1 || active[0].ID != "legacy-reservation" || active[0].HeldBytes != 30 {
+		t.Fatalf("unexpected legacy load: %+v", active)
+	}
+}
