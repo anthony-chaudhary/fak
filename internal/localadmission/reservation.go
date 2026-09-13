@@ -10,17 +10,26 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 )
 
-// reservationSchema is the schema written to new ledgers. The class-breakdown
-// additions are additive, so /2 ledgers are strict supersets of /1; readLedger
-// still accepts legacy /1 ledgers (see legacyReservationSchemas).
+// reservationSchema is the schema stamped on every write. The class-breakdown
+// additions are additive, so /2 ledgers are strict supersets of /1.
+//
+// Forward migration contract: the ledger is a shared host cache, so the newest
+// writer must never poison an older reader. Readers therefore accept ANY
+// generation within reservationSchemaFamilyPrefix, decoding only the stable
+// reservation fields (encoding/json drops unknown fields from a newer
+// generation). The next write self-heals by re-stamping reservationSchema (see
+// writeLedger), so no explicit migration step is needed.
 const reservationSchema = "fak-local-memory-reservations/2"
 
-// legacyReservationSchemas are read-compatible schemas retained so ledgers
-// written before the class breakdown was added keep loading.
-var legacyReservationSchemas = []string{"fak-local-memory-reservations/1"}
+// reservationSchemaFamilyPrefix identifies the reservation-ledger schema family.
+// Any schema with this prefix and a positive integer generation suffix is
+// read-compatible regardless of generation.
+const reservationSchemaFamilyPrefix = "fak-local-memory-reservations/"
 
 type Pressure string
 
@@ -230,6 +239,10 @@ func (s *ReservationStore) ActiveReservations(ctx context.Context) ([]Reservatio
 	}
 
 	active, reaped := s.reap(ledger.Reservations)
+	// Persist the reaped list, not the stale pre-reap slice: reap aliases the
+	// backing array, and writeLedger's in-place sort would otherwise resurrect
+	// reaped entries and corrupt the returned active slice.
+	ledger.Reservations = active
 	if reaped > 0 {
 		_ = s.writeLedger(ledger)
 	}
@@ -310,19 +323,29 @@ func (s *ReservationStore) readLedger() (reservationLedger, error) {
 	return l, nil
 }
 
-// reservationSchemaKnown reports whether a ledger schema is read-compatible:
-// the current schema or any retained legacy schema. Only truly unknown schemas
-// are rejected.
+// reservationSchemaKnown reports whether a ledger schema is read-compatible.
+// Any generation of the reservation-ledger family is accepted: older (legacy)
+// generations decode as today, and a NEWER generation written by a newer binary
+// is decoded leniently over the stable reservation fields (unknown fields are
+// ignored by encoding/json), so the newest writer never bricks an older reader.
+// Only a schema outside the family, or a malformed generation suffix, is
+// rejected. writeLedger re-stamps reservationSchema on the next mutation, which
+// self-heals the on-disk generation back to the current one.
 func reservationSchemaKnown(schema string) bool {
-	if schema == reservationSchema {
-		return true
+	return reservationSchemaFamily(schema)
+}
+
+// reservationSchemaFamily reports whether schema belongs to the reservation
+// ledger family and carries a positive integer generation suffix, e.g.
+// "fak-local-memory-reservations/3". A different family or a non-numeric or
+// non-positive suffix is not read-compatible.
+func reservationSchemaFamily(schema string) bool {
+	gen, ok := strings.CutPrefix(schema, reservationSchemaFamilyPrefix)
+	if !ok || gen == "" {
+		return false
 	}
-	for _, legacy := range legacyReservationSchemas {
-		if schema == legacy {
-			return true
-		}
-	}
-	return false
+	n, err := strconv.Atoi(gen)
+	return err == nil && n > 0
 }
 
 // cloneClasses copies a class breakdown so a stored reservation cannot alias or

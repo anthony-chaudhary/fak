@@ -455,3 +455,120 @@ func TestReadLedgerAcceptsLegacyV1Schema(t *testing.T) {
 		t.Fatalf("unexpected legacy load: %+v", active)
 	}
 }
+
+func TestReadLedgerAcceptsNewerSchemaGeneration(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	ledger := reservationLedger{
+		Schema: "fak-local-memory-reservations/3",
+		Reservations: []Reservation{
+			{
+				ID:               "live-reservation",
+				OwnerPID:         os.Getpid(),
+				StartupPeakBytes: 60,
+				SteadyBytes:      30,
+				HeldBytes:        45,
+				Phase:            "startup",
+			},
+			{
+				ID:               "dead-reservation",
+				OwnerPID:         1 << 30,
+				StartupPeakBytes: 50,
+				SteadyBytes:      25,
+				HeldBytes:        50,
+				Phase:            "startup",
+			},
+		},
+	}
+	b, err := json.MarshalIndent(ledger, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledgerPath := filepath.Join(dir, "reservations.json")
+	if err := os.WriteFile(ledgerPath, append(b, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	store := NewReservationStore(dir)
+	store.alive = func(pid int) bool { return pid == os.Getpid() }
+	active, err := store.ActiveReservations(ctx)
+	if err != nil {
+		t.Fatalf("ActiveReservations on newer-generation ledger: %v", err)
+	}
+	if len(active) != 1 || active[0].ID != "live-reservation" || active[0].HeldBytes != 45 {
+		t.Fatalf("newer-generation load did not account live reservation: %+v", active)
+	}
+
+	total, err := store.TotalReservedBytes(ctx)
+	if err != nil {
+		t.Fatalf("TotalReservedBytes on newer-generation ledger: %v", err)
+	}
+	if total != 45 {
+		t.Fatalf("newer-generation HeldBytes total = %d, want 45 (live reservation dropped?)", total)
+	}
+
+	var onDisk reservationLedger
+	rewritten, err := os.ReadFile(ledgerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(rewritten, &onDisk); err != nil {
+		t.Fatal(err)
+	}
+	if onDisk.Schema != reservationSchema {
+		t.Fatalf("schema after reap = %q, want self-healed %q", onDisk.Schema, reservationSchema)
+	}
+
+	if _, err := store.Reserve(ctx, reservationRequest(os.Getpid(), 10, 5, 100, PressureNormal)); err != nil {
+		t.Fatalf("reserve after newer-generation load: %v", err)
+	}
+	rewritten, err = os.ReadFile(ledgerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(rewritten, &onDisk); err != nil {
+		t.Fatal(err)
+	}
+	if onDisk.Schema != reservationSchema {
+		t.Fatalf("schema after mutation = %q, want self-healed %q", onDisk.Schema, reservationSchema)
+	}
+}
+
+func TestReadLedgerRejectsForeignSchema(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	ledger := reservationLedger{
+		Schema: "some-other-ledger/1",
+		Reservations: []Reservation{{
+			ID:       "foreign-reservation",
+			OwnerPID: os.Getpid(),
+		}},
+	}
+	b, err := json.MarshalIndent(ledger, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "reservations.json"), append(b, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	store := NewReservationStore(dir)
+	store.alive = func(int) bool { return true }
+	if _, err := store.ActiveReservations(ctx); err == nil {
+		t.Fatal("ActiveReservations accepted a foreign-family schema; want fail-closed error")
+	}
+}
+
+func TestReadLedgerRejectsMalformedJSON(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "reservations.json"), []byte("{not json at all"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	store := NewReservationStore(dir)
+	store.alive = func(int) bool { return true }
+	if _, err := store.ActiveReservations(ctx); err == nil {
+		t.Fatal("ActiveReservations accepted malformed JSON; want fail-closed error")
+	}
+}
