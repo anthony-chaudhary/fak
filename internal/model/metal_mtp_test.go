@@ -1311,3 +1311,213 @@ func TestMetalMTPProposeCancellationLeavesTargetUntouched(t *testing.T) {
 		t.Fatalf("target Cache.Len advanced on cancellation: got %d, want %d", got, cacheLenBefore)
 	}
 }
+
+// summingMTPRecorder accumulates the accepted-token counts reported to the
+// Context-MMU across every CommitMTPDraft so a test can assert that the MMU
+// committed exactly the tokens Generate actually returned (issue #12344).
+type summingMTPRecorder struct {
+	mu       sync.Mutex
+	accepted int
+	commits  int
+}
+
+func (m *summingMTPRecorder) RecordMTPDraft(string, []int32) error { return nil }
+
+func (m *summingMTPRecorder) CommitMTPDraft(_ string, accepted int) (int, int, error) {
+	m.mu.Lock()
+	m.accepted += accepted
+	m.commits++
+	m.mu.Unlock()
+	return accepted, 0, nil
+}
+
+func (m *summingMTPRecorder) RollbackMTPDraft(string) (int, error) { return 0, nil }
+
+func (m *summingMTPRecorder) acceptedTotal() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.accepted
+}
+
+// assertMTPContinuationParity Steps one further identical token in each session
+// and requires the resulting logits to be bit-identical, proving the committed
+// prefix is not merely equal in shape but a faithful decode frontier.
+func assertMTPContinuationParity(t *testing.T, got, want *Session, next int) {
+	t.Helper()
+	gotNext := got.Step(next)
+	wantNext := want.Step(next)
+	assertFloat32BitsEqual(t, "continuation logits", wantNext, gotNext)
+}
+
+// TestMetalMTPGenerateCommitBoundary is the witness for issue #12344: Metal MTP
+// generation must commit exactly prompt plus returned output. StepRound commits
+// accepted drafts plus a bonus token (numAccepted+1 positions) before Generate
+// applies maxNew/EOS truncation, so a bounded round can leave target KV/GDN/
+// hidden state and Context-MMU accepted counts ahead of the returned tokens.
+//
+// The test drives deterministic native synthetic sessions with a drafter that
+// proposes the true greedy continuation, so rounds are genuinely accepted, then
+// covers both the maxNew truncation boundary and the EOS exclusion boundary. For
+// each case it compares complete target state (Cache + hidden history + GDN
+// recurrence) against a fresh prompt-plus-output reference, and asserts no
+// discarded suffix reached the Context-MMU.
+func TestMetalMTPGenerateCommitBoundary(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	prompt := []int{0, 1, 2}
+	const horizon = 12
+
+	// Deterministic greedy continuation, used both as the reference sequence and
+	// as the drafter's proposal source so draft rounds are accepted.
+	refSes := m.NewSession()
+	t.Cleanup(refSes.Close)
+	full := append(append([]int(nil), prompt...), refSes.Generate(prompt, horizon)...)
+
+	// freshReference returns a session holding exactly prompt+output state with
+	// target-hidden capture enabled, matching how the coordinator tracks state.
+	freshReference := func(output []int) *Session {
+		s := m.NewSession()
+		s.captureTargetHidden = true
+		s.Prefill(prompt)
+		for _, tok := range output {
+			s.Step(tok)
+		}
+		return s
+	}
+
+	runGenerate := func(t *testing.T, maxNew, eos, depth int) (*Session, []int, int) {
+		t.Helper()
+		// Set the EOS token before the session is created so the target cache cfg
+		// and the fresh reference cache cfg are identical (cfg is copied at
+		// NewSession time, so a later mutation would make the state oracle skew).
+		if eos >= 0 {
+			m.Cfg.EOSTokenID = eos
+			t.Cleanup(func() { m.Cfg.EOSTokenID = -1 })
+		}
+		ses := m.NewSession()
+		t.Cleanup(ses.Close)
+		coord, err := ses.NewMetalMTPCoordinator(MetalMTPConfig{
+			DraftDepth:            depth,
+			EnforceGreedyTripwire: true,
+			MinAcceptanceRate:     0.0,
+			WindowSize:            32,
+			FallbackToSerial:      true,
+		})
+		if err != nil {
+			t.Fatalf("NewMetalMTPCoordinator: %v", err)
+		}
+		t.Cleanup(func() { _ = coord.Close() })
+
+		rec := &summingMTPRecorder{}
+		coord.SetMMU(rec, "test-12344")
+		coord.SetDrafter(NewMTPProposalGeneratorWithFn(func(_ context.Context, committed []int, maxDraft int) ([]int, error) {
+			start := len(committed)
+			out := make([]int, 0, maxDraft)
+			for i := 0; i < maxDraft && start+i < len(full); i++ {
+				out = append(out, full[start+i])
+			}
+			return out, nil
+		}))
+
+		got, err := coord.Generate(context.Background(), prompt, maxNew)
+		if err != nil {
+			t.Fatalf("Generate(maxNew=%d,eos=%d): %v", maxNew, eos, err)
+		}
+		return coord.TargetSession(), got, rec.acceptedTotal()
+	}
+
+	// case 1: maxNew truncation inside an accepted round (K=4)
+	t.Run("maxnew_truncation", func(t *testing.T) {
+		const maxNew = 2
+		tgt, got, mmuAccepted := runGenerate(t, maxNew, -1, 4)
+		if len(got) != maxNew {
+			t.Fatalf("got %v, want %d tokens", got, maxNew)
+		}
+		want := full[len(prompt) : len(prompt)+maxNew]
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("output %v != greedy baseline %v", got, want)
+		}
+		if tgt.Cache.Len() != len(prompt)+len(got) {
+			t.Fatalf("target committed %d positions, want exactly prompt+output %d (over-commit)",
+				tgt.Cache.Len(), len(prompt)+len(got))
+		}
+		wantSes := freshReference(got)
+		t.Cleanup(wantSes.Close)
+		normalizeSnapshotForTest(t, tgt)
+		normalizeSnapshotForTest(t, wantSes)
+		assertQwen35MTPTargetStateEqual(t, tgt, wantSes)
+		if mmuAccepted != len(got) {
+			t.Fatalf("Context-MMU committed %d accepted tokens, want exactly returned %d", mmuAccepted, len(got))
+		}
+		assertMTPContinuationParity(t, tgt, wantSes, full[len(prompt)+maxNew])
+	})
+
+	// case 2: EOS exclusion — an accepted token equal to EOS must not be committed
+	t.Run("eos_exclusion", func(t *testing.T) {
+		// First token of the greedy continuation becomes EOS; Generate must stop
+		// before it and the discarded suffix must not be committed.
+		eos := full[len(prompt)]
+		tgt, got, mmuAccepted := runGenerate(t, horizon, eos, 4)
+		if len(got) != 0 {
+			t.Fatalf("got %v, want empty output before EOS", got)
+		}
+		if tgt.Cache.Len() != len(prompt) {
+			t.Fatalf("target committed %d positions, want exactly prompt %d at EOS boundary",
+				tgt.Cache.Len(), len(prompt))
+		}
+		wantSes := freshReference(nil)
+		t.Cleanup(wantSes.Close)
+		normalizeSnapshotForTest(t, tgt)
+		normalizeSnapshotForTest(t, wantSes)
+		assertQwen35MTPTargetStateEqual(t, tgt, wantSes)
+		if mmuAccepted != 0 {
+			t.Fatalf("Context-MMU committed %d tokens, want 0 at EOS boundary", mmuAccepted)
+		}
+		assertMTPContinuationParity(t, tgt, wantSes, eos)
+	})
+
+	// case 3: EOS reached on the serial/fallback step path (no accepted drafts).
+	// The serial path emits the boundary argmax without consulting the admission
+	// budget, so Generate must stop before committing an EOS position there too.
+	t.Run("serial_fallback_eos", func(t *testing.T) {
+		// First token after 4 emitted tokens becomes EOS; generation must stop
+		// exactly at that boundary with state == prompt+output.
+		eos := full[len(prompt)+4]
+		m.Cfg.EOSTokenID = eos
+		t.Cleanup(func() { m.Cfg.EOSTokenID = -1 })
+
+		ses := m.NewSession()
+		t.Cleanup(ses.Close)
+		coord, err := ses.NewMetalMTPCoordinator(DefaultMetalMTPConfig())
+		if err != nil {
+			t.Fatalf("NewMetalMTPCoordinator: %v", err)
+		}
+		t.Cleanup(func() { _ = coord.Close() })
+		// Force the serial step path: no drafter + fallback flag.
+		coord.SetDrafter(NewMTPProposalGeneratorWithFn(func(context.Context, []int, int) ([]int, error) {
+			return nil, nil
+		}))
+		coord.mu.Lock()
+		coord.inFallback = true
+		coord.mu.Unlock()
+
+		got, err := coord.Generate(context.Background(), prompt, horizon)
+		if err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		want := full[len(prompt) : len(prompt)+4]
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("serial fallback output %v, want pre-EOS greedy %v", got, want)
+		}
+		tgt := coord.TargetSession()
+		if tgt.Cache.Len() != len(prompt)+len(got) {
+			t.Fatalf("serial fallback committed %d positions, want exactly prompt+output %d",
+				tgt.Cache.Len(), len(prompt)+len(got))
+		}
+		wantSes := freshReference(got)
+		t.Cleanup(wantSes.Close)
+		normalizeSnapshotForTest(t, tgt)
+		normalizeSnapshotForTest(t, wantSes)
+		assertQwen35MTPTargetStateEqual(t, tgt, wantSes)
+		assertMTPContinuationParity(t, tgt, wantSes, eos)
+	})
+}
