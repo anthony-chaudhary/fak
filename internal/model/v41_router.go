@@ -3,7 +3,6 @@ package model
 import (
 	"fmt"
 	"math"
-	"sort"
 )
 
 const (
@@ -112,13 +111,7 @@ func v41Route(logits, correctionBias []float32, cfg v41RouterConfig) ([]routePic
 		}
 	}
 
-	indices := make([]int, cfg.Experts)
-	for i := range indices {
-		indices[i] = i
-	}
-	sort.SliceStable(indices, func(i, j int) bool {
-		return choice[indices[i]] > choice[indices[j]]
-	})
+	indices := v4TopKIndices(choice, cfg.TopK)
 
 	picks := make([]routePick, cfg.TopK)
 	var sum float32

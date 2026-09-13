@@ -3,7 +3,10 @@ package model
 import (
 	"fmt"
 	"math"
+	"os"
 	"sort"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // v4RouteError is a fail-closed admission error for the scored-layer V4
@@ -63,15 +66,7 @@ func v4ScoredRoute(logits, correctionBias []float32, topK int, routeScale float3
 		}
 	}
 
-	indices := make([]int, len(logits))
-	for i := range indices {
-		indices[i] = i
-	}
-	// Deterministic equivalent of topk: descending selection score, then the
-	// lower expert index for ties.
-	sort.SliceStable(indices, func(i, j int) bool {
-		return choice[indices[i]] > choice[indices[j]]
-	})
+	indices := v4TopKIndices(choice, topK)
 
 	picks := make([]routePick, topK)
 	var sum float32
@@ -90,6 +85,64 @@ func v4ScoredRoute(logits, correctionBias []float32, topK int, routeScale float3
 		}
 	}
 	return picks, nil
+}
+
+// v4BitonicTopKEnabled reports whether the bitonic-network top-k kernel is
+// opted in. Unset (default) keeps the reference full stable sort, so the
+// default path stays byte-identical to the pre-kernel router.
+func v4BitonicTopKEnabled() bool { return os.Getenv("FAK_V4_BITONIC_TOPK") == "1" }
+
+// v4TopKIndices returns the expert indices of the k largest selection scores,
+// in the router's pinned order: descending score, lower expert index first on
+// ties.
+//
+// With the kernel opted in it delegates to compute.PersistentBitonicTopK. Note
+// that kernel is a *full* bitonic sorting network (it pads E up to the next
+// power of two and sorts all slots, then slices the first k), NOT an O(E log k)
+// partial selection: at E=384 it pads to 512 and performs ~11520 compare-
+// exchanges versus ~3300 for the reference sort. It is wired here as an
+// opt-in equivalence spine only; no speedup is claimed, and the reference path
+// remains the default.
+//
+// On any kernel error, or on a returned index that is not a valid expert slot,
+// it falls back to the reference stable sort. The fallback is fail-closed: a
+// malformed kernel result can never select a non-existent expert or panic the
+// route.
+func v4TopKIndices(choice []float32, k int) []int {
+	ref := func() []int {
+		indices := make([]int, len(choice))
+		for i := range indices {
+			indices[i] = i
+		}
+		sort.SliceStable(indices, func(i, j int) bool {
+			return choice[indices[i]] > choice[indices[j]]
+		})
+		return indices
+	}
+	// Defense in depth: callers validate k, but a direct call with an
+	// out-of-range k must not index past the reference width downstream.
+	if k <= 0 || k > len(choice) {
+		return ref()
+	}
+	if !v4BitonicTopKEnabled() {
+		return ref()
+	}
+	entries, _, err := compute.PersistentBitonicTopK(choice, k)
+	if err != nil {
+		return ref()
+	}
+	indices := make([]int, 0, k)
+	for _, e := range entries {
+		idx := int(e.Index)
+		if idx < 0 || idx >= len(choice) {
+			return ref()
+		}
+		indices = append(indices, idx)
+	}
+	if len(indices) != k {
+		return ref()
+	}
+	return indices
 }
 
 func finite32(v float32) bool {
