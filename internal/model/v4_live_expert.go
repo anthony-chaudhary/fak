@@ -158,5 +158,27 @@ func (s *Session) v4ExpertForward(layer, tokenID int, normalized compute.Tensor)
 	if len(out) != s.M.Cfg.HiddenSize {
 		return compute.Tensor{}, fmt.Errorf("%w: expert output width=%d want %d", ErrV4LiveExpert, len(out), s.M.Cfg.HiddenSize)
 	}
+	// The always-on shared expert runs on every token and its contribution is
+	// added to the routed sum. Compute routed first, then shared, then combine
+	// as routed+shared: float addition order is observable, so the order is
+	// pinned here and the combine reuses the single pinned shared-add helper
+	// (v41_router.go). Scope: the Flash profile (epic #12638) is the admitted
+	// model whose shared expert must execute; the Pro profile keeps its prior
+	// routed-only behavior, and a shared-less profile (NSharedExperts==0)
+	// likewise stays routed-only.
+	if s.M.Cfg.NSharedExperts > 0 && isDeepSeekV4FlashProfile(s.M.Cfg) {
+		shared, err := s.v4SharedExpertForward(layer, x, float32(s.M.Cfg.SwigluLimit), s.M.Cfg.HiddenSize, s.M.Cfg.MoEIntermediateSize)
+		if err != nil {
+			return compute.Tensor{}, err
+		}
+		combined, err := v41SharedExpertAdd(out, shared, v41RouterConfig{SharedCount: s.M.Cfg.NSharedExperts})
+		if err != nil {
+			return compute.Tensor{}, fmt.Errorf("%w: shared add: %v", ErrV4SharedExpert, err)
+		}
+		out = combined
+	}
+	if len(out) != s.M.Cfg.HiddenSize {
+		return compute.Tensor{}, fmt.Errorf("%w: combined output width=%d want %d", ErrV4LiveExpert, len(out), s.M.Cfg.HiddenSize)
+	}
 	return s.uploadHostF32([]int{s.M.Cfg.HiddenSize}, out, compute.MemoryActivation, "v4-expert-output"), nil
 }

@@ -121,10 +121,6 @@ var offWithReason = map[string]reviewedDefaultDecision{
 		reason:   "changes cross-turn cache residency and requires a named principal plus writes routed through fak",
 		reviewBy: "2026-10-01",
 	},
-	"compact-anchor-head": {
-		reason:   "can burst the recent provider-cache breakpoint once -- needs a live session-turn payback witness",
-		reviewBy: "2026-10-01",
-	},
 	"compact-solvency-floor": {
 		reason:   "only the launcher knows model window minus output reserve; a gateway guess is harmful in both directions",
 		reviewBy: "2026-11-01",
@@ -165,6 +161,45 @@ var onWithReason = map[string]reviewedDefaultDecision{
 	"elide-stale-reads":      {reason: "stale-read elision suppresses superseded observations while preserving the latest value", reviewBy: "2026-11-01"},
 	"vdso":                   {reason: "the in-process fast path avoids redundant engine calls and retains the policy checkpoint", reviewBy: "2026-11-01"},
 	"gpudirect-overflow":     {reason: "direct P2P DMA NVMe/host overflow bypasses CPU bounce buffering on VRAM saturation", reviewBy: "2026-11-01"},
+}
+
+// registryOverlap returns the flag names present in BOTH reviewed registries, sorted.
+// The two maps encode opposite default postures (offWithReason = reviewed default-OFF,
+// onWithReason = reviewed default-ON), so a name in both is a contradiction: the tables
+// assert the flag both ships gated-off and ships on. The overlap must be empty; it is the
+// public half of the cross-repo invariant whose private half lives in platform/featureindex.
+func registryOverlap() []string {
+	var shared []string
+	for flag := range offWithReason {
+		if _, ok := onWithReason[flag]; ok {
+			shared = append(shared, flag)
+		}
+	}
+	sort.Strings(shared)
+	return shared
+}
+
+// ReviewedDecision is the public, read-only projection of one reviewed table entry.
+type ReviewedDecision struct {
+	Flag     string
+	On       bool
+	Reason   string
+	ReviewBy string
+}
+
+// ReviewedDecisions returns a deterministic (flag-name-sorted) snapshot of every entry
+// in the reviewed tables: offWithReason (On=false) and onWithReason (On=true). The
+// unexported maps remain the single source of truth; this accessor only projects them.
+func ReviewedDecisions() []ReviewedDecision {
+	out := make([]ReviewedDecision, 0, len(offWithReason)+len(onWithReason))
+	for flag, d := range offWithReason {
+		out = append(out, ReviewedDecision{Flag: flag, On: false, Reason: d.reason, ReviewBy: d.reviewBy})
+	}
+	for flag, d := range onWithReason {
+		out = append(out, ReviewedDecision{Flag: flag, On: true, Reason: d.reason, ReviewBy: d.reviewBy})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Flag < out[j].Flag })
+	return out
 }
 
 type valueFlag struct {

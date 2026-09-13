@@ -12,6 +12,7 @@ package model
 // MetalQ4K can still be paired with FAK_Q4K_FREE_CPU=1 once all q4_k matmuls are GPU-routed.
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -732,6 +733,13 @@ func (m *Model) metalQ8Weight(name string, qt *q8Tensor) *metalgemm.Q8Weight {
 func (m *Model) promoteMetalQ8Residency() error {
 	names, err := qwen38MetalQ8RuntimeNames(m.Cfg)
 	if err != nil {
+		// Cache the guard reason too so MetalQ8ResidencyError() can explain a declined
+		// promotion to the startup report even on a non-exact model.
+		metalQ4KMu.Lock()
+		if _, ok := metalQ8Exact[m]; !ok {
+			metalQ8Exact[m] = &metalQ8ExactState{err: err}
+		}
+		metalQ4KMu.Unlock()
 		return err
 	}
 	metalQ4KMu.Lock()
@@ -757,11 +765,17 @@ func (m *Model) promoteMetalQ8Residency() error {
 			return nil, &MetalQ8ResidencyUnavailableError{Reason: "missing promised Q8 projection: " + name}
 		}
 		w := metalgemm.AliasQ8(qt.q, qt.d, qt.out, qt.in)
-		if w == nil || !w.NoCopy() {
-			if w != nil {
-				w.Release()
-			}
-			return nil, &MetalQ8ResidencyUnavailableError{Reason: "no-copy Metal alias declined: " + name}
+		if w == nil {
+			// AliasQ8 fails closed on a non-page-aligned owner (its length must be a
+			// multiple of the OS page) or an invalid shape. Report the exact operands so
+			// the enabling condition is diagnosable rather than a silent nil.
+			return nil, &MetalQ8ResidencyUnavailableError{Reason: fmt.Sprintf(
+				"no-copy Metal alias declined for %s: out=%d in=%d len(q)=%d len(d)=%d (owner must be page-aligned; see newQ8Tensor/makePageAlignedResidentBytes)",
+				name, qt.out, qt.in, len(qt.q), len(qt.d))}
+		}
+		if !w.NoCopy() {
+			w.Release()
+			return nil, &MetalQ8ResidencyUnavailableError{Reason: "Q8 handle for " + name + " is a copied buffer, not the required no-copy alias"}
 		}
 		return w, nil
 	}, func(w *metalgemm.Q8Weight) { w.Release() })
@@ -798,6 +812,94 @@ func (m *Model) releaseMetalQ8Residency() {
 			w.Release()
 		}
 	}
+}
+
+// EagerMetalQ8Residency promotes the exact Qwen3.8 no-copy Q8 band at MODEL LOAD time, before
+// serving, so the first request already finds the GPU-resident Q8 minority and the device reaches
+// full utilization immediately instead of after the first lazy prefill upload. It is a deliberate
+// no-op (nil) when Metal is unavailable or the model is not the exact 64-layer Qwen3.8 hybrid, so
+// callers may invoke it unconditionally. A genuine decline returns the fail-closed
+// *MetalQ8ResidencyUnavailableError and is echoed to stderr once — metal_live_q8_weights going 0 is
+// never silent.
+func (m *Model) EagerMetalQ8Residency() error {
+	if m == nil || !metalgemm.Available() {
+		return nil
+	}
+	// Q6_K is a copied additive upload, so it is best-effort under the #1087 budget guard and
+	// never blocks the no-copy Q8 promotion.
+	if n, ok := m.metalQ6KWeights(); ok {
+		fmt.Fprintf(os.Stderr, "[metal-q8-residency] eager Q6_K upload: %d tensors GPU-resident\n", n)
+	} else {
+		fmt.Fprintf(os.Stderr, "[metal-q8-residency] eager Q6_K upload skipped: additive copy would exceed device budget (#1087 guard)\n")
+	}
+	// Q8 is the no-copy band. Only the exact 64-layer Qwen3.8 hybrid has a promised Q8 topology;
+	// for any other model promoteMetalQ8Residency returns its not-applicable guard reason, which
+	// is not a failure of the generic Metal-armed path.
+	names, guardErr := qwen38MetalQ8RuntimeNames(m.Cfg)
+	if guardErr != nil {
+		return nil
+	}
+	if err := m.promoteMetalQ8Residency(); err != nil {
+		fmt.Fprintf(os.Stderr, "[metal-q8-residency] eager Q8 promotion declined (%d named projections): %v\n", len(names), err)
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "[metal-q8-residency] eager Q8 promotion published %d no-copy projections\n", len(names))
+	return nil
+}
+
+// MetalQ8ResidencyError returns the cached fail-closed reason this model's exact Q8 promotion
+// declined, or nil if it was never attempted or succeeded. MetalQ8ResidencyAttempted distinguishes
+// "not attempted / not exact" (false) from "attempted and declined" (true, err non-nil).
+func (m *Model) MetalQ8ResidencyError() (error, bool) {
+	if m == nil {
+		return nil, false
+	}
+	metalQ4KMu.Lock()
+	defer metalQ4KMu.Unlock()
+	state, ok := metalQ8Exact[m]
+	if !ok || state == nil || state.err == nil {
+		return nil, false
+	}
+	return state.err, true
+}
+
+// metalQ6KWeights uploads the resident Q6_K projection store (the fused-MLP down_proj and the
+// Q6_K LM/MTP head when a q4_k_m GGUF quantizes them to Q6_K) to the GPU once at load time. It
+// mirrors metalQ6KWeight's copy semantics but is gated by the additive-copy budget predicate
+// q6kUploadFits so an eager Q6_K upload can never reopen the #1087 OOM. Returns the number of
+// tensors uploaded on success; ok is false (and nothing is uploaded) when the device budget cannot
+// absorb the additive copy, so the caller leaves Q6_K on its lazy guarded path.
+func (m *Model) metalQ6KWeights() (int, bool) {
+	if !metalgemm.Available() {
+		return 0, false
+	}
+	var q6kBytes int64
+	for _, qt := range m.kqw {
+		if qt != nil && qt.kind == kindQ6K {
+			q6kBytes += int64(len(qt.raw))
+		}
+	}
+	if q6kBytes == 0 {
+		return 0, true
+	}
+	r := m.ResidentReport()
+	deviceTotal := int64(0)
+	if total, ok := metalgemm.DeviceMemoryTotal(); ok {
+		deviceTotal = int64(total)
+	}
+	if !q6kUploadFits(r.TotalResidentBytes, q6kBytes, deviceTotal) {
+		return 0, false
+	}
+	n := 0
+	for name, qt := range m.kqw {
+		if qt == nil || qt.kind != kindQ6K {
+			continue
+		}
+		if m.metalQ6KWeight(name, qt) != nil {
+			n++
+		}
+	}
+	return n, true
 }
 
 // metalQ4KWeights uploads all Q4_K projection weights for this model to the GPU once,

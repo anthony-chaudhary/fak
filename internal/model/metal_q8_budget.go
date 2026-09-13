@@ -21,6 +21,15 @@ import "fmt"
 // for the prefill activation panels + KV growth on top of the (temporarily doubled) projection store.
 const metalQ8UploadFraction = 0.90
 
+// metalQ8AliasFraction is the headroom fraction for the EXACT Qwen3.8 no-copy alias path ONLY. Unlike
+// the additive UploadQ8 copy gated by metalQ8UploadFraction, AliasQ8 adds no new device bytes — it
+// exposes the model's already-resident, page-aligned Q8 owners to Metal in place. The residual risk
+// is therefore not a doubled projection store but a model whose resident owner already saturates the
+// working set and leaves no room for prefill activations + KV. 0.97 keeps that fail-closed headroom
+// while admitting the common case (e.g. a 23 GiB owner on a 27 GiB budget = 0.852) that the
+// additive-copy 0.90 model wrongly refused. The #1087 additive gate above is deliberately unchanged.
+const metalQ8AliasFraction = 0.97
+
 // q8UploadFits is the pure budget predicate: does the already-resident weight footprint plus the
 // projected additive Q8 GPU copy fit under metalQ8UploadFraction of the device working-set budget?
 // forceEnv is the raw FAK_METAL_Q8_UPLOAD value: "1"/"on"/"true" forces the upload on (a roomy box
@@ -50,15 +59,38 @@ func (e *MetalQ8ResidencyUnavailableError) Error() string {
 	return "model: exact Metal Q8 residency unavailable: " + e.Reason
 }
 
+// q8AliasFits decides whether the EXACT no-copy Q8 alias band may be published. It is the
+// fail-closed gate for the alias path alone: the alias adds no device bytes, so it is judged against
+// metalQ8AliasFraction (headroom for activations/KV only), NOT the additive-copy
+// metalQ8UploadFraction. Every decline carries the concrete operands so a silent
+// metal_live_q8_weights=0 is never unexplained.
+// q6kUploadFits is the additive-copy budget predicate for eagerly uploading the resident Q6_K
+// (k-quant) projection store at load time. Unlike the Q8 no-copy alias, UploadQ6KGoOwned COPIES the
+// raw blocks into a fresh device buffer, so it is judged with the SAME 0.90 headroom as the #1087
+// additive Q8 copy and is deliberately NOT overridable by FAK_METAL_Q8_UPLOAD (that env governs the
+// Q8 path only; letting it force an additive Q6_K copy would reopen the OOM it guards).
+func q6kUploadFits(residentBytes, q6kBytes, deviceTotal int64) bool {
+	if deviceTotal <= 0 || q6kBytes <= 0 {
+		return false
+	}
+	return float64(residentBytes+q6kBytes) <= metalQ8UploadFraction*float64(deviceTotal)
+}
+
 func q8AliasFits(residentBytes, deviceTotal int64, override string) error {
 	if override != "" {
-		return &MetalQ8ResidencyUnavailableError{Reason: "FAK_METAL_Q8_UPLOAD override is not admissible for no-copy evidence"}
+		return &MetalQ8ResidencyUnavailableError{Reason: fmt.Sprintf(
+			"FAK_METAL_Q8_UPLOAD=%q override is not admissible for no-copy evidence (unset it to let the alias publish on its own evidence)", override)}
 	}
 	if deviceTotal <= 0 {
-		return &MetalQ8ResidencyUnavailableError{Reason: "device working-set budget is unknown"}
+		return &MetalQ8ResidencyUnavailableError{Reason: "device working-set budget is unknown (Metal device memory probe returned 0)"}
 	}
-	if residentBytes < 0 || float64(residentBytes) > metalQ8UploadFraction*float64(deviceTotal) {
-		return &MetalQ8ResidencyUnavailableError{Reason: "model owner leaves insufficient activation/KV headroom"}
+	if residentBytes < 0 {
+		return &MetalQ8ResidencyUnavailableError{Reason: fmt.Sprintf("resident footprint is negative (%d bytes); refusing no-copy evidence", residentBytes)}
+	}
+	if limit := metalQ8AliasFraction * float64(deviceTotal); float64(residentBytes) > limit {
+		return &MetalQ8ResidencyUnavailableError{Reason: fmt.Sprintf(
+			"model owner leaves insufficient activation/KV headroom: resident=%d bytes > %.2f*deviceTotal=%d bytes (%.2f%% of device)",
+			residentBytes, metalQ8AliasFraction, int64(limit), 100*float64(residentBytes)/float64(deviceTotal))}
 	}
 	return nil
 }

@@ -74,6 +74,14 @@ type labelTotals struct {
 	promptTokens   uint64
 	eligibleTokens uint64
 	reusedTokens   uint64
+	// Per-label source-axis counters (#12886), the same four buckets the global source axis
+	// carries. Booking them in the SAME critical section as the label's depth counters means
+	// a per-label source row can never drift from the global source total it decomposes:
+	// summing these across rows always reconciles, exactly like the depth columns.
+	srcLocalCompute     uint64
+	srcLocalHit         uint64
+	srcExternalTransfer uint64
+	srcUnknown          uint64
 }
 
 // labelTotalsLocked returns (creating if needed) the row for labels. Caller holds o.mu;
@@ -109,13 +117,23 @@ func (o *Observer) ObserveLabeled(labels Labels, promptTokens, cacheablePrefixTo
 	o.observeAttributed(labels, promptTokens, cacheablePrefixTokens, reusedPrefixTokens, 0, eligiblePromptTokens)
 }
 
-// LabeledStats is one (model, tenant, phase) row of the per-series snapshot.
+// LabeledStats is one (model, tenant, phase) row of the per-series snapshot. Beyond the
+// depth columns it carries the SOURCE axis for the same series (#12886), so a caller gets
+// whose traffic earned the reuse and where that value came from, from one coherent read.
 type LabeledStats struct {
 	Labels         Labels
 	Turns          uint64
 	PromptTokens   uint64
 	EligibleTokens uint64
 	ReusedTokens   uint64
+	// Source columns. Zero for a series that has only ever been fed by a depth-axis tap
+	// (including the legacy Observe / ObserveSplit / ObserveLabeled taps), never a fabricated
+	// classification — a source-less turn stays absent rather than looking local.
+	LocalComputeTokens     uint64
+	LocalHitTokens         uint64
+	ExternalTransferTokens uint64
+	// UnknownSourceTokens is the explicit un-witnessed provenance for this series (#12886).
+	UnknownSourceTokens uint64
 }
 
 // LabeledSnapshot returns the per-(model, tenant, phase) rows in deterministic order so a
@@ -128,17 +146,37 @@ func (o *Observer) LabeledSnapshot() []LabeledStats {
 		return nil
 	}
 	o.mu.Lock()
+	rows := o.labeledRowsLocked()
+	o.mu.Unlock()
+	sortLabeledRows(rows)
+	return rows
+}
+
+// labeledRowsLocked copies every label row's depth AND source columns. Caller holds o.mu;
+// the result is unsorted (the exported readers sort it outside the lock). It is the single
+// row builder behind LabeledSnapshot and the coherent combined snapshot, so the two can
+// never disagree on a row's fields.
+func (o *Observer) labeledRowsLocked() []LabeledStats {
 	rows := make([]LabeledStats, 0, len(o.byLabel))
 	for labels, lt := range o.byLabel {
 		rows = append(rows, LabeledStats{
-			Labels:         labels,
-			Turns:          lt.turns,
-			PromptTokens:   lt.promptTokens,
-			EligibleTokens: lt.eligibleTokens,
-			ReusedTokens:   lt.reusedTokens,
+			Labels:                 labels,
+			Turns:                  lt.turns,
+			PromptTokens:           lt.promptTokens,
+			EligibleTokens:         lt.eligibleTokens,
+			ReusedTokens:           lt.reusedTokens,
+			LocalComputeTokens:     lt.srcLocalCompute,
+			LocalHitTokens:         lt.srcLocalHit,
+			ExternalTransferTokens: lt.srcExternalTransfer,
+			UnknownSourceTokens:    lt.srcUnknown,
 		})
 	}
-	o.mu.Unlock()
+	return rows
+}
+
+// sortLabeledRows imposes the deterministic (model, tenant, phase) order a renderer needs to
+// emit a stable series order.
+func sortLabeledRows(rows []LabeledStats) {
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].Labels.Model != rows[j].Labels.Model {
 			return rows[i].Labels.Model < rows[j].Labels.Model
@@ -148,5 +186,98 @@ func (o *Observer) LabeledSnapshot() []LabeledStats {
 		}
 		return rows[i].Labels.Phase < rows[j].Labels.Phase
 	})
-	return rows
+}
+
+// SourceSplit is the caller's provenance decomposition of one turn's served tokens along
+// the source axis (#3896 / #12886): how many prompt tokens were recomputed locally, served
+// from a locally-resident prefix, or pulled across the fabric. A nil *SourceSplit (or a
+// zero-valued one whose buckets do not account for the whole turn) is understood as an
+// ABSENT source witness, and the turn's reuse books as SourceUnknown — never as local.
+type SourceSplit struct {
+	LocalCompute     int
+	LocalHit         int
+	ExternalTransfer int
+}
+
+// sourceBuckets clamps a caller's source split into non-negative buckets and returns the
+// remainder of the turn's reused tokens as UNKNOWN. With a nil split (legacy input, no
+// source evidence) the entire reused share books UNKNOWN — explicit, never classified
+// local. The four returned values always sum to reusedPrefixTokens (already clamped >= 0),
+// so the source axis reconciles exactly with the turn's depth-axis reuse.
+func sourceBuckets(src *SourceSplit, reusedPrefixTokens int) (compute, hit, external, unknown uint64) {
+	if reusedPrefixTokens < 0 {
+		reusedPrefixTokens = 0
+	}
+	if src == nil {
+		return 0, 0, 0, uint64(reusedPrefixTokens)
+	}
+	if src.LocalCompute > 0 {
+		compute = uint64(src.LocalCompute)
+	}
+	if src.LocalHit > 0 {
+		hit = uint64(src.LocalHit)
+	}
+	if src.ExternalTransfer > 0 {
+		external = uint64(src.ExternalTransfer)
+	}
+	booked := compute + hit + external
+	if booked > uint64(reusedPrefixTokens) {
+		// Over-claim: cap at the reuse the depth axis actually saw, folding the excess back
+		// to UNKNOWN rather than inflating any known source above the tokens that exist.
+		compute, hit, external, unknown = 0, 0, 0, uint64(reusedPrefixTokens)
+		return
+	}
+	unknown = uint64(reusedPrefixTokens) - booked
+	return
+}
+
+// ObserveLabeledSource is the ATOMIC labeled-source observation (#12886). It records one
+// served turn exactly like ObserveLabeled — the same #3390 clamps, eligibility denominator,
+// regime/histogram bookkeeping, and (model, tenant, phase) depth row — and IN THE SAME
+// o.mu critical section books the SOURCE axis both globally and on the label row. src is
+// the caller's provenance split; pass nil for a legacy tap that carries no source evidence,
+// and the turn's reuse books as explicit UNKNOWN rather than as a local hit or compute.
+//
+// This is the deliberate replacement for the non-atomic pattern of calling ObserveBySource
+// and ObserveLabeled separately, under which a concurrent reader can observe a depth total
+// and a source total that never co-existed.
+func (o *Observer) ObserveLabeledSource(labels Labels, promptTokens, cacheablePrefixTokens, reusedPrefixTokens, eligiblePromptTokens int, src *SourceSplit) {
+	o.observeAttributedSource(labels, promptTokens, cacheablePrefixTokens, reusedPrefixTokens, 0, eligiblePromptTokens, src, true)
+}
+
+// CombinedStats is one coherent reading of every axis the observer accumulates: the global
+// DEPTH snapshot, the global SOURCE snapshot, and the per-label rows — each carrying both
+// depth and source columns. Every field was read under a single o.mu acquisition, so the
+// three axes cannot be mutually inconsistent (no depth total from before an observation
+// beside a source total from after it).
+type CombinedStats struct {
+	// Depth is the global depth-axis snapshot, identical to Snapshot().
+	Depth Stats
+	// Source is the global provenance snapshot, identical to SourceSnapshot().
+	Source SourceStats
+	// Labels are the per-(model, tenant, phase) rows in deterministic order, identical to
+	// LabeledSnapshot() — but read under the same lock as Depth and Source, so summing their
+	// columns reconciles with both global axes in THIS reading.
+	Labels []LabeledStats
+}
+
+// CombinedSnapshot returns the global depth, global source, and labeled rows from one lock
+// acquisition — a coherent snapshot (#12886). It is the operation a caller must use when it
+// needs to reconcile the axes: sequentially calling Snapshot, SourceSnapshot, and
+// LabeledSnapshot is NOT a coherent snapshot, because an observation may land between any
+// two of those calls and leave a reader with totals that never co-existed. The label rows
+// are sorted deterministically, as LabeledSnapshot sorts them. Nil-safe like Snapshot.
+func (o *Observer) CombinedSnapshot() CombinedStats {
+	if o == nil {
+		return CombinedStats{}
+	}
+	o.mu.Lock()
+	cs := CombinedStats{
+		Depth:  o.snapshotLocked(),
+		Source: o.sourceSnapshotLocked(),
+		Labels: o.labeledRowsLocked(),
+	}
+	o.mu.Unlock()
+	sortLabeledRows(cs.Labels)
+	return cs
 }

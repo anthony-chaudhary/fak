@@ -666,6 +666,12 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 	if req.Model != "" {
 		modelID = req.Model
 	}
+	if req.Stream && !s.mock {
+		if sp, ok := s.planner.(agent.StreamingPlanner); ok && sp.StreamingSupported() {
+			s.handleChatCompletionsStream(w, r, req, modelID, sp)
+			return
+		}
+	}
 
 	promptTokens := 0
 	compTokens := 0

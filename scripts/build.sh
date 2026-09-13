@@ -54,6 +54,27 @@ if [ "$PGO" = "auto" ]; then
   exit 2
 fi
 
+# Darwin/arm64 Metal guard (#12771/#12784). The Metal GEMM backend is gated
+# `//go:build darwin && arm64 && cgo`: with CGO_ENABLED=0 the build links the
+# pure-Go STUB and `fak up` silently serves CPU while still printing a Metal-ish
+# banner. Every shipping darwin/arm64 build must therefore be cgo-enabled; an
+# accidental CGO_ENABLED=0 is refused loudly here (the ONE build entrypoint all
+# consumers route through) unless the caller explicitly opts into a CPU build.
+# The check keys on the TARGET (GOOS/GOARCH, defaulting to the host), so a
+# cross-build for another OS is unaffected.
+_target_os="${GOOS:-$(go env GOOS)}"
+_target_arch="${GOARCH:-$(go env GOARCH)}"
+if [ "$_target_os" = "darwin" ] && [ "$_target_arch" = "arm64" ] && [ "${CGO_ENABLED:-}" != "1" ]; then
+  if [ "${ALLOW_CPU_FALLBACK:-0}" = "1" ]; then
+    echo "build.sh: WARNING: CGO_ENABLED!=1 on darwin/arm64 -- building the CPU STUB (Metal disabled). ALLOW_CPU_FALLBACK=1 acknowledged." >&2
+  else
+    echo "build.sh: REFUSED -- darwin/arm64 without cgo silently produces a CPU-only fak (Metal stub)." >&2
+    echo "  Metal needs CGO_ENABLED=1:  CGO_ENABLED=1 sh scripts/build.sh" >&2
+    echo "  For an intentional CPU-only build:  ALLOW_CPU_FALLBACK=1 sh scripts/build.sh" >&2
+    exit 2
+  fi
+fi
+
 # BuildVersion is stamped in EVERY profile so `fak version` never lies about what ran;
 # only the strip/trim/DWARF posture differs between the shipped and the debuggable builds.
 STAMP="-X github.com/anthony-chaudhary/fak/internal/appversion.BuildVersion=${VERSION}"

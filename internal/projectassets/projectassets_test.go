@@ -731,6 +731,48 @@ func TestVerifyOpenCodePlugin(t *testing.T) {
 	}
 }
 
+func TestDefaultOpenCodePluginDOSProbeHasNoStrictKwarg(t *testing.T) {
+	if strings.Contains(DefaultOpenCodePlugin, "strict=") {
+		t.Fatal("DefaultOpenCodePlugin must not emit strict= (incompatible with DOS >= " + DOSMinVersion + ")")
+	}
+	if !strings.Contains(DefaultOpenCodePlugin, "live_leases(cfg, expire_dead=True)") {
+		t.Fatal("DefaultOpenCodePlugin must emit the strict-free live_leases(cfg, expire_dead=True) probe")
+	}
+}
+
+func TestVerifyOpenCodePluginRejectsStaleStrictProbe(t *testing.T) {
+	stale := strings.Replace(DefaultOpenCodePlugin, "live_leases(cfg, expire_dead=True)", "live_leases(cfg, strict=True, expire_dead=True)", 1)
+	if !strings.Contains(stale, "strict=") {
+		t.Fatal("fixture construction failed: stale probe lacks strict=")
+	}
+	tmp := t.TempDir()
+	write(t, tmp, OpenCodePluginPath, stale)
+	err := VerifyOpenCodePlugin(tmp)
+	if err == nil {
+		t.Fatal("expected VerifyOpenCodePlugin to reject a stale strict=True probe, got nil")
+	}
+	if !strings.Contains(err.Error(), "strict") {
+		t.Fatalf("expected rejection error to mention strict, got: %v", err)
+	}
+}
+
+func TestSyncOpenCodePluginRoundTripOmitsStrict(t *testing.T) {
+	tmp := t.TempDir()
+	if err := SyncOpenCodePlugin(tmp); err != nil {
+		t.Fatalf("SyncOpenCodePlugin failed: %v", err)
+	}
+	if err := VerifyOpenCodePlugin(tmp); err != nil {
+		t.Fatalf("VerifyOpenCodePlugin failed after SyncOpenCodePlugin: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(tmp, filepath.FromSlash(OpenCodePluginPath)))
+	if err != nil {
+		t.Fatalf("read synced plugin: %v", err)
+	}
+	if strings.Contains(string(b), "strict=") {
+		t.Fatal("synced plugin must not contain strict=")
+	}
+}
+
 func TestSyncAndEnsureOpenCodePlugin(t *testing.T) {
 	tmp := t.TempDir()
 

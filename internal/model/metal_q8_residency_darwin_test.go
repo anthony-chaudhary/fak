@@ -3,6 +3,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -174,5 +175,87 @@ func TestMetalQ8ExactPromotionRollbackConcurrencyAndTeardown(t *testing.T) {
 	}
 	if !closer.closed {
 		t.Fatal("checkpoint owner was not closed after native teardown")
+	}
+}
+
+// TestEagerMetalQ8ResidencyPromotesAtLoad pins part A: an exact Qwen3.8 hybrid on Apple Silicon
+// publishes its full 272-projection no-copy Q8 band at LOAD time (before any prefill), so the
+// startup probe reads a non-zero metal_live_q8_weights and the first request is fully resident.
+func TestEagerMetalQ8ResidencyPromotesAtLoad(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("no Metal device available")
+	}
+	t.Setenv("FAK_METAL_Q8_UPLOAD", "")
+	base := metalgemm.LiveQ8Weights()
+	m := tinyExactQwen38Q8Model(t)
+	if err := m.EagerMetalQ8Residency(); err != nil {
+		t.Fatalf("eager promotion declined on an exact hybrid: %v", err)
+	}
+	if got := metalgemm.LiveQ8Weights(); got != base+272 {
+		t.Fatalf("eager promotion allocated %d slots, want 272 over base %d", got-base, base)
+	}
+	if err, attempted := m.MetalQ8ResidencyError(); attempted || err != nil {
+		t.Fatalf("successful promotion reported attempted=%v err=%v", attempted, err)
+	}
+	// Idempotent: a second eager call must not double-publish.
+	if err := m.EagerMetalQ8Residency(); err != nil {
+		t.Fatalf("second eager promotion: %v", err)
+	}
+	if got := metalgemm.LiveQ8Weights(); got != base+272 {
+		t.Fatalf("repeat eager promotion double-published: live=%d want %d", got, base+272)
+	}
+	m.releaseMetalQ8Residency()
+	if got := metalgemm.LiveQ8Weights(); got != base {
+		t.Fatalf("teardown leaked slots: live=%d base=%d", got, base)
+	}
+}
+
+// TestEagerMetalQ8ResidencyFailureSurfacesReason pins part B: when the no-copy band cannot be built
+// (here a deliberately non-page-aligned owner), the eager call returns a fail-closed reason and
+// MetalQ8ResidencyError reports it as attempted — a metal_live_q8_weights=0 is never silent.
+func TestEagerMetalQ8ResidencyFailureSurfacesReason(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("no Metal device available")
+	}
+	t.Setenv("FAK_METAL_Q8_UPLOAD", "")
+	base := metalgemm.LiveQ8Weights()
+	m := tinyExactQwen38Q8Model(t)
+	names, _ := qwen38MetalQ8RuntimeNames(m.Cfg)
+	bad := newQ8Tensor(2, 32, 1)
+	bad.d[0] = 1
+	bad.q = bad.q[1:33] // full logical length, deliberately not page aligned
+	bad.out = 1
+	m.q8w[names[113]] = bad
+
+	err := m.EagerMetalQ8Residency()
+	if err == nil {
+		t.Fatal("eager promotion admitted an unbuildable no-copy band")
+	}
+	var unavailable *MetalQ8ResidencyUnavailableError
+	if !errors.As(err, &unavailable) || unavailable.Reason == "" {
+		t.Fatalf("eager failure not a fail-closed reason: %T %v", err, err)
+	}
+	stored, attempted := m.MetalQ8ResidencyError()
+	if !attempted || stored == nil {
+		t.Fatalf("declined promotion not surfaced: attempted=%v err=%v", attempted, stored)
+	}
+	if metalgemm.LiveQ8Weights() != base {
+		t.Fatalf("failed eager promotion leaked native slots: live=%d base=%d", metalgemm.LiveQ8Weights(), base)
+	}
+}
+
+// TestEagerMetalQ8ResidencyNoopWhenNotExact proves the guard: a non-exact model is a no-op (no
+// slots, no error), so callers may invoke the hook unconditionally on any Metal-armed model.
+func TestEagerMetalQ8ResidencyNoopWhenNotExact(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("no Metal device available")
+	}
+	base := metalgemm.LiveQ8Weights()
+	m := &Model{Cfg: Config{ModelType: "llama", NumLayers: 2, LayerTypes: []string{"full_attention", "full_attention"}}}
+	if err := m.EagerMetalQ8Residency(); err != nil {
+		t.Fatalf("non-exact model eager hook returned an error: %v", err)
+	}
+	if got := metalgemm.LiveQ8Weights(); got != base {
+		t.Fatalf("non-exact model allocated %d Q8 slots", got-base)
 	}
 }

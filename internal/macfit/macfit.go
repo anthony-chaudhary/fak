@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // Input describes a modeled unified-memory budget. All byte quantities are
@@ -58,6 +59,39 @@ func mul(values ...uint64) (uint64, error) {
 		n *= v
 	}
 	return n, nil
+}
+
+// kvQuantized reports whether a KV precision tier stores the attended rows at a
+// reduced width (q8_0/q4_0) rather than full FP16/FP32. It gates the memory-pressure
+// context ceiling: a quantized tier earns a proportionally larger context budget.
+func kvQuantized(prec model.KVPrecision) bool {
+	switch prec {
+	case model.KVPrecisionQ8_0, model.KVPrecisionQ4_0:
+		return true
+	default:
+		return false
+	}
+}
+
+// kvBytesPerToken returns the resident KV bytes for one token of one layer's K and V
+// vectors, each of length KVHeads*HeadDim, packed at prec. The model.KVVectorBytes
+// helper already accounts for per-group scale/min metadata, so the quantized result is
+// honest rather than a naive bit-width division. FP16 reproduces the historical
+// 2*KVHeads*HeadDim*2 bytes per token per layer exactly.
+func kvBytesPerToken(tier ModelTier, prec model.KVPrecision) (uint64, error) {
+	dim, err := mul(tier.KVHeads, tier.HeadDim)
+	if err != nil {
+		return 0, err
+	}
+	if dim == 0 {
+		return 0, nil
+	}
+	perSide := uint64(model.KVVectorBytes(int(dim), prec))
+	if perSide == 0 {
+		return 0, nil
+	}
+	// K and V are the same shape, so the per-token per-layer cost is two sides.
+	return mul(2, tier.Layers, perSide)
 }
 
 func fit(pool, fixed, perAgent uint64) uint64 {
@@ -234,22 +268,28 @@ type TurnkeyOptions struct {
 	AvailableBytes     uint64 // live available memory in bytes (0 = auto-detect via compute.HostSystemMemoryInfo)
 	DisplayBufferBytes uint64 // display buffer reservation in bytes (0 = auto-detect)
 	StaticOnly         bool   // disable dynamic memory clamping (preserves standard static sizing)
+
+	// KVPrecision optionally selects a quantized KV storage tier (q8_0/q4_0) for the
+	// KV-bytes-per-token estimate below. The zero value ("" / fp16) preserves the
+	// historical FP16 arithmetic byte-for-byte, so no existing plan changes.
+	KVPrecision model.KVPrecision
 }
 
 // TurnkeyProfile describes the sizing calculation for turnkey model provisioning.
 type TurnkeyProfile struct {
-	Schema              string    `json:"schema"`
-	MemoryBytes         uint64    `json:"memory_bytes"`
-	ReserveBytes        uint64    `json:"reserve_bytes"`
-	HeadroomBytes       uint64    `json:"headroom_bytes"`
-	HeadroomRatio       float64   `json:"headroom_ratio"`
-	Tier                ModelTier `json:"tier"`
-	ContextBudgetTokens uint64    `json:"context_budget_tokens"`
-	KVBytesPerToken     uint64    `json:"kv_bytes_per_token"`
-	KVPoolBytes         uint64    `json:"kv_pool_bytes"`
-	AvailableBytes      uint64    `json:"available_bytes,omitempty"`
-	DisplayBufferBytes  uint64    `json:"display_buffer_bytes,omitempty"`
-	MemoryPressure      bool      `json:"memory_pressure,omitempty"`
+	Schema              string            `json:"schema"`
+	MemoryBytes         uint64            `json:"memory_bytes"`
+	ReserveBytes        uint64            `json:"reserve_bytes"`
+	HeadroomBytes       uint64            `json:"headroom_bytes"`
+	HeadroomRatio       float64           `json:"headroom_ratio"`
+	Tier                ModelTier         `json:"tier"`
+	ContextBudgetTokens uint64            `json:"context_budget_tokens"`
+	KVBytesPerToken     uint64            `json:"kv_bytes_per_token"`
+	KVPrecision         model.KVPrecision `json:"kv_precision,omitempty"`
+	KVPoolBytes         uint64            `json:"kv_pool_bytes"`
+	AvailableBytes      uint64            `json:"available_bytes,omitempty"`
+	DisplayBufferBytes  uint64            `json:"display_buffer_bytes,omitempty"`
+	MemoryPressure      bool              `json:"memory_pressure,omitempty"`
 }
 
 // DefaultDisplayBufferReservePerDisplay is the estimated memory reserved by WindowServer
@@ -423,8 +463,15 @@ func ConfigureTurnkeyWithOptions(memoryBytes uint64, opts TurnkeyOptions) (Turnk
 	// 3. Allocate remaining usable memory for KV cache pool.
 	staticKVBytes := usableBytes - tier.WeightBytes
 
-	// KV bytes per token (FP16 = 2 bytes per element, key + value = 2).
-	kvpt, err := mul(2, tier.Layers, tier.KVHeads, tier.HeadDim, 2)
+	// KV bytes per token. The default (zero-value) precision is FP16 over a K and a V
+	// vector of KVHeads*HeadDim elements, which is byte-identical to the historical
+	// 2*Layers*KVHeads*HeadDim*2 estimate. A quantized tier (q8_0/q4_0) packs the same
+	// two vectors denser, so the same KV pool holds proportionally more context.
+	kvPrecision := opts.KVPrecision
+	if kvPrecision == "" {
+		kvPrecision = model.KVPrecisionFP16
+	}
+	kvpt, err := kvBytesPerToken(tier, kvPrecision)
 	if err != nil {
 		return TurnkeyProfile{}, err
 	}
@@ -476,8 +523,11 @@ func ConfigureTurnkeyWithOptions(memoryBytes uint64, opts TurnkeyOptions) (Turnk
 	}
 
 	// Memory pressure signals trigger conservative context budget reductions instead of swap thrashing.
+	// A quantized KV tier makes the same KV pool hold far more tokens, so the FP16
+	// 8192-token ceiling is only applied when KV is stored at full FP16 precision;
+	// the smaller hard floors below still apply under severe pressure.
 	if memoryPressure {
-		if contextBudget > 8192 {
+		if !kvQuantized(kvPrecision) && contextBudget > 8192 {
 			contextBudget = 8192
 		}
 		if kvPoolBytes < 2*GiB && contextBudget > 2048 {
@@ -506,6 +556,7 @@ func ConfigureTurnkeyWithOptions(memoryBytes uint64, opts TurnkeyOptions) (Turnk
 		Tier:                tier,
 		ContextBudgetTokens: contextBudget,
 		KVBytesPerToken:     kvpt,
+		KVPrecision:         kvPrecision,
 		KVPoolBytes:         kvPoolBytes,
 		AvailableBytes:      availableBytes,
 		DisplayBufferBytes:  displayBufferBytes,

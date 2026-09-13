@@ -159,9 +159,136 @@ jobs:
         with:
           subject-path: ${{ env.ARCHIVE }}
 
+  vulkan-build:
+    name: linux/amd64 Vulkan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write # gh release upload
+      id-token: write # SLSA build-provenance attestation
+      attestations: write
+    env:
+      GOTOOLCHAIN: auto
+      CGO_ENABLED: "1"
+      GOOS: linux
+      GOARCH: amd64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Install Vulkan build and software-device dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y binutils ca-certificates curl g++ jq libvulkan-dev mesa-vulkan-drivers xz-utils
+
+      - name: Build and validate Vulkan archive
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          ARCHIVE="fak_${VERSION}_linux_amd64_vulkan.tar.gz"
+          SDK_VERSION="1.4.350.0"
+          SDK_SHA256="b65f068ab36263559da49d7cacd7e7b9df23824ca8b68ccc522a2b06f5725df2"
+          SDK_ARCHIVE="$RUNNER_TEMP/vulkansdk-linux-x86_64-${SDK_VERSION}.tar.xz"
+          SDK_ROOT="$RUNNER_TEMP/vulkansdk-${SDK_VERSION}"
+          mapfile -t LVP_ICDS < <(find /usr/share/vulkan/icd.d -maxdepth 1 -type f -name 'lvp_icd*.json' -print | sort)
+          if [ "${#LVP_ICDS[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one Lavapipe ICD, found ${#LVP_ICDS[@]}"
+            exit 1
+          fi
+          LVP_ICD="${LVP_ICDS[0]}"
+
+          curl --fail --location --retry 3 \
+            "https://sdk.lunarg.com/sdk/download/${SDK_VERSION}/linux/vulkan_sdk.tar.xz" \
+            --output "$SDK_ARCHIVE"
+          echo "${SDK_SHA256}  ${SDK_ARCHIVE}" | sha256sum --check --strict
+          mkdir -p "$SDK_ROOT"
+          tar -xJf "$SDK_ARCHIVE" -C "$SDK_ROOT"
+          mapfile -t PINNED_GLSLCS < <(find "$SDK_ROOT" -type f -path '*/x86_64/bin/glslc' -print | sort)
+          if [ "${#PINNED_GLSLCS[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one pinned LunarG glslc, found ${#PINNED_GLSLCS[@]}"
+            exit 1
+          fi
+          PINNED_GLSLC="${PINNED_GLSLCS[0]}"
+          "$PINNED_GLSLC" --version
+
+          mkdir -p dist/pkg
+          go run ./cmd/fak-dev build-vulkan shaders \
+            --commit "$(git rev-parse HEAD)" \
+            --glslc "$PINNED_GLSLC" \
+            --receipt dist/vulkan-shaders-build.json
+          go run ./cmd/fak-dev build-vulkan lib \
+            --commit "$(git rev-parse HEAD)" \
+            --glslc "$PINNED_GLSLC" \
+            --receipt dist/vulkan-shim-build.json
+          CGO_LDFLAGS="-L$PWD/internal/compute" \
+            go run ./cmd/fak-dev build \
+              --profile release \
+              --out dist/pkg/fak \
+              --receipt dist/vulkan-release-build.json \
+              --version "$VERSION" \
+              --tags vulkan
+
+          mkdir -p dist/pkg/spirv
+          cp internal/compute/spirv/*.spv dist/pkg/spirv/
+          cp LICENSE GETTING-STARTED.md dist/pkg/
+
+          test "$(find dist/pkg/spirv -maxdepth 1 -type f -name '*.spv' | wc -l)" -gt 0
+
+          tar -C dist/pkg -czf "dist/${ARCHIVE}" .
+          tar -tzf "dist/${ARCHIVE}" > dist/vulkan-archive.list
+          grep -Fxq './fak' dist/vulkan-archive.list
+          grep -Eq '^\./spirv/.+\.spv$' dist/vulkan-archive.list
+          ( cd dist && sha256sum "$ARCHIVE" > "${ARCHIVE}.sha256" )
+
+          # Validate a fresh extraction, including executable-relative shader
+          # discovery, on a software Vulkan device before publishing it. This is
+          # a build/registration witness only; physical Halo qualification remains
+          # a separate hardware gate.
+          mkdir -p dist/vulkan-validate
+          tar -xzf "dist/${ARCHIVE}" -C dist/vulkan-validate
+          unset FAK_VULKAN_SPIRV
+          export VK_ICD_FILENAMES="$LVP_ICD"
+          version_json="$(dist/vulkan-validate/fak version --json)"
+          got_version="$(jq -er '.app_version | select(type == "string")' <<<"$version_json")"
+          [ "$got_version" = "$VERSION" ]
+          dist/vulkan-validate/fak backends | tee dist/vulkan-backends.txt
+          grep -Fxq vulkan dist/vulkan-backends.txt
+          ldd dist/vulkan-validate/fak | grep -F 'libvulkan.so' >/dev/null
+          echo "VULKAN_ARCHIVE=dist/${ARCHIVE}" >> "$GITHUB_ENV"
+          echo "VULKAN_ARCHIVE_SUM=dist/${ARCHIVE}.sha256" >> "$GITHUB_ENV"
+
+      - name: Upload validated Vulkan archive to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          for i in $(seq 1 24); do
+            gh release view "$TAG" >/dev/null 2>&1 && break
+            echo "release $TAG not visible yet (attempt $i/24); waiting 5s..."
+            sleep 5
+          done
+          gh release view "$TAG" >/dev/null
+          gh release upload "$TAG" "$VULKAN_ARCHIVE" "$VULKAN_ARCHIVE_SUM" --clobber
+
+      - name: Attest Vulkan build provenance (SLSA)
+        if: ${{ !github.event.repository.fork }}
+        continue-on-error: true
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: ${{ env.VULKAN_ARCHIVE }}
+
   checksums:
     name: aggregate SHA256SUMS
-    needs: build
+    needs: [build, vulkan-build]
     outputs:
       cpu_digest: ${{ steps.fold.outputs.cpu_digest }}
       cuda_digest: ${{ steps.fold.outputs.cuda_digest }}
@@ -322,6 +449,11 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      - name: Install Vulkan software-device verification dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq libvulkan1 mesa-vulkan-drivers
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to ghcr.io
@@ -478,10 +610,46 @@ jobs:
               echo "ok: binary backends --json is a live JSON array including cpu-ref"
             fi
           fi
+
+          # Exercise the published Vulkan binary from its extracted archive with
+          # the environment override absent. Lavapipe makes this a deterministic
+          # software-only build/registration gate; physical Halo qualification is
+          # recorded separately and is never inferred from this check.
+          vulkan_dir="${unpacked}/fak_${VERSION}_linux_amd64_vulkan.tar.gz"
+          vulkan_bin="${vulkan_dir}/fak"
+          mapfile -t lvp_icds < <(find /usr/share/vulkan/icd.d -maxdepth 1 -type f -name 'lvp_icd*.json' -print | sort)
+          if [ ! -x "$vulkan_bin" ]; then
+            echo "::error::published Vulkan archive did not extract a runnable fak binary"; fail=1
+          elif [ "${#lvp_icds[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one Lavapipe ICD, found ${#lvp_icds[@]}"; fail=1
+          elif [ ! -d "${vulkan_dir}/spirv" ] || \
+               [ "$(find "${vulkan_dir}/spirv" -maxdepth 1 -type f -name '*.spv' | wc -l)" -eq 0 ]; then
+            echo "::error::published Vulkan archive lacks bundled SPIR-V assets"; fail=1
+          else
+            lvp_icd="${lvp_icds[0]}"
+            unset FAK_VULKAN_SPIRV
+            if ! vulkan_version_json="$(VK_ICD_FILENAMES="$lvp_icd" "$vulkan_bin" version --json)"; then
+              echo "::error::published Vulkan binary version command failed"; fail=1
+            elif ! vulkan_version="$(jq -er '.app_version | select(type == "string")' <<<"$vulkan_version_json")"; then
+              echo "::error::published Vulkan binary returned invalid version JSON"; fail=1
+            elif [ "$vulkan_version" = "$VERSION" ]; then
+              echo "ok: Vulkan binary reports $VERSION"
+            else
+              echo "::error::published Vulkan binary version mismatch: got '$vulkan_version', want '$VERSION'"; fail=1
+            fi
+            vulkan_backends="$(VK_ICD_FILENAMES="$lvp_icd" "$vulkan_bin" backends 2>/dev/null || true)"
+            echo "linux_amd64_vulkan fak backends -> $(echo "$vulkan_backends" | tr '\n' ' ')"
+            if ! echo "$vulkan_backends" | grep -Fxq vulkan; then
+              echo "::error::published Vulkan binary does not register vulkan with bundled assets: '$vulkan_backends'"; fail=1
+            fi
+            if ! ldd "$vulkan_bin" | grep -Fq 'libvulkan.so'; then
+              echo "::error::published Vulkan binary is not linked to libvulkan"; fail=1
+            fi
+          fi
           {
             echo "## verify published artifacts — ${TAG}"
             echo "Required archives: ${#expected_archives[@]}"
-            echo "Checksum sidecars, SHA256SUMS, extraction, linux/amd64 binary-version verification, and backend-registry presence (plain + --json) ran."
+            echo "Checksum sidecars, SHA256SUMS, extraction, linux/amd64 binary-version verification, backend-registry presence, and Vulkan bundled-asset registration under Lavapipe ran."
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$fail"
 

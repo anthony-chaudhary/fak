@@ -32,6 +32,14 @@ const (
 	// SourceExternalTransfer is a prompt token served by a cross-instance KV transfer from
 	// the external / disaggregated tier — the disaggregation dividend.
 	SourceExternalTransfer
+	// SourceUnknown is the EXPLICIT un-witnessed provenance (#12886): a served token the
+	// caller could not attribute to any of the three known sources, INCLUDING a legacy tap
+	// that carries no source evidence at all. It is deliberately OUTSIDE the closed booking
+	// vocabulary -- ObserveBySource still ignores it -- so an absence of provenance can
+	// never be silently folded into SourceLocalCompute (a real miss) or SourceLocalHit (a
+	// real local cache win). It exists only on the combined labeled-source path, where an
+	// absent split books UNKNOWN rather than a fabricated local classification.
+	SourceUnknown ReuseSource = -1
 )
 
 // String renders the Prometheus/label spelling of a source, matching vLLM's by_source label
@@ -64,15 +72,26 @@ func (o *Observer) ObserveBySource(source ReuseSource, tokens int) {
 		return
 	}
 	o.mu.Lock()
+	o.observeSourceLocked(source, uint64(tokens))
+	o.mu.Unlock()
+}
+
+// observeSourceLocked books tokens against one provenance bucket on the GLOBAL source axis.
+// Caller holds o.mu. An out-of-range source (including SourceUnknown, which is outside the
+// closed booking vocabulary) is ignored, preserving the parts==total invariant: every
+// booked token lands in exactly one known bucket. It is the single accumulation core so the
+// legacy ObserveBySource tap and the atomic labeled-source tap (#12886) cannot drift.
+func (o *Observer) observeSourceLocked(source ReuseSource, tokens uint64) {
 	switch source {
 	case SourceLocalCompute:
-		o.srcLocalCompute = saturatingAddU64(o.srcLocalCompute, uint64(tokens))
+		o.srcLocalCompute = saturatingAddU64(o.srcLocalCompute, tokens)
 	case SourceLocalHit:
-		o.srcLocalHit = saturatingAddU64(o.srcLocalHit, uint64(tokens))
+		o.srcLocalHit = saturatingAddU64(o.srcLocalHit, tokens)
 	case SourceExternalTransfer:
-		o.srcExternalTransfer = saturatingAddU64(o.srcExternalTransfer, uint64(tokens))
+		o.srcExternalTransfer = saturatingAddU64(o.srcExternalTransfer, tokens)
+	case SourceUnknown:
+		o.srcUnknown = saturatingAddU64(o.srcUnknown, tokens)
 	}
-	o.mu.Unlock()
 }
 
 // SourceStats is a point-in-time snapshot of the provenance decomposition. The load-bearing
@@ -84,6 +103,12 @@ type SourceStats struct {
 	LocalComputeTokens     uint64
 	LocalHitTokens         uint64
 	ExternalTransferTokens uint64
+	// UnknownTokens is the explicit un-witnessed provenance (#12886): served tokens booked
+	// through the atomic labeled-source path with NO source evidence. Kept strictly apart
+	// from the three known buckets so an absence of provenance can never be mis-read as a
+	// local recompute or a local cache win. Zero for known-source and legacy ObserveBySource
+	// taps, so their parts==total reading is unchanged.
+	UnknownTokens uint64
 	// TotalTokens is the sum of the three buckets — the `total` the parts==total invariant
 	// checks against. (Saturating: a real process never books near 2^64 tokens.)
 	TotalTokens uint64
@@ -109,13 +134,21 @@ func (o *Observer) SourceSnapshot() SourceStats {
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	return o.sourceSnapshotLocked()
+}
+
+// sourceSnapshotLocked derives the provenance decomposition from the live counters. Caller
+// holds o.mu, so the totals and ratios are consistent with the counters they came from and,
+// on the combined path (#12886), with the depth and label readings taken under the same lock.
+func (o *Observer) sourceSnapshotLocked() SourceStats {
 	s := SourceStats{
 		LocalComputeTokens:     o.srcLocalCompute,
 		LocalHitTokens:         o.srcLocalHit,
 		ExternalTransferTokens: o.srcExternalTransfer,
+		UnknownTokens:          o.srcUnknown,
 	}
 	s.ReusedTokens = saturatingAddU64(o.srcLocalHit, o.srcExternalTransfer)
-	s.TotalTokens = saturatingAddU64(s.ReusedTokens, o.srcLocalCompute)
+	s.TotalTokens = saturatingAddU64(s.ReusedTokens, saturatingAddU64(o.srcLocalCompute, o.srcUnknown))
 	if s.TotalTokens > 0 {
 		s.ExternalTransferRatio = float64(s.ExternalTransferTokens) / float64(s.TotalTokens)
 		s.LocalHitRatio = float64(s.LocalHitTokens) / float64(s.TotalTokens)

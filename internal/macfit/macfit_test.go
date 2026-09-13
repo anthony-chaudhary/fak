@@ -3,6 +3,8 @@ package macfit
 import (
 	"fmt"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 func TestQwen25SevenBQ4On36GiBWorkedExample(t *testing.T) {
@@ -230,4 +232,88 @@ func TestTurnkeyDynamicMemoryPressure(t *testing.T) {
 			t.Errorf("plan.DisplayBufferBytes = %d, want %d", plan.DisplayBufferBytes, 1500*1024*1024)
 		}
 	})
+}
+
+// TestTurnkeyKVQuantizedContextExceedsFP16Ceiling proves a quantized KV tier lifts the
+// memory-pressure context budget above the hard FP16 8192-token ceiling, while the same
+// pressured box at FP16 still clamps to exactly 8192.
+func TestTurnkeyKVQuantizedContextExceedsFP16Ceiling(t *testing.T) {
+	const total36 = 36 * GiB
+	pressure := TurnkeyOptions{
+		AvailableBytes:     20 * GiB,
+		DisplayBufferBytes: 1 * GiB,
+	}
+
+	fp16, err := ConfigureTurnkeyWithOptions(total36, pressure)
+	if err != nil {
+		t.Fatalf("FP16 plan: %v", err)
+	}
+	if !fp16.MemoryPressure {
+		t.Fatalf("fixture must induce memory pressure; plan=%+v", fp16)
+	}
+	if fp16.ContextBudgetTokens != 8192 {
+		t.Fatalf("FP16 pressured context = %d, want the 8192 ceiling", fp16.ContextBudgetTokens)
+	}
+
+	q8Opts := pressure
+	q8Opts.KVPrecision = model.KVPrecisionQ8_0
+	q8, err := ConfigureTurnkeyWithOptions(total36, q8Opts)
+	if err != nil {
+		t.Fatalf("Q8_0 plan: %v", err)
+	}
+	if q8.KVBytesPerToken >= fp16.KVBytesPerToken {
+		t.Fatalf("Q8_0 KV bytes/token = %d, want < FP16 %d", q8.KVBytesPerToken, fp16.KVBytesPerToken)
+	}
+	if q8.ContextBudgetTokens <= 8192 {
+		t.Fatalf("Q8_0 pressured context = %d, want strictly > 8192", q8.ContextBudgetTokens)
+	}
+	if q8.KVPrecision != model.KVPrecisionQ8_0 {
+		t.Fatalf("plan KV precision = %q, want q8_0", q8.KVPrecision)
+	}
+}
+
+// TestTurnkeyKVQuantizedContextDefaultUnchanged proves omitting KVPrecision is byte-identical
+// to an explicit FP16 selection, and that the historical FP16 KV-bytes-per-token arithmetic
+// (2*Layers*KVHeads*HeadDim*2) is preserved for every tier.
+func TestTurnkeyKVQuantizedContextDefaultUnchanged(t *testing.T) {
+	for _, gib := range []uint64{16, 36, 64, 128} {
+		mem := gib * GiB
+		def, err := ConfigureTurnkey(mem)
+		if err != nil {
+			t.Fatalf("%d GiB default: %v", gib, err)
+		}
+		explicit, err := ConfigureTurnkeyWithOptions(mem, TurnkeyOptions{KVPrecision: model.KVPrecisionFP16})
+		if err != nil {
+			t.Fatalf("%d GiB explicit fp16: %v", gib, err)
+		}
+		wantFP16, err := mul(2, explicit.Tier.Layers, explicit.Tier.KVHeads, explicit.Tier.HeadDim, 2)
+		if err != nil {
+			t.Fatalf("%d GiB fp16 math: %v", gib, err)
+		}
+		if def.KVBytesPerToken != wantFP16 || explicit.KVBytesPerToken != wantFP16 {
+			t.Fatalf("%d GiB KV bytes/token = default %d / explicit %d, want FP16 %d",
+				gib, def.KVBytesPerToken, explicit.KVBytesPerToken, wantFP16)
+		}
+		if def.ContextBudgetTokens != explicit.ContextBudgetTokens {
+			t.Fatalf("%d GiB default context = %d, explicit fp16 = %d; must match",
+				gib, def.ContextBudgetTokens, explicit.ContextBudgetTokens)
+		}
+	}
+}
+
+// TestTurnkeyKVQuantizedContextSelects20kOn36GiB pins the operator goal: on a 36 GiB box that
+// quantized KV lets the bucket ladder reach a >=20k context, which FP16 cannot under pressure.
+func TestTurnkeyKVQuantizedContextSelects20kOn36GiB(t *testing.T) {
+	const total36 = 36 * GiB
+	q4, err := ConfigureTurnkeyWithOptions(total36, TurnkeyOptions{
+		AvailableBytes:     20 * GiB,
+		DisplayBufferBytes: 1 * GiB,
+		KVPrecision:        model.KVPrecisionQ4_0,
+	})
+	if err != nil {
+		t.Fatalf("Q4_0 plan: %v", err)
+	}
+	if q4.ContextBudgetTokens < 20480 {
+		t.Fatalf("Q4_0 pressured context = %d, want >= 20480", q4.ContextBudgetTokens)
+	}
 }
