@@ -265,3 +265,62 @@ func TestResolveAgentMode(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveStreamMode pins the --stream selector (fak-private#1019): the empty default and
+// "auto" both heal a stream-only upstream, "on"/"off" are honored verbatim, and a typo is
+// rejected so it can never silently pick the buffered arm.
+func TestResolveStreamMode(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{"", streamAuto, false},
+		{"auto", streamAuto, false},
+		{"AUTO", streamAuto, false},
+		{"on", streamOn, false},
+		{"off", streamOff, false},
+		{"  On ", streamOn, false},
+		{"maybe", "", true},
+	}
+	for _, tc := range cases {
+		got, err := resolveStreamMode(tc.in)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("resolveStreamMode(%q) expected error, got %q", tc.in, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("resolveStreamMode(%q) unexpected error: %v", tc.in, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("resolveStreamMode(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestPlannerSupportsStreaming pins the CLI gate that decides whether the native arm may use
+// the streaming path: an OpenAI-wire planner is streaming-capable, an Anthropic-wire planner
+// (not streamable today) and a non-streaming mock planner are not. This is the predicate that
+// keeps --stream=auto byte-identical to the old buffered arm for every wire that cannot stream.
+func TestPlannerSupportsStreaming(t *testing.T) {
+	openai, err := agent.NewProviderHTTPPlanner("openai", "http://127.0.0.1:0", "m", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plannerSupportsStreaming(openai) {
+		t.Error("openai wire must be streaming-capable")
+	}
+	anthropic, err := agent.NewProviderHTTPPlanner("anthropic", "http://127.0.0.1:0", "m", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plannerSupportsStreaming(anthropic) {
+		t.Error("anthropic wire must NOT be streaming-capable (buffered arm stays byte-identical)")
+	}
+	if plannerSupportsStreaming(agent.NewMockPlanner("mock")) {
+		t.Error("the mock planner (no StreamingPlanner) must NOT be streaming-capable")
+	}
+}

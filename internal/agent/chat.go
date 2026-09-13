@@ -1071,6 +1071,11 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 	rehomePending := false
 	triedTransientRetry := false
 	triedTransientTarget := false
+	// A stream-required refusal is recoverable ONCE by reissuing the same turn as a stream
+	// (see the non-200 branch below). triedStreamRequired caps that at a single reissue so a
+	// genuinely-streaming-but-still-failing upstream surfaces its real error instead of
+	// bouncing between the buffered and streamed arms.
+	triedStreamRequired := false
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			// Write-ahead durable checkpoint (#1363): record how far this turn has gotten
@@ -1123,6 +1128,19 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			continue
 		}
 		if resp.StatusCode != http.StatusOK {
+			// A stream-required refusal (a stream-only OpenAI-compatible gateway rejecting a
+			// buffered request) is NOT a backoff: reissue the IDENTICAL turn with stream:true.
+			// Delegate to CompleteStream, which re-runs prepareUpstream with the stream flag and
+			// parses the SSE into the same Completion shape — so the buffered caller self-heals
+			// on a wire it already knows how to read, exactly once, instead of resending the
+			// unacceptable buffered body until the retry budget drains. Only a streaming-capable
+			// planner can heal this way; an incapable one falls through to the classified error.
+			if !triedStreamRequired && p.StreamingSupported() &&
+				classifyUpstream(resp.StatusCode, raw, resp.Header) == RemedyStreamRequired {
+				triedStreamRequired = true
+				notifyImmediateStatusRetry(p, attempt, resp.StatusCode)
+				return p.CompleteStream(ctx, nil, messages, tools, opts...)
+			}
 			transientRetryTried := triedTransientRetry
 			transientTargetTried := triedTransientTarget
 			retry, rewind, statusErr := call.handleRejectedResponse(ctx, p, &rs, resp, raw, attempt, rejectedResponseRetry{

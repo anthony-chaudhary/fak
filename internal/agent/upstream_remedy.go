@@ -55,6 +55,13 @@ const (
 	// same credential on a permitted model succeeds. (Detected here; execution is a
 	// follow-on — until then a SwitchModel with no switch target degrades to Terminal.)
 	RemedySwitchModel
+	// RemedyStreamRequired: the upstream refuses a BUFFERED request and serves the same turn
+	// only as a stream — a stream-only OpenAI-compatible gateway (the hive-ai case). The
+	// remedy is NOT a backoff: no amount of waiting makes a non-stream body acceptable, so
+	// the blind 5xx retry re-sends the same unacceptable request until the budget drains and
+	// the failure LOOKS like a hang. The fix is to reissue the identical request with
+	// `stream:true` on the wire that already knows how to read SSE.
+	RemedyStreamRequired
 )
 
 // String renders the remedy as a short stable label for logs, notify hooks, and metrics.
@@ -70,6 +77,8 @@ func (r UpstreamRemedy) String() string {
 		return "failover_account"
 	case RemedySwitchModel:
 		return "switch_model"
+	case RemedyStreamRequired:
+		return "stream_required"
 	default:
 		return "terminal"
 	}
@@ -98,6 +107,14 @@ func (r UpstreamRemedy) String() string {
 // carry no rolling-reset semantics). An unlabeled 403 stays a possibly-transient abuse gate
 // (Backoff), matching forbiddenRetryState's own transient arm.
 func classifyUpstream(status int, body []byte, h http.Header) UpstreamRemedy {
+	// The stream-required refusal is checked BEFORE retryableStatus: a stream-only gateway
+	// commonly rejects a buffered request with a generic 500, which retryableStatus would
+	// otherwise classify as Backoff — the DECEIVING remedy that resends the same unacceptable
+	// body until the budget drains (the witnessed hive-ai hang). The body is the only honest
+	// discriminator, so an explicit stream-required signature wins over the bare status.
+	if streamRequired(body) {
+		return RemedyStreamRequired
+	}
 	if retryableStatus(status) {
 		return RemedyBackoff
 	}
@@ -208,5 +225,32 @@ func modelNotEntitled(body []byte) bool {
 		"does not have access", // same, explicit
 		"not entitled",         // entitlement refusal
 		"not allowed to use",   // model/feature not on the plan
+	)
+}
+
+// streamRequired reports whether an upstream refusal body explicitly says the request must
+// STREAM — the discriminator for a stream-only OpenAI-compatible gateway. It matches the
+// phrasings such gateways actually emit ("stream required", "streaming is required", "must
+// stream", "stream must be true", "streaming must be enabled", "non-streaming is not
+// supported") without over-matching an unrelated capacity/overload message. The match is
+// lowercase-substring over the (already truncated) body, so it is robust to the surrounding
+// JSON envelope. It is the ONLY honest signal for this remedy: the status alone (a generic
+// 500) cannot distinguish a stream-only refusal from a genuine transient overload, which is
+// exactly why the failure previously looked like a hang rather than a decision.
+func streamRequired(body []byte) bool {
+	return bodyContainsAny(body,
+		"stream required",         // "stream required", "stream: true is required"
+		"streaming required",      // "streaming required"
+		"streaming is required",   // "streaming is required"
+		"must stream",             // "request must stream", "you must stream"
+		"stream must be",          // "stream must be true/enabled"
+		"streaming must be",       // "streaming must be true/enabled"
+		"non-streaming is not",    // "non-streaming is not supported"
+		"nonstreaming is not",     // ...no hyphen
+		"only supports streaming", // "this endpoint only supports streaming"
+		"only support streaming",  // ...plural subject
+		"requires stream",         // "this endpoint requires stream: true"
+		"requires streaming",      // "requires streaming"
+		"enable streaming",        // "please enable streaming"
 	)
 }

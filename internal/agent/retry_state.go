@@ -94,6 +94,14 @@ func (c *upstreamCall) handleRejectedResponse(ctx context.Context, p *HTTPPlanne
 		}
 	}
 	if retryableStatus(status) {
+		// A stream-required refusal is NOT a transient overload even when it arrives as a 500:
+		// backoff cannot make a buffered request acceptable. The caller's streaming-capable path
+		// (Complete) reissues once as a stream BEFORE reaching here; if we are here, the wire
+		// cannot stream (or the reissue already happened), so surface the refusal terminally
+		// with its real cause instead of draining the retry budget on an unfixable status.
+		if classifyUpstream(status, raw, resp.Header) == RemedyStreamRequired {
+			return false, false, newUpstreamStatusError(status, raw, resp.Header, 400)
+		}
 		action := c.noteRetryableCapMaybeRehome(p, s, status, raw, resp.Header, ctl.bodyCap, false, ctl.triedRehome, ctl.rehomePending, attempt)
 		return true, action == capRehomeResend, nil
 	}

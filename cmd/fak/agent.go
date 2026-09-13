@@ -37,6 +37,7 @@ type agentFlags struct {
 	native                *bool
 	raw                   *bool
 	mode                  *string
+	stream                *string
 	maxTurns              *int
 	out                   *string
 	logOut                *string
@@ -83,6 +84,7 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.native = fs.Bool("native", false, "run one kernel-mediated arm and print its final answer (basic terminal mode)")
 	af.raw = fs.Bool("raw", false, "run one unmediated baseline harness arm (skipping the mediated fak kernel arm)")
 	af.mode = fs.String("mode", "", "execution mode: dual (default), native, or raw")
+	af.stream = fs.String("stream", "auto", "(--native) transport for the arm: auto streams when the planner supports it (self-healing a stream-only upstream), on forces the streaming arm, off forces the buffered arm (byte-identical to pre-stream behavior)")
 	af.maxTurns = fs.Int("max-turns", 10, "max model turns per arm")
 	af.out = fs.String("out", "agent-report.json", "report output path")
 	af.logOut = fs.String("log", "", "optional path to write the per-call trace log")
@@ -483,8 +485,27 @@ func runAgent(argv []string) {
 		if *af.logOut != "" && auditJournal == nil {
 			must(errors.New("fak agent: --native does not support --log; use --out for its receipt"))
 		}
+		streamMode, err := resolveStreamMode(*af.stream)
+		must(err)
 		activeWakeReleaser, _ := acquireAgentRunKeepAwake(*af.keepAwake)
-		metrics, err := agent.RunArm(ctx(), planner, *af.task, true, *af.maxTurns, nil, runOpts...)
+		var metrics agent.ArmMetrics
+		if streamMode == streamOn || (streamMode == streamAuto && plannerSupportsStreaming(planner)) {
+			// Drive the native arm through RunArmStream so a stream-only upstream (one that
+			// rejects a buffered request) completes instead of retrying its refusal. Content
+			// is mirrored live to stderr; the final answer and receipt are unchanged. A planner
+			// that cannot stream falls back to the buffered arm for BOTH auto and on (RunArmStream
+			// would otherwise fail immediately with ErrStreamingUnsupported).
+			if plannerSupportsStreaming(planner) {
+				metrics, err = agent.RunArmStream(ctx(), planner, *af.task, true, *af.maxTurns, streamToStderr, nil, runOpts...)
+			} else {
+				if streamMode == streamOn {
+					must(errors.New("fak agent: --stream=on requires a streaming-capable planner (this provider/wire cannot stream)"))
+				}
+				metrics, err = agent.RunArm(ctx(), planner, *af.task, true, *af.maxTurns, nil, runOpts...)
+			}
+		} else {
+			metrics, err = agent.RunArm(ctx(), planner, *af.task, true, *af.maxTurns, nil, runOpts...)
+		}
 		if activeWakeReleaser != nil {
 			_ = activeWakeReleaser.Release()
 		}
@@ -613,6 +634,47 @@ func resolveAgentMode(raw, native bool, mode string) (isRaw, isNative bool, err 
 
 func validateAgentMode(raw, native bool, mode string) (isRaw, isNative bool, err error) {
 	return resolveAgentMode(raw, native, mode)
+}
+
+// Stream-mode selector values for --stream (see resolveStreamMode). It is a closed set so a
+// typo fails fast rather than silently picking the buffered arm.
+const (
+	streamAuto = "auto" // stream when the planner supports it, else buffered
+	streamOn   = "on"   // force the streaming arm (error if the wire cannot stream)
+	streamOff  = "off"  // force the buffered arm (byte-identical to pre-stream behavior)
+)
+
+// resolveStreamMode maps --stream to one of the closed stream-mode values. An empty value is
+// auto, so an unset flag preserves the new self-healing default while `--stream=off` restores
+// the exact pre-stream behavior for a buffered-only provider.
+func resolveStreamMode(v string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", streamAuto:
+		return streamAuto, nil
+	case streamOn:
+		return streamOn, nil
+	case streamOff:
+		return streamOff, nil
+	default:
+		return "", fmt.Errorf("fak agent: unknown --stream %q (want auto, on, or off)", v)
+	}
+}
+
+// plannerSupportsStreaming reports whether the planner can drive a live token stream. It is
+// the CLI-side mirror of the engine's StreamingPlanner capability: a typed assertion plus the
+// configuration-aware StreamingSupported() check, so an OpenAI-wire planner reports true and
+// every other wire reports false.
+func plannerSupportsStreaming(p agent.Planner) bool {
+	sp, ok := p.(agent.StreamingPlanner)
+	return ok && sp.StreamingSupported()
+}
+
+// streamToStderr mirrors live content fragments to stderr during the streaming native arm, so
+// an operator sees tokens as they arrive while stdout stays reserved for the final answer.
+// The sink never fails the run: a stderr write error cannot abort a completed turn.
+func streamToStderr(frag string) error {
+	_, _ = fmt.Fprint(os.Stderr, frag)
+	return nil
 }
 
 func generateAgentSessionID() string {

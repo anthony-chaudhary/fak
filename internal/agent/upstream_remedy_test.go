@@ -40,6 +40,12 @@ func TestClassifyUpstream(t *testing.T) {
 		{"429 backoff", http.StatusTooManyRequests, `{"error":{"message":"rate_limit_error"}}`, RemedyBackoff},
 		{"529 overloaded backoff", statusOverloaded, `{"error":{"message":"overloaded"}}`, RemedyBackoff},
 		{"503 backoff", http.StatusServiceUnavailable, ``, RemedyBackoff},
+		{"stream required (500)", http.StatusInternalServerError,
+			`{"status_code":500,"message":"stream required"}`, RemedyStreamRequired},
+		{"non-streaming not supported (400)", http.StatusBadRequest,
+			`{"error":{"message":"non-streaming is not supported by this endpoint"}}`, RemedyStreamRequired},
+		{"requires streaming (400)", http.StatusBadRequest,
+			`{"error":{"message":"this endpoint requires streaming"}}`, RemedyStreamRequired},
 		{"404 terminal", http.StatusNotFound, `{"error":{"message":"model not found"}}`, RemedyTerminal},
 		{"400 terminal", http.StatusBadRequest, `{"error":{"message":"invalid_request_error"}}`, RemedyTerminal},
 	}
@@ -128,10 +134,34 @@ func TestUpstreamRemedy_String(t *testing.T) {
 		RemedyBackoff:         "backoff",
 		RemedyFailoverAccount: "failover_account",
 		RemedySwitchModel:     "switch_model",
+		RemedyStreamRequired:  "stream_required",
 	}
 	for r, s := range want {
 		if r.String() != s {
 			t.Errorf("%d.String() = %q, want %q", r, r.String(), s)
 		}
+	}
+}
+
+// TestClassifyUpstreamStreamRequiredIsBodyGated pins the load-bearing discrimination: the
+// stream-required remedy fires ONLY on an explicit stream-required body. A generic 5xx (the
+// common transient overload) must STILL be Backoff — otherwise every overload would be
+// misread as "stream only", reissuing a healthy buffered provider's request as a stream and
+// changing its behavior for no reason.
+func TestClassifyUpstreamStreamRequiredIsBodyGated(t *testing.T) {
+	// A bare 500 with no stream-required signature is a transient overload, not a stream wall.
+	if got := classifyUpstream(http.StatusInternalServerError,
+		[]byte(`{"status_code":500,"message":"Internal Server Error"}`), http.Header{}); got != RemedyBackoff {
+		t.Fatalf("generic 500 = %v, want backoff (must NOT be misread as stream-required)", got)
+	}
+	// The stream-required signature wins even on a status (500) that would otherwise backoff.
+	if got := classifyUpstream(http.StatusInternalServerError,
+		[]byte(`{"status_code":500,"message":"stream required"}`), http.Header{}); got != RemedyStreamRequired {
+		t.Fatalf("stream-required 500 = %v, want stream_required", got)
+	}
+	// A 400 variant of the same refusal is likewise stream-required, not terminal.
+	if got := classifyUpstream(http.StatusBadRequest,
+		[]byte(`{"error":{"message":"this endpoint only supports streaming"}}`), http.Header{}); got != RemedyStreamRequired {
+		t.Fatalf("stream-only 400 = %v, want stream_required", got)
 	}
 }
