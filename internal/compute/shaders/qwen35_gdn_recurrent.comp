@@ -16,6 +16,12 @@ layout(push_constant) uniform PC { int tokens; int convDim; int nK; int nV; int 
 
 shared float readout[1024];
 shared float rmsInv;
+// Cooperative Q/K norm reduction scratch: [0] = sum(q^2), [1] = sum(k^2).
+// One workgroup owns one value head, so a single workgroup reduction per
+// value-head group replaces the redundant per-lane walk of the full key-head
+// dimension. qkSum broadcasts the two reduced norms after the tree.
+shared float qkPart[2][64];
+shared float qkSum[2];
 
 float silu(float x) { return x / (1.0 + exp(-x)); }
 float softplus(float x) { return x > 20.0 ? x : log(1.0 + exp(x)); }
@@ -29,18 +35,36 @@ void main() {
     int keyDim = pc.nK * pc.kHd;
     for (int t = 0; t < pc.tokens; ++t) {
         int base = t * pc.convDim;
-        float q2 = 0.0, k2 = 0.0;
-        for (int i = 0; i < pc.kHd; ++i) {
+
+        // Cooperative Q/K squared-norm reduction: each lane accumulates a
+        // strided slice, then a shared-memory tree reduces across the group.
+        // This replaces the previous redundant per-lane walk over pc.kHd
+        // (all 64 invocations computed the identical q2/k2).
+        float q2p = 0.0, k2p = 0.0;
+        for (int i = lane; i < pc.kHd; i += 64) {
             float qv = convOut[base + kh * pc.kHd + i];
             float kv = convOut[base + keyDim + kh * pc.kHd + i];
-            q2 += qv*qv; k2 += kv*kv;
+            q2p += qv*qv; k2p += kv*kv;
         }
-        // Q/K L2 normalization has its own fixed epsilon; pc.eps belongs to
-        // the output RMS norm and may differ (model.l2normInto uses 1e-6).
-        float qInv = inversesqrt(q2 + 1e-6);
-        float kInv = inversesqrt(k2 + 1e-6);
-        float qScale = inversesqrt(float(pc.kHd));
-        qInv *= qScale;
+        qkPart[0][lane] = q2p;
+        qkPart[1][lane] = k2p;
+        barrier();
+        for (int s = 32; s > 0; s >>= 1) {
+            if (lane < s) {
+                qkPart[0][lane] += qkPart[0][lane + s];
+                qkPart[1][lane] += qkPart[1][lane + s];
+            }
+            barrier();
+        }
+        if (lane == 0) {
+            // Q/K L2 normalization has its own fixed epsilon; pc.eps belongs to
+            // the output RMS norm and may differ (model.l2normInto uses 1e-6).
+            qkSum[0] = inversesqrt(qkPart[0][0] + 1e-6);
+            qkSum[1] = inversesqrt(qkPart[1][0] + 1e-6);
+        }
+        barrier();
+        float qInv = qkSum[0] * inversesqrt(float(pc.kHd));
+        float kInv = qkSum[1];
         float bv = 1.0 / (1.0 + exp(-beta[t * pc.nV + h]));
         float av = exp(-exp(aLog[h]) * softplus(alpha[t * pc.nV + h] + dtBias[h]));
 

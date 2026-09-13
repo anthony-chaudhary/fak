@@ -1630,3 +1630,55 @@ func TestWave32_Ticket516_DeltaNet16ChannelTranspose(t *testing.T) {
 		}
 	}
 }
+
+// TestQwen35GDNRecurrentShaderCooperativeQKNormContract is the deterministic,
+// GPU-independent software witness for anthony-chaudhary/fak#12531: the Vulkan
+// GDN recurrent shader must compute the Q/K squared norms once per value-head
+// workgroup (a strided accumulation plus a shared-memory tree reduction), not
+// redundantly in every lane. It runs without the vulkan build tag or a C
+// toolchain so a regression that reintroduces the per-lane walk fails here.
+func TestQwen35GDNRecurrentShaderCooperativeQKNormContract(t *testing.T) {
+	candidates := []string{
+		"shaders/qwen35_gdn_recurrent.comp",
+		"internal/compute/shaders/qwen35_gdn_recurrent.comp",
+		filepath.Join("..", "internal", "compute", "shaders", "qwen35_gdn_recurrent.comp"),
+	}
+	var content, foundPath string
+	for _, p := range candidates {
+		data, err := os.ReadFile(p)
+		if err == nil {
+			content = string(data)
+			foundPath = p
+			break
+		}
+	}
+	if content == "" {
+		t.Fatalf("could not find qwen35_gdn_recurrent.comp in any candidate path: %v", candidates)
+	}
+
+	required := []string{
+		"shared float qkPart[2][64];",
+		"shared float qkSum[2];",
+		"for (int i = lane; i < pc.kHd; i += 64)",
+		"qkPart[0][lane] += qkPart[0][lane + s];",
+		"qkPart[1][lane] += qkPart[1][lane + s];",
+		"qkSum[0] = inversesqrt(qkPart[0][0] + 1e-6);",
+		"qkSum[1] = inversesqrt(qkPart[1][0] + 1e-6);",
+	}
+	for _, tok := range required {
+		if !strings.Contains(content, tok) {
+			t.Errorf("shader %s missing cooperative Q/K reduction token %q", foundPath, tok)
+		}
+	}
+
+	redundant := []string{
+		"q2 += qv*qv; k2 += kv*kv;",
+		"float qInv = inversesqrt(q2 + 1e-6);",
+		"float kInv = inversesqrt(k2 + 1e-6);",
+	}
+	for _, tok := range redundant {
+		if strings.Contains(content, tok) {
+			t.Errorf("shader %s reintroduced the redundant per-lane Q/K norm walk: %q", foundPath, tok)
+		}
+	}
+}
