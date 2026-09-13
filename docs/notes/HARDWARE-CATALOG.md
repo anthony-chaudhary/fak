@@ -27,6 +27,7 @@ Track all benchmark machines with full specs, onboarding procedures, and baselin
 - **GPU**: AMD Radeon RX 7600 (8 GB, RDNA3 gfx1102, Vulkan 1.4.349)
 - **RAM**: 256 GiB physical (4×64 GiB DDR5); ≈253.6 GiB / 272 GB usable after hardware-reserved
 - **OS**: Windows 11 Pro 10.0.26200 (native Vulkan)
+- **Onboarding state**: driver/agent-host node, not a bench target. sshd (Windows service) is **Running/Automatic** and the tailnet SSH port answers with a completed banner exchange (verified 2026-09-13). Remaining step: install the driver pubkey into the host authorized_keys, then pin `host_key`. Excluded from bench targets: the placement law refuses to bench the driver’s own tailnet IP.
 - **Status**: ✅ Active
 - **Benchmarks**:
   - GPU Q8 decode (Vulkan, RX 7600): 24.6 tok/s · 1.49× vs GPU f32 (BENCHMARK-AUTHORITY.md; `q8gpu-smollm2-135m-gpu-q8-20260619.json`)
@@ -67,6 +68,8 @@ Track all benchmark machines with full specs, onboarding procedures, and baselin
   - Multi-GPU serving work planned
 
 ## Onboarding Checklist
+
+> Note: the `desktop` (`node-linux-desktop-a`) is the **agent-host / driver** and is excluded from bench targets by the placement law; use it to drive benches against the target nodes, not as a target itself.
 
 For each new machine:
 
