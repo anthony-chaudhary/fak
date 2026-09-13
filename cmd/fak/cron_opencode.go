@@ -15,10 +15,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 )
@@ -50,6 +52,22 @@ type OpenCodeRunReceipt struct {
 	EndedAt    string  `json:"ended_at"`
 	DurationMS int64   `json:"duration_ms"`
 	WitnessRef *string `json:"witness_ref"` // explicitly null (pointer without omitempty)
+
+	StartError    string `json:"start_error,omitempty"`    // bounded tail of child output when the session never started
+	StartupFailed bool   `json:"startup_failed,omitempty"` // true iff exit != 0 AND SessionID == ""
+}
+
+// cronBoundedOutputTail returns at most the last maxBytes of s collapsed to a
+// single trimmed line, so child startup errors stay bounded in receipts. A cut
+// landing mid-rune is trimmed to the nearest valid UTF-8 boundary.
+func cronBoundedOutputTail(s string, maxBytes int) string {
+	if maxBytes > 0 && len(s) > maxBytes {
+		s = s[len(s)-maxBytes:]
+		for len(s) > 0 && !utf8.RuneStart(s[0]) {
+			s = s[1:]
+		}
+	}
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // ScheduledOpenCodeOptions carries the configuration for a scheduled OpenCode execution.
@@ -264,6 +282,26 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 
 	cmdName := opts.Command[0]
 	cmdRest := opts.Command[1:]
+
+	// Cheap pre-flight: a bare command name with no path separator must resolve
+	// on PATH, otherwise the child can never start; fail loud without spawning.
+	if !strings.ContainsRune(cmdName, filepath.Separator) && !strings.Contains(cmdName, "/") {
+		if _, lookErr := exec.LookPath(cmdName); lookErr != nil {
+			if opts.Stderr != nil {
+				fmt.Fprintf(opts.Stderr, "fak cron opencode: command not found: %s\n", cmdName)
+			}
+			return OpenCodeRunReceipt{
+				Schema:        cronOpenCodeRunSchema,
+				RunID:         runID,
+				ExitCode:      2,
+				Outcome:       "failed",
+				StartupFailed: true,
+				StartError:    "command not found: " + cmdName,
+				WitnessRef:    nil,
+			}, fmt.Errorf("fak cron opencode: command not found: %s", cmdName)
+		}
+	}
+
 	c := exec.CommandContext(ctx, cmdName, cmdRest...)
 	configureDispatchHelperCommand(c)
 	if opts.Workdir != "" {
@@ -344,6 +382,20 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 		EndedAt:    endedTime.UTC().Format(time.RFC3339),
 		DurationMS: durationMS,
 		WitnessRef: nil,
+	}
+
+	// Nonzero exit with no session created means OpenCode never started; surface
+	// the child's bounded stderr (or stdout fallback) so the failure is not silent.
+	if runErr != nil && sessionID == "" && !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		tail := childStderrBuf.String()
+		if strings.TrimSpace(tail) == "" {
+			tail = childStdoutBuf.String()
+		}
+		receipt.StartupFailed = true
+		receipt.StartError = cronBoundedOutputTail(tail, 2048)
+		if receipt.StartError == "" {
+			receipt.StartError = runErr.Error()
+		}
 	}
 
 	if opts.Ledger != "" {
@@ -432,6 +484,9 @@ func runCronOpenCode(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	receipt, err := RunScheduledOpenCode(opts)
+	if receipt.StartupFailed {
+		fmt.Fprintf(stderr, "fak cron opencode: opencode failed to start (no session created): %s\n", receipt.StartError)
+	}
 	if err != nil && receipt.ExitCode == 0 {
 		return 2
 	}

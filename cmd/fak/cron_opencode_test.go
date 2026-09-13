@@ -597,3 +597,202 @@ func TestCronOpenCodeAllowsLongTimeout(t *testing.T) {
 		t.Fatalf("expected clamped 2h, got %v", got)
 	}
 }
+
+func TestCronOpenCodeStartupFailureNoSession(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "opencode_startup_fail.jsonl")
+	var stdout, stderr bytes.Buffer
+
+	var cmdArgs []string
+	if runtime.GOOS == "windows" {
+		cmdArgs = []string{"cmd", "/c", "echo boom-child-error 1>&2 & exit 7"}
+	} else {
+		cmdArgs = []string{"sh", "-c", "echo boom-child-error 1>&2; exit 7"}
+	}
+
+	opts := ScheduledOpenCodeOptions{
+		Job:         "job-startup-fail",
+		Ledger:      ledger,
+		Timeout:     5 * time.Second,
+		Command:     cmdArgs,
+		Stdout:      &stdout,
+		Stderr:      &stderr,
+		EmitReceipt: true,
+	}
+
+	receipt, err := RunScheduledOpenCode(opts)
+	if err != nil {
+		t.Fatalf("unexpected harness error: %v", err)
+	}
+
+	if receipt.SessionID != "" {
+		t.Errorf("expected empty session_id for startup failure, got %q", receipt.SessionID)
+	}
+	if !receipt.StartupFailed {
+		t.Errorf("expected startup_failed true, got false (receipt: %+v)", receipt)
+	}
+	if receipt.StartError == "" {
+		t.Errorf("expected non-empty start_error containing child stderr, got empty")
+	}
+	if !strings.Contains(receipt.StartError, "boom-child-error") {
+		t.Errorf("expected start_error to contain child stderr 'boom-child-error', got %q", receipt.StartError)
+	}
+	if receipt.Outcome != "failed" {
+		t.Errorf("expected outcome 'failed', got %q", receipt.Outcome)
+	}
+
+	receipts, err := cronReadOpenCodeReceipts(ledger)
+	if err != nil {
+		t.Fatalf("cronReadOpenCodeReceipts error: %v", err)
+	}
+	if len(receipts) != 1 {
+		t.Fatalf("expected 1 receipt in ledger, got %d", len(receipts))
+	}
+	if !receipts[0].StartupFailed {
+		t.Errorf("expected ledger receipt startup_failed true, got false: %+v", receipts[0])
+	}
+	if receipts[0].StartError == "" {
+		t.Errorf("expected ledger receipt non-empty start_error, got empty")
+	}
+	if receipts[0].Outcome != "failed" {
+		t.Errorf("expected ledger receipt outcome 'failed', got %q", receipts[0].Outcome)
+	}
+}
+
+func TestCronOpenCodeZeroExitNoSessionNotStartupFailure(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "opencode_zero_no_session.jsonl")
+	var stdout, stderr bytes.Buffer
+
+	var cmdArgs []string
+	if runtime.GOOS == "windows" {
+		cmdArgs = []string{"cmd", "/c", "echo ran-but-no-work"}
+	} else {
+		cmdArgs = []string{"sh", "-c", "echo ran-but-no-work"}
+	}
+
+	opts := ScheduledOpenCodeOptions{
+		Job:         "job-zero-no-session",
+		Ledger:      ledger,
+		Timeout:     5 * time.Second,
+		Command:     cmdArgs,
+		Stdout:      &stdout,
+		Stderr:      &stderr,
+		EmitReceipt: true,
+	}
+
+	receipt, err := RunScheduledOpenCode(opts)
+	if err != nil {
+		t.Fatalf("unexpected harness error: %v", err)
+	}
+
+	if receipt.SessionID != "" {
+		t.Errorf("expected empty session_id, got %q", receipt.SessionID)
+	}
+	if receipt.ExitCode != 0 {
+		t.Errorf("expected exit_code 0, got %d", receipt.ExitCode)
+	}
+	if receipt.StartupFailed {
+		t.Errorf("expected startup_failed false for zero-exit no-session run, got true (receipt: %+v)", receipt)
+	}
+	if receipt.StartError != "" {
+		t.Errorf("expected empty start_error for zero-exit no-session run, got %q", receipt.StartError)
+	}
+}
+
+func TestCronOpenCodeSuccessNoStartupFailure(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "opencode_success_no_startup_fail.jsonl")
+	var stdout, stderr bytes.Buffer
+
+	var cmdArgs []string
+	if runtime.GOOS == "windows" {
+		cmdArgs = []string{"cmd", "/c", "echo {\"session_id\": \"ses_regression_guard_11\"}"}
+	} else {
+		cmdArgs = []string{"sh", "-c", "echo '{\"session_id\": \"ses_regression_guard_11\"}'"}
+	}
+
+	opts := ScheduledOpenCodeOptions{
+		Job:         "job-success-no-startup-fail",
+		Ledger:      ledger,
+		Timeout:     5 * time.Second,
+		Command:     cmdArgs,
+		Stdout:      &stdout,
+		Stderr:      &stderr,
+		EmitReceipt: true,
+	}
+
+	receipt, err := RunScheduledOpenCode(opts)
+	if err != nil {
+		t.Fatalf("RunScheduledOpenCode error: %v (stderr: %s)", err, stderr.String())
+	}
+
+	if receipt.SessionID != "ses_regression_guard_11" {
+		t.Errorf("expected session_id 'ses_regression_guard_11', got %q", receipt.SessionID)
+	}
+	if receipt.StartupFailed {
+		t.Errorf("expected startup_failed false on successful run, got true (receipt: %+v)", receipt)
+	}
+	if receipt.StartError != "" {
+		t.Errorf("expected empty start_error on successful run, got %q", receipt.StartError)
+	}
+}
+
+func TestCronOpenCodePreflightMissingBinary(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "opencode_missing_binary.jsonl")
+	var stdout, stderr bytes.Buffer
+
+	opts := ScheduledOpenCodeOptions{
+		Job:         "job-missing-binary",
+		Ledger:      ledger,
+		Timeout:     5 * time.Second,
+		Command:     []string{"fak-nonexistent-binary-xyz-zzz"},
+		Stdout:      &stdout,
+		Stderr:      &stderr,
+		EmitReceipt: true,
+	}
+
+	receipt, err := RunScheduledOpenCode(opts)
+	if err == nil {
+		t.Fatalf("expected non-nil error for missing binary pre-flight probe")
+	}
+
+	if !receipt.StartupFailed {
+		t.Errorf("expected startup_failed true, got false (receipt: %+v)", receipt)
+	}
+	if receipt.ExitCode != 2 {
+		t.Errorf("expected exit_code 2, got %d", receipt.ExitCode)
+	}
+	if !strings.Contains(receipt.StartError, "command not found") {
+		t.Errorf("expected start_error to mention 'command not found', got %q", receipt.StartError)
+	}
+}
+
+func TestCronOpenCodeExecFailureSurfacesRunErrWhenOutputEmpty(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "opencode_exec_failure.jsonl")
+	var stdout, stderr bytes.Buffer
+
+	// A path binary that cannot be exec'd emits no child output, so the only
+	// diagnostic is runErr; the receipt must still carry a non-empty start_error.
+	missing := filepath.Join(t.TempDir(), "definitely-missing-opencode-binary")
+	opts := ScheduledOpenCodeOptions{
+		Job:         "job-exec-failure",
+		Ledger:      ledger,
+		Timeout:     5 * time.Second,
+		Command:     []string{missing},
+		Stdout:      &stdout,
+		Stderr:      &stderr,
+		EmitReceipt: true,
+	}
+
+	receipt, err := RunScheduledOpenCode(opts)
+	if err != nil {
+		t.Fatalf("unexpected harness error: %v", err)
+	}
+	if !receipt.StartupFailed {
+		t.Errorf("expected startup_failed true for a non-executable path binary, got false: %+v", receipt)
+	}
+	if receipt.StartError == "" {
+		t.Errorf("expected non-empty start_error from runErr when child output is empty")
+	}
+	if receipt.SessionID != "" {
+		t.Errorf("expected empty session_id, got %q", receipt.SessionID)
+	}
+}
