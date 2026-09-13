@@ -198,3 +198,63 @@ func TestV41FailClosedAllF32AndQuantLoadersReject(t *testing.T) {
 		t.Fatalf("opened %d weight files before refusal", opened)
 	}
 }
+
+// panicAsError runs fn and returns the recovered panic as an error, or nil if fn
+// returned normally. Forward entrypoints fail closed by panicking (the requirePreNorm
+// convention), so the negative witness recovers the value and checks errors.Is.
+func panicAsError(fn func()) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			switch v := r.(type) {
+			case error:
+				err = v
+			default:
+				err = errors.New("panic: non-error value")
+			}
+		}
+	}()
+	fn()
+	return nil
+}
+
+// TestV41FailClosedForwardEntrypoints covers the last unguarded V4.1 seam (#12967): a
+// *Model built directly in memory (bypassing every loader) must refuse at Model.Forward,
+// Session.Prefill and Session.Step with the typed ErrV41NativeUnsupported rather than
+// running the generic layer()/token loop over V4.1 geometry and emitting partial logits.
+// The config carries no weights, so a guard-removed run would fault on missing tensors
+// (not silently succeed) — either way the absence of the typed refusal fails the test.
+func TestV41FailClosedForwardEntrypoints(t *testing.T) {
+	_, cfg := readDeepSeekV41Config(t)
+	m := &Model{Cfg: cfg}
+	if !m.Cfg.IsDeepSeekV41() {
+		t.Fatal("probe config is not recognized as V4.1")
+	}
+
+	cases := map[string]func() error{
+		"Model.Forward": func() error {
+			return panicAsError(func() { _ = m.Forward([]int{1, 2, 3}) })
+		},
+		"Session.Prefill": func() error {
+			s := &Session{M: m}
+			return panicAsError(func() { _ = s.Prefill([]int{1, 2, 3}) })
+		},
+		"Session.Step": func() error {
+			s := &Session{M: m}
+			return panicAsError(func() { _ = s.Step(1) })
+		},
+	}
+	for name, run := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := run(); !errors.Is(err, ErrV41NativeUnsupported) {
+				t.Fatalf("error=%v want ErrV41NativeUnsupported", err)
+			}
+		})
+	}
+
+	t.Run("non V4.1 forward unaffected", func(t *testing.T) {
+		llama := Config{ModelType: "llama", HiddenSize: 4, NumLayers: 1, NumHeads: 1, NumKVHeads: 1, HeadDim: 4}
+		if err := refuseDeepSeekV41Native(llama); err != nil {
+			t.Fatalf("non-V4.1 refusal=%v want nil (guard must be IsDeepSeekV41-gated)", err)
+		}
+	})
+}
