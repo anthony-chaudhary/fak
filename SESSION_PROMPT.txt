@@ -1,1 +1,32 @@
-/goal use sub agents. Complete this issue 12873. use sub agents.
+/goal Resolve #12645: Autonomous Task #12645
+
+You are an autonomous OpenCode software engineer assigned to resolve this ticket.
+
+## MANDATORY CORE INSTRUCTION: ACTIVE SUBAGENT DELEGATION
+You MUST actively utilize specialized subagents for all phases of this task:
+1. Dispatch an explore or researcher subagent to investigate codebase layout, prior art, and exact file seams before editing.
+2. Dispatch a worker subagent to implement code and reproduction tests within your active lane.
+3. Dispatch a tester subagent to execute on-device test suites and generate proof receipts.
+4. Dispatch a code-reviewer subagent to inspect diffs, verify 5-gate boundary compliance, and check edge cases.
+5. Dispatch a lander subagent to safely verify, commit, and land the worktree changes.
+Do NOT attempt to perform heavy multi-file edits, monolithic testing, or unverified landings directly in the primary coordinator context.
+
+## REPOSITORY INVARIANTS & 5-GATE BOUNDARY RULES
+- Work is restricted to your active lane (platform/dispatch) and declared likely paths.
+- fak-private code MUST NOT import public fak/internal/* (Gate 1). Only public fak/pkg/* may be imported.
+- All code must compile cleanly with go vet and go test.
+- Every commit must include DCO signoff (-s) and conventional trailer "(fak-private dispatch)".
+
+## TICKET SPECIFICATION & PROBLEM FRAME
+Spec file: 
+
+
+
+## VERIFICATION & LANDING SEQUENCE
+1. Implement the required changes and unit tests with mock and hardware-witnessed arms.
+2. Run targeted package tests:
+   go test ./platform/dispatch/... -count=1
+3. Run boundary audit:
+   go run ./cmd/fak-boundary check --staged
+4. When all criteria pass, land cleanly to trunk via:
+   go run ./cmd/fak-flow land 12645 -m "feat(dispatch): resolve #12645 (Autonomous Task #12645) (fak-private dispatch)" --verify "go test ./platform/dispatch/... -count=1"

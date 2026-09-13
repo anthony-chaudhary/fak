@@ -6,6 +6,15 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute/strix"
 )
 
+// AttachStrixSubsystems accepts the initialized Strix Halo preflight subsystems.
+// The Vulkan backend retains references for its zero-copy UMA/MALL allocation paths;
+// on non-Strix builds this is a no-op so discrete/CPU backends are unaffected.
+func (v *vulkanBackend) AttachStrixSubsystems(uma *strix.UMAPointerManager, mall *strix.MALLTiler) error {
+	v.strixUMA = uma
+	v.strixMALL = mall
+	return nil
+}
+
 // StrixSFence executes an SFENCE instruction via internal/compute/strix to drain
 // CPU write-combining store buffers (WCBs) prior to GPU queue submissions.
 func (v *vulkanBackend) StrixSFence() {
