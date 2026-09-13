@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-09-04",
+  "updated_at": "2026-09-12",
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
 {
@@ -18,7 +18,7 @@
       "issue_refs": [
         "#10950"
       ],
-      "mode": "deep",
+      "mode": "exhaustive",
       "candidate_count": 5
     }
 },
@@ -37,7 +37,7 @@
       "issue_refs": [
         "#10953"
       ],
-      "mode": "deep",
+      "mode": "exhaustive",
       "candidate_count": 5
     }
 },
@@ -56,7 +56,7 @@
       "issue_refs": [
         "#10957"
       ],
-      "mode": "deep",
+      "mode": "exhaustive",
       "candidate_count": 3
     }
 },
@@ -75,7 +75,7 @@
                       "issue_refs":  [
                                          "#11700"
                                      ],
-                      "mode":  "scoped",
+                      "mode":  "standard",
                       "candidate_count":  2
                   }
 },
@@ -94,7 +94,7 @@
                       "issue_refs":  [
                                          "#11700"
                                      ],
-                      "mode":  "scoped",
+                      "mode":  "standard",
                       "candidate_count":  2
                   }
 },
@@ -273,6 +273,82 @@
           "#11089",
           "#11090",
           "#11091"
+        ]
+      }
+    },
+    {
+      "repository": "airawatraj/dgx-spark-qwen38-flash-agent",
+      "url": "https://github.com/airawatraj/dgx-spark-qwen38-flash-agent",
+      "status": "studied",
+      "priority": 1,
+      "why": "HashK 4x GPU PLE table compression (51.2 GB to 12.8 GB VRAM via SplitMix64 dual-subtable hashing with identity ridge bypass), Mamba/Gated DeltaNet recurrent-state checkpoint-and-rollback invariants under speculative rejection, and Grace-Blackwell SM121 kernel patches for Qwen3.8-Flash-Next on DGX Spark GB10.",
+      "last_checked": "2026-09-03",
+      "checked_revision": "659fa22981c07606bcb29269b5444c0e45ee7b55",
+      "stars_at_check": 5,
+      "last_push_at_check": "2026-09-08T02:18:47Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-AIRAWATRAJ-HASHK-PLE-2026-09-03.md",
+      "receipt_id": "study_09d87cac2703515c678a679f94fba63a68e82a3515df7c431ed067a85dad93f9",
+      "refresh_issue": "#10954",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/airawatraj-dgx-spark-qwen38-flash-agent.json",
+        "indexed_revision": "659fa22981c07606bcb29269b5444c0e45ee7b55",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 9,
+        "candidate_count": 5,
+        "filed_issue_count": 0,
+        "issue_refs": [],
+        "completeness_critic": "Exhaustive local tree map of the pinned revision walks all 49 tracked files across 9 subsystems (patches, tools, assets, docker, benchmark, setup, src, docs, root). architecture_design, history_changelog_releases and roadmap_todos are checked_absent in-tree; the open/closed issue, PR and discussion census is a completed zero-count read-back (repo has 0 issues, 0 pull requests, 0 discussions, 0 releases); fak self-query and the 5-row candidate matrix live in the study note; candidacy and issue tracking are recorded on #10954. Benchmark PNG assets and generated docker/setup shell are the only excluded surfaces.",
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api repos/airawatraj/dgx-spark-qwen38-flash-agent/issues?state=all&per_page=100 -> 0 issue or pull requests",
+              "gh api repos/airawatraj/dgx-spark-qwen38-flash-agent/discussions -> 0 discussions",
+              "gh api repos/airawatraj/dgx-spark-qwen38-flash-agent/releases -> 0 releases",
+              "docs/notes/CONCEPT-STUDY-AIRAWATRAJ-HASHK-PLE-2026-09-03.md"
+            ],
+            "note": "Zero-count forge read-back: the pinned repo has no issue, pull request, or discussion history to census; the main branch is a flat patch kit."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities embedding table compression",
+              "internal/model/verify.go",
+              "internal/quality/spec_decode.go",
+              "docs/notes/CONCEPT-STUDY-AIRAWATRAJ-HASHK-PLE-2026-09-03.md#4-current-fak-witness--gap-matrix"
+            ],
+            "note": "Per-candidate fak self-query maps HashK compression to internal/model, internal/compute and internal/ggufload (ABSENT), and DeltaNet rollback to internal/quality/spec_decode.go (PARTIAL)."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/notes/CONCEPT-STUDY-AIRAWATRAJ-HASHK-PLE-2026-09-03.md#4-current-fak-witness--gap-matrix",
+              "docs/notes/CONCEPT-STUDY-AIRAWATRAJ-HASHK-PLE-2026-09-03.md#5-concrete-borrow-candidates-grounded-at-filelinesha"
+            ],
+            "note": "Five-row candidate matrix (HashK PLE, recurrent rollback, SM121 grouped-BMM decode, wedge watchdog, CuTe-DSL TMA-O guard) with PRESENT/PARTIAL/ABSENT dispositions."
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/10954",
+              "docs/notes/CONCEPT-STUDY-AIRAWATRAJ-HASHK-PLE-2026-09-03.md"
+            ],
+            "note": "Tracking issue #10954 carries the study and its five candidate dispositions."
+          }
         ]
       }
     },
@@ -3213,7 +3289,7 @@
       "last_push_at_check": "2026-09-06T16:32:32Z",
       "study_note": "docs/notes/CONCEPT-STUDY-PURE-GO-HOST-BINDINGS-2026-09-08.md",
       "inventory": {
-        "mode": "focused",
+        "mode": "exhaustive",
         "source_classes": [
           "readme_docs",
           "runtime_source",
@@ -3248,7 +3324,7 @@
       "last_push_at_check": "2026-09-07T01:27:43Z",
       "study_note": "docs/notes/CONCEPT-STUDY-PURE-GO-HOST-BINDINGS-2026-09-08.md",
       "inventory": {
-        "mode": "focused",
+        "mode": "exhaustive",
         "source_classes": [
           "runtime_source",
           "tests_fixtures",
@@ -3277,7 +3353,7 @@
       "last_push_at_check": "2026-08-07T03:32:30Z",
       "study_note": "docs/notes/CONCEPT-STUDY-PURE-GO-HOST-BINDINGS-2026-09-08.md",
       "inventory": {
-        "mode": "focused",
+        "mode": "exhaustive",
         "source_classes": [
           "architecture_design",
           "runtime_source",
