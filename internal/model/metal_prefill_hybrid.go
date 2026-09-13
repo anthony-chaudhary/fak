@@ -528,11 +528,10 @@ func (s *Session) Qwen35MetalMTPVerifyPanel(ids []int) (result Qwen35MetalMTPVer
 	m, cfg := s.M, s.M.Cfg
 	base, H := s.Cache.Len(), cfg.HiddenSize
 	X := make([]float32, len(ids)*H)
-	embed := m.embedRows()
-	for i, id := range ids {
-		copy(X[i*H:(i+1)*H], embed[id*H:(id+1)*H])
-		scaleEmbedInPlace(X[i*H:(i+1)*H], cfg)
-	}
+	// embedRowsInto is the packed-embedding-aware lookup (Q2_K/Q4_K row gather) and
+	// applies the config embedding scale in place; a raw embedRows() panics on a
+	// packed store, which is the Qwen3.8 Q4_K_M tied-embedding case.
+	m.embedRowsInto(X, ids, H, cfg)
 	g, err := metalgemm.BeginProjectionGraph(X, nil, nil, len(ids), H)
 	if err != nil {
 		owner.Close()
@@ -736,12 +735,10 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequence(s *Session, i
 	// Resolve every resident handle before graph construction. Once Begin succeeds,
 	// any failure remains accepted and cannot replay through the host forward.
 	s.prefillQwen35HybridQ4KMetalUpload()
-	embed := m.embedRows()
+	// embedRowsInto gathers through the packed Q2_K/Q4_K store when present and applies
+	// the embedding scale; embedRows() itself refuses (panics) a packed table.
 	X := make([]float32, P*H)
-	for i, id := range ids {
-		copy(X[i*H:(i+1)*H], embed[id*H:(id+1)*H])
-		scaleEmbedInPlace(X[i*H:(i+1)*H], cfg)
-	}
+	m.embedRowsInto(X, ids, H, cfg)
 	g, err := metalgemm.BeginProjectionGraph(X, nil, nil, P, H)
 	if err != nil {
 		return nil, Qwen35MetalForwardSequenceReceipt{}, true, err
