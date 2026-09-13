@@ -209,6 +209,13 @@ type InKernelPlanner struct {
 	speculativeEngine *model.SpeculativeEngine
 	specDraftDepth    int
 	vulkanMTP         bool
+	// specSessionCloseHook, when non-nil, observes the live reused-speculative
+	// target session immediately before it is closed at the end of
+	// generateReusedSpeculative. It exists so package tests can witness the
+	// resident KV state after a round terminates early (the boundary-state
+	// parity regression for #12422 defect 3) without exporting the per-request
+	// session. nil on the served path is a literal no-op.
+	specSessionCloseHook func(*model.Session)
 	// vulkanMTPDraftFactory is request-scoped: each invocation binds one draft
 	// cache to the live target session used by that request. Tests in this
 	// package replace it to witness lifecycle behavior without Vulkan hardware.
@@ -1403,7 +1410,12 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		matched = 0
 		s = p.newSpeculativeSession()
 	}
-	defer func() { s.Close() }()
+	defer func() {
+		if p.specSessionCloseHook != nil {
+			p.specSessionCloseHook(s)
+		}
+		s.Close()
+	}()
 	p.configureNativeSession(s)
 
 	eng := p.speculativeEngine
@@ -1658,12 +1670,25 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 
 		// Accept verified tokens
 		roundStopped := false
+		// emittedThisRound counts accepted tokens actually emitted to the caller.
+		// ParallelVerifyKernel appended EVERY accepted draft token to the target
+		// KV during its single batched forward, so the resident cache holds
+		// committed + len(vRes.AcceptedTokens) even though this loop may stop
+		// early (ctx cancellation, a token-ID stop, the emit callback returning
+		// true, or gen == maxNew). The un-emitted accepted suffix is then a
+		// PHANTOM SUFFIX: state the caller never received. Increment only at the
+		// exact commit point (after the stop/maxNew checks pass) so the rollback
+		// below removes precisely the tokens that were verified but not emitted
+		// (#12422 defect 3).
+		emittedThisRound := 0
 		for i, tok := range vRes.AcceptedTokens {
 			if err = ctx.Err(); err != nil {
 				roundStopped = true
 				break
 			}
 			if tok < 0 || stops[tok] {
+				// A token-ID stop is neither emitted nor stepped; leave it out of
+				// emittedThisRound so the rollback also drops it from KV.
 				roundStopped = true
 				stopped = true
 				break
@@ -1680,6 +1705,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 			emitStopped := emit != nil && emit(tok)
 			gen++
 			committed = append(committed, tok)
+			emittedThisRound++
 			if err = measurement.recordDecodeTrace(gen, tok); err != nil {
 				roundStopped = true
 				break
@@ -1695,6 +1721,18 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 					break
 				}
 			}
+		}
+
+		// Boundary-state parity: the session must return holding exactly the
+		// emitted tokens. The un-emitted accepted suffix is the current KV tail
+		// (ParallelVerifyKernel already evicted only the rejected draft suffix),
+		// so truncating from the end by that count is exact. RollbackResidentSuffix
+		// routes through the backend-aware eviction seam, so a device session
+		// releases its HAL store too — RollbackSpeculative would touch only the
+		// host Cache and leave the device phantom suffix resident. This is a no-op
+		// on the normal path, where every accepted token was emitted.
+		if unemitted := len(vRes.AcceptedTokens) - emittedThisRound; unemitted > 0 {
+			s.RollbackResidentSuffix(unemitted)
 		}
 
 		if roundStopped || gen == maxNew {

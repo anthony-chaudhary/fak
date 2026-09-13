@@ -544,6 +544,182 @@ func TestInKernelPlannerSpeculativeVerification(t *testing.T) {
 	}
 }
 
+// boundaryParityProbe proposes a fixed linear draft, so the accepted count is
+// deterministic: the tokens come from a greedy target walk, which is exactly
+// what ParallelVerifyKernel accepts at temperature zero.
+type boundaryParityProbe struct{ tokens []int }
+
+func (*boundaryParityProbe) Name() string { return "boundary-parity" }
+
+func (p *boundaryParityProbe) Propose(ctx context.Context, _ []int, maxDraft int) (model.DraftProposal, error) {
+	if err := ctx.Err(); err != nil {
+		return model.DraftProposal{}, err
+	}
+	tokens := append([]int(nil), p.tokens...)
+	if maxDraft > 0 && len(tokens) > maxDraft {
+		tokens = tokens[:maxDraft]
+	}
+	return model.NewLinearProposal(tokens, nil), nil
+}
+
+// TestPlannerSpeculativeBoundaryStateParity is the #12422 defect-3 regression:
+// when a speculative round terminates before every verified draft token is
+// emitted (here, the emit callback stops the round after N tokens), the target
+// session's resident KV must equal prompt+emitted exactly. ParallelVerifyKernel
+// appends ALL accepted draft tokens to the target KV during its single batched
+// forward, so without the rollback the un-emitted accepted suffix survives as a
+// phantom suffix — state the caller never received. The specSessionCloseHook
+// seam captures the live session just before it is closed so the test can assert
+// the resident cache length directly (the per-request session is not exported).
+func TestPlannerSpeculativeBoundaryStateParity(t *testing.T) {
+	ctx := context.Background()
+	cfg := tinyConcurrencyConfig()
+	m := model.NewSynthetic(cfg)
+	m.Quantize()
+
+	prompt := []int{10, 20, 30, 40, 10, 20, 30}
+	const draftDepth = 4
+	const emitStop = 2
+
+	// A greedy target walk gives the exact tokens the verify kernel accepts.
+	acceptedDraft := speculativeAcceptedDraft(t, m, prompt, draftDepth)
+	if len(acceptedDraft) != draftDepth {
+		t.Fatalf("accepted draft len = %d, want %d", len(acceptedDraft), draftDepth)
+	}
+
+	p := NewInKernelPlanner(m, nil, "boundary-parity", false, nil, false)
+	p.EnableSpeculativeDecoding(&boundaryParityProbe{tokens: acceptedDraft}, draftDepth)
+
+	var captured *model.Session
+	p.specSessionCloseHook = func(s *model.Session) { captured = s }
+
+	var emitted []int
+	res, err := p.generateReusedRecovering(ctx, prompt, 100, 0, 0, 0, nil, 0, 0, nil, func(tok int) bool {
+		emitted = append(emitted, tok)
+		return len(emitted) == emitStop
+	})
+	if err != nil {
+		t.Fatalf("speculative generate: %v", err)
+	}
+	if captured == nil {
+		t.Fatal("session close hook did not capture the target session")
+	}
+	if len(emitted) != emitStop {
+		t.Fatalf("emitted %d tokens, want %d (emit callback stop)", len(emitted), emitStop)
+	}
+	if res.gen != emitStop {
+		t.Fatalf("gen = %d, want %d", res.gen, emitStop)
+	}
+
+	// The load-bearing invariant: resident KV == prompt + emitted, with no
+	// phantom accepted suffix left resident.
+	wantKV := len(prompt) + len(emitted)
+	if got := captured.Cache.Len(); got != wantKV {
+		t.Fatalf("resident KV length = %d, want %d (prompt %d + emitted %d); "+
+			"un-emitted accepted suffix was not rolled back (#12422 defect 3)",
+			got, wantKV, len(prompt), len(emitted))
+	}
+
+	// The emitted prefix must match a baseline autoregressive decode: the
+	// rollback must not perturb the tokens the caller actually received.
+	baseline := NewInKernelPlanner(m, nil, "boundary-parity-baseline", false, nil, false)
+	var baselineTokens []int
+	if _, err := baseline.generateReusedRecovering(ctx, prompt, emitStop, 0, 0, 0, nil, 0, 0, nil, func(tok int) bool {
+		baselineTokens = append(baselineTokens, tok)
+		return false
+	}); err != nil {
+		t.Fatalf("baseline generate: %v", err)
+	}
+	if !reflect.DeepEqual(emitted, baselineTokens) {
+		t.Fatalf("emitted prefix diverged from baseline:\n want: %v\n  got: %v", baselineTokens, emitted)
+	}
+
+	// A full (non-truncated) round must also end with KV == prompt + emitted:
+	// the rollback is a no-op when every accepted token was emitted.
+	full := NewInKernelPlanner(m, nil, "boundary-parity-full", false, nil, false)
+	full.EnableSpeculativeDecoding(&boundaryParityProbe{tokens: acceptedDraft}, draftDepth)
+	var fullSession *model.Session
+	full.specSessionCloseHook = func(s *model.Session) { fullSession = s }
+	var fullEmitted []int
+	if _, err := full.generateReusedRecovering(ctx, prompt, draftDepth, 0, 0, 0, nil, 0, 0, nil, func(tok int) bool {
+		fullEmitted = append(fullEmitted, tok)
+		return false
+	}); err != nil {
+		t.Fatalf("full speculative generate: %v", err)
+	}
+	if fullSession == nil {
+		t.Fatal("session close hook did not capture the full-round session")
+	}
+	if want := len(prompt) + len(fullEmitted); fullSession.Cache.Len() != want {
+		t.Fatalf("full-round resident KV length = %d, want %d (prompt %d + emitted %d)",
+			fullSession.Cache.Len(), want, len(prompt), len(fullEmitted))
+	}
+}
+
+// TestPlannerSpeculativeSelectorParity is the #12422 defect-4 witness: a request
+// that carries a logit bias or a frequency/presence penalty must select the same
+// token whether or not a speculative engine is configured. The planner keeps its
+// exact-greedy target-verifier contract by routing selector-bearing requests to
+// the serial target path (greedySpeculativeRequestEligible), and that serial path
+// applies the request selector; this test binds the observable outcome: identical
+// token sequences with and without a speculative engine attached.
+func TestPlannerSpeculativeSelectorParity(t *testing.T) {
+	ctx := context.Background()
+	cfg := tinyConcurrencyConfig()
+	m := model.NewSynthetic(cfg)
+	m.Quantize()
+
+	prompt := []int{10, 20, 30, 40, 10, 20, 30}
+	const maxNew = 6
+
+	// A logit bias that strongly favors a token the unbiased greedy walk would not
+	// pick first, plus a repetition penalty, so a path that ignored the selector
+	// would visibly diverge.
+	bias := model.LogitBias{0: 50.0}
+
+	run := func(label string, withSpec bool, useBias bool, freq, pres float64) []int {
+		p := NewInKernelPlanner(m, nil, label, false, nil, false)
+		if withSpec {
+			p.EnableSpeculativeDecoding(
+				model.NewNGramProposalGenerator(model.NgramDrafter{Enabled: true, MinMatch: 2, MaxMatch: 4, MaxDraft: 3}), 3)
+		}
+		var out []int
+		localBias := model.LogitBias(nil)
+		if useBias {
+			localBias = bias
+		}
+		if _, err := p.generateReusedRecovering(ctx, prompt, maxNew, 0, 0, 0, localBias, freq, pres, nil, func(tok int) bool {
+			out = append(out, tok)
+			return false
+		}); err != nil {
+			t.Fatalf("%s generate: %v", label, err)
+		}
+		return out
+	}
+
+	// Bias case: serial (no engine) must equal speculative-engine-configured.
+	baseBias := run("selector-baseline-bias", false, true, 0, 0)
+	specBias := run("selector-spec-bias", true, true, 0, 0)
+	if !reflect.DeepEqual(baseBias, specBias) {
+		t.Fatalf("logit-bias selection diverged with speculation:\n want: %v\n  got: %v", baseBias, specBias)
+	}
+
+	// Penalty case: same equivalence obligation for frequency/presence penalties.
+	basePenalty := run("selector-baseline-penalty", false, false, 1.0, 0.5)
+	specPenalty := run("selector-spec-penalty", true, false, 1.0, 0.5)
+	if !reflect.DeepEqual(basePenalty, specPenalty) {
+		t.Fatalf("repetition-penalty selection diverged with speculation:\n want: %v\n  got: %v", basePenalty, specPenalty)
+	}
+
+	// The selector must actually change the selection: otherwise the witness above
+	// could pass vacuously. Bias to token 0 with a large positive score, then prove
+	// the first emitted token is influenced relative to the unbiased walk.
+	basePlain := run("selector-baseline-plain", false, false, 0, 0)
+	if reflect.DeepEqual(basePlain, baseBias) {
+		t.Fatalf("logit bias did not change selection (test would be vacuous): plain=%v biased=%v", basePlain, baseBias)
+	}
+}
+
 // TestInKernelPlannerMetalMTP is the witness test for Issue #12238 in internal/agent:
 // It asserts:
 //  1. InKernelPlanner with MetalMTPCoordinator produces 100% bit-exact token sequence
