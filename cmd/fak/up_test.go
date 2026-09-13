@@ -732,18 +732,19 @@ func TestUpInKernelModelExecution(t *testing.T) {
 		t.Fatal("newInKernelChatPlanner with Metal returned nil")
 	}
 
-	// Verify model tier alias resolution
-	if got := resolveTurnkeyModelRef("27B"); got != "qwen38:27b" {
-		t.Fatalf("resolveTurnkeyModelRef(27B) = %q, want qwen38:27b", got)
+	// Verify model tier alias resolution. The 27B tier must map to the quant-qualified
+	// alias, NOT the bare "qwen38:27b" that a user registry.json overlay can shadow.
+	if got := resolveTurnkeyModelRef("27B"); got != "qwen38:27b-q4_k_m" {
+		t.Fatalf("resolveTurnkeyModelRef(27B) = %q, want qwen38:27b-q4_k_m", got)
 	}
-	if got := resolveTurnkeyModelRef("qwen3.8-27b-q4_k_m"); got != "qwen38:27b" {
-		t.Fatalf("resolveTurnkeyModelRef(qwen3.8-27b-q4_k_m) = %q, want qwen38:27b", got)
+	if got := resolveTurnkeyModelRef("qwen3.8-27b-q4_k_m"); got != "qwen38:27b-q4_k_m" {
+		t.Fatalf("resolveTurnkeyModelRef(qwen3.8-27b-q4_k_m) = %q, want qwen38:27b-q4_k_m", got)
 	}
 	if got := resolveTurnkeyModelRef("7B"); got != "qwen2.5:7b" {
 		t.Fatalf("resolveTurnkeyModelRef(7B) = %q, want qwen2.5:7b", got)
 	}
-	if got := resolveTurnkeyModelRef(""); got != "qwen38:27b" {
-		t.Fatalf("resolveTurnkeyModelRef(\"\") = %q, want qwen38:27b", got)
+	if got := resolveTurnkeyModelRef(""); got != "qwen38:27b-q4_k_m" {
+		t.Fatalf("resolveTurnkeyModelRef(\"\") = %q, want qwen38:27b-q4_k_m", got)
 	}
 
 	// 2. Verify turnkeyServer in non-mock mode routes handleChatCompletions through InKernelPlanner

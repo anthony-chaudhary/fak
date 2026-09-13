@@ -48,8 +48,8 @@ func TestTurnkeyCatalogResolution(t *testing.T) {
 			if aliases["name"] != aliases["model ID"] {
 				t.Errorf("name %q and model ID %q resolve to different aliases: %q != %q", tier.Name, tier.ModelID, aliases["name"], aliases["model ID"])
 			}
-			if tier.Name == "70B" && aliases["name"] != "qwen38:70b" {
-				t.Errorf("70B name resolves to %q, want qwen38:70b", aliases["name"])
+			if tier.Name == "70B" && aliases["name"] != "qwen38:70b-q4_k_m" {
+				t.Errorf("70B name resolves to %q, want qwen38:70b-q4_k_m", aliases["name"])
 			}
 		})
 	}
