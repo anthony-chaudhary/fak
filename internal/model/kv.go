@@ -416,6 +416,15 @@ type Session struct {
 	qScratch q8Vec
 	qDecode  *qDecodeBuf
 
+	// metalCommandBuffers and metalGraphCommandBuffers are session-local decode
+	// accounting: one increment per observed native dispatch (GEMV/GEMM/group/
+	// fused-MLP) and one per fused Qwen35 decode graph respectively. They are
+	// written only on the single-owner generation goroutine and read via
+	// MetalCommandBuffers after ResetMetalCommandBuffers; zero on the pure-Go
+	// path. See metal_cb_accounting.go.
+	metalCommandBuffers      int
+	metalGraphCommandBuffers int
+
 	// Metal routes PREFILL's projection GEMMs through the Metal GPU backend
 	// (metal_prefill.go, built only under -tags fakmetal) to reach llama.cpp-Metal prefill
 	// parity on Apple Silicon — prefill is compute-bound, where the GPU's FLOP advantage is

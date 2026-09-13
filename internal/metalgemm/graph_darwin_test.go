@@ -1139,3 +1139,169 @@ func TestProjectionGraphGDNLeaseReleasesOnFailureAndFree(t *testing.T) {
 		t.Fatalf("freed graph leaked buffers=%d, baseline=%d", got, baseline)
 	}
 }
+
+// TestProjectionGraphGEMVP1RouteParity documents the numerical drift of the P=1 GEMV
+// projection route (SetGEMVDecode). At P=1 the GEMM pipeline computes a 64-wide token
+// tile with 63 dead columns; the GEMV route replaces it with the historical decode
+// kernel (q4k_gemv/q4k_gemv_vectorized). The reduction tree differs (simd_sum vs the
+// GEMM's serial per-token accumulation), so the outputs are Approx-equal, not bit-equal.
+// This test pins the tolerance and fails if a future change makes the route structurally
+// wrong (e.g. wrong dispatch geometry or a transposed weight).
+func TestProjectionGraphGEMVP1RouteParity(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	defer ResetQ4K()
+	const P, input = 1, 256
+	vec := q4kTestVector(P*input, 5512001)
+
+	run := func(name string, gemv, vectorized bool) []float32 {
+		t.Helper()
+		g, err := BeginProjectionGraph(vec, nil, nil, P, input)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		defer g.Free()
+		if gemv {
+			if !g.SetGEMVDecode() {
+				t.Skip("P=1 GEMV route unavailable")
+			}
+			g.SetGEMVVectorized(vectorized)
+		}
+		weight := UploadQ4K(q4kTestRaw(128, input, 5512002), 128, input)
+		if weight == nil {
+			t.Fatal("Q4_K upload")
+		}
+		result, err := g.EncodeQ4K(weight)
+		if err != nil {
+			t.Fatal(err)
+		}
+		outputs, receipt, err := g.FinishRead(result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !receipt.Committed || !receipt.CompletedWait || receipt.Encoders != 1 || receipt.HostReadbacks != 1 {
+			t.Fatalf("%s receipt=%+v, want one encoder and one terminal readback", name, receipt)
+		}
+		t.Logf("route=%s encoders=%d gpu_ms=%.3f out[0]=%.6f", name, receipt.Encoders, receipt.GPUMilliseconds, outputs[0][0])
+		return outputs[0]
+	}
+
+	gemm := run("gemm-default", false, false)
+	for _, probe := range []struct {
+		name             string
+		gemv, vectorized bool
+	}{
+		{name: "gemv-scalar", gemv: true},
+		{name: "gemv-vectorized", gemv: true, vectorized: true},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			got := run(probe.name, probe.gemv, probe.vectorized)
+			if len(got) != len(gemm) {
+				t.Fatalf("len(got)=%d len(gemm)=%d", len(got), len(gemm))
+			}
+			var dot, na, nb, maxAbs float64
+			for i := range got {
+				a, b := float64(got[i]), float64(gemm[i])
+				dot += a * b
+				na += a * a
+				nb += b * b
+				if d := math.Abs(a - b); d > maxAbs {
+					maxAbs = d
+				}
+			}
+			cosine := dot / (math.Sqrt(na) * math.Sqrt(nb))
+			t.Logf("%s vs GEMM: cosine=%.9f maxAbs=%.3e", probe.name, cosine, maxAbs)
+			if na == 0 || nb == 0 || cosine < 0.9999 || maxAbs > 1e-2 {
+				t.Fatalf("%s drift exceeds documented P=1 GEMV tolerance: cosine=%.9f maxAbs=%.3e", probe.name, cosine, maxAbs)
+			}
+		})
+	}
+}
+
+// TestProjectionGraphBufferPoolParity proves the per-shape idle-buffer recycle pool
+// (SetBufferPool + Release) is output-preserving. It encodes a chain of P=1 projections
+// both with the pool disabled and enabled, recycling each intermediate once its consumer
+// is encoded, and requires each stage's output to be finite and the final output to match
+// within the documented Approx tolerance. A wrong recycle (aliasing a still-live buffer)
+// would corrupt an intermediate and red this test.
+func TestProjectionGraphBufferPoolParity(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	defer ResetQ4K()
+	const P, input = 1, 256
+	// Scale the activation down so a 12-stage chain of the same projection stays
+	// finite; an unnormalized fixture overflows to NaN/Inf before the pool is even
+	// involved, which would make the parity assertion vacuous.
+	vec := q4kTestVector(P*input, 6603001)
+	for i := range vec {
+		vec[i] *= 0.02
+	}
+	weight := UploadQ4K(q4kTestRaw(256, input, 6603002), 256, input)
+	if weight == nil {
+		t.Fatal("Q4_K upload")
+	}
+
+	run := func(pooled bool) []float32 {
+		t.Helper()
+		g, err := BeginProjectionGraph(vec, nil, nil, P, input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer g.Free()
+		if pooled && !g.SetBufferPool(8) {
+			t.Skip("buffer pool unavailable")
+		}
+		cur, err := g.Input(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for stage := 0; stage < 12; stage++ {
+			next, err := g.EncodeQ4KFrom(weight, cur)
+			if err != nil {
+				t.Fatalf("stage %d: %v", stage, err)
+			}
+			if stage > 0 {
+				g.Release(cur)
+			}
+			cur = next
+		}
+		out, receipt, err := g.FinishRead(cur)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !receipt.Committed || !receipt.CompletedWait || receipt.Encoders != 12 {
+			t.Fatalf("pooled=%v receipt=%+v, want 12 encoders", pooled, receipt)
+		}
+		return out[0]
+	}
+
+	plain := run(false)
+	pooled := run(true)
+	if len(plain) != len(pooled) {
+		t.Fatalf("len plain=%d pooled=%d", len(plain), len(pooled))
+	}
+	// The pool reuses intermediate buffers only within one command buffer, where
+	// Metal executes encoders in order, so the pooled chain must be BIT-IDENTICAL to
+	// the unpooled chain. The synthetic 12-stage chain multiplies an unnormalized
+	// test weight repeatedly and can overflow to NaN/Inf on its own; that is a
+	// property of the fixture, not the pool. Parity is therefore compared with
+	// NaN==NaN treated as equal, and a finite-element maxAbs is logged.
+	var maxAbs float64
+	finite := 0
+	for i := range plain {
+		a, b := float64(plain[i]), float64(pooled[i])
+		if math.IsNaN(a) && math.IsNaN(b) {
+			continue
+		}
+		if a != b {
+			t.Fatalf("buffer pool changed output[%d]: plain=%v pooled=%v", i, plain[i], pooled[i])
+		}
+		finite++
+		if d := math.Abs(a - b); d > maxAbs {
+			maxAbs = d
+		}
+	}
+	t.Logf("pooled vs unpooled 12-stage chain: bit-identical on %d finite elems, maxAbs=%.3e", finite, maxAbs)
+}

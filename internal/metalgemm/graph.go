@@ -27,6 +27,10 @@ int mg_graph_read(void *graph, void *result, float *dst, int n);
 int mg_graph_read_pack(void *graph, void **results, const int *sizes, int count, float *dst, int total);
 void mg_graph_free(void *graph);
 void *mg_graph_xf_buffer(void *graph);
+int mg_graph_set_gemv_vectorized(void *graph, int mode);
+int mg_graph_set_gemv_p1(void *graph, int mode);
+int mg_graph_set_buffer_pool(void *graph, int depth);
+void mg_graph_recycle_result(void *graph, void *result);
 void *mg_qwen35_graph_norm(void *graph, void *input, const float *weight, int rows, int width, float eps, int gain1p, int last_only);
 int mg_qwen35_graph_add(void *graph, void *x, void *y, int n);
 int mg_qwen35_graph_swiglu(void *graph, void *gate, void *up, int n);
@@ -75,10 +79,11 @@ type GraphReceipt struct {
 }
 
 type GraphResult struct {
-	ptr   unsafe.Pointer
-	out   int
-	p     int
-	graph *ProjectionGraph
+	ptr      unsafe.Pointer
+	out      int
+	p        int
+	graph    *ProjectionGraph
+	released bool
 }
 
 // QuantizedGraphResult is a graph-owned Q8_0 activation panel. It can only be
@@ -412,6 +417,60 @@ func (g *ProjectionGraph) Input(width int) (*GraphResult, error) {
 	}
 	return &GraphResult{ptr: C.mg_graph_xf_buffer(g.ptr), out: width, p: g.p, graph: g}, nil
 }
+
+// SetBufferPool enables the graph's per-shape idle-buffer recycle pool with the given
+// maximum idle depth per shape (0 disables). Intermediate projection/norm outputs are
+// recycled through Release instead of allocating a fresh Metal buffer per operation.
+// It is opt-in and must be called before the first encode. Reuse is sound because every
+// encoder shares one command buffer, so Metal's in-order execution guarantees a later
+// reuse cannot overtake an earlier read. Terminal results (KV, final norm) are never
+// released and are therefore never recycled.
+func (g *ProjectionGraph) SetBufferPool(depth int) bool {
+	if g == nil || g.ptr == nil || g.finished || g.freed || g.encoders != 0 || depth < 0 {
+		return false
+	}
+	return C.mg_graph_set_buffer_pool(g.ptr, C.int(depth)) != 0
+}
+
+// Release returns a graph result whose last consumer has already been encoded to the
+// graph's recycle pool. The result must not be read, AddInPlace'd, or otherwise consumed
+// after Release. It is a no-op when the pool is disabled.
+func (g *ProjectionGraph) Release(r *GraphResult) {
+	if g == nil || g.ptr == nil || g.finished || g.freed || r == nil || r.ptr == nil || r.graph != g {
+		return
+	}
+	C.mg_graph_recycle_result(g.ptr, r.ptr)
+	r.released = true
+}
+
+// SetGEMVDecode opts this graph into the P=1 GEMV projection route: single-token Q4_K,
+// Q6_K, and Q8 projections use the decode GEMV kernels (q4k_gemv/q4k_gemv_vectorized,
+// q6k_gemv, q8_gemv) instead of the prefill GEMM pipeline, whose 64-wide token tile
+// wastes 63/64 of its work at P=1. It must be called before the first encode and is
+// inert for P!=1. Returns false when the route has already encoded work or the kernel
+// is unavailable (fail-closed; the caller keeps the GEMM default).
+func (g *ProjectionGraph) SetGEMVDecode() bool {
+	if g == nil || g.ptr == nil || g.finished || g.freed || g.encoders != 0 {
+		return false
+	}
+	return C.mg_graph_set_gemv_p1(g.ptr, 1) != 0
+}
+
+// SetGEMVVectorized selects the P=1 kernel variant used when SetGEMVDecode is active:
+// true routes single-token Q4_K projections through q4k_gemv_vectorized, false through
+// the scalar q4k_gemv. It must be called before the first encode and is inert for P!=1.
+// Returns false when the requested vectorized pipeline is unavailable (fail-closed).
+func (g *ProjectionGraph) SetGEMVVectorized(mode bool) bool {
+	if g == nil || g.ptr == nil || g.finished || g.freed || g.encoders != 0 {
+		return false
+	}
+	m := C.int(0)
+	if mode {
+		m = 1
+	}
+	return C.mg_graph_set_gemv_vectorized(g.ptr, m) != 0
+}
+
 func (g *ProjectionGraph) add(ptr unsafe.Pointer, out int) (*GraphResult, error) {
 	if ptr == nil {
 		return nil, errors.New("metalgemm: graph projection encode failed")
@@ -597,7 +656,7 @@ func (g *ProjectionGraph) SplitGatedQ(input *GraphResult, qwidth, hd int) (q, ga
 		return nil, nil, errGraphTerminal
 	}
 	if !qwenOrderedPanel(g.p) {
-		return nil, nil, fmt.Errorf("metalgemm: Qwen gated-Q panel P=%d outside witnessed set {2,3,4,32}", g.p)
+		return nil, nil, fmt.Errorf("metalgemm: Qwen gated-Q panel P=%d outside witnessed set {1,2,3,4,32}", g.p)
 	}
 	if err = g.qwenInput(input, g.p, 2*qwidth); err != nil || qwidth <= 0 || hd <= 0 || qwidth%hd != 0 {
 		return nil, nil, err
@@ -804,7 +863,7 @@ func (g *ProjectionGraph) Read(r *GraphResult) ([]float32, error) {
 	if g == nil || !g.finished || g.freed {
 		return nil, errGraphTerminal
 	}
-	if r == nil || r.graph != g || r.ptr == nil {
+	if r == nil || r.graph != g || r.ptr == nil || r.released {
 		return nil, errors.New("metalgemm: result does not belong to graph")
 	}
 	out := make([]float32, r.p*r.out)
@@ -824,7 +883,7 @@ func (g *ProjectionGraph) FinishRead(results ...*GraphResult) ([][]float32, Grap
 	}
 	total := 0
 	for _, r := range results {
-		if r == nil || r.graph != g || r.ptr == nil || r.p <= 0 || r.out <= 0 {
+		if r == nil || r.graph != g || r.ptr == nil || r.p <= 0 || r.out <= 0 || r.released {
 			return nil, GraphReceipt{}, errors.New("metalgemm: terminal result does not belong to graph")
 		}
 		total += r.p * r.out

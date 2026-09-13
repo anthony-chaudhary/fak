@@ -1,5 +1,7 @@
 package model
 
+import "os"
+
 // qwen35DecodeBlockReceipt is the portable model view of one accepted P=1
 // Metal linear-attention block. It distinguishes activation and immutable
 // constant uploads so a zero-intermediate-transfer claim cannot hide H2D work.
@@ -39,4 +41,39 @@ func (s *Session) tryQwen35MetalDecodeBlock(layer int, x []float32) ([]float32, 
 		return nil, receipt, true, s.failQwen35GDNSequence(layer, "resident decode block", err)
 	}
 	return out, receipt, true, nil
+}
+
+// qwen35MetalDecodeTokenizer is implemented by the darwin sequence backend. It
+// lowers a WHOLE decode token (all 64 Qwen3.8 layers) into one command buffer.
+type qwen35MetalDecodeTokenizer interface {
+	Qwen35MetalDecodeToken(*Session, int) ([]float32, Qwen35MetalForwardSequenceReceipt, bool, error)
+}
+
+// tryQwen35MetalDecodeWholeToken selects the one-command-buffer whole-token decode
+// graph after the resident GDN owners have been promoted. It declines before any
+// submission when the owner, backend, or tap conditions are wrong; on acceptance
+// the graph has advanced resident state and the caller must not replay. Opt in
+// with FAK_QWEN35_WHOLE_TOKEN_DECODE=1; it is off by default because the current
+// in-graph P=1 kernels are dispatch-bound on the M3 Pro (see the W1 report).
+func (s *Session) tryQwen35MetalDecodeWholeToken(id int) ([]float32, bool, error) {
+	if s == nil || s.qwen35HAL == nil || !s.qwen35HAL.decodeAccepted || s.tapActive != nil ||
+		s.qwen35DecodeHandoffMode() == Qwen35DecodeHandoffControl {
+		return nil, false, nil
+	}
+	if os.Getenv("FAK_QWEN35_WHOLE_TOKEN_DECODE") != "1" {
+		return nil, false, nil
+	}
+	tok, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalDecodeTokenizer)
+	if !ok {
+		return nil, false, nil
+	}
+	hidden, _, accepted, err := tok.Qwen35MetalDecodeToken(s, id)
+	if !accepted {
+		return nil, false, err
+	}
+	s.recordQwen35DecodeBlockAccepted()
+	if err != nil {
+		return nil, true, s.failQwen35GDNSequence(-1, "whole-token decode graph", err)
+	}
+	return hidden, true, nil
 }

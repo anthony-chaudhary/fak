@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"hash"
 	"math"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -338,6 +339,12 @@ func qwen35MetalMTPPanelAdmission(s *Session, ids []int) (*metalQwen35GDNSequenc
 	if s == nil || s.M == nil || s.Cache == nil || len(ids) != qwen35MetalMTPVerifyPanelTokens ||
 		s.Backend != nil || !s.Q4K || !s.MetalQ4K || s.qwen35HAL == nil || !s.qwen35HAL.decodeAccepted ||
 		s.qwen35HAL.decodePath != Qwen35MetalGDNDecodeForwardPath || s.activeTap() != nil {
+		return nil, qwen35MetalMTPHead{}, false
+	}
+	// The MTP panel embeds its draft rows through embedRows(), which refuses whole-table
+	// expansion of a packed (Q2_K/Q4_K) store. Decline so the verifier downgrades instead
+	// of panicking on a packed-embedding model.
+	if m := s.M; m != nil && m.Q2KEmbedding != nil {
 		return nil, qwen35MetalMTPHead{}, false
 	}
 	if qwen35MetalMTPPanelGeometryError(s.M.Cfg) != nil || s.Cache.Len()+len(ids) > 4096 {
@@ -880,6 +887,211 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequence(s *Session, i
 	s.q4kHybridPrefillChunks++
 	s.q4kHybridPrefillLastBase = base
 	return hidden, receipt, true, nil
+}
+
+// Qwen35MetalDecodeToken runs one decode position (id at absolute position
+// s.Cache.Len()) through the WHOLE 64-layer Qwen3.8 hybrid forward — every
+// linear-attention layer's GDN recurrence, every full-attention layer's SDPA,
+// every MLP, and the final norm — encoded into ONE ProjectionGraph and therefore
+// ONE Metal command buffer. It reuses the exact layer-ordered graph walk proven by
+// the P=32 Qwen35MetalForwardSequence prefill panels, with the resident GDN decode
+// owners promoted by FinalizeQwen35MetalGDNPreprojectedSequence.
+//
+// The host full-attention KV prefix is uploaded per full-attention layer and the
+// appended K/V is read back to the host cache, exactly as the P=32 walk does; the
+// context bound (4096) keeps that transfer bounded. This collapses the ~225
+// command-buffer round trips of the historical per-GEMV decode to one commit and
+// one completion wait per token.
+//
+// Fail-open: any pre-submit decline returns accepted=false and leaves the caller
+// on the historical blockStep/host path. Once the graph commits, accepted stays
+// true and the caller must not replay (resident GDN state may have advanced).
+func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id int) (hidden []float32, receipt Qwen35MetalForwardSequenceReceipt, accepted bool, err error) {
+	if s == nil || s.M == nil || s.Cache == nil || s.Backend != nil || !s.Q4K || !s.MetalQ4K || s.qwen35HAL == nil ||
+		!s.qwen35HAL.decodeAccepted || s.activeTap() != nil {
+		return nil, receipt, false, nil
+	}
+	m, cfg := s.M, s.M.Cfg
+	if qwen35MetalForwardGeometryError(cfg) != nil || !cfg.AttnOutputGate || !cfg.NormGain1p || !cfg.QKNorm || cfg.BlockTopology != PreNorm {
+		return nil, receipt, false, nil
+	}
+	if id < 0 || id >= cfg.VocabSize {
+		return nil, receipt, false, nil
+	}
+	base, H, P := s.Cache.Len(), cfg.HiddenSize, 1
+	if base+P > 4096 {
+		return nil, receipt, false, nil
+	}
+	// Resolve every resident handle before graph construction. Once Begin succeeds,
+	// a failure remains accepted and cannot replay through the host forward.
+	s.prefillQwen35HybridQ4KMetalUpload()
+	X := make([]float32, P*H)
+	m.embedRowsInto(X, []int{id}, H, cfg)
+
+	g, err := metalgemm.BeginProjectionGraph(X, nil, nil, P, H)
+	if err != nil {
+		return nil, receipt, false, err
+	}
+	defer g.Free()
+	// The whole-token graph is P=1: route every Q4_K/Q6_K/Q8 projection through the
+	// historical decode GEMV kernels instead of the prefill GEMM pipeline. At P=1 the
+	// GEMM's 64-wide token tile wastes 63/64 of its work and emits a small dispatch per
+	// output-row block. SetGEMVUseVectorized(1) selects q4k_gemv_vectorized; the scalar
+	// q4k_gemv remains the fallback. FAK_QWEN35_WHOLE_TOKEN_GEMV=0 restores the GEMM
+	// route for an A/B measurement.
+	if os.Getenv("FAK_QWEN35_WHOLE_TOKEN_GEMV") != "0" {
+		g.SetGEMVDecode()
+		g.SetGEMVVectorized(os.Getenv("FAK_QWEN35_WHOLE_TOKEN_GEMV_VEC") != "0")
+	}
+	// Recycle dead intermediate projection/norm buffers per shape. Opt-in (env) so the
+	// default graph keeps its call-owned allocations; the terminal KV and final-norm
+	// results are never released and remain valid for FinishRead.
+	if os.Getenv("FAK_QWEN35_WHOLE_TOKEN_POOL") == "1" {
+		g.SetBufferPool(8)
+	}
+	x, err := g.Input(H)
+	if err != nil {
+		return nil, receipt, true, err
+	}
+	quantized := make(map[*metalgemm.GraphResult]*metalgemm.QuantizedGraphResult)
+	type kvResult struct {
+		layer          int
+		kraw, kpost, v *metalgemm.GraphResult
+	}
+	var kvResults []kvResult
+	eps := float32(cfg.RMSNormEps)
+	for l := 0; l < cfg.NumLayers; l++ {
+		p := func(suffix string) string { return layerName(l, suffix) }
+		xn, runErr := g.RMSNorm(x, m.tensor(p("input_layernorm.weight")), eps, cfg.NormGain1p)
+		if runErr != nil {
+			return nil, receipt, true, runErr
+		}
+		var attnOut *metalgemm.GraphResult
+		if cfg.isLinearAttnLayer(l) {
+			in, runErr := qwen35GraphProjections(g, s, []string{
+				p("linear_attn.in_proj_qkv.weight"), p("linear_attn.in_proj_z.weight"),
+				p("linear_attn.in_proj_b.weight"), p("linear_attn.in_proj_a.weight"),
+			}, xn, quantized)
+			if runErr != nil {
+				return nil, receipt, true, runErr
+			}
+			state := b.state(s.qwen35HAL.sequenceLayers[l])
+			if state == nil {
+				return nil, receipt, true, fmt.Errorf("metalgemm: missing GDN graph owner for layer %d", l)
+			}
+			core, runErr := g.GDN(state, in[0], in[1], in[2], in[3], metalgemm.GDNPanel{
+				Conv1D: m.tensor(p("linear_attn.conv1d.weight")), ALog: m.tensor(p("linear_attn.A_log")),
+				DTBias: m.tensor(p("linear_attn.dt_bias")), Norm: m.tensor(p("linear_attn.norm.weight")), RMSNormEpsilon: eps,
+			})
+			if runErr != nil {
+				return nil, receipt, true, runErr
+			}
+			for _, consumed := range in {
+				g.Release(consumed)
+			}
+			attnOut, runErr = qwen35GraphProjection(g, s, p("linear_attn.out_proj.weight"), core, quantized)
+			if runErr != nil {
+				return nil, receipt, true, runErr
+			}
+			g.Release(core)
+		} else {
+			qkv, runErr := qwen35GraphProjections(g, s, []string{p("self_attn.q_proj.weight"), p("self_attn.k_proj.weight"), p("self_attn.v_proj.weight")}, xn, quantized)
+			if runErr != nil {
+				return nil, receipt, true, runErr
+			}
+			q, gate, runErr := g.SplitGatedQ(qkv[0], cfg.NumHeads*cfg.HeadDim, cfg.HeadDim)
+			if runErr != nil {
+				return nil, receipt, true, runErr
+			}
+			qnorm, knorm := m.tensor(p("self_attn.q_norm.weight")), m.tensor(p("self_attn.k_norm.weight"))
+			rotary := cfg.rotaryDim()
+			cos, sin := ropeRowForLayer(cfg, l, base)
+			attention, runErr := g.FullAttention(q, qkv[1], qkv[2], gate, qnorm, knorm, cos, sin,
+				s.Cache.K[l], s.Cache.V[l], base, cfg.NumHeads, cfg.NumKVHeads, cfg.HeadDim, rotary, cfg.attnScale(), cfg.qkNormEps(), cfg.NormGain1p, cfg.QKNorm)
+			if runErr != nil {
+				return nil, receipt, true, runErr
+			}
+			attnOut, runErr = qwen35GraphProjection(g, s, p("self_attn.o_proj.weight"), attention.Output, quantized)
+			if runErr != nil {
+				return nil, receipt, true, runErr
+			}
+			for _, consumed := range qkv {
+				g.Release(consumed)
+			}
+			g.Release(q)
+			g.Release(gate)
+			g.Release(attention.Output)
+			kvResults = append(kvResults, kvResult{layer: l, kraw: attention.KRaw, kpost: attention.KPost, v: attention.V})
+		}
+		if err = g.AddInPlace(x, attnOut); err != nil {
+			return nil, receipt, true, err
+		}
+		g.Release(xn)
+		g.Release(attnOut)
+		xn2, runErr := g.RMSNorm(x, m.tensor(p("post_attention_layernorm.weight")), eps, cfg.NormGain1p)
+		if runErr != nil {
+			return nil, receipt, true, runErr
+		}
+		gu, runErr := qwen35GraphProjections(g, s, []string{p("mlp.gate_proj.weight"), p("mlp.up_proj.weight")}, xn2, quantized)
+		if runErr != nil {
+			return nil, receipt, true, runErr
+		}
+		g.Release(xn2)
+		if err = g.SwiGLUInPlace(gu[0], gu[1]); err != nil {
+			return nil, receipt, true, err
+		}
+		g.Release(gu[1])
+		down, runErr := qwen35GraphProjection(g, s, p("mlp.down_proj.weight"), gu[0], quantized)
+		if runErr != nil {
+			return nil, receipt, true, runErr
+		}
+		g.Release(gu[0])
+		if err = g.AddInPlace(x, down); err != nil {
+			return nil, receipt, true, err
+		}
+		g.Release(down)
+	}
+	hiddenResult, err := g.LastRMSNorm(x, m.tensor("model.norm.weight"), eps, cfg.NormGain1p)
+	if err != nil {
+		return nil, receipt, true, err
+	}
+	terminal := []*metalgemm.GraphResult{hiddenResult}
+	for _, kv := range kvResults {
+		terminal = append(terminal, kv.kraw, kv.kpost, kv.v)
+	}
+	outputs, graphReceipt, err := g.FinishRead(terminal...)
+	receipt = Qwen35MetalForwardSequenceReceipt{
+		Path: Qwen35MetalGDNSequenceForwardPath, Available: true,
+		SelectorState: Qwen35MetalSequenceSelectorOn, EvidenceState: Qwen35MetalSequenceEvidenceExecuted, Tokens: P,
+		CommandBuffers: 1, Encoders: graphReceipt.Encoders, TerminalWaits: 1, TerminalReadbacks: graphReceipt.HostReadbacks,
+		IntermediateWaits: graphReceipt.IntermediateWaits, IntermediateReadbacks: graphReceipt.IntermediateReadbacks,
+		HostUploadBytes: graphReceipt.HostUploadBytes, HostReadbackBytes: graphReceipt.HostReadbackBytes,
+		Committed: graphReceipt.Committed, CompletedWait: graphReceipt.CompletedWait, TimingAvailable: graphReceipt.TimingAvailable,
+		GPUMilliseconds: graphReceipt.GPUMilliseconds, WaitMilliseconds: graphReceipt.WaitMilliseconds,
+	}
+	if err != nil || !graphReceipt.Committed || !graphReceipt.CompletedWait || graphReceipt.HostReadbacks != 1 {
+		if err == nil {
+			err = fmt.Errorf("metalgemm: incomplete Qwen decode-token graph receipt: %+v", graphReceipt)
+		}
+		return nil, receipt, true, err
+	}
+	s.countMetalGraphCommandBuffer(1)
+	if os.Getenv("FAK_QWEN35_WHOLE_TOKEN_TRACE") == "1" {
+		fmt.Fprintf(os.Stderr, "w1-whole-token P=1 cb=1 encoders=%d gpu_ms=%.2f wait_ms=%.2f host_up=%dB host_down=%dB graph_cb_total=%d dispatch_cb_total=%d gdn_fused=%v\n",
+			graphReceipt.Encoders, graphReceipt.GPUMilliseconds, graphReceipt.WaitMilliseconds,
+			graphReceipt.HostUploadBytes, graphReceipt.HostReadbackBytes,
+			s.metalGraphCommandBuffers, s.metalCommandBuffers,
+			os.Getenv("FAK_QWEN35_WHOLE_TOKEN_GDN_FUSED") == "1")
+	}
+	outIndex := 1
+	for _, kv := range kvResults {
+		s.Cache.Kraw[kv.layer] = append(s.Cache.Kraw[kv.layer], outputs[outIndex]...)
+		s.Cache.K[kv.layer] = append(s.Cache.K[kv.layer], outputs[outIndex+1]...)
+		s.Cache.V[kv.layer] = append(s.Cache.V[kv.layer], outputs[outIndex+2]...)
+		outIndex += 3
+	}
+	s.Cache.appendPosition(base, id)
+	return outputs[0], receipt, true, nil
 }
 
 func init() {
