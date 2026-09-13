@@ -378,7 +378,7 @@ func (rt *serveRuntime) resolveNativeContext(sf *serveFlags, ranks int) error {
 				return err
 			}
 			cfg, _ := ws.File.Config()
-			logServeAutoSizedContext(cfg.ContextSizeConfig(), weights, fit, fit.avail(), requested, resolution.ResolvedTokens)
+			logServeAutoSizedContext(cfg.ContextSizeConfigWithPrecision(serveKVPrecision()), weights, fit, fit.avail(), requested, resolution.ResolvedTokens)
 		}
 	}
 	rt.nativeContext = resolution

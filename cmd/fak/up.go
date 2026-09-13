@@ -285,6 +285,7 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	memoryGiB := fs.Float64("memory-gib", 0, "override detected unified memory in GiB")
 	modelOverride := fs.String("model", "", "override auto-selected model tier (e.g. 7B, 27B, 70B)")
 	contextOverride := fs.Uint64("context", 0, "override auto-selected context budget tokens")
+	kvPrecision := fs.String("kv-precision", "", "KV cache storage tier: f32 (default, exact) or q8_0 (dense mixed: f32 pre-RoPE K + q8_0 K/V; ~2x more context). Also settable via FAK_UP_KV_PRECISION.")
 	engineID := fs.String("engine", "inkernel", "model engine ID (default inkernel; mock only with --mock)")
 
 	if err := fs.Parse(argv); err != nil {
@@ -307,7 +308,13 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 		}
 	}
 
-	plan, err := macfit.ConfigureTurnkey(memoryBytes)
+	kvPrec, err := resolveUpKVPrecision(*kvPrecision)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak up: %v\n", err)
+		os.Exit(1)
+	}
+
+	plan, err := macfit.ConfigureTurnkeyWithOptions(memoryBytes, macfit.TurnkeyOptions{KVPrecision: kvPrec})
 	if err != nil {
 		fmt.Fprintf(stderr, "fak up: planning failed: %v\n", err)
 		os.Exit(1)
@@ -354,7 +361,11 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 			fmt.Fprintf(stdout, "Resolved URI   : %s\n", resolvedURI)
 		}
 		fmt.Fprintf(stdout, "Weights Size   : %.2f GiB\n", float64(plan.Tier.WeightBytes)/float64(macfit.GiB))
-		fmt.Fprintf(stdout, "Context Budget : %d tokens (KV: %.2f GiB)\n", plan.ContextBudgetTokens, float64(plan.ContextBudgetTokens*plan.KVBytesPerToken)/float64(macfit.GiB))
+		kvPrecLabel := string(plan.KVPrecision)
+		if kvPrecLabel == "" {
+			kvPrecLabel = string(fakmodel.KVPrecisionFP16)
+		}
+		fmt.Fprintf(stdout, "Context Budget : %d tokens (KV: %s, %.2f GiB)\n", plan.ContextBudgetTokens, kvPrecLabel, float64(plan.ContextBudgetTokens*plan.KVBytesPerToken)/float64(macfit.GiB))
 		fmt.Fprintf(stdout, "Headroom       : %.1f%% (>= 20.0%% guaranteed to prevent swap)\n", plan.HeadroomRatio*100)
 		return
 	}
@@ -399,8 +410,12 @@ func printTurnkeyReady(w io.Writer, ver, addr string, plan macfit.TurnkeyProfile
 		readyBadge = tuiSGRGreenBold + "[READY]" + tuiSGRReset
 	}
 	fmt.Fprintf(w, "\n%s fak up %s running on http://%s\n", readyBadge, ver, addr)
-	fmt.Fprintf(w, "  • Model:                      %s (%s, quant: %s) | Context: %d tokens | Headroom: %.1f%%\n",
-		plan.Tier.Name, plan.Tier.ModelID, plan.Tier.QuantTier, plan.ContextBudgetTokens, plan.HeadroomRatio*100)
+	kvPrecLabel := string(plan.KVPrecision)
+	if kvPrecLabel == "" {
+		kvPrecLabel = string(fakmodel.KVPrecisionFP16)
+	}
+	fmt.Fprintf(w, "  • Model:                      %s (%s, quant: %s) | Context: %d tokens | KV precision: %s | Headroom: %.1f%%\n",
+		plan.Tier.Name, plan.Tier.ModelID, plan.Tier.QuantTier, plan.ContextBudgetTokens, kvPrecLabel, plan.HeadroomRatio*100)
 	fmt.Fprintf(w, "  • OpenAI-compatible endpoint: http://%s/v1/chat/completions\n", addr)
 	fmt.Fprintf(w, "  • Health check endpoint:      http://%s/healthz\n\n", addr)
 	if f, ok := w.(*os.File); ok {
@@ -508,7 +523,35 @@ func newInKernelChatPlanner(model *fakmodel.Model, tok *tokenizer.Tokenizer, mod
 }
 
 func newTurnkeyInKernelPlanner(model *fakmodel.Model, tok *tokenizer.Tokenizer, modelID string, q4k bool, backend compute.Backend, metal bool, contextTokens int) *agent.InKernelPlanner {
-	return agent.NewInKernelPlannerWithConfig(model, tok, modelID, q4k, backend, metal, agent.InKernelPlannerConfig{ContextTokens: contextTokens})
+	// The realized KV tier is resolved once at startup (--kv-precision > FAK_UP_KV_PRECISION)
+	// and published to FAK_UP_KV_PRECISION so the loader dep path (which carries no KV field)
+	// and any nested serve planner agree on one value. Unset means f32, byte-identical.
+	kvPrec, err := resolveUpKVPrecision("")
+	if err != nil {
+		panic(err)
+	}
+	return agent.NewInKernelPlannerWithConfig(model, tok, modelID, q4k, backend, metal, agent.InKernelPlannerConfig{ContextTokens: contextTokens, KVPrecision: kvPrec})
+}
+
+// resolveUpKVPrecision resolves the realized KV storage tier for `fak up`. Precedence:
+// an explicit flag value wins; otherwise FAK_UP_KV_PRECISION; otherwise f32 (the exact
+// default). It pins the resolved value back into FAK_UP_KV_PRECISION so the native
+// loader dep path and the per-request planner cannot drift. Unknown tokens refuse
+// rather than silently falling back, so a typo never buys a lossy cache unnoticed.
+func resolveUpKVPrecision(flagValue string) (fakmodel.KVPrecision, error) {
+	raw := strings.TrimSpace(flagValue)
+	if raw == "" {
+		raw = strings.TrimSpace(os.Getenv("FAK_UP_KV_PRECISION"))
+	}
+	if raw == "" {
+		return fakmodel.KVPrecisionFP32, nil
+	}
+	prec, err := fakmodel.ParseKVPrecision(raw)
+	if err != nil {
+		return "", err
+	}
+	_ = os.Setenv("FAK_UP_KV_PRECISION", string(prec))
+	return prec, nil
 }
 
 func turnkeyContextTokens(tokens uint64) (int, error) {

@@ -18,6 +18,19 @@ type KVCache struct {
 	linear  *linearAttnCache
 	glm     *glmDsaKVCache
 	msa     *minimaxKVCache // MiniMax-M3 lightning-indexer key cache (sparse layers only)
+
+	// prec is the realized storage tier of the two ATTENDED rows (post-RoPE K, V).
+	// Its zero value is KVPrecisionFP32, which keeps K/V as the f32 [][]float32 above
+	// and is byte-for-byte the historical cache. KVPrecisionQ8_0 instead stores K and
+	// V packed in kQ8/vQ8 (int8 codes + f32 per-32-block scale) and leaves Kraw f32,
+	// matching the compute.KVPrecisionQ8 planner tier and keeping Evict's pre-RoPE
+	// re-positioning exact. It is fixed at construction and never mutated, so no
+	// append/evict path can observe a half-converted cache.
+	prec KVPrecision
+	// kQ8/vQ8 are the packed K (post-RoPE) and V row-sets when prec is KVPrecisionQ8_0.
+	// They are nil on the f32 path; kQ8... fields are indexed by layer.
+	kQ8 []kvPackedRow
+	vQ8 []kvPackedRow
 }
 
 // NewKVCache allocates an empty cache for a model. Kraw (pre-RoPE K) is kept so that
@@ -25,15 +38,51 @@ type KVCache struct {
 // rotation (bit-exact to a fresh prefill), rather than composing two rotations
 // (which is mathematically equal but drifts ~1e-6 — enough to flip a greedy token).
 func NewKVCache(cfg Config) *KVCache {
-	return &KVCache{
+	return NewKVCacheWithPrecision(cfg, KVPrecisionFP32)
+}
+
+// NewKVCacheWithPrecision allocates an empty cache whose attended K/V rows are stored
+// at prec. KVPrecisionFP32 (and the empty string, the caller-facing "unset") is the
+// historical f32 layout, byte-for-byte. KVPrecisionQ8_0 realizes the dense mixed
+// layout the compute.KVPrecisionQ8 planner tier charges: Kraw stays f32, post-RoPE K
+// and V are packed q8_0. See kvcache_q8.go for why.
+func NewKVCacheWithPrecision(cfg Config, prec KVPrecision) *KVCache {
+	if prec == "" {
+		prec = KVPrecisionFP32
+	}
+	c := &KVCache{
 		cfg:    cfg,
 		K:      make([][]float32, cfg.NumLayers),
 		Kraw:   make([][]float32, cfg.NumLayers),
 		V:      make([][]float32, cfg.NumLayers),
+		prec:   prec,
 		linear: newLinearAttnCache(cfg),
 		glm:    newGLMDsaKVCache(cfg),
 		msa:    newMinimaxKVCache(cfg),
 	}
+	if c.quantized() {
+		c.kQ8 = make([]kvPackedRow, cfg.NumLayers)
+		c.vQ8 = make([]kvPackedRow, cfg.NumLayers)
+		for l := 0; l < cfg.NumLayers; l++ {
+			c.kQ8[l].width = c.kvStride()
+			c.vQ8[l].width = c.kvStride()
+		}
+	}
+	return c
+}
+
+// Precision reports this cache's realized KV storage tier.
+func (c *KVCache) Precision() KVPrecision {
+	if c == nil {
+		return KVPrecisionFP32
+	}
+	return c.prec
+}
+
+// quantized reports whether this cache stores the attended K/V rows as packed q8_0.
+// False (the default, and for the nil cache) means the historical f32 rows.
+func (c *KVCache) quantized() bool {
+	return c != nil && c.prec == KVPrecisionQ8_0
 }
 
 // Len is the number of cached positions.
@@ -127,8 +176,13 @@ func (c *KVCache) evictSupported(from, n int) int {
 	w := c.kvStride()
 	hd, nKV := c.cfg.HeadDim, c.cfg.NumKVHeads
 	for l := 0; l < c.cfg.NumLayers; l++ {
-		c.K[l] = append(c.K[l][:from*w], c.K[l][end*w:]...)
 		c.Kraw[l] = append(c.Kraw[l][:from*w], c.Kraw[l][end*w:]...)
+		if c.quantized() {
+			c.kQ8[l].dropSpan(from, end)
+			c.vQ8[l].dropSpan(from, end)
+			continue
+		}
+		c.K[l] = append(c.K[l][:from*w], c.K[l][end*w:]...)
 		c.V[l] = append(c.V[l][:from*w], c.V[l][end*w:]...)
 	}
 	// MiniMax-M3 MSA keeps its main K/V in the rows just compacted; the per-layer
@@ -142,15 +196,17 @@ func (c *KVCache) evictSupported(from, n int) int {
 	return c.compactPositions(from, end, func(i int) {
 		for l := 0; l < c.cfg.NumLayers; l++ {
 			if c.cfg.Alibi {
-				copy(c.K[l][i*w:(i+1)*w], c.Kraw[l][i*w:(i+1)*w])
+				c.rewriteKRow(l, i, c.Kraw[l][i*w:(i+1)*w])
 				continue
 			}
 			cos, sin := ropeRowForLayer(c.cfg, l, i)
+			row := make([]float32, w)
 			for h := 0; h < nKV; h++ {
-				dst := c.K[l][i*w+h*hd : i*w+(h+1)*hd]
+				dst := row[h*hd : (h+1)*hd]
 				copy(dst, c.Kraw[l][i*w+h*hd:i*w+(h+1)*hd]) // raw (pre-RoPE)
 				applyRopeRow(dst, cos, sin)                 // single rotation at new pos
 			}
+			c.rewriteKRow(l, i, row)
 		}
 		c.msa.rerotateSurvivor(c.cfg, i) // nil-safe: re-RoPE the survivor's index key
 	})
@@ -208,9 +264,22 @@ func (c *KVCache) CloneWithReserve(extraPositions int) *KVCache {
 		K:       make([][]float32, len(c.K)),
 		Kraw:    make([][]float32, len(c.Kraw)),
 		V:       make([][]float32, len(c.V)),
+		prec:    c.prec,
 		pos:     cloneIntsWithReserve(c.pos, extraPositions),
 		lineage: c.lineage.clone(extraPositions),
 		linear:  c.linear.clone(),
+	}
+	if c.quantized() {
+		n.kQ8 = make([]kvPackedRow, len(c.kQ8))
+		n.vQ8 = make([]kvPackedRow, len(c.vQ8))
+		for l := range c.kQ8 {
+			reserve := extraPositions
+			if !c.reserveTokenKVLayer(l) {
+				reserve = 0
+			}
+			n.kQ8[l] = *clonePacked(&c.kQ8[l], reserve)
+			n.vQ8[l] = *clonePacked(&c.vQ8[l], reserve)
+		}
 	}
 	if c.glm != nil {
 		n.glm = c.glm.cloneWithReserve(c.cfg, extraPositions)
@@ -223,8 +292,11 @@ func (c *KVCache) CloneWithReserve(extraPositions int) *KVCache {
 		if !c.reserveTokenKVLayer(l) {
 			reserve = 0
 		}
-		n.K[l] = cloneFloat32WithReserve(c.K[l], reserve)
 		n.Kraw[l] = cloneFloat32WithReserve(c.Kraw[l], reserve)
+		if c.quantized() {
+			continue
+		}
+		n.K[l] = cloneFloat32WithReserve(c.K[l], reserve)
 		n.V[l] = cloneFloat32WithReserve(c.V[l], reserve)
 	}
 	return n
@@ -243,8 +315,13 @@ func (c *KVCache) Reserve(extraPositions int) {
 		if !c.reserveTokenKVLayer(l) {
 			continue
 		}
-		c.K[l] = reserveFloat32(c.K[l], extraFloats)
 		c.Kraw[l] = reserveFloat32(c.Kraw[l], extraFloats)
+		if c.quantized() {
+			c.kQ8[l].reserve(extraPositions)
+			c.vQ8[l].reserve(extraPositions)
+			continue
+		}
+		c.K[l] = reserveFloat32(c.K[l], extraFloats)
 		c.V[l] = reserveFloat32(c.V[l], extraFloats)
 	}
 	if c.glm != nil {
@@ -320,14 +397,23 @@ func (c *KVCache) Truncate(targetLen int) {
 	}
 	w := c.kvStride()
 	for l := 0; l < c.cfg.NumLayers; l++ {
-		if l < len(c.K) && len(c.K[l]) >= targetLen*w {
-			c.K[l] = c.K[l][:targetLen*w]
+		if c.quantized() {
+			if l < len(c.kQ8) {
+				c.kQ8[l].truncate(targetLen)
+			}
+			if l < len(c.vQ8) {
+				c.vQ8[l].truncate(targetLen)
+			}
+		} else {
+			if l < len(c.K) && len(c.K[l]) >= targetLen*w {
+				c.K[l] = c.K[l][:targetLen*w]
+			}
+			if l < len(c.V) && len(c.V[l]) >= targetLen*w {
+				c.V[l] = c.V[l][:targetLen*w]
+			}
 		}
 		if l < len(c.Kraw) && len(c.Kraw[l]) >= targetLen*w {
 			c.Kraw[l] = c.Kraw[l][:targetLen*w]
-		}
-		if l < len(c.V) && len(c.V[l]) >= targetLen*w {
-			c.V[l] = c.V[l][:targetLen*w]
 		}
 	}
 	c.pos = c.pos[:targetLen]

@@ -21,6 +21,7 @@ func TestNativeControlFlagsExposeSharedPublicHelp(t *testing.T) {
 		"native-qwen-q4k-prefill-chunk-tokens",
 		"native-qwen35-metal-gdn-sequence",
 		"native-q4k-gateup-slab",
+		"kv-precision",
 		"native-prefix-profile",
 		"vulkan-q4k-profile",
 		"vulkan-stage-q4k",

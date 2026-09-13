@@ -177,9 +177,8 @@ func (s *Session) prefillBatchedQ4K(ids []int) []float32 {
 			}
 		})
 
-		s.Cache.K[l] = append(s.Cache.K[l], K...)
-		s.Cache.V[l] = append(s.Cache.V[l], V...)
-		Kl, Vl := s.Cache.K[l], s.Cache.V[l]
+		s.Cache.appendBatchedKV(l, K, V, P, w)
+		Kl, Vl := s.Cache.attentionRows(l)
 
 		attnOut := make([]float32, P*nH*hd)
 		tA := tic()

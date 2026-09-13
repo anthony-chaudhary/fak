@@ -45,6 +45,17 @@ func (c *KVCache) cachePayloadBytes(clone bool) int64 {
 	f32(c.K)
 	f32(c.Kraw)
 	f32(c.V)
+	// Packed q8_0 rows: 1 byte per int8 code + 4 bytes per f32 scale (the exact
+	// kvPackedRow layout). Counted so a q8 cache's OwnedPayloadBytes does not report
+	// only its f32 Kraw row and understate residency.
+	packed := func(rows []kvPackedRow) {
+		for i := range rows {
+			add(count(len(rows[i].codes), cap(rows[i].codes)), 1)
+			add(count(len(rows[i].scales), cap(rows[i].scales)), 4)
+		}
+	}
+	packed(c.kQ8)
+	packed(c.vQ8)
 	add(count(len(c.pos), cap(c.pos)), strconv.IntSize/8)
 	add(count(len(c.lineage.ids), cap(c.lineage.ids)), 4)
 	if c.linear != nil {
