@@ -686,6 +686,49 @@ func (c *MetalMTPCoordinator) recordTargetVerificationLocked(tx *qwen35MTPTarget
 //     h. Advances target session with the bonus token.
 //     i. Records rolling acceptance rate (falling back to serial if < 50%).
 func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, boundaryLogits []float32) (accepted []int, bonus int, nextLogits []float32, err error) {
+	return c.stepRoundImpl(ctx, committed, boundaryLogits, -1, -1)
+}
+
+// mtpEOSStop is the bonus sentinel returned by a bounded round when EOS was hit:
+// the round committed only the admitted prefix and generation must stop.
+const mtpEOSStop = -2
+
+// admitRoundPrefix trims a verified round to the tokens a caller may actually
+// commit. budget is the remaining output budget (maxNew minus already-emitted);
+// budget < 0 means unbounded. Accepted tokens and the bonus are admitted only
+// while they stay within budget, and eos is never admitted (eos < 0 disables
+// the EOS exclusion). When a token equal to eos is reached the returned bonus is
+// mtpEOSStop so the caller terminates instead of re-proposing the same boundary.
+func admitRoundPrefix(accepted []int, bonus, budget, eos int) ([]int, int) {
+	if budget < 0 {
+		return accepted, bonus
+	}
+	n := 0
+	for n < len(accepted) && n < budget {
+		if eos >= 0 && accepted[n] == eos {
+			return accepted[:n], mtpEOSStop
+		}
+		n++
+	}
+	accepted = accepted[:n]
+	if n >= budget {
+		return accepted, -1
+	}
+	if bonus >= 0 {
+		if eos >= 0 && bonus == eos {
+			return accepted, mtpEOSStop
+		}
+		return accepted, bonus
+	}
+	return accepted, bonus
+}
+
+// stepRoundImpl executes one StepRound with an optional admission budget. When
+// budget >= 0 the round commits at most `budget` accepted tokens and never
+// commits a token equal to eos, so a caller applying maxNew/EOS truncation can
+// keep target and Context-MMU state in lockstep with the output it returns
+// (issue #12344). budget < 0 preserves the unbounded public StepRound contract.
+func (c *MetalMTPCoordinator) stepRoundImpl(ctx context.Context, committed []int, boundaryLogits []float32, budget, eos int) (accepted []int, bonus int, nextLogits []float32, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.lastTargetVerification = MetalMTPTargetVerificationReceipt{}
@@ -777,7 +820,7 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 
 	// Candidate tree verification path: evaluate M=16..24 tree in one forward pass
 	if prop.Tree != nil && len(prop.Tree.Nodes) > 0 {
-		return c.stepRoundTreeLocked(start, target0, boundaryLogits, prop.Tree)
+		return c.stepRoundTreeLocked(start, target0, boundaryLogits, prop.Tree, budget, eos)
 	}
 
 	drafts := prop.Tokens
@@ -826,7 +869,7 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 	// checkpoint and PrefixSnapshot needed to adopt a full panel or restore and
 	// replay a partial accepted prefix.
 	if activeDepth == 4 && len(drafts) == 4 && (c.target.M.Cfg.IsQwen35Hybrid() || c.target.M.Cfg.isQwen35TextFamily()) {
-		return c.stepRoundQwen35P4Locked(start, target0, boundaryLogits, drafts, draftTokens32)
+		return c.stepRoundQwen35P4Locked(start, target0, boundaryLogits, drafts, draftTokens32, budget, eos)
 	}
 
 	// 4. Capture pre-round verified snapshot for exact rollback
@@ -958,6 +1001,9 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 		return nil, -1, nil, tripErr
 	}
 
+	// Bound the committed round to the caller's admission budget so target and
+	// Context-MMU state never include a token discarded by maxNew/EOS (#12344).
+	accTokens, bonusTok = admitRoundPrefix(accTokens, bonusTok, budget, eos)
 	numAccepted := len(accTokens)
 
 	// 8. Atomic Context-MMU page commit & rollback:
@@ -980,7 +1026,33 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 		}
 	}
 
-	// 9. Advance target session with the bonus token
+	// 9. Advance target session with the bonus token. When the bonus was not
+	// admitted there is no bonus position to commit; the target already holds
+	// exactly prompt+accepted, so leave it there.
+	if bonusTok < 0 {
+		elapsed := time.Since(start)
+		c.totalGenerated += numAccepted
+		c.recordAcceptanceLocked(len(drafts), numAccepted)
+		if c.governor != nil {
+			obs := Qwen38AdaptiveStepObservation{
+				ProposedTokens: len(drafts),
+				AcceptedTokens: numAccepted,
+				StepLatency:    elapsed,
+				TargetLatency:  c.targetLatency,
+			}
+			if c.stepCostFn != nil {
+				obs = c.stepCostFn(len(drafts), numAccepted, obs)
+			}
+			_, _, _ = c.governor.ObserveStep(obs)
+		}
+		// Boundary logits for the next round: after the last accepted token, or
+		// the pre-round boundary when nothing was accepted.
+		nextLogits = boundaryLogits
+		if numAccepted > 0 {
+			nextLogits = rows[numAccepted-1]
+		}
+		return accTokens, bonusTok, nextLogits, nil
+	}
 	nextLogits = c.target.Step(bonusTok)
 	elapsed := time.Since(start)
 	c.totalGenerated += numAccepted + 1
@@ -1038,7 +1110,7 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 	return accTokens, bonusTok, nextLogits, nil
 }
 
-func (c *MetalMTPCoordinator) stepRoundQwen35P4Locked(start time.Time, target0 int, boundaryLogits []float32, drafts []int, draftTokens32 []int32) ([]int, int, []float32, error) {
+func (c *MetalMTPCoordinator) stepRoundQwen35P4Locked(start time.Time, target0 int, boundaryLogits []float32, drafts []int, draftTokens32 []int32, budget, eos int) ([]int, int, []float32, error) {
 	tx, txErr := beginQwen35MTPTargetTransaction(c.target, boundaryLogits)
 	if txErr != nil {
 		nextLogits := c.target.Step(target0)
@@ -1135,6 +1207,9 @@ func (c *MetalMTPCoordinator) stepRoundQwen35P4Locked(start time.Time, target0 i
 		return abort(tripErr)
 	}
 
+	// Bound the committed round to the caller's admission budget so target and
+	// Context-MMU state never include a token discarded by maxNew/EOS (#12344).
+	accTokens, bonusTok = admitRoundPrefix(accTokens, bonusTok, budget, eos)
 	numAccepted := len(accTokens)
 	// Commit the external Context-MMU while the target transaction still owns
 	// its pre-panel rollback state. A failed external commit cannot expose the
@@ -1152,6 +1227,17 @@ func (c *MetalMTPCoordinator) stepRoundQwen35P4Locked(start time.Time, target0 i
 		return nil, -1, nil, fmt.Errorf("model: commit local MTP draft accounting: %w", commitErr)
 	}
 
+	if bonusTok < 0 {
+		nextLogits := boundaryLogits
+		if len(rows) > 0 && numAccepted > 0 {
+			nextLogits = rows[numAccepted-1]
+		}
+		c.totalGenerated += numAccepted
+		if observeErr := c.observeSpeculativeRoundLocked(start, len(drafts), numAccepted); observeErr != nil {
+			return nil, -1, nil, observeErr
+		}
+		return accTokens, bonusTok, nextLogits, nil
+	}
 	nextLogits := c.target.Step(bonusTok)
 	c.totalGenerated += numAccepted + 1
 	if observeErr := c.observeSpeculativeRoundLocked(start, len(drafts), numAccepted); observeErr != nil {
@@ -1198,10 +1284,10 @@ func (c *MetalMTPCoordinator) StepRoundTree(ctx context.Context, committed []int
 		return []int{target0}, -1, nextLogits, nil
 	}
 
-	return c.stepRoundTreeLocked(time.Now(), target0, boundaryLogits, tree)
+	return c.stepRoundTreeLocked(time.Now(), target0, boundaryLogits, tree, -1, -1)
 }
 
-func (c *MetalMTPCoordinator) stepRoundTreeLocked(start time.Time, target0 int, boundaryLogits []float32, tree *CandidateTree) ([]int, int, []float32, error) {
+func (c *MetalMTPCoordinator) stepRoundTreeLocked(start time.Time, target0 int, boundaryLogits []float32, tree *CandidateTree, budget, eos int) ([]int, int, []float32, error) {
 	N := len(tree.Nodes)
 	ids := tree.Tokens()
 
@@ -1371,6 +1457,9 @@ func (c *MetalMTPCoordinator) stepRoundTreeLocked(start time.Time, target0 int, 
 		acceptedTokens[i] = tree.Nodes[idx].Token
 	}
 	bonusTok := pred
+	// Bound the committed round to the caller's admission budget so target and
+	// Context-MMU state never include a token discarded by maxNew/EOS (#12344).
+	acceptedTokens, bonusTok = admitRoundPrefix(acceptedTokens, bonusTok, budget, eos)
 	numAccepted := len(acceptedTokens)
 
 	// Atomic Context-MMU page commit & rollback:
@@ -1386,7 +1475,26 @@ func (c *MetalMTPCoordinator) stepRoundTreeLocked(start time.Time, target0 int, 
 		c.target.Step(tok)
 	}
 
-	// Advance target session with the bonus token
+	// Advance target session with the bonus token. When the bonus was not
+	// admitted the target already holds exactly prompt+accepted.
+	if bonusTok < 0 {
+		elapsed := time.Since(start)
+		c.totalGenerated += numAccepted
+		c.recordAcceptanceLocked(N, numAccepted)
+		if c.governor != nil {
+			obs := Qwen38AdaptiveStepObservation{
+				ProposedTokens: N,
+				AcceptedTokens: numAccepted,
+				StepLatency:    elapsed,
+				TargetLatency:  c.targetLatency,
+			}
+			if c.stepCostFn != nil {
+				obs = c.stepCostFn(N, numAccepted, obs)
+			}
+			_, _, _ = c.governor.ObserveStep(obs)
+		}
+		return acceptedTokens, bonusTok, boundaryLogits, nil
+	}
 	nextLogits := c.target.Step(bonusTok)
 	elapsed := time.Since(start)
 	c.totalGenerated += numAccepted + 1
@@ -1478,28 +1586,37 @@ func (c *MetalMTPCoordinator) Generate(ctx context.Context, prompt []int, maxNew
 			return output, err
 		}
 
-		accTokens, bonusTok, nextLogits, err := c.StepRound(ctx, committed, boundaryLogits)
+		// The serial/fallback and early-return StepRound paths emit the boundary
+		// argmax as their single token without consulting the admission budget.
+		// Stop before that round when the next greedy token is EOS so no EOS
+		// position is committed and no EOS is emitted, preserving the pre-round
+		// state == prompt+output invariant on every path.
+		if eos >= 0 && argmaxF32(boundaryLogits) == eos {
+			break
+		}
+
+		// StepRound commits the whole accepted round plus its bonus token to the
+		// target and the Context-MMU before returning. The round can overshoot the
+		// output boundary chosen here by maxNew truncation or EOS exclusion, so
+		// bound the commit to the tokens this call will actually admit: pass the
+		// remaining maxNew budget and let StepRound trim accepted tokens at EOS
+		// (issue #12344). Reply state then shares one stop boundary with output.
+		accTokens, bonusTok, nextLogits, err := c.stepRoundLimited(ctx, committed, boundaryLogits, maxNew-len(output), eos)
 		if err != nil {
 			return output, err
 		}
 
-		stopped := false
 		for _, tok := range accTokens {
-			if len(output) >= maxNew || (eos >= 0 && tok == eos) {
-				stopped = true
-				break
-			}
 			output = append(output, tok)
 			committed = append(committed, tok)
 		}
-		if stopped || len(output) >= maxNew {
+		if len(output) >= maxNew {
 			break
 		}
-
+		if bonusTok == mtpEOSStop {
+			break
+		}
 		if bonusTok >= 0 {
-			if eos >= 0 && bonusTok == eos {
-				break
-			}
 			output = append(output, bonusTok)
 			committed = append(committed, bonusTok)
 		}
@@ -1511,6 +1628,14 @@ func (c *MetalMTPCoordinator) Generate(ctx context.Context, prompt []int, maxNew
 	}
 
 	return output, nil
+}
+
+// stepRoundLimited is StepRound with an explicit admission budget: it never
+// commits more than `budget` accepted tokens nor any token equal to eos, so the
+// target KV/GDN/hidden state and the Context-MMU accepted-page count stay in
+// lockstep with the output that Generate returns. budget < 0 means unbounded.
+func (c *MetalMTPCoordinator) stepRoundLimited(ctx context.Context, committed []int, boundaryLogits []float32, budget, eos int) (accepted []int, bonus int, nextLogits []float32, err error) {
+	return c.stepRoundImpl(ctx, committed, boundaryLogits, budget, eos)
 }
 
 // Close releases the coordinator and any underlying draft session resources.
