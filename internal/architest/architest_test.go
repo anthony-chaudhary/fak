@@ -869,6 +869,7 @@ var tier = map[string]int{
 	"hil":                        2, // Hardware-in-the-loop micro-dose execution and comparison audit leaf.
 	"cluster":                    1, // multi-Mac point-to-point mesh allocation and Thunderbolt 5 RDMA discovery (#12596).
 	"agentbench":                 5,
+	"beam":                       3, // beam-search primitive over the batched decode session (#12409): BeamIndirectionTable maps logical (beam,pos) to physical KV slots as pure integer moves, plus a thin driver over model.BatchSession.StepBatch; imports model(2), off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
