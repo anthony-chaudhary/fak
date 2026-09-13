@@ -69,6 +69,9 @@ func LoadGPTQ(dir string) (*Model, error) {
 	if err := readJSON(filepath.Join(dir, "config.json"), &cfg); err != nil {
 		return nil, fmt.Errorf("gptq load config: %w", err)
 	}
+	if err := refuseDeepSeekV41Native(cfg); err != nil {
+		return nil, err
+	}
 	qcfg, err := readGPTQQuantConfig(dir)
 	if err != nil {
 		return nil, err
@@ -154,6 +157,9 @@ func gptqSafetensorsFiles(dir string) ([]string, error) {
 }
 
 func loadGPTQSafetensorsFiles(files []string, cfg Config, qcfg gptqQuantConfig) (*Model, error) {
+	if err := refuseDeepSeekV41Native(cfg); err != nil {
+		return nil, err
+	}
 	openedFiles := make([]gptqOpenedFile, 0, len(files))
 	for _, path := range files {
 		sf, err := openSafetensorsFile(path)

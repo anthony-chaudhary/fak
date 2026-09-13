@@ -23,6 +23,8 @@ func TestAuditAllNativeLoadersRefuseV41BeforeWeightIO(t *testing.T) {
 		"awq group":       func() error { _, err := loadAWQGroupSafetensors(nil, cfg); return err },
 		"awq pytorch bin": func() error { _, err := loadAWQPytorchBin("absent.bin", cfg); return err },
 		"exl2 directory":  func() error { _, err := LoadEXL2(dir); return err },
+		"gptq directory":  func() error { _, err := LoadGPTQ(dir); return err },
+		"gptq helper":     func() error { _, err := loadGPTQSafetensorsFiles(nil, cfg, gptqQuantConfig{}); return err },
 		"exl2 file":       func() error { _, err := loadEXL2Safetensors(nil, cfg); return err },
 	}
 	for name, load := range tests {
