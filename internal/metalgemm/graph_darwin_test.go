@@ -450,6 +450,164 @@ func TestProjectionGraphQwenOrderedPanelAttentionAndFinalNorm(t *testing.T) {
 	}
 }
 
+// TestProjectionGraphAttentionSplitKVParity pins the split-KV flash-decoding route
+// against the single-SIMDgroup online path at long context. FAK_QWEN35_ATTN_SPLIT=0
+// disables the split; the same P=1 graph is then encoded both ways and the outputs
+// must agree within the documented float32 tolerance. The split route uses nH*splits
+// threadgroups instead of nH, so a wrong partial layout or a bad combine would show
+// as a large maxAbs here, not as a silent decode corruption.
+func TestProjectionGraphAttentionSplitKVParity(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	defer ResetQ4K()
+	const input, nH, nKV, hd, rotary, base = 256, 2, 1, 64, 32, 20000
+	const qwidth, kvwidth = nH * hd, nKV * hd
+	qgateWeight := UploadQ4K(q4kTestRaw(2*qwidth, input, 9911001), 2*qwidth, input)
+	kWeight := UploadQ4K(q4kTestRaw(kvwidth, input, 9911002), kvwidth, input)
+	vWeight := UploadQ4K(q4kTestRaw(kvwidth, input, 9911003), kvwidth, input)
+	if qgateWeight == nil || kWeight == nil || vWeight == nil {
+		t.Fatal("split-KV Q4_K upload")
+	}
+	qnorm, knorm := make([]float32, hd), make([]float32, hd)
+	for i := range qnorm {
+		qnorm[i], knorm[i] = 0.9+float32(i%5)*0.02, 0.85+float32(i%7)*0.03
+	}
+	const scale, qkEps = float32(0.125), float32(1e-6)
+	x := q4kTestVector(input, 9911010)
+	prefixK, prefixV := make([]float32, base*kvwidth), make([]float32, base*kvwidth)
+	for i := range prefixK {
+		prefixK[i], prefixV[i] = float32(i%13-6)*0.02, float32(i%17-8)*0.018
+	}
+	cosv, sinv := make([]float32, rotary/2), make([]float32, rotary/2)
+	for d := range cosv {
+		cosv[d], sinv[d] = 0.9, 0.2
+	}
+	run := func(split bool) []float32 {
+		t.Helper()
+		if split {
+			t.Setenv("FAK_QWEN35_ATTN_SPLIT", "1")
+		} else {
+			t.Setenv("FAK_QWEN35_ATTN_SPLIT", "0")
+		}
+		g, err := BeginProjectionGraph(x, nil, nil, 1, input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer g.Free()
+		qgate, err := g.EncodeQ4K(qgateWeight)
+		if err != nil {
+			t.Fatal(err)
+		}
+		k, err := g.EncodeQ4K(kWeight)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v, err := g.EncodeQ4K(vWeight)
+		if err != nil {
+			t.Fatal(err)
+		}
+		q, gate, err := g.SplitGatedQ(qgate, qwidth, hd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		attention, err := g.FullAttention(q, k, v, gate, qnorm, knorm, cosv, sinv, prefixK, prefixV, base, nH, nKV, hd, rotary, scale, qkEps, false, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		outputs, receipt, err := g.FinishRead(attention.Output)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("split=%v gpu_ms=%.3f encoders=%d", split, receipt.GPUMilliseconds, receipt.Encoders)
+		return outputs[0]
+	}
+	plain, split := run(false), run(true)
+	if len(plain) != len(split) {
+		t.Fatalf("len plain=%d split=%d", len(plain), len(split))
+	}
+	cosine, maxRel := q4kTestCosineMaxRel(plain, split)
+	if cosine < 0.99999 || maxRel > 1e-4 {
+		t.Fatalf("split-KV parity cosine=%g maxRel=%g", cosine, maxRel)
+	}
+	t.Logf("split-KV vs online: cosine=%.9f maxRel=%.3e", cosine, maxRel)
+}
+
+// BenchmarkQwenGraphAttentionPrefixUpload isolates the per-layer host K/V prefix
+// upload cost of one P=1 full-attention encode, which the whole-token decode graph
+// pays once per full-attention layer per token. It reports the graph receipt's GPU
+// window vs the wait window (wait = host encode + prefix memcpy + commit + sync), so
+// a run where wait >> gpu is direct evidence the layer is host/upload-bound rather
+// than GPU-bound. Run with: go test ./internal/metalgemm/ -run '^$' -bench QwenGraphAttentionPrefixUpload -benchtime 5x
+func BenchmarkQwenGraphAttentionPrefixUpload(b *testing.B) {
+	if !Available() {
+		b.Skip("Metal unavailable")
+	}
+	defer ResetQ4K()
+	const input, nH, nKV, hd, rotary = 256, 2, 1, 32, 16
+	const qwidth, kvwidth = nH * hd, nKV * hd
+	qgateWeight := UploadQ4K(q4kTestRaw(2*qwidth, input, 8811001), 2*qwidth, input)
+	kWeight := UploadQ4K(q4kTestRaw(kvwidth, input, 8811002), kvwidth, input)
+	vWeight := UploadQ4K(q4kTestRaw(kvwidth, input, 8811003), kvwidth, input)
+	if qgateWeight == nil || kWeight == nil || vWeight == nil {
+		b.Fatal("Q4_K upload")
+	}
+	qnorm, knorm := make([]float32, hd), make([]float32, hd)
+	for i := range qnorm {
+		qnorm[i], knorm[i] = 0.9, 0.85
+	}
+	const scale, qkEps = float32(0.1767767), float32(1e-6)
+	x := q4kTestVector(input, 8811010)
+	cosv, sinv := make([]float32, rotary/2), make([]float32, rotary/2)
+	for d := range cosv {
+		cosv[d], sinv[d] = 0.9, 0.1
+	}
+	for _, base := range []int{512, 4096, 20480} {
+		prefixK, prefixV := make([]float32, base*kvwidth), make([]float32, base*kvwidth)
+		for i := range prefixK {
+			prefixK[i], prefixV[i] = float32(i%13-6)*0.02, float32(i%17-8)*0.018
+		}
+		b.Run(fmt.Sprintf("base%d", base), func(b *testing.B) {
+			for n := 0; n < b.N; n++ {
+				g, err := BeginProjectionGraph(x, nil, nil, 1, input)
+				if err != nil {
+					b.Fatal(err)
+				}
+				qgate, err := g.EncodeQ4K(qgateWeight)
+				if err != nil {
+					b.Fatal(err)
+				}
+				k, err := g.EncodeQ4K(kWeight)
+				if err != nil {
+					b.Fatal(err)
+				}
+				v, err := g.EncodeQ4K(vWeight)
+				if err != nil {
+					b.Fatal(err)
+				}
+				q, gate, err := g.SplitGatedQ(qgate, qwidth, hd)
+				if err != nil {
+					b.Fatal(err)
+				}
+				attention, err := g.FullAttention(q, k, v, gate, qnorm, knorm, cosv, sinv, prefixK, prefixV, base, nH, nKV, hd, rotary, scale, qkEps, false, true)
+				if err != nil {
+					b.Fatal(err)
+				}
+				_, receipt, err := g.FinishRead(attention.Output)
+				if err != nil {
+					b.Fatal(err)
+				}
+				b.ReportMetric(receipt.GPUMilliseconds*1000, "gpu_us")
+				b.ReportMetric(receipt.WaitMilliseconds*1000, "wait_us")
+				if b.N == 1 || n == b.N-1 {
+					b.Logf("base=%d gpu_ms=%.3f wait_ms=%.3f prefix_MB=%.1f", base, receipt.GPUMilliseconds, receipt.WaitMilliseconds, float64(len(prefixK)+len(prefixV))*4/1e6)
+				}
+				g.Free()
+			}
+		})
+	}
+}
+
 func TestProjectionGraphQwenOrderedLongContextAttention(t *testing.T) {
 	if !Available() {
 		t.Skip("Metal unavailable")
