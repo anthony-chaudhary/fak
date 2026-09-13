@@ -2,7 +2,6 @@ package model
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 )
 
@@ -33,66 +32,23 @@ func ComputeQwen35RecurrentPricingWithDtype(cfg Config, maxUnits int, stateDtype
 		return Qwen35RecurrentPricing{}, fmt.Errorf("maxUnits must be positive, got %d", maxUnits)
 	}
 
-	normalized := strings.ToLower(strings.TrimSpace(stateDtype))
-	if normalized == "" {
-		normalized = "f32"
+	layout, err := NewQwen35StateLayout(cfg, stateDtype)
+	if err != nil {
+		return Qwen35RecurrentPricing{}, err
 	}
-
-	var elemBytes int
-	switch normalized {
-	case "f32":
-		elemBytes = 4
-	case "f16", "bf16":
-		elemBytes = 2
-	default:
-		return Qwen35RecurrentPricing{}, fmt.Errorf("unsupported state dtype %q: must be f32, f16, or bf16", stateDtype)
-	}
-
-	linearLayers := 0
-	for l := 0; l < cfg.NumLayers; l++ {
-		if cfg.isLinearAttnLayer(l) {
-			linearLayers++
-		}
-	}
-	if linearLayers == 0 {
-		if cfg.IsQwen35Hybrid() {
-			linearLayers = cfg.NumLayers
-		} else {
-			linearLayers = 1
-		}
-	}
-
-	nK, nV, kHd, vHd, _, _, convDim := cfg.linearAttnDims()
-	kernel := cfg.LinearConvKernelDim
-	if kernel <= 1 {
-		kernel = 4
-	}
-
-	convElements := (kernel - 1) * convDim
-	convBytesPerLayer := int64(convElements * elemBytes)
-
-	recurrentElements := nV * kHd * vHd
-	if recurrentElements == 0 && nK > 0 {
-		recurrentElements = nK * kHd * vHd
-	}
-	recurrentBytesPerLayer := int64(recurrentElements * elemBytes)
-
-	bytesPerLayer := convBytesPerLayer + recurrentBytesPerLayer
-	bytesPerUnit := bytesPerLayer * int64(linearLayers)
-	totalCapacity := bytesPerUnit * int64(maxUnits)
 
 	return Qwen35RecurrentPricing{
-		StateDtype:             normalized,
-		ElementBytes:           elemBytes,
-		NumLinearLayers:        linearLayers,
-		ConvDim:                convDim,
-		ConvKernel:             kernel,
-		ConvBytesPerLayer:      convBytesPerLayer,
-		RecurrentBytesPerLayer: recurrentBytesPerLayer,
-		BytesPerLayer:          bytesPerLayer,
-		BytesPerUnit:           bytesPerUnit,
+		StateDtype:             layout.StateDtype,
+		ElementBytes:           layout.ElementBytes,
+		NumLinearLayers:        layout.NumLinearLayers,
+		ConvDim:                layout.ConvDim,
+		ConvKernel:             layout.ConvKernel,
+		ConvBytesPerLayer:      layout.ConvBytesPerLayer(),
+		RecurrentBytesPerLayer: layout.RecurrentBytesPerLayer(),
+		BytesPerLayer:          layout.BytesPerLayer(),
+		BytesPerUnit:           layout.BytesPerUnit(),
 		MaxUnits:               maxUnits,
-		TotalCapacityBytes:     totalCapacity,
+		TotalCapacityBytes:     layout.TotalBytes(maxUnits),
 	}, nil
 }
 

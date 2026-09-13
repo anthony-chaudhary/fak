@@ -42,31 +42,15 @@ func NewQwen35PreallocatedStateBank(cfg Config, maxUnits int) (*Qwen35Preallocat
 		return nil, fmt.Errorf("maxUnits must be positive, got %d", maxUnits)
 	}
 
-	linearLayers := 0
-	for l := 0; l < cfg.NumLayers; l++ {
-		if cfg.isLinearAttnLayer(l) {
-			linearLayers++
-		}
+	// The bank preallocates []float32 buffers, so it is f32-only: byte
+	// accounting is element count * 4 (ElementBytes == 4 here by construction).
+	layout, err := NewQwen35StateLayout(cfg, "f32")
+	if err != nil {
+		return nil, err
 	}
-	if linearLayers == 0 {
-		if cfg.IsQwen35Hybrid() {
-			linearLayers = cfg.NumLayers
-		} else {
-			linearLayers = 1
-		}
-	}
-
-	nK, nV, kHd, vHd, _, _, convDim := cfg.linearAttnDims()
-	kernel := cfg.LinearConvKernelDim
-	if kernel <= 1 {
-		kernel = 4
-	}
-
-	convElements := (kernel - 1) * convDim
-	recurrentElements := nV * kHd * vHd
-	if recurrentElements == 0 && nK > 0 {
-		recurrentElements = nK * kHd * vHd
-	}
+	linearLayers := layout.NumLinearLayers
+	convElements := layout.ConvElementsPerLayer
+	recurrentElements := layout.RecurrentElementsPerLayer
 
 	allocCount := 0
 	var totalBytes int64
@@ -78,7 +62,7 @@ func NewQwen35PreallocatedStateBank(cfg Config, maxUnits int) (*Qwen35Preallocat
 			cBuf := make([]float32, convElements)
 			rBuf := make([]float32, recurrentElements)
 			allocCount += 2
-			totalBytes += int64((convElements + recurrentElements) * 4)
+			totalBytes += int64((convElements + recurrentElements) * layout.ElementBytes)
 
 			units[u][l] = Qwen35LayerStateUnit{
 				UnitID:          u,
