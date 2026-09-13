@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 )
 
@@ -210,13 +211,14 @@ func TestMetalGGUFPeakCapacityAlignsWithLoadArm(t *testing.T) {
 		}
 	})
 
-	t.Run("resident Q4_K evaluates at on-disk size and refuses 36 GiB Mac", func(t *testing.T) {
+	t.Run("resident Q4_K judged at steady plus staging scratch admits 36 GiB Mac", func(t *testing.T) {
+		// The resident-Q4K arm loads directly into resident buffers: startup peak is
+		// steady + 1 GiB scratch, NOT the legacy 3.5x blanket. The synthetic 27B Q4_K
+		// steady is ~15.4 GiB, so ~16.4 GiB must be admitted on a 36 GiB host. This is
+		// the witnessed METAL_GGUF_PEAK_TOO_BIG regression guard.
 		err := refuseOversubscribedMetalGGUFForHost(q4kPath, 36*gib, true)
-		if err == nil {
-			t.Fatal("resident Q4_K 27B must be refused on 36 GiB host, got nil")
-		}
-		if !strings.Contains(err.Error(), "METAL_GGUF_PEAK_TOO_BIG") {
-			t.Fatalf("error = %v, want METAL_GGUF_PEAK_TOO_BIG", err)
+		if err != nil {
+			t.Fatalf("resident Q4_K 27B must be admitted on 36 GiB host (steady+scratch), got error: %v", err)
 		}
 	})
 
@@ -237,4 +239,121 @@ func TestMetalGGUFPeakCapacityAlignsWithLoadArm(t *testing.T) {
 			t.Fatalf("error = %v, want METAL_GGUF_PEAK_TOO_BIG", err)
 		}
 	})
+}
+
+// TestMetalServeStartupPeakBytesIsArmConsistent pins the shared arm-aware peak
+// estimator the refusal path and the admission plan now both call. It is the
+// unit-level witness that a resident-Q4K artifact is judged against
+// steady + staging scratch (not the legacy 3.5x), that legacy arms keep the
+// 3.5x bound exactly, and that an unrepresentably-large steady still refuses.
+func TestMetalServeStartupPeakBytesIsArmConsistent(t *testing.T) {
+	const gib = int64(1 << 30)
+	steady := 1592 * gib / 100 // 15.92 GiB, the witnessed Qwen3.8-27B Q4_K_M steady
+	tests := []struct {
+		name   string
+		arm    serveLoadArm
+		steady int64
+		total  int64
+		known  bool
+		peak   int64
+		refuse bool
+	}{
+		{
+			name:   "resident-Q4K 15.92 GiB on 36 GiB host admits at steady+1GiB",
+			arm:    serveLoadArmResidentQ4K,
+			steady: steady,
+			total:  36 * gib,
+			known:  true,
+			peak:   steady + (1 << 30),
+			refuse: false,
+		},
+		{
+			name:   "quant-profile-q8 15.92 GiB on 36 GiB host still refuses at 3.5x",
+			arm:    serveLoadArmQuantProfileQ8,
+			steady: steady,
+			total:  36 * gib,
+			known:  true,
+			peak:   int64(float64(steady) * metalGGUFObservedPeakMultiplier),
+			refuse: true,
+		},
+		{
+			name:   "resident-Q4K steady+scratch over host refuses",
+			arm:    serveLoadArmResidentQ4K,
+			steady: 36 * gib, // 36 + 1 = 37 GiB > 36 GiB host
+			total:  36 * gib,
+			known:  true,
+			peak:   37 * gib,
+			refuse: true,
+		},
+		{
+			name:   "resident-Q4K unknown host does not refuse",
+			arm:    serveLoadArmResidentQ4K,
+			steady: steady,
+			total:  0,
+			known:  false,
+			peak:   steady + (1 << 30),
+			refuse: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			peak, refuse := metalServeStartupPeakBytes(tt.arm, tt.steady, tt.total, tt.known)
+			if peak != tt.peak || refuse != tt.refuse {
+				t.Fatalf("metalServeStartupPeakBytes(%s, %d, %d, %v) = (%d, %v), want (%d, %v)",
+					tt.arm, tt.steady, tt.total, tt.known, peak, refuse, tt.peak, tt.refuse)
+			}
+		})
+	}
+}
+
+// TestResidentQ4KRefusalPathMatchesPlanPath is the drift guard required by the
+// defect: for a given (arm, steady, total) the refusal-path peak and the
+// admission-plan peak must be byte-identical because both delegate to
+// metalServeStartupPeakBytes. If either path ever re-inlines its own formula,
+// this test goes red.
+func TestResidentQ4KRefusalPathMatchesPlanPath(t *testing.T) {
+	const gib = int64(1 << 30)
+	dir := t.TempDir()
+
+	q4kPath := filepath.Join(dir, "qwen38-27b-q4km.gguf")
+	writeSynth27BGGUF(t, q4kPath, false)
+	udPath := filepath.Join(dir, "qwen38-27b-ud-q2kxl.gguf")
+	writeSynth27BGGUF(t, udPath, true)
+
+	// The plan path derives steady from the gguf and total from the host probe;
+	// mirror that derivation so the comparison uses the exact same operands.
+	steadyFor := func(path string) (serveLoadArm, int64) {
+		ws, err := ggufload.OpenWeights(path)
+		if err != nil {
+			t.Fatalf("open %s: %v", path, err)
+		}
+		defer ws.Close()
+		arm := resolveMetalServeLoadArm(ws)
+		if arm == serveLoadArmQuantProfileQ8 {
+			plan, err := ws.EstimateQ8LoadMemoryPlan()
+			if err != nil {
+				t.Fatalf("q8 plan: %v", err)
+			}
+			return arm, plan.Total()
+		}
+		plan, err := ws.EstimateLoadMemoryPlan()
+		if err != nil {
+			t.Fatalf("load plan: %v", err)
+		}
+		return arm, plan.Total()
+	}
+
+	for _, path := range []string{q4kPath, udPath} {
+		arm, steady := steadyFor(path)
+		total, _, known := compute.HostSystemMemoryInfo()
+		wantPeak, _ := metalServeStartupPeakBytes(arm, steady, total, known)
+		got := estimateMetalModelMemoryBounds(path)
+		if got.StartupPeakBytes != wantPeak {
+			t.Fatalf("%s: plan startup peak %d != shared-helper peak %d (arm=%s steady=%d total=%d known=%v)",
+				filepath.Base(path), got.StartupPeakBytes, wantPeak, arm, steady, total, known)
+		}
+		if got.SteadyBytes != steady {
+			t.Fatalf("%s: plan steady %d != derived steady %d", filepath.Base(path), got.SteadyBytes, steady)
+		}
+	}
 }

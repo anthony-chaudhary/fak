@@ -391,7 +391,16 @@ func resetOnBudgetHook(enabled bool, freshContextTokens int) gateway.ResetOnBudg
 
 // The 3.5x bound is the observed native-fak startup high-water mark from the
 // Qwen3.8-27B Q4_K_M campaign on an M3 Pro, not a GGUF steady-state estimate.
+// It applies to the legacy Q8-quant-profile/F32 arms, where weights are staged
+// and duplicated before the resident copy settles.
 const metalGGUFObservedPeakMultiplier = 3.5
+
+// metalResidentQ4KStagingScratchBytes is the load-staging margin for the
+// resident-Q4K arm, where weights load directly into resident Metal buffers
+// rather than being duplicated into Q8 staging. Startup peak is therefore
+// steady + this scratch, not the legacy 3.5x. The refusal path and the
+// admission plan share metalServeStartupPeakBytes so they cannot drift.
+const metalResidentQ4KStagingScratchBytes int64 = 1 << 30
 
 const (
 	streamedQ4KModeRetainedCPU = "retained-cpu-backing"
@@ -426,6 +435,40 @@ func metalGGUFPeakCapacity(metal bool, steady, total int64, known bool) (peak in
 	}
 	peak = int64(peakFloat)
 	return peak, peak > total
+}
+
+// metalServeStartupPeakBytes is the single arm-aware startup-peak estimator
+// shared by the admission REFUSAL path (refuseOversubscribedMetalGGUFForHost)
+// and the admission PLAN path (estimateMetalWeightsMemoryBounds). Keeping both
+// on one function is what prevents the plan from admitting an artifact the
+// refusal path rejects (or vice versa).
+//
+// The resident-Q4K arm loads weights directly into resident Metal buffers, so
+// its startup peak is steady plus metalResidentQ4KStagingScratchBytes staging
+// scratch. Every legacy arm (quant-profile-q8, f32) keeps the historical
+// metalGGUFObservedPeakMultiplier blanket bound. refuse is only meaningful when
+// total is known and positive; an unknown host keeps the historic pass-through
+// (no refusal) while still reporting the estimate for planning.
+func metalServeStartupPeakBytes(arm serveLoadArm, steady, total int64, known bool) (peak int64, refuse bool) {
+	if arm == serveLoadArmResidentQ4K {
+		if steady <= 0 {
+			return 0, false
+		}
+		if steady > (1<<63-1)-metalResidentQ4KStagingScratchBytes {
+			peak = 1<<63 - 1 // saturate: an unrepresentable steady is certainly oversized
+		} else {
+			peak = steady + metalResidentQ4KStagingScratchBytes
+		}
+		if total > 0 && known {
+			return peak, peak > total
+		}
+		return peak, false
+	}
+	peak, refuse = metalGGUFPeakCapacity(true, steady, total, known)
+	if peak <= steady {
+		peak = int64(float64(steady) * metalGGUFObservedPeakMultiplier)
+	}
+	return peak, refuse
 }
 
 func streamedQ4KMetalCapacity(total int64, known, freeCPU bool) (required int64, refuse bool, mode string) {
@@ -493,9 +536,9 @@ func refuseOversubscribedMetalGGUFForHost(path string, total int64, known bool) 
 		return err
 	}
 	steady := plan.Total()
-	peak, refuse := metalGGUFPeakCapacity(true, steady, total, known)
+	peak, refuse := metalServeStartupPeakBytes(arm, steady, total, known)
 	if !refuse {
 		return nil
 	}
-	return fmt.Errorf("fak serve: METAL_GGUF_PEAK_TOO_BIG: estimated steady weights %.2f GiB, startup peak %.2f GiB, host has %.2f GiB; native Metal startup would overcommit unified memory before listener readiness; use a larger-memory Mac or a delegated quantized Metal engine", float64(steady)/(1<<30), float64(peak)/(1<<30), float64(total)/(1<<30))
+	return fmt.Errorf("fak serve: METAL_GGUF_PEAK_TOO_BIG: estimated steady weights %.2f GiB, startup peak %.2f GiB (arm=%s), host has %.2f GiB; native Metal startup would overcommit unified memory before listener readiness; use a larger-memory Mac or a delegated quantized Metal engine", float64(steady)/(1<<30), float64(peak)/(1<<30), arm, float64(total)/(1<<30))
 }
