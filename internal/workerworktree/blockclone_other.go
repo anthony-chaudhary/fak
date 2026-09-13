@@ -11,3 +11,4 @@ func probeBlockClone(string) error {
 func cloneFileBlocks(string, string) error {
 	return errors.New("block cloning is unavailable on this platform")
 }
+func cloneTree(string, string) error { return ErrBlockCloneUnsupported }
