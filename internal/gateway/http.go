@@ -118,6 +118,7 @@ func (s *Server) routeTable() []gatewayRoute {
 		{"/v1/fak/policy/reload", s.handleFakPolicyReload},
 		{"/v1/fak/cache/posture", s.handleFakCachePosture},
 		{"/v1/fak/route/reload", s.handleFakRouteReload},
+		{"/v1/fak/route/aliases", s.handleFakRouteAliases},
 		{"/v1/fak/trace/reset", s.handleFakTraceReset},
 		{"/v1/fak/trace/", s.handleFakTraceObserve},
 		// /v1/fak/session/changes is the DRIVE-state revision stream (#630): a

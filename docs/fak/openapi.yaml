@@ -1319,6 +1319,61 @@ paths:
               example: { error: { message: "route reload is not configured", type: "invalid_request_error", code: null, param: null } }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /v1/fak/route/aliases:
+    get:
+      tags: [fak-native]
+      summary: List the runtime model-alias registry
+      description: Returns the installed alias table (#11091) — the name -> target rewrites the gateway applies BEFORE the account roster. A deployment with no alias store returns 404, so the surface is opt-in.
+      responses:
+        '200':
+          description: The current alias table.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  aliases:
+                    type: array
+                    items: { $ref: '#/components/schemas/RouteAlias' }
+              example: { aliases: [ { name: "production-coder", target: "small" } ] }
+        '404':
+          description: No alias registry is configured for this deployment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example: { error: { message: "alias registry is not configured", type: "invalid_request_error", code: null, param: null } }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+    post:
+      tags: [fak-native]
+      summary: Set or remove a runtime model alias
+      description: Hot-reassigns an alias with `{name,target}` or removes one with `{remove}` (#11091); the next completion resolves through the new table with no restart. A self-cycle or an over-deep chain is refused with 400.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RouteAliasMutation' }
+            example: { name: "production-coder", target: "small" }
+      responses:
+        '200':
+          description: The resulting alias table.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  aliases:
+                    type: array
+                    items: { $ref: '#/components/schemas/RouteAlias' }
+              example: { aliases: [ { name: "production-coder", target: "small" } ] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404':
+          description: No alias registry is configured, or the named alias to remove does not exist.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example: { error: { message: "alias registry is not configured", type: "invalid_request_error", code: null, param: null } }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
   /v1/fak/trace/reset:
     post:
       tags: [fak-native]
@@ -2725,6 +2780,21 @@ components:
         changed: { type: boolean, description: True when the file content differed from the installed policy. }
         reloads: { type: integer, format: int64, description: Cumulative successful hot-swaps (after this reload). }
         rejects: { type: integer, format: int64, description: Cumulative rejected (malformed) reload attempts. }
+
+    RouteAlias:
+      type: object
+      description: "One runtime model-alias edge (#11091): a client-facing NAME rewritten to a terminal model id (which may itself be another alias, forming a chain) BEFORE the account roster binds it."
+      properties:
+        name: { type: string, description: The alias a client may request. }
+        target: { type: string, description: The terminal model id (or another alias) it resolves to. }
+
+    RouteAliasMutation:
+      type: object
+      description: A runtime alias mutation (#11091). Send `{name,target}` to insert or hot-reassign, or `{remove}` to delete. Exactly one form is expected; a request naming neither is refused with 400.
+      properties:
+        name: { type: string, description: The alias to set (with `target`). }
+        target: { type: string, description: The terminal model id to bind `name` to. }
+        remove: { type: string, description: The alias to delete. }
 
     TraceResetRequest:
       type: object

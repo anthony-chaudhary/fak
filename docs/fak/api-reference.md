@@ -127,6 +127,7 @@ policy refusal. This is what lets a refusal cost a non-Go agent zero extra model
 | POST | [`/v1/fak/context/change`](#post-v1fakcontextchange) | fak-native | Tombstone a recall page |
 | POST | [`/v1/fak/policy/reload`](#post-v1fakpolicyreload) | fak-native | Hot-reload the policy manifest |
 | POST | [`/v1/fak/route/reload`](#post-v1fakroutereload) | fak-native | Force-reload the model-routing manifest |
+| GET·POST | `/v1/fak/route/aliases` | fak-native | List / hot-reassign the runtime model-alias registry (`#11091`) |
 | POST | [`/v1/fak/trace/reset`](#post-v1faktracereset) | fak-native | Clear a session's IFC taint mark |
 | GET | [`/v1/fak/session/{id}`](#v1faksession--live-session-control) | fak-native | Observe a session's live drive state |
 | POST | [`/v1/fak/session/{id}/{verb}`](#v1faksession--live-session-control) | fak-native | Control a session (run/budget/pace/priority) |

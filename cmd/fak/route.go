@@ -71,6 +71,11 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 	accountsCheck := fs.String("accounts-check", "", "validate an account roster and print the account + binding surface")
 	accountsStatus := fs.String("accounts-status", "", "validate an account roster and print credential readiness (env presence only; no network, no secret values)")
 	accountsCover := fs.String("accounts-cover", "", "cross-check an account roster against the routing manifest's routed ids and report coverage (exit 1 if any id is unbound)")
+	aliasesDump := fs.Bool("aliases-dump", false, "write the built-in DefaultAliases (the runtime alias-registry starter) to stdout")
+	aliasesList := fs.String("aliases-list", "", "load an alias registry file and print its table sorted by name")
+	aliasesSet := fs.String("aliases-set", "", "set an alias as name=target in --aliases-file and print the resulting registry (requires --aliases-file)")
+	aliasesRemove := fs.String("aliases-remove", "", "remove an alias by name from --aliases-file and print the resulting registry (requires --aliases-file)")
+	aliasesFile := fs.String("aliases-file", "", "alias registry file to load (for --aliases-set/--aliases-remove) or apply to the --accounts resolve path")
 	place := fs.Bool("place", false, "walk the zone ladder (device -> fleet -> vendor) for this subject and report which rung serves it; needs --accounts")
 	capability := fs.String("capability", "", "declare MEASURED per-model capability tiers for --place: model=t0|t1|t2[,...] (undeclared = unmeasured, which may not descend the ladder)")
 	evidence := fs.String("evidence", "", "grade per-model capability for --place from a JSON file of OBSERVED outcomes {floor,evidence} instead of asserting it; self-reported outcomes are refused")
@@ -140,6 +145,19 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	case *accountsCover != "":
 		return runAccountsCover(stdout, stderr, *accountsCover, *asJSON)
+	case *aliasesDump:
+		stdout.Write(modelroute.DefaultAliases().JSON())
+		return 0
+	case *aliasesList != "":
+		reg, err := modelroute.LoadAliases(*aliasesList)
+		if err != nil {
+			fmt.Fprintln(stderr, "fak route:", err)
+			return 1
+		}
+		stdout.Write(reg.JSON())
+		return 0
+	case *aliasesSet != "" || *aliasesRemove != "":
+		return runAliasMutate(stdout, stderr, *aliasesFile, *aliasesSet, *aliasesRemove)
 	}
 
 	// Resolve the manifest: an explicit file, else the built-in default.
@@ -205,6 +223,22 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 		}
 		fmt.Fprintf(stderr, "fak: loaded account roster from %s\n", *accounts)
 		roster = &r
+		// Optional runtime alias rewrite (#11091): rewrite each abstract plan id
+		// through the alias registry BEFORE the roster binds it, mirroring the
+		// gateway's alias-before-roster order.
+		if *aliasesFile != "" {
+			store, err := loadAliasStore(*aliasesFile)
+			if err != nil {
+				fmt.Fprintln(stderr, "fak route:", err)
+				return 1
+			}
+			rd, err := rewritePlanAliases(store, d)
+			if err != nil {
+				fmt.Fprintln(stderr, "fak route:", err)
+				return 1
+			}
+			d = rd
+		}
 		resolved, err := r.ResolveDecision(d)
 		if err != nil {
 			fmt.Fprintln(stderr, "fak route:", err)
@@ -235,6 +269,15 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak route: --serving needs --place — a liveness snapshot gates the placement ladder, and `fak route` alone answers which model, not which rung")
 		return 2
 	}
+	// --aliases-file is honored ONLY inside the `--accounts` resolve path (it rewrites
+	// each abstract plan id before the roster binds it). Reaching here means none of the
+	// alias-management flags (--aliases-dump/list/set/remove) was set either, so a bare
+	// --aliases-file would be silently dropped — refuse instead of printing a routing
+	// answer that ignored the operator's registry.
+	if strings.TrimSpace(*aliasesFile) != "" && strings.TrimSpace(*accounts) == "" {
+		fmt.Fprintln(stderr, "fak route: --aliases-file needs --accounts (it rewrites the routed ids before the roster binds them), or use --aliases-set/--aliases-remove to edit the registry")
+		return 2
+	}
 
 	if *asJSON {
 		fmt.Fprintln(stdout, routeJSON(d, red, sav, bound, capacity))
@@ -242,6 +285,114 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 	}
 	printRoute(stdout, d, red, sav, bound)
 	return 0
+}
+
+// runAliasMutate implements --aliases-set/--aliases-remove: it loads the registry
+// from file, applies exactly one mutation, prints the resulting registry to stdout,
+// and writes it back to the file so the edit persists for the next command. It is a
+// file-management surface; the LIVE redirect witness lives in the gateway test.
+func runAliasMutate(stdout, stderr io.Writer, path, set, remove string) int {
+	if strings.TrimSpace(path) == "" {
+		fmt.Fprintln(stderr, "fak route: --aliases-set/--aliases-remove require --aliases-file")
+		return 2
+	}
+	reg, err := modelroute.LoadAliases(path)
+	if err != nil {
+		fmt.Fprintln(stderr, "fak route:", err)
+		return 1
+	}
+	if set != "" {
+		kv := strings.SplitN(set, "=", 2)
+		if len(kv) != 2 || strings.TrimSpace(kv[0]) == "" || strings.TrimSpace(kv[1]) == "" {
+			fmt.Fprintln(stderr, "fak route: --aliases-set wants name=target")
+			return 2
+		}
+		name, target := strings.TrimSpace(kv[0]), strings.TrimSpace(kv[1])
+		replaced := false
+		for i := range reg.Aliases {
+			if reg.Aliases[i].Name == name {
+				reg.Aliases[i].Target = target
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			reg.Aliases = append(reg.Aliases, modelroute.Alias{Name: name, Target: target})
+		}
+	} else {
+		name := strings.TrimSpace(remove)
+		kept := reg.Aliases[:0]
+		removed := false
+		for _, a := range reg.Aliases {
+			if a.Name == name {
+				removed = true
+				continue
+			}
+			kept = append(kept, a)
+		}
+		if !removed {
+			fmt.Fprintf(stderr, "fak route: alias %q not found in %s\n", name, path)
+			return 1
+		}
+		reg.Aliases = kept
+	}
+	// Validate the prospective table (cycle/duplicate/empty) before persisting, so a
+	// bad edit fails loud and never leaves a corrupt file on disk.
+	if err := reg.Validate(); err != nil {
+		fmt.Fprintln(stderr, "fak route:", err)
+		return 1
+	}
+	encoded := reg.JSON()
+	stdout.Write(encoded)
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+	if err := writeFileAtomic(path, encoded, mode); err != nil {
+		fmt.Fprintln(stderr, "fak route: write aliases", path+":", err)
+		return 1
+	}
+	return 0
+}
+
+// loadAliasStore builds a validated AliasStore from a registry file.
+func loadAliasStore(path string) (*modelroute.AliasStore, error) {
+	reg, err := modelroute.LoadAliases(path)
+	if err != nil {
+		return nil, err
+	}
+	return modelroute.NewAliasStore(reg)
+}
+
+// rewritePlanAliases rewrites a Decision's plan (scout + every member) through the
+// alias store, so `--aliases-file` composes with `--accounts` the same way the
+// gateway rewrites before the roster.
+func rewritePlanAliases(store *modelroute.AliasStore, d modelroute.Decision) (modelroute.Decision, error) {
+	rewrite := func(id string) (string, error) {
+		target, isAlias, err := store.Resolve(id)
+		if err != nil {
+			return "", err
+		}
+		if isAlias {
+			return target, nil
+		}
+		return id, nil
+	}
+	if d.Plan.Scout != "" {
+		t, err := rewrite(d.Plan.Scout)
+		if err != nil {
+			return d, err
+		}
+		d.Plan.Scout = t
+	}
+	for i := range d.Plan.Members {
+		t, err := rewrite(d.Plan.Members[i].Model)
+		if err != nil {
+			return d, err
+		}
+		d.Plan.Members[i].Model = t
+	}
+	return d, nil
 }
 
 // parseLabels turns "k=v,k2=v2" into a map. Malformed pairs are skipped.

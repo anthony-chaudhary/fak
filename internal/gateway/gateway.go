@@ -306,6 +306,7 @@ func New(cfg Config) (*Server, error) {
 		orgAudit:                     orgAudit,
 		route:                        newRouteLive(cfg.RouteManifest),
 		roster:                       cfg.RouteAccounts,
+		aliases:                      cfg.RouteAliases,
 		native:                       cfg.Native,
 		nativeMaxTurns:               nativeMaxTurnsOr(cfg.NativeMaxTurns),
 		nativeCodeCatalog:            nativeCodeCatalog,

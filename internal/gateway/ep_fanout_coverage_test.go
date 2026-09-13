@@ -208,6 +208,7 @@ var epFanoutExemptRoutes = map[string]string{
 	"/v1/fak/policy":                epExemptNoDecode,
 	"/v1/fak/policy/reload":         epExemptNoDecode,
 	"/v1/fak/route/reload":          epExemptNoDecode,
+	"/v1/fak/route/aliases":         epExemptNoDecode,
 	"/v1/fak/trace/reset":           epExemptNoDecode,
 	"/v1/fak/trace/":                epExemptNoDecode,
 	"/v1/fak/session/changes":       epExemptNoDecode,

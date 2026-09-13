@@ -1014,6 +1014,15 @@ type Server struct {
 	// (New() calls Validate), so Resolve's dangling-ref/locality invariants hold.
 	roster *modelroute.Roster
 
+	// aliases, when non-nil, is the runtime model-ALIAS registry (#11091): the
+	// requested model name is rewritten through its chain to a terminal model id
+	// BEFORE the roster binds that id to an account, so an alias can be reassigned
+	// at runtime and the next completion redirects without a restart. nil (the
+	// default) leaves the requested name untouched — byte-identical to the
+	// pre-#11091 path. bindChatRoute / resolveRoute call Resolve, which is
+	// read-locked and safe against a concurrent Set.
+	aliases *modelroute.AliasStore
+
 	// native, when true, routes a non-streaming /v1/messages turn through fak's OWN agent
 	// loop (agent.RunArm) — the native-harness keystone (#1316). nativeMaxTurns bounds the
 	// loop's model round-trips per request. See Config.Native / native_serve.go.

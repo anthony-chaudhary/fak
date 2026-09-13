@@ -670,6 +670,18 @@ func (s *Server) resolveRoute(modelID, principal string) (string, error) {
 	if s.roster == nil || modelID == "" {
 		return modelID, nil
 	}
+	// Runtime alias rewrite (#11091): resolve the requested name through the alias
+	// chain to the terminal model id the roster binds. A cyclic/corrupt alias fails
+	// LOUD, matching bindChatRoute, so both dispatch seams agree on the target.
+	if s.aliases != nil {
+		target, isAlias, err := s.aliases.Resolve(modelID)
+		if err != nil {
+			return "", fmt.Errorf("gateway: route accounts: %w", err)
+		}
+		if isAlias {
+			modelID = target
+		}
+	}
 	t, err := s.roster.Resolve(modelID)
 	if err != nil {
 		return "", fmt.Errorf("gateway: route accounts: %w (fix the roster binding for %q or set a default account; no silent fallback)", err, modelID)
@@ -707,6 +719,20 @@ func (s *Server) routeAccount(tool string, readOnly bool, meta map[string]string
 	prim := d.Plan.Primary()
 	if prim == "" {
 		return modelroute.Target{}, false
+	}
+	// Runtime alias rewrite (#11091): match resolveRoute/bindChatRoute so the
+	// observability Target is recorded for the resolved model — otherwise a report
+	// would name the alias and attribute it to the wrong (or no) account. A cyclic
+	// alias is not re-raised here: observability never raises the fail-loud that
+	// already surfaced at buildCall.
+	if s.aliases != nil {
+		target, isAlias, err := s.aliases.Resolve(prim)
+		if err != nil {
+			return modelroute.Target{}, false
+		}
+		if isAlias {
+			prim = target
+		}
 	}
 	t, err := s.roster.Resolve(prim)
 	if err != nil {

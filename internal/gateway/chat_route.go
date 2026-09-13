@@ -152,6 +152,16 @@ func (s *Server) chatServingLocality(ctx context.Context, model string) servingL
 	if binding := chatRouteFromContext(ctx); binding != nil {
 		return binding.Locality
 	}
+	// Runtime alias rewrite (#11091): the planner papers over the wire model, so a
+	// locality check against the raw alias name would miss a locally-served target.
+	// On a Resolve error we deliberately do NOT panic or divert: fall through to the
+	// existing upstream/servedSide attribution (the fail-loud for a cyclic alias
+	// already fired at bindChatRoute/resolveRoute on the dispatch path).
+	if s.aliases != nil {
+		if target, isAlias, err := s.aliases.Resolve(model); err == nil && isAlias {
+			model = target
+		}
+	}
 	if dp, ok := s.planner.(*DualPlanner); ok && dp.RoutesLocal(model) {
 		return localitySelfHosted
 	}
@@ -168,6 +178,19 @@ func (s *Server) chatServingLocality(ctx context.Context, model string) servingL
 func (s *Server) bindChatRoute(ctx context.Context, requestedModel string) (*chatRouteBinding, error) {
 	if s == nil || s.roster == nil || requestedModel == "" {
 		return nil, nil
+	}
+	// Runtime alias rewrite (#11091): the requested name may be an alias whose
+	// terminal target is the model the roster actually binds. A cyclic/corrupt alias
+	// fails LOUD (never a silent pass-through) so a misconfigured registry cannot
+	// quietly serve the wrong model.
+	if s.aliases != nil {
+		target, isAlias, err := s.aliases.Resolve(requestedModel)
+		if err != nil {
+			return nil, fmt.Errorf("gateway: chat route: %w", err)
+		}
+		if isAlias {
+			requestedModel = target
+		}
 	}
 	bound := false
 	for _, binding := range s.roster.Bindings {

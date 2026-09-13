@@ -164,6 +164,7 @@ type serveFlags struct {
 	codexConfigPath              *string
 	routeManifest                *string
 	routeAccounts                *string
+	routeAliases                 *string
 	ggufPath                     *string
 	tokPath                      *string
 	ctxViewBudget                *int
@@ -302,6 +303,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.unsafeUnauthedBind = fs.Bool(serveUnsafeBindFlag, false, "proceed with a bind that is reachable from OFF THIS HOST even though no inbound token door is configured (#5373, a child of #3279). Default false: `fak serve --addr 0.0.0.0:8080` with neither --require-key-env nor --key-principal is REFUSED at startup with the "+serveBindRefusalToken+" reason, because every request such a listener serves is unauthenticated and the internet-wide scan #3279 cites found 175,108 local-model servers in exactly that shape. Loopback binds (the 127.0.0.1:8080 default, localhost, ::1) are never affected, nor is --stdio, nor is an off-host bind that DOES name a token door — so this flag is only ever needed for the deliberate case: an isolated lab segment, or a host firewall doing the work instead. Passing it prints a loud stderr warning every boot; it is named to be impossible to set by accident and is not a substitute for --require-key-env.")
 	sf.routeManifest = fs.String("route-manifest", "", "model-routing policy to install: each fak_syscall call is classified into a modelroute.Subject and a single-model (PICK) plan binds abi.ToolCall.Engine before Submit, so the residency PDP adjudicates the real route (#601). Empty (default) leaves Engine unset → the kernel default engine, byte-for-byte the pre-routing behavior. A malformed manifest fails startup loud (a mis-routed model is a security boundary, never a silent default). The installed file is HOT-RELOADED: an edit is picked up without a restart and swapped atomically (a request classifies against the whole old or whole new policy, never a torn read); a malformed edit is rejected and the last-good policy stays installed (#842).")
 	sf.routeAccounts = fs.String("route-accounts", "", "model-ACCOUNT roster (fak-accounts/v1) to install ALONGSIDE --route-manifest (#2528): after the manifest PICKs an abstract model id, the roster BINDS it to a concrete provider account + upstream wire model, and the account-resolved EngineRoute (openai:acct/model, local:acct/model) — not the bare plan-member string — is written to abi.ToolCall.Engine before Submit, so the residency PDP adjudicates the ACCOUNT-resolved route and an ensemble member each binds independently. A route to a provider with no registered adapter fails LOUD at dispatch (no silent fallback to the default engine). Credentials are env-var NAMES in the roster, never secrets. Empty (default) leaves the plan-member string as the route, byte-for-byte the pre-#2528 behavior. A malformed roster fails startup loud. Preflight it no-spend first with `fak api-host acceptance --from-model-accounts FILE`.")
+	sf.routeAliases = fs.String("route-aliases", "", "runtime model-alias registry (fak-alias-registry/v1) installed BEFORE the account roster (#11091): the requested model name is rewritten through its alias chain to a terminal model id, which the roster then binds — an alias names another MODEL id (or alias), never an account. Hot-editable at runtime via GET/POST /v1/fak/route/aliases, so a repoint takes effect on the next completion with no restart. Empty (default) leaves every requested name untouched, byte-identical to pre-#11091; a malformed file fails startup loud.")
 	sf.ggufPath = fs.String("gguf", "", "load these GGUF weights into the in-kernel engine at boot; the load is part of the measured startup sequence and its phase breakdown is exposed on /metrics. Default path is lean-Q8 (Q4→f32→Q8 round-trip); set FAK_Q4K=1 for the direct-resident-Q4_K path (Qwen3.6-27B q4_k_m, the P1/P2 decode lever)")
 	sf.tokPath = fs.String("tokenizer", "", "OPTIONAL override for the in-kernel CHAT planner's tokenizer. With --gguf and no --base-url, /v1/chat/completions AND /v1/messages already serve the in-kernel model (real ChatML chat) using the GGUF's EMBEDDED tokenizer; pass this only to override it (e.g. an SPM-only checkpoint with no embedded BPE tokenizer, or a custom vocab). Accepts a tokenizer.json or its directory. e.g. ~/.cache/fak-models/tokenizers/qwen3.6")
 	sf.ctxViewBudget = fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget, "wire the ctxplan context PLANNER into the live serve loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). DEFAULT-ON at a conservative 8000 resident tokens; pass 0 to disable (leaves the existing path byte-for-byte unchanged). The planner only ever SHORTENS and falls open to the full history on any doubt; on the Anthropic passthrough it keeps the cached prefix byte-identical (witness: docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md). The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
@@ -861,6 +863,28 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		startupMessages = append(startupMessages, gateway.StartupMessage{Source: "serve", Kind: "route-accounts", Level: "info", Text: "model-account roster loaded from " + *sf.routeAccounts})
 	}
 
+	// Resolve the optional runtime model-ALIAS registry (#11091). Off by default: an
+	// empty --route-aliases leaves routeAliases nil, so every requested name is passed
+	// through untouched (byte-for-byte pre-#11091). LoadAliases validates the acyclic /
+	// depth contract on load, and NewAliasStore re-validates before the store is armed;
+	// a malformed registry fails LOUD here rather than silently mis-redirecting a request.
+	var routeAliases *modelroute.AliasStore
+	if *sf.routeAliases != "" {
+		routeAliasReg := loadServeRouteFile("route-aliases", *sf.routeAliases, "a fak-alias-registry/v1 registry whose chains are acyclic and within MaxAliasDepth", modelroute.LoadAliases)
+		store, err := modelroute.NewAliasStore(*routeAliasReg)
+		if err != nil {
+			writeConfigBail(os.Stderr, configBail{
+				Verb: "fak serve", Reason: bailRouteManifestInvalid,
+				Summary: fmt.Sprintf("--route-aliases did not load: %v", err),
+				Knobs:   []bailKnob{bailFlag("route-aliases", *sf.routeAliases), bailFile(*sf.routeAliases, "did not load").want("a fak-alias-registry/v1 registry whose chains are acyclic and within MaxAliasDepth")},
+				Bind:    []string{"path=" + *sf.routeAliases},
+			})
+			os.Exit(1)
+		}
+		routeAliases = store
+		startupMessages = append(startupMessages, gateway.StartupMessage{Source: "serve", Kind: "route-aliases", Level: "info", Text: "model-alias registry loaded from " + *sf.routeAliases})
+	}
+
 	// Resolve the optional multi-tenant KEYSET (#5332). Off by default: no --key-principal
 	// leaves keyPrincipals nil, so gateway.New builds a nil *keyset and the RequireKey-only
 	// auth path stays byte-for-byte what it was. A malformed spec, an unset/empty env var, or
@@ -985,6 +1009,11 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		// PDP adjudicates the ACCOUNT-resolved route and a native provider with no wired
 		// adapter fails loud instead of running through the default engine.
 		RouteAccounts: routeRoster,
+		// Runtime model-alias registry (#11091). nil (the default, no --route-aliases)
+		// leaves every requested name untouched. When set, the requested model name is
+		// rewritten through its alias chain BEFORE the roster binds it; the store is
+		// concurrency-safe so the /v1/fak/route/aliases endpoint can repoint it live.
+		RouteAliases: routeAliases,
 		// Native-harness keystone (#1316): drive agent.RunArm for a non-streaming
 		// /v1/messages turn. Off by default — the proxy path is byte-for-byte unchanged.
 		Native:              *sf.native,

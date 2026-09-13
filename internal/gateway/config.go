@@ -833,6 +833,15 @@ type Config struct {
 	// --route-accounts FILE`; the pure resolver is internal/modelroute (reused verbatim, per
 	// the ticket's "the pure resolver is the source of truth" non-goal).
 	RouteAccounts *modelroute.Roster
+	// RouteAliases, when non-nil, is the runtime model-ALIAS registry the gateway
+	// consults BEFORE the roster at live dispatch time (#11091): the requested model
+	// name is rewritten through its alias chain to a terminal model id, and the
+	// roster then binds that id. An alias therefore names another model id, never an
+	// account. It is concurrency-safe, so a host may reassign an alias (or serve the
+	// management endpoint) at runtime and the next completion redirects immediately.
+	// nil (the default) leaves every requested name untouched — byte-identical to the
+	// pre-#11091 path. Set by `fak serve -route-aliases FILE`.
+	RouteAliases *modelroute.AliasStore
 	// Native, when true, makes /v1/messages drive fak's OWN agent loop (agent.RunArm /
 	// RunArmStream) instead of the single-shot proxy turn: fak owns dispatch, the in-kernel
 	// syscall boundary is the sole tool path, and no external harness owns the turn loop.
