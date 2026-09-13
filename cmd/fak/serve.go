@@ -120,6 +120,7 @@ type serveFlags struct {
 	mock                         *bool
 	apiKeyEnv                    *string
 	streamProgressTimeout        *time.Duration
+	streamSoftProgressTimeout    *time.Duration
 	engineCacheEngine            *string
 	engineCacheBaseURL           *string
 	engineCacheAdminKeyEnv       *string
@@ -264,6 +265,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.writeCodexConfig = fs.Bool("write-codex-config", false, "write or update config.toml with this server's provider config and exit without binding a listener")
 	sf.codexConfigPath = fs.String("codex-config-path", "", "custom destination path for Codex config.toml (default: $CODEX_HOME/config.toml or ~/.codex/config.toml)")
 	sf.apiKeyEnv = fs.String("api-key-env", "", "env var holding the upstream API key (proxy mode)")
+	sf.streamSoftProgressTimeout = fs.Duration("stream-soft-progress-timeout", 0, "proxy mode: SOFT no-progress DIAGNOSTIC deadline (#10638). When a STREAMING turn has not advanced for this long (same progress definition as --stream-progress-timeout), the gateway writes a content-free elapsed-since-progress / retry-attempt receipt and lets the turn KEEP RUNNING; --stream-progress-timeout remains the hard client-survivable ceiling that actually ends it. 0 (the default) derives the soft window from the hard one (hard/3), so the diagnostic always has lead time. A negative value disables the diagnostic. Enables the soft-stalls.jsonl receipt under the --stream-incident-dir path (FAK_STREAM_INCIDENT_DIR).")
 	sf.streamProgressTimeout = fs.Duration("stream-progress-timeout", agent.DefaultStreamProgressTimeout, "proxy mode: end a STREAMING upstream turn that has stayed warm this long without a single frame that advances it (#5486). Keepalive frames (a ping, an SSE comment, an empty-delta chunk) re-arm the inter-byte deadline but are NOT progress, so a generation wedged behind a live socket otherwise rides the 600s whole-request ceiling. DEFAULT-ON at agent.DefaultStreamProgressTimeout (300s), which sits above the worst prefill-to-first-token gap on a large cached prompt and above any extended-thinking pause (thinking streams content deltas, which do count as progress). Pass 0 to DISABLE the deadline — the escape hatch when a provider's prefill legitimately outlasts the window. A positive value outside [5s, 600s] is not honored as a real window: the default is used instead, so a typo never silently becomes a different deadline. Inert on the non-streaming path and on the offline mock planner.")
 	sf.engineCacheEngine = fs.String("engine-cache-engine", "", "self-hosted upstream cache reset engine for quarantined provider-bound tool results: sglang|vllm (empty disables)")
 	sf.engineCacheBaseURL = fs.String("engine-cache-base-url", "", "serving-engine control/base URL for cache reset (default: --base-url when --engine-cache-engine is set)")
@@ -999,6 +1001,9 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		// and is translated here into that resolver's negative encoding; every other value
 		// (including the 300s default) passes through untouched.
 		StreamProgressTimeout: serveStreamProgressTimeout(*sf.streamProgressTimeout),
+		// #10638 soft diagnostic: passed through verbatim (0 = derive-from-hard). It already
+		// uses the negative-off encoding, so no front-door translation is needed.
+		StreamSoftProgressTimeout: *sf.streamSoftProgressTimeout,
 		RichDashboards: gateway.RichDashboardConfig{
 			ApplianceProfile: *sf.applianceObservability || rt.strixPreflight.Detected,
 		},

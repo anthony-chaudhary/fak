@@ -81,6 +81,11 @@ type upstreamCall struct {
 	// upstream for SSE anyway. Codex's ChatGPT-subscription backend requires stream=true,
 	// but the gateway still buffers, adjudicates, and returns the client's requested shape.
 	responsesStreamed bool
+	// attemptsUsed is the number of upstream attempts this call consumed before a 200
+	// opened the stream (set on the success path of streamConnect). It is per-call, so
+	// concurrent turns on one planner never race, and it lets the soft no-progress
+	// diagnostic (#10638) report which retry attempt a silent turn fell on.
+	attemptsUsed int
 	// authRefreshable marks the pinned/rotating-credential path — no per-request
 	// UpstreamAPIKey (the transparent passthrough hop authenticates with the client's
 	// OWN key, which we must not second-guess) AND a live APIKeyFunc on the planner. On
@@ -616,6 +621,7 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 			// A 200 after a 429-account-cap seat rehome is a CONFIRMED rehome (see Complete).
 			notifyRehomeRecovered(p, &rehomePending, attempt)
 			resp = r
+			call.attemptsUsed = attempt + 1
 			break
 		}
 		raw, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
@@ -721,8 +727,13 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	// upstream that stays WARM without advancing — keepalive comments and empty-delta chunks
 	// re-arm the byte deadline but are not progress, so only a real delta below calls
 	// sr.noteProgress (#5486).
-	sr := newStallReader(resp.Body, streamStallTimeout(), p.streamProgressWindow(), streamMaxDuration())
+	progressWindow := p.streamProgressWindow()
+	sr := newStallReader(resp.Body, streamStallTimeout(), progressWindow, streamMaxDuration())
 	defer sr.Close()
+	// Arm the SOFT no-progress diagnostic (#10638): it fires WELL BEFORE the hard progress
+	// deadline above, hands the gateway an elapsed-since-progress + retry-attempt receipt, and
+	// leaves the stream RUNNING — a slow-but-alive turn still gets every chance to finish.
+	sr.armSoftProgress(p.streamSoftProgressWindow(progressWindow), func() int { return call.attemptsUsed }, p.SoftStallNotify)
 	sc := bufio.NewScanner(sr)
 	// A single SSE data line can carry a large tool-call argument fragment; raise the
 	// scanner ceiling well past the 64 KiB default so a big chunk is never truncated.

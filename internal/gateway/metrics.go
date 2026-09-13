@@ -365,6 +365,21 @@ type gatewayMetrics struct {
 	// 2026-07-03 gem8 transient-403 storm showed was missing.
 	upstreamForbiddenRetries map[string]uint64
 
+	// softProgressStalls counts SOFT no-progress diagnostics (#10638): a stream stayed silent
+	// (no turn-advancing frame; keepalives ignored) for the soft window and a content-free
+	// elapsed-since-progress / retry-attempt receipt was captured WITHOUT ending the turn. It is
+	// the observability that makes a stalled-but-alive turn visible before the hard deadline
+	// produces a terminal 5xx. Bumped atomically from the SoftStallNotify hook, off the request
+	// path. SEPARATE from upstreamErrors (a terminal failure) and upstreamRetries (a backoff).
+	softProgressStalls uint64
+
+	// softProgressStallElapsedNS / softProgressStallAttempt carry the most recent soft strike's
+	// numbers (nanoseconds of silence and the upstream retry attempt) so the scrape and the
+	// debug line can name them without reading the receipt file. Written with atomic stores by
+	// observeSoftProgressStall off the request path.
+	softProgressStallElapsedNS uint64
+	softProgressStallAttempt   uint64
+
 	// upstreamAccountFailovers counts ACCOUNT-SCOPED failover outcomes, keyed by outcome
 	// ("recovered" = a 403/402 named this credential's org/region/billing as walled and a permitted
 	// sibling account was adopted so the turn completed in place; "exhausted" = no failover target

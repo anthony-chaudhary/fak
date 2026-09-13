@@ -77,6 +77,39 @@ func (ic *incidentConfig) writeIncident(wire, phase, statusClass, boundPolicy, c
 	f.WriteString(string(data) + "\n")
 }
 
+// writeSoftProgressStall appends a content-free soft no-progress receipt (#10638) to the
+// incident directory's soft-stalls.jsonl. It captures ONLY counts and durations: the elapsed
+// silence, the soft window that elapsed, and the upstream retry attempt — never a prompt,
+// document, path, or output byte (the public-safe shape #10634 consumes). It is best-effort:
+// a disabled config or an IO error never affects the live turn, which continues untouched.
+func (s *Server) writeSoftProgressStall(stall agent.SoftProgressStall) {
+	ic := newIncidentConfig()
+	if !ic.enabled {
+		return
+	}
+	_ = os.MkdirAll(ic.dir, 0o750)
+	path := filepath.Join(ic.dir, "soft-stalls.jsonl")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	pkt := map[string]any{
+		"schema":                    "fak-soft-progress-stall/1",
+		"class":                     "no_progress",
+		"phase":                     "soft_no_progress",
+		"elapsed_since_progress_ms": stall.ElapsedSinceProgress.Milliseconds(),
+		"window_ms":                 stall.Window.Milliseconds(),
+		"retry_attempt":             stall.RetryAttempt,
+		"disposition":               "turn_continues",
+	}
+	data, err := json.Marshal(pkt)
+	if err != nil {
+		return
+	}
+	f.WriteString(string(data) + "\n")
+}
+
 // writeCheckpoint writes a durable partial-output checkpoint for mid-stream death.
 func (c *checkpointConfig) writeCheckpoint(wire, traceID, model, phase string, elapsedMS int64, text string, estimatedTokens int, boundPolicy, reason string) {
 	if !c.enabled {

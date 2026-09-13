@@ -173,7 +173,7 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 			// HTTP 529 the arm below already retries, and it has emitted nothing to the
 			// caller, so it belongs on the same invisible retry — not outside the loop where
 			// it used to become an un-retried, un-counted 502.
-			refusalStatus, refusalFrame, serr := p.relayAnthropicStream(r, onEvent)
+			refusalStatus, refusalFrame, serr := p.relayAnthropicStream(r, attempt+1, onEvent)
 			if refusalStatus == 0 {
 				return serr // a relayed turn (nil), or a real read/stall/unsupported failure
 			}
@@ -254,7 +254,7 @@ var errAnthropicInBandRefusal = errors.New("agent: anthropic refused the stream 
 // The pre-start window is bounded by message_start deliberately: that frame is what opens the
 // caller's own client stream, so an `error` frame arriving after it is a MID-stream failure the
 // caller must forward, and it is passed through to onEvent untouched exactly as before.
-func (p *HTTPPlanner) relayAnthropicStream(resp *http.Response, onEvent func(AnthropicSSEEvent) error) (refusalStatus int, refusalFrame []byte, err error) {
+func (p *HTTPPlanner) relayAnthropicStream(resp *http.Response, attemptsUsed int, onEvent func(AnthropicSSEEvent) error) (refusalStatus int, refusalFrame []byte, err error) {
 	defer resp.Body.Close()
 	// The gateway only takes this path against the real Anthropic API, but guard anyway:
 	// an upstream that ignores stream and replies with one buffered JSON body cannot be
@@ -279,8 +279,14 @@ func (p *HTTPPlanner) relayAnthropicStream(resp *http.Response, onEvent func(Ant
 	// The third deadline (FAK_STREAM_MAX_DURATION_S) is the absolute total-duration budget:
 	// armed once at stream open, never re-armed by bytes or progress, it ends a stream that
 	// outlives its configured ceiling with the same typed stall error (#10672).
-	sr := newStallReader(resp.Body, streamStallTimeout(), p.streamProgressWindow(), streamMaxDuration())
+	progressWindow := p.streamProgressWindow()
+	sr := newStallReader(resp.Body, streamStallTimeout(), progressWindow, streamMaxDuration())
 	defer sr.Close()
+	// Soft no-progress diagnostic (#10638): fire WELL BEFORE the hard progress deadline,
+	// report elapsed-since-progress + the attempt the stream opened on, and leave the turn
+	// running so a slow-but-alive stream still completes. The hard deadline above is the only
+	// thing that ends it.
+	sr.armSoftProgress(p.streamSoftProgressWindow(progressWindow), func() int { return attemptsUsed }, p.SoftStallNotify)
 	started := false
 	var frame []byte
 	onProgressingEvent := func(ev AnthropicSSEEvent) error {
