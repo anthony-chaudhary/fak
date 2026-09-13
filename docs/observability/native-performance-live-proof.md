@@ -190,6 +190,50 @@ On Apple Silicon hardware with the cached `qwen38:27b` artifact, execute a live 
 bash scripts/local-qwen38-metal-observe.sh --output tools/grafana/provisioning/witnesses/local-qwen38-metal-live-proof.json
 ```
 
+The launcher must serve the **exact witnessed artifact** (`Qwen3.8-27B-Q4_K_M.gguf`,
+17,106,775,008 bytes). Other `qwen38` quantizations (for example the UD-Q2_K_XL alias)
+do not carry the separate process-RSS availability witness and reserve the 36 GiB
+startup peak, which no 36 GiB host can admit. See
+[`docs/_witnesses/issue-8971-streamed-q4k-capacity/`](../_witnesses/issue-8971-streamed-q4k-capacity/README.md)
+for the canonical capacity bound.
+
+### 5. Capture the four dashboard renders
+
+`cmd/fakgrafana-capture` is the native Go capture harness for issue #10008. It renders
+each of the four native-performance dashboards in kiosk mode with headless Chrome at
+1920x1500 (the geometry the SLO contract declares in `visual_render`) and binds the four
+PNGs into the live receipt and the coverage manifest. It **refuses to write when any two
+renders are byte-identical** — four distinct SHA-256 hashes are the done condition:
+
+```bash
+go run ./cmd/fakgrafana-capture \
+  --base http://127.0.0.1:3000 --user admin --pass fleet \
+  --root . \
+  --receipt tools/grafana/provisioning/witnesses/local-qwen38-metal-live-proof.json \
+  --manifest tools/grafana/provisioning/witnesses/fak-native-panel-coverage-manifest.json
+```
+
+It preflights Grafana access with the supplied credentials (a Go HTTP GET of
+`/api/dashboards/uid/<uid>`) and fails loudly on 401/403 or a login-page body rather than
+silently capturing an unauthenticated render. `--dry-run` renders without writing. The
+four target paths are:
+
+- `tools/grafana/provisioning/witnesses/local-qwen38-metal-kernel-performance.png`
+- `tools/grafana/provisioning/witnesses/local-qwen38-metal-backends.png`
+- `tools/grafana/provisioning/witnesses/local-qwen38-metal-artifacts.png`
+- `tools/grafana/provisioning/witnesses/local-qwen38-metal-slo.png`
+
+Unit tests prove the harness logic with an injected renderer and an `httptest` Grafana;
+they never require a live stack:
+
+```bash
+go test ./cmd/fakgrafana-capture/... -count=1
+```
+
+A capture is only a **live** witness when all four dashboards are visibly populated from
+one fresh receipt whose `fak_native_*` families Prometheus actually scraped. Rendering
+empty panels, fixture data, or an unauthenticated login page is not live proof.
+
 ---
 
 ## Reproduce the matrix
@@ -259,13 +303,29 @@ and not benchmark evidence.
 | Scrubbed live receipt | One exact Qwen3.8 request executed through fak-native without fallback | A comparative gain, SLO promotion, or general hardware capacity |
 
 The live receipt location is
-`tools/grafana/provisioning/witnesses/fak-native-qwen38-live-proof-unavailable.json`.
-As of **August 28, 2026**, it honestly records `status: unavailable`: the local native
-Metal route refused before load because its current streamed-Q4_K admission requirement
-exceeded host memory, the sanctioned GCP probe lacked a refreshable credential, and the
-private-lab bridge had no authorized control channel. No live Qwen3.8 result is claimed
-from those attempts, and no private hostname, channel, credential, path, or raw log is
-committed.
+`tools/grafana/provisioning/witnesses/fak-native-qwen38-live-proof.json` (schema
+`fak-native-qwen38-metal-observation/v1`). As of **September 12, 2026**, no fresh live
+receipt and no four-dashboard render have been captured on the 36 GiB Apple M3 Pro, so the
+capture remains honestly pending. The blockers are evidenced, not assumed:
+
+1. **Capacity bound.** `internal/nativeperf/current.go` records the exact
+   `q38-q4km-native-metal-m3pro-capacity` envelope as `ConstraintCapacityBound` with a
+   **44 GiB minimum**: the canonical no-`FAK_Q4K_FREE_CPU` control reached readiness but
+   grew peak swap by 7,681,930,690 bytes
+   ([canonical witness](../_witnesses/issue-8971-streamed-q4k-capacity/canonical-no-free-cpu.json)).
+   The reservation plane (`internal/localadmission/reservation.go`) compares the exact
+   artifact's 20 GiB startup-peak bound against *currently allocatable* memory, so a
+   36 GiB host under ambient load refuses before model load even though the streamed
+   FreeCPU route historically reached readiness swap-free.
+2. **Lease contention.** The machine-wide Metal lease (`internal/gpulease`, default
+   `<tmp>/fak-gpu.lease`) is held for the whole serve lifetime. On a shared host where
+   peers run `fak up --headless`, a bounded observation cannot win an exclusive window;
+   doctrine is bounded waiting or independent local work, never bypassing the lease.
+
+The `cmd/fakgrafana-capture` harness is landed and tested; the missing artifact is the
+fresh receipt. Produce it on hardware meeting the 44 GiB bound (or a separately named
+supported envelope), then run step 5 above to render the four dashboards from that one
+run. Do not substitute fixtures or unauthenticated/empty renders as live proof.
 
 ## Complete the live half on sanctioned compute
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -394,9 +395,17 @@ func NormalizeMTPRunnerOptions(opts MTPRunnerOptions) MTPRunnerOptions {
 	return res
 }
 
+// ErrMTPPendingHardware is the typed sentinel returned by every default MTP arm
+// adapter when physical qualification is blocked on unavailable hardware or tools.
+// Callers and tests can distinguish "blocked on hardware" from a genuine failure
+// with errors.Is(err, ErrMTPPendingHardware); no observed evidence is fabricated.
+var ErrMTPPendingHardware = errors.New("mtp comparison pending hardware")
+
 // DefaultMTPAdapters constructs default executable adapters for the four canonical arms.
 // If underlying binaries or hardware models are not available, each adapter returns an
-// error indicating that physical qualification is pending hardware availability.
+// error indicating that physical qualification is pending hardware availability. Every
+// returned error wraps ErrMTPPendingHardware so callers can programmatically detect the
+// blocked-on-hardware state with errors.Is.
 func DefaultMTPAdapters() map[string]MTPComparisonAdapter {
 	adapters := make(map[string]MTPComparisonAdapter, len(canonicalMTPArms))
 	for _, name := range canonicalMTPArms {
@@ -407,15 +416,15 @@ func DefaultMTPAdapters() map[string]MTPComparisonAdapter {
 			}
 			switch armName {
 			case "fak-native":
-				return MTPComparisonArm{}, fmt.Errorf("fak-native: model weights %s not resident or Metal forward unavailable on this host (state=PENDING_HARDWARE)", req.Model.ID)
+				return MTPComparisonArm{}, fmt.Errorf("fak-native: model weights %s not resident or Metal forward unavailable on this host (state=PENDING_HARDWARE): %w", req.Model.ID, ErrMTPPendingHardware)
 			case "ax-engine":
-				return MTPComparisonArm{}, fmt.Errorf("ax-engine: executable ax-bench not found in PATH (state=PENDING_HARDWARE)")
+				return MTPComparisonArm{}, fmt.Errorf("ax-engine: executable ax-bench not found in PATH (state=PENDING_HARDWARE): %w", ErrMTPPendingHardware)
 			case "mtplx":
-				return MTPComparisonArm{}, fmt.Errorf("mtplx: python module mtplx not found in environment (state=PENDING_HARDWARE)")
+				return MTPComparisonArm{}, fmt.Errorf("mtplx: python module mtplx not found in environment (state=PENDING_HARDWARE): %w", ErrMTPPendingHardware)
 			case "llama.cpp":
-				return MTPComparisonArm{}, fmt.Errorf("llama.cpp: model weights %s not found for llama-bench (state=PENDING_HARDWARE)", req.Model.ID)
+				return MTPComparisonArm{}, fmt.Errorf("llama.cpp: model weights %s not found for llama-bench (state=PENDING_HARDWARE): %w", req.Model.ID, ErrMTPPendingHardware)
 			default:
-				return MTPComparisonArm{}, fmt.Errorf("unknown canonical arm %q (state=PENDING_HARDWARE)", armName)
+				return MTPComparisonArm{}, fmt.Errorf("unknown canonical arm %q (state=PENDING_HARDWARE): %w", armName, ErrMTPPendingHardware)
 			}
 		}
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
+	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
 
@@ -49,6 +50,12 @@ const ReasonLoopBodyUnwitnessed = "LOOP_DONE_UNWITNESSED"
 // converts a repeated admitted call into a denial. It is RETRYABLE per-tool feedback
 // (the model can make progress by changing approach), never a deny-all session stop.
 const ReasonLivelockFuse = "LIVELOCK_FUSE"
+
+// ReasonSubagentDepthExceeded is the refusal reason stamped when a spawn-shaped tool
+// is proposed by a session whose child would exceed policy.SubagentDepthRule (#12631).
+// It is RETRYABLE per-tool feedback: the model can decompose the work instead of
+// recursing, and the refusal never reaches the wire (Admitted:false => dropped).
+const ReasonSubagentDepthExceeded = "SUBAGENT_DEPTH_EXCEEDED"
 
 // adjudicateProposedServed is the served-turn vDSO fast path (issue: vDSO live in
 // the hot path). It is adjudicateProposed plus a vDSO Lookup probe FIRST for every
@@ -550,6 +557,17 @@ func (s *Server) adjudicateProposed(ctx context.Context, calls []agent.ToolCall,
 		}
 		policyArguments := clientToolPolicyArguments(tool, tc.Function.Arguments)
 		seq := s.nextOriginSeq()
+		// SUBAGENT DEPTH GATE (#12631): a spawn-shaped call is refused BEFORE any spend
+		// or backend adjudication when the caller's session depth would push the child
+		// past the policy-bound fan-out cap. The refusal is a structured, RETRYABLE
+		// denial — the model can decompose instead of recursing — and Admitted:false
+		// means the call is dropped and never reaches the wire.
+		if wv, refused := s.subagentDepthRefusal(ctx, tool); refused {
+			dropped++
+			adjs = append(adjs, ToolAdjudication{ToolCallID: tc.ID, Tool: tool, ArgsDigest: argsDigest, Admitted: false,
+				Verdict: wv})
+			continue
+		}
 		wv, repaired, aerr := s.adjudicateWithSeq(ctx, tool, policyArguments, false, "", reqTrace, seq)
 		if aerr != nil {
 			dropped++
@@ -590,6 +608,39 @@ func (s *Server) adjudicateProposed(ctx context.Context, calls []agent.ToolCall,
 		}
 	}
 	return kept, adjs, dropped
+}
+
+// subagentDepthRefusal decides whether a proposed spawn-shaped call exceeds the
+// policy-bound subagent fan-out cap (#12631) and, if so, returns the structured
+// refusal verdict. Non-spawn tools and calls that pass the cap return (_, false).
+//
+// The rule is nil-safe: an absent policy runtime or an absent subagent_depth block
+// evaluates the nil *policy.SubagentDepthRule, whose AdmitChildOf applies the
+// fail-closed DefaultMaxSubagentDepth — so recursion is bounded even when nothing
+// is declared. The check runs at the adjudication seam, before adjudicateWithSeq,
+// so a refused spawn spends nothing and is never forwarded.
+func (s *Server) subagentDepthRefusal(ctx context.Context, tool string) (WireVerdict, bool) {
+	if !subagentSpawnTool(tool) {
+		return WireVerdict{}, false
+	}
+	parentDepth := sessionDepthFrom(ctx)
+	var rule *policy.SubagentDepthRule
+	if pr := s.PolicyRuntime(); pr != nil {
+		rule = pr.SubagentDepth
+	}
+	if err := rule.AdmitChildOf(parentDepth); err != nil {
+		return WireVerdict{
+			Kind:        "DENY",
+			Reason:      ReasonSubagentDepthExceeded,
+			By:          "subagent-depth-cap",
+			Disposition: "RETRYABLE",
+			Detail: map[string]string{
+				"parent_depth": strconv.Itoa(parentDepth),
+				"cap":          strconv.Itoa(rule.Cap()),
+			},
+		}, true
+	}
+	return WireVerdict{}, false
 }
 
 type clientToolSchemasContextKey struct{}
