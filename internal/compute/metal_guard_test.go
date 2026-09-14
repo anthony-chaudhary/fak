@@ -62,8 +62,16 @@ func TestMetalGuardRequireDeviceFailsLoudOnMetalLessHost(t *testing.T) {
 		(!strings.Contains(fatal, "built without darwin/arm64 cgo") && !strings.Contains(fatal, "no usable Metal device")) {
 		t.Fatalf("fatal %q must name the two-state availability reason (compiled-out OR no device)", fatal)
 	}
+	// Pin that the fatal's named reason matches the compiled/unavailable state. A
+	// darwin/arm64 cgo build with metalgemm present but no reachable device is a
+	// legitimate "no usable Metal device" host: the backend stays unregistered even
+	// though it compiled, so Compiled() alone must not be assumed false.
 	if metalgemm.Compiled() {
-		t.Fatalf("metalgemm.Compiled() = true with no registered metal backend; availability verdict taxonomy drifted")
+		if !strings.Contains(fatal, "no usable Metal device") && !strings.Contains(fatal, "metal init failed") {
+			t.Fatalf("compiled Metal host with no registered backend named reason %q, want the device-unavailable state", fatal)
+		}
+	} else if !strings.Contains(fatal, "built without darwin/arm64 cgo") {
+		t.Fatalf("uncompiled Metal build named reason %q, want the compiled-out state", fatal)
 	}
 }
 

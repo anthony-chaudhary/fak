@@ -112,7 +112,15 @@ func TestMetalMatMulRejectsEitherNonF32OperandBeforeDeviceUse(t *testing.T) {
 func metalOrSkip(t *testing.T) *metalBackend {
 	be := Pick("metal")
 	mb, ok := be.(*metalBackend)
-	if fatal, skip := metalGuardVerdict(ok, mb.Tier()); fatal != "" || skip != "" {
+	// Tier() is a method on *metalBackend: calling it on a nil/incompatible
+	// Pick result panics before the guard can decide. Only dereference once the
+	// type assertion succeeded; otherwise hand the guard an empty tier so it can
+	// fail loud or skip instead of crashing the test binary.
+	tier := ""
+	if ok && mb != nil {
+		tier = mb.Tier()
+	}
+	if fatal, skip := metalGuardVerdict(ok && mb != nil, tier); fatal != "" || skip != "" {
 		if fatal != "" {
 			t.Fatal(fatal)
 		}
@@ -730,9 +738,3 @@ func TestMetalAttention(t *testing.T) {
 		})
 	}
 }
-
-// The Metal guard tests (TestMetalGuard*) live in the build-tag-free
-// metal_guard_test.go so they compile and run on every host, including
-// windows/amd64 where this darwin-only file is not built. They were once
-// duplicated here too, which broke darwin/arm64 cgo builds with redeclared
-// symbols (#12810, #13028). Keep exactly one canonical definition there.
