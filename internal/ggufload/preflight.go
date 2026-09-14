@@ -407,13 +407,17 @@ func estimateVulkanMixedQ4K(s *WeightSource, residentQ2KEmbedding, streamedDense
 		}
 	}
 
-	hostF32Reserved, err := checkedEstimateAdd(hostF32Logical, hostF32Logical, "host f32 growth reserve")
-	if err != nil {
-		return preflightEstimate{}, err
-	}
+	// The loader holds exactly ONE host f32 blob for the dequantized fallback tensors:
+	// appendF32Tensor appends each tensor once into a single raw slice, and the transient
+	// per-tensor read buffer is released as the collector advances (tensorWork is zeroed).
+	// There is no grow-and-retain second f32 buffer, so charging hostF32Logical twice (an
+	// earlier "growth reserve", #1461) over-stated host residency by one full f32 copy and
+	// turned a fitting UMA load into a spurious REFUSE_TOO_BIG. The retained second
+	// allocation is the Vulkan device arena, a separate VkDeviceMemory upload of the same
+	// bytes, accounted under the device scope rather than here as a phantom host reserve.
 	hostResident, err := checkedEstimateAdd(hostPacked, hostQ8, "host resident bytes")
 	if err == nil {
-		hostResident, err = checkedEstimateAdd(hostResident, hostF32Reserved, "host resident bytes")
+		hostResident, err = checkedEstimateAdd(hostResident, hostF32Logical, "host resident bytes")
 	}
 	if err != nil {
 		return preflightEstimate{}, err

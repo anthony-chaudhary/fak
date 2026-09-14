@@ -185,7 +185,7 @@ func TestPreflightVulkanMixedQ4KAccountsPackedQ8F32AndBoundedStaging(t *testing.
 
 	wantDevice := q2Payload + q4Payload + q8Codes + q8Scales + embedF32 + normF32
 	wantHostResident := conservativeTestAllocation(q2Payload) + conservativeTestAllocation(q4Payload) +
-		conservativeTestAllocation(q8Codes) + conservativeTestAllocation(q8Scales) + 2*(embedF32+normF32)
+		conservativeTestAllocation(q8Codes) + conservativeTestAllocation(q8Scales) + (embedF32 + normF32)
 	// Two worker slots: Q3 conversion (raw + old/new f32 normalization buffers)
 	// and retained Q4_K are the two largest simultaneous staging demands.
 	wantStaging := (q3Payload + 2*256*256*4) + q4Payload
@@ -357,7 +357,7 @@ func TestPreflightVulkanMixedQ4KAccountsResidentQ2KEmbedding(t *testing.T) {
 	if got, want := base.EstDeviceResidentBytes-packed.EstDeviceResidentBytes, f32Bytes; got != want {
 		t.Fatalf("device reduction=%d, want removed whole-table F32 %d", got, want)
 	}
-	if got, want := base.EstHostResidentBytes-packed.EstHostResidentBytes, 2*f32Bytes-conservativeTestAllocation(packedBytes); got != want {
+	if got, want := base.EstHostResidentBytes-packed.EstHostResidentBytes, f32Bytes-conservativeTestAllocation(packedBytes); got != want {
 		t.Fatalf("host reduction=%d, want %d", got, want)
 	}
 	if got, want := base.EstLoadStagingBytes-packed.EstLoadStagingBytes, 2*f32Bytes; got != want {
