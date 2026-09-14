@@ -4,3 +4,4 @@ This local index links the studies listed here; it is not a complete inventory o
 
 - [Harness child tasks: spawn, input queues, and pending execution](2026-09-05-harness-task-spawn-queue-study.md) — 2026-09-05 bounded Codex/LangGraph source study, license pins, FAK integration boundaries, and deduplicated implementation order. Source inspection only; runtime adapter tracked in #11840.
 - [Matched Dogfood Evaluation: Structured MCP Tool Compression](2026-09-06-mcpbroker-structured-compression-matched-dogfood.md) — 2026-09-06 matched task evaluation report for structured MCP tool compression (#11825).
+- [Scope: structural sharing for the legacy Metal host prefix KV](SCOPE-LEGACY-METAL-HOST-PREFIX-KV-STRUCTURAL-SHARING-2026-09-14.md) — 2026-09-14 audit inventorying the backend-nil host K/Kraw/V readers and writers, naming the bounded three-file slice and fail-closed rollback for #12856. No sharing implemented; physical qualification separate.
