@@ -21,6 +21,9 @@ package model
 // reduced assembly projects a per-layer attn.wkv.weight, executes neither
 // compression stage, and never reuses a shared KV/index source, so an in-range
 // declaration is refused rather than silently run against a per-layer cache. The
+// blocked-candidate selection the lightning indexer reads is likewise not executed
+// (v41CandidateSourceForwardAdmitted), so an in-range candidate source is refused
+// rather than silently run as unblocked attention. The
 // mHC hyperconnection multiplicity is likewise fixed at the published four-stream
 // layout (v41HCMultForwardAdmitted), so a declared hc_mult other than 4 is refused
 // rather than silently run as four streams. The assembled
@@ -264,6 +267,32 @@ func v41KVSourceForwardAdmitted(cfg Config) error {
 	return nil
 }
 
+// v41CandidateSourceForwardAdmitted fails closed when the config declares a
+// candidate-source layer that lies WITHIN the model's decoder stack. The reduced
+// text assembly runs its own full per-layer attention contraction and never
+// executes the CED/CSA2 blocked-candidate selection the lightning indexer reads
+// (the reference's candidate_source_layer_id / candidate_topk_blocks /
+// candidate_block_size schedule), so silently running an in-range candidate source
+// would emit logits from an unblocked attention path where the official model
+// selects a sparse candidate pool first. Declarations that only touch out-of-range
+// layers stay admitted, which keeps the reduced oracle fixture runnable: it derives
+// from the published 40-layer config but narrows NumLayers to 1, so the candidate
+// source (20) is unreachable. Executing the real candidate selection is the
+// CED/CSA2 attention leaf's remaining work; until then this is the fail-closed
+// boundary.
+func v41CandidateSourceForwardAdmitted(cfg Config) error {
+	m := cfg.DeepSeekV41
+	if m == nil {
+		return nil
+	}
+	layer := m.CandidateSourceLayerID
+	if layer >= 0 && layer < cfg.NumLayers {
+		return v41StageErr(v41StageIndexer, layer,
+			fmt.Errorf("%w: layer %d declares a candidate source but the reduced forward does not execute the CED/CSA2 blocked-candidate selection", ErrV41ForwardStage, layer))
+	}
+	return nil
+}
+
 // v41HCMultForwardAdmitted fails closed when the config declares an mHC
 // hyperconnection multiplicity other than 4. The reduced text assembly hardcodes
 // the four-stream geometry (v41MHCSplit called with hc=4, four identical stand-in
@@ -328,6 +357,9 @@ func (m *Model) v41ForwardAdmitted() error {
 		return err
 	}
 	if err := v41KVSourceForwardAdmitted(cfg); err != nil {
+		return err
+	}
+	if err := v41CandidateSourceForwardAdmitted(cfg); err != nil {
 		return err
 	}
 	if err := v41HCMultForwardAdmitted(cfg); err != nil {

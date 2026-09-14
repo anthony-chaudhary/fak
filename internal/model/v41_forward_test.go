@@ -518,3 +518,32 @@ func TestV41ForwardHCMultDeclaredFailsClosed(t *testing.T) {
 		t.Fatalf("hc_mult=4 admission error = %v, want nil", err)
 	}
 }
+
+// TestV41ForwardCandidateSourceDeclaredFailsClosed is the candidate-source
+// fail-closed witness: the reduced assembly runs its own full per-layer attention
+// contraction and never executes the CED/CSA2 blocked-candidate selection, so a
+// config that declares a candidate-source layer WITHIN the model's layer range
+// must refuse rather than silently emit logits from an unblocked attention path
+// as if the candidate selection were absent. Out-of-range declared candidate
+// sources (the reduced oracle fixture derives from the published 40-layer config
+// but narrows NumLayers to 1, so the candidate source 20 is unreachable) stay
+// admitted, because the assembly never reaches them.
+func TestV41ForwardCandidateSourceDeclaredFailsClosed(t *testing.T) {
+	// In-range candidate source 0: must refuse.
+	selected := v41ReducedModel(t)
+	selected.Cfg.DeepSeekV41.CandidateSourceLayerID = 0
+
+	if err := selected.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("in-range candidate source admission error = %v, want ErrV41ForwardStage", err)
+	}
+	if err := panicAsError(func() { _ = selected.Forward([]int{1, 2}) }); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("in-range candidate source Forward panic = %v, want ErrV41ForwardStage", err)
+	}
+
+	// The reduced oracle fixture declares only an out-of-range candidate source
+	// (20), so the existing reduced forward must keep running (no regression).
+	reduced := v41ReducedModel(t)
+	if err := reduced.v41ForwardAdmitted(); err != nil {
+		t.Fatalf("reduced out-of-range candidate source admission error = %v, want nil", err)
+	}
+}
