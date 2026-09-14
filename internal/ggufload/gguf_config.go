@@ -139,7 +139,7 @@ func (f *File) Config() (model.Config, error) {
 	if err != nil {
 		return model.Config{}, err
 	}
-	ffn, err := requiredDenseFFNLen(f, p)
+	ffn, err := requiredDenseFFNLen(f, canonicalGGUFArch(arch), p)
 	if err != nil {
 		return model.Config{}, err
 	}
@@ -326,27 +326,51 @@ func canonicalGGUFArch(arch string) string {
 // feed_forward_length, so the unconditional dense-key read refused every published
 // vcruz305 deepseek41 artifact before the V4.1-specific axes were ever applied.
 //
-// For an architecture-prefixed MoE file that declares expert_feed_forward_length
-// but no dense feed_forward_length, derive the dense width from the expert width so
-// Config() can project model.Config; deepseek41's own applyDeepSeek41Config then
-// overwrites IntermediateSize with the true dense value when the converter writes
-// one. A file that declares NEITHER width still fails loud, naming the dense key.
+// For a MoE architecture that declares expert_feed_forward_length but no dense
+// feed_forward_length, derive the dense width from the expert width so Config() can
+// project model.Config; deepseek41's own applyDeepSeek41Config then overwrites
+// IntermediateSize with the true dense value when the converter writes one. A file
+// that declares NEITHER width still fails loud, naming the dense key.
 //
-// Non-V4.1 behavior is unchanged: only the exactly-missing dense key on an MoE
-// file takes the derive path, so a dense LLM still requires its own key.
-func requiredDenseFFNLen(f *File, p string) (int, error) {
+// The derive is gated on canonical arch (archIsMoEForDenseFFNDerive) so it never
+// leaks to a dense LLM: a plain dense architecture (llama/gemma3/qwen2/...) that
+// happens to carry an expert width but no dense width still fails loud naming its
+// own dense key, rather than silently projecting IntermediateSize from the expert
+// width. This is the issue #13010 out-of-scope fence — do NOT relax a guard that
+// would let an incompatible artifact silently load.
+func requiredDenseFFNLen(f *File, arch, p string) (int, error) {
 	if v, ok := f.Uint64(p + "feed_forward_length"); ok {
 		if v > uint64(math.MaxInt) {
 			return 0, fmt.Errorf("gguf: %sfeed_forward_length overflows int", p)
 		}
 		return int(v), nil
 	}
-	if _, ok := f.Metadata[p+glmKeyExpertFFNLength]; ok {
-		if v := intValueOrZero(f, p+glmKeyExpertFFNLength); v > 0 {
-			return v, nil
+	if archIsMoEForDenseFFNDerive(arch) {
+		if _, ok := f.Metadata[p+glmKeyExpertFFNLength]; ok {
+			if v := intValueOrZero(f, p+glmKeyExpertFFNLength); v > 0 {
+				return v, nil
+			}
 		}
 	}
 	return 0, fmt.Errorf("gguf: missing %sfeed_forward_length", p)
+}
+
+// archIsMoEForDenseFFNDerive reports whether a canonical arch may legitimately ship an
+// MoE-only header — one that declares expert_feed_forward_length but no dense
+// feed_forward_length — so the dense width can be derived from the expert width. This is
+// exactly the set of arches whose Config() path applies an MoE expert-axis applier
+// (applyMoEExpertCounts): the MLA+MoE family (glm_moe_dsa, deepseek2), the V4.1 family
+// (deepseek41), and the qwen MoE spellings (qwen3moe, qwen35moe, qwen2moe). A dense arch
+// named here would be a bug, so the set is kept to canonical spellings only.
+func archIsMoEForDenseFFNDerive(arch string) bool {
+	if archUsesMLAMoELayout(arch) {
+		return true
+	}
+	switch arch {
+	case "deepseek41", "qwen3moe", "qwen35moe", "qwen2moe":
+		return true
+	}
+	return false
 }
 
 // applyMoEExpertCounts reads the three shared MoE expert-axis GGUF scalars — expert count,
