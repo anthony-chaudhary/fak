@@ -361,6 +361,7 @@ type WMMATelemetry struct {
 	RetiledThroughputTokS     float64          `json:"retiled_throughput_tok_s"`
 	ThroughputGainPercent     float64          `json:"throughput_gain_percent"`      // >= 7.0%
 	VerifiedConflictFree2Bank bool             `json:"verified_conflict_free_2bank"` // true
+	EfficiencyModelOnly       bool             `json:"efficiency_model_only"`        // true: roofline efficiencies are model-only, not measured
 }
 
 // Validate verifies that the execution complies with all Silicon invariants:
@@ -782,10 +783,10 @@ func (m *Wave32RetiledMatMul) buildTelemetry(M, N, K, bytesPerElem int,
 		peakBWBytes = 273.056 * 1e9
 	}
 
-	const wave32ComputeEfficiency = 0.85
-	effectiveComputeFLOPs := peakComputeFLOPs * wave32ComputeEfficiency
-	const sustainedBWEfficiency = 0.80
-	effectiveBWBytes := peakBWBytes * sustainedBWEfficiency
+	// model-only: these efficiencies are asserted model parameters, not gfx1151
+	// measurements, so the resulting roofline below is an asserted estimate.
+	effectiveComputeFLOPs := peakComputeFLOPs * ModelOnlyWave32ComputeEfficiency
+	effectiveBWBytes := peakBWBytes * ModelOnlySustainedBWEfficiency
 
 	computeTimeSec := float64(totalFLOPs) / effectiveComputeFLOPs
 	memoryTimeSec := float64(totalBytes) / effectiveBWBytes
@@ -844,6 +845,7 @@ func (m *Wave32RetiledMatMul) buildTelemetry(M, N, K, bytesPerElem int,
 		RetiledThroughputTokS:     retiledTokS,
 		ThroughputGainPercent:     throughputGainPercent,
 		VerifiedConflictFree2Bank: verifiedConflictFree,
+		EfficiencyModelOnly:       true,
 	}
 }
 
@@ -1141,10 +1143,10 @@ func (m *Wave32RetiledMatMul) buildAttentionTelemetry(seqLen, headDim int,
 		peakBWBytes = 273.056 * 1e9
 	}
 
-	const wave32ComputeEfficiency = 0.85
-	effectiveComputeFLOPs := peakComputeFLOPs * wave32ComputeEfficiency
-	const sustainedBWEfficiency = 0.80
-	effectiveBWBytes := peakBWBytes * sustainedBWEfficiency
+	// model-only: these efficiencies are asserted model parameters, not gfx1151
+	// measurements, so the resulting roofline below is an asserted estimate.
+	effectiveComputeFLOPs := peakComputeFLOPs * ModelOnlyWave32ComputeEfficiency
+	effectiveBWBytes := peakBWBytes * ModelOnlySustainedBWEfficiency
 
 	computeTimeSec := float64(totalFLOPs) / effectiveComputeFLOPs
 	memoryTimeSec := float64(totalBytes) / effectiveBWBytes
@@ -1200,5 +1202,6 @@ func (m *Wave32RetiledMatMul) buildAttentionTelemetry(seqLen, headDim int,
 		RetiledThroughputTokS:     retiledTokS,
 		ThroughputGainPercent:     throughputGainPercent,
 		VerifiedConflictFree2Bank: verifiedConflictFree,
+		EfficiencyModelOnly:       true,
 	}
 }
