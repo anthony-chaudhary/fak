@@ -261,7 +261,7 @@ func TestServeNativeContextDeviceSizingMatchesWeightBudgetedLoadPlan(t *testing.
 		weightBudget: 256 << 10,
 	}
 
-	arm := resolveDeviceServeLoadArm(ws, be, false)
+	arm := resolveDeviceServeLoadArm(ws, be, false, false)
 	rawWeights, err := serveGGUFWeightMemoryPlanForArm(ws, arm)
 	if err != nil {
 		t.Fatal(err)
@@ -321,7 +321,7 @@ func TestServeNativeContextMetalHostFitUsesSelectedResidentArm(t *testing.T) {
 	if arm != serveLoadArmResidentQ4K {
 		t.Fatalf("selected Metal arm = %q, want resident Q4_K", arm)
 	}
-	if cpuArm := resolveHostServeLoadArm(ws, false); cpuArm != serveLoadArmQuantProfileQ8 {
+	if cpuArm := resolveHostServeLoadArm(ws, false, false); cpuArm != serveLoadArmQuantProfileQ8 {
 		t.Fatalf("legacy CPU arm = %q, want quantized Q8", cpuArm)
 	}
 	residentPlan, err := serveGGUFMemoryPlanForArm(ws, arm, contextTokens, serveFitBudget{})

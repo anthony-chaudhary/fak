@@ -20,7 +20,10 @@ func attnDecodeBatch(attnOut, Q []float32, caches []*KVCache, l, B, nH, hd, w, g
 	units := B * nKV
 	maxPos := 0
 	for b := 0; b < B; b++ {
-		if n := len(caches[b].K[l]) / w; n > maxPos {
+		// Precision-aware position count (#12981): kvLen on f32 equals len(K[l])/w
+		// (byte-identical); on q8 it reads the packed rows, so the scratch is sized
+		// from the real prefix instead of an always-zero nil K slice.
+		if n := caches[b].kvLen(l); n > maxPos {
 			maxPos = n
 		}
 	}
@@ -38,8 +41,12 @@ func attnDecodeBatch(attnOut, Q []float32, caches []*KVCache, l, B, nH, hd, w, g
 			b := u / nKV
 			kvh := u % nKV
 			c := caches[b]
-			Kl, Vl := c.K[l], c.V[l]
-			nPos := len(Kl) / w
+			// Precision-aware read (#12981): on f32 attentionRows returns the cache's own
+			// K/V slices (zero copy, byte-identical); on q8 it dequantizes the layer so this
+			// batch-decode lane can never read a nil K/V slice. kvLen is the representation-
+			// independent position count (len(K[l])/w on f32, the packed row count on q8).
+			Kl, Vl := c.attentionRows(l)
+			nPos := c.kvLen(l)
 			// SWA read-time mask: this user's query (its just-appended K row, at absolute
 			// position nPos-1 since the cache is contiguous and was appended at Cache.Len())
 			// attends only keys in the window. j0=0 (full causal) when W<0.
@@ -132,7 +139,10 @@ func attnPrefillMultiInto(attnOut, Q []float32, caches []*KVCache, baseB []int, 
 			b := row / P
 			t := row % P
 			c := caches[b]
-			Kl, Vl := c.K[layer], c.V[layer]
+			// Precision-aware read (#12981): on f32 attentionRows returns the cache's own
+			// K/V slices (zero copy, byte-identical); on q8 it dequantizes the layer so the
+			// lane can never read nil.
+			Kl, Vl := c.attentionRows(layer)
 			nPos := baseB[b] + t + 1
 			// SWA read-time mask: query (absolute position baseB[b]+t) over the contiguous
 			// prefill cache. j0=0 (full causal) when W<0.
@@ -192,7 +202,10 @@ func attnPrefillMultiGQAInto(attnOut, Q []float32, caches []*KVCache, baseB []in
 			b := row / P
 			t := row % P
 			c := caches[b]
-			Kl, Vl := c.K[layer], c.V[layer]
+			// Precision-aware read (#12981): on f32 attentionRows returns the cache's own
+			// K/V slices (zero copy, byte-identical); on q8 it dequantizes the layer so the
+			// lane can never read nil.
+			Kl, Vl := c.attentionRows(layer)
 			nPos := baseB[b] + t + 1
 			j0 := windowLoContig(nPos, baseB[b]+t, W)
 			span := nPos - j0

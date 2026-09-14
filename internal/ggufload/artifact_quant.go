@@ -1,6 +1,7 @@
 package ggufload
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -127,6 +128,92 @@ func targetQuantExcludesTensor(cfg model.Config, name string) bool {
 	}
 	layer, _, ok := parseGLMBlkLayerSuffix(name)
 	return ok && layer >= cfg.NumLayers && layer-cfg.NumLayers < cfg.NumNextNPredictLayers
+}
+
+// ErrRoutedExpertEncodingUnqualified names the refusal for a routed-expert blob whose GGUF
+// encoding the host-offload loader cannot hold raw-resident. It is the typed key the admission
+// planner and the serve arm selector share, so a genuinely unqualified MoE artifact refuses by a
+// named reason instead of silently charging a transcoded (f32-inflated) weight or mis-selecting
+// the device-resident arm.
+var ErrRoutedExpertEncodingUnqualified = errors.New("gguf: routed-expert encoding not admitted for host offload")
+
+// AdmittedRoutedExpertEncoding reports whether a GGUF encoding is one the routed-expert loader can
+// hold raw-resident (residentExpertBlockGeometry returns ok) AND for which raw blobs are admitted
+// to the host expert pool. It is an ENUMERATED admit-set — the loader's residentable rows
+// restricted to the encodings a routed expert genuinely supports — never a wildcard, so an
+// unrecognized future tag is refused rather than silently treated as device-scoped.
+func AdmittedRoutedExpertEncoding(t TensorType) bool {
+	switch t {
+	case TensorQ2_K, TensorQ3_K, TensorQ4_K, TensorQ5_K, TensorQ6_K, TensorQ8_0,
+		TensorIQ3_XXS, TensorIQ2_XXS, TensorIQ2_XS, TensorIQ1_S, TensorIQ2_S,
+		TensorIQ1_M, TensorIQ4_XS:
+		return true
+	}
+	return false
+}
+
+// routedExpertResidencyEncoding is the single admission predicate the plan and the serve arm
+// selector share: an encoding is host-chargeable at RAW payload bytes when the loader holds it
+// raw-resident (AdmittedRoutedExpertEncoding) OR it is F32, whose dequant is the identity and so
+// has no f32 inflation. Every other encoding (including F16/BF16, whose 2 B/weight would expand to
+// 4 B/weight) is refused by name rather than charged at a footprint the loader would not honour.
+func routedExpertResidencyEncoding(t TensorType) bool {
+	return AdmittedRoutedExpertEncoding(t) || t == TensorF32
+}
+
+// routedExpertCanonicalName builds the per-expert canonical name the raw routed-expert loader
+// emits (splitGLMMoeDsaExpertsRawQuant): model.layers.<layer>.mlp.experts.<e>.<proj>.weight. The
+// classifier and the loader therefore ask model.ResidentKQuantEligible about the SAME name, so a
+// packed artifact is admitted exactly when the loader would hold it raw.
+func routedExpertCanonicalName(layer int, proj string, expert int) string {
+	return fmt.Sprintf("model.layers.%d.mlp.experts.%d.%s.weight", layer, expert, proj)
+}
+
+// RoutedExpertResidencyQualified reports whether every routed-expert tensor in a parsed GGUF is
+// backed by an admitted encoding AND a canonical name the loader holds raw-resident
+// (model.ResidentKQuantEligible). It classifies routed experts with the loader's own
+// glmMoeDsaBatchedExpert predicate — never a substring heuristic — and returns the offending
+// tensor name/type on the first unqualified entry. An artifact with NO routed expert is not
+// qualified: ok=false with name=="" (the caller cannot confirm raw expert residency).
+func RoutedExpertResidencyQualified(cfg model.Config, tensors []TensorInfo) (ok bool, offending TensorType, name string) {
+	if !archUsesGGUFBatchedMoEExperts(cfg.ModelType) {
+		return false, 0, ""
+	}
+	found := false
+	for _, info := range tensors {
+		layer, proj, isExpert := glmMoeDsaBatchedExpert(info.Name)
+		if !isExpert {
+			continue
+		}
+		found = true
+		if !routedExpertResidencyEncoding(info.Type) {
+			return false, info.Type, info.Name
+		}
+		if info.Type != TensorF32 {
+			canon := routedExpertCanonicalName(layer, proj, 0)
+			if !model.ResidentKQuantEligible(cfg, canon) {
+				return false, info.Type, info.Name
+			}
+		}
+	}
+	if !found {
+		return false, 0, ""
+	}
+	return true, 0, ""
+}
+
+// RoutedExpertEncodingRefusal returns nil when the artifact's routed experts are all admitted for
+// host offload, and otherwise wraps ErrRoutedExpertEncodingUnqualified with the offending tensor
+// and encoding. It is the single named-refusal seam the serve planner and arm selector share.
+func RoutedExpertEncodingRefusal(cfg model.Config, tensors []TensorInfo) error {
+	ok, typ, name := RoutedExpertResidencyQualified(cfg, tensors)
+	if ok {
+		return nil
+	}
+	if name == "" {
+		return fmt.Errorf("%w: no routed-expert tensor in %s artifact", ErrRoutedExpertEncodingUnqualified, cfg.ModelType)
+	}
+	return fmt.Errorf("%w: tensor %s type %s", ErrRoutedExpertEncodingUnqualified, name, typ)
 }
 
 // AdmittedUDQ2KXLConstituents defines the 14 admitted constituent tensor types
