@@ -45,7 +45,7 @@ What `fak serve` answers for an OpenAI client, on the current build:
 |---|---|---|
 | `POST /v1/chat/completions` | Full: tools + streaming | Proposed tool calls are adjudicated; `stream: true` streams content tokens live when the upstream streams (proposed tool calls are held for adjudication, never streamed raw), and is synthesized from the buffered turn otherwise. |
 | `POST /v1/responses` | Buffered | Same served-turn core as the chat wire. `stream: true` is refused with a 400 — a client that needs SSE should use the chat wire or [MCP](mcp.md). |
-| `POST /v1/completions` | Legacy text wire | The pre-chat text-completion surface; no tools on this wire. |
+| `POST /v1/completions` | Legacy text wire | The pre-chat text-completion surface (`prompt` in, `text_completion` out); no tools on this wire. Served on **both** surfaces: `fak serve` ([`internal/gateway/completions.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/gateway/completions.go)) and the turnkey `fak up` server (`cmd/fak/up.go`). It exists as an inbound **compatibility alias**, not a second engine: `fak up` reuses the same native `StreamingPlanner` per-token path and only swaps the JSON envelope, so pre-chat clients — vLLM, SGLang, llama-server, and the `fak-dev` sub-agent fan-out harness — work unchanged. Point them at `fak up` and no client-side code changes. |
 | `GET /v1/models` | Served | Advertises the model id fak is fronting. |
 | `POST /v1/embeddings` | Deterministic, self-contained | An honest feature-hashing backend — not a learned model. Same text, same vector; good for deterministic tests and smoke checks. |
 | `POST /v1/moderations` | Deterministic, self-contained | Lexical backend, per-item results on batched input; no model round-trip. |
