@@ -39,6 +39,11 @@ const (
 	ArmVLLM    = "vllm"     // Arm 3: vLLM with Automatic Prefix Caching
 	ArmFAK     = "fak"      // Arm 4: FAK native engine / gateway
 
+	// ArmLLamaCPP is an additional selectable arm (Issue #13023): a live
+	// head-to-head against a real llama-server (llama.cpp) on Apple Silicon.
+	// It is NOT one of the 4 mandatory arms, so CanonicalArms stays frozen.
+	ArmLLamaCPP = "llamacpp"
+
 	// Default Contract Invariants.
 	DefaultModel          = "Qwen/Qwen2.5-Coder-7B-Instruct"
 	DefaultQuantization   = "Q4_K_M"
@@ -63,10 +68,11 @@ var CanonicalFanoutSweep = []int{1, 4, 8, 16, 32}
 
 // ArmDescription maps arm identifier to human-readable description.
 var ArmDescription = map[string]string{
-	ArmNoReuse: "Arm 1: No-reuse baseline (cache disabled)",
-	ArmSGLang:  "Arm 2: SGLang with RadixAttention",
-	ArmVLLM:    "Arm 3: vLLM with Automatic Prefix Caching",
-	ArmFAK:     "Arm 4: FAK native engine / gateway",
+	ArmNoReuse:  "Arm 1: No-reuse baseline (cache disabled)",
+	ArmSGLang:   "Arm 2: SGLang with RadixAttention",
+	ArmVLLM:     "Arm 3: vLLM with Automatic Prefix Caching",
+	ArmFAK:      "Arm 4: FAK native engine / gateway",
+	ArmLLamaCPP: "llama.cpp llama-server (Metal prefix cache / continuous batching)",
 }
 
 // DistributionStats captures empirical latency distributions across trials.
@@ -251,6 +257,7 @@ func parseFanoutFlags(stderr io.Writer, argv []string) (*FanoutBenchConfig, erro
 	sglangURL := fs.String("sglang-url", "", "HTTP URL for Arm 2 (SGLang RadixAttention)")
 	vllmURL := fs.String("vllm-url", "", "HTTP URL for Arm 3 (vLLM APC)")
 	fakURL := fs.String("fak-url", "", "HTTP URL for Arm 4 (FAK native engine / gateway)")
+	llamaCPPURL := fs.String("llamacpp-url", "", "HTTP URL for the llama.cpp llama-server arm (Apple Silicon Metal prefix cache)")
 	verifyContract := fs.Bool("verify-contract", true, "verify all Issue #6036 and #12325 contract invariants")
 	jsonOut := fs.Bool("json", false, "output benchmark results as JSON")
 	outFile := fs.String("out", "", "path to write benchmark receipt JSON")
@@ -282,6 +289,9 @@ func parseFanoutFlags(stderr io.Writer, argv []string) (*FanoutBenchConfig, erro
 	}
 	if *fakURL != "" {
 		endpoints[ArmFAK] = *fakURL
+	}
+	if *llamaCPPURL != "" {
+		endpoints[ArmLLamaCPP] = *llamaCPPURL
 	}
 
 	return &FanoutBenchConfig{
@@ -516,6 +526,12 @@ func (h *SubagentFanoutHarness) simulateCell(arm string, n int) (FanoutArmResult
 			reusedTokens = int64(n-1) * int64(P)
 			hitRate = float64(reusedTokens) / float64(totalPromptTokens)
 		}
+	case ArmLLamaCPP:
+		// llama.cpp llama-server prefix cache (Metal, --parallel continuous batching)
+		if n > 1 {
+			reusedTokens = int64(n-1) * int64(P)
+			hitRate = float64(reusedTokens) / float64(totalPromptTokens)
+		}
 	}
 
 	// Calibrate base latencies for 7B Q4_K_M (or 27B) model:
@@ -581,6 +597,17 @@ func (h *SubagentFanoutHarness) simulateCell(arm string, n int) (FanoutArmResult
 				fakZeroCopyOverheadMs := 0.03
 				kernelScheduling := float64(n) * 0.35 * h.RNG.Float64()
 				baseTTFT = float64(subagentPrefillTokens)/basePrefillRateTokPerMs + fakZeroCopyOverheadMs + kernelScheduling
+
+			case ArmLLamaCPP:
+				if sub == 0 {
+					subagentPrefillTokens = P + S
+				} else {
+					subagentPrefillTokens = S // prefix-cache hit
+				}
+				// llama.cpp shared-prefix cache lookup + continuous-batching step
+				llamaCPPLookupMs := 0.40
+				llamaCPPContention := float64(n) * 1.0 * h.RNG.Float64()
+				baseTTFT = float64(subagentPrefillTokens)/basePrefillRateTokPerMs + llamaCPPLookupMs + llamaCPPContention
 			}
 
 			// Add small jitter
@@ -606,6 +633,9 @@ func (h *SubagentFanoutHarness) simulateCell(arm string, n int) (FanoutArmResult
 				case ArmFAK:
 					// In-kernel context MMU continuous batching
 					itlJitterStd = 0.82 + float64(n)*0.02
+				case ArmLLamaCPP:
+					// llama.cpp Metal continuous batching
+					itlJitterStd = 1.35 + float64(n)*0.04
 				}
 
 				// Normal distribution approximation (Box-Muller)
@@ -975,6 +1005,8 @@ func renderPrettyReceipt(w io.Writer, r *SubagentFanoutReceipt) {
 			armLabel = "vLLM Prefix Caching"
 		case ArmFAK:
 			armLabel = "FAK native engine"
+		case ArmLLamaCPP:
+			armLabel = "llama.cpp llama-server"
 		}
 
 		if res.Error != "" {
