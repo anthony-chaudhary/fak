@@ -6,6 +6,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/compute/strix"
 	"github.com/anthony-chaudhary/fak/internal/computetrace"
 	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
@@ -138,6 +139,20 @@ func (c *cpuBackend) q4kRows(w Tensor, in int) (raw []byte, rowBytes int) {
 }
 
 // ---- matmul family (dtype-dispatched on the WEIGHT — the f32/Q8 twin collapse) -----
+
+// RequireStrixDecodeGEMV is the decode-path fail-closed guard for the roofline target. The
+// CPU reference is the scalar floor the roofline campaign must NOT silently degrade to: when an
+// operator has opted into the gfx1151 Wave32 decode GEMV (FAK_STRIX_WAVE32_GEMV_DECODE), this
+// refuses on the scalar CPU path rather than pretending it achieved the 218.44 GB/s floor.
+// When the roofline path is not requested it is a no-op, so the reference semantics are
+// unchanged (P3 preserved).
+func (c *cpuBackend) RequireStrixDecodeGEMV() error {
+	if !strix.StrixDecodeGEMVDeviceRequested() {
+		return nil
+	}
+	toggle, _ := strix.ResolveStrixDecodeGEMVDevice()
+	return strix.RequireDecodeGEMVDevice(toggle)
+}
 
 // MatMul: y[o] = Σ_i W[o,i]·x[i]. F32 reproduces matRows/parMatRows (fdot reduction);
 // Q8_0 reproduces qMatRows (quantize the activation, per-block int8 dot). One method,
