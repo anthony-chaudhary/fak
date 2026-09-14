@@ -1,1 +1,1 @@
-/goal use sub agents. Complete this issue 12990. use sub agents.
+/goal use sub agents. Complete GitHub issue anthony-chaudhary/fak#13004 (BF16 WMMA tile tuning toward >=47.52 TFLOPS on gfx1151). Read it with gh issue view 13004 --repo anthony-chaudhary/fak. use sub agents.
