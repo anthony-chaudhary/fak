@@ -1,0 +1,116 @@
+name: release-vulkan
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release-vulkan.yml
+      - internal/compute/vulkan_resources*.go
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag or commit to build (publishing requires a vX.Y.Z tag)"
+        type: string
+        required: true
+      publish:
+        description: "Publish verified assets to an existing release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-vulkan-${{ github.event.inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux-vulkan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    env:
+      GOTOOLCHAIN: auto
+      CGO_ENABLED: "1"
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      PUBLISH: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Install Vulkan build tools and packaging smoke driver
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ libvulkan-dev glslc mesa-vulkan-drivers
+
+      - name: Build canonical shader bundle and static shim
+        run: |
+          set -euo pipefail
+          go run ./cmd/fak-dev build-vulkan shaders --smoke=false
+          go run ./cmd/fak-dev build-vulkan lib --smoke=false
+
+      - name: Build versioned Linux amd64 Vulkan binary and archive
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          if [ "$PUBLISH" != true ]; then
+            VERSION=ci
+          else
+            [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+          fi
+          mkdir -p dist/bundle
+          GOOS=linux GOARCH=amd64 TAGS=vulkan OUT=dist/bundle/fak VERSION="$VERSION" sh scripts/build.sh
+          cp -R internal/compute/spirv dist/bundle/spirv
+          cp LICENSE GETTING-STARTED.md dist/bundle/
+          ASSET_NAME="fak_${VERSION}_linux_amd64_vulkan.tar.gz"
+          ( cd dist/bundle && tar -czf "../$ASSET_NAME" . )
+          ( cd dist && sha256sum "$ASSET_NAME" > "$ASSET_NAME.sha256" )
+          echo "ASSET_NAME=$ASSET_NAME" >> "$GITHUB_ENV"
+
+      - name: Verify extracted executable registration before publishing
+        # Lavapipe witnesses artifact linkage, shader loading, and backend registration.
+        # It is a software renderer: this does not qualify AMD GPU performance.
+        run: |
+          set -euo pipefail
+          ( cd dist && sha256sum -c "$ASSET_NAME.sha256" )
+          RELOCATED="$RUNNER_TEMP/vulkan-release-relocated"
+          mkdir -p "$RELOCATED"
+          tar -xzf "dist/$ASSET_NAME" -C "$RELOCATED"
+          test -s "$RELOCATED/spirv/q4k_matmul.spv"
+          LAVAPIPE=$(find /usr/share/vulkan/icd.d -name '*lvp*.json' -print -quit)
+          test -n "$LAVAPIPE"
+          export VK_ICD_FILENAMES="$LAVAPIPE"
+          unset FAK_VULKAN_SPIRV
+          cd "$RUNNER_TEMP"
+          "$RELOCATED/fak" version
+          timeout 120s "$RELOCATED/fak" backends | tee "$RELOCATED/backends.txt"
+          grep -Fx vulkan "$RELOCATED/backends.txt"
+
+      - name: Retain verified archive and registration witness
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-amd64-vulkan
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+            ${{ runner.temp }}/vulkan-release-relocated/backends.txt
+          if-no-files-found: error
+
+      - name: Upload verified Vulkan archive to release
+        if: env.PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 24); do
+            gh release view "$RELEASE_TAG" >/dev/null 2>&1 && break
+            sleep 5
+          done
+          gh release upload "$RELEASE_TAG" "dist/$ASSET_NAME" "dist/$ASSET_NAME.sha256" --clobber
