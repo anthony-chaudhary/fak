@@ -7,6 +7,9 @@ package devcmd
 //	fak-dev index lane <path>...   which lane/leaf owns these paths (+ the commit stamp)
 //	fak-dev index leaf [<query>]   the lane taxonomy, filtered by name/tree/description
 //	fak-dev index claims <query>   the CLAIMS.md honesty ledger: shipped/simulated/stub
+//	fak-dev index reconcile [--json]
+//	                         INNOVATIONS-INDEX.md vs CLAIMS.md disagreements: a Status
+//	                         mismatch is emitted as a finding, never a silent pick (#1289)
 //	fak-dev index verbs [<query>]  the structured CLI-verb catalog (name/lane/synopsis)
 //	fak-dev index work [<query>]   the selection surface: named issue views + the default's gh query
 //	fak-dev index refs <pkg>.<Symbol>
@@ -81,6 +84,7 @@ func RunIndex(stdout, stderr io.Writer, argv []string) int {
 	agentsMaxBytes := fs.Int64("max-bytes", 0, "fak-dev index agents: shared effective-instruction byte budget")
 	agentsTrust := fs.Bool("trust", false, "fak-dev index agents: mark caller-verified sources trusted")
 	writeManifest := fs.Bool("write-manifest", false, "fak-dev index ownership: write the generated commands manifest")
+	writeUsage := fs.Bool("write-usage", false, "fak-dev index verbs: write the generated runtime verb index (cmd/fak/verbs_gen.go)")
 	// Parse flags that may appear ANYWHERE around the positional query (the natural
 	// `fak-dev index leaf cache --limit 6` order), not just before it. Go's flag package
 	// stops at the first non-flag arg, so interleave Parse with positional collection.
@@ -121,8 +125,10 @@ func RunIndex(stdout, stderr io.Writer, argv []string) int {
 		return indexDiscoveryBenchmark(stdout, stderr, cat, args, *asJSON)
 	case "claims", "claim":
 		return indexClaims(stdout, stderr, cat, args, *asJSON, *limit)
+	case "reconcile", "recon":
+		return indexReconcile(stdout, stderr, cat, args, *asJSON, *limit)
 	case "verbs", "verb":
-		return indexVerbs(stdout, stderr, cat, args, *asJSON, *limit)
+		return indexVerbs(stdout, stderr, rootDir, cat, args, *asJSON, *limit, *writeUsage)
 	case "generation", "generations", "gen":
 		return indexGeneration(stdout, stderr, cat, args, *asJSON, *limit)
 	case "work", "views", "view":
@@ -174,7 +180,7 @@ func (v *stringListFlag) Set(value string) error {
 
 func isIndexSubcommand(s string) bool {
 	switch s {
-	case "lane", "leaf", "leaves", "docs", "doc", "claims", "claim", "verbs", "verb",
+	case "lane", "leaf", "leaves", "docs", "doc", "claims", "claim", "reconcile", "recon", "verbs", "verb",
 		"generation", "generations", "gen", "work", "views", "view", "refs", "ref",
 		"ctxplans", "ctxplan", "ctxknobs", "ctxknob", "knobs", "knob", "freshness", "fresh",
 		"execaudit", "executables", "exec", "agents", "agentsmd", "agent", "ownership",
@@ -301,10 +307,48 @@ func indexClaims(stdout, stderr io.Writer, cat *devindex.Catalog, args []string,
 		})
 }
 
+// indexReconcile answers `fak-dev index reconcile` from internal/devindex.Reconciliations:
+// every leaf whose INNOVATIONS-INDEX.md Status column disagrees with the CLAIMS.md SHIPPED
+// rollup. It is a READ-ONLY query (always exit 0) that EMITS findings rather than picking a
+// winner - the build-redding freshness gate over the same mismatch is C6 #1293's job, out of
+// this shell's lane. The finding set is query-independent, so no positional argument is taken;
+// --limit caps the printed/exposed findings for a compact digest. A clean tree prints one line.
+func indexReconcile(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, asJSON bool, limit int) int {
+	if len(args) != 0 {
+		fmt.Fprintln(stderr, "fak-dev index reconcile: accepts no query")
+		return 2
+	}
+	findings := cat.Reconciliations()
+	if limit > 0 && len(findings) > limit {
+		findings = findings[:limit]
+	}
+	return indexRenderHits(stdout, stderr, findings, asJSON, "fak-dev index reconcile",
+		"no INNOVATIONS-INDEX/CLAIMS.md disagreements",
+		func(tw *tabwriter.Writer, f devindex.ReconcileFinding) {
+			fmt.Fprintf(tw, "%s\t%s\t%s\n", f.Leaf, f.Source, f.Detail)
+		})
+}
+
 // indexVerbs answers `fak-dev index verbs [<query>]` from the structured C3 verb manifest
 // (#1290) — the parseable replacement for grepping usage.go's freeform prose. An empty
 // query lists the whole catalog (the SearchVerbs convention), matching `fak-dev index leaf`.
-func indexVerbs(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, asJSON bool, limit int) int {
+func indexVerbs(stdout, stderr io.Writer, root string, cat *devindex.Catalog, args []string, asJSON bool, limit int, writeUsage bool) int {
+	if writeUsage {
+		if asJSON {
+			fmt.Fprintln(stderr, "fak-dev index verbs: --write-usage and --json are mutually exclusive")
+			return 2
+		}
+		if len(args) != 0 {
+			fmt.Fprintln(stderr, "fak-dev index verbs: --write-usage takes no query")
+			return 2
+		}
+		if err := devindex.WriteVerbUsage(root); err != nil {
+			fmt.Fprintf(stderr, "fak-dev index verbs: write usage: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, devindex.VerbUsagePath)
+		return 0
+	}
 	hits := capVerbs(cat.SearchVerbs(joinArgs(args)), limit)
 	return indexRenderHits(stdout, stderr, hits, asJSON, "fak-dev index verbs", "no matching verb",
 		func(tw *tabwriter.Writer, v devindex.Verb) {
@@ -419,7 +463,9 @@ func writeIndexUsage(w io.Writer) {
   fak-dev index lane <path>...    which lane/leaf owns each path, + the (fak <leaf>) commit stamp
   fak-dev index leaf [<query>]    the lane taxonomy (+ shipped/sim/stub rollup), filtered by name/tree/desc
   fak-dev index claims <query>    the CLAIMS.md honesty ledger, ranked by relevance (shipped/simulated/stub)
+  fak-dev index reconcile         INNOVATIONS-INDEX.md vs CLAIMS.md disagreements (a mismatch is a finding, not a silent pick)
   fak-dev index verbs [<query>]   the structured CLI-verb catalog (name/owning-lane/synopsis)
+                         --write-usage regenerates cmd/fak/verbs_gen.go from the catalog
   fak-dev index generation [<q>]  generation labels, milestones, issue-body signals, and evidence rules
   fak-dev index work [<query>]    the selection surface ("what should I work on"): named issue views + the default's gh query
   fak-dev index refs <pkg>.<Sym>  direct + transitive dependents of a Go symbol before editing
