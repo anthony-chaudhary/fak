@@ -199,6 +199,227 @@ func (m *Model) ValidateBackendForwardPath(be compute.Backend) error {
 	return ValidateBackendForwardConfig(m.Cfg, be)
 }
 
+// WholeSequencePath is the backend-neutral capability identity for one complete
+// native whole-sequence execution (prefill panels + resident decode handoff). It
+// deliberately does not name a device or architecture: the concrete Qwen35 Metal
+// runtime adapts its own receipt into the neutral seam below, and a later HIP /
+// CUDA / other runtime can implement the same interface without editing the
+// whole-token witness.
+const WholeSequencePath = "native/whole-sequence-v1"
+
+// WholeSequenceSelectorState is backend-authored selection provenance. It
+// reflects whether the session admitted a native whole-sequence owner; callers
+// never supply or override it.
+type WholeSequenceSelectorState string
+
+const (
+	WholeSequenceSelectorOff WholeSequenceSelectorState = "off"
+	WholeSequenceSelectorOn  WholeSequenceSelectorState = "on"
+)
+
+// WholeSequenceEvidenceState distinguishes a truthful zero from a route that did
+// not run or cannot run in the current execution envelope.
+type WholeSequenceEvidenceState string
+
+const (
+	WholeSequenceEvidenceNotSelected WholeSequenceEvidenceState = "not_selected"
+	WholeSequenceEvidenceUnsupported WholeSequenceEvidenceState = "unsupported"
+	WholeSequenceEvidenceUnavailable WholeSequenceEvidenceState = "unavailable"
+	WholeSequenceEvidenceExecuted    WholeSequenceEvidenceState = "executed"
+)
+
+// WholeSequenceReceipt is the backend-neutral immutable value snapshot of a
+// native whole-sequence owner. The concrete Qwen35 Metal receipt is adapted into
+// this shape; Metal-only observation fields (for example the state-identity
+// binding) are intentionally not part of the neutral contract.
+type WholeSequenceReceipt struct {
+	Path                  string                     `json:"path"`
+	Available             bool                       `json:"available"`
+	SelectorState         WholeSequenceSelectorState `json:"selector_state"`
+	EvidenceState         WholeSequenceEvidenceState `json:"evidence_state"`
+	Tokens                int                        `json:"tokens"`
+	CommandBuffers        int                        `json:"command_buffers"`
+	Encoders              int                        `json:"encoders"`
+	IntermediateWaits     int                        `json:"intermediate_waits"`
+	IntermediateReadbacks int                        `json:"intermediate_readbacks"`
+	TerminalWaits         int                        `json:"terminal_waits"`
+	TerminalReadbacks     int                        `json:"terminal_readbacks"`
+	HostUploadBytes       uint64                     `json:"host_upload_bytes"`
+	HostReadbackBytes     uint64                     `json:"host_readback_bytes"`
+	Committed             bool                       `json:"committed"`
+	CompletedWait         bool                       `json:"completed_wait"`
+	TimingAvailable       bool                       `json:"timing_available"`
+	GPUMilliseconds       float64                    `json:"gpu_milliseconds"`
+	WaitMilliseconds      float64                    `json:"wait_milliseconds"`
+	SelectedPanels        int                        `json:"selected_panels,omitempty"`
+	ExecutedPanels        int                        `json:"executed_panels,omitempty"`
+	FallbackCount         int                        `json:"fallback_count,omitempty"`
+	Device                string                     `json:"device,omitempty"`
+	SourceRevision        string                     `json:"source_revision,omitempty"`
+	ArtifactSHA256        string                     `json:"artifact_sha256,omitempty"`
+}
+
+// WholeSequenceHandoff is the backend-neutral decode-route accounting snapshot.
+// Counts advance only after the corresponding operation accepts ownership. The
+// wire keys preserve the historical receipt field names so the serialized
+// whole-token witness stays byte-compatible.
+type WholeSequenceHandoff struct {
+	Mode                  string `json:"mode"`
+	BlockAcceptedCalls    uint64 `json:"block_accepted_calls"`
+	MixerAcceptedCalls    uint64 `json:"mixer_accepted_calls"`
+	ResidentAcceptedCalls uint64 `json:"resident_gdn_accepted_calls"`
+}
+
+// WholeSequenceSession is the backend-neutral whole-sequence capability seam.
+// It expresses enable/finalize of a whole sequence, before/after receipt reads,
+// handoff-counter reads, and the path + evidence-state tokens the witness
+// validates against — none of which name a device or architecture. The concrete
+// Qwen35 Metal path implements it through wholeSequenceAdapter; a non-Qwen test
+// double can implement it directly.
+type WholeSequenceSession interface {
+	EnableWholeSequence() error
+	FinalizeWholeSequence() (bool, error)
+	WholeSequenceReceipt() WholeSequenceReceipt
+	WholeSequenceHandoffReceipt() WholeSequenceHandoff
+	WholeSequencePath() string
+	WholeSequenceExecutedEvidence() WholeSequenceEvidenceState
+	WholeSequenceSelectorOnState() WholeSequenceSelectorState
+}
+
+// wholeSequenceAdapter adapts a *Session onto the backend-neutral
+// WholeSequenceSession seam. It owns no state of its own: every method delegates
+// to the concrete Session and converts the Qwen35 receipt/handoff value into the
+// neutral shapes. The Metal execution path is unchanged.
+type wholeSequenceAdapter struct{ s *Session }
+
+// WholeSequence returns the backend-neutral whole-sequence capability owner for
+// this session. It is the seam cmd/modelbench consumes so the witness never names
+// the concrete Qwen35 Metal receipt or backend types.
+func (s *Session) WholeSequence() WholeSequenceSession {
+	return wholeSequenceAdapter{s: s}
+}
+
+func (a wholeSequenceAdapter) EnableWholeSequence() error {
+	if a.s == nil {
+		return &UnsupportedGDNPreprojectedSequenceError{Path: Qwen35MetalGDNSequenceForwardPath, Reason: "session is nil"}
+	}
+	return a.s.EnableQwen35MetalGDNPreprojectedSequence()
+}
+
+func (a wholeSequenceAdapter) FinalizeWholeSequence() (bool, error) {
+	if a.s == nil {
+		return false, nil
+	}
+	return a.s.FinalizeQwen35MetalGDNPreprojectedSequence()
+}
+
+func (a wholeSequenceAdapter) WholeSequenceReceipt() WholeSequenceReceipt {
+	if a.s == nil {
+		return WholeSequenceReceipt{}
+	}
+	return WholeSequenceReceiptFromQwen35(a.s.Qwen35MetalForwardSequenceReceipt())
+}
+
+func (a wholeSequenceAdapter) WholeSequenceHandoffReceipt() WholeSequenceHandoff {
+	if a.s == nil {
+		return WholeSequenceHandoff{Mode: "AUTO"}
+	}
+	return WholeSequenceHandoffFromQwen35(a.s.Qwen35DecodeHandoffReceipt())
+}
+
+// WholeSequencePath returns the runtime's concrete capability token. It is the
+// value the adapted receipts carry in their Path field; the witness validates
+// the receipt against this token rather than a hard-coded neutral constant.
+func (a wholeSequenceAdapter) WholeSequencePath() string { return Qwen35MetalGDNSequenceForwardPath }
+
+func (a wholeSequenceAdapter) WholeSequenceExecutedEvidence() WholeSequenceEvidenceState {
+	return WholeSequenceEvidenceExecuted
+}
+
+func (a wholeSequenceAdapter) WholeSequenceSelectorOnState() WholeSequenceSelectorState {
+	return WholeSequenceSelectorOn
+}
+
+// WholeSequenceReceiptFromQwen35 adapts the concrete Qwen35 Metal receipt into
+// the backend-neutral shape. It preserves every neutral field verbatim; the
+// Metal-only state-identity binding is intentionally dropped.
+func WholeSequenceReceiptFromQwen35(r Qwen35MetalForwardSequenceReceipt) WholeSequenceReceipt {
+	return WholeSequenceReceipt{
+		Path: r.Path, Available: r.Available,
+		SelectorState: WholeSequenceSelectorState(r.SelectorState),
+		EvidenceState: WholeSequenceEvidenceState(r.EvidenceState),
+		Tokens:        r.Tokens, CommandBuffers: r.CommandBuffers, Encoders: r.Encoders,
+		IntermediateWaits: r.IntermediateWaits, IntermediateReadbacks: r.IntermediateReadbacks,
+		TerminalWaits: r.TerminalWaits, TerminalReadbacks: r.TerminalReadbacks,
+		HostUploadBytes: r.HostUploadBytes, HostReadbackBytes: r.HostReadbackBytes,
+		Committed: r.Committed, CompletedWait: r.CompletedWait, TimingAvailable: r.TimingAvailable,
+		GPUMilliseconds: r.GPUMilliseconds, WaitMilliseconds: r.WaitMilliseconds,
+		SelectedPanels: r.SelectedPanels, ExecutedPanels: r.ExecutedPanels, FallbackCount: r.FallbackCount,
+		Device: r.Device, SourceRevision: r.SourceRevision, ArtifactSHA256: r.ArtifactSHA256,
+	}
+}
+
+// WholeSequenceHandoffFromQwen35 adapts the concrete decode-handoff receipt into
+// the backend-neutral counter snapshot.
+func WholeSequenceHandoffFromQwen35(r Qwen35DecodeHandoffReceipt) WholeSequenceHandoff {
+	return WholeSequenceHandoff{
+		Mode: string(r.Mode), BlockAcceptedCalls: r.BlockAcceptedCalls,
+		MixerAcceptedCalls: r.MixerAcceptedCalls, ResidentAcceptedCalls: r.ResidentGDNAcceptedCalls,
+	}
+}
+
+// WholeSequenceOperation pairs the before/after neutral receipts of one decode
+// step with the handoff-counter snapshots either side of it. It is retained in
+// the serialized report so readback can reject stale receipts without relying on
+// pointer identity after JSON decoding.
+type WholeSequenceOperation struct {
+	Before       WholeSequenceReceipt `json:"before"`
+	After        WholeSequenceReceipt `json:"after"`
+	CountsBefore WholeSequenceHandoff `json:"counts_before"`
+	CountsAfter  WholeSequenceHandoff `json:"counts_after"`
+	CacheBefore  int                  `json:"cache_before"`
+	CacheAfter   int                  `json:"cache_after"`
+}
+
+// ValidateWholeSequenceOperation is the backend-neutral whole-token lockstep
+// validator. route is the expected executed route ("whole-token" or "per-layer");
+// path is the session's declared capability path and executed is the session's
+// executed-evidence token, both read from the WholeSequenceSession seam.
+//
+// path is the required capability token. Readback of a serialized artifact must
+// supply the token the report recorded at build time; the validator never trusts
+// a path the receipt declares for itself, so stripping that token cannot re-open
+// the check. Calling with an empty path on the whole-token route is refused.
+// It is the exact semantics of the former cmd/modelbench validation, lifted into
+// the model so a non-Qwen test double can drive it.
+func ValidateWholeSequenceOperation(route, path string, executed WholeSequenceEvidenceState, op WholeSequenceOperation) error {
+	if op.CacheAfter != op.CacheBefore+1 {
+		return fmt.Errorf("model: whole-sequence Step did not advance exactly one cache position")
+	}
+	a, c, n := op.After, op.CountsBefore, op.CountsAfter
+	switch route {
+	// The promoted trunk whole-token route records its acceptance on
+	// BlockAcceptedCalls and rewrites the HAL forward receipt to a fresh
+	// Tokens=1 executed receipt. Requiring ResidentAcceptedCalls to advance would
+	// wrongly reject that real route; requiring it to stay unchanged still
+	// rejects a per-layer fallback.
+	case "whole-token":
+		if path == "" {
+			return fmt.Errorf("model: whole-sequence capability path is required")
+		}
+		if op.Before == op.After || a.Tokens != 1 || !a.Committed || !a.CompletedWait || a.CommandBuffers != 1 || a.TerminalWaits != 1 || a.TerminalReadbacks != 1 || a.IntermediateReadbacks != 0 || a.IntermediateWaits != 0 || a.Path != path || a.EvidenceState != executed || n.BlockAcceptedCalls != c.BlockAcceptedCalls+1 || n.ResidentAcceptedCalls != c.ResidentAcceptedCalls || n.MixerAcceptedCalls != c.MixerAcceptedCalls {
+			return fmt.Errorf("model: whole-sequence Step lacks a fresh successful whole-token receipt; fallback is non-qualifying")
+		}
+	case "per-layer":
+		if op.Before != op.After || n.BlockAcceptedCalls != c.BlockAcceptedCalls+1 || n.MixerAcceptedCalls != c.MixerAcceptedCalls || n.ResidentAcceptedCalls != c.ResidentAcceptedCalls {
+			return fmt.Errorf("model: whole-sequence source-control Step did not execute exactly one prior AUTO per-layer block route")
+		}
+	default:
+		return fmt.Errorf("model: unknown whole-sequence route %q", route)
+	}
+	return nil
+}
+
 // Qwen35SequencePrefillBackend is the optional whole-prompt seam for native
 // Qwen3.5/3.8 hybrid execution. The compute-owned request avoids a model/compute
 // package cycle and does not widen compute.Backend.

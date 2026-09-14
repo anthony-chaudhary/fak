@@ -21,27 +21,31 @@ var (
 )
 
 type wholeTokenReport struct {
-	BindingSHA256 string                                    `json:"binding_sha256"`
-	Host          nativeHostIdentity                        `json:"host"`
-	Operations    []wholeTokenOperation                     `json:"operations"`
-	Schema        string                                    `json:"schema"`
-	Engine        string                                    `json:"engine"`
-	Device        string                                    `json:"device"`
-	ExpectedRoute string                                    `json:"expected_route"`
-	Prompt        []int                                     `json:"prompt_ids"`
-	Tokens        []int                                     `json:"forwarded_token_ids"`
-	GreedyNext    []int                                     `json:"greedy_next_token_ids"`
-	Phases        map[string]float64                        `json:"phase_seconds"`
-	TotalSeconds  float64                                   `json:"total_seconds"`
-	Prefill       model.Qwen35MetalForwardSequenceReceipt   `json:"prefill"`
-	Decode        []model.Qwen35MetalForwardSequenceReceipt `json:"decode_operations,omitempty"`
-	Handoff       model.Qwen35DecodeHandoffReceipt          `json:"handoff"`
-	PeakRSSBytes  uint64                                    `json:"peak_rss_bytes"`
-	Artifact      nativeFileIdentity                        `json:"artifact"`
-	Source        nativeSourceIdentity                      `json:"source"`
-	Binary        nativeFileIdentity                        `json:"binary"`
-	Controls      map[string]any                            `json:"controls,omitempty"`
-	Error         string                                    `json:"error,omitempty"`
+	BindingSHA256 string                `json:"binding_sha256"`
+	Host          nativeHostIdentity    `json:"host"`
+	Operations    []wholeTokenOperation `json:"operations"`
+	Schema        string                `json:"schema"`
+	Engine        string                `json:"engine"`
+	Device        string                `json:"device"`
+	ExpectedRoute string                `json:"expected_route"`
+	// SequencePath is the capability token the live session declared at build
+	// time. Readback pins every operation receipt to it, so a serialized report
+	// cannot be revalidated under a fabricated capability path.
+	SequencePath string                       `json:"sequence_path"`
+	Prompt       []int                        `json:"prompt_ids"`
+	Tokens       []int                        `json:"forwarded_token_ids"`
+	GreedyNext   []int                        `json:"greedy_next_token_ids"`
+	Phases       map[string]float64           `json:"phase_seconds"`
+	TotalSeconds float64                      `json:"total_seconds"`
+	Prefill      model.WholeSequenceReceipt   `json:"prefill"`
+	Decode       []model.WholeSequenceReceipt `json:"decode_operations,omitempty"`
+	Handoff      model.WholeSequenceHandoff   `json:"handoff"`
+	PeakRSSBytes uint64                       `json:"peak_rss_bytes"`
+	Artifact     nativeFileIdentity           `json:"artifact"`
+	Source       nativeSourceIdentity         `json:"source"`
+	Binary       nativeFileIdentity           `json:"binary"`
+	Controls     map[string]any               `json:"controls,omitempty"`
+	Error        string                       `json:"error,omitempty"`
 }
 
 func validateWholeTokenFlags(f *benchFlags) error {
@@ -98,8 +102,13 @@ func runWholeToken(s *model.Session, prompt []int, steps int, route string, star
 			return report, errors.New("prompt ID outside vocabulary")
 		}
 	}
+	// Consume the backend-neutral whole-sequence seam: the witness never names the
+	// concrete Qwen35 Metal receipt or backend types. The adapter behind this
+	// interface is the unchanged Metal path.
+	sequence := s.WholeSequence()
+	report.SequencePath = sequence.WholeSequencePath()
 	t := time.Now()
-	if err = s.EnableQwen35MetalGDNPreprojectedSequence(); err != nil {
+	if err = sequence.EnableWholeSequence(); err != nil {
 		return report, err
 	}
 	report.Phases["session_setup"] = time.Since(t).Seconds()
@@ -107,11 +116,11 @@ func runWholeToken(s *model.Session, prompt []int, steps int, route string, star
 	logits := s.Prefill(prompt)
 	report.Phases["prefill"] = time.Since(t).Seconds()
 	t = time.Now()
-	if executed, e := s.FinalizeQwen35MetalGDNPreprojectedSequence(); e != nil || !executed {
+	if executed, e := sequence.FinalizeWholeSequence(); e != nil || !executed {
 		return report, fmt.Errorf("resident handoff executed=%v: %w", executed, e)
 	}
 	report.Phases["finalize"] = time.Since(t).Seconds()
-	report.Prefill = s.Qwen35MetalForwardSequenceReceipt()
+	report.Prefill = sequence.WholeSequenceReceipt()
 	if report.Prefill.Tokens != 32 || !report.Prefill.CompletedWait {
 		return report, errors.New("missing physical P32 prefill receipt")
 	}
@@ -122,18 +131,18 @@ func runWholeToken(s *model.Session, prompt []int, steps int, route string, star
 			return report, e
 		}
 		report.Phases["host_selection_and_receipt_bookkeeping"] += time.Since(t).Seconds()
-		before := s.Qwen35MetalForwardSequenceReceipt()
-		counts := s.Qwen35DecodeHandoffReceipt()
+		before := sequence.WholeSequenceReceipt()
+		counts := sequence.WholeSequenceHandoffReceipt()
 		base := s.Cache.Len()
 		t = time.Now()
 		logits = s.Step(id) // Includes the existing output head and cache bookkeeping.
 		report.Phases["decode_with_head"] += time.Since(t).Seconds()
 		t = time.Now()
-		after := s.Qwen35MetalForwardSequenceReceipt()
-		nextCounts := s.Qwen35DecodeHandoffReceipt()
+		after := sequence.WholeSequenceReceipt()
+		nextCounts := sequence.WholeSequenceHandoffReceipt()
 		report.Handoff = nextCounts
-		operation := wholeTokenOperation{Before: before, After: after, CountsBefore: counts, CountsAfter: nextCounts, CacheBefore: base, CacheAfter: s.Cache.Len()}
-		if err := validateWholeTokenOperation(operation, route); err != nil {
+		operation := wholeTokenOperation{WholeSequenceOperation: model.WholeSequenceOperation{Before: before, After: after, CountsBefore: counts, CountsAfter: nextCounts, CacheBefore: base, CacheAfter: s.Cache.Len()}}
+		if err := validateWholeTokenOperation(operation, route, sequence, report.SequencePath); err != nil {
 			return report, err
 		}
 		report.Operations = append(report.Operations, operation)
@@ -229,48 +238,26 @@ func runWholeTokenCLI(f *benchFlags, m *model.Model, started time.Time, newSessi
 	})
 }
 
-// Operation pairs are retained in the serialized report so readback can reject
-// stale receipts without relying on pointer identity after JSON decoding.
+// wholeTokenOperation embeds the backend-neutral operation pair retained in the
+// serialized report so readback can reject stale receipts without relying on
+// pointer identity after JSON decoding.
 type wholeTokenOperation struct {
-	Before       model.Qwen35MetalForwardSequenceReceipt `json:"before"`
-	After        model.Qwen35MetalForwardSequenceReceipt `json:"after"`
-	CountsBefore model.Qwen35DecodeHandoffReceipt        `json:"counts_before"`
-	CountsAfter  model.Qwen35DecodeHandoffReceipt        `json:"counts_after"`
-	CacheBefore  int                                     `json:"cache_before"`
-	CacheAfter   int                                     `json:"cache_after"`
+	model.WholeSequenceOperation
 }
 
-func validateWholeTokenOperation(op wholeTokenOperation, route string) error {
-	before, err := sha256JSON(op.Before)
-	if err != nil {
-		return err
+// validateWholeTokenOperation delegates to the backend-neutral model validator,
+// reading the path and executed-evidence tokens from the seam rather than naming
+// a concrete Qwen35/Metal constant. A nil sequence means readback of a serialized
+// artifact: the caller supplies the capability token recorded at build time
+// (report.SequencePath) so a fabricated path still fails.
+func validateWholeTokenOperation(op wholeTokenOperation, route string, sequence model.WholeSequenceSession, recordedPath string) error {
+	path := recordedPath
+	executed := model.WholeSequenceEvidenceExecuted
+	if sequence != nil {
+		path = sequence.WholeSequencePath()
+		executed = sequence.WholeSequenceExecutedEvidence()
 	}
-	after, err := sha256JSON(op.After)
-	if err != nil {
-		return err
-	}
-	if op.CacheAfter != op.CacheBefore+1 {
-		return errors.New("Step did not advance exactly one cache position")
-	}
-	a, c, n := op.After, op.CountsBefore, op.CountsAfter
-	switch route {
-	// The promoted trunk whole-token route records its acceptance on
-	// BlockAcceptedCalls and rewrites the HAL forward receipt to a fresh
-	// Tokens=1 executed receipt. Requiring ResidentGDNAcceptedCalls to advance
-	// would wrongly reject that real route; requiring it to stay unchanged
-	// still rejects a per-layer GDN fallback.
-	case "whole-token":
-		if before == after || a.Tokens != 1 || !a.Committed || !a.CompletedWait || a.CommandBuffers != 1 || a.TerminalWaits != 1 || a.TerminalReadbacks != 1 || a.IntermediateReadbacks != 0 || a.IntermediateWaits != 0 || a.Path != model.Qwen35MetalGDNSequenceForwardPath || a.EvidenceState != model.Qwen35MetalSequenceEvidenceExecuted || n.BlockAcceptedCalls != c.BlockAcceptedCalls+1 || n.ResidentGDNAcceptedCalls != c.ResidentGDNAcceptedCalls || n.MixerAcceptedCalls != c.MixerAcceptedCalls {
-			return errors.New("Step lacks a fresh successful whole-token receipt; fallback is non-qualifying")
-		}
-	case "per-layer":
-		if before != after || n.BlockAcceptedCalls != c.BlockAcceptedCalls+1 || n.MixerAcceptedCalls != c.MixerAcceptedCalls || n.ResidentGDNAcceptedCalls != c.ResidentGDNAcceptedCalls {
-			return errors.New("source-control Step did not execute exactly one prior AUTO per-layer block route")
-		}
-	default:
-		return errors.New("unknown whole-token route")
-	}
-	return nil
+	return model.ValidateWholeSequenceOperation(route, path, executed, op.WholeSequenceOperation)
 }
 
 func wholeTokenBinding(report wholeTokenReport) (string, error) {
@@ -294,8 +281,13 @@ func validateWholeTokenReport(report wholeTokenReport) error {
 	if len(report.Operations) == 0 || len(report.Operations) != len(report.Tokens) {
 		return errors.New("whole-token operations missing")
 	}
+	if report.ExpectedRoute == "whole-token" && report.SequencePath == "" {
+		return errors.New("whole-token report records no capability path")
+	}
 	for _, op := range report.Operations {
-		if err := validateWholeTokenOperation(op, report.ExpectedRoute); err != nil {
+		// A readback validates a serialized artifact: it pins each receipt to the
+		// capability token the live session recorded at build time.
+		if err := validateWholeTokenOperation(op, report.ExpectedRoute, nil, report.SequencePath); err != nil {
 			return err
 		}
 	}

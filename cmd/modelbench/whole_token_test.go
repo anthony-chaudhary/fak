@@ -81,11 +81,14 @@ func TestWholeTokenWitnessUsesPromotedP1AndPreservesProfilerMode(t *testing.T) {
 }
 
 func TestWholeTokenSerializedReceiptRejectsStaleAndTamperedEvidence(t *testing.T) {
-	op := wholeTokenOperation{CacheBefore: 32, CacheAfter: 33}
+	op := wholeTokenOperation{WholeSequenceOperation: model.WholeSequenceOperation{CacheBefore: 32, CacheAfter: 33}}
 	op.Before.Tokens = 32
-	op.After = model.Qwen35MetalForwardSequenceReceipt{Tokens: 1, Committed: true, CompletedWait: true, CommandBuffers: 1, TerminalWaits: 1, TerminalReadbacks: 1, Path: model.Qwen35MetalGDNSequenceForwardPath, EvidenceState: model.Qwen35MetalSequenceEvidenceExecuted}
+	// A real serialized report carries the runtime's concrete capability path, which
+	// the report also records at build time; readback must pin to that recorded token.
+	const sequencePath = "metal/qwen35-gdn-preprojected-sequence-v1"
+	op.After = model.WholeSequenceReceipt{Tokens: 1, Committed: true, CompletedWait: true, CommandBuffers: 1, TerminalWaits: 1, TerminalReadbacks: 1, Path: sequencePath, EvidenceState: model.WholeSequenceEvidenceExecuted}
 	op.CountsAfter.BlockAcceptedCalls = 1
-	report := wholeTokenReport{ExpectedRoute: "whole-token", Tokens: []int{7}, Operations: []wholeTokenOperation{op}}
+	report := wholeTokenReport{ExpectedRoute: "whole-token", SequencePath: sequencePath, Tokens: []int{7}, Operations: []wholeTokenOperation{op}}
 	report.BindingSHA256, _ = wholeTokenBinding(report)
 	data, err := json.Marshal(report)
 	if err != nil {
@@ -107,14 +110,24 @@ func TestWholeTokenSerializedReceiptRejectsStaleAndTamperedEvidence(t *testing.T
 	if validateWholeTokenReport(decoded) == nil {
 		t.Fatal("accepted stale receipt with a recomputed binding")
 	}
+	// A fabricated capability path must not revalidate even with a recomputed
+	// binding: readback pins the receipt to the token the report recorded.
+	fabricated := report
+	fabricated.Operations = append([]wholeTokenOperation(nil), op)
+	fabricated.Operations[0].After.Path = "fabricated/other-backend-v1"
+	fabricated.Operations[0].Before.Path = "fabricated/other-backend-v1"
+	fabricated.BindingSHA256, _ = wholeTokenBinding(fabricated)
+	if validateWholeTokenReport(fabricated) == nil {
+		t.Fatal("accepted a receipt with a fabricated capability path and recomputed binding")
+	}
 	op.After = op.Before
-	op.CountsAfter.ResidentGDNAcceptedCalls = 0
+	op.CountsAfter.ResidentAcceptedCalls = 0
 	op.CountsAfter.BlockAcceptedCalls = 2
-	if validateWholeTokenOperation(op, "per-layer") == nil {
+	if validateWholeTokenOperation(op, "per-layer", nil, sequencePath) == nil {
 		t.Fatal("accepted two block calls for one Step")
 	}
 	op.CountsAfter.BlockAcceptedCalls = 1
-	if err := validateWholeTokenOperation(op, "per-layer"); err != nil {
+	if err := validateWholeTokenOperation(op, "per-layer", nil, sequencePath); err != nil {
 		t.Fatal(err)
 	}
 }
