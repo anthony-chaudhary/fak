@@ -1256,6 +1256,11 @@ func maybeRunMTPComparison(f *benchFlags) bool {
 func main() {
 	f := parseFlags()
 	validateFlags(f)
+	if err := validateWholeTokenFlags(f); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		f.exit(2)
+		return
+	}
 	if maybeRunMTPComparison(f) {
 		return
 	}
@@ -1356,6 +1361,13 @@ func main() {
 	}
 	newSession := func() *model.Session {
 		return newBenchSession(m, f, be)
+	}
+	if *wholeTokenOut != "" {
+		if err := runWholeTokenCLI(f, m, loadStart, newSession); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			f.exit(1)
+		}
+		return
 	}
 	if *f.nativeProfileOut != "" {
 		if err := runWithTransferredWeightLifetime(f, func() error {
