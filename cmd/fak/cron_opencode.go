@@ -28,6 +28,15 @@ import (
 const (
 	cronOpenCodeRunSchema  = "fak-opencode-run/1"
 	cronOpenCodeMaxTimeout = 2 * time.Hour
+
+	// cronOpenCodeDefaultCrashRetries is the number of extra child attempts
+	// granted after a Bun SIGSEGV terminal outcome, so the default is 2 total
+	// attempts (1 initial + 1 retry).
+	cronOpenCodeDefaultCrashRetries = 1
+
+	// cronOpenCodeVersionProbeTimeout bounds the best-effort version probe so
+	// runtime-version capture can never stall the hot path (#1316).
+	cronOpenCodeVersionProbeTimeout = 5 * time.Second
 )
 
 func cronOpenCodeEffectiveTimeout(requested time.Duration) time.Duration {
@@ -55,6 +64,70 @@ type OpenCodeRunReceipt struct {
 
 	StartError    string `json:"start_error,omitempty"`    // bounded tail of child output when the session never started
 	StartupFailed bool   `json:"startup_failed,omitempty"` // true iff exit != 0 AND SessionID == ""
+
+	// Bun-crash retry/version provenance (#1316). All additive + omitempty so the
+	// fak-opencode-run/1 schema stays backward-compatible.
+	Attempts        int    `json:"attempts,omitempty"`         // total child executions performed (>=1)
+	CrashSignature  bool   `json:"crash_signature,omitempty"`  // child output ever carried the Bun SIGSEGV signature
+	CrashRecovered  bool   `json:"crash_recovered,omitempty"`  // final outcome succeeded after a Bun crash
+	OpenCodeVersion string `json:"opencode_version,omitempty"` // best-effort `opencode --version`
+	BunVersion      string `json:"bun_version,omitempty"`      // best-effort Bun runtime version
+}
+
+// cronOpenCodeBunCrashSignature reports whether captured child output carries the
+// Bun SIGSEGV crash fingerprint. This is the ONLY admission for a retry: a bare
+// non-zero exit (real opencode error, bad flags, model error) must never retry.
+func cronOpenCodeBunCrashSignature(output string) bool {
+	if output == "" {
+		return false
+	}
+	lower := strings.ToLower(output)
+	return strings.Contains(lower, "segmentation fault") &&
+		(strings.Contains(lower, "bun has crashed") || strings.Contains(lower, "bun.report"))
+}
+
+var reOpenCodeBunVersion = regexp.MustCompile(`(?i)\bbun\s+v([0-9][0-9A-Za-z_.-]*)`)
+
+// cronExtractBunVersion best-effort extracts a Bun runtime version from child
+// output (the crash banner already prints `Bun vX.Y.Z`). Cheap: no extra process.
+func cronExtractBunVersion(output string) string {
+	if m := reOpenCodeBunVersion.FindStringSubmatch(output); len(m) > 1 {
+		return m[1]
+	}
+	return ""
+}
+
+// cronIsOpenCodeCommand reports whether cmdName names the opencode binary (by
+// base name, ignoring extension and case). Used to keep the version probe off
+// the hot path for arbitrary/stub commands (#1316).
+func cronIsOpenCodeCommand(cmdName string) bool {
+	base := strings.ToLower(filepath.Base(strings.TrimSpace(cmdName)))
+	base = strings.TrimSuffix(base, filepath.Ext(base))
+	return base == "opencode"
+}
+
+// cronProbeOpenCodeVersion best-effort captures `opencode --version`. It is
+// bounded and failure-tolerant: a missing/odd binary or a timeout yields "" and
+// NEVER fails the run (#1316).
+func cronProbeOpenCodeVersion(cmdName string, workdir string, env []string) string {
+	if cmdName == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), cronOpenCodeVersionProbeTimeout)
+	defer cancel()
+	c := exec.CommandContext(ctx, cmdName, "--version")
+	configureDispatchHelperCommand(c)
+	if workdir != "" {
+		c.Dir = workdir
+	}
+	if len(env) > 0 {
+		c.Env = append(os.Environ(), env...)
+	}
+	out, err := c.Output()
+	if err != nil && len(out) == 0 {
+		return ""
+	}
+	return cronBoundedOutputTail(string(out), 256)
 }
 
 // cronBoundedOutputTail returns at most the last maxBytes of s collapsed to a
@@ -89,6 +162,11 @@ type ScheduledOpenCodeOptions struct {
 	Passthrough bool
 	EmitReceipt bool
 	Env         []string
+
+	// CrashRetries is the number of extra child attempts granted after a Bun
+	// SIGSEGV terminal outcome (total attempts = CrashRetries + 1). 0 disables
+	// retry. Negative values are treated as 0.
+	CrashRetries int
 }
 
 // RunScheduledOpenCode executes an OpenCode command with bounded timeout and optional
@@ -275,11 +353,11 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 		}
 	}
 
-	// Child process execution with bounded timeout context (#11953)
-	effectiveTimeout := cronOpenCodeEffectiveTimeout(opts.Timeout)
-	ctx, cancel := context.WithTimeout(context.Background(), effectiveTimeout)
-	defer cancel()
-
+	// Child process execution with bounded timeout context (#11953).
+	// A Bun SIGSEGV after the session started is a FALSE failure (#1316): the
+	// child did its work but the Bun runtime segfaulted on exit. When the crash
+	// signature is present we re-exec the command (child only — the CAS/dedup
+	// fire step above is never re-run) up to a small bounded number of times.
 	cmdName := opts.Command[0]
 	cmdRest := opts.Command[1:]
 
@@ -302,94 +380,156 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 		}
 	}
 
-	c := exec.CommandContext(ctx, cmdName, cmdRest...)
-	configureDispatchHelperCommand(c)
-	if opts.Workdir != "" {
-		c.Dir = opts.Workdir
+	effectiveTimeout := cronOpenCodeEffectiveTimeout(opts.Timeout)
+	crashRetries := opts.CrashRetries
+	if crashRetries < 0 {
+		crashRetries = 0
 	}
-	if len(opts.Env) > 0 {
-		c.Env = append(os.Environ(), opts.Env...)
+	maxAttempts := crashRetries + 1
+
+	// Best-effort installed runtime versions, captured once (never fails the run).
+	// The probe only makes sense for the real opencode binary and costs an extra
+	// process, so it is skipped for arbitrary/stub commands on the hot path.
+	openCodeVersion := ""
+	if cronIsOpenCodeCommand(cmdName) {
+		openCodeVersion = cronProbeOpenCodeVersion(cmdName, opts.Workdir, opts.Env)
 	}
 
-	var childStdoutBuf bytes.Buffer
-	var childStderrBuf bytes.Buffer
+	var (
+		sessionID      string
+		exitCode       int
+		outcome        string
+		runErr         error
+		startTime      time.Time
+		endedTime      time.Time
+		attempts       int
+		crashSignature bool
+		bunVersion     string
+		lastStderr     string
+		lastStdout     string
+	)
 
-	var stdoutWriters []io.Writer
-	stdoutWriters = append(stdoutWriters, &childStdoutBuf)
-	if opts.ChildStdout != nil {
-		stdoutWriters = append(stdoutWriters, opts.ChildStdout)
-	}
-	if opts.Passthrough && opts.Stdout != nil {
-		stdoutWriters = append(stdoutWriters, opts.Stdout)
-	}
-	c.Stdout = io.MultiWriter(stdoutWriters...)
+	for {
+		attempts++
 
-	var stderrWriters []io.Writer
-	stderrWriters = append(stderrWriters, &childStderrBuf)
-	if opts.Stderr != nil {
-		stderrWriters = append(stderrWriters, opts.Stderr)
-	}
-	c.Stderr = io.MultiWriter(stderrWriters...)
+		ctx, cancel := context.WithTimeout(context.Background(), effectiveTimeout)
 
-	c.WaitDelay = 5 * time.Second
-	c.Cancel = func() error {
-		if c.Process != nil && c.Process.Pid > 0 {
-			cronRunKillTree(c.Process.Pid)
+		c := exec.CommandContext(ctx, cmdName, cmdRest...)
+		configureDispatchHelperCommand(c)
+		if opts.Workdir != "" {
+			c.Dir = opts.Workdir
 		}
-		return nil
+		if len(opts.Env) > 0 {
+			c.Env = append(os.Environ(), opts.Env...)
+		}
+
+		var childStdoutBuf bytes.Buffer
+		var childStderrBuf bytes.Buffer
+
+		var stdoutWriters []io.Writer
+		stdoutWriters = append(stdoutWriters, &childStdoutBuf)
+		if opts.ChildStdout != nil {
+			stdoutWriters = append(stdoutWriters, opts.ChildStdout)
+		}
+		if opts.Passthrough && opts.Stdout != nil {
+			stdoutWriters = append(stdoutWriters, opts.Stdout)
+		}
+		c.Stdout = io.MultiWriter(stdoutWriters...)
+
+		var stderrWriters []io.Writer
+		stderrWriters = append(stderrWriters, &childStderrBuf)
+		if opts.Stderr != nil {
+			stderrWriters = append(stderrWriters, opts.Stderr)
+		}
+		c.Stderr = io.MultiWriter(stderrWriters...)
+
+		c.WaitDelay = 5 * time.Second
+		c.Cancel = func() error {
+			if c.Process != nil && c.Process.Pid > 0 {
+				cronRunKillTree(c.Process.Pid)
+			}
+			return nil
+		}
+
+		startTime = time.Now()
+		runErr = c.Run()
+		endedTime = time.Now()
+
+		lastStdout = childStdoutBuf.String()
+		lastStderr = childStderrBuf.String()
+
+		sessionID = extractOpenCodeSessionID(lastStdout)
+		if sessionID == "" && lastStderr != "" {
+			sessionID = extractOpenCodeSessionID(lastStderr)
+		}
+
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			outcome = "timeout"
+			var exitErr *exec.ExitError
+			if errors.As(runErr, &exitErr) {
+				exitCode = exitErr.ExitCode()
+			} else {
+				exitCode = 124
+			}
+		} else if runErr != nil {
+			outcome = "failed"
+			var exitErr *exec.ExitError
+			if errors.As(runErr, &exitErr) {
+				exitCode = exitErr.ExitCode()
+			} else {
+				exitCode = 1
+			}
+		} else {
+			outcome = "succeeded"
+			exitCode = 0
+		}
+		cancel()
+
+		if bv := cronExtractBunVersion(lastStderr + "\n" + lastStdout); bv != "" {
+			bunVersion = bv
+		}
+
+		// A crash is only admitted from the Bun SIGSEGV signature in the child
+		// output — never from the exit code alone. A genuine non-crash failure
+		// must not retry. crashSignature is sticky across attempts so the receipt
+		// records whether the run EVER hit the Bun crash.
+		attemptCrash := cronOpenCodeBunCrashSignature(lastStderr) || cronOpenCodeBunCrashSignature(lastStdout)
+		crashSignature = crashSignature || attemptCrash
+		if !attemptCrash || attempts >= maxAttempts {
+			break
+		}
+		if opts.Stderr != nil {
+			fmt.Fprintf(opts.Stderr, "fak cron opencode: Bun crash detected on attempt %d/%d; retrying child execution\n", attempts, maxAttempts)
+		}
 	}
 
-	startTime := time.Now()
-	runErr := c.Run()
-	endedTime := time.Now()
 	durationMS := endedTime.Sub(startTime).Milliseconds()
 
-	sessionID := extractOpenCodeSessionID(childStdoutBuf.String())
-	if sessionID == "" && childStderrBuf.Len() > 0 {
-		sessionID = extractOpenCodeSessionID(childStderrBuf.String())
-	}
-
-	var exitCode int
-	var outcome string
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		outcome = "timeout"
-		var exitErr *exec.ExitError
-		if errors.As(runErr, &exitErr) {
-			exitCode = exitErr.ExitCode()
-		} else {
-			exitCode = 124
-		}
-	} else if runErr != nil {
-		outcome = "failed"
-		var exitErr *exec.ExitError
-		if errors.As(runErr, &exitErr) {
-			exitCode = exitErr.ExitCode()
-		} else {
-			exitCode = 1
-		}
-	} else {
-		outcome = "succeeded"
-		exitCode = 0
-	}
+	crashRecovered := crashSignature && outcome == "succeeded"
 
 	receipt := OpenCodeRunReceipt{
-		Schema:     cronOpenCodeRunSchema,
-		RunID:      runID,
-		SessionID:  sessionID,
-		ExitCode:   exitCode,
-		Outcome:    outcome,
-		StartedAt:  startTime.UTC().Format(time.RFC3339),
-		EndedAt:    endedTime.UTC().Format(time.RFC3339),
-		DurationMS: durationMS,
-		WitnessRef: nil,
+		Schema:          cronOpenCodeRunSchema,
+		RunID:           runID,
+		SessionID:       sessionID,
+		ExitCode:        exitCode,
+		Outcome:         outcome,
+		StartedAt:       startTime.UTC().Format(time.RFC3339),
+		EndedAt:         endedTime.UTC().Format(time.RFC3339),
+		DurationMS:      durationMS,
+		WitnessRef:      nil,
+		Attempts:        attempts,
+		CrashSignature:  crashSignature,
+		CrashRecovered:  crashRecovered,
+		OpenCodeVersion: openCodeVersion,
+		BunVersion:      bunVersion,
 	}
 
 	// Nonzero exit with no session created means OpenCode never started; surface
 	// the child's bounded stderr (or stdout fallback) so the failure is not silent.
-	if runErr != nil && sessionID == "" && !errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		tail := childStderrBuf.String()
+	if runErr != nil && sessionID == "" && outcome != "timeout" {
+		tail := lastStderr
 		if strings.TrimSpace(tail) == "" {
-			tail = childStdoutBuf.String()
+			tail = lastStdout
 		}
 		receipt.StartupFailed = true
 		receipt.StartError = cronBoundedOutputTail(tail, 2048)
@@ -432,6 +572,7 @@ func runCronOpenCode(stdout, stderr io.Writer, argv []string) int {
 	workdir := fs.String("workdir", "", "working directory for child command execution")
 	unloadPlist := fs.String("unload-plist", "", "launchd plist to unload upon expiration (macOS)")
 	passthrough := fs.Bool("passthrough", false, "pass child stdout through to stdout during execution")
+	crashRetries := fs.Int("crash-retries", cronOpenCodeDefaultCrashRetries, "extra child attempts after a Bun SIGSEGV crash (N>=0; total attempts = N+1; 0 disables)")
 
 	// Find the trailing "--" separator for command arguments
 	dashIdx := -1
@@ -466,21 +607,22 @@ func runCronOpenCode(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	opts := ScheduledOpenCodeOptions{
-		Job:         *job,
-		Ledger:      *ledger,
-		Interval:    *interval,
-		Timeout:     *timeout,
-		At:          *at,
-		Slot:        *slot,
-		RunID:       *runID,
-		Until:       *until,
-		Workdir:     *workdir,
-		UnloadPlist: *unloadPlist,
-		Passthrough: *passthrough,
-		EmitReceipt: true,
-		Command:     cmdArgs,
-		Stdout:      stdout,
-		Stderr:      stderr,
+		Job:          *job,
+		Ledger:       *ledger,
+		Interval:     *interval,
+		Timeout:      *timeout,
+		At:           *at,
+		Slot:         *slot,
+		RunID:        *runID,
+		Until:        *until,
+		Workdir:      *workdir,
+		UnloadPlist:  *unloadPlist,
+		Passthrough:  *passthrough,
+		EmitReceipt:  true,
+		Command:      cmdArgs,
+		Stdout:       stdout,
+		Stderr:       stderr,
+		CrashRetries: *crashRetries,
 	}
 
 	receipt, err := RunScheduledOpenCode(opts)

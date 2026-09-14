@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -794,5 +796,231 @@ func TestCronOpenCodeExecFailureSurfacesRunErrWhenOutputEmpty(t *testing.T) {
 	}
 	if receipt.SessionID != "" {
 		t.Errorf("expected empty session_id, got %q", receipt.SessionID)
+	}
+}
+
+// TestCronOpenCodeCrashHelper is a deterministic stub child for the Bun-crash
+// retry tests (#1316). It is gated by FAK_CRON_CRASH_HELPER so it is inert in a
+// normal `go test` run, and it records its invocation count in a counter file so
+// the parent's re-exec can advance the attempt sequence.
+func TestCronOpenCodeCrashHelper(t *testing.T) {
+	if os.Getenv("FAK_CRON_CRASH_HELPER") != "1" {
+		return
+	}
+	mode := os.Getenv("FAK_CRON_CRASH_MODE")
+	counter := os.Getenv("FAK_CRON_CRASH_COUNTER")
+	n := 0
+	if counter != "" {
+		if b, err := os.ReadFile(counter); err == nil {
+			n, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+		}
+		n++
+		_ = os.WriteFile(counter, []byte(strconv.Itoa(n)), 0o644)
+	}
+	crash := func() {
+		fmt.Fprintln(os.Stderr, "panic(thread 11): Segmentation fault at address 0x0")
+		fmt.Fprintln(os.Stderr, "oh no: Bun has crashed. This indicates a bug in Bun, not your code.")
+		fmt.Fprintln(os.Stderr, "Bun v1.3.14 (baseline) Windows x64")
+		fmt.Fprintln(os.Stderr, "https://bun.report/1.3.14")
+		os.Exit(3)
+	}
+	switch mode {
+	case "crash-then-ok":
+		if n <= 1 {
+			crash()
+		}
+		fmt.Println(`{"session_id": "ses_retry_ok"}`)
+		os.Exit(0)
+	case "crash-always":
+		crash()
+	case "exit3-nocrash":
+		fmt.Fprintln(os.Stderr, "real opencode error: invalid flag")
+		os.Exit(3)
+	}
+	os.Exit(0)
+}
+
+func cronOpenCodeCrashHelperCommand(t *testing.T, mode string) ([]string, []string) {
+	dir := t.TempDir()
+	counter := filepath.Join(dir, "attempts")
+	cmdArgs := []string{os.Args[0], "-test.run=^TestCronOpenCodeCrashHelper$"}
+	env := []string{
+		"FAK_CRON_CRASH_HELPER=1",
+		"FAK_CRON_CRASH_MODE=" + mode,
+		"FAK_CRON_CRASH_COUNTER=" + counter,
+	}
+	t.Cleanup(func() { _ = os.Remove(counter) })
+	return cmdArgs, env
+}
+
+func TestCronOpenCodeBunCrashRetryRecovers(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "opencode_crash_retry.jsonl")
+	var stdout, stderr bytes.Buffer
+	cmdArgs, env := cronOpenCodeCrashHelperCommand(t, "crash-then-ok")
+
+	opts := ScheduledOpenCodeOptions{
+		Job:          "job-crash-retry",
+		Ledger:       ledger,
+		Timeout:      10 * time.Second,
+		Command:      cmdArgs,
+		Env:          env,
+		Stdout:       &stdout,
+		Stderr:       &stderr,
+		EmitReceipt:  true,
+		CrashRetries: 1,
+	}
+
+	receipt, err := RunScheduledOpenCode(opts)
+	if err != nil {
+		t.Fatalf("unexpected harness error: %v (stderr: %s)", err, stderr.String())
+	}
+	if receipt.Outcome != "succeeded" {
+		t.Errorf("expected outcome 'succeeded' after recovered crash, got %q (exit=%d)", receipt.Outcome, receipt.ExitCode)
+	}
+	if receipt.Attempts != 2 {
+		t.Errorf("expected attempts==2, got %d", receipt.Attempts)
+	}
+	if !receipt.CrashSignature {
+		t.Errorf("expected crash_signature true, got false (receipt: %+v)", receipt)
+	}
+	if !receipt.CrashRecovered {
+		t.Errorf("expected crash_recovered true, got false (receipt: %+v)", receipt)
+	}
+	if receipt.SessionID != "ses_retry_ok" {
+		t.Errorf("expected session_id 'ses_retry_ok', got %q", receipt.SessionID)
+	}
+
+	receipts, err := cronReadOpenCodeReceipts(ledger)
+	if err != nil {
+		t.Fatalf("cronReadOpenCodeReceipts error: %v", err)
+	}
+	if len(receipts) != 1 {
+		t.Fatalf("expected exactly 1 receipt in ledger, got %d", len(receipts))
+	}
+	if receipts[0].Outcome != "succeeded" || receipts[0].Attempts != 2 {
+		t.Errorf("ledger receipt mismatch: %+v", receipts[0])
+	}
+}
+
+func TestCronOpenCodeNonCrashExitNotRetried(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "opencode_nocrash.jsonl")
+	var stdout, stderr bytes.Buffer
+	cmdArgs, env := cronOpenCodeCrashHelperCommand(t, "exit3-nocrash")
+
+	opts := ScheduledOpenCodeOptions{
+		Job:          "job-nocrash",
+		Ledger:       ledger,
+		Timeout:      10 * time.Second,
+		Command:      cmdArgs,
+		Env:          env,
+		Stdout:       &stdout,
+		Stderr:       &stderr,
+		EmitReceipt:  true,
+		CrashRetries: 2,
+	}
+
+	receipt, err := RunScheduledOpenCode(opts)
+	if err != nil {
+		t.Fatalf("unexpected harness error: %v", err)
+	}
+	if receipt.Outcome != "failed" {
+		t.Errorf("expected outcome 'failed', got %q", receipt.Outcome)
+	}
+	if receipt.ExitCode != 3 {
+		t.Errorf("expected exit_code 3, got %d", receipt.ExitCode)
+	}
+	if receipt.Attempts != 1 {
+		t.Errorf("expected no retry on non-crash failure (attempts==1), got %d", receipt.Attempts)
+	}
+	if receipt.CrashSignature {
+		t.Errorf("expected crash_signature false, got true")
+	}
+	if receipt.CrashRecovered {
+		t.Errorf("expected crash_recovered false, got true")
+	}
+}
+
+func TestCronOpenCodeBunCrashBoundedRetries(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "opencode_crash_bounded.jsonl")
+	var stdout, stderr bytes.Buffer
+	cmdArgs, env := cronOpenCodeCrashHelperCommand(t, "crash-always")
+
+	opts := ScheduledOpenCodeOptions{
+		Job:          "job-crash-bounded",
+		Ledger:       ledger,
+		Timeout:      10 * time.Second,
+		Command:      cmdArgs,
+		Env:          env,
+		Stdout:       &stdout,
+		Stderr:       &stderr,
+		EmitReceipt:  true,
+		CrashRetries: 2,
+	}
+
+	receipt, err := RunScheduledOpenCode(opts)
+	if err != nil {
+		t.Fatalf("unexpected harness error: %v", err)
+	}
+	if receipt.Outcome != "failed" {
+		t.Errorf("expected outcome 'failed' after exhausting retries, got %q", receipt.Outcome)
+	}
+	if receipt.Attempts != 3 {
+		t.Errorf("expected attempts==3 (1 + 2 retries), got %d", receipt.Attempts)
+	}
+	if !receipt.CrashSignature {
+		t.Errorf("expected crash_signature true, got false")
+	}
+	if receipt.CrashRecovered {
+		t.Errorf("expected crash_recovered false when all attempts crash, got true")
+	}
+}
+
+func TestCronOpenCodeCrashRetriesZeroDisables(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "opencode_crash_zero.jsonl")
+	var stdout, stderr bytes.Buffer
+	cmdArgs, env := cronOpenCodeCrashHelperCommand(t, "crash-then-ok")
+
+	opts := ScheduledOpenCodeOptions{
+		Job:          "job-crash-zero",
+		Ledger:       ledger,
+		Timeout:      10 * time.Second,
+		Command:      cmdArgs,
+		Env:          env,
+		Stdout:       &stdout,
+		Stderr:       &stderr,
+		EmitReceipt:  true,
+		CrashRetries: 0,
+	}
+
+	receipt, err := RunScheduledOpenCode(opts)
+	if err != nil {
+		t.Fatalf("unexpected harness error: %v", err)
+	}
+	if receipt.Outcome != "failed" {
+		t.Errorf("expected outcome 'failed' with --crash-retries 0, got %q", receipt.Outcome)
+	}
+	if receipt.ExitCode != 3 {
+		t.Errorf("expected exit_code 3, got %d", receipt.ExitCode)
+	}
+	if receipt.Attempts != 1 {
+		t.Errorf("expected attempts==1 when retries disabled, got %d", receipt.Attempts)
+	}
+	if !receipt.CrashSignature {
+		t.Errorf("expected crash_signature true, got false")
+	}
+}
+
+func TestCronOpenCodeBunCrashSignatureDetector(t *testing.T) {
+	if cronOpenCodeBunCrashSignature("") {
+		t.Errorf("empty output must not be a crash signature")
+	}
+	if cronOpenCodeBunCrashSignature("exit status 3") {
+		t.Errorf("bare non-zero exit must not be a crash signature")
+	}
+	if !cronOpenCodeBunCrashSignature("panic(thread 1): Segmentation fault at address 0x10\noh no: Bun has crashed. This indicates a bug in Bun, not your code.") {
+		t.Errorf("expected Bun crash signature to be detected")
+	}
+	if !cronOpenCodeBunCrashSignature("Segmentation fault\nsee https://bun.report/1.3.14") {
+		t.Errorf("expected bun.report link alone to count")
 	}
 }
