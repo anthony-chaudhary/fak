@@ -729,9 +729,13 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequence(s *Session, i
 		return nil, Qwen35MetalForwardSequenceReceipt{}, true, err
 	}
 	base, H, P := s.Cache.Len(), cfg.HiddenSize, len(ids)
-	if base+P > 4096 {
-		return nil, Qwen35MetalForwardSequenceReceipt{}, true, fmt.Errorf("metalgemm: P32 graph attention context %d exceeds 4096", base+P)
-	}
+	// The ordered-panel full attention (mg_qwen35_graph_attention) switches from
+	// the register-resident score<=4096 path to qg_attn_online above 4096, an
+	// O(head_dim) ordered online-softmax recurrence with no fixed context cap.
+	// The former hard 4096 bail here was a pre-online limitation; long prompts
+	// now stay on the batched P32 panel instead of falling back to the CPU
+	// per-token loop (the ~3-7 tok/s prefill wall). Proven by
+	// TestProjectionGraphQwenOrderedLongContextAttention (P32/base20000).
 	// Resolve every resident handle before graph construction. Once Begin succeeds,
 	// any failure remains accepted and cannot replay through the host forward.
 	s.prefillQwen35HybridQ4KMetalUpload()
@@ -896,7 +900,7 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequence(s *Session, i
 //
 // The host full-attention KV prefix is uploaded per full-attention layer and the
 // appended K/V is read back to the host cache, exactly as the P=32 walk does; the
-// context bound (4096) keeps that transfer bounded. This collapses the ~225
+// split-KV/online attention keeps the GPU work bounded as context grows. This collapses the ~225
 // command-buffer round trips of the historical per-GEMV decode to one commit and
 // one completion wait per token.
 //
@@ -916,9 +920,12 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 		return nil, receipt, false, nil
 	}
 	base, H, P := s.Cache.Len(), cfg.HiddenSize, 1
-	if base+P > 4096 {
-		return nil, receipt, false, nil
-	}
+	// The decode full-attention route is uncapped: above 2048 context
+	// mg_qwen35_graph_attention uses split-KV (qg_attn_split + qg_attn_combine,
+	// one SIMDgroup per (head, KV split)), below it the ordered qg_attn_online;
+	// neither has the historical score[4096] register array. Guarding at 4096
+	// here would strand --native-context-tokens beyond 4096 on the slow host
+	// per-token path, so the decode accepts the same long context prefill does.
 	// Resolve every resident handle before graph construction. Once Begin succeeds,
 	// a failure remains accepted and cannot replay through the host forward.
 	s.prefillQwen35HybridQ4KMetalUpload()

@@ -328,10 +328,11 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 			const panelTokens = 32
 			nPanels := len(ids) / panelTokens
 			if nPanels > 0 {
-				base := s.Cache.Len()
-				if base+len(ids) > 4096 {
-					panic(s.failQwen35MetalForwardSequence(fmt.Errorf("metalgemm: P32 graph attention context %d exceeds 4096", base+len(ids))))
-				}
+				// The P32 panel attention has no 4096 cap: mg_qwen35_graph_attention
+				// uses qg_attn_online (O(head_dim) ordered online softmax) above
+				// 4096 context, so a long prompt stays on the batched panel rather
+				// than being forced through the CPU per-token loop. See
+				// TestProjectionGraphQwenOrderedLongContextAttention.
 				var agg Qwen35MetalForwardSequenceReceipt
 				var aggValid bool
 				selectedPanels := nPanels
