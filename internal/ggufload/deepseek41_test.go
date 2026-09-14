@@ -575,6 +575,127 @@ func TestDeepSeek41GGUFMoEOnlyHeaderDerivesConfig(t *testing.T) {
 	}
 }
 
+// vcruzQ2KReceiptMeta reconstructs the EXACT header shape the physical loader
+// receipt recorded for the published vcruz305/DeepSeek-V4.1-Flash-GGUF Q2_K
+// shard, built from a clean public HEAD at commit f75ae93f6
+// (docs/benchmarks/receipts/deepseek-v4-loader-admission-strix3-20260913-hardware.json
+// "observed_metadata"). That run REFUSED an otherwise-loadable artifact with
+// `gguf: missing deepseek41.feed_forward_length`. The observed set is used
+// verbatim: an MoE-only deepseek41 header (expert_count/used/shared/ffn), the
+// vcruz Engram dialect (nested head_count/key_length/max_ngram_size, INT32
+// layer_ids), the indexer + compress_ratios + hyper_connection axes, and NO
+// dense feed_forward_length and NO ds4 engram.encoding/rows/compressed_vocab_size.
+func vcruzQ2KReceiptMeta() map[string]Value {
+	const arch = "deepseek41"
+	p := arch + "."
+	primes := make([]uint64, 2*(4-1)*8)
+	for i := range primes {
+		primes[i] = 16000057 + uint64(i)
+	}
+	return map[string]Value{
+		"general.architecture":                 {Type: TypeString, Value: arch},
+		p + "embedding_length":                 {Type: TypeUint64, Value: uint64(5120)},
+		p + "block_count":                      {Type: TypeUint64, Value: uint64(40)},
+		p + "attention.head_count":             {Type: TypeUint64, Value: uint64(128)},
+		p + "attention.layer_norm_rms_epsilon": {Type: TypeFloat32, Value: float32(1e-6)},
+		// No p+"feed_forward_length": the publisher emits none (the receipt's
+		// dense_feed_forward_length_present=false).
+
+		// MoE FFN axis (observed).
+		p + "expert_count":                      {Type: TypeUint64, Value: uint64(384)},
+		p + "expert_used_count":                 {Type: TypeUint64, Value: uint64(6)},
+		p + "expert_feed_forward_length":        {Type: TypeUint64, Value: uint64(2304)},
+		p + "expert_shared_count":               {Type: TypeUint64, Value: uint64(1)},
+		p + "expert_shared_feed_forward_length": {Type: TypeUint64, Value: uint64(2304)},
+
+		// MLA latent-attention axis.
+		p + "attention.q_lora_rank":      {Type: TypeUint64, Value: uint64(1280)},
+		p + "attention.kv_lora_rank":     {Type: TypeUint64, Value: uint64(512)},
+		p + "attention.key_length_mla":   {Type: TypeUint64, Value: uint64(512)},
+		p + "attention.value_length_mla": {Type: TypeUint64, Value: uint64(512)},
+		p + "attention.qk_nope_head_dim": {Type: TypeUint64, Value: uint64(448)},
+		p + "attention.qk_rope_head_dim": {Type: TypeUint64, Value: uint64(64)},
+
+		// Indexer axis present (observed attention.indexer.present=true).
+		p + "attention.indexer.head_count": {Type: TypeUint64, Value: uint64(32)},
+		p + "attention.indexer.key_length": {Type: TypeUint64, Value: uint64(128)},
+		p + "attention.indexer.top_k":      {Type: TypeUint64, Value: uint64(512)},
+
+		// Compression ratios present (observed) + hyper-connection axis.
+		p + "attention.compress_ratios": vcruzI32Array([]int32{1, 2, 4}),
+		p + "hyper_connection.count":    {Type: TypeUint64, Value: uint64(4)},
+		p + "hyper_connection.epsilon":  {Type: TypeFloat32, Value: float32(1e-6)},
+
+		// vcruz Engram dialect (observed); NO encoding/rows/compressed_vocab_size.
+		p + "engram.layer_ids":      vcruzI32Array([]int32{1, 14}),
+		p + "engram.head_count":     {Type: TypeUint32, Value: uint32(8)},
+		p + "engram.key_length":     {Type: TypeUint32, Value: uint32(256)},
+		p + "engram.max_ngram_size": {Type: TypeUint32, Value: uint32(4)},
+		p + "engram.primes":         vcruzU64Array(primes),
+		p + "engram.multipliers":    vcruzU64Array([]uint64{35184372088831, 35184372088829}),
+		p + "engram.offsets":        vcruzU64Array([]uint64{0, 1}),
+		p + "engram.token_map":      vcruzI32Array([]int32{7, 8, 9}),
+		p + "engram.pad_id":         {Type: TypeUint32, Value: uint32(0)},
+	}
+}
+
+// TestDeepSeek41Q2KAdmission is the acceptance witness the #13010 tracking issue
+// names. It reproduces the EXACT published-artifact header that physical commit
+// f75ae93f6 REFUSED on Strix Halo (`missing deepseek41.feed_forward_length`) and
+// asserts the current loader admits it and reaches every V4.1 axis. It is the
+// regression guard for issue #13010's dense-FFN derive, and it fails loud if the
+// conditional derive or the Engram converter-key read is ever removed.
+func TestDeepSeek41Q2KAdmission(t *testing.T) {
+	meta := vcruzQ2KReceiptMeta()
+	f := &File{Metadata: meta}
+
+	cfg, err := f.Config()
+	if err != nil {
+		t.Fatalf("Config on the exact f75ae93f6 Q2_K header: %v (the physical receipt refused here; current trunk must admit)", err)
+	}
+	if cfg.ModelType != "deepseek41" {
+		t.Errorf("ModelType = %q, want deepseek41", cfg.ModelType)
+	}
+	if cfg.NumLayers != 40 || cfg.HiddenSize != 5120 {
+		t.Errorf("geometry = layers:%d hidden:%d, want 40/5120", cfg.NumLayers, cfg.HiddenSize)
+	}
+	// The dense width is derived from the expert width (the exact f75ae93f6
+	// refusal site), and the MoE axes are actually read.
+	if cfg.IntermediateSize != 2304 {
+		t.Errorf("IntermediateSize = %d, want 2304 (derived from expert_feed_forward_length)", cfg.IntermediateSize)
+	}
+	if cfg.NumExperts != 384 || cfg.NumExpertsPerTok != 6 || cfg.NSharedExperts != 1 {
+		t.Errorf("MoE axes = experts:%d topk:%d shared:%d, want 384/6/1", cfg.NumExperts, cfg.NumExpertsPerTok, cfg.NSharedExperts)
+	}
+	// The V4.1-specific axes the receipt recorded as present were reached.
+	if len(cfg.CompressRatios) != 3 {
+		t.Errorf("CompressRatios = %v, want 3 entries from attention.compress_ratios", cfg.CompressRatios)
+	}
+	if cfg.IndexNHeads != 32 || cfg.IndexHeadDim != 128 || cfg.IndexTopK != 512 {
+		t.Errorf("indexer axes = n_heads:%d head_dim:%d top_k:%d, want 32/128/512", cfg.IndexNHeads, cfg.IndexHeadDim, cfg.IndexTopK)
+	}
+	if cfg.HCMult != 4 {
+		t.Errorf("HCMult = %d, want 4", cfg.HCMult)
+	}
+	if f.DeepSeek41Engram == nil {
+		t.Fatal("f.DeepSeek41Engram is nil; the vcruz Engram declaration was not retained")
+	}
+	if len(f.DeepSeek41Engram.LayerIDs) != 2 || f.DeepSeek41Engram.NHeads != 8 || f.DeepSeek41Engram.HeadDim != 256 {
+		t.Errorf("Engram not retained: layer_ids=%v n_heads=%d head_dim=%d",
+			f.DeepSeek41Engram.LayerIDs, f.DeepSeek41Engram.NHeads, f.DeepSeek41Engram.HeadDim)
+	}
+
+	// Negative control: without ANY FFN width the header must still refuse, and
+	// the refusal must name the dense key (no silent derive, no zero-fill).
+	delete(meta, "deepseek41.expert_feed_forward_length")
+	delete(meta, "deepseek41.expert_shared_feed_forward_length")
+	if _, err := (&File{Metadata: meta}).Config(); err == nil {
+		t.Fatal("Config admitted a header with neither dense nor expert feed_forward_length")
+	} else if !strings.Contains(err.Error(), "feed_forward_length") {
+		t.Fatalf("refusal %q does not name feed_forward_length", err)
+	}
+}
+
 // vcruzI32Array builds a GGUF INT32 metadata array (the width the vcruz305
 // converter writes for engram.layer_ids and engram.token_map).
 func vcruzI32Array(values []int32) Value {
