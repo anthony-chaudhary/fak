@@ -281,6 +281,13 @@ type Session struct {
 	// (the default, expert_ring_prefetch.go, #5614) or discovered one expert at a time as the GEMMs
 	// reach for it. Inert without a ring, like every knob above it.
 	ExpertPrefetch ExpertPrefetchMode
+	// ExpertRingBatchAware enables the batch-aware hot-set policy (expert_ring_policy.go, #1295).
+	// It couples the resident hot-set budget and prefetch aggressiveness to ExpertAdmittedBatch.
+	// Zero value (Enabled=false) is OFF and leaves the static budget byte-for-byte unchanged.
+	ExpertRingBatchAware BatchAwareExpertCachePolicy
+	// ExpertAdmittedBatch is the decode batch size the governor admitted for this session; 0/1 is the
+	// default-off single-stream case. Inert unless ExpertRingBatchAware.Enabled.
+	ExpertAdmittedBatch int
 	// expertRing is the bounded routed-expert ring, built lazily on the first routed-expert staging
 	// when ExpertRingBytes > 0 and freed by Close. nil on every session that never declared a budget.
 	// When sharedRing is set it points at THAT ring instead, so every routed-expert path — demand,

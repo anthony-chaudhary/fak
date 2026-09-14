@@ -1,6 +1,7 @@
 package model
 
 import (
+	"math"
 	"path/filepath"
 	"testing"
 
@@ -380,5 +381,221 @@ func TestExpertRingPolicySwapRejectsInvalidAndNoopsSamePolicy(t *testing.T) {
 	if got := s.ExpertRing(); got != beforeStats || len(s.ExpertRingTrace().Events) != len(beforeTrace.Events) ||
 		len(s.expertRing.heat) != heatLen || len(s.expertRing.lastUse) != lastUseLen || s.expertRing.clock != clock || s.expertRing.accesses != accesses {
 		t.Fatalf("same-policy request changed epoch or policy-local state")
+	}
+}
+
+// expertBatchAwareSession is expertPolicySession plus the batch-aware hot-set knobs (#1295), so two
+// runs over the same workload differ only in the batch-aware policy and the admitted batch.
+func expertBatchAwareSession(m *Model, ringBytes int64, policy BatchAwareExpertCachePolicy, batch int) *Session {
+	s := expertPolicySession(m, ringBytes, ExpertRingEvictLRU)
+	s.ExpertRingBatchAware = policy
+	s.ExpertAdmittedBatch = batch
+	return s
+}
+
+// TestBatchAwareHotSetBudgetScalesWithAdmittedBatch pins the byte-level rule the policy exists for:
+// the multiplier is 1.0 unless the policy is enabled AND the admitted batch exceeds one stream, the
+// scale grows monotonically with the batch, and the MaxScale ceiling — not the linear term — is the
+// bound at large batch. The overflow guard must saturate HIGH, never wrap negative: a scaled budget
+// is a fit CEILING, so clamping high is the conservative direction.
+func TestBatchAwareHotSetBudgetScalesWithAdmittedBatch(t *testing.T) {
+	const base = int64(1 << 20)
+	off := BatchAwareExpertCachePolicy{}
+	// Disabled: base exactly, whatever the batch — including a zero-value policy at a large batch.
+	for _, batch := range []int{-1, 0, 1, 16} {
+		if got := BatchAwareHotSetBytes(base, batch, off); got != base {
+			t.Fatalf("disabled policy at batch %d returned %d, want base %d", batch, got, base)
+		}
+	}
+	// Enabled but batch <= 1: still the static budget, because one stream has nothing to share.
+	on := BatchAwareExpertCachePolicy{Enabled: true, PerStreamGain: 0.25, MaxScale: 3}
+	for _, batch := range []int{-1, 0, 1} {
+		if got := BatchAwareHotSetBytes(base, batch, on); got != base {
+			t.Fatalf("enabled policy at batch %d returned %d, want base %d", batch, got, base)
+		}
+	}
+	if got := on.BatchScale(1); got != 1.0 {
+		t.Fatalf("BatchScale(1)=%v, want exactly 1.0", got)
+	}
+
+	// Enabled and batch > 1: strictly increasing, and batch 1 is still the base.
+	prev := base
+	for _, batch := range []int{1, 2, 4, 8, 16} {
+		got := BatchAwareHotSetBytes(base, batch, on)
+		if batch == 1 {
+			if got != base {
+				t.Fatalf("batch 1 with an enabled policy returned %d, want base %d", got, base)
+			}
+		} else if got <= prev {
+			t.Fatalf("budget did not grow: batch %d returned %d, not more than %d", batch, got, prev)
+		}
+		prev = got
+	}
+	if got := BatchAwareHotSetBytes(base, 100, on); got != base*3 {
+		t.Fatalf("MaxScale cap not enforced: batch 100 returned %d, want base*3 = %d", got, base*3)
+	}
+	if got := on.BatchScale(100); got != 3.0 {
+		t.Fatalf("BatchScale(100)=%v, want the MaxScale ceiling 3.0", got)
+	}
+
+	// Overflow guard: a huge base under a huge scale must saturate positive, never wrap negative.
+	huge := BatchAwareExpertCachePolicy{Enabled: true, PerStreamGain: 1e9, MaxScale: 1e18}
+	got := BatchAwareHotSetBytes(math.MaxInt64, 16, huge)
+	if got <= 0 {
+		t.Fatalf("overflow guard returned %d; a scaled budget must saturate high rather than wrap negative", got)
+	}
+	if got != math.MaxInt64 {
+		t.Fatalf("overflow guard returned %d, want saturation at MaxInt64", got)
+	}
+}
+
+// TestBatchAwarePolicyDefaultOffIsStaticBudget is the byte-for-byte default-off witness: a zero-value
+// policy changes no budget at any batch, and a session that declares the policy but leaves it DISABLED
+// drives an IDENTICAL ledger at batch 8 to the one it drives at batch 1. That is the guarantee that
+// makes the knob safe to leave in a session that never turns it on.
+func TestBatchAwarePolicyDefaultOffIsStaticBudget(t *testing.T) {
+	const base = int64(1 << 20)
+	zero := BatchAwareExpertCachePolicy{}
+	for _, batch := range []int{0, 1, 2, 8, 64} {
+		if got := BatchAwareHotSetBytes(base, batch, zero); got != base {
+			t.Fatalf("zero-value policy at batch %d returned %d, want base %d", batch, got, base)
+		}
+	}
+
+	const H, E = 256, 8
+	m := expertRingTestModel(t, H, E)
+	perWeight := expertRingWeightBytes(t, m)
+	budget := perWeight * 6
+	window := expertJitterWindow(2, 6)
+
+	atOne := expertBatchAwareSession(m, budget, BatchAwareExpertCachePolicy{}, 1)
+	defer atOne.Close()
+	low := driveExpertWindow(atOne, m, window)
+
+	atEight := expertBatchAwareSession(m, budget, BatchAwareExpertCachePolicy{}, 8)
+	defer atEight.Close()
+	high := driveExpertWindow(atEight, m, window)
+
+	if low != high {
+		t.Fatalf("a DISABLED policy changed the ledger at batch 8 vs batch 1: %+v vs %+v", high, low)
+	}
+	if low.BudgetBytes != budget {
+		t.Fatalf("ring budget moved under a disabled policy: %d, want %d", low.BudgetBytes, budget)
+	}
+	if atOne.expertRing.budget() != atEight.expertRing.budget() {
+		t.Fatalf("ring budget differs across runs: %d vs %d", atOne.expertRing.budget(), atEight.expertRing.budget())
+	}
+}
+
+// TestBatchAwarePrefetchCoversMoreExpertsAtLargerBatch is the policy's whole point on the live seam:
+// at the SAME ring budget, enabling the rule and admitting a larger batch lets the prefetch stage a
+// longer prefix of the activated set, so more experts are covered before any GEMM runs. The ring's
+// own BudgetBytes is unchanged in both runs — the policy projects an EFFECTIVE ceiling for the fit
+// comparison; it does not resize the ring.
+func TestBatchAwarePrefetchCoversMoreExpertsAtLargerBatch(t *testing.T) {
+	const H, E, K = 256, 8, 4
+	m := expertPrefetchModel(t, H, E, K)
+	perWeight := expertRingWeightBytes(t, m)
+	budget := perWeight * 3 * 2 // room for two of the four activated experts at scale 1
+
+	policy := BatchAwareExpertCachePolicy{Enabled: true, PerStreamGain: DefaultBatchAwarePerStreamGain, MaxScale: 3}
+
+	atOne, _ := expertPrefetchSession(m, budget)
+	defer atOne.Close()
+	atOne.ExpertRingBatchAware = policy
+	atOne.ExpertAdmittedBatch = 1
+	moeFFN{}.apply(m, 0, expertRingTestInput(H), sessionQ4KKernel{s: atOne})
+
+	atSixteen, _ := expertPrefetchSession(m, budget)
+	defer atSixteen.Close()
+	atSixteen.ExpertRingBatchAware = policy
+	atSixteen.ExpertAdmittedBatch = 16
+	moeFFN{}.apply(m, 0, expertRingTestInput(H), sessionQ4KKernel{s: atSixteen})
+
+	one, sixteen := atOne.ExpertRing(), atSixteen.ExpertRing()
+	t.Logf("covered: batch1=%d batch16=%d (budget=%d)", one.ActivatedCovered, sixteen.ActivatedCovered, budget)
+
+	if one.ActivatedCovered >= sixteen.ActivatedCovered {
+		t.Fatalf("batch 16 covered %d experts, not more than batch 1's %d; the batch-aware ceiling bought no prefix",
+			sixteen.ActivatedCovered, one.ActivatedCovered)
+	}
+	if one.ActivatedExperts != K || sixteen.ActivatedExperts != K {
+		t.Fatalf("coverage meter counted %d/%d experts, want the whole top-%d in both runs", one.ActivatedExperts, sixteen.ActivatedExperts, K)
+	}
+	if one.BudgetBytes != budget || sixteen.BudgetBytes != budget {
+		t.Fatalf("the policy resized the ring: budget %d/%d, want %d", one.BudgetBytes, sixteen.BudgetBytes, budget)
+	}
+	if sixteen.ActivatedCovered > K {
+		t.Fatalf("batch 16 covered %d experts, more than the %d the router activated", sixteen.ActivatedCovered, K)
+	}
+}
+
+// TestBatchAwareReceiptRecordsHitRateChange witnesses the telemetry, not an optimization: the receipt
+// must RECORD the batch-aware effect and the ring's own measured hit rate, with BaseBudget equal to
+// the ring budget, Effective equal to BatchAwareHotSetBytes at the admitted batch, and a delta that is
+// exactly the difference of the two rates. It deliberately does NOT claim the hit rate rises.
+func TestBatchAwareReceiptRecordsHitRateChange(t *testing.T) {
+	const H, E = 256, 8
+	m := expertRingTestModel(t, H, E)
+	perWeight := expertRingWeightBytes(t, m)
+	budget := perWeight * 6
+	window := expertJitterWindow(2, 6)
+
+	// Policy OFF: the receipt is the zero value — the third default-off witness.
+	off := expertBatchAwareSession(m, budget, BatchAwareExpertCachePolicy{}, 8)
+	defer off.Close()
+	driveExpertWindow(off, m, window)
+	if got := off.BatchAwareReceipt(); got != (BatchAwarePolicyReceipt{}) {
+		t.Fatalf("receipt for a disabled policy = %+v, want the zero value", got)
+	}
+
+	const batch = 8
+	policy := BatchAwareExpertCachePolicy{Enabled: true, PerStreamGain: DefaultBatchAwarePerStreamGain, MaxScale: 4}
+	on := expertBatchAwareSession(m, budget, policy, batch)
+	defer on.Close()
+	driveExpertWindow(on, m, window)
+
+	st := on.ExpertRing()
+	r := on.BatchAwareReceipt()
+	t.Logf("receipt: scale=%.3f base=%d effective=%d hits=%d pageIns=%d", r.Scale, r.BaseBudgetBytes, r.EffectiveBudgetBytes, st.Hits, st.PageIns)
+
+	if !r.Enabled {
+		t.Fatal("receipt from an enabled policy reports Enabled=false")
+	}
+	if r.Batch != batch {
+		t.Fatalf("receipt Batch=%d, want the admitted %d", r.Batch, batch)
+	}
+	if r.Scale <= 1 {
+		t.Fatalf("receipt Scale=%v, want > 1 at batch %d", r.Scale, batch)
+	}
+	if r.EffectiveBudgetBytes <= r.BaseBudgetBytes {
+		t.Fatalf("receipt effective %d not above base %d; the rule recorded no projection", r.EffectiveBudgetBytes, r.BaseBudgetBytes)
+	}
+	if r.BaseBudgetBytes != st.BudgetBytes {
+		t.Fatalf("receipt base %d, want the ring budget %d", r.BaseBudgetBytes, st.BudgetBytes)
+	}
+	wantEffective := BatchAwareHotSetBytes(st.BudgetBytes, batch, policy)
+	if r.EffectiveBudgetBytes != wantEffective {
+		t.Fatalf("receipt effective %d, want BatchAwareHotSetBytes(budget, %d, policy) = %d", r.EffectiveBudgetBytes, batch, wantEffective)
+	}
+
+	// Recompute the ring's own rate from its ledger rather than trusting the receipt's own copy.
+	var wantRate float64
+	if den := st.Hits + st.PageIns; den > 0 {
+		wantRate = float64(st.Hits) / float64(den)
+	}
+	if r.HitRateBase != wantRate {
+		t.Fatalf("HitRateBase=%v, want the ring's own Hits/(Hits+PageIns)=%v (%d/%d)", r.HitRateBase, wantRate, st.Hits, st.Hits+st.PageIns)
+	}
+	if r.HitRateBatch != wantRate {
+		t.Fatalf("HitRateBatch=%v, want the ring's own measured rate %v", r.HitRateBatch, wantRate)
+	}
+	if r.HitRateDelta != r.HitRateBatch-r.HitRateBase {
+		t.Fatalf("HitRateDelta=%v, want HitRateBatch-HitRateBase=%v", r.HitRateDelta, r.HitRateBatch-r.HitRateBase)
+	}
+	for name, v := range map[string]float64{"scale": r.Scale, "base": r.HitRateBase, "batch": r.HitRateBatch, "delta": r.HitRateDelta} {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			t.Fatalf("%s is not finite: %v", name, v)
+		}
 	}
 }

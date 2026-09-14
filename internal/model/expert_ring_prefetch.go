@@ -212,10 +212,14 @@ func (s *Session) prefetchActivatedExperts(layer int, picks []routePick) {
 	r.prefetching = true
 	defer func() { r.prefetching = false }()
 
-	budget := r.budget()
+	// The ring's own budget is fixed; the batch-aware policy projects a larger EFFECTIVE hot-set
+	// ceiling when the admitted batch justifies one (#1295). Disabled or batch<=1 returns r.budget()
+	// byte-for-byte. The larger effective ceiling admits a longer prefetched prefix, which is the
+	// policy's aggressiveness lever; the break-on-partial prefix semantics below are untouched.
+	effective := BatchAwareHotSetBytes(r.budget(), s.ExpertAdmittedBatch, s.ExpertRingBatchAware)
 	var reserved int64
 	for _, p := range plans {
-		if reserved+p.bytes > budget {
+		if reserved+p.bytes > effective {
 			break // do not prefetch what cannot stay; the rest of the set is lower-confidence anyway
 		}
 		pinned := r.isExpertPinned(layer, p.expert)

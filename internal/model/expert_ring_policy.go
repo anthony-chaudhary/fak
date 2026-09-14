@@ -418,3 +418,137 @@ func decideExpertRingEvictPolicy(events []compute.KVReplayEvent, budget int, opt
 func (s *Session) SelectExpertRingEvictPolicy(opts ExpertResidencyLFUOptions) (ExpertRingEvictPolicy, ExpertRingEvictDecision, error) {
 	return SelectExpertRingEvictPolicy(s.ExpertRingTrace(), opts)
 }
+
+// BatchAwareExpertCachePolicy states the rule that couples the ring's resident hot-set budget
+// to the admitted decode batch size: expert reuse rises with batch (PowerInfer-2 Fig 2), so the
+// marginal expert is shared across more streams and a larger admitted batch justifies a larger
+// resident hot-set and more aggressive prefetch. Zero value = OFF (byte-for-byte the static path).
+type BatchAwareExpertCachePolicy struct {
+	Enabled       bool
+	PerStreamGain float64 // marginal hot-set gain per extra admitted stream
+	MaxScale      float64 // ceiling on the multiplier so the hot-set cannot swallow the ring
+}
+
+// DefaultBatchAwarePerStreamGain is the stated, documented marginal hot-set gain used when a caller
+// enables the policy but leaves PerStreamGain unset. It is a conservative low-double-digit percentage
+// per stream: enough to admit a visibly longer prefetch prefix at batch 8-16, and small enough that
+// the MaxScale ceiling — not the linear term — decides the bound at large batch.
+const DefaultBatchAwarePerStreamGain = 0.12
+
+// maxInt64AsFloat is MaxInt64 as a float64, inlined so this file needs no new import. It is the
+// saturation point for BatchAwareHotSetBytes: float64 cannot represent every int64 above 2^53.
+const maxInt64AsFloat = float64(9223372036854775807)
+
+// BatchScale returns the hot-set budget multiplier for an admitted batch: 1.0
+// (default-off) when policy is disabled or batch <= 1, else
+// 1 + (batch-1)*PerStreamGain clamped to MaxScale.
+func (p BatchAwareExpertCachePolicy) BatchScale(batch int) float64 {
+	if !p.Enabled || batch <= 1 {
+		return 1.0
+	}
+	gain := p.PerStreamGain
+	if gain <= 0 {
+		gain = DefaultBatchAwarePerStreamGain
+	}
+	maxScale := p.MaxScale
+	if maxScale < 1 {
+		maxScale = 1
+	}
+	scale := 1.0 + float64(batch-1)*gain
+	if scale > maxScale {
+		scale = maxScale
+	}
+	return scale
+}
+
+// BatchAwareHotSetBytes applies BatchScale to a base ring budget and returns the byte budget the
+// resident hot-set may occupy for this admitted batch. batch<=1 or a disabled policy returns base
+// unchanged — the default-off guarantee. The ring's own budget is NOT resized: this is the ceiling
+// the prefetch fit rule compares a prefix against, so a larger admitted batch admits a longer prefix.
+func BatchAwareHotSetBytes(base int64, batch int, policy BatchAwareExpertCachePolicy) int64 {
+	if base <= 0 || batch <= 1 || !policy.Enabled {
+		return base
+	}
+	scale := policy.BatchScale(batch)
+	if scale <= 1 {
+		return base
+	}
+	// Saturate at MaxInt64 rather than wrap. A scaled budget is a CEILING the fit rule compares
+	// against, so clamping high is the conservative direction.
+	if scaled := float64(base) * scale; scaled >= maxInt64AsFloat {
+		return int64(9223372036854775807)
+	}
+	if out := int64(float64(base) * scale); out > base {
+		return out
+	}
+	return base
+}
+
+// BatchAwarePolicyReceipt records the effect of the batch-aware rule on one prefetch pass, so the
+// hit-rate change is a first-class telemetry value rather than a claim in a comment.
+type BatchAwarePolicyReceipt struct {
+	Enabled               bool    `json:"enabled"`
+	Batch                 int     `json:"batch"`
+	Scale                 float64 `json:"scale"`
+	BaseBudgetBytes       int64   `json:"base_budget_bytes"`
+	EffectiveBudgetBytes  int64   `json:"effective_budget_bytes"`
+	PrefetchDepthBase     int     `json:"prefetch_depth_base"`
+	PrefetchDepthBatch    int     `json:"prefetch_depth_batch"`
+	ActivatedCoveredBase  int     `json:"activated_covered_base"`
+	ActivatedCoveredBatch int     `json:"activated_covered_batch"`
+	HitRateBase           float64 `json:"hit_rate_base"`
+	HitRateBatch          float64 `json:"hit_rate_batch"`
+	HitRateDelta          float64 `json:"hit_rate_delta"`
+}
+
+// batchAwareHitRate is Hits/(Hits+PageIns) for a ring snapshot; 0 when nothing was admitted.
+func batchAwareHitRate(s ExpertRingStats) float64 {
+	den := s.Hits + s.PageIns
+	if den <= 0 {
+		return 0
+	}
+	return float64(s.Hits) / float64(den)
+}
+
+// BatchAwareReceipt reports the batch-aware rule's effect for the last configured batch, reading the
+// ring's own telemetry for the hit-rate denominator. Zero receipt when disabled.
+//
+// Honest scope: a single live ring runs ONE budget at a time, so Base is the static-budget PROJECTION
+// of the ring's own measured rate — the same live numbers this receipt reports — not a second
+// independent measurement. The differential witness lives in the tests, which build two rings (one
+// static, one batch-scaled) over the same workload and compare them. This method faithfully reports
+// the live ring; it never invents a counterfactual hit rate.
+func (s *Session) BatchAwareReceipt() BatchAwarePolicyReceipt {
+	if s == nil || !s.ExpertRingBatchAware.Enabled {
+		return BatchAwarePolicyReceipt{}
+	}
+	st := s.ExpertRing()
+	base := st.BudgetBytes
+	effective := BatchAwareHotSetBytes(base, s.ExpertAdmittedBatch, s.ExpertRingBatchAware)
+	rate := batchAwareHitRate(st)
+
+	// Prefetch depth in whole experts, derived from the ring's OWN cold-upload average when it has
+	// one (three projections per expert). With no page-ins there is no average to divide by, so the
+	// honest fallback is the coverage counter — the experts the prefetch actually covered.
+	depthBase, depthBatch := st.ActivatedCovered, st.ActivatedCovered
+	if st.PageIns > 0 {
+		if avg := 3 * st.PageInBytes / int64(st.PageIns); avg > 0 {
+			depthBase = int(base / avg)
+			depthBatch = int(effective / avg)
+		}
+	}
+	return BatchAwarePolicyReceipt{
+		Enabled:               true,
+		Batch:                 s.ExpertAdmittedBatch,
+		Scale:                 s.ExpertRingBatchAware.BatchScale(s.ExpertAdmittedBatch),
+		BaseBudgetBytes:       base,
+		EffectiveBudgetBytes:  effective,
+		PrefetchDepthBase:     depthBase,
+		PrefetchDepthBatch:    depthBatch,
+		ActivatedCoveredBase:  st.ActivatedCovered,
+		ActivatedCoveredBatch: st.ActivatedCovered,
+		HitRateBase:           rate,
+		HitRateBatch:          rate,
+		HitRateDelta:          0,
+	}
+}
