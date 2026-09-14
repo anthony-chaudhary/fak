@@ -98,6 +98,24 @@ type Qwen35GraphAttentionResult struct {
 	Output, KRaw, KPost, V *GraphResult
 }
 
+// PromptPanelMaxTokens is the widest prompt panel the Qwen3.8 whole-forward graph
+// admits in one command buffer. The ordered-panel kernels (qg_norm/add/swiglu/
+// split/qk/attn/attn_online) and the fused GDN encoder loop generically over the
+// graph's row count; the original witness set {1,2,3,4,32} was a conservative
+// enumeration, not a hardware bound. Widening the admitted set up to this ceiling
+// lets a long prompt ride one commit+terminal-wait per panel instead of one per
+// 32 tokens (issue #13041). Kept as a small multiple of the decode token so the
+// GDN recurrence and KV staging remain in the proven regime.
+const PromptPanelMaxTokens = 128
+
+// PromptPanelWitnessed reports whether the Qwen3.8 graph admits a prompt panel of
+// rows tokens in one whole-forward pass. rows==0 is refused, matching the native
+// qg_ordered_rows() guard; every positive row count up to PromptPanelMaxTokens is
+// admitted.
+func PromptPanelWitnessed(rows int) bool {
+	return rows >= 1 && rows <= PromptPanelMaxTokens
+}
+
 type ProjectionGraph struct {
 	ptr                     unsafe.Pointer
 	p                       int
@@ -581,7 +599,7 @@ func (g *ProjectionGraph) qwenP32Input(input *GraphResult, width int) error {
 }
 
 func qwenOrderedPanel(rows int) bool {
-	return rows == 1 || rows == 2 || rows == 3 || rows == 4 || rows == 32
+	return PromptPanelWitnessed(rows)
 }
 
 func (g *ProjectionGraph) RMSNorm(input *GraphResult, weight []float32, eps float32, gain1p bool) (*GraphResult, error) {
@@ -608,7 +626,7 @@ func (g *ProjectionGraph) LastRMSNorm(input *GraphResult, weight []float32, eps 
 		return nil, errGraphTerminal
 	}
 	if !qwenOrderedPanel(g.p) {
-		return nil, fmt.Errorf("metalgemm: Qwen final RMSNorm panel P=%d outside witnessed set {2,3,4,32}", g.p)
+		return nil, fmt.Errorf("metalgemm: Qwen final RMSNorm panel P=%d outside witnessed set [1,%d]", g.p, PromptPanelMaxTokens)
 	}
 	if err := g.qwenInput(input, g.p, len(weight)); err != nil || eps <= 0 {
 		if err == nil {
@@ -656,7 +674,7 @@ func (g *ProjectionGraph) SplitGatedQ(input *GraphResult, qwidth, hd int) (q, ga
 		return nil, nil, errGraphTerminal
 	}
 	if !qwenOrderedPanel(g.p) {
-		return nil, nil, fmt.Errorf("metalgemm: Qwen gated-Q panel P=%d outside witnessed set {1,2,3,4,32}", g.p)
+		return nil, nil, fmt.Errorf("metalgemm: Qwen gated-Q panel P=%d outside witnessed set [1,%d]", g.p, PromptPanelMaxTokens)
 	}
 	if err = g.qwenInput(input, g.p, 2*qwidth); err != nil || qwidth <= 0 || hd <= 0 || qwidth%hd != 0 {
 		return nil, nil, err
@@ -674,7 +692,7 @@ func (g *ProjectionGraph) FullAttention(q, k, v, gate *GraphResult, qnorm, knorm
 		return Qwen35GraphAttentionResult{}, errGraphTerminal
 	}
 	if !qwenOrderedPanel(g.p) {
-		return Qwen35GraphAttentionResult{}, fmt.Errorf("metalgemm: Qwen full-attention panel P=%d outside witnessed set {1,2,3,4,32}", g.p)
+		return Qwen35GraphAttentionResult{}, fmt.Errorf("metalgemm: Qwen full-attention panel P=%d outside witnessed set [1,%d]", g.p, PromptPanelMaxTokens)
 	}
 	qwidth, kvwidth := nH*hd, nKV*hd
 	for _, check := range []struct {
@@ -727,8 +745,8 @@ func (g *ProjectionGraph) GDN(state *GDNState, mixed, z, b, a *GraphResult, pane
 	if err := g.open(); err != nil {
 		return nil, err
 	}
-	if (g.p < 1 || g.p > 4) && g.p != 32 {
-		return nil, &GDNDeclinedError{Reason: fmt.Sprintf("graph GDN panel P=%d outside witnessed set {1,2,3,4,32}", g.p)}
+	if !PromptPanelWitnessed(g.p) {
+		return nil, &GDNDeclinedError{Reason: fmt.Sprintf("graph GDN panel P=%d outside witnessed set [1,%d]", g.p, PromptPanelMaxTokens)}
 	}
 	geometry, err := state.graphGeometry()
 	if err != nil {

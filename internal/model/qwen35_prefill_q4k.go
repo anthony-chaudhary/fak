@@ -118,6 +118,24 @@ type hybridQ4KGroup func(names []string, Xf []float32, Xq *q8Panel) [][]float32
 // to the historical decode path.
 const Qwen35MetalGDNSequenceForwardPath = "metal/qwen35-gdn-preprojected-sequence-v1"
 
+// PrefillPanelRoundTripBudget is the L1 ceiling on the aggregate command-buffer
+// round-trips a resident-Q4_K Qwen3.8 prefill may spend serving the fixed
+// 256-token L1 prompt, EXCLUSIVE of the host-served tail. It mirrors the private
+// perfpattern DecodeRoundTripBudgetPerToken recipe (issue #13042) without
+// importing the private package: the ceiling is a small per-prompt constant, NOT
+// a function of len/32, so a regression back to one terminal GPU wait per
+// 32-token panel (256/32 == 8 round-trips) trips the assertion instead of merely
+// showing up in a timing table. At the widest witnessed panel
+// (metalgemm.PromptPanelMaxTokens == 128) 256 tokens is exactly two panels, so
+// the budget is 2. PrefillPanelRoundTripBudgetPromptTokens names the prompt the
+// ceiling is fixed at; a longer prompt legitimately needs more panels
+// (O(len/128)) and is not what this L1 guard measures.
+const PrefillPanelRoundTripBudget = 2
+
+// PrefillPanelRoundTripBudgetPromptTokens is the prompt length the
+// PrefillPanelRoundTripBudget ceiling is asserted against.
+const PrefillPanelRoundTripBudgetPromptTokens = 256
+
 // The Darwin implementation installs this factory at package initialization.
 // The model-only type keeps pure-Go builds free of Darwin/cgo GDNState symbols.
 var newQwen35MetalGDNSequenceBackend func() Qwen35GDNPreprojectedSequenceBackend
@@ -325,20 +343,34 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 	var hidden []float32
 	if s.qwen35HAL != nil && s.qwen35HAL.sequenceAccepted {
 		if runner, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalForwardSequenceRunner); ok {
-			const panelTokens = 32
-			nPanels := len(ids) / panelTokens
-			if nPanels > 0 {
-				// The P32 panel attention has no 4096 cap: mg_qwen35_graph_attention
-				// uses qg_attn_online (O(head_dim) ordered online softmax) above
-				// 4096 context, so a long prompt stays on the batched panel rather
-				// than being forced through the CPU per-token loop. See
-				// TestProjectionGraphQwenOrderedLongContextAttention.
+			// The whole-forward graph now witnesses prompt panels up to
+			// metalgemm.PromptPanelMaxTokens (128) tokens in ONE command buffer, so the
+			// prompt is walked in the widest admitted panels instead of the historical
+			// exact-32 panel. The panel count — and therefore the per-panel commit +
+			// terminal GPU wait + host KV readback — drops from O(len/32) to
+			// O(len/128) (#13041). Panels cover the largest multiple-of-32 prefix and a
+			// trailing <32 remainder still rides the historical host path, so the
+			// non-multiple-of-32 and append semantics are unchanged.
+			//
+			// The panel attention has no 4096 cap: mg_qwen35_graph_attention uses
+			// qg_attn_online (O(head_dim) ordered online softmax) above 4096 context, so
+			// a long prompt stays on the batched panel rather than being forced through
+			// the CPU per-token loop. See TestProjectionGraphQwenOrderedLongContextAttention.
+			const panelQuantum = 32
+			panelCover := (len(ids) / panelQuantum) * panelQuantum
+			if panelCover > 0 {
+				nPanels := (panelCover + metalgemm.PromptPanelMaxTokens - 1) / metalgemm.PromptPanelMaxTokens
 				var agg Qwen35MetalForwardSequenceReceipt
 				var aggValid bool
 				selectedPanels := nPanels
 				executedPanels := 0
 				for p := 0; p < nPanels; p++ {
-					panelIDs := ids[p*panelTokens : (p+1)*panelTokens]
+					start := p * metalgemm.PromptPanelMaxTokens
+					end := start + metalgemm.PromptPanelMaxTokens
+					if end > panelCover {
+						end = panelCover
+					}
+					panelIDs := ids[start:end]
 					h, receipt, accepted, err := runner.Qwen35MetalForwardSequence(s, panelIDs)
 					if !accepted {
 						break
@@ -379,7 +411,7 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 					}
 				}
 				if executedPanels > 0 {
-					rem := ids[nPanels*panelTokens:]
+					rem := ids[panelCover:]
 					if len(rem) > 0 {
 						hidden = s.prefillQwen35HybridQ4KHidden(rem)
 						agg.Tokens += len(rem)
