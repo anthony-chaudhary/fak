@@ -36,6 +36,12 @@ typedef struct {
 // 384 simultaneous lane-local states. Keep fixed storage and leave headroom for
 // diagnostics or overlapping construction without reallocating an active table.
 enum { MG_GDN_MAX_OWNERS = 512 };
+
+// MG_GDN_GRAPH_MAX_TOKENS mirrors metalgemm.PromptPanelMaxTokens (graph.go): the
+// conv/QK-norm/recurrent panel kernels all loop generically over `tokens`, so the
+// historical {1,2,3,4,32} admission was a conservative enumeration, not a hardware
+// bound. Keep the two in lockstep for the #13041 wider-panel collapse.
+enum { MG_GDN_GRAPH_MAX_TOKENS = 128 };
 static MGGDNOwner gGDNOwners[MG_GDN_MAX_OWNERS];
 static uint64_t gGDNNextHandle = 1;
 static id<MTLComputePipelineState> gGDNConvPSO;
@@ -567,7 +573,7 @@ void *mg_gdn_graph_encode(void *graph, int owner,
                           void *mixedPtr, void *zPtr, void *bPtr, void *aPtr,
                           const float *convW, const float *aLog, const float *dtBias, const float *norm,
                           int tokens, int nK, int nV, int kHd, int vHd, int convKernel, float eps) {
-    if(!graph||owner<0||owner>=MG_GDN_MAX_OWNERS||!((tokens>=1&&tokens<=4)||tokens==32)||!mixedPtr||!zPtr||!bPtr||!aPtr||!convW||!aLog||!dtBias||!norm||eps<=0||!mg_gdn_pipelines())return NULL;
+    if(!graph||owner<0||owner>=MG_GDN_MAX_OWNERS||!(tokens>=1&&tokens<=MG_GDN_GRAPH_MAX_TOKENS)||!mixedPtr||!zPtr||!bPtr||!aPtr||!convW||!aLog||!dtBias||!norm||eps<=0||!mg_gdn_pipelines())return NULL;
     MGGDNOwner slot;@synchronized(gDev){slot=gGDNOwners[owner];}
     if(slot.conv==NULL||slot.recurrent==NULL||slot.nK!=nK||slot.nV!=nV||slot.kHd!=kHd||slot.vHd!=vHd||slot.convKernel!=convKernel)return NULL;
     int keyDim=nK*kHd,valueDim=nV*vHd,convDim=2*keyDim+valueDim;

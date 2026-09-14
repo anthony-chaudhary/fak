@@ -721,7 +721,13 @@ func qwen35MetalMTPDigestFloats(h hash.Hash, values []float32) {
 }
 
 func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequence(s *Session, ids []int) ([]float32, Qwen35MetalForwardSequenceReceipt, bool, error) {
-	if s == nil || s.M == nil || s.Backend != nil || !s.Q4K || !s.MetalQ4K || len(ids) != 32 || s.qwen35HAL == nil || !s.qwen35HAL.sequenceAccepted {
+	// Admit a prompt panel of any width the Qwen3.8 graph witnesses in one command
+	// buffer (metalgemm.PromptPanelWitnessed), not just the historical exact-32 panel.
+	// A declined width returns accepted=false with KV/state unmutated, so the caller
+	// keeps the historical host path (fail-open). Widening this admission is the
+	// #13041 lever: a long prompt then pays one commit+terminal-wait per panel
+	// instead of one per 32 tokens.
+	if s == nil || s.M == nil || s.Backend != nil || !s.Q4K || !s.MetalQ4K || s.qwen35HAL == nil || !s.qwen35HAL.sequenceAccepted || !metalgemm.PromptPanelWitnessed(len(ids)) {
 		return nil, Qwen35MetalForwardSequenceReceipt{}, false, nil
 	}
 	m, cfg := s.M, s.M.Cfg
@@ -733,8 +739,9 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequence(s *Session, i
 	// the register-resident score<=4096 path to qg_attn_online above 4096, an
 	// O(head_dim) ordered online-softmax recurrence with no fixed context cap.
 	// The former hard 4096 bail here was a pre-online limitation; long prompts
-	// now stay on the batched P32 panel instead of falling back to the CPU
-	// per-token loop (the ~3-7 tok/s prefill wall). Proven by
+	// now stay on the batched wide panel (up to metalgemm.PromptPanelMaxTokens
+	// tokens per call, #13041) instead of falling back to the CPU per-token loop
+	// (the ~3-7 tok/s prefill wall). Proven by
 	// TestProjectionGraphQwenOrderedLongContextAttention (P32/base20000).
 	// Resolve every resident handle before graph construction. Once Begin succeeds,
 	// any failure remains accepted and cannot replay through the host forward.

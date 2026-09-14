@@ -11,11 +11,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
 
-// TestMetalPrefillChunkedGraph is the acceptance witness for Issue #12718:
-// "perf(model): route admitted Qwen Metal prefill through P32 panels"
-// It proves:
+// TestMetalPrefillChunkedGraph is the acceptance witness for Issue #12718 and,
+// after #13041, for the wider-panel collapse:
 //  1. One already-admitted Qwen3.8 Metal sequence session executes a normal P128
-//     prefill as consecutive P32 whole-forward panels.
+//     prefill as a single whole-forward panel, not one P32 panel per 32 tokens.
 //  2. Complete aggregate receipt counters are produced with zero fallback.
 //  3. Bit-exact / numerical parity of logits, greedy continuation, and KV cache.
 //  4. Preserves non-multiple-of-32 remainder and append semantics.
@@ -25,7 +24,7 @@ func TestMetalPrefillChunkedGraph(t *testing.T) {
 	setQ4KSDOTForTest(false)
 	t.Cleanup(func() { setQ4KSDOTForTest(true) })
 
-	t.Run("portable_fixture_p128_four_p32_panels", func(t *testing.T) {
+	t.Run("portable_fixture_p128_one_panel", func(t *testing.T) {
 		cfg := qwen35HybridQ4KTestCfg()
 		cfg.NumHeads = 24
 		cfg.NumKVHeads = 4
@@ -48,7 +47,7 @@ func TestMetalPrefillChunkedGraph(t *testing.T) {
 		t.Cleanup(control.Close)
 		wantLogits := control.Prefill(prompt)
 
-		// Candidate arm (ordered P32 whole-forward panels)
+		// Candidate arm (wide whole-forward panels)
 		candidate := m.NewSession()
 		candidate.Q4K, candidate.MetalQ4K = true, true
 		t.Cleanup(candidate.Close)
@@ -73,20 +72,22 @@ func TestMetalPrefillChunkedGraph(t *testing.T) {
 		if receipt.Tokens != 128 {
 			t.Fatalf("receipt.Tokens = %d, want 128", receipt.Tokens)
 		}
-		if receipt.SelectedPanels != 4 {
-			t.Fatalf("receipt.SelectedPanels = %d, want 4", receipt.SelectedPanels)
+		// #13041 collapse: 128 tokens ride ONE wide panel, so selected/executed and
+		// every per-panel barrier counter fall to 1 instead of len/32 == 4.
+		if receipt.SelectedPanels != 1 {
+			t.Fatalf("receipt.SelectedPanels = %d, want 1 (one 128-token panel)", receipt.SelectedPanels)
 		}
-		if receipt.ExecutedPanels != 4 {
-			t.Fatalf("receipt.ExecutedPanels = %d, want 4", receipt.ExecutedPanels)
+		if receipt.ExecutedPanels != 1 {
+			t.Fatalf("receipt.ExecutedPanels = %d, want 1", receipt.ExecutedPanels)
 		}
-		if receipt.CommandBuffers != 4 {
-			t.Fatalf("receipt.CommandBuffers = %d, want 4 (one per P32 panel)", receipt.CommandBuffers)
+		if receipt.CommandBuffers != 1 {
+			t.Fatalf("receipt.CommandBuffers = %d, want 1 (one wide panel)", receipt.CommandBuffers)
 		}
-		if receipt.TerminalWaits != 4 {
-			t.Fatalf("receipt.TerminalWaits = %d, want 4", receipt.TerminalWaits)
+		if receipt.TerminalWaits != 1 {
+			t.Fatalf("receipt.TerminalWaits = %d, want 1", receipt.TerminalWaits)
 		}
-		if receipt.TerminalReadbacks != 4 {
-			t.Fatalf("receipt.TerminalReadbacks = %d, want 4", receipt.TerminalReadbacks)
+		if receipt.TerminalReadbacks != 1 {
+			t.Fatalf("receipt.TerminalReadbacks = %d, want 1", receipt.TerminalReadbacks)
 		}
 		if receipt.FallbackCount != 0 {
 			t.Fatalf("receipt.FallbackCount = %d, want 0", receipt.FallbackCount)
@@ -103,8 +104,8 @@ func TestMetalPrefillChunkedGraph(t *testing.T) {
 		if candidate.Cache.Len() != 128 {
 			t.Fatalf("candidate cache len = %d, want 128", candidate.Cache.Len())
 		}
-		if candidate.q4kHybridPrefillChunks != 4 {
-			t.Fatalf("candidate.q4kHybridPrefillChunks = %d, want 4", candidate.q4kHybridPrefillChunks)
+		if candidate.q4kHybridPrefillChunks != 1 {
+			t.Fatalf("candidate.q4kHybridPrefillChunks = %d, want 1", candidate.q4kHybridPrefillChunks)
 		}
 
 		// 2. Numerical logits and continuation parity
@@ -193,8 +194,9 @@ func TestMetalPrefillChunkedGraph(t *testing.T) {
 		if !receipt.Available || receipt.Path != Qwen35MetalGDNSequenceForwardPath {
 			t.Fatalf("long-context receipt=%+v", receipt)
 		}
-		if receipt.SelectedPanels != 129 || receipt.ExecutedPanels != 129 {
-			t.Fatalf("long-context panels selected/executed=%d/%d, want 129/129", receipt.SelectedPanels, receipt.ExecutedPanels)
+		// #13041: 4128 tokens = 33 wide (128-token) panels, not 129 P32 panels.
+		if receipt.SelectedPanels != 33 || receipt.ExecutedPanels != 33 {
+			t.Fatalf("long-context panels selected/executed=%d/%d, want 33/33", receipt.SelectedPanels, receipt.ExecutedPanels)
 		}
 		if receipt.FallbackCount != 0 {
 			t.Fatalf("long-context fell back off the batched panel: FallbackCount=%d", receipt.FallbackCount)
@@ -250,11 +252,12 @@ func TestMetalPrefillChunkedGraph(t *testing.T) {
 		if receipt.Tokens != 135 {
 			t.Fatalf("receipt.Tokens = %d, want 135", receipt.Tokens)
 		}
-		if receipt.SelectedPanels != 4 {
-			t.Fatalf("receipt.SelectedPanels = %d, want 4", receipt.SelectedPanels)
+		// #13041: 135 tokens = one wide 128-token panel + a 7-token host remainder.
+		if receipt.SelectedPanels != 1 {
+			t.Fatalf("receipt.SelectedPanels = %d, want 1", receipt.SelectedPanels)
 		}
-		if receipt.ExecutedPanels != 4 {
-			t.Fatalf("receipt.ExecutedPanels = %d, want 4", receipt.ExecutedPanels)
+		if receipt.ExecutedPanels != 1 {
+			t.Fatalf("receipt.ExecutedPanels = %d, want 1", receipt.ExecutedPanels)
 		}
 		if candidate.Cache.Len() != 135 {
 			t.Fatalf("candidate cache len = %d, want 135", candidate.Cache.Len())
@@ -324,13 +327,13 @@ func TestMetalPrefillChunkedGraph(t *testing.T) {
 		}
 		candidate.PrefillNoLogits(p1)
 		r1 := candidate.Qwen35MetalForwardSequenceReceipt()
-		if !r1.Available || r1.Tokens != 64 || r1.ExecutedPanels != 2 {
+		if !r1.Available || r1.Tokens != 64 || r1.ExecutedPanels != 1 {
 			t.Fatalf("first chunk receipt=%+v", r1)
 		}
 
 		gotLogits := candidate.Prefill(p2)
 		r2 := candidate.Qwen35MetalForwardSequenceReceipt()
-		if !r2.Available || r2.Tokens != 64 || r2.ExecutedPanels != 2 {
+		if !r2.Available || r2.Tokens != 64 || r2.ExecutedPanels != 1 {
 			t.Fatalf("second chunk receipt=%+v", r2)
 		}
 		if candidate.Cache.Len() != 128 {
