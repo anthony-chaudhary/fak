@@ -633,3 +633,151 @@ func TestSearchDocsCanonicalMultiTermTieBreakerPreservesSingleTermWeights(t *tes
 		t.Fatalf("single=%+v", single)
 	}
 }
+
+// writeInnovationsRepo lays down a dos.toml with three declared lanes plus a
+// CLAIMS.md and an INNOVATIONS-INDEX.md that exercise the innovation parse, the
+// Home->lane join, the repeated table header, and both reconciliation polarities.
+func writeInnovationsRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	dosToml := "[lanes.trees]\n" +
+		"gateway = [\"internal/gateway/**\"]\n" +
+		"kvmmu = [\"internal/kvmmu/**\"]\n" +
+		"ctxplan = [\"internal/ctxplan/**\"]\n" +
+		"model = [\"internal/model/**\"]\n" +
+		"mixedlane = [\"internal/mixedlane/**\"]\n"
+	// gateway: SHIPPED both sides (agree). kvmmu: SHIPPED in CLAIMS, absent from
+	// the index (a CLAIMS-only finding). ctxplan: qualified SHIPPED in the index,
+	// absent from CLAIMS (an index-only finding - the qualifier has no [STUB]).
+	// model: qualified SHIPPED in the index AND SHIPPED in CLAIMS, so it agrees
+	// (proving a qualifier without a rung marker is a pure claim). mixedlane: MIXED
+	// in the index and absent from CLAIMS, so it never produces a finding.
+	claimsMd := "# CLAIMS.md\n" +
+		"- [SHIPPED] internal/gateway speaks OpenAI at the front door.\n" +
+		"- [SHIPPED] internal/kvmmu evicts a span bit-exactly.\n" +
+		"- [SHIPPED] internal/model owns the in-process forward pass.\n"
+	innovationsMd := "# INNOVATIONS INDEX\n\n" +
+		"## A. Safety\n\n" +
+		"| Innovation | Concept it embodies | Home | Status |\n" +
+		"|---|---|---|---|\n" +
+		"| Front door | one binary serves the API | `gateway` | SHIPPED |\n" +
+		"| KV eviction | evict a span | `kvmmu` | MIXED (eviction SHIPPED; live bridge `[STUB]`) |\n\n" +
+		"## B. Context\n\n" +
+		"| Innovation | Concept it embodies | Home | Status |\n" +
+		"|---|---|---|---|\n" +
+		"| Context planner | O(1) resident view | `ctxplan` | SHIPPED (live-loop seam off by default) |\n" +
+		"| Model cache | kernel-owned KV | `model` | SHIPPED (real-traffic cascade unverified) |\n" +
+		"| Mixed lane | spans rungs | `mixedlane` | MIXED (part SHIPPED; bridge `[STUB]`) |\n" +
+		"| Novel thing | an unbound package | `notalaneyet` | SHIPPED |\n"
+	for name, body := range map[string]string{
+		"dos.toml":                  dosToml,
+		"CLAIMS.md":                 claimsMd,
+		"docs/INNOVATIONS-INDEX.md": innovationsMd,
+	} {
+		full := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+func TestParseInnovationsTables(t *testing.T) {
+	c, err := Load(writeInnovationsRepo(t))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(c.Innovations) != 6 {
+		t.Fatalf("parsed %d innovations, want 6 (repeated headers must re-arm): %+v", len(c.Innovations), c.Innovations)
+	}
+	byName := map[string]Innovation{}
+	for _, in := range c.Innovations {
+		byName[in.Name] = in
+	}
+	// A bare Home package binds to the like-named lane.
+	if got := byName["Front door"].HomeLanes; len(got) != 1 || got[0] != "gateway" {
+		t.Errorf("Front door HomeLanes = %v, want [gateway]", got)
+	}
+	// An unknown Home token is kept as a raw label and binds no lane (never fatal).
+	novel := byName["Novel thing"]
+	if len(novel.Home) != 1 || novel.Home[0] != "notalaneyet" || len(novel.HomeLanes) != 0 {
+		t.Errorf("Novel thing = %+v, want raw [notalaneyet] with no bound lane", novel)
+	}
+	// The Part-3 header is a different shape and must not be parsed as a Part-2 row.
+	if _, ok := byName["General concept"]; ok {
+		t.Error("a non-Part-2 table header leaked into Innovations")
+	}
+}
+
+func TestShippedInInnovations(t *testing.T) {
+	cases := []struct {
+		status string
+		want   bool
+	}{
+		{"SHIPPED", true},
+		{"SHIPPED (live-loop seam off by default)", true},
+		{"SHIPPED (real-traffic cascade unverified)", true},
+		{"SHIPPED (live transport [STUB])", false},
+		{"SHIPPED (rung-2/3 [SIMULATED])", false},
+		{"MIXED (governor SHIPPED; live transport [STUB])", false},
+		{"MIXED", false},
+		{"SIMULATED", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := shippedInInnovations(tc.status); got != tc.want {
+			t.Errorf("shippedInInnovations(%q) = %v, want %v", tc.status, got, tc.want)
+		}
+	}
+}
+
+func TestReconciliations(t *testing.T) {
+	c, err := Load(writeInnovationsRepo(t))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got := c.Reconciliations()
+	want := []ReconcileFinding{
+		{Leaf: "ctxplan", Source: "innovations-index"},
+		{Leaf: "kvmmu", Source: "CLAIMS.md"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("Reconciliations() = %+v, want %d findings", got, len(want))
+	}
+	for i := range want {
+		if got[i].Leaf != want[i].Leaf || got[i].Source != want[i].Source {
+			t.Errorf("finding[%d] = %+v, want leaf=%s source=%s", i, got[i], want[i].Leaf, want[i].Source)
+		}
+		if got[i].Detail == "" {
+			t.Errorf("finding[%d] has an empty Detail: %+v", i, got[i])
+		}
+	}
+	// gateway and model agree (a qualifier without a rung marker is pure), and
+	// mixedlane is MIXED: none may appear.
+	for _, f := range got {
+		if f.Leaf == "gateway" || f.Leaf == "model" || f.Leaf == "mixedlane" {
+			t.Errorf("unexpected finding for an agreeing/MIXED leaf: %+v", f)
+		}
+	}
+}
+
+func TestLoadMissingInnovationsDegrades(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "dos.toml"),
+		[]byte("[lanes.trees]\ngateway = [\"internal/gateway/**\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load without INNOVATIONS-INDEX.md should not error: %v", err)
+	}
+	if len(c.Innovations) != 0 {
+		t.Errorf("no index should mean no innovations, got %d", len(c.Innovations))
+	}
+	if got := c.Reconciliations(); got != nil {
+		t.Errorf("no index should reconcile to nil, got %+v", got)
+	}
+}

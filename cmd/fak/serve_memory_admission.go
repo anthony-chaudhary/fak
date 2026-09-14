@@ -170,6 +170,42 @@ func isWitnessedQwen38UDQ2KXL(path string) bool {
 
 var serveReadMemory = memgate.ReadMemory
 
+// reservationAllocatable applies the turnkey stable-budget floor to a live
+// allocatable reading. live is the byte-precise sample; fitFloor (when non-nil)
+// is the reserve-based ceiling (total x (1-headroom)) the turnkey plan was
+// admitted against at the loader layer.
+//
+// The rule is deliberately asymmetric so a momentary dip cannot defeat an
+// SLO plan while genuine exhaustion still refuses:
+//
+//   - unknown or critical pressure -> return live unchanged. The kernel has a
+//     real signal the host is exhausted (or cannot be read); the reservation
+//     must fail closed rather than paper over it.
+//   - normal/warning -> max(live, budget), capped at the host total. The floor
+//     only ever RAISES a depressed reading up to the reserve-based envelope;
+//     a live reading already above the floor is preserved, and the cap keeps
+//     the value physically representable.
+func reservationAllocatable(live int64, fitFloor *serveFitBudget, pressure memgate.Pressure, total int64) int64 {
+	if fitFloor == nil {
+		return live
+	}
+	switch pressure {
+	case memgate.PressureCritical, memgate.PressureUnknown:
+		return live
+	}
+	floor := fitFloor.avail()
+	if floor <= 0 {
+		return live
+	}
+	if total > 0 && floor > total {
+		floor = total
+	}
+	if floor > live {
+		return floor
+	}
+	return live
+}
+
 func defaultLocalReservationDir() string {
 	if dir := os.Getenv("FAK_RESERVATION_DIR"); dir != "" {
 		return dir
@@ -299,7 +335,15 @@ func estimateMetalWeightsMemoryBounds(ggufPath string) (localadmission.MemoryPla
 // to prevent transient allocation races, reserves startup peak memory in the persistent reservation store,
 // downshifts to steady residency once loaded, and releases the transient load lease so that proven-small
 // models can safely coexist when aggregate capacity permits.
-func loadLocalLauncherModelWithMetalLease(useMetal bool, ggufPath string, opts gpulease.Options, load func()) (release func(), err error) {
+//
+// fitFloors, when supplied, is the STABLE reserve-based budget the turnkey path
+// pins (total unified memory minus the 20% OS reserve). The reservation then
+// admits against the same envelope the loader planned against: it lifts a
+// transient live-memory dip up to that floor while pressure is normal/warning.
+// Under critical/unknown pressure the live reading wins and the reservation
+// still fails closed. Omitted (every serve --gguf/all-in-one caller) preserves
+// the historical pure live-probe behavior.
+func loadLocalLauncherModelWithMetalLease(useMetal bool, ggufPath string, opts gpulease.Options, load func(), fitFloors ...*serveFitBudget) (release func(), err error) {
 	if !useMetal || strings.TrimSpace(ggufPath) == "" {
 		load()
 		return func() {}, nil
@@ -345,12 +389,17 @@ func loadLocalLauncherModelWithMetalLease(useMetal bool, ggufPath string, opts g
 		}
 
 		if !exclusiveMode {
+			var fitFloor *serveFitBudget
+			if len(fitFloors) > 0 {
+				fitFloor = fitFloors[0]
+			}
+			allocatable := reservationAllocatable(sample.AllocatableBytes, fitFloor, sample.Pressure, sample.TotalBytes)
 			req := localadmission.ReservationRequest{
 				OwnerPID: os.Getpid(),
 				Plan:     plan,
 				Host: localadmission.AdmissionSample{
 					TotalBytes:       sample.TotalBytes,
-					AllocatableBytes: sample.AllocatableBytes,
+					AllocatableBytes: allocatable,
 					CompressedBytes:  sample.CompressedBytes,
 					WiredBytes:       sample.WiredBytes,
 					Pressure:         localadmission.Pressure(sample.Pressure),

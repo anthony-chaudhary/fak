@@ -98,7 +98,7 @@ func usageCompact(w io.Writer) {
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "repository-development tooling is in the separate 'fak-dev' executable.")
-	fmt.Fprintln(w, "'fak help --all' lists runtime usage;")
+	fmt.Fprintln(w, "'fak help --verbs' lists the generated verb index; 'fak help --all' is the deep wall;")
 	fmt.Fprintln(w, "'fak help <verb>' explains one in depth; 'fak <verb> -h' lists its flags.")
 }
 
@@ -111,6 +111,8 @@ func cmdHelp(args []string) {
 		return
 	}
 	switch args[0] {
+	case "--verbs", "verbs":
+		usageVerbs(os.Stdout)
 	case "--all", "-a", "all":
 		usageAllVerbs(os.Stdout)
 	case "--full", "full":
@@ -156,6 +158,27 @@ func usageAllVerbs(w io.Writer) {
 	}
 }
 
+// usageVerbs prints the runtime verb INDEX generated from the devindex catalog
+// (cmd/fak/verbs_gen.go, regenerated with `fak-dev index verbs --write-usage`).
+// Unlike `fak help --all` (the authored deep wall), this is the machine-truth
+// membership list: one `fak <name>` line per dispatched verb with its catalog
+// synopsis, aliases, and tier, so a verb's existence and one-line meaning come
+// from ONE source that a drift gate holds against the tree (verbs_usage_test.go).
+func usageVerbs(w io.Writer) {
+	fmt.Fprintf(w, "fak - the Fused Agent Kernel (v%s)\n\n", appversion.Current())
+	fmt.Fprintln(w, "verb index (generated from the devindex catalog; `fak help --all` is the deep wall):")
+	for _, v := range generatedVerbIndex {
+		name := "fak " + v.Name
+		if len(v.Aliases) != 0 {
+			name += " (" + strings.Join(v.Aliases, ", ") + ")"
+		}
+		tier := v.Tier
+		if tier == "" {
+			tier = "-"
+		}
+		fmt.Fprintf(w, "  %-34s %-10s %s\n", name, "["+tier+"]", v.Synopsis)
+	}
+}
 // printVerbHelp prints one verb's deep help: the catalog synopsis line (when
 // available) over the verb's block(s) carved from the usage wall. Reports false
 // when neither source knows the verb.

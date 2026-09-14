@@ -253,7 +253,7 @@ func applyTurnkeyModelOverride(plan *macfit.TurnkeyProfile, memoryBytes uint64, 
 		maxTokens = kvPoolBytes / kvpt
 	}
 	var contextBudget uint64
-	for _, bucket := range []uint64{65536, 32768, 16384, 8192, 4096, 2048, 1024, 512} {
+	for _, bucket := range []uint64{65536, 32768, macfit.TurnkeySLOContextTokens, 16384, 8192, 4096, 2048, 1024, 512} {
 		if maxTokens >= bucket {
 			contextBudget = bucket
 			break
@@ -265,6 +265,15 @@ func applyTurnkeyModelOverride(plan *macfit.TurnkeyProfile, memoryBytes uint64, 
 	// must never exceed what maxTokens actually permits.
 	if contextBudget == 0 {
 		contextBudget = maxTokens
+	}
+	// The named-tier override path honors the same flagship SLO default as the
+	// auto-selected path, so `--model 27B` and auto-selection agree on 20k.
+	if slo := macfit.TurnkeySLODefault(tier, kvpt, kvPoolBytes); slo > 0 {
+		contextBudget = slo
+		if used := contextBudget * kvpt; kvPoolBytes < used {
+			kvPoolBytes = used
+			plan.KVPoolBytes = kvPoolBytes
+		}
 	}
 	plan.ContextBudgetTokens = contextBudget
 
@@ -554,6 +563,20 @@ func resolveUpKVPrecision(flagValue string) (fakmodel.KVPrecision, error) {
 	return prec, nil
 }
 
+// turnkeyStableFitBudget builds the loader admission budget the turnkey path pins
+// for a host whose total unified memory is memoryBytes. It is deliberately STABLE:
+// the base is the physical total and the headroom is macfit's documented 20% OS/
+// other-app reserve, so the number does not move with the instantaneous free-memory
+// reading. That is the fix for a fresh-boot/cold-cache box spuriously refusing a
+// context the reserve-based envelope admits. memoryBytes==0 (an unknown host, e.g. a
+// unit-test profile) yields nil, preserving the historical live probe.
+func turnkeyStableFitBudget(memoryBytes uint64) *serveFitBudget {
+	if memoryBytes == 0 {
+		return nil
+	}
+	return &serveFitBudget{Base: int64(memoryBytes), Headroom: macfit.DefaultMinHeadroomRatio}
+}
+
 func turnkeyContextTokens(tokens uint64) (int, error) {
 	maxInt := uint64(^uint(0) >> 1)
 	if tokens > maxInt {
@@ -770,6 +793,19 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 			}
 
 			deps := defaultTurnkeyNativeLoadDeps()
+			// Pin the loader's admission to a STABLE, reserve-based budget instead of
+			// a live host-free probe. A momentary dip in reclaimable memory (cold
+			// page cache, a just-loaded sibling) must not spuriously refuse the
+			// turnkey plan the reserve-based envelope already admitted; the same 20%
+			// reserve macfit plans against is the headroom here, so the two agree.
+			// Genuine live pressure is still caught downstream by the local
+			// admission reservation and the Metal GPU lease.
+			deps.fitOverride = turnkeyStableFitBudget(plan.MemoryBytes)
+			// The reservation lives below the loader and re-samples live memory,
+			// so it needs the SAME stable envelope: otherwise a momentary dip
+			// refuses a plan the loader just admitted (the macfit/loader and
+			// reservation budgets disagreeing is the original defect).
+			deps.fitFloor = deps.fitOverride
 			resolveBackend := deps.resolveBackend
 			admitMetal := deps.admitAndLoad
 			var selectedBackend compute.Backend
@@ -778,11 +814,11 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 				selectedBackend = backend
 				return backend, err
 			}
-			deps.admitAndLoad = func(metal bool, path string, load func()) (func(), error) {
+			deps.admitAndLoad = func(metal bool, path string, load func(), fitFloor *serveFitBudget) (func(), error) {
 				if selectedBackend != nil && selectedBackend.Name() == "vulkan" {
 					return loadLocalLauncherModelWithVulkanLease(true, path, gpulease.Options{}, load)
 				}
-				return admitMetal(metal, path, load)
+				return admitMetal(metal, path, load, fitFloor)
 			}
 
 			var err error

@@ -528,6 +528,50 @@ func TestV41ForwardHCMultDeclaredFailsClosed(t *testing.T) {
 	}
 }
 
+// TestV41FullGeometryRouterConfigFailsClosed witnesses the #13009 router-geometry
+// reduction: the real forward path must source its routed+shared geometry through
+// v41RouterConfigFromConfig (the published 384/top-6/1-shared/1.5-scale envelope),
+// not read an arbitrary live Config. A config whose router axis departs from the
+// published envelope must fail closed with the typed ErrV41ForwardStage at the
+// admission boundary -- never silently run a different MoE geometry -- while the
+// published/reduced envelope keeps running.
+func TestV41FullGeometryRouterConfigFailsClosed(t *testing.T) {
+	// A non-published expert count must refuse.
+	fewerExperts := v41ReducedModel(t)
+	fewerExperts.Cfg.NumExperts = V41RouterExperts / 2
+	if err := fewerExperts.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("NumExperts=%d admission error = %v, want ErrV41ForwardStage", fewerExperts.Cfg.NumExperts, err)
+	}
+	if err := panicAsError(func() { _ = fewerExperts.Forward([]int{1, 2}) }); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("NumExperts=%d Forward panic = %v, want ErrV41ForwardStage", fewerExperts.Cfg.NumExperts, err)
+	}
+
+	// A non-published top-k must refuse.
+	badTopK := v41ReducedModel(t)
+	badTopK.Cfg.NumExpertsPerTok = V41RouterTopK + 1
+	if err := badTopK.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("NumExpertsPerTok=%d admission error = %v, want ErrV41ForwardStage", badTopK.Cfg.NumExpertsPerTok, err)
+	}
+
+	// A non-published route scale must refuse.
+	badScale := v41ReducedModel(t)
+	badScale.Cfg.RoutedScalingFactor = 2.5
+	if err := badScale.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("RoutedScalingFactor=%g admission error = %v, want ErrV41ForwardStage", badScale.Cfg.RoutedScalingFactor, err)
+	}
+
+	// The published/reduced envelope must keep running (no regression).
+	reduced := v41ReducedModel(t)
+	if reduced.Cfg.NumExperts != V41RouterExperts || reduced.Cfg.NumExpertsPerTok != V41RouterTopK ||
+		reduced.Cfg.NSharedExperts != V41RouterSharedCount || reduced.Cfg.RoutedScalingFactor != float64(V41RouterRouteScale) {
+		t.Fatalf("reduced fixture router envelope = experts %d topk %d shared %d scale %g, want published",
+			reduced.Cfg.NumExperts, reduced.Cfg.NumExpertsPerTok, reduced.Cfg.NSharedExperts, reduced.Cfg.RoutedScalingFactor)
+	}
+	if err := reduced.v41ForwardAdmitted(); err != nil {
+		t.Fatalf("published router envelope admission error = %v, want nil", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // #13007 Engram retrieval witness
 //

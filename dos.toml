@@ -782,6 +782,34 @@ canon = ["internal/canon/**"]
 cachemeta = ["internal/cachemeta/**"]
 capindex = ["internal/capindex/**"]
 capindexgw = ["internal/capindexgw/**"]
+# --- #13039: internal/compute is NOT split into backend sub-lanes (recorded decision) ---
+# DECISION: internal/compute stays ONE lane; no cuda/vulkan/metal/amd/rocm/radv sub-lanes.
+# WHY (evidence, not preference):
+#   1. internal/compute is a SINGLE Go package ("package compute", ~478 .go files). Its
+#      "backend families" are organic FILENAME PREFIXES (cuda_*.go, vulkan_*.go, amd_*.go,
+#      rocm_*.go, radv_*.go, metal*.go), NOT subdirectories. A prefix split would claim
+#      write-disjointness while the files still CO-COMPILE into one build -- the exact
+#      "over-promises on a Go package" case internal/laneadmit/lanetree.go:252 names.
+#   2. The arbiter's geometry (internal/dispatchorder treeOverlap: literal directory-prefix
+#      containment; normalizeTree strips only a trailing /** or /*) makes a total remainder
+#      INEXPRESSIBLE: every remainder covering the package root (internal/compute/**, or
+#      even internal/compute/*.go, which normalizes to the SAME prefix) OVERLAPS every
+#      prefix sub-lane carved from it. Witnessed: `dos arbitrate --lane cudabackend
+#      --tree internal/compute/cuda_*.go` vs a live internal/compute/** lease REFUSES
+#      ("intersecting region with exclusive/exclusive modes requires zero-tolerance
+#      refusal"), while cuda_*.go vs a disjoint vulkan_*.go lease ACQUIREs.
+#   3. `dos lint` (wired into make ci: Makefile dos-lint) emits LANE_REGION_SHADOWED for
+#      such a sub-lane: it "can never be picked independently ... so it is dead". The
+#      lint's own remedy ("carve the remainder") is the step (2) proves inexpressible.
+#   4. A GranDir split on the real sub-packages (arm64tile, deltanetavx512, slotstream,
+#      strix) does NOT separate the backends this issue names -- cuda/vulkan/metal live in
+#      the package ROOT, so they would all fall in one indistinguishable remainder.
+# Per #13039's acceptance clause ("Any split must therefore enumerate its remainder
+# explicitly, or record why it does not") and its Quarantined Fallback ("If the sub-lane
+# remainder cannot be made total, keep the single compute lane"), the remedy is the
+# already-landed #13028 symbol fix (commit 5b3038392), NOT a dos.toml split.
+# Revisit only if internal/compute is physically split into sub-PACKAGES (a real refactor),
+# at which point GranDir lanes (arm64tile/**, strix/**, ...) become honestly disjoint.
 compute = ["internal/compute/**"]
 cluster = ["internal/cluster/**"]
 cdb = ["internal/cdb/**"]

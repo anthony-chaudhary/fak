@@ -157,16 +157,22 @@ func TestTurnkeyDynamicMemoryPressure(t *testing.T) {
 			t.Errorf("pressured KVPoolBytes (%d) must be clamped lower than unpressured (%d)",
 				pressured.KVPoolBytes, unpressured.KVPoolBytes)
 		}
-		if pressured.ContextBudgetTokens >= unpressured.ContextBudgetTokens {
-			t.Errorf("pressured context budget (%d) must be reduced lower than unpressured (%d)",
-				pressured.ContextBudgetTokens, unpressured.ContextBudgetTokens)
+		// The 27B tier carries the turnkey SLO (TurnkeySLOContextTokens): when the
+		// STABLE reserve-based pool can hold it, a transient live-memory dip must not
+		// shrink the out-of-the-box default below 20k. Both plans therefore land on
+		// the SLO; only the KV pool is clamped lower under pressure.
+		if unpressured.ContextBudgetTokens != TurnkeySLOContextTokens {
+			t.Errorf("unpressured 27B context = %d, want the %d SLO", unpressured.ContextBudgetTokens, TurnkeySLOContextTokens)
+		}
+		if pressured.ContextBudgetTokens != TurnkeySLOContextTokens {
+			t.Errorf("pressured 27B context = %d, want the %d SLO preserved", pressured.ContextBudgetTokens, TurnkeySLOContextTokens)
 		}
 
-		// Verify total allocation fits within available memory minus display buffers
+		// The real safety guarantee: even after consuming the reserve the plan still
+		// leaves at least the documented 20% headroom, so it cannot swap-thrash.
 		allocated := pressured.Tier.WeightBytes + (pressured.ContextBudgetTokens * pressured.KVBytesPerToken)
-		netAvailable := 18*GiB - 1500*1024*1024
-		if allocated > netAvailable {
-			t.Errorf("allocated bytes (%d) exceeds net available capacity (%d)", allocated, netAvailable)
+		if headroom := total36 - allocated; headroom < total36*20/100 {
+			t.Errorf("allocated bytes (%d) leaves %d headroom, want >= the 20%% reserve (%d)", allocated, headroom, total36*20/100)
 		}
 	})
 
@@ -234,9 +240,11 @@ func TestTurnkeyDynamicMemoryPressure(t *testing.T) {
 	})
 }
 
-// TestTurnkeyKVQuantizedContextExceedsFP16Ceiling proves a quantized KV tier lifts the
-// memory-pressure context budget above the hard FP16 8192-token ceiling, while the same
-// pressured box at FP16 still clamps to exactly 8192.
+// TestTurnkeyKVQuantizedContextExceedsFP16Ceiling proves a quantized KV tier is strictly
+// denser than FP16 for the same plan, and that on the flagship 27B tier the SLO-protected
+// 20k default survives memory pressure at both tiers instead of collapsing to the old
+// 8192 FP16 ceiling. (The explicit FP16 8192 clamp remains for non-SLO tiers and for a box
+// too small to hold the SLO; that path is covered by the SLO-floor fall-through tests.)
 func TestTurnkeyKVQuantizedContextExceedsFP16Ceiling(t *testing.T) {
 	const total36 = 36 * GiB
 	pressure := TurnkeyOptions{
@@ -251,8 +259,8 @@ func TestTurnkeyKVQuantizedContextExceedsFP16Ceiling(t *testing.T) {
 	if !fp16.MemoryPressure {
 		t.Fatalf("fixture must induce memory pressure; plan=%+v", fp16)
 	}
-	if fp16.ContextBudgetTokens != 8192 {
-		t.Fatalf("FP16 pressured context = %d, want the 8192 ceiling", fp16.ContextBudgetTokens)
+	if fp16.ContextBudgetTokens < TurnkeySLOContextTokens {
+		t.Fatalf("FP16 pressured 27B context = %d, want the %d SLO preserved", fp16.ContextBudgetTokens, TurnkeySLOContextTokens)
 	}
 
 	q8Opts := pressure
@@ -264,8 +272,8 @@ func TestTurnkeyKVQuantizedContextExceedsFP16Ceiling(t *testing.T) {
 	if q8.KVBytesPerToken >= fp16.KVBytesPerToken {
 		t.Fatalf("Q8_0 KV bytes/token = %d, want < FP16 %d", q8.KVBytesPerToken, fp16.KVBytesPerToken)
 	}
-	if q8.ContextBudgetTokens <= 8192 {
-		t.Fatalf("Q8_0 pressured context = %d, want strictly > 8192", q8.ContextBudgetTokens)
+	if q8.ContextBudgetTokens < TurnkeySLOContextTokens {
+		t.Fatalf("Q8_0 pressured 27B context = %d, want >= %d", q8.ContextBudgetTokens, TurnkeySLOContextTokens)
 	}
 	if q8.KVPrecision != model.KVPrecisionQ8_0 {
 		t.Fatalf("plan KV precision = %q, want q8_0", q8.KVPrecision)
@@ -315,6 +323,35 @@ func TestTurnkeyKVQuantizedContextSelects20kOn36GiB(t *testing.T) {
 	}
 	if q4.ContextBudgetTokens < 20480 {
 		t.Fatalf("Q4_0 pressured context = %d, want >= 20480", q4.ContextBudgetTokens)
+	}
+}
+
+// TestTurnkeySLODefaultFallsThroughOnTinyBox pins the safety half of the SLO rule: a
+// 27B tier whose STABLE reserve-based pool cannot hold 20480 keeps the conservative
+// country: no SLO is invented for a box that genuinely cannot hold it, and the normal
+// pressure clamp still applies. A non-27B tier never carries the SLO at all.
+func TestTurnkeySLODefaultFallsThroughOnTinyBox(t *testing.T) {
+	tier, ok := LookupModelTier("27B")
+	if !ok {
+		t.Fatal("27B tier missing")
+	}
+	// 16 GiB box: usable = 12.8 GiB, weights 16 GiB -> negative pool, cannot hold 20480.
+	if got := TurnkeySLODefault(tier, 262144, 0); got != 0 {
+		t.Fatalf("27B with empty stable pool SLO = %d, want 0", got)
+	}
+	// A pool that holds exactly one token less than the SLO must not admit it.
+	if got := TurnkeySLODefault(tier, 262144, TurnkeySLOContextTokens*262144-1); got != 0 {
+		t.Fatalf("27B one-byte-short pool SLO = %d, want 0", got)
+	}
+	if got := TurnkeySLODefault(tier, 262144, TurnkeySLOContextTokens*262144); got != TurnkeySLOContextTokens {
+		t.Fatalf("27B exactly-fitting pool SLO = %d, want %d", got, TurnkeySLOContextTokens)
+	}
+	seven, ok := LookupModelTier("7B")
+	if !ok {
+		t.Fatal("7B tier missing")
+	}
+	if got := TurnkeySLODefault(seven, 262144, 1<<40); got != 0 {
+		t.Fatalf("7B SLO = %d, want 0 (no SLO outside the flagship tier)", got)
 	}
 }
 

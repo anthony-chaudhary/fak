@@ -102,6 +102,11 @@ type Catalog struct {
 	Docs        []Doc        `json:"docs"`
 	Claims      []Claim      `json:"claims,omitempty"`
 	Generations []Generation `json:"generations,omitempty"`
+	// Innovations is the INNOVATIONS-INDEX.md concept catalog (C2 #1289), the
+	// hand-curated counterpart to the lint-enforced Claims rollup. Its Home
+	// packages bind to lanes with the SAME resolver, so a Status disagreement is
+	// a ReconcileFinding, never a silent pick (see Reconciliations).
+	Innovations []Innovation `json:"innovations,omitempty"`
 
 	// prefixes maps a tree prefix ("internal/gateway/") to its lane ("gateway");
 	// exact maps a bare file entry ("version") to its lane. Both lowercased.
@@ -167,6 +172,10 @@ func Load(root string) (*Catalog, error) {
 	if cl, err := os.ReadFile(filepath.Join(root, "CLAIMS.md")); err == nil {
 		c.parseClaims(string(cl))
 	}
+	// INNOVATIONS-INDEX.md is parsed AFTER the lanes too, so its Home packages
+	// resolve through the same taxonomy; reconciled against the claims rollup
+	// by the caller. A missing file degrades to an empty catalog, not an error.
+	c.loadInnovations()
 	// The module-versions ledger is joined AFTER the lanes so each leaf's Dir is
 	// known. A missing ledger degrades to empty versions, not an error — the version
 	// is a staleness hint (#2465), never load-bearing.

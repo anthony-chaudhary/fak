@@ -374,3 +374,80 @@ func TestIndexDiscoveryBenchmarkJSON(t *testing.T) {
 		t.Fatalf("benchmark must expose bounded coverage and current misses: %+v", report)
 	}
 }
+
+// writeReconcileRepo extends writeIndexRepo with an INNOVATIONS-INDEX.md so the
+// reconcile verb has both an agreeing leaf (gateway) and a disagreeing one
+// (session: SHIPPED in the index but only SIMULATED in CLAIMS.md).
+func writeReconcileRepo(t *testing.T, agreeOnly bool) string {
+	root := writeIndexRepo(t)
+	innovations := "# INNOVATIONS INDEX\n\n" +
+		"| Innovation | Concept it embodies | Home | Status |\n" +
+		"|---|---|---|---|\n" +
+		"| Front door | one binary serves the API | `gateway` | SHIPPED |\n"
+	if !agreeOnly {
+		innovations += "| Cost ring | per-session accounting | `session` | SHIPPED |\n"
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "INNOVATIONS-INDEX.md"), []byte(innovations), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func TestIndexReconcileReportsMismatch(t *testing.T) {
+	// The fixture's session leaf is SIMULATED in CLAIMS.md but SHIPPED in the
+	// index, so the verb must EMIT the disagreement rather than pick a winner.
+	root := writeReconcileRepo(t, false)
+	var out, errb bytes.Buffer
+	if rc := RunIndex(&out, &errb, []string{"reconcile", "--root", root}); rc != 0 {
+		t.Fatalf("runIndex reconcile rc=%d, stderr=%s", rc, errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "session") || !strings.Contains(got, "innovations-index") {
+		t.Errorf("reconcile output missing the session disagreement, got:\n%s", got)
+	}
+	// The agreeing gateway leaf must NOT be reported.
+	if strings.Contains(got, "gateway") {
+		t.Errorf("reconcile reported the agreeing gateway leaf, got:\n%s", got)
+	}
+}
+
+func TestIndexReconcileClean(t *testing.T) {
+	root := writeReconcileRepo(t, true)
+	var out, errb bytes.Buffer
+	if rc := RunIndex(&out, &errb, []string{"reconcile", "--root", root}); rc != 0 {
+		t.Fatalf("runIndex reconcile rc=%d, stderr=%s", rc, errb.String())
+	}
+	if !strings.Contains(out.String(), "no INNOVATIONS-INDEX/CLAIMS.md disagreements") {
+		t.Errorf("clean reconcile should print the reassuring line, got:\n%s", out.String())
+	}
+}
+
+func TestIndexReconcileJSON(t *testing.T) {
+	root := writeReconcileRepo(t, false)
+	var out, errb bytes.Buffer
+	if rc := RunIndex(&out, &errb, []string{"reconcile", "--json", "--root", root}); rc != 0 {
+		t.Fatalf("runIndex reconcile --json rc=%d, stderr=%s", rc, errb.String())
+	}
+	var findings []struct {
+		Leaf   string `json:"leaf"`
+		Source string `json:"source"`
+		Detail string `json:"detail"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &findings); err != nil {
+		t.Fatalf("reconcile --json is not valid JSON: %v\n%s", err, out.String())
+	}
+	if len(findings) != 1 || findings[0].Leaf != "session" || findings[0].Source != "innovations-index" {
+		t.Errorf("reconcile --json = %+v, want one session/innovations-index finding", findings)
+	}
+}
+
+func TestIndexReconcileRejectsQuery(t *testing.T) {
+	root := writeReconcileRepo(t, true)
+	var out, errb bytes.Buffer
+	if rc := RunIndex(&out, &errb, []string{"reconcile", "--root", root, "gateway"}); rc != 2 {
+		t.Fatalf("reconcile with a query rc=%d, want 2 (usage error)", rc)
+	}
+	if !strings.Contains(errb.String(), "accepts no query") {
+		t.Errorf("reconcile query rejection stderr = %q", errb.String())
+	}
+}

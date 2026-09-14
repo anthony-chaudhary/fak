@@ -21,7 +21,7 @@ func TestTurnkeyNativeResourcesAdmissionAndLifecycle(t *testing.T) {
 		resolveBackend: func() (compute.Backend, error) { return nil, nil },
 		resolveMetal:   func() (serveMetalDecision, error) { return serveMetalDecision{live: true}, nil },
 		refusePeak:     func(string) error { return refused },
-		admitAndLoad: func(bool, string, func()) (func(), error) {
+		admitAndLoad: func(bool, string, func(), *serveFitBudget) (func(), error) {
 			t.Fatal("admission ran after peak refusal")
 			return nil, nil
 		},
@@ -35,7 +35,7 @@ func TestTurnkeyNativeResourcesAdmissionAndLifecycle(t *testing.T) {
 
 	admissionRefused := errors.New("reservation refused")
 	deps.refusePeak = func(string) error { return nil }
-	deps.admitAndLoad = func(_ bool, _ string, _ func()) (func(), error) {
+	deps.admitAndLoad = func(_ bool, _ string, _ func(), _ *serveFitBudget) (func(), error) {
 		return nil, admissionRefused
 	}
 	if _, err := loadTurnkeyNativeResourcesWith(context.Background(), "model.gguf", "qwen38", 2048, deps); !errors.Is(err, admissionRefused) {
@@ -50,14 +50,14 @@ func TestTurnkeyNativeResourcesAdmissionAndLifecycle(t *testing.T) {
 	profile := &gateway.ModelLoadProfile{Mode: "gguf-resident-q4k", TotalSeconds: 1.25, Bytes: 99, Tensors: 7, Bottleneck: "resident-copy"}
 	planner := &agent.InKernelPlanner{}
 	deps.refusePeak = func(string) error { return nil }
-	deps.admitAndLoad = func(metal bool, path string, load func()) (func(), error) {
+	deps.admitAndLoad = func(metal bool, path string, load func(), _ *serveFitBudget) (func(), error) {
 		if !metal || path != "model.gguf" {
 			t.Fatalf("admission args metal=%v path=%q", metal, path)
 		}
 		load()
 		return func() { order = append(order, "release-admission") }, nil
 	}
-	deps.loadModel = func(path string, _ compute.Backend, tokens int) (*fakmodel.Model, bool, *gateway.ModelLoadProfile) {
+	deps.loadModel = func(path string, _ compute.Backend, tokens int, _ *serveFitBudget) (*fakmodel.Model, bool, *gateway.ModelLoadProfile) {
 		loadCalls++
 		if path != "model.gguf" || tokens != 2048 {
 			t.Fatalf("load args path=%q tokens=%d", path, tokens)
@@ -124,14 +124,14 @@ func TestTurnkeyNativeResourcesCPUDecisionPaths(t *testing.T) {
 				resolveBackend: func() (compute.Backend, error) { return nil, nil },
 				resolveMetal:   func() (serveMetalDecision, error) { return decided, nil },
 				refusePeak:     func(string) error { return nil },
-				admitAndLoad: func(metal bool, path string, load func()) (func(), error) {
+				admitAndLoad: func(metal bool, path string, load func(), _ *serveFitBudget) (func(), error) {
 					if metal {
 						t.Fatalf("CPU decision passed metal=%v to admission", metal)
 					}
 					load()
 					return func() {}, nil
 				},
-				loadModel: func(path string, _ compute.Backend, tokens int) (*fakmodel.Model, bool, *gateway.ModelLoadProfile) {
+				loadModel: func(path string, _ compute.Backend, tokens int, _ *serveFitBudget) (*fakmodel.Model, bool, *gateway.ModelLoadProfile) {
 					loadCalls++
 					return &fakmodel.Model{}, false, nil
 				},
@@ -201,11 +201,11 @@ func TestTurnkeyNativeEagerResidencyReported(t *testing.T) {
 				resolveBackend: func() (compute.Backend, error) { return nil, nil },
 				resolveMetal:   func() (serveMetalDecision, error) { return serveMetalDecision{live: true}, nil },
 				refusePeak:     func(string) error { return nil },
-				admitAndLoad: func(_ bool, _ string, load func()) (func(), error) {
+				admitAndLoad: func(_ bool, _ string, load func(), _ *serveFitBudget) (func(), error) {
 					load()
 					return func() {}, nil
 				},
-				loadModel: func(string, compute.Backend, int) (*fakmodel.Model, bool, *gateway.ModelLoadProfile) {
+				loadModel: func(string, compute.Backend, int, *serveFitBudget) (*fakmodel.Model, bool, *gateway.ModelLoadProfile) {
 					return &fakmodel.Model{}, true, nil
 				},
 				loadTokenizer: func(string) (*tokenizer.Tokenizer, bool) { return &tokenizer.Tokenizer{}, true },
