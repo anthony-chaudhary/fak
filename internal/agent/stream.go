@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/httptrust"
 )
 
 // StreamSink receives incremental assistant CONTENT fragments as they arrive from
@@ -556,6 +558,30 @@ type openAIStreamChunk struct {
 // invisible to the client and the caller can still choose an HTTP status. It NEVER retries
 // mid-stream: once bytes have flowed a read error is returned as-is. A non-OpenAI wire
 // returns ErrStreamingUnsupported without a network call.
+
+// streamingClient returns a client for a STREAMED upstream request: the planner's
+// configured client with its TOTAL deadline (Client.Timeout) cleared. A single
+// http.Client{Timeout: T} applies T as a deadline over the ENTIRE exchange —
+// dial, response headers, AND reading the streamed body — so a slow-but-live
+// generation that legitimately runs past T is severed mid-stream with a
+// "context canceled" transport error even while tokens are still flowing. That
+// is exactly wrong for SSE: the turn's real bound is (a) the request context,
+// cancelled when the client disconnects, plus (b) the idle/progress/max-duration
+// watchdog in relayAnthropicStream / the planner read loop, which fails a
+// GENUINELY stalled stream with the typed UpstreamStalledError. Non-streaming
+// callers keep the bounded p.Client so a dead gateway still cannot hang them.
+// The shallow copy preserves Transport (the declared trust source / corporate CA
+// bundle), Jar, and CheckRedirect — only the total deadline is dropped. Mirrors
+// the identical rule pkg/fakclient/stream.go already enforces on the SDK side.
+func (p *HTTPPlanner) streamingClient() *http.Client {
+	if p.Client == nil {
+		return httptrust.Client(0)
+	}
+	hc := *p.Client
+	hc.Timeout = 0
+	return &hc
+}
+
 // streamConnect dials the upstream with the same retry/backoff/Retry-After policy as
 // Complete, but ONLY before the first byte is streamed: a pre-stream failure has emitted
 // nothing to the sink, so the retry is safe and invisible to the client. A deterministic
@@ -591,7 +617,7 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 		call.applyHeaders(req)
 		finishProvider := BeginProviderCall(req)
 		req.Header.Set("Accept", "text/event-stream")
-		r, err := p.Client.Do(req)
+		r, err := p.streamingClient().Do(req)
 		finishProvider(providerResponseStatus(r), err)
 		if err != nil {
 			if uerr := classifyDoError(err, &rs); uerr != nil {

@@ -49,7 +49,11 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		"audit":         startupReady,
 		"metrics":       startupReady,
 	}
-	ok, _ := health["ok"].(bool)
+	// Readiness is the SAME positive predicate /healthz uses (healthOK), ANDed
+	// with the listener-bound startup gate and the shutdown stopper. Sharing the
+	// predicate is what keeps the two surfaces from drifting: an ok:false body is
+	// not ready on either.
+	ok := healthOK(health)
 	stopping := s != nil && s.stopping.Load()
 	if stopping {
 		health["stopping"] = true
@@ -59,9 +63,10 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		health["ok"] = false
 	}
 
-	status := http.StatusOK
 	if !ok {
-		status = http.StatusServiceUnavailable
+		w.Header().Set("Retry-After", "1")
+		writeJSON(w, http.StatusServiceUnavailable, health)
+		return
 	}
-	writeJSON(w, status, health)
+	writeJSON(w, http.StatusOK, health)
 }

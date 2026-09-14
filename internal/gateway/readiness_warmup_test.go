@@ -99,10 +99,15 @@ func TestHealthzHoldsUntilWarmup(t *testing.T) {
 		t.Fatalf("unarmed serve: /healthz ok = %v, want true", body["ok"])
 	}
 
-	// armed but not warm: not ready, warmup_pending set.
+	// armed but not warm: NOT READY. The #3051 contract is a 503 status (the exact
+	// false-ready signal a proxy/opencode client must not route on), with
+	// warmup_pending set and Retry-After so the client backs off instead of failing.
 	pending := &Server{}
 	pending.ArmWarmupGate()
-	body := warmupHealthzBody(t, pending)
+	code, body := warmupHealthz(t, pending)
+	if code != http.StatusServiceUnavailable {
+		t.Fatalf("armed-pending serve: /healthz status = %d, want 503 (not-ready)", code)
+	}
 	if body["ok"] != false {
 		t.Fatalf("armed-pending serve: /healthz ok = %v, want false", body["ok"])
 	}
@@ -136,8 +141,8 @@ func TestRunWarmupCompletesGate(t *testing.T) {
 	if !srv.warmup.pending() {
 		t.Fatal("armed gate should be pending before RunWarmup")
 	}
-	if body := warmupHealthzBody(t, srv); body["ok"] != false {
-		t.Fatalf("armed-pending serve: /healthz ok = %v, want false", body["ok"])
+	if code, body := warmupHealthz(t, srv); code != http.StatusServiceUnavailable || body["ok"] != false {
+		t.Fatalf("armed-pending serve: /healthz = %d ok=%v, want 503 ok=false", code, body["ok"])
 	}
 
 	if _, err := srv.RunWarmup(context.Background()); err != nil {
@@ -174,21 +179,32 @@ func TestRunWarmupNilPlannerReleasesGate(t *testing.T) {
 }
 
 // warmupHealthzBody serves one /healthz request against s and returns the decoded
-// JSON body. Named distinctly from the coherence gate's healthzBody helper so the
-// two readiness tests never collide in the shared package.
+// JSON body, requiring the READY status (200). Named distinctly from the
+// coherence gate's healthzBody helper so the two readiness tests never collide in
+// the shared package. The not-ready counterpart is warmupHealthz, which pins the
+// #3051 status contract: a warmup-pending body must answer 503, not 200.
 func warmupHealthzBody(t *testing.T, s *Server) map[string]any {
+	t.Helper()
+	code, body := warmupHealthz(t, s)
+	if code != http.StatusOK {
+		t.Fatalf("/healthz status = %d, want %d (ready body)", code, http.StatusOK)
+	}
+	return body
+}
+
+// warmupHealthz serves one /healthz request against s and returns the status code
+// and decoded body, asserting nothing about readiness — the shared seam for both
+// the ready and not-ready halves.
+func warmupHealthz(t *testing.T, s *Server) (int, map[string]any) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
 	s.handleHealth(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("/healthz status = %d, want %d", rec.Code, http.StatusOK)
-	}
 	var body map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode /healthz body %q: %v", rec.Body.String(), err)
 	}
-	return body
+	return rec.Code, body
 }
 
 // TestInferenceGatedDuringWarmup proves that incoming inference requests are gated
