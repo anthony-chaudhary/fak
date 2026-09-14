@@ -78,6 +78,27 @@ func serveArtifactResidentQ4K(backend compute.Backend, artifact ggufload.Artifac
 	return (artifact.Q4KResident || artifact.Recipe == "UD-Q2_K_XL") && serveDeviceResidentQ4K(backend)
 }
 
+// serveArtifactCPUOffloadExperts is the artifact-derived offload predicate: it reports whether
+// the header's ROUTED expert tensors are all backed by an encoding the host-offload loader can
+// hold raw-resident AND a canonical name it holds resident (ggufload.RoutedExpertEncodingRefusal).
+// It replaces the old Q4_K-only gate, which missed a packed non-Q4_K MoE artifact entirely and
+// charged every weight device-scoped. The error is the named ErrRoutedExpertEncodingUnqualified
+// refusal when the artifact is genuinely unqualified; it is reported (not swallowed) so a caller
+// can surface the named key.
+func serveArtifactCPUOffloadExperts(ws *ggufload.WeightSource) (bool, error) {
+	if ws == nil {
+		return false, nil
+	}
+	cfg, err := ws.File.Config()
+	if err != nil {
+		return false, err
+	}
+	if err := ggufload.RoutedExpertEncodingRefusal(cfg, ws.File.Tensors); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // serveQwen38Q4KEmbeddingResident limits packed Q4_K embedding residency to the
 // exact Qwen3.8-27B artifact on the native Metal resident-Q4_K path. Other
 // artifacts and explicit backends retain the loader's default F32 embedding.
@@ -152,6 +173,25 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		must(err)
 	}
 	residentQ4K := serveArtifactResidentQ4K(backend, artifactQuant)
+	// Artifact-derived offload-arm decision. The old Q4_K-only gate (artifactQuant.Q4KResident)
+	// never selected the offload arm for a packed non-Q4_K MoE artifact (e.g. DeepSeek-V4.1
+	// Q2_K/Q3_K), so the plan charged ALL weights device-scoped and refused with a bogus
+	// oversize. The decision is derived from the artifact's routed-expert encodings and is the
+	// SAME predicate EstimateCPUOffloadExperts* applies, so arm selection and the plan cannot
+	// disagree. A routed expert present but unqualified refuses by the named key here.
+	cpuOffloadArm := false
+	if backend != nil && cpuOffloadExperts {
+		if ws, wsErr := ggufload.OpenWeights(ggufPath); wsErr == nil {
+			if cfg, cfgErr := ws.File.Config(); cfgErr == nil {
+				if ok, _, offending := ggufload.RoutedExpertResidencyQualified(cfg, ws.File.Tensors); ok {
+					cpuOffloadArm = true
+				} else if offending != "" {
+					must(ggufload.RoutedExpertEncodingRefusal(cfg, ws.File.Tensors))
+				}
+			}
+			_ = ws.Close()
+		}
+	}
 	var loadMessages []gateway.StartupMessage
 	// A sharded expert-parallel rank (expertShard != nil) admits ONLY its routed-expert band into
 	// the resident store — the residency that fits GLM-5.2 across the fleet (#971). It rides ONLY
@@ -191,7 +231,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		loadMessages = append(loadMessages, serveStartupMessage("slow-load-path", "warning", w))
 	}
 	switch {
-	case backend != nil && cpuOffloadExperts && artifactQuant.Q4KResident:
+	case backend != nil && cpuOffloadExperts && cpuOffloadArm:
 		loadMessages = append(loadMessages, serveQuantProvenance(artifactQuant, true))
 		if !backend.Caps().UploadDtype {
 			must(fmt.Errorf("fak serve: --cpu-offload-experts requires backend %q to advertise quantized UploadDtype (Q8_0 upload); use a quantized-upload backend or omit --cpu-offload-experts", backend.Name()))
@@ -529,9 +569,10 @@ func refuseStreamedQ4KMetalCapacity(total int64, known, freeCPU bool) error {
 type serveLoadArm string
 
 const (
-	serveLoadArmResidentQ4K    serveLoadArm = "resident-q4k"
-	serveLoadArmQuantProfileQ8 serveLoadArm = "quant-profile-q8"
-	serveLoadArmF32            serveLoadArm = "f32"
+	serveLoadArmResidentQ4K       serveLoadArm = "resident-q4k"
+	serveLoadArmQuantProfileQ8    serveLoadArm = "quant-profile-q8"
+	serveLoadArmCPUOffloadExperts serveLoadArm = "cpu-offload-experts"
+	serveLoadArmF32               serveLoadArm = "f32"
 )
 
 func resolveMetalServeLoadArm(ws *ggufload.WeightSource) serveLoadArm {

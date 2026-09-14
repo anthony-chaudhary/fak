@@ -148,6 +148,58 @@ func TestTurnkeyHealthReportsNativeStartupMemory(t *testing.T) {
 	}
 }
 
+// TestTurnkeyHealthReportsLiveResidency pins the #12875 contract: /healthz carries a
+// `live_residency` block read at request time (not just the frozen `native_startup`), exposing
+// device-resident weight counts and the promised-CPU-fallback tally. The frozen startup fields
+// remain alongside it for backward compatibility.
+func TestTurnkeyHealthReportsLiveResidency(t *testing.T) {
+	m := &model.Model{}
+	srv := &turnkeyServer{native: &turnkeyNativeResources{
+		Model:   m,
+		Startup: turnkeyNativeStartup{MetalLive: true, MetalLiveQ8Weights: 0, MetalLiveQ6Weights: 0},
+	}}
+	rec := httptest.NewRecorder()
+	srv.handleHealthz(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	var got struct {
+		NativeStartup turnkeyNativeStartup `json:"native_startup"`
+		Live          map[string]any       `json:"live_residency"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Live == nil {
+		t.Fatal("healthz omitted live_residency with a live native model")
+	}
+	for _, key := range []string{"metal_live_q8_weights", "metal_live_q6_weights", "promised_cpu_fallbacks", "fallbacks_observed", "fallbacks_by_route"} {
+		if _, ok := got.Live[key]; !ok {
+			t.Fatalf("live_residency missing %q: %#v", key, got.Live)
+		}
+	}
+	if fb, _ := got.Live["promised_cpu_fallbacks"].(float64); fb != 0 {
+		t.Fatalf("live_residency.promised_cpu_fallbacks = %v, want 0 on a fresh model", got.Live["promised_cpu_fallbacks"])
+	}
+	// The frozen startup block is preserved unchanged alongside the live block.
+	if got.NativeStartup.MetalLiveQ8Weights != 0 {
+		t.Fatalf("native_startup unexpectedly mutated: %+v", got.NativeStartup)
+	}
+}
+
+// TestTurnkeyHealthOmitsLiveResidencyWithoutModel pins the honest-absence contract: with no
+// native model loaded (mock/custom-server paths) the live_residency key is absent rather than a
+// fabricated all-zero block.
+func TestTurnkeyHealthOmitsLiveResidencyWithoutModel(t *testing.T) {
+	srv := &turnkeyServer{native: &turnkeyNativeResources{Startup: turnkeyNativeStartup{}}}
+	rec := httptest.NewRecorder()
+	srv.handleHealthz(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if v, present := got["live_residency"]; present && v != nil {
+		t.Fatalf("live_residency = %#v, want absent/nil without a native model", v)
+	}
+}
+
 func TestTurnkeyShutdownKeepsNativeResourcesUntilActiveRequestDrains(t *testing.T) {
 	planner := &turnkeyBlockingPlanner{started: make(chan struct{}), release: make(chan struct{})}
 	var nativeCloses atomic.Int32

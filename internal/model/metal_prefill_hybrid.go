@@ -853,9 +853,13 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequence(s *Session, i
 	if err != nil {
 		return nil, Qwen35MetalForwardSequenceReceipt{}, true, err
 	}
+	captureRaw := s.captureTargetHidden
 	terminal := []*metalgemm.GraphResult{hiddenResult}
 	for _, kv := range kvResults {
 		terminal = append(terminal, kv.kraw, kv.kpost, kv.v)
+	}
+	if captureRaw {
+		terminal = append(terminal, x)
 	}
 	outputs, graphReceipt, err := g.FinishRead(terminal...)
 	receipt := Qwen35MetalForwardSequenceReceipt{
@@ -874,6 +878,18 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequence(s *Session, i
 		}
 		return nil, receipt, true, err
 	}
+	var rawHidden []float32
+	if captureRaw {
+		if len(outputs) != len(terminal) || len(outputs[len(outputs)-1]) != P*H {
+			return nil, receipt, true, fmt.Errorf("metalgemm: raw hidden panel must contain %d rows of width %d", P, H)
+		}
+		rawHidden = outputs[len(outputs)-1]
+		for i, value := range rawHidden {
+			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+				return nil, receipt, true, fmt.Errorf("metalgemm: raw hidden panel has non-finite value at row %d column %d", i/H, i%H)
+			}
+		}
+	}
 	hidden := outputs[0]
 	outIndex := 1
 	for _, kv := range kvResults {
@@ -884,6 +900,11 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequence(s *Session, i
 	}
 	for i, id := range ids {
 		s.Cache.appendPosition(base+i, id)
+	}
+	if captureRaw {
+		for row, id := range ids {
+			s.rememberTargetHidden(base+row, id, rawHidden[row*H:(row+1)*H])
+		}
 	}
 	s.q4kHybridPrefillChunks++
 	s.q4kHybridPrefillLastBase = base
@@ -1059,9 +1080,13 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 	if err != nil {
 		return nil, receipt, true, err
 	}
+	captureRaw := s.captureTargetHidden
 	terminal := []*metalgemm.GraphResult{hiddenResult}
 	for _, kv := range kvResults {
 		terminal = append(terminal, kv.kraw, kv.kpost, kv.v)
+	}
+	if captureRaw {
+		terminal = append(terminal, x)
 	}
 	outputs, graphReceipt, err := g.FinishRead(terminal...)
 	receipt = Qwen35MetalForwardSequenceReceipt{
@@ -1079,6 +1104,18 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 		}
 		return nil, receipt, true, err
 	}
+	var rawHidden []float32
+	if captureRaw {
+		if len(outputs) != len(terminal) || len(outputs[len(outputs)-1]) != P*H {
+			return nil, receipt, true, fmt.Errorf("metalgemm: raw hidden panel must contain %d rows of width %d", P, H)
+		}
+		rawHidden = outputs[len(outputs)-1]
+		for i, value := range rawHidden {
+			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+				return nil, receipt, true, fmt.Errorf("metalgemm: raw hidden panel has non-finite value at row %d column %d", i/H, i%H)
+			}
+		}
+	}
 	s.countMetalGraphCommandBuffer(1)
 	if os.Getenv("FAK_QWEN35_WHOLE_TOKEN_TRACE") == "1" {
 		fmt.Fprintf(os.Stderr, "w1-whole-token P=1 cb=1 encoders=%d gpu_ms=%.2f wait_ms=%.2f host_up=%dB host_down=%dB graph_cb_total=%d dispatch_cb_total=%d gdn_fused=%v\n",
@@ -1095,6 +1132,9 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 		outIndex += 3
 	}
 	s.Cache.appendPosition(base, id)
+	if captureRaw {
+		s.rememberTargetHidden(base, id, rawHidden[0:H])
+	}
 	return outputs[0], receipt, true, nil
 }
 

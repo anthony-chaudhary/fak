@@ -2,11 +2,40 @@ package model
 
 import "sync"
 
+// appendLayerKV appends this prefill panel's K/V rows to layer `layer` and returns
+// the layer's FULL cached K and V (all positions through and including the panel),
+// which is what the callers (prefill_batch.go, verify.go) index over [0, base+rows).
+//
+// rawKey (pre-RoPE K) is always appended f32 to Kraw — Evict re-positions a survivor
+// from it, so it must stay bit-exact. key/value are `rows` positions of `w` elements
+// each (row-major, w = NumKVHeads*HeadDim). They are routed through the
+// precision-aware appendBatchedKV so a q8-realized cache PACKS the rows into kQ8/vQ8
+// instead of writing f32 into its (nil) K/V slices; on the f32 path that helper is the
+// historical `c.K[l]=append(c.K[l],key...)` and this is byte-for-byte unchanged.
+//
+// The q8 invariant this fixes (#12981): on a q8 cache K/V stay nil and kvLen reads the
+// packed length, so an unconditional f32 append left kvLen==0 — a silent q8->f32
+// fallback where the cache looked empty to every later attend. attentionRows then
+// returns the full dequantized layer on q8 (and the full K/V slice on f32), so the
+// returned keys/values are correct for both representations.
 func appendLayerKV(cache *KVCache, layer int, rawKey, key, value []float32) ([]float32, []float32) {
 	cache.Kraw[layer] = append(cache.Kraw[layer], rawKey...)
-	cache.K[layer] = append(cache.K[layer], key...)
-	cache.V[layer] = append(cache.V[layer], value...)
-	return cache.K[layer], cache.V[layer]
+	// Derive rows/width from the cache stride (== NumKVHeads*HeadDim). Only route
+	// through the batched append when key and value are both a whole number of rows
+	// and agree in length; otherwise fall back to the f32-only append (and, on q8,
+	// refuse the unsafe mixed write rather than panic on the hot path).
+	w := cache.kvStride()
+	rows := 0
+	if len(key) > 0 && len(value) == len(key) && w > 0 && len(key)%w == 0 {
+		rows = len(key) / w
+	}
+	if rows > 0 {
+		cache.appendBatchedKV(layer, key, value, rows, w)
+	} else if !cache.quantized() {
+		cache.K[layer] = append(cache.K[layer], key...)
+		cache.V[layer] = append(cache.V[layer], value...)
+	}
+	return cache.attentionRows(layer)
 }
 
 func preparePrefillAttention(cache *KVCache, layer int, rawKey, key, value []float32, cfg Config, rows, heads, headDim int) (keys, values []float32, window int, output []float32) {

@@ -76,7 +76,7 @@ func TestPrintTurnkeyBackendStamp(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			printTurnkeyBackendStamp(&buf, tt.decision)
+			printTurnkeyBackendStamp(&buf, tt.decision, metalResidencyStamp{})
 			if tt.wantEmpty {
 				if buf.Len() != 0 {
 					t.Fatalf("stamp emitted %q, want no output", buf.String())
@@ -90,5 +90,74 @@ func TestPrintTurnkeyBackendStamp(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestPrintTurnkeyBackendStampQualifiesLiveMetal pins the #12875 honesty contract: a live Metal
+// decision is NOT allowed to assert an unqualified "Metal GPU" when the observed device residency
+// shows no Q8/Q6_K weights (decode silently falling back to CPU) or when the Q8 band was declined
+// at load. The decision-time backend is preserved and the residency truth is appended.
+func TestPrintTurnkeyBackendStampQualifiesLiveMetal(t *testing.T) {
+	tests := []struct {
+		name           string
+		res            metalResidencyStamp
+		wantSubstrings []string
+	}{
+		{
+			name:           "zero residency qualifies",
+			res:            metalResidencyStamp{ResidencyKnown: true},
+			wantSubstrings: []string{"backend=metal", "device-resident-weights=0 (cpu-projection-fallback)"},
+		},
+		{
+			name:           "q8 declined qualifies",
+			res:            metalResidencyStamp{Q8Declined: true, ResidencyKnown: true},
+			wantSubstrings: []string{"backend=metal", "q8-device-resident=declined"},
+		},
+		{
+			name:           "resident weights reported",
+			res:            metalResidencyStamp{Q8Resident: 272, Q6Resident: 16, ResidencyKnown: true},
+			wantSubstrings: []string{"backend=metal", "device-resident-weights=q8:272,q6k:16"},
+		},
+		{
+			name:           "unobserved stays plain",
+			res:            metalResidencyStamp{},
+			wantSubstrings: []string{"backend=metal"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			printTurnkeyBackendStamp(&buf, serveMetalDecision{live: true}, tt.res)
+			out := buf.String()
+			for _, want := range tt.wantSubstrings {
+				if !strings.Contains(out, want) {
+					t.Fatalf("stamp output %q missing %q", out, want)
+				}
+			}
+			if !tt.res.ResidencyKnown && !tt.res.Q8Declined && strings.Contains(out, "device-resident-weights") {
+				t.Fatalf("unobserved residency must not fabricate a device-resident claim: %q", out)
+			}
+		})
+	}
+}
+
+// TestMetalResidencyStampFrom pins the report→stamp mapping, including the nil (no native model)
+// case that must stay "unobserved" rather than a fabricated zero.
+func TestMetalResidencyStampFrom(t *testing.T) {
+	if got := metalResidencyStampFrom(nil); got.ResidencyKnown {
+		t.Fatalf("nil report must be unobserved, got %+v", got)
+	}
+	got := metalResidencyStampFrom(map[string]any{
+		"metal_live_q8_weights":    272,
+		"metal_live_q6_weights":    16,
+		"metal_q8_residency_error": "declined: over budget",
+	})
+	if !got.ResidencyKnown || got.Q8Resident != 272 || got.Q6Resident != 16 || !got.Q8Declined {
+		t.Fatalf("metalResidencyStampFrom mapped wrong: %+v", got)
+	}
+	// A nil error string is not a decline.
+	got = metalResidencyStampFrom(map[string]any{"metal_live_q8_weights": 0, "metal_live_q6_weights": 0})
+	if got.Q8Declined {
+		t.Fatalf("empty residency error must not read as a decline: %+v", got)
 	}
 }

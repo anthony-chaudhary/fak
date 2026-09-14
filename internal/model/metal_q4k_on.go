@@ -99,7 +99,15 @@ func (s *Session) metalExecution(operation metalgemm.ExecutionOperation, call fu
 }
 
 func (s *Session) recordMetalFallback(route MetalFallbackRoute) {
-	if s != nil && s.PhaseProfiler != nil {
+	if s == nil {
+		return
+	}
+	// Live whole-serve tally (#12875): survives the per-request Session churn and is read at
+	// request time by /healthz, unlike the opt-in per-session PhaseProfiler below.
+	if s.M != nil {
+		s.M.recordMetalFallbackLive(route)
+	}
+	if s.PhaseProfiler != nil {
 		s.PhaseProfiler.recordMetalFallback(route)
 	}
 }
@@ -1006,7 +1014,18 @@ func (m *Model) EagerMetalQ8Residency() error {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "[metal-q8-residency] eager Q8 promotion published %d no-copy projections\n", len(names))
+	// Publish the post-promotion live residency into the model's observability tally (#12875)
+	// so /healthz can report the real device-resident counts rather than a frozen startup zero.
+	m.RefreshMetalResidency()
 	return nil
+}
+
+// liveMetalWeightCounts samples the live device-resident weight counts from the metalgemm
+// registries (#12875). Note the underlying C counters are O(N) linear scans and the Q8 one takes
+// no lock, so callers use this only on the low-rate health/stamp path (see
+// Model.RefreshMetalResidency), never per generated token.
+func liveMetalWeightCounts() (q6k, q8 int) {
+	return metalgemm.LiveQ6KWeights(), metalgemm.LiveQ8Weights()
 }
 
 // MetalQ8ResidencyError returns the cached fail-closed reason this model's exact Q8 promotion

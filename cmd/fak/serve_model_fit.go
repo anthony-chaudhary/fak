@@ -272,12 +272,17 @@ func fitServeGGUFCPUOffloadOnDevice(ws *ggufload.WeightSource, be compute.Backen
 	return compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFDeviceHeadroom)
 }
 
-func resolveHostServeLoadArm(ws *ggufload.WeightSource, f32Resident bool) serveLoadArm {
+func resolveHostServeLoadArm(ws *ggufload.WeightSource, f32Resident, cpuOffloadExperts bool) serveLoadArm {
 	if f32Resident {
 		return serveLoadArmF32
 	}
 	if ws == nil {
 		return serveLoadArmQuantProfileQ8
+	}
+	if cpuOffloadExperts {
+		if ok, err := serveArtifactCPUOffloadExperts(ws); ok && err == nil {
+			return serveLoadArmCPUOffloadExperts
+		}
 	}
 	quant := ggufload.ClassifyTensorQuant(ws.File.Tensors)
 	if (quant.Q4KResident || quant.Recipe == "UD-Q2_K_XL") && (serveDeviceResidentQ4K(nil) || (os.Getenv("FAK_Q4K") != "" && os.Getenv("FAK_Q4K") != "0")) {
@@ -286,15 +291,20 @@ func resolveHostServeLoadArm(ws *ggufload.WeightSource, f32Resident bool) serveL
 	return serveLoadArmQuantProfileQ8
 }
 
-func resolveDeviceServeLoadArm(ws *ggufload.WeightSource, be compute.Backend, f32Resident bool) serveLoadArm {
+func resolveDeviceServeLoadArm(ws *ggufload.WeightSource, be compute.Backend, f32Resident, cpuOffloadExperts bool) serveLoadArm {
 	if f32Resident {
 		return serveLoadArmF32
 	}
 	if be == nil {
-		return resolveHostServeLoadArm(ws, false)
+		return resolveHostServeLoadArm(ws, false, cpuOffloadExperts)
 	}
 	if ws == nil {
 		return serveLoadArmResidentQ4K
+	}
+	if cpuOffloadExperts {
+		if ok, err := serveArtifactCPUOffloadExperts(ws); ok && err == nil {
+			return serveLoadArmCPUOffloadExperts
+		}
 	}
 	quant := ggufload.ClassifyTensorQuant(ws.File.Tensors)
 	if serveArtifactResidentQ4K(be, quant) {
@@ -314,16 +324,17 @@ func serveNativeContextSizingInputs(ws *ggufload.WeightSource, be compute.Backen
 	if ws == nil {
 		return nil, serveFitBudget{}, nil
 	}
-	quant := ggufload.ClassifyTensorQuant(ws.File.Tensors)
-	if be != nil && cpuOffloadExperts && quant.Q4KResident {
-		weights, err := ws.EstimateCPUOffloadExpertsExpertParallelMemoryPlan(max(ranks, 1))
-		return weights, serveDeviceFitBudget(be), err
+	if be != nil && cpuOffloadExperts {
+		if ok, err := serveArtifactCPUOffloadExperts(ws); ok && err == nil {
+			weights, perr := ws.EstimateCPUOffloadExpertsExpertParallelMemoryPlan(max(ranks, 1))
+			return weights, serveDeviceFitBudget(be), perr
+		}
 	}
 	path := ""
 	if len(ggufPath) > 0 {
 		path = ggufPath[0]
 	}
-	arm := resolveServeNativeContextLoadArm(ws, be, useMetal)
+	arm := resolveServeNativeContextLoadArm(ws, be, cpuOffloadExperts, useMetal)
 	if be != nil {
 		if ranks > 1 && arm == serveLoadArmResidentQ4K {
 			weights, err := ws.EstimateExpertParallelLoadMemoryPlan(ranks)
@@ -336,14 +347,14 @@ func serveNativeContextSizingInputs(ws *ggufload.WeightSource, be compute.Backen
 	return weights, serveHostFitBudget(), err
 }
 
-func resolveServeNativeContextLoadArm(ws *ggufload.WeightSource, be compute.Backend, useMetal bool) serveLoadArm {
+func resolveServeNativeContextLoadArm(ws *ggufload.WeightSource, be compute.Backend, cpuOffloadExperts, useMetal bool) serveLoadArm {
 	if be != nil {
-		return resolveDeviceServeLoadArm(ws, be, false)
+		return resolveDeviceServeLoadArm(ws, be, false, cpuOffloadExperts)
 	}
 	if useMetal {
 		return resolveMetalServeLoadArm(ws)
 	}
-	return resolveHostServeLoadArm(ws, false)
+	return resolveHostServeLoadArm(ws, false, cpuOffloadExperts)
 }
 
 func serveGGUFMemoryPlanForArm(ws *ggufload.WeightSource, arm serveLoadArm, contextBudgetTokens int, fit serveFitBudget, q4kOpts ...ggufload.Q4KLoadOption) (compute.MemoryPlan, error) {
@@ -366,6 +377,11 @@ func serveGGUFWeightMemoryPlanForArm(ws *ggufload.WeightSource, arm serveLoadArm
 		return ws.EstimateF32LoadMemoryPlan()
 	case serveLoadArmQuantProfileQ8:
 		return ws.EstimateQ8LoadMemoryPlan()
+	case serveLoadArmCPUOffloadExperts:
+		// arm-selected cpu-offload: the routed experts are host-scoped. rank-local
+		// sharding is handled upstream (serveNativeContextSizingInputs) before this
+		// unsharded single-rank arm is reached, so charge the full routed set here.
+		return ws.EstimateCPUOffloadExpertsMemoryPlan()
 	case serveLoadArmResidentQ4K:
 		plan, err := ws.EstimateQ4KLoadMemoryPlan(q4kOpts...)
 		if errors.Is(err, ggufload.ErrQ4KLoadEstimateUnsupported) {
@@ -514,7 +530,7 @@ func fitServeGGUFPathOnReportedHost(ggufPath string, f32Resident bool, contextBu
 	}
 	fit := serveHostFitBudgetFromReported(total, free, known, override)
 	plan, err := withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
-		arm := resolveHostServeLoadArm(ws, f32Resident)
+		arm := resolveHostServeLoadArm(ws, f32Resident, false)
 		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, fit, serveQ4KFitOptions(ggufPath, ws, nil, arm)...)
 	})
 	if err != nil {
@@ -556,7 +572,7 @@ func withGGUFWeights(ggufPath string, plan func(*ggufload.WeightSource) (compute
 
 func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Resident bool, contextBudgetTokens int, override *serveFitBudget) (compute.MemoryPlan, error) {
 	plan, err := withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
-		arm := resolveDeviceServeLoadArm(ws, be, f32Resident)
+		arm := resolveDeviceServeLoadArm(ws, be, f32Resident, false)
 		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, serveDeviceFitBudgetFromReported(be, override), serveQ4KFitOptions(ggufPath, ws, be, arm)...)
 	})
 	if err == nil {

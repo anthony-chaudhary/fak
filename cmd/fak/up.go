@@ -28,6 +28,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
 	"github.com/anthony-chaudhary/fak/internal/macfit"
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -399,7 +400,7 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 		ver += " (" + id + ")"
 	}
 	printTurnkeyReady(stdout, ver, server.Addr(), plan)
-	printTurnkeyBackendStamp(stdout, server.metalDecision)
+	printTurnkeyBackendStamp(stdout, server.metalDecision, metalResidencyStampFrom(server.liveResidencyReport()))
 
 	if *headless || in == nil {
 		<-ctx.Done()
@@ -588,6 +589,28 @@ func (s *turnkeyServer) endChatRequest() {
 	if release {
 		s.releaseResidency()
 	}
+}
+
+// readiness reports whether the turnkey HTTP surface is accepting new work as
+// the tuple (ready, state, reason). Readiness is a published contract (see
+// help.go: GET /readyz is 503 until the server is up and passing its health
+// gates), not merely a liveness flag, so it folds BOTH independent not-ready
+// conditions: the boot warmup gate (s.ready, armed until the synchronous model
+// load completes — #12984) and the stopping transition (the same s.stopping
+// state beginChatRequest gates on). A zero-value turnkeyServer is ready:
+// nothing has asked it to stop and no warmup was armed. Callers must not hold
+// s.mu while encoding or writing the response.
+func (s *turnkeyServer) readiness() (ready bool, state string, reason string) {
+	if readyState, isReady := s.ready.readyState(); !isReady {
+		return false, readyState, "boot warmup in flight"
+	}
+	s.mu.Lock()
+	stopping := s.stopping
+	s.mu.Unlock()
+	if stopping {
+		return false, "stopping", "server is stopping"
+	}
+	return true, "ok", ""
 }
 
 func newInKernelChatPlanner(model *fakmodel.Model, tok *tokenizer.Tokenizer, modelID string, q4k bool, backend compute.Backend, metal bool) *agent.InKernelPlanner {
@@ -955,19 +978,19 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 }
 
 func (s *turnkeyServer) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	isReady, state, _ := s.readiness()
 	var nativeStartup *turnkeyNativeStartup
 	if s.native != nil {
 		nativeStartup = &s.native.Startup
 	}
-	readyState, isReady := s.ready.readyState()
-	status := "ok"
-	if !isReady {
-		status = readyState
-	}
 	w.Header().Set("Content-Type", "application/json")
+	// Liveness is preserved for a live-but-not-ready process: /healthz answers
+	// 200 while the process can still respond, but the body's status must be
+	// truthful about readiness — "warming_up" until the boot warmup gate
+	// completes, "stopping" once shutdown began, otherwise "ok".
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status":         status,
+		"status":         state,
 		"ready":          isReady,
 		"mode":           "turnkey",
 		"engine":         s.engineID,
@@ -975,20 +998,54 @@ func (s *turnkeyServer) handleHealthz(w http.ResponseWriter, r *http.Request) {
 		"model":          s.plan.Tier.ModelID,
 		"headroom_ratio": s.plan.HeadroomRatio,
 		"native_startup": nativeStartup,
+		"live_residency": s.liveResidencyReport(),
 	})
 }
 
+// liveResidencyReport reads the LIVE Metal/CPU routing state at request time (#12875) instead of
+// replaying the snapshot frozen into native.Startup at load. The frozen `native_startup` stays for
+// backward compatibility; this block is the truthful answer to "did decode run on Metal on this
+// run?". It re-samples device-resident weight counts (a lazy later upload is now visible) and
+// reports the model's process-wide promised-CPU-fallback tally, which survives the per-request
+// session churn. It returns nil when no native model is loaded (mock/custom-server paths), so the
+// key is absent rather than a fabricated zero.
+func (s *turnkeyServer) liveResidencyReport() map[string]any {
+	if s.native == nil || s.native.Model == nil {
+		return nil
+	}
+	q6k, q8 := s.native.Model.RefreshMetalResidency()
+	fallbacks := s.native.Model.MetalFallbackSnapshot()
+	return map[string]any{
+		"metal_live_q8_weights":    q8,
+		"metal_live_q6_weights":    q6k,
+		"promised_cpu_fallbacks":   fallbacks.Total,
+		"fallbacks_observed":       fallbacks.Observed,
+		"fallbacks_by_route":       fallbacks.ByRoute,
+		"startup_q8_weights":       s.native.Startup.MetalLiveQ8Weights,
+		"startup_q6_weights":       s.native.Startup.MetalLiveQ6Weights,
+		"metal_q8_residency_error": s.native.Startup.MetalQ8ResidencyError,
+	}
+}
+
 func (s *turnkeyServer) handleReadyz(w http.ResponseWriter, r *http.Request) {
-	readyState, isReady := s.ready.readyState()
+	isReady, state, reason := s.readiness()
 	w.Header().Set("Content-Type", "application/json")
 	if !isReady {
 		w.Header().Set("Retry-After", "1")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		_ = json.NewEncoder(w).Encode(map[string]any{"status": readyState})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": state,
+			"ready":  false,
+			"reason": reason,
+		})
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ready"})
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status": "ready",
+		"ready":  true,
+		"mode":   "turnkey",
+	})
 }
 
 func (s *turnkeyServer) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -1394,6 +1451,22 @@ func writeTurnkeyInferenceError(w http.ResponseWriter, err error) {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
 			"message": contextErr.Error(), "type": "invalid_request_error", "code": "context_length_exceeded",
+		}})
+		return
+	}
+	// A native Metal command-buffer wait that exceeded its bound is a local,
+	// retryable resource stall — not a generic server fault. Surface it as 503
+	// with a distinct code so a client can retry or shed load instead of
+	// treating it as an opaque 500. The observation seam may wrap the typed
+	// error, so errors.As (not a type assertion) recovers it.
+	var stall metalgemm.MetalCommandBufferStallError
+	if errors.As(err, &stall) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
+			"message": fmt.Sprintf("Metal command buffer stall during %s: waited %.3fms at/over %.3fms limit",
+				stall.Operation, stall.WaitedMilliseconds, stall.LimitMilliseconds),
+			"type": "server_error", "code": "metal_command_buffer_stalled",
 		}})
 		return
 	}

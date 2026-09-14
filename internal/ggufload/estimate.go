@@ -667,6 +667,19 @@ func (s *WeightSource) estimateCPUOffloadExpertsMemoryPlan(ranks int) (compute.M
 		if err != nil {
 			return nil, err
 		}
+		// Mirror the loader's stored residency: the routed-expert loader holds a blob raw
+		// (residentExpertBlockGeometry + model.ResidentKQuantEligible) ONLY for an admitted
+		// encoding; otherwise it dequantizes to f32 and inflates a quantized weight toward
+		// ~4 B/elem. A host-scoped routed expert whose QUANTIZED encoding the loader cannot
+		// hold raw therefore refuses by the named key instead of silently charging the
+		// transcoded footprint. Genuinely f32-resident inputs (F32/F16/BF16) carry no
+		// raw-quant block geometry and dequantize to the same f32 width, so they keep the
+		// historical raw-payload charge.
+		if hostExpert && archUsesGGUFBatchedMoEExperts(modelType) {
+			if _, _, isRouted := glmMoeDsaBatchedExpert(info.Name); isRouted && !routedExpertResidencyEncoding(info.Type) {
+				return nil, fmt.Errorf("%w: tensor %s type %s", ErrRoutedExpertEncodingUnqualified, info.Name, info.Type)
+			}
+		}
 		shard := false
 		if experts > 0 {
 			if _, _, ok := glmMoeDsaBatchedExpert(info.Name); ok {

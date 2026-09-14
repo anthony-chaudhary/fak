@@ -18,6 +18,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/pkg/turncost"
 )
 
@@ -1147,6 +1148,18 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 		return http.StatusServiceUnavailable, "in_kernel_oom",
 			fmt.Sprintf("in-kernel GPU out of memory for this request (%s allocation of %d bytes failed); "+
 				"reduce the prompt/context size or max_tokens, or serve a smaller model / shorter --ctx", class, oom.Bytes)
+	}
+	// A native Metal command-buffer wait that exceeded its bound is a LOCAL stall the caller can
+	// retry — a transiently-busy or wedged GPU, not an upstream fault. It is in-kernel by
+	// construction (only the native planner produces it), so the specific operation + wait detail
+	// is safe and reachable only on a genuine stall — a real upstream error can never be this
+	// type. 503 (retryable) over 502, matching the in-kernel OOM arm's reasoning.
+	var stall metalgemm.MetalCommandBufferStallError
+	if errors.As(err, &stall) {
+		return http.StatusServiceUnavailable, "metal_command_buffer_stalled",
+			fmt.Sprintf("Metal command buffer stall during %s: waited %.3fms at/over %.3fms limit; "+
+				"retry the request — if it persists, reduce the batch/prompt or restart the GPU server",
+				stall.Operation, stall.WaitedMilliseconds, stall.LimitMilliseconds)
 	}
 	var capErr *agent.InKernelCapacityError
 	if errors.As(err, &capErr) {
