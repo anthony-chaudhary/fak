@@ -3,7 +3,7 @@ package model
 import (
 	"strings"
 
-	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
+	"github.com/anthony-chaudhary/fak/internal/cachelayout"
 )
 
 // Architecture-support gate (issue #934).
@@ -158,13 +158,13 @@ func ClassifyForwardPath(cfg Config, man map[string]tensorMeta) (ForwardPathKind
 }
 
 // cacheLayout derives the per-layer hybrid cache-type registry (#942) for this config
-// from its layer_types. It is the model-side adapter over ctxmmu.NewModelCacheLayout:
+// from its layer_types. It is the model-side adapter over cachelayout.NewModelCacheLayout:
 // the classification vocabulary (LayerKind / LayerCacheDescriptor / ModelCacheLayout)
-// and the geometry live in ctxmmu, so the swap, checkpoint and block-store seams share
+// and the geometry live in cachelayout, so the swap, checkpoint and block-store seams share
 // ONE per-layer storage-granularity answer instead of re-deriving a layout from
 // constants. Derived on demand from the immutable loaded Config; pure and deterministic.
-func (c Config) cacheLayout() ctxmmu.ModelCacheLayout {
-	return ctxmmu.NewModelCacheLayout(c.LayerTypes, ctxmmu.CacheLayoutGeometry{
+func (c Config) cacheLayout() cachelayout.ModelCacheLayout {
+	return cachelayout.NewModelCacheLayout(c.LayerTypes, cachelayout.CacheLayoutGeometry{
 		NumKVHeads:          c.NumKVHeads,
 		HeadDim:             c.HeadDim,
 		LinearNumValueHeads: c.LinearNumValueHeads,

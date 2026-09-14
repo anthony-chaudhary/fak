@@ -3,8 +3,8 @@ package deepseekv4moe
 import (
 	"sort"
 
-	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/mathx"
+	"github.com/anthony-chaudhary/fak/internal/replayoracle"
 )
 
 // CachePolicyBenchSchema is the receipt schema id for the expert-cache policy bench.
@@ -107,7 +107,7 @@ type CachePolicyBenchReceipt struct {
 // CachePolicyReplay replays one stream across the five arms at matched capacity and
 // returns the per-arm receipt. A non-positive capacity fails closed with
 // ErrInvalidTraceCapacity. The OPT arm is an offline Belady upper bound computed by
-// compute.BeladyKVReplayOracle; its Evictions are left 0 by construction because an
+// replayoracle.Belady; its Evictions are left 0 by construction because an
 // oracle does not pay online evictions, and VersusOPT for OPT is therefore 1.0.
 //
 // On a stream with more than 63 distinct groups the oracle falls back to a
@@ -120,7 +120,7 @@ func CachePolicyReplay(stream CachePolicyStream, capacity int) (CachePolicyBench
 	}
 
 	events := cachePolicyEvents(stream)
-	oracle := compute.BeladyKVReplayOracle(events, capacity)
+	oracle := replayoracle.Belady(events, capacity)
 
 	receipt := CachePolicyBenchReceipt{
 		Schema:      CachePolicyBenchSchema,
@@ -144,7 +144,7 @@ func CachePolicyReplay(stream CachePolicyStream, capacity int) (CachePolicyBench
 // CachePolicyReplayOnline replays only the four implementable arms (LRU/LFU/heat/random),
 // skipping the offline OPT oracle entirely. It returns the same rows, in the same order,
 // and with the same Hits/Misses/Accesses/HitRate/Evictions as CachePolicyReplay would for
-// those arms — but without paying compute.BeladyKVReplayOracle, whose exact DP is
+// those arms — but without paying replayoracle.Belady, whose exact DP is
 // exponential in the distinct-group count. Use it to compare arms against each other (or
 // against a shipped simulator) when no oracle-normalized margin is needed; use
 // CachePolicyReplay when the margin versus OPT is the result.
@@ -161,24 +161,24 @@ func CachePolicyReplayOnline(stream CachePolicyStream, capacity int) ([]CachePol
 		if policy == CachePolicyOPT {
 			continue
 		}
-		rows = append(rows, cachePolicyReplayArm(policy, stream.Groups, capacity, nil, compute.KVReplayOracleResult{}))
+		rows = append(rows, cachePolicyReplayArm(policy, stream.Groups, capacity, nil, replayoracle.Result{}))
 	}
 	return rows, nil
 }
 
-// cachePolicyEvents maps a stream to unit-sized compute.KVReplayEvent rows, assigning a
+// cachePolicyEvents maps a stream to unit-sized replayoracle.Event rows, assigning a
 // stable int SpanID per distinct ExpertGroup in first-touch order (so the OPT oracle and
 // the LRU cross-check key on the same identity).
-func cachePolicyEvents(stream CachePolicyStream) []compute.KVReplayEvent {
+func cachePolicyEvents(stream CachePolicyStream) []replayoracle.Event {
 	spanIDs := make(map[ExpertGroup]int)
-	events := make([]compute.KVReplayEvent, 0, len(stream.Groups))
+	events := make([]replayoracle.Event, 0, len(stream.Groups))
 	for _, group := range stream.Groups {
 		id, ok := spanIDs[group]
 		if !ok {
 			id = len(spanIDs)
 			spanIDs[group] = id
 		}
-		events = append(events, compute.KVReplayEvent{SpanID: id, Tokens: 1})
+		events = append(events, replayoracle.Event{SpanID: id, Tokens: 1})
 	}
 	return events
 }
@@ -186,7 +186,7 @@ func cachePolicyEvents(stream CachePolicyStream) []compute.KVReplayEvent {
 // cachePolicyReplayArm replays one arm over the unit-sized groups. Every victim choice
 // uses an explicit sort or a deterministic scan with a documented tie-break; Go map
 // iteration is never allowed to decide a victim.
-func cachePolicyReplayArm(policy CachePolicy, groups []ExpertGroup, capacity int, events []compute.KVReplayEvent, oracle compute.KVReplayOracleResult) CachePolicyRow {
+func cachePolicyReplayArm(policy CachePolicy, groups []ExpertGroup, capacity int, events []replayoracle.Event, oracle replayoracle.Result) CachePolicyRow {
 	row := CachePolicyRow{Policy: policy, Accesses: len(groups)}
 	if policy == CachePolicyOPT {
 		row.Hits = oracle.HitTokens

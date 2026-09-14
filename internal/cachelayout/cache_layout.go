@@ -1,4 +1,4 @@
-package ctxmmu
+package cachelayout
 
 // cache_layout.go - the per-layer hybrid cache-type registry (#942).
 //
