@@ -398,7 +398,7 @@ func TestROCmFP4_ConcurrentRace(t *testing.T) {
 			defer wg.Done()
 			dst := make([]float32, rows)
 			for iter := 0; iter < 50; iter++ {
-				err := ROCmFP4CoopMatMulInto(tensor, vector, dst)
+				err := ROCmFP4CoopMatMulScalarInto(tensor, vector, dst)
 				if err != nil {
 					t.Errorf("worker %d iter %d failed: %v", id, iter, err)
 					return
@@ -435,7 +435,7 @@ func BenchmarkROCmFP4CoopMatMul_HotPath(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		err := ROCmFP4CoopMatMulInto(tensor, vector, dst)
+		err := ROCmFP4CoopMatMulScalarInto(tensor, vector, dst)
 		if err != nil {
 			b.Fatal(err)
 		}

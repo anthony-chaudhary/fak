@@ -68,6 +68,7 @@ const (
 	IQ3_XXS              // llama.cpp i-quant: 256-elem super-block, 98 raw bytes
 	IQ3_S                // llama.cpp i-quant: 256-elem super-block, 110 raw bytes
 	IQ2_XXS              // llama.cpp i-quant: 256-elem super-block, 66 raw bytes
+	FP4                  // FP4 is 4-bit E2M1 floating point, block-32 with an FP16/FP32 per-block scale (ROCmFP4).
 )
 
 // Bytes is the per-element storage width. For sub-byte formats (I4) it reports the
@@ -78,6 +79,8 @@ func (d Dtype) Bytes() int {
 		return 4
 	case F16, BF16:
 		return 2
+	case FP4:
+		return 1
 	default:
 		return 1
 	}
@@ -117,6 +120,8 @@ func (d Dtype) String() string {
 		return "iq3_s"
 	case IQ2_XXS:
 		return "iq2_xxs"
+	case FP4:
+		return "fp4"
 	default:
 		return "dtype?"
 	}
@@ -124,7 +129,7 @@ func (d Dtype) String() string {
 
 // Quantized reports whether the dtype needs a QuantSpec to be interpreted.
 func (d Dtype) Quantized() bool {
-	return d == Q8_0 || d == I8 || d == I4 || d == FP8 || d == Q4_K || d == Q5_K || d == Q6_K || d == Q2_0 || d == Q2_K || d == IQ3_XXS || d == IQ3_S || d == IQ2_XXS
+	return d == Q8_0 || d == I8 || d == I4 || d == FP8 || d == Q4_K || d == Q5_K || d == Q6_K || d == Q2_0 || d == Q2_K || d == IQ3_XXS || d == IQ3_S || d == IQ2_XXS || d == FP4
 }
 
 // ---- Layout ---------------------------------------------------------------------

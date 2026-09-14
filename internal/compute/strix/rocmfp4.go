@@ -22,7 +22,48 @@ var (
 
 	// ErrMisalignedCacheLine indicates tensor memory violates 128-bit cacheline boundary.
 	ErrMisalignedCacheLine = errors.New("strix/rocmfp4: tensor memory violates 128-bit cacheline boundary")
+
+	// ErrNoFP4DeviceKernel indicates no FP4 device kernel is registered for this host, so
+	// the roofline path fails closed instead of silently running a scalar CPU loop that
+	// would report roofline-class numbers backed by non-device work.
+	ErrNoFP4DeviceKernel = errors.New("strix/rocmfp4: no FP4 device kernel available for gfx1151; refusing scalar fallback in the roofline path")
+
+	// ErrFP4DeviceKernelAbsent is the legacy spelling of ErrNoFP4DeviceKernel, retained so
+	// existing errors.Is callers keep matching after the registry seam was introduced.
+	ErrFP4DeviceKernelAbsent = ErrNoFP4DeviceKernel
 )
+
+// fp4DeviceKernel is the device-path seam for the FP4 cooperative roofline entry point.
+// An implementation owns the real GFX1151 v_wmma_f32_16x16x16_fp4 dispatch (or its
+// device-backed reference). It is nil until a device host registers one.
+type fp4DeviceKernel interface {
+	// CoopMatMulInto computes dst = tensor * vector through the FP4 device path.
+	CoopMatMulInto(tensor *ROCmFP4Tensor, vector []float32, dst []float32) error
+}
+
+// rocmFP4DeviceKernel is the process-wide registered FP4 device kernel. It is nil by
+// default: this host has no gfx1151 FP4 device, so the roofline path fails closed rather
+// than dequantizing on the CPU.
+var rocmFP4DeviceKernel fp4DeviceKernel
+
+// RegisterROCmFP4DeviceKernel installs the FP4 device-path implementation. Passing nil
+// clears it. It exists so a real gfx1151 host (or a device-backed test) can supply the
+// v_wmma_f32_16x16x16_fp4 dispatch without changing the fail-closed default.
+func RegisterROCmFP4DeviceKernel(k fp4DeviceKernel) {
+	rocmFP4DeviceKernel = k
+}
+
+// ROCmFP4DeviceKernelAvailable reports whether an FP4 device kernel is registered, i.e.
+// whether ROCmFP4CoopMatMulInto will take the device path instead of failing closed.
+func ROCmFP4DeviceKernelAvailable() bool {
+	return rocmFP4DeviceKernel != nil
+}
+
+// fp4DeviceKernelPresent reports whether a real FP4 device path is available. It is the
+// positive capability the roofline path requires; absence is a fail-closed error.
+func fp4DeviceKernelPresent() bool {
+	return ROCmFP4DeviceKernelAvailable()
+}
 
 // Block flags for FP4Block32 metadata.
 const (
@@ -63,6 +104,14 @@ type ROCmFP4Telemetry struct {
 	BandwidthEfficiency      float64 `json:"bandwidth_efficiency"`
 	SustainedBandwidthGBps   float64 `json:"sustained_bandwidth_gbps"`
 	Wave32Count              int     `json:"wave32_count"`
+	// BandwidthIsModelConstant is true when the bandwidth fields above are a static
+	// model constant derived from the nominal bus width, not a measured value. Consumers
+	// must not report these numbers as measured hardware bandwidth.
+	BandwidthIsModelConstant bool `json:"bandwidth_is_model_constant"`
+	// BandwidthSource names the provenance of the bandwidth fields above. When they are a
+	// model constant this carries the full MODEL CONSTANT label; a real measurement would
+	// replace it with the measurement's provenance.
+	BandwidthSource string `json:"bandwidth_source"`
 }
 
 // ROCmFP4Tensor represents a 2D matrix packed in ROCmFP4 block-32 format.
@@ -322,14 +371,16 @@ func PackTensorROCmFP4(matrix []float32, rows, cols int) (*ROCmFP4Tensor, error)
 }
 
 // ROCmFP4CoopMatMul performs fused cooperative matrix-vector multiplication (GEMV).
-// Simulates RDNA 3.5 WMMA hardware semantics with scale multiplication folded directly
-// into Wave32 multiply-accumulate units.
+// It intentionally runs the EXPLICIT scalar reference semantics that model RDNA 3.5
+// WMMA accumulator behavior with the block scale folded into the accumulator, and is
+// retained for callers that want a device-free result. The fail-closed roofline entry
+// point is ROCmFP4CoopMatMulInto, which requires a registered FP4 device kernel.
 func ROCmFP4CoopMatMul(tensor *ROCmFP4Tensor, vector []float32) ([]float32, error) {
 	if tensor == nil {
 		return nil, ErrNilTensor
 	}
 	out := make([]float32, tensor.Rows)
-	err := ROCmFP4CoopMatMulInto(tensor, vector, out)
+	err := ROCmFP4CoopMatMulScalarInto(tensor, vector, out)
 	if err != nil {
 		return nil, err
 	}
@@ -337,8 +388,41 @@ func ROCmFP4CoopMatMul(tensor *ROCmFP4Tensor, vector []float32) ([]float32, erro
 }
 
 // ROCmFP4CoopMatMulInto performs fused cooperative matrix-vector multiplication into a
-// caller-provided destination slice, guaranteeing zero allocations on the hot path.
+// caller-provided destination slice through the FP4 DEVICE path.
+//
+// FAIL-CLOSED: this roofline entry point dispatches only to a registered FP4 device
+// kernel (the gfx1151 v_wmma_f32_16x16x16_fp4 path). When no device kernel is registered
+// it returns ErrNoFP4DeviceKernel instead of silently running a scalar CPU loop that
+// would report roofline-class numbers backed by non-device work. Callers that explicitly
+// want the scalar reference semantics (tests, offline parity checks) must call
+// ROCmFP4CoopMatMulScalarInto.
 func ROCmFP4CoopMatMulInto(tensor *ROCmFP4Tensor, vector []float32, dst []float32) error {
+	if tensor == nil {
+		return ErrNilTensor
+	}
+	if len(vector) != tensor.Cols {
+		return fmt.Errorf("%w: vector len %d != tensor cols %d", ErrDimensionMismatch, len(vector), tensor.Cols)
+	}
+	if len(dst) < tensor.Rows {
+		return fmt.Errorf("%w: dst len %d < tensor rows %d", ErrDimensionMismatch, len(dst), tensor.Rows)
+	}
+
+	if !fp4DeviceKernelPresent() {
+		return ErrNoFP4DeviceKernel
+	}
+	if err := rocmFP4DeviceKernel.CoopMatMulInto(tensor, vector, dst); err != nil {
+		return fmt.Errorf("strix/rocmfp4: FP4 device kernel dispatch failed: %w", err)
+	}
+	return nil
+}
+
+// ROCmFP4CoopMatMulScalarInto is the EXPLICIT scalar reference path for the fused
+// cooperative matrix-vector product. It models the fused Wave32 cooperative WMMA
+// accumulation the device kernel performs, with the block scale folded into the
+// accumulator once per block. It is NOT a silent fallback: callers must name it
+// deliberately (tests, offline parity/reference checks). The roofline entry point
+// ROCmFP4CoopMatMulInto never routes here implicitly.
+func ROCmFP4CoopMatMulScalarInto(tensor *ROCmFP4Tensor, vector []float32, dst []float32) error {
 	if tensor == nil {
 		return ErrNilTensor
 	}
@@ -455,10 +539,15 @@ func ComputeROCmFP4Telemetry(rows, cols int) ROCmFP4Telemetry {
 	// sustaining 100% active wavefront occupancy.
 	const activeOccupancy = 1.0 // 100% wavefront occupancy
 
-	// Memory bus: 256-bit LPDDR5X-8533. Sustained bandwidth is 231 GB/s (nominal 256 GB/s, peak 273 GB/s).
-	const sustainedBW = 231.0
+	// MODEL CONSTANT, NOT A MEASUREMENT: 231.0 GB/s is the nominal sustained-bandwidth
+	// model for the Strix Halo memory subsystem (256-bit LPDDR5X-8533: nominal bus
+	// 256 GB/s, peak 273 GB/s). It is a static model parameter used to derive the
+	// efficiency ratio below, not a value measured on this host. The corresponding
+	// telemetry carries BandwidthIsModelConstant=true so no consumer can mistake it for a
+	// measured reading.
+	const rocmFP4ModelSustainedBWGBps = 231.0
 	const busBandwidth = 256.0
-	efficiency := sustainedBW / busBandwidth // ~0.9023 (90.23%)
+	efficiency := rocmFP4ModelSustainedBWGBps / busBandwidth // ~0.9023 (90.23%)
 
 	return ROCmFP4Telemetry{
 		OriginalSizeBytes:        originalBytes,
@@ -466,10 +555,12 @@ func ComputeROCmFP4Telemetry(rows, cols int) ROCmFP4Telemetry {
 		EffectiveBPW:             effectiveBPW,
 		CompressionRatio:         compRatio,
 		ActiveWavefrontOccupancy: activeOccupancy,
-		MemoryBandwidthGBps:      sustainedBW,
+		MemoryBandwidthGBps:      rocmFP4ModelSustainedBWGBps,
 		BandwidthEfficiency:      efficiency,
-		SustainedBandwidthGBps:   sustainedBW,
+		SustainedBandwidthGBps:   rocmFP4ModelSustainedBWGBps,
 		Wave32Count:              totalBlocks,
+		BandwidthIsModelConstant: true,
+		BandwidthSource:          "model_constant:231GB/s (LPDDR5X-8533 sustained estimate, not measured on this host)",
 	}
 }
 

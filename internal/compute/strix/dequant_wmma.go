@@ -161,6 +161,20 @@ func NewDequantWMMAKernel(cfg DequantWMMAConfig) (*DequantWMMAKernel, error) {
 	return kernel, nil
 }
 
+// EmitsFP4WMMAOpcode reports whether the embedded GFX1151 assembly issues a real
+// v_wmma_f32_16x16x16_fp4 instruction driving on-the-fly in-register E2M1 dequant.
+func (k *DequantWMMAKernel) EmitsFP4WMMAOpcode() bool {
+	return k.inspection.WMMAOpcode == "v_wmma_f32_16x16x16_fp4"
+}
+
+// FP4WMMAOpcode returns the FP4 WMMA opcode string when the embedded assembly emits it, else "".
+func (k *DequantWMMAKernel) FP4WMMAOpcode() string {
+	if k.EmitsFP4WMMAOpcode() {
+		return "v_wmma_f32_16x16x16_fp4"
+	}
+	return ""
+}
+
 // InspectAssembly returns the parsed structural properties of the embedded GFX1151 assembly.
 func (k *DequantWMMAKernel) InspectAssembly() AssemblyInspection {
 	k.mu.RLock()
@@ -175,8 +189,14 @@ func (k *DequantWMMAKernel) parseAssembly(source string) AssemblyInspection {
 		!strings.Contains(source, "ds_write") &&
 		!strings.Contains(source, "ds_read")
 
+	// Detect the emitted opcode against CODE lines only. A bare substring match would
+	// be fooled by the documentation comment that names the FP4 instruction, so an
+	// implementation that deleted the real instruction but kept the comment would
+	// still "detect" FP4. Strip line comments first, then require a code line whose
+	// first token is the opcode — analysis must reflect emission, not prose.
+	codeOnly := stripAsmComments(source)
 	wmmaOpcode := "v_wmma_f32_16x16x16_f16"
-	if strings.Contains(source, "v_wmma_f32_16x16x16_fp4") {
+	if lineEmitsOpcode(codeOnly, "v_wmma_f32_16x16x16_fp4") {
 		wmmaOpcode = "v_wmma_f32_16x16x16_fp4"
 	}
 
@@ -191,6 +211,36 @@ func (k *DequantWMMAKernel) parseAssembly(source string) AssemblyInspection {
 		VectorLoadOpcode:     "global_load_dwordx4",
 		RawSource:            source,
 	}
+}
+
+// stripAsmComments removes AMDGPU line-comment tails (`//` and `;`) from each line of
+// an assembly source so structural checks never match an opcode that appears only in
+// documentation. It deliberately keeps the line structure (newlines) intact.
+func stripAsmComments(source string) string {
+	lines := strings.Split(source, "\n")
+	for i, line := range lines {
+		if idx := strings.Index(line, "//"); idx >= 0 {
+			line = line[:idx]
+		}
+		if idx := strings.Index(line, ";"); idx >= 0 {
+			line = line[:idx]
+		}
+		lines[i] = line
+	}
+	return strings.Join(lines, "\n")
+}
+
+// lineEmitsOpcode reports whether any CODE line's first whitespace-delimited token is
+// exactly opcode. This is the non-forgeable emission check: an instruction must begin
+// a code line with the opcode, so a comment mentioning the opcode cannot satisfy it.
+func lineEmitsOpcode(source, opcode string) bool {
+	for _, line := range strings.Split(source, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && fields[0] == opcode {
+			return true
+		}
+	}
+	return false
 }
 
 // VerifyCoalescing asserts 128-byte boundary alignment and calculates burst efficiency.
