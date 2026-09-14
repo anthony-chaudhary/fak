@@ -20,7 +20,10 @@ package model
 // declared compressor/indexer layer (v41CompressIndexForwardAdmitted): the
 // reduced assembly projects a per-layer attn.wkv.weight, executes neither
 // compression stage, and never reuses a shared KV/index source, so an in-range
-// declaration is refused rather than silently run against a per-layer cache. The assembled
+// declaration is refused rather than silently run against a per-layer cache. The
+// mHC hyperconnection multiplicity is likewise fixed at the published four-stream
+// layout (v41HCMultForwardAdmitted), so a declared hc_mult other than 4 is refused
+// rather than silently run as four streams. The assembled
 // pass is exercised by a REDUCED model
 // against an independent scalar oracle (v41_forward_test.go); it does not itself
 // qualify the official checkpoint for generation.
@@ -261,6 +264,28 @@ func v41KVSourceForwardAdmitted(cfg Config) error {
 	return nil
 }
 
+// v41HCMultForwardAdmitted fails closed when the config declares an mHC
+// hyperconnection multiplicity other than 4. The reduced text assembly hardcodes
+// the four-stream geometry (v41MHCSplit called with hc=4, four identical stand-in
+// streams, and the width-24 mix projection v41MHCMixWidth), so it executes only
+// the published hc_mult=4 layout. A config declaring a different multiplicity
+// would otherwise run the four-stream hyperconnection for a model the assembly
+// never ran -- a silent omission contrary to the fail-closed invariant. The
+// published artifact and every reduced fixture declare hc_mult=4, so the reduced
+// oracle forward stays admitted; executing a non-4 multiplicity is the mHC
+// geometry leaf's remaining work.
+func v41HCMultForwardAdmitted(cfg Config) error {
+	m := cfg.DeepSeekV41
+	if m == nil {
+		return nil
+	}
+	if m.HCMult != 4 {
+		return v41StageErr(v41StageMHC, -1,
+			fmt.Errorf("%w: config declares mHC multiplicity %d but the reduced forward only executes the four-stream hc_mult=4 geometry", ErrV41ForwardStage, m.HCMult))
+	}
+	return nil
+}
+
 // v41ForwardAdmitted returns nil only when this is an admitted V4.1 config with
 // every required stage's weights present and shape-consistent. It is the gate
 // both Model.Forward and Session.Prefill/Step run before the assembly. A
@@ -303,6 +328,9 @@ func (m *Model) v41ForwardAdmitted() error {
 		return err
 	}
 	if err := v41KVSourceForwardAdmitted(cfg); err != nil {
+		return err
+	}
+	if err := v41HCMultForwardAdmitted(cfg); err != nil {
 		return err
 	}
 	H, hd, nH := cfg.HiddenSize, cfg.HeadDim, cfg.NumHeads

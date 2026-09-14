@@ -490,3 +490,31 @@ func TestV41ForwardKVSourceDeclaredFailsClosed(t *testing.T) {
 		t.Fatalf("reduced out-of-range KV source admission error = %v, want nil", err)
 	}
 }
+
+// TestV41ForwardHCMultDeclaredFailsClosed is the mHC-multiplicity fail-closed
+// witness: the reduced assembly hardcodes the four-stream hyperconnection
+// geometry (v41MHCSplit called with hc=4, four identical stand-in streams, and
+// the width-24 mix projection v41MHCMixWidth), so it executes only the published
+// hc_mult=4 layout. A config that declares a different hc_mult must refuse rather
+// than silently run the four-stream geometry for a model the assembly never ran.
+// hc_mult=4 (the published artifact and every reduced fixture) stays admitted.
+func TestV41ForwardHCMultDeclaredFailsClosed(t *testing.T) {
+	// A declared multiplicity other than 4: must refuse.
+	other := v41ReducedModel(t)
+	other.Cfg.DeepSeekV41.HCMult = 2
+	if err := other.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("hc_mult=2 admission error = %v, want ErrV41ForwardStage", err)
+	}
+	if err := panicAsError(func() { _ = other.Forward([]int{1, 2}) }); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("hc_mult=2 Forward panic = %v, want ErrV41ForwardStage", err)
+	}
+
+	// The published/reduced hc_mult=4 must keep running (no regression).
+	reduced := v41ReducedModel(t)
+	if reduced.Cfg.DeepSeekV41.HCMult != 4 {
+		t.Fatalf("reduced fixture hc_mult = %d, want 4", reduced.Cfg.DeepSeekV41.HCMult)
+	}
+	if err := reduced.v41ForwardAdmitted(); err != nil {
+		t.Fatalf("hc_mult=4 admission error = %v, want nil", err)
+	}
+}
