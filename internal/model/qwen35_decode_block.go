@@ -70,13 +70,23 @@ func (s *Session) tryQwen35MetalDecodeWholeToken(id int) ([]float32, bool, error
 	if !ok {
 		return nil, false, nil
 	}
-	hidden, _, accepted, err := tok.Qwen35MetalDecodeToken(s, id)
+	hidden, receipt, accepted, err := tok.Qwen35MetalDecodeToken(s, id)
 	if !accepted {
 		return nil, false, err
 	}
 	s.recordQwen35DecodeBlockAccepted()
 	if err != nil {
 		return nil, true, s.failQwen35GDNSequence(-1, "whole-token decode graph", err)
+	}
+	// The one-command-buffer whole-token graph is the resident GDN sequence owner's
+	// terminal evidence: record its executed receipt so Qwen35MetalForwardSequenceStatus
+	// (and therefore the native-inference receipt + forward_path label) reports the
+	// native route that actually ran, instead of silently falling back to the
+	// host-recurrence label. Previously this receipt was discarded, so an
+	// auto-admitted whole-token decode reported selector=on/evidence=unavailable and
+	// the operator could not distinguish an active route from a declined one.
+	if s.qwen35HAL != nil {
+		s.qwen35HAL.setMetalForwardReceipt(receipt)
 	}
 	return hidden, true, nil
 }

@@ -736,11 +736,25 @@ type decodeLane struct {
 }
 
 func captureQwen35MetalForwardSequenceReceipt(p *InKernelPlanner, s *model.Session, measurement *nativeInferenceMeasurement) {
-	if p == nil || s == nil || measurement == nil || measurement.inferenceDisabled || p.m == nil ||
+	if p == nil || s == nil || p.m == nil ||
 		p.backend != nil || !p.metal || !p.q4k || !p.m.Cfg.IsQwen35Hybrid() {
 		return
 	}
-	measurement.qwen35MetalForwardSequence = s.Qwen35MetalForwardSequenceStatus()
+	// Read the session's actual route selection unconditionally: the resident GDN
+	// sequence owner can be admitted by the model's own auto-eligibility seam
+	// (tryPrefillQwen35HybridQ4K) without the operator's
+	// --native-qwen35-metal-gdn-sequence opt-in, and the whole-token decode graph
+	// records its executed receipt on the session. Recording it here (not only on the
+	// flag-gated path) keeps executionIdentity/log forward_path and the
+	// native-inference receipt honest about the route that actually ran.
+	status := s.Qwen35MetalForwardSequenceStatus()
+	if status.SelectorState == model.Qwen35MetalSequenceSelectorOn {
+		p.qwen35MetalGDNExecuted.Store(true)
+	}
+	if measurement == nil || measurement.inferenceDisabled {
+		return
+	}
+	measurement.qwen35MetalForwardSequence = status
 }
 
 func shouldEnableQwen35MetalStateIdentity(p *InKernelPlanner, measurement *nativeInferenceMeasurement, ids []int, matched int, cachedLogits []float32) bool {

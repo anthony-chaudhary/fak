@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // v41DenseE4M3Codes are finite E4M3 byte codes (0x7f/0xff are NaN), chosen to
@@ -226,4 +229,154 @@ func TestV41FP4DoesNotSelectV4ProOrFlashSpec(t *testing.T) {
 	if !errors.Is(err, ErrV4ExpertQuantMetadata) {
 		t.Fatalf("error = %v, want ErrV4ExpertQuantMetadata for Pro shape", err)
 	}
+}
+
+// ---- Routed-expert device matmul witnesses -------------------------------------
+
+// v41DeviceExpertBackend is an in-memory stand-in for a gfx1151 device that advertises
+// the routed-expert device kernel capability. It is [SW-VERIFIED]: it proves the model
+// dispatch reaches a device kernel and preserves packed bytes, NOT physical TOPS/GB·s-1.
+type v41DeviceExpertBackend struct {
+	compute.Backend
+	fp8Calls, fp4Calls int
+}
+
+func (b *v41DeviceExpertBackend) GemvExpertFP8Block32E8M0(O, I int, weight, scales []byte, x []float32) ([]float32, error) {
+	b.fp8Calls++
+	return compute.GemvFP8Block32E8M0("device", O, I, weight, scales, x)
+}
+
+func (b *v41DeviceExpertBackend) GemvExpertMXFP4E8M0(O, I int, weight, scales []byte, x []float32) ([]float32, error) {
+	b.fp4Calls++
+	return compute.GemvMXFP4E8M0("device", O, I, weight, scales, x)
+}
+
+// v41ExpertDeviceFixture builds a reduced V4.1 routed-expert (weight, scale) fixture
+// under a temporarily reduced spec map and returns the packed bytes plus the spec.
+func v41ExpertDeviceFixture(t *testing.T, rows, packedCols, scaleCols int) (name string, weights, scales []byte) {
+	t.Helper()
+	saved := v41ExpertQuantSpecs
+	v41ExpertQuantSpecs = map[string]v41ExpertQuantSpec{
+		"w1": {weightRows: rows, weightCols: packedCols, scaleRows: rows, scaleCols: scaleCols},
+		"w2": saved["w2"],
+		"w3": saved["w3"],
+	}
+	weights = make([]byte, rows*packedCols)
+	for i := range weights {
+		weights[i] = byte((i*3 + 1) & 0xff)
+	}
+	scales = make([]byte, rows*scaleCols)
+	for i := range scales {
+		scales[i] = byte(126 + i%5)
+	}
+	return "layers.0.ffn.experts.0.w1", weights, scales
+}
+
+// TestV41ExpertDeviceMatmul witnesses the routed-expert device path end-to-end:
+// (1) install preserves PACKED bytes (no full-checkpoint dequant) and is observable;
+// (2) the device matmul reaches a capable backend kernel and matches the independent
+// scalar oracle; (3) an ABSENT device kernel fails CLOSED with a typed error and never
+// silently produces a scalar fallback result; (4) the dense path is unchanged.
+func TestV41ExpertDeviceMatmul(t *testing.T) {
+	saved := v41ExpertQuantSpecs
+	defer func() { v41ExpertQuantSpecs = saved }()
+
+	m := &Model{Cfg: Config{NumLayers: 1, DeepSeekV41: &DeepSeekV41Config{}}}
+
+	const rows, packedCols, scaleCols = 8, 32, 2
+	name, weights, scales := v41ExpertDeviceFixture(t, rows, packedCols, scaleCols)
+
+	weightEntry := stEntry{Dtype: "I8", Shape: []int{rows, packedCols}}
+	scaleEntry := stEntry{Dtype: "F8_E8M0", Shape: []int{rows, scaleCols}}
+
+	// A packed-byte snapshot BEFORE install: install must not mutate the source and must
+	// copy, not expand, the bytes.
+	weightBefore := append([]byte(nil), weights...)
+	if err := installV41ExpertQuantDevice(name+".weight", name+".scale", weightEntry, scaleEntry, weights, scales, m); err != nil {
+		t.Fatalf("installV41ExpertQuantDevice: %v", err)
+	}
+	if !m.V41ExpertDeviceInstalled(name + ".weight") {
+		t.Fatalf("routed expert %s was not observed as device-installed", name)
+	}
+	if !m.V41ExpertDevicePackedPreserved() {
+		t.Fatalf("device install did not report packed-byte preservation (full dequant?)")
+	}
+	if string(weights) != string(weightBefore) {
+		t.Fatalf("device install mutated the caller's packed source bytes")
+	}
+	store := v41ExpertDeviceStore(m, false)
+	w := store.weights[name+".weight"]
+	if w == nil {
+		t.Fatalf("installed expert missing from store")
+	}
+	if len(w.weight) != rows*packedCols || len(w.scales) != rows*scaleCols {
+		t.Fatalf("installed packed sizes = %d/%d, want %d/%d", len(w.weight), len(w.scales), rows*packedCols, rows*scaleCols)
+	}
+	if w.dtype != "I8" {
+		t.Fatalf("installed dtype = %q, want I8 (packed MXFP4)", w.dtype)
+	}
+
+	// (2) device matmul reaches the kernel and matches the scalar oracle.
+	I := unpackedColsFor(t, packedCols)
+	x := make([]float32, I)
+	for i := range x {
+		x[i] = float32(math.Cos(float64(i)*0.07)) - 0.1
+	}
+	device := &v41DeviceExpertBackend{Backend: compute.Default()}
+	got, err := m.V41ExpertDeviceMatmul(name+".weight", device, x)
+	if err != nil {
+		t.Fatalf("V41ExpertDeviceMatmul: %v", err)
+	}
+	if device.fp4Calls != 1 {
+		t.Fatalf("device MXFP4 kernel calls = %d, want 1", device.fp4Calls)
+	}
+	if len(got) != rows {
+		t.Fatalf("device matmul returned %d outputs, want %d", len(got), rows)
+	}
+	// Independent oracle over the PACKED bytes (E2M1 nibbles x E8M0 block scales).
+	reference := make([]float32, rows)
+	for o := 0; o < rows; o++ {
+		var acc float32
+		for i := 0; i < I; i++ {
+			b := weights[o*packedCols+i/2]
+			nib := b & 0x0f
+			if i%2 == 1 {
+				nib = b >> 4
+			}
+			exp := int(scales[o*scaleCols+i/v41FP8BlockDim]) - 127
+			acc += v4ExpertE2M1Values[nib] * float32(math.Ldexp(1, exp)) * x[i]
+		}
+		reference[o] = acc
+	}
+	for o := range reference {
+		if math.Float32bits(got[o]) != math.Float32bits(reference[o]) {
+			t.Fatalf("device matmul[%d] bits=%08x, want %08x", o, math.Float32bits(got[o]), math.Float32bits(reference[o]))
+		}
+	}
+
+	// (3) absent device kernel fails CLOSED with a typed error; no scalar fallback.
+	absent := compute.Default() // cpu-ref implements no RoutedExpertDeviceKernel
+	if _, err := m.V41ExpertDeviceMatmul(name+".weight", absent, x); err == nil {
+		t.Fatalf("absent-kernel device matmul returned a result; want a fail-closed error")
+	} else if !strings.Contains(err.Error(), "device kernel is absent") {
+		t.Fatalf("absent-kernel error = %v, want a typed absent-kernel refusal", err)
+	}
+
+	// (4) uninstalled expert fails closed; dense path is untouched.
+	if _, err := m.V41ExpertDeviceMatmul("layers.9.ffn.experts.0.w1.weight", device, x); err == nil {
+		t.Fatalf("uninstalled expert matmul returned a result; want a metadata error")
+	}
+	if len(m.q8w) != 0 {
+		t.Fatalf("device expert install touched m.q8w (dense path) unexpectedly")
+	}
+}
+
+// unpackedColsFor mirrors the spec's unpacked column count (packedCols*2).
+func unpackedColsFor(t *testing.T, packedCols int) int {
+	t.Helper()
+	cols, ok := checkedShapeProduct(packedCols, 2)
+	if !ok {
+		t.Fatalf("unpacked col product overflow")
+	}
+	return cols
 }

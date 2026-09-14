@@ -330,6 +330,82 @@ func TestQwen35DecodeBlockOperationTapUsesHistoricalTokenPath(t *testing.T) {
 	}
 }
 
+type recordingQwen35WholeTokenBackend struct {
+	*metalQwen35GDNSequenceBackend
+	mu        sync.Mutex
+	calls     int
+	receipt   Qwen35MetalForwardSequenceReceipt
+	accept    bool
+	returnErr error
+}
+
+func (b *recordingQwen35WholeTokenBackend) Qwen35MetalDecodeToken(_ *Session, _ int) ([]float32, Qwen35MetalForwardSequenceReceipt, bool, error) {
+	b.mu.Lock()
+	b.calls++
+	accept, receipt, err := b.accept, b.receipt, b.returnErr
+	b.mu.Unlock()
+	if !accept {
+		return nil, receipt, false, err
+	}
+	return make([]float32, 256), receipt, true, err
+}
+
+func (b *recordingQwen35WholeTokenBackend) callCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.calls
+}
+
+// TestQwen35WholeTokenDecodeRecordsExecutedForwardReceipt pins the W1 receipt
+// honesty fix: an accepted one-command-buffer whole-token decode must leave the
+// session reporting selector=on/evidence=executed so the serve forward_path
+// names the native GDN sequence route instead of the historical hybrid label.
+func TestQwen35WholeTokenDecodeRecordsExecutedForwardReceipt(t *testing.T) {
+	cfg := qwen35HybridQ4KTestCfg()
+	executed := Qwen35MetalForwardSequenceReceipt{
+		Path: Qwen35MetalGDNSequenceForwardPath, Available: true,
+		SelectorState: Qwen35MetalSequenceSelectorOn, EvidenceState: Qwen35MetalSequenceEvidenceExecuted, Tokens: 1,
+	}
+	backend := &recordingQwen35WholeTokenBackend{
+		metalQwen35GDNSequenceBackend: &metalQwen35GDNSequenceBackend{states: make(map[Qwen35GDNAuxState]*metalgemm.GDNState)},
+		accept:                        true, receipt: executed,
+	}
+	s := &Session{M: &Model{Cfg: cfg}, Q4K: true, MetalQ4K: true, qwen35HAL: &qwen35HALState{decodeAccepted: true, sequenceBackend: backend}}
+	if _, ok := interface{}(backend).(qwen35MetalDecodeTokenizer); !ok {
+		t.Fatal("recording backend does not implement qwen35MetalDecodeTokenizer")
+	}
+	if _, accepted, err := s.tryQwen35MetalDecodeWholeToken(3); !accepted || err != nil {
+		t.Fatalf("whole-token decode accepted=%v err=%v", accepted, err)
+	}
+	if backend.callCount() != 1 {
+		t.Fatalf("whole-token backend calls=%d, want 1", backend.callCount())
+	}
+	status := s.Qwen35MetalForwardSequenceStatus()
+	if status.SelectorState != Qwen35MetalSequenceSelectorOn || status.EvidenceState != Qwen35MetalSequenceEvidenceExecuted {
+		t.Fatalf("forward-sequence status selector=%q evidence=%q, want on/executed", status.SelectorState, status.EvidenceState)
+	}
+	if r := s.Qwen35MetalForwardSequenceReceipt(); r.EvidenceState != Qwen35MetalSequenceEvidenceExecuted {
+		t.Fatalf("Qwen35MetalForwardSequenceReceipt=%+v, want executed", r)
+	}
+}
+
+// TestQwen35WholeTokenDecodeDeclinedLeavesStatusUnselected pins the negative:
+// a declined whole-token decode must not fabricate executed evidence.
+func TestQwen35WholeTokenDecodeDeclinedLeavesStatusUnselected(t *testing.T) {
+	cfg := qwen35HybridQ4KTestCfg()
+	backend := &recordingQwen35WholeTokenBackend{
+		metalQwen35GDNSequenceBackend: &metalQwen35GDNSequenceBackend{states: make(map[Qwen35GDNAuxState]*metalgemm.GDNState)},
+		accept:                        false,
+	}
+	s := &Session{M: &Model{Cfg: cfg}, Q4K: true, MetalQ4K: true, qwen35HAL: &qwen35HALState{decodeAccepted: true, sequenceBackend: backend}}
+	if _, accepted, err := s.tryQwen35MetalDecodeWholeToken(3); accepted || err != nil {
+		t.Fatalf("declined whole-token accepted=%v err=%v", accepted, err)
+	}
+	if r := s.Qwen35MetalForwardSequenceReceipt(); r.Available || r.EvidenceState == Qwen35MetalSequenceEvidenceExecuted {
+		t.Fatalf("declined whole-token produced executed receipt %+v", r)
+	}
+}
+
 func exactQwen38BlockTestCfg() Config {
 	cfg := qwen35HybridQ4KTestCfg()
 	cfg.ModelType = "qwen3_5_text"

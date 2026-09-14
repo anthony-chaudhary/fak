@@ -1,0 +1,180 @@
+{
+  "schema": "fak.benchmark.subagent_fanout_apples_to_apples/v1",
+  "contract_issue": "6036",
+  "benchmark": "subagent_fanout_apples_to_apples",
+  "timestamp": "2026-09-14T13:26:02Z",
+  "host_os": "darwin/arm64",
+  "model": "Qwen2.5-Coder-3B-Instruct-Q4_K_M",
+  "quantization": "Q4_K_M",
+  "memory_fraction": 0.85,
+  "fanout_sweep": [
+    1,
+    4
+  ],
+  "arms": [
+    "llamacpp"
+  ],
+  "contract": {
+    "compliant": false,
+    "issue_reference": "Issue #6036 & #12325",
+    "identical_weights_enforced": true,
+    "identical_quantization_enforced": true,
+    "fixed_memory_fraction_verified": true,
+    "required_memory_fraction": 0.85,
+    "observed_memory_fraction": 0.85,
+    "all_four_arms_present": false,
+    "present_arms": [
+      "llamacpp"
+    ],
+    "fanout_sweep_verified": false,
+    "observed_fanout_sweep": [
+      1,
+      4
+    ],
+    "captured_ttft_distributions": true,
+    "captured_itl_jitter": true,
+    "violations": [
+      "mandatory comparison arm \"no_reuse\" (Arm 1: No-reuse baseline (cache disabled)) is missing",
+      "mandatory comparison arm \"sglang\" (Arm 2: SGLang with RadixAttention) is missing",
+      "mandatory comparison arm \"vllm\" (Arm 3: vLLM with Automatic Prefix Caching) is missing",
+      "mandatory comparison arm \"fak\" (Arm 4: FAK native engine / gateway) is missing",
+      "mandatory fanout sweep value N=8 is missing",
+      "mandatory fanout sweep value N=16 is missing",
+      "mandatory fanout sweep value N=32 is missing"
+    ]
+  },
+  "results": [
+    {
+      "arm": "llamacpp",
+      "arm_description": "llama.cpp llama-server (Metal prefix cache / continuous batching)",
+      "fanout_n": 1,
+      "trials": 1,
+      "prefix_tokens": 4096,
+      "suffix_tokens": 512,
+      "decode_tokens": 16,
+      "total_prompt_tokens": 4608,
+      "reused_tokens": 0,
+      "prefix_hit_rate": 0,
+      "ttft": {
+        "count": 1,
+        "mean_ms": 86.713125,
+        "min_ms": 86.713125,
+        "max_ms": 86.713125,
+        "p50_ms": 86.713125,
+        "p95_ms": 86.713125,
+        "p99_ms": 86.713125,
+        "std_dev_ms": 0
+      },
+      "itl": {
+        "count": 16,
+        "mean_ms": 17.420445312499997,
+        "p50_ms": 18.0215415,
+        "p95_ms": 20.450312749999995,
+        "p99_ms": 23.54666255,
+        "std_dev_ms": 4.714034298197216,
+        "jitter_ms": 5.525121049999999
+      },
+      "decode_throughput_tok_per_sec": 57.4038138555765,
+      "wall_clock_ms": 367.47675000000004,
+      "kv_memory_bytes": 0,
+      "peak_memory_fraction": 0.85,
+      "output_equivalence": true,
+      "output_hash": "85b538bef810baba"
+    },
+    {
+      "arm": "llamacpp",
+      "arm_description": "llama.cpp llama-server (Metal prefix cache / continuous batching)",
+      "fanout_n": 4,
+      "trials": 1,
+      "prefix_tokens": 4096,
+      "suffix_tokens": 512,
+      "decode_tokens": 16,
+      "total_prompt_tokens": 18432,
+      "reused_tokens": 12288,
+      "prefix_hit_rate": 0.6666666666666666,
+      "ttft": {
+        "count": 4,
+        "mean_ms": 149.77541625,
+        "min_ms": 71.687416,
+        "max_ms": 176.425666,
+        "p50_ms": 175.4942915,
+        "p95_ms": 176.31194725,
+        "p99_ms": 176.40292225000002,
+        "std_dev_ms": 45.08589777804696
+      },
+      "itl": {
+        "count": 64,
+        "mean_ms": 43.30127801562501,
+        "p50_ms": 45.230979,
+        "p95_ms": 46.7030045,
+        "p99_ms": 68.08146336999997,
+        "std_dev_ms": 13.358687588989415,
+        "jitter_ms": 22.85048436999997
+      },
+      "decode_throughput_tok_per_sec": 92.37602637401658,
+      "wall_clock_ms": 853.618833,
+      "kv_memory_bytes": 0,
+      "peak_memory_fraction": 0.85,
+      "output_equivalence": true,
+      "output_hash": "3fa4df6ad021e407"
+    }
+  ],
+  "summary": {
+    "total_cells_evaluated": 2
+  },
+  "arm_provenance": {
+    "llamacpp": {
+      "engine": "llama.cpp llama-server",
+      "command": "llama-server -m Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf --parallel 8 -c 32768 --host 127.0.0.1 --port 8081",
+      "model_loaded": "Qwen2.5-Coder-3B-Instruct-Q4_K_M",
+      "note": "harness 'model' field is the default label; actual loaded model is the 3B GGUF above"
+    },
+    "fak": {
+      "status": "BLOCKED",
+      "reason": "peer Metal lease + /v1/completions gap fak#13027"
+    },
+    "geometry": {
+      "prefix_tokens": 4096,
+      "suffix_tokens": 512,
+      "decode_tokens": 16,
+      "fanout": [
+        1,
+        4
+      ],
+      "trials": 1
+    },
+    "verdict": "OSS reference baseline live-witnessed; fak arm pending"
+  },
+  "receipt_provenance": {
+    "kind": "live pilot",
+    "measured_fields": [
+      "ttft",
+      "itl",
+      "decode_throughput_tok_per_sec",
+      "wall_clock_ms"
+    ],
+    "accounted_not_measured_fields": {
+      "reused_tokens": "computed (N-1)*P in harness live path; not a server cache-counter read",
+      "prefix_hit_rate": "derived from accounted reused_tokens",
+      "output_equivalence": "hard-coded true in harness live path; not compared across arms",
+      "output_hash": "hash of (arm,N,P,S,D) args, not of model output"
+    },
+    "geometry": {
+      "prefix_tokens": 4096,
+      "suffix_tokens": 512,
+      "decode_tokens": 16,
+      "fanout": [
+        1,
+        4
+      ],
+      "trials": 1,
+      "note": "pilot; does not satisfy the frozen D=64/N={1,4,8}/T=5 contract"
+    },
+    "llamacpp_command": "llama-server -m Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf --parallel 8 -c 32768 --host 127.0.0.1 --port 8081",
+    "fak_arm": {
+      "status": "BLOCKED",
+      "reason": "peer Metal lease; /v1/completions vs /v1/chat/completions gap fak#13027"
+    },
+    "label": "[SW-VERIFIED]"
+  }
+}

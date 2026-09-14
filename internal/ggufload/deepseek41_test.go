@@ -575,6 +575,63 @@ func TestDeepSeek41GGUFMoEOnlyHeaderDerivesConfig(t *testing.T) {
 	}
 }
 
+// TestRequiredDenseFFNLendDoesNotLeakToDenseArchs is the regression guard for the
+// issue #13010 out-of-scope fence: "Do NOT relax any guard that would let an
+// incompatible artifact silently load." requiredDenseFFNLen derives the dense FFN
+// width from the expert width for a MoE-only deepseek41 artifact (correct), but its
+// derive branch keys only on the PRESENCE of "<p>expert_feed_forward_length" — it
+// never checks that the file is a MoE architecture. Before the fix, a plain dense
+// arch (e.g. gemma3, llama) that happened to carry an expert width but no dense
+// width silently admitted and projected IntermediateSize from the EXPERT width
+// instead of failing loud on its own missing dense key.
+//
+// The guard is deliberately narrow: deepseek41/MoE spellings still derive, and a
+// genuinely dense arch that declares no expert width still fails loud naming the
+// dense key.
+func TestRequiredDenseFFNLendDoesNotLeakToDenseArchs(t *testing.T) {
+	// A dense (non-MoE) arch with hidden/layers/heads/rms but NO dense
+	// feed_forward_length, carrying only an expert width. It must NOT admit.
+	dense := func(arch string) map[string]Value {
+		p := arch + "."
+		return map[string]Value{
+			"general.architecture":                 {Type: TypeString, Value: arch},
+			p + "embedding_length":                 {Type: TypeUint64, Value: uint64(4096)},
+			p + "block_count":                      {Type: TypeUint64, Value: uint64(32)},
+			p + "attention.head_count":             {Type: TypeUint64, Value: uint64(32)},
+			p + "attention.head_count_kv":          {Type: TypeUint64, Value: uint64(8)},
+			p + "attention.layer_norm_rms_epsilon": {Type: TypeFloat32, Value: float32(1e-5)},
+			p + "expert_feed_forward_length":       {Type: TypeUint64, Value: uint64(2304)},
+		}
+	}
+
+	for _, arch := range []string{"gemma3", "llama", "qwen2"} {
+		meta := dense(arch)
+		_, err := (&File{Metadata: meta}).Config()
+		if err == nil {
+			t.Fatalf("arch %q: Config admitted a dense header that declared only an expert width; the derive leaked outside the MoE/deepseek41 gate", arch)
+		}
+		if !strings.Contains(err.Error(), "feed_forward_length") {
+			t.Fatalf("arch %q: refusal %q does not name feed_forward_length", arch, err)
+		}
+	}
+
+	// The legitimate derive must still work for a deepseek41 MoE-only header.
+	meta, p := vcruzEngramMeta()
+	delete(meta, p+"feed_forward_length")
+	meta[p+"expert_count"] = Value{Type: TypeUint64, Value: uint64(384)}
+	meta[p+"expert_used_count"] = Value{Type: TypeUint64, Value: uint64(6)}
+	meta[p+"expert_feed_forward_length"] = Value{Type: TypeUint64, Value: uint64(2304)}
+	meta[p+"expert_shared_count"] = Value{Type: TypeUint64, Value: uint64(1)}
+	meta[p+"expert_shared_feed_forward_length"] = Value{Type: TypeUint64, Value: uint64(2304)}
+	cfg, err := (&File{Metadata: meta}).Config()
+	if err != nil {
+		t.Fatalf("deepseek41 MoE-only header must still derive its dense width: %v", err)
+	}
+	if cfg.IntermediateSize != 2304 {
+		t.Errorf("deepseek41 MoE-only IntermediateSize = %d, want 2304 (derived)", cfg.IntermediateSize)
+	}
+}
+
 // vcruzQ2KReceiptMeta reconstructs the EXACT header shape the physical loader
 // receipt recorded for the published vcruz305/DeepSeek-V4.1-Flash-GGUF Q2_K
 // shard, built from a clean public HEAD at commit f75ae93f6

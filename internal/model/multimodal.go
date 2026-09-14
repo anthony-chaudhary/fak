@@ -126,6 +126,19 @@ type MultimodalVerdict struct {
 // under the zero policy; image-bearing requests require Mode=quarantine and must
 // pass the image byte/pixel/embedding-token limits.
 func (m *Model) ForwardMultimodal(req MultimodalRequest) (*Activations, MultimodalVerdict, error) {
+	if m.Cfg.IsDeepSeekV41() {
+		// A V4.1 config matches none of forwardHiddenRows's arch predicates
+		// (gemma4 / MLA-MoE / MiniMax), so it would fall through to the generic
+		// m.layer() Q/K/V attention path -- bypassing every V4.1 fail-closed guard
+		// (Engram, compressor/indexer, shared-KV source, candidate source, mHC
+		// multiplicity). Refuse the governed multimodal entry point rather than
+		// emit generic-attention logits for a model it never executes.
+		verdict := MultimodalVerdict{Decision: MultimodalDeny, Mode: req.Policy.withDefaults().Mode}
+		err := v41StageErr(v41StageEmbedding, -1,
+			fmt.Errorf("%w: multimodal forward is not implemented for DeepSeek V4.1", ErrV41ForwardStage))
+		verdict.Reason = err.Error()
+		return nil, verdict, err
+	}
 	rows, verdict, err := m.prepareMultimodalRows(req)
 	if err != nil {
 		return nil, verdict, err

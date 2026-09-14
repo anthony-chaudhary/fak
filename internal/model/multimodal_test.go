@@ -400,6 +400,65 @@ func withMediaType(img *VisionEmbedding, media string) *VisionEmbedding {
 	return &cp
 }
 
+// TestV41ForwardMultimodalDeclaredFailsClosed is the #13022 fail-closed witness:
+// ForwardMultimodal/ForwardImagePrompt call forwardHiddenRows directly and never
+// consult V4.1 admission, so a V4.1 config matches none of forwardHiddenRows's
+// arch predicates and falls through to the generic m.layer() Q/K/V attention
+// stack -- bypassing every V4.1 fail-closed guard (Engram, compressor/indexer,
+// shared-KV source, candidate source, mHC multiplicity). The governed multimodal
+// entry points must refuse a V4.1 config with the typed ErrV41ForwardStage rather
+// than silently emitting generic-attention logits.
+func TestV41ForwardMultimodalDeclaredFailsClosed(t *testing.T) {
+	m := v41ReducedModel(t)
+	if !m.Cfg.IsDeepSeekV41() {
+		t.Fatal("v41ReducedModel is not recognized as V4.1")
+	}
+
+	t.Run("ForwardMultimodal refuses", func(t *testing.T) {
+		act, verdict, err := m.ForwardMultimodal(MultimodalRequest{
+			Parts: []MultimodalPart{{TokenIDs: []int{1, 2, 3}}},
+		})
+		if !errors.Is(err, ErrV41ForwardStage) {
+			t.Fatalf("ForwardMultimodal V4.1 error = %v, want ErrV41ForwardStage", err)
+		}
+		if errors.Is(err, ErrV41NativeUnsupported) {
+			t.Fatal("ForwardMultimodal V4.1 error incorrectly reported ErrV41NativeUnsupported")
+		}
+		if act != nil {
+			t.Fatalf("ForwardMultimodal V4.1 returned activations %+v, want nil", act)
+		}
+		if verdict.Decision == MultimodalAllow {
+			t.Fatalf("ForwardMultimodal V4.1 verdict = %+v, want non-allow refusal", verdict)
+		}
+	})
+
+	t.Run("ForwardImagePrompt inherits refusal", func(t *testing.T) {
+		act, _, err := m.ForwardImagePrompt([]int{1, 2, 3}, 0, nil, MultimodalPolicy{})
+		if !errors.Is(err, ErrV41ForwardStage) {
+			t.Fatalf("ForwardImagePrompt V4.1 error = %v, want ErrV41ForwardStage", err)
+		}
+		if act != nil {
+			t.Fatalf("ForwardImagePrompt V4.1 returned activations %+v, want nil", act)
+		}
+	})
+
+	t.Run("non V4.1 multimodal path unchanged", func(t *testing.T) {
+		llama := multimodalTestModel()
+		ids := []int{1, 2, 3}
+		got, verdict, err := llama.ForwardMultimodal(MultimodalRequest{
+			Parts: []MultimodalPart{{TokenIDs: ids}},
+		})
+		if err != nil {
+			t.Fatalf("non-V4.1 ForwardMultimodal: %v", err)
+		}
+		if verdict.Decision != MultimodalAllow {
+			t.Fatalf("non-V4.1 verdict = %+v, want allow", verdict)
+		}
+		want := llama.Forward(ids)
+		assertActivationsBitsEqual(t, got, want)
+	})
+}
+
 func assertActivationsBitsEqual(t *testing.T, got, want *Activations) {
 	t.Helper()
 	if got.Seq != want.Seq || len(got.Hidden) != len(want.Hidden) || len(got.Logits) != len(want.Logits) {

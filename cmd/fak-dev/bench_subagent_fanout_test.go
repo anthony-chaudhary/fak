@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -250,5 +254,138 @@ func TestPrettyRenderOutput(t *testing.T) {
 	}
 	if !strings.Contains(output, "No-reuse baseline") || !strings.Contains(output, "FAK native engine") {
 		t.Errorf("missing arm labels in pretty render:\n%s", output)
+	}
+}
+
+// TestSubagentFanoutLlamaCPPArm proves the additional llama.cpp arm is
+// parseable/selectable and that a LIVE cell against an OpenAI-compatible
+// httptest endpoint produces a well-formed FanoutArmResult labeled llamacpp.
+// No network or external service is required.
+func TestSubagentFanoutLlamaCPPArm(t *testing.T) {
+	// 1. Arm identifier and description are registered.
+	if ArmLLamaCPP != "llamacpp" {
+		t.Fatalf("ArmLLamaCPP = %q, want %q", ArmLLamaCPP, "llamacpp")
+	}
+	if desc := ArmDescription[ArmLLamaCPP]; desc == "" {
+		t.Fatalf("ArmDescription[%q] must be registered", ArmLLamaCPP)
+	}
+
+	// 2. The arm is NOT one of the 4 mandatory contract arms.
+	for _, a := range CanonicalArms {
+		if a == ArmLLamaCPP {
+			t.Fatalf("CanonicalArms must stay the frozen 4; got %q", ArmLLamaCPP)
+		}
+	}
+
+	// 3. -arms accepts llamacpp and -llamacpp-url wires the endpoint.
+	cfg, err := parseFanoutFlags(&bytes.Buffer{}, []string{
+		"-arms", "no_reuse,sglang,vllm,fak,llamacpp",
+		"-llamacpp-url", "http://127.0.0.1:18081",
+	})
+	if err != nil {
+		t.Fatalf("parseFanoutFlags: %v", err)
+	}
+	found := false
+	for _, a := range cfg.Arms {
+		if a == ArmLLamaCPP {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("llamacpp not selectable via -arms; got %v", cfg.Arms)
+	}
+	if got := cfg.Endpoints[ArmLLamaCPP]; got != "http://127.0.0.1:18081" {
+		t.Fatalf("llamacpp endpoint = %q, want %q", got, "http://127.0.0.1:18081")
+	}
+
+	// 4. A LIVE cell against an OpenAI-compatible streaming endpoint yields a
+	//    well-formed result labeled llamacpp.
+	var hits int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		atomic.AddInt64(&hits, 1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		for i := 0; i < 4; i++ {
+			fmt.Fprintf(w, "data: {\"choices\":[{\"text\":\"tok\"}]}\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}))
+	defer srv.Close()
+
+	harness := NewFanoutBenchmarkHarness(&FanoutBenchConfig{
+		Model:          "Qwen/Qwen2.5-Coder-7B-Instruct",
+		Quantization:   "Q4_K_M",
+		MemoryFraction: FixedMemoryFraction,
+		FanoutSweep:    []int{2},
+		Arms:           []string{ArmLLamaCPP},
+		PrefixTokens:   64,
+		SuffixTokens:   16,
+		DecodeTokens:   4,
+		Trials:         1,
+		Live:           true,
+		Endpoints:      map[string]string{ArmLLamaCPP: srv.URL},
+		Seed:           42,
+	})
+	receipt, err := harness.Run(context.Background())
+	if err != nil {
+		t.Fatalf("live harness run: %v", err)
+	}
+	if atomic.LoadInt64(&hits) == 0 {
+		t.Fatal("live cell never reached the httptest endpoint")
+	}
+	if len(receipt.Results) != 1 {
+		t.Fatalf("got %d results, want 1", len(receipt.Results))
+	}
+	res := receipt.Results[0]
+	if res.Error != "" {
+		t.Fatalf("live cell returned error: %s", res.Error)
+	}
+	if res.Arm != ArmLLamaCPP {
+		t.Errorf("result arm = %q, want %q", res.Arm, ArmLLamaCPP)
+	}
+	if res.ArmDescription != ArmDescription[ArmLLamaCPP] {
+		t.Errorf("arm description = %q, want %q", res.ArmDescription, ArmDescription[ArmLLamaCPP])
+	}
+	if res.FanoutN != 2 {
+		t.Errorf("fanout N = %d, want 2", res.FanoutN)
+	}
+	if res.PrefixTokens != 64 || res.SuffixTokens != 16 || res.DecodeTokens != 4 {
+		t.Errorf("trace geometry not preserved: P=%d S=%d D=%d", res.PrefixTokens, res.SuffixTokens, res.DecodeTokens)
+	}
+	if res.TotalPromptTokens != int64(2)*(64+16) {
+		t.Errorf("total prompt tokens = %d, want %d", res.TotalPromptTokens, int64(2)*(64+16))
+	}
+	if res.TTFT.Count == 0 {
+		t.Errorf("expected TTFT samples from the live stream")
+	}
+	if res.OutputHash == "" {
+		t.Errorf("expected non-empty output hash")
+	}
+	// At N > 1 the arm has a shared-prefix cache, so reuse must be accounted.
+	if res.ReusedTokens <= 0 || res.PrefixHitRate <= 0 {
+		t.Errorf("expected positive reuse accounting at N=2, got reused=%d rate=%f", res.ReusedTokens, res.PrefixHitRate)
+	}
+
+	// 5. Contract validation still requires the frozen 4; llamacpp alone is
+	//    not compliant, which proves CanonicalArms did not absorb it.
+	if val := validateContractInvariants(&FanoutBenchConfig{
+		Model:          "Qwen/Qwen2.5-Coder-7B-Instruct",
+		Quantization:   "Q4_K_M",
+		MemoryFraction: FixedMemoryFraction,
+		FanoutSweep:    CanonicalFanoutSweep,
+		Arms:           []string{ArmLLamaCPP},
+	}); val.Compliant {
+		t.Error("llamacpp alone must not satisfy the 4-arm contract")
 	}
 }
