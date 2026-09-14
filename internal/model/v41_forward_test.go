@@ -422,3 +422,42 @@ func TestV41ForwardEngramDeclaredFailsClosed(t *testing.T) {
 		t.Fatalf("reduced out-of-range Engram admission error = %v, want nil", err)
 	}
 }
+
+// TestV41ForwardCompressIndexDeclaredFailsClosed is the #13006 fail-closed
+// witness: the reduced assembly does not execute the CED/CSA2 compressor or the
+// lightning indexer, so a config that declares a compressed layer WITHIN the
+// model's layer range (CompressRatios[l] > 1), or an index-source layer within
+// range, must refuse rather than silently emit reduced, non-compressed logits as
+// if those stages were absent. Declarations that only touch out-of-range layers
+// (the reduced oracle fixture derives from the published 40-layer config but
+// narrows NumLayers to 1, so ratios above index 0 and index sources {2,8,...} are
+// all unreachable) stay admitted, because the assembly never reaches them.
+func TestV41ForwardCompressIndexDeclaredFailsClosed(t *testing.T) {
+	// In-range compressed layer 0 (ratio 2 = CED/CSA2): must refuse.
+	compressed := v41ReducedModel(t)
+	compressed.Cfg.DeepSeekV41.CompressRatios = []int{2}
+	if err := compressed.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("in-range compressor admission error = %v, want ErrV41ForwardStage", err)
+	}
+	if err := panicAsError(func() { _ = compressed.Forward([]int{1, 2}) }); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("in-range compressor Forward panic = %v, want ErrV41ForwardStage", err)
+	}
+
+	// In-range index source 0: must refuse.
+	indexed := v41ReducedModel(t)
+	indexed.Cfg.DeepSeekV41.IndexSourceLayerIDs = []int{0}
+	if err := indexed.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("in-range indexer admission error = %v, want ErrV41ForwardStage", err)
+	}
+	if err := panicAsError(func() { _ = indexed.Forward([]int{1, 2}) }); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("in-range indexer Forward panic = %v, want ErrV41ForwardStage", err)
+	}
+
+	// The reduced oracle fixture declares only out-of-range compressor/indexer
+	// axes (ratio 0 at layer 0; index sources >= 2), so the existing reduced
+	// forward must keep running (no regression).
+	reduced := v41ReducedModel(t)
+	if err := reduced.v41ForwardAdmitted(); err != nil {
+		t.Fatalf("reduced out-of-range compress/index admission error = %v, want nil", err)
+	}
+}

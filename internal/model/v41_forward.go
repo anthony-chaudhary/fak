@@ -52,15 +52,17 @@ const (
 	v41StageEngram    v41ForwardStage = "engram"
 	v41StageFinalNorm v41ForwardStage = "final_norm"
 	v41StageHead      v41ForwardStage = "head"
+	v41StageCompress  v41ForwardStage = "compress"
+	v41StageIndexer   v41ForwardStage = "indexer"
 )
 
-// v41StageCompress and v41StageIndexer are reserved stage names for the CED/CSA2
-// compressor and the lightning indexer. They are deliberately NOT declared here as
-// live stages: the reduced text forward does not execute them (their packed-row /
-// compressed-stream inputs cannot be materialized weight-free — see the scope note
-// at the top of this file), so the assembly never gates on them. Declaring them
-// would make the "every missing stage fails closed" claim false by unused
-// constants. They become live when a leaf lands the compressor/indexer execution.
+// v41StageCompress and v41StageIndexer are the stage names for the CED/CSA2
+// compressor and the lightning indexer. The reduced text forward does not execute
+// them (their packed-row / compressed-stream inputs cannot be materialized
+// weight-free — see the scope note at the top of this file), so they stay
+// fail-closed: a config declaring an in-range compressor or indexer layer is
+// refused at admission by v41CompressIndexForwardAdmitted (#13006). They become
+// live when a leaf lands the compressor/indexer execution.
 
 // V41ForwardError is the typed fail-closed error for one V4.1 assembly stage.
 // Layer is the zero-based decoder layer the stage belongs to, or -1 for a
@@ -195,6 +197,40 @@ func v41EngramForwardAdmitted(cfg Config) error {
 	return nil
 }
 
+// v41CompressIndexForwardAdmitted fails closed when the config declares a
+// CED/CSA2 compressor regime or a lightning-indexer source that lies WITHIN the
+// model's decoder stack. The reduced text assembly executes neither stage (their
+// packed-row / compressed-stream inputs cannot be materialized weight-free — see
+// the scope note at the top of this file), so silently dropping a declared
+// in-range compressor/indexer layer would emit reduced logits for a model the
+// assembly never ran. Declarations that only touch out-of-range layers stay
+// admitted, which keeps the reduced oracle fixture runnable: it derives from the
+// published 40-layer config but narrows NumLayers to 1, so every CompressRatios
+// entry above index 0 and every index source ({2,8,...}) is unreachable. Executing
+// the real compressor/indexer stages is #13006's remaining integration work; until
+// then this is the fail-closed boundary.
+func v41CompressIndexForwardAdmitted(cfg Config) error {
+	m := cfg.DeepSeekV41
+	if m == nil {
+		return nil
+	}
+	for layer := 0; layer < cfg.NumLayers && layer < len(m.CompressRatios); layer++ {
+		// Ratio 0 and 1 are the uncompressed regimes; a ratio > 1 declares a
+		// compressed layer the reduced forward does not execute.
+		if m.CompressRatios[layer] > 1 {
+			return v41StageErr(v41StageCompress, layer,
+				fmt.Errorf("%w: layer %d declares compressor ratio %d but the reduced forward does not execute the CED/CSA2 compressor stage", ErrV41ForwardStage, layer, m.CompressRatios[layer]))
+		}
+	}
+	for _, layer := range m.IndexSourceLayerIDs {
+		if layer >= 0 && layer < cfg.NumLayers {
+			return v41StageErr(v41StageIndexer, layer,
+				fmt.Errorf("%w: layer %d declares a lightning-indexer source but the reduced forward does not execute the indexer stage", ErrV41ForwardStage, layer))
+		}
+	}
+	return nil
+}
+
 // v41ForwardAdmitted returns nil only when this is an admitted V4.1 config with
 // every required stage's weights present and shape-consistent. It is the gate
 // both Model.Forward and Session.Prefill/Step run before the assembly. A
@@ -231,6 +267,9 @@ func (m *Model) v41ForwardAdmitted() error {
 		return err
 	}
 	if err := v41EngramForwardAdmitted(cfg); err != nil {
+		return err
+	}
+	if err := v41CompressIndexForwardAdmitted(cfg); err != nil {
 		return err
 	}
 	H, hd, nH := cfg.HiddenSize, cfg.HeadDim, cfg.NumHeads
