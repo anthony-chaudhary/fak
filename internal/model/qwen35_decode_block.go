@@ -52,15 +52,18 @@ type qwen35MetalDecodeTokenizer interface {
 // tryQwen35MetalDecodeWholeToken selects the one-command-buffer whole-token decode
 // graph after the resident GDN owners have been promoted. It declines before any
 // submission when the owner, backend, or tap conditions are wrong; on acceptance
-// the graph has advanced resident state and the caller must not replay. Opt in
-// with FAK_QWEN35_WHOLE_TOKEN_DECODE=1; it is off by default because the current
-// in-graph P=1 kernels are dispatch-bound on the M3 Pro (see the W1 report).
+// the graph has advanced resident state and the caller must not replay. The route
+// is ON by default: with the P=1 GEMV projection kernels and the per-shape buffer
+// pool it measured decode 0.4-0.9 -> 4.2-4.6 tok/s on the M3 Pro (Qwen3.8-27B
+// Q4_K_M) with bit-identical pooled/unpooled graph parity, versus the historical
+// per-op path. Everything not exactly on this lane still declines to the
+// historical decode. Set FAK_QWEN35_WHOLE_TOKEN_DECODE=0 to force the old path.
 func (s *Session) tryQwen35MetalDecodeWholeToken(id int) ([]float32, bool, error) {
 	if s == nil || s.qwen35HAL == nil || !s.qwen35HAL.decodeAccepted || s.tapActive != nil ||
 		s.qwen35DecodeHandoffMode() == Qwen35DecodeHandoffControl {
 		return nil, false, nil
 	}
-	if os.Getenv("FAK_QWEN35_WHOLE_TOKEN_DECODE") != "1" {
+	if os.Getenv("FAK_QWEN35_WHOLE_TOKEN_DECODE") == "0" {
 		return nil, false, nil
 	}
 	tok, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalDecodeTokenizer)
