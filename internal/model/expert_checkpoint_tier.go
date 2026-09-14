@@ -9,7 +9,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/polymodel"
 )
 
-// expert_checkpoint_tier.go — R5 of the activated-expert offload ladder (#5616, epic #5606,
+// expert_checkpoint_tier.go â€” R5 of the activated-expert offload ladder (#5616, epic #5606,
 // docs/MOE-ACTIVATED-OFFLOAD-PLAN.md): put a CHECKPOINT tier under a ring miss, so the tier below
 // the bounded device ring stops being "the whole model, resident in host RAM".
 //
@@ -22,12 +22,12 @@ import (
 //
 // Both halves of the answer already existed and neither was wired. ggufExpertSource
 // (gguf_expert_source.go) indexes {offset, [E,out,in], quant-block geometry} per fused tensor at
-// construction — no payload IO — and reads exactly one expert's sub-range through a caller-supplied
+// construction â€” no payload IO â€” and reads exactly one expert's sub-range through a caller-supplied
 // io.ReaderAt; its own witness proves those bytes are bit-identical to the resident slab slice and
 // that a read moves exactly stride bytes. What it lacked was a CONSUMER on the decode path. This
 // file is that consumer: it maps a canonical per-expert tensor name to (fused tensor, expert index,
 // quant geometry), faults exactly that expert's stride on a miss, and hands back the very
-// q4kTensor / kQuantTensor the resident path would have handed back — so the device / pinned-host /
+// q4kTensor / kQuantTensor the resident path would have handed back â€” so the device / pinned-host /
 // checkpoint ladder is a real three-rung ladder rather than a two-rung one.
 //
 // Where it sits. Session.expertSwiGLUHAL resolves a routed expert's three projections against
@@ -38,8 +38,8 @@ import (
 // set is known at layer entry, so its reads are issued together rather than one GEMM apart.
 //
 // Host residency is BOUNDED, by the same policy the ring uses. The retained-host cache is a
-// polymodel.Pool — the byte budget, the LRU victim and the all-on-nothing admit the ring already
-// borrows — so `resident <= budget` holds here by construction too. The default budget is 0, which
+// polymodel.Pool â€” the byte budget, the LRU victim and the all-on-nothing admit the ring already
+// borrows â€” so `resident <= budget` holds here by construction too. The default budget is 0, which
 // means STREAM-THROUGH: an expert is read, handed to the staging that uploads it, and dropped. That
 // is the honest default, because on a device backend the host copy is dead the moment Upload
 // returns, and a tier that retained it by default would re-introduce exactly the unbounded host
@@ -50,7 +50,7 @@ import (
 // the READ is issued outside the lock, because ggufExpertSource is safe for concurrent use whenever
 // its ReaderAt is (os.File, bytes.Reader and stripeload.StripedReaderAt all are) and serializing
 // every fault behind one lock would make the tier a throughput floor for the whole fleet. The cost
-// is that two agents faulting the same cold expert at the same instant may both read it — a
+// is that two agents faulting the same cold expert at the same instant may both read it â€” a
 // duplicated read of byte-identical bytes, never a corrupted one. Coalescing those into one read is
 // precisely R7/#5618, which needs a shared ring to coalesce ONTO; this rung supplies the tier it
 // coalesces at.
@@ -58,11 +58,11 @@ import (
 // A read failure is never swallowed silently: the failure count and the last error surface through
 // ExpertCheckpointStats, and the fault itself reports the error to its caller. On the staging path
 // there is deliberately no soft "weight absent" degradation, because over a streamed checkpoint the
-// weight is resident nowhere else — a caller told "absent" would report a missing tensor and bury
+// weight is resident nowhere else â€” a caller told "absent" would report a missing tensor and bury
 // the real IO error underneath it. See staging's own note.
 //
 // The tier composes with the ring instead of shadowing it. Everything the weight HAL needs to STAGE
-// a projection — the ring key, the dtype, the resident byte cost — comes from the index, so a weight
+// a projection â€” the ring key, the dtype, the resident byte cost â€” comes from the index, so a weight
 // the ring already holds is answered on a ring hit and no byte is read. Faulting eagerly would have
 // been the quiet defeat of this whole ladder: every routed expert would pay checkpoint IO even at a
 // ring budget large enough to hold the entire activated set.
@@ -79,7 +79,7 @@ import (
 type ExpertCheckpointQuant int
 
 const (
-	// ExpertCheckpointQ4K is the Q4_K super-block form, ~0.56 B/weight — the expert majority of a
+	// ExpertCheckpointQ4K is the Q4_K super-block form, ~0.56 B/weight â€” the expert majority of a
 	// memory-lean GLM-5.2-class checkpoint.
 	ExpertCheckpointQ4K ExpertCheckpointQuant = iota
 	// ExpertCheckpointQ5K and ExpertCheckpointQ6K are the mixed-quant forms a UD-Q4_K_M artifact
@@ -126,7 +126,7 @@ type FusedExpertTensor struct {
 	// It is the source key and appears in every diagnostic, so a refusal names a real tensor.
 	Name  string
 	Layer int
-	// Proj is the canonical projection suffix without `.weight` — "gate_proj", "up_proj" or
+	// Proj is the canonical projection suffix without `.weight` â€” "gate_proj", "up_proj" or
 	// "down_proj".
 	Proj    string
 	Quant   ExpertCheckpointQuant
@@ -139,7 +139,7 @@ type FusedExpertTensor struct {
 // expertCheckpointEntry is one indexed per-expert projection: which shard holds it, which fused
 // tensor and index inside it, the geometry needed to rebuild the resident tensor the weight HAL
 // stages, and the byte stride a fault would move. The stride is indexed rather than derived at read
-// time because it is what lets the tier answer "how big is this weight" WITHOUT reading it — the
+// time because it is what lets the tier answer "how big is this weight" WITHOUT reading it â€” the
 // whole reason a ring hit over a streamed checkpoint costs no IO.
 type expertCheckpointEntry struct {
 	shard  int
@@ -152,7 +152,7 @@ type expertCheckpointEntry struct {
 	stride int64
 }
 
-// halKey / dtype are the staging identity of this projection — the same dtype-prefixed key and
+// halKey / dtype are the staging identity of this projection â€” the same dtype-prefixed key and
 // compute dtype the resident path uses (expertWeight.halKey, weightHALQ4K / weightHALKQuant), so a
 // checkpoint-served expert lands under exactly the ring entry a resident one would have.
 func (e expertCheckpointEntry) halKey(name string) string {
@@ -173,7 +173,7 @@ func (e expertCheckpointEntry) dtype() compute.Dtype {
 	}
 }
 
-// weight rebuilds the resident representation from one faulted expert's raw bytes — the SAME
+// weight rebuilds the resident representation from one faulted expert's raw bytes â€” the SAME
 // q4kTensor / kQuantTensor shape the resident loader path produces, so everything downstream (the
 // staged builders, the ring key, the resident byte accounting) is unchanged by where the bytes
 // came from.
@@ -190,12 +190,17 @@ func (e expertCheckpointEntry) weight(name string, raw []byte) expertWeight {
 
 // ExpertCheckpointTier is the checkpoint rung under the device ring: a per-expert range reader over
 // one or more checkpoint shards, plus a bounded host-resident cache over what it faults. Its zero
-// value is not usable — construct it with NewExpertCheckpointTier — and a nil *ExpertCheckpointTier
+// value is not usable â€” construct it with NewExpertCheckpointTier â€” and a nil *ExpertCheckpointTier
 // is a valid "no tier", which is the default and which every method tolerates.
 type ExpertCheckpointTier struct {
 	mu     sync.Mutex
 	shards []*ggufExpertSource
 	index  map[string]expertCheckpointEntry
+
+	// overlays holds the optional per-rank sparse row overlays, keyed by the fused tensor they
+	// band (#13030). It is nil until SetExpertSparseOverlay registers one, so an overlay-free tier
+	// carries no extra field traffic and fault is byte-identical to the dense-stride path.
+	overlays map[string]*ExpertSparseOverlay
 
 	// pool bounds the RETAINED host copies. A zero budget retains nothing (every Admit reports
 	// ErrTooLarge and the faulted expert is simply handed to the caller and dropped), which is the
@@ -210,6 +215,12 @@ type ExpertCheckpointTier struct {
 	failures  int
 	bytesRead int64
 	lastErr   error
+
+	// overlayRows / overlayBytes are the sparse-overlay ledger (#13030): faults served from a
+	// registered overlay's copied rows and the row bytes they moved. Zero with no overlay, which is
+	// the default.
+	overlayRows  int
+	overlayBytes int64
 }
 
 // NewExpertCheckpointTier returns an empty tier whose retained host cache is bounded by hostBytes.
@@ -305,7 +316,7 @@ func (t *ExpertCheckpointTier) AddShardData(r io.ReaderAt, size int64, data []by
 // checkpointStaging is how a checkpoint-served projection would be staged into the weight HAL and
 // the routed-expert ring: the ring key, the host-source builder, the dtype and the resident byte
 // cost. An expertWeight carries THIS instead of the expert's bytes, which is the whole point of the
-// shape — every field is known from the index, so the bytes are read only when the ring actually
+// shape â€” every field is known from the index, so the bytes are read only when the ring actually
 // misses.
 type checkpointStaging struct {
 	key   string
@@ -316,7 +327,7 @@ type checkpointStaging struct {
 
 // staging derives that descriptor from the INDEX alone: the key, the dtype and the byte cost are
 // answered WITHOUT reading a byte. That is what makes the tier compose with the ring instead of
-// defeating it — a projection the ring already holds is served on a hit and the fault inside mk
+// defeating it â€” a projection the ring already holds is served on a hit and the fault inside mk
 // never runs, so a resident activated set costs zero checkpoint IO no matter how often it is routed.
 // ok=false means this tier simply does not carry the name, which is how a fully-resident checkpoint
 // (and the nil tier) declines.
@@ -355,7 +366,7 @@ func (t *ExpertCheckpointTier) staging(name string) (*checkpointStaging, bool) {
 	}, true
 }
 
-// fault answers one canonical per-expert tensor name by reading exactly that expert's stride — or
+// fault answers one canonical per-expert tensor name by reading exactly that expert's stride â€” or
 // by serving a retained host copy when the bounded host cache holds one. It never returns a
 // partially-built weight.
 func (t *ExpertCheckpointTier) fault(name string) (expertWeight, error) {
@@ -377,7 +388,44 @@ func (t *ExpertCheckpointTier) fault(name string) (expertWeight, error) {
 		return w, nil
 	}
 	src := t.shards[entry.shard]
+	overlay := t.overlays[entry.fused] // nil unless a per-rank sparse overlay was registered
 	t.mu.Unlock()
+
+	// Sparse-overlay fast path (#13030): when this rank registered an overlay banding this fused
+	// tensor AND the routed expert is bitmap-present, serve the copied rows and move no device
+	// bytes. An expert outside the overlay (or no overlay at all) falls through to the dense stride
+	// below, byte-for-byte, so the default-off path is exactly the historical one.
+	var raw []byte
+	if overlay != nil {
+		if have, ok := overlay.row(name); ok {
+			t.mu.Lock()
+			t.overlayRows++
+			t.overlayBytes += int64(len(have))
+			t.mu.Unlock()
+			w := entry.weight(name, have)
+			// An overlay-served fault still populates the bounded host cache, so a repeat fault of
+			// the same expert is a host hit and the overlay bytes are moved exactly once.
+			t.mu.Lock()
+			defer t.mu.Unlock()
+			if prev, live := t.host[id]; live {
+				t.pool.Touch(id)
+				return prev, nil
+			}
+			evicted, admitErr := t.pool.Admit(polymodel.Model{ID: id, WeightBytes: int64(len(have))})
+			if admitErr != nil {
+				return w, nil // stream-through (the default) or an expert larger than the host budget
+			}
+			for _, vid := range evicted {
+				delete(t.host, vid)
+				t.evictions++
+			}
+			t.host[id] = w
+			if used := t.pool.Used(); used > t.peak {
+				t.peak = used
+			}
+			return w, nil
+		}
+	}
 
 	// Issued OUTSIDE the lock: see the file header on why a duplicated concurrent read of identical
 	// bytes is the right trade against serializing every fleet fault behind one mutex. On a shard
@@ -398,7 +446,7 @@ func (t *ExpertCheckpointTier) fault(name string) (expertWeight, error) {
 	t.bytesRead += int64(len(raw))
 	if have, live := t.host[id]; live {
 		// A concurrent fault landed first. Its bytes and ours are byte-identical, so serve the
-		// retained copy and let this one go — but the read still happened and is still counted, or
+		// retained copy and let this one go â€” but the read still happened and is still counted, or
 		// the ledger would under-report the IO the workload actually issued.
 		t.pool.Touch(id)
 		return have, nil
@@ -418,13 +466,13 @@ func (t *ExpertCheckpointTier) fault(name string) (expertWeight, error) {
 	return w, nil
 }
 
-// ExpertCheckpointStats is the checkpoint tier's ledger — the evidence for this rung's claim that
+// ExpertCheckpointStats is the checkpoint tier's ledger â€” the evidence for this rung's claim that
 // bytes read per decode step scale with the ACTIVATED count k rather than with the expert count E.
 // A hit rate alone cannot show that: the number that matters is BytesRead against the slab bytes a
 // fully-resident load would have paid.
 type ExpertCheckpointStats struct {
 	Enabled bool `json:"enabled"`
-	// Tensors is how many per-expert projections the tier indexes — E*3 per MoE layer indexed.
+	// Tensors is how many per-expert projections the tier indexes â€” E*3 per MoE layer indexed.
 	Tensors int `json:"tensors"`
 	// Reads is how many expert faults reached the checkpoint; BytesRead their total stride bytes.
 	// Hits are faults served from the retained host cache, Evictions its page-outs.
@@ -432,6 +480,16 @@ type ExpertCheckpointStats struct {
 	BytesRead int64 `json:"bytes_read"`
 	Hits      int   `json:"hits"`
 	Evictions int   `json:"evictions"`
+	// OverlayRows/OverlayBytesRead are the per-rank sparse-overlay ledger (#13030): how many faults
+	// were served from a registered overlay's copied rows, and the row bytes those faults moved.
+	// A fault outside every registered overlay falls through to the dense stride and is counted in
+	// Reads/BytesRead, so the two ledgers together account for every byte the tier moved.
+	OverlayRows      int   `json:"overlay_rows"`
+	OverlayBytesRead int64 `json:"overlay_bytes_read"`
+	// OverlayTensors/PresentRows describe the registered overlays: how many fused tensors carry one,
+	// and the total present rows across them. Both are zero with no overlay registered.
+	OverlayTensors int `json:"overlay_tensors"`
+	OverlayPresent int `json:"overlay_present"`
 	// BudgetBytes/ResidentBytes/PeakBytes are the HOST residency bound. Budget 0 is stream-through:
 	// the expert bulk never accumulates in host RAM at all, which is the point of the rung.
 	BudgetBytes   int64 `json:"budget_bytes"`
@@ -467,6 +525,13 @@ func (t *ExpertCheckpointTier) Stats() ExpertCheckpointStats {
 		PeakBytes:     t.peak,
 		ResidentCount: len(t.host),
 		Failures:      t.failures,
+
+		OverlayRows:      t.overlayRows,
+		OverlayBytesRead: t.overlayBytes,
+		OverlayTensors:   len(t.overlays),
+	}
+	for _, o := range t.overlays {
+		st.OverlayPresent += o.PresentRows()
 	}
 	if t.lastErr != nil {
 		st.LastError = t.lastErr.Error()
@@ -486,7 +551,7 @@ func (m *Model) SetExpertCheckpoint(t *ExpertCheckpointTier) {
 }
 
 // ExpertCheckpointStats reports this model's checkpoint-tier ledger (the zero value when it has
-// none) — the operator-facing counterpart of Session.ExpertRing() one rung down.
+// none) â€” the operator-facing counterpart of Session.ExpertRing() one rung down.
 func (m *Model) ExpertCheckpointStats() ExpertCheckpointStats {
 	if m == nil {
 		return ExpertCheckpointStats{}
