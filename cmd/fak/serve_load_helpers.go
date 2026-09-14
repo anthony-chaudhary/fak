@@ -17,11 +17,30 @@ import (
 
 var serveMetalAvailable = metalgemm.Available
 
+// q2kCapableBackend is the native packed-Q2_K capability seam: a backend advertises that it can
+// matmul over Q2_K blocks without expanding them to Q8/F32 first. It is asserted locally so the
+// serve wiring never names a concrete device backend.
+type q2kCapableBackend interface {
+	SupportsQ2K() bool
+}
+
+// serveDenseKQuantOptions keeps a dense Q2_K artifact packed on a backend that advertises BOTH a
+// native packed Q2_K matmul path AND quantized upload. Otherwise it preserves the historical
+// behavior byte-for-byte: blanket dense k-quant residency stays off (those tensors take the proven
+// dequant-to-Q8 route), and a nil backend yields no options.
+//
+// #12757: without this, a 246 GiB UD-Q2_K_XL artifact was expanded from packed Q2_K to Q8/F32 at
+// load on exactly the backends whose kernels can consume Q2_K directly, and that expansion is what
+// made a 128 GB Halo refuse the model.
 func serveDenseKQuantOptions(backend compute.Backend) []ggufload.Q4KLoadOption {
 	if backend == nil {
 		return nil
 	}
-	return []ggufload.Q4KLoadOption{ggufload.WithDenseKQuantResident(false)}
+	opts := []ggufload.Q4KLoadOption{ggufload.WithDenseKQuantResident(false)}
+	if cap, ok := backend.(q2kCapableBackend); ok && cap.SupportsQ2K() && backend.Caps().UploadDtype {
+		opts = append(opts, ggufload.WithDenseQ2KResident(true))
+	}
+	return opts
 }
 
 // serveResidentQ4KLoadOptions keeps loader and admission storage selection on

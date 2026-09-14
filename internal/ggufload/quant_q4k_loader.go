@@ -158,6 +158,33 @@ func probeQ4KLoadOptions(opts []Q4KLoadOption) q4kLoadOptions {
 	return out
 }
 
+// Q4KLoadOptionEffects is the observation surface of applying a Q4KLoadOption list: it reports
+// the request-level toggles an option list actually sets (the loader's internal q4kLoadOptions,
+// minus the fields that are not option-driven). It lets a caller assert the EFFECT of an option
+// list through the same option-application path the loader uses, instead of eyeballing slice
+// length. It is read-only and performs no config-dependent validation (see resolveQ4KLoadOptions).
+type Q4KLoadOptionEffects struct {
+	DenseKQuantResident  bool
+	DenseQ2KResident     bool
+	Q2KEmbeddingResident bool
+	Q4KEmbeddingResident bool
+	MTPRetention         bool
+}
+
+// ApplyQ4KLoadOptions applies opts to the zero value and returns the observable effect set. It is
+// the exported entry point to the loader's option-application path for callers (e.g. serve wiring)
+// that need to assert an option list enables the residency mode it intends.
+func ApplyQ4KLoadOptions(opts []Q4KLoadOption) Q4KLoadOptionEffects {
+	o := probeQ4KLoadOptions(opts)
+	return Q4KLoadOptionEffects{
+		DenseKQuantResident:  o.residentDenseKQuant,
+		DenseQ2KResident:     o.residentDenseQ2K,
+		Q2KEmbeddingResident: o.residentQ2KEmbedding,
+		Q4KEmbeddingResident: o.residentQ4KEmbedding,
+		MTPRetention:         o.retainMTP,
+	}
+}
+
 func resolveQ4KLoadOptions(cfg model.Config, opts []Q4KLoadOption) (q4kLoadOptions, error) {
 	out := q4kLoadOptions{residentDenseKQuant: true, retainMTP: model.RetainMTP}
 	for _, opt := range opts {
