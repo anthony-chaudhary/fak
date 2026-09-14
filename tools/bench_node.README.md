@@ -23,6 +23,7 @@ flowchart LR
 ```bash
 tools/bench_node.sh <node> info            # resolved facts (sanitized name only)
 tools/bench_node.sh <node> ping            # SSH-handshake reachability
+tools/bench_node.sh <node> diagnose         # classify onboarding: no-sshd|sshd-only|authorized
 tools/bench_node.sh <node> wait            # poll (backoff) until reachable
 tools/bench_node.sh <node> tests           # go test ggufload+model (correctness)
 tools/bench_node.sh <node> bench           # kernel-latency microbenches (ns/op)
@@ -40,6 +41,30 @@ BENCH_KEEPAWAKE_S=28800 tools/bench_node.sh <node> keepawake
 first remote script starts `caffeinate -dimsu -t <seconds>` before any checkout/toolchain
 inspection. That preserves the wake window for follow-up `tests`, `bench`, `kernels`, or
 `cmd` runs on macOS nodes that would otherwise go back to sleep.
+
+## Onboarding diagnosis (`diagnose`)
+
+`ping` is a **binary reachability gate** — exit 0 only when the driver key is authorized. That
+conflates two very different boxes: one with no `sshd` at all, and one whose `sshd` answered but
+**rejected the key**. `diagnose` separates them, classifying the node into a closed vocabulary:
+
+- `no-sshd` — nothing answers on :22 (a TCP failure, not ICMP).
+- `sshd-only` — `sshd` is up but the driver pubkey is not in `authorized_keys`.
+- `authorized` — the driver key authenticates and the remote command runs.
+- `unknown` — the classifier could not tell a connect failure from an auth denial.
+
+It probes with the **same remote command as `ping`** (`remote_probe`), so the two can never
+disagree about what "reachable" means, and prints two lines: `ONBOARD-STATE <node> <state>` plus
+an actionable `ONBOARD-REMEDY <...>`.
+
+```bash
+tools/bench_node.sh desktop diagnose
+# ONBOARD-STATE desktop sshd-only
+# ONBOARD-REMEDY sshd is up; append the driver pubkey to the node account's authorized_keys, then re-run diagnose
+```
+
+`diagnose` reuses `ping`'s probe so the two cannot disagree about what "reachable" means; it
+only adds the state distinction `ping` deliberately folds into a single exit code.
 
 ## Tailnet-offline recovery (`recover`)
 
@@ -145,8 +170,10 @@ because the repo's scrub audit is *shape-only* (Slack-token regex without the gi
 needles sidecar) and would **not** redact a CPU brand or hostname. So:
 
 - **Reachability = SSH handshake**, not `tailscale ping` — a node can answer ping with no
-  `sshd` (the desktop does exactly this). POSIX targets probe with `true`; Windows-WSL
-  targets probe with `cmd /c exit 0`.
+  `sshd` (the desktop did exactly this). POSIX targets probe with `true`; Windows-WSL
+  targets probe with `cmd /c exit 0`. `ping` stays a binary gate (exit 0 only when
+  authorized); `diagnose` feeds the `no-sshd` vs `sshd-only` distinction so an
+  authorized-keys gap is never mis-filed as a missing-`sshd` gap.
 - **Host key is pinned** from the registry (`StrictHostKeyChecking=yes`), not blind
   `accept-new`; ephemeral nodes may leave it empty and accept a per-run key in the temp
   known-hosts file.
