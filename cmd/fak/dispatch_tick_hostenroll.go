@@ -78,6 +78,29 @@ func dispatchTickHostEnroll(root, runsDir string, opts dispatchTickOptions, pick
 		return finish(payload)
 	}
 
+	// Live WAVE enrollment into ONE shared host (#2030 massive-concurrency). A wave
+	// sets opts.SharedHost so every row's routing/lease/gate evaluation lands in the
+	// SAME host instead of constructing a private Config{Workers:1,Queue:1} host per
+	// tick -- the host lifecycle is shared, the per-row fence is not. Enrollment is
+	// deferred: no drain happens here, and this row's payload is finalized once the
+	// wave drains the batch (dispatch_wave_shared_host.go). A standalone tick leaves
+	// SharedHost nil and takes the byte-identical private-host path below.
+	if opts.SharedHost != nil {
+		agentInst := &hostEnrollAgent{issue: target, root: root, lane: pick.Lane, tree: pick.Tree, maxTurns: opts.MaxTurns}
+		opts.SharedHost.enroll(&dispatchWaveHostShareRow{
+			rank:    opts.WaveSharedRank,
+			target:  target,
+			runsDir: runsDir,
+			opts:    opts,
+			plan:    plan,
+			agent:   agentInst,
+			lease:   lease,
+			payload: payload,
+			finish:  finish,
+		})
+		payload["host_pending"] = true
+		return payload
+	}
 	// Enroll the routed issue as ONE microagent into a real in-process host over one
 	// shared gateway and one audit sink — the M2 host lifecycle
 	// (Spawn -> Step -> retire -> Reap), not an exec.Command spawn.
