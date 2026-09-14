@@ -235,3 +235,4 @@ security policy.
 - [server-config.md](server-config.md) — every flag and env var.
 - [`SECURITY-capability-floor-2026-06-18.md`](../notes/SECURITY-capability-floor-2026-06-18.md) — the floor visual + the dogfood verdict matrix.
 - [Policy in the kernel](../explainers/policy-in-the-kernel.md) — the design rationale for default-deny in the call path.
+- [Native harness default-on security features](../architecture/native-harness-default-security.md) - the feature inventory a native harness ships by default, including the JIT secret "page in and out" path.

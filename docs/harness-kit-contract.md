@@ -67,3 +67,16 @@ Buffers name their owner and require idempotent `Release`. Execution never trans
 `internal/compute.NewHarnessAdapter` is the in-tree non-default bridge: a CUDA build can pass the result of `compute.Lookup("cuda")` without exposing the private compute API. The reference and accelerated paths use the same public scheduler and correctness fixture.
 
 This is a `gen/next` gated contract. Promotion requires reference parity plus sanctioned-device correctness, cancellation, memory-pressure, fallback, and tuned net-true performance captures. Demote or retire an adapter when parity, cancellation, ownership, or net-true performance regresses. The invalidating assumption is that device discovery and negotiated capabilities remain truthful for the lifetime of a scheduled request.
+
+## Default-on security a builder inherits
+
+The harness-kit contract does not only describe extension points; it inherits the
+kernel's default security posture. Registration is reachability, never authority
+(`Services.Invoke` stays subject to the effective session/tenant capability
+floor), and the secret path is declared and enforced at the execution boundary:
+`AuthBinding`/`AuthRequirement` page a `fleet_secret`/`oauth2` credential
+just-in-time and `ScrubSecretsFromResults` strips it on the way back out, so a
+secret never enters model context or serialized tool parameters. The full
+inventory of default-on features — capability floor, result quarantine, the JIT
+secret "page in and out", provenance, and witness gates — is collected in
+[Native harness default-on security features](architecture/native-harness-default-security.md).
