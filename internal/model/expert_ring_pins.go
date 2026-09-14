@@ -103,6 +103,13 @@ func (s *Session) warmStartExpertPins(r *pagedRing) {
 	}
 	r.WarmStartPins(hist, s.ExpertPinBudget)
 	r.turn = NewExpertUsageHistogram()
+	// The online hot-set learner is built lazily WITH the pin-set and only when the operator asked
+	// for it (#1301). Its budget is the pin budget — the learned hot-set and the pin-set select the
+	// same number of units — and its margin is the session's fraction. A session at the default 0
+	// allocates no learner, so the turn boundary below is unchanged byte-for-byte.
+	if s.ExpertHotSetHysteresis > 0 {
+		r.hotSet = NewExpertHotSetLearner(s.ExpertPinBudget, s.ExpertHotSetHysteresis)
+	}
 }
 
 // observeExpert folds one routed-expert staging into the ring's per-turn usage histogram — the live
@@ -172,8 +179,18 @@ func (s *Session) ExpertRingEndTurn(decay float64, maxSwaps int) ([]ExpertPinSwa
 	// ring span. "No forward in flight" is this session's quiescence; a peer agent's may not be.
 	done := s.ringEnter(r)
 	defer done()
-	swaps := r.RepinPass(r.turn, decay, maxSwaps)
+	turn := r.turn
+	swaps := r.RepinPass(turn, decay, maxSwaps)
 	swaps = append(swaps, r.pins.fillPins()...)
+	// Online hot-set learning (#1301): when the operator enabled it, fold THIS turn's activation
+	// statistics into the ring's learner, recompute the committed hot-set under the hysteresis band,
+	// and apply the learned swaps to the pin-set — so the durable pins the ring protects are seeded
+	// by what the workload actually routed, not only by RepinPass's pairwise swap. The learner is
+	// nil at the default (hysteresis 0), so this is a branch not taken and allocates nothing.
+	if r.hotSet != nil {
+		r.hotSet.absorb(turn)
+		r.pins.applyHotSetSwaps(r.hotSet.Learn())
+	}
 	r.turn = NewExpertUsageHistogram()
 
 	var dumpErr error

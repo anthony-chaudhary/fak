@@ -114,6 +114,13 @@ type pagedRing struct {
 	// Session.ExpertRingEndTurn (which decays the standing heat, folds this in, repins, and dumps).
 	// nil alongside a nil pins, so a ring that was never warm-started observes nothing.
 	turn *ExpertUsageHistogram
+	// hotSet is the ONLINE hot-set learner (expert_hot_set.go, #1301), built lazily WITH the pin-set
+	// and only when Session.ExpertHotSetHysteresis > 0. ExpertRingEndTurn folds each turn's heat
+	// into it, calls Learn() under the hysteresis band, and applies the learned swaps to pins —
+	// so the durable pin-set is seeded by learned activation statistics, not only by RepinPass.
+	// nil on every default session (no pin-set, or hysteresis 0), so nothing is allocated and the
+	// pinned-never-evicted path is exactly R2's.
+	hotSet *ExpertHotSetLearner
 
 	// policy is the VICTIM ranking among unpinned residents (R4/#5615, expert_ring_policy.go).
 	// At the zero value (ExpertRingEvictLRU) the ring evicts nothing of its

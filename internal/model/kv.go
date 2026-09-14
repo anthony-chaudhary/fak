@@ -270,6 +270,20 @@ type Session struct {
 	// folding several sessions' dumps sums them with SumExpertUsageHistograms and points here at the
 	// result.
 	ExpertUsagePath string
+	// ExpertHotSetHysteresis turns on the ONLINE hot-set learner (expert_hot_set.go, #1301) and is
+	// the displacement margin FRACTION its hysteresis band uses. When > 0 the ring keeps an
+	// ExpertHotSetLearner alongside its pin-set, folds each turn's routed-expert heat into it at
+	// ExpertRingEndTurn, and applies the learned swaps to the pin-set before the dump — so the
+	// pin/repin path is seeded by a hot-set LEARNED from EPLB-style activation statistics rather
+	// than only by RepinPass's last pairwise swap. A challenger may displace the committed coldest
+	// unit only when its heat beats cold + cold*fraction + 4; inside the band the incumbent stays,
+	// which suppresses pin/unpin oscillation under routing jitter. Pass
+	// DefaultExpertHotSetHysteresis for the shipped victim/4 margin. 0 (the default) disables the
+	// learner entirely and builds no additional state — a session that also leaves ExpertPinBudget
+	// and ExpertUsagePath at their defaults is byte-for-byte unchanged. Requires a pin-set to act
+	// on: with no ExpertPinBudget and no ExpertUsagePath there are no pins to seed, so the knob is
+	// inert.
+	ExpertHotSetHysteresis float64
 	// ExpertRingEvict selects how the ring ranks eviction victims among its UNPINNED residents
 	// (expert_ring_policy.go, #5615). The zero value is LRU — polymodel's own choice, which the ring
 	// has always inherited and which is a default rather than a finding. Promote the value-aware
