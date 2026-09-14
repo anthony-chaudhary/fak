@@ -468,17 +468,12 @@ func (s *Session) Qwen35MetalForwardSequenceStatus() Qwen35MetalForwardSequenceR
 	if s == nil || s.M == nil || !s.M.Cfg.IsQwen35Hybrid() || s.Backend != nil || !s.Q4K || !s.MetalQ4K {
 		return base
 	}
-	if newQwen35MetalGDNSequenceBackend == nil {
-		base.EvidenceState = Qwen35MetalSequenceEvidenceUnavailable
-		return base
-	}
-	base.EvidenceState = Qwen35MetalSequenceEvidenceNotSelected
-	if s.qwen35HAL == nil || !s.qwen35HAL.sequenceAccepted && !s.qwen35HAL.decodeAccepted {
-		return base
-	}
-	base.SelectorState = Qwen35MetalSequenceSelectorOn
-	base.EvidenceState = Qwen35MetalSequenceEvidenceUnavailable
-	if s.qwen35HAL != nil {
+	// A stored whole-sequence receipt is execution evidence regardless of whether
+	// the native backend factory is linked into THIS build: the Go-only panel-walk
+	// double deliberately reports through this seam on every host
+	// (TestPrefillPanelRoundTripBudget). Only fall to the build-availability status
+	// when the session holds no such receipt.
+	if s.qwen35HAL != nil && (s.qwen35HAL.sequenceAccepted || s.qwen35HAL.decodeAccepted) {
 		if agg, ok := s.qwen35HAL.getMetalForwardReceipt(); ok && agg.Available {
 			agg.SelectorState = Qwen35MetalSequenceSelectorOn
 			if runner, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalForwardSequenceRunner); ok {
@@ -493,6 +488,16 @@ func (s *Session) Qwen35MetalForwardSequenceStatus() Qwen35MetalForwardSequenceR
 			return agg
 		}
 	}
+	if newQwen35MetalGDNSequenceBackend == nil {
+		base.EvidenceState = Qwen35MetalSequenceEvidenceUnavailable
+		return base
+	}
+	base.EvidenceState = Qwen35MetalSequenceEvidenceNotSelected
+	if s.qwen35HAL == nil || !s.qwen35HAL.sequenceAccepted && !s.qwen35HAL.decodeAccepted {
+		return base
+	}
+	base.SelectorState = Qwen35MetalSequenceSelectorOn
+	base.EvidenceState = Qwen35MetalSequenceEvidenceUnavailable
 	runner, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalForwardSequenceRunner)
 	if !ok {
 		return base
