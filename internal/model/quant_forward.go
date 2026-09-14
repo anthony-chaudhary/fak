@@ -358,8 +358,7 @@ func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
 		m.applyProjBias(l, q, kk, vv)
 		m.applyLayerQKNorm(l, q, kk)
 		s.ropeRowQK(l, q, kk, cos, sin)
-		s.Cache.K[l] = append(s.Cache.K[l], kk...)
-		s.Cache.V[l] = append(s.Cache.V[l], vv...)
+		s.Cache.appendKV(l, kk, vv)
 		s.phaseEnd("q8_rope_kv", tRoPE)
 
 		tAttn := s.phaseStart()
@@ -437,7 +436,7 @@ func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
 
 func attnDecodeOne(attnOut, Q []float32, cache *KVCache, layer, nH, hd, w, grp int, scale float32, scoreDot func(a, b []float32) float32, scoreDot3 func(a, b, c, x []float32) (float32, float32, float32), scoreScratch [][]float32) [][]float32 {
 	nKV := nH / grp
-	Kl, Vl := cache.K[layer], cache.V[layer]
+	Kl, Vl := cache.attentionRows(layer)
 	nPos := len(Kl) / w
 	scoreScratch = grow2D(scoreScratch, grp, nPos)
 	useSaxpy3SIMD := attnSaxpy3SIMDMinBatch <= 1 && nPos >= attnSaxpy3SIMDMinPos
@@ -482,7 +481,13 @@ func (s *Session) attnDecodeQSA(
 	scoreDot func(a, b []float32) float32,
 	scoreDot3 func(a, b, c, x []float32) (float32, float32, float32),
 ) [][]float32 {
-	Kl, Vl := cache.K[layer], cache.V[layer]
+	if cache.quantized() {
+		// QSA's block scoring/gather reads packed-or-f32 rows through packedHead; a
+		// q8 cache dequantizes on attend instead, so skip the sparse path and take the
+		// dense decode over the dequantized layer. Partial fidelity, full correctness.
+		return attnDecodeOne(attnOut, Q, cache, layer, nH, hd, w, grp, scale, scoreDot, scoreDot3, db.scores)
+	}
+	Kl, Vl := cache.attentionRows(layer)
 	totalTokens := len(Kl) / w
 	blockSize := compute.QSABlockSize
 
@@ -693,9 +698,8 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 			}
 		})
 
-		s.Cache.K[l] = append(s.Cache.K[l], K...)
-		s.Cache.V[l] = append(s.Cache.V[l], V...)
-		Kl, Vl := s.Cache.K[l], s.Cache.V[l]
+		s.Cache.appendBatchedKV(l, K, V, P, w)
+		Kl, Vl := s.Cache.attentionRows(l)
 
 		// Attention accumulates values, so discard the previous layer output.
 		clear(attnOut)

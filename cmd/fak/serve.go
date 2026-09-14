@@ -190,6 +190,7 @@ type serveFlags struct {
 	nativeQwenQ4KPrefillChunk    *int
 	nativeQwen35MetalGDNSequence *bool
 	nativeQ4KGateUpOutputSlab    *bool
+	kvPrecision                  *string
 	nativePrefixProfile          *string
 	vulkanQ4KProfile             *bool
 	vulkanStageQ4K               *bool
@@ -283,6 +284,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.nativeQwenQ4KPrefillChunk = nativeControls.prefillChunk
 	sf.nativeQwen35MetalGDNSequence = nativeControls.qwen35GDNSequence
 	sf.nativeQ4KGateUpOutputSlab = nativeControls.q4kGateUpSlab
+	sf.kvPrecision = nativeControls.kvPrecision
 	sf.nativePrefixProfile = nativeControls.prefixProfile
 	sf.vulkanQ4KProfile = nativeControls.vulkanQ4KProfile
 	sf.vulkanStageQ4K = nativeControls.vulkanStageQ4K
@@ -499,6 +501,10 @@ func cmdServe(argv []string) {
 		defer keepAwakeReleaser.Release()
 	}
 	if err := validateNativeQwenQ4KPrefillChunk(*sf.nativeQwenQ4KPrefillChunk); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
+	if err := validateServeKVPrecision(*sf.kvPrecision); err != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
 		os.Exit(2)
 	}

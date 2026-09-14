@@ -100,15 +100,19 @@ func (p KVPrecision) perTokenPerLayerBytes(elemsPerRow int64) int64 {
 }
 
 // kvQ8RowBytes is the resident bytes of one row of `elems` values stored as q8_0: one int8
-// code per value plus one f16 scale per 32-value block — exactly llama.cpp's block_q8_0 wire
-// size (34 bytes / 32 elems), the same {Block:32, Bits:8} scheme QuantSpec documents.
+// code per value plus one f32 scale per 32-value block — the realized kvPackedRow layout
+// (model/kvcache_q8.go) and the same {Block:32, Bits:8} scheme QuantSpec documents. The
+// scale is f32, not f16 (36 bytes / 32 elems): the engine codec (model.KVQuantQ8_0) stores
+// f32 scales, so this estimate is byte-exact against the resident cache. An f16-scale
+// narrowing is a future density step; charging it here before the engine realizes it would
+// under-reserve the cache (#12981).
 func kvQ8RowBytes(elems int64) int64 {
 	if elems <= 0 {
 		return 0
 	}
 	const block = 32
 	blocks := (elems + block - 1) / block
-	return saturatingAddInt64(elems, saturatingMulInt64(blocks, 2)) // int8 codes + per-block f16 scale
+	return saturatingAddInt64(elems, saturatingMulInt64(blocks, 4)) // int8 codes + per-block f32 scale
 }
 
 // AutoSelectKVPrecision is the "auto-select a denser KV when f32 would force a tiny context"

@@ -51,6 +51,10 @@ type InKernelPlanner struct {
 	backend           compute.Backend // non-nil → decode runs through the device HAL (e.g. CUDA) instead of the CPU session
 	metal             bool            // Apple-Silicon metalgemm GPU forward on the CPU session (s.Metal); engaged ONLY when backend==nil (the CPU-session seam). No-op on non-Metal builds.
 	cpuOffloadExperts bool            // with a backend, keep MoE experts host-resident while dense/attention use the device
+	// kvPrecision is the realized storage tier installed on every session this planner
+	// builds (model.KVPrecisionFP32 default; Q8_0 for the dense mixed layout). Fixed at
+	// construction from InKernelPlannerConfig.KVPrecision.
+	kvPrecision model.KVPrecision
 	// expertSpill is the resolved graded expert placement (`--n-cpu-moe`, #5612) this planner
 	// installs on every session it builds: how many MoE layers spill to host and how many device
 	// bytes the routed-expert ring may hold. nil — the default and every planner that was never
@@ -531,6 +535,27 @@ func (p *InKernelPlanner) ApplyPromptShrink(ctx context.Context, messages []Mess
 // KVMemoryStats reports the in-process KV prefix cache's physical resident shape.
 // Native backend snapshots are split into hot device bytes, hot host metadata, and
 // the independently owned host-DRAM L2. Proxy/provider counters never enter here.
+// effectiveKVConfig is the compute.KVConfig this planner's admission math must use:
+// the model's geometry plus the realized KV storage tier (p.kvPrecision, mapped to the
+// compute tier). The F32 default maps to compute.KVPrecisionF32, so a planner that
+// never set a tier estimates byte-identically to before.
+func (p *InKernelPlanner) effectiveKVConfig() compute.KVConfig {
+	cfg := p.m.Cfg.ContextSizeConfigWithPrecision(computeKVPrecisionFor(p.kvPrecision)).KV
+	return cfg
+}
+
+// computeKVPrecisionFor maps a model.KVPrecision tier to the compute.KVPrecision the
+// byte estimate understands. Only f32 and q8_0 are realized; any other declared tier
+// falls back to f32 so the estimate never claims a density the engine does not have.
+func computeKVPrecisionFor(prec model.KVPrecision) compute.KVPrecision {
+	switch prec {
+	case model.KVPrecisionQ8_0:
+		return compute.KVPrecisionQ8
+	default:
+		return compute.KVPrecisionF32
+	}
+}
+
 func (p *InKernelPlanner) KVMemoryStats() KVMemoryStats {
 	if p == nil || p.m == nil {
 		return KVMemoryStats{
@@ -539,19 +564,14 @@ func (p *InKernelPlanner) KVMemoryStats() KVMemoryStats {
 			DType:       compute.F32.String(),
 		}
 	}
-	kvCfg := compute.KVConfig{
-		NumLayers:  p.m.Cfg.NumLayers,
-		NumKVHeads: p.m.Cfg.NumKVHeads,
-		HeadDim:    p.m.Cfg.HeadDim,
-		RopeTheta:  p.m.Cfg.RopeTheta,
-	}
+	kvCfg := p.effectiveKVConfig()
 	bytesPerToken := compute.EstimateKVStoreBytes(kvCfg, 1)
 	stats := KVMemoryStats{
 		Enabled:       p.tree != nil,
 		Backend:       "radixkv",
 		MemoryClass:   string(compute.MemoryKVCache),
 		Scope:         string(compute.MemoryScopeHost),
-		DType:         compute.F32.String(),
+		DType:         kvCfg.Precision.StorageLabel(),
 		BytesPerToken: bytesPerToken,
 		HeadroomRatio: inKernelKVMemoryHeadroom,
 	}
@@ -2877,7 +2897,7 @@ func (p *InKernelPlanner) requestMemoryPlan(promptTokens, maxNew int) compute.Me
 	// path uses — so boot and per-request build a byte-identical KV+scratch plan for the
 	// same (model, tokens). The per-request count is exact, so it is the explicit override
 	// (>=0); resident weights (below) stay this path's own demand.
-	_, plan := compute.AutoSizeContextPlan(p.m.Cfg.ContextSizeConfig(), nil, compute.FreeUnknown, plannedTokens)
+	_, plan := compute.AutoSizeContextPlan(p.m.Cfg.ContextSizeConfigWithPrecision(computeKVPrecisionFor(p.kvPrecision)), nil, compute.FreeUnknown, plannedTokens)
 	if p.backend != nil && p.includeResidentWeightsInRequestFit() {
 		if r := p.m.ResidentReport(); r != nil && r.TotalResidentBytes > 0 {
 			plan = append(compute.MemoryPlan{{Class: compute.MemoryWeights, Bytes: r.TotalResidentBytes, Detail: "resident-weights", DType: "mixed"}}, plan...)

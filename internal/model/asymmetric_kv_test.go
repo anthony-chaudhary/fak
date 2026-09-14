@@ -14,42 +14,45 @@ func TestAsymmetricKVByteSavings262KReduction(t *testing.T) {
 	const contextTokens = 262144 // 262K tokens
 
 	// Config 1: 26 layers, 23 KV heads, HeadDim 64 -> kvDim = 1472.
-	// K=Q8_0, V=Q4_0 -> 2944 bytes/token/layer * 26 * 262144 = 20,065,550,336 bytes (~20.08 GB).
+	// K=Q8_0 (symmetric, f32 scale: 1472 + 46*4 = 1656 B), V=Q4_0 (736 + 46*8 = 1104 B)
+	// -> 2760 bytes/token/layer * 26 * 262144 = 18,811,453,440 bytes (~18.81 GB).
 	numLayers1 := 26
 	kvDim1 := 23 * 64 // 1472
 	bytes1 := AsymmetricKVCacheBytes(contextTokens, numLayers1, kvDim1, KVPrecisionQ8_0, KVPrecisionQ4_0)
-	wantBytes1 := int64(26) * 2944 * int64(contextTokens)
+	wantBytes1 := int64(26) * 2760 * int64(contextTokens)
 	if bytes1 != wantBytes1 {
 		t.Fatalf("Config 1 bytes = %d, want %d", bytes1, wantBytes1)
 	}
 
 	gb1 := float64(bytes1) / 1e9
-	if math.Abs(gb1-20.07) > 0.1 {
-		t.Fatalf("Config 1 in GB = %.2f, want ~20.08 GB", gb1)
+	if math.Abs(gb1-18.81) > 0.1 {
+		t.Fatalf("Config 1 in GB = %.2f, want ~18.81 GB", gb1)
 	}
 	t.Logf("Config 1 (262K, 26 layers, kvDim 1472): %d bytes (%.2f GB / %.2f GiB)",
 		bytes1, gb1, float64(bytes1)/(1<<30))
 
 	// Config 2: 29 layers, 8 KV heads, HeadDim 128 -> kvDim = 1024.
-	// FP32 baseline: 62,276,730,880 bytes (~62.28 GB / 58.0 GiB)
-	// Asymmetric K=8, V=4: 15,569,182,720 bytes (~15.57 GB / 14.5 GiB) -> 4.0x reduction!
+	// FP32 baseline: 62,277,025,792 bytes (~62.28 GB / 58.0 GiB)
+	// Asymmetric K=8, V=4 (symmetric Q8_0 with f32 scale): 14,596,177,920 bytes
+	// (~14.60 GB / 13.6 GiB) -> 4.27x reduction (the f32 scale narrows the old 4.0x).
 	numLayers2 := 29
 	kvDim2 := 8 * 128 // 1024
 	fp32Bytes := AsymmetricKVCacheBytes(contextTokens, numLayers2, kvDim2, KVPrecisionFP32, KVPrecisionFP32)
 	asymBytes := AsymmetricKVCacheBytes(contextTokens, numLayers2, kvDim2, KVPrecisionQ8_0, KVPrecisionQ4_0)
 
-	wantFP32 := int64(contextTokens) * int64(numLayers2) * int64(1024*8) // 62,276,730,880
+	wantFP32 := int64(contextTokens) * int64(numLayers2) * int64(1024*8) // 62,277,025,792
 	if fp32Bytes != wantFP32 {
 		t.Fatalf("Config 2 FP32 bytes = %d, want %d", fp32Bytes, wantFP32)
 	}
 
-	wantAsym := int64(contextTokens) * int64(numLayers2) * int64(2048) // 15,569,182,720
+	wantAsym := int64(contextTokens) * int64(numLayers2) * int64(1920) // 14,596,177,920
 	if asymBytes != wantAsym {
 		t.Fatalf("Config 2 Asym bytes = %d, want %d", asymBytes, wantAsym)
 	}
 
-	if fp32Bytes != 4*asymBytes {
-		t.Fatalf("Config 2 reduction ratio: got %v vs 4*asym %v", fp32Bytes, 4*asymBytes)
+	// 8192/1920 = 64/15 exactly; assert the rational identity with no rounding.
+	if fp32Bytes*15 != asymBytes*64 {
+		t.Fatalf("Config 2 reduction ratio: fp32=%d asym=%d, want 64/15", fp32Bytes, asymBytes)
 	}
 
 	// FP16 Keys with Q4_0 Values
@@ -61,7 +64,7 @@ func TestAsymmetricKVByteSavings262KReduction(t *testing.T) {
 
 	t.Logf("Config 2 (262K, 29 layers, kvDim 1024):")
 	t.Logf("  FP32 baseline: %.2f GB", float64(fp32Bytes)/1e9)
-	t.Logf("  K=Q8_0, V=Q4_0: %.2f GB (4.0x reduction)", float64(asymBytes)/1e9)
+	t.Logf("  K=Q8_0, V=Q4_0: %.2f GB (4.27x reduction)", float64(asymBytes)/1e9)
 	t.Logf("  K=FP16, V=Q4_0: %.2f GB (2.91x reduction)", float64(asymFP16Bytes)/1e9)
 }
 
@@ -72,8 +75,8 @@ func TestAsymmetricKVBudgetReportAndMaxTokens(t *testing.T) {
 	const kvDim = 1024
 
 	report := AsymmetricKVCacheBudgetReport(contextTokens, numLayers, kvDim)
-	if report.SavingsVsFP32 < 3.99 || report.SavingsVsFP32 > 4.01 {
-		t.Fatalf("SavingsVsFP32 = %v, want ~4.0x", report.SavingsVsFP32)
+	if report.SavingsVsFP32 < 4.26 || report.SavingsVsFP32 > 4.28 {
+		t.Fatalf("SavingsVsFP32 = %v, want ~4.27x", report.SavingsVsFP32)
 	}
 	if report.AsymQ8Q4Bytes >= report.FP32Bytes {
 		t.Fatalf("asym bytes %d >= fp32 bytes %d", report.AsymQ8Q4Bytes, report.FP32Bytes)
@@ -84,8 +87,8 @@ func TestAsymmetricKVBudgetReportAndMaxTokens(t *testing.T) {
 	maxFP32 := MaxContextTokensForBudget(budget24GB, numLayers, kvDim, KVPrecisionFP32, KVPrecisionFP32)
 	maxAsym := MaxContextTokensForBudget(budget24GB, numLayers, kvDim, KVPrecisionQ8_0, KVPrecisionQ4_0)
 
-	if maxAsym < 4*maxFP32-10 || maxAsym > 4*maxFP32+10 {
-		t.Fatalf("maxAsym tokens (%d) should be ~4x maxFP32 tokens (%d)", maxAsym, maxFP32)
+	if maxAsym < 4*maxFP32-10 || maxAsym > 5*maxFP32 {
+		t.Fatalf("maxAsym tokens (%d) should be ~4.27x maxFP32 tokens (%d)", maxAsym, maxFP32)
 	}
 	t.Logf("24 GB VRAM context limits: FP32=%d tokens, Asym(K=8,V=4)=%d tokens", maxFP32, maxAsym)
 

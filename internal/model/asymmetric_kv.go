@@ -76,9 +76,13 @@ func KVVectorBytes(dim int, prec KVPrecision) int64 {
 	case KVPrecisionFP16:
 		return int64(dim) * 2
 	case KVPrecisionQ8_0:
-		groups := int64((dim + KVQuant8GroupSize - 1) / KVQuant8GroupSize)
-		// 1 byte per code + 8 bytes (f32 scale + f32 min) per group
-		return int64(dim) + groups*8
+		groups := int64((dim + KVQuantQ8_0BlockSize - 1) / KVQuantQ8_0BlockSize)
+		// Symmetric Q8_0 (KVQuantQ8_0): 1 int8 code per element + one f32 scale per
+		// block of 32 (no min — the codec is zero-offset). This is the layout the
+		// realized kvPackedRow stores, so the planner's q8 estimate equals the bytes
+		// actually resident (#12981). The kvcache_q8.go KVPackedRowBytes helper is the
+		// engine-side witness of this exact formula; a test asserts they agree.
+		return int64(dim) + groups*4
 	case KVPrecisionQ4_0:
 		groups := int64((dim + KVQuant4GroupSize - 1) / KVQuant4GroupSize)
 		// 0.5 bytes per code (packed 2 per byte) + 8 bytes (f32 scale + f32 min) per group
