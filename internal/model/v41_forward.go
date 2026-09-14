@@ -156,33 +156,19 @@ func v41KVLoraRankReduced(cfg Config) int { return cfg.HeadDim }
 // v41MHCMixWidth is the mHC coefficient-vector width for hc=4: (2+hc)*hc.
 const v41MHCMixWidth = 24
 
-// v41RouterConfigFor builds the routed+shared geometry directly from Config
-// rather than through v41RouterConfigFromConfig, which deliberately admits only
-// the published 384/top-6/1-shared/1.5-scale envelope. The reduced fixture keeps
-// the published expert/top-k envelope (v41Route.validate still enforces 384), so
-// this reads the live config rather than hardcoding it.
-func v41RouterConfigFor(cfg Config) (v41RouterConfig, error) {
-	if cfg.NumExperts <= 0 {
+// v41RouterConfigFullGeometry is the real-path routed+shared geometry. It routes
+// through v41RouterConfigFromConfig so the forward only admits the published
+// 384/top-6/1-shared/1.5-scale envelope; any other axis is refused here rather
+// than silently running a different MoE geometry. The router admission error is
+// wrapped into the typed ErrV41ForwardStage so a config missing (or carrying a
+// non-published) full-geometry axis fails closed at the forward stage boundary.
+func v41RouterConfigFullGeometry(cfg Config) (v41RouterConfig, error) {
+	rc, err := v41RouterConfigFromConfig(cfg)
+	if err != nil {
 		return v41RouterConfig{}, v41StageErr(v41StageMoE, -1,
-			fmt.Errorf("%w: router needs a positive expert count, got %d", ErrV41ForwardStage, cfg.NumExperts))
+			fmt.Errorf("%w: published router envelope rejected: %w", ErrV41ForwardStage, err))
 	}
-	if cfg.NumExpertsPerTok <= 0 || cfg.NumExpertsPerTok > cfg.NumExperts {
-		return v41RouterConfig{}, v41StageErr(v41StageMoE, -1,
-			fmt.Errorf("%w: top-k %d outside [1,%d]", ErrV41ForwardStage, cfg.NumExpertsPerTok, cfg.NumExperts))
-	}
-	if cfg.NSharedExperts < 1 {
-		return v41RouterConfig{}, v41StageErr(v41StageMoE, -1,
-			fmt.Errorf("%w: shared experts %d must be >= 1", ErrV41ForwardStage, cfg.NSharedExperts))
-	}
-	scale := float32(cfg.RoutedScalingFactor)
-	if scale == 0 {
-		scale = V41RouterRouteScale
-	}
-	if !finite32(scale) || scale <= 0 {
-		return v41RouterConfig{}, v41StageErr(v41StageMoE, -1,
-			fmt.Errorf("%w: route scale %g must be finite and positive", ErrV41ForwardStage, scale))
-	}
-	return v41RouterConfig{Experts: cfg.NumExperts, TopK: cfg.NumExpertsPerTok, SharedCount: cfg.NSharedExperts, RouteScale: scale}, nil
+	return rc, nil
 }
 
 // ---- admission -------------------------------------------------------------
@@ -373,7 +359,7 @@ func (m *Model) v41ForwardAdmitted() error {
 	if err := m.v41AdmitShape("lm_head.weight", v41StageHead, -1, cfg.VocabSize, cfg.HiddenSize); err != nil {
 		return err
 	}
-	if _, err := v41RouterConfigFor(cfg); err != nil {
+	if _, err := v41RouterConfigFullGeometry(cfg); err != nil {
 		return err
 	}
 	if err := m.v41EngramForwardAdmitted(); err != nil {
@@ -538,7 +524,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (*Activations, error)
 			hcEps = float32(cfg.DeepSeekV41.HCEps)
 		}
 	}
-	routeCfg, err := v41RouterConfigFor(cfg)
+	routeCfg, err := v41RouterConfigFullGeometry(cfg)
 	if err != nil {
 		return nil, err
 	}
