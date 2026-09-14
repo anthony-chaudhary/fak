@@ -28,6 +28,7 @@ func populatedExpertCacheReceipt() ExpertCacheReceipt {
 		HitRateKnown:      true,
 		BytesReadDRAM:     123456789,
 		BytesReadNVMe:     987654321,
+		BytesRefused:      424242424,
 		PrefillToksPerSec: 42.5,
 		DecodeToksPerSec:  18.25,
 		TTFTMillis:        750.5,

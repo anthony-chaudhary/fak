@@ -365,6 +365,12 @@ func ReplayExpertCacheTrace(trace ExpertCacheTrace, ringByteCap int64) (ExpertCa
 // and TTFT are unmeasured; the L1 schema carries the fields for the hardware
 // leaf that can actually time a forward pass. Writing a non-zero number here
 // would fabricate a throughput claim the measurement rung forbids.
+//
+// Every per-tier byte figure is folded straight from the replay result, refused
+// bytes included: a refused event is served by neither tier, so dropping it
+// would leave bytes_read_dram + bytes_read_nvme short of the trace total with
+// no structural signal. bytes_refused is the signal, and
+// ExpertCacheTierSplitComplete(bytes_refused) is the derived completeness rung.
 func BuildExpertCacheReceipt(shape V41ExpertCacheShape, res ExpertCacheReplayResult) ExpertCacheReceipt {
 	rate, known := ExpertCacheHitRate(res.HitCount, res.MissCount)
 	return ExpertCacheReceipt{
@@ -385,6 +391,7 @@ func BuildExpertCacheReceipt(shape V41ExpertCacheShape, res ExpertCacheReplayRes
 		HitRateKnown:      known,
 		BytesReadDRAM:     res.BytesReadDRAM,
 		BytesReadNVMe:     res.BytesReadNVMe,
+		BytesRefused:      res.BytesRefused,
 		PrefillToksPerSec: 0, // unmeasured: no clock, no GEMM (see doc above)
 		DecodeToksPerSec:  0, // unmeasured
 		TTFTMillis:        0, // unmeasured

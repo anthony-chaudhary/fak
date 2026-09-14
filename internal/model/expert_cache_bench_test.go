@@ -458,6 +458,58 @@ func TestExpertCacheBenchReceiptSameSeedIdentical(t *testing.T) {
 	}
 }
 
+// TestExpertCacheBenchReceiptRefusedBytesDisclosed is the #13012 witness: a
+// replay with refusals must emit a receipt whose refusal disclosure (a) is
+// STRUCTURALLY present as the locked bytes_refused key, (b) reconciles
+// dram+nvme+refused == the trace's true total, and (c) makes
+// ExpertCacheTierSplitComplete false. Before the fix the receipt folded only
+// dram+nvme, so a consumer saw a short split with no signal that anything was
+// missing. This case reaches the sub-expert budget the existing receipt lock
+// test cannot.
+func TestExpertCacheBenchReceiptRefusedBytesDisclosed(t *testing.T) {
+	shape := benchShape(t)
+	const expertBytes = 64
+	trace := benchTrace(t, ExpertCacheTraceOptions{
+		Shape: shape, Seed: 29, Tokens: 3, HotSetSize: 8, ZipfExponent: 1.5, ExpertBytes: expertBytes,
+	})
+	// One byte below one expert's footprint: every admit is refused.
+	res, err := ReplayExpertCacheTrace(trace, expertBytes-1)
+	if err != nil {
+		t.Fatalf("ReplayExpertCacheTrace: %v", err)
+	}
+	if res.BytesRefused == 0 {
+		t.Fatal("sub-expert budget produced no refusals; the witness is vacuous")
+	}
+	receipt := BuildExpertCacheReceipt(shape, res)
+
+	if receipt.BytesRefused != res.BytesRefused {
+		t.Fatalf("receipt bytes_refused %d != replay BytesRefused %d; the refusal was dropped", receipt.BytesRefused, res.BytesRefused)
+	}
+	total := int64(len(trace.Events)) * expertBytes
+	if receipt.BytesReadDRAM+receipt.BytesReadNVMe+receipt.BytesRefused != total {
+		t.Fatalf("receipt tiers %d+%d+%d != trace total %d",
+			receipt.BytesReadDRAM, receipt.BytesReadNVMe, receipt.BytesRefused, total)
+	}
+	if receipt.BytesReadDRAM+receipt.BytesReadNVMe == total {
+		t.Fatal("the two-tier sum totals the trace despite refusals; the disclosure is not load-bearing")
+	}
+	if ExpertCacheTierSplitComplete(receipt.BytesRefused) {
+		t.Fatalf("tier split reported complete with %d refused bytes", receipt.BytesRefused)
+	}
+
+	raw, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if _, ok := m["bytes_refused"]; !ok {
+		t.Fatalf("receipt is missing the structural bytes_refused key:\n%s", raw)
+	}
+}
+
 // TestExpertCacheBenchSkewRaisesHitRate pins that concentration helps: at a
 // fixed moderate budget, a tighter hot set yields a hit rate at least as high
 // as a flat distribution.

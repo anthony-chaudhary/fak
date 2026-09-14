@@ -46,6 +46,13 @@ type ExpertCacheReceipt struct {
 	// Per-tier bytes read per token.
 	BytesReadDRAM int64 `json:"bytes_read_dram"` // bytes read from the resident tier
 	BytesReadNVMe int64 `json:"bytes_read_nvme"` // bytes read from the streamed tier
+	// BytesRefused is the bytes of events served by NEITHER tier: an event larger
+	// than the whole ring budget is admitted by no eviction and is refused. It is
+	// a first-class field so a consumer can never read bytes_read_dram +
+	// bytes_read_nvme < total as a complete split. When it is zero the three-way
+	// sum still totals the trace; when it is non-zero that sum is incomplete and
+	// this field says so.
+	BytesRefused int64 `json:"bytes_refused"` // bytes served by neither tier (ring refused)
 
 	// Throughput / latency.
 	PrefillToksPerSec float64 `json:"prefill_toks_per_s"`
@@ -66,7 +73,7 @@ func ExpertCacheRequiredFields() []string {
 		"model_id", "arch", "precision", "quant",
 		"layers", "experts", "top_k", "moe_inter",
 		"ring_byte_cap", "hit_count", "miss_count", "hit_rate", "hit_rate_known",
-		"bytes_read_dram", "bytes_read_nvme",
+		"bytes_read_dram", "bytes_read_nvme", "bytes_refused",
 		"prefill_toks_per_s", "decode_toks_per_s", "ttft_ms",
 		"peak_memory_bytes",
 	}
@@ -88,4 +95,14 @@ func ExpertCacheHitRate(hitCount, missCount int64) (rate float64, known bool) {
 		return 0, false
 	}
 	return float64(hitCount) / float64(total), true
+}
+
+// ExpertCacheTierSplitComplete reports whether the receipt's two per-tier byte
+// fields account for every trace byte. It is false whenever BytesRefused > 0:
+// a refused event is served by neither tier, so bytes_read_dram +
+// bytes_read_nvme alone is an incomplete split and a consumer must NOT assume
+// the receipt reconciled. A reader that ignores BytesRefused can still call
+// this to refuse to treat a short split as complete.
+func ExpertCacheTierSplitComplete(bytesRefused int64) bool {
+	return bytesRefused == 0
 }
