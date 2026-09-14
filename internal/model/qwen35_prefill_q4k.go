@@ -76,14 +76,14 @@ func q4kQwen35HybridPrefillAtPositionOK(cfg Config, promptLen, base int) bool {
 // decode block. It is deliberately exact: only the 64-layer Qwen3.8 hybrid whose full
 // no-copy Q8 projection band resolves, on the backend-nil resident-Q4_K Metal lane, at
 // a fresh prompt boundary. Every other case declines so the historical decode path is
-// byte-identical. Opt in with FAK_QWEN35_RESIDENT_DECODE_AUTO=1; it is off by
-// default because the fused per-layer block trades 4 command buffers for 1 but
-// adds per-layer graph construction overhead on the M3 Pro (see the W1 report).
+// byte-identical. The route is ON by default (measured 0.4-0.9 -> 4.2-4.6 tok/s
+// decode on the M3 Pro, Qwen3.8-27B Q4_K_M, bit-identical pooled parity); set
+// FAK_QWEN35_RESIDENT_DECODE_AUTO=0 to force the historical path.
 func (s *Session) qwen35ResidentDecodeAutoEligible() bool {
 	if s == nil || s.M == nil || s.Cache == nil || s.Backend != nil || !s.Q4K || !s.MetalQ4K {
 		return false
 	}
-	if os.Getenv("FAK_QWEN35_RESIDENT_DECODE_AUTO") != "1" {
+	if os.Getenv("FAK_QWEN35_RESIDENT_DECODE_AUTO") == "0" {
 		return false
 	}
 	if newQwen35MetalGDNSequenceBackend == nil || !s.M.Cfg.IsQwen35Hybrid() {
