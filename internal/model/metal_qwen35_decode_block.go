@@ -89,6 +89,10 @@ func (b *metalQwen35GDNSequenceBackend) qwen35MetalDecodeBlock(s *Session, layer
 		},
 		InjectPostSubmitFailureForTest: injectPostSubmitFailure,
 	})
+	if accepted {
+		// One fused whole-block command buffer per accepted call (W1 decode accounting).
+		s.countMetalGraphCommandBuffer(nativeReceipt.CommandBuffers)
+	}
 	receipt := qwen35DecodeBlockReceipt{
 		CommandBuffers: nativeReceipt.CommandBuffers, Commits: nativeReceipt.Commits, CompletionWaits: nativeReceipt.CompletionWaits,
 		ProjectionDispatches: nativeReceipt.ProjectionDispatches, MixerProjectionDispatches: nativeReceipt.MixerProjectionDispatches,

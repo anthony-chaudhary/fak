@@ -227,9 +227,19 @@ func q8FastDecodeSessionOK(s *Session, cfg Config) bool {
 // (f32) K/V to the kernel-owned cache, so Evict/Clone and the KV semantics are unchanged;
 // returns the post-final-norm hidden (caller applies headQ).
 func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
+	cbTrace := os.Getenv("FAK_QWEN35_DECODE_CB_TRACE") == "1"
+	if cbTrace {
+		s.ResetMetalCommandBuffers()
+	}
 	finishGraph := s.beginQwen35DecodeGraph(pos)
 	aborted := true
-	defer func() { finishGraph(aborted) }()
+	defer func() {
+		finishGraph(aborted)
+		if cbTrace {
+			fmt.Fprintf(os.Stderr, "w1-decode-cb pos=%d total_cb=%d graph_cb=%d dispatch_cb=%d\n",
+				pos, s.MetalCommandBuffers(), s.MetalGraphCommandBuffers(), s.MetalDispatchCommandBuffers())
+		}
+	}()
 	// Fail closed BY NAME for a per-layer-head_dim arch (gemma4) whose q_norm/k_norm the
 	// generic block path's scalar-HeadDim qk-norm band cannot express — instead of the
 	// cryptic deep panic in applyQKNormCfg on the first token (issue #4274).
@@ -255,6 +265,24 @@ func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
 	s.tapActive = tap
 	defer func() { s.tapActive = prevTap }()
 	if cfg.IsHybrid() || cfg.IsQwen35Hybrid() || !q8FastDecodeSessionOK(s, cfg) {
+		// Whole-token one-command-buffer decode (W1 keystone): once the resident GDN
+		// owners are promoted, the exact Qwen3.8 hybrid can encode all 64 layers —
+		// GDN recurrence, full-attention SDPA, every MLP, and the final norm — into a
+		// single Metal command buffer, replacing ~225 per-GEMV submit/sync round trips
+		// per token. Declines fail open to the historical blockStep path below.
+		if cfg.IsQwen35Hybrid() {
+			if hidden, ok, err := s.tryQwen35MetalDecodeWholeToken(id); ok {
+				if err != nil {
+					panic(err)
+				}
+				if tap != nil {
+					tap.writeMeta(cfg, H, pos)
+				}
+				out = hidden
+				aborted = false
+				return out
+			}
+		}
 		mat := matKernel(sessionQ8Kernel{s})
 		if s.Q4 && m.q4w != nil {
 			// Resident int4 decode: the Qwen3.6 hybrid (and every non-fast-PreNorm arch)

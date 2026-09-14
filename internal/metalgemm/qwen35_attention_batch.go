@@ -169,7 +169,7 @@ func validateQwen35FullAttentionBatch(req Qwen35FullAttentionBatchRequest) (batc
 	offsets = make([]int, batch)
 	lengths = make([]int, batch)
 	for i, l := range req.Lanes {
-		if l.Position < 0 || l.Position >= 4096 || l.Position > qwen35MaxCInt/kvWidth || len(l.PrefixK) != l.Position*kvWidth || len(l.PrefixV) != len(l.PrefixK) || totalKV > qwen35MaxCInt-(l.Position+1) {
+		if l.Position < 0 || l.Position > qwen35MaxCInt/kvWidth || len(l.PrefixK) != l.Position*kvWidth || len(l.PrefixV) != len(l.PrefixK) || totalKV > qwen35MaxCInt-(l.Position+1) {
 			return 0, 0, 0, 0, 0, nil, nil, nil, nil, &MixedQKVError{Stage: MixedQKVDeclined, Detail: fmt.Sprintf("lane %d prefix/position mismatch", i)}
 		}
 		offsets[i] = totalKV

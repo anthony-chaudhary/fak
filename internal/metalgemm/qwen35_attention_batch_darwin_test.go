@@ -129,6 +129,92 @@ func TestQwen35FullAttentionDecodeBatchIndependentKVSingleFence(t *testing.T) {
 	})
 }
 
+// TestQwen35FullAttentionDecodeBatchLongContextParity pins the online-softmax
+// rewrite of qg_lane_attn against the independent float64 CPU oracle at contexts
+// the historical score[4096] register array could not represent. Lane positions
+// of 5000 and 20000 exceed the old 4096 hard cap twice over: before the rewrite
+// validateQwen35FullAttentionBatch declined them (l.Position >= 4096) and the
+// kernel itself indexed past score[4096]. This is the batch (independent-lane)
+// twin of TestProjectionGraphAttentionSplitKVParity and the direct witness that
+// the batched decode no longer strands long sessions on the host path.
+func TestQwen35FullAttentionDecodeBatchLongContextParity(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	defer ResetQ4K()
+	const modelWidth, nH, nKV, hd, rotary = 256, 2, 1, 64, 32
+	const attentionWidth, kvWidth = nH * hd, nKV * hd
+	weights := Qwen35FullAttentionWeights{
+		Q: attentionBatchQ8(t, 2*attentionWidth, modelWidth, 101),
+		K: attentionBatchQ8(t, kvWidth, modelWidth, 103),
+		V: attentionBatchQ4K(t, kvWidth, modelWidth, 107),
+	}
+	defer weights.Q.Release()
+	defer weights.K.Release()
+	defer weights.V.Release()
+	// Wide position spread keeps every lane distinct and the online recurrence
+	// rescaling repeatedly; per-lane variance defeats a shared-max shortcut.
+	for _, positions := range [][]int{{5000, 4097}, {20000, 12345}} {
+		t.Run(fmt.Sprintf("pos%d_%d", positions[0], positions[1]), func(t *testing.T) {
+			req := attentionBatchLongRequest(modelWidth, nH, nKV, hd, rotary, positions, weights)
+			got, receipt, accepted, err := RunQwen35FullAttentionDecodeBatch(req)
+			if err != nil || !accepted {
+				t.Fatalf("accepted=%v err=%v", accepted, err)
+			}
+			if receipt.Batch != len(positions) || !receipt.Committed || !receipt.CompletedWait || receipt.FinalReadbacks != 1 {
+				t.Fatalf("receipt=%+v", receipt)
+			}
+			for row, pos := range positions {
+				want := attentionBatchCPUOracle(t, Qwen35FullAttentionBatchRequest{
+					Input: append([]float32(nil), req.Input[row*modelWidth:(row+1)*modelWidth]...),
+					Weights: req.Weights, Lanes: []Qwen35FullAttentionLane{req.Lanes[row]},
+					QNorm: req.QNorm, KNorm: req.KNorm, Cos: req.Cos, Sin: req.Sin,
+					NumHeads: req.NumHeads, NumKVHeads: req.NumKVHeads, HeadDim: req.HeadDim,
+					RotaryDim: req.RotaryDim, Scale: req.Scale, QKNormEpsilon: req.QKNormEpsilon,
+					Gain1p: req.Gain1p, QKNorm: req.QKNorm,
+				})
+				attentionBatchClose(t, fmt.Sprintf("pos%d output", pos), got.Output[row], want.Output[0])
+				attentionBatchClose(t, fmt.Sprintf("pos%d kraw", pos), got.KRaw[row], want.KRaw[0])
+				attentionBatchClose(t, fmt.Sprintf("pos%d kpost", pos), got.KPost[row], want.KPost[0])
+				attentionBatchClose(t, fmt.Sprintf("pos%d v", pos), got.V[row], want.V[0])
+			}
+		})
+	}
+}
+
+func attentionBatchLongRequest(modelWidth, nH, nKV, hd, rotary int, positions []int, weights Qwen35FullAttentionWeights) Qwen35FullAttentionBatchRequest {
+	kvWidth := nKV * hd
+	batch := len(positions)
+	lanes := make([]Qwen35FullAttentionLane, batch)
+	input := make([]float32, batch*modelWidth)
+	maxPos := 0
+	for row, pos := range positions {
+		if pos > maxPos {
+			maxPos = pos
+		}
+		// Rising-magnitude prefix keys force the online max to move late instead
+		// of being set by the first token, so an unmerged partial or a stale max
+		// shows as a large error against the float64 oracle.
+		prefixK := make([]float32, pos*kvWidth)
+		prefixV := make([]float32, pos*kvWidth)
+		for tok := 0; tok < pos; tok++ {
+			amplitude := float32(0.2 + float64(tok%257)*0.01)
+			for d := 0; d < kvWidth; d++ {
+				sign := float32(1)
+				if (tok/257+d/3)%2 != 0 {
+					sign = -1
+				}
+				prefixK[tok*kvWidth+d] = sign * amplitude * (0.5 + float32(d%11)*0.07)
+				prefixV[tok*kvWidth+d] = float32((tok*7+d*13)%61-30) * 0.013
+			}
+		}
+		lanes[row] = Qwen35FullAttentionLane{Position: pos, PrefixK: prefixK, PrefixV: prefixV}
+		copy(input[row*modelWidth:], attentionBatchValues(modelWidth, row+11))
+	}
+	cosv, sinv := attentionBatchRope(maxPos+1, rotary)
+	return Qwen35FullAttentionBatchRequest{Input: input, Weights: weights, Lanes: lanes, QNorm: attentionBatchOnes(hd), KNorm: attentionBatchOnes(hd), Cos: cosv, Sin: sinv, NumHeads: nH, NumKVHeads: nKV, HeadDim: hd, RotaryDim: rotary, Scale: 1 / float32(math.Sqrt(float64(hd))), QKNormEpsilon: 1e-6, QKNorm: true}
+}
+
 func attentionBatchRequest(batch, modelWidth, nH, nKV, hd, rotary int, weights Qwen35FullAttentionWeights) Qwen35FullAttentionBatchRequest {
 	kvWidth := nKV * hd
 	lanes := make([]Qwen35FullAttentionLane, batch)

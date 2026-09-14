@@ -15,6 +15,12 @@ func (s *Session) qwen35VerifyPanel(ids []int, observe func(layer, rows int)) ([
 	if err := s.admitQwen35VerifyPanel(ids); err != nil {
 		return nil, err
 	}
+	// The panel gathers row embeddings through embedRows(), which refuses to expand a
+	// packed (Q2_K/Q4_K) embedding store. Decline rather than panic so a packed-embedding
+	// model fails open to the sequential verifier.
+	if s.M != nil && s.M.Q2KEmbedding != nil {
+		return nil, targetVerificationDowngrade("incremental panel needs the whole embedding table, unavailable on a packed store")
+	}
 	m, cfg := s.M, s.M.Cfg
 	P, H, base := len(ids), cfg.HiddenSize, s.Cache.Len()
 	eps := float32(cfg.RMSNormEps)
@@ -81,6 +87,9 @@ func (s *Session) admitQwen35VerifyPanel(ids []int) error {
 		return targetVerificationDowngrade(reason)
 	}
 	m, cfg := s.M, s.M.Cfg
+	if m.Q2KEmbedding != nil {
+		return targetVerificationDowngrade("incremental panel needs the whole embedding table, unavailable on a packed store")
+	}
 	if m.lora != nil || cfg.LayerNorm || cfg.EnableResidualHook || s.activeTap() != nil || cfg.hasLayerSpecificRopeTheta() {
 		return targetVerificationDowngrade("incremental panel excludes adapters, hooks and nonstandard normalization/RoPE")
 	}

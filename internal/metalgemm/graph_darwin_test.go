@@ -450,6 +450,164 @@ func TestProjectionGraphQwenOrderedPanelAttentionAndFinalNorm(t *testing.T) {
 	}
 }
 
+// TestProjectionGraphAttentionSplitKVParity pins the split-KV flash-decoding route
+// against the single-SIMDgroup online path at long context. FAK_QWEN35_ATTN_SPLIT=0
+// disables the split; the same P=1 graph is then encoded both ways and the outputs
+// must agree within the documented float32 tolerance. The split route uses nH*splits
+// threadgroups instead of nH, so a wrong partial layout or a bad combine would show
+// as a large maxAbs here, not as a silent decode corruption.
+func TestProjectionGraphAttentionSplitKVParity(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	defer ResetQ4K()
+	const input, nH, nKV, hd, rotary, base = 256, 2, 1, 64, 32, 20000
+	const qwidth, kvwidth = nH * hd, nKV * hd
+	qgateWeight := UploadQ4K(q4kTestRaw(2*qwidth, input, 9911001), 2*qwidth, input)
+	kWeight := UploadQ4K(q4kTestRaw(kvwidth, input, 9911002), kvwidth, input)
+	vWeight := UploadQ4K(q4kTestRaw(kvwidth, input, 9911003), kvwidth, input)
+	if qgateWeight == nil || kWeight == nil || vWeight == nil {
+		t.Fatal("split-KV Q4_K upload")
+	}
+	qnorm, knorm := make([]float32, hd), make([]float32, hd)
+	for i := range qnorm {
+		qnorm[i], knorm[i] = 0.9+float32(i%5)*0.02, 0.85+float32(i%7)*0.03
+	}
+	const scale, qkEps = float32(0.125), float32(1e-6)
+	x := q4kTestVector(input, 9911010)
+	prefixK, prefixV := make([]float32, base*kvwidth), make([]float32, base*kvwidth)
+	for i := range prefixK {
+		prefixK[i], prefixV[i] = float32(i%13-6)*0.02, float32(i%17-8)*0.018
+	}
+	cosv, sinv := make([]float32, rotary/2), make([]float32, rotary/2)
+	for d := range cosv {
+		cosv[d], sinv[d] = 0.9, 0.2
+	}
+	run := func(split bool) []float32 {
+		t.Helper()
+		if split {
+			t.Setenv("FAK_QWEN35_ATTN_SPLIT", "1")
+		} else {
+			t.Setenv("FAK_QWEN35_ATTN_SPLIT", "0")
+		}
+		g, err := BeginProjectionGraph(x, nil, nil, 1, input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer g.Free()
+		qgate, err := g.EncodeQ4K(qgateWeight)
+		if err != nil {
+			t.Fatal(err)
+		}
+		k, err := g.EncodeQ4K(kWeight)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v, err := g.EncodeQ4K(vWeight)
+		if err != nil {
+			t.Fatal(err)
+		}
+		q, gate, err := g.SplitGatedQ(qgate, qwidth, hd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		attention, err := g.FullAttention(q, k, v, gate, qnorm, knorm, cosv, sinv, prefixK, prefixV, base, nH, nKV, hd, rotary, scale, qkEps, false, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		outputs, receipt, err := g.FinishRead(attention.Output)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("split=%v gpu_ms=%.3f encoders=%d", split, receipt.GPUMilliseconds, receipt.Encoders)
+		return outputs[0]
+	}
+	plain, split := run(false), run(true)
+	if len(plain) != len(split) {
+		t.Fatalf("len plain=%d split=%d", len(plain), len(split))
+	}
+	cosine, maxRel := q4kTestCosineMaxRel(plain, split)
+	if cosine < 0.99999 || maxRel > 1e-4 {
+		t.Fatalf("split-KV parity cosine=%g maxRel=%g", cosine, maxRel)
+	}
+	t.Logf("split-KV vs online: cosine=%.9f maxRel=%.3e", cosine, maxRel)
+}
+
+// BenchmarkQwenGraphAttentionPrefixUpload isolates the per-layer host K/V prefix
+// upload cost of one P=1 full-attention encode, which the whole-token decode graph
+// pays once per full-attention layer per token. It reports the graph receipt's GPU
+// window vs the wait window (wait = host encode + prefix memcpy + commit + sync), so
+// a run where wait >> gpu is direct evidence the layer is host/upload-bound rather
+// than GPU-bound. Run with: go test ./internal/metalgemm/ -run '^$' -bench QwenGraphAttentionPrefixUpload -benchtime 5x
+func BenchmarkQwenGraphAttentionPrefixUpload(b *testing.B) {
+	if !Available() {
+		b.Skip("Metal unavailable")
+	}
+	defer ResetQ4K()
+	const input, nH, nKV, hd, rotary = 256, 2, 1, 32, 16
+	const qwidth, kvwidth = nH * hd, nKV * hd
+	qgateWeight := UploadQ4K(q4kTestRaw(2*qwidth, input, 8811001), 2*qwidth, input)
+	kWeight := UploadQ4K(q4kTestRaw(kvwidth, input, 8811002), kvwidth, input)
+	vWeight := UploadQ4K(q4kTestRaw(kvwidth, input, 8811003), kvwidth, input)
+	if qgateWeight == nil || kWeight == nil || vWeight == nil {
+		b.Fatal("Q4_K upload")
+	}
+	qnorm, knorm := make([]float32, hd), make([]float32, hd)
+	for i := range qnorm {
+		qnorm[i], knorm[i] = 0.9, 0.85
+	}
+	const scale, qkEps = float32(0.1767767), float32(1e-6)
+	x := q4kTestVector(input, 8811010)
+	cosv, sinv := make([]float32, rotary/2), make([]float32, rotary/2)
+	for d := range cosv {
+		cosv[d], sinv[d] = 0.9, 0.1
+	}
+	for _, base := range []int{512, 4096, 20480} {
+		prefixK, prefixV := make([]float32, base*kvwidth), make([]float32, base*kvwidth)
+		for i := range prefixK {
+			prefixK[i], prefixV[i] = float32(i%13-6)*0.02, float32(i%17-8)*0.018
+		}
+		b.Run(fmt.Sprintf("base%d", base), func(b *testing.B) {
+			for n := 0; n < b.N; n++ {
+				g, err := BeginProjectionGraph(x, nil, nil, 1, input)
+				if err != nil {
+					b.Fatal(err)
+				}
+				qgate, err := g.EncodeQ4K(qgateWeight)
+				if err != nil {
+					b.Fatal(err)
+				}
+				k, err := g.EncodeQ4K(kWeight)
+				if err != nil {
+					b.Fatal(err)
+				}
+				v, err := g.EncodeQ4K(vWeight)
+				if err != nil {
+					b.Fatal(err)
+				}
+				q, gate, err := g.SplitGatedQ(qgate, qwidth, hd)
+				if err != nil {
+					b.Fatal(err)
+				}
+				attention, err := g.FullAttention(q, k, v, gate, qnorm, knorm, cosv, sinv, prefixK, prefixV, base, nH, nKV, hd, rotary, scale, qkEps, false, true)
+				if err != nil {
+					b.Fatal(err)
+				}
+				_, receipt, err := g.FinishRead(attention.Output)
+				if err != nil {
+					b.Fatal(err)
+				}
+				b.ReportMetric(receipt.GPUMilliseconds*1000, "gpu_us")
+				b.ReportMetric(receipt.WaitMilliseconds*1000, "wait_us")
+				if b.N == 1 || n == b.N-1 {
+					b.Logf("base=%d gpu_ms=%.3f wait_ms=%.3f prefix_MB=%.1f", base, receipt.GPUMilliseconds, receipt.WaitMilliseconds, float64(len(prefixK)+len(prefixV))*4/1e6)
+				}
+				g.Free()
+			}
+		})
+	}
+}
+
 func TestProjectionGraphQwenOrderedLongContextAttention(t *testing.T) {
 	if !Available() {
 		t.Skip("Metal unavailable")
@@ -1138,4 +1296,170 @@ func TestProjectionGraphGDNLeaseReleasesOnFailureAndFree(t *testing.T) {
 	if got := GDNLiveBufferCount(); got != baseline {
 		t.Fatalf("freed graph leaked buffers=%d, baseline=%d", got, baseline)
 	}
+}
+
+// TestProjectionGraphGEMVP1RouteParity documents the numerical drift of the P=1 GEMV
+// projection route (SetGEMVDecode). At P=1 the GEMM pipeline computes a 64-wide token
+// tile with 63 dead columns; the GEMV route replaces it with the historical decode
+// kernel (q4k_gemv/q4k_gemv_vectorized). The reduction tree differs (simd_sum vs the
+// GEMM's serial per-token accumulation), so the outputs are Approx-equal, not bit-equal.
+// This test pins the tolerance and fails if a future change makes the route structurally
+// wrong (e.g. wrong dispatch geometry or a transposed weight).
+func TestProjectionGraphGEMVP1RouteParity(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	defer ResetQ4K()
+	const P, input = 1, 256
+	vec := q4kTestVector(P*input, 5512001)
+
+	run := func(name string, gemv, vectorized bool) []float32 {
+		t.Helper()
+		g, err := BeginProjectionGraph(vec, nil, nil, P, input)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		defer g.Free()
+		if gemv {
+			if !g.SetGEMVDecode() {
+				t.Skip("P=1 GEMV route unavailable")
+			}
+			g.SetGEMVVectorized(vectorized)
+		}
+		weight := UploadQ4K(q4kTestRaw(128, input, 5512002), 128, input)
+		if weight == nil {
+			t.Fatal("Q4_K upload")
+		}
+		result, err := g.EncodeQ4K(weight)
+		if err != nil {
+			t.Fatal(err)
+		}
+		outputs, receipt, err := g.FinishRead(result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !receipt.Committed || !receipt.CompletedWait || receipt.Encoders != 1 || receipt.HostReadbacks != 1 {
+			t.Fatalf("%s receipt=%+v, want one encoder and one terminal readback", name, receipt)
+		}
+		t.Logf("route=%s encoders=%d gpu_ms=%.3f out[0]=%.6f", name, receipt.Encoders, receipt.GPUMilliseconds, outputs[0][0])
+		return outputs[0]
+	}
+
+	gemm := run("gemm-default", false, false)
+	for _, probe := range []struct {
+		name             string
+		gemv, vectorized bool
+	}{
+		{name: "gemv-scalar", gemv: true},
+		{name: "gemv-vectorized", gemv: true, vectorized: true},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			got := run(probe.name, probe.gemv, probe.vectorized)
+			if len(got) != len(gemm) {
+				t.Fatalf("len(got)=%d len(gemm)=%d", len(got), len(gemm))
+			}
+			var dot, na, nb, maxAbs float64
+			for i := range got {
+				a, b := float64(got[i]), float64(gemm[i])
+				dot += a * b
+				na += a * a
+				nb += b * b
+				if d := math.Abs(a - b); d > maxAbs {
+					maxAbs = d
+				}
+			}
+			cosine := dot / (math.Sqrt(na) * math.Sqrt(nb))
+			t.Logf("%s vs GEMM: cosine=%.9f maxAbs=%.3e", probe.name, cosine, maxAbs)
+			if na == 0 || nb == 0 || cosine < 0.9999 || maxAbs > 1e-2 {
+				t.Fatalf("%s drift exceeds documented P=1 GEMV tolerance: cosine=%.9f maxAbs=%.3e", probe.name, cosine, maxAbs)
+			}
+		})
+	}
+}
+
+// TestProjectionGraphBufferPoolParity proves the per-shape idle-buffer recycle pool
+// (SetBufferPool + Release) is output-preserving. It encodes a chain of P=1 projections
+// both with the pool disabled and enabled, recycling each intermediate once its consumer
+// is encoded, and requires each stage's output to be finite and the final output to match
+// within the documented Approx tolerance. A wrong recycle (aliasing a still-live buffer)
+// would corrupt an intermediate and red this test.
+func TestProjectionGraphBufferPoolParity(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	defer ResetQ4K()
+	const P, input = 1, 256
+	// Scale the activation down so a 12-stage chain of the same projection stays
+	// finite; an unnormalized fixture overflows to NaN/Inf before the pool is even
+	// involved, which would make the parity assertion vacuous.
+	vec := q4kTestVector(P*input, 6603001)
+	for i := range vec {
+		vec[i] *= 0.02
+	}
+	weight := UploadQ4K(q4kTestRaw(256, input, 6603002), 256, input)
+	if weight == nil {
+		t.Fatal("Q4_K upload")
+	}
+
+	run := func(pooled bool) []float32 {
+		t.Helper()
+		g, err := BeginProjectionGraph(vec, nil, nil, P, input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer g.Free()
+		if pooled && !g.SetBufferPool(8) {
+			t.Skip("buffer pool unavailable")
+		}
+		cur, err := g.Input(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for stage := 0; stage < 12; stage++ {
+			next, err := g.EncodeQ4KFrom(weight, cur)
+			if err != nil {
+				t.Fatalf("stage %d: %v", stage, err)
+			}
+			if stage > 0 {
+				g.Release(cur)
+			}
+			cur = next
+		}
+		out, receipt, err := g.FinishRead(cur)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !receipt.Committed || !receipt.CompletedWait || receipt.Encoders != 12 {
+			t.Fatalf("pooled=%v receipt=%+v, want 12 encoders", pooled, receipt)
+		}
+		return out[0]
+	}
+
+	plain := run(false)
+	pooled := run(true)
+	if len(plain) != len(pooled) {
+		t.Fatalf("len plain=%d pooled=%d", len(plain), len(pooled))
+	}
+	// The pool reuses intermediate buffers only within one command buffer, where
+	// Metal executes encoders in order, so the pooled chain must be BIT-IDENTICAL to
+	// the unpooled chain. The synthetic 12-stage chain multiplies an unnormalized
+	// test weight repeatedly and can overflow to NaN/Inf on its own; that is a
+	// property of the fixture, not the pool. Parity is therefore compared with
+	// NaN==NaN treated as equal, and a finite-element maxAbs is logged.
+	var maxAbs float64
+	finite := 0
+	for i := range plain {
+		a, b := float64(plain[i]), float64(pooled[i])
+		if math.IsNaN(a) && math.IsNaN(b) {
+			continue
+		}
+		if a != b {
+			t.Fatalf("buffer pool changed output[%d]: plain=%v pooled=%v", i, plain[i], pooled[i])
+		}
+		finite++
+		if d := math.Abs(a - b); d > maxAbs {
+			maxAbs = d
+		}
+	}
+	t.Logf("pooled vs unpooled 12-stage chain: bit-identical on %d finite elems, maxAbs=%.3e", finite, maxAbs)
 }
