@@ -302,6 +302,15 @@ type Session struct {
 	// ExpertAdmittedBatch is the decode batch size the governor admitted for this session; 0/1 is the
 	// default-off single-stream case. Inert unless ExpertRingBatchAware.Enabled.
 	ExpertAdmittedBatch int
+	// ExpertTier is the three-tier (VRAM/L2/NVMe) expert streaming policy (#1300,
+	// expert_tier_policy.go). It names the rungs and gates the NVMe->L2 promotion and L2->NVMe
+	// demotion between them. The ZERO VALUE is OFF: no promotion, no demotion, no allocation - every
+	// existing path is byte-for-byte unchanged.
+	ExpertTier ExpertTierPolicy
+	// expertTier is the policy's lazily-allocated L2 bookkeeping (the bounded polymodel.Pool and its
+	// transition counters). nil until the first promotion, so a session that never enables the policy
+	// allocates nothing.
+	expertTier *expertTierState
 	// expertRing is the bounded routed-expert ring, built lazily on the first routed-expert staging
 	// when ExpertRingBytes > 0 and freed by Close. nil on every session that never declared a budget.
 	// When sharedRing is set it points at THAT ring instead, so every routed-expert path — demand,

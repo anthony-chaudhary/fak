@@ -40,5 +40,25 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "expert-tier-policy",
+      "canonical": "ExpertTierPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The opt-in policy that gates the two transitions between the expert waterfall's L2 and NVMe rungs: an NVMe-\u003eL2 fill on a checkpoint miss and its inverse L2-\u003eNVMe demotion that never drops a pinned expert.",
+      "distinction": "Selects the PROMOTION/DEMOTION transition between the host L2 and backing-store rungs (fill-on-miss, demote-without-dropping-pins), not the ring's victim-eviction ranking (ExpertRingPolicy) nor the ctx-residency TierPolicy.",
+      "distinct_from": [
+        "cov-debt250-policy-capability-expertringpolicy",
+        "x2-policy-capability-tierpolicy"
+      ],
+      "aliases": [],
+      "grounding": "ExpertTierPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

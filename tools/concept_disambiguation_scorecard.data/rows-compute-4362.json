@@ -8,7 +8,9 @@
       "definition": "The OS page-cache reserve in fak's host-memory budget: an absolute byte floor held back from MemAvailable so demand-paged (mmap/pread) weights keep a read-through tier.",
       "distinction": "Not the prompt-cache concepts (cache-read/cache-control), which meter provider token reuse; this is host RAM the kernel spends caching file-backed weight pages, and it is an ABSOLUTE floor rather than the fraction BudgetAfterHeadroom applies.",
       "distinct_from": [
-        "cache-read"
+        "cache-read",
+        "expert-nvme-geometry",
+        "read-expert-page-cache"
       ],
       "aliases": [],
       "grounding": "pagecachefloor",

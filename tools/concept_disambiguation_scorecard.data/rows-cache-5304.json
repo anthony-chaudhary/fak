@@ -167,7 +167,7 @@
       "kind": "symbol",
       "definition": "internal/deepseekv4moe/cache_capacity.go ExpertCachePlan: the computed plan for how many routed MoE experts fit resident in HBM given the total/non-routed/reserve byte budget.",
       "distinction": "The static CAPACITY PLAN (how many experts fit) - NOT ExpertCacheTrace (the simulated hit/miss trace of a route stream) and NOT the KV cache; it is a residency budget, not a run.",
-      "distinct_from": ["cov5304-expert-cache-trace", "kv-cache", "cov5304-plan-expert-cache"],
+      "distinct_from": ["cov5304-expert-cache-trace", "kv-cache", "cov5304-plan-expert-cache", "expert-tier-cache-tier", "expert-tier-stats"],
       "aliases": ["expertCachePlan"],
       "grounding": "ExpertCachePlan",
       "grounding_kind": "symbol",

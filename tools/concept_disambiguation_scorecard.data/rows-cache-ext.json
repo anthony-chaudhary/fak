@@ -488,7 +488,9 @@
       "distinction": "It enumerates per-page cache metadata for an image, not cachemeta which is the single Entry shape each row uses.",
       "distinct_from": [
         "cachemeta",
-        "viewcache"
+        "viewcache",
+        "expert-nvme-geometry",
+        "read-expert-page-cache"
       ],
       "aliases": [],
       "grounding": "pagecacheentries",

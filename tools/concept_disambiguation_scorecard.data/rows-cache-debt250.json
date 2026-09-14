@@ -230,7 +230,10 @@
       "definition": "`CacheTier` is the cache symbol declared or used at `internal/cacheobs/cacheobs.go:125` as `tierStatus map[CacheTier]TierStatus`. This row positions that concrete implementation surface, not merely the family label.",
       "distinction": "Use `CacheTier` for the operation evidenced at `internal/cacheobs/cacheobs.go:125`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
       "distinct_from": [
-        "promptcachekey"
+        "promptcachekey",
+        "expert-tier-stats",
+        "expert-tier-ledger",
+        "expert-nvme-geometry"
       ],
       "aliases": [],
       "grounding": "cachetier",

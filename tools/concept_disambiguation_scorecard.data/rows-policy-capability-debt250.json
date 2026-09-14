@@ -62,7 +62,8 @@
       "definition": "`expert_ring_policy` is the policy-capability symbol declared or used at `internal/model/expert_residency_lfu.go:128` as `// expert_ring_policy.go) can adopt the ranking but not yet the hysteresis \u2014 a bypassed weight still`. This row positions that concrete implementation surface, not merely the family label.",
       "distinction": "Use `expert_ring_policy` for the operation evidenced at `internal/model/expert_residency_lfu.go:128`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
       "distinct_from": [
-        "egressposture"
+        "egressposture",
+        "expert-tier-policy"
       ],
       "aliases": [],
       "grounding": "expertringpolicy",

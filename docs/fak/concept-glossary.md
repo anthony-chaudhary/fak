@@ -629,3 +629,45 @@ Input to the pure Anthropic byte-rewrite verifier specifying protected prefix an
 Opaque completion attestation minted by the kernel around an actual successful engine execution, binding a measured wall-clock duration to the exact call and result contents.
 
 **Distinct from:** Gateway counters aggregate observations; this transient attestation authenticates one prior execution measurement. A cache-hit duration estimate additionally requires the exact resident entry and current lookup receipt; it does not measure an avoided counterfactual execution.
+
+
+### ExpertCacheTier
+
+The closed three-rung vocabulary (VRAM/L2/NVMe) naming where a routed expert's weights live, mapped onto the pkg/moecache tier names.
+
+**Distinct from:** Names the TIER a routed expert resides on, not a residency plan (ExpertCachePlan) or a batch-admission result: it is the enum a policy transitions between, not a plan or a trace.
+
+
+### ExpertTierPolicy
+
+The opt-in policy that gates the two transitions between the expert waterfall's L2 and NVMe rungs: an NVMe->L2 fill on a checkpoint miss and its inverse L2->NVMe demotion that never drops a pinned expert.
+
+**Distinct from:** Selects the PROMOTION/DEMOTION transition between the host L2 and backing-store rungs (fill-on-miss, demote-without-dropping-pins), not the ring's victim-eviction ranking (ExpertRingPolicy) nor the ctx-residency TierPolicy.
+
+
+### ExpertTierStats
+
+The session-level, tier-shaped fold of the device ring ledger, the checkpoint-tier ledger and the explicit L2 tier policy's transition counters, one counter block per rung.
+
+**Distinct from:** FOLDS per-rung traffic and transition counters into one three-tier record; unlike ExpertRingStats or ExpertCheckpointStats it is not one rung's own ledger, and unlike ExpertCachePlan it carries no admission decision.
+
+
+### ExpertTierLedger
+
+The record of ONE expert tier transition: the from/to rungs, whether a promotion or demotion happened, how many candidates a demotion pass preserved because they were pinned, and why.
+
+**Distinct from:** Records a SINGLE transition decision with its reason, whereas ExpertTierStats aggregates many into counters; it is an event, not a running ledger of the whole tier.
+
+
+### ExpertNVMeGeometry
+
+The aligned read geometry of one NVMe expert fault: the alignment granularity plus the start/end and byte length a fault's unaligned range rounds to, stated without issuing the read.
+
+**Distinct from:** States the ALIGNED SPAN a fault would move (round-down start, round-up end) as pure geometry, rather than naming a page-cache entry or modeling the page cache that serves it.
+
+
+### readExpertPageCache
+
+The #1302 page-cache-aware expert read: reads one expert's stride through a mapped region, serving a warm fault zero-copy and issuing an aligned device ReadAt only on a cold fault.
+
+**Distinct from:** Names the READ OPERATION (one expert's bytes, warm-from-mapping vs cold-aligned-device) rather than a page-cache entry, a slot count, or the byte floor a page cache must clear to pay for itself.

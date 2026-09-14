@@ -105,7 +105,8 @@
         "Policy (loaded)",
         "policy manifest",
         "cov5307-view-policy",
-        "sharedtask-viewpolicy"
+        "sharedtask-viewpolicy",
+        "expert-tier-policy"
       ],
       "aliases": [],
       "grounding": "tierpolicy",
