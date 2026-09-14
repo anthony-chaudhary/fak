@@ -37,10 +37,13 @@ func (c ContextSizeConfig) PerContextMemoryPlan(tokens int) MemoryPlan {
 // with, the available memory ceiling, and an optional context-token override, it returns
 // the context-token count to serve and the per-context memory plan sized to it.
 //
-// Token policy: a non-negative `override` is an explicit request and is used verbatim —
-// the serve boot path passes the operator's --context-budget-tokens, the per-request
-// planner passes its exact prompt+new count. A negative `override` means "not set": fall
-// back to the model's declared full window (MaxContext).
+// Token policy: a non-negative `override` is an explicit request — the serve boot path
+// passes the operator's --context-budget-tokens, the per-request planner passes its exact
+// prompt+new count. When the memory ceiling is known and the model declares a window, an
+// override LARGER than the largest context that provably fits is clamped DOWN to that
+// fitted bound (#13036) instead of being taken verbatim into a plan the load-time fit check
+// must fatally refuse; an override that fits stays verbatim. A negative `override` means
+// "not set": fall back to the model's declared full window (MaxContext).
 //
 // `weights` and `avail` are the inputs #1046's auto-fit-to-host policy reads to derive
 // the largest context that fits when no override is set; they are threaded through every
@@ -59,21 +62,46 @@ func AutoSizeContextPlan(cfg ContextSizeConfig, weights MemoryPlan, avail int64,
 // box is refused with a typed FitTooBig, instead of this sizer silently picking a zero context.
 const MinAutoContextTokens = 512
 
-// contextTokens applies the auto-sizer's token policy. A non-negative override is taken
-// verbatim; a negative override falls back to the full declared window, or — when the memory
-// ceiling is known — to the #1046 largest-fitting derivation below.
+// contextTokens applies the auto-sizer's token policy. An explicit override is taken
+// verbatim when it fits (or the ceiling is unknown — fail-open; unknown capacity never
+// rewrites an operator's request), and CLAMPED to the #1046 largest-fitting derivation
+// when it would exceed it (#13036): never emit an over-maximal KV plan the load-time fit
+// check must fatally refuse. A negative override falls back to the full declared window,
+// or — when the memory ceiling is known — to that same largest-fitting derivation (the
+// #13025 exported wrapper LargestFittingContextTokens shares it), so the unset-override
+// path and the exported form cannot drift.
+//
+// Weights-overflow note: when the box cannot even hold the weights, largestFittingContext
+// returns MinAutoContextTokens, and an explicit override is clamped to it. That is the
+// intended policy — the sizer only lowers the context so the LOAD-TIME fit check
+// (RefuseMemoryPlanIfTooBig*) stays the single place a genuinely-too-small box is refused
+// with a typed FitTooBig — an over-maximal KV demand is never emitted ahead of it.
 func (c ContextSizeConfig) contextTokens(override int, weights MemoryPlan, avail int64) int {
-	if override >= 0 {
-		return override // explicit operator/request count wins
+	if override < 0 {
+		// #1046: no explicit budget. A negative (unset) override falls back to the full
+		// declared window; with a known ceiling it derives the largest context that fits
+		// (the exact continue the #13025 exported wrapper shares — they cannot drift).
+		if c.MaxContext <= 0 {
+			return 0
+		}
+		if avail <= 0 {
+			return c.MaxContext // ceiling unprobeable → full declared window (historical behavior)
+		}
+		return c.largestFittingContext(weights, avail)
 	}
-	if c.MaxContext <= 0 {
-		return 0
+	// Explicit override: verbatim when the ceiling is unknown (fail-open) or the model
+	// declares no window to bound the derivation against.
+	if avail <= 0 || c.MaxContext <= 0 {
+		return override
 	}
-	if avail <= 0 {
-		return c.MaxContext // ceiling unprobeable → full declared window (historical behavior)
+	// #13036: an explicitly requested window larger than the largest context that fits is
+	// clamped DOWN to that fitted bound; anything at or below it is honored verbatim
+	// (the clamp only ever shrinks — a small explicit request is never expanded).
+	fit := c.largestFittingContext(weights, avail)
+	if override <= fit {
+		return override
 	}
-	// #1046: no explicit budget and a known ceiling → derive the largest context that fits.
-	return c.largestFittingContext(weights, avail)
+	return fit
 }
 
 // largestFittingContext returns the largest context-token count whose resident KV store plus
@@ -105,4 +133,21 @@ func (c ContextSizeConfig) largestFittingContext(weights MemoryPlan, avail int64
 		return c.MaxContext
 	}
 	return int(fit)
+}
+
+// LargestFittingContextTokens is the exported form of the #1046 largest-fitting derivation
+// (#13025), for refusal sites that must name "the maximum context that WOULD fit" without
+// contradicting an unset-override AutoSizeContextPlan plan built from the same weights and
+// budget. It carries the unset-override branch's fail-open verbatim: an unprobeable ceiling
+// (avail <= 0) yields the full declared window — the fail-open contract — NOT a floor clamp,
+// and a model with no declared window yields 0. A known ceiling routes through
+// largestFittingContext, so the exported answer and the auto-sizer's are one derivation.
+func LargestFittingContextTokens(cfg ContextSizeConfig, weights MemoryPlan, avail int64) int {
+	if cfg.MaxContext <= 0 {
+		return 0
+	}
+	if avail <= 0 {
+		return cfg.MaxContext // ceiling unprobeable → full declared window (never a floor clamp)
+	}
+	return cfg.largestFittingContext(weights, avail)
 }
