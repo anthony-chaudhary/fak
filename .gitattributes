@@ -56,3 +56,9 @@ internal/model/testdata/deepseek_v4_flash_config.json text eol=lf
 # Under core.autocrlf=true a Windows checkout rewrites it to CRLF and the pinned
 # geometry digest fails locally while passing on Unix (#12973, same class as #12888).
 internal/model/testdata/v41_moe_dispatch_fixture.json text eol=lf
+
+# The devhandoff command manifest is a GENERATED file byte-compared by
+# internal/devindex TestGeneratedDevHandoffManifestIsCurrent; under
+# core.autocrlf=true a Windows checkout rewrites it to CRLF and the byte compare
+# fails locally while passing on LF CI (#freshness, same class as *.golden).
+internal/devhandoff/commands_gen.go text eol=lf

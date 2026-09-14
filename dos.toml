@@ -546,6 +546,17 @@ concurrent = [
   "worktree",
   "sysproc",
   "agentbench",
+  # beam/parentwatch/radixpager/cachelayout/replayoracle are real committed
+  # internal/ leaves, and moecache/turncost are real committed pkg/ leaves; all
+  # seven landed without a [lanes.trees] owner, so the freshness gate resolved
+  # them as undeclared.
+  "beam",
+  "parentwatch",
+  "radixpager",
+  "moecache",
+  "turncost",
+  "cachelayout",
+  "replayoracle",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -1749,6 +1760,13 @@ cmd         = ["cmd/**"]
 # the one lane; neither overlaps any other leaf's tree, so the set stays pairwise disjoint.
 experiments = ["experiments/**", "internal/experiments/**"]
 examples    = ["examples/**"]
+beam         = ["internal/beam/**"]
+parentwatch  = ["internal/parentwatch/**"]
+radixpager   = ["internal/radixpager/**"]
+cachelayout  = ["internal/cachelayout/**"]
+replayoracle = ["internal/replayoracle/**"]
+moecache     = ["pkg/moecache/**"]
+turncost     = ["pkg/turncost/**"]
 # Root docs/index files are part of the docs lane too. Without these exact
 # entries, `fak sweep` can only surface README/llms churn as no-lane residuals,
 # so the shared tree never fully drains through `fak sweep --apply --lane docs`.
