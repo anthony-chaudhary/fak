@@ -38,5 +38,26 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "scratchquery-candidate-kind",
+      "canonical": "CandidateKind",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The closed promotion-candidate taxonomy a scratchpad artifact is classified into: unfinished-spine, blocked, discovered-edge-case, deferred-caveat, next-checkable-step. A CandidateKind is the deterministic Classify verdict over one parked artifact's filename/leading block.",
+      "distinction": "It is the CLOSED taxonomy value for a parked scratchpad artifact that looks like an unfiled session flag, NOT the plan/spawn Candidate (a scored span the planner may keep resident) and NOT a generic kind enum.",
+      "distinct_from": [
+        "covg-plan-ncandidate"
+      ],
+      "aliases": [
+        "candidatekinds"
+      ],
+      "grounding": "CandidateKind",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

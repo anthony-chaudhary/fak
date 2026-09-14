@@ -701,6 +701,7 @@ var tier = map[string]int{
 	"codetools":             2, // Kernel-mediated workspace coding engines: canonical confinement, policy rung, bounded Read/Grep/Glob; imports ABI/refutil/vDSO but not core runtime.
 	"systools":              2, // safe system and web search/fetch utility tools for the native harness
 	"portabilitylab":        2, // Hermetic release acceptance harness over the tier-1 portability leaf; stdlib plus portability only, off the hot path.
+	"scratchquery":          1, // stdlib-only, deterministic read-only content query + closed promotion-candidate taxonomy over a session scratchpad (#13067/#13069); off the runtime hot path.
 	"scratchjanitor":        1, // stdlib-only age and resume-reference guarded harness scratch cleanup; off the runtime hot path.
 	"tempartifact":          1, // stdlib-only exact-path OS-temp artifact lifecycle; process inspection stays in its off-path platform adapter.
 	"managedocs":            1,

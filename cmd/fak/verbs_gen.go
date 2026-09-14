@@ -298,6 +298,7 @@ var generatedVerbIndex = []generatedVerb{
 	{Name: "score", Synopsis: "parent verb over the meta-scorecards / RSI loops: `fak score <name>` routes to each legacy scorecard handler", Tier: "dev"},
 	{Name: "scoreboard", Synopsis: "the scoreboard Slack surface for #scoreboard", Tier: "dev"},
 	{Name: "scorecard", Synopsis: "the scorecard control pane: every metric's debt + grade + trend", Tier: "dev"},
+	{Name: "scratch", Synopsis: "the harness session scratchpad surface: read-only content query + promotion candidates", Tier: "dev"},
 	{Name: "scratch-janitor", Synopsis: "plan or remove abandoned session scratch directories with age and resume guards", Tier: "dev"},
 	{Name: "search", Synopsis: "search the repository text corpus with bounded results and JSON output", Tier: "dev"},
 	{Name: "self-update", Synopsis: "converge a built-from-source fak binary on origin/main", Aliases: []string{"self"}, Tier: "frontdoor"},

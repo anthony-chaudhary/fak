@@ -479,7 +479,7 @@ concurrent = [
   "quantlicense", "quantmatrix", "quantmeta", "quantobs", "quantroute", "quantwatch",
   "qwen38ladder", "qwen38quant", "qwen38quantrun", "qwen4exp", "qwenflashnext", "qwensemanticstop",
   "qwenworkbudget", "refid", "releasereadiness", "requanteval", "residualquant", "resourcelifecycle",
-  "resumeactuator", "rolloutmode", "rotationmeta", "runtimecap", "scorecardportfolio", "scratchjanitor",
+  "resumeactuator", "rolloutmode", "rotationmeta", "runtimecap", "scorecardportfolio", "scratchjanitor", "scratchquery",
   "serverartifact", "servicewatchdog", "sessiondiag", "sessionmine", "sessionrecovery", "sessionregistry",
   "shellprov", "shelltoken", "sortkeys", "speedab", "stackpreflight", "stackresolve",
   "stalework", "strictjson", "stringlist", "stringset", "studybench", "studyforge",
@@ -1640,6 +1640,7 @@ rotationmeta = ["internal/rotationmeta/**"]
 runtimecap = ["internal/runtimecap/**"]
 scorecardportfolio = ["internal/scorecardportfolio/**"]
 scratchjanitor = ["internal/scratchjanitor/**"]
+scratchquery = ["internal/scratchquery/**"]
 serverartifact = ["internal/serverartifact/**"]
 servicewatchdog = ["internal/servicewatchdog/**"]
 sessiondiag = ["internal/sessiondiag/**"]
