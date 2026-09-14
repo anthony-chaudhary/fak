@@ -1,9 +1,41 @@
 package compute
 
 import (
+	"errors"
 	"fmt"
 	"math"
 )
+
+// ErrExpertDeviceKernelAbsent is the fail-closed verdict a routed-expert device
+// matmul returns when the target Backend carries no FP8/MXFP4 expert kernel. It is
+// deliberately TYPED and returned (never a scalar fallback): the expert tier binds
+// decode throughput, so a roofline caller must be able to distinguish "ran on the
+// device" from "no device kernel exists" and refuse rather than silently degrade to
+// the memory-bound scalar loop. errors.Is(err, ErrExpertDeviceKernelAbsent) pins it.
+var ErrExpertDeviceKernelAbsent = errors.New("compute: routed-expert FP8/MXFP4 device kernel is absent")
+
+// RoutedExpertDeviceKernel is the OPTIONAL backend capability a device (CUDA/Metal/
+// ROCm) implements to serve routed-expert FP8/MXFP4 GEMVs natively. A backend that
+// does not implement it is refused by GemvFP8Block32ExpertDevice /
+// GemvMXFP4ExpertDevice with ErrExpertDeviceKernelAbsent — never scalar-fallback.
+//
+// The interface is intentionally byte-in/byte-out: weight bytes stay PACKED (E4M3 for
+// FP8, I8-packed E2M1 nibbles for MXFP4) and the kernel decodes inline against the
+// per-32-block E8M0 scale, so installing a resident expert never materializes a full
+// dequantized f32 matrix.
+type RoutedExpertDeviceKernel interface {
+	// GemvExpertFP8Block32E8M0 computes y[o] = sum_i decode(weight[o,i], scale[o/32,i/32]) * x[i]
+	// for one routed-expert projection resident on the device. weight holds O*I packed
+	// E4M3 bytes, scales holds ceil(O/32)*ceil(I/32) raw E8M0 bytes, x has I entries,
+	// and the returned slice has O entries. err is non-nil (fail closed) on any shape,
+	// dtype or device fault; a nil error with a short y is never returned.
+	GemvExpertFP8Block32E8M0(O, I int, weight, scales []byte, x []float32) ([]float32, error)
+	// GemvExpertMXFP4E8M0 computes y[o] = sum_i decode(_E2M1(weight[o,i]), scale[o/32,i/32]) * x[i]
+	// for one routed-expert projection resident on the device. weight holds O*I packed
+	// I8 bytes (two E2M1 nibbles each), scales holds ceil(O/32)*ceil(I/32) raw E8M0
+	// bytes, x has I entries, and the returned slice has O entries. Fail-closed as above.
+	GemvExpertMXFP4E8M0(O, I int, weight, scales []byte, x []float32) ([]float32, error)
+}
 
 // fp8_block32.go - the DeepSeek-V4.1 dense FP8 block-scale reference for the compute HAL.
 // V4.1 replaces V4-Flash's 128x128 weight_scale_inv tile with a 32x32 edge, so a single
@@ -186,6 +218,126 @@ func GemvFP8Block32E8M0(name string, O, I int, weight, scales []byte, x []float3
 		var acc float32
 		for i := 0; i < I; i++ {
 			w := DecodeE4M3(weight[o*I+i]) * scaleF[scaleRow+i/FP8Block32Dim]
+			acc += w * x[i]
+		}
+		y[o] = acc
+	}
+	return y, nil
+}
+
+// ---- Routed-expert device matmul seam ------------------------------------------
+
+// mxE2M1Values is the OCP MX E2M1 finite value table indexed by one unpacked nibble.
+// PyTorch float4_e2m1fn_x2 stores val0 in the low nibble and val1 in the high nibble,
+// matching internal/model's v4ExpertE2M1Values (this copy keeps compute free of a model
+// import; the two are held to the same table by the expert-GEMV witness).
+var mxE2M1Values = [16]float32{
+	0, 0.5, 1, 1.5, 2, 3, 4, 6,
+	float32(math.Copysign(0, -1)), -0.5, -1, -1.5, -2, -3, -4, -6,
+}
+
+// routedExpertDeviceKernel type-asserts be for the optional device capability, returning
+// nil when the backend carries none. It is the single seam both dispatchers share so the
+// fail-closed rule lives in one place.
+func routedExpertDeviceKernel(be Backend) RoutedExpertDeviceKernel {
+	if be == nil {
+		return nil
+	}
+	k, ok := be.(RoutedExpertDeviceKernel)
+	if !ok {
+		return nil
+	}
+	return k
+}
+
+// GemvFP8Block32ExpertDevice dispatches a routed-expert FP8 block-32 E8M0 GEMV to the
+// backend's device kernel, FAILING CLOSED with ErrExpertDeviceKernelAbsent when the
+// backend implements no RoutedExpertDeviceKernel. It never calls the portable scalar
+// GemvFP8Block32E8M0: the expert tier binds decode throughput, so an absent kernel must
+// be a visible refusal, not a silent roofline-regressing fallback. The weight/scale
+// bytes are passed through PACKED, so no full-checkpoint dequantization occurs here.
+func GemvFP8Block32ExpertDevice(name string, be Backend, O, I int, weight, scales []byte, x []float32) ([]float32, error) {
+	k := routedExpertDeviceKernel(be)
+	if k == nil {
+		return nil, fmt.Errorf("fp8 block32 expert %s: %w", name, ErrExpertDeviceKernelAbsent)
+	}
+	y, err := k.GemvExpertFP8Block32E8M0(O, I, weight, scales, x)
+	if err != nil {
+		return nil, fmt.Errorf("fp8 block32 expert %s: %w", name, err)
+	}
+	if len(y) != O {
+		return nil, fmt.Errorf("fp8 block32 expert %s: device kernel returned %d outputs, want %d", name, len(y), O)
+	}
+	return y, nil
+}
+
+// GemvMXFP4ExpertDevice dispatches a routed-expert MXFP4 (E2M1 x E8M0, 32-K block) GEMV
+// to the backend's device kernel, failing closed exactly as GemvFP8Block32ExpertDevice.
+// The packed I8 weight (two E2M1 nibbles per byte) and its raw E8M0 scale bytes are
+// handed to the device unchanged — no scalar unpack, no f32 materialization.
+func GemvMXFP4ExpertDevice(name string, be Backend, O, I int, weight, scales []byte, x []float32) ([]float32, error) {
+	k := routedExpertDeviceKernel(be)
+	if k == nil {
+		return nil, fmt.Errorf("mxfp4 expert %s: %w", name, ErrExpertDeviceKernelAbsent)
+	}
+	y, err := k.GemvExpertMXFP4E8M0(O, I, weight, scales, x)
+	if err != nil {
+		return nil, fmt.Errorf("mxfp4 expert %s: %w", name, err)
+	}
+	if len(y) != O {
+		return nil, fmt.Errorf("mxfp4 expert %s: device kernel returned %d outputs, want %d", name, len(y), O)
+	}
+	return y, nil
+}
+
+// GemvMXFP4E8M0 is the PORTABLE SCALAR reference for a routed-expert MXFP4 GEMV: it is
+// the non-roofline oracle the device kernel is held to, never a fallback the dispatch
+// above reaches for. Weight rows are O packed rows of I/2 bytes (low nibble = val0,
+// high nibble = val1); one E8M0 byte scales each group of 32 unpacked K values, so a
+// row carries ceil(I/32) scale bytes. Fail-closed: every length, dtype and E8M0 NaN
+// byte is validated before y is allocated.
+func GemvMXFP4E8M0(name string, O, I int, weight, scales []byte, x []float32) ([]float32, error) {
+	if O <= 0 || I <= 0 || I%2 != 0 {
+		return nil, fmt.Errorf("mxfp4 %s: shape [%d %d] needs positive O and even I", name, O, I)
+	}
+	packedCols := I / 2
+	elems, ok := fp8Block32Product(O, packedCols)
+	if !ok {
+		return nil, fmt.Errorf("mxfp4 %s: shape [%d %d] overflows packed byte count", name, O, I)
+	}
+	if len(weight) != elems {
+		return nil, fmt.Errorf("mxfp4 %s: weight has %d bytes, shape [%d %d] implies %d", name, len(weight), O, I, elems)
+	}
+	scaleCols := (I + FP8Block32Dim - 1) / FP8Block32Dim
+	scaleElems, ok := fp8Block32Product(O, scaleCols)
+	if !ok {
+		return nil, fmt.Errorf("mxfp4 %s: scale shape [%d %d] overflows element count", name, O, scaleCols)
+	}
+	if len(scales) != scaleElems {
+		return nil, fmt.Errorf("mxfp4 %s: scales has %d bytes, shape [%d %d] (blocks of %d) implies %d", name, len(scales), O, I, FP8Block32Dim, scaleElems)
+	}
+	if len(x) != I {
+		return nil, fmt.Errorf("mxfp4 %s: x has %d entries, shape [%d %d] implies %d", name, len(x), O, I, I)
+	}
+	scaleF := make([]float32, scaleElems)
+	for k, b := range scales {
+		v, err := decodeE8M0Scale(b)
+		if err != nil {
+			return nil, fmt.Errorf("mxfp4 %s: %w", name, err)
+		}
+		scaleF[k] = v
+	}
+	y := make([]float32, O)
+	for o := 0; o < O; o++ {
+		scaleRow := o * scaleCols
+		var acc float32
+		for i := 0; i < I; i++ {
+			b := weight[o*packedCols+i/2]
+			nib := b & 0x0f
+			if i%2 == 1 {
+				nib = b >> 4
+			}
+			w := mxE2M1Values[nib] * scaleF[scaleRow+i/FP8Block32Dim]
 			acc += w * x[i]
 		}
 		y[o] = acc

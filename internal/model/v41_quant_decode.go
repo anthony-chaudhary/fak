@@ -7,6 +7,9 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // v41FP8BlockDim and v41KVLoraRank are shared checkpoint constants declared in
@@ -335,4 +338,181 @@ func parseV41ExpertQuantWeightName(name string) (stem, projection string, err er
 		}
 	}
 	return "", "", v4QuantMetadataf("V4.1 weight name %q has unsupported suffix or identity", name)
+}
+
+// ---- Routed-expert device-resident install + device matmul ---------------------
+//
+// The dense V4.1 path installs decoded FP8 into m.q8w. The routed-expert tier is
+// different in two ways that matter to decode throughput:
+//
+//  1. The expert weight dominates the byte stream (top-6 of 384 experts x 3 matrices
+//     x 5120 x 2304 x 40 layers), so its information-carrying representation must
+//     stay PACKED. Expanding it to f32 (the scalar decodeV41ExpertQuant reference
+//     above) is a full-checkpoint dequantization that would multiply resident bytes
+//     ~4x and defeat the residency budget.
+//  2. The matmul must run on the DEVICE. A scalar loop on the expert tier is exactly
+//     the memory-bound roofline regression the keystone exists to remove.
+//
+// So this store holds the checkpoint's OWN packed bytes (E4M3 for FP8, I8-packed
+// E2M1 for MXFP4) plus the raw E8M0 scale bytes, keyed by projection name, and the
+// device matmul below hands them unchanged to compute's RoutedExpertDeviceKernel.
+// It is a device RESIDENT install: installV41ExpertQuantDevice mirrors the dense
+// `m.q8w[weightName] = ...` line but stores the packed pair rather than a Q8 tensor,
+// and it never calls decodeV41ExpertQuant / decodeV41DenseFP8 (no f32 materialization).
+
+// v41ExpertDeviceWeight is one routed-expert projection resident in its PACKED
+// checkpoint form: weight bytes and raw E8M0 scale bytes, plus the geometry needed to
+// size the device kernel. dtype is the checkpoint dtype string ("F8_E4M3" for the FP8
+// block-32 path, "I8" for the MXFP4 nibble path), which selects the device kernel.
+type v41ExpertDeviceWeight struct {
+	projection string
+	dtype      string
+	O, I       int // unpacked output/input dims
+	weight     []byte
+	scales     []byte
+}
+
+// v41ExpertDeviceInstall is the per-Model device-expert store. It is kept in a
+// package-level registry (rather than a Model field) so this leaf does not edit
+// weights.go, and it is lazily created on first install. packedPreserved records that
+// the install path never expanded weights to f32 — the invariant the witness pins.
+type v41ExpertDeviceInstall struct {
+	weights         map[string]*v41ExpertDeviceWeight
+	packedPreserved bool
+}
+
+var (
+	v41ExpertDeviceMu   sync.Mutex
+	v41ExpertDeviceRegs = map[*Model]*v41ExpertDeviceInstall{}
+)
+
+func v41ExpertDeviceStore(m *Model, create bool) *v41ExpertDeviceInstall {
+	v41ExpertDeviceMu.Lock()
+	defer v41ExpertDeviceMu.Unlock()
+	store := v41ExpertDeviceRegs[m]
+	if store == nil && create {
+		store = &v41ExpertDeviceInstall{weights: map[string]*v41ExpertDeviceWeight{}}
+		v41ExpertDeviceRegs[m] = store
+	}
+	return store
+}
+
+// installV41ExpertQuantDevice validates one V4.1 routed-expert (weight, scale) pair and
+// installs its PACKED bytes into the model's device-expert store. It mirrors the dense
+// quantizeV41DenseFP8TensorInto install (m.q8w[weightName]) but preserves the packed
+// representation: MXFP4 (I8 code nibbles + F8_E8M0) is stored verbatim, with NO call to
+// decodeV41ExpertQuant and therefore NO full-checkpoint dequantization. name is the
+// .weight tensor name; scaleName its .scale sibling.
+func installV41ExpertQuantDevice(
+	weightName, scaleName string,
+	weightEntry, scaleEntry stEntry,
+	weights, scales []byte,
+	m *Model,
+) error {
+	if m == nil || !m.Cfg.IsDeepSeekV41() {
+		return nil
+	}
+	_, projection, err := parseV41ExpertQuantWeightName(weightName)
+	if err != nil {
+		return err
+	}
+	wantScaleName := strings.TrimSuffix(weightName, ".weight") + ".scale"
+	if scaleName != wantScaleName {
+		return v4QuantMetadataf("V4.1 device install scale name %q, want %q", scaleName, wantScaleName)
+	}
+	if weightEntry.Dtype != "I8" {
+		return v4QuantMetadataf("V4.1 device install %s dtype %q, want I8", weightName, weightEntry.Dtype)
+	}
+	if scaleEntry.Dtype != "F8_E8M0" {
+		return v4QuantMetadataf("V4.1 device install %s dtype %q, want F8_E8M0", scaleName, scaleEntry.Dtype)
+	}
+	spec, ok := selectV41ExpertQuantSpec(projection, weightEntry.Shape, scaleEntry.Shape)
+	if !ok {
+		return v4QuantMetadataf("V4.1 device install %s shape %v with %s shape %v does not match a supported V4.1 profile", weightName, weightEntry.Shape, scaleName, scaleEntry.Shape)
+	}
+	weightBytes, ok := checkedShapeProduct(spec.weightRows, spec.weightCols)
+	if !ok || len(weights) != weightBytes {
+		return v4QuantMetadataf("V4.1 device install %s has %d bytes, want %d", weightName, len(weights), weightBytes)
+	}
+	scaleBytes, ok := checkedShapeProduct(spec.scaleRows, spec.scaleCols)
+	if !ok || len(scales) != scaleBytes {
+		return v4QuantMetadataf("V4.1 device install %s has %d bytes, want %d", scaleName, len(scales), scaleBytes)
+	}
+	for i, scale := range scales {
+		if scale == 0xff {
+			return v4QuantMetadataf("V4.1 device install %s scale byte %d is F8_E8M0 NaN", scaleName, i)
+		}
+	}
+	unpackedCols, ok := checkedShapeProduct(spec.weightCols, 2)
+	if !ok {
+		return v4QuantMetadataf("V4.1 device install %s unpacked shape overflows", weightName)
+	}
+	store := v41ExpertDeviceStore(m, true)
+	// Preserve the packed checkpoint bytes verbatim (copy so the caller's slab can be
+	// released); this is the "no full-checkpoint dequantization" invariant.
+	store.weights[weightName] = &v41ExpertDeviceWeight{
+		projection: projection,
+		dtype:      weightEntry.Dtype,
+		O:          spec.weightRows,
+		I:          unpackedCols,
+		weight:     append([]byte(nil), weights...),
+		scales:     append([]byte(nil), scales...),
+	}
+	store.packedPreserved = true
+	return nil
+}
+
+// V41ExpertDeviceInstalled reports whether a routed expert was installed device-resident
+// with its packed bytes preserved (no f32 expansion). It is the observable the witness
+// reads to prove the install happened on the intended representation.
+func (m *Model) V41ExpertDeviceInstalled(weightName string) bool {
+	store := v41ExpertDeviceStore(m, false)
+	if store == nil {
+		return false
+	}
+	return store.weights[weightName] != nil
+}
+
+// V41ExpertDevicePackedPreserved reports whether the install path kept every expert's
+// packed bytes (never materializing f32). False before any install.
+func (m *Model) V41ExpertDevicePackedPreserved() bool {
+	store := v41ExpertDeviceStore(m, false)
+	return store != nil && store.packedPreserved
+}
+
+// V41ExpertDeviceMatmul runs one installed routed-expert projection's GEMV on the
+// device backend be. It is the roofline callable from expert decode: it hands the
+// PACKED weight + E8M0 scale bytes to compute's RoutedExpertDeviceKernel and returns
+// the device result. When be implements no such kernel, compute returns
+// compute.ErrExpertDeviceKernelAbsent and this propagates it wrapped — the call FAILS
+// CLOSED and NEVER falls back to the scalar decodeV41ExpertQuant path. Returns
+// ErrV41ExpertQuantMetadata when the named expert was not installed.
+func (m *Model) V41ExpertDeviceMatmul(weightName string, be compute.Backend, x []float32) ([]float32, error) {
+	store := v41ExpertDeviceStore(m, false)
+	if store == nil {
+		return nil, v4QuantMetadataf("V4.1 device matmul: no routed experts installed")
+	}
+	w := store.weights[weightName]
+	if w == nil {
+		return nil, v4QuantMetadataf("V4.1 device matmul: routed expert %q is not installed", weightName)
+	}
+	if len(x) != w.I {
+		return nil, v4QuantMetadataf("V4.1 device matmul %s: x has %d entries, want %d", weightName, len(x), w.I)
+	}
+	switch w.dtype {
+	case "F8_E4M3":
+		y, err := compute.GemvFP8Block32ExpertDevice(weightName, be, w.O, w.I, w.weight, w.scales, x)
+		if err != nil {
+			return nil, err
+		}
+		return y, nil
+	case "I8":
+		y, err := compute.GemvMXFP4ExpertDevice(weightName, be, w.O, w.I, w.weight, w.scales, x)
+		if err != nil {
+			return nil, err
+		}
+		return y, nil
+	default:
+		return nil, v4QuantMetadataf("V4.1 device matmul %s: unsupported packed dtype %q", weightName, w.dtype)
+	}
 }
