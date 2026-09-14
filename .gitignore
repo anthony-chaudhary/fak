@@ -923,3 +923,9 @@ docs/dispatch-status.md
 /fak-orchestration-runs
 /fak-orchestration-launches
 /tools/bus/instances
+
+# Root-local dev binary emitted by `go build ./cmd/fak-dev` when run from the repo
+# root. It is a 27 MB arm64 Mach-O artifact, never source; leaving it untracked and
+# unignored reddens `git status` for every agent and defers the sync fast-path
+# (observed 2026-09-14: fak-dev was the only entry in an otherwise clean tree).
+/fak-dev
