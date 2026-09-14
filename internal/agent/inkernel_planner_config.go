@@ -32,7 +32,12 @@ type InKernelPlannerConfig struct {
 	// known, the smaller bound wins.
 	ContextTokens int
 	// CPUCacheBytes caps retained native CPU KV payload; zero uses the environment.
-	CPUCacheBytes             int64
+	CPUCacheBytes int64
+	// KVPrecision selects the realized storage tier of the per-request native KV
+	// cache. Its zero value (and "") is model.KVPrecisionFP32: byte-for-byte the
+	// historical f32 cache. model.KVPrecisionQ8_0 realizes the dense mixed layout
+	// (Kraw f32 + q8_0 K/V) the planner's compute.KVPrecisionQ8 tier charges.
+	KVPrecision               model.KVPrecision
 	CPUOffloadExperts         bool
 	QwenQ4KPrefillChunkTokens int
 	Qwen35MetalGDNSequence    bool
@@ -56,6 +61,7 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 		backend:                      backend,
 		metal:                        metal,
 		cpuOffloadExperts:            cfg.CPUOffloadExperts,
+		kvPrecision:                  cfg.KVPrecision,
 		contextTokens:                cfg.ContextTokens,
 		denseGPULayers:               cfg.DenseGPULayers,
 		maxNew:                       envInt("FAK_INKERNEL_MAX_TOKENS", 256),
@@ -131,6 +137,7 @@ func (p *InKernelPlanner) RuntimeConfig() InKernelPlannerConfig {
 	return InKernelPlannerConfig{
 		ContextTokens:             p.contextTokens,
 		CPUCacheBytes:             cpuBytes,
+		KVPrecision:               p.kvPrecision,
 		CPUOffloadExperts:         p.cpuOffloadExperts,
 		QwenQ4KPrefillChunkTokens: p.qwenQ4KPrefillChunkTokens,
 		Qwen35MetalGDNSequence:    p.qwen35MetalGDNSequence,

@@ -31,11 +31,22 @@ import "github.com/anthony-chaudhary/fak/internal/compute"
 // corrected shape. Flipping it on by default is the follow-on, and it is blocked on the
 // cache realizing the window, not on this projection.
 func (c Config) ContextSizeConfig() compute.ContextSizeConfig {
+	return c.ContextSizeConfigWithPrecision(compute.KVPrecisionF32)
+}
+
+// ContextSizeConfigWithPrecision is ContextSizeConfig with the KV store's realized
+// storage tier set. A caller serving a q8 KV cache passes compute.KVPrecisionQ8 so the
+// context auto-sizer and the fit checks charge the denser mixed layout (f32 pre-RoPE K
+// + q8_0 K/V) the engine actually allocates — otherwise the admission gate would plan
+// for f32 while the engine resides q8, refusing a context that fits. The F32 zero
+// value reproduces ContextSizeConfig byte-for-byte.
+func (c Config) ContextSizeConfigWithPrecision(prec compute.KVPrecision) compute.ContextSizeConfig {
 	kv := compute.KVConfig{
 		NumLayers:  c.NumLayers,
 		NumKVHeads: c.NumKVHeads,
 		HeadDim:    c.HeadDim,
 		RopeTheta:  c.RopeTheta,
+		Precision:  prec,
 	}
 	var sessionState compute.MemoryPlan
 	if c.IsQwen35Hybrid() {

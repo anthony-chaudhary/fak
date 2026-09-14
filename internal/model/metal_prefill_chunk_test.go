@@ -150,6 +150,67 @@ func TestMetalPrefillChunkedGraph(t *testing.T) {
 		t.Logf("=== P128 Receipt ===\n%s", string(receiptJSON))
 	})
 
+	// Long-context crossing: the P32 panel attention was hard-capped at 4096
+	// context (metal_prefill_hybrid.go bailed base+P>4096; the kernel's
+	// score[4096] register array could not index past it), so any prefill whose
+	// base+P crossed 4096 fell back to the CPU per-token loop -- the ~3-7 tok/s
+	// prefill wall. After the online-softmax rewrite of the panel attention and
+	// the Go bail removal, the batched P32 panel must carry the same prompt with
+	// zero fallback across the 4096 boundary. Control (per-op CPU loop) and
+	// candidate share the same synthetic model, so the logits must still match.
+	t.Run("portable_fixture_long_context_crosses_4096", func(t *testing.T) {
+		cfg := qwen35HybridQ4KTestCfg()
+		cfg.NumHeads = 24
+		cfg.NumKVHeads = 4
+		cfg.HeadDim = 256
+		cfg.PartialRotaryFactor = .25
+		cfg.QKNorm = true
+		cfg.QKNormEps = 3e-5
+		m := NewSynthetic(cfg)
+		m.Quantize()
+		fillQ4KMajority(t, m, cfg)
+
+		// 128 panels of 32 = 4096, then one more panel crosses the old cap at 4128.
+		prompt := make([]int, 4128)
+		for i := range prompt {
+			prompt[i] = (i*31 + 7) % cfg.VocabSize
+		}
+
+		control := m.NewSession()
+		control.Q4K, control.MetalQ4K = true, true
+		t.Cleanup(control.Close)
+		wantLogits := control.Prefill(prompt)
+
+		candidate := m.NewSession()
+		candidate.Q4K, candidate.MetalQ4K = true, true
+		t.Cleanup(candidate.Close)
+		if err := candidate.EnableQwen35MetalGDNPreprojectedSequence(); err != nil {
+			t.Fatalf("EnableQwen35MetalGDNPreprojectedSequence failed: %v", err)
+		}
+		gotLogits := candidate.Prefill(prompt)
+
+		receipt := candidate.Qwen35MetalForwardSequenceReceipt()
+		if !receipt.Available || receipt.Path != Qwen35MetalGDNSequenceForwardPath {
+			t.Fatalf("long-context receipt=%+v", receipt)
+		}
+		if receipt.SelectedPanels != 129 || receipt.ExecutedPanels != 129 {
+			t.Fatalf("long-context panels selected/executed=%d/%d, want 129/129", receipt.SelectedPanels, receipt.ExecutedPanels)
+		}
+		if receipt.FallbackCount != 0 {
+			t.Fatalf("long-context fell back off the batched panel: FallbackCount=%d", receipt.FallbackCount)
+		}
+		if !receipt.Committed || !receipt.CompletedWait {
+			t.Fatal("long-context receipt must report Committed and CompletedWait")
+		}
+		if candidate.Cache.Len() != 4128 {
+			t.Fatalf("long-context cache len=%d, want 4128", candidate.Cache.Len())
+		}
+		assertCosineAtLeast(t, "P4128 long-context logits", wantLogits, gotLogits, Qwen35GDNParityCosineMin)
+		if argmax(wantLogits) != argmax(gotLogits) {
+			t.Fatalf("P4128 argmax mismatch: want %d, got %d", argmax(wantLogits), argmax(gotLogits))
+		}
+	})
+
 	t.Run("portable_fixture_non_multiple_of_32_remainder", func(t *testing.T) {
 		cfg := qwen35HybridQ4KTestCfg()
 		cfg.NumHeads = 24

@@ -71,6 +71,36 @@ func q4kQwen35HybridPrefillAtPositionOK(cfg Config, promptLen, base int) bool {
 	return q4kQwen35HybridPrefillOK(cfg, qwen35HybridQBatchMinPrompt)
 }
 
+// qwen35ResidentDecodeAutoEligible reports whether this session may auto-admit the
+// resident GDN sequence owner to reach the one-command-buffer fused linear-attention
+// decode block. It is deliberately exact: only the 64-layer Qwen3.8 hybrid whose full
+// no-copy Q8 projection band resolves, on the backend-nil resident-Q4_K Metal lane, at
+// a fresh prompt boundary. Every other case declines so the historical decode path is
+// byte-identical. Opt in with FAK_QWEN35_RESIDENT_DECODE_AUTO=1; it is off by
+// default because the fused per-layer block trades 4 command buffers for 1 but
+// adds per-layer graph construction overhead on the M3 Pro (see the W1 report).
+func (s *Session) qwen35ResidentDecodeAutoEligible() bool {
+	if s == nil || s.M == nil || s.Cache == nil || s.Backend != nil || !s.Q4K || !s.MetalQ4K {
+		return false
+	}
+	if os.Getenv("FAK_QWEN35_RESIDENT_DECODE_AUTO") != "1" {
+		return false
+	}
+	if newQwen35MetalGDNSequenceBackend == nil || !s.M.Cfg.IsQwen35Hybrid() {
+		return false
+	}
+	if s.qwen35HAL != nil && (s.qwen35HAL.sequenceAccepted || s.qwen35HAL.decodeAccepted) {
+		return false
+	}
+	if s.Cache.Len() != 0 {
+		return false // promotion requires a fresh prompt boundary
+	}
+	if _, err := qwen38MetalQ8RuntimeNames(s.M.Cfg); err != nil {
+		return false // not the exact Qwen3.8 topology the fused block/owner is proven on
+	}
+	return true
+}
+
 // hybridQ4KProj is the per-weight projection dispatch shared by every GEMM in the batched
 // resident-Q4_K hybrid prefill: q4kw-resident -> q4kGemm on the raw f32 activation Xf;
 // otherwise -> q8GemmDispatch on the pre-quantized Q8 panel Xq (CPU qGemm8 by default,
@@ -275,16 +305,34 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 	if !q4kQwen35HybridPrefillAtPositionOK(s.M.Cfg, len(ids), s.Cache.Len()) {
 		return nil, false
 	}
+	// Keystone decode lever (W1): the exact resident-Q4_K Qwen3.8 hybrid can run its
+	// linear-attention layers through the one-command-buffer fused decode block once the
+	// whole-sequence owner has been admitted and its recurrent state promoted. That
+	// promotion is only reachable through Enable/Finalize, so a caller that did not opt
+	// in (e.g. plain `fak serve --metal` without --native-qwen35-metal-gdn-sequence)
+	// silently decoded one grouped GEMV command buffer at a time. Admit the owner here,
+	// before any prompt state is mutated, and promote it after the prefill completes.
+	// Fail-open: any decline leaves the historical host-recurrence decode untouched.
+	autoAdmitted := false
+	if s.qwen35ResidentDecodeAutoEligible() {
+		if err := s.EnableQwen35MetalGDNPreprojectedSequence(); err == nil {
+			autoAdmitted = true
+		}
+	}
+	if autoAdmitted {
+		defer func() { _, _ = s.FinalizeQwen35MetalGDNPreprojectedSequence() }()
+	}
 	var hidden []float32
 	if s.qwen35HAL != nil && s.qwen35HAL.sequenceAccepted {
 		if runner, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalForwardSequenceRunner); ok {
 			const panelTokens = 32
 			nPanels := len(ids) / panelTokens
 			if nPanels > 0 {
-				base := s.Cache.Len()
-				if base+len(ids) > 4096 {
-					panic(s.failQwen35MetalForwardSequence(fmt.Errorf("metalgemm: P32 graph attention context %d exceeds 4096", base+len(ids))))
-				}
+				// The P32 panel attention has no 4096 cap: mg_qwen35_graph_attention
+				// uses qg_attn_online (O(head_dim) ordered online softmax) above
+				// 4096 context, so a long prompt stays on the batched panel rather
+				// than being forced through the CPU per-token loop. See
+				// TestProjectionGraphQwenOrderedLongContextAttention.
 				var agg Qwen35MetalForwardSequenceReceipt
 				var aggValid bool
 				selectedPanels := nPanels

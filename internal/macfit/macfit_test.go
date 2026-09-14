@@ -317,3 +317,50 @@ func TestTurnkeyKVQuantizedContextSelects20kOn36GiB(t *testing.T) {
 		t.Fatalf("Q4_0 pressured context = %d, want >= 20480", q4.ContextBudgetTokens)
 	}
 }
+
+// TestTurnkeyQ8KVAdmits20kOn36GiB is the #12981 acceptance witness at the budget
+// layer: a 36 GiB box (the M3 Pro target) with a Q8_0 KV tier admits at least 20480
+// context tokens for the 27B tier, and the ENGINE-HONEST resident cache at that
+// context — three rows (f32 pre-RoPE K + q8_0 K + q8_0 V), as the realized
+// model.KVCacheWithPrecision allocates — fits inside the plan's q8 KV pool. The plan's
+// own KVBytesPerToken models the historical 2-row convention, so this test deliberately
+// checks the denser real layout against it rather than trusting the budget math alone.
+func TestTurnkeyQ8KVAdmits20kOn36GiB(t *testing.T) {
+	const total36 = 36 * GiB
+	const wantTokens = 20480
+	opts := TurnkeyOptions{
+		KVPrecision:    model.KVPrecisionQ8_0,
+		AvailableBytes: total36, // no pressure: derive the full unpressured pool
+	}
+	plan, err := ConfigureTurnkeyWithOptions(total36, opts)
+	if err != nil {
+		t.Fatalf("36 GiB q8 plan: %v", err)
+	}
+	if plan.KVPrecision != model.KVPrecisionQ8_0 {
+		t.Fatalf("plan precision = %q, want q8_0", plan.KVPrecision)
+	}
+	if plan.ContextBudgetTokens < wantTokens {
+		t.Fatalf("q8 36 GiB context budget = %d, want >= %d", plan.ContextBudgetTokens, wantTokens)
+	}
+
+	// Engine-honest realized bytes at wantTokens: per layer per token = f32 Kraw row +
+	// two q8_0 rows, exactly what model.KVVectorBytes charges plus the f32 Kraw row.
+	dim := int64(plan.Tier.KVHeads * plan.Tier.HeadDim)
+	perTokenPerLayer := dim*4 + 2*model.KVVectorBytes(int(dim), model.KVPrecisionQ8_0)
+	realized := perTokenPerLayer * int64(wantTokens) * int64(plan.Tier.Layers)
+	if realized <= 0 {
+		t.Fatal("realized KV bytes must be positive")
+	}
+	if realized > int64(plan.KVPoolBytes) {
+		t.Fatalf("engine-honest q8 cache at %d tokens = %d bytes exceeds the %d-byte q8 KV pool",
+			wantTokens, realized, plan.KVPoolBytes)
+	}
+	// And it must be materially denser than the same 3-row layout at FP32.
+	f32Realized := dim * 3 * 4 * int64(wantTokens) * int64(plan.Tier.Layers)
+	if realized >= f32Realized {
+		t.Fatalf("q8 realized %d not smaller than f32 3-row %d", realized, f32Realized)
+	}
+	t.Logf("36 GiB q8: budget=%d tok, q8 pool=%.2f GiB, realized 3-row@%d = %.2f GiB (f32 3-row = %.2f GiB)",
+		plan.ContextBudgetTokens, float64(plan.KVPoolBytes)/float64(GiB), wantTokens,
+		float64(realized)/float64(GiB), float64(f32Realized)/float64(GiB))
+}

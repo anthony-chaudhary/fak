@@ -56,6 +56,9 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeMixer(s *Session, layer
 			RMSNormEpsilon: float32(cfg.RMSNormEps),
 		},
 	})
+	if accepted {
+		s.countMetalGraphCommandBuffer(nativeReceipt.CommandBuffers)
+	}
 	receipt := qwen35DecodeMixerReceipt{
 		CommandBuffers: nativeReceipt.CommandBuffers, Commits: nativeReceipt.Commits, CompletionWaits: nativeReceipt.CompletionWaits,
 		ProjectionDispatches: nativeReceipt.ProjectionDispatches, Quantizers: nativeReceipt.Quantizers, GDNEncoders: nativeReceipt.GDNEncoders,

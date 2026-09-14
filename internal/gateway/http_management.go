@@ -507,7 +507,34 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if sat := s.sessionSaturationNow(r.Context()); sat.Bounded {
 		health["session_saturation"] = sat
 	}
+	// #3051 readiness-vs-liveness: this endpoint answers "can the model serve
+	// NOW", not "is the process alive". A body that reports ok:false — warmup
+	// pending, a degenerate startup decode, a recent served-completion failure,
+	// or a failed deep provider probe — is NOT ready, so the HTTP status must
+	// say so. Returning 200 while the model is still loading is the exact
+	// false-ready signal a proxy/opencode client keys on: it treats any 200 as
+	// "route work here" and sends the operator's first turn into the cold-start
+	// (or into a broken backend). 503 + Retry-After = retry me; the typed body
+	// (warmup_pending, time_to_ready_ms, degenerate_decode) says why. Liveness
+	// on a wedged process is still observable: a dead process refuses the
+	// connection entirely. /readyz projects this same ok bit, so the two stay
+	// consistent by construction.
+	if !healthOK(health) {
+		w.Header().Set("Retry-After", "1")
+		writeJSON(w, http.StatusServiceUnavailable, health)
+		return
+	}
 	writeJSON(w, http.StatusOK, health)
+}
+
+// healthOK reports the readiness bit the /healthz and /readyz surfaces both key
+// off. health["ok"] defaults to true and is only ever set false by a gate
+// (warmup pending, degenerate decode, served failure, failed provider probe);
+// an absent or non-bool value is treated as not-ready so a malformed body can
+// never masquerade as a green light.
+func healthOK(health map[string]any) bool {
+	ok, isBool := health["ok"].(bool)
+	return isBool && ok
 }
 
 // ---------------------------------------------------------------------------

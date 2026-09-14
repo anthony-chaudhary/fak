@@ -351,6 +351,14 @@ type Session struct {
 	// glmDsaHeadNameLogged gates the one-time FAK_GLMDSA_DUMP head-resolution log (#996 LM-head probe).
 	glmDsaHeadNameLogged bool
 
+	// KVPrecision selects the realized storage tier of this session's kernel-owned KV
+	// cache (Cache). Its zero value is KVPrecisionFP32: the attended K/V rows stay f32
+	// and the session is byte-for-byte the historical path. KVPrecisionQ8_0 stores them
+	// packed q8_0 (Kraw stays f32 so Evict's re-positioning is exact), matching the
+	// planner's compute.KVPrecisionQ8 tier. It is set when the session is created
+	// (NewSessionWithKVPrecision) and never changed after the first append.
+	KVPrecision KVPrecision
+
 	// Quant selects the Q8_0 quantized forward path (quant_forward.go) for this session's
 	// prefill and decode. The f32 path is the default and is left byte-for-byte unchanged;
 	// set Quant only on a session whose Model has had Quantize() called. The KV cache it
@@ -429,6 +437,15 @@ type Session struct {
 	// it, so this removes hot-path allocation without changing any Q8 arithmetic.
 	qScratch q8Vec
 	qDecode  *qDecodeBuf
+
+	// metalCommandBuffers and metalGraphCommandBuffers are session-local decode
+	// accounting: one increment per observed native dispatch (GEMV/GEMM/group/
+	// fused-MLP) and one per fused Qwen35 decode graph respectively. They are
+	// written only on the single-owner generation goroutine and read via
+	// MetalCommandBuffers after ResetMetalCommandBuffers; zero on the pure-Go
+	// path. See metal_cb_accounting.go.
+	metalCommandBuffers      int
+	metalGraphCommandBuffers int
 
 	// Metal routes PREFILL's projection GEMMs through the Metal GPU backend
 	// (metal_prefill.go, built only under -tags fakmetal) to reach llama.cpp-Metal prefill
@@ -525,12 +542,20 @@ type Session struct {
 	v41Forward *v41ForwardState
 }
 
-// NewSession starts a fresh generation session.
+// NewSession starts a fresh generation session with the default f32 KV cache.
 func (m *Model) NewSession() *Session {
+	return m.NewSessionWithKVPrecision(KVPrecisionFP32)
+}
+
+// NewSessionWithKVPrecision starts a fresh session whose kernel-owned KV cache stores
+// the attended K/V rows at prec. KVPrecisionFP32 (and "") is the historical default,
+// byte-for-byte. KVPrecisionQ8_0 realizes the dense mixed layout the planner's
+// compute.KVPrecisionQ8 tier charges (Kraw f32 + q8_0 K/V).
+func (m *Model) NewSessionWithKVPrecision(prec KVPrecision) *Session {
 	if !m.holdModelWeights() {
 		panic("model: weights are closing or closed")
 	}
-	s := &Session{M: m, Cache: NewKVCache(m.Cfg), modelWeightsHeld: true}
+	s := &Session{M: m, Cache: NewKVCacheWithPrecision(m.Cfg, prec), KVPrecision: prec, modelWeightsHeld: true}
 	s.initMixedQKV()
 	return s
 }
@@ -986,11 +1011,10 @@ func (s *Session) blockStep(l, qpos int, x, cos, sin []float32, mat matKernel) [
 			s.ropeRowQK(l, q, kk, cos, sin)
 		}
 		// append this position's (post-RoPE) K/V to the kernel-owned cache
-		s.Cache.K[l] = append(s.Cache.K[l], kk...)
-		s.Cache.V[l] = append(s.Cache.V[l], vv...)
+		s.Cache.appendKV(l, kk, vv)
 		s.phaseEnd("full_attn_qk_norm_rope", t)
 
-		nPos := len(s.Cache.K[l]) / w
+		nPos := s.Cache.kvLen(l)
 		// SWA read-time mask: query (the row just appended, at absolute position qpos)
 		// attends only keys whose absolute position is >= qpos-W+1. lo=0 (full causal)
 		// when W<0. Keyed off pos[] so it stays correct after an Evict compaction.
@@ -1001,12 +1025,27 @@ func (s *Session) blockStep(l, qpos int, x, cos, sin []float32, mat matKernel) [
 		// would cost. Fully overwritten per head below, so reuse is bit-identical.
 		s.decodeScores = grow(s.decodeScores, nPos-lo)
 		t = s.phaseStart()
+		// q8 tier reads dequantize each attended row into this scratch; the f32 tier
+		// reads the row slice directly (dequantRowInto is then a plain copy). One
+		// scratch row per layer, reused across heads — the accumulation order and every
+		// f32 byte are unchanged.
+		var kRowScratch, vRowScratch []float32
+		if s.Cache.quantized() {
+			kRowScratch = make([]float32, w)
+			vRowScratch = make([]float32, w)
+		}
 		for h := 0; h < nH; h++ {
 			kvh := h / grp
 			qh := q[h*hd : (h+1)*hd]
 			scores := s.decodeScores
 			for j := lo; j < nPos; j++ {
-				kh := s.Cache.K[l][j*w+kvh*hd : j*w+(kvh+1)*hd]
+				var kh []float32
+				if s.Cache.quantized() {
+					s.Cache.decodeRowInto(l, j, true, kRowScratch)
+					kh = kRowScratch[kvh*hd : (kvh+1)*hd]
+				} else {
+					kh = s.Cache.K[l][j*w+kvh*hd : j*w+(kvh+1)*hd]
+				}
 				scores[j-lo] = dot(qh, kh)*scale + cfg.alibiScoreBias(h, j, nPos)
 			}
 			softcapInPlace(scores, attnCap)
@@ -1016,7 +1055,13 @@ func (s *Session) blockStep(l, qpos int, x, cos, sin []float32, mat matKernel) [
 			}
 			out := attnOut[h*hd : (h+1)*hd]
 			for j := lo; j < nPos; j++ {
-				vh := s.Cache.V[l][j*w+kvh*hd : j*w+(kvh+1)*hd]
+				var vh []float32
+				if s.Cache.quantized() {
+					s.Cache.decodeRowInto(l, j, false, vRowScratch)
+					vh = vRowScratch[kvh*hd : (kvh+1)*hd]
+				} else {
+					vh = s.Cache.V[l][j*w+kvh*hd : j*w+(kvh+1)*hd]
+				}
 				wj := scores[j-lo]
 				saxpy(out, vh, wj)
 			}

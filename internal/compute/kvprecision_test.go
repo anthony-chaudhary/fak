@@ -4,11 +4,11 @@ import "testing"
 
 // f32 and q8 per-token costs for kvCfg768 (2 layers * 4 kv heads * 8 dims = 32 elems/row):
 //
-//	f32: 2 layers * 32 elems * 3 rows * 4 bytes                       = 768
-//	q8 : 2 layers * (32*4 Kraw-f32 + 2 * (32 + 1*2) q8_0)  = 2 * 196  = 392
+//	f32: 2 layers * 32 elems * 3 rows * 4 bytes                          = 768
+//	q8 : 2 layers * (32*4 Kraw-f32 + 2 * (32 + 1*4) q8_0)  = 2 * 200  = 400
 const (
 	kvCfg768F32PerToken = 768
-	kvCfg768Q8PerToken  = 392
+	kvCfg768Q8PerToken  = 400
 )
 
 // TestEstimateKVStoreBytesF32ParityUnchanged locks the F32 default to the exact bytes the

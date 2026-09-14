@@ -84,6 +84,12 @@ func (s *Session) metalExecution(operation metalgemm.ExecutionOperation, call fu
 	observation := metalgemm.NewExecutionObservation(operation)
 	call(observation)
 	snapshot, err := observation.Snapshot()
+	// Each observed native call commits exactly one command buffer (GEMVGroup and
+	// Friends encode N dispatches into one buffer). Count it for the W1 decode
+	// accounting; a failed/unavailable observation contributes zero events.
+	if err == nil {
+		s.countMetalCommandBuffer(len(snapshot.Events))
+	}
 	if s.PhaseProfiler != nil {
 		s.PhaseProfiler.recordMetal(snapshot, err)
 	}

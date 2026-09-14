@@ -48,6 +48,25 @@ type inKernelPrefillSession interface {
 
 func (p *InKernelPlanner) configureNativeSession(s *model.Session) {
 	s.Quant = p.quant
+	// Realize the planner's KV storage tier before any prefill/decode append. The
+	// default (model.KVPrecisionFP32) is a no-op, so every existing planner is
+	// byte-for-byte unchanged. ConvertToPrecision handles a session that already
+	// holds rows (a preserved/reused session) by re-encoding in place.
+	if p.kvPrecision != "" && p.kvPrecision != model.KVPrecisionFP32 {
+		// Fail closed on a path this realization does not cover (device HAL, Metal
+		// resident, hybrid recurrent, GLM-DSA, MiniMax sparse, gemma4): those write
+		// c.K directly, so enabling q8 would silently mix f32 and packed rows.
+		if reason := p.m.Cfg.QuantizedKVUnsupportedReason(); reason != "" {
+			panic(fmt.Sprintf("model: --kv-precision=%s is not realized for this forward path (%s); use f32", p.kvPrecision, reason))
+		}
+		if p.backend != nil || p.metal {
+			panic(fmt.Sprintf("model: --kv-precision=%s is not realized on the device HAL/Metal path; use f32", p.kvPrecision))
+		}
+		if s.Cache != nil {
+			s.Cache.ConvertToPrecision(p.kvPrecision)
+		}
+		s.KVPrecision = p.kvPrecision
+	}
 	// Resident Q4_K decode runs on both host and device paths. The slab selector is
 	// session-scoped alongside that mode, so an explicit planner setting reaches every
 	// real request session and never leaks between planners.

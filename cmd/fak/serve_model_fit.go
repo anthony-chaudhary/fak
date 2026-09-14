@@ -4,11 +4,26 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 )
+
+// serveKVPrecision is the realized KV storage tier the fit estimator charges, read
+// from FAK_UP_KV_PRECISION (the same seam the serve --kv-precision flag publishes to).
+// Unset or "f32" yields the exact F32 tier; a q8 token yields the denser mixed tier so
+// the admission math matches the engine's residency. Unknown tokens fall back to F32
+// (fail-open) — an invalid flag is refused at serve-flag validation, not here.
+func serveKVPrecision() compute.KVPrecision {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_UP_KV_PRECISION"))) {
+	case "q8", "q8_0", "8":
+		return compute.KVPrecisionQ8
+	default:
+		return compute.KVPrecisionF32
+	}
+}
 
 const serveGGUFDeviceHeadroom = 0.15
 
@@ -42,6 +57,7 @@ func refuseEPPlanIfUnfit(m *fakmodel.Model, be compute.Backend, ranks, contextBu
 			NumKVHeads: m.Cfg.NumKVHeads,
 			HeadDim:    m.Cfg.HeadDim,
 			RopeTheta:  m.Cfg.RopeTheta,
+			Precision:  serveKVPrecision(),
 		}, contextBudgetTokens)
 	}
 	plan := compute.ExpertParallelPerRankPlan(replicated, expert, m.Cfg.NumExperts, ranks, extra)
@@ -100,7 +116,7 @@ func resolveServeNativeContext(ws *ggufload.WeightSource, weights compute.Memory
 	if err != nil {
 		return resolution, nil, err
 	}
-	csc := cfg.ContextSizeConfig()
+	csc := cfg.ContextSizeConfigWithPrecision(serveKVPrecision())
 	resolution.ModelDeclaredTokens = csc.MaxContext
 	if requested > 0 && csc.MaxContext > 0 && requested > csc.MaxContext {
 		return resolution, nil, fmt.Errorf("--native-context-tokens %d exceeds model-declared context window %d", requested, csc.MaxContext)
@@ -421,7 +437,7 @@ func appendServeGGUFDevicePlan(ws *ggufload.WeightSource, plan compute.MemoryPla
 	// derives the LARGEST context that fits this box — instead of sizing against the full
 	// MaxPositionEmbeddings window and refusing — and log the derived size for the operator.
 	avail := fit.avail()
-	csc := cfg.ContextSizeConfig()
+	csc := cfg.ContextSizeConfigWithPrecision(serveKVPrecision())
 	tokens, ctxPlan := compute.AutoSizeContextPlan(csc, plan, avail, serveContextTokenOverride(contextBudgetTokens))
 	logServeAutoSizedContext(csc, plan, fit, avail, contextBudgetTokens, tokens)
 	return append(plan, ctxPlan...)

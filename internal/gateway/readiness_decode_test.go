@@ -51,10 +51,14 @@ func TestHealthzRejectsDegenerateStartupDecode(t *testing.T) {
 		t.Fatalf("benign startup decode: /healthz ok = %v, want true", body["ok"])
 	}
 
-	// degenerate decode flips ready -> not ready, with the reason captured.
+	// degenerate decode flips ready -> not ready with a 503 status, and the reason
+	// captured: a proxy client must not route on this body.
 	bad := &Server{}
 	bad.SetStartupDecodeProbe("!!!!!!!!")
-	body := healthzBody(t, bad)
+	code, body := healthzStatus(t, bad)
+	if code != http.StatusServiceUnavailable {
+		t.Fatalf("degenerate startup decode: /healthz status = %d, want 503", code)
+	}
 	if body["ok"] != false {
 		t.Fatalf("degenerate startup decode: /healthz ok = %v, want false", body["ok"])
 	}
@@ -75,7 +79,10 @@ func TestHealthzRejectsDegenerateStartupDecode(t *testing.T) {
 	// a repeated-single-token decode is rejected under its own kind.
 	repeat := &Server{}
 	repeat.SetStartupDecodeProbe("the the the the the")
-	rb := healthzBody(t, repeat)
+	rcode, rb := healthzStatus(t, repeat)
+	if rcode != http.StatusServiceUnavailable {
+		t.Fatalf("repeated-token decode: /healthz status = %d, want 503", rcode)
+	}
 	if rb["ok"] != false {
 		t.Fatalf("repeated-token decode: /healthz ok = %v, want false", rb["ok"])
 	}
@@ -85,19 +92,28 @@ func TestHealthzRejectsDegenerateStartupDecode(t *testing.T) {
 }
 
 // healthzBody serves GET /healthz through the real handler and returns the
-// decoded JSON body — the served readiness response the issue asks the test to
-// capture.
+// decoded JSON body, requiring the READY status (200) — the served readiness
+// response the issue asks the test to capture. healthzStatus is the not-ready
+// counterpart that also lets a test pin the HTTP status of an ok:false body.
 func healthzBody(t *testing.T, s *Server) map[string]any {
+	t.Helper()
+	code, body := healthzStatus(t, s)
+	if code != http.StatusOK {
+		t.Fatalf("/healthz status = %d, want %d (ready body)", code, http.StatusOK)
+	}
+	return body
+}
+
+// healthzStatus serves GET /healthz through the real handler and returns the
+// status code and decoded body without asserting readiness.
+func healthzStatus(t *testing.T, s *Server) (int, map[string]any) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
 	s.handleHealth(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("/healthz status = %d, want %d", rec.Code, http.StatusOK)
-	}
 	var body map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode /healthz body %q: %v", rec.Body.String(), err)
 	}
-	return body
+	return rec.Code, body
 }
