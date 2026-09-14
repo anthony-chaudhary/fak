@@ -728,8 +728,20 @@ func (s *KVStore) PutPage(page *Page) error {
 		delete(s.keyIndex, existing.Key.String())
 		if sessMap, ok := s.sessionIndex[existing.Key.SessionID]; ok {
 			delete(sessMap, existing.ID)
+			if len(sessMap) == 0 {
+				delete(s.sessionIndex, existing.Key.SessionID)
+			}
 		}
 	} else {
+		// The incoming page ID is new, but its key may already be resident
+		// under a different canonical ID. Free that prior page so the key and
+		// session indexes stay one-to-one and no resident page is left
+		// unreachable by key.
+		if priorID, ok := s.keyIndex[page.Key.String()]; ok {
+			if prior, ok := s.pages[priorID]; ok && prior.ID != page.ID {
+				s.freePageLocked(prior)
+			}
+		}
 		if err := s.ensureCapacityLocked(1); err != nil {
 			return err
 		}
