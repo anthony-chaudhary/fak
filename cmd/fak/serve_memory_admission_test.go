@@ -1124,3 +1124,138 @@ func TestMetalLauncherReservationUsesStoredWeightsAndReleasesOnEstimateError(t *
 		})
 	}
 }
+
+// TestReservationAllocatableStableFloor pins the exact turnkey reservation rule.
+// It is the unit witness that a momentary live-memory dip cannot defeat the SLO
+// plan the reserve-based envelope admits, while genuine critical/unknown pressure
+// still fails closed on the live reading.
+func TestReservationAllocatableStableFloor(t *testing.T) {
+	const total = 36 << 30
+	floor := turnkeyStableFitBudget(total)
+	want := computeBudgetAfterHeadroomForTest(total, 0.20)
+	if want <= 0 {
+		t.Fatal("fixture floor must be positive")
+	}
+
+	cases := []struct {
+		name      string
+		live      int64
+		fit       *serveFitBudget
+		pressure  memgate.Pressure
+		wantBytes int64
+	}{
+		{"nil floor keeps live probe", 19 << 30, nil, memgate.PressureNormal, 19 << 30},
+		{"normal lifts a dip to the reserve floor", 19 << 30, floor, memgate.PressureNormal, want},
+		{"warning lifts a dip to the reserve floor", 18 << 30, floor, memgate.PressureWarning, want},
+		{"critical fails closed on the live reading", 19 << 30, floor, memgate.PressureCritical, 19 << 30},
+		{"unknown fails closed on the live reading", 19 << 30, floor, memgate.PressureUnknown, 19 << 30},
+		{"live above the floor is preserved", total, floor, memgate.PressureNormal, total},
+		{"live equal to the floor is preserved", want, floor, memgate.PressureNormal, want},
+		{"floor is capped at host total", 1 << 30, turnkeyStableFitBudget(total), memgate.PressureNormal, want},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := reservationAllocatable(tc.live, tc.fit, tc.pressure, total); got != tc.wantBytes {
+				t.Fatalf("reservationAllocatable(live=%d, pressure=%s) = %d, want %d", tc.live, tc.pressure, got, tc.wantBytes)
+			}
+		})
+	}
+
+	// A floor that exceeds the host total must never raise allocatable above the
+	// physical ceiling: the cap is the whole point of the "no dangerous overshoot"
+	// half of the rule.
+	huge := &serveFitBudget{Base: 2 * total, Headroom: 0.20}
+	if got := reservationAllocatable(1<<30, huge, memgate.PressureNormal, total); got != total {
+		t.Fatalf("oversized floor = %d, want the host total %d", got, total)
+	}
+}
+
+// computeBudgetAfterHeadroomForTest is the exact production formula
+// (compute.BudgetAfterHeadroom) the loader budget's avail() applies, so the
+// expected floor is the real one rather than a hand-rolled approximation.
+func computeBudgetAfterHeadroomForTest(base int64, headroom float64) int64 {
+	if base > 0 && headroom > 0 && headroom < 1 {
+		return int64(float64(base) * (1 - headroom))
+	}
+	return base
+}
+
+// TestLoadLocalLauncherModelWithMetalLeaseStableFloorAdmitsUnderDip is the RED/GREEN
+// end-to-end witness for the turnkey 20k defect: the live reading is below the plan's
+// startup peak, so the historical live-probe reservation refuses; supplying the SAME
+// stable reserve-based floor the loader uses admits it. Critical pressure still refuses
+// even with the floor present.
+func TestLoadLocalLauncherModelWithMetalLeaseStableFloorAdmitsUnderDip(t *testing.T) {
+	const total = 36 << 30
+	const peak = int64(20 << 30)
+	// Live allocatable under the dip is below peak; the reserve floor (28.8 GiB) is above.
+	const dip = int64(19 << 30)
+
+	t.Setenv("FAK_ADMISSION_POLICY", "dev")
+	t.Setenv("FAK_TEST_STARTUP_PEAK_BYTES", strconv.FormatInt(peak, 10))
+	t.Setenv("FAK_TEST_STEADY_BYTES", strconv.FormatInt(peak/2, 10))
+
+	newWorld := func(allocatable int64) {
+		resDir := filepath.Join(t.TempDir(), "reservations")
+		leasePath := filepath.Join(t.TempDir(), "gpu.lease")
+		t.Setenv("FAK_RESERVATION_DIR", resDir)
+		t.Setenv("FAK_GPU_LEASE", leasePath)
+		stubServeAllocatable(t, total, allocatable)
+	}
+
+	t.Run("no floor: live dip refuses (historical behavior preserved)", func(t *testing.T) {
+		newWorld(dip)
+		loads := 0
+		release, err := loadLocalLauncherModelWithMetalLease(true, "small-model.gguf", gpulease.Options{}, func() { loads++ })
+		if err == nil {
+			release()
+			t.Fatal("expected the live-probe reservation to refuse under the dip")
+		}
+		if loads != 0 {
+			t.Fatalf("load must not run on refusal, got %d", loads)
+		}
+		if !strings.Contains(err.Error(), "exceeds available allocatable capacity") {
+			t.Fatalf("unexpected refusal error: %v", err)
+		}
+	})
+
+	t.Run("stable floor: the same dip admits", func(t *testing.T) {
+		newWorld(dip)
+		loads := 0
+		release, err := loadLocalLauncherModelWithMetalLease(true, "small-model.gguf", gpulease.Options{}, func() { loads++ }, turnkeyStableFitBudget(total))
+		if err != nil {
+			t.Fatalf("stable floor must admit the plan the loader admitted, got: %v", err)
+		}
+		defer release()
+		if loads != 1 {
+			t.Fatalf("expected the load to run once, got %d", loads)
+		}
+	})
+
+	t.Run("critical pressure refuses even with the stable floor", func(t *testing.T) {
+		resDir := filepath.Join(t.TempDir(), "reservations")
+		leasePath := filepath.Join(t.TempDir(), "gpu.lease")
+		t.Setenv("FAK_RESERVATION_DIR", resDir)
+		t.Setenv("FAK_GPU_LEASE", leasePath)
+		orig := serveReadMemory
+		t.Cleanup(func() { serveReadMemory = orig })
+		serveReadMemory = func() (memgate.Memory, error) {
+			return memgate.Memory{
+				TotalBytes:      total,
+				FreeBytes:       dip,
+				AvailableBytes:  dip,
+				CompressedBytes: total / 2, // classified critical by AdmissionSampleFor
+				WiredBytes:      0,
+			}, nil
+		}
+		loads := 0
+		release, err := loadLocalLauncherModelWithMetalLease(true, "small-model.gguf", gpulease.Options{}, func() { loads++ }, turnkeyStableFitBudget(total))
+		if err == nil {
+			release()
+			t.Fatal("critical pressure must refuse even with a stable floor")
+		}
+		if loads != 0 {
+			t.Fatalf("load must not run under critical pressure, got %d", loads)
+		}
+	})
+}

@@ -70,9 +70,20 @@ func (r *turnkeyNativeResources) Close() error {
 type turnkeyNativeLoadDeps struct {
 	resolveBackend func() (compute.Backend, error)
 	resolveMetal   func() (serveMetalDecision, error)
-	admitAndLoad   func(bool, string, func()) (func(), error)
+	admitAndLoad   func(bool, string, func(), *serveFitBudget) (func(), error)
 	refusePeak     func(string) error
-	loadModel      func(string, compute.Backend, int) (*fakmodel.Model, bool, *gateway.ModelLoadProfile)
+	loadModel      func(string, compute.Backend, int, *serveFitBudget) (*fakmodel.Model, bool, *gateway.ModelLoadProfile)
+	// fitOverride is the STABLE, headroom-aware memory budget the turnkey loader
+	// admits against, instead of the live host-free probe. It exists so a momentary
+	// dip in reclaimable memory (cold cache, a just-loaded sibling) cannot spuriously
+	// refuse a context the box's reserve-based envelope holds. nil preserves the
+	// historical live-probe admission (every serve/all-in-one caller).
+	fitOverride *serveFitBudget
+	// fitFloor is the SAME stable budget handed to the local-launcher reservation,
+	// so the loader's admission and the persistent reservation agree on one
+	// envelope. Without it the reservation re-reads live memory and can refuse a
+	// plan the loader just admitted; nil keeps the pure live probe.
+	fitFloor       *serveFitBudget
 	loadTokenizer  func(string) (*tokenizer.Tokenizer, bool)
 	newPlanner     func(*fakmodel.Model, *tokenizer.Tokenizer, string, bool, compute.Backend, bool, int) *agent.InKernelPlanner
 	hostMemory     func() (int64, int64, bool)
@@ -88,11 +99,14 @@ func defaultTurnkeyNativeLoadDeps() turnkeyNativeLoadDeps {
 		resolveBackend: func() (compute.Backend, error) { return resolveServeChatBackend("") },
 		resolveMetal:   func() (serveMetalDecision, error) { return resolveServeMetalDecision(false, false, "") },
 		refusePeak:     refuseOversubscribedMetalGGUF,
-		admitAndLoad: func(metal bool, path string, load func()) (func(), error) {
-			return loadLocalLauncherModelWithMetalLease(metal, path, gpulease.Options{}, load)
+		admitAndLoad: func(metal bool, path string, load func(), fitFloor *serveFitBudget) (func(), error) {
+			return loadLocalLauncherModelWithMetalLease(metal, path, gpulease.Options{}, load, fitFloor)
 		},
-		loadModel: func(path string, backend compute.Backend, contextTokens int) (*fakmodel.Model, bool, *gateway.ModelLoadProfile) {
-			m, q4k, profile, _ := loadServeInKernelModel(path, backend, false, contextTokens, nil, 1, nil)
+		// loadModel threads the caller-supplied fit override (when set) as the
+		// loader's admission budget; a nil override keeps the live host probe
+		// exactly as before.
+		loadModel: func(path string, backend compute.Backend, contextTokens int, fit *serveFitBudget) (*fakmodel.Model, bool, *gateway.ModelLoadProfile) {
+			m, q4k, profile, _ := loadServeInKernelModel(path, backend, false, contextTokens, nil, 1, fit)
 			return m, q4k, profile
 		},
 		loadTokenizer:  func(path string) (*tokenizer.Tokenizer, bool) { return resolveServeTokenizer("", path) },
@@ -138,8 +152,8 @@ func loadTurnkeyNativeResourcesWith(_ context.Context, modelPath, modelID string
 	var q4k bool
 	var profile *gateway.ModelLoadProfile
 	release, err := deps.admitAndLoad(metal, modelPath, func() {
-		model, q4k, profile = deps.loadModel(modelPath, backend, contextTokens)
-	})
+		model, q4k, profile = deps.loadModel(modelPath, backend, contextTokens, deps.fitOverride)
+	}, deps.fitFloor)
 	if err != nil {
 		return nil, err
 	}

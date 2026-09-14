@@ -197,6 +197,37 @@ const GiB = uint64(1 << 30)
 // DefaultMinHeadroomRatio is the minimum guaranteed headroom ratio to prevent swap (20%).
 const DefaultMinHeadroomRatio = 0.20
 
+// TurnkeySLOContextTokens is the out-of-the-box context floor turnkey provisioning
+// targets on the flagship Apple-Silicon serving tier (Qwen3.8-27B Q4_K_M on a 36 GiB
+// M3 Pro). It is a deliberate SLO default, not a hard ceiling: when the tier's STABLE
+// (reserve-based) KV pool holds this many tokens the plan serves exactly this many,
+// instead of the larger standard bucket that sits at the edge of the memory envelope
+// and spuriously refuses under a momentary live-memory dip. A box that genuinely
+// cannot hold it still clamps lower, and an explicit --context still wins.
+const TurnkeySLOContextTokens = 20480
+
+// turnkeySLOTier reports whether a tier carries the turnkey context SLO. Only the
+// 27B flagship tier does; every other tier keeps the historical bucket selection.
+func turnkeySLOTier(tierName string) bool {
+	return strings.EqualFold(strings.TrimSpace(tierName), "27B")
+}
+
+// TurnkeySLODefault returns the SLO context to serve for a tier when the STABLE KV
+// pool (usableBytes - weights, before any transient available-memory clamp) can hold
+// it at the planned per-token cost. It returns 0 when the SLO does not apply or the
+// box genuinely cannot hold it, preserving the conservative bucket/clamp result.
+// Stability is the point: a momentary dip in live free memory must not shrink a
+// turnkey default below the SLO on a box whose reserve-based envelope admits it.
+func TurnkeySLODefault(tier ModelTier, kvpt, staticKVBytes uint64) uint64 {
+	if !turnkeySLOTier(tier.Name) || kvpt == 0 {
+		return 0
+	}
+	if staticKVBytes/kvpt < TurnkeySLOContextTokens {
+		return 0
+	}
+	return TurnkeySLOContextTokens
+}
+
 // ModelTier describes an optimal model configuration for a unified memory tier.
 type ModelTier struct {
 	Name           string `json:"name"`             // e.g. "7B", "27B", "70B"
@@ -538,8 +569,10 @@ func ConfigureTurnkeyWithOptions(memoryBytes uint64, opts TurnkeyOptions) (Turnk
 	}
 
 	// Bucket context budget to standard boundaries without exceeding maxTokens.
+	// TurnkeySLOContextTokens (20480) is a first-class bucket so the flagship tier
+	// can select the SLO instead of the larger bucket above it.
 	var contextBudget uint64
-	for _, bucket := range []uint64{65536, 32768, 16384, 8192, 4096, 2048, 1024, 512} {
+	for _, bucket := range []uint64{65536, 32768, TurnkeySLOContextTokens, 16384, 8192, 4096, 2048, 1024, 512} {
 		if maxTokens >= bucket {
 			contextBudget = bucket
 			break
@@ -565,6 +598,22 @@ func ConfigureTurnkeyWithOptions(memoryBytes uint64, opts TurnkeyOptions) (Turnk
 		}
 		if contextBudget == 0 {
 			contextBudget = 512
+		}
+	}
+
+	// SLO default for the flagship tier: a momentary live-memory dip must not shrink
+	// the out-of-the-box context below the 20k SLO when the STABLE, reserve-based pool
+	// (staticKVBytes = usableBytes - weights) can hold it. The 20% reserve already
+	// absorbs OS/other-app pressure, so the transient clamp above must not double-count
+	// it and silently under-serve. When the box genuinely cannot hold the SLO the floor
+	// is 0 and the clamped bucket stands; an explicit --context still wins downstream.
+	if slo := TurnkeySLODefault(tier, kvpt, staticKVBytes); slo > 0 {
+		contextBudget = slo
+		if used := contextBudget * kvpt; kvPoolBytes < used {
+			// Keep the reported pool self-consistent with the served context. This is
+			// still >= the context's own resident bytes, so HeadroomBytes never reports
+			// a negative (over-committed) allocation.
+			kvPoolBytes = used
 		}
 	}
 
