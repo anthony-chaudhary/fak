@@ -33,11 +33,12 @@ import (
 // ranks (#971, #3886) rather than choosing a host-vs-device home within one rank; the two compose
 // and neither substitutes for the other.
 //
-// The three placements now compose instead of competing: the first N layers' experts run on the
-// HOST kernel (spill), the remaining layers' experts are DEVICE-resident but BOUNDED by the ring
-// (only the activated working set need be resident at once), and the dense base is device-resident
-// and permanent. Default is unchanged: with ExpertSpillLayers <= 0 the predicate is exactly
-// isExpertWeight, and with ExpertRingBytes == 0 there is no ring.
+// The three placements now compose instead of competing: the first N layers' ROUTED experts run on the
+// HOST kernel (spill), the remaining layers' ROUTED experts are DEVICE-resident but BOUNDED by the ring
+// (only the activated working set need be resident at once), and the dense base plus the always-on
+// shared expert are device-resident and permanent. Default is unchanged: with ExpertSpillLayers <= 0
+// the predicate is exactly hostOffloadWeight (routed-only; the shared expert is device-pinned), and
+// with ExpertRingBytes == 0 there is no ring.
 
 // expertLayerIndex reads the layer ordinal out of a canonical tensor name — "model.layers.<L>."
 // (layerPrefix, weights.go) — which is what makes a layer-GRADED placement predicate possible from
@@ -234,7 +235,7 @@ func (m *Model) ResolveExpertSpillPlacement(deviceBudgetBytes int64, userN int) 
 // spilledExpertLayers resolves "spill the first n MoE layers" into the layer-ordinal SET a
 // placement predicate can test in O(1). nil is the UNGRADED answer and covers both endpoints —
 // n <= 0 (spill nothing through the graded path) and n >= the MoE layer count (spilling every
-// layer is exactly the layer-blind isExpertWeight) — so the caller has one nil check rather than
+// layer is exactly the layer-blind hostOffloadWeight) — so the caller has one nil check rather than
 // two range checks, and the default path allocates nothing.
 func (m *Model) spilledExpertLayers(n int) map[int]bool {
 	if n <= 0 {
@@ -253,19 +254,27 @@ func (m *Model) spilledExpertLayers(n int) map[int]bool {
 
 // gradedExpertSpillPredicate turns a resolved spill set into the predicate splitKernel runs.
 //
-// An empty set returns isExpertWeight itself — byte-for-byte the ungraded pre-#5612 predicate, not
-// a wrapper that reproduces it — so the default path keeps its exact identity and cost. Otherwise
-// an expert weight goes to host only when its layer is in the set; a NON-expert weight never does
-// (dense, router, attention and lm_head stay on the device exactly as before), and an expert weight
-// whose name carries no parseable layer ordinal spills — the memory-safe direction, since the
-// device is the scarce side and an unplaceable name must not silently consume VRAM the plan did
-// not budget.
+// An empty set returns hostOffloadWeight itself — byte-for-byte the ungraded pre-#5612 predicate
+// over ROUTED experts, not a wrapper that reproduces it — so the default path keeps its exact
+// identity and cost. Otherwise a ROUTED expert weight goes to host only when its layer is in the
+// set; a NON-routed weight never does (dense, router, attention, lm_head AND the always-on shared
+// expert stay on the device), and a routed expert weight whose name carries no parseable layer
+// ordinal spills — the memory-safe direction, since the device is the scarce side and an
+// unplaceable name must not silently consume VRAM the plan did not budget.
+//
+// The shared expert is pinned to the device on BOTH arms (#1304): it is active on every token
+// (hit rate 1.0), so spilling it would stream a resident-hot tensor out and pay a miss on every
+// token. isSharedExpertWeight is therefore an explicit early-false before the routed test, which
+// keeps the property belt-and-suspenders regardless of how expertLayerIndex would classify it.
 func gradedExpertSpillPredicate(spilled map[int]bool) func(string) bool {
 	if len(spilled) == 0 {
-		return isExpertWeight
+		return hostOffloadWeight
 	}
 	return func(name string) bool {
-		if !isExpertWeight(name) {
+		if isSharedExpertWeight(name) {
+			return false
+		}
+		if !isRoutedExpertWeight(name) {
 			return false
 		}
 		l, ok := expertLayerIndex(name)
@@ -298,16 +307,18 @@ func (s *Session) ApplyExpertSpillPlacement(p ExpertSpillPlacement) {
 	s.spillOnHost = gradedExpertSpillPredicate(p.spilled)
 }
 
-// expertSpillOnHost is the placement predicate splitKernel runs — isExpertWeight GRADED by layer.
+// expertSpillOnHost is the placement predicate splitKernel runs — hostOffloadWeight GRADED by layer.
 //
-//	ExpertSpillLayers <= 0  -> isExpertWeight, byte-for-byte the ungraded pre-#5612 predicate
-//	ExpertSpillLayers >= MoELayers -> also isExpertWeight (spilling every layer IS the ungraded case)
-//	0 < N < MoELayers       -> only the FIRST N MoE layers' expert weights go to host
+//	ExpertSpillLayers <= 0  -> hostOffloadWeight, byte-for-byte the ungraded pre-#5612 predicate
+//	ExpertSpillLayers >= MoELayers -> also hostOffloadWeight (spilling every layer IS the ungraded case)
+//	0 < N < MoELayers       -> only the FIRST N MoE layers' ROUTED experts go to host
 //
 // "First N" is over the model's real MoE layer ordinals (MoEExpertLayers), matching llama.cpp's
-// `--n-cpu-moe N` and the semantics expert_spill_fit.go sizes against. An expert weight whose name
-// carries no parseable layer ordinal spills — the memory-safe direction, since the device is the
-// scarce side and an unplaceable name must not silently consume VRAM the plan did not budget.
+// `--n-cpu-moe N` and the semantics expert_spill_fit.go sizes against. A routed expert weight whose
+// name carries no parseable layer ordinal spills — the memory-safe direction, since the device is
+// the scarce side and an unplaceable name must not silently consume VRAM the plan did not budget.
+// The always-on shared expert is pinned DEVICE-resident on every arm (#1304): it never enters this
+// host set, so it is never streamed as a miss.
 //
 // The predicate is built once per session and memoized: it is consulted per GEMM, and rebuilding it
 // would re-walk every resident tensor name on a 753B checkpoint each time. A session configured by

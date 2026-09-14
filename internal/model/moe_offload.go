@@ -9,9 +9,10 @@ import "strings"
 // weights, while the dense projections (attention q_a/q_b/kv_a/kv_b/o_proj, the learned-index
 // projections, the MoE router) and the per-token activation FLOPs are tiny by comparison. At
 // Q4_K_M the full model is ~424 GB — far past any single GPU's VRAM — but the host has 1007 GB
-// of RAM. So the serve-able split is exactly llama.cpp's `--n-cpu-moe`: keep the EXPERT GEMMs
+// of RAM. So the serve-able split is exactly llama.cpp's `--n-cpu-moe`: keep the ROUTED expert GEMMs
 // resident in host RAM (run them on the CPU Q4_K/Q8 kernel) while the DENSE projections + router
-// + attention run on the GPU device backend. The experts are sparse (only top-k fire per token)
+// + attention, and the always-on shared expert (active on every token), run on the GPU device
+// backend. The routed experts are sparse (only top-k fire per token)
 // and bandwidth-, not latency-, bound, so the host is a reasonable home for them; the dense work
 // that runs every token on every position stays on the device where the FLOPs are.
 //
@@ -97,8 +98,8 @@ func (k splitKernel) sparseAttend(q, selK, selV []float32, nSel, nH, qkHead, vHe
 }
 
 // indexSelect forwards GLM-DSA's learned-indexer score + top-k SELECTION to the DEVICE side, the
-// symmetric partner of sparseAttend above: isExpertWeight keeps the learned-index PROJECTIONS on the
-// device under a `--n-cpu-moe` split (only the expert bulk goes host-resident), so the selection
+// symmetric partner of sparseAttend above: hostOffloadWeight keeps the learned-index PROJECTIONS on the
+// device under a `--n-cpu-moe` split (only the routed expert bulk goes host-resident), so the selection
 // COMPUTE they feed belongs on the device too — otherwise the offload hybrid would silently keep the
 // indexer host-resident while every other DSA op runs on the kernel. glmDsaIndexStep type-asserts the
 // active matKernel for dsaIndexKernel; routing through here keeps k_dsa_index_score + k_dsa_index_topk
@@ -130,25 +131,49 @@ func isRoutedExpertWeight(name string) bool {
 	return strings.Contains(name, ".mlp.experts.") && !isSharedExpertWeight(name)
 }
 
-// isExpertWeight is the default CPU-offload predicate: it selects the MoE expert and shared-expert
-// projection weights — the parameter bulk a `--n-cpu-moe` split sends to host RAM — and nothing else.
-// It is exactly the OR of the two disjoint expert classes (isRoutedExpertWeight, isSharedExpertWeight).
-// It deliberately does NOT match the router (mlp.gate.weight), the attention/MLA projections, the
-// learned-index projections, or the LM head: those are the small, every-token dense GEMMs that stay
-// on the device. The names are the canonical HF tensor names the GLM-DSA forward reads:
+// isExpertWeight is the ACCOUNTING predicate: the union of the two disjoint expert classes
+// (isRoutedExpertWeight, isSharedExpertWeight), i.e. every parameter that belongs to an MoE expert
+// BLOCK. It deliberately does NOT match the router (mlp.gate.weight), the attention/MLA projections,
+// the learned-index projections, or the LM head: those are the small, every-token dense GEMMs that
+// stay on the device. The names are the canonical HF tensor names the GLM-DSA forward reads:
 //
 //	routed experts: model.layers.<l>.mlp.experts.<e>.{gate,up,down}_proj.weight  (expertName, moe.go)
 //	shared experts: model.layers.<l>.mlp.shared_experts.{gate,up,down}_proj.weight (glmSharedExperts)
 //
-// so the substrings ".mlp.experts." and ".mlp.shared_experts." partition expert weights from every
-// dense weight exactly (the router mlp.gate.weight contains neither).
+// It is the ACCOUNTING/classification union, NOT the runtime PLACEMENT predicate. The two differ by
+// design (see hostOffloadWeight): under offload the routed experts move to host RAM while the
+// always-on shared expert stays DEVICE-resident, but the shared expert's bytes still belong to the
+// expert block, so the union keeps the byte partitions stable: MoEResidentWeightBytes still counts
+// the routed experts against the per-layer expert term while the shared expert falls into the
+// replicated remainder (the device base the spill sizing reserves), which is EXACTLY the placement
+// hostOffloadWeight implements. Keeping this union intact is what makes that accounting stable across
+// the placement change. Callers that decide a weight's HOME must use hostOffloadWeight.
 func isExpertWeight(name string) bool {
 	return isRoutedExpertWeight(name) || isSharedExpertWeight(name)
 }
 
-// CPUOffloadExpertWeight reports whether the canonical tensor name is routed to host RAM by
-// the CPU-offload expert split. It is exported so load-time memory planners can use the exact
-// same partition as the runtime split kernel.
+// hostOffloadWeight is the runtime PLACEMENT predicate splitKernel runs: it sends only the ROUTED
+// experts (.mlp.experts.<e>.*) to host RAM and pins everything else — the always-on shared expert,
+// the router, attention/MLA projections, learned-index projections, the LM head and every dense
+// weight — to the device. It is the routed-only arm of isExpertWeight.
+//
+// The distinction from isExpertWeight is the point of #1304. The shared expert is active on EVERY
+// token (hit rate 1.0), so it is resident-hot by construction; placing it on the same host path as
+// the sparse, cold routed experts streams it out and pays a needless miss latency on every token.
+// The shared expert is device-resident, so routing it to host is simply wrong. isExpertWeight stays
+// the union (accounting: the shared expert's bytes still belong to the expert block, and
+// CPUOffloadExpertWeight must keep partitioning exactly as the load-time planner expects); this
+// predicate is the routed-only placement half.
+func hostOffloadWeight(name string) bool {
+	return isRoutedExpertWeight(name)
+}
+
+// CPUOffloadExpertWeight reports whether the canonical tensor name belongs to an MoE expert BLOCK
+// (routed OR shared) — the ACCOUNTING partition load-time memory planners size against. It is the
+// union isExpertWeight, deliberately NOT the runtime placement predicate hostOffloadWeight: the
+// runtime keeps the always-on shared expert DEVICE-resident on EVERY token (#1304), while this
+// accounting still charges the shared expert's bytes to the expert block. A caller deciding a
+// weight's HOME (host vs device) must use hostOffloadWeight, not this.
 func CPUOffloadExpertWeight(name string) bool {
 	return isExpertWeight(name)
 }
@@ -174,9 +199,11 @@ func (s *Session) glmDsaMatKernel() matKernel {
 	}
 	if s.CPUOffloadExperts {
 		// The predicate is GRADED by ExpertSpillLayers (#5612, expert_spill_placement.go): unset (the
-		// default) it is exactly isExpertWeight, so this line is byte-for-byte the ungraded split;
-		// set to N it spills only the first N MoE layers' experts and leaves the rest on the device,
-		// where R0's ring (#5611) bounds what they may hold resident.
+		// default) it is exactly hostOffloadWeight, so this line is byte-for-byte the ungraded split
+		// over ROUTED experts; set to N it spills only the first N MoE layers' routed experts and
+		// leaves the rest on the device, where R0's ring (#5611) bounds what they may hold resident.
+		// The always-on shared expert is pinned DEVICE-resident on both arms (#1304): it is never a
+		// host-offload candidate, so it is never streamed as a miss.
 		return splitKernel{host: host, device: device, onHost: s.expertSpillOnHost()}
 	}
 	return device

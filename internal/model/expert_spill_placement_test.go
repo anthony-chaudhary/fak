@@ -69,8 +69,8 @@ func TestExpertSpillLayersAreMoEOrdinals(t *testing.T) {
 		{expertName(3, 1, "down_proj.weight"), true},                  // second spilled MoE layer
 		{expertName(4, 0, "up_proj.weight"), false},                   // kept on the device
 		{expertName(5, 1, "gate_proj.weight"), false},                 // kept on the device
-		{"model.layers.2.mlp.shared_experts.gate_proj.weight", true},  // the spilled layer's whole MoE block
-		{"model.layers.5.mlp.shared_experts.gate_proj.weight", false}, // ...and the kept layer's stays
+		{"model.layers.2.mlp.shared_experts.gate_proj.weight", false}, // device-pinned: shared expert regardless of spill grade
+		{"model.layers.5.mlp.shared_experts.gate_proj.weight", false}, // ...same on a kept layer
 		{routerName(2), false},                                        // the router is dense: never spills
 		{layerName(0, "self_attn.q_proj.weight"), false},
 		{layerName(2, "self_attn.q_proj.weight"), false},
@@ -85,13 +85,18 @@ func TestExpertSpillLayersAreMoEOrdinals(t *testing.T) {
 
 // TestExpertSpillUngradedMatchesLegacyPredicate is the default-unchanged witness: an unset grade —
 // every session in the tree today — and a grade at or above the MoE layer count both resolve to
-// exactly isExpertWeight, so the split placement is byte-for-byte what it was before #5612.
+// exactly hostOffloadWeight on ROUTED experts, so the split placement is byte-for-byte what it was
+// before #5612 for every routed expert. The ALWAYS-ON shared expert is the deliberate exception
+// (#1304): it is device-pinned on every arm, so it is asserted FALSE rather than equal to the
+// accounting union isExpertWeight.
 func TestExpertSpillUngradedMatchesLegacyPredicate(t *testing.T) {
 	m := expertSpillTestModel([]int{0, 1, 2}, nil, 2, 64)
-	names := []string{
+	routedNames := []string{
 		expertName(0, 0, "gate_proj.weight"),
 		expertName(2, 1, "down_proj.weight"),
-		"model.layers.1.mlp.shared_experts.up_proj.weight",
+	}
+	sharedName := "model.layers.1.mlp.shared_experts.up_proj.weight"
+	deviceNames := []string{
 		routerName(0),
 		layerName(1, "self_attn.q_proj.weight"),
 		"lm_head.weight",
@@ -100,9 +105,20 @@ func TestExpertSpillUngradedMatchesLegacyPredicate(t *testing.T) {
 	for _, n := range []int{0, -1, 3, 99} {
 		s := &Session{M: m, CPUOffloadExperts: true, ExpertSpillLayers: n}
 		onHost := s.expertSpillOnHost()
-		for _, name := range names {
+		// Routed experts keep the legacy identity: onHost == isExpertWeight.
+		for _, name := range routedNames {
 			if got, want := onHost(name), isExpertWeight(name); got != want {
 				t.Errorf("ExpertSpillLayers=%d: onHost(%q) = %v, want the ungraded isExpertWeight = %v", n, name, got, want)
+			}
+		}
+		// The shared expert is device-pinned regardless of grade — NOT equal to isExpertWeight(true).
+		if onHost(sharedName) {
+			t.Errorf("ExpertSpillLayers=%d: onHost(%q) = true, want false (shared expert is device-pinned, #1304)", n, sharedName)
+		}
+		// Non-expert dense weights stay on the device, exactly as before.
+		for _, name := range deviceNames {
+			if onHost(name) {
+				t.Errorf("ExpertSpillLayers=%d: onHost(%q) = true, want false (dense weight stays device)", n, name)
 			}
 		}
 	}

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"sync"
 	"testing"
 
@@ -17,15 +18,33 @@ import (
 type recordingBackend struct {
 	compute.Backend
 	mu          sync.Mutex
-	shapes      map[[2]int]int // [out,in] -> MatMul call count
-	sparseCalls int            // DSASparseAttend call count (the sparse-attention device op)
-	sparseSel   int            // total selected keys handed to DSASparseAttend (proves real work, not an empty call)
-	indexCalls  int            // DSAIndexSelect call count (the indexer score + top-k device op)
-	indexKeys   int            // total cached keys scored by DSAIndexSelect (proves real selection work)
+	shapes      map[[2]int]int            // [out,in] -> MatMul call count
+	sites       map[compute.Buffer]string // weight buffer -> upload site ("hal-weight <name>")
+	names       map[string]int            // weight NAME -> MatMul call count (resolved from sites)
+	sparseCalls int                       // DSASparseAttend call count (the sparse-attention device op)
+	sparseSel   int                       // total selected keys handed to DSASparseAttend (proves real work, not an empty call)
+	indexCalls  int                       // DSAIndexSelect call count (the indexer score + top-k device op)
+	indexKeys   int                       // total cached keys scored by DSAIndexSelect (proves real selection work)
 }
 
 func newRecordingBackend(be compute.Backend) *recordingBackend {
-	return &recordingBackend{Backend: be, shapes: map[[2]int]int{}}
+	return &recordingBackend{Backend: be, shapes: map[[2]int]int{}, sites: map[compute.Buffer]string{}, names: map[string]int{}}
+}
+
+// UploadClass records the upload site — which for a resident weight is "hal-weight <name>" — keyed
+// by the uploaded tensor's buffer, and delegates to the wrapped backend unchanged. It makes
+// recordingBackend a classedUploadBackend, so uploadHostF32Class routes the weight through here on
+// the f32 path; pairing the site with the buffer is what lets MatMul below recover the weight's
+// NAME without changing the production matKernel (which has the name but hands the backend only a
+// Tensor). This is what makes the hybrid witness name-precise: the shared expert and the routed
+// experts share [I,H]/[H,I] shapes, so a shape probe cannot tell them apart.
+func (r *recordingBackend) UploadClass(t compute.Tensor, as compute.Dtype, class compute.MemoryClass, site string) compute.Tensor {
+	if b := t.Buf(); b != nil {
+		r.mu.Lock()
+		r.sites[b] = site
+		r.mu.Unlock()
+	}
+	return r.Backend.Upload(t, as)
 }
 
 // DSASparseAttend records that GLM-DSA's sparse attention reached the backend device op (rather
@@ -71,6 +90,9 @@ func (r *recordingBackend) record(w compute.Tensor) {
 	}
 	r.mu.Lock()
 	r.shapes[[2]int{w.Shape[0], w.Shape[1]}]++
+	if site, ok := r.sites[w.Buf()]; ok {
+		r.names[weightNameFromSite(site)]++
+	}
 	r.mu.Unlock()
 }
 
@@ -88,6 +110,50 @@ func (r *recordingBackend) saw(out, in int) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.shapes[[2]int{out, in}] > 0
+}
+
+// count reports how many MatMul/BatchedMatMul calls ran on the wrapped backend with weight shape
+// [out,in]. It is the differential witness for a path whose weights reach the backend through a
+// direct Upload (Q8/Q4_K staged residency) and therefore carry no upload site/name.
+func (r *recordingBackend) count(out, in int) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.shapes[[2]int{out, in}]
+}
+
+// namesSeen returns a snapshot of every weight NAME that ran a MatMul/BatchedMatMul on the wrapped
+// backend. It lets a caller assert over the whole observed set regardless of which experts the
+// router happened to pick.
+func (r *recordingBackend) namesSeen() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, 0, len(r.names))
+	for name := range r.names {
+		out = append(out, name)
+	}
+	return out
+}
+
+// sawName reports whether a MatMul/BatchedMatMul ran on the wrapped backend for the weight with
+// this canonical NAME (resolved from the upload site recorded for its buffer). It is the
+// name-precise complement to saw: the only way to tell a shared-expert GEMM from a routed-expert
+// one when they share a shape.
+func (r *recordingBackend) sawName(name string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.names[name] > 0
+}
+
+// weightNameFromSite recovers a weight's canonical name from its upload site. Resident weights are
+// uploaded as "hal-weight <name>" (Session.weightHAL); a site that is not a weight (an activation)
+// or not in that form is returned unchanged, and simply never matches a weight name the test asks
+// about.
+func weightNameFromSite(site string) string {
+	const p = "hal-weight "
+	if strings.HasPrefix(site, p) {
+		return site[len(p):]
+	}
+	return site
 }
 
 // TestGLMMoeDsaBackendRoutesAttentionProjections is the #86 (partial, next slice) witness that

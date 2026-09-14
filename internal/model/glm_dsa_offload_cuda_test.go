@@ -10,22 +10,27 @@ import (
 
 // TestCUDAGLMDsaCPUOffloadHybrid is the on-DEVICE witness for the --n-cpu-moe CPU-offload hybrid
 // (Session.CPUOffloadExperts, moe_offload.go): with the cuda backend attached AND offload on, the
-// MoE expert GEMMs must run HOST-resident (the CPU Q8 kernel) while the dense projections + router
-// + DSA attention run on the GPU pure kernels (k_q8_gemm + k_dsa_sparse_attend). This is the real
-// 753B serve split — experts in host RAM, the every-token dense FLOPs on the device — proven on
-// real sm_80, not just the cpu-ref stand-in the moe_offload_test.go suite uses on the agent-host.
+// ROUTED MoE expert GEMMs must run HOST-resident (the CPU Q8 kernel) while the dense projections +
+// router + DSA attention — and the always-on shared expert (#1304) — run on the GPU pure kernels
+// (k_q8_gemm + k_dsa_sparse_attend). This is the real 753B serve split — routed experts in host
+// RAM, the every-token dense FLOPs (plus the shared expert) on the device — proven on real sm_80,
+// not just the cpu-ref stand-in the moe_offload_test.go suite uses on the agent-host.
 //
 // A recordingBackend over the cuda backend makes "which GEMMs reached the GPU" directly observable:
-//   - the all-device baseline (offload off) records the expert shapes [I,H]/[H,I] — experts on GPU;
-//   - the hybrid (offload on) does NOT — the experts moved to host — while it still records the
-//     router [NumExperts,H], an MLA projection [QLoraRank,H], and DSA sparse-attention calls, so the
-//     dense path stayed on the device.
+//   - the all-device baseline (offload off) records the expert shapes [I,H]/[H,I] — routed + shared
+//     experts on GPU;
+//   - the hybrid (offload on) records STRICTLY FEWER expert-shaped GEMMs — the routed experts moved
+//     to host — but still MORE THAN ZERO, because the shared expert stays device-resident (#1304);
+//     it also records the router [NumExperts,H], an MLA projection [QLoraRank,H], and DSA
+//     sparse-attention calls, so the dense path stayed on the device.
 //
-// None of the dense/attention/router/head weights share the expert shapes in this fixture, so a GPU
-// MatMul at [I,H] or [H,I] is unambiguous expert work. The hybrid forward must still match the all-
-// host CPU Q8 reference argmax-exact within the recorded Approx cosine floor (the GPU reduction order
-// differs from the host). A skip (no reachable GPU) is NOT a pass; run on an sm_80+ node via
-// tools/dgx_glm_gpu_witness.sh.
+// The shared and routed experts share the [I,H]/[H,I] shapes, so the routed-vs-shared split is
+// witnessed by the differential COUNT rather than by shape alone (the Q8/Q4_K staged residency
+// reaches the backend through a direct Upload with no upload site/name). A GPU MatMul at [I,H] or
+// [H,I] is therefore no longer unambiguous routed work — the shared expert contributes it by
+// design. The hybrid forward must still match the all-host CPU Q8 reference argmax-exact within the
+// recorded Approx cosine floor (the GPU reduction order differs from the host). A skip (no
+// reachable GPU) is NOT a pass; run on an sm_80+ node via tools/dgx_glm_gpu_witness.sh.
 func TestCUDAGLMDsaCPUOffloadHybrid(t *testing.T) {
 	be, ok := compute.Lookup("cuda")
 	if !ok {
@@ -34,7 +39,7 @@ func TestCUDAGLMDsaCPUOffloadHybrid(t *testing.T) {
 	if _, ok := be.(compute.DSASparseBackend); !ok {
 		t.Fatalf("cuda backend does not implement DSASparseBackend — DSA sparse attention would run host-resident")
 	}
-	// MoE + shared experts so the offload predicate (isExpertWeight) actually fires on real tensors.
+	// MoE + shared experts so the offload predicate (hostOffloadWeight) actually fires on real tensors.
 	path, cfg := writeTinyGLMDsaSafetensorsFixture(t, "F32", true /*tied*/, false /*omitSharedIndexer*/, true /*withMoE*/, true /*withSharedExperts*/)
 	lean, err := LoadSafetensorsQuant(path, cfg) // q8-resident GLM-DSA: dense -> k_q8_gemm, experts -> host qMatRows
 	if err != nil {
@@ -51,18 +56,25 @@ func TestCUDAGLMDsaCPUOffloadHybrid(t *testing.T) {
 	sCPU.Quant = true
 	lCPU := sCPU.Prefill(prompt)
 
-	// All-device baseline (offload OFF): the expert GEMMs DO reach the GPU.
+	// All-device baseline (offload OFF): routed + shared experts reach the GPU.
 	recAll := newRecordingBackend(be)
 	sAll := lean.NewBackendSession(recAll)
 	sAll.Quant = true
 	_ = sAll.Prefill(prompt)
 	sAll.Close()
-	if !recAll.saw(I, H) || !recAll.saw(H, I) {
-		t.Fatalf("all-device baseline did not run expert GEMMs on the GPU (gate/up [%d,%d] seen=%v, down [%d,%d] seen=%v) — probe is broken",
-			I, H, recAll.saw(I, H), H, I, recAll.saw(H, I))
+	baseGateUp, baseDown := recAll.count(I, H), recAll.count(H, I)
+	if baseGateUp == 0 || baseDown == 0 {
+		t.Fatalf("all-device baseline did not run expert GEMMs on the GPU (gate/up [%d,%d] count=%d, down [%d,%d] count=%d) - probe is broken",
+			I, H, baseGateUp, H, I, baseDown)
 	}
 
-	// Hybrid (offload ON): experts host-resident, dense + router + DSA attention on the GPU.
+	// Hybrid (offload ON): ROUTED experts host-resident; the SHARED expert stays device-resident
+	// (#1304), as do dense + router + DSA attention. The Q8/Q4_K staged residency reaches the
+	// backend through a direct Upload (no upload site/name), so the routed-vs-shared split is
+	// witnessed by the differential COUNT of expert-shaped GEMMs: the hybrid runs strictly FEWER
+	// than the baseline (the routed experts left the device) yet still MORE than zero (the shared
+	// expert stayed). This replaces the pre-#1304 assertion that NO expert-shaped GEMM reached the
+	// GPU, which is now false by design because the shared expert shares those shapes.
 	recOff := newRecordingBackend(be)
 	sHy := lean.NewBackendSession(recOff)
 	sHy.Quant = true
@@ -70,18 +82,22 @@ func TestCUDAGLMDsaCPUOffloadHybrid(t *testing.T) {
 	lHy := sHy.Prefill(prompt)
 	sHy.Close()
 
-	if recOff.saw(I, H) || recOff.saw(H, I) {
-		t.Errorf("CPU-offload hybrid still ran expert GEMMs on the GPU (gate/up [%d,%d] seen=%v, down [%d,%d] seen=%v) — experts did NOT offload to host",
-			I, H, recOff.saw(I, H), H, I, recOff.saw(H, I))
+	hyGateUp, hyDown := recOff.count(I, H), recOff.count(H, I)
+	if hyGateUp >= baseGateUp || hyDown >= baseDown {
+		t.Errorf("CPU-offload hybrid ran as many expert GEMMs on the GPU as the all-device baseline (gate/up %d vs %d, down %d vs %d) - routed experts did NOT offload to host",
+			hyGateUp, baseGateUp, hyDown, baseDown)
+	}
+	if hyGateUp == 0 || hyDown == 0 {
+		t.Errorf("CPU-offload hybrid ran NO expert-shaped GEMM on the GPU (gate/up=%d down=%d) - the always-on shared expert must stay DEVICE-resident (#1304)", hyGateUp, hyDown)
 	}
 	if !recOff.saw(cfg.QLoraRank, H) {
-		t.Errorf("CPU-offload hybrid did not run q_a_proj [%d,%d] on the GPU — attention wrongly offloaded", cfg.QLoraRank, H)
+		t.Errorf("CPU-offload hybrid did not run q_a_proj [%d,%d] on the GPU - attention wrongly offloaded", cfg.QLoraRank, H)
 	}
 	if !recOff.saw(cfg.NumExperts, H) {
-		t.Errorf("CPU-offload hybrid did not run the router [%d,%d] on the GPU — dense path wrongly offloaded", cfg.NumExperts, H)
+		t.Errorf("CPU-offload hybrid did not run the router [%d,%d] on the GPU - dense path wrongly offloaded", cfg.NumExperts, H)
 	}
 	if calls, sel := recOff.sparse(); calls == 0 || sel == 0 {
-		t.Errorf("CPU-offload hybrid: DSA sparse attention did not run on the GPU (calls=%d sel=%d) — should stay on the device", calls, sel)
+		t.Errorf("CPU-offload hybrid: DSA sparse attention did not run on the GPU (calls=%d sel=%d) - should stay on the device", calls, sel)
 	}
 
 	// Correctness: the hybrid forward matches the all-host CPU Q8 reference argmax-exact within the

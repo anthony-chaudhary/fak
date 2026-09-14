@@ -118,6 +118,9 @@ func (k *recordingKernel) saw(name string) bool { return k.names[name] > 0 }
 
 // TestSplitKernelRoutesByPredicate proves splitKernel.mul sends a weight to host iff onHost(name),
 // and that it computes the SAME bytes the routed sub-kernel would — the routing is a pure dispatch.
+// It exercises the RUNTIME placement predicate hostOffloadWeight (not the accounting union
+// isExpertWeight), so the shared-expert case pins the #1304 contract: the always-on shared expert
+// stays on the DEVICE while the routed experts offload to host.
 func TestSplitKernelRoutesByPredicate(t *testing.T) {
 	path, cfg := writeTinyGLMDsaSafetensorsFixture(t, "F32", true, false, true /*withMoE*/, true /*withSharedExperts*/)
 	m, err := LoadSafetensors(path, cfg)
@@ -126,9 +129,9 @@ func TestSplitKernelRoutesByPredicate(t *testing.T) {
 	}
 	host := newRecordingKernel(residentKernel{m})
 	device := newRecordingKernel(residentKernel{m})
-	k := splitKernel{host: host, device: device, onHost: isExpertWeight}
+	k := splitKernel{host: host, device: device, onHost: hostOffloadWeight}
 
-	// A representative activation; the exact values do not matter — we assert routing + equality.
+	// A representative activation; the exact values do not matter - we assert routing + equality.
 	H := m.Cfg.HiddenSize
 	x := make([]float32, H)
 	for i := range x {
@@ -143,7 +146,7 @@ func TestSplitKernelRoutesByPredicate(t *testing.T) {
 	}{
 		{expertName(0, 0, "gate_proj.weight"), m.Cfg.IntermediateSize, H, true},
 		{expertName(0, 1, "up_proj.weight"), m.Cfg.IntermediateSize, H, true},
-		{"model.layers.0.mlp.shared_experts.gate_proj.weight", m.Cfg.MoEIntermediateSize * m.Cfg.NSharedExperts, H, true},
+		{"model.layers.0.mlp.shared_experts.gate_proj.weight", m.Cfg.MoEIntermediateSize * m.Cfg.NSharedExperts, H, false}, // shared expert is device-pinned (#1304)
 		{routerName(0), m.Cfg.NumExperts, H, false},
 		{"model.layers.0.self_attn.q_a_proj.weight", m.Cfg.QLoraRank, H, false},
 	}
@@ -209,15 +212,17 @@ func TestGLMDsaCPUOffloadPlacementInvariance(t *testing.T) {
 }
 
 // TestGLMDsaCPUOffloadHybridOverBackend is the real-hybrid witness: with a device backend attached
-// AND CPUOffloadExperts on, the expert GEMMs must LEAVE the device (stay on host RAM) while the
-// dense projections + router + attention stay on it — and the forward must still be correct. A
-// recordingBackend over cpu-ref makes "which weights reached the device" directly observable. The
-// proof is differential: an all-device session (offload off) records the expert shapes; the hybrid
-// session (offload on) does NOT — the experts moved to host — while both record the dense shapes.
-// The hybrid forward stays argmax-exact and within the f32-reduction-order floor vs the all-host
-// reference, so the offload is correct, not just present. On the GPU server the device side is the cuda
-// Q4_K kernel and the host side is the resident Q4_K GEMM; here both are cpu-ref, which is what
-// makes the routing — the only new logic — witnessable without the A100s.
+// AND CPUOffloadExperts on, the ROUTED expert GEMMs must LEAVE the device (stay on host RAM) while
+// the dense projections + router + attention — and the always-on shared expert (#1304) — stay on it,
+// and the forward must still be correct. A recordingBackend over cpu-ref makes "which weights
+// reached the device" directly observable BY NAME: the shared expert and the routed experts share
+// [I,H]/[H,I] shapes in this fixture, so a shape-only probe cannot distinguish them (the pre-#1304
+// bug this test encoded). recordingBackend.UploadClass pairs each weight's upload site
+// ("hal-weight <name>") with its buffer, so MatMul resolves the NAME. The proof is differential: an
+// all-device session (offload off) runs routed + shared expert names on the device; the hybrid
+// session (offload on) runs the SHARED expert name but NONE of the routed ones — the routed experts
+// moved to host — while both run the dense/router names. The hybrid forward stays argmax-exact and
+// within the f32-reduction-order floor vs the all-host reference.
 func TestGLMDsaCPUOffloadHybridOverBackend(t *testing.T) {
 	path, cfg := writeTinyGLMDsaSafetensorsFixture(t, "F32", true, false, true /*withMoE*/, true /*withSharedExperts*/)
 	m, err := LoadSafetensors(path, cfg)
@@ -226,42 +231,55 @@ func TestGLMDsaCPUOffloadHybridOverBackend(t *testing.T) {
 	}
 	prompt := []int{3, 17, 5, 23}
 
-	// Expert tensor shapes in this fixture: gate/up = [I,H], down = [H,I]; shared experts share
-	// these dims (MoEIntermediateSize==IntermediateSize). None of the dense/attention/router/head
-	// weights share either shape (verified by the fixture geometry), so seeing [I,H] or [H,I] on the
-	// backend is unambiguous evidence an EXPERT GEMM ran there.
-	I, H := cfg.IntermediateSize, cfg.HiddenSize
-	expertGateUp := [2]int{I, H}
-	expertDown := [2]int{H, I}
+	routedOnBackend := func(rec *recordingBackend) []string {
+		var out []string
+		for _, name := range rec.namesSeen() {
+			if isRoutedExpertWeight(name) {
+				out = append(out, name)
+			}
+		}
+		return out
+	}
+	sharedOnBackend := func(rec *recordingBackend) []string {
+		var out []string
+		for _, name := range rec.namesSeen() {
+			if isSharedExpertWeight(name) {
+				out = append(out, name)
+			}
+		}
+		return out
+	}
+	const sharedGate = "model.layers.0.mlp.shared_experts.gate_proj.weight"
 
-	// All-device baseline: experts DO reach the backend.
+	// All-device baseline: BOTH routed and shared experts DO reach the backend.
 	recAll := newRecordingBackend(compute.Default())
 	sAll := m.NewBackendSession(recAll)
 	lAll := sAll.Prefill(prompt)
-	if !recAll.saw(expertGateUp[0], expertGateUp[1]) || !recAll.saw(expertDown[0], expertDown[1]) {
-		t.Fatalf("all-device baseline did not run expert GEMMs on the backend (gate/up [%d,%d] seen=%v, down [%d,%d] seen=%v) — probe is broken",
-			expertGateUp[0], expertGateUp[1], recAll.saw(expertGateUp[0], expertGateUp[1]),
-			expertDown[0], expertDown[1], recAll.saw(expertDown[0], expertDown[1]))
+	if len(routedOnBackend(recAll)) == 0 {
+		t.Fatalf("all-device baseline ran NO routed expert on the backend — name probe is broken (seen=%v)", recAll.namesSeen())
+	}
+	if len(sharedOnBackend(recAll)) == 0 {
+		t.Fatalf("all-device baseline ran NO shared expert on the backend — name probe is broken (seen=%v)", recAll.namesSeen())
 	}
 
-	// Hybrid: experts must NOT reach the backend; dense projections + router still must.
+	// Hybrid: the ROUTED experts must NOT reach the backend; the SHARED expert must.
 	recOff := newRecordingBackend(compute.Default())
 	sOff := m.NewBackendSession(recOff)
 	sOff.CPUOffloadExperts = true
 	lOff := sOff.Prefill(prompt)
 
-	if recOff.saw(expertGateUp[0], expertGateUp[1]) || recOff.saw(expertDown[0], expertDown[1]) {
-		t.Errorf("CPU-offload hybrid still ran expert GEMMs on the backend (gate/up [%d,%d] seen=%v, down [%d,%d] seen=%v) — experts did NOT offload to host",
-			expertGateUp[0], expertGateUp[1], recOff.saw(expertGateUp[0], expertGateUp[1]),
-			expertDown[0], expertDown[1], recOff.saw(expertDown[0], expertDown[1]))
+	if routed := routedOnBackend(recOff); len(routed) != 0 {
+		t.Errorf("CPU-offload hybrid ran routed experts on the backend (should be host-offloaded): %v", routed)
 	}
-	// The router ([NumExperts,H]) and an MLA projection ([QLoraRank,H]) prove the dense path stayed
-	// on the device under offload.
-	if !recOff.saw(cfg.NumExperts, H) {
-		t.Errorf("CPU-offload hybrid did not run the router [%d,%d] on the backend — dense path wrongly offloaded", cfg.NumExperts, H)
+	if !recOff.sawName(sharedGate) {
+		t.Errorf("CPU-offload hybrid did NOT run the shared expert %q on the backend — it must stay DEVICE-resident (#1304); shared seen=%v", sharedGate, sharedOnBackend(recOff))
 	}
-	if !recOff.saw(cfg.QLoraRank, H) {
-		t.Errorf("CPU-offload hybrid did not run q_a_proj [%d,%d] on the backend — attention wrongly offloaded", cfg.QLoraRank, H)
+	// The router and an MLA projection prove the dense path stayed on the device under offload.
+	if !recOff.saw(cfg.NumExperts, cfg.HiddenSize) {
+		t.Errorf("CPU-offload hybrid did not run the router [%d,%d] on the backend — dense path wrongly offloaded", cfg.NumExperts, cfg.HiddenSize)
+	}
+	if !recOff.saw(cfg.QLoraRank, cfg.HiddenSize) {
+		t.Errorf("CPU-offload hybrid did not run q_a_proj [%d,%d] on the backend — attention wrongly offloaded", cfg.QLoraRank, cfg.HiddenSize)
 	}
 
 	// Correctness: the hybrid forward matches the all-host reference argmax-exact, within the same
@@ -278,7 +296,7 @@ func TestGLMDsaCPUOffloadHybridOverBackend(t *testing.T) {
 	if d > 1e-3 {
 		t.Fatalf("CPU-offload hybrid forward max|Δ|=%.3e at %d (> 1e-3 f32-order floor) — routing bug", d, at)
 	}
-	t.Logf("GLM-DSA --n-cpu-moe hybrid on backend %q: experts host-offloaded (off the device), router+attention on device; argmax-exact, max|Δ|=%.3e vs all-host", recOff.Name(), d)
+	t.Logf("GLM-DSA --n-cpu-moe hybrid on backend %q: routed experts host-offloaded (off the device), shared expert DEVICE-resident, router+attention on device; argmax-exact, max|Δ|=%.3e vs all-host", recOff.Name(), d)
 }
 
 // TestGLMDsaCPUOffloadRoutesIndexSelection witnesses that the learned-indexer SCORE + top-k SELECTION
