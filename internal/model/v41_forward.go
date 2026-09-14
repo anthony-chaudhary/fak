@@ -9,13 +9,15 @@ package model
 // per-layer [mHC + attention + MoE] -> final norm -> head logits.
 //
 // Scope (gold-plating boundary from #12901): TEXT-forward assembly only. No GPU
-// qualification, no GGUF/checkpoint loading, no streaming, no vision, no DSpark,
-// and no Engram packed-row retrieval (that stage's rows are 264-byte packed FP8
-// streams a weight-free in-memory forward cannot materialize). That omission is
-// fail-closed: a config declaring an Engram layer WITHIN the decoder stack is
-// refused at admission by v41EngramForwardAdmitted, so the assembly never emits
-// non-Engram logits for a model it did not fully run (#13007's remaining seam is
-// wiring the stage; declaring it is no longer silently dropped). The same holds
+// qualification, no GGUF/checkpoint loading, no streaming, no vision, no DSpark.
+// Engram packed-row retrieval is wired as of #13007 (v41_forward_engram.go):
+// a declared in-range Engram layer is admitted only when the model carries a
+// packed-row stage and the three mixing tensors, and the stage is injected at
+// the START of the layer per the reference schedule. That is fail-closed: a
+// config declaring an in-range Engram layer WITHOUT a wired row source is
+// refused at admission by v41EngramForwardAdmitted with an error wrapping
+// ErrV41NativeUnsupported, so the assembly never emits non-Engram logits for a
+// model it did not fully run. The same holds
 // for a declared shared-KV source layer (v41KVSourceForwardAdmitted) and a
 // declared compressor/indexer layer (v41CompressIndexForwardAdmitted): the
 // reduced assembly projects a per-layer attn.wkv.weight, executes neither
@@ -186,23 +188,47 @@ func v41RouterConfigFor(cfg Config) (v41RouterConfig, error) {
 // ---- admission -------------------------------------------------------------
 
 // v41EngramForwardAdmitted fails closed when the config declares an Engram layer
-// that lies WITHIN the model's decoder stack. The reduced text assembly does not
-// execute the Engram stage (its packed-row inputs are not materializable
-// weight-free), so silently dropping a declared in-range Engram layer would emit
-// logits for a model the assembly never ran. Declared Engram layers outside
-// [0,NumLayers) are unreachable by this forward and stay admitted, which keeps the
-// reduced oracle fixture (NumLayers=1, EngramLayerIDs [1,14]) runnable. Wiring the
-// real Engram stage is #13007's remaining integration work; until then this is the
-// fail-closed boundary.
-func v41EngramForwardAdmitted(cfg Config) error {
-	m := cfg.DeepSeekV41
-	if m == nil {
+// that lies WITHIN the model's decoder stack but the model's Engram stage is not
+// fully wired for it. As of #13007 the reduced text assembly DOES execute
+// packaged-row Engram retrieval (v41_forward_engram.go): a declared in-range
+// Engram layer is admitted only when it has a wired row source and the three
+// mixing tensors (engram_kv.weight, engram_q_norm.weight, engram_k_norm.weight).
+// Otherwise the assembly would emit logits for a model it did not fully run, so
+// the layer is refused with an error wrapping ErrV41NativeUnsupported — the same
+// native-forward-unavailable class the #12967 weightless fence uses, because the
+// Engram stage cannot execute without its packed-row source. Declared Engram
+// layers outside [0,NumLayers) are unreachable by this forward and stay admitted,
+// which keeps the reduced oracle fixture (NumLayers=1, EngramLayerIDs [1,14])
+// runnable.
+//
+// Method receiver (not a bare Config) is required because admission must see
+// whether THIS model carries the packed-row stage; v41ForwardAdmitted calls it
+// after the embedding/manifest checks so a weightless model still fails at the
+// embedding fence with ErrV41NativeUnsupported first.
+func (m *Model) v41EngramForwardAdmitted() error {
+	d41 := m.Cfg.DeepSeekV41
+	if d41 == nil {
 		return nil
 	}
-	for _, layer := range m.EngramLayerIDs {
-		if layer >= 0 && layer < cfg.NumLayers {
+	for _, layer := range d41.EngramLayerIDs {
+		if layer < 0 || layer >= m.Cfg.NumLayers {
+			continue
+		}
+		stage := m.v41EngramStageFor()
+		if stage == nil || stage.cacheIndex(layer) < 0 {
 			return v41StageErr(v41StageEngram, layer,
-				fmt.Errorf("%w: layer %d declares Engram but the reduced forward does not execute the Engram stage", ErrV41ForwardStage, layer))
+				fmt.Errorf("%w: layer %d declares Engram but no packed-row source is wired", ErrV41NativeUnsupported, layer))
+		}
+		cols := stage.columns
+		H := m.Cfg.HiddenSize
+		if err := m.v41AdmitShape(layerName(layer, "engram_kv.weight"), v41StageEngram, layer, cols*stage.headDim, (stage.hc+1)*H); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(layer, "engram_q_norm.weight"), v41StageEngram, layer, stage.hc*H); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(layer, "engram_k_norm.weight"), v41StageEngram, layer, stage.hc*H); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -350,7 +376,7 @@ func (m *Model) v41ForwardAdmitted() error {
 	if _, err := v41RouterConfigFor(cfg); err != nil {
 		return err
 	}
-	if err := v41EngramForwardAdmitted(cfg); err != nil {
+	if err := m.v41EngramForwardAdmitted(); err != nil {
 		return err
 	}
 	if err := v41CompressIndexForwardAdmitted(cfg); err != nil {
@@ -519,7 +545,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (*Activations, error)
 
 	act := &Activations{Seq: len(seq), Hidden: [][]float32{flatten(x)}}
 	for l := 0; l < cfg.NumLayers; l++ {
-		if err := m.v41Layer(l, x, hd, nH, H, eps, hcIters, hcEps, routeCfg, st); err != nil {
+		if err := m.v41Layer(l, seq, x, hd, nH, H, eps, hcIters, hcEps, routeCfg, st); err != nil {
 			return nil, err
 		}
 		act.Hidden = append(act.Hidden, flatten(x))
@@ -536,9 +562,24 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (*Activations, error)
 	return act, nil
 }
 
-// v41Layer applies one reduced V4.1 decoder layer to x in place.
-func (m *Model) v41Layer(l int, x [][]float32, hd, nH, H int, eps float32, hcIters int, hcEps float32, routeCfg v41RouterConfig, st *v41ForwardState) error {
+// v41Layer applies one reduced V4.1 decoder layer to x in place. tokens carries
+// the ids for the positions in x so a declared Engram layer can hash them.
+func (m *Model) v41Layer(l int, tokens []int, x [][]float32, hd, nH, H int, eps float32, hcIters int, hcEps float32, routeCfg v41RouterConfig, st *v41ForwardState) error {
 	cfg := m.Cfg
+
+	// Engram injection happens at the START of the layer, into the residual,
+	// before attention and before attn_norm (ds41_graph_before_attention).
+	if cfg.DeepSeekV41 != nil {
+		for _, eng := range cfg.DeepSeekV41.EngramLayerIDs {
+			if eng == l {
+				if err := m.v41EngramInject(l, x, tokens, eps); err != nil {
+					return err
+				}
+				break
+			}
+		}
+	}
+
 	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
 	ffnNorm := m.tensor(layerName(l, "ffn_norm.weight"))
 	wMix := m.tensor(layerName(l, "mhc.mixes.weight"))

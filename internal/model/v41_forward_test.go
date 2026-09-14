@@ -27,6 +27,7 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"testing"
 )
@@ -397,22 +398,30 @@ func TestV41Forward(t *testing.T) {
 }
 
 // TestV41ForwardEngramDeclaredFailsClosed is the #13007 fail-closed witness: the
-// reduced assembly does not execute the Engram stage, so a config that declares
-// an Engram layer WITHIN the model's layer range must refuse rather than silently
-// emit non-Engram logits as if Engram were absent. Out-of-range declared Engram
-// layers (the reduced oracle fixture: NumLayers=1 with EngramLayerIDs [1,14]) stay
-// admitted, because the assembly never reaches them.
+// reduced assembly now EXECUTES the Engram stage when it is wired, so a config
+// that declares an Engram layer WITHIN the model's layer range but carries no
+// packed-row source must refuse rather than silently emit non-Engram logits as if
+// Engram were absent. Out-of-range declared Engram layers (the reduced oracle
+// fixture: NumLayers=1 with EngramLayerIDs [1,14]) stay admitted, because the
+// assembly never reaches them.
+//
+// Error-class note (#13007): before this leaf the in-range declaration wrapped
+// ErrV41ForwardStage. It now wraps ErrV41NativeUnsupported, because the stage
+// cannot execute without its packed-row source — the same native-forward-
+// unavailable class the #12967 weightless fence uses. The intent is unchanged:
+// the model still fails closed and emits no logits.
 func TestV41ForwardEngramDeclaredFailsClosed(t *testing.T) {
-	// In-range declaration: layer 0 is inside the single reduced decoder layer.
+	// In-range declaration with no wired row source: layer 0 is inside the
+	// single reduced decoder layer and has no stage, so it must refuse.
 	declared := v41ReducedModel(t)
 	declared.Cfg.DeepSeekV41.EngramLayerIDs = []int{0}
 	declared.Cfg.DeepSeekV41.EngramNumEmbeddings = []int{8}
 
-	if err := declared.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
-		t.Fatalf("in-range Engram admission error = %v, want ErrV41ForwardStage", err)
+	if err := declared.v41ForwardAdmitted(); !errors.Is(err, ErrV41NativeUnsupported) {
+		t.Fatalf("in-range Engram admission error = %v, want ErrV41NativeUnsupported", err)
 	}
-	if err := panicAsError(func() { _ = declared.Forward([]int{1, 2}) }); !errors.Is(err, ErrV41ForwardStage) {
-		t.Fatalf("in-range Engram Forward panic = %v, want ErrV41ForwardStage", err)
+	if err := panicAsError(func() { _ = declared.Forward([]int{1, 2}) }); !errors.Is(err, ErrV41NativeUnsupported) {
+		t.Fatalf("in-range Engram Forward panic = %v, want ErrV41NativeUnsupported", err)
 	}
 
 	// The reduced oracle fixture declares only out-of-range Engram layers, so the
@@ -516,6 +525,510 @@ func TestV41ForwardHCMultDeclaredFailsClosed(t *testing.T) {
 	}
 	if err := reduced.v41ForwardAdmitted(); err != nil {
 		t.Fatalf("hc_mult=4 admission error = %v, want nil", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// #13007 Engram retrieval witness
+//
+// This section wires a synthetic packed-row Engram stage into a variant of the
+// reduced fixture and checks the production injection against an independent
+// scalar transcription of the reference schedule (antirez/ds4 @ bd66c402,
+// ds41_graph_before_attention + kernel_dsv41_engram_add). The reference's
+// four-stream residual is reduced to the single stand-in vector exactly as
+// v41_forward_engram.go documents: x[t][i] += sum_s bf16(gate_s * bf16(value[i])).
+// The oracle re-transcribes the dequant/projection/gate/mix itself; it reuses
+// only GatherV41EngramRows (the retrieval primitive under test) and the generic
+// cpuOracle* scalar primitives.
+// ---------------------------------------------------------------------------
+
+// v41EngramTestLayout is the synthetic hash layout for the reduced Engram
+// fixture: one table, MaxNgramSize=4, HeadsPerNgram=8 (so cols=24), and 24 primes
+// of 2 giving 48 rows.
+func v41EngramTestLayout(cfg Config) V41EngramLayout {
+	primes := make([]uint32, 24)
+	for i := range primes {
+		primes[i] = 2
+	}
+	tokenMap := make([]uint32, cfg.VocabSize)
+	for i := range tokenMap {
+		tokenMap[i] = uint32(i % 4)
+	}
+	return V41EngramLayout{
+		TokenMap:        tokenMap,
+		CompressedVocab: 4,
+		PadID:           0,
+		Rows:            []uint32{48},
+		Multipliers:     [][]uint64{{17, 13, 19, 11}},
+		Primes:          [][]uint32{primes},
+		MaxNgramSize:    4,
+		HeadsPerNgram:   8,
+	}
+}
+
+// v41EngramTestPackedRows fills rows valid packed rows: 256 E4M3 codes that are
+// never the NaN byte, plus 8 E8M0 scale bytes in [120,127] that are never 0xff.
+func v41EngramTestPackedRows(rows int) []byte {
+	out := make([]byte, rows*V41EngramPackedRowBytes)
+	for r := 0; r < rows; r++ {
+		for j := 0; j < 256; j++ {
+			code := byte((r*131 + j*7 + 3) & 0x7f)
+			if code == 127 {
+				code = 126
+			}
+			out[r*V41EngramPackedRowBytes+j] = code
+		}
+		for s := 0; s < 8; s++ {
+			out[r*V41EngramPackedRowBytes+256+s] = byte(120 + (r+s)%8)
+		}
+	}
+	return out
+}
+
+// v41EngramMemorySource is an in-memory V41EngramRowSource over fixed packed rows.
+type v41EngramMemorySource struct {
+	packed []byte
+	rows   int
+}
+
+func (s *v41EngramMemorySource) RowBytes() int { return V41EngramPackedRowBytes }
+
+func (s *v41EngramMemorySource) ReadRows(start, count int, dst []byte) (int, error) {
+	if start < 0 || count <= 0 || start+count > s.rows {
+		return 0, fmt.Errorf("engram memory source: range [%d,%d) outside [0,%d)", start, start+count, s.rows)
+	}
+	n := count * V41EngramPackedRowBytes
+	copy(dst, s.packed[start*V41EngramPackedRowBytes:start*V41EngramPackedRowBytes+n])
+	return n, nil
+}
+
+// v41ReducedEngramModel builds a two-layer reduced fixture whose in-range layer 1
+// is a declared Engram layer with the three mixing tensors and a wired synthetic
+// packed-row source. Engram geometry: MaxNgramSize=4, NHeads=8 (cols=24),
+// HeadDim=H=64, hc=4.
+func v41ReducedEngramModel(t *testing.T) (*Model, V41EngramLayout) {
+	t.Helper()
+	cfg := v41TestReducedConfig(t, 2, V41RouterExperts)
+	cfg.NumExpertsPerTok = V41RouterTopK
+	cfg.NSharedExperts = 1
+	cfg.RoutedScalingFactor = 1.5
+	cfg.RopeScaling = ""
+	cfg.LongRope = nil
+	cfg.RopeFactor = 0
+	cfg.RopeOrigContext = 0
+	if cfg.RopeTheta == 0 {
+		cfg.RopeTheta = 10000
+	}
+	cfg.DeepSeekV41.EngramLayerIDs = []int{1}
+	cfg.DeepSeekV41.EngramNumEmbeddings = []int{48}
+	cfg.DeepSeekV41.EngramMaxNgramSize = 4
+	cfg.DeepSeekV41.EngramNHeads = 8
+	cfg.DeepSeekV41.EngramHeadDim = cfg.HiddenSize
+
+	H := cfg.HiddenSize
+	I := cfg.MoEIntermediateSize
+	hd := cfg.HeadDim
+	nH := cfg.NumHeads
+	qHeadDim := nH * hd
+	oDim := cfg.OLoraRank * cfg.OGroups
+	cols := (cfg.DeepSeekV41.EngramMaxNgramSize - 1) * cfg.DeepSeekV41.EngramNHeads
+
+	type ts = synthTensor
+	tensors := []ts{
+		{"model.embed_tokens.weight", []int{cfg.VocabSize, H}},
+		{"lm_head.weight", []int{cfg.VocabSize, H}},
+		{"model.norm.weight", []int{H}},
+	}
+	for l := 0; l < cfg.NumLayers; l++ {
+		tensors = append(tensors,
+			ts{layerName(l, "attn_norm.weight"), []int{H}},
+			ts{layerName(l, "ffn_norm.weight"), []int{H}},
+			ts{layerName(l, "mhc.mixes.weight"), []int{v41MHCMixWidth, H}},
+			ts{layerName(l, "mhc.base"), []int{v41MHCMixWidth}},
+			ts{layerName(l, "mhc.scale"), []int{3}},
+			ts{layerName(l, "attn.wq_a.weight"), []int{cfg.QLoraRank, H}},
+			ts{layerName(l, "attn.wq_b.weight"), []int{qHeadDim, cfg.QLoraRank}},
+			ts{layerName(l, "attn.wkv.weight"), []int{v41KVLoraRankReduced(cfg), H}},
+			ts{layerName(l, "attn.wo_a.weight"), []int{cfg.OLoraRank, qHeadDim}},
+			ts{layerName(l, "attn.wo_b.weight"), []int{H, oDim}},
+			ts{layerName(l, "attn.sink"), []int{nH}},
+			ts{layerName(l, "ffn.gate.weight"), []int{cfg.NumExperts, H}},
+			ts{layerName(l, "ffn.gate.e_score_correction_bias"), []int{cfg.NumExperts}},
+			ts{layerName(l, "ffn.shared_experts.w1.weight"), []int{I, H}},
+			ts{layerName(l, "ffn.shared_experts.w3.weight"), []int{I, H}},
+			ts{layerName(l, "ffn.shared_experts.w2.weight"), []int{H, I}},
+		)
+		for e := 0; e < cfg.NumExperts; e++ {
+			stem := "ffn.experts." + itoa(e)
+			tensors = append(tensors,
+				ts{layerName(l, stem+".w1.weight"), []int{I, H}},
+				ts{layerName(l, stem+".w3.weight"), []int{I, H}},
+				ts{layerName(l, stem+".w2.weight"), []int{H, I}},
+			)
+		}
+	}
+	// The Engram mixing tensors at the in-range Engram layer.
+	for _, id := range cfg.DeepSeekV41.EngramLayerIDs {
+		tensors = append(tensors,
+			ts{layerName(id, "engram_kv.weight"), []int{cols * cfg.DeepSeekV41.EngramHeadDim, (4 + 1) * H}},
+			ts{layerName(id, "engram_q_norm.weight"), []int{4 * H}},
+			ts{layerName(id, "engram_k_norm.weight"), []int{4 * H}},
+		)
+	}
+
+	man, raw := synthBuildRaw(tensors, func(name string, next func() float32) float32 {
+		switch {
+		case name == "model.norm.weight" || hasSuffix(name, "attn_norm.weight") || hasSuffix(name, "ffn_norm.weight"):
+			return 1.0
+		case hasSuffix(name, "mhc.scale"):
+			return 1.0
+		case hasSuffix(name, "mhc.base"):
+			return 0.0
+		case hasSuffix(name, "attn.sink"):
+			return 0.25 * next()
+		default:
+			return synthMatmulFill(name, next)
+		}
+	})
+	m := &Model{Cfg: cfg, manifest: man, raw: raw}
+
+	layout := v41EngramTestLayout(cfg)
+	src := &v41EngramMemorySource{packed: v41EngramTestPackedRows(int(layout.Rows[0])), rows: int(layout.Rows[0])}
+	if err := m.wireV41Engram(layout, []V41EngramRowSource{src}, int64(V41EngramPackedRowBytes)*4); err != nil {
+		t.Fatalf("wire Engram stage: %v", err)
+	}
+	return m, layout
+}
+
+// v41OracleBF16 is an independent bf16 round-half-to-even (mirrors dsv41_bf16).
+func v41OracleBF16(x float32) float32 {
+	bits := math.Float32bits(x)
+	if bits&0x7f800000 != 0x7f800000 {
+		bits += 0x7fff + ((bits >> 16) & 1)
+	}
+	return math.Float32frombits(bits & 0xffff0000)
+}
+
+// v41OracleEngramDequant decodes one packed row independently of production.
+func v41OracleEngramDequant(t *testing.T, row []byte, dim int) []float32 {
+	t.Helper()
+	if len(row) != V41EngramPackedRowBytes {
+		t.Fatalf("packed row %d bytes, want %d", len(row), V41EngramPackedRowBytes)
+	}
+	out := make([]float32, dim)
+	for j := 0; j < dim; j++ {
+		code := row[j]
+		scale := row[256+j/32]
+		if code&127 == 127 || scale == 255 {
+			t.Fatalf("invalid packed row byte at %d", j)
+		}
+		out[j] = v41OracleBF16(fp8E4M3ToF32(code) * float32(math.Ldexp(1, int(scale)-127)))
+	}
+	return out
+}
+
+// v41OracleEngramInject is the independent scalar transcription of the reference
+// Engram add for one in-range layer, into the single stand-in residual vector.
+func v41OracleEngramInject(t *testing.T, m *Model, layout V41EngramLayout, l int, x [][]float32, ids []int, eps float32) {
+	t.Helper()
+	cfg := m.Cfg
+	H := cfg.HiddenSize
+	dim := cfg.DeepSeekV41.EngramHeadDim
+	hc := 4
+	cols := (layout.MaxNgramSize - 1) * layout.HeadsPerNgram
+
+	stage := m.v41EngramStageFor()
+	if stage == nil {
+		t.Fatal("oracle: Engram stage not wired")
+	}
+	hash, err := NewV41EngramHashState(layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allRows, err := hash.Hash(ids, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	layers := len(layout.Rows)
+	cacheIdx := stage.cacheIndex(l)
+	layerRows := make([]uint32, 0, len(ids)*cols)
+	for tt := range ids {
+		base := tt*layers*cols + cacheIdx*cols
+		layerRows = append(layerRows, allRows[base:base+cols]...)
+	}
+	gathered, err := GatherV41EngramRows([]*V41EngramRowCache{stage.caches[cacheIdx]}, layerRows, cols)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wKV := cpuOracleTensor(t, m, layerName(l, "engram_kv.weight"))
+	qNorm := cpuOracleTensor(t, m, layerName(l, "engram_q_norm.weight"))
+	kNorm := cpuOracleTensor(t, m, layerName(l, "engram_k_norm.weight"))
+
+	for tt := range ids {
+		rowVec := make([]float32, cols*dim)
+		for c := 0; c < cols; c++ {
+			copy(rowVec[c*dim:], v41OracleEngramDequant(t, gathered[tt*cols+c], dim))
+		}
+		projected := cpuOracleMatVec(wKV, rowVec, (hc+1)*H, cols*dim)
+		value := make([]float32, H)
+		for i := 0; i < H; i++ {
+			value[i] = v41OracleBF16(projected[hc*H+i])
+		}
+		h := x[tt]
+		acc := make([]float64, H)
+		for s := 0; s < hc; s++ {
+			key := make([]float32, H)
+			var h2, k2, dot float64
+			for i := 0; i < H; i++ {
+				key[i] = v41OracleBF16(projected[s*H+i])
+				hh := float64(h[i])
+				kk := float64(key[i])
+				h2 += hh * hh
+				k2 += kk * kk
+				dot += hh * float64(qNorm[s*H+i]) * float64(kNorm[s*H+i]) * kk
+			}
+			dot *= 1 / math.Sqrt(h2/float64(H)+float64(eps))
+			dot *= 1 / math.Sqrt(k2/float64(H)+float64(eps))
+			dot *= 1 / math.Sqrt(float64(H))
+			gate := 1 / (1 + math.Exp(-math.Copysign(math.Sqrt(math.Max(math.Abs(dot), 1e-6)), dot)))
+			for i := 0; i < H; i++ {
+				acc[i] += float64(v41OracleBF16(float32(gate) * value[i]))
+			}
+		}
+		for i := 0; i < H; i++ {
+			h[i] += float32(acc[i])
+		}
+	}
+}
+
+// v41OracleEngramForward mirrors v41OracleForward with the Engram injection at
+// the start of every declared in-range Engram layer.
+func v41OracleEngramForward(t *testing.T, m *Model, layout V41EngramLayout, ids []int) [][]float32 {
+	t.Helper()
+	cfg := m.Cfg
+	H, hd, nH := cfg.HiddenSize, cfg.HeadDim, cfg.NumHeads
+	eps := float32(cfg.RMSNormEps)
+	seq := len(ids)
+
+	tensor := func(name string) []float32 { return cpuOracleTensor(t, m, name) }
+	embed := tensor("model.embed_tokens.weight")
+	x := make([][]float32, seq)
+	for tt, id := range ids {
+		x[tt] = append([]float32(nil), embed[id*H:(id+1)*H]...)
+	}
+
+	scale := float32(1.0 / math.Sqrt(float64(hd)))
+	hcIters := 1
+	hcEps := float64(1e-6)
+	if cfg.DeepSeekV41 != nil {
+		if cfg.DeepSeekV41.HCSinkhornIters > 0 {
+			hcIters = cfg.DeepSeekV41.HCSinkhornIters
+		}
+		if cfg.DeepSeekV41.HCEps > 0 {
+			hcEps = cfg.DeepSeekV41.HCEps
+		}
+	}
+	routeScale := cfg.RoutedScalingFactor
+	if routeScale == 0 {
+		routeScale = 1.5
+	}
+
+	for l := 0; l < cfg.NumLayers; l++ {
+		if cfg.DeepSeekV41 != nil {
+			for _, eng := range cfg.DeepSeekV41.EngramLayerIDs {
+				if eng == l {
+					v41OracleEngramInject(t, m, layout, l, x, ids, eps)
+					break
+				}
+			}
+		}
+
+		attnNorm := tensor(layerName(l, "attn_norm.weight"))
+		ffnNorm := tensor(layerName(l, "ffn_norm.weight"))
+		wMix := tensor(layerName(l, "mhc.mixes.weight"))
+		mixBase := tensor(layerName(l, "mhc.base"))
+		mixScale := tensor(layerName(l, "mhc.scale"))
+		wQA := tensor(layerName(l, "attn.wq_a.weight"))
+		wQB := tensor(layerName(l, "attn.wq_b.weight"))
+		wKV := tensor(layerName(l, "attn.wkv.weight"))
+		woA := tensor(layerName(l, "attn.wo_a.weight"))
+		woB := tensor(layerName(l, "attn.wo_b.weight"))
+		sink := tensor(layerName(l, "attn.sink"))
+		wGate := tensor(layerName(l, "ffn.gate.weight"))
+		gateBias := tensor(layerName(l, "ffn.gate.e_score_correction_bias"))
+		shW1 := tensor(layerName(l, "ffn.shared_experts.w1.weight"))
+		shW3 := tensor(layerName(l, "ffn.shared_experts.w3.weight"))
+		shW2 := tensor(layerName(l, "ffn.shared_experts.w2.weight"))
+
+		preByPos := make([][]float32, seq)
+		pre := make([][]float64, seq)
+		post := make([][]float64, seq)
+		comb := make([][]float64, seq)
+		for tt := 0; tt < seq; tt++ {
+			xn := cpuOracleRMSNorm(x[tt], attnNorm, eps)
+			mixes := cpuOracleMatVec(wMix, xn, v41MHCMixWidth, H)
+			mixF := toF64(mixes)
+			baseF := toF64(mixBase)
+			scaleF := toF64(mixScale)
+			p, po, c := oracleV41MHCKernel(mixF, scaleF, baseF, 4, hcIters, hcEps)
+			pre[tt], post[tt], comb[tt] = p, po, c
+			streams := [][]float64{toF64(xn), toF64(xn), toF64(xn), toF64(xn)}
+			collapsed := oracleV41MHCPre(streams, p)
+			preByPos[tt] = toF32(collapsed)
+		}
+
+		qHeads := make([][]float32, seq)
+		kvRows := make([][]float32, seq)
+		for tt := 0; tt < seq; tt++ {
+			c := preByPos[tt]
+			qLat := cpuOracleMatVec(wQA, c, cfg.QLoraRank, H)
+			q := cpuOracleMatVec(wQB, qLat, nH*hd, cfg.QLoraRank)
+			kv := cpuOracleMatVec(wKV, c, hd, H)
+			for h := 0; h < nH; h++ {
+				cpuOracleRope(q[h*hd:(h+1)*hd], tt, hd, cfg.RopeTheta)
+			}
+			cpuOracleRope(kv, tt, hd, cfg.RopeTheta)
+			qHeads[tt] = q
+			kvRows[tt] = kv
+		}
+
+		attnOut := make([][]float32, seq)
+		for tt := 0; tt < seq; tt++ {
+			rows := tt + 1
+			o := make([]float32, nH*hd)
+			for h := 0; h < nH; h++ {
+				qh := qHeads[tt][h*hd : (h+1)*hd]
+				maxScore := float64(sink[h])
+				dots := make([]float64, rows)
+				for i := 0; i < rows; i++ {
+					var d float64
+					for j := 0; j < hd; j++ {
+						d += float64(qh[j]) * float64(kvRows[i][j])
+					}
+					d *= float64(scale)
+					dots[i] = d
+					if d > maxScore {
+						maxScore = d
+					}
+				}
+				sum := math.Exp(float64(sink[h]) - maxScore)
+				for i := 0; i < rows; i++ {
+					sum += math.Exp(dots[i] - maxScore)
+				}
+				if sum == 0 {
+					continue
+				}
+				for i := 0; i < rows; i++ {
+					w := math.Exp(dots[i]-maxScore) / sum
+					for j := 0; j < hd; j++ {
+						o[h*hd+j] += float32(w * float64(kvRows[i][j]))
+					}
+				}
+			}
+			attnOut[tt] = v41OracleGroupedOutput(o, woA, woB, nH, hd, cfg.OGroups, cfg.OLoraRank, H)
+		}
+
+		for tt := 0; tt < seq; tt++ {
+			xn := cpuOracleRMSNorm(x[tt], ffnNorm, eps)
+			router := cpuOracleMatVec(wGate, xn, cfg.NumExperts, H)
+			logits := toF64(router)
+			bias := toF64(gateBias)
+			picks, weights := oracleV41Route(logits, bias, cfg.NumExpertsPerTok, routeScale)
+			routed := make([]float64, H)
+			for pi, e := range picks {
+				stem := "ffn.experts." + itoa(e)
+				w1 := tensor(layerName(l, stem+".w1.weight"))
+				w3 := tensor(layerName(l, stem+".w3.weight"))
+				w2 := tensor(layerName(l, stem+".w2.weight"))
+				y := oracleSwiGLU(w1, w3, w2, xn, cfg.MoEIntermediateSize, H)
+				for d := range routed {
+					routed[d] += weights[pi] * y[d]
+				}
+			}
+			shared := oracleSwiGLU(shW1, shW3, shW2, xn, cfg.MoEIntermediateSize, H)
+			moe := oracleV41SharedExpertAdd(routed, shared)
+
+			delta := make([]float64, H)
+			for i := 0; i < H; i++ {
+				delta[i] = float64(attnOut[tt][i]) + moe[i]
+			}
+			streams := [][]float64{toF64(preByPos[tt]), toF64(preByPos[tt]), toF64(preByPos[tt]), toF64(preByPos[tt])}
+			next := oracleV41MHCPost(delta, streams, post[tt], comb[tt], 4, false)
+			copy(x[tt], toF32(next[0]))
+		}
+	}
+
+	norm := tensor("model.norm.weight")
+	head := tensor("lm_head.weight")
+	logits := make([][]float32, seq)
+	for tt := 0; tt < seq; tt++ {
+		xf := cpuOracleRMSNorm(x[tt], norm, eps)
+		logits[tt] = cpuOracleMatVec(head, xf, cfg.VocabSize, H)
+	}
+	return logits
+}
+
+// TestV41EngramRetrievalForward is the #13007 acceptance witness: at a declared
+// in-range Engram layer the reduced assembly retrieves, dequantizes, projects,
+// gates, and mixes the packed rows, and its logits match the independent scalar
+// oracle within cpuOracleTol. It also proves the injection is live (not a no-op)
+// by comparing against the same model with the Engram layer moved out of range.
+func TestV41EngramRetrievalForward(t *testing.T) {
+	m, layout := v41ReducedEngramModel(t)
+	ids := []int{1, 3, 5}
+
+	if err := m.v41ForwardAdmitted(); err != nil {
+		t.Fatalf("admission with wired Engram stage = %v, want nil", err)
+	}
+	act := m.Forward(ids)
+	if act == nil || len(act.Logits) != len(ids) {
+		t.Fatalf("Forward returned %v positions, want %d", act, len(ids))
+	}
+	want := v41OracleEngramForward(t, m, layout, ids)
+	for tPos := range ids {
+		v41LogitsClose(t, "engram-forward", act.Logits[tPos], want[tPos])
+	}
+
+	// Live-injection control: move the Engram layer out of range on the same
+	// weights and confirm the logits DIFFER, so a silently skipped stage would
+	// fail this test.
+	off, _ := v41ReducedEngramModel(t)
+	off.Cfg.DeepSeekV41.EngramLayerIDs = []int{99}
+	off.Cfg.DeepSeekV41.EngramNumEmbeddings = []int{48}
+	baseline := off.Forward(ids)
+	if baseline == nil || len(baseline.Logits) != len(ids) {
+		t.Fatalf("out-of-range Forward returned %v positions", baseline)
+	}
+	changed := false
+	for tPos := range ids {
+		for i := range act.Logits[tPos] {
+			if math.Abs(float64(act.Logits[tPos][i]-baseline.Logits[tPos][i])) > cpuOracleTol {
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		t.Fatal("Engram injection did not change the logits; the stage is a no-op")
+	}
+}
+
+// TestV41EngramNoSourceFailsClosed is the #13007 negative witness: an in-range
+// declared Engram layer with no wired row source must refuse at admission AND at
+// Forward with ErrV41NativeUnsupported, and emit no logits.
+func TestV41EngramNoSourceFailsClosed(t *testing.T) {
+	m, _ := v41ReducedEngramModel(t)
+	// Drop the stage to model an in-range declaration whose source is absent.
+	v41EngramStages.Delete(m)
+
+	if err := m.v41ForwardAdmitted(); !errors.Is(err, ErrV41NativeUnsupported) {
+		t.Fatalf("unwired Engram admission error = %v, want ErrV41NativeUnsupported", err)
+	}
+	if errors.Is(m.v41ForwardAdmitted(), ErrV41ForwardStage) {
+		t.Fatal("unwired Engram error incorrectly reported ErrV41ForwardStage")
+	}
+	if err := panicAsError(func() { _ = m.Forward([]int{1, 2}) }); !errors.Is(err, ErrV41NativeUnsupported) {
+		t.Fatalf("unwired Engram Forward panic = %v, want ErrV41NativeUnsupported", err)
 	}
 }
 
