@@ -605,10 +605,11 @@ func (s *WeightSource) EstimateQ8LoadMemoryPlan() (compute.MemoryPlan, error) {
 }
 
 // EstimateCPUOffloadExpertsMemoryPlan estimates the --cpu-offload-experts placement without
-// reading tensor payloads. Dense/router/attention tensors remain device-scoped weights; routed
-// and shared expert tensors are host-scoped offload bytes. The partition uses the same canonical
-// tensor names as the runtime split kernel (model.CPUOffloadExpertWeight), with GLM-DSA's batched
-// routed-expert GGUF blobs classified before their loader-time 1->E split.
+// reading tensor payloads. Dense/router/attention tensors remain device-scoped weights; ONLY the
+// routed expert tensors are host-scoped offload bytes (the always-on shared expert stays
+// device-resident, consistent with the runtime PLACEMENT split #1304). The partition uses the same
+// canonical tensor names as the runtime split kernel (model.hostOffloadWeight), with GLM-DSA's
+// batched routed-expert GGUF blobs classified before their loader-time 1->E split.
 func (s *WeightSource) EstimateCPUOffloadExpertsMemoryPlan() (compute.MemoryPlan, error) {
 	return s.estimateCPUOffloadExpertsMemoryPlan(1)
 }
@@ -765,6 +766,15 @@ func ggufMemoryPlanByDType(class compute.MemoryClass, scope compute.MemoryScope,
 	return plan, nil
 }
 
+// isSharedExpertCanonicalName matches the ALWAYS-ON shared-expert projections by their canonical
+// HF spelling, model.layers.<l>.mlp.shared_experts.{gate,up,down}_proj.weight. It mirrors the
+// unexported model.isSharedExpertWeight predicate (internal/model/moe_offload.go) on the same
+// ".mlp.shared_experts." substring, so the load-time planner and the runtime PLACEMENT split agree
+// on the shared expert's home: DEVICE-resident, never the host-scoped routed-expert pool (#1304).
+func isSharedExpertCanonicalName(name string) bool {
+	return strings.Contains(name, ".mlp.shared_experts.")
+}
+
 func tensorCPUOffloadExpert(name, modelType string) (bool, error) {
 	// The MTP ("nextn") head + vision tower carry no canonical HF mapping. Classify them as
 	// non-expert (never a mapping error) via the UNGATED union: when model.RetainMTP retains
@@ -784,9 +794,19 @@ func tensorCPUOffloadExpert(name, modelType string) (bool, error) {
 			return true, nil
 		}
 	}
+	// The shared expert is active on EVERY token (hit rate 1.0), so the runtime pins it
+	// DEVICE-resident (#1304); the load-time planner must agree. Classify it device-scoped
+	// BEFORE the CPUOffloadExpertWeight union, which deliberately still counts the shared
+	// expert against the expert block for byte accounting (see CPUOffloadExpertWeight's doc).
+	if isSharedExpertCanonicalName(name) {
+		return false, nil
+	}
 	canon, ok := CanonicalTensorNameArch(name, modelType)
 	if !ok {
 		return false, fmt.Errorf("gguf: no canonical mapping for tensor %s", name)
+	}
+	if isSharedExpertCanonicalName(canon) {
+		return false, nil
 	}
 	return model.CPUOffloadExpertWeight(canon), nil
 }

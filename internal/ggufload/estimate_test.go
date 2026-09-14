@@ -277,7 +277,7 @@ func TestEstimateCPUOffloadExpertsMemoryPlanSplitsDeviceAndHost(t *testing.T) {
 			{Name: "token_embd.weight", Dims: []uint64{256}, Type: TensorF32},               // device, 1024 B
 			{Name: "blk.0.ffn_gate_inp.weight", Dims: []uint64{128}, Type: TensorF32},       // router device, 512 B
 			{Name: "blk.0.attn_k_b.weight", Dims: []uint64{64}, Type: TensorF32},            // KV-b half device, 256 B
-			{Name: "blk.0.ffn_gate_shexp.weight", Dims: []uint64{512}, Type: TensorF32},     // shared expert host, 2048 B
+			{Name: "blk.0.ffn_gate_shexp.weight", Dims: []uint64{512}, Type: TensorF32},     // shared expert device (always-on, #1304), 2048 B
 			{Name: "blk.0.ffn_gate_exps.weight", Dims: []uint64{1024}, Type: TensorF32},     // routed expert blob host, 4096 B
 			{Name: "blk.78.nextn.eh_proj.weight", Dims: []uint64{1 << 20}, Type: TensorF32}, // skipped, counts nowhere
 		},
@@ -291,23 +291,23 @@ func TestEstimateCPUOffloadExpertsMemoryPlanSplitsDeviceAndHost(t *testing.T) {
 		t.Fatalf("EstimateCPUOffloadExpertsMemoryPlan: %v", err)
 	}
 	by := plan.ByClass()
-	if got, want := by[compute.MemoryWeights], int64(1024+512+256); got != want {
-		t.Fatalf("device weights = %d, want %d", got, want)
+	if got, want := by[compute.MemoryWeights], int64(1024+512+256+2048); got != want {
+		t.Fatalf("device weights = %d, want dense/router/attention/shared %d", got, want)
 	}
-	if got, want := by[compute.MemoryOffload], int64(2048+4096); got != want {
-		t.Fatalf("host offload = %d, want %d", got, want)
+	if got, want := by[compute.MemoryOffload], int64(4096); got != want {
+		t.Fatalf("host offload = %d, want routed experts only %d", got, want)
 	}
-	if got, want := plan.DeviceTotal(), int64(1024+512+256); got != want {
-		t.Fatalf("DeviceTotal = %d, want dense/device side only %d", got, want)
+	if got, want := plan.DeviceTotal(), int64(1024+512+256+2048); got != want {
+		t.Fatalf("DeviceTotal = %d, want dense/router/attention/shared %d", got, want)
 	}
 	if got, want := plan.Total(), int64(1024+512+256+2048+4096); got != want {
 		t.Fatalf("Total = %d, want all bytes %d", got, want)
 	}
-	fitsDense := capBackend{total: 2 << 10, free: 2 << 10, known: true}
+	fitsDense := capBackend{total: 5 << 10, free: 5 << 10, known: true}
 	if err := ws.FitCPUOffloadExpertsOnDevice(fitsDense, 0); err != nil {
 		t.Fatalf("fit should ignore host expert bytes and accept dense side: %v", err)
 	}
-	tooSmallForDense := capBackend{total: 1 << 10, free: 1 << 10, known: true}
+	tooSmallForDense := capBackend{total: 3 << 10, free: 3 << 10, known: true}
 	err = ws.FitCPUOffloadExpertsOnDevice(tooSmallForDense, 0)
 	if err == nil {
 		t.Fatal("dense side over device capacity must be refused")
@@ -316,7 +316,7 @@ func TestEstimateCPUOffloadExpertsMemoryPlanSplitsDeviceAndHost(t *testing.T) {
 	if !ok {
 		t.Fatalf("want *compute.FitError, got %T (%v)", err, err)
 	}
-	if fe.Want != 1024+512+256 {
+	if fe.Want != 1024+512+256+2048 {
 		t.Fatalf("FitError Want = %d, want device-only dense side", fe.Want)
 	}
 	if len(fe.Demands) != 2 || fe.Demands[1].Class != compute.MemoryOffload || fe.Demands[1].Scope != compute.MemoryScopeHost {
@@ -337,7 +337,7 @@ func TestEstimateCPUOffloadExpertsExpertParallelShardsHostRoutedExperts(t *testi
 				{Name: "token_embd.weight", Dims: []uint64{256}, Type: TensorF32},               // device, 1024 B
 				{Name: "blk.0.ffn_gate_inp.weight", Dims: []uint64{128}, Type: TensorF32},       // router device, 512 B
 				{Name: "blk.0.attn_k_b.weight", Dims: []uint64{64}, Type: TensorF32},            // KV-b half device, 256 B
-				{Name: "blk.0.ffn_gate_shexp.weight", Dims: []uint64{512}, Type: TensorF32},     // shared expert host, 2048 B, replicated
+				{Name: "blk.0.ffn_gate_shexp.weight", Dims: []uint64{512}, Type: TensorF32},     // shared expert device (always-on, #1304), 2048 B, replicated
 				{Name: "blk.0.ffn_gate_exps.weight", Dims: []uint64{1024}, Type: TensorF32},     // routed blob host, 4096 B over 4 experts
 				{Name: "blk.78.nextn.eh_proj.weight", Dims: []uint64{1 << 20}, Type: TensorF32}, // skipped, counts nowhere
 			},
@@ -348,7 +348,7 @@ func TestEstimateCPUOffloadExpertsExpertParallelShardsHostRoutedExperts(t *testi
 		}
 		return ws
 	}
-	const device = int64(1024 + 512 + 256)
+	const device = int64(1024 + 512 + 256 + 2048)
 	const shared = int64(2048)
 	const routed = int64(4096)
 
@@ -356,8 +356,8 @@ func TestEstimateCPUOffloadExpertsExpertParallelShardsHostRoutedExperts(t *testi
 	if err != nil {
 		t.Fatalf("EstimateCPUOffloadExpertsMemoryPlan: %v", err)
 	}
-	if got, want := full.ByClass()[compute.MemoryOffload], shared+routed; got != want {
-		t.Fatalf("unsharded host offload = %d, want the whole routed set %d", got, want)
+	if got, want := full.ByClass()[compute.MemoryOffload], routed; got != want {
+		t.Fatalf("unsharded host offload = %d, want the routed set only %d (shared expert is device-resident)", got, want)
 	}
 
 	// ranks<=1 is the same plan by construction — the pre-#4952 behaviour of every non-EP serve.
@@ -383,17 +383,18 @@ func TestEstimateCPUOffloadExpertsExpertParallelShardsHostRoutedExperts(t *testi
 			t.Fatalf("EP-%d offload plan: %v", tc.ranks, err)
 		}
 		by := plan.ByClass()
-		if got, want := by[compute.MemoryOffload], shared+tc.band; got != want {
-			t.Fatalf("EP-%d host offload = %d, want replicated shared expert + one routed band %d", tc.ranks, got, want)
+		if got, want := by[compute.MemoryOffload], tc.band; got != want {
+			t.Fatalf("EP-%d host offload = %d, want one routed band %d (shared expert is device-resident)", tc.ranks, got, want)
 		}
-		// The device side is dense/router/attention only, unchanged by sharding: the routed
-		// experts live in host RAM on this arm whether or not the rank holds a band.
+		// The device side is dense/router/attention PLUS the always-on shared expert (#1304),
+		// unchanged by sharding: the routed experts live in host RAM on this arm whether or not
+		// the rank holds a band.
 		if got := plan.DeviceTotal(); got != device {
 			t.Fatalf("EP-%d DeviceTotal = %d, want the unchanged dense side %d", tc.ranks, got, device)
 		}
 		byDetail := memoryPlanBytesByDetail(plan)
-		if got := byDetail["gguf-host-expert-offload"]; got != shared {
-			t.Fatalf("EP-%d replicated host detail = %d, want the shared expert %d; plan=%+v", tc.ranks, got, shared, plan)
+		if got := byDetail["gguf-host-expert-offload"]; got != 0 {
+			t.Fatalf("EP-%d replicated host detail = %d, want 0 (shared expert is device-resident); plan=%+v", tc.ranks, got, plan)
 		}
 		if got := byDetail["gguf-host-expert-offload-shard"]; got != tc.band {
 			t.Fatalf("EP-%d routed host shard detail = %d, want %d; plan=%+v", tc.ranks, got, tc.band, plan)
