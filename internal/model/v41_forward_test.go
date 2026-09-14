@@ -461,3 +461,32 @@ func TestV41ForwardCompressIndexDeclaredFailsClosed(t *testing.T) {
 		t.Fatalf("reduced out-of-range compress/index admission error = %v, want nil", err)
 	}
 }
+
+// TestV41ForwardKVSourceDeclaredFailsClosed is the shared-KV-source fail-closed
+// witness: the reduced assembly projects its own per-layer attn.wkv.weight and
+// never consumes a KV source layer's shared key/value state, so a config that
+// declares a shared-KV source layer WITHIN the model's layer range must refuse
+// rather than silently emit logits from a per-layer KV cache as if the shared
+// source were absent. Out-of-range declared KV sources (the reduced oracle
+// fixture derives from the published 40-layer config but narrows NumLayers to 1,
+// so kv sources {2,8,14,20} are all unreachable) stay admitted, because the
+// assembly never reaches them.
+func TestV41ForwardKVSourceDeclaredFailsClosed(t *testing.T) {
+	// In-range KV source layer 0: must refuse.
+	shared := v41ReducedModel(t)
+	shared.Cfg.DeepSeekV41.KVSourceLayerIDs = []int{0}
+
+	if err := shared.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("in-range KV source admission error = %v, want ErrV41ForwardStage", err)
+	}
+	if err := panicAsError(func() { _ = shared.Forward([]int{1, 2}) }); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("in-range KV source Forward panic = %v, want ErrV41ForwardStage", err)
+	}
+
+	// The reduced oracle fixture declares only out-of-range KV sources (>= 2), so
+	// the existing reduced forward must keep running (no regression).
+	reduced := v41ReducedModel(t)
+	if err := reduced.v41ForwardAdmitted(); err != nil {
+		t.Fatalf("reduced out-of-range KV source admission error = %v, want nil", err)
+	}
+}

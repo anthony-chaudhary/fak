@@ -15,7 +15,12 @@ package model
 // fail-closed: a config declaring an Engram layer WITHIN the decoder stack is
 // refused at admission by v41EngramForwardAdmitted, so the assembly never emits
 // non-Engram logits for a model it did not fully run (#13007's remaining seam is
-// wiring the stage; declaring it is no longer silently dropped). The assembled
+// wiring the stage; declaring it is no longer silently dropped). The same holds
+// for a declared shared-KV source layer (v41KVSourceForwardAdmitted) and a
+// declared compressor/indexer layer (v41CompressIndexForwardAdmitted): the
+// reduced assembly projects a per-layer attn.wkv.weight, executes neither
+// compression stage, and never reuses a shared KV/index source, so an in-range
+// declaration is refused rather than silently run against a per-layer cache. The assembled
 // pass is exercised by a REDUCED model
 // against an independent scalar oracle (v41_forward_test.go); it does not itself
 // qualify the official checkpoint for generation.
@@ -231,6 +236,31 @@ func v41CompressIndexForwardAdmitted(cfg Config) error {
 	return nil
 }
 
+// v41KVSourceForwardAdmitted fails closed when the config declares a shared-KV
+// source layer that lies WITHIN the model's decoder stack. The reduced text
+// assembly projects its own per-layer attn.wkv.weight and never consumes a KV
+// source layer's shared key/value state (the reference's shared KV/index source
+// schedule), so silently running an in-range KV source would emit logits from a
+// per-layer KV cache where the official model reuses a source layer's state.
+// Declarations that only touch out-of-range layers stay admitted, which keeps the
+// reduced oracle fixture runnable: it derives from the published 40-layer config
+// but narrows NumLayers to 1, so every kv source ({2,8,14,20}) is unreachable.
+// Executing the real shared KV source is #12896's remaining integration work;
+// until then this is the fail-closed boundary.
+func v41KVSourceForwardAdmitted(cfg Config) error {
+	m := cfg.DeepSeekV41
+	if m == nil {
+		return nil
+	}
+	for _, layer := range m.KVSourceLayerIDs {
+		if layer >= 0 && layer < cfg.NumLayers {
+			return v41StageErr(v41StageAttention, layer,
+				fmt.Errorf("%w: layer %d declares a shared-KV source but the reduced forward does not execute shared KV/index state", ErrV41ForwardStage, layer))
+		}
+	}
+	return nil
+}
+
 // v41ForwardAdmitted returns nil only when this is an admitted V4.1 config with
 // every required stage's weights present and shape-consistent. It is the gate
 // both Model.Forward and Session.Prefill/Step run before the assembly. A
@@ -270,6 +300,9 @@ func (m *Model) v41ForwardAdmitted() error {
 		return err
 	}
 	if err := v41CompressIndexForwardAdmitted(cfg); err != nil {
+		return err
+	}
+	if err := v41KVSourceForwardAdmitted(cfg); err != nil {
 		return err
 	}
 	H, hd, nH := cfg.HiddenSize, cfg.HeadDim, cfg.NumHeads
