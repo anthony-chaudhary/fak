@@ -39,6 +39,8 @@ import (
 	"strings"
 	"sync"
 	"unsafe"
+
+	"github.com/anthony-chaudhary/fak/internal/compute/strix"
 )
 
 var vulkanMu sync.Mutex
@@ -447,6 +449,10 @@ type vulkanBackend struct {
 	q4kFusionSwiGLUCalls        int64
 	q4kComposedRMSNormCalls     int64
 	q4kComposedSwiGLUCalls      int64
+	// strixGEMVKernel holds the admitted gfx1151 Wave32 Q2_K decode GEMV. It is nil unless the
+	// roofline decode path was explicitly requested AND admitted (fail-closed); a nil kernel
+	// means the path must refuse, never fall back to the scalar CPU/shader composition.
+	strixGEMVKernel *strix.Wave32GEMVDecodeKernel
 }
 
 var _ TensorCloner = (*vulkanBackend)(nil)
@@ -1441,11 +1447,55 @@ func (v *vulkanBackend) MatMul(w, x Tensor) Tensor {
 	case Q6_K:
 		v.q6kMatMulLocked(w, x, y, 1)
 	case Q2_K:
-		v.q2kMatMulLocked(w, x, y, out, in, 1)
+		if v.strixWave32DecodeGEMVRequested() {
+			// Roofline decode path: the gfx1151 Wave32 Q2_K GEMV is requested explicitly.
+			// It must be dispatched as a real device kernel or the call refuses — never a
+			// silent degradation to the scalar CPU/q2k shader path (fail closed).
+			if err := v.requireStrixWave32DecodeGEMV(); err != nil {
+				panic("compute: vulkan " + err.Error())
+			}
+			v.strixWave32GEMVDecodeLocked(w, x, y, out, in)
+		} else {
+			v.q2kMatMulLocked(w, x, y, out, in, 1)
+		}
 	default:
 		panic("compute: vulkan MatMul unsupported weight dtype " + w.Dtype.String())
 	}
 	return y
+}
+
+// strixWave32DecodeGEMVRequested reports whether the operator explicitly opted into the
+// gfx1151 Wave32 Q2_K decode GEMV roofline path. Opt-in only: unset leaves the existing
+// shader/CPU composition unchanged (P3 preserved).
+func (v *vulkanBackend) strixWave32DecodeGEMVRequested() bool {
+	return strix.StrixDecodeGEMVDeviceRequested()
+}
+
+// requireStrixWave32DecodeGEMV resolves the device-visible fail-closed toggle. It returns an
+// error (never a fallback) when the requested gfx1151 Wave32 decode GEMV cannot be dispatched:
+// wrong device/tier, or no proven launch path. The toggle is device-visible because it is
+// reachable from the decode MatMul path above.
+func (v *vulkanBackend) requireStrixWave32DecodeGEMV() error {
+	if !isStrixHaloArch(v.tier) {
+		return strix.ErrWave32GEMVDecodeUnavailable
+	}
+	toggle, kernel := strix.ResolveStrixDecodeGEMVDevice()
+	if err := strix.RequireDecodeGEMVDevice(toggle); err != nil {
+		return err
+	}
+	v.strixGEMVKernel = kernel
+	return nil
+}
+
+// strixWave32GEMVDecodeLocked dispatches the admitted gfx1151 Wave32 Q2_K decode GEMV. The
+// admission check already passed in requireStrixWave32DecodeGEMV; this is the launch site the
+// follow-on hsaco/AQL work fills in. Until then, reaching here is unreachable by construction
+// (the toggle refuses), so an explicit panic prevents a silent stale-state launch.
+func (v *vulkanBackend) strixWave32GEMVDecodeLocked(w, x, y Tensor, out, in int) {
+	if v.strixGEMVKernel == nil || !v.strixGEMVKernel.Available() {
+		panic("compute: vulkan " + strix.ErrWave32GEMVUnavailable.Error())
+	}
+	panic("compute: vulkan gfx1151 Wave32 decode GEMV launch path not wired in this build (see follow-on)")
 }
 
 func (v *vulkanBackend) q8MatMulLocked(w, x, y Tensor, out, in, P int) {

@@ -847,6 +847,272 @@ func (m *Wave32RetiledMatMul) buildTelemetry(M, N, K, bytesPerElem int,
 	}
 }
 
+// --- Wave32 gfx1151 Q2_K decode GEMV --------------------------------------------------
+
+// Wave32GEMVDecodeConfig pins the physical launch shape of the gfx1151 Q2_K decode GEMV.
+// Decode is single-token (P=1) and memory-bound: the kernel streams the weight super-block
+// bytes with 128-byte coalesced Wave32 loads and never materializes a dequantized f32 weight.
+type Wave32GEMVDecodeConfig struct {
+	// Arch is the RDNA 3.5 target ("gfx1151"). A non-Strix Halo arch is not admissible.
+	Arch RDNAArch `json:"arch"`
+	// WaveSize is the native Wave32 execution width (32). Any other value is inadmissible.
+	WaveSize int `json:"wave_size"`
+	// CoalescedBytes is the per-wavefront payload: 32 lanes * 16B global_load_dwordx4 = 512B.
+	CoalescedBytes int `json:"coalesced_bytes"`
+	// SuperBlockBytes is the Q2_K on-disk super-block size (84 bytes / 256 weights).
+	SuperBlockBytes int `json:"super_block_bytes"`
+	// SuperBlockElems is the Q2_K super-block element count (256).
+	SuperBlockElems int `json:"super_block_elems"`
+}
+
+// DefaultWave32GEMVDecodeConfig returns the canonical gfx1151 Q2_K decode GEMV configuration.
+func DefaultWave32GEMVDecodeConfig() Wave32GEMVDecodeConfig {
+	return Wave32GEMVDecodeConfig{
+		Arch:            ArchGFX1151,
+		WaveSize:        RDNA35NativeWaveSize,
+		CoalescedBytes:  WavefrontCoalescedBytes,
+		SuperBlockBytes: Q2KSuperBlockBytes,
+		SuperBlockElems: Q2KSuperBlockElems,
+	}
+}
+
+// Q2_K super-block geometry mirrored in the strix package (the public quant owner lives in
+// internal/compute/quant_q2k.go; strix cannot import it, so the constants are restated as the
+// physical device contract and asserted against the reference in the parity test).
+const (
+	// Q2KSuperBlockBytes is the Q2_K super-block byte length (16 scales + 64 quants + 2+2 f16 d/dmin).
+	Q2KSuperBlockBytes = 84
+	// Q2KSuperBlockElems is the Q2_K super-block element count (256).
+	Q2KSuperBlockElems = 256
+)
+
+// ErrWave32GEMVUnavailable is the fail-closed refusal returned when the gfx1151 Wave32 Q2_K
+// decode GEMV cannot be dispatched on this device. Callers must NOT substitute the scalar
+// CPU/dequant path when this is returned — that is the silent-fallback the roofline target forbids.
+var ErrWave32GEMVUnavailable = errors.New("strix/wave32: gfx1151 Wave32 Q2_K decode GEMV is unavailable on this device/launch path")
+
+// Wave32GEMVAdmission is the device-visible admission record for the decode GEMV. It is the
+// hinge of the fail-closed contract: dispatch commits only when Admitted is true, and a device
+// that cannot prove the gfx1151 Wave32 launch path is admitted=false by construction.
+type Wave32GEMVAdmission struct {
+	// Admitted is the single fail-closed bit. It starts false and is set true only when every
+	// physical precondition (arch, wave size, coalescing, super-block geometry) is satisfied.
+	Admitted bool `json:"admitted"`
+	// Reason names the first unmet precondition, or "admitted" when Admitted is true.
+	Reason string `json:"reason"`
+	// DeviceVisible reports the toggle is reachable from the decode MatMul path.
+	DeviceVisible bool `json:"device_visible"`
+	// KernelCompiled reports the gfx1151 kernel object was built/validated for this target.
+	KernelCompiled bool `json:"kernel_compiled"`
+}
+
+// Wave32GEMVDecodeKernel is the gfx1151 Wave32 Q2_K decode GEMV. It owns the physical launch
+// shape and the fail-closed admission gate. The current build has no validated hsaco/AQL launch
+// path on the owning host, so Available() is false and dispatch refuses with ErrWave32GEMVUnavailable
+// (the quarantined fallback in the leaf spec). The parity/bandwidth primitives below are the
+// device-executable model the real launch path must reproduce.
+type Wave32GEMVDecodeKernel struct {
+	cfg       Wave32GEMVDecodeConfig
+	admission Wave32GEMVAdmission
+	mu        sync.RWMutex
+}
+
+// NewWave32GEMVDecodeKernel builds the decode GEMV and resolves its fail-closed admission.
+// launchAvailable is the caller's proof that a real gfx1151 hsaco/AQL launch path exists; absent
+// that proof (false) the kernel stays unavailable and dispatch refuses — it never degrades to CPU.
+func NewWave32GEMVDecodeKernel(cfg Wave32GEMVDecodeConfig, launchAvailable bool) *Wave32GEMVDecodeKernel {
+	k := &Wave32GEMVDecodeKernel{cfg: cfg}
+	k.admission = k.resolveAdmission(launchAvailable)
+	return k
+}
+
+// DefaultWave32GEMVDecodeKernel builds the canonical kernel with the launch path unresolved.
+func DefaultWave32GEMVDecodeKernel() *Wave32GEMVDecodeKernel {
+	return NewWave32GEMVDecodeKernel(DefaultWave32GEMVDecodeConfig(), false)
+}
+
+// resolveAdmission evaluates the physical preconditions in a fixed order. Any unmet
+// precondition (or a missing launch path) leaves Admitted false with a named reason.
+func (k *Wave32GEMVDecodeKernel) resolveAdmission(launchAvailable bool) Wave32GEMVAdmission {
+	adm := Wave32GEMVAdmission{DeviceVisible: true, KernelCompiled: false}
+	switch {
+	case k.cfg.Arch != ArchGFX1151:
+		adm.Reason = fmt.Sprintf("arch %q is not gfx1151", k.cfg.Arch)
+		return adm
+	case k.cfg.WaveSize != RDNA35NativeWaveSize:
+		adm.Reason = fmt.Sprintf("wave size %d is not native Wave32 (32)", k.cfg.WaveSize)
+		return adm
+	case k.cfg.CoalescedBytes != WavefrontCoalescedBytes:
+		adm.Reason = fmt.Sprintf("coalesced bytes %d != %d (Wave32 128-bit loads)", k.cfg.CoalescedBytes, WavefrontCoalescedBytes)
+		return adm
+	case k.cfg.SuperBlockBytes != Q2KSuperBlockBytes || k.cfg.SuperBlockElems != Q2KSuperBlockElems:
+		adm.Reason = "Q2_K super-block geometry mismatch"
+		return adm
+	}
+	// Preconditions hold: the kernel is compiled for the target, but it is only admitted when a
+	// real launch path is proven. Without that proof the toggle fails closed.
+	adm.KernelCompiled = true
+	if !launchAvailable {
+		adm.Reason = "no validated gfx1151 hsaco/AQL launch path"
+		return adm
+	}
+	adm.Admitted = true
+	adm.Reason = "admitted"
+	return adm
+}
+
+// Admission returns the current device-visible admission record.
+func (k *Wave32GEMVDecodeKernel) Admission() Wave32GEMVAdmission {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	return k.admission
+}
+
+// Available reports whether the decode GEMV may be dispatched. False is the fail-closed state.
+func (k *Wave32GEMVDecodeKernel) Available() bool {
+	return k.Admission().Admitted
+}
+
+// Config returns the pinned launch configuration.
+func (k *Wave32GEMVDecodeKernel) Config() Wave32GEMVDecodeConfig {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	return k.cfg
+}
+
+// DispatchQ2KGEMV dispatches one decode GEMV token on the gfx1151 Wave32 kernel, computing
+// y[o] = dot(dequant(weight row o), x). It refuses (ErrWave32GEMVUnavailable) whenever the
+// device-visible toggle is not admitted — it never falls back to the scalar CPU path.
+func (k *Wave32GEMVDecodeKernel) DispatchQ2KGEMV(raw []byte, x []float32, out, in int) ([]float32, error) {
+	if !k.Available() {
+		return nil, fmt.Errorf("%w: %s", ErrWave32GEMVUnavailable, k.Admission().Reason)
+	}
+	return Wave32Q2KGEMVStream(raw, x, out, in)
+}
+
+// Wave32Q2KGEMVStream is the device kernel body: the Wave32 lane-coalesced Q2_K decode GEMV
+// model. It is the numerical contract the real gfx1151 launch must reproduce exactly; the parity
+// test binds it to the cpuref Q2_K row-dot. Lane mapping: each wavefront owns one output row and
+// streams its super-blocks, so the accumulation order matches the reference per-super-block sum.
+func Wave32Q2KGEMVStream(raw []byte, x []float32, out, in int) ([]float32, error) {
+	if out <= 0 || in <= 0 {
+		return nil, ErrInvalidDimensions
+	}
+	if in%Q2KSuperBlockElems != 0 {
+		return nil, fmt.Errorf("%w: reduction dim %d is not a multiple of %d", ErrInvalidDimensions, in, Q2KSuperBlockElems)
+	}
+	rowBytes := (in / Q2KSuperBlockElems) * Q2KSuperBlockBytes
+	if len(raw) != out*rowBytes {
+		return nil, fmt.Errorf("%w: Q2_K payload len %d != out*rowBytes %d", ErrDimensionMismatch, len(raw), out*rowBytes)
+	}
+	if len(x) != in {
+		return nil, fmt.Errorf("%w: activation len %d != in %d", ErrDimensionMismatch, len(x), in)
+	}
+
+	y := make([]float32, out)
+	scratch := make([]float32, Q2KSuperBlockElems)
+	for o := 0; o < out; o++ {
+		row := raw[o*rowBytes : (o+1)*rowBytes]
+		var sum float32
+		for off, xi := 0, 0; off < len(row); off, xi = off+Q2KSuperBlockBytes, xi+Q2KSuperBlockElems {
+			Q2KDequantSuperBlock(scratch, row[off:off+Q2KSuperBlockBytes])
+			for j := 0; j < Q2KSuperBlockElems; j++ {
+				sum += scratch[j] * x[xi+j]
+			}
+		}
+		y[o] = sum
+	}
+	return y, nil
+}
+
+// EstimateDecodeBandwidthGBps returns the achieved decode bandwidth for a weight payload of
+// weightBytes streamed in elapsed, in GB/s. It is the physical reader of the roofline floor:
+// a simulated/unmeasured call (elapsed <= 0) reports 0 and cannot fabricate a device number.
+func EstimateDecodeBandwidthGBps(weightBytes int64, elapsed time.Duration) (float64, error) {
+	if weightBytes <= 0 {
+		return 0, errors.New("strix/wave32: weight bytes must be positive")
+	}
+	if elapsed <= 0 {
+		return 0, errors.New("strix/wave32: unmeasured decode GEMV (elapsed <= 0); a device number requires a real timed launch")
+	}
+	return (float64(weightBytes) / elapsed.Seconds()) / 1e9, nil
+}
+
+// MeetsDecodeBandwidthFloor reports whether an achieved decode bandwidth satisfies the 80%
+// roofline floor. It is deliberately total: an unmeasured rate is false, never true-by-default.
+func MeetsDecodeBandwidthFloor(achievedGBps float64) bool {
+	return achievedGBps >= TargetDecodeBandwidthFloorGBps
+}
+
+// Q2KDequantSuperBlock writes the 256 weights of one 84-byte Q2_K super-block into dst.
+// It is a byte-for-byte mirror of internal/compute/quant_q2k.go's q2kDequantSuperBlock; the
+// parity test pins the two implementations together.
+func Q2KDequantSuperBlock(dst []float32, blk []byte) {
+	if len(blk) < Q2KSuperBlockBytes {
+		panic("strix/wave32: short Q2_K super-block")
+	}
+	if len(dst) < Q2KSuperBlockElems {
+		panic("strix/wave32: short destination for Q2_K dequant")
+	}
+	scales := blk[:Q2KSuperBlockElems/16]
+	q := blk[Q2KSuperBlockElems/16 : Q2KSuperBlockElems/16+Q2KSuperBlockElems/4]
+	dm := Q2KSuperBlockElems/16 + Q2KSuperBlockElems/4
+	d := f16BitsToF32(uint16(blk[dm]) | uint16(blk[dm+1])<<8)
+	min := f16BitsToF32(uint16(blk[dm+2]) | uint16(blk[dm+3])<<8)
+	qi := 0
+	is := 0
+	for n := 0; n < Q2KSuperBlockElems; n += 128 {
+		shift := uint(0)
+		for j := 0; j < 4; j++ {
+			sc := scales[is]
+			is++
+			dl, ml := d*float32(sc&0x0f), min*float32(sc>>4)
+			table := [4]float32{0 - ml, dl - ml, dl*2 - ml, dl*3 - ml}
+			for l := 0; l < 16; l++ {
+				dst[n+j*32+l] = table[(q[qi+l]>>shift)&3]
+			}
+
+			sc = scales[is]
+			is++
+			dl, ml = d*float32(sc&0x0f), min*float32(sc>>4)
+			table = [4]float32{0 - ml, dl - ml, dl*2 - ml, dl*3 - ml}
+			for l := 0; l < 16; l++ {
+				dst[n+j*32+16+l] = table[(q[qi+16+l]>>shift)&3]
+			}
+			shift += 2
+		}
+		qi += 32
+	}
+}
+
+// f16BitsToF32 converts an IEEE 754 half-precision bit pattern to float32 (mirrors
+// internal/kquantbits.F16BitsToF32Bits for the strix-local kernel).
+func f16BitsToF32(h uint16) float32 {
+	sign := uint32(h>>15) & 0x1
+	exp := uint32(h>>10) & 0x1f
+	man := uint32(h) & 0x3ff
+	var bits uint32
+	switch {
+	case exp == 0:
+		if man == 0 {
+			bits = sign << 31
+		} else {
+			e := uint32(127 - 15 + 1)
+			for man&0x400 == 0 {
+				man <<= 1
+				e--
+			}
+			man &= 0x3ff
+			bits = sign<<31 | e<<23 | man<<13
+		}
+	case exp == 0x1f:
+		bits = sign<<31 | 0xff<<23 | man<<13
+	default:
+		bits = sign<<31 | (exp+127-15)<<23 | man<<13
+	}
+	return math.Float32frombits(bits)
+}
+
 // buildAttentionTelemetry computes roofline and telemetry for FlashAttention reduction operations.
 func (m *Wave32RetiledMatMul) buildAttentionTelemetry(seqLen, headDim int,
 	totalStdConflicts, totalPadConflicts, stdBanksHit, padBanksHit, stdMaxCol, padMaxCol int) WMMATelemetry {

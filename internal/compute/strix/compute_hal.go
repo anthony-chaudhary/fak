@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -132,7 +134,94 @@ var (
 	ErrDimensionMismatch     = errors.New("strix/hal: tensor dimension mismatch")
 	ErrCosineParityViolation = errors.New("strix/hal: cosine parity check failed (< 0.9999)")
 	ErrBusSaturation         = errors.New("strix/hal: memory streaming rate exceeds 256 GB/s bus ceiling")
+
+	// ErrWave32GEMVDecodeUnavailable is the device-visible refusal for the roofline decode path:
+	// the gfx1151 Wave32 Q2_K GEMV could not be dispatched, so the decode MatMul must refuse
+	// rather than silently run the scalar CPU/dequant path below the 218.44 GB/s floor.
+	ErrWave32GEMVDecodeUnavailable = errors.New("strix/hal: gfx1151 Wave32 Q2_K decode GEMV unavailable; refuse, do not fall back to scalar CPU")
 )
+
+// DecodeGEMVDeviceToggle is the device-visible fail-closed toggle for the gfx1151 Wave32 Q2_K
+// decode GEMV. It is the single hinge the decode MatMul path reads: when Admitted is false the
+// caller MUST refuse (ErrWave32GEMVDecodeUnavailable) and MUST NOT substitute the scalar path.
+type DecodeGEMVDeviceToggle struct {
+	// Admitted is the fail-closed bit. Zero value (false) is the safe default.
+	Admitted bool `json:"admitted"`
+	// LaunchPath names the proven launch mechanism ("hsaco-aql"), or "" when unproven.
+	LaunchPath string `json:"launch_path"`
+	// Reason is the closed explanation for the current state.
+	Reason string `json:"reason"`
+}
+
+// ResolveDecodeGEMVDeviceToggle folds the kernel admission into the device-visible toggle.
+// launchPath is the proven gfx1151 launch mechanism; an empty/unproven launchPath fails closed.
+func ResolveDecodeGEMVDeviceToggle(k *Wave32GEMVDecodeKernel, launchPath string) DecodeGEMVDeviceToggle {
+	if k == nil {
+		return DecodeGEMVDeviceToggle{Reason: "nil Wave32 decode GEMV kernel"}
+	}
+	adm := k.Admission()
+	if !adm.Admitted || launchPath == "" {
+		reason := adm.Reason
+		if launchPath == "" && adm.Admitted {
+			reason = "no proven launch path"
+		}
+		return DecodeGEMVDeviceToggle{Reason: reason}
+	}
+	return DecodeGEMVDeviceToggle{Admitted: true, LaunchPath: launchPath, Reason: "admitted"}
+}
+
+// RequireDecodeGEMVDevice errors (fail-closed) unless the toggle admits the gfx1151 decode GEMV.
+// It exists so the decode MatMul path has one call that can NEVER silently run the CPU path.
+func RequireDecodeGEMVDevice(t DecodeGEMVDeviceToggle) error {
+	if !t.Admitted {
+		return fmt.Errorf("%w: %s", ErrWave32GEMVDecodeUnavailable, t.Reason)
+	}
+	return nil
+}
+
+// Environment names negotiated by the decode GEMV device toggle.
+const (
+	// EnvStrixWave32GEMVDecode is the opt-in switch for the gfx1151 Wave32 Q2_K decode GEMV
+	// roofline path. Unset/false leaves the existing shader/CPU composition unchanged.
+	EnvStrixWave32GEMVDecode = "FAK_STRIX_WAVE32_GEMV_DECODE"
+	// EnvStrixGEMVLaunchPath is the operator's asserted gfx1151 launch mechanism (e.g.
+	// "hsaco-aql"). It is the *proof* half of admission: an empty or "none" value is unproven
+	// and therefore fails closed. A real launch path must be witnessed on physical hardware
+	// before this is set to a non-empty mechanism name.
+	EnvStrixGEMVLaunchPath = "FAK_STRIX_GEMV_LAUNCH_PATH"
+)
+
+// StrixDecodeGEMVDeviceRequested reports whether the operator opted into the roofline decode
+// GEMV. Opt-in only: the default is false, so existing behaviour is byte-preserved.
+func StrixDecodeGEMVDeviceRequested() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(EnvStrixWave32GEMVDecode))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+// StrixGEMVLaunchPath returns the operator-asserted launch mechanism, normalized. Anything other
+// than a concrete non-"none" mechanism is treated as unproven ("").
+func StrixGEMVLaunchPath() string {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(EnvStrixGEMVLaunchPath)))
+	switch v {
+	case "", "none", "0", "false", "no", "off":
+		return ""
+	default:
+		return v
+	}
+}
+
+// ResolveStrixDecodeGEMVDevice builds the canonical gfx1151 decode GEMV kernel and folds it into
+// the device-visible toggle using the operator-asserted launch path. It is the single entry the
+// decode MatMul wiring calls, so the fail-closed decision lives in one place.
+func ResolveStrixDecodeGEMVDevice() (DecodeGEMVDeviceToggle, *Wave32GEMVDecodeKernel) {
+	launchPath := StrixGEMVLaunchPath()
+	kernel := NewWave32GEMVDecodeKernel(DefaultWave32GEMVDecodeConfig(), launchPath != "")
+	return ResolveDecodeGEMVDeviceToggle(kernel, launchPath), kernel
+}
 
 // IsPageAligned checks if a memory pointer is aligned to a 4096-byte page boundary.
 func IsPageAligned(ptr uintptr) bool {
