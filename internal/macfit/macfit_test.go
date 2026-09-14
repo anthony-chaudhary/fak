@@ -364,3 +364,34 @@ func TestTurnkeyQ8KVAdmits20kOn36GiB(t *testing.T) {
 		plan.ContextBudgetTokens, float64(plan.KVPoolBytes)/float64(GiB), wantTokens,
 		float64(realized)/float64(GiB), float64(f32Realized)/float64(GiB))
 }
+
+// TestLookupModelTier pins the friendly-name -> geometry resolution used by the
+// `fak up --model <tier>` override. A hit must return the FULL StandardTiers
+// entry (so the caller can swap geometry, not just the label); a miss must
+// report ok=false.
+func TestLookupModelTier(t *testing.T) {
+	three, ok := LookupModelTier("3B")
+	if !ok {
+		t.Fatal(`LookupModelTier("3B") not found`)
+	}
+	if three.WeightBytes != 2*GiB || three.Layers != 16 {
+		t.Fatalf("3B geometry = weight %d, layers %d; want weight %d, layers 16", three.WeightBytes, three.Layers, 2*GiB)
+	}
+
+	twentySeven, ok := LookupModelTier("27B")
+	if !ok {
+		t.Fatal(`LookupModelTier("27B") not found`)
+	}
+	if twentySeven.WeightBytes != 16*GiB || twentySeven.Layers != 64 {
+		t.Fatalf("27B geometry = weight %d, layers %d; want weight %d, layers 64", twentySeven.WeightBytes, twentySeven.Layers, 16*GiB)
+	}
+
+	lower, ok := LookupModelTier("3b")
+	if !ok || lower.Name != "3B" || lower.WeightBytes != 2*GiB {
+		t.Fatalf(`LookupModelTier("3b") = %+v, ok=%v; want case-insensitive 3B`, lower, ok)
+	}
+
+	if _, ok := LookupModelTier("nope"); ok {
+		t.Fatal(`LookupModelTier("nope") unexpectedly matched`)
+	}
+}
