@@ -940,6 +940,7 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 	mux.HandleFunc("/readyz", ts.handleReadyz)
 	mux.HandleFunc("/v1/models", ts.handleModels)
 	mux.HandleFunc("/v1/chat/completions", ts.handleChatCompletions)
+	mux.HandleFunc("/v1/completions", ts.handleCompletions)
 	mux.HandleFunc("/v1/fak/tokenize", ts.handleTokenize)
 
 	ts.httpServer = &http.Server{
@@ -1036,6 +1037,162 @@ func turnkeyMaxOutputTokens(contextTokens uint64) int {
 type chatCompletionResponse = gateway.ChatResponse
 type chatCompletionRequest = gateway.ChatRequest
 type chatCompletionMessage = agent.Message
+
+// turnkeyCompletionRequest is the LEGACY OpenAI text-completion wire for the
+// turnkey server (POST /v1/completions). It mirrors gateway.CompletionRequest but is
+// local to keep this file's wire surface explicit; `prompt` is raw because the wire
+// allows a bare string or an array of strings.
+type turnkeyCompletionRequest struct {
+	Model       string          `json:"model"`
+	Prompt      json.RawMessage `json:"prompt"`
+	MaxTokens   int             `json:"max_tokens,omitempty"`
+	Temperature *float64        `json:"temperature,omitempty"`
+	TopP        *float64        `json:"top_p,omitempty"`
+	Stream      bool            `json:"stream,omitempty"`
+}
+
+// turnkeyNormalizePrompt folds the legacy `prompt` field (bare string, or array of
+// strings joined with newlines) into one prompt string.
+func turnkeyNormalizePrompt(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var one string
+	if err := json.Unmarshal(raw, &one); err == nil {
+		return one
+	}
+	var many []string
+	if err := json.Unmarshal(raw, &many); err == nil {
+		return strings.Join(many, "\n")
+	}
+	return ""
+}
+
+// handleCompletions serves the LEGACY text-completion wire the turnkey server
+// previously omitted: it wraps the request prompt as a single user message and reuses
+// the same planner path as the chat route, then emits `text_completion` frames (bare
+// `text`, never a chat delta). This is the surface vLLM, SGLang, llama.cpp-server,
+// and the subagent fan-out harness all speak.
+func (s *turnkeyServer) handleCompletions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.beginChatRequest() {
+		http.Error(w, "server stopping", http.StatusServiceUnavailable)
+		return
+	}
+	defer s.endChatRequest()
+
+	var req turnkeyCompletionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	prompt := turnkeyNormalizePrompt(req.Prompt)
+	if strings.TrimSpace(prompt) == "" {
+		http.Error(w, "prompt: field required", http.StatusBadRequest)
+		return
+	}
+	if req.MaxTokens < 0 {
+		http.Error(w, "max_tokens: must be a positive integer", http.StatusBadRequest)
+		return
+	}
+
+	chatReq := gateway.ChatRequest{
+		Model:       req.Model,
+		Messages:    []agent.Message{{Role: agent.RoleUser, Content: prompt}},
+		MaxTokens:   req.MaxTokens,
+		Temperature: req.Temperature,
+		TopP:        req.TopP,
+		Stream:      req.Stream,
+	}
+	modelID := s.plan.Tier.ModelID
+	if chatReq.Model != "" {
+		modelID = chatReq.Model
+	}
+
+	if chatReq.Stream && !s.mock {
+		if sp, ok := s.planner.(agent.StreamingPlanner); ok && sp.StreamingSupported() {
+			s.handleCompletionsStream(w, r, chatReq, modelID, sp)
+			return
+		}
+	}
+
+	finishReason := "stop"
+	answer := agent.Message{Role: agent.RoleAssistant}
+	var usage agent.Usage
+
+	if !s.mock && s.planner != nil {
+		sampleOpts := turnkeyChatSampleOpts(chatReq, s.plan.ContextBudgetTokens)
+		comp, err := s.planner.Complete(r.Context(), chatReq.Messages, nil, sampleOpts...)
+		if err != nil {
+			writeTurnkeyInferenceError(w, err)
+			return
+		}
+		answer = comp.Message
+		usage = comp.Usage
+		if comp.FinishReason != "" {
+			finishReason = comp.FinishReason
+		}
+	} else {
+		answer.Content = fmt.Sprintf("Turnkey %s completion on Apple Silicon. Processed: %s", s.plan.Tier.Name, prompt)
+	}
+	if usage.CompletionTokens == 0 && answer.Content != "" {
+		usage.CompletionTokens = len(strings.Fields(answer.Content))
+		if usage.CompletionTokens == 0 {
+			usage.CompletionTokens = 1
+		}
+		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	}
+	atomic.AddInt64(&s.requestCount, 1)
+	atomic.AddInt64(&s.totalTokens, int64(usage.CompletionTokens))
+	created := time.Now().Unix()
+	cmplID := fmt.Sprintf("cmpl-fak-%d", time.Now().UnixNano())
+
+	if chatReq.Stream {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		sendChunk := func(text string, finish *string) {
+			chunk := map[string]any{
+				"id": cmplID, "object": "text_completion", "created": created, "model": modelID,
+				"choices": []map[string]any{{"index": 0, "text": text, "finish_reason": finish}},
+			}
+			if finish != nil {
+				chunk["usage"] = usage
+			}
+			raw, _ := json.Marshal(chunk)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", raw)
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		if answer.Content != "" {
+			sendChunk(answer.Content, nil)
+		}
+		stop := finishReason
+		sendChunk("", &stop)
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(gateway.CompletionResponse{
+		ID:      cmplID,
+		Object:  "text_completion",
+		Created: created,
+		Model:   modelID,
+		Choices: []gateway.CompletionChoice{{Index: 0, Text: answer.Content, FinishReason: &finishReason}},
+		Usage:   usage,
+	})
+}
 
 func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
