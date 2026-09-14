@@ -395,3 +395,30 @@ func TestV41Forward(t *testing.T) {
 		}
 	})
 }
+
+// TestV41ForwardEngramDeclaredFailsClosed is the #13007 fail-closed witness: the
+// reduced assembly does not execute the Engram stage, so a config that declares
+// an Engram layer WITHIN the model's layer range must refuse rather than silently
+// emit non-Engram logits as if Engram were absent. Out-of-range declared Engram
+// layers (the reduced oracle fixture: NumLayers=1 with EngramLayerIDs [1,14]) stay
+// admitted, because the assembly never reaches them.
+func TestV41ForwardEngramDeclaredFailsClosed(t *testing.T) {
+	// In-range declaration: layer 0 is inside the single reduced decoder layer.
+	declared := v41ReducedModel(t)
+	declared.Cfg.DeepSeekV41.EngramLayerIDs = []int{0}
+	declared.Cfg.DeepSeekV41.EngramNumEmbeddings = []int{8}
+
+	if err := declared.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("in-range Engram admission error = %v, want ErrV41ForwardStage", err)
+	}
+	if err := panicAsError(func() { _ = declared.Forward([]int{1, 2}) }); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("in-range Engram Forward panic = %v, want ErrV41ForwardStage", err)
+	}
+
+	// The reduced oracle fixture declares only out-of-range Engram layers, so the
+	// existing reduced forward must keep running (no regression).
+	reduced := v41ReducedModel(t)
+	if err := reduced.v41ForwardAdmitted(); err != nil {
+		t.Fatalf("reduced out-of-range Engram admission error = %v, want nil", err)
+	}
+}

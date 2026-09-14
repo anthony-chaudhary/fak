@@ -11,8 +11,12 @@ package model
 // Scope (gold-plating boundary from #12901): TEXT-forward assembly only. No GPU
 // qualification, no GGUF/checkpoint loading, no streaming, no vision, no DSpark,
 // and no Engram packed-row retrieval (that stage's rows are 264-byte packed FP8
-// streams a weight-free in-memory forward cannot materialize; it is an explicit,
-// documented omission). The assembled pass is exercised by a REDUCED model
+// streams a weight-free in-memory forward cannot materialize). That omission is
+// fail-closed: a config declaring an Engram layer WITHIN the decoder stack is
+// refused at admission by v41EngramForwardAdmitted, so the assembly never emits
+// non-Engram logits for a model it did not fully run (#13007's remaining seam is
+// wiring the stage; declaring it is no longer silently dropped). The assembled
+// pass is exercised by a REDUCED model
 // against an independent scalar oracle (v41_forward_test.go); it does not itself
 // qualify the official checkpoint for generation.
 //
@@ -45,6 +49,7 @@ const (
 	v41StageMHC       v41ForwardStage = "mhc"
 	v41StageAttention v41ForwardStage = "attention"
 	v41StageMoE       v41ForwardStage = "moe"
+	v41StageEngram    v41ForwardStage = "engram"
 	v41StageFinalNorm v41ForwardStage = "final_norm"
 	v41StageHead      v41ForwardStage = "head"
 )
@@ -167,6 +172,29 @@ func v41RouterConfigFor(cfg Config) (v41RouterConfig, error) {
 
 // ---- admission -------------------------------------------------------------
 
+// v41EngramForwardAdmitted fails closed when the config declares an Engram layer
+// that lies WITHIN the model's decoder stack. The reduced text assembly does not
+// execute the Engram stage (its packed-row inputs are not materializable
+// weight-free), so silently dropping a declared in-range Engram layer would emit
+// logits for a model the assembly never ran. Declared Engram layers outside
+// [0,NumLayers) are unreachable by this forward and stay admitted, which keeps the
+// reduced oracle fixture (NumLayers=1, EngramLayerIDs [1,14]) runnable. Wiring the
+// real Engram stage is #13007's remaining integration work; until then this is the
+// fail-closed boundary.
+func v41EngramForwardAdmitted(cfg Config) error {
+	m := cfg.DeepSeekV41
+	if m == nil {
+		return nil
+	}
+	for _, layer := range m.EngramLayerIDs {
+		if layer >= 0 && layer < cfg.NumLayers {
+			return v41StageErr(v41StageEngram, layer,
+				fmt.Errorf("%w: layer %d declares Engram but the reduced forward does not execute the Engram stage", ErrV41ForwardStage, layer))
+		}
+	}
+	return nil
+}
+
 // v41ForwardAdmitted returns nil only when this is an admitted V4.1 config with
 // every required stage's weights present and shape-consistent. It is the gate
 // both Model.Forward and Session.Prefill/Step run before the assembly. A
@@ -200,6 +228,9 @@ func (m *Model) v41ForwardAdmitted() error {
 		return err
 	}
 	if _, err := v41RouterConfigFor(cfg); err != nil {
+		return err
+	}
+	if err := v41EngramForwardAdmitted(cfg); err != nil {
 		return err
 	}
 	H, hd, nH := cfg.HiddenSize, cfg.HeadDim, cfg.NumHeads
