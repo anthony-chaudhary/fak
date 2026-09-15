@@ -255,6 +255,27 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 	if expertShard != nil && expertRanks > 1 {
 		residentRanks = expertRanks
 	}
+	// Bounded-resident NVMe-streamed expert policy (fak#13121). When --cpu-offload-experts is
+	// requested but the FULL routed-expert set cannot be host-resident (the DeepSeek-V4.1 Flash
+	// Q2_K set is 183.25 GiB against a 62 GiB Halo) AND the checkpoint tier can stage the slabs,
+	// charge only a bounded resident working set and fault the rest from the staged shards on
+	// demand. The decision is made from the SAME opened checkpoint the plan runs over, so the load
+	// arm's option threading and the sizing path's plan cannot disagree. A streamed tier serves
+	// EVERY expert the checkpoint carries, so it never combines with an expert-parallel shard
+	// (the loader refuses both); sharded ranks keep the resident band arm unchanged.
+	hostFit := serveHostFitBudget()
+	if fit != nil {
+		hostFit = *fit
+	}
+	streamedOffload := false
+	var streamedBound int64
+	if cpuOffloadArm && expertShard == nil {
+		streamedOffload, streamedBound, err = serveStreamedCPUOffloadPathDecision(ggufPath, residentRanks, contextBudgetTokens, hostFit)
+		must(err)
+		if streamedOffload {
+			q4kOpts = append(q4kOpts, ggufload.WithStreamedExperts(streamedBound))
+		}
+	}
 	// #1062 pre-launch load-path check: warn (don't refuse) before a large GGUF load when the
 	// weights sit on a network filesystem. NFS/CIFS read at network speed — the ~50-100x
 	// time-to-ready tax a CPU server hit loading GLM-5.2 off /projects (NFS, ~82 min) vs a local NVMe
@@ -275,7 +296,12 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		// and load the routed experts raw-resident on the host via the same Q4_K resident loader the
 		// pure-CPU FAK_Q4K arm uses.
 		loadMessages = append(loadMessages, serveQuantProvenance(artifactQuant, true))
-		must(fitServeGGUFPathOnHostForArm(ggufPath, serveLoadArmCPUOffloadExperts, contextBudgetTokens, fit))
+		if streamedOffload {
+			must(fitServeStreamedCPUOffloadPathOnHost(ggufPath, residentRanks, contextBudgetTokens, hostFit))
+			loadMessages = append(loadMessages, serveStartupMessage("serving-expert-residency", "info", fmt.Sprintf("routed-expert set exceeds host RAM; streaming the checkpoint with a bounded resident working set (%s) and faulting the remaining strides from the staged shards on demand", bytesText(uint64(max(streamedBound, 0))))))
+		} else {
+			must(fitServeGGUFPathOnHostForArm(ggufPath, serveLoadArmCPUOffloadExperts, contextBudgetTokens, fit))
+		}
 		loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", "GGUF host load -> direct-resident K-quant on the host (no device backend registered; dense + routed experts host-resident, raw super-blocks, dequant fused into the GEMM tile, no f32/Q8 round-trip; --cpu-offload-experts)"))
 		mm, prof, loadNanos := loadResidentQ4KProfiled(ggufPath, tLoad, q4kOpts...)
 		loadMessages = append(loadMessages, serveStartupMessage("resident-layout", "info", fakmodel.FormatResidentReport(mm.ResidentReport())))
@@ -300,8 +326,15 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		// host-scope refusal below over-refuses ~ranks-fold, and it does so BEFORE the authoritative
 		// rank-local gate (refuseEPPlanIfUnfit) ever runs. residentRanks is 1 for every unsharded
 		// serve, which plans exactly as before.
-		memPlan, err := fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens, fit)
-		must(err)
+		var memPlan compute.MemoryPlan
+		if streamedOffload {
+			memPlan, _, err = fitServeStreamedCPUOffloadPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens, fit)
+			must(err)
+			loadMessages = append(loadMessages, serveStartupMessage("serving-expert-residency", "info", fmt.Sprintf("routed-expert set exceeds host RAM; streaming the checkpoint with a bounded resident working set (%s) and faulting the remaining strides from the staged shards on demand", bytesText(uint64(max(streamedBound, 0))))))
+		} else {
+			memPlan, err = fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens, fit)
+			must(err)
+		}
 		// #971 blocker 3: the dense weights fit-checked above land in VRAM, but the routed MoE
 		// experts (~424 GiB for GLM-5.2 Q4_K) are pinned in HOST RAM — and a device backend does not
 		// advertise HostCapacity, so the device fit check fails OPEN on them. Guard the host expert

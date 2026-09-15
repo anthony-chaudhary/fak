@@ -602,3 +602,122 @@ func serveGGUFCPUOffloadPathMemoryPlan(ggufPath string, ranks, contextBudgetToke
 		return serveGGUFCPUOffloadMemoryPlan(ws, ranks, contextBudgetTokens, fit)
 	})
 }
+
+// serveStreamedExpertsCapable reports whether this artifact's routed-expert slabs are servable one
+// stride at a time by the R5 checkpoint tier (ggufload.FusedExpertTensors is non-empty). It is the
+// artifact-side half of the streamed policy decision: only a checkpoint whose expert encodings the
+// tier can stage (Q2_K/Q4_K/Q5_K/Q6_K today) has a working fault path, so an unstageable artifact
+// never takes the streamed arm and keeps the resident policy byte-for-byte.
+func serveStreamedExpertsCapable(ws *ggufload.WeightSource) bool {
+	if ws == nil {
+		return false
+	}
+	shards, err := ws.FusedExpertTensors()
+	return err == nil && len(shards) > 0
+}
+
+// serveCPUOffloadStreamedResidentBound derives the bounded host-resident expert working set for the
+// streamed policy from the SAME measured fit budget the resident arm is judged against: the
+// headroom-adjusted host budget (fit.avail()). An unprobeable host yields zero (stream-through) --
+// the honest floor, because an unmeasurable host must not be promised residency it may not have.
+func serveCPUOffloadStreamedResidentBound(fit serveFitBudget) int64 {
+	avail := fit.avail()
+	if avail <= 0 {
+		return 0
+	}
+	return avail
+}
+
+// serveStreamedCPUOffloadPlan is serveGGUFCPUOffloadMemoryPlan under the bounded-resident
+// NVMe-streamed expert policy (fak#13121). It builds the FULL-charge plan first and measures its
+// HOST-scoped subset against the host budget: when the full routed charge fits (or the host is
+// unprobeable), streaming is not needed and the caller keeps the resident arm byte-for-byte -- the
+// preserved case for small-expert and non-MoE artifacts. Only when the full charge cannot fit AND
+// the checkpoint tier can stage the routed slabs does it return the streamed plan with streamed=true,
+// so the load arm threads WithStreamedExperts and the routed experts fault from the staged shards.
+//
+// The streamed plan charges the device dense side IDENTICALLY (the same per-tensor classification),
+// so the device fit check and the resident arm cannot disagree about what stays on the device.
+func serveStreamedCPUOffloadPlan(ws *ggufload.WeightSource, ranks, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, bool, error) {
+	plan, err := serveGGUFCPUOffloadMemoryPlan(ws, ranks, contextBudgetTokens, fit)
+	if err != nil {
+		return nil, false, err
+	}
+	if ws == nil || fit.Base <= 0 {
+		return plan, false, nil
+	}
+	// Judge the HOST-scoped subset, not the grand total: on a device serve the dense weights live in
+	// VRAM and must not be double-counted against host RAM here.
+	if plan.HostTotal() <= fit.avail() {
+		return plan, false, nil
+	}
+	if !serveStreamedExpertsCapable(ws) {
+		return plan, false, nil
+	}
+	bound := serveCPUOffloadStreamedResidentBound(fit)
+	streamed, err := ws.EstimateCPUOffloadExpertsStreamedMemoryPlan(bound)
+	if err != nil {
+		return nil, false, err
+	}
+	return appendServeGGUFDevicePlan(ws, streamed, contextBudgetTokens, fit), true, nil
+}
+
+// serveStreamedCPUOffloadPathDecision is the path-form of serveStreamedCPUOffloadPlan: the LOAD
+// arm's WithStreamedExperts threading and the SIZING path's plan are decided by ONE measurement
+// over one opened checkpoint, so they cannot disagree. An unopenable path, a non-MoE artifact, or a
+// routed set that already fits the host budget all return (false, 0, nil) -- the resident arm.
+func serveStreamedCPUOffloadPathDecision(ggufPath string, ranks, contextBudgetTokens int, fit serveFitBudget) (bool, int64, error) {
+	streamed := false
+	bound := int64(0)
+	_, err := withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
+		_, isStreamed, perr := serveStreamedCPUOffloadPlan(ws, ranks, contextBudgetTokens, fit)
+		if perr != nil {
+			return nil, perr
+		}
+		if isStreamed {
+			streamed, bound = true, serveCPUOffloadStreamedResidentBound(fit)
+		}
+		return nil, nil
+	})
+	if err != nil {
+		return false, 0, err
+	}
+	return streamed, bound, nil
+}
+
+// fitServeStreamedCPUOffloadPathOnHost is the device-less counterpart of
+// fitServeStreamedCPUOffloadPathOnDevice. It judges the bounded-resident streamed plan against the
+// host budget that SELECTED it, so the derivation and the admission share one snapshot.
+func fitServeStreamedCPUOffloadPathOnHost(ggufPath string, ranks, contextBudgetTokens int, fit serveFitBudget) error {
+	ws, err := ggufload.OpenWeights(ggufPath)
+	if err != nil {
+		return err
+	}
+	defer ws.Close()
+	plan, _, err := serveStreamedCPUOffloadPlan(ws, ranks, contextBudgetTokens, fit)
+	if err != nil {
+		return err
+	}
+	return refuseHostPlanAgainstFit(plan, fit)
+}
+
+// fitServeStreamedCPUOffloadPathOnDevice is fitAndPlanServeGGUFCPUOffloadPathOnDevice under the
+// bounded-resident streamed policy: when the full routed charge does not fit the host budget and the
+// tier can stage the slabs, judge the DEVICE side against the streamed plan (whose host-scoped
+// demand is the bounded resident set) and return that plan. Otherwise it falls back to the resident
+// plan unchanged, so a fitting artifact keeps the historical arm.
+func fitServeStreamedCPUOffloadPathOnDevice(ggufPath string, be compute.Backend, ranks, contextBudgetTokens int, override *serveFitBudget) (compute.MemoryPlan, bool, error) {
+	fit := serveHostFitBudget()
+	ws, err := ggufload.OpenWeights(ggufPath)
+	if err != nil {
+		return nil, false, err
+	}
+	defer ws.Close()
+	plan, streamed, err := serveStreamedCPUOffloadPlan(ws, ranks, contextBudgetTokens, fit)
+	if err != nil {
+		return nil, false, err
+	}
+	dev := serveDeviceFitBudgetFromReported(be, override)
+	admitted, rerr := refuseIfTooBigOnDevice(plan, nil, be, &dev)
+	return admitted, streamed, rerr
+}
