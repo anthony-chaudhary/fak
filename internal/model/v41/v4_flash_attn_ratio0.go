@@ -1,9 +1,11 @@
-package model
+package v41
 
 import (
 	"errors"
 	"fmt"
 	"math"
+
+	model "github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // v4_flash_attn_ratio0.go - the native ratio-0 (window-only) attention
@@ -82,7 +84,7 @@ type V4FlashRatio0Weights struct {
 // V4FlashRatio0GeometryFromConfig derives and validates the ratio-0 geometry
 // from a V4-Flash config without mutating it. Any violation returns
 // ErrV4FlashRatio0Geometry.
-func V4FlashRatio0GeometryFromConfig(cfg Config) (V4FlashRatio0Geometry, error) {
+func V4FlashRatio0GeometryFromConfig(cfg model.Config) (V4FlashRatio0Geometry, error) {
 	g := V4FlashRatio0Geometry{
 		Dim:         cfg.HiddenSize,
 		NumHeads:    cfg.NumHeads,
@@ -91,7 +93,7 @@ func V4FlashRatio0GeometryFromConfig(cfg Config) (V4FlashRatio0Geometry, error) 
 		QLoraRank:   cfg.QLoraRank,
 		OGroups:     cfg.OGroups,
 		OLoraRank:   cfg.OLoraRank,
-		WindowSize:  V4FlashWindowSize,
+		WindowSize:  model.V4FlashWindowSize,
 		NormEps:     cfg.RMSNormEps,
 	}
 	switch {
@@ -109,8 +111,8 @@ func V4FlashRatio0GeometryFromConfig(cfg Config) (V4FlashRatio0Geometry, error) 
 		return V4FlashRatio0Geometry{}, fmt.Errorf("%w: head_dim=%d not divisible by o_groups=%d", ErrV4FlashRatio0Geometry, g.HeadDim, g.OGroups)
 	case g.OLoraRank <= 0:
 		return V4FlashRatio0Geometry{}, fmt.Errorf("%w: o_lora_rank=%d", ErrV4FlashRatio0Geometry, g.OLoraRank)
-	case g.WindowSize != V4FlashWindowSize:
-		return V4FlashRatio0Geometry{}, fmt.Errorf("%w: window_size=%d want %d", ErrV4FlashRatio0Geometry, g.WindowSize, V4FlashWindowSize)
+	case g.WindowSize != model.V4FlashWindowSize:
+		return V4FlashRatio0Geometry{}, fmt.Errorf("%w: window_size=%d want %d", ErrV4FlashRatio0Geometry, g.WindowSize, model.V4FlashWindowSize)
 	}
 	return g, nil
 }
