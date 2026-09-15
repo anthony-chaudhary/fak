@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 )
 
 // Open parses just the GGUF header/metadata at path and returns the parsed File,
@@ -107,6 +108,20 @@ func firstShardPath(path string) (string, error) {
 	return fmt.Sprintf("%s%0*d-of-%s.gguf", prefix, width, 1, countStr), nil
 }
 
+// shardPathCount returns the total shard count encoded in a shard path's
+// "-N-of-M.gguf" suffix. ok is false when the path is not a shard path.
+func shardPathCount(path string) (count int, ok bool) {
+	loc := shardSuffixRe.FindStringSubmatchIndex(path)
+	if loc == nil {
+		return 0, false
+	}
+	n, err := strconv.Atoi(path[loc[4]:loc[5]])
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
+}
+
 // shardPaths expands shard 1's path into the full ordered shard-1..shard-N list,
 // preserving the zero-padding width and total count encoded in the filename.
 func shardPaths(shard1Path string, count int) ([]string, error) {
@@ -157,6 +172,21 @@ func validShardNo(declared uint64, present bool, i int) bool {
 // reader comes from retainShardReader: the parsed file itself by default, or a
 // read-only mmap of the shard under FAK_GGUF_MMAP (gguf_mmap.go).
 func openWeightsSplitFromFirst(shard1Path string, count int, shard1File *os.File, shard1GG *File, shard1Size int64) (*WeightSource, error) {
+	// The declared split.count -- read from the config-carrying shard -- must
+	// agree with the -of-M total encoded in the filename. A disagreement means
+	// the shard set is not the set this filename claims; refuse before opening
+	// any shard rather than assemble a partial model that looks whole.
+	if declared, ok := shard1GG.Uint64("split.count"); !ok {
+		_ = shard1File.Close()
+		return nil, fmt.Errorf("gguf: %s is a split shard but declares no split.count", shard1Path)
+	} else if int(declared) != count {
+		_ = shard1File.Close()
+		return nil, fmt.Errorf("gguf: %s declares split.count=%d, but its filename names a %d-shard set", shard1Path, declared, count)
+	}
+	if named, ok := shardPathCount(shard1Path); !ok || named != count {
+		_ = shard1File.Close()
+		return nil, fmt.Errorf("gguf: %s names a %d-shard set in its filename, but the config shard declares split.count=%d", shard1Path, named, count)
+	}
 	shard1R, shard1Size, shard1Closer, shard1Data, err := retainShardReader(shard1Path, shard1File, shard1Size)
 	if err != nil {
 		return nil, err
@@ -206,6 +236,13 @@ func openWeightsSplitFromFirst(shard1Path string, count int, shard1File *os.File
 		if no, ok := gg.Uint64("split.no"); !validShardNo(no, ok, i) {
 			closeAll(closers)
 			return nil, fmt.Errorf("gguf: shard %s declares split.no=%d, want %d or %d", p, no, i-1, i)
+		}
+		// Every shard must agree on the set size. A shard declaring a different
+		// split.count than the config shard means the directory is not one
+		// consistent set; refuse rather than merge a partial model.
+		if sc, ok := gg.Uint64("split.count"); !ok || int(sc) != count {
+			closeAll(closers)
+			return nil, fmt.Errorf("gguf: shard %s declares split.count=%d, want %d (the config shard's total)", p, sc, count)
 		}
 		for _, t := range gg.Tensors {
 			if seen[t.Name] {
