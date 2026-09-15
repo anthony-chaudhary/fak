@@ -170,3 +170,152 @@ func TestEngramSparseOverlayBitmapRefusesMalformed(t *testing.T) {
 		t.Fatal("the tier registered an overlay banding a fused tensor no shard carries")
 	}
 }
+
+// TestEngramSparseOverlayDiskBackedRowsAreNotResident is the disk-backed-row witness. A per-rank
+// overlay registers ONE expert's gate stride as a DISK-BACKED extent over a shared reader (the
+// [off,size) form the 183.25 GiB routed-expert figure requires) instead of a resident copy:
+//   - the fault is byte-identical to the dense-stride read of the same expert, so the extent names
+//     the honest rows and not a placeholder (AC1);
+//   - the overlay holds ZERO resident row bytes for it — BackedRows()==1 and the resident row map
+//     is empty — proving the rank's band costs no host RAM for the expert it bands (AC2);
+//   - the overlay ledger still books exactly the stride the fault moved, so the offload win is a
+//     measured number rather than an assertion (AC3).
+func TestEngramSparseOverlayDiskBackedRowsAreNotResident(t *testing.T) {
+	const H, E, K = 256, 8, 4
+
+	// Baseline dense-stride bytes for the expert this overlay will band.
+	_, plain, _ := expertCheckpointTestModel(t, H, E, K, 0)
+	want, err := plain.fault(expertName(0, 0, "gate_proj.weight"))
+	if err != nil {
+		t.Fatalf("baseline fault: %v", err)
+	}
+	name := expertName(0, 0, "gate_proj.weight")
+
+	// Rebuild the SAME resident rows the shard holds, then publish them through a shared ReaderAt
+	// the overlay reads on demand. The extent deliberately starts at a non-zero offset so an
+	// off-by-base read cannot pass by coincidence.
+	resident := expertPrefetchModel(t, H, E, K)
+	row := resident.q4kw[name].raw
+	shard := append([]byte("PREAMBLE"), row...)
+	off := int64(len("PREAMBLE"))
+
+	_, tier, stride := expertCheckpointTestModel(t, H, E, K, 0)
+	overlay, err := NewExpertSparseOverlay("blk.0.ffn_gate_exps.weight", E)
+	if err != nil {
+		t.Fatalf("NewExpertSparseOverlay: %v", err)
+	}
+	if err := overlay.SetRowBacked(0, name, bytes.NewReader(shard), off, int64(len(row))); err != nil {
+		t.Fatalf("SetRowBacked: %v", err)
+	}
+	if err := tier.SetExpertSparseOverlay(overlay); err != nil {
+		t.Fatalf("SetExpertSparseOverlay: %v", err)
+	}
+
+	if got := overlay.BackedRows(); got != 1 {
+		t.Fatalf("BackedRows=%d, want 1 — the disk-backed row was not registered", got)
+	}
+
+	got, err := tier.fault(name)
+	if err != nil {
+		t.Fatalf("fault of a disk-backed overlay row: %v", err)
+	}
+	if !bytes.Equal(got.q4.raw, want.q4.raw) {
+		t.Fatalf("the disk-backed overlay served bytes the shared shard does not hold")
+	}
+
+	st := tier.Stats()
+	if st.OverlayRows != 1 {
+		t.Fatalf("OverlayRows=%d, want 1 (the disk-backed row was overlay-served)", st.OverlayRows)
+	}
+	if st.OverlayBytesRead != stride {
+		t.Fatalf("OverlayBytesRead=%d, want the %d-byte stride the disk-backed row moved", st.OverlayBytesRead, stride)
+	}
+}
+
+// TestEngramSparseOverlayDiskBackedFailsClosed drives the extent source's fail-closed edges: a
+// short/truncated backing read must NOT be served as a zero-byte weight, a name may not be claimed
+// by both the resident and the backed form, and a malformed extent is refused at registration.
+func TestEngramSparseOverlayDiskBackedFailsClosed(t *testing.T) {
+	const H, E = 256, 4
+	name := expertName(0, 0, "gate_proj.weight")
+
+	o, err := NewExpertSparseOverlay("blk.0.ffn_gate_exps.weight", E)
+	if err != nil {
+		t.Fatalf("NewExpertSparseOverlay: %v", err)
+	}
+	// A nil reader, a negative offset, and a zero size are each refused at registration.
+	if err := o.SetRowBacked(0, name, nil, 0, 4); err == nil {
+		t.Fatal("SetRowBacked accepted a nil reader")
+	}
+	if err := o.SetRowBacked(0, name, bytes.NewReader([]byte{1, 2, 3, 4}), -1, 4); err == nil {
+		t.Fatal("SetRowBacked accepted a negative extent offset")
+	}
+	if err := o.SetRowBacked(0, name, bytes.NewReader([]byte{1, 2, 3, 4}), 0, 0); err == nil {
+		t.Fatal("SetRowBacked accepted a zero-size extent")
+	}
+	if o.PresentRows() != 0 {
+		t.Fatalf("a malformed backed overlay marked %d rows present, want 0", o.PresentRows())
+	}
+
+	// A name already claimed resident cannot also be claimed backed.
+	if err := o.SetRow(0, name, []byte{9, 9}); err != nil {
+		t.Fatalf("SetRow: %v", err)
+	}
+	if err := o.SetRowBacked(0, name, bytes.NewReader([]byte{1, 2}), 0, 2); err == nil {
+		t.Fatal("SetRowBacked shadowed an already-resident row")
+	}
+
+	// A truncated extent: the shard holds fewer bytes than the row declares, so the read falls
+	// short and row() must report the row absent rather than serving a partial weight.
+	short, err := NewExpertSparseOverlay("blk.0.ffn_gate_exps.weight", E)
+	if err != nil {
+		t.Fatalf("NewExpertSparseOverlay: %v", err)
+	}
+	if err := short.SetRowBacked(1, expertName(0, 1, "gate_proj.weight"),
+		bytes.NewReader([]byte{1, 2, 3}), 0, 8); err != nil {
+		t.Fatalf("SetRowBacked: %v", err)
+	}
+	_, tier, _ := expertCheckpointTestModel(t, H, E, 2, 0)
+	if err := tier.SetExpertSparseOverlay(short); err != nil {
+		t.Fatalf("SetExpertSparseOverlay: %v", err)
+	}
+	// The bitmap says present, but the extent cannot be read: the fault must fall through to the
+	// dense stride (a real read), never return the 3 available bytes or a zero-length row.
+	got, err := tier.fault(expertName(0, 1, "gate_proj.weight"))
+	if err != nil {
+		t.Fatalf("fault after a short backed read: %v", err)
+	}
+	if len(got.q4.raw) == 0 || len(got.q4.raw) == 3 {
+		t.Fatalf("a short backed read served %d bytes; it must fall through, not serve a partial row", len(got.q4.raw))
+	}
+	if st := tier.Stats(); st.OverlayRows != 0 {
+		t.Fatalf("OverlayRows=%d, want 0 — the short read must not be booked as an overlay hit", st.OverlayRows)
+	}
+
+	// A ReaderAt that returns fewer bytes than requested WITHOUT an error is a loose implementation
+	// (the io.ReaderAt contract forbids it, but a shard wrapper can lose the error). The explicit
+	// n==size check must still fail the row closed rather than serving a zero-padded weight.
+	loose, err := NewExpertSparseOverlay("blk.0.ffn_gate_exps.weight", E)
+	if err != nil {
+		t.Fatalf("NewExpertSparseOverlay: %v", err)
+	}
+	if err := loose.SetRowBacked(2, expertName(0, 2, "gate_proj.weight"),
+		shortReaderAt{data: []byte{1, 2, 3}}, 0, 8); err != nil {
+		t.Fatalf("SetRowBacked: %v", err)
+	}
+	if _, ok := loose.row(expertName(0, 2, "gate_proj.weight")); ok {
+		t.Fatal("row() served a zero-padded row from a ReaderAt that returned fewer bytes with no error")
+	}
+}
+
+// shortReaderAt is an io.ReaderAt that returns min(len(p), len(data)) bytes and NO error — the loose
+// implementation the explicit n==size check in row() must defend against.
+type shortReaderAt struct{ data []byte }
+
+func (s shortReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	if off >= int64(len(s.data)) {
+		return 0, nil
+	}
+	n := copy(p, s.data[off:])
+	return n, nil
+}

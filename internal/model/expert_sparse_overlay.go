@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"io"
 	"sync"
 )
 
@@ -26,10 +27,18 @@ import (
 // reflects the overlay row bytes actually moved, so the offload win is a measured number rather than
 // an assertion.
 //
+// TWO ROW SOURCES, ONE BAND. A row is either RESIDENT (SetRow copies raw stride bytes into the
+// overlay) or DISK-BACKED (SetRowBacked names a shared reader + [off,size) extent the row is read
+// from on demand). A rank at scale uses the backed form so its overlay band costs no host RAM for
+// the experts it bands — the bytes the 183.25 GiB routed-expert figure says do not fit. The two
+// forms share one bitmap and one fall-through; a name may be claimed by exactly one of them.
+//
 // WHAT THIS IS NOT (gold-plating boundary, #13030): no writer and no new on-disk format — the
-// overlay is an in-memory index + row copy over an EXISTING shard, registered by whoever loaded it;
-// no EPLB all-to-all placement or multi-node shipping; no physical measurement. The bitmap is an
-// in-memory presence index, never a persisted artifact.
+// overlay is an in-memory index over an EXISTING shard, registered by whoever loaded it; no EPLB
+// all-to-all placement or multi-node shipping; no physical measurement. The bitmap is an in-memory
+// presence index, never a persisted artifact. A disk-backed row moves its bytes from the shared
+// shard at fault time, so it is IO, not free residency: the overlay ledger still counts the bytes
+// each fault moved.
 
 // ExpertSparseOverlay is one rank's sparse row set over a single fused checkpoint tensor: a
 // row-presence bitmap over expert indices plus the raw stride bytes of every present expert.
@@ -45,9 +54,20 @@ type ExpertSparseOverlay struct {
 	fused string
 
 	mu      sync.RWMutex
-	present map[string][]byte // canonical expert name -> raw stride bytes (present experts only)
-	bitmap  []uint64          // row-presence bitmap over expert indices of fused
-	rows    int               // expert count of fused (bitmap width)
+	present map[string][]byte    // canonical expert name -> resident raw stride bytes (present experts only)
+	backed  map[string]backedRow // canonical expert name -> disk-backed row descriptor (present experts only)
+	bitmap  []uint64             // row-presence bitmap over expert indices of fused
+	rows    int                  // expert count of fused (bitmap width)
+}
+
+// backedRow is a disk-backed row descriptor: the shared shard reader and the byte extent of one
+// expert's stride. A row registered this way is NOT held resident; row() reads it on demand from
+// the backing reader, so a rank's overlay band costs no host RAM for its present experts. This is
+// the shape V41EngramShard/V41EngramRowSource already model for the Engram hash cache.
+type backedRow struct {
+	reader io.ReaderAt
+	off    int64
+	size   int64
 }
 
 // NewExpertSparseOverlay returns an empty overlay for the fused tensor named fused with rows expert
@@ -63,6 +83,7 @@ func NewExpertSparseOverlay(fused string, rows int) (*ExpertSparseOverlay, error
 	return &ExpertSparseOverlay{
 		fused:   fused,
 		present: make(map[string][]byte),
+		backed:  make(map[string]backedRow),
 		bitmap:  make([]uint64, (rows+63)/64),
 		rows:    rows,
 	}, nil
@@ -111,6 +132,56 @@ func (o *ExpertSparseOverlay) SetRow(index int, name string, raw []byte) error {
 	return nil
 }
 
+// SetRowBacked registers a DISK-BACKED row for the canonical expert name at bit index: the row's
+// raw stride bytes live at [off, off+size) in reader, a shared shard this rank does not hold
+// resident. It is the RAM-bounded counterpart to SetRow — a rank at scale can band the rows it
+// routes to without materializing every present expert's stride in host memory. index must be in
+// [0, rows); reader must be non-nil; off must be non-negative; size must be positive. row() reads
+// the extent on demand and fails closed on a short read, so a backed row is never served partially.
+//
+// Exactly one of SetRow / SetRowBacked may claim a given expert name; a second registration for the
+// same name is refused rather than silently shadowing the first, so a mis-built band cannot serve
+// bytes from a surprising source.
+func (o *ExpertSparseOverlay) SetRowBacked(index int, name string, reader io.ReaderAt, off, size int64) error {
+	if o == nil {
+		return fmt.Errorf("%w: nil sparse overlay", ErrGGUFExpertMetadata)
+	}
+	if index < 0 || index >= o.rows {
+		return fmt.Errorf("%w: sparse overlay row %d outside [0,%d)", ErrGGUFExpertMetadata, index, o.rows)
+	}
+	if name == "" {
+		return fmt.Errorf("%w: sparse overlay row %d declares no expert name", ErrGGUFExpertMetadata, index)
+	}
+	if reader == nil {
+		return fmt.Errorf("%w: sparse overlay row %s declares no backing reader", ErrGGUFExpertMetadata, name)
+	}
+	if off < 0 || size <= 0 {
+		return fmt.Errorf("%w: sparse overlay row %s declares extent offset=%d size=%d", ErrGGUFExpertMetadata, name, off, size)
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if _, ok := o.present[name]; ok {
+		return fmt.Errorf("%w: sparse overlay row %s is already resident", ErrGGUFExpertMetadata, name)
+	}
+	if _, ok := o.backed[name]; ok {
+		return fmt.Errorf("%w: sparse overlay row %s already has a backing extent", ErrGGUFExpertMetadata, name)
+	}
+	o.backed[name] = backedRow{reader: reader, off: off, size: size}
+	o.bitmap[index/64] |= 1 << uint(index%64)
+	return nil
+}
+
+// BackedRows counts the bitmap-present experts whose rows are disk-backed rather than resident — the
+// host RAM this rank's overlay band does NOT hold. Always <= PresentRows.
+func (o *ExpertSparseOverlay) BackedRows() int {
+	if o == nil {
+		return 0
+	}
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return len(o.backed)
+}
+
 // RowPresent reports whether the row-presence bitmap marks expert index present.
 func (o *ExpertSparseOverlay) RowPresent(index int) bool {
 	if o == nil || index < 0 || index >= o.rows {
@@ -144,14 +215,24 @@ func (o *ExpertSparseOverlay) row(name string) ([]byte, bool) {
 		return nil, false
 	}
 	o.mu.RLock()
-	defer o.mu.RUnlock()
-	raw, ok := o.present[name]
-	if !ok {
+	raw, resident := o.present[name]
+	backed, hasBacking := o.backed[name]
+	o.mu.RUnlock()
+	if resident {
+		cp := make([]byte, len(raw))
+		copy(cp, raw)
+		return cp, true
+	}
+	if !hasBacking {
 		return nil, false
 	}
-	cp := make([]byte, len(raw))
-	copy(cp, raw)
-	return cp, true
+	// Disk-backed: read the row's declared extent on demand so it never sits resident. A short read
+	// is a corrupt/truncated shard, so fail closed (nil,true would serve zero bytes as a weight).
+	buf := make([]byte, backed.size)
+	if n, err := backed.reader.ReadAt(buf, backed.off); err != nil || int64(n) != backed.size {
+		return nil, false
+	}
+	return buf, true
 }
 
 // SetExpertSparseOverlay registers a per-rank sparse overlay for the fused tensor it bands. It is
