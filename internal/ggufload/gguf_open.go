@@ -79,7 +79,7 @@ func openAndRead(path string) (*os.File, *File, int64, error) {
 		_ = f.Close()
 		return nil, nil, 0, err
 	}
-	gg, err := Read(f)
+	gg, err := ReadSize(f, st.Size())
 	if err != nil {
 		_ = f.Close()
 		return nil, nil, 0, err

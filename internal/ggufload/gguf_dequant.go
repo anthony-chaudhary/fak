@@ -1042,6 +1042,48 @@ func f16At(raw []byte, off int) float32 {
 type countingReader struct {
 	r io.Reader
 	n int64
+	// mapped is the byte extent of the underlying source, when known. A zero value
+	// means "unbounded/unknown" (the historical Read(io.Reader) contract), so every
+	// existing caller stays byte-identical; a positive value makes str() and the
+	// array-length path reject a declared [offset, offset+len) range that would run
+	// past the mapping (fak#13065).
+	mapped int64
+}
+
+// checkMappedExtent reports whether the byte range [off, off+n) lies within a mapping of
+// mapped bytes. mapped <= 0 means the extent is unknown, so the check is a no-op (the
+// historical Read(io.Reader) behavior). It refuses a range that runs past the mapping with
+// a typed error, so a malformed or hostile GGUF that declares a length passing the size
+// ceiling but overrunning the file is rejected at parse time instead of over-reading.
+func checkMappedExtent(off, n, mapped int64) error {
+	if mapped <= 0 {
+		return nil
+	}
+	if off < 0 || n < 0 {
+		return fmt.Errorf("gguf: negative metadata extent off=%d len=%d", off, n)
+	}
+	if off > mapped || n > mapped-off {
+		return fmt.Errorf("gguf: metadata value [%d,%d) exceeds mapped extent %d", off, off+n, mapped)
+	}
+	return nil
+}
+
+// valueTypeFixedWidth reports the fixed storage width in bytes of a GGUF scalar metadata
+// type, and whether that type has one. String and Array are variable-width (their reader
+// bounds each value itself), so they report ok=false and are not pre-charged here.
+func valueTypeFixedWidth(t ValueType) (int, bool) {
+	switch t {
+	case TypeUint8, TypeInt8, TypeBool:
+		return 1, true
+	case TypeUint16, TypeInt16:
+		return 2, true
+	case TypeUint32, TypeInt32, TypeFloat32:
+		return 4, true
+	case TypeUint64, TypeInt64, TypeFloat64:
+		return 8, true
+	default:
+		return 0, false
+	}
 }
 
 func (r *countingReader) readFull(b []byte) error {
@@ -1079,6 +1121,9 @@ func (r *countingReader) str() (string, error) {
 	}
 	if n > maxStringBytes {
 		return "", fmt.Errorf("string too large: %d bytes", n)
+	}
+	if err := checkMappedExtent(r.n, int64(n), r.mapped); err != nil {
+		return "", err
 	}
 	b := make([]byte, int(n))
 	if err := r.readFull(b); err != nil {
@@ -1150,6 +1195,22 @@ func (r *countingReader) value(typ ValueType) (Value, error) {
 		}
 		if n > uint64(math.MaxInt) {
 			return Value{}, fmt.Errorf("array too large: %d elements", n)
+		}
+		// Bound the array's declared element count against the mapping extent before
+		// allocating: a count that passes the ceiling but cannot fit in the remaining
+		// mapped bytes is a malformed declaration, so refuse it here rather than
+		// walking into a short read. The element's fixed storage width is used when it
+		// is known (fixed-width scalars); a variable-width element (string/array) is
+		// checked per element by its own reader.
+		if width, ok := valueTypeFixedWidth(elem); ok {
+			// n*width must not overflow before the extent comparison; a count large
+			// enough to overflow int64 cannot fit any real mapping, so refuse it.
+			if n > uint64(math.MaxInt64)/uint64(width) {
+				return Value{}, fmt.Errorf("array span of %d x %d bytes overflows int64", n, width)
+			}
+			if err := checkMappedExtent(r.n, int64(n)*int64(width), r.mapped); err != nil {
+				return Value{}, err
+			}
 		}
 		items := make([]Value, int(n))
 		for i := range items {

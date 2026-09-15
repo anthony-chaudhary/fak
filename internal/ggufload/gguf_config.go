@@ -17,9 +17,23 @@ const ggufHeaderBufferSize = 64 << 10
 // resolved. It reads only the header (not the tensor data blob), and errors on a bad magic,
 // an unsupported version, or a misaligned tensor offset.
 func Read(r io.Reader) (*File, error) {
+	return readHeader(r, 0)
+}
+
+// ReadSize is Read for a source whose total byte extent is known (a memory-mapped or
+// stat'd file). mapped <= 0 keeps Read's exact behavior. When mapped > 0, every metadata
+// string and fixed-width array declared length is validated against [0, mapped): a value
+// whose declared range runs past the mapping is refused with a typed error at parse time,
+// so a malformed or hostile GGUF cannot over-read (fak#13065). Tensor-data bounds are
+// unchanged (gguf_weightsource.go already checks them against the file size).
+func ReadSize(r io.Reader, mapped int64) (*File, error) {
+	return readHeader(r, mapped)
+}
+
+func readHeader(r io.Reader, mapped int64) (*File, error) {
 	// Keep countingReader outside the buffer: rr.n is the exact number of header bytes
 	// consumed by the parser, independent of any source bytes prefetched by bufio.
-	rr := &countingReader{r: bufio.NewReaderSize(r, ggufHeaderBufferSize)}
+	rr := &countingReader{r: bufio.NewReaderSize(r, ggufHeaderBufferSize), mapped: mapped}
 	magic := make([]byte, 4)
 	if err := rr.readFull(magic); err != nil {
 		return nil, err
