@@ -221,7 +221,11 @@ func executeDispatchWavePlan(stdout, stderr io.Writer, req dispatchWaveExecution
 	// recompute the spawn count from the finalized per-row actions. Zero admitted
 	// rows short-circuit inside drainAndFinish (no drain) and are reported per-row.
 	if share != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), sharedHostDrainTimeout(len(ticks), microagent.BudgetForWave(*maxWorkers, len(executionPlan))))
+		// Size the backstop from the batch the host must actually drain (the rows it
+		// admitted), not from len(ticks): the two diverge whenever the execution loop
+		// stops early, and a short timeout must not cut off work still resident.
+		workers := microagent.BudgetForWave(*maxWorkers, len(executionPlan))
+		ctx, cancel := context.WithTimeout(context.Background(), sharedHostDrainTimeout(len(share.rows), workers))
 		dispatchWaveDrainSharedHost(ctx, share)
 		cancel()
 		spawned = 0
