@@ -1,1 +1,252 @@
-/goal use sub agents. Complete this issue 12993. use sub agents.
+/goal Complete flow ticket 13101: feat(compute): up-level shadow contract — exact companion to a quantized plane
+
+You are an autonomous OpenCode software engineer assigned to resolve this ticket.
+
+## TARGET REPOSITORY
+This ticket lives in the **public core (fak)** repository. Your worktree and all edits are in
+that repository; do not edit the other repository. Its landing path and commit
+trailer differ from the other repo — use the commands in the VERIFICATION &
+LANDING SEQUENCE below, not a remembered command for the other repo.
+
+## MANDATORY CORE INSTRUCTION: ACTIVE SUBAGENT DELEGATION
+You MUST actively utilize specialized subagents for all phases of this task:
+1. Dispatch an explore or researcher subagent to investigate codebase layout, prior art, and exact file seams before editing.
+2. Dispatch a worker subagent to implement code and reproduction tests within your active lane.
+3. Dispatch a tester subagent to execute on-device test suites and generate proof receipts.
+4. Dispatch a code-reviewer subagent to inspect diffs, verify 5-gate boundary compliance, and check edge cases.
+5. Dispatch a lander subagent to safely verify, commit, and land the worktree changes.
+Do NOT attempt to perform heavy multi-file edits, monolithic testing, or unverified landings directly in the primary coordinator context.
+
+<test-separation>
+DEFAULT RULE - tests must be authored in a SEPARATE context window from the
+implementation. This is the Context-Decoupled Test Separation Invariant
+(docs/notes/2026-09-09-context-decoupled-test-provenance.md).
+- Implementation author and test author MUST be distinct sessions. Record the
+  implementation session as Impl-Context and the test author session as
+  Test-Context; they must differ (Separation-Verdict: SEPARATED).
+- The test author subagent must run in a FRESH context seeded with ONLY the
+  ticket specification and exported interfaces/contracts. Do NOT hand it the
+  implementation reasoning trace, scratchpad, or a "write tests for what I just
+  built" prompt that reveals the implementation's internal choices.
+- The test author writes tests adversarially from the spec: probe edge cases the
+  implementation may have omitted, not the artifacts the implementation happened
+  to produce.
+- If a distinct test-author context is genuinely unavailable, you MUST declare
+  Separation-Verdict: COLLOCATED (fallback: <reason>) with a concrete reason; a
+  collocated landing requires an operator-signed waiver. Never synthesize a fake
+  Test-Context session ID or hash to fabricate SEPARATED.
+- When landing, pass the two distinct session IDs explicitly, e.g.
+  fak-flow land <ticket> --impl-session <impl> --test-session <test> ...
+</test-separation>
+
+## FRESH-CONTEXT REQUIREMENT
+The following roles MUST each run in a session DISTINCT from the implementation session (a fresh OpenCode context), and MUST NOT reuse the implementer's context: test, judge.
+
+## ENFORCEABLE DELEGATION RECEIPT
+Delegation is now a recorded artifact, not just prose. The required subagent
+roles for this ticket are: explore, worker, tester, reviewer, lander.
+As you fulfill each role, record the delegated context's session id with:
+  fak-flow delegation record --ticket 13101 --role <role> --session <session-id>
+The record is validated at land time; a session that ran entirely in one context
+(zero delegated roles) is detectable and will be surfaced as partial/zero.
+This is separate from - and does not replace - the commit context-provenance
+trailers required for any change touching both implementation and test files.
+
+## REPOSITORY INVARIANTS & 5-GATE BOUNDARY RULES
+- Work is restricted to your active lane (compute) and declared likely paths.
+- Public fak code MUST NOT import fak-private/* (the private factory repo is never a dependency of the public core).
+- Public core engine work goes in internal/*, pkg/*, cmd/fak/* only.
+- All code must compile cleanly with go vet and go test.
+- Every commit must include DCO signoff (-s) and conventional trailer "(fak compute)".
+
+## TICKET SPECIFICATION & PROBLEM FRAME
+Spec file: C:\work\fak\.worktrees\ticket-13101.md
+
+<!-- fak-plevel-key: up-level-shadow-contract -->
+# feat(compute): up-level shadow contract — exact companion to a quantized plane
+
+```routing
+lane: compute
+paths: internal/compute/shadow.go, internal/compute/shadow_test.go
+expected_steps: 6
+```
+
+## Value
+
+- Centrality: Core
+- For: engine developers who must keep an exactness-critical companion to a quantized plane
+- Problem: several planes are already quantized while keeping a full-precision companion (KV pre-RoPE K, V4.1 hot rows, a planned FP4-with-f32-Kraw), but the pattern is emergent and unnamed, so its invariant ("the shadow is bit-exact") is untested as a contract
+- Today: each site hand-rolls an f32 reservation and relies on a comment to say why
+- Better because: one named contract says "plane X is quantized with an exact shadow at level Z for purpose W", and a round-trip test enforces the bit-identity
+- P1: advanced - generalizes the shipped "pre-RoPE K stays f32 while attended K/V are q8_0" trick into a reusable contract
+- P2: advanced - makes mixed storage that MUST stay mixed expressible and testable instead of emergent
+- P3: advanced - additive; the existing KV "mixed" label and V4.1 hot-row override become the first two instantiations, unchanged
+- P4: advanced - gives operators one word and one receipt for "this plane carries an exact shadow"
+
+## Current state
+
+`internal/compute/kvprecision.go:87` `perTokenPerLayerBytes` keeps the pre-RoPE K
+row **f32** while the attended K/V are q8_0; the storage label is literally
+`"mixed"` (`:60`) and the header explains the reason is **exact eviction**. V4.1
+hot rows ship an exact FP8+E8M0 override on top of quantized shards. A blackwell
+plan decides "tier precision per plane; FP4 weights/V/read-K with an f32 `Kraw`
+shadow". `internal/quantmeta/contract.go:171` `KVSpec` already models K and V
+independently with a full-precision sink/recent window (`:174-175`), but no type
+or interface names the shadow or asserts its bit-identity.
+
+## Core through-line
+
+Add `internal/compute/shadow.go` with:
+
+```go
+// ShadowPurpose names why a plane needs an exact companion.
+type ShadowPurpose string // "exact-eviction" | "hot-row-override" | "quality-floor"
+
+// ShadowLifetime names how long the shadow is retained.
+type ShadowLifetime string // "resident" | "per-token" | "on-evict"
+
+// Shadow declares an exactness-critical companion to a quantized plane.
+type Shadow struct {
+    Purpose  ShadowPurpose
+    Dtype    Dtype          // the shadow's dtype; must be strictly wider than the plane
+    Lifetime ShadowLifetime
+}
+
+// Shadowed pairs a quantized Tensor with its exact shadow Tensor.
+type Shadowed struct {
+    Quant  Tensor
+    Shadow Tensor
+    Spec   Shadow
+}
+```
+
+A constructor that fail-closes when `Shadow.Dtype` is not strictly wider than the
+quantized plane's dtype (by the registry's rank from child 01), and a check that
+the shadow is **bit-identical to the pre-quantization source** for the covered
+elements. The KV `mixed` reserve and the V4.1 hot-row override become the first
+two named instantiations, proving the contract by construction.
+
+## Gold-plating boundary
+
+Out of scope: new quant formats, the per-pass schedule (child 03), and any
+change to the KV store's append/evict arithmetic. Contract type + validation +
+the two refactors that consume it, plus tests.
+
+## Verifiable Witness
+
+```bash
+go -C ..\fak test -count=1 ./internal/compute/... -run 'Shadow'
+```
+
+Expect: the KV `mixed` instantiation keeps the pre-RoPE K shadow bit-identical
+to the f32 source while attended K/V are q8_0; a shadow narrower-or-equal to its
+plane refuses; and a deliberately corrupted shadow fails the bit-identity check.
+
+### File:Line Seam
+
+- `internal/compute/kvprecision.go:32` (`KVPrecision`), `:60` (`"mixed"` label),
+  `:87` (`perTokenPerLayerBytes`), `:125` (`AutoSelectKVPrecision`)
+- `internal/compute/compute.go:194` (`Tensor`), `:156` (`QuantSpec`)
+- `internal/quantmeta/contract.go:171` (`KVSpec`), `:174-175` (full-precision window)
+
+### Blast Radius & Affected Lanes
+
+- **Primary Lane:** `compute`
+- **Unaffected Lanes:** additive type; the KV `mixed` reserve and hot-row
+  override keep their exact behavior, now expressed through the contract.
+
+### Quarantined Fallback Mechanism
+
+A shadow that is not strictly wider than its plane, or that fails the
+bit-identity round-trip, refuses explicitly. There is no "approximately exact"
+shadow: the contract is binary.
+
+## Scoped Acceptance Criteria
+
+- [ ] 1. `Shadow`, `ShadowPurpose`, `ShadowLifetime`, `Shadowed` types plus a
+      fail-closed constructor.
+- [ ] 2. Strictly-wider-than-plane check; a narrower-or-equal shadow refuses.
+- [ ] 3. Bit-identity check of the shadow against the pre-quantization source;
+      a corrupted shadow fails.
+- [ ] 4. The KV `mixed` reserve is expressed through the contract and its
+      existing witness still passes.
+- [ ] 5. `gofmt` clean, `go vet ./internal/compute/...` clean.
+
+## Why this is next
+
+It is the missing third leg of the leveling seam: levels can go up, levels can go
+down, and a quantized plane can declare the exact companion it must keep. It is
+low-risk and can proceed once child 02 lands, in parallel with child 03.
+
+## Working spine
+
+`Shadow`/`Shadowed` types + fail-closed constructor + bit-identity round-trip +
+the KV `mixed` refactor as the proving instantiation.
+
+## Acceptance gate
+
+The `## Witness` command runs green, including the narrower-shadow refusal and
+the corrupted-shadow failure.
+
+## Closure binding
+
+Resolving commit cites this issue and carries `(fak compute)`.
+
+## Done condition
+
+`go test -count=1 ./internal/compute/...` is green with the new `shadow_test.go`,
+the KV `mixed` reserve is expressed through the contract, and no file outside
+`internal/compute/{shadow.go,shadow_test.go,kvprecision.go}` is modified.
+
+## Witness
+
+```bash
+go -C ..\fak test -count=1 ./internal/compute/... -run 'Shadow'
+```
+
+## Definition of done
+
+The shadow contract and its tests are landed on `fak` trunk with the witness
+above green, and the shipped KV `mixed` reservation is the contract's first
+named instantiation.
+
+## Parent context
+
+Parent: #13097 (fak). Umbrella: `00-umbrella-precision-levels.md`. Depends on child 02
+(`02-composable-converter-seam.md`) for the shadow round-trip.
+## Work estimate
+
+Estimate: 4 points
+
+## Overall completion contribution
+
+Contribution: 4/4 points to the shadow contract surface.
+
+## Completion standard
+
+integrated
+
+
+<glm-5.3-flash-rules>
+You are running on GLM-5.3-Flash. Four prompt-construction rules apply (M1 / TICKET-01; evidence E1, E4, E7):
+(a) Steering reasoning: use the reasoning_effort parameter only (low or high; any other value is treated as max). Do not pass provider chat-template kwargs to the GLM endpoint. GLM-5.3 ignores those boolean knobs and leaks its raw scratchpad, so rely on reasoning_effort alone.
+(b) JSON-schema pattern fields: use ASCII character-class regex only (e.g. [^<...>]). Never use Unicode property escapes of the backslash-p brace form (a backslash, then "p", then an open brace); GLM/anthropic-compatible endpoints reject those with HTTP 400 invalid_request.
+(c) Section framing: demarcate every prompt section with XML-ish tags (<task>, <facts>, <done>) rather than loose prose fences.
+(d) Unknown/unavailable tool: STOP immediately and report the missing tool and the intended call. Never substitute another tool and never silently execute a different server's tool.
+</glm-5.3-flash-rules>
+
+
+## VERIFICATION & LANDING SEQUENCE
+1. Implement the required changes and unit tests with mock and hardware-witnessed arms.
+2. Run targeted package tests:
+   go test ./platform/compute/... -count=1
+3. Run boundary audit:
+   go -C <public-root> run ./cmd/fak boundary check --staged
+4. When all criteria pass, land cleanly to trunk via:
+   go -C <public-root> run ./cmd/fak worktree worker land --worktree . -m "feat(compute): complete ticket 13101 (feat(compute): up-level shadow contract — exact companion to a quantized plane) (fak compute)" --verify "go test ./platform/compute/... -count=1"
+
+## DURABLE OUTPUT DIRECTORY (write all candidate artifacts here)
+Write every candidate artifact (issue drafts, analysis notes, receipts) to the
+absolute path below. Do NOT write to a CWD-relative .issue-scratch directory -
+the worktree filesystem may be virtualized and those writes can be lost.
+  OUTPUT DIR: C:\work\fak\.fak\runs\13101\scratch

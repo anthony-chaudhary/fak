@@ -90,8 +90,19 @@ func (p KVPrecision) perTokenPerLayerBytes(elemsPerRow int64) int64 {
 	}
 	switch p {
 	case KVPrecisionQ8:
-		// pre-RoPE K stays f32 (exact evict re-positioning); post-RoPE K and V are q8_0.
-		kRaw := saturatingMulInt64(elemsPerRow, 4)
+		// pre-RoPE K stays f32 (exact evict re-positioning); post-RoPE K and V are q8_0. The
+		// "keep the pre-RoPE K row f32" decision is EXPRESSED through the shadow contract
+		// (shadow.go) rather than only asserted in prose: KVExactEvictShadow(Q8_0) is the
+		// named instantiation of exactly this reserve, and its validity is what makes the
+		// kRaw term f32. The arithmetic is unchanged — the shadow's F32 dtype is the same
+		// F32.Bytes()==4 the term always charged.
+		evictShadow, err := KVExactEvictShadow(Q8_0)
+		if err != nil {
+			// Should be unreachable (f32 is strictly wider than q8_0), but fail open to the
+			// f32-exact kRaw term rather than silently dropping exactness.
+			evictShadow = Shadow{Purpose: ShadowPurposeExactEviction, Dtype: F32, Lifetime: ShadowLifetimeOnEvict}
+		}
+		kRaw := saturatingMulInt64(elemsPerRow, int64(evictShadow.Dtype.Bytes()))
 		q8Row := kvQ8RowBytes(elemsPerRow)
 		return saturatingAddInt64(kRaw, q8Row, q8Row)
 	default: // KVPrecisionF32 — three f32 rows (Kraw + K + V)
