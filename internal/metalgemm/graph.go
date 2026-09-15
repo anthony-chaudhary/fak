@@ -33,6 +33,16 @@ int mg_graph_set_mm_mode(void *graph, int mode);
 int mg_graph_mm_mode(void *graph);
 int mg_graph_set_buffer_pool(void *graph, int depth);
 void mg_graph_recycle_result(void *graph, void *result);
+void *mg_qwen35_graph_kv_alloc(int elems);
+void mg_qwen35_graph_kv_free(void *kv);
+int mg_qwen35_graph_kv_upload(void *kv, const float *src, int elems);
+int mg_qwen35_graph_kv_download(void *kv, float *dst, int elems);
+int mg_qwen35_graph_attention_dkv(void *graph, void *q, void *k, void *v, void *gate,
+    const float *qnorm, const float *knorm, const float *cosv, const float *sinv,
+    void *kv_kraw, void *kv_kpost, void *kv_v, int kv_off,
+    int base, int nh, int nkv, int hd, int rotary, float scale, float qk_eps, int gain1p, int qknorm,
+    int qnorm_elems, int knorm_elems,
+    void **out, void **kraw, void **kpost, void **vcurrent);
 void *mg_qwen35_graph_norm(void *graph, void *input, const float *weight, int rows, int width, float eps, int gain1p, int last_only);
 int mg_qwen35_graph_add(void *graph, void *x, void *y, int n);
 int mg_qwen35_graph_swiglu(void *graph, void *gate, void *up, int n);
@@ -98,6 +108,171 @@ type QuantizedGraphResult struct {
 
 type Qwen35GraphAttentionResult struct {
 	Output, KRaw, KPost, V *GraphResult
+}
+
+// DeviceKV is a caller-owned device-resident KV triple shared by every
+// full-attention layer across a panel walk. Unlike a GraphResult it is NOT
+// tracked on any ProjectionGraph, so a panel's graph Free() never reclaims it:
+// one DeviceKV lives for the whole sequence and each panel's new KRaw/KPost/V
+// rows are appended into it by mg_qwen35_graph_attention_dkv, so panel p+1 reads
+// the KPost/V prefix on the device instead of paying a host readback + prefix
+// re-upload.
+//
+// Each of the three sides reserves LayerStride = tokens*NumKVHeads*HeadDim floats
+// per layer; layer l's rows begin at l*LayerStride. Close frees all three device
+// buffers. Side 0 is KRaw (pre-norm key), side 1 is KPost (attention prefix) and
+// side 2 is V (raw value).
+type DeviceKV struct {
+	kraw, kpost, v unsafe.Pointer
+	elems          int // per-side capacity in floats
+	layerStride    int // floats per layer per side
+}
+
+// NewDeviceKV allocates a persistent device KV triple sized for tokens tokens
+// across layers full-attention layers, each layer holding kvWidth = nKV*hd
+// floats per token. Returns nil when any device allocation or the geometry is
+// unavailable, which the caller treats as a decline (fail-open to the host walk).
+func NewDeviceKV(layers, tokens, kvWidth int) *DeviceKV {
+	if layers <= 0 || tokens <= 0 || kvWidth <= 0 || tokens > int(^uint(0)>>1)/kvWidth {
+		return nil
+	}
+	layerStride := tokens * kvWidth
+	if layers > int(^uint(0)>>1)/layerStride {
+		return nil
+	}
+	elems := layers * layerStride
+	kraw := C.mg_qwen35_graph_kv_alloc(C.int(elems))
+	if kraw == nil {
+		return nil
+	}
+	kpost := C.mg_qwen35_graph_kv_alloc(C.int(elems))
+	if kpost == nil {
+		C.mg_qwen35_graph_kv_free(kraw)
+		return nil
+	}
+	v := C.mg_qwen35_graph_kv_alloc(C.int(elems))
+	if v == nil {
+		C.mg_qwen35_graph_kv_free(kraw)
+		C.mg_qwen35_graph_kv_free(kpost)
+		return nil
+	}
+	return &DeviceKV{kraw: kraw, kpost: kpost, v: v, elems: elems, layerStride: layerStride}
+}
+
+// LayerStride reports the per-layer float width per side the pair was sized for,
+// so a caller can validate its geometry before encoding.
+func (d *DeviceKV) LayerStride() int {
+	if d == nil {
+		return 0
+	}
+	return d.layerStride
+}
+
+func (d *DeviceKV) side(side int) (unsafe.Pointer, error) {
+	if d == nil || d.kraw == nil || d.kpost == nil || d.v == nil {
+		return nil, errors.New("metalgemm: device KV is not allocated")
+	}
+	switch side {
+	case 0:
+		return d.kraw, nil
+	case 1:
+		return d.kpost, nil
+	case 2:
+		return d.v, nil
+	default:
+		return nil, errors.New("metalgemm: device KV side must be 0 (KRaw), 1 (KPost) or 2 (V)")
+	}
+}
+
+// Upload copies host prefix rows into the device side at offset 0. It is used only
+// to seed an already-resident prefix (e.g. a pre-existing cache); a fresh walk
+// appends every row on the device and never uploads.
+func (d *DeviceKV) Upload(side int, src []float32) error {
+	return d.UploadRegion(side, 0, src)
+}
+
+// UploadRegion copies `src` into a device side starting at float offset `off`, so
+// a layer's existing host prefix can be seeded at l*LayerStride() before a walk.
+func (d *DeviceKV) UploadRegion(side, off int, src []float32) error {
+	buf, err := d.side(side)
+	if err != nil {
+		return err
+	}
+	if len(src) == 0 {
+		return nil
+	}
+	if off < 0 || off+len(src) > d.elems {
+		return errors.New("metalgemm: device KV upload exceeds capacity")
+	}
+	// The native uploader copies to the buffer start, so upload the whole
+	// [0, off+len) region: stage the existing device bytes below `off` first, then
+	// the caller's rows, then write once. Device bytes below `off` are either a
+	// previously seeded prefix or zero, so preserving them is required.
+	staging := make([]float32, off+len(src))
+	if off > 0 {
+		if C.mg_qwen35_graph_kv_download(buf, (*C.float)(unsafe.Pointer(&staging[0])), C.int(off)) == 0 {
+			return errors.New("metalgemm: device KV upload read-back failed")
+		}
+	}
+	copy(staging[off:], src)
+	if C.mg_qwen35_graph_kv_upload(buf, (*C.float)(unsafe.Pointer(&staging[0])), C.int(len(staging))) == 0 {
+		return errors.New("metalgemm: device KV upload failed")
+	}
+	return nil
+}
+
+// Download copies a device side back to a host slice once, at the END of a
+// device-resident walk, so the host cache contract the decode path depends on
+// still holds. This is the single terminal readback that replaces the per-panel
+// one.
+func (d *DeviceKV) Download(side int, dst []float32) error {
+	return d.DownloadRegion(side, 0, dst)
+}
+
+// DownloadRegion copies `dst` floats starting at float offset `off` from a device
+// side. It lets one persistent triple serve every full-attention layer: layer l's
+// rows live at l*LayerStride(), and the walk downloads each slice into the host
+// cache row exactly once at the end.
+func (d *DeviceKV) DownloadRegion(side, off int, dst []float32) error {
+	buf, err := d.side(side)
+	if err != nil {
+		return err
+	}
+	if len(dst) == 0 {
+		return nil
+	}
+	if off < 0 || off+len(dst) > d.elems {
+		return errors.New("metalgemm: device KV download exceeds capacity")
+	}
+	// The native downloader copies from the buffer start, so read the layer slice
+	// into a staging buffer sized to its end offset, then take the tail. This
+	// allocates per layer but only once per walk.
+	staging := make([]float32, off+len(dst))
+	if C.mg_qwen35_graph_kv_download(buf, (*C.float)(unsafe.Pointer(&staging[0])), C.int(len(staging))) == 0 {
+		return errors.New("metalgemm: device KV download failed")
+	}
+	copy(dst, staging[off:])
+	return nil
+}
+
+// Close frees the device KV triple. Safe to call twice.
+func (d *DeviceKV) Close() {
+	if d == nil {
+		return
+	}
+	if d.kraw != nil {
+		C.mg_qwen35_graph_kv_free(d.kraw)
+		d.kraw = nil
+	}
+	if d.kpost != nil {
+		C.mg_qwen35_graph_kv_free(d.kpost)
+		d.kpost = nil
+	}
+	if d.v != nil {
+		C.mg_qwen35_graph_kv_free(d.v)
+		d.v = nil
+	}
+	d.elems, d.layerStride = 0, 0
 }
 
 // PromptPanelMaxTokens is the widest prompt panel the Qwen3.8 whole-forward graph
@@ -777,6 +952,75 @@ func (g *ProjectionGraph) FullAttention(q, k, v, gate *GraphResult, qnorm, knorm
 	// attention as three encoders.
 	g.encoders += 3
 	g.hostUploadBytes += uint64(len(qnorm)+len(knorm)+len(cosv)+len(sinv)+len(prefixK)+len(prefixV)) * 4
+	return Qwen35GraphAttentionResult{
+		Output: &GraphResult{ptr: outp, out: qwidth, p: g.p, graph: g},
+		KRaw:   &GraphResult{ptr: krawp, out: kvwidth, p: g.p, graph: g},
+		KPost:  &GraphResult{ptr: kpostp, out: kvwidth, p: g.p, graph: g},
+		V:      &GraphResult{ptr: vcurp, out: kvwidth, p: g.p, graph: g},
+	}, nil
+}
+
+// FullAttentionDevice is FullAttention with the KV prefix held on the device in a
+// persistent DeviceKV pair shared across a panel walk. `layer` selects the pair's
+// layer slice (layer*layerStride floats) and `base` is the prefix row count already
+// resident there. The panel's new K/V rows are appended on the device, so no host
+// prefix memcpy and no per-panel host readback are paid; the caller reads the pair
+// back ONCE at the end of the walk to satisfy the host cache contract.
+//
+// A nil or under-sized pair, or any native decline, returns an error and encodes
+// nothing observable beyond its own graph; the caller falls back to the host walk.
+func (g *ProjectionGraph) FullAttentionDevice(q, k, v, gate *GraphResult, kv *DeviceKV, layer int, qnorm, knorm, cosv, sinv []float32, base, nH, nKV, hd, rotary int, scale, qkEps float32, gain1p, qkNorm bool) (Qwen35GraphAttentionResult, error) {
+	if g == nil {
+		return Qwen35GraphAttentionResult{}, errGraphTerminal
+	}
+	if kv == nil || kv.kraw == nil || kv.kpost == nil || kv.v == nil || layer < 0 {
+		return Qwen35GraphAttentionResult{}, errors.New("metalgemm: device KV is not allocated")
+	}
+	if !qwenOrderedPanel(g.p) {
+		return Qwen35GraphAttentionResult{}, fmt.Errorf("metalgemm: Qwen full-attention panel P=%d outside witnessed set [1,%d]", g.p, PromptPanelMaxTokens)
+	}
+	if nKV <= 0 || hd <= 0 {
+		return Qwen35GraphAttentionResult{}, errors.New("metalgemm: invalid Qwen full-attention geometry")
+	}
+	kvwidth := nKV * hd
+	kvOff := layer * kv.layerStride
+	if kvOff < 0 || kvOff+kv.layerStride > kv.elems || base > kv.layerStride/kvwidth {
+		return Qwen35GraphAttentionResult{}, errors.New("metalgemm: device KV layer slice out of range")
+	}
+	qwidth := nH * hd
+	for _, check := range []struct {
+		r *GraphResult
+		w int
+	}{{q, qwidth}, {gate, qwidth}, {k, kvwidth}, {v, kvwidth}} {
+		if err := g.qwenInput(check.r, g.p, check.w); err != nil {
+			return Qwen35GraphAttentionResult{}, err
+		}
+	}
+	qNormShapeOK := len(qnorm) == hd || len(qnorm) == qwidth
+	kNormShapeOK := len(knorm) == hd || len(knorm) == kvwidth
+	if !qNormShapeOK || !kNormShapeOK || hd < 2 || hd > 256 || rotary < 2 || rotary > hd || rotary%2 != 0 || len(cosv) != g.p*(rotary/2) || len(sinv) != len(cosv) || base < 0 || scale <= 0 || qkEps <= 0 {
+		return Qwen35GraphAttentionResult{}, errors.New("metalgemm: invalid Qwen full-attention geometry")
+	}
+	gain := C.int(0)
+	if gain1p {
+		gain = 1
+	}
+	qkn := C.int(0)
+	if qkNorm {
+		qkn = 1
+	}
+	var outp, krawp, kpostp, vcurp unsafe.Pointer
+	if C.mg_qwen35_graph_attention_dkv(g.ptr, q.ptr, k.ptr, v.ptr, gate.ptr,
+		(*C.float)(unsafe.Pointer(&qnorm[0])), (*C.float)(unsafe.Pointer(&knorm[0])),
+		(*C.float)(unsafe.Pointer(&cosv[0])), (*C.float)(unsafe.Pointer(&sinv[0])), kv.kraw, kv.kpost, kv.v, C.int(kvOff),
+		C.int(base), C.int(nH), C.int(nKV), C.int(hd), C.int(rotary), C.float(scale), C.float(qkEps), gain, qkn, C.int(len(qnorm)), C.int(len(knorm)),
+		&outp, &krawp, &kpostp, &vcurp) == 0 {
+		return Qwen35GraphAttentionResult{}, errors.New("metalgemm: Qwen full-attention device-KV encode failed")
+	}
+	// Native full attention owns Q/K normalization, current-K/V append, and
+	// attention as three encoders; the device append is the fourth.
+	g.encoders += 3
+	g.hostUploadBytes += uint64(len(qnorm)+len(knorm)+len(cosv)+len(sinv)) * 4
 	return Qwen35GraphAttentionResult{
 		Output: &GraphResult{ptr: outp, out: qwidth, p: g.p, graph: g},
 		KRaw:   &GraphResult{ptr: krawp, out: kvwidth, p: g.p, graph: g},

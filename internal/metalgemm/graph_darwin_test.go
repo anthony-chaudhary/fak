@@ -730,6 +730,187 @@ func TestProjectionGraphQwenOrderedLongContextAttention(t *testing.T) {
 	}
 }
 
+// TestProjectionGraphQwenDeviceKVAttentionParity is the #13087 witness for the
+// device-resident KV path. It proves the two things the change must not break:
+//
+//  1. CPU-oracle parity: FullAttentionDevice's output/KRaw/KPost match the
+//     independent float64 oracle (qwenOrderedAttentionCPU) on both a single-row
+//     (decode-shaped) and a multi-row (panel-shaped) encode, so moving the KV
+//     append onto the device is numerically transparent.
+//  2. Panel-walk identity: across TWO panels appending into ONE persistent
+//     DeviceKV pair, the per-panel readback of the device pair is byte-identical
+//     to the historical host-prefix path (FullAttention with a host prefix), and
+//     the pair's device-resident prefix rows equal the rows the host path
+//     appended. This is the pinned crossover identity: panel p+1 reads on the
+//     device exactly the rows panel p wrote.
+func TestProjectionGraphQwenDeviceKVAttentionParity(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	defer ResetQ4K()
+	const input, nH, nKV = 256, 2, 1
+	for _, tc := range []struct {
+		name         string
+		rows, hd     int
+		rotary, base int
+	}{
+		{name: "single_row_hd32", rows: 1, hd: 32, rotary: 16, base: 4},
+		{name: "panel32_hd32", rows: 32, hd: 32, rotary: 16, base: 8},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, hd, rotary, base := tc.rows, tc.hd, tc.rotary, tc.base
+			qwidth, kvwidth := nH*hd, nKV*hd
+			qgateWeight := UploadQ4K(q4kTestRaw(2*qwidth, input, uint64(1308701+hd)), 2*qwidth, input)
+			kWeight := UploadQ4K(q4kTestRaw(kvwidth, input, uint64(1308702+hd)), kvwidth, input)
+			vWeight := UploadQ4K(q4kTestRaw(kvwidth, input, uint64(1308703+hd)), kvwidth, input)
+			if qgateWeight == nil || kWeight == nil || vWeight == nil {
+				t.Fatal("device-KV parity Q4_K upload")
+			}
+			qnorm, knorm := make([]float32, hd), make([]float32, hd)
+			for i := range qnorm {
+				qnorm[i] = 0.87 + float32(i%7)*0.05
+				knorm[i] = 0.91 + float32(i%5)*0.04
+			}
+			// Deterministic, non-degenerate prefix and per-row rope phases.
+			prefixK, prefixV := make([]float32, base*kvwidth), make([]float32, base*kvwidth)
+			for i := range prefixK {
+				prefixK[i] = float32((i*7)%29-14) * 0.02
+				prefixV[i] = float32((i*11)%31-15) * 0.017
+			}
+			cosv, sinv := make([]float32, rows*(rotary/2)), make([]float32, rows*(rotary/2))
+			for row := 0; row < rows; row++ {
+				for dim := 0; dim < rotary/2; dim++ {
+					angle := float64((base+row+1)*(dim+1)) * 0.003
+					cosv[row*(rotary/2)+dim], sinv[row*(rotary/2)+dim] = float32(math.Cos(angle)), float32(math.Sin(angle))
+				}
+			}
+			scale, qkEps := float32(1/math.Sqrt(float64(hd))), float32(1e-6)
+			x := q4kTestVector(rows*input, int64(1308710+rows+base))
+
+			// Host path: seed the prefix as a host slice, exactly the historical walk.
+			gh, err := BeginProjectionGraph(x, nil, nil, rows, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			qh, err := gh.EncodeQ4K(qgateWeight)
+			if err != nil {
+				t.Fatal(err)
+			}
+			kh, err := gh.EncodeQ4K(kWeight)
+			if err != nil {
+				t.Fatal(err)
+			}
+			vh, err := gh.EncodeQ4K(vWeight)
+			if err != nil {
+				t.Fatal(err)
+			}
+			qh2, gateh, err := gh.SplitGatedQ(qh, qwidth, hd)
+			if err != nil {
+				t.Fatal(err)
+			}
+			attH, err := gh.FullAttention(qh2, kh, vh, gateh, qnorm, knorm, cosv, sinv, prefixK, prefixV, base, nH, nKV, hd, rotary, scale, qkEps, true, true)
+			if err != nil {
+				t.Fatalf("host FullAttention: %v", err)
+			}
+			hostOut, _, err := gh.FinishRead(qh2, gateh, kh, vh, attH.Output, attH.KRaw, attH.KPost, attH.V)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gh.Free()
+
+			// Device path: the SAME prefix seeded into a persistent pair, then the
+			// panel appended on the device. One layer, so layer slice 0.
+			kv := NewDeviceKV(1, base+rows, kvwidth)
+			if kv == nil {
+				t.Fatal("NewDeviceKV returned nil")
+			}
+			defer kv.Close()
+			if err := kv.Upload(0, prefixK); err != nil {
+				t.Fatalf("upload kraw: %v", err)
+			}
+			if err := kv.Upload(1, prefixK); err != nil {
+				t.Fatalf("upload kpost: %v", err)
+			}
+			if err := kv.Upload(2, prefixV); err != nil {
+				t.Fatalf("upload v: %v", err)
+			}
+			gd, err := BeginProjectionGraph(x, nil, nil, rows, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			qd, err := gd.EncodeQ4K(qgateWeight)
+			if err != nil {
+				t.Fatal(err)
+			}
+			kd, err := gd.EncodeQ4K(kWeight)
+			if err != nil {
+				t.Fatal(err)
+			}
+			vd, err := gd.EncodeQ4K(vWeight)
+			if err != nil {
+				t.Fatal(err)
+			}
+			qd2, gated, err := gd.SplitGatedQ(qd, qwidth, hd)
+			if err != nil {
+				t.Fatal(err)
+			}
+			attD, err := gd.FullAttentionDevice(qd2, kd, vd, gated, kv, 0, qnorm, knorm, cosv, sinv, base, nH, nKV, hd, rotary, scale, qkEps, true, true)
+			if err != nil {
+				t.Fatalf("FullAttentionDevice: %v", err)
+			}
+			devOut, _, err := gd.FinishRead(qd2, gated, kd, vd, attD.Output, attD.KRaw, attD.KPost, attD.V)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gd.Free()
+
+			// devOut slots: 0=q, 1=gate, 2=k, 3=v, 4=output, 5=KRaw, 6=KPost, 7=V.
+			// (1) CPU-oracle parity on the attention output and the two K rows the
+			// change appends on the device.
+			want, wantKRaw, wantKPost := qwenOrderedAttentionCPU(devOut[0], devOut[2], devOut[3], devOut[1], qnorm, knorm, cosv, sinv, prefixK, prefixV, rows, base, nH, nKV, hd, rotary, scale, qkEps, true)
+			assertOracleClose := func(name string, got, ref []float32) {
+				t.Helper()
+				for i := range ref {
+					if math.IsNaN(float64(got[i])) || math.IsInf(float64(got[i]), 0) {
+						t.Fatalf("%s[%d] non-finite: %g", name, i, got[i])
+					}
+					if d := math.Abs(float64(got[i] - ref[i])); d > 8e-4+1e-5*math.Abs(float64(ref[i])) {
+						t.Fatalf("%s[%d] oracle delta=%g got=%g want=%g", name, i, d, got[i], ref[i])
+					}
+				}
+			}
+			assertOracleClose("device attention", devOut[4], want)
+			assertOracleClose("device K raw", devOut[5], wantKRaw)
+			assertOracleClose("device K post", devOut[6], wantKPost)
+
+			// (2) Panel-walk identity: the device pair's rows [base, base+rows)
+			// equal BOTH the host path's appended rows and the device path's own
+			// per-panel readback. This is the pinned crossover: the next panel
+			// reads on the device exactly what this panel wrote.
+			// hostOut slots: 0=q, 1=gate, 2=k, 3=v, 4=Output, 5=KRaw, 6=KPost, 7=V.
+			for _, side := range []struct {
+				name string
+				side int
+				host []float32
+			}{
+				{name: "KRaw", side: 0, host: hostOut[5]},
+				{name: "KPost", side: 1, host: hostOut[6]},
+				{name: "V", side: 2, host: hostOut[7]},
+			} {
+				got := make([]float32, rows*kvwidth)
+				if err := kv.DownloadRegion(side.side, base*kvwidth, got); err != nil {
+					t.Fatalf("download device %s prefix rows: %v", side.name, err)
+				}
+				for i := range got {
+					if math.Abs(float64(got[i]-side.host[i])) > 1e-6 {
+						t.Fatalf("crossover identity %s[%d]: device=%g host=%g", side.name, i, got[i], side.host[i])
+					}
+				}
+			}
+		})
+	}
+}
+
 func graphGDNPanel(g GDNGeometry, tokens int) GDNPanel {
 	panel := GDNPanel{
 		Tokens: tokens, Mixed: make([]float32, tokens*g.convDim()),

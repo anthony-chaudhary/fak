@@ -210,6 +210,28 @@ type qwen35MetalForwardSequenceRunner interface {
 	Qwen35MetalForwardSequenceReceipt() (Qwen35MetalForwardSequenceReceipt, bool)
 }
 
+// qwen35MetalDeviceKVAdmitter is implemented by the native sequence backend that can
+// hold the full-attention KV prefix on the device across a panel walk (#13087). The
+// walk owner allocates one DeviceKV pair for the whole prompt, threads it onto the
+// backend for the walk, and downloads it once at the end. A backend that does not
+// implement this keeps the historical host-append walk; the walk owner treats a
+// decline (nil pair, or the backend not implementing the interface) as fail-open.
+type qwen35MetalDeviceKVAdmitter interface {
+	// AdmitDeviceKV sizes and attaches the walk's device KV pair. It returns nil when
+	// the geometry is unsupported or the device allocation fails, in which case the
+	// caller keeps the host walk with KV/state unmutated.
+	AdmitDeviceKV(s *Session, tokens int) *metalgemm.DeviceKV
+	// DetachDeviceKV clears the walk's pair and returns it so the caller can download
+	// and free it. It never mutates host KV/state.
+	DetachDeviceKV() *metalgemm.DeviceKV
+	// ReconcileDeviceKV appends the triple's device rows for every full-attention
+	// layer to the host cache exactly once, after the last panel. `base` is the host
+	// prefix length the walk started from and `rows` the rows the panels appended. It
+	// returns an error without mutating any host cache row if the pair's geometry
+	// disagrees with the cache.
+	ReconcileDeviceKV(s *Session, base, rows int) error
+}
+
 type qwen35MetalStateIdentityBinder interface {
 	bindQwen35MetalStateIdentity(Qwen35MetalStateIdentityReceipt)
 }
@@ -360,10 +382,37 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 			panelCover := (len(ids) / panelQuantum) * panelQuantum
 			if panelCover > 0 {
 				nPanels := (panelCover + metalgemm.PromptPanelMaxTokens - 1) / metalgemm.PromptPanelMaxTokens
+				// #13087 device-resident KV: when the native backend admits it, one
+				// device KV triple is allocated for the whole prompt and attached for
+				// the panel walk. Every full-attention layer then reads its prefix on
+				// the device and appends its new rows there, so the walk pays no
+				// per-panel host KV readback or prefix re-upload; the triple is
+				// downloaded ONCE after the last panel to restore the host cache. Any
+				// decline (pair unavailable, backend without the admitter) falls back
+				// to the historical host-append walk with KV/state unmutated.
+				var deviceKV *metalgemm.DeviceKV
+				var deviceAdmitter qwen35MetalDeviceKVAdmitter
+				deviceBase := s.Cache.Len()
+				if admitter, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalDeviceKVAdmitter); ok {
+					if kv := admitter.AdmitDeviceKV(s, panelCover); kv != nil {
+						deviceAdmitter = admitter
+						deviceKV = kv
+						s.q4kHybridPrefillDevicePanels = 0
+						s.q4kHybridPrefillDeviceRows = 0
+					}
+				}
+				if deviceKV != nil {
+					defer func() {
+						if attached := deviceAdmitter.DetachDeviceKV(); attached != nil {
+							attached.Close()
+						}
+					}()
+				}
 				var agg Qwen35MetalForwardSequenceReceipt
 				var aggValid bool
 				selectedPanels := nPanels
 				executedPanels := 0
+				executedRows := 0
 				for p := 0; p < nPanels; p++ {
 					start := p * metalgemm.PromptPanelMaxTokens
 					end := start + metalgemm.PromptPanelMaxTokens
@@ -380,6 +429,7 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 					}
 					hidden = h
 					executedPanels++
+					executedRows += len(panelIDs)
 					if !aggValid {
 						agg = receipt
 						agg.SelectedPanels = selectedPanels
@@ -411,6 +461,21 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 					}
 				}
 				if executedPanels > 0 {
+					// Reconcile the device-resident KV BEFORE the trailing remainder
+					// runs: the triple holds the panel-covered rows for every
+					// full-attention layer, and this single download restores the host
+					// cache contract the decode path depends on. Doing it first keeps
+					// the host cache row order [panelCover device rows][rem host rows]
+					// matching the appended positions. A reconcile failure is fatal
+					// (accepted), never a silent partial cache.
+					if deviceAdmitter != nil && deviceKV != nil {
+						if err := deviceAdmitter.ReconcileDeviceKV(s, deviceBase, executedRows); err != nil {
+							panic(s.failQwen35MetalForwardSequence(err))
+						}
+						if attached := deviceAdmitter.DetachDeviceKV(); attached != nil {
+							attached.Close()
+						}
+					}
 					rem := ids[panelCover:]
 					if len(rem) > 0 {
 						hidden = s.prefillQwen35HybridQ4KHidden(rem)

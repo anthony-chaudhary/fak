@@ -49,6 +49,11 @@ type metalQwen35GDNSequenceBackend struct {
 	forwardRan                      bool
 	injectForwardPostSubmitFailure  bool
 	injectMTPPanelPostSubmitFailure bool
+	// deviceKV is the sequence-scoped device KV pair the panel walk threads across
+	// panels when the device-resident lever is admitted (#13087). It is set by
+	// DeviceKVPrefix / the walk owner and cleared when the walk ends. Nil keeps the
+	// historical per-panel host append + prefix re-upload byte-identical.
+	deviceKV *metalgemm.DeviceKV
 }
 
 const (
@@ -775,6 +780,14 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequence(s *Session, i
 		kraw, kpost, v *metalgemm.GraphResult
 	}
 	var kvResults []kvResult
+	// deviceKV is the sequence-scoped device KV pair threaded by the panel walk
+	// (tryPrefillQwen35HybridQ4K) when the device-resident lever is admitted. When
+	// non-nil the full-attention layers read their prefix from the device and append
+	// their new K/V rows on the device, so this panel pays no host prefix memcpy and
+	// its K/Kpost/V rows are NOT read back here; the walk downloads the pair once at
+	// the end. nil keeps the historical host-append walk byte-identical.
+	deviceKV := b.deviceKV
+	deviceAttnOrdinal := 0
 	eps := float32(cfg.RMSNormEps)
 	for l := 0; l < cfg.NumLayers; l++ {
 		p := func(suffix string) string { return layerName(l, suffix) }
@@ -830,16 +843,31 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequence(s *Session, i
 				c, si := ropeRowForLayer(cfg, l, base+pos)
 				cosv, sinv = append(cosv, c...), append(sinv, si...)
 			}
-			attention, runErr := g.FullAttention(q, qkv[1], qkv[2], gate, qnorm, knorm, cosv, sinv,
-				s.Cache.K[l], s.Cache.V[l], base, cfg.NumHeads, cfg.NumKVHeads, cfg.HeadDim, rotary, cfg.attnScale(), cfg.qkNormEps(), cfg.NormGain1p, cfg.QKNorm)
-			if runErr != nil {
-				return nil, Qwen35MetalForwardSequenceReceipt{}, true, runErr
+			var attention metalgemm.Qwen35GraphAttentionResult
+			var runErr2 error
+			if deviceKV != nil {
+				// Device-resident KV (#13087): the prefix lives in the persistent triple
+				// at this layer's slice, and the panel appends its new rows on the device.
+				// Its K/Kpost/V rows are not read back per panel; the walk downloads once.
+				// The triple is indexed by full-attention ORDINAL, not absolute layer
+				// index, so only full-attention layers consume a slice.
+				attention, runErr2 = g.FullAttentionDevice(q, qkv[1], qkv[2], gate, deviceKV, deviceAttnOrdinal,
+					qnorm, knorm, cosv, sinv, base, cfg.NumHeads, cfg.NumKVHeads, cfg.HeadDim, rotary, cfg.attnScale(), cfg.qkNormEps(), cfg.NormGain1p, cfg.QKNorm)
+				deviceAttnOrdinal++
+			} else {
+				attention, runErr2 = g.FullAttention(q, qkv[1], qkv[2], gate, qnorm, knorm, cosv, sinv,
+					s.Cache.K[l], s.Cache.V[l], base, cfg.NumHeads, cfg.NumKVHeads, cfg.HeadDim, rotary, cfg.attnScale(), cfg.qkNormEps(), cfg.NormGain1p, cfg.QKNorm)
+			}
+			if runErr2 != nil {
+				return nil, Qwen35MetalForwardSequenceReceipt{}, true, runErr2
 			}
 			attnOut, runErr = qwen35GraphProjection(g, s, p("self_attn.o_proj.weight"), attention.Output, quantized)
 			if runErr != nil {
 				return nil, Qwen35MetalForwardSequenceReceipt{}, true, runErr
 			}
-			kvResults = append(kvResults, kvResult{layer: l, kraw: attention.KRaw, kpost: attention.KPost, v: attention.V})
+			if deviceKV == nil {
+				kvResults = append(kvResults, kvResult{layer: l, kraw: attention.KRaw, kpost: attention.KPost, v: attention.V})
+			}
 		}
 		if err = g.AddInPlace(x, attnOut); err != nil {
 			return nil, Qwen35MetalForwardSequenceReceipt{}, true, err
@@ -915,6 +943,17 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequence(s *Session, i
 	for i, id := range ids {
 		s.Cache.appendPosition(base+i, id)
 	}
+	// On the device-resident path the full-attention K/Kraw/V rows live in the
+	// sequence-scoped device KV pair, not this panel's readback: kvResults is empty,
+	// so the host append above is a no-op here and the panel records its device
+	// window instead. The walk downloads the pair once after the last panel and
+	// appends the rows to s.Cache, keeping the host cache contract the decode path
+	// depends on. This is what makes TerminalReadbacks/HostReadbackBytes flat in
+	// panel count while CommandBuffers stays ceil(L/128).
+	if deviceKV != nil {
+		s.q4kHybridPrefillDevicePanels++
+		s.q4kHybridPrefillDeviceRows += P
+	}
 	if captureRaw {
 		for row, id := range ids {
 			s.rememberTargetHidden(base+row, id, rawHidden[row*H:(row+1)*H])
@@ -923,6 +962,158 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequence(s *Session, i
 	s.q4kHybridPrefillChunks++
 	s.q4kHybridPrefillLastBase = base
 	return hidden, receipt, true, nil
+}
+
+// AdmitDeviceKV sizes a device-resident KV triple for a walk that ends at context
+// `tokens` and attaches it to the backend, so Qwen35MetalForwardSequence routes
+// full-attention layers through FullAttentionDevice. One triple is shared by every
+// full-attention layer (layer l's rows at l*layerStride). When the session already
+// holds a host prefix (`base = s.Cache.Len() > 0`, an append), each layer's
+// existing KRaw/KPost/V rows are uploaded into the triple first, so the device walk
+// continues the same prefix the host walk would have re-uploaded per panel.
+// Returns nil (decline, fail-open) for an unsupported session, an unallocatable
+// geometry, or an already-attached walk, leaving host KV/state unmutated.
+func (b *metalQwen35GDNSequenceBackend) AdmitDeviceKV(s *Session, tokens int) *metalgemm.DeviceKV {
+	if b == nil || s == nil || s.M == nil || tokens <= 0 {
+		return nil
+	}
+	if s.Backend != nil || !s.Q4K || !s.MetalQ4K || s.qwen35HAL == nil || !s.qwen35HAL.sequenceAccepted {
+		return nil
+	}
+	cfg := s.M.Cfg
+	if qwen35MetalForwardGeometryError(cfg) != nil {
+		return nil
+	}
+	base := s.Cache.Len()
+	total := base + tokens
+	layers := 0
+	for l := 0; l < cfg.NumLayers; l++ {
+		if !cfg.isLinearAttnLayer(l) {
+			layers++
+		}
+	}
+	if layers == 0 {
+		return nil // no full-attention layer: nothing to keep device-resident
+	}
+	kvWidth := cfg.NumKVHeads * cfg.HeadDim
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.deviceKV != nil {
+		return nil // a walk is already in flight; never share the triple across walks
+	}
+	kv := metalgemm.NewDeviceKV(layers, total, kvWidth)
+	if kv == nil {
+		return nil
+	}
+	// Seed an append's existing prefix into the device triple so the first panel's
+	// attention sees it. Layer l occupies ordinal*layerStride rows on each side.
+	if base > 0 {
+		want := base * kvWidth
+		stride := kv.LayerStride()
+		ordinal := 0
+		for l := 0; l < cfg.NumLayers; l++ {
+			if cfg.isLinearAttnLayer(l) {
+				continue
+			}
+			off := ordinal * stride
+			ordinal++
+			if len(s.Cache.Kraw[l]) < want || len(s.Cache.K[l]) < want || len(s.Cache.V[l]) < want {
+				kv.Close()
+				return nil // prefix shorter than the cache claims: decline, host walk
+			}
+			if err := kv.UploadRegion(0, off, s.Cache.Kraw[l][:want]); err != nil {
+				kv.Close()
+				return nil
+			}
+			if err := kv.UploadRegion(1, off, s.Cache.K[l][:want]); err != nil {
+				kv.Close()
+				return nil
+			}
+			if err := kv.UploadRegion(2, off, s.Cache.V[l][:want]); err != nil {
+				kv.Close()
+				return nil
+			}
+		}
+	}
+	b.deviceKV = kv
+	return kv
+}
+
+// DetachDeviceKV clears and returns the walk's device KV pair. It touches no host
+// KV/state, so a caller that declines the device path after admitting can detach
+// and free the pair without any host mutation.
+func (b *metalQwen35GDNSequenceBackend) DetachDeviceKV() *metalgemm.DeviceKV {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	kv := b.deviceKV
+	b.deviceKV = nil
+	return kv
+}
+
+// ReconcileDeviceKV downloads the device triple once and appends each
+// full-attention layer's newly-written rows to the host cache, restoring the host
+// cache contract the decode path depends on after a device-resident panel walk.
+// `base` is the host prefix length the walk started from (s.Cache.Len() before the
+// walk) and `rows` is how many rows the panels actually appended; the device rows
+// [base, base+rows) are the ones absent from the host cache. Every layer's host
+// rows are staged first and only committed once ALL layers validate, so a geometry
+// mismatch leaves the host cache byte-identical (fail-closed).
+func (b *metalQwen35GDNSequenceBackend) ReconcileDeviceKV(s *Session, base, rows int) error {
+	if b == nil || s == nil || s.M == nil {
+		return errors.New("metalgemm: device KV reconcile without a session")
+	}
+	b.mu.Lock()
+	kv := b.deviceKV
+	b.mu.Unlock()
+	if kv == nil {
+		return nil
+	}
+	cfg := s.M.Cfg
+	kvWidth := cfg.NumKVHeads * cfg.HeadDim
+	stride := kv.LayerStride()
+	want := rows * kvWidth
+	if kvWidth <= 0 || stride <= 0 || rows <= 0 || (base+rows)*kvWidth > stride {
+		return fmt.Errorf("metalgemm: device KV reconcile geometry mismatch: base=%d rows=%d kvWidth=%d stride=%d", base, rows, kvWidth, stride)
+	}
+	// The device triple holds exactly the three host rows the walk appended: side 0
+	// KRaw (pre-norm key), side 1 KPost (the attention prefix) and side 2 V. Layer l
+	// occupies rows [l*stride, l*stride+stride); this walk wrote [base, base+rows)
+	// of that slice, so stage those rows and commit only once every download passed.
+	type layerRows struct {
+		layer          int
+		kraw, kpost, v []float32
+	}
+	planned := make([]layerRows, 0, cfg.NumLayers)
+	ordinal := 0
+	for l := 0; l < cfg.NumLayers; l++ {
+		if cfg.isLinearAttnLayer(l) {
+			continue
+		}
+		off := ordinal*stride + base*kvWidth
+		ordinal++
+		kraw := make([]float32, want)
+		kpost := make([]float32, want)
+		v := make([]float32, want)
+		if err := kv.DownloadRegion(0, off, kraw); err != nil {
+			return err
+		}
+		if err := kv.DownloadRegion(1, off, kpost); err != nil {
+			return err
+		}
+		if err := kv.DownloadRegion(2, off, v); err != nil {
+			return err
+		}
+		planned = append(planned, layerRows{layer: l, kraw: kraw, kpost: kpost, v: v})
+	}
+	for _, row := range planned {
+		s.Cache.Kraw[row.layer] = append(s.Cache.Kraw[row.layer], row.kraw...)
+		s.Cache.K[row.layer] = append(s.Cache.K[row.layer], row.kpost...)
+		s.Cache.V[row.layer] = append(s.Cache.V[row.layer], row.v...)
+	}
+	return nil
 }
 
 // Qwen35MetalDecodeToken runs one decode position (id at absolute position

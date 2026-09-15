@@ -506,6 +506,13 @@ type Session struct {
 	// correct token-loop fallback without adding an operator-facing control.
 	q4kHybridPrefillChunks   int
 	q4kHybridPrefillLastBase int
+	// q4kHybridPrefillDevicePanels / DeviceRows count the panels that rode the
+	// device-resident KV walk (#13087) and the token rows those panels appended to
+	// the device pair. They are internal execution markers: a non-zero count with a
+	// matching Cache.Len proves the device path ran and its rows were reconciled to
+	// the host cache, distinct from a numerically correct host-append fallback.
+	q4kHybridPrefillDevicePanels int
+	q4kHybridPrefillDeviceRows   int
 	// q4kMLPOutputSlab is the optional, session-local host readback backing for one grouped Q4_K
 	// gate/up prefill result. Generation owns a Session serially, and each layer consumes gate/up
 	// before the next layer overwrites it. It is retained only inside the P<=512, 68 MiB envelope
