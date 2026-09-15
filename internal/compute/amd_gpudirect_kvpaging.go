@@ -243,6 +243,7 @@ type BaMIOPipeline struct {
 	inFlight    map[uint16]*NVMeP2PCommand
 	nextCmdID   uint16
 	exhaustions uint64
+	pollCalls   uint64
 }
 
 // NewBaMIOPipeline constructs a new BaM direct I/O pipeline.
@@ -342,7 +343,17 @@ func (p *BaMIOPipeline) PollCompletions(maxEntries int) int {
 		delete(p.inFlight, cid)
 		resolved++
 	}
+	p.pollCalls++
 	return resolved
+}
+
+// PollCallCount reports how many PollCompletions calls this pipeline has serviced.
+// A batched submit+drain collapses N per-block round-trips into O(1) polls; this
+// counter is the seam the batching witness asserts against.
+func (p *BaMIOPipeline) PollCallCount() uint64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.pollCalls
 }
 
 // InFlightCount returns the number of active commands in the submission queue.
@@ -626,6 +637,32 @@ func (c *BaMKVPagingCoordinator) offloadFrameLocked(frameIdx int) error {
 
 		c.stats.NVMeWriteCount++
 		c.stats.BytesWrittenNVMe += frame.SizeBytes
+	}
+
+	// The frame's bytes are now durable; complete residency/frame bookkeeping
+	// without re-issuing the write.
+	return c.markFrameOffloadedLocked(frameIdx)
+}
+
+// markFrameOffloadedLocked applies the residency bookkeeping that completes an
+// offload after the frame's bytes have already been committed to NVMe storage.
+// It must not re-issue the storage write, so a caller whose bytes are already
+// durable (e.g. a batched BufferColdPrefix write) can complete an offload
+// without a redundant, serial NVMe round-trip.
+func (c *BaMKVPagingCoordinator) markFrameOffloadedLocked(frameIdx int) error {
+	if frameIdx < 0 || frameIdx >= len(c.frames) {
+		return errors.New("amddirect: invalid frame index")
+	}
+	frame := c.frames[frameIdx]
+	if !frame.InUse {
+		return nil
+	}
+	if frame.PinCount > 0 {
+		return ErrBlockPinned
+	}
+	entry, exists := c.directory[frame.BlockID]
+	if !exists {
+		return ErrBlockNotFound
 	}
 
 	c.stats.ResidentBlocks--
