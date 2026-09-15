@@ -350,8 +350,18 @@ func TestCanonicalLower(t *testing.T) {
 // metal-check false "Xcode Command Line Tools missing" failure: Run used to build
 // Requirements with only GoTool populated, so Adjudicate always saw XcodeCLT.OK and
 // Clang.OK as false and failed a correctly-configured host. hostRequirements is the
-// extracted wiring under test; it must populate every prerequisite field it gates on,
-// and on this darwin/arm64 host all three tools are present.
+// extracted wiring under test; it must populate every prerequisite field it gates on
+// (each ToolCheck is a status, and OK=false is the honest "not applicable on this
+// host" status the shims deliberately emit on non-darwin hosts — Adjudicate returns
+// the not-applicable exit 0 before consulting them there).
+//
+// The gate is only *applicable* on darwin/arm64, so that is the sole host where every
+// lookup must actually succeed. On non-darwin hosts (Linux CI, Windows) the probes'
+// OK value is host-dependent — `xcode-select` is absent on Linux, and every lookup is
+// statically false on Windows — so asserting OK a priori was the bug; the beat under
+// test is that hostRequirements wires each field through with a status, not that a
+// Linux or Windows box has Xcode. An empty Extra with OK=false would also signal an
+// unwired field, so that is rejected.
 func TestHostRequirementsPopulatesAllPrereqs(t *testing.T) {
 	req := hostRequirements(runtime.GOARCH)
 	if req.Goos != runtime.GOOS {
@@ -360,6 +370,7 @@ func TestHostRequirementsPopulatesAllPrereqs(t *testing.T) {
 	if req.Goarch != runtime.GOARCH {
 		t.Fatalf("hostRequirements Goarch = %q, want %q", req.Goarch, runtime.GOARCH)
 	}
+	applicable := runtime.GOOS == "darwin" && runtime.GOARCH == "arm64"
 	populated := []struct {
 		name string
 		got  ToolCheck
@@ -369,14 +380,27 @@ func TestHostRequirementsPopulatesAllPrereqs(t *testing.T) {
 		{"Clang", req.Clang},
 	}
 	for _, tc := range populated {
-		if !tc.got.OK {
-			t.Errorf("hostRequirements left %s unpopulated: %+v", tc.name, tc.got)
+		if applicable {
+			// Sole applicable host: every prerequisite must be genuinely present.
+			if !tc.got.OK {
+				t.Errorf("hostRequirements left %s unpopulated on applicable darwin/arm64 host: %+v", tc.name, tc.got)
+			}
+			continue
+		}
+		// Non-applicable host: the field must still carry a status, not be left as
+		// the zero value. A failing lookup names itself in Extra; the windows shims
+		// do the same with their "not applicable" text.
+		if !tc.got.OK && strings.TrimSpace(tc.got.Extra) == "" {
+			t.Errorf("hostRequirements left %s without a status (OK=false and empty Extra): %+v", tc.name, tc.got)
 		}
 	}
-	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+	if applicable {
 		if got := Adjudicate(req); got != 2 {
 			t.Fatalf("Adjudicate(hostRequirements) = %d, want 2 (prereqs satisfied) on a configured darwin/arm64 host; verdict=%q failure=%q",
 				got, PopulatedVerdict(req), PopulateFailure(req))
 		}
+	} else if got := Adjudicate(req); got != 0 {
+		t.Fatalf("Adjudicate(hostRequirements) = %d, want 0 (not applicable) on %s/%s",
+			got, runtime.GOOS, runtime.GOARCH)
 	}
 }
