@@ -2044,6 +2044,47 @@ func TestWorkerLandTypedTerminalResults(t *testing.T) {
 		}
 	})
 
+	t.Run("main-based land passes ancestor check while root HEAD is off-trunk", func(t *testing.T) {
+		t.Setenv(IsolatedLandEnv, "0")
+		t.Setenv(LandReadbackEnv, "0")
+		// The shared-root HEAD does NOT contain the base, but the trunk ref main
+		// does. The stale-base gate must test main, not HEAD, so this land must
+		// proceed (never refuse as stale-base).
+		g := replyLandDiff(newFakeGit(), "x\n", "diff --git a/x b/x\n@@\n-old\n+new\n", "x\n").
+			reply("rev-parse", 0, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n").
+			reply("merge-base", 0, "").
+			reply("apply", 0, "").
+			reply("commit", 0, "[main abc] msg")
+		res := Land("/trunk", "/wt/fak-worker-wt-test-1", "base123", "/tmp/msg.txt", []string{"x"}, nil, g.run)
+		if res.Code == LandResultStaleBase {
+			t.Fatalf("main-based land was refused as stale-base while HEAD was off-trunk: %+v", res)
+		}
+		if !res.OK || !res.Committed {
+			t.Fatalf("want land to proceed, got %+v", res)
+		}
+		if got := g.callsWithPrefix("merge-base"); len(got) != 1 {
+			t.Fatalf("want 1 merge-base call, got %d: %v", len(got), got)
+		} else if joined := strings.Join(got[0], " "); strings.Contains(joined, " HEAD") {
+			t.Fatalf("ancestor check tested HEAD, not the trunk ref: %q", joined)
+		}
+	})
+
+	t.Run("stale-base still fires against the trunk ref", func(t *testing.T) {
+		// main resolves, but the base is not its ancestor: the refusal must fire
+		// exactly as before, naming the trunk ref.
+		g := newFakeGit().
+			reply("diff", 0, "diff --git a/x b/x\n@@\n-old\n+new\n").
+			reply("rev-parse", 0, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n").
+			reply("merge-base", 1, "")
+		res := Land("/trunk", "/wt/fak-worker-wt-test-1", "stalebase123", "/tmp/msg.txt", nil, nil, g.run)
+		if res.OK || res.Code != LandResultStaleBase {
+			t.Fatalf("want code %q and OK=false, got %+v", LandResultStaleBase, res)
+		}
+		if !strings.Contains(res.Reason, "trunk main") {
+			t.Fatalf("refusal must name the trunk ref, got %q", res.Reason)
+		}
+	})
+
 	t.Run("success", func(t *testing.T) {
 		t.Setenv(IsolatedLandEnv, "0")
 		t.Setenv(LandReadbackEnv, "0")
