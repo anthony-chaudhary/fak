@@ -161,16 +161,18 @@ var q4kUseM5 atomic.Bool
 // version only after a physical on-silicon measurement showed the candidate/scalar ratio cleared
 // the fak#9937 >=1.10x margin; MinRatio records that measured margin and the source witness path.
 //
-// The table is intentionally EMPTY. No physical M3 Pro candidate/scalar ratio has been captured as
-// a sanctioned receipt in this lane, so the #9937 gate is not cleared and the scalar identity stays
-// the executed kernel in the panel regime. This is the conservative branch of the ticket's
-// "quarantined fallback": land the offline oracle-parity and the pinned selector behind the
-// explicit opt-in, and file the physical-margin follow-up rather than promoting an unwitnessed
-// crossover. A later lane adds exactly one row of the form:
+// Exactly one row is pinned: the physical Apple M3 Pro / macOS 26 receipt captured on the
+// on-silicon M3 Pro box (date 2026-09-15, commit 97cae3629,
+// TestQ4KCrossoverReceiptCandidateVsScalar), where the median candidate/scalar on-GPU ratio
+// measured 1.31-1.83x at P=64 and 1.44-1.56x at P=128 across repeated runs — every sample
+// clearing the fak#9937 >=1.10x margin. The selector therefore routes P>=64 panel GEMMs to
+// mode 2 on that device/OS alone; every other device (including other Apple families and
+// macOS majors) stays fail-closed scalar because no row matches it.
 //
-//	{Family: "Apple M3 Pro", OSVersion: "26", MinRatio: <measured>, Witness: "<macbench receipt>"}
-//
-// and the selector then routes P>=64 to mode 2 on that device alone.
+// MinRatio is pinned at the fak#9937 gate (1.10x), NOT at a volatile single-run median: it is
+// the floor the row must clear, and the receipt witness asserts that floor <= the measured
+// medians, so a candidate-kernel regression that drops below the gate fails the witness instead
+// of silently keeping the row. Witness names the receipt-emitting test that justified the row.
 type q4kM5CrossoverRow struct {
 	Family    string  // Metal device name prefix the row is pinned to (e.g. "Apple M3")
 	OSVersion string  // leading macOS major version the row is pinned to (e.g. "26")
@@ -178,7 +180,10 @@ type q4kM5CrossoverRow struct {
 	Witness   string  // path/commit of the sanctioned on-silicon receipt that justified the row
 }
 
-var q4kM5CrossoverTable = []q4kM5CrossoverRow{}
+var q4kM5CrossoverTable = []q4kM5CrossoverRow{
+	{Family: "Apple M3 Pro", OSVersion: "26", MinRatio: q4kM5CrossoverMargin,
+		Witness: "internal/metalgemm/q4k_m5_crossover_receipt_test.go TestQ4KCrossoverReceiptCandidateVsScalar @97cae3629"},
+}
 
 // q4kM5CrossoverAt reports whether the device/version-pinned table admits mode 2, i.e. at least one
 // row both matches this device+OS and clears the fak#9937 >=1.10x routing margin. It is a pure
@@ -1211,7 +1216,8 @@ func GEMMUseM5() bool { return q4kUseM5.Load() }
 func Q4KM5CrossoverAdmits() bool { return q4kM5CrossoverAdmits() }
 
 // Q4KM5CrossoverRowCount returns the number of pinned rows currently in the routing table. It is
-// 0 until a physical M3 Pro measurement is recorded as a sanctioned receipt.
+// 1 once the sanctioned M3 Pro on-silicon receipt has pinned a row, and 0 before (or if the
+// measured margin falls back below the gate).
 func Q4KM5CrossoverRowCount() int { return len(q4kM5CrossoverTable) }
 
 // Q4KM5CrossoverPredicate evaluates the device/version pin against an explicit identity without
