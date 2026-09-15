@@ -14,6 +14,129 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
+// mtpStatusTestDeps builds the minimal live-Metal deps the MTP-status witnesses
+// share: Metal live, admission that actually loads, a q4k model, a tokenizer, and
+// a bare planner with no admitted coordinator.
+func mtpStatusTestDeps() turnkeyNativeLoadDeps {
+	return turnkeyNativeLoadDeps{
+		resolveBackend: func() (compute.Backend, error) { return nil, nil },
+		resolveMetal:   func() (serveMetalDecision, error) { return serveMetalDecision{live: true}, nil },
+		refusePeak:     func(string) error { return nil },
+		admitAndLoad: func(_ bool, _ string, load func(), _ *serveFitBudget) (func(), error) {
+			load()
+			return func() {}, nil
+		},
+		loadModel: func(string, compute.Backend, int, *serveFitBudget) (*fakmodel.Model, bool, *gateway.ModelLoadProfile) {
+			return &fakmodel.Model{}, true, nil
+		},
+		loadTokenizer: func(string) (*tokenizer.Tokenizer, bool) { return &tokenizer.Tokenizer{}, true },
+		newPlanner: func(*fakmodel.Model, *tokenizer.Tokenizer, string, bool, compute.Backend, bool, int) *agent.InKernelPlanner {
+			return &agent.InKernelPlanner{}
+		},
+	}
+}
+
+// TestLoadTurnkeyNativeResourcesReportsUnqualifiedMTP is the reproduction for
+// #12922: a live-Metal startup must report Metal execution and the REAL typed
+// inactive speculative reason together, so operators can distinguish fak-native
+// Metal target decode from evidence-qualified MTP.
+func TestLoadTurnkeyNativeResourcesReportsUnqualifiedMTP(t *testing.T) {
+	t.Run("injected seam exercises the real embedded selector", func(t *testing.T) {
+		deps := mtpStatusTestDeps()
+		deps.resolveMTPStatus = func(result *turnkeyMTPQualificationResult, planner *agent.InKernelPlanner) (bool, string) {
+			if result.Selection != nil {
+				t.Fatalf("empty embedded catalog selected a record: %+v", result.Selection)
+			}
+			if result.Refusal != turnkeyMTPNoEligibleContext {
+				t.Fatalf("refusal = %q, want %q", result.Refusal, turnkeyMTPNoEligibleContext)
+			}
+			return false, string(result.Refusal)
+		}
+		resources, err := loadTurnkeyNativeResourcesWith(context.Background(), "model.gguf", "qwen38", 2048, deps)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			resources.closeModel = func() error { return nil }
+			_ = resources.Close()
+		}()
+		if !resources.Startup.MetalLive {
+			t.Fatalf("startup.MetalLive = false, want true")
+		}
+		if resources.Startup.MTPActive {
+			t.Fatalf("startup.MTPActive = true, want false (empty catalog)")
+		}
+		if got, want := resources.Startup.MTPInactiveReason, string(turnkeyMTPNoEligibleContext); got != want {
+			t.Fatalf("startup.MTPInactiveReason = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("shipped default fail-closed path", func(t *testing.T) {
+		deps := mtpStatusTestDeps()
+		resources, err := loadTurnkeyNativeResourcesWith(context.Background(), "model.gguf", "qwen38", 2048, deps)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			resources.closeModel = func() error { return nil }
+			_ = resources.Close()
+		}()
+		if !resources.Startup.MetalLive {
+			t.Fatalf("startup.MetalLive = false, want true")
+		}
+		if resources.Startup.MTPActive {
+			t.Fatalf("default startup.MTPActive = true, want false")
+		}
+		if got, want := resources.Startup.MTPInactiveReason, string(turnkeyMTPNoEligibleContext); got != want {
+			t.Fatalf("default startup.MTPInactiveReason = %q, want %q", got, want)
+		}
+	})
+}
+
+// TestLoadTurnkeyNativeResourcesReportsMTPActiveOnlyWhenAdmitted pins that the
+// MTP fields are driven by the admission signal, not hard-coded false.
+func TestLoadTurnkeyNativeResourcesReportsMTPActiveOnlyWhenAdmitted(t *testing.T) {
+	deps := mtpStatusTestDeps()
+	deps.resolveMTPStatus = func(*turnkeyMTPQualificationResult, *agent.InKernelPlanner) (bool, string) {
+		return true, ""
+	}
+	resources, err := loadTurnkeyNativeResourcesWith(context.Background(), "model.gguf", "qwen38", 2048, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		resources.closeModel = func() error { return nil }
+		_ = resources.Close()
+	}()
+	if !resources.Startup.MTPActive {
+		t.Fatalf("startup.MTPActive = false, want true")
+	}
+	if resources.Startup.MTPInactiveReason != "" {
+		t.Fatalf("startup.MTPInactiveReason = %q, want empty", resources.Startup.MTPInactiveReason)
+	}
+}
+
+// TestDefaultResolveTurnkeyMTPStatusNeverEmitsEmptyInactiveReason pins the field
+// contract: MTPInactiveReason is empty ONLY when MTPActive is true. A successful
+// catalog selection whose planner coordinator was not admitted must still report
+// a concrete typed reason instead of an empty string.
+func TestDefaultResolveTurnkeyMTPStatusNeverEmitsEmptyInactiveReason(t *testing.T) {
+	// A matched selection with no admitted coordinator: inactive + concrete typed reason.
+	matched := &turnkeyMTPQualificationResult{Selection: &turnkeyMTPQualificationSelection{}}
+	active, reason := defaultResolveTurnkeyMTPStatus(matched, &agent.InKernelPlanner{})
+	if active {
+		t.Fatalf("matched selection without coordinator reported active")
+	}
+	if reason != string(turnkeyMTPNoEligibleContext) {
+		t.Fatalf("inactive reason = %q, want %q", reason, turnkeyMTPNoEligibleContext)
+	}
+	// The fail-closed default (nil result) must also carry the typed token.
+	active, reason = defaultResolveTurnkeyMTPStatus(nil, nil)
+	if active || reason != string(turnkeyMTPNoEligibleContext) {
+		t.Fatalf("nil-result status = (%v, %q), want (false, %q)", active, reason, turnkeyMTPNoEligibleContext)
+	}
+}
+
 func TestTurnkeyNativeResourcesAdmissionAndLifecycle(t *testing.T) {
 	refused := errors.New("peak refused")
 	loadCalls := 0
