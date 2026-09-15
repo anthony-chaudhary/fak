@@ -534,24 +534,37 @@ func uint64ArrayOrNil(f *File, key string) []uint64 {
 // split), so attn_kv maps straight to self_attn.kv_a_proj_with_mqa.weight and
 // deepseek41 is deliberately kept OUT of archUsesMLAMoELayout ? the glm KV-b
 // 2->1 merge (glmMoeDsaSplitKVB) must never run for a V4 file.
+//
+// V4.1 emits attn_kv_a_norm, not glm's attn_kv_norm. Both spellings resolve to
+// self_attn.kv_a_layernorm.weight. The compressor, indexer, and sink suffixes
+// also resolve here, which clears only the LOADER's name gate; the reduced
+// forward still fails an in-range layer closed at its own admission seam.
 func deepseek41CanonicalSuffix(suffix string) (string, bool) {
 	if name, ok := deepseek41EngramSuffixName(suffix); ok {
 		return deepseek41EngramPrefix + deepseek41EngramLayerPlaceholder + "." + name + ".weight", true
 	}
 	mapped, ok := map[string]string{
-		"attn_q_a.weight":         "self_attn.q_a_proj.weight",
-		"attn_q_a_norm.weight":    "self_attn.q_a_layernorm.weight",
-		"attn_q_b.weight":         "self_attn.q_b_proj.weight",
-		"attn_kv.weight":          "self_attn.kv_a_proj_with_mqa.weight",
-		"attn_kv_norm.weight":     "self_attn.kv_a_layernorm.weight",
-		"attn_output_a.weight":    "self_attn.o_proj_a.weight",
-		"attn_output_b.weight":    "self_attn.o_proj_b.weight",
-		"indexer.attn_q_b.weight": "self_attn.indexer.wq_b.weight",
-		"indexer.proj.weight":     "self_attn.indexer.weights_proj.weight",
-		"exp_probs_b.bias":        "mlp.gate.e_score_correction_bias",
-		"ffn_gate_shexp.weight":   "mlp.shared_experts.gate_proj.weight",
-		"ffn_up_shexp.weight":     "mlp.shared_experts.up_proj.weight",
-		"ffn_down_shexp.weight":   "mlp.shared_experts.down_proj.weight",
+		"attn_q_a.weight":             "self_attn.q_a_proj.weight",
+		"attn_q_a_norm.weight":        "self_attn.q_a_layernorm.weight",
+		"attn_q_b.weight":             "self_attn.q_b_proj.weight",
+		"attn_kv.weight":              "self_attn.kv_a_proj_with_mqa.weight",
+		"attn_kv_norm.weight":         "self_attn.kv_a_layernorm.weight",
+		"attn_kv_a_norm.weight":       "self_attn.kv_a_layernorm.weight",
+		"attn_output_a.weight":        "self_attn.o_proj_a.weight",
+		"attn_output_b.weight":        "self_attn.o_proj_b.weight",
+		"indexer.attn_q_b.weight":     "self_attn.indexer.wq_b.weight",
+		"indexer.attn_k.weight":       "self_attn.indexer.wk.weight",
+		"indexer.k_norm.weight":       "self_attn.indexer.k_norm.weight",
+		"indexer.proj.weight":         "self_attn.indexer.weights_proj.weight",
+		"attn_compressor_gate.weight": "self_attn.compressor.wgate.weight",
+		"attn_compressor_kv.weight":   "self_attn.compressor.wkv.weight",
+		"attn_compressor_norm.weight": "self_attn.compressor.norm.weight",
+		"attn_sinks.weight":           "attn.attn_sink",
+		"exp_probs_b.bias":            "mlp.gate.e_score_correction_bias",
+		"exp_probs_b_vl.bias":         "mlp.gate.e_score_correction_bias_vl",
+		"ffn_gate_shexp.weight":       "mlp.shared_experts.gate_proj.weight",
+		"ffn_up_shexp.weight":         "mlp.shared_experts.up_proj.weight",
+		"ffn_down_shexp.weight":       "mlp.shared_experts.down_proj.weight",
 		// Hyper-connection taps (GUESSED canonical names ? model.Config carries only
 		// the HCMult/iters/eps scalars, and the native V4.1 forward is unimplemented;
 		// these map into a dedicated per-layer hc. namespace so a real file's

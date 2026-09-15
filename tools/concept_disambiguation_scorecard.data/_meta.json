@@ -3731,6 +3731,11 @@
           "category": "incidental",
           "reason": "Wire discriminator naming FeatureCacheProof's digest construction; it is neither an authorization guard nor a gate.",
           "token": "gateway_call_result_sha256"
+        },
+        {
+          "category": "incidental",
+          "reason": "The DeepSeek V4.1 attention-compressor gate projection (blk.<L>.attn_compressor_gate -> self_attn.compressor.wgate) matches the guard-gate lexical family only on the 'gate' substring: it is a model WEIGHT matrix holding the compressor's gate projection, not a validation rung that admits, refuses or gates anything. Positioned by the #12640 tensor-map slice.",
+          "token": "wgate"
         }
       ],
       "exclude": [
@@ -4177,6 +4182,7 @@
         "ungated",
         "unguarded",
         "verifyGateCheckout",
+        "wgate",
         "withGuardRegistrationEnv",
         "worker_guard",
         "writeGuardCodexSessionBinding"
