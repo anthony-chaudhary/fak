@@ -120,6 +120,11 @@ type DevClaim struct {
 type DevVerb struct {
 	Name, Synopsis, Lane string
 	Aliases              []string
+	// Binary is the artifact that actually dispatches the verb ("fak" | "fak-dev"),
+	// supplied by the devindex loader so a cli-verb card renders `<binary> <verb>`
+	// rather than a hardcoded prefix (#13093). Empty means the loader predates the
+	// tag; verbBinary falls back to fak-dev, the historical rendering.
+	Binary string
 }
 type DevCatalog struct {
 	Leaves []DevLeaf
@@ -380,12 +385,24 @@ func (c *Catalog) devCards() []FeatureCard {
 			RequestShape{Route: "cli", Command: []string{"fak-dev", "index", "claims", strings.Join(cl.Lanes, " ")}, Executed: false}))
 	}
 	for _, v := range c.dev.Verbs {
+		bin := verbBinary(v)
 		tags := append([]string{"dev", "cli", "verb", v.Lane}, v.Aliases...)
-		out = append(out, card("cli-verb", "fak-dev "+v.Name, v.Synopsis, tags,
-			"fak-dev "+v.Name, EffectRead, "", "devindex", digestOf(v),
-			RequestShape{Route: "cli", Command: []string{"fak-dev", v.Name, "--help"}, Executed: false}))
+		out = append(out, card("cli-verb", bin+" "+v.Name, v.Synopsis, tags,
+			bin+" "+v.Name, EffectRead, "", "devindex", digestOf(v),
+			RequestShape{Route: "cli", Command: []string{bin, v.Name, "--help"}, Executed: false}))
 	}
 	return out
+}
+
+// verbBinary returns the artifact a dev verb is advertised under. The devindex loader
+// stamps the real dispatcher (cmd/fak vs cmd/fak-dev) on each verb (#13093); an empty
+// stamp means the caller installed the catalog before that tag existed, so fall back to
+// fak-dev — the historical rendering — rather than silently naming the wrong binary.
+func verbBinary(v DevVerb) string {
+	if strings.TrimSpace(v.Binary) == "" {
+		return "fak-dev"
+	}
+	return v.Binary
 }
 
 func (c *Catalog) devSurfaceCards() []FeatureCard {

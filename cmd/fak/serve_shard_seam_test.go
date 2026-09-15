@@ -19,20 +19,21 @@ func TestServeShardSeamRefusalMatchesTheArmThatWouldBeSelected(t *testing.T) {
 		name              string
 		backend           compute.Backend
 		cpuOffloadExperts bool
+		cpuOffloadArm     bool
 		q4k               bool
 		wantRefuse        bool
 		wantMentions      string
 	}{
 		{
 			name:    "device cpu-offload arm carries the seam",
-			backend: quantized, cpuOffloadExperts: true, q4k: false,
+			backend: quantized, cpuOffloadExperts: true, cpuOffloadArm: true, q4k: false,
 			wantRefuse: false,
 		},
 		{
 			// That arm raises its own UploadDtype message naming --cpu-offload-experts, so this
 			// guard must not pre-empt it with a different one.
 			name:    "device cpu-offload arm defers its own upload-capability message",
-			backend: plain, cpuOffloadExperts: true, q4k: false,
+			backend: plain, cpuOffloadExperts: true, cpuOffloadArm: true, q4k: false,
 			wantRefuse: false,
 		},
 		{
@@ -59,10 +60,16 @@ func TestServeShardSeamRefusalMatchesTheArmThatWouldBeSelected(t *testing.T) {
 			wantRefuse: false,
 		},
 		{
-			// THE OTHER HOLE: --cpu-offload-experts selects nothing without a device backend (its
-			// arm is gated on backend != nil), so this rank fell through to the lean CPU arm.
-			name:    "CPU path with only --cpu-offload-experts selects no seam-carrying arm",
-			backend: nil, cpuOffloadExperts: true, q4k: false,
+			// #13116 closed the other hole: the host offload arm is now reachable with no device
+			// backend, and it carries the expert-shard seam, so a qualified artifact is admitted.
+			name:    "CPU path with a qualified --cpu-offload-experts arm carries the seam",
+			backend: nil, cpuOffloadExperts: true, cpuOffloadArm: true, q4k: false,
+			wantRefuse: false,
+		},
+		{
+			// A nil backend + --cpu-offload-experts on an UNQUALIFIED artifact selects no seam arm.
+			name:    "CPU path with an unqualified --cpu-offload-experts artifact selects no seam-carrying arm",
+			backend: nil, cpuOffloadExperts: true, cpuOffloadArm: false, q4k: false,
 			wantRefuse: true, wantMentions: "FAK_Q4K=1",
 		},
 		{
@@ -72,7 +79,7 @@ func TestServeShardSeamRefusalMatchesTheArmThatWouldBeSelected(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := serveShardSeamRefusal(tc.backend, tc.cpuOffloadExperts, tc.q4k)
+			err := serveShardSeamRefusal(tc.backend, tc.cpuOffloadExperts, tc.cpuOffloadArm, tc.q4k)
 			if tc.wantRefuse && err == nil {
 				t.Fatal("want a refusal: this configuration reaches a load arm with no expert-shard seam, which loads the full model on every rank")
 			}
@@ -89,7 +96,11 @@ func TestServeShardSeamRefusalMatchesTheArmThatWouldBeSelected(t *testing.T) {
 // A nil backend is the CPU path, not "no opinion": the guard must still decide, because the CPU
 // arms differ in whether they carry the seam.
 func TestServeShardSeamRefusalNeverFailsOpenOnANilBackend(t *testing.T) {
-	if err := serveShardSeamRefusal(nil, true, false); err == nil {
-		t.Fatal("nil backend + --cpu-offload-experts must refuse, not fail open into the lean CPU loader")
+	if err := serveShardSeamRefusal(nil, true, false, false); err == nil {
+		t.Fatal("nil backend + an UNQUALIFIED --cpu-offload-experts artifact must refuse, not fail open into the lean CPU loader")
+	}
+	// #13116: a nil backend + a QUALIFIED offload arm carries the seam and must be admitted.
+	if err := serveShardSeamRefusal(nil, true, true, false); err != nil {
+		t.Fatalf("nil backend + a qualified --cpu-offload-experts arm now carries the seam, want nil, got %v", err)
 	}
 }

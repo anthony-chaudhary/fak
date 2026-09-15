@@ -929,3 +929,8 @@ docs/dispatch-status.md
 # unignored reddens `git status` for every agent and defers the sync fast-path
 # (observed 2026-09-14: fak-dev was the only entry in an otherwise clean tree).
 /fak-dev
+
+# Per-worktree detached-worker PROMPT SLOT (cmd/fak-flow/spawn.go, platform/worktree/adopt.go).
+# Generated per spawn as the worker's stdin -- NEVER tracked. Accidentally committed in
+# b782efab3 and thrashed since (#13101 restores, 13038 park); root-anchored.
+/SESSION_PROMPT.txt

@@ -1,8 +1,10 @@
-package model
+package v41
 
 import (
 	"errors"
 	"testing"
+
+	model "github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // v4_flash_kv_layout_test.go - the bounded first-slice witness for DeepSeek
@@ -25,6 +27,33 @@ import (
 //     rows across prefill/decode appends, in order, discarding the oldest.
 //  3. schema identity: state encoded for one ratio cannot be restored into a
 //     layer declaring a different ratio.
+
+// v41FlashTracerConfig is a leaf-local copy of the v4FlashTracerConfig fixture
+// from internal/model/v4_flash_attention_test.go (parent #12637). Test-only
+// helpers are not importable across packages, so the tiny synthetic DeepSeek-V4
+// config is duplicated here per the v41 fixtures_test.go precedent.
+func v41FlashTracerConfig(ratios []int) model.Config {
+	cfg := model.Config{
+		ModelType:         "deepseek_v4",
+		HiddenSize:        32,
+		NumLayers:         len(ratios),
+		NumHeads:          4,
+		NumKVHeads:        1,
+		HeadDim:           8,
+		IntermediateSize:  64,
+		VocabSize:         97,
+		RMSNormEps:        1e-5,
+		RopeTheta:         10000,
+		TieWordEmbeddings: true,
+		EOSTokenID:        -1,
+		CompressRatios:    append([]int(nil), ratios...),
+	}
+	cfg.Window = make([]int, cfg.NumLayers)
+	for i := range cfg.Window {
+		cfg.Window[i] = model.V4FlashWindowSize
+	}
+	return cfg
+}
 
 func TestV4FlashKVLayoutForRatio(t *testing.T) {
 	cases := []struct {
@@ -50,7 +79,7 @@ func TestV4FlashKVLayoutForRatio(t *testing.T) {
 }
 
 func TestV4FlashKVStateRejectsInvalidRatioBeforeAllocation(t *testing.T) {
-	cfg := v4FlashTracerConfig([]int{0, 4, 5})
+	cfg := v41FlashTracerConfig([]int{0, 4, 5})
 	state, err := newV4FlashKVState(cfg)
 	if !errors.Is(err, ErrV4FlashKVStateRatioInvalid) {
 		t.Fatalf("newV4FlashKVState error = %v, want ErrV4FlashKVStateRatioInvalid", err)
@@ -61,7 +90,7 @@ func TestV4FlashKVStateRejectsInvalidRatioBeforeAllocation(t *testing.T) {
 }
 
 func TestV4FlashKVStateSelectsPerLayerLayout(t *testing.T) {
-	cfg := v4FlashTracerConfig([]int{0, 4, 128})
+	cfg := v41FlashTracerConfig([]int{0, 4, 128})
 	state, err := newV4FlashKVState(cfg)
 	if err != nil {
 		t.Fatalf("newV4FlashKVState error: %v", err)
@@ -84,23 +113,23 @@ func TestV4FlashKVStateSelectsPerLayerLayout(t *testing.T) {
 }
 
 func TestV4FlashCircularWindowRetainsMostRecent(t *testing.T) {
-	w := newV4FlashCircularWindow(V4FlashWindowSize)
-	if w.Capacity() != V4FlashWindowSize {
-		t.Fatalf("capacity = %d, want %d", w.Capacity(), V4FlashWindowSize)
+	w := newV4FlashCircularWindow(model.V4FlashWindowSize)
+	if w.Capacity() != model.V4FlashWindowSize {
+		t.Fatalf("capacity = %d, want %d", w.Capacity(), model.V4FlashWindowSize)
 	}
-	total := V4FlashWindowSize + 7
+	total := model.V4FlashWindowSize + 7
 	for i := 0; i < total; i++ {
 		w.Append([]float32{float32(i)})
 	}
-	if w.Len() != V4FlashWindowSize {
-		t.Fatalf("window len = %d after %d appends, want %d", w.Len(), total, V4FlashWindowSize)
+	if w.Len() != model.V4FlashWindowSize {
+		t.Fatalf("window len = %d after %d appends, want %d", w.Len(), total, model.V4FlashWindowSize)
 	}
 	rows := w.Rows()
-	if len(rows) != V4FlashWindowSize {
-		t.Fatalf("rows = %d, want %d", len(rows), V4FlashWindowSize)
+	if len(rows) != model.V4FlashWindowSize {
+		t.Fatalf("rows = %d, want %d", len(rows), model.V4FlashWindowSize)
 	}
 	first := rows[0][0]
-	wantFirst := float32(total - V4FlashWindowSize)
+	wantFirst := float32(total - model.V4FlashWindowSize)
 	if first != wantFirst {
 		t.Fatalf("oldest retained value = %v, want %v", first, wantFirst)
 	}
@@ -116,14 +145,14 @@ func TestV4FlashCircularWindowRetainsMostRecent(t *testing.T) {
 }
 
 func TestV4FlashKVStateRatioIdentityIsNotRestorable(t *testing.T) {
-	encodeCfg := v4FlashTracerConfig([]int{4})
+	encodeCfg := v41FlashTracerConfig([]int{4})
 	state, err := newV4FlashKVState(encodeCfg)
 	if err != nil {
 		t.Fatalf("newV4FlashKVState error: %v", err)
 	}
 	blob := state.Encode()
 
-	restoreCfg := v4FlashTracerConfig([]int{128})
+	restoreCfg := v41FlashTracerConfig([]int{128})
 	if err := RestoreV4FlashKVState(blob, restoreCfg); !errors.Is(err, ErrV4FlashKVStateRatioMismatch) {
 		t.Fatalf("restore into ratio 128 layer error = %v, want ErrV4FlashKVStateRatioMismatch", err)
 	}

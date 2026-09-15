@@ -112,3 +112,53 @@ func TestServeArtifactCPUOffloadExpertsRefusesUnadmittedEncoding(t *testing.T) {
 		t.Fatalf("refusal %q must name the offending tensor", err.Error())
 	}
 }
+
+// #13116 acceptance at the serve-arm seam: with NO device backend (the CGO_ENABLED=0 appliance
+// build) and a QUALIFIED packed-expert artifact, the LOAD switch's arm decision must agree with the
+// host SIZING path (resolveHostServeLoadArm) rather than fall through to the all-resident lean
+// default and over-refuse. A device-less serve is the exact configuration the physical strix3 run
+// refused with a bogus 1321.53 GiB FitTooBig.
+func TestServeHostCPUOffloadArmAgreesBetweenLoadAndSizingOnNilBackend(t *testing.T) {
+	ws := serveSynthRoutedExpertWeightSource(t, ggufload.TensorQ3_K)
+
+	if got := resolveHostServeLoadArm(ws, false, true); got != serveLoadArmCPUOffloadExperts {
+		t.Fatalf("nil-backend SIZING arm = %q, want %q", got, serveLoadArmCPUOffloadExperts)
+	}
+
+	ok, err := serveLoadCPUOffloadArmFromWeightSource(ws, true)
+	if err != nil {
+		t.Fatalf("load arm decision on a qualified artifact: %v", err)
+	}
+	if !ok {
+		t.Fatalf("nil-backend LOAD arm decision = false, want true (must agree with the sizing path %q)", serveLoadArmCPUOffloadExperts)
+	}
+}
+
+// A device-less serve with NO offload intent must keep its current (Q8/lean) arm, and the load
+// decision must be false so the switch cannot select the host offload arm.
+func TestServeHostCPUOffloadArmRequiresIntent(t *testing.T) {
+	ws := serveSynthRoutedExpertWeightSource(t, ggufload.TensorQ3_K)
+	ok, err := serveLoadCPUOffloadArmFromWeightSource(ws, false)
+	if err != nil {
+		t.Fatalf("no-intent load arm decision: %v", err)
+	}
+	if ok {
+		t.Fatal("offload intent is required; no-intent must not select the host offload arm")
+	}
+}
+
+// The NEGATIVE: an unqualified expert encoding must fail CLOSED at the load-arm decision by the
+// named key, never select the arm and never silently fall through.
+func TestServeHostCPUOffloadArmRefusesUnqualifiedEncoding(t *testing.T) {
+	ws := serveSynthRoutedExpertWeightSource(t, ggufload.TensorF16)
+	ok, err := serveLoadCPUOffloadArmFromWeightSource(ws, true)
+	if ok {
+		t.Fatal("F16 routed experts must not select the host offload arm")
+	}
+	if err == nil {
+		t.Fatal("unqualified experts must refuse by name, got nil")
+	}
+	if !errors.Is(err, ggufload.ErrRoutedExpertEncodingUnqualified) {
+		t.Fatalf("error %v, want errors.Is ggufload.ErrRoutedExpertEncodingUnqualified", err)
+	}
+}

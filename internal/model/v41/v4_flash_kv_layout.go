@@ -1,10 +1,12 @@
-package model
+package v41
 
 import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	model "github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // v4_flash_kv_layout.go - the first bounded slice of DeepSeek-V4-Flash-0731
@@ -103,7 +105,7 @@ type V4FlashKVState struct {
 // closed (nil, ErrV4FlashKVStateRatioInvalid) on any ratio outside {0,4,128}
 // BEFORE allocating layer state, so a malformed schedule never yields a partial
 // state object.
-func newV4FlashKVState(cfg Config) (*V4FlashKVState, error) {
+func newV4FlashKVState(cfg model.Config) (*V4FlashKVState, error) {
 	if !cfg.IsDeepSeekV4() || len(cfg.CompressRatios) == 0 {
 		return nil, nil
 	}
@@ -116,7 +118,7 @@ func newV4FlashKVState(cfg Config) (*V4FlashKVState, error) {
 		layouts[l] = layout
 	}
 	state := &V4FlashKVState{
-		WindowSize: V4FlashWindowSize,
+		WindowSize: model.V4FlashWindowSize,
 		Layers:     make([]V4FlashKVLayerState, len(cfg.CompressRatios)),
 	}
 	for l, ratio := range cfg.CompressRatios {
@@ -124,7 +126,7 @@ func newV4FlashKVState(cfg Config) (*V4FlashKVState, error) {
 			Layer:  l + 1,
 			Ratio:  ratio,
 			Layout: layouts[l],
-			Window: newV4FlashCircularWindow(V4FlashWindowSize),
+			Window: newV4FlashCircularWindow(model.V4FlashWindowSize),
 		}
 	}
 	return state, nil
@@ -162,7 +164,7 @@ func (s *V4FlashKVState) Encode() []byte {
 // RestoreV4FlashKVState adopts an encoded state only when the encoding's
 // per-layer ratios match the target config exactly. A state encoded for one
 // ratio can never be restored into a layer declaring another.
-func RestoreV4FlashKVState(blob []byte, cfg Config) error {
+func RestoreV4FlashKVState(blob []byte, cfg model.Config) error {
 	var enc v4FlashKVStateEncoding
 	if err := json.Unmarshal(blob, &enc); err != nil {
 		return fmt.Errorf("%w: %v", ErrV4FlashKVStateRatioMismatch, err)

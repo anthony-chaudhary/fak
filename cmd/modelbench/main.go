@@ -1425,6 +1425,10 @@ func preflightInputFor(f *benchFlags, be compute.Backend) ggufload.PreflightInpu
 	vulkanMixed := convertedDense && *f.backendName == "vulkan"
 	streamedDenseQ4K := vulkanMixed && streamQ4KEnabled(f)
 	residentQ2KEmbedding := vulkanMixed && q2kEmbeddingSourceEligible(ws)
+	// The single-residency release is armed by the -single-residency-q4k flag (defaulting to the
+	// FAK_Q4K_FREE_CPU env knob) AND actually effective only on a Vulkan backend whose tier is a
+	// unified-memory ("integrated:") device — the same predicate weightHALQ4K applies at runtime.
+	singleResidencyQ4K := vulkanMixed && singleResidencyQ4KEnabled(f) && be != nil && strings.HasPrefix(be.Tier(), "integrated:")
 	return ggufload.PreflightInput{
 		Path:                 *f.gguf,
 		OpenErr:              err,
@@ -1436,6 +1440,7 @@ func preflightInputFor(f *benchFlags, be compute.Backend) ggufload.PreflightInpu
 		VulkanMixedQ4K:       vulkanMixed,
 		StreamedDenseQ4K:     streamedDenseQ4K,
 		ResidentQ2KEmbedding: residentQ2KEmbedding,
+		SingleResidencyQ4K:   singleResidencyQ4K,
 	}
 }
 

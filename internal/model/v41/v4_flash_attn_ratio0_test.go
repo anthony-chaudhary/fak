@@ -1,9 +1,11 @@
-package model
+package v41
 
 import (
 	"errors"
 	"math"
 	"testing"
+
+	model "github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // v4_flash_attn_ratio0_test.go - INDEPENDENT numeric witness for the ratio-0
@@ -211,12 +213,12 @@ func v4r0OraclePrefill(g V4FlashRatio0Geometry, w V4FlashRatio0Weights, x [][]fl
 func v4r0Geometry() V4FlashRatio0Geometry {
 	return V4FlashRatio0Geometry{
 		Dim: 8, NumHeads: 2, HeadDim: 8, RopeHeadDim: 2,
-		QLoraRank: 4, OGroups: 2, OLoraRank: 4, WindowSize: V4FlashWindowSize, NormEps: 1e-5,
+		QLoraRank: 4, OGroups: 2, OLoraRank: 4, WindowSize: model.V4FlashWindowSize, NormEps: 1e-5,
 	}
 }
 
-func v4r0Config() Config {
-	return Config{
+func v4r0Config() model.Config {
+	return model.Config{
 		ModelType:      "deepseek_v4",
 		HiddenSize:     8,
 		NumHeads:       2,
@@ -227,7 +229,7 @@ func v4r0Config() Config {
 		OLoraRank:      4,
 		RMSNormEps:     1e-5,
 		RopeTheta:      10000,
-		Window:         []int{V4FlashWindowSize},
+		Window:         []int{model.V4FlashWindowSize},
 		CompressRatios: []int{0},
 	}
 }
