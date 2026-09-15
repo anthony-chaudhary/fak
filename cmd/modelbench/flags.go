@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -23,6 +24,7 @@ type benchFlags struct {
 	lean                  *bool
 	q4k                   *bool
 	streamQ4K             *bool
+	singleResidencyQ4K    *bool
 	name                  *string
 	out                   *string
 	prefillSizesCSV       *string
@@ -81,6 +83,7 @@ func parseFlags() *benchFlags {
 		lean:                  flag.Bool("lean", false, "memory-lean load: quantize big matmul weights at load and drop their f32 (with -hf or -gguf; implies -quant; fits much bigger models)"),
 		q4k:                   flag.Bool("q4k", false, "with -gguf, load eligible Q4_K tensors as resident raw Q4_K and run the Q4_K session path"),
 		streamQ4K:             flag.Bool("stream-q4k", false, "benchmark-only: with -gguf -q4k, stream eligible dense Q4_K tensors from the checkpoint instead of keeping their raw bytes resident"),
+		singleResidencyQ4K:    flag.Bool("single-residency-q4k", singleResidencyQ4KEnvDefault(), "with -gguf -q4k on a Vulkan unified-memory (integrated:) backend, release each resident Q4_K host packed copy after its device upload (single residency). Defaults to FAK_Q4K_FREE_CPU=1; ineffective on a discrete device."),
 		name:                  flag.String("name", "", "model name for the report (default: derived from the source dir)"),
 		out:                   flag.String("out", "", "write JSON result here (default stdout)"),
 		prefillSizesCSV:       flag.String("prefill-sizes", "16,64,256", "comma-separated prompt lengths for prefill timings"),
@@ -163,6 +166,17 @@ func (f *benchFlags) exit(code int) {
 
 func streamQ4KEnabled(f *benchFlags) bool {
 	return f.streamQ4K != nil && *f.streamQ4K
+}
+
+// singleResidencyQ4KEnvDefault mirrors the runtime release knob (compute.Q4KSingleResidencyEnv,
+// FAK_Q4K_FREE_CPU) so -single-residency-q4k needs no explicit flag to take effect when the
+// operator has already exported the env var — the ticket's witness command stays one flag shorter.
+func singleResidencyQ4KEnvDefault() bool {
+	return os.Getenv(compute.Q4KSingleResidencyEnv) == "1"
+}
+
+func singleResidencyQ4KEnabled(f *benchFlags) bool {
+	return f.singleResidencyQ4K != nil && *f.singleResidencyQ4K
 }
 
 func bindLoadedModelWeights(f *benchFlags, m *model.Model) bool {

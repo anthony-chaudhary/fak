@@ -85,24 +85,37 @@ func TestQ4KM5CooperativeSMEMCandidateMatchesIndependentCPUOracle(t *testing.T) 
 // device/OS, and for P<64 the typed requested identity stays scalar. It is pure Go (no Metal work),
 // so it runs on any host and pins the gate itself rather than a magic literal.
 func TestQ4KM5CrossoverGatesPanelRegime(t *testing.T) {
-	// The production table is intentionally empty until a sanctioned on-silicon receipt lands:
-	// with no row, the opt-in is inert and the widened panel regime stays scalar.
-	if Q4KM5CrossoverRowCount() != 0 {
-		t.Fatalf("production crossover table has %d rows; the #9937 gate must stay unwitnessed until a sanctioned receipt pins one", Q4KM5CrossoverRowCount())
+	// Exactly one row is pinned: the on-silicon Apple M3 Pro / macOS 26 receipt from
+	// TestQ4KCrossoverReceiptCandidateVsScalar. A second row would be an unpinned device reaching
+	// mode 2, and zero rows would mean the gate never opened despite the measured margin.
+	if n := Q4KM5CrossoverRowCount(); n != 1 {
+		t.Fatalf("production crossover table has %d rows; exactly one on-silicon M3 Pro row is pinned", n)
 	}
 	if Q4KM5CrossoverMinimumRatio < 1.10 {
 		t.Fatalf("crossover gate=%g, want >= 1.10", Q4KM5CrossoverMinimumRatio)
 	}
-	// q4kGEMMModeForPrompt must never reach mode 2 without the pinned row, even for P>=64.
-	priorM5 := q4kUseM5.Swap(true)
+	// q4kGEMMModeForPrompt must never reach mode 2 without the SetGEMMUseM5 opt-in, even for
+	// P>=64 on a device the pinned table admits.
+	priorM5 := q4kUseM5.Swap(false)
 	defer q4kUseM5.Store(priorM5)
 	for _, P := range []int{32, 64, 128, 256} {
 		if got := q4kGEMMModeForPrompt(P); got == Q4KGEMMModeM5CooperativeSMEM {
-			t.Fatalf("P=%d selected mode 2 with an empty crossover table", P)
+			t.Fatalf("P=%d selected mode 2 without the SetGEMMUseM5 opt-in", P)
 		}
 	}
 
 	const device, osVersion = "Apple M3 Pro", "26.6.2"
+	// On the device the pinned production row was measured on, the opt-in must reach mode 2 for
+	// the widened panel shapes. This is the end-to-end gate the row exists to open.
+	if Q4KM5CrossoverPredicate(device, osVersion) {
+		q4kUseM5.Store(true)
+		for _, P := range []int{64, 128, 256} {
+			if got := q4kGEMMModeForPrompt(P); got != Q4KGEMMModeM5CooperativeSMEM {
+				t.Fatalf("P=%d on the pinned device selected %v, want mode 2", P, got)
+			}
+		}
+		q4kUseM5.Store(false)
+	}
 	// A row below the >=1.10x gate must NOT admit mode 2.
 	withPinnedCrossoverRow(t, q4kM5CrossoverRow{Family: device, OSVersion: "26", MinRatio: 1.09, Witness: "witness://below-gate"}, func() {
 		if Q4KM5CrossoverPredicate(device, osVersion) {
@@ -120,20 +133,25 @@ func TestQ4KM5CrossoverGatesPanelRegime(t *testing.T) {
 		if Q4KM5CrossoverPredicate(device, "25.4.0") {
 			t.Fatal("crossover admitted an OS outside its pin")
 		}
-		if got := q4kGEMMModeForPrompt(64); got != Q4KGEMMModeM5CooperativeSMEM {
-			t.Fatalf("P=64 with an admitting row selected %v, want mode 2", got)
-		}
-		if got := q4kGEMMModeForPrompt(128); got != Q4KGEMMModeM5CooperativeSMEM {
-			t.Fatalf("P=128 with an admitting row selected %v, want mode 2", got)
+		q4kUseM5.Store(true)
+		defer q4kUseM5.Store(false)
+		// The encode-time selector consults the LIVE device, so the mode-2 assertions only hold
+		// where Metal reports a matching device; on any other host the selector stays scalar.
+		if Available() && DeviceName() == device {
+			if got := q4kGEMMModeForPrompt(64); got != Q4KGEMMModeM5CooperativeSMEM {
+				t.Fatalf("P=64 with an admitting row selected %v, want mode 2", got)
+			}
+			if got := q4kGEMMModeForPrompt(128); got != Q4KGEMMModeM5CooperativeSMEM {
+				t.Fatalf("P=128 with an admitting row selected %v, want mode 2", got)
+			}
+			// The typed requested identity must report mode 2 (not scalar) for the admitted shape.
+			if req := q4kGEMMRequestedExecution(64, q4kGEMMModeForPrompt(64)); req != Q4KGEMMExecutedM5CooperativeSMEM {
+				t.Fatalf("P=64 requested identity=%v, want M5CooperativeSMEM", req)
+			}
 		}
 		// P<64 is outside the wide-tile envelope even under an admitting row.
 		if got := q4kGEMMModeForPrompt(32); got == Q4KGEMMModeM5CooperativeSMEM {
 			t.Fatalf("P=32 selected mode 2 outside the wide-tile envelope")
-		}
-		// The typed requested identity must report mode 2 (not scalar) for the admitted shape,
-		// and must stay scalar on a non-admitted device.
-		if req := q4kGEMMRequestedExecution(64, q4kGEMMModeForPrompt(64)); req != Q4KGEMMExecutedM5CooperativeSMEM {
-			t.Fatalf("P=64 requested identity=%v, want M5CooperativeSMEM", req)
 		}
 		if req := q4kGEMMRequestedExecution(64, Q4KGEMMModeScalar); req != Q4KGEMMExecutedScalar {
 			t.Fatalf("scalar requested identity=%v, want scalar", req)

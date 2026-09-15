@@ -45,7 +45,7 @@ func (c testCloser) Close() error { return c() }
 func testCompleteBenchFlags() *benchFlags {
 	return &benchFlags{
 		dir: testString("fixture-dir"), hf: testString(""), gguf: testString(""),
-		lean: testBool(false), q4k: testBool(false), streamQ4K: testBool(false),
+		lean: testBool(false), q4k: testBool(false), streamQ4K: testBool(false), singleResidencyQ4K: testBool(false),
 		name: testString(""), out: testString(""), prefillSizesCSV: testString("16"),
 		prefillReps: testInt(1), decodeReps: testInt(1), decodeSteps: testInt(1), decodePrompt: testInt(1),
 		quant: testBool(false), metal: testBool(false), verify: testBool(false),

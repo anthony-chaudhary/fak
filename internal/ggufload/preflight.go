@@ -76,6 +76,11 @@ type PreflightInput struct {
 	// and contribute one tensor-sized session staging window rather than load-worker
 	// staging. Device residency and bytes eventually read are unchanged.
 	StreamedDenseQ4K bool
+	// SingleResidencyQ4K mirrors the FAK_Q4K_FREE_CPU single-residency release for an
+	// integrated-tier Vulkan Q4_K load: eligible resident Q4_K tensors drop their host packed
+	// bytes right after the device upload, so on UMA the host copy is a transient phase, NOT a
+	// steady-state resident alongside the device copy. Device residency is unchanged.
+	SingleResidencyQ4K bool
 	// ResidentQ2KEmbedding mirrors WithQ2KEmbeddingResident on the eligible dense-Qwen
 	// Vulkan arm. The table remains packed in host memory and never becomes a persistent
 	// device weight; requested rows are materialized separately by the model.
@@ -242,7 +247,7 @@ func estimateLoadFor(in PreflightInput) (preflightEstimate, error) {
 	var err error
 	switch {
 	case in.VulkanMixedQ4K:
-		return estimateVulkanMixedQ4K(in.Source, in.ResidentQ2KEmbedding, in.StreamedDenseQ4K)
+		return estimateVulkanMixedQ4K(in.Source, in.ResidentQ2KEmbedding, in.StreamedDenseQ4K, in.SingleResidencyQ4K)
 	case in.OffloadExperts:
 		plan, err = in.Source.EstimateCPUOffloadExpertsMemoryPlan()
 	case in.Lean || in.Q4K:
@@ -270,7 +275,14 @@ func estimateLoadFor(in PreflightInput) (preflightEstimate, error) {
 // staging are phase-disjoint, so the peak is their maximum rather than their sum. W is
 // loadWorkers(), the exact runtime concurrency including FAK_GGUF_LOAD_WORKERS. Split/MoE/
 // unknown layouts fail closed until they share their exact transform and sharding contract.
-func estimateVulkanMixedQ4K(s *WeightSource, residentQ2KEmbedding, streamedDenseQ4K bool) (preflightEstimate, error) {
+//
+// singleResidencyQ4K is the already-resolved release decision (the caller combines the
+// FAK_Q4K_FREE_CPU knob with the backend's integrated/unified-memory tier). When true, every
+// eligible resident Q4_K tensor drops its host packed copy right after its device upload, so on a
+// shared physical pool those host bytes are a transient phase rather than a steady-state resident
+// alongside the device copy: they are NOT charged to hostResident, and the device demand is intact.
+// When false (the default, or a discrete device) the accounting is byte-identical to before.
+func estimateVulkanMixedQ4K(s *WeightSource, residentQ2KEmbedding, streamedDenseQ4K, singleResidencyQ4K bool) (preflightEstimate, error) {
 	if s == nil || s.File == nil {
 		return preflightEstimate{}, fmt.Errorf("gguf: mixed Vulkan estimate has no weight source")
 	}
@@ -356,6 +368,17 @@ func estimateVulkanMixedQ4K(s *WeightSource, residentQ2KEmbedding, streamedDense
 				if alloc > sessionStagingMax {
 					sessionStagingMax = alloc
 				}
+			} else if singleResidencyQ4K && retainedQ4K {
+				// Single residency on a unified-memory APU: the tensor IS read into a resident
+				// host packed copy during load (so its load-worker window is real and charged),
+				// but weightHALQ4K drops that copy right after the device upload, so at steady
+				// state it is NOT host-resident alongside the device copy. Charge only the
+				// transient load window; the device demand below stays intact.
+				alloc, err := conservativePageAllocation(payloadBytes)
+				if err != nil {
+					return preflightEstimate{}, fmt.Errorf("gguf: mixed Vulkan estimate tensor %s: %w", info.Name, err)
+				}
+				loadStaging = append(loadStaging, alloc)
 			} else {
 				alloc, err := conservativePageAllocation(payloadBytes)
 				if err != nil {
