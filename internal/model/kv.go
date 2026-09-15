@@ -441,6 +441,16 @@ type Session struct {
 	PrecisionPolicy *DynamicPrecisionPolicy
 	PrecisionStats  PrecisionStats
 
+	// PrecisionSchedule is the optional per-point precision plan for a scheduled pass
+	// (precision_schedule.go, #13100). nil (the default) leaves every existing path
+	// byte-for-byte unchanged: scheduledLevel answers (LevelF32,false) and RunScheduledPass
+	// is never entered, so the f32/Q8 dynamic path is exactly today's.
+	PrecisionSchedule Schedule
+	// PrecisionReceipt is the optional sink a scheduled pass records its admitted and
+	// refused decisions into. nil (the default) means no trace is kept. It is a pointer so
+	// several sessions may share one receipt when a caller folds a cohort's decisions.
+	PrecisionReceipt *LevelReceipt
+
 	// qScratch reuses the Q8 activation vector storage for serial quantized decode/head
 	// GEMVs. Each qMatRows call consumes the vector before the next quantization overwrites
 	// it, so this removes hot-path allocation without changing any Q8 arithmetic.
