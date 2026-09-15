@@ -775,6 +775,21 @@ function isTempOrScratchPath(target, filename) {
   return scratchPattern.test(normTarget) || scratchPattern.test(normName);
 }
 
+// Out-of-tree scratch (OS temp dirs, the harness's own scratch) is not leased
+// by the kernel, so a repo mutation tool must neither be blocked nor steered to
+// shell for it: that steerage is what taught agents to route around the guard
+// (fak-private#12166). Admit it outright; containment still governs every
+// in-repo path. Scratch is matched ONLY under a temp/scratch root so a repo
+// path that merely contains the word cannot escape admission.
+function isAdmittedScratchPath(target, filename) {
+  const normTarget = (target || "").replace(/\\/g, "/");
+  const normName = (filename || "").replace(/\\/g, "/");
+  const scratchRoot = /(?:^|\/)(?:appdata\/local\/temp|temp|tmp|scratch)\//i;
+  const scratchLeaf = /(?:^|\/)(?:opencode|scratch)(?:\/|$)/i;
+  return (scratchRoot.test(normTarget) || scratchRoot.test(normName)) &&
+    (scratchLeaf.test(normTarget) || scratchLeaf.test(normName));
+}
+
 function extractOutputText(output) {
   if (!output) return "";
   if (typeof output === "string") return output;
@@ -958,6 +973,7 @@ export default async function dosProofGuardPlugin({ client, directory }) {
 
       try {
         const trees = [];
+        let scratchOnly = true;
         for (const filename of filenames) {
           if (filename.includes("\0")) {
             throw new Error("[dos-proof-guard] Malformed mutation path: contains null byte");
@@ -965,12 +981,22 @@ export default async function dosProofGuardPlugin({ client, directory }) {
           const target = await canonicalPath(path.resolve(root, filename));
           const relative = path.relative(root, target);
           if (!relative || relative === ".." || relative.startsWith(` + "`" + `..${path.sep}` + "`" + `) || path.isAbsolute(relative)) {
-            if (isTempOrScratchPath(target, filename)) {
-              throw new Error("[dos-proof-guard] Mutation path is outside this lease workspace: '" + filename + "'. Temporary scratch files under temp/scratch directories (e.g. AppData/Local/Temp/opencode) must not be created or edited via repo mutation tools (write/edit/apply_patch); use shell commands (e.g. bash or PowerShell) to manage out-of-tree scratch files.");
+            // Out-of-tree scratch is admitted outright: the kernel does not lease
+            // OS temp, and the old "use shell" steerage taught agents to route
+            // around the guard (fak-private#12166). In-repo containment is
+            // unaffected; only temp/scratch subtrees short-circuit.
+            if (isAdmittedScratchPath(target, filename)) {
+              continue;
             }
-            throw new Error("[dos-proof-guard] Mutation path is outside this lease workspace: '" + filename + "'");
+            throw new Error("[dos-proof-guard:OUT_OF_LEASE] Mutation path is outside this lease workspace: '" + filename + "'. The kernel leases in-repo trees only; this path is not covered by any lane. Take the lane that owns this path (fak leaseref acquire ... or dos arbitrate), or record a handoff - do NOT re-attempt the same write through a different tool (shell/edit/write all cross the same lease boundary). Out-of-tree SCRATCH belongs under a temp/scratch directory and is admitted automatically.");
           }
+          scratchOnly = false;
           trees.push(relative.split(path.sep).join("/"));
+        }
+
+        if (scratchOnly) {
+          // Nothing in-repo to admit; scratch writes need no lease consultation.
+          return;
         }
 
         const refs = await jsonCommand("fak", ["leaseref", "liveness", "--dir", root, "--session", session], root);

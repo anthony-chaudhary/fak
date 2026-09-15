@@ -1400,25 +1400,21 @@ const [pluginFile, root] = process.argv.slice(2);
 const plugin = (await import(pathToFileURL(pluginFile).href)).default;
 const hooks = await plugin({ directory: root });
 
-// 1. Out-of-workspace scratch writes emit explicit steerage
+// 1. Out-of-workspace scratch writes are ADMITTED; non-scratch out-of-tree
+//    writes refuse with the structured OUT_OF_LEASE marker and no shell steerage.
 {
   const scratchTarget = path.join(root, '..', 'AppData', 'Local', 'Temp', 'opencode', 'scratch.txt');
-  await assert.rejects(
-    hooks['tool.execute.before']({ tool: 'write', sessionID: 'sess-scratch' }, { args: { filePath: scratchTarget } }),
-    (err) => {
-      assert.ok(err.message.includes('[dos-proof-guard] Mutation path is outside this lease workspace'));
-      assert.ok(err.message.includes('Temporary scratch files under temp/scratch directories'));
-      assert.ok(err.message.includes('use shell commands (e.g. bash or PowerShell)'));
-      return true;
-    }
+  await assert.doesNotReject(
+    hooks['tool.execute.before']({ tool: 'write', sessionID: 'sess-scratch' }, { args: { filePath: scratchTarget } })
   );
 
   const normalOut = path.join(root, '..', 'sibling', 'file.txt');
   await assert.rejects(
     hooks['tool.execute.before']({ tool: 'write', sessionID: 'sess-scratch' }, { args: { filePath: normalOut } }),
     (err) => {
-      assert.ok(err.message.includes('[dos-proof-guard] Mutation path is outside this lease workspace'));
-      assert.ok(!err.message.includes('Temporary scratch files'));
+      assert.ok(err.message.includes('[dos-proof-guard:OUT_OF_LEASE]'));
+      assert.ok(err.message.includes('do NOT re-attempt the same write through a different tool'));
+      assert.ok(!/use shell commands/i.test(err.message));
       return true;
     }
   );
