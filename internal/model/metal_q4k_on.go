@@ -1075,6 +1075,15 @@ func (m *Model) metalQ6KWeights() (int, bool) {
 	return len(names), true
 }
 
+// q4kM5OptIn resolves the FAK_Q4K_M5 process opt-in for the widened-panel wide-tile candidate.
+// Default ON: only an explicit FAK_Q4K_M5=0 turns it off. The real safety is metalgemm's
+// device/version-pinned crossover gate, so default-on never promotes an unreceipted device.
+func q4kM5OptIn() bool { return os.Getenv("FAK_Q4K_M5") != "0" }
+
+// q4kMMOptIn resolves the FAK_Q4K_MM process opt-in for the exact-P32 MM32 candidate. Default OFF
+// (the sibling of q4kM5OptIn, but the MM32 variant has not yet earned a default-on receipt).
+func q4kMMOptIn() bool { return os.Getenv("FAK_Q4K_MM") == "1" }
+
 // metalQ4KWeights uploads all Q4_K projection weights for this model to the GPU once,
 // caching them per *Model. This is the prefill-weight-upload twin of metalWeights(): it
 // uploads every q4_k-resident projection (q/k/v/o, gate/up/down) upfront so the prefill
@@ -1091,13 +1100,16 @@ func (m *Model) metalQ4KWeights() map[string]bool {
 	// on the M3 Pro), cosine 1.0 vs the CPU f32 reference. Default OFF (the scalar kernel stays the
 	// proven path) until the MMA variant earns auto-enable. Set once per process — cheap and
 	// idempotent on the metalgemm side.
-	q4kMMOnce.Do(func() { metalgemm.SetGEMMUseMM(os.Getenv("FAK_Q4K_MM") == "1") })
-	// Opt into the wide-tile cooperative-SMEM candidate for the widened panel regime (P>=64,
-	// fak#13041) when FAK_Q4K_M5=1. This is only the process opt-in; metalgemm additionally gates
-	// every encode on the device/version-pinned crossover table, which stays empty until a
-	// sanctioned on-silicon >=1.10x receipt pins a row (fak#9937). So FAK_Q4K_M5=1 is inert (the
-	// scalar kernel is reported) rather than an unwitnessed promotion. Set once per process.
-	q4kM5Once.Do(func() { metalgemm.SetGEMMUseM5(os.Getenv("FAK_Q4K_M5") == "1") })
+	q4kMMOnce.Do(func() { metalgemm.SetGEMMUseMM(q4kMMOptIn()) })
+	// Default ON the wide-tile cooperative-SMEM candidate for the widened panel regime (P>=64,
+	// fak#13041). The sanctioned on-silicon M3 Pro receipt now pins a row in metalgemm's
+	// device/version-pinned crossover table (fak#13124 / 1ebb4a9c6), where the median candidate/
+	// scalar on-GPU ratio measured 1.57x at P=64 and 1.46x at P=128, every sample clearing the
+	// fak#9937 >=1.10x gate. The encode-time crossover gate is the real safety mechanism: on any
+	// device/OS with no pinned row q4kGEMMModeForPrompt still requests the scalar identity, so
+	// default-on is inert off the receipted box. Flip FAK_Q4K_M5=0 to force the scalar kernel
+	// explicitly. Set once per process (cheap, idempotent on the metalgemm side).
+	q4kM5Once.Do(func() { metalgemm.SetGEMMUseM5(q4kM5OptIn()) })
 	uploaded := map[string]bool{}
 	cfg := m.Cfg
 	for l := 0; l < cfg.NumLayers; l++ {

@@ -1195,13 +1195,14 @@ func SetGEMMUseMM(on bool) {
 	q4kUseMM.Store(on)
 }
 
-// SetGEMMUseM5 opts the widened-panel regime (P>=64) into the wide-tile cooperative-SMEM candidate
-// (fak#13041 panel shapes / this leaf). It is the compute-side twin of SetGEMMUseMM and is default
-// OFF. Unlike MM32 it is ALSO gated at encode time by the device/version-pinned crossover table:
-// even with the opt-in on, q4kGEMMModeForPrompt requests mode 2 only for a P>=64 shape whose
-// live device/OS clears the fak#9937 >=1.10x routing margin. With the table empty (no sanctioned
-// on-silicon receipt yet) the opt-in is inert and the scalar kernel stays the executed identity.
-// The model layer flips this process-local opt-in from FAK_Q4K_M5.
+// SetGEMMUseM5 selects the widened-panel regime (P>=64) wide-tile cooperative-SMEM candidate
+// (fak#13041 panel shapes). It is the compute-side twin of SetGEMMUseMM, but unlike MM32 it is
+// ALSO gated at encode time by the device/version-pinned crossover table: q4kGEMMModeForPrompt
+// requests mode 2 only for a P>=64 shape whose live device/OS clears the fak#9937 >=1.10x routing
+// margin. With no pinned row for the live device the opt-in stays inert and the scalar kernel is
+// the executed identity, so flipping the opt-in on cannot promote an unreceipted device. The model
+// layer now defaults this process-local opt-in ON (FAK_Q4K_M5=0 forces it off) once the sanctioned
+// on-silicon M3 Pro receipt pinned a row (fak#13124); the crossover gate remains the real safety.
 func SetGEMMUseM5(on bool) {
 	q4kUseM5.Store(on)
 }

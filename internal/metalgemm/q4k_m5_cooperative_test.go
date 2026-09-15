@@ -19,6 +19,61 @@ func withPinnedCrossoverRow(t *testing.T, row q4kM5CrossoverRow, fn func()) {
 	fn()
 }
 
+// TestQ4KM5ProductionSeamDefaultsToWideTile pins the end-to-end production seam that fak#13124
+// left dormant: with the model-layer opt-in now default-ON (FAK_Q4K_M5 unset), the exact call the
+// prefill walk makes — SetQ4KGEMMMode(Q4KGEMMModeForPrompt(P)) at the production panel width
+// PromptPanelMaxTokens (128) — must select mode 2 on the receipted Apple M3 Pro / macOS 26 box, and
+// the graph must report that mode. Off the receipted device the crossover gate keeps the request
+// inert, so the same call yields scalar and the scalar identity stays executed (fail-closed).
+func TestQ4KM5ProductionSeamDefaultsToWideTile(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	defer ResetQ4K()
+	const in, out = 256, 64
+	w := UploadQ4K(q4kTestRaw(out, in, 0x13124), out, in)
+	if w == nil {
+		t.Fatal("UploadQ4K returned nil")
+	}
+	defer w.Release()
+
+	// Simulate the model layer's default-on resolution without an env dependency: the prefill walk
+	// calls SetGEMMUseM5(true) on FAK_Q4K_M5-unset. Restore whatever the ambient process had.
+	priorM5 := q4kUseM5.Swap(true)
+	defer q4kUseM5.Store(priorM5)
+
+	P := PromptPanelMaxTokens // 128: the production panel width (P>=64 wide-tile envelope)
+	g, err := BeginProjectionGraph(make([]float32, P*in), nil, nil, P, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Free()
+
+	mode := Q4KGEMMModeForPrompt(P)
+	admitted := Q4KM5CrossoverAdmits()
+	if admitted {
+		// Receipted box: the production seam must actually select the wide-tile kernel.
+		if mode != Q4KGEMMModeM5CooperativeSMEM {
+			t.Fatalf("admitted device: Q4KGEMMModeForPrompt(%d)=%v, want mode 2", P, mode)
+		}
+		if !g.SetQ4KGEMMMode(mode) {
+			t.Fatal("graph refused the wide-tile mode on an admitted P=128 panel")
+		}
+		if got := g.Q4KGEMMMode(); got != Q4KGEMMModeM5CooperativeSMEM {
+			t.Fatalf("graph mode=%v, want mode 2", got)
+		}
+		if _, err := g.EncodeQ4K(w); err != nil {
+			t.Fatalf("wide-tile P=128 encode: %v", err)
+		}
+	} else {
+		// Unreceipted device: the gate keeps default-on inert, so the scalar identity stays executed.
+		if mode != Q4KGEMMModeScalar {
+			t.Fatalf("unadmitted device: Q4KGEMMModeForPrompt(%d)=%v, want scalar", P, mode)
+		}
+		t.Logf("device %q is not the receipted M3 Pro/macOS 26 box; default-on is inert as designed", DeviceName())
+	}
+}
+
 func TestQ4KM5CooperativeSMEMCandidateMatchesIndependentCPUOracle(t *testing.T) {
 	if !Available() {
 		t.Skip("Metal unavailable")
