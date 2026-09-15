@@ -1150,3 +1150,36 @@ func TestDeepSeek41GGUFV41SuffixesDoNotLeakToSiblings(t *testing.T) {
 		})
 	}
 }
+
+// TestDeepSeek41GGUFV41HyperconnectionTapsMap is the regression guard for the
+// hc_* hyper-connection tap spellings the real converted artifact emits. The
+// published vcruz305 Q2_K shard carries blk.N.hc_attn_{fn,base,scale}.weight and
+// blk.N.hc_ffn_{fn,base,scale}.weight (parsed directly from the staged header).
+// The earlier map arms omitted the trailing ".weight", so every one of these
+// tensors was refused by CanonicalTensorNameArch and the shard load hard-failed
+// with "gguf: no canonical mapping for tensor blk.0.hc_attn_fn.weight" - the
+// same failure class the attn_kv_a_norm fix retired. Assert both the resolve and
+// the exact canonical leaf, at two layer indices.
+func TestDeepSeek41GGUFV41HyperconnectionTapsMap(t *testing.T) {
+	taps := []string{
+		"hc_attn_fn.weight", "hc_attn_base.weight", "hc_attn_scale.weight",
+		"hc_ffn_fn.weight", "hc_ffn_base.weight", "hc_ffn_scale.weight",
+	}
+	for _, tap := range taps {
+		for _, layer := range []int{0, 7} {
+			ggufName := fmt.Sprintf("blk.%d.%s", layer, tap)
+			got, ok := CanonicalTensorNameArch(ggufName, "deepseek41")
+			if !ok {
+				t.Errorf("published V4.1 hyper-connection tap %q did not resolve under deepseek41; the shard load hard-fails", ggufName)
+				continue
+			}
+			// The map strips the leading "hc_" and re-nests the tap under the
+			// per-layer hc.<leaf>.weight namespace, so hc_attn_fn.weight becomes
+			// model.layers.<L>.hc.attn_fn.weight.
+			want := layerName(layer, "hc."+strings.TrimPrefix(strings.TrimSuffix(tap, ".weight"), "hc_")+".weight")
+			if got != want {
+				t.Errorf("CanonicalTensorNameArch(%q, deepseek41) = %q, want %q", ggufName, got, want)
+			}
+		}
+	}
+}

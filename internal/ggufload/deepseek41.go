@@ -569,12 +569,12 @@ func deepseek41CanonicalSuffix(suffix string) (string, bool) {
 		// the HCMult/iters/eps scalars, and the native V4.1 forward is unimplemented;
 		// these map into a dedicated per-layer hc. namespace so a real file's
 		// hc_attn_*/hc_ffn_* tensors do not hard-fail the shard load).
-		"hc_attn_fn":    "hc.attn_fn",
-		"hc_attn_base":  "hc.attn_base",
-		"hc_attn_scale": "hc.attn_scale",
-		"hc_ffn_fn":     "hc.ffn_fn",
-		"hc_ffn_base":   "hc.ffn_base",
-		"hc_ffn_scale":  "hc.ffn_scale",
+		"hc_attn_fn.weight":    "hc.attn_fn.weight",
+		"hc_attn_base.weight":  "hc.attn_base.weight",
+		"hc_attn_scale.weight": "hc.attn_scale.weight",
+		"hc_ffn_fn.weight":     "hc.ffn_fn.weight",
+		"hc_ffn_base.weight":   "hc.ffn_base.weight",
+		"hc_ffn_scale.weight":  "hc.ffn_scale.weight",
 	}[suffix]
 	return mapped, ok
 }
