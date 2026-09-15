@@ -614,6 +614,28 @@ func (s *WeightSource) EstimateCPUOffloadExpertsMemoryPlan() (compute.MemoryPlan
 	return s.estimateCPUOffloadExpertsMemoryPlan(1)
 }
 
+// EstimateCPUOffloadExpertsStreamedMemoryPlan is EstimateCPUOffloadExpertsMemoryPlan under the
+// BOUNDED-RESIDENT NVMe-STREAMED expert policy (fak#13121): the SAME device/host partition, except
+// the host-scoped routed-expert demand is the residentExpertBytes working set the loader KEEPS
+// (faulting the remaining strides from the staged shards on demand) instead of the full routed
+// payload. That is what lets a MoE artifact whose routed experts exceed host RAM - the DeepSeek-V4.1
+// Flash Q2_K set is 183.25 GiB against a 62 GiB Halo - produce a plan that fits and reach the load,
+// where the full-charge plan refused by name before reading a byte.
+//
+// residentExpertBytes <= 0 is STREAM-THROUGH: the resident set is zero (an expert is read, handed to
+// the ring and dropped) and only the device dense side is charged. A negative value is refused
+// rather than clamped, so a caller cannot ask for an unrepresentable policy. The device dense/router/
+// attention/shared-expert side is byte-identical to EstimateCPUOffloadExpertsMemoryPlan: the SAME
+// per-tensor classification runs, so the streamed arm and the resident arm cannot disagree about
+// what stays on the device. The streamed host row carries the distinct
+// "gguf-host-expert-offload-streamed" detail so a refusal names which of the two policies failed.
+func (s *WeightSource) EstimateCPUOffloadExpertsStreamedMemoryPlan(residentExpertBytes int64) (compute.MemoryPlan, error) {
+	if residentExpertBytes < 0 {
+		return nil, fmt.Errorf("gguf: streamed expert resident budget %d is negative", residentExpertBytes)
+	}
+	return s.estimateCPUOffloadExpertsMemoryPlanFor(1, residentExpertBytes)
+}
+
 // EstimateCPUOffloadExpertsExpertParallelMemoryPlan is EstimateCPUOffloadExpertsMemoryPlan for a
 // SHARDED expert-parallel rank: the same device/host partition, except batched routed-expert blobs
 // are charged only for the BUSIEST rank's contiguous band. A --cpu-offload-experts rank in a
@@ -630,6 +652,14 @@ func (s *WeightSource) EstimateCPUOffloadExpertsExpertParallelMemoryPlan(ranks i
 }
 
 func (s *WeightSource) estimateCPUOffloadExpertsMemoryPlan(ranks int) (compute.MemoryPlan, error) {
+	return s.estimateCPUOffloadExpertsMemoryPlanFor(ranks, -1)
+}
+
+// estimateCPUOffloadExpertsMemoryPlanFor is the one accounting kernel both the full-charge and the
+// bounded-resident policies share. streamResident < 0 means the historical full host charge; >= 0
+// means the streamed policy's resident set (0 = stream-through). Only the HOST-scoped routed-expert
+// rows are transformed; every device-scoped byte is untouched.
+func (s *WeightSource) estimateCPUOffloadExpertsMemoryPlanFor(ranks int, streamResident int64) (compute.MemoryPlan, error) {
 	arch, _ := s.File.String("general.architecture")
 	modelType := canonicalGGUFArch(arch)
 	// band>0 only for a real sharded EP rank on a batched-MoE arch; everything else keeps the
@@ -715,7 +745,13 @@ func (s *WeightSource) estimateCPUOffloadExpertsMemoryPlan(ranks int) (compute.M
 		}
 		return !keys[i].shard && keys[j].shard
 	})
-	plan := make(compute.MemoryPlan, 0, len(keys))
+	plan := make(compute.MemoryPlan, 0, len(keys)+1)
+	// Under the bounded-resident streamed policy the host-scoped routed-expert bytes are NOT all
+	// resident: only streamResident bytes are KEPT and the rest are faulted from the staged shards.
+	// Fold every host offload row into ONE streamed row charged min(hostTotal, streamResident), so
+	// the plan's host total is exactly the bounded working set. Device rows are untouched.
+	streamed := streamResident >= 0
+	var streamedHostBytes int64
 	for _, k := range keys {
 		total := by[k]
 		if total == 0 {
@@ -723,6 +759,10 @@ func (s *WeightSource) estimateCPUOffloadExpertsMemoryPlan(ranks int) (compute.M
 		}
 		if total > math.MaxInt64 {
 			return nil, fmt.Errorf("gguf: estimated offload memory plan overflows int64")
+		}
+		if streamed && k.scope == compute.MemoryScopeHost {
+			streamedHostBytes += int64(total)
+			continue
 		}
 		detail := "gguf-device-dense-load"
 		if k.scope == compute.MemoryScopeHost {
@@ -741,6 +781,21 @@ func (s *WeightSource) estimateCPUOffloadExpertsMemoryPlan(ranks int) (compute.M
 			Scope:  k.scope,
 			DType:  k.dtype,
 		})
+	}
+	if streamed {
+		resident := streamedHostBytes
+		if streamResident < resident {
+			resident = streamResident
+		}
+		if resident > 0 {
+			plan = append(plan, compute.MemoryDemand{
+				Class:  compute.MemoryOffload,
+				Bytes:  resident,
+				Detail: "gguf-host-expert-offload-streamed",
+				Scope:  compute.MemoryScopeHost,
+				DType:  "streamed-resident",
+			})
+		}
 	}
 	return plan, nil
 }
@@ -855,6 +910,17 @@ func (s *WeightSource) FitF32OnDevice(be compute.Backend, headroom float64) erro
 // expert bytes remain visible as MemoryOffload demands but do not count against device capacity.
 func (s *WeightSource) FitCPUOffloadExpertsOnDevice(be compute.Backend, headroom float64) error {
 	plan, err := s.EstimateCPUOffloadExpertsMemoryPlan()
+	if err != nil {
+		return err
+	}
+	return compute.RefuseMemoryPlanIfTooBig(be, plan, headroom)
+}
+
+// FitCPUOffloadExpertsStreamedOnDevice is FitCPUOffloadExpertsOnDevice for the bounded-resident
+// streamed policy: the device side is checked against the device probe exactly as the full-charge
+// arm does, but the host-scoped demand is the bounded resident set rather than the routed payload.
+func (s *WeightSource) FitCPUOffloadExpertsStreamedOnDevice(be compute.Backend, headroom float64, residentExpertBytes int64) error {
+	plan, err := s.EstimateCPUOffloadExpertsStreamedMemoryPlan(residentExpertBytes)
 	if err != nil {
 		return err
 	}
