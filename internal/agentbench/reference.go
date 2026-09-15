@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -180,9 +181,13 @@ func sameOriginReferenceURL(base *url.URL, advertised string) (string, error) {
 	return resolved.String(), nil
 }
 
+// referenceHTTPClientTimeout bounds the fallback client so a stalled reference
+// endpoint cannot hang a bench run; an explicit caller client keeps its own config.
+const referenceHTTPClientTimeout = 2 * time.Minute
+
 func referenceHTTPClient(client *http.Client) *http.Client {
 	if client == nil {
-		client = http.DefaultClient
+		client = &http.Client{Timeout: referenceHTTPClientTimeout}
 	}
 	clone := *client
 	clone.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }

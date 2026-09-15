@@ -326,6 +326,7 @@ func runOpencodeConfig(stdout, stderr io.Writer, argv []string) int {
 	if !parseFlags(fs, argv) {
 		return 2
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 	if (*halo || *strix) && *model == projectassets.DefaultOpenCodeModelID {
 		*model = projectassets.ResolveDynamicHaloModel(*dir)
 	}

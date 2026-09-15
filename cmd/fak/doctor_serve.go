@@ -41,6 +41,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/macfit"
 	"github.com/anthony-chaudhary/fak/internal/memgate"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"golang.org/x/sys/cpu"
 )
 
@@ -618,6 +619,8 @@ func runServeDoctor(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak doctor serve: unexpected args: %v\n", fs.Args())
 		return 2
 	}
+
+	*ggufPath = pathutil.ExpandTilde(*ggufPath)
 
 	facts := probeServeHost(*modelBytes, *headroom)
 	if *modelName != "" || *ggufPath != "" {
