@@ -450,6 +450,8 @@ type turnkeyServer struct {
 	stopping         bool
 	releaseRequested bool
 	activeRequests   int
+	admittedTotal    int64
+	shedTotal        int64
 	residencyOnce    sync.Once
 	ready            *readinessGate
 }
@@ -571,14 +573,13 @@ func (s *turnkeyServer) requestResidencyRelease() {
 	}
 }
 
+// beginChatRequest admits a request when capacity allows and the server is not
+// stopping. It is the legacy bool form of admitChatRequest, kept for existing
+// callers/tests: a request denied by the KV budget returns false, so callers that
+// only understand "stopping" must use admitChatRequest to tell the two refusals
+// apart and emit the right status (#13075).
 func (s *turnkeyServer) beginChatRequest() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.stopping {
-		return false
-	}
-	s.activeRequests++
-	return true
+	return s.admitChatRequest() == admissionGranted
 }
 
 func (s *turnkeyServer) endChatRequest() {
@@ -999,6 +1000,7 @@ func (s *turnkeyServer) handleHealthz(w http.ResponseWriter, r *http.Request) {
 		"headroom_ratio": s.plan.HeadroomRatio,
 		"native_startup": nativeStartup,
 		"live_residency": s.liveResidencyReport(),
+		"sessions":       s.capacityStats(),
 	})
 }
 
@@ -1135,7 +1137,13 @@ func (s *turnkeyServer) handleCompletions(w http.ResponseWriter, r *http.Request
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !s.beginChatRequest() {
+	switch s.admitChatRequest() {
+	case admissionGranted:
+		// admitted
+	case admissionAtCapacity:
+		writeTurnkeyBackpressure(w, "server_at_capacity", s.capacity().MaxSessions)
+		return
+	default:
 		http.Error(w, "server stopping", http.StatusServiceUnavailable)
 		return
 	}
@@ -1256,7 +1264,13 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !s.beginChatRequest() {
+	switch s.admitChatRequest() {
+	case admissionGranted:
+		// admitted
+	case admissionAtCapacity:
+		writeTurnkeyBackpressure(w, "server_at_capacity", s.capacity().MaxSessions)
+		return
+	default:
 		http.Error(w, "server stopping", http.StatusServiceUnavailable)
 		return
 	}
