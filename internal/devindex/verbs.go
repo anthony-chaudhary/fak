@@ -40,7 +40,21 @@ type Verb struct {
 	// so the classification keeps its one home. Empty only for a curated entry
 	// whose verb is not (yet) dispatched.
 	Tier VerbTier `json:"tier,omitempty"`
+	// Binary names the artifact whose dispatch switch actually routes this verb
+	// ("fak" or "fak-dev"). It is DERIVED from live dispatch membership in
+	// Verbs(), never authored in verbManifest, so a card can never advertise a
+	// binary that cannot dispatch the verb (#13093). A capability card built
+	// from this entry must render `<Binary> <Name>`, not a hardcoded prefix.
+	Binary string `json:"binary,omitempty"`
 }
+
+// The two artifacts that own a top-level command spelling. A verb dispatched by
+// cmd/fak is advertised as `fak <verb>`; one dispatched only by cmd/fak-dev is
+// advertised as `fak-dev <verb>` (#13093).
+const (
+	BinaryFak    = "fak"
+	BinaryFakDev = "fak-dev"
+)
 
 // Spellings returns the verb's canonical name plus every alias — the full set of
 // argv[1] tokens that route to this verb. The freshness gate joins on this set so a
@@ -377,7 +391,7 @@ var verbManifest = []Verb{
 	{Name: "score", Synopsis: "parent verb over the meta-scorecards / RSI loops: `fak score <name>` routes to each legacy scorecard handler", Lane: "cmd"},
 	{Name: "scoreboard", Synopsis: "the scoreboard Slack surface for #scoreboard", Lane: "cmd"},
 	{Name: "scorecard", Synopsis: "the scorecard control pane: every metric's debt + grade + trend", Lane: "cmd"},
-	{Name: "search", Synopsis: "search the repository text corpus with bounded results and JSON output", Lane: "cmd"},
+	{Name: "search", Synopsis: "search the fleet session stores (lifecycle, registration, tool-process) by logical session ID", Lane: "cmd"},
 	{Name: "scratch", Synopsis: "the harness session scratchpad surface: read-only content query + promotion candidates", Lane: "cmd"},
 	{Name: "scratch-janitor", Synopsis: "plan or remove abandoned session scratch directories with age and resume guards", Lane: "cmd"},
 	{Name: "self-update", Synopsis: "converge a built-from-source fak binary on origin/main", Aliases: []string{"self"}, Lane: "cmd"},
@@ -481,15 +495,19 @@ var verbManifest = []Verb{
 // verb with no curated entry still appears, carrying a fallback synopsis that points at
 // its own --help — so the catalog can never silently fall behind the binary the way a
 // hand-maintained list does. When main.go cannot be read (an installed binary outside a
-// repo), it falls back to the curated overlay alone. The cmd/ usage generator and
-// `fak index verbs` (CLI + MCP) consume it.
+// repo), it falls back to the curated overlay alone. Each emitted entry also carries a
+// derived Binary naming the artifact that dispatches it (#13093), so a capability card
+// built downstream renders the real command instead of a hardcoded prefix. The cmd/
+// usage generator and `fak index verbs` (CLI + MCP) consume it.
 func (c *Catalog) Verbs() []Verb {
 	tokens := c.liveDispatchTokens()
+	devTokens := c.liveDevDispatchTokens()
 	if len(tokens) == 0 {
 		out := make([]Verb, len(verbManifest))
 		copy(out, verbManifest)
 		for i := range out {
 			out[i].Tier = tierFor(out[i].Name)
+			out[i].Binary = binaryForVerb(out[i].Name, devTokens)
 		}
 		sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 		return out
@@ -509,6 +527,7 @@ func (c *Catalog) Verbs() []Verb {
 			}
 			seen[v.Name] = true
 			v.Tier = tierFor(v.Name)
+			v.Binary = binaryForVerb(v.Name, devTokens)
 			out = append(out, v)
 			continue
 		}
@@ -516,10 +535,51 @@ func (c *Catalog) Verbs() []Verb {
 			continue
 		}
 		seen[tok] = true
-		out = append(out, Verb{Name: tok, Synopsis: "not yet cataloged — `fak " + tok + " -h` for usage", Tier: tierFor(tok)})
+		out = append(out, Verb{
+			Name:     tok,
+			Synopsis: "not yet cataloged — `fak " + tok + " -h` for usage",
+			Tier:     tierFor(tok),
+			Binary:   binaryForVerb(tok, devTokens),
+		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// liveDevDispatchTokens returns the lowercased tokens of cmd/fak-dev/main.go's
+// top-level dispatch switch — the set of verbs the *dev* artifact actually routes.
+// Nil when the file cannot be read (an installed binary outside a repo), which sends
+// binaryForVerb to its tier-derived fallback. It reuses devDispatchVerbs, the same
+// scan the tier-coverage test uses, so the two can never disagree (#13093).
+func (c *Catalog) liveDevDispatchTokens() []string {
+	b, err := os.ReadFile(filepath.Join(c.Root, "cmd", "fak-dev", "main.go"))
+	if err != nil {
+		return nil
+	}
+	return devDispatchVerbs(b)
+}
+
+// binaryForVerb names the artifact that dispatches a verb, for the capability card's
+// `<binary> <verb>` rendering (#13093). A verb whose canonical spelling is in the
+// fak-dev dispatch set is advertised as `fak-dev <verb>`; every other verb belongs to
+// the `fak` catalog `Verbs()` already derives from cmd/fak/main.go. When the dev
+// switch is unreadable (devTokens empty — an installed binary outside a repo) it falls
+// back to the tier table: a TierDev verb is dev-routed, everything else is `fak`. This
+// is a second, coarser home for the same fact, used only when the live switch is gone.
+func binaryForVerb(name string, devTokens []string) string {
+	if len(devTokens) == 0 {
+		if tierFor(name) == TierDev {
+			return BinaryFakDev
+		}
+		return BinaryFak
+	}
+	n := strings.ToLower(name)
+	for _, tok := range devTokens {
+		if tok == n {
+			return BinaryFakDev
+		}
+	}
+	return BinaryFak
 }
 
 // liveDispatchTokens returns the lowercased verb tokens (canonical + alias spellings)

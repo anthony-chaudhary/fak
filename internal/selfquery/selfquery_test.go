@@ -19,7 +19,11 @@ func testDevCatalog() *DevCatalog {
 		Leaves: []DevLeaf{{Name: "gateway", Tree: "internal/gateway/**", Desc: "gateway surface"}, {Name: "cmd", Tree: "cmd/**", Desc: "command shells"}},
 		Docs:   []DevDoc{{Title: "Gateway guide", Path: "docs/gateway.md", Blurb: "MCP and gateway docs."}},
 		Claims: []DevClaim{{Tag: "SHIPPED", Text: "internal/gateway exposes MCP tools.", Lanes: []string{"gateway"}}},
-		Verbs:  []DevVerb{{Name: "index", Synopsis: "query repository index", Lane: "devcmd"}, {Name: "feature", Synopsis: "query feature catalog", Lane: "devcmd"}},
+		Verbs: []DevVerb{
+			{Name: "index", Synopsis: "query repository index", Lane: "devcmd", Binary: "fak-dev"},
+			{Name: "feature", Synopsis: "query feature catalog", Lane: "devcmd", Binary: "fak-dev"},
+			{Name: "search", Synopsis: "search the fleet session stores by logical session ID", Lane: "cmd", Binary: "fak"},
+		},
 	}
 }
 
@@ -207,6 +211,53 @@ func TestEveryInjectedDevVerbHasFeatureCard(t *testing.T) {
 	}
 	if !namesOf(cat.Cards(PlaneDev))["fak-dev index"] {
 		t.Fatal("injected fak-dev verb missing from self-feature catalog")
+	}
+}
+
+// TestCLIVerbCardsNameDispatcherBinary is the #13093 regression: a cli-verb card must
+// advertise the binary that actually dispatches the verb, never a hardcoded `fak-dev`
+// prefix. `fak search` is dispatched by cmd/fak, not cmd/fak-dev, so its card name,
+// detail ref, and request command must all say `fak`.
+func TestCLIVerbCardsNameDispatcherBinary(t *testing.T) {
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]FeatureCard{}
+	for _, c := range cat.Cards(PlaneDev) {
+		if c.Kind == "cli-verb" {
+			byName[c.Name] = c
+		}
+	}
+	// The fak-dev-dispatched verb renders under fak-dev.
+	if _, ok := byName["fak-dev index"]; !ok {
+		t.Fatalf("fak-dev-dispatched verb card missing; got %v", sortedNames(cat.Cards(PlaneDev)))
+	}
+	// The fak-dispatched verb must NOT be advertised as fak-dev (the phantom bug).
+	if _, ok := byName["fak-dev search"]; ok {
+		t.Fatal("cli-verb card advertises `fak-dev search`, but cmd/fak-dev does not route it (#13093)")
+	}
+	search, ok := byName["fak search"]
+	if !ok {
+		t.Fatalf("fak-dispatched verb card missing; got %v", sortedNames(cat.Cards(PlaneDev)))
+	}
+	if search.DetailRef != "fak search" {
+		t.Fatalf("fak search detail_ref = %q, want %q", search.DetailRef, "fak search")
+	}
+	if got := strings.Join(search.Request.Command, " "); got != "fak search --help" {
+		t.Fatalf("fak search request = %q, want %q", got, "fak search --help")
+	}
+}
+
+// TestVerbBinaryFallsBackToFakDev pins the empty-stamp fallback: a loader that predates
+// the Binary tag must keep the historical `fak-dev <verb>` rendering rather than
+// silently advertising the wrong binary.
+func TestVerbBinaryFallsBackToFakDev(t *testing.T) {
+	if got := verbBinary(DevVerb{Name: "index"}); got != "fak-dev" {
+		t.Fatalf("verbBinary(empty) = %q, want fak-dev", got)
+	}
+	if got := verbBinary(DevVerb{Name: "search", Binary: "fak"}); got != "fak" {
+		t.Fatalf("verbBinary(fak) = %q, want fak", got)
 	}
 }
 
