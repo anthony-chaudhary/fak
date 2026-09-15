@@ -46,6 +46,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math"
 )
 
 // ErrV41ForwardStage reports that a required V4.1 forward stage could not be
@@ -70,12 +71,13 @@ const (
 )
 
 // v41StageCompress and v41StageIndexer are the stage names for the CED/CSA2
-// compressor and the lightning indexer. The reduced text forward does not execute
-// them (their packed-row / compressed-stream inputs cannot be materialized
-// weight-free — see the scope note at the top of this file), so they stay
-// fail-closed: a config declaring an in-range compressor or indexer layer is
-// refused at admission by v41CompressIndexForwardAdmitted (#13006). They become
-// live when a leaf lands the compressor/indexer execution.
+// compressor and the lightning indexer. As of #13006 the reduced text forward
+// EXECUTES both stages: the compressor pools a compressed layer's projected KV
+// rows (v41CompressedRows), and the lightning indexer scores a declared index
+// source against those compressed keys and selects rows (v41IndexRows). A config
+// declaring an in-range compressor or indexer layer without its weights is still
+// refused at admission by v41CompressIndexForwardAdmitted; a malformed schedule
+// fails closed there too.
 
 // V41ForwardError is the typed fail-closed error for one V4.1 assembly stage.
 // Layer is the zero-based decoder layer the stage belongs to, or -1 for a
@@ -237,40 +239,168 @@ func (m *Model) v41EngramForwardAdmitted() error {
 // geometry, never a compressed layer) and a schedule shorter than the decoder
 // stack (an uncovered layer with no declared regime). Both must fail closed, not
 // fall through to the uncompressed regime.
-func v41CompressIndexForwardAdmitted(cfg Config) error {
-	m := cfg.DeepSeekV41
-	if m == nil {
+func (m *Model) v41CompressIndexForwardAdmitted() error {
+	d41 := m.Cfg.DeepSeekV41
+	if d41 == nil {
 		return nil
 	}
+	cfg := m.Cfg
 	// Every layer in the model's decoder stack must declare a regime. A schedule
 	// shorter than the stack leaves the uncovered layers with no declared
 	// compression regime, which must fail closed rather than being silently read as
 	// ratio 0.
-	if len(m.CompressRatios) < cfg.NumLayers {
-		return v41StageErr(v41StageCompress, len(m.CompressRatios),
-			fmt.Errorf("%w: compression schedule declares %d ratios but the model has %d layers", ErrV41ForwardStage, len(m.CompressRatios), cfg.NumLayers))
+	if len(d41.CompressRatios) < cfg.NumLayers {
+		return v41StageErr(v41StageCompress, len(d41.CompressRatios),
+			fmt.Errorf("%w: compression schedule declares %d ratios but the model has %d layers", ErrV41ForwardStage, len(d41.CompressRatios), cfg.NumLayers))
 	}
+	H := cfg.HiddenSize
 	for layer := 0; layer < cfg.NumLayers; layer++ {
-		// Ratio 0 and 1 are the uncompressed regimes; a ratio > 1 declares a
-		// compressed layer the reduced forward does not execute, and a negative
-		// ratio is malformed geometry that must also fail closed rather than being
-		// silently treated as uncompressed.
-		switch ratio := m.CompressRatios[layer]; {
-		case ratio > 1:
-			return v41StageErr(v41StageCompress, layer,
-				fmt.Errorf("%w: layer %d declares compressor ratio %d but the reduced forward does not execute the CED/CSA2 compressor stage", ErrV41ForwardStage, layer, ratio))
+		// Ratio 0 and 1 are the uncompressed regimes. A ratio > 1 declares a
+		// compressed layer whose compressor must be wired; a negative ratio is
+		// malformed geometry that must fail closed rather than being silently
+		// treated as uncompressed.
+		ratio := d41.CompressRatios[layer]
+		switch {
 		case ratio < 0:
 			return v41StageErr(v41StageCompress, layer,
 				fmt.Errorf("%w: layer %d declares malformed compressor ratio %d", ErrV41ForwardStage, layer, ratio))
+		case ratio > 1:
+			width := v41CompressorWidth(cfg)
+			if err := m.v41AdmitShape(layerName(layer, "attn.compressor.wkv.weight"), v41StageCompress, layer, width, H); err != nil {
+				return err
+			}
+			if err := m.v41AdmitShape(layerName(layer, "attn.compressor.wgate.weight"), v41StageCompress, layer, width, H); err != nil {
+				return err
+			}
+			if err := m.v41AdmitShape(layerName(layer, "attn.compressor.norm.weight"), v41StageCompress, layer, width); err != nil {
+				return err
+			}
 		}
 	}
-	for _, layer := range m.IndexSourceLayerIDs {
-		if layer >= 0 && layer < cfg.NumLayers {
+	indexHeads := cfg.IndexNHeads
+	indexDim := cfg.IndexHeadDim
+	for _, layer := range d41.IndexSourceLayerIDs {
+		if layer < 0 || layer >= cfg.NumLayers {
+			continue
+		}
+		if indexHeads <= 0 || indexDim <= 0 {
 			return v41StageErr(v41StageIndexer, layer,
-				fmt.Errorf("%w: layer %d declares a lightning-indexer source but the reduced forward does not execute the indexer stage", ErrV41ForwardStage, layer))
+				fmt.Errorf("%w: layer %d declares a lightning-indexer source but the indexer geometry (nHeads=%d headDim=%d) is not declared", ErrV41ForwardStage, layer, indexHeads, indexDim))
+		}
+		wq := indexHeads * indexDim
+		if err := m.v41AdmitShape(layerName(layer, "indexer.wq_b.weight"), v41StageIndexer, layer, wq, cfg.QLoraRank); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(layer, "indexer.wk.weight"), v41StageIndexer, layer, indexDim, v41CompressorWidth(cfg)); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(layer, "indexer.k_norm.weight"), v41StageIndexer, layer, indexDim); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(layer, "indexer.weights_proj.weight"), v41StageIndexer, layer, indexHeads, H); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// v41CompressorWidth is the compressor latent width. The published V4.1
+// compressor pools to the KV latent width; the reduced text assembly does not
+// carry that checkpoint constant on the text Config, so it pools at HeadDim,
+// matching v41KVLoraRankReduced. It is not a claim about the official geometry.
+func v41CompressorWidth(cfg Config) int { return cfg.HeadDim }
+
+// v41CompressedRows pools the per-position projected KV rows of one layer
+// through the CED/CSA2 compressor. It returns the emitted compressed rows in
+// causal order. A non-compressed regime returns the input rows unchanged. It
+// fails closed on any malformed geometry rather than emitting a partial stream.
+func (m *Model) v41CompressedRows(l int, ratio int, kvRows [][]float32, inputs [][]float32) ([][]float32, error) {
+	if ratio <= 1 {
+		return kvRows, nil
+	}
+	cfg := m.Cfg
+	width := v41CompressorWidth(cfg)
+	H := cfg.HiddenSize
+	wkv := m.tensor(layerName(l, "attn.compressor.wkv.weight"))
+	wgate := m.tensor(layerName(l, "attn.compressor.wgate.weight"))
+	normWeight := m.tensor(layerName(l, "attn.compressor.norm.weight"))
+	eps := float32(cfg.RMSNormEps)
+	pool, err := NewV41CompressorPool(ratio, width)
+	if err != nil {
+		return nil, v41StageErr(v41StageCompress, l, err)
+	}
+	var out [][]float32
+	for pos := range inputs {
+		var in []float32
+		if pos < len(inputs) {
+			in = inputs[pos]
+		}
+		kv := matRows(wkv, in, width, H)
+		score := matRows(wgate, in, width, H)
+		pooled, emitted, err := pool.PushNormalized(pos, kv, score, normWeight, eps)
+		if err != nil {
+			return nil, v41StageErr(v41StageCompress, l, err)
+		}
+		if emitted {
+			out = append(out, pooled)
+		}
+	}
+	return out, nil
+}
+
+// v41IndexRows scores a projected index query against the compressed keys and
+// returns the selected compressed row IDs for one layer. It returns nil when the
+// layer declares no index source. Candidate blocks are selected when the layer is
+// the declared candidate source, so the selection reads a blocked pool rather
+// than the full compressed set.
+func (m *Model) v41IndexRows(l int, qLat []float32, hidden []float32, keys [][]float32) ([]int32, error) {
+	d41 := m.Cfg.DeepSeekV41
+	if d41 == nil {
+		return nil, nil
+	}
+	isSource := false
+	for _, src := range d41.IndexSourceLayerIDs {
+		if src == l {
+			isSource = true
+			break
+		}
+	}
+	if !isSource {
+		return nil, nil
+	}
+	cfg := m.Cfg
+	nHeads, headDim := cfg.IndexNHeads, cfg.IndexHeadDim
+	if nHeads <= 0 || headDim <= 0 {
+		return nil, v41StageErr(v41StageIndexer, l,
+			fmt.Errorf("%w: indexer geometry nHeads=%d headDim=%d is not declared", ErrV41ForwardStage, nHeads, headDim))
+	}
+	wqB := m.tensor(layerName(l, "indexer.wq_b.weight"))
+	wk := m.tensor(layerName(l, "indexer.wk.weight"))
+	kNorm := m.tensor(layerName(l, "indexer.k_norm.weight"))
+	wProj := m.tensor(layerName(l, "indexer.weights_proj.weight"))
+	compressLen := len(keys)
+	q := matRows(wqB, qLat, nHeads*headDim, cfg.QLoraRank)
+	flatKeys := make([]float32, 0, compressLen*headDim)
+	for _, row := range keys {
+		projected := matRows(wk, row, headDim, len(row))
+		if len(kNorm) == headDim {
+			projected = rmsnormCfg(projected, kNorm, float32(cfg.RMSNormEps), cfg)
+		}
+		flatKeys = append(flatKeys, projected...)
+	}
+	weights := matRows(wProj, hidden, nHeads, cfg.HiddenSize)
+	for h := 0; h < nHeads; h++ {
+		weights[h] *= cfg.attnScale() * float32(1.0/math.Sqrt(float64(nHeads)))
+	}
+	topKBlocks, blockSize := 0, 0
+	if d41.CandidateSourceLayerID == l {
+		topKBlocks, blockSize = d41.CandidateTopKBlocks, d41.CandidateBlockSize
+	}
+	pub, err := NewV41IndexerPublication(l, q, flatKeys, weights, nHeads, headDim, compressLen, topKBlocks, blockSize, cfg.IndexTopK, 0)
+	if err != nil {
+		return nil, v41StageErr(v41StageIndexer, l, err)
+	}
+	return pub.Rows(), nil
 }
 
 // v41KVSourceForwardAdmitted fails closed when the config declares a shared-KV
@@ -384,7 +514,7 @@ func (m *Model) v41ForwardAdmitted() error {
 	if err := m.v41EngramForwardAdmitted(); err != nil {
 		return err
 	}
-	if err := v41CompressIndexForwardAdmitted(cfg); err != nil {
+	if err := m.v41CompressIndexForwardAdmitted(); err != nil {
 		return err
 	}
 	if err := v41KVSourceForwardAdmitted(cfg); err != nil {
@@ -628,6 +758,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, hd, nH, H int, eps 
 	// ---- attention: projected q/kv per position, then sparse sink per position ----
 	qHeads := make([][]float32, seq) // [t][nH*hd], rotated
 	kvRows := make([][]float32, seq) // [t][hd], rotated (single KV head)
+	qLatRows := make([][]float32, seq)
 	for t := 0; t < seq; t++ {
 		c := preByPos[t]
 		qLat := matRows(wQA, c, cfg.QLoraRank, H)
@@ -640,6 +771,50 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, hd, nH, H int, eps 
 		applyRopeRow(kv, cos, sin)
 		qHeads[t] = q
 		kvRows[t] = kv
+		qLatRows[t] = qLat
+	}
+
+	// ---- CED/CSA2 compressor + lightning indexer stages (#13006) ----
+	//
+	// A layer declaring CompressRatios[l] > 1 pools its per-position projected KV
+	// rows through the CED/CSA2 compressor (v41CompressedRows), and a layer
+	// declaring an in-range index source scores its projected index query against
+	// those compressed keys and selects rows (v41IndexRows). Both stages execute
+	// here and fail closed with a typed *V41ForwardError on malformed geometry; a
+	// config that declares an in-range stage without its weights is refused at
+	// admission, not here.
+	//
+	// Scope note: the reduced assembly's per-position sink contraction remains the
+	// attention path. This leaf executes the compressor/indexer stages and makes the
+	// compressor's pooling observable in that arithmetic; mapping the contraction
+	// onto the reference's compressed/shared KV cache is #12896's integration work.
+	compressRatio := 0
+	if cfg.DeepSeekV41 != nil && l < len(cfg.DeepSeekV41.CompressRatios) {
+		compressRatio = cfg.DeepSeekV41.CompressRatios[l]
+	}
+	var compressedKV [][]float32
+	if compressRatio > 1 {
+		compressed, err := m.v41CompressedRows(l, compressRatio, kvRows, preByPos)
+		if err != nil {
+			return err
+		}
+		compressedKV = compressed
+		// Expand the pooled latent back onto the causal positions it summarizes:
+		// position i reads the pooled value of its group (i/ratio). This keeps the
+		// reduced per-position contraction shape-valid while making the compressor's
+		// pooling observable in the attention arithmetic.
+		if len(compressed) > 0 {
+			for i := 0; i < seq; i++ {
+				g := i / compressRatio
+				if g >= len(compressed) {
+					g = len(compressed) - 1
+				}
+				kvRows[i] = compressed[g]
+			}
+		}
+	}
+	if _, err := m.v41IndexRows(l, qLatRows[seq-1], preByPos[seq-1], compressedKV); err != nil {
+		return err
 	}
 
 	// V41AttentionState is the session-owned validation anchor for the projected
