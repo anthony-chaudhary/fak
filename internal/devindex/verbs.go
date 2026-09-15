@@ -378,6 +378,7 @@ var verbManifest = []Verb{
 	{Name: "scoreboard", Synopsis: "the scoreboard Slack surface for #scoreboard", Lane: "cmd"},
 	{Name: "scorecard", Synopsis: "the scorecard control pane: every metric's debt + grade + trend", Lane: "cmd"},
 	{Name: "search", Synopsis: "search the repository text corpus with bounded results and JSON output", Lane: "cmd"},
+	{Name: "scratch", Synopsis: "the harness session scratchpad surface: read-only content query + promotion candidates", Lane: "cmd"},
 	{Name: "scratch-janitor", Synopsis: "plan or remove abandoned session scratch directories with age and resume guards", Lane: "cmd"},
 	{Name: "self-update", Synopsis: "converge a built-from-source fak binary on origin/main", Aliases: []string{"self"}, Lane: "cmd"},
 	{Name: "sensecheck", Synopsis: "evaluate text, commits, or session traces for grounded truth and hallucination drift", Lane: "cmd"},

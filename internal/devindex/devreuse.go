@@ -298,6 +298,7 @@ var maintainerDevCommands = []string{
 	"score",
 	"scoreboard",
 	"scorecard",
+	"scratch",
 	"scratch-janitor",
 	"serve-wiring",
 	"service",

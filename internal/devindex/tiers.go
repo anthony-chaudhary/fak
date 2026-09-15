@@ -138,6 +138,7 @@ var verbTiers = map[string]VerbTier{
 	"quantwatch":            TierDev,
 	"schedule-held":         TierDev,
 	"search":                TierDev,
+	"scratch":               TierDev,
 	"scratch-janitor":       TierDev,
 	"speed-ab":              TierDev,
 	"doc-freshness":         TierDev,
