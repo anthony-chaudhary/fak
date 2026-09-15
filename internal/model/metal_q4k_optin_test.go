@@ -1,3 +1,5 @@
+//go:build darwin && arm64 && cgo
+
 package model
 
 import "testing"
