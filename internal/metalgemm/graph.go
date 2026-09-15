@@ -29,6 +29,8 @@ void mg_graph_free(void *graph);
 void *mg_graph_xf_buffer(void *graph);
 int mg_graph_set_gemv_vectorized(void *graph, int mode);
 int mg_graph_set_gemv_p1(void *graph, int mode);
+int mg_graph_set_mm_mode(void *graph, int mode);
+int mg_graph_mm_mode(void *graph);
 int mg_graph_set_buffer_pool(void *graph, int depth);
 void mg_graph_recycle_result(void *graph, void *result);
 void *mg_qwen35_graph_norm(void *graph, void *input, const float *weight, int rows, int width, float eps, int gain1p, int last_only);
@@ -495,6 +497,48 @@ func (g *ProjectionGraph) add(ptr unsafe.Pointer, out int) (*GraphResult, error)
 	}
 	g.encoders++
 	return &GraphResult{ptr: ptr, out: out, p: g.p, graph: g}, nil
+}
+
+// SetQ4KGEMMMode sets the Q4_K projection candidate every EncodeQ4K / EncodeQ4KFrom in
+// this graph dispatches: Q4KGEMMModeScalar (the historical default) or
+// Q4KGEMMModeM5CooperativeSMEM, the wide-tile cooperative-SMEM candidate for the P>=64
+// panel regime (fak#13041 / this leaf). It must be called before the first encode.
+//
+// It is fail-closed: requesting mode 2 for a graph whose P is below the kernel's 64-token
+// eligibility, or when the optional pipeline is unavailable, returns false and leaves the
+// graph on the scalar kernel — the caller must keep the scalar identity. This method does
+// NOT consult the device/version crossover; the production selector
+// (q4kGEMMModeForPrompt) only reaches mode 2 after that pin admits it, so an unwitnessed
+// margin can never be requested here.
+func (g *ProjectionGraph) SetQ4KGEMMMode(mode Q4KGEMMMode) bool {
+	if g == nil || g.ptr == nil || g.finished || g.freed || g.encoders != 0 {
+		return false
+	}
+	var m C.int
+	switch mode {
+	case Q4KGEMMModeScalar:
+		m = 0
+	case Q4KGEMMModeM5CooperativeSMEM:
+		m = 2
+	default:
+		return false
+	}
+	return C.mg_graph_set_mm_mode(g.ptr, m) != 0
+}
+
+// Q4KGEMMMode reports the Q4_K projection candidate this graph will request (scalar by
+// default). It is the graph-side half of the typed requested/executed identity; the
+// executed half is the mg_execution_event identity returned by the weight calls.
+func (g *ProjectionGraph) Q4KGEMMMode() Q4KGEMMMode {
+	if g == nil || g.ptr == nil || g.finished || g.freed {
+		return Q4KGEMMModeScalar
+	}
+	switch intof := int(C.mg_graph_mm_mode(g.ptr)); intof {
+	case 2:
+		return Q4KGEMMModeM5CooperativeSMEM
+	default:
+		return Q4KGEMMModeScalar
+	}
 }
 func (g *ProjectionGraph) EncodeQ4K(w *Q4KWeight) (*GraphResult, error) {
 	if err := g.open(); err != nil {

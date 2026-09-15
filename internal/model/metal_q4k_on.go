@@ -61,6 +61,11 @@ var (
 	// matrix kernel (metalgemm.SetGEMMUseMM). Read lazily on first prefill weight-upload, not at
 	// package init, because it is a cgo call that needs the Metal device present.
 	q4kMMOnce sync.Once
+	// q4kM5Once guards the one-time FAK_Q4K_M5 read that opts the widened panel regime (P>=64) into
+	// the wide-tile cooperative-SMEM candidate (metalgemm.SetGEMMUseM5). It is likewise read lazily
+	// on first prefill weight-upload (a cgo call needing the device) and is additionally gated by
+	// metalgemm's device/version-pinned crossover table at encode time.
+	q4kM5Once sync.Once
 )
 
 type metalQ8ExactState struct {
@@ -1087,6 +1092,12 @@ func (m *Model) metalQ4KWeights() map[string]bool {
 	// proven path) until the MMA variant earns auto-enable. Set once per process — cheap and
 	// idempotent on the metalgemm side.
 	q4kMMOnce.Do(func() { metalgemm.SetGEMMUseMM(os.Getenv("FAK_Q4K_MM") == "1") })
+	// Opt into the wide-tile cooperative-SMEM candidate for the widened panel regime (P>=64,
+	// fak#13041) when FAK_Q4K_M5=1. This is only the process opt-in; metalgemm additionally gates
+	// every encode on the device/version-pinned crossover table, which stays empty until a
+	// sanctioned on-silicon >=1.10x receipt pins a row (fak#9937). So FAK_Q4K_M5=1 is inert (the
+	// scalar kernel is reported) rather than an unwitnessed promotion. Set once per process.
+	q4kM5Once.Do(func() { metalgemm.SetGEMMUseM5(os.Getenv("FAK_Q4K_M5") == "1") })
 	uploaded := map[string]bool{}
 	cfg := m.Cfg
 	for l := 0; l < cfg.NumLayers; l++ {

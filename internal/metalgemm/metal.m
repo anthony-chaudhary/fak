@@ -98,6 +98,25 @@ int mg_device_name(char *name, int namelen) {
     return 1;
 }
 
+// mg_os_version writes the host macOS product version (e.g. "26.6.2", as reported by
+// NSProcessInfo operatingSystemVersion) into name. It is the version half of the device/version
+// pin for the wide-tile crossover (q4k.go q4kM5CrossoverAt): the #9937 routing margin is only
+// valid on the exact OS the physical measurement was taken on. Returns 0 (and leaves name empty)
+// when the version is unavailable, so the crossover predicate fails closed and never encodes an
+// unpinned candidate.
+int mg_os_version(char *name, int namelen) {
+    if (name == NULL || namelen <= 0) return 0;
+    NSOperatingSystemVersion v = [[NSProcessInfo processInfo] operatingSystemVersion];
+    if (v.majorVersion <= 0) { name[0] = '\0'; return 0; }
+    if (v.patchVersion > 0) {
+        snprintf(name, (size_t)namelen, "%ld.%ld.%ld", (long)v.majorVersion, (long)v.minorVersion, (long)v.patchVersion);
+    } else {
+        snprintf(name, (size_t)namelen, "%ld.%ld", (long)v.majorVersion, (long)v.minorVersion);
+    }
+    name[namelen - 1] = '\0';
+    return 1;
+}
+
 int mg_device_memory_total(unsigned long long *total) {
     if (!mg_init() || total == NULL) return 0;
     if (![gDev respondsToSelector:@selector(recommendedMaxWorkingSetSize)]) return 0;

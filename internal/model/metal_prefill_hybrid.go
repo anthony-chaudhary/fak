@@ -755,6 +755,13 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequence(s *Session, i
 		return nil, Qwen35MetalForwardSequenceReceipt{}, true, err
 	}
 	defer g.Free()
+	// Route the graph's Q4_K projections through the process-selected candidate. The default is
+	// the scalar kernel; the widened panel regime (P>=64, #13041) requests the wide-tile
+	// cooperative-SMEM kernel only when the FAK_Q4K_M5 opt-in is on AND metalgemm's
+	// device/version-pinned crossover admits this box (an unwitnessed >=1.10x margin keeps the
+	// scalar identity). SetQ4KGEMMMode is fail-closed for an ineligible P or unavailable
+	// pipeline, so a false return simply leaves the graph on scalar; it never mutates state.
+	_ = g.SetQ4KGEMMMode(metalgemm.Q4KGEMMModeForPrompt(P))
 	if b.injectForwardPostSubmitFailure {
 		g.InjectPostSubmitFailureForTest()
 	}
