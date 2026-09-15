@@ -1,4 +1,4 @@
-package model
+package v41
 
 // v41_engram_quality.go — an INDEPENDENT quality gate for QUANTIZED Engram
 // n-gram tables (issue #12969, parent track #12640). The published
@@ -37,6 +37,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+
+	model "github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // V41EngramQualityNMSECeiling is the published block-level NMSE ceiling for a
@@ -111,29 +113,29 @@ func decodeV41EngramQuantRow(table V41EngramQuantTable, row int) ([]float32, err
 		return nil, fmt.Errorf("%w: quantized Engram row %d out of range [0,%d)",
 			ErrV41EngramQuality, row, table.RowCount)
 	}
-	wantWeights, ok := checkedShapeProduct(table.RowCount, table.RowWidth)
+	wantWeights, ok := model.CheckedShapeProduct(table.RowCount, table.RowWidth)
 	if !ok || len(table.Weight) != wantWeights {
 		return nil, fmt.Errorf("%w: quantized Engram weight has %d bytes, geometry %dx%d implies %d",
 			ErrV41EngramQuality, len(table.Weight), table.RowCount, table.RowWidth, wantWeights)
 	}
-	scaleRows := (table.RowCount-1)/v41FP8BlockDim + 1
-	scaleCols := (table.RowWidth-1)/v41FP8BlockDim + 1
-	wantScales, ok := checkedShapeProduct(scaleRows, scaleCols)
+	scaleRows := (table.RowCount-1)/model.V41FP8BlockDim + 1
+	scaleCols := (table.RowWidth-1)/model.V41FP8BlockDim + 1
+	wantScales, ok := model.CheckedShapeProduct(scaleRows, scaleCols)
 	if !ok || len(table.Scales) != wantScales {
 		return nil, fmt.Errorf("%w: quantized Engram scales have %d bytes, want %d for geometry %dx%d",
 			ErrV41EngramQuality, len(table.Scales), wantScales, table.RowCount, table.RowWidth)
 	}
 
-	scaleRow := (row / v41FP8BlockDim) * scaleCols
+	scaleRow := (row / model.V41FP8BlockDim) * scaleCols
 	out := make([]float32, table.RowWidth)
 	for col := 0; col < table.RowWidth; col++ {
-		scaleByte := table.Scales[scaleRow+col/v41FP8BlockDim]
+		scaleByte := table.Scales[scaleRow+col/model.V41FP8BlockDim]
 		if scaleByte == 0xff {
 			return nil, fmt.Errorf("%w: quantized Engram scale [%d,%d] is E8M0 NaN",
 				ErrV41EngramQuality, row, col)
 		}
 		raw := table.Weight[row*table.RowWidth+col]
-		decoded := fp8E4M3ToF32(raw)
+		decoded := model.FP8E4M3ToF32(raw)
 		if math.IsNaN(float64(decoded)) || math.IsInf(float64(decoded), 0) {
 			return nil, fmt.Errorf("%w: quantized Engram weight [%d,%d] is E4M3 NaN",
 				ErrV41EngramQuality, row, col)

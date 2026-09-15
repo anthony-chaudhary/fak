@@ -23,7 +23,7 @@
 // (MIT), cross-checked against PipeNetwork/deepseek-v41-mlx indexer.py:38-64,
 // 129-144 at a9567ae7196e596355b6fdaa7de7af4a2c92ba91 (Apache-2.0).
 
-package model
+package v41
 
 import (
 	"math"

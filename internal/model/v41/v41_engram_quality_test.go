@@ -1,10 +1,12 @@
-package model
+package v41
 
 import (
 	"encoding/json"
 	"errors"
 	"math"
 	"testing"
+
+	model "github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // v41_engram_quality_test.go — focused witness for the quantized-Engram quality
@@ -22,12 +24,12 @@ import (
 // element as encodeE4M3(v / 2^exp).
 func quantizeV41EngramRow(ref []float32) (weight []byte, scales []byte) {
 	width := len(ref)
-	scaleCols := (width-1)/v41FP8BlockDim + 1
+	scaleCols := (width-1)/model.V41FP8BlockDim + 1
 	scales = make([]byte, scaleCols)
 	weight = make([]byte, width)
 	for tile := 0; tile < scaleCols; tile++ {
-		lo := tile * v41FP8BlockDim
-		hi := lo + v41FP8BlockDim
+		lo := tile * model.V41FP8BlockDim
+		hi := lo + model.V41FP8BlockDim
 		if hi > width {
 			hi = width
 		}
@@ -60,8 +62,8 @@ func buildV41EngramQuantTable(ref [][]float32) V41EngramQuantTable {
 		return V41EngramQuantTable{}
 	}
 	width := len(ref[0])
-	scaleCols := (width-1)/v41FP8BlockDim + 1
-	scaleRows := (len(ref)-1)/v41FP8BlockDim + 1
+	scaleCols := (width-1)/model.V41FP8BlockDim + 1
+	scaleRows := (len(ref)-1)/model.V41FP8BlockDim + 1
 	table := V41EngramQuantTable{
 		RowCount: len(ref),
 		RowWidth: width,
@@ -71,7 +73,7 @@ func buildV41EngramQuantTable(ref [][]float32) V41EngramQuantTable {
 	for row := 0; row < len(ref); row++ {
 		w, s := quantizeV41EngramRow(ref[row])
 		copy(table.Weight[row*width:], w)
-		tileRow := (row / v41FP8BlockDim) * scaleCols
+		tileRow := (row / model.V41FP8BlockDim) * scaleCols
 		copy(table.Scales[tileRow:], s)
 	}
 	return table

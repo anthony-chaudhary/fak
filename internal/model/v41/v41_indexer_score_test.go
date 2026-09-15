@@ -23,7 +23,7 @@
 // (MIT). The reductions here are hand-transcribed per position and head; they
 // do not call the production helper.
 
-package model
+package v41
 
 import (
 	"math"

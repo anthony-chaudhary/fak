@@ -21,9 +21,13 @@
 // Adapted from deepseek-ai/DeepSeek-V4.1-Flash inference/model.py:488-580 at
 // dba1be0a40aa45a94ad051997016db3960a90277 (MIT).
 
-package model
+package v41
 
-import "fmt"
+import (
+	"fmt"
+
+	model "github.com/anthony-chaudhary/fak/internal/model"
+)
 
 // V41IndexerScore consumes already projected and RoPE-rotated index query
 // heads for a single query step together with the normalized index keys of the
@@ -55,17 +59,17 @@ func V41IndexerScore(q, keys, weights []float32, nHeads, headDim, compressLen in
 		return nil, fmt.Errorf("model: v41 indexer score key length %d, want %d", len(keys), compressLen*headDim)
 	}
 	for i, w := range weights {
-		if !finite32(w) {
+		if !model.Finite32(w) {
 			return nil, fmt.Errorf("model: v41 indexer score weight %d is non-finite", i)
 		}
 	}
 	for i, v := range q {
-		if !finite32(v) {
+		if !model.Finite32(v) {
 			return nil, fmt.Errorf("model: v41 indexer score query element %d is non-finite", i)
 		}
 	}
 	for i, v := range keys {
-		if !finite32(v) {
+		if !model.Finite32(v) {
 			return nil, fmt.Errorf("model: v41 indexer score key element %d is non-finite", i)
 		}
 	}

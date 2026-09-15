@@ -149,6 +149,10 @@ func finite32(v float32) bool {
 	return !float32IsNaN(v) && !float32IsInf(v)
 }
 
+// Finite32 exposes the package-internal finiteness check to the internal/model/v41
+// leaf package without renaming the lowercase symbol core callers use.
+func Finite32(v float32) bool { return finite32(v) }
+
 func float32IsNaN(v float32) bool { return v != v }
 func float32IsInf(v float32) bool {
 	return v > math.MaxFloat32 || v < -math.MaxFloat32

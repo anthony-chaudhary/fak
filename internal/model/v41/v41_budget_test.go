@@ -1,4 +1,4 @@
-package model
+package v41
 
 import (
 	"encoding/json"
@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	model "github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // TestV41Budget pins the published, measured checkpoint byte counts and the
@@ -154,7 +156,7 @@ func TestV41Budget(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var cfg Config
+		var cfg model.Config
 		if err := json.Unmarshal(raw, &cfg); err != nil {
 			t.Fatalf("parse pinned V4.1 config: %v", err)
 		}

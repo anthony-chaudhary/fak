@@ -1,4 +1,4 @@
-package model
+package v41
 
 import (
 	"reflect"

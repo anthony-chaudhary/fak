@@ -1,8 +1,10 @@
-package model
+package v41
 
 import (
 	"fmt"
 	"strings"
+
+	model "github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // V4.1 text prompt encoding is pinned to
@@ -16,7 +18,7 @@ import (
 // V4-Flash-0731 tokenization; that artifact is a separately-scoped control.
 
 // DeepSeekV41TokenizerRevision pins the tokenizer to the published artifact.
-const DeepSeekV41TokenizerRevision = DeepSeekV41FlashRevision
+const DeepSeekV41TokenizerRevision = model.DeepSeekV41FlashRevision
 
 // V4.1 reference special-token spellings. A vocabulary that does not contain
 // them fails admission rather than silently dropping them.

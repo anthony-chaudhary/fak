@@ -1,4 +1,4 @@
-package model
+package v41
 
 // This file adapts the token-group pooling state machine from
 // deepseek-ai/DeepSeek-V4.1-Flash, inference/model.py (Compressor), revision
@@ -28,6 +28,8 @@ package model
 import (
 	"fmt"
 	"math"
+
+	model "github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // v41CompressorPool owns the causal partial-group state for one sequence and
@@ -71,11 +73,11 @@ func (c *v41CompressorPool) pushNormalized(pos int, projectedKV, projectedScore,
 	if c == nil || len(normWeight) != c.width {
 		return nil, false, fmt.Errorf("model: V41 compressor norm width %d does not match %d", len(normWeight), compressorWidth(c))
 	}
-	if !finite32(eps) || eps <= 0 {
+	if !model.Finite32(eps) || eps <= 0 {
 		return nil, false, fmt.Errorf("model: V41 compressor norm epsilon must be finite and positive")
 	}
 	for i, weight := range normWeight {
-		if !finite32(weight) {
+		if !model.Finite32(weight) {
 			return nil, false, fmt.Errorf("model: V41 compressor norm weight[%d] is non-finite", i)
 		}
 	}
@@ -128,7 +130,7 @@ func (c *v41CompressorPool) push(pos int, projectedKV, projectedScore []float32)
 		return nil, false, fmt.Errorf("model: V41 compressor score width %d, want %d", len(projectedScore), c.width)
 	}
 	for i, value := range projectedKV {
-		if !finite32(value) {
+		if !model.Finite32(value) {
 			return nil, false, fmt.Errorf("model: V41 compressor KV[%d] is non-finite", i)
 		}
 	}
@@ -137,7 +139,7 @@ func (c *v41CompressorPool) push(pos int, projectedKV, projectedScore []float32)
 		return append([]float32(nil), projectedKV...), true, nil
 	}
 	for i, value := range projectedScore {
-		if !finite32(value) {
+		if !model.Finite32(value) {
 			return nil, false, fmt.Errorf("model: V41 compressor score[%d] is non-finite", i)
 		}
 	}
