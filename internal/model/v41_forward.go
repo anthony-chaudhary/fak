@@ -232,17 +232,36 @@ func (m *Model) v41EngramForwardAdmitted() error {
 // entry above index 0 and every index source ({2,8,...}) is unreachable. Executing
 // the real compressor/indexer stages is #13006's remaining integration work; until
 // then this is the fail-closed boundary.
+//
+// Two malformed-schedule arms are also refused here: a negative ratio (invalid
+// geometry, never a compressed layer) and a schedule shorter than the decoder
+// stack (an uncovered layer with no declared regime). Both must fail closed, not
+// fall through to the uncompressed regime.
 func v41CompressIndexForwardAdmitted(cfg Config) error {
 	m := cfg.DeepSeekV41
 	if m == nil {
 		return nil
 	}
-	for layer := 0; layer < cfg.NumLayers && layer < len(m.CompressRatios); layer++ {
+	// Every layer in the model's decoder stack must declare a regime. A schedule
+	// shorter than the stack leaves the uncovered layers with no declared
+	// compression regime, which must fail closed rather than being silently read as
+	// ratio 0.
+	if len(m.CompressRatios) < cfg.NumLayers {
+		return v41StageErr(v41StageCompress, len(m.CompressRatios),
+			fmt.Errorf("%w: compression schedule declares %d ratios but the model has %d layers", ErrV41ForwardStage, len(m.CompressRatios), cfg.NumLayers))
+	}
+	for layer := 0; layer < cfg.NumLayers; layer++ {
 		// Ratio 0 and 1 are the uncompressed regimes; a ratio > 1 declares a
-		// compressed layer the reduced forward does not execute.
-		if m.CompressRatios[layer] > 1 {
+		// compressed layer the reduced forward does not execute, and a negative
+		// ratio is malformed geometry that must also fail closed rather than being
+		// silently treated as uncompressed.
+		switch ratio := m.CompressRatios[layer]; {
+		case ratio > 1:
 			return v41StageErr(v41StageCompress, layer,
-				fmt.Errorf("%w: layer %d declares compressor ratio %d but the reduced forward does not execute the CED/CSA2 compressor stage", ErrV41ForwardStage, layer, m.CompressRatios[layer]))
+				fmt.Errorf("%w: layer %d declares compressor ratio %d but the reduced forward does not execute the CED/CSA2 compressor stage", ErrV41ForwardStage, layer, ratio))
+		case ratio < 0:
+			return v41StageErr(v41StageCompress, layer,
+				fmt.Errorf("%w: layer %d declares malformed compressor ratio %d", ErrV41ForwardStage, layer, ratio))
 		}
 	}
 	for _, layer := range m.IndexSourceLayerIDs {

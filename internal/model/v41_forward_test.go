@@ -471,6 +471,46 @@ func TestV41ForwardCompressIndexDeclaredFailsClosed(t *testing.T) {
 	}
 }
 
+// TestV41ForwardCompressRatioMalformedFailsClosed pins the malformed-ratio arm
+// of the compressor admission seam. v41CompressIndexForwardAdmitted must refuse
+// every declared ratio that is not one of the two uncompressed regimes (0 or 1):
+// a positive ratio > 1 declares a compressed layer the reduced forward does not
+// execute (witnessed above), and a NEGATIVE ratio is malformed geometry that must
+// also fail closed rather than being silently treated as an uncompressed layer.
+// Before this guard the > 1 arm alone admitted a negative ratio, so a config with
+// a corrupt compression schedule would run the generic per-layer attention
+// contraction over a model the published artifact never describes.
+func TestV41ForwardCompressRatioMalformedFailsClosed(t *testing.T) {
+	for _, ratio := range []int{-1, -2} {
+		malformed := v41ReducedModel(t)
+		malformed.Cfg.DeepSeekV41.CompressRatios = []int{ratio}
+		if err := malformed.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
+			t.Fatalf("negative compressor ratio %d admission error = %v, want ErrV41ForwardStage", ratio, err)
+		}
+		if err := panicAsError(func() { _ = malformed.Forward([]int{1, 2}) }); !errors.Is(err, ErrV41ForwardStage) {
+			t.Fatalf("negative compressor ratio %d Forward panic = %v, want ErrV41ForwardStage", ratio, err)
+		}
+	}
+
+	// A schedule shorter than the model's layer range leaves the uncovered layers
+	// with no declared regime; that omission must also fail closed rather than
+	// being silently read as ratio 0.
+	short := v41ReducedModel(t)
+	short.Cfg.DeepSeekV41.CompressRatios = nil
+	if err := short.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("short compressor schedule admission error = %v, want ErrV41ForwardStage", err)
+	}
+	// The uncompressed regimes (0 and 1) stay admitted so the reduced oracle
+	// fixture keeps running.
+	for _, ratio := range []int{0, 1} {
+		ok := v41ReducedModel(t)
+		ok.Cfg.DeepSeekV41.CompressRatios = []int{ratio}
+		if err := ok.v41ForwardAdmitted(); err != nil {
+			t.Fatalf("uncompressed ratio %d admission error = %v, want nil", ratio, err)
+		}
+	}
+}
+
 // TestV41ForwardKVSourceDeclaredFailsClosed is the shared-KV-source fail-closed
 // witness: the reduced assembly projects its own per-layer attn.wkv.weight and
 // never consumes a KV source layer's shared key/value state, so a config that
