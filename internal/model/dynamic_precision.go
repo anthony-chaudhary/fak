@@ -93,6 +93,91 @@ func (s *Session) runDynamic(tokens int, f32, q8 func() []float32) []float32 {
 	return logits
 }
 
+// ScheduledLevelFor is the checked per-point lookup a scheduled pass uses. With no schedule
+// attached it answers (LevelF32,false) — the same "no decision" a nil policy reports, so a
+// default-unset session never gains a precision path it did not ask for. When a schedule is
+// present and the session carries a receipt, the admitted/refused decision is recorded
+// there so the trace matches the pass rather than being reconstructed afterwards.
+func (s *Session) ScheduledLevelFor(p Point) (Level, bool) {
+	if s.PrecisionSchedule == nil {
+		return LevelF32, false
+	}
+	level, ok := s.PrecisionSchedule.LevelFor(p)
+	// A configured schedule with no receipt sink is a legitimate configuration (the
+	// caller wants the decision but not the trace), so the record is skipped rather
+	// than dereferencing a nil pointer.
+	if s.PrecisionReceipt == nil {
+		return level, ok
+	}
+	res := Resolved{Point: p, Level: level, Source: SourceExplicit}
+	if !ok {
+		res.Reason = scheduleReason(s.PrecisionSchedule, p)
+		if res.Reason == "" {
+			res.Reason = "model: schedule refused point"
+		}
+		s.PrecisionReceipt.Refuse(res)
+		return level, false
+	}
+	s.PrecisionReceipt.Record(res)
+	return level, true
+}
+
+// RunScheduledPass runs the pass named by `points` at the level the schedule decides for
+// each one: it consults the schedule per point, EXECUTES that point's arithmetic at the
+// decided level, and records EVERY decision (admitted or refused) into the receipt. It
+// returns the receipt plus the count of distinct admitted levels, so a caller can read
+// both what ran and how many levels it really spanned.
+//
+// run is the caller's forward closure for one point (already the point's own arithmetic),
+// so the schedule owns the POLICY and the caller owns the KERNEL. A refused point is
+// never executed and never quieted into a widest-level rerun: it is recorded as a refusal
+// and skipped, which is what keeps a refusal auditable instead of a silent widen.
+//
+// When the session carries no schedule the level is decided by the existing
+// DynamicPrecisionPolicy path (LevelF32/LevelQ8_0 as the policy settles), which is exactly
+// today's behavior; with neither a schedule nor a policy, every point runs at LevelF32.
+//
+// The returned receipt is ALWAYS complete, and is the session's own sink when one is
+// installed (so a caller reading s.PrecisionReceipt sees the same trace). When no sink is
+// installed the returned receipt is the only record, so every admitted decision is appended
+// to it directly — otherwise a caller that never set a sink would get DistinctLevels()==0
+// for a pass that genuinely spanned several levels, which would misreport the very thing
+// this receipt exists to report.
+func (s *Session) RunScheduledPass(points []Point, run func(p Point, level Level) []float32) (*LevelReceipt, int) {
+	receipt := s.PrecisionReceipt
+	ownReceipt := receipt == nil
+	if ownReceipt {
+		receipt = &LevelReceipt{}
+	}
+	for _, p := range points {
+		level, ok := s.ScheduledLevelFor(p)
+		if !ok {
+			// ScheduledLevelFor records the refusal when a sink is present; with no sink
+			// the returned receipt owns that record so the trace stays complete.
+			if ownReceipt {
+				res := Resolved{Point: p, Level: level, Source: SourceExplicit}
+				res.Reason = scheduleReason(s.PrecisionSchedule, p)
+				if res.Reason == "" {
+					res.Reason = "model: schedule refused point"
+				}
+				receipt.Refuse(res)
+			}
+			continue
+		}
+		// ScheduledLevelFor records the admitted decision only into the session's sink, so
+		// the returned receipt fills the gap when there is no sink.
+		if ownReceipt {
+			receipt.Record(Resolved{Point: p, Level: level, Source: SourceExplicit})
+		}
+		// Execute the point at its decided level. A nil run closure means the caller only
+		// wants the decision trace, so nothing is executed (and nothing is claimed to be).
+		if run != nil {
+			_ = run(p, level)
+		}
+	}
+	return receipt, receipt.DistinctLevels()
+}
+
 func (p *DynamicPrecisionPolicy) accepts(margin, prob float32) bool {
 	if p == nil {
 		return false
