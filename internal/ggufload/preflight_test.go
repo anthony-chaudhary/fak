@@ -334,6 +334,45 @@ func TestPreflightVulkanMixedQ4KCountsUnifiedAPUMemoryOnce(t *testing.T) {
 	}
 }
 
+func TestPreflightVulkanMixedQ4KSingleResidencyDropsHostCopy(t *testing.T) {
+	t.Setenv("FAK_GGUF_LOAD_WORKERS", "2")
+	ws := mixedVulkanWeightSource(t)
+	backend := dualCapacityBackend{
+		capBackend: capBackend{total: 8 << 30, free: 8 << 30, known: true},
+		hostTotal:  8 << 30, hostFree: 8 << 30, hostKnown: true,
+		name: "vulkan", tier: "integrated:strix-halo",
+	}
+	base := BuildModelPreflight(PreflightInput{Source: ws, Backend: backend, VulkanMixedQ4K: true})
+	released := BuildModelPreflight(PreflightInput{
+		Source: ws, Backend: backend, VulkanMixedQ4K: true, SingleResidencyQ4K: true,
+	})
+	if base.Verdict != PreflightReady || released.Verdict != PreflightReady {
+		t.Fatalf("base=%+v released=%+v, want READY", base, released)
+	}
+	// The one eligible resident Q4_K tensor (blk.0.ffn_up.weight, [256,256]) contributes its
+	// page-aligned host packed allocation to hostResident; single residency removes exactly that
+	// steady-state resident charge while leaving the device demand intact. (The discrete/knob-off
+	// fail-closed resolution lives at the caller, preflightInputFor — this estimator is pure in the
+	// already-resolved bool.)
+	removed := conservativeTestAllocation(256 * 256 / 256 * 144)
+	if got, want := base.EstHostResidentBytes-released.EstHostResidentBytes, removed; got != want {
+		t.Fatalf("host-resident reduction=%d, want the released Q4_K packed copy %d", got, want)
+	}
+	if base.EstDeviceResidentBytes != released.EstDeviceResidentBytes {
+		t.Fatalf("device residency changed: %d -> %d", base.EstDeviceResidentBytes, released.EstDeviceResidentBytes)
+	}
+	if base.EstLoadBytes <= released.EstLoadBytes {
+		t.Fatalf("load bytes did not drop: %d -> %d", base.EstLoadBytes, released.EstLoadBytes)
+	}
+	// A source with no eligible resident Q4_K (streamed) must be unaffected by the knob.
+	t.Setenv("FAK_GGUF_LOAD_WORKERS", "2")
+	streamBase := BuildModelPreflight(PreflightInput{Source: ws, Backend: backend, VulkanMixedQ4K: true, StreamedDenseQ4K: true})
+	streamKnob := BuildModelPreflight(PreflightInput{Source: ws, Backend: backend, VulkanMixedQ4K: true, StreamedDenseQ4K: true, SingleResidencyQ4K: true})
+	if streamKnob.EstHostResidentBytes != streamBase.EstHostResidentBytes || streamKnob.EstDeviceResidentBytes != streamBase.EstDeviceResidentBytes {
+		t.Fatalf("single residency altered a streamed plan: base=%+v knob=%+v", streamBase, streamKnob)
+	}
+}
+
 func TestPreflightVulkanMixedQ4KAccountsResidentQ2KEmbedding(t *testing.T) {
 	t.Setenv("FAK_GGUF_LOAD_WORKERS", "2")
 	ws := mixedVulkanQwen35WeightSource(t)
