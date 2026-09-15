@@ -3,7 +3,7 @@
   "adjudicator": "independent-openai-v2",
   "model": "gpt-5.6-sol",
   "prompt_version": "semantic-tool-need-v2",
-  "packet_sha256": "2889531f4cf83df09f9335a239af76a2539ffc116b70c36ac8af6438c4f274e6",
+  "packet_sha256": "c013636c7cc26a827acfe91ac5a68d62a68c1938b3929f553d46014bdb16ef65",
   "created_at": "2026-08-10T15:30:27Z",
   "judgments": [
     {
