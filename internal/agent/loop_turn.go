@@ -64,6 +64,17 @@ type armRunner struct {
 	envelopeMu              sync.Mutex
 	streamingFSM            *StreamingToolFSM
 	codeReads               *codeReadObservations
+	// The recoverable-infrastructure-reprompt budget (infra_reprompt.go): a positive
+	// repromptRemaining means a classified recoverable Complete failure may re-prompt
+	// instead of hard-stopping. Zero is the historical behavior (the loop never reprompts).
+	repromptRemaining int
+	lastInfraClass    infraClass
+	lastInfraReason   string
+	// lastInfraWrapped is the terminal-wrapped form of the last recoverable failure. It is
+	// what run returns once the budget is spent (or disabled), so the caller's existing %w
+	// context is preserved on the exhausted path exactly as it was on the historical
+	// hard-stop path.
+	lastInfraWrapped error
 }
 
 func (r *armRunner) emitEnvelope(eventType harnesskit.EventType, payload any) {
@@ -105,13 +116,60 @@ const (
 	armTurnDispatchTools armTurnAction = iota
 	armTurnContinue
 	armTurnStop
+	armTurnReprompt
 )
+
+// hardStop classifies a turn-loop infrastructure error and decides whether the arm may
+// re-prompt or must stop. A recoverable classification records the class/reason (and the
+// terminal-wrapped error) on the runner and returns armTurnReprompt, so runTurn hands it
+// to run: with budget remaining run re-prompts and swallows it; when the budget is spent
+// (or disabled) run surfaces r.lastInfraWrapped — the bounded anti-spin terminal, carrying
+// the caller's original %w wrapping exactly as the historical hard-stop did. A terminal
+// classification returns armTurnStop with terminalWrap(err). The reason carried forward is
+// always a CLOSED token (never err.Error()).
+func (r *armRunner) hardStop(err error, terminalWrap func(error) error) (armTurnAction, error) {
+	class, reason := classifyCompleteError(err)
+	wrapped := terminalWrap(err)
+	if class == infraReprompt {
+		r.lastInfraClass = infraReprompt
+		r.lastInfraReason = reason
+		r.lastInfraWrapped = wrapped
+		return armTurnReprompt, err
+	}
+	r.lastInfraClass = infraTerminal
+	r.lastInfraReason = ""
+	r.lastInfraWrapped = nil
+	return armTurnStop, wrapped
+}
 
 func (r *armRunner) run(ctx context.Context, maxTurns int) error {
 	for turn := 0; turn < maxTurns; turn++ {
 		stop, err := r.runTurn(ctx, turn)
-		if err != nil || stop {
+		// A recoverable infrastructure failure with budget left re-prompts instead of
+		// hard-stopping the arm: decrement the bound, publish the typed event, splice a
+		// closed-token continuation, and squash any speculation (it was never confirmed by
+		// an authoritative call). When the budget is spent the error is returned below —
+		// the loop can never spin on a persistent upstream failure.
+		if err != nil && r.lastInfraClass == infraReprompt && r.repromptRemaining > 0 {
+			r.repromptRemaining--
+			r.metrics.InfraReprompts++
+			r.cfg.emitProgress(ProgressEvent{Kind: ProgressInfraReprompt, Turn: turn + 1, Reason: r.lastInfraReason})
+			r.messages = append(r.messages, Message{Role: RoleUser, Content: infraContinuationText(r.lastInfraReason)})
+			r.speculation.resolve(ctx, nil, r.metrics)
+			r.lastInfraClass = infraTerminal
+			r.lastInfraWrapped = nil
+			continue
+		}
+		if err != nil {
+			// Budget spent or disabled: surface the recoverable failure with the caller's
+			// original %w wrapping intact (byte-for-byte the historical hard-stop error).
+			if r.lastInfraWrapped != nil {
+				return r.lastInfraWrapped
+			}
 			return err
+		}
+		if stop {
+			return nil
 		}
 	}
 	r.metrics.HitTurnCap = true
@@ -179,6 +237,14 @@ func (r *armRunner) runTurn(ctx context.Context, turn int) (bool, error) {
 	}
 
 	asst, action, err := r.requestModel(ctx, turn, perTurnCap)
+	if action == armTurnReprompt {
+		// A recoverable infrastructure failure: record an active checkpoint so the
+		// reprompt re-entry resumes from a witnessed boundary, and hand the error to run
+		// to consume the reprompt budget (or surface it when the budget is spent). No
+		// tool calls are dispatched on this turn.
+		r.saveCheckpoint(turn, "active")
+		return false, err
+	}
 	if err != nil {
 		return false, err
 	}
@@ -262,7 +328,10 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 	injected := append([]Message(nil), r.messages[beforeDirectives:]...)
 	inputClaim, err := r.cfg.claimTurnInputs(turn+1, injected)
 	if err != nil {
-		return Message{}, armTurnStop, fmt.Errorf("%s arm turn %d claim admitted input: %w", r.metrics.Arm, turn+1, err)
+		action, herr := r.hardStop(err, func(cause error) error {
+			return fmt.Errorf("%s arm turn %d claim admitted input: %w", r.metrics.Arm, turn+1, cause)
+		})
+		return Message{}, action, herr
 	}
 	releaseClaim := func(reason string, cause error) error {
 		if err := r.cfg.releaseInputClaim(inputClaim, reason); err != nil {
@@ -273,7 +342,10 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 	// Render exactly once because SessionPlanner.RenderTurn is stateful.
 	planned, err := r.cfg.promptMessages(ctx, r.messages)
 	if err != nil {
-		return Message{}, armTurnStop, fmt.Errorf("%s arm turn %d prompt assembly: %w", r.metrics.Arm, turn+1, releaseClaim("PROMPT_ASSEMBLY_FAILED", err))
+		action, herr := r.hardStop(err, func(cause error) error {
+			return fmt.Errorf("%s arm turn %d prompt assembly: %w", r.metrics.Arm, turn+1, releaseClaim("PROMPT_ASSEMBLY_FAILED", cause))
+		})
+		return Message{}, action, herr
 	}
 	if inputClaim.ID != "" && !claimedInputsSurviveAssembly(injected, planned) {
 		err := fmt.Errorf("prompt assembly dropped claimed input")
@@ -392,7 +464,10 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 		if terminated {
 			return Message{}, armTurnStop, nil
 		}
-		return Message{}, armTurnStop, fmt.Errorf("%s arm turn %d: %w", r.metrics.Arm, turn+1, err)
+		action, herr := r.hardStop(err, func(cause error) error {
+			return fmt.Errorf("%s arm turn %d: %w", r.metrics.Arm, turn+1, cause)
+		})
+		return Message{}, action, herr
 	}
 	r.metrics.Turns++
 	r.metrics.PromptTokens += comp.Usage.PromptTokens
@@ -401,7 +476,9 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 	asst := comp.Message
 	asst.Role = RoleAssistant
 	if comp.ToolCallsDropped && len(asst.ToolCalls) == 0 {
-		return Message{}, armTurnStop, fmt.Errorf("%s arm turn %d: upstream announced tool_calls but none parsed; refusing to skip adjudication", r.metrics.Arm, turn+1)
+		err := fmt.Errorf("%s arm turn %d: upstream announced tool_calls but none parsed; refusing to skip adjudication", r.metrics.Arm, turn+1)
+		action, herr := r.hardStop(err, func(cause error) error { return cause })
+		return Message{}, action, herr
 	}
 	r.messages = append(r.messages, asst)
 	if len(asst.ToolCalls) != 0 {

@@ -139,6 +139,10 @@ func TestInputClaimReleasedOnceWhenPromptAssemblyFails(t *testing.T) {
 	planner := &recordingPlanner{}
 	_, err := RunArm(context.Background(), planner, "failure", false, 1, nil,
 		WithSessionTable(nil, trace), WithInputClaimLifecycle(witness.lifecycle()),
+		// Pin the historical hard-stop: this test asserts the release-once invariant on a
+		// failed assembly, and the default infra-reprompt budget would otherwise re-prompt
+		// the recoverable-classified failure instead of surfacing it.
+		WithInfraRepromptBudget(-1),
 		WithPromptAssembler(func(context.Context, []Message) ([]Message, error) {
 			return nil, errors.New("assembly fixture failed")
 		}), WithModelRequestObserver(func(ModelRequestBoundary) error {
