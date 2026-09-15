@@ -16,10 +16,11 @@ const V41EngramPackedRowBytes = 264
 type V41EngramStreamErrorKind string
 
 const (
-	V41EngramStreamGeometry      V41EngramStreamErrorKind = "geometry"
-	V41EngramStreamOutOfBounds   V41EngramStreamErrorKind = "out_of_bounds"
-	V41EngramStreamShardMismatch V41EngramStreamErrorKind = "shard_mismatch"
-	V41EngramStreamShortRead     V41EngramStreamErrorKind = "short_read"
+	V41EngramStreamGeometry        V41EngramStreamErrorKind = "geometry"
+	V41EngramStreamOutOfBounds     V41EngramStreamErrorKind = "out_of_bounds"
+	V41EngramStreamShardMismatch   V41EngramStreamErrorKind = "shard_mismatch"
+	V41EngramStreamShortRead       V41EngramStreamErrorKind = "short_read"
+	V41EngramStreamBindingMismatch V41EngramStreamErrorKind = "binding_mismatch"
 )
 
 // V41EngramStreamError is returned for malformed geometry, invalid row ranges,
