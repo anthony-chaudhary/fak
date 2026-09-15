@@ -526,6 +526,9 @@ func (m *Model) v41ForwardAdmitted() error {
 	if err := v41HCMultForwardAdmitted(cfg); err != nil {
 		return err
 	}
+	if err := v41AttentionGeometryForwardAdmitted(cfg); err != nil {
+		return err
+	}
 	H, hd, nH := cfg.HiddenSize, cfg.HeadDim, cfg.NumHeads
 	qHeadDim := nH * hd
 	oDim := cfg.OLoraRank * cfg.OGroups

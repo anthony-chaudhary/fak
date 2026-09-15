@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"math"
 	"testing"
 )
@@ -269,6 +270,65 @@ func TestV41AttentionStateResetClearsOwnership(t *testing.T) {
 	// A reset state accepts a fresh prefill of the same geometry.
 	if err := s.Prefill(chunk, nil); err != nil {
 		t.Fatalf("post-reset prefill: %v", err)
+	}
+}
+
+// TestV41AttentionGeometryDriftFailsClosed is the #12890 fail-closed witness for
+// the retained Attention envelope. The official 40-layer fixture already pins
+// Attention == the published envelope (admitDeepSeekV41Published). The reduced
+// forward fixture narrows ONLY the flat Config and deliberately leaves Attention
+// holding that published envelope whole, so an exact-envelope retention must stay
+// admitted (no regression). A config whose Attention is neither empty nor the
+// published envelope is lone-axis drift: the assembly would run the flat geometry
+// while a reader trusts the inconsistent envelope, so it must refuse with the
+// typed ErrV41ForwardStage rather than emit logits.
+func TestV41AttentionGeometryDriftFailsClosed(t *testing.T) {
+	// The official fixture retains the published envelope and is admitted.
+	official := v41ReducedModel(t)
+	if got := official.Cfg.DeepSeekV41.Attention; got != v41PublishedAttentionGeometry {
+		t.Fatalf("official Attention=%+v want published envelope", got)
+	}
+	if err := official.v41ForwardAdmitted(); err != nil {
+		t.Fatalf("official admission error = %v, want nil", err)
+	}
+
+	// The reduced fixture narrows the flat geometry but retains the published
+	// envelope whole; that exact-envelope retention is legitimate and admitted.
+	reduced := v41ReducedModel(t)
+	if reduced.Cfg.NumLayers == 40 || reduced.Cfg.HiddenSize == 5120 {
+		t.Fatalf("reduced fixture did not narrow the flat geometry: layers=%d hidden=%d", reduced.Cfg.NumLayers, reduced.Cfg.HiddenSize)
+	}
+	if err := reduced.v41ForwardAdmitted(); err != nil {
+		t.Fatalf("reduced exact-envelope admission error = %v, want nil", err)
+	}
+
+	// Lone-axis drift: a single axis moved off the published envelope while the
+	// rest stay official. This is the malformed envelope a hand-built Config (or a
+	// stale cache) can carry, and the forward must fail closed.
+	for _, tc := range []struct {
+		name   string
+		mutate func(*DeepSeekV41AttentionGeometry)
+	}{
+		{"hidden size", func(a *DeepSeekV41AttentionGeometry) { a.HiddenSize = 2560 }},
+		{"head dim", func(a *DeepSeekV41AttentionGeometry) { a.HeadDim = 256 }},
+		{"num layers", func(a *DeepSeekV41AttentionGeometry) { a.NumLayers = 39 }},
+		{"o groups", func(a *DeepSeekV41AttentionGeometry) { a.OGroups = 7 }},
+		{"q lora rank", func(a *DeepSeekV41AttentionGeometry) { a.QLoraRank = 1281 }},
+		{"num heads", func(a *DeepSeekV41AttentionGeometry) { a.NumHeads = 63 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := v41ReducedModel(t)
+			tc.mutate(&m.Cfg.DeepSeekV41.Attention)
+			if err := m.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
+				t.Fatalf("drifting Attention admission error = %v, want ErrV41ForwardStage", err)
+			}
+			if errors.Is(m.v41ForwardAdmitted(), ErrV41NativeUnsupported) {
+				t.Fatal("drifting Attention incorrectly reported ErrV41NativeUnsupported")
+			}
+			if err := panicAsError(func() { _ = m.Forward([]int{1, 2}) }); !errors.Is(err, ErrV41ForwardStage) {
+				t.Fatalf("drifting Attention Forward panic = %v, want ErrV41ForwardStage", err)
+			}
+		})
 	}
 }
 

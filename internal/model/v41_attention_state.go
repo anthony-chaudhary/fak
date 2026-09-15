@@ -39,6 +39,58 @@ import "fmt"
 // default (inference/model.py:79). Window KV lives in a ring of this many rows.
 const v41WindowSize = 128
 
+// v41PublishedAttentionGeometry is the published DeepSeek-V4.1-Flash decoder
+// attention envelope, transcribed from the pinned testdata config
+// (deepseek_v41_flash_config.json @ dba1be0a; inference/model.py ModelArgs). It
+// is the whole-envelope value admitDeepSeekV41Published requires
+// DeepSeekV41Config.Attention to hold on parse. The reduced forward fixture
+// narrows only the flat Config and deliberately retains this envelope whole, so
+// the forward's drift guard must distinguish exact retention from lone-axis drift
+// rather than comparing Attention against the narrowed flat axes.
+var v41PublishedAttentionGeometry = DeepSeekV41AttentionGeometry{
+	NumLayers:           40,
+	HiddenSize:          5120,
+	NumHeads:            64,
+	NumKVHeads:          1,
+	HeadDim:             512,
+	QKRopeHeadDim:       64,
+	QLoraRank:           1280,
+	OLoraRank:           1024,
+	OGroups:             8,
+	NumExperts:          384,
+	NSharedExperts:      1,
+	NumExpertsPerTok:    6,
+	MoEIntermediateSize: 2304,
+}
+
+// v41AttentionGeometryForwardAdmitted fails closed when a V4.1 config's retained
+// Attention envelope is neither empty nor the published one. Attention is a
+// metadata envelope a later native leaf trusts instead of re-reading the flat
+// Config, so an envelope that is populated but does not match the published axes
+// is lone-axis drift: the assembly would execute the flat geometry while a reader
+// trusts a disagreeing envelope. That must refuse with the typed
+// ErrV41ForwardStage rather than emit logits.
+//
+// A zero envelope stays admitted: it is the legitimate "no typed metadata
+// retained" state for hand-built fixtures, and the forward already reads the flat
+// axes directly. An envelope equal to the published one also stays admitted: the
+// reduced fixture narrows the flat geometry but retains the published envelope
+// whole, so exact-envelope retention is not drift.
+func v41AttentionGeometryForwardAdmitted(cfg Config) error {
+	m := cfg.DeepSeekV41
+	if m == nil {
+		return nil
+	}
+	if m.Attention == (DeepSeekV41AttentionGeometry{}) {
+		return nil
+	}
+	if m.Attention != v41PublishedAttentionGeometry {
+		return v41StageErr(v41StageAttention, -1,
+			fmt.Errorf("%w: retained Attention envelope %+v does not match the published V4.1 decoder attention axes", ErrV41ForwardStage, m.Attention))
+	}
+	return nil
+}
+
 // V41AttentionStateRef identifies one layer in the sequential stack. LayerID
 // is zero-based as in the pinned source. Ratio is that layer's compress ratio;
 // ratio 0 disables compressed state for the layer. IsKVSource and IsIndexSource
