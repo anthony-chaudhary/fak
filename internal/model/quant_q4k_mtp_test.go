@@ -21,6 +21,12 @@ func TestAddCanonicalMTPQ4KIsNarrowAndFailClosed(t *testing.T) {
 	qShape := []int{512, 256}
 	qRaw := make([]byte, 512*q4kBlockBytes)
 	b := NewQuantBuilder(cfg, false)
+	// This test exercises the narrow canonical store path, so it must opt into MTP
+	// retention explicitly; without an option the builder inherits the global
+	// RetainMTP default (#12838), which drops the head.
+	if err := b.SetMTPRetention(true); err != nil {
+		t.Fatalf("SetMTPRetention: %v", err)
+	}
 	if err := b.AddCanonicalMTPQ4K(qName, qShape, qRaw); err != nil {
 		t.Fatalf("AddCanonicalMTPQ4K(q): %v", err)
 	}

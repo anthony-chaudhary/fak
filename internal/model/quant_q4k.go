@@ -929,7 +929,7 @@ func (b *QuantBuilder) AddCanonicalMTPQ4K(canon string, shape []int, raw []byte)
 	if _, exists := b.m.manifest[canon]; exists {
 		return fmt.Errorf("model: canonical MTP Q4_K tensor %s already has a decoded representation", canon)
 	}
-	if b.retainMTP != nil && !*b.retainMTP {
+	if !b.mtpRetention() {
 		return nil
 	}
 	if b.m.q4kw == nil {
@@ -988,7 +988,7 @@ func (b *QuantBuilder) AddCanonicalMTPFCQ8(canon string, shape []int, raw []byte
 	if _, exists := b.m.manifest[canon]; exists {
 		return fmt.Errorf("model: canonical MTP FC Q8_0 tensor %s already has a decoded representation", canon)
 	}
-	if b.retainMTP != nil && !*b.retainMTP {
+	if !b.mtpRetention() {
 		return nil
 	}
 	qt := newQ8Tensor(shape[0], shape[1], shape[1]/kindQ8_0.blockWeights())
