@@ -73,10 +73,12 @@ type FusedExpertShard struct {
 // ok=false for one it has no staging for. This is deliberately NARROWER than
 // residentExpertBlockGeometry: that predicate answers "can these raw bytes be held resident", this
 // one answers "can one expert's raw bytes be uploaded straight into the ring", and the second set
-// is the three k-quants compute.NewQ4K/NewQ5K/NewQ6K accept. Widening it is a matter of teaching
+// is the k-quants compute.NewQ2K/NewQ4K/NewQ5K/NewQ6K accept. Widening it is a matter of teaching
 // model.ExpertCheckpointQuant the extra kinds, not of relaxing anything here.
 func checkpointExpertQuant(t TensorType) (model.ExpertCheckpointQuant, bool) {
 	switch t {
+	case TensorQ2_K:
+		return model.ExpertCheckpointQ2K, true
 	case TensorQ4_K:
 		return model.ExpertCheckpointQ4K, true
 	case TensorQ5_K:

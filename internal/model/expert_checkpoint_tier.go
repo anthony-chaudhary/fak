@@ -76,6 +76,7 @@ import (
 // ExpertCheckpointQuant is the quantized representation a fused routed-expert slab is stored in.
 // Only the k-quant forms the routed-expert weight HAL can stage resident are admitted: a tier that
 // accepted a representation expertSwiGLUHAL cannot serve would fault bytes nothing could then use.
+// Q2_K joined the admitted set for the DeepSeek-V4.1 Flash Q2_K routed-expert slate (fak#13121).
 type ExpertCheckpointQuant int
 
 const (
@@ -86,6 +87,10 @@ const (
 	// uses for the projections it keeps at higher precision.
 	ExpertCheckpointQ5K
 	ExpertCheckpointQ6K
+	// ExpertCheckpointQ2K is the Q2_K super-block form, the narrowest k-quant a routed-expert slate
+	// is published in. It is appended AFTER Q6K so the existing constant values never shift; the
+	// DeepSeek-V4.1 Flash Q2_K arm is its first producer.
+	ExpertCheckpointQ2K
 )
 
 // String names the representation for a report or an error.
@@ -95,6 +100,8 @@ func (q ExpertCheckpointQuant) String() string {
 		return "Q5_K"
 	case ExpertCheckpointQ6K:
 		return "Q6_K"
+	case ExpertCheckpointQ2K:
+		return "Q2_K"
 	case ExpertCheckpointQ4K:
 		return "Q4_K"
 	}
@@ -112,6 +119,8 @@ func (q ExpertCheckpointQuant) blockGeometry() (weights, bytes int, ok bool) {
 		return qkK, kindQ5K.blockBytes(), true
 	case ExpertCheckpointQ6K:
 		return qkK, kindQ6K.blockBytes(), true
+	case ExpertCheckpointQ2K:
+		return qkK, q2kBlockBytes, true
 	}
 	return 0, 0, false
 }
@@ -168,6 +177,8 @@ func (e expertCheckpointEntry) dtype() compute.Dtype {
 		return compute.Q5_K
 	case ExpertCheckpointQ6K:
 		return compute.Q6_K
+	case ExpertCheckpointQ2K:
+		return compute.Q2_K
 	default:
 		return compute.Q4_K
 	}
@@ -183,6 +194,8 @@ func (e expertCheckpointEntry) weight(name string, raw []byte) expertWeight {
 		return expertWeight{name: name, kq: &kQuantTensor{out: e.rows, in: e.cols, nblk: e.nblk, kind: kindQ5K, raw: raw}}
 	case ExpertCheckpointQ6K:
 		return expertWeight{name: name, kq: &kQuantTensor{out: e.rows, in: e.cols, nblk: e.nblk, kind: kindQ6K, raw: raw}}
+	case ExpertCheckpointQ2K:
+		return expertWeight{name: name, kq: &kQuantTensor{out: e.rows, in: e.cols, nblk: e.nblk, kind: kindQ2K, raw: raw}}
 	default:
 		return expertWeight{name: name, q4: &q4kTensor{out: e.rows, in: e.cols, nblk: e.nblk, raw: raw}}
 	}
@@ -358,6 +371,9 @@ func (t *ExpertCheckpointTier) staging(name string) (*checkpointStaging, bool) {
 			}
 			if w.kq.kind == kindQ6K {
 				return compute.NewQ6K(compute.Default(), []int{w.kq.out, w.kq.in}, w.kq.raw)
+			}
+			if w.kq.kind == kindQ2K {
+				return compute.NewQ2K(compute.Default(), []int{w.kq.out, w.kq.in}, w.kq.raw)
 			}
 			return compute.NewQ5K(compute.Default(), []int{w.kq.out, w.kq.in}, w.kq.raw)
 		},
