@@ -706,8 +706,13 @@ func fitServeStreamedCPUOffloadPathOnHost(ggufPath string, ranks, contextBudgetT
 // tier can stage the slabs, judge the DEVICE side against the streamed plan (whose host-scoped
 // demand is the bounded resident set) and return that plan. Otherwise it falls back to the resident
 // plan unchanged, so a fitting artifact keeps the historical arm.
-func fitServeStreamedCPUOffloadPathOnDevice(ggufPath string, be compute.Backend, ranks, contextBudgetTokens int, override *serveFitBudget) (compute.MemoryPlan, bool, error) {
-	fit := serveHostFitBudget()
+//
+// hostFit is the SAME host-fit snapshot serveStreamedCPUOffloadPathDecision used to SELECT this
+// arm (the load path's one measurement), threaded in rather than re-probed, so the streamed
+// decision and the sizing plan cannot disagree about what is host-resident. override remains the
+// DEVICE fit override: device admission stays serveDeviceFitBudgetFromReported(be, override).
+func fitServeStreamedCPUOffloadPathOnDevice(ggufPath string, be compute.Backend, ranks, contextBudgetTokens int, hostFit serveFitBudget, override *serveFitBudget) (compute.MemoryPlan, bool, error) {
+	fit := hostFit
 	ws, err := ggufload.OpenWeights(ggufPath)
 	if err != nil {
 		return nil, false, err

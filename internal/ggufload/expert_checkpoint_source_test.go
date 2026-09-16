@@ -270,6 +270,203 @@ func TestFusedExpertDescriptorsDeclineWhatTheTierCannotServe(t *testing.T) {
 	})
 }
 
+// TestExpertCheckpointSourceDescribesQ2KSlab is the Q2_K admission witness (issue #13122). The
+// checkpoint tier is the only path that serves the published DeepSeek-V4.1 Q2_K artifact's routed
+// experts without materializing the slab, and it can only do that if FusedExpertTensors DESCRIBES
+// the Q2_K blocks at all: before checkpointExpertQuant admitted Q2_K, this call returned zero shard
+// groups for a Q2_K checkpoint (the rung silently declined it), so a Q2_K caller kept the eager
+// materialization the rung exists to avoid. The descriptor must also agree with the tier's own
+// regime — Q2_K is a stageable quant with the same 256-weight super-block geometry as the other
+// k-quants, so every fused slab that can be described must be describable here, cold.
+func TestExpertCheckpointSourceDescribesQ2KSlab(t *testing.T) {
+	path, E := glmMoeDsaCheckpointFixture(t, TensorQ2_K)
+
+	ws, err := OpenWeights(path)
+	if err != nil {
+		t.Fatalf("OpenWeights: %v", err)
+	}
+	defer ws.Close()
+
+	shards, err := ws.FusedExpertTensors()
+	if err != nil {
+		t.Fatalf("FusedExpertTensors: %v", err)
+	}
+	if len(shards) != 1 {
+		t.Fatalf("a Q2_K checkpoint described %d shard groups, want 1; before Q2_K admission this was 0",
+			len(shards))
+	}
+	if got := len(shards[0].Fused); got != 3 {
+		t.Fatalf("described %d fused Q2_K slabs, want 3 (gate/up/down for the one MoE layer)", got)
+	}
+	for _, d := range shards[0].Fused {
+		if d.Quant != model.ExpertCheckpointQ2K {
+			t.Fatalf("slab %s described as %s staging, want Q2_K", d.Name, d.Quant)
+		}
+		if d.Experts != E {
+			t.Fatalf("slab %s describes %d experts, want %d", d.Name, d.Experts, E)
+		}
+		if d.Offset <= 0 {
+			t.Fatalf("slab %s has file offset %d; the descriptor must locate the payload absolutely",
+				d.Name, d.Offset)
+		}
+	}
+
+	// And a tier built over those Q2_K descriptors indexes every expert while staying cold: it must
+	// not read the slab to describe it, or the rung has merely renamed the eager materialization.
+	tier, err := ws.ExpertCheckpointTier(0)
+	if err != nil {
+		t.Fatalf("ExpertCheckpointTier: %v", err)
+	}
+	if tier == nil {
+		t.Fatal("no tier over a checkpoint whose Q2_K experts are all describable")
+	}
+	if st := tier.Stats(); st.Tensors != E*3 || st.Reads != 0 {
+		t.Fatalf("Q2_K tier indexed %d experts with %d reads, want %d and 0", st.Tensors, st.Reads, E*3)
+	}
+}
+
+// TestExpertCheckpointSourceQ2KFaultMatchesTheEagerSlabSlice is the Q2_K arithmetic witness on this
+// side of the seam. A descriptor is offset + e*stride with no checksum behind it, and a Q2_K slab
+// makes that arithmetic Q2_K-specific: the stride is Rows*Cols/256 super-blocks at 72 bytes each
+// (blockQ2KBytes), a geometry the other k-quants do not share. A descriptor that used Q4_K's 144-byte
+// block here would not fail at index time — it would fault a misaligned block into the decode path
+// and return plausible garbage. So the bytes the descriptor points at are checked against the bytes
+// the SHIPPED eager splitter made resident for the same expert: if the Q2_K geometry is wrong, this
+// is a byte diff instead of a silent misdecode. The stride is also pinned to the resident length so
+// the descriptor and the resident store cannot disagree about how much an expert is.
+func TestExpertCheckpointSourceQ2KFaultMatchesTheEagerSlabSlice(t *testing.T) {
+	path, E := glmMoeDsaCheckpointFixture(t, TensorQ2_K)
+
+	// The eager arm: the shipped raw split materializes every routed Q2_K expert into the resident
+	// k-quant store, and those bytes are the parity reference.
+	eager, err := LoadModelQ4KProfile(path, nil)
+	if err != nil {
+		t.Fatalf("eager load: %v", err)
+	}
+	if got := eager.KQuantCount(); got != E*3 {
+		t.Fatalf("eager load made %d Q2_K experts resident, want %d; the comparison arm is wrong", got, E*3)
+	}
+
+	ws, err := OpenWeights(path)
+	if err != nil {
+		t.Fatalf("OpenWeights: %v", err)
+	}
+	defer ws.Close()
+	shards, err := ws.FusedExpertTensors()
+	if err != nil {
+		t.Fatalf("FusedExpertTensors: %v", err)
+	}
+	if len(shards) != 1 || len(shards[0].Fused) != 3 {
+		t.Fatalf("Q2_K checkpoint described %d shard groups / %d slabs, want 1 / 3",
+			len(shards), fusedCount(shards))
+	}
+
+	// Locate the gate_proj descriptor (the fixture's three slabs are gate/up/down for one layer) and
+	// read its LAST expert's stride bytes straight off disk. Reading the last expert proves the
+	// offset advances by exactly one stride per expert, which a first-expert-only check would miss.
+	var gate model.FusedExpertTensor
+	found := false
+	for _, d := range shards[0].Fused {
+		if d.Proj == "gate_proj" {
+			gate, found = d, true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("the Q2_K checkpoint described no gate_proj slab")
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	// blockQ2KBytes is the ggufload-side Q2_K super-block width (72 B); qkK is the 256-weight
+	// super-block. Deriving the stride from those two names — not a literal — is what ties this test
+	// to the SAME geometry the loader uses, so a future block-size change moves both together.
+	stride := int64(gate.Rows*gate.Cols/qkK) * int64(blockQ2KBytes)
+	e := E - 1
+	canon := fmt.Sprintf("model.layers.%d.mlp.experts.%d.%s.weight", gate.Layer, e, gate.Proj)
+	want, ok := eager.KQuantRaw(canon)
+	if !ok {
+		t.Fatalf("the eager load has no resident %s to compare against", canon)
+	}
+	if stride != int64(len(want)) {
+		t.Fatalf("%s: descriptor stride %d disagrees with the resident %d bytes; the Q2_K block "+
+			"geometry is wrong", canon, stride, len(want))
+	}
+	if len(want) == 0 {
+		t.Fatalf("%s: the eager split made an empty expert resident", canon)
+	}
+	got := make([]byte, stride)
+	if _, err := f.ReadAt(got, gate.Offset+int64(e)*stride); err != nil {
+		t.Fatalf("%s: read at descriptor offset %d: %v", canon, gate.Offset+int64(e)*stride, err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("%s: the bytes at the Q2_K descriptor's offset+stride are not the bytes the eager "+
+			"split made resident; a fault here would feed the GEMM misaligned Q2_K blocks", canon)
+	}
+
+	// The tier built over the same descriptors is cold and fully indexed; the byte comparison above
+	// is the parity witness on this side (the model package owns the fault itself).
+	tier, err := ws.ExpertCheckpointTier(0)
+	if err != nil {
+		t.Fatalf("ExpertCheckpointTier: %v", err)
+	}
+	if tier == nil {
+		t.Fatal("no tier over a Q2_K checkpoint whose experts are describable")
+	}
+	if st := tier.Stats(); st.Tensors != E*3 {
+		t.Fatalf("Q2_K tier indexed %d experts, want %d", st.Tensors, E*3)
+	}
+}
+
+// TestExpertCheckpointSourceDeclinesQ3K is the settlement witness for the encoding the tier cannot
+// serve. Q3_K is residentable raw (residentExpertBlockGeometry returns 32-byte/110-byte blocks) but
+// internal/compute has NO Q3_K dtype and no constructor for it, so the tier's staging could not
+// build a compute tensor from a Q3_K expert — a descriptor would be promised and then fail at
+// decode. checkpointExpertQuant must therefore DECLINE Q3_K so the eager path is preserved unchanged
+// rather than half-admitted: a missing descriptor costs host RAM, a wrong one costs correctness.
+func TestExpertCheckpointSourceDeclinesQ3K(t *testing.T) {
+	path, E := glmMoeDsaCheckpointFixture(t, TensorQ3_K)
+
+	ws, err := OpenWeights(path)
+	if err != nil {
+		t.Fatalf("OpenWeights: %v", err)
+	}
+	defer ws.Close()
+	shards, err := ws.FusedExpertTensors()
+	if err != nil {
+		t.Fatalf("FusedExpertTensors: %v", err)
+	}
+	if len(shards) != 0 {
+		t.Fatalf("described %d shard groups of Q3_K experts; the tier cannot stage that encoding",
+			len(shards))
+	}
+
+	// The decline is inert: Q3_K still takes the unchanged eager raw-resident path, so every routed
+	// expert stays in the resident k-quant store exactly as before the Q2_K admission landed.
+	m, err := LoadModelQ4KProfile(path, nil)
+	if err != nil {
+		t.Fatalf("eager load: %v", err)
+	}
+	if got := m.KQuantCount(); got != E*3 {
+		t.Fatalf("Q3_K experts resident = %d, want %d; declining a descriptor must change nothing",
+			got, E*3)
+	}
+}
+
+// fusedCount totals the fused slabs across shard groups, for a diagnostic that names the shape it
+// actually saw rather than only the group count.
+func fusedCount(shards []FusedExpertShard) int {
+	n := 0
+	for _, sh := range shards {
+		n += len(sh.Fused)
+	}
+	return n
+}
+
 // TestStreamedExpertsLoadLeavesTheSlabOnDisk is the end-to-end shape of the rung on the loader:
 // WithStreamedExperts must produce a model that carries NO routed expert in host RAM and reaches
 // all of them through the tier. Both halves matter — a load that attached a tier AND materialized

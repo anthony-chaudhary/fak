@@ -299,10 +299,20 @@ func TestSubagentFanoutLlamaCPPArm(t *testing.T) {
 	}
 
 	// 4. A LIVE cell against an OpenAI-compatible streaming endpoint yields a
-	//    well-formed result labeled llamacpp.
+	//    well-formed result labeled llamacpp. The fixture must also serve /props
+	//    with an adequate per-slot context, because the harness now fails a cell
+	//    closed unless the reference provably serves the frozen geometry
+	//    (issue #13134).
 	var hits int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/completions" {
+		switch r.URL.Path {
+		case "/props":
+			// Per-slot n_ctx must cover P+S+D = 64+16+4 = 84; serve 4096.
+			fmt.Fprint(w, `{"total_slots":8,"default_generation_settings":{"n_ctx":4096}}`)
+			return
+		case "/v1/completions":
+			// handled below
+		default:
 			http.NotFound(w, r)
 			return
 		}
@@ -376,6 +386,13 @@ func TestSubagentFanoutLlamaCPPArm(t *testing.T) {
 	if res.ReusedTokens <= 0 || res.PrefixHitRate <= 0 {
 		t.Errorf("expected positive reuse accounting at N=2, got reused=%d rate=%f", res.ReusedTokens, res.PrefixHitRate)
 	}
+	// The live cell must carry the serve-completeness witness and be admitted.
+	if res.ServeCompleteness == nil {
+		t.Fatal("live cell must carry ServeCompleteness")
+	}
+	if !res.ServeCompleteness.ControlArmServed {
+		t.Errorf("adequately sized reference must be admitted as a control: %+v", res.ServeCompleteness)
+	}
 
 	// 5. Contract validation still requires the frozen 4; llamacpp alone is
 	//    not compliant, which proves CanonicalArms did not absorb it.
@@ -387,5 +404,257 @@ func TestSubagentFanoutLlamaCPPArm(t *testing.T) {
 		Arms:           []string{ArmLLamaCPP},
 	}); val.Compliant {
 		t.Error("llamacpp alone must not satisfy the 4-arm contract")
+	}
+}
+
+// fanoutPropsServer stands up a server-free llama-server-shaped endpoint that
+// answers /props with a fixed per-slot n_ctx (the served capacity) and
+// /v1/completions with a small SSE stream. It is the whole reference surface the
+// harness touches, so a cell can be driven entirely in-process.
+func fanoutPropsServer(t *testing.T, perSlotCtx, totalSlots int, completionsHits *int64) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/props":
+			// Mirrors the live shape: per-slot n_ctx == -c/--parallel, plus total_slots.
+			fmt.Fprintf(w, `{"total_slots":%d,"default_generation_settings":{"n_ctx":%d}}`, totalSlots, perSlotCtx)
+		case "/v1/completions":
+			if completionsHits != nil {
+				atomic.AddInt64(completionsHits, 1)
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			flusher, _ := w.(http.Flusher)
+			for i := 0; i < 4; i++ {
+				fmt.Fprint(w, "data: {\"choices\":[{\"text\":\"tok\"}]}\n\n")
+				if flusher != nil {
+					flusher.Flush()
+				}
+			}
+			fmt.Fprint(w, "data: [DONE]\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestSubagentFanoutServeGeometryShortfallFailsClosed is the issue #13134
+// witness: a reference server whose per-slot context cannot hold the frozen
+// P+S+D geometry must fail the cell CLOSED with a structured reason naming the
+// observed limit, and must never be counted as a measured/compared arm.
+func TestSubagentFanoutServeGeometryShortfallFailsClosed(t *testing.T) {
+	// Served per-slot capacity 128 < P+S+D = 256+64+16 = 336, so the reference
+	// cannot hold even one frozen prompt and the cell must fail closed.
+	var completionsHits int64
+	srv := fanoutPropsServer(t, 128, 4, &completionsHits)
+
+	h := NewFanoutBenchmarkHarness(&FanoutBenchConfig{
+		Model:          "Qwen/Qwen2.5-Coder-7B-Instruct",
+		Quantization:   "Q4_K_M",
+		MemoryFraction: FixedMemoryFraction,
+		FanoutSweep:    []int{2},
+		Arms:           []string{ArmLLamaCPP},
+		PrefixTokens:   256,
+		SuffixTokens:   64,
+		DecodeTokens:   16,
+		Trials:         1,
+		Live:           true,
+		Endpoints:      map[string]string{ArmLLamaCPP: srv.URL},
+		Seed:           42,
+	})
+	receipt, err := h.Run(context.Background())
+	if err != nil {
+		t.Fatalf("harness run returned a top-level error (cells must fail, not the run): %v", err)
+	}
+	if len(receipt.Results) != 1 {
+		t.Fatalf("got %d results, want 1", len(receipt.Results))
+	}
+	res := receipt.Results[0]
+
+	// The cell failed closed.
+	if res.Error == "" {
+		t.Fatal("under-capacity reference must produce a failed cell, got none")
+	}
+	if res.ServeCompleteness == nil {
+		t.Fatal("failed cell must carry a structured ServeCompleteness witness")
+	}
+	sc := res.ServeCompleteness
+	if sc.ControlArmServed {
+		t.Error("ControlArmServed must be false when the reference cannot hold the prompt")
+	}
+	if sc.Refusal != FanoutServeRefusePromptOverflow {
+		t.Errorf("refusal = %q, want %q", sc.Refusal, FanoutServeRefusePromptOverflow)
+	}
+	if sc.EvidenceGap {
+		t.Error("a measured shortfall is not an evidence gap")
+	}
+	if sc.ObservedPerSlotTokens != 128 {
+		t.Errorf("observed per-slot = %d, want 128 (the served limit)", sc.ObservedPerSlotTokens)
+	}
+	if sc.ObservedTotalSlots != 4 {
+		t.Errorf("observed total slots = %d, want 4", sc.ObservedTotalSlots)
+	}
+	if sc.PromptTokens != 320 { // P+S
+		t.Errorf("declared prompt geometry = %d, want 320", sc.PromptTokens)
+	}
+	if sc.RequestedTotalTokens != 336 { // P+S+D
+		t.Errorf("requested total = %d, want 336", sc.RequestedTotalTokens)
+	}
+	// The refusal must name the observed limit so the reader sees the cause.
+	if !strings.Contains(sc.Detail, "128") {
+		t.Errorf("refusal detail must name the observed limit 128: %q", sc.Detail)
+	}
+	if !strings.Contains(sc.Detail, "336") {
+		t.Errorf("refusal detail must name the required geometry 336: %q", sc.Detail)
+	}
+	// The whole point: the control never ran, so no measured request was spent.
+	if got := atomic.LoadInt64(&completionsHits); got != 0 {
+		t.Errorf("an under-capacity control must not spend measured requests, got %d completions", got)
+	}
+	// It must not be counted as a served/comparable arm.
+	if sc.ControlArmServed {
+		t.Error("under-capacity reference must not be counted as a measured arm")
+	}
+
+	// The receipt summary must surface the unserved control, and the pretty
+	// render must name the structured refusal so a reader cannot mistake a
+	// broken reference for a measured null result.
+	if got, ok := receipt.Summary["control_arms_unserved"]; !ok || got != 1 {
+		t.Errorf("summary control_arms_unserved = %v (ok=%v), want 1", got, ok)
+	}
+	var buf bytes.Buffer
+	renderPrettyReceipt(&buf, receipt)
+	if !strings.Contains(buf.String(), FanoutServeRefusePromptOverflow) {
+		t.Errorf("pretty render must name the refusal %q:\n%s", FanoutServeRefusePromptOverflow, buf.String())
+	}
+}
+
+// TestSubagentFanoutServeGeometryOK proves a correctly sized reference is
+// unaffected: the cell is admitted, ControlArmServed is true, and the measured
+// requests actually ran.
+func TestSubagentFanoutServeGeometryOK(t *testing.T) {
+	var completionsHits int64
+	// served 4096/slot >= P+S+D = 64+16+4 = 84
+	srv := fanoutPropsServer(t, 4096, 8, &completionsHits)
+
+	h := NewFanoutBenchmarkHarness(&FanoutBenchConfig{
+		Model:          "Qwen/Qwen2.5-Coder-7B-Instruct",
+		Quantization:   "Q4_K_M",
+		MemoryFraction: FixedMemoryFraction,
+		FanoutSweep:    []int{2},
+		Arms:           []string{ArmLLamaCPP},
+		PrefixTokens:   64,
+		SuffixTokens:   16,
+		DecodeTokens:   4,
+		Trials:         1,
+		Live:           true,
+		Endpoints:      map[string]string{ArmLLamaCPP: srv.URL},
+		Seed:           42,
+	})
+	receipt, err := h.Run(context.Background())
+	if err != nil {
+		t.Fatalf("live harness run: %v", err)
+	}
+	if len(receipt.Results) != 1 {
+		t.Fatalf("got %d results, want 1", len(receipt.Results))
+	}
+	res := receipt.Results[0]
+	if res.Error != "" {
+		t.Fatalf("correctly sized reference must not fail: %s", res.Error)
+	}
+	if res.ServeCompleteness == nil {
+		t.Fatal("live cell must carry a ServeCompleteness witness")
+	}
+	sc := res.ServeCompleteness
+	if !sc.ControlArmServed {
+		t.Errorf("ControlArmServed must be true; refusal=%q detail=%q", sc.Refusal, sc.Detail)
+	}
+	if sc.Refusal != "" {
+		t.Errorf("no refusal expected on the ok path, got %q", sc.Refusal)
+	}
+	if sc.ObservedPerSlotTokens != 4096 {
+		t.Errorf("observed per-slot = %d, want 4096", sc.ObservedPerSlotTokens)
+	}
+	if atomic.LoadInt64(&completionsHits) == 0 {
+		t.Fatal("an admitted control must actually run its measured requests")
+	}
+}
+
+// TestSubagentFanoutServeGeometryUnobservedFailsClosed proves the anti-vacuity
+// path: when the served limit cannot be read (no /props), the cell fails closed
+// as an evidence gap rather than assuming a default capacity.
+func TestSubagentFanoutServeGeometryUnobservedFailsClosed(t *testing.T) {
+	var completionsHits int64
+	// A server with NO /props endpoint: only completions exists.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		atomic.AddInt64(&completionsHits, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	h := NewFanoutBenchmarkHarness(&FanoutBenchConfig{
+		Model:          "Qwen/Qwen2.5-Coder-7B-Instruct",
+		Quantization:   "Q4_K_M",
+		MemoryFraction: FixedMemoryFraction,
+		FanoutSweep:    []int{1},
+		Arms:           []string{ArmLLamaCPP},
+		PrefixTokens:   64,
+		SuffixTokens:   16,
+		DecodeTokens:   4,
+		Trials:         1,
+		Live:           true,
+		Endpoints:      map[string]string{ArmLLamaCPP: srv.URL},
+		Seed:           42,
+	})
+	receipt, err := h.Run(context.Background())
+	if err != nil {
+		t.Fatalf("harness run: %v", err)
+	}
+	res := receipt.Results[0]
+	if res.Error == "" {
+		t.Fatal("unreadable served capacity must fail the cell closed")
+	}
+	if res.ServeCompleteness == nil {
+		t.Fatal("must carry ServeCompleteness with the evidence gap")
+	}
+	sc := res.ServeCompleteness
+	if sc.ControlArmServed {
+		t.Error("unobserved capacity must never be admitted")
+	}
+	if sc.Refusal != FanoutServeRefuseCapacityUnobserved {
+		t.Errorf("refusal = %q, want %q", sc.Refusal, FanoutServeRefuseCapacityUnobserved)
+	}
+	if !sc.EvidenceGap {
+		t.Error("an unreadable limit is an evidence gap")
+	}
+	if got := atomic.LoadInt64(&completionsHits); got != 0 {
+		t.Errorf("unobserved control must not spend measured requests, got %d", got)
+	}
+}
+
+// TestSubagentFanoutServeRefusalVocabularyIsClosed pins the refusal tokens so a
+// future edit cannot silently invent a new one.
+func TestSubagentFanoutServeRefusalVocabularyIsClosed(t *testing.T) {
+	want := map[string]bool{
+		FanoutServeRefusePromptOverflow:     true,
+		FanoutServeRefuseCapacityUnobserved: true,
+		FanoutServeRefuseProbeError:         true,
+	}
+	if len(FanoutServeRefusalVocabulary) != len(want) {
+		t.Fatalf("vocabulary has %d tokens, want %d", len(FanoutServeRefusalVocabulary), len(want))
+	}
+	for _, tok := range FanoutServeRefusalVocabulary {
+		if !want[tok] {
+			t.Errorf("unexpected refusal token %q", tok)
+		}
 	}
 }
