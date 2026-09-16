@@ -1429,6 +1429,19 @@ func (v *vulkanBackend) q6kMatMulLocked(w, x, y Tensor, P int) {
 	C.fvk_q6k_matmul_f32(wb.ptr, v.vp(x), v.vp(y), C.int(out), C.int(in), C.int(P))
 }
 
+// SupportsDeviceWeightDtype reports the exact dtype set vulkanBackend.MatMul has a case
+// for. It must match that switch: F32, Q8_0, Q4_K, Q6_K and Q2_K are handled; Q5_K and
+// every other dtype fall to the switch's panic default, so they are reported false here
+// (a caller probing this seam gets a clean decline instead of a device panic).
+func (v *vulkanBackend) SupportsDeviceWeightDtype(dt Dtype) bool {
+	switch dt {
+	case F32, Q8_0, Q4_K, Q6_K, Q2_K:
+		return true
+	default:
+		return false
+	}
+}
+
 func (v *vulkanBackend) MatMul(w, x Tensor) Tensor {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()

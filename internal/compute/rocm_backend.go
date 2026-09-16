@@ -365,6 +365,18 @@ func (r *rocmBackend) matmul(w, x Tensor, rows int) Tensor {
 	return y
 }
 
+// SupportsDeviceWeightDtype reports the exact dtype set rocmBackend.matmul has a case for,
+// matching that switch: F32, Q8_0, Q4_K, Q5_K and Q6_K. Every other dtype falls to the
+// switch's panic default, so it is reported false here.
+func (r *rocmBackend) SupportsDeviceWeightDtype(dt Dtype) bool {
+	switch dt {
+	case F32, Q8_0, Q4_K, Q5_K, Q6_K:
+		return true
+	default:
+		return false
+	}
+}
+
 func (r *rocmBackend) MatMul(w, x Tensor) Tensor {
 	rocmMu.Lock()
 	defer rocmMu.Unlock()
