@@ -5,6 +5,8 @@ package metalgemm
 import (
 	"sort"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/gpulease"
 )
 
 // q4kCrossoverReceipt is the moment-in-time record the ticket asks for: the date, commit SHA,
@@ -58,6 +60,20 @@ func TestQ4KCrossoverReceiptCandidateVsScalar(t *testing.T) {
 	if got := OSVersion(); got[0:2] != "26" {
 		t.Skipf("crossover receipt is pinned to macOS 26; this host reports %q", got)
 	}
+
+	// The ratio floor is only attributable on an uncontended GPU. A resident
+	// `fak-native up` holder, a concurrent modelbench run, or any other GPU-heavy
+	// process sharing this box can drag a single timed rep below the >=1.10x gate
+	// even though the kernel is correct (observed 2026-09-15 on this M3 Pro box).
+	// Take the machine-wide lease NoWait: if another exclusive GPU holder owns it,
+	// skip with the contention named rather than asserting a ratio measured under
+	// noise. A quiet box still asserts the strict floor below.
+	lease, err := gpulease.Acquire(gpulease.Options{NoWait: true})
+	if err != nil {
+		t.Skipf("crossover receipt is [HW-WITNESSED] only on an uncontended GPU; exclusive GPU lease unavailable (%v)", err)
+	}
+	defer lease.Release()
+
 	defer ResetQ4K()
 
 	// Real projection geometry (out,in) = (4096,4096) — the FFN projection width of the resident
