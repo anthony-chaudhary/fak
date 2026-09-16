@@ -201,7 +201,6 @@ type PrefillArmRunner func(ctx context.Context, arm string, repeats int) (Prefil
 func RunPrefillMatched(ctx context.Context, req PrefillMatchedRequest, run PrefillArmRunner) (PrefillMatchedPacket, error) {
 	packet := PrefillMatchedPacket{
 		Schema:         PrefillMatchedSchema,
-		GeneratedAt:    time.Now().UTC().Format(time.RFC3339),
 		CampaignID:     req.CampaignID,
 		HostID:         req.HostID,
 		EvidenceKind:   req.EvidenceKind,
@@ -235,6 +234,10 @@ func RunPrefillMatched(ctx context.Context, req PrefillMatchedRequest, run Prefi
 		arm.Metrics = SummarizePrefillSamples(arm.Samples)
 		packet.Arms = append(packet.Arms, arm)
 	}
+	// GeneratedAt must be stamped AFTER the last arm finishes: the validator
+	// rejects any arm whose finished_at is after generated_at, so stamping it
+	// up front would make every real run fail closed on its own clock.
+	packet.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
 	packet.Summary = summarizePrefillMatched(packet.Arms)
 	if err := ValidatePrefillMatchedPacket(packet); err != nil {
 		return packet, err

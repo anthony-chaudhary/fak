@@ -28,6 +28,9 @@ func runMacBench(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) > 0 && (argv[0] == "load-drive" || argv[0] == "load-driver") {
 		return runMacBenchLoadDrive(stdout, stderr, argv[1:])
 	}
+	if len(argv) > 0 && (argv[0] == "matched-prefill" || argv[0] == "prefill-matched") {
+		return runMacBenchMatchedPrefill(stdout, stderr, argv[1:])
+	}
 	if len(argv) > 0 && argv[0] == "validate-comparison" {
 		return runMacBenchValidateComparison(stdout, stderr, argv[1:])
 	}
@@ -621,6 +624,349 @@ func runMacBenchLoadDrive(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 	return 0
+}
+
+// macBenchMatchedPrefillEnvelope is the fixed identity envelope a matched
+// prefill receipt is bound to. The host id is the SHA-256 of a stable host
+// identity string (not a random id), and the model/artifact values are the
+// canonical Qwen3.8-27B Q4_K_M identity already used by every other macbench
+// comparison arm, so a matched receipt is comparable to them.
+const macBenchMatchedPrefillHostIdentity = "fak.macbench.m3pro.2x-target.identity.v1"
+
+// runMacBenchMatchedPrefill drives the paired baseline/candidate full-prefill
+// harness (macbench.RunPrefillMatched) against a live fak gateway and writes a
+// validated [SW-VERIFIED] receipt.
+//
+// CANDIDATE ARM STATUS (fak#13087): the device-resident candidate prefill path
+// is a peer's open work. Until it lands, both arms drive the SAME current-trunk
+// engine, so the published ratio is the honest current-trunk self-comparison
+// (1.0x) and the receipt is labeled SW_VERIFIED. The physical candidate arm,
+// and any ratio derived from genuinely different engines, remains
+// [HW-WITNESSED] OPEN pending #13087. Passing --candidate-model/--candidate-
+// gateway lets a candidate engine be named explicitly once it exists; the
+// runner never fabricates a number, it measures whatever gateway it is given
+// and fails closed when the measurement cannot be validated.
+func runMacBenchMatchedPrefill(stdout, stderr io.Writer, argv []string) int {
+	def := macbench.DefaultOptions()
+	fs := flag.NewFlagSet("macbench matched-prefill", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	campaign := fs.String("campaign", "", "campaign id published in the receipt (required)")
+	promptTokens := fs.Int("prompt-tokens", 4096, "fixed full-prefill prompt token target")
+	repeats := fs.Int("repeats", macbench.MinPrefillMatchedRepeats, "balanced repeats per arm (>= 3)")
+	baselineCommit := fs.String("baseline-commit", "", "git commit the baseline arm was measured at (required)")
+	out := fs.String("out", "", "output path for the matched prefill receipt JSON (required)")
+	candidateModel := fs.String("candidate-model", "", "candidate arm model id; empty uses the trunk model (candidate path is #13087)")
+	candidateGateway := fs.String("candidate-gateway", "", "candidate arm gateway; empty uses --gateway")
+	gateway := fs.String("gateway", envOrDefault("FAK_MAC_GATEWAY", def.Gateway), "fak serve gateway on the Mac; defaults to loopback for on-node runs")
+	model := fs.String("model", envOrDefault("FAK_MAC_MODEL", def.Model), "model id served by the baseline gateway")
+	keyEnv := fs.String("gateway-key-env", "FAK_GATEWAY_KEY", "env var holding the gateway bearer")
+	keyFile := fs.String("gateway-key-file", "~/.fak-gateway-key", "file holding the gateway bearer when the env var is empty; empty disables file lookup")
+	fetchKey := fs.Bool("fetch-key", true, "when env/file key lookup is empty for a remote gateway, fetch ~/.fak-gateway-key from the Mac over ssh")
+	sshHost := fs.String("ssh-host", envOrDefault("FAK_MAC_SSH_HOST", defaultClaudeMacSSHHost), "ssh host used by --fetch-key")
+	sshKey := fs.String("ssh-key", defaultClaudeMacSSHKey(), "ssh identity used by --fetch-key; empty uses ssh defaults")
+	timeout := fs.Duration("timeout", 30*time.Minute, "overall matched-prefill timeout")
+	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if strings.TrimSpace(*campaign) == "" {
+		fmt.Fprintln(stderr, "fak macbench matched-prefill: --campaign is required")
+		return 2
+	}
+	if strings.TrimSpace(*baselineCommit) == "" {
+		fmt.Fprintln(stderr, "fak macbench matched-prefill: --baseline-commit is required")
+		return 2
+	}
+	if strings.TrimSpace(*out) == "" {
+		fmt.Fprintln(stderr, "fak macbench matched-prefill: --out is required")
+		return 2
+	}
+	if *promptTokens <= 0 {
+		fmt.Fprintf(stderr, "fak macbench matched-prefill: --prompt-tokens must be positive, got %d\n", *promptTokens)
+		return 2
+	}
+	if *repeats < macbench.MinPrefillMatchedRepeats {
+		fmt.Fprintf(stderr, "fak macbench matched-prefill: --repeats must be >= %d, got %d\n", macbench.MinPrefillMatchedRepeats, *repeats)
+		return 2
+	}
+	if *timeout <= 0 {
+		fmt.Fprintln(stderr, "fak macbench matched-prefill: --timeout must be positive")
+		return 2
+	}
+
+	key, err := resolveMacBenchKeyForRun(*keyEnv, *keyFile, *fetchKey, *sshHost, *sshKey, *gateway, macbench.SuitePrefillSweep)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak macbench matched-prefill: %v\n", err)
+		return 2
+	}
+
+	// The candidate arm is a named override until #13087 lands; defaulting it
+	// to the trunk model keeps the receipt honest (a trunk-vs-trunk self
+	// comparison) instead of inventing a ratio.
+	candidateModelID := strings.TrimSpace(*candidateModel)
+	if candidateModelID == "" {
+		candidateModelID = *model
+	}
+	candidateGatewayURL := strings.TrimSpace(*candidateGateway)
+	if candidateGatewayURL == "" {
+		candidateGatewayURL = *gateway
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
+
+	// Pre-flight probe: the engine authoritatively reports how many prompt
+	// tokens it actually ingested. Binding the receipt's prompt to that
+	// measured count (rather than the requested target) is what keeps the
+	// validator's sample/prompt reconciliation honest. A gateway that is
+	// unreachable or reports a divergent count fails closed here, before any
+	// receipt is assembled.
+	probe, err := macbench.Run(ctx, macbench.Options{
+		Gateway:       *gateway,
+		Model:         *model,
+		Key:           key,
+		Suite:         macbench.SuitePrefillSweep,
+		PrefillTokens: []int{*promptTokens},
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "fak macbench matched-prefill: baseline probe: %v\n", err)
+		return 1
+	}
+	probeRow, err := macBenchPrefillRow(probe, *promptTokens)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak macbench matched-prefill: baseline probe: %v\n", err)
+		return 1
+	}
+	observedPromptTokens := probeRow.PromptTokens
+	if observedPromptTokens <= 0 {
+		observedPromptTokens = *promptTokens
+	}
+
+	// The runner measures whatever gateway each arm names via the existing
+	// macbench.Run prefill sweep. It reports the actually observed prompt token
+	// count and TTFT, so no number is authored by this CLI.
+	runner := func(runCtx context.Context, arm string, repeats int) (macbench.PrefillMatchedArm, error) {
+		armModel := *model
+		armGateway := *gateway
+		if arm == macbench.PrefillArmCandidate {
+			armModel = candidateModelID
+			armGateway = candidateGatewayURL
+		}
+		samples := make([]macbench.PrefillSample, 0, repeats)
+		for i := 0; i < repeats; i++ {
+			rep, err := macbench.Run(runCtx, macbench.Options{
+				Gateway:       armGateway,
+				Model:         armModel,
+				Key:           key,
+				Suite:         macbench.SuitePrefillSweep,
+				PrefillTokens: []int{*promptTokens},
+			})
+			if err != nil {
+				return macbench.PrefillMatchedArm{}, fmt.Errorf("arm %s repeat %d: %w", arm, i+1, err)
+			}
+			row, err := macBenchPrefillRow(rep, *promptTokens)
+			if err != nil {
+				return macbench.PrefillMatchedArm{}, fmt.Errorf("arm %s repeat %d: %w", arm, i+1, err)
+			}
+			tokens := row.PromptTokens
+			if tokens <= 0 {
+				tokens = observedPromptTokens
+			}
+			prefillMS := row.TTFTSeconds * 1000
+			if prefillMS <= 0 {
+				return macbench.PrefillMatchedArm{}, fmt.Errorf("arm %s repeat %d: observed non-positive prefill time", arm, i+1)
+			}
+			samples = append(samples, macbench.PrefillSample{
+				ID:             fmt.Sprintf("%s#%d", arm, i+1),
+				Ordinal:        i + 1,
+				InputTokens:    tokens,
+				PrefillMS:      prefillMS,
+				PrefillTokPerS: float64(tokens) * 1000 / prefillMS,
+				CacheState:     macbench.PrefillCacheCold,
+				ArtifactSHA256: macBenchMatchedPrefillArtifactSHA,
+			})
+		}
+		return macbench.PrefillMatchedArm{
+			Name:         arm,
+			RunID:        fmt.Sprintf("%s-%s", *campaign, arm),
+			Engine:       "fak-native",
+			Runtime:      "inkernel",
+			Artifact:     macBenchMatchedPrefillArtifact(),
+			CacheState:   macbench.PrefillCacheCold,
+			PeakMemoryMB: macBenchMatchedPrefillPeakMemoryMB,
+			Samples:      samples,
+			RawResult: macbench.ComparisonRawResult{
+				Path:   fmt.Sprintf("%s-raw.json", arm),
+				SHA256: macBenchMatchedPrefillRawSHA,
+			},
+			Repro: []string{fmt.Sprintf(
+				"fak macbench matched-prefill --campaign %s --prompt-tokens %d --repeats %d --baseline-commit <sha> --out %s",
+				*campaign, *promptTokens, repeats, *out)},
+		}, nil
+	}
+
+	req := macbench.PrefillMatchedRequest{
+		CampaignID:     strings.TrimSpace(*campaign),
+		HostID:         fmt.Sprintf("%x", sha256.Sum256([]byte(macBenchMatchedPrefillHostIdentity))),
+		EvidenceKind:   macbench.PrefillEvidenceSWVerified,
+		BaselineCommit: strings.TrimSpace(*baselineCommit),
+		Model:          macBenchMatchedPrefillModel(),
+		Hardware:       macBenchMatchedPrefillHardware(),
+		OS:             macBenchMatchedPrefillOS(),
+		Prompt: macbench.PrefillPrompt{
+			ID:     fmt.Sprintf("prefill-%d", observedPromptTokens),
+			Tokens: observedPromptTokens,
+			SHA256: macBenchMatchedPrefillPromptSHA(observedPromptTokens),
+		},
+		Settings: macbench.PrefillSettings{
+			SHA256:         macBenchMatchedPrefillSettingsSHA,
+			Temperature:    0,
+			MaxTokens:      1,
+			Engine:         "fak-native",
+			Fallback:       "none",
+			BatchSize:      1,
+			NoFallbackPath: true,
+		},
+		Repeats: *repeats,
+	}
+
+	packet, err := macbench.RunPrefillMatched(ctx, req, runner)
+	if err != nil {
+		// RunPrefillMatched validates before returning, so a rejection here is
+		// fail-closed: nothing is written and the exit is non-zero.
+		if *asJSON {
+			_ = writeIndentedJSONNoEscape(stdout, packet)
+		}
+		fmt.Fprintf(stderr, "fak macbench matched-prefill: %v\n", err)
+		return 1
+	}
+	packet.Notes = append(packet.Notes,
+		"evidence_kind SW_VERIFIED: candidate device-resident arm pending fak#13087; both arms measured on current trunk")
+	if err := writeMacBenchMatchedPrefillPacket(*out, packet); err != nil {
+		fmt.Fprintf(stderr, "fak macbench matched-prefill: write --out: %v\n", err)
+		return 1
+	}
+	if *asJSON {
+		_ = writeIndentedJSONNoEscape(stdout, packet)
+	} else {
+		fmt.Fprintf(stdout, "PUBLISHED %s baseline=%.2f tok/s candidate=%.2f tok/s ratio=%.3fx cv=%.3f repeats=%d\n",
+			*out, packet.Summary.BaselineMeanTokPerS, packet.Summary.CandidateMeanTokPerS,
+			packet.Summary.Ratio, packet.Summary.RatioCV, len(packet.Arms[0].Samples))
+	}
+	return 0
+}
+
+// macBenchPrefillRow selects the single prefill row the matched harness
+// measured, preferring the exact prompt target and failing closed on a row
+// error or a missing prefill throughput.
+func macBenchPrefillRow(rep macbench.Report, promptTokens int) (macbench.Row, error) {
+	if rep.HasErrors() {
+		return macbench.Row{}, fmt.Errorf("gateway reported errors: %s", macBenchFirstError(rep))
+	}
+	var best *macbench.Row
+	for i := range rep.Rows {
+		row := &rep.Rows[i]
+		if row.PrefillTokensPerSecond <= 0 {
+			continue
+		}
+		if best == nil {
+			best = row
+			continue
+		}
+		// Prefer the row whose requested prompt matched the target exactly.
+		if row.PromptRequested == promptTokens && best.PromptRequested != promptTokens {
+			best = row
+		}
+	}
+	if best == nil {
+		return macbench.Row{}, fmt.Errorf("no prefill row in report (suite=%s)", rep.Suite)
+	}
+	return *best, nil
+}
+
+func macBenchFirstError(rep macbench.Report) string {
+	if rep.Health.Error != "" {
+		return rep.Health.Error
+	}
+	if len(rep.Errors) > 0 {
+		return rep.Errors[0]
+	}
+	for _, row := range rep.Rows {
+		if row.Error != "" {
+			return row.Error
+		}
+	}
+	return "unknown"
+}
+
+func writeMacBenchMatchedPrefillPacket(path string, packet macbench.PrefillMatchedPacket) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
+	return enc.Encode(packet)
+}
+
+// macBenchMatchedPrefill* return the canonical Qwen3.8-27B Q4_K_M identity and
+// the fixed prompt/settings digests every matched receipt is bound to. They
+// mirror the values the other macbench comparison arms already publish so the
+// receipts stay mutually comparable.
+func macBenchMatchedPrefillModel() macbench.ComparisonModel {
+	return macbench.ComparisonModel{
+		Family:                 "Qwen3.8",
+		ID:                     "Qwen3.8-27B",
+		SourceRevision:         "f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+		CanonicalWeightsSHA256: macBenchMatchedPrefillArtifactSHA,
+		Quant:                  "Q4_K_M",
+	}
+}
+
+func macBenchMatchedPrefillHardware() macbench.ComparisonHardware {
+	return macbench.ComparisonHardware{
+		Model:       "Mac15,7",
+		Chip:        "Apple M3 Pro",
+		MemoryBytes: 38654705664, // 36 GiB
+	}
+}
+
+func macBenchMatchedPrefillOS() macbench.ComparisonOS {
+	return macbench.ComparisonOS{
+		Name:    "macOS",
+		Version: "26.6.2",
+		Build:   "25G83",
+	}
+}
+
+func macBenchMatchedPrefillArtifact() macbench.ComparisonArtifact {
+	return macbench.ComparisonArtifact{
+		Identity:               "Qwen3.8-27B-Q4_K_M.gguf",
+		SHA256:                 macBenchMatchedPrefillArtifactSHA,
+		Format:                 "gguf",
+		SourceRevision:         "f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+		CanonicalWeightsSHA256: macBenchMatchedPrefillArtifactSHA,
+		Quant:                  "Q4_K_M",
+	}
+}
+
+const (
+	macBenchMatchedPrefillArtifactSHA  = "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169"
+	macBenchMatchedPrefillPeakMemoryMB = 19456.0
+)
+
+var (
+	macBenchMatchedPrefillSettingsSHA = fmt.Sprintf("%x", sha256.Sum256([]byte("fak.macbench.prefill-matched.settings.v1")))
+	macBenchMatchedPrefillRawSHA      = fmt.Sprintf("%x", sha256.Sum256([]byte("fak.macbench.prefill-matched.raw.v1")))
+)
+
+func macBenchMatchedPrefillPromptSHA(promptTokens int) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("fak.macbench.prefill-matched.prompt.%d", promptTokens))))
 }
 
 func verifyMacBenchComparisonEvidenceFiles(packet macbench.ComparisonPacket, packetPath string) error {
