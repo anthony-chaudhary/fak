@@ -82,6 +82,111 @@ func splitHostResidentExperts(mat matKernel, layer int, picks []routePick) bool 
 	return true
 }
 
+// expertEngine is the COMPUTE ENGINE a routed expert's projections run on. It is the placement
+// decision splitKernel used to make by construction: before #13128 every routed expert under
+// `--n-cpu-moe` ran on the host CPU, because hostOffloadWeight sends the whole `.mlp.experts.<e>.*`
+// block to the host sub-kernel and nothing ever asked whether a device kernel existed for that
+// weight's encoding. On a discrete GPU that was the llama.cpp `--n-cpu-moe` model (host RAM is the
+// only large pool, PCIe is the tax). On a unified-memory APU (Strix Halo: CPU and iGPU read the
+// same LPDDR5X/GTT through the same ~256 GB/s pool) residency and compute-engine are INDEPENDENT
+// questions: bytes resident in the unified pool may be computed by either engine, and the engine
+// should follow the kernel that exists for the encoding rather than a static name predicate.
+type expertEngine int
+
+const (
+	// expertEngineHost is the fail-closed default: the host CPU k-quant GEMV. It is what every
+	// routed expert ran before #13128 and what any expert still runs when no device kernel exists
+	// for its encoding or no device backend is attached.
+	expertEngineHost expertEngine = iota
+	// expertEngineDevice runs the expert's gate/up + SwiGLU on the device backend (q4kExpertInputHAL)
+	// when a device kernel exists for its encoding. The host-CPU down-projection fallback remains
+	// inside expertSwiGLU until the Q5_K/Q6_K down kernel lands (fak#13129).
+	expertEngineDevice
+)
+
+// deviceKernelForExpertEncoding is the PER-ENCODING device-kernel predicate #13128 asks for: it
+// answers "does a device kernel exist for THIS expert weight's encoding?" rather than assuming the
+// host CPU for every routed expert. It is consulted by the offload split before an expert is sent
+// to the host floor, so a resident expert on a device with a kernel for its encoding can execute on
+// the iGPU instead of the CPU.
+//
+// The predicate is deliberately NARROW and fail-closed:
+//   - Q4_K (m.q4kw[...] != nil) has a device kernel: the Q4_K gate/up MatMul + SwiGLU
+//     (q4kExpertInputHAL, moe_device_gateup.go) used by the resident device expert route.
+//   - Q5_K / Q6_K down projections have NO device kernel yet (fak#13129, filed separately), so they
+//     remain host. An encoding with no entry here answers expertEngineHost, which is byte-for-byte
+//     the pre-#13128 arm.
+//
+// `name` is the canonical expert tensor name (expertName, moe.go); a nil model, a nil q4kw map, or a
+// weight with no resident Q4_K representation all answer expertEngineHost.
+func deviceKernelForExpertEncoding(m *Model, name string) expertEngine {
+	if m == nil || m.q4kw == nil {
+		return expertEngineHost
+	}
+	if m.q4kw[name] != nil {
+		return expertEngineDevice
+	}
+	return expertEngineHost
+}
+
+// expertEngineForWeight is the ADMISSION wrapper the offload split consults: it resolves the compute
+// engine for one routed expert projection by its encoding, and requires the session to actually be
+// able to run a device kernel (a backend advertising DeviceMemory + UploadDtype, the same pair
+// q4kExpertInputHAL admits). A session with no backend — or a backend without a device kernel for
+// the encoding — answers expertEngineHost, so the fail-closed default is structural, not a caller
+// convention.
+func expertEngineForWeight(s *Session, name string) expertEngine {
+	if s == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory {
+		return expertEngineHost
+	}
+	return deviceKernelForExpertEncoding(s.M, name)
+}
+
+// splitDeviceExpertInput runs the DEVICE engine for one routed expert's gate/up + SwiGLU when the
+// offload split has routed that expert's bytes to host RAM but a device kernel exists for its
+// encoding (#13128). It is the engine-selection half of the split: the WEIGHT stays host-resident
+// (residency is unchanged — the split's byte accounting is untouched), but the COMPUTE moves to the
+// iGPU, which reads the same unified pool.
+//
+// It reuses q4kExpertInputHAL verbatim — the landed moe_device_gateup prototype — so no new
+// arithmetic is introduced: the helper's own guard chain decides whether the device kernel is
+// actually available for this encoding/session, and a decline leaves the caller on the proven host
+// arm. Returning ok=false writes nothing.
+//
+// The returned *Session is the session whose counters must attribute the execution (it is non-nil
+// exactly when ok is true), so the caller does not have to re-derive it — and so a splitKernel is
+// never mistaken for a session-bearing kernel anywhere else on the expert path.
+//
+// splitKernel is the only kernel for which this path exists: residentKernel and backendKernel are
+// pure placements with no second engine to choose between (backendKernel already runs on the device,
+// residentKernel has no session), so a split over them returns ok=false and the host arm runs.
+func (k splitKernel) splitDeviceExpertInput(layer, expert int, xn any) (*Session, []float32, bool) {
+	// The device side of the split is the kernel whose session owns the Backend: glmDsaMatKernel
+	// builds backendKernel for the device half (moe_offload.go:194-209). Accept both session-bearing
+	// kernels so a hand-built split over the generic blockStep kernel is also reachable. A split whose
+	// device side is a residentKernel (the no-backend degenerate split) has no session behind it and
+	// therefore no device engine: decline.
+	var s *Session
+	switch dk := k.device.(type) {
+	case backendKernel:
+		s = dk.s
+	case sessionQ4KKernel:
+		s = dk.s
+	default:
+		return nil, nil, false
+	}
+	g := expertName(layer, expert, "gate_proj.weight")
+	u := expertName(layer, expert, "up_proj.weight")
+	if expertEngineForWeight(s, g) != expertEngineDevice || expertEngineForWeight(s, u) != expertEngineDevice {
+		return nil, nil, false
+	}
+	out, ok := q4kExpertInputHAL(s, g, u, xn, s.M.Cfg.expertIntermediate(), s.M.Cfg.HiddenSize)
+	if !ok {
+		return nil, nil, false
+	}
+	return s, out, true
+}
+
 // sparseAttend forwards GLM-DSA's sparse-attention compute to the DEVICE side: sparse attention is
 // dense per-head softmax(scale·q·k)·V over the host-selected keys — attention work, not an expert —
 // so it belongs with the dense projections on the GPU. glmDsaAttendCached type-asserts the active

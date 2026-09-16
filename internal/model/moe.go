@@ -206,10 +206,15 @@ func expertSwiGLU(m *Model, layer, expert int, xn any, mat matKernel) []float32 
 	gn := expertName(layer, expert, "gate_proj.weight")
 	un := expertName(layer, expert, "up_proj.weight")
 	dn := expertName(layer, expert, "down_proj.weight")
-	// The session behind mat, when it has one. Admit both sessionQ4KKernel (the generic
-	// blockStep kernel) AND backendKernel (what decodeBandGLMDsa actually builds);
-	// residentKernel and splitKernel carry none. It resolves the device HAL route below
-	// and owns the reachability counters, so both outcomes land on the same session.
+	// The session behind mat, when it has one. Admit sessionQ4KKernel (the generic
+	// blockStep kernel) and backendKernel (what decodeBandGLMDsa actually builds).
+	// residentKernel carries none, and splitKernel is deliberately NOT admitted here:
+	// under --n-cpu-moe the experts are HOST-routed by design, so resolving a session
+	// from the split would re-arm the pre-existing expertSwiGLUHAL route below and upload
+	// host-offloaded expert bytes to device memory — exactly the residency the operator's
+	// --n-cpu-moe did NOT budget. The #13128 engine choice on the split resolves its OWN
+	// session inside splitDeviceExpertInput, so this seam can move the COMPUTE without
+	// touching residency.
 	var sess *Session
 	switch mk := mat.(type) {
 	case sessionQ4KKernel:
@@ -231,6 +236,28 @@ func expertSwiGLU(m *Model, layer, expert int, xn any, mat matKernel) []float32 
 				if out, ok := sess.expertSwiGLUHAL(gn, un, dn, xf); ok {
 					sess.recordRoutedExpertDeviceHAL(1)
 					return out
+				}
+			}
+		}
+		// #13128 engine selection on the --n-cpu-moe split: the split routes a routed
+		// expert's BYTES to host RAM (hostOffloadWeight), and until now that pinned its
+		// COMPUTE to the host CPU for the life of the session. On a unified-memory device
+		// residency and engine are independent: when a device kernel exists for this
+		// expert's encoding, run gate/up + SwiGLU on the device (it reads the same pool),
+		// even though the bytes remain host-resident. The same bias/SiLU guard as the HAL
+		// route above applies, and q4kExpertInputHAL declines cleanly for any encoding or
+		// session the device kernel cannot serve, leaving the host arm byte-for-byte.
+		if sk, ok := mat.(splitKernel); ok {
+			if _, ok := xn.([]float32); ok {
+				if ds, out, ok := sk.splitDeviceExpertInput(layer, expert, xn); ok {
+					// Gate/up + SwiGLU ran device-side; the host-CPU down projection below
+					// (mat.mul(dn, ...) on the split's host side) finishes the expert exactly
+					// as the host arm does, so the result matches within the device's f32
+					// reduction-order tolerance (pinned by the parity witness).
+					out2 := mat.mul(dn, mat.prep(out), H, I)
+					m.addBiasIfPresent(out2, expertName(layer, expert, "down_proj.bias"))
+					ds.recordRoutedExpertDeviceHAL(1)
+					return out2
 				}
 			}
 		}
