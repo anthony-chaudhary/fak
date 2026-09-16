@@ -157,6 +157,22 @@ func (c *cpuBackend) RequireStrixDecodeGEMV() error {
 // MatMul: y[o] = Σ_i W[o,i]·x[i]. F32 reproduces matRows/parMatRows (fdot reduction);
 // Q8_0 reproduces qMatRows (quantize the activation, per-block int8 dot). One method,
 // two dtypes — the duplication the audit ranked hardest, expressed as dispatch.
+// SupportsDeviceWeightDtype reports the exact dtype set cpuBackend.MatMul has a case for,
+// matching that switch: F32, Q8_0, Q4_K, Q5_K, Q6_K, Q2_K, IQ2_XXS and Q2_0. Every other
+// dtype falls to the switch's panic default, so it is reported false here.
+//
+// The CPU reference is a host backend (Caps().DeviceMemory is false), so the device seams
+// never admit it; declaring its true MatMul dtype set keeps the predicate honest for any
+// caller that probes it directly (including a recording wrapper that embeds this backend).
+func (c *cpuBackend) SupportsDeviceWeightDtype(dt Dtype) bool {
+	switch dt {
+	case F32, Q8_0, Q4_K, Q5_K, Q6_K, Q2_K, IQ2_XXS, Q2_0:
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *cpuBackend) MatMul(w, x Tensor) Tensor {
 	started := time.Now()
 	defer func() {

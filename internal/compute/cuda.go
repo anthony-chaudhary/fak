@@ -965,6 +965,18 @@ func colMajorFlag(w Tensor) C.int {
 	return 0
 }
 
+// SupportsDeviceWeightDtype reports the exact dtype set cudaBackend.MatMul has a case
+// for, matching that switch: F32, F16, Q8_0, Q4_K, Q5_K, Q6_K, Q2_0 and Q2_K. Every other
+// dtype falls to the switch's CUDAOpError default, so it is reported false here.
+func (c *cudaBackend) SupportsDeviceWeightDtype(dt Dtype) bool {
+	switch dt {
+	case F32, F16, Q8_0, Q4_K, Q5_K, Q6_K, Q2_0, Q2_K:
+		return true
+	default:
+		return false
+	}
+}
+
 // MatMul computes y = x @ Wᵀ as a decode GEMV (P=1), dispatching on the weight dtype to the
 // SGEMM (F32), tensor-core HGEMM (F16), or native Q8_0/Q4_K device GEMV; output is F32-resident.
 func (c *cudaBackend) MatMul(w, x Tensor) Tensor {

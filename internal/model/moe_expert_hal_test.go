@@ -20,6 +20,14 @@ type expertHALRecordingBackend struct {
 
 func (b *expertHALRecordingBackend) Name() string                     { return "cuda-test" }
 func (b *expertHALRecordingBackend) SupportsRoutedExpertKQuant() bool { return true }
+
+// SupportsDeviceWeightDtype delegates to the wrapped backend: this recorder is a pass-through
+// shim (it only counts MatMul/SwiGLU/Upload), so it serves exactly the weight dtypes its
+// underlying backend does. In these tests that backend is compute.Default() (cpu-ref), which
+// genuinely serves Q4_K/Q5_K/Q6_K in MatMul — so the delegation is honest, not a blanket true.
+func (b *expertHALRecordingBackend) SupportsDeviceWeightDtype(dt compute.Dtype) bool {
+	return compute.BackendSupportsDeviceWeightDtype(b.Backend, dt)
+}
 func (b *expertHALRecordingBackend) Caps() compute.Caps {
 	return compute.Caps{DeviceMemory: true, UploadDtype: true, CapacityProbe: b.capacity > 0}
 }
