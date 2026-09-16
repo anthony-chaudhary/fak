@@ -328,7 +328,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		// serve, which plans exactly as before.
 		var memPlan compute.MemoryPlan
 		if streamedOffload {
-			memPlan, _, err = fitServeStreamedCPUOffloadPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens, fit)
+			memPlan, _, err = fitServeStreamedCPUOffloadPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens, hostFit, fit)
 			must(err)
 			loadMessages = append(loadMessages, serveStartupMessage("serving-expert-residency", "info", fmt.Sprintf("routed-expert set exceeds host RAM; streaming the checkpoint with a bounded resident working set (%s) and faulting the remaining strides from the staged shards on demand", bytesText(uint64(max(streamedBound, 0))))))
 		} else {

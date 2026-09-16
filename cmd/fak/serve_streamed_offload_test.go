@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
@@ -129,5 +132,137 @@ func TestServeCPUOffloadStreamedArm(t *testing.T) {
 	}
 	if byDetail["gguf-host-expert-offload-streamed"] == 0 {
 		t.Fatalf("streamed plan carries no gguf-host-expert-offload-streamed row; plan=%+v", plan)
+	}
+}
+
+// writeKVUint64ForTest writes a uint64 GGUF metadata value — the type the GLM-MoE-DSA header
+// declares for its expert/geometry keys, matching serveStreamedSynthWeightSource's in-memory
+// fixture byte-for-byte so the on-disk checkpoint parses to the same config.
+func writeKVUint64ForTest(b *bytes.Buffer, key string, value uint64) {
+	writeStringForTest(b, key)
+	_ = binary.Write(b, binary.LittleEndian, uint32(ggufload.TypeUint64))
+	_ = binary.Write(b, binary.LittleEndian, value)
+}
+
+// writeServeStreamedSynthGGUF serializes serveStreamedSynthWeightSource's MoE fixture to a real
+// GGUF path, so the path-form device arm (fitServeStreamedCPUOffloadPathOnDevice) can be exercised
+// over the SAME stageable Q2_K routed-expert checkpoint the in-memory plan tests use. Offsets are
+// laid out per slab with the true Q2_K block math (256 values/block, 84 bytes/block) and a
+// zero-filled payload of exactly that size, so FusedExpertTensors resolves each slab's reader.
+func writeServeStreamedSynthGGUF(t *testing.T, base string) string {
+	t.Helper()
+	const (
+		experts = 4
+		hidden  = 256
+	)
+	slabBytes := uint64(experts) * uint64(hidden) * uint64(hidden) / 256 * 84
+	align32 := func(n uint64) uint64 { return (n + 31) &^ 31 }
+
+	var b bytes.Buffer
+	writeMinimalHeaderForTest(&b, 4, 14)
+	writeKVStringForTest(&b, "general.architecture", "glm_moe_dsa")
+	writeKVUint32ForTest(&b, "general.alignment", 32)
+	writeKVUint64ForTest(&b, "glm_moe_dsa.context_length", 16)
+	writeKVUint64ForTest(&b, "glm_moe_dsa.embedding_length", 32)
+	writeKVUint64ForTest(&b, "glm_moe_dsa.block_count", 2)
+	writeKVUint64ForTest(&b, "glm_moe_dsa.feed_forward_length", 64)
+	writeKVUint64ForTest(&b, "glm_moe_dsa.attention.head_count", 4)
+	writeKVUint64ForTest(&b, "glm_moe_dsa.attention.head_count_kv", 2)
+	writeKVFloat32ForTest(&b, "glm_moe_dsa.attention.layer_norm_rms_epsilon", 1e-5)
+	writeKVFloat32ForTest(&b, "glm_moe_dsa.rope.freq_base", 10000)
+	writeKVUint64ForTest(&b, "glm_moe_dsa.expert_count", experts)
+	writeKVUint64ForTest(&b, "glm_moe_dsa.expert_used_count", 2)
+	writeKVUint64ForTest(&b, "glm_moe_dsa.expert_feed_forward_length", hidden)
+	writeKVUint32ForTest(&b, "tokenizer.ggml.eos_token_id", 2)
+
+	offset := uint64(0)
+	writeTensorInfoForTest(&b, "token_embd.weight", []uint64{256}, uint32(ggufload.TensorF32), offset)
+	offset = align32(offset + 1024)
+	for _, name := range []string{"blk.0.ffn_gate_exps.weight", "blk.0.ffn_up_exps.weight", "blk.0.ffn_down_exps.weight"} {
+		writeTensorInfoForTest(&b, name, []uint64{hidden, hidden, experts}, uint32(ggufload.TensorQ2_K), offset)
+		offset = align32(offset + slabBytes)
+	}
+	padToAlignmentForTest(&b, 32)
+	b.Write(make([]byte, int(offset)))
+
+	path := filepath.Join(t.TempDir(), base)
+	if err := os.WriteFile(path, b.Bytes(), 0o600); err != nil {
+		t.Fatalf("writeServeStreamedSynthGGUF: %v", err)
+	}
+	return path
+}
+
+// The device arm regression (fak#13121 "one measurement"): the streamed DECISION and the device
+// SIZING plan must be judged against the SAME host-fit snapshot. The device arm previously
+// re-probed a fresh host budget inside fitServeStreamedCPUOffloadPathOnDevice, so a decision made
+// on the caller's snapshot could be contradicted by a later, different probe. Here the caller's
+// hostFit is a TINY snapshot that forces streaming while the real machine's probe is far larger;
+// the device arm must honor the threaded snapshot (streamed==decision) rather than disagree.
+func TestServeStreamedDeviceArmUsesDecisionHostFitSnapshot(t *testing.T) {
+	path := writeServeStreamedSynthGGUF(t, "glm-moe-dsa-streamed.gguf")
+
+	// A device backend with a generous, known device ceiling so device admission never masks the
+	// host-fit invariant under test. hostKnown=false keeps host admission fail-open.
+	be := serveCapBackend{total: 1 << 40, free: 1 << 40, known: true}
+
+	// The caller's one-measurement snapshot: tiny, so the full routed charge cannot be host-resident.
+	tinyFit := serveFitBudget{Base: 512, Headroom: 0}
+	decided, _, err := serveStreamedCPUOffloadPathDecision(path, 1, 0, tinyFit)
+	if err != nil {
+		t.Fatalf("serveStreamedCPUOffloadPathDecision: %v", err)
+	}
+	if !decided {
+		t.Fatal("fixture must force the streamed decision under the tiny host-fit snapshot")
+	}
+
+	// The same snapshot threaded into the device arm must yield the SAME streamed verdict.
+	plan, streamed, err := fitServeStreamedCPUOffloadPathOnDevice(path, be, 1, 0, tinyFit, nil)
+	if err != nil {
+		t.Fatalf("fitServeStreamedCPUOffloadPathOnDevice: %v", err)
+	}
+	if streamed != decided {
+		t.Fatalf("device sizing disagreed with the streamed decision: decision=%v plan=%v (one-measurement invariant violated)", decided, streamed)
+	}
+	if plan.HostTotal() > tinyFit.avail() {
+		t.Fatalf("streamed device-arm plan host total %d exceeds the bounded resident snapshot %d", plan.HostTotal(), tinyFit.avail())
+	}
+}
+
+// A fitting artifact keeps the resident arm byte-for-byte on the device path: with the same tiny
+// snapshot threaded through but a HOST budget large enough that the full routed charge fits, the
+// decision and the device sizing must BOTH report streamed=false and the plan must match the
+// resident plan's host total.
+func TestServeStreamedDeviceArmFittingArtifactStaysResident(t *testing.T) {
+	path := writeServeStreamedSynthGGUF(t, "glm-moe-dsa-resident.gguf")
+
+	ws, err := ggufload.OpenWeights(path)
+	if err != nil {
+		t.Fatalf("OpenWeights: %v", err)
+	}
+	defer ws.Close()
+	resident, err := serveGGUFCPUOffloadMemoryPlan(ws, 1, 0, serveFitBudget{})
+	if err != nil {
+		t.Fatalf("resident plan: %v", err)
+	}
+
+	be := serveCapBackend{total: 1 << 40, free: 1 << 40, known: true}
+	bigFit := serveFitBudget{Base: 1 << 40, Headroom: 0}
+	decided, _, err := serveStreamedCPUOffloadPathDecision(path, 1, 0, bigFit)
+	if err != nil {
+		t.Fatalf("serveStreamedCPUOffloadPathDecision: %v", err)
+	}
+	if decided {
+		t.Fatal("fixture must NOT stream when the full routed charge fits the host snapshot")
+	}
+
+	plan, streamed, err := fitServeStreamedCPUOffloadPathOnDevice(path, be, 1, 0, bigFit, nil)
+	if err != nil {
+		t.Fatalf("fitServeStreamedCPUOffloadPathOnDevice: %v", err)
+	}
+	if streamed != decided {
+		t.Fatalf("device sizing disagreed with the resident decision: decision=%v plan=%v", decided, streamed)
+	}
+	if plan.HostTotal() != resident.HostTotal() {
+		t.Fatalf("resident-path host total %d, want the byte-identical resident plan %d", plan.HostTotal(), resident.HostTotal())
 	}
 }
