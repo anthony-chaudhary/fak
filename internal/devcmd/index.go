@@ -471,7 +471,7 @@ func writeIndexUsage(w io.Writer) {
   fak-dev index refs <pkg>.<Sym>  direct + transitive dependents of a Go symbol before editing
   fak-dev index ctxknobs          the manual-overlay counter: context flags/env/skills classified operator-debug vs user-required (#2199)
   fak-dev index knobs             the knob census: every user-facing behavior knob classified INTENT (promote) vs HOUSEKEEPING (automate) (#2210)
-  fak-dev index freshness         the self-index drift report: undeclared leaves, dead doc links, unknown verbs, orphaned dated notes
+  fak-dev index freshness         the self-index drift report: undeclared leaves, dead doc links, declared-but-unlinked authority docs, unknown verbs, orphaned dated notes
   fak-dev index execaudit         executable packages that build but have no adjacent test or no invocation edge outside themselves (#5648)
   fak-dev index agents [<query>]  sectioned AGENTS.md view; --for PATH resolves the effective hierarchy
   fak-dev index graph             HEAD-only Markdown reachability census under named resolver rules

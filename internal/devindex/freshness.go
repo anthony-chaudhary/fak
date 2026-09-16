@@ -19,7 +19,10 @@ package devindex
 //     so the whole self-index drift surface is answerable from one queryable place;
 //   - a DeadLLMSLink: a local .md link in llms.txt (the answer-engine index) that no
 //     longer resolves — the same dangling check DeadDocLinks does for INDEX.md, applied
-//     to the LLM-facing map so a dead link in the index answer engines read is caught.
+//     to the LLM-facing map so a dead link in the index answer engines read is caught;
+//   - a MissingLLMSLink: a docs page that declares `llms_authority: true` in its
+//     frontmatter but is ABSENT from llms.txt — the declared-authority converse of a
+//     dead link, catching an authority doc that silently fell out of the index.
 //
 // This file is the DETECTION half (in lane). REDDING THE BUILD on a finding is a CI /
 // *_test.go concern that lives outside internal/devindex — out of lane, reported as
@@ -49,6 +52,9 @@ const (
 	DriftOrphanNote DriftKind = "orphan-note"
 	// DriftDeadLLMSLink: an llms.txt local .md link that no longer resolves on disk.
 	DriftDeadLLMSLink DriftKind = "dead-llms-link"
+	// DriftMissingLLMSLink: a docs page declaring `llms_authority: true` that is ABSENT
+	// from llms.txt — the DECLARED-AUTHORITY converse of a dead link.
+	DriftMissingLLMSLink DriftKind = "missing-llms-link"
 )
 
 // Drift is one freshness finding: the kind, the offending token (a leaf name, a doc
@@ -127,8 +133,9 @@ func (c *Catalog) CheckFreshness() []Drift { return c.CheckFreshnessReport().Dri
 
 // CheckFreshnessReport compares the loaded catalog against its live sources on disk.
 //
-// It folds five detectors: undeclared leaves, dead INDEX.md doc links, main.go verb
-// cases missing from the C3 manifest, orphaned dated notes, and dead llms.txt links.
+// It folds six detectors: undeclared leaves, dead INDEX.md doc links, main.go verb
+// cases missing from the C3 manifest, orphaned dated notes, dead llms.txt links, and
+// declared-authority docs missing from llms.txt.
 // A source it cannot read still contributes no DRIFT finding — a missing source is
 // the absence of a claim, not a disagreement — but it is now recorded as an
 // Unchecked, so the detector that skipped it can never be mistaken for one that ran
@@ -192,6 +199,15 @@ func (c *Catalog) CheckFreshnessReport() FreshnessReport {
 			Kind:    DriftDeadLLMSLink,
 			Subject: link,
 			Reason:  "llms.txt links " + link + " which no longer exists on disk",
+		})
+	}
+	missing, missingUnchecked := c.missingLLMSLinks()
+	note(missingUnchecked)
+	for _, doc := range missing {
+		rep.Drifts = append(rep.Drifts, Drift{
+			Kind:    DriftMissingLLMSLink,
+			Subject: doc,
+			Reason:  doc + " declares llms_authority but is not linked from llms.txt",
 		})
 	}
 	sort.SliceStable(rep.Drifts, func(i, j int) bool {
@@ -437,6 +453,26 @@ func (c *Catalog) deadLLMSLinks() ([]string, *Unchecked) {
 	}
 	seen := map[string]bool{}
 	var dead []string
+	for _, clean := range llmsLocalMDTargets(b) {
+		if seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		if _, err := os.Stat(filepath.Join(c.Root, filepath.FromSlash(clean))); err != nil {
+			dead = append(dead, clean)
+		}
+	}
+	sort.Strings(dead)
+	return dead, nil
+}
+
+// llmsLocalMDTargets extracts the local .md link targets from llms.txt bytes, applying
+// the shared filter both llms.txt detectors use: an http(s) / mailto / in-page anchor /
+// absolute-path target is skipped, a trailing #anchor or ?query is stripped, and only a
+// .md target survives. NOT deduped (each caller keeps its own seen-set, since they count
+// different things). Sorted by nothing — the caller sorts.
+func llmsLocalMDTargets(b []byte) []string {
+	var targets []string
 	for _, m := range llmsLinkRE.FindAllStringSubmatch(string(b), -1) {
 		target := strings.TrimSpace(m[1])
 		if target == "" {
@@ -451,16 +487,80 @@ func (c *Catalog) deadLLMSLinks() ([]string, *Unchecked) {
 		if i := strings.IndexAny(clean, "#?"); i >= 0 {
 			clean = clean[:i]
 		}
-		if clean == "" || !strings.HasSuffix(clean, ".md") || seen[clean] {
+		if clean == "" || !strings.HasSuffix(clean, ".md") {
 			continue
 		}
-		seen[clean] = true
-		if _, err := os.Stat(filepath.Join(c.Root, filepath.FromSlash(clean))); err != nil {
-			dead = append(dead, clean)
-		}
+		targets = append(targets, clean)
 	}
-	sort.Strings(dead)
-	return dead, nil
+	return targets
+}
+
+// llmsAuthorityRE matches the declared-authority marker inside a doc's leading YAML
+// frontmatter block: `llms_authority: true` on its own line. A docs page opts into the
+// agent-facing authority set by declaring this marker, so the invariant is DECLARED, not
+// a hardcoded list that rots as docs move.
+var llmsAuthorityRE = regexp.MustCompile(`(?m)^llms_authority:\s*true\s*$`)
+
+// hasLLMSAuthority reports whether a doc's bytes carry a leading `---` frontmatter block
+// whose YAML declares `llms_authority: true`. Only a block at the very top of the file
+// counts (a marker buried in prose or a later block is not a declaration).
+func hasLLMSAuthority(b []byte) bool {
+	text := string(b)
+	if !strings.HasPrefix(text, "---\n") && !strings.HasPrefix(text, "---\r\n") {
+		return false
+	}
+	rest := text[strings.IndexByte(text, '\n')+1:]
+	end := strings.Index(rest, "\n---")
+	if end < 0 {
+		return false
+	}
+	return llmsAuthorityRE.MatchString(rest[:end])
+}
+
+// MissingLLMSLinks returns the repo-relative paths (forward slashes) of docs pages whose
+// frontmatter declares `llms_authority: true` but that are ABSENT from the local .md link
+// targets of llms.txt — the DECLARED-AUTHORITY converse of DeadLLMSLinks. DeadLLMSLinks
+// catches a link that is PRESENT but dangling; this catches a required authority doc that
+// silently fell OUT of the index, the class of regression where a page is never linked and
+// so never noticed as missing. Only docs that opt in via the marker are governed, so the
+// check is a no-op until a page declares itself. Sorted. A missing llms.txt yields nothing
+// (no map to be missing from) and reports an Unchecked instead.
+func (c *Catalog) MissingLLMSLinks() []string { m, _ := c.missingLLMSLinks(); return m }
+
+// missingLLMSLinks is MissingLLMSLinks plus the reason it could not finish: an llms.txt
+// this process cannot read means the answer-engine map was never scanned, which is not
+// the same answer as "every declared authority doc is linked".
+func (c *Catalog) missingLLMSLinks() ([]string, *Unchecked) {
+	b, err := os.ReadFile(filepath.Join(c.Root, "llms.txt"))
+	if err != nil {
+		return nil, &Unchecked{Detector: DriftMissingLLMSLink, Source: "llms.txt", Reason: err.Error()}
+	}
+	linked := map[string]bool{}
+	for _, t := range llmsLocalMDTargets(b) {
+		linked[t] = true
+	}
+	var missing []string
+	docsDir := filepath.Join(c.Root, "docs")
+	_ = filepath.WalkDir(docsDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
+			return nil
+		}
+		raw, rerr := os.ReadFile(path)
+		if rerr != nil || !hasLLMSAuthority(raw) {
+			return nil
+		}
+		rel, rerr := filepath.Rel(c.Root, path)
+		if rerr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if !linked[rel] {
+			missing = append(missing, rel)
+		}
+		return nil
+	})
+	sort.Strings(missing)
+	return missing, nil
 }
 
 // mainCaseRE captures the quoted verb tokens of a `case "a", "b":` line in a Go

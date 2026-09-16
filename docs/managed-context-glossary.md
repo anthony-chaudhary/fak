@@ -1,4 +1,5 @@
 ---
+llms_authority: true
 title: "The managed-context glossary and product contract"
 description: "The public glossary for fak's managed-context promise: assumption, resident view, pinned objective, budget envelope, reset transaction, context query, memory promotion, cache state, and relay vocabulary — grounded in shipped mechanisms where available and explicitly marked when planned."
 ---
