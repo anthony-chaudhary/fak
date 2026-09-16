@@ -84,6 +84,8 @@ This compact ledger indexes one addressable page per claim. Claim text and matur
 - [SHIPPED] [vCache Governor (M5)](docs/claims/vcache-governor-m5.md) [exposure: default-on]
 <a id="vcache-observability-per-sub-concept-lens"></a>
 - [SHIPPED] [vCache observability (per-sub-concept lens)](docs/claims/vcache-observability-per-sub-concept-lens.md) [exposure: default-on]
+<a id="cache-value-rollup"></a>
+- [SHIPPED] [Cache-value roll-up front door](docs/claims/cache-value-rollup.md) [exposure: default-on]
 <a id="what-fak-is-not"></a>
 - [SIMULATED] [What fak is NOT](docs/claims/what-fak-is-not.md)
 <a id="prior-art-posture"></a>
