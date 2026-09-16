@@ -33,6 +33,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -56,6 +57,87 @@ func nativeMaxTurnsOr(n int) int {
 	return n
 }
 
+// nativeAdmissionCeiling bounds how long a native owned-loop request will WAIT in the
+// scheduler queue before giving up. #1738: a client that opens concurrent streams
+// (OpenCode's title + build) hands the single-resident native server a second request it
+// cannot serve yet. Without a bound the second stream blocks silently until the client's
+// own provider header timeout and the turn never completes. Bounding the wait converts a
+// silent hang into either a bounded queue wait or a typed 429 the client can act on.
+//
+// Package-level (not per-Server) so wiring it needs no new Server field: production always
+// uses the default, and a test may shrink it to exercise the ceiling without paying 120s.
+const nativeAdmissionCeiling = 120 * time.Second
+
+// SetNativeAdmissionCeiling overrides the native queue-wait ceiling process-wide. A
+// non-positive value restores the default. It bounds the QUEUE WAIT only; once admitted, a
+// request keeps the caller's context so a client disconnect still cancels generation.
+// Exposed for tests and for an operator that wants a tighter busy-signal.
+func SetNativeAdmissionCeiling(d time.Duration) {
+	if d > 0 {
+		nativeAdmissionCeilingOverride.Store(int64(d))
+		return
+	}
+	nativeAdmissionCeilingOverride.Store(0)
+}
+
+// nativeAdmissionCeilingOverride holds an optional process-wide override (nanoseconds);
+// 0 means "use nativeAdmissionCeiling". Kept as an atomic so a test can set it without
+// racing concurrent serves.
+var nativeAdmissionCeilingOverride atomic.Int64
+
+// nativeAdmissionWait resolves the effective ceiling.
+func nativeAdmissionWait() time.Duration {
+	if d := nativeAdmissionCeilingOverride.Load(); d > 0 {
+		return time.Duration(d)
+	}
+	return nativeAdmissionCeiling
+}
+
+// admitNativeTurn is the admission boundary for the native owned-loop branches
+// (#1738). It is the same scheduler/token/principal gate every proxied wire crosses
+// (beginServedAdmission), wired onto the one served branch that previously had no
+// admission path at all: before this, `serveNativeMessages`/`serveNativeMessagesStream`
+// ran the owned loop directly, so a concurrent second request had no queue, no progress
+// signal, and no typed refusal — it simply blocked inside the resident model lock until
+// the client gave up.
+//
+// It returns the lease to defer (nil-safe when no gate is attached) and ok=false once it
+// has already written the client-visible outcome, exactly like admitStreamedTurn:
+// an admitted request proceeds, a QUEUED one waits here under nativeAdmissionCeiling,
+// and a refused/shed one is answered with the typed status admissionErrorStatus maps
+// (VerdictShed→429 scheduler_overloaded, VerdictDenied→403, VerdictRefused→400) rather
+// than a silent hang. A wait that outlives the ceiling is reported as a 429 shed, not a
+// context error, so the client sees the same actionable class as an explicit shed.
+//
+// It MUST be called before any header or SSE frame is written; a refusal discovered
+// after WriteHeader could only masquerade as a 200.
+func (s *Server) admitNativeTurn(ctx context.Context, w http.ResponseWriter, lane string, reqTrace string, req *agent.AnthropicMessagesRequest) (*AdmissionLease, bool) {
+	turn := servedSessionTurn{traceID: reqTrace, srv: s, turnCost: newTurnCostRecord(false)}
+	// Bound the QUEUE WAIT, never the generation: a request that reaches the model keeps
+	// the request's own context (client disconnect still cancels it). The bound exists so
+	// a second concurrent stream is told "busy" within a declared ceiling instead of
+	// hanging to the client's header timeout.
+	ceiling := nativeAdmissionWait()
+	waitCtx, cancel := context.WithTimeout(ctx, ceiling)
+	defer cancel()
+	lease, err := s.beginServedAdmission(waitCtx, turn, req.Messages, req.Tools, req.MaxTokens)
+	if err == nil {
+		return lease, true
+	}
+	s.logf("gateway: native scheduler admission refused (%s): %v", lane, err)
+	if errors.Is(err, context.DeadlineExceeded) {
+		// The wait outlived the declared ceiling while still queued: report it as a shed
+		// (429 + Retry-After) so the client backs off and retries, rather than surfacing a
+		// context-internal error the client cannot classify.
+		w.Header().Set("Retry-After", "1")
+		writeErrCode(w, http.StatusTooManyRequests, "scheduler_overloaded",
+			"native server busy: request still queued after "+ceiling.String()+" — retry")
+		return nil, false
+	}
+	s.writeUpstreamErr(w, err)
+	return nil, false
+}
+
 // serveNativeMessages handles a buffered /v1/messages turn by driving fak's owned
 // agent loop and rendering its final answer (plus the per-turn ArmMetrics witness) back
 // on the Anthropic wire. It is the native counterpart to completeAnthropicTurn.
@@ -71,6 +153,14 @@ func (s *Server) serveNativeMessages(w http.ResponseWriter, r *http.Request, req
 		writeNativeWireErr(w, wireErr)
 		return
 	}
+	// #1738: the owned-loop branch had no admission path, so a concurrent second stream
+	// blocked silently inside the resident model lock. Acquire the scheduler slot (and
+	// wait/refuse explicitly) before the loop runs and before any status is written.
+	lease, admitted := s.admitNativeTurn(r.Context(), w, "native buffered", reqTrace, req)
+	if !admitted {
+		return
+	}
+	defer lease.Release()
 	m, err := s.runNativeArmSeed(r.Context(), seed, reqTrace)
 	if err != nil {
 		// An owned-loop failure is classified like any served turn error: a device OOM
@@ -151,6 +241,17 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 		writeNativeWireErr(w, wireErr)
 		return
 	}
+
+	// #1738: the same pre-header admission placement as the buffered handler, and for the
+	// same reason the conversion above runs here: once the SSE 200 is written a refusal
+	// can only masquerade as a successful stream. Acquire (wait bounded, refuse typed)
+	// BEFORE any frame goes out so a concurrent second stream gets a real 429 rather than
+	// a stream that never produces a frame.
+	lease, admitted := s.admitNativeTurn(r.Context(), w, "native stream", reqTrace, req)
+	if !admitted {
+		return
+	}
+	defer lease.Release()
 
 	began := time.Now()
 	id := "msg_fak_" + itoa(uint64(began.UnixNano()))
