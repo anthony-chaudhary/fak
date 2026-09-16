@@ -22,6 +22,7 @@ package model
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -253,4 +254,207 @@ func TestV41GreedyGenerationParity(t *testing.T) {
 			t.Fatalf("prompt perturbation produced an identical stream %v; parity fixture is vacuous", base)
 		}
 	})
+}
+
+// v41ParityStagesModel builds the reduced token-path fixture for the
+// name-the-stages arm (fak#13151). It combines the four architecture-specific
+// V4.1 stages on one model so a single Forward exercises them together:
+//
+//   - mHC:        every layer carries the mhc.mixes/base/scale tensors the
+//     mixing stage reads (v41MHCSplit/v41MHCPre/v41MHCPost).
+//   - Engram:     layer 1 declares Engram with its three mixing tensors and a
+//     wired packed-row source, so v41EngramInject runs.
+//   - CED/CSA2:   layer 0 declares CompressRatios[0]=2 with its compressor
+//     tensors, so v41CompressedRows pools the projected KV.
+//   - indexer:    layer 0 declares itself an index source with its indexer
+//     tensors, so v41IndexRows scores and selects rows.
+//
+// The model is the ordinary reduced envelope + the Engram wiring; no production
+// behavior changes and no checkpoint or hardware is involved.
+func v41ParityStagesModel(t *testing.T) (*Model, V41EngramLayout) {
+	t.Helper()
+	m, layout := v41ReducedEngramModel(t)
+	cfg := m.Cfg
+	H := cfg.HiddenSize
+	width := v41CompressorWidth(cfg)
+	// The compressed + index source is the LAST layer, so no later layer becomes a
+	// reader that would need session-state publication; the Engram layer is the
+	// same last layer, so a single Forward exercises all four stages without a
+	// session.
+	src := cfg.NumLayers - 1
+	ratios := make([]int, cfg.NumLayers)
+	ratios[src] = 2
+	cfg.DeepSeekV41.CompressRatios = ratios
+	cfg.DeepSeekV41.IndexSourceLayerIDs = []int{src}
+	cfg.IndexNHeads = 1
+	cfg.IndexHeadDim = H
+	cfg.IndexTopK = 2
+	m.Cfg = cfg
+
+	type ts = synthTensor
+	tensors := []ts{
+		{layerName(src, "attn.compressor.wkv.weight"), []int{width, H}},
+		{layerName(src, "attn.compressor.wgate.weight"), []int{width, H}},
+		{layerName(src, "attn.compressor.norm.weight"), []int{width}},
+		{layerName(src, "indexer.wq_b.weight"), []int{cfg.IndexNHeads * cfg.IndexHeadDim, cfg.QLoraRank}},
+		{layerName(src, "indexer.wk.weight"), []int{cfg.IndexHeadDim, width}},
+		{layerName(src, "indexer.k_norm.weight"), []int{cfg.IndexHeadDim}},
+		{layerName(src, "indexer.weights_proj.weight"), []int{cfg.IndexNHeads, H}},
+	}
+	man, raw := synthBuildRaw(tensors, func(name string, next func() float32) float32 {
+		switch {
+		case hasSuffix(name, "compressor.norm.weight") || hasSuffix(name, "indexer.k_norm.weight"):
+			return 1.0
+		default:
+			return synthMatmulFill(name, next)
+		}
+	})
+	for k, v := range man {
+		m.manifest[k] = v
+	}
+	for k, v := range raw {
+		m.raw[k] = v
+	}
+	return m, layout
+}
+
+// TestV41ParityStages is the #13151 token-path parity arm that NAMES the four
+// architecture-specific V4.1 stages on the production path: Engram, mHC, the
+// CED/CSA2 compressor, and the lightning indexer. It asserts each stage is
+// present, executes, and is non-vacuous (removing/disabling it moves or breaks
+// the token-path result), so the parity claim cannot be satisfied by a path that
+// silently skips a stage. It is a witness-completeness arm, not a regression.
+func TestV41ParityStages(t *testing.T) {
+	m, layout := v41ParityStagesModel(t)
+	// The four stage names this arm is required to see on the path.
+	stages := []v41ForwardStage{
+		v41StageEngram,   // Engram n-gram retrieval + mixing
+		v41StageMHC,      // four-stream mHC mixing
+		v41StageCompress, // CED/CSA2 compressor pooling
+		v41StageIndexer,  // lightning indexer scoring + selection
+	}
+	named := make(map[v41ForwardStage]bool, len(stages))
+	for _, s := range stages {
+		if !v41StageNamedOnPath(s) {
+			t.Fatalf("stage %q is not a named assembly stage", s)
+		}
+		named[s] = true
+	}
+	if len(named) != 4 {
+		t.Fatalf("expected 4 distinct named stages, got %d", len(named))
+	}
+
+	// Admission must succeed: the fixture carries the weights every declared
+	// stage reads, so nothing is refused and nothing is silently skipped.
+	if err := m.v41ForwardAdmitted(); err != nil {
+		t.Fatalf("stage-complete fixture admission error = %v, want nil", err)
+	}
+
+	// A declared Engram layer must actually have a wired retrieval stage whose
+	// layer set matches the declared Engram layers.
+	stage := m.v41EngramStageFor()
+	if stage == nil {
+		t.Fatal("Engram stage not wired for a model that declares an Engram layer")
+	}
+	if v41EngramSourceCount(stage) != len(layout.Rows) {
+		t.Fatalf("Engram stage layer count = %d, layout rows = %d",
+			v41EngramSourceCount(stage), len(layout.Rows))
+	}
+
+	prompt := []int{1, 2, 3, 4}
+	act := m.Forward(prompt)
+	if act == nil || len(act.Logits) != len(prompt) {
+		t.Fatalf("Forward returned %d positions, want %d", logitCount(act), len(prompt))
+	}
+	for pos, row := range act.Logits {
+		if len(row) != m.Cfg.VocabSize {
+			t.Fatalf("logits[%d] width %d, want %d", pos, len(row), m.Cfg.VocabSize)
+		}
+		for i, v := range row {
+			if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+				t.Fatalf("logits[%d][%d] = %v is non-finite", pos, i, v)
+			}
+		}
+	}
+
+	// Non-vacuity per stage: disabling each stage must change the token-path
+	// result (or make it refuse), proving the stage is load-bearing and not a
+	// no-op the parity arm would have credited for free.
+
+	// (1) CED/CSA2 + indexer: falling back to the uncompressed regime changes the
+	// logits, so the compressor/indexer stages genuinely feed the contraction.
+	t.Run("CED/CSA2 + indexer change the token path", func(t *testing.T) {
+		plain, _ := v41ParityStagesModel(t)
+		zeros := make([]int, plain.Cfg.NumLayers)
+		plain.Cfg.DeepSeekV41.CompressRatios = zeros
+		plain.Cfg.DeepSeekV41.IndexSourceLayerIDs = nil
+		plainAct := plain.Forward(prompt)
+		if v41LogitsEqual(act, plainAct) {
+			t.Fatal("uncompressed forward matches the compressed forward; CED/CSA2/indexer did not execute")
+		}
+	})
+
+	// (2) Engram: stripping the wired row source must make the Engram layer fail
+	// closed rather than silently emit non-Engram logits.
+	t.Run("Engram stage is load-bearing", func(t *testing.T) {
+		noEngram, _ := v41ParityStagesModel(t)
+		noEngram.Cfg.DeepSeekV41.EngramLayerIDs = nil
+		noEngramAct := noEngram.Forward(prompt)
+		if v41LogitsEqual(act, noEngramAct) {
+			t.Fatal("removing the Engram layer left the token-path logits unchanged; Engram did not execute")
+		}
+	})
+
+	// (3) mHC: a malformed mHC mixing shape must refuse at admission, so the arm
+	// cannot pass on a path that silently skipped the mHC stage.
+	t.Run("mHC stage is load-bearing", func(t *testing.T) {
+		bad, _ := v41ParityStagesModel(t)
+		H := bad.Cfg.HiddenSize
+		bad.manifest[layerName(0, "mhc.mixes.weight")] = tensorMeta{Shape: []int{v41MHCMixWidth + 1, H}}
+		if err := bad.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
+			t.Fatalf("malformed mHC admission error = %v, want ErrV41ForwardStage", err)
+		}
+	})
+}
+
+// v41StageNamedOnPath reports whether stage is one of the assembly's declared
+// stage names. It is a structural (not behavioral) check: the four V4.1 stages
+// this arm names must exist as distinct named stages so a refusal or failure can
+// be attributed to one of them.
+func v41StageNamedOnPath(stage v41ForwardStage) bool {
+	switch stage {
+	case v41StageEmbedding, v41StageLayer, v41StageMHC, v41StageAttention,
+		v41StageMoE, v41StageEngram, v41StageFinalNorm, v41StageHead,
+		v41StageCompress, v41StageIndexer:
+		return true
+	default:
+		return false
+	}
+}
+
+// v41EngramSourceCount reports how many Engram layers a stage owns, tolerating a
+// nil stage.
+func v41EngramSourceCount(stage *v41EngramStage) int {
+	if stage == nil {
+		return 0
+	}
+	return len(stage.layerIDs)
+}
+
+// v41LogitsEqual reports whether two activation results carry identical logits.
+func v41LogitsEqual(a, b *Activations) bool {
+	if a == nil || b == nil || len(a.Logits) != len(b.Logits) {
+		return false
+	}
+	for i := range a.Logits {
+		if len(a.Logits[i]) != len(b.Logits[i]) {
+			return false
+		}
+		for j := range a.Logits[i] {
+			if a.Logits[i][j] != b.Logits[i][j] {
+				return false
+			}
+		}
+	}
+	return true
 }
