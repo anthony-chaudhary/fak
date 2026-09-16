@@ -194,9 +194,37 @@ func tensorElems(t TensorInfo) (uint64, error) {
 	return n, nil
 }
 
+// MaxEagerF32Bytes is the fail-closed ceiling on a SINGLE tensor's eager f32 payload in
+// dequantF32IntoLimited. A k-quant tensor that the raw-resident/streamed tier did not
+// intercept must never trigger an unbounded make([]float32, n): a ~98.3B-element span
+// (the published V4.1 Engram table, 366.2 GiB) is a hard Go runtime OOM, not a typed
+// refusal (fak#13152). 16 GiB is far above any legitimate single dense tensor a Halo
+// appliance loads resident (the largest real tensors are the ~5-10 GB embeddings and the
+// per-rank dense base) while still refusing a multi-hundred-GiB span. A caller with a
+// genuinely larger single tensor raises this explicitly rather than the loader silently
+// attempting the allocation. It is a var, not a const, so a test can lower it to a
+// deterministic fixture size without materializing gigabytes.
+var MaxEagerF32Bytes int64 = 16 << 30
+
+// ErrEagerF32BudgetExceeded is the typed refusal a tensor whose f32 payload exceeds
+// MaxEagerF32Bytes returns from dequantF32IntoLimited. It NAMES the tensor so the caller
+// can see exactly which weight the raw-resident/streamed tier failed to intercept, rather
+// than reading a bare runtime OOM.
+type ErrEagerF32BudgetExceeded struct {
+	Tensor    string
+	Type      TensorType
+	WantBytes int64
+	Limit     int64
+}
+
+func (e *ErrEagerF32BudgetExceeded) Error() string {
+	return fmt.Sprintf("gguf: eager f32 dequant of tensor %s (type %s) would allocate %d bytes (%.1f GiB), over the %d-byte (%.1f GiB) eager-f32 budget; the raw-resident/streamed tier must admit this tensor or the caller must stream it",
+		e.Tensor, e.Type, e.WantBytes, float64(e.WantBytes)/(1<<30), e.Limit, float64(e.Limit)/(1<<30))
+}
+
 // reuseF32 returns a length-n float32 slice backed by buf when buf's capacity allows, else
 // a fresh allocation. The caller overwrites every returned element, so the reused tail is
-// not zeroed — and never leaks into the result, whose length is exactly n.
+// not zeroed - and never leaks into the result, whose length is exactly n.
 func reuseF32(buf []float32, n int) []float32 {
 	if cap(buf) >= n {
 		return buf[:n]
@@ -329,6 +357,13 @@ func dequantF32IntoLimited(scratch []float32, t TensorInfo, raw []byte, workerLi
 	}
 	if elems > uint64(math.MaxInt) {
 		return nil, fmt.Errorf("gguf: tensor %s element count overflows int", t.Name)
+	}
+	if want := int64(elems) * 4; want > MaxEagerF32Bytes {
+		// Fail closed BEFORE the allocation: a tensor the raw-resident/streamed tier
+		// did not intercept must not become an unbounded make([]float32, n). The
+		// named typed refusal lets the caller see which weight leaked past the tier
+		// instead of reading a bare "fatal error: runtime: out of memory" (fak#13152).
+		return nil, &ErrEagerF32BudgetExceeded{Tensor: t.Name, Type: t.Type, WantBytes: want, Limit: MaxEagerF32Bytes}
 	}
 	out := reuseF32(scratch, int(elems))
 	switch t.Type {

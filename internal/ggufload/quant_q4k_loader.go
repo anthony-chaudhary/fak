@@ -938,6 +938,16 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 	if archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
 		return tw
 	}
+	// A V4.1 packed Engram table is NOT a matmul weight: the forward reads it
+	// row-wise through the bounded V41EngramRowSource seam, never as an f32
+	// tensor. Eager-dequantizing the published Q2_K table is a ~98.3B-element
+	// (~366.2 GiB) single allocation that aborts the runtime with
+	// "fatal error: runtime: out of memory" (fak#13152). Drop it from the
+	// materializing load, exactly like the MTP/vision sidecar above; the serve
+	// wiring opens the row source separately via V41EngramQ2KOpen.
+	if archIsDeepSeek41(cfg.ModelType) && deepseek41EngramTableTensor(info.Name) {
+		return tw
+	}
 	if archUsesMLAMoELayout(cfg.ModelType) {
 		if layer, half, ok := glmMoeDsaSplitKVB(info.Name); ok {
 			shape, data, err := s.dequantGGUFShapeF32Limited(info, innerWorkers)

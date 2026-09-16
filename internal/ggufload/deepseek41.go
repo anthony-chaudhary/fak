@@ -488,6 +488,33 @@ func deepseek41HasEngramTable(f *File) bool {
 	return false
 }
 
+// deepseek41EngramTableTensor reports whether a GGUF tensor name is a per-layer
+// PACKED Engram table (blk.<L>.engram_embd.weight, and the legacy
+// engram_table / engram_key / engram_value spellings). The packed table is NOT a
+// matmul weight: the native V4.1 forward reads it row-wise through the bounded
+// model.V41EngramRowSource seam (V41EngramQ2KOpen / V41EngramGGUFOpen), never as
+// an f32 matrix. The materializing quant loaders must therefore NOT
+// eager-dequantize it - on the published vcruz Q2_K checkpoint one table is
+// [256, ~384M rows] = ~98.3B elements, i.e. a 366.2 GiB f32 span that OOMs the
+// Go runtime (fak#13152). The projection-side Engram tensors
+// (engram_wkv/engram_q/engram_k and their forward spellings) are deliberately
+// EXCLUDED: those ARE consumed as f32 weights by the forward and must load.
+func deepseek41EngramTableTensor(name string) bool {
+	_, _, suffix, ok := splitDeepSeek41BlkTensor(name)
+	if !ok {
+		return false
+	}
+	leaf, isEngram := deepseek41EngramSuffixName(suffix)
+	if !isEngram {
+		return false
+	}
+	switch leaf {
+	case "engram_table", "engram_embd":
+		return true
+	}
+	return false
+}
+
 // splitDeepSeek41BlkTensor splits "blk.<layer>.<suffix>" into its layer index and
 // suffix. It is the deepseek41 front half of the name classifiers; ok=false for
 // a non-blk or non-integer-layer name.
