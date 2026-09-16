@@ -20,13 +20,13 @@ import (
 )
 
 var allowedRootRequires = map[string]string{
-	"golang.org/x/sys":  "v0.46.0",
+	"golang.org/x/sys":  "v0.48.0",
 	"golang.org/x/term": "v0.44.0",
 }
 
 var allowedRootSum = map[string]bool{
-	"golang.org/x/sys v0.46.0 h1:noSf2Fq6F8DBgS+LysIkx7rIExoNHJsxOAtPp4rthXw=":         true,
-	"golang.org/x/sys v0.46.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=":  true,
+	"golang.org/x/sys v0.48.0 h1:bbX/i/6MgT9BVLM9RT1thmxL04yeTAhbEz4SyadbXoo=":         true,
+	"golang.org/x/sys v0.48.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=":  true,
 	"golang.org/x/term v0.44.0 h1:0rLvDRCtNj0gZkyIXhCyOb2OAzEhLVqc4B+hrsBhrmc=":        true,
 	"golang.org/x/term v0.44.0/go.mod h1:7ze4MdzUzLXpSAoFP1H0bOI9aXDqveSvatT5vKcFh2Y=": true,
 }

@@ -272,7 +272,7 @@
     },
     {
       "class": "go_module",
-      "reference": "golang.org/x/sys@v0.46.0",
+      "reference": "golang.org/x/sys@v0.48.0",
       "consumer_domains": [
         "go.mod"
       ],
