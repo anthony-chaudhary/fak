@@ -35,6 +35,38 @@ type splitKernel struct {
 // form, the split would have to prep per side; today it does not, so prep stays a no-op pass.
 func (k splitKernel) prep(x []float32) any { return x }
 
+// expertSession resolves the *Session behind this split's DEVICE side, so the routed-expert device
+// route stays reachable under --n-cpu-moe (#13128). A split's host side is a residentKernel (no
+// session); the device side is where a backend session lives (backendKernel). Returns nil for any
+// other device kernel, which keeps the split's host-CPU arm the fail-closed default.
+func (k splitKernel) expertSession() *Session {
+	if bk, ok := k.device.(backendKernel); ok {
+		return bk.s
+	}
+	return nil
+}
+
+// splitDeviceExpertInput is the PER-ENCODING device-kernel predicate the offload split consults
+// before pinning a routed expert to host CPU. It reports whether a routed expert's gate/up
+// projections can execute on the split's DEVICE backend for this encoding. It is deliberately
+// narrower than expertSwiGLUHAL: it asks only whether a device kernel EXISTS for the encoding, so a
+// caller can decide placement before staging any bytes.
+//
+// `name` is the weight name being placed. `onHost` is the split's own placement predicate: a weight
+// the split already routes to the device (onHost(name)==false) is a device candidate; a host-routed
+// weight is NOT, so the host arm is unchanged.
+func (k splitKernel) splitDeviceExpertInput(name string) bool {
+	sess := k.expertSession()
+	if sess == nil {
+		return false
+	}
+	// The split must not steal a weight it has placed on the host.
+	if k.onHost != nil && k.onHost(name) {
+		return false
+	}
+	return sess.supportsRoutedExpertKQuant()
+}
+
 // mul routes the named weight to the host or device sub-kernel by the predicate. The chosen
 // sub-kernel computes it exactly as it would in an all-host / all-device forward, so the split is
 // a pure placement decision over the SAME math.

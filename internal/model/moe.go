@@ -197,6 +197,21 @@ func routedExpertKQuantActive(mat matKernel) bool {
 	return sess.supportsRoutedExpertKQuant()
 }
 
+// isDeviceInputHALKernel reports whether mat is a kernel whose gate/up projections
+// legitimately run through the q4kExpertInputHAL seam. That seam predates #13128 and
+// was sessionQ4KKernel-only (the legacy blockStep kernel); this preserves its behavior
+// exactly while adding the one new caller: a splitKernel whose device side owns the
+// expert. backendKernel and residentKernel return false — backendKernel already stages
+// gate/up through its own mul (glmDsaWeightHAL), so routing it here would double the
+// device work, and residentKernel has no device side at all.
+func isDeviceInputHALKernel(mat matKernel) bool {
+	switch mat.(type) {
+	case sessionQ4KKernel, splitKernel:
+		return true
+	}
+	return false
+}
+
 // expertSwiGLU runs one expert's dense SwiGLU over xn and returns its [H] output.
 // It is the per-expert primitive the MoE weighted sum reuses — the same SwiGLU
 // arithmetic as the dense path, just over an expert-indexed weight set.
@@ -206,16 +221,33 @@ func expertSwiGLU(m *Model, layer, expert int, xn any, mat matKernel) []float32 
 	gn := expertName(layer, expert, "gate_proj.weight")
 	un := expertName(layer, expert, "up_proj.weight")
 	dn := expertName(layer, expert, "down_proj.weight")
-	// The session behind mat, when it has one. Admit both sessionQ4KKernel (the generic
-	// blockStep kernel) AND backendKernel (what decodeBandGLMDsa actually builds);
-	// residentKernel and splitKernel carry none. It resolves the device HAL route below
-	// and owns the reachability counters, so both outcomes land on the same session.
+	// The session behind mat, when it has one. Admit sessionQ4KKernel (the generic
+	// blockStep kernel), backendKernel (what decodeBandGLMDsa builds), AND splitKernel
+	// (the --n-cpu-moe hybrid), whose DEVICE side may be a backendKernel. It resolves the
+	// device HAL route below and owns the reachability counters, so both outcomes land on
+	// the same session. residentKernel carries none.
 	var sess *Session
 	switch mk := mat.(type) {
 	case sessionQ4KKernel:
 		sess = mk.s
 	case backendKernel:
 		sess = mk.s
+	case splitKernel:
+		// The device side of a --n-cpu-moe split. The host side is a residentKernel
+		// (no session); resolving it here is what makes the device routed-expert
+		// route reachable under the offload split (#13128).
+		sess = mk.expertSession()
+	}
+	// Under a split, an expert the split placed on the HOST must not be stolen to the
+	// device: gate every device seam below on the split's own predicate, keyed on the
+	// gate weight (all three projections of one expert share a placement by
+	// construction). A non-split kernel (sessionQ4KKernel/backendKernel) has no split
+	// placement to honor, so this stays true and their behavior is unchanged. For a
+	// splitKernel it is false whenever the split routes this expert to host RAM, which
+	// keeps the host-CPU arm byte-for-byte (#13128).
+	deviceEligible := true
+	if sk, ok := mat.(splitKernel); ok {
+		deviceEligible = sk.splitDeviceExpertInput(gn)
 	}
 	// CUDA/device HAL route: keep all three expert projections and SwiGLU on the
 	// backend. The helper admits only bias-free SiLU experts whose gate/up/down
@@ -226,7 +258,7 @@ func expertSwiGLU(m *Model, layer, expert int, xn any, mat matKernel) []float32 
 		!m.has(expertName(layer, expert, "down_proj.bias")) {
 		// expertSwiGLUHAL itself gates on supportsRoutedExpertKQuant + halW, so a
 		// non-capable backend returns ok=false and falls through unchanged (#5111).
-		if sess != nil {
+		if sess != nil && deviceEligible {
 			if xf, ok := xn.([]float32); ok {
 				if out, ok := sess.expertSwiGLUHAL(gn, un, dn, xf); ok {
 					sess.recordRoutedExpertDeviceHAL(1)
@@ -275,7 +307,19 @@ func expertSwiGLU(m *Model, layer, expert int, xn any, mat matKernel) []float32 
 	// their I-wide activation on the backend when possible; read back only the fused intermediate
 	// for the still-host Q5_K/Q6_K down projection. This is intentionally an incremental seam: once
 	// those k-quant device kernels land, the same helper can retain down and the H-wide result too.
-	g, residentInput := q4kExpertInputHAL(func() *Session { sk, _ := mat.(sessionQ4KKernel); return sk.s }(), gn, un, xn, I, H)
+	// sess is nil for a host-routed split expert (deviceEligible false), so the seam declines to the
+	// host path exactly as it did before this route existed — a split never steals a host expert (#13128).
+	//
+	// This seam was sessionQ4KKernel-only by construction (the legacy blockStep kernel); a plain
+	// backendKernel must keep passing nil here, because its own mul already stages gate/up through
+	// glmDsaWeightHAL and would otherwise pay a duplicate device SwiGLU. The #13128 route adds exactly
+	// one new caller: a splitKernel whose DEVICE side owns this expert.
+	inputHALSess := deviceEligible && sess != nil && isDeviceInputHALKernel(mat)
+	var moeSess *Session
+	if inputHALSess {
+		moeSess = sess
+	}
+	g, residentInput := q4kExpertInputHAL(moeSess, gn, un, xn, I, H)
 	if !residentInput {
 		// gate+up share the same activation xn, so dispatch them as ONE group: a Q4_K session kernel
 		// quantizes xn once and runs both output sets under a single goroutine barrier (the same
