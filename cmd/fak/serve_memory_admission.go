@@ -374,6 +374,34 @@ func metalLeaseRefusalAdviceFor(probe gpulease.HolderProbe, path string) string 
 	}
 }
 
+// gpuWaitBoundFromEnv is the caller's willingness to queue for the machine-wide
+// GPU lease, read from FAK_GPU_WAIT_BOUND (a Go duration such as "120s" or "2m").
+// Zero means the caller cannot bound the wait, which makes a progressing-but-
+// unattachable holder a TRUTHFUL_REFUSE rather than a WAIT_WITH_BOUND: the
+// default must not invent a bound the operator never offered.
+func gpuWaitBoundFromEnv() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("FAK_GPU_WAIT_BOUND"))
+	if raw == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 0 {
+		return 0
+	}
+	return d
+}
+
+// metalLeaseRefusalError builds the bounded, typed Metal residency refusal. It
+// replaces the historical bare "stop the holder process and retry" tail with the
+// gpulease scale-out decision, so the error names one of ATTACH_OWNER /
+// WAIT_WITH_BOUND / TRUTHFUL_REFUSE and carries the retry bound when one applies.
+// Split from the acquisition branch so the wording is testable directly.
+func metalLeaseRefusalError(err error, path string, waitBound time.Duration) error {
+	rec := gpulease.DecideScaleOut(err, gpulease.ScaleOutOptions{Path: path, WaitBound: waitBound})
+	return fmt.Errorf("fak local launcher: Metal residency admission refused before model load: %w; %s; %s",
+		err, rec.String(), metalLeaseRefusalAdvice(path))
+}
+
 func loadLocalLauncherModelWithMetalLease(useMetal bool, ggufPath string, opts gpulease.Options, load func(), fitFloors ...*serveFitBudget) (release func(), err error) {
 	if !useMetal || strings.TrimSpace(ggufPath) == "" {
 		load()
@@ -391,7 +419,7 @@ func loadLocalLauncherModelWithMetalLease(useMetal bool, ggufPath string, opts g
 			path = gpulease.DefaultPath()
 		}
 		if errors.Is(err, gpulease.ErrBusy) {
-			return func() {}, fmt.Errorf("fak local launcher: Metal residency admission refused before model load: %w; %s", err, metalLeaseRefusalAdvice(path))
+			return func() {}, metalLeaseRefusalError(err, path, gpuWaitBoundFromEnv())
 		}
 		return func() {}, fmt.Errorf("fak local launcher: acquire Metal residency lease %s before model load: %w", path, err)
 	}
@@ -531,7 +559,8 @@ func loadLocalLauncherModelWithVulkanLease(useVulkan bool, ggufPath string, opts
 			path = gpulease.DefaultPath()
 		}
 		if errors.Is(err, gpulease.ErrBusy) {
-			return func() {}, fmt.Errorf("fak local launcher: Vulkan residency admission refused before model load: %w; stop the holder process and retry, or run a CPU/non-Vulkan serve", err)
+			rec := gpulease.DecideScaleOut(err, gpulease.ScaleOutOptions{Path: path, WaitBound: gpuWaitBoundFromEnv()})
+			return func() {}, fmt.Errorf("fak local launcher: Vulkan residency admission refused before model load: %w; %s", err, rec.String())
 		}
 		return func() {}, fmt.Errorf("fak local launcher: acquire Vulkan residency lease %s before model load: %w", path, err)
 	}

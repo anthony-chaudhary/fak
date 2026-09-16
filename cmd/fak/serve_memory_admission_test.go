@@ -353,7 +353,7 @@ func TestLoadLocalLauncherModelWithVulkanLeaseRefusesBeforeLoadAndReleasesAfterS
 	if !errors.Is(err, gpulease.ErrBusy) {
 		t.Fatalf("busy admission error = %v, want errors.Is(ErrBusy)", err)
 	}
-	for _, want := range []string{path, "pid " + strconv.Itoa(child.Process.Pid), "before model load", "stop the holder process"} {
+	for _, want := range []string{path, "pid " + strconv.Itoa(child.Process.Pid), "before model load", string(gpulease.ScaleOutRefuse)} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("busy admission error %q does not contain %q", err, want)
 		}
@@ -1258,4 +1258,63 @@ func TestLoadLocalLauncherModelWithMetalLeaseStableFloorAdmitsUnderDip(t *testin
 			t.Fatalf("load must not run under critical pressure, got %d", loads)
 		}
 	})
+}
+
+// TestMetalLeaseRefusalErrorCarriesScaleOutVerdict is the #1549 witness: a second
+// GPU-heavy launch that cannot acquire the exclusive lease must carry a TYPED,
+// BOUNDED decision (TRUTHFUL_REFUSE / WAIT_WITH_BOUND / ATTACH_OWNER) rather than
+// only the bare holder pid. It also proves the end-to-end Metal branch produces
+// the typed word by holding a real temp-path lease and refusing the launch.
+func TestMetalLeaseRefusalErrorCarriesScaleOutVerdict(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gpu.lease")
+	held, err := gpulease.Acquire(gpulease.Options{Path: path})
+	if err != nil {
+		t.Fatalf("hold exclusive lease: %v", err)
+	}
+	defer held.Release()
+
+	// The pure helper: with no wait bound and no attach surface, the decision is a
+	// truthful refusal that names the holder and the reason.
+	busy := &gpulease.BusyError{Path: path, PID: os.Getpid()}
+	refusal := metalLeaseRefusalError(busy, path, 0)
+	if !strings.Contains(refusal.Error(), "Metal residency admission refused before model load") {
+		t.Fatalf("refusal lost its prefix: %v", refusal)
+	}
+	if !strings.Contains(refusal.Error(), string(gpulease.ScaleOutRefuse)) {
+		t.Fatalf("refusal %q does not carry the typed verdict %q", refusal, gpulease.ScaleOutRefuse)
+	}
+	if !errors.Is(refusal, gpulease.ErrBusy) {
+		t.Fatalf("refusal must preserve errors.Is(ErrBusy): %v", refusal)
+	}
+
+	// With a wait bound, the same holder still yields a typed verdict, and a
+	// WAIT decision would carry the bound. Either way it must name the verdict.
+	bounded := metalLeaseRefusalError(busy, path, 30*time.Second)
+	if !strings.Contains(bounded.Error(), string(gpulease.ScaleOutRefuse)) &&
+		!strings.Contains(bounded.Error(), string(gpulease.ScaleOutWaitWithBound)) {
+		t.Fatalf("bounded refusal %q does not carry a typed verdict", bounded)
+	}
+
+	// End-to-end: the Metal branch over a live temp-path lease must produce the
+	// typed word and must not run the loader.
+	loads := 0
+	release, err := loadLocalLauncherModelWithMetalLease(true, "typed-refusal.gguf", gpulease.Options{Path: path}, func() {
+		loads++
+	})
+	if err == nil {
+		release()
+		t.Fatal("Metal serve admission succeeded while lease was held")
+	}
+	if loads != 0 {
+		t.Fatalf("loader ran on refusal, got %d loads", loads)
+	}
+	text := err.Error()
+	if !strings.Contains(text, "Metal residency admission refused before model load") {
+		t.Fatalf("error %q lost the refusal prefix", text)
+	}
+	if !strings.Contains(text, string(gpulease.ScaleOutRefuse)) &&
+		!strings.Contains(text, string(gpulease.ScaleOutWaitWithBound)) &&
+		!strings.Contains(text, string(gpulease.ScaleOutAttachOwner)) {
+		t.Fatalf("error %q carries no typed scale-out verdict", text)
+	}
 }
