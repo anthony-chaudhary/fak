@@ -203,6 +203,75 @@ func refuseDevicePlanAgainstFit(be compute.Backend, plan compute.MemoryPlan, fit
 	return plan, compute.RefuseMemoryPlanIfTooBigForReportedDevice(be, plan, fit.Base, fit.Base, fit.Base > 0, fit.Headroom)
 }
 
+// serveDeviceStagingHostCharge is the TRANSIENT host-resident charge a device serve materializes
+// while STAGING its device-scoped weights (fak#13171). A device-scoped weight is not born in VRAM:
+// the loader reads its bytes into host RAM, dequantizes/transcodes, uploads it to the device, and
+// frees the host copy — so the device-scoped dense total is ALSO a transient host demand, on top of
+// the already-host-scoped routed-expert pool. RefuseHostScopedPlanIfTooBigForHost judges ONLY
+// plan.HostTotal(), so a 63.09 GiB device dense charge sails past it and the process is SIGKILLed
+// by the Linux OOM-killer mid-staging (the witnessed strix3 kill: weights=63.092GiB against
+// MemTotal 62.4 GiB, anon-rss 37.1 GiB before the gateway bound :8084). This is the charge the
+// guard below bounds against real host RAM.
+func serveDeviceStagingHostCharge(plan compute.MemoryPlan) int64 {
+	return plan.DeviceTotal()
+}
+
+// serveDeviceStagingHostPlan is the plan the staging guard judges: ONE host-scoped row carrying the
+// device-scoped staging transit, so the established reported-host refusal measures it against host
+// RAM without re-charging the resident expert pool (compute.RefuseHostScopedPlanIfTooBigForHost
+// already judges those host-scoped rows on the same arm). An empty plan yields nil (nothing to
+// stage -> the guard is inert).
+func serveDeviceStagingHostPlan(plan compute.MemoryPlan) compute.MemoryPlan {
+	staging := serveDeviceStagingHostCharge(plan)
+	if staging <= 0 {
+		return nil
+	}
+	return compute.MemoryPlan{{
+		Class:  compute.MemoryScratchpad,
+		Scope:  compute.MemoryScopeHost,
+		Bytes:  staging,
+		Detail: "gguf-device-staging-host-transit",
+	}}
+}
+
+// refuseDeviceStagingAgainstHostFit judges the device cpu-offload arm's transient host staging
+// charge (fak#13171) against the SAME host budget snapshot the streamed arm decision was sized from
+// (serveStreamedHostFit). Base<=0 means the host ceiling was unprobeable -> fail open, exactly as
+// every other capacity rung here. On overflow it returns the typed *compute.FitError the reported-
+// host refusal builds, which NAMES the demand and the shortfall instead of letting the kernel OOM
+// decide. A device serve whose device dense staging fits is unchanged.
+func refuseDeviceStagingAgainstHostFit(plan compute.MemoryPlan, fit serveFitBudget) error {
+	if fit.Base <= 0 {
+		return nil
+	}
+	staging := serveDeviceStagingHostPlan(plan)
+	return compute.RefuseMemoryPlanIfTooBigForReportedHost(staging, fit.Base, fit.Base, true, fit.Headroom)
+}
+
+// logServeDeviceCPUOffloadArmStaging is the ONE pre-staging startup line the device
+// --cpu-offload-experts arm emits BEFORE loadResidentQ4KDevice (fak#13171). The prior physical
+// receipt had to INFER streamed=false from an ABSENT "serving-expert-residency" message: that
+// message rides loadMessages, which the gateway prints only AFTER the load, so a serve SIGKILLed
+// during staging never emitted it and the arm that actually ran was invisible. This prints to
+// stderr at STAGING TIME (the logServeAutoSizedContext convention) and names the arm decision
+// (streamed vs resident), the bounded/charged host bytes, and the host budget, so the next
+// physical run witnesses which arm was taken without inference.
+func logServeDeviceCPUOffloadArmStaging(backend compute.Backend, streamed bool, streamedBound int64, plan compute.MemoryPlan, fit serveFitBudget) {
+	arm := "resident"
+	charged := serveDeviceStagingHostCharge(plan) + plan.HostTotal()
+	if streamed {
+		arm = fmt.Sprintf("streamed(resident-bound=%s)", bytesText(uint64(max(streamedBound, 0))))
+		charged = int64(max(streamedBound, 0)) + plan.DeviceTotal()
+	}
+	backendName := "none"
+	if backend != nil {
+		backendName = backend.Name()
+	}
+	fmt.Fprintf(os.Stderr,
+		"fak: device --cpu-offload-experts arm=%s backend=%s staging-host-charge=%s host-budget=%s (bounded before staging; device dense bytes transit host RAM, fak#13171)\n",
+		arm, backendName, bytesText(uint64(max(charged, 0))), bytesText(uint64(max(fit.avail(), 0))))
+}
+
 type deviceWeightBudgetBackend interface {
 	DeviceWeightBudget() (bytes int64, enabled bool)
 }
