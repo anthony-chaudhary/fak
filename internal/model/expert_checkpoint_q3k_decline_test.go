@@ -2,122 +2,139 @@ package model
 
 import (
 	"bytes"
-	"errors"
-	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
-// expert_checkpoint_q3k_decline_test.go — the Q3_K SETTLEMENT witness for fak#13122.
+// expert_checkpoint_q3k_decline_test.go — the Q3_K ADMISSION witness for fak#13144.
 //
-// The DeepSeek-V4.1 Q2_K artifact is published with a Q3_K down-projection form, so the question
-// this file settles is whether the checkpoint tier should ADMIT Q3_K alongside Q2_K. The answer is
-// no, and it is forced by the representative downstream, not by taste: staging().mk must return a
-// compute.Tensor, and no Q3_K host-tensor constructor exists (the enum, blockGeometry(), dtype()
-// and weight() have no Q3_K member, and grep finds no compute.Q3_K / compute.NewQ3K). The quant
-// registry confirms the same asymmetry from the other side — Q3_K is registered as a NON-HAL
-// descriptor with a zero ComputeDtype, while Q2_K is HAL-supported with a real constructor.
+// This file REPLACES the fak#13122 settlement witness that used to live here. That settlement
+// declined Q3_K because staging().mk must return a compute.Tensor and no Q3_K compute kind existed.
+// fak#13149 then built exactly that kind (compute.NewQ3K / compute.Q3_K, a verbatim host tensor),
+// so the settlement's premise no longer holds and the tier admits Q3_K the same way it admits
+// Q2_K — staged VERBATIM, with no f32 materialization of the expert bulk. The published
+// DeepSeek-V4.1 Q2_K artifact stores its down projection as Q3_K, so admitting it is what lets the
+// artifact reach the streamed forward instead of a refusal or a ~393 GiB eager-f32 OOM.
 //
-// Admitting Q3_K would therefore be a silent half-path: the tier would fault Q3_K bytes that
-// nothing downstream can stage. Worse, because dtype() and weight() fall through to a default
-// (compute.Q4_K / q4kTensor), a Q3_K entry indexed under an unset enum would be read at the wrong
-// block geometry and rebuilt as the wrong representation — a silent corruption rather than a
-// refusal. The tier must decline instead, which is exactly what an unknown ExpertCheckpointQuant
-// does: blockGeometry() returns ok=false and AddShardData refuses it by name.
+// The settled, load-bearing properties this pins:
+//   - ExpertCheckpointQ3K is a real tier member with the Q3_K 256-weight/110-byte super-block;
+//   - staging() admits a Q3_K slab and reports compute.Q3_K, keyed under kquant-raw:; and
+//   - staging().mk stages the faulted expert's raw bytes VERBATIM as a compute.Q3_K host tensor.
 
-// TestExpertCheckpointQ3KIsNotStaged pins the settlement: the tier carries no Q3_K member, and an
-// unknown/out-of-range quant is declined rather than silently mapped onto a Q4_K fall-through.
-func TestExpertCheckpointQ3KIsNotStaged(t *testing.T) {
-	// An unset/unknown quant must be declined by the geometry, not coerced to a real one. This is
-	// the property that keeps a Q3_K description from being read at the Q4_K block geometry the
-	// default arm would impose.
-	if _, _, ok := ExpertCheckpointQuant(-1).blockGeometry(); ok {
-		t.Fatal("blockGeometry accepted an unknown quant; an unstageable representation must be declined")
-	}
-	if _, _, ok := ExpertCheckpointQuant(999).blockGeometry(); ok {
-		t.Fatal("blockGeometry accepted an out-of-range quant; the tier must not fabricate geometry")
-	}
+// TestExpertCheckpointTierStagesQ3K is the Q3_K admission witness. A Q3_K fused slab is indexable,
+// one expert faults back as a verbatim compute.Q3_K host tensor carrying its own raw bytes, and the
+// staging descriptor reports the one-expert Q3_K stride as its resident byte cost.
+func TestExpertCheckpointTierStagesQ3K(t *testing.T) {
+	const H, E = 256, 4
+	nblk := H / qkK
+	stride := int64(H * nblk * q3kBlockBytes)
 
-	// A name is diagnosed, never invented. If a future edit added a Q3_K member without a compute
-	// tensor, this is the assertion that would still distinguish the enum from a real representation:
-	// an out-of-range value reports itself numerically rather than borrowing another kind's name.
-	if got := ExpertCheckpointQuant(999).String(); got == "Q3_K" {
-		t.Fatalf("out-of-range quant printed %q; a diagnostic must not masquerade as a real representation", got)
-	} else if !strings.Contains(got, "ExpertCheckpointQuant(") {
-		t.Fatalf("out-of-range quant printed %q, want the ExpertCheckpointQuant(n) diagnostic form", got)
-	}
-
-	// No value of the enum may name itself Q3_K. This is the property the settlement rests on: a
-	// Q3_K member would make staging().mk reachable with a representation no compute tensor exists
-	// for. Sweeping the full enum range (not just the four known members) means a FUTURE Q3_K arm
-	// added at the next iota is caught here rather than at decode, so this test fails when the
-	// settlement is violated rather than merely restating today's constant list.
-	for q := ExpertCheckpointQuant(0); q <= ExpertCheckpointQuant(64); q++ {
-		if q.String() == "Q3_K" {
-			t.Fatalf("ExpertCheckpointQuant(%d) is named Q3_K; Q3_K has no compute tensor kind and must not be admitted", q)
+	expertBytes := func(e int) []byte {
+		raw := make([]byte, stride)
+		for i := range raw {
+			raw[i] = byte((e*37 + i*11) & 0xff)
 		}
+		return raw
 	}
-}
-
-// TestExpertCheckpointQ2KAndQ3KAreDistinctRegistryOutcomes pins the asymmetry that justifies the
-// settlement, read through the model package's own registry. Q2_K is HAL-stageable so the tier can
-// serve it; Q3_K is not, so the tier correctly declines it. This is the registry-side proof that
-// the tier's refusal tracks the representative downstream rather than a guess.
-func TestExpertCheckpointQ2KAndQ3KAreDistinctRegistryOutcomes(t *testing.T) {
-	// The settlement is only sound if the two outcomes actually differ: the tier admits Q2_K
-	// because the resident store stages it and declines Q3_K because it does not. Assert the
-	// specific direction (Q2_K true, Q3_K false) rather than mere inequality, so a registry that
-	// flipped Q2_K to non-HAL would fail here instead of accidentally satisfying an "!=".
-	if !SupportsHALKQuant(kindQ2K) {
-		t.Fatal("Q2_K is not HAL-supported; the tier's Q2_K admission would be the same half-path Q3_K avoids")
-	}
-	if SupportsHALKQuant(kindQ3K) {
-		t.Fatal("Q3_K reports HAL-supported; the tier must then admit it, contradicting this settlement")
+	var blob []byte
+	for e := 0; e < E; e++ {
+		blob = append(blob, expertBytes(e)...)
 	}
 
-	// The difference the settlement rests on is concrete: Q2_K has a host-tensor constructor a
-	// faulted stride can rebuild into, Q3_K has none. This is the representative capability the
-	// issue names — staging().mk must return a compute.Tensor — observed directly rather than
-	// inferred from the HAL boolean above. A zero Dtype is the registry's own statement that no
-	// compute tensor kind exists to build.
-	q2Desc, ok := LookupQuantDescriptor(kindQ2K)
-	if !ok {
-		t.Fatal("kindQ2K is not registered; the Q2_K staging arm has no descriptor to build from")
-	}
-	q3Desc, ok := LookupQuantDescriptor(kindQ3K)
-	if !ok {
-		t.Fatal("kindQ3K is not registered; expected a non-HAL descriptor")
-	}
-	if q2Desc.Dtype() == 0 {
-		t.Fatal("Q2_K descriptor dtype = 0; the tier could not name a compute dtype to stage")
-	}
-	if q3Desc.Dtype() != 0 {
-		t.Fatalf("Q3_K descriptor dtype = %s, want 0 (no compute tensor kind exists)", q3Desc.Dtype())
-	}
-}
-
-// TestExpertCheckpointUnknownQuantShardIsRefused pins the load-time refusal: a fused tensor that
-// declares an unstageable representation (the Q3_K slot has no enum member, so an unknown value is
-// the only way to express one) aborts AddShardData with ErrGGUFExpertMetadata rather than being
-// half-indexed. This is the "no silent half-path" rule at the shard boundary.
-func TestExpertCheckpointUnknownQuantShardIsRefused(t *testing.T) {
-	const H = 256
-	blob := make([]byte, H*H)
 	tier := NewExpertCheckpointTier(0)
-	err := tier.AddShardData(bytes.NewReader(blob), int64(len(blob)), nil, []FusedExpertTensor{{
-		Name: "blk.0.ffn_gate_exps.weight", Layer: 0, Proj: "gate_proj",
-		Quant: ExpertCheckpointQuant(999), Offset: 0, Experts: 1, Rows: H, Cols: H,
-	}})
-	if err == nil {
-		t.Fatal("AddShardData admitted an unstageable representation; the tier must refuse the shard")
+	if err := tier.AddShard(bytes.NewReader(blob), int64(len(blob)), []FusedExpertTensor{{
+		Name: "blk.0.ffn_down_exps.weight", Layer: 0, Proj: "down_proj",
+		Quant: ExpertCheckpointQ3K, Offset: 0, Experts: E, Rows: H, Cols: H,
+	}}); err != nil {
+		t.Fatalf("AddShard over a well-formed Q3_K slab: %v", err)
 	}
-	if !errors.Is(err, ErrGGUFExpertMetadata) {
-		t.Fatalf("refusal = %v, want it to wrap ErrGGUFExpertMetadata", err)
+
+	name := expertName(0, 2, "down_proj.weight")
+	ck, ok := tier.staging(name)
+	if !ok {
+		t.Fatalf("staging declined %s; the Q3_K slab must be admitted", name)
 	}
-	if !strings.Contains(err.Error(), "unstageable representation") {
-		t.Fatalf("refusal = %v, want it to name the unstageable representation", err)
+	if ck.dt != compute.Q3_K {
+		t.Fatalf("staging dtype = %s, want Q3_K (the verbatim host tensor kind from fak#13149)", ck.dt)
 	}
-	// Nothing may have been indexed: a refused shard leaves the tier exactly as it was found.
-	if got := tier.Stats().Tensors; got != 0 {
-		t.Fatalf("tier indexed %d tensors after a refused shard, want 0", got)
+	if ck.bytes != stride {
+		t.Fatalf("staging resident bytes = %d, want one expert stride %d", ck.bytes, stride)
+	}
+	if got := ck.key; got != "kquant-raw:"+name {
+		t.Fatalf("staging key = %q, want the kquant-raw ring key for %s", got, name)
+	}
+
+	// The staged tensor must carry THIS expert's raw bytes verbatim, as a Q3_K host tensor.
+	tensor := ck.mk()
+	if tensor.Dtype != compute.Q3_K {
+		t.Fatalf("staged tensor dtype = %s, want Q3_K", tensor.Dtype)
+	}
+	hb, ok := tensor.Buf().(compute.HostBuffer)
+	if !ok {
+		t.Fatal("staged Q3_K tensor is not host-addressable; the CPU reference backend was not used")
+	}
+	want := expertBytes(2)
+	i8 := hb.I8()
+	if len(i8) != len(want) {
+		t.Fatalf("staged Q3_K byte length = %d, want %d", len(i8), len(want))
+	}
+	got := make([]byte, len(want))
+	for i, v := range i8 {
+		got[i] = byte(v)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatal("staged Q3_K tensor did not carry expert 2's stride bytes verbatim")
+	}
+
+	st := tier.Stats()
+	if st.Reads != 1 || st.BytesRead != stride {
+		t.Fatalf("tier ledger reads=%d bytes=%d, want 1 read / %d bytes", st.Reads, st.BytesRead, stride)
+	}
+}
+
+// TestExpertCheckpointQ3KMemberGeometry pins the enum member added by the reversal: Q3_K reports a
+// real 256-weight/110-byte super-block geometry and names itself, so a descriptor cannot be built at
+// the wrong block size. It also pins that the enum VALUE appended did not shift its neighbours — the
+// four older members keep the exact values a serialized descriptor would carry.
+func TestExpertCheckpointQ3KMemberGeometry(t *testing.T) {
+	if ExpertCheckpointQ4K != 0 || ExpertCheckpointQ5K != 1 || ExpertCheckpointQ6K != 2 || ExpertCheckpointQ2K != 3 {
+		t.Fatalf("existing enum values shifted: Q4K=%d Q5K=%d Q6K=%d Q2K=%d, want 0/1/2/3",
+			ExpertCheckpointQ4K, ExpertCheckpointQ5K, ExpertCheckpointQ6K, ExpertCheckpointQ2K)
+	}
+	if ExpertCheckpointQ3K != 4 {
+		t.Fatalf("Q3_K enum value = %d, want the next iota after Q2_K (4)", ExpertCheckpointQ3K)
+	}
+	if got := ExpertCheckpointQ3K.String(); got != "Q3_K" {
+		t.Fatalf("Q3_K String() = %q, want Q3_K", got)
+	}
+	w, b, ok := ExpertCheckpointQ3K.blockGeometry()
+	if !ok {
+		t.Fatal("Q3_K blockGeometry declined; an admitted member must have geometry")
+	}
+	if w != qkK || b != q3kBlockBytes {
+		t.Fatalf("Q3_K geometry = %d weights / %d bytes, want %d / %d", w, b, qkK, q3kBlockBytes)
+	}
+}
+
+// TestExpertCheckpointQ3KIsDistinctFromVerbatimKQuants pins that Q3_K now stages verbatim, exactly
+// like Q2_K: each reports its OWN compute dtype (Q2_K / Q3_K), never a shared fall-through. This is
+// the fak#13149 convergence — the settlement's "stage Q3_K as something else" tension is gone,
+// because a verbatim Q3_K host tensor kind now exists.
+func TestExpertCheckpointQ3KIsDistinctFromVerbatimKQuants(t *testing.T) {
+	if _, _, ok := ExpertCheckpointQ2K.blockGeometry(); !ok {
+		t.Fatal("Q2_K geometry must exist")
+	}
+	q2 := expertCheckpointEntry{quant: ExpertCheckpointQ2K}
+	q3 := expertCheckpointEntry{quant: ExpertCheckpointQ3K}
+	if q2.dtype() != compute.Q2_K {
+		t.Fatalf("Q2_K staging dtype = %s, want Q2_K (verbatim)", q2.dtype())
+	}
+	if q3.dtype() != compute.Q3_K {
+		t.Fatalf("Q3_K staging dtype = %s, want Q3_K (verbatim host tensor, fak#13149)", q3.dtype())
+	}
+	if q2.halKey("n") != q3.halKey("n") {
+		t.Fatalf("Q2_K and Q3_K ring keys differ (%q vs %q); both non-Q4_K arms share the kquant-raw prefix",
+			q2.halKey("n"), q3.halKey("n"))
 	}
 }

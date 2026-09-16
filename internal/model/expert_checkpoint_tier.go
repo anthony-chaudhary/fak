@@ -74,9 +74,14 @@ import (
 // caller cannot state a stride that disagrees with the representation the decode path will build.
 
 // ExpertCheckpointQuant is the quantized representation a fused routed-expert slab is stored in.
-// Only the k-quant forms the routed-expert weight HAL can stage resident are admitted: a tier that
-// accepted a representation expertSwiGLUHAL cannot serve would fault bytes nothing could then use.
-// Q2_K joined the admitted set for the DeepSeek-V4.1 Flash Q2_K routed-expert slate (fak#13121).
+// Every member is a form a routed-expert slab can be STAGED from: a tier that accepted a
+// representation no consumer could serve would fault bytes nothing could then use.
+//
+// Every admitted kind stages its GGUF super-blocks VERBATIM through an internal/compute host
+// constructor: Q4_K/Q5_K/Q6_K/Q2_K always had one, and Q3_K gained one in fak#13149
+// (compute.NewQ3K / compute.Q3_K). That last addition is what lets the published DeepSeek-V4.1
+// Flash Q2_K artifact - Q2_K gate/up, Q3_K down - reach the streamed forward with no f32
+// materialization of the expert bulk (fak#13144).
 type ExpertCheckpointQuant int
 
 const (
@@ -91,6 +96,14 @@ const (
 	// is published in. It is appended AFTER Q6K so the existing constant values never shift; the
 	// DeepSeek-V4.1 Flash Q2_K arm is its first producer.
 	ExpertCheckpointQ2K
+	// ExpertCheckpointQ3K is the Q3_K super-block form the published DeepSeek-V4.1 Q2_K slate uses
+	// for its down projection. Appended AFTER Q2K so the existing constant values never shift, and
+	// staged VERBATIM like its siblings now that internal/compute carries a Q3_K host tensor kind
+	// (compute.NewQ3K, fak#13149). This overturns the fak#13122 settlement, which declined Q3_K
+	// because staging().mk must return a compute.Tensor and no Q3_K kind existed; fak#13149 built
+	// exactly that kind, so the settlement's premise no longer holds and the tier admits Q3_K the
+	// same way it admits Q2_K (fak#13144).
+	ExpertCheckpointQ3K
 )
 
 // String names the representation for a report or an error.
@@ -102,6 +115,8 @@ func (q ExpertCheckpointQuant) String() string {
 		return "Q6_K"
 	case ExpertCheckpointQ2K:
 		return "Q2_K"
+	case ExpertCheckpointQ3K:
+		return "Q3_K"
 	case ExpertCheckpointQ4K:
 		return "Q4_K"
 	}
@@ -121,6 +136,8 @@ func (q ExpertCheckpointQuant) blockGeometry() (weights, bytes int, ok bool) {
 		return qkK, kindQ6K.blockBytes(), true
 	case ExpertCheckpointQ2K:
 		return qkK, q2kBlockBytes, true
+	case ExpertCheckpointQ3K:
+		return qkK, q3kBlockBytes, true
 	}
 	return 0, 0, false
 }
@@ -179,6 +196,8 @@ func (e expertCheckpointEntry) dtype() compute.Dtype {
 		return compute.Q6_K
 	case ExpertCheckpointQ2K:
 		return compute.Q2_K
+	case ExpertCheckpointQ3K:
+		return compute.Q3_K
 	default:
 		return compute.Q4_K
 	}
@@ -196,6 +215,8 @@ func (e expertCheckpointEntry) weight(name string, raw []byte) expertWeight {
 		return expertWeight{name: name, kq: &kQuantTensor{out: e.rows, in: e.cols, nblk: e.nblk, kind: kindQ6K, raw: raw}}
 	case ExpertCheckpointQ2K:
 		return expertWeight{name: name, kq: &kQuantTensor{out: e.rows, in: e.cols, nblk: e.nblk, kind: kindQ2K, raw: raw}}
+	case ExpertCheckpointQ3K:
+		return expertWeight{name: name, kq: &kQuantTensor{out: e.rows, in: e.cols, nblk: e.nblk, kind: kindQ3K, raw: raw}}
 	default:
 		return expertWeight{name: name, q4: &q4kTensor{out: e.rows, in: e.cols, nblk: e.nblk, raw: raw}}
 	}
@@ -374,6 +395,10 @@ func (t *ExpertCheckpointTier) staging(name string) (*checkpointStaging, bool) {
 			}
 			if w.kq.kind == kindQ2K {
 				return compute.NewQ2K(compute.Default(), []int{w.kq.out, w.kq.in}, w.kq.raw)
+			}
+			if w.kq.kind == kindQ3K {
+				// Verbatim, like every other admitted k-quant: no f32 expansion of the expert bulk.
+				return compute.NewQ3K(compute.Default(), []int{w.kq.out, w.kq.in}, w.kq.raw)
 			}
 			return compute.NewQ5K(compute.Default(), []int{w.kq.out, w.kq.in}, w.kq.raw)
 		},

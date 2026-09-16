@@ -11,19 +11,19 @@ import (
 //
 // The real vcruz305/DeepSeek-V4.1-Flash-GGUF Q2_K checkpoint stores its routed-expert slabs with
 // TWO quant types in one layer: ffn_gate_exps / ffn_up_exps are type 10 (Q2_K), while
-// ffn_down_exps is type 11 (Q3_K). The R5 streamed tier stages Q2_K but has no compute tensor for
-// Q3_K, so FusedExpertTensors declines the down-projection slabs.
+// ffn_down_exps is type 11 (Q3_K). Before this change the R5 streamed tier staged Q2_K but had no
+// way to stage Q3_K, so FusedExpertTensors declined the down-projection slabs and the load either
+// refused (the landed partial-decline guard) or eager-dequantized the bulk to f32 (the ~393 GiB
+// physical OOM fak#13144 records).
 //
-// The bug this pins: a PARTIAL decline used to be silent. The tier built fine over the Q2_K
-// gate/up slabs, so the load did not refuse; the Q3_K down-projection slabs then dropped off the
-// streamed set and were eager-dequantized to f32 by computeQ4KTensorWork, materializing the whole
-// expert bulk the caller passed WithStreamedExperts to avoid. On the physical Halo that is the
-// ~393 GiB runtime OOM recorded on fak#13144.
+// The reversal: Q3_K is now ADMITTED. fak#13149 added the compute.NewQ3K verbatim host tensor
+// kind the fak#13122 settlement said was missing, so the tier stages a Q3_K expert exactly like
+// Q2_K — bytes verbatim, no f32 expansion. This overturns the fak#13122 settlement because its
+// premise (no Q3_K compute tensor exists) no longer holds.
 //
-// The settlement (fak#13122): Q3_K has no compute tensor kind, so the tier cannot stage it and must
-// not pretend to. The honest answer to a request for BOUNDED experts over a checkpoint whose expert
-// bulk cannot be fully bounded is a refusal that names the unstageable slabs — not a quiet partial
-// stream that leaves the bulk in RAM.
+// The RED->GREEN property: over the exact mixed Q2_K/Q3_K shape, WithStreamedExperts must produce a
+// model with ALL THREE projections streamed (zero experts resident in host RAM) — not a refusal and
+// not a partial stream that leaves the Q3_K down slabs in RAM.
 
 // frozenMixedExpertGGUF writes a complete glm_moe_dsa GGUF whose routed-expert slabs are typed
 // per-projection, mirroring the published V4.1 Q2_K artifact: gate/up as the majority quant and
@@ -56,11 +56,11 @@ func frozenMixedExpertGGUF(t *testing.T, gateUp, down TensorType) (path string, 
 	return path, E
 }
 
-// TestStreamedExpertsRefusesPartiallyUnstageableExpertQuant is the fak#13144 regression. A
-// WithStreamedExperts request over a checkpoint whose expert bulk is only PARTIALLY stageable must
-// refuse, naming the slabs it cannot bound; it must never return a model that quietly eager-
-// dequantizes the remainder to f32.
-func TestStreamedExpertsRefusesPartiallyUnstageableExpertQuant(t *testing.T) {
+// TestStreamedExpertsAdmitsMixedQ2KQ3KExpertQuant is the fak#13144 RED->GREEN regression. Over the
+// exact published V4.1 Q2_K shape (Q2_K gate/up, Q3_K down), a WithStreamedExperts request must
+// admit ALL THREE projections to the R5 tier: the Q3_K down slabs are staged through the bounded
+// on-demand f32 arm rather than refused or eager-dequantized.
+func TestStreamedExpertsAdmitsMixedQ2KQ3KExpertQuant(t *testing.T) {
 	// Exactly the published V4.1 Q2_K shape: Q2_K gate/up, Q3_K down.
 	path, E := frozenMixedExpertGGUF(t, TensorQ2_K, TensorQ3_K)
 
@@ -70,44 +70,47 @@ func TestStreamedExpertsRefusesPartiallyUnstageableExpertQuant(t *testing.T) {
 	}
 	defer ws.Close()
 
-	// The tier describes only the stageable gate/up slabs; the Q3_K down slab is declined. That
-	// asymmetry is what makes the request partial rather than empty.
+	// The tier describes every routed-expert slab now: one descriptor per projection covers all E
+	// experts as a batched slab, so gate + up + down = three. The Q3_K down slab is no longer
+	// declined, which is the admission this regression pins.
 	shards, err := ws.FusedExpertTensors()
 	if err != nil {
 		t.Fatalf("FusedExpertTensors: %v", err)
 	}
-	// One descriptor per projection covers all E experts as a batched slab, so the stageable Q2_K
-	// gate/up pair yields two; the Q3_K down slab is the declined third.
-	if got := fusedCount(shards); got != 2 {
-		t.Fatalf("described %d fused slabs over %d experts, want 2 (the stageable Q2_K gate/up projections)", got, E)
+	if got := fusedCount(shards); got != 3 {
+		t.Fatalf("described %d fused slabs over %d experts, want 3 (Q2_K gate/up + Q3_K down all admitted)", got, E)
 	}
 
-	// The load must refuse: the caller asked for bounded experts and the checkpoint cannot deliver
-	// bounded experts. A nil error here is the silent f32 fall-through fak#13144 records.
+	// And there must be nothing unstageable: the partial-decline refusal must not fire.
+	unstageable, err := ws.UnstageableRoutedExpertSlabs()
+	if err != nil {
+		t.Fatalf("UnstageableRoutedExpertSlabs: %v", err)
+	}
+	if len(unstageable) != 0 {
+		t.Fatalf("Q3_K down slabs still reported unstageable: %v; the tier must admit them", unstageable)
+	}
+
+	// The load must succeed and leave ZERO routed experts in host RAM: every slab, including the
+	// Q3_K down projection, is served through the bounded tier rather than materialized.
 	m, err := ws.QuantModelQ4KProfileOptions(nil, WithStreamedExperts(0))
-	if err == nil {
-		experts := -1
-		if m != nil {
-			experts = m.KQuantCount()
-		}
-		t.Fatalf("a partially-unstageable expert checkpoint loaded under WithStreamedExperts; "+
-			"the Q3_K down-projection slabs would be eager-dequantized to f32 (the fak#13144 OOM). "+
-			"model non-nil=%v experts=%d", m != nil, experts)
+	if err != nil {
+		t.Fatalf("the exact V4.1 Q2_K/Q3_K checkpoint was refused under WithStreamedExperts: %v", err)
 	}
-	if m != nil {
-		t.Fatal("a refused streamed load still returned a model")
+	if m == nil {
+		t.Fatal("streamed load returned a nil model")
 	}
-	// The refusal must name the unstageable projection so an operator can act on it, rather than
-	// reporting a generic failure or the checkpoint merely having "no streamable slab".
-	if !strings.Contains(err.Error(), "ffn_down_exps") {
-		t.Fatalf("refusal %q does not name the unstageable slab; an operator cannot tell which "+
-			"projection keeps the expert bulk in RAM", err)
+	if got := m.KQuantCount(); got != 0 {
+		t.Fatalf("a streamed load left %d experts resident, want 0; the Q3_K down slabs must not be eager-f32", got)
+	}
+	st := m.ExpertCheckpointStats()
+	if !st.Enabled || st.Tensors != E*3 {
+		t.Fatalf("streamed model reports %+v, want an enabled tier over %d experts (all three projections)", st, E*3)
 	}
 }
 
-// TestStreamedExpertsAcceptsFullyStageableMixedKQuant is the control: the refusal above must key on
-// UNstageability, not on quantization itself. A checkpoint whose every expert slab is stageable
-// (here Q2_K gate/up with Q4_K down - the mixed-but-all-staged UD shape) must still stream.
+// TestStreamedExpertsAcceptsFullyStageableMixedKQuant is the verbatim control: a checkpoint whose
+// every expert slab has a compute kind of its own (here Q2_K gate/up with Q4_K down - the mixed-but-
+// all-verbatim UD shape) must stream through the unchanged verbatim arms.
 func TestStreamedExpertsAcceptsFullyStageableMixedKQuant(t *testing.T) {
 	path, E := frozenMixedExpertGGUF(t, TensorQ2_K, TensorQ4_K)
 

@@ -72,13 +72,19 @@ type FusedExpertShard struct {
 // checkpointExpertQuant maps a GGUF tensor type onto the representation the checkpoint tier stages,
 // ok=false for one it has no staging for. This is deliberately NARROWER than
 // residentExpertBlockGeometry: that predicate answers "can these raw bytes be held resident", this
-// one answers "can one expert's raw bytes be uploaded straight into the ring", and the second set
-// is the k-quants compute.NewQ2K/NewQ4K/NewQ5K/NewQ6K accept. Widening it is a matter of teaching
-// model.ExpertCheckpointQuant the extra kinds, not of relaxing anything here.
+// one answers "can one expert's raw bytes be STAGED into the ring", and it tracks the
+// model.ExpertCheckpointQuant members one-for-one.
+//
+// Every kind here stages its super-blocks VERBATIM through an internal/compute host constructor:
+// Q2_K/Q4_K/Q5_K/Q6_K always had one, and Q3_K gained compute.NewQ3K in fak#13149. Admitting
+// TensorQ3_K here is what lets the exact DeepSeek-V4.1 Q2_K artifact (Q2_K gate/up, Q3_K down)
+// reach the streamed forward instead of being refused as partially unstageable (fak#13144).
 func checkpointExpertQuant(t TensorType) (model.ExpertCheckpointQuant, bool) {
 	switch t {
 	case TensorQ2_K:
 		return model.ExpertCheckpointQ2K, true
+	case TensorQ3_K:
+		return model.ExpertCheckpointQ3K, true
 	case TensorQ4_K:
 		return model.ExpertCheckpointQ4K, true
 	case TensorQ5_K:
@@ -95,8 +101,8 @@ func checkpointExpertQuant(t TensorType) (model.ExpertCheckpointQuant, bool) {
 // this slab takes the eager path instead. An error means the directory is malformed.
 //
 // The three declines, in the order the eager path applies them:
-//   - the quant must have a compute tensor kind (checkpointExpertQuant) - Q3_K has none, so the tier
-//     cannot rebuild a faulted stride into anything;
+//   - the quant must have a compute tensor kind (checkpointExpertQuant) - internal/compute's
+//     verbatim host constructor for each, Q3_K included since fak#13149;
 //   - the reduction dim must be whole 256-weight super-blocks, the same gate
 //     splitGLMMoeDsaExpertsRawQuant applies before it will split raw bytes at all;
 //   - the name must be resident-eligible, the same predicate that decides whether the eager path

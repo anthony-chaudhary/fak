@@ -422,13 +422,13 @@ func TestExpertCheckpointSourceQ2KFaultMatchesTheEagerSlabSlice(t *testing.T) {
 	}
 }
 
-// TestExpertCheckpointSourceDeclinesQ3K is the settlement witness for the encoding the tier cannot
-// serve. Q3_K is residentable raw (residentExpertBlockGeometry returns 32-byte/110-byte blocks) but
-// internal/compute has NO Q3_K dtype and no constructor for it, so the tier's staging could not
-// build a compute tensor from a Q3_K expert — a descriptor would be promised and then fail at
-// decode. checkpointExpertQuant must therefore DECLINE Q3_K so the eager path is preserved unchanged
-// rather than half-admitted: a missing descriptor costs host RAM, a wrong one costs correctness.
-func TestExpertCheckpointSourceDeclinesQ3K(t *testing.T) {
+// TestExpertCheckpointSourceAdmitsQ3K is the Q3_K admission witness on the loader side of the seam,
+// replacing the fak#13122 settlement witness. Q3_K is residentable raw (residentExpertBlockGeometry
+// returns 256-weight/110-byte blocks) and internal/compute now carries a verbatim Q3_K host tensor
+// kind (compute.NewQ3K, fak#13149), so the tier stages a Q3_K expert exactly like Q2_K. A
+// descriptor is therefore promised AND deliverable; checkpointExpertQuant must ADMIT Q3_K, and the
+// mixed Q2_K/Q3_K V4.1 artifact depends on it.
+func TestExpertCheckpointSourceAdmitsQ3K(t *testing.T) {
 	path, E := glmMoeDsaCheckpointFixture(t, TensorQ3_K)
 
 	ws, err := OpenWeights(path)
@@ -440,20 +440,38 @@ func TestExpertCheckpointSourceDeclinesQ3K(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FusedExpertTensors: %v", err)
 	}
-	if len(shards) != 0 {
-		t.Fatalf("described %d shard groups of Q3_K experts; the tier cannot stage that encoding",
-			len(shards))
+	if got := fusedCount(shards); got != 3 {
+		t.Fatalf("described %d fused Q3_K slabs, want 3 (gate/up/down); Q3_K must be admitted", got)
 	}
 
-	// The decline is inert: Q3_K still takes the unchanged eager raw-resident path, so every routed
-	// expert stays in the resident k-quant store exactly as before the Q2_K admission landed.
+	// Nothing is unstageable over a pure Q3_K expert checkpoint, so the partial-decline guard stays
+	// silent and the streamed tier builds over every slab.
+	unstageable, err := ws.UnstageableRoutedExpertSlabs()
+	if err != nil {
+		t.Fatalf("UnstageableRoutedExpertSlabs: %v", err)
+	}
+	if len(unstageable) != 0 {
+		t.Fatalf("Q3_K slabs reported unstageable after admission: %v", unstageable)
+	}
+	tier, err := ws.ExpertCheckpointTier(0)
+	if err != nil {
+		t.Fatalf("ExpertCheckpointTier: %v", err)
+	}
+	if tier == nil {
+		t.Fatal("no tier over a Q3_K checkpoint whose experts are now describable")
+	}
+	if st := tier.Stats(); st.Tensors != E*3 {
+		t.Fatalf("Q3_K tier indexed %d experts, want %d", st.Tensors, E*3)
+	}
+
+	// The eager path still makes every Q3_K expert resident (unchanged); admission only adds the
+	// streamed alternative, it does not remove the resident one.
 	m, err := LoadModelQ4KProfile(path, nil)
 	if err != nil {
 		t.Fatalf("eager load: %v", err)
 	}
 	if got := m.KQuantCount(); got != E*3 {
-		t.Fatalf("Q3_K experts resident = %d, want %d; declining a descriptor must change nothing",
-			got, E*3)
+		t.Fatalf("Q3_K experts resident = %d, want %d", got, E*3)
 	}
 }
 
