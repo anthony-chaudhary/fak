@@ -845,8 +845,9 @@ docs/dispatch-status.md
 # without LOCALAPPDATA in its environment falls back to the working directory, so a
 # background script launched from the clone root drops the cache here instead of under
 # AppData. Machine-generated, never source, and it reads as a no-lane path in the
-# `fak sync push` dirty-worktree report until it is ignored.
-/Microsoft/
+# `fak sync push` dirty-worktree report until it is ignored. Unanchored so it also
+# matches a nested cache (e.g. `cmd/fak/Microsoft/...`) when the cwd is a subdirectory.
+Microsoft/
 /.overlay4515
 
 # --- root DOT namespace (denylist -> allowlist inversion) -------------------------
