@@ -202,6 +202,11 @@ func Acquire(opts Options) (*Lease, error) {
 				if _, werr := f.WriteAt(rec, 0); werr == nil {
 					_ = f.Truncate(int64(len(rec)))
 				}
+				// Record the bounded progress witness beside the lockfile so a
+				// refused peer can tell a progressing holder from a wedged one
+				// (#13131). Best-effort metadata only: the flock above is the
+				// lease, and a failed write just fails a later probe closed.
+				writeHolderMeta(path, os.Getpid(), time.Now())
 			}
 			return &Lease{f: f, path: path, shared: isShared}, nil
 		}
@@ -293,6 +298,9 @@ func (l *Lease) Release() {
 		// Clear exclusive-owner metadata before readers can enter. Never truncate
 		// the file: on Windows that can overlap the mandatory lock byte.
 		_, _ = l.f.WriteAt([]byte("0\n"), 0)
+		// Drop the progress-witness sidecar with the lock so the next acquirer's
+		// probe never reads a stale holder identity (#13131).
+		clearHolderMeta(l.path)
 	}
 	_ = flock.Unlock(l.f)
 	_ = l.f.Close()
@@ -321,6 +329,11 @@ func readHolderPID(f *os.File) int {
 	}
 	return pid
 }
+
+// FormatHolderPID renders a holder pid for operator-facing wording, using the
+// same shared-readers / unknown conventions as BusyError. Exported so a refusal
+// or doctor surface can name the holder consistently with the lease itself.
+func FormatHolderPID(pid int) string { return formatHolderPID(pid) }
 
 func formatHolderPID(pid int) string {
 	switch {

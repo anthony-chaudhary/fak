@@ -53,24 +53,34 @@ const sevFail = "fail"
 // field is a plain measured fact so the classification stays pure and tests can
 // drive any green/yellow/red combination without real hardware.
 type serveHostFacts struct {
-	Arch          string             `json:"arch"`        // GOARCH: "amd64", "arm64", …
-	ISA           string             `json:"isa"`         // best detected SIMD feature: "amx","avx512","avx2","sse","neon","asimd","scalar",""
-	ModelBytes    int64              `json:"model_bytes"` // resident weight bytes the target model needs (0 = unknown)
-	FreeBytes     int64              `json:"free_bytes"`  // free device/host memory the model would load into
-	MemKnown      bool               `json:"mem_known"`   // whether FreeBytes was actually probeable
-	NUMANodes     int                `json:"numa_nodes"`  // online NUMA node count (0 = topology unreadable)
-	Headroom      float64            `json:"headroom"`    // fit headroom fraction reserved for KV/activations (0..1)
-	TotalBytes    int64              `json:"total_bytes,omitempty"`
-	Pressure      string             `json:"pressure,omitempty"`
-	WiredBytes    int64              `json:"wired_bytes,omitempty"`
-	CompBytes     int64              `json:"compressed_bytes,omitempty"`
-	ReservedBytes int64              `json:"reserved_bytes,omitempty"`
-	ActiveLeases  int                `json:"active_leases,omitempty"`
-	GPULeaseHeld  bool               `json:"gpu_lease_held,omitempty"`
-	GPULeasePath  string             `json:"gpu_lease_path,omitempty"`
-	ModelName     string             `json:"model_name,omitempty"`
-	ModelArm      string             `json:"model_arm,omitempty"`
-	Vulkan        *vulkanLoaderFacts `json:"vulkan,omitempty"`
+	Arch          string  `json:"arch"`        // GOARCH: "amd64", "arm64", …
+	ISA           string  `json:"isa"`         // best detected SIMD feature: "amx","avx512","avx2","sse","neon","asimd","scalar",""
+	ModelBytes    int64   `json:"model_bytes"` // resident weight bytes the target model needs (0 = unknown)
+	FreeBytes     int64   `json:"free_bytes"`  // free device/host memory the model would load into
+	MemKnown      bool    `json:"mem_known"`   // whether FreeBytes was actually probeable
+	NUMANodes     int     `json:"numa_nodes"`  // online NUMA node count (0 = topology unreadable)
+	Headroom      float64 `json:"headroom"`    // fit headroom fraction reserved for KV/activations (0..1)
+	TotalBytes    int64   `json:"total_bytes,omitempty"`
+	Pressure      string  `json:"pressure,omitempty"`
+	WiredBytes    int64   `json:"wired_bytes,omitempty"`
+	CompBytes     int64   `json:"compressed_bytes,omitempty"`
+	ReservedBytes int64   `json:"reserved_bytes,omitempty"`
+	ActiveLeases  int     `json:"active_leases,omitempty"`
+	GPULeaseHeld  bool    `json:"gpu_lease_held,omitempty"`
+	GPULeasePath  string  `json:"gpu_lease_path,omitempty"`
+	// GPULeaseHolderVerdict is the typed holder-progress verdict (#13131):
+	// LIVE_PROGRESSING / STALLED / DEAD / UNKNOWN. It is only meaningful when
+	// GPULeaseHeld is true; empty means the lease was free or the probe could not
+	// classify a holder.
+	GPULeaseHolderVerdict string `json:"gpu_lease_holder_verdict,omitempty"`
+	// GPULeaseHolderPID is the recorded exclusive-holder pid behind the verdict.
+	GPULeaseHolderPID int `json:"gpu_lease_holder_pid,omitempty"`
+	// GPULeaseHolderDetail is the one-line evidence behind the verdict, so an
+	// operator sees WHY the holder was classified as it was.
+	GPULeaseHolderDetail string             `json:"gpu_lease_holder_detail,omitempty"`
+	ModelName            string             `json:"model_name,omitempty"`
+	ModelArm             string             `json:"model_arm,omitempty"`
+	Vulkan               *vulkanLoaderFacts `json:"vulkan,omitempty"`
 }
 
 // vulkanLoaderFacts carries the cgo-free Vulkan loader probe outcome as a plain
@@ -295,8 +305,27 @@ func serveReservationsRow(f serveHostFacts) *serveReadinessRow {
 	row := &serveReadinessRow{Check: "local-leases"}
 	if f.GPULeaseHeld {
 		row.Status = sevWarn
-		row.Finding = fmt.Sprintf("Metal GPU residency lease is currently locked (%s) — another process is serving or holding residency", f.GPULeasePath)
-		row.Remediation = "wait for the active serve process to exit or release the GPU lease"
+		holder := ""
+		if f.GPULeaseHolderPID > 0 {
+			holder = fmt.Sprintf(" held by pid %d", f.GPULeaseHolderPID)
+		}
+		row.Finding = fmt.Sprintf("Metal GPU residency lease is currently locked%s (%s) — another process is serving or holding residency", holder, f.GPULeasePath)
+		switch f.GPULeaseHolderVerdict {
+		case string(gpulease.HolderProgressLiveProgressing):
+			row.Finding += fmt.Sprintf("; holder verdict %s (%s)", f.GPULeaseHolderVerdict, f.GPULeaseHolderDetail)
+			row.Remediation = "the holder is progressing — wait for it to finish rather than stopping it; run a CPU/non-Metal serve meanwhile"
+		case string(gpulease.HolderProgressStalled):
+			row.Finding += fmt.Sprintf("; holder verdict %s (%s)", f.GPULeaseHolderVerdict, f.GPULeaseHolderDetail)
+			row.Remediation = "the holder looks stalled — confirm with the holder's own logs, then release the GPU lease"
+		case string(gpulease.HolderProgressDead):
+			row.Finding += fmt.Sprintf("; holder verdict %s (%s)", f.GPULeaseHolderVerdict, f.GPULeaseHolderDetail)
+			row.Remediation = "the recorded holder is gone — the OS will drop the flock; retry the serve or release the GPU lease"
+		default:
+			if f.GPULeaseHolderVerdict != "" {
+				row.Finding += fmt.Sprintf("; holder verdict %s (%s)", f.GPULeaseHolderVerdict, f.GPULeaseHolderDetail)
+			}
+			row.Remediation = "wait for the active serve process to exit or release the GPU lease"
+		}
 	} else if f.ReservedBytes > 0 {
 		row.Status = sevWarn
 		row.Finding = fmt.Sprintf("%s active local memory reservation across peer process(es)", serveHumanBytes(f.ReservedBytes))
@@ -450,6 +479,15 @@ func probeServeHost(modelBytes int64, headroom float64) serveHostFacts {
 	lease, err := gpulease.Acquire(gpulease.Options{Path: leasePath, NoWait: true, Timeout: 0})
 	if errors.Is(err, gpulease.ErrBusy) {
 		facts.GPULeaseHeld = true
+		// Classify the holder so the row can distinguish a healthy long-running
+		// GPU job from a dead one (#13131). Fail-closed: an unreadable/raced
+		// lockfile yields UNKNOWN, never a fabricated STALLED.
+		probe := gpulease.ProbeHolderProgress(gpulease.HolderProgressOptions{Path: leasePath})
+		facts.GPULeaseHolderVerdict = string(probe.Verdict)
+		if probe.PID > 0 {
+			facts.GPULeaseHolderPID = probe.PID
+		}
+		facts.GPULeaseHolderDetail = probe.Detail
 	} else if err == nil {
 		lease.Release()
 	}
