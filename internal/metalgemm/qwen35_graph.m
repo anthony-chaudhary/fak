@@ -208,7 +208,12 @@ static int qg_init(void) {
 int mg_qwen35_graph_ready(void){return qg_init();}
 static id<MTLBuffer> qg_host(const float*p,int n){return[gDev newBufferWithBytes:p length:(NSUInteger)n*sizeof(float) options:MTLResourceStorageModeShared];}
 static void qg_dispatch(id<MTLComputeCommandEncoder>e,id<MTLComputePipelineState>p,int n){int t=(int)p.maxTotalThreadsPerThreadgroup;if(t>n)t=n;if(t<1)t=1;[e dispatchThreads:MTLSizeMake((NSUInteger)n,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)t,1,1)];}
-static int qg_ordered_rows(void*g){int rows=mg_graph_prompt(g);return rows==1||rows==2||rows==3||rows==4||rows==32?rows:0;}
+// QG_MAX_ROWS mirrors metalgemm.PromptPanelMaxTokens (graph.go). The ordered-panel
+// kernels loop generically over the graph's row count; the historical {1,2,3,4,32}
+// enumeration was conservative, not a hardware bound. Keep the two in lockstep: a
+// mismatch turns a wider Go-side admission into a native nil-PSO decline.
+#define QG_MAX_ROWS 128
+static int qg_ordered_rows(void*g){int rows=mg_graph_prompt(g);return rows>=1&&rows<=QG_MAX_ROWS?rows:0;}
 
 void *mg_qwen35_graph_norm(void*g,void*input,const float*w,int rows,int width,float eps,int gain1p,int lastOnly){if(!qg_init()||!g||!input||!w||rows<=0||width<=0||eps<=0||(lastOnly&&!qg_ordered_rows(g))||mg_graph_prompt(g)!=rows)return NULL;id<MTLCommandBuffer>cb=(__bridge id<MTLCommandBuffer>)mg_graph_command_buffer(g);id<MTLBuffer>x=(__bridge id<MTLBuffer>)input,wb=qg_host(w,width),y=(__bridge id<MTLBuffer>)mg_graph_alloc_result(g,lastOnly?width:rows*width);if(!cb||!x||!wb||!y)return NULL;id<MTLComputeCommandEncoder>e=[cb computeCommandEncoder];[e setComputePipelineState:qgNorm];[e setBuffer:x offset:0 atIndex:0];[e setBuffer:wb offset:0 atIndex:1];[e setBuffer:y offset:0 atIndex:2];[e setBytes:&width length:4 atIndex:3];[e setBytes:&eps length:4 atIndex:4];[e setBytes:&gain1p length:4 atIndex:5];int row=lastOnly?rows-1:-1;[e setBytes:&row length:4 atIndex:6];[e dispatchThreadgroups:MTLSizeMake(lastOnly?1:rows,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];[e endEncoding];return(__bridge void*)y;}
 int mg_qwen35_graph_add(void*g,void*xp,void*yp,int n){if(!qg_init()||!g||!xp||!yp||n<=0)return 0;id<MTLCommandBuffer>cb=(__bridge id<MTLCommandBuffer>)mg_graph_command_buffer(g);id<MTLComputeCommandEncoder>e=[cb computeCommandEncoder];[e setComputePipelineState:qgAdd];[e setBuffer:(__bridge id<MTLBuffer>)xp offset:0 atIndex:0];[e setBuffer:(__bridge id<MTLBuffer>)yp offset:0 atIndex:1];[e setBytes:&n length:4 atIndex:2];qg_dispatch(e,qgAdd,n);[e endEncoding];mg_graph_note_encoder(g);return 1;}
@@ -237,6 +242,82 @@ int mg_qwen35_graph_attention(void*g,void*qp,void*kp,void*vp,void*gatep,const fl
         e=[cb computeCommandEncoder];if(!e)return 0;[e setComputePipelineState:qgAttnCombine];[e setBuffer:part offset:0 atIndex:0];[e setBuffer:(__bridge id<MTLBuffer>)gatep offset:0 atIndex:1];[e setBuffer:out offset:0 atIndex:2];[e setBytes:&nH length:4 atIndex:3];[e setBytes:&hd length:4 atIndex:4];[e setBytes:&splits length:4 atIndex:5];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)nH,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];[e endEncoding];mg_graph_note_encoder(g);
     } else {
     id<MTLComputePipelineState>attn=total<=4096?qgAttn:qgAttnOnline;e=[cb computeCommandEncoder];[e setComputePipelineState:attn];[e setBuffer:qo offset:0 atIndex:0];[e setBuffer:kall offset:0 atIndex:1];[e setBuffer:vall offset:0 atIndex:2];[e setBuffer:(__bridge id<MTLBuffer>)gatep offset:0 atIndex:3];[e setBuffer:out offset:0 atIndex:4];[e setBytes:&total length:4 atIndex:5];[e setBytes:&base length:4 atIndex:6];[e setBytes:&nH length:4 atIndex:7];[e setBytes:&nKV length:4 atIndex:8];[e setBytes:&hd length:4 atIndex:9];[e setBytes:&scale length:4 atIndex:10];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)nH,rows,1) threadsPerThreadgroup:MTLSizeMake(total<=4096?256:32,1,1)];[e endEncoding];mg_graph_note_encoder(g);
+    }
+    *outp=(__bridge void*)out;*krawp=(__bridge void*)kr;*kpostp=(__bridge void*)kpo;*vcurp=vp;return 1;
+}
+
+// Device-resident KV prefix (#13087). The default attention entry above allocates a
+// fresh `kall`/`vall` pair per panel, memcpy's the host prefix into it, and the caller
+// then readbacks every layer's K/Kpost/V to append to the host cache — so panel p+1
+// cannot encode until panel p's host readback completes and the host prefix is
+// re-uploaded. The sequence-local device KV pair persists ACROSS panels instead: it is
+// a plain `gDev` allocation owned by the caller (NOT tracked in `g->results`), so
+// `mg_graph_free` never reclaims it. `mg_qwen35_graph_kv_alloc`/`_free` own that
+// lifetime and `mg_qwen35_graph_attention_dkv` reads the SAME device K/V pair as the
+// attention prefix and blits the panel's new K/V rows into it at `kvOff + prefixElems`
+// — a device-side append that removes both the host prefix memcpy and the per-panel
+// host KV readback.
+//
+// The pair is three buffers (KRaw, KPost and V) shared by every full-attention
+// layer: the caller reserves `layers * tokens * kvWidth` floats per side and passes
+// the layer's row offset `kvOff`. The layout matches the historical per-panel
+// `kall`/`vall` exactly — `kall` held KPost rows and `vall` held raw V rows, both
+// `total * nKV * hd` wide, while KRaw is the extra pre-norm key the host cache also
+// keeps for state identity — so swapping the per-panel pair for one persistent pair
+// is numerically transparent.
+// mg_qwen35_graph_kv_alloc returns a caller-owned device buffer that survives
+// `mg_graph_free`: it is NOT tracked in `g->results` and is retained (+1) with
+// CFBridgingRetain so the ARC local does not free it when this function returns.
+// mg_qwen35_graph_kv_free releases exactly that +1. This is the ownership that
+// lets one KV triple live across every panel of a walk.
+void *mg_qwen35_graph_kv_alloc(int elems){if(elems<=0||gDev==nil)return NULL;id<MTLBuffer>b=[gDev newBufferWithLength:(NSUInteger)elems*sizeof(float) options:MTLResourceStorageModeShared];return b?(__bridge_retained void*)b:NULL;}
+void mg_qwen35_graph_kv_free(void*kv){if(kv){id<MTLBuffer>b=(__bridge_transfer id<MTLBuffer>)kv;b=nil;}}
+int mg_qwen35_graph_kv_upload(void*kv,const float*src,int elems){
+    if(!kv||!src||elems<=0)return 0;id<MTLBuffer>b=(__bridge id<MTLBuffer>)kv;
+    if((NSUInteger)elems*sizeof(float)>b.length)return 0;memcpy([b contents],src,(NSUInteger)elems*sizeof(float));return 1;
+}
+int mg_qwen35_graph_kv_download(void*kv,float*dst,int elems){
+    if(!kv||!dst||elems<=0)return 0;id<MTLBuffer>b=(__bridge id<MTLBuffer>)kv;
+    if((NSUInteger)elems*sizeof(float)>b.length)return 0;memcpy(dst,[b contents],(NSUInteger)elems*sizeof(float));return 1;
+}
+
+// mg_qwen35_graph_attention_dkv is mg_qwen35_graph_attention with the KV prefix held
+// on the device. `kvK`/`kvV` are the persistent K/V buffers and `kvOff` is this
+// full-attention layer's row offset inside them (`layer * tokens * kvWidth`); the pair
+// must already hold `base` prefix rows at that offset (the caller keeps it current
+// across panels, so panel p reads exactly the rows panel p-1 appended). The function
+// blits the panel's new K/V rows into the pair at `kvOff + prefixElems` in place; no
+// host memcpy and no fresh per-panel allocation. `kraw`/`kpost`/`vcur` remain
+// graph-temporary results the caller may read back once at the END of the walk.
+int mg_qwen35_graph_attention_dkv(void*g,void*qp,void*kp,void*vp,void*gatep,const float*qw,const float*kw,const float*cosv,const float*sinv,void*kvKraw,void*kvKpost,void*kvV,int kvOff,int base,int nH,int nKV,int hd,int rotary,float scale,float qkEps,int gain1p,int qknorm,int qnw,int knw,void**outp,void**krawp,void**kpostp,void**vcurp){
+    int rows=qg_ordered_rows(g);if(!qg_init()||!g||!rows||!qp||!kp||!vp||!gatep||!qw||!kw||!cosv||!sinv||!kvKraw||!kvKpost||!kvV||kvOff<0||base<0||base>INT_MAX-rows||nH<1||nKV<1||nH%nKV||hd<2||hd>256||nH>INT_MAX/hd||nKV>INT_MAX/hd||rotary<2||rotary>hd||rotary%2||!isfinite(scale)||scale<=0||!isfinite(qkEps)||qkEps<=0||!outp||!krawp||!kpostp||!vcurp)return 0;int qwidth=nH*hd,kvwidth=nKV*hd,total=base+rows;if((qnw!=hd&&qnw!=qwidth)||(knw!=hd&&knw!=kvwidth)||rows>INT_MAX/qwidth||rows>INT_MAX/kvwidth||total>INT_MAX/kvwidth||(NSUInteger)total*(NSUInteger)kvwidth>NSUIntegerMax/sizeof(float))return 0;int qn=rows*qwidth,kn=rows*kvwidth,prefixElems=base*kvwidth;
+    id<MTLBuffer>kall=(__bridge id<MTLBuffer>)kvKpost,vall=(__bridge id<MTLBuffer>)kvV,krawall=(__bridge id<MTLBuffer>)kvKraw;
+    // The layer's device slices must hold through `total` rows (prefix + this panel).
+    if((NSUInteger)(kvOff+prefixElems+kn)*sizeof(float)>kall.length||(NSUInteger)(kvOff+prefixElems+kn)*sizeof(float)>vall.length||(NSUInteger)(kvOff+prefixElems+kn)*sizeof(float)>krawall.length)return 0;
+    id<MTLBuffer>qo=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,qn),kr=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,kn),kpo=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,kn),out=(__bridge id<MTLBuffer>)mg_graph_alloc_buffer(g,qn);id<MTLBuffer>qa=qg_host(qw,qnw),ka=qg_host(kw,knw);if(!qo||!kr||!kpo||!out||!qa||!ka)return 0;
+    id<MTLBuffer>cbv=qg_host(cosv,rows*(rotary/2)),sbv=qg_host(sinv,rows*(rotary/2));if(!cbv||!sbv)return 0;id<MTLCommandBuffer>cb=(__bridge id<MTLCommandBuffer>)mg_graph_command_buffer(g);id<MTLComputeCommandEncoder>e=[cb computeCommandEncoder];[e setComputePipelineState:qgQK];[e setBuffer:(__bridge id<MTLBuffer>)qp offset:0 atIndex:0];[e setBuffer:(__bridge id<MTLBuffer>)kp offset:0 atIndex:1];[e setBuffer:qa offset:0 atIndex:2];[e setBuffer:ka offset:0 atIndex:3];[e setBuffer:qo offset:0 atIndex:4];[e setBuffer:kr offset:0 atIndex:5];[e setBuffer:kpo offset:0 atIndex:6];[e setBytes:&nH length:4 atIndex:7];[e setBytes:&nKV length:4 atIndex:8];[e setBytes:&hd length:4 atIndex:9];[e setBytes:&rotary length:4 atIndex:10];[e setBytes:&base length:4 atIndex:11];[e setBuffer:cbv offset:0 atIndex:12];[e setBuffer:sbv offset:0 atIndex:13];[e setBytes:&qkEps length:4 atIndex:14];[e setBytes:&gain1p length:4 atIndex:15];[e setBytes:&qknorm length:4 atIndex:16];[e setBytes:&qnw length:4 atIndex:17];[e setBytes:&knw length:4 atIndex:18];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)MAX(nH,nKV),rows,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];[e endEncoding];mg_graph_note_encoder(g);
+    // Append this panel's three host-visible rows into the persistent device pair:
+    // pre-norm KRaw (`kr`), post-norm KPost (`kpo`) and raw V (`vp`) — exactly the
+    // three rows the host path appended at the per-panel readback, so KRaw/K/Kpost/V
+    // parity holds byte-for-byte. Device blits into kvOff+prefixElems replace the old
+    // host memcpy of the prefix, so panel p+1 reads the device rows directly.
+    id<MTLBlitCommandEncoder>b=[cb blitCommandEncoder];[b copyFromBuffer:kr sourceOffset:0 toBuffer:krawall destinationOffset:(NSUInteger)(kvOff+prefixElems)*sizeof(float) size:(NSUInteger)kn*sizeof(float)];[b copyFromBuffer:kpo sourceOffset:0 toBuffer:kall destinationOffset:(NSUInteger)(kvOff+prefixElems)*sizeof(float) size:(NSUInteger)kn*sizeof(float)];[b copyFromBuffer:(__bridge id<MTLBuffer>)vp sourceOffset:0 toBuffer:vall destinationOffset:(NSUInteger)(kvOff+prefixElems)*sizeof(float) size:(NSUInteger)kn*sizeof(float)];[b endEncoding];mg_graph_note_encoder(g);
+    // Split-KV flash decoding for the single-token decode at long context: one SIMDgroup
+    // per (head, KV split) exposes nH*splits-wide parallelism instead of one SIMDgroup per
+    // head walking the whole KV axis. Only at rows==1 (decode); the prefill panels keep the
+    // proven all-rows paths. splits grows with total so each range stays ~1024-2048 tokens.
+    int useSplit=0,splits=1,chunk=2048;
+    const char*rawSplit=getenv("FAK_QWEN35_ATTN_SPLIT");
+    if(!(rawSplit&&rawSplit[0]=='0')){
+        if(rows==1&&total>2048){splits=(total+chunk-1)/chunk;if(splits>32)splits=32;if(splits>1)useSplit=1;}
+    }
+    if(useSplit&&qgAttnSplit&&qgAttnCombine){
+        id<MTLBuffer>part=[gDev newBufferWithLength:(NSUInteger)nH*(NSUInteger)splits*(NSUInteger)(hd+2)*sizeof(float) options:MTLResourceStorageModePrivate];
+        if(!part)return 0;
+        e=[cb computeCommandEncoder];if(!e)return 0;[e setComputePipelineState:qgAttnSplit];[e setBuffer:qo offset:0 atIndex:0];[e setBuffer:kall offset:(NSUInteger)kvOff*sizeof(float) atIndex:1];[e setBuffer:vall offset:(NSUInteger)kvOff*sizeof(float) atIndex:2];[e setBuffer:part offset:0 atIndex:3];[e setBytes:&total length:4 atIndex:4];[e setBytes:&base length:4 atIndex:5];[e setBytes:&nH length:4 atIndex:6];[e setBytes:&nKV length:4 atIndex:7];[e setBytes:&hd length:4 atIndex:8];[e setBytes:&scale length:4 atIndex:9];[e setBytes:&splits length:4 atIndex:10];[e setBytes:&chunk length:4 atIndex:11];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)nH,(NSUInteger)splits,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];[e endEncoding];mg_graph_note_encoder(g);
+        e=[cb computeCommandEncoder];if(!e)return 0;[e setComputePipelineState:qgAttnCombine];[e setBuffer:part offset:0 atIndex:0];[e setBuffer:(__bridge id<MTLBuffer>)gatep offset:0 atIndex:1];[e setBuffer:out offset:0 atIndex:2];[e setBytes:&nH length:4 atIndex:3];[e setBytes:&hd length:4 atIndex:4];[e setBytes:&splits length:4 atIndex:5];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)nH,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];[e endEncoding];mg_graph_note_encoder(g);
+    } else {
+    id<MTLComputePipelineState>attn=total<=4096?qgAttn:qgAttnOnline;e=[cb computeCommandEncoder];[e setComputePipelineState:attn];[e setBuffer:qo offset:0 atIndex:0];[e setBuffer:kall offset:(NSUInteger)kvOff*sizeof(float) atIndex:1];[e setBuffer:vall offset:(NSUInteger)kvOff*sizeof(float) atIndex:2];[e setBuffer:(__bridge id<MTLBuffer>)gatep offset:0 atIndex:3];[e setBuffer:out offset:0 atIndex:4];[e setBytes:&total length:4 atIndex:5];[e setBytes:&base length:4 atIndex:6];[e setBytes:&nH length:4 atIndex:7];[e setBytes:&nKV length:4 atIndex:8];[e setBytes:&hd length:4 atIndex:9];[e setBytes:&scale length:4 atIndex:10];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)nH,rows,1) threadsPerThreadgroup:MTLSizeMake(total<=4096?256:32,1,1)];[e endEncoding];mg_graph_note_encoder(g);
     }
     *outp=(__bridge void*)out;*krawp=(__bridge void*)kr;*kpostp=(__bridge void*)kpo;*vcurp=vp;return 1;
 }

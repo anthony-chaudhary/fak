@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"io"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/microagent"
 )
 
 type dispatchWavePlanRequest struct {
@@ -156,10 +158,32 @@ func executeDispatchWavePlan(stdout, stderr io.Writer, req dispatchWaveExecution
 	}
 	discovery := subscribeDispatchWaveDiscovery(root, limit)
 	defer closeDispatchDiscoverySubscriptions(discovery)
+
+	// Live micro wave: construct ONE host the whole batch shares (#2030
+	// massive-concurrency) instead of a private Config{Workers:1,Queue:1} host per
+	// row. Every other backend leaves share nil and takes the byte-identical serial
+	// path below. Building the share is fail-open: a construct fault degrades to the
+	// per-row private-host path rather than aborting the wave.
+	var share *dispatchWaveHostShare
+	if *live && len(executionPlan) > 0 && dispatchtick.IsMicroBackend(executionPlan[0].Backend) {
+		base := dispatchWaveExecutionTickOptions(root, *maxWorkers, splitCommaList(*excludeLane), executionPlan[0], true, false, *codexLoopGate, maxFloat64(0, *codexLoopGateSinceHours), *codexLoopGateLimit)
+		if built, buildErr := newDispatchWaveHostShare(executionPlan, base); buildErr != nil {
+			rec["shared_host_error"] = buildErr.Error()
+		} else {
+			share = built
+			defer share.Close()
+		}
+	}
+
 	for i := 0; i < limit; i++ {
 		row := executionPlan[i]
 		snapshot := <-discovery[i].Snapshots
-		payload, err := evaluateDispatchTick(dispatchWaveExecutionTickOptions(root, *maxWorkers, splitCommaList(*excludeLane), row, *live, i == 0, *codexLoopGate, maxFloat64(0, *codexLoopGateSinceHours), *codexLoopGateLimit, snapshot), stderr)
+		opts := dispatchWaveExecutionTickOptions(root, *maxWorkers, splitCommaList(*excludeLane), row, *live, i == 0, *codexLoopGate, maxFloat64(0, *codexLoopGateSinceHours), *codexLoopGateLimit, snapshot)
+		if share != nil {
+			opts.SharedHost = share
+			opts.WaveSharedRank = i
+		}
+		payload, err := evaluateDispatchTick(opts, stderr)
 		if err != nil {
 			ticks = append(ticks, map[string]any{"ok": false, "error": err.Error(), "rank": i})
 			rec["stop_reason"] = err.Error()
@@ -168,6 +192,12 @@ func executeDispatchWavePlan(stdout, stderr io.Writer, req dispatchWaveExecution
 		payload["wave_rank"] = row.Rank
 		payload["wave_target"] = row.Target
 		ticks = append(ticks, payload)
+		// Shared-host rows are enrolled but not yet run: the drain happens ONCE after
+		// the whole batch is admitted, so a pending row neither settles nor stops the
+		// loop -- the serial spawn/settle cadence below is for detached workers only.
+		if share != nil && dispatchMapBool(payload, "host_pending") {
+			continue
+		}
 		action := dispatchMapString(payload, "action")
 		if action == "spawned" || action == "enrolled" {
 			spawned++
@@ -186,6 +216,27 @@ func executeDispatchWavePlan(stdout, stderr io.Writer, req dispatchWaveExecution
 			rec["stop_reason"] = firstString(dispatchMapString(payload, "verdict"), dispatchMapString(payload, "action"))
 		}
 		break
+	}
+	// Drain the shared host ONCE, map each reaped result back to its row, and
+	// recompute the spawn count from the finalized per-row actions. Zero admitted
+	// rows short-circuit inside drainAndFinish (no drain) and are reported per-row.
+	if share != nil {
+		// Size the backstop from the batch the host must actually drain (the rows it
+		// admitted), not from len(ticks): the two diverge whenever the execution loop
+		// stops early, and a short timeout must not cut off work still resident.
+		workers := microagent.BudgetForWave(*maxWorkers, len(executionPlan))
+		ctx, cancel := context.WithTimeout(context.Background(), sharedHostDrainTimeout(len(share.rows), workers))
+		dispatchWaveDrainSharedHost(ctx, share)
+		cancel()
+		spawned = 0
+		for _, tk := range ticks {
+			if m, ok := tk.(map[string]any); ok {
+				if a := dispatchMapString(m, "action"); a == "spawned" || a == "enrolled" {
+					spawned++
+				}
+			}
+		}
+		dispatchWaveRecordSharedHost(rec, share, microagent.BudgetForWave(*maxWorkers, len(executionPlan)), len(share.rows))
 	}
 	rec["ticks"] = ticks
 	rec["spawned"] = spawned

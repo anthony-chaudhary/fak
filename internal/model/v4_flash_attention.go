@@ -26,6 +26,42 @@ import (
 // DeepSeek-V4-Flash-0731 attention layer ("sliding_window": 128).
 const V4FlashWindowSize = 128
 
+// V4FlashRatioScheduleClosedSet reports the published closed set of per-layer
+// compression ratios for the DeepSeek-V4-Flash-0731 schedule. It is DERIVED
+// from the single declared schedule source (deepSeekV4FlashCompressRatios), so
+// a second hardcoded literal cannot drift from the admitted schedule. The
+// official V4.1 schedule ({0,1,2}) is a DIFFERENT closed set and is owned by
+// the deepseek_v41 admission path; it is deliberately not admitted here.
+func V4FlashRatioScheduleClosedSet() []int {
+	seen := make(map[int]bool, 3)
+	for _, r := range deepSeekV4FlashCompressRatios {
+		seen[r] = true
+	}
+	out := make([]int, 0, len(seen))
+	for _, r := range []int{0, 4, 128} {
+		if seen[r] {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// V4FlashScheduleAdmitsRatio reports whether ratio is a member of the declared
+// V4 Flash 0731 closed set. Membership is derived from the single declared
+// schedule source, never a second literal. It is exported so the v41 layout
+// package can share the one source of truth instead of copying the set.
+func V4FlashScheduleAdmitsRatio(ratio int) bool {
+	for _, r := range deepSeekV4FlashCompressRatios {
+		if r == ratio {
+			return true
+		}
+	}
+	return false
+}
+
+// v4FlashScheduleAdmitsRatio is the in-package alias.
+func v4FlashScheduleAdmitsRatio(ratio int) bool { return V4FlashScheduleAdmitsRatio(ratio) }
+
 var (
 	// ErrV4FlashAttentionUnimplemented reports that a DeepSeek-V4 session
 	// carries an attention compression ratio whose native forward is not
@@ -34,7 +70,9 @@ var (
 	ErrV4FlashAttentionUnimplemented = errors.New("model: DeepSeek V4 Flash compressed attention is not implemented")
 
 	// ErrV4FlashAttentionRatioInvalid reports malformed per-layer metadata: a
-	// compression ratio outside the published closed set {0,4,128}.
+	// compression ratio outside the published closed set. The set is derived
+	// from the declared schedule (V4FlashRatioScheduleClosedSet) rather than a
+	// second hardcoded literal.
 	ErrV4FlashAttentionRatioInvalid = errors.New("model: DeepSeek V4 Flash compression ratio is invalid")
 )
 
@@ -52,16 +90,16 @@ const (
 )
 
 // v4FlashAttentionRegime classifies one published compression ratio. ok is
-// false for any value outside the closed set {0,4,128}.
+// false for any value outside the closed set DECLARED by the Flash schedule
+// (derived via v4FlashScheduleAdmitsRatio), never a second hardcoded literal.
 func v4FlashAttentionRegime(ratio int) (V4FlashAttentionRegime, bool) {
-	switch ratio {
-	case 0:
-		return V4FlashAttentionWindowOnly, true
-	case 4, 128:
-		return V4FlashAttentionCompressed, true
-	default:
+	if !v4FlashScheduleAdmitsRatio(ratio) {
 		return 0, false
 	}
+	if ratio == 0 {
+		return V4FlashAttentionWindowOnly, true
+	}
+	return V4FlashAttentionCompressed, true
 }
 
 // v4FlashCompressedLayerRatios returns the 1-based layer numbers whose
@@ -90,7 +128,7 @@ func v4FlashCompressedLayerRatios(cfg Config) (compressed []int, invalidLayer in
 // session runs before its first prefill/decode. It returns:
 //
 //   - ErrV4FlashAttentionRatioInvalid when any layer declares a ratio outside
-//     {0,4,128} (malformed metadata);
+//     the declared Flash closed set (malformed metadata);
 //   - ErrV4FlashAttentionUnimplemented when any layer declares ratio 4 or 128
 //     (metadata-valid, native forward not implemented).
 //
@@ -103,7 +141,7 @@ func (s *Session) refuseUnimplementedV4FlashAttention() error {
 	cfg := s.M.Cfg
 	compressed, invalid := v4FlashCompressedLayerRatios(cfg)
 	if invalid != 0 {
-		return fmt.Errorf("%w: layer %d has ratio outside {0,4,128}", ErrV4FlashAttentionRatioInvalid, invalid)
+		return fmt.Errorf("%w: layer %d has ratio outside %v", ErrV4FlashAttentionRatioInvalid, invalid, V4FlashRatioScheduleClosedSet())
 	}
 	if len(compressed) > 0 {
 		return fmt.Errorf("%w: %d of %d layers carry ratio 4/128 (first layer %d)", ErrV4FlashAttentionUnimplemented, len(compressed), len(cfg.CompressRatios), compressed[0])

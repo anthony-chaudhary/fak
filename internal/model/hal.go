@@ -265,7 +265,7 @@ func (s *Session) weightHALQ8(name string, qt *q8Tensor) compute.Tensor {
 // lets the GLM-DSA forward run its dense projections from a memory-lean Q4_K model on the device —
 // the Q4_K majority of a 753B GLM-5.2 on the GPU, with only ~0.56 B/weight resident.
 func (s *Session) weightHALQ4K(name string, qt *q4kTensor) compute.Tensor {
-	return s.weightHALStagedBounded("q4k:"+name, name, func() compute.Tensor {
+	wt := s.weightHALStagedBounded("q4k:"+name, name, func() compute.Tensor {
 		requireTensorPresent(qt == nil, "Q4_K", name)
 		raw, err := qt.materializeRaw()
 		if err != nil {
@@ -273,6 +273,15 @@ func (s *Session) weightHALQ4K(name string, qt *q4kTensor) compute.Tensor {
 		}
 		return compute.NewQ4K(compute.Default(), []int{qt.out, qt.in}, raw)
 	}, compute.Q4_K, q4kResidentBytes(qt))
+	if q4kHostCopyReleasable(s, qt, wt.Ready()) {
+		// Single residency on a unified-memory APU: the device tensor is authoritative for every
+		// q4_k matmul (useHALQ4KWeights), so the host packed copy is pure duplicated footprint on
+		// the SAME physical pool. Dropping it is what lets a 27B Q4_K fit one 64 GB Strix Halo.
+		// Idempotent: a second call with raw already nil re-derives false (len(raw)==0, but the
+		// gate never reads raw) and, being a no-op assignment, cannot resurrect a stale copy.
+		qt.raw = nil
+	}
+	return wt
 }
 
 // weightHALKQuant stages verbatim k-quant GGUF bytes dispatched through the quant registry.

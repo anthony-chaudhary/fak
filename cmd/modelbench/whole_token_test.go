@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -129,5 +130,40 @@ func TestWholeTokenSerializedReceiptRejectsStaleAndTamperedEvidence(t *testing.T
 	op.CountsAfter.BlockAcceptedCalls = 1
 	if err := validateWholeTokenOperation(op, "per-layer", nil, sequencePath); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// deviceIdentitySeamBackend is a fake compute.Backend whose Name/Tier are fixture
+// values, so the whole-token device-identity seam can be exercised with no Metal
+// device and no registration side effects.
+type deviceIdentitySeamBackend struct {
+	compute.Backend
+	name, tier string
+}
+
+func (b deviceIdentitySeamBackend) Name() string { return b.name }
+func (b deviceIdentitySeamBackend) Tier() string { return b.tier }
+
+func TestWholeTokenDeviceIdentitySeam(t *testing.T) {
+	fallback := metalgemm.DeviceName()
+
+	if got := wholeTokenDeviceIdentity(&model.Session{
+		Backend: deviceIdentitySeamBackend{Backend: compute.Default(), name: "fixture-dev", tier: "fixture-tier"},
+	}); got != "fixture-dev/fixture-tier" {
+		t.Fatalf("backend name/tier identity = %q, want %q", got, "fixture-dev/fixture-tier")
+	}
+
+	if got := wholeTokenDeviceIdentity(&model.Session{
+		Backend: deviceIdentitySeamBackend{Backend: compute.Default(), name: "fixture-dev", tier: ""},
+	}); got != "fixture-dev" {
+		t.Fatalf("backend name-only identity = %q, want %q", got, "fixture-dev")
+	}
+
+	if got := wholeTokenDeviceIdentity(&model.Session{}); got != fallback {
+		t.Fatalf("nil backend identity = %q, want legacy fallback %q", got, fallback)
+	}
+
+	if got := wholeTokenDeviceIdentity(nil); got != fallback {
+		t.Fatalf("nil session identity = %q, want legacy fallback %q", got, fallback)
 	}
 }

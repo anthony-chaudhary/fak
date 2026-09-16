@@ -272,9 +272,17 @@ func expertSwiGLU(m *Model, layer, expert int, xn any, mat matKernel) []float32 
 	// CUDA and other HAL device backends already have a native resident Q4_K MatMul and SwiGLU,
 	// but the legacy sessionQ4KKernel below otherwise dispatches these expert projections through
 	// q4kMatRowsDispatch, whose non-Metal implementation is the host scalar path. Keep gate/up and
-	// their I-wide activation on the backend when possible; read back only the fused intermediate
-	// for the still-host Q5_K/Q6_K down projection. This is intentionally an incremental seam: once
-	// those k-quant device kernels land, the same helper can retain down and the H-wide result too.
+	// their I-wide activation on the backend when possible.
+	//
+	// The Q5_K/Q6_K DOWN device kernels now exist (#13129), so try the full gate/up/down seam first:
+	// when the down weight resolves to a device kernel it runs there too and the fused intermediate
+	// never crosses back to host. Only when that declines does the narrow gate/up seam run and read
+	// back the intermediate for the still-host down projection, byte-for-byte as before.
+	if sk, ok := mat.(sessionQ4KKernel); ok {
+		if out, ok := q4kExpertGateUpDownHAL(sk.s, gn, un, dn, xn, I, H); ok {
+			return out
+		}
+	}
 	g, residentInput := q4kExpertInputHAL(func() *Session { sk, _ := mat.(sessionQ4KKernel); return sk.s }(), gn, un, xn, I, H)
 	if !residentInput {
 		// gate+up share the same activation xn, so dispatch them as ONE group: a Q4_K session kernel

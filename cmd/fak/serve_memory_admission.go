@@ -343,6 +343,65 @@ func estimateMetalWeightsMemoryBounds(ggufPath string) (localadmission.MemoryPla
 // Under critical/unknown pressure the live reading wins and the reservation
 // still fails closed. Omitted (every serve --gguf/all-in-one caller) preserves
 // the historical pure live-probe behavior.
+// metalLeaseRefusalAdvice builds the actionable tail of the `fak up` Metal
+// residency refusal (#13131). The lease carries only the holder's pid, so the
+// historical advice was an unconditional "stop the holder process" — which, on
+// 2026-09-15, would have killed a healthy 17-minute modelbench prefill sweep.
+// The holder-progress verdict lets the refusal name a progressing holder as
+// legitimate and reserve the release advice for a dead or stalled one.
+func metalLeaseRefusalAdvice(path string) string {
+	return metalLeaseRefusalAdviceFor(gpulease.ProbeHolderProgress(gpulease.HolderProgressOptions{Path: path}), path)
+}
+
+// metalLeaseRefusalAdviceFor renders the refusal tail for an already-computed
+// holder probe. Split from metalLeaseRefusalAdvice so the wording for each
+// verdict is testable without needing a live holder in each state.
+func metalLeaseRefusalAdviceFor(probe gpulease.HolderProbe, path string) string {
+	const doctor = "inspect the holder with 'fak doctor serve'"
+	switch probe.Verdict {
+	case gpulease.HolderProgressLiveProgressing:
+		return fmt.Sprintf("the lease is held by %s and that holder is making progress (%s), so wait for it to finish rather than killing it; run a CPU/non-Metal serve, or %s, or release %s once it exits",
+			gpulease.FormatHolderPID(probe.PID), probe.Detail, doctor, path)
+	case gpulease.HolderProgressDead:
+		return fmt.Sprintf("the recorded holder (%s) is no longer running, so %s and retry, or release %s",
+			gpulease.FormatHolderPID(probe.PID), doctor, path)
+	case gpulease.HolderProgressStalled:
+		return fmt.Sprintf("the lease is held by %s and that holder looks stalled (%s), so %s and release it once confirmed, or release %s",
+			gpulease.FormatHolderPID(probe.PID), probe.Detail, doctor, path)
+	default:
+		return fmt.Sprintf("stop the holder process and retry, or run a CPU/non-Metal serve; %s (%s), or release %s",
+			doctor, probe.Detail, path)
+	}
+}
+
+// gpuWaitBoundFromEnv is the caller's willingness to queue for the machine-wide
+// GPU lease, read from FAK_GPU_WAIT_BOUND (a Go duration such as "120s" or "2m").
+// Zero means the caller cannot bound the wait, which makes a progressing-but-
+// unattachable holder a TRUTHFUL_REFUSE rather than a WAIT_WITH_BOUND: the
+// default must not invent a bound the operator never offered.
+func gpuWaitBoundFromEnv() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("FAK_GPU_WAIT_BOUND"))
+	if raw == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 0 {
+		return 0
+	}
+	return d
+}
+
+// metalLeaseRefusalError builds the bounded, typed Metal residency refusal. It
+// replaces the historical bare "stop the holder process and retry" tail with the
+// gpulease scale-out decision, so the error names one of ATTACH_OWNER /
+// WAIT_WITH_BOUND / TRUTHFUL_REFUSE and carries the retry bound when one applies.
+// Split from the acquisition branch so the wording is testable directly.
+func metalLeaseRefusalError(err error, path string, waitBound time.Duration) error {
+	rec := gpulease.DecideScaleOut(err, gpulease.ScaleOutOptions{Path: path, WaitBound: waitBound})
+	return fmt.Errorf("fak local launcher: Metal residency admission refused before model load: %w; %s; %s",
+		err, rec.String(), metalLeaseRefusalAdvice(path))
+}
+
 func loadLocalLauncherModelWithMetalLease(useMetal bool, ggufPath string, opts gpulease.Options, load func(), fitFloors ...*serveFitBudget) (release func(), err error) {
 	if !useMetal || strings.TrimSpace(ggufPath) == "" {
 		load()
@@ -360,7 +419,7 @@ func loadLocalLauncherModelWithMetalLease(useMetal bool, ggufPath string, opts g
 			path = gpulease.DefaultPath()
 		}
 		if errors.Is(err, gpulease.ErrBusy) {
-			return func() {}, fmt.Errorf("fak local launcher: Metal residency admission refused before model load: %w; stop the holder process and retry, or run a CPU/non-Metal serve; inspect active leases with 'fak doctor serve' or release %s", err, path)
+			return func() {}, metalLeaseRefusalError(err, path, gpuWaitBoundFromEnv())
 		}
 		return func() {}, fmt.Errorf("fak local launcher: acquire Metal residency lease %s before model load: %w", path, err)
 	}
@@ -500,7 +559,8 @@ func loadLocalLauncherModelWithVulkanLease(useVulkan bool, ggufPath string, opts
 			path = gpulease.DefaultPath()
 		}
 		if errors.Is(err, gpulease.ErrBusy) {
-			return func() {}, fmt.Errorf("fak local launcher: Vulkan residency admission refused before model load: %w; stop the holder process and retry, or run a CPU/non-Vulkan serve", err)
+			rec := gpulease.DecideScaleOut(err, gpulease.ScaleOutOptions{Path: path, WaitBound: gpuWaitBoundFromEnv()})
+			return func() {}, fmt.Errorf("fak local launcher: Vulkan residency admission refused before model load: %w; %s", err, rec.String())
 		}
 		return func() {}, fmt.Errorf("fak local launcher: acquire Vulkan residency lease %s before model load: %w", path, err)
 	}

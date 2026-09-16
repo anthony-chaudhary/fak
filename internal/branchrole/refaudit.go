@@ -190,6 +190,7 @@ func hardcodedRefLine(line string) bool {
 // family a prefix rule would assign.
 var refClassByExactPath = map[string]string{
 	"cmd/fak/codex_freshness.go":                         RefClassDevelopmentSource,
+	"cmd/fak/verbs_gen.go":                               RefClassDevelopmentSource,
 	"cmd/fak/stallscan_skew.go":                          RefClassDevelopmentSource,
 	"cmd/fak/sweep_parked.go":                            RefClassDevelopmentSource,
 	"cmd/fak/sync.go":                                    RefClassDevelopmentSource,

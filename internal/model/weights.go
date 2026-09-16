@@ -294,6 +294,15 @@ type Model struct {
 	routeObs RouteObserver
 	routePos int
 
+	// metalObs is the process-wide observability tally for the Metal/CPU routing decision
+	// (#12875): a live per-route CPU-fallback count plus the last-observed device-resident
+	// Q8/Q6_K weight counts. It exists so /healthz and the startup stamp can report what
+	// decode ACTUALLY did at request time instead of replaying a frozen pre-prefill snapshot.
+	// It is pure observation — no routing math, kernel selection, or numerics read it — and is
+	// lock-free on the hot path (atomic adds), so an unobserved serve is byte- and
+	// allocation-identical. Created lazily by metalLive(); see metal_observability.go.
+	metalObs *metalLiveState
+
 	// lora is the optional set of active LoRA adapters applied dynamically at the
 	// named-projection seam (#291). nil by default — residentMatRows is then
 	// byte-identical and allocation-identical. When set via SetLoRA, each named
@@ -345,6 +354,13 @@ type Model struct {
 	// byte-identical: the hook reads this one nil field and returns. Set via
 	// SetEPDecodeCoordinator; follower ranks run RunEPFollower instead and never set it.
 	epCoord *EPDecodeCoordinator
+
+	// v41Roles memoizes the DeepSeek V4.1 shared KV/index execution schedule for
+	// the model's config (v41_attention.go). The schedule is a pure function of
+	// the config, so it is resolved once on first forward and reused. nil until
+	// then; the field is never written by a caller and never consulted off the
+	// V4.1 path, so every non-V4.1 model is byte-identical with it present (#12896).
+	v41Roles map[int]V41AttentionRole
 }
 
 // newModel assembles a Model from a built manifest + packed f32 blob, applying

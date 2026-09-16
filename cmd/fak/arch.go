@@ -9,6 +9,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/archcheck"
 	"github.com/anthony-chaudhary/fak/internal/archfitness"
 	"github.com/anthony-chaudhary/fak/internal/archrank"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 func cmdArch(argv []string) {
@@ -66,6 +67,7 @@ func runArchCheck(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
+	*dirFlag = pathutil.ExpandTilde(*dirFlag)
 	root := resolveRoot(*dirFlag)
 
 	var res *archcheck.CheckResult

@@ -48,6 +48,7 @@ connects new work to operator value. Do not turn this direction into a shipped c
 - Fak-native execution-engine doctrine, matched-envelope rule, external-reference boundary, and deterministic docs guard: [`docs/native-inference-goal.md`](docs/native-inference-goal.md)
 - Performance-RSI loop doctrine, 16 canonical dimensions, dominant bottleneck derivation, matched-baseline evidence rules, and scorecard CLI: [`docs/notes/PERFORMANCE-RSI-LOOP-DOCTRINE.md`](docs/notes/PERFORMANCE-RSI-LOOP-DOCTRINE.md)
 - Memory-concept ranking dossier (superset): [`docs/superset/MEMORY-CONCEPT-RANKINGS.md`](docs/superset/MEMORY-CONCEPT-RANKINGS.md) — 10 memory concepts M1–M10 ranked fak-vs-engines with evidence, per-engine evidence tables, and adopt-or-SKIP verdicts
+- [The managed-context glossary and product contract](docs/managed-context-glossary.md): the public glossary for managed context — assumption, resident view, pinned objective, budget envelope, reset transaction, context query, memory promotion, and cache state — each grounded in the shipped mechanism, stating what fak manages automatically, what it asks the user about, and what stays user-controlled. The product-facing companion to [context-is-not-memory](docs/CONTEXT-IS-NOT-MEMORY.md) (#1571, epic #1570).
 - External system architecture, interfaces, and trust boundaries: [`docs/architecture.md`](docs/architecture.md)
 - Builder stability and ownership ladder (CLI → semantic protocol → public Go API → sidecar → internal leaves): [`docs/builder-contract-ladder.md`](docs/builder-contract-ladder.md)
 - Detailed integration architecture and extension seams: [`docs/fak/agent-integration-architecture.md`](docs/fak/agent-integration-architecture.md)
@@ -86,6 +87,7 @@ connects new work to operator value. Do not turn this direction into a shipped c
 - Operator-steerability PRs (`fak steer prs`) — the gate/observability separation, the OSP unit, and why the overlay must never become a merge gate: [docs/operator-steerability-prs.md](docs/operator-steerability-prs.md)
 - Version-everything (`fak version modules`) — per-module rev+date over the module tree, git-witnessed via the `fak-module-versions/1` ledger rather than asserted: [docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md](docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md)
 - Cross-repo issue velocity (`fak issues-solved`): query issues solved across public and companion checkouts over arbitrary time windows in 1 turn: [docs/cli/verbs.md#fak-issues-solved](docs/cli/verbs.md#fak-issues-solved)
+- Cache-value roll-up — is the cache work paying off over time? The front-door story keeping WITNESSED kernel reuse and OBSERVED provider-dollar savings in separate, unblended tracks, with the #1066 marginal-over-warm-KV, WITNESSED-vs-OBSERVED, and net-not-gross fences and the shipped Track-1 reproduce command (`fak nightrun score --json`): [docs/cache-value-rollup.md](docs/cache-value-rollup.md)
 
 ## Source authorities
 

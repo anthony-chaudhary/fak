@@ -43,6 +43,8 @@ func RunIssue(stdout, stderr io.Writer, argv []string) int {
 		return runIssueDecompose(stdout, stderr, argv[1:])
 	case "dedup":
 		return runIssueDedup(stdout, stderr, argv[1:])
+	case "draft":
+		return runIssueDraft(stdout, stderr, argv[1:])
 	case "finding":
 		return runIssueFinding(stdout, stderr, argv[1:])
 	case "audit-discoverability", "discoverability":
@@ -1267,6 +1269,9 @@ func issueUsage(w io.Writer) {
                      [--repo owner/name] [--strict-born-routed] [--json]
   fak-dev issue create   --title T (--body B | --body-file F) [--labels l1,l2] [--category C --layer L]
                      [--repo owner/name] [--dry-run] [--json]
+                     [--dedupe-checked --dedupe-cap N --dedupe-threshold F --dedupe-warn-only]
+  fak-dev issue draft    --lane L [--title T] [--slug S] [--out DIR]
+                     [--dedupe-checked --dedupe-cap N] [--repo owner/name] [--dry-run] [--json]
   fak-dev issue edit     --issue N [--title T] [--body B | --body-file F]
                      [--add-label l1,l2] [--remove-label l1,l2]
                      [--repo owner/name] [--dry-run] [--json]

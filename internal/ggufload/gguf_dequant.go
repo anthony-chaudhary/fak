@@ -194,9 +194,37 @@ func tensorElems(t TensorInfo) (uint64, error) {
 	return n, nil
 }
 
+// MaxEagerF32Bytes is the fail-closed ceiling on a SINGLE tensor's eager f32 payload in
+// dequantF32IntoLimited. A k-quant tensor that the raw-resident/streamed tier did not
+// intercept must never trigger an unbounded make([]float32, n): a ~98.3B-element span
+// (the published V4.1 Engram table, 366.2 GiB) is a hard Go runtime OOM, not a typed
+// refusal (fak#13152). 16 GiB is far above any legitimate single dense tensor a Halo
+// appliance loads resident (the largest real tensors are the ~5-10 GB embeddings and the
+// per-rank dense base) while still refusing a multi-hundred-GiB span. A caller with a
+// genuinely larger single tensor raises this explicitly rather than the loader silently
+// attempting the allocation. It is a var, not a const, so a test can lower it to a
+// deterministic fixture size without materializing gigabytes.
+var MaxEagerF32Bytes int64 = 16 << 30
+
+// ErrEagerF32BudgetExceeded is the typed refusal a tensor whose f32 payload exceeds
+// MaxEagerF32Bytes returns from dequantF32IntoLimited. It NAMES the tensor so the caller
+// can see exactly which weight the raw-resident/streamed tier failed to intercept, rather
+// than reading a bare runtime OOM.
+type ErrEagerF32BudgetExceeded struct {
+	Tensor    string
+	Type      TensorType
+	WantBytes int64
+	Limit     int64
+}
+
+func (e *ErrEagerF32BudgetExceeded) Error() string {
+	return fmt.Sprintf("gguf: eager f32 dequant of tensor %s (type %s) would allocate %d bytes (%.1f GiB), over the %d-byte (%.1f GiB) eager-f32 budget; the raw-resident/streamed tier must admit this tensor or the caller must stream it",
+		e.Tensor, e.Type, e.WantBytes, float64(e.WantBytes)/(1<<30), e.Limit, float64(e.Limit)/(1<<30))
+}
+
 // reuseF32 returns a length-n float32 slice backed by buf when buf's capacity allows, else
 // a fresh allocation. The caller overwrites every returned element, so the reused tail is
-// not zeroed — and never leaks into the result, whose length is exactly n.
+// not zeroed - and never leaks into the result, whose length is exactly n.
 func reuseF32(buf []float32, n int) []float32 {
 	if cap(buf) >= n {
 		return buf[:n]
@@ -329,6 +357,13 @@ func dequantF32IntoLimited(scratch []float32, t TensorInfo, raw []byte, workerLi
 	}
 	if elems > uint64(math.MaxInt) {
 		return nil, fmt.Errorf("gguf: tensor %s element count overflows int", t.Name)
+	}
+	if want := int64(elems) * 4; want > MaxEagerF32Bytes {
+		// Fail closed BEFORE the allocation: a tensor the raw-resident/streamed tier
+		// did not intercept must not become an unbounded make([]float32, n). The
+		// named typed refusal lets the caller see which weight leaked past the tier
+		// instead of reading a bare "fatal error: runtime: out of memory" (fak#13152).
+		return nil, &ErrEagerF32BudgetExceeded{Tensor: t.Name, Type: t.Type, WantBytes: want, Limit: MaxEagerF32Bytes}
 	}
 	out := reuseF32(scratch, int(elems))
 	switch t.Type {
@@ -1042,6 +1077,48 @@ func f16At(raw []byte, off int) float32 {
 type countingReader struct {
 	r io.Reader
 	n int64
+	// mapped is the byte extent of the underlying source, when known. A zero value
+	// means "unbounded/unknown" (the historical Read(io.Reader) contract), so every
+	// existing caller stays byte-identical; a positive value makes str() and the
+	// array-length path reject a declared [offset, offset+len) range that would run
+	// past the mapping (fak#13065).
+	mapped int64
+}
+
+// checkMappedExtent reports whether the byte range [off, off+n) lies within a mapping of
+// mapped bytes. mapped <= 0 means the extent is unknown, so the check is a no-op (the
+// historical Read(io.Reader) behavior). It refuses a range that runs past the mapping with
+// a typed error, so a malformed or hostile GGUF that declares a length passing the size
+// ceiling but overrunning the file is rejected at parse time instead of over-reading.
+func checkMappedExtent(off, n, mapped int64) error {
+	if mapped <= 0 {
+		return nil
+	}
+	if off < 0 || n < 0 {
+		return fmt.Errorf("gguf: negative metadata extent off=%d len=%d", off, n)
+	}
+	if off > mapped || n > mapped-off {
+		return fmt.Errorf("gguf: metadata value [%d,%d) exceeds mapped extent %d", off, off+n, mapped)
+	}
+	return nil
+}
+
+// valueTypeFixedWidth reports the fixed storage width in bytes of a GGUF scalar metadata
+// type, and whether that type has one. String and Array are variable-width (their reader
+// bounds each value itself), so they report ok=false and are not pre-charged here.
+func valueTypeFixedWidth(t ValueType) (int, bool) {
+	switch t {
+	case TypeUint8, TypeInt8, TypeBool:
+		return 1, true
+	case TypeUint16, TypeInt16:
+		return 2, true
+	case TypeUint32, TypeInt32, TypeFloat32:
+		return 4, true
+	case TypeUint64, TypeInt64, TypeFloat64:
+		return 8, true
+	default:
+		return 0, false
+	}
 }
 
 func (r *countingReader) readFull(b []byte) error {
@@ -1079,6 +1156,9 @@ func (r *countingReader) str() (string, error) {
 	}
 	if n > maxStringBytes {
 		return "", fmt.Errorf("string too large: %d bytes", n)
+	}
+	if err := checkMappedExtent(r.n, int64(n), r.mapped); err != nil {
+		return "", err
 	}
 	b := make([]byte, int(n))
 	if err := r.readFull(b); err != nil {
@@ -1150,6 +1230,22 @@ func (r *countingReader) value(typ ValueType) (Value, error) {
 		}
 		if n > uint64(math.MaxInt) {
 			return Value{}, fmt.Errorf("array too large: %d elements", n)
+		}
+		// Bound the array's declared element count against the mapping extent before
+		// allocating: a count that passes the ceiling but cannot fit in the remaining
+		// mapped bytes is a malformed declaration, so refuse it here rather than
+		// walking into a short read. The element's fixed storage width is used when it
+		// is known (fixed-width scalars); a variable-width element (string/array) is
+		// checked per element by its own reader.
+		if width, ok := valueTypeFixedWidth(elem); ok {
+			// n*width must not overflow before the extent comparison; a count large
+			// enough to overflow int64 cannot fit any real mapping, so refuse it.
+			if n > uint64(math.MaxInt64)/uint64(width) {
+				return Value{}, fmt.Errorf("array span of %d x %d bytes overflows int64", n, width)
+			}
+			if err := checkMappedExtent(r.n, int64(n)*int64(width), r.mapped); err != nil {
+				return Value{}, err
+			}
 		}
 		items := make([]Value, int(n))
 		for i := range items {

@@ -423,3 +423,40 @@ func TestStreamChatCompletionsHTTPError(t *testing.T) {
 		t.Fatalf("onDelta fired %d time(s) on a 401; an auth failure must never deliver fragments", fired)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// T6 - an in-band `data: {"error":{...}}` frame followed by `data: [DONE]` is a
+// mid-stream upstream failure. It must fail closed with a typed error carrying
+// the server message, never be honored as a silently completed 0-token answer
+// (issue #12776).
+// ---------------------------------------------------------------------------
+
+func TestStreamChatCompletionsInBandErrorFrameFailsClosed(t *testing.T) {
+	const id, model = "chatcmpl-fak-t6", "test-model"
+	frames := []string{
+		sseEvent(sseOpenChunk(id, model)),
+		sseEvent(sseChunkJSON(id, model, map[string]any{"content": "Hel"}, nil, nil)),
+		sseEvent(`{"error":{"message":"upstream exploded mid-stream","type":"upstream_error","code":null,"param":null}}`),
+		sseEvent(fakclient.StreamDoneToken),
+	}
+	ts := newStreamServer(t, frames)
+	c := fakclient.New(ts.URL)
+
+	res, err := c.StreamChatCompletions(context.Background(), fakclient.StreamChatRequest{
+		Model:    "test-model",
+		Messages: []fakclient.StreamMessage{{Role: "user", Content: "hi"}},
+	}, func(string) {})
+	if err == nil {
+		t.Fatalf("in-band error frame returned nil error with result %+v - a mid-stream failure must never read as success", res)
+	}
+	if res != nil {
+		t.Fatalf("result = %+v, want nil on a mid-stream failure", res)
+	}
+	apiErr, ok := err.(*fakclient.APIError)
+	if !ok {
+		t.Fatalf("error is not *APIError: %T %v", err, err)
+	}
+	if apiErr.Type != "upstream_error" || !strings.Contains(apiErr.Message, "upstream exploded mid-stream") {
+		t.Fatalf("in-band error not surfaced: %+v", apiErr)
+	}
+}

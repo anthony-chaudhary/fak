@@ -126,6 +126,14 @@ type InKernelPlanner struct {
 	// follow-up (internal/model/batch.go), not a correctness fix.
 	devMu sync.Mutex
 
+	// concurrencyProfile is an OPT-IN phase-timeline recorder for the device
+	// fan-out cell (issue #1589). Its zero value is nil, so a planner that never
+	// opts in is byte-for-byte unaffected: the admit / forwardEnter / forwardExit
+	// calls are all nil-receiver-safe. When set, it localizes the serialization
+	// layer (devMu vs. concurrent-unfused) with a witnessing timeline instead of
+	// a guessed mechanism.
+	concurrencyProfile *concurrencyProfiler
+
 	coalesceMu         sync.Mutex
 	coalesceReady      []*inKernelCoalesceRequest
 	coalesceRunning    bool
@@ -137,6 +145,15 @@ type InKernelPlanner struct {
 	reqMemMu      sync.Mutex
 	lastReqMemory RequestMemoryStats
 
+	// nativePhaseMu guards nativePhaseLog, the bounded most-recent-observation-per-trace-id
+	// ledger behind NativePhaseReporter (#13120). It is deliberately its OWN mutex rather than
+	// sharing reqMemMu: the request-memory plan is written once per request admission, while a
+	// phase observation is written at each phase boundary, so folding them would couple two
+	// unrelated lock orderings on the serve hot path. The map is capped and evicts oldest-first
+	// so a long-lived serve cannot grow it without bound.
+	nativePhaseMu  sync.Mutex
+	nativePhaseLog map[string]NativePhaseObservation
+	nativePhaseSeq []string
 	// moeResidencyState is the serve-scoped fold of every request's activated-expert residency
 	// (R6/#5617, inkernel_moe_residency.go). It is embedded because the ring lives on a session
 	// this planner builds and closes PER REQUEST, so without a planner-scoped ledger the whole
@@ -236,6 +253,22 @@ func (p *InKernelPlanner) Model() string { return p.modelID }
 // NativeDecodeTraceSupported declares that this planner owns the token-commit
 // seam used by NativeDecodeTrace. It performs no model work.
 func (p *InKernelPlanner) NativeDecodeTraceSupported() bool { return true }
+
+// nativePhaseTraceID returns the request trace id the planner binds a native-phase
+// observation to. It is the SAME "trace_id" context value the restore stash reads, and it
+// is empty when the request carried none — the observation then keys the empty bucket rather
+// than fabricating an id (#13120).
+func nativePhaseTraceID(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if v := ctx.Value("trace_id"); v != nil {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
 
 // StreamingSupported enables the gateway's semantic SSE path for in-kernel runs.
 // The backend projects each completed turn as one content delta; tool lifecycle
@@ -706,6 +739,54 @@ func (p *InKernelPlanner) RequestMemoryStats() RequestMemoryStats {
 	out.MemoryPlan = append([]RequestMemoryDemand(nil), p.lastReqMemory.MemoryPlan...)
 	out.Capacities = append([]RequestMemoryCapacity(nil), p.lastReqMemory.Capacities...)
 	return out
+}
+
+// nativePhaseLogCap bounds the per-planner native-phase ledger. It is small because the
+// ledger holds only the MOST RECENT observation per trace id, and one serve usually has a
+// handful of in-flight requests; the cap exists so an unbounded stream of distinct trace ids
+// (or the empty-trace-id bucket) cannot grow the map without limit.
+const nativePhaseLogCap = 64
+
+// recordNativePhase stores the most recent observation for traceID. It is a no-op for an
+// unknown phase token, so the closed vocabulary cannot be widened by a caller's typo. The
+// empty trace id is a valid key: a request that carried no trace id is still attributed to
+// its phase rather than dropped (NativePhaseObservation.TraceID stays empty, never fabricated).
+func (p *InKernelPlanner) recordNativePhase(traceID string, phase NativePhase, at time.Time, elapsed time.Duration, completed bool) {
+	if p == nil || !nativePhaseKnown(phase) {
+		return
+	}
+	obs := NativePhaseObservation{TraceID: traceID, Phase: phase, At: at, Elapsed: elapsed, Completed: completed}
+	p.nativePhaseMu.Lock()
+	defer p.nativePhaseMu.Unlock()
+	if p.nativePhaseLog == nil {
+		p.nativePhaseLog = make(map[string]NativePhaseObservation, nativePhaseLogCap)
+	}
+	if _, seen := p.nativePhaseLog[traceID]; !seen {
+		for len(p.nativePhaseSeq) >= nativePhaseLogCap {
+			oldest := p.nativePhaseSeq[0]
+			p.nativePhaseSeq = p.nativePhaseSeq[1:]
+			if _, still := p.nativePhaseLog[oldest]; still {
+				delete(p.nativePhaseLog, oldest)
+				break
+			}
+		}
+		p.nativePhaseSeq = append(p.nativePhaseSeq, traceID)
+	}
+	p.nativePhaseLog[traceID] = obs
+}
+
+// NativePhaseObservation reports the most recent native-phase observation recorded for traceID.
+// It implements NativePhaseReporter, so the gateway can type-assert a planner for this optional
+// seam and emit nothing for a proxy planner that does not implement it. A nil planner reports
+// not-observed.
+func (p *InKernelPlanner) NativePhaseObservation(traceID string) (NativePhaseObservation, bool) {
+	if p == nil {
+		return NativePhaseObservation{}, false
+	}
+	p.nativePhaseMu.Lock()
+	defer p.nativePhaseMu.Unlock()
+	obs, ok := p.nativePhaseLog[traceID]
+	return obs, ok
 }
 
 func (p *InKernelPlanner) InKernelOOMRetryStats() InKernelOOMRetryStats {
@@ -1327,11 +1408,13 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		if prefillAt < len(ids) {
 			rawLogits, err := p.prefillDivergentSuffix(ctx, s, ids[prefillAt:], measurementOpt...)
 			if err != nil {
+				p.recordNativePhase(nativePhaseTraceID(ctx), NativePhasePrefill, tp, time.Since(tp), false)
 				return inKernelGenerateResult{}, err
 			}
 			logits = append([]float32(nil), rawLogits...)
 		}
 		prefillS = time.Since(tp).Seconds()
+		p.recordNativePhase(nativePhaseTraceID(ctx), NativePhasePrefill, tp, time.Since(tp), true)
 	} else {
 		logits = append([]float32(nil), cachedLogits...)
 	}
@@ -1580,7 +1663,8 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	}
 
 	decodeS := time.Since(td).Seconds()
-
+	p.recordNativePhase(nativePhaseTraceID(ctx), NativePhaseDecode, td, time.Since(td), err == nil)
+	p.recordNativePhase(nativePhaseTraceID(ctx), NativePhaseTerminal, time.Now(), 0, err == nil)
 	return inKernelGenerateResult{
 		gen:        gen,
 		promptTok:  promptTok,
@@ -1793,11 +1877,13 @@ func (p *InKernelPlanner) generateReusedMetalMTP(
 		if prefillAt < len(ids) {
 			rawLogits, err := p.prefillDivergentSuffix(ctx, s, ids[prefillAt:], measurementOpt...)
 			if err != nil {
+				p.recordNativePhase(nativePhaseTraceID(ctx), NativePhasePrefill, tp, time.Since(tp), false)
 				return inKernelGenerateResult{}, err
 			}
 			logits = append([]float32(nil), rawLogits...)
 		}
 		prefillS = time.Since(tp).Seconds()
+		p.recordNativePhase(nativePhaseTraceID(ctx), NativePhasePrefill, tp, time.Since(tp), true)
 	} else {
 		logits = append([]float32(nil), cachedLogits...)
 	}
@@ -1892,7 +1978,8 @@ func (p *InKernelPlanner) generateReusedMetalMTP(
 	}
 
 	decodeS := time.Since(td).Seconds()
-
+	p.recordNativePhase(nativePhaseTraceID(ctx), NativePhaseDecode, td, time.Since(td), err == nil)
+	p.recordNativePhase(nativePhaseTraceID(ctx), NativePhaseTerminal, time.Now(), 0, err == nil)
 	return inKernelGenerateResult{
 		gen:        gen,
 		promptTok:  promptTok,
@@ -2277,11 +2364,26 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	// (see devMu). The plain CPU path owns a per-turn session and guards the shared radix tree
 	// with p.mu itself, so it remains concurrent. Held across Prefill + decode.
 	if p.requiresDeviceSerialization() && !p.coalescesQwenDecode() {
+		// #1589 phase-timeline probe: record the fan-out boundary and the
+		// serialized critical section. Both calls are nil-safe no-ops unless a
+		// caller opted into a concurrency profile.
+		phase := p.concurrencyProfile.admit()
 		p.devMu.Lock()
-		defer p.devMu.Unlock()
+		p.concurrencyProfile.forwardEnter(phase, true)
+		defer func() {
+			p.concurrencyProfile.forwardExit(phase)
+			p.devMu.Unlock()
+		}()
 		if err := p.refuseOversizeRequest(len(ids), maxNew); err != nil {
 			return nil, err
 		}
+	} else if p.concurrencyProfile != nil {
+		// Concurrent-unfused path (coalescing or CPU): still record the boundary
+		// so the timeline can distinguish "no mutex serialized us" from "no
+		// overlap happened at all".
+		phase := p.concurrencyProfile.admit()
+		p.concurrencyProfile.forwardEnter(phase, false)
+		defer p.concurrencyProfile.forwardExit(phase)
 	}
 	if p.coalescesQwenDecode() {
 		if err := p.refuseOversizeRequest(len(ids), maxNew); err != nil {
@@ -2327,6 +2429,10 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		genRes, err = generate(ctx)
 	}
 	if err != nil {
+		// A generate path that bailed before its decode boundary (prefix-snapshot, admission,
+		// context cancel) never reached the in-loop terminal emit, so the request still gets a
+		// terminal observation here — bound to the same trace id (#13120).
+		p.recordNativePhase(nativePhaseTraceID(ctx), NativePhaseTerminal, time.Now(), 0, false)
 		if genRes.vulkanMTP != nil {
 			return &Completion{VulkanMTP: genRes.vulkanMTP}, err
 		}
@@ -2603,6 +2709,30 @@ func cudaImmutableWeightUploadSnapshot(be compute.Backend) (model.NativeCUDAImmu
 
 func (p *InKernelPlanner) requiresDeviceSerialization() bool {
 	return p != nil && (p.backend != nil || p.metal)
+}
+
+// EnableConcurrencyProfile turns on the opt-in device-fan-out phase-timeline
+// recorder (issue #1589). It must be called before concurrent Complete calls.
+// Enabling it changes no served tokens and no batching: it only records the
+// admit / forward-enter / forward-exit timestamps at the existing devMu seam.
+func (p *InKernelPlanner) EnableConcurrencyProfile() {
+	if p == nil {
+		return
+	}
+	if p.concurrencyProfile == nil {
+		p.concurrencyProfile = newConcurrencyProfiler()
+	}
+}
+
+// ConcurrencyProfile folds the recorded phase timeline into a named-mechanism
+// receipt. It returns nil when no profile was enabled. Callers must invoke it
+// after all profiled requests have returned.
+func (p *InKernelPlanner) ConcurrencyProfile() *ConcurrencyProfile {
+	if p == nil {
+		return nil
+	}
+	_, forwardPath := p.executionIdentity()
+	return p.concurrencyProfile.build(forwardPath)
 }
 
 const inKernelRequestDeviceHeadroom = 0.15

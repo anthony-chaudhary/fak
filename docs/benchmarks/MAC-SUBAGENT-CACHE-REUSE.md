@@ -211,19 +211,23 @@ The N=4 `reused 12,288 = (4-1)*4096` and `prefix hit 0.667` are the harness's
 cross-agent shared-prefix behavior that fak must beat, still to be confirmed
 against the server's own cache counters.
 
-### 5.2 `fak` arm status — BLOCKED (honest, not a number)
+### 5.2 `fak` arm status — endpoint gap RESOLVED; one environmental blocker remains (honest, not a number)
 
-Two concrete blockers were found while attempting the live `fak` arm; neither is
-a performance claim:
+Two blockers were found while attempting the live `fak` arm. Blocker 2 is now resolved;
+blocker 1 is environmental. Neither was ever a performance claim:
 
 1. **Peer Metal lease.** A concurrent peer `fak serve` (27B, Metal) held the GPU
    lease `/var/folders/.../T/fak-gpu.lease`, so `fak up` correctly refused with
    `Metal residency admission refused ... lease held by pid <peer>`. Killing a
    peer is out of policy; the 3B `fak up` was therefore not run on Metal.
-2. **Endpoint-path gap (filed as fak#13027).** The harness posts live cells to
-   `/v1/completions` (`cmd/fak-dev/bench_subagent_fanout.go`), but `fak up` /
-   `fak serve` expose only `/v1/chat/completions`; the fak mock returned `404 page
-   not found`. Until #13027 lands, the live fak arm cannot complete a cell.
+2. **Endpoint-path gap (filed as fak#13027) — RESOLVED.** The harness posts live cells to
+   `/v1/completions` (`cmd/fak-dev/bench_subagent_fanout.go`). `fak serve` always exposed
+   that route (`internal/gateway/completions.go`); the gap was the turnkey `fak up` server,
+   which served only `/v1/chat/completions` and returned `404 page not found`. That half
+   landed in `bf099b20a` (`cmd/fak/up.go`), so `fak up` now serves `/v1/completions` too —
+   same native `StreamingPlanner` per-token path, only the JSON envelope differs. The live
+   fak arm is no longer blocked by the endpoint path; blocker #1 (peer Metal lease) still
+   governs whether a run may execute on a shared host.
 
 Receipt path (once produced): `docs/benchmarks/receipts/mac-subagent-cache-reuse/m3pro.json`.
 
@@ -298,5 +302,5 @@ curl -sf http://127.0.0.1:8082/healthz
 - Mac many-agent cache-value background (measured, separate workload): [`../notes/MAC-MANYAGENT-CACHE-VALUE-2026-09-03.md`](../notes/MAC-MANYAGENT-CACHE-VALUE-2026-09-03.md)
 - Modeled Mac comparison source: `cmd/fak/macbench_manyagent.go` (`DefaultManyAgentProvenance = "MODELED"`)
 - fak#13023 — this head-to-head (arm + receipt + this README)
-- fak#13027 — `/v1/completions` vs `/v1/chat/completions` gap blocking the live fak arm
+- fak#13027 — `/v1/completions` gap on the turnkey `fak up` server, blocking the live fak arm; the `fak up` half is RESOLVED in `bf099b20a` (`fak serve` always served the route), so only the peer-lease blocker remains
 - fak#13029 — harness reports accounted reuse / output equivalence as if measured (honesty fix)

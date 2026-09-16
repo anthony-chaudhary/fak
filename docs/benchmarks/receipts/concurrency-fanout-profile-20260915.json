@@ -1,0 +1,39 @@
+{
+  "schema": "fak.inkernel_concurrency_profile.v1",
+  "generated_at": "2026-09-16T02:52:26.6226883Z",
+  "concurrency": 4,
+  "mechanism": "device-mutex",
+  "max_concurrent_forward": 1,
+  "forward_path": "device/generic",
+  "phases": [
+    {
+      "request_id": 1,
+      "admitted_ns": 527000,
+      "forward_in_ns": 527000,
+      "forward_out_ns": 3117900,
+      "serialized": true
+    },
+    {
+      "request_id": 2,
+      "admitted_ns": 527000,
+      "forward_in_ns": 3117900,
+      "forward_out_ns": 4685000,
+      "serialized": true
+    },
+    {
+      "request_id": 3,
+      "admitted_ns": 527000,
+      "forward_in_ns": 4685000,
+      "forward_out_ns": 6810200,
+      "serialized": true
+    },
+    {
+      "request_id": 4,
+      "admitted_ns": 527000,
+      "forward_in_ns": 6810200,
+      "forward_out_ns": 7862400,
+      "serialized": true
+    }
+  ],
+  "witness": "admitted concurrently but max_concurrent_forward == 1: a single forward-pass mutex (devMu) serialized the whole Prefill+decode for each request"
+}

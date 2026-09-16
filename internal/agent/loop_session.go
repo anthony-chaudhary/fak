@@ -31,6 +31,14 @@ import (
 
 const DefaultCircuitBreakerThreshold = 3
 
+// DefaultInfraRepromptBudget is how many times the outer turn loop will RE-PROMPT the
+// model after a recoverable infrastructure failure (a transient 429/5xx/529, a retry
+// ceiling, an exhausted transient transport) before it gives up and surfaces the error.
+// It bounds the loop so a persistent upstream outage cannot spin. A negative
+// WithInfraRepromptBudget disables the arm entirely, restoring the historical
+// hard-stop-on-first-failure behavior.
+const DefaultInfraRepromptBudget = 3
+
 // RunOption configures an optional behavior of RunArm / Run. The zero set of options
 // is the historical behavior; each option opts into one capability (today: a session
 // drive-state table). It is the variadic-options idiom so adding a capability never
@@ -250,10 +258,15 @@ type runConfig struct {
 	provider                     string
 	baseURL                      string
 	circuitBreakerThreshold      int
-	envelopeSink                 func(harnesskit.Envelope)
-	policySnapshot               *adjudicator.Policy
-	streamingSpeculation         bool
-	streamingFSMHook             func(*StreamingToolFSM)
+	// infraRepromptBudget is the outer loop's recoverable-infrastructure re-prompt bound
+	// (infra_reprompt.go). The option carries the operator's raw value: negative disables
+	// the arm (budget 0), zero means unset (DefaultInfraRepromptBudget), positive means an
+	// explicit budget. runArm resolves it onto the runner.
+	infraRepromptBudget  int
+	envelopeSink         func(harnesskit.Envelope)
+	policySnapshot       *adjudicator.Policy
+	streamingSpeculation bool
+	streamingFSMHook     func(*StreamingToolFSM)
 }
 
 // WithStreamingSpeculation enables speculative tool execution driven by StreamingToolFSM
@@ -277,6 +290,16 @@ func WithStreamingFSMHook(hook func(*StreamingToolFSM)) RunOption {
 func WithCircuitBreakerThreshold(threshold int) RunOption {
 	return func(c *runConfig) {
 		c.circuitBreakerThreshold = threshold
+	}
+}
+
+// WithInfraRepromptBudget sets the outer turn loop's recoverable-infrastructure re-prompt
+// budget. Semantics: n < 0 disables the arm (the loop hard-stops on the first recoverable
+// failure — the exact historical behavior); n == 0 means unset and uses
+// DefaultInfraRepromptBudget; n > 0 uses n.
+func WithInfraRepromptBudget(n int) RunOption {
+	return func(c *runConfig) {
+		c.infraRepromptBudget = n
 	}
 }
 

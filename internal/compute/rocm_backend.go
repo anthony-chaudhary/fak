@@ -365,6 +365,18 @@ func (r *rocmBackend) matmul(w, x Tensor, rows int) Tensor {
 	return y
 }
 
+// SupportsDeviceWeightDtype reports the exact dtype set rocmBackend.matmul has a case for,
+// matching that switch: F32, Q8_0, Q4_K, Q5_K and Q6_K. Every other dtype falls to the
+// switch's panic default, so it is reported false here.
+func (r *rocmBackend) SupportsDeviceWeightDtype(dt Dtype) bool {
+	switch dt {
+	case F32, Q8_0, Q4_K, Q5_K, Q6_K:
+		return true
+	default:
+		return false
+	}
+}
+
 func (r *rocmBackend) MatMul(w, x Tensor) Tensor {
 	rocmMu.Lock()
 	defer rocmMu.Unlock()
@@ -474,4 +486,30 @@ func (r *rocmBackend) Argmax(logits Tensor) int {
 	var idx C.int
 	rocmCheck(C.frocm_argmax_f32((*C.float)(b.ptr), rocmDim(n, "argmax elements"), &idx), "argmax")
 	return int(idx)
+}
+
+// DSAIndexSelect runs GLM-MoE-DSA's learned-indexer score + top-k SELECTION for one query.
+//
+// This is a device-path WIRING, not a device kernel: the numerics delegate to the exact host
+// reference dsaIndexSelectHost over the tensors read back from the device, so the selected key
+// SET is bit-identical to the cpu-ref. That is deliberate, and it is the same boundary dsa.go
+// documents at its "WHY the selection stays on the host" block: the indexer drives a DISCRETE
+// top-k, so a single flipped entry would diverge the output far past any reduction-order cosine
+// -- the selection is held reduction-faithful, not cosine-close. Even though rocmBackend.Class()
+// is Approx, this method must NOT become an Approx path: unlike the dense GEMM and flash-attention
+// lanes there is no cosine margin for a different key set. The scoring is f64 in dsaIndexSelectHost
+// and the selected set must match the cpu-ref exactly, so this method runs on the HOST (it does
+// not claim to run on the device). A device topk kernel is out of scope for this pass (see
+// issue #1747's gold-plating boundary: no TMA/cluster on gfx1151).
+//
+// indexQ/indexK/weights are read via r.Read (host- or device-resident); only the small index
+// list is returned. The returned length is min(topK, nValid) positions, score descending, ties
+// by lower position (the DSAIndexBackend contract).
+func (r *rocmBackend) DSAIndexSelect(indexQ, indexK, weights Tensor, nKeys, nH, indexDim, queryPos, topK int, scale float32) []int {
+	rocmMu.Lock()
+	defer rocmMu.Unlock()
+	if nKeys <= 0 || topK <= 0 {
+		return nil
+	}
+	return dsaIndexSelectHost(r.Read(indexQ), r.Read(indexK), r.Read(weights), nKeys, nH, indexDim, queryPos, topK, scale)
 }

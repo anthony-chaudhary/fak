@@ -350,8 +350,14 @@ func TestCanonicalLower(t *testing.T) {
 // metal-check false "Xcode Command Line Tools missing" failure: Run used to build
 // Requirements with only GoTool populated, so Adjudicate always saw XcodeCLT.OK and
 // Clang.OK as false and failed a correctly-configured host. hostRequirements is the
-// extracted wiring under test; it must populate every prerequisite field it gates on,
-// and on this darwin/arm64 host all three tools are present.
+// extracted wiring under test; it must populate every prerequisite field it gates on.
+//
+// The invariant is wiring, not host tool availability: each check must have RUN and
+// produced a verdict, which shows as either OK=true (tool found) or a non-empty
+// Extra (the check's own failure diagnostic). A field left at its zero value -
+// the original bug - has OK=false and Extra=="", so it is caught here even on a CI
+// runner without Xcode CLT. Asserting OK==true would instead re-test the host, which
+// is what made this test flaky on GitHub's macOS runners.
 func TestHostRequirementsPopulatesAllPrereqs(t *testing.T) {
 	req := hostRequirements(runtime.GOARCH)
 	if req.Goos != runtime.GOOS {
@@ -369,14 +375,48 @@ func TestHostRequirementsPopulatesAllPrereqs(t *testing.T) {
 		{"Clang", req.Clang},
 	}
 	for _, tc := range populated {
-		if !tc.got.OK {
-			t.Errorf("hostRequirements left %s unpopulated: %+v", tc.name, tc.got)
+		if !tc.got.OK && tc.got.Extra == "" {
+			t.Errorf("hostRequirements left %s unpopulated (OK=false and no check diagnostic): %+v", tc.name, tc.got)
 		}
 	}
-	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+	// Adjudicate's exit code is conditioned on the host actually satisfying the
+	// prereqs; an unconfigured runner must not turn correct wiring into a failure.
+	if req.GoTool.OK && req.XcodeCLT.OK && req.Clang.OK {
 		if got := Adjudicate(req); got != 2 {
 			t.Fatalf("Adjudicate(hostRequirements) = %d, want 2 (prereqs satisfied) on a configured darwin/arm64 host; verdict=%q failure=%q",
 				got, PopulatedVerdict(req), PopulateFailure(req))
 		}
+	} else if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		if got := Adjudicate(req); got != 1 {
+			t.Fatalf("Adjudicate(hostRequirements) = %d, want 1 on darwin/arm64 with a missing prereq actually reported", got)
+		}
+	}
+}
+
+// TestHostRequirementsWiringCatchesZeroValueField proves the wiring assertion above
+// still fires on the original bug shape: a Requirements whose gated tool field was
+// never populated (OK=false, Extra==""). hostRequirements once produced exactly this
+// for XcodeCLT and Clang.
+func TestHostRequirementsWiringCatchesZeroValueField(t *testing.T) {
+	regressed := Requirements{
+		Goos: "darwin", Goarch: "arm64", CgoEnabled: "1",
+		GoTool: ToolCheck{OK: true, Extra: "/usr/local/go/bin/go"},
+	}
+	fields := []struct {
+		name string
+		got  ToolCheck
+	}{
+		{"GoTool", regressed.GoTool},
+		{"XcodeCLT", regressed.XcodeCLT},
+		{"Clang", regressed.Clang},
+	}
+	unpopulated := 0
+	for _, f := range fields {
+		if !f.got.OK && f.got.Extra == "" {
+			unpopulated++
+		}
+	}
+	if unpopulated != 2 {
+		t.Fatalf("wiring assertion missed the regression: expected XcodeCLT and Clang detected as unpopulated, found %d", unpopulated)
 	}
 }

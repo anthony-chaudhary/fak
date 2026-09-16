@@ -122,9 +122,13 @@ func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpu
 		warnings = append(warnings, fmt.Sprintf("--cpu-offload-experts requires backend %q to advertise quantized UploadDtype (Q8_0 upload); a live serve refuses this combination", be.Name()))
 	}
 	useMetal := be == nil && serveMetalAvailable()
-	selectedArm := resolveServeNativeContextLoadArm(ws, be, useMetal)
-	quant := ggufload.ClassifyTensorQuant(ws.File.Tensors)
-	cpuOffloadActive := be != nil && cpuOffloadExperts && quant.Q4KResident
+	selectedArm := resolveServeNativeContextLoadArm(ws, be, cpuOffloadExperts, useMetal)
+	cpuOffloadActive := false
+	if be != nil && cpuOffloadExperts {
+		if ok, err := serveArtifactCPUOffloadExperts(ws); ok && err == nil {
+			cpuOffloadActive = true
+		}
+	}
 	weights, fit, err := serveNativeContextSizingInputs(ws, be, cpuOffloadExperts, useMetal, 1, model)
 	if err != nil {
 		return serveSizingArtifact{}, err

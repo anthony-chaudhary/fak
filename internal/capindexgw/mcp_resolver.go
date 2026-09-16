@@ -23,6 +23,27 @@ import (
 // and skills use.
 type MCPResolver struct {
 	server *gateway.Server // The gateway server (for tool descriptors)
+
+	// testDescriptors is a test-only seam: when non-nil it replaces the
+	// gateway catalog Index()/Fault read. It lets a witness hold name and
+	// description fixed while varying ONLY inputSchema size, which is the
+	// cleanest way to prove the at-rest path never reads a body. Production
+	// leaves it nil.
+	testDescriptors []map[string]any
+}
+
+// descriptors returns the tool catalog this resolver reads, honoring the
+// test-only override when set.
+func (r *MCPResolver) descriptors() []map[string]any {
+	if r.testDescriptors != nil {
+		return r.testDescriptors
+	}
+	return gateway.ToolDescriptorsForResolver()
+}
+
+// setDescriptorsForTest installs a synthetic descriptor catalog for a test.
+func (r *MCPResolver) setDescriptorsForTest(descs []map[string]any) {
+	r.testDescriptors = descs
 }
 
 // NewMCPResolver creates an MCP resolver from a gateway server.
@@ -30,17 +51,23 @@ func NewMCPResolver(server *gateway.Server) *MCPResolver {
 	return &MCPResolver{server: server}
 }
 
-// Index returns cheap cards only — the at-rest cost.
-// For MCP, this is the tools/list descriptor (name + description + inputSchema stub).
+// Index returns cheap cards only — the at-rest cost. It is O(cards), NOT
+// O(cards × body): the digest it reports is derived from the CHEAP CARD bytes
+// (name + description — exactly what CapCard.CardBytes serializes), never from
+// the multi-KB inputSchema. This is the "0-for-∞" property the C5 acceptance
+// requires: an N-tool MCP catalog costs the same at rest whether each tool's
+// body is ten bytes or ten megabytes, because Index() never reads a body. The
+// full inputSchema is materialized only by Fault.
 func (r *MCPResolver) Index() []capindex.CapCard {
 	// Use the existing toolDescriptors from gateway/mcp.go
-	toolDescs := gateway.ToolDescriptorsForResolver()
+	toolDescs := r.descriptors()
 
 	cards := make([]capindex.CapCard, 0, len(toolDescs))
 	for _, td := range toolDescs {
 		name, _ := td["name"].(string)
 		desc, _ := td["description"].(string)
-		inputSchema, _ := td["inputSchema"].(json.RawMessage)
+		// NOTE: td["inputSchema"] is deliberately NOT read here. Touching it
+		// would make the at-rest index O(bodies) and defeat the whole point.
 
 		// Serialize the card for CapCard.CardBytes
 		cardBytes, _ := json.Marshal(map[string]any{
@@ -48,9 +75,20 @@ func (r *MCPResolver) Index() []capindex.CapCard {
 			"description": desc,
 		})
 
-		// Digest is a hash of the full schema (for now, use a placeholder;
-		// the real implementation would SHA-256 the full tool definition)
-		digest := simpleDigest(string(inputSchema))
+		// The index digest is the CARD-level sync key, not the body content
+		// hash: it is capindex.Digest(cardBytes), cheap because cardBytes is
+		// the small resident card. This is what makes Index() O(cards).
+		//
+		// It intentionally DIFFERS from Fault()'s digest by design:
+		//   - Index digest = card-level sync key over {name, description};
+		//     it moves when the cheap surface moves and costs no body read.
+		//   - Fault digest = full-body content hash over the tool's
+		//     inputSchema, so a body mutation that leaves the card unchanged
+		//     still produces a new ScaleMCP sync key at fault time.
+		// Making Index() agree with Fault() would require SHA-256 over every
+		// multi-KB inputSchema on the index path — precisely the O(bodies)
+		// defect this change removes.
+		digest := capindex.Digest(cardBytes)
 
 		cards = append(cards, capindex.CapCard{
 			Ref: capindex.CapRef{
@@ -76,7 +114,7 @@ func (r *MCPResolver) Fault(ref capindex.CapRef) (capindex.Capability, error) {
 	}
 
 	// Look up the tool by name
-	toolDescs := gateway.ToolDescriptorsForResolver()
+	toolDescs := r.descriptors()
 	for _, td := range toolDescs {
 		name, _ := td["name"].(string)
 		if name == ref.Name {

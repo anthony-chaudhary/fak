@@ -346,3 +346,57 @@ func TestModelbenchSelectedBackendExecutesSmoke(t *testing.T) {
 		t.Fatal("conflicting legacy Metal and compute backend accepted")
 	}
 }
+
+// tierOverrideBackend presents a chosen Tier() over the cpu-ref oracle so preflightInputFor's
+// integrated/discrete single-residency resolution can be witnessed without a Vulkan device.
+type tierOverrideBackend struct {
+	compute.Backend
+	tier string
+}
+
+func (b *tierOverrideBackend) Caps() compute.Caps {
+	c := b.Backend.Caps()
+	c.UploadDtype = true
+	return c
+}
+
+func (b *tierOverrideBackend) Tier() string { return b.tier }
+
+// TestPreflightInputForResolvesSingleResidencyOnIntegratedTier pins the caller-side fail-closed
+// resolution: SingleResidencyQ4K reaches the estimator ONLY when the -single-residency-q4k knob
+// (defaulting to FAK_Q4K_FREE_CPU=1) is on AND the Vulkan backend's physical-device tier is a
+// unified-memory "integrated:" one. A discrete tier or a knob-off run never arms the release.
+func TestPreflightInputForResolvesSingleResidencyOnIntegratedTier(t *testing.T) {
+	f := testCompleteBenchFlags()
+	*f.gguf, *f.q4k, *f.backendName = benchMixedQuantGGUF(t), true, "vulkan"
+	*f.streamQ4K = false
+
+	t.Setenv("FAK_Q4K_FREE_CPU", "1")
+	*f.singleResidencyQ4K = true
+	integrated := &tierOverrideBackend{Backend: compute.Default(), tier: "integrated:strix-halo"}
+	in := preflightInputFor(f, integrated)
+	if in.Source != nil {
+		defer in.Source.Close()
+	}
+	if !in.VulkanMixedQ4K || !in.SingleResidencyQ4K {
+		t.Fatalf("integrated tier with the knob on: vulkanMixed=%v singleResidency=%v, want both true", in.VulkanMixedQ4K, in.SingleResidencyQ4K)
+	}
+
+	*f.singleResidencyQ4K = false
+	knobOff := preflightInputFor(f, integrated)
+	if knobOff.Source != nil {
+		defer knobOff.Source.Close()
+	}
+	if knobOff.SingleResidencyQ4K {
+		t.Fatal("knob off still armed the single-residency release")
+	}
+
+	*f.singleResidencyQ4K = true
+	discrete := preflightInputFor(f, &tierOverrideBackend{Backend: compute.Default(), tier: "discrete:nvidia-4090"})
+	if discrete.Source != nil {
+		defer discrete.Source.Close()
+	}
+	if discrete.SingleResidencyQ4K {
+		t.Fatal("discrete tier armed the single-residency release")
+	}
+}

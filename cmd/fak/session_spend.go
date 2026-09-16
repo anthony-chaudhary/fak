@@ -168,17 +168,34 @@ func servedTurnSpendMicroCents(u gateway.SessionUsage) int64 {
 }
 
 // spendTurnMicroCents is the pure per-turn cost model: uncached input at 1.0x,
-// cache read at 0.1x, cache creation at the 5-minute write tier (the unsplit-
-// creation convention), output at the output price — the same shape as
-// gateway.CachePricing.CostUSD, in integer micro-cents. Rounded UP: for a spend
-// CEILING the conservative error direction is charging a fraction more, never a
-// fraction less.
+// cache read at the cache-read multiplier, cache creation at the 5-minute write
+// tier (the unsplit-creation convention), output at the output price — the same
+// shape as gateway.CachePricing.CostUSD, in integer micro-cents. Rounded UP: for
+// a spend CEILING the conservative error direction is charging a fraction more,
+// never a fraction less.
+//
+// The multipliers are read from the supplied pricing so that a fresh measured
+// calibration overlaid by armServedSpendPricing actually moves the dollar: a
+// POSITIVE overlaid multiplier is authoritative, and a zero/absent one falls
+// back to the static provider default. This mirrors the guard in
+// gateway.CachePricing.CostUSD and keeps a bare CachePricing (all overlay fields
+// zero) priced exactly as before.
 func spendTurnMicroCents(p gateway.CachePricing, u gateway.SessionUsage) int64 {
 	inPerTok := p.InputPerMTokUSD * usdPerMTokToMicroCentsPerTok
 	outPerTok := p.OutputPerMTokUSD * usdPerMTokToMicroCentsPerTok
+	// !(x > 0) rather than x <= 0 so a malformed NaN overlay falls back to the
+	// static default instead of poisoning the whole turn cost to dollar-blind.
+	readMult := p.CacheReadMultiplier
+	if !(readMult > 0) {
+		readMult = gateway.CacheReadMultiplier
+	}
+	write5m := p.CacheWrite5mMultiplier
+	if !(write5m > 0) {
+		write5m = gateway.CacheWrite5mMultiplier
+	}
 	cost := float64(u.PromptTokens) * inPerTok
-	cost += float64(u.CacheReadInputTokens) * inPerTok * gateway.CacheReadMultiplier
-	cost += float64(u.CacheCreationInputTokens) * inPerTok * gateway.CacheWrite5mMultiplier
+	cost += float64(u.CacheReadInputTokens) * inPerTok * readMult
+	cost += float64(u.CacheCreationInputTokens) * inPerTok * write5m
 	cost += float64(u.CompletionTokens) * outPerTok
 	if cost <= 0 || math.IsNaN(cost) || math.IsInf(cost, 0) {
 		return 0

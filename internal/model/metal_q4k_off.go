@@ -91,3 +91,7 @@ func (m *Model) EagerMetalQ8Residency() error { return nil }
 // MetalQ8ResidencyError reports that no eager Metal Q8 promotion exists on this build. attempted is
 // always false so the startup report prints no residency error on a pure-Go/non-Apple-Silicon host.
 func (m *Model) MetalQ8ResidencyError() (error, bool) { return nil, false }
+
+// liveMetalWeightCounts is the pure-Go stub for the live device-resident weight counts (#12875):
+// no Metal device exists on this build, so both counts are honestly zero.
+func liveMetalWeightCounts() (q6k, q8 int) { return 0, 0 }

@@ -340,6 +340,177 @@ func TestV41GroupedOutputProjectionOrder(t *testing.T) {
 	}
 }
 
+// v41PaddedSinkOracle is an independent scalar transcription of the FlashMLA
+// ref.py padding rule (commit ba89a3466): a slot at position >= topk_length is
+// overwritten with -1 before the -1/out-of-range invalid mask is formed, so the
+// padding contributes neither score nor value. It keeps no running state and
+// recomputes scores so it cannot share a bug with the implementation.
+func v41PaddedSinkOracle(q, kv []float32, idx []int32, topkLength []int32, b, m, heads, headDim, topk, n int, scale float32) []float32 {
+	o := make([]float32, b*m*heads*headDim)
+	for bi := 0; bi < b; bi++ {
+		for mi := 0; mi < m; mi++ {
+			idxBase := (bi*m + mi) * topk
+			valid := int(topk)
+			if topkLength != nil {
+				valid = int(topkLength[bi*m+mi])
+			}
+			for h := 0; h < heads; h++ {
+				qBase := ((bi*m+mi)*heads + h) * headDim
+				dots := make([]float64, topk)
+				ok := make([]bool, topk)
+				best := math.Inf(-1)
+				for i := 0; i < valid; i++ {
+					row := int(idx[idxBase+i])
+					if row < 0 {
+						continue
+					}
+					ok[i] = true
+					kvBase := (bi*n + row) * headDim
+					var dot float64
+					for d := 0; d < headDim; d++ {
+						dot += float64(q[qBase+d]) * float64(kv[kvBase+d])
+					}
+					dots[i] = dot * float64(scale)
+					if dots[i] > best {
+						best = dots[i]
+					}
+				}
+				if math.IsInf(best, -1) {
+					continue
+				}
+				var sum float64
+				for i := 0; i < topk; i++ {
+					if ok[i] {
+						sum += math.Exp(dots[i] - best)
+					}
+				}
+				if sum == 0 {
+					continue
+				}
+				for i := 0; i < topk; i++ {
+					if !ok[i] {
+						continue
+					}
+					row := int(idx[idxBase+i])
+					kvBase := (bi*n + row) * headDim
+					w := math.Exp(dots[i]-best) / sum
+					for d := 0; d < headDim; d++ {
+						o[qBase+d] += float32(w * float64(kv[kvBase+d]))
+					}
+				}
+			}
+		}
+	}
+	return o
+}
+
+// TestV41SparseAttentionSinkTopKLengthPadding proves the FlashMLA padding rule:
+// slots at position >= topk_length are masked exactly like -1, so they
+// contribute nothing. The witness (a) matches the ref.py reduction on a
+// partially-filled top-k, and (b) is relocation-invariant under arbitrary
+// trailing garbage in the padding slots.
+func TestV41SparseAttentionSinkTopKLengthPadding(t *testing.T) {
+	const b, m, heads, headDim, topk, n = 1, 2, 2, 4, 4, 3
+	scale := float32(1.0 / math.Sqrt(float64(headDim)))
+	q := []float32{
+		1, 0, 0.5, -0.25, // pos 0 head 0
+		0, 1, -0.5, 0.75, // pos 0 head 1
+		-1, 0.25, 0, 0.5, // pos 1 head 0
+		0.5, 0, -1, 0.25, // pos 1 head 1
+	}
+	kv := []float32{
+		1, 0, 0, 0, // row 0
+		0, 1, 0, 0, // row 1
+		0, 0, 1, 0, // row 2
+	}
+	// pos 0: topk_length 2 -> slots 2,3 are padding even though they name rows.
+	// pos 1: topk_length 3 -> slot 3 is padding.
+	idx := []int32{
+		0, 1, 2, 0,
+		1, 2, -1, 2,
+	}
+	topkLength := []int32{2, 3}
+
+	want := v41PaddedSinkOracle(q, kv, idx, topkLength, b, m, heads, headDim, topk, n, scale)
+	got, err := V41SparseAttentionSink(q, kv, nil, idx, V41SparseAttentionSinkOptions{
+		B: b, M: m, Heads: heads, HeadDim: headDim, TopK: topk, N: n, Softmax: scale,
+		TopKLength: topkLength,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v41SinkClose(t, "topk_length padding", got, want, 1e-5)
+
+	// Relocation invariance: replace every padding slot with a different valid
+	// row. If padding were attended to, the output would move.
+	garbage := append([]int32(nil), idx...)
+	garbage[2], garbage[3] = 2, 1 // pos 0 padding slots
+	garbage[7] = 0                // pos 1 padding slot
+	garbageOut, err := V41SparseAttentionSink(q, kv, nil, garbage, V41SparseAttentionSinkOptions{
+		B: b, M: m, Heads: heads, HeadDim: headDim, TopK: topk, N: n, Softmax: scale,
+		TopKLength: topkLength,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v41SinkClose(t, "padding relocation invariant", garbageOut, want, 1e-6)
+
+	// Sanity: without the length mask the same idx DOES attend to those slots,
+	// so the masking is load-bearing rather than a no-op.
+	unmasked, err := V41SparseAttentionSink(q, kv, nil, idx, V41SparseAttentionSinkOptions{
+		B: b, M: m, Heads: heads, HeadDim: headDim, TopK: topk, N: n, Softmax: scale,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	differed := false
+	for i := range unmasked {
+		if math.Abs(float64(unmasked[i]-want[i])) > 1e-4 {
+			differed = true
+		}
+	}
+	if !differed {
+		t.Fatal("topk_length padding was a no-op; the fixture does not exercise it")
+	}
+
+	// A fully padded row (topk_length 0) yields an all-zero output, matching the
+	// reference's finite lower bound when no slot is valid.
+	zero, err := V41SparseAttentionSink(q, kv, nil, []int32{0, 1, 2, 0, 1, 2, -1, 2}, V41SparseAttentionSinkOptions{
+		B: b, M: m, Heads: heads, HeadDim: headDim, TopK: topk, N: n, Softmax: scale,
+		TopKLength: []int32{0, 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for h := 0; h < heads; h++ {
+		for d := 0; d < headDim; d++ {
+			if zero[h*headDim+d] != 0 {
+				t.Fatalf("fully padded row produced non-zero output at head %d dim %d: %g", h, d, zero[h*headDim+d])
+			}
+		}
+	}
+
+	// Fail-closed: a malformed length vector is refused before any output.
+	if _, err := V41SparseAttentionSink(q, kv, nil, idx, V41SparseAttentionSinkOptions{
+		B: b, M: m, Heads: heads, HeadDim: headDim, TopK: topk, N: n, Softmax: scale,
+		TopKLength: []int32{2},
+	}); err == nil {
+		t.Fatal("short topk length vector was not refused")
+	}
+	if _, err := V41SparseAttentionSink(q, kv, nil, idx, V41SparseAttentionSinkOptions{
+		B: b, M: m, Heads: heads, HeadDim: headDim, TopK: topk, N: n, Softmax: scale,
+		TopKLength: []int32{2, topk + 1},
+	}); err == nil {
+		t.Fatal("over-long topk length was not refused")
+	}
+	if _, err := V41SparseAttentionSink(q, kv, nil, idx, V41SparseAttentionSinkOptions{
+		B: b, M: m, Heads: heads, HeadDim: headDim, TopK: topk, N: n, Softmax: scale,
+		TopKLength: []int32{-1, 2},
+	}); err == nil {
+		t.Fatal("negative topk length was not refused")
+	}
+}
+
 // TestV41SparseAttentionSinkRefusesMalformedInput proves fail-closed shape and
 // non-finite validation before any caller-visible output.
 func TestV41SparseAttentionSinkRefusesMalformedInput(t *testing.T) {

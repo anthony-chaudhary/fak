@@ -14,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/agentquery"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
 )
 
@@ -408,6 +409,7 @@ func runAgentsList(stdout, stderr io.Writer, argv []string) int {
 	if fs.NArg() > 0 && *dir == "." {
 		*dir = fs.Arg(0)
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 
 	descs, err := agent.DiscoverAgentDescriptors(*dir)
 	if err != nil {

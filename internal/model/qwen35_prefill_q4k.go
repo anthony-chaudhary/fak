@@ -118,6 +118,24 @@ type hybridQ4KGroup func(names []string, Xf []float32, Xq *q8Panel) [][]float32
 // to the historical decode path.
 const Qwen35MetalGDNSequenceForwardPath = "metal/qwen35-gdn-preprojected-sequence-v1"
 
+// PrefillPanelRoundTripBudget is the L1 ceiling on the aggregate command-buffer
+// round-trips a resident-Q4_K Qwen3.8 prefill may spend serving the fixed
+// 256-token L1 prompt, EXCLUSIVE of the host-served tail. It mirrors the private
+// perfpattern DecodeRoundTripBudgetPerToken recipe (issue #13042) without
+// importing the private package: the ceiling is a small per-prompt constant, NOT
+// a function of len/32, so a regression back to one terminal GPU wait per
+// 32-token panel (256/32 == 8 round-trips) trips the assertion instead of merely
+// showing up in a timing table. At the widest witnessed panel
+// (metalgemm.PromptPanelMaxTokens == 128) 256 tokens is exactly two panels, so
+// the budget is 2. PrefillPanelRoundTripBudgetPromptTokens names the prompt the
+// ceiling is fixed at; a longer prompt legitimately needs more panels
+// (O(len/128)) and is not what this L1 guard measures.
+const PrefillPanelRoundTripBudget = 2
+
+// PrefillPanelRoundTripBudgetPromptTokens is the prompt length the
+// PrefillPanelRoundTripBudget ceiling is asserted against.
+const PrefillPanelRoundTripBudgetPromptTokens = 256
+
 // The Darwin implementation installs this factory at package initialization.
 // The model-only type keeps pure-Go builds free of Darwin/cgo GDNState symbols.
 var newQwen35MetalGDNSequenceBackend func() Qwen35GDNPreprojectedSequenceBackend
@@ -190,6 +208,28 @@ type Qwen35MetalForwardSequenceReceipt struct {
 type qwen35MetalForwardSequenceRunner interface {
 	Qwen35MetalForwardSequence(*Session, []int) ([]float32, Qwen35MetalForwardSequenceReceipt, bool, error)
 	Qwen35MetalForwardSequenceReceipt() (Qwen35MetalForwardSequenceReceipt, bool)
+}
+
+// qwen35MetalDeviceKVAdmitter is implemented by the native sequence backend that can
+// hold the full-attention KV prefix on the device across a panel walk (#13087). The
+// walk owner allocates one DeviceKV pair for the whole prompt, threads it onto the
+// backend for the walk, and downloads it once at the end. A backend that does not
+// implement this keeps the historical host-append walk; the walk owner treats a
+// decline (nil pair, or the backend not implementing the interface) as fail-open.
+type qwen35MetalDeviceKVAdmitter interface {
+	// AdmitDeviceKV sizes and attaches the walk's device KV pair. It returns nil when
+	// the geometry is unsupported or the device allocation fails, in which case the
+	// caller keeps the host walk with KV/state unmutated.
+	AdmitDeviceKV(s *Session, tokens int) *metalgemm.DeviceKV
+	// DetachDeviceKV clears the walk's pair and returns it so the caller can download
+	// and free it. It never mutates host KV/state.
+	DetachDeviceKV() *metalgemm.DeviceKV
+	// ReconcileDeviceKV appends the triple's device rows for every full-attention
+	// layer to the host cache exactly once, after the last panel. `base` is the host
+	// prefix length the walk started from and `rows` the rows the panels appended. It
+	// returns an error without mutating any host cache row if the pair's geometry
+	// disagrees with the cache.
+	ReconcileDeviceKV(s *Session, base, rows int) error
 }
 
 type qwen35MetalStateIdentityBinder interface {
@@ -325,20 +365,61 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 	var hidden []float32
 	if s.qwen35HAL != nil && s.qwen35HAL.sequenceAccepted {
 		if runner, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalForwardSequenceRunner); ok {
-			const panelTokens = 32
-			nPanels := len(ids) / panelTokens
-			if nPanels > 0 {
-				// The P32 panel attention has no 4096 cap: mg_qwen35_graph_attention
-				// uses qg_attn_online (O(head_dim) ordered online softmax) above
-				// 4096 context, so a long prompt stays on the batched panel rather
-				// than being forced through the CPU per-token loop. See
-				// TestProjectionGraphQwenOrderedLongContextAttention.
+			// The whole-forward graph now witnesses prompt panels up to
+			// metalgemm.PromptPanelMaxTokens (128) tokens in ONE command buffer, so the
+			// prompt is walked in the widest admitted panels instead of the historical
+			// exact-32 panel. The panel count — and therefore the per-panel commit +
+			// terminal GPU wait + host KV readback — drops from O(len/32) to
+			// O(len/128) (#13041). Panels cover the largest multiple-of-32 prefix and a
+			// trailing <32 remainder still rides the historical host path, so the
+			// non-multiple-of-32 and append semantics are unchanged.
+			//
+			// The panel attention has no 4096 cap: mg_qwen35_graph_attention uses
+			// qg_attn_online (O(head_dim) ordered online softmax) above 4096 context, so
+			// a long prompt stays on the batched panel rather than being forced through
+			// the CPU per-token loop. See TestProjectionGraphQwenOrderedLongContextAttention.
+			const panelQuantum = 32
+			panelCover := (len(ids) / panelQuantum) * panelQuantum
+			if panelCover > 0 {
+				nPanels := (panelCover + metalgemm.PromptPanelMaxTokens - 1) / metalgemm.PromptPanelMaxTokens
+				// #13087 device-resident KV: when the native backend admits it, one
+				// device KV triple is allocated for the whole prompt and attached for
+				// the panel walk. Every full-attention layer then reads its prefix on
+				// the device and appends its new rows there, so the walk pays no
+				// per-panel host KV readback or prefix re-upload; the triple is
+				// downloaded ONCE after the last panel to restore the host cache. Any
+				// decline (pair unavailable, backend without the admitter) falls back
+				// to the historical host-append walk with KV/state unmutated.
+				var deviceKV *metalgemm.DeviceKV
+				var deviceAdmitter qwen35MetalDeviceKVAdmitter
+				deviceBase := s.Cache.Len()
+				if admitter, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalDeviceKVAdmitter); ok {
+					if kv := admitter.AdmitDeviceKV(s, panelCover); kv != nil {
+						deviceAdmitter = admitter
+						deviceKV = kv
+						s.q4kHybridPrefillDevicePanels = 0
+						s.q4kHybridPrefillDeviceRows = 0
+					}
+				}
+				if deviceKV != nil {
+					defer func() {
+						if attached := deviceAdmitter.DetachDeviceKV(); attached != nil {
+							attached.Close()
+						}
+					}()
+				}
 				var agg Qwen35MetalForwardSequenceReceipt
 				var aggValid bool
 				selectedPanels := nPanels
 				executedPanels := 0
+				executedRows := 0
 				for p := 0; p < nPanels; p++ {
-					panelIDs := ids[p*panelTokens : (p+1)*panelTokens]
+					start := p * metalgemm.PromptPanelMaxTokens
+					end := start + metalgemm.PromptPanelMaxTokens
+					if end > panelCover {
+						end = panelCover
+					}
+					panelIDs := ids[start:end]
 					h, receipt, accepted, err := runner.Qwen35MetalForwardSequence(s, panelIDs)
 					if !accepted {
 						break
@@ -348,6 +429,7 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 					}
 					hidden = h
 					executedPanels++
+					executedRows += len(panelIDs)
 					if !aggValid {
 						agg = receipt
 						agg.SelectedPanels = selectedPanels
@@ -379,7 +461,22 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 					}
 				}
 				if executedPanels > 0 {
-					rem := ids[nPanels*panelTokens:]
+					// Reconcile the device-resident KV BEFORE the trailing remainder
+					// runs: the triple holds the panel-covered rows for every
+					// full-attention layer, and this single download restores the host
+					// cache contract the decode path depends on. Doing it first keeps
+					// the host cache row order [panelCover device rows][rem host rows]
+					// matching the appended positions. A reconcile failure is fatal
+					// (accepted), never a silent partial cache.
+					if deviceAdmitter != nil && deviceKV != nil {
+						if err := deviceAdmitter.ReconcileDeviceKV(s, deviceBase, executedRows); err != nil {
+							panic(s.failQwen35MetalForwardSequence(err))
+						}
+						if attached := deviceAdmitter.DetachDeviceKV(); attached != nil {
+							attached.Close()
+						}
+					}
+					rem := ids[panelCover:]
 					if len(rem) > 0 {
 						hidden = s.prefillQwen35HybridQ4KHidden(rem)
 						agg.Tokens += len(rem)
@@ -436,17 +533,12 @@ func (s *Session) Qwen35MetalForwardSequenceStatus() Qwen35MetalForwardSequenceR
 	if s == nil || s.M == nil || !s.M.Cfg.IsQwen35Hybrid() || s.Backend != nil || !s.Q4K || !s.MetalQ4K {
 		return base
 	}
-	if newQwen35MetalGDNSequenceBackend == nil {
-		base.EvidenceState = Qwen35MetalSequenceEvidenceUnavailable
-		return base
-	}
-	base.EvidenceState = Qwen35MetalSequenceEvidenceNotSelected
-	if s.qwen35HAL == nil || !s.qwen35HAL.sequenceAccepted && !s.qwen35HAL.decodeAccepted {
-		return base
-	}
-	base.SelectorState = Qwen35MetalSequenceSelectorOn
-	base.EvidenceState = Qwen35MetalSequenceEvidenceUnavailable
-	if s.qwen35HAL != nil {
+	// A stored whole-sequence receipt is execution evidence regardless of whether
+	// the native backend factory is linked into THIS build: the Go-only panel-walk
+	// double deliberately reports through this seam on every host
+	// (TestPrefillPanelRoundTripBudget). Only fall to the build-availability status
+	// when the session holds no such receipt.
+	if s.qwen35HAL != nil && (s.qwen35HAL.sequenceAccepted || s.qwen35HAL.decodeAccepted) {
 		if agg, ok := s.qwen35HAL.getMetalForwardReceipt(); ok && agg.Available {
 			agg.SelectorState = Qwen35MetalSequenceSelectorOn
 			if runner, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalForwardSequenceRunner); ok {
@@ -461,6 +553,16 @@ func (s *Session) Qwen35MetalForwardSequenceStatus() Qwen35MetalForwardSequenceR
 			return agg
 		}
 	}
+	if newQwen35MetalGDNSequenceBackend == nil {
+		base.EvidenceState = Qwen35MetalSequenceEvidenceUnavailable
+		return base
+	}
+	base.EvidenceState = Qwen35MetalSequenceEvidenceNotSelected
+	if s.qwen35HAL == nil || !s.qwen35HAL.sequenceAccepted && !s.qwen35HAL.decodeAccepted {
+		return base
+	}
+	base.SelectorState = Qwen35MetalSequenceSelectorOn
+	base.EvidenceState = Qwen35MetalSequenceEvidenceUnavailable
 	runner, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalForwardSequenceRunner)
 	if !ok {
 		return base

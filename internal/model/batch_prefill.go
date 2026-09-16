@@ -193,11 +193,9 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 			}
 		})
 		for b, c := range caches {
-			for t := 0; t < P; t++ {
-				row := b*P + t
-				c.K[l] = append(c.K[l], K[row*w:(row+1)*w]...)
-				c.V[l] = append(c.V[l], V[row*w:(row+1)*w]...)
-			}
+			// Precision-aware append (#12981): f32 is the historical append (byte-identical);
+			// q8 packs each row so a quantized cache is never written with raw f32 rows.
+			c.appendBatchedKV(l, K[b*P*w:(b+1)*P*w], V[b*P*w:(b+1)*P*w], P, w)
 		}
 
 		// F32 prefill keeps the plain (allocating) attention path: the windowed
@@ -343,11 +341,9 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 			}
 		})
 		for b, c := range caches {
-			for t := 0; t < P; t++ {
-				row := b*P + t
-				c.K[l] = append(c.K[l], K[row*w:(row+1)*w]...)
-				c.V[l] = append(c.V[l], V[row*w:(row+1)*w]...)
-			}
+			// Precision-aware append (#12981): f32 is the historical append (byte-identical);
+			// q8 packs each row so a quantized cache is never written with raw f32 rows.
+			c.appendBatchedKV(l, K[b*P*w:(b+1)*P*w], V[b*P*w:(b+1)*P*w], P, w)
 		}
 
 		// Attention. pb.attn is a reused buffer and the helper += accumulates into it, so it

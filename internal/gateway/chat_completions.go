@@ -22,16 +22,17 @@ const (
 )
 
 // isMetalMTPActive reports whether Metal MTP speculative decoding is configured
-// and active for the specified request model on this server.
+// and active for the specified request model on this server. Truth is resolved
+// PER REQUEST from the planner that will actually serve it: a request routed to
+// the DualPlanner proxy side must never inherit the LOCAL side's coordinator
+// (#12331). Server.metalMTPCoord is only the construction-time mirror of that
+// local/planner-side coordinator (SetMetalMTPCoordinator, New), not a
+// server-wide grant — so it is never read here.
 func (s *Server) isMetalMTPActive(reqModel string) bool {
 	if s == nil {
 		return false
 	}
-	p := s.plannerForRequest(reqModel)
-	if coord := metalMTPCoordinatorFromPlanner(p); coord != nil {
-		return true
-	}
-	return s.metalMTPCoord != nil
+	return metalMTPCoordinatorFromPlanner(s.plannerForRequest(reqModel)) != nil
 }
 
 // activeMetalMTPCoordinator extracts the active MetalMTPCoordinator from Server or its planner.

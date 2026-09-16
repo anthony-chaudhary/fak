@@ -92,6 +92,7 @@ connects new work to operator value. Do not turn this direction into a shipped c
 - Operator-steerability PRs (`fak steer prs`) — the gate/observability separation, the OSP unit, and why the overlay must never become a merge gate: [docs/operator-steerability-prs.md](docs/operator-steerability-prs.md)
 - Version-everything (`fak version modules`) — per-module rev+date over the module tree, git-witnessed via the `fak-module-versions/1` ledger rather than asserted: [docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md](docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md)
 - Cross-repo issue velocity (`fak issues-solved`): query issues solved across public and companion checkouts over arbitrary time windows in 1 turn: [docs/cli/verbs.md#fak-issues-solved](docs/cli/verbs.md#fak-issues-solved)
+- Cache-value roll-up — is the cache work paying off over time? The front-door story keeping WITNESSED kernel reuse and OBSERVED provider-dollar savings in separate, unblended tracks, with the #1066 marginal-over-warm-KV, WITNESSED-vs-OBSERVED, and net-not-gross fences and the shipped Track-1 reproduce command (`fak nightrun score --json`): [docs/cache-value-rollup.md](docs/cache-value-rollup.md)
 
 ## Source authorities
 
@@ -1057,6 +1058,8 @@ This compact ledger indexes one addressable page per claim. Claim text and matur
 - [SHIPPED] [vCache Governor (M5)](https://github.com/anthony-chaudhary/fak/blob/main/docs/claims/vcache-governor-m5.md) [exposure: default-on]
 <a id="vcache-observability-per-sub-concept-lens"></a>
 - [SHIPPED] [vCache observability (per-sub-concept lens)](https://github.com/anthony-chaudhary/fak/blob/main/docs/claims/vcache-observability-per-sub-concept-lens.md) [exposure: default-on]
+<a id="cache-value-rollup"></a>
+- [SHIPPED] [Cache-value roll-up front door](https://github.com/anthony-chaudhary/fak/blob/main/docs/claims/cache-value-rollup.md) [exposure: default-on]
 <a id="what-fak-is-not"></a>
 - [SIMULATED] [What fak is NOT](https://github.com/anthony-chaudhary/fak/blob/main/docs/claims/what-fak-is-not.md)
 <a id="prior-art-posture"></a>
@@ -4205,10 +4208,14 @@ receipts. For Mac local model setup and head-to-head Apple Silicon Metal measure
   the wiring and qualification limits; a default-valued flag alone proves neither.
 - **Run on your own hardware:** Native backends target Apple Silicon, AMD, and
   NVIDIA with different support envelopes — and different delivery channels:
-  Apple Silicon Metal via `install.sh --variant metal` (darwin/arm64 asset) or a
-  source build with `CGO_ENABLED=1`; NVIDIA CUDA via the ghcr `-cuda` container
-  image; AMD via a source build with `-tags vulkan` (no official artifact ships
-  the Vulkan backend yet). Default release archives are pure-Go and serve on CPU.
+  The installer defaults to Apple Silicon Metal on darwin/arm64 and bundled Vulkan
+  on linux/amd64, including AMD Strix Halo. NVIDIA users are directed to
+  `ghcr.io/anthony-chaudhary/fak:cuda-latest` with `--gpus all`.
+  CPU archives are secondary references selected with `--variant cpu`.
+  The Metal archive is available on v0.54.0, backfilled from that exact tag.
+  Vulkan publication remains pending its release and hardware gate. Missing GPU
+  assets fail with an actionable message.
+  Apple acceleration is fak-native Metal; MLX is a comparison runtime.
   New native-performance work prefers Qwen3.8. Choose a supported model/backend
   and measure the actual local workflow.
 - **Default-deny capability floor:** Protect your workspace from unintended commands, path escapes, or tool poisoning. Every tool call is verified against a capability floor before execution. Drop-in wrappers protect existing agents like Claude Code, Codex, OpenCode, and Cursor with zero rewrites.
@@ -4254,14 +4261,21 @@ Balanced defaults are `ponytail:medium` for work discipline and `caveman:medium`
 |---|---|
 | Check what is shipped, limited, or planned | [Status](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md) · [claims](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) · [feature matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/features.md) |
 | Browse performance evidence | [Mac](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md) · [AMD](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) · [NVIDIA](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-10944-nvidia-gcp-overnight/README.md) · [all benchmarks](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/README.md) |
+| Is the cache paying off? (trend) | [Cache-value roll-up](https://github.com/anthony-chaudhary/fak/blob/main/docs/cache-value-rollup.md) — kernel reuse and provider-dollar savings kept in separate, unblended tracks |
 | Connect another agent or model | [Codex](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/openai-codex.md) · [Claude Code](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/claude.md) · [subagents](https://github.com/anthony-chaudhary/fak/blob/main/docs/subagents-guide.md) · [Mac local models](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/mac-local-models.md) · [all integrations](https://github.com/anthony-chaudhary/fak/tree/main/docs/integrations) |
 | Understand the runtime | [Architecture](https://github.com/anthony-chaudhary/fak/blob/main/ARCHITECTURE.md) · [capability map](https://github.com/anthony-chaudhary/fak/blob/main/docs/CAPABILITIES.md) · [CLI reference](https://github.com/anthony-chaudhary/fak/blob/main/docs/cli-reference.md) |
 | Learn in prerequisite order | [Start here](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md) · [learning path](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md) · [documentation index](https://github.com/anthony-chaudhary/fak/blob/main/docs/index.md) |
 | Build on fak | [Go API](https://github.com/anthony-chaudhary/fak/tree/main/pkg) · [harness contract](https://github.com/anthony-chaudhary/fak/blob/main/docs/harness-kit-contract.md) · [contributing](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md) |
 
+## Commercial serving
+
+We run one of your repetitive repo workloads — test-candidate generation, codebase Q&A, or doc maintenance — on a managed, metered inference route, and we prove it against your current baseline on your acceptance criteria before you pay for ongoing operation. Qualification is a two-week pilot on one workload with a continue/stop recommendation. Claims are confidence-tiered: the inference quality is measured at raw-compute parity and decode advantage [SW-VERIFIED]; production readiness is not yet claimed. The pilot is a fixed fee; ongoing operation is metered. To start, open an issue in this repository describing your workload — every inquiry routes into our pipeline ledger (channel=oss).
+
+Provenance: gtm-t08 commercial-serving touchpoint.
+
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-09-09 vs VERSION 0.54.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-09 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
+<!-- readme-verified: 2026-09-12 vs VERSION 0.54.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-09 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
 
 ---
 
@@ -4408,6 +4422,7 @@ This is the complete map of repository documentation. The audience table below i
 New dated notes go under [`docs/notes/`](https://github.com/anthony-chaudhary/fak/tree/main/docs/notes) and get a line in **Notes & research**, so the audience route can stay concise while the map remains complete. Before touching this map or [`llms.txt`](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt), run `python tools/check_index_sync.py --audit-tree`; the same reciprocal check runs in staged mode for front-door index and dated-note changes.
 
 ## Start here
+- Structural sharing for the legacy Metal host prefix KV — [`docs/notes/SCOPE-LEGACY-METAL-HOST-PREFIX-KV-STRUCTURAL-SHARING-2026-09-14.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/SCOPE-LEGACY-METAL-HOST-PREFIX-KV-STRUCTURAL-SHARING-2026-09-14.md) is the #12856 scoping audit: it inventories the backend-nil host `K`/`Kraw`/`V` readers and writers, names the bounded three-file slice (`kvcache.go`, `kv.go`, `kv_cache_bytes.go`) and a fail-closed rollback that keeps the flat layout, and re-derives the 6,910,967,808-byte prefix payload from the real 16 full-attention layers. No sharing implemented; physical qualification separate.
 - Meta-loop trigger effectiveness — [`docs/notes/META-LOOP-TRIGGER-EFFECTIVENESS-2026-08-31.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/META-LOOP-TRIGGER-EFFECTIVENESS-2026-08-31.md) defines the read-only `fak-loop-trigger/1` receipt, classification precedence, effectiveness metrics, live baseline, and field-derived cadence policy for super/meta loops (#10352).
 
 - [Response profiles: concise, Caveman-compatible, and composable](https://github.com/anthony-chaudhary/fak/blob/main/docs/response-profiles.md) -- choose low/medium/high, distinguish native from original, and understand the safety and composition boundaries.
@@ -4497,6 +4512,7 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 - [Why default-deny beats a classifier](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/default-deny-vs-classifier.md) — the prompt-injection explainer for the most common objection: a classifier has to recognize the attack and can fail open, while a default-deny capability floor and result quarantine stop the same injected prompt by structure. Walks one attack through both stacks, names the OWASP Agentic Top-10 / MCP Top-10 risks covered, and keeps the 5/5 live run framed as a small demonstration, not a benchmark sweep.
 - [What fak is not — the honest boundary](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/what-fak-is-not.md) — the disarming page for the skeptic: `fak` is **not** a serving engine and does not beat vLLM/SGLang/llama.cpp on raw tokens/sec — as a gateway fronting SGLang it *trails* raw SGLang 0.75× at peak (the ~3%-at-saturation adjudication tax), because its field is governance at the agent boundary, not throughput. States the 0/29-novel prior-art audit plainly and reframes it as the point (the contribution is the *assembly*, not an invented primitive), and names the detector as best-effort/evadable while the default-deny capability floor is the load-bearing guarantee. Honest fence: witnessed numbers only (~4.1× vs the *tuned* baseline, never the naive 60×; WebVoyager 8.8–9.7× labeled simulated). The volunteered-limits companion to [why default-deny beats a classifier](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/default-deny-vs-classifier.md).
 - [Change data capture for agents](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/change-data-capture-for-agents.md) — the page for the infra reader who searches "change data capture" or "Debezium": `fak` already implements the whole CDC pattern family — a hash-chained change log (`internal/journal`), cursor-drained change feeds (`GET /v1/fak/changes`, `GET /v1/fak/events`), a transactional outbox (`internal/slackoutbox`), and fold-to-read-model projections (`dos_verify`/`dos_status`) — but over **agent, cache, and session state**, mapped one-to-one onto the CDC vocabulary (LSN/offset ↔ `Seq` cursor, tombstone/delete ↔ `revocation`, source metadata ↔ `WorldVer`/`TrustEpoch`, CQRS read model ↔ the fold verbs). The honest fence and companion to [what fak is not](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/what-fak-is-not.md): `fak` is a change **source** for agent work, **not** a database-replication sink — it never ingests your Postgres WAL, emits semantic events (not row images), and runs no Kafka/Flink. Shipped feeds today; the Debezium-envelope export (#3171), work-change unification (#3172), and consumer-contract doc (#3173) are the open follow-ups.
+- [Native harness default-on security features](https://github.com/anthony-chaudhary/fak/blob/main/docs/architecture/native-harness-default-security.md) — the one-page inventory of what the fak native harness ships **by default** at the call boundary: the default-deny capability floor, the write-time result quarantine, the JIT secret "page in and out" (mask-in-place redact by default, opt-in hard seal, and a fail-closed re-screen on the way back so a clearance cannot launder a credential), kernel-authored provenance/IFC, witness gates, plan-CFI, and the durable-memory promotion gate — each row pointing at the package that owns it, plus the `pkg/harnesskit` contracts (`ToolScope`, `AuthBinding`, `PublicToolContract`) an external builder inherits instead of re-implementing. Keeps the honest scope: the detector is evadable, the floor and the wall are load-bearing.
 - [Long-session economics](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/long-session-economics.md) — the cost explainer for the largest audience (anyone paying for a long agent run): why a growing transcript re-sends everything each turn, why the provider's prompt-cache discount survives *only* while the prefix is byte-identical, and how `fak` keeps it alive by splicing on original bytes (a `memcpy`, never a re-marshal) rather than rewriting the prompt to shrink it. Carries a worked cost example and the honest fence — `fak` guarantees the byte-identical prefix and *relays the provider's own reuse number*, it never claims a saving it can't force. The economics angle beside the practical flag ([long sessions: keep the cache hit](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/long-sessions-keep-the-cache-hit.md)) and the theory ([addressable KV cache](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/addressable-kv-cache.md)).
 - [Context shedding](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/context-shedding.md) — the plain-English *what and why* of fak's default "trim the middle out" saving: every turn re-sends the whole transcript, the growing middle keeps missing the provider cache, so fak drops the stale middle (keeping the cached head byte-identical and your recent turns, leaving a restore handle) and the trimmed history stops costing you every turn. Written to be read honestly: the real saving is per-turn recurrence; the honest number is shed **per fire**, because fak re-trims the client's full re-sent history each fire so a session-total re-counts the same middle (the [retracted-75%](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) lesson, baked in); and the ref-count / use-after-free framing of whether a shed span was safe to drop. Companion to [long-session economics](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/long-session-economics.md) and the [built-in compaction audit](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/BUILT-IN-COMPACTION-AUDIT-2026-07-06.md).
 - [What a saved token is worth](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/what-a-saved-token-is-worth.md) — the valuation companion to context shedding: how a token fak avoided paying for becomes an honest dollar, from the one number that underlies it all (the `0.1x` cache-read price). Names the two savings stories that share that number (the provider's `0.9x` read rebate vs fak's compaction shed), the `count × price` identity that keeps the figure honest (with the two orthogonal inflation bugs it has survived — the price axis, `1.0x`-on-warm over-crediting compaction 10x, fixed by #2794/#2798/#2796; and the count axis, per-fire not session-sum), the `ValuationBasis` label every fak dollar must carry (the renderer refuses an unlabeled one), and the decoder ring for the *same* `0.1` declared six times under six names — why the layered-DAG import rule makes most of those copies mandatory (pinned to the canonical `gateway.CacheReadMultiplier`) and which one same-file pair is honest, collapsible debt.
@@ -4668,6 +4684,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [`docs/notes/CONCEPT-STUDY-AZHU9701-NINFER-4090D-2026-09-03.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-STUDY-AZHU9701-NINFER-4090D-2026-09-03.md) — pinned deep study of Azhu9701/ninfer-4090d@3eaa163: a Windows RTX 4090 D inference deployment dossier whose headline 114-SM wave-grid / DirectStorage 1.3 / E8-lattice KV claims are unverified README prose (no engine source in-repo, no license), with two genuine artifacts — a restart-based load-adaptive draft-depth controller and a tool-call-drift salvage patch; dynamic MTP depth is PRESENT-on-axis in fak, while lax parameter salvage is PARTIAL and filed as #12944; parent #10193, portfolio #10960.
 - [Three-Tree Synchronization Invariants and Multi-Node Safe Sync Rules](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/SAFE-SYNC-THREE-TREE-INVARIANTS-2026-09-09.md) -- auto-indexed dated note.
 - [`docs/notes/CONCEPT-STUDY-PURE-GO-HOST-BINDINGS-2026-09-08.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-STUDY-PURE-GO-HOST-BINDINGS-2026-09-08.md) — inventory and source-pinned migration plan for replacing accelerator CGo/C++ host shims with Go-toolchain-owned bindings while retaining CUDA/PTX, MSL, SPIR-V, explicit engine identity, and real-device witnesses; parent #12210, shipped loader spine #12212, sequenced Vulkan leaves #12283–#12286, CUDA loader #11657; receipt `study_3cd46be3b861ab9872e7c8cb01f81def505a9cecbbc6cf80e728087c689558dc`.
 - [Agent-first abstractions for a massively multiagent world](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-AGENT-FIRST-ABSTRACTIONS-2026-09-06.md) — pinned Temporal, Ray, A2A, and LangGraph research; durable work, effects, evidence, and bounded demand; original hypotheses and four scoped follow-ons under #11949.
@@ -10399,11 +10416,16 @@ description: "How to run local models (Qwen3.8-27B and peers) natively on Apple 
 
 ## Build and qualify the native Metal binary
 
-Metal support is compiled only into a native `darwin/arm64` build with CGo enabled. The
-default release archive is a pure-Go build: it can serve on CPU, but it cannot pass this
-Metal qualification. (The `install.sh --variant metal` path installs a separate CGO
-darwin/arm64 asset with Metal compiled in for versions that publish it; everything below
-builds the same thing from source.) Install Xcode Command Line Tools and Go 1.26+, then build from a clean
+Metal support is compiled into the native `darwin/arm64` build with CGo enabled.
+The installer now selects the Metal archive by default on Apple Silicon; CPU
+archives require explicit `--variant cpu` and cannot pass Metal qualification.
+The v0.54.0 Metal archive is available as a backfill from its exact tagged source,
+without creating a new release. On Apple Silicon, use `FAK_VERSION=0.54.0 sh install.sh`
+to select it. Missing assets for other versions produce an actionable error.
+Vulkan publication remains pending its release and hardware gate. The commands
+below build and qualify the native Metal backend from source. MLX remains a
+comparison runtime.
+Install Xcode Command Line Tools and Go 1.26+, then build from a clean
 committed checkout (or a managed worker) to a unique temporary path and inspect the actual
 Mac and backend:
 A pure-Go binary never fails silently: `fak serve`, `fak run`, and `fak up` stamp a
@@ -12849,6 +12871,18 @@ Clear every item before a network-facing deploy. Sources for each are in
 - [ ] **Audit journal enabled** (recommended). Set `FAK_AUDIT_JOURNAL=/path/to/audit.jsonl`
   to a durable, writable path for a tamper-evident record of every adjudicated
   syscall.
+- [ ] **Shutdown drain sized to the workload.** Set `FAK_HTTP_DRAIN_TIMEOUT_S=300`
+  for a five-minute HTTP drain, or leave it unset for the default five seconds.
+  The value is read when serving starts and accepts positive whole seconds up to
+  9223372036 (the largest whole-second Go duration). Surrounding whitespace is
+  ignored; empty, malformed, zero, negative, or larger values retain five seconds.
+  On terminating-signal cancellation, `/readyz` returns 503 with `stopping: true`
+  while the listener remains available; `/healthz` and startup timing retain their
+  existing semantics. Background loops join first within their separate five-second
+  bound, then the HTTP drain window starts and the listener closes to new requests.
+  Size the supervisor's termination grace period for both windows. The shutdown
+  log records `drain_timeout` and the `inflight_requests` snapshot taken before
+  loop joining. Requests exceeding the drain window are not guaranteed to finish.
 - [ ] **Rate limiting** (optional). `FAK_RATELIMIT_MAX_CALLS` / `FAK_RATELIMIT_MAX_COST`
   with `FAK_RATELIMIT_KEY` (`trace`|`tool`|`global`) cap per-key load.
 - [ ] **Health + metrics wired.** Probe `/healthz`; scrape `/metrics`

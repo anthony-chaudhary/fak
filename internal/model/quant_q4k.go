@@ -130,20 +130,23 @@ func (qt *q4kTensor) rawForNode(nodeID int) []byte {
 func (qt *q4kTensor) q4kRowBytes() int { return qt.nblk * q4kBlockBytes }
 
 // requireRawCPU is the #1067 legibility guardrail for the CPU Q4_K matmul entry points. Under
-// MetalQ4K with FAK_Q4K_FREE_CPU=1 (single residency), metalQ4KWeight drops qt.raw after a
-// successful GPU upload. Decode then takes the Metal GEMV, but the BATCHED PREFILL GEMM
-// (prefill_q4k.go's proj → q4kGemm, and the q4kGemmDispatch CPU fallback) is NOT Metal-routed —
-// so a multi-thousand-token prompt reaches the CPU q4kGemmRange* and reads the freed nil raw,
-// which previously died with a cryptic "slice bounds out of range [N:0]" deep in a parFor worker.
+// single residency (FAK_Q4K_FREE_CPU=1) the resident host copy is dropped after a successful
+// device upload — by MetalQ4KWeight on Apple Silicon and by weightHALQ4K on a unified-memory
+// Vulkan APU. Decode then takes the device GEMV, but the BATCHED PREFILL GEMM (prefill_q4k.go's
+// proj → q4kGemm, and the q4kGemmDispatch CPU fallback) may NOT be device-routed — so a
+// multi-thousand-token prompt reaches the CPU q4kGemmRange* and reads the freed nil raw, which
+// previously died with a cryptic "slice bounds out of range [N:0]" deep in a parFor worker.
 // This turns that into a legible failure that names the misconfig and its two remedies: keep the
-// CPU copy (unset FAK_Q4K_FREE_CPU) or route the prefill GEMM through Metal. out>0 distinguishes a
-// real-but-freed weight from a degenerate empty tensor (which holds no rows to read either way).
+// CPU copy (unset FAK_Q4K_FREE_CPU) or route the prefill GEMM through the device. out>0
+// distinguishes a real-but-freed weight from a degenerate empty tensor (which holds no rows to
+// read either way).
 func (qt *q4kTensor) requireRawCPU(op string) {
 	if len(qt.raw) == 0 && qt.out > 0 {
 		panic(fmt.Sprintf("model: Q4_K %s on a freed CPU weight (out=%d in=%d): the resident raw "+
-			"Q4_K bytes were dropped after a Metal upload (FAK_Q4K_FREE_CPU=1) but a CPU Q4_K matmul "+
-			"ran — prefill is not GPU-routed for this weight. Unset FAK_Q4K_FREE_CPU to keep the CPU "+
-			"copy, or route the prefill GEMM through Metal (#1067).", op, qt.out, qt.in))
+			"Q4_K bytes were dropped after a device upload (FAK_Q4K_FREE_CPU=1, single residency: "+
+			"Metal on Apple Silicon, or Vulkan on a unified-memory APU) but a CPU Q4_K matmul ran — "+
+			"prefill is not device-routed for this weight. Unset FAK_Q4K_FREE_CPU to keep the CPU "+
+			"copy, or route the prefill GEMM through the device (#1067).", op, qt.out, qt.in))
 	}
 }
 
@@ -929,7 +932,7 @@ func (b *QuantBuilder) AddCanonicalMTPQ4K(canon string, shape []int, raw []byte)
 	if _, exists := b.m.manifest[canon]; exists {
 		return fmt.Errorf("model: canonical MTP Q4_K tensor %s already has a decoded representation", canon)
 	}
-	if b.retainMTP != nil && !*b.retainMTP {
+	if !b.mtpRetention() {
 		return nil
 	}
 	if b.m.q4kw == nil {
@@ -988,7 +991,7 @@ func (b *QuantBuilder) AddCanonicalMTPFCQ8(canon string, shape []int, raw []byte
 	if _, exists := b.m.manifest[canon]; exists {
 		return fmt.Errorf("model: canonical MTP FC Q8_0 tensor %s already has a decoded representation", canon)
 	}
-	if b.retainMTP != nil && !*b.retainMTP {
+	if !b.mtpRetention() {
 		return nil
 	}
 	qt := newQ8Tensor(shape[0], shape[1], shape[1]/kindQ8_0.blockWeights())

@@ -5,9 +5,15 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
+
+// guardCodexAuthHTTPTimeout bounds the owned client used for the ChatGPT
+// subscription backend. It is generous because turns stream, but finite so a stalled
+// endpoint cannot hang the guard forever.
+const guardCodexAuthHTTPTimeout = 10 * time.Minute
 
 // configureChatCodexSubscription binds an explicitly selected native Responses
 // planner to the same account credential source used by the Codex guard adapter.
@@ -29,9 +35,11 @@ func configureChatCodexSubscription(p *agent.HTTPPlanner, codexHome string) erro
 	p.ExtraHeaders = nil
 	p.ForceResponsesStream = true
 	// A redirect must not carry the subscription credential to another endpoint.
-	client := http.DefaultClient
-	if p.Client != nil {
-		client = p.Client
+	client := p.Client
+	if client == nil {
+		// Never inherit http.DefaultClient (no timeout); own a bounded clone so a stalled
+		// subscription endpoint cannot hang the turn forever.
+		client = &http.Client{Timeout: guardCodexAuthHTTPTimeout}
 	}
 	ownedClient := *client
 	ownedClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }

@@ -64,12 +64,6 @@ func (s *Session) verifyForwardQwenHybrid(ids []int, pos []int, allow func(q, k 
 	if len(ids) == 0 {
 		return nil
 	}
-	if qwen35MTPMetalP4Verify != nil && len(ids) == 4 && s.MetalQ4K {
-		rows, _, _, accepted, err := qwen35MTPMetalP4Verify(s, ids)
-		if accepted && err == nil {
-			return rows
-		}
-	}
 	rows, err := s.qwen35VerifyPanel(ids, nil)
 	if err != nil {
 		return s.verifyForwardSequential(ids)

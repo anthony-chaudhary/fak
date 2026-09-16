@@ -448,6 +448,116 @@ func TestDeadLLMSLinksNoFile(t *testing.T) {
 	}
 }
 
+// TestMissingLLMSLinks: the DECLARED-AUTHORITY converse of TestDeadLLMSLinks. A doc that
+// declares `llms_authority: true` in its frontmatter must appear as a local .md link in
+// llms.txt; an unmarked doc is not governed, so the check is a no-op until a page opts in.
+func TestMissingLLMSLinks(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "dos.toml", "[lanes.trees]\ngateway = [\"internal/gateway/**\"]\n")
+	mustMkdir(t, root, "docs")
+	mustWrite(t, filepath.Join(root, "docs"), "marked.md",
+		"---\nllms_authority: true\ntitle: \"marked\"\n---\n\n# marked\n")
+	mustWrite(t, filepath.Join(root, "docs"), "plain.md", "# plain\n")
+	mustWrite(t, root, "llms.txt", "# llms\nSee [plain](docs/plain.md).\n")
+
+	c, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got := c.MissingLLMSLinks()
+	if len(got) != 1 || got[0] != "docs/marked.md" {
+		t.Fatalf("MissingLLMSLinks = %v, want [docs/marked.md] (plain.md is unmarked, so not governed)", got)
+	}
+	// It also surfaces through the folded view, tagged missing-llms-link.
+	found := false
+	for _, d := range c.CheckFreshness() {
+		if d.Kind == DriftMissingLLMSLink && d.Subject == "docs/marked.md" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("CheckFreshness did not carry the missing-llms-link finding")
+	}
+}
+
+// TestMissingLLMSLinksListed: a marked doc that IS linked reports none.
+func TestMissingLLMSLinksListed(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "dos.toml", "[lanes.trees]\ngateway = [\"internal/gateway/**\"]\n")
+	mustMkdir(t, root, "docs")
+	mustWrite(t, filepath.Join(root, "docs"), "marked.md",
+		"---\nllms_authority: true\ntitle: \"marked\"\n---\n\n# marked\n")
+	mustWrite(t, root, "llms.txt", "# llms\nSee [marked](docs/marked.md).\n")
+
+	c, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := c.MissingLLMSLinks(); got != nil {
+		t.Errorf("a linked authority doc must not be reported missing, got %v", got)
+	}
+}
+
+// TestMissingLLMSLinksNoFile: a tree with no llms.txt yields no drift finding from the
+// detector's drift-only view (absent source), but CheckFreshnessReport must record an
+// Unchecked rather than pass green — a false green from a map that was never read is
+// exactly what the report exists to prevent.
+func TestMissingLLMSLinksNoFile(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "dos.toml", "[lanes.trees]\ngateway = [\"internal/gateway/**\"]\n")
+	mustMkdir(t, root, "docs")
+	mustWrite(t, filepath.Join(root, "docs"), "marked.md",
+		"---\nllms_authority: true\ntitle: \"marked\"\n---\n\n# marked\n")
+
+	c, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := c.MissingLLMSLinks(); got != nil {
+		t.Errorf("no llms.txt should yield nil, got %v", got)
+	}
+	rep := c.CheckFreshnessReport()
+	found := false
+	for _, u := range rep.Unchecked {
+		if u.Detector == DriftMissingLLMSLink {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no llms.txt should record an Unchecked for %s; report = %+v", DriftMissingLLMSLink, rep)
+	}
+}
+
+// TestMissingLLMSLinksRealTreeGlossaryListed is the live-tree gate for the real regression
+// (ticket #1571): docs/managed-context-glossary.md declares llms_authority, so if its
+// llms.txt link is removed this fails and reds CI (`go test ./...`). It also asserts the
+// declaration itself survives — the marker is self-declared, so a rewrite that ALSO
+// deletes `llms_authority: true` from the doc would silently re-arm the blind spot before
+// the missing-link check could fire.
+func TestMissingLLMSLinksRealTreeGlossaryListed(t *testing.T) {
+	root := FindRoot(".")
+	if root == "" {
+		t.Skip("no repo root; skipping live missing-authority dogfood")
+	}
+	c, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	const glossary = "docs/managed-context-glossary.md"
+	raw, rerr := os.ReadFile(filepath.Join(root, filepath.FromSlash(glossary)))
+	if rerr != nil {
+		t.Fatalf("read %s: %v", glossary, rerr)
+	}
+	if !hasLLMSAuthority(raw) {
+		t.Errorf("%s no longer declares llms_authority: true; re-add the marker or the missing-link guard is inert", glossary)
+	}
+	for _, m := range c.MissingLLMSLinks() {
+		if m == glossary {
+			t.Errorf("%s declares llms_authority but is not linked from llms.txt", glossary)
+		}
+	}
+}
+
 func TestMainDispatchVerbsIncludesExtractedHelperSwitch(t *testing.T) {
 	source := []byte(`package main
 func main() {

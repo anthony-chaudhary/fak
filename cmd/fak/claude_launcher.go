@@ -405,6 +405,8 @@ func runClaudeConfig(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
+	*dir = pathutil.ExpandTilde(*dir)
+
 	baseURL := projectassets.NormalizeClaudeBaseURL(*addr)
 	modelID := projectassets.NormalizeClaudeModelID(*model)
 	apiKey := projectassets.NormalizeClaudeAPIKey(*key)

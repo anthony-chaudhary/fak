@@ -18,6 +18,7 @@ package metalgemm
 int  mg_init(void);
 int  mg_mps_available(void);
 int  mg_device_name(char *name, int namelen);
+int  mg_os_version(char *name, int namelen);
 int  mg_device_memory_total(unsigned long long *total);
 int  mg_upload(const float *w, int out, int in);
 void mg_matmul(int wid, const float *x, int P, float *y);
@@ -80,6 +81,18 @@ func DeviceName() string {
 		return ""
 	}
 	return C.GoString(&name[0])
+}
+
+// OSVersion returns the host macOS product version (e.g. "26.6.2") from NSProcessInfo, or ""
+// when unavailable. It is the version half of the device/version pin the wide-tile crossover
+// (q4k.go q4kM5CrossoverAt) requires; a "" version fails the pin closed so no unpinned candidate
+// is ever encoded.
+func OSVersion() string {
+	var v [64]C.char
+	if C.mg_os_version(&v[0], C.int(len(v))) != 1 {
+		return ""
+	}
+	return C.GoString(&v[0])
 }
 
 // DeviceMemoryTotal returns Metal's recommended working-set size for the shared device.

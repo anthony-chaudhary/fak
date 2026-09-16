@@ -2,6 +2,7 @@ package ggufload
 
 import (
 	"bytes"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -860,12 +861,19 @@ func TestDeepSeek41GGUFReadsVcruzEngramMetadata(t *testing.T) {
 // tensor suffixes map into the dedicated model.engram.<L>.* namespace, and never
 // into a generic self_attn./mlp. name (which would let an Engram table fall
 // through to the wrong forward).
+//
+// The three projection-side suffixes (engram_wkv / engram_q / engram_k) are
+// normalized onto the exact canonical leaves the reduced native forward consumes
+// (engram_kv / engram_q_norm / engram_k_norm) - see
+// internal/model/v41_forward.go:295 and v41_forward_engram.go:212. The Engram
+// table (engram_embd) keeps its own leaf, because the forward reaches it through
+// the packed-row source rather than a named projection tensor.
 func TestDeepSeek41GGUFVcruzEngramTensorSuffixes(t *testing.T) {
 	want := map[string]string{
 		"engram_embd": "model.engram.1.engram_embd.weight",
-		"engram_k":    "model.engram.1.engram_k.weight",
-		"engram_q":    "model.engram.1.engram_q.weight",
-		"engram_wkv":  "model.engram.1.engram_wkv.weight",
+		"engram_k":    "model.engram.1.engram_k_norm.weight",
+		"engram_q":    "model.engram.1.engram_q_norm.weight",
+		"engram_wkv":  "model.engram.1.engram_kv.weight",
 	}
 	for suffix, wantName := range want {
 		got, ok := CanonicalTensorNameArch("blk.1."+suffix+".weight", "deepseek41")
@@ -902,4 +910,283 @@ func TestDeepSeek41GGUFVcruzMalformedFailsLoud(t *testing.T) {
 			t.Fatalf("Config error = %v, want integer-array refusal naming layer_ids", err)
 		}
 	})
+}
+
+// deepSeek41V41RealSuffixes is the GGUF per-layer suffix set the real converted
+// DeepSeek-V4.1 GGUF emits, each paired with the exact canonical name the
+// "deepseek41" arch MUST resolve it to. Kept as the single source of truth for
+// the suffix-map tests below so every one of the eight is exercised identically.
+var deepSeek41V41RealSuffixes = []struct {
+	suffix string
+	want   func(l int) string
+}{
+	{"attn_kv_a_norm.weight", func(l int) string { return layerName(l, "self_attn.kv_a_layernorm.weight") }},
+	{"attn_compressor_gate.weight", func(l int) string { return layerName(l, "self_attn.compressor.wgate.weight") }},
+	{"attn_compressor_kv.weight", func(l int) string { return layerName(l, "self_attn.compressor.wkv.weight") }},
+	{"attn_compressor_norm.weight", func(l int) string { return layerName(l, "self_attn.compressor.norm.weight") }},
+	{"attn_sinks.weight", func(l int) string { return fmt.Sprintf("model.layers.%d.attn.attn_sink", l) }},
+	{"exp_probs_b_vl.bias", func(l int) string { return layerName(l, "mlp.gate.e_score_correction_bias_vl") }},
+	{"indexer.attn_k.weight", func(l int) string { return layerName(l, "self_attn.indexer.wk.weight") }},
+	{"indexer.k_norm.weight", func(l int) string { return layerName(l, "self_attn.indexer.k_norm.weight") }},
+}
+
+// layerName formats a canonical per-layer name for layer l under a suffix.
+func layerName(layer int, suffix string) string {
+	return fmt.Sprintf("model.layers.%d.%s", layer, suffix)
+}
+
+// canonicalFor maps a raw "blk.<L>.<suffix>" GGUF name through
+// CanonicalTensorNameArch for arch "deepseek41", failing the test if the map
+// refuses a name the spec says must resolve.
+func canonicalFor(t *testing.T, ggufName string) string {
+	t.Helper()
+	got, ok := CanonicalTensorNameArch(ggufName, "deepseek41")
+	if !ok {
+		t.Fatalf("CanonicalTensorNameArch(%q, deepseek41) = ok=false; the real V4.1 suffix must resolve", ggufName)
+	}
+	return got
+}
+
+// TestDeepSeek41GGUFV41RealArtifactSuffixMap binds the eight per-layer suffixes
+// the real converted DeepSeek-V4.1 GGUF emits to their exact canonical names.
+// Each suffix is asserted at layer 0 AND a non-zero layer (7) so the layer index
+// is genuinely substituted rather than hardcoded.
+func TestDeepSeek41GGUFV41RealArtifactSuffixMap(t *testing.T) {
+	for _, tc := range deepSeek41V41RealSuffixes {
+		for _, layer := range []int{0, 7} {
+			ggufName := fmt.Sprintf("blk.%d.%s", layer, tc.suffix)
+			got := canonicalFor(t, ggufName)
+			want := tc.want(layer)
+			if got != want {
+				t.Errorf("CanonicalTensorNameArch(%q, deepseek41) = %q, want %q", ggufName, got, want)
+			}
+		}
+	}
+}
+
+// TestDeepSeek41GGUFV41FixtureResolvesEveryTensor builds a real-artifact-shaped
+// File from the existing vcruzQ2KReceiptMeta header and proves EVERY one of the
+// eight V4.1 per-layer suffixes resolves through the arch map for both a layer
+// the header declares and a non-declared layer, so a single omitted map arm
+// cannot hide behind the table test.
+func TestDeepSeek41GGUFV41FixtureResolvesEveryTensor(t *testing.T) {
+	f := &File{Metadata: vcruzQ2KReceiptMeta()}
+	if _, err := f.Config(); err != nil {
+		t.Fatalf("Config on the vcruz Q2_K fixture: %v", err)
+	}
+	// No frozen table-length assertion here: the table's 8 members are the
+	// artifact inventory, and every one is exercised below. Asserting the count
+	// would pin today's total rather than the relation under test.
+	for _, layer := range []int{0, 7} {
+		for _, tc := range deepSeek41V41RealSuffixes {
+			ggufName := fmt.Sprintf("blk.%d.%s", layer, tc.suffix)
+			got, ok := CanonicalTensorNameArch(ggufName, "deepseek41")
+			if !ok {
+				t.Errorf("fixture tensor %q did not resolve under deepseek41", ggufName)
+				continue
+			}
+			if want := tc.want(layer); got != want {
+				t.Errorf("fixture tensor %q = %q, want %q", ggufName, got, want)
+			}
+		}
+	}
+}
+
+// TestDeepSeek41GGUFV41SuffixMapEdges probes the adversarial edges of the V4.1
+// suffix map: sibling indexer names must not collide, the new kv_a norm must not
+// shadow or be shadowed by the legacy kv_norm (and must never become the kv_a
+// projection), an unknown suffix must stay refused, and no compressor/indexer/
+// sink arm may produce a kv_b_proj leaf.
+func TestDeepSeek41GGUFV41SuffixMapEdges(t *testing.T) {
+	t.Run("indexer names do not collide", func(t *testing.T) {
+		names := map[string]string{
+			"indexer.attn_k.weight":   canonicalFor(t, "blk.0.indexer.attn_k.weight"),
+			"indexer.k_norm.weight":   canonicalFor(t, "blk.0.indexer.k_norm.weight"),
+			"indexer.attn_q_b.weight": canonicalFor(t, "blk.0.indexer.attn_q_b.weight"),
+			"indexer.proj.weight":     canonicalFor(t, "blk.0.indexer.proj.weight"),
+		}
+		seen := map[string]string{}
+		for suffix, canonical := range names {
+			if canonical == "" {
+				t.Errorf("indexer suffix %s resolved to an empty canonical name", suffix)
+			}
+			if prev, dup := seen[canonical]; dup {
+				t.Errorf("indexer suffixes %s and %s collide on canonical name %q", prev, suffix, canonical)
+			}
+			seen[canonical] = suffix
+		}
+	})
+
+	t.Run("kv_a norm and legacy kv_norm agree and are not the projection", func(t *testing.T) {
+		newNorm := canonicalFor(t, "blk.0.attn_kv_a_norm.weight")
+		legacyNorm := canonicalFor(t, "blk.0.attn_kv_norm.weight")
+		if newNorm != legacyNorm {
+			t.Errorf("attn_kv_a_norm canonical = %q, legacy attn_kv_norm canonical = %q; both must resolve to the same kv norm", newNorm, legacyNorm)
+		}
+		if want := "model.layers.0.self_attn.kv_a_layernorm.weight"; newNorm != want {
+			t.Errorf("kv norm canonical = %q, want %q", newNorm, want)
+		}
+		if proj := "model.layers.0.self_attn.kv_a_proj_with_mqa.weight"; newNorm == proj {
+			t.Errorf("kv norm canonical = %q; a norm must never map to the kv_a projection", proj)
+		}
+	})
+
+	t.Run("unknown suffix stays refused", func(t *testing.T) {
+		if got, ok := CanonicalTensorNameArch("blk.0.totally_unknown_suffix.weight", "deepseek41"); ok {
+			t.Errorf("unknown suffix resolved to %q; the deepseek41 map must not be a catch-all", got)
+		}
+	})
+
+	t.Run("no kv_b_proj leaf in compressor indexer sink names", func(t *testing.T) {
+		for _, suffix := range []string{
+			"attn_compressor_gate.weight",
+			"attn_compressor_kv.weight",
+			"attn_compressor_norm.weight",
+			"indexer.attn_k.weight",
+			"indexer.k_norm.weight",
+			"attn_sinks.weight",
+		} {
+			got := canonicalFor(t, "blk.0."+suffix)
+			if strings.Contains(got, "kv_b_proj") {
+				t.Errorf("suffix %s canonical name %q carries a kv_b_proj leaf; the V4 single-attn_kv invariant must hold", suffix, got)
+			}
+		}
+	})
+}
+
+// TestDeepSeek41GGUFV41CompressorStaysForwardClassified is the ticket's required
+// negative arm. The admission functions live in internal/model (a different
+// package), so this is a comment-documented structural assertion instead: the
+// loader map resolving a compressor tensor is NOT sufficient to make the layer
+// admissible, because the compressor canonical names live under the
+// self_attn.compressor.* namespace that the reduced forward's supported tensor
+// set does not contain.
+func TestDeepSeek41GGUFV41CompressorStaysForwardClassified(t *testing.T) {
+	compressorNames := []string{
+		canonicalFor(t, "blk.0.attn_compressor_gate.weight"),
+		canonicalFor(t, "blk.0.attn_compressor_kv.weight"),
+		canonicalFor(t, "blk.0.attn_compressor_norm.weight"),
+	}
+	for _, name := range compressorNames {
+		if !strings.Contains(name, "self_attn.compressor.") {
+			t.Errorf("compressor canonical name %q is not under the self_attn.compressor.* namespace; a reduced forward could fall through and wrongly admit the stage", name)
+		}
+	}
+}
+
+// TestDeepSeek41GGUFV41SuffixMapClassifierConsistency asserts the namespace
+// classification that keeps each V4.1 tensor distinguishable from a generic
+// MLP/attention fall-through, without calling the forward package: compressor
+// and indexer names land under a self_attn. namespace, while attn_sinks lands
+// under the raw attn. namespace. It also re-proves the unknown-suffix arm that
+// guards against the map becoming a catch-all for a non-V4 arch.
+func TestDeepSeek41GGUFV41SuffixMapClassifierConsistency(t *testing.T) {
+	subSelfAttn := []string{
+		canonicalFor(t, "blk.0.attn_compressor_gate.weight"),
+		canonicalFor(t, "blk.0.attn_compressor_kv.weight"),
+		canonicalFor(t, "blk.0.attn_compressor_norm.weight"),
+		canonicalFor(t, "blk.0.indexer.attn_k.weight"),
+		canonicalFor(t, "blk.0.indexer.k_norm.weight"),
+	}
+	for _, name := range subSelfAttn {
+		if !strings.Contains(name, "self_attn.") {
+			t.Errorf("canonical name %q is not under a self_attn. namespace", name)
+		}
+		if !strings.HasPrefix(name, "model.layers.0.") {
+			t.Errorf("canonical name %q is not rooted at model.layers.0.", name)
+		}
+	}
+
+	sink := canonicalFor(t, "blk.0.attn_sinks.weight")
+	if !strings.Contains(sink, ".attn.") {
+		t.Errorf("attn_sinks canonical name %q is not under the raw attn. namespace", sink)
+	}
+	if strings.Contains(sink, "self_attn.") {
+		t.Errorf("attn_sinks canonical name %q landed under self_attn.; the sink must stay distinguishable", sink)
+	}
+
+	if got, ok := CanonicalTensorNameArch("blk.0.totally_unknown_suffix.weight", "deepseek41"); ok {
+		t.Errorf("unknown suffix resolved to %q; the deepseek41 map must not be a catch-all", got)
+	}
+}
+
+// TestDeepSeek41GGUFV41SuffixesDoNotLeakToSiblings is the ticket #13112 negative
+// arm: the V4.1 arms are reached ONLY inside the deepseek41 branch of
+// CanonicalTensorNameArch (gated on archIsDeepSeek41). A sibling arch must
+// therefore resolve no suffix that the V4.1 branch ALONE introduced.
+//
+// Fence: an arch that reaches the shared glm_moe_dsa MLA+MoE map
+// (archUsesMLAMoELayout: glm_moe_dsa, deepseek2) legitimately resolves the three
+// suffixes that map ALREADY shares with V4.1 — attn_kv_a_norm.weight,
+// indexer.attn_k.weight, indexer.k_norm.weight. That coverage PREDATES #13112
+// (glmGGUFAttnKVANorm / glmGGUFIndexerWK / glmGGUFIndexerKNorm), so it is not a
+// leak this ticket introduced; asserting ok=false for those would pin a
+// pre-existing sibling behavior this ticket has no scope to change. The five
+// suffixes UNIQUE to V4.1 must stay refused by every sibling, and llama/qwen2
+// (which do not reach the glm map) must refuse all eight.
+func TestDeepSeek41GGUFV41SuffixesDoNotLeakToSiblings(t *testing.T) {
+	// Suffixes the shared glm_moe_dsa/deepseek2 map already carries at base.
+	sharedWithSiblingMLA := map[string]bool{
+		"attn_kv_a_norm.weight": true,
+		"indexer.attn_k.weight": true,
+		"indexer.k_norm.weight": true,
+	}
+	siblings := []string{"llama", "qwen2", "deepseek2", "glm_moe_dsa"}
+	for _, sibling := range siblings {
+		t.Run(sibling, func(t *testing.T) {
+			for _, tc := range deepSeek41V41RealSuffixes {
+				ggufName := "blk.0." + tc.suffix
+				got, ok := CanonicalTensorNameArch(ggufName, sibling)
+				if !ok {
+					continue // refused: the strongest form of no-leak
+				}
+				reachesGlmMLA := sibling == "deepseek2" || sibling == "glm_moe_dsa"
+				if reachesGlmMLA && sharedWithSiblingMLA[tc.suffix] {
+					// Pre-existing sibling coverage, not a #13112 leak. Pin the
+					// canonical it must keep producing so a future refactor that
+					// silently re-routes it is still caught.
+					if want := tc.want(0); got != want {
+						t.Errorf("sibling %q resolved shared suffix %q to %q, want %q",
+							sibling, tc.suffix, got, want)
+					}
+					continue
+				}
+				t.Errorf("V4.1 arm LEAKED into sibling arch %q: CanonicalTensorNameArch(%q, %q) = %q, want ok=false; the deepseek41 branch must stay gated on archIsDeepSeek41",
+					sibling, ggufName, sibling, got)
+			}
+		})
+	}
+}
+
+// TestDeepSeek41GGUFV41HyperconnectionTapsMap is the regression guard for the
+// hc_* hyper-connection tap spellings the real converted artifact emits. The
+// published vcruz305 Q2_K shard carries blk.N.hc_attn_{fn,base,scale}.weight and
+// blk.N.hc_ffn_{fn,base,scale}.weight (parsed directly from the staged header).
+// The earlier map arms omitted the trailing ".weight", so every one of these
+// tensors was refused by CanonicalTensorNameArch and the shard load hard-failed
+// with "gguf: no canonical mapping for tensor blk.0.hc_attn_fn.weight" - the
+// same failure class the attn_kv_a_norm fix retired. Assert both the resolve and
+// the exact canonical leaf, at two layer indices.
+func TestDeepSeek41GGUFV41HyperconnectionTapsMap(t *testing.T) {
+	taps := []string{
+		"hc_attn_fn.weight", "hc_attn_base.weight", "hc_attn_scale.weight",
+		"hc_ffn_fn.weight", "hc_ffn_base.weight", "hc_ffn_scale.weight",
+	}
+	for _, tap := range taps {
+		for _, layer := range []int{0, 7} {
+			ggufName := fmt.Sprintf("blk.%d.%s", layer, tap)
+			got, ok := CanonicalTensorNameArch(ggufName, "deepseek41")
+			if !ok {
+				t.Errorf("published V4.1 hyper-connection tap %q did not resolve under deepseek41; the shard load hard-fails", ggufName)
+				continue
+			}
+			// The map strips the leading "hc_" and re-nests the tap under the
+			// per-layer hc.<leaf>.weight namespace, so hc_attn_fn.weight becomes
+			// model.layers.<L>.hc.attn_fn.weight.
+			want := layerName(layer, "hc."+strings.TrimPrefix(strings.TrimSuffix(tap, ".weight"), "hc_")+".weight")
+			if got != want {
+				t.Errorf("CanonicalTensorNameArch(%q, deepseek41) = %q, want %q", ggufName, got, want)
+			}
+		}
+	}
 }

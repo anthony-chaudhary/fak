@@ -123,6 +123,79 @@ func TestROCmBackendCoreBehavior(t *testing.T) {
 	}
 }
 
+// TestROCmBackendDSAIndexSelectHostExact is the GPU-FREE witness for rocmBackend.DSAIndexSelect:
+// the method is a deliberate HOST delegation (the indexer drives a discrete top-k, so the selected
+// set must be bit-identical to the cpu-ref ? see dsa.go's selection-on-host rationale), so it can be
+// exercised with a bare backend and HOST-resident tensors, touching no HIP call and needing no device.
+// It requires only the rocm build tag (this file is linux && rocm && cgo), not physical hardware; on a
+// tag build without a GPU it still runs, and it pins the selected POSITIONS to the independent f64
+// oracle hostIndexSelectF64 (dsa_index_test.go) across the same geometry sweep the cpu-ref test uses.
+func TestROCmBackendDSAIndexSelectHostExact(t *testing.T) {
+	r := &rocmBackend{name: "rocm"}
+	scale := float32(1.0 / math.Sqrt(8))
+	cases := []struct {
+		name            string
+		nH, indexDim    int
+		nKeys, queryPos int
+		topK            int
+		tie             bool
+	}{
+		{"small", 4, 8, 6, 5, 2, false},
+		{"topk-ge-keys", 4, 8, 3, 2, 8, false},
+		{"causal-mask", 4, 8, 10, 4, 3, false},
+		{"near-tie", 2, 4, 8, 7, 3, true},
+		{"single-head", 1, 16, 12, 11, 5, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			indexQ := make([]float32, tc.nH*tc.indexDim)
+			for i := range indexQ {
+				indexQ[i] = float32(math.Sin(float64(i)*0.7+1.3)) * 0.5
+			}
+			indexK := make([]float32, tc.nKeys*tc.indexDim)
+			for i := range indexK {
+				indexK[i] = float32(math.Cos(float64(i)*0.37+0.2)) * 0.5
+			}
+			weights := make([]float32, tc.nH)
+			for h := range weights {
+				weights[h] = float32(0.3 + 0.1*float64(h))
+			}
+			if tc.tie {
+				copy(indexK[2*tc.indexDim:3*tc.indexDim], indexK[1*tc.indexDim:2*tc.indexDim])
+			}
+
+			want := hostIndexSelectF64(indexQ, indexK, weights, tc.nKeys, tc.nH, tc.indexDim, tc.queryPos, tc.topK, scale)
+
+			// Host-resident (Default()) tensors: rocmBackend.Read returns their host slice directly,
+			// so no device buffer and no HIP call is reached.
+			qt := NewF32(Default(), []int{tc.nH * tc.indexDim}, indexQ)
+			kt := NewF32(Default(), []int{tc.nKeys * tc.indexDim}, indexK)
+			wt := NewF32(Default(), []int{tc.nH}, weights)
+			got := r.DSAIndexSelect(qt, kt, wt, tc.nKeys, tc.nH, tc.indexDim, tc.queryPos, tc.topK, scale)
+
+			if len(got) != len(want) {
+				t.Fatalf("selection length: got %d want %d (got=%v want=%v)", len(got), len(want), got, want)
+			}
+			for i := range want {
+				if got[i] != want[i] {
+					t.Fatalf("selection[%d]: got %d want %d (full got=%v want=%v) ? NOT selection-stable", i, got[i], want[i], got, want)
+				}
+			}
+			seen := map[int]bool{}
+			for _, p := range got {
+				if p < 0 || p > tc.queryPos {
+					t.Fatalf("selected non-causal position %d (queryPos=%d)", p, tc.queryPos)
+				}
+				if seen[p] {
+					t.Fatalf("selected duplicate position %d", p)
+				}
+				seen[p] = true
+			}
+			t.Logf("rocm DSAIndexSelect (host-delegated) %s: selection==host-f64 exactly: %v", tc.name, got)
+		})
+	}
+}
+
 func TestROCmBackendKVCloneEvict(t *testing.T) {
 	b, ref := rocmRequired(t), Default()
 	kv := b.NewKV(KVConfig{NumLayers: 1, NumKVHeads: 1, HeadDim: 4, RopeTheta: 10000})

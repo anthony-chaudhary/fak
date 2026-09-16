@@ -845,8 +845,9 @@ docs/dispatch-status.md
 # without LOCALAPPDATA in its environment falls back to the working directory, so a
 # background script launched from the clone root drops the cache here instead of under
 # AppData. Machine-generated, never source, and it reads as a no-lane path in the
-# `fak sync push` dirty-worktree report until it is ignored.
-/Microsoft/
+# `fak sync push` dirty-worktree report until it is ignored. Unanchored so it also
+# matches a nested cache (e.g. `cmd/fak/Microsoft/...`) when the cwd is a subdirectory.
+Microsoft/
 /.overlay4515
 
 # --- root DOT namespace (denylist -> allowlist inversion) -------------------------
@@ -923,3 +924,14 @@ docs/dispatch-status.md
 /fak-orchestration-runs
 /fak-orchestration-launches
 /tools/bus/instances
+
+# Root-local dev binary emitted by `go build ./cmd/fak-dev` when run from the repo
+# root. It is a 27 MB arm64 Mach-O artifact, never source; leaving it untracked and
+# unignored reddens `git status` for every agent and defers the sync fast-path
+# (observed 2026-09-14: fak-dev was the only entry in an otherwise clean tree).
+/fak-dev
+
+# Per-worktree detached-worker PROMPT SLOT (cmd/fak-flow/spawn.go, platform/worktree/adopt.go).
+# Generated per spawn as the worker's stdin -- NEVER tracked. Accidentally committed in
+# b782efab3 and thrashed since (#13101 restores, 13038 park); root-anchored.
+/SESSION_PROMPT.txt

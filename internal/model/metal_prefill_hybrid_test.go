@@ -23,6 +23,7 @@ package model
 // logit cosine / argmax — or the per-full-attention-layer KV cosine — below.
 
 import (
+	"math"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
@@ -115,4 +116,197 @@ func assertPrefillQwen35HybridMetalMatchesCPU(t *testing.T) *Model {
 		}
 	}
 	return m
+}
+
+// TestMetalQwen35P1PublishesTargetHidden is the on-device witness that the raw
+// pre-final-norm residual hidden by BOTH whole-sequence Metal graphs — the P32
+// Qwen35MetalForwardSequence prefill and the P1 Qwen35MetalDecodeToken decode —
+// is read back and published through Session.TargetHiddenAt. The raw residual x
+// is the LAST terminal graph result when capture is armed; the normalized hidden
+// (LastRMSNorm(x)) stays at outputs[0]. Capture must be observation-only: the
+// capture-on P32/P1 logits, encoder counts, and command-buffer shape must be
+// bit-identical to a control session, with the sole delta the extra raw-residual
+// readback bytes (P32: 32*H*4, P1: H*4). Proven by TestMetalQwen35P1PublishesTargetHidden.
+func TestMetalQwen35P1PublishesTargetHidden(t *testing.T) {
+	if !metalgemm.Available() || metalgemm.DeviceName() == "" {
+		t.Fatal("raw target-hidden publication requires a physical Metal device")
+	}
+	setQ4KSDOTForTest(false)
+	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+	cfg := qwen35HybridQ4KTestCfg()
+	// QKNorm is the whole-token P1 decode admission precondition (the P1 graph
+	// carries per-head Q/K RMSNorm); without it Qwen35MetalDecodeToken declines
+	// fail-open and the P1 raw-hidden readback is never encoded.
+	cfg.QKNorm = true
+	m := NewSynthetic(cfg)
+	m.Quantize()
+	fillQ4KMajority(t, m, cfg)
+	H := cfg.HiddenSize
+	prompt := make([]int, 32)
+	for i := range prompt {
+		prompt[i] = (i*19 + 7) % cfg.VocabSize
+	}
+
+	// The first resident GDN preprojected decode in a process advances global
+	// Metal GDN state (the one-time state promotion); a primer session absorbs
+	// that transition so the two measured arms observe identical device state
+	// and their logits are comparable bit-for-bit.
+	primer := m.NewSession()
+	primer.Q4K, primer.MetalQ4K = true, true
+	if err := primer.EnableQwen35MetalGDNPreprojectedSequence(); err != nil {
+		primer.Close()
+		t.Fatalf("primer EnableQwen35MetalGDNPreprojectedSequence: %v", err)
+	}
+	primer.Prefill(prompt)
+	if executed, err := primer.FinalizeQwen35MetalGDNPreprojectedSequence(); err != nil || !executed {
+		primer.Close()
+		t.Fatalf("primer finalize = executed %v err %v", executed, err)
+	}
+	primer.Step(7)
+
+	control := m.NewSession()
+	control.Q4K, control.MetalQ4K = true, true
+	if err := control.EnableQwen35MetalGDNPreprojectedSequence(); err != nil {
+		control.Close()
+		t.Fatalf("control EnableQwen35MetalGDNPreprojectedSequence: %v", err)
+	}
+	// The forward logits slice is call-owned device memory reused by the next
+	// forward on the same session, so snapshot it before the session advances.
+	wantP32 := append([]float32(nil), control.Prefill(prompt)...)
+	wantP32Receipt := control.Qwen35MetalForwardSequenceReceipt()
+	if executed, err := control.FinalizeQwen35MetalGDNPreprojectedSequence(); err != nil || !executed {
+		control.Close()
+		t.Fatalf("control finalize = executed %v err %v", executed, err)
+	}
+	wantP1 := append([]float32(nil), control.Step(7)...)
+	wantP1Receipt := control.Qwen35MetalForwardSequenceReceipt()
+	if len(control.targetHidden) != 0 || len(control.targetHiddenTokens) != 0 {
+		control.Close()
+		t.Fatalf("control captured %d hidden rows, want 0", len(control.targetHidden))
+	}
+
+	captured := m.NewSession()
+	captured.Q4K, captured.MetalQ4K = true, true
+	captured.captureTargetHidden = true
+	if err := captured.EnableQwen35MetalGDNPreprojectedSequence(); err != nil {
+		captured.Close()
+		t.Fatalf("captured EnableQwen35MetalGDNPreprojectedSequence: %v", err)
+	}
+	gotP32 := append([]float32(nil), captured.Prefill(prompt)...)
+	gotP32Receipt := captured.Qwen35MetalForwardSequenceReceipt()
+	assertFloat32BitsEqual(t, "capture-on P32 logits", wantP32, gotP32)
+	if gotP32Receipt.Tokens != 32 || !gotP32Receipt.Available || !gotP32Receipt.Committed || !gotP32Receipt.CompletedWait ||
+		gotP32Receipt.CommandBuffers != 1 || gotP32Receipt.TerminalWaits != 1 || gotP32Receipt.TerminalReadbacks != 1 ||
+		gotP32Receipt.IntermediateWaits != 0 || gotP32Receipt.IntermediateReadbacks != 0 {
+		captured.Close()
+		t.Fatalf("captured P32 receipt=%+v", gotP32Receipt)
+	}
+	if gotP32Receipt.HostReadbackBytes != wantP32Receipt.HostReadbackBytes+uint64(32*H*4) {
+		captured.Close()
+		t.Fatalf("captured P32 readback=%d, want plain %d + %d", gotP32Receipt.HostReadbackBytes, wantP32Receipt.HostReadbackBytes, 32*H*4)
+	}
+	if gotP32Receipt.Encoders != wantP32Receipt.Encoders {
+		captured.Close()
+		t.Fatalf("captured P32 encoders=%d, want %d", gotP32Receipt.Encoders, wantP32Receipt.Encoders)
+	}
+	if len(captured.targetHidden) != 32 || len(captured.targetHiddenTokens) != 32 {
+		captured.Close()
+		t.Fatalf("captured P32 rows=%d tokens=%d, want 32/32", len(captured.targetHidden), len(captured.targetHiddenTokens))
+	}
+	for pos := 0; pos < 32; pos++ {
+		if captured.targetHiddenTokens[pos] != (pos*19+7)%cfg.VocabSize {
+			captured.Close()
+			t.Fatalf("P32 target token[%d]=%d, want %d", pos, captured.targetHiddenTokens[pos], (pos*19+7)%cfg.VocabSize)
+		}
+		if len(captured.targetHidden[pos]) != H {
+			captured.Close()
+			t.Fatalf("P32 target hidden[%d] len=%d, want %d", pos, len(captured.targetHidden[pos]), H)
+		}
+		for _, value := range captured.targetHidden[pos] {
+			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+				captured.Close()
+				t.Fatalf("P32 target hidden[%d] has non-finite value", pos)
+			}
+		}
+	}
+
+	if executed, err := captured.FinalizeQwen35MetalGDNPreprojectedSequence(); err != nil || !executed {
+		captured.Close()
+		t.Fatalf("captured finalize = executed %v err %v", executed, err)
+	}
+	gotP1 := append([]float32(nil), captured.Step(7)...)
+	gotP1Receipt := captured.Qwen35MetalForwardSequenceReceipt()
+	assertFloat32BitsEqual(t, "capture-on P1 logits", wantP1, gotP1)
+	if gotP1Receipt.HostReadbackBytes != wantP1Receipt.HostReadbackBytes+uint64(H*4) {
+		captured.Close()
+		t.Fatalf("captured P1 readback=%d, want plain %d + %d", gotP1Receipt.HostReadbackBytes, wantP1Receipt.HostReadbackBytes, H*4)
+	}
+	if gotP1Receipt.Encoders != wantP1Receipt.Encoders {
+		captured.Close()
+		t.Fatalf("captured P1 encoders=%d, want %d", gotP1Receipt.Encoders, wantP1Receipt.Encoders)
+	}
+	if captured.Cache.Len() != 33 || len(captured.targetHidden) != 33 || len(captured.targetHiddenTokens) != 33 {
+		captured.Close()
+		t.Fatalf("captured cache=%d rows=%d tokens=%d, want 33/33/33", captured.Cache.Len(), len(captured.targetHidden), len(captured.targetHiddenTokens))
+	}
+	if captured.targetHiddenTokens[32] != 7 {
+		captured.Close()
+		t.Fatalf("captured token[32]=%d, want 7", captured.targetHiddenTokens[32])
+	}
+
+	raw, err := captured.TargetHiddenAt(32)
+	if err != nil {
+		captured.Close()
+		t.Fatalf("TargetHiddenAt(32): %v", err)
+	}
+	if len(raw) != H {
+		captured.Close()
+		t.Fatalf("TargetHiddenAt(32) len=%d, want %d", len(raw), H)
+	}
+	// The published vector is the PRE-final-norm residual, not the normalized
+	// hidden the LM head consumed: running the resident head over it must not
+	// reproduce the P1 logits bit-for-bit (those came from headResident(norm)).
+	if assertFloat32BitsEqualOptional(wantP1, captured.headResident(raw)) {
+		captured.Close()
+		t.Fatal("TargetHiddenAt(32) reproduced the P1 logits through the head, so it is the normalized hidden, not the raw residual")
+	}
+
+	echo, err := captured.TargetHiddenAt(32)
+	if err != nil {
+		captured.Close()
+		t.Fatalf("second TargetHiddenAt(32): %v", err)
+	}
+	assertFloat32BitsEqual(t, "TargetHiddenAt defensive copy", raw, echo)
+	echo[0] = echo[0] + 1
+	again, err := captured.TargetHiddenAt(32)
+	if err != nil {
+		captured.Close()
+		t.Fatalf("third TargetHiddenAt(32): %v", err)
+	}
+	if again[0] == echo[0] {
+		captured.Close()
+		t.Fatalf("TargetHiddenAt returned a mutable reference: again[0]=%g echo[0]=%g", again[0], echo[0])
+	}
+	if cloneTargetHidden(captured.targetHidden)[32][0] != raw[0] {
+		captured.Close()
+		t.Fatal("caller mutation leaked into the stored target hidden")
+	}
+	control.Close()
+	captured.Close()
+	primer.Close()
+}
+
+// assertFloat32BitsEqualOptional reports whether two float32 slices are
+// bit-identical WITHOUT failing the test; it is the inverse probe the
+// raw-hidden witness needs (identity must NOT hold).
+func assertFloat32BitsEqualOptional(want, got []float32) bool {
+	if len(want) != len(got) {
+		return false
+	}
+	for i := range want {
+		if math.Float32bits(want[i]) != math.Float32bits(got[i]) {
+			return false
+		}
+	}
+	return true
 }

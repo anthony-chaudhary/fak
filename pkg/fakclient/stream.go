@@ -208,6 +208,25 @@ func consumeChatStream(resp *http.Response, onDelta func(frag string)) (*ChatRes
 				Message:    fmt.Sprintf("undecodable SSE payload: %v", err),
 			}
 		}
+		// An in-band error frame is a mid-stream upstream failure the server
+		// signals over the open SSE channel instead of a status code: both
+		// gateway stream paths can emit it followed by data: [DONE]. Fail
+		// closed with the server's message so a 0-token failed turn can never
+		// be read as a completed answer (issue #12776).
+		if chunk.Error != nil && chunk.Error.Message != "" {
+			apiErr := &APIError{
+				StatusCode: resp.StatusCode,
+				Type:       chunk.Error.Type,
+				Message:    chunk.Error.Message,
+			}
+			if chunk.Error.Code != nil {
+				apiErr.Code = *chunk.Error.Code
+			}
+			if chunk.Error.Param != nil {
+				apiErr.Param = *chunk.Error.Param
+			}
+			return nil, apiErr
+		}
 		if len(chunk.Choices) > 0 {
 			delta := chunk.Choices[0].Delta
 			// A role-first opening chunk (role set, no content) is an
@@ -304,4 +323,19 @@ type chatStreamChunk struct {
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *StreamUsage `json:"usage"`
+	// Error carries the in-band error object both gateway stream paths can
+	// emit mid-stream (followed by data: [DONE]). Its presence is a failure
+	// signal, never a completion; the consumer fails closed on it (#12776).
+	Error *streamError `json:"error"`
+}
+
+// streamError mirrors the gateway ErrorResponse error object carried in an
+// in-band SSE error frame: {"error":{"message":...,"type":...,"code":...,
+// "param":...}}. Pointer fields preserve "absent" vs "null" so the consumer
+// can distinguish a real error object from an empty JSON object.
+type streamError struct {
+	Message string  `json:"message"`
+	Type    string  `json:"type"`
+	Code    *string `json:"code"`
+	Param   *string `json:"param"`
 }

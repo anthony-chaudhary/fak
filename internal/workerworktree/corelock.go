@@ -84,6 +84,21 @@ type landConfig struct {
 	tracker         *landProgressTracker
 	queue           *LandingQueue
 	LeasedGlobs     []string
+	// trunkRef names the branch the stale-base ancestor check tests against. It
+	// defaults to "main" when unset so a main-based land is judged against the
+	// trunk even while the shared-root checkout HEAD sits on a peer ticket branch.
+	trunkRef string
+}
+
+// LandTrunkRefDefault is the trunk branch the stale-base ancestor check falls back
+// to when no explicit ref is supplied and no local trunk resolves.
+const LandTrunkRefDefault = "main"
+
+// WithLandTrunkRef names the trunk ref the stale-base ancestor check tests the
+// pinned base against, instead of the shared-root checkout's HEAD (which may be on
+// a peer ticket branch). An empty ref keeps the default.
+func WithLandTrunkRef(ref string) LandOption {
+	return func(c *landConfig) { c.trunkRef = strings.TrimSpace(ref) }
 }
 
 // WithLeasedGlobs configures the leased path globs for pathspec disjointness fencing.

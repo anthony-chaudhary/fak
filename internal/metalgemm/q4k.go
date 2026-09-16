@@ -54,6 +54,7 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -149,11 +150,89 @@ const (
 
 var q4kUseMM atomic.Bool
 
+// q4kUseM5 opts the panel regime (P>=64) into the wide-tile cooperative-SMEM candidate. It is
+// default OFF and only ever set through SetGEMMUseM5, which requires the pinned device/version
+// crossover to be present; until a sanctioned [HW-WITNESSED] ratio clears the >=1.10x gate the
+// production selector never requests mode 2 (fak#9937 deliberately shipped it explicit-only).
+var q4kUseM5 atomic.Bool
+
+// q4kM5Crossover is the device/version-pinned routing table for the wide-tile cooperative-SMEM
+// candidate (fak#9943/this leaf). A row admits mode 2 for one Apple GPU family + macOS major
+// version only after a physical on-silicon measurement showed the candidate/scalar ratio cleared
+// the fak#9937 >=1.10x margin; MinRatio records that measured margin and the source witness path.
+//
+// Exactly one row is pinned: the physical Apple M3 Pro / macOS 26 receipt captured on the
+// on-silicon M3 Pro box (date 2026-09-15, commit 97cae3629,
+// TestQ4KCrossoverReceiptCandidateVsScalar), where the median candidate/scalar on-GPU ratio
+// measured 1.31-1.83x at P=64 and 1.44-1.56x at P=128 across repeated runs — every sample
+// clearing the fak#9937 >=1.10x margin. The selector therefore routes P>=64 panel GEMMs to
+// mode 2 on that device/OS alone; every other device (including other Apple families and
+// macOS majors) stays fail-closed scalar because no row matches it.
+//
+// MinRatio is pinned at the fak#9937 gate (1.10x), NOT at a volatile single-run median: it is
+// the floor the row must clear, and the receipt witness asserts that floor <= the measured
+// medians, so a candidate-kernel regression that drops below the gate fails the witness instead
+// of silently keeping the row. Witness names the receipt-emitting test that justified the row.
+type q4kM5CrossoverRow struct {
+	Family    string  // Metal device name prefix the row is pinned to (e.g. "Apple M3")
+	OSVersion string  // leading macOS major version the row is pinned to (e.g. "26")
+	MinRatio  float64 // measured candidate/scalar ratio this row is gated at (must be >= 1.10)
+	Witness   string  // path/commit of the sanctioned on-silicon receipt that justified the row
+}
+
+var q4kM5CrossoverTable = []q4kM5CrossoverRow{
+	{Family: "Apple M3 Pro", OSVersion: "26", MinRatio: q4kM5CrossoverMargin,
+		Witness: "internal/metalgemm/q4k_m5_crossover_receipt_test.go TestQ4KCrossoverReceiptCandidateVsScalar @97cae3629"},
+}
+
+// q4kM5CrossoverAt reports whether the device/version-pinned table admits mode 2, i.e. at least one
+// row both matches this device+OS and clears the fak#9937 >=1.10x routing margin. It is a pure
+// function of the table + device identity so it can be asserted without a GPU.
+func q4kM5CrossoverAt(deviceName, osVersion string) bool {
+	for _, row := range q4kM5CrossoverTable {
+		if row.MinRatio < q4kM5CrossoverMargin {
+			continue
+		}
+		if !strings.HasPrefix(deviceName, row.Family) {
+			continue
+		}
+		if row.OSVersion != "" && !strings.HasPrefix(osVersion, row.OSVersion) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// q4kM5CrossoverMargin is the fak#9937 device-pinned routing gate: the candidate is encoded only
+// where a physical measurement shows it is at least 10% faster than the scalar kernel.
+const q4kM5CrossoverMargin = 1.10
+
 func q4kGEMMModeForPrompt(P int) Q4KGEMMMode {
+	// Exact-P32 keeps its shape-bounded MM32 candidate under FAK_Q4K_MM.
 	if P == 32 && q4kUseMM.Load() {
 		return Q4KGEMMModeMM32
 	}
+	// The widened-panel regime (P>=64, fak#13041) is the wide-tile candidate's envelope. It is
+	// only requested when the operator opt-in is on AND the pinned crossover admits this
+	// device/version; otherwise the scalar kernel remains the executed identity (fail-closed).
+	if P >= 64 && q4kUseM5.Load() && q4kM5CrossoverAdmits() {
+		return Q4KGEMMModeM5CooperativeSMEM
+	}
 	return Q4KGEMMModeScalar
+}
+
+// q4kM5CrossoverAdmits evaluates the pinned crossover against the live device. It is fail-closed:
+// with no usable device identity, or an empty table, it returns false and mode 2 is never encoded.
+func q4kM5CrossoverAdmits() bool {
+	if !Available() {
+		return false
+	}
+	name := DeviceName()
+	if name == "" {
+		return false
+	}
+	return q4kM5CrossoverAt(name, OSVersion())
 }
 
 func q4kGEMMRequestedExecution(P int, mode Q4KGEMMMode) Q4KGEMMExecution {
@@ -186,6 +265,14 @@ func Q4KGEMMIdentityForMode(P int, mode Q4KGEMMMode, executed Q4KGEMMExecution) 
 func Q4KGEMMRequestedExecution(P int) Q4KGEMMExecution {
 	return q4kGEMMRequestedExecution(P, q4kGEMMModeForPrompt(P))
 }
+
+// Q4KGEMMModeForPrompt returns the production candidate for a prompt of P tokens under the current
+// process opt-ins AND the live device/version-pinned crossover. It is the exported selector the
+// model-side graph encode uses: scalar by default, exact-P32 MM32 under FAK_Q4K_MM, and the
+// wide-tile cooperative-SMEM candidate only for P>=64 when FAK_Q4K_M5 is on and the pinned
+// crossover admits this device/OS. It creates no Metal work and mutates no state; callers pass
+// the result to ProjectionGraph.SetQ4KGEMMMode, which is itself fail-closed.
+func Q4KGEMMModeForPrompt(P int) Q4KGEMMMode { return q4kGEMMModeForPrompt(P) }
 
 // Q4KWeight is a handle to a raw q4_k weight matrix [Out, In] resident on the GPU. In must be
 // a multiple of 256 (the q4_k super-block size); the resident byte cost is Out*(In/256)*144.
@@ -1107,6 +1194,43 @@ func (w *Q4KWeight) NoCopy() bool { return w != nil && w.noCopy }
 func SetGEMMUseMM(on bool) {
 	q4kUseMM.Store(on)
 }
+
+// SetGEMMUseM5 selects the widened-panel regime (P>=64) wide-tile cooperative-SMEM candidate
+// (fak#13041 panel shapes). It is the compute-side twin of SetGEMMUseMM, but unlike MM32 it is
+// ALSO gated at encode time by the device/version-pinned crossover table: q4kGEMMModeForPrompt
+// requests mode 2 only for a P>=64 shape whose live device/OS clears the fak#9937 >=1.10x routing
+// margin. With no pinned row for the live device the opt-in stays inert and the scalar kernel is
+// the executed identity, so flipping the opt-in on cannot promote an unreceipted device. The model
+// layer now defaults this process-local opt-in ON (FAK_Q4K_M5=0 forces it off) once the sanctioned
+// on-silicon M3 Pro receipt pinned a row (fak#13124); the crossover gate remains the real safety.
+func SetGEMMUseM5(on bool) {
+	q4kUseM5.Store(on)
+}
+
+// GEMMUseM5 reports whether the wide-tile opt-in is on. It does not consult the crossover table.
+func GEMMUseM5() bool { return q4kUseM5.Load() }
+
+// Q4KM5CrossoverAdmits reports whether the pinned crossover admits the wide-tile candidate on the
+// live device/OS. It is the exported, side-effect-free view of the encode-time gate: false (the
+// default, and the only value until a sanctioned on-silicon receipt pins a row) means mode 2 is
+// never requested even under the SetGEMMUseM5 opt-in.
+func Q4KM5CrossoverAdmits() bool { return q4kM5CrossoverAdmits() }
+
+// Q4KM5CrossoverRowCount returns the number of pinned rows currently in the routing table. It is
+// 1 once the sanctioned M3 Pro on-silicon receipt has pinned a row, and 0 before (or if the
+// measured margin falls back below the gate).
+func Q4KM5CrossoverRowCount() int { return len(q4kM5CrossoverTable) }
+
+// Q4KM5CrossoverPredicate evaluates the device/version pin against an explicit identity without
+// touching the live device, so the gate can be asserted on any host. It returns whether the pinned
+// table admits mode 2 for deviceName/osVersion.
+func Q4KM5CrossoverPredicate(deviceName, osVersion string) bool {
+	return q4kM5CrossoverAt(deviceName, osVersion)
+}
+
+// Q4KM5CrossoverMinimumRatio is the fak#9937 routing gate (>=1.10x) that every pinned row must
+// clear. Exposed so the witness can assert the gate value rather than a magic literal.
+const Q4KM5CrossoverMinimumRatio = q4kM5CrossoverMargin
 
 // ResetQ4K releases every resident q4_k weight buffer and the reused scratch (the q4_k twin of
 // Reset). Call only when no Q4KWeight handle is still in use — every prior handle is invalidated.

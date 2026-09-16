@@ -488,6 +488,33 @@ func deepseek41HasEngramTable(f *File) bool {
 	return false
 }
 
+// deepseek41EngramTableTensor reports whether a GGUF tensor name is a per-layer
+// PACKED Engram table (blk.<L>.engram_embd.weight, and the legacy
+// engram_table / engram_key / engram_value spellings). The packed table is NOT a
+// matmul weight: the native V4.1 forward reads it row-wise through the bounded
+// model.V41EngramRowSource seam (V41EngramQ2KOpen / V41EngramGGUFOpen), never as
+// an f32 matrix. The materializing quant loaders must therefore NOT
+// eager-dequantize it - on the published vcruz Q2_K checkpoint one table is
+// [256, ~384M rows] = ~98.3B elements, i.e. a 366.2 GiB f32 span that OOMs the
+// Go runtime (fak#13152). The projection-side Engram tensors
+// (engram_wkv/engram_q/engram_k and their forward spellings) are deliberately
+// EXCLUDED: those ARE consumed as f32 weights by the forward and must load.
+func deepseek41EngramTableTensor(name string) bool {
+	_, _, suffix, ok := splitDeepSeek41BlkTensor(name)
+	if !ok {
+		return false
+	}
+	leaf, isEngram := deepseek41EngramSuffixName(suffix)
+	if !isEngram {
+		return false
+	}
+	switch leaf {
+	case "engram_table", "engram_embd":
+		return true
+	}
+	return false
+}
+
 // splitDeepSeek41BlkTensor splits "blk.<layer>.<suffix>" into its layer index and
 // suffix. It is the deepseek41 front half of the name classifiers; ok=false for
 // a non-blk or non-integer-layer name.
@@ -534,34 +561,47 @@ func uint64ArrayOrNil(f *File, key string) []uint64 {
 // split), so attn_kv maps straight to self_attn.kv_a_proj_with_mqa.weight and
 // deepseek41 is deliberately kept OUT of archUsesMLAMoELayout ? the glm KV-b
 // 2->1 merge (glmMoeDsaSplitKVB) must never run for a V4 file.
+//
+// V4.1 emits attn_kv_a_norm, not glm's attn_kv_norm. Both spellings resolve to
+// self_attn.kv_a_layernorm.weight. The compressor, indexer, and sink suffixes
+// also resolve here, which clears only the LOADER's name gate; the reduced
+// forward still fails an in-range layer closed at its own admission seam.
 func deepseek41CanonicalSuffix(suffix string) (string, bool) {
 	if name, ok := deepseek41EngramSuffixName(suffix); ok {
 		return deepseek41EngramPrefix + deepseek41EngramLayerPlaceholder + "." + name + ".weight", true
 	}
 	mapped, ok := map[string]string{
-		"attn_q_a.weight":         "self_attn.q_a_proj.weight",
-		"attn_q_a_norm.weight":    "self_attn.q_a_layernorm.weight",
-		"attn_q_b.weight":         "self_attn.q_b_proj.weight",
-		"attn_kv.weight":          "self_attn.kv_a_proj_with_mqa.weight",
-		"attn_kv_norm.weight":     "self_attn.kv_a_layernorm.weight",
-		"attn_output_a.weight":    "self_attn.o_proj_a.weight",
-		"attn_output_b.weight":    "self_attn.o_proj_b.weight",
-		"indexer.attn_q_b.weight": "self_attn.indexer.wq_b.weight",
-		"indexer.proj.weight":     "self_attn.indexer.weights_proj.weight",
-		"exp_probs_b.bias":        "mlp.gate.e_score_correction_bias",
-		"ffn_gate_shexp.weight":   "mlp.shared_experts.gate_proj.weight",
-		"ffn_up_shexp.weight":     "mlp.shared_experts.up_proj.weight",
-		"ffn_down_shexp.weight":   "mlp.shared_experts.down_proj.weight",
+		"attn_q_a.weight":             "self_attn.q_a_proj.weight",
+		"attn_q_a_norm.weight":        "self_attn.q_a_layernorm.weight",
+		"attn_q_b.weight":             "self_attn.q_b_proj.weight",
+		"attn_kv.weight":              "self_attn.kv_a_proj_with_mqa.weight",
+		"attn_kv_norm.weight":         "self_attn.kv_a_layernorm.weight",
+		"attn_kv_a_norm.weight":       "self_attn.kv_a_layernorm.weight",
+		"attn_output_a.weight":        "self_attn.o_proj_a.weight",
+		"attn_output_b.weight":        "self_attn.o_proj_b.weight",
+		"indexer.attn_q_b.weight":     "self_attn.indexer.wq_b.weight",
+		"indexer.attn_k.weight":       "self_attn.indexer.wk.weight",
+		"indexer.k_norm.weight":       "self_attn.indexer.k_norm.weight",
+		"indexer.proj.weight":         "self_attn.indexer.weights_proj.weight",
+		"attn_compressor_gate.weight": "self_attn.compressor.wgate.weight",
+		"attn_compressor_kv.weight":   "self_attn.compressor.wkv.weight",
+		"attn_compressor_norm.weight": "self_attn.compressor.norm.weight",
+		"attn_sinks.weight":           "attn.attn_sink",
+		"exp_probs_b.bias":            "mlp.gate.e_score_correction_bias",
+		"exp_probs_b_vl.bias":         "mlp.gate.e_score_correction_bias_vl",
+		"ffn_gate_shexp.weight":       "mlp.shared_experts.gate_proj.weight",
+		"ffn_up_shexp.weight":         "mlp.shared_experts.up_proj.weight",
+		"ffn_down_shexp.weight":       "mlp.shared_experts.down_proj.weight",
 		// Hyper-connection taps (GUESSED canonical names ? model.Config carries only
 		// the HCMult/iters/eps scalars, and the native V4.1 forward is unimplemented;
 		// these map into a dedicated per-layer hc. namespace so a real file's
 		// hc_attn_*/hc_ffn_* tensors do not hard-fail the shard load).
-		"hc_attn_fn":    "hc.attn_fn",
-		"hc_attn_base":  "hc.attn_base",
-		"hc_attn_scale": "hc.attn_scale",
-		"hc_ffn_fn":     "hc.ffn_fn",
-		"hc_ffn_base":   "hc.ffn_base",
-		"hc_ffn_scale":  "hc.ffn_scale",
+		"hc_attn_fn.weight":    "hc.attn_fn.weight",
+		"hc_attn_base.weight":  "hc.attn_base.weight",
+		"hc_attn_scale.weight": "hc.attn_scale.weight",
+		"hc_ffn_fn.weight":     "hc.ffn_fn.weight",
+		"hc_ffn_base.weight":   "hc.ffn_base.weight",
+		"hc_ffn_scale.weight":  "hc.ffn_scale.weight",
 	}[suffix]
 	return mapped, ok
 }
@@ -579,12 +619,37 @@ func deepseek41CanonicalSuffix(suffix string) (string, bool) {
 // A trailing ".weight" is accepted and stripped uniformly so both dialect forms
 // resolve to the same canonical leaf, and neither falls through to a generic
 // attention/MLP canonical name.
+//
+// Projection-side seam. The reference Engram module carries a projection
+// `self.wkv` (reference inference/model.py) and two per-HC norms `q_weight` /
+// `k_weight`. The reduced native forward consumes those same tensors under ITS
+// canonical spellings, which are the loader's contract target:
+//
+//	Engram wkv projection  -> engram_kv.weight
+//	Engram q norm          -> engram_q_norm.weight
+//	Engram k norm          -> engram_k_norm.weight
+//
+// The loader therefore NORMALIZES both the converter spelling (engram_wkv /
+// engram_q / engram_k) and the forward spelling (engram_kv / engram_q_norm /
+// engram_k_norm) onto that one forward-consumed leaf, so a shard load produces
+// exactly the name internal/model/v41_forward.go:295 and
+// v41_forward_engram.go:212 look up. Without this the forward's v41AdmitShape
+// lookup cannot find the projection and a declared Engram layer refuses on a
+// naming mismatch rather than a genuine unsupported-model refusal.
 func deepseek41EngramSuffixName(suffix string) (string, bool) {
 	leaf := strings.TrimSuffix(suffix, ".weight")
 	switch leaf {
 	case "engram_table", "engram_key", "engram_value",
-		"engram_embd", "engram_k", "engram_q", "engram_wkv":
+		"engram_embd":
 		return leaf, true
+	// Projection-side tensors: both dialect and forward spellings converge on the
+	// single forward-consumed canonical leaf.
+	case "engram_wkv", "engram_kv":
+		return "engram_kv", true
+	case "engram_q", "engram_q_norm":
+		return "engram_q_norm", true
+	case "engram_k", "engram_k_norm":
+		return "engram_k_norm", true
 	}
 	return "", false
 }

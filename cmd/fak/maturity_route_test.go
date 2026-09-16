@@ -175,8 +175,12 @@ func TestMaturityAnatomyRouteEmitsStaticStructure(t *testing.T) {
 }
 
 func TestMaturityAnatomyAllRouteEmitsRelativePortfolio(t *testing.T) {
+	// Scan a small fixture workspace, not the whole repo: --all walks every
+	// package, and on a starved CI runner the real tree pushes cmd/fak past the
+	// 10m go-test package timeout. The fixture still exercises the portfolio fold.
+	root := writeMaturityRouteWorkspace(t)
 	var stdout, stderr bytes.Buffer
-	code := runMaturity(&stdout, &stderr, []string{"anatomy", "--workspace", repoRoot(), "--all", "--limit", "2"})
+	code := runMaturity(&stdout, &stderr, []string{"anatomy", "--workspace", root, "--all", "--limit", "2"})
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}

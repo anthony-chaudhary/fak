@@ -263,3 +263,56 @@ func TestOpenWeightsRejectsDuplicateTensorAcrossShards(t *testing.T) {
 		t.Fatal("OpenWeights accepted duplicate tensor across shards")
 	}
 }
+
+// TestOpenWeightsRejectsShardCountDisagreement guards the split.count integrity
+// check: a shard whose declared split.count disagrees with the config shard (or
+// with the -of-M total encoded in the filename) must fail closed rather than be
+// silently merged into the model. A V4.1 file ships as a 7-shard Q2_K set, so an
+// inconsistent shard set must not assemble into a "whole model".
+func TestOpenWeightsRejectsShardCountDisagreement(t *testing.T) {
+	t.Run("later shard declares a different split.count", func(t *testing.T) {
+		dir := t.TempDir()
+		shard1 := writeDeepSeek41SplitShard(t, 1, 2, 2, true, []splitTensor{
+			{name: "blk.0.attn_norm.weight", dims: []uint64{4}, typ: TensorF32, data: f32Payload(1, 2, 3, 4)},
+		})
+		// shard 2 lies: it says the set has 3 shards, not 2.
+		shard2 := writeDeepSeek41SplitShard(t, 2, 3, 2, false, []splitTensor{
+			{name: "blk.0.ffn_gate.weight", dims: []uint64{4}, typ: TensorF32, data: f32Payload(5, 6, 7, 8)},
+		})
+		p1 := filepath.Join(dir, "ds41-00001-of-00002.gguf")
+		p2 := filepath.Join(dir, "ds41-00002-of-00002.gguf")
+		if err := os.WriteFile(p1, shard1, 0o644); err != nil {
+			t.Fatalf("write shard 1: %v", err)
+		}
+		if err := os.WriteFile(p2, shard2, 0o644); err != nil {
+			t.Fatalf("write shard 2: %v", err)
+		}
+		if ws, err := OpenWeights(p1); err == nil {
+			_ = ws.Close()
+			t.Fatal("OpenWeights accepted a later shard declaring a conflicting split.count")
+		}
+	})
+
+	t.Run("config shard declares a different split.count than the filename", func(t *testing.T) {
+		dir := t.TempDir()
+		// Filename encodes -of-00003, but the config shard declares split.count=2.
+		shard1 := writeDeepSeek41SplitShard(t, 1, 2, 2, true, []splitTensor{
+			{name: "blk.0.attn_norm.weight", dims: []uint64{4}, typ: TensorF32, data: f32Payload(1, 2, 3, 4)},
+		})
+		shard2 := writeDeepSeek41SplitShard(t, 2, 2, 2, false, []splitTensor{
+			{name: "blk.0.ffn_gate.weight", dims: []uint64{4}, typ: TensorF32, data: f32Payload(5, 6, 7, 8)},
+		})
+		p1 := filepath.Join(dir, "ds41-00001-of-00003.gguf")
+		p2 := filepath.Join(dir, "ds41-00002-of-00003.gguf")
+		if err := os.WriteFile(p1, shard1, 0o644); err != nil {
+			t.Fatalf("write shard 1: %v", err)
+		}
+		if err := os.WriteFile(p2, shard2, 0o644); err != nil {
+			t.Fatalf("write shard 2: %v", err)
+		}
+		if ws, err := OpenWeights(p1); err == nil {
+			_ = ws.Close()
+			t.Fatal("OpenWeights accepted a config shard whose split.count disagreed with the filename total")
+		}
+	})
+}

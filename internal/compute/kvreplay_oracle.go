@@ -2,9 +2,9 @@ package compute
 
 import (
 	"math"
-	"math/bits"
 
 	"github.com/anthony-chaudhary/fak/internal/mathx"
+	"github.com/anthony-chaudhary/fak/internal/replayoracle"
 )
 
 // KVReplayResult is the structured replay row #2675 needs for policy comparisons.
@@ -108,116 +108,19 @@ func ReplayKVCacheMulti(events []KVReplayEvent, budget int, policies ...KVEvictP
 }
 
 // BeladyKVReplayOracle computes the exact offline max-hit upper bound for a finite trace
-// when the trace has at most 63 distinct spans. The DP state is (event index, resident
-// bitset); on a miss it may keep any fitting subset of the current residents plus the
-// accessed span, which is the offline optimum. Larger traces fall back to a farthest-next-use
-// approximation and mark Exact=false.
+// when the trace has at most 63 distinct spans, and marks Exact=false when it falls back
+// to a farthest-next-use approximation. It is a thin shim over replayoracle.Belady; the
+// algorithm lives in the tier-1 oracle package so the model-side benches can share it.
 func BeladyKVReplayOracle(events []KVReplayEvent, budget int) KVReplayOracleResult {
-	filtered := validKVReplayEvents(events)
-	access := 0
-	for _, ev := range filtered {
-		access += ev.Tokens
-	}
-	if len(filtered) == 0 {
-		return KVReplayOracleResult{Exact: true}
-	}
-	if budget <= 0 {
-		hits := 0
-		seen := map[int]bool{}
-		for _, ev := range filtered {
-			if seen[ev.SpanID] {
-				hits += ev.Tokens
-			}
-			seen[ev.SpanID] = true
-		}
-		return KVReplayOracleResult{HitTokens: hits, AccessTokens: access, Exact: true}
-	}
-
-	spanIndex := map[int]int{}
-	var spanIDs []int
-	for _, ev := range filtered {
-		if _, ok := spanIndex[ev.SpanID]; !ok {
-			spanIndex[ev.SpanID] = len(spanIDs)
-			spanIDs = append(spanIDs, ev.SpanID)
-		}
-	}
-	if len(spanIDs) > 63 {
-		hits := beladyGreedyHits(filtered, budget)
-		return KVReplayOracleResult{HitTokens: hits, AccessTokens: access, Exact: false}
-	}
-
-	sizes := make([]int, len(spanIDs))
-	for _, ev := range filtered {
-		idx := spanIndex[ev.SpanID]
-		if sizes[idx] == 0 {
-			sizes[idx] = ev.Tokens
-		}
-	}
-	weights := make(map[uint64]int)
-	var maskWeight func(uint64) int
-	maskWeight = func(mask uint64) int {
-		if w, ok := weights[mask]; ok {
-			return w
-		}
-		total := 0
-		m := mask
-		for m != 0 {
-			bit := bits.TrailingZeros64(m)
-			total += sizes[bit]
-			m &^= 1 << uint(bit)
-		}
-		weights[mask] = total
-		return total
-	}
-
-	type key struct {
-		pos  int
-		mask uint64
-	}
-	memo := map[key]int{}
-	var best func(int, uint64) int
-	best = func(pos int, mask uint64) int {
-		if pos >= len(filtered) {
-			return 0
-		}
-		k := key{pos: pos, mask: mask}
-		if v, ok := memo[k]; ok {
-			return v
-		}
-		ev := filtered[pos]
-		idx := spanIndex[ev.SpanID]
-		bit := uint64(1) << uint(idx)
-		if mask&bit != 0 {
-			v := ev.Tokens + best(pos+1, mask)
-			memo[k] = v
-			return v
-		}
-
-		candidates := mask | bit
-		bestFuture := best(pos+1, mask&^bit) // do not keep the missed span.
-		for sub := candidates; ; sub = (sub - 1) & candidates {
-			if sub&bit != 0 && maskWeight(sub) <= budget {
-				if v := best(pos+1, sub); v > bestFuture {
-					bestFuture = v
-				}
-			}
-			if sub == 0 {
-				break
-			}
-		}
-		memo[k] = bestFuture
-		return bestFuture
-	}
-
-	return KVReplayOracleResult{HitTokens: best(0, 0), AccessTokens: access, Exact: true}
+	r := replayoracle.Belady(toReplayEvents(events), budget)
+	return KVReplayOracleResult{HitTokens: r.HitTokens, AccessTokens: r.AccessTokens, Exact: r.Exact}
 }
 
-func validKVReplayEvents(events []KVReplayEvent) []KVReplayEvent {
-	out := make([]KVReplayEvent, 0, len(events))
-	for _, ev := range events {
-		if ev.Tokens > 0 {
-			out = append(out, ev)
-		}
+// toReplayEvents projects compute's replay rows onto the shared oracle event type.
+func toReplayEvents(events []KVReplayEvent) []replayoracle.Event {
+	out := make([]replayoracle.Event, len(events))
+	for i, ev := range events {
+		out[i] = replayoracle.Event{SpanID: ev.SpanID, Tokens: ev.Tokens}
 	}
 	return out
 }
@@ -230,44 +133,4 @@ func evictionsPerHit(evictions, hitTokens int) float64 {
 		return math.Inf(1)
 	}
 	return float64(evictions) / float64(hitTokens)
-}
-
-func beladyGreedyHits(events []KVReplayEvent, budget int) int {
-	resident := map[int]int{}
-	residentTokens := 0
-	hits := 0
-	for i, ev := range events {
-		if _, ok := resident[ev.SpanID]; ok {
-			hits += ev.Tokens
-			continue
-		}
-		for budget > 0 && residentTokens+ev.Tokens > budget && len(resident) > 0 {
-			victim := farthestNextUse(events, i+1, resident)
-			residentTokens -= resident[victim]
-			delete(resident, victim)
-		}
-		if budget <= 0 || ev.Tokens <= budget {
-			resident[ev.SpanID] = ev.Tokens
-			residentTokens += ev.Tokens
-		}
-	}
-	return hits
-}
-
-func farthestNextUse(events []KVReplayEvent, start int, resident map[int]int) int {
-	victim := 0
-	bestDistance := -1
-	for id := range resident {
-		distance := len(events) + 1
-		for j := start; j < len(events); j++ {
-			if events[j].SpanID == id {
-				distance = j - start
-				break
-			}
-		}
-		if bestDistance < 0 || distance > bestDistance || (distance == bestDistance && id < victim) {
-			victim, bestDistance = id, distance
-		}
-	}
-	return victim
 }

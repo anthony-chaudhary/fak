@@ -32,6 +32,12 @@ import (
 
 const defaultServedCalls = 4
 
+// fakReadToolName is the canonical in-kernel read tool name. The adjudicator
+// transparently repairs the legacy "Read" spelling to this name, so the served
+// proof sends it directly to exercise the ALLOW + tier-2 cache path the kernel
+// actually serves (see internal/adjudicator/decide.go read_to_fak_read).
+const fakReadToolName = "fak_read"
+
 type servedReadCallProof struct {
 	Index          int    `json:"index"`
 	Surface        string `json:"surface"`
@@ -241,7 +247,7 @@ func buildServedReadProof(ctx context.Context, calls int) (servedReadProof, erro
 			row := servedReadCallProof{
 				Index:          idx + 1,
 				Surface:        surface,
-				Tool:           "Read",
+				Tool:           fakReadToolName,
 				Resource:       relPath,
 				ArgsHash:       argsHash,
 				HTTPStatus:     status,
@@ -307,7 +313,7 @@ func buildServedReadProof(ctx context.Context, calls int) (servedReadProof, erro
 		Schema:                "fak.tokendemo.served-read-cache.v1",
 		Surface:               "http+mcp",
 		Endpoints:             []string{"/v1/fak/syscall", "/mcp"},
-		Tool:                  "Read",
+		Tool:                  fakReadToolName,
 		Engine:                agent.FakReadEngineID,
 		CallsPerSurface:       calls,
 		Calls:                 totalCalls,
@@ -333,20 +339,20 @@ func buildServedReadProof(ctx context.Context, calls int) (servedReadProof, erro
 func configureServedReadWorld(root string) {
 	agent.RegisterReadEngine(root)
 	adjudicator.Default.SetPolicy(adjudicator.Policy{
-		Allow: map[string]bool{"Read": true},
+		Allow: map[string]bool{fakReadToolName: true},
 	})
 }
 
 func servedReadCall(ctx context.Context, client *http.Client, baseURL, surface string, args []byte, index int) (int, gateway.SyscallResponse, error) {
 	reqBody, _ := json.Marshal(gateway.SyscallRequest{
-		Tool:      "Read",
+		Tool:      fakReadToolName,
 		Arguments: json.RawMessage(args),
 		ReadOnly:  true,
 		TraceID:   "tokendemo-served-read",
 	})
 	if surface == "mcp" {
 		resp, err := servedMCPSyscall(ctx, client, baseURL, index, gateway.SyscallRequest{
-			Tool:      "Read",
+			Tool:      fakReadToolName,
 			Arguments: json.RawMessage(args),
 			ReadOnly:  true,
 			TraceID:   "tokendemo-served-read",
@@ -421,8 +427,8 @@ func servedReadMetricEvidence(text string) servedMetricEvidence {
 		"kernel_engine_calls":           "fak_kernel_engine_calls_total ",
 		"gateway_http_post_syscall_200": `fak_gateway_http_requests_total{route="/v1/fak/syscall",method="POST",status="200"} `,
 		"gateway_mcp_post_200":          `fak_gateway_http_requests_total{route="/mcp",method="POST",status="200"} `,
-		"gateway_syscall_allow_engine":  `fak_gateway_operations_total{operation="syscall",verdict="ALLOW",reason="",disposition="",by="monitor"} `,
-		"gateway_syscall_allow_vdso":    `fak_gateway_operations_total{operation="syscall",verdict="ALLOW",reason="",disposition="",by="vdso"} `,
+		"gateway_syscall_allow_engine":  `fak_gateway_operations_total{operation="syscall",verdict="ALLOW",reason="",refusal_subtype="",disposition="",by="monitor"} `,
+		"gateway_syscall_allow_vdso":    `fak_gateway_operations_total{operation="syscall",verdict="ALLOW",reason="",refusal_subtype="",disposition="",by="vdso"} `,
 		"gateway_vdso_hit_ratio":        "fak_gateway_vdso_hit_ratio ",
 	}
 	rows := make(map[string]string, len(prefixes))

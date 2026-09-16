@@ -311,14 +311,26 @@ func land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 		}
 	}
 	if checkBase != "" {
-		rc, _ := run(git, root, []string{"merge-base", "--is-ancestor", checkBase, "HEAD"})
+		trunkRef := cfg.trunkRef
+		if trunkRef == "" {
+			trunkRef = LandTrunkRefDefault
+		}
+		// The ancestor check tests the TRUNK ref, never the shared-root checkout
+		// HEAD: the root may sit on a peer ticket branch, so HEAD there is not the
+		// trunk a main-based land must descend from. When the trunk ref does not
+		// resolve (local-only/offline repo), fall back to HEAD — fail open.
+		target := "HEAD"
+		if rc, _ := run(git, root, []string{"rev-parse", "--verify", "--quiet", trunkRef + "^{commit}"}); rc == 0 {
+			target = trunkRef
+		}
+		rc, _ := run(git, root, []string{"merge-base", "--is-ancestor", checkBase, target})
 		if rc != 0 {
 			return Result{
 				OK:        false,
 				Code:      LandResultStaleBase,
 				Applied:   false,
 				Committed: false,
-				Reason:    fmt.Sprintf("base commit %s is not an ancestor of trunk HEAD (stale base)", shortSHA(checkBase)),
+				Reason:    fmt.Sprintf("base commit %s is not an ancestor of trunk %s (stale base)", shortSHA(checkBase), target),
 			}
 		}
 	}

@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/resultstier"
 )
 
@@ -54,6 +55,8 @@ func runResults(stdout, stderr io.Writer, argv []string) int {
 		}
 		return 2
 	}
+
+	*dir = pathutil.ExpandTilde(*dir)
 
 	if *mint && *verify {
 		fmt.Fprintln(stderr, "fak results tier: --mint and --verify are mutually exclusive")

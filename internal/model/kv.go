@@ -441,6 +441,16 @@ type Session struct {
 	PrecisionPolicy *DynamicPrecisionPolicy
 	PrecisionStats  PrecisionStats
 
+	// PrecisionSchedule is the optional per-point precision plan for a scheduled pass
+	// (precision_schedule.go, #13100). nil (the default) leaves every existing path
+	// byte-for-byte unchanged: scheduledLevel answers (LevelF32,false) and RunScheduledPass
+	// is never entered, so the f32/Q8 dynamic path is exactly today's.
+	PrecisionSchedule Schedule
+	// PrecisionReceipt is the optional sink a scheduled pass records its admitted and
+	// refused decisions into. nil (the default) means no trace is kept. It is a pointer so
+	// several sessions may share one receipt when a caller folds a cohort's decisions.
+	PrecisionReceipt *LevelReceipt
+
 	// qScratch reuses the Q8 activation vector storage for serial quantized decode/head
 	// GEMVs. Each qMatRows call consumes the vector before the next quantization overwrites
 	// it, so this removes hot-path allocation without changing any Q8 arithmetic.
@@ -496,6 +506,13 @@ type Session struct {
 	// correct token-loop fallback without adding an operator-facing control.
 	q4kHybridPrefillChunks   int
 	q4kHybridPrefillLastBase int
+	// q4kHybridPrefillDevicePanels / DeviceRows count the panels that rode the
+	// device-resident KV walk (#13087) and the token rows those panels appended to
+	// the device pair. They are internal execution markers: a non-zero count with a
+	// matching Cache.Len proves the device path ran and its rows were reconciled to
+	// the host cache, distinct from a numerically correct host-append fallback.
+	q4kHybridPrefillDevicePanels int
+	q4kHybridPrefillDeviceRows   int
 	// q4kMLPOutputSlab is the optional, session-local host readback backing for one grouped Q4_K
 	// gate/up prefill result. Generation owns a Session serially, and each layer consumes gate/up
 	// before the next layer overwrites it. It is retained only inside the P<=512, 68 MiB envelope

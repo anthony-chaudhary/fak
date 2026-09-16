@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -50,6 +51,17 @@ type turnkeyNativeStartup struct {
 	// applicable (Metal unavailable / not the exact hybrid). This makes a
 	// metal_live_q8_weights=0 report self-explaining instead of silent.
 	MetalQ8ResidencyError string `json:"metal_q8_residency_error,omitempty"`
+	// MTPActive is true only when the reviewed qualification catalog produced an
+	// eligible record AND the planner's Metal MTP coordinator is actually admitted
+	// for execution. It is false on the fail-closed default: an empty or unmatched
+	// catalog leaves ordinary fak-native Metal target decode selected.
+	MTPActive bool `json:"mtp_active"`
+	// MTPInactiveReason carries the concrete typed reason MTP is not executing. It
+	// is empty only when MTPActive is true. The fail-closed reason for an
+	// unqualified/empty catalog is the turnkeyMTPNoEligibleContext token
+	// ("NO_ELIGIBLE_QUALIFICATION_CONTEXT"), so a metal_live=true + mtp_active=false
+	// startup is self-explaining instead of silent.
+	MTPInactiveReason string `json:"mtp_inactive_reason,omitempty"`
 }
 
 func (r *turnkeyNativeResources) Close() error {
@@ -65,6 +77,20 @@ func (r *turnkeyNativeResources) Close() error {
 		}
 	})
 	return r.closeErr
+}
+
+// ReleaseAdmission exposes the residency/GPU-lease release closure so a caller
+// that owns the server lifetime can free the lease WITHOUT also tearing down the
+// weights: the idle-exit path (#13135) releases admission as one half of the
+// bounded stop, then Close releases the rest. It is idempotent (the underlying
+// closure is once-guarded by the loader) and returns false when there is no
+// admission to release.
+func (r *turnkeyNativeResources) ReleaseAdmission() bool {
+	if r == nil || r.releaseAdmission == nil {
+		return false
+	}
+	r.releaseAdmission()
+	return true
 }
 
 type turnkeyNativeLoadDeps struct {
@@ -92,6 +118,12 @@ type turnkeyNativeLoadDeps struct {
 	// request already finds the device full. It returns the fail-closed reason on decline, or
 	// nil when promotion succeeded or was not applicable.
 	eagerMetalResidency func(*fakmodel.Model) error
+	// resolveMTPStatus resolves the truthful startup speculative state from the
+	// actual qualification result + planner admission. It returns active=true with
+	// an empty reason only when a reviewed record matched AND the coordinator was
+	// admitted; otherwise active=false plus the concrete typed inactive reason.
+	// nil preserves the fail-closed default (inactive, NO_ELIGIBLE_QUALIFICATION_CONTEXT).
+	resolveMTPStatus func(*turnkeyMTPQualificationResult, *agent.InKernelPlanner) (bool, string)
 }
 
 func defaultTurnkeyNativeLoadDeps() turnkeyNativeLoadDeps {
@@ -119,7 +151,37 @@ func defaultTurnkeyNativeLoadDeps() turnkeyNativeLoadDeps {
 			}
 			return m.EagerMetalQ8Residency()
 		},
+		resolveMTPStatus: defaultResolveTurnkeyMTPStatus,
 	}
+}
+
+// defaultResolveTurnkeyMTPStatus is the fail-closed default for the startup MTP
+// status seam. The exact runtime qualification identity is not constructible
+// within this leaf, so it deliberately selects against a zero context: an empty
+// or unmatched reviewed catalog resolves to the NO_ELIGIBLE_QUALIFICATION_CONTEXT
+// refusal, and even a matched record must show an admitted planner coordinator
+// before MTP is reported active.
+func defaultResolveTurnkeyMTPStatus(result *turnkeyMTPQualificationResult, planner *agent.InKernelPlanner) (bool, string) {
+	if result == nil || result.Selection == nil {
+		reason := turnkeyMTPNoEligibleContext
+		if result != nil && result.Refusal != "" {
+			reason = result.Refusal
+		}
+		return false, string(reason)
+	}
+	if planner == nil || planner.MetalMTPCoordinator() == nil {
+		// A matched record is not enough: without an admitted coordinator the
+		// planner still runs ordinary target decode, so the status must stay
+		// inactive with a concrete typed reason. A successful selection carries an
+		// empty Refusal, so fall back to the fail-closed token rather than emit an
+		// empty reason that would contradict "empty only when MTPActive is true".
+		reason := result.Refusal
+		if reason == "" {
+			reason = turnkeyMTPNoEligibleContext
+		}
+		return false, string(reason)
+	}
+	return true, ""
 }
 
 // loadTurnkeyNativeResources performs the native-only portion of fak up startup.
@@ -193,8 +255,18 @@ func loadTurnkeyNativeResourcesWith(_ context.Context, modelPath, modelID string
 		return nil, fmt.Errorf("%q has no usable tokenizer; pass a GGUF with an embedded tokenizer", modelPath)
 	}
 
+	planner := deps.newPlanner(model, tok, modelID, q4k, backend, metal, contextTokens)
+	// The MTP status needs the built planner's admission state, so it is resolved
+	// after planner construction. A nil seam keeps the fail-closed default.
+	if deps.resolveMTPStatus == nil {
+		startup.MTPActive, startup.MTPInactiveReason = defaultResolveTurnkeyMTPStatus(nil, planner)
+	} else {
+		result := embeddedTurnkeyMTPQualification(time.Now(), turnkeyMTPQualificationContext{})
+		startup.MTPActive, startup.MTPInactiveReason = deps.resolveMTPStatus(&result, planner)
+	}
+
 	return &turnkeyNativeResources{
-		Planner:          deps.newPlanner(model, tok, modelID, q4k, backend, metal, contextTokens),
+		Planner:          planner,
 		Model:            model,
 		LoadProfile:      profile,
 		Startup:          startup,

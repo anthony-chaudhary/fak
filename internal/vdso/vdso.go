@@ -1167,6 +1167,13 @@ func (v *VDSO) BumpWorld() {
 	v.mu.Lock()
 	atomic.AddUint64(&v.worldVer, 1)
 	v.mu.Unlock()
+	// The search-result memoization cache (#11492) keys on tool/pattern/dir/principal
+	// and does NOT bind the world epoch, so bumping the epoch alone would leave a
+	// memoized search from a prior session visible to the next one. Flush it so
+	// BumpWorld's documented whole-cache contract holds for search as well.
+	if v.searchCache != nil {
+		v.searchCache.Clear()
+	}
 }
 
 // WorldVersion reports the current version.

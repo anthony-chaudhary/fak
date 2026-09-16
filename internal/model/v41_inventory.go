@@ -60,6 +60,10 @@ var ErrV41Inventory = errors.New("model: invalid DeepSeek V4.1 tensor inventory"
 // declares weight_block_size [32,32], so each E8M0 scale covers a 32x32 tile.
 const v41FP8BlockDim = 32
 
+// V41FP8BlockDim exposes the V4.1 dense FP8 block edge to the internal/model/v41
+// leaf package without renaming the core constant.
+const V41FP8BlockDim = v41FP8BlockDim
+
 // v41KVLoraRank is the published DeepSeek-V4.1 KV latent width. The V4.1 text
 // config does not carry a kv_lora_rank key, so this geometry is a checkpoint
 // constant rather than a parsed field (mirrors the quant decode path).

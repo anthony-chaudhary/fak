@@ -471,6 +471,46 @@ func TestV41ForwardCompressIndexDeclaredFailsClosed(t *testing.T) {
 	}
 }
 
+// TestV41ForwardCompressRatioMalformedFailsClosed pins the malformed-ratio arm
+// of the compressor admission seam. v41CompressIndexForwardAdmitted must refuse
+// every declared ratio that is not one of the two uncompressed regimes (0 or 1):
+// a positive ratio > 1 declares a compressed layer the reduced forward does not
+// execute (witnessed above), and a NEGATIVE ratio is malformed geometry that must
+// also fail closed rather than being silently treated as an uncompressed layer.
+// Before this guard the > 1 arm alone admitted a negative ratio, so a config with
+// a corrupt compression schedule would run the generic per-layer attention
+// contraction over a model the published artifact never describes.
+func TestV41ForwardCompressRatioMalformedFailsClosed(t *testing.T) {
+	for _, ratio := range []int{-1, -2} {
+		malformed := v41ReducedModel(t)
+		malformed.Cfg.DeepSeekV41.CompressRatios = []int{ratio}
+		if err := malformed.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
+			t.Fatalf("negative compressor ratio %d admission error = %v, want ErrV41ForwardStage", ratio, err)
+		}
+		if err := panicAsError(func() { _ = malformed.Forward([]int{1, 2}) }); !errors.Is(err, ErrV41ForwardStage) {
+			t.Fatalf("negative compressor ratio %d Forward panic = %v, want ErrV41ForwardStage", ratio, err)
+		}
+	}
+
+	// A schedule shorter than the model's layer range leaves the uncovered layers
+	// with no declared regime; that omission must also fail closed rather than
+	// being silently read as ratio 0.
+	short := v41ReducedModel(t)
+	short.Cfg.DeepSeekV41.CompressRatios = nil
+	if err := short.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("short compressor schedule admission error = %v, want ErrV41ForwardStage", err)
+	}
+	// The uncompressed regimes (0 and 1) stay admitted so the reduced oracle
+	// fixture keeps running.
+	for _, ratio := range []int{0, 1} {
+		ok := v41ReducedModel(t)
+		ok.Cfg.DeepSeekV41.CompressRatios = []int{ratio}
+		if err := ok.v41ForwardAdmitted(); err != nil {
+			t.Fatalf("uncompressed ratio %d admission error = %v, want nil", ratio, err)
+		}
+	}
+}
+
 // TestV41ForwardKVSourceDeclaredFailsClosed is the shared-KV-source fail-closed
 // witness: the reduced assembly projects its own per-layer attn.wkv.weight and
 // never consumes a KV source layer's shared key/value state, so a config that
@@ -1102,5 +1142,335 @@ func TestV41ForwardCandidateSourceDeclaredFailsClosed(t *testing.T) {
 	reduced := v41ReducedModel(t)
 	if err := reduced.v41ForwardAdmitted(); err != nil {
 		t.Fatalf("reduced out-of-range candidate source admission error = %v, want nil", err)
+	}
+}
+
+// v41ReducedCompressIndexModel builds the reduced V4.1 fixture with a compressed
+// layer 0 (ratio 2) and index source 0 wired: it carries the compressor's wkv /
+// wgate / norm tensors and the indexer's wq_b / wk / k_norm / weights_proj
+// tensors, so the #13006 stages can actually execute. The compressor width and
+// the indexer geometry match the reduced geometry.
+func v41ReducedCompressIndexModel(t *testing.T) *Model {
+	t.Helper()
+	m := v41ReducedModel(t)
+	cfg := m.Cfg
+	H := cfg.HiddenSize
+	width := v41CompressorWidth(cfg)
+	cfg.DeepSeekV41.CompressRatios = []int{2}
+	cfg.DeepSeekV41.IndexSourceLayerIDs = []int{0}
+	cfg.IndexNHeads = 1
+	cfg.IndexHeadDim = H
+	cfg.IndexTopK = 2
+	m.Cfg = cfg
+
+	type ts = synthTensor
+	tensors := []ts{
+		{layerName(0, "attn.compressor.wkv.weight"), []int{width, H}},
+		{layerName(0, "attn.compressor.wgate.weight"), []int{width, H}},
+		{layerName(0, "attn.compressor.norm.weight"), []int{width}},
+		{layerName(0, "indexer.wq_b.weight"), []int{cfg.IndexNHeads * cfg.IndexHeadDim, cfg.QLoraRank}},
+		{layerName(0, "indexer.wk.weight"), []int{cfg.IndexHeadDim, width}},
+		{layerName(0, "indexer.k_norm.weight"), []int{cfg.IndexHeadDim}},
+		{layerName(0, "indexer.weights_proj.weight"), []int{cfg.IndexNHeads, H}},
+	}
+	man, raw := synthBuildRaw(tensors, func(name string, next func() float32) float32 {
+		switch {
+		case hasSuffix(name, "compressor.norm.weight") || hasSuffix(name, "indexer.k_norm.weight"):
+			return 1.0
+		default:
+			return synthMatmulFill(name, next)
+		}
+	})
+	for k, v := range man {
+		m.manifest[k] = v
+	}
+	for k, v := range raw {
+		m.raw[k] = v
+	}
+	return m
+}
+
+// TestV41CEDCSA2Stages is the #13006 acceptance gate. It witnesses that a config
+// declaring an in-range CED/CSA2 compressor regime and a lightning-indexer source
+// now EXECUTES both stages (admitted, finite logits) instead of refusing, and that
+// the stage primitives reproduce an independent hand computation. It also pins the
+// malformed-schedule arm as still fail-closed.
+func TestV41CEDCSA2Stages(t *testing.T) {
+	// --- stage execution: a declared in-range compressor + index source runs ---
+	m := v41ReducedCompressIndexModel(t)
+	if err := m.v41ForwardAdmitted(); err != nil {
+		t.Fatalf("declared in-range compressor/index admission error = %v, want nil (stage now executes)", err)
+	}
+	act := m.Forward([]int{1, 2, 3, 4})
+	if act == nil || len(act.Logits) == 0 {
+		t.Fatal("compressed forward produced no logits")
+	}
+	for t2, row := range act.Logits {
+		if len(row) == 0 {
+			t.Fatalf("logits row %d empty", t2)
+		}
+		for i, v := range row {
+			if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+				t.Fatalf("logits[%d][%d] = %v is non-finite", t2, i, v)
+			}
+		}
+	}
+
+	// The compressed run must differ from the uncompressed run (unwired ratio-0
+	// schedule): the compressor pooled rows and the arithmetic actually changed.
+	plain := v41ReducedCompressIndexModel(t)
+	plain.Cfg.DeepSeekV41.CompressRatios = []int{0}
+	plain.Cfg.DeepSeekV41.IndexSourceLayerIDs = nil
+	plainAct := plain.Forward([]int{1, 2, 3, 4})
+	same := true
+	if plainAct != nil && len(plainAct.Logits) == len(act.Logits) {
+		for i := range act.Logits {
+			for j := range act.Logits[i] {
+				if act.Logits[i][j] != plainAct.Logits[i][j] {
+					same = false
+					break
+				}
+			}
+			if !same {
+				break
+			}
+		}
+	} else {
+		same = false
+	}
+	if same {
+		t.Fatal("compressed forward logits equal the uncompressed forward; compressor stage did not execute")
+	}
+
+	// --- compressor primitive: independent per-dimension softmax pooling oracle ---
+	pool, err := NewV41CompressorPool(2, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, emitted, err := pool.Push(0, []float32{1, 10}, []float32{0, 2}); err != nil || emitted || got != nil {
+		t.Fatalf("partial group = (%v,%v,%v), want (nil,false,nil)", got, emitted, err)
+	}
+	got, emitted, err := pool.Push(1, []float32{3, 20}, []float32{float32(math.Log(3)), 0})
+	if err != nil || !emitted {
+		t.Fatalf("completed group = (%v,%v,%v), want emitted", got, emitted, err)
+	}
+	// Independent hand computation: per dimension, subtract the max score, exp,
+	// normalize, then take the score-weighted sum of the KV values.
+	w0 := float32(math.Exp(float64(-float32(math.Log(3)))))
+	w1 := float32(1)
+	d0 := w0 + w1
+	v0 := 1*(w0/d0) + 3*(w1/d0)
+	w1d0 := float32(1)
+	w1d1 := float32(math.Exp(-2))
+	d1 := w1d0 + w1d1
+	v1 := 10*(w1d0/d1) + 20*(w1d1/d1)
+	if got[0] != v0 || got[1] != v1 {
+		t.Fatalf("pooled = %v, want [%g %g]", got, v0, v1)
+	}
+
+	// --- indexer primitive: independent ReLU-then-head-weighted reduction ---
+	q := []float32{1, 1, 1, -1}
+	keys := []float32{1, 1, 1, -1, 2, 2, 3, -1}
+	weights := []float32{0.5, 2.0}
+	score, err := V41IndexerScore(q, keys, weights, 2, 2, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []float32{1, 4, 2, 9}
+	for i := range want {
+		if score[i] != want[i] {
+			t.Fatalf("indexer score[%d] = %g, want %g", i, score[i], want[i])
+		}
+	}
+
+	// --- fail-closed: a malformed schedule still refuses ---
+	for _, ratio := range []int{-1, -2} {
+		bad := v41ReducedCompressIndexModel(t)
+		bad.Cfg.DeepSeekV41.CompressRatios = []int{ratio}
+		if err := bad.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
+			t.Fatalf("malformed compressor ratio %d admission error = %v, want ErrV41ForwardStage", ratio, err)
+		}
+	}
+	short := v41ReducedCompressIndexModel(t)
+	short.Cfg.DeepSeekV41.CompressRatios = nil
+	if err := short.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("short compressor schedule admission error = %v, want ErrV41ForwardStage", err)
+	}
+
+	// A declared in-range compressed layer WITHOUT its compressor weights must
+	// still fail closed: the stage cannot execute, so admission refuses.
+	missing := v41ReducedModel(t)
+	missing.Cfg.DeepSeekV41.CompressRatios = []int{2}
+	if err := missing.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("declared compressor without weights admission error = %v, want ErrV41ForwardStage", err)
+	}
+}
+
+// TestV41CEDCSA2StagesIndependent is the independent test-plane witness for the
+// #13006 CED/CSA2 compressor + lightning-indexer execution. It shares no
+// assertion values with TestV41CEDCSA2Stages: every expected number below is
+// re-derived by a fresh scalar loop in this file. The fixture is rebuilt here so
+// the compressor/indexer wiring is exercised from independent inputs.
+func TestV41CEDCSA2StagesIndependent(t *testing.T) {
+	// ---- fixture: a reduced model with compressor + index source wired ----
+	m := v41ReducedModel(t)
+	cfg := m.Cfg
+	H := cfg.HiddenSize
+	width := cfg.HeadDim
+	cfg.DeepSeekV41.CompressRatios = []int{2}
+	cfg.DeepSeekV41.IndexSourceLayerIDs = []int{0}
+	cfg.IndexNHeads = 2
+	cfg.IndexHeadDim = 4
+	cfg.IndexTopK = 2
+	m.Cfg = cfg
+
+	type ts = synthTensor
+	extra := []ts{
+		{layerName(0, "attn.compressor.wkv.weight"), []int{width, H}},
+		{layerName(0, "attn.compressor.wgate.weight"), []int{width, H}},
+		{layerName(0, "attn.compressor.norm.weight"), []int{width}},
+		{layerName(0, "indexer.wq_b.weight"), []int{cfg.IndexNHeads * cfg.IndexHeadDim, cfg.QLoraRank}},
+		{layerName(0, "indexer.wk.weight"), []int{cfg.IndexHeadDim, width}},
+		{layerName(0, "indexer.k_norm.weight"), []int{cfg.IndexHeadDim}},
+		{layerName(0, "indexer.weights_proj.weight"), []int{cfg.IndexNHeads, H}},
+	}
+	man, raw := synthBuildRaw(extra, func(name string, next func() float32) float32 {
+		switch {
+		case hasSuffix(name, "compressor.norm.weight") || hasSuffix(name, "indexer.k_norm.weight"):
+			return 1.0
+		default:
+			return synthMatmulFill(name, next)
+		}
+	})
+	for k, v := range man {
+		m.manifest[k] = v
+	}
+	for k, v := range raw {
+		m.raw[k] = v
+	}
+
+	// ---- (a) in-range compressor + index source, tensors present, admits ----
+	if err := m.v41ForwardAdmitted(); err != nil {
+		t.Fatalf("(a) admission error = %v, want nil", err)
+	}
+	act := m.Forward([]int{2, 5, 1, 7})
+	if act == nil || len(act.Logits) == 0 {
+		t.Fatal("(a) forward produced no logits")
+	}
+	for ti, row := range act.Logits {
+		if len(row) == 0 {
+			t.Fatalf("(a) logits row %d empty", ti)
+		}
+		for i, v := range row {
+			if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+				t.Fatalf("(a) logits[%d][%d]=%v non-finite", ti, i, v)
+			}
+		}
+	}
+
+	// ---- (b) same config WITHOUT compressor weights fails closed ----
+	noW := v41ReducedModel(t)
+	{
+		c2 := noW.Cfg
+		c2.DeepSeekV41.CompressRatios = []int{2}
+		c2.DeepSeekV41.IndexSourceLayerIDs = []int{0}
+		c2.IndexNHeads = 2
+		c2.IndexHeadDim = 4
+		c2.IndexTopK = 2
+		noW.Cfg = c2
+	}
+	if err := noW.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("(b) missing-compressor admission error = %v, want ErrV41ForwardStage", err)
+	}
+	if err := panicAsError(func() { _ = noW.Forward([]int{1, 2}) }); !errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("(b) missing-compressor Forward panic = %v, want ErrV41ForwardStage", err)
+	}
+
+	// ---- (c) negative ratio fails closed ----
+	for _, r := range []int{-1, -7} {
+		bad := v41ReducedModel(t)
+		bad.Cfg.DeepSeekV41.CompressRatios = []int{r}
+		if err := bad.v41ForwardAdmitted(); !errors.Is(err, ErrV41ForwardStage) {
+			t.Fatalf("(c) ratio %d admission error = %v, want ErrV41ForwardStage", r, err)
+		}
+	}
+
+	// ---- (d) compressor primitive: independent scalar softmax pooling ----
+	// Ratio 3, width 2, deliberately non-trivial scores so each dim weights
+	// differently. Expected computed by a standalone loop, never by Push.
+	p3, err := NewV41CompressorPool(3, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kvIn := [][]float32{{1.5, -2.0}, {4.0, 0.5}, {-3.0, 7.25}}
+	scIn := [][]float32{{0.25, 1.0}, {-1.5, 0.0}, {2.0, -0.75}}
+	var poolOut []float32
+	for pos := 0; pos < 3; pos++ {
+		got, emitted, err := p3.Push(pos, kvIn[pos], scIn[pos])
+		if err != nil {
+			t.Fatalf("(d) push %d: %v", pos, err)
+		}
+		if pos < 2 && (emitted || got != nil) {
+			t.Fatalf("(d) push %d early emit = (%v,%v), want (nil,false)", pos, got, emitted)
+		}
+		if pos == 2 {
+			if !emitted {
+				t.Fatal("(d) final push did not emit")
+			}
+			poolOut = got
+		}
+	}
+	want := make([]float32, 2)
+	for dim := 0; dim < 2; dim++ {
+		maxS := scIn[0][dim]
+		for tok := 1; tok < 3; tok++ {
+			if scIn[tok][dim] > maxS {
+				maxS = scIn[tok][dim]
+			}
+		}
+		exps := make([]float32, 3)
+		var denom float32
+		for tok := 0; tok < 3; tok++ {
+			exps[tok] = float32(math.Exp(float64(scIn[tok][dim] - maxS)))
+			denom += exps[tok]
+		}
+		var acc float32
+		for tok := 0; tok < 3; tok++ {
+			acc += kvIn[tok][dim] * (exps[tok] / denom)
+		}
+		want[dim] = acc
+	}
+	for dim := 0; dim < 2; dim++ {
+		if poolOut[dim] != want[dim] {
+			t.Fatalf("(d) pooled[%d] = %g, want %g (input kv=%v score=%v)", dim, poolOut[dim], want[dim], kvIn, scIn)
+		}
+	}
+
+	// ---- (e) indexer ReLU-before-head-reduction, not ReLU-after ----
+	// nHeads=2, headDim=2. Head 0 dot is strongly negative, head 1 positive.
+	//   before: relu(-5)*10 + relu(1)*1 = 0 + 1 = 1
+	//   after : relu((-5)*10 + 1*1) = relu(-49) = 0
+	// The two semantics differ; we assert the before-semantics (==1).
+	qi := []float32{1, 1, 1, -1} // head0=(1,1), head1=(1,-1)
+	ki := []float32{-2, -3}      // single key (headDim=2): head0 dot=-5, head1 dot=1
+	wi := []float32{10, 1}
+	sc, err := V41IndexerScore(qi, ki, wi, 2, 2, 1)
+	if err != nil {
+		t.Fatalf("(e) indexer score: %v", err)
+	}
+	if got := sc[0]; got != 1 {
+		t.Fatalf("(e) score = %g, want 1 (ReLU-before); ReLU-after would be 0", got)
+	}
+
+	// Sanity: the same inputs scored with the ReLU deferred to after the head
+	// reduction would be 0, proving the assertion above actually discriminates.
+	d0 := qi[0]*ki[0] + qi[1]*ki[1]
+	d1 := qi[2]*ki[0] + qi[3]*ki[1]
+	after := float32(0)
+	if s := d0*wi[0] + d1*wi[1]; s > 0 {
+		after = s
+	}
+	if after != 0 {
+		t.Fatalf("(e) discriminating construction failed: ReLU-after = %g, want 0", after)
 	}
 }

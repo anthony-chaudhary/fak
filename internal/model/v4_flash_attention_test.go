@@ -136,3 +136,55 @@ func TestV4FlashGateLeavesNonV4FamiliesAlone(t *testing.T) {
 		t.Fatalf("non-V4 family refused by V4 gate: %v", err)
 	}
 }
+
+// TestV4FlashRatioScheduleIsSingleSourced pins the #1714 invariant: the closed
+// set of admitted Flash 0731 compression ratios is DERIVED from the declared
+// schedule (deepSeekV4FlashCompressRatios), never a second hardcoded literal.
+//
+// The official DeepSeek V4.1 config publishes compress_ratios drawn from
+// {0,1,2} - a DIFFERENT closed set. Before single-sourcing, both the attention
+// regime and the KV layout carried their own "{0,4,128}" literal, so a reader
+// (or a later edit) could change one and silently diverge from the admitted
+// schedule. This witness fixes the derivation and the cross-family separation.
+func TestV4FlashRatioScheduleIsSingleSourced(t *testing.T) {
+	// Membership is derived exactly from the declared schedule: every declared
+	// ratio is admitted, nothing else in a wide probe range is.
+	declared := make(map[int]bool)
+	for _, r := range deepSeekV4FlashCompressRatios {
+		declared[r] = true
+	}
+	for ratio := -2; ratio <= 260; ratio++ {
+		got := V4FlashScheduleAdmitsRatio(ratio)
+		if got != declared[ratio] {
+			t.Fatalf("V4FlashScheduleAdmitsRatio(%d) = %v, want %v (declared schedule membership)", ratio, got, declared[ratio])
+		}
+	}
+
+	// The derived closed set is exactly {0,4,128} for the 0731 schedule and is
+	// a subset of the declared schedule.
+	set := V4FlashRatioScheduleClosedSet()
+	if len(set) != 3 || set[0] != 0 || set[1] != 4 || set[2] != 128 {
+		t.Fatalf("Flash 0731 derived closed set = %v, want [0 4 128]", set)
+	}
+	for _, r := range set {
+		if !declared[r] {
+			t.Fatalf("derived closed-set member %d is not in the declared schedule", r)
+		}
+	}
+
+	// Cross-family separation: the V4.1 official ratios (1 and 2) are NOT Flash
+	// 0731 members, and the Flash 0731 compressed ratios are not V4.1 members.
+	for _, v41Ratio := range []int{1, 2} {
+		if V4FlashScheduleAdmitsRatio(v41Ratio) {
+			t.Fatalf("V4.1 ratio %d wrongly admitted by the Flash 0731 closed set", v41Ratio)
+		}
+		if _, ok := v4FlashAttentionRegime(v41Ratio); ok {
+			t.Fatalf("v4FlashAttentionRegime(%d) admitted a V4.1-only ratio", v41Ratio)
+		}
+	}
+	for _, flashRatio := range []int{0, 4, 128} {
+		if _, ok := v4FlashAttentionRegime(flashRatio); !ok {
+			t.Fatalf("v4FlashAttentionRegime(%d) refused a declared Flash 0731 ratio", flashRatio)
+		}
+	}
+}

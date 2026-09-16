@@ -1348,11 +1348,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/flowcredit",
-            "lane": "flowcredit"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/flowmetrics",
             "lane": "flowmetrics"
         },
@@ -2380,11 +2375,6 @@
             "command": "fak version modules",
             "output_contains": "internal/microagent",
             "lane": "microagent"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/microfleeteconomics",
-            "lane": "microfleeteconomics"
         },
         {
             "command": "fak version modules",

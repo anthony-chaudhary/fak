@@ -71,11 +71,28 @@ func validateWholeTokenFlags(f *benchFlags) error {
 	return nil
 }
 
+// wholeTokenDeviceIdentity resolves the whole-token witness's reported device
+// identity device-neutrally: the active session's selected compute.Backend when
+// present, else the legacy metalgemm.DeviceName() fallback (Metal path,
+// byte-identical). A nil session, or a session with no selected backend, is the
+// legacy direct path and MUST fall back to keep its report byte-identical.
+func wholeTokenDeviceIdentity(s *model.Session) string {
+	if s == nil || s.Backend == nil {
+		return metalgemm.DeviceName()
+	}
+	name := s.Backend.Name()
+	tier := s.Backend.Tier()
+	if tier == "" {
+		return name
+	}
+	return name + "/" + tier
+}
+
 // runWholeToken owns an isolated session through cleanup. An unchanged terminal
 // receipt is not evidence of another operation: decline/fallback must fail the
 // candidate witness, even if an earlier Step successfully used the graph.
 func runWholeToken(s *model.Session, prompt []int, steps int, route string, started time.Time, closeWeights func() error) (report wholeTokenReport, err error) {
-	report = wholeTokenReport{Schema: "fak.whole-token-witness/1", Engine: "fak-native", Device: metalgemm.DeviceName(), ExpectedRoute: route, Prompt: append([]int(nil), prompt...), Phases: map[string]float64{}}
+	report = wholeTokenReport{Schema: "fak.whole-token-witness/1", Engine: "fak-native", Device: wholeTokenDeviceIdentity(s), ExpectedRoute: route, Prompt: append([]int(nil), prompt...), Phases: map[string]float64{}}
 	report.Phases["load_setup"] = time.Since(started).Seconds()
 	defer func() {
 		if p := recover(); p != nil {

@@ -178,6 +178,53 @@ func TestRunWarmupNilPlannerReleasesGate(t *testing.T) {
 	}
 }
 
+// TestReadyzGatesWhileWarming isolates the warmup seam on /readyz (distinct from
+// the startup gate proven by TestReadyzRequiresStartupAndReusesHealthState): once
+// startup is satisfied by MarkReady(), an armed-but-incomplete warmup gate must
+// force /readyz to 503 with warmup_pending, and MarkWarmupComplete must release it
+// to 200. The startup gate is satisfied first so this witnesses the warmup gate
+// specifically, not the startup gate.
+func TestReadyGatingWhileWarming(t *testing.T) {
+	srv := newTestServer(t)
+	srv.planner = agent.NewMockPlanner("test-model")
+	srv.MarkReady()
+
+	readyzBody := func(t *testing.T) (int, map[string]any) {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode /readyz body %q: %v", rec.Body.String(), err)
+		}
+		return rec.Code, body
+	}
+
+	srv.ArmWarmupGate()
+	status, body := readyzBody(t)
+	if status != http.StatusServiceUnavailable {
+		t.Fatalf("warming /readyz status = %d, want 503; body=%v", status, body)
+	}
+	if body["ok"] != false {
+		t.Fatalf("warming /readyz ok = %v, want false", body["ok"])
+	}
+	if body["warmup_pending"] != true {
+		t.Fatalf("warming /readyz warmup_pending = %v, want true", body["warmup_pending"])
+	}
+
+	srv.MarkWarmupComplete(0)
+	status, body = readyzBody(t)
+	if status != http.StatusOK {
+		t.Fatalf("warm /readyz status = %d, want 200; body=%v", status, body)
+	}
+	if body["ok"] != true {
+		t.Fatalf("warm /readyz ok = %v, want true", body["ok"])
+	}
+	if body["warmup_pending"] == true {
+		t.Fatalf("warm /readyz warmup_pending = %v, want absent/false", body["warmup_pending"])
+	}
+}
+
 // warmupHealthzBody serves one /healthz request against s and returns the decoded
 // JSON body, requiring the READY status (200). Named distinctly from the
 // coherence gate's healthzBody helper so the two readiness tests never collide in

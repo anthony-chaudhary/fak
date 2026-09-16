@@ -46,6 +46,13 @@ type V41SparseAttentionSinkOptions struct {
 	TopK    int
 	N       int
 	Softmax float32
+	// TopKLength, when non-nil, is the row-major [B, M] count of valid slots in
+	// each query's index list. Slots at position >= TopKLength[b*M+m] are masked
+	// out exactly as a -1 index is, before the max and the softmax: the pinned
+	// reference overwrites them with -1 (mask = arange(topk) >= topk_length).
+	// A nil slice means every query uses all TopK slots. Each value must be in
+	// [0, TopK]; a negative or over-long length is refused.
+	TopKLength []int32
 	// Inverse, when non-nil, is the inverse output RoPE applied to the trailing
 	// RopeDim dimensions of every output head in place. RopeDim must be even.
 	Inverse func(ropeDim int, o []float32) error
@@ -58,12 +65,14 @@ type V41SparseAttentionSinkOptions struct {
 //
 //	score[b,m,h,i] = (q[b,m,h,:] . kv[b,idx,:]) * softmax
 //	invalid idx (-1) contributes neither score nor value
+//	a slot at i >= topk_length[b,m] is invalid too, exactly like -1
 //	o[b,m,h,:] = sum_i softmax_i * kv[b,idx_i,:], with exp(sink[h]-max)
 //	             folded into the softmax denominator
 //
 // q is row-major [B, M, Heads, HeadDim]; kv is row-major [B, N, HeadDim],
 // shared across heads; idx is row-major [B, M, TopK] with -1 marking an empty
-// slot. sink, when non-nil, is [Heads]. The result is a fresh row-major
+// slot. sink, when non-nil, is [Heads]. TopKLength, when non-nil, is the
+// row-major [B, M] valid-slot count that masks the trailing padding slots. The result is a fresh row-major
 // [B, M, Heads, HeadDim] tensor. A row whose indices are all -1 yields an
 // all-zero output, matching the reference's finite lower bound. Every input is
 // validated and every non-finite value is refused before any output is
@@ -89,6 +98,16 @@ func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V4
 	}
 	if sink != nil && len(sink) != opt.Heads {
 		return nil, fmt.Errorf("model: V4.1 sparse sink length %d, want %d", len(sink), opt.Heads)
+	}
+	if opt.TopKLength != nil && len(opt.TopKLength) != opt.B*opt.M {
+		return nil, fmt.Errorf("model: V4.1 sparse sink topk length %d, want %d", len(opt.TopKLength), opt.B*opt.M)
+	}
+	if opt.TopKLength != nil {
+		for i, v := range opt.TopKLength {
+			if v < 0 || int(v) > opt.TopK {
+				return nil, fmt.Errorf("model: V4.1 sparse sink topk length %d out of range at %d", v, i)
+			}
+		}
 	}
 	for i, v := range q {
 		if !finite32(v) {
@@ -118,6 +137,12 @@ func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V4
 	for b := 0; b < opt.B; b++ {
 		for m := 0; m < opt.M; m++ {
 			idxBase := (b*opt.M + m) * opt.TopK
+			// validCount is the number of leading slots that count; slots at
+			// index >= validCount are padding and contribute nothing.
+			validCount := opt.TopK
+			if opt.TopKLength != nil {
+				validCount = int(opt.TopKLength[b*opt.M+m])
+			}
 			for h := 0; h < opt.Heads; h++ {
 				qBase := ((b*opt.M+m)*opt.Heads + h) * opt.HeadDim
 				// Stage 1: max over valid scaled scores, seeded with the sink.
@@ -125,7 +150,7 @@ func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V4
 				if sink != nil {
 					maxScore = sink[h]
 				}
-				for i := 0; i < opt.TopK; i++ {
+				for i := 0; i < validCount; i++ {
 					row := int(idx[idxBase+i])
 					if row < 0 {
 						continue
@@ -150,7 +175,7 @@ func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V4
 				if sink != nil {
 					sum = exp32(sink[h] - maxScore)
 				}
-				for i := 0; i < opt.TopK; i++ {
+				for i := 0; i < validCount; i++ {
 					row := int(idx[idxBase+i])
 					if row < 0 {
 						continue
@@ -167,7 +192,7 @@ func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V4
 				}
 				// Stage 3: weighted value sum, normalized by the denominator.
 				oBase := qBase
-				for i := 0; i < opt.TopK; i++ {
+				for i := 0; i < validCount; i++ {
 					row := int(idx[idxBase+i])
 					if row < 0 {
 						continue

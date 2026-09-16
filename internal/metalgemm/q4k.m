@@ -1835,6 +1835,7 @@ typedef struct {
     int P, in, encoders, committed, readbacks, buffers;
     int graph_gemv_p1;         // 1 routes P=1 graph projections to the GEMV kernels
     int graph_gemv_vectorized; // P=1 graph projections: 1 selects q4k_gemv_vectorized
+    int graph_mm_mode;         // Q4_K projection candidate: 0 scalar, 2 wide-tile cooperative-SMEM
     int graph_buf_pool;        // per-shape recycle depth; 0 disables the pool
     double gpu_ms, wait_ms;
 } MGProjectionGraph;
@@ -1871,6 +1872,33 @@ int mg_graph_set_gemv_vectorized(void *opaque, int mode) {
     if (mode != 0 && psoQ4KGemvVectorized == nil) return 0;
     g->graph_gemv_vectorized = mode;
     return 1;
+}
+
+// mg_graph_set_mm_mode sets the Q4_K projection candidate this graph encodes: 0 is the scalar
+// q4k_gemm kernel (the historical default), 2 is the wide-tile cooperative-SMEM candidate
+// q4k_gemm_m5_cooperative_smem. It is the graph-side production selector for the P>=64 panel
+// regime (fak#13041 / this leaf). Mode 2 is fail-closed here: it is refused before any encode
+// (returning 0) when this graph's P is below the kernel's 64-token eligibility or the optional
+// pipeline is unavailable, so the caller must keep the scalar identity. The Go caller only sets
+// mode 2 after the device/version-pinned crossover admits it, so an unpinned margin can never reach
+// this seam. Returns 1 when the mode was accepted (including the mode-0 no-op).
+int mg_graph_set_mm_mode(void *opaque, int mode) {
+    MGProjectionGraph *g = opaque;
+    if (!g || g->committed || g->encoders != 0) return 0;
+    if (mode == 0) { g->graph_mm_mode = 0; return 1; }
+    if (mode == 2) {
+        if (g->P < 64 || psoQ4KGemmM5CooperativeSMEM == nil) return 0;
+        g->graph_mm_mode = 2;
+        return 1;
+    }
+    return 0;
+}
+
+// mg_graph_mm_mode reports the Q4_K projection candidate the graph will request (0 scalar, 2
+// wide-tile cooperative-SMEM). It is the graph-side half of the typed requested/executed identity.
+int mg_graph_mm_mode(void *opaque) {
+    MGProjectionGraph *g = opaque;
+    return g ? g->graph_mm_mode : 0;
 }
 
 // mg_graph_set_gemv_p1 opts a graph into the P=1 GEMV projection route. It is opt-in so
@@ -2004,7 +2032,11 @@ void *mg_graph_encode_q4k(void *opaque, int wid) {
     MGProjectionGraph *g=opaque; if (!g || g->committed || !g->xf || wid<0 || wid>=gNQ4 || gQ4[wid].in!=g->in) return NULL;
     if (g->graph_gemv_p1 && g->P == 1) { id<MTLBuffer> y=mg_graph_q4k_gemv(g,g->xf,wid); return y?(__bridge void*)y:NULL; }
     Q4KW *w=&gQ4[wid]; id<MTLBuffer> y=(__bridge id<MTLBuffer>)mg_graph_result(g,(NSUInteger)g->P*(NSUInteger)w->out); if(!y)return NULL;
-    int executed=0, BN=64; id<MTLComputePipelineState> pso=q4k_gemm_pso(g->P,0,&executed,&BN); if(!pso)return NULL;
+    // Route through the graph's requested candidate. graph_mm_mode defaults to 0 (scalar); the Go
+    // production selector sets 2 for the widened panel regime only when the device/version-pinned
+    // crossover admits it. A mode-2 graph whose pipeline/P guard fails here returns NULL and the Go
+    // caller declines fail-open before any state mutation.
+    int executed=0, BN=64; id<MTLComputePipelineState> pso=q4k_gemm_pso(g->P,g->graph_mm_mode,&executed,&BN); if(!pso)return NULL;
     const int BM=64,TG=256; int rowBlocks=(w->out+BM-1)/BM;
     id<MTLComputeCommandEncoder> e=[g->cb computeCommandEncoder]; [e setComputePipelineState:pso]; [e setBuffer:(__bridge id<MTLBuffer>)w->buf offset:w->offset atIndex:0]; [e setBuffer:g->xf offset:0 atIndex:1]; [e setBuffer:y offset:0 atIndex:2]; [e setBytes:&w->nblk length:sizeof(int) atIndex:3];[e setBytes:&w->out length:sizeof(int) atIndex:4];[e setBytes:&g->P length:sizeof(int) atIndex:5]; for(int t0=0;t0<g->P;t0+=BN){int nt=g->P-t0;if(nt>BN)nt=BN;[e setBytes:&t0 length:sizeof(int) atIndex:6];[e setBytes:&nt length:sizeof(int) atIndex:7];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG,1,1)];}[e endEncoding]; return (__bridge void*)y;
 }
@@ -2012,7 +2044,7 @@ void *mg_graph_encode_q4k_from(void *opaque,int wid,void*input,int elems) {
     MGProjectionGraph*g=opaque;id<MTLBuffer>x=(__bridge id<MTLBuffer>)input;if(!g||g->committed||!x||wid<0||wid>=gNQ4||gQ4[wid].in*g->P!=elems||![g->results containsObject:x])return NULL;
     if (g->graph_gemv_p1 && g->P == 1) { id<MTLBuffer> y=mg_graph_q4k_gemv(g,x,wid); return y?(__bridge void*)y:NULL; }
     Q4KW*w=&gQ4[wid];id<MTLBuffer>y=(__bridge id<MTLBuffer>)mg_graph_result(g,(NSUInteger)g->P*(NSUInteger)w->out);if(!y)return NULL;
-    int executed=0,BN=64;id<MTLComputePipelineState>pso=q4k_gemm_pso(g->P,0,&executed,&BN);if(!pso)return NULL;const int BM=64,TG=256;int rowBlocks=(w->out+BM-1)/BM;
+    int executed=0,BN=64;id<MTLComputePipelineState>pso=q4k_gemm_pso(g->P,g->graph_mm_mode,&executed,&BN);if(!pso)return NULL;const int BM=64,TG=256;int rowBlocks=(w->out+BM-1)/BM;
     id<MTLComputeCommandEncoder>e=[g->cb computeCommandEncoder];[e setComputePipelineState:pso];[e setBuffer:(__bridge id<MTLBuffer>)w->buf offset:w->offset atIndex:0];[e setBuffer:x offset:0 atIndex:1];[e setBuffer:y offset:0 atIndex:2];[e setBytes:&w->nblk length:sizeof(int) atIndex:3];[e setBytes:&w->out length:sizeof(int) atIndex:4];[e setBytes:&g->P length:sizeof(int) atIndex:5];for(int t0=0;t0<g->P;t0+=BN){int nt=g->P-t0;if(nt>BN)nt=BN;[e setBytes:&t0 length:sizeof(int) atIndex:6];[e setBytes:&nt length:sizeof(int) atIndex:7];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG,1,1)];}[e endEncoding];return (__bridge void*)y;
 }
 void *mg_graph_encode_q6k(void *opaque, int wid) {

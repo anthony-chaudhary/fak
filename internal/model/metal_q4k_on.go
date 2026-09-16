@@ -61,6 +61,11 @@ var (
 	// matrix kernel (metalgemm.SetGEMMUseMM). Read lazily on first prefill weight-upload, not at
 	// package init, because it is a cgo call that needs the Metal device present.
 	q4kMMOnce sync.Once
+	// q4kM5Once guards the one-time FAK_Q4K_M5 read that opts the widened panel regime (P>=64) into
+	// the wide-tile cooperative-SMEM candidate (metalgemm.SetGEMMUseM5). It is likewise read lazily
+	// on first prefill weight-upload (a cgo call needing the device) and is additionally gated by
+	// metalgemm's device/version-pinned crossover table at encode time.
+	q4kM5Once sync.Once
 )
 
 type metalQ8ExactState struct {
@@ -99,7 +104,15 @@ func (s *Session) metalExecution(operation metalgemm.ExecutionOperation, call fu
 }
 
 func (s *Session) recordMetalFallback(route MetalFallbackRoute) {
-	if s != nil && s.PhaseProfiler != nil {
+	if s == nil {
+		return
+	}
+	// Live whole-serve tally (#12875): survives the per-request Session churn and is read at
+	// request time by /healthz, unlike the opt-in per-session PhaseProfiler below.
+	if s.M != nil {
+		s.M.recordMetalFallbackLive(route)
+	}
+	if s.PhaseProfiler != nil {
 		s.PhaseProfiler.recordMetalFallback(route)
 	}
 }
@@ -1006,7 +1019,18 @@ func (m *Model) EagerMetalQ8Residency() error {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "[metal-q8-residency] eager Q8 promotion published %d no-copy projections\n", len(names))
+	// Publish the post-promotion live residency into the model's observability tally (#12875)
+	// so /healthz can report the real device-resident counts rather than a frozen startup zero.
+	m.RefreshMetalResidency()
 	return nil
+}
+
+// liveMetalWeightCounts samples the live device-resident weight counts from the metalgemm
+// registries (#12875). Note the underlying C counters are O(N) linear scans and the Q8 one takes
+// no lock, so callers use this only on the low-rate health/stamp path (see
+// Model.RefreshMetalResidency), never per generated token.
+func liveMetalWeightCounts() (q6k, q8 int) {
+	return metalgemm.LiveQ6KWeights(), metalgemm.LiveQ8Weights()
 }
 
 // MetalQ8ResidencyError returns the cached fail-closed reason this model's exact Q8 promotion
@@ -1051,6 +1075,15 @@ func (m *Model) metalQ6KWeights() (int, bool) {
 	return len(names), true
 }
 
+// q4kM5OptIn resolves the FAK_Q4K_M5 process opt-in for the widened-panel wide-tile candidate.
+// Default ON: only an explicit FAK_Q4K_M5=0 turns it off. The real safety is metalgemm's
+// device/version-pinned crossover gate, so default-on never promotes an unreceipted device.
+func q4kM5OptIn() bool { return os.Getenv("FAK_Q4K_M5") != "0" }
+
+// q4kMMOptIn resolves the FAK_Q4K_MM process opt-in for the exact-P32 MM32 candidate. Default OFF
+// (the sibling of q4kM5OptIn, but the MM32 variant has not yet earned a default-on receipt).
+func q4kMMOptIn() bool { return os.Getenv("FAK_Q4K_MM") == "1" }
+
 // metalQ4KWeights uploads all Q4_K projection weights for this model to the GPU once,
 // caching them per *Model. This is the prefill-weight-upload twin of metalWeights(): it
 // uploads every q4_k-resident projection (q/k/v/o, gate/up/down) upfront so the prefill
@@ -1067,7 +1100,16 @@ func (m *Model) metalQ4KWeights() map[string]bool {
 	// on the M3 Pro), cosine 1.0 vs the CPU f32 reference. Default OFF (the scalar kernel stays the
 	// proven path) until the MMA variant earns auto-enable. Set once per process — cheap and
 	// idempotent on the metalgemm side.
-	q4kMMOnce.Do(func() { metalgemm.SetGEMMUseMM(os.Getenv("FAK_Q4K_MM") == "1") })
+	q4kMMOnce.Do(func() { metalgemm.SetGEMMUseMM(q4kMMOptIn()) })
+	// Default ON the wide-tile cooperative-SMEM candidate for the widened panel regime (P>=64,
+	// fak#13041). The sanctioned on-silicon M3 Pro receipt now pins a row in metalgemm's
+	// device/version-pinned crossover table (fak#13124 / 1ebb4a9c6), where the median candidate/
+	// scalar on-GPU ratio measured 1.57x at P=64 and 1.46x at P=128, every sample clearing the
+	// fak#9937 >=1.10x gate. The encode-time crossover gate is the real safety mechanism: on any
+	// device/OS with no pinned row q4kGEMMModeForPrompt still requests the scalar identity, so
+	// default-on is inert off the receipted box. Flip FAK_Q4K_M5=0 to force the scalar kernel
+	// explicitly. Set once per process (cheap, idempotent on the metalgemm side).
+	q4kM5Once.Do(func() { metalgemm.SetGEMMUseM5(q4kM5OptIn()) })
 	uploaded := map[string]bool{}
 	cfg := m.Cfg
 	for l := 0; l < cfg.NumLayers; l++ {

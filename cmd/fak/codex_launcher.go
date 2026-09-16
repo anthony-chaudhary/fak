@@ -458,6 +458,8 @@ func runCodexConfig(stdout, stderr io.Writer, argv []string) int {
 	if !parseFlags(fs, argv) {
 		return 2
 	}
+	*dir = pathutil.ExpandTilde(*dir)
+	*codexHome = pathutil.ExpandTilde(*codexHome)
 	baseURL := *addr
 	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
 		baseURL = "http://" + baseURL

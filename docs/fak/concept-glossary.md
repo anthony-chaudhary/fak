@@ -671,3 +671,10 @@ The aligned read geometry of one NVMe expert fault: the alignment granularity pl
 The #1302 page-cache-aware expert read: reads one expert's stride through a mapped region, serving a warm fault zero-copy and issuing an aligned device ReadAt only on a cold fault.
 
 **Distinct from:** Names the READ OPERATION (one expert's bytes, warm-from-mapping vs cold-aligned-device) rather than a page-cache entry, a slot count, or the byte floor a page cache must clear to pay for itself.
+
+
+### CandidateKind
+
+The closed promotion-candidate taxonomy a scratchpad artifact is classified into: unfinished-spine, blocked, discovered-edge-case, deferred-caveat, next-checkable-step. A CandidateKind is the deterministic Classify verdict over one parked artifact's filename/leading block.
+
+**Distinct from:** It is the CLOSED taxonomy value for a parked scratchpad artifact that looks like an unfiled session flag, NOT the plan/spawn Candidate (a scored span the planner may keep resident) and NOT a generic kind enum.

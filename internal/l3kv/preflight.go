@@ -17,6 +17,10 @@ import (
 // RemoteKVProbeSchema identifies the schema version of the probe receipt.
 const RemoteKVProbeSchema = "fak.remote-kv-preflight/v1"
 
+// RemoteKVProbeHTTPTimeout bounds the remote kv HEAD probe so a hung endpoint
+// cannot stall bring-up; the probe is a liveness check, not a data transfer.
+const RemoteKVProbeHTTPTimeout = 5 * time.Second
+
 // DefaultRemoteKVTimeout is the default duration allotted for remote KV connectivity probe.
 const DefaultRemoteKVTimeout = 5 * time.Second
 
@@ -199,7 +203,8 @@ func DefaultRemoteKVProbe(ctx context.Context, cfg RemoteKVConfig) error {
 	if cfg.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+cfg.Token)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: RemoteKVProbeHTTPTimeout}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("probe request failed: %w", err)
 	}

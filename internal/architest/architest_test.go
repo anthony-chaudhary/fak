@@ -155,7 +155,7 @@ var tier = map[string]int{
 	"workloadfit":            2, // purpose-specific fitness mechanism over stackresolve contracts; keeps soft ranking outside composition gates (#6893).
 	"stackpreflight":         3, // launch integrator joining dependency, workload-fitness, and support-evidence receipts (#6897).
 	"amdgpu":                 2, // AMD GPU fact probe and perf-counter JSON fold for Windows harness diagnostics; imports windowgate(1), off the hot path.
-	"accounts":               2, "accountobs": 1, "guardaudit": 2, "appversion": 2, "blob": 1, "boundarylint": 1, "cachemeta": 2, "cacheobs": 1, "cachevalue": 2, "canon": 1, "compute": 2, "runtimecap": 3, "deletioncert": 1, "demoui": 2, "ggufload": 2, "gpulease": 2, "researcharm": 2, "fleetreap": 2, "hfhub": 2, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 2, "model": 2, "orphanscan": 1, "pathlint": 1, "pathutil": 1, "privatepath": 2, "provenance": 1, "swebench": 2, "urllint": 1, "webbench": 2,
+	"accounts":               2, "accountobs": 1, "guardaudit": 2, "appversion": 2, "blob": 1, "boundarylint": 1, "cachelayout": 1, "replayoracle": 1, "cachemeta": 2, "cacheobs": 1, "cachevalue": 2, "canon": 1, "compute": 2, "runtimecap": 3, "deletioncert": 1, "demoui": 2, "ggufload": 2, "gpulease": 2, "researcharm": 2, "fleetreap": 2, "hfhub": 2, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 2, "model": 2, "orphanscan": 1, "pathlint": 1, "pathutil": 1, "privatepath": 2, "provenance": 1, "swebench": 2, "urllint": 1, "webbench": 2,
 	// stdlib-only foundation leaves (import nothing internal); off the hot path.
 	"auditpane": 2, "benchingest": 2, "binstamp": 2, "cachewitness": 2, "codexmemory": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "experiments": 2, "fleetaccounts": 2, "fleetbottleneck": 2, "flock": 1, "framevisibility": 1, "ghspam": 1, "issuecontractrepair": 2, "jsonlledger": 1, "kvbudget": 2, "maputil": 1, "mathx": 1, "modeldescriptor": 1, "newleaf": 1, "numfmt": 1, "randhex": 1, "refutil": 2, "selfinstall": 2, "sessionaudit": 2, "strmatch": 1,
 	"newmodel":      2,                                                                            // deterministic onboarding compiler composed over the primitive modeldescriptor contract (#9421).
@@ -701,6 +701,7 @@ var tier = map[string]int{
 	"codetools":             2, // Kernel-mediated workspace coding engines: canonical confinement, policy rung, bounded Read/Grep/Glob; imports ABI/refutil/vDSO but not core runtime.
 	"systools":              2, // safe system and web search/fetch utility tools for the native harness
 	"portabilitylab":        2, // Hermetic release acceptance harness over the tier-1 portability leaf; stdlib plus portability only, off the hot path.
+	"scratchquery":          1, // stdlib-only, deterministic read-only content query + closed promotion-candidate taxonomy over a session scratchpad (#13067/#13069); off the runtime hot path.
 	"scratchjanitor":        1, // stdlib-only age and resume-reference guarded harness scratch cleanup; off the runtime hot path.
 	"tempartifact":          1, // stdlib-only exact-path OS-temp artifact lifecycle; process inspection stays in its off-path platform adapter.
 	"managedocs":            1,

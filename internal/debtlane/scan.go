@@ -833,7 +833,13 @@ func discoverLanesFromDisk(root string, companionRoots ...string) ([]DebtLane, e
 			}
 		}
 
-		// c) If a lane does not exist on disk, check whether its declared tree explicitly starts with a Go source root.
+		// c) If a lane does not exist on disk, check whether its declared tree
+		// explicitly starts with a Go source root AND that root actually exists
+		// on disk. A declared tree such as "internal/<lane>/**" whose unit was
+		// migrated away (e.g. to platform/<x>/) must NOT synthesize a phantom
+		// internal/<lane>: the scanner would otherwise report the absence as
+		// coverage/test/wiring/proof/benchmark debt and rank it as the top
+		// maturity gap ahead of real, actionable debt.
 		if unitDir == "" {
 			hasDeclaredGoPrefix := false
 			for _, t := range trees {
@@ -846,7 +852,12 @@ func discoverLanesFromDisk(root string, companionRoots ...string) ([]DebtLane, e
 				// Neither exists on disk nor declares a Go source tree; do NOT synthesize phantom internal/<lane>.
 				continue
 			}
-			unitDir = filepath.Join("internal", lane)
+			synth := filepath.Join("internal", lane)
+			if info, err := os.Stat(filepath.Join(root, synth)); err != nil || !info.IsDir() {
+				// Declared Go-prefixed tree has no on-disk root; suppress the phantom lane entirely.
+				continue
+			}
+			unitDir = synth
 		}
 
 		absUnitDir := filepath.Join(root, unitDir)

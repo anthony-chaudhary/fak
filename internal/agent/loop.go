@@ -51,11 +51,15 @@ type ArmMetrics struct {
 	HitTurnCap          bool   `json:"hit_turn_cap"`
 	FinalAnswer         string `json:"final_answer"`
 
-	GracefulDrained         bool   `json:"graceful_drained,omitempty"`
-	SynthesizedFinalTurn    bool   `json:"synthesized_final_turn,omitempty"`
-	GoalAnchorRecoveryTurns int    `json:"goal_anchor_recovery_turns,omitempty"`
-	CircuitBreakerTripped   bool   `json:"circuit_breaker_tripped,omitempty"`
-	CircuitBreakerReason    string `json:"circuit_breaker_reason,omitempty"`
+	GracefulDrained         bool `json:"graceful_drained,omitempty"`
+	SynthesizedFinalTurn    bool `json:"synthesized_final_turn,omitempty"`
+	GoalAnchorRecoveryTurns int  `json:"goal_anchor_recovery_turns,omitempty"`
+	// InfraReprompts counts how many times the outer loop re-prompted the model after a
+	// RECOVERABLE infrastructure failure (infra_reprompt.go) instead of hard-stopping the
+	// arm. Zero on the historical loop and whenever the arm is disabled.
+	InfraReprompts        int    `json:"infra_reprompts,omitempty"`
+	CircuitBreakerTripped bool   `json:"circuit_breaker_tripped,omitempty"`
+	CircuitBreakerReason  string `json:"circuit_breaker_reason,omitempty"`
 
 	// ElapsedMs is the arm's observed wall-clock in milliseconds. It is populated
 	// ONLY on the live lane (a real network model actually blocks on each turn); the
@@ -655,6 +659,17 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 		log:          log,
 		task:         task,
 		envelopeSink: cfg.envelopeSink,
+	}
+	// Resolve the recoverable-infrastructure re-prompt budget: negative disables the arm
+	// (0 — the historical loop), zero means unset (DefaultInfraRepromptBudget), positive is
+	// an explicit bound.
+	switch {
+	case cfg.infraRepromptBudget < 0:
+		runner.repromptRemaining = 0
+	case cfg.infraRepromptBudget == 0:
+		runner.repromptRemaining = DefaultInfraRepromptBudget
+	default:
+		runner.repromptRemaining = cfg.infraRepromptBudget
 	}
 	runner.stopTerminated = func() bool {
 		return stopTerminatedArm(ctx, cfg, terminated, fak, k, &m)

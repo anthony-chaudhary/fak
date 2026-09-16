@@ -1,5 +1,7 @@
 package agent
 
+import "time"
+
 // KVMemoryStats is an optional planner-owned snapshot of local KV-cache residency.
 // It is separate from Usage cache-read counters: those count work saved on a turn,
 // while this reports resident KV memory pressure in the local process. Planners that
@@ -173,4 +175,52 @@ type InKernelMemoryPressureTrimReporter interface {
 // what a row of zeros reads like on a dashboard.
 type MoEResidencyReporter interface {
 	MoEResidencyStats() MoEResidencyLedger
+}
+
+// NativePhase is the CLOSED vocabulary of observed native-runtime phase boundaries. A phase
+// token is never free text: a surface can enumerate these, and a value it did not mint is a
+// bug, not a new state. Values are emitted only at real phase transitions on the serve path,
+// never per token.
+type NativePhase string
+
+const (
+	// NativePhasePrefill spans the prompt-computation phase (s.Prefill plus the divergent
+	// suffix), from just before the first prompt token is computed to the logits that seed decode.
+	NativePhasePrefill NativePhase = "native_phase_prefill"
+	// NativePhaseDecode spans the speculative/autoregressive decode loop.
+	NativePhaseDecode NativePhase = "native_phase_decode"
+	// NativePhaseTerminal marks the end of the turn, whether it completed or errored.
+	NativePhaseTerminal NativePhase = "native_phase_terminal"
+)
+
+// String renders the phase token. It is the accessor a surface uses to emit the closed
+// vocabulary value into a metric label or a log line without re-typing the literal.
+func (p NativePhase) String() string { return string(p) }
+
+// nativePhaseKnown reports whether tok is a member of the closed NativePhase vocabulary.
+func nativePhaseKnown(tok NativePhase) bool {
+	switch tok {
+	case NativePhasePrefill, NativePhaseDecode, NativePhaseTerminal:
+		return true
+	default:
+		return false
+	}
+}
+
+// NativePhaseObservation is the optional planner-owned record of the most recent native-phase
+// transition observed for one request. It is bound to the request trace id, so a prefill that
+// dies before any provider usage can still be attributed to the phase that was running.
+// TraceID is empty when the request carried no trace id (never fabricated).
+type NativePhaseObservation struct {
+	TraceID   string
+	Phase     NativePhase
+	At        time.Time
+	Elapsed   time.Duration
+	Completed bool
+}
+
+// NativePhaseReporter is implemented by local planners that observe native phase transitions.
+// Proxy planners do not implement it, so a surface emits no phase series for upstream providers.
+type NativePhaseReporter interface {
+	NativePhaseObservation(traceID string) (NativePhaseObservation, bool)
 }

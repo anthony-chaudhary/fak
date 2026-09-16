@@ -141,6 +141,48 @@ const (
 	MetalFallbackFusedMLPBatchDispatch  MetalFallbackRoute = "fused-mlp-q6down-batch-caller-dispatch"
 )
 
+// metalFallbackRouteOrder is the stable slot order for the live per-route counter vector
+// (#12875). Its index i <=> metalFallbackRouteIndex(route)==i <=> metalFallbackRouteByIndex(i).
+// Keep it in sync with the const block above; a route absent here is simply not per-route
+// tallied (the scalar total still counts it).
+var metalFallbackRouteOrder = [...]MetalFallbackRoute{
+	MetalFallbackQ4KGEMMCPU,
+	MetalFallbackQ4KGEMVPanelCPU,
+	MetalFallbackQ4KGEMMGroupDispatch,
+	MetalFallbackQ4KGEMVGroupDispatch,
+	MetalFallbackQ8GEMMCPU,
+	MetalFallbackQ8GEMMGroupDispatch,
+	MetalFallbackQ8GEMVGroupDispatch,
+	MetalFallbackQ6KGEMMCPU,
+	MetalFallbackQ6KGEMVCPU,
+	MetalFallbackQ4KGEMVCPU,
+	MetalFallbackQ8GEMVCPU,
+	MetalFallbackQ4KGroupQ8CPU,
+	MetalFallbackFusedMLPDispatch,
+	MetalFallbackFusedMLPQ6DownDispatch,
+	MetalFallbackFusedMLPBatchDispatch,
+}
+
+// metalFallbackRouteIndex returns the stable vector slot for route, or ok=false when the route
+// has no dedicated slot. It is a small linear scan over 15 entries, off the hot path.
+func metalFallbackRouteIndex(route MetalFallbackRoute) (int, bool) {
+	for i, r := range metalFallbackRouteOrder {
+		if r == route {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// metalFallbackRouteByIndex maps a vector slot back to its route string. Out-of-range slots
+// return "" so a corrupted read can never fabricate a route name.
+func metalFallbackRouteByIndex(i int) string {
+	if i < 0 || i >= len(metalFallbackRouteOrder) {
+		return ""
+	}
+	return string(metalFallbackRouteOrder[i])
+}
+
 const (
 	metalFallbackBackendCPU         = "cpu"
 	metalFallbackBackendNotExecuted = "not-executed"

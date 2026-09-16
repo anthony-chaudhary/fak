@@ -36,6 +36,10 @@ const (
 	// turn's tool calls were all admitted). Abnormal stops (terminate, gate, error) carry
 	// their reason on the terminal ArmMetrics witness instead.
 	ProgressTurnDone ProgressEventKind = "turn_done"
+	// ProgressInfraReprompt marks the outer loop re-prompting the model after a
+	// RECOVERABLE infrastructure failure instead of hard-stopping the arm. Reason carries
+	// the CLOSED classification token (never upstream text); Turn is the failed turn index.
+	ProgressInfraReprompt ProgressEventKind = "infra_reprompt"
 )
 
 // ProgressEvent is one typed loop-lifecycle transition. It carries only witnessed facts
@@ -44,6 +48,7 @@ const (
 //   - tool_started: Turn, CallID, Tool.
 //   - call_adjudicated: Turn, CallID, Tool, Verdict, Reason.
 //   - result_admitted: Turn, CallID, Tool, Taint.
+//   - infra_reprompt: Turn, Reason (the closed infrastructure classification token).
 type ProgressEvent struct {
 	Seq     uint64            `json:"seq"`
 	Kind    ProgressEventKind `json:"kind"`

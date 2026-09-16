@@ -33,6 +33,16 @@ const fp8BlockDim = 128
 
 func fp8E4M3ToF32(b byte) float32 { return mathx.DecodeE4M3(b) }
 
+// FP8E4M3ToF32 exposes the E4M3 byte decode to the internal/model/v41 leaf
+// package without renaming the core symbol.
+func FP8E4M3ToF32(b byte) float32 { return fp8E4M3ToF32(b) }
+
+// CheckedShapeProduct exposes the overflow-safe shape product to the
+// internal/model/v41 leaf package without renaming the core symbol. It lives
+// here rather than beside its definition in safetensors.go so the V4.1 carve
+// does not edit a file another lane holds WIP on (fak#13038).
+func CheckedShapeProduct(dims ...int) (int, bool) { return checkedShapeProduct(dims...) }
+
 // decodeFP8BlockScale dequantizes a row-major [O,I] float8_e4m3fn weight stored with
 // 128x128 2-D block scales to a flat row-major [O,I] f32 slice. scaleInv holds one f32
 // per 128x128 tile in row-major [ceil(O/128), ceil(I/128)] order — exactly the

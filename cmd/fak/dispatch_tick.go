@@ -114,6 +114,15 @@ type dispatchTickOptions struct {
 	Account             *dispatchtick.Account
 	Membership          *dispatchtick.Membership
 	DiscoverySnapshot   *runsSnapshot
+	// SharedHost carries the ONE microagent host a live --backend micro WAVE shares
+	// across every row it enrolls (dispatch_wave_shared_host.go). It is nil for a
+	// standalone tick, so dispatchTickHostEnroll builds its own one-agent host exactly
+	// as before; a wave sets it so the same per-row routing/lease/gate evaluation
+	// enrolls into a single shared host instead of constructing one per tick.
+	SharedHost *dispatchWaveHostShare
+	// WaveSharedRank is the originating row's rank when SharedHost is set, so a
+	// deferred row can be mapped back to its wave receipt entry after the batch drains.
+	WaveSharedRank int
 }
 
 type dispatchLanePick struct {

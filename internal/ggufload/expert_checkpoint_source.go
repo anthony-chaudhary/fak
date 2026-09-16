@@ -72,11 +72,19 @@ type FusedExpertShard struct {
 // checkpointExpertQuant maps a GGUF tensor type onto the representation the checkpoint tier stages,
 // ok=false for one it has no staging for. This is deliberately NARROWER than
 // residentExpertBlockGeometry: that predicate answers "can these raw bytes be held resident", this
-// one answers "can one expert's raw bytes be uploaded straight into the ring", and the second set
-// is the three k-quants compute.NewQ4K/NewQ5K/NewQ6K accept. Widening it is a matter of teaching
-// model.ExpertCheckpointQuant the extra kinds, not of relaxing anything here.
+// one answers "can one expert's raw bytes be STAGED into the ring", and it tracks the
+// model.ExpertCheckpointQuant members one-for-one.
+//
+// Every kind here stages its super-blocks VERBATIM through an internal/compute host constructor:
+// Q2_K/Q4_K/Q5_K/Q6_K always had one, and Q3_K gained compute.NewQ3K in fak#13149. Admitting
+// TensorQ3_K here is what lets the exact DeepSeek-V4.1 Q2_K artifact (Q2_K gate/up, Q3_K down)
+// reach the streamed forward instead of being refused as partially unstageable (fak#13144).
 func checkpointExpertQuant(t TensorType) (model.ExpertCheckpointQuant, bool) {
 	switch t {
+	case TensorQ2_K:
+		return model.ExpertCheckpointQ2K, true
+	case TensorQ3_K:
+		return model.ExpertCheckpointQ3K, true
 	case TensorQ4_K:
 		return model.ExpertCheckpointQ4K, true
 	case TensorQ5_K:
@@ -85,6 +93,81 @@ func checkpointExpertQuant(t TensorType) (model.ExpertCheckpointQuant, bool) {
 		return model.ExpertCheckpointQ6K, true
 	}
 	return 0, false
+}
+
+// stageableRoutedExpertSlab is the tier's per-slab admission rule, single-sourced so
+// FusedExpertTensors and UnstageableRoutedExpertSlabs cannot disagree about which slabs the tier can
+// serve. It reports the staging quant and the parsed [E,out,in] shape on admission; ok=false means
+// this slab takes the eager path instead. An error means the directory is malformed.
+//
+// The three declines, in the order the eager path applies them:
+//   - the quant must have a compute tensor kind (checkpointExpertQuant) - internal/compute's
+//     verbatim host constructor for each, Q3_K included since fak#13149;
+//   - the reduction dim must be whole 256-weight super-blocks, the same gate
+//     splitGLMMoeDsaExpertsRawQuant applies before it will split raw bytes at all;
+//   - the name must be resident-eligible, the same predicate that decides whether the eager path
+//     may hold those bytes raw.
+func (s *WeightSource) stageableRoutedExpertSlab(cfg model.Config, info TensorInfo) (quant model.ExpertCheckpointQuant, experts, rows, cols int, ok bool, err error) {
+	quant, ok = checkpointExpertQuant(info.Type)
+	if !ok {
+		return 0, 0, 0, 0, false, nil // residentable perhaps, but not stageable one expert at a time
+	}
+	shape, serr := modelShapeFromGGUFDims(info.Name, info.Dims)
+	if serr != nil {
+		return 0, 0, 0, 0, false, serr
+	}
+	experts, rows, cols, perr := parseGLMMoeDsaExpertShape(shape)
+	if perr != nil {
+		return 0, 0, 0, 0, false, perr
+	}
+	if cols%qkK != 0 {
+		return 0, 0, 0, 0, false, nil
+	}
+	layer, proj, _ := glmMoeDsaBatchedExpert(info.Name)
+	if !model.ResidentKQuantEligible(cfg, fmt.Sprintf("model.layers.%d.mlp.experts.0.%s.weight", layer, proj)) {
+		return 0, 0, 0, 0, false, nil
+	}
+	return quant, experts, rows, cols, true, nil
+}
+
+// UnstageableRoutedExpertSlabs names every batched routed-expert slab this checkpoint carries that
+// the R5 tier CANNOT stage, in directory order. It performs NO payload IO, exactly like
+// FusedExpertTensors, and consults the same admission rule so the two cannot drift.
+//
+// It exists because a PARTIAL decline is not the same as an empty one. When a checkpoint has some
+// stageable expert slabs and some it cannot stage, the tier still builds (so the caller's
+// WithStreamedExperts request is not refused outright), but the declined slabs fall off the
+// streamed set and are eager-dequantized to f32 - materializing the very expert bulk the caller
+// asked to bound. Naming them lets the loader refuse that half-measure instead of silently paying
+// the bytes (fak#13144).
+//
+// It returns an error only for a malformed directory, matching FusedExpertTensors: a 3-D expert
+// slab whose dims do not parse is corrupt, not a decline.
+func (s *WeightSource) UnstageableRoutedExpertSlabs() ([]string, error) {
+	if s == nil || s.File == nil {
+		return nil, nil
+	}
+	cfg, err := s.File.Config()
+	if err != nil {
+		return nil, err
+	}
+	if !archUsesGGUFBatchedMoEExperts(cfg.ModelType) {
+		return nil, nil
+	}
+	var names []string
+	for _, info := range s.File.Tensors {
+		if _, _, ok := glmMoeDsaBatchedExpert(info.Name); !ok {
+			continue
+		}
+		_, _, _, _, stageable, serr := s.stageableRoutedExpertSlab(cfg, info)
+		if serr != nil {
+			return nil, serr
+		}
+		if !stageable {
+			names = append(names, info.Name)
+		}
+	}
+	return names, nil
 }
 
 // FusedExpertTensors describes every batched routed-expert slab this checkpoint carries that the
@@ -122,28 +205,11 @@ func (s *WeightSource) FusedExpertTensors() ([]FusedExpertShard, error) {
 		if !ok {
 			continue
 		}
-		quant, ok := checkpointExpertQuant(info.Type)
-		if !ok {
-			continue // residentable perhaps, but not stageable one expert at a time — eager path
+		quant, experts, rows, cols, stageable, perr := s.stageableRoutedExpertSlab(cfg, info)
+		if perr != nil {
+			return nil, perr
 		}
-		shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
-		if err != nil {
-			return nil, err
-		}
-		experts, rows, cols, err := parseGLMMoeDsaExpertShape(shape)
-		if err != nil {
-			return nil, err
-		}
-		// The same reduction-dim gate splitGLMMoeDsaExpertsRawQuant applies: a resident raw-quant
-		// row must be a whole number of super-blocks, because the GEMV dequantizes blocks ALONG
-		// each row. Unaligned means the eager path dequant-splits this slab to f32, and so must we.
-		if cols%qkK != 0 {
-			continue
-		}
-		// The eager path decides residency on the FIRST expert's canonical name; ask the same
-		// question of the same name, so a tensor the resident store would refuse is not quietly
-		// admitted through the tier instead.
-		if !model.ResidentKQuantEligible(cfg, fmt.Sprintf("model.layers.%d.mlp.experts.0.%s.weight", layer, proj)) {
+		if !stageable {
 			continue
 		}
 		r, size := s.r, s.size

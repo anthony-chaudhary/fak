@@ -78,6 +78,71 @@ func serveArtifactResidentQ4K(backend compute.Backend, artifact ggufload.Artifac
 	return (artifact.Q4KResident || artifact.Recipe == "UD-Q2_K_XL") && serveDeviceResidentQ4K(backend)
 }
 
+// serveArtifactCPUOffloadExperts is the artifact-derived offload predicate: it reports whether
+// the header's ROUTED expert tensors are all backed by an encoding the host-offload loader can
+// hold raw-resident AND a canonical name it holds resident (ggufload.RoutedExpertEncodingRefusal).
+// It replaces the old Q4_K-only gate, which missed a packed non-Q4_K MoE artifact entirely and
+// charged every weight device-scoped. The error is the named ErrRoutedExpertEncodingUnqualified
+// refusal when the artifact is genuinely unqualified; it is reported (not swallowed) so a caller
+// can surface the named key.
+func serveArtifactCPUOffloadExperts(ws *ggufload.WeightSource) (bool, error) {
+	if ws == nil {
+		return false, nil
+	}
+	cfg, err := ws.File.Config()
+	if err != nil {
+		return false, err
+	}
+	if err := ggufload.RoutedExpertEncodingRefusal(cfg, ws.File.Tensors); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// serveLoadCPUOffloadArm resolves the LOAD switch's cpu-offload decision from the artifact ALONE
+// (#13116) — the same predicate the host sizing path (resolveHostServeLoadArm ->
+// serveArtifactCPUOffloadExperts) applies, so arm selection and the plan cannot disagree. It is
+// deliberately backend-INDEPENDENT: a device-less serve (backend == nil on the CGO_ENABLED=0
+// appliance build) that the sizing path already charged host-scoped must select the host offload
+// arm rather than fall through to the all-resident lean default and over-refuse. The caller
+// enforces the device arm's quantized-UploadDtype constraint; an unqualified artifact refuses
+// here by the named ggufload.ErrRoutedExpertEncodingUnqualified key, never a silent partial load.
+func serveLoadCPUOffloadArm(ggufPath string, cpuOffloadExperts bool) (bool, error) {
+	if !cpuOffloadExperts {
+		return false, nil
+	}
+	ws, err := ggufload.OpenWeights(ggufPath)
+	if err != nil {
+		return false, nil
+	}
+	defer ws.Close()
+	return serveLoadCPUOffloadArmFromWeightSource(ws, cpuOffloadExperts)
+}
+
+// serveLoadCPUOffloadArmFromWeightSource is the artifact-only half of serveLoadCPUOffloadArm: the
+// open/conclude prelude split out so the arm decision can be witnessed directly against an
+// in-memory WeightSource, the same seam the sizing-path tests use. It mirrors
+// RoutedExpertResidencyQualified exactly: a PRESENT but unqualified routed expert refuses by the
+// named key; an artifact with NO routed expert at all is simply not the offload arm (ok=false,
+// nil err), so an ordinary dense serve that happens to pass --cpu-offload-experts is unchanged.
+func serveLoadCPUOffloadArmFromWeightSource(ws *ggufload.WeightSource, cpuOffloadExperts bool) (bool, error) {
+	if !cpuOffloadExperts || ws == nil {
+		return false, nil
+	}
+	cfg, err := ws.File.Config()
+	if err != nil {
+		return false, nil
+	}
+	ok, _, offending := ggufload.RoutedExpertResidencyQualified(cfg, ws.File.Tensors)
+	if ok {
+		return true, nil
+	}
+	if offending != "" {
+		return false, ggufload.RoutedExpertEncodingRefusal(cfg, ws.File.Tensors)
+	}
+	return false, nil
+}
+
 // serveQwen38Q4KEmbeddingResident limits packed Q4_K embedding residency to the
 // exact Qwen3.8-27B artifact on the native Metal resident-Q4_K path. Other
 // artifacts and explicit backends retain the loader's default F32 embedding.
@@ -122,6 +187,28 @@ func newServeLoadProfiler() *ggufload.LoadProfiler {
 	return p
 }
 
+// serveStreamedHostFit picks the HOST budget the bounded-resident streamed expert decision sizes
+// its working set from (fak#13142).
+//
+// `fit` is the caller's injected fit override. On a device serve it is the DEVICE fit budget:
+// serveNativeContextSizingInputs returns serveDeviceFitBudget(be) for be != nil, serve_stages.go
+// threads that snapshot here as rt.fitBudget, and the value describes VRAM, not host RAM. Sizing
+// the streamed bound from it made the load charge a device-scale resident set (0.90 * 71.53 GiB =
+// 64.38 GiB of VRAM) and then judge it against real host RAM (~48.89 GiB), so the plan refused
+// FitTooBig and the serve never loaded: the physical strix3 witness.
+//
+// So the streamed decision always probes the true HOST budget when a device backend is present.
+// Only the device-LESS arm may take the injected override as its host snapshot, because there the
+// override IS the host fit the sizing path measured (resolveServeNativeContext's serveHostFitBudget
+// / serveHostFitBudgetFromReported). The device arm still admits its device side with `fit`
+// verbatim inside fitServeStreamedCPUOffloadPathOnDevice, so device accounting is unchanged.
+func serveStreamedHostFit(backend compute.Backend, fit *serveFitBudget) serveFitBudget {
+	if backend == nil && fit != nil {
+		return *fit
+	}
+	return serveHostFitBudget()
+}
+
 func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloadExperts bool, contextBudgetTokens int, expertShard *ggufload.ExpertShard, expertRanks int, fit *serveFitBudget) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
 	if modelPath == "" {
 		return nil, false, nil, gateway.StartupPhase{}
@@ -152,6 +239,14 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		must(err)
 	}
 	residentQ4K := serveArtifactResidentQ4K(backend, artifactQuant)
+	// Artifact-derived offload-arm decision. The old Q4_K-only gate (artifactQuant.Q4KResident)
+	// never selected the offload arm for a packed non-Q4_K MoE artifact (e.g. DeepSeek-V4.1
+	// Q2_K/Q3_K), so the plan charged ALL weights device-scoped and refused with a bogus
+	// oversize. The decision is derived from the artifact's routed-expert encodings and is the
+	// SAME predicate EstimateCPUOffloadExperts* applies, so arm selection and the plan cannot
+	// disagree. A routed expert present but unqualified refuses by the named key here.
+	cpuOffloadArm, err := serveLoadCPUOffloadArm(ggufPath, cpuOffloadExperts)
+	must(err)
 	var loadMessages []gateway.StartupMessage
 	// A sharded expert-parallel rank (expertShard != nil) admits ONLY its routed-expert band into
 	// the resident store — the residency that fits GLM-5.2 across the fleet (#971). It rides ONLY
@@ -173,7 +268,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 	}
 	if expertShard != nil {
 		q4kOpts = append(q4kOpts, ggufload.WithExpertShard(expertShard.Lo, expertShard.Hi))
-		must(serveShardSeamRefusal(backend, cpuOffloadExperts, serveShardSeamEnvQ4K() && artifactQuant.Q4KResident))
+		must(serveShardSeamRefusal(backend, cpuOffloadExperts, cpuOffloadArm, serveShardSeamEnvQ4K() && artifactQuant.Q4KResident))
 	}
 	// How many ranks this process's WEIGHTS are actually split across. A rank is sharded only when
 	// it was handed a band: expertRanks alone must never select a per-rank plan, or an unsharded
@@ -181,6 +276,24 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 	residentRanks := 1
 	if expertShard != nil && expertRanks > 1 {
 		residentRanks = expertRanks
+	}
+	// Bounded-resident NVMe-streamed expert policy (fak#13121). When --cpu-offload-experts is
+	// requested but the FULL routed-expert set cannot be host-resident (the DeepSeek-V4.1 Flash
+	// Q2_K set is 183.25 GiB against a 62 GiB Halo) AND the checkpoint tier can stage the slabs,
+	// charge only a bounded resident working set and fault the rest from the staged shards on
+	// demand. The decision is made from the SAME opened checkpoint the plan runs over, so the load
+	// arm's option threading and the sizing path's plan cannot disagree. A streamed tier serves
+	// EVERY expert the checkpoint carries, so it never combines with an expert-parallel shard
+	// (the loader refuses both); sharded ranks keep the resident band arm unchanged.
+	hostFit := serveStreamedHostFit(backend, fit)
+	streamedOffload := false
+	var streamedBound int64
+	if cpuOffloadArm && expertShard == nil {
+		streamedOffload, streamedBound, err = serveStreamedCPUOffloadPathDecision(ggufPath, residentRanks, contextBudgetTokens, hostFit)
+		must(err)
+		if streamedOffload {
+			q4kOpts = append(q4kOpts, ggufload.WithStreamedExperts(streamedBound))
+		}
 	}
 	// #1062 pre-launch load-path check: warn (don't refuse) before a large GGUF load when the
 	// weights sit on a network filesystem. NFS/CIFS read at network speed — the ~50-100x
@@ -191,7 +304,29 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		loadMessages = append(loadMessages, serveStartupMessage("slow-load-path", "warning", w))
 	}
 	switch {
-	case backend != nil && cpuOffloadExperts && artifactQuant.Q4KResident:
+	case backend == nil && cpuOffloadExperts && cpuOffloadArm:
+		// Device-LESS host CPU-expert offload (#13116). The appliance binary is built without
+		// -tags vulkan (CGO_ENABLED=0), so no device backend registers and backend is nil — but
+		// resolveHostServeLoadArm (serve_model_fit.go) already selects serveLoadArmCPUOffloadExperts
+		// for exactly this case, and the memory plan already charges the routed experts host-scoped.
+		// Without this arm the load switch fell to the all-resident lean-Q8 default, charged every
+		// weight against MemAvailable, and refused a serve the sizing path had shown fit. Mirror the
+		// sizing predicate (serveArtifactCPUOffloadExperts) so arm selection and plan cannot disagree,
+		// and load the routed experts raw-resident on the host via the same Q4_K resident loader the
+		// pure-CPU FAK_Q4K arm uses.
+		loadMessages = append(loadMessages, serveQuantProvenance(artifactQuant, true))
+		if streamedOffload {
+			must(fitServeStreamedCPUOffloadPathOnHost(ggufPath, residentRanks, contextBudgetTokens, hostFit))
+			loadMessages = append(loadMessages, serveStartupMessage("serving-expert-residency", "info", fmt.Sprintf("routed-expert set exceeds host RAM; streaming the checkpoint with a bounded resident working set (%s) and faulting the remaining strides from the staged shards on demand", bytesText(uint64(max(streamedBound, 0))))))
+		} else {
+			must(fitServeGGUFPathOnHostForArm(ggufPath, serveLoadArmCPUOffloadExperts, contextBudgetTokens, fit))
+		}
+		loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", "GGUF host load -> direct-resident K-quant on the host (no device backend registered; dense + routed experts host-resident, raw super-blocks, dequant fused into the GEMM tile, no f32/Q8 round-trip; --cpu-offload-experts)"))
+		mm, prof, loadNanos := loadResidentQ4KProfiled(ggufPath, tLoad, q4kOpts...)
+		loadMessages = append(loadMessages, serveStartupMessage("resident-layout", "info", fakmodel.FormatResidentReport(mm.ResidentReport())))
+		profile := withServeStartupMessages(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k-host", ggufPath, loadNanos)), loadMessages...)
+		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
+	case backend != nil && cpuOffloadExperts && cpuOffloadArm:
 		loadMessages = append(loadMessages, serveQuantProvenance(artifactQuant, true))
 		if !backend.Caps().UploadDtype {
 			must(fmt.Errorf("fak serve: --cpu-offload-experts requires backend %q to advertise quantized UploadDtype (Q8_0 upload); use a quantized-upload backend or omit --cpu-offload-experts", backend.Name()))
@@ -210,8 +345,15 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		// host-scope refusal below over-refuses ~ranks-fold, and it does so BEFORE the authoritative
 		// rank-local gate (refuseEPPlanIfUnfit) ever runs. residentRanks is 1 for every unsharded
 		// serve, which plans exactly as before.
-		memPlan, err := fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens, fit)
-		must(err)
+		var memPlan compute.MemoryPlan
+		if streamedOffload {
+			memPlan, _, err = fitServeStreamedCPUOffloadPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens, hostFit, fit)
+			must(err)
+			loadMessages = append(loadMessages, serveStartupMessage("serving-expert-residency", "info", fmt.Sprintf("routed-expert set exceeds host RAM; streaming the checkpoint with a bounded resident working set (%s) and faulting the remaining strides from the staged shards on demand", bytesText(uint64(max(streamedBound, 0))))))
+		} else {
+			memPlan, err = fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens, fit)
+			must(err)
+		}
 		// #971 blocker 3: the dense weights fit-checked above land in VRAM, but the routed MoE
 		// experts (~424 GiB for GLM-5.2 Q4_K) are pinned in HOST RAM — and a device backend does not
 		// advertise HostCapacity, so the device fit check fails OPEN on them. Guard the host expert
@@ -330,9 +472,18 @@ func loadResidentQ4KProfiled(ggufPath string, tLoad time.Time, opts ...ggufload.
 	// Empty opts (the default, every non-EP serve) is byte-identical to the old LoadModelQ4KProfile.
 	var mm *fakmodel.Model
 	var err error
-	if os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1" {
+	// The streamed arms need a checkpoint that outlives the model; the lifetime-CLOSING entry
+	// (LoadModelQ4KProfileOptions) refuses both by contract, and repurposing the DENSE stream entry
+	// for the expert arm would materialize the full routed set instead of faulting it (fak#13143).
+	// Read the option list the caller threaded and pick the matching lifetime-TRANSFERRING entry so
+	// the bounded-resident streamed-expert arm can actually reach model load.
+	effects := ggufload.ApplyQ4KLoadOptions(opts)
+	switch {
+	case effects.StreamedExperts:
+		mm, err = ggufload.LoadModelQ4KStreamedExperts(ggufPath, prof, effects.StreamedExpertBytes, opts...)
+	case effects.StreamedDenseQ4K || os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1":
 		mm, err = ggufload.LoadModelQ4KStreamedDense(ggufPath, prof, opts...)
-	} else {
+	default:
 		mm, err = ggufload.LoadModelQ4KProfileOptions(ggufPath, prof, opts...)
 	}
 	must(err)
@@ -529,9 +680,10 @@ func refuseStreamedQ4KMetalCapacity(total int64, known, freeCPU bool) error {
 type serveLoadArm string
 
 const (
-	serveLoadArmResidentQ4K    serveLoadArm = "resident-q4k"
-	serveLoadArmQuantProfileQ8 serveLoadArm = "quant-profile-q8"
-	serveLoadArmF32            serveLoadArm = "f32"
+	serveLoadArmResidentQ4K       serveLoadArm = "resident-q4k"
+	serveLoadArmQuantProfileQ8    serveLoadArm = "quant-profile-q8"
+	serveLoadArmCPUOffloadExperts serveLoadArm = "cpu-offload-experts"
+	serveLoadArmF32               serveLoadArm = "f32"
 )
 
 func resolveMetalServeLoadArm(ws *ggufload.WeightSource) serveLoadArm {

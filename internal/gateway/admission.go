@@ -257,6 +257,54 @@ type AdmissionStats struct {
 	Refused       int64 // cumulative requests refused for impossible envelopes (counter)
 }
 
+// admissionDecisionHistory is the fixed bound on retained per-trace admission decisions —
+// the durable record never grows unboundedly (#13120).
+const admissionDecisionHistory = 64
+
+// AdmissionReservation is one scope's estimated footprint held by an admitted request — the
+// reservation view of a receipt. Tokens is the token axis the gate actually charges today;
+// Bytes is a per-scope byte estimate only when the controller holds an exact basis for one.
+// A zero Bytes means "no byte estimate available", never a fabricated fit.
+type AdmissionReservation struct {
+	// Scope names the capacity axis the reservation holds (e.g. "tokens", "fleet_tokens").
+	Scope string
+	// Tokens is the estimated token footprint reserved on this scope.
+	Tokens int
+	// Bytes is the estimated byte footprint when an exact basis exists; 0 otherwise.
+	Bytes int64
+}
+
+// AdmissionDecisionReceipt is the durable, per-request record of ONE admission decision
+// bound to its trace id (#13120). It is observability only: it changes no admission policy,
+// KV budget, allocator, or backend behavior. Every field is a snapshot taken at the
+// decision boundary under the controller lock.
+type AdmissionDecisionReceipt struct {
+	// TraceID is the request's identity AFTER the controller assigned its unique suffix, so
+	// two concurrent requests for the same served session remain distinguishable.
+	TraceID string
+	// SessionID is the caller's session/trace grouping (base trace, suffix stripped).
+	SessionID string
+	// Tokens is the request's estimated/planned token footprint charged to the gate.
+	Tokens int
+	// Priority is the request's raw priority (lower is higher, Priority-ascending).
+	Priority int
+	// Verdict is the outcome token (AdmissionVerdict.String()).
+	Verdict string
+	// Admitted reports whether this decision granted a running-set slot to the request.
+	Admitted bool
+	// Budget names the policy/budget axis that decided a refusal ("tokens",
+	// "fleet_tokens", "max_num_seqs", ...); empty when nothing refused it.
+	Budget string
+	// Reason carries the rejection reason when refused/shed/denied; empty otherwise.
+	Reason string
+	// At is the decision time from the controller's injectable clock.
+	At time.Time
+	// Reservations is the estimated reservation by scope. Today the token axis is the only
+	// exact one, so it carries at most the token scope; it is empty when the controller
+	// holds no exact per-scope basis rather than guessing bytes.
+	Reservations []AdmissionReservation
+}
+
 // AdmissionController is the admission/priority/fairness gate over the native loop. The
 // zero value is not usable — build one with NewAdmissionController. It is safe for
 // concurrent use (the gateway request path and the loop both touch it).
@@ -277,6 +325,10 @@ type AdmissionController struct {
 	pool         *session.Pool
 	orderPolicy  session.Policy
 	credits      map[string]int64
+	// decisions retains the most recent admission decision per trace id (bounded ring of
+	// admissionDecisionHistory entries), guarded by mu like every other controller field.
+	decisions     map[string]AdmissionDecisionReceipt
+	decisionOrder []string // FIFO of retained trace ids; len ≤ admissionDecisionHistory
 }
 
 // waitEntry is one queued request plus the round it was enqueued, so aging can measure
@@ -371,11 +423,66 @@ func (c *AdmissionController) MaxWaiting() int {
 
 func newAdmissionControllerWithBudgets(p AdmissionPolicy, budgets ...batchBudget) *AdmissionController {
 	return &AdmissionController{
-		policy:  p,
-		budgets: append([]batchBudget(nil), budgets...),
-		running: map[string]SeqRequest{},
-		credits: make(map[string]int64),
+		policy:    p,
+		budgets:   append([]batchBudget(nil), budgets...),
+		running:   map[string]SeqRequest{},
+		credits:   make(map[string]int64),
+		decisions: map[string]AdmissionDecisionReceipt{},
 	}
+}
+
+// recordDecisionLocked retains one admission decision receipt in the bounded ring, keyed
+// by the request's (suffixed) trace id. A later decision for the same trace — e.g. a queued
+// request finally promoted — overwrites the prior receipt. Oldest entries are evicted once
+// the ring is at its fixed bound. Caller holds c.mu.
+func (c *AdmissionController) recordDecisionLocked(req SeqRequest, verdict AdmissionVerdict, budget, reason string) {
+	if c == nil {
+		return
+	}
+	if c.decisions == nil {
+		c.decisions = map[string]AdmissionDecisionReceipt{}
+	}
+	rec := AdmissionDecisionReceipt{
+		TraceID:   req.TraceID,
+		SessionID: req.SessionID,
+		Tokens:    req.Tokens,
+		Priority:  req.Priority,
+		Verdict:   verdict.String(),
+		Admitted:  verdict == VerdictAdmitted,
+		Budget:    budget,
+		Reason:    reason,
+		At:        c.nowLocked(),
+		// The token axis is the one exact reservation the gate holds today; a byte
+		// estimate would have to be invented here, so none is recorded.
+		Reservations: []AdmissionReservation{{Scope: "tokens", Tokens: req.Tokens}},
+	}
+	if _, exists := c.decisions[req.TraceID]; !exists {
+		if len(c.decisionOrder) >= admissionDecisionHistory {
+			evict := c.decisionOrder[0]
+			c.decisionOrder = c.decisionOrder[1:]
+			delete(c.decisions, evict)
+		}
+		c.decisionOrder = append(c.decisionOrder, req.TraceID)
+	}
+	c.decisions[req.TraceID] = rec
+}
+
+// LastAdmissionDecision returns the most recent admission decision receipt retained for
+// traceID, and whether one exists. It is the durable per-request read-back the serve path
+// (or a diagnostic reader) consults; the returned slice is a copy so a caller cannot
+// mutate controller state.
+func (c *AdmissionController) LastAdmissionDecision(traceID string) (AdmissionDecisionReceipt, bool) {
+	if c == nil {
+		return AdmissionDecisionReceipt{}, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	rec, ok := c.decisions[traceID]
+	if !ok {
+		return AdmissionDecisionReceipt{}, false
+	}
+	rec.Reservations = append([]AdmissionReservation(nil), rec.Reservations...)
+	return rec, true
 }
 
 // SetTable attaches or replaces the session table.
@@ -598,23 +705,28 @@ func (c *AdmissionController) Offer(req SeqRequest) AdmissionVerdict {
 	}
 	if req.DecodeTTL > 0 && now.Sub(req.CreatedAt) >= req.DecodeTTL {
 		c.stats.Expired++
+		c.recordDecisionLocked(req, VerdictExpired, "", "")
 		return VerdictExpired
 	}
 	if req.Trust.Deny {
 		c.stats.Denied++
+		c.recordDecisionLocked(req, VerdictDenied, "", req.Trust.Reason)
 		return VerdictDenied
 	}
 	if check := c.impossibleBudgetLocked(req); check.status == batchBudgetImpossible {
 		c.stats.Refused++
+		c.recordDecisionLocked(req, VerdictRefused, check.budget, check.reason)
 		return VerdictRefused
 	} else if check.status >= batchBudgetExhausted {
 		c.stats.Shed++
+		c.recordDecisionLocked(req, VerdictShed, check.budget, check.reason)
 		return VerdictShed
 	}
 	// Fast path: nobody is waiting and there is headroom now — admit immediately so an
 	// idle/underloaded node does not pay a Schedule round to serve its first requests.
 	if len(c.waiting) == 0 && c.batchBudgetStatusLocked(req).status < batchBudgetExhausted {
 		c.admitLocked(req)
+		c.recordDecisionLocked(req, VerdictAdmitted, "", "")
 		return VerdictAdmitted
 	}
 	// The request must wait. Shed it if the waiting queue is already at its bound — the
@@ -622,15 +734,18 @@ func (c *AdmissionController) Offer(req SeqRequest) AdmissionVerdict {
 	// volume cap (#10727) before long-prompt floods destroy TTFT service levels.
 	if c.policy.MaxWaiting > 0 && len(c.waiting) >= c.policy.MaxWaiting {
 		c.stats.Shed++
+		c.recordDecisionLocked(req, VerdictShed, "max_waiting", "waiting queue at bound")
 		return VerdictShed
 	}
 	if c.policy.MaxQueuedTokens > 0 && c.queuedTokens+req.Tokens > c.policy.MaxQueuedTokens {
 		c.stats.Shed++
+		c.recordDecisionLocked(req, VerdictShed, "max_queued_tokens", "queued token volume exceeds cap")
 		return VerdictShed
 	}
 	c.waiting = append(c.waiting, waitEntry{req: req, enqueuedRound: c.round})
 	c.queuedTokens += req.Tokens
 	c.stats.Queued++
+	c.recordDecisionLocked(req, VerdictQueued, "", "")
 	return VerdictQueued
 }
 
@@ -654,30 +769,36 @@ func (c *AdmissionController) Acquire(ctx context.Context, req SeqRequest) (*Adm
 	c.mu.Lock()
 	if req.Trust.Deny {
 		c.stats.Denied++
+		c.recordDecisionLocked(req, VerdictDenied, "", req.Trust.Reason)
 		c.mu.Unlock()
 		return nil, &AdmissionError{Verdict: VerdictDenied, Reason: req.Trust.Reason}
 	}
 	if check := c.impossibleBudgetLocked(req); check.status == batchBudgetImpossible {
 		c.stats.Refused++
+		c.recordDecisionLocked(req, VerdictRefused, check.budget, check.reason)
 		c.mu.Unlock()
 		return nil, &AdmissionError{Verdict: VerdictRefused, Budget: check.budget, Reason: check.reason}
 	} else if check.status >= batchBudgetExhausted {
 		c.stats.Shed++
+		c.recordDecisionLocked(req, VerdictShed, check.budget, check.reason)
 		c.mu.Unlock()
 		return nil, &AdmissionError{Verdict: VerdictShed, Budget: check.budget, Reason: check.reason}
 	}
 	if len(c.waiting) == 0 && c.batchBudgetStatusLocked(req).status < batchBudgetExhausted {
 		c.admitLocked(req)
+		c.recordDecisionLocked(req, VerdictAdmitted, "", "")
 		c.mu.Unlock()
 		return &AdmissionLease{ctl: c, traceID: req.TraceID}, nil
 	}
 	if c.policy.MaxWaiting > 0 && len(c.waiting) >= c.policy.MaxWaiting {
 		c.stats.Shed++
+		c.recordDecisionLocked(req, VerdictShed, "max_waiting", "waiting queue at bound")
 		c.mu.Unlock()
 		return nil, &AdmissionError{Verdict: VerdictShed}
 	}
 	if c.policy.MaxQueuedTokens > 0 && c.queuedTokens+req.Tokens > c.policy.MaxQueuedTokens {
 		c.stats.Shed++
+		c.recordDecisionLocked(req, VerdictShed, "max_queued_tokens", "queued token volume exceeds cap")
 		c.mu.Unlock()
 		return nil, &AdmissionError{Verdict: VerdictShed, Reason: "queued token volume exceeds cap"}
 	}
@@ -685,21 +806,45 @@ func (c *AdmissionController) Acquire(ctx context.Context, req SeqRequest) (*Adm
 	c.waiting = append(c.waiting, waitEntry{req: req, enqueuedRound: c.round, ready: ready})
 	c.queuedTokens += req.Tokens
 	c.stats.Queued++
+	c.recordDecisionLocked(req, VerdictQueued, "", "")
 	c.scheduleLocked()
+	// A same-round promotion closes ready before we wait, so refresh the receipt to
+	// admitted when the lease is actually granted below.
 	c.mu.Unlock()
 
 	select {
 	case <-ready:
+		c.recordGrantLocked(req)
 		return &AdmissionLease{ctl: c, traceID: req.TraceID}, nil
 	default:
 	}
 	select {
 	case <-ready:
+		c.recordGrantLocked(req)
 		return &AdmissionLease{ctl: c, traceID: req.TraceID}, nil
 	case <-ctx.Done():
 		c.cancelAdmission(req.TraceID)
+		c.recordCancelLocked(req)
 		return nil, ctx.Err()
 	}
+}
+
+// recordGrantLocked refreshes a promoted queued request's receipt to the terminal admitted
+// decision. c.mu is taken here so the caller (past its own unlock) need not hold it.
+func (c *AdmissionController) recordGrantLocked(req SeqRequest) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.recordDecisionLocked(req, VerdictAdmitted, "", "")
+}
+
+// recordCancelLocked records a caller-cancelled queued request's terminal decision. There
+// is no "cancelled" member in the closed AdmissionVerdict enum, so the receipt carries
+// VerdictExpired (the request ended unserved) with a distinguishing Reason. c.mu is taken
+// here so the caller need not hold it.
+func (c *AdmissionController) recordCancelLocked(req SeqRequest) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.recordDecisionLocked(req, VerdictExpired, "", "context cancelled while waiting")
 }
 
 func (c *AdmissionController) admissionTraceID(traceID string) string {

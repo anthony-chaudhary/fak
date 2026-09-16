@@ -171,6 +171,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		cmdSession(args)
 	case "session-audit":
 		cmdSessionAudit(args)
+	case "scratch":
+		cmdScratch(args)
 	case "scratch-janitor":
 		os.Exit(runScratchJanitor(os.Stdout, os.Stderr, args))
 	case "temp-artifacts":

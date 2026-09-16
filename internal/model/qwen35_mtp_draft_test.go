@@ -193,7 +193,7 @@ func TestSpecDecodeGreedyQwen35MTPDepthAdmission(t *testing.T) {
 	}{
 		{name: "zero", depth: 0},
 		{name: "above bound", depth: Qwen35MTPMaxDraftDepth + 1, reason: "exceeds the witnessed native bound"},
-		{name: "quant format", depth: 2, mutate: func(s *Session) { s.Quant = true }, reason: "#9985"},
+		{name: "quant format", depth: 2, mutate: func(s *Session) { s.Quant = true }, reason: "this quant format remains unsupported"},
 		{name: "malformed shape", depth: 2, mutate: func(s *Session) {
 			meta := s.M.manifest["mtp.fc.weight"]
 			meta.Shape = []int{1, 1}

@@ -28,6 +28,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
 	"github.com/anthony-chaudhary/fak/internal/macfit"
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -296,6 +297,7 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	contextOverride := fs.Uint64("context", 0, "override auto-selected context budget tokens")
 	kvPrecision := fs.String("kv-precision", "", "KV cache storage tier: f32 (default, exact) or q8_0 (dense mixed: f32 pre-RoPE K + q8_0 K/V; ~2x more context). Also settable via FAK_UP_KV_PRECISION.")
 	engineID := fs.String("engine", "inkernel", "model engine ID (default inkernel; mock only with --mock)")
+	gpuIdleExit := fs.Duration("gpu-idle-exit", defaultGPUIdleExit, "stop the resident server after this idle window (no in-flight request) so its GPU lease and model residency are released for a queued peer (e.g. modelbench, #13135); 0 keeps the historical process-lifetime holder")
 
 	if err := fs.Parse(argv); err != nil {
 		os.Exit(2)
@@ -398,11 +400,20 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	if id := guardShortBuildID(); id != "" {
 		ver += " (" + id + ")"
 	}
+	server.armGPUIdleExit(*gpuIdleExit)
 	printTurnkeyReady(stdout, ver, server.Addr(), plan)
-	printTurnkeyBackendStamp(stdout, server.metalDecision)
+	printTurnkeyBackendStamp(stdout, server.metalDecision, metalResidencyStampFrom(server.liveResidencyReport()))
+	if *gpuIdleExit > 0 {
+		fmt.Fprintf(stdout, "  • GPU idle-exit:             stops after %s idle so a queued GPU peer can run (#13135)\n", *gpuIdleExit)
+	}
 
 	if *headless || in == nil {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-server.done:
+			// The bounded idle exit already ran the graceful shutdown and
+			// released the GPU lease; nothing further to unwind here.
+		}
 		return
 	}
 
@@ -450,10 +461,98 @@ type turnkeyServer struct {
 	releaseRequested bool
 	activeRequests   int
 	residencyOnce    sync.Once
+	ready            *readinessGate
+	// idleExit stops the resident server after a bounded idle window so the GPU
+	// lease and model residency are released instead of pinned for the process
+	// lifetime (#13135). Nil preserves the historical lifetime holder.
+	idleExit *gpuIdleExitGovernor
+	// stop triggers the bounded stop from the idle governor; done is closed when
+	// the stop has been requested so the run loop can return through the same
+	// graceful-shutdown path a SIGTERM drives.
+	stop     func()
+	stopOnce sync.Once
+	done     chan struct{}
+}
+
+// readinessGate is a small package-main equivalent of the gateway warmup gate
+// (internal/gateway/readiness_warmup.go): it records whether a boot-time warmup
+// phase is still in flight so /healthz and /readyz can tell the TRUTH about
+// readiness instead of hardcoding ok/ready. The zero value means "not warming",
+// so a bare &turnkeyServer{} is ready — existing tests that construct one stay
+// byte-for-byte unaffected. Guarded by its own mutex; safe on a nil receiver.
+type readinessGate struct {
+	mu       sync.Mutex
+	armed    bool
+	complete bool
+}
+
+// armWarming declares that boot work (e.g. the synchronous model load) is in
+// flight and the server is not ready until markReady is called.
+func (g *readinessGate) armWarming() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.armed = true
+	g.complete = false
+}
+
+// markReady records that boot work finished and the server is ready. The first
+// completion wins; marking ready also overrides an armed gate.
+func (g *readinessGate) markReady() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.armed = true
+	g.complete = true
+}
+
+// pending reports whether readiness is being HELD for an incomplete warmup —
+// true only when the gate was armed and warmup has not completed. A never-armed
+// or already-complete gate returns false (readiness unaffected / already warm).
+func (g *readinessGate) pending() bool {
+	if g == nil {
+		return false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.armed && !g.complete
+}
+
+// readyState reports the readiness as a state string and a boolean: while
+// armed-and-incomplete it is ("warming_up", false); otherwise ready ("ok", true).
+func (g *readinessGate) readyState() (state string, isReady bool) {
+	if g == nil {
+		return "ok", true
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.armed && !g.complete {
+		return "warming_up", false
+	}
+	return "ok", true
 }
 
 func (s *turnkeyServer) Addr() string {
 	return s.boundAddr
+}
+
+// armGPUIdleExit installs the bounded idle-exit governor (#13135). A zero or
+// negative window disables it, preserving the historical process-lifetime
+// holder. It is a no-op when the server is mock (no GPU lease to release) or
+// has no stop wired.
+func (s *turnkeyServer) armGPUIdleExit(idle time.Duration) {
+	if s == nil || s.stop == nil || idle <= 0 {
+		return
+	}
+	s.mu.Lock()
+	s.idleExit = newGPUIdleExitGovernor(idle, s.stop, func(format string, args ...any) {
+		fmt.Fprintf(os.Stderr, format+"\n", args...)
+	})
+	s.mu.Unlock()
 }
 
 func (s *turnkeyServer) Plan() macfit.TurnkeyProfile {
@@ -467,7 +566,9 @@ func (s *turnkeyServer) Planner() agent.Planner {
 func (s *turnkeyServer) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
 	s.stopping = true
+	idleExit := s.idleExit
 	s.mu.Unlock()
+	idleExit.close()
 	err := s.httpServer.Shutdown(ctx)
 	if err == nil {
 		s.requestResidencyRelease()
@@ -480,7 +581,9 @@ func (s *turnkeyServer) Close() error {
 	// resources and their admission lease after a successful server close.
 	s.mu.Lock()
 	s.stopping = true
+	idleExit := s.idleExit
 	s.mu.Unlock()
+	idleExit.close()
 	err := s.httpServer.Close()
 	if err == nil {
 		s.requestResidencyRelease()
@@ -509,11 +612,16 @@ func (s *turnkeyServer) requestResidencyRelease() {
 
 func (s *turnkeyServer) beginChatRequest() bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.stopping {
+		s.mu.Unlock()
 		return false
 	}
 	s.activeRequests++
+	idleExit := s.idleExit
+	s.mu.Unlock()
+	if idleExit != nil {
+		idleExit.requestBegan()
+	}
 	return true
 }
 
@@ -521,10 +629,36 @@ func (s *turnkeyServer) endChatRequest() {
 	s.mu.Lock()
 	s.activeRequests--
 	release := s.releaseRequested && s.activeRequests == 0
+	idleExit := s.idleExit
 	s.mu.Unlock()
+	if idleExit != nil {
+		idleExit.requestEnded()
+	}
 	if release {
 		s.releaseResidency()
 	}
+}
+
+// readiness reports whether the turnkey HTTP surface is accepting new work as
+// the tuple (ready, state, reason). Readiness is a published contract (see
+// help.go: GET /readyz is 503 until the server is up and passing its health
+// gates), not merely a liveness flag, so it folds BOTH independent not-ready
+// conditions: the boot warmup gate (s.ready, armed until the synchronous model
+// load completes — #12984) and the stopping transition (the same s.stopping
+// state beginChatRequest gates on). A zero-value turnkeyServer is ready:
+// nothing has asked it to stop and no warmup was armed. Callers must not hold
+// s.mu while encoding or writing the response.
+func (s *turnkeyServer) readiness() (ready bool, state string, reason string) {
+	if readyState, isReady := s.ready.readyState(); !isReady {
+		return false, readyState, "boot warmup in flight"
+	}
+	s.mu.Lock()
+	stopping := s.stopping
+	s.mu.Unlock()
+	if stopping {
+		return false, "stopping", "server is stopping"
+	}
+	return true, "ok", ""
 }
 
 func newInKernelChatPlanner(model *fakmodel.Model, tok *tokenizer.Tokenizer, modelID string, q4k bool, backend compute.Backend, metal bool) *agent.InKernelPlanner {
@@ -762,6 +896,10 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 	var planner agent.Planner
 	var native *turnkeyNativeResources
 	var capturedMetalDecision serveMetalDecision
+	// Declare the boot phase honestly: until the model/planner is constructed and
+	// the listener is about to bind, a readiness probe must not claim ready.
+	ready := &readinessGate{}
+	ready.armWarming()
 	if !mock {
 		if len(custom) > 0 && custom[0] != nil {
 			planner = custom[0]
@@ -843,6 +981,9 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 	if addr == "" {
 		addr = "127.0.0.1:8080"
 	}
+	// Boot work (model load + planner construction) is complete here; the server
+	// flips to ready immediately before binding the listener.
+	ready.markReady()
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		_ = native.Close()
@@ -862,6 +1003,24 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 		native:        native,
 		listener:      ln,
 		boundAddr:     ln.Addr().String(),
+		ready:         ready,
+		done:          make(chan struct{}),
+	}
+	// The idle-exit stop and the signal-driven stop converge here: both request
+	// the graceful shutdown and release the same residency/GPU lease exactly once.
+	ts.stop = func() {
+		ts.stopOnce.Do(func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = ts.Shutdown(shutdownCtx)
+			close(ts.done)
+		})
+	}
+	if native != nil {
+		// Release the admission (including the machine-wide GPU lease) as the
+		// residency half of the bounded stop; requestResidencyRelease fires it
+		// when the last in-flight request drains, and Shutdown if already idle.
+		ts.residencyRelease = func() { native.ReleaseAdmission() }
 	}
 
 	mux := http.NewServeMux()
@@ -869,6 +1028,7 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 	mux.HandleFunc("/readyz", ts.handleReadyz)
 	mux.HandleFunc("/v1/models", ts.handleModels)
 	mux.HandleFunc("/v1/chat/completions", ts.handleChatCompletions)
+	mux.HandleFunc("/v1/completions", ts.handleCompletions)
 	mux.HandleFunc("/v1/fak/tokenize", ts.handleTokenize)
 
 	ts.httpServer = &http.Server{
@@ -883,27 +1043,74 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 }
 
 func (s *turnkeyServer) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	isReady, state, _ := s.readiness()
 	var nativeStartup *turnkeyNativeStartup
 	if s.native != nil {
 		nativeStartup = &s.native.Startup
 	}
 	w.Header().Set("Content-Type", "application/json")
+	// Liveness is preserved for a live-but-not-ready process: /healthz answers
+	// 200 while the process can still respond, but the body's status must be
+	// truthful about readiness — "warming_up" until the boot warmup gate
+	// completes, "stopping" once shutdown began, otherwise "ok".
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status":         "ok",
+		"status":         state,
+		"ready":          isReady,
 		"mode":           "turnkey",
 		"engine":         s.engineID,
 		"tier":           s.plan.Tier.Name,
 		"model":          s.plan.Tier.ModelID,
 		"headroom_ratio": s.plan.HeadroomRatio,
 		"native_startup": nativeStartup,
+		"live_residency": s.liveResidencyReport(),
 	})
 }
 
+// liveResidencyReport reads the LIVE Metal/CPU routing state at request time (#12875) instead of
+// replaying the snapshot frozen into native.Startup at load. The frozen `native_startup` stays for
+// backward compatibility; this block is the truthful answer to "did decode run on Metal on this
+// run?". It re-samples device-resident weight counts (a lazy later upload is now visible) and
+// reports the model's process-wide promised-CPU-fallback tally, which survives the per-request
+// session churn. It returns nil when no native model is loaded (mock/custom-server paths), so the
+// key is absent rather than a fabricated zero.
+func (s *turnkeyServer) liveResidencyReport() map[string]any {
+	if s.native == nil || s.native.Model == nil {
+		return nil
+	}
+	q6k, q8 := s.native.Model.RefreshMetalResidency()
+	fallbacks := s.native.Model.MetalFallbackSnapshot()
+	return map[string]any{
+		"metal_live_q8_weights":    q8,
+		"metal_live_q6_weights":    q6k,
+		"promised_cpu_fallbacks":   fallbacks.Total,
+		"fallbacks_observed":       fallbacks.Observed,
+		"fallbacks_by_route":       fallbacks.ByRoute,
+		"startup_q8_weights":       s.native.Startup.MetalLiveQ8Weights,
+		"startup_q6_weights":       s.native.Startup.MetalLiveQ6Weights,
+		"metal_q8_residency_error": s.native.Startup.MetalQ8ResidencyError,
+	}
+}
+
 func (s *turnkeyServer) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	isReady, state, reason := s.readiness()
 	w.Header().Set("Content-Type", "application/json")
+	if !isReady {
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": state,
+			"ready":  false,
+			"reason": reason,
+		})
+		return
+	}
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"status":"ready"}`))
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status": "ready",
+		"ready":  true,
+		"mode":   "turnkey",
+	})
 }
 
 func (s *turnkeyServer) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -952,6 +1159,162 @@ func turnkeyMaxOutputTokens(contextTokens uint64) int {
 type chatCompletionResponse = gateway.ChatResponse
 type chatCompletionRequest = gateway.ChatRequest
 type chatCompletionMessage = agent.Message
+
+// turnkeyCompletionRequest is the LEGACY OpenAI text-completion wire for the
+// turnkey server (POST /v1/completions). It mirrors gateway.CompletionRequest but is
+// local to keep this file's wire surface explicit; `prompt` is raw because the wire
+// allows a bare string or an array of strings.
+type turnkeyCompletionRequest struct {
+	Model       string          `json:"model"`
+	Prompt      json.RawMessage `json:"prompt"`
+	MaxTokens   int             `json:"max_tokens,omitempty"`
+	Temperature *float64        `json:"temperature,omitempty"`
+	TopP        *float64        `json:"top_p,omitempty"`
+	Stream      bool            `json:"stream,omitempty"`
+}
+
+// turnkeyNormalizePrompt folds the legacy `prompt` field (bare string, or array of
+// strings joined with newlines) into one prompt string.
+func turnkeyNormalizePrompt(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var one string
+	if err := json.Unmarshal(raw, &one); err == nil {
+		return one
+	}
+	var many []string
+	if err := json.Unmarshal(raw, &many); err == nil {
+		return strings.Join(many, "\n")
+	}
+	return ""
+}
+
+// handleCompletions serves the LEGACY text-completion wire the turnkey server
+// previously omitted: it wraps the request prompt as a single user message and reuses
+// the same planner path as the chat route, then emits `text_completion` frames (bare
+// `text`, never a chat delta). This is the surface vLLM, SGLang, llama.cpp-server,
+// and the subagent fan-out harness all speak.
+func (s *turnkeyServer) handleCompletions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.beginChatRequest() {
+		http.Error(w, "server stopping", http.StatusServiceUnavailable)
+		return
+	}
+	defer s.endChatRequest()
+
+	var req turnkeyCompletionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	prompt := turnkeyNormalizePrompt(req.Prompt)
+	if strings.TrimSpace(prompt) == "" {
+		http.Error(w, "prompt: field required", http.StatusBadRequest)
+		return
+	}
+	if req.MaxTokens < 0 {
+		http.Error(w, "max_tokens: must be a positive integer", http.StatusBadRequest)
+		return
+	}
+
+	chatReq := gateway.ChatRequest{
+		Model:       req.Model,
+		Messages:    []agent.Message{{Role: agent.RoleUser, Content: prompt}},
+		MaxTokens:   req.MaxTokens,
+		Temperature: req.Temperature,
+		TopP:        req.TopP,
+		Stream:      req.Stream,
+	}
+	modelID := s.plan.Tier.ModelID
+	if chatReq.Model != "" {
+		modelID = chatReq.Model
+	}
+
+	if chatReq.Stream && !s.mock {
+		if sp, ok := s.planner.(agent.StreamingPlanner); ok && sp.StreamingSupported() {
+			s.handleCompletionsStream(w, r, chatReq, modelID, sp)
+			return
+		}
+	}
+
+	finishReason := "stop"
+	answer := agent.Message{Role: agent.RoleAssistant}
+	var usage agent.Usage
+
+	if !s.mock && s.planner != nil {
+		sampleOpts := turnkeyChatSampleOpts(chatReq, s.plan.ContextBudgetTokens)
+		comp, err := s.planner.Complete(r.Context(), chatReq.Messages, nil, sampleOpts...)
+		if err != nil {
+			writeTurnkeyInferenceError(w, err)
+			return
+		}
+		answer = comp.Message
+		usage = comp.Usage
+		if comp.FinishReason != "" {
+			finishReason = comp.FinishReason
+		}
+	} else {
+		answer.Content = fmt.Sprintf("Turnkey %s completion on Apple Silicon. Processed: %s", s.plan.Tier.Name, prompt)
+	}
+	if usage.CompletionTokens == 0 && answer.Content != "" {
+		usage.CompletionTokens = len(strings.Fields(answer.Content))
+		if usage.CompletionTokens == 0 {
+			usage.CompletionTokens = 1
+		}
+		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	}
+	atomic.AddInt64(&s.requestCount, 1)
+	atomic.AddInt64(&s.totalTokens, int64(usage.CompletionTokens))
+	created := time.Now().Unix()
+	cmplID := fmt.Sprintf("cmpl-fak-%d", time.Now().UnixNano())
+
+	if chatReq.Stream {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		sendChunk := func(text string, finish *string) {
+			chunk := map[string]any{
+				"id": cmplID, "object": "text_completion", "created": created, "model": modelID,
+				"choices": []map[string]any{{"index": 0, "text": text, "finish_reason": finish}},
+			}
+			if finish != nil {
+				chunk["usage"] = usage
+			}
+			raw, _ := json.Marshal(chunk)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", raw)
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		if answer.Content != "" {
+			sendChunk(answer.Content, nil)
+		}
+		stop := finishReason
+		sendChunk("", &stop)
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(gateway.CompletionResponse{
+		ID:      cmplID,
+		Object:  "text_completion",
+		Created: created,
+		Model:   modelID,
+		Choices: []gateway.CompletionChoice{{Index: 0, Text: answer.Content, FinishReason: &finishReason}},
+		Usage:   usage,
+	})
+}
 
 func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -1153,6 +1516,22 @@ func writeTurnkeyInferenceError(w http.ResponseWriter, err error) {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
 			"message": contextErr.Error(), "type": "invalid_request_error", "code": "context_length_exceeded",
+		}})
+		return
+	}
+	// A native Metal command-buffer wait that exceeded its bound is a local,
+	// retryable resource stall — not a generic server fault. Surface it as 503
+	// with a distinct code so a client can retry or shed load instead of
+	// treating it as an opaque 500. The observation seam may wrap the typed
+	// error, so errors.As (not a type assertion) recovers it.
+	var stall metalgemm.MetalCommandBufferStallError
+	if errors.As(err, &stall) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
+			"message": fmt.Sprintf("Metal command buffer stall during %s: waited %.3fms at/over %.3fms limit",
+				stall.Operation, stall.WaitedMilliseconds, stall.LimitMilliseconds),
+			"type": "server_error", "code": "metal_command_buffer_stalled",
 		}})
 		return
 	}

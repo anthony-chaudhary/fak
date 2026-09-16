@@ -46,10 +46,16 @@ type debugVarsResponse struct {
 	// MoEResidency is what a serve that declared an expert budget paid to keep the top-k
 	// activated experts resident (R6, #5617). Omitted unless some request actually engaged a
 	// routed-expert ring, so its absence means "not engaged" rather than "engaged, cost zero".
-	MoEResidency   *debugMoEResidencyVars    `json:"moe_residency,omitempty"`
-	Sessions       []debugSessionVars        `json:"sessions,omitempty"`
-	Assumptions    []SessionAssumption       `json:"assumptions,omitempty"`
-	ContextQueries []ContextQueryAuditRecord `json:"context_queries,omitempty"`
+	MoEResidency *debugMoEResidencyVars `json:"moe_residency,omitempty"`
+	// RequestAdmission is the LAST admission decision for the most recent live trace, joined
+	// to the LAST native phase observed for that SAME trace (#13120). It is a one-trace view,
+	// never the whole decision ring: a per-trace Prometheus series would be unbounded
+	// cardinality, so this rides the JSON debug front door instead. Omitted when neither
+	// producer is present (a proxy/mock serve), never rendered as a fabricated zero.
+	RequestAdmission *debugRequestAdmissionVars `json:"request_admission,omitempty"`
+	Sessions         []debugSessionVars         `json:"sessions,omitempty"`
+	Assumptions      []SessionAssumption        `json:"assumptions,omitempty"`
+	ContextQueries   []ContextQueryAuditRecord  `json:"context_queries,omitempty"`
 	// Endpoints is the live accounts+nodes block — which Claude seats and which serving
 	// nodes THIS session is using (fak guard's status area). Nil/omitted unless the host
 	// set a provider (SetSessionEndpointsProvider) that has something to report.
@@ -456,6 +462,49 @@ type debugRequestMemoryVars struct {
 	Fit           []debugMemoryFitVars           `json:"fit,omitempty"`
 }
 
+// debugRequestAdmissionVars is the one-trace admission/native-phase join (#13120): the last
+// admission decision recorded for the most recent live trace, plus the last native phase the
+// planner observed for that SAME trace. Each half is omitempty so a serve with only one
+// producer still renders the half it has; the block itself is omitted when neither is present.
+type debugRequestAdmissionVars struct {
+	// TraceID is the live trace the two halves below are keyed on (the request identity
+	// after the controller's concurrency suffix), so a reader can join them unambiguously.
+	TraceID string `json:"trace_id,omitempty"`
+	// Decision is the last admission decision for TraceID, or nil when the admission
+	// controller is not wired or holds no decision for this trace.
+	Decision *debugAdmissionDecisionVars `json:"decision,omitempty"`
+	// NativePhase is the last native phase observed for TraceID, or nil when the planner
+	// does not implement agent.NativePhaseReporter (a proxy planner).
+	NativePhase *debugNativePhaseVars `json:"native_phase,omitempty"`
+}
+
+// debugAdmissionDecisionVars is the durable AdmissionDecisionReceipt projected onto the
+// debug wire. It mirrors the controller's receipt field-for-field so an operator reading
+// /debug/vars sees exactly what LastAdmissionDecision returned.
+type debugAdmissionDecisionVars struct {
+	TraceID   string `json:"trace_id"`
+	SessionID string `json:"session_id,omitempty"`
+	Tokens    int    `json:"tokens"`
+	Priority  int    `json:"priority"`
+	Verdict   string `json:"verdict"`
+	Admitted  bool   `json:"admitted"`
+	Budget    string `json:"budget,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	// AtUnixNano is the decision time in epoch nanoseconds; 0 when the controller's clock
+	// returned the zero time (never a fabricated timestamp).
+	AtUnixNano int64 `json:"at_unix_nano,omitempty"`
+}
+
+// debugNativePhaseVars is the NativePhaseObservation projected onto the debug wire. Phase
+// carries the closed-vocabulary token verbatim; Completed distinguishes a phase that ran to
+// its end from one still in flight (or cut short).
+type debugNativePhaseVars struct {
+	Phase      string `json:"phase"`
+	AtUnixNano int64  `json:"at_unix_nano,omitempty"`
+	ElapsedMs  int64  `json:"elapsed_ms,omitempty"`
+	Completed  bool   `json:"completed"`
+}
+
 type debugCompactionVars struct {
 	Attempts                    map[string]uint64 `json:"attempts"`
 	BailReasons                 map[string]uint64 `json:"bail_reasons"`
@@ -680,6 +729,7 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 		KVMemory:         debugKVMemory(s.planner),
 		RequestMemory:    debugRequestMemory(s.planner),
 		MoEResidency:     debugMoEResidency(s.planner),
+		RequestAdmission: s.debugRequestAdmission(now),
 		Sessions:         observation.Sessions,
 		Assumptions:      s.debugAssumptions(ctx),
 		ContextQueries:   s.contextQueryAuditSnapshot(),
@@ -955,6 +1005,99 @@ func debugRequestMemory(p agent.Planner) *debugRequestMemoryVars {
 	}
 	out.Fit = debugMemoryFitRows(requestMemoryFitRows(st.MemoryPlan, st.Capacities, st.HeadroomRatio))
 	return out
+}
+
+// debugRequestAdmission folds the last admission decision for the most recent live trace,
+// joined to the last native phase observed for that SAME trace (#13120). It is a bounded
+// one-trace view: it never dumps the decision ring or every live trace. The trace is chosen
+// deterministically as the live session with the greatest Rev (the registry's monotone
+// revision), tie-broken by trace id, so two scrapes over an unchanged registry agree.
+//
+// It returns nil when NEITHER producer can answer, so the block is omitted on a proxy/mock
+// serve rather than rendered as an all-zero row. When only one producer is wired the block
+// still renders the half available. It reuses the same live-session enumeration
+// debugSessions uses (listSessions), inventing no second registry.
+func (s *Server) debugRequestAdmission(_ time.Time) *debugRequestAdmissionVars {
+	if s == nil {
+		return nil
+	}
+	s.admissionMu.RLock()
+	ctl := s.admissionCtl
+	s.admissionMu.RUnlock()
+	reporter, _ := s.planner.(agent.NativePhaseReporter)
+	if ctl == nil && reporter == nil {
+		return nil
+	}
+
+	trace := s.mostRecentLiveTrace(context.Background())
+	if trace == "" {
+		return nil
+	}
+
+	out := &debugRequestAdmissionVars{TraceID: trace}
+	if ctl != nil {
+		if rec, ok := ctl.LastAdmissionDecision(trace); ok {
+			dec := &debugAdmissionDecisionVars{
+				TraceID:   rec.TraceID,
+				SessionID: rec.SessionID,
+				Tokens:    rec.Tokens,
+				Priority:  rec.Priority,
+				Verdict:   rec.Verdict,
+				Admitted:  rec.Admitted,
+				Budget:    rec.Budget,
+				Reason:    rec.Reason,
+			}
+			if !rec.At.IsZero() {
+				dec.AtUnixNano = rec.At.UnixNano()
+			}
+			out.Decision = dec
+		}
+	}
+	if reporter != nil {
+		if obs, ok := reporter.NativePhaseObservation(trace); ok {
+			phase := &debugNativePhaseVars{
+				Phase:     obs.Phase.String(),
+				Completed: obs.Completed,
+			}
+			if !obs.At.IsZero() {
+				phase.AtUnixNano = obs.At.UnixNano()
+			}
+			if obs.Elapsed > 0 {
+				phase.ElapsedMs = obs.Elapsed.Milliseconds()
+			}
+			out.NativePhase = phase
+		}
+	}
+	if out.Decision == nil && out.NativePhase == nil {
+		return nil
+	}
+	return out
+}
+
+// mostRecentLiveTrace returns the live session's trace id with the greatest Rev (the
+// registry's monotone revision), tie-broken by trace id so the pick is deterministic. It
+// returns "" when no registry is wired or no session is live. This mirrors debugSessions'
+// enumeration exactly; it reads no other registry.
+func (s *Server) mostRecentLiveTrace(ctx context.Context) string {
+	if s == nil || s.listSessions == nil {
+		return ""
+	}
+	bestRev := uint64(0)
+	best := ""
+	for _, st := range s.listSessions(ctx) {
+		if strings.EqualFold(strings.TrimSpace(st.Run), "stopped") {
+			continue
+		}
+		trace := strings.TrimSpace(st.TraceID)
+		if trace == "" {
+			continue
+		}
+		if best == "" || st.Rev > bestRev || (st.Rev == bestRev && trace < best) {
+			bestRev = st.Rev
+			best = trace
+		}
+	}
+	return best
 }
 
 func debugModelLoadProfile(p *ModelLoadProfile) *debugModelLoadVars {

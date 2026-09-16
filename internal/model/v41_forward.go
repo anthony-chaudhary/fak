@@ -46,6 +46,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math"
 )
 
 // ErrV41ForwardStage reports that a required V4.1 forward stage could not be
@@ -70,12 +71,13 @@ const (
 )
 
 // v41StageCompress and v41StageIndexer are the stage names for the CED/CSA2
-// compressor and the lightning indexer. The reduced text forward does not execute
-// them (their packed-row / compressed-stream inputs cannot be materialized
-// weight-free — see the scope note at the top of this file), so they stay
-// fail-closed: a config declaring an in-range compressor or indexer layer is
-// refused at admission by v41CompressIndexForwardAdmitted (#13006). They become
-// live when a leaf lands the compressor/indexer execution.
+// compressor and the lightning indexer. As of #13006 the reduced text forward
+// EXECUTES both stages: the compressor pools a compressed layer's projected KV
+// rows (v41CompressedRows), and the lightning indexer scores a declared index
+// source against those compressed keys and selects rows (v41IndexRows). A config
+// declaring an in-range compressor or indexer layer without its weights is still
+// refused at admission by v41CompressIndexForwardAdmitted; a malformed schedule
+// fails closed there too.
 
 // V41ForwardError is the typed fail-closed error for one V4.1 assembly stage.
 // Layer is the zero-based decoder layer the stage belongs to, or -1 for a
@@ -152,6 +154,89 @@ func (st *v41ForwardState) appendHistory(ids []int) {
 // fixture stays tiny and self-consistent. It is not a claim about the official
 // checkpoint geometry.
 func v41KVLoraRankReduced(cfg Config) int { return cfg.HeadDim }
+
+// v41ForwardGeometry reports whether cfg declares the published full V4.1
+// geometry (true) or the reduced test fixture (false). It FAILS CLOSED: when the
+// parsed DeepSeekV41.Attention envelope is populated (a published/parsed config)
+// and the config is not a coherently narrowed reduced fixture, the full geometry
+// is REQUIRED and any mismatch is a typed ErrV41ForwardStage -- the assembly
+// never silently falls back to the reduced stand-in. A lone-axis drift (a mutated
+// head width while the decoder stack stays at the published envelope) is refused.
+//
+// The discriminator is the Attention envelope's HeadDim plus the flat layer
+// count: a reduced fixture narrows both the decoder stack and the head width
+// (NumLayers 40 -> 1, HeadDim 512 -> 32). A config with no DeepSeekV41 metadata or
+// an empty envelope is classified by its own flat HeadDim: 512 (v41KVLoraRank)
+// means full, anything else (the reduced fixture's 32) means reduced.
+func v41ForwardGeometry(cfg Config) (bool, error) {
+	m := cfg.DeepSeekV41
+	if m == nil || m.Attention.HeadDim == 0 {
+		return cfg.HeadDim == v41KVLoraRank, nil
+	}
+	attn := m.Attention
+	// A parsed/published config derives its Attention envelope from the SAME flat
+	// geometry, so a genuine published config always agrees with its envelope on
+	// every decoder axis. Two situations can disagree:
+	//
+	//   * The reduced fixture reuses the retained published metadata pointer but
+	//     narrows the flat decoder stack (NumLayers 40 -> 1) AND the head width
+	//     (HeadDim 512 -> 32) -- a deliberate, coherent narrowing. That config is a
+	//     fixture and is classified by its flat head width.
+	//   * A corrupted full config drifts a single axis (typically the head width)
+	//     while leaving the rest of the decoder stack at the published envelope.
+	//     That is NOT a deliberate reduction and FAILS CLOSED: a full-intended
+	//     config must never silently run the reduced stand-in geometry.
+	//
+	// The two are distinguished by whether the flat decoder stack itself was
+	// narrowed below the envelope. Requiring BOTH a non-published head width and a
+	// narrowed layer count keeps the reduced fixture admitted while refusing a
+	// lone-axis drift.
+	if attn.HeadDim != cfg.HeadDim {
+		reducedFixture := cfg.HeadDim != v41KVLoraRank && cfg.NumLayers < attn.NumLayers
+		if !reducedFixture {
+			return false, v41StageErr(v41StageAttention, -1,
+				fmt.Errorf("%w: published V4.1 attention envelope declares head_dim=%d but config has %d and the decoder stack is not a narrowed fixture (layers %d vs %d)",
+					ErrV41ForwardStage, attn.HeadDim, cfg.HeadDim, cfg.NumLayers, attn.NumLayers))
+		}
+		return cfg.HeadDim == v41KVLoraRank, nil
+	}
+	// Authoritative (self-consistent) envelope: the full published geometry is
+	// REQUIRED. Any mismatch on a decoder axis is a typed fail-closed error -- the
+	// assembly never falls back to the reduced stand-in.
+	type axis struct {
+		name      string
+		got, want int
+	}
+	for _, a := range []axis{
+		{"head_dim", cfg.HeadDim, v41KVLoraRank},
+		{"num_hidden_layers", cfg.NumLayers, attn.NumLayers},
+		{"hidden_size", cfg.HiddenSize, attn.HiddenSize},
+		{"num_attention_heads", cfg.NumHeads, attn.NumHeads},
+		{"num_key_value_heads", cfg.NumKVHeads, attn.NumKVHeads},
+	} {
+		if a.got != a.want {
+			return false, v41StageErr(v41StageAttention, -1,
+				fmt.Errorf("%w: published V4.1 attention envelope declares %s=%d but config has %d", ErrV41ForwardStage, a.name, a.want, a.got))
+		}
+	}
+	return true, nil
+}
+
+// v41ForwardKVLatentRank resolves the attn.wkv output width for an admitted
+// config: the published v41KVLoraRank (512) on the full path, the tiny HeadDim
+// stand-in on the reduced fixture. It returns v41ForwardGeometry's error rather
+// than defaulting to the reduced width, so a config whose published envelope is
+// inconsistent can never be admitted against a reduced stand-in shape.
+func v41ForwardKVLatentRank(cfg Config) (int, error) {
+	full, err := v41ForwardGeometry(cfg)
+	if err != nil {
+		return 0, err
+	}
+	if full {
+		return v41KVLoraRank, nil
+	}
+	return v41KVLoraRankReduced(cfg), nil
+}
 
 // v41MHCMixWidth is the mHC coefficient-vector width for hc=4: (2+hc)*hc.
 const v41MHCMixWidth = 24
@@ -232,48 +317,216 @@ func (m *Model) v41EngramForwardAdmitted() error {
 // entry above index 0 and every index source ({2,8,...}) is unreachable. Executing
 // the real compressor/indexer stages is #13006's remaining integration work; until
 // then this is the fail-closed boundary.
-func v41CompressIndexForwardAdmitted(cfg Config) error {
-	m := cfg.DeepSeekV41
-	if m == nil {
+//
+// Two malformed-schedule arms are also refused here: a negative ratio (invalid
+// geometry, never a compressed layer) and a schedule shorter than the decoder
+// stack (an uncovered layer with no declared regime). Both must fail closed, not
+// fall through to the uncompressed regime.
+func (m *Model) v41CompressIndexForwardAdmitted() error {
+	d41 := m.Cfg.DeepSeekV41
+	if d41 == nil {
 		return nil
 	}
-	for layer := 0; layer < cfg.NumLayers && layer < len(m.CompressRatios); layer++ {
-		// Ratio 0 and 1 are the uncompressed regimes; a ratio > 1 declares a
-		// compressed layer the reduced forward does not execute.
-		if m.CompressRatios[layer] > 1 {
+	cfg := m.Cfg
+	// Every layer in the model's decoder stack must declare a regime. A schedule
+	// shorter than the stack leaves the uncovered layers with no declared
+	// compression regime, which must fail closed rather than being silently read as
+	// ratio 0.
+	if len(d41.CompressRatios) < cfg.NumLayers {
+		return v41StageErr(v41StageCompress, len(d41.CompressRatios),
+			fmt.Errorf("%w: compression schedule declares %d ratios but the model has %d layers", ErrV41ForwardStage, len(d41.CompressRatios), cfg.NumLayers))
+	}
+	H := cfg.HiddenSize
+	for layer := 0; layer < cfg.NumLayers; layer++ {
+		// Ratio 0 and 1 are the uncompressed regimes. A ratio > 1 declares a
+		// compressed layer whose compressor must be wired; a negative ratio is
+		// malformed geometry that must fail closed rather than being silently
+		// treated as uncompressed.
+		ratio := d41.CompressRatios[layer]
+		switch {
+		case ratio < 0:
 			return v41StageErr(v41StageCompress, layer,
-				fmt.Errorf("%w: layer %d declares compressor ratio %d but the reduced forward does not execute the CED/CSA2 compressor stage", ErrV41ForwardStage, layer, m.CompressRatios[layer]))
+				fmt.Errorf("%w: layer %d declares malformed compressor ratio %d", ErrV41ForwardStage, layer, ratio))
+		case ratio > 1:
+			width := v41CompressorWidth(cfg)
+			if err := m.v41AdmitShape(layerName(layer, "attn.compressor.wkv.weight"), v41StageCompress, layer, width, H); err != nil {
+				return err
+			}
+			if err := m.v41AdmitShape(layerName(layer, "attn.compressor.wgate.weight"), v41StageCompress, layer, width, H); err != nil {
+				return err
+			}
+			if err := m.v41AdmitShape(layerName(layer, "attn.compressor.norm.weight"), v41StageCompress, layer, width); err != nil {
+				return err
+			}
 		}
 	}
-	for _, layer := range m.IndexSourceLayerIDs {
-		if layer >= 0 && layer < cfg.NumLayers {
+	indexHeads := cfg.IndexNHeads
+	indexDim := cfg.IndexHeadDim
+	for _, layer := range d41.IndexSourceLayerIDs {
+		if layer < 0 || layer >= cfg.NumLayers {
+			continue
+		}
+		if indexHeads <= 0 || indexDim <= 0 {
 			return v41StageErr(v41StageIndexer, layer,
-				fmt.Errorf("%w: layer %d declares a lightning-indexer source but the reduced forward does not execute the indexer stage", ErrV41ForwardStage, layer))
+				fmt.Errorf("%w: layer %d declares a lightning-indexer source but the indexer geometry (nHeads=%d headDim=%d) is not declared", ErrV41ForwardStage, layer, indexHeads, indexDim))
+		}
+		wq := indexHeads * indexDim
+		if err := m.v41AdmitShape(layerName(layer, "indexer.wq_b.weight"), v41StageIndexer, layer, wq, cfg.QLoraRank); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(layer, "indexer.wk.weight"), v41StageIndexer, layer, indexDim, v41CompressorWidth(cfg)); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(layer, "indexer.k_norm.weight"), v41StageIndexer, layer, indexDim); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(layer, "indexer.weights_proj.weight"), v41StageIndexer, layer, indexHeads, H); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
+// v41CompressorWidth is the compressor latent width. The published V4.1
+// compressor pools to the KV latent width; the reduced text assembly does not
+// carry that checkpoint constant on the text Config, so it pools at HeadDim,
+// matching v41KVLoraRankReduced. It is not a claim about the official geometry.
+func v41CompressorWidth(cfg Config) int { return cfg.HeadDim }
+
+// v41CompressedRows pools the per-position projected KV rows of one layer
+// through the CED/CSA2 compressor. It returns the emitted compressed rows in
+// causal order. A non-compressed regime returns the input rows unchanged. It
+// fails closed on any malformed geometry rather than emitting a partial stream.
+func (m *Model) v41CompressedRows(l int, ratio int, kvRows [][]float32, inputs [][]float32) ([][]float32, error) {
+	if ratio <= 1 {
+		return kvRows, nil
+	}
+	cfg := m.Cfg
+	width := v41CompressorWidth(cfg)
+	H := cfg.HiddenSize
+	wkv := m.tensor(layerName(l, "attn.compressor.wkv.weight"))
+	wgate := m.tensor(layerName(l, "attn.compressor.wgate.weight"))
+	normWeight := m.tensor(layerName(l, "attn.compressor.norm.weight"))
+	eps := float32(cfg.RMSNormEps)
+	pool, err := NewV41CompressorPool(ratio, width)
+	if err != nil {
+		return nil, v41StageErr(v41StageCompress, l, err)
+	}
+	var out [][]float32
+	for pos := range inputs {
+		var in []float32
+		if pos < len(inputs) {
+			in = inputs[pos]
+		}
+		kv := matRows(wkv, in, width, H)
+		score := matRows(wgate, in, width, H)
+		pooled, emitted, err := pool.PushNormalized(pos, kv, score, normWeight, eps)
+		if err != nil {
+			return nil, v41StageErr(v41StageCompress, l, err)
+		}
+		if emitted {
+			out = append(out, pooled)
+		}
+	}
+	return out, nil
+}
+
+// v41IndexRows scores a projected index query against the compressed keys and
+// returns the selected compressed row IDs for one layer. It returns nil when the
+// layer declares no index source. Candidate blocks are selected when the layer is
+// the declared candidate source, so the selection reads a blocked pool rather
+// than the full compressed set.
+func (m *Model) v41IndexRows(l int, qLat []float32, hidden []float32, keys [][]float32) ([]int32, error) {
+	d41 := m.Cfg.DeepSeekV41
+	if d41 == nil {
+		return nil, nil
+	}
+	isSource := false
+	for _, src := range d41.IndexSourceLayerIDs {
+		if src == l {
+			isSource = true
+			break
+		}
+	}
+	if !isSource {
+		return nil, nil
+	}
+	cfg := m.Cfg
+	nHeads, headDim := cfg.IndexNHeads, cfg.IndexHeadDim
+	if nHeads <= 0 || headDim <= 0 {
+		return nil, v41StageErr(v41StageIndexer, l,
+			fmt.Errorf("%w: indexer geometry nHeads=%d headDim=%d is not declared", ErrV41ForwardStage, nHeads, headDim))
+	}
+	wqB := m.tensor(layerName(l, "indexer.wq_b.weight"))
+	wk := m.tensor(layerName(l, "indexer.wk.weight"))
+	kNorm := m.tensor(layerName(l, "indexer.k_norm.weight"))
+	wProj := m.tensor(layerName(l, "indexer.weights_proj.weight"))
+	compressLen := len(keys)
+	q := matRows(wqB, qLat, nHeads*headDim, cfg.QLoraRank)
+	flatKeys := make([]float32, 0, compressLen*headDim)
+	for _, row := range keys {
+		projected := matRows(wk, row, headDim, len(row))
+		if len(kNorm) == headDim {
+			projected = rmsnormCfg(projected, kNorm, float32(cfg.RMSNormEps), cfg)
+		}
+		flatKeys = append(flatKeys, projected...)
+	}
+	weights := matRows(wProj, hidden, nHeads, cfg.HiddenSize)
+	for h := 0; h < nHeads; h++ {
+		weights[h] *= cfg.attnScale() * float32(1.0/math.Sqrt(float64(nHeads)))
+	}
+	topKBlocks, blockSize := 0, 0
+	if d41.CandidateSourceLayerID == l {
+		topKBlocks, blockSize = d41.CandidateTopKBlocks, d41.CandidateBlockSize
+	}
+	pub, err := NewV41IndexerPublication(l, q, flatKeys, weights, nHeads, headDim, compressLen, topKBlocks, blockSize, cfg.IndexTopK, 0)
+	if err != nil {
+		return nil, v41StageErr(v41StageIndexer, l, err)
+	}
+	return pub.Rows(), nil
+}
+
 // v41KVSourceForwardAdmitted fails closed when the config declares a shared-KV
-// source layer that lies WITHIN the model's decoder stack. The reduced text
-// assembly projects its own per-layer attn.wkv.weight and never consumes a KV
-// source layer's shared key/value state (the reference's shared KV/index source
-// schedule), so silently running an in-range KV source would emit logits from a
+// source layer that lies WITHIN the model's decoder stack but whose shared state
+// the reduced assembly cannot actually publish. As of #12896 the assembly DOES
+// execute the shared KV/index schedule (v41_attention.go): a declared source
+// pools its projected KV input through the CED/CSA2 compressor and publishes the
+// rows, and a later reader resolves them. A source is therefore admitted only
+// when it declares a compressed regime (ratio > 1, so the compressor runs) and
+// carries the compressor tensors its pooling reads; a source at ratio <= 1 has
+// no pooled stream to publish, so it is refused rather than silently running a
 // per-layer KV cache where the official model reuses a source layer's state.
 // Declarations that only touch out-of-range layers stay admitted, which keeps the
 // reduced oracle fixture runnable: it derives from the published 40-layer config
 // but narrows NumLayers to 1, so every kv source ({2,8,14,20}) is unreachable.
-// Executing the real shared KV source is #12896's remaining integration work;
-// until then this is the fail-closed boundary.
-func v41KVSourceForwardAdmitted(cfg Config) error {
-	m := cfg.DeepSeekV41
-	if m == nil {
+func (m *Model) v41KVSourceForwardAdmitted() error {
+	d41 := m.Cfg.DeepSeekV41
+	if d41 == nil {
 		return nil
 	}
-	for _, layer := range m.KVSourceLayerIDs {
-		if layer >= 0 && layer < cfg.NumLayers {
+	cfg := m.Cfg
+	for _, layer := range d41.KVSourceLayerIDs {
+		if layer < 0 || layer >= cfg.NumLayers {
+			continue
+		}
+		if !v41AttentionRatioImplemented(v41CompressRatioAt(cfg, layer)) {
+			return v41StageErr(v41StageCompress, layer,
+				fmt.Errorf("%w: layer %d declares a shared-KV source but its compress ratio %d is not an implemented variant", ErrV41ForwardStage, layer, v41CompressRatioAt(cfg, layer)))
+		}
+		if v41CompressRatioAt(cfg, layer) <= 1 {
 			return v41StageErr(v41StageAttention, layer,
-				fmt.Errorf("%w: layer %d declares a shared-KV source but the reduced forward does not execute shared KV/index state", ErrV41ForwardStage, layer))
+				fmt.Errorf("%w: layer %d declares a shared-KV source but has no compressed regime to publish", ErrV41ForwardStage, layer))
+		}
+		H := cfg.HiddenSize
+		width := v41CompressorWidth(cfg)
+		if err := m.v41AdmitShape(layerName(layer, "attn.compressor.wkv.weight"), v41StageCompress, layer, width, H); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(layer, "attn.compressor.wgate.weight"), v41StageCompress, layer, width, H); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(layer, "attn.compressor.norm.weight"), v41StageCompress, layer, width); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -346,6 +599,18 @@ func (m *Model) v41ForwardAdmitted() error {
 			fmt.Errorf("%w: reduced weights absent", ErrV41NativeUnsupported))
 	}
 	cfg := m.Cfg
+	// Geometry discrimination fails closed: a parsed/published config whose flat
+	// axes disagree with its Attention envelope is refused here rather than
+	// silently assembled against the reduced stand-in geometry.
+	if _, err := v41ForwardGeometry(cfg); err != nil {
+		return err
+	}
+	// kvLatentRank is resolved through the same fail-closed discriminator, so an
+	// inconsistent published envelope can never be admitted at the reduced shape.
+	kvLatentRank, err := v41ForwardKVLatentRank(cfg)
+	if err != nil {
+		return err
+	}
 	if err := m.v41AdmitShape("model.embed_tokens.weight", v41StageEmbedding, -1, cfg.VocabSize, cfg.HiddenSize); err != nil {
 		return err
 	}
@@ -365,16 +630,19 @@ func (m *Model) v41ForwardAdmitted() error {
 	if err := m.v41EngramForwardAdmitted(); err != nil {
 		return err
 	}
-	if err := v41CompressIndexForwardAdmitted(cfg); err != nil {
+	if err := m.v41CompressIndexForwardAdmitted(); err != nil {
 		return err
 	}
-	if err := v41KVSourceForwardAdmitted(cfg); err != nil {
+	if err := m.v41KVSourceForwardAdmitted(); err != nil {
 		return err
 	}
 	if err := v41CandidateSourceForwardAdmitted(cfg); err != nil {
 		return err
 	}
 	if err := v41HCMultForwardAdmitted(cfg); err != nil {
+		return err
+	}
+	if err := v41AttentionGeometryForwardAdmitted(cfg); err != nil {
 		return err
 	}
 	H, hd, nH := cfg.HiddenSize, cfg.HeadDim, cfg.NumHeads
@@ -403,7 +671,7 @@ func (m *Model) v41ForwardAdmitted() error {
 		if err := m.v41AdmitShape(layerName(l, "attn.wq_b.weight"), v41StageAttention, l, qHeadDim, cfg.QLoraRank); err != nil {
 			return err
 		}
-		if err := m.v41AdmitShape(layerName(l, "attn.wkv.weight"), v41StageAttention, l, v41KVLoraRankReduced(cfg), H); err != nil {
+		if err := m.v41AdmitShape(layerName(l, "attn.wkv.weight"), v41StageAttention, l, kvLatentRank, H); err != nil {
 			return err
 		}
 		// wo_a is the leaf's group-major [Groups, OLoRARank, HeadsPerGroup*HeadDim]
@@ -502,6 +770,11 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (*Activations, error)
 	H, hd, nH := cfg.HiddenSize, cfg.HeadDim, cfg.NumHeads
 	eps := float32(cfg.RMSNormEps)
 
+	full, err := v41ForwardGeometry(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	// ---- embedding ----
 	embed := m.tensor("model.embed_tokens.weight")
 	if len(embed) < cfg.VocabSize*H {
@@ -512,6 +785,22 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (*Activations, error)
 	for t, id := range seq {
 		x[t] = append([]float32(nil), embed[id*H:(id+1)*H]...)
 		scaleEmbedInPlace(x[t], cfg)
+	}
+
+	// Persistent mHC streams, one four-stream set per position. On the full path
+	// stream 0 carries the live hidden state and streams 1..3 are the reference's
+	// persistent residual streams initialized to zero -- DISTINCT from stream 0,
+	// not the reduced stand-in's four identical copies. Both paths carry the same
+	// [][][]float32 shape; only the initialization and mixing differ, so the
+	// reduced arithmetic is byte-identical to the pre-#13009 assembly.
+	streams := make([][][]float32, len(seq))
+	for t := range streams {
+		set := make([][]float32, 4)
+		set[0] = x[t]
+		for h := 1; h < 4; h++ {
+			set[h] = make([]float32, H)
+		}
+		streams[t] = set
 	}
 
 	hcIters := 1
@@ -531,7 +820,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (*Activations, error)
 
 	act := &Activations{Seq: len(seq), Hidden: [][]float32{flatten(x)}}
 	for l := 0; l < cfg.NumLayers; l++ {
-		if err := m.v41Layer(l, seq, x, hd, nH, H, eps, hcIters, hcEps, routeCfg, st); err != nil {
+		if err := m.v41Layer(l, seq, x, streams, full, hd, nH, H, eps, hcIters, hcEps, routeCfg, st); err != nil {
 			return nil, err
 		}
 		act.Hidden = append(act.Hidden, flatten(x))
@@ -548,9 +837,13 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (*Activations, error)
 	return act, nil
 }
 
-// v41Layer applies one reduced V4.1 decoder layer to x in place. tokens carries
-// the ids for the positions in x so a declared Engram layer can hash them.
-func (m *Model) v41Layer(l int, tokens []int, x [][]float32, hd, nH, H int, eps float32, hcIters int, hcEps float32, routeCfg v41RouterConfig, st *v41ForwardState) error {
+// v41Layer applies one V4.1 decoder layer to x in place, updating the persistent
+// mHC streams[t] for each position. tokens carries the ids for the positions in
+// x so a declared Engram layer can hash them. The reduced path reproduces the
+// pre-#13009 arithmetic exactly (four identical stand-in streams derived from the
+// normalized input, and stream 0 of the post-mix written back); the full path
+// reads and writes all four DISTINCT persistent streams.
+func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float32, full bool, hd, nH, H int, eps float32, hcIters int, hcEps float32, routeCfg v41RouterConfig, st *v41ForwardState) error {
 	cfg := m.Cfg
 
 	// Engram injection happens at the START of the layer, into the residual,
@@ -595,11 +888,17 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, hd, nH, H int, eps 
 			return v41StageErr(v41StageMHC, l, err)
 		}
 		hcByPos[t] = mix
-		// Reduced stand-in for the reference's hc persistent streams: four
-		// identical copies of the normalized input. v41MHCPre then collapses them
-		// with the learned pre coefficients.
-		streams := [][]float32{xn, xn, xn, xn}
-		collapsed, err := v41MHCPre(streams, mix.pre)
+		// The mHC pre-collapse always reads a four-stream set collapsed by the
+		// learned pre coefficients. The reduced path reconstructs the reference's
+		// stand-in (four identical copies of the normalized input, byte-identical
+		// to pre-#13009) rather than reading the persistent set, so its numerics
+		// are unchanged. The full path reads the four DISTINCT persistent streams
+		// carried into this layer (stream 0 = live hidden, 1..3 = residual).
+		streams4 := streams[t]
+		if !full {
+			streams4 = [][]float32{xn, xn, xn, xn}
+		}
+		collapsed, err := v41MHCPre(streams4, mix.pre)
 		if err != nil {
 			return v41StageErr(v41StageMHC, l, err)
 		}
@@ -609,11 +908,29 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, hd, nH, H int, eps 
 	// ---- attention: projected q/kv per position, then sparse sink per position ----
 	qHeads := make([][]float32, seq) // [t][nH*hd], rotated
 	kvRows := make([][]float32, seq) // [t][hd], rotated (single KV head)
+	qLatRows := make([][]float32, seq)
 	for t := 0; t < seq; t++ {
 		c := preByPos[t]
 		qLat := matRows(wQA, c, cfg.QLoraRank, H)
 		q := matRows(wQB, qLat, nH*hd, cfg.QLoraRank)
-		kv := matRows(wKV, c, hd, H)
+		// KV latent seam. The full path admits and projects attn.wkv at the
+		// published latent rank (v41KVLoraRank = 512); the attention contraction
+		// below consumes a per-position row of width hd (head_dim), so the full
+		// projection is taken at the published latent rank and sliced to the first
+		// hd columns for the sink contraction. On a valid full config
+		// hd == v41KVLoraRank == 512, so the slice is a no-op; an hd wider than the
+		// latent rank is refused rather than silently mis-read. The reduced fixture
+		// keeps its HeadDim-wide projection byte-for-byte.
+		var kv []float32
+		if full {
+			if hd > v41KVLoraRank {
+				return v41StageErr(v41StageAttention, l,
+					fmt.Errorf("%w: attention head_dim %d exceeds full KV latent rank %d", ErrV41ForwardStage, hd, v41KVLoraRank))
+			}
+			kv = matRows(wKV, c, v41KVLoraRank, H)[:hd]
+		} else {
+			kv = matRows(wKV, c, hd, H)
+		}
 		cos, sin := ropeRowForLayer(cfg, l, t)
 		for h := 0; h < nH; h++ {
 			applyRopeRow(q[h*hd:(h+1)*hd], cos, sin)
@@ -621,6 +938,63 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, hd, nH, H int, eps 
 		applyRopeRow(kv, cos, sin)
 		qHeads[t] = q
 		kvRows[t] = kv
+		qLatRows[t] = qLat
+	}
+
+	// ---- CED/CSA2 compressor + lightning indexer stages (#13006, #12896) ----
+	//
+	// A layer declaring CompressRatios[l] > 1 pools its per-position projected KV
+	// rows through the CED/CSA2 compressor (v41CompressedRows), and a layer
+	// declaring an in-range index source scores its projected index query against
+	// those compressed keys and selects rows (v41IndexRows). Both stages execute
+	// here and fail closed with a typed *V41ForwardError on malformed geometry; a
+	// config that declares an in-range stage without its weights is refused at
+	// admission, not here.
+	//
+	// #12896 maps the sink contraction onto the reference's compressed KV cache:
+	// a compressed layer contracts the COMPRESSED stream directly (block-causal
+	// visibility, one pooled key/value row per group) instead of expanding the
+	// pooled latent back onto causal positions. A declared shared-KV source layer
+	// publishes its compressed rows into the session state, and a later reader
+	// layer resolves its KV stream from that published source.
+	plan, err := v41AttentionPlanFor(cfg, l, m.v41AttentionRolesCached())
+	if err != nil {
+		return err
+	}
+	var compressedKV [][]float32
+	if plan.Ratio > 1 {
+		compressed, err := m.v41CompressedRows(l, plan.Ratio, kvRows, preByPos)
+		if err != nil {
+			return err
+		}
+		compressedKV = compressed
+	}
+	// A reader layer whose KV source precedes it consumes the source's published
+	// compressed stream; a source layer publishes its own for later readers.
+	sharedKV := compressedKV
+	if plan.Role == V41AttentionRoleReader && plan.KVSourceLayer >= 0 && st != nil {
+		attn, err := st.attentionState(hd, 8)
+		if err != nil {
+			return v41StageErr(v41StageAttention, l, err)
+		}
+		if rows, ok := attn.KVSourceRows(plan.KVSourceLayer); ok && len(rows) > 0 {
+			sharedKV = rows
+		}
+	}
+	// The layer's own lightning-index selection for the newest position. A layer
+	// that is not an index source computes none (nil).
+	localIdx, err := m.v41IndexRows(l, qLatRows[seq-1], preByPos[seq-1], compressedKV)
+	if err != nil {
+		return err
+	}
+	// The per-position index list the compressed contraction consumes, flattened
+	// [seq][TopKWidth]. A layer that is itself the index source uses its local
+	// selection replicated across the causal positions it published it for; a
+	// reader layer reuses its source's published top-k selection; a layer with
+	// neither passes no list and the contraction falls back to the causal mask.
+	indexList, err := m.v41AttentionIndexList(plan, st, localIdx, hd, len(sharedKV), seq)
+	if err != nil {
+		return err
 	}
 
 	// V41AttentionState is the session-owned validation anchor for the projected
@@ -642,9 +1016,31 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, hd, nH, H int, eps 
 		if len(seed) > v41WindowSize {
 			seed = seed[len(seed)-v41WindowSize:]
 		}
+		// A declared source layer publishes its compressed rows and index keys so
+		// later readers can resolve them within this same forward pass (the
+		// V41AttentionState source-then-consumer ordering).
+		updates := m.v41AttentionSourceUpdates(plan, compressedKV, qLatRows)
 		if len(seed) > 0 {
-			if err := attn.Prefill(seed, nil); err != nil {
+			if err := attn.Prefill(seed, updates); err != nil {
 				return v41StageErr(v41StageAttention, l, err)
+			}
+		} else if len(updates) > 0 {
+			// A source layer with no projected window rows still publishes.
+			if err := attn.PublishCandidates(plan.Ratio, nil); err != nil {
+				return v41StageErr(v41StageAttention, l, err)
+			}
+		}
+		// An index source publishes its own per-position top-k selection so a
+		// later reader layer can reuse it without recomputing the scoring path.
+		// The selection is the source's local index list, one row per published
+		// query position.
+		if indexSourceAt(cfg.DeepSeekV41, l) && indexList != nil && plan.TopKWidth > 0 {
+			rows := make([][]int32, seq)
+			for t := range rows {
+				rows[t] = append([]int32(nil), indexList[t*plan.TopKWidth:(t+1)*plan.TopKWidth]...)
+			}
+			if err := attn.PublishTopK(plan.Ratio, rows); err != nil {
+				return v41StageErr(v41StageIndexer, l, err)
 			}
 		}
 	}
@@ -652,6 +1048,32 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, hd, nH, H int, eps 
 	scale := cfg.attnScale()
 	attnOut := make([][]float32, seq)
 	for t := 0; t < seq; t++ {
+		// A compressed/shared layer contracts the COMPRESSED KV stream directly:
+		// block-causal visibility over pooled group rows, with the lightning
+		// indexer's row selection when the layer published one. A per-layer layer
+		// keeps the exact per-position causal sink contraction.
+		if plan.Ratio > 1 || (plan.Role == V41AttentionRoleReader && len(sharedKV) > 0 && len(sharedKV) < seq) {
+			opt := V41AttentionSharedKVOptions{
+				Layer: l, Ratio: maxInt(plan.Ratio, 1), Groups: len(sharedKV),
+				HeadDim: hd, Heads: nH, Softmax: scale, Sink: sink,
+			}
+			if indexList != nil && len(indexList) >= (t+1)*plan.topKWidth() {
+				// The index source publishes one selection row per query position.
+				opt.Idx = indexList[t*plan.topKWidth() : (t+1)*plan.topKWidth()]
+				opt.IndexTopK = plan.topKWidth()
+				opt.TopK = plan.topKWidth()
+			}
+			o, err := V41AttentionCompressedForward(qHeads[t], sharedKV, opt)
+			if err != nil {
+				return err
+			}
+			projected, err := V41GroupedOutputProjection(o, woA, woB, 1, 1, nH, hd, cfg.OGroups, cfg.OLoraRank, H)
+			if err != nil {
+				return v41StageErr(v41StageAttention, l, err)
+			}
+			attnOut[t] = projected
+			continue
+		}
 		rows := t + 1
 		idx := make([]int32, rows+1) // one trailing -1 marks an empty slot beyond the causal prefix
 		for i := 0; i < rows; i++ {
@@ -705,12 +1127,29 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, hd, nH, H int, eps 
 		for i := 0; i < H; i++ {
 			delta[i] = attnOut[t][i] + moe[i]
 		}
-		streams := [][]float32{preByPos[t], preByPos[t], preByPos[t], preByPos[t]}
-		next, err := v41MHCPost(delta, streams, hcByPos[t].post, hcByPos[t].comb)
+		// The post-mix always reads a four-stream residual set. The reduced path
+		// reconstructs the stand-in (four identical copies of the collapsed pre
+		// vector) so its arithmetic is unchanged; the full path mixes the four
+		// distinct persistent streams.
+		residual := [][]float32{preByPos[t], preByPos[t], preByPos[t], preByPos[t]}
+		if full {
+			residual = streams[t]
+		}
+		next, err := v41MHCPost(delta, residual, hcByPos[t].post, hcByPos[t].comb)
 		if err != nil {
 			return v41StageErr(v41StageMHC, l, err)
 		}
-		copy(x[t], next[0])
+		if full {
+			// Write ALL FOUR post-mix streams back into the persistent set so the
+			// next layer reads the updated state; stream 0 is the live hidden.
+			for h := 0; h < 4; h++ {
+				copy(streams[t][h], next[h])
+			}
+			copy(x[t], next[0])
+		} else {
+			// Reduced path: only stream 0 is propagated, exactly as before.
+			copy(x[t], next[0])
+		}
 	}
 	return nil
 }

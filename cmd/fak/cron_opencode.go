@@ -22,6 +22,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 )
 
@@ -72,6 +73,13 @@ type OpenCodeRunReceipt struct {
 	CrashRecovered  bool   `json:"crash_recovered,omitempty"`  // final outcome succeeded after a Bun crash
 	OpenCodeVersion string `json:"opencode_version,omitempty"` // best-effort `opencode --version`
 	BunVersion      string `json:"bun_version,omitempty"`      // best-effort Bun runtime version
+
+	// Session token/cost/model join (#1559). Additive + omitempty so a receipt with
+	// no session join stays byte-identical to the fak-opencode-run/1 shape above.
+	TokensTotal int64   `json:"tokens_total,omitempty"` // total billed tokens the joined session moved
+	CostUSD     float64 `json:"cost_usd,omitempty"`     // observed billed USD (provider ledger); 0 = unmeasured
+	ModelID     string  `json:"model_id,omitempty"`     // model that served the session
+	ProviderID  string  `json:"provider_id,omitempty"`  // provider that served the session
 }
 
 // cronOpenCodeBunCrashSignature reports whether captured child output carries the
@@ -538,6 +546,13 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 		}
 	}
 
+	// Session token/cost/model join (#1559): best-effort, read-only, and never
+	// fatal. A receipt with no join keeps the four fields at zero and stays
+	// byte-identical (omitempty).
+	if opts.EmitReceipt && receipt.SessionID != "" {
+		cronPopulateReceiptSessionJoin(&receipt)
+	}
+
 	if opts.Ledger != "" {
 		if err := cronAppendJSONL(opts.Ledger, receipt); err != nil {
 			if opts.Stderr != nil {
@@ -748,4 +763,55 @@ func cronReadOpenCodeReceipts(path string) ([]OpenCodeRunReceipt, error) {
 	return jsonlledger.Parse(string(b), func(r OpenCodeRunReceipt) bool {
 		return r.Schema == cronOpenCodeRunSchema && r.RunID != ""
 	}), nil
+}
+
+// cronPopulateReceiptSessionJoin fills the additive session token/cost/model fields
+// (#1559) on a receipt from the public session-join path already used by
+// `fak dispatch sessions`: the gateway-usage ledger keyed by served session id. It is
+// strictly BEST-EFFORT — any missing/unreadable ledger, unknown session, or unmeasured
+// axis leaves the corresponding field at its zero value (omitted by omitempty) and can
+// never fail the run. Cost/model/provider are not carried by the usage ledger, so those
+// three stay zero until a priced per-session source lands (the join is additive).
+func cronPopulateReceiptSessionJoin(receipt *OpenCodeRunReceipt) {
+	if receipt == nil || strings.TrimSpace(receipt.SessionID) == "" {
+		return
+	}
+	path := cronOpenCodeUsageLedgerPath()
+	if path == "" {
+		return
+	}
+	var best *gatewayusageledger.Counters
+	var bestMs int64
+	for _, r := range gatewayusageledger.ReadLedgerFile(path) {
+		if strings.TrimSpace(r.SessionID) != receipt.SessionID {
+			continue
+		}
+		if best == nil || r.UnixMillis > bestMs {
+			c := r.Counters
+			best = &c
+			bestMs = r.UnixMillis
+		}
+	}
+	if best == nil {
+		return
+	}
+	receipt.TokensTotal = int64(best.InputTokens + best.OutputTokens + best.CachedPromptTokens + best.CacheCreationTokens)
+}
+
+// cronOpenCodeUsageLedgerPath resolves the default gateway-usage ledger under the repo
+// root (FAK_OPENCODE_USAGE_LEDGER overrides for tests). Best-effort: returns "" when no
+// repo root or ledger can be found, so the join is simply skipped.
+func cronOpenCodeUsageLedgerPath() string {
+	if override := strings.TrimSpace(os.Getenv("FAK_OPENCODE_USAGE_LEDGER")); override != "" {
+		return override
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	root := findRepoRoot(cwd)
+	if strings.TrimSpace(root) == "" {
+		return ""
+	}
+	return filepath.Join(root, filepath.FromSlash(gatewayusageledger.DefaultLedgerRel))
 }
