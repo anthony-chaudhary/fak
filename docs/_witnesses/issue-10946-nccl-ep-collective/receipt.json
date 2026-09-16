@@ -10,7 +10,7 @@
     8
   ],
   "collective_operation": "NCCL AllReduceSum",
-  "logit_parity_vs_single_rank": 0.9999999403953552,
+  "logit_parity_vs_single_rank": 1,
   "max_absolute_delta": 4.656612873077393e-10,
   "sharding_proven": true
 }

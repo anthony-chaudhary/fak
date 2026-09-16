@@ -861,12 +861,19 @@ func TestDeepSeek41GGUFReadsVcruzEngramMetadata(t *testing.T) {
 // tensor suffixes map into the dedicated model.engram.<L>.* namespace, and never
 // into a generic self_attn./mlp. name (which would let an Engram table fall
 // through to the wrong forward).
+//
+// The three projection-side suffixes (engram_wkv / engram_q / engram_k) are
+// normalized onto the exact canonical leaves the reduced native forward consumes
+// (engram_kv / engram_q_norm / engram_k_norm) - see
+// internal/model/v41_forward.go:295 and v41_forward_engram.go:212. The Engram
+// table (engram_embd) keeps its own leaf, because the forward reaches it through
+// the packed-row source rather than a named projection tensor.
 func TestDeepSeek41GGUFVcruzEngramTensorSuffixes(t *testing.T) {
 	want := map[string]string{
 		"engram_embd": "model.engram.1.engram_embd.weight",
-		"engram_k":    "model.engram.1.engram_k.weight",
-		"engram_q":    "model.engram.1.engram_q.weight",
-		"engram_wkv":  "model.engram.1.engram_wkv.weight",
+		"engram_k":    "model.engram.1.engram_k_norm.weight",
+		"engram_q":    "model.engram.1.engram_q_norm.weight",
+		"engram_wkv":  "model.engram.1.engram_kv.weight",
 	}
 	for suffix, wantName := range want {
 		got, ok := CanonicalTensorNameArch("blk.1."+suffix+".weight", "deepseek41")

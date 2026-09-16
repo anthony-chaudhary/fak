@@ -592,12 +592,37 @@ func deepseek41CanonicalSuffix(suffix string) (string, bool) {
 // A trailing ".weight" is accepted and stripped uniformly so both dialect forms
 // resolve to the same canonical leaf, and neither falls through to a generic
 // attention/MLP canonical name.
+//
+// Projection-side seam. The reference Engram module carries a projection
+// `self.wkv` (reference inference/model.py) and two per-HC norms `q_weight` /
+// `k_weight`. The reduced native forward consumes those same tensors under ITS
+// canonical spellings, which are the loader's contract target:
+//
+//	Engram wkv projection  -> engram_kv.weight
+//	Engram q norm          -> engram_q_norm.weight
+//	Engram k norm          -> engram_k_norm.weight
+//
+// The loader therefore NORMALIZES both the converter spelling (engram_wkv /
+// engram_q / engram_k) and the forward spelling (engram_kv / engram_q_norm /
+// engram_k_norm) onto that one forward-consumed leaf, so a shard load produces
+// exactly the name internal/model/v41_forward.go:295 and
+// v41_forward_engram.go:212 look up. Without this the forward's v41AdmitShape
+// lookup cannot find the projection and a declared Engram layer refuses on a
+// naming mismatch rather than a genuine unsupported-model refusal.
 func deepseek41EngramSuffixName(suffix string) (string, bool) {
 	leaf := strings.TrimSuffix(suffix, ".weight")
 	switch leaf {
 	case "engram_table", "engram_key", "engram_value",
-		"engram_embd", "engram_k", "engram_q", "engram_wkv":
+		"engram_embd":
 		return leaf, true
+	// Projection-side tensors: both dialect and forward spellings converge on the
+	// single forward-consumed canonical leaf.
+	case "engram_wkv", "engram_kv":
+		return "engram_kv", true
+	case "engram_q", "engram_q_norm":
+		return "engram_q_norm", true
+	case "engram_k", "engram_k_norm":
+		return "engram_k_norm", true
 	}
 	return "", false
 }
