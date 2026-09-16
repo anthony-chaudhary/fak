@@ -160,3 +160,23 @@ func TestV4FlashKVStateRatioIdentityIsNotRestorable(t *testing.T) {
 		t.Fatalf("restore into matching ratio 4 layer error: %v", err)
 	}
 }
+
+// TestV41KVLayoutSharesTheFlashClosedSetSource pins the #1714 cross-package
+// invariant: the v41 KV layout's ratio admission is derived from the single
+// declared Flash 0731 set in internal/model (model.V4FlashScheduleAdmitsRatio),
+// not a second literal copied into this package. A V4.1-only ratio (1 or 2)
+// must be refused here; the declared Flash 0731 ratios must be admitted.
+func TestV41KVLayoutSharesTheFlashClosedSetSource(t *testing.T) {
+	for ratio := -2; ratio <= 260; ratio++ {
+		_, got := v4FlashKVLayoutForRatio(ratio)
+		want := model.V4FlashScheduleAdmitsRatio(ratio)
+		if got != want {
+			t.Fatalf("v4FlashKVLayoutForRatio(%d) ok = %v, want %v (shared declared set)", ratio, got, want)
+		}
+	}
+	for _, v41Ratio := range []int{1, 2} {
+		if _, ok := v4FlashKVLayoutForRatio(v41Ratio); ok {
+			t.Fatalf("v41 KV layout admitted V4.1-only ratio %d via the Flash 0731 set", v41Ratio)
+		}
+	}
+}

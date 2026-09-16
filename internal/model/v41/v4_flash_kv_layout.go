@@ -21,7 +21,7 @@ import (
 //   - ratio 128 -> window + one non-overlapping compressor.
 //
 // This file owns the LAYOUT decision and the shared 128-token circular window.
-// A ratio outside the published closed set {0,4,128} fails closed with a typed
+// A ratio outside the declared Flash closed set (model.V4FlashScheduleAdmitsRatio)
 // error rather than selecting a generic path. The compressor/indexer BODIES for
 // ratios 4 and 128 are deliberately not implemented here (parent #12637 is a
 // planning track dispatched as bounded leaves); this slice only guarantees the
@@ -30,7 +30,7 @@ import (
 
 var (
 	// ErrV4FlashKVStateRatioInvalid reports malformed per-layer metadata: a
-	// compression ratio outside the published closed set {0,4,128}. It is the
+	// compression ratio outside the declared Flash closed set. It is the
 	// fail-closed verdict for a state layout request.
 	ErrV4FlashKVStateRatioInvalid = errors.New("model: DeepSeek V4 Flash compression ratio is invalid for KV state")
 
@@ -71,8 +71,11 @@ func (l V4FlashKVLayout) String() string {
 }
 
 // v4FlashKVLayoutForRatio maps one published compression ratio onto its KV
-// state layout. ok is false for any value outside the closed set {0,4,128}.
+// state layout. ok is false for any value outside the declared closed set.
 func v4FlashKVLayoutForRatio(ratio int) (V4FlashKVLayout, bool) {
+	if !model.V4FlashScheduleAdmitsRatio(ratio) {
+		return 0, false
+	}
 	switch ratio {
 	case 0:
 		return V4FlashKVWindowOnly, true
@@ -102,7 +105,7 @@ type V4FlashKVState struct {
 }
 
 // newV4FlashKVState selects one layer state per compress_ratios entry. It fails
-// closed (nil, ErrV4FlashKVStateRatioInvalid) on any ratio outside {0,4,128}
+// closed (nil, ErrV4FlashKVStateRatioInvalid) on any ratio outside the
 // BEFORE allocating layer state, so a malformed schedule never yields a partial
 // state object.
 func newV4FlashKVState(cfg model.Config) (*V4FlashKVState, error) {
@@ -113,7 +116,7 @@ func newV4FlashKVState(cfg model.Config) (*V4FlashKVState, error) {
 	for l, ratio := range cfg.CompressRatios {
 		layout, ok := v4FlashKVLayoutForRatio(ratio)
 		if !ok {
-			return nil, fmt.Errorf("%w: layer %d has ratio %d outside {0,4,128}", ErrV4FlashKVStateRatioInvalid, l+1, ratio)
+			return nil, fmt.Errorf("%w: layer %d has ratio %d outside %v", ErrV4FlashKVStateRatioInvalid, l+1, ratio, model.V4FlashRatioScheduleClosedSet())
 		}
 		layouts[l] = layout
 	}
