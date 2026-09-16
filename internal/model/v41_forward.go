@@ -155,6 +155,89 @@ func (st *v41ForwardState) appendHistory(ids []int) {
 // checkpoint geometry.
 func v41KVLoraRankReduced(cfg Config) int { return cfg.HeadDim }
 
+// v41ForwardGeometry reports whether cfg declares the published full V4.1
+// geometry (true) or the reduced test fixture (false). It FAILS CLOSED: when the
+// parsed DeepSeekV41.Attention envelope is populated (a published/parsed config)
+// and the config is not a coherently narrowed reduced fixture, the full geometry
+// is REQUIRED and any mismatch is a typed ErrV41ForwardStage -- the assembly
+// never silently falls back to the reduced stand-in. A lone-axis drift (a mutated
+// head width while the decoder stack stays at the published envelope) is refused.
+//
+// The discriminator is the Attention envelope's HeadDim plus the flat layer
+// count: a reduced fixture narrows both the decoder stack and the head width
+// (NumLayers 40 -> 1, HeadDim 512 -> 32). A config with no DeepSeekV41 metadata or
+// an empty envelope is classified by its own flat HeadDim: 512 (v41KVLoraRank)
+// means full, anything else (the reduced fixture's 32) means reduced.
+func v41ForwardGeometry(cfg Config) (bool, error) {
+	m := cfg.DeepSeekV41
+	if m == nil || m.Attention.HeadDim == 0 {
+		return cfg.HeadDim == v41KVLoraRank, nil
+	}
+	attn := m.Attention
+	// A parsed/published config derives its Attention envelope from the SAME flat
+	// geometry, so a genuine published config always agrees with its envelope on
+	// every decoder axis. Two situations can disagree:
+	//
+	//   * The reduced fixture reuses the retained published metadata pointer but
+	//     narrows the flat decoder stack (NumLayers 40 -> 1) AND the head width
+	//     (HeadDim 512 -> 32) -- a deliberate, coherent narrowing. That config is a
+	//     fixture and is classified by its flat head width.
+	//   * A corrupted full config drifts a single axis (typically the head width)
+	//     while leaving the rest of the decoder stack at the published envelope.
+	//     That is NOT a deliberate reduction and FAILS CLOSED: a full-intended
+	//     config must never silently run the reduced stand-in geometry.
+	//
+	// The two are distinguished by whether the flat decoder stack itself was
+	// narrowed below the envelope. Requiring BOTH a non-published head width and a
+	// narrowed layer count keeps the reduced fixture admitted while refusing a
+	// lone-axis drift.
+	if attn.HeadDim != cfg.HeadDim {
+		reducedFixture := cfg.HeadDim != v41KVLoraRank && cfg.NumLayers < attn.NumLayers
+		if !reducedFixture {
+			return false, v41StageErr(v41StageAttention, -1,
+				fmt.Errorf("%w: published V4.1 attention envelope declares head_dim=%d but config has %d and the decoder stack is not a narrowed fixture (layers %d vs %d)",
+					ErrV41ForwardStage, attn.HeadDim, cfg.HeadDim, cfg.NumLayers, attn.NumLayers))
+		}
+		return cfg.HeadDim == v41KVLoraRank, nil
+	}
+	// Authoritative (self-consistent) envelope: the full published geometry is
+	// REQUIRED. Any mismatch on a decoder axis is a typed fail-closed error -- the
+	// assembly never falls back to the reduced stand-in.
+	type axis struct {
+		name      string
+		got, want int
+	}
+	for _, a := range []axis{
+		{"head_dim", cfg.HeadDim, v41KVLoraRank},
+		{"num_hidden_layers", cfg.NumLayers, attn.NumLayers},
+		{"hidden_size", cfg.HiddenSize, attn.HiddenSize},
+		{"num_attention_heads", cfg.NumHeads, attn.NumHeads},
+		{"num_key_value_heads", cfg.NumKVHeads, attn.NumKVHeads},
+	} {
+		if a.got != a.want {
+			return false, v41StageErr(v41StageAttention, -1,
+				fmt.Errorf("%w: published V4.1 attention envelope declares %s=%d but config has %d", ErrV41ForwardStage, a.name, a.want, a.got))
+		}
+	}
+	return true, nil
+}
+
+// v41ForwardKVLatentRank resolves the attn.wkv output width for an admitted
+// config: the published v41KVLoraRank (512) on the full path, the tiny HeadDim
+// stand-in on the reduced fixture. It returns v41ForwardGeometry's error rather
+// than defaulting to the reduced width, so a config whose published envelope is
+// inconsistent can never be admitted against a reduced stand-in shape.
+func v41ForwardKVLatentRank(cfg Config) (int, error) {
+	full, err := v41ForwardGeometry(cfg)
+	if err != nil {
+		return 0, err
+	}
+	if full {
+		return v41KVLoraRank, nil
+	}
+	return v41KVLoraRankReduced(cfg), nil
+}
+
 // v41MHCMixWidth is the mHC coefficient-vector width for hc=4: (2+hc)*hc.
 const v41MHCMixWidth = 24
 
@@ -495,6 +578,18 @@ func (m *Model) v41ForwardAdmitted() error {
 			fmt.Errorf("%w: reduced weights absent", ErrV41NativeUnsupported))
 	}
 	cfg := m.Cfg
+	// Geometry discrimination fails closed: a parsed/published config whose flat
+	// axes disagree with its Attention envelope is refused here rather than
+	// silently assembled against the reduced stand-in geometry.
+	if _, err := v41ForwardGeometry(cfg); err != nil {
+		return err
+	}
+	// kvLatentRank is resolved through the same fail-closed discriminator, so an
+	// inconsistent published envelope can never be admitted at the reduced shape.
+	kvLatentRank, err := v41ForwardKVLatentRank(cfg)
+	if err != nil {
+		return err
+	}
 	if err := m.v41AdmitShape("model.embed_tokens.weight", v41StageEmbedding, -1, cfg.VocabSize, cfg.HiddenSize); err != nil {
 		return err
 	}
@@ -555,7 +650,7 @@ func (m *Model) v41ForwardAdmitted() error {
 		if err := m.v41AdmitShape(layerName(l, "attn.wq_b.weight"), v41StageAttention, l, qHeadDim, cfg.QLoraRank); err != nil {
 			return err
 		}
-		if err := m.v41AdmitShape(layerName(l, "attn.wkv.weight"), v41StageAttention, l, v41KVLoraRankReduced(cfg), H); err != nil {
+		if err := m.v41AdmitShape(layerName(l, "attn.wkv.weight"), v41StageAttention, l, kvLatentRank, H); err != nil {
 			return err
 		}
 		// wo_a is the leaf's group-major [Groups, OLoRARank, HeadsPerGroup*HeadDim]
@@ -654,6 +749,11 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (*Activations, error)
 	H, hd, nH := cfg.HiddenSize, cfg.HeadDim, cfg.NumHeads
 	eps := float32(cfg.RMSNormEps)
 
+	full, err := v41ForwardGeometry(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	// ---- embedding ----
 	embed := m.tensor("model.embed_tokens.weight")
 	if len(embed) < cfg.VocabSize*H {
@@ -664,6 +764,22 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (*Activations, error)
 	for t, id := range seq {
 		x[t] = append([]float32(nil), embed[id*H:(id+1)*H]...)
 		scaleEmbedInPlace(x[t], cfg)
+	}
+
+	// Persistent mHC streams, one four-stream set per position. On the full path
+	// stream 0 carries the live hidden state and streams 1..3 are the reference's
+	// persistent residual streams initialized to zero -- DISTINCT from stream 0,
+	// not the reduced stand-in's four identical copies. Both paths carry the same
+	// [][][]float32 shape; only the initialization and mixing differ, so the
+	// reduced arithmetic is byte-identical to the pre-#13009 assembly.
+	streams := make([][][]float32, len(seq))
+	for t := range streams {
+		set := make([][]float32, 4)
+		set[0] = x[t]
+		for h := 1; h < 4; h++ {
+			set[h] = make([]float32, H)
+		}
+		streams[t] = set
 	}
 
 	hcIters := 1
@@ -683,7 +799,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (*Activations, error)
 
 	act := &Activations{Seq: len(seq), Hidden: [][]float32{flatten(x)}}
 	for l := 0; l < cfg.NumLayers; l++ {
-		if err := m.v41Layer(l, seq, x, hd, nH, H, eps, hcIters, hcEps, routeCfg, st); err != nil {
+		if err := m.v41Layer(l, seq, x, streams, full, hd, nH, H, eps, hcIters, hcEps, routeCfg, st); err != nil {
 			return nil, err
 		}
 		act.Hidden = append(act.Hidden, flatten(x))
@@ -700,9 +816,13 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (*Activations, error)
 	return act, nil
 }
 
-// v41Layer applies one reduced V4.1 decoder layer to x in place. tokens carries
-// the ids for the positions in x so a declared Engram layer can hash them.
-func (m *Model) v41Layer(l int, tokens []int, x [][]float32, hd, nH, H int, eps float32, hcIters int, hcEps float32, routeCfg v41RouterConfig, st *v41ForwardState) error {
+// v41Layer applies one V4.1 decoder layer to x in place, updating the persistent
+// mHC streams[t] for each position. tokens carries the ids for the positions in
+// x so a declared Engram layer can hash them. The reduced path reproduces the
+// pre-#13009 arithmetic exactly (four identical stand-in streams derived from the
+// normalized input, and stream 0 of the post-mix written back); the full path
+// reads and writes all four DISTINCT persistent streams.
+func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float32, full bool, hd, nH, H int, eps float32, hcIters int, hcEps float32, routeCfg v41RouterConfig, st *v41ForwardState) error {
 	cfg := m.Cfg
 
 	// Engram injection happens at the START of the layer, into the residual,
@@ -747,11 +867,17 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, hd, nH, H int, eps 
 			return v41StageErr(v41StageMHC, l, err)
 		}
 		hcByPos[t] = mix
-		// Reduced stand-in for the reference's hc persistent streams: four
-		// identical copies of the normalized input. v41MHCPre then collapses them
-		// with the learned pre coefficients.
-		streams := [][]float32{xn, xn, xn, xn}
-		collapsed, err := v41MHCPre(streams, mix.pre)
+		// The mHC pre-collapse always reads a four-stream set collapsed by the
+		// learned pre coefficients. The reduced path reconstructs the reference's
+		// stand-in (four identical copies of the normalized input, byte-identical
+		// to pre-#13009) rather than reading the persistent set, so its numerics
+		// are unchanged. The full path reads the four DISTINCT persistent streams
+		// carried into this layer (stream 0 = live hidden, 1..3 = residual).
+		streams4 := streams[t]
+		if !full {
+			streams4 = [][]float32{xn, xn, xn, xn}
+		}
+		collapsed, err := v41MHCPre(streams4, mix.pre)
 		if err != nil {
 			return v41StageErr(v41StageMHC, l, err)
 		}
@@ -766,7 +892,24 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, hd, nH, H int, eps 
 		c := preByPos[t]
 		qLat := matRows(wQA, c, cfg.QLoraRank, H)
 		q := matRows(wQB, qLat, nH*hd, cfg.QLoraRank)
-		kv := matRows(wKV, c, hd, H)
+		// KV latent seam. The full path admits and projects attn.wkv at the
+		// published latent rank (v41KVLoraRank = 512); the attention contraction
+		// below consumes a per-position row of width hd (head_dim), so the full
+		// projection is taken at the published latent rank and sliced to the first
+		// hd columns for the sink contraction. On a valid full config
+		// hd == v41KVLoraRank == 512, so the slice is a no-op; an hd wider than the
+		// latent rank is refused rather than silently mis-read. The reduced fixture
+		// keeps its HeadDim-wide projection byte-for-byte.
+		var kv []float32
+		if full {
+			if hd > v41KVLoraRank {
+				return v41StageErr(v41StageAttention, l,
+					fmt.Errorf("%w: attention head_dim %d exceeds full KV latent rank %d", ErrV41ForwardStage, hd, v41KVLoraRank))
+			}
+			kv = matRows(wKV, c, v41KVLoraRank, H)[:hd]
+		} else {
+			kv = matRows(wKV, c, hd, H)
+		}
 		cos, sin := ropeRowForLayer(cfg, l, t)
 		for h := 0; h < nH; h++ {
 			applyRopeRow(q[h*hd:(h+1)*hd], cos, sin)
@@ -902,12 +1045,29 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, hd, nH, H int, eps 
 		for i := 0; i < H; i++ {
 			delta[i] = attnOut[t][i] + moe[i]
 		}
-		streams := [][]float32{preByPos[t], preByPos[t], preByPos[t], preByPos[t]}
-		next, err := v41MHCPost(delta, streams, hcByPos[t].post, hcByPos[t].comb)
+		// The post-mix always reads a four-stream residual set. The reduced path
+		// reconstructs the stand-in (four identical copies of the collapsed pre
+		// vector) so its arithmetic is unchanged; the full path mixes the four
+		// distinct persistent streams.
+		residual := [][]float32{preByPos[t], preByPos[t], preByPos[t], preByPos[t]}
+		if full {
+			residual = streams[t]
+		}
+		next, err := v41MHCPost(delta, residual, hcByPos[t].post, hcByPos[t].comb)
 		if err != nil {
 			return v41StageErr(v41StageMHC, l, err)
 		}
-		copy(x[t], next[0])
+		if full {
+			// Write ALL FOUR post-mix streams back into the persistent set so the
+			// next layer reads the updated state; stream 0 is the live hidden.
+			for h := 0; h < 4; h++ {
+				copy(streams[t][h], next[h])
+			}
+			copy(x[t], next[0])
+		} else {
+			// Reduced path: only stream 0 is propagated, exactly as before.
+			copy(x[t], next[0])
+		}
 	}
 	return nil
 }
