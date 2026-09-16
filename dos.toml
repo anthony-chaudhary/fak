@@ -336,7 +336,7 @@ concurrent = [
   "fleetbottleneck", "fleetbus", "fleetcap", "fleetcompare", "fleetfreeze", "fleetmemory",
   "fleetmetrics",
   "fleetmon", "fleetpane", "fleetreap", "fleetsim", "fleetspine", "fleettrend", "fleetverify",
-  "flock", "flowcredit", "focusscore", "framebus", "frontierswe", "fusedturn", "gardenbundle",
+  "flock", "focusscore", "framebus", "frontierswe", "fusedturn", "gardenbundle",
   # reconciled 2026-09-01 (index-freshness refresh pass): six committed internal/ leaves the
   # `fak-dev index freshness` drift report flagged as holding Go files with NO [lanes.trees]
   # entry -- the same empty-tree-overlaps-everything class the 2026-07-25 audit fixed at scale.
@@ -436,7 +436,6 @@ concurrent = [
   "studyprio",
   "studytickets",
   "sweepcert",
-  "microfleeteconomics",
   "modeldescriptor",
   "openviking",
   "dockerprocess",
@@ -724,7 +723,6 @@ autopick = [
   "studyprio",
   "studytickets",
   "sweepcert",
-  "microfleeteconomics",
   "openviking",
   "dockerprocess",
   "nativebench",
@@ -1158,7 +1156,6 @@ fleetspine = ["internal/fleetspine/**"]
 fleettrend = ["internal/fleettrend/**"]
 fleetverify = ["internal/fleetverify/**"]
 flock = ["internal/flock/**"]
-flowcredit = ["internal/flowcredit/**"]
 focusscore = ["internal/focusscore/**"]
 framebus = ["internal/framebus/**"]
 frontierswe = ["internal/frontierswe/**"]
@@ -1455,7 +1452,6 @@ studyadjacency = ["internal/studyadjacency/**"]
 studylink = ["internal/studylink/**"]
 studyprio = ["internal/studyprio/**"]
 studytickets = ["internal/studytickets/**"]
-microfleeteconomics = ["internal/microfleeteconomics/**"]
 sweepcert = ["internal/sweepcert/**"]
 modeldescriptor = ["internal/modeldescriptor/**"]
 openviking = ["internal/openviking/**"]
