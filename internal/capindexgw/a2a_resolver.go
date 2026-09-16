@@ -55,8 +55,14 @@ func (r *A2AResolver) Index() []capindex.CapCard {
 	return cards
 }
 
-// Fault pages in the full body for a given reference on demand.
-// For A2A, this is the full method spec including inputs/outputs.
+// Fault pages in the full body for a given reference on demand. For A2A the
+// body is the method's full INVOCATION CONTRACT: the dispatch token (method),
+// the transport envelope it is called under, the access scope, the reviewed
+// description, and the parameter envelope. That is what makes "Fault() resolves
+// the invocation contract" true — the bytes paged in here are the contract a
+// caller needs to actually invoke the method, not just its label. The registry
+// carries no per-method parameter schema, so input_schema is the uniform
+// envelope the dispatcher enforces (documented on A2AMethodSpecForResolver).
 func (r *A2AResolver) Fault(ref capindex.CapRef) (capindex.Capability, error) {
 	if ref.Kind != capindex.CapKindA2AAgent {
 		return capindex.Capability{}, capindex.ErrKindMismatch
@@ -66,7 +72,9 @@ func (r *A2AResolver) Fault(ref capindex.CapRef) (capindex.Capability, error) {
 	methodSpecs := gateway.A2AMethodRegistryForResolver()
 	for _, spec := range methodSpecs {
 		if spec.Name == ref.Name {
-			// Full body is the complete method spec
+			// Full body is the complete method spec — including the invocation
+			// contract fields (method, transport, input_schema), so Fault()
+			// pages in more than a name+scope+description label.
 			body, _ := json.Marshal(spec)
 			digest := simpleDigest(spec.Name + ":" + spec.Scope)
 

@@ -1,6 +1,7 @@
 package capindexgw
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -76,6 +77,94 @@ func TestC5ProtocolBlindLoader(t *testing.T) {
 	t.Logf("  Example A2A card: %s", a2aCards[0].Ref.Name)
 }
 
+// TestMCPResolverIndexIsCheapAtRest proves the C5 "0-for-∞" at-rest property:
+// MCPResolver.Index() is O(cards), not O(cards × body). A toolset of N tools
+// costs the same at rest however large each tool's inputSchema is, because the
+// index digest is derived from the cheap card bytes and the body is only
+// materialized by Fault (which is what actually carries the inputSchema).
+//
+// This is the regression witness for the defect where Index() hashed the full
+// multi-KB inputSchema for every tool on every call. The witness is the REAL
+// Index() path: we swap the resolver's descriptor source (a test-only seam on
+// MCPResolver) for the same tool with a thin body and then with a 512 KiB body,
+// holding name and description fixed. Every pre-fix implementation that folds
+// the body into the digest moves the digest between the two; a cheap-at-rest
+// index does not.
+func TestMCPResolverIndexIsCheapAtRest(t *testing.T) {
+	const (
+		name = "fak_adjudicate" // any catalog tool; we supply the descriptor
+		desc = "Adjudicate a proposed tool call through the fak kernel WITHOUT executing it."
+	)
+	// A 512 KiB body: wildly oversized vs a normal schema, so any body read on
+	// the index path changes the result visibly.
+	fatBody := []byte(`{"type":"object","padding":"` + strings.Repeat("x", 512*1024) + `"}`)
+
+	thin := NewMCPResolver(nil)
+	thin.setDescriptorsForTest([]map[string]any{{
+		"name":        name,
+		"description": desc,
+		"inputSchema": json.RawMessage(`{}`),
+	}})
+	fat := NewMCPResolver(nil)
+	fat.setDescriptorsForTest([]map[string]any{{
+		"name":        name,
+		"description": desc,
+		"inputSchema": json.RawMessage(fatBody),
+	}})
+
+	thinCards := thin.Index()
+	fatCards := fat.Index()
+	if len(thinCards) != 1 || len(fatCards) != 1 {
+		t.Fatalf("card counts: thin=%d fat=%d, want 1 each", len(thinCards), len(fatCards))
+	}
+
+	// The whole at-rest card must be body-size-invariant: same digest, same
+	// bytes, same ref/trigger/tags semantics.
+	if thinCards[0].Digest != fatCards[0].Digest {
+		t.Fatalf("Index() digest depends on body size: thin=%s fat=%s (at-rest index must be O(cards), not O(bodies))",
+			thinCards[0].Digest, fatCards[0].Digest)
+	}
+	if string(thinCards[0].CardBytes) != string(fatCards[0].CardBytes) {
+		t.Fatalf("Index() CardBytes depend on body size:\n thin=%s\n fat =%s",
+			thinCards[0].CardBytes, fatCards[0].CardBytes)
+	}
+
+	// The digest must be the cheap card-level key, not a hash of any body.
+	if want := capindex.Digest(thinCards[0].CardBytes); thinCards[0].Digest != want {
+		t.Fatalf("Index() digest = %s, want capindex.Digest(CardBytes) = %s", thinCards[0].Digest, want)
+	}
+
+	// Semantics are unchanged: ref/kind/trigger/tags still come from the card.
+	got := thinCards[0]
+	if got.Ref.Kind != capindex.CapKindMCPTool || got.Ref.Name != name {
+		t.Fatalf("Index() ref = %+v, want kind=%s name=%s", got.Ref, capindex.CapKindMCPTool, name)
+	}
+	if got.Trigger != desc {
+		t.Fatalf("Index() trigger = %q, want description %q", got.Trigger, desc)
+	}
+	if len(got.Tags) != 2 || got.Tags[0] != "mcp" || got.Tags[1] != "tool" {
+		t.Fatalf("Index() tags = %v, want [mcp tool]", got.Tags)
+	}
+
+	// The residual O(bodies) path is Fault: it must materialize the inputSchema,
+	// and the at-rest card must NOT carry it.
+	cap, err := fat.Fault(got.Ref)
+	if err != nil {
+		t.Fatalf("Fault(%+v) returned error: %v", got.Ref, err)
+	}
+	if !strings.Contains(string(cap.Body), "inputSchema") {
+		t.Fatalf("Fault() body does not materialize inputSchema: %s", cap.Body)
+	}
+	if !strings.Contains(string(cap.Body), strings.Repeat("x", 1024)) {
+		t.Fatalf("Fault() body does not carry the full inputSchema bytes")
+	}
+	if strings.Contains(string(got.CardBytes), "inputSchema") || strings.Contains(string(got.CardBytes), "padding") {
+		t.Fatalf("at-rest card carries body bytes: %s", got.CardBytes)
+	}
+
+	t.Logf("PROOF: Index() digest is body-size-invariant (thin==fat==%s); Fault() materializes the schema", got.Digest)
+}
+
 // TestMCPResolverFoldingProvesFolded tests that the MCP resolver
 // successfully folds the existing gateway/mcp.go code.
 func TestMCPResolverFoldingProvesFolded(t *testing.T) {
@@ -141,6 +230,79 @@ func TestA2AResolverFoldingProvesFolded(t *testing.T) {
 
 	t.Logf("PROOF: A2A resolver folds gateway/a2a.go (A2AMethodRegistryForResolver)")
 	t.Logf("  Folded %d methods from gateway/a2a.go", len(cards))
+}
+
+// TestA2AFaultResolvesInvocationContract proves C5's "Fault() resolves the
+// invocation contract" claim (issue #1108): the body a Fault pages in carries
+// the real invocation fields — the wire dispatch token, the transport envelope,
+// and the parameter envelope — not just name/scope/description. It also proves
+// Index() stays cheap (cards carry no invocation contract), so the enrichment
+// is confined to the faulted body.
+func TestA2AFaultResolvesInvocationContract(t *testing.T) {
+	r := NewA2AResolver()
+
+	cards := r.Index()
+	if len(cards) == 0 {
+		t.Fatal("A2A resolver returned no cards")
+	}
+
+	// Every A2A method faults in a body carrying the invocation contract.
+	for _, card := range cards {
+		cap, err := r.Fault(card.Ref)
+		if err != nil {
+			t.Fatalf("Fault(%s) failed: %v", card.Ref.Name, err)
+		}
+
+		var body struct {
+			Name        string `json:"name"`
+			Scope       string `json:"scope"`
+			Method      string `json:"method"`
+			Transport   string `json:"transport"`
+			InputSchema string `json:"input_schema"`
+		}
+		if err := json.Unmarshal(cap.Body, &body); err != nil {
+			t.Fatalf("Fault(%s) body is not valid JSON: %v", card.Ref.Name, err)
+		}
+
+		// The invocation contract: who to call, under which envelope, and the
+		// parameter envelope — the fields that make the body invocable.
+		if body.Method == "" {
+			t.Errorf("Fault(%s) body missing invocation `method`", card.Ref.Name)
+		}
+		if body.Transport == "" {
+			t.Errorf("Fault(%s) body missing `transport`", card.Ref.Name)
+		}
+		if body.InputSchema == "" {
+			t.Errorf("Fault(%s) body missing `input_schema` (parameter envelope)", card.Ref.Name)
+		}
+		if body.Method != card.Ref.Name {
+			t.Errorf("Fault(%s) method %q != card name %q", card.Ref.Name, body.Method, card.Ref.Name)
+		}
+
+		// The contract must be MORE than the cheap card's label.
+		if body.Method == "" || body.Transport == "" || body.InputSchema == "" {
+			t.Errorf("Fault(%s) body did not enrich beyond name/scope/description", card.Ref.Name)
+		}
+	}
+
+	// Index() stays cheap: the card bytes carry no invocation-contract fields.
+	for _, card := range cards {
+		if strings.Contains(string(card.CardBytes), "input_schema") ||
+			strings.Contains(string(card.CardBytes), "transport") {
+			t.Errorf("card %s leaked invocation-contract fields into cheap CardBytes", card.Ref.Name)
+		}
+	}
+
+	// Spot-check one concrete method end-to-end.
+	sample, err := r.Fault(cards[0].Ref)
+	if err != nil {
+		t.Fatalf("Fault(%s) failed: %v", cards[0].Ref.Name, err)
+	}
+	if !strings.Contains(string(sample.Body), `"method"`) {
+		t.Fatalf("Fault body lacks the invocation method: %s", sample.Body)
+	}
+
+	t.Logf("PROOF: Fault() pages in the A2A invocation contract; sample body: %s", sample.Body)
 }
 
 // Compile-time proof that both adapters satisfy the protocol-blind seam.

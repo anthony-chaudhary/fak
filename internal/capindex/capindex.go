@@ -92,7 +92,8 @@ func (c *Capability) Materialize() []byte {
 }
 
 // Resolver is the protocol-generic interface for resolving capabilities.
-// Every protocol (skill, MCP, A2A, ...) implements this one seam.
+// Every protocol (skill, MCP, A2A, ...) implements this one seam;
+// docs/adding-the-next-protocol.md is the one-file on-ramp for a new protocol.
 type Resolver interface {
 	// Index returns cheap cards only — the at-rest cost. This is the
 	// protocol's "list" operation: tools/list for MCP, skills/* for local skills,

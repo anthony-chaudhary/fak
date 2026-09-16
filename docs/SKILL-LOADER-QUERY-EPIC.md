@@ -169,7 +169,9 @@ reimplements the pager or the procedural cache.
 - **C5 — the protocol-generic resolvers (MCP + A2A).** An `mcp-tool` `Resolver` whose
   `Index()` wraps `tools/list` and `Fault()` wraps the call schema (folds the existing
   `internal/gateway/mcp.go`); an `a2a-agent` `Resolver`. Proves the loader is
-  protocol-blind and gives the next protocol a one-file on-ramp.
+  protocol-blind and gives the next protocol a one-file on-ramp. The on-ramp is
+  written down in [`docs/adding-the-next-protocol.md`](adding-the-next-protocol.md):
+  the one interface a new protocol implements and where its resolver file goes.
 - **C6 — the witness + audit surface (`ctxresidency` read side).** Every fault /
   eviction / version-bind is a journal row; a `fak` read reconciles the loader's view
   with the kernel counters, the way KV residency is audited today. The trust floor.
