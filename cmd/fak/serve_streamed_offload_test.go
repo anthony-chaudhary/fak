@@ -208,7 +208,7 @@ func TestServeStreamedDeviceArmUsesDecisionHostFitSnapshot(t *testing.T) {
 
 	// The caller's one-measurement snapshot: tiny, so the full routed charge cannot be host-resident.
 	tinyFit := serveFitBudget{Base: 512, Headroom: 0}
-	decided, _, err := serveStreamedCPUOffloadPathDecision(path, 1, 0, tinyFit)
+	decided, _, err := serveStreamedCPUOffloadPathDecision(path, 1, 0, tinyFit, false)
 	if err != nil {
 		t.Fatalf("serveStreamedCPUOffloadPathDecision: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestServeStreamedDeviceArmFittingArtifactStaysResident(t *testing.T) {
 
 	be := serveCapBackend{total: 1 << 40, free: 1 << 40, known: true}
 	bigFit := serveFitBudget{Base: 1 << 40, Headroom: 0}
-	decided, _, err := serveStreamedCPUOffloadPathDecision(path, 1, 0, bigFit)
+	decided, _, err := serveStreamedCPUOffloadPathDecision(path, 1, 0, bigFit, false)
 	if err != nil {
 		t.Fatalf("serveStreamedCPUOffloadPathDecision: %v", err)
 	}
@@ -426,4 +426,154 @@ func TestServeStreamedHostFitIgnoresDeviceOverride(t *testing.T) {
 // without re-deriving the constant inline.
 func maxBoundFor(fit serveFitBudget) int64 {
 	return int64(float64(fit.avail()) * (1 - serveCPUOffloadStreamedResidentMargin))
+}
+
+// TestServeCPUOffloadSharedPoolStreamsOnGrandTotal is the fak#13172 follow-on regression at the
+// integrated-pool arm-selection seam. serveStreamedCPUOffloadPlan judged ONLY plan.HostTotal()
+// against host avail -- correct on a DISCRETE device, where the device dense side is independent
+// VRAM. On an INTEGRATED/APU tier (ggufload.BackendSharesHostRAM: "integrated:<device>") the device
+// dense side and the host-resident expert set draw from ONE physical DRAM pool, so a plan whose HOST
+// subset fits avail while its GRAND total (device transit + host resident) exceeds the pool is
+// admitted on the host subset and then fails closed on the unified-host-residency bound -- the
+// witnessed strix3 refusal: weights=63.09 GiB + offload(host)=43.86 GiB = 107.08 GiB against a
+// 62.4 GiB MemTotal, with HostTotal 43.86 <= avail 48.72 so the resident arm was kept.
+//
+// The shared-pool arm must instead SELECT streaming on the GRAND total and size the bounded resident
+// expert set from what REMAINS after the device dense transit, so the streamed plan's simultaneous
+// physical footprint fits the pool.
+func TestServeCPUOffloadSharedPoolStreamsOnGrandTotal(t *testing.T) {
+	ws := serveStreamedSynthWeightSource(t)
+	if !serveStreamedExpertsCapable(ws) {
+		t.Fatal("fixture routed slabs are not stageable; the shared-pool fault path has no work here")
+	}
+
+	// The resident plan over an unbounded budget: its device dense side and its host-scoped routed
+	// set are the two terms the shared pool must hold simultaneously.
+	resident, err := serveGGUFCPUOffloadMemoryPlan(ws, 1, 0, serveFitBudget{})
+	if err != nil {
+		t.Fatalf("resident plan: %v", err)
+	}
+	if resident.DeviceTotal() <= 0 || resident.HostTotal() <= 0 {
+		t.Fatalf("fixture must charge both a device dense side and a host routed side; plan=%+v", resident)
+	}
+
+	// The pool is sized so the HOST subset ALONE fits (the bug's trigger), but the GRAND total does
+	// not: avail is at least HostTotal but strictly below DeviceTotal+HostTotal. This is exactly the
+	// witnessed shape (host subset <= avail, grand total > pool).
+	pool := resident.HostTotal() + resident.DeviceTotal()/2
+	fit := serveFitBudget{Base: pool, Headroom: 0}
+	if fit.avail() < resident.HostTotal() {
+		t.Fatalf("fixture pool %d must admit the host subset %d to reproduce the shared-pool trap", fit.avail(), resident.HostTotal())
+	}
+	if resident.DeviceTotal()+resident.HostTotal() <= fit.avail() {
+		t.Fatalf("fixture pool %d must NOT admit the grand total %d", fit.avail(), resident.DeviceTotal()+resident.HostTotal())
+	}
+
+	// 1) The discrete arm keeps the resident plan (P4 preserved): the device dense side is not
+	// charged against host RAM there.
+	discretePlan, discreteStreamed, err := serveStreamedCPUOffloadPlanForPool(ws, 1, 0, fit, false)
+	if err != nil {
+		t.Fatalf("discrete plan: %v", err)
+	}
+	if discreteStreamed {
+		t.Fatalf("discrete arm streamed although the host subset %d fits avail %d; the historical trigger must be unchanged", resident.HostTotal(), fit.avail())
+	}
+	if discretePlan.HostTotal() != resident.HostTotal() {
+		t.Fatalf("discrete plan host total %d, want the resident plan %d (byte-identical)", discretePlan.HostTotal(), resident.HostTotal())
+	}
+
+	// 2) The shared-pool arm SELECTS streaming on the grand total -- the bug's fix.
+	plan, streamed, err := serveStreamedCPUOffloadPlanForPool(ws, 1, 0, fit, true)
+	if err != nil {
+		t.Fatalf("shared-pool plan: %v", err)
+	}
+	if !streamed {
+		t.Fatalf("shared-pool arm did NOT stream although grand total %d exceeds avail %d and the host subset fits", resident.DeviceTotal()+resident.HostTotal(), fit.avail())
+	}
+	// The device dense side is charged IDENTICALLY, so the device fit check cannot disagree.
+	if plan.DeviceTotal() != resident.DeviceTotal() {
+		t.Fatalf("streamed device total %d, want the unchanged dense side %d", plan.DeviceTotal(), resident.DeviceTotal())
+	}
+	// The simultaneous physical footprint (device transit + bounded resident set) must fit the pool.
+	if plan.DeviceTotal()+plan.HostTotal() > fit.avail() {
+		t.Fatalf("streamed simultaneous footprint %d (device %d + host %d) exceeds the shared pool %d", plan.DeviceTotal()+plan.HostTotal(), plan.DeviceTotal(), plan.HostTotal(), fit.avail())
+	}
+	if plan.HostTotal() <= 0 {
+		t.Fatalf("bounded resident expert set collapsed to zero; plan=%+v", plan)
+	}
+	// The device dense side consumed part of the pool, so the resident expert bound must be strictly
+	// smaller than the whole-avail bound the discrete case uses (it is sized from the remainder).
+	fullBound := serveCPUOffloadStreamedResidentBound(fit)
+	sharedBound := serveCPUOffloadSharedPoolResidentBound(fit, resident.DeviceTotal())
+	if sharedBound >= fullBound {
+		t.Fatalf("shared-pool bound %d is not below the whole-avail bound %d; the device transit was not subtracted", sharedBound, fullBound)
+	}
+}
+
+// TestServeCPUOffloadSharedPoolResidentBoundFloorsAtZero pins the honest floor: a device transit that
+// already at or above the pool (or an unprobeable pool) yields a zero bound (stream-through) rather
+// than a negative one.
+func TestServeCPUOffloadSharedPoolResidentBoundFloorsAtZero(t *testing.T) {
+	fit := serveFitBudget{Base: 1 << 30, Headroom: 0}
+	if got := serveCPUOffloadSharedPoolResidentBound(fit, fit.avail()); got != 0 {
+		t.Fatalf("transit at avail: bound = %d, want 0 (stream-through floor)", got)
+	}
+	if got := serveCPUOffloadSharedPoolResidentBound(fit, fit.avail()+1); got != 0 {
+		t.Fatalf("transit over avail: bound = %d, want 0", got)
+	}
+	if got := serveCPUOffloadSharedPoolResidentBound(serveFitBudget{}, 1); got != 0 {
+		t.Fatalf("unprobeable pool: bound = %d, want 0", got)
+	}
+	// A genuine remainder keeps the declared margin strictly below it.
+	got := serveCPUOffloadSharedPoolResidentBound(fit, 1<<29)
+	remaining := fit.avail() - (1 << 29)
+	if got <= 0 || got >= remaining {
+		t.Fatalf("remainder bound = %d, want a nonzero set strictly below %d", got, remaining)
+	}
+}
+
+// TestServeStreamedDecisionSharedPoolBoundMatchesPlan is the shared-pool "one measurement" regression:
+// the load arm's WithStreamedExperts working set (the bound returned by
+// serveStreamedCPUOffloadPathDecision) and the sizing plan's charged host set must be the SAME
+// derivation. Before the fix the decision recomputed the bound with the DISCRETE helper even when the
+// shared-pool (grand-total) arm had selected streaming, so the bound threaded to the loader was the
+// whole-avail bound -- larger than the shared-pool bound the plan charged against the device transit.
+func TestServeStreamedDecisionSharedPoolBoundMatchesPlan(t *testing.T) {
+	path := writeServeStreamedSynthGGUF(t, "glm-moe-dsa-shared-pool.gguf")
+
+	ws, err := ggufload.OpenWeights(path)
+	if err != nil {
+		t.Fatalf("OpenWeights: %v", err)
+	}
+	resident, err := serveGGUFCPUOffloadMemoryPlan(ws, 1, 0, serveFitBudget{})
+	ws.Close()
+	if err != nil {
+		t.Fatalf("resident plan: %v", err)
+	}
+	if resident.DeviceTotal() <= 0 || resident.HostTotal() <= 0 {
+		t.Fatalf("fixture must charge both a device dense side and a host routed side; plan=%+v", resident)
+	}
+
+	// The shared-pool trap: the host subset fits, the grand total does not.
+	fit := serveFitBudget{Base: resident.HostTotal() + resident.DeviceTotal()/2, Headroom: 0}
+	if fit.avail() < resident.HostTotal() || resident.DeviceTotal()+resident.HostTotal() <= fit.avail() {
+		t.Fatalf("fixture pool %d does not reproduce the shared-pool trap (host %d, grand %d)", fit.avail(), resident.HostTotal(), resident.DeviceTotal()+resident.HostTotal())
+	}
+
+	decided, bound, err := serveStreamedCPUOffloadPathDecision(path, 1, 0, fit, true)
+	if err != nil {
+		t.Fatalf("serveStreamedCPUOffloadPathDecision(sharedPool=true): %v", err)
+	}
+	if !decided {
+		t.Fatalf("shared-pool decision did NOT stream (host %d fits avail %d, grand %d does not)", resident.HostTotal(), fit.avail(), resident.DeviceTotal()+resident.HostTotal())
+	}
+
+	want := serveCPUOffloadSharedPoolResidentBound(fit, resident.DeviceTotal())
+	if bound != want {
+		t.Fatalf("decision bound %d != the shared-pool bound the plan uses %d; the load arm and sizing path disagree (one-measurement invariant violated)", bound, want)
+	}
+	wholeAvail := serveCPUOffloadStreamedResidentBound(fit)
+	if bound >= wholeAvail {
+		t.Fatalf("decision bound %d was not reduced below the whole-avail bound %d despite the device transit", bound, wholeAvail)
+	}
 }

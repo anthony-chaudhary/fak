@@ -752,6 +752,27 @@ func serveCPUOffloadStreamedResidentBound(fit serveFitBudget) int64 {
 // The streamed plan charges the device dense side IDENTICALLY (the same per-tensor classification),
 // so the device fit check and the resident arm cannot disagree about what stays on the device.
 func serveStreamedCPUOffloadPlan(ws *ggufload.WeightSource, ranks, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, bool, error) {
+	return serveStreamedCPUOffloadPlanForPool(ws, ranks, contextBudgetTokens, fit, false)
+}
+
+// serveStreamedCPUOffloadPlanForPool is serveStreamedCPUOffloadPlan with the pool topology made
+// explicit. sharedPool reports whether the device-scoped dense charge draws from the SAME physical
+// DRAM pool the host-resident expert set is judged against -- an integrated/APU tier
+// (ggufload.BackendSharesHostRAM).
+//
+// On a DISCRETE device the two pools are independent: the device dense side lives in VRAM and must
+// NOT be double-counted against host RAM, so streaming is selected when the HOST-scoped routed set
+// alone exceeds host avail (the historical #13121 trigger), unchanged.
+//
+// On a SHARED pool the device dense side is ALSO physical DRAM (staged through host RAM and, on the
+// integrated tier, resident in the same unified heap), so the quantity that must fit is the plan's
+// GRAND total. The witnessed strix3 refusal is exactly this: weights=63.09 GiB device-scoped +
+// offload(host)=43.86 GiB routed, HostTotal 43.86 <= avail 48.72 so the resident arm was kept, yet
+// the grand total 107.08 GiB cannot fit 62.4 GiB MemTotal -> typed FitTooBig before the forward.
+// Selecting streaming on the grand total admits the same checkpoint with a bounded resident expert
+// set instead of refusing. The device dense side is still charged IDENTICALLY by the streamed plan,
+// so the device fit check and the resident arm cannot disagree about what stays on the device.
+func serveStreamedCPUOffloadPlanForPool(ws *ggufload.WeightSource, ranks, contextBudgetTokens int, fit serveFitBudget, sharedPool bool) (compute.MemoryPlan, bool, error) {
 	plan, err := serveGGUFCPUOffloadMemoryPlan(ws, ranks, contextBudgetTokens, fit)
 	if err != nil {
 		return nil, false, err
@@ -759,15 +780,20 @@ func serveStreamedCPUOffloadPlan(ws *ggufload.WeightSource, ranks, contextBudget
 	if ws == nil || fit.Base <= 0 {
 		return plan, false, nil
 	}
-	// Judge the HOST-scoped subset, not the grand total: on a device serve the dense weights live in
-	// VRAM and must not be double-counted against host RAM here.
-	if plan.HostTotal() <= fit.avail() {
+	// Discrete: judge the HOST-scoped subset (the device dense side is independent VRAM and must not
+	// be double-counted against host RAM). Shared pool: judge the GRAND total, because the device
+	// dense side consumes the same physical DRAM the host expert set is bound against.
+	if sharedPool {
+		if plan.Total() <= fit.avail() {
+			return plan, false, nil
+		}
+	} else if plan.HostTotal() <= fit.avail() {
 		return plan, false, nil
 	}
 	if !serveStreamedExpertsCapable(ws) {
 		return plan, false, nil
 	}
-	bound := serveCPUOffloadStreamedResidentBound(fit)
+	bound := serveCPUOffloadStreamedResidentBoundForPool(fit, plan.DeviceTotal(), sharedPool)
 	streamed, err := ws.EstimateCPUOffloadExpertsStreamedMemoryPlan(bound)
 	if err != nil {
 		return nil, false, err
@@ -775,20 +801,71 @@ func serveStreamedCPUOffloadPlan(ws *ggufload.WeightSource, ranks, contextBudget
 	return appendServeGGUFDevicePlan(ws, streamed, contextBudgetTokens, fit), true, nil
 }
 
+// serveCPUOffloadStreamedResidentBoundForPool is the ONE derivation of the bounded host-resident
+// expert working set, keyed on the pool topology so the load arm and the sizing path share it.
+// On a DISCRETE device (sharedPool=false) the device dense side is independent VRAM, so the bound is
+// the whole headroom-adjusted host budget less the resident margin (serveCPUOffloadStreamedResidentBound,
+// the #13121/#13140 behaviour, unchanged).
+// On a SHARED pool (sharedPool=true, an integrated/APU tier) the device-scoped dense charge and the
+// host-resident expert set draw from ONE physical DRAM pool, so the bound is sized from the budget
+// that REMAINS after the device dense transit -- otherwise the streamed plan re-charges the whole
+// pool (device transit + full resident bound) against the same budget and ties/overruns it.
+// deviceTransit is the resident plan's device-scoped dense total (0 for the host-only arm, where the
+// historical whole-avail bound is kept).
+func serveCPUOffloadStreamedResidentBoundForPool(fit serveFitBudget, deviceTransit int64, sharedPool bool) int64 {
+	if !sharedPool {
+		return serveCPUOffloadStreamedResidentBound(fit)
+	}
+	return serveCPUOffloadSharedPoolResidentBound(fit, deviceTransit)
+}
+
+// serveCPUOffloadSharedPoolResidentBound is the bounded host-resident expert working set for a
+// SHARED-pool (integrated/APU) tier, where the device-scoped dense charge and the host-resident
+// expert set draw from ONE physical DRAM pool. It sizes that set from the SAME host budget the
+// bound is judged against (fit.avail()) MINUS the device-scoped dense bytes that must transit that
+// pool first, then applies the fixed resident margin so the streamed plan's host total lands
+// STRICTLY below the budget that judges it (the #13140 property, preserved). A device-scoped
+// transit already at or above the budget yields zero (stream-through) -- the honest floor, because a
+// pool with no room left cannot be promised residency. An unprobeable host also yields zero.
+func serveCPUOffloadSharedPoolResidentBound(fit serveFitBudget, deviceTransit int64) int64 {
+	avail := fit.avail()
+	if avail <= 0 {
+		return 0
+	}
+	remaining := avail - deviceTransit
+	if remaining <= 0 {
+		return 0
+	}
+	bound := int64(float64(remaining) * (1 - serveCPUOffloadStreamedResidentMargin))
+	if bound >= remaining {
+		// A razor-thin remainder must still land strictly below it, and never become negative.
+		bound = remaining - 1
+	}
+	if bound < 0 {
+		return 0
+	}
+	return bound
+}
+
 // serveStreamedCPUOffloadPathDecision is the path-form of serveStreamedCPUOffloadPlan: the LOAD
 // arm's WithStreamedExperts threading and the SIZING path's plan are decided by ONE measurement
 // over one opened checkpoint, so they cannot disagree. An unopenable path, a non-MoE artifact, or a
 // routed set that already fits the host budget all return (false, 0, nil) -- the resident arm.
-func serveStreamedCPUOffloadPathDecision(ggufPath string, ranks, contextBudgetTokens int, fit serveFitBudget) (bool, int64, error) {
+// sharedPool is threaded straight to serveStreamedCPUOffloadPlanForPool so the load arm selects
+// streaming on the GRAND total on an integrated/APU tier (fak#13171/#13172 follow-on).
+func serveStreamedCPUOffloadPathDecision(ggufPath string, ranks, contextBudgetTokens int, fit serveFitBudget, sharedPool bool) (bool, int64, error) {
 	streamed := false
 	bound := int64(0)
 	_, err := withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
-		_, isStreamed, perr := serveStreamedCPUOffloadPlan(ws, ranks, contextBudgetTokens, fit)
+		plan, isStreamed, perr := serveStreamedCPUOffloadPlanForPool(ws, ranks, contextBudgetTokens, fit, sharedPool)
 		if perr != nil {
 			return nil, perr
 		}
 		if isStreamed {
-			streamed, bound = true, serveCPUOffloadStreamedResidentBound(fit)
+			// Derive the bound from the SAME resident plan the sizing path used, so the load arm's
+			// WithStreamedExperts working set and the sizing plan cannot disagree. On a shared pool the
+			// device dense transit has already consumed part of the pool, exactly as the plan charged it.
+			streamed, bound = true, serveCPUOffloadStreamedResidentBoundForPool(fit, plan.DeviceTotal(), sharedPool)
 		}
 		return nil, nil
 	})
@@ -807,7 +884,7 @@ func fitServeStreamedCPUOffloadPathOnHost(ggufPath string, ranks, contextBudgetT
 		return err
 	}
 	defer ws.Close()
-	plan, _, err := serveStreamedCPUOffloadPlan(ws, ranks, contextBudgetTokens, fit)
+	plan, _, err := serveStreamedCPUOffloadPlanForPool(ws, ranks, contextBudgetTokens, fit, false)
 	if err != nil {
 		return err
 	}
@@ -831,7 +908,7 @@ func fitServeStreamedCPUOffloadPathOnDevice(ggufPath string, be compute.Backend,
 		return nil, false, err
 	}
 	defer ws.Close()
-	plan, streamed, err := serveStreamedCPUOffloadPlan(ws, ranks, contextBudgetTokens, fit)
+	plan, streamed, err := serveStreamedCPUOffloadPlanForPool(ws, ranks, contextBudgetTokens, fit, ggufload.BackendSharesHostRAM(be))
 	if err != nil {
 		return nil, false, err
 	}
