@@ -370,9 +370,19 @@ func TestServeStreamedHostFitIgnoresDeviceOverride(t *testing.T) {
 	if hostless := serveStreamedHostFit(nil, &deviceOverride); hostless != deviceOverride {
 		t.Fatalf("device-less arm override = %+v, want the injected host snapshot %+v", hostless, deviceOverride)
 	}
-	// A nil override on either arm keeps the live probe (fail-open, unchanged).
-	if live := serveStreamedHostFit(nil, nil); live.Base != serveHostFitBudget().Base {
-		t.Fatalf("nil override device-less base %d, want the live host probe %d", live.Base, serveHostFitBudget().Base)
+	// A nil override on either arm keeps the live probe (fail-open, unchanged). The live host probe
+	// is MemAvailable-driven and drifts between calls, so assert the SHAPE (a positive host-scale
+	// budget that is not the injected device override) rather than byte-equality against a second
+	// probe.
+	live := serveStreamedHostFit(nil, nil)
+	if live.Base <= 0 {
+		t.Fatalf("nil override device-less fit base %d is not a live host budget (%+v)", live.Base, live)
+	}
+	if live == deviceOverride {
+		t.Fatalf("nil override device-less fit took the injected device override %+v", deviceOverride)
+	}
+	if liveDevice := serveStreamedHostFit(be, nil); liveDevice.Base <= 0 {
+		t.Fatalf("nil override device arm fit base %d is not a live host budget (%+v)", liveDevice.Base, liveDevice)
 	}
 
 	// The consequence the defect denied: a HOST-scale budget sizes the streamed resident bound to
