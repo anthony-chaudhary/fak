@@ -266,3 +266,66 @@ func TestServeStreamedDeviceArmFittingArtifactStaysResident(t *testing.T) {
 		t.Fatalf("resident-path host total %d, want the byte-identical resident plan %d", plan.HostTotal(), resident.HostTotal())
 	}
 }
+
+// TestServeStreamedResidentBoundMargin is the fak#13140 regression at the bound-arithmetic seam.
+// serveCPUOffloadStreamedResidentBound used to return fit.avail() VERBATIM, so on a probeable host
+// the bound WAS the budget the streamed plan is judged against (fitServeStreamedCPUOffloadPathOnHost
+// -> refuseHostPlanAgainstFit). Any non-expert host row (KV/scratch/activation) or the int64
+// truncation in compute.BudgetAfterHeadroom pushed the judged host total a few bytes over the
+// budget and failed closed, with no real wall: the physical strix3 reproduction was
+// "plan needs 48.01 GiB, host has 47.99 GiB (FitTooBig)" on the exact host class the streamed arm
+// exists to serve. The bound must be a DECLARED margin strictly BELOW avail, and a streamed plan
+// whose routed set exceeds the raw host budget must then be ADMITTED while still a genuine bounded
+// working set (not zero, not the whole budget).
+func TestServeStreamedResidentBoundMargin(t *testing.T) {
+	// 1) Probeable host: the bound is strictly below the budget it is judged against, and still a
+	// genuine nonzero working set the loader can keep resident.
+	fits := []int64{1 << 20, 1 << 30, 64 << 30}
+	for _, base := range fits {
+		fit := serveFitBudget{Base: base, Headroom: 0}
+		bound := serveCPUOffloadStreamedResidentBound(fit)
+		if bound >= fit.avail() {
+			t.Fatalf("base=%d: bound %d is not strictly below avail %d; the plan ties the budget it is judged against", base, bound, fit.avail())
+		}
+		if bound <= 0 {
+			t.Fatalf("base=%d: bound %d collapsed to zero; the streamed arm would bill a stream-through set", base, bound)
+		}
+	}
+
+	// An unprobeable host keeps the honest zero floor (stream-through) -- preserved behaviour.
+	if bound := serveCPUOffloadStreamedResidentBound(serveFitBudget{}); bound != 0 {
+		t.Fatalf("unprobeable host bound = %d, want 0 (stream-through floor)", bound)
+	}
+
+	// 2) The admission the defect denied: a routed set that CANNOT be host-resident (routed>avail)
+	// but is stageable must produce a streamed plan whose host total sits STRICTLY below avail, so
+	// the host fit check ADMITS it instead of refusing by a razor-thin arithmetic miss.
+	ws := serveStreamedSynthWeightSource(t)
+	resident, err := serveGGUFCPUOffloadMemoryPlan(ws, 1, 0, serveFitBudget{})
+	if err != nil {
+		t.Fatalf("resident plan: %v", err)
+	}
+	if resident.HostTotal() <= 0 {
+		t.Fatal("fixture must host-scope the routed experts (HostTotal>0)")
+	}
+
+	// A host budget the routed set cannot fully fit, but big enough that the bounded resident set is
+	// substantial: it forces the streamed arm and exercises the margin against real KV/scratch rows.
+	fit := serveFitBudget{Base: resident.HostTotal() / 2, Headroom: 0}
+	if fit.avail() <= 0 {
+		t.Fatalf("fixture routed set too small to build a forced-stream budget (%d)", resident.HostTotal())
+	}
+	plan, streamed, err := serveStreamedCPUOffloadPlan(ws, 1, 0, fit)
+	if err != nil {
+		t.Fatalf("serveStreamedCPUOffloadPlan: %v", err)
+	}
+	if !streamed {
+		t.Fatalf("streamed policy did not fire with budget %d against routed set %d", fit.avail(), resident.HostTotal())
+	}
+	if plan.HostTotal() >= fit.avail() {
+		t.Fatalf("streamed host total %d is not strictly below avail %d; the plan still ties the budget it is judged against", plan.HostTotal(), fit.avail())
+	}
+	if err := refuseHostPlanAgainstFit(plan, fit); err != nil {
+		t.Fatalf("streamed plan whose routed set exceeds the host budget was NOT admitted by the host fit check: %v (host total %d, avail %d)", err, plan.HostTotal(), fit.avail())
+	}
+}
