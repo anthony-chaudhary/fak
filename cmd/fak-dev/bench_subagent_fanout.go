@@ -119,7 +119,84 @@ type FanoutArmResult struct {
 	PeakMemoryFraction        float64           `json:"peak_memory_fraction"`
 	OutputEquivalence         bool              `json:"output_equivalence"`
 	OutputHash                string            `json:"output_hash"`
-	Error                     string            `json:"error,omitempty"`
+	// ServeCompleteness records whether the reference server was probed to
+	// actually serve the frozen workload geometry. It is present only for live
+	// cells; a simulated cell leaves it nil. ControlArmServed is the gate: a
+	// cell is only admissible as an ablation control when it is true.
+	ServeCompleteness *FanoutServeCompleteness `json:"serve_completeness,omitempty"`
+	Error             string                   `json:"error,omitempty"`
+}
+
+// FanoutServeCompleteness is the frozen-workload-geometry capacity witness for a
+// live cell. It binds the geometry the harness will send (one request of
+// PromptTokens = P+S, plus DecodeTokens generated) to the per-slot context
+// capacity the reference server reports it will serve. See issue #13134.
+//
+// The gate is ControlArmServed: an ablation arm whose reference cannot hold the
+// frozen prompt is a control that silently did not run, which is worse than a
+// missing arm because the comparison reads as if it were attempted. A shortfall
+// fails the cell closed with PromptOverflow naming the observed limit; an
+// unreadable/unstated limit fails closed as CapacityUnobserved (an evidence gap,
+// never a silent pass).
+type FanoutServeCompleteness struct {
+	// PromptTokens is the frozen per-slot geometry (P+S) one request carries.
+	PromptTokens int `json:"prompt_tokens"`
+	// DecodeTokens is the generated-token budget for the same request.
+	DecodeTokens int `json:"decode_tokens"`
+	// RequestedTotalTokens is what one slot must hold: PromptTokens+DecodeTokens.
+	RequestedTotalTokens int `json:"requested_total_tokens"`
+	// ObservedPerSlotTokens is the per-slot context the server reports it will
+	// serve (llama.cpp /props default_generation_settings.n_ctx, which is
+	// -c/--ctx-size divided by --parallel). Zero means UNOBSERVED.
+	ObservedPerSlotTokens int `json:"observed_per_slot_tokens"`
+	// ObservedTotalSlots is the server's served sequence/slot count
+	// (llama.cpp /props total_slots == --parallel). Zero means unobserved.
+	ObservedTotalSlots int `json:"observed_total_slots,omitempty"`
+	// CapacitySource names where ObservedPerSlotTokens came from, or why it is
+	// absent. It is the auditor's trail: "llama.cpp /props" is authoritative.
+	CapacitySource string `json:"capacity_source"`
+	// ControlArmServed is the single gate bit. True only when the observed
+	// per-slot capacity provably covers RequestedTotalTokens.
+	ControlArmServed bool `json:"control_arm_served"`
+	// Refusal is one of FanoutServeRefusalVocabulary, empty exactly when served.
+	Refusal string `json:"refusal,omitempty"`
+	// EvidenceGap distinguishes "could not establish the served limit" from
+	// "established the limit, and it is too small". Both fail the cell closed.
+	EvidenceGap bool `json:"evidence_gap"`
+	// Detail is the human-readable fail-closed reason, naming the observed limit
+	// and the command that set it.
+	Detail string `json:"detail,omitempty"`
+}
+
+// FanoutServeRefusalVocabulary is the closed set of serve-completeness refusals.
+var FanoutServeRefusalVocabulary = []string{
+	FanoutServeRefusePromptOverflow,     // observed per-slot ctx < P+S (or P+S+D)
+	FanoutServeRefuseCapacityUnobserved, // /props unreadable or n_ctx undeclared
+	FanoutServeRefuseProbeError,         // transport error reaching /props
+}
+
+const (
+	// FanoutServeRefusePromptOverflow: the server's observed per-slot capacity is
+	// smaller than the frozen prompt geometry. The control arm cannot serve the
+	// workload; the cell fails closed.
+	FanoutServeRefusePromptOverflow = "SERVE_PROMPT_OVERFLOW"
+	// FanoutServeRefuseCapacityUnobserved: the served per-slot capacity could not
+	// be read (no /props, or n_ctx absent/undeclared). Fail closed rather than
+	// assume a default — an unmeasured control is not a control.
+	FanoutServeRefuseCapacityUnobserved = "SERVE_CAPACITY_UNOBSERVED"
+	// FanoutServeRefuseProbeError: the capacity probe itself failed (transport).
+	FanoutServeRefuseProbeError = "SERVE_PROBE_ERROR"
+)
+
+// servedPropsWire is the subset of llama.cpp's /props response this harness
+// trusts. Shape verified against a live llama-server: the per-slot context is
+// default_generation_settings.n_ctx (here 4096 for `-c 32768 --parallel 8`), and
+// total_slots is --parallel. There is no top-level n_ctx field.
+type servedPropsWire struct {
+	TotalSlots                int `json:"total_slots"`
+	DefaultGenerationSettings struct {
+		NCtx int `json:"n_ctx"`
+	} `json:"default_generation_settings"`
 }
 
 // ContractValidation records compliance against Issue #6036 and #12325 mandates.
@@ -458,11 +535,25 @@ func (h *SubagentFanoutHarness) Run(ctx context.Context) (*SubagentFanoutReceipt
 
 			res, err := h.evaluateCell(ctx, arm, n)
 			if err != nil {
-				res = FanoutArmResult{
-					Arm:            arm,
-					ArmDescription: ArmDescription[arm],
-					FanoutN:        n,
-					Error:          err.Error(),
+				// Preserve any structured serve-completeness witness the cell
+				// produced: a fail-closed capacity refusal must reach the receipt
+				// naming the observed limit, not collapse to a bare error string.
+				if res.ServeCompleteness == nil {
+					res = FanoutArmResult{
+						Arm:            arm,
+						ArmDescription: ArmDescription[arm],
+						FanoutN:        n,
+					}
+				}
+				res.Error = err.Error()
+				if res.ArmDescription == "" {
+					res.ArmDescription = ArmDescription[arm]
+				}
+				if res.Arm == "" {
+					res.Arm = arm
+				}
+				if res.FanoutN == 0 {
+					res.FanoutN = n
 				}
 			}
 			receipt.Results = append(receipt.Results, res)
@@ -706,6 +797,28 @@ func (h *SubagentFanoutHarness) executeLiveCell(ctx context.Context, arm string,
 	S := h.Config.SuffixTokens
 	D := h.Config.DecodeTokens
 
+	// Declare the frozen workload geometry and verify the reference actually
+	// serves it before spending a single measured request. A control arm that
+	// cannot hold the prompt is not a control (issue #13134).
+	completeness, cerr := h.verifyServedGeometry(ctx, arm, endpoint, P, S, D)
+	res := FanoutArmResult{
+		Arm:               arm,
+		ArmDescription:    ArmDescription[arm],
+		FanoutN:           n,
+		Trials:            trials,
+		PrefixTokens:      P,
+		SuffixTokens:      S,
+		DecodeTokens:      D,
+		ServeCompleteness: completeness,
+	}
+	if cerr != nil {
+		// Fail the cell closed. The structured ServeCompleteness names the
+		// observed limit and the refusal; the error keeps the pretty renderer and
+		// the receipt's error field honest.
+		res.Error = completeness.Detail
+		return res, cerr
+	}
+
 	prefixPrompt := strings.Repeat("system instruction root coordinator master prompt ", P/8)
 	totalPromptTokens := int64(n) * int64(P+S)
 
@@ -843,7 +956,87 @@ func (h *SubagentFanoutHarness) executeLiveCell(ctx context.Context, arm string,
 		PeakMemoryFraction:        h.Config.MemoryFraction,
 		OutputEquivalence:         true,
 		OutputHash:                deterministicOutputHash(arm, n, P, S, D),
+		ServeCompleteness:         completeness,
 	}, nil
+}
+
+// verifyServedGeometry probes the reference server for the per-slot context
+// capacity it will actually serve, and fails closed when that capacity cannot
+// cover the frozen workload geometry one request carries.
+//
+// Geometry (issue #13134): one request sends PromptTokens = P+S and asks for
+// DecodeTokens = D back, so one slot must hold P+S+D. llama.cpp partitions
+// -c/--ctx-size across --parallel sequences, so the served per-slot limit is the
+// /props default_generation_settings.n_ctx (verified: `-c 32768 --parallel 8`
+// reports n_ctx=4096). The observed limit is read from the running server; no
+// context flag is invented or assumed.
+//
+// A shortfall, or an unreadable/undeclared limit, returns a non-nil error and a
+// populated FanoutServeCompleteness carrying the structured refusal, so the cell
+// can never be counted as a measured/compared control arm.
+func (h *SubagentFanoutHarness) verifyServedGeometry(ctx context.Context, arm, endpoint string, p, s, d int) (*FanoutServeCompleteness, error) {
+	promptTokens := p + s
+	requested := promptTokens + d
+	sc := &FanoutServeCompleteness{
+		PromptTokens:         promptTokens,
+		DecodeTokens:         d,
+		RequestedTotalTokens: requested,
+	}
+
+	fail := func(refusal, source, detail string, evidenceGap bool) (*FanoutServeCompleteness, error) {
+		sc.CapacitySource = source
+		sc.Refusal = refusal
+		sc.EvidenceGap = evidenceGap
+		sc.ControlArmServed = false
+		sc.Detail = detail
+		return sc, errors.New(detail)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(endpoint, "/")+"/props", nil)
+	if err != nil {
+		return fail(FanoutServeRefuseProbeError, "llama.cpp /props (unbuildable request)",
+			fmt.Sprintf("serve-completeness probe: could not build /props request for %s: %v", arm, err), true)
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fail(FanoutServeRefuseProbeError, "llama.cpp /props (transport error)",
+			fmt.Sprintf("serve-completeness probe: /props unreachable for %s at %s: %v", arm, endpoint, err), true)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fail(FanoutServeRefuseCapacityUnobserved, fmt.Sprintf("llama.cpp /props (HTTP %d)", resp.StatusCode),
+			fmt.Sprintf("serve-completeness probe: %s /props returned HTTP %d; served per-slot capacity is UNOBSERVED, refusing to assume a default", arm, resp.StatusCode), true)
+	}
+
+	var props servedPropsWire
+	if err := json.NewDecoder(resp.Body).Decode(&props); err != nil {
+		return fail(FanoutServeRefuseCapacityUnobserved, "llama.cpp /props (malformed JSON)",
+			fmt.Sprintf("serve-completeness probe: %s /props was not decodable: %v", arm, err), true)
+	}
+
+	perSlot := props.DefaultGenerationSettings.NCtx
+	sc.ObservedPerSlotTokens = perSlot
+	sc.ObservedTotalSlots = props.TotalSlots
+	sc.CapacitySource = "llama.cpp /props default_generation_settings.n_ctx"
+
+	if perSlot <= 0 {
+		return fail(FanoutServeRefuseCapacityUnobserved, sc.CapacitySource,
+			fmt.Sprintf("serve-completeness probe: %s /props reported no n_ctx (per-slot capacity UNOBSERVED); the reference command must set -c/--ctx-size so that -c/--parallel >= P+S+D=%d", arm, requested), true)
+	}
+
+	if perSlot < requested {
+		slotsNote := ""
+		if props.TotalSlots > 0 {
+			slotsNote = fmt.Sprintf(" (--parallel %d over -c %d)", props.TotalSlots, perSlot*props.TotalSlots)
+		}
+		return fail(FanoutServeRefusePromptOverflow, sc.CapacitySource,
+			fmt.Sprintf("serve-completeness probe: %s serves %d tokens/slot%s but the frozen geometry needs P+S+D=%d (P=%d S=%d D=%d); the control arm cannot serve the workload, so the cell fails closed. Start the reference with -c >= %d * %d.",
+				arm, perSlot, slotsNote, requested, p, s, d, props.TotalSlots, requested), false)
+	}
+
+	sc.ControlArmServed = true
+	return sc, nil
 }
 
 func computeDistribution(samples []float64) DistributionStats {
@@ -975,6 +1168,17 @@ func (h *SubagentFanoutHarness) computeSummary(results []FanoutArmResult) map[st
 	}
 
 	summary["total_cells_evaluated"] = len(results)
+
+	// Serve-completeness roll-up (issue #13134): count live cells whose control
+	// arm was probed and did NOT provably serve the frozen geometry. A non-zero
+	// count means some ablation arm in this receipt is not a valid comparison.
+	unserved := 0
+	for _, r := range results {
+		if r.ServeCompleteness != nil && !r.ServeCompleteness.ControlArmServed {
+			unserved++
+		}
+	}
+	summary["control_arms_unserved"] = unserved
 	return summary
 }
 
@@ -1011,6 +1215,14 @@ func renderPrettyReceipt(w io.Writer, r *SubagentFanoutReceipt) {
 
 		if res.Error != "" {
 			fmt.Fprintf(w, "N=%-4d | %-26s | %8s | %s\n", res.FanoutN, armLabel, "ERR", res.Error)
+			// A serve-completeness refusal is the difference between "the arm
+			// erred" and "the control never ran". Spell out the structured
+			// reason and the observed capacity so a reader cannot mistake a
+			// broken reference for a measured null result (issue #13134).
+			if sc := res.ServeCompleteness; sc != nil && !sc.ControlArmServed {
+				fmt.Fprintf(w, "       %-26s | serve-completeness: %s (per-slot=%d, slots=%d, requested=%d, evidence_gap=%v)\n",
+					"", sc.Refusal, sc.ObservedPerSlotTokens, sc.ObservedTotalSlots, sc.RequestedTotalTokens, sc.EvidenceGap)
+			}
 			continue
 		}
 
