@@ -2,9 +2,20 @@ package model
 
 import "github.com/anthony-chaudhary/fak/internal/compute"
 
-// q4kExpertInputHAL runs the two Q4_K expert input projections plus SwiGLU on a device backend.
-// It returns the fused host intermediate because Q5_K/Q6_K down projection does not yet have a
-// compute.Backend kernel. No device capability means a clean decline, never a semantic fallback.
+// q4kExpertInputHAL runs the two Q4_K expert input projections plus SwiGLU on a device
+// backend and returns the fused host INTERMEDIATE, not the expert output.
+//
+// It is the NARROW fallback, not the primary device route: expertSwiGLU tries
+// expertSwiGLUHAL first (moe.go), and that helper already keeps all THREE projections —
+// including the Q5_K/Q6_K down projection — on the backend via Backend.MatMul over a
+// resident raw k-quant tensor. So this function is reached only when the full-expert
+// seam DECLINED: no routed-expert k-quant capability, no halW staging map, a GELU
+// activation, a projection bias, or a gate/up/down weight with no HAL-supporting
+// resident representation (e.g. an IQ3_XXS down). In those configurations the down
+// projection has no device kernel either, so there is no surviving "Q5_K/Q6_K down is
+// still host-side" gap left for this partial route to cover; it simply rescues the
+// gate/up half for encodings the full seam cannot serve. No device capability means a
+// clean decline, never a semantic fallback.
 func q4kExpertInputHAL(s *Session, gateName, upName string, xn any, intermediate, hidden int) ([]float32, bool) {
 	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory ||
 		!s.useHALQ4KWeights() || s.M.Cfg.ActGeluTanh || s.M.Cfg.ActGeluErf ||
