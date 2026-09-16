@@ -1091,8 +1091,23 @@ func (c Config) SelfSpeculationSubstrateReady() bool {
 // layout-family predicate: broaden a check to this when it concerns the MLA/MoE
 // structure both families share, and KEEP isGLMMoeDsa() when it concerns the DSA
 // indexer specifically. See dense-MLA seam in glmDsaAttnSeqShared/glmDsaAttentionStep.
+//
+// The "deepseek41" identity is included because the vcruz GGUF converter emits the
+// MLA low-rank attention layout — self_attn.q_a_proj/q_b_proj/kv_a_proj_with_mqa/
+// o_proj_a/o_proj_b — with NO dense self_attn.q_proj leaf, and applyDeepSeek41Config
+// populates the same MLA geometry fields (QLoraRank, KVLoraRank, QKNopeHeadDim,
+// VHeadDim) the MLA path reads. Without it the forward falls to the dense-MHA branch,
+// requests the absent q_proj leaf, and panics `model: missing tensor`. This is the
+// GGUF "deepseek41" identity, DISTINCT from the safetensors "deepseek_v41" identity
+// that IsDeepSeekV41()/refuseDeepSeekV41Native() still holds fail-closed.
+//
+// This is the MODEL-side forward predicate and deliberately DIVERGES from the
+// loader-side internal/ggufload.archUsesMLAMoELayout: that sibling keeps deepseek41
+// OUT because it gates the glm KV-b 2->1 merge (glmMoeDsaSplitKVB), which must never
+// run for a V4 file (V4 emits a single attn_kv tensor). Do NOT reconcile the two —
+// see deepseek41CanonicalSuffix in internal/ggufload/deepseek41.go.
 func (c Config) usesMLAMoELayout() bool {
-	return c.isGLMMoeDsa() || c.ModelType == "deepseek2"
+	return c.isGLMMoeDsa() || c.ModelType == "deepseek2" || c.ModelType == "deepseek41"
 }
 
 // InKernelBackendPrefixReuseSupported reports whether PrefixSnapshot owns every
