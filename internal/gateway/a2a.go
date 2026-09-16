@@ -323,21 +323,57 @@ var (
 // A2AMethodSpecForResolver is the exported type for the capindex A2A resolver.
 // This exposes the reviewed method registry as generic Capabilities, proving
 // the loader is protocol-blind (issue #1108, C5).
+//
+// It carries the A2A INVOCATION CONTRACT, so a resolver's Fault() pages in the
+// full contract and not merely a name+description+scope label. Every field is
+// sourced from the reviewed registry (or a literal of this gateway's own wire
+// surface) — none is invented:
+//
+//   - Name        — the registry key, and the `method` field a caller puts in
+//     the A2A message content to invoke it (see handleA2ASendMessage).
+//   - Scope       — the registry's access class ("read"/"act"): the capability
+//     contract enforced by validateMethodAgainstRegistry + policy scope.
+//   - Description — the registry's reviewed prose.
+//   - Method      — the invocation verb as it appears on the wire; equal to Name
+//     for the registry's flat namespace (set from the registry key so a caller
+//     reads the exact dispatch token).
+//   - Transport   — the JSON-RPC-style envelope name this method dispatches
+//     under: "SendMessage" (POST /a2a/v1/messages), a literal of this package.
+//   - InputSchema — the reviewed parameter contract, as a JSON object literal.
+//     The registry genuinely does NOT carry a per-method parameter schema, so
+//     this is the one honest envelope the dispatcher enforces: an object with a
+//     `params` member (handleA2ASendMessage refuses a non-object `params` with
+//     "params must be an object"). It is documented as the envelope, not a
+//     fabricated per-method schema — a future registry field would replace it.
 type A2AMethodSpecForResolver struct {
-	Name        string
-	Scope       string // "read" or "act"
-	Description string
+	Name        string `json:"name"`
+	Scope       string `json:"scope"` // "read" or "act"
+	Description string `json:"description"`
+	Method      string `json:"method"`       // wire dispatch token (== Name; the message `method` field)
+	Transport   string `json:"transport"`    // envelope the method dispatches under, e.g. "SendMessage"
+	InputSchema string `json:"input_schema"` // reviewed param envelope; a JSON object literal (see doc above)
 }
+
+// a2aSendMessageInputSchema is the invocation envelope every A2A method in the
+// reviewed registry is called through. The registry holds no per-method JSON
+// Schema, so this states the contract the dispatcher DOES enforce for all
+// methods uniformly rather than inventing a per-method shape (see the type doc
+// on A2AMethodSpecForResolver). handleA2ASendMessage parses content.method
+// (required, string) and content.params (optional; must be an object if present).
+const a2aSendMessageInputSchema = `{"type":"object","properties":{"method":{"type":"string"},"params":{"type":"object"}},"required":["method"]}`
 
 // A2AMethodRegistryForResolver returns the reviewed method registry for use
 // by the protocol-generic capindex A2A resolver.
 func A2AMethodRegistryForResolver() []A2AMethodSpecForResolver {
 	methods := make([]A2AMethodSpecForResolver, 0, len(a2aMethodRegistry))
-	for _, spec := range a2aMethodRegistry {
+	for key, spec := range a2aMethodRegistry {
 		methods = append(methods, A2AMethodSpecForResolver{
 			Name:        spec.Name,
 			Scope:       spec.Scope,
 			Description: spec.Description,
+			Method:      key,
+			Transport:   "SendMessage",
+			InputSchema: a2aSendMessageInputSchema,
 		})
 	}
 	return methods

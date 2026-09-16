@@ -79,15 +79,16 @@ func issueCreateShiftLeftScope(body string) (string, error) {
 // issueCreateResult is the --json shape: the rendered gh argv is always included (even on
 // a dry run) so a caller can see exactly what would run or did run.
 type issueCreateResult struct {
-	OK     bool                  `json:"ok"`
-	DryRun bool                  `json:"dry_run"`
-	Title  string                `json:"title"`
-	Repo   string                `json:"repo,omitempty"`
-	Labels []string              `json:"labels,omitempty"`
-	Args   []string              `json:"args"`
-	URL    string                `json:"url,omitempty"`
-	Error  string                `json:"error,omitempty"`
-	Scrub  issueScrubVerdictJSON `json:"scrub"`
+	OK     bool                   `json:"ok"`
+	DryRun bool                   `json:"dry_run"`
+	Title  string                 `json:"title"`
+	Repo   string                 `json:"repo,omitempty"`
+	Labels []string               `json:"labels,omitempty"`
+	Args   []string               `json:"args"`
+	URL    string                 `json:"url,omitempty"`
+	Error  string                 `json:"error,omitempty"`
+	Scrub  issueScrubVerdictJSON  `json:"scrub"`
+	Dedupe *issueCreateDedupeJSON `json:"dedupe,omitempty"`
 }
 
 func runIssueCreate(stdout, stderr io.Writer, argv []string) int {
@@ -166,6 +167,10 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 	noAuditDiscoverability := fs.Bool("no-audit-discoverability", false, "bypass discoverability audit check")
 	allowNonDispatchable := fs.Bool("allow-non-dispatchable", false, "allow filing issues that land in triage or subdivide queues")
 	dryRun := fs.Bool("dry-run", false, "render the issue + gh argv without calling gh")
+	dedupeChecked := fs.Bool("dedupe-checked", false, "run a bounded write-time near-duplicate pre-check against the open backlog")
+	dedupeCap := fs.Int("dedupe-cap", 0, "bound the backlog scan (0 = issuefanout.DefaultDedupeCap)")
+	dedupeThreshold := fs.Float64("dedupe-threshold", 0, "similarity floor (0 = issuededup.DefaultThreshold)")
+	dedupeWarnOnly := fs.Bool("dedupe-warn-only", false, "warn on a near-duplicate instead of refusing")
 	asJSON := fs.Bool("json", false, "emit the machine-readable result")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -263,6 +268,12 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 	result.Labels = labelList
 	result.Args = args
 
+	if !*rawBody {
+		if code, refused := issueCreateRunDedupeGate(stdout, stderr, result, nil, *dedupeChecked, *dedupeCap, *dedupeThreshold, *dedupeWarnOnly, *title, resolvedBody, *asJSON); refused {
+			return code
+		}
+	}
+
 	if *dryRun {
 		result.OK = true
 		if *asJSON {
@@ -325,6 +336,7 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 		}
 		return 1
 	}
+	issueCreateWriteBackFiledMarker(stderr, *bodyFile, *repo, result.URL)
 	if *asJSON {
 		return encodeJSONOrFail(stdout, stderr, result, "fak-dev issue create")
 	}

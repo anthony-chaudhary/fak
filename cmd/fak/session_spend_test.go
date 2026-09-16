@@ -59,6 +59,47 @@ func TestSpendTurnMicroCentsExactAxes(t *testing.T) {
 	}
 }
 
+// TestSpendTurnMicroCentsHonorsCalibratedMultipliers is the #13138 regression:
+// a POSITIVE measured multiplier overlaid onto CachePricing (the shape
+// armServedSpendPricing installs via cal.ApplyCachePricing) must actually change
+// the debit, while a zero/absent overlay reproduces the static default exactly.
+func TestSpendTurnMicroCentsHonorsCalibratedMultipliers(t *testing.T) {
+	base := gateway.CachePricing{InputPerMTokUSD: 5, OutputPerMTokUSD: 25}
+	usage := gateway.SessionUsage{
+		PromptTokens:             1000,
+		CacheReadInputTokens:     10_000,
+		CacheCreationInputTokens: 1000,
+		CompletionTokens:         1000,
+	}
+	staticCost := spendTurnMicroCents(base, usage)
+	if staticCost != 4_125_000 {
+		t.Fatalf("bare static pricing = %d, want 4,125,000", staticCost)
+	}
+
+	t.Run("zero overlay reproduces static", func(t *testing.T) {
+		bare := gateway.CachePricing{InputPerMTokUSD: 5, OutputPerMTokUSD: 25}
+		if got := spendTurnMicroCents(bare, usage); got != staticCost {
+			t.Fatalf("zero overlay = %d, want exact static %d", got, staticCost)
+		}
+	})
+
+	t.Run("measured read multiplier changes the debit", func(t *testing.T) {
+		measured := base
+		measured.CacheReadMultiplier = 0.2
+		if got := spendTurnMicroCents(measured, usage); got <= staticCost {
+			t.Fatalf("measured read (0.2x) = %d, want MORE than static %d", got, staticCost)
+		}
+	})
+
+	t.Run("measured 5m write multiplier changes the debit", func(t *testing.T) {
+		measured := base
+		measured.CacheWrite5mMultiplier = 2.0
+		if got := spendTurnMicroCents(measured, usage); got <= staticCost {
+			t.Fatalf("measured write5m (2.0x) = %d, want MORE than static %d", got, staticCost)
+		}
+	})
+}
+
 // TestResolveSpendPricingOrder pins the resolution ladder: explicit env wins,
 // the built-in table prices the flagship anthropic/claude pair, and an unknown
 // pair is dollar-blind (ok=false → no debit, never a guessed cost).
