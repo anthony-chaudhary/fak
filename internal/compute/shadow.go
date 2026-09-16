@@ -97,6 +97,7 @@ type Shadowed struct {
 //	           FP4    : of q4_k is NOT wider by bit width, so the classes are split here.
 //	rank 1 — Q2_0   : <=3-bit class: ternary/packed 2-bit and the i-quant 3-/2-bit
 //	           Q2_K   : codes. The narrowest band; every wider class exact-ifies one.
+//	           Q3_K
 //	           IQ3_XXS, IQ3_S, IQ2_XXS
 //
 // It is a STRICT TOTAL ORDER, and crucially it is strictly DECREASING in real bit
@@ -120,7 +121,7 @@ func (d Dtype) widthRank() int {
 		return 3
 	case Q4_K, I4, FP4:
 		return 2
-	case Q2_0, Q2_K, IQ3_XXS, IQ3_S, IQ2_XXS:
+	case Q2_0, Q2_K, Q3_K, IQ3_XXS, IQ3_S, IQ2_XXS:
 		return 1
 	default:
 		return 0

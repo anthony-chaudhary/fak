@@ -158,7 +158,7 @@ func (c *cpuBackend) RequireStrixDecodeGEMV() error {
 // Q8_0 reproduces qMatRows (quantize the activation, per-block int8 dot). One method,
 // two dtypes — the duplication the audit ranked hardest, expressed as dispatch.
 // SupportsDeviceWeightDtype reports the exact dtype set cpuBackend.MatMul has a case for,
-// matching that switch: F32, Q8_0, Q4_K, Q5_K, Q6_K, Q2_K, IQ2_XXS and Q2_0. Every other
+// matching that switch: F32, Q8_0, Q4_K, Q5_K, Q6_K, Q2_K, Q3_K, IQ2_XXS and Q2_0. Every other
 // dtype falls to the switch's panic default, so it is reported false here.
 //
 // The CPU reference is a host backend (Caps().DeviceMemory is false), so the device seams
@@ -166,7 +166,7 @@ func (c *cpuBackend) RequireStrixDecodeGEMV() error {
 // caller that probes it directly (including a recording wrapper that embeds this backend).
 func (c *cpuBackend) SupportsDeviceWeightDtype(dt Dtype) bool {
 	switch dt {
-	case F32, Q8_0, Q4_K, Q5_K, Q6_K, Q2_K, IQ2_XXS, Q2_0:
+	case F32, Q8_0, Q4_K, Q5_K, Q6_K, Q2_K, Q3_K, IQ2_XXS, Q2_0:
 		return true
 	default:
 		return false
@@ -218,6 +218,13 @@ func (c *cpuBackend) MatMul(w, x Tensor) Tensor {
 		buf := make([]float32, q2kSuper)
 		for o := 0; o < out; o++ {
 			y[o] = q2kRowDot(raw[o*rowBytes:(o+1)*rowBytes], xf, buf)
+		}
+	case Q3_K:
+		raw := i8AsBytes(w.buf.(HostBuffer).I8())
+		rowBytes := (in / q3kSuper) * q3kSuperBlock
+		buf := make([]float32, q3kSuper)
+		for o := 0; o < out; o++ {
+			y[o] = q3kRowDot(raw[o*rowBytes:(o+1)*rowBytes], xf, buf)
 		}
 	case IQ2_XXS:
 		raw := i8AsBytes(w.buf.(HostBuffer).I8())
@@ -305,6 +312,16 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 			row := raw[o*rowBytes : (o+1)*rowBytes]
 			for t := 0; t < P; t++ {
 				Y[t*out+o] = q2kRowDot(row, Xf[t*in:t*in+in], buf)
+			}
+		}
+	case Q3_K:
+		raw := i8AsBytes(w.buf.(HostBuffer).I8())
+		rowBytes := (in / q3kSuper) * q3kSuperBlock
+		buf := make([]float32, q3kSuper)
+		for o := 0; o < out; o++ {
+			row := raw[o*rowBytes : (o+1)*rowBytes]
+			for t := 0; t < P; t++ {
+				Y[t*out+o] = q3kRowDot(row, Xf[t*in:t*in+in], buf)
 			}
 		}
 	case IQ2_XXS:
