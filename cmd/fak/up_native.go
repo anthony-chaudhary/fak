@@ -79,6 +79,20 @@ func (r *turnkeyNativeResources) Close() error {
 	return r.closeErr
 }
 
+// ReleaseAdmission exposes the residency/GPU-lease release closure so a caller
+// that owns the server lifetime can free the lease WITHOUT also tearing down the
+// weights: the idle-exit path (#13135) releases admission as one half of the
+// bounded stop, then Close releases the rest. It is idempotent (the underlying
+// closure is once-guarded by the loader) and returns false when there is no
+// admission to release.
+func (r *turnkeyNativeResources) ReleaseAdmission() bool {
+	if r == nil || r.releaseAdmission == nil {
+		return false
+	}
+	r.releaseAdmission()
+	return true
+}
+
 type turnkeyNativeLoadDeps struct {
 	resolveBackend func() (compute.Backend, error)
 	resolveMetal   func() (serveMetalDecision, error)

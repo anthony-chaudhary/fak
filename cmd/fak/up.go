@@ -297,6 +297,7 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	contextOverride := fs.Uint64("context", 0, "override auto-selected context budget tokens")
 	kvPrecision := fs.String("kv-precision", "", "KV cache storage tier: f32 (default, exact) or q8_0 (dense mixed: f32 pre-RoPE K + q8_0 K/V; ~2x more context). Also settable via FAK_UP_KV_PRECISION.")
 	engineID := fs.String("engine", "inkernel", "model engine ID (default inkernel; mock only with --mock)")
+	gpuIdleExit := fs.Duration("gpu-idle-exit", defaultGPUIdleExit, "stop the resident server after this idle window (no in-flight request) so its GPU lease and model residency are released for a queued peer (e.g. modelbench, #13135); 0 keeps the historical process-lifetime holder")
 
 	if err := fs.Parse(argv); err != nil {
 		os.Exit(2)
@@ -399,11 +400,20 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	if id := guardShortBuildID(); id != "" {
 		ver += " (" + id + ")"
 	}
+	server.armGPUIdleExit(*gpuIdleExit)
 	printTurnkeyReady(stdout, ver, server.Addr(), plan)
 	printTurnkeyBackendStamp(stdout, server.metalDecision, metalResidencyStampFrom(server.liveResidencyReport()))
+	if *gpuIdleExit > 0 {
+		fmt.Fprintf(stdout, "  • GPU idle-exit:             stops after %s idle so a queued GPU peer can run (#13135)\n", *gpuIdleExit)
+	}
 
 	if *headless || in == nil {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-server.done:
+			// The bounded idle exit already ran the graceful shutdown and
+			// released the GPU lease; nothing further to unwind here.
+		}
 		return
 	}
 
@@ -452,6 +462,16 @@ type turnkeyServer struct {
 	activeRequests   int
 	residencyOnce    sync.Once
 	ready            *readinessGate
+	// idleExit stops the resident server after a bounded idle window so the GPU
+	// lease and model residency are released instead of pinned for the process
+	// lifetime (#13135). Nil preserves the historical lifetime holder.
+	idleExit *gpuIdleExitGovernor
+	// stop triggers the bounded stop from the idle governor; done is closed when
+	// the stop has been requested so the run loop can return through the same
+	// graceful-shutdown path a SIGTERM drives.
+	stop     func()
+	stopOnce sync.Once
+	done     chan struct{}
 }
 
 // readinessGate is a small package-main equivalent of the gateway warmup gate
@@ -520,6 +540,21 @@ func (s *turnkeyServer) Addr() string {
 	return s.boundAddr
 }
 
+// armGPUIdleExit installs the bounded idle-exit governor (#13135). A zero or
+// negative window disables it, preserving the historical process-lifetime
+// holder. It is a no-op when the server is mock (no GPU lease to release) or
+// has no stop wired.
+func (s *turnkeyServer) armGPUIdleExit(idle time.Duration) {
+	if s == nil || s.stop == nil || idle <= 0 {
+		return
+	}
+	s.mu.Lock()
+	s.idleExit = newGPUIdleExitGovernor(idle, s.stop, func(format string, args ...any) {
+		fmt.Fprintf(os.Stderr, format+"\n", args...)
+	})
+	s.mu.Unlock()
+}
+
 func (s *turnkeyServer) Plan() macfit.TurnkeyProfile {
 	return s.plan
 }
@@ -531,7 +566,9 @@ func (s *turnkeyServer) Planner() agent.Planner {
 func (s *turnkeyServer) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
 	s.stopping = true
+	idleExit := s.idleExit
 	s.mu.Unlock()
+	idleExit.close()
 	err := s.httpServer.Shutdown(ctx)
 	if err == nil {
 		s.requestResidencyRelease()
@@ -544,7 +581,9 @@ func (s *turnkeyServer) Close() error {
 	// resources and their admission lease after a successful server close.
 	s.mu.Lock()
 	s.stopping = true
+	idleExit := s.idleExit
 	s.mu.Unlock()
+	idleExit.close()
 	err := s.httpServer.Close()
 	if err == nil {
 		s.requestResidencyRelease()
@@ -573,11 +612,16 @@ func (s *turnkeyServer) requestResidencyRelease() {
 
 func (s *turnkeyServer) beginChatRequest() bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.stopping {
+		s.mu.Unlock()
 		return false
 	}
 	s.activeRequests++
+	idleExit := s.idleExit
+	s.mu.Unlock()
+	if idleExit != nil {
+		idleExit.requestBegan()
+	}
 	return true
 }
 
@@ -585,7 +629,11 @@ func (s *turnkeyServer) endChatRequest() {
 	s.mu.Lock()
 	s.activeRequests--
 	release := s.releaseRequested && s.activeRequests == 0
+	idleExit := s.idleExit
 	s.mu.Unlock()
+	if idleExit != nil {
+		idleExit.requestEnded()
+	}
 	if release {
 		s.releaseResidency()
 	}
@@ -956,6 +1004,23 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 		listener:      ln,
 		boundAddr:     ln.Addr().String(),
 		ready:         ready,
+		done:          make(chan struct{}),
+	}
+	// The idle-exit stop and the signal-driven stop converge here: both request
+	// the graceful shutdown and release the same residency/GPU lease exactly once.
+	ts.stop = func() {
+		ts.stopOnce.Do(func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = ts.Shutdown(shutdownCtx)
+			close(ts.done)
+		})
+	}
+	if native != nil {
+		// Release the admission (including the machine-wide GPU lease) as the
+		// residency half of the bounded stop; requestResidencyRelease fires it
+		// when the last in-flight request drains, and Shutdown if already idle.
+		ts.residencyRelease = func() { native.ReleaseAdmission() }
 	}
 
 	mux := http.NewServeMux()
