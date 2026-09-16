@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 )
 
@@ -328,4 +329,91 @@ func TestServeStreamedResidentBoundMargin(t *testing.T) {
 	if err := refuseHostPlanAgainstFit(plan, fit); err != nil {
 		t.Fatalf("streamed plan whose routed set exceeds the host budget was NOT admitted by the host fit check: %v (host total %d, avail %d)", err, plan.HostTotal(), fit.avail())
 	}
+}
+
+// TestServeStreamedHostFitIgnoresDeviceOverride is the fak#13142 regression at the hostFit-selection
+// seam. loadServeInKernelModel used to do `hostFit := serveHostFitBudget(); if fit != nil { hostFit =
+// *fit }`. On a device serve `fit` is the DEVICE override (serveNativeContextSizingInputs returns
+// serveDeviceFitBudget(be) for be != nil), so the bounded-resident streamed bound was sized from the
+// device ceiling (0.90 * 71.53 = 64.38 GiB of VRAM) and then judged against real host RAM (~48.89
+// GiB): the strix3 "needs 64.38 GiB, host has 48.89 GiB (FitTooBig)" refusal, no load.
+//
+// The selection must size the streamed decision from the HOST probe whenever a device backend is
+// present, accepting the injected override as a host snapshot ONLY on the device-less arm (where it
+// IS the host fit the sizing path measured). This test pins that at the real predicate the loader
+// calls, then proves the consequence on the plan: a host-scale budget admits the streamed plan even
+// though a device-scale override rode in.
+func TestServeStreamedHostFitIgnoresDeviceOverride(t *testing.T) {
+	// strix3's real host RAM and VRAM ceiling, in bytes. Bound through vars so the float multiply is
+	// a runtime expression (a constant float->int64 conversion is rejected at compile time).
+	hostBudgetGiB := 48.89
+	deviceBudgetGiB := 71.53
+	hostBudgetBytes := int64(hostBudgetGiB * float64(int64(1)<<30))
+	deviceBudgetBytes := int64(deviceBudgetGiB * float64(int64(1)<<30))
+	deviceOverride := serveFitBudget{Base: deviceBudgetBytes, Headroom: 0}
+
+	// Device ARM: the device-scale override must NOT become the streamed host fit. The true host
+	// probe decides; whatever this machine reports, it must not equal the injected device override
+	// unless the live probe happens to agree byte-for-byte (which the assertion below excludes for
+	// the pinned device value on any real host).
+	be := serveCapBackend{Backend: compute.Default(), total: deviceBudgetBytes, free: deviceBudgetBytes, known: true}
+	deviceSelected := serveStreamedHostFit(be, &deviceOverride)
+	if deviceSelected == deviceOverride {
+		t.Fatalf("device arm took the DEVICE override %d as the streamed host fit; the streamed bound would be sized from VRAM (fak#13142)", deviceOverride.Base)
+	}
+	if deviceSelected.Base == deviceBudgetBytes {
+		t.Fatalf("device arm host fit base %d equals the device override base; device VRAM leaked into host sizing", deviceSelected.Base)
+	}
+
+	// Device-LESS arm: the injected override IS the host snapshot and must win verbatim, so the
+	// sizing path's measurement and the load's stay one snapshot (the preserved #13121 behaviour).
+	if hostless := serveStreamedHostFit(nil, &deviceOverride); hostless != deviceOverride {
+		t.Fatalf("device-less arm override = %+v, want the injected host snapshot %+v", hostless, deviceOverride)
+	}
+	// A nil override on either arm keeps the live probe (fail-open, unchanged).
+	if live := serveStreamedHostFit(nil, nil); live.Base != serveHostFitBudget().Base {
+		t.Fatalf("nil override device-less base %d, want the live host probe %d", live.Base, serveHostFitBudget().Base)
+	}
+
+	// The consequence the defect denied: a HOST-scale budget sizes the streamed resident bound to
+	// at most 0.90 * host, and the plan admits host-side instead of producing the 64.38-vs-48.89
+	// refusal. The device-scale override riding in must not change any of it.
+	ws := serveStreamedSynthWeightSource(t)
+	hostFit := serveFitBudget{Base: hostBudgetBytes, Headroom: 0}
+	bound := serveCPUOffloadStreamedResidentBound(hostFit)
+	maxBound := int64(float64(hostFit.avail()) * (1 - serveCPUOffloadStreamedResidentMargin))
+	if bound > maxBound {
+		t.Fatalf("streamed resident bound %d exceeds 0.9 * host budget %d; the bound was sized from the device override", bound, maxBound)
+	}
+
+	// An artificial routed set bigger than the host budget forces the streamed arm so the margin and
+	// the admission are exercised against real KV/scratch rows -- in-memory, no checkpoint needed.
+	residentFit := serveFitBudget{Base: hostBudgetBytes * 4, Headroom: 0}
+	resident, err := serveGGUFCPUOffloadMemoryPlan(ws, 1, 0, residentFit)
+	if err != nil {
+		t.Fatalf("resident plan: %v", err)
+	}
+	if resident.HostTotal() <= 0 {
+		t.Fatal("fixture must host-scope the routed experts (HostTotal>0)")
+	}
+	forced := serveFitBudget{Base: resident.HostTotal() / 2, Headroom: 0}
+	plan, streamed, err := serveStreamedCPUOffloadPlan(ws, 1, 0, forced)
+	if err != nil {
+		t.Fatalf("serveStreamedCPUOffloadPlan: %v", err)
+	}
+	if !streamed {
+		t.Fatalf("streamed policy did not fire with host budget %d against routed set %d", forced.avail(), resident.HostTotal())
+	}
+	if plan.HostTotal() > maxBoundFor(forced) {
+		t.Fatalf("streamed host total %d exceeds the bounded resident set %d; a device override could not have admitted this", plan.HostTotal(), maxBoundFor(forced))
+	}
+	if err := refuseHostPlanAgainstFit(plan, forced); err != nil {
+		t.Fatalf("streamed plan sized from the host fit was NOT admitted host-side: %v (the 64.38-vs-48.89 refusal class, fak#13142)", err)
+	}
+}
+
+// maxBoundFor is the 0.90 margin ceiling for a budget, used to phrase the host admission assertion
+// without re-deriving the constant inline.
+func maxBoundFor(fit serveFitBudget) int64 {
+	return int64(float64(fit.avail()) * (1 - serveCPUOffloadStreamedResidentMargin))
 }

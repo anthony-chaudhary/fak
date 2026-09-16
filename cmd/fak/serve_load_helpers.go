@@ -187,6 +187,28 @@ func newServeLoadProfiler() *ggufload.LoadProfiler {
 	return p
 }
 
+// serveStreamedHostFit picks the HOST budget the bounded-resident streamed expert decision sizes
+// its working set from (fak#13142).
+//
+// `fit` is the caller's injected fit override. On a device serve it is the DEVICE fit budget:
+// serveNativeContextSizingInputs returns serveDeviceFitBudget(be) for be != nil, serve_stages.go
+// threads that snapshot here as rt.fitBudget, and the value describes VRAM, not host RAM. Sizing
+// the streamed bound from it made the load charge a device-scale resident set (0.90 * 71.53 GiB =
+// 64.38 GiB of VRAM) and then judge it against real host RAM (~48.89 GiB), so the plan refused
+// FitTooBig and the serve never loaded: the physical strix3 witness.
+//
+// So the streamed decision always probes the true HOST budget when a device backend is present.
+// Only the device-LESS arm may take the injected override as its host snapshot, because there the
+// override IS the host fit the sizing path measured (resolveServeNativeContext's serveHostFitBudget
+// / serveHostFitBudgetFromReported). The device arm still admits its device side with `fit`
+// verbatim inside fitServeStreamedCPUOffloadPathOnDevice, so device accounting is unchanged.
+func serveStreamedHostFit(backend compute.Backend, fit *serveFitBudget) serveFitBudget {
+	if backend == nil && fit != nil {
+		return *fit
+	}
+	return serveHostFitBudget()
+}
+
 func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloadExperts bool, contextBudgetTokens int, expertShard *ggufload.ExpertShard, expertRanks int, fit *serveFitBudget) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
 	if modelPath == "" {
 		return nil, false, nil, gateway.StartupPhase{}
@@ -263,10 +285,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 	// arm's option threading and the sizing path's plan cannot disagree. A streamed tier serves
 	// EVERY expert the checkpoint carries, so it never combines with an expert-parallel shard
 	// (the loader refuses both); sharded ranks keep the resident band arm unchanged.
-	hostFit := serveHostFitBudget()
-	if fit != nil {
-		hostFit = *fit
-	}
+	hostFit := serveStreamedHostFit(backend, fit)
 	streamedOffload := false
 	var streamedBound int64
 	if cpuOffloadArm && expertShard == nil {
