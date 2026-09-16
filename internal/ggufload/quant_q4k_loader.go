@@ -169,6 +169,16 @@ type Q4KLoadOptionEffects struct {
 	Q2KEmbeddingResident bool
 	Q4KEmbeddingResident bool
 	MTPRetention         bool
+	// StreamedExperts reports that the option list requests the R5 streamed-expert tier, and
+	// StreamedExpertBytes is its host retention budget. A caller that must pick a loader ENTRY
+	// POINT from the same option list it will thread (serve's loadResidentQ4KProfiled) reads these
+	// to route to the lifetime-transferring streamed-experts entry instead of the lifetime-closing
+	// one, which refuses the option by contract.
+	StreamedExperts     bool
+	StreamedExpertBytes int64
+	// StreamedDenseQ4K reports that the option list requests the streamed DENSE k-quant tier, which
+	// likewise needs a checkpoint that outlives the model.
+	StreamedDenseQ4K bool
 }
 
 // ApplyQ4KLoadOptions applies opts to the zero value and returns the observable effect set. It is
@@ -182,6 +192,9 @@ func ApplyQ4KLoadOptions(opts []Q4KLoadOption) Q4KLoadOptionEffects {
 		Q2KEmbeddingResident: o.residentQ2KEmbedding,
 		Q4KEmbeddingResident: o.residentQ4KEmbedding,
 		MTPRetention:         o.retainMTP,
+		StreamedExperts:      o.streamedExperts,
+		StreamedExpertBytes:  o.streamedExpertBytes,
+		StreamedDenseQ4K:     o.streamedDenseQ4K,
 	}
 }
 
@@ -307,6 +320,45 @@ func LoadModelQ4KStreamedDenseContext(ctx context.Context, path string, p *LoadP
 		return nil, err
 	}
 	opts = append(opts, WithStreamedDenseQ4K(true))
+	m, err := ws.QuantModelQ4KProfileOptionsContext(ctx, p, opts...)
+	if err != nil {
+		_ = ws.Close()
+		return nil, err
+	}
+	m.SetWeightCloser(ws)
+	return m, nil
+}
+
+// LoadModelQ4KStreamedExperts opens path, attaches the bounded-resident R5 streamed-expert
+// tier, and transfers the checkpoint lifetime to the returned model - the expert-set symmetric
+// of LoadModelQ4KStreamedDense. The routed-expert slabs are read through the WeightSource's own
+// shard readers for the life of the model, so the model owns the checkpoint and CloseWeights
+// (the model's weight closer) must be called when serving stops. hostBytes is the tier's host
+// retention budget; 0 is stream-through.
+//
+// LoadModelQ4KProfileOptions refuses WithStreamedExperts (it closes the checkpoint on return, so
+// the model would fail on the first routed expert a router picked). This entry point exists so
+// the serve streamed-expert arm has a load path that admits the option instead of falling into
+// that refusal.
+func LoadModelQ4KStreamedExperts(path string, p *LoadProfiler, hostBytes int64, opts ...Q4KLoadOption) (*model.Model, error) {
+	return LoadModelQ4KStreamedExpertsContext(context.Background(), path, p, hostBytes, opts...)
+}
+
+// LoadModelQ4KStreamedExpertsContext is LoadModelQ4KStreamedExperts with cooperative
+// cancellation. On cancellation it closes the checkpoint before returning.
+func LoadModelQ4KStreamedExpertsContext(ctx context.Context, path string, p *LoadProfiler, hostBytes int64, opts ...Q4KLoadOption) (*model.Model, error) {
+	return loadModelQ4KStreamedExpertsContext(ctx, path, p, hostBytes, OpenWeights, opts...)
+}
+
+// loadModelQ4KStreamedExpertsContext is the open-injectable core of the streamed-experts entry,
+// mirroring loadModelQ4KProfileOptionsContext: `open` supplies the checkpoint so a test can pin the
+// lifetime contract without a full model load.
+func loadModelQ4KStreamedExpertsContext(ctx context.Context, path string, p *LoadProfiler, hostBytes int64, open func(string) (*WeightSource, error), opts ...Q4KLoadOption) (*model.Model, error) {
+	ws, err := open(path)
+	if err != nil {
+		return nil, err
+	}
+	opts = append(opts, WithStreamedExperts(hostBytes))
 	m, err := ws.QuantModelQ4KProfileOptionsContext(ctx, p, opts...)
 	if err != nil {
 		_ = ws.Close()

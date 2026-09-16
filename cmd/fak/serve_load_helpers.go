@@ -472,9 +472,18 @@ func loadResidentQ4KProfiled(ggufPath string, tLoad time.Time, opts ...ggufload.
 	// Empty opts (the default, every non-EP serve) is byte-identical to the old LoadModelQ4KProfile.
 	var mm *fakmodel.Model
 	var err error
-	if os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1" {
+	// The streamed arms need a checkpoint that outlives the model; the lifetime-CLOSING entry
+	// (LoadModelQ4KProfileOptions) refuses both by contract, and repurposing the DENSE stream entry
+	// for the expert arm would materialize the full routed set instead of faulting it (fak#13143).
+	// Read the option list the caller threaded and pick the matching lifetime-TRANSFERRING entry so
+	// the bounded-resident streamed-expert arm can actually reach model load.
+	effects := ggufload.ApplyQ4KLoadOptions(opts)
+	switch {
+	case effects.StreamedExperts:
+		mm, err = ggufload.LoadModelQ4KStreamedExperts(ggufPath, prof, effects.StreamedExpertBytes, opts...)
+	case effects.StreamedDenseQ4K || os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1":
 		mm, err = ggufload.LoadModelQ4KStreamedDense(ggufPath, prof, opts...)
-	} else {
+	default:
 		mm, err = ggufload.LoadModelQ4KProfileOptions(ggufPath, prof, opts...)
 	}
 	must(err)
