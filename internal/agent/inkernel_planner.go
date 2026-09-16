@@ -126,6 +126,14 @@ type InKernelPlanner struct {
 	// follow-up (internal/model/batch.go), not a correctness fix.
 	devMu sync.Mutex
 
+	// concurrencyProfile is an OPT-IN phase-timeline recorder for the device
+	// fan-out cell (issue #1589). Its zero value is nil, so a planner that never
+	// opts in is byte-for-byte unaffected: the admit / forwardEnter / forwardExit
+	// calls are all nil-receiver-safe. When set, it localizes the serialization
+	// layer (devMu vs. concurrent-unfused) with a witnessing timeline instead of
+	// a guessed mechanism.
+	concurrencyProfile *concurrencyProfiler
+
 	coalesceMu         sync.Mutex
 	coalesceReady      []*inKernelCoalesceRequest
 	coalesceRunning    bool
@@ -2356,11 +2364,26 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	// (see devMu). The plain CPU path owns a per-turn session and guards the shared radix tree
 	// with p.mu itself, so it remains concurrent. Held across Prefill + decode.
 	if p.requiresDeviceSerialization() && !p.coalescesQwenDecode() {
+		// #1589 phase-timeline probe: record the fan-out boundary and the
+		// serialized critical section. Both calls are nil-safe no-ops unless a
+		// caller opted into a concurrency profile.
+		phase := p.concurrencyProfile.admit()
 		p.devMu.Lock()
-		defer p.devMu.Unlock()
+		p.concurrencyProfile.forwardEnter(phase, true)
+		defer func() {
+			p.concurrencyProfile.forwardExit(phase)
+			p.devMu.Unlock()
+		}()
 		if err := p.refuseOversizeRequest(len(ids), maxNew); err != nil {
 			return nil, err
 		}
+	} else if p.concurrencyProfile != nil {
+		// Concurrent-unfused path (coalescing or CPU): still record the boundary
+		// so the timeline can distinguish "no mutex serialized us" from "no
+		// overlap happened at all".
+		phase := p.concurrencyProfile.admit()
+		p.concurrencyProfile.forwardEnter(phase, false)
+		defer p.concurrencyProfile.forwardExit(phase)
 	}
 	if p.coalescesQwenDecode() {
 		if err := p.refuseOversizeRequest(len(ids), maxNew); err != nil {
@@ -2686,6 +2709,30 @@ func cudaImmutableWeightUploadSnapshot(be compute.Backend) (model.NativeCUDAImmu
 
 func (p *InKernelPlanner) requiresDeviceSerialization() bool {
 	return p != nil && (p.backend != nil || p.metal)
+}
+
+// EnableConcurrencyProfile turns on the opt-in device-fan-out phase-timeline
+// recorder (issue #1589). It must be called before concurrent Complete calls.
+// Enabling it changes no served tokens and no batching: it only records the
+// admit / forward-enter / forward-exit timestamps at the existing devMu seam.
+func (p *InKernelPlanner) EnableConcurrencyProfile() {
+	if p == nil {
+		return
+	}
+	if p.concurrencyProfile == nil {
+		p.concurrencyProfile = newConcurrencyProfiler()
+	}
+}
+
+// ConcurrencyProfile folds the recorded phase timeline into a named-mechanism
+// receipt. It returns nil when no profile was enabled. Callers must invoke it
+// after all profiled requests have returned.
+func (p *InKernelPlanner) ConcurrencyProfile() *ConcurrencyProfile {
+	if p == nil {
+		return nil
+	}
+	_, forwardPath := p.executionIdentity()
+	return p.concurrencyProfile.build(forwardPath)
 }
 
 const inKernelRequestDeviceHeadroom = 0.15
