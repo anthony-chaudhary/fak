@@ -618,10 +618,31 @@ func refuseIfTooBigOnDevice(plan compute.MemoryPlan, err error, be compute.Backe
 	if be == nil {
 		return plan, nil
 	}
+	var admitErr error
 	if override != nil {
-		return refuseDevicePlanAgainstFit(be, plan, *override)
+		plan, admitErr = refuseDevicePlanAgainstFit(be, plan, *override)
+	} else {
+		admitErr = compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFDeviceHeadroom)
 	}
-	return plan, compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFDeviceHeadroom)
+	if admitErr != nil {
+		return plan, admitErr
+	}
+	// #13172: on an INTEGRATED device (a Strix Halo APU Vulkan tier) the device-scoped weights
+	// and the host-resident expert/staging charge draw from ONE physical DRAM pool, but the
+	// device admission above judges only the device-scoped subset against a device probe that
+	// reports the UNIFIED heap (~84 GiB on a 62.4 GiB Halo), not physical RAM. A plan whose
+	// device dense side alone exceeds MemTotal then passes device admission and host admission,
+	// and the kernel OOM-kills the serve during staging, before the forward. Bound the plan's
+	// TOTAL simultaneous physical footprint against host RAM here so it is a typed fail-closed
+	// refusal naming the shortfall. Inert on a discrete device or an unprobeable host (the
+	// fail-open contract), so those loads are byte-for-byte unchanged. The sibling #13171 guard
+	// (refuseDeviceStagingAgainstHostFit) bounds the --cpu-offload-experts arm's transient
+	// staging transit; this bound is the loader-side total that covers the device arms that
+	// guard does not, on the shared-pool tier.
+	if unifiedErr := ggufload.RefuseUnifiedHostResidencyIfTooBig(plan, be, serveGGUFDeviceHeadroom); unifiedErr != nil {
+		return plan, unifiedErr
+	}
+	return plan, nil
 }
 
 // withGGUFWeights opens the GGUF weights at ggufPath (an empty path plans nothing) and runs

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -16,10 +17,23 @@ type serveCapBackend struct {
 	hostTotal, hostFree int64
 	known, hostKnown    bool
 	uploadDtype         bool
+	tier                string
 }
 
 func (b serveCapBackend) Caps() compute.Caps {
 	return compute.Caps{CapacityProbe: true, HostCapacityProbe: b.hostKnown, UploadDtype: b.uploadDtype}
+}
+
+// Tier reports the test double's device tier. The embedded compute.Backend is nil in this double,
+// so without this method the promoted Tier() would nil-deref; the unified host-residency bound
+// (ggufload.BackendSharesHostRAM) reads Tier(), so the double must answer it explicitly. An empty
+// field keeps the historical discrete tier, so every existing caller stays byte-for-byte unchanged;
+// a #13172 test sets an "integrated:" tier to arm the shared-physical-pool bound.
+func (b serveCapBackend) Tier() string {
+	if b.tier != "" {
+		return b.tier
+	}
+	return "discrete:test"
 }
 func (b serveCapBackend) DeviceMemory() (int64, int64, bool) { return b.total, b.free, b.known }
 func (b serveCapBackend) HostMemory() (int64, int64, bool) {
@@ -600,5 +614,83 @@ func TestFitServeGGUFPathOnHostRefusesExpandingQ8Load(t *testing.T) {
 	// On a larger 64 GiB host, allocatable budget is 54.4 GiB, which admits the ~31.27 GiB plan.
 	if err := fitServeGGUFPathOnReportedHost(udPath, false, 0, 64*gib, 64*gib, true, nil); err != nil {
 		t.Fatalf("fitServeGGUFPathOnHost should admit expanding Q8 load on 64 GiB host: %v", err)
+	}
+}
+
+// #13172: the V4.1 native serve is kernel-OOM-killed during weight staging because the memory
+// plan's device dense side (weights=63.092GiB) exceeds the box's physical MemTotal (62.4GiB) even
+// though the DEVICE fit budget (71.531GiB, the unified Vulkan heap) admits it. On a Strix Halo APU
+// the device allocation and the host-resident expert/staging charge draw from ONE physical DRAM
+// pool, so refusingIfTooBigOnDevice must bound the plan's TOTAL simultaneous footprint against host
+// RAM and turn the would-be kernel SIGKILL into a typed fail-closed refusal naming the shortfall.
+// This is the serve-path witness for the loader-level bound: it drives the EXACT production seam
+// (refuseIfTooBigOnDevice, reached by loadServeInKernelModel via fitAndPlanServeGGUFPathOnDevice)
+// with an integrated-tier backend. RED before the #13172 wiring: the device admission accepts the
+// plan and nothing compares the sum to physical RAM.
+var (
+	witnessedV41DeviceWeightsGiB = 63.092
+	witnessedV41HostTotalGiB     = 62.4
+)
+
+func TestRefuseIfTooBigOnDeviceBoundsIntegratedUnifiedHostResidency(t *testing.T) {
+	const gib = int64(1 << 30)
+	// The witnessed strix3 arithmetic as runtime floats (a constant conversion is a compile error):
+	// a 63.092 GiB device dense charge against a 62.4 GiB physical MemTotal, admitted by a device
+	// probe that reports the larger unified heap (as RADV/Vulkan does on an APU).
+	devWeights := int64(witnessedV41DeviceWeightsGiB * float64(gib))
+	hostTotal := int64(witnessedV41HostTotalGiB * float64(gib))
+	hostExperts := int64(6 * float64(gib))
+	deviceProbe := int64(80 * float64(gib)) // the unified heap: admits the device-scoped weights
+
+	plan := compute.MemoryPlan{
+		{Class: compute.MemoryWeights, Scope: compute.MemoryScopeDevice, Bytes: devWeights, Detail: "gguf-device-dense-growth"},
+		{Class: compute.MemoryOffload, Scope: compute.MemoryScopeHost, Bytes: hostExperts, Detail: "gguf-host-expert-offload-streamed"},
+	}
+
+	// An INTEGRATED (shared physical pool) backend: device probe large enough to pass device
+	// admission, but the backend's host probe IS the box's physical RAM.
+	integrated := serveCapBackend{
+		Backend: compute.Default(), total: deviceProbe, free: deviceProbe, known: true,
+		hostTotal: hostTotal, hostFree: hostTotal, hostKnown: true,
+		tier: "integrated:AMD Radeon 8060S Graphics (gfx1151)",
+	}
+	// Sanity: the DEVICE admission alone admits this plan (it is the unified-heap budget), which is
+	// exactly why the sum-vs-physical-RAM bound is needed.
+	if err := compute.RefuseMemoryPlanIfTooBig(integrated, plan, serveGGUFDeviceHeadroom); err != nil {
+		t.Fatalf("fixture must pass device admission so the test exercises the unified bound, got %v", err)
+	}
+	_, err := refuseIfTooBigOnDevice(plan, nil, integrated, nil)
+	if err == nil {
+		t.Fatal("integrated backend whose device+host footprint exceeds physical RAM was ADMITTED; the serve would be kernel-OOM-killed during staging (fak#13172)")
+	}
+	var fe *compute.FitError
+	if !errors.As(err, &fe) {
+		t.Fatalf("want a typed *compute.FitError naming the shortfall, got %T: %v", err, err)
+	}
+	if fe.Verdict != compute.FitTooBig {
+		t.Fatalf("fe.Verdict = %v, want FitTooBig", fe.Verdict)
+	}
+	if fe.Scope != compute.MemoryScopeHost {
+		t.Fatalf("fe.Scope = %v, want MemoryScopeHost (the shared physical RAM)", fe.Scope)
+	}
+	if fe.Want != plan.Total() {
+		t.Fatalf("fe.Want = %d, want the summed simultaneous footprint %d", fe.Want, plan.Total())
+	}
+	if !strings.Contains(err.Error(), "unified-memory host residency") {
+		t.Fatalf("refusal %q must name the shared physical pool", err.Error())
+	}
+	if !strings.Contains(err.Error(), "needs") || !strings.Contains(err.Error(), "host has") {
+		t.Fatalf("refusal %q must name the host-RAM shortfall", err.Error())
+	}
+
+	// A DISCRETE device (independent VRAM/host pools) with the SAME hosts is NOT judged by the
+	// unified bound: its device-scoped weights live in its own pool, so only the host-scoped expert
+	// charge is compared to host RAM and the load is admitted exactly as before.
+	discrete := serveCapBackend{
+		Backend: compute.Default(), total: deviceProbe, free: deviceProbe, known: true,
+		hostTotal: hostTotal, hostFree: hostTotal, hostKnown: true,
+	}
+	if _, err := refuseIfTooBigOnDevice(plan, nil, discrete, nil); err != nil {
+		t.Fatalf("discrete device (independent pools) must stay unchanged by the unified bound, got %v", err)
 	}
 }
