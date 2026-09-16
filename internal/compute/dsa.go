@@ -140,7 +140,51 @@ func dsaIndexSelectHost(indexQ, indexK, weights []float32, nKeys, nH, indexDim, 
 		}
 		cands = append(cands, dsaIndexCand{pos: k, score: score})
 	}
-	// Stable order: score descending, ties by lower position (the dsaTopKIndices tie-break).
+	// SELECTION over the scored candidates may take the DeepSelect engine; the SCORE math
+	// above is untouched, so the selected set stays bit-identical to the sort reference.
+	// dsaIndexUseDeepSelect=false restores the exact old path (kept as the reference/fallback).
+	if !dsaIndexUseDeepSelect {
+		return dsaIndexSelectSorted(cands, topK)
+	}
+	n := topK
+	if n > len(cands) {
+		n = len(cands)
+	}
+	if n <= 0 {
+		return nil
+	}
+	// Bridge the scored candidates into DeepSelect's (value, position) total order and back.
+	// DeepSelectTopk returns the EXACT top-k under the same (score desc, position asc) order
+	// as sortDSAIndexCands, so no re-sort is needed to match the reference byte-for-byte.
+	pool := make([]Candidate, len(cands))
+	for i := range cands {
+		pool[i] = Candidate{Value: cands[i].score, Position: cands[i].pos}
+	}
+	sel := DeepSelectTopk(pool, n, dsaIndexSelectBlock, dsaIndexSelectBlock2)
+	out := make([]int, len(sel))
+	for i := range sel {
+		out[i] = sel[i].Position
+	}
+	return out
+}
+
+// dsaIndexSelectBlock / dsaIndexSelectBlock2 are the DeepSelect block size and compaction
+// slack for the DSA indexer. B=B2=1024 is sized for the real GLM indexer's k (hundreds); the
+// engine stays exact for any k and any block geometry.
+const (
+	dsaIndexSelectBlock  = 1024
+	dsaIndexSelectBlock2 = 1024
+)
+
+// dsaIndexUseDeepSelect toggles the DeepSelect engine on the DSA indexer. The sort-based
+// path below is retained as the reference/fallback (and is what the independent f64 test
+// still targets), so flipping this to false is a drop-in revert, never a deletion.
+var dsaIndexUseDeepSelect = true
+
+// dsaIndexSelectSorted is the original sort-based selection: sortDSAIndexCands (score desc,
+// ties by lower position), then take the first topK positions. Kept as the reference and
+// fallback for the DeepSelect engine.
+func dsaIndexSelectSorted(cands []dsaIndexCand, topK int) []int {
 	sortDSAIndexCands(cands)
 	n := topK
 	if n > len(cands) {
