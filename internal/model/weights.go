@@ -354,6 +354,13 @@ type Model struct {
 	// byte-identical: the hook reads this one nil field and returns. Set via
 	// SetEPDecodeCoordinator; follower ranks run RunEPFollower instead and never set it.
 	epCoord *EPDecodeCoordinator
+
+	// v41Roles memoizes the DeepSeek V4.1 shared KV/index execution schedule for
+	// the model's config (v41_attention.go). The schedule is a pure function of
+	// the config, so it is resolved once on first forward and reused. nil until
+	// then; the field is never written by a caller and never consulted off the
+	// V4.1 path, so every non-V4.1 model is byte-identical with it present (#12896).
+	v41Roles map[int]V41AttentionRole
 }
 
 // newModel assembles a Model from a built manifest + packed f32 blob, applying

@@ -487,25 +487,46 @@ func (m *Model) v41IndexRows(l int, qLat []float32, hidden []float32, keys [][]f
 }
 
 // v41KVSourceForwardAdmitted fails closed when the config declares a shared-KV
-// source layer that lies WITHIN the model's decoder stack. The reduced text
-// assembly projects its own per-layer attn.wkv.weight and never consumes a KV
-// source layer's shared key/value state (the reference's shared KV/index source
-// schedule), so silently running an in-range KV source would emit logits from a
+// source layer that lies WITHIN the model's decoder stack but whose shared state
+// the reduced assembly cannot actually publish. As of #12896 the assembly DOES
+// execute the shared KV/index schedule (v41_attention.go): a declared source
+// pools its projected KV input through the CED/CSA2 compressor and publishes the
+// rows, and a later reader resolves them. A source is therefore admitted only
+// when it declares a compressed regime (ratio > 1, so the compressor runs) and
+// carries the compressor tensors its pooling reads; a source at ratio <= 1 has
+// no pooled stream to publish, so it is refused rather than silently running a
 // per-layer KV cache where the official model reuses a source layer's state.
 // Declarations that only touch out-of-range layers stay admitted, which keeps the
 // reduced oracle fixture runnable: it derives from the published 40-layer config
 // but narrows NumLayers to 1, so every kv source ({2,8,14,20}) is unreachable.
-// Executing the real shared KV source is #12896's remaining integration work;
-// until then this is the fail-closed boundary.
-func v41KVSourceForwardAdmitted(cfg Config) error {
-	m := cfg.DeepSeekV41
-	if m == nil {
+func (m *Model) v41KVSourceForwardAdmitted() error {
+	d41 := m.Cfg.DeepSeekV41
+	if d41 == nil {
 		return nil
 	}
-	for _, layer := range m.KVSourceLayerIDs {
-		if layer >= 0 && layer < cfg.NumLayers {
+	cfg := m.Cfg
+	for _, layer := range d41.KVSourceLayerIDs {
+		if layer < 0 || layer >= cfg.NumLayers {
+			continue
+		}
+		if !v41AttentionRatioImplemented(v41CompressRatioAt(cfg, layer)) {
+			return v41StageErr(v41StageCompress, layer,
+				fmt.Errorf("%w: layer %d declares a shared-KV source but its compress ratio %d is not an implemented variant", ErrV41ForwardStage, layer, v41CompressRatioAt(cfg, layer)))
+		}
+		if v41CompressRatioAt(cfg, layer) <= 1 {
 			return v41StageErr(v41StageAttention, layer,
-				fmt.Errorf("%w: layer %d declares a shared-KV source but the reduced forward does not execute shared KV/index state", ErrV41ForwardStage, layer))
+				fmt.Errorf("%w: layer %d declares a shared-KV source but has no compressed regime to publish", ErrV41ForwardStage, layer))
+		}
+		H := cfg.HiddenSize
+		width := v41CompressorWidth(cfg)
+		if err := m.v41AdmitShape(layerName(layer, "attn.compressor.wkv.weight"), v41StageCompress, layer, width, H); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(layer, "attn.compressor.wgate.weight"), v41StageCompress, layer, width, H); err != nil {
+			return err
+		}
+		if err := m.v41AdmitShape(layerName(layer, "attn.compressor.norm.weight"), v41StageCompress, layer, width); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -612,7 +633,7 @@ func (m *Model) v41ForwardAdmitted() error {
 	if err := m.v41CompressIndexForwardAdmitted(); err != nil {
 		return err
 	}
-	if err := v41KVSourceForwardAdmitted(cfg); err != nil {
+	if err := m.v41KVSourceForwardAdmitted(); err != nil {
 		return err
 	}
 	if err := v41CandidateSourceForwardAdmitted(cfg); err != nil {
@@ -920,7 +941,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		qLatRows[t] = qLat
 	}
 
-	// ---- CED/CSA2 compressor + lightning indexer stages (#13006) ----
+	// ---- CED/CSA2 compressor + lightning indexer stages (#13006, #12896) ----
 	//
 	// A layer declaring CompressRatios[l] > 1 pools its per-position projected KV
 	// rows through the CED/CSA2 compressor (v41CompressedRows), and a layer
@@ -930,36 +951,49 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	// config that declares an in-range stage without its weights is refused at
 	// admission, not here.
 	//
-	// Scope note: the reduced assembly's per-position sink contraction remains the
-	// attention path. This leaf executes the compressor/indexer stages and makes the
-	// compressor's pooling observable in that arithmetic; mapping the contraction
-	// onto the reference's compressed/shared KV cache is #12896's integration work.
-	compressRatio := 0
-	if cfg.DeepSeekV41 != nil && l < len(cfg.DeepSeekV41.CompressRatios) {
-		compressRatio = cfg.DeepSeekV41.CompressRatios[l]
+	// #12896 maps the sink contraction onto the reference's compressed KV cache:
+	// a compressed layer contracts the COMPRESSED stream directly (block-causal
+	// visibility, one pooled key/value row per group) instead of expanding the
+	// pooled latent back onto causal positions. A declared shared-KV source layer
+	// publishes its compressed rows into the session state, and a later reader
+	// layer resolves its KV stream from that published source.
+	plan, err := v41AttentionPlanFor(cfg, l, m.v41AttentionRolesCached())
+	if err != nil {
+		return err
 	}
 	var compressedKV [][]float32
-	if compressRatio > 1 {
-		compressed, err := m.v41CompressedRows(l, compressRatio, kvRows, preByPos)
+	if plan.Ratio > 1 {
+		compressed, err := m.v41CompressedRows(l, plan.Ratio, kvRows, preByPos)
 		if err != nil {
 			return err
 		}
 		compressedKV = compressed
-		// Expand the pooled latent back onto the causal positions it summarizes:
-		// position i reads the pooled value of its group (i/ratio). This keeps the
-		// reduced per-position contraction shape-valid while making the compressor's
-		// pooling observable in the attention arithmetic.
-		if len(compressed) > 0 {
-			for i := 0; i < seq; i++ {
-				g := i / compressRatio
-				if g >= len(compressed) {
-					g = len(compressed) - 1
-				}
-				kvRows[i] = compressed[g]
-			}
+	}
+	// A reader layer whose KV source precedes it consumes the source's published
+	// compressed stream; a source layer publishes its own for later readers.
+	sharedKV := compressedKV
+	if plan.Role == V41AttentionRoleReader && plan.KVSourceLayer >= 0 && st != nil {
+		attn, err := st.attentionState(hd, 8)
+		if err != nil {
+			return v41StageErr(v41StageAttention, l, err)
+		}
+		if rows, ok := attn.KVSourceRows(plan.KVSourceLayer); ok && len(rows) > 0 {
+			sharedKV = rows
 		}
 	}
-	if _, err := m.v41IndexRows(l, qLatRows[seq-1], preByPos[seq-1], compressedKV); err != nil {
+	// The layer's own lightning-index selection for the newest position. A layer
+	// that is not an index source computes none (nil).
+	localIdx, err := m.v41IndexRows(l, qLatRows[seq-1], preByPos[seq-1], compressedKV)
+	if err != nil {
+		return err
+	}
+	// The per-position index list the compressed contraction consumes, flattened
+	// [seq][TopKWidth]. A layer that is itself the index source uses its local
+	// selection replicated across the causal positions it published it for; a
+	// reader layer reuses its source's published top-k selection; a layer with
+	// neither passes no list and the contraction falls back to the causal mask.
+	indexList, err := m.v41AttentionIndexList(plan, st, localIdx, hd, len(sharedKV), seq)
+	if err != nil {
 		return err
 	}
 
@@ -982,9 +1016,31 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if len(seed) > v41WindowSize {
 			seed = seed[len(seed)-v41WindowSize:]
 		}
+		// A declared source layer publishes its compressed rows and index keys so
+		// later readers can resolve them within this same forward pass (the
+		// V41AttentionState source-then-consumer ordering).
+		updates := m.v41AttentionSourceUpdates(plan, compressedKV, qLatRows)
 		if len(seed) > 0 {
-			if err := attn.Prefill(seed, nil); err != nil {
+			if err := attn.Prefill(seed, updates); err != nil {
 				return v41StageErr(v41StageAttention, l, err)
+			}
+		} else if len(updates) > 0 {
+			// A source layer with no projected window rows still publishes.
+			if err := attn.PublishCandidates(plan.Ratio, nil); err != nil {
+				return v41StageErr(v41StageAttention, l, err)
+			}
+		}
+		// An index source publishes its own per-position top-k selection so a
+		// later reader layer can reuse it without recomputing the scoring path.
+		// The selection is the source's local index list, one row per published
+		// query position.
+		if indexSourceAt(cfg.DeepSeekV41, l) && indexList != nil && plan.TopKWidth > 0 {
+			rows := make([][]int32, seq)
+			for t := range rows {
+				rows[t] = append([]int32(nil), indexList[t*plan.TopKWidth:(t+1)*plan.TopKWidth]...)
+			}
+			if err := attn.PublishTopK(plan.Ratio, rows); err != nil {
+				return v41StageErr(v41StageIndexer, l, err)
 			}
 		}
 	}
@@ -992,6 +1048,32 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scale := cfg.attnScale()
 	attnOut := make([][]float32, seq)
 	for t := 0; t < seq; t++ {
+		// A compressed/shared layer contracts the COMPRESSED KV stream directly:
+		// block-causal visibility over pooled group rows, with the lightning
+		// indexer's row selection when the layer published one. A per-layer layer
+		// keeps the exact per-position causal sink contraction.
+		if plan.Ratio > 1 || (plan.Role == V41AttentionRoleReader && len(sharedKV) > 0 && len(sharedKV) < seq) {
+			opt := V41AttentionSharedKVOptions{
+				Layer: l, Ratio: maxInt(plan.Ratio, 1), Groups: len(sharedKV),
+				HeadDim: hd, Heads: nH, Softmax: scale, Sink: sink,
+			}
+			if indexList != nil && len(indexList) >= (t+1)*plan.topKWidth() {
+				// The index source publishes one selection row per query position.
+				opt.Idx = indexList[t*plan.topKWidth() : (t+1)*plan.topKWidth()]
+				opt.IndexTopK = plan.topKWidth()
+				opt.TopK = plan.topKWidth()
+			}
+			o, err := V41AttentionCompressedForward(qHeads[t], sharedKV, opt)
+			if err != nil {
+				return err
+			}
+			projected, err := V41GroupedOutputProjection(o, woA, woB, 1, 1, nH, hd, cfg.OGroups, cfg.OLoraRank, H)
+			if err != nil {
+				return v41StageErr(v41StageAttention, l, err)
+			}
+			attnOut[t] = projected
+			continue
+		}
 		rows := t + 1
 		idx := make([]int32, rows+1) // one trailing -1 marks an empty slot beyond the causal prefix
 		for i := 0; i < rows; i++ {
