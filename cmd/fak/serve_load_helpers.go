@@ -360,6 +360,14 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		// pool against the box's real MemAvailable so a load that would OOM-kill the host (or a second
 		// concurrent large load on a contended box) refuses cleanly here instead of wedging the box.
 		must(compute.RefuseHostScopedPlanIfTooBigForHost(memPlan, serveGGUFHostHeadroom))
+		// #13171: the same device fit check stages the DEVICE-scoped dense weights THROUGH host RAM
+		// (read -> dequant/transcode -> device upload -> free), so a 63.09 GiB device dense charge
+		// materializes tens of GiB of unaccounted host anon RSS and the process is kernel-OOM-killed
+		// mid-staging before the forward. Bound that transient staging charge against the SAME host
+		// budget the arm decision was sized from, and emit the arm/budget line at STAGING TIME (not
+		// via loadMessages, which prints only after the load) so the arm taken is observable.
+		must(refuseDeviceStagingAgainstHostFit(memPlan, hostFit))
+		logServeDeviceCPUOffloadArmStaging(backend, streamedOffload, streamedBound, memPlan, hostFit)
 		return loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend, loadMessages, q4kOpts...)
 	case residentQ4K:
 		if backend != nil {
