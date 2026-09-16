@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +14,12 @@ import (
 )
 
 func TestWholeTokenWitnessUsesPromotedP1AndPreservesProfilerMode(t *testing.T) {
+	// The promoted-P1 resident graph is a Metal-only instrument; the off-Metal
+	// backend lane (Linux CPU / ROCm / Vulkan) is covered by
+	// TestWholeTokenRunsWithoutMetal. On darwin this remains the physical oracle.
+	if runtime.GOOS != "darwin" {
+		t.Skipf("resident-Metal whole-token oracle requires darwin/arm64+cgo, this host is %s", runtime.GOOS)
+	}
 	if !metalgemm.Available() {
 		t.Fatal("physical Metal device required")
 	}
@@ -165,5 +173,223 @@ func TestWholeTokenDeviceIdentitySeam(t *testing.T) {
 
 	if got := wholeTokenDeviceIdentity(nil); got != fallback {
 		t.Fatalf("nil session identity = %q, want legacy fallback %q", got, fallback)
+	}
+}
+
+// wholeTokenBackendFixture is a non-Metal compute.Backend that advertises the
+// whole-sequence prefill seam (the TICKET-02 route) and structurally implements
+// the Qwen35 GDN contract, so the whole-token witness can run end-to-end on any
+// host — Linux CPU included. It owns no GPU kernel: matmuls and attention run on
+// the embedded cpu-ref backend, and its sequence/GDN bodies return finite,
+// deterministic values. It is a routing fixture, not a model-quality witness.
+type wholeTokenBackendFixture struct {
+	compute.Backend
+	m             *model.Model
+	sequenceCalls int
+	gdnCalls      int
+}
+
+func (b *wholeTokenBackendFixture) Name() string                    { return "linux-cpu-fixture" }
+func (b *wholeTokenBackendFixture) Tier() string                    { return "fixture" }
+func (b *wholeTokenBackendFixture) Class() compute.CorrectnessClass { return compute.Approx }
+func (*wholeTokenBackendFixture) Qwen35GDNPath() string             { return model.Qwen35GDNCUDAPath }
+
+// Qwen35SequencePrefill appends KV rows and returns finite resident products,
+// mirroring the model package's recording fixture without any device.
+func (b *wholeTokenBackendFixture) Qwen35SequencePrefill(req compute.Qwen35SequencePrefillRequest) (compute.Qwen35SequencePrefillResult, error) {
+	b.sequenceCalls++
+	for token := range req.TokenIDs {
+		pos := req.StartPos + token
+		for layer := range req.Layers {
+			width := req.NumKVHeads * req.HeadDim
+			z := compute.NewF32(b.Backend, []int{width}, make([]float32, width))
+			req.KV.AppendKV(layer, z, z, z, pos)
+		}
+	}
+	hidden := compute.NewF32(b.Backend, []int{req.Hidden}, make([]float32, req.Hidden))
+	var logits compute.Tensor
+	if req.NeedLogits {
+		logits = compute.NewF32(b.Backend, []int{b.m.Cfg.VocabSize}, make([]float32, b.m.Cfg.VocabSize))
+	}
+	return compute.Qwen35SequencePrefillResult{LastHidden: hidden, Logits: logits, Tokens: len(req.TokenIDs)}, nil
+}
+
+// Qwen35GDNDecode honors the in-place state contract and returns a finite output
+// of the correct width; the decode loop's finiteness is what the witness checks,
+// not numeric quality.
+func (b *wholeTokenBackendFixture) Qwen35GDNDecode(
+	normalizedInput,
+	inProjQKV, inProjZ, inProjB, inProjA,
+	conv1D, aLog, dtBias, norm, outProj,
+	convState, recurrentState compute.Tensor,
+	numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel int,
+	rmsNormEpsilon float32,
+) (output, nextConvState, nextRecurrentState compute.Tensor, err error) {
+	b.gdnCalls++
+	width := len(b.Backend.Read(normalizedInput))
+	if width == 0 {
+		width = b.m.Cfg.HiddenSize
+	}
+	out := compute.NewF32(b.Backend, []int{width}, make([]float32, width))
+	return out, convState, recurrentState, nil
+}
+
+// wholeTokenSequenceBackend is the same fixture with the whole-sequence prefill
+// capability advertised. The two-type split is deliberate: a Go interface is
+// satisfied statically, so "this backend provides no whole-sequence owner" must
+// be a type that does not implement the path marker at all — exactly how a real
+// non-sequence backend presents itself to the admission gate.
+type wholeTokenSequenceBackend struct {
+	wholeTokenBackendFixture
+}
+
+func (*wholeTokenSequenceBackend) Qwen35SequencePrefillPath() string {
+	return compute.Qwen35SequencePrefillPath
+}
+
+// wholeTokenFixtureCfg is a small Qwen3.5 GDN hybrid whose vocabulary is large
+// enough for 32 distinct prompt IDs and whose full-attention layer exercises the
+// standard HAL attention path.
+func wholeTokenFixtureCfg() model.Config {
+	return model.Config{
+		HiddenSize: 32, NumLayers: 4, NumHeads: 4, NumKVHeads: 2,
+		HeadDim: 8, IntermediateSize: 64, VocabSize: 97,
+		RMSNormEps: 1e-5, RopeTheta: 10000, TieWordEmbeddings: true, EOSTokenID: -1,
+		LayerTypes:          []string{"linear_attention", "linear_attention", "linear_attention", "full_attention"},
+		LinearConvKernelDim: 3, LinearKeyHeadDim: 8, LinearNumKeyHeads: 2,
+		LinearValueHeadDim: 8, LinearNumValueHeads: 4, AttnOutputGate: true,
+		FullAttentionInterval: 4, NormGain1p: true,
+	}
+}
+
+func wholeTokenFixturePrompt(vocab int) []int {
+	prompt := make([]int, 32)
+	for i := range prompt {
+		prompt[i] = (i*19 + 7) % vocab
+	}
+	return prompt
+}
+
+// TestWholeTokenRunsWithoutMetal drives the whole-token witness end-to-end on a
+// compute.Backend-selected session: no Metal device, no backend-nil legacy lane.
+// It asserts a finite decode loop, an honest non-empty Device stamped from the
+// selected backend, and a typed refusal when the selected backend advertises no
+// whole-sequence owner.
+func TestWholeTokenRunsWithoutMetal(t *testing.T) {
+	cfg := wholeTokenFixtureCfg()
+	m := model.NewSynthetic(cfg)
+	var closeOnce sync.Once
+	closeCalls := 0
+	closeWeights := func() (err error) {
+		closeOnce.Do(func() { closeCalls++; err = m.CloseWeights() })
+		return err
+	}
+	t.Cleanup(func() {
+		if err := closeWeights(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	be := &wholeTokenSequenceBackend{wholeTokenBackendFixture: wholeTokenBackendFixture{Backend: compute.Default(), m: m}}
+	session, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatalf("backend-selected session refused on the whole-sequence lane: %v", err)
+	}
+	if path, admissible := session.WholeSequenceCapability(); !admissible || path != compute.Qwen35SequencePrefillPath {
+		t.Fatalf("backend whole-sequence capability = %q admissible=%t, want %q", path, admissible, compute.Qwen35SequencePrefillPath)
+	}
+	session.Close()
+
+	report, err := runWholeToken(m.NewBackendSession(be), wholeTokenFixturePrompt(cfg.VocabSize), 3, "whole-token", time.Now(), closeWeights)
+	if err != nil {
+		t.Fatalf("off-Metal whole-token witness failed: %v", err)
+	}
+	if (report.Device != "linux-cpu-fixture/fixture") && (report.Device != "linux-cpu-fixture") {
+		t.Fatalf("device identity = %q, want the selected backend stamp", report.Device)
+	}
+	if report.SequencePath != compute.Qwen35SequencePrefillPath {
+		t.Fatalf("sequence path = %q, want the backend whole-sequence route", report.SequencePath)
+	}
+	if len(report.Tokens) != 3 || len(report.GreedyNext) != 3 || len(report.Operations) != 3 {
+		t.Fatalf("decode loop did not run %d finite steps: %+v", 3, report)
+	}
+	if report.Prefill.Tokens != 32 || !report.Prefill.CompletedWait || !report.Prefill.Available {
+		t.Fatalf("missing backend P32 prefill evidence: %+v", report.Prefill)
+	}
+	if report.PeakRSSBytes == 0 {
+		t.Fatalf("missing peak-RSS evidence: %+v", report)
+	}
+	if be.sequenceCalls != 1 {
+		t.Fatalf("backend sequence prefill calls = %d, want exactly one whole-prompt call", be.sequenceCalls)
+	}
+	if be.gdnCalls == 0 {
+		t.Fatal("decode loop did not exercise the linear-attention GDN route")
+	}
+	// Greedy selection above rejects non-finite logits per step, so a completed
+	// loop with recorded tokens IS the finite-decode assertion.
+	for _, id := range report.Tokens {
+		if id < 0 || id >= cfg.VocabSize {
+			t.Fatalf("forwarded token id %d outside vocabulary", id)
+		}
+	}
+	t.Logf("device=%s path=%s phases=%v", report.Device, report.SequencePath, report.Phases)
+}
+
+// TestWholeTokenRefusesBackendWithoutWholeSequence is the Quarantined Fallback
+// witness: a backend that advertises no whole-sequence owner is refused with a
+// typed admission error before any prompt byte is consumed — never silently run
+// through a per-layer host fallback.
+func TestWholeTokenRefusesBackendWithoutWholeSequence(t *testing.T) {
+	cfg := wholeTokenFixtureCfg()
+	m := model.NewSynthetic(cfg)
+	t.Cleanup(func() { _ = m.CloseWeights() })
+
+	be := &wholeTokenBackendFixture{Backend: compute.Default(), m: m}
+	session, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatalf("session construction: %v", err)
+	}
+	if path, admissible := session.WholeSequenceCapability(); admissible || path != "" {
+		t.Fatalf("capability = %q admissible=%t, want no whole-sequence owner", path, admissible)
+	}
+	session.Close()
+
+	report, err := runWholeToken(m.NewBackendSession(be), wholeTokenFixturePrompt(cfg.VocabSize), 2, "whole-token", time.Now(), nil)
+	if err == nil {
+		t.Fatalf("accepted a backend with no whole-sequence owner: %+v", report)
+	}
+	if !strings.Contains(err.Error(), "whole-sequence-capable") {
+		t.Fatalf("refusal is not typed/named: %v", err)
+	}
+	if be.sequenceCalls != 0 || be.gdnCalls != 0 {
+		t.Fatalf("refused witness still executed: sequence=%d gdn=%d", be.sequenceCalls, be.gdnCalls)
+	}
+}
+
+// TestValidateWholeTokenFlagsAdmitsBackendLane pins the flag gate: the legacy
+// lane still demands -metal, a named backend must omit -metal, and the backend
+// lane no longer requires -metal to select the witness.
+func TestValidateWholeTokenFlagsAdmitsBackendLane(t *testing.T) {
+	f := testCompleteBenchFlags()
+	*wholeTokenOut = "witness.json"
+	*wholeTokenPrompt = "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32"
+	t.Cleanup(func() { *wholeTokenOut = "" })
+	*f.gguf, *f.q4k, *f.decodeSteps = "model.gguf", true, 2
+
+	*f.backendName, *f.metal = "legacy", false
+	if err := validateWholeTokenFlags(f); err == nil {
+		t.Fatal("legacy lane without -metal was admitted")
+	}
+	*f.backendName, *f.metal = "legacy", true
+	if err := validateWholeTokenFlags(f); err != nil {
+		t.Fatalf("legacy Metal lane refused: %v", err)
+	}
+	*f.backendName, *f.metal = "vulkan", false
+	if err := validateWholeTokenFlags(f); err != nil {
+		t.Fatalf("named backend lane refused: %v", err)
+	}
+	*f.backendName, *f.metal = "vulkan", true
+	if err := validateWholeTokenFlags(f); err == nil {
+		t.Fatal("-metal with a named -backend was admitted")
 	}
 }

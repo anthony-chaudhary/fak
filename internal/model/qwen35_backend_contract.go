@@ -295,8 +295,153 @@ type wholeSequenceAdapter struct{ s *Session }
 // WholeSequence returns the backend-neutral whole-sequence capability owner for
 // this session. It is the seam cmd/modelbench consumes so the witness never names
 // the concrete Qwen35 Metal receipt or backend types.
+//
+// A compute.Backend-selected session resolves to the backend sequence adapter,
+// which reports its evidence from the backend's whole-sequence prefill route
+// (tryQwen35SequencePrefill) and the session's decode-handoff counters. A
+// backend-nil session resolves to the legacy Metal adapter unchanged, so the
+// Metal report stays byte-identical.
 func (s *Session) WholeSequence() WholeSequenceSession {
+	if s != nil && s.Backend != nil {
+		return wholeSequenceBackendAdapter{s: s, backend: s.Backend}
+	}
 	return wholeSequenceAdapter{s: s}
+}
+
+// WholeSequenceCapability reports whether this session can own a whole-token
+// native sequence, and names the capability path. It is the admission predicate
+// the whole-token witness gates on before executing: a session that advertises no
+// whole-sequence owner is refused by name rather than run through a per-layer
+// fallback. A backend-nil resident-Q4_K Metal session is admissible only when the
+// native Metal sequence factory is linked into this build.
+func (s *Session) WholeSequenceCapability() (path string, admissible bool) {
+	if s == nil || s.M == nil || !s.M.Cfg.IsQwen35Hybrid() {
+		return "", false
+	}
+	if s.Backend != nil {
+		seq, advertised, err := qwen35SequencePrefillBackend(s.Backend)
+		if err != nil || !advertised || seq == nil {
+			return "", false
+		}
+		return seq.Qwen35SequencePrefillPath(), true
+	}
+	if !s.Q4K || !s.MetalQ4K || !Qwen35MetalGDNPreprojectedSequenceAvailable() {
+		return "", false
+	}
+	return Qwen35MetalGDNSequenceForwardPath, true
+}
+
+// SequencePosition reports the session's current sequence position: the HAL KV
+// length on a backend-selected session (the device path keeps its positions in
+// halKV), else the resident model cache length. It is the single position
+// authority the whole-token witness pairs around a decode Step.
+func (s *Session) SequencePosition() int {
+	if s == nil {
+		return 0
+	}
+	if s.Backend != nil && s.halKV != nil {
+		return s.halKV.Len()
+	}
+	if s.Cache == nil {
+		return 0
+	}
+	return s.Cache.Len()
+}
+
+// wholeSequenceBackendAdapter adapts a compute.Backend-selected session onto the
+// backend-neutral WholeSequenceSession seam. The backend lane owns whole-prompt
+// execution through the Qwen3.5/3.8 sequence-prefill route (the TICKET-02 seam),
+// not the resident Metal graph: Enable/Finalize are admission checks because the
+// route is selected automatically inside Prefill, and the prefill/decode evidence
+// is read back from the session's route status and decode-handoff counters. It
+// never fabricates a Metal-shaped receipt.
+type wholeSequenceBackendAdapter struct {
+	s       *Session
+	backend compute.Backend
+}
+
+// EnableWholeSequence on the backend lane is explicit admission only: it proves
+// the backend advertises the whole-sequence prefill path on a fresh session
+// before any prompt state is mutated, and it mutates nothing itself. The actual
+// route admission happens inside Prefill.
+func (a wholeSequenceBackendAdapter) EnableWholeSequence() error {
+	seq, advertised, err := qwen35SequencePrefillBackend(a.backend)
+	if err != nil {
+		return err
+	}
+	if !advertised || seq == nil {
+		return &UnsupportedSequencePrefillError{
+			Backend: a.backend.Name(), Path: compute.Qwen35SequencePrefillPath,
+			Reason: "backend advertises no whole-sequence prefill capability",
+		}
+	}
+	if a.s == nil || a.s.Cache == nil || a.s.Cache.Len() != 0 {
+		return &UnsupportedSequencePrefillError{
+			Backend: a.backend.Name(), Path: seq.Qwen35SequencePrefillPath(),
+			Reason: "requires a fresh session before prompt-state mutation",
+		}
+	}
+	return nil
+}
+
+// FinalizeWholeSequence on the backend lane confirms the last eligible prefill
+// actually completed on the canonical native sequence route. It never mutates
+// state; the route decision is recorded by Prefill itself.
+func (a wholeSequenceBackendAdapter) FinalizeWholeSequence() (bool, error) {
+	status, ok := a.s.Qwen35SequencePrefillRouteStatus()
+	if !ok {
+		return false, nil
+	}
+	if !status.NativePerformanceQualifying || status.FallbackActive || status.EffectivePath != compute.Qwen35SequencePrefillPath {
+		return true, &UnsupportedSequencePrefillError{
+			Backend: a.backend.Name(), Path: status.EffectivePath,
+			Reason: fmt.Sprintf("prefill route non-qualifying: requested=%q effective=%q fallback=%t reason=%q", status.RequestedPath, status.EffectivePath, status.FallbackActive, status.DeclineReason),
+		}
+	}
+	return true, nil
+}
+
+// WholeSequenceReceipt reports the backend lane's whole-sequence evidence. The
+// executed prefill is a single batched whole-prompt forward on the canonical
+// path, so the route status is the honest executed-evidence source. The backend
+// lane performs no per-token terminal GPU wait accounting, so the wait/readback
+// counters stay zero: the whole-token lockstep validator refuses that route
+// rather than crediting a wait the backend never made.
+func (a wholeSequenceBackendAdapter) WholeSequenceReceipt() WholeSequenceReceipt {
+	status, ok := a.s.Qwen35SequencePrefillRouteStatus()
+	if !ok || !status.NativePerformanceQualifying || status.FallbackActive || status.EffectivePath != compute.Qwen35SequencePrefillPath {
+		return WholeSequenceReceipt{}
+	}
+	return WholeSequenceReceipt{
+		Path:          status.EffectivePath,
+		Available:     true,
+		SelectorState: WholeSequenceSelectorOn,
+		EvidenceState: WholeSequenceEvidenceExecuted,
+		Tokens:        a.s.halKV.Len(),
+		Committed:     true,
+		CompletedWait: true,
+		Device:        a.backend.Name(),
+	}
+}
+
+func (a wholeSequenceBackendAdapter) WholeSequenceHandoffReceipt() WholeSequenceHandoff {
+	return WholeSequenceHandoffFromQwen35(a.s.Qwen35DecodeHandoffReceipt())
+}
+
+func (a wholeSequenceBackendAdapter) WholeSequencePath() string {
+	seq, advertised, err := qwen35SequencePrefillBackend(a.backend)
+	if err != nil || !advertised || seq == nil {
+		return ""
+	}
+	return seq.Qwen35SequencePrefillPath()
+}
+
+func (a wholeSequenceBackendAdapter) WholeSequenceExecutedEvidence() WholeSequenceEvidenceState {
+	return WholeSequenceEvidenceExecuted
+}
+
+func (a wholeSequenceBackendAdapter) WholeSequenceSelectorOnState() WholeSequenceSelectorState {
+	return WholeSequenceSelectorOn
 }
 
 func (a wholeSequenceAdapter) EnableWholeSequence() error {

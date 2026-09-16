@@ -59,8 +59,22 @@ func validateWholeTokenFlags(f *benchFlags) error {
 	if err != nil || len(ids) != 32 {
 		return errors.New("whole-token witness requires exactly 32 explicit prompt IDs")
 	}
-	if *f.gguf == "" || !*f.q4k || !*f.metal || *f.backendName != "legacy" || *f.decodeSteps < 1 || *f.decodeSteps > 64 {
-		return errors.New("whole-token witness requires -gguf -q4k -metal -backend=legacy and 1..64 decode steps")
+	if *f.gguf == "" || !*f.q4k || *f.decodeSteps < 1 || *f.decodeSteps > 64 {
+		return errors.New("whole-token witness requires -gguf -q4k and 1..64 decode steps")
+	}
+	// Device admission is capability-gated, not Metal-gated: either the legacy
+	// Metal lane (-metal -backend=legacy, whose resolved whole-sequence owner is
+	// the Metal graph) or a named compute.Backend that advertises the
+	// whole-sequence prefill seam (the TICKET-02 route). A legacy run without
+	// -metal is refused by name rather than silently running the witness on a lane
+	// it did not select; a -backend run must omit -metal because that flag selects
+	// the legacy path.
+	if *f.backendName == "legacy" {
+		if !*f.metal {
+			return errors.New("whole-token witness on the legacy lane requires -metal, or name a -backend that provides a whole-sequence prefill")
+		}
+	} else if *f.metal {
+		return errors.New("-metal selects the legacy Metal path; omit it when naming -backend")
 	}
 	if rawDecodeEnabled() || *f.nativeProfileOut != "" || *f.nativeProfileCompare != "" || *f.nativeProfileReadback != "" || *f.qwenSwapOut != "" || *f.qwenSwapReadback != "" || *f.loadOnly || *f.smoke || *f.verify || *f.preflight || *f.phaseProfile || *f.workloadPath != "" || *f.checkpoint != "" || *f.resume != "" {
 		return errors.New("whole-token witness is exclusive with other benchmark/profile/readback modes")
@@ -111,8 +125,23 @@ func runWholeToken(s *model.Session, prompt []int, steps int, route string, star
 			report.Error = err.Error()
 		}
 	}()
-	if s == nil || s.M == nil || s.Backend != nil || !s.Q4K || !s.MetalQ4K || s.PhaseProfiler != nil || len(prompt) != 32 || steps < 1 || steps > 64 || (route != "whole-token" && route != "per-layer") {
-		return report, errors.New("whole-token witness requires a fresh backend-nil Metal Q4_K session without profiler")
+	if s == nil || s.M == nil || s.PhaseProfiler != nil || len(prompt) != 32 || steps < 1 || steps > 64 || (route != "whole-token" && route != "per-layer") {
+		return report, errors.New("whole-token witness requires a fresh whole-sequence-capable session without profiler")
+	}
+	// Admission is capability-gated before any prompt byte is consumed: the
+	// selected session must advertise a whole-sequence owner. A session with no
+	// such capability is refused by name (a typed refusal), never silently run
+	// through a per-layer fallback.
+	capabilityPath, admissible := s.WholeSequenceCapability()
+	if !admissible {
+		return report, errors.New("whole-token witness requires a whole-sequence-capable session: no native whole-sequence owner is available for this build/device")
+	}
+	// The legacy lane is exactly the backend-nil resident-Q4_K Metal session; the
+	// backend lane is any session whose selected compute.Backend advertises the
+	// whole-sequence prefill seam.
+	backendLane := s.Backend != nil
+	if !backendLane && (!s.Q4K || !s.MetalQ4K) {
+		return report, errors.New("whole-token witness on the legacy lane requires a fresh resident-Q4_K Metal session")
 	}
 	for _, id := range prompt {
 		if id < 0 || id >= s.M.Cfg.VocabSize {
@@ -121,9 +150,13 @@ func runWholeToken(s *model.Session, prompt []int, steps int, route string, star
 	}
 	// Consume the backend-neutral whole-sequence seam: the witness never names the
 	// concrete Qwen35 Metal receipt or backend types. The adapter behind this
-	// interface is the unchanged Metal path.
+	// interface is the unchanged Metal path on the legacy lane, and the backend
+	// whole-sequence prefill route on the backend lane.
 	sequence := s.WholeSequence()
-	report.SequencePath = sequence.WholeSequencePath()
+	if path := sequence.WholeSequencePath(); path != "" {
+		capabilityPath = path
+	}
+	report.SequencePath = capabilityPath
 	t := time.Now()
 	if err = sequence.EnableWholeSequence(); err != nil {
 		return report, err
@@ -150,7 +183,7 @@ func runWholeToken(s *model.Session, prompt []int, steps int, route string, star
 		report.Phases["host_selection_and_receipt_bookkeeping"] += time.Since(t).Seconds()
 		before := sequence.WholeSequenceReceipt()
 		counts := sequence.WholeSequenceHandoffReceipt()
-		base := s.Cache.Len()
+		base := s.SequencePosition()
 		t = time.Now()
 		logits = s.Step(id) // Includes the existing output head and cache bookkeeping.
 		report.Phases["decode_with_head"] += time.Since(t).Seconds()
@@ -158,8 +191,12 @@ func runWholeToken(s *model.Session, prompt []int, steps int, route string, star
 		after := sequence.WholeSequenceReceipt()
 		nextCounts := sequence.WholeSequenceHandoffReceipt()
 		report.Handoff = nextCounts
-		operation := wholeTokenOperation{WholeSequenceOperation: model.WholeSequenceOperation{Before: before, After: after, CountsBefore: counts, CountsAfter: nextCounts, CacheBefore: base, CacheAfter: s.Cache.Len()}}
-		if err := validateWholeTokenOperation(operation, route, sequence, report.SequencePath); err != nil {
+		operation := wholeTokenOperation{WholeSequenceOperation: model.WholeSequenceOperation{Before: before, After: after, CountsBefore: counts, CountsAfter: nextCounts, CacheBefore: base, CacheAfter: s.SequencePosition()}}
+		if backendLane {
+			if err := validateWholeTokenBackendOperation(operation, route, sequence); err != nil {
+				return report, err
+			}
+		} else if err := validateWholeTokenOperation(operation, route, sequence, report.SequencePath); err != nil {
 			return report, err
 		}
 		report.Operations = append(report.Operations, operation)
@@ -173,6 +210,16 @@ func runWholeToken(s *model.Session, prompt []int, steps int, route string, star
 		report.Tokens = append(report.Tokens, id)
 		report.GreedyNext = append(report.GreedyNext, next)
 		report.Phases["host_selection_and_receipt_bookkeeping"] += time.Since(t).Seconds()
+	}
+	if backendLane {
+		// The backend lane owns no per-token terminal Metal receipt; the honest
+		// evidence is the whole-sequence route still reporting an executed,
+		// available receipt after the finite decode loop, plus the finite-logits
+		// check the greedy selection above already enforces at every step.
+		final := sequence.WholeSequenceReceipt()
+		if !final.Available || final.EvidenceState != sequence.WholeSequenceExecutedEvidence() {
+			return report, errors.New("whole-token backend decode loop lost its qualifying whole-sequence route")
+		}
 	}
 	report.PeakRSSBytes, err = peakRSSBytes()
 	return report, err
@@ -275,6 +322,41 @@ func validateWholeTokenOperation(op wholeTokenOperation, route string, sequence 
 		executed = sequence.WholeSequenceExecutedEvidence()
 	}
 	return model.ValidateWholeSequenceOperation(route, path, executed, op.WholeSequenceOperation)
+}
+
+// validateWholeTokenBackendOperation is the backend lane's whole-token lockstep
+// gate. A compute.Backend-selected session runs its prompt as one batched
+// whole-sequence prefill and decodes through the HAL; it owns no per-token
+// terminal Metal command-buffer receipt, so requiring the resident-Metal
+// Tokens==1/CommandBuffers==1 lockstep would refuse a real backend. What this
+// lane can honestly witness is: the sequence advanced exactly one position, the
+// whole-sequence route still reports an executed/available receipt, and the
+// prefill-level evidence is unchanged across the step (the route is a
+// prefill-level fact, not a per-decode one). A backend that cannot hold the
+// route fails FinalizeWholeSequence before this ever runs.
+func validateWholeTokenBackendOperation(op wholeTokenOperation, route string, sequence model.WholeSequenceSession) error {
+	if op.CacheAfter != op.CacheBefore+1 {
+		return errors.New("whole-token backend Step did not advance exactly one sequence position")
+	}
+	switch route {
+	case "whole-token":
+		if !op.After.Available || op.After.EvidenceState != sequence.WholeSequenceExecutedEvidence() || !op.After.CompletedWait {
+			return errors.New("whole-token backend Step lacks a live executed whole-sequence receipt; fallback is non-qualifying")
+		}
+		// The backend lane's receipt is prefill-level, so its tokens field tracks
+		// the sequence position rather than a per-step command buffer. A zero-
+		// progress step (no token advanced) is the corruption this rejects.
+		if op.After.Tokens <= op.Before.Tokens {
+			return errors.New("whole-token backend Step advanced no whole-sequence token")
+		}
+	case "per-layer":
+		// The backend lane does not distinguish a per-layer source-control arm at
+		// the receipt level; the route status is the same executed prefill. Only
+		// the position advance is contract-bearing here.
+	default:
+		return errors.New("unknown whole-token route")
+	}
+	return nil
 }
 
 func wholeTokenBinding(report wholeTokenReport) (string, error) {
