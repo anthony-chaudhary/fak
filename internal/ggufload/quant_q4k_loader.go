@@ -536,6 +536,18 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 		if expertTier == nil {
 			return nil, fmt.Errorf("gguf: streamed routed experts requested, but this %s checkpoint carries no fused expert slab the tier can serve", cfg.ModelType)
 		}
+		// A PARTIAL decline is not a bound. If some routed-expert slabs are stageable and others
+		// are not, the tier builds over the former while the latter drop off the streamed set and
+		// are eager-dequantized to f32 by computeQ4KTensorWork - materializing the very expert bulk
+		// WithStreamedExperts was passed to avoid. Refuse the half-measure and name the slabs, so a
+		// caller gets either bounded experts or an actionable error (fak#13144).
+		unstageable, err := s.UnstageableRoutedExpertSlabs()
+		if err != nil {
+			return nil, err
+		}
+		if len(unstageable) > 0 {
+			return nil, fmt.Errorf("gguf: streamed routed experts requested, but %d routed-expert slab(s) carry an unstageable quant and would be eager-dequantized to f32 (materializing the expert bulk): %s", len(unstageable), strings.Join(unstageable, ", "))
+		}
 		streamed = make(map[string]bool)
 		for _, sh := range shards {
 			for _, f := range sh.Fused {
