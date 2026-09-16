@@ -693,6 +693,25 @@ func specDecodeGreedyQwen35MTPDepthNMeasured(target *Session, prompt []int, n, d
 	return run, nil
 }
 
+// qwen35MTPMetalTargetCapturesRawHidden reports whether a Metal-resident target
+// session can supply the exact pre-final-norm residual the MTP drafter consumes.
+// Metal sessions carry Backend == nil and route Prefill/Step through the
+// metal_prefill_hybrid / resident-decode paths, which read the raw residual back
+// (captureTargetHidden) before the final norm. A session without an active
+// capture or without the hybrid Qwen3.8 layout cannot satisfy the contract.
+func qwen35MTPMetalTargetCapturesRawHidden(target *Session) bool {
+	if target == nil || target.M == nil || target.Cache == nil {
+		return false
+	}
+	if target.Backend != nil {
+		return false
+	}
+	if !(target.Metal || target.MetalQ4K) {
+		return false
+	}
+	return target.M.Cfg.isQwen35TextFamily() || target.M.Cfg.IsQwen35Hybrid()
+}
+
 func validateQwen35MTPDepthNTarget(target *Session, depth int, requireFresh bool) error {
 	if target == nil || target.M == nil {
 		return errors.New("model: Qwen3.8 MTP target session is required")
@@ -713,8 +732,14 @@ func validateQwen35MTPDepthNTarget(target *Session, depth int, requireFresh bool
 		if err := validateQwen35MTPVulkanTarget(target); err != nil {
 			return err
 		}
-	} else if target.Quant || target.Q4 || target.Q4K || target.F16 || target.GPTQ || target.Metal || target.MetalQ4K || target.PrecisionPolicy != nil {
-		return &Qwen35MTPSpecDecodeUnsupportedError{Reason: "only the native f32 target path has exact pre-final-norm hidden capture; production quant formats remain #9985"}
+	} else if target.Quant || target.Q4 || target.Q4K || target.F16 || target.GPTQ || target.PrecisionPolicy != nil {
+		// The f32-only restriction predates the resident Metal raw-hidden capture
+		// path. Metal sessions (Backend == nil, Metal/MetalQ4K flags) read the
+		// exact pre-final-norm residual back via qwen35MTPMetalTargetCapturesRawHidden,
+		// so a quantized Metal target is admissible when that capture is available.
+		if !qwen35MTPMetalTargetCapturesRawHidden(target) {
+			return &Qwen35MTPSpecDecodeUnsupportedError{Reason: "only the native f32 target path or the resident Metal raw-hidden capture path supports exact pre-final-norm hidden capture; this quant format remains unsupported"}
+		}
 	}
 	mode, err := target.M.Qwen35MTPMode(false)
 	if err != nil {
