@@ -103,10 +103,10 @@ READ_TIME_MULT = 0.1
 USD_PER_MTOK_INPUT_OPUS = 5.0
 
 EXCLUDE_NS_SUBSTR = ["pytest-of-USER", "AppData-Local-Temp", "workspace", "-ws", "test_"]
-NS_INCLUDE_PREFIX = "C--work"
+NS_INCLUDE_PREFIX = ""
 
 # --------------------------------------------------------------------------------------
-# transcript discovery (same scope rule as ctxwin.py: the ACTIVE account's C--work* sessions)
+# transcript discovery (same scope rule as ctxwin.py: all non-excluded namespaces by default; narrow with --ns-prefix)
 # --------------------------------------------------------------------------------------
 def discover_roots():
     home = os.path.expanduser("~")
@@ -1248,7 +1248,7 @@ def main(argv=None):
     r.add_argument("--since-days", type=float, default=None)
     r.add_argument("--root", action="append", default=None)
     r.add_argument("--max", type=int, default=20, help="cap at the N heaviest sessions (default 20)")
-    r.add_argument("--all", action="store_true", help="include all namespaces (default C--work* only)")
+    r.add_argument("--all", action="store_true", help="include all namespaces (default: all non-excluded namespaces)")
     r.add_argument("--json", default=None)
     r.add_argument("--md", default=None)
     r.add_argument("--now", default=None)

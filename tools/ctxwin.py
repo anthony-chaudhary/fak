@@ -102,7 +102,7 @@ STALE_POINTER_TOK = 16       # pointer for a stale read superseded by a later wr
 MIN_BUDGET = 256             # never window a result below this (amputation floor)
 ERROR_HEAD_TOK = 80          # tokens kept from an error's head in --error-collapse head
 EXCLUDE_NS_SUBSTR = ["pytest-of-USER", "AppData-Local-Temp", "workspace", "-ws", "test_"]
-NS_INCLUDE_PREFIX = "C--work"
+NS_INCLUDE_PREFIX = ""
 WRITE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 # Control-plane tools whose result is small + load-bearing (a todo list, a user choice);
 # the aggressive/hyper presets EXEMPT these by default so aggression never guts them.
@@ -1186,7 +1186,7 @@ def main(argv=None):
     b.add_argument("--since-days", type=float, default=None)
     b.add_argument("--root", action="append", default=None, help="transcript root(s); default = all ~/.claude*/projects")
     b.add_argument("--max", type=int, default=20, help="cap at the N heaviest sessions (default 20)")
-    b.add_argument("--all", action="store_true", help="include all namespaces (default: C--work* only)")
+    b.add_argument("--all", action="store_true", help="include all namespaces (default: all non-excluded namespaces)")
     b.add_argument("--json", default=None)
     b.add_argument("--md", default=None)
     b.add_argument("--now", default=None, help="timestamp string to stamp into the report")

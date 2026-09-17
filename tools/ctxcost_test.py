@@ -140,6 +140,23 @@ def test_trace_is_deterministic_and_flags_truncation():
 def test_selfcheck_passes():
     assert C.runselfcheck() == 0
 
+def test_discover_default_prefix_is_not_host_specific():
+    # fak#310/#13081: the default namespace filter is EMPTY, so a host whose namespaces
+    # are not "C--work*" still discovers sessions without --all, and an explicit prefix
+    # still narrows discovery to the named namespace family.
+    d = tempfile.mkdtemp()
+    for ns in ("C--work-a", "-Users-otherhost-fleet"):
+        os.makedirs(os.path.join(d, ns), exist_ok=True)
+        p = os.path.join(d, ns, "s.jsonl")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(json.dumps(_assistant("m1", 2, 100, 0, 10)) + "\n")
+    assert C.NS_INCLUDE_PREFIX == ""
+    all_ns = {r["ns"] for r in C.discover([d])}
+    assert "C--work-a" in all_ns, all_ns
+    assert "-Users-otherhost-fleet" in all_ns, all_ns
+    narrowed = {r["ns"] for r in C.discover([d], ns_prefix="C--work")}
+    assert narrowed == {"C--work-a"}, narrowed
+
 
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

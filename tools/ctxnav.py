@@ -197,7 +197,7 @@ def _discover_one(args):
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import ctxwin as W
     roots = W.discover_roots()
-    sess = W.discover(roots, ns_prefix="" if args.all else W.NS_INCLUDE_PREFIX, max_n=args.max)
+    sess = W.discover(roots, ns_prefix="", max_n=args.max)
     if not sess:
         return None
     if args.session:
