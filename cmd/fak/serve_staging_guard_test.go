@@ -115,25 +115,63 @@ func TestServeDeviceStagingGuardInertWithoutDeviceTransit(t *testing.T) {
 	}
 }
 
-// serve_staging_guard_test.go (fak#13177) — SPLIT-APERTURE form. On a Strix Halo the box exposes a
-// 64 GiB VRAM carve-out SEPARATE from a 62.43 GiB system window. The #13171 staging guard judged the
-// device-scoped dense transit against the SYSTEM window alone, so a 63.22 GiB dense side that fits
-// the 64 GiB VRAM window was refused - the [HW-WITNESSED] strix3 refusal that blocked the first
-// physical V4.1 token. The split-aware form must judge the transit against the DEVICE window when a
-// distinct one is known, and keep the single-window judgment (byte-for-byte) otherwise.
+// serve_staging_guard_test.go (fak#13177 + fak#13186) — SPLIT-APERTURE form. On a Strix Halo the box
+// exposes a 64 GiB VRAM carve-out SEPARATE from a 62.43 GiB system window. The #13171 staging guard
+// judged the device-scoped dense transit against the SYSTEM window alone, so a 63.22 GiB dense side
+// that fits the 64 GiB VRAM window was refused - the [HW-WITNESSED] strix3 refusal that blocked the
+// first physical V4.1 token. The split-aware form judges the transit's RESIDENCY against the DEVICE
+// window when a distinct one is known (fak#13177), and keeps the single-window judgment
+// (byte-for-byte) otherwise.
+//
+// fak#13186 (the rung this leaf closes): the residency admission alone was NOT sufficient, because
+// the transit is staged THROUGH host RAM. The [HW-WITNESSED] strix3 rung admitted the 63.22 GiB
+// transit on its 64 GiB VRAM fit and was then kernel-OOM-killed as a ~63 GiB host allocation against
+// a ~48.5 GiB host budget. The split form therefore requires BOTH windows: the device window for
+// RESIDENCY and the host window for the staging TRANSIT.
 
-// The witnessed strix3 shape: device dense transit 63.22 GiB, device window 64 GiB, system window
-// 62.43 GiB. The transit is admitted because it fits the VRAM window it is destined for.
-func TestServeDeviceStagingSplitApertureAdmitsTransitFittingDeviceWindow(t *testing.T) {
+// A transit that fits BOTH the device window (residency) and the host window (staging transit) is
+// admitted unchanged.
+func TestServeDeviceStagingSplitApertureAdmitsTransitFittingBothWindows(t *testing.T) {
 	const gib = int64(1) << 30
-	plan := serveStagingGuardPlan(63*gib+225<<20, 4*gib)
-	// hostFit.Base is the system window (62.43 GiB) the transit EXCEEDS.
+	// 32 GiB dense transit: fits both a 64 GiB VRAM window and a 62.43 GiB system window.
+	plan := serveStagingGuardPlan(32*gib, 4*gib)
 	hostFit := serveFitBudget{Base: 62*gib + 439<<20, Headroom: 0}
 	deviceTotal := int64(64) * gib
 	deviceFree := int64(64) * gib
 
 	if err := refuseDeviceStagingAgainstReportedAperture(plan, hostFit, deviceTotal, deviceFree, true); err != nil {
-		t.Fatalf("split-aperture transit (fits 64 GiB VRAM window, exceeds 62.43 GiB system window) was refused: %v", err)
+		t.Fatalf("split-aperture transit fitting both windows was refused: %v", err)
+	}
+}
+
+// fak#13186 RED->GREEN: the exact witnessed strix3 shape - device dense transit 63.22 GiB, device
+// window 64 GiB, system window 62.43 GiB. The transit fits the VRAM window it is destined for but
+// EXCEEDS the host window it must be STAGED through; it must be refused typed (host scope) instead
+// of admitted-then-kernel-OOM-killed mid-staging.
+func TestServeDeviceStagingSplitApertureRefusesTransitExceedingHostStagingWindow(t *testing.T) {
+	const gib = int64(1) << 30
+	plan := serveStagingGuardPlan(63*gib+225<<20, 4*gib)
+	// hostFit.Base is the system window (62.43 GiB) the staging transit EXCEEDS.
+	hostFit := serveFitBudget{Base: 62*gib + 439<<20, Headroom: 0}
+	deviceTotal := int64(64) * gib
+	deviceFree := int64(64) * gib
+
+	err := refuseDeviceStagingAgainstReportedAperture(plan, hostFit, deviceTotal, deviceFree, true)
+	if err == nil {
+		t.Fatalf("split-aperture transit (fits 64 GiB VRAM window, exceeds 62.43 GiB host staging window) was ADMITTED; it would be kernel-OOM-killed mid-staging (fak#13186 regressed)")
+	}
+	var fe *compute.FitError
+	if !errors.As(err, &fe) {
+		t.Fatalf("refusal %v is not a typed *compute.FitError; the operator cannot read the shortfall", err)
+	}
+	if fe.Scope != compute.MemoryScopeHost {
+		t.Fatalf("refusal scope = %q, want %q (the bound is the host staging transit)", fe.Scope, compute.MemoryScopeHost)
+	}
+	if fe.Want < 63*gib {
+		t.Fatalf("refusal Want = %d, want the device staging transit >= %d", fe.Want, int64(63*gib))
+	}
+	if fe.Avail != hostFit.avail() {
+		t.Fatalf("refusal Avail = %d, want the host budget %d", fe.Avail, hostFit.avail())
 	}
 }
 

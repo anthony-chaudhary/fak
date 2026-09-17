@@ -270,11 +270,25 @@ func refuseDeviceStagingAgainstHostFit(plan compute.MemoryPlan, fit serveFitBudg
 // alone (62.43 GiB MemTotal) refuses a 63.22 GiB dense side that comfortably fits the 64 GiB VRAM
 // window - the exact [HW-WITNESSED] strix3 refusal that blocked the first physical V4.1 token.
 //
-// When a device window is known AND distinct from the host window, the transit is judged against
-// that device window; otherwise this delegates byte-for-byte to the single-window
+// When a device window is known AND distinct from the host window, the transit's RESIDENCY is
+// judged against that device window; otherwise this delegates byte-for-byte to the single-window
 // refuseDeviceStagingAgainstHostFit, so the fak#13171 kernel-OOM protection is preserved exactly
 // (an unknown or coincident device window keeps today's host-RAM judgement). The genuine
 // host-scoped expert pool is judged by the pre-existing host guard on the same arm, not here.
+//
+// fak#13186 (the rung this leaf closes): the device-window admission alone is NOT sufficient,
+// because the transit is not born in VRAM - the loader reads each device-destined tensor into HOST
+// RAM, transcodes, uploads, and frees, so the device dense total is ALSO a transient host
+// allocation. The [HW-WITNESSED] strix3 rung is exactly this: the 63.22 GiB device transit fits the
+// 64 GiB VRAM window (so the split form ADMITTED it) yet is materialized as a ~63 GiB host anon
+// buffer against a ~48.5 GiB host budget, and the kernel OOM-killer kills the serve via
+// filemap_fault before any device transfer (`staging-host-charge=63.223GiB host-budget=48.542GiB`
+// reported, then proceeded). So the split form now requires BOTH windows: the device window for
+// RESIDENCY and the host window for the staging TRANSIT. When the transit does not fit the host
+// window it returns the typed host-scoped *compute.FitError naming the shortfall - the honest
+// fail-closed replacement for the kernel OOM - while a transit that fits both windows is admitted
+// unchanged. A genuinely bounded/streamed host->device staging path that keeps peak host anon-RSS
+// under MemAvailable would supersede this check; until it is threaded, refusing is correct.
 func refuseDeviceStagingAgainstReportedAperture(plan compute.MemoryPlan, fit serveFitBudget, deviceTotal, deviceFree int64, deviceKnown bool) error {
 	if fit.Base <= 0 {
 		return nil
@@ -286,15 +300,23 @@ func refuseDeviceStagingAgainstReportedAperture(plan compute.MemoryPlan, fit ser
 	if !deviceKnown || deviceTotal <= 0 || deviceTotal == fit.Base {
 		return refuseDeviceStagingAgainstHostFit(plan, fit)
 	}
-	// The transit is DEVICE-destined, so it must be judged as a device-scoped demand: the reported
-	// device refusal sums plan.DeviceTotal(), and a host-scoped row would make that sum zero and
-	// admit any transit. Re-scope the synthesized row to the device aperture for this check.
+	// The transit is DEVICE-destined, so its RESIDENCY must be judged as a device-scoped demand:
+	// the reported device refusal sums plan.DeviceTotal(), and a host-scoped row would make that
+	// sum zero and admit any transit. Re-scope the synthesized row to the device aperture for the
+	// residency check.
 	deviceStaging := make(compute.MemoryPlan, len(staging))
 	copy(deviceStaging, staging)
 	for i := range deviceStaging {
 		deviceStaging[i].Scope = compute.MemoryScopeDevice
 	}
-	return compute.RefuseMemoryPlanIfTooBigForReportedDevice(nil, deviceStaging, deviceTotal, deviceFree, true, fit.Headroom)
+	if err := compute.RefuseMemoryPlanIfTooBigForReportedDevice(nil, deviceStaging, deviceTotal, deviceFree, true, fit.Headroom); err != nil {
+		return err
+	}
+	// fak#13186: the residency fits the device window, but the staging TRANSIT still materializes
+	// in host RAM, so it must ALSO fit the host window. Reuse the single-window host judgement on
+	// the original host-scoped transit row: a device-destined transit that cannot be staged through
+	// host RAM is refused typed here instead of being kernel-OOM-killed mid-staging.
+	return refuseDeviceStagingAgainstHostFit(plan, fit)
 }
 
 // logServeDeviceCPUOffloadArmStaging is the ONE pre-staging startup line the device
