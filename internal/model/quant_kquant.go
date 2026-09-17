@@ -174,6 +174,7 @@ type kQuantTensor struct {
 	kind          kQuantKind
 	w3MLP         bool
 	raw           []byte
+	lazy          *LazyQ4KRange
 	replicas      *compute.NUMAReplicaSet
 	numaPool      *compute.NUMADecodePool
 }
@@ -435,6 +436,7 @@ func kQuantMatRowsRangeRaw(raw []byte, qt *kQuantTensor, x, y []float32, lo, hi 
 	if len(raw) == 0 {
 		raw = qt.raw
 	}
+	qt.requireRawCPU("GEMV")
 	blockWeights := qt.kind.blockWeights()
 	buf := make([]float32, blockWeights) // reused per block; L1/L2-resident
 	rowBytes := qt.rowBytes()

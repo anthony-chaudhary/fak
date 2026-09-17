@@ -61,21 +61,31 @@ type LazyQ4KRange struct {
 	MappedOffset int
 }
 
+// mappedLazyRaw validates the (Bytes, span, offset) triple of a lazy range against the
+// retained page mapping. The validation is format-agnostic, so both the Q4_K and the
+// k-quant lazy stores route through it and the two cannot drift.
+func mappedLazyRaw(lazy *LazyQ4KRange) (span []byte, offset int, ok bool) {
+	if lazy == nil || lazy.Bytes <= 0 || len(lazy.MappedSpan) == 0 {
+		return nil, 0, false
+	}
+	span, offset = lazy.MappedSpan, lazy.MappedOffset
+	page := os.Getpagesize()
+	if offset < 0 || offset%32 != 0 || page <= 0 || len(span)%page != 0 ||
+		uintptr(unsafe.Pointer(&span[0]))%uintptr(page) != 0 ||
+		offset > len(span) || lazy.Bytes > len(span)-offset {
+		return nil, 0, false
+	}
+	return span, offset, true
+}
+
 // mappedRaw returns a checked tensor view inside the retained page mapping.
 // The full span and offset are kept separate because Metal binds the buffer at
 // the page-aligned base and applies the tensor offset at encoder dispatch.
 func (q *q4kTensor) mappedRaw() (span []byte, offset int, ok bool) {
-	if q == nil || q.lazy == nil || q.lazy.Bytes <= 0 || len(q.lazy.MappedSpan) == 0 {
+	if q == nil {
 		return nil, 0, false
 	}
-	span, offset = q.lazy.MappedSpan, q.lazy.MappedOffset
-	page := os.Getpagesize()
-	if offset < 0 || offset%32 != 0 || page <= 0 || len(span)%page != 0 ||
-		uintptr(unsafe.Pointer(&span[0]))%uintptr(page) != 0 ||
-		offset > len(span) || q.lazy.Bytes > len(span)-offset {
-		return nil, 0, false
-	}
-	return span, offset, true
+	return mappedLazyRaw(q.lazy)
 }
 
 // q4kMaterializeWindowBytes bounds the transient host window the non-mmap lazy read streams
