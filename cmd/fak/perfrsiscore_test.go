@@ -232,13 +232,13 @@ func TestPerformanceRSIDogfoodJSONReportsPoorNamedLoopHealthDebt(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.LoopHealth.Score != 62.6 || report.LoopHealth.Grade != "D" || report.LoopHealth.Clean ||
+	if report.LoopHealth.Score != 56.4 || report.LoopHealth.Grade != "F" || report.LoopHealth.Clean ||
 		!strings.Contains(report.LoopHealth.Interpretation, "does not prove") {
 		t.Fatalf("loop health=%+v", report.LoopHealth)
 	}
-	if report.DebtSummary.PerformanceRSIDebt != 9 || report.DebtSummary.Total != 9 ||
+	if report.DebtSummary.PerformanceRSIDebt != 10 || report.DebtSummary.Total != 10 ||
 		report.DebtSummary.DimensionsMeasured != 15 || report.DebtSummary.DimensionsTotal != 16 ||
-		report.DebtSummary.Behind != 8 || report.DebtSummary.Unknown != 1 ||
+		report.DebtSummary.Behind != 9 || report.DebtSummary.Unknown != 1 ||
 		len(report.DebtSummary.Evidence) != report.DebtSummary.PerformanceRSIDebt {
 		t.Fatalf("debt summary=%+v", report.DebtSummary)
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/causalreceipt"
+	"github.com/anthony-chaudhary/fak/internal/computetrace"
 )
 
 func cmdCausalReceipt(argv []string) {
@@ -41,8 +43,12 @@ func runCausalReceipt(stdout, stderr io.Writer, stdin io.Reader, argv []string) 
 	}
 
 	args := fs.Args()
+	if len(args) > 0 && (args[0] == "produce" || args[0] == "fold") {
+		return runCausalReceiptProduce(stdout, stderr, *asJSON, args[1:])
+	}
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, "usage: fak causal-receipt [flags] <receipt.json|- >")
+		fmt.Fprintln(stderr, "       fak causal-receipt produce [--trace <compute-trace.json>] [--attr k=v ...] [--json]")
 		fmt.Fprintln(stderr, "       fak causal-receipt --self-test [--json]")
 		return 2
 	}
@@ -184,6 +190,77 @@ func runCausalReceiptSelfTest(stdout, stderr io.Writer, asJSON bool) int {
 		_ = writeIndentedJSONNoEscape(stdout, out)
 	} else {
 		fmt.Fprintln(stdout, "causal-receipt: self-test passed (valid fixture verified)")
+	}
+	return 0
+}
+
+// runCausalReceiptProduce folds a bounded compute-trace artifact plus optional
+// launch-context attributes into a validated causal receipt. It is the producer
+// seam for the fak.causal-receipt/1 schema: it reuses causalreceipt.Produce and
+// reports the receipt's metrics so the caller can confirm non-zero overhead.
+func runCausalReceiptProduce(stdout, stderr io.Writer, asJSON bool, argv []string) int {
+	fs := flag.NewFlagSet("causal-receipt produce", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	tracePath := fs.String("trace", "", "compute-trace artifact JSON path (- for stdin)")
+	attrFlags := multiFlag{}
+	fs.Var(&attrFlags, "attr", "launch-context attribute k=v (repeatable)")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if *tracePath == "" && len(fs.Args()) > 0 {
+		*tracePath = fs.Args()[0]
+	}
+	if *tracePath == "" {
+		fmt.Fprintln(stderr, "usage: fak causal-receipt produce [--trace <compute-trace.json>] [--attr k=v ...] [--json]")
+		return 2
+	}
+
+	var data []byte
+	var err error
+	if *tracePath == "-" {
+		data, err = io.ReadAll(os.Stdin)
+	} else {
+		data, err = os.ReadFile(*tracePath)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "causal-receipt produce: read trace: %v\n", err)
+		return 1
+	}
+
+	artifact, err := computetrace.Read(bytes.NewReader(data))
+	if err != nil {
+		fmt.Fprintf(stderr, "causal-receipt produce: parse compute trace: %v\n", err)
+		return 1
+	}
+
+	attributes := map[string]string{}
+	for _, kv := range attrFlags {
+		key, value, ok := strings.Cut(kv, "=")
+		if !ok || strings.TrimSpace(key) == "" {
+			fmt.Fprintf(stderr, "causal-receipt produce: attribute %q must be k=v\n", kv)
+			return 2
+		}
+		attributes[key] = value
+	}
+
+	receipt, err := causalreceipt.Produce(artifact, attributes)
+	if err != nil {
+		fmt.Fprintf(stderr, "causal-receipt produce: %v\n", err)
+		return 1
+	}
+	metrics, err := causalreceipt.DeriveMetrics(receipt)
+	if err != nil {
+		fmt.Fprintf(stderr, "causal-receipt produce: derive metrics: %v\n", err)
+		return 1
+	}
+
+	if err := writeIndentedJSONNoEscape(stdout, receipt); err != nil {
+		fmt.Fprintf(stderr, "causal-receipt produce: encode json: %v\n", err)
+		return 1
+	}
+	if !asJSON {
+		fmt.Fprintf(stderr, "causal-receipt produce: VALID (%s) phases=%d overhead_ns=%d bytes=%d\n",
+			receipt.Schema, metrics.PhaseCount, metrics.OverheadNS, metrics.Bytes)
 	}
 	return 0
 }

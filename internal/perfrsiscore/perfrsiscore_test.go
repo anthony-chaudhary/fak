@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 func TestScoreLoopTurnScoresConfiguredInput(t *testing.T) {
@@ -106,18 +108,18 @@ func TestIssue9768DogfoodGetsPoorNamedLoopHealthDebt(t *testing.T) {
 	if r.LoopHealth == nil || r.DebtSummary == nil {
 		t.Fatalf("missing loop-health summaries: %+v", r)
 	}
-	if r.LoopHealth.Score != 62.6 || r.LoopHealth.Grade != "D" || r.LoopHealth.Clean {
-		t.Fatalf("loop health=%+v, want D 62.6 and non-clean", r.LoopHealth)
+	if r.LoopHealth.Score != 56.4 || r.LoopHealth.Grade != "F" || r.LoopHealth.Clean {
+		t.Fatalf("loop health=%+v, want F 56.4 and non-clean", r.LoopHealth)
 	}
 	if r.DebtSummary.DimensionsMeasured != 15 || r.DebtSummary.DimensionsTotal != 16 ||
-		r.DebtSummary.Behind != 8 || r.DebtSummary.Unknown != 1 ||
-		r.DebtSummary.Total != 9 || r.DebtSummary.PerformanceRSIDebt != 9 {
-		t.Fatalf("debt summary=%+v, want 15/16 measured, 8 BEHIND, 1 UNKNOWN, debt 9", r.DebtSummary)
+		r.DebtSummary.Behind != 9 || r.DebtSummary.Unknown != 1 ||
+		r.DebtSummary.Total != 10 || r.DebtSummary.PerformanceRSIDebt != 10 {
+		t.Fatalf("debt summary=%+v, want 15/16 measured, 9 BEHIND, 1 UNKNOWN, debt 10", r.DebtSummary)
 	}
 	wantEvidence := []string{
 		"cycle_time", "improvement_yield", "evaluation_latency", "experiment_throughput",
 		"discovery_freshness", "production_transfer", "hardware_utilization",
-		"automation_coverage", "compounding_rate",
+		"attribution_quality", "automation_coverage", "compounding_rate",
 	}
 	if len(r.DebtSummary.Evidence) != len(wantEvidence) {
 		t.Fatalf("named evidence=%d, want %d: %+v", len(r.DebtSummary.Evidence), len(wantEvidence), r.DebtSummary.Evidence)
@@ -645,7 +647,7 @@ func TestImprovementDerivesReceiptDimensionsOnly(t *testing.T) {
 	}
 	want := map[string]float64{
 		"improvement_yield": 20, "receipt_coverage": 100,
-		"quality_gate_coverage": 100, "attribution_quality": 100,
+		"quality_gate_coverage": 100, "attribution_quality": 0,
 	}
 	for _, d := range e.Dimensions {
 		value, derived := want[d.ID]
@@ -662,6 +664,119 @@ func TestImprovementDerivesReceiptDimensionsOnly(t *testing.T) {
 			d.Source != p.Source || d.EvidenceKind != p.EvidenceKind || d.Engine != p.Engine {
 			t.Errorf("unrelated dimension %s changed: got %+v want %+v", d.ID, d, p)
 		}
+	}
+}
+
+func completeLaunchContext() *LaunchContext {
+	return &LaunchContext{
+		Schema: Schema,
+		Hardware: HardwareContext{
+			Platform:      "linux",
+			Backend:       "vulkan",
+			DriverVersion: "24.1",
+			KernelVersion: "6.10",
+			Governor:      "performance",
+			ClocksMHz:     2400,
+			ThermalC:      45,
+			PowerW:        55,
+		},
+		CodeVersion:  CodeVersion{SHA: strings.Repeat("a", 40)},
+		LaunchParams: LaunchParams{Argv: []string{"fak", "bench"}, EnvKeys: []string{"FAK_ENGINE"}, ResolvedFlags: map[string]string{"ctx": "4096"}},
+		ChangeSet:    ChangeSet{Base: strings.Repeat("b", 40), Head: strings.Repeat("c", 40)},
+		Kernels:      []string{"q4k_matmul"},
+		InputConditions: InputConditions{
+			Shapes:       []string{"1x4096"},
+			DTypes:       []string{"q4_k"},
+			BatchSize:    1,
+			Concurrency:  1,
+			PromptTokens: 512,
+			PrefixTokens: 128,
+			DecodeTokens: 256,
+		},
+		Threads:   ThreadContext{Workers: 8, Observers: 1, Engine: 4},
+		Intervals: []Interval{{Name: "decode", NS: 1000}},
+		CodePaths: []string{"internal/model/decode.go"},
+	}
+}
+
+func TestImprovementDerivesAttributionFromLaunchContext(t *testing.T) {
+	complete := completeLaunchContext()
+	if got := complete.WitnessedCount(); got != complete.AxisCount() {
+		t.Fatalf("complete launch context witnesses %d/%d axes; fixture is incomplete", got, complete.AxisCount())
+	}
+	partial := *complete
+	partial.Hardware = HardwareContext{Platform: "linux"}
+
+	tests := []struct {
+		name string
+		ctx  *LaunchContext
+	}{
+		{"absent", nil},
+		{"partial", &partial},
+		{"complete", complete},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := improvementEvidence(t)
+			e.Improvement.LaunchContext = tc.ctx
+			b, err := json.Marshal(e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := Decode(bytes.NewReader(b))
+			if err != nil {
+				t.Fatalf("decode with launch_context: %v", err)
+			}
+			ctx := decoded.Improvement.LaunchContext
+			var want float64
+			if ctx != nil {
+				want = scorecard.Round1(100 * float64(ctx.WitnessedCount()) / float64(ctx.AxisCount()))
+			}
+			var got *float64
+			for _, d := range decoded.Dimensions {
+				if d.ID == "attribution_quality" {
+					got = d.Current
+				}
+			}
+			if got == nil || *got != want {
+				t.Fatalf("attribution_quality=%v, want %v", got, want)
+			}
+			switch tc.name {
+			case "absent":
+				if want != 0 {
+					t.Fatalf("absent launch context must score 0, got %v", want)
+				}
+			case "partial":
+				if want <= 0 || want >= 100 {
+					t.Fatalf("partial launch context must score strictly between 0 and 100, got %v", want)
+				}
+			case "complete":
+				if want != 100 {
+					t.Fatalf("complete launch context must score 100, got %v", want)
+				}
+			}
+
+			report := Score(decoded)
+			behind, unknown := 0, 0
+			for _, d := range report.Dimensions {
+				if d.ID != "attribution_quality" {
+					continue
+				}
+				switch d.Status {
+				case "BEHIND":
+					behind++
+				case "UNKNOWN":
+					unknown++
+				}
+			}
+			if want < 100 {
+				if behind+unknown != 1 {
+					t.Fatalf("unattributed improvement must land as BEHIND or UNKNOWN, got behind=%d unknown=%d", behind, unknown)
+				}
+			} else if behind+unknown != 0 {
+				t.Fatalf("fully attributed improvement must not be debt, got behind=%d unknown=%d", behind, unknown)
+			}
+		})
 	}
 }
 

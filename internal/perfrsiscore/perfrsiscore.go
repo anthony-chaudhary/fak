@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 const (
@@ -227,6 +229,10 @@ type Improvement struct {
 	BaselineEnvelope  OperatingEnvelope  `json:"baseline_envelope"`
 	CandidateEnvelope OperatingEnvelope  `json:"candidate_envelope"`
 	Causal            ImprovementCausal  `json:"causal"`
+	// LaunchContext is optional. Its absence is a legitimate low-attribution
+	// state, not a validation error: an improvement that does not witness its
+	// launch axes simply cannot earn attribution quality.
+	LaunchContext *LaunchContext `json:"launch_context,omitempty"`
 }
 
 type ImprovementMeasure struct {
@@ -1132,7 +1138,7 @@ func applyImprovement(e *Evidence) error {
 		"improvement_yield":     r.NetTrueGain.Value,
 		"receipt_coverage":      100,
 		"quality_gate_coverage": 100,
-		"attribution_quality":   100,
+		"attribution_quality":   attributionQuality(r.LaunchContext),
 	}
 	for i := range e.Dimensions {
 		d := &e.Dimensions[i]
@@ -1155,6 +1161,22 @@ var (
 	lowerHex40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	moduleRev  = regexp.MustCompile(`^.+@r[1-9][0-9]*\+g([0-9a-f]{7,40})$`)
 )
+
+// attributionQuality derives attribution quality from how many launch-context
+// axes the improvement actually witnesses. An absent launch context earns no
+// attribution; a context that witnesses some axes earns a proportional share;
+// a fully witnessed context earns 100. The value is reported in percent, one
+// decimal, matching the package's percent-dimension conventions.
+func attributionQuality(c *LaunchContext) float64 {
+	if c == nil {
+		return 0
+	}
+	total := c.AxisCount()
+	if total <= 0 {
+		return 0
+	}
+	return scorecard.Round1(100 * float64(c.WitnessedCount()) / float64(total))
+}
 
 func applyProvenance(e *Evidence) error {
 	r := e.Provenance
