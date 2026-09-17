@@ -54,6 +54,7 @@ var exemptions = map[string]string{
 	"switch|internal/incidentrsi|TestConcurrentThresholdCrossingLaunchesExactlyOnce":            "Concurrent incident test validates specific action transitions.",
 	"switch|internal/metalgemm|q4kGEMMRequestedExecution":                                       "Scalar mode is non-GEMM execution handled by scalar fallbacks outside this switcher.",
 	"literal|internal/model|iq12ResidentCases":                                                  "Unit test matrix specifically targets IQ1 and IQ2 resident k-quant variants.",
+	"literal|internal/model/v41|v41KVCacheLayouts":                                              "V41KVUnspecified (the zero value) is never a valid KV record format, so the published-layout table deliberately excludes it and the zero-value layout fails closed on use.",
 	"literal|internal/wipinventory|issueHistory.Transitions":                                    "Test fixture models a partial session transition history covering only tested events.",
 	"switch|internal/compute|sccpAnalysis.evaluateNode":                                         "Constant propagation evaluates arithmetic and comparison ops; structural control and aggregate nodes are folded by separate passes.",
 	"literal|internal/compute|DefaultVulkanErrorInventory.Rules":                                "VulkanClassUnknown is the fallback classification applied when no pattern rule matches.",
