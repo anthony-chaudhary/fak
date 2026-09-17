@@ -922,9 +922,23 @@ type Wave32GEMVDecodeKernel struct {
 // NewWave32GEMVDecodeKernel builds the decode GEMV and resolves its fail-closed admission.
 // launchAvailable is the caller's proof that a real gfx1151 hsaco/AQL launch path exists; absent
 // that proof (false) the kernel stays unavailable and dispatch refuses — it never degrades to CPU.
+//
+// Deprecated: a bare bool cannot distinguish a validated code object from an operator's
+// assertion. New callers MUST use NewWave32GEMVDecodeKernelFromProof; this form is retained so
+// existing bool-typed call sites keep compiling, and it is NOT reachable from the operator
+// entry point (ResolveStrixDecodeGEMVDevice validates a real code object instead).
 func NewWave32GEMVDecodeKernel(cfg Wave32GEMVDecodeConfig, launchAvailable bool) *Wave32GEMVDecodeKernel {
 	k := &Wave32GEMVDecodeKernel{cfg: cfg}
 	k.admission = k.resolveAdmission(launchAvailable)
+	return k
+}
+
+// NewWave32GEMVDecodeKernelFromProof builds the decode GEMV from a validated hsaco launch proof.
+// Admission follows proof.Proven(): the zero proof (or any proof built by hand rather than by
+// ValidateHSACOLaunchPath) fails closed exactly like launchAvailable=false.
+func NewWave32GEMVDecodeKernelFromProof(cfg Wave32GEMVDecodeConfig, proof HSACOLaunchProof) *Wave32GEMVDecodeKernel {
+	k := &Wave32GEMVDecodeKernel{cfg: cfg}
+	k.admission = k.resolveAdmission(proof.Proven())
 	return k
 }
 

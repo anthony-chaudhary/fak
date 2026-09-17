@@ -214,13 +214,65 @@ func StrixGEMVLaunchPath() string {
 	}
 }
 
+// EnvStrixGEMVHSACOPath names the gfx1151 hsaco code object the operator asserts is the
+// Q2_K decode GEMV. It is the *evidence* half of admission: the named object is parsed and
+// validated, and only a gfx1151 AMDGPU HSA code object admits. An unset path, a missing file,
+// or a wrong-target object all fail closed. Merely naming a mechanism (EnvStrixGEMVLaunchPath)
+// is no longer sufficient — that was the "asserted, not validated" gap #13026 closed.
+const EnvStrixGEMVHSACOPath = "FAK_STRIX_GEMV_HSACO_PATH"
+
 // ResolveStrixDecodeGEMVDevice builds the canonical gfx1151 decode GEMV kernel and folds it into
-// the device-visible toggle using the operator-asserted launch path. It is the single entry the
-// decode MatMul wiring calls, so the fail-closed decision lives in one place.
+// the device-visible toggle. It is the single entry the decode MatMul wiring calls, so the
+// fail-closed decision lives in one place.
+//
+// Admission requires a validated hsaco code object: the operator names one via
+// EnvStrixGEMVHSACOPath, it is parsed by ValidateHSACOLaunchPath, and only a proven gfx1151
+// object admits. The older asserted-mechanism env (EnvStrixGEMVLaunchPath) can no longer admit
+// on its own; it is retained only as the expected-mechanism assertion and must agree with the
+// proven path.
 func ResolveStrixDecodeGEMVDevice() (DecodeGEMVDeviceToggle, *Wave32GEMVDecodeKernel) {
-	launchPath := StrixGEMVLaunchPath()
-	kernel := NewWave32GEMVDecodeKernel(DefaultWave32GEMVDecodeConfig(), launchPath != "")
-	return ResolveDecodeGEMVDeviceToggle(kernel, launchPath), kernel
+	proof, perr := StrixGEMVHSACOLaunchProof()
+	if perr != nil {
+		kernel := NewWave32GEMVDecodeKernelFromProof(DefaultWave32GEMVDecodeConfig(), HSACOLaunchProof{})
+		return DecodeGEMVDeviceToggle{Reason: perr.Error()}, kernel
+	}
+
+	// A stated mechanism that contradicts the proven one is refused rather than
+	// silently preferring one of the two.
+	if asserted := StrixGEMVLaunchPath(); asserted != "" && asserted != proof.LaunchPath {
+		kernel := NewWave32GEMVDecodeKernelFromProof(DefaultWave32GEMVDecodeConfig(), HSACOLaunchProof{})
+		return DecodeGEMVDeviceToggle{
+			Reason: fmt.Sprintf("asserted launch path %q contradicts validated %q", asserted, proof.LaunchPath),
+		}, kernel
+	}
+
+	kernel := NewWave32GEMVDecodeKernelFromProof(DefaultWave32GEMVDecodeConfig(), proof)
+	return ResolveDecodeGEMVDeviceToggleFromProof(kernel, proof), kernel
+}
+
+// StrixGEMVHSACOLaunchProof loads and validates the code object named by
+// EnvStrixGEMVHSACOPath against gfx1151. The boolean opt-in env must also be set:
+// validation never turns the path on by itself, so the default remains byte-preserved.
+func StrixGEMVHSACOLaunchProof() (HSACOLaunchProof, error) {
+	if !StrixDecodeGEMVDeviceRequested() {
+		return HSACOLaunchProof{}, fmt.Errorf("%w: %s is not enabled",
+			ErrWave32GEMVDecodeUnavailable, EnvStrixWave32GEMVDecode)
+	}
+	path := strings.TrimSpace(os.Getenv(EnvStrixGEMVHSACOPath))
+	if path == "" {
+		return HSACOLaunchProof{}, fmt.Errorf("%w: no validated gfx1151 hsaco/AQL launch path (%s unset)",
+			ErrWave32GEMVDecodeUnavailable, EnvStrixGEMVHSACOPath)
+	}
+	codeObject, err := os.ReadFile(path)
+	if err != nil {
+		return HSACOLaunchProof{}, fmt.Errorf("%w: reading %s: %v",
+			ErrWave32GEMVDecodeUnavailable, path, err)
+	}
+	proof, err := ValidateHSACOLaunchPath(codeObject, path)
+	if err != nil {
+		return HSACOLaunchProof{}, fmt.Errorf("%w: %v", ErrWave32GEMVDecodeUnavailable, err)
+	}
+	return proof, nil
 }
 
 // IsPageAligned checks if a memory pointer is aligned to a 4096-byte page boundary.
