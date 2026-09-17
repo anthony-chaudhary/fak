@@ -241,7 +241,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q6K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -270,7 +270,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_QWEN35_GDN_PREFILL_TILED: case K_QWEN35_GDN_PREFILL_NORM:
     case K_GLM_KDA_REREAD: case K_GLM_KDA_WAVE32:
         return g_dp.otherGDN;
-    case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_COUNT:
+    case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q4K_MATMUL_COOPMAT: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_COUNT:
         return g_dp.otherUnclassified;
     }
     return g_dp.otherUnclassified;
@@ -279,7 +279,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
 static inline void dpDispatch(const Kernel& k) {
     if (!g_dp_on) return;
     const KId id = static_cast<KId>(&k - g_kern);
-    if (id == K_Q4K_MATMUL || id == K_Q4K_MATMUL_WAVE32) {
+    if (id == K_Q4K_MATMUL || id == K_Q4K_MATMUL_WAVE32 || id == K_Q4K_MATMUL_COOPMAT) {
         g_dp.q4k.fetch_add(1, std::memory_order_relaxed);
     } else if (id == K_Q2K_MATMUL || id == K_RMSNORM_Q2K_MATMUL2) {
         g_dp.q2k.fetch_add(1, std::memory_order_relaxed);
@@ -330,6 +330,9 @@ int g_gdn_prefill_mode = -1;
 uint64_t g_gdn_prefill_tiled_calls = 0;
 uint64_t g_gdn_prefill_scalar_calls = 0;
 int g_have_coopmat = 0;
+// Candidate Q4_K cooperative-matrix prefill arm (2D block-tiled). Requires the native
+// cooperative-matrix capability AND a 2D-grid shader that built; default retains scalar.
+int g_have_q4k_coopmat = 0;
 // Portable packed Q6_K is optional so older SPIR-V bundles remain loadable.
 int g_have_q6k_matmul = 0;
 
@@ -1567,6 +1570,17 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
             g_have_q4k_wave32 = 0;
         }
     }
+    // Candidate Q4_K cooperative-matrix prefill arm: only load when the native
+    // cooperative-matrix capability and Wave32 subgroup control are present, so an
+    // unsupported device keeps the scalar path instead of a broken pipeline.
+    if (g_have_coopmat) {
+        uint32_t reqSize = g_q4k_wave32_required_subgroup ? 32 : 0;
+        if (!buildKernel(g_kern[K_Q4K_MATMUL_COOPMAT], P("q4k_matmul_coopmat.spv"), 3, 3 * sizeof(int), reqSize)) {
+            g_have_q4k_coopmat = 0;
+        } else {
+            g_have_q4k_coopmat = 1;
+        }
+    }
     g_have_q6k_matmul = buildKernel(g_kern[K_Q6K_MATMUL], P("q6k_matmul.spv"),
                                     3, 3 * sizeof(int)) ? 1 : 0;
     buildKernel(g_kern[K_RMSNORM_Q4K_MATMUL2], P("rmsnorm_q4k_matmul2.spv"), 6, 4 * sizeof(int) + sizeof(float));
@@ -2601,8 +2615,39 @@ extern "C" int fvk_have_q4k_wave32(void) {
     return g_have_q4k_wave32;
 }
 
+// Candidate Q4_K cooperative-matrix prefill arm. Default off: the scalar path owns
+// decode, and an unsupported device never sees the coopmat pipeline. FAK_VULKAN_Q4K_ARM
+// (candidate/scalar) is shared with the Wave32 arm; cooperative matrix is preferred
+// for multi-token because it stages the tile once instead of re-reading weights per token.
+static inline bool useQ4KCoopMat(int P) {
+    if (!g_have_q4k_coopmat || P <= 1) return false;
+    if (g_q4k_arm_mode == 2) return false;
+    const char* arm = std::getenv("FAK_VULKAN_Q4K_ARM");
+    if (arm) {
+        if (strcmp(arm, "scalar") == 0 || strcmp(arm, "0") == 0) return false;
+        if (strcmp(arm, "candidate") == 0 || strcmp(arm, "coopmat") == 0 || strcmp(arm, "1") == 0) return true;
+    }
+    const char* cm = std::getenv("FAK_VULKAN_Q4K_COOPMAT");
+    if (cm) {
+        if (strcmp(cm, "0") == 0 || strcmp(cm, "false") == 0) return false;
+        if (strcmp(cm, "1") == 0 || strcmp(cm, "true") == 0) return true;
+    }
+    if (g_q4k_arm_mode == 1) return true;
+    // Default retains the scalar path until a physical A/B qualifies the coopmat arm.
+    return false;
+}
+
 extern "C" void fvk_q4k_matmul_f32(const void* dQ4K, const void* dX, void* dY,
                          int out, int in, int P) {
+    if (useQ4KCoopMat(P)) {
+        struct PC { int out, in, p; } pc{out, in, P};
+        Buffer* bufs[3] = {B((void*)dQ4K), B((void*)dX), B(dY)};
+        // 2D grid: X covers output rows, Y covers tokens (see vulkanQ4KDispatchGrid).
+        uint32_t gx = (uint32_t)(((size_t)out + 31) / 32);
+        uint32_t gy = (uint32_t)(((size_t)P + 31) / 32);
+        dispatch(g_kern[K_Q4K_MATMUL_COOPMAT], bufs, &pc, sizeof(pc), gx, gy);
+        return;
+    }
     if (useQ4KWave32(P)) {
         struct PC { int out, in, p; } pc{out, in, P};
         Buffer* bufs[3] = {B((void*)dQ4K), B((void*)dX), B(dY)};

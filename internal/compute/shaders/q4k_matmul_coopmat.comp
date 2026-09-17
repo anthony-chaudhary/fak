@@ -1,0 +1,134 @@
+#version 450
+
+// q4k_matmul_coopmat.comp - 2D block-tiled cooperative-matrix Q4_K matmul (gfx1151 / RDNA 3.5).
+//
+// Candidate arm for multi-token (prefill) Q4_K matmul. The scalar q4k_matmul.comp computes
+// one (token,output) pair per invocation and re-reads every packed weight for every token,
+// so a prefill of P tokens pays P redundant weight reads. This shader instead stages a
+// spatial output tile (TILE_M tokens x TILE_N output rows) in LDS and shares each unpacked
+// Q4_K sub-block across the tile, using the RDNA 3.5 Wave32 cooperative-matrix primitive.
+//
+// Contract with the host: exactly the 2D grid emitted by vulkanQ4KDispatchGrid,
+//   gridX = ceil(outDim / TILE_N), gridY = ceil(tokens / TILE_M), gridZ = 1,
+// with local_size_x = 32, local_size_y = 4, local_size_z = 1 (4 Wave32 waves = 128 threads).
+// Output is Y[token][outDim] (row-major, leading dimension outDim), matching the scalar
+// shader's y[token * outDim + row] layout. The scalar shader remains the default; this arm
+// is admitted only when the native cooperative-matrix capability is present, tokens > 1,
+// and the candidate is armed (see useQ4KCoopMat in vulkan_shim.cpp).
+
+#extension GL_KHR_cooperative_matrix : enable
+#extension GL_KHR_shader_subgroup_basic : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : enable
+
+layout(local_size_x = 32, local_size_y = 4, local_size_z = 1) in;
+
+layout(set=0,binding=0) readonly buffer Q4K { uint raw[]; };
+layout(set=0,binding=1) readonly buffer X { float x[]; };
+layout(set=0,binding=2) writeonly buffer Y { float y[]; };
+
+layout(push_constant) uniform PC {
+    int outDim; // number of output rows (N)
+    int inDim;  // reduction dimension (K), a multiple of 256
+    int tokens; // number of tokens (M)
+} pc;
+
+const uint TILE_M = 32u;
+const uint TILE_N = 32u;
+const uint TILE_K = 32u;
+const uint PAD    = 2u;                   // LDS Pad-2 stride
+const uint STRIDE_K = TILE_K + PAD;       // 34
+const uint STRIDE_N = TILE_N + PAD;       // 34
+
+// LDS staging. A holds TILE_M tokens x padded TILE_K activations;
+// B holds padded TILE_K x TILE_N unpacked weights.
+shared float ldsTileA[TILE_M * STRIDE_K];
+shared float ldsTileB[TILE_K * STRIDE_N];
+
+// One Q4_K super-block is 256 weights: a d/dm halfword pair, 12 packed 6-bit scale/min
+// bytes, and 128 nibble bytes = 36 uint words per block.
+const uint Q4K_BLOCK_WORDS = 36u;
+
+void main() {
+    uint laneID = gl_LocalInvocationID.x;   // 0..31 within the Wave32 wave
+    uint waveID = gl_LocalInvocationID.y;   // 0..3
+    uint threadID = waveID * 32u + laneID;  // 0..127
+
+    // 2x2 wave grid over the 32x32 spatial tile.
+    uint waveRow = (waveID / 2u) * 16u;
+    uint waveCol = (waveID % 2u) * 16u;
+
+    // Workgroup tile origin: X indexes output rows, Y indexes tokens.
+    uint tileRow = gl_WorkGroupID.x * TILE_N; // output row origin
+    uint tileTok = gl_WorkGroupID.y * TILE_M; // token origin
+
+    uint blocks = uint(pc.inDim) / 256u;
+
+    coopmat<float16_t, gl_ScopeSubgroup, 16, TILE_K, gl_MatrixUseA> matA;
+    coopmat<float16_t, gl_ScopeSubgroup, TILE_K, 16, gl_MatrixUseB> matB;
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC;
+    matC = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+
+    for (uint sb = 0u; sb < blocks; ++sb) {
+        // Stage the activation slice for TILE_M tokens (this tile's K sub-block).
+        for (uint i = threadID; i < TILE_M * TILE_K; i += 128u) {
+            uint t = i / TILE_K;
+            uint k = i % TILE_K;
+            uint gt = tileTok + t;
+            float a = 0.0;
+            if (gt < uint(pc.tokens)) {
+                a = x[gt * uint(pc.inDim) + sb * 256u + k];
+            }
+            ldsTileA[t * STRIDE_K + k] = a;
+        }
+
+        // Stage the unpacked Q4_K weights for TILE_N output rows of this tile.
+        for (uint i = threadID; i < TILE_K * TILE_N; i += 128u) {
+            uint k = i / TILE_N;
+            uint r = i % TILE_N;
+            uint grow = tileRow + r;
+            float w = 0.0;
+            if (grow < uint(pc.outDim)) {
+                uint wordBase = (grow * blocks + sb) * Q4K_BLOCK_WORDS;
+                uint w1 = raw[wordBase + 1u];
+                uint w2 = raw[wordBase + 2u];
+                uint w3 = raw[wordBase + 3u];
+                uint sub = k / 32u;    // which 32-weight sub-block
+                uint pos = k % 32u;    // position inside the sub-block
+                uint sc, mn;
+                if (sub < 4u) {
+                    sc = bitfieldExtract(w1, int(sub) * 8, 6);
+                    mn = bitfieldExtract(w2, int(sub) * 8, 6);
+                } else {
+                    uint j = sub - 4u;
+                    sc = bitfieldExtract(w3, int(j) * 8, 4) | (bitfieldExtract(w1, int(j) * 8 + 6, 2) << 4u);
+                    mn = bitfieldExtract(w3, int(j) * 8 + 4, 4) | (bitfieldExtract(w2, int(j) * 8 + 6, 2) << 4u);
+                }
+                vec2 d_dm = unpackHalf2x16(raw[wordBase]);
+                uint nw = raw[wordBase + 4u + (pos / 8u)];
+                uint nib = bitfieldExtract(nw, int((pos % 8u) * 4u), 4);
+                w = d_dm.x * float(sc) * float(nib) - d_dm.y * float(mn);
+            }
+            ldsTileB[k * STRIDE_N + r] = w;
+        }
+
+        barrier();
+
+        uint offsetA = waveRow * STRIDE_K;
+        uint offsetB = waveCol;
+        coopMatLoad(matA, ldsTileA, offsetA, STRIDE_K, gl_CooperativeMatrixLayoutRowMajor);
+        coopMatLoad(matB, ldsTileB, offsetB, STRIDE_N, gl_CooperativeMatrixLayoutRowMajor);
+
+        matC = coopMatMulAdd(matA, matB, matC);
+
+        barrier();
+    }
+
+    // The 16x16 accumulator maps to tokens [tileTok + waveRow .. +16) and output rows
+    // [tileRow + waveCol .. +16). Store back in the scalar y[token*outDim + row] layout.
+    uint outRow = tileRow + waveCol;
+    uint outTok = tileTok + waveRow;
+    if (outRow < uint(pc.outDim) && outTok < uint(pc.tokens)) {
+        coopMatStore(matC, y, outTok * uint(pc.outDim) + outRow, uint(pc.outDim),
+                     gl_CooperativeMatrixLayoutRowMajor);
+    }
+}
