@@ -515,6 +515,38 @@ func DeviceMemoryInfo(b Backend) (total, free int64, known bool) {
 	return dc.DeviceMemory()
 }
 
+// DeviceCeiling is the OPTIONAL capability a Backend implements to report the STABLE
+// device-local capacity its bytes are destined for, as distinct from the VOLATILE free
+// headroom DeviceCapacity reports. On a Strix Halo the device-local heap is 84.28 GiB while
+// the VK_EXT_memory_budget free reading swings with live VRAM pressure, so a 63.22 GiB
+// device-destined dense transit is refused at one reading and admitted - then kernel-OOM-killed
+// mid-staging - at another (fak#13186). A device-destined weight-residency plan must be sized
+// against the ceiling it lands in, keeping the volatile budget only as the runtime guard for
+// the live allocation. Callers discover it the same two-part way as DeviceCapacity (type-assert
+// plus Caps().CapacityProbe), so a non-reporting backend falls back byte-for-byte to the
+// volatile DeviceMemory() reading.
+type DeviceCeiling interface {
+	Backend
+	// DeviceLocalCeiling reports the immutable device-local capacity in bytes, or known=false
+	// when the backend cannot report a stable ceiling. It never returns a volatile headroom.
+	DeviceLocalCeiling() (ceiling int64, known bool)
+}
+
+// DeviceCeilingInfo reports the STABLE device-local capacity for ANY backend, hiding the
+// type-assert. It follows DeviceMemoryInfo's two-part discovery contract (interface plus
+// Caps().CapacityProbe) and returns known=false for a nil or non-reporting backend, so callers
+// keep the fail-open path and can fall back to the volatile DeviceMemoryInfo reading.
+func DeviceCeilingInfo(b Backend) (ceiling int64, known bool) {
+	if b == nil {
+		return 0, false
+	}
+	dc, ok := b.(DeviceCeiling)
+	if !ok || !b.Caps().CapacityProbe {
+		return 0, false
+	}
+	return dc.DeviceLocalCeiling()
+}
+
 // HostMemoryInfo reports host-side capacity for host-scoped memory demands. It follows
 // the same two-part discovery contract as DeviceMemoryInfo: interface plus explicit cap
 // flag, otherwise unknown/fail-open.

@@ -141,9 +141,18 @@ func (b serveFitBudget) avail() int64 {
 }
 
 // serveDeviceFitBudget reads the device memory ceiling a device serve arm's fit check uses
-// (DeviceMemoryInfo: free, or the total ceiling when free is unprobeable). Unknown capacity Ã¢â€ â€™ a
-// zero base Ã¢â€ â€™ the auto-sizer keeps the full window.
+// (DeviceCeilingInfo: the STABLE device-local heap capacity, with headroom reserved against
+// THAT). A device-destined plan must be sized against the capacity it lands in, not the volatile
+// VK_EXT_memory_budget headroom: the live budget swings with VRAM pressure, so the same 63.22 GiB
+// dense transit is refused at one reading and admitted - then kernel-OOM-killed mid-staging - at
+// another (fak#13186). When the backend cannot report a stable ceiling (cpu-ref, a non-probing
+// device, nil) this falls back byte-for-byte to serveFitBudgetBase(total, free, known) on the
+// volatile DeviceMemoryInfo reading. Unknown capacity -> a zero base -> the auto-sizer keeps the
+// full window.
 func serveDeviceFitBudget(be compute.Backend) serveFitBudget {
+	if ceiling, ok := compute.DeviceCeilingInfo(be); ok && ceiling > 0 {
+		return serveFitBudget{Base: ceiling, Headroom: serveGGUFDeviceHeadroom}
+	}
 	total, free, known := compute.DeviceMemoryInfo(be)
 	return serveFitBudget{Base: serveFitBudgetBase(total, free, known), Headroom: serveGGUFDeviceHeadroom}
 }

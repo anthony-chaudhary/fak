@@ -581,6 +581,20 @@ func VulkanQ8DispatchGrid(outDim, tokens int, coopMatActive bool) (gridX, gridY,
 	return vulkanQ8DispatchGrid(outDim, tokens, coopMatActive)
 }
 
+// DeviceLocalCeiling reports the immutable device-local heap capacity (g_totalDeviceLocalMemory,
+// captured once at backend creation) - the STABLE ceiling a device-destined weight-residency
+// transit lands in, as distinct from the VOLATILE VK_EXT_memory_budget headroom DeviceMemory
+// reports as free. It implements compute.DeviceCeiling so a serve fit check can size a
+// device-destined plan against the pocket it is destined for instead of a fluctuating
+// budget-minus-headroom reading (fak#13186). known=false on a nil/zero-heap backend keeps the
+// fail-open contract; no lock is needed because totalMem is immutable after creation.
+func (v *vulkanBackend) DeviceLocalCeiling() (ceiling int64, known bool) {
+	if v == nil || v.totalMem <= 0 {
+		return 0, false
+	}
+	return v.totalMem, true
+}
+
 // DeviceMemory reports the Vulkan device-local heap total and, when VK_EXT_memory_budget is
 // available, the current device-local budget headroom. Drivers without the extension keep
 // the prior fail-open behavior: total known, free unknown.

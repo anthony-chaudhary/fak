@@ -479,3 +479,45 @@ func TestDeviceAllocErrorCarriesMemoryClass(t *testing.T) {
 		t.Fatalf("empty class = %s, want %s", got, MemoryUnknown)
 	}
 }
+
+// ceilingDevice is a capDevice that ALSO reports a stable device-local ceiling — the
+// test stand-in for the Vulkan backend, whose device-local heap capacity is distinct
+// from the volatile VK_EXT_memory_budget free reading (fak#13186).
+type ceilingDevice struct {
+	capDevice
+	ceiling   int64
+	ceilingOK bool
+}
+
+func (c ceilingDevice) DeviceLocalCeiling() (int64, bool) { return c.ceiling, c.ceilingOK }
+
+func TestDeviceCeilingInfo(t *testing.T) {
+	known := ceilingDevice{capDevice: capDevice{total: 84 << 30, free: 56 << 30, known: true}, ceiling: 84 << 30, ceilingOK: true}
+	if ceiling, ok := DeviceCeilingInfo(known); !ok || ceiling != 84<<30 {
+		t.Fatalf("DeviceCeilingInfo = (%d, %v), want the stable ceiling (84 GiB, true)", ceiling, ok)
+	}
+	// A backend that reports a volatile reading but no stable ceiling (a plain capDevice)
+	// reads as unknown so the caller keeps its fallback — fail-open preserved.
+	if ceiling, ok := DeviceCeilingInfo(capDevice{total: 24 << 30, free: 20 << 30, known: true}); ok || ceiling != 0 {
+		t.Fatalf("capDevice without DeviceLocalCeiling = (%d, %v), want (0, false)", ceiling, ok)
+	}
+	// The NULL backend and the cpu reference both read unknown.
+	if ceiling, ok := DeviceCeilingInfo(nil); ok || ceiling != 0 {
+		t.Fatalf("nil backend = (%d, %v), want (0, false)", ceiling, ok)
+	}
+	if ceiling, ok := DeviceCeilingInfo(cpu()); ok || ceiling != 0 {
+		t.Fatalf("cpu reference = (%d, %v), want (0, false)", ceiling, ok)
+	}
+	// The two-part discovery idiom: a backend that implements DeviceLocalCeiling but does
+	// NOT advertise Caps().CapacityProbe half-advertised, so it is not trusted.
+	if ceiling, ok := DeviceCeilingInfo(halfCeiling{}); ok || ceiling != 0 {
+		t.Fatalf("half-advertised ceiling = (%d, %v), want (0, false)", ceiling, ok)
+	}
+}
+
+// halfCeiling implements DeviceLocalCeiling but inherits fakeDevice's Caps (no CapacityProbe).
+type halfCeiling struct {
+	fakeDevice
+}
+
+func (halfCeiling) DeviceLocalCeiling() (int64, bool) { return 24 << 30, true }

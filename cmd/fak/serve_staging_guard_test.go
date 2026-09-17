@@ -190,3 +190,113 @@ func TestServeDeviceStagingSplitApertureFailsOpenAndInert(t *testing.T) {
 		t.Fatalf("host-only plan (no device transit) was refused by the split guard: %v", err)
 	}
 }
+
+// serveDeviceCeilingBackend is the fake a device serve fit check sees: it reports BOTH the
+// volatile DeviceCapacity reading (total, free, known) and the STABLE device-local ceiling
+// (DeviceCeiling). It is the test stand-in for the Vulkan backend on a Strix Halo, where the
+// device-local heap capacity and the VK_EXT_memory_budget free reading are different numbers.
+type serveDeviceCeilingBackend struct {
+	compute.Backend
+	total, free int64
+	known       bool
+	ceiling     int64
+	ceilingOK   bool
+}
+
+func (b serveDeviceCeilingBackend) Caps() compute.Caps {
+	return compute.Caps{CapacityProbe: true, DeviceMemory: true}
+}
+
+func (b serveDeviceCeilingBackend) DeviceMemory() (int64, int64, bool) {
+	return b.total, b.free, b.known
+}
+
+func (b serveDeviceCeilingBackend) DeviceLocalCeiling() (int64, bool) {
+	return b.ceiling, b.ceilingOK
+}
+
+// serve_staging_guard_test.go (fak#13186) - THE STABLE-CEILING FORM. serveDeviceFitBudget sized
+// the device fit budget from the VOLATILE VK_EXT_memory_budget free reading, so a 63.22 GiB
+// device-destined dense transit was refused at a low reading (65.88 GiB budget x 0.85 = 56.00
+// GiB) and admitted at a high one (84.28 GiB-ish x 0.85 = 71.53 GiB) - where it then hard-OOMs
+// on the host staging transit. The transit fits the STABLE 84.28 GiB device-local heap in BOTH
+// readings, so the budget must be sized from that ceiling.
+
+// The exact failing shape: a device-destined transit that FITS the stable device-local heap
+// capacity but EXCEEDS the volatile budget reading must be ADMITTED. RED before the fix (the
+// volatile free reading drove the budget), GREEN after.
+func TestServeDeviceFitBudgetUsesStableCeilingNotVolatileFree(t *testing.T) {
+	const gib = int64(1) << 30
+	// strix3: device-local heap 84.28 GiB; volatile budget reading 65.88 GiB (one real reading).
+	be := serveDeviceCeilingBackend{
+		total: 84*gib + 286<<20, free: 65*gib + 900<<20, known: true,
+		ceiling: 84*gib + 286<<20, ceilingOK: true,
+	}
+	fit := serveDeviceFitBudget(be)
+	if fit.Base != be.ceiling {
+		t.Fatalf("device fit budget base = %d, want the STABLE device-local ceiling %d (the volatile free reading %d must not size the budget)", fit.Base, be.ceiling, be.free)
+	}
+	// The 63.22 GiB dense transit must be admitted against the stable capacity with headroom.
+	transit := 63*gib + 225<<20
+	if avail := fit.avail(); transit > avail {
+		t.Fatalf("63.22 GiB device transit (%d B) exceeds the stable-ceiling budget %d B; it must be admitted", transit, avail)
+	}
+}
+
+// The two-reading divergence is gone: the SAME (plan, ceiling) admits regardless of the volatile
+// free value, because the volatile reading no longer sizes the budget.
+func TestServeDeviceFitBudgetInvariantAcrossVolatileReadings(t *testing.T) {
+	const gib = int64(1) << 30
+	ceiling := 84*gib + 286<<20
+	base := func(free int64) serveFitBudget {
+		return serveDeviceFitBudget(serveDeviceCeilingBackend{
+			total: ceiling, free: free, known: true, ceiling: ceiling, ceilingOK: true,
+		})
+	}
+	low, high := base(56*gib), base(71*gib+500<<20)
+	if low.Base != high.Base || low.avail() != high.avail() {
+		t.Fatalf("budget diverged across volatile readings: low=%d high=%d (avail %d vs %d)", low.Base, high.Base, low.avail(), high.avail())
+	}
+}
+
+// A genuine overflow of the STABLE device capacity must still refuse with a typed
+// *compute.FitError naming the plan - the fak#13171 kernel-OOM protection is intact.
+func TestServeDeviceFitBudgetRefusesGenuineCapacityOverflow(t *testing.T) {
+	const gib = int64(1) << 30
+	be := serveDeviceCeilingBackend{
+		total: 24 * gib, free: 24 * gib, known: true,
+		ceiling: 24 * gib, ceilingOK: true,
+	}
+	fit := serveDeviceFitBudget(be)
+	plan := serveStagingGuardPlan(63*gib, 4*gib)
+	err := compute.RefuseMemoryPlanIfTooBigForReportedDevice(be, plan, fit.Base, fit.Base, fit.Base > 0, fit.Headroom)
+	if err == nil {
+		t.Fatalf("63 GiB transit against a 24 GiB stable device ceiling was ADMITTED; the fak#13171 kernel-OOM protection regressed")
+	}
+	var fe *compute.FitError
+	if !errors.As(err, &fe) {
+		t.Fatalf("refusal %v is not a typed *compute.FitError", err)
+	}
+	if fe.Scope != compute.MemoryScopeDevice {
+		t.Fatalf("refusal scope = %q, want %q", fe.Scope, compute.MemoryScopeDevice)
+	}
+	if fe.Want < 63*gib {
+		t.Fatalf("refusal Want = %d, want the 63 GiB device transit", fe.Want)
+	}
+}
+
+// Fail-open preserved: a backend with NO stable-ceiling seam falls back byte-for-byte to the
+// volatile DeviceMemoryInfo reading, and an unknown-capacity backend keeps the zero base.
+func TestServeDeviceFitBudgetFallsBackWithoutCeilingSeam(t *testing.T) {
+	const gib = int64(1) << 30
+	volatile := serveCapBackend{total: 24 * gib, free: 20 * gib, known: true}
+	if got, want := serveDeviceFitBudget(volatile).Base, int64(20*gib); got != want {
+		t.Fatalf("non-ceiling backend base = %d, want the volatile free %d (fallback must be byte-for-byte)", got, want)
+	}
+	if got := serveDeviceFitBudget(serveCapBackend{}).Base; got != 0 {
+		t.Fatalf("unknown-capacity backend base = %d, want 0 (fail-open)", got)
+	}
+	if got := serveDeviceFitBudget(nil).Base; got != 0 {
+		t.Fatalf("nil backend base = %d, want 0 (fail-open)", got)
+	}
+}
