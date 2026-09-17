@@ -703,3 +703,135 @@ func BenchmarkValidateComparisonPacket(b *testing.B) {
 		}
 	}
 }
+
+// TestRequestTimeoutCancelsStalledRequestBeforeOverallDeadline proves a single
+// stalled chat request is bounded by the per-request budget, well before the
+// caller's overall deadline, and is recorded as a typed client timeout. This is
+// the issue #12678 regression witness: the abandoned diagnostic stops occupying
+// the server instead of running for the whole suite deadline.
+func TestRequestTimeoutCancelsStalledRequestBeforeOverallDeadline(t *testing.T) {
+	// The handler sleeps for a BOUNDED time that is longer than the per-request
+	// budget but far shorter than the overall deadline. A bounded server-side
+	// sleep means httptest.Server.Close never waits forever on the handler,
+	// while still proving the client gave up on its own budget.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz":
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case "/v1/chat/completions":
+			select {
+			case <-r.Context().Done():
+			case <-time.After(3 * time.Second):
+			}
+			_, _ = w.Write([]byte(`{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":0,"total_tokens":1}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	overall, cancelOverall := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelOverall()
+	start := time.Now()
+	rep, err := Run(overall, Options{
+		Gateway:        ts.URL,
+		Suite:          SuiteDecodeLong,
+		DecodeTokens:   []int{8, 16},
+		HTTPClient:     ts.Client(),
+		RequestTimeout: 200 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed >= 2*time.Second {
+		t.Fatalf("per-request timeout did not shorten the run: elapsed=%s", elapsed)
+	}
+	if len(rep.Rows) != 1 {
+		t.Fatalf("rows=%d, want 1 (a timed-out case must not start further cases)", len(rep.Rows))
+	}
+	row := rep.Rows[0]
+	if !row.TimedOut {
+		t.Fatalf("row not marked timed out: %+v", row)
+	}
+	if !strings.Contains(row.Error, ErrRequestTimeout.Error()) {
+		t.Fatalf("row error lacks the typed timeout sentinel: %q", row.Error)
+	}
+	if overall.Err() != nil {
+		t.Fatalf("overall context expired; the per-request budget should have fired first: %v", overall.Err())
+	}
+}
+
+// TestRequestTimeoutDisabledKeepsHistoricalBehavior proves a negative budget
+// disables the per-request deadline, so an existing caller that only sets an
+// overall context keeps byte-identical behavior.
+func TestRequestTimeoutDisabledKeepsHistoricalBehavior(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz":
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case "/v1/chat/completions":
+			_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"length"}],"usage":{"prompt_tokens":4,"completion_tokens":8,"total_tokens":12}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	rep, err := Run(context.Background(), Options{
+		Gateway:        ts.URL,
+		Suite:          SuiteDecodeLong,
+		DecodeTokens:   []int{8},
+		HTTPClient:     ts.Client(),
+		RequestTimeout: -1,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(rep.Rows) != 1 || rep.Rows[0].TimedOut {
+		t.Fatalf("disabled budget changed behavior: %+v", rep.Rows)
+	}
+	if rep.Rows[0].CompletionTokens != 8 {
+		t.Fatalf("bad row: %+v", rep.Rows[0])
+	}
+}
+
+// TestRequestTimeoutDoesNotFireOnFastSuccess is the negative control: a request
+// well under budget must record a clean row and NOT a timeout.
+func TestRequestTimeoutDoesNotFireOnFastSuccess(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz":
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case "/v1/chat/completions":
+			_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":5,"total_tokens":8}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	rep, err := Run(context.Background(), Options{
+		Gateway:        ts.URL,
+		Suite:          SuiteDecodeLong,
+		DecodeTokens:   []int{16},
+		HTTPClient:     ts.Client(),
+		RequestTimeout: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(rep.Rows) != 1 || rep.Rows[0].TimedOut || rep.Rows[0].Error != "" {
+		t.Fatalf("fast success mislabelled: %+v", rep.Rows)
+	}
+}
+
+// TestDefaultRequestTimeoutIsConservative pins the default within the two-hour
+// overall suite deadline so an abandoned request is bounded.
+func TestDefaultRequestTimeoutIsConservative(t *testing.T) {
+	if DefaultRequestTimeout <= 0 || DefaultRequestTimeout >= 2*time.Hour {
+		t.Fatalf("DefaultRequestTimeout=%s, want (0, 2h)", DefaultRequestTimeout)
+	}
+	if got := normalizeOptions(Options{}).RequestTimeout; got != DefaultRequestTimeout {
+		t.Fatalf("normalizeOptions did not apply the default: %s", got)
+	}
+}

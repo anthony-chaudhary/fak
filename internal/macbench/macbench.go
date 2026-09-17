@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -499,6 +500,13 @@ type Options struct {
 	Concurrency   int
 	HTTPClient    *http.Client
 	Now           func() time.Time
+	// RequestTimeout bounds a SINGLE chat request. Zero selects
+	// DefaultRequestTimeout; a negative value disables the per-request budget
+	// entirely, preserving the historical behavior where only the caller's
+	// overall context bounds a run. When positive, each request gets its own
+	// derived context; a request that exceeds it is cancelled and recorded as a
+	// typed client timeout, and the suite stops starting further cases.
+	RequestTimeout time.Duration
 	// MinPrefillTPS and MinDecodeTPS are optional ABSOLUTE throughput floors,
 	// in tokens/second. When positive, Run grades the report against them and
 	// records a SLO verdict (Report.SLO). Zero (the default) disables the gate,
@@ -626,19 +634,32 @@ type Row struct {
 	FinishReason           string  `json:"finish_reason,omitempty"`
 	HTTPStatus             int     `json:"http_status,omitempty"`
 	Headline               string  `json:"headline,omitempty"`
+	TimedOut               bool    `json:"timed_out,omitempty"`
 	Error                  string  `json:"error,omitempty"`
 }
 
 func DefaultOptions() Options {
 	return Options{
-		Gateway:       "http://127.0.0.1:8080",
-		Model:         "qwen38:27b",
-		Suite:         SuiteAll,
-		DecodeTokens:  []int{16, 32, 64, 128, 256, 512},
-		PrefillTokens: []int{128, 512, 2048, 4096},
-		Concurrency:   2,
+		Gateway:        "http://127.0.0.1:8080",
+		Model:          "qwen38:27b",
+		Suite:          SuiteAll,
+		DecodeTokens:   []int{16, 32, 64, 128, 256, 512},
+		PrefillTokens:  []int{128, 512, 2048, 4096},
+		Concurrency:    2,
+		RequestTimeout: DefaultRequestTimeout,
 	}
 }
+
+// DefaultRequestTimeout is the conservative per-request budget applied when a
+// caller does not set Options.RequestTimeout. It bounds one abandoned native
+// request well below the two-hour overall suite deadline so a stuck
+// diagnostic cannot keep driving the server at full CPU.
+const DefaultRequestTimeout = 20 * time.Minute
+
+// ErrRequestTimeout is the sentinel wrapped into a Row.Error when a single
+// chat request exceeded its per-request budget. Callers can match it with
+// errors.Is to distinguish a client-side timeout from a server/transport error.
+var ErrRequestTimeout = errors.New("macbench: per-request timeout")
 
 func PlanRecovery(sig RecoverySignals) RecoveryPlan {
 	plan := RecoveryPlan{
@@ -872,6 +893,9 @@ func normalizeOptions(opts Options) Options {
 	if opts.HTTPClient == nil {
 		opts.HTTPClient = &http.Client{}
 	}
+	if opts.RequestTimeout == 0 {
+		opts.RequestTimeout = DefaultRequestTimeout
+	}
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
@@ -977,6 +1001,11 @@ func runDecodeLong(ctx context.Context, opts Options) []Row {
 	for _, maxTok := range opts.DecodeTokens {
 		row := runBuffered(ctx, opts, "decode-longgen", fmt.Sprintf("decode-%d", maxTok), 25, maxTok)
 		rows = append(rows, row)
+		if row.TimedOut || ctx.Err() != nil {
+			// A timed-out or cancelled case must not start further cases: the
+			// diagnostic is no longer bounded or meaningful.
+			break
+		}
 	}
 	return rows
 }
@@ -986,6 +1015,9 @@ func runPrefillSweep(ctx context.Context, opts Options) []Row {
 	for _, promptTok := range opts.PrefillTokens {
 		row := runStreamed(ctx, opts, "prefill-sweep", fmt.Sprintf("prefill-%d", promptTok), promptTok, 16)
 		rows = append(rows, row)
+		if row.TimedOut || ctx.Err() != nil {
+			break
+		}
 	}
 	return rows
 }
@@ -1028,12 +1060,14 @@ func runTwoStream(ctx context.Context, opts Options) []Row {
 func runBuffered(ctx context.Context, opts Options, kind, name string, promptTokens, maxTokens int) Row {
 	row := Row{Name: name, Kind: kind, PromptRequested: promptTokens, MaxTokens: maxTokens}
 	body := chatBody(opts.Model, prompt(promptTokens), maxTokens, false)
+	reqCtx, cancel := requestContext(ctx, opts.RequestTimeout)
+	defer cancel()
 	start := time.Now()
-	resp, err := doChat(ctx, opts, body)
+	resp, err := doChat(reqCtx, opts, body)
 	wall := elapsedSeconds(start)
 	row.WallSeconds = round(wall)
 	if err != nil {
-		row.Error = err.Error()
+		classifyRequestError(reqCtx, opts.RequestTimeout, &row, err)
 		return row
 	}
 	defer resp.Body.Close()
@@ -1063,10 +1097,12 @@ func runBuffered(ctx context.Context, opts Options, kind, name string, promptTok
 func runStreamed(ctx context.Context, opts Options, kind, name string, promptTokens, maxTokens int) Row {
 	row := Row{Name: name, Kind: kind, PromptRequested: promptTokens, MaxTokens: maxTokens}
 	body := chatBody(opts.Model, prompt(promptTokens), maxTokens, true)
+	reqCtx, cancel := requestContext(ctx, opts.RequestTimeout)
+	defer cancel()
 	start := time.Now()
-	resp, err := doChat(ctx, opts, body)
+	resp, err := doChat(reqCtx, opts, body)
 	if err != nil {
-		row.Error = err.Error()
+		classifyRequestError(reqCtx, opts.RequestTimeout, &row, err)
 		return row
 	}
 	defer resp.Body.Close()
@@ -1116,7 +1152,7 @@ func runStreamed(ctx context.Context, opts Options, kind, name string, promptTok
 		row.PromptTokens = promptTokens
 	}
 	if err := sc.Err(); err != nil {
-		row.Error = err.Error()
+		classifyRequestError(reqCtx, opts.RequestTimeout, &row, err)
 		return row
 	}
 	if row.TTFTSeconds > 0 && row.PromptTokens > 0 {
@@ -1127,6 +1163,31 @@ func runStreamed(ctx context.Context, opts Options, kind, name string, promptTok
 		row.TokensPerSecond = round(float64(row.CompletionTokens) / row.WallSeconds)
 	}
 	return row
+}
+
+// requestContext derives the per-request context. A non-positive budget leaves
+// the caller's context untouched (the historical behavior); a positive budget
+// adds an independent deadline so one abandoned request cannot hold the suite.
+func requestContext(parent context.Context, budget time.Duration) (context.Context, context.CancelFunc) {
+	if budget <= 0 {
+		return context.WithCancel(parent)
+	}
+	return context.WithTimeout(parent, budget)
+}
+
+// classifyRequestError records an error on a row, marking a per-request timeout
+// as a typed, explicit outcome instead of a bare context error. The distinction
+// matters: a client deadline proves the client gave up, NOT that the server
+// stopped the work, so the row carries the client-side meaning only.
+func classifyRequestError(reqCtx context.Context, budget time.Duration, row *Row, err error) {
+	row.Error = err.Error()
+	if budget <= 0 || err == nil {
+		return
+	}
+	if errors.Is(err, context.DeadlineExceeded) || (errors.Is(reqCtx.Err(), context.DeadlineExceeded) && errors.Is(err, reqCtx.Err())) {
+		row.TimedOut = true
+		row.Error = fmt.Sprintf("%v after %s (client cancellation; server completion not implied)", ErrRequestTimeout, budget)
+	}
 }
 
 func doChat(ctx context.Context, opts Options, body []byte) (*http.Response, error) {

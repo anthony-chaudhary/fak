@@ -71,6 +71,7 @@ func runMacBench(stdout, stderr io.Writer, argv []string) int {
 	sshHost := fs.String("ssh-host", envOrDefault("FAK_MAC_SSH_HOST", defaultClaudeMacSSHHost), "ssh host used by --fetch-key")
 	sshKey := fs.String("ssh-key", defaultClaudeMacSSHKey(), "ssh identity used by --fetch-key; empty uses ssh defaults")
 	timeout := fs.Duration("timeout", 2*time.Hour, "overall benchmark timeout")
+	requestTimeout := fs.Duration("request-timeout", macbench.DefaultRequestTimeout, "per-request timeout; bounds one chat request independently of --timeout; negative disables")
 	decodeTokens := fs.String("decode-tokens", "16,32,64,128,256,512", "comma-separated max_tokens for decode-longgen")
 	prefillTokens := fs.String("prefill-tokens", "128,512,2048,4096", "comma-separated prompt-token targets for prefill-sweep")
 	concurrency := fs.Int("concurrency", 2, "concurrent requests for the 2stream suite")
@@ -103,15 +104,16 @@ func runMacBench(stdout, stderr io.Writer, argv []string) int {
 	defer cancel()
 	gpuUtilBefore := sampleGPUUtilPct(ctx)
 	rep, err := macbench.Run(ctx, macbench.Options{
-		Gateway:       *gateway,
-		Model:         *model,
-		Key:           key,
-		Suite:         suite,
-		DecodeTokens:  dec,
-		PrefillTokens: pre,
-		Concurrency:   *concurrency,
-		MinPrefillTPS: *minPrefillTPS,
-		MinDecodeTPS:  *minDecodeTPS,
+		Gateway:        *gateway,
+		Model:          *model,
+		Key:            key,
+		Suite:          suite,
+		DecodeTokens:   dec,
+		PrefillTokens:  pre,
+		Concurrency:    *concurrency,
+		RequestTimeout: *requestTimeout,
+		MinPrefillTPS:  *minPrefillTPS,
+		MinDecodeTPS:   *minDecodeTPS,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "fak macbench: %v\n", err)
