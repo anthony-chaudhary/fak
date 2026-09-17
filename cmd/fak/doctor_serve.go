@@ -549,7 +549,9 @@ func resolveDoctorTargetModel(facts *serveHostFacts, modelName, ggufPath string)
 		defer ws.Close()
 		arm := resolveMetalServeLoadArm(ws)
 		facts.ModelArm = string(arm)
-		plan, err := serveGGUFWeightMemoryPlanForArm(ws, arm, serveQ4KFitOptions(localPath, ws, nil, arm)...)
+		// No fit budget is in scope here (doctor facts are estimate-only and never load),
+		// so pass the zero budget: unprobeable -> bound 0 -> stream-through (fak#13205).
+		plan, err := serveGGUFWeightMemoryPlanForArm(ws, arm, serveQ4KFitOptions(localPath, ws, nil, arm, serveFitBudget{})...)
 		if err == nil && plan.Total() > 0 {
 			facts.ModelBytes = plan.Total()
 		}

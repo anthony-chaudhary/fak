@@ -56,7 +56,7 @@ func TestServeQ4KWeightAdmissionUsesTransformedPlan(t *testing.T) {
 	if err != nil {
 		t.Errorf("streamed resident admission must retain the conservative fallback, got %v", err)
 	}
-	streamedPlan, err := serveGGUFWeightMemoryPlanForArm(ws, arm, serveQ4KFitOptions(path, ws, nil, arm)...)
+	streamedPlan, err := serveGGUFWeightMemoryPlanForArm(ws, arm, serveQ4KFitOptions(path, ws, nil, arm, serveFitBudget{})...)
 	if err != nil {
 		t.Fatalf("streamed conservative fallback: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestServeResidentQ4KSharedOptionsMatchStoredWeights(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = m.CloseWeights() })
-			fitOpts := serveQ4KFitOptions(path, ws, backend, serveLoadArmResidentQ4K)
+			fitOpts := serveQ4KFitOptions(path, ws, backend, serveLoadArmResidentQ4K, serveFitBudget{})
 			plan, err := serveGGUFWeightMemoryPlanForArm(ws, serveLoadArmResidentQ4K, fitOpts...)
 			if err != nil {
 				t.Fatal(err)
@@ -178,7 +178,7 @@ func TestServeResidentDenseStandardArchitectureAdmissionMatchesLoader(t *testing
 				t.Fatalf("raw bytes=%d error=%v, want147456", raw, err)
 			}
 			t.Logf("actual %s loader succeeded: raw=%d stored=%d Q4=%d Q8=%d", arch, raw, report.TotalResidentBytes, report.Q4KTensors, report.Q8Tensors)
-			plan, err := serveGGUFWeightMemoryPlanForArm(ws, arm, serveQ4KFitOptions(path, ws, nil, arm)...)
+			plan, err := serveGGUFWeightMemoryPlanForArm(ws, arm, serveQ4KFitOptions(path, ws, nil, arm, serveFitBudget{})...)
 			if err != nil {
 				t.Fatalf("admission rejected supported %s loader storage (%d bytes): %v", arch, wantStored, err)
 			}

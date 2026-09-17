@@ -480,11 +480,16 @@ func serveNativeContextSizingInputs(ws *ggufload.WeightSource, be compute.Backen
 			weights, err := ws.EstimateExpertParallelLoadMemoryPlan(ranks)
 			return weights, serveExpertParallelDeviceFitBudget(be), err
 		}
-		weights, err := serveGGUFWeightMemoryPlanForArm(ws, arm, serveQ4KFitOptions(path, ws, be, arm)...)
-		return applyDeviceWeightBudget(weights, be), serveDeviceFitBudget(be), err
+		// ONE fit snapshot: the same serveDeviceFitBudget(be) the caller receives is what the
+		// streamed-dense option list derives its bounded working set from (fak#13205).
+		fit := serveDeviceFitBudget(be)
+		weights, err := serveGGUFWeightMemoryPlanForArm(ws, arm, serveQ4KFitOptions(path, ws, be, arm, fit)...)
+		return applyDeviceWeightBudget(weights, be), fit, err
 	}
-	weights, err := serveGGUFWeightMemoryPlanForArm(ws, arm, serveQ4KFitOptions(path, ws, nil, arm)...)
-	return weights, serveHostFitBudget(), err
+	// ONE fit snapshot: the same serveHostFitBudget() the caller receives (fak#13205).
+	fit := serveHostFitBudget()
+	weights, err := serveGGUFWeightMemoryPlanForArm(ws, arm, serveQ4KFitOptions(path, ws, nil, arm, fit)...)
+	return weights, fit, err
 }
 
 func resolveServeNativeContextLoadArm(ws *ggufload.WeightSource, be compute.Backend, cpuOffloadExperts, useMetal bool) serveLoadArm {
@@ -542,13 +547,24 @@ func serveGGUFWeightMemoryPlanForArm(ws *ggufload.WeightSource, arm serveLoadArm
 // serveQ4KFitOptions uses the existing loader selectors for the known path and
 // backend. Pathless sizing uses default embedding storage; the path-based fit
 // still runs before allocation. Neither plan includes transient load peaks.
-func serveQ4KFitOptions(path string, ws *ggufload.WeightSource, be compute.Backend, arm serveLoadArm) []ggufload.Q4KLoadOption {
+//
+// fit is the SAME measured budget the calling sizing path judges its plan against; the streamed
+// dense route derives its bounded host working set from it (serveStreamedDenseQ4KWorkingSetBound)
+// so the option list the loader receives charges the working set the fit guard already admitted,
+// never the full on-disk dense side (fak#13205). A caller with no budget in scope passes
+// serveFitBudget{} (unprobeable -> bound 0 -> stream-through), exactly as the expert precedent.
+func serveQ4KFitOptions(path string, ws *ggufload.WeightSource, be compute.Backend, arm serveLoadArm, fit serveFitBudget) []ggufload.Q4KLoadOption {
 	if arm != serveLoadArmResidentQ4K || ws == nil {
 		return nil
 	}
 	opts := serveResidentQ4KLoadOptions(be, path, true, ggufload.ClassifyTensorQuant(ws.File.Tensors))
 	if os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1" {
-		opts = append(opts, ggufload.WithStreamedDenseQ4K(true))
+		// The dense working set is HOST-resident, so derive its bound from the true host
+		// budget -- serveStreamedHostFit, exactly the fak#13142 rule the expert precedent
+		// uses -- not the device aperture: a device-scale bound judged against real host RAM
+		// is the bug that rule exists to prevent. The load path derives from the same rule
+		// over the same fit, so estimate and load carry a byte-identical budget (fak#13205).
+		opts = append(opts, ggufload.WithStreamedDenseQ4KWorkingSet(serveStreamedDenseQ4KWorkingSetBound(serveStreamedHostFit(be, &fit))))
 	}
 	return opts
 }
@@ -558,7 +574,7 @@ func serveGGUFMemoryPlan(ws *ggufload.WeightSource, f32Resident bool, contextBud
 	if f32Resident {
 		arm = serveLoadArmF32
 	}
-	return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, fit, serveQ4KFitOptions("", ws, nil, arm)...)
+	return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, fit, serveQ4KFitOptions("", ws, nil, arm, fit)...)
 }
 
 // serveGGUFCPUOffloadMemoryPlan plans the --cpu-offload-experts split: dense/router/attention
@@ -656,7 +672,7 @@ func fitServeGGUFPathOnReportedHostForArm(ggufPath string, arm serveLoadArm, con
 	}
 	fit := serveHostFitBudgetFromReported(total, free, known, override)
 	plan, err := withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
-		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, fit, serveQ4KFitOptions(ggufPath, ws, nil, arm)...)
+		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, fit, serveQ4KFitOptions(ggufPath, ws, nil, arm, fit)...)
 	})
 	if err != nil {
 		return err
@@ -671,7 +687,7 @@ func fitServeGGUFPathOnReportedHost(ggufPath string, f32Resident bool, contextBu
 	fit := serveHostFitBudgetFromReported(total, free, known, override)
 	plan, err := withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
 		arm := resolveHostServeLoadArm(ws, f32Resident, false)
-		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, fit, serveQ4KFitOptions(ggufPath, ws, nil, arm)...)
+		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, fit, serveQ4KFitOptions(ggufPath, ws, nil, arm, fit)...)
 	})
 	if err != nil {
 		return err
@@ -734,7 +750,10 @@ func withGGUFWeights(ggufPath string, plan func(*ggufload.WeightSource) (compute
 func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Resident bool, contextBudgetTokens int, override *serveFitBudget) (compute.MemoryPlan, error) {
 	plan, err := withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
 		arm := resolveDeviceServeLoadArm(ws, be, f32Resident, false)
-		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, serveDeviceFitBudgetFromReported(be, override), serveQ4KFitOptions(ggufPath, ws, be, arm)...)
+		// ONE fit snapshot: the same device budget judges the plan and derives the
+		// streamed-dense working set (fak#13205).
+		fit := serveDeviceFitBudgetFromReported(be, override)
+		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, fit, serveQ4KFitOptions(ggufPath, ws, be, arm, fit)...)
 	})
 	if err == nil {
 		plan = applyDeviceWeightBudget(plan, be)
@@ -797,6 +816,37 @@ const serveCPUOffloadStreamedResidentMargin = 0.10
 // (fak#13140). An unprobeable host yields zero (stream-through) -- the honest floor, because an
 // unmeasurable host must not be promised residency it may not have.
 func serveCPUOffloadStreamedResidentBound(fit serveFitBudget) int64 {
+	avail := fit.avail()
+	if avail <= 0 {
+		return 0
+	}
+	bound := int64(float64(avail) * (1 - serveCPUOffloadStreamedResidentMargin))
+	if bound >= avail {
+		// A razor-thin budget must still land strictly below avail, and never become negative.
+		bound = avail - 1
+	}
+	if bound < 0 {
+		return 0
+	}
+	return bound
+}
+
+// serveStreamedDenseQ4KWorkingSetBound derives the bounded host-resident DENSE working set for the
+// streamed dense route (fak#13205) from the SAME measured fit budget the calling sizing path judges
+// its plan against. The device-scoped dense transit is NOT born in VRAM: staging materializes it in
+// host RAM (read -> dequant/transcode -> device upload -> free), so the fit guard must judge the
+// bounded working set the loader actually RETAINS (ggufload.WithStreamedDenseQ4KWorkingSet, landed
+// fak#13194) rather than the full on-disk dense side -- otherwise the ~63.22 GiB V4.1 dense side is
+// ALSO charged as a transient host demand and the kernel OOM-kills the serve at staging
+// (`staging-host-charge=63.223GiB host-budget=48.542GiB`, then OOM via filemap_fault; fak#13171).
+//
+// The arithmetic is identical to the bounded streamed-EXPERT precedent
+// (serveCPUOffloadStreamedResidentBound, fak#13121/#13140): the headroom-adjusted host budget
+// (fit.avail()) less serveCPUOffloadStreamedResidentMargin, clamped so the bound lands strictly
+// below avail and never goes negative. An unprobeable host yields zero (stream-through) -- the
+// honest floor, because an unmeasurable host must not be promised residency it may not have. The
+// SAME value must flow to both the estimate and the load option list (one measurement).
+func serveStreamedDenseQ4KWorkingSetBound(fit serveFitBudget) int64 {
 	avail := fit.avail()
 	if avail <= 0 {
 		return 0

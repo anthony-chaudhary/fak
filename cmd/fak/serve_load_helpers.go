@@ -295,7 +295,17 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 			q4kOpts = append(q4kOpts, ggufload.WithStreamedExperts(streamedBound))
 		}
 	}
-	// #1062 pre-launch load-path check: warn (don't refuse) before a large GGUF load when the
+	// Bounded dense working set on the streamed dense route (fak#13205). The estimate path derives
+	// the SAME bounded budget from the SAME host-fit rule over the SAME fit snapshot (see
+	// serveQ4KFitOptions), so the option list that reaches the loader charges the working set the fit
+	// guard already admitted, never the full on-disk dense side. The load's q4kOpts is built here
+	// independently of the estimate-side list, so without this threading the streamed dense route
+	// would take the UNBOUNDED form off the env fallback in loadResidentQ4KProfiled. Gated on the
+	// same FAK_STREAM_Q4K/FAK_METAL_STREAM_Q4K knobs: when the env asks for streaming, the bounded
+	// form is selected (bounded is the improved form, so it supersedes the unbounded precedent).
+	if residentQ4K && (os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1") {
+		q4kOpts = append(q4kOpts, ggufload.WithStreamedDenseQ4KWorkingSet(serveStreamedDenseQ4KWorkingSetBound(hostFit)))
+	} // #1062 pre-launch load-path check: warn (don't refuse) before a large GGUF load when the
 	// weights sit on a network filesystem. NFS/CIFS read at network speed â€” the ~50-100x
 	// time-to-ready tax a CPU server hit loading GLM-5.2 off /projects (NFS, ~82 min) vs a local NVMe
 	// (minutes). Probed once here so it covers every serve arm (device + CPU); fail-open, so a
@@ -752,7 +762,10 @@ func refuseOversubscribedMetalGGUFForHost(path string, total int64, known bool) 
 // the historical startup peak. Neither number is exact physical residency.
 func serveMetalGGUFAdmissionWeights(path string, ws *ggufload.WeightSource) (compute.MemoryPlan, int64, error) {
 	arm := resolveMetalServeLoadArm(ws)
-	plan, err := serveGGUFWeightMemoryPlanForArm(ws, arm, serveQ4KFitOptions(path, ws, nil, arm)...)
+	// No fit budget is in scope here (this is a Metal startup-peak admission helper,
+	// not the sizing path), so pass the zero budget: unprobeable -> bound 0 ->
+	// stream-through, exactly the expert precedent's no-budget convention (fak#13205).
+	plan, err := serveGGUFWeightMemoryPlanForArm(ws, arm, serveQ4KFitOptions(path, ws, nil, arm, serveFitBudget{})...)
 	if err != nil {
 		return nil, 0, err
 	}

@@ -577,3 +577,71 @@ func TestServeStreamedDecisionSharedPoolBoundMatchesPlan(t *testing.T) {
 		t.Fatalf("decision bound %d was not reduced below the whole-avail bound %d despite the device transit", bound, wholeAvail)
 	}
 }
+
+// TestServeStreamedDenseAppliesBoundedWorkingSet is the fak#13205 acceptance at the serve option
+// list: when the env asks for streamed dense (FAK_STREAM_Q4K=1) the option list serveQ4KFitOptions
+// builds must enable the streamed DENSE route in its BOUNDED form -- StreamedDenseQ4K &&
+// StreamedDenseBounded -- carrying the SAME budget serveStreamedDenseQ4KWorkingSetBound derives from
+// the fit snapshot, so the loader retains a bounded host working set instead of the full 63.22 GiB
+// device dense side that kernel-OOM-killed staging (the fak#13205 bug). It asserts the EFFECT of the
+// list via ApplyQ4KLoadOptions (the loader's own option-application path), not slice length.
+func TestServeStreamedDenseAppliesBoundedWorkingSet(t *testing.T) {
+	t.Setenv("FAK_STREAM_Q4K", "1")
+	t.Setenv("FAK_METAL_STREAM_Q4K", "")
+	t.Setenv("FAK_Q4K", "1")
+	t.Setenv("FAK_GGUF_MMAP", "0")
+
+	path := createTestQ4KGGUF(t)
+	ws, err := ggufload.OpenWeights(path)
+	if err != nil {
+		t.Fatalf("OpenWeights: %v", err)
+	}
+	t.Cleanup(func() { _ = ws.Close() })
+
+	fit := serveFitBudget{Base: 1 << 40, Headroom: 0.10}
+	opts := serveQ4KFitOptions(path, ws, nil, serveLoadArmResidentQ4K, fit)
+	eff := ggufload.ApplyQ4KLoadOptions(opts)
+	if !eff.StreamedDenseQ4K {
+		t.Fatalf("serveQ4KFitOptions did not enable the streamed dense route with FAK_STREAM_Q4K=1; effects=%+v", eff)
+	}
+	if !eff.StreamedDenseBounded {
+		t.Fatalf("streamed dense route was enabled UNBOUNDED; the bounded working set must be selected (fak#13205); effects=%+v", eff)
+	}
+	want := serveStreamedDenseQ4KWorkingSetBound(serveStreamedHostFit(nil, &fit))
+	if eff.StreamedDenseBytes != want {
+		t.Fatalf("streamed dense working set=%d, want the single derivation %d (one-measurement invariant)", eff.StreamedDenseBytes, want)
+	}
+	if eff.StreamedDenseBytes <= 0 || eff.StreamedDenseBytes >= fit.avail() {
+		t.Fatalf("streamed dense working set=%d must be nonzero and strictly below avail=%d", eff.StreamedDenseBytes, fit.avail())
+	}
+}
+
+// TestServeStreamedDenseWorkingSetBoundIsStrictlyBelowAvail pins the bound derivation: an
+// unprobeable host (Base<=0) yields zero (stream-through, the honest floor), a probeable budget
+// yields a nonzero working set STRICTLY below avail, and no input yields a negative bound.
+func TestServeStreamedDenseWorkingSetBoundIsStrictlyBelowAvail(t *testing.T) {
+	if got := serveStreamedDenseQ4KWorkingSetBound(serveFitBudget{}); got != 0 {
+		t.Fatalf("unprobeable host: bound = %d, want 0 (stream-through)", got)
+	}
+	if got := serveStreamedDenseQ4KWorkingSetBound(serveFitBudget{Base: -1, Headroom: 0.10}); got != 0 {
+		t.Fatalf("negative base: bound = %d, want 0", got)
+	}
+	for _, fit := range []serveFitBudget{
+		{Base: 1 << 40, Headroom: 0},
+		{Base: 1 << 40, Headroom: 0.10},
+		{Base: 48 << 30, Headroom: 0.10},
+	} {
+		got := serveStreamedDenseQ4KWorkingSetBound(fit)
+		if got <= 0 {
+			t.Fatalf("probeable budget %+v: bound = %d, want a nonzero working set", fit, got)
+		}
+		if got >= fit.avail() {
+			t.Fatalf("probeable budget %+v: bound = %d is not strictly below avail = %d", fit, got, fit.avail())
+		}
+	}
+	// The razor-thin budget must still land strictly below avail and never go negative.
+	thin := serveStreamedDenseQ4KWorkingSetBound(serveFitBudget{Base: 4, Headroom: 0})
+	if thin < 0 || thin >= 4 {
+		t.Fatalf("thin budget: bound = %d, want [0,4)", thin)
+	}
+}
