@@ -1,15 +1,15 @@
 package compute
 
-// Q4_K cooperative matrix 2D tile geometry constants on gfx1151 / RDNA 3.5.
+// Q4_K cooperative matrix 2D tile geometry for the routing candidate arm.
 //
-// Q4_K is a 256-element super-block format: each super-block carries 8 sub-blocks
-// of 32 weights. The cooperative-matrix micro-tile for the Q4_K precision is
-// 16x16x32 (see CoopMatQ4_K in coopmat.go), so the reduction tile K is 32 and the
-// spatial tiles mirror the Q8_0 cooperative path.
+// These are the block-tiled routing scheme's own tile dimensions, distinct from
+// the exported VulkanQ4KTile* geometry in vulkan.go (which the production
+// Q4KMatMul2DDispatchGrid path uses). They are kept file-private so the two
+// schemes cannot collide on the package-level identifier, as they did when this
+// file redeclared the exported names (fak#12177 follow-up build break).
 const (
-	VulkanQ4KTileM = 32 // Token tile dimension
-	VulkanQ4KTileN = 32 // Output channel / row tile dimension
-	VulkanQ4KTileK = 32 // Reduction K dimension (Q4_K sub-block)
+	q4kRoutingTileM = 32 // Token tile dimension
+	q4kRoutingTileN = 32 // Output channel / row tile dimension
 )
 
 // vulkanQ4KCooperativeMatrixActive reports whether the Q4_K cooperative-matrix
@@ -32,8 +32,8 @@ func vulkanQ4KDispatchGrid(outDim, tokens int, cooperativeMatrixActive bool) (gr
 		return 1, 1, 1
 	}
 	if cooperativeMatrixActive && tokens > 1 {
-		gridX = (outDim + VulkanQ4KTileN - 1) / VulkanQ4KTileN
-		gridY = (tokens + VulkanQ4KTileM - 1) / VulkanQ4KTileM
+		gridX = (outDim + q4kRoutingTileN - 1) / q4kRoutingTileN
+		gridY = (tokens + q4kRoutingTileM - 1) / q4kRoutingTileM
 		if gridX < 1 {
 			gridX = 1
 		}

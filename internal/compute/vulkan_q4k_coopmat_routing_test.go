@@ -26,6 +26,32 @@ func TestVulkanQ4KCooperativeMatrixActive(t *testing.T) {
 	}
 }
 
+// TestVulkanQ4KRoutingTileGeometryIsFilePrivate guards the fak#12177 follow-up
+// build break: this file once redeclared the exported VulkanQ4KTileM/N/K names
+// that vulkan.go also declares in package compute, so any `-tags vulkan` build
+// that includes vulkan.go failed with a redeclaration error. The routing scheme
+// now owns file-private q4kRoutingTileM/N; this test pins their values and proves
+// the routing grid is derived from THEM, not from the exported production
+// geometry, so an accidental re-point or re-export is caught here rather than on
+// the device build.
+func TestVulkanQ4KRoutingTileGeometryIsFilePrivate(t *testing.T) {
+	if q4kRoutingTileM != 32 || q4kRoutingTileN != 32 {
+		t.Fatalf("routing tile geometry = (%d, %d), want (32, 32)", q4kRoutingTileM, q4kRoutingTileN)
+	}
+	// Distinct from the production exported geometry in vulkan.go; if they ever
+	// coincide, the two schemes have been conflated and this guard is void.
+	if q4kRoutingTileM == 16 && q4kRoutingTileN == 32 {
+		t.Fatalf("routing tile geometry (%d, %d) collides with the exported VulkanQ4KTile geometry",
+			q4kRoutingTileM, q4kRoutingTileN)
+	}
+	// out=64, tokens=64 with 32/32 routing tiles => (2, 2, 1); the exported
+	// production 16/32 geometry would yield (2, 4, 1) for the same shape.
+	gotX, gotY, gotZ := vulkanQ4KDispatchGrid(64, 64, true)
+	if gotX != 2 || gotY != 2 || gotZ != 1 {
+		t.Fatalf("routing grid(64, 64, coopmat) = (%d, %d, %d), want (2, 2, 1)", gotX, gotY, gotZ)
+	}
+}
+
 func TestVulkanQ4KDispatchGrid(t *testing.T) {
 	tests := []struct {
 		name                string
