@@ -98,6 +98,12 @@ type PagedRadixKVPool struct {
 	tokensPerPage int
 	nodeBlocks    map[*node][]int
 	activeTables  map[string]*PagedBlockTable
+	// retracted records nodes whose published block chain has been retracted: a
+	// transient request-local checkpoint whose physical slots are about to be
+	// overwritten. A retracted node (and any ancestor that derived its published
+	// chain through it) resolves to no block chain until a fresh SetNodeBlocks
+	// re-publishes it, so a lookup can never silently reuse overwritten slots.
+	retracted map[*node]bool
 
 	// Telemetry & accounting counters
 	hits                atomic.Int64
@@ -145,6 +151,7 @@ func NewPagedRadixKVPoolWithTree(tree *Tree, pool *ctxmmu.KVPool) *PagedRadixKVP
 		tokensPerPage: tpp,
 		nodeBlocks:    make(map[*node][]int),
 		activeTables:  make(map[string]*PagedBlockTable),
+		retracted:     make(map[*node]bool),
 	}
 
 	// Register this pool as page occupancy tracker on the tree so page-aware eviction
@@ -214,6 +221,7 @@ func (p *PagedRadixKVPool) SetNodeBlocks(n *Node, blockIDs []int) error {
 	}
 
 	p.nodeBlocks[n] = append([]int(nil), blockIDs...)
+	delete(p.retracted, n) // a fresh assignment re-publishes the node chain
 	if len(blockIDs) > 0 {
 		n.SetChunkID(blockIDs[0])
 	}
@@ -249,8 +257,59 @@ func (p *PagedRadixKVPool) ResolveBlockIDs(n *Node) []int {
 	return p.resolveBlockIDsLocked(n)
 }
 
+// RetractPublishedHash drops node n's published prefix hash before its physical slots are
+// overwritten by a later write. It is the radixkv analogue of vLLM's
+// _maybe_evict_cached_block + replace_existing_hashes=True: a transient request-local
+// checkpoint must retract its published block chain so a subsequent lookup cannot match a
+// hash that names slots which no longer hold the prefix. The retraction spreads to every
+// no-direct-block ancestor whose published chain was derived through this node, because that
+// derived chain also names the overwritten slots. A later SetNodeBlocks re-publishes the node
+// and clears its retraction. Leases and refcounts are untouched, so a leased node and its
+// ancestors are still never reclaimed.
+func (p *PagedRadixKVPool) RetractPublishedHash(n *Node) {
+	if p == nil || n == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.retractLocked(n)
+}
+
+func (p *PagedRadixKVPool) retractLocked(n *node) {
+	if n == nil || p.retracted[n] {
+		return
+	}
+	p.retracted[n] = true
+	for anc := n.parent; anc != nil && anc.parent != nil; anc = anc.parent {
+		if _, direct := p.nodeBlocks[anc]; direct {
+			break
+		}
+		p.retracted[anc] = true
+	}
+}
+
+// ResolvePublishedChain resolves the published 32-bit Metal page chain for an exact token
+// path, or nil when the longest matching node chain has been retracted. It is the
+// lookup-shaped read of the published hash: a retracted checkpoint makes the chain miss (so
+// a caller re-prefills) instead of silently binding overwritten slots.
+func (p *PagedRadixKVPool) ResolvePublishedChain(tokens []int) []uint32 {
+	if p == nil || len(tokens) == 0 {
+		return nil
+	}
+	boundary, matched := p.Tree.Lookup(tokens)
+	if boundary == nil || matched == 0 {
+		return nil
+	}
+	p.Tree.Done(boundary)
+	return p.ResolveMetalPageTable(boundary)
+}
+
 func (p *PagedRadixKVPool) resolveBlockIDsLocked(n *node) []int {
 	if n == nil {
+		return nil
+	}
+
+	if p.retracted[n] {
 		return nil
 	}
 
