@@ -15,7 +15,7 @@ import (
 // from FAK_UP_KV_PRECISION (the same seam the serve --kv-precision flag publishes to).
 // Unset or "f32" yields the exact F32 tier; a q8 token yields the denser mixed tier so
 // the admission math matches the engine's residency. Unknown tokens fall back to F32
-// (fail-open) — an invalid flag is refused at serve-flag validation, not here.
+// (fail-open) Ã¢â‚¬â€ an invalid flag is refused at serve-flag validation, not here.
 func serveKVPrecision() compute.KVPrecision {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_UP_KV_PRECISION"))) {
 	case "q8", "q8_0", "8":
@@ -36,8 +36,8 @@ const serveGGUFDeviceHeadroom = 0.15
 // It is FAIL-OPEN by construction (the contract every capacity check here keeps): a non-MoE model,
 // a model whose weights cannot be accounted, ranks<=1, a nil backend, or a backend whose capacity is
 // unknown (cpu-ref, a non-probing device) all return nil. So it can ONLY turn a KNOWN per-card
-// overflow (e.g. a 434 GiB model at N=4 ≈ 118 GiB/card on 80 GiB GPUs) into a clean pre-serve
-// refusal — instead of an OOM that surfaces minutes in, when rank r uploads its expert band to GPU r.
+// overflow (e.g. a 434 GiB model at N=4 Ã¢â€°Ë† 118 GiB/card on 80 GiB GPUs) into a clean pre-serve
+// refusal Ã¢â‚¬â€ instead of an OOM that surfaces minutes in, when rank r uploads its expert band to GPU r.
 func refuseEPPlanIfUnfit(m *fakmodel.Model, be compute.Backend, ranks, contextBudgetTokens int) error {
 	if m == nil || be == nil || ranks <= 1 {
 		return nil
@@ -47,8 +47,8 @@ func refuseEPPlanIfUnfit(m *fakmodel.Model, be compute.Backend, ranks, contextBu
 		return nil // nothing accounted (non-MoE / unloaded) -> fail open
 	}
 	// KV is a per-rank cost: pure EP replicates attention, so each rank holds the full KV for the
-	// context it serves. Size it from the model geometry at the context budget — the SAME KV the
-	// load-time fit plan sizes from contextBudgetTokens — so the per-card check is weights + KV, not
+	// context it serves. Size it from the model geometry at the context budget Ã¢â‚¬â€ the SAME KV the
+	// load-time fit plan sizes from contextBudgetTokens Ã¢â‚¬â€ so the per-card check is weights + KV, not
 	// weights alone (matching the established serve fit pattern). 0 budget leaves a weights-only plan.
 	var extra compute.MemoryPlan
 	if contextBudgetTokens > 0 {
@@ -76,7 +76,7 @@ const serveGGUFHostHeadroom = 0.15
 // context against: the raw budget base (a backend's device free-or-total, or the host's
 // MemAvailable) and the headroom fraction the matching load-time fit check reserves. A
 // non-positive Base means the ceiling is unprobeable (the cpu-ref floor, a device that cannot
-// report capacity) — avail() then yields FreeUnknown and the auto-sizer falls open to the model's
+// report capacity) Ã¢â‚¬â€ avail() then yields FreeUnknown and the auto-sizer falls open to the model's
 // full declared window, exactly as before #1046.
 type serveFitBudget struct {
 	Base     int64
@@ -129,7 +129,7 @@ func resolveServeNativeContext(ws *ggufload.WeightSource, weights compute.Memory
 	return resolution, csc.PerContextMemoryPlan(resolution.ResolvedTokens), nil
 }
 
-// avail is the headroom-adjusted budget passed to compute.AutoSizeContextPlan — byte-identical to
+// avail is the headroom-adjusted budget passed to compute.AutoSizeContextPlan Ã¢â‚¬â€ byte-identical to
 // the budget the matching RefuseMemoryPlanIfTooBig* check computes (same compute.BudgetAfterHeadroom
 // formula), so a context derived against it provably passes that check. An unknown base yields
 // FreeUnknown so the sizer fails open to the full window.
@@ -141,15 +141,15 @@ func (b serveFitBudget) avail() int64 {
 }
 
 // serveDeviceFitBudget reads the device memory ceiling a device serve arm's fit check uses
-// (DeviceMemoryInfo: free, or the total ceiling when free is unprobeable). Unknown capacity → a
-// zero base → the auto-sizer keeps the full window.
+// (DeviceMemoryInfo: free, or the total ceiling when free is unprobeable). Unknown capacity Ã¢â€ â€™ a
+// zero base Ã¢â€ â€™ the auto-sizer keeps the full window.
 func serveDeviceFitBudget(be compute.Backend) serveFitBudget {
 	total, free, known := compute.DeviceMemoryInfo(be)
 	return serveFitBudget{Base: serveFitBudgetBase(total, free, known), Headroom: serveGGUFDeviceHeadroom}
 }
 
 // serveHostFitBudget reads the process host's allocatable RAM the pure-CPU serve arm's fit check
-// uses (HostSystemMemoryInfo → Linux MemAvailable). Unknown → a zero base → the full window.
+// uses (HostSystemMemoryInfo Ã¢â€ â€™ Linux MemAvailable). Unknown Ã¢â€ â€™ a zero base Ã¢â€ â€™ the full window.
 func serveHostFitBudget() serveFitBudget {
 	total, free, known := compute.HostSystemMemoryInfo()
 	return serveFitBudget{Base: serveFitBudgetBase(total, free, known), Headroom: serveGGUFHostHeadroom}
@@ -206,7 +206,7 @@ func refuseDevicePlanAgainstFit(be compute.Backend, plan compute.MemoryPlan, fit
 // serveDeviceStagingHostCharge is the TRANSIENT host-resident charge a device serve materializes
 // while STAGING its device-scoped weights (fak#13171). A device-scoped weight is not born in VRAM:
 // the loader reads its bytes into host RAM, dequantizes/transcodes, uploads it to the device, and
-// frees the host copy — so the device-scoped dense total is ALSO a transient host demand, on top of
+// frees the host copy Ã¢â‚¬â€ so the device-scoped dense total is ALSO a transient host demand, on top of
 // the already-host-scoped routed-expert pool. RefuseHostScopedPlanIfTooBigForHost judges ONLY
 // plan.HostTotal(), so a 63.09 GiB device dense charge sails past it and the process is SIGKILLed
 // by the Linux OOM-killer mid-staging (the witnessed strix3 kill: weights=63.092GiB against
@@ -240,12 +240,52 @@ func serveDeviceStagingHostPlan(plan compute.MemoryPlan) compute.MemoryPlan {
 // every other capacity rung here. On overflow it returns the typed *compute.FitError the reported-
 // host refusal builds, which NAMES the demand and the shortfall instead of letting the kernel OOM
 // decide. A device serve whose device dense staging fits is unchanged.
+//
+// This is the SINGLE-WINDOW form: the device staging transit is judged against the host window
+// alone. Callers that hold a distinct device aperture (a split VRAM/system box) use
+// refuseDeviceStagingAgainstReportedAperture, which judges the transit against the DEVICE window
+// it is destined for (fak#13177) while preserving this single-window judgement when no distinct
+// device window is known.
 func refuseDeviceStagingAgainstHostFit(plan compute.MemoryPlan, fit serveFitBudget) error {
 	if fit.Base <= 0 {
 		return nil
 	}
 	staging := serveDeviceStagingHostPlan(plan)
 	return compute.RefuseMemoryPlanIfTooBigForReportedHost(staging, fit.Base, fit.Base, true, fit.Headroom)
+}
+
+// refuseDeviceStagingAgainstReportedAperture is the SPLIT-AWARE form of the staging guard
+// (fak#13177). On a split-aperture integrated box (a Strix Halo with a 64 GiB VRAM carve-out) the
+// device-scoped dense side is DESTINED for the VRAM window: it transits host RAM only transiently
+// during staging, but its residency is the device aperture. Judging it against the system window
+// alone (62.43 GiB MemTotal) refuses a 63.22 GiB dense side that comfortably fits the 64 GiB VRAM
+// window - the exact [HW-WITNESSED] strix3 refusal that blocked the first physical V4.1 token.
+//
+// When a device window is known AND distinct from the host window, the transit is judged against
+// that device window; otherwise this delegates byte-for-byte to the single-window
+// refuseDeviceStagingAgainstHostFit, so the fak#13171 kernel-OOM protection is preserved exactly
+// (an unknown or coincident device window keeps today's host-RAM judgement). The genuine
+// host-scoped expert pool is judged by the pre-existing host guard on the same arm, not here.
+func refuseDeviceStagingAgainstReportedAperture(plan compute.MemoryPlan, fit serveFitBudget, deviceTotal, deviceFree int64, deviceKnown bool) error {
+	if fit.Base <= 0 {
+		return nil
+	}
+	staging := serveDeviceStagingHostPlan(plan)
+	if staging == nil {
+		return nil
+	}
+	if !deviceKnown || deviceTotal <= 0 || deviceTotal == fit.Base {
+		return refuseDeviceStagingAgainstHostFit(plan, fit)
+	}
+	// The transit is DEVICE-destined, so it must be judged as a device-scoped demand: the reported
+	// device refusal sums plan.DeviceTotal(), and a host-scoped row would make that sum zero and
+	// admit any transit. Re-scope the synthesized row to the device aperture for this check.
+	deviceStaging := make(compute.MemoryPlan, len(staging))
+	copy(deviceStaging, staging)
+	for i := range deviceStaging {
+		deviceStaging[i].Scope = compute.MemoryScopeDevice
+	}
+	return compute.RefuseMemoryPlanIfTooBigForReportedDevice(nil, deviceStaging, deviceTotal, deviceFree, true, fit.Headroom)
 }
 
 // logServeDeviceCPUOffloadArmStaging is the ONE pre-staging startup line the device
@@ -493,12 +533,12 @@ func serveGGUFMemoryPlan(ws *ggufload.WeightSource, f32Resident bool, contextBud
 // serveGGUFCPUOffloadMemoryPlan plans the --cpu-offload-experts split: dense/router/attention
 // weights device-scoped, routed and shared experts host-scoped.
 //
-// ranks is how many expert-parallel ranks this process's weights are split across — 1 for every
+// ranks is how many expert-parallel ranks this process's weights are split across Ã¢â‚¬â€ 1 for every
 // unsharded serve, which plans exactly as it always has. Above 1 the rank has been handed a band
 // and admits only experts [Lo,Hi) into the host expert pool (the loader's WithExpertShard seam),
 // so the routed set must be charged one band and not in full: charging every rank the whole set
 // overstated host demand ~ranks-fold and made RefuseHostScopedPlanIfTooBigForHost refuse a serve
-// that fits — before the authoritative rank-local gate (refuseEPPlanIfUnfit, #2997) could run at
+// that fits Ã¢â‚¬â€ before the authoritative rank-local gate (refuseEPPlanIfUnfit, #2997) could run at
 // all (#4952).
 func serveGGUFCPUOffloadMemoryPlan(ws *ggufload.WeightSource, ranks, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
 	if ws == nil {
@@ -519,8 +559,8 @@ func appendServeGGUFDevicePlan(ws *ggufload.WeightSource, plan compute.MemoryPla
 	// Delegate to the single context auto-sizer (#1049) so the serve boot path sizes its
 	// KV+scratch plan exactly as the in-kernel per-request planner does. #1046: pass the real
 	// (headroom-adjusted) memory ceiling so that when no native context override is set the sizer
-	// derives the LARGEST context that fits this box — instead of sizing against the full
-	// MaxPositionEmbeddings window and refusing — and log the derived size for the operator.
+	// derives the LARGEST context that fits this box Ã¢â‚¬â€ instead of sizing against the full
+	// MaxPositionEmbeddings window and refusing Ã¢â‚¬â€ and log the derived size for the operator.
 	avail := fit.avail()
 	csc := cfg.ContextSizeConfigWithPrecision(serveKVPrecision())
 	tokens, ctxPlan := compute.AutoSizeContextPlan(csc, plan, avail, serveContextTokenOverride(contextBudgetTokens))
@@ -530,7 +570,7 @@ func appendServeGGUFDevicePlan(ws *ggufload.WeightSource, plan compute.MemoryPla
 
 // logServeAutoSizedContext prints the #1046 one-line auto-size record when the boot path DERIVED a
 // context (no --native-context-tokens override, and a probeable memory ceiling) that is smaller than the
-// model's full declared window — the case the operator needs to see, because the full window would
+// model's full declared window Ã¢â‚¬â€ the case the operator needs to see, because the full window would
 // have overflowed the box and refused. It is silent when an explicit budget was given, when the
 // ceiling is unprobeable (the full window is kept, unchanged), or when the full window already fits
 // (nothing was shrunk).
@@ -544,7 +584,7 @@ func logServeAutoSizedContext(csc compute.ContextSizeConfig, weights compute.Mem
 		headroom = 0
 	}
 	fmt.Fprintf(os.Stderr,
-		"fak: auto-sized context to %d tokens (kv=%s, weights=%s, headroom=%s) — --native-context-tokens=0 selected auto sizing; the model's full %d-token window would overflow the %s fit budget\n",
+		"fak: auto-sized context to %d tokens (kv=%s, weights=%s, headroom=%s) Ã¢â‚¬â€ --native-context-tokens=0 selected auto sizing; the model's full %d-token window would overflow the %s fit budget\n",
 		tokens, bytesText(uint64(max(kv, 0))), bytesText(uint64(max(weights.DeviceTotal(), 0))),
 		bytesText(uint64(headroom)), csc.MaxContext, bytesText(uint64(max(avail, 0))))
 }
@@ -562,9 +602,9 @@ func serveContextTokenOverride(contextBudgetTokens int) int {
 // serve path (loadServeInKernelModel's FAK_Q4K and default cases) copies every super-block to
 // ANONYMOUS host RAM with NO HAL backend to refuse via RefuseMemoryPlanIfTooBig, so without this
 // it loads until the host OOM-wedges. It sizes the resident weights + KV + scratch off the GGUF
-// HEADER ALONE (no tensor read — same EstimateLoadMemoryPlan proxy the device lean path uses) and
+// HEADER ALONE (no tensor read Ã¢â‚¬â€ same EstimateLoadMemoryPlan proxy the device lean path uses) and
 // refuses with a typed FitTooBig naming the shortfall when the plan exceeds MemAvailable less
-// headroom — parity with the device path's fit plan. Fail-open: a platform that cannot report
+// headroom Ã¢â‚¬â€ parity with the device path's fit plan. Fail-open: a platform that cannot report
 // host memory loads exactly as before.
 func fitServeGGUFPathOnHost(ggufPath string, f32Resident bool, contextBudgetTokens int, fit *serveFitBudget) error {
 	total, free, known := compute.HostSystemMemoryInfo()
@@ -608,9 +648,9 @@ func fitServeGGUFPathOnReportedHost(ggufPath string, f32Resident bool, contextBu
 	return refuseHostPlanAgainstFit(plan, fit)
 }
 
-// refuseIfTooBigOnDevice applies the device-headroom refusal to a freshly-built plan —
+// refuseIfTooBigOnDevice applies the device-headroom refusal to a freshly-built plan Ã¢â‚¬â€
 // the err-check + nil-backend passthrough + RefuseMemoryPlanIfTooBig tail the two
-// fitAndPlan…OnDevice helpers share.
+// fitAndPlanÃ¢â‚¬Â¦OnDevice helpers share.
 func refuseIfTooBigOnDevice(plan compute.MemoryPlan, err error, be compute.Backend, override *serveFitBudget) (compute.MemoryPlan, error) {
 	if err != nil {
 		return nil, err
@@ -646,8 +686,8 @@ func refuseIfTooBigOnDevice(plan compute.MemoryPlan, err error, be compute.Backe
 }
 
 // withGGUFWeights opens the GGUF weights at ggufPath (an empty path plans nothing) and runs
-// plan against them, closing the source after — the open+defer-close prelude the
-// serveGGUF…PathMemoryPlan helpers share.
+// plan against them, closing the source after Ã¢â‚¬â€ the open+defer-close prelude the
+// serveGGUFÃ¢â‚¬Â¦PathMemoryPlan helpers share.
 func withGGUFWeights(ggufPath string, plan func(*ggufload.WeightSource) (compute.MemoryPlan, error)) (compute.MemoryPlan, error) {
 	if ggufPath == "" {
 		return nil, nil
@@ -673,7 +713,7 @@ func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Res
 
 // fitAndPlanServeGGUFCPUOffloadPathOnDevice keeps serveDeviceFitBudget's generic device headroom
 // even for a sharded rank, rather than the tighter EP load-time one: on this arm the routed
-// experts are host-resident, so the device side is the dense remainder plus KV — not the tight
+// experts are host-resident, so the device side is the dense remainder plus KV Ã¢â‚¬â€ not the tight
 // resident-EP case 0.05 exists for. ranks changes which routed bytes are charged, never the
 // headroom.
 func fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath string, be compute.Backend, ranks, contextBudgetTokens int, override *serveFitBudget) (compute.MemoryPlan, error) {
