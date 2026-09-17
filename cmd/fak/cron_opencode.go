@@ -80,6 +80,13 @@ type OpenCodeRunReceipt struct {
 	CostUSD     float64 `json:"cost_usd,omitempty"`     // observed billed USD (provider ledger); 0 = unmeasured
 	ModelID     string  `json:"model_id,omitempty"`     // model that served the session
 	ProviderID  string  `json:"provider_id,omitempty"`  // provider that served the session
+
+	// Provider-failure classification (#1866). Additive + omitempty so a receipt
+	// with no class stays byte-identical to the fak-opencode-run/1 shape above.
+	// Present on every failed/timeout run as "transient" | "ongoing"; absent on a
+	// succeeded run. "ongoing" is the conservative fallback for any failure the
+	// runner cannot positively identify as a bounded provider blip.
+	FailureClass string `json:"failure_class,omitempty"`
 }
 
 // cronOpenCodeBunCrashSignature reports whether captured child output carries the
@@ -92,6 +99,78 @@ func cronOpenCodeBunCrashSignature(output string) bool {
 	lower := strings.ToLower(output)
 	return strings.Contains(lower, "segmentation fault") &&
 		(strings.Contains(lower, "bun has crashed") || strings.Contains(lower, "bun.report"))
+}
+
+// Regexes for the TRANSIENT provider-failure signals (#1866). Each requires an
+// explicit HTTP/status context token adjacent to the code: we bias HARD toward a
+// false NEGATIVE (unrecognized evidence -> "ongoing", the conservative default)
+// because a false POSITIVE would hide a real outage as a non-throttling blip.
+var (
+	// reCronFailureStatus matches an HTTP status code that is unambiguous ONLY in
+	// a status context: "HTTP/1.1 503", "status 502", "status_code=429",
+	// `"status":429` (JSON), "code: 500", "response 503". A bare "500" embedded in
+	// arbitrary output (latency ms, token counts) does NOT match.
+	reCronFailureStatus = regexp.MustCompile(`(?i)(?:\bhttp(?:/[0-9.]+)?\b|\bstatus(?:[_ -]?code)?\b|\bcode\b|\bresponse\b)["']?\s*[:=]?\s*["']?\s*(?:<[^>]*>\s*)?\b(500|502|503|504|429)\b`)
+	// reCronFailureStatusPost matches "<code> <reason phrase>" forms such as
+	// "503 Service Unavailable" / "429 Too Many Requests" / "502 Bad Gateway".
+	reCronFailureStatusPost = regexp.MustCompile(`(?i)\b(500|502|503|504|429)\s+(?:internal server error|bad gateway|service unavailable|gateway time-?out|too many requests)\b`)
+	// reCronFailureStatusPre matches "<reason phrase> <code>" forms such as
+	// "Internal Server Error 500" / "Too Many Requests 429".
+	reCronFailureStatusPre = regexp.MustCompile(`(?i)\b(?:internal server error|bad gateway|service unavailable|gateway time-?out|too many requests)\b[\s:]*\b(500|502|503|504|429)\b`)
+	// reCronConnectionReset matches a transport-level reset ("connection reset by
+	// peer"), an unambiguously transient transport failure.
+	reCronConnectionReset = regexp.MustCompile(`(?i)\bconnection reset(?: by peer)?\b`)
+)
+
+// cronClassifyFailureClass maps a terminal run outcome plus its bounded child
+// output to the provider-failure class the ops budget guard consumes (#1866).
+// It returns:
+//
+//	""          when outcome is not a failure (only "failed"/"timeout" are classed)
+//	"transient" for a bounded provider blip: HTTP 500/502/503/504, HTTP 429, or a
+//	            connection reset
+//	"ongoing"   for a paused/forbidden org (HTTP 405), exhausted credit, or ANY
+//	            unclassifiable failure
+//
+// "transient" is the narrow, evidence-gated class; "ongoing" is the conservative
+// fallback so a failed/timeout receipt is NEVER left without a class (an absent
+// class counts as ONGOING downstream anyway, and explicit is the honest form).
+func cronClassifyFailureClass(outcome, output string) string {
+	switch strings.ToLower(strings.TrimSpace(outcome)) {
+	case "failed", "timeout":
+	default:
+		return ""
+	}
+	if output != "" {
+		// Paused/forbidden org (HTTP 405, e.g. a body saying the account is
+		// paused) is an ONGOING, operator-actionable condition - never transient.
+		if strings.Contains(strings.ToLower(output), "paused") {
+			return "ongoing"
+		}
+		if reCronConnectionReset.MatchString(output) {
+			return "transient"
+		}
+		if m := reCronFailureStatus.FindStringSubmatch(output); len(m) > 1 {
+			return cronFailureStatusClass(m[1])
+		}
+		if m := reCronFailureStatusPost.FindStringSubmatch(output); len(m) > 1 {
+			return cronFailureStatusClass(m[1])
+		}
+		if m := reCronFailureStatusPre.FindStringSubmatch(output); len(m) > 1 {
+			return cronFailureStatusClass(m[1])
+		}
+	}
+	return "ongoing"
+}
+
+// cronFailureStatusClass maps a matched HTTP status code to a failure class:
+// 429 and the 5xx server-blip class are TRANSIENT; everything else is ONGOING.
+func cronFailureStatusClass(code string) string {
+	switch code {
+	case "429", "500", "502", "503", "504":
+		return "transient"
+	}
+	return "ongoing"
 }
 
 var reOpenCodeBunVersion = regexp.MustCompile(`(?i)\bbun\s+v([0-9][0-9A-Za-z_.-]*)`)
@@ -530,6 +609,12 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 		CrashRecovered:  crashRecovered,
 		OpenCodeVersion: openCodeVersion,
 		BunVersion:      bunVersion,
+
+		// Provider-failure classification (#1866): stamped on failed/timeout runs
+		// only (empty on succeeded). cronClassifyFailureClass returns "ongoing" for
+		// any unclassifiable failure, so a failed/timeout receipt is never left
+		// classless. Additive + omitempty: succeeded runs stay byte-identical.
+		FailureClass: cronClassifyFailureClass(outcome, lastStderr+"\n"+lastStdout),
 	}
 
 	// Nonzero exit with no session created means OpenCode never started; surface

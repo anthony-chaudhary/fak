@@ -1024,3 +1024,211 @@ func TestCronOpenCodeBunCrashSignatureDetector(t *testing.T) {
 		t.Errorf("expected bun.report link alone to count")
 	}
 }
+
+// --- Provider-failure classification (#1866): TRANSIENT-vs-ONGOING producer half ---
+//
+// A failed/timeout receipt MUST carry failure_class ("transient" | "ongoing"); a
+// succeeded receipt MUST omit it entirely (byte-identical to the pre-#1866 shape).
+
+// cronOpenCodeFailureClassCommand builds a cross-platform child that exits
+// non-zero after writing `stderrText` (best-effort, via the shell) so a failure
+// run deterministically surfaces that text in the bounded receipt output.
+func cronOpenCodeFailureClassCommand(stderrText string) []string {
+	if runtime.GOOS == "windows" {
+		return []string{"cmd", "/c", "echo " + stderrText + " 1>&2 & exit 1"}
+	}
+	return []string{"sh", "-c", "echo " + strconv.Quote(stderrText) + " 1>&2; exit 1"}
+}
+
+// cronRunFailureClassChild executes a failing child whose stderr carries
+// stderrText, and returns the receipt (asserting the run itself is a harness
+// success so the classification assertions stay meaningful).
+func cronRunFailureClassChild(t *testing.T, job, stderrText string) OpenCodeRunReceipt {
+	t.Helper()
+	ledger := filepath.Join(t.TempDir(), "opencode_failure_class.jsonl")
+	var stdout, stderr bytes.Buffer
+
+	opts := ScheduledOpenCodeOptions{
+		Job:         job,
+		Ledger:      ledger,
+		Timeout:     5 * time.Second,
+		Command:     cronOpenCodeFailureClassCommand(stderrText),
+		Stdout:      &stdout,
+		Stderr:      &stderr,
+		EmitReceipt: true,
+	}
+
+	receipt, err := RunScheduledOpenCode(opts)
+	if err != nil {
+		t.Fatalf("unexpected harness error: %v (stderr: %s)", err, stderr.String())
+	}
+	if receipt.Outcome != "failed" {
+		t.Fatalf("expected outcome 'failed', got %q (exit=%d, stderr=%s)", receipt.Outcome, receipt.ExitCode, stderr.String())
+	}
+
+	// The classification must survive the JSONL round-trip, not just live on the
+	// in-memory struct: read the ledger back and cross-check.
+	receipts, readErr := cronReadOpenCodeReceipts(ledger)
+	if readErr != nil {
+		t.Fatalf("cronReadOpenCodeReceipts error: %v", readErr)
+	}
+	if len(receipts) != 1 {
+		t.Fatalf("expected 1 receipt in ledger, got %d", len(receipts))
+	}
+	if receipts[0].FailureClass != receipt.FailureClass {
+		t.Errorf("ledger failure_class %q != in-memory %q (round-trip drift)", receipts[0].FailureClass, receipt.FailureClass)
+	}
+	return receipt
+}
+
+func TestCronOpenCodeFailureClassTransient500(t *testing.T) {
+	receipt := cronRunFailureClassChild(t, "job-class-500", "provider error: HTTP 500 Internal Server Error")
+	if receipt.Outcome != "failed" {
+		t.Fatalf("expected outcome 'failed', got %q", receipt.Outcome)
+	}
+	if receipt.FailureClass != "transient" {
+		t.Errorf("expected failure_class 'transient' for HTTP 500, got %q (receipt: %+v)", receipt.FailureClass, receipt)
+	}
+}
+
+func TestCronOpenCodeFailureClassTransient429(t *testing.T) {
+	receipt := cronRunFailureClassChild(t, "job-class-429", "rate limited: status 429 Too Many Requests")
+	if receipt.Outcome != "failed" {
+		t.Fatalf("expected outcome 'failed', got %q", receipt.Outcome)
+	}
+	if receipt.FailureClass != "transient" {
+		t.Errorf("expected failure_class 'transient' for HTTP 429, got %q", receipt.FailureClass)
+	}
+}
+
+func TestCronOpenCodeFailureClassTransientConnectionReset(t *testing.T) {
+	receipt := cronRunFailureClassChild(t, "job-class-reset", "read tcp 10.0.0.1:443: connection reset by peer")
+	if receipt.Outcome != "failed" {
+		t.Fatalf("expected outcome 'failed', got %q", receipt.Outcome)
+	}
+	if receipt.FailureClass != "transient" {
+		t.Errorf("expected failure_class 'transient' for connection reset, got %q", receipt.FailureClass)
+	}
+}
+
+func TestCronOpenCodeFailureClassOngoingPausedOrg(t *testing.T) {
+	receipt := cronRunFailureClassChild(t, "job-class-paused", "HTTP 405 Method Not Allowed: organization is paused")
+	if receipt.Outcome != "failed" {
+		t.Fatalf("expected outcome 'failed', got %q", receipt.Outcome)
+	}
+	if receipt.FailureClass != "ongoing" {
+		t.Errorf("expected failure_class 'ongoing' for paused org (HTTP 405), got %q", receipt.FailureClass)
+	}
+}
+
+func TestCronOpenCodeFailureClassOngoingUnclassified(t *testing.T) {
+	// The critical invariant: a failure the classifier cannot positively identify
+	// as a bounded provider blip MUST default to "ongoing" (conservative), never
+	// "transient".
+	receipt := cronRunFailureClassChild(t, "job-class-unclassified", "invalid flag: --nonexistent-option")
+	if receipt.Outcome != "failed" {
+		t.Fatalf("expected outcome 'failed', got %q", receipt.Outcome)
+	}
+	if receipt.FailureClass != "ongoing" {
+		t.Errorf("expected conservative failure_class 'ongoing' for unclassifiable failure, got %q", receipt.FailureClass)
+	}
+}
+
+func TestCronOpenCodeFailureClassOmittedOnSuccess(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "opencode_class_success.jsonl")
+	var stdout, stderr bytes.Buffer
+
+	var cmdArgs []string
+	if runtime.GOOS == "windows" {
+		cmdArgs = []string{"cmd", "/c", "echo {\"session_id\": \"ses_class_ok\"}"}
+	} else {
+		cmdArgs = []string{"sh", "-c", "echo '{\"session_id\": \"ses_class_ok\"}'"}
+	}
+
+	opts := ScheduledOpenCodeOptions{
+		Job:         "job-class-success",
+		Ledger:      ledger,
+		Timeout:     5 * time.Second,
+		Command:     cmdArgs,
+		Stdout:      &stdout,
+		Stderr:      &stderr,
+		EmitReceipt: true,
+	}
+
+	receipt, err := RunScheduledOpenCode(opts)
+	if err != nil {
+		t.Fatalf("RunScheduledOpenCode error: %v (stderr: %s)", err, stderr.String())
+	}
+	if receipt.Outcome != "succeeded" {
+		t.Fatalf("expected outcome 'succeeded', got %q", receipt.Outcome)
+	}
+	if receipt.FailureClass != "" {
+		t.Errorf("expected empty FailureClass on success, got %q", receipt.FailureClass)
+	}
+
+	// The success receipt must be byte-identical to the pre-#1866 schema: the
+	// additive omitempty field contributes ZERO bytes when empty.
+	rawJSON, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatalf("failed to marshal receipt: %v", err)
+	}
+	if strings.Contains(string(rawJSON), "failure_class") {
+		t.Errorf("succeeded receipt JSON must NOT contain 'failure_class', got: %s", string(rawJSON))
+	}
+
+	// Independent of field presence, an empty-string-typed field landing in the
+	// ledger must also serialize without the key (round-trip read-back).
+	receipts, err := cronReadOpenCodeReceipts(ledger)
+	if err != nil {
+		t.Fatalf("cronReadOpenCodeReceipts error: %v", err)
+	}
+	if len(receipts) != 1 {
+		t.Fatalf("expected 1 receipt in ledger, got %d", len(receipts))
+	}
+	if receipts[0].FailureClass != "" {
+		t.Errorf("expected ledger succeeded receipt FailureClass empty, got %q", receipts[0].FailureClass)
+	}
+}
+
+func TestCronClassifyFailureClass(t *testing.T) {
+	tests := []struct {
+		name     string
+		outcome  string
+		output   string
+		expected string
+	}{
+		{name: "empty_outcome", outcome: "", output: "HTTP 500", expected: ""},
+		{name: "succeeded", outcome: "succeeded", output: "HTTP 500 Internal Server Error", expected: ""},
+		{name: "expired_not_a_failure_class", outcome: "expired", output: "", expected: ""},
+		{name: "deduped_not_a_failure_class", outcome: "deduped", output: "", expected: ""},
+
+		{name: "failed_http_500", outcome: "failed", output: "provider error: HTTP 500 Internal Server Error", expected: "transient"},
+		{name: "failed_http_429", outcome: "failed", output: "rate limited: status 429 Too Many Requests", expected: "transient"},
+		{name: "failed_http_503", outcome: "failed", output: "HTTP/1.1 503 Service Unavailable", expected: "transient"},
+		{name: "timeout_http_502", outcome: "timeout", output: "bad gateway: HTTP 502", expected: "transient"},
+		{name: "failed_status_code_eq_504", outcome: "failed", output: "status_code=504", expected: "transient"},
+		{name: "failed_connection_reset", outcome: "failed", output: "read tcp: connection reset by peer", expected: "transient"},
+
+		{name: "failed_paused_org_405", outcome: "failed", output: "HTTP 405 Method Not Allowed: organization is paused", expected: "ongoing"},
+		{name: "failed_paused_word_only", outcome: "failed", output: "this account is paused", expected: "ongoing"},
+		{name: "failed_unrecognized_stderr", outcome: "failed", output: "invalid flag: --nope", expected: "ongoing"},
+		{name: "failed_empty_output", outcome: "failed", output: "", expected: "ongoing"},
+		{name: "timeout_empty_output", outcome: "timeout", output: "", expected: "ongoing"},
+
+		// Conservative-default guard: a bare "500" with NO HTTP/status context (for
+		// example a JSON body carrying a numeric field) must NOT be read as a
+		// transient provider blip. The regex requires an explicit status context
+		// token, so this stays "ongoing".
+		{name: "bare_500_without_context_is_ongoing", outcome: "failed", output: `{"latency_ms": 500, "tokens": 123}`, expected: "ongoing"},
+		{name: "bare_429_without_context_is_ongoing", outcome: "failed", output: `{"retry_after": 429}`, expected: "ongoing"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := cronClassifyFailureClass(tc.outcome, tc.output)
+			if got != tc.expected {
+				t.Errorf("cronClassifyFailureClass(%q, %q) = %q, want %q", tc.outcome, tc.output, got, tc.expected)
+			}
+		})
+	}
+}
