@@ -135,6 +135,10 @@ func runWholeToken(s *model.Session, prompt []int, steps int, route string, star
 	// through a per-layer fallback.
 	capabilityPath, admissible := s.WholeSequenceCapability()
 	if !admissible {
+		if reason := s.WholeSequenceUnsupportedReason(); reason != nil {
+			report.Error = reason.Error()
+			return report, reason
+		}
 		return report, errors.New("whole-token witness requires a whole-sequence-capable session: no native whole-sequence owner is available for this build/device")
 	}
 	// The legacy lane is exactly the backend-nil resident-Q4_K Metal session; the

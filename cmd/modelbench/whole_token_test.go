@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"runtime"
 	"strings"
 	"sync"
@@ -363,6 +364,69 @@ func TestWholeTokenRefusesBackendWithoutWholeSequence(t *testing.T) {
 	}
 	if be.sequenceCalls != 0 || be.gdnCalls != 0 {
 		t.Fatalf("refused witness still executed: sequence=%d gdn=%d", be.sequenceCalls, be.gdnCalls)
+	}
+}
+
+// TestWholeTokenDeepSeekV41Admission is the V4.1 admission witness: a DeepSeek
+// V4.1 Flash session is admitted to the whole-sequence seam and refused by name
+// with a TYPED, non-qualifying report — never a silent per-layer fallback and
+// never routed through the Qwen35 backend adapter. The negative control proves
+// the refusal is architecture-keyed (a Qwen35 hybrid config returns no V4.1
+// reason), not a blanket refusal.
+func TestWholeTokenDeepSeekV41Admission(t *testing.T) {
+	cfg := wholeTokenFixtureCfg()
+	m := model.NewSynthetic(cfg)
+	t.Cleanup(func() { _ = m.CloseWeights() })
+	// Model.Cfg is an exported value field, so the architecture key is settable
+	// from package main without constructing the full official V4.1 wrapper.
+	m.Cfg.ModelType = "deepseek_v41"
+
+	if !m.Cfg.IsDeepSeekV41() {
+		t.Fatal("fixture config is not recognized as DeepSeek V4.1")
+	}
+	// Not-mis-admitted-as-Qwen regression: even though this synthetic fixture
+	// still carries linear_attention layers (so IsQwen35Hybrid stays true), the
+	// V4.1 identity must win at the admission seam — the session exposes no
+	// Qwen35 capability and carries the typed V4.1 refusal instead.
+
+	session := m.NewSession()
+	t.Cleanup(session.Close)
+	if path, admissible := session.WholeSequenceCapability(); admissible || path != "" {
+		t.Fatalf("V4.1 capability = %q admissible=%t, want refused", path, admissible)
+	}
+	reason := session.WholeSequenceUnsupportedReason()
+	if reason == nil {
+		t.Fatal("V4.1 session exposed no typed whole-sequence refusal")
+	}
+	if !errors.Is(reason, model.ErrV41WholeSequenceUnsupported) {
+		t.Fatalf("refusal is not typed as ErrV41WholeSequenceUnsupported: %v", reason)
+	}
+
+	report, err := runWholeToken(session, wholeTokenFixturePrompt(cfg.VocabSize), 2, "whole-token", time.Now(), nil)
+	if err == nil {
+		t.Fatalf("V4.1 session was admitted to the whole-token witness: %+v", report)
+	}
+	if !errors.Is(err, model.ErrV41WholeSequenceUnsupported) {
+		t.Fatalf("refusal is not the typed V4.1 refusal: %v", err)
+	}
+	if report.Error == "" {
+		t.Fatal("non-qualifying V4.1 report did not record the refusal")
+	}
+	if report.SequencePath != "" {
+		t.Fatalf("non-qualifying V4.1 report claimed a sequence path %q", report.SequencePath)
+	}
+	if len(report.Tokens) != 0 || len(report.Operations) != 0 {
+		t.Fatalf("refused V4.1 witness still executed: tokens=%d operations=%d", len(report.Tokens), len(report.Operations))
+	}
+
+	// Negative control: the unchanged Qwen35 fixture is not hit by the V4.1
+	// refusal, so the branch is keyed on architecture, not blanket.
+	qm := model.NewSynthetic(wholeTokenFixtureCfg())
+	t.Cleanup(func() { _ = qm.CloseWeights() })
+	qs := qm.NewSession()
+	t.Cleanup(qs.Close)
+	if r := qs.WholeSequenceUnsupportedReason(); r != nil {
+		t.Fatalf("Qwen35 fixture hit by the V4.1 refusal: %v", r)
 	}
 }
 

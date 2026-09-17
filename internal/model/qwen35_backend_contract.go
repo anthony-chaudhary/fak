@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -84,6 +85,30 @@ type UnsupportedGDNPreprojectedSequenceError struct {
 func (e *UnsupportedGDNPreprojectedSequenceError) Error() string {
 	return fmt.Sprintf("model: cannot admit Qwen GDN preprojected sequence via %q: %s; refusing host recurrence fallback", e.Path, e.Reason)
 }
+
+// ErrV41WholeSequenceUnsupported is the typed refusal for a DeepSeek V4.1 Flash
+// session admitted to the whole-token admission seam while no V4.1 whole-sequence
+// owner exists. It is deliberately NOT the Qwen-named
+// UnsupportedSequencePrefillError/UnsupportedGDNPreprojectedSequenceError: a V4.1
+// refusal must be distinguishable from a Qwen35 legacy refusal and must never
+// route V4.1 into the Qwen35 backend adapter.
+var ErrV41WholeSequenceUnsupported = errors.New("model: DeepSeek V4.1 Flash has no whole-sequence owner")
+
+// UnsupportedV41WholeSequenceError names the V4.1-specific whole-sequence refusal.
+// It carries the capability path and the reason so a caller can surface a typed,
+// non-qualifying report instead of the generic "no whole-sequence owner" message.
+type UnsupportedV41WholeSequenceError struct {
+	Path   string
+	Reason string
+}
+
+func (e *UnsupportedV41WholeSequenceError) Error() string {
+	return fmt.Sprintf("model: cannot admit DeepSeek V4.1 Flash whole-sequence owner via %q: %s; refusing per-layer fallback (%v)", e.Path, e.Reason, ErrV41WholeSequenceUnsupported)
+}
+
+// Unwrap makes errors.Is(err, ErrV41WholeSequenceUnsupported) reachable across the
+// typed refusal, so the whole-token witness can pin the V4.1-specific rung.
+func (e *UnsupportedV41WholeSequenceError) Unwrap() error { return ErrV41WholeSequenceUnsupported }
 
 func qwen35GDNPreprojectedSequenceBackend(candidate any) (Qwen35GDNPreprojectedSequenceBackend, bool, error) {
 	marker, advertised := candidate.(qwen35GDNPreprojectedSequencePathMarker)
@@ -315,7 +340,19 @@ func (s *Session) WholeSequence() WholeSequenceSession {
 // fallback. A backend-nil resident-Q4_K Metal session is admissible only when the
 // native Metal sequence factory is linked into this build.
 func (s *Session) WholeSequenceCapability() (path string, admissible bool) {
-	if s == nil || s.M == nil || !s.M.Cfg.IsQwen35Hybrid() {
+	if s == nil || s.M == nil {
+		return "", false
+	}
+	// A DeepSeek V4.1 Flash session is admitted to this seam and refused by name:
+	// no V4.1 whole-sequence owner exists yet (engine leaves pending), and routing
+	// it through the Qwen35 backend adapter would be a silent mis-admission. The
+	// typed refusal (WholeSequenceUnsupportedReason) is the honest, fail-closed
+	// answer, so the V4.1 arm returns no capability explicitly rather than being
+	// silently collapsed by the Qwen-only predicate below.
+	if s.M.Cfg.IsDeepSeekV41() {
+		return "", false
+	}
+	if !s.M.Cfg.IsQwen35Hybrid() {
 		return "", false
 	}
 	if s.Backend != nil {
@@ -329,6 +366,21 @@ func (s *Session) WholeSequenceCapability() (path string, admissible bool) {
 		return "", false
 	}
 	return Qwen35MetalGDNSequenceForwardPath, true
+}
+
+// WholeSequenceUnsupportedReason returns a typed, named refusal when this session
+// is a DeepSeek V4.1 Flash config admitted to the whole-sequence admission seam
+// with no V4.1 owner, else nil. It lets the whole-token witness surface a
+// V4.1-specific, non-qualifying refusal instead of the generic "no whole-sequence
+// owner for this build/device" message.
+func (s *Session) WholeSequenceUnsupportedReason() error {
+	if s == nil || s.M == nil || !s.M.Cfg.IsDeepSeekV41() {
+		return nil
+	}
+	return &UnsupportedV41WholeSequenceError{
+		Path:   WholeSequencePath,
+		Reason: "no native V4.1 whole-sequence owner is implemented (pending the V4.1 engine leaves)",
+	}
 }
 
 // SequencePosition reports the session's current sequence position: the HAL KV
