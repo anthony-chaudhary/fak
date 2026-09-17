@@ -430,6 +430,65 @@ func TestWholeTokenDeepSeekV41Admission(t *testing.T) {
 	}
 }
 
+// TestWholeTokenDeepSeekV41BackendLaneRefused is the non-vacuous witness for the
+// V4.1-first admission branch: on a BACKEND-SELECTED V4.1 hybrid session — one
+// whose backend advertises Qwen35SequencePrefillPath() and whose fixture still
+// carries linear_attention layers (so IsQwen35Hybrid stays true) — the V4.1
+// identity must win at the admission seam. Without the V4.1-first guard in
+// WholeSequenceCapability this predicate reaches the s.Backend != nil branch and
+// returns (Qwen35SequencePrefillPath, true), silently mis-admitting a V4.1
+// session onto the Qwen35 backend adapter; the guard makes it return ("", false).
+func TestWholeTokenDeepSeekV41BackendLaneRefused(t *testing.T) {
+	cfg := wholeTokenFixtureCfg()
+	m := model.NewSynthetic(cfg)
+	t.Cleanup(func() { _ = m.CloseWeights() })
+	m.Cfg.ModelType = "deepseek_v41"
+	if !m.Cfg.IsDeepSeekV41() {
+		t.Fatal("fixture config is not recognized as DeepSeek V4.1")
+	}
+
+	be := &wholeTokenSequenceBackend{wholeTokenBackendFixture: wholeTokenBackendFixture{Backend: compute.Default(), m: m}}
+	session, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatalf("backend-selected V4.1 session construction: %v", err)
+	}
+	t.Cleanup(session.Close)
+
+	// THIS assertion fails before commit a56d9e143's model change (the old
+	// predicate order reaches the s.Backend != nil branch and returns the Qwen35
+	// sequence path as admissible) and passes after it. It guards the silent
+	// mis-admission of a V4.1 session onto the Qwen35 backend adapter.
+	if path, admissible := session.WholeSequenceCapability(); admissible || path != "" {
+		t.Fatalf("V4.1 backend-lane capability = %q admissible=%t, want refused", path, admissible)
+	}
+	reason := session.WholeSequenceUnsupportedReason()
+	if reason == nil {
+		t.Fatal("V4.1 backend-lane session exposed no typed whole-sequence refusal")
+	}
+	if !errors.Is(reason, model.ErrV41WholeSequenceUnsupported) {
+		t.Fatalf("refusal is not typed as ErrV41WholeSequenceUnsupported: %v", reason)
+	}
+
+	report, err := runWholeToken(session, wholeTokenFixturePrompt(cfg.VocabSize), 2, "whole-token", time.Now(), nil)
+	if err == nil {
+		t.Fatalf("V4.1 backend-lane session was admitted to the whole-token witness: %+v", report)
+	}
+	if !errors.Is(err, model.ErrV41WholeSequenceUnsupported) {
+		t.Fatalf("refusal is not the typed V4.1 refusal: %v", err)
+	}
+	if report.SequencePath != "" {
+		t.Fatalf("non-qualifying V4.1 backend-lane report claimed a sequence path %q", report.SequencePath)
+	}
+	if len(report.Tokens) != 0 || len(report.Operations) != 0 {
+		t.Fatalf("refused V4.1 backend-lane witness still executed: tokens=%d operations=%d", len(report.Tokens), len(report.Operations))
+	}
+	// The refusal happens before any prompt byte or device work: the backend
+	// fixture must have executed nothing.
+	if be.sequenceCalls != 0 || be.gdnCalls != 0 {
+		t.Fatalf("refused V4.1 backend-lane witness still executed: sequence=%d gdn=%d", be.sequenceCalls, be.gdnCalls)
+	}
+}
+
 // TestValidateWholeTokenFlagsAdmitsBackendLane pins the flag gate: the legacy
 // lane still demands -metal, a named backend must omit -metal, and the backend
 // lane no longer requires -metal to select the witness.
