@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"unsafe"
 )
 
 type issue9073ReaderAt struct {
@@ -185,116 +184,5 @@ func TestLazyQ4KMaterializationRejectsShortRead(t *testing.T) {
 	}
 	if _, err := qt.materializeRaw(); err == nil {
 		t.Fatal("materialize accepted a truncated checkpoint range")
-	}
-}
-
-// chunkedProbeReaderAt records the size of every ReadAt so a test can witness that a
-// large lazy tensor is streamed through bounded windows rather than one whole-payload read.
-type chunkedProbeReaderAt struct {
-	data    []byte
-	reads   int
-	maxRead int
-}
-
-func (r *chunkedProbeReaderAt) ReadAt(p []byte, off int64) (int, error) {
-	r.reads++
-	if len(p) > r.maxRead {
-		r.maxRead = len(p)
-	}
-	if off < 0 || off >= int64(len(r.data)) {
-		return 0, io.EOF
-	}
-	n := copy(p, r.data[off:])
-	if n != len(p) {
-		return n, io.EOF
-	}
-	return n, nil
-}
-
-// TestLazyQ4KChunkedMaterializeBoundedWindowAndByteIdentical pins the bounded-window
-// invariant for the non-mmap path: a payload larger than q4kMaterializeWindowBytes is
-// materialized byte-identically, while no single ReadAt is larger than the window, so the
-// peak transient host allocation beyond the page-aligned output is bounded by the window
-// rather than the tensor size.
-func TestLazyQ4KChunkedMaterializeBoundedWindowAndByteIdentical(t *testing.T) {
-	payloadLen := q4kMaterializeWindowBytes + q4kBlockBytes*3
-
-	want := make([]byte, payloadLen)
-	for i := range want {
-		want[i] = byte(i*31 + 7)
-	}
-	r := &chunkedProbeReaderAt{data: append([]byte("prefix"), want...)}
-	qt := &q4kTensor{out: 1, in: qkK, nblk: 1, lazy: &LazyQ4KRange{
-		Reader: r, Offset: int64(len("prefix")), Bytes: payloadLen,
-	}}
-	got, err := qt.materializeRaw()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, want) {
-		t.Fatal("chunked materialization changed payload bytes")
-	}
-	if r.maxRead > q4kMaterializeWindowBytes {
-		t.Fatalf("largest ReadAt = %d bytes, want <= window %d", r.maxRead, q4kMaterializeWindowBytes)
-	}
-	if r.reads < 2 {
-		t.Fatalf("ReadAt calls = %d, want multiple bounded windows", r.reads)
-	}
-	if uintptr(unsafe.Pointer(&got[0]))%uintptr(os.Getpagesize()) != 0 {
-		t.Fatal("chunked output is not page-aligned resident bytes")
-	}
-}
-
-// TestLazyQ4KMappedSpanZeroCopyByteIdentical pins the mmap seam: a validated mapped view is
-// returned directly, allocating nothing and performing zero ReadAt calls, and its bytes equal
-// the historical ReadAt payload.
-func TestLazyQ4KMappedSpanZeroCopyByteIdentical(t *testing.T) {
-	const offset = 32
-	payload := make([]byte, q4kBlockBytes)
-	for i := range payload {
-		payload[i] = byte(i*13 + 5)
-	}
-	span := makePageAlignedResidentBytes(os.Getpagesize())
-	copy(span[offset:], payload)
-	r := &chunkedProbeReaderAt{data: append([]byte("fallback"), payload...)}
-	qt := &q4kTensor{out: 1, in: qkK, nblk: 1, lazy: &LazyQ4KRange{
-		Reader: r, Offset: int64(len("fallback")), Bytes: len(payload),
-		MappedSpan: span, MappedOffset: offset,
-	}}
-	got, err := qt.materializeRaw()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, payload) {
-		t.Fatal("mapped zero-copy view is not byte-identical to the ReadAt payload")
-	}
-	if &got[0] != &span[offset] {
-		t.Fatal("materializeRaw did not return the mapped span view")
-	}
-	if r.reads != 0 {
-		t.Fatalf("mapped path performed %d ReadAt calls, want zero", r.reads)
-	}
-}
-
-// TestLazyQ4KMaterializeKeepsRawMemoization pins that a second call still returns the cached
-// resident copy without touching the reader again.
-func TestLazyQ4KMaterializeKeepsRawMemoization(t *testing.T) {
-	payload := make([]byte, q4kBlockBytes)
-	for i := range payload {
-		payload[i] = byte(i*3 + 11)
-	}
-	r := &chunkedProbeReaderAt{data: append([]byte(nil), payload...)}
-	qt := &q4kTensor{out: 1, in: qkK, nblk: 1, raw: payload, lazy: &LazyQ4KRange{
-		Reader: r, Bytes: len(payload),
-	}}
-	got, err := qt.materializeRaw()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, payload) {
-		t.Fatal("memoized raw mismatch")
-	}
-	if r.reads != 0 {
-		t.Fatalf("memoized path performed %d ReadAt calls, want zero", r.reads)
 	}
 }

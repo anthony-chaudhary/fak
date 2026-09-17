@@ -78,44 +78,19 @@ func (q *q4kTensor) mappedRaw() (span []byte, offset int, ok bool) {
 	return span, offset, true
 }
 
-// q4kMaterializeWindowBytes bounds the transient host window the non-mmap lazy read streams
-// through: peak anon-RSS beyond the output is one window, never the tensor size (a 63.22 GiB
-// dense V4.1 transit would otherwise make() its whole payload in host RAM and OOM the serve).
-const q4kMaterializeWindowBytes = 64 << 20
-
 func (q *q4kTensor) materializeRaw() ([]byte, error) {
 	if len(q.raw) > 0 {
 		return q.raw, nil
-	}
-	if span, offset, ok := q.mappedRaw(); ok {
-		// Zero-copy: the validated mapping holds exactly the bytes the historical ReadAt would
-		// have copied, so this allocates nothing at all.
-		return span[offset : offset+q.lazy.Bytes], nil
 	}
 	if q.lazy == nil || q.lazy.Reader == nil || q.lazy.Bytes <= 0 {
 		return nil, fmt.Errorf("model: Q4_K tensor has no resident or lazy payload")
 	}
 	// Read directly into Metal-compatible backing. Allocating an ordinary slice and then
 	// page-aligning it would transiently hold a second copy of every streamed tensor during
-	// first-token promotion — roughly another 10 GiB for Qwen3.8-27B. With no mapping the
-	// page-aligned output is still allocated once, but it is filled window-by-window out of a
-	// single reusable scratch buffer so the transient beyond it is bounded by the window.
+	// first-token promotion — roughly another 10 GiB for Qwen3.8-27B.
 	raw := makePageAlignedResidentBytes(q.lazy.Bytes)
-	window := q4kMaterializeWindowBytes
-	if window <= 0 || window > q.lazy.Bytes {
-		window = q.lazy.Bytes
-	}
-	buf := make([]byte, window)
-	for done := 0; done < q.lazy.Bytes; {
-		n := q.lazy.Bytes - done
-		if n > len(buf) {
-			n = len(buf)
-		}
-		if _, err := q.lazy.Reader.ReadAt(buf[:n], q.lazy.Offset+int64(done)); err != nil {
-			return nil, err
-		}
-		copy(raw[done:], buf[:n])
-		done += n
+	if _, err := q.lazy.Reader.ReadAt(raw, q.lazy.Offset); err != nil {
+		return nil, err
 	}
 	return raw, nil
 }
