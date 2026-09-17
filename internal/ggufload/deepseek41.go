@@ -570,6 +570,9 @@ func deepseek41CanonicalSuffix(suffix string) (string, bool) {
 	if name, ok := deepseek41EngramSuffixName(suffix); ok {
 		return deepseek41EngramPrefix + deepseek41EngramLayerPlaceholder + "." + name + ".weight", true
 	}
+	if name, ok := deepseek41MHCSuffixName(suffix); ok {
+		return name, true
+	}
 	mapped, ok := map[string]string{
 		"attn_q_a.weight":             "self_attn.q_a_proj.weight",
 		"attn_q_a_norm.weight":        "self_attn.q_a_layernorm.weight",
@@ -650,6 +653,34 @@ func deepseek41EngramSuffixName(suffix string) (string, bool) {
 		return "engram_q_norm", true
 	case "engram_k", "engram_k_norm":
 		return "engram_k_norm", true
+	}
+	return "", false
+}
+
+// deepseek41MHCSuffixName maps a V4.1 hyper-connection (mHC) coefficient-block
+// suffix to the canonical per-layer leaf the reduced native forward both ADMITS
+// (v41StageMHC, internal/model/v41_forward.go:659-665) and CONSUMES
+// (internal/model/v41_forward.go:864-866):
+//
+//	mhc_mixes | mhc_mixes.weight | mhc.mixes.weight -> mhc.mixes.weight
+//	mhc_base  | mhc_base.weight  | mhc.base         -> mhc.base
+//	mhc_scale | mhc_scale.weight | mhc.scale        -> mhc.scale
+//
+// Two dialects reach the loader: the converter emits the underscore spelling
+// (blk.<L>.mhc_base.weight), while an HF-layout file may already carry the
+// forward-consumed dotted leaf (blk.<L>.mhc.base). Both normalize onto the SAME
+// forward leaf, mirroring deepseek41EngramSuffixName. The leaves stay inside the
+// dedicated per-layer mhc. namespace, so an mHC coefficient block can never fall
+// through to a generic attention/MLP canonical name.
+func deepseek41MHCSuffixName(suffix string) (string, bool) {
+	leaf := strings.TrimSuffix(suffix, ".weight")
+	switch leaf {
+	case "mhc_mixes", "mhc.mixes":
+		return "mhc.mixes.weight", true
+	case "mhc_base", "mhc.base":
+		return "mhc.base", true
+	case "mhc_scale", "mhc.scale":
+		return "mhc.scale", true
 	}
 	return "", false
 }
