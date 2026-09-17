@@ -142,16 +142,16 @@ func addBurnCorpusMaterial(t *testing.T, repo string) {
 			t.Fatal(err)
 		}
 	}
-	cmd := exec.Command("git", "add", ".")
-	cmd.Dir = repo
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git add burn material: %v: %s", err, out)
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Corpus Test", "GIT_AUTHOR_EMAIL=corpus@example.invalid", "GIT_COMMITTER_NAME=Corpus Test", "GIT_COMMITTER_EMAIL=corpus@example.invalid")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
 	}
-	cmd = exec.Command("git", "commit", "-q", "-m", "burn corpus material")
-	cmd.Dir = repo
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git commit burn material: %v: %s", err, out)
-	}
+	run("add", ".")
+	run("commit", "-q", "-m", "burn corpus material")
 }
 
 func messageHistoryPrefix(prior, next []chatMessage) bool {
