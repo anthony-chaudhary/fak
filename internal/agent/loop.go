@@ -711,7 +711,7 @@ func verdictName(k abi.VerdictKind) string {
 
 func hashEvents(evs []traceEvent) string {
 	b, _ := json.Marshal(evs)
-	return fmt.Sprintf("%x", fnv1a(b))[:16]
+	return fmt.Sprintf("%016x", fnv1a(b))
 }
 
 func fnv1a(b []byte) uint64 {
