@@ -469,21 +469,24 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	s.stopping = false
 	s.mu.Unlock()
 
-	// Default-real guardrail: fail fast on a missing lock or bundle, an
-	// unconfigured engine, or a contradictory mock selection before binding
-	// any listener or launching any child process.
-	if err := s.cfg.Validate(); err != nil {
-		s.health.SetStatus(SubsystemHTTP, false, err.Error())
-		return err
-	}
-
-	// 1. Validate lock or bundle
+	// 1. Validate lock or bundle. This runs before the config guardrail so an
+	// air-gap violation in the artifact (a remote dependency) is refused with
+	// its typed reason even when the engine is also unconfigured - the security
+	// refusal must not be masked by an unrelated config error.
 	lock, _, err := s.validateLockOrBundle()
 	if err != nil {
 		s.health.SetStatus(SubsystemHTTP, false, err.Error())
 		return err
 	}
 	s.lock = lock
+
+	// Default-real guardrail: fail fast on an unconfigured engine or a
+	// contradictory mock selection before binding any listener or launching
+	// any child process.
+	if err := s.cfg.Validate(); err != nil {
+		s.health.SetStatus(SubsystemHTTP, false, err.Error())
+		return err
+	}
 
 	if s.cfg.BundlePath != "" {
 		unpackDir, err := os.MkdirTemp("", "fak-bundle-unpack-*")
