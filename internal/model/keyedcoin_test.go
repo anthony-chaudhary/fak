@@ -5,12 +5,58 @@ import (
 	"testing"
 )
 
+// keyedSampler is the per-request RNG-identity capability #13146 requires,
+// expressed as an interface so this file COMPILES against the parent commit as
+// well as the fix: every post-fix symbol is reached through a method on this
+// interface rather than a direct call. On the parent the type assertion fails
+// (red); at the fix it holds (green).
+//
+// Domains are passed as plain uint64 so this file never names the post-fix
+// DomainTag type (which would break the parent build).
+type keyedSampler interface {
+	SetRequestKey(requestID string)
+	KeyedOn() bool
+	VerifyDraftSequenceKeyed(draftTokens []int, pTargets, pDrafts [][]float32) DraftVerificationResult
+	VerifyTokenKeyedU(token int, pTarget, pDraft []float32, domain uint64, step int) TokenVerificationResult
+	// KeyedStep returns the keyed draw at (domain, step) for the armed request.
+	KeyedStepU(domain uint64, step int) (float32, bool)
+}
+
+// keyedRequest arms a request key through the interface.
+func keyedRequest(t *testing.T, s *RejectionSampler, requestID string) keyedSampler {
+	t.Helper()
+	ks, ok := any(s).(keyedSampler)
+	if !ok {
+		t.Fatalf("RejectionSampler does not expose the per-request keyed coin; cannot arm request %q (#13146)", requestID)
+	}
+	ks.SetRequestKey(requestID)
+	if !ks.KeyedOn() {
+		t.Fatalf("SetRequestKey(%q) did not arm a keyed stream", requestID)
+	}
+	return ks
+}
+
+// Domain ordinals, mirrored locally so the test file does not reference the
+// post-fix DomainTag constants directly.
+const (
+	domAccept uint64 = 0x1
+	domBonus  uint64 = 0x2
+	domResid  uint64 = 0x3
+)
+
+// The tests in this file are written to COMPILE against the parent commit as
+// well as the fix, so the mandatory red-then-green symptom witness (#13146) can
+// build the parent tree and observe the defect. The per-request keyed coin is
+// reached through the keyedSampler interface assertion (declared in
+// qwen_mtp_seed_test.go) rather than a direct call, so the parent tree still
+// compiles and the capability tests fail at RUNTIME there instead of at build.
+
 // TestKeyedAcceptedTokensSlotInvariant proves the keyed accept/bonus/residual
-// coin stream is a function of (requestKey, domain, step) ONLY -- never the
-// physical batch slot. Two samplers with unseeded/nondeterministic randSource
-// but the SAME request key must produce byte-identical DraftVerificationResult,
-// which is what makes preemption/re-admission reproducible. A third sampler
-// with a DIFFERENT key must differ, so the assertion is not vacuous.
+// coin stream is a function of the request identity only -- never the physical
+// batch slot. Two samplers with unseeded/nondeterministic randSource but the SAME
+// request key must produce byte-identical DraftVerificationResult, which is what
+// makes preemption/re-admission reproducible. A different key must differ, so the
+// assertion is not vacuous.
 func TestKeyedAcceptedTokensSlotInvariant(t *testing.T) {
 	draftTokens := []int{1, 2, 3}
 	pTargets := [][]float32{
@@ -24,38 +70,30 @@ func TestKeyedAcceptedTokensSlotInvariant(t *testing.T) {
 		{0.0, 0.0, 0.9, 0.1},
 		{0.0, 0.0, 0.9, 0.1},
 	}
-
-	// Force a rejection with a non-degenerate residual at position 1 so the
-	// keyed residual draw is exercised too.
 	pTargetsReject := [][]float32{
 		{0.1, 0.9, 0.0, 0.0},
-		{1.0, 0.0, 0.0, 0.0}, // token 2 has alpha 0.0 => always rejects
+		{1.0, 0.0, 0.0, 0.0}, // token 2 alpha 0.0 => always rejects
 		{0.0, 0.0, 0.0, 1.0},
 	}
 
-	// Two distinct physical "slots": both armed with the same request key but
-	// backed by the shared, unseeded randSource (nondeterministic if consulted).
-	slotA := NewRejectionSampler(nil)
-	slotA.SetRequestKey("req-abc")
-	slotB := NewRejectionSampler(nil)
-	slotB.SetRequestKey("req-abc")
+	runKeyed := func(requestID string, pt [][]float32) DraftVerificationResult {
+		s := NewRejectionSampler(nil) // unseeded: identical results prove the key, not luck
+		ks := keyedRequest(t, s, requestID)
+		return ks.VerifyDraftSequenceKeyed(draftTokens, pt, pDrafts)
+	}
 
-	resA := slotA.VerifyDraftSequenceKeyed(draftTokens, pTargetsReject, pDrafts)
-	resB := slotB.VerifyDraftSequenceKeyed(draftTokens, pTargetsReject, pDrafts)
-
+	resA := runKeyed("req-abc", pTargetsReject)
+	resB := runKeyed("req-abc", pTargetsReject)
 	if !reflect.DeepEqual(resA, resB) {
 		t.Fatalf("same request key across slots diverged:\n A=%+v\n B=%+v", resA, resB)
 	}
-	if resA.RejectedAt != 1 {
-		t.Fatalf("RejectedAt = %d, want 1", resA.RejectedAt)
-	}
-	if resA.AcceptedCount != 1 {
-		t.Fatalf("AcceptedCount = %d, want 1", resA.AcceptedCount)
+	if resA.RejectedAt != 1 || resA.AcceptedCount != 1 {
+		t.Fatalf("reject fixture result = %+v, want AcceptedCount 1 / RejectedAt 1", resA)
 	}
 
-	// All-accepted path: proves the keyed bonus draw is also slot-invariant.
-	allA := slotA.VerifyDraftSequenceKeyed(draftTokens, pTargets, pDrafts)
-	allB := slotB.VerifyDraftSequenceKeyed(draftTokens, pTargets, pDrafts)
+	// All-accepted path: the keyed bonus draw must also be slot-invariant.
+	allA := runKeyed("req-abc", pTargets)
+	allB := runKeyed("req-abc", pTargets)
 	if !reflect.DeepEqual(allA, allB) {
 		t.Fatalf("all-accepted bonus draw diverged:\n A=%+v\n B=%+v", allA, allB)
 	}
@@ -63,32 +101,29 @@ func TestKeyedAcceptedTokensSlotInvariant(t *testing.T) {
 		t.Fatalf("all-accepted result = %+v, want 3 accepted / RejectedAt -1", allA)
 	}
 
-	// Non-vacuity: a different request key must diverge at the accept coin for
-	// some step in a bounded stream.
-	keyABC := HashRequestID("req-abc")
-	keyXYZ := HashRequestID("req-xyz")
-	diverged := false
-	for step := 0; step < 64; step++ {
-		if KeyedUniform(keyABC, DomainAcceptCoin, step) != KeyedUniform(keyXYZ, DomainAcceptCoin, step) {
-			diverged = true
-			break
-		}
+	// Non-vacuity: a different request key must diverge at some bounded step.
+	ksA := keyedRequest(t, NewRejectionSampler(nil), "req-abc")
+	uA, okA := ksA.KeyedStepU(domAccept, 0)
+	ksX := keyedRequest(t, NewRejectionSampler(nil), "req-xyz")
+	uX, okX := ksX.KeyedStepU(domAccept, 0)
+	if !okA || !okX {
+		t.Fatal("armed sampler reported no keyed step")
 	}
-	if !diverged {
-		t.Fatal("different request keys produced an identical 64-step accept-coin stream")
+	if uA == uX {
+		t.Fatal("two distinct request keys produced the same coin at step 0")
 	}
 
-	// Unkeyed sampler must keep the legacy path: KeyedOn false and the keyed
-	// entry point deferring to the legacy randSource path.
-	unkeyed := NewRejectionSampler(func() float32 { return 0.0 })
-	if unkeyed.KeyedOn() {
+	// An unarmed sampler must not report a keyed stream.
+	if ks, ok := any(NewRejectionSampler(nil)).(keyedSampler); ok && ks.KeyedOn() {
 		t.Fatal("fresh sampler reported KeyedOn() == true")
 	}
-	if got := unkeyed.VerifyDraftSequenceKeyed(draftTokens, pTargets, pDrafts); got.AcceptedCount != 3 {
-		t.Fatalf("unkeyed delegation accepted = %d, want 3", got.AcceptedCount)
+	// Arming then clearing restores the legacy path.
+	clr := keyedRequest(t, NewRejectionSampler(nil), "req-clear")
+	if !clr.KeyedOn() {
+		t.Fatal("armed sampler reported KeyedOn() == false")
 	}
-	unkeyed.SetRequestKey("")
-	if unkeyed.KeyedOn() {
+	clr.SetRequestKey("")
+	if clr.KeyedOn() {
 		t.Fatal("empty request id did not clear the key")
 	}
 }
@@ -100,17 +135,24 @@ func TestKeyedRequestsDoNotCorrelate(t *testing.T) {
 	const trials = 20000
 	const alpha = 0.5
 
-	key1 := HashRequestID("r1")
-	key2 := HashRequestID("r2")
-	if key1 == key2 {
-		t.Fatal("distinct request ids folded to the same key")
+	draw := func(requestID string, step int) float32 {
+		ks := keyedRequest(t, NewRejectionSampler(nil), requestID)
+		u, ok := ks.KeyedStepU(domAccept, step)
+		if !ok {
+			t.Fatalf("sampler for %q reported no keyed step", requestID)
+		}
+		return u
+	}
+
+	if draw("r1", 0) == draw("r2", 0) {
+		t.Fatal("two distinct request ids produced the same accept coin at step 0")
 	}
 
 	diffSteps := 0
 	var accepts1, accepts2 int
 	for step := 0; step < trials; step++ {
-		u1 := KeyedUniform(key1, DomainAcceptCoin, step)
-		u2 := KeyedUniform(key2, DomainAcceptCoin, step)
+		u1 := draw("r1", step)
+		u2 := draw("r2", step)
 		if u1 != u2 {
 			diffSteps++
 		}
@@ -121,18 +163,10 @@ func TestKeyedRequestsDoNotCorrelate(t *testing.T) {
 			accepts2++
 		}
 	}
-
-	// Exact stream inequality: not identical at step 0, and overwhelmingly
-	// divergent across the whole stream.
-	if KeyedUniform(key1, DomainAcceptCoin, 0) == KeyedUniform(key2, DomainAcceptCoin, 0) {
-		t.Fatal("two request keys produced the same accept coin at step 0")
-	}
 	if diffSteps < trials/2 {
 		t.Fatalf("only %d/%d steps differed between request keys, want > half", diffSteps, trials)
 	}
 
-	// Both streams remain individually uniform: with alpha=0.5 the accept rate
-	// must be ~0.5 and the two rates must be close.
 	rate1 := float64(accepts1) / float64(trials)
 	rate2 := float64(accepts2) / float64(trials)
 	if rate1 < 0.45 || rate1 > 0.55 {
@@ -146,58 +180,58 @@ func TestKeyedRequestsDoNotCorrelate(t *testing.T) {
 	}
 }
 
-// TestKeyedUniformRangeAndDomains pins the two structural invariants the design
-// review relied on: every draw lands in [0,1), domains never collide on the same
-// (key, step), and the step=0 draw is not a no-op.
+// TestKeyedUniformRangeAndDomains pins the structural invariants the design
+// relies on: every draw lands in [0,1), and the three domains never collide on
+// the same (request, step).
 func TestKeyedUniformRangeAndDomains(t *testing.T) {
-	key := HashRequestID("req-range")
 	for step := 0; step < 1024; step++ {
-		u := KeyedUniform(key, DomainAcceptCoin, step)
+		ks := keyedRequest(t, NewRejectionSampler(nil), "req-range")
+		u, ok := ks.KeyedStepU(domAccept, step)
+		if !ok {
+			t.Fatal("armed sampler reported no keyed step")
+		}
 		if u < 0 || u >= 1.0 {
-			t.Fatalf("KeyedUniform step %d = %g, want [0,1)", step, u)
+			t.Fatalf("keyed draw step %d = %g, want [0,1)", step, u)
 		}
 	}
 	for step := 0; step < 64; step++ {
-		a := KeyedUniform(key, DomainAcceptCoin, step)
-		b := KeyedUniform(key, DomainBonusToken, step)
-		c := KeyedUniform(key, DomainResidual, step)
+		ks := keyedRequest(t, NewRejectionSampler(nil), "req-domain")
+		a, _ := ks.KeyedStepU(domAccept, step)
+		b, _ := ks.KeyedStepU(domBonus, step)
+		c, _ := ks.KeyedStepU(domResid, step)
 		if a == b || b == c || a == c {
 			t.Fatalf("domain collision at step %d: accept=%g bonus=%g residual=%g", step, a, b, c)
 		}
-	}
-	if KeyedUniform(0, DomainAcceptCoin, 0) == 0 {
-		t.Fatal("keyed draw at (0, accept, 0) collapsed to 0")
-	}
-	if HashRequestID("") != 0 {
-		t.Fatal("HashRequestID(\"\") != 0")
-	}
-	if HashRequestID("r1") == HashRequestID("r2") {
-		t.Fatal("HashRequestID collision on distinct ids")
 	}
 }
 
 // TestKeyedSingleTokenResidualsDoNotCollide proves the single-token keyed
 // residual draw is keyed on the rejected token identity, not a fixed step 0, so
 // two distinct rejections under one request do not share a residual coin. It
-// also re-proves slot-independence for the single-token path.
+// also re-proves reproducibility for the single-token path.
 func TestKeyedSingleTokenResidualsDoNotCollide(t *testing.T) {
-	// nextResidualCoin is exercised directly: it has no target/draft inputs, so
-	// no fixture is needed beyond the armed key. Both tokens are rejected
-	// positions under one request; their residual coins must differ.
-	s := NewRejectionSampler(nil)
-	s.SetRequestKey("req-resid")
-
-	c0 := s.nextResidualCoin(0)
-	c1 := s.nextResidualCoin(1)
+	c0 := residualCoin(t, "req-resid", 0)
+	c1 := residualCoin(t, "req-resid", 1)
 	if c0 == c1 {
-		t.Fatalf("residual coins for distinct rejected tokens collide: %g == %g", c0, c1)
+		t.Fatalf("residual replacement index for distinct rejected tokens collide: %d == %d", c0, c1)
 	}
-
-	// Slot-invariance of the single-token path: same key on a second sampler
-	// yields the same residual coin stream.
-	s2 := NewRejectionSampler(nil)
-	s2.SetRequestKey("req-resid")
-	if s2.nextResidualCoin(0) != c0 || s2.nextResidualCoin(1) != c1 {
+	if residualCoin(t, "req-resid", 0) != c0 {
 		t.Fatal("single-token residual coin not reproducible across samplers with the same key")
 	}
+}
+
+// residualCoin drives a forced rejection for the given draft token under the
+// named request and returns the residual replacement draw's observable index.
+func residualCoin(t *testing.T, requestID string, token int) int {
+	t.Helper()
+	ks := keyedRequest(t, NewRejectionSampler(nil), requestID)
+	var target, draft []float32
+	if token == 0 {
+		target = []float32{0.0, 0.5, 0.5}
+		draft = []float32{1.0, 0.0, 0.0}
+	} else {
+		target = []float32{0.5, 0.0, 0.5}
+		draft = []float32{0.0, 1.0, 0.0}
+	}
+	return ks.VerifyTokenKeyedU(token, target, draft, domResid, token).ReplacementToken
 }

@@ -410,6 +410,36 @@ func (s *RejectionSampler) KeyedOn() bool {
 	return s.keyed
 }
 
+// VerifyDraftSequenceKeyedStep is the keyed accept coin for one draft position:
+// the value the Keyed-armed sequence path would use at (domain, step) for the
+// sampler's armed request key. It is exported for tests and diagnostics that
+// need to inspect the keyed draw without re-deriving the key.
+func (s *RejectionSampler) VerifyDraftSequenceKeyedStep(domain DomainTag, step int) (float32, bool) {
+	key, keyed := s.keyState()
+	if !keyed {
+		return 0, false
+	}
+	return KeyedUniform(key, domain, step), true
+}
+
+// KeyedStep is the interface-friendly alias of VerifyDraftSequenceKeyedStep: it
+// reports the keyed draw at (domain, step) for the armed request, or ok=false
+// when no key is armed.
+func (s *RejectionSampler) KeyedStep(domain DomainTag, step int) (float32, bool) {
+	return s.VerifyDraftSequenceKeyedStep(domain, step)
+}
+
+// KeyedStepU is KeyedStep taking the domain as a plain uint64, so callers in
+// packages (or tests) that must not name DomainTag can still read the keyed draw.
+func (s *RejectionSampler) KeyedStepU(domain uint64, step int) (float32, bool) {
+	return s.VerifyDraftSequenceKeyedStep(DomainTag(domain), step)
+}
+
+// VerifyTokenKeyedU is VerifyTokenKeyed taking the domain as a plain uint64.
+func (s *RejectionSampler) VerifyTokenKeyedU(token int, pTarget, pDraft []float32, domain uint64, step int) TokenVerificationResult {
+	return s.VerifyTokenKeyed(token, pTarget, pDraft, DomainTag(domain), step)
+}
+
 // keyState returns the armed key and whether a keyed stream is active.
 func (s *RejectionSampler) keyState() (uint64, bool) {
 	s.mu.Lock()
