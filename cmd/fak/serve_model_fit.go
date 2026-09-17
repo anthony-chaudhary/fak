@@ -225,13 +225,126 @@ func serveDeviceStagingHostCharge(plan compute.MemoryPlan) int64 {
 	return plan.DeviceTotal()
 }
 
+// serveDenseBoundedStreamStagingDetail is the memory-plan row Detail the bounded streamed-dense
+// loader attaches to a dense working-set row that the loader RETAINS as a bounded host working set
+// rather than materializing whole (ggufload.EstimateQ4KLoadMemoryPlan's streamed fold). When the
+// device --cpu-offload-experts arm threads the bounded streamed-dense route (fak#13209), the
+// eligible dense k-quant staging transit is bounded to that resident working set, so the staging
+// charge must reflect it instead of the full plan.DeviceTotal().
+const serveDenseBoundedStreamStagingDetail = "gguf-host-dense-streamed"
+
+// serveDenseStreamedStagingChargeDetail is the row Detail the staging guard stamps on the bounded
+// transit row, so a physical receipt / test can tell the bounded charge from the whole-device-total
+// charge (fak#13209).
+const serveDenseStreamedStagingChargeDetail = "gguf-device-staging-host-transit:bounded-streamed-dense"
+
+// serveBoundableDeviceDenseTotal is the device-scoped dense charge the bounded streamed-dense route
+// could actually cover: the plan's device-scoped DENSE weight total (Class MemoryWeights). It is the
+// upper bound (before the working-set cap) of what the streamed route bounds, and the bulk of the
+// staging transit -- the moat the #13171 guard exists to bound.
+//
+// KV/scratch and any non-Weight class are EXCLUDED, because the streamed-dense route only covers the
+// eligible dense k-quant matmul weights the loader turns into lazy checkpoint range descriptors; the
+// runtime/KV/scratch device demands are materialized separately and are not what the dense working
+// set bounds. Classifying by Class (not by Detail) keeps this robust to Detail churn: a plan that
+// scopes device dense weights under any Detail still contributes its Weight bytes here.
+func serveBoundableDeviceDenseTotal(plan compute.MemoryPlan) int64 {
+	var total int64
+	const maxInt64 = int64(^uint64(0) >> 1)
+	for _, d := range plan {
+		if d.Bytes <= 0 || d.Class != compute.MemoryWeights || !d.DeviceScoped() {
+			continue
+		}
+		if total > maxInt64-d.Bytes {
+			return maxInt64
+		}
+		total += d.Bytes
+	}
+	return total
+}
+
+// serveDeviceDenseStreamedBounded reports whether the plan carries a bounded streamed-dense
+// working-set row -- i.e. the loader that produced it (or will produce it) retains the eligible
+// dense k-quant side as a bounded host working set (ggufload.WithStreamedDenseQ4KWorkingSet)
+// instead of materializing the full device dense side during staging (fak#13209). The row is the
+// one ggufload's streamed fold appends; its presence is the observable evidence that the bounded
+// route is active.
+func serveDeviceDenseStreamedBounded(plan compute.MemoryPlan) bool {
+	for _, d := range plan {
+		if d.Detail == serveDenseBoundedStreamStagingDetail && d.Bytes >= 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// serveDeviceDenseStagingBoundCharge is the BOUNDED dense staging transit (fak#13209): the eligible
+// device dense side (the only device-scoped DENSE weight charge the streamed route covers) charged
+// at the DECLARED host working set rather than the full on-disk dense total. It returns
+// (bounded, ok):
+//
+//   - ok=false when the plan does NOT show the bounded streamed-dense route (no working-set row) --
+//     the caller keeps the historical whole DeviceTotal() charge byte-for-byte, preserving the
+//     fak#13171 kernel-OOM protection for the non-streamed shape;
+//   - ok=true when the route is active: the charge is min(boundableDeviceDense, declaredWorkingSet),
+//     so the guard judges the bounded transit. Every other device-scoped demand that is NOT the
+//     bounded dense side (KV/scratch, and any weight class the streamed route does not cover) is
+//     ADDED back whole, so the fail-closed floor is preserved: a plan whose non-streamed device
+//     remainder cannot be staged still refuses typed.
+//
+// bound <= 0 (stream-through) yields a zero dense term: the loader retains no dense working set, so
+// the dense transit does not consume host RAM. That is the honest floor, not a silent deletion of
+// the guard -- the non-dense device remainder is still charged.
+func serveDeviceDenseStagingBoundCharge(plan compute.MemoryPlan) (int64, bool) {
+	if !serveDeviceDenseStreamedBounded(plan) {
+		return 0, false
+	}
+	if plan.DeviceTotal() <= 0 {
+		return 0, true
+	}
+	bound := serveStreamedDenseQ4KWorkingSetBound(serveFitBudget{})
+	// Derive the declared working set from the plan's OWN working-set row, so the charge and the
+	// loader's retained set cannot disagree about the bound (one measurement).
+	for _, d := range plan {
+		if d.Detail == serveDenseBoundedStreamStagingDetail {
+			bound = d.Bytes
+			break
+		}
+	}
+	dense := serveBoundableDeviceDenseTotal(plan)
+	resident := dense
+	if bound < resident {
+		resident = bound
+	}
+	if resident < 0 {
+		resident = 0
+	}
+	nonDense := plan.DeviceTotal() - dense
+	if nonDense < 0 {
+		nonDense = 0
+	}
+	return resident + nonDense, true
+}
+
 // serveDeviceStagingHostPlan is the plan the staging guard judges: ONE host-scoped row carrying the
 // device-scoped staging transit, so the established reported-host refusal measures it against host
 // RAM without re-charging the resident expert pool (compute.RefuseHostScopedPlanIfTooBigForHost
 // already judges those host-scoped rows on the same arm). An empty plan yields nil (nothing to
 // stage -> the guard is inert).
+//
+// fak#13209: when the plan carries the bounded streamed-dense working-set row, the transit row is
+// the BOUNDED charge (serveDeviceDenseStagingBoundCharge) rather than the whole plan.DeviceTotal():
+// the device-destined eligible dense side is faulted as bounded checkpoint ranges and uploaded, so
+// it is never materialized as one ~63 GiB host anon buffer. The fail-closed floor is preserved: the
+// non-streamed device remainder is still charged whole, so a transit that cannot be placed even in
+// bounded form still refuses typed.
 func serveDeviceStagingHostPlan(plan compute.MemoryPlan) compute.MemoryPlan {
 	staging := serveDeviceStagingHostCharge(plan)
+	detail := "gguf-device-staging-host-transit"
+	if bounded, ok := serveDeviceDenseStagingBoundCharge(plan); ok {
+		staging = bounded
+		detail = serveDenseStreamedStagingChargeDetail
+	}
 	if staging <= 0 {
 		return nil
 	}
@@ -239,7 +352,7 @@ func serveDeviceStagingHostPlan(plan compute.MemoryPlan) compute.MemoryPlan {
 		Class:  compute.MemoryScratchpad,
 		Scope:  compute.MemoryScopeHost,
 		Bytes:  staging,
-		Detail: "gguf-device-staging-host-transit",
+		Detail: detail,
 	}}
 }
 
