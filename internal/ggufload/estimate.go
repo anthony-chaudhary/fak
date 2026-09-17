@@ -236,12 +236,13 @@ func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute
 		if err != nil {
 			return nil, err
 		}
-		// Under the BOUNDED streamed-dense policy, eligible dense Q4_K tensors stay on disk with
-		// range descriptors (the loader's lazyDenseQ4KTensorWork branch), so they are charged to a
-		// single bounded HOST working set rather than the full dense side. The predicate mirrors
-		// quant_q4k_loader.go's lazy branch exactly (TensorQ4_K && ResidentQ4KEligible), so the
-		// estimate and the loader cannot disagree about which tensors the policy covers.
-		if loadOpts.streamedDenseBounded && info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, canon) {
+		// Under the BOUNDED streamed-dense policy, eligible dense k-quant tensors (Q4_K and the
+		// #13201 non-Q4_K family Q2_K/Q3_K/Q5_K/Q6_K) stay on disk with range descriptors (the
+		// loader's lazyDenseQ4KTensorWork / lazyKQuantTensorWork branches), so they are charged to
+		// a single bounded HOST working set rather than the full dense side. denseBoundedEligible
+		// is the SAME predicate the loader dispatches on, so the estimate and the loader cannot
+		// disagree about which tensors the policy covers.
+		if loadOpts.streamedDenseBounded && denseBoundedEligible(cfg, info.Type, canon) {
 			if hostDenseStreamed > math.MaxUint64-n {
 				return nil, fmt.Errorf("gguf: streamed-dense estimate bytes overflow")
 			}
@@ -298,6 +299,33 @@ func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute
 	return plan, nil
 }
 
+// denseBoundedEligible is the ONE bounded-dense eligibility predicate, shared by BOTH the
+// non-MoE fold in EstimateQ4KLoadMemoryPlan and the MoE fold in
+// EstimateMoEBoundedDenseHostMemoryPlan, and mirrored EXACTLY by the loader's dispatch in
+// quant_q4k_loader.go. canon is a canonical tensor name (the output of
+// CanonicalTensorNameArch -> QuantSourceTensorName, which the caller has already applied).
+//
+// It admits a dense matmul weight whose GGUF type the loader can hold as a lazy range:
+//
+//   - TensorQ4_K (the original bounded route), gated on model.ResidentQ4KEligible; and
+//   - the non-Q4_K dense k-quants Q2_K/Q3_K/Q5_K/Q6_K (#13201), gated on
+//     model.ResidentKQuantEligible, which the loader reaches through the lazy k-quant store.
+//
+// Everything else - F32/F16, the legacy 32-weight blocks, the IQ family, and any tensor whose
+// canonical name fails the identity-normalization gate (including the MoE routed-expert blobs,
+// which CanonicalTensorNameArch does not map) - is non-eligible and stays on the raw device
+// charge, so the fail-closed direction is preserved. This single predicate is what keeps the
+// estimate and the loader from drifting about which tensors the bounded policy covers.
+func denseBoundedEligible(cfg model.Config, t TensorType, canon string) bool {
+	switch t {
+	case TensorQ4_K:
+		return model.ResidentQ4KEligible(cfg, canon)
+	case TensorQ2_K, TensorQ3_K, TensorQ5_K, TensorQ6_K:
+		return model.ResidentKQuantEligible(cfg, canon)
+	}
+	return false
+}
+
 // EstimateMoEBoundedDenseHostMemoryPlan is the MoE-capable sibling of the bounded
 // streamed-dense fold inside EstimateQ4KLoadMemoryPlan (fak#13200). EstimateQ4KLoadMemoryPlan
 // refuses EVERY MoE checkpoint by name (cfg.IsMoE()), so UnifiedHostResidencyPlan's
@@ -341,13 +369,14 @@ func (s *WeightSource) EstimateMoEBoundedDenseHostMemoryPlan(bound int64) (compu
 			return nil, fmt.Errorf("gguf: estimate tensor %s: %w", info.Name, err)
 		}
 		// Mirror the bounded dense fold's eligibility gate exactly: a canonical name resolved
-		// through the qwen35 source chain that is a RAW-identity Q4_K matmul weight is the only
-		// tensor the loader holds as a lazy dense range. Everything else - including the MoE
-		// routed-expert blobs, which CanonicalTensorNameArch deliberately does not map - is
-		// charged to device at its raw payload, the pre-existing conservative accounting.
+		// through the qwen35 source chain that is a RAW-identity dense k-quant matmul weight
+		// (Q4_K, or the #13201 Q2_K/Q3_K/Q5_K/Q6_K family) is what the loader holds as a lazy
+		// dense range. Everything else - including the MoE routed-expert blobs, which
+		// CanonicalTensorNameArch deliberately does not map - is charged to device at its raw
+		// payload, the pre-existing conservative accounting.
 		if canon, ok := CanonicalTensorNameArch(info.Name, cfg.ModelType); ok {
 			if resolved, keep := model.QuantSourceTensorName(cfg, canon); keep &&
-				info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, resolved) {
+				denseBoundedEligible(cfg, info.Type, resolved) {
 				if denseEligible > math.MaxUint64-n {
 					return nil, fmt.Errorf("gguf: MoE bounded dense estimate bytes overflow")
 				}

@@ -108,6 +108,7 @@ type pendingTensor struct {
 	q2kEmbed         bool       // true -> model.NewQ2KEmbedding(raw) -> builder.SetQ2KEmbedding
 	q4kEmbed         bool       // true -> model.NewQ4KEmbedding(raw) -> builder.SetQ2KEmbedding
 	lazyQ4K          bool
+	lazyKQuant       bool // non-Q4_K dense k-quant held as a bounded range (loader's lazyKQuantTensorWork; #13201)
 	sourceInfo       TensorInfo
 	lazyReader       io.ReaderAt
 	isKVBHalf        bool // true -> bufferGLMKVBHalf(layer, half, f32); merge applied on the 2nd half
