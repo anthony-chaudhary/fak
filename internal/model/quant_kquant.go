@@ -369,6 +369,7 @@ func kQuantMatRowsInto(qt *kQuantTensor, x, y []float32) {
 // PREFILL fallback in kQuantMatRowsIntoBatch keeps the full currentWorkerCount() width while batch-1 decode
 // takes the capped decode budget. Prefill is not the memory-bound batch-1 shape the cap targets.
 func kQuantMatRowsIntoWorkers(qt *kQuantTensor, x, y []float32, workers int) {
+	qt.ensureRawCPU("GEMV")
 	y = y[:qt.out]
 	if qt.numaPool != nil && qt.numaPool.Schedule().Eligible {
 		if qt.w3MLP {
@@ -476,6 +477,7 @@ func kQuantMatRowsRangeRaw(raw []byte, qt *kQuantTensor, x, y []float32, lo, hi 
 // kQuantSDOTEnabled(qt.kind) the batch variant falls back to the per-token kQuantMatRowsInto loop
 // â€” correctness first; the f32 batch below is the bit-exact dequant-once speedup.
 func kQuantMatRowsIntoBatch(qt *kQuantTensor, X []float32, P int, Y []float32) {
+	qt.ensureRawCPU("prefill GEMM")
 	dispatchWorkers := currentWorkerCount()
 	if kQuantSDOTEnabled(qt.kind) {
 		in, out := qt.in, qt.out

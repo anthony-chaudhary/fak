@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -441,26 +442,69 @@ func TestLazyKQuantMaterializationRejectsShortRead(t *testing.T) {
 	}
 }
 
-func TestLazyKQuantCPUFallbackFailsClosed(t *testing.T) {
+// TestLazyKQuantCPUCGEMVMaterializesOnDemand is the #13216 RED->GREEN witness: the CPU GEMV over
+// a checkpoint-backed (lazy) k-quant tensor must MATERIALIZE the bounded range and compute, not
+// panic. Before the fix this path hit requireRawCPU's #13202 panic; after it, ensureRawCPU faults
+// the range into qt.raw and the GEMV produces exactly the resident-tensor result. Byte-identity
+// against the same payload held resident is the no-silent-zeros property.
+func TestLazyKQuantCPUCGEMVMaterializesOnDemand(t *testing.T) {
+	for _, kind := range []kQuantKind{kindQ2K, kindQ3K, kindQ5K, kindQ6K} {
+		payload := kQuantLazyLazyPayload(kind, 4, 256)
+		resident := &kQuantTensor{out: 4, in: 256, nblk: 1, kind: kind, raw: payload}
+		reader := &chunkedProbeReaderAt{data: append([]byte(nil), payload...)}
+		lazy := &kQuantTensor{
+			out: 4, in: 256, nblk: 1, kind: kind,
+			lazy: &LazyQ4KRange{Reader: reader, Bytes: len(payload)},
+		}
+		x := make([]float32, 256)
+		for i := range x {
+			x[i] = float32(i%13) * 0.25
+		}
+		want := kQuantMatRows(resident, x)
+		got := func() []float32 {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("%s: CPU GEMV panicked on a materializable lazy tensor: %v", kind, r)
+				}
+			}()
+			return kQuantMatRows(lazy, x)
+		}()
+		if len(lazy.raw) == 0 {
+			t.Fatalf("%s: CPU GEMV did not memoize the materialized range into raw", kind)
+		}
+		if reader.reads == 0 {
+			t.Fatalf("%s: CPU GEMV produced a result without reading the checkpoint", kind)
+		}
+		for o := range want {
+			if math.Float32bits(got[o]) != math.Float32bits(want[o]) {
+				t.Fatalf("%s: row %d = %v, want byte-identical resident result %v (silent-zeros guard)", kind, o, got[o], want[o])
+			}
+		}
+	}
+}
+
+// TestLazyKQuantCPUGEMVStillFailsClosedOnUnmaterializable is the retained fail-closed half of the
+// #13202 contract: a lazy tensor whose range genuinely cannot be read (reader error) must still
+// panic with a named diagnostic from the CPU entry point — ensureRawCPU materializes or refuses,
+// it never silently reads nil raw and emits zeros.
+func TestLazyKQuantCPUGEMVStillFailsClosedOnUnmaterializable(t *testing.T) {
 	for _, kind := range []kQuantKind{kindQ2K, kindQ6K} {
 		qt := &kQuantTensor{
 			out: 1, in: 256, nblk: 1, kind: kind,
-			lazy: &LazyQ4KRange{Reader: bytes.NewReader(make([]byte, kind.blockBytes())), Bytes: kind.blockBytes()},
+			lazy: &LazyQ4KRange{Reader: failingReaderAt{}, Bytes: kind.blockBytes()},
 		}
-		func() {
-			defer func() {
-				got := recover()
-				if got == nil {
-					t.Fatalf("%s: CPU GEMV accepted a lazy k-quant tensor", kind)
-				}
-				if msg, ok := got.(string); !ok || msg == "" {
-					t.Fatalf("%s: CPU fallback panic = %#v, want a clear diagnostic", kind, got)
-				}
-			}()
-			x := make([]float32, 256)
-			y := make([]float32, 1)
-			kQuantMatRowsRange(qt, x, y, 0, 1)
-		}()
+		msg := recoverContains(func() {
+			kQuantMatRowsRange(qt, make([]float32, 256), make([]float32, 1), 0, 1)
+		})
+		if msg == "" {
+			t.Fatalf("%s: CPU GEMV accepted a lazy tensor whose range cannot be read", kind)
+		}
+		if !strings.Contains(msg, "materialization failed") && !strings.Contains(msg, "#13202") {
+			t.Fatalf("%s: fail-closed panic = %q, want a named materialization/guard diagnostic", kind, msg)
+		}
+		if len(qt.raw) != 0 {
+			t.Fatalf("%s: failed materialization left %d resident bytes, want none", kind, len(qt.raw))
+		}
 	}
 }
 

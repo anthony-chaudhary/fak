@@ -48,12 +48,41 @@ func (qt *kQuantTensor) materializeRaw() ([]byte, error) {
 	return raw, nil
 }
 
+// ensureRawCPU materializes the bounded lazy range of a checkpoint-backed k-quant tensor on
+// demand and memoizes it into qt.raw, so a CPU k-quant matmul over a lazy bounded-dense tensor
+// (#13201/#13202) executes instead of hitting the requireRawCPU panic (#13216). It is the
+// k-quant twin of the `qt.materializeRaw()` call the device staging path already makes in
+// weightHALQ4K (hal.go): the retention primitive has always been able to fault the range, and
+// the CPU forward was simply never asking it to. The read is bounded by the fak#13199 window
+// (q4kMaterializeWindowBytes) into page-aligned resident bytes, so a dense side larger than host
+// RAM is faulted through a small window rather than retained whole.
+//
+// Fail-closed is preserved: a tensor with no resident and no lazy payload is left untouched for
+// requireRawCPU to name, and a read error panics legibly here rather than silently reading nil
+// (which would emit zeros — the exact #13202 wrong answer). No silent zeros in any branch.
+func (qt *kQuantTensor) ensureRawCPU(op string) {
+	if qt == nil || len(qt.raw) > 0 || qt.lazy == nil {
+		return
+	}
+	raw, err := qt.materializeRaw()
+	if err != nil {
+		panic(fmt.Sprintf("model: lazy k-quant %s materialization failed (kind=%s out=%d in=%d): %v "+
+			"(#13216; the lazy range could not be faulted and a CPU k-quant matmul ran — refusing "+
+			"to read nil raw and silently produce zeros).", op, qt.kind, qt.out, qt.in, err))
+	}
+	qt.raw = raw
+}
+
 // requireRawCPU is the #13202 legibility guardrail for the CPU k-quant matmul entry points
 // (kQuantMatRowsRangeRaw and its siblings). A lazy k-quant tensor holds no resident raw
 // bytes until materializeRaw runs, and the CPU fallback does `if len(raw)==0 { raw = qt.raw }`
 // — over a lazy tensor both are empty, so the row loop would silently read a nil slice and
 // emit ZEROS instead of failing. That is a silent-wrong-answer bug, so this turns it into a
 // named panic: the tensor must be materialized (or read through a device path) first.
+//
+// The CPU entry points call ensureRawCPU first, so this is now the BACKSTOP for a tensor that
+// is genuinely unmaterializable (no reader / no lazy range / a failed read), not the ordinary
+// path for a bounded lazy range.
 func (qt *kQuantTensor) requireRawCPU(op string) {
 	if qt != nil && len(qt.raw) == 0 && qt.lazy != nil && qt.out > 0 {
 		panic(fmt.Sprintf("model: k-quant %s on a lazy tensor (kind=%s out=%d in=%d): the resident "+
