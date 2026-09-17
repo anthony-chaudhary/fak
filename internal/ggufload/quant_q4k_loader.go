@@ -71,6 +71,8 @@ type q4kLoadOptions struct {
 	streamedExperts      bool
 	streamedExpertBytes  int64
 	streamedDenseQ4K     bool
+	streamedDenseBytes   int64
+	streamedDenseBounded bool
 	retainMTP            bool
 }
 
@@ -146,6 +148,28 @@ func WithStreamedDenseQ4K(enabled bool) Q4KLoadOption {
 	return func(o *q4kLoadOptions) { o.streamedDenseQ4K = enabled }
 }
 
+// WithStreamedDenseQ4KWorkingSet is the BOUNDED form of WithStreamedDenseQ4K: it turns the
+// read-defer into a bounded host working set. Eligible dense k-quant tensors stay on disk with
+// range descriptors (as WithStreamedDenseQ4K does), but the load plan charges only hostBytes of
+// resident dense working set instead of the FULL dense side, exactly as WithStreamedExperts does
+// for the routed band. hostBytes <= 0 is stream-through: no dense host residency is charged and
+// only the device dense side remains. A negative budget is refused by name rather than clamped,
+// so a caller cannot ask for an unrepresentable policy.
+//
+// This is the dense sibling of the fak#13121 bounded routed-expert policy: it lets a device
+// dense remainder larger than host RAM (the pinned V4.1 Q2_K side is 63.099 GiB against a
+// 62.425 GiB Halo MemTotal) produce a plan that fits, so the fit guard judges the working set
+// the loader actually retains rather than the full on-disk side. Like WithStreamedDenseQ4K it
+// needs a checkpoint that outlives the model; it is available only on the WeightSource-form
+// entry points.
+func WithStreamedDenseQ4KWorkingSet(hostBytes int64) Q4KLoadOption {
+	return func(o *q4kLoadOptions) {
+		o.streamedDenseQ4K = true
+		o.streamedDenseBounded = true
+		o.streamedDenseBytes = hostBytes
+	}
+}
+
 // probeQ4KLoadOptions applies opts to the zero value without the config-dependent validation, for
 // callers that must inspect a request BEFORE they have a parsed checkpoint to validate it against.
 func probeQ4KLoadOptions(opts []Q4KLoadOption) q4kLoadOptions {
@@ -179,6 +203,12 @@ type Q4KLoadOptionEffects struct {
 	// StreamedDenseQ4K reports that the option list requests the streamed DENSE k-quant tier, which
 	// likewise needs a checkpoint that outlives the model.
 	StreamedDenseQ4K bool
+	// StreamedDenseBytes is the bounded dense host working set the option list declares (the
+	// WithStreamedDenseQ4KWorkingSet budget); 0 means stream-through or an unbounded request.
+	StreamedDenseBytes int64
+	// StreamedDenseBounded reports that the working set was explicitly declared (so 0 means
+	// stream-through, not unbounded); a plain WithStreamedDenseQ4K(true) leaves it false.
+	StreamedDenseBounded bool
 }
 
 // ApplyQ4KLoadOptions applies opts to the zero value and returns the observable effect set. It is
@@ -195,6 +225,8 @@ func ApplyQ4KLoadOptions(opts []Q4KLoadOption) Q4KLoadOptionEffects {
 		StreamedExperts:      o.streamedExperts,
 		StreamedExpertBytes:  o.streamedExpertBytes,
 		StreamedDenseQ4K:     o.streamedDenseQ4K,
+		StreamedDenseBytes:   o.streamedDenseBytes,
+		StreamedDenseBounded: o.streamedDenseBounded,
 	}
 }
 
@@ -219,6 +251,9 @@ func resolveQ4KLoadOptions(cfg model.Config, opts []Q4KLoadOption) (q4kLoadOptio
 			return out, fmt.Errorf("gguf: streamed routed experts and an expert-parallel shard [%d,%d) cannot both be requested",
 				out.expertShard.Lo, out.expertShard.Hi)
 		}
+	}
+	if out.streamedDenseBounded && out.streamedDenseBytes < 0 {
+		return out, fmt.Errorf("gguf: streamed-dense host working set %d is negative", out.streamedDenseBytes)
 	}
 	if !out.expertShardSet {
 		return out, nil

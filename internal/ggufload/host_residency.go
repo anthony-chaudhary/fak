@@ -198,7 +198,9 @@ func (s *WeightSource) RefuseUnifiedHostResidencyForLoadOptions(be compute.Backe
 // UnifiedHostResidencyPlan sizes the plan whose TOTAL simultaneous physical footprint the
 // unified-memory bound judges. With WithStreamedExperts the routed expert bulk is charged at
 // its bounded resident set (never the full payload); with WithStreamedDenseQ4K the dense side
-// stays lazy file ranges. With no option (the default) it falls back to the resident
+// stays lazy file ranges, and with the BOUNDED WithStreamedDenseQ4KWorkingSet it is charged at
+// that declared host working set rather than the full dense side (fak#13194). With no option
+// (the default) it falls back to the resident
 // all-weights load plan, so the helper is total over the load-option space the loader accepts.
 func (s *WeightSource) UnifiedHostResidencyPlan(opts ...Q4KLoadOption) (compute.MemoryPlan, error) {
 	if s == nil {
@@ -208,6 +210,16 @@ func (s *WeightSource) UnifiedHostResidencyPlan(opts ...Q4KLoadOption) (compute.
 	switch {
 	case o.streamedExperts:
 		return s.EstimateCPUOffloadExpertsStreamedMemoryPlan(o.streamedExpertBytes)
+	case o.streamedDenseBounded:
+		// Bounded streamed dense: the eligible dense side is charged at its declared host
+		// working set (fak#13194), so the residency bound judges what the loader retains rather
+		// than the full on-disk dense side. Only a genuinely unbounded request (no working set
+		// declared) still falls back to the raw full-charge plan, preserving fail-closed.
+		plan, err := s.EstimateQ4KLoadMemoryPlan(WithStreamedDenseQ4KWorkingSet(o.streamedDenseBytes))
+		if errors.Is(err, ErrQ4KLoadEstimateUnsupported) {
+			return s.EstimateLoadMemoryPlan()
+		}
+		return plan, err
 	case o.streamedDenseQ4K:
 		plan, err := s.EstimateQ4KLoadMemoryPlan(WithStreamedDenseQ4K(true))
 		if errors.Is(err, ErrQ4KLoadEstimateUnsupported) {

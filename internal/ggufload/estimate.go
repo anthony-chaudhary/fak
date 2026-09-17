@@ -124,7 +124,7 @@ func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute
 	if (!cfg.IsQwen35Hybrid() && !standardDense) || cfg.IsMoE() {
 		return nil, fmt.Errorf("%w: requires dense Llama, Qwen2 or Qwen3.5-family weights", ErrQ4KLoadEstimateUnsupported)
 	}
-	if loadOpts.streamedDenseQ4K || loadOpts.streamedExperts || loadOpts.expertShardSet || model.W3MLPRequested() {
+	if (loadOpts.streamedDenseQ4K && !loadOpts.streamedDenseBounded) || loadOpts.streamedExperts || loadOpts.expertShardSet || model.W3MLPRequested() {
 		return nil, fmt.Errorf("%w: streaming, expert shards and W3 selection", ErrQ4KLoadEstimateUnsupported)
 	}
 	if loadOpts.residentQ2KEmbedding {
@@ -138,6 +138,7 @@ func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute
 		}
 	}
 	byDType := map[string]uint64{}
+	hostDenseStreamed := uint64(0)
 	seen := map[string]bool{}
 	qwenMTPSeen := newQwen35MTPSeenWithRetention(cfg, loadOpts.retainMTP)
 	if qwenMTPSeen != nil && (cfg.NumMTPLayers() != 1 || cfg.MTPUseDedicatedEmbeddings) {
@@ -235,8 +236,17 @@ func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute
 		if err != nil {
 			return nil, err
 		}
-		if byDType[dtype] > math.MaxUint64-n {
-			return nil, fmt.Errorf("gguf: Q4K estimate bytes overflow")
+		// Under the BOUNDED streamed-dense policy, eligible dense Q4_K tensors stay on disk with
+		// range descriptors (the loader's lazyDenseQ4KTensorWork branch), so they are charged to a
+		// single bounded HOST working set rather than the full dense side. The predicate mirrors
+		// quant_q4k_loader.go's lazy branch exactly (TensorQ4_K && ResidentQ4KEligible), so the
+		// estimate and the loader cannot disagree about which tensors the policy covers.
+		if loadOpts.streamedDenseBounded && info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, canon) {
+			if hostDenseStreamed > math.MaxUint64-n {
+				return nil, fmt.Errorf("gguf: streamed-dense estimate bytes overflow")
+			}
+			hostDenseStreamed += n
+			continue
 		}
 		byDType[dtype] += n
 		// The default tied loader keeps F32 embedding rows for gathers and a
@@ -259,7 +269,33 @@ func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute
 	if err := validateQwen35MTPMaterialized(qwenMTPSeen); err != nil {
 		return nil, err
 	}
-	return ggufMemoryPlanByDType(compute.MemoryWeights, compute.MemoryScopeDevice, "gguf-native-q4k-logical-weights", byDType)
+	plan, err := ggufMemoryPlanByDType(compute.MemoryWeights, compute.MemoryScopeDevice, "gguf-native-q4k-logical-weights", byDType)
+	if err != nil {
+		return nil, err
+	}
+	// Fold the eligible dense Q4_K side into ONE bounded host working-set row charged
+	// min(denseSide, workingSet). A zero working set is stream-through and charges nothing; a
+	// bound above the dense side is capped by the actual dense bytes, never inflated past what
+	// is resident.
+	if loadOpts.streamedDenseBounded {
+		resident := hostDenseStreamed
+		if uint64(loadOpts.streamedDenseBytes) < resident {
+			resident = uint64(loadOpts.streamedDenseBytes)
+		}
+		if resident > math.MaxInt64 {
+			return nil, fmt.Errorf("gguf: streamed-dense working set overflows int64")
+		}
+		if resident > 0 {
+			plan = append(plan, compute.MemoryDemand{
+				Class:  compute.MemoryOffload,
+				Bytes:  int64(resident),
+				Detail: "gguf-host-dense-streamed",
+				Scope:  compute.MemoryScopeHost,
+				DType:  "streamed-resident",
+			})
+		}
+	}
+	return plan, nil
 }
 
 func estimateNativeQ8LogicalBytes(elems uint64) (uint64, error) {
