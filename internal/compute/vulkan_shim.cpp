@@ -1922,6 +1922,79 @@ int fvk_device_allocation_window_end(uint64_t token, uint64_t* live_bytes,
     *peak_bytes = g_allocationWindowPeakBytes;
     return 1;
 }
+// ---- RADV/Vulkan performance-query phase observation ---------------------------
+//
+// Fail-closed: reports availability from the live device extension set only.
+// Unsupported counters are never replaced with constants; callers must observe
+// `*available == 0` and publish a typed-unavailable receipt.
+
+int fvk_phase_performance_query_available(void) {
+    if (!g_ready || g_submissionStatus != VK_SUCCESS) return 0;
+#ifdef VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME
+    return deviceExtensionSupported(VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME) ? 1 : 0;
+#else
+    return 0;
+#endif
+}
+
+int fvk_phase_counter_count(void) {
+#ifdef VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME
+    if (!g_ready || g_submissionStatus != VK_SUCCESS ||
+        !deviceExtensionSupported(VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME)) {
+        return -1;
+    }
+    uint32_t n = 0;
+    if (vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR(
+            g_phys, 0, &n, nullptr, nullptr) != VK_SUCCESS) {
+        return -1;
+    }
+    return (int)n;
+#else
+    return -1;
+#endif
+}
+
+int fvk_phase_counter_describe(int index, char* name, size_t name_len,
+                               char* unit, size_t unit_len, int* scope) {
+#ifdef VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME
+    if (index < 0 || !name || name_len == 0 || !unit || unit_len == 0 || !scope) {
+        return 0;
+    }
+    uint32_t n = 0;
+    if (!g_ready || g_submissionStatus != VK_SUCCESS ||
+        vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR(
+            g_phys, 0, &n, nullptr, nullptr) != VK_SUCCESS || (uint32_t)index >= n) {
+        return 0;
+    }
+    std::vector<VkPerformanceCounterKHR> counters(n, VkPerformanceCounterKHR{
+        VK_STRUCTURE_TYPE_PERFORMANCE_COUNTER_KHR});
+    std::vector<VkPerformanceCounterDescriptionKHR> descs(n, VkPerformanceCounterDescriptionKHR{
+        VK_STRUCTURE_TYPE_PERFORMANCE_COUNTER_DESCRIPTION_KHR});
+    if (vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR(
+            g_phys, 0, &n, counters.data(), descs.data()) != VK_SUCCESS) {
+        return 0;
+    }
+    strncpy(name, counters[index].name, name_len - 1);
+    name[name_len - 1] = 0;
+    const char* unitName = "unknown";
+    switch (counters[index].unit) {
+        case VK_PERFORMANCE_COUNTER_UNIT_GENERIC_KHR: unitName = "generic"; break;
+        case VK_PERFORMANCE_COUNTER_UNIT_PERCENTAGE_KHR: unitName = "percentage"; break;
+        case VK_PERFORMANCE_COUNTER_UNIT_NANOSECONDS_KHR: unitName = "nanoseconds"; break;
+        case VK_PERFORMANCE_COUNTER_UNIT_BYTES_KHR: unitName = "bytes"; break;
+        case VK_PERFORMANCE_COUNTER_UNIT_BYTES_PER_SECOND_KHR: unitName = "bytes_per_second"; break;
+        case VK_PERFORMANCE_COUNTER_UNIT_CYCLES_KHR: unitName = "cycles"; break;
+        default: unitName = "unknown"; break;
+    }
+    strncpy(unit, unitName, unit_len - 1);
+    unit[unit_len - 1] = 0;
+    *scope = (int)counters[index].scope;
+    return 1;
+#else
+    (void)index; (void)name; (void)name_len; (void)unit; (void)unit_len; (void)scope;
+    return 0;
+#endif
+}
 
 void fvk_sync(void) { if (g_dev) vkDeviceWaitIdle(g_dev); }
 

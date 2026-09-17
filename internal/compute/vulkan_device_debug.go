@@ -18,6 +18,9 @@ void fvk_restore_finish(void);
 void fvk_restore_abort(void);
 int fvk_restore_active(void);
 void fvk_debug_restore_fail_after_submits(int successful_submits);
+int fvk_phase_performance_query_available(void);
+int fvk_phase_counter_count(void);
+int fvk_phase_counter_describe(int index, char* name, size_t name_len, char* unit, size_t unit_len, int* scope);
 */
 import "C"
 import (
@@ -575,4 +578,47 @@ func VulkanDebugInitShim(spirvDir string) int {
 	var name [256]C.char
 	var discrete C.int
 	return int(C.fvk_init(&name[0], 256, &discrete, cdir))
+}
+
+// PhasePerformanceQuerySupported reports whether the live RADV/Vulkan device
+// exposes the KHR performance-query surface. A nil/absent extension is a typed
+// false, never a fabricated true.
+func (v *vulkanBackend) PhasePerformanceQuerySupported() (bool, string) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	if C.fvk_phase_performance_query_available() == 0 {
+		return false, "device does not expose VK_KHR_performance_query"
+	}
+	if C.fvk_phase_counter_count() <= 0 {
+		return false, "VK_KHR_performance_query is present but this queue family declares no enumerable counters"
+	}
+	return true, ""
+}
+
+// PhasePerformanceCounterDescriptors enumerates the device-declared counters
+// once. observed=false means the device did not enumerate a live counter set,
+// so the caller must publish a typed-unavailable observation.
+func (v *vulkanBackend) PhasePerformanceCounterDescriptors() ([]PhasePerformanceCounterDescriptor, bool) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	count := int(C.fvk_phase_counter_count())
+	if count <= 0 {
+		return nil, false
+	}
+	descriptors := make([]PhasePerformanceCounterDescriptor, 0, count)
+	for i := 0; i < count; i++ {
+		var name [256]C.char
+		var unit [64]C.char
+		var scope C.int
+		if C.fvk_phase_counter_describe(C.int(i), &name[0], 256, &unit[0], 64, &scope) == 0 {
+			return nil, false
+		}
+		descriptors = append(descriptors, PhasePerformanceCounterDescriptor{
+			Index: i,
+			Name:  strings.TrimSpace(C.GoString(&name[0])),
+			Unit:  PhasePerformanceCounterUnit(strings.TrimSpace(C.GoString(&unit[0]))),
+			Scope: PhasePerformanceCounterScope(int(scope)),
+		})
+	}
+	return descriptors, true
 }

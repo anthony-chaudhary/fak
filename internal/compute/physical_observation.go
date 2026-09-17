@@ -252,3 +252,113 @@ func subtractBackendCounters(before, after BackendCounterSnapshot) (BackendCount
 		TensorHomeAdmissions: a[14], TensorHomeBypasses: a[15], TensorHomeCopiedBytes: a[16],
 	}, nil
 }
+
+// PhasePerformanceCounterScope mirrors VkPerformanceCounterScopeKHR without
+// importing cgo into the untagged observation path.
+type PhasePerformanceCounterScope int
+
+const (
+	PhaseCounterScopeUnspecified PhasePerformanceCounterScope = iota
+	PhaseCounterScopeCommand
+	PhaseCounterScopeRenderPass
+	PhaseCounterScopeCompute
+)
+
+// PhasePerformanceCounterUnit mirrors VkPerformanceCounterUnitKHR.
+type PhasePerformanceCounterUnit string
+
+const (
+	PhaseCounterUnitUnknown     PhasePerformanceCounterUnit = "unknown"
+	PhaseCounterUnitGeneric     PhasePerformanceCounterUnit = "generic"
+	PhaseCounterUnitPercentage  PhasePerformanceCounterUnit = "percentage"
+	PhaseCounterUnitNanoseconds PhasePerformanceCounterUnit = "nanoseconds"
+	PhaseCounterUnitBytes       PhasePerformanceCounterUnit = "bytes"
+	PhaseCounterUnitBytesPerSec PhasePerformanceCounterUnit = "bytes_per_second"
+	PhaseCounterUnitCycles      PhasePerformanceCounterUnit = "cycles"
+)
+
+// PhasePerformanceCounterDescriptor is one device-declared counter. It is
+// reported only when a live device enumerates it; a counter that the device
+// does not declare is never substituted with a constant or a zero reading.
+type PhasePerformanceCounterDescriptor struct {
+	Index int
+	Name  string
+	Unit  PhasePerformanceCounterUnit
+	Scope PhasePerformanceCounterScope
+}
+
+// PhasePerformancePhaseReading is one sampled counter for one timestamped
+// phase. Available=false means the counter was NOT observed; Value is
+// meaningful only when Available is true. A typed-unavailable reading is the
+// fail-closed substitute for a fabricated constant.
+type PhasePerformancePhaseReading struct {
+	Phase     string
+	Counter   string
+	Unit      PhasePerformanceCounterUnit
+	Value     uint64
+	Available bool
+}
+
+// PhasePerformanceQueryObservation is the fail-closed result of probing the
+// RADV/Vulkan performance-query surface. When Supported is false the entire
+// observation is typed-unavailable: Descriptors is empty and every phase
+// reading is Available=false. No field is ever defaulted to a plausible
+// constant.
+type PhasePerformanceQueryObservation struct {
+	Supported   bool
+	Reason      string
+	Descriptors []PhasePerformanceCounterDescriptor
+	Readings    []PhasePerformancePhaseReading
+}
+
+// phasePerformanceQueryProbe is the backend-owned availability seam. The
+// Vulkan backend implements it with cgo; other backends simply do not.
+type phasePerformanceQueryProbe interface {
+	PhasePerformanceQuerySupported() (bool, string)
+	PhasePerformanceCounterDescriptors() ([]PhasePerformanceCounterDescriptor, bool)
+}
+
+// ObservePhasePerformanceQuery probes the selected backend for a live
+// performance-query surface. Unsupported backends, a nil probe, or an
+// unavailable extension all return Supported=false with a typed reason; the
+// caller must publish that typed-unavailable state rather than constants.
+func ObservePhasePerformanceQuery(backend Backend) PhasePerformanceQueryObservation {
+	if backend == nil {
+		return PhasePerformanceQueryObservation{Reason: "no backend selected"}
+	}
+	probe, ok := backend.(phasePerformanceQueryProbe)
+	if !ok {
+		return PhasePerformanceQueryObservation{Reason: "backend does not expose a phase performance-query surface"}
+	}
+	supported, reason := probe.PhasePerformanceQuerySupported()
+	if !supported {
+		if reason == "" {
+			reason = "device reported no RADV/Vulkan performance-query support"
+		}
+		return PhasePerformanceQueryObservation{Reason: reason}
+	}
+	descriptors, observed := probe.PhasePerformanceCounterDescriptors()
+	if !observed {
+		return PhasePerformanceQueryObservation{Reason: "performance-query counters could not be enumerated on this device"}
+	}
+	return PhasePerformanceQueryObservation{Supported: true, Descriptors: descriptors}
+}
+
+// PhasePerformanceReadingsForPhase attaches per-counter readings for one
+// timestamped phase. A counter not present in the observation's descriptors is
+// emitted as a typed-unavailable reading, never as a zero value that could be
+// mistaken for a measured constant.
+func (o PhasePerformanceQueryObservation) ReadingsForPhase(phase string, samples map[string]uint64) []PhasePerformancePhaseReading {
+	readings := make([]PhasePerformancePhaseReading, 0, len(o.Descriptors))
+	for _, descriptor := range o.Descriptors {
+		value, ok := samples[descriptor.Name]
+		readings = append(readings, PhasePerformancePhaseReading{
+			Phase:     phase,
+			Counter:   descriptor.Name,
+			Unit:      descriptor.Unit,
+			Value:     value,
+			Available: ok,
+		})
+	}
+	return readings
+}

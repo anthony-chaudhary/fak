@@ -383,3 +383,122 @@ func TestBackendExecutionDeltaRejectsIncompleteTransferPairs(t *testing.T) {
 		})
 	}
 }
+
+type phaseQueryBackend struct {
+	Backend
+	name        string
+	supported   bool
+	reason      string
+	descriptors []PhasePerformanceCounterDescriptor
+	observed    bool
+}
+
+func (b phaseQueryBackend) Name() string            { return b.name }
+func (b phaseQueryBackend) Tier() string            { return "test" }
+func (b phaseQueryBackend) Class() CorrectnessClass { return Approx }
+func (b phaseQueryBackend) Caps() Caps              { return Caps{} }
+func (b phaseQueryBackend) PhasePerformanceQuerySupported() (bool, string) {
+	return b.supported, b.reason
+}
+func (b phaseQueryBackend) PhasePerformanceCounterDescriptors() ([]PhasePerformanceCounterDescriptor, bool) {
+	return b.descriptors, b.observed
+}
+
+// TestVulkanPhasePerformanceCounters is the deterministic software witness for
+// the RADV/Vulkan phase performance-query observation leaf. It binds the
+// fail-closed source seam in the native shim to the fail-closed Go behavior:
+// no unsupported counter is ever replaced with a constant.
+func TestVulkanPhasePerformanceCounters(t *testing.T) {
+	raw, err := os.ReadFile("vulkan_shim.cpp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+
+	available := sourceSection(t, source, "int fvk_phase_performance_query_available(void)", "int fvk_phase_counter_count(void)")
+	for _, required := range []string{
+		"!g_ready", "g_submissionStatus != VK_SUCCESS",
+		"deviceExtensionSupported(VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME)",
+	} {
+		if !strings.Contains(available, required) {
+			t.Fatalf("phase performance-query availability probe missing %q", required)
+		}
+	}
+	if strings.Contains(available, "return 1;") && !strings.Contains(available, ": 0;") {
+		t.Fatal("availability probe must be fail-closed, never an unconditional success")
+	}
+
+	describe := sourceSection(t, source, "int fvk_phase_counter_describe", "void fvk_sync")
+	for _, required := range []string{
+		"vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR",
+		"VK_PERFORMANCE_COUNTER_UNIT_BYTES_KHR",
+		"VK_PERFORMANCE_COUNTER_UNIT_NANOSECONDS_KHR",
+	} {
+		if !strings.Contains(describe, required) {
+			t.Fatalf("counter-description seam missing %q", required)
+		}
+	}
+	if !strings.Contains(describe, "return 0;") {
+		t.Fatal("counter description must fail closed when enumeration is unavailable")
+	}
+	for _, forbidden := range []string{"273.056", "= 218", "return 100", "= 1; //"} {
+		if strings.Contains(describe, forbidden) {
+			t.Fatalf("counter description must never fabricate a constant reading (%q)", forbidden)
+		}
+	}
+
+	t.Run("nil backend is typed unavailable", func(t *testing.T) {
+		got := ObservePhasePerformanceQuery(nil)
+		if got.Supported || len(got.Descriptors) != 0 || len(got.Readings) != 0 || got.Reason == "" {
+			t.Fatalf("nil backend must be typed-unavailable: %+v", got)
+		}
+	})
+
+	t.Run("backend without the surface is typed unavailable", func(t *testing.T) {
+		got := ObservePhasePerformanceQuery(unsupportedObservationBackend{name: "cpu-ref"})
+		if got.Supported || len(got.Descriptors) != 0 || got.Reason == "" {
+			t.Fatalf("unsupported backend must be typed-unavailable: %+v", got)
+		}
+	})
+
+	t.Run("device refusal stays unavailable", func(t *testing.T) {
+		backend := phaseQueryBackend{name: "vulkan", supported: false}
+		got := ObservePhasePerformanceQuery(backend)
+		if got.Supported || len(got.Descriptors) != 0 || got.Reason == "" {
+			t.Fatalf("refused device must be typed-unavailable: %+v", got)
+		}
+	})
+
+	t.Run("enumeration failure stays unavailable", func(t *testing.T) {
+		backend := phaseQueryBackend{name: "vulkan", supported: true}
+		got := ObservePhasePerformanceQuery(backend)
+		if got.Supported || len(got.Descriptors) != 0 || got.Reason == "" {
+			t.Fatalf("failed enumeration must be typed-unavailable: %+v", got)
+		}
+	})
+
+	t.Run("supported device reports live descriptors and phase readings", func(t *testing.T) {
+		backend := phaseQueryBackend{
+			name: "vulkan", supported: true, observed: true,
+			descriptors: []PhasePerformanceCounterDescriptor{
+				{Index: 0, Name: "GPUTime", Unit: PhaseCounterUnitNanoseconds, Scope: PhaseCounterScopeCompute},
+				{Index: 1, Name: "GPUMemoryBytes", Unit: PhaseCounterUnitBytes, Scope: PhaseCounterScopeCompute},
+			},
+		}
+		got := ObservePhasePerformanceQuery(backend)
+		if !got.Supported || len(got.Descriptors) != 2 {
+			t.Fatalf("supported device lost descriptors: %+v", got)
+		}
+		readings := got.ReadingsForPhase("prefill", map[string]uint64{"GPUTime": 42})
+		if len(readings) != 2 {
+			t.Fatalf("want one reading per descriptor, got %+v", readings)
+		}
+		if !readings[0].Available || readings[0].Value != 42 || readings[0].Phase != "prefill" {
+			t.Fatalf("measured counter misreported: %+v", readings[0])
+		}
+		if readings[1].Available || readings[1].Value != 0 {
+			t.Fatalf("unmeasured counter must stay typed-unavailable, not constant: %+v", readings[1])
+		}
+	})
+
+}
