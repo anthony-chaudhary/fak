@@ -50,7 +50,7 @@ func TestQ4KM5ProductionSeamDefaultsToWideTile(t *testing.T) {
 	defer g.Free()
 
 	mode := Q4KGEMMModeForPrompt(P)
-	admitted := Q4KM5CrossoverAdmits()
+	admitted := Q4KM5CrossoverAdmits(P)
 	if admitted {
 		// Receipted box: the production seam must actually select the wide-tile kernel.
 		if mode != Q4KGEMMModeM5CooperativeSMEM {
@@ -134,11 +134,12 @@ func TestQ4KM5CooperativeSMEMCandidateMatchesIndependentCPUOracle(t *testing.T) 
 	}
 }
 
-// TestQ4KM5CrossoverGatesPanelRegime is the routing witness for the pinned crossover the ticket
-// asks for: mode 2 is requested for the widened panel shapes P>=64 ONLY where a pinned row both
-// matches the device/OS and clears the fak#9937 >=1.10x margin; below the margin, on a mismatched
-// device/OS, and for P<64 the typed requested identity stays scalar. It is pure Go (no Metal work),
-// so it runs on any host and pins the gate itself rather than a magic literal.
+// TestQ4KM5CrossoverGatesPanelRegime is the routing witness for the P-band-pinned crossover
+// fak#13133 asks for: mode 2 is requested for the widened panel shapes P>=64 ONLY where a pinned
+// row matches the device/OS, COVERS P in its measured band, and clears the fak#9937 >=1.10x
+// margin; below the margin, on a mismatched device/OS, outside the measured band, and for P<64
+// the typed requested identity stays scalar. It is pure Go (no Metal work), so it runs on any
+// host and pins the gate itself rather than a magic literal.
 func TestQ4KM5CrossoverGatesPanelRegime(t *testing.T) {
 	// Exactly one row is pinned: the on-silicon Apple M3 Pro / macOS 26 receipt from
 	// TestQ4KCrossoverReceiptCandidateVsScalar. A second row would be an unpinned device reaching
@@ -161,10 +162,11 @@ func TestQ4KM5CrossoverGatesPanelRegime(t *testing.T) {
 
 	const device, osVersion = "Apple M3 Pro", "26.6.2"
 	// On the device the pinned production row was measured on, the opt-in must reach mode 2 for
-	// the widened panel shapes. This is the end-to-end gate the row exists to open.
-	if Q4KM5CrossoverPredicate(device, osVersion) {
+	// the widened panel shapes INSIDE the measured band. This is the end-to-end gate the row
+	// exists to open: P=64 and P=128 are the measured endpoints.
+	if Q4KM5CrossoverPredicate(device, osVersion, 64) {
 		q4kUseM5.Store(true)
-		for _, P := range []int{64, 128, 256} {
+		for _, P := range []int{64, 128} {
 			if got := q4kGEMMModeForPrompt(P); got != Q4KGEMMModeM5CooperativeSMEM {
 				t.Fatalf("P=%d on the pinned device selected %v, want mode 2", P, got)
 			}
@@ -172,20 +174,27 @@ func TestQ4KM5CrossoverGatesPanelRegime(t *testing.T) {
 		q4kUseM5.Store(false)
 	}
 	// A row below the >=1.10x gate must NOT admit mode 2.
-	withPinnedCrossoverRow(t, q4kM5CrossoverRow{Family: device, OSVersion: "26", MinRatio: 1.09, Witness: "witness://below-gate"}, func() {
-		if Q4KM5CrossoverPredicate(device, osVersion) {
+	withPinnedCrossoverRow(t, q4kM5CrossoverRow{Family: device, OSVersion: "26", MinP: 64, MaxP: 128, MinRatio: 1.09, Witness: "witness://below-gate"}, func() {
+		if Q4KM5CrossoverPredicate(device, osVersion, 64) {
 			t.Fatal("a row gated below 1.10 admitted mode 2")
 		}
 	})
-	// A row above the gate admits only for the pinned device/OS.
-	withPinnedCrossoverRow(t, q4kM5CrossoverRow{Family: device, OSVersion: "26", MinRatio: 1.10, Witness: "witness://oracle-parity"}, func() {
-		if !Q4KM5CrossoverPredicate(device, osVersion) {
-			t.Fatal("a matching >=1.10 row did not admit mode 2")
+	// A row above the gate admits only for the pinned device/OS AND only inside its P band.
+	withPinnedCrossoverRow(t, q4kM5CrossoverRow{Family: device, OSVersion: "26", MinP: 64, MaxP: 128, MinRatio: 1.10, Witness: "witness://oracle-parity"}, func() {
+		if !Q4KM5CrossoverPredicate(device, osVersion, 64) {
+			t.Fatal("a matching >=1.10 row did not admit mode 2 at its lower band edge")
 		}
-		if Q4KM5CrossoverPredicate("Apple M1 Max", osVersion) {
+		if !Q4KM5CrossoverPredicate(device, osVersion, 128) {
+			t.Fatal("a matching >=1.10 row did not admit mode 2 at its upper band edge")
+		}
+		// An unmeasured P outside the band is fail-closed, even on the pinned device/OS.
+		if Q4KM5CrossoverPredicate(device, osVersion, 256) {
+			t.Fatal("crossover admitted P=256 outside the measured band")
+		}
+		if Q4KM5CrossoverPredicate("Apple M1 Max", osVersion, 64) {
 			t.Fatal("crossover admitted a device outside its pin")
 		}
-		if Q4KM5CrossoverPredicate(device, "25.4.0") {
+		if Q4KM5CrossoverPredicate(device, "25.4.0", 64) {
 			t.Fatal("crossover admitted an OS outside its pin")
 		}
 		q4kUseM5.Store(true)
@@ -199,6 +208,11 @@ func TestQ4KM5CrossoverGatesPanelRegime(t *testing.T) {
 			if got := q4kGEMMModeForPrompt(128); got != Q4KGEMMModeM5CooperativeSMEM {
 				t.Fatalf("P=128 with an admitting row selected %v, want mode 2", got)
 			}
+			// P=256 is inside the widened panel regime (P>=64) but outside the measured band, so
+			// even with the opt-in on and an admitting row it must stay scalar (fail-closed).
+			if got := q4kGEMMModeForPrompt(256); got != Q4KGEMMModeScalar {
+				t.Fatalf("P=256 outside the measured band selected %v, want scalar", got)
+			}
 			// The typed requested identity must report mode 2 (not scalar) for the admitted shape.
 			if req := q4kGEMMRequestedExecution(64, q4kGEMMModeForPrompt(64)); req != Q4KGEMMExecutedM5CooperativeSMEM {
 				t.Fatalf("P=64 requested identity=%v, want M5CooperativeSMEM", req)
@@ -210,6 +224,55 @@ func TestQ4KM5CrossoverGatesPanelRegime(t *testing.T) {
 		}
 		if req := q4kGEMMRequestedExecution(64, Q4KGEMMModeScalar); req != Q4KGEMMExecutedScalar {
 			t.Fatalf("scalar requested identity=%v, want scalar", req)
+		}
+	})
+}
+
+// TestQ4KM5CrossoverBandFailsClosedForUnmeasuredPrompt is the fail-closed witness fak#13133's
+// definition of done names: a row pinned at a measured band [MinP,MaxP] admits only P inside that
+// band, and every P outside it — below, above, or a bandless row — stays scalar. It is pure Go.
+func TestQ4KM5CrossoverBandFailsClosedForUnmeasuredPrompt(t *testing.T) {
+	const device, osVersion = "Apple M3 Pro", "26.6.2"
+	// A banded, above-gate row: the measured interval [64,128].
+	withPinnedCrossoverRow(t, q4kM5CrossoverRow{Family: device, OSVersion: "26", MinP: 64, MaxP: 128, MinRatio: 1.10, Witness: "witness://band"}, func() {
+		for _, P := range []int{64, 96, 128} {
+			if !Q4KM5CrossoverPredicate(device, osVersion, P) {
+				t.Fatalf("P=%d inside [64,128] was not admitted", P)
+			}
+		}
+		for _, P := range []int{1, 32, 63, 129, 256, 4096} {
+			if Q4KM5CrossoverPredicate(device, osVersion, P) {
+				t.Fatalf("P=%d outside the measured [64,128] band admitted mode 2; must fail closed", P)
+			}
+		}
+	})
+	// A row with no P band (the pre-#13133 shape) admits nothing: an unbanded row is an
+	// unmeasured row, and the fail-closed predicate must not silently treat it as unbounded.
+	withPinnedCrossoverRow(t, q4kM5CrossoverRow{Family: device, OSVersion: "26", MinRatio: 1.10, Witness: "witness://unbanded"}, func() {
+		for _, P := range []int{64, 128, 256} {
+			if Q4KM5CrossoverPredicate(device, osVersion, P) {
+				t.Fatalf("an unbanded row admitted P=%d; a P band with no measured shape must fail closed", P)
+			}
+		}
+	})
+	// An open-above band (MaxP=0) admits every P at or above MinP — the shape to use only when a
+	// receipt measured the whole open interval.
+	withPinnedCrossoverRow(t, q4kM5CrossoverRow{Family: device, OSVersion: "26", MinP: 64, MaxP: 0, MinRatio: 1.10, Witness: "witness://open-above"}, func() {
+		for _, P := range []int{64, 128, 256, 4096} {
+			if !Q4KM5CrossoverPredicate(device, osVersion, P) {
+				t.Fatalf("open-above band did not admit P=%d", P)
+			}
+		}
+		if Q4KM5CrossoverPredicate(device, osVersion, 63) {
+			t.Fatal("open-above band admitted P=63 below MinP")
+		}
+	})
+	// An inverted/zero-width band is malformed and admits nothing.
+	withPinnedCrossoverRow(t, q4kM5CrossoverRow{Family: device, OSVersion: "26", MinP: 128, MaxP: 64, MinRatio: 1.10, Witness: "witness://inverted"}, func() {
+		for _, P := range []int{64, 96, 128} {
+			if Q4KM5CrossoverPredicate(device, osVersion, P) {
+				t.Fatalf("an inverted band admitted P=%d; must fail closed", P)
+			}
 		}
 	})
 }
