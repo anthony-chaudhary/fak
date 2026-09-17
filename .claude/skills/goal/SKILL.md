@@ -1,4 +1,4 @@
----
+﻿---
 name: goal
 description: Autonomous goal-directed execution loop. Establishes an immutable objective pin, durable scratch state (_scratch/goals/GOAL.md & todowrite), a deterministic witness exit-gate, and executes atomic steps until verified.
 disable-model-invocation: false
@@ -7,7 +7,7 @@ allowed-tools: Read, Edit, Write, Grep, Glob, Bash
 argument-hint: "[objective] [--witness <command>] [--budget <iters>] [--dry-run]"
 ---
 
-# /goal — Autonomous Goal-Directed Execution Loop
+# /goal â€” Autonomous Goal-Directed Execution Loop
 
 An autonomous execution skill that drives a high-level objective to verified completion. While awaiting native OpenCode `/goal` runtime primitives, this skill provides a battle-tested goal loop immediately across OpenCode, Claude Code, and Codex.
 
@@ -24,7 +24,7 @@ It unifies the best patterns from existing open-source agent systems:
 1. **The Objective Pin**: The objective statement is pinned verbatim and never mutates during the run. Pinning prevents goal drift (Arike et al., 2025).
 2. **State on Disk, Not Ephemeral Memory**: Progress, plans, and scratchpad live in `_scratch/goals/GOAL.md` (or `_scratch/goals/GOAL-<slug>.md`) on disk. Goal specs are noisy, disposable scratchpad memory for surviving context compaction; they are not coordination artifacts. First-class coordination occurs via lane leases (`dos arbitrate` / `internal/leaseref`), claims (`CLAIMS.md`), issue comments, and commit trailers.
 3. **External Witness Exit-Gate (and Live Hardware Shift-Left)**: Model proposes, test disposes. The agent never grades its own work. A goal is satisfied only when a deterministic external command (test suite, buildcheck, validator) exits 0. For tasks touching hardware, compute kernels, or accelerator paths (CUDA, Vulkan, Metal, APU/UMA), bias heavily toward testing sub-components on live physical hardware (divide and conquer) with high volume and frequency (e.g. `fak validate --strix --subkernels=...`, `make mac-perf`, `make cuda-test`) rather than relying on synthetic host mocks or deferring verification to monolithic post-merge runs.
-4. **Atomic S0/S1 Steps (Divide & Conquer, Subdivide, and Scope Abstention)**: Divide and conquer substantive or multi-concern objectives into atomic leaves (1–3 files touched per step). When tasks have independent components, delegate to isolated subagents or workers (`task`: worker, researcher, explore, cross-validator) to prevent coordinator context pollution. Divide and conquer applies to compute pipelines as well: decompose hardware verification into isolated sub-components (sub-kernels, GEMV/GEMM microbenchmarks, Vulkan primitives) to execute on live hardware frequently and in high volume. Parallel subagent cohorts (4–8 parallel subagents across independent packages, tests, or diagnostic probes) are authorized while maintaining the single active goal milestone in `todowrite`. Top-level coordinators fan out subagents, while leaf workers execute directly without nested recursion (#12028). Keep exactly one step `in_progress` in `todowrite`. When encountering high-difficulty boundaries (e.g. frozen ABI, kernel SIMD), scope abstention strictly to the bounded aspect: emit a structured `ABSTAIN` record for that boundary while advancing all independent, safe, solvable sub-components (reproduction tests, diagnostics, disjoint packages).
+4. **Atomic S0/S1 Steps (Divide & Conquer, Subdivide, and Scope Abstention)**: Divide and conquer substantive or multi-concern objectives into atomic leaves (1â€“3 files touched per step). When tasks have independent components, delegate to isolated subagents or workers (`task`: worker, researcher, explore, cross-validator) to prevent coordinator context pollution. Divide and conquer applies to compute pipelines as well: decompose hardware verification into isolated sub-components (sub-kernels, GEMV/GEMM microbenchmarks, Vulkan primitives) to execute on live hardware frequently and in high volume. Parallel subagent cohorts (4â€“8 parallel subagents across independent packages, tests, or diagnostic probes) are authorized while maintaining the single active goal milestone in `todowrite`. Top-level coordinators fan out subagents, while leaf workers execute directly without nested recursion (#12028). Keep exactly one step `in_progress` in `todowrite`. When encountering high-difficulty boundaries (e.g. frozen ABI, kernel SIMD), scope abstention strictly to the bounded aspect: emit a structured `ABSTAIN` record for that boundary while advancing all independent, safe, solvable sub-components (reproduction tests, diagnostics, disjoint packages).
 5. **Failure Memory Scratchpad & Persistence (Move Forward Over Conclusions)**: Genuine guard refusals carrying a closed reason token or unexpected process crashes are recorded in `# Scratch / last-refusal` in `_scratch/goals/GOAL.md` (or `_scratch/goals/GOAL-<slug>.md`). Routine CLI return codes from read-only commands (such as `grep` returning 1 on no match, or `git diff --quiet` detecting changes) are normal tool execution results and must not be logged as failures in `# Scratch / last-refusal`. A refusal or tool crash is diagnostic feedback, not a session abort. Query `fak recover <TOKEN>` for structured recovery, adapt the execution path or decompose the step, and maintain momentum on the pinned objective without repeating identical failing calls. Focus on forward momentum over terminal conclusions: rather than defeatist conclusions when a step underperforms (e.g. rather *"the next step to get better performance is X"* than *"X didn't work ... therefore we suck..."*), treat unmet targets as empirical data that eliminates a variable, and formulate the concrete next checkable step.
 
 ---
@@ -33,7 +33,7 @@ It unifies the best patterns from existing open-source agent systems:
 
 ### Step 1: Intake and Objective Pinning
 
-Parse `$ARGUMENTS` (e.g. `/goal Fix memory leak in auth service --witness "go test ./internal/auth/..."`). If no argument was provided, prompt the operator for the singular objective.
+Parse `$ARGUMENTS` (e.g. `/goal Fix memory leak in auth service --witness "go test ./internal/auth/..."`). If no argument was provided, do not prompt the operator - default to acting: derive the best-supported objective from evidence (the active goal, open WIP, tickets, or the repo's default work object) and proceed. Resolve a surfaced choice through the `internal/choicetriage` fold: take the obvious move (`TAKE_OBVIOUS`); hand a knowable-but-unobvious question to a **fresh context window at the top tier** (`FRESH_CONTEXT`, the default); or decompose scope too large for this context into a ticket (`FILE_TICKET`). Only an irreducible policy/auth/release/priority/trust decision (`HUMAN_RESIDUAL`) legitimately returns to a person - and it must be **earned** by a real authority signal, never manufactured by phrasing status as a question. An unattended goal run that opens by asking a person has silently stalled.
 
 Formulate three fields:
 - **Objective Pin**: Exactly one clear, measurable end-state.
@@ -86,7 +86,7 @@ Before editing code:
 Iterate through plan items sequentially:
 1. **Divide and conquer by delegation**: For substantive, complex, or multi-component goals, launch specialized subagents concurrently for independent parts (e.g. `task` with `worker` for implementation, `researcher` for prior art, `cross-validator` for verification). Pull only compact receipts and decisions into the coordinator.
 2. Keep only one task `in_progress` in `todowrite`.
-3. Confine edits to 1–3 closely related files using `Edit` or `Write`.
+3. Confine edits to 1â€“3 closely related files using `Edit` or `Write`.
 4. If a command or tool fails:
    - Routine CLI return codes from read-only commands (such as `grep` returning 1 on no match, or `git diff --quiet` detecting changes) are normal tool execution results and must not be logged as failures in `# Scratch / last-refusal`.
    - Log only genuine guard refusals carrying a closed reason token or unexpected process crashes to `# Scratch / last-refusal` in `_scratch/goals/GOAL.md`.
