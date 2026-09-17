@@ -1928,10 +1928,31 @@ int fvk_device_allocation_window_end(uint64_t token, uint64_t* live_bytes,
 // Unsupported counters are never replaced with constants; callers must observe
 // `*available == 0` and publish a typed-unavailable receipt.
 
+// The KHR performance-query counters entry point is a device-level command the
+// Vulkan loader does not export for direct linking; resolve it at runtime and
+// cache the result. A missing entry point is fail-closed (null), never a stub
+// that fabricates a reading.
+#ifdef VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME
+static PFN_vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR
+    phaseCounterEnumerate() {
+    static PFN_vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR fn = nullptr;
+    static bool resolved = false;
+    if (!resolved) {
+        resolved = true;
+        if (g_dev) {
+            fn = (PFN_vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR)
+                vkGetDeviceProcAddr(g_dev, "vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR");
+        }
+    }
+    return fn;
+}
+#endif
+
 int fvk_phase_performance_query_available(void) {
     if (!g_ready || g_submissionStatus != VK_SUCCESS) return 0;
 #ifdef VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME
-    return deviceExtensionSupported(VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME) ? 1 : 0;
+    if (!deviceExtensionSupported(VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME)) return 0;
+    return phaseCounterEnumerate() ? 1 : 0;
 #else
     return 0;
 #endif
@@ -1943,9 +1964,11 @@ int fvk_phase_counter_count(void) {
         !deviceExtensionSupported(VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME)) {
         return -1;
     }
+    PFN_vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR enumerate =
+        phaseCounterEnumerate();
+    if (!enumerate) return -1;
     uint32_t n = 0;
-    if (vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR(
-            g_phys, 0, &n, nullptr, nullptr) != VK_SUCCESS) {
+    if (enumerate(g_phys, 0, &n, nullptr, nullptr) != VK_SUCCESS) {
         return -1;
     }
     return (int)n;
@@ -1960,21 +1983,22 @@ int fvk_phase_counter_describe(int index, char* name, size_t name_len,
     if (index < 0 || !name || name_len == 0 || !unit || unit_len == 0 || !scope) {
         return 0;
     }
+    PFN_vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR enumerate =
+        phaseCounterEnumerate();
+    if (!enumerate) return 0;
     uint32_t n = 0;
     if (!g_ready || g_submissionStatus != VK_SUCCESS ||
-        vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR(
-            g_phys, 0, &n, nullptr, nullptr) != VK_SUCCESS || (uint32_t)index >= n) {
+        enumerate(g_phys, 0, &n, nullptr, nullptr) != VK_SUCCESS || (uint32_t)index >= n) {
         return 0;
     }
     std::vector<VkPerformanceCounterKHR> counters(n, VkPerformanceCounterKHR{
         VK_STRUCTURE_TYPE_PERFORMANCE_COUNTER_KHR});
     std::vector<VkPerformanceCounterDescriptionKHR> descs(n, VkPerformanceCounterDescriptionKHR{
         VK_STRUCTURE_TYPE_PERFORMANCE_COUNTER_DESCRIPTION_KHR});
-    if (vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR(
-            g_phys, 0, &n, counters.data(), descs.data()) != VK_SUCCESS) {
+    if (enumerate(g_phys, 0, &n, counters.data(), descs.data()) != VK_SUCCESS) {
         return 0;
     }
-    strncpy(name, counters[index].name, name_len - 1);
+    strncpy(name, descs[index].name, name_len - 1);
     name[name_len - 1] = 0;
     const char* unitName = "unknown";
     switch (counters[index].unit) {
