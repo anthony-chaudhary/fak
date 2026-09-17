@@ -781,8 +781,10 @@ func TestStrixWave32GEMVDecode_FailClosed(t *testing.T) {
 	}
 }
 
-// TestStrixDecodeGEMVDevice_ToggleEnv verifies the opt-in switch and launch-path proof are
-// read fail-closed from the environment.
+// TestStrixDecodeGEMVDevice_ToggleEnv verifies the opt-in switch is read fail-closed from the
+// environment and that naming a launch mechanism is an assertion, not evidence: since #13026 the
+// decode GEMV admits only from a validated gfx1151 hsaco code object, so FAK_STRIX_GEMV_LAUNCH_PATH
+// alone never admits.
 func TestStrixDecodeGEMVDevice_ToggleEnv(t *testing.T) {
 	t.Setenv(EnvStrixWave32GEMVDecode, "")
 	t.Setenv(EnvStrixGEMVLaunchPath, "")
@@ -804,13 +806,13 @@ func TestStrixDecodeGEMVDevice_ToggleEnv(t *testing.T) {
 		t.Fatal("asserted launch path 'none' must not admit")
 	}
 
+	// Hardened contract (#13026): naming a mechanism is an assertion, not evidence.
+	// The decode GEMV admits only once a real gfx1151 hsaco code object has been
+	// validated, so the operator string alone must still refuse.
 	t.Setenv(EnvStrixGEMVLaunchPath, "hsaco-aql")
-	toggle, kernel := ResolveStrixDecodeGEMVDevice()
-	if !toggle.Admitted || !kernel.Available() {
-		t.Fatalf("proven launch path must admit, got %+v", toggle)
-	}
-	if toggle.LaunchPath != "hsaco-aql" {
-		t.Fatalf("launch path %q != hsaco-aql", toggle.LaunchPath)
+	assertedToggle, assertedKernel := ResolveStrixDecodeGEMVDevice()
+	if assertedToggle.Admitted || assertedKernel.Available() {
+		t.Fatalf("an asserted launch path with no validated code object must not admit, got %+v", assertedToggle)
 	}
 }
 
