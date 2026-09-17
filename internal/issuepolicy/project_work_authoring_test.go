@@ -56,3 +56,26 @@ func TestAppendProjectWorkDefaultsUnknownStandardNamesTheResolvedValue(t *testin
 		t.Fatalf("error must name the resolved standard, not the empty argument: err=%v", err)
 	}
 }
+
+func TestLandedStandardAgreesBetweenAuthoringAndReview(t *testing.T) {
+	body := "## Parent context\n#1\n\n## Work estimate\nEstimate: 1 point.\n\n## Overall completion contribution\nContribution: 1/8 points.\n\n## Completion standard\nlanded\n"
+	authored, err := AppendProjectWorkDefaults(body, ProjectWorkAuthoring{})
+	if err != nil {
+		t.Fatalf("authoring must accept landed: err=%v", err)
+	}
+	review := ReviewIssueDraft(IssueDraft{Title: "x", Body: authored}, Options{StrictProjectWork: true})
+	if !knownCompletionStandard(review.ProjectWork.CompletionStandard) {
+		t.Fatalf("review resolved standard %q is not a known standard", review.ProjectWork.CompletionStandard)
+	}
+	for _, invalid := range review.ProjectWork.Invalid {
+		if strings.Contains(invalid, "completion standard must be") {
+			t.Fatalf("review rejected a standard the authoring path accepted: %q", invalid)
+		}
+	}
+}
+
+func TestCompletionStandardListNamesLanded(t *testing.T) {
+	if !strings.Contains(completionStandardList(), "landed") {
+		t.Fatalf("refusal vocabulary must name landed: %q", completionStandardList())
+	}
+}

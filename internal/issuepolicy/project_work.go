@@ -71,12 +71,8 @@ func projectWork(c Candidate) ProjectWorkReadout {
 		out.Invalid = append(out.Invalid, "completion standard is missing")
 		out.Repair = append(out.Repair, "add ## Completion standard; unqualified authoring defaults to production")
 	}
-	switch out.CompletionStandard {
-	case "production", "research", "experiment", "prototype", "demo", "development", "dev", "integrated", "staging":
-	default:
-		if out.CompletionStandard != "" {
-			out.Invalid = append(out.Invalid, "completion standard must be production, integrated, staging, development, demo, prototype, experiment, or research")
-		}
+	if !knownCompletionStandard(out.CompletionStandard) {
+		out.Invalid = append(out.Invalid, "completion standard must be "+completionStandardList())
 	}
 	out.ProductionCredit = out.CompletionStandard == "production" && len(out.Invalid) == 0
 	if len(out.Invalid) > 0 {

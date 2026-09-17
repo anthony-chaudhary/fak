@@ -50,9 +50,7 @@ func AppendProjectWorkDefaults(body string, a ProjectWorkAuthoring) (string, err
 	if standard == "" {
 		standard = "production"
 	}
-	switch standard {
-	case "production", "research", "experiment", "prototype", "demo", "development", "dev", "integrated", "staging", "landed":
-	default:
+	if !knownCompletionStandard(standard) {
 		return "", fmt.Errorf("unsupported completion standard %q", standard)
 	}
 	out := strings.TrimSpace(body)
@@ -84,6 +82,30 @@ func AppendProjectWorkDefaults(body string, a ProjectWorkAuthoring) (string, err
 		appendSection("Witnessed operating envelope", strings.TrimSpace(a.WitnessedEnvelope))
 	}
 	return out + "\n", nil
+}
+
+// completionStandards is the single authority for the accepted completion
+// standards. Both the authoring path (AppendProjectWorkDefaults) and the strict
+// review validator (evaluateProjectWork) consult it, so a standard can never be
+// accepted by one and rejected by the other.
+var completionStandards = []string{
+	"production", "research", "experiment", "prototype", "demo",
+	"development", "dev", "integrated", "staging", "landed",
+}
+
+// knownCompletionStandard reports whether s names an accepted completion standard.
+func knownCompletionStandard(s string) bool {
+	for _, std := range completionStandards {
+		if s == std {
+			return true
+		}
+	}
+	return false
+}
+
+// completionStandardList renders the accepted standards for a refusal message.
+func completionStandardList() string {
+	return strings.Join(completionStandards[:len(completionStandards)-1], ", ") + ", or " + completionStandards[len(completionStandards)-1]
 }
 
 func finitePositive(v float64) bool { return v > 0 && !math.IsNaN(v) && !math.IsInf(v, 0) }
