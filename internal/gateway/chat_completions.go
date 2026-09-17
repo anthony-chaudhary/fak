@@ -161,14 +161,14 @@ func shouldEnableMetalMTP(cfg Config) bool {
 	if !isModelHybrid(cfg.InKernelModel) {
 		return false
 	}
-	return cfg.MetalMTP || speculativeModeSelected("mtp")
+	return cfg.MetalMTP || speculativeModeSelected(cfg, "mtp")
 }
 
 // shouldEnableVulkanMTP admits only the supported Qwen3.8 resident
 // draft/target envelope. The request-bound constructor repeats these checks and
 // produces a typed ordinary-decode downgrade if live session state is unsuitable.
 func shouldEnableVulkanMTP(cfg Config) bool {
-	if cfg.InKernelModel == nil || cfg.Backend == nil || cfg.Metal || !cfg.InKernelQ4K || !vulkanMTPModeSelected() {
+	if cfg.InKernelModel == nil || cfg.Backend == nil || cfg.Metal || !cfg.InKernelQ4K || !vulkanMTPModeSelected(cfg) {
 		return false
 	}
 	if !isModelHybrid(cfg.InKernelModel) || !strings.EqualFold(strings.TrimSpace(cfg.Backend.Name()), "vulkan") {
@@ -211,23 +211,39 @@ func shouldEnableNGramSpeculative(cfg Config) bool {
 	if !ok || backend.Qwen35SequenceAllLogitsPath() != compute.Qwen35SequenceAllLogitsPath {
 		return false
 	}
-	return speculativeModeSelected("ngram")
+	return speculativeModeSelected(cfg, "ngram")
 }
 
-func speculativeModeSelected(mode string) bool {
+// speculativeModeSelected reports whether the requested speculative mode is
+// selected. The STRUCTURAL cfg.SpeculativeMode is consulted first so a default
+// front door reaches the fast decode route by construction; the FAK_SPECULATIVE /
+// SPECULATIVE env vars remain the operator override and win when set. The
+// conflicting-env guard is preserved: two different non-empty env values select
+// nothing rather than guessing.
+func speculativeModeSelected(cfg Config, mode string) bool {
 	want := strings.ToLower(strings.TrimSpace(mode))
+	if want == "" {
+		return false
+	}
 	primary := strings.ToLower(strings.TrimSpace(os.Getenv("FAK_SPECULATIVE")))
 	alternate := strings.ToLower(strings.TrimSpace(os.Getenv("SPECULATIVE")))
-	return want != "" && (primary == want || alternate == want)
+	if primary != "" || alternate != "" {
+		// Env remains the operator override with its exact historical OR
+		// semantics: either non-empty env var may select the mode, including the
+		// conflicting-value case the Metal/Vulkan admission guard handles.
+		return primary == want || alternate == want
+	}
+	// No env at all: the STRUCTURAL selector is the default front-door route.
+	return strings.ToLower(strings.TrimSpace(cfg.SpeculativeMode)) == want
 }
 
-func vulkanMTPModeSelected() bool {
+func vulkanMTPModeSelected(cfg Config) bool {
 	primary := strings.ToLower(strings.TrimSpace(os.Getenv("FAK_SPECULATIVE")))
 	alternate := strings.ToLower(strings.TrimSpace(os.Getenv("SPECULATIVE")))
 	if primary != "" && alternate != "" && primary != alternate {
 		return false
 	}
-	return speculativeModeSelected("mtp")
+	return speculativeModeSelected(cfg, "mtp")
 }
 
 // isModelHybrid checks whether the model has linear attention layers (Qwen 3.5/3.8 hybrid architecture).

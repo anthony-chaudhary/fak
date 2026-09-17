@@ -420,6 +420,12 @@ type Config struct {
 	// DisableMetalMTP explicitly disables Metal MTP speculative decoding even
 	// if FAK_SPECULATIVE=mtp is set in the environment.
 	DisableMetalMTP bool
+	// SpeculativeMode is the STRUCTURAL selector for the speculative-decode route
+	// ("mtp" or "ngram"). A default front door sets it so the fast decode route is
+	// selected by construction rather than by an ambient env var; FAK_SPECULATIVE /
+	// SPECULATIVE remain the operator override and still win when set. Every
+	// existing admissibility precondition is unchanged -- this threads the selector.
+	SpeculativeMode string
 	// ExpertParallelRanks is the expert-parallel rank count for the in-kernel MoE forward:
 	// the number of expert shards the routed glm_moe_dsa MoE delta is reduced across
 	// (model.SetExpertParallelRanks; the EP twin glmMoeEPFFN). 0/1 leave the forward on the

@@ -97,7 +97,7 @@ var guardFlagGroups = []guardFlagGroup{
 		"lease",
 	}},
 	{"Local in-kernel model", []string{
-		"gguf", "local", "alongside", "backend", "tokenizer", "remote-serve",
+		"gguf", "local", "alongside", "backend", "tokenizer", "remote-serve", "speculative",
 		"gpudirect-overflow",
 		"native-admission-token-budget",
 		"native-qwen-q4k-prefill-chunk-tokens", "native-qwen35-metal-gdn-sequence",

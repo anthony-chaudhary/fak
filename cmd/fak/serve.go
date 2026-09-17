@@ -146,6 +146,7 @@ type serveFlags struct {
 	vdso                         *bool
 	invalidation                 *string
 	requireKeyEnv                *string
+	speculative                  *string
 	allowLAN                     *bool
 	keyPrincipal                 repeatedStringFlag
 	unsafeUnauthedBind           *bool
@@ -334,6 +335,13 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.memoryGovernor = fs.Bool("memory-governor", false, "enable dynamic zero-swap memory governor admission on Apple Silicon / Metal serving (auto-enabled with --metal or FAK_MEMORY_GOVERNOR=1)")
 	sf.gpudirectOverflow = fs.Bool("gpudirect-overflow", true, "enable AMD GPU Direct / NVMe P2PDMA zero-copy storage for KV cache and layer overflow handling (bypasses CPU bounce buffers on VRAM saturation; default on)")
 	sf.expertParallel = fs.Int("expert-parallel", 1, "with --gguf: shard the routed MoE experts of a glm_moe_dsa model (GLM-5.2) across N expert-parallel ranks — the lever to move supported expert GEMMs off the host (the `--cpu-offload-experts` wall) onto resident GPUs (#971). Mixed k-quant expert formats without backend kernels (for example Q5_K/Q6_K today) still use the host k-quant fallback; set FAK_KQ_INT8=1 to use its production int8 path. The per-rank residual partials are reduced by one AllReduceSum through the wired Collective. 1 (default) = the unchanged monolith forward. N>1 requires an initialized non-cpu-ref compute.CollectiveBackend; CUDA builds provide that only with -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1) on a box with enough visible GPUs.")
+	// Structural speculative-decode selector (#1891): the DEFAULT front door sets
+	// the fast decode route by construction instead of leaving it env-only. "mtp"
+	// (default) selects the resident Metal/Vulkan MTP path where the admissibility
+	// envelope holds; "ngram" selects prompt n-gram speculation; "" leaves the
+	// route unselected. FAK_SPECULATIVE / SPECULATIVE remain the operator override
+	// and win when set, so this flag only supplies the structural default.
+	sf.speculative = fs.String("speculative", "mtp", "structural speculative-decode selector: mtp (default) or ngram; empty disables; env overrides")
 	sf.tensorParallel = fs.Int("tensor-parallel", 1, "with --gguf: tensor-parallel rank count for the dense projections (the Megatron column/row split, tensor_parallel.go). 1 (default) = no split. N>1 uses the same initialized device-collective gate as --expert-parallel; CUDA builds require -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1).")
 	sf.budgetWebhook = fs.String("budget-webhook", "", "POST a JSON event to this URL when a served session's context budget crosses the warning threshold (--budget-warn-fraction) or is exhausted (the reset trigger), so an operator/monitor is notified before exhaustion (#743). Also carries the --spend-cap breach event (kind:\"spend_breach\", #4859) when a scope crosses its token/USD budget. Empty = off. Needs --context-budget-tokens to have a budget to watch.")
 	sf.budgetWarnFraction = fs.Float64("budget-warn-fraction", 0.8, "consumed share (0..1) of the context budget at which --budget-webhook fires its pre-exhaustion warning (default 0.8 = 80%); <=0 or >=1 disables the warning while the exhaustion event still fires")
@@ -928,6 +936,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		Backend:                      rt.chatBackend,
 		CPUOffloadExperts:            *sf.cpuOffloadExperts,
 		Metal:                        rt.useMetal,
+		SpeculativeMode:              *sf.speculative,
 		ExpertParallelRanks:          *sf.expertParallel,
 		RequireKey:                   rt.requireKey,
 		AllowLAN:                     *sf.allowLAN,
