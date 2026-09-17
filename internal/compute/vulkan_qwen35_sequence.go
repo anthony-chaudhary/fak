@@ -620,9 +620,17 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 		C.fvk_swiglu_f32(v.vp(gate), v.vp(up), v.vp(activated), C.int(tokens*req.Intermediate))
 		delta := mul(layer.Down, activated)
 		C.fvk_add_f32(v.vp(x), v.vp(delta), C.int(tokens*req.Hidden))
-		stage = "layer-fence"
-		if err = check(C.fvk_batch_flush_status()); err != nil {
-			return result, err
+		// Default: no per-layer submit/fence. The whole prefill is bracketed by the
+		// fvk_batch_begin() at the top of this loop and the single final-fence below.
+		// Mid-batch fvk_free parks scratch in g_batchFreed instead of recycling it, so
+		// releasing each layer's intermediates while recording stays safe; the boundary
+		// flush then submits the full chain once and recycles every parked buffer.
+		// FAK_QWEN35_SEQUENCE_PER_LAYER_FENCE=1 restores the legacy round-trip for A/B.
+		if qwen35VulkanSequencePerLayerFence() {
+			stage = "layer-fence"
+			if err = check(C.fvk_batch_flush_status()); err != nil {
+				return result, err
+			}
 		}
 		keep := append([]Tensor{x}, qwen35ReplayProjectionTensors(replayProjections)...)
 		v.qwen35VulkanSequenceReleaseLocked(start, keep...)
