@@ -68,6 +68,11 @@ type V41SpecDecodeConfig struct {
 	// Layout is the draft/verify token layout. An Enabled config must declare
 	// V41SpecDecodeLayoutBonus1N.
 	Layout V41SpecDecodeLayout
+	// RequestKey is the per-request keyed-coin identity the spec-decode
+	// verify path draws its accept/bonus coins from. The zero value names no
+	// identity, so an unkeyed config fails closed on the keyed seam rather than
+	// drawing from an unkeyed stream. Arm it with WithRequestKey.
+	RequestKey V41SpecDecodeRequestKey
 }
 
 // V41SpecDecodeMinDraftLen and V41SpecDecodeMaxDraftLen bound DraftLen. The
@@ -557,4 +562,174 @@ func (c *V41SpecDecodeCarry) Done() (bool, V41SpecDecodeDoneReason) {
 		return false, V41SpecDecodeNotDone
 	}
 	return c.doneReason != V41SpecDecodeNotDone, c.doneReason
+}
+
+// ---------------------------------------------------------------------------
+// Keyed request-identity coins (issue #13195)
+//
+// The acceptance function above takes its verdicts as an `accept []bool` the
+// caller supplies. When those verdicts are drawn from batch-slot- or
+// call-order-derived randomness, the same request re-admitted into a different
+// slot yields a different accepted-token sequence -- exactly the divergence the
+// keyed coin (landed for qwen_mtp.go in #13146) exists to remove.
+//
+// This section wires the SAME landed keyedcoin.go primitive into the V4.1
+// spec-decode verify path. The accept coin for draft i and the bonus draw are
+// derived from the request identity alone -- HashRequestID keyed, with the
+// draft index as the step -- so a re-admitted request reproduces the identical
+// accepted-token sequence regardless of the slot it lands in. No per-slot or
+// call-order state is consulted.
+// ---------------------------------------------------------------------------
+
+// V41SpecDecodeRequestKey is the V4.1 spec-decode request identity: the FNV-1a
+// hash of the request id. A zero key (empty request id) names no identity, so
+// the keyed seam fails closed rather than drawing from an unkeyed stream.
+type V41SpecDecodeRequestKey uint64
+
+// V41SpecDecodeKeyFromRequest folds a request id to its V4.1 spec-decode key.
+// An empty id folds to 0, which the keyed seam treats as "no key".
+func V41SpecDecodeKeyFromRequest(requestID string) V41SpecDecodeRequestKey {
+	return V41SpecDecodeRequestKey(HashRequestID(requestID))
+}
+
+// Keyed reports whether the key names a real request identity. A false key must
+// not be used for a keyed draw.
+func (k V41SpecDecodeRequestKey) Keyed() bool {
+	return k != 0
+}
+
+// V41SpecDecodeAcceptCoin is the keyed accept coin for draft index step, in
+// [0,1). It is a pure function of (request key, step): no batch slot, no clock,
+// and no acceptance history, so the same request draws the same coin for the
+// same draft index no matter where it runs. A zero key fails closed by
+// returning ok=false rather than a coin from an unkeyed stream.
+func V41SpecDecodeAcceptCoin(key V41SpecDecodeRequestKey, step int) (float32, bool) {
+	if !key.Keyed() {
+		return 0, false
+	}
+	return KeyedUniform(uint64(key), DomainAcceptCoin, step), true
+}
+
+// V41SpecDecodeBonusCoin is the keyed bonus draw for a step whose drafts were
+// all accepted, in [0,1). It is domain-separated from the accept coin so the two
+// can never collide on the same (request, step) key. A zero key fails closed
+// with ok=false.
+func V41SpecDecodeBonusCoin(key V41SpecDecodeRequestKey, step int) (float32, bool) {
+	if !key.Keyed() {
+		return 0, false
+	}
+	return KeyedUniform(uint64(key), DomainBonusToken, step), true
+}
+
+// V41SpecDecodeKeyedAccept derives the accept verdicts for a whole draft block
+// from the request identity alone, using the landed Leviathan-Chen rule
+// (accept iff coin <= alpha, matching RejectionSampler.VerifyToken). alpha[i] is
+// the per-position acceptance probability for draft i; a position with no alpha
+// (alpha shorter than the draft) fails closed as a rejection.
+//
+// The returned slice is exactly what v41SpecDecodeAcceptedUnderBonus1N consumes
+// for its `accept []bool`, so keying this derivation is sufficient to make the
+// committed prefix a function of the request identity and the draft index.
+func V41SpecDecodeKeyedAccept(key V41SpecDecodeRequestKey, draft []int, alpha []float32) ([]bool, bool) {
+	if !key.Keyed() {
+		return nil, false
+	}
+	accept := make([]bool, len(draft))
+	for i := range draft {
+		coin, ok := V41SpecDecodeAcceptCoin(key, i)
+		if !ok {
+			return nil, false
+		}
+		if i >= len(alpha) {
+			// No acceptance probability for this position: fail closed as a
+			// rejection rather than admitting an unweighed draft.
+			accept[i] = false
+			continue
+		}
+		accept[i] = coin <= alpha[i]
+	}
+	return accept, true
+}
+
+// V41SpecDecodeKeyedAcceptedPrefix is the end-to-end keyed acceptance for the
+// default 1+N bonus layout: it derives the accept verdicts from the request
+// identity, then commits the accepted prefix under the bonus 1+N accounting.
+// The result is a pure function of (key, anchor, draft, alpha, base), so a
+// request re-admitted into a different batch slot reproduces the identical
+// accepted-token sequence. A zero key fails closed with ok=false.
+func V41SpecDecodeKeyedAcceptedPrefix(key V41SpecDecodeRequestKey, anchor int, draft []int, alpha []float32, base []int) ([]int, bool) {
+	accept, ok := V41SpecDecodeKeyedAccept(key, draft, alpha)
+	if !ok {
+		return nil, false
+	}
+	return v41SpecDecodeAcceptedUnderBonus1N(anchor, draft, accept, base), true
+}
+
+// ---------------------------------------------------------------------------
+// Keyed capability surface (issue #13195)
+//
+// The keyed coin functions above are free functions so a caller that does not
+// hold a V41SpecDecodeConfig can still derive a coin. These thin methods expose
+// the SAME capability on the pre-existing V41SpecDecodeConfig type, so the
+// red-then-green symptom witness can reach the capability through an interface
+// type-assertion: the witness test file compiles against the parent commit (the
+// methods are simply absent there) and fails at runtime, rather than failing to
+// build against the old source.
+// ---------------------------------------------------------------------------
+
+// V41SpecDecodeKeyedCapability names the per-request keyed-coin capability the
+// V4.1 spec-decode verify path exposes. It exists so the symptom witness can
+// assert the capability's presence at runtime, and so a consumer can depend on
+// the surface without naming every concrete function.
+type V41SpecDecodeKeyedCapability interface {
+	KeyFromRequest(requestID string) V41SpecDecodeRequestKey
+	AcceptCoin(step int) (float32, bool)
+	BonusCoin(step int) (float32, bool)
+	KeyedAccept(draft []int, alpha []float32) ([]bool, bool)
+	KeyedAcceptedPrefix(anchor int, draft []int, alpha []float32, base []int) ([]int, bool)
+}
+
+// KeyFromRequest folds a request id to the keyed-coin identity this config's
+// spec-decode path draws from.
+func (c V41SpecDecodeConfig) KeyFromRequest(requestID string) V41SpecDecodeRequestKey {
+	return V41SpecDecodeKeyFromRequest(requestID)
+}
+
+// KeyFold is KeyFromRequest returning the identity as a plain uint64, so a
+// consumer (or the symptom witness) that must not name the keyed type can still
+// read the folded request identity. A zero value names no identity.
+func (c V41SpecDecodeConfig) KeyFold(requestID string) uint64 {
+	return uint64(V41SpecDecodeKeyFromRequest(requestID))
+}
+
+// AcceptCoin is the keyed accept coin for draft index step under the config's
+// request identity. It fails closed (ok=false) when no key is armed.
+func (c V41SpecDecodeConfig) AcceptCoin(step int) (float32, bool) {
+	return V41SpecDecodeAcceptCoin(c.RequestKey, step)
+}
+
+// BonusCoin is the keyed bonus draw for a fully-accepted step under the config's
+// request identity. It fails closed (ok=false) when no key is armed.
+func (c V41SpecDecodeConfig) BonusCoin(step int) (float32, bool) {
+	return V41SpecDecodeBonusCoin(c.RequestKey, step)
+}
+
+// KeyedAccept derives the accept verdicts for a draft block from the config's
+// request identity. A zero key fails closed.
+func (c V41SpecDecodeConfig) KeyedAccept(draft []int, alpha []float32) ([]bool, bool) {
+	return V41SpecDecodeKeyedAccept(c.RequestKey, draft, alpha)
+}
+
+// KeyedAcceptedPrefix commits the accepted prefix under the bonus 1+N layout
+// from the config's request identity. A zero key fails closed.
+func (c V41SpecDecodeConfig) KeyedAcceptedPrefix(anchor int, draft []int, alpha []float32, base []int) ([]int, bool) {
+	return V41SpecDecodeKeyedAcceptedPrefix(c.RequestKey, anchor, draft, alpha, base)
+}
+
+// WithRequestKey returns a copy of the config with the request-id keyed coin
+// identity armed. An empty request id clears the key, so the keyed seam fails
+// closed rather than drawing from an unkeyed stream.
+func (c V41SpecDecodeConfig) WithRequestKey(requestID string) V41SpecDecodeConfig {
+	c.RequestKey = V41SpecDecodeKeyFromRequest(requestID)
+	return c
 }
