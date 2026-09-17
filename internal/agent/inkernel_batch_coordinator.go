@@ -38,6 +38,72 @@ func runQwenSharedReceiptProbe(bs *model.BatchSession, ids []int, active []bool)
 	return fn(bs, ids, active)
 }
 
+// BatchDecodeEnabled reports whether this planner is wired for the continuous-batch
+// decode path (the coalescer gate coalescesQwenDecode builds on). It is a readback
+// seam for tests and serve-reachability receipts: operators can confirm the turnkey
+// fan-out (#1590) is routed through the batched forward rather than serialized on
+// devMu. It does not mutate the planner.
+func (p *InKernelPlanner) BatchDecodeEnabled() bool {
+	return p != nil && p.batchDecode
+}
+
+// AdmitCoalescedDecodeForTest relaxes the DEVICE half of coalescesQwenDecode
+// (metal/q4k) so a cross-package test can drive the REAL coalescer over a synthetic
+// hybrid model on the CPU dense forward, with no physical device. It enables the
+// batchDecode wiring and returns a restore func that puts every mutated gate back.
+//
+// It is deliberately a test seam: production turns coalescing on structurally via
+// InKernelPlannerConfig.BatchDecode (cmd/fak/up.go) and the device gates stay tied to
+// the real Metal/Q4_K load, so a synthetic model can never be mistaken for a device
+// forward in a served process.
+func (p *InKernelPlanner) AdmitCoalescedDecodeForTest() func() {
+	if p == nil {
+		return func() {}
+	}
+	prevBatch, prevMetal, prevQ4K := p.batchDecode, p.metal, p.q4k
+	p.batchDecode = true
+	p.metal = true
+	p.q4k = true
+	return func() {
+		p.batchDecode = prevBatch
+		p.metal = prevMetal
+		p.q4k = prevQ4K
+	}
+}
+
+// CoalesceReadyLenForTest returns the number of requests currently queued for the
+// next coalesced cohort. A cross-package test polls this to release the cohort leader
+// once all N fan-out requests have arrived, making coalescing deterministic instead of
+// racy. It is a read-only test seam.
+func (p *InKernelPlanner) CoalesceReadyLenForTest() int {
+	if p == nil {
+		return 0
+	}
+	p.coalesceMu.Lock()
+	defer p.coalesceMu.Unlock()
+	return len(p.coalesceReady)
+}
+
+// SetCoalesceReadyHookForTest installs a barrier the cohort LEADER calls after it
+// becomes the drainer but before it drains. A test blocks here until all N expected
+// requests have arrived, so a same-prefix fan-out coalesces deterministically instead
+// of depending on the leader's runtime.Gosched racing N request goroutines. It
+// returns a restore func that clears the hook.
+func (p *InKernelPlanner) SetCoalesceReadyHookForTest(hook func()) func() {
+	if p == nil {
+		return func() {}
+	}
+	p.coalesceMu.Lock()
+	prev := p.coalesceReadyHook
+	p.coalesceReadyHook = hook
+	p.coalesceMu.Unlock()
+	return func() {
+		p.coalesceMu.Lock()
+		p.coalesceReadyHook = prev
+		p.coalesceMu.Unlock()
+	}
+}
+
 type InKernelBatchReceipt struct {
 	CohortID      uint64 `json:"cohort_id"`
 	CohortSize    int    `json:"cohort_size"`

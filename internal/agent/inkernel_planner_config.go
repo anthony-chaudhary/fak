@@ -46,6 +46,15 @@ type InKernelPlannerConfig struct {
 	CompactHistoryBudget      int
 	ElideStaleReads           bool
 	DeferColdTools            bool
+	// BatchDecode opts this planner into the continuous-batch decode wiring
+	// (#401/#1590) at construction time instead of relying on the process-wide
+	// FAK_INKERNEL_BATCH env. It is the programmatic seam the turnkey `fak up`
+	// path uses so N concurrent same-prefix requests are coalesced onto one
+	// batched forward (coalescesQwenDecode) rather than serialized one-at-a-time
+	// on devMu. Left false, decode is the historical serial Session.Step loop;
+	// with it true, a B==1 fan-out is still bit-identical to serial (see the
+	// batchDecode field note in inkernel_planner.go).
+	BatchDecode bool
 }
 
 // NewInKernelPlannerWithConfig is the explicit configuration constructor for native planning.
@@ -75,6 +84,7 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 		compactHistoryBudget:         cfg.CompactHistoryBudget,
 		elideStaleReads:              cfg.ElideStaleReads,
 		deferColdTools:               cfg.DeferColdTools,
+		batchDecode:                  cfg.BatchDecode,
 	}
 	if backend == nil && metal {
 		m.PrepareMetalResidency(q4k)
@@ -116,12 +126,19 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 	case "on", "1", "true", "yes":
 		p.kvSpanEvict = backend == nil
 	}
-	// Opt-in continuous-batch decode wiring (#401, L2). Default off keeps the serial
-	// Session.Step loop; on routes decode through BatchSession.StepBatchActive (a batch of
-	// one per request today, bit-identical to serial — see the batchDecode field note).
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_INKERNEL_BATCH"))) {
-	case "on", "1", "true", "yes":
-		p.batchDecode = true
+	// Continuous-batch decode wiring (#401, L2; turnkey fan-out #1590). The
+	// constructor may opt in structurally via cfg.BatchDecode (the turnkey
+	// `fak up` path does), and the process-wide FAK_INKERNEL_BATCH env may opt in
+	// or explicitly opt OUT (`off`) so an operator override always wins. Either
+	// arm routes decode through BatchSession.StepBatchActive; at B==1 it is
+	// bit-identical to serial — see the batchDecode field note.
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("FAK_INKERNEL_BATCH")), "off") {
+		p.batchDecode = false
+	} else {
+		switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_INKERNEL_BATCH"))) {
+		case "on", "1", "true", "yes":
+			p.batchDecode = true
+		}
 	}
 	return p
 }

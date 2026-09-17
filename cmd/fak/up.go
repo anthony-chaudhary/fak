@@ -673,7 +673,16 @@ func newTurnkeyInKernelPlanner(model *fakmodel.Model, tok *tokenizer.Tokenizer, 
 	if err != nil {
 		panic(err)
 	}
-	return agent.NewInKernelPlannerWithConfig(model, tok, modelID, q4k, backend, metal, agent.InKernelPlannerConfig{ContextTokens: contextTokens, KVPrecision: kvPrec})
+	// Turnkey fan-out admits concurrent requests but, without this, each ran its own
+	// prefill/decode forward serialized on the device mutex (#1590). Opt the turnkey
+	// planner into the existing continuous-batch decode coalescer so N concurrent
+	// same-prefix requests share one batched forward; the per-request serial path
+	// remains the typed fallback and the FAK_INKERNEL_BATCH=off env still opts out.
+	return agent.NewInKernelPlannerWithConfig(model, tok, modelID, q4k, backend, metal, agent.InKernelPlannerConfig{
+		ContextTokens: contextTokens,
+		KVPrecision:   kvPrec,
+		BatchDecode:   true,
+	})
 }
 
 // resolveUpKVPrecision resolves the realized KV storage tier for `fak up`. Precedence:
