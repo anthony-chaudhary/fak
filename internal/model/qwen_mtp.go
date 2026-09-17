@@ -155,6 +155,9 @@ type RejectionSampler struct {
 	totalAccepted int64
 	totalRejected int64
 	randSource    func() float32
+	requestKey    uint64 // per-request RNG identity; 0 means no key (legacy path)
+	keyed         bool   // true when a keyed stream is armed
+	keyedDraws    int    // monotonic per-request draw counter for the legacy keyed seam
 }
 
 // NewRejectionSampler creates a RejectionSampler. If randSource is nil,
@@ -248,8 +251,15 @@ func (s *RejectionSampler) SampleFromDistribution(dist []float32, r float32) int
 }
 
 // Sample draws a token index from dist using the sampler's random source.
+// When a per-request key is armed it draws from that keyed stream instead, so
+// the sampled token is a function of the request identity and a monotonic step
+// counter rather than the shared source (see SetRequestKey).
 func (s *RejectionSampler) Sample(dist []float32) int {
-	return s.SampleFromDistribution(dist, s.randSource())
+	key, keyed, step := s.nextKeyedStep()
+	if !keyed {
+		return s.SampleFromDistribution(dist, s.randSource())
+	}
+	return s.SampleFromDistribution(dist, KeyedUniform(key, DomainBonusToken, step))
 }
 
 // TokenVerificationResult holds the outcome of verifying one draft token.
@@ -272,7 +282,11 @@ func (s *RejectionSampler) VerifyToken(token int, pTarget, pDraft []float32, ran
 	s.mu.Unlock()
 
 	if randVal < 0 {
-		randVal = s.randSource()
+		if key, keyed, step := s.nextKeyedStep(); keyed {
+			randVal = KeyedUniform(key, DomainAcceptCoin, step)
+		} else {
+			randVal = s.randSource()
+		}
 	}
 
 	pT := float32(0)
@@ -368,6 +382,217 @@ func (s *RejectionSampler) VerifyDraftSequence(
 			res.BonusToken = s.Sample(pTargets[k])
 		} else if len(pTargets) > 0 {
 			res.BonusToken = s.Sample(pTargets[len(pTargets)-1])
+		}
+	}
+
+	return res
+}
+
+// SetRequestKey arms a per-request keyed coin stream. An empty requestID clears
+// the key and restores the legacy randSource path (no reproducibility claim is
+// made without a key -- fail-closed at the CLAIM level).
+//
+// Arming a key also resets the monotonic draw counter the legacy Sample/VerifyToken
+// seam uses as its step, so a request replay starts from a known point.
+func (s *RejectionSampler) SetRequestKey(requestID string) {
+	key := HashRequestID(requestID)
+	s.mu.Lock()
+	s.requestKey = key
+	s.keyed = key != 0
+	s.keyedDraws = 0
+	s.mu.Unlock()
+}
+
+// KeyedOn reports whether a keyed stream is armed.
+func (s *RejectionSampler) KeyedOn() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.keyed
+}
+
+// VerifyDraftSequenceKeyedStep is the keyed accept coin for one draft position:
+// the value the Keyed-armed sequence path would use at (domain, step) for the
+// sampler's armed request key. It is exported for tests and diagnostics that
+// need to inspect the keyed draw without re-deriving the key.
+func (s *RejectionSampler) VerifyDraftSequenceKeyedStep(domain DomainTag, step int) (float32, bool) {
+	key, keyed := s.keyState()
+	if !keyed {
+		return 0, false
+	}
+	return KeyedUniform(key, domain, step), true
+}
+
+// KeyedStep is the interface-friendly alias of VerifyDraftSequenceKeyedStep: it
+// reports the keyed draw at (domain, step) for the armed request, or ok=false
+// when no key is armed.
+func (s *RejectionSampler) KeyedStep(domain DomainTag, step int) (float32, bool) {
+	return s.VerifyDraftSequenceKeyedStep(domain, step)
+}
+
+// KeyedStepU is KeyedStep taking the domain as a plain uint64, so callers in
+// packages (or tests) that must not name DomainTag can still read the keyed draw.
+func (s *RejectionSampler) KeyedStepU(domain uint64, step int) (float32, bool) {
+	return s.VerifyDraftSequenceKeyedStep(DomainTag(domain), step)
+}
+
+// VerifyTokenKeyedU is VerifyTokenKeyed taking the domain as a plain uint64.
+func (s *RejectionSampler) VerifyTokenKeyedU(token int, pTarget, pDraft []float32, domain uint64, step int) TokenVerificationResult {
+	return s.VerifyTokenKeyed(token, pTarget, pDraft, DomainTag(domain), step)
+}
+
+// keyState returns the armed key and whether a keyed stream is active.
+func (s *RejectionSampler) keyState() (uint64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.requestKey, s.keyed
+}
+
+// nextKeyedStep returns the armed key, whether it is active, and a monotonic
+// draw counter used as the keyed step for the legacy Sample/VerifyToken seam.
+// The counter is a function of how many draws THIS request has made, so it is
+// slot-free: replaying the same request in a different batch slot repeats the
+// counter from 0 and therefore the same coin sequence.
+func (s *RejectionSampler) nextKeyedStep() (uint64, bool, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.keyed {
+		return 0, false, 0
+	}
+	step := s.keyedDraws
+	s.keyedDraws++
+	return s.requestKey, true, step
+}
+
+// SampleKeyed draws a token from dist using the keyed stream for (domain, step).
+// When no key is armed it falls back to the legacy Sample(dist) path.
+func (s *RejectionSampler) SampleKeyed(dist []float32, domain DomainTag, step int) int {
+	key, keyed := s.keyState()
+	if !keyed {
+		return s.Sample(dist)
+	}
+	return s.SampleFromDistribution(dist, KeyedUniform(key, domain, step))
+}
+
+// VerifyTokenKeyed is VerifyToken with the accept coin drawn from the keyed
+// stream for (domain, step) when a key is armed; otherwise it defers to
+// VerifyToken's legacy randSource/randVal path.
+func (s *RejectionSampler) VerifyTokenKeyed(token int, pTarget, pDraft []float32, domain DomainTag, step int) TokenVerificationResult {
+	key, keyed := s.keyState()
+	if !keyed {
+		return s.VerifyToken(token, pTarget, pDraft, -1)
+	}
+	return s.verifyTokenWithCoin(token, pTarget, pDraft, KeyedUniform(key, domain, step))
+}
+
+// verifyTokenWithCoin is VerifyToken with an explicit accept coin, so the keyed
+// path can share the exact accept rule (accept iff coin <= alpha) without
+// re-deriving it. No randSource call is made.
+func (s *RejectionSampler) verifyTokenWithCoin(token int, pTarget, pDraft []float32, coin float32) TokenVerificationResult {
+	s.mu.Lock()
+	s.totalDrafted++
+	s.mu.Unlock()
+
+	pT := float32(0)
+	if token >= 0 && token < len(pTarget) {
+		pT = pTarget[token]
+	}
+	pD := float32(0)
+	if token >= 0 && token < len(pDraft) {
+		pD = pDraft[token]
+	}
+
+	alpha := s.AcceptanceProbability(pT, pD)
+	if coin <= alpha {
+		s.mu.Lock()
+		s.totalAccepted++
+		s.mu.Unlock()
+		return TokenVerificationResult{
+			Accepted:   true,
+			DraftToken: token,
+			AcceptProb: alpha,
+		}
+	}
+
+	s.mu.Lock()
+	s.totalRejected++
+	s.mu.Unlock()
+
+	residual := s.ResidualDistribution(pTarget, pDraft)
+	replacement := s.SampleFromDistribution(residual, s.nextResidualCoin(token))
+
+	return TokenVerificationResult{
+		Accepted:         false,
+		DraftToken:       token,
+		ReplacementToken: replacement,
+		AcceptProb:       alpha,
+		ResidualDist:     residual,
+	}
+}
+
+// nextResidualCoin supplies the residual draw for the keyed single-token path.
+// Callers that need a specific (request, step) keyed residual use
+// VerifyDraftSequenceKeyed/SampleKeyed; this fallback keeps VerifyTokenKeyed
+// self-contained by reusing the armed key with the residual domain and a step
+// derived from the rejected draft token. Keying on the token (rather than a
+// fixed step 0) keeps two distinct rejections under the same request on distinct
+// coins; it is still slot-free -- the physical batch slot is not an input.
+func (s *RejectionSampler) nextResidualCoin(token int) float32 {
+	key, keyed := s.keyState()
+	if keyed {
+		return KeyedUniform(key, DomainResidual, token+1)
+	}
+	return s.randSource()
+}
+
+// VerifyDraftSequenceKeyed is VerifyDraftSequence with every accept coin and the
+// bonus/replacement draws taken from the per-request keyed stream. Same accept
+// rule (Leviathan-Chen, accept iff randVal <= alpha) -- only the coin SOURCE changes.
+//
+// The physical batch slot never enters the key: the key is
+// (requestKey, domain, step) only, so preemption/re-admission into a different
+// slot yields a byte-identical accepted-token sequence.
+func (s *RejectionSampler) VerifyDraftSequenceKeyed(
+	draftTokens []int,
+	pTargets [][]float32,
+	pDrafts [][]float32,
+) DraftVerificationResult {
+	key, keyed := s.keyState()
+	if !keyed {
+		return s.VerifyDraftSequence(draftTokens, pTargets, pDrafts, nil)
+	}
+
+	k := len(draftTokens)
+	res := DraftVerificationResult{
+		AcceptedTokens: make([]int, 0, k),
+		RejectedAt:     -1,
+		TotalDrafted:   k,
+	}
+
+	for i := 0; i < k; i++ {
+		var targetDist, draftDist []float32
+		if i < len(pTargets) {
+			targetDist = pTargets[i]
+		}
+		if i < len(pDrafts) {
+			draftDist = pDrafts[i]
+		}
+
+		ver := s.verifyTokenWithCoin(draftTokens[i], targetDist, draftDist, KeyedUniform(key, DomainAcceptCoin, i))
+		if ver.Accepted {
+			res.AcceptedTokens = append(res.AcceptedTokens, draftTokens[i])
+			res.AcceptedCount++
+		} else {
+			res.RejectedAt = i
+			res.ReplacementToken = s.SampleKeyed(ver.ResidualDist, DomainResidual, i)
+			break
+		}
+	}
+
+	if res.RejectedAt == -1 {
+		if len(pTargets) > k {
+			res.BonusToken = s.SampleKeyed(pTargets[k], DomainBonusToken, k)
+		} else if len(pTargets) > 0 {
+			res.BonusToken = s.SampleKeyed(pTargets[len(pTargets)-1], DomainBonusToken, len(pTargets)-1)
 		}
 	}
 
