@@ -114,3 +114,79 @@ func TestServeDeviceStagingGuardInertWithoutDeviceTransit(t *testing.T) {
 		t.Fatalf("empty plan was refused by the staging guard: %v", err)
 	}
 }
+
+// serve_staging_guard_test.go (fak#13177) — SPLIT-APERTURE form. On a Strix Halo the box exposes a
+// 64 GiB VRAM carve-out SEPARATE from a 62.43 GiB system window. The #13171 staging guard judged the
+// device-scoped dense transit against the SYSTEM window alone, so a 63.22 GiB dense side that fits
+// the 64 GiB VRAM window was refused - the [HW-WITNESSED] strix3 refusal that blocked the first
+// physical V4.1 token. The split-aware form must judge the transit against the DEVICE window when a
+// distinct one is known, and keep the single-window judgment (byte-for-byte) otherwise.
+
+// The witnessed strix3 shape: device dense transit 63.22 GiB, device window 64 GiB, system window
+// 62.43 GiB. The transit is admitted because it fits the VRAM window it is destined for.
+func TestServeDeviceStagingSplitApertureAdmitsTransitFittingDeviceWindow(t *testing.T) {
+	const gib = int64(1) << 30
+	plan := serveStagingGuardPlan(63*gib+225<<20, 4*gib)
+	// hostFit.Base is the system window (62.43 GiB) the transit EXCEEDS.
+	hostFit := serveFitBudget{Base: 62*gib + 439<<20, Headroom: 0}
+	deviceTotal := int64(64) * gib
+	deviceFree := int64(64) * gib
+
+	if err := refuseDeviceStagingAgainstReportedAperture(plan, hostFit, deviceTotal, deviceFree, true); err != nil {
+		t.Fatalf("split-aperture transit (fits 64 GiB VRAM window, exceeds 62.43 GiB system window) was refused: %v", err)
+	}
+}
+
+// fak#13171 preserved: with NO distinct device window (unknown, or coincident with the host window)
+// the transit is judged against the system window exactly as before and still refuses.
+func TestServeDeviceStagingSplitAperturePreservesSingleWindowRefusal(t *testing.T) {
+	const gib = int64(1) << 30
+	plan := serveStagingGuardPlan(63*gib, 4*gib)
+	hostFit := serveFitBudget{Base: 62 * gib, Headroom: 0}
+
+	// Unknown device window -> single-window judgement -> refuse.
+	if err := refuseDeviceStagingAgainstReportedAperture(plan, hostFit, 0, compute.FreeUnknown, false); err == nil {
+		t.Fatalf("unknown-device-window oversize transit was ADMITTED; the #13171 kernel-OOM protection regressed")
+	}
+	// Coincident window (device == host, one pool under two names) -> single-window judgement -> refuse.
+	if err := refuseDeviceStagingAgainstReportedAperture(plan, hostFit, hostFit.Base, hostFit.Base, true); err == nil {
+		t.Fatalf("coincident-aperture oversize transit was ADMITTED; the #13171 kernel-OOM protection regressed")
+	}
+}
+
+// A genuine overflow of the DEVICE window still refuses typed - the fak#13171 protection is intact
+// in the split arm too. Here the transit exceeds BOTH windows.
+func TestServeDeviceStagingSplitApertureRefusesGenuineDeviceOverflow(t *testing.T) {
+	const gib = int64(1) << 30
+	plan := serveStagingGuardPlan(80*gib, 4*gib)
+	hostFit := serveFitBudget{Base: 62 * gib, Headroom: 0}
+	deviceTotal := int64(64) * gib
+
+	err := refuseDeviceStagingAgainstReportedAperture(plan, hostFit, deviceTotal, deviceTotal, true)
+	if err == nil {
+		t.Fatalf("80 GiB transit against a 64 GiB device window was ADMITTED")
+	}
+	var fe *compute.FitError
+	if !errors.As(err, &fe) {
+		t.Fatalf("refusal %v is not a typed *compute.FitError", err)
+	}
+	if fe.Want < 80*gib {
+		t.Fatalf("refusal Want = %d, want the 80 GiB transit", fe.Want)
+	}
+}
+
+// The split form is fail-open on an unprobeable host and inert without a device transit, exactly
+// like the single-window form.
+func TestServeDeviceStagingSplitApertureFailsOpenAndInert(t *testing.T) {
+	const gib = int64(1) << 30
+	plan := serveStagingGuardPlan(63*gib, 4*gib)
+	if err := refuseDeviceStagingAgainstReportedAperture(plan, serveFitBudget{}, 64*gib, 64*gib, true); err != nil {
+		t.Fatalf("unprobeable host refused the split transit: %v", err)
+	}
+	hostOnly := compute.MemoryPlan{
+		{Class: compute.MemoryWeights, Scope: compute.MemoryScopeHost, Bytes: 8 << 30, Detail: "gguf-host-expert-offload"},
+	}
+	if err := refuseDeviceStagingAgainstReportedAperture(hostOnly, serveFitBudget{Base: 62 * gib}, 64*gib, 64*gib, true); err != nil {
+		t.Fatalf("host-only plan (no device transit) was refused by the split guard: %v", err)
+	}
+}
