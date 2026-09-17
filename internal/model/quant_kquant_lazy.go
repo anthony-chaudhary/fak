@@ -64,10 +64,41 @@ func (qt *kQuantTensor) requireRawCPU(op string) {
 	}
 }
 
+// The exported per-type lazy k-quant entries below mirror the AddResidentQ2K/AddResidentQ3K/
+// AddResidentQ5K/AddResidentQ6K family in quant_kquant.go: kQuantKind is unexported, so
+// AddLazyKQuant's signature is unreachable for a caller outside package model. These wrappers
+// let such a caller key the primitive on a CONCRETE format instead of the private kind, while
+// the block geometry is still selected inside package model — so a caller cannot supply a
+// mismatched kind/geometry pair. Each is a one-line delegation to AddLazyKQuant.
+
+// AddLazyKQuantQ2K stores a checkpoint-backed Q2_K descriptor without reading its payload.
+func (b *QuantBuilder) AddLazyKQuantQ2K(canon string, shape []int, src LazyQ4KRange) error {
+	return b.AddLazyKQuant(canon, shape, kindQ2K, src)
+}
+
+// AddLazyKQuantQ3K stores a checkpoint-backed Q3_K descriptor without reading its payload.
+func (b *QuantBuilder) AddLazyKQuantQ3K(canon string, shape []int, src LazyQ4KRange) error {
+	return b.AddLazyKQuant(canon, shape, kindQ3K, src)
+}
+
+// AddLazyKQuantQ5K stores a checkpoint-backed Q5_K descriptor without reading its payload.
+func (b *QuantBuilder) AddLazyKQuantQ5K(canon string, shape []int, src LazyQ4KRange) error {
+	return b.AddLazyKQuant(canon, shape, kindQ5K, src)
+}
+
+// AddLazyKQuantQ6K stores a checkpoint-backed Q6_K descriptor without reading its payload.
+func (b *QuantBuilder) AddLazyKQuantQ6K(canon string, shape []int, src LazyQ4KRange) error {
+	return b.AddLazyKQuant(canon, shape, kindQ6K, src)
+}
+
 // AddLazyKQuant stores a checkpoint-backed k-quant descriptor without reading its payload.
 // It runs the SAME eligibility gate as the resident k-quant entries (residentQuantTarget),
 // validates the byte count against the kind's block geometry, and stores a kQuantTensor
 // that holds only the range — no payload read. Symmetric with AddLazyQ4K.
+//
+// Reachability constraint: kind is the unexported kQuantKind, so this entry point is callable
+// only from within package model. Out-of-package callers must use the exported per-type
+// wrappers above (AddLazyKQuantQ2K/Q3K/Q5K/Q6K), which pin the kind for them.
 func (b *QuantBuilder) AddLazyKQuant(canon string, shape []int, kind kQuantKind, src LazyQ4KRange) error {
 	return b.addResidentQuant(canon, shape, func(name string) {
 		if b.m.kqw == nil {

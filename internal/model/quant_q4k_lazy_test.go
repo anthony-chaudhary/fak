@@ -479,3 +479,76 @@ func TestLazyKQuantMaterializeKeepsRawMemoization(t *testing.T) {
 		t.Fatalf("memoized path performed %d ReadAt calls, want zero", r.reads)
 	}
 }
+
+// lazyKQuantSeamReaderAt counts payload reads so a test can witness that an exported
+// per-type lazy entry point stored a descriptor WITHOUT touching the checkpoint bytes.
+type lazyKQuantSeamReaderAt struct {
+	data  []byte
+	reads int
+}
+
+func (r *lazyKQuantSeamReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	r.reads++
+	if off < 0 || off >= int64(len(r.data)) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[off:])
+	if n != len(p) {
+		return n, io.EOF
+	}
+	return n, nil
+}
+
+// TestAddLazyKQuantPerTypeExportsReachThePrimitive is the RED->GREEN witness for the
+// exported per-type lazy k-quant seam: AddLazyKQuant takes the unexported kQuantKind, so
+// it is unreachable outside package model. Each AddLazyKQuantQxK wrapper must delegate to
+// the primitive with the matching kind. This test drives each exported method with a
+// correctly-sized range, asserts KQuantLazy(name) is true and that NO payload byte was read
+// (the descriptor is held, not materialized), and asserts the fail-closed direction: a wrong
+// byte count panics through the exported method exactly as it does through the primitive.
+func TestAddLazyKQuantPerTypeExportsReachThePrimitive(t *testing.T) {
+	cases := []struct {
+		name  string
+		add   func(b *QuantBuilder, canon string, shape []int, src LazyQ4KRange) error
+		bytes int
+	}{
+		{"Q2_K", (*QuantBuilder).AddLazyKQuantQ2K, 84},
+		{"Q3_K", (*QuantBuilder).AddLazyKQuantQ3K, 110},
+		{"Q5_K", (*QuantBuilder).AddLazyKQuantQ5K, 176},
+		{"Q6_K", (*QuantBuilder).AddLazyKQuantQ6K, 210},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{HiddenSize: 256}
+			b := NewQuantBuilder(cfg, false)
+			name := "model.layers.0.mlp.down_proj.weight"
+			payload := make([]byte, tc.bytes)
+			for i := range payload {
+				payload[i] = byte(i*41 + 7)
+			}
+			reader := &lazyKQuantSeamReaderAt{data: payload}
+			rangeSrc := LazyQ4KRange{Reader: reader, Bytes: len(payload)}
+			if err := tc.add(b, name, []int{1, 256}, rangeSrc); err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			if !b.m.KQuantLazy(name) {
+				t.Fatalf("%s: KQuantLazy(%q) = false, want true", tc.name, name)
+			}
+			if reader.reads != 0 {
+				t.Fatalf("%s: store read %d payload bytes, want 0 (descriptor only)", tc.name, reader.reads)
+			}
+
+			// Fail-closed: a payload-size mismatch panics in AddLazyKQuant, and the
+			// exported wrapper must reach that same panic rather than swallow it.
+			func() {
+				defer func() {
+					if recover() == nil {
+						t.Fatalf("%s: wrong byte count did not panic through the exported method", tc.name)
+					}
+				}()
+				b2 := NewQuantBuilder(cfg, false)
+				_ = tc.add(b2, name, []int{1, 256}, LazyQ4KRange{Reader: reader, Bytes: len(payload) - 1})
+			}()
+		})
+	}
+}
