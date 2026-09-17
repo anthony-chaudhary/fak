@@ -164,9 +164,21 @@ func (s *v4ShardedExpertSource) readV4ExpertBatch(layer int, selected []int, byt
 	if err != nil {
 		return v4ExpertBatch{}, err
 	}
+	// Issue the whole batch's reads before the loop returns its first tensor, so the per-tensor
+	// ReadAts overlap instead of running strictly one after another. A nil staged map means the
+	// prefetch was forfeited (a shard failed to open); the loop then takes the unchanged serial
+	// path, so correctness never depends on the hint.
+	staged := s.prefetchV4ExpertBatch(plan)
 	out := v4ExpertBatch{Plan: plan, Tensors: make([]v4ExpertTensor, 0, plan.TensorCount)}
 	for _, g := range plan.Groups {
 		for _, name := range g.TensorNames {
+			if b, ok := staged[name]; ok {
+				// A prefetched tensor already performed its payload read; count it so the
+				// source's read meter stays equivalent to the serial path.
+				s.readCount++
+				out.Tensors = append(out.Tensors, b)
+				continue
+			}
 			t, err := s.read(name)
 			if err != nil {
 				return v4ExpertBatch{}, err
@@ -175,6 +187,98 @@ func (s *v4ShardedExpertSource) readV4ExpertBatch(layer int, selected []int, byt
 		}
 	}
 	return out, nil
+}
+
+// prefetchV4ExpertBatch reads every tensor in the batch concurrently, grouped by shard so each
+// shard's ranges fan into ONE ReadRanges call over the existing bounded parallel range reader
+// (weightsource_ranges.go) rather than a per-tensor serial ReadAt. It returns a name-keyed map
+// of the owned tensor buffers the read loop then consumes, so the batch's bytes are filled in
+// parallel and returned byte-for-byte identical to the serial path (each range owns its own
+// destination buffer, and ReadRanges enforces first-error-cancels).
+//
+// The hint is best-effort: a shard that cannot be opened, or a batch with fewer than two tensor
+// ranges to overlap, yields no staged entry and the caller falls back to the unchanged serial
+// read. A partial map (some shards fanned, one refused) is still returned so the remaining
+// tensors at least benefit; the refusal is retried by the serial fallback and reported there, so
+// a missing entry never masks a real read error.
+func (s *v4ShardedExpertSource) prefetchV4ExpertBatch(plan v4ExpertBatchPlan) map[string]v4ExpertTensor {
+	if plan.TensorCount < 2 {
+		return nil
+	}
+	perShard := make(map[string][]v4ExpertPrefetchRange)
+	for _, g := range plan.Groups {
+		for _, name := range g.TensorNames {
+			shard, ok := s.weightMap[name]
+			if !ok {
+				continue
+			}
+			src, err := s.shard(shard)
+			if err != nil {
+				return nil
+			}
+			e, ok := src.entry(name)
+			if !ok {
+				continue
+			}
+			start, end, err := safetensorsDataBounds(src.file.dataBase, src.file.size, e)
+			if err != nil {
+				continue
+			}
+			perShard[shard] = append(perShard[shard], v4ExpertPrefetchRange{name: name, entry: e, start: start, length: end - start})
+		}
+	}
+	if len(perShard) == 0 {
+		return nil
+	}
+
+	staged := make(map[string]v4ExpertTensor, plan.TensorCount)
+	for shard, ranges := range perShard {
+		src, err := s.shard(shard)
+		if err != nil {
+			return nil
+		}
+		// A range whose length cannot be represented is dropped rather than staged with a short
+		// buffer: the serial fallback then reads it and reports any real error there.
+		fan := make([]v4ExpertPrefetchRange, 0, len(ranges))
+		bufs := make([][]byte, 0, len(ranges))
+		maxInt := int64(^uint(0) >> 1)
+		for _, r := range ranges {
+			if r.length < 0 || r.length > maxInt {
+				continue
+			}
+			fan = append(fan, r)
+			bufs = append(bufs, make([]byte, int(r.length)))
+		}
+		if len(fan) < 2 {
+			continue
+		}
+		spans := make([]Range, len(fan))
+		for i, r := range fan {
+			spans[i] = Range{Offset: r.start, Dst: bufs[i]}
+		}
+		if err := ReadRanges(src.file.r, spans, len(spans)); err != nil {
+			continue
+		}
+		for i, r := range fan {
+			staged[r.name] = v4ExpertTensor{
+				Name:  r.name,
+				Dtype: r.entry.Dtype,
+				Shape: append([]int(nil), r.entry.Shape...),
+				Bytes: bufs[i],
+			}
+		}
+	}
+	return staged
+}
+
+// v4ExpertPrefetchRange is one tensor's resolved byte span in its shard, carrying the header
+// entry so the staged tensor keeps the exact dtype and shape the serial path would have
+// returned.
+type v4ExpertPrefetchRange struct {
+	name   string
+	entry  stEntry
+	start  int64
+	length int64
 }
 
 func (s *v4ShardedExpertSource) read(name string) (v4ExpertTensor, error) {

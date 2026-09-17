@@ -1,11 +1,14 @@
 package model
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -152,5 +155,137 @@ func TestV4ShardedExpertSourceMissingIndexedTensorFailsBeforePayloadRead(t *test
 	}
 	if s.readCount != 0 {
 		t.Fatalf("payload reads=%d", s.readCount)
+	}
+}
+
+// v4ReadAtProbe wraps an io.ReaderAt and records the maximum number of ReadAt calls it ever saw
+// in flight at once. It is the witness for the batch readahead: the serial batch path issues one
+// ReadAt at a time (peak 1), whereas a batch readahead fans the whole batch across the shared
+// ReadRanges workers so the peak rises above 1.
+type v4ReadAtProbe struct {
+	inner    io.ReaderAt
+	mu       sync.Mutex
+	inFlight int
+	maxSeen  int
+	reads    int
+}
+
+func (p *v4ReadAtProbe) ReadAt(b []byte, off int64) (int, error) {
+	p.mu.Lock()
+	p.inFlight++
+	if p.inFlight > p.maxSeen {
+		p.maxSeen = p.inFlight
+	}
+	p.reads++
+	p.mu.Unlock()
+
+	// A wide window so a serial caller can never have two of these overlapping regardless of how
+	// long the underlying read takes: any peak above 1 is a real concurrent issuance.
+	for i := 0; i < 20000; i++ {
+		_ = i
+	}
+
+	n, err := p.inner.ReadAt(b, off)
+
+	p.mu.Lock()
+	p.inFlight--
+	p.mu.Unlock()
+	return n, err
+}
+
+func (p *v4ReadAtProbe) Peak() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.maxSeen
+}
+
+func (p *v4ReadAtProbe) Reads() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.reads
+}
+
+func TestV4ShardedExpertBatchIssuesReadAheadAndIsByteIdentical(t *testing.T) {
+	dir := t.TempDir()
+	n := func(e int, w string) string {
+		return "model.layers.0.ffn.experts." + string(rune('0'+e)) + "." + w + ".weight"
+	}
+	a1, a2, a3 := n(1, "w1"), n(1, "w2"), n(1, "w3")
+	b1, b2, b3 := n(2, "w1"), n(2, "w2"), n(2, "w3")
+	writeV4Shard(t, filepath.Join(dir, "a.safetensors"), map[string][]float32{a1: {1}, a3: {3}, b2: {20}})
+	writeV4Shard(t, filepath.Join(dir, "b.safetensors"), map[string][]float32{a2: {2}, b1: {10}, b3: {30}})
+	wm := map[string]string{a1: "a.safetensors", a2: "b.safetensors", a3: "a.safetensors", b1: "b.safetensors", b2: "a.safetensors", b3: "b.safetensors"}
+	ib, _ := json.Marshal(map[string]any{"weight_map": wm})
+	if err := os.WriteFile(filepath.Join(dir, "model.safetensors.index.json"), ib, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Baseline bytes via the unchanged serial path.
+	base, err := newV4ShardedExpertSource(dir, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantBatch, err := base.readV4ExpertBatch(0, []int{2, 1}, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base.Close()
+
+	s, err := newV4ShardedExpertSource(dir, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	// Resolve both shards first, then wrap each payload reader in a probe.
+	if _, err := s.read(a1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.read(a2); err != nil {
+		t.Fatal(err)
+	}
+	var probes []*v4ReadAtProbe
+	for _, h := range s.open {
+		p := &v4ReadAtProbe{inner: h.src.file.r}
+		h.src.file.r = p
+		probes = append(probes, p)
+	}
+	if len(probes) == 0 {
+		t.Fatal("no shard handles to probe")
+	}
+
+	got, err := s.readV4ExpertBatch(0, []int{2, 1}, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Byte-identity against the serial baseline.
+	if len(got.Tensors) != len(wantBatch.Tensors) {
+		t.Fatalf("tensor count=%d want %d", len(got.Tensors), len(wantBatch.Tensors))
+	}
+	want := map[string][]byte{}
+	for _, x := range wantBatch.Tensors {
+		want[x.Name] = x.Bytes
+	}
+	for _, x := range got.Tensors {
+		if !bytes.Equal(x.Bytes, want[x.Name]) {
+			t.Fatalf("tensor %s bytes differ from serial baseline: got %v want %v", x.Name, x.Bytes, want[x.Name])
+		}
+	}
+
+	// Readahead: at least one probe saw two payload reads in flight at once. The serial path is
+	// physically incapable of this.
+	peak, reads := 0, 0
+	for _, p := range probes {
+		if p.Peak() > peak {
+			peak = p.Peak()
+		}
+		reads += p.Reads()
+	}
+	if reads < 6 {
+		t.Fatalf("expected 6 payload reads for the batch, saw %d", reads)
+	}
+	if peak < 2 {
+		t.Fatalf("batch reads were issued serially (peak concurrency %d); expected readahead fan-out", peak)
 	}
 }
