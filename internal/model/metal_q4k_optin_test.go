@@ -6,25 +6,33 @@ import "testing"
 
 // TestQ4KM5OptInDefaultsOn pins the default-on contract for the widened-panel wide-tile candidate
 // (fak#13041 / fak#13124). The sanctioned on-silicon M3 Pro receipt pinned a crossover row, so the
-// model-layer process opt-in now defaults ON; only an explicit FAK_Q4K_M5=0 forces the scalar
-// kernel. The real safety is the encode-time device/version-pinned crossover gate in metalgemm
-// (q4kGEMMModeForPrompt), which keeps default-on inert on any device without a pinned row.
+// model-layer config-surface opt-in now defaults ON; only an explicit SetQ4KM5OptIn(false) forces
+// the scalar kernel. The real safety is the encode-time device/version-pinned crossover gate in
+// metalgemm (q4kGEMMModeForPrompt), which keeps default-on inert on any device without a pinned row.
+// The knob is a config-surface seam rather than an environment read (internal/envconfiglint
+// CONFIG_NOT_ENV); the former FAK_Q4K_M5 env read was relocated here.
 func TestQ4KM5OptInDefaultsOn(t *testing.T) {
+	// Undeclared default: ON. Restore the ambient declaration after the test.
+	defer SetQ4KM5OptIn(true)
+	if got := q4kM5OptIn(); got != true {
+		t.Errorf("q4kM5OptIn with the seam undeclared = %t, want true (default ON)", got)
+	}
 	for _, tc := range []struct {
-		env  string
+		on   bool
 		want bool
 	}{
-		{"", true},      // unset: default ON
-		{"1", true},     // explicit enable
-		{"0", false},    // explicit opt-out
-		{"true", true},  // any non-"0" value stays on (opt-out is the only escape)
-		{"false", true}, // "false" is not the documented opt-out token
-		{"00", true},    // only the exact token "0" opts out
+		{true, true},   // explicit enable
+		{false, false}, // explicit opt-out
 	} {
-		t.Setenv("FAK_Q4K_M5", tc.env)
+		SetQ4KM5OptIn(tc.on)
 		if got := q4kM5OptIn(); got != tc.want {
-			t.Errorf("q4kM5OptIn with FAK_Q4K_M5=%q = %t, want %t", tc.env, got, tc.want)
+			t.Errorf("q4kM5OptIn with SetQ4KM5OptIn(%t) = %t, want %t", tc.on, got, tc.want)
 		}
+	}
+	// Only the seam declaration flips the knob; a bare default stays ON.
+	SetQ4KM5OptIn(true)
+	if got := q4kM5OptIn(); got != true {
+		t.Errorf("q4kM5OptIn after re-enable = %t, want true", got)
 	}
 }
 

@@ -3,7 +3,6 @@ package model
 import (
 	"fmt"
 	"math"
-	"os"
 	"sort"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -87,10 +86,22 @@ func v4ScoredRoute(logits, correctionBias []float32, topK int, routeScale float3
 	return picks, nil
 }
 
-// v4BitonicTopKEnabled reports whether the bitonic-network top-k kernel is
-// opted in. Unset (default) keeps the reference full stable sort, so the
-// default path stays byte-identical to the pre-kernel router.
-func v4BitonicTopKEnabled() bool { return os.Getenv("FAK_V4_BITONIC_TOPK") == "1" }
+// v4BitonicTopK is the bitonic-network top-k opt-in. It is a config-surface seam
+// rather than an environment read: a kernel-selection posture is behavior, not a
+// credential, so it lives on the config surface (internal/envconfiglint's
+// CONFIG_NOT_ENV rule; the former FAK_V4_BITONIC_TOPK env read was relocated here).
+// Default (false) keeps the reference full stable sort, so the default path stays
+// byte-identical to the pre-kernel router. The front door that owns this switch
+// declares it with SetV4BitonicTopK.
+var v4BitonicTopK bool
+
+// SetV4BitonicTopK declares whether the bitonic-network top-k kernel is opted in.
+// It is the config-surface replacement for the retired FAK_V4_BITONIC_TOPK env read.
+func SetV4BitonicTopK(on bool) { v4BitonicTopK = on }
+
+// v4BitonicTopKEnabled reports whether the bitonic-network top-k kernel is opted
+// in. Default (undeclared) is OFF.
+func v4BitonicTopKEnabled() bool { return v4BitonicTopK }
 
 // v4TopKIndices returns the expert indices of the k largest selection scores,
 // in the router's pinned order: descending score, lower expert index first on

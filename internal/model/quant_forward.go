@@ -218,6 +218,22 @@ func q8FastDecodeSessionOK(s *Session, cfg Config) bool {
 	return q8FastDecodeOK(cfg)
 }
 
+// qwen35DecodeCBTrace is the decode command-buffer trace opt-in. It is a
+// config-surface seam rather than an environment read: a diagnostic tracing posture
+// is behavior, not a credential, so it lives on the config surface
+// (internal/envconfiglint's CONFIG_NOT_ENV rule; the former
+// FAK_QWEN35_DECODE_CB_TRACE env read was relocated here). Default (false) keeps
+// the trace silent, so the default decode path is unchanged.
+var qwen35DecodeCBTrace bool
+
+// SetQwen35DecodeCBTrace declares whether the resident-Q4_K Qwen3.5 decode path
+// emits its per-token command-buffer trace. It is the config-surface replacement
+// for the retired FAK_QWEN35_DECODE_CB_TRACE env read.
+func SetQwen35DecodeCBTrace(on bool) { qwen35DecodeCBTrace = on }
+
+// qwen35DecodeCBTraceEnabled reports whether the decode command-buffer trace is on.
+func qwen35DecodeCBTraceEnabled() bool { return qwen35DecodeCBTrace }
+
 // tokenHiddenQ is the Q8_0 decode path. It is now a thin shell over the shared
 // single-position blockStep, selecting the Q8 kernel (q8Kernel): the block skeleton —
 // RMSNorm, RoPE+Kraw stash, GQA over the f32 KV cache, residuals, SwiGLU — is the
@@ -227,7 +243,7 @@ func q8FastDecodeSessionOK(s *Session, cfg Config) bool {
 // (f32) K/V to the kernel-owned cache, so Evict/Clone and the KV semantics are unchanged;
 // returns the post-final-norm hidden (caller applies headQ).
 func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
-	cbTrace := os.Getenv("FAK_QWEN35_DECODE_CB_TRACE") == "1"
+	cbTrace := qwen35DecodeCBTraceEnabled()
 	if cbTrace {
 		s.ResetMetalCommandBuffers()
 	}

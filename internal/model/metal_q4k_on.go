@@ -1075,10 +1075,21 @@ func (m *Model) metalQ6KWeights() (int, bool) {
 	return len(names), true
 }
 
-// q4kM5OptIn resolves the FAK_Q4K_M5 process opt-in for the widened-panel wide-tile candidate.
-// Default ON: only an explicit FAK_Q4K_M5=0 turns it off. The real safety is metalgemm's
-// device/version-pinned crossover gate, so default-on never promotes an unreceipted device.
-func q4kM5OptIn() bool { return os.Getenv("FAK_Q4K_M5") != "0" }
+// q4kM5Disabled is the config-surface opt-out for the widened-panel wide-tile candidate.
+// It is a seam rather than an environment read: a kernel-selection posture is behavior,
+// not a credential, so it lives on the config surface (internal/envconfiglint's
+// CONFIG_NOT_ENV rule; the former FAK_Q4K_M5 env read was relocated here). The declared
+// default is ON; SetQ4KM5OptIn(false) is the explicit opt-out. The real safety is
+// metalgemm's device/version-pinned crossover gate, so the default never promotes an
+// unreceipted device.
+var q4kM5Disabled bool
+
+// SetQ4KM5OptIn declares whether the widened-panel wide-tile candidate is opted in.
+// It is the config-surface replacement for the retired FAK_Q4K_M5 env read.
+func SetQ4KM5OptIn(on bool) { q4kM5Disabled = !on }
+
+// q4kM5OptIn reports the widened-panel wide-tile opt-in. Default (undeclared) is ON.
+func q4kM5OptIn() bool { return !q4kM5Disabled }
 
 // q4kMMOptIn resolves the FAK_Q4K_MM process opt-in for the exact-P32 MM32 candidate. Default OFF
 // (the sibling of q4kM5OptIn, but the MM32 variant has not yet earned a default-on receipt).

@@ -124,10 +124,10 @@ func v41RouterPartialTopKIndices(choice []float32, k int) []int {
 // O(E log k) partial selection must return the exact same top-k index sequence
 // as the default reference arm at E=384, K=6.
 func TestV41RouterCostTopKSetEquality(t *testing.T) {
-	// The reference arm is the public v4TopKIndices with the bitonic flag
-	// unset; we never opt the kernel in, so this witnesses the default path.
+	// The reference arm is the public v4TopKIndices with the bitonic seam
+	// undeclared; we never opt the kernel in, so this witnesses the default path.
 	if v4BitonicTopKEnabled() {
-		t.Fatal("reference arm must run with FAK_V4_BITONIC_TOPK unset")
+		t.Fatal("reference arm must run with the bitonic top-k seam undeclared")
 	}
 
 	rng := rand.New(rand.NewSource(12992))

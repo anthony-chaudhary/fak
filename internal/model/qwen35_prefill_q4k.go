@@ -71,19 +71,36 @@ func q4kQwen35HybridPrefillAtPositionOK(cfg Config, promptLen, base int) bool {
 	return q4kQwen35HybridPrefillOK(cfg, qwen35HybridQBatchMinPrompt)
 }
 
+// qwen35ResidentDecodeAutoDisable is the config-surface opt-out consulted by
+// qwen35ResidentDecodeAutoEligible. It is a seam rather than an environment read:
+// an admission posture is behavior, not a credential, so it lives on the config
+// surface (internal/envconfiglint's CONFIG_NOT_ENV rule; the former
+// FAK_QWEN35_RESIDENT_DECODE_AUTO env read was relocated here). Default (false)
+// keeps the route ON; SetQwen35ResidentDecodeAuto(false) forces the historical path.
+var qwen35ResidentDecodeAutoDisable bool
+
+// SetQwen35ResidentDecodeAuto declares whether the resident GDN sequence-owner
+// auto-admission route is enabled. It is the config-surface replacement for the
+// retired FAK_QWEN35_RESIDENT_DECODE_AUTO env read (whose only opt-out token was "0").
+func SetQwen35ResidentDecodeAuto(on bool) { qwen35ResidentDecodeAutoDisable = !on }
+
+// qwen35ResidentDecodeAutoDisabled reports whether the resident GDN sequence-owner
+// auto-admission route has been explicitly turned off. Default (undeclared) is OFF.
+func qwen35ResidentDecodeAutoDisabled() bool { return qwen35ResidentDecodeAutoDisable }
+
 // qwen35ResidentDecodeAutoEligible reports whether this session may auto-admit the
 // resident GDN sequence owner to reach the one-command-buffer fused linear-attention
 // decode block. It is deliberately exact: only the 64-layer Qwen3.8 hybrid whose full
 // no-copy Q8 projection band resolves, on the backend-nil resident-Q4_K Metal lane, at
 // a fresh prompt boundary. Every other case declines so the historical decode path is
 // byte-identical. The route is ON by default (measured 0.4-0.9 -> 4.2-4.6 tok/s
-// decode on the M3 Pro, Qwen3.8-27B Q4_K_M, bit-identical pooled parity); set
-// FAK_QWEN35_RESIDENT_DECODE_AUTO=0 to force the historical path.
+// decode on the M3 Pro, Qwen3.8-27B Q4_K_M, bit-identical pooled parity); declare
+// SetQwen35ResidentDecodeAuto(false) to force the historical path.
 func (s *Session) qwen35ResidentDecodeAutoEligible() bool {
 	if s == nil || s.M == nil || s.Cache == nil || s.Backend != nil || !s.Q4K || !s.MetalQ4K {
 		return false
 	}
-	if os.Getenv("FAK_QWEN35_RESIDENT_DECODE_AUTO") == "0" {
+	if qwen35ResidentDecodeAutoDisabled() {
 		return false
 	}
 	if newQwen35MetalGDNSequenceBackend == nil || !s.M.Cfg.IsQwen35Hybrid() {

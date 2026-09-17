@@ -170,15 +170,16 @@ func TestV4BitonicTopKMatchesStableSort(t *testing.T) {
 	}
 	for name, fx := range fixtures {
 		t.Run(name, func(t *testing.T) {
+			defer SetV4BitonicTopK(false) // restore the package-global default
 			choice := fx.choice
 			k := 6
 			if k > len(choice) {
 				k = len(choice)
 			}
-			t.Setenv("FAK_V4_BITONIC_TOPK", "0")
+			SetV4BitonicTopK(false)
 			ref := v4TopKIndices(choice, k)
 
-			t.Setenv("FAK_V4_BITONIC_TOPK", "1")
+			SetV4BitonicTopK(true)
 			got := v4TopKIndices(choice, k)
 
 			if len(ref) != len(choice) {
@@ -211,12 +212,13 @@ func TestV4BitonicTopKMatchesStableSort(t *testing.T) {
 // unreachable through the routers, which validate top_k first, but the helper
 // is package-visible and guards k directly).
 func TestV4BitonicTopKFallbackContract(t *testing.T) {
+	defer SetV4BitonicTopK(false) // restore the package-global default
 	choice := []float32{5, 1, 4, 4, 9, 0}
 
 	// k == len(choice) is serviceable by the kernel; the result must match.
-	t.Setenv("FAK_V4_BITONIC_TOPK", "0")
+	SetV4BitonicTopK(false)
 	ref := v4TopKIndices(choice, len(choice))
-	t.Setenv("FAK_V4_BITONIC_TOPK", "1")
+	SetV4BitonicTopK(true)
 	got := v4TopKIndices(choice, len(choice))
 	if !reflect.DeepEqual(got, ref) {
 		t.Fatalf("full-selection order %v != reference %v", got, ref)
@@ -224,7 +226,7 @@ func TestV4BitonicTopKFallbackContract(t *testing.T) {
 
 	// An out-of-range k must fall through to ref(), which yields the full
 	// width, rather than indexing past it or panicking.
-	t.Setenv("FAK_V4_BITONIC_TOPK", "1")
+	SetV4BitonicTopK(true)
 	if out := v4TopKIndices(choice, len(choice)+5); len(out) != len(choice) {
 		t.Fatalf("k>len fallback width=%d, want %d", len(out), len(choice))
 	}
@@ -234,9 +236,9 @@ func TestV4BitonicTopKFallbackContract(t *testing.T) {
 
 	// Minimal valid width stays deterministic on both paths.
 	minimal := []float32{42}
-	t.Setenv("FAK_V4_BITONIC_TOPK", "0")
+	SetV4BitonicTopK(false)
 	refMin := v4TopKIndices(minimal, 1)
-	t.Setenv("FAK_V4_BITONIC_TOPK", "1")
+	SetV4BitonicTopK(true)
 	gotMin := v4TopKIndices(minimal, 1)
 	if !reflect.DeepEqual(gotMin, refMin) || len(gotMin) != 1 || gotMin[0] != 0 {
 		t.Fatalf("minimal case order %v (ref %v), want [0]", gotMin, refMin)
@@ -247,7 +249,8 @@ func TestV4BitonicTopKFallbackContract(t *testing.T) {
 // independent-oracle scenarios with the kernel flag ON, proving the flag does
 // not perturb expert selection or weights.
 func TestV41AndV4BitonicTopKWiringPreservesOracleSelection(t *testing.T) {
-	t.Setenv("FAK_V4_BITONIC_TOPK", "1")
+	defer SetV4BitonicTopK(false) // restore the package-global default
+	SetV4BitonicTopK(true)
 
 	t.Run("v41_384", func(t *testing.T) {
 		cfg := v41TestCfg()
@@ -306,6 +309,7 @@ func TestV41AndV4BitonicTopKWiringPreservesOracleSelection(t *testing.T) {
 // (~11520 compare-exchanges) against the reference sort's ~3300, so expect the
 // bitonic arm to be slower. The flag stays off by default for that reason.
 func BenchmarkV4TopKIndicesE384(b *testing.B) {
+	defer SetV4BitonicTopK(false) // restore the package-global default
 	const E, K = V41RouterExperts, V41RouterTopK
 	rng := rand.New(rand.NewSource(12970))
 	choice := make([]float32, E)
@@ -314,14 +318,14 @@ func BenchmarkV4TopKIndicesE384(b *testing.B) {
 	}
 
 	b.Run("reference_stable_sort", func(b *testing.B) {
-		b.Setenv("FAK_V4_BITONIC_TOPK", "0")
+		SetV4BitonicTopK(false)
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			_ = v4TopKIndices(choice, K)
 		}
 	})
 	b.Run("bitonic_kernel", func(b *testing.B) {
-		b.Setenv("FAK_V4_BITONIC_TOPK", "1")
+		SetV4BitonicTopK(true)
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			_ = v4TopKIndices(choice, K)
