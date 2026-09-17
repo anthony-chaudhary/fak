@@ -579,7 +579,18 @@ func serveNativeContextSizingInputs(ws *ggufload.WeightSource, be compute.Backen
 	}
 	if be != nil && cpuOffloadExperts {
 		if ok, err := serveArtifactCPUOffloadExperts(ws); ok && err == nil {
-			weights, perr := ws.EstimateCPUOffloadExpertsExpertParallelMemoryPlan(max(ranks, 1))
+			// fak#13209: thread the bounded streamed-dense option so the arm's estimate charges the
+			// eligible dense side at the working set, not the full on-disk dense total. The option
+			// list is the SAME serveQ4KFitOptions list the path-based load arm uses, so the sizing
+			// path and the loader carry one declaration.
+			opts := serveQ4KFitOptions("", ws, be, serveLoadArmCPUOffloadExperts, serveDeviceFitBudget(be))
+			var weights compute.MemoryPlan
+			var perr error
+			if bound, bounded := serveBoundedDenseWorkingSetBound(opts); bounded {
+				weights, perr = ws.EstimateCPUOffloadExpertsBoundedDenseMemoryPlan(max(ranks, 1), bound)
+			} else {
+				weights, perr = ws.EstimateCPUOffloadExpertsExpertParallelMemoryPlan(max(ranks, 1))
+			}
 			return weights, serveDeviceFitBudget(be), perr
 		}
 	}
@@ -639,6 +650,14 @@ func serveGGUFWeightMemoryPlanForArm(ws *ggufload.WeightSource, arm serveLoadArm
 		// arm-selected cpu-offload: the routed experts are host-scoped. rank-local
 		// sharding is handled upstream (serveNativeContextSizingInputs) before this
 		// unsharded single-rank arm is reached, so charge the full routed set here.
+		//
+		// fak#13209: probe the q4kOpts this call site received so a declared bounded
+		// streamed-dense working set reaches the estimator. Before this, the arm IGNORED
+		// q4kOpts and the bounded dense row was DEAD on the device --cpu-offload-experts arm.
+		// The unsharded single-rank arm plans exactly as before when no bound is declared.
+		if bound, ok := serveBoundedDenseWorkingSetBound(q4kOpts); ok {
+			return ws.EstimateCPUOffloadExpertsBoundedDenseMemoryPlan(1, bound)
+		}
 		return ws.EstimateCPUOffloadExpertsMemoryPlan()
 	case serveLoadArmResidentQ4K:
 		plan, err := ws.EstimateQ4KLoadMemoryPlan(q4kOpts...)
@@ -667,6 +686,16 @@ func serveGGUFWeightMemoryPlanForArm(ws *ggufload.WeightSource, arm serveLoadArm
 // never the full on-disk dense side (fak#13205). A caller with no budget in scope passes
 // serveFitBudget{} (unprobeable -> bound 0 -> stream-through), exactly as the expert precedent.
 func serveQ4KFitOptions(path string, ws *ggufload.WeightSource, be compute.Backend, arm serveLoadArm, fit serveFitBudget) []ggufload.Q4KLoadOption {
+	// fak#13209: the device --cpu-offload-experts arm also carries the bounded streamed-dense
+	// working set, so the arm's DENSE side is judged against the bound rather than the full
+	// on-disk dense total (the ~63.22 GiB V4.1 dense side charged as one host anon buffer is the
+	// fak#13171 kernel OOM). This is the ONE option list the sizing path and the load path share,
+	// so estimate and load cannot disagree. The arm's dense/router/attention weights are still
+	// device-scoped; only the eligible dense k-quant staging transit is bounded. It needs no
+	// WeightSource (the derivation is budget-only), so it is available on the path-form call sites.
+	if arm == serveLoadArmCPUOffloadExperts {
+		return serveCPUOffloadBoundedDenseOptions(be, fit)
+	}
 	if arm != serveLoadArmResidentQ4K || ws == nil {
 		return nil
 	}
@@ -680,6 +709,24 @@ func serveQ4KFitOptions(path string, ws *ggufload.WeightSource, be compute.Backe
 		opts = append(opts, ggufload.WithStreamedDenseQ4KWorkingSet(serveStreamedDenseQ4KWorkingSetBound(serveStreamedHostFit(be, &fit))))
 	}
 	return opts
+}
+
+// serveCPUOffloadBoundedDenseOptions is the ONE derivation of the device --cpu-offload-experts
+// arm's bounded streamed-dense option list (fak#13209). It is gated on the SAME
+// FAK_STREAM_Q4K/FAK_METAL_STREAM_Q4K knobs as the resident-Q4K streamed-dense route, and derives
+// the bound from the HOST budget via serveStreamedHostFit -- the dense working set is HOST-resident,
+// so it must not be sized from the device aperture (the fak#13142/#13205 rule). With the knob unset
+// the list is empty, so every non-streamed device cpu-offload serve is byte-identical. The
+// eligibility of the artifact's dense side is applied INSIDE the estimator and the loader via the
+// same denseBoundedEligible predicate, so an ineligible dense side simply produces no bounded row
+// and keeps the full charge (fail-closed) -- no pre-check is needed here.
+func serveCPUOffloadBoundedDenseOptions(be compute.Backend, fit serveFitBudget) []ggufload.Q4KLoadOption {
+	if os.Getenv("FAK_STREAM_Q4K") != "1" && os.Getenv("FAK_METAL_STREAM_Q4K") != "1" {
+		return nil
+	}
+	return []ggufload.Q4KLoadOption{
+		ggufload.WithStreamedDenseQ4KWorkingSet(serveStreamedDenseQ4KWorkingSetBound(serveStreamedHostFit(be, &fit))),
+	}
 }
 
 func serveGGUFMemoryPlan(ws *ggufload.WeightSource, f32Resident bool, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
@@ -700,15 +747,50 @@ func serveGGUFMemoryPlan(ws *ggufload.WeightSource, f32Resident bool, contextBud
 // overstated host demand ~ranks-fold and made RefuseHostScopedPlanIfTooBigForHost refuse a serve
 // that fits Ã¢â‚¬â€ before the authoritative rank-local gate (refuseEPPlanIfUnfit, #2997) could run at
 // all (#4952).
-func serveGGUFCPUOffloadMemoryPlan(ws *ggufload.WeightSource, ranks, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
+// serveGGUFCPUOffloadMemoryPlan is the CPU-offload sizing entry point. The variadic q4kOpts
+// carries the SAME option list the load arm will thread, so when it declares a BOUNDED streamed-
+// dense host working set (ggufload.WithStreamedDenseQ4KWorkingSet, fak#13209) the estimator charges
+// the eligible dense side at that bound instead of the full on-disk dense total -- the estimate and
+// the load cannot disagree because they read one declaration. Omitting q4kOpts (every historical
+// caller) keeps EstimateCPUOffloadExpertsExpertParallelMemoryPlan byte-for-byte.
+//
+// THREADING CHOICE (fak#13209): a variadic parameter was chosen over a new argument on every
+// CPU-offload helper because it is the least invasive form -- the streamed-expert selection path
+// (serveStreamedCPUOffloadPlanForPool) and the host-fit probes call this WITHOUT an option list and
+// stay byte-identical, while only the device arm's sizing + load call sites forward the bound.
+// ggufload.ApplyQ4KLoadOptions probes the list without a config, so a non-bounded list is inert.
+func serveGGUFCPUOffloadMemoryPlan(ws *ggufload.WeightSource, ranks, contextBudgetTokens int, fit serveFitBudget, q4kOpts ...ggufload.Q4KLoadOption) (compute.MemoryPlan, error) {
 	if ws == nil {
 		return nil, nil
 	}
-	plan, err := ws.EstimateCPUOffloadExpertsExpertParallelMemoryPlan(ranks)
+	var plan compute.MemoryPlan
+	var err error
+	if bound, ok := serveBoundedDenseWorkingSetBound(q4kOpts); ok {
+		plan, err = ws.EstimateCPUOffloadExpertsBoundedDenseMemoryPlan(ranks, bound)
+	} else {
+		plan, err = ws.EstimateCPUOffloadExpertsExpertParallelMemoryPlan(ranks)
+	}
 	if err != nil {
 		return nil, err
 	}
 	return appendServeGGUFDevicePlan(ws, plan, contextBudgetTokens, fit), nil
+}
+
+// serveBoundedDenseWorkingSetBound reports the declared bounded streamed-dense host working set an
+// option list carries, if any. It reads the loader's own option-application surface
+// (ggufload.ApplyQ4KLoadOptions) so the estimate-side probe and the load-side dispatch cannot drift.
+// The bool is false when the list does not declare the bounded form (or is empty), in which case the
+// caller keeps the historical full-charge estimator byte-for-byte. A declared zero IS bounded
+// (stream-through), matching ggufload's StreamedDenseBounded semantics.
+func serveBoundedDenseWorkingSetBound(opts []ggufload.Q4KLoadOption) (int64, bool) {
+	if len(opts) == 0 {
+		return 0, false
+	}
+	eff := ggufload.ApplyQ4KLoadOptions(opts)
+	if !eff.StreamedDenseBounded {
+		return 0, false
+	}
+	return eff.StreamedDenseBytes, true
 }
 
 func appendServeGGUFDevicePlan(ws *ggufload.WeightSource, plan compute.MemoryPlan, contextBudgetTokens int, fit serveFitBudget) compute.MemoryPlan {
@@ -880,7 +962,14 @@ func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Res
 // resident-EP case 0.05 exists for. ranks changes which routed bytes are charged, never the
 // headroom.
 func fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath string, be compute.Backend, ranks, contextBudgetTokens int, override *serveFitBudget) (compute.MemoryPlan, error) {
-	plan, err := serveGGUFCPUOffloadPathMemoryPlan(ggufPath, ranks, contextBudgetTokens, serveDeviceFitBudgetFromReported(be, override))
+	// ONE fit snapshot (fak#13209): the same device budget the plan is judged against also derives
+	// the bounded streamed-dense option list, so the estimate the fit gate reads is the bound the
+	// loader will thread. serveQ4KFitOptions derives the bound from the HOST budget
+	// (serveStreamedHostFit), exactly as the resident-Q4K route does -- the dense working set is
+	// HOST-resident and must not be sized from the device aperture.
+	devFit := serveDeviceFitBudgetFromReported(be, override)
+	opts := serveQ4KFitOptions(ggufPath, nil, be, serveLoadArmCPUOffloadExperts, devFit)
+	plan, err := serveGGUFCPUOffloadPathMemoryPlan(ggufPath, ranks, contextBudgetTokens, devFit, opts...)
 	return refuseIfTooBigOnDevice(plan, err, be, override)
 }
 
@@ -890,9 +979,9 @@ func serveGGUFPathMemoryPlan(ggufPath string, f32Resident bool, contextBudgetTok
 	})
 }
 
-func serveGGUFCPUOffloadPathMemoryPlan(ggufPath string, ranks, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
+func serveGGUFCPUOffloadPathMemoryPlan(ggufPath string, ranks, contextBudgetTokens int, fit serveFitBudget, q4kOpts ...ggufload.Q4KLoadOption) (compute.MemoryPlan, error) {
 	return withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
-		return serveGGUFCPUOffloadMemoryPlan(ws, ranks, contextBudgetTokens, fit)
+		return serveGGUFCPUOffloadMemoryPlan(ws, ranks, contextBudgetTokens, fit, q4kOpts...)
 	})
 }
 

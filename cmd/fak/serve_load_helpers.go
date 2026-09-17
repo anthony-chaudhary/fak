@@ -303,7 +303,16 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 	// would take the UNBOUNDED form off the env fallback in loadResidentQ4KProfiled. Gated on the
 	// same FAK_STREAM_Q4K/FAK_METAL_STREAM_Q4K knobs: when the env asks for streaming, the bounded
 	// form is selected (bounded is the improved form, so it supersedes the unbounded precedent).
-	if residentQ4K && (os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1") {
+	// fak#13209: the device --cpu-offload-experts arm ALSO threads the bounded dense working set
+	// when the same env knob is set, so the arm's dense router/attention staging transit is bounded
+	// instead of charged as one ~63 GiB host anon buffer. The value is the SAME
+	// serveStreamedDenseQ4KWorkingSetBound(hostFit) the sizing path derives (hostFit =
+	// serveStreamedHostFit(backend, fit), the true HOST budget the dense working set is resident
+	// against), so the estimate and the load carry one measurement and cannot disagree. On the
+	// cpu-offload arm the eligibility of the artifact's dense side is applied inside the estimator
+	// and loader via the shared denseBoundedEligible predicate: an ineligible dense side produces no
+	// bounded row and keeps the full charge (fail-closed).
+	if (residentQ4K || (cpuOffloadExperts && cpuOffloadArm)) && (os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1") {
 		q4kOpts = append(q4kOpts, ggufload.WithStreamedDenseQ4KWorkingSet(serveStreamedDenseQ4KWorkingSetBound(hostFit)))
 	} // #1062 pre-launch load-path check: warn (don't refuse) before a large GGUF load when the
 	// weights sit on a network filesystem. NFS/CIFS read at network speed â€” the ~50-100x

@@ -801,31 +801,85 @@ func (s *WeightSource) EstimateCPUOffloadExpertsExpertParallelMemoryPlan(ranks i
 	return s.estimateCPUOffloadExpertsMemoryPlan(ranks)
 }
 
+// EstimateCPUOffloadExpertsBoundedDenseMemoryPlan is EstimateCPUOffloadExpertsMemoryPlan under the
+// BOUNDED dense policy (fak#13209): the SAME device/host split for the routed experts, except the
+// ELIGIBLE dense bounded k-quant side is moved OUT of the device "gguf-device-dense-load" charge
+// and folded into ONE bounded host working-set row charged min(denseEligible, bound). That is the
+// dense sibling of the bounded-resident streamed-expert policy: the device-scoped dense side is not
+// born in VRAM (staging materializes it in host RAM, read -> dequant/transcode -> upload -> free),
+// so a device --cpu-offload-experts plan that charges the full 63.22 GiB V4.1 dense side as one host
+// anon buffer is exactly the fak#13171 kernel OOM. Charging the eligible dense side at a bounded
+// host working set lets the arm's fit guard judge what the loader RETAINS, not the full on-disk
+// side.
+//
+// bound < 0 is refused by name (an unrepresentable policy is never clamped). bound == 0 is
+// stream-through: no dense host residency is charged and only the non-eligible device remainder is.
+// A bound above the eligible dense side is capped by the actual eligible bytes, never inflated past
+// what is resident. Eligibility is denseBoundedEligible, reached through the SAME
+// CanonicalTensorNameArch -> model.QuantSourceTensorName chain the loader dispatches on, so the
+// estimate and the loader cannot disagree about which tensors the bounded dense policy covers; a
+// non-eligible dense tensor (F32/F16, the routed-expert blobs, anything without a canonical
+// mapping) stays on the raw device charge, so the fail-closed direction is preserved.
+func (s *WeightSource) EstimateCPUOffloadExpertsBoundedDenseMemoryPlan(ranks int, bound int64) (compute.MemoryPlan, error) {
+	if bound < 0 {
+		return nil, fmt.Errorf("gguf: streamed-dense host working set %d is negative", bound)
+	}
+	return s.estimateCPUOffloadExpertsMemoryPlanForArm(ranks, -1, bound)
+}
+
 func (s *WeightSource) estimateCPUOffloadExpertsMemoryPlan(ranks int) (compute.MemoryPlan, error) {
 	return s.estimateCPUOffloadExpertsMemoryPlanFor(ranks, -1)
 }
 
-// estimateCPUOffloadExpertsMemoryPlanFor is the one accounting kernel both the full-charge and the
-// bounded-resident policies share. streamResident < 0 means the historical full host charge; >= 0
-// means the streamed policy's resident set (0 = stream-through). Only the HOST-scoped routed-expert
-// rows are transformed; every device-scoped byte is untouched.
+// estimateCPUOffloadExpertsMemoryPlanFor is the full-charge / streamed-expert-resident accounting
+// kernel: it delegates to the shared arm kernel with denseResident = -1, the historical full device
+// dense charge, so every pre-existing caller stays byte-identical.
 func (s *WeightSource) estimateCPUOffloadExpertsMemoryPlanFor(ranks int, streamResident int64) (compute.MemoryPlan, error) {
+	return s.estimateCPUOffloadExpertsMemoryPlanForArm(ranks, streamResident, -1)
+}
+
+// estimateCPUOffloadExpertsMemoryPlanForArm is the ONE accounting kernel every --cpu-offload-experts
+// policy shares. Two independent bounded policies are folded into it:
+//
+//   - streamResident < 0 means the historical FULL host routed-expert charge; >= 0 means the
+//     streamed-expert policy's resident set (0 = stream-through), which folds every HOST-scoped
+//     routed-expert row into ONE "gguf-host-expert-offload-streamed" row charged
+//     min(hostTotal, streamResident) (fak#13121).
+//   - denseResident < 0 means the historical FULL device dense charge (byte-identical for every
+//     existing caller); >= 0 means the BOUNDED dense policy (0 = stream-through), which moves every
+//     ELIGIBLE dense bounded k-quant tensor OUT of the device "gguf-device-dense-load" charge and
+//     folds it into ONE "gguf-host-dense-streamed" host row charged min(denseEligible, denseResident).
+//
+// The dense eligibility predicate is denseBoundedEligible, reached through the SAME
+// CanonicalTensorNameArch -> model.QuantSourceTensorName chain the Q4_K loader dispatches on, so
+// this estimator and the loader cannot disagree about which tensors the bounded dense policy
+// covers: a non-eligible dense tensor stays on the raw device charge (fail-closed).
+func (s *WeightSource) estimateCPUOffloadExpertsMemoryPlanForArm(ranks int, streamResident, denseResident int64) (compute.MemoryPlan, error) {
 	arch, _ := s.File.String("general.architecture")
 	modelType := canonicalGGUFArch(arch)
+	// densePolicy turns on the bounded dense fold and the lazy Config() read it needs; the
+	// historical denseResident < 0 path never reaches Config here, so no new error path appears
+	// for the existing callers.
+	densePolicy := denseResident >= 0
+	var (
+		cfg       model.Config
+		cfgLoaded bool
+	)
 	// band>0 only for a real sharded EP rank on a batched-MoE arch; everything else keeps the
 	// full-model accounting untouched (and never reads Config, so no new error path appears on
 	// the ranks<=1 call this method has always served).
 	band, experts := 0, 0
 	if ranks > 1 {
-		cfg, err := s.File.Config()
+		c, err := s.File.Config()
 		if err != nil {
 			return nil, err
 		}
-		if archUsesGGUFBatchedMoEExperts(cfg.ModelType) && cfg.NumExperts > 0 {
-			if _, err := model.ExpertParallelPlan(cfg.NumExperts, ranks); err != nil {
+		cfg, cfgLoaded = c, true
+		if archUsesGGUFBatchedMoEExperts(c.ModelType) && c.NumExperts > 0 {
+			if _, err := model.ExpertParallelPlan(c.NumExperts, ranks); err != nil {
 				return nil, err
 			}
-			band, experts = compute.ExpertParallelLargestBandExperts(cfg.NumExperts, ranks), cfg.NumExperts
+			band, experts = compute.ExpertParallelLargestBandExperts(c.NumExperts, ranks), c.NumExperts
 		}
 	}
 	type key struct {
@@ -835,6 +889,7 @@ func (s *WeightSource) estimateCPUOffloadExpertsMemoryPlanFor(ranks int, streamR
 		shard bool
 	}
 	by := map[key]uint64{}
+	var denseEligible uint64
 	for _, info := range s.File.Tensors {
 		if glmMoeDsaSkipGGUFTensorForType(modelType, info.Name) {
 			continue
@@ -846,6 +901,31 @@ func (s *WeightSource) estimateCPUOffloadExpertsMemoryPlanFor(ranks int, streamR
 		hostExpert, err := tensorCPUOffloadExpert(info.Name, modelType)
 		if err != nil {
 			return nil, err
+		}
+		// Bounded dense policy (fak#13209): an ELIGIBLE dense bounded k-quant tensor is moved OUT
+		// of the device charge and accumulated into the ONE bounded host working-set fold. It must
+		// NOT be a host expert (those are governed by the separate streamed/routed policy) and must
+		// resolve through the SAME CanonicalTensorNameArch -> model.QuantSourceTensorName chain the
+		// loader dispatches on, so estimate and loader agree. Everything else stays on the raw
+		// device charge (fail-closed).
+		if densePolicy && !hostExpert {
+			if !cfgLoaded {
+				c, cerr := s.File.Config()
+				if cerr != nil {
+					return nil, cerr
+				}
+				cfg, cfgLoaded = c, true
+			}
+			if canon, ok := CanonicalTensorNameArch(info.Name, cfg.ModelType); ok {
+				if resolved, keep := model.QuantSourceTensorName(cfg, canon); keep &&
+					denseBoundedEligible(cfg, info.Type, resolved) {
+					if denseEligible > math.MaxUint64-n {
+						return nil, fmt.Errorf("gguf: bounded dense offload estimate bytes overflow")
+					}
+					denseEligible += n
+					continue
+				}
+			}
 		}
 		// Mirror the loader's stored residency: the routed-expert loader holds a blob raw
 		// (residentExpertBlockGeometry + model.ResidentKQuantEligible) ONLY for an admitted
@@ -942,6 +1022,29 @@ func (s *WeightSource) estimateCPUOffloadExpertsMemoryPlanFor(ranks int, streamR
 				Class:  compute.MemoryOffload,
 				Bytes:  resident,
 				Detail: "gguf-host-expert-offload-streamed",
+				Scope:  compute.MemoryScopeHost,
+				DType:  "streamed-resident",
+			})
+		}
+	}
+	// Bounded dense fold (fak#13209), mirroring the MoE/streamed fold at EstimateMoEBoundedDenseHostMemoryPlan:
+	// the eligible dense side is charged at the DECLARED host working set, min(eligible, bound). A zero
+	// bound is stream-through and charges nothing; a bound above the eligible side is capped by the
+	// actual resident bytes, never inflated past what is resident. Every non-eligible device demand was
+	// left on its raw charge above, so the fail-closed floor is preserved.
+	if densePolicy {
+		resident := denseEligible
+		if uint64(denseResident) < resident {
+			resident = uint64(denseResident)
+		}
+		if resident > math.MaxInt64 {
+			return nil, fmt.Errorf("gguf: bounded dense offload working set overflows int64")
+		}
+		if resident > 0 {
+			plan = append(plan, compute.MemoryDemand{
+				Class:  compute.MemoryOffload,
+				Bytes:  int64(resident),
+				Detail: "gguf-host-dense-streamed",
 				Scope:  compute.MemoryScopeHost,
 				DType:  "streamed-resident",
 			})

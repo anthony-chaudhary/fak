@@ -338,3 +338,119 @@ func TestServeDeviceFitBudgetFallsBackWithoutCeilingSeam(t *testing.T) {
 		t.Fatalf("nil backend base = %d, want 0 (fail-open)", got)
 	}
 }
+
+// serve_staging_guard_test.go (fak#13209) - the BOUNDED streamed-dense transit form. The device
+// --cpu-offload-experts plan now carries a "gguf-host-dense-streamed" host working-set row
+// (ggufload.EstimateCPUOffloadExpertsBoundedDenseMemoryPlan) so the eligible dense k-quant side is
+// faulted as bounded checkpoint ranges instead of materialized as one ~63 GiB host anon buffer.
+// serveDeviceStagingHostPlan must charge THAT bounded working set -- not the whole plan.DeviceTotal()
+// -- and stamp the distinct detail so a physical receipt can tell the two apart. Without the row the
+// historical whole-DeviceTotal charge and the plain detail are preserved byte-for-byte.
+
+// serveBoundedDenseStagingPlan is the bounded-transit shape: a device-scoped dense charge (the
+// eligible dense side the streamed route covers) plus the bounded host working-set row the streamed
+// fold appends, plus a host-scoped routed-expert pool. The bounded row is the observable evidence
+// that the bounded route is active.
+func serveBoundedDenseStagingPlan(deviceDense, hostExperts, denseBound int64) compute.MemoryPlan {
+	return compute.MemoryPlan{
+		{Class: compute.MemoryWeights, Scope: compute.MemoryScopeDevice, Bytes: deviceDense, Detail: "gguf-device-dense-load"},
+		{Class: compute.MemoryOffload, Scope: compute.MemoryScopeHost, Bytes: hostExperts, Detail: "gguf-host-expert-offload"},
+		{Class: compute.MemoryOffload, Scope: compute.MemoryScopeHost, Bytes: denseBound, Detail: serveDenseBoundedStreamStagingDetail},
+	}
+}
+
+// With the bounded working-set row present the transit is the BOUNDED dense charge, strictly below
+// plan.DeviceTotal(), and carries the bounded detail.
+func TestServeDeviceStagingHostPlanBoundsStreamedDenseTransit(t *testing.T) {
+	const gib = int64(1) << 30
+	// 63.22 GiB device dense side, bounded to a 12 GiB host working set.
+	plan := serveBoundedDenseStagingPlan(63*gib+225<<20, 4*gib, 12*gib)
+
+	if !serveDeviceDenseStreamedBounded(plan) {
+		t.Fatalf("fixture does not carry the bounded streamed-dense row")
+	}
+	stagingPlan := serveDeviceStagingHostPlan(plan)
+	if len(stagingPlan) != 1 {
+		t.Fatalf("staging plan carries %d rows, want exactly the 1 synthesized transit row", len(stagingPlan))
+	}
+	got := stagingPlan[0]
+	if got.Detail != serveDenseStreamedStagingChargeDetail {
+		t.Fatalf("transit detail = %q, want %q", got.Detail, serveDenseStreamedStagingChargeDetail)
+	}
+	if got.Bytes >= plan.DeviceTotal() {
+		t.Fatalf("bounded transit = %d, want STRICTLY less than DeviceTotal %d", got.Bytes, plan.DeviceTotal())
+	}
+	if got.Bytes != 12*gib {
+		t.Fatalf("bounded transit = %d, want the declared working set %d", got.Bytes, int64(12*gib))
+	}
+}
+
+// WITHOUT the bounded row the historical whole-DeviceTotal charge and the plain detail are
+// preserved byte-for-byte: the fak#13171 kernel-OOM protection is untouched on the non-streamed shape.
+func TestServeDeviceStagingHostPlanPreservesWholeTotalWithoutBoundedRow(t *testing.T) {
+	const gib = int64(1) << 30
+	plan := serveStagingGuardPlan(63*gib+225<<20, 4*gib)
+
+	stagingPlan := serveDeviceStagingHostPlan(plan)
+	if len(stagingPlan) != 1 {
+		t.Fatalf("staging plan carries %d rows, want exactly the 1 synthesized transit row", len(stagingPlan))
+	}
+	got := stagingPlan[0]
+	if got.Detail != "gguf-device-staging-host-transit" {
+		t.Fatalf("transit detail = %q, want the historical plain detail", got.Detail)
+	}
+	if got.Bytes != plan.DeviceTotal() {
+		t.Fatalf("transit bytes = %d, want the whole DeviceTotal %d byte-for-byte", got.Bytes, plan.DeviceTotal())
+	}
+}
+
+// A bounded transit that fits the host window is admitted; the same plan WITHOUT the row refuses.
+// This is the fak#13209 witness: the bound is what lets the arm reach the load instead of refusing.
+func TestServeDeviceStagingBoundedTransitAdmitsWhereWholeTotalRefuses(t *testing.T) {
+	const gib = int64(1) << 30
+	hostFit := serveFitBudget{Base: 48*gib + 542<<20, Headroom: 0} // ~48.5 GiB host budget
+
+	bounded := serveBoundedDenseStagingPlan(63*gib+225<<20, 4*gib, 12*gib)
+	if err := refuseDeviceStagingAgainstHostFit(bounded, hostFit); err != nil {
+		t.Fatalf("bounded 12 GiB dense transit against a 48.5 GiB host budget was refused: %v", err)
+	}
+
+	unbounded := serveStagingGuardPlan(63*gib+225<<20, 4*gib)
+	if err := refuseDeviceStagingAgainstHostFit(unbounded, hostFit); err == nil {
+		t.Fatalf("unbounded 63.22 GiB dense transit against a 48.5 GiB host budget was ADMITTED; the fak#13171 protection regressed")
+	}
+}
+
+// fak#13209 threading seam: the device --cpu-offload-experts arm's option list must carry the
+// bounded streamed-dense working set when the env knob is set, derived from the HOST budget. These
+// helpers are the NEW plumbing this leaf adds, so stashing serve_model_fit.go makes this test fail
+// to build (the RED witness for the threading half).
+func TestServeCPUOffloadBoundedDenseOptionsThreadsHostBound(t *testing.T) {
+	const gib = int64(1) << 30
+	t.Setenv("FAK_STREAM_Q4K", "1")
+	// be=nil makes serveStreamedHostFit take the injected fit verbatim (the device-less form),
+	// so the bound is a pure function of the host budget under test.
+	hostFit := serveFitBudget{Base: 48*gib + 542<<20, Headroom: 0}
+	opts := serveCPUOffloadBoundedDenseOptions(nil, hostFit)
+	bound, ok := serveBoundedDenseWorkingSetBound(opts)
+	if !ok {
+		t.Fatalf("option list does not declare the bounded dense working set: %+v", opts)
+	}
+	want := serveStreamedDenseQ4KWorkingSetBound(hostFit)
+	if bound != want {
+		t.Fatalf("threaded bound = %d, want the host-derived working set %d", bound, want)
+	}
+	if bound >= hostFit.avail() {
+		t.Fatalf("threaded bound = %d, want STRICTLY below the host budget %d", bound, hostFit.avail())
+	}
+	// With the knob unset the list is empty, so a non-streamed device cpu-offload serve is
+	// byte-identical.
+	t.Setenv("FAK_STREAM_Q4K", "0")
+	t.Setenv("FAK_METAL_STREAM_Q4K", "0")
+	if opts := serveCPUOffloadBoundedDenseOptions(nil, hostFit); len(opts) != 0 {
+		t.Fatalf("unset knob produced a non-empty option list: %+v", opts)
+	}
+	if _, ok := serveBoundedDenseWorkingSetBound(nil); ok {
+		t.Fatalf("nil option list reported a bounded dense working set")
+	}
+}
