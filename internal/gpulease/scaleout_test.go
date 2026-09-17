@@ -127,6 +127,33 @@ func TestDecideScaleOutDecisionMatrix(t *testing.T) {
 	}
 }
 
+// TestScaleOutRefusalWhyIsExhaustive pins the requirement that
+// scaleOutRefusalWhy decides for EVERY HolderProgress constant. It guards the
+// seam internal/enumlint flags (a switch that silently falls through for an
+// unhandled member) without relying on the tree-wide lint: a future constant, or
+// a deleted case, fails here directly.
+func TestScaleOutRefusalWhyIsExhaustive(t *testing.T) {
+	verdicts := []HolderProgress{
+		HolderProgressLiveProgressing,
+		HolderProgressStalled,
+		HolderProgressDead,
+		HolderProgressUnknown,
+	}
+	for _, v := range verdicts {
+		t.Run(string(v), func(t *testing.T) {
+			probe := HolderProbe{Verdict: v, Held: true, PID: 4242}
+			opts := ScaleOutOptions{} // no wait bound, no attach owner
+			reason := scaleOutRefusalWhy(probe, opts)
+			if reason == "" {
+				t.Fatalf("scaleOutRefusalWhy(%s) returned an empty reason", v)
+			}
+			if reason == "no attachable owner and the wait cannot be bounded" {
+				t.Fatalf("scaleOutRefusalWhy(%s) fell through to the generic default; %s must be handled explicitly", v, v)
+			}
+		})
+	}
+}
+
 func TestScaleOutReceiptJSONRoundTrip(t *testing.T) {
 	rec := ScaleOutReceipt{
 		Schema:            scaleOutSchema,

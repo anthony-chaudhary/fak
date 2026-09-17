@@ -265,7 +265,13 @@ func ownerDetailSuffix(detail string) string {
 }
 
 // scaleOutRefusalWhy names the concrete reason no attach/wait decision was
-// reachable, keeping the three causes distinct so an operator can act.
+// reachable, keeping the four causes distinct so an operator can act.
+//
+// The switch is exhaustive over HolderProgress: HolderProgressDead is handled at
+// Rung 1 of DecideScaleOut before this helper is reached, so its case is a
+// defensive decision rather than a live path. Naming it here keeps the switch
+// total (a new constant must be handled explicitly) and states the release
+// advice an operator would want if it ever did arrive.
 func scaleOutRefusalWhy(probe HolderProbe, opts ScaleOutOptions) string {
 	switch probe.Verdict {
 	case HolderProgressLiveProgressing:
@@ -274,6 +280,8 @@ func scaleOutRefusalWhy(probe HolderProbe, opts ScaleOutOptions) string {
 		}
 	case HolderProgressStalled:
 		return "holder looks stalled and no owner advertised an attach surface; inspect it with 'fak doctor serve' before releasing"
+	case HolderProgressDead:
+		return "holder process is gone and no owner advertised an attach surface; the OS is dropping the flock, so retry"
 	case HolderProgressUnknown:
 		return "holder progress is unreadable and no owner advertised an attach surface; cannot bound the wait"
 	}
