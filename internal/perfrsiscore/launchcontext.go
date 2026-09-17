@@ -101,7 +101,7 @@ func (c LaunchContext) canonical() LaunchContext {
 	c.CodePaths = sortedStrings(c.CodePaths)
 	c.LaunchParams.Argv = sortedStrings(c.LaunchParams.Argv)
 	c.LaunchParams.EnvKeys = sortedStrings(c.LaunchParams.EnvKeys)
-	if c.LaunchParams.ResolvedFlags == nil {
+	if len(c.LaunchParams.ResolvedFlags) == 0 {
 		c.LaunchParams.ResolvedFlags = map[string]string{}
 	}
 	c.InputConditions.Shapes = sortedStrings(c.InputConditions.Shapes)
@@ -110,20 +110,20 @@ func (c LaunchContext) canonical() LaunchContext {
 	return c
 }
 
+// sortedStrings returns a sorted copy of in. nil and empty inputs share one
+// canonical shape: a non-nil empty slice (JSON []), never null.
 func sortedStrings(in []string) []string {
-	if in == nil {
-		return []string{}
-	}
-	out := append([]string(nil), in...)
+	out := make([]string, len(in))
+	copy(out, in)
 	sort.Strings(out)
 	return out
 }
 
+// sortedIntervals returns a sorted copy of in. nil and empty inputs share one
+// canonical shape: a non-nil empty slice (JSON []), never null.
 func sortedIntervals(in []Interval) []Interval {
-	if in == nil {
-		return []Interval{}
-	}
-	out := append([]Interval(nil), in...)
+	out := make([]Interval, len(in))
+	copy(out, in)
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Name != out[j].Name {
 			return out[i].Name < out[j].Name
