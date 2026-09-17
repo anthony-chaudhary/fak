@@ -694,6 +694,84 @@ func (s *WeightSource) lazyDenseQ4KTensorWork(info TensorInfo, canon string, tic
 	return tw
 }
 
+// lazyKQuantTensorWork is the NON-Q4_K sibling of lazyDenseQ4KTensorWork (#13201): under the
+// BOUNDED streamed-dense policy an eligible dense k-quant of the Q2_K/Q3_K/Q5_K/Q6_K family is
+// held as a checkpoint range descriptor instead of being read into host RAM whole, exactly as the
+// Q4_K path does. The byte count and shape checks are the shared ones; only the store the
+// descriptor lands in differs (the k-quant store rather than the Q4_K store), which the
+// collector-side apply selects by pt.lazyKQuant. The mapped-span reader is the SAME
+// s.mappedQ4KReader used by the Q4_K path, so a fully-covered shard tensor gets the identical
+// zero-copy view and the two routes cannot drift.
+func (s *WeightSource) lazyKQuantTensorWork(info TensorInfo, canon string, tickBytes int64) tensorWork {
+	tw := tensorWork{tickBytes: tickBytes}
+	shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
+	if err != nil {
+		tw.err = err
+		return tw
+	}
+	r, size, err := s.tensorReader(info)
+	if err != nil {
+		tw.err = err
+		return tw
+	}
+	n, err := tensorPayloadBytes(info)
+	if err != nil || n > uint64(math.MaxInt) {
+		if err == nil {
+			err = fmt.Errorf("gguf: tensor %s payload is too large", info.Name)
+		}
+		tw.err = err
+		return tw
+	}
+	r = s.mappedQ4KReader(info, r, size, int(n))
+	tw.pending = []pendingTensor{{lazyKQuant: true, name: canon, shape: shape, sourceInfo: info, lazyReader: r}}
+	tw.acctType, tw.acctBytes, tw.acctTensors, tw.acctResident = info.Type.String(), tensorOnDiskBytes(info), 1, true
+	return tw
+}
+
+// lazyDenseKQuantBoundedEligible is the ONE predicate that decides whether a non-Q4_K dense
+// k-quant tensor may be held as a bounded range under the streamed-dense policy (#13201). It is
+// deliberately the strict conjunction the loader needs and nothing more:
+//
+//   - the type must be a k-quant super-block format the lazy store carries
+//     (Q2_K/Q3_K/Q5_K/Q6_K), which residentExpertBlockGeometry already enumerates;
+//   - the canonical name must pass model.ResidentKQuantEligible, the same eligibility the
+//     resident k-quant entries use, so widening the BOUNDED route cannot admit a tensor the
+//     resident store would refuse.
+//
+// Routing-expert blobs have no canonical mapping (CanonicalTensorNameArch declines them), so they
+// stay on their own streamedExperts policy and are never folded here. The estimate fold in
+// estimate.go mirrors this function's truth table exactly.
+func lazyDenseKQuantBoundedEligible(cfg model.Config, t TensorType, canon string) bool {
+	switch t {
+	case TensorQ2_K, TensorQ3_K, TensorQ5_K, TensorQ6_K:
+	default:
+		return false
+	}
+	if _, _, ok := residentExpertBlockGeometry(t); !ok {
+		return false
+	}
+	return model.ResidentKQuantEligible(cfg, canon)
+}
+
+// applyLazyKQuantByType routes a lazyKQuant pending tensor to the matching per-type lazy builder
+// entry (AddLazyKQuantQ2K/Q3K/Q5K/Q6K, exported by package model for exactly this consumer), so
+// the unexported kQuantKind never crosses the package boundary. A type with no lazy entry is a
+// programming error: lazyDenseKQuantBoundedEligible admitted it, so reaching the default means
+// the two tables drifted, and it must fail closed rather than fall through to an f32 load.
+func applyLazyKQuantByType(builder *model.QuantBuilder, name string, shape []int, t TensorType, src model.LazyQ4KRange) error {
+	switch t {
+	case TensorQ2_K:
+		return builder.AddLazyKQuantQ2K(name, shape, src)
+	case TensorQ3_K:
+		return builder.AddLazyKQuantQ3K(name, shape, src)
+	case TensorQ5_K:
+		return builder.AddLazyKQuantQ5K(name, shape, src)
+	case TensorQ6_K:
+		return builder.AddLazyKQuantQ6K(name, shape, src)
+	}
+	return fmt.Errorf("gguf: no lazy k-quant store for admitted dense type %s", t)
+}
+
 func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builder *model.QuantBuilder, kvbHalf map[int]glmKVBHalf, w3Requested bool) error {
 	p.Tick(tw.tickBytes)
 	p.recordLoadPath(tw.acctType, tw.acctExpert, tw.acctResident, tw.acctBytes, tw.acctTensors)
@@ -734,6 +812,19 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 				src.MappedOffset = mapped.offset
 			}
 			if err := builder.AddLazyQ4K(pt.name, pt.shape, src); err != nil {
+				return err
+			}
+		case pt.lazyKQuant:
+			n, err := tensorPayloadBytes(pt.sourceInfo)
+			if err != nil {
+				return err
+			}
+			src := model.LazyQ4KRange{Reader: pt.lazyReader, Offset: pt.sourceInfo.FileOffset, Bytes: int(n)}
+			if mapped, ok := pt.lazyReader.(*mappedQ4KReaderAt); ok {
+				src.MappedSpan = mapped.span
+				src.MappedOffset = mapped.offset
+			}
+			if err := applyLazyKQuantByType(builder, pt.name, pt.shape, pt.sourceInfo.Type, src); err != nil {
 				return err
 			}
 		case pt.isKVBHalf:
@@ -1080,6 +1171,16 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 	}
 	if loadOpts.streamedDenseQ4K && info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, canon) {
 		return s.lazyDenseQ4KTensorWork(info, canon, tw.tickBytes)
+	}
+	// #13201: the bounded dense route must cover the dense k-quant TYPES the pinned artifact
+	// actually carries, not just Q4_K. An eligible Q2_K/Q3_K/Q5_K/Q6_K dense matmul is held as a
+	// range descriptor here (the same bounded policy the Q4_K branch above applies) rather than
+	// falling through to the raw resident charge. The gate is the loader's OWN bounded-dense
+	// eligibility (block geometry + ResidentKQuantEligible), so the estimate fold in estimate.go
+	// can mirror it exactly and the two cannot disagree. Q4_K is excluded because the branch above
+	// already owns it.
+	if loadOpts.streamedDenseQ4K && info.Type != TensorQ4_K && lazyDenseKQuantBoundedEligible(cfg, info.Type, canon) {
+		return s.lazyKQuantTensorWork(info, canon, tw.tickBytes)
 	}
 	shape, raw, ok := s.shapeAndBytesOrFail(info, &tw)
 	if !ok {
