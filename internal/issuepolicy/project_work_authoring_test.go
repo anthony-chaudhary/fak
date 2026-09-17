@@ -36,3 +36,23 @@ func TestAppendProjectWorkDefaultsRefusesContributionAboveBaseline(t *testing.T)
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestAppendProjectWorkDefaultsAcceptsLanded(t *testing.T) {
+	body, err := AppendProjectWorkDefaults("## Work estimate\nEstimate: 1 point.\n\n## Overall completion contribution\nContribution: 1/8 points.\n\n## Completion standard\nlanded\n", ProjectWorkAuthoring{})
+	if err != nil {
+		t.Fatalf("landed must be an accepted completion standard: err=%v", err)
+	}
+	if !strings.Contains(body, "\nlanded\n") {
+		t.Fatalf("body=%q lost the landed standard", body)
+	}
+}
+
+func TestAppendProjectWorkDefaultsUnknownStandardNamesTheResolvedValue(t *testing.T) {
+	_, err := AppendProjectWorkDefaults("## Work estimate\nEstimate: 1 point.\n\n## Overall completion contribution\nContribution: 1/8 points.\n\n## Completion standard\nbogus\n", ProjectWorkAuthoring{})
+	if err == nil {
+		t.Fatal("unknown standard must be refused")
+	}
+	if !strings.Contains(err.Error(), `"bogus"`) {
+		t.Fatalf("error must name the resolved standard, not the empty argument: err=%v", err)
+	}
+}

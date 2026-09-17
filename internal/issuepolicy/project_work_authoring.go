@@ -51,9 +51,9 @@ func AppendProjectWorkDefaults(body string, a ProjectWorkAuthoring) (string, err
 		standard = "production"
 	}
 	switch standard {
-	case "production", "research", "experiment", "prototype", "demo", "development", "dev", "integrated", "staging":
+	case "production", "research", "experiment", "prototype", "demo", "development", "dev", "integrated", "staging", "landed":
 	default:
-		return "", fmt.Errorf("unsupported completion standard %q", a.CompletionStandard)
+		return "", fmt.Errorf("unsupported completion standard %q", standard)
 	}
 	out := strings.TrimSpace(body)
 	appendSection := func(title, value string) {
