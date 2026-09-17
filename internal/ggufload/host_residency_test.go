@@ -8,7 +8,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
-// host_residency_test.go — fak#13172 regression. On an INTEGRATED device (Strix Halo / APU
+// host_residency_test.go —— fak#13172 regression. On an INTEGRATED device (Strix Halo / APU
 // Vulkan tier) the device-visible weights and the host-resident expert/staging charge draw
 // from ONE physical DRAM pool, but the per-scope fit checks judge each against its OWN probe:
 // the device probe on RADV/Vulkan reports the unified heap (~84 GiB on a 62.4 GiB Halo), so a
@@ -19,7 +19,7 @@ import (
 
 // integratedTestBackend is the shared-pool double: a Vulkan-shaped backend whose tier advertises
 // an integrated GPU (compute-arbitrated UMA detection, never a product-name guess) and whose
-// device probe is FAR larger than the host's physical RAM — exactly the witnessed strix3 shape
+// device probe is FAR larger than the host's physical RAM —— exactly the witnessed strix3 shape
 // (device budget 71.53 GiB admitted against a 62.4 GiB MemTotal).
 func integratedTestBackend(deviceBytes int64) dualCapacityBackend {
 	return dualCapacityBackend{
@@ -33,6 +33,7 @@ func integratedTestBackend(deviceBytes int64) dualCapacityBackend {
 // the float multiply is not a constant conversion (rejected at compile time).
 var (
 	witnessedDeviceWeightsGiB = 63.092
+	witnessedHostExpertsGiB   = 8.425
 	witnessedHostTotalGiB     = 62.4
 )
 
@@ -181,4 +182,125 @@ func wsEstimateLoadBytes(t *testing.T, ws *WeightSource) int64 {
 		t.Fatalf("EstimateLoadBytes: %v", err)
 	}
 	return b
+}
+
+// ---------------------------------------------------------------------------------------------
+// fak#13176 — split VRAM/system aperture. The witnessed strix3 box exposes a 64 GiB device VRAM
+// window (mem_info_vram_total) and a 62.4 GiB system window (MemTotal), both carved from 128 GB
+// physical. The V4.1 plan is kv=8.425GiB, weights=63.092GiB, headroom=12.623GiB: the dense
+// weights fit the 64 GiB VRAM window and the host-resident charge fits the 62.4 GiB system
+// window, but the grand total exceeds the system window alone. The pre-#13176 bound judged the
+// grand total against MemTotal and refused a plan the hardware can run.
+
+// splitApertureBackend is the strix3-shaped double: an integrated tier with a DISTINCT device
+// VRAM window and system window, so the split arm of the bound engages.
+func splitApertureBackend(vramBytes, systemBytes int64) dualCapacityBackend {
+	return dualCapacityBackend{
+		capBackend: capBackend{total: vramBytes, free: vramBytes, known: true},
+		hostTotal:  systemBytes, hostFree: systemBytes, hostKnown: true,
+		name: "vulkan", tier: "integrated:strix-halo",
+	}
+}
+
+// TestRefuseUnifiedHostResidencyAdmitsSplitAperture is the fak#13176 RED->GREEN: a plan whose
+// device-scoped bytes fit the VRAM window and whose host-scoped bytes fit the system window is
+// ADMITTED even though the grand total exceeds the system window alone.
+func TestRefuseUnifiedHostResidencyAdmitsSplitAperture(t *testing.T) {
+	const gib = int64(1 << 30)
+	deviceWeights := int64(witnessedDeviceWeightsGiB * float64(gib)) // 63.092 GiB
+	hostExperts := int64(witnessedHostExpertsGiB * float64(gib))     // 8.425 GiB
+	vram := int64(64 * float64(gib))                                 // 64 GiB VRAM window
+	system := int64(witnessedHostTotalGiB * float64(gib))            // 62.4 GiB system window
+	if deviceWeights > vram || hostExperts > system {
+		t.Fatalf("fixture does not fit the split apertures (device %d<=%d, host %d<=%d)", deviceWeights, vram, hostExperts, system)
+	}
+	if deviceWeights+hostExperts <= system {
+		t.Fatalf("fixture does not reproduce the defect: grand total %d must exceed the system window %d", deviceWeights+hostExperts, system)
+	}
+	plan := compute.MemoryPlan{
+		{Class: compute.MemoryWeights, Scope: compute.MemoryScopeDevice, Bytes: deviceWeights, Detail: "gguf-device-dense-load"},
+		{Class: compute.MemoryKVCache, Scope: compute.MemoryScopeHost, Bytes: hostExperts, Detail: "gguf-host-expert-offload-streamed"},
+	}
+	// Split aperture, injectable: device fits VRAM, host fits system, sum > system -> ADMITTED.
+	if err := RefuseUnifiedHostResidencyIfTooBigForReportedAperture(plan, vram, vram, true, system, system, true, 0); err != nil {
+		t.Fatalf("split-aperture plan (device %d<=VRAM %d, host %d<=system %d) was refused: %v", deviceWeights, vram, hostExperts, system, err)
+	}
+	// End-to-end through the backend-aware form, resolving BOTH windows off the backend probes.
+	be := splitApertureBackend(vram, system)
+	if err := RefuseUnifiedHostResidencyIfTooBig(plan, be, 0); err != nil {
+		t.Fatalf("backend-aware split-aperture admission refused the runnable V4.1 plan: %v", err)
+	}
+	// The SAME plan through the pre-#13176 single-window form (no device window) still refuses:
+	// that is the defect the split form fixes, and it proves the two forms are not interchangeable.
+	if err := RefuseUnifiedHostResidencyIfTooBigForReportedHost(plan, system, system, true, 0); err == nil {
+		t.Fatal("single-window form admitted a grand total above the system window; the split form must be doing the admission")
+	}
+}
+
+// TestRefuseUnifiedHostResidencyRefusesDeviceOverflow is the negative test: a plan whose
+// device-scoped bytes exceed the VRAM window must still refuse with a typed FitError naming the
+// DEVICE aperture, even though its host side fits the system window.
+func TestRefuseUnifiedHostResidencyRefusesDeviceOverflow(t *testing.T) {
+	const gib = int64(1 << 30)
+	vram := int64(64 * float64(gib))
+	system := int64(witnessedHostTotalGiB * float64(gib))
+	plan := compute.MemoryPlan{
+		{Class: compute.MemoryWeights, Scope: compute.MemoryScopeDevice, Bytes: vram + gib, Detail: "gguf-device-dense-load"},
+		{Class: compute.MemoryKVCache, Scope: compute.MemoryScopeHost, Bytes: 2 * gib, Detail: "kv"},
+	}
+	err := RefuseUnifiedHostResidencyIfTooBigForReportedAperture(plan, vram, vram, true, system, system, true, 0)
+	if err == nil {
+		t.Fatal("device-overflow plan was admitted; a genuine VRAM overflow must still refuse")
+	}
+	var fe *compute.FitError
+	if !errors.As(err, &fe) {
+		t.Fatalf("want a typed *compute.FitError, got %T: %v", err, err)
+	}
+	if fe.Verdict != compute.FitTooBig || fe.Scope != compute.MemoryScopeDevice {
+		t.Fatalf("FitError verdict=%v scope=%v, want FitTooBig/device (the VRAM aperture)", fe.Verdict, fe.Scope)
+	}
+	if fe.Want != vram+gib {
+		t.Fatalf("FitError Want = %d, want the device-scoped demand %d", fe.Want, vram+gib)
+	}
+	if !strings.Contains(err.Error(), "unified-memory host residency") {
+		t.Fatalf("refusal %q missing shared-pool provenance", err.Error())
+	}
+	// The backend-aware form must reach the SAME typed device refusal.
+	if err := RefuseUnifiedHostResidencyIfTooBig(plan, splitApertureBackend(vram, system), 0); err == nil {
+		t.Fatal("backend-aware form admitted a device-overflow plan")
+	} else if !errors.As(err, &fe) || fe.Scope != compute.MemoryScopeDevice {
+		t.Fatalf("backend-aware refusal scope = %v, want device: %v", fe.Scope, err)
+	}
+}
+
+// TestRefuseUnifiedHostResidencySingleWindowUnchanged is the P3-preservation sibling: a host
+// that reports only ONE window (device == system, the pre-#13176 shape) or no device window
+// behaves EXACTLY as before — the grand total is judged against the system window.
+func TestRefuseUnifiedHostResidencySingleWindowUnchanged(t *testing.T) {
+	const gib = int64(1 << 30)
+	window := int64(witnessedHostTotalGiB * float64(gib))
+	plan := compute.MemoryPlan{
+		{Class: compute.MemoryWeights, Scope: compute.MemoryScopeDevice, Bytes: 63 * gib, Detail: "dense"},
+		{Class: compute.MemoryOffload, Scope: compute.MemoryScopeHost, Bytes: 20 * gib, Detail: "experts"},
+	}
+	// device == system: one shared pool, grand total 83 GiB > 62.4 GiB -> refuse (as before).
+	if err := RefuseUnifiedHostResidencyIfTooBigForReportedAperture(plan, window, window, true, window, window, true, 0); err == nil {
+		t.Fatal("single-window (device==system) plan over the pool was admitted; the grand-total guard was lost")
+	}
+	// No device window at all: falls back to the grand-total system-window check -> refuse.
+	if err := RefuseUnifiedHostResidencyIfTooBigForReportedAperture(plan, 0, compute.FreeUnknown, false, window, window, true, 0); err == nil {
+		t.Fatal("unknown-device-window plan over the system pool was admitted; must stay conservative")
+	}
+	// Unknown host window still fails OPEN, unchanged.
+	if err := RefuseUnifiedHostResidencyIfTooBigForReportedAperture(plan, 64*gib, 64*gib, true, 0, compute.FreeUnknown, false, 0); err != nil {
+		t.Fatalf("unknown host capacity must fail open, got %v", err)
+	}
+	// A plan that fits a single unified pool is admitted, unchanged.
+	fits := compute.MemoryPlan{
+		{Class: compute.MemoryWeights, Scope: compute.MemoryScopeDevice, Bytes: 8 * gib, Detail: "dense"},
+		{Class: compute.MemoryOffload, Scope: compute.MemoryScopeHost, Bytes: 2 * gib, Detail: "experts"},
+	}
+	if err := RefuseUnifiedHostResidencyIfTooBigForReportedAperture(fits, window, window, true, window, window, true, 0); err != nil {
+		t.Fatalf("plan inside a single unified pool was refused: %v", err)
+	}
 }
