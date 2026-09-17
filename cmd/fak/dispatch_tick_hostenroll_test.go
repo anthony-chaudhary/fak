@@ -31,6 +31,15 @@ func TestDispatchTickMicroBackendEnrollsIntoHostNotDetachedSpawn(t *testing.T) {
 	}
 	t.Cleanup(func() { dispatchIssueWorkerSpawner = oldSpawner })
 
+	// The live path builds a REAL planner and has no endpoint configured here, so the
+	// canned planner is reached ONLY through the explicit test hook. This is the single
+	// sanctioned route for a mock on live (de-mock: fak#13085).
+	oldHook := dispatchHostEnrollWorkerHook
+	dispatchHostEnrollWorkerHook = func(dispatchTickOptions, dispatchtick.Account) agent.Planner {
+		return hostEnrollPlanner{}
+	}
+	t.Cleanup(func() { dispatchHostEnrollWorkerHook = oldHook })
+
 	out, errb, code := runDispatchAt("tick", "--workspace", root, "--backend", "micro", "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--live", "--json")
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 for micro host-enroll (stderr: %s)\n%s", code, errb, out)
@@ -237,5 +246,126 @@ func TestDispatchTickMicroBackendExecutesInProcessToolCalls(t *testing.T) {
 	}
 	if topTurns := dispatchMapInt(res, "turns"); topTurns != turns {
 		t.Fatalf("host_result.turns = %d, want %d", topTurns, turns)
+	}
+}
+
+// clearHostEnrollPlannerEnv blanks every planner-selection env var so a test observes
+// only what it sets itself, never an ambient local endpoint or cloud seat.
+func clearHostEnrollPlannerEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{
+		"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
+		"OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_API_BASE",
+		"FAK_GATEWAY_URL", "FAK_API_KEY",
+	} {
+		t.Setenv(k, "")
+	}
+}
+
+// TestDispatchHostEnrollWorkerSelectsRealPlannerForLocalEndpoint is the #13082 witness:
+// the micro backend's LOCAL path is an OpenAI-compatible endpoint. With OPENAI_BASE_URL
+// pointed at the local gateway, the live worker selector returns a REAL provider HTTP
+// planner (not the canned hostEnrollPlanner), and the FAK_GATEWAY_URL route likewise
+// yields a real planner. This proves planner selection, not just that some planner exists.
+func TestDispatchHostEnrollWorkerSelectsRealPlannerForLocalEndpoint(t *testing.T) {
+	clearHostEnrollPlannerEnv(t)
+	t.Setenv("OPENAI_BASE_URL", "http://127.0.0.1:8080/v1")
+	t.Setenv("OPENAI_API_KEY", "local-token")
+
+	p := defaultDispatchHostEnrollWorker(dispatchTickOptions{Live: true, WorkerModel: "local-model"}, dispatchtick.Account{})
+	if p == nil {
+		t.Fatal("live planner selection returned nil with OPENAI_BASE_URL set")
+	}
+	if _, ok := p.(hostEnrollPlanner); ok {
+		t.Fatal("live planner selection returned the canned hostEnrollPlanner for a configured endpoint")
+	}
+	hp, ok := p.(*agent.HTTPPlanner)
+	if !ok {
+		t.Fatalf("planner = %T, want *agent.HTTPPlanner", p)
+	}
+	if hp.BaseURL != "http://127.0.0.1:8080/v1" || hp.ModelID != "local-model" {
+		t.Fatalf("planner base/model = %q/%q, want the local endpoint/local-model", hp.BaseURL, hp.ModelID)
+	}
+
+	clearHostEnrollPlannerEnv(t)
+	t.Setenv("FAK_GATEWAY_URL", "127.0.0.1:9090")
+	t.Setenv("FAK_API_KEY", "gw-token")
+	gp := defaultDispatchHostEnrollWorker(dispatchTickOptions{Live: true, WorkerModel: "gw-model"}, dispatchtick.Account{})
+	if _, ok := gp.(*agent.HTTPPlanner); !ok {
+		t.Fatalf("FAK_GATEWAY_URL planner = %T, want *agent.HTTPPlanner", gp)
+	}
+}
+
+// TestDispatchHostEnrollWorkerNoPlannerLiveReturnsNil pins the de-mock contract at the
+// selector: on the LIVE path with no endpoint and no hook, the default worker returns nil
+// (a typed no-planner failure for the caller) and NEVER the canned hostEnrollPlanner. The
+// canned planner stays reachable only offline or through the explicit test hook.
+func TestDispatchHostEnrollWorkerNoPlannerLiveReturnsNil(t *testing.T) {
+	clearHostEnrollPlannerEnv(t)
+	oldHook := dispatchHostEnrollWorkerHook
+	dispatchHostEnrollWorkerHook = nil
+	t.Cleanup(func() { dispatchHostEnrollWorkerHook = oldHook })
+
+	if p := defaultDispatchHostEnrollWorker(dispatchTickOptions{Live: true}, dispatchtick.Account{}); p != nil {
+		t.Fatalf("live no-endpoint planner = %T (%v), want nil (never a mock)", p, p)
+	}
+
+	dispatchHostEnrollWorkerHook = func(dispatchTickOptions, dispatchtick.Account) agent.Planner { return nil }
+	if p := defaultDispatchHostEnrollWorker(dispatchTickOptions{Live: true}, dispatchtick.Account{}); p != nil {
+		t.Fatalf("live hook-returned-nil planner = %T (%v), want nil", p, p)
+	}
+
+	dispatchHostEnrollWorkerHook = nil
+	if _, ok := defaultDispatchHostEnrollWorker(dispatchTickOptions{Live: false}, dispatchtick.Account{}).(hostEnrollPlanner); !ok {
+		t.Fatal("non-live planner must be the offline canned hostEnrollPlanner")
+	}
+}
+
+// TestDispatchTickMicroBackendLiveNoPlannerFailsTyped is the end-to-end silence-killer
+// (fak#13085): a live micro tick with no endpoint and no test hook must NOT report a mock
+// ENROLLED. It exits non-zero with a typed ENROLL_FAILED / enroll_failure=no_planner, and
+// records no host_result/host_audit as if the worker had run.
+func TestDispatchTickMicroBackendLiveNoPlannerFailsTyped(t *testing.T) {
+	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	root := t.TempDir()
+	clearHostEnrollPlannerEnv(t)
+
+	oldHook := dispatchHostEnrollWorkerHook
+	dispatchHostEnrollWorkerHook = nil
+	t.Cleanup(func() { dispatchHostEnrollWorkerHook = oldHook })
+
+	oldSpawner := dispatchIssueWorkerSpawner
+	spawned := false
+	dispatchIssueWorkerSpawner = func(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA, stdinPayload string, probeS float64) (dispatchSpawnResult, error) {
+		spawned = true
+		return dispatchSpawnResult{}, nil
+	}
+	t.Cleanup(func() { dispatchIssueWorkerSpawner = oldSpawner })
+
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--backend", "micro", "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--live", "--json")
+	if code == 0 {
+		t.Fatalf("live micro tick with no planner exited 0; want non-zero typed failure\n%s", out)
+	}
+	if spawned {
+		t.Fatal("no-planner live tick reached the detached spawner")
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("bad json: %v (stderr: %s)\n%s", err, errb, out)
+	}
+	if got["action"] != "enroll_failed" || got["verdict"] != "ENROLL_FAILED" || got["ok"] != false {
+		t.Fatalf("no-planner tick = action %v verdict %v ok %v, want enroll_failed/ENROLL_FAILED/false\n%s", got["action"], got["verdict"], got["ok"], out)
+	}
+	if got["enroll_failure"] != "no_planner" {
+		t.Fatalf("enroll_failure = %v, want no_planner", got["enroll_failure"])
+	}
+	if got["verdict"] == "ENROLLED" {
+		t.Fatal("live tick reported ENROLLED without a model: the mock leaked onto the live path")
+	}
+	if _, ok := got["host_result"]; ok {
+		t.Fatalf("no-planner tick recorded host_result %#v; want none", got["host_result"])
+	}
+	if _, ok := got["host_audit"]; ok {
+		t.Fatalf("no-planner tick recorded host_audit %#v; want none", got["host_audit"])
 	}
 }

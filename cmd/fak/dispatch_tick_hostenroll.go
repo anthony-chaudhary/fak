@@ -42,15 +42,21 @@ import (
 //   - Demotion / retirement: drop the micro path if #2033 shows per-agent cost is
 //     dominated by provider seats/rate limits (the host buys no density), or if the
 //     isolation floor (#2018) demands a per-agent OS process anyway.
-//   - Invalidating assumption: the enrolled agent here is a BOUNDED PROTOTYPE — it takes
-//     one offline turn through the host-shared gateway and does NO edits and NO tool
-//     calls. The REAL claude issue-resolution loop (per-turn stepping of internal/agent
-//     RunArm) is #2001, still OPEN. Until it lands, this path proves the dispatch->host
-//     enrollment SEAM (construct + Spawn under lease + per-agent audit), not full
-//     in-process issue resolution — and the CLI-only guard/self-modify/spawn-broker
-//     gates are not yet re-applied to the in-process path (they gate OS-process launches
-//     and tree edits the prototype does not perform; wiring them is part of the #2001
-//     real-loop work).
+//   - Real loop: hostEnrollAgent.Step resolves the issue through the OWNED agent loop —
+//     it arms the focused code tool catalog (ArmFocusedCodeTools over a.root) and calls
+//     agent.RunGovernedArm, so the enrolled microagent proposes and EXECUTES tool calls
+//     (edits included) against the fence tree under ONE host-shared gateway. This is not
+//     a prototype no-op.
+//
+// Model planner selection (live path): a live tick WILL NOT enroll on a canned planner.
+// It constructs a REAL HTTP planner from the first available provider route and fails
+// the enrollment with a typed no_planner reason when none can be built. The supported
+// LOCAL route is an OpenAI-compatible endpoint: point OPENAI_BASE_URL (or the legacy
+// OPENAI_API_BASE) at the local gateway (e.g. http://127.0.0.1:8080/v1) with
+// OPENAI_API_KEY set to any non-empty token. ANTHROPIC_BASE_URL/ANTHROPIC_API_KEY and
+// FAK_GATEWAY_URL (with FAK_API_KEY) are the hosted/gateway alternatives. The offline
+// canned hostEnrollPlanner is reachable ONLY via the explicit test hook
+// (dispatchHostEnrollWorkerHook) or the non-live WOULD_ENROLL path — never a live run.
 func dispatchTickHostEnroll(root, runsDir string, opts dispatchTickOptions, pick dispatchLanePick, leaseID string, account dispatchtick.Account, target int, payload map[string]any, finish func(map[string]any) map[string]any) map[string]any {
 	plan := dispatchtick.PlanHostEnrollment(pick.Lane, target, leaseID, pick.Tree)
 	payload["host_enrollment"] = map[string]any{
@@ -106,6 +112,9 @@ func dispatchTickHostEnroll(root, runsDir string, opts dispatchTickOptions, pick
 	// (Spawn -> Step -> retire -> Reap), not an exec.Command spawn.
 	sink := &hostEnrollSink{}
 	planner := dispatchHostEnrollWorker(opts, account)
+	if planner == nil {
+		return dispatchHostEnrollNoPlanner(runsDir, opts, payload, finish, account)
+	}
 	host, err := microagent.NewHost(planner, microagent.Config{Workers: 1, Queue: 1, Audit: sink})
 	if err != nil {
 		return dispatchHostEnrollFailed(runsDir, opts, payload, finish, fmt.Sprintf("microagent host construct failed for issue #%d: %v", target, err))
@@ -180,7 +189,7 @@ func newHostEnrollmentLaunchID(backend string, issue int) string {
 		return fmt.Sprintf("%s-%d-%s", backend, issue, hex.EncodeToString(nonce[:]))
 	}
 	// crypto/rand failure must not erase the launch witness. The timestamp fallback is
-	// process-local but still distinguishes sequential prototype enrollments.
+	// process-local but still distinguishes sequential in-process enrollments.
 	return fmt.Sprintf("%s-%d-%d", backend, issue, time.Now().UnixNano())
 }
 
@@ -196,31 +205,66 @@ func dispatchHostEnrollFailed(runsDir string, opts dispatchTickOptions, payload 
 	return finish(payload)
 }
 
+// dispatchHostEnrollNoPlanner is the typed de-mock failure for a live enrollment with no
+// real model planner: it stamps enroll_failure=no_planner alongside the ENROLL_FAILED
+// verdict so an operator (and the tests) can distinguish "no model configured" from a
+// host/spawn/drain fault, and can never mistake a no-op for a real ENROLLED run.
+func dispatchHostEnrollNoPlanner(runsDir string, opts dispatchTickOptions, payload map[string]any, finish func(map[string]any) map[string]any, account dispatchtick.Account) map[string]any {
+	model := firstString(opts.WorkerModel, account.Model)
+	if model == "" {
+		model = "claude-3-5-sonnet-20241022"
+	}
+	payload["enroll_failure"] = enrollFailureNoPlanner
+	err := &errHostEnrollNoPlanner{model: model, tried: []string{"anthropic", "openai", "fak-gateway"}}
+	return dispatchHostEnrollFailed(runsDir, opts, payload, finish, err.Error())
+}
+
 // dispatchHostEnrollDrainTimeout bounds how long the tick waits for the enrolled
-// prototype microagent to retire. The prototype takes one offline turn, so this is a
-// generous liveness backstop, not a steady-state budget.
+// microagent to retire after its governed arm loop. It is a generous liveness
+// backstop, not a steady-state budget.
 const dispatchHostEnrollDrainTimeout = 30 * time.Second
 
-// hostEnrollPlanner is the minimal offline agent.Planner the prototype host runs
-// on: it returns a deterministic canned completion with no network, credentials, or
-// model call.
+// hostEnrollPlanner is the canned offline agent.Planner used ONLY by the non-live
+// WOULD_ENROLL path and the explicit test hook (dispatchHostEnrollWorkerHook): it
+// returns a deterministic completion with no network, credentials, or model call,
+// so unit tests and dry runs never depend on an upstream. It is NEVER returned by a
+// live tick, whose planner selection fails typed (enrollFailureNoPlanner) instead.
 type hostEnrollPlanner struct{}
 
-func (hostEnrollPlanner) Model() string { return "micro-prototype" }
+func (hostEnrollPlanner) Model() string { return "micro-offline-canned" }
 
 func (hostEnrollPlanner) Complete(ctx context.Context, _ []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: "microagent host-enroll prototype step"}}, nil
+	return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: "microagent offline canned step (non-live/test only)"}}, nil
 }
 
-// dispatchHostEnrollWorkerHook is an optional test hook to intercept host-enroll worker creation.
+// enrollFailureNoPlanner is the typed enroll_failure class stamped on a live micro
+// enrollment that could not construct a real model planner. It is the de-mock
+// contract: a live tick reports ENROLL_FAILED/no_planner rather than a fake ENROLLED.
+const enrollFailureNoPlanner = "no_planner"
+
+// errHostEnrollNoPlanner is the typed error returned when no real planner is available.
+type errHostEnrollNoPlanner struct {
+	model string
+	tried []string
+}
+
+func (e *errHostEnrollNoPlanner) Error() string {
+	return fmt.Sprintf("no live model planner for the micro host-enroll path: model %q has no constructible endpoint (tried %s); set OPENAI_BASE_URL (local OpenAI-compatible gateway, or legacy OPENAI_API_BASE) with OPENAI_API_KEY, or ANTHROPIC_BASE_URL with ANTHROPIC_API_KEY, or FAK_GATEWAY_URL with FAK_API_KEY; a non-live run uses the offline canned planner", e.model, strings.Join(e.tried, ", "))
+}
+
+// dispatchHostEnrollWorkerHook is an optional test hook to intercept host-enroll worker
+// creation. It is the ONLY route by which a test reaches the canned hostEnrollPlanner on
+// the live path; the default worker never returns it on live.
 var dispatchHostEnrollWorkerHook func(opts dispatchTickOptions, account dispatchtick.Account) agent.Planner
 
 // dispatchHostEnrollWorker returns the agent.Planner for in-process issue resolution.
-// If live with account credentials/endpoint, it returns a provider HTTP planner;
-// if offline or in tests without credentials, it returns hostEnrollPlanner{}.
+// It returns a real provider HTTP planner when a live endpoint is configured, the
+// canned hostEnrollPlanner when NOT live (dry-run/test), and nil when live with no
+// constructible planner — never a mock. A nil result is a typed failure the caller
+// must surface; see defaultDispatchHostEnrollWorker.
 var dispatchHostEnrollWorker = defaultDispatchHostEnrollWorker
 
 func defaultDispatchHostEnrollWorker(opts dispatchTickOptions, account dispatchtick.Account) agent.Planner {
@@ -256,7 +300,7 @@ func defaultDispatchHostEnrollWorker(opts dispatchTickOptions, account dispatcht
 		return agent.NewHTTPPlanner(gatewayBaseURL(gw), model, strings.TrimSpace(os.Getenv("FAK_API_KEY")))
 	}
 
-	return hostEnrollPlanner{}
+	return nil
 }
 
 // hostEnrollAgent executes in-process issue resolution through the owned agent loop.

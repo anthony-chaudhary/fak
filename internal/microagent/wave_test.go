@@ -209,3 +209,125 @@ func TestRunWaveOneCallFanOut(t *testing.T) {
 		}
 	}
 }
+
+// stuckWaveAgent models the exact wedge #13080 was filed for: its Step IGNORES
+// ctx entirely and blocks on a release channel until the test lets it go. It is
+// the adversarial input the bounded close exists for -- a drain timeout alone
+// cannot stop it, and an unbounded Close (workers.Wait) would hang forever behind
+// this goroutine.
+type stuckWaveAgent struct {
+	release chan struct{}
+	started *atomic.Int64
+}
+
+func (a *stuckWaveAgent) Step(context.Context, Gateway) (bool, error) {
+	a.started.Add(1)
+	<-a.release // deliberately not select-on-ctx: this is the ctx-ignoring agent
+	return true, nil
+}
+
+// TestCloseContextIsBoundedAgainstACtxIgnoringAgent is the #13080 acceptance
+// witness for the microagent seam: a host holding an agent whose Step ignores ctx
+// still returns from CloseContext within the declared budget, reporting the
+// timeout instead of blocking on workers.Wait().
+func TestCloseContextIsBoundedAgainstACtxIgnoringAgent(t *testing.T) {
+	h, err := NewHost(waveStubPlanner{}, Config{Workers: 1, Queue: 1})
+	if err != nil {
+		t.Fatalf("NewHost: %v", err)
+	}
+	release := make(chan struct{})
+	defer close(release) // let the wedged goroutine exit once the test is done
+	started := &atomic.Int64{}
+	if err := h.Spawn("stuck", &stuckWaveAgent{release: release, started: started}); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	// Wait until the worker is actually pinned inside Step, so the close below is
+	// racing the wedge and not an empty host.
+	deadline := time.Now().Add(5 * time.Second)
+	for started.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if started.Load() == 0 {
+		t.Fatal("stuck agent never entered Step")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	began := time.Now()
+	err = h.CloseContext(ctx)
+	elapsed := time.Since(began)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("CloseContext err = %v, want context.DeadlineExceeded (bounded, not a hang)", err)
+	}
+	if elapsed > 3*time.Second {
+		t.Fatalf("CloseContext took %v, want bounded near the 200ms budget", elapsed)
+	}
+	if h.Live() != 1 {
+		t.Fatalf("Live()=%d, want 1 (the wedged agent is abandoned, not retired)", h.Live())
+	}
+	// Idempotent: a second bounded close returns immediately without re-blocking.
+	done := make(chan error, 1)
+	go func() { done <- h.CloseContext(context.Background()) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("second CloseContext err = %v, want nil", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("second CloseContext blocked; it must be idempotent")
+	}
+}
+
+// TestHostCloseUnchangedIsUnbounded pins that the BASE Close keeps its historical
+// semantics: it is the unbounded posture, so a cooperative fleet drains and the
+// zero-agent case returns immediately (every other caller stays byte-identical).
+func TestHostCloseUnchangedIsUnbounded(t *testing.T) {
+	h, err := NewHost(waveStubPlanner{}, Config{Workers: 2, Queue: 4})
+	if err != nil {
+		t.Fatalf("NewHost: %v", err)
+	}
+	for i := 0; i < 4; i++ {
+		if err := h.Spawn("ok-"+strconv.Itoa(i), &countingWaveAgent{active: &atomic.Int64{}, peak: &atomic.Int64{}}); err != nil {
+			t.Fatalf("Spawn: %v", err)
+		}
+	}
+	done := make(chan struct{})
+	go func() { h.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("base Close did not return for a cooperative fleet")
+	}
+	if err := h.Spawn("after", &countingWaveAgent{active: &atomic.Int64{}, peak: &atomic.Int64{}}); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Spawn after Close = %v, want ErrClosed", err)
+	}
+}
+
+// TestWaveHostCloseContextIsBounded is the WaveHost-level twin: the wave entry
+// point the dispatch shell uses must itself be hang-proof, since a wave can hold
+// an untrusted batch of N agents.
+func TestWaveHostCloseContextIsBounded(t *testing.T) {
+	w, err := NewWaveHost(waveStubPlanner{}, Config{}, WaveConfig{Workers: 1, Queue: 1})
+	if err != nil {
+		t.Fatalf("NewWaveHost: %v", err)
+	}
+	release := make(chan struct{})
+	defer close(release)
+	started := &atomic.Int64{}
+	got := w.Enroll([]Enrollment{{ID: "stuck-wave", Agent: &stuckWaveAgent{release: release, started: started}}})
+	if Admitted(got) != 1 {
+		t.Fatalf("admitted=%d, want 1 (refusal %v)", Admitted(got), FirstRefusal(got))
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for started.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if started.Load() == 0 {
+		t.Fatal("stuck wave agent never entered Step")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if err := w.CloseContext(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("WaveHost.CloseContext err = %v, want context.DeadlineExceeded", err)
+	}
+}

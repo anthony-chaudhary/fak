@@ -349,25 +349,75 @@ func (h *Host) Drain(ctx context.Context) error {
 // Close cancels every live agent, stops the K workers, and retires anything
 // still queued (as cancelled). It waits for in-flight Step calls to return at
 // their next boundary. Idempotent; Spawn after Close returns ErrClosed.
+//
+// Close is the UNBOUNDED posture: it waits for the fleet for as long as that
+// takes. A caller that cannot afford to be wedged by an agent whose Step ignores
+// ctx (the wave drain-timeout case, #13080) must use CloseContext with a
+// deadline instead.
 func (h *Host) Close() {
+	_ = h.CloseContext(context.Background())
+}
+
+// CloseContext is the BOUNDED twin of Close: it performs the same cancel +
+// quiesce transition, but waits for the K workers (and the accepted-not-yet-
+// retired agents) only until ctx ends. It returns ctx.Err() -- DeadlineExceeded
+// or Canceled -- when the fleet does not quiesce within the budget, having
+// ABANDONED the wedge instead of blocking on it. A nil return means every worker
+// retired and the host is fully stopped.
+//
+// Abandonment is safe by construction: h.cancel has already fired, so every job
+// context is cancelled and any agent that DOES honor ctx retires promptly. A
+// goroutine wedged in a Step that ignores ctx is left behind (a leak, visible
+// via Live()) rather than allowed to stall the whole wave. Idempotent, and a
+// call after a nil-returning CloseContext returns nil immediately.
+func (h *Host) CloseContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
-		return
+		return nil
 	}
 	h.closed = true
 	h.draining = true
 	h.mu.Unlock()
-	h.cancel()       // every job ctx derives from h.ctx
-	h.workers.Wait() // workers retire their in-flight agent, then exit
-	for {
-		select {
-		case j := <-h.queue: // never picked up by a worker
-			h.retire(j, 0, false, context.Canceled)
-		default:
-			h.pending.Wait()
-			return
+	h.cancel() // every job ctx derives from h.ctx
+
+	// Bounded worker wait: the K Step drivers retire their in-flight agent at the
+	// next boundary and exit. An agent that ignores ctx keeps its worker parked in
+	// Step, so this select -- not an unbounded WaitGroup.Wait -- decides.
+	workersDone := make(chan struct{})
+	go func() { h.workers.Wait(); close(workersDone) }()
+	select {
+	case <-workersDone:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	// Workers have exited, so nothing else will pull from the queue. Retire
+	// anything still queued (cancelled), then wait for every accepted agent to have
+	// retired. That pending wait is bounded by the SAME ctx: a worker that exited
+	// mid-Step without retiring (impossible today, but not by contract) must not
+	// re-introduce the wedge this method exists to remove.
+	pendingDone := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case j := <-h.queue: // never picked up by a worker
+				h.retire(j, 0, false, context.Canceled)
+			default:
+				h.pending.Wait()
+				close(pendingDone)
+				return
+			}
 		}
+	}()
+	select {
+	case <-pendingDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 

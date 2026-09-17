@@ -171,7 +171,17 @@ func executeDispatchWavePlan(stdout, stderr io.Writer, req dispatchWaveExecution
 			rec["shared_host_error"] = buildErr.Error()
 		} else {
 			share = built
-			defer share.Close()
+			// Bounded teardown (#13080): a plain Close() here would block on
+			// workers.Wait() if the wave drained a wedged agent, hanging on the
+			// defer exactly as the old unconditional Close did. closeWithin uses
+			// the same hang-proof margin as the drain seam; the drain path below
+			// already closed the host, so on the happy path this is an idempotent
+			// no-op.
+			defer func() {
+				closeCtx, cancel := context.WithTimeout(context.Background(), dispatchWaveSharedHostCloseMargin)
+				defer cancel()
+				share.closeWithin(closeCtx)
+			}()
 		}
 	}
 

@@ -195,6 +195,19 @@ func (w *WaveHost) Close() {
 	}
 }
 
+// CloseContext is the BOUNDED twin of Close: it releases the shared host and
+// every agent it still holds, but returns ctx.Err() (instead of blocking) when a
+// wedged agent -- one whose Step ignores ctx -- does not quiesce within the
+// budget. It is the wave's hang-proof close (#13080): the caller declares a drain
+// budget plus a bounded close margin and the wave always returns. A nil return
+// means the host fully stopped; idempotent, via Host.CloseContext.
+func (w *WaveHost) CloseContext(ctx context.Context) error {
+	if w.host == nil {
+		return nil
+	}
+	return w.host.CloseContext(ctx)
+}
+
 // BudgetForWave derives the resident worker budget for a wave from a declared
 // ceiling and the batch size: the smaller of the caller's declared maximum and
 // the number of agents actually enrolling, floored at 1. It is the pure rule the

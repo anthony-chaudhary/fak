@@ -36,6 +36,21 @@ type dispatchWaveHostShare struct {
 
 	rows  []*dispatchWaveHostShareRow
 	byRow map[int]*dispatchWaveHostShareRow
+
+	// drains counts how many times this share drained. It is the ONE-drain
+	// witness the wave receipt emits (always 1 on the live-micro path) and it
+	// makes a second drain a visible regression rather than an assumption.
+	drains int
+	// drainErr is the wave's drain outcome: nil on a clean retire, the typed
+	// microagent.ErrWaveTimeout when a wedged agent outlived the drain budget.
+	drainErr error
+	// closeErr is non-nil when the BOUNDED close abandoned a wedged agent
+	// instead of blocking on workers.Wait() (#13080). It is the hang-proofing
+	// witness: a wave with an uncooperative agent still returns.
+	closeErr error
+	// abandoned is set when closeErr is a deadline/cancel, i.e. the wave gave up
+	// waiting for an agent whose Step ignored ctx rather than stalling forever.
+	abandoned bool
 }
 
 // dispatchWaveHostShareRow is one wave row's deferred enrollment: everything the
@@ -126,7 +141,9 @@ func (s *dispatchWaveHostShare) drainAndFinish(ctx context.Context) {
 	}
 	byID := map[string]microagent.Result{}
 	if s.admittedRows() > 0 {
-		results, _ := s.host.DrainAll(ctx)
+		s.drains++
+		results, drainErr := s.host.DrainAll(ctx)
+		s.drainErr = drainErr
 		for _, res := range results {
 			byID[res.ID] = res
 		}
@@ -187,6 +204,22 @@ func (s *dispatchWaveHostShare) Close() {
 	}
 }
 
+// closeWithin is the wave's BOUNDED close seam (#13080): it releases the shared
+// host within ctx, and when a wedged agent (one whose Step ignores ctx) outlives
+// the budget it records the refusal on the share and RETURNS instead of blocking
+// on the host's workers.Wait(). It is deliberately not Close(): the base Close
+// keeps its unbounded semantics so every other caller stays byte-identical, while
+// the wave — the one caller that can hold an untrusted batch — is hang-proof.
+func (s *dispatchWaveHostShare) closeWithin(ctx context.Context) {
+	if s == nil || s.host == nil {
+		return
+	}
+	if err := s.host.CloseContext(ctx); err != nil {
+		s.closeErr = err
+		s.abandoned = true
+	}
+}
+
 // dispatchWaveRecordSharedHost stamps the wave-level shared-host receipt: ONE host
 // construction, its resident worker budget, and the enrolled/admitted counts. It is
 // additive -- a non-micro wave never records it, so those receipts stay byte-identical.
@@ -199,19 +232,42 @@ func dispatchWaveRecordSharedHost(rec map[string]any, share *dispatchWaveHostSha
 		"peak_workers":       workers,
 		"enrolled":           enrolled,
 		"admitted":           share.admittedRows(),
+		"drains":             share.drains,
+	}
+	if share.drainErr != nil {
+		rec["shared_host"].(map[string]any)["drain_incomplete"] = share.drainErr.Error()
+	}
+	// #13080: a close that returned ctx.Err() abandoned a wedged (ctx-ignoring)
+	// agent rather than blocking on workers.Wait(). Record it as an explicit
+	// refusal so the wave is never silently hung and the wedge is auditable.
+	if share.abandoned {
+		rec["shared_host"].(map[string]any)["abandoned"] = true
+		rec["shared_host"].(map[string]any)["close_refusal"] = share.closeErr.Error()
 	}
 }
 
 // dispatchWaveDrainSharedHost is the live-micro wave's one drain seam. The wave
 // calls it after the per-row execution loop has enrolled every row; it drains the
-// shared host once, maps results back, and closes it.
+// shared host once, maps results back, and closes it — BOUNDED, so a wedged agent
+// cannot hang the wave (#13080). The drain gets the declared budget ctx while the
+// close gets a fresh, independent margin: an agent that ignored the drain ctx is
+// exactly the one the close margin must survive, so reusing the (already expired)
+// drain ctx would make every timeout a guaranteed abandonment.
 func dispatchWaveDrainSharedHost(ctx context.Context, share *dispatchWaveHostShare) {
 	if share == nil {
 		return
 	}
 	share.drainAndFinish(ctx)
-	share.Close()
+	closeCtx, cancel := context.WithTimeout(context.Background(), dispatchWaveSharedHostCloseMargin)
+	defer cancel()
+	share.closeWithin(closeCtx)
 }
+
+// dispatchWaveSharedHostCloseMargin is the bounded close budget the wave grants
+// after the drain budget ends (#13080). It is deliberately small: every agent
+// that honors ctx has already retired by now, so anything still resident is a
+// wedge the wave must abandon, not wait out.
+const dispatchWaveSharedHostCloseMargin = 5 * time.Second
 
 // sharedHostDrainTimeout bounds how long a wave waits for the whole enrolled batch
 // to retire. It scales the single-tick backstop by the wave's shape so a large
