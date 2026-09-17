@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/mtpbench"
 )
 
@@ -44,6 +45,9 @@ func main() {
 		}
 	}
 	raw, marshalErr := json.MarshalIndent(value, "", "  ")
+	if marshalErr == nil {
+		raw, marshalErr = benchcli.MarshalReport(raw)
+	}
 	if marshalErr != nil {
 		fmt.Fprintln(os.Stderr, marshalErr)
 		os.Exit(1)

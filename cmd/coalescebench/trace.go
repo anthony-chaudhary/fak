@@ -20,6 +20,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/deepseekv4moe"
 )
 
@@ -86,7 +87,7 @@ func runTraceWitness(path, artifactOut string, out io.Writer) error {
 
 	if p := strings.TrimSpace(artifactOut); p != "" {
 		report := traceWitnessReceipt{Schema: deepseekv4moe.ExpertCacheHitRateWitnessSchema, Witness: witness}
-		raw, err := json.Marshal(report)
+		raw, err := benchcli.MarshalReport(report)
 		if err != nil {
 			return fmt.Errorf("marshal trace-witness receipt: %w", err)
 		}

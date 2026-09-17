@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -295,6 +296,9 @@ func runWholeTokenCLI(f *benchFlags, m *model.Model, started time.Time, newSessi
 			return errors.Join(runErr, err)
 		}
 		data, err := json.MarshalIndent(report, "", "  ")
+		if err == nil {
+			data, err = benchcli.MarshalReport(data)
+		}
 		if err == nil {
 			err = os.WriteFile(*wholeTokenOut, append(data, '\n'), 0o600)
 		}
