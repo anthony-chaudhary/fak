@@ -217,6 +217,16 @@ func (s *WeightSource) UnifiedHostResidencyPlan(opts ...Q4KLoadOption) (compute.
 		// declared) still falls back to the raw full-charge plan, preserving fail-closed.
 		plan, err := s.EstimateQ4KLoadMemoryPlan(WithStreamedDenseQ4KWorkingSet(o.streamedDenseBytes))
 		if errors.Is(err, ErrQ4KLoadEstimateUnsupported) {
+			// The dense-family Q4_K estimate refuses an MoE checkpoint by name. Charging the
+			// raw full-payload plan there SILENTLY discards the declared bounded dense working
+			// set (fak#13200), so route the MoE case to the MoE-capable dense-bound helper: it
+			// charges the SAME raw device remainder as EstimateLoadMemoryPlan but folds the
+			// eligible dense Q4_K side into ONE bounded host row, preserving fail-closed on the
+			// non-eligible remainder. A non-MoE refusal (an unmapped/fused checkpoint) keeps the
+			// conservative full-payload fallback unchanged.
+			if cfg, cerr := s.File.Config(); cerr == nil && cfg.IsMoE() {
+				return s.EstimateMoEBoundedDenseHostMemoryPlan(o.streamedDenseBytes)
+			}
 			return s.EstimateLoadMemoryPlan()
 		}
 		return plan, err

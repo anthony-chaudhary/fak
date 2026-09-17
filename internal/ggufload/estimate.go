@@ -298,8 +298,93 @@ func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute
 	return plan, nil
 }
 
-func estimateNativeQ8LogicalBytes(elems uint64) (uint64, error) {
-	// Native stored scales are F32; GGUF Q8_0 wire scales are F16.
+// EstimateMoEBoundedDenseHostMemoryPlan is the MoE-capable sibling of the bounded
+// streamed-dense fold inside EstimateQ4KLoadMemoryPlan (fak#13200). EstimateQ4KLoadMemoryPlan
+// refuses EVERY MoE checkpoint by name (cfg.IsMoE()), so UnifiedHostResidencyPlan's
+// streamedDenseBounded branch used to fall back to EstimateLoadMemoryPlan() - the raw
+// full-payload charge - and SILENTLY discarded the declared bounded dense working set. For the
+// pinned V4.1 Q2_K artifact that means the eligible dense side is charged at its full on-disk
+// size whenever it is routed through the MoE guard, which defeats the declared bound.
+//
+// This helper charges the SAME accounting EstimateLoadMemoryPlan would (every tensor's raw
+// header payload, so the fail-closed direction is preserved) EXCEPT the eligible dense Q4_K
+// tensors, which are moved OUT of the device charge and folded into ONE bounded host working-set
+// row charged min(denseEligibleBytes, bound). The eligible predicate is byte-for-byte the
+// loader's lazyDenseQ4KTensorWork gate - CanonicalTensorNameArch -> model.QuantSourceTensorName
+// -> (info.Type == TensorQ4_K && model.ResidentQ4KEligible) - so the estimate and the loader
+// cannot disagree about which tensors the policy covers. A tensor with no canonical mapping
+// (the MoE routed-expert blobs, whose 1->E split this plan deliberately does not model) is
+// non-eligible and stays in the raw device charge exactly as before: the routed-expert side is
+// governed by the separate streamedExperts policy, which UnifiedHostResidencyPlan checks first.
+//
+// bound < 0 is refused by name; bound == 0 is stream-through (zero dense host residency). A
+// bound above the dense side is capped by the actual eligible bytes, never inflated past what is
+// resident. The returned plan carries the SAME "gguf-load" raw device rows EstimateLoadMemoryPlan
+// emits, so a genuinely unfit dense remainder still refuses fail-closed against the device
+// aperture.
+func (s *WeightSource) EstimateMoEBoundedDenseHostMemoryPlan(bound int64) (compute.MemoryPlan, error) {
+	if s == nil || s.File == nil {
+		return nil, fmt.Errorf("gguf: MoE bounded dense estimate requires a weight source")
+	}
+	if bound < 0 {
+		return nil, fmt.Errorf("gguf: streamed-dense host working set %d is negative", bound)
+	}
+	cfg, err := s.File.Config()
+	if err != nil {
+		return nil, err
+	}
+	byDType := map[string]uint64{}
+	var denseEligible uint64
+	for _, info := range s.File.Tensors {
+		n, err := tensorPayloadBytes(info)
+		if err != nil {
+			return nil, fmt.Errorf("gguf: estimate tensor %s: %w", info.Name, err)
+		}
+		// Mirror the bounded dense fold's eligibility gate exactly: a canonical name resolved
+		// through the qwen35 source chain that is a RAW-identity Q4_K matmul weight is the only
+		// tensor the loader holds as a lazy dense range. Everything else - including the MoE
+		// routed-expert blobs, which CanonicalTensorNameArch deliberately does not map - is
+		// charged to device at its raw payload, the pre-existing conservative accounting.
+		if canon, ok := CanonicalTensorNameArch(info.Name, cfg.ModelType); ok {
+			if resolved, keep := model.QuantSourceTensorName(cfg, canon); keep &&
+				info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, resolved) {
+				if denseEligible > math.MaxUint64-n {
+					return nil, fmt.Errorf("gguf: MoE bounded dense estimate bytes overflow")
+				}
+				denseEligible += n
+				continue
+			}
+		}
+		dtype := ggufTensorDTypeLabel(info.Type)
+		if byDType[dtype] > math.MaxUint64-n {
+			return nil, fmt.Errorf("gguf: MoE bounded dense estimated load bytes overflow uint64")
+		}
+		byDType[dtype] += n
+	}
+	plan, err := ggufMemoryPlanByDType(compute.MemoryWeights, compute.MemoryScopeDevice, "gguf-load", byDType)
+	if err != nil {
+		return nil, err
+	}
+	resident := denseEligible
+	if uint64(bound) < resident {
+		resident = uint64(bound)
+	}
+	if resident > math.MaxInt64 {
+		return nil, fmt.Errorf("gguf: MoE bounded dense working set overflows int64")
+	}
+	if resident > 0 {
+		plan = append(plan, compute.MemoryDemand{
+			Class:  compute.MemoryOffload,
+			Bytes:  int64(resident),
+			Detail: "gguf-host-dense-streamed",
+			Scope:  compute.MemoryScopeHost,
+			DType:  "streamed-resident",
+		})
+	}
+	return plan, nil
+}
+
+func estimateNativeQ8LogicalBytes(elems uint64) (uint64, error) { // Native stored scales are F32; GGUF Q8_0 wire scales are F16.
 	const residentBlockBytes = 32 + 4
 	if elems > (math.MaxUint64-31)/residentBlockBytes {
 		return 0, fmt.Errorf("gguf: estimated q8 load bytes overflow uint64")
