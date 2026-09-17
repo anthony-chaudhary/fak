@@ -801,6 +801,32 @@ func (s *WeightSource) EstimateCPUOffloadExpertsExpertParallelMemoryPlan(ranks i
 	return s.estimateCPUOffloadExpertsMemoryPlan(ranks)
 }
 
+// EstimateCPUOffloadExpertsStreamedBoundedDenseMemoryPlan is the COMBINED arm (fak#13215): the
+// bounded-resident STREAMED expert policy (fak#13121) AND the bounded dense policy (fak#13209)
+// applied at once. It is the estimator the streamed-expert selection path must use when it also
+// carries a declared bounded dense working set: EstimateCPUOffloadExpertsStreamedMemoryPlan pins
+// denseResident = -1 (the historical full device dense charge), so a streamed serve that bounds its
+// dense side would still charge the whole 63.22 GiB V4.1 device dense transit and refuse FitTooBig
+// against the host staging window. Both policies are folded by the ONE shared kernel
+// estimateCPUOffloadExpertsMemoryPlanForArm, which already supports streamResident >= 0 and
+// denseResident >= 0 simultaneously, so this entry point adds no new accounting -- it only lets a
+// caller declare both bounds.
+//
+// streamResident < 0 or denseResident < 0 is refused by name (an unrepresentable policy is never
+// clamped). Either bound at 0 is stream-through for that policy. The device dense side is charged
+// byte-identically to every other arm except for the eligible dense fold, so the fail-closed
+// direction is preserved: a caller that declares no dense bound keeps
+// EstimateCPUOffloadExpertsStreamedMemoryPlan byte-for-byte.
+func (s *WeightSource) EstimateCPUOffloadExpertsStreamedBoundedDenseMemoryPlan(ranks int, streamResident, denseResident int64) (compute.MemoryPlan, error) {
+	if streamResident < 0 {
+		return nil, fmt.Errorf("gguf: streamed expert resident budget %d is negative", streamResident)
+	}
+	if denseResident < 0 {
+		return nil, fmt.Errorf("gguf: streamed-dense host working set %d is negative", denseResident)
+	}
+	return s.estimateCPUOffloadExpertsMemoryPlanForArm(ranks, streamResident, denseResident)
+}
+
 // EstimateCPUOffloadExpertsBoundedDenseMemoryPlan is EstimateCPUOffloadExpertsMemoryPlan under the
 // BOUNDED dense policy (fak#13209): the SAME device/host split for the routed experts, except the
 // ELIGIBLE dense bounded k-quant side is moved OUT of the device "gguf-device-dense-load" charge

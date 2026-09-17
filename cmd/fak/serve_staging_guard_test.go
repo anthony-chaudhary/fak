@@ -454,3 +454,79 @@ func TestServeCPUOffloadBoundedDenseOptionsThreadsHostBound(t *testing.T) {
 		t.Fatalf("nil option list reported a bounded dense working set")
 	}
 }
+
+// serve_staging_guard_test.go (fak#13215) - the COMBINED streamed-expert + bounded-dense transit. The
+// DeepSeek-V4.1 Q2_K arm on strix3 runs the STREAMED expert policy (serveStreamedCPUOffloadPlanForAperture
+// -> EstimateCPUOffloadExpertsStreamedMemoryPlan, denseResident = -1), which charged the WHOLE 63.22 GiB
+// device dense side as the host staging transit and refused typed against the 48.76 GiB host window --
+// the exact refusal this leaf removes. The combined estimator threads the SAME bounded dense working set
+// the device arm already uses (serveCPUOffloadBoundedDenseOptions), so the streamed plan now carries the
+// "gguf-host-dense-streamed" row and the staging guard charges the bounded transit.
+
+// serveCombinedStreamedBoundedDenseStagingPlan is the streamed+bounded shape: the device-scoped dense
+// charge the streamed route covers, the bounded host dense working-set row, and the bounded host routed
+// expert row the streamed fold emits. The dense row is the observable evidence the combined route is
+// active.
+func serveCombinedStreamedBoundedDenseStagingPlan(deviceDense, routedResident, denseBound int64) compute.MemoryPlan {
+	return compute.MemoryPlan{
+		{Class: compute.MemoryWeights, Scope: compute.MemoryScopeDevice, Bytes: deviceDense, Detail: "gguf-device-dense-load"},
+		{Class: compute.MemoryOffload, Scope: compute.MemoryScopeHost, Bytes: routedResident, Detail: "gguf-host-expert-offload-streamed"},
+		{Class: compute.MemoryOffload, Scope: compute.MemoryScopeHost, Bytes: denseBound, Detail: serveDenseBoundedStreamStagingDetail},
+	}
+}
+
+// TestServeDeviceStagingStreamedBoundedTransitAdmitsWhereWholeTotalRefuses is the RED->GREEN witness at
+// the staging seam: the combined streamed plan (bounded dense row present) ADMITS a 63.22 GiB device
+// dense transit against a 48.76 GiB host window, whereas the historical streamed plan WITHOUT the row
+// (denseResident = -1, the fak#13215 refusal) still refuses typed. The charge is the bounded dense
+// transit (min(denseEligible, bound) + non-dense remainder), never plan.DeviceTotal().
+func TestServeDeviceStagingStreamedBoundedTransitAdmitsWhereWholeTotalRefuses(t *testing.T) {
+	const gib = int64(1) << 30
+	// strix3's system window: the host budget the staging transit must fit.
+	hostFit := serveFitBudget{Base: 48*gib + 778<<20, Headroom: 0}
+	deviceDense := 63*gib + 225<<20 // 63.22 GiB device dense side
+	routedResident := 4 * gib
+	denseBound := 12 * gib
+
+	combined := serveCombinedStreamedBoundedDenseStagingPlan(deviceDense, routedResident, denseBound)
+	if !serveDeviceDenseStreamedBounded(combined) {
+		t.Fatalf("combined fixture does not carry the bounded streamed-dense row")
+	}
+	stagingPlan := serveDeviceStagingHostPlan(combined)
+	if len(stagingPlan) != 1 {
+		t.Fatalf("combined staging plan carries %d rows, want exactly the 1 synthesized transit row", len(stagingPlan))
+	}
+	if got := stagingPlan[0].Detail; got != serveDenseStreamedStagingChargeDetail {
+		t.Fatalf("combined transit detail = %q, want %q", got, serveDenseStreamedStagingChargeDetail)
+	}
+	if got := stagingPlan[0].Bytes; got != denseBound {
+		t.Fatalf("combined transit = %d, want the bounded dense working set %d (not the whole DeviceTotal %d)", got, denseBound, combined.DeviceTotal())
+	}
+	if err := refuseDeviceStagingAgainstReportedAperture(combined, hostFit, deviceDense, deviceDense, true); err != nil {
+		t.Fatalf("combined bounded streamed transit against a 48.76 GiB host window was refused: %v", err)
+	}
+
+	// WITHOUT the bounded dense row the historical streamed plan charges the whole DeviceTotal and
+	// still refuses typed (the fak#13171 kernel-OOM protection, and the fak#13215 refusal itself).
+	legacy := compute.MemoryPlan{
+		{Class: compute.MemoryWeights, Scope: compute.MemoryScopeDevice, Bytes: deviceDense, Detail: "gguf-device-dense-load"},
+		{Class: compute.MemoryOffload, Scope: compute.MemoryScopeHost, Bytes: routedResident, Detail: "gguf-host-expert-offload-streamed"},
+	}
+	if serveDeviceDenseStreamedBounded(legacy) {
+		t.Fatalf("legacy fixture unexpectedly carries the bounded dense row")
+	}
+	if got := serveDeviceStagingHostPlan(legacy)[0].Bytes; got != legacy.DeviceTotal() {
+		t.Fatalf("legacy transit = %d, want the whole DeviceTotal %d byte-for-byte", got, legacy.DeviceTotal())
+	}
+	err := refuseDeviceStagingAgainstReportedAperture(legacy, hostFit, deviceDense, deviceDense, true)
+	if err == nil {
+		t.Fatalf("legacy streamed transit (no bounded dense row) against a 48.76 GiB host window was ADMITTED; the fak#13215 premise is broken")
+	}
+	var fe *compute.FitError
+	if !errors.As(err, &fe) {
+		t.Fatalf("legacy refusal %v is not a typed *compute.FitError", err)
+	}
+	if fe.Scope != compute.MemoryScopeHost {
+		t.Fatalf("legacy refusal scope = %q, want %q", fe.Scope, compute.MemoryScopeHost)
+	}
+}

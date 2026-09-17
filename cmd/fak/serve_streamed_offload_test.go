@@ -79,7 +79,7 @@ func TestServeCPUOffloadStreamedArmNotSelectedWhenResidentFits(t *testing.T) {
 	ws := serveStreamedSynthWeightSource(t)
 	// A huge host budget: the full routed charge fits, so streaming is unnecessary.
 	bigFit := serveFitBudget{Base: 1 << 40, Headroom: 0}
-	plan, streamed, err := serveStreamedCPUOffloadPlan(ws, 1, 0, bigFit)
+	plan, streamed, err := serveStreamedCPUOffloadPlan(ws, nil, 1, 0, bigFit)
 	if err != nil {
 		t.Fatalf("serveStreamedCPUOffloadPlan: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestServeCPUOffloadStreamedArm(t *testing.T) {
 
 	// A host budget far below the routed charge forces the streamed decision.
 	tinyFit := serveFitBudget{Base: 512, Headroom: 0}
-	plan, streamed, err := serveStreamedCPUOffloadPlan(ws, 1, 0, tinyFit)
+	plan, streamed, err := serveStreamedCPUOffloadPlan(ws, nil, 1, 0, tinyFit)
 	if err != nil {
 		t.Fatalf("serveStreamedCPUOffloadPlan: %v", err)
 	}
@@ -316,7 +316,7 @@ func TestServeStreamedResidentBoundMargin(t *testing.T) {
 	if fit.avail() <= 0 {
 		t.Fatalf("fixture routed set too small to build a forced-stream budget (%d)", resident.HostTotal())
 	}
-	plan, streamed, err := serveStreamedCPUOffloadPlan(ws, 1, 0, fit)
+	plan, streamed, err := serveStreamedCPUOffloadPlan(ws, nil, 1, 0, fit)
 	if err != nil {
 		t.Fatalf("serveStreamedCPUOffloadPlan: %v", err)
 	}
@@ -407,7 +407,7 @@ func TestServeStreamedHostFitIgnoresDeviceOverride(t *testing.T) {
 		t.Fatal("fixture must host-scope the routed experts (HostTotal>0)")
 	}
 	forced := serveFitBudget{Base: resident.HostTotal() / 2, Headroom: 0}
-	plan, streamed, err := serveStreamedCPUOffloadPlan(ws, 1, 0, forced)
+	plan, streamed, err := serveStreamedCPUOffloadPlan(ws, nil, 1, 0, forced)
 	if err != nil {
 		t.Fatalf("serveStreamedCPUOffloadPlan: %v", err)
 	}
@@ -471,7 +471,7 @@ func TestServeCPUOffloadSharedPoolStreamsOnGrandTotal(t *testing.T) {
 
 	// 1) The discrete arm keeps the resident plan (P4 preserved): the device dense side is not
 	// charged against host RAM there.
-	discretePlan, discreteStreamed, err := serveStreamedCPUOffloadPlanForPool(ws, 1, 0, fit, false)
+	discretePlan, discreteStreamed, err := serveStreamedCPUOffloadPlanForPool(ws, nil, 1, 0, fit, false)
 	if err != nil {
 		t.Fatalf("discrete plan: %v", err)
 	}
@@ -483,7 +483,7 @@ func TestServeCPUOffloadSharedPoolStreamsOnGrandTotal(t *testing.T) {
 	}
 
 	// 2) The shared-pool arm SELECTS streaming on the grand total -- the bug's fix.
-	plan, streamed, err := serveStreamedCPUOffloadPlanForPool(ws, 1, 0, fit, true)
+	plan, streamed, err := serveStreamedCPUOffloadPlanForPool(ws, nil, 1, 0, fit, true)
 	if err != nil {
 		t.Fatalf("shared-pool plan: %v", err)
 	}

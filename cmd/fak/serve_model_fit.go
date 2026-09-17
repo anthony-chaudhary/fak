@@ -1096,8 +1096,8 @@ func serveStreamedDenseQ4KWorkingSetBound(fit serveFitBudget) int64 {
 //
 // The streamed plan charges the device dense side IDENTICALLY (the same per-tensor classification),
 // so the device fit check and the resident arm cannot disagree about what stays on the device.
-func serveStreamedCPUOffloadPlan(ws *ggufload.WeightSource, ranks, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, bool, error) {
-	return serveStreamedCPUOffloadPlanForPool(ws, ranks, contextBudgetTokens, fit, false)
+func serveStreamedCPUOffloadPlan(ws *ggufload.WeightSource, be compute.Backend, ranks, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, bool, error) {
+	return serveStreamedCPUOffloadPlanForPool(ws, be, ranks, contextBudgetTokens, fit, false)
 }
 
 // serveStreamedCPUOffloadPlanForPool is serveStreamedCPUOffloadPlan with the pool topology made
@@ -1117,8 +1117,8 @@ func serveStreamedCPUOffloadPlan(ws *ggufload.WeightSource, ranks, contextBudget
 // Selecting streaming on the grand total admits the same checkpoint with a bounded resident expert
 // set instead of refusing. The device dense side is still charged IDENTICALLY by the streamed plan,
 // so the device fit check and the resident arm cannot disagree about what stays on the device.
-func serveStreamedCPUOffloadPlanForPool(ws *ggufload.WeightSource, ranks, contextBudgetTokens int, fit serveFitBudget, sharedPool bool) (compute.MemoryPlan, bool, error) {
-	return serveStreamedCPUOffloadPlanForAperture(ws, ranks, contextBudgetTokens, fit, sharedPool, false)
+func serveStreamedCPUOffloadPlanForPool(ws *ggufload.WeightSource, be compute.Backend, ranks, contextBudgetTokens int, fit serveFitBudget, sharedPool bool) (compute.MemoryPlan, bool, error) {
+	return serveStreamedCPUOffloadPlanForAperture(ws, be, ranks, contextBudgetTokens, fit, sharedPool, false)
 }
 
 // serveStreamedCPUOffloadPlanForAperture is serveStreamedCPUOffloadPlanForPool with the device
@@ -1136,7 +1136,7 @@ func serveStreamedCPUOffloadPlanForPool(ws *ggufload.WeightSource, ranks, contex
 // number and forces stream-through (bound 0), which is not a genuine capacity floor: the witnessed
 // strix3 refusal (63.09 GiB dense transit vs 48.57 GiB host avail -> bound 0 -> dense-only
 // FitTooBig) is exactly that self-referential collapse, not a wall.
-func serveStreamedCPUOffloadPlanForAperture(ws *ggufload.WeightSource, ranks, contextBudgetTokens int, fit serveFitBudget, sharedPool, splitAperture bool) (compute.MemoryPlan, bool, error) {
+func serveStreamedCPUOffloadPlanForAperture(ws *ggufload.WeightSource, be compute.Backend, ranks, contextBudgetTokens int, fit serveFitBudget, sharedPool, splitAperture bool) (compute.MemoryPlan, bool, error) {
 	plan, err := serveGGUFCPUOffloadMemoryPlan(ws, ranks, contextBudgetTokens, fit)
 	if err != nil {
 		return nil, false, err
@@ -1158,7 +1158,19 @@ func serveStreamedCPUOffloadPlanForAperture(ws *ggufload.WeightSource, ranks, co
 		return plan, false, nil
 	}
 	bound := serveCPUOffloadStreamedResidentBoundForAperture(fit, plan.DeviceTotal(), sharedPool, splitAperture)
-	streamed, err := ws.EstimateCPUOffloadExpertsStreamedMemoryPlan(bound)
+	// fak#13215: when the device --cpu-offload-experts arm declares a bounded streamed-dense working
+	// set (serveCPUOffloadBoundedDenseOptions, gated on the SAME FAK_STREAM_Q4K knob), the streamed
+	// plan must fold BOTH bounds -- otherwise the historical EstimateCPUOffloadExpertsStreamedMemoryPlan
+	// (denseResident = -1) charges the whole 63.22 GiB V4.1 device dense transit and the staging guard
+	// refuses FitTooBig against the host window. The estimator is the ONE combined kernel; with no
+	// declared bounded dense option (the default, every non-streamed serve) this is byte-for-byte
+	// EstimateCPUOffloadExpertsStreamedMemoryPlan.
+	var streamed compute.MemoryPlan
+	if denseBound, ok := serveBoundedDenseWorkingSetBound(serveCPUOffloadBoundedDenseOptions(be, fit)); ok {
+		streamed, err = ws.EstimateCPUOffloadExpertsStreamedBoundedDenseMemoryPlan(ranks, bound, denseBound)
+	} else {
+		streamed, err = ws.EstimateCPUOffloadExpertsStreamedMemoryPlan(bound)
+	}
 	if err != nil {
 		return nil, false, err
 	}
@@ -1238,7 +1250,7 @@ func serveStreamedCPUOffloadPathDecision(ggufPath string, be compute.Backend, ra
 	bound := int64(0)
 	splitAperture := serveSplitAperture(be)
 	_, err := withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
-		plan, isStreamed, perr := serveStreamedCPUOffloadPlanForAperture(ws, ranks, contextBudgetTokens, fit, sharedPool, splitAperture)
+		plan, isStreamed, perr := serveStreamedCPUOffloadPlanForAperture(ws, be, ranks, contextBudgetTokens, fit, sharedPool, splitAperture)
 		if perr != nil {
 			return nil, perr
 		}
@@ -1265,7 +1277,7 @@ func fitServeStreamedCPUOffloadPathOnHost(ggufPath string, ranks, contextBudgetT
 		return err
 	}
 	defer ws.Close()
-	plan, _, err := serveStreamedCPUOffloadPlanForPool(ws, ranks, contextBudgetTokens, fit, false)
+	plan, _, err := serveStreamedCPUOffloadPlanForPool(ws, nil, ranks, contextBudgetTokens, fit, false)
 	if err != nil {
 		return err
 	}
@@ -1289,7 +1301,7 @@ func fitServeStreamedCPUOffloadPathOnDevice(ggufPath string, be compute.Backend,
 		return nil, false, err
 	}
 	defer ws.Close()
-	plan, streamed, err := serveStreamedCPUOffloadPlanForAperture(ws, ranks, contextBudgetTokens, fit, ggufload.BackendSharesHostRAM(be), serveSplitAperture(be))
+	plan, streamed, err := serveStreamedCPUOffloadPlanForAperture(ws, be, ranks, contextBudgetTokens, fit, ggufload.BackendSharesHostRAM(be), serveSplitAperture(be))
 	if err != nil {
 		return nil, false, err
 	}
