@@ -157,6 +157,7 @@ type RejectionSampler struct {
 	randSource    func() float32
 	requestKey    uint64 // per-request RNG identity; 0 means no key (legacy path)
 	keyed         bool   // true when a keyed stream is armed
+	keyedDraws    int    // monotonic per-request draw counter for the legacy keyed seam
 }
 
 // NewRejectionSampler creates a RejectionSampler. If randSource is nil,
@@ -250,8 +251,15 @@ func (s *RejectionSampler) SampleFromDistribution(dist []float32, r float32) int
 }
 
 // Sample draws a token index from dist using the sampler's random source.
+// When a per-request key is armed it draws from that keyed stream instead, so
+// the sampled token is a function of the request identity and a monotonic step
+// counter rather than the shared source (see SetRequestKey).
 func (s *RejectionSampler) Sample(dist []float32) int {
-	return s.SampleFromDistribution(dist, s.randSource())
+	key, keyed, step := s.nextKeyedStep()
+	if !keyed {
+		return s.SampleFromDistribution(dist, s.randSource())
+	}
+	return s.SampleFromDistribution(dist, KeyedUniform(key, DomainBonusToken, step))
 }
 
 // TokenVerificationResult holds the outcome of verifying one draft token.
@@ -274,7 +282,11 @@ func (s *RejectionSampler) VerifyToken(token int, pTarget, pDraft []float32, ran
 	s.mu.Unlock()
 
 	if randVal < 0 {
-		randVal = s.randSource()
+		if key, keyed, step := s.nextKeyedStep(); keyed {
+			randVal = KeyedUniform(key, DomainAcceptCoin, step)
+		} else {
+			randVal = s.randSource()
+		}
 	}
 
 	pT := float32(0)
@@ -379,11 +391,15 @@ func (s *RejectionSampler) VerifyDraftSequence(
 // SetRequestKey arms a per-request keyed coin stream. An empty requestID clears
 // the key and restores the legacy randSource path (no reproducibility claim is
 // made without a key -- fail-closed at the CLAIM level).
+//
+// Arming a key also resets the monotonic draw counter the legacy Sample/VerifyToken
+// seam uses as its step, so a request replay starts from a known point.
 func (s *RejectionSampler) SetRequestKey(requestID string) {
 	key := HashRequestID(requestID)
 	s.mu.Lock()
 	s.requestKey = key
 	s.keyed = key != 0
+	s.keyedDraws = 0
 	s.mu.Unlock()
 }
 
@@ -399,6 +415,22 @@ func (s *RejectionSampler) keyState() (uint64, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.requestKey, s.keyed
+}
+
+// nextKeyedStep returns the armed key, whether it is active, and a monotonic
+// draw counter used as the keyed step for the legacy Sample/VerifyToken seam.
+// The counter is a function of how many draws THIS request has made, so it is
+// slot-free: replaying the same request in a different batch slot repeats the
+// counter from 0 and therefore the same coin sequence.
+func (s *RejectionSampler) nextKeyedStep() (uint64, bool, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.keyed {
+		return 0, false, 0
+	}
+	step := s.keyedDraws
+	s.keyedDraws++
+	return s.requestKey, true, step
 }
 
 // SampleKeyed draws a token from dist using the keyed stream for (domain, step).
