@@ -208,7 +208,7 @@ func TestServeStreamedDeviceArmUsesDecisionHostFitSnapshot(t *testing.T) {
 
 	// The caller's one-measurement snapshot: tiny, so the full routed charge cannot be host-resident.
 	tinyFit := serveFitBudget{Base: 512, Headroom: 0}
-	decided, _, err := serveStreamedCPUOffloadPathDecision(path, 1, 0, tinyFit, false)
+	decided, _, err := serveStreamedCPUOffloadPathDecision(path, nil, 1, 0, tinyFit, false)
 	if err != nil {
 		t.Fatalf("serveStreamedCPUOffloadPathDecision: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestServeStreamedDeviceArmFittingArtifactStaysResident(t *testing.T) {
 
 	be := serveCapBackend{total: 1 << 40, free: 1 << 40, known: true}
 	bigFit := serveFitBudget{Base: 1 << 40, Headroom: 0}
-	decided, _, err := serveStreamedCPUOffloadPathDecision(path, 1, 0, bigFit, false)
+	decided, _, err := serveStreamedCPUOffloadPathDecision(path, nil, 1, 0, bigFit, false)
 	if err != nil {
 		t.Fatalf("serveStreamedCPUOffloadPathDecision: %v", err)
 	}
@@ -510,6 +510,52 @@ func TestServeCPUOffloadSharedPoolStreamsOnGrandTotal(t *testing.T) {
 	}
 }
 
+// TestServeCPUOffloadStreamedResidentBoundForApertureSplitDoesNotCollapse is the fak#13175
+// split-aperture regression at the pure bound seam. On the witnessed strix3 box the device-scoped
+// dense side (63.09 GiB) is LARGER than the host window it is judged against (48.57 GiB avail), so
+// the shared-pool resident bound computed `avail - deviceTransit` as NEGATIVE and floored to zero
+// (stream-through). The arm selection cannot distinguish that from "streaming not selected", so the
+// serve fell through to a dense-only FitTooBig and the forward was never entered. But strix3's
+// device side has its OWN aperture (an 84.28 GiB stable device-local heap vs a 62.4 GiB MemTotal),
+// so the dense transit is a TRANSIENT host staging cost (fak#13171), not a permanent co-resident
+// claim: with splitAperture=true the bound is the whole-avail resident set (non-zero) so the
+// streamed arm is admissible; with splitAperture=false the historical subtraction is preserved
+// byte-for-byte.
+func TestServeCPUOffloadStreamedResidentBoundForApertureSplitDoesNotCollapse(t *testing.T) {
+	const gib = int64(1 << 30)
+	// The witnessed strix3 arithmetic: a dense transit larger than the host window.
+	fit := serveFitBudget{Base: 48*gib + gib/2, Headroom: 0} // ~48.5 GiB host avail
+	transit := 63*gib + gib/10                               // ~63.1 GiB device-destined dense transit
+	if transit <= fit.avail() {
+		t.Fatalf("fixture transit %d must exceed avail %d to reproduce the collapse", transit, fit.avail())
+	}
+
+	// 1) Whole-transit (no distinct aperture) accounting is UNCHANGED: the bound floors at zero,
+	// exactly as before this leaf. This is the rung that produced the dense-only refusal.
+	if got := serveCPUOffloadStreamedResidentBoundForPool(fit, transit, true); got != 0 {
+		t.Fatalf("whole-transit shared-pool bound = %d, want the 0 stream-through floor (preserved)", got)
+	}
+	if got := serveCPUOffloadStreamedResidentBoundForAperture(fit, transit, true, false); got != 0 {
+		t.Fatalf("non-split aperture bound = %d, want the 0 stream-through floor (preserved)", got)
+	}
+
+	// 2) With a SPLIT aperture the transient transit is NOT subtracted: the bound is the whole-avail
+	// resident set, non-zero, so the streamed arm has a working set to charge.
+	got := serveCPUOffloadStreamedResidentBoundForAperture(fit, transit, true, true)
+	want := serveCPUOffloadStreamedResidentBound(fit)
+	if got != want {
+		t.Fatalf("split-aperture bound = %d, want the whole-avail resident set %d (transit not subtracted)", got, want)
+	}
+	if got <= 0 || got >= fit.avail() {
+		t.Fatalf("split-aperture bound = %d, want a nonzero set strictly below avail %d", got, fit.avail())
+	}
+
+	// 3) A DISCRETE sharedPool=false call is untouched regardless of the aperture flag.
+	if got := serveCPUOffloadStreamedResidentBoundForAperture(fit, transit, false, true); got != serveCPUOffloadStreamedResidentBound(fit) {
+		t.Fatalf("discrete bound changed under splitAperture: %d", got)
+	}
+}
+
 // TestServeCPUOffloadSharedPoolResidentBoundFloorsAtZero pins the honest floor: a device transit that
 // already at or above the pool (or an unprobeable pool) yields a zero bound (stream-through) rather
 // than a negative one.
@@ -560,7 +606,7 @@ func TestServeStreamedDecisionSharedPoolBoundMatchesPlan(t *testing.T) {
 		t.Fatalf("fixture pool %d does not reproduce the shared-pool trap (host %d, grand %d)", fit.avail(), resident.HostTotal(), resident.DeviceTotal()+resident.HostTotal())
 	}
 
-	decided, bound, err := serveStreamedCPUOffloadPathDecision(path, 1, 0, fit, true)
+	decided, bound, err := serveStreamedCPUOffloadPathDecision(path, nil, 1, 0, fit, true)
 	if err != nil {
 		t.Fatalf("serveStreamedCPUOffloadPathDecision(sharedPool=true): %v", err)
 	}
@@ -645,3 +691,39 @@ func TestServeStreamedDenseWorkingSetBoundIsStrictlyBelowAvail(t *testing.T) {
 		t.Fatalf("thin budget: bound = %d, want [0,4)", thin)
 	}
 }
+
+// TestServeSplitApertureDetection pins the split-aperture predicate at the capacity seam: a device
+// whose reported window DIFFERS from the process host window is split (strix3: 84.28 GiB heap vs
+// 62.4 GiB MemTotal); a nil/unknown backend and a backend reporting the SAME total as the host
+// window (a unified heap) report false, so the whole-transit accounting is preserved for them.
+// This reuses the established ggufload split test (deviceTotal != hostTotal), not a ratio.
+func TestServeSplitApertureDetection(t *testing.T) {
+	if serveSplitAperture(nil) {
+		t.Fatal("nil backend reported a split aperture; must fail open to false")
+	}
+	hostTotal, _, known := compute.HostSystemMemoryInfo()
+	if !known || hostTotal <= 0 {
+		t.Skip("host memory unprobeable on this runner; the split-aperture predicate cannot be exercised")
+	}
+	if !serveSplitAperture(splitApertureBackend{total: hostTotal + hostTotal/4, free: hostTotal + hostTotal/4, known: true}) {
+		t.Fatal("a device window distinct from the host window must report split=true")
+	}
+	if serveSplitAperture(splitApertureBackend{total: hostTotal, free: hostTotal, known: true}) {
+		t.Fatal("a device window equal to the host window (unified heap) must report split=false")
+	}
+	if serveSplitAperture(splitApertureBackend{known: false}) {
+		t.Fatal("a backend reporting no device window must report split=false")
+	}
+}
+
+// splitApertureBackend is a minimal compute.Backend double that reports a device memory window,
+// so TestServeSplitApertureDetection can exercise the predicate without a device.
+type splitApertureBackend struct {
+	compute.Backend
+	total int64
+	free  int64
+	known bool
+}
+
+func (b splitApertureBackend) DeviceMemory() (int64, int64, bool) { return b.total, b.free, b.known }
+func (b splitApertureBackend) Caps() compute.Caps                 { return compute.Caps{CapacityProbe: true} }

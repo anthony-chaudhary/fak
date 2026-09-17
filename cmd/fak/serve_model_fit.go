@@ -157,7 +157,29 @@ func serveDeviceFitBudget(be compute.Backend) serveFitBudget {
 	return serveFitBudget{Base: serveFitBudgetBase(total, free, known), Headroom: serveGGUFDeviceHeadroom}
 }
 
+// serveSplitAperture reports whether a device backend has its OWN aperture DISTINCT from the
+// process host window it is judged against -- a split VRAM/system carve-out (strix3: an 84.28 GiB
+// device-local heap beside a 62.4 GiB MemTotal). It composes with the ESTABLISHED split-aperture
+// notion in ggufload.RefuseUnifiedHostResidencyIfTooBigForReportedAperture: the two windows are
+// split when both are KNOWN and their totals DIFFER (a genuinely unified heap reports one window
+// under both names). It deliberately reuses that test rather than inventing a ratio so the serve
+// sizing path and the unified-host-residency admission cannot disagree about what "split" means.
+// A backend that reports no device capacity, or a host that reports no total, is NOT split -- fail
+// open, exactly as every other capacity rung here.
+func serveSplitAperture(be compute.Backend) bool {
+	devTotal, _, devKnown := compute.DeviceMemoryInfo(be)
+	if !devKnown || devTotal <= 0 {
+		return false
+	}
+	hostTotal, _, hostKnown := compute.HostSystemMemoryInfo()
+	if !hostKnown || hostTotal <= 0 {
+		return false
+	}
+	return devTotal != hostTotal
+}
+
 // serveHostFitBudget reads the process host's allocatable RAM the pure-CPU serve arm's fit check
+// uses (HostSystemMemoryInfo// serveHostFitBudget reads the process host's allocatable RAM the pure-CPU serve arm's fit check
 // uses (HostSystemMemoryInfo Ã¢â€ â€™ Linux MemAvailable). Unknown Ã¢â€ â€™ a zero base Ã¢â€ â€™ the full window.
 func serveHostFitBudget() serveFitBudget {
 	total, free, known := compute.HostSystemMemoryInfo()
@@ -1096,6 +1118,25 @@ func serveStreamedCPUOffloadPlan(ws *ggufload.WeightSource, ranks, contextBudget
 // set instead of refusing. The device dense side is still charged IDENTICALLY by the streamed plan,
 // so the device fit check and the resident arm cannot disagree about what stays on the device.
 func serveStreamedCPUOffloadPlanForPool(ws *ggufload.WeightSource, ranks, contextBudgetTokens int, fit serveFitBudget, sharedPool bool) (compute.MemoryPlan, bool, error) {
+	return serveStreamedCPUOffloadPlanForAperture(ws, ranks, contextBudgetTokens, fit, sharedPool, false)
+}
+
+// serveStreamedCPUOffloadPlanForAperture is serveStreamedCPUOffloadPlanForPool with the device
+// APERTURE made explicit. splitAperture reports whether the device-scoped dense side has its OWN
+// device-local capacity DISTINCT from the host system window it is judged against (a split
+// VRAM/system carve-out, e.g. strix3's 84.28 GiB device-local heap vs its 62.4 GiB MemTotal).
+//
+// On a shared pool WITHOUT a split aperture (a single unified heap: the device dense side and the
+// host expert set genuinely co-reside in one physical pool) the whole device transit must be
+// subtracted from the resident-expert bound -- that is the #13175 fix and it is preserved
+// byte-for-byte. On a SPLIT aperture the device dense side is DESTINED for the device window; it
+// merely TRANSITS host RAM while staging (read -> transcode -> upload -> free, the fak#13171
+// lesson), so it does not permanently occupy the host window the resident-expert set is judged
+// against. Subtracting the whole transit there collapses remaining = avail - transit to a negative
+// number and forces stream-through (bound 0), which is not a genuine capacity floor: the witnessed
+// strix3 refusal (63.09 GiB dense transit vs 48.57 GiB host avail -> bound 0 -> dense-only
+// FitTooBig) is exactly that self-referential collapse, not a wall.
+func serveStreamedCPUOffloadPlanForAperture(ws *ggufload.WeightSource, ranks, contextBudgetTokens int, fit serveFitBudget, sharedPool, splitAperture bool) (compute.MemoryPlan, bool, error) {
 	plan, err := serveGGUFCPUOffloadMemoryPlan(ws, ranks, contextBudgetTokens, fit)
 	if err != nil {
 		return nil, false, err
@@ -1116,7 +1157,7 @@ func serveStreamedCPUOffloadPlanForPool(ws *ggufload.WeightSource, ranks, contex
 	if !serveStreamedExpertsCapable(ws) {
 		return plan, false, nil
 	}
-	bound := serveCPUOffloadStreamedResidentBoundForPool(fit, plan.DeviceTotal(), sharedPool)
+	bound := serveCPUOffloadStreamedResidentBoundForAperture(fit, plan.DeviceTotal(), sharedPool, splitAperture)
 	streamed, err := ws.EstimateCPUOffloadExpertsStreamedMemoryPlan(bound)
 	if err != nil {
 		return nil, false, err
@@ -1140,6 +1181,22 @@ func serveCPUOffloadStreamedResidentBoundForPool(fit serveFitBudget, deviceTrans
 		return serveCPUOffloadStreamedResidentBound(fit)
 	}
 	return serveCPUOffloadSharedPoolResidentBound(fit, deviceTransit)
+}
+
+// serveCPUOffloadStreamedResidentBoundForAperture is the ONE derivation of the bounded host-resident
+// expert working set with the device APERTURE made explicit. It preserves
+// serveCPUOffloadStreamedResidentBoundForPool byte-for-byte EXCEPT on a shared pool whose device
+// side has its OWN aperture distinct from the host window (splitAperture=true): there the device
+// dense transit is a TRANSIENT host staging cost (fak#13171), not a permanent co-resident claim on
+// the host window, so it is NOT subtracted from the resident-expert budget. Subtracting it would
+// make (avail - transit) negative on a box whose dense side is larger than the host window
+// (strix3: 63.09 GiB transit vs 48.57 GiB host avail) and force a stream-through bound of zero --
+// a self-referential refusal masquerading as a capacity floor, which is the witnessed #13175 rung.
+func serveCPUOffloadStreamedResidentBoundForAperture(fit serveFitBudget, deviceTransit int64, sharedPool, splitAperture bool) int64 {
+	if sharedPool && splitAperture {
+		return serveCPUOffloadStreamedResidentBound(fit)
+	}
+	return serveCPUOffloadStreamedResidentBoundForPool(fit, deviceTransit, sharedPool)
 }
 
 // serveCPUOffloadSharedPoolResidentBound is the bounded host-resident expert working set for a
@@ -1176,11 +1233,12 @@ func serveCPUOffloadSharedPoolResidentBound(fit serveFitBudget, deviceTransit in
 // routed set that already fits the host budget all return (false, 0, nil) -- the resident arm.
 // sharedPool is threaded straight to serveStreamedCPUOffloadPlanForPool so the load arm selects
 // streaming on the GRAND total on an integrated/APU tier (fak#13171/#13172 follow-on).
-func serveStreamedCPUOffloadPathDecision(ggufPath string, ranks, contextBudgetTokens int, fit serveFitBudget, sharedPool bool) (bool, int64, error) {
+func serveStreamedCPUOffloadPathDecision(ggufPath string, be compute.Backend, ranks, contextBudgetTokens int, fit serveFitBudget, sharedPool bool) (bool, int64, error) {
 	streamed := false
 	bound := int64(0)
+	splitAperture := serveSplitAperture(be)
 	_, err := withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
-		plan, isStreamed, perr := serveStreamedCPUOffloadPlanForPool(ws, ranks, contextBudgetTokens, fit, sharedPool)
+		plan, isStreamed, perr := serveStreamedCPUOffloadPlanForAperture(ws, ranks, contextBudgetTokens, fit, sharedPool, splitAperture)
 		if perr != nil {
 			return nil, perr
 		}
@@ -1188,7 +1246,7 @@ func serveStreamedCPUOffloadPathDecision(ggufPath string, ranks, contextBudgetTo
 			// Derive the bound from the SAME resident plan the sizing path used, so the load arm's
 			// WithStreamedExperts working set and the sizing plan cannot disagree. On a shared pool the
 			// device dense transit has already consumed part of the pool, exactly as the plan charged it.
-			streamed, bound = true, serveCPUOffloadStreamedResidentBoundForPool(fit, plan.DeviceTotal(), sharedPool)
+			streamed, bound = true, serveCPUOffloadStreamedResidentBoundForAperture(fit, plan.DeviceTotal(), sharedPool, splitAperture)
 		}
 		return nil, nil
 	})
@@ -1231,7 +1289,7 @@ func fitServeStreamedCPUOffloadPathOnDevice(ggufPath string, be compute.Backend,
 		return nil, false, err
 	}
 	defer ws.Close()
-	plan, streamed, err := serveStreamedCPUOffloadPlanForPool(ws, ranks, contextBudgetTokens, fit, ggufload.BackendSharesHostRAM(be))
+	plan, streamed, err := serveStreamedCPUOffloadPlanForAperture(ws, ranks, contextBudgetTokens, fit, ggufload.BackendSharesHostRAM(be), serveSplitAperture(be))
 	if err != nil {
 		return nil, false, err
 	}

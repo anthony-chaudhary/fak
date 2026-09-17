@@ -289,7 +289,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 	streamedOffload := false
 	var streamedBound int64
 	if cpuOffloadArm && expertShard == nil {
-		streamedOffload, streamedBound, err = serveStreamedCPUOffloadPathDecision(ggufPath, residentRanks, contextBudgetTokens, hostFit, ggufload.BackendSharesHostRAM(backend))
+		streamedOffload, streamedBound, err = serveStreamedCPUOffloadPathDecision(ggufPath, backend, residentRanks, contextBudgetTokens, hostFit, ggufload.BackendSharesHostRAM(backend))
 		must(err)
 		if streamedOffload {
 			q4kOpts = append(q4kOpts, ggufload.WithStreamedExperts(streamedBound))
