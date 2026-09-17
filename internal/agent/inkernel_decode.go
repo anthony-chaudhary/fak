@@ -169,6 +169,19 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 				matchedSnapshot, cachedLogits, m, sourceScope, tier, err = p.scopedTree.LookupSnapshotTieredContext(ctx, owner, ids)
 			} else {
 				matchedKV, cachedLogits, m, _, err = p.scopedTree.Lookup(owner, ids)
+				if inKernelHostSnapshotReuse(p) && matchedKV == nil {
+					// Recurrent hybrid on the host-session (Metal) seam: a mid-edge
+					// split carries no KV because span eviction is unsupported, so the
+					// only restorable boundary is a complete PrefixSnapshot admitted at
+					// an adaptive block boundary. Consult that tier before falling open.
+					var snap *model.PrefixSnapshot
+					snap, cachedLogits, m, sourceScope, tier, err = p.scopedTree.LookupSnapshotTieredContext(ctx, owner, ids)
+					if err == nil {
+						matchedSnapshot = snap
+					} else if snap != nil {
+						snap.Close()
+					}
+				}
 			}
 		} else {
 			p.mu.Lock()
@@ -196,6 +209,27 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 					}
 				}
 				p.tree.Done(b)
+				if inKernelHostSnapshotReuse(p) && matchedKV == nil {
+					// See the scoped arm above: on a host-session recurrent hybrid a
+					// mid-edge split owns no KV, so only an admitted complete snapshot
+					// at a block boundary is restorable. The boundary node it returns
+					// carries the structural Plen for cacheability; the snapshot length
+					// is the realized, restorable prefix.
+					var lookupTier radixkv.SnapshotTier
+					site, snap, snapMatched, lookupTier, lookupErr := p.tree.LookupSnapshotTieredContext(ctx, ids)
+					if site != nil {
+						if site.Plen() > cacheable {
+							cacheable = site.Plen()
+						}
+						p.tree.Done(site)
+					}
+					m = snapMatched
+					if lookupErr == nil {
+						matchedSnapshot, cachedLogits, tier = snap, nil, lookupTier
+					} else if snap != nil {
+						snap.Close()
+					}
+				}
 			}
 			p.mu.Unlock()
 		}
@@ -218,7 +252,14 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			cacheable = m
 		}
 		if matchedSnapshot != nil {
-			s = p.m.NewBackendSession(p.backend)
+			if p.backend != nil {
+				s = p.m.NewBackendSession(p.backend)
+			} else {
+				// Host-session (Metal seam) snapshot: a plain session, never a
+				// backend session on the default backend. Restore installs the
+				// cloned Cache (which carries the hybrid recurrent state).
+				s = p.m.NewSession()
+			}
 			if err = matchedSnapshot.Restore(s); err != nil {
 				matchedSnapshot.Close()
 				s.Close()
@@ -367,7 +408,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		}
 		prefillAt := matched
 		checkpoint := inKernelAdaptiveSnapshotCheckpoint(prefillAt, cacheable, len(ids))
-		if reuse && p.backend != nil && checkpoint > prefillAt {
+		if reuse && (p.backend != nil || inKernelHostSnapshotReuse(p)) && checkpoint > prefillAt {
 			logits, err = p.prefillDivergentSuffix(ctx, s, ids[prefillAt:checkpoint], measurement)
 			if err != nil {
 				return
