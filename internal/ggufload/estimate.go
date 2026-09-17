@@ -307,15 +307,30 @@ func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute
 // size whenever it is routed through the MoE guard, which defeats the declared bound.
 //
 // This helper charges the SAME accounting EstimateLoadMemoryPlan would (every tensor's raw
-// header payload, so the fail-closed direction is preserved) EXCEPT the eligible dense Q4_K
+// header payload, so the fail-closed direction is preserved) EXCEPT the eligible dense k-quant
 // tensors, which are moved OUT of the device charge and folded into ONE bounded host working-set
-// row charged min(denseEligibleBytes, bound). The eligible predicate is byte-for-byte the
-// loader's lazyDenseQ4KTensorWork gate - CanonicalTensorNameArch -> model.QuantSourceTensorName
-// -> (info.Type == TensorQ4_K && model.ResidentQ4KEligible) - so the estimate and the loader
-// cannot disagree about which tensors the policy covers. A tensor with no canonical mapping
-// (the MoE routed-expert blobs, whose 1->E split this plan deliberately does not model) is
-// non-eligible and stays in the raw device charge exactly as before: the routed-expert side is
-// governed by the separate streamedExperts policy, which UnifiedHostResidencyPlan checks first.
+// row charged min(denseEligibleBytes, bound). "Eligible" is the union of the two gates the loader
+// itself uses to hold a dense k-quant as a lazy/bounded range, so the estimate and the loader
+// cannot disagree about which tensors the policy covers. First, after
+// CanonicalTensorNameArch -> model.QuantSourceTensorName, an identity-layout Q4_K matmul weight is
+// eligible when model.ResidentQ4KEligible(cfg, resolved) (exactly the loader's
+// lazyDenseQ4KTensorWork gate, quant_q4k_loader.go:1081). Second (fak#13201), a dense k-quant of
+// any OTHER type the loader's resident-k-quant gate admits is also eligible:
+//
+//	residentExpertBlockGeometry(info.Type) && info.Type != TensorQ4_K &&
+//	    model.ResidentKQuantEligible(cfg, resolved)
+//
+// mirroring quant_q4k_loader.go:1104-1108 (the `residentable` set / ResidentKQuantEligible arm).
+// This is the widening the pinned DeepSeek-V4.1 Q2_K artifact needs: its device-scoped dense
+// remainder is Q2_K/Q3_K/Q5_K/Q6_K (token_embd.weight Q2_K, output.weight Q6_K, MLA
+// attn_output_a/b Q2_K, ffn_down_shexp Q3_K), none of which is Q4_K, so the Q4_K-only gate left
+// every one of them charged at full raw device payload and silently discarded the declared bound.
+//
+// Fail-closed is unchanged. A tensor with no canonical mapping (the MoE routed-expert blobs,
+// whose 1->E split this plan deliberately does not model), a non-k-quant type, and a k-quant the
+// loader cannot hold resident all stay in the raw device charge exactly as before: the
+// routed-expert side is governed by the separate streamedExperts policy, which
+// UnifiedHostResidencyPlan checks first.
 //
 // bound < 0 is refused by name; bound == 0 is stream-through (zero dense host residency). A
 // bound above the dense side is capped by the actual eligible bytes, never inflated past what is
@@ -341,18 +356,29 @@ func (s *WeightSource) EstimateMoEBoundedDenseHostMemoryPlan(bound int64) (compu
 			return nil, fmt.Errorf("gguf: estimate tensor %s: %w", info.Name, err)
 		}
 		// Mirror the bounded dense fold's eligibility gate exactly: a canonical name resolved
-		// through the qwen35 source chain that is a RAW-identity Q4_K matmul weight is the only
-		// tensor the loader holds as a lazy dense range. Everything else - including the MoE
-		// routed-expert blobs, which CanonicalTensorNameArch deliberately does not map - is
-		// charged to device at its raw payload, the pre-existing conservative accounting.
+		// through the qwen35 source chain that the loader holds as a lazy/bounded dense range.
+		// The loader has TWO such gates (quant_q4k_loader.go:1081 lazy Q4_K, and :1104-1108
+		// resident k-quant), so eligibility here is their union: an identity-layout Q4_K matmul
+		// weight (model.ResidentQ4KEligible), OR any OTHER dense k-quant type the loader can hold
+		// resident (residentExpertBlockGeometry admits its block geometry) and that is
+		// identity-normalized (model.ResidentKQuantEligible, fak#13201). The second arm covers
+		// the pinned V4.1 Q2_K artifact's non-Q4_K dense remainder (Q2_K/Q3_K/Q5_K/Q6_K).
+		// Everything else - including the MoE routed-expert blobs, which
+		// CanonicalTensorNameArch deliberately does not map - is charged to device at its raw
+		// payload, the pre-existing conservative fail-closed accounting.
 		if canon, ok := CanonicalTensorNameArch(info.Name, cfg.ModelType); ok {
-			if resolved, keep := model.QuantSourceTensorName(cfg, canon); keep &&
-				info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, resolved) {
-				if denseEligible > math.MaxUint64-n {
-					return nil, fmt.Errorf("gguf: MoE bounded dense estimate bytes overflow")
+			if resolved, keep := model.QuantSourceTensorName(cfg, canon); keep {
+				q4kEligible := info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, resolved)
+				_, _, residentable := residentExpertBlockGeometry(info.Type)
+				kQuantEligible := info.Type != TensorQ4_K && residentable &&
+					model.ResidentKQuantEligible(cfg, resolved)
+				if q4kEligible || kQuantEligible {
+					if denseEligible > math.MaxUint64-n {
+						return nil, fmt.Errorf("gguf: MoE bounded dense estimate bytes overflow")
+					}
+					denseEligible += n
+					continue
 				}
-				denseEligible += n
-				continue
 			}
 		}
 		dtype := ggufTensorDTypeLabel(info.Type)
