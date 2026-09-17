@@ -9,6 +9,11 @@ import (
 
 var ErrV4ExpertNotSelected = errors.New("v4 expert tensor was not admitted by the selected batch plan")
 
+// ErrV4ExpertDecodeDtype is the fail-closed refusal for a decoder that hands the
+// stager a resident tensor whose dtype is not the F32 the ring budget is keyed on.
+// Admitting it would silently mis-key the bounded residency accounting.
+var ErrV4ExpertDecodeDtype = errors.New("v4 expert decoder returned a non-F32 decoded tensor")
+
 // v4ExpertDecode turns one exact safetensors tensor range into a host tensor for
 // the real pagedRing. Official V4 FP4/FP8 decoding is intentionally supplied by
 // a separate implementation; the stager never labels fixture F32 as V4 quant.
@@ -94,12 +99,20 @@ func newV4ShardedExpertStager(source *v4ShardedExpertSource, ring *pagedRing, pl
 // matMulStaged with a closure that is never invoked, so it performs no source IO
 // or decode. A miss reads and decodes before admission; an error therefore cannot
 // leave a corrupt resident behind.
+//
+// The decoder must hand back an F32 tensor: that is the dtype the ring budget is
+// keyed on, so a non-F32 resident is refused fail-closed rather than admitted
+// against a budget it does not match. On a miss the ring is charged the DECODED
+// F32 footprint (f32TensorBytes of the decoded shape), not the packed source
+// span, so a bounded ring admits exactly as many resident experts as its budget
+// can actually hold.
 func (s *v4ExpertStager) matMul(name string, x compute.Tensor) ([]float32, error) {
 	weightBytes, ok := s.selected[name]
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrV4ExpertNotSelected, name)
 	}
 	var decoded compute.Tensor
+	residentBytes := weightBytes
 	if !s.ring.isResident(name) {
 		tensor, err := s.source.read(name)
 		if err != nil {
@@ -111,9 +124,17 @@ func (s *v4ExpertStager) matMul(name string, x compute.Tensor) ([]float32, error
 		if err != nil {
 			return nil, err
 		}
+		if decoded.Dtype != compute.F32 {
+			return nil, fmt.Errorf("%w: %s decoded as %s", ErrV4ExpertDecodeDtype, name, decoded.Dtype)
+		}
+		decodedBytes, ok := f32TensorBytes(decoded.Shape)
+		if !ok {
+			return nil, fmt.Errorf("v4 expert stager: %s has an unmaterializable decoded shape %v", name, decoded.Shape)
+		}
+		residentBytes = decodedBytes
 	}
 	beforePageIn, beforeHit, beforeEvict := s.ring.pageIn, s.ring.hit, s.ring.evict
-	got := s.ring.matMulStaged(name, func() compute.Tensor { return decoded }, s.dtype, x, weightBytes, false)
+	got := s.ring.matMulStaged(name, func() compute.Tensor { return decoded }, s.dtype, x, residentBytes, false)
 	if got == nil {
 		return nil, fmt.Errorf("v4 expert stager: %s cannot fit ring budget", name)
 	}
