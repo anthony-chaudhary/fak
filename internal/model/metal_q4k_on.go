@@ -505,9 +505,18 @@ func (s *Session) q4kGroupDispatch(names []string, xf []float32, outs []int) [][
 	if len(q8ws) > 0 {
 		q := getQ8()
 		var grouped [][]float32
+		var stall error
 		s.metalExecution(metalgemm.ExecutionQ8GEMVGroup, func(observation *metalgemm.ExecutionObservation) {
-			grouped = metalgemm.GEMVGroupQ8WithEvents(q8ws, q.q, q.d, observation)
+			grouped, stall = metalgemm.GEMVGroupQ8WithEventsErr(q8ws, q.q, q.d, observation)
 		})
+		if metalgemm.IsMetalCommandBufferStall(stall) {
+			// The bounded Q8 GEMV wait timed out, so the GPU command buffer never completed and
+			// the grouped outputs are not readable. Decline (nil) so mulGroup takes the proven
+			// per-weight path and the served turn still completes correctly instead of blocking
+			// on a wedged GPU.
+			s.recordMetalFallback(MetalFallbackQ8GEMVGroupDispatch)
+			return nil
+		}
 		if grouped != nil {
 			for j, i := range q8pos {
 				out[i] = grouped[j]

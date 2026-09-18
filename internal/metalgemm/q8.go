@@ -27,8 +27,8 @@ int  mg_q8_upload(const signed char* codes, const float* scales, int out, int in
 int  mg_q8_alias(const signed char* codes, const float* scales, int out, int in);
 void mg_q8_release(int wid);
 int  mg_q8_live_count(void);
-void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y, mg_execution_event* event);
-void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float* xd, float* Ycat, const int* yoff, mg_execution_event* event);
+void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y, mg_execution_event* event, int* out_status, int* out_error);
+void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float* xd, float* Ycat, const int* yoff, mg_execution_event* event, int* out_status, int* out_error);
 void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y, mg_execution_event* event);
 void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float* Xd, int P, float* Ycat, const int* yoff, mg_execution_event* event);
 void mg_q8_reset(void);
@@ -48,6 +48,30 @@ func recordQ8Event(observation *ExecutionObservation, event *C.mg_execution_even
 	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0,
 		event.host_readback != 0, int(event.encoders), float64(event.gpu_milliseconds),
 		float64(event.wait_milliseconds), event.timing_available != 0)
+}
+
+// q8CommandBufferStall classifies one observed Q8 command-buffer wait into the package's typed
+// stall. The native wait is not interruptible, so the observed terminal state is what decides:
+// a committed buffer that never reached MTLCommandBufferStatusCompleted (a device fault) is a
+// stall even under the limit, and an over-limit wait is a stall regardless. A nil event carries
+// no observation and yields no error so the pre-existing no-observation path is preserved.
+func q8CommandBufferStall(event *C.mg_execution_event, statusCode, errorCode int, op string) error {
+	if event == nil {
+		return nil
+	}
+	return q8StallFromReceipt(event.completed_wait != 0, float64(event.wait_milliseconds),
+		statusCode, errorCode, op)
+}
+
+// q8StallFromReceipt is the cgo-free classification seam folds native receipts into: a committed
+// buffer that did not reach Completed (a device fault) is a stall even under the limit, and an
+// over-limit wait is a stall regardless. Keeping it plain-Go makes the classification testable
+// without a cgo test import.
+func q8StallFromReceipt(completedWait bool, waitMS float64, statusCode, errorCode int, op string) error {
+	if completedWait {
+		return nil
+	}
+	return commandBufferStallError(waitMS, statusCode, errorCode, "", op)
 }
 
 // Q8Weight is a handle to a Q8_0 weight matrix [Out, In] resident on the GPU (int8 codes + per-32
@@ -137,18 +161,28 @@ func (w *Q8Weight) NoCopy() bool {
 // GEMV computes y[Out] = W · x for one Q8_0-quantized activation: xq are the in int8 codes, xd the
 // nblk per-block f32 scales. y must have length >= Out. All slices are accessed only during the call.
 func (w *Q8Weight) GEMVWithEvents(xq []int8, xd []float32, y []float32, observation *ExecutionObservation) {
+	w.GEMVWithEventsErr(xq, xd, y, observation)
+}
+
+// GEMVWithEventsErr is GEMVWithEvents plus the observed terminal command-buffer classification: a
+// committed buffer that never reached Completed (or a wait at/over the package wait limit) returns
+// the package's typed MetalCommandBufferStallError instead of a silent zero result. The observation
+// is still recorded so the existing counters path is unchanged.
+func (w *Q8Weight) GEMVWithEventsErr(xq []int8, xd []float32, y []float32, observation *ExecutionObservation) error {
 	if w == nil {
-		return
+		return nil
 	}
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	if w == nil || w.id < 0 || len(xq) < w.In || len(xd) < w.Nblk || len(y) < w.Out {
-		return
+		return nil
 	}
 	var event C.mg_execution_event
+	var statusCode, errorCode C.int
 	C.mg_q8_gemv(w.id, (*C.schar)(unsafe.Pointer(&xq[0])), (*C.float)(unsafe.Pointer(&xd[0])),
-		(*C.float)(unsafe.Pointer(&y[0])), &event)
+		(*C.float)(unsafe.Pointer(&y[0])), &event, &statusCode, &errorCode)
 	recordQ8Event(observation, &event)
+	return q8CommandBufferStall(&event, int(statusCode), int(errorCode), "q8 gemv")
 }
 
 // GEMVGroupQ8 runs one decode GEMV per weight in ws — all reading the SAME Q8_0 activation (xq
@@ -157,16 +191,26 @@ func (w *Q8Weight) GEMVWithEvents(xq []int8, xd []float32, y []float32, observat
 // live GDN decode group (the in_proj quad): it pays the per-command-buffer submit/sync once for the
 // whole group and pipelines the dispatches. Returns nil on a shape mismatch or empty input.
 func GEMVGroupQ8WithEvents(ws []*Q8Weight, xq []int8, xd []float32, observation *ExecutionObservation) [][]float32 {
+	out, _ := GEMVGroupQ8WithEventsErr(ws, xq, xd, observation)
+	return out
+}
+
+// GEMVGroupQ8WithEventsErr is GEMVGroupQ8WithEvents plus the observed terminal command-buffer
+// classification: a committed group buffer that never reached Completed (a device fault) or whose
+// wait reached the package wait limit returns the typed MetalCommandBufferStallError alongside the
+// (best-effort, possibly garbage) outputs, so a hung GPU surfaces as a diagnosable failure instead
+// of an unbounded silent block. The observation is still recorded.
+func GEMVGroupQ8WithEventsErr(ws []*Q8Weight, xq []int8, xd []float32, observation *ExecutionObservation) ([][]float32, error) {
 	n := len(ws)
 	if n == 0 {
-		return nil
+		return nil, nil
 	}
 	if !lockQ8Group(ws) {
-		return nil
+		return nil, nil
 	}
 	defer unlockQ8Group(ws)
 	if len(xq) < ws[0].In || len(xd) < ws[0].Nblk {
-		return nil
+		return nil, nil
 	}
 	in := ws[0].In
 	wids := make([]C.int, n)
@@ -174,7 +218,7 @@ func GEMVGroupQ8WithEvents(ws []*Q8Weight, xq []int8, xd []float32, observation 
 	off := 0
 	for i, w := range ws {
 		if w == nil || w.id < 0 || w.In != in {
-			return nil
+			return nil, nil
 		}
 		wids[i] = w.id
 		yoff[i] = C.int(off)
@@ -183,8 +227,9 @@ func GEMVGroupQ8WithEvents(ws []*Q8Weight, xq []int8, xd []float32, observation 
 	yoff[n] = C.int(off)
 	ycat := make([]float32, off)
 	var event C.mg_execution_event
+	var statusCode, errorCode C.int
 	C.mg_q8_gemv_group(&wids[0], C.int(n), (*C.schar)(unsafe.Pointer(&xq[0])), (*C.float)(unsafe.Pointer(&xd[0])),
-		(*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0], &event)
+		(*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0], &event, &statusCode, &errorCode)
 	recordQ8Event(observation, &event)
 	out := make([][]float32, n)
 	o := 0
@@ -192,7 +237,7 @@ func GEMVGroupQ8WithEvents(ws []*Q8Weight, xq []int8, xd []float32, observation 
 		out[i] = ycat[o : o+w.Out : o+w.Out]
 		o += w.Out
 	}
-	return out
+	return out, q8CommandBufferStall(&event, int(statusCode), int(errorCode), "q8 gemv group")
 }
 
 // GEMM computes Y[P, Out] = X[P, In] · Wᵀ for a Q8_0-quantized activation panel: Xq are

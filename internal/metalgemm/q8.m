@@ -21,8 +21,19 @@
 #import <Metal/Metal.h>
 #include "q8_bridge.h"
 #include <CoreFoundation/CoreFoundation.h>
+#include <dispatch/dispatch.h>
+#include <errno.h>
 #include <math.h>
 #include <string.h>
+
+// MG_Q8_WAIT_LIMIT_MS bounds every Q8 GEMV command-buffer wait. The old path called the
+// uninterruptible, unbounded `[cmd waitUntilCompleted]`, so a stalled GPU (submit stuck in
+// IOGPUMetalCommandQueue _submitCommandBuffers) hung the served request forever. A
+// dispatch_semaphore completed-handler wait turns that into a bounded, reportable timeout.
+// Kept in parity with the Go-side classification budget, metal_stall.go
+// DefaultCommandBufferWaitLimit (10_000ms); the two must move together or the native timeout
+// and the Go classification diverge.
+static const int64_t MG_Q8_WAIT_LIMIT_MS = 10000;
 
 typedef struct {
     uintptr_t command_buffer;
@@ -372,7 +383,7 @@ void mg_q8_read_gemv_group(float* y, int ytot) {
 
 // mg_q8_gemv computes y[out] = W[wid] · x for one Q8_0-quantized activation (xq codes [in],
 // xd block scales [nblk]). f32 result.
-void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y, mg_execution_event* event) {
+void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y, mg_execution_event* event, int* out_status, int* out_error) {
     mg_execution_event_reset(event);
     if (!q8_valid(wid)) return;
     @autoreleasepool {
@@ -396,11 +407,27 @@ void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y, mg_ex
         [e dispatchThreadgroups:MTLSizeMake((NSUInteger)W.out, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
         [e endEncoding];
+        // Bounded wait: register the completion signal BEFORE commit (Metal requires the
+        // handler be attached to the uncommitted buffer), then wait at most MG_Q8_WAIT_LIMIT_MS.
+        dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+        [cmd addCompletedHandler:^(id<MTLCommandBuffer> b){ (void)b; dispatch_semaphore_signal(sem); }];
         [cmd commit];
         mg_execution_event_committed(event);
         CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
-        [cmd waitUntilCompleted];
+        long timedOut = dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MG_Q8_WAIT_LIMIT_MS * NSEC_PER_MSEC)));
         mg_execution_event_waited(event, cmd, wait_started);
+        if (timedOut != 0) {
+            // The buffer did not complete within the bound. Do NOT read an unwritten output
+            // buffer, and do NOT call waitUntilCompleted to "bound" teardown - that would
+            // re-introduce the unbounded block. Record the timeout explicitly and fall through;
+            // ARC/the command queue owns the buffer's lifetime.
+            if (event != NULL) event->completed_wait = 0;
+            if (out_status != NULL) *out_status = -1;
+            if (out_error != NULL) *out_error = ETIMEDOUT;
+            return;
+        }
+        if (out_status != NULL) *out_status = (int)cmd.status;
+        if (out_error != NULL) { NSError* err = cmd.error; *out_error = err ? (int)err.code : 0; }
 
         memcpy(y, gQ8YBuf.contents, (size_t)W.out * 4);
         mg_execution_event_readback(event);
@@ -411,7 +438,7 @@ void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y, mg_ex
 // n DIFFERENT resident Q8 weights, into ONE command buffer (one commit/waitUntilCompleted). This
 // is the live GDN decode access pattern — the in_proj quad (qkv,z,b,a) all read the same post-norm
 // activation. Each weight i writes Ycat[yoff[i] .. yoff[i]+out_i); yoff has n+1 entries.
-void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float* xd, float* Ycat, const int* yoff, mg_execution_event* event) {
+void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float* xd, float* Ycat, const int* yoff, mg_execution_event* event, int* out_status, int* out_error) {
     mg_execution_event_reset(event);
     if (n <= 0) return;
 	for (int i = 0; i < n; i++) if (!q8_valid(wids[i])) return;
@@ -441,11 +468,27 @@ void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float
                 threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
         }
         [e endEncoding];
+        // Bounded wait: register the completion signal BEFORE commit (Metal requires the
+        // handler be attached to the uncommitted buffer), then wait at most MG_Q8_WAIT_LIMIT_MS.
+        dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+        [cmd addCompletedHandler:^(id<MTLCommandBuffer> b){ (void)b; dispatch_semaphore_signal(sem); }];
         [cmd commit];
         mg_execution_event_committed(event);
         CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
-        [cmd waitUntilCompleted];
+        long timedOut = dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MG_Q8_WAIT_LIMIT_MS * NSEC_PER_MSEC)));
         mg_execution_event_waited(event, cmd, wait_started);
+        if (timedOut != 0) {
+            // The buffer did not complete within the bound. Do NOT read an unwritten output
+            // buffer, and do NOT call waitUntilCompleted to "bound" teardown - that would
+            // re-introduce the unbounded block. Record the timeout explicitly and fall through;
+            // ARC/the command queue owns the buffer's lifetime.
+            if (event != NULL) event->completed_wait = 0;
+            if (out_status != NULL) *out_status = -1;
+            if (out_error != NULL) *out_error = ETIMEDOUT;
+            return;
+        }
+        if (out_status != NULL) *out_status = (int)cmd.status;
+        if (out_error != NULL) { NSError* err = cmd.error; *out_error = err ? (int)err.code : 0; }
 
         memcpy(Ycat, gQ8YBuf.contents, (size_t)ytot * 4);
         mg_execution_event_readback(event);

@@ -538,6 +538,11 @@ func TestFakUpTurnkeyBootstrap(t *testing.T) {
 		if health["status"] != "ok" || health["tier"] != "27B" {
 			t.Fatalf("healthz payload mismatch: %+v", health)
 		}
+		// macbench's health probe decodes {"ok": bool}; a ready turnkey server
+		// must report ok=true or the benchmark reports a phantom health failure.
+		if health["ok"] != true || health["ready"] != true {
+			t.Fatalf("healthz readiness flags mismatch: %+v", health)
+		}
 
 		// 2. Check /readyz
 		rResp, err := http.Get(base + "/readyz")

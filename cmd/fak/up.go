@@ -1064,6 +1064,7 @@ func (s *turnkeyServer) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	// completes, "stopping" once shutdown began, otherwise "ok".
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":             isReady,
 		"status":         state,
 		"ready":          isReady,
 		"mode":           "turnkey",
