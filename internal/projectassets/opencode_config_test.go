@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -254,4 +255,109 @@ func TestResolveDynamicHaloModel(t *testing.T) {
 			t.Errorf("got %q, want %q", got, "qwen-2.5-coder-7b")
 		}
 	})
+}
+
+func TestGenerateOpenCodeConfigModeMac(t *testing.T) {
+	for _, modelID := range []string{"", "fak-local"} {
+		out, err := GenerateOpenCodeConfigMode("", modelID, OpenCodeModeMac)
+		if err != nil {
+			t.Fatalf("unexpected error for modelID %q: %v", modelID, err)
+		}
+		var parsed map[string]interface{}
+		if err := json.Unmarshal(out, &parsed); err != nil {
+			t.Fatalf("failed to parse generated config: %v", err)
+		}
+		if parsed["model"] != "fak/"+DefaultOpenCodeMacModelID {
+			t.Errorf("modelID %q: expected top-level model fak/%s, got %v", modelID, DefaultOpenCodeMacModelID, parsed["model"])
+		}
+		prov := parsed["provider"].(map[string]interface{})
+		fak := prov["fak"].(map[string]interface{})
+		if name, _ := fak["name"].(string); !strings.Contains(name, "mac metal native") {
+			t.Errorf("expected provider name to contain 'mac metal native', got %q", name)
+		}
+		opts := fak["options"].(map[string]interface{})
+		if opts["native"] != "metal" {
+			t.Errorf("expected options.native==metal, got %v", opts["native"])
+		}
+		if opts["gguf"] != "default" {
+			t.Errorf("expected options.gguf==default, got %v", opts["gguf"])
+		}
+		agents, ok := parsed["agent"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected agent map in Mac mode config")
+		}
+		metalAgent, ok := agents["fak-metal-native"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected agent fak-metal-native in Mac mode config")
+		}
+		if metalAgent["model"] != "fak/"+DefaultOpenCodeMacModelID {
+			t.Errorf("expected fak-metal-native model fak/%s, got %v", DefaultOpenCodeMacModelID, metalAgent["model"])
+		}
+	}
+}
+
+func TestEnsureOpenCodeProviderConfigModeMac(t *testing.T) {
+	tmp := t.TempDir()
+	initialConfig := `{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["AGENTS.md"]
+}`
+	if err := os.WriteFile(filepath.Join(tmp, "opencode.json"), []byte(initialConfig), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	modified, err := EnsureOpenCodeProviderConfigMode(tmp, "http://127.0.0.1:8080/v1", "", OpenCodeModeMac)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !modified {
+		t.Fatalf("expected modified=true on first Mac-mode call")
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmp, "opencode.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if parsed["snapshot"] != false {
+		t.Errorf("expected snapshot:false, got %v", parsed["snapshot"])
+	}
+	if parsed["model"] != "fak/"+DefaultOpenCodeMacModelID {
+		t.Errorf("expected top-level model fak/%s, got %v", DefaultOpenCodeMacModelID, parsed["model"])
+	}
+	prov := parsed["provider"].(map[string]interface{})
+	fak := prov["fak"].(map[string]interface{})
+	opts := fak["options"].(map[string]interface{})
+	if opts["native"] != "metal" {
+		t.Errorf("expected options.native==metal, got %v", opts["native"])
+	}
+	if opts["gguf"] != "default" {
+		t.Errorf("expected options.gguf==default, got %v", opts["gguf"])
+	}
+	agents := parsed["agent"].(map[string]interface{})
+	metalAgent, ok := agents["fak-metal-native"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected agent fak-metal-native to exist")
+	}
+	if metalAgent["model"] != "fak/"+DefaultOpenCodeMacModelID {
+		t.Errorf("expected fak-metal-native model fak/%s, got %v", DefaultOpenCodeMacModelID, metalAgent["model"])
+	}
+	if metalAgent["mode"] != "primary" {
+		t.Errorf("expected fak-metal-native mode primary, got %v", metalAgent["mode"])
+	}
+	inst, ok := parsed["instructions"].([]interface{})
+	if !ok || len(inst) != 1 || inst[0] != "AGENTS.md" {
+		t.Errorf("instructions was not preserved: %v", parsed["instructions"])
+	}
+
+	modifiedAgain, err := EnsureOpenCodeProviderConfigMode(tmp, "http://127.0.0.1:8080/v1", "", OpenCodeModeMac)
+	if err != nil {
+		t.Fatalf("unexpected error on second call: %v", err)
+	}
+	if modifiedAgain {
+		t.Errorf("expected modified=false on idempotent Mac-mode call")
+	}
 }

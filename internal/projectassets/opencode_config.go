@@ -17,6 +17,23 @@ const DefaultOpenCodeModelID = "fak-local"
 // DefaultOpenCodeHaloModelID is the primary served model identifier for AMD Strix Halo local inference.
 const DefaultOpenCodeHaloModelID = "qwen-2.5-coder-32b-instruct"
 
+// DefaultOpenCodeMacModelID is the primary served model identifier for Apple Silicon
+// native in-kernel Metal inference. The 27B Qwen3.8 variants crash on Metal (fak#8011),
+// so the Mac default is the witnessed-friendly 7B coder model.
+const DefaultOpenCodeMacModelID = "qwen2.5-coder:7b"
+
+// OpenCodeConfigMode selects the flavor of opencode.json generated for a local backend.
+type OpenCodeConfigMode int
+
+const (
+	// OpenCodeModeGateway targets a generic fak serve gateway.
+	OpenCodeModeGateway OpenCodeConfigMode = iota
+	// OpenCodeModeHalo targets the AMD Strix Halo appliance.
+	OpenCodeModeHalo
+	// OpenCodeModeMac targets Apple Silicon native in-kernel Metal inference.
+	OpenCodeModeMac
+)
+
 // ResolveDynamicHaloModel dynamically resolves the default Halo model identifier.
 // It checks FAK_HALO_MODEL, FAK_MODEL, opencode.json in root (inspecting top-level model,
 // provider.fak models, and model tier profiles), falling back to DefaultOpenCodeHaloModelID.
@@ -89,14 +106,28 @@ type OpenCodeProviderConfig struct {
 }
 
 // GenerateOpenCodeConfig creates a standalone opencode.json configuration targeting a fak serve gateway.
+// It preserves the historical gateway behavior by delegating to GenerateOpenCodeConfigMode.
 func GenerateOpenCodeConfig(baseURL, modelID string) ([]byte, error) {
+	return GenerateOpenCodeConfigMode(baseURL, modelID, OpenCodeModeGateway)
+}
+
+// GenerateOpenCodeConfigMode creates a standalone opencode.json configuration for the
+// requested mode. In Mac mode the provider "fak" carries an options block marking the
+// native in-kernel Metal path and the default model is DefaultOpenCodeMacModelID.
+func GenerateOpenCodeConfigMode(baseURL, modelID string, mode OpenCodeConfigMode) ([]byte, error) {
 	baseURL = strings.TrimSpace(baseURL)
 	if baseURL == "" {
 		baseURL = DefaultOpenCodeBaseURL
 	}
 	modelID = strings.TrimSpace(modelID)
-	if modelID == "" || modelID == DefaultOpenCodeModelID {
-		modelID = ResolveDynamicHaloModel(".")
+	if mode == OpenCodeModeMac {
+		if modelID == "" || modelID == DefaultOpenCodeModelID || modelID == "fak-local" {
+			modelID = DefaultOpenCodeMacModelID
+		}
+	} else {
+		if modelID == "" || modelID == DefaultOpenCodeModelID {
+			modelID = ResolveDynamicHaloModel(".")
+		}
 	}
 
 	modelsMap := map[string]interface{}{
@@ -114,28 +145,55 @@ func GenerateOpenCodeConfig(baseURL, modelID string) ([]byte, error) {
 		}
 	}
 
+	options := map[string]interface{}{
+		"baseURL": baseURL,
+	}
+	provName := "fak (kernel-adjudicated)"
+	if mode == OpenCodeModeMac {
+		options["native"] = "metal"
+		options["gguf"] = "default"
+		provName = "fak (kernel-adjudicated, mac metal native)"
+	}
+
 	cfg := map[string]interface{}{
 		"$schema":  "https://opencode.ai/config.json",
 		"snapshot": false,
 		"model":    "fak/" + modelID,
 		"provider": map[string]interface{}{
 			"fak": map[string]interface{}{
-				"npm":  "@ai-sdk/openai-compatible",
-				"name": "fak (kernel-adjudicated)",
-				"options": map[string]interface{}{
-					"baseURL": baseURL,
-				},
-				"models": modelsMap,
+				"npm":     "@ai-sdk/openai-compatible",
+				"name":    provName,
+				"options": options,
+				"models":  modelsMap,
 			},
 		},
+	}
+	if mode == OpenCodeModeMac {
+		cfg["agent"] = map[string]interface{}{
+			"fak-metal-native": map[string]interface{}{
+				"description": "Mac Metal native (in-kernel GGUF) coding agent",
+				"mode":        "primary",
+				"model":       "fak/" + modelID,
+			},
+		}
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 }
 
 // EnsureOpenCodeProviderConfig ensures opencode.json in root contains the "fak" provider pointing
 // to baseURL with modelID, while preserving all existing instructions, permissions, and agent configurations.
-// It also enforces "snapshot": false to avoid workspace bloat.
+// It also enforces "snapshot": false to avoid workspace bloat. It preserves the historical gateway
+// behavior by delegating to EnsureOpenCodeProviderConfigMode with OpenCodeModeGateway.
 func EnsureOpenCodeProviderConfig(root, baseURL, modelID string) (bool, error) {
+	return EnsureOpenCodeProviderConfigMode(root, baseURL, modelID, OpenCodeModeGateway)
+}
+
+// EnsureOpenCodeProviderConfigMode ensures opencode.json in root contains the "fak" provider pointing
+// to baseURL with modelID for the requested mode, while preserving all existing instructions,
+// permissions, and agent configurations. It also enforces "snapshot": false to avoid workspace bloat.
+// In Mac mode it additionally marks the provider options as the native in-kernel Metal path and adds
+// a primary "fak-metal-native" agent.
+func EnsureOpenCodeProviderConfigMode(root, baseURL, modelID string, mode OpenCodeConfigMode) (bool, error) {
 	if root == "" {
 		root = "."
 	}
@@ -144,8 +202,14 @@ func EnsureOpenCodeProviderConfig(root, baseURL, modelID string) (bool, error) {
 		baseURL = DefaultOpenCodeBaseURL
 	}
 	modelID = strings.TrimSpace(modelID)
-	if modelID == "" || modelID == DefaultOpenCodeModelID {
-		modelID = ResolveDynamicHaloModel(root)
+	if mode == OpenCodeModeMac {
+		if modelID == "" || modelID == DefaultOpenCodeModelID || modelID == "fak-local" {
+			modelID = DefaultOpenCodeMacModelID
+		}
+	} else {
+		if modelID == "" || modelID == DefaultOpenCodeModelID {
+			modelID = ResolveDynamicHaloModel(root)
+		}
 	}
 
 	configPath := filepath.Join(root, "opencode.json")
@@ -155,7 +219,7 @@ func EnsureOpenCodeProviderConfig(root, baseURL, modelID string) (bool, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Create fresh config
-			out, genErr := GenerateOpenCodeConfig(baseURL, modelID)
+			out, genErr := GenerateOpenCodeConfigMode(baseURL, modelID, mode)
 			if genErr != nil {
 				return false, fmt.Errorf("generate opencode.json: %w", genErr)
 			}
@@ -233,13 +297,20 @@ func EnsureOpenCodeProviderConfig(root, baseURL, modelID string) (bool, error) {
 	}
 
 	// Build target fak provider map
+	targetOptions := map[string]interface{}{
+		"baseURL": baseURL,
+	}
+	targetName := "fak (kernel-adjudicated)"
+	if mode == OpenCodeModeMac {
+		targetOptions["native"] = "metal"
+		targetOptions["gguf"] = "default"
+		targetName = "fak (kernel-adjudicated, mac metal native)"
+	}
 	targetFak := map[string]interface{}{
-		"npm":  "@ai-sdk/openai-compatible",
-		"name": "fak (kernel-adjudicated)",
-		"options": map[string]interface{}{
-			"baseURL": baseURL,
-		},
-		"models": existingModels,
+		"npm":     "@ai-sdk/openai-compatible",
+		"name":    targetName,
+		"options": targetOptions,
+		"models":  existingModels,
 	}
 
 	// Check if fak provider needs updating
@@ -269,6 +340,33 @@ func EnsureOpenCodeProviderConfig(root, baseURL, modelID string) (bool, error) {
 			curModel, _ := balancedAgent["model"].(string)
 			if curModel == "" || curModel == DefaultOpenCodeHaloModelID || curModel == modelID || curModel == "fak/"+DefaultOpenCodeHaloModelID {
 				balancedAgent["model"] = targetModel
+				modified = true
+			}
+		}
+	}
+
+	if mode == OpenCodeModeMac {
+		agents, ok := raw["agent"].(map[string]interface{})
+		if !ok {
+			agents = make(map[string]interface{})
+			raw["agent"] = agents
+			modified = true
+		}
+		targetModel := "fak/" + modelID
+		targetAgent := map[string]interface{}{
+			"description": "Mac Metal native (in-kernel GGUF) coding agent",
+			"mode":        "primary",
+			"model":       targetModel,
+		}
+		existingAgent, hasAgent := agents["fak-metal-native"]
+		if !hasAgent {
+			agents["fak-metal-native"] = targetAgent
+			modified = true
+		} else {
+			existingBytes, _ := json.Marshal(existingAgent)
+			targetBytes, _ := json.Marshal(targetAgent)
+			if string(existingBytes) != string(targetBytes) {
+				agents["fak-metal-native"] = targetAgent
 				modified = true
 			}
 		}

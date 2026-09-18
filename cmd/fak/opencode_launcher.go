@@ -130,7 +130,8 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 
 	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
 		if *metal || (*ggufPath != "" && *gpuBackend == "") {
-			*gpuBackend = "metal"
+			// Apple-Silicon Metal is the CPU-session forward (`fak guard --metal`), NOT a
+			// compute --backend: leave gpuBackend empty so guard resolves the session seam.
 			*metal = true
 		}
 	}
@@ -152,7 +153,8 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 						*model = "qwen38:27b"
 					}
 					if runtime.GOARCH == "arm64" {
-						*gpuBackend = "metal"
+						// Session seam, not a compute --backend (one-touch must not pass
+						// `--backend metal`, which is unregistered on this host).
 						*metal = true
 					}
 					if !*quiet {
@@ -267,6 +269,9 @@ func buildOpencodeLaunchArgv(fakBin string, o opencodeLaunchOptions) []string {
 		argv = append(argv, "--probe")
 	}
 	appendKV("--gguf", o.ggufPath)
+	if o.metal {
+		argv = append(argv, "--metal")
+	}
 	appendKV("--backend", o.gpuBackend)
 	appendKV("--tokenizer", o.tokenizerPath)
 
@@ -314,6 +319,16 @@ func execOpencodeLaunchChildContext(ctx context.Context, stdout, stderr io.Write
 	return 0
 }
 
+func opencodeConfigModeLabel(mode projectassets.OpenCodeConfigMode) string {
+	if mode == projectassets.OpenCodeModeMac {
+		return "mac metal native"
+	}
+	if mode == projectassets.OpenCodeModeHalo {
+		return "halo"
+	}
+	return "gateway"
+}
+
 func runOpencodeConfig(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("opencode config", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -321,13 +336,26 @@ func runOpencodeConfig(stdout, stderr io.Writer, argv []string) int {
 	model := fs.String("model", projectassets.DefaultOpenCodeModelID, "served model ID")
 	halo := fs.Bool("halo", false, "configure opencode.json for local AMD Strix Halo server")
 	strix := fs.Bool("strix", false, "alias for --halo")
+	mac := fs.Bool("mac", false, "configure opencode.json for native in-kernel Apple Silicon Metal inference")
+	nativeMetal := fs.Bool("native-metal", false, "alias for --mac")
 	write := fs.Bool("write", false, "write or update opencode.json in the current workspace")
 	dir := fs.String("dir", ".", "workspace directory containing opencode.json")
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: fak opencode config [--write] [--addr ADDR] [--model MODEL] [--halo|--strix|--mac|--native-metal]")
+		fmt.Fprintln(stderr, "  e.g. fak opencode config --mac --write")
+		fmt.Fprintln(stderr, "")
+		fs.PrintDefaults()
+	}
 	if !parseFlags(fs, argv) {
 		return 2
 	}
 	*dir = pathutil.ExpandTilde(*dir)
-	if (*halo || *strix) && *model == projectassets.DefaultOpenCodeModelID {
+	macMode := *mac || *nativeMetal
+	if macMode {
+		if *model == projectassets.DefaultOpenCodeModelID || *model == "fak-local" {
+			*model = projectassets.DefaultOpenCodeMacModelID
+		}
+	} else if (*halo || *strix) && *model == projectassets.DefaultOpenCodeModelID {
 		*model = projectassets.ResolveDynamicHaloModel(*dir)
 	}
 	baseURL := *addr
@@ -337,20 +365,29 @@ func runOpencodeConfig(stdout, stderr io.Writer, argv []string) int {
 	if !strings.HasSuffix(baseURL, "/v1") {
 		baseURL = strings.TrimSuffix(baseURL, "/") + "/v1"
 	}
+	mode := projectassets.OpenCodeModeGateway
+	switch {
+	case macMode:
+		mode = projectassets.OpenCodeModeMac
+	case *halo || *strix:
+		mode = projectassets.OpenCodeModeHalo
+	}
+
 	if *write {
-		modified, err := projectassets.EnsureOpenCodeProviderConfig(*dir, baseURL, *model)
+		modified, err := projectassets.EnsureOpenCodeProviderConfigMode(*dir, baseURL, *model, mode)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak opencode config: %v\n", err)
 			return 1
 		}
+		label := opencodeConfigModeLabel(mode)
 		if modified {
-			fmt.Fprintf(stdout, "fak opencode config: updated %s with provider \"fak\" (baseURL: %s, model: %s)\n", filepath.Join(*dir, "opencode.json"), baseURL, *model)
+			fmt.Fprintf(stdout, "fak opencode config: updated %s with provider \"fak\" (%s, baseURL: %s, model: %s)\n", filepath.Join(*dir, "opencode.json"), label, baseURL, *model)
 		} else {
-			fmt.Fprintf(stdout, "fak opencode config: %s already has up-to-date provider \"fak\"\n", filepath.Join(*dir, "opencode.json"))
+			fmt.Fprintf(stdout, "fak opencode config: %s already has up-to-date provider \"fak\" (%s)\n", filepath.Join(*dir, "opencode.json"), label)
 		}
 		return 0
 	}
-	out, err := projectassets.GenerateOpenCodeConfig(baseURL, *model)
+	out, err := projectassets.GenerateOpenCodeConfigMode(baseURL, *model, mode)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak opencode config: %v\n", err)
 		return 1

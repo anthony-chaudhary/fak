@@ -123,10 +123,25 @@ func installGuardOpenCodeConfig(command []string, gwURL, modelID string, getenv 
 	}
 
 	mergeOpenCodeModel(modelsMap, cleanModel)
-	if len(advertised) > 0 && advertised[0].Context > 0 && advertised[0].Output > 0 && advertised[0].Output <= advertised[0].Context {
+	if len(advertised) > 0 && advertised[0].Context > 0 {
+		// Advertised output may be 0 (the gateway /v1/models roster sets context_length
+		// but not max_output_tokens) or nonsensically >= the context window. Letting it
+		// through unset makes OpenCode default max_tokens to 32000, which then overflows a
+		// 32768-token window on any prompt >768 tokens ("in-kernel request exceeds the
+		// context window"). Derive a bounded fraction of the remaining window instead.
+		outputLimit := advertised[0].Output
+		if outputLimit <= 0 || outputLimit >= advertised[0].Context {
+			outputLimit = advertised[0].Context / 4
+			if outputLimit > 8192 {
+				outputLimit = 8192
+			}
+			if outputLimit < 512 {
+				outputLimit = 512
+			}
+		}
 		model := modelsMap[cleanModel].(map[string]any)
 		if _, explicit := model["limit"]; !explicit {
-			model["limit"] = map[string]any{"context": advertised[0].Context, "output": advertised[0].Output}
+			model["limit"] = map[string]any{"context": advertised[0].Context, "output": outputLimit}
 		}
 	}
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -11,7 +12,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +46,17 @@ import (
 
 func cmdGuard(argv []string) {
 	cmdManageCommand("guard", argv)
+}
+
+// resolveGuardMetal mirrors resolveRunMetal: it resolves the Apple-Silicon Metal
+// session-forward decision through the shared serve resolver, rewriting the verb in the
+// error so a guard failure reads "fak guard:" rather than "fak serve:".
+func resolveGuardMetal(flag, env bool, backendName string) (bool, error) {
+	use, err := resolveServeMetal(flag, env, backendName)
+	if err != nil {
+		return false, errors.New(strings.ReplaceAll(err.Error(), "fak serve:", "fak guard:"))
+	}
+	return use, nil
 }
 
 func cmdManageCommand(commandName string, argv []string) {
@@ -154,6 +165,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	alongside := fs.Bool("alongside", false, "with --gguf: serve the small local model ALONGSIDE the API upstream instead of REPLACING it (the dual planner). The wrapped agent's normal turns proxy to the provider exactly as a plain `fak guard` session (same OAuth/passthrough, same prompt-cache preservation), while any request addressed to the --gguf model's alias — or the literal model id \"local\" — decodes in-kernel on your box with no upstream call and no tokens billed (e.g. point a cheap subagent tier at it). Implied by --gguf + an explicit --base-url.")
 	localAuto := fs.Bool("local", false, "auto-detect a local OpenAI-compatible model server you are ALREADY running (Ollama, LM Studio, Qwen3.6 dogfood, or llama.cpp) and wire guard's upstream to it with zero flags — `fak guard --local -- codex` becomes a governed local coding loop with no base-URL hunting. Probes, fail-soft (~300ms each), Ollama (127.0.0.1:11434, honors OLLAMA_HOST), then LM Studio (127.0.0.1:1234), then Qwen3.6 dogfood (127.0.0.1:8131), then llama.cpp (127.0.0.1:8080); the first live one wins and a coding-tuned served model is preferred. If --gguf is ALSO passed it wins (that is the no-server in-kernel path); if nothing is detected and no --gguf, fak fails loud with how to start a server. Mutually exclusive with --base-url / --remote-serve.")
 	gpuBackend := fs.String("backend", "", "with --gguf: compute backend for in-kernel decode; --backend overrides FAK_BACKEND. Use 'auto', 'cpu', or a registered name. Omitted/auto selects usable Vulkan on Linux/Windows, preserves registered Metal auto-selection on Darwin, and otherwise uses CPU. An unavailable named backend fails loud.")
+	metalFlag := fs.Bool("metal", false, "with --gguf: require the Apple-Silicon Metal GPU session forward (the same seam fak serve --metal uses, NOT a compute --backend). Mutually exclusive with --backend. Auto-selected on darwin/arm64+cgo when no --backend is given.")
 	gpudirectOverflow := fs.Bool("gpudirect-overflow", true, "with --gguf: enable AMD GPU Direct / NVMe P2PDMA zero-copy storage for KV cache and layer overflow handling (bypasses CPU bounce buffers on VRAM saturation; default on)")
 	_ = gpudirectOverflow
 	guardNativeFlags := registerGuardNativeControlFlags(fs)
@@ -738,6 +750,7 @@ func cmdManageCommand(commandName string, argv []string) {
 		inKernelTok   *tokenizer.Tokenizer
 		inKernelQ4K   bool
 		chatBackend   compute.Backend
+		useMetal      bool
 		loadProfile   *gateway.ModelLoadProfile
 		loadPhase     gateway.StartupPhase
 	)
@@ -757,21 +770,29 @@ func cmdManageCommand(commandName string, argv []string) {
 			}
 			*ggufPath = resolved
 		}
-		requestedBackend := strings.ToLower(strings.TrimSpace(*gpuBackend))
-		envBackend := strings.ToLower(strings.TrimSpace(os.Getenv("FAK_BACKEND")))
-		autoBackend := requestedBackend == "auto" || (requestedBackend == "" && (envBackend == "" || envBackend == "auto"))
-		if autoBackend && runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
-			if _, found := compute.Lookup("metal"); found {
-				*gpuBackend = "metal"
-			}
-		}
+		// Resolve the compute backend first (absent/auto => nil CPU fallback), keeping
+		// --backend behavior byte-for-byte when no Metal session forward is selected.
 		var berr error
 		chatBackend, berr = resolveServeChatBackend(*gpuBackend)
 		if berr != nil {
 			fmt.Fprintln(os.Stderr, "fak guard:", berr)
 			os.Exit(2)
 		}
-		if chatBackend != nil {
+		// Resolve the Apple-Silicon Metal GPU session forward — the SAME seam `fak serve
+		// --metal` uses (CPU session, s.Metal=true), NOT a compute HAL backend. Auto-selects
+		// on an Apple-Silicon+cgo binary with a usable device when no --backend is given;
+		// --metal/FAK_METAL=1 keeps the fail-loud posture when unavailable; mutually
+		// exclusive with an explicit --backend (resolveServeMetal enforces it).
+		var merr error
+		useMetal, merr = resolveGuardMetal(*metalFlag, os.Getenv("FAK_METAL") != "", *gpuBackend)
+		if merr != nil {
+			fmt.Fprintln(os.Stderr, "fak guard:", merr)
+			os.Exit(2)
+		}
+		if useMetal {
+			chatBackend = nil
+			fmt.Fprintln(os.Stderr, "fak guard: in-kernel decode → Apple-Silicon Metal GPU (session forward)")
+		} else if chatBackend != nil {
 			fmt.Fprintf(os.Stderr, "fak guard: in-kernel decode → device backend %q\n", chatBackend.Name())
 		}
 		if err := applyNativeControls(chatBackend, guardNativeConfig); err != nil {
@@ -782,7 +803,17 @@ func cmdManageCommand(commandName string, argv []string) {
 			inKernelModel, inKernelQ4K, loadProfile, loadPhase = loadServeInKernelModel(*ggufPath, chatBackend, false, contextBudgetLimit, nil, 1, nil)
 		}
 		var residencyRelease func()
-		if chatBackend != nil && chatBackend.Name() == "vulkan" {
+		if useMetal {
+			// Mirror `fak serve`: the Metal session forward takes the GPU residency lease
+			// (same loadLocalLauncherModelWithMetalLease helper) before loading weights.
+			var leaseErr error
+			residencyRelease, leaseErr = loadLocalLauncherModelWithMetalLease(true, *ggufPath, gpulease.Options{}, load)
+			if leaseErr != nil {
+				fmt.Fprintln(os.Stderr, "fak guard: Metal model residency:", leaseErr)
+				os.Exit(1)
+			}
+			defer residencyRelease()
+		} else if chatBackend != nil && chatBackend.Name() == "vulkan" {
 			var leaseErr error
 			residencyRelease, leaseErr = loadLocalLauncherModelWithVulkanLease(true, *ggufPath, gpulease.Options{}, load)
 			if leaseErr != nil {
@@ -945,6 +976,7 @@ func cmdManageCommand(commandName string, argv []string) {
 		InKernelPlanner:       guardNativeConfig.Planner,
 		LocalModelID:          localAlias,
 		Backend:               chatBackend,
+		Metal:                 useMetal,
 		SpeculativeMode:       *speculativeMode,
 		PinUpstreamCredential: pinUpstream,
 		RequireKey:            requireKey,

@@ -437,3 +437,64 @@ func TestOpencodeConfigHaloDynamicModelFromDir(t *testing.T) {
 		t.Errorf("expected qwen-2.5-coder-7b in models: %v", models)
 	}
 }
+
+func TestOpencodeLauncherDarwinOneTouchMetalSession(t *testing.T) {
+	// The one-touch darwin path sets ggufPath="default" and metal=true but must NOT set
+	// gpuBackend: Apple-Silicon Metal is the guard session forward (`fak guard --metal`),
+	// not the unregistered compute backend `metal`.
+	opts := opencodeLaunchOptions{
+		splitMode:  "off",
+		splitWhere: "bottom",
+		ggufPath:   "default",
+		metal:      true,
+	}
+	argv := buildOpencodeLaunchArgv("fak", opts)
+
+	if !argvHas(argv, "--metal") {
+		t.Errorf("expected '--metal' in argv: %v", argv)
+	}
+	if !argvHas(argv, "--gguf") {
+		t.Errorf("expected '--gguf' in argv: %v", argv)
+	}
+	for i, arg := range argv {
+		if arg == "--backend" && i+1 < len(argv) && argv[i+1] == "metal" {
+			t.Errorf("one-touch Metal must not pass '--backend metal'; argv: %v", argv)
+		}
+	}
+}
+
+func TestOpencodeLauncherBackendStillEmittedWithMetal(t *testing.T) {
+	// --backend remains available alongside explicit non-Metal backends; --metal is additive.
+	opts := opencodeLaunchOptions{
+		splitMode:  "off",
+		splitWhere: "bottom",
+		ggufPath:   "default",
+		gpuBackend: "cpu",
+		metal:      true,
+	}
+	argv := buildOpencodeLaunchArgv("fak", opts)
+	if !argvHas(argv, "--metal") {
+		t.Errorf("expected '--metal' in argv: %v", argv)
+	}
+	if !argvHasPair(argv, "--backend", "cpu") {
+		t.Errorf("expected '--backend cpu' in argv: %v", argv)
+	}
+}
+
+func argvHas(argv []string, want string) bool {
+	for _, a := range argv {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+func argvHasPair(argv []string, flag, val string) bool {
+	for i, a := range argv {
+		if a == flag && i+1 < len(argv) && argv[i+1] == val {
+			return true
+		}
+	}
+	return false
+}

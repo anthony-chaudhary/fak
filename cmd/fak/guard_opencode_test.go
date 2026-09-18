@@ -737,3 +737,75 @@ func TestGuardOpenCodeSafetyRootSettingsUntouched(t *testing.T) {
 		t.Errorf("expected ./opencode.json to not exist, got err: %v", err)
 	}
 }
+
+func TestGuardOpenCodeDerivesSafeOutputLimitWhenAdvertisedZero(t *testing.T) {
+	// Live witness: the guard gateway's /v1/models advertises context_length but no
+	// max_output_tokens, so Output==0. The generated config must still carry a limit
+	// whose output is a positive, bounded fraction of the window — otherwise OpenCode
+	// defaults max_tokens to 32000 and overflows a 32768 window.
+	injected, install := installGuardOpenCodeConfig(
+		[]string{"opencode"},
+		"http://127.0.0.1:54321",
+		"qwen2.5-coder:7b",
+		func(string) string { return "" },
+		guardOpenCodeModelLimits{ID: "qwen2.5-coder:7b", Context: 32768, Output: 0},
+	)
+	if !install.Applied {
+		t.Fatal("OpenCode config injection was not applied")
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal([]byte(injected[0][1]), &config); err != nil {
+		t.Fatalf("unmarshal OPENCODE_CONFIG_CONTENT: %v", err)
+	}
+	provider := config["provider"].(map[string]any)["fak"].(map[string]any)
+	model := provider["models"].(map[string]any)["qwen2.5-coder:7b"].(map[string]any)
+	limit, ok := model["limit"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected model.limit to be set when advertised output was 0; model=%#v", model)
+	}
+	if limit["context"] != float64(32768) {
+		t.Errorf("limit.context = %v, want 32768", limit["context"])
+	}
+	out, ok := limit["output"].(float64)
+	if !ok {
+		t.Fatalf("limit.output is not numeric: %#v", limit["output"])
+	}
+	if out <= 0 {
+		t.Errorf("limit.output = %v, want > 0", out)
+	}
+	if out >= 32768 {
+		t.Errorf("limit.output = %v, want < 32768 (the context window)", out)
+	}
+	if out > 8192 {
+		t.Errorf("limit.output = %v, want <= 8192", out)
+	}
+}
+
+func TestGuardOpenCodeKeepsValidAdvertisedOutput(t *testing.T) {
+	// A sane advertised output within the window must be used verbatim (no fraction).
+	injected, install := installGuardOpenCodeConfig(
+		[]string{"opencode"},
+		"http://127.0.0.1:54321",
+		"qwen2.5-coder:7b",
+		func(string) string { return "" },
+		guardOpenCodeModelLimits{ID: "qwen2.5-coder:7b", Context: 32768, Output: 1024},
+	)
+	if !install.Applied {
+		t.Fatal("OpenCode config injection was not applied")
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal([]byte(injected[0][1]), &config); err != nil {
+		t.Fatalf("unmarshal OPENCODE_CONFIG_CONTENT: %v", err)
+	}
+	provider := config["provider"].(map[string]any)["fak"].(map[string]any)
+	model := provider["models"].(map[string]any)["qwen2.5-coder:7b"].(map[string]any)
+	limit, ok := model["limit"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected model.limit to be set; model=%#v", model)
+	}
+	if limit["context"] != float64(32768) || limit["output"] != float64(1024) {
+		t.Fatalf("valid advertised limit not preserved: %#v", limit)
+	}
+}
