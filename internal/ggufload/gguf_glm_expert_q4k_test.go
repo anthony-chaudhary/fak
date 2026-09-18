@@ -15,7 +15,7 @@ func TestSplitGLMMoeDsaExpertsQ4KRaw(t *testing.T) {
 	for i := range raw {
 		raw[i] = byte((i*7 + 3) & 0xff) // distinct, recoverable pattern
 	}
-	got, aligned, err := splitGLMMoeDsaExpertsQ4KRaw(5, "gate_proj", []int{e, out, in}, raw)
+	got, aligned, err := splitGLMMoeDsaExpertsQ4KRaw("glm_moe_dsa", 5, "gate_proj", []int{e, out, in}, raw)
 	if err != nil {
 		t.Fatalf("split: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestSplitGLMMoeDsaExpertsQ4KRaw(t *testing.T) {
 // (no error), so the loader falls back to the f32 dequant-split.
 func TestSplitGLMMoeDsaExpertsQ4KRawUnaligned(t *testing.T) {
 	// out*in = 32*100 = 3200, not a multiple of 256.
-	_, aligned, err := splitGLMMoeDsaExpertsQ4KRaw(0, "up_proj", []int{2, 32, 100}, make([]byte, 1))
+	_, aligned, err := splitGLMMoeDsaExpertsQ4KRaw("glm_moe_dsa", 0, "up_proj", []int{2, 32, 100}, make([]byte, 1))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

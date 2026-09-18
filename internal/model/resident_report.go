@@ -105,8 +105,14 @@ func (m *Model) ResidentReport() *ResidentReport {
 // across ranks. The always-on GLM shared expert (mlp.shared_experts.* / mlp.shared_expert.*) is
 // REPLICATED on every rank (it fires every token), so it deliberately does NOT match: the segment
 // after ".mlp." is "shared_experts", not "experts", so ".mlp.experts." is not a substring of it.
+// The native non-MLA DeepSeek-V4.1 forward names its routed experts
+// model.layers.<L>.ffn.experts.<e>.{w1,w3,w2}.weight (ffn, not mlp), so this
+// predicate must also match ".ffn.experts." or MoEResidentWeightBytes would count
+// the whole V4.1 routed-expert bulk as REPLICATED — breaking the expert-parallel
+// per-rank fit plan and the expert-spill budget sizing for the very artifact the
+// resident Q2_K spine exists to serve (fak#13271).
 func isRoutedExpertTensor(name string) bool {
-	return strings.Contains(name, ".mlp.experts.")
+	return strings.Contains(name, ".mlp.experts.") || strings.Contains(name, ".ffn.experts.")
 }
 
 // MoEResidentWeightBytes partitions the model's RESIDENT weight bytes into the routed-expert bytes

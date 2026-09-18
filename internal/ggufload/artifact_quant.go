@@ -162,11 +162,14 @@ func routedExpertResidencyEncoding(t TensorType) bool {
 }
 
 // routedExpertCanonicalName builds the per-expert canonical name the raw routed-expert loader
-// emits (splitGLMMoeDsaExpertsRawQuant): model.layers.<layer>.mlp.experts.<e>.<proj>.weight. The
-// classifier and the loader therefore ask model.ResidentKQuantEligible about the SAME name, so a
-// packed artifact is admitted exactly when the loader would hold it raw.
-func routedExpertCanonicalName(layer int, proj string, expert int) string {
-	return fmt.Sprintf("model.layers.%d.mlp.experts.%d.%s.weight", layer, expert, proj)
+// emits (splitGLMMoeDsaExpertsRawQuant): model.layers.<layer>.mlp.experts.<e>.<proj>.weight for
+// every non-deepseek41 arch, and the native-forward model.layers.<layer>.ffn.experts.<e>.w{1,3,2}.weight
+// for deepseek41 (via batchedExpertCanonicalName). The classifier and the loader therefore ask
+// model.ResidentKQuantEligible about the SAME name, so a packed artifact is admitted exactly when
+// the loader would hold it raw — including the V4.1 Q2_K routed-expert bulk, whose residency would
+// otherwise be checked against a name the native V4.1 forward never reads.
+func routedExpertCanonicalName(arch string, layer int, proj string, expert int) string {
+	return batchedExpertCanonicalName(arch, layer, expert, proj)
 }
 
 // RoutedExpertResidencyQualified reports whether every routed-expert tensor in a parsed GGUF is
@@ -190,7 +193,7 @@ func RoutedExpertResidencyQualified(cfg model.Config, tensors []TensorInfo) (ok 
 			return false, info.Type, info.Name
 		}
 		if info.Type != TensorF32 {
-			canon := routedExpertCanonicalName(layer, proj, 0)
+			canon := routedExpertCanonicalName(cfg.ModelType, layer, proj, 0)
 			if !model.ResidentKQuantEligible(cfg, canon) {
 				return false, info.Type, info.Name
 			}

@@ -124,7 +124,7 @@ func (s *WeightSource) stageableRoutedExpertSlab(cfg model.Config, info TensorIn
 		return 0, 0, 0, 0, false, nil
 	}
 	layer, proj, _ := glmMoeDsaBatchedExpert(info.Name)
-	if !model.ResidentKQuantEligible(cfg, fmt.Sprintf("model.layers.%d.mlp.experts.0.%s.weight", layer, proj)) {
+	if !model.ResidentKQuantEligible(cfg, batchedExpertCanonicalName(cfg.ModelType, layer, 0, proj)) {
 		return 0, 0, 0, 0, false, nil
 	}
 	return quant, experts, rows, cols, true, nil

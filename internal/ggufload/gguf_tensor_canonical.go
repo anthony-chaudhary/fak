@@ -383,7 +383,7 @@ func CanonicalTensorNameArch(name, arch string) (string, bool) {
 	// suffixes come back under the dedicated model.engram.<L>. root and have their
 	// layer placeholder expanded here (the suffix map carries no layer argument).
 	// Everything else falls through to the shared base map. The batched routed
-	// experts are split 1->E by the loader BEFORE this map (see deepseek41BatchedExpert),
+	// experts are split 1->E by the loader BEFORE this map (see batchedExpertCanonicalName),
 	// and the router mlp.gate.weight is handled by the batched-MoE branch above.
 	if archIsDeepSeek41(arch) {
 		if mapped, ok := deepseek41CanonicalSuffix(suffix); ok {

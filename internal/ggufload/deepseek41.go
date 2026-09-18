@@ -732,7 +732,7 @@ func uint64ArrayOrNil(f *File, key string) []uint64 {
 // Returns ok=false for anything not V4-specific, so CanonicalTensorNameArch falls
 // through to the shared base map (attn_norm, ffn_norm, attn_output, ...). The
 // batched routed experts (ffn_gate_exps/up/down) are handled by the loader's 1->E
-// splitter BEFORE this 1:1 map, exactly as for glm ? see deepseek41BatchedExpert.
+// splitter BEFORE this 1:1 map, exactly as for glm ? see batchedExpertCanonicalName.
 //
 // The vcruz GGUF converter emits V4.1-Flash as a NON-MLA attention (wkv ->
 // head_dim, kv_norm, partial in-place rope), so attn_kv maps to the native
@@ -922,11 +922,13 @@ func deepseek41MHCSuffixName(suffix string) (string, bool) {
 	return "", false
 }
 
-// deepseek41BatchedExpert reports whether a deepseek41 GGUF tensor name is a
-// batched routed-expert blob and, if so, its layer and per-expert canonical
-// projection. V4 reuses the deepseek2-convention spellings (ffn_gate_exps /
-// ffn_up_exps / ffn_down_exps), so this is the shared glm classifier. It exists as
-// a named seam so the deepseek41 loader dependency is explicit and witnessed.
-func deepseek41BatchedExpert(name string) (layer int, proj string, ok bool) {
-	return glmMoeDsaBatchedExpert(name)
-}
+// The deepseek41 batched routed experts reuse the deepseek2-convention GGUF
+// spellings (ffn_gate_exps / ffn_up_exps / ffn_down_exps), so classification stays
+// the shared glmMoeDsaBatchedExpert predicate. The ARCH-SPECIFIC part is the
+// EMITTED per-expert canonical name, which batchedExpertCanonicalName
+// (gguf_glm_tensors.go) owns: deepseek41 emits ffn.experts.<e>.w{1,3,2}.weight for
+// the native non-MLA forward, every other arch emits mlp.experts.<e>.<proj>.weight.
+// The former deepseek41BatchedExpert classifier wrapper was dead code and is
+// removed; the one real seam is the arch-aware name, exercised by every splitter
+// call site (gguf_weightsource.go, quant_q4k_loader.go) and by
+// TestDeepSeek41GGUFV41FFNExpertsSeam.

@@ -1105,7 +1105,7 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 			}
 			tw.acctType, tw.acctExpert, tw.acctBytes = info.Type.String(), true, tensorOnDiskBytes(info)
 			if blockWeights, blockBytes, residentable := residentExpertBlockGeometry(info.Type); residentable {
-				kqExperts, aligned, err := splitGLMMoeDsaExpertsRawQuant(layer, proj, shape, raw, blockWeights, blockBytes)
+				kqExperts, aligned, err := splitGLMMoeDsaExpertsRawQuant(cfg.ModelType, layer, proj, shape, raw, blockWeights, blockBytes)
 				if err != nil {
 					tw.err = err
 					return tw
@@ -1133,7 +1133,7 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 				tw.err = err
 				return tw
 			}
-			experts, err := splitGLMMoeDsaExperts(layer, proj, shape, data)
+			experts, err := splitGLMMoeDsaExperts(cfg.ModelType, layer, proj, shape, data)
 			if err != nil {
 				tw.err = err
 				return tw

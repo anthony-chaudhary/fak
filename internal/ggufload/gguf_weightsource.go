@@ -416,7 +416,7 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 				if err != nil {
 					return nil, err
 				}
-				experts, err := splitGLMMoeDsaExperts(layer, proj, shape, data)
+				experts, err := splitGLMMoeDsaExperts(cfg.ModelType, layer, proj, shape, data)
 				if err != nil {
 					return nil, err
 				}
@@ -563,7 +563,7 @@ func (s *WeightSource) F32Tensors() (model.Config, []model.NamedTensorF32, error
 				if err != nil {
 					return model.Config{}, nil, err
 				}
-				experts, err := splitGLMMoeDsaExperts(layer, proj, shape, data)
+				experts, err := splitGLMMoeDsaExperts(cfg.ModelType, layer, proj, shape, data)
 				if err != nil {
 					return model.Config{}, nil, err
 				}

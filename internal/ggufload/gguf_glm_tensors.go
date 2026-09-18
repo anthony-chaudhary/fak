@@ -141,6 +141,40 @@ func archUsesGGUFBatchedMoEExperts(arch string) bool {
 	return false
 }
 
+// deepseek41Arch reports whether arch is the native non-MLA DeepSeek-V4.1 model.
+// The V4.1 forward (internal/model/v41_forward.go) admits and reads the routed
+// experts under the ffn.experts.<e>.{w1,w3,w2}.weight spelling — NOT the
+// deepseek2/GLM mlp.experts.<e>.{gate,up,down}_proj.weight spelling — so the
+// batched-expert 1->E splitter must emit V4 names for this arch alone.
+func deepseek41Arch(arch string) bool { return arch == "deepseek41" }
+
+// batchedExpertCanonicalName is the ONE place the batched routed-expert 1->E
+// splitter composes a per-expert canonical name, arch-aware so the splitter's
+// output matches what the arch's forward actually reads. Default (every arch but
+// deepseek41): the deepseek2/GLM spelling
+// model.layers.<layer>.mlp.experts.<e>.<proj>.weight. For deepseek41:
+// model.layers.<layer>.ffn.experts.<e>.{w1,w3,w2}.weight, mapping the GGUF
+// projection (gate_proj/up_proj/down_proj) onto the V4 w1/w3/w2 leaves
+// (gate_proj->w1, up_proj->w3, down_proj->w2), exactly as the reduced fixture and
+// the v41 forward's admission loop read them (v41_forward.go:700-710, :1388-1391).
+// This is why the deepseek41 arm of splitGLMMoeDsaExpertsRawQuant must compose its
+// V4 name BEFORE model.ResidentKQuantEligible is consulted (quant_q4k_loader.go:1113):
+// otherwise the resident raw-quant store would be keyed on a name the V4 forward
+// never looks up and the whole Q2_K routed-expert bulk falls back to eager f32.
+func batchedExpertCanonicalName(arch string, layer int, expert int, proj string) string {
+	if deepseek41Arch(arch) {
+		leaf := map[string]string{
+			"gate_proj": "w1",
+			"up_proj":   "w3",
+			"down_proj": "w2",
+		}[proj]
+		if leaf != "" {
+			return fmt.Sprintf("model.layers.%d.ffn.experts.%d.%s.weight", layer, expert, leaf)
+		}
+	}
+	return fmt.Sprintf("model.layers.%d.mlp.experts.%d.%s.weight", layer, expert, proj)
+}
+
 // archUsesMLAMoELayout reports whether a canonical arch uses the MLA-latent-attention +
 // MoE tensor layout that fak's glm_moe_dsa loader implements — glm_moe_dsa (GLM-5.2) OR
 // deepseek2 (real DeepSeek-V2/V3/R1). DeepSeek is that layout minus the DSA indexer, so
@@ -289,7 +323,7 @@ func parseGLMMoeDsaExpertShape(shape []int) (e, out, in int, err error) {
 	return e, out, in, nil
 }
 
-func splitGLMMoeDsaExperts(layer int, proj string, shape []int, data []float32) ([]model.NamedTensorF32, error) {
+func splitGLMMoeDsaExperts(arch string, layer int, proj string, shape []int, data []float32) ([]model.NamedTensorF32, error) {
 	e, out, in, err := parseGLMMoeDsaExpertShape(shape)
 	if err != nil {
 		return nil, err
@@ -303,7 +337,7 @@ func splitGLMMoeDsaExperts(layer int, proj string, shape []int, data []float32) 
 		seg := make([]float32, per)
 		copy(seg, data[x*per:(x+1)*per])
 		tensors[x] = model.NamedTensorF32{
-			Name:  fmt.Sprintf("model.layers.%d.mlp.experts.%d.%s.weight", layer, x, proj),
+			Name:  batchedExpertCanonicalName(arch, layer, x, proj),
 			Shape: []int{out, in},
 			Data:  seg,
 		}
@@ -335,22 +369,22 @@ const (
 // splitGLMMoeDsaExperts; ok=false (no error) means the dims are not block-aligned for a clean raw
 // split, so the caller falls back to the f32 split. Each expert's bytes are copied into their own
 // backing array so a later resident-store cannot alias across experts.
-func splitGLMMoeDsaExpertsQ4KRaw(layer int, proj string, shape []int, raw []byte) ([]NamedResidentQ4K, bool, error) {
-	return splitGLMMoeDsaExpertsKQuantRaw(layer, proj, shape, raw, q4kSuperBlockBytes)
+func splitGLMMoeDsaExpertsQ4KRaw(arch string, layer int, proj string, shape []int, raw []byte) ([]NamedResidentQ4K, bool, error) {
+	return splitGLMMoeDsaExpertsKQuantRaw(arch, layer, proj, shape, raw, q4kSuperBlockBytes)
 }
 
 // splitGLMMoeDsaExpertsKQuantRaw is the byte-only legacy wrapper for 256-weight super-block formats
 // (Q4_K/Q5_K/Q6_K/IQ3_XXS/IQ4_XS). Q8_0 callers must use splitGLMMoeDsaExpertsRawQuant with a
 // 32-weight block geometry.
-func splitGLMMoeDsaExpertsKQuantRaw(layer int, proj string, shape []int, raw []byte, blockBytes int) ([]NamedResidentQ4K, bool, error) {
-	return splitGLMMoeDsaExpertsRawQuant(layer, proj, shape, raw, q4kSuperBlockWeights, blockBytes)
+func splitGLMMoeDsaExpertsKQuantRaw(arch string, layer int, proj string, shape []int, raw []byte, blockBytes int) ([]NamedResidentQ4K, bool, error) {
+	return splitGLMMoeDsaExpertsRawQuant(arch, layer, proj, shape, raw, q4kSuperBlockWeights, blockBytes)
 }
 
 // splitGLMMoeDsaExpertsRawQuant expands a batched raw-quant routed-expert tensor (model shape
 // [E,out,in]) into E per-expert resident byte slices WITHOUT dequantizing. ok=false (no error)
 // means the row reduction dim is not block-aligned for a clean raw split, so the caller
 // dequant-splits to f32.
-func splitGLMMoeDsaExpertsRawQuant(layer int, proj string, shape []int, raw []byte, blockWeights, blockBytes int) ([]NamedResidentQ4K, bool, error) {
+func splitGLMMoeDsaExpertsRawQuant(arch string, layer int, proj string, shape []int, raw []byte, blockWeights, blockBytes int) ([]NamedResidentQ4K, bool, error) {
 	e, out, in, err := parseGLMMoeDsaExpertShape(shape)
 	if err != nil {
 		return nil, false, err
@@ -374,7 +408,7 @@ func splitGLMMoeDsaExpertsRawQuant(layer int, proj string, shape []int, raw []by
 		seg := make([]byte, perBytes)
 		copy(seg, raw[x*perBytes:(x+1)*perBytes])
 		tensors[x] = NamedResidentQ4K{
-			Name:  fmt.Sprintf("model.layers.%d.mlp.experts.%d.%s.weight", layer, x, proj),
+			Name:  batchedExpertCanonicalName(arch, layer, x, proj),
 			Shape: []int{out, in},
 			Raw:   seg,
 		}

@@ -1116,10 +1116,12 @@ func ggufMemoryPlanByDType(class compute.MemoryClass, scope compute.MemoryScope,
 // isSharedExpertCanonicalName matches the ALWAYS-ON shared-expert projections by their canonical
 // HF spelling, model.layers.<l>.mlp.shared_experts.{gate,up,down}_proj.weight. It mirrors the
 // unexported model.isSharedExpertWeight predicate (internal/model/moe_offload.go) on the same
-// ".mlp.shared_experts." substring, so the load-time planner and the runtime PLACEMENT split agree
-// on the shared expert's home: DEVICE-resident, never the host-scoped routed-expert pool (#1304).
+// ".mlp.shared_experts." / ".ffn.shared_experts." substrings, so the load-time planner and the
+// runtime PLACEMENT split agree on the shared expert's home: DEVICE-resident, never the host-scoped
+// routed-expert pool (#1304). The V4.1 forward spells the shared expert
+// model.layers.<L>.ffn.shared_experts.{w1,w3,w2}.weight (fak#13271).
 func isSharedExpertCanonicalName(name string) bool {
-	return strings.Contains(name, ".mlp.shared_experts.")
+	return strings.Contains(name, ".mlp.shared_experts.") || strings.Contains(name, ".ffn.shared_experts.")
 }
 
 func tensorCPUOffloadExpert(name, modelType string) (bool, error) {

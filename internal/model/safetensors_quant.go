@@ -52,6 +52,15 @@ func isQuantWeight(name string) bool {
 		strings.Contains(name, ".mlp.experts.") && strings.HasSuffix(name, ".gate_proj.weight"),
 		strings.Contains(name, ".mlp.experts.") && strings.HasSuffix(name, ".up_proj.weight"),
 		strings.Contains(name, ".mlp.experts.") && strings.HasSuffix(name, ".down_proj.weight"),
+		// DeepSeek-V4.1 native ROUTED experts (ggufload batchedExpertCanonicalName emits
+		// ffn.experts.<e>.w{1,3,2}.weight for arch deepseek41; v41_forward.go:1388-1391 reads
+		// them). Without these arms ResidentQ4KEligible/ResidentKQuantEligible returns false for
+		// every V4.1 routed expert, so the loader skips the raw k-quant store and eager-dequantizes
+		// the expert bulk to f32 — for the pinned Q2_K artifact that is the ~366 GiB OOM the
+		// streaming/resident spine exists to avoid.
+		strings.Contains(name, ".ffn.experts.") && strings.HasSuffix(name, ".w1.weight"),
+		strings.Contains(name, ".ffn.experts.") && strings.HasSuffix(name, ".w3.weight"),
+		strings.Contains(name, ".ffn.experts.") && strings.HasSuffix(name, ".w2.weight"),
 		strings.Contains(name, ".mlp.shared_experts.") && strings.HasSuffix(name, ".gate_proj.weight"),
 		strings.Contains(name, ".mlp.shared_experts.") && strings.HasSuffix(name, ".up_proj.weight"),
 		strings.Contains(name, ".mlp.shared_experts.") && strings.HasSuffix(name, ".down_proj.weight"),

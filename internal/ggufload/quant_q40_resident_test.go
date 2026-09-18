@@ -221,7 +221,7 @@ func TestQ40BatchedExpertsLandResidentRaw(t *testing.T) {
 	for i := range raw {
 		raw[i] = byte(i*17 + 3) // position-dependent, so a wrong stride cannot pass
 	}
-	split, aligned, err := splitGLMMoeDsaExpertsRawQuant(0, "down_proj", []int{experts, out, in}, raw, blockWeights, blockBytes)
+	split, aligned, err := splitGLMMoeDsaExpertsRawQuant("glm_moe_dsa", 0, "down_proj", []int{experts, out, in}, raw, blockWeights, blockBytes)
 	if err != nil || !aligned {
 		t.Fatalf("raw expert split: aligned=%v err=%v", aligned, err)
 	}

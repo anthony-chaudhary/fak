@@ -52,8 +52,15 @@ func routedExpertIdentity(name string) (layer, expert int, ok bool) {
 	if !ok {
 		return 0, 0, false
 	}
-	const seg = ".mlp.experts."
+	// Accept both the deepseek2/GLM spelling (.mlp.experts.) and the native
+	// non-MLA V4.1 spelling (.ffn.experts.), so a V4.1 routed expert still parses
+	// to its (layer, expert) identity for ring pinning / usage (fak#13271).
+	seg := ".mlp.experts."
 	i := strings.Index(name, seg)
+	if i < 0 {
+		seg = ".ffn.experts."
+		i = strings.Index(name, seg)
+	}
 	if i < 0 {
 		return 0, 0, false
 	}

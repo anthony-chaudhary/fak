@@ -223,7 +223,7 @@ func (k splitKernel) indexSelect(indexQ, indexK, weights []float32, nKeys, nH, i
 // every token in addition to the routed top-k: model.layers.<l>.mlp.shared_experts.{gate,up,down}_proj.weight
 // (glmSharedExperts). The distinguishing substring is ".mlp.shared_experts.".
 func isSharedExpertWeight(name string) bool {
-	return strings.Contains(name, ".mlp.shared_experts.")
+	return strings.Contains(name, ".mlp.shared_experts.") || strings.Contains(name, ".ffn.shared_experts.")
 }
 
 // isRoutedExpertWeight matches the PER-TOKEN ROUTED experts (only the router-selected top-k fire per
@@ -233,7 +233,7 @@ func isSharedExpertWeight(name string) bool {
 // provably disjoint even if the naming ever drifts. A bias tensor of an expert
 // (…experts.<e>.gate_proj.bias) also matches, which is correct — its add belongs with its GEMM.
 func isRoutedExpertWeight(name string) bool {
-	return strings.Contains(name, ".mlp.experts.") && !isSharedExpertWeight(name)
+	return (strings.Contains(name, ".mlp.experts.") || strings.Contains(name, ".ffn.experts.")) && !isSharedExpertWeight(name)
 }
 
 // isExpertWeight is the ACCOUNTING predicate: the union of the two disjoint expert classes

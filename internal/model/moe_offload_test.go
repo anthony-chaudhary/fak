@@ -75,6 +75,16 @@ func TestExpertWeightClassification(t *testing.T) {
 		{"router/gate weight", router, false, false},
 		{"router bias", routerBiasName(0), false, false},
 		{"dense (non-MoE) mlp weight", "model.layers.0.mlp.gate_proj.weight", false, false},
+		// DeepSeek-V4.1 native non-MLA forward names (v41_forward.go:1388-1391 reads
+		// ffn.experts.<e>.w{1,3,2}.weight; the shared expert is ffn.shared_experts.*).
+		// The runtime placement predicate hostOffloadWeight must send these ROUTED experts
+		// to host RAM under --cpu-offload-experts, and pin the V4 SHARED expert to the device.
+		{"V4 routed w1", "model.layers.0.ffn.experts.0.w1.weight", true, false},
+		{"V4 routed w3 (other layer/expert)", "model.layers.3.ffn.experts.7.w3.weight", true, false},
+		{"V4 routed w2", "model.layers.1.ffn.experts.2.w2.weight", true, false},
+		{"V4 shared w1", "model.layers.5.ffn.shared_experts.w1.weight", false, true},
+		{"V4 shared w3", "model.layers.5.ffn.shared_experts.w3.weight", false, true},
+		{"V4 shared w2", "model.layers.5.ffn.shared_experts.w2.weight", false, true},
 	}
 	for _, c := range cases {
 		gotRouted, gotShared := isRoutedExpertWeight(c.weight), isSharedExpertWeight(c.weight)

@@ -21,7 +21,7 @@ func TestSplitGLMMoeDsaExperts(t *testing.T) {
 	for i := range data {
 		data[i] = float32(i) * 0.5
 	}
-	got, err := splitGLMMoeDsaExperts(2, "gate_proj", []int{e, out, in}, data)
+	got, err := splitGLMMoeDsaExperts("glm_moe_dsa", 2, "gate_proj", []int{e, out, in}, data)
 	if err != nil {
 		t.Fatalf("splitGLMMoeDsaExperts: %v", err)
 	}
@@ -49,10 +49,10 @@ func TestSplitGLMMoeDsaExperts(t *testing.T) {
 	}
 
 	// fail-closed: a non-3-D shape or a length mismatch is rejected, not silently mis-split.
-	if _, err := splitGLMMoeDsaExperts(0, "up_proj", []int{out, in}, data); err == nil {
+	if _, err := splitGLMMoeDsaExperts("glm_moe_dsa", 0, "up_proj", []int{out, in}, data); err == nil {
 		t.Errorf("split of a 2-D shape should fail closed")
 	}
-	if _, err := splitGLMMoeDsaExperts(0, "up_proj", []int{e, out, in}, data[:per]); err == nil {
+	if _, err := splitGLMMoeDsaExperts("glm_moe_dsa", 0, "up_proj", []int{e, out, in}, data[:per]); err == nil {
 		t.Errorf("split with a too-short payload should fail closed")
 	}
 }
