@@ -489,19 +489,39 @@ func TestBrokerAndSpawnAgreeOnRealGit(t *testing.T) {
 		t.Fatalf("Serve: %v", err)
 	}
 	defer srv.Close()
-	viaBroker, err := c.Object(context.Background(), oid)
-	if err != nil {
-		t.Fatalf("broker read: %v", err)
+	// The FIRST read after Serve is the broker's COLD spawn of `git cat-file
+	// --batch`. On a loaded host that spawn can exceed DefaultTimeout (500ms), so
+	// viaBroker times out and the client correctly falls back to SpawnRunner — the
+	// fuse working as designed, not a broker failure. Asserting `Broker` on the
+	// first read made this test flake (4/10 failures observed). Warm up with a
+	// bounded loop until the broker has answered at least once, then require the
+	// NEXT read be served from the cache, which is the claim that actually
+	// distinguishes a resident broker from the fallback: only a broker that
+	// answered and cached can produce a `Cache` read.
+	var viaBroker Result
+	warmed := false
+	for i := 0; i < 20; i++ {
+		viaBroker, err = c.Object(context.Background(), oid)
+		if err != nil {
+			t.Fatalf("broker warm-up read %d: %v", i, err)
+		}
+		if viaBroker.Provenance == Broker || viaBroker.Provenance == Cache {
+			warmed = true
+			break
+		}
+	}
+	if !warmed {
+		t.Fatalf("provenance = %q after 20 reads, want a brokered answer (%q or %q); a live broker must eventually serve the first read rather than always falling back to the spawn path", viaBroker.Provenance, Broker, Cache)
 	}
 	viaCache, err := c.Object(context.Background(), oid)
 	if err != nil {
 		t.Fatalf("cache read: %v", err)
 	}
-	if viaBroker.Provenance != Broker || viaCache.Provenance != Cache {
-		t.Fatalf("provenance sequence = %q then %q, want %q then %q",
-			viaBroker.Provenance, viaCache.Provenance, Broker, Cache)
+	if viaCache.Provenance != Cache {
+		t.Fatalf("provenance after the warm-up = %q, want %q — a broker that answered has the object cached, so the next read must not leave the broker",
+			viaCache.Provenance, Cache)
 	}
-	for name, got := range map[string]Result{"broker": viaBroker, "cache": viaCache} {
+	for name, got := range map[string]Result{"warm": viaBroker, "cache": viaCache} {
 		if got.OID != spawned.OID || got.Type != spawned.Type || got.Size != spawned.Size || string(got.Data) != string(spawned.Data) {
 			t.Fatalf("%s answer differs from the pre-broker spawn:\n %s %+v\n spawn %+v", name, name, got.Object, spawned.Object)
 		}
