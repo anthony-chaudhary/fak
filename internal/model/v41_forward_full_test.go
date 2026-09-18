@@ -215,7 +215,7 @@ func v41BuildFullModel(cfg Config, kvRank int) *Model {
 		"model.norm.weight":                              {Dtype: "F32", Shape: []int{H}},
 		layerName(0, "attn_norm.weight"):                 {Dtype: "F32", Shape: []int{H}},
 		layerName(0, "ffn_norm.weight"):                  {Dtype: "F32", Shape: []int{H}},
-		layerName(0, "mhc.mixes.weight"):                 {Dtype: "F32", Shape: []int{v41MHCMixWidth, H}},
+		layerName(0, "mhc.mixes.weight"):                 {Dtype: "F32", Shape: []int{v41MHCMixWidth, 4 * H}},
 		layerName(0, "mhc.base"):                         {Dtype: "F32", Shape: []int{v41MHCMixWidth}},
 		layerName(0, "mhc.scale"):                        {Dtype: "F32", Shape: []int{3}},
 		layerName(0, "attn.wq_a.weight"):                 {Dtype: "F32", Shape: []int{cfg.QLoraRank, H}},

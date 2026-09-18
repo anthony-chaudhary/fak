@@ -721,9 +721,15 @@ func (m *Model) v41ForwardAdmitted() error {
 // stores that projection as [4H, 24] (input-major), while the forward consumes it
 // logically as [24, 4H] (coefficient-major). Both the logical [mixWidth, 4H]
 // orientation and the stored [4H, mixWidth] transpose are admitted here so a real
-// artifact load reaches the forward instead of refusing at admission; every other
-// shape (including the reduced [mixWidth, H]) still falls through to the named
-// two-axis shape guard and fails closed. The base/scale vectors are unchanged.
+// artifact load reaches the forward instead of refusing at admission.
+//
+// The admitted set is GEOMETRY-CONSISTENT with the model's resolved mode: a FULL
+// four-stream config must carry the flattened 4H input axis, so the reduced
+// [mixWidth, H] singleton is refused at this boundary rather than silently
+// running the legacy single-stream matmul over a sub-matrix of the four-stream
+// residual. Only a NON-full (reduced fixture) config admits [mixWidth, H]. Every
+// other shape still falls through to the named two-axis shape guard and fails
+// closed. The base/scale vectors are unchanged.
 func (m *Model) v41AdmitMHC(l int) error {
 	H := m.Cfg.HiddenSize
 	name := layerName(l, "mhc.mixes.weight")
@@ -731,11 +737,17 @@ func (m *Model) v41AdmitMHC(l int) error {
 	if !ok {
 		return v41StageErr(v41StageMHC, l, fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
 	}
+	full, err := v41ForwardGeometry(m.Cfg)
+	if err != nil {
+		return err
+	}
 	switch {
-	case out == v41MHCMixWidth && (in == H || in == 4*H):
-		// logical [mixWidth, in]
+	case out == v41MHCMixWidth && in == 4*H:
+		// logical flattened [mixWidth, 4H]
 	case in == v41MHCMixWidth && out == 4*H:
 		// stored artifact transpose [4H, mixWidth]
+	case !full && out == v41MHCMixWidth && in == H:
+		// reduced legacy [mixWidth, H] -- admitted only off the full path
 	default:
 		return v41StageErr(v41StageMHC, l,
 			fmt.Errorf("%w: tensor %s shape [%d %d], want [%d %d], [%d %d] or [%d %d]",
@@ -798,12 +810,19 @@ func (m *Model) v41AdmitGroupedWoA(l int) error {
 // v41MHCWeightLayout reports how an admitted mhc.mixes.weight is laid out:
 // flat=true for the published flattened-four-stream projection (24 x 4H logical,
 // or the artifact's 4H x 24 storage transpose), flat=false for the reduced
-// fixture's legacy 24 x H single-stream matmul. ok=false means the weight is
-// absent or holds neither admitted geometry, so the caller fails closed rather
-// than reading a wrong sub-matrix.
+// fixture's legacy 24 x H single-stream matmul. The rule mirrors v41AdmitMHC's
+// geometry-consistency: the reduced 24 x H layout is reported only when the model
+// is NOT in full geometry, so a full-geometry config carrying a [24, H] mix cannot
+// silently select the legacy single-stream matmul. ok=false means the weight is
+// absent or holds neither geometry admitted for this model's mode, so the caller
+// fails closed rather than reading a wrong sub-matrix.
 func (m *Model) v41MHCWeightLayout(l int) (flat, transposed, ok bool) {
 	out, in, present := m.residentShape(layerName(l, "mhc.mixes.weight"))
 	if !present {
+		return false, false, false
+	}
+	full, err := v41ForwardGeometry(m.Cfg)
+	if err != nil {
 		return false, false, false
 	}
 	switch {
@@ -811,7 +830,7 @@ func (m *Model) v41MHCWeightLayout(l int) (flat, transposed, ok bool) {
 		return true, false, true // logical [24, 4H]
 	case out == 4*m.Cfg.HiddenSize && in == v41MHCMixWidth:
 		return true, true, true // stored artifact transpose [4H, 24]
-	case out == v41MHCMixWidth && in == m.Cfg.HiddenSize:
+	case !full && out == v41MHCMixWidth && in == m.Cfg.HiddenSize:
 		return false, false, true // reduced legacy [24, H]
 	default:
 		return false, false, false
