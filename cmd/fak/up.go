@@ -44,19 +44,56 @@ func printUpHelp(w io.Writer) {
 	fmt.Fprintln(w, "launches local OpenAI-compatible server on :8080, and opens an interactive chat REPL.")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Flags:")
-	fmt.Fprintln(w, "  --addr <addr>               address to bind HTTP server (default: 127.0.0.1:8080)")
-	fmt.Fprintln(w, "  --mock                      enable mock completion responses for testing/offline")
-	fmt.Fprintln(w, "  --headless                  run server in foreground without interactive REPL")
-	fmt.Fprintln(w, "  --dry-run                   validate topology or profile hardware without running")
-	fmt.Fprintln(w, "  --memory-gib <gib>          override detected unified memory in GiB")
-	fmt.Fprintln(w, "  --model <tier>              override auto-selected model tier (e.g. 7B, 27B, 70B)")
-	fmt.Fprintln(w, "  --context <tokens>          override auto-selected context budget tokens")
+	// Flag names are rendered from the same registration the parser uses, so a
+	// new flag cannot become undiscoverable via --help (see
+	// TestUpHelpListsEveryRegisteredFlag); the human-readable usage synopsis and
+	// placement below are curated.
+	fs := flag.NewFlagSet("up", flag.ContinueOnError)
+	registerUpFlags(fs)
+	for _, line := range upHelpFlagLines() {
+		fmt.Fprintln(w, line)
+	}
 	fmt.Fprintln(w, "  --lock <path>               path to harness product lock JSON (v2) [all-in-one mode]")
 	fmt.Fprintln(w, "  --bundle <path>             path to .fakpack bundle [all-in-one mode]")
 	fmt.Fprintln(w, "  --bundle-verify-key <key>   optional public key / signature verification key for bundle")
 	fmt.Fprintln(w, "  --policy <path>             path to security policy file")
-	fmt.Fprintln(w, "  --engine <engine>           model engine ID (default: inkernel; mock only with --mock)")
 	fmt.Fprintln(w, "  --help, -h                  show this help message")
+}
+
+// upHelpFlagLines renders the human-readable synopsis for each flag registered
+// by registerUpFlags, keyed by flag name so the order and wording stay curated
+// while the set of names can never drift from the parser.
+func upHelpFlagLines() []string {
+	synopsis := map[string]string{
+		"addr":            "--addr <addr>               address to bind HTTP server (default: 127.0.0.1:8080)",
+		"mock":            "--mock                      enable mock completion responses for testing/offline",
+		"headless":        "--headless                  run server in foreground without interactive REPL",
+		"dry-run":         "--dry-run                   validate topology or profile hardware without running",
+		"json":            "--json                      emit plan in JSON format",
+		"memory-gib":      "--memory-gib <gib>          override detected unified memory in GiB",
+		"model":           "--model <tier>              override auto-selected model tier (e.g. 7B, 27B, 70B)",
+		"context":         "--context <tokens>          override auto-selected context budget tokens",
+		"kv-precision":    "--kv-precision <prec>       KV cache storage tier: f32 (default, exact) or q8_0 (~2x more context)",
+		"engine":          "--engine <engine>           model engine ID (default: inkernel; mock only with --mock)",
+		"gpu-idle-exit":   "--gpu-idle-exit <dur>       stop the resident server after this idle window so its GPU lease and model residency are released (0 keeps the process-lifetime holder)",
+		"max-rss":         "--max-rss <bytes>           stop the resident server when its own RSS stays above this many bytes for --max-rss-sustain, so unbounded growth cannot drive the host into swap exhaustion; 0 disables the guard (env FAK_UP_MAX_RSS)",
+		"max-rss-sustain": "--max-rss-sustain <dur>     how long RSS must stay above --max-rss before the guard stops the server, absorbing the model-load high-water mark",
+	}
+	return []string{
+		"  " + synopsis["addr"],
+		"  " + synopsis["mock"],
+		"  " + synopsis["headless"],
+		"  " + synopsis["dry-run"],
+		"  " + synopsis["json"],
+		"  " + synopsis["memory-gib"],
+		"  " + synopsis["model"],
+		"  " + synopsis["context"],
+		"  " + synopsis["kv-precision"],
+		"  " + synopsis["engine"],
+		"  " + synopsis["gpu-idle-exit"],
+		"  " + synopsis["max-rss"],
+		"  " + synopsis["max-rss-sustain"],
+	}
 }
 
 func isServeDelegation(argv []string) bool {
@@ -285,22 +322,51 @@ func applyTurnkeyModelOverride(plan *macfit.TurnkeyProfile, memoryBytes uint64, 
 	return nil
 }
 
+// upFlagSet is the single source of truth for `fak up` flags: the parser and
+// printUpHelp both derive from it, so a new flag cannot become undiscoverable.
+type upFlagSet struct {
+	addr            *string
+	mock            *bool
+	headless        *bool
+	dryRun          *bool
+	asJSON          *bool
+	memoryGiB       *float64
+	modelOverride   *string
+	contextOverride *uint64
+	kvPrecision     *string
+	engineID        *string
+	gpuIdleExit     *time.Duration
+	maxRSS          *uint64
+	maxRSSSustain   *time.Duration
+}
+
+// registerUpFlags registers every `fak up` flag on fs and returns bound pointers.
+func registerUpFlags(fs *flag.FlagSet) upFlagSet {
+	return upFlagSet{
+		addr:            fs.String("addr", "127.0.0.1:8080", "address to bind HTTP server"),
+		mock:            fs.Bool("mock", false, "enable mock completion responses for testing/offline"),
+		headless:        fs.Bool("headless", false, "run server only without interactive REPL"),
+		dryRun:          fs.Bool("dry-run", false, "profile hardware and print execution plan without running"),
+		asJSON:          fs.Bool("json", false, "emit plan in JSON format"),
+		memoryGiB:       fs.Float64("memory-gib", 0, "override detected unified memory in GiB"),
+		modelOverride:   fs.String("model", "", "override auto-selected model tier (e.g. 7B, 27B, 70B)"),
+		contextOverride: fs.Uint64("context", 0, "override auto-selected context budget tokens"),
+		kvPrecision:     fs.String("kv-precision", "", "KV cache storage tier: f32 (default, exact) or q8_0 (dense mixed: f32 pre-RoPE K + q8_0 K/V; ~2x more context). Also settable via FAK_UP_KV_PRECISION."),
+		engineID:        fs.String("engine", "inkernel", "model engine ID (default inkernel; mock only with --mock)"),
+		gpuIdleExit:     fs.Duration("gpu-idle-exit", defaultGPUIdleExit, "stop the resident server after this idle window (no in-flight request) so its GPU lease and model residency are released for a queued peer (e.g. modelbench, #13135); 0 keeps the historical process-lifetime holder"),
+		maxRSS:          fs.Uint64("max-rss", 0, "stop the resident server when its own RSS stays above this many bytes for --max-rss-sustain, so an unbounded-growth process cannot drive the host into swap exhaustion (launchd KeepAlive then restarts a fresh process); 0 disables the guard (historical unbounded holder). Env: FAK_UP_MAX_RSS"),
+		maxRSSSustain:   fs.Duration("max-rss-sustain", defaultMemGuardSustain, "how long RSS must stay above --max-rss before the guard stops the server; absorbs the model-load high-water"),
+	}
+}
+
 func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	fs := flag.NewFlagSet("up", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	addr := fs.String("addr", "127.0.0.1:8080", "address to bind HTTP server")
-	mock := fs.Bool("mock", false, "enable mock completion responses for testing/offline")
-	headless := fs.Bool("headless", false, "run server only without interactive REPL")
-	dryRun := fs.Bool("dry-run", false, "profile hardware and print execution plan without running")
-	asJSON := fs.Bool("json", false, "emit plan in JSON format")
-	memoryGiB := fs.Float64("memory-gib", 0, "override detected unified memory in GiB")
-	modelOverride := fs.String("model", "", "override auto-selected model tier (e.g. 7B, 27B, 70B)")
-	contextOverride := fs.Uint64("context", 0, "override auto-selected context budget tokens")
-	kvPrecision := fs.String("kv-precision", "", "KV cache storage tier: f32 (default, exact) or q8_0 (dense mixed: f32 pre-RoPE K + q8_0 K/V; ~2x more context). Also settable via FAK_UP_KV_PRECISION.")
-	engineID := fs.String("engine", "inkernel", "model engine ID (default inkernel; mock only with --mock)")
-	gpuIdleExit := fs.Duration("gpu-idle-exit", defaultGPUIdleExit, "stop the resident server after this idle window (no in-flight request) so its GPU lease and model residency are released for a queued peer (e.g. modelbench, #13135); 0 keeps the historical process-lifetime holder")
-	maxRSS := fs.Uint64("max-rss", 0, "stop the resident server when its own RSS stays above this many bytes for --max-rss-sustain, so an unbounded-growth process cannot drive the host into swap exhaustion (launchd KeepAlive then restarts a fresh process); 0 disables the guard (historical unbounded holder). Env: FAK_UP_MAX_RSS")
-	maxRSSSustain := fs.Duration("max-rss-sustain", defaultMemGuardSustain, "how long RSS must stay above --max-rss before the guard stops the server; absorbs the model-load high-water")
+	upFlags := registerUpFlags(fs)
+	addr, mock, headless, dryRun, asJSON := upFlags.addr, upFlags.mock, upFlags.headless, upFlags.dryRun, upFlags.asJSON
+	memoryGiB, modelOverride, contextOverride := upFlags.memoryGiB, upFlags.modelOverride, upFlags.contextOverride
+	kvPrecision, engineID, gpuIdleExit := upFlags.kvPrecision, upFlags.engineID, upFlags.gpuIdleExit
+	maxRSS, maxRSSSustain := upFlags.maxRSS, upFlags.maxRSSSustain
 
 	if err := fs.Parse(argv); err != nil {
 		os.Exit(2)
