@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 
@@ -311,8 +312,41 @@ func (v *ExecutionVerifier) revParse(ctx context.Context, ref string) (string, b
 	return sha, sha != ""
 }
 
+// workspaceNeedsSiblingTopology reports whether the tree at ref commits a Go
+// workspace that escapes the repository root via a sibling path (e.g. `use
+// ../fak`). Such a workspace only resolves when the checkout sits beside its
+// sibling, so materializing the scratch tree in the system temp dir breaks the
+// module graph. It reads the committed go.work at ref (not the working tree) so
+// the decision matches the tree actually checked out. A missing/unreadable
+// go.work is not a sibling topology (false).
+func (v *ExecutionVerifier) workspaceNeedsSiblingTopology(ctx context.Context, ref string) bool {
+	out, code, err := v.gitRun()(ctx, v.dir, "show", ref+":go.work")
+	if err != nil || code != 0 {
+		return false
+	}
+	for _, field := range strings.Fields(out) {
+		field = strings.Trim(field, "()\"")
+		if field == ".." || strings.HasPrefix(field, "../") || strings.HasPrefix(field, `..\`) {
+			return true
+		}
+	}
+	return false
+}
+
 func (v *ExecutionVerifier) scratchWorktree(ctx context.Context, ref string) (string, func(), error) {
-	dir, err := os.MkdirTemp("", "fak-exec-witness-*")
+	// A checked-in workspace that references a sibling module (the private repo's
+	// `use ../fak`) only resolves when the scratch checkout preserves that sibling
+	// relationship. Materializing it beside the repository root keeps `../fak`
+	// resolvable; the system temp dir does not, which otherwise turns a genuine
+	// red-then-green into a false SYMPTOM_UNWITNESSED build failure (#12447 class).
+	// Ordinary repositories keep the system-temp checkout.
+	parent := ""
+	if v.workspaceNeedsSiblingTopology(ctx, ref) {
+		if rootAbs, err := filepath.Abs(v.dir); err == nil {
+			parent = filepath.Dir(rootAbs)
+		}
+	}
+	dir, err := os.MkdirTemp(parent, "fak-exec-witness-*")
 	if err != nil {
 		return "", nil, err
 	}

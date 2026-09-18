@@ -502,3 +502,93 @@ func newGoModuleRepo(t *testing.T) string {
 	gitIn(t, dir, "commit", "-q", "-m", "init module")
 	return dir
 }
+
+// --- sibling-workspace topology (the `use ../fak` scratch-checkout defect) ---------------
+
+// TestSymptomSiblingWorkspace builds a two-module fixture: a parent repo whose committed
+// go.work references a SIBLING module through `use ../sibling` (mirroring the private repo's
+// `use ../fak`). The scratch checkout must be materialized beside the repo root so that
+// `../sibling` still resolves; from the system temp dir it does not, and `go test` fails to
+// load the workspace — turning a genuine red-then-green into a false refutation/abstain. The
+// test asserts CONFIRMED, which only holds once the checkout preserves the sibling topology.
+func TestSymptomSiblingWorkspace(t *testing.T) {
+	requireGoAndGit(t)
+	ctx := context.Background()
+	t.Setenv(SymptomFlagEnv, "1")
+
+	base := t.TempDir()
+	siblingDir := filepath.Join(base, "sibling")
+	parentDir := filepath.Join(base, "parent")
+
+	initRepo := func(dir string) {
+		t.Helper()
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		gitIn(t, dir, "init", "-q")
+		gitIn(t, dir, "config", "user.email", "t@t")
+		gitIn(t, dir, "config", "user.name", "t")
+	}
+
+	// The sibling module. It stays put; the parent's go.work resolves it via `../sibling`.
+	initRepo(siblingDir)
+	writeRepoFile(t, siblingDir, "go.mod", "module sib\n\ngo 1.21\n")
+	writeRepoFile(t, siblingDir, "sib.go", "package sib\n\nfunc Value() int { return 1 }\n")
+	gitIn(t, siblingDir, "add", "go.mod", "sib.go")
+	gitIn(t, siblingDir, "commit", "-q", "-m", "sibling module")
+
+	// Parent: a committed go.work whose `use ../sibling` escapes the repo root, plus a
+	// buggy Sign (the symptom).
+	initRepo(parentDir)
+	writeRepoFile(t, parentDir, "go.mod", "module parent\n\ngo 1.21\n\nrequire sib v0.0.0\n\nreplace sib => ../sibling\n")
+	writeRepoFile(t, parentDir, "go.work", "go 1.21\n\nuse (\n\t.\n\t../sibling\n)\n")
+	writeRepoFile(t, parentDir, "sign.go", "package parent\n\nfunc Sign(n int) int {\n\tif n > 0 {\n\t\treturn 1\n\t}\n\treturn 0\n}\n")
+	gitIn(t, parentDir, "add", "go.mod", "go.work", "sign.go")
+	gitIn(t, parentDir, "commit", "-q", "-m", "parent: buggy Sign + sibling workspace")
+
+	// Fix: correct Sign AND add a test that imports the sibling module (so the workspace
+	// topology is load-bearing) and fails on the parent's source.
+	writeRepoFile(t, parentDir, "sign.go", "package parent\n\nfunc Sign(n int) int {\n\tif n > 0 {\n\t\treturn 1\n\t}\n\tif n < 0 {\n\t\treturn -1\n\t}\n\treturn 0\n}\n")
+	writeRepoFile(t, parentDir, "sign_test.go", "package parent\n\nimport (\n\t\"testing\"\n\n\t\"sib\"\n)\n\nfunc TestSignNegative(t *testing.T) {\n\tif sib.Value() != 1 {\n\t\tt.Fatal(\"sibling module not resolved\")\n\t}\n\tif Sign(-3) != -1 {\n\t\tt.Fatalf(\"Sign(-3)=%d, want -1\", Sign(-3))\n\t}\n}\n")
+	gitIn(t, parentDir, "add", "sign.go", "sign_test.go")
+	gitIn(t, parentDir, "commit", "-q", "-m", "fix(parent): Sign returns -1 for negatives")
+
+	if got := NewWithRunner(gitRunner, parentDir).Resolve(ctx, nil, "symptom:HEAD"); got != abi.WitnessConfirmed {
+		t.Fatalf("sibling-workspace red-then-green symptom = %v, want confirmed (a temp-dir checkout breaks `use ../sibling`)", got)
+	}
+	assertRepoClean(t, parentDir)
+}
+
+// TestWorkspaceNeedsSiblingTopology is the focused unit test for the topology probe: a
+// committed go.work that escapes the repo root via `..`/`../x` is a sibling topology; a
+// self-contained or absent go.work is not.
+func TestWorkspaceNeedsSiblingTopology(t *testing.T) {
+	requireGoAndGit(t)
+
+	t.Run("sibling", func(t *testing.T) {
+		dir := newExecutionRepo(t)
+		writeRepoFile(t, dir, "go.work", "go 1.21\n\nuse (\n\t.\n\t../x\n)\n")
+		gitIn(t, dir, "add", "go.work")
+		gitIn(t, dir, "commit", "-q", "-m", "sibling workspace")
+		if !NewExecutionVerifier(dir).workspaceNeedsSiblingTopology(context.Background(), "HEAD") {
+			t.Fatalf("go.work `use ../x` = false, want true")
+		}
+	})
+
+	t.Run("local-only", func(t *testing.T) {
+		dir := newExecutionRepo(t)
+		writeRepoFile(t, dir, "go.work", "go 1.21\n\nuse .\n")
+		gitIn(t, dir, "add", "go.work")
+		gitIn(t, dir, "commit", "-q", "-m", "local workspace")
+		if NewExecutionVerifier(dir).workspaceNeedsSiblingTopology(context.Background(), "HEAD") {
+			t.Fatalf("go.work `use .` = true, want false")
+		}
+	})
+
+	t.Run("absent", func(t *testing.T) {
+		dir := newExecutionRepo(t)
+		if NewExecutionVerifier(dir).workspaceNeedsSiblingTopology(context.Background(), "HEAD") {
+			t.Fatalf("no go.work = true, want false")
+		}
+	})
+}
