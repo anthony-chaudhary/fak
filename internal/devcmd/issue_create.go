@@ -291,7 +291,7 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 		for _, l := range labelList {
 			draft.Labels = append(draft.Labels, issuepolicy.IssueLabel{Name: l})
 		}
-		audit := auditIssueDraftDiscoverability(draft, issuepolicy.Options{})
+		audit := auditIssueDraftDiscoverability(draft, issuepolicy.Options{TargetPrivate: issueTargetRepoIsPrivate(*repo)})
 		if !audit.Dispatchable {
 			errMsg := fmt.Sprintf("issue is not dispatchable for wave orchestrator (placement: %s)", audit.Placement)
 			fmt.Fprintf(stderr, "fak-dev issue create: %s\n", errMsg)

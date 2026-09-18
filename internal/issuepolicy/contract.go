@@ -212,6 +212,12 @@ type Options struct {
 	StrictProjectWork bool
 	// StrictRootPoint holds QA-dogfood candidates missing origin controls.
 	StrictRootPoint bool
+	// TargetPrivate declares that the review's TARGET repo is a private
+	// repository (e.g. anthony-chaudhary/fak-private), where a self-reference
+	// to fak-private (paths, current state) is expected and must NOT be
+	// treated as a public-leak boundary. A PUBLIC target leaves this false so
+	// the leak protection still fires.
+	TargetPrivate bool
 }
 
 // Score explains the spine-first readiness score. The four axes are intentionally
@@ -369,7 +375,10 @@ func reviewCandidate(c Candidate, opt Options, allowLegacyProblemFrame bool) Rev
 	if !routeOK {
 		reasons.add(ReasonUnrouted)
 	}
-	private := c.Private || containsPrivateBoundary(c)
+	// A private target repo legitimately names itself (paths, current state),
+	// so suppress the private-boundary reason there; a public target keeps the
+	// refusal so a public-leak reference is still caught.
+	private := !opt.TargetPrivate && (c.Private || containsPrivateBoundary(c))
 	if private {
 		reasons.add(ReasonPrivateBoundary)
 	}

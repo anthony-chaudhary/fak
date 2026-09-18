@@ -247,6 +247,7 @@ func runIssueDiscoverabilityWith(stdout, stderr io.Writer, argv []string, runner
 
 	opts := issuepolicy.Options{
 		StrictBornRouted: *strictBornRouted,
+		TargetPrivate:    issueTargetRepoIsPrivate(*repo),
 	}
 
 	result := IssueDiscoverabilityAuditResult{

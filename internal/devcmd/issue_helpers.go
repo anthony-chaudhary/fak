@@ -134,3 +134,19 @@ func writeJSON(w io.Writer, v any) int {
 	}
 	return 0
 }
+
+// issueTargetRepoIsPrivate reports whether a --repo value (owner/name or bare
+// name) names the private companion repository. The public core repo is
+// anthony-chaudhary/fak; fak-private is the only private target. An empty or
+// unrecognized repo is treated as public so the public-leak gate stays armed.
+func issueTargetRepoIsPrivate(repo string) bool {
+	repo = strings.TrimSpace(repo)
+	if repo == "" {
+		return false
+	}
+	seg := repo
+	if i := strings.LastIndex(repo, "/"); i >= 0 {
+		seg = repo[i+1:]
+	}
+	return strings.EqualFold(strings.TrimSpace(seg), "fak-private")
+}
