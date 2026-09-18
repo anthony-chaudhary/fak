@@ -12,13 +12,21 @@ import (
 // The published contract gives every layer a 128-token sliding window and ONE
 // per-layer compression ratio. Ratio 0 is the pure window layer and is the
 // smallest token tracer. Ratios 4 and 128 additionally carry compressor state
-// that is not implemented yet. This file witnesses two invariants:
+// that is not implemented yet. This file witnesses three invariants:
 //
 //  1. regime classification: ratio 0 -> window-only tracer, 4/128 ->
 //     compressed (unimplemented), anything else -> invalid.
 //  2. fail-closed dispatch: a V4 session whose layers carry an unimplemented
 //     compression ratio must REFUSE to run before any prefill/decode, rather
 //     than silently falling through to the generic sliding-window Q/K/V path.
+//     NOTE: this guard is wired into Session.GenerateContext ONLY; the direct
+//     Session.Prefill/Session.Step seam in kv.go does not consult it (see
+//     invariant 3).
+//  3. the Prefill/Step seam gap (#12935 / #12636): Session.Prefill (kv.go:1146)
+//     and Session.Step (kv.go:1398) branch only on IsDeepSeekV41(), which
+//     excludes "deepseek_v4", so they bypass refuseUnimplementedV4FlashAttention
+//     entirely. TestV4FlashPrefillStepSeamBypassesFailClosedGuard pins that
+//     structural fact so the record stays honest until #12636 closes the seam.
 
 // v4FlashTracerConfig is a small synthetic DeepSeek-V4 config carrying the
 // published per-layer compression schedule shape. Dims are miniature so the
@@ -186,5 +194,58 @@ func TestV4FlashRatioScheduleIsSingleSourced(t *testing.T) {
 		if _, ok := v4FlashAttentionRegime(flashRatio); !ok {
 			t.Fatalf("v4FlashAttentionRegime(%d) refused a declared Flash 0731 ratio", flashRatio)
 		}
+	}
+}
+
+// TestV4FlashPrefillStepSeamBypassesFailClosedGuard witnesses the #12935
+// blocker: the fail-closed V4 Flash attention guard is wired into
+// Session.GenerateContext ONLY. The direct Session.Prefill (kv.go:1146) and
+// Session.Step (kv.go:1398) seam does NOT consult
+// refuseUnimplementedV4FlashAttention; both branch solely on
+// IsDeepSeekV41(), which excludes "deepseek_v4" (v41_config.go:91). A caller
+// of Prefill/Step on a deepseek_v4 config with compressed layers therefore
+// bypasses the guard and would fall through to the generic Q/K/V path.
+//
+// This test asserts the CURRENT (gap) behaviour so the record is honest: it
+// passes while the gap exists and will be updated by #12636 when the seam is
+// closed. It deliberately does NOT call s.Prefill/s.Step on the compressed
+// tracer config: those entry points do not refuse the compressed geometry, and
+// exercising an unimplemented native forward on it is neither safe nor
+// deterministic here. The gap is pinned structurally instead.
+func TestV4FlashPrefillStepSeamBypassesFailClosedGuard(t *testing.T) {
+	cfg := v4FlashTracerConfig([]int{0, 4, 128})
+	s := NewSynthetic(cfg).NewSession()
+
+	// (b) Sanity: the guarded entry point DOES refuse the compressed schedule.
+	if _, err := s.GenerateContext(context.Background(), []int{1, 2, 3}, 1); !errors.Is(err, ErrV4FlashAttentionUnimplemented) {
+		t.Fatalf("GenerateContext error = %v, want ErrV4FlashAttentionUnimplemented", err)
+	}
+
+	// (c) The guard helper itself refuses the same session.
+	if err := s.refuseUnimplementedV4FlashAttention(); !errors.Is(err, ErrV4FlashAttentionUnimplemented) {
+		t.Fatalf("refuseUnimplementedV4FlashAttention error = %v, want ErrV4FlashAttentionUnimplemented", err)
+	}
+
+	// (d) The gap: the guard is the ONLY gate, and it lives on
+	// GenerateContext alone. The direct Prefill/Step seam in kv.go never calls
+	// it (no "refuseUnimplementedV4FlashAttention" call site in kv.go). Pin the
+	// structural facts in-package: the real 0731 geometry is compressed-dominated,
+	// so the guard WOULD fire on the published schedule, yet Prefill/Step skip it.
+	if len(deepSeekV4FlashCompressRatios) != 46 {
+		t.Fatalf("deepSeekV4FlashCompressRatios length = %d, want 46", len(deepSeekV4FlashCompressRatios))
+	}
+	compressed := 0
+	for _, r := range deepSeekV4FlashCompressRatios {
+		if r == 4 || r == 128 {
+			compressed++
+		}
+	}
+	if compressed != 41 {
+		t.Fatalf("compressed (ratio 4/128) layers = %d, want 41 of 46", compressed)
+	}
+	// The same classifier that refuses the tracer session also flags the real
+	// published geometry, proving Prefill/Step would have plenty to guard.
+	if cl, invalid := v4FlashCompressedLayerRatios(cfg); invalid != 0 || len(cl) != 2 {
+		t.Fatalf("v4FlashCompressedLayerRatios(cfg) = (%v, %d), want 2 compressed layers and no invalid", cl, invalid)
 	}
 }

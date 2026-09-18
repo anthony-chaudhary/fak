@@ -124,16 +124,24 @@ func v4FlashCompressedLayerRatios(cfg Config) (compressed []int, invalidLayer in
 	return compressed, invalidLayer
 }
 
-// refuseUnimplementedV4FlashAttention is the fail-closed admission every V4
-// session runs before its first prefill/decode. It returns:
+// refuseUnimplementedV4FlashAttention is the fail-closed admission for V4 Flash
+// attention. Its ONLY production call site is Session.GenerateContext
+// (generate_context.go:20). It returns:
 //
 //   - ErrV4FlashAttentionRatioInvalid when any layer declares a ratio outside
 //     the declared Flash closed set (malformed metadata);
 //   - ErrV4FlashAttentionUnimplemented when any layer declares ratio 4 or 128
 //     (metadata-valid, native forward not implemented).
 //
-// A non-V4 config, and a ratio-0-only schedule, return nil. It never falls
-// through to the generic attention path for an unimplemented regime.
+// A non-V4 config, and a ratio-0-only schedule, return nil.
+//
+// RESIDUAL GAP (#12636): Session.Prefill (kv.go:1146) and Session.Step
+// (kv.go:1398) — the direct prefill/decode seam — do NOT call this guard. Both
+// branch solely on IsDeepSeekV41(), which excludes "deepseek_v4" (v41_config.go:91),
+// so a caller of those entry points on a deepseek_v4 config bypasses this check
+// entirely and falls through to the generic Q/K/V path with compressed layers
+// still unimplemented. #12636 must close that seam. Until then the guard covers
+// GenerateContext only, never Prefill or Step.
 func (s *Session) refuseUnimplementedV4FlashAttention() error {
 	if s == nil || s.M == nil {
 		return nil
