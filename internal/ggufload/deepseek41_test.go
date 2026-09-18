@@ -934,6 +934,7 @@ var deepSeek41V41RealSuffixes = []struct {
 	{"attn_kv_a_norm.weight", func(l int) string { return layerName(l, "attn.kv_norm.weight") }},
 	{"attn_kv_norm.weight", func(l int) string { return layerName(l, "attn.kv_norm.weight") }},
 	{"exp_probs_b.bias", func(l int) string { return layerName(l, "ffn.gate.e_score_correction_bias") }},
+	{"ffn_gate_inp.weight", func(l int) string { return layerName(l, "ffn.gate.weight") }}, // native router gate (fak#13266)
 	{"exp_probs_b_vl.bias", func(l int) string { return layerName(l, "ffn.gate.e_score_correction_bias_vl") }},
 	{"ffn_gate_shexp.weight", func(l int) string { return layerName(l, "ffn.shared_experts.w1.weight") }},
 	{"ffn_up_shexp.weight", func(l int) string { return layerName(l, "ffn.shared_experts.w3.weight") }},
@@ -973,6 +974,7 @@ var deepSeek41V41NativeSuffixContract = []struct {
 	{"attn_compressor_kv.weight", "attn.compressor.wkv.weight"},
 	{"attn_compressor_norm.weight", "attn.compressor.norm.weight"},
 	{"exp_probs_b.bias", "ffn.gate.e_score_correction_bias"},
+	{"ffn_gate_inp.weight", "ffn.gate.weight"}, // native router gate (fak#13266)
 	{"ffn_gate_shexp.weight", "ffn.shared_experts.w1.weight"},
 	{"ffn_up_shexp.weight", "ffn.shared_experts.w3.weight"},
 	{"ffn_down_shexp.weight", "ffn.shared_experts.w2.weight"},

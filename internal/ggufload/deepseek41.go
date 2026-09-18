@@ -707,6 +707,14 @@ func uint64ArrayOrNil(f *File, key string) []uint64 {
 // (internal/model/v41_forward.go), reusing the glm/deepseek2 conventions only
 // where the native forward's admitted names and shapes actually match.
 //
+// ROUTER GATE (fak#13266): the artifact stores the router matmul as
+// ffn_gate_inp.weight (the deepseek2 spelling), but the native non-MLA V4.1
+// forward reads model.layers.<L>.ffn.gate.weight (:685 admission, :1114 read,
+// :1381 matRows(wGate, xn, cfg.NumExperts, H)). CanonicalTensorNameArch
+// EXCLUDES deepseek41 from the shared batched-MoE router branch, so the suffix
+// resolves here to the forward-consumed leaf. Name resolution only: the router
+// arithmetic (v41Route) and the recorded shape are unchanged.
+//
 // The native-forward contract is authoritative. Its admitted per-layer shapes
 // live at internal/model/v41_forward.go:652-715 and the names its layer step
 // reads at :862-877 (attn.wq_a/attn.wq_b/attn.wkv/attn.wo_a/attn.wo_b/attn.sink,
@@ -787,6 +795,7 @@ func deepseek41CanonicalSuffix(suffix string) (string, bool) {
 		"attn_compressor_norm.weight": "attn.compressor.norm.weight",
 		// Native MoE gate + score-correction bias and shared experts
 		// (admit :689-703, read :873-877).
+		"ffn_gate_inp.weight":   "ffn.gate.weight", // admit [E, H] (fak#13266)
 		"exp_probs_b.bias":      "ffn.gate.e_score_correction_bias",
 		"exp_probs_b_vl.bias":   "ffn.gate.e_score_correction_bias_vl",
 		"ffn_gate_shexp.weight": "ffn.shared_experts.w1.weight", // admit [I, H]

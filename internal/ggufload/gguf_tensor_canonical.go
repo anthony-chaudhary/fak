@@ -361,7 +361,15 @@ func CanonicalTensorNameArch(name, arch string) (string, bool) {
 	// single GGUF name cannot become E per-expert canonical tensors, and two KV-b names
 	// must become one canonical tensor. gguf_weightsource.go handles both before this
 	// one-name-to-one-name map is consulted.
-	if archUsesGGUFBatchedMoEExperts(arch) && suffix == glmGGUFRouter {
+	//
+	// deepseek41 is EXCLUDED here: the deepseek2/GLM router spelling is
+	// model.layers.<L>.mlp.gate.weight, but the native non-MLA V4.1 forward
+	// reads model.layers.<L>.ffn.gate.weight (v41_forward.go:685/:1114/:1381).
+	// Falling through to this branch rewrote the artifact's ffn_gate_inp.weight
+	// to a name the native forward never reads, so admission refused a tensor
+	// the file DOES carry (fak#13266). deepseek41's router gate is resolved by
+	// its own suffix arm in deepseek41CanonicalSuffix instead.
+	if archUsesGGUFBatchedMoEExperts(arch) && !archIsDeepSeek41(arch) && suffix == glmGGUFRouter {
 		return "model.layers." + layer + ".mlp.gate.weight", true
 	}
 	if archUsesMLAMoELayout(arch) {
