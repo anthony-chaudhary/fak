@@ -372,12 +372,15 @@ func (m *Model) headName() string {
 	if m.has("lm_head.weight") {
 		return "lm_head.weight"
 	}
-	// The memory-lean quant loader drops the f32 lm_head from the manifest but keeps its Q8
-	// copy in q8w (untied models — e.g. Qwen2.5-7B). Resolve to it so the quantized head path
-	// finds the real head instead of falling through to the tied-embedding key (which is not
-	// quantized for an untied model, and would panic in m.q8). m.has() only sees the f32
-	// manifest, so this q8w check is what makes an untied model loadable leanly.
-	if _, ok := m.q8w["lm_head.weight"]; ok {
+	// The memory-lean quant loader drops the f32 lm_head from the manifest but keeps a copy
+	// in a resident store (q8w for an untied Q8 model — e.g. Qwen2.5-7B; kqw/q4kw/q2w for a
+	// raw-resident quantized head, as the V4.1 Q2_K artifact's untied output.weight does).
+	// Resolve to the first store that carries it so the quantized head path finds the real
+	// head instead of falling through to the tied-embedding key (which is not quantized for
+	// an untied model, and would panic in m.q8 / mis-read as the tied head). m.has() only
+	// sees the f32 manifest, so these resident-store checks are what make an untied model
+	// loadable leanly and what make the V4.1 raw-resident head reachable (#13254).
+	if m.residentHeadName() == "lm_head.weight" {
 		return "lm_head.weight"
 	}
 	return "model.embed_tokens.weight"

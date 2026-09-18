@@ -617,7 +617,7 @@ func (m *Model) v41ForwardAdmitted() error {
 	if err := m.v41AdmitShape("model.norm.weight", v41StageFinalNorm, -1, cfg.HiddenSize); err != nil {
 		return err
 	}
-	if !m.has("lm_head.weight") && !m.has("model.embed_tokens.weight") {
+	if !m.hasWeight("lm_head.weight") && !m.hasWeight("model.embed_tokens.weight") {
 		return v41StageErr(v41StageHead, -1,
 			fmt.Errorf("%w: no lm_head.weight and no tied embedding", ErrV41ForwardStage))
 	}
@@ -719,7 +719,24 @@ func (m *Model) v41ForwardAdmitted() error {
 }
 
 // v41AdmitShape asserts a named tensor is present with the expected shape.
+// Presence + shape are resolved residency-completely (residentShape), so a
+// weight that a quantized serve keeps in a resident store (kqw/q4kw/q8w/...)
+// rather than the f32 manifest is admitted at its real [out, in] geometry
+// instead of being refused as "missing". The fail-closed property is retained:
+// a tensor absent from every store still refuses by name, and a resident tensor
+// whose geometry disagrees with the expected shape still refuses.
 func (m *Model) v41AdmitShape(name string, stage v41ForwardStage, layer int, want ...int) error {
+	if len(want) == 2 {
+		out, in, ok := m.residentShape(name)
+		if !ok {
+			return v41StageErr(stage, layer, fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
+		}
+		if out != want[0] || in != want[1] {
+			return v41StageErr(stage, layer,
+				fmt.Errorf("%w: tensor %s shape [%d %d], want %v", ErrV41ForwardStage, name, out, in, want))
+		}
+		return nil
+	}
 	meta, ok := m.manifest[name]
 	if !ok {
 		return v41StageErr(stage, layer, fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
@@ -1179,7 +1196,7 @@ func (m *Model) v41Head(x []float32) ([]float32, error) {
 		return nil, v41StageErr(v41StageFinalNorm, -1,
 			fmt.Errorf("%w: final norm width %d, want %d", ErrV41ForwardStage, len(x), m.Cfg.HiddenSize))
 	}
-	if !m.has("lm_head.weight") && !m.has("model.embed_tokens.weight") {
+	if !m.hasWeight("lm_head.weight") && !m.hasWeight("model.embed_tokens.weight") {
 		return nil, v41StageErr(v41StageHead, -1,
 			fmt.Errorf("%w: no lm_head.weight and no tied embedding", ErrV41ForwardStage))
 	}

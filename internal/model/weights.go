@@ -629,6 +629,62 @@ func (m *Model) HasQ2KEmbedding() bool { return m != nil && m.Q2KEmbedding != ni
 // HasF32 reports whether a named float32 manifest tensor is present.
 func (m *Model) HasF32(name string) bool { return m != nil && m.has(name) }
 
+// residentShape returns the [out, in] shape of a named matmul weight resolved
+// from whichever store actually carries it: the f32 manifest first, then the
+// resident quant stores (q8w/q4w/q4kw/kqw/q2w/gptqw). It returns false when the
+// weight is resident in no store. This is the residency-complete twin of
+// hasWeight: a caller that must gate on a weight's shape (e.g. the V4.1 forward
+// admission) cannot read m.manifest alone, because a quantized serve keeps the
+// weight in a store with no manifest entry. A 1-D manifest tensor (norm/bias)
+// reports ok=false because it has no [out, in] matmul geometry.
+func (m *Model) residentShape(name string) (out, in int, ok bool) {
+	if meta, present := m.manifest[name]; present {
+		if len(meta.Shape) != 2 {
+			return 0, 0, false
+		}
+		return meta.Shape[0], meta.Shape[1], true
+	}
+	if qt := m.q8w[name]; qt != nil {
+		return qt.out, qt.in, true
+	}
+	if qt := m.q4w[name]; qt != nil {
+		return qt.out, qt.in, true
+	}
+	if qt := m.q4kw[name]; qt != nil {
+		return qt.out, qt.in, true
+	}
+	if qt := m.kqw[name]; qt != nil {
+		return qt.out, qt.in, true
+	}
+	if qt := m.q2w[name]; qt != nil {
+		return qt.out, qt.in, true
+	}
+	if qt := m.gptqw[name]; qt != nil {
+		return qt.out, qt.in, true
+	}
+	return 0, 0, false
+}
+
+// residentHeadName resolves the LM-head tensor name against the store that
+// carries it, so a head resident only as a quantized tensor is found instead of
+// falling through to the tied-embedding key. It extends headName() (manifest +
+// q8w) to the raw-resident stores the V4.1 Q2_K artifact uses (kqw, q4kw, q2w),
+// which is what makes the untied quantized output.weight reachable (#13254).
+func (m *Model) residentHeadName() string {
+	if m.has("lm_head.weight") {
+		return "lm_head.weight"
+	}
+	if m.q8w["lm_head.weight"] != nil ||
+		m.q4w["lm_head.weight"] != nil ||
+		m.q4kw["lm_head.weight"] != nil ||
+		m.kqw["lm_head.weight"] != nil ||
+		m.q2w["lm_head.weight"] != nil ||
+		m.gptqw["lm_head.weight"] != nil {
+		return "lm_head.weight"
+	}
+	return "model.embed_tokens.weight"
+}
+
 // lmHead returns the [vocab, hidden] output projection. Tied -> the embedding.
 func (m *Model) lmHead() []float32 {
 	if m.has("lm_head.weight") {
