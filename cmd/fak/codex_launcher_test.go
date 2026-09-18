@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/projectassets"
 )
 
 func TestBuildCodexLaunchArgvDefault(t *testing.T) {
@@ -230,6 +234,8 @@ func TestBuildCodexRawArgvDefault(t *testing.T) {
 	argv, env := buildCodexRawArgv(codexLaunchOptions{
 		raw:             true,
 		skipPermissions: true,
+		model:           projectassets.DefaultCodexModelID,
+		baseURL:         projectassets.DefaultCodexBaseURL,
 	})
 	wantBin := "codex"
 	if runtime.GOOS == "windows" {
@@ -243,7 +249,7 @@ func TestBuildCodexRawArgvDefault(t *testing.T) {
 	joined := strings.Join(argv, " ")
 	for _, want := range []string{
 		`-c model_provider=fak`,
-		`-c model="qwen38:27b-q4"`,
+		`-c model="` + projectassets.DefaultCodexModelID + `"`,
 		`-c model_providers.fak.name="fak serve"`,
 		`-c model_providers.fak.base_url="http://127.0.0.1:8080/v1"`,
 		`-c model_providers.fak.wire_api="responses"`,
@@ -262,6 +268,37 @@ func TestBuildCodexRawArgvDefault(t *testing.T) {
 	}
 	if !foundRecovery {
 		t.Errorf("buildCodexRawArgv env missing FAK_CODEX_RAW_RECOVERY=break-glass: %v", env)
+	}
+}
+
+func TestBuildCodexRawArgvDefaultIgnoresLiveServedModel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"qwen3.8-27b-q4_k_m"}`))
+	}))
+	defer srv.Close()
+
+	explicit, _ := buildCodexRawArgv(codexLaunchOptions{
+		raw:             true,
+		skipPermissions: true,
+		model:           projectassets.DefaultCodexModelID,
+		baseURL:         srv.URL,
+	})
+	if got := strings.Join(explicit, " "); !strings.Contains(got, `-c model="`+projectassets.DefaultCodexModelID+`"`) {
+		t.Errorf("explicit model must win over live served model, missing %q:\n%s", projectassets.DefaultCodexModelID, got)
+	}
+
+	live, _ := buildCodexRawArgv(codexLaunchOptions{
+		raw:             true,
+		skipPermissions: true,
+		baseURL:         srv.URL,
+	})
+	if got := strings.Join(live, " "); !strings.Contains(got, `-c model="qwen3.8-27b-q4_k_m"`) {
+		t.Errorf("reachable server model must win when no explicit model is set, missing %q:\n%s", "qwen3.8-27b-q4_k_m", got)
 	}
 }
 
