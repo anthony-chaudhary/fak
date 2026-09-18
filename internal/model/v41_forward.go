@@ -670,8 +670,10 @@ func (m *Model) v41ForwardAdmitted() error {
 		}
 		// wo_a is the leaf's group-major [Groups, OLoRARank, HeadsPerGroup*HeadDim]
 		// tensor, so its total is OLoRARank*NumHeads*HeadDim; wo_b is
-		// [H, Groups*OLoRARank]. The declared shapes carry those totals.
-		if err := m.v41AdmitShape(layerName(l, "attn.wo_a.weight"), v41StageAttention, l, cfg.OLoraRank, qHeadDim); err != nil {
+		// [H, Groups*OLoRARank]. The artifact stores the group-major form while
+		// the reduced fixture declares the equivalent flat form, so admit either
+		// declaration (see v41AdmitGroupedWoA; the #13264 seam).
+		if err := m.v41AdmitGroupedWoA(l); err != nil {
 			return err
 		}
 		if err := m.v41AdmitShape(layerName(l, "attn.wo_b.weight"), v41StageAttention, l, H, oDim); err != nil {
@@ -746,6 +748,51 @@ func (m *Model) v41AdmitMHC(l int) error {
 		return err
 	}
 	return nil
+}
+
+// v41AdmitGroupedWoA admits a layer's attn.wo_a.weight in either declaration of
+// the same weight. The forward consumes it through V41GroupedOutputProjection,
+// which reads the group-major [Groups, OLoRARank, HeadsPerGroup*HeadDim] tensor
+// the published artifact's attn_output_a.weight stores. The reduced fixture
+// declares the equivalent flat [OLoraRank, NumHeads*HeadDim] two-axis form.
+// The two forms carry the SAME element count
+// (OGroups*OLoraRank*HeadsPerGroup*HeadDim == OLoraRank*NumHeads*HeadDim) but
+// assign different numbers to the two axes, so a single v41AdmitShape row cannot
+// admit both: demanding the flat form refused the real artifact by name before
+// the grouped projection ever ran (the #13264 seam), and demanding the grouped
+// form would refuse the reduced fixture.
+//
+// Both declarations are admitted here. Any other shape - including a grouped
+// form whose axes are individually consistent but whose total disagrees, and the
+// artifact's [OGroups*OLoraRank, HeadsPerGroup*HeadDim] with a non-divisible
+// head count - falls through to the named two-axis shape guard and fails closed,
+// so the no-silent-mis-shape property is retained. Presence is resolved
+// residency-completely by residentShape, so a resident-store wo_a is admitted at
+// its real geometry on either arm.
+func (m *Model) v41AdmitGroupedWoA(l int) error {
+	name := layerName(l, "attn.wo_a.weight")
+	cfg := m.Cfg
+	out, in, ok := m.residentShape(name)
+	if !ok {
+		return v41StageErr(v41StageAttention, l, fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
+	}
+	flatRows, flatCols := cfg.OLoraRank, cfg.NumHeads*cfg.HeadDim
+	groupedRows := cfg.OGroups * cfg.OLoraRank
+	groupedHeadsPerGroup := 0
+	if cfg.OGroups > 0 && cfg.NumHeads%cfg.OGroups == 0 {
+		groupedHeadsPerGroup = cfg.NumHeads / cfg.OGroups
+	}
+	groupedCols := groupedHeadsPerGroup * cfg.HeadDim
+	switch {
+	case out == flatRows && in == flatCols:
+		return nil
+	case groupedHeadsPerGroup > 0 && out == groupedRows && in == groupedCols:
+		return nil
+	default:
+		return v41StageErr(v41StageAttention, l,
+			fmt.Errorf("%w: tensor %s shape [%d %d], want [%d %d] (flat) or [%d %d] (grouped)",
+				ErrV41ForwardStage, name, out, in, flatRows, flatCols, groupedRows, groupedCols))
+	}
 }
 
 // v41MHCWeightLayout reports how an admitted mhc.mixes.weight is laid out:
