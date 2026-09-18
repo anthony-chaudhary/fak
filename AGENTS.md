@@ -298,6 +298,10 @@ The rule of thumb: reproduce the defect as a captured artifact *first*, then mak
 clean. If you cannot capture it, you cannot prove you fixed it — say `not yet` with the missing
 witness instead of claiming a fix.
 
+**Presence is not invokability.** An artifact that exists in the tree (a file, a symbol, a
+doc, a test) is not thereby reachable from production. Name the production entry point at HEAD
+that reaches the change and run its witness — see [`docs/presence-vs-invokability.md`](docs/presence-vs-invokability.md).
+
 ## Track work in GitHub before implementation
 
 Use a GitHub issue as the durable tracker for every substantive unit of work whenever

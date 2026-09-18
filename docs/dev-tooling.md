@@ -119,6 +119,10 @@ subcommand (`lane`, `refs`, `graph`, and the others listed by `fak-dev index`); 
 query reads the curated map in the checkout. The graph census reads only committed
 `HEAD`, so peer-dirty tracked bodies and untracked Markdown cannot change its evidence.
 
+The census proves a tracked document exists at `HEAD`; it does not prove the runtime
+behavior it describes is invoked. That distinction is named in
+[`presence-vs-invokability.md`](presence-vs-invokability.md).
+
 **Value frame:** for contributors and coding agents, the problem is repeated broad tree
 surveys before the owning authority is known; today the fallback is manual grep plus a
 large index read; the default is better because one read-only query narrows the route;
