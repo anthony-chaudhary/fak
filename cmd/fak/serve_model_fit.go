@@ -605,10 +605,19 @@ func serveNativeContextSizingInputs(ws *ggufload.WeightSource, be compute.Backen
 			// eligible dense side at the working set, not the full on-disk dense total. The option
 			// list is the SAME serveQ4KFitOptions list the path-based load arm uses, so the sizing
 			// path and the loader carry one declaration.
+			//
+			// fak#13251: this sizing arm MUST fold the COMBINED streamed-expert remainder -- the same
+			// rule the load arm applies (serve_load_helpers.go). Without it the context-sizing arm
+			// derived its bounded dense working set from the whole host budget, so the auto-sized
+			// context's view of the dense working set disagreed with the load guard: the same class of
+			// over-admission fak#13249 removed from the load path. serveCPUOffloadSizingDenseBound is the
+			// ONE derivation -- post-expert remainder on the combined arm, the historical whole-budget
+			// bound on every other arm -- so the context plan and the load guard cannot disagree.
 			opts := serveQ4KFitOptions("", ws, be, serveLoadArmCPUOffloadExperts, serveDeviceFitBudget(be))
 			var weights compute.MemoryPlan
 			var perr error
 			if bound, bounded := serveBoundedDenseWorkingSetBound(opts); bounded {
+				bound = serveCPUOffloadSizingDenseBound(ws, be, serveDeviceFitBudget(be), bound)
 				weights, perr = ws.EstimateCPUOffloadExpertsBoundedDenseMemoryPlan(max(ranks, 1), bound)
 			} else {
 				weights, perr = ws.EstimateCPUOffloadExpertsExpertParallelMemoryPlan(max(ranks, 1))
@@ -749,6 +758,47 @@ func serveCPUOffloadBoundedDenseOptions(be compute.Backend, fit serveFitBudget) 
 	return []ggufload.Q4KLoadOption{
 		ggufload.WithStreamedDenseQ4KWorkingSet(serveStreamedDenseQ4KWorkingSetBound(serveStreamedHostFit(be, &fit))),
 	}
+}
+
+// serveCPUOffloadSizingDenseBound folds the COMBINED streamed-expert remainder into the
+// context-sizing arm's bounded dense working set, so the native-context auto-sizer sees the SAME
+// combined host working set the load guard and the loader see (fak#13251).
+//
+// serveCPUOffloadBoundedDenseOptions derives the dense working set from the whole host budget
+// (serveStreamedDenseQ4KWorkingSetBound(serveStreamedHostFit(...))). On the COMBINED
+// streamed-expert + bounded-dense arm the streamed routed-expert set and the bounded dense set are
+// BOTH simultaneously host-resident, and fak#13249 sized the dense bound from the budget REMAINING
+// after the resident expert bound (serveCombinedStreamedDenseResidentBound) on the load path and the
+// streamed sizing path. This context-sizing arm was the one caller left on the un-combined
+// whole-budget bound, so the auto-sized context could claim residency the post-expert host headroom
+// does not have -- the same over-admission fak#13249 removed from the load path.
+//
+// declared is the bound serveCPUOffloadBoundedDenseOptions already returned; the result is never
+// larger than it (min, exactly as the fak#13249 call sites). When the streamed-expert policy is NOT
+// selected (the full routed charge fits host, or the host is unprobeable) the declared bound is
+// returned byte-for-byte, so every non-combined arm is unchanged.
+func serveCPUOffloadSizingDenseBound(ws *ggufload.WeightSource, be compute.Backend, fit serveFitBudget, declared int64) int64 {
+	if declared <= 0 || ws == nil {
+		return declared
+	}
+	// The SAME host-fit rule serveCPUOffloadBoundedDenseOptions uses (one measurement): the injected
+	// fit is taken verbatim on the device-less arm, the true host budget is probed when a device
+	// backend is present, exactly as the load path does.
+	hostFit := serveStreamedHostFit(be, &fit)
+	if hostFit.avail() <= 0 {
+		return declared
+	}
+	sharedPool := ggufload.BackendSharesHostRAM(be)
+	splitAperture := serveSplitAperture(be)
+	plan, streamed, err := serveStreamedCPUOffloadPlanForAperture(ws, be, 1, 0, hostFit, sharedPool, splitAperture)
+	if err != nil || !streamed {
+		return declared
+	}
+	expertBound := serveCPUOffloadStreamedResidentBoundForAperture(hostFit, plan.DeviceTotal(), sharedPool, splitAperture)
+	if combined := serveCombinedStreamedDenseResidentBound(hostFit, expertBound); combined < declared {
+		return combined
+	}
+	return declared
 }
 
 func serveGGUFMemoryPlan(ws *ggufload.WeightSource, f32Resident bool, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {

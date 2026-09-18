@@ -595,3 +595,71 @@ func combineWantDenseBound(fit serveFitBudget, expertBound int64) int64 {
 	}
 	return bound
 }
+
+// serve_staging_guard_test.go (fak#13251) - the CONTEXT-SIZING arm of the combined host working-set
+// sum. fak#13249 fixed the load path to size the bounded dense working set from the budget remaining
+// after the resident expert bound, but serveNativeContextSizingInputs still derived its dense bound
+// from the whole host budget (serveCPUOffloadBoundedDenseOptions -> the plain
+// serveStreamedDenseQ4KWorkingSetBound), so the auto-sized context's view of the dense working set
+// disagreed with the load guard -- the same over-admission fak#13249 removed from the load path.
+// serveCPUOffloadSizingDenseBound must fold the combined remainder so BOTH views agree.
+
+// On the streamed arm the sizing helper returns the post-expert combined dense bound, strictly below
+// the declared whole-budget bound and strictly below the expert+dense host sum.
+func TestServeCPUOffloadSizingDenseBoundFoldsCombinedRemainder(t *testing.T) {
+	const gib = int64(1) << 30
+	t.Setenv("FAK_STREAM_Q4K", "1")
+	ws := serveStreamedSynthWeightSource(t)
+	resident, err := serveGGUFCPUOffloadMemoryPlan(ws, 1, 0, serveFitBudget{})
+	if err != nil {
+		t.Fatalf("resident plan: %v", err)
+	}
+	// A host budget below the full routed charge forces the streamed decision (the #13121 trigger),
+	// while staying large enough that the post-expert remainder is a meaningful positive bound.
+	hostFit := serveFitBudget{Base: resident.HostTotal() - 1, Headroom: 0}
+	declared := serveStreamedDenseQ4KWorkingSetBound(hostFit)
+	expertBound := serveCPUOffloadStreamedResidentBound(hostFit)
+
+	// The historical independent derivation admitted both at (1-margin)*avail: their sum exceeds the
+	// budget, the [HW-WITNESSED] strix3 OOM premise.
+	if declared+expertBound <= hostFit.avail() {
+		t.Fatalf("fixture premise broken: declared %d + expert %d does not exceed avail %d", declared, expertBound, hostFit.avail())
+	}
+
+	// be==nil: serveStreamedHostFit takes the injected fit verbatim, so hostFit above is the budget
+	// under test. The helper must min the declared bound against the post-expert remainder.
+	got := serveCPUOffloadSizingDenseBound(ws, nil, hostFit, declared)
+	want := serveCombinedStreamedDenseResidentBound(hostFit, expertBound)
+	if got != want {
+		t.Fatalf("sizing dense bound = %d, want the combined post-expert remainder %d", got, want)
+	}
+	if got >= declared {
+		t.Fatalf("sizing dense bound = %d, want STRICTLY below the whole-budget declared bound %d", got, declared)
+	}
+	if expertBound+got >= hostFit.avail() {
+		t.Fatalf("expert %d + sizing dense %d = %d, want STRICTLY below avail %d", expertBound, got, expertBound+got, hostFit.avail())
+	}
+
+	// A non-positive declared bound is returned unchanged (no policy declared -> no fold).
+	if got := serveCPUOffloadSizingDenseBound(ws, nil, hostFit, 0); got != 0 {
+		t.Fatalf("zero declared bound -> %d, want 0 (unchanged)", got)
+	}
+	// A nil source cannot plan the streamed arm; the declared bound is preserved byte-for-byte.
+	if got := serveCPUOffloadSizingDenseBound(nil, nil, hostFit, declared); got != declared {
+		t.Fatalf("nil source -> %d, want the declared bound %d unchanged", got, declared)
+	}
+}
+
+// With the streamed knobs unset the helper must not alter the declared bound, so every non-combined
+// serve is byte-identical.
+func TestServeCPUOffloadSizingDenseBoundNoopWithoutStreamKnob(t *testing.T) {
+	const gib = int64(1) << 30
+	t.Setenv("FAK_STREAM_Q4K", "0")
+	t.Setenv("FAK_METAL_STREAM_Q4K", "0")
+	ws := serveStreamedSynthWeightSource(t)
+	hostFit := serveFitBudget{Base: 48*gib + 654<<20, Headroom: 0}
+	declared := serveStreamedDenseQ4KWorkingSetBound(hostFit)
+	if got := serveCPUOffloadSizingDenseBound(ws, nil, hostFit, declared); got != declared {
+		t.Fatalf("knob unset -> %d, want the declared bound %d unchanged", got, declared)
+	}
+}
