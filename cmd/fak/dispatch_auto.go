@@ -219,6 +219,14 @@ func runDispatchAuto(stdout, stderr io.Writer, argv []string) int {
 		var waveRec map[string]any
 		if json.Unmarshal(waveOut.Bytes(), &waveRec) == nil {
 			rec["wave"] = waveRec
+			// Hoist the nested wave's shared-host receipt to the auto receipt's top
+			// level (#13084). Auto delegates its live spawns to the wave, so when the
+			// backend is micro the wave already built ONE shared host for the refill;
+			// surfacing it here lets an operator read `host_constructions == 1` off the
+			// auto run without descending into the nested wave record.
+			if sh, ok := waveRec["shared_host"].(map[string]any); ok {
+				rec["shared_host"] = sh
+			}
 		} else {
 			rec["wave_raw"] = waveOut.String()
 		}

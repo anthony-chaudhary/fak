@@ -93,8 +93,8 @@ func dispatchTickHostEnroll(root, runsDir string, opts dispatchTickOptions, pick
 	// SharedHost nil and takes the byte-identical private-host path below.
 	if opts.SharedHost != nil {
 		agentInst := &hostEnrollAgent{issue: target, root: root, lane: pick.Lane, tree: pick.Tree, maxTurns: opts.MaxTurns}
-		opts.SharedHost.enroll(&dispatchWaveHostShareRow{
-			rank:    opts.WaveSharedRank,
+		row := &dispatchWaveHostShareRow{
+			rank:    opts.SharedHostRank,
 			target:  target,
 			runsDir: runsDir,
 			opts:    opts,
@@ -103,8 +103,16 @@ func dispatchTickHostEnroll(root, runsDir string, opts dispatchTickOptions, pick
 			lease:   lease,
 			payload: payload,
 			finish:  finish,
-		})
-		payload["host_pending"] = true
+		}
+		opts.SharedHost.enroll(row)
+		// host_pending means the row is genuinely RESIDENT in the shared host, not
+		// merely that a shared host was named. A queue-full or duplicate-id refusal
+		// leaves the row unadmitted (see dispatchSharedHost.enroll), and the caller
+		// must finalize it at the run drain as a per-row ENROLL_FAILED rather than
+		// treat it as progress. The wave never reads this flag (it continues on every
+		// row), but a driver that maps it onto its own progress vocabulary (the sweep)
+		// relies on it being truthful (#13084).
+		payload["host_pending"] = row.admitted
 		return payload
 	}
 	// Enroll the routed issue as ONE microagent into a real in-process host over one

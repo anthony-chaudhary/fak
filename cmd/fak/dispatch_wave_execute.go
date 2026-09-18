@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"time"
 
@@ -164,7 +165,7 @@ func executeDispatchWavePlan(stdout, stderr io.Writer, req dispatchWaveExecution
 	// row. Every other backend leaves share nil and takes the byte-identical serial
 	// path below. Building the share is fail-open: a construct fault degrades to the
 	// per-row private-host path rather than aborting the wave.
-	var share *dispatchWaveHostShare
+	var share *dispatchSharedHost
 	if *live && len(executionPlan) > 0 && dispatchtick.IsMicroBackend(executionPlan[0].Backend) {
 		base := dispatchWaveExecutionTickOptions(root, *maxWorkers, splitCommaList(*excludeLane), executionPlan[0], true, false, *codexLoopGate, maxFloat64(0, *codexLoopGateSinceHours), *codexLoopGateLimit)
 		if built, buildErr := newDispatchWaveHostShare(executionPlan, base); buildErr != nil {
@@ -191,7 +192,7 @@ func executeDispatchWavePlan(stdout, stderr io.Writer, req dispatchWaveExecution
 		opts := dispatchWaveExecutionTickOptions(root, *maxWorkers, splitCommaList(*excludeLane), row, *live, i == 0, *codexLoopGate, maxFloat64(0, *codexLoopGateSinceHours), *codexLoopGateLimit, snapshot)
 		if share != nil {
 			opts.SharedHost = share
-			opts.WaveSharedRank = i
+			opts.SharedHostRank = i
 		}
 		payload, err := evaluateDispatchTick(opts, stderr)
 		if err != nil {
@@ -207,6 +208,22 @@ func executeDispatchWavePlan(stdout, stderr io.Writer, req dispatchWaveExecution
 		// loop -- the serial spawn/settle cadence below is for detached workers only.
 		if share != nil && dispatchMapBool(payload, "host_pending") {
 			continue
+		}
+		// A row the shared host REFUSED (queue full / duplicate id) is unadmitted, so
+		// it carries no host_pending flag and no action. Finalize it now as the per-row
+		// ENROLL_FAILED it is and keep the batch running -- the refusal of one row must
+		// not stop a wave whose other rows are still admissible, and drainAndFinish
+		// would otherwise render it without ever having its payload recorded.
+		if share != nil {
+			if r := share.row(i); r != nil && !r.admitted {
+				payload["host_result"] = map[string]any{
+					"agent_id": r.plan.AgentID,
+					"done":     false,
+					"steps":    0,
+				}
+				dispatchHostEnrollFailed(r.runsDir, r.opts, payload, r.finish, fmt.Sprintf("host refused to enroll microagent %q for issue #%d: %v", r.plan.AgentID, r.target, r.refusal))
+				continue
+			}
 		}
 		action := dispatchMapString(payload, "action")
 		if action == "spawned" || action == "enrolled" {

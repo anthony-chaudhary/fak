@@ -18,6 +18,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -30,6 +31,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/maputil"
+	"github.com/anthony-chaudhary/fak/internal/microagent"
 	"github.com/anthony-chaudhary/fak/internal/seatpark"
 )
 
@@ -111,8 +113,44 @@ func runDispatchSweep(stdout, stderr io.Writer, argv []string) int {
 	}
 	_ = tickTimeoutS // kept for CLI compatibility; the Go tick no longer shells a timeout-bound subprocess.
 
+	// ONE shared microagent host per LIVE micro sweep (#13084). Before this seam each
+	// tick's dispatchTickHostEnroll built its OWN Config{Workers:1, Queue:1} host, ran
+	// exactly one prototype agent, and tore it down -- so a sweep inherited one host
+	// construction per tick at peak concurrency 1, and the density the one-shot wave
+	// already had was unreachable from the longer-running driver a dev leaves running.
+	// CONCURRENCY IS A PROPERTY OF THE HOST, NOT OF THE TICK: build ONE host here,
+	// sized from the declared --max-workers budget and the --max-agents ceiling,
+	// enroll each tick's admitted agent into it, and drain ONCE after RunSweep returns.
+	// The host's Drain latches after the first call (internal/microagent), so the single
+	// drain is structural, not a choice: `host_constructions == 1` for the whole run.
+	//
+	// Building the share is fail-open in the same way the wave is: a construct fault
+	// degrades to the byte-identical per-tick private-host path rather than aborting.
+	var share *dispatchSharedHost
+	if *live && dispatchtick.IsMicroBackend(*backend) {
+		base := dispatchTickOptions{
+			Workspace:   root,
+			MaxWorkers:  *maxWorkers,
+			Backend:     *backend,
+			WorkKind:    dispatchtickWorkKind(*backend),
+			Lane:        *lane,
+			Live:        true,
+			CooldownMin: dispatchtick.DefaultCooldownMinutes,
+		}
+		built, buildErr := newDispatchSharedHost(base, *maxAgents)
+		if buildErr != nil {
+			fmt.Fprintf(stderr, "fak dispatch sweep: shared host construct failed (degrading to per-tick hosts): %v\n", buildErr)
+		} else {
+			share = built
+			// Bounded, idempotent teardown: the post-loop drain already closed the
+			// host on the happy path, so this is a no-op there and only backs up an
+			// early return (a seat-park, a panic).
+			defer share.closeBounded()
+		}
+	}
+
 	tick := func(iter int) (dispatchsweep.TickResult, error) {
-		payload, err := evaluateDispatchTick(dispatchTickOptions{
+		opts := dispatchTickOptions{
 			Workspace:    root,
 			MaxWorkers:   *maxWorkers,
 			WorkKind:     dispatchtickWorkKind(*backend),
@@ -133,11 +171,32 @@ func runDispatchSweep(stdout, stderr io.Writer, argv []string) int {
 			WorkerTimeoutS: dispatchtick.DefaultWorkerTimeoutS,
 			SpawnProbeS:    dispatchtick.DefaultSpawnProbeS,
 			RecordLoop:     !*noLedger,
-		}, stderr)
+		}
+		if share != nil {
+			// Enroll this tick's admitted agent into the ONE shared host instead of
+			// constructing a private host. The row's routing, gates, and lane lease are
+			// evaluated identically; only the host lifecycle is shared, and the result is
+			// finalized once at the single post-loop drain. Its rank is the tick index so
+			// the drained outcome maps back to the tick that produced it.
+			opts.SharedHost = share
+			opts.SharedHostRank = iter
+		}
+		payload, err := evaluateDispatchTick(opts, stderr)
 		if err != nil {
 			return dispatchsweep.TickResult{}, err
 		}
-		return tickResultFromJSON(payload), nil
+		tr := tickResultFromJSON(payload)
+		// A shared-host row is ADMITTED for real but its outcome lands only at the
+		// run-level drain, so its payload carries no action/verdict/ok yet. Report it to
+		// the loop as the progress it is (one row admitted), keeping the pure loop's
+		// progress vocabulary and safety contract (it still stops the instant a tick
+		// genuinely refuses) unchanged.
+		if share != nil && dispatchMapBool(payload, "host_pending") {
+			tr.Action = "spawned"
+			tr.Verdict = "ENROLLED"
+			tr.OK = true
+		}
+		return tr, nil
 	}
 
 	settle := func() {
@@ -172,6 +231,22 @@ func runDispatchSweep(stdout, stderr io.Writer, argv []string) int {
 
 	rec := dispatchsweep.RunSweep(cfg, tick, settle)
 
+	// ONE drain for the whole sweep (#13084). RunSweep has now admitted up to
+	// --max-agents agents into the shared host; drain them ONCE, map each reaped
+	// result back to its tick, and stamp `host_constructions == 1` on the sweep
+	// receipt. The backstop is sized from the batch the host actually holds (not
+	// --max-agents) so a sweep that stopped early is never cut off, and it is the
+	// same shape the wave uses. A nil share (non-micro / dry-run / construct fault)
+	// leaves the receipt byte-identical to before this seam.
+	var hostRec map[string]any
+	if share != nil {
+		workers := microagent.BudgetForWave(*maxWorkers, *maxAgents)
+		ctx, cancel := context.WithTimeout(context.Background(), sharedHostDrainTimeout(len(share.rows), workers))
+		dispatchSharedHostDrain(ctx, share)
+		cancel()
+		hostRec = sharedHostReceiptMap(share, workers, len(share.rows))
+	}
+
 	// Record this LIVE sweep's outcome in the park tail: a seat-refuse stop counts toward the
 	// bounded budget; any other stop ends the tail so the next cycle starts fresh (#3523).
 	if *live && !*noLedger {
@@ -183,11 +258,18 @@ func runDispatchSweep(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *asJSON {
-		if rc := encodeJSONOrFailPrefixed(stdout, stderr, rec, "fak dispatch sweep: marshal"); rc != 0 {
+		// The pure loop's Record is a closed struct (no extension map), so the
+		// shared-host receipt is spliced in as a sibling key rather than smuggled
+		// through the loop package. A nil hostRec leaves the JSON byte-identical.
+		if hostRec == nil {
+			if rc := encodeJSONOrFailPrefixed(stdout, stderr, rec, "fak dispatch sweep: marshal"); rc != 0 {
+				return rc
+			}
+		} else if rc := encodeJSONOrFailPrefixed(stdout, stderr, sweepRecordWithSharedHost(rec, hostRec), "fak dispatch sweep: marshal"); rc != 0 {
 			return rc
 		}
 	} else {
-		fmt.Fprint(stdout, renderSweepCard(rec))
+		fmt.Fprint(stdout, renderSweepCard(rec, hostRec))
 	}
 	if rec.OK {
 		return 0
@@ -303,8 +385,42 @@ func jsonInt(m map[string]any, k string) int {
 	return 0
 }
 
+// sweepRecordWithSharedHost renders the sweep Record with the run-level
+// shared-host receipt spliced in as a sibling `shared_host` key. dispatchsweep.Record
+// is a closed struct with no extension map, so the loop package stays pure and the
+// cmd shell — which owns the host — owns the receipt. Marshalling the record through
+// its own JSON tags keeps every field, order and omitempty rule byte-identical to a
+// plain encode.
+func sweepRecordWithSharedHost(rec dispatchsweep.Record, sharedHost map[string]any) map[string]any {
+	body, err := json.Marshal(rec)
+	if err != nil {
+		// Cannot happen for a struct of scalars/slices of scalars; fall back to the
+		// bare record so the sweep still reports rather than failing on the splice.
+		return map[string]any{"schema": rec.Schema}
+	}
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		return map[string]any{"schema": rec.Schema}
+	}
+	m["shared_host"] = sharedHost
+	return m
+}
+
+// sharedHostReceiptMap builds the run-level shared-host receipt the sweep emits,
+// via the SAME stamper the wave uses so `host_constructions == 1` means one host
+// for the whole run on either driver. It returns nil for a nil share, which leaves
+// both output paths byte-identical to a non-micro / dry-run sweep.
+func sharedHostReceiptMap(share *dispatchSharedHost, workers, enrolled int) map[string]any {
+	if share == nil {
+		return nil
+	}
+	rec := map[string]any{}
+	dispatchSharedHostReceipt(rec, share, workers, enrolled)
+	return mapAt(rec, "shared_host")
+}
+
 // renderSweepCard is the human read-out: one header line, one line per tick, and the typed stop.
-func renderSweepCard(rec dispatchsweep.Record) string {
+func renderSweepCard(rec dispatchsweep.Record, sharedHost map[string]any) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "issue-dispatch-sweep: %s  spawned=%d/%d  cap(max-workers)=%d\n",
 		rec.Mode, rec.SpawnedCount, rec.MaxAgents, rec.MaxWorkers)
@@ -329,6 +445,14 @@ func renderSweepCard(rec dispatchsweep.Record) string {
 			mark, t.Iteration, t.Verdict, issue, lane, acct)
 	}
 	fmt.Fprintf(&b, "  STOP: %s — %s\n", rec.StopVerdict, rec.StopReason)
+	// One line, only when a shared host was used, so a non-micro sweep's card is
+	// unchanged. `host_constructions=1` is the whole point of the seam (#13084).
+	if sharedHost != nil {
+		fmt.Fprintf(&b, "  SHARED HOST: host_constructions=%d peak_workers=%d enrolled=%d admitted=%d drains=%d\n",
+			dispatchMapInt(sharedHost, "host_constructions"), dispatchMapInt(sharedHost, "peak_workers"),
+			dispatchMapInt(sharedHost, "enrolled"), dispatchMapInt(sharedHost, "admitted"),
+			dispatchMapInt(sharedHost, "drains"))
+	}
 	if rec.Mode == "dry-run" {
 		fmt.Fprintln(&b, "  (dry-run — re-run with --live to drain the queue)")
 	}

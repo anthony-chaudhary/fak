@@ -61,7 +61,7 @@ func newSharedHostRow(rank, issue int, root string, opts dispatchTickOptions) *d
 }
 
 // TestSharedHostEnrollsWholeWaveIntoOneHost is the mass-concurrency acceptance
-// witness: a live micro wave of N rows admits every row into ONE dispatchWaveHostShare
+// witness: a live micro wave of N rows admits every row into ONE dispatchSharedHost
 // (one host construction), drains ONCE, and maps each reaped result back to its row
 // with host_result.done=true. The detached exec spawner is wired to fail the test if
 // the shared path ever reaches it.

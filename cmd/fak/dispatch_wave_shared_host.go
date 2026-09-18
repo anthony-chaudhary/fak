@@ -10,27 +10,36 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/microagent"
 )
 
-// dispatchWaveHostShare is the ONE microagent host a live --backend micro wave
-// shares across every row it enrolls (#2030 / native-harness massive-concurrency).
+// dispatchSharedHost is the ONE microagent host a live --backend micro driver
+// shares across every agent it enrolls (#2030 / native-harness massive-concurrency).
 //
-// Before this seam the wave executed its rows strictly sequentially and each row's
-// dispatchTickHostEnroll built its OWN Config{Workers:1, Queue:1} host, ran exactly
-// one prototype agent, and tore it down (cmd/fak/dispatch_tick_hostenroll.go). A
-// 1000-issue wave therefore paid ~1000 host constructions at global peak
+// Before this seam each driver executed its units strictly sequentially and each
+// unit's dispatchTickHostEnroll built its OWN Config{Workers:1, Queue:1} host, ran
+// exactly one prototype agent, and tore it down (cmd/fak/dispatch_tick_hostenroll.go).
+// A 1000-issue wave therefore paid ~1000 host constructions at global peak
 // concurrency 1, and the verified microagent capacity (one host, N agents) was
 // unreachable from the real dispatch path. CONCURRENCY IS A PROPERTY OF THE HOST,
-// NOT OF THE TICK: this share constructs ONE host sized from the wave's declared
-// worker budget, enrolls every admitted row into it, drains ONCE, and maps each
-// reaped result back to the row that produced it.
+// NOT OF THE TICK: this share constructs ONE host sized from the driver's declared
+// worker budget, enrolls every admitted unit into it, drains ONCE, and maps each
+// reaped result back to the unit that produced it.
 //
-// Tree-safety and per-row accounting are preserved BY CONSTRUCTION: routing, the
+// This type is the REUSABLE lifecycle seam (#13084): the one-shot `fak dispatch
+// wave` and the continuous `fak dispatch sweep` / `auto` drivers all build one of
+// these, enroll per unit/tick, and drain once at the end of the run. The wave
+// enrolls a priced batch and drains when the batch is admitted; the sweep enrolls
+// one agent per tick and drains after the whole loop returns. Neither drains
+// more than once: microagent's Host latches `draining` on the first Drain and
+// never resets it (internal/microagent/microagent.go), so "enroll per tick then
+// drain per tick" is structurally impossible — one host, one drain, one run.
+//
+// Tree-safety and per-unit accounting are preserved BY CONSTRUCTION: routing, the
 // shared duplicate/collision/lane gates, and the lane-lease fence all still run
-// per-row in dispatchTickHostEnroll over the SAME fence tree the detached path
+// per-unit in dispatchTickHostEnroll over the SAME fence tree the detached path
 // would hold; only the host lifecycle is shared. A held peer lease still refuses
-// that row (and only that row). Each enrolled agent keeps its own hostEnrollAgent
+// that unit (and only that unit). Each enrolled agent keeps its own hostEnrollAgent
 // instance (one spawn + one done of per-agent audit) and its own lease, released
 // per-agent on a clean retire exactly as the standalone path does (#4324).
-type dispatchWaveHostShare struct {
+type dispatchSharedHost struct {
 	host *microagent.WaveHost
 	sink *hostEnrollSink
 
@@ -38,17 +47,17 @@ type dispatchWaveHostShare struct {
 	byRow map[int]*dispatchWaveHostShareRow
 
 	// drains counts how many times this share drained. It is the ONE-drain
-	// witness the wave receipt emits (always 1 on the live-micro path) and it
+	// witness the receipt emits (always 1 on the live-micro path) and it
 	// makes a second drain a visible regression rather than an assumption.
 	drains int
-	// drainErr is the wave's drain outcome: nil on a clean retire, the typed
+	// drainErr is the run's drain outcome: nil on a clean retire, the typed
 	// microagent.ErrWaveTimeout when a wedged agent outlived the drain budget.
 	drainErr error
 	// closeErr is non-nil when the BOUNDED close abandoned a wedged agent
 	// instead of blocking on workers.Wait() (#13080). It is the hang-proofing
-	// witness: a wave with an uncooperative agent still returns.
+	// witness: a run with an uncooperative agent still returns.
 	closeErr error
-	// abandoned is set when closeErr is a deadline/cancel, i.e. the wave gave up
+	// abandoned is set when closeErr is a deadline/cancel, i.e. the run gave up
 	// waiting for an agent whose Step ignored ctx rather than stalling forever.
 	abandoned bool
 }
@@ -75,40 +84,53 @@ type dispatchWaveHostShareRow struct {
 	pending  bool
 }
 
-func (s *dispatchWaveHostShare) row(rank int) *dispatchWaveHostShareRow {
+func (s *dispatchSharedHost) row(rank int) *dispatchWaveHostShareRow {
 	if s == nil {
 		return nil
 	}
 	return s.byRow[rank]
 }
 
-// newDispatchWaveHostShare builds the ONE host a live micro wave shares. It sizes
-// the resident worker budget from the wave's declared --max-workers ceiling and the
-// row count (microagent.BudgetForWave: the declared cap, never the backlog) and the
-// pending queue from the row count so a full wave is admitted without refusing its
-// own tail. The gateway is the row-0 planner: the host holds ONE gateway and hands
-// the same handle to every Step, which is exactly the shared-gateway inversion the
-// in-process path exists to buy.
-func newDispatchWaveHostShare(rows []dispatchWaveExecutionPlan, base dispatchTickOptions) (*dispatchWaveHostShare, error) {
+// newDispatchSharedHost builds the ONE host a live micro run shares. It sizes the
+// resident worker budget from the run's declared --max-workers ceiling and the
+// batch size (microagent.BudgetForWave: the declared cap, never the backlog) and
+// the pending queue from the batch size so a full batch is admitted without
+// refusing its own tail. The gateway is the base planner: the host holds ONE
+// gateway and hands the same handle to every Step, which is exactly the
+// shared-gateway inversion the in-process path exists to buy.
+//
+// This is the reusable lifecycle seam (#13084): `batchCap` is how many agents the
+// run may enroll before its single drain (a wave's row count, or a sweep's
+// --max-agents ceiling), while `workerBudget` is the declared concurrency cap both
+// callers pass in their base options. Capacity is never widened to the batch: a
+// 1000-agent sweep on a 6-worker budget still runs 6-wide and queues the rest.
+func newDispatchSharedHost(base dispatchTickOptions, batchCap int) (*dispatchSharedHost, error) {
 	gw := agent.Planner(dispatchHostEnrollWorker(base, base.accountOrZero()))
 	sink := &hostEnrollSink{}
-	workers := microagent.BudgetForWave(base.MaxWorkers, len(rows))
-	host, err := microagent.NewWaveHost(gw, microagent.Config{Audit: sink}, microagent.WaveConfig{Workers: workers, Queue: len(rows)})
+	workers := microagent.BudgetForWave(base.MaxWorkers, batchCap)
+	host, err := microagent.NewWaveHost(gw, microagent.Config{Audit: sink}, microagent.WaveConfig{Workers: workers, Queue: batchCap})
 	if err != nil {
 		return nil, err
 	}
-	return &dispatchWaveHostShare{
+	return &dispatchSharedHost{
 		host:  host,
 		sink:  sink,
-		rows:  make([]*dispatchWaveHostShareRow, 0, len(rows)),
-		byRow: make(map[int]*dispatchWaveHostShareRow, len(rows)),
+		rows:  make([]*dispatchWaveHostShareRow, 0, batchCap),
+		byRow: make(map[int]*dispatchWaveHostShareRow, batchCap),
 	}, nil
+}
+
+// newDispatchWaveHostShare is the wave's thin binding of the shared lifecycle seam:
+// a live micro wave shares ONE host sized to its row batch. Kept as a named shim so
+// the wave executor reads as it always did while the lifecycle itself is common.
+func newDispatchWaveHostShare(rows []dispatchWaveExecutionPlan, base dispatchTickOptions) (*dispatchSharedHost, error) {
+	return newDispatchSharedHost(base, len(rows))
 }
 
 // enroll records and admits one row's agent into the shared host. It mirrors the
 // standalone Spawn: a row whose agent is refused is reported per-row and the rest
 // of the batch still runs. No drain happens here -- the wave drains once, later.
-func (s *dispatchWaveHostShare) enroll(r *dispatchWaveHostShareRow) {
+func (s *dispatchSharedHost) enroll(r *dispatchWaveHostShareRow) {
 	r.pending = true
 	s.rows = append(s.rows, r)
 	s.byRow[r.rank] = r
@@ -120,7 +142,7 @@ func (s *dispatchWaveHostShare) enroll(r *dispatchWaveHostShareRow) {
 }
 
 // admittedRows counts the rows this share accepted, for the receipt's admitted.
-func (s *dispatchWaveHostShare) admittedRows() int {
+func (s *dispatchSharedHost) admittedRows() int {
 	n := 0
 	for _, r := range s.rows {
 		if r.admitted {
@@ -135,7 +157,7 @@ func (s *dispatchWaveHostShare) admittedRows() int {
 // its own lane lease on a clean retire (#4324), records its payload, and runs its
 // own finish closure. A row whose agent was refused, or whose agent did not retire
 // done, is rendered as a per-row ENROLL_FAILED -- the rest of the batch is untouched.
-func (s *dispatchWaveHostShare) drainAndFinish(ctx context.Context) {
+func (s *dispatchSharedHost) drainAndFinish(ctx context.Context) {
 	if s == nil {
 		return
 	}
@@ -156,7 +178,7 @@ func (s *dispatchWaveHostShare) drainAndFinish(ctx context.Context) {
 // finishRow renders one row's deferred outcome into its payload. It is the shared
 // twin of the standalone tail of dispatchTickHostEnroll: same keys, same audit
 // counters, same #4324 release-on-exit, same verdict vocabulary.
-func (s *dispatchWaveHostShare) finishRow(r *dispatchWaveHostShareRow, byID map[string]microagent.Result) {
+func (s *dispatchSharedHost) finishRow(r *dispatchWaveHostShareRow, byID map[string]microagent.Result) {
 	payload := r.payload
 	payload["host_audit"] = map[string]any{
 		"spawns":          s.sink.count(microagent.EventSpawn),
@@ -198,7 +220,7 @@ func (s *dispatchWaveHostShare) finishRow(r *dispatchWaveHostShareRow, byID map[
 }
 
 // Close releases the shared host. Idempotent.
-func (s *dispatchWaveHostShare) Close() {
+func (s *dispatchSharedHost) Close() {
 	if s != nil && s.host != nil {
 		s.host.Close()
 	}
@@ -210,7 +232,7 @@ func (s *dispatchWaveHostShare) Close() {
 // on the host's workers.Wait(). It is deliberately not Close(): the base Close
 // keeps its unbounded semantics so every other caller stays byte-identical, while
 // the wave — the one caller that can hold an untrusted batch — is hang-proof.
-func (s *dispatchWaveHostShare) closeWithin(ctx context.Context) {
+func (s *dispatchSharedHost) closeWithin(ctx context.Context) {
 	if s == nil || s.host == nil {
 		return
 	}
@@ -220,10 +242,25 @@ func (s *dispatchWaveHostShare) closeWithin(ctx context.Context) {
 	}
 }
 
-// dispatchWaveRecordSharedHost stamps the wave-level shared-host receipt: ONE host
+// closeBounded releases the shared host with the #13080 hang-proof margin,
+// recording an abandoned wedge on the share instead of blocking. It is the seam a
+// driver's deferred early-return backup calls, so the bounded-close budget lives in
+// exactly ONE place and no caller names its own timeout context.
+func (s *dispatchSharedHost) closeBounded() {
+	if s == nil || s.host == nil {
+		return
+	}
+	closeCtx, cancel := context.WithTimeout(context.Background(), dispatchWaveSharedHostCloseMargin)
+	defer cancel()
+	s.closeWithin(closeCtx)
+}
+
+// dispatchSharedHostReceipt stamps the run-level shared-host receipt: ONE host
 // construction, its resident worker budget, and the enrolled/admitted counts. It is
-// additive -- a non-micro wave never records it, so those receipts stay byte-identical.
-func dispatchWaveRecordSharedHost(rec map[string]any, share *dispatchWaveHostShare, workers, enrolled int) {
+// additive -- a non-micro run never records it, so those receipts stay byte-identical.
+// Both the wave and the sweep call it, so `host_constructions == 1` means the same
+// thing (one host for the whole run) on either driver.
+func dispatchSharedHostReceipt(rec map[string]any, share *dispatchSharedHost, workers, enrolled int) {
 	if rec == nil || share == nil {
 		return
 	}
@@ -239,21 +276,27 @@ func dispatchWaveRecordSharedHost(rec map[string]any, share *dispatchWaveHostSha
 	}
 	// #13080: a close that returned ctx.Err() abandoned a wedged (ctx-ignoring)
 	// agent rather than blocking on workers.Wait(). Record it as an explicit
-	// refusal so the wave is never silently hung and the wedge is auditable.
+	// refusal so the run is never silently hung and the wedge is auditable.
 	if share.abandoned {
 		rec["shared_host"].(map[string]any)["abandoned"] = true
 		rec["shared_host"].(map[string]any)["close_refusal"] = share.closeErr.Error()
 	}
 }
 
-// dispatchWaveDrainSharedHost is the live-micro wave's one drain seam. The wave
-// calls it after the per-row execution loop has enrolled every row; it drains the
-// shared host once, maps results back, and closes it — BOUNDED, so a wedged agent
-// cannot hang the wave (#13080). The drain gets the declared budget ctx while the
-// close gets a fresh, independent margin: an agent that ignored the drain ctx is
-// exactly the one the close margin must survive, so reusing the (already expired)
-// drain ctx would make every timeout a guaranteed abandonment.
-func dispatchWaveDrainSharedHost(ctx context.Context, share *dispatchWaveHostShare) {
+// dispatchWaveRecordSharedHost is the wave's thin alias of the shared receipt
+// stamper, kept so the wave executor and its tests name the wave's own receipt.
+func dispatchWaveRecordSharedHost(rec map[string]any, share *dispatchSharedHost, workers, enrolled int) {
+	dispatchSharedHostReceipt(rec, share, workers, enrolled)
+}
+
+// dispatchSharedHostDrain is the run's one drain seam. The driver calls it after
+// its enroll loop has admitted every agent; it drains the shared host once, maps
+// results back, and closes it — BOUNDED, so a wedged agent cannot hang the run
+// (#13080). The drain gets the declared budget ctx while the close gets a fresh,
+// independent margin: an agent that ignored the drain ctx is exactly the one the
+// close margin must survive, so reusing the (already expired) drain ctx would make
+// every timeout a guaranteed abandonment.
+func dispatchSharedHostDrain(ctx context.Context, share *dispatchSharedHost) {
 	if share == nil {
 		return
 	}
@@ -261,6 +304,11 @@ func dispatchWaveDrainSharedHost(ctx context.Context, share *dispatchWaveHostSha
 	closeCtx, cancel := context.WithTimeout(context.Background(), dispatchWaveSharedHostCloseMargin)
 	defer cancel()
 	share.closeWithin(closeCtx)
+}
+
+// dispatchWaveDrainSharedHost is the wave's thin alias of the one-drain seam.
+func dispatchWaveDrainSharedHost(ctx context.Context, share *dispatchSharedHost) {
+	dispatchSharedHostDrain(ctx, share)
 }
 
 // dispatchWaveSharedHostCloseMargin is the bounded close budget the wave grants
