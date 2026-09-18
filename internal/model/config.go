@@ -1092,22 +1092,30 @@ func (c Config) SelfSpeculationSubstrateReady() bool {
 // structure both families share, and KEEP isGLMMoeDsa() when it concerns the DSA
 // indexer specifically. See dense-MLA seam in glmDsaAttnSeqShared/glmDsaAttentionStep.
 //
-// The "deepseek41" identity is included because the vcruz GGUF converter emits the
-// MLA low-rank attention layout — self_attn.q_a_proj/q_b_proj/kv_a_proj_with_mqa/
-// o_proj_a/o_proj_b — with NO dense self_attn.q_proj leaf, and applyDeepSeek41Config
-// populates the same MLA geometry fields (QLoraRank, KVLoraRank, QKNopeHeadDim,
-// VHeadDim) the MLA path reads. Without it the forward falls to the dense-MHA branch,
-// requests the absent q_proj leaf, and panics `model: missing tensor`. This is the
-// GGUF "deepseek41" identity, DISTINCT from the safetensors "deepseek_v41" identity
-// that IsDeepSeekV41()/refuseDeepSeekV41Native() still holds fail-closed.
+// The "deepseek41" identity is deliberately EXCLUDED. The vcruz GGUF converter
+// emits V4.1-Flash as a NON-MLA attention: the official reference
+// (deepseek-ai/DeepSeek-V4.1-Flash, inference/model.py class Attention) projects
+// kv with self.wkv = Linear(dim, head_dim), normalizes with self.kv_norm =
+// RMSNorm(head_dim), and applies rope to only the LAST qk_rope_head_dim (64) of
+// each head — there is no kv_lora_rank, no kv_b_proj, and no separate k_pe. So
+// attn_kv.weight [5120,512] is a DIRECT per-head KV projection, not an MLA
+// low-rank latent. The old "MLA low-rank" claim here was fixture-vs-reference
+// drift; routing deepseek41 through the MLA machinery requested a 576-wide
+// kv_a_proj_with_mqa from a [512,5120] tensor and panicked. The GGUF
+// "deepseek41" identity now routes through IsDeepSeekV41() to the native
+// non-MLA forwardV41 path (internal/model/v41_forward.go). This is DISTINCT from
+// the safetensors "deepseek_v41" identity, which IsDeepSeekV41() admits to the
+// same native path while refuseDeepSeekV41Native()/admitDeepSeekV41Published()
+// keep their published-config fail-closed gates.
 //
 // This is the MODEL-side forward predicate and deliberately DIVERGES from the
-// loader-side internal/ggufload.archUsesMLAMoELayout: that sibling keeps deepseek41
-// OUT because it gates the glm KV-b 2->1 merge (glmMoeDsaSplitKVB), which must never
-// run for a V4 file (V4 emits a single attn_kv tensor). Do NOT reconcile the two —
-// see deepseek41CanonicalSuffix in internal/ggufload/deepseek41.go.
+// loader-side internal/ggufload.archUsesMLAMoELayout: that sibling also keeps
+// deepseek41 OUT because it gates the glm KV-b 2->1 merge (glmMoeDsaSplitKVB),
+// which must never run for a V4 file (V4 emits a single attn_kv tensor). Do NOT
+// reconcile the two — see deepseek41CanonicalSuffix in
+// internal/ggufload/deepseek41.go.
 func (c Config) usesMLAMoELayout() bool {
-	return c.isGLMMoeDsa() || c.ModelType == "deepseek2" || c.ModelType == "deepseek41"
+	return c.isGLMMoeDsa() || c.ModelType == "deepseek2"
 }
 
 // InKernelBackendPrefixReuseSupported reports whether PrefixSnapshot owns every

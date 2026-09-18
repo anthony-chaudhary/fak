@@ -83,7 +83,7 @@ const (
 	ds41KeyValueLenMLA = glmKeyValueLengthMLA
 	// V4.1's staged vcruz artifact ships the UNSUFFIXED deepseek2 spellings attention.key_length
 	// (per-head qk width, 512 = qk_nope 448 + qk_rope 64) and attention.value_length (per-head v
-	// width). They are the fallback when the *_mla spelling is absent — the exact chain
+	// width). They are the fallback when the *_mla spelling is absent â€” the exact chain
 	// applyGLMMoeDsaConfig uses. Reading only *_mla left QKNopeHeadDim/VHeadDim at 0, which is
 	// how the first physical V4.1 completion died at glmDsaAppendAttentionKV's precondition.
 	ds41KeyKeyLength   = glmKeyKeyLength
@@ -703,8 +703,17 @@ func uint64ArrayOrNil(f *File, key string) []uint64 {
 }
 
 // deepseek41CanonicalSuffix maps a DeepSeek-V4 per-layer GGUF tensor suffix (after
-// "blk.<L>.") to the canonical HF suffix (after "model.layers.<L>.") the native
-// MLA forward reads, reusing the glm/deepseek2 conventions where they match.
+// "blk.<L>.") to the canonical name the NATIVE non-MLA V4.1 forward reads
+// (internal/model/v41_forward.go), reusing the glm/deepseek2 conventions only
+// where the native forward's admitted names and shapes actually match.
+//
+// The native-forward contract is authoritative. Its admitted per-layer shapes
+// live at internal/model/v41_forward.go:652-715 and the names its layer step
+// reads at :862-877 (attn.wq_a/attn.wq_b/attn.wkv/attn.wo_a/attn.wo_b/attn.sink,
+// ffn.gate.weight/ffn.gate.e_score_correction_bias, ffn.shared_experts.w1/w3/w2),
+// the compressor at :352-358/407-409 (attn.compressor.wkv/wgate/norm), and the
+// indexer at :374-383/460-463 (indexer.wq_b/wk/k_norm/weights_proj). Every arm
+// below is grounded against those admitted shapes.
 //
 // Engram suffixes map to the DEDICATED canonical root and carry the layer
 // placeholder "<L>": deepseek41CanonicalSuffix has no layer argument, so the
@@ -717,13 +726,22 @@ func uint64ArrayOrNil(f *File, key string) []uint64 {
 // batched routed experts (ffn_gate_exps/up/down) are handled by the loader's 1->E
 // splitter BEFORE this 1:1 map, exactly as for glm ? see deepseek41BatchedExpert.
 //
-// MLA KV-b: V4 uses the SINGLE attn_kv tensor (unlike glm's attn_k_b/attn_v_b
-// split), so attn_kv maps straight to self_attn.kv_a_proj_with_mqa.weight and
+// The vcruz GGUF converter emits V4.1-Flash as a NON-MLA attention (wkv ->
+// head_dim, kv_norm, partial in-place rope), so attn_kv maps to the native
+// attn.wkv.weight [kvLatentRank, H], NOT to any MLA kv_a_proj_with_mqa leaf, and
 // deepseek41 is deliberately kept OUT of archUsesMLAMoELayout ? the glm KV-b
 // 2->1 merge (glmMoeDsaSplitKVB) must never run for a V4 file.
 //
-// V4.1 emits attn_kv_a_norm, not glm's attn_kv_norm. Both spellings resolve to
-// self_attn.kv_a_layernorm.weight. The compressor, indexer, and sink suffixes
+// Q/KV NORMS (follow-on, deliberately NOT wired): the reference Attention carries
+// self.q_norm = RMSNorm(q_lora_rank) and self.kv_norm = RMSNorm(head_dim), but
+// the reduced native forward has no q_norm/kv_norm lookup yet (see the reads at
+// v41_forward.go:862-877). The loader still maps those suffixes to NON-COLLIDING
+// dedicated leaves (attn.wq_a_norm.weight, attn.kv_norm.weight) so a real file's
+// tensors resolve and cannot collide with an admitted projection; wiring them
+// into the forward is a separate leaf and MUST NOT be done here.
+//
+// V4.1 emits attn_kv_a_norm, not glm's attn_kv_norm. Both spellings converge on
+// the same attn.kv_norm.weight leaf. The compressor, indexer, and sink suffixes
 // also resolve here, which clears only the LOADER's name gate; the reduced
 // forward still fails an in-range layer closed at its own admission seam.
 func deepseek41CanonicalSuffix(suffix string) (string, bool) {
@@ -734,27 +752,36 @@ func deepseek41CanonicalSuffix(suffix string) (string, bool) {
 		return name, true
 	}
 	mapped, ok := map[string]string{
-		"attn_q_a.weight":             "self_attn.q_a_proj.weight",
-		"attn_q_a_norm.weight":        "self_attn.q_a_layernorm.weight",
-		"attn_q_b.weight":             "self_attn.q_b_proj.weight",
-		"attn_kv.weight":              "self_attn.kv_a_proj_with_mqa.weight",
-		"attn_kv_norm.weight":         "self_attn.kv_a_layernorm.weight",
-		"attn_kv_a_norm.weight":       "self_attn.kv_a_layernorm.weight",
-		"attn_output_a.weight":        "self_attn.o_proj_a.weight",
-		"attn_output_b.weight":        "self_attn.o_proj_b.weight",
-		"indexer.attn_q_b.weight":     "self_attn.indexer.wq_b.weight",
-		"indexer.attn_k.weight":       "self_attn.indexer.wk.weight",
-		"indexer.k_norm.weight":       "self_attn.indexer.k_norm.weight",
-		"indexer.proj.weight":         "self_attn.indexer.weights_proj.weight",
-		"attn_compressor_gate.weight": "self_attn.compressor.wgate.weight",
-		"attn_compressor_kv.weight":   "self_attn.compressor.wkv.weight",
-		"attn_compressor_norm.weight": "self_attn.compressor.norm.weight",
-		"attn_sinks.weight":           "attn.attn_sink",
-		"exp_probs_b.bias":            "mlp.gate.e_score_correction_bias",
-		"exp_probs_b_vl.bias":         "mlp.gate.e_score_correction_bias_vl",
-		"ffn_gate_shexp.weight":       "mlp.shared_experts.gate_proj.weight",
-		"ffn_up_shexp.weight":         "mlp.shared_experts.up_proj.weight",
-		"ffn_down_shexp.weight":       "mlp.shared_experts.down_proj.weight",
+		// Native attention projections (v41_forward.go:668-688, read :867-872).
+		"attn_q_a.weight":      "attn.wq_a.weight", // admit [QLoraRank, H]
+		"attn_q_b.weight":      "attn.wq_b.weight", // admit [nH*hd, QLoraRank]
+		"attn_kv.weight":       "attn.wkv.weight",  // admit [kvLatentRank=512, H]
+		"attn_output_a.weight": "attn.wo_a.weight", // admit [OLoraRank, qHeadDim]
+		"attn_output_b.weight": "attn.wo_b.weight", // admit [H, oDim]
+		"attn_sinks.weight":    "attn.sink",        // admit [nH]
+		// Norms: NON-COLLIDING dedicated leaves. The native forward reads neither
+		// yet; wiring them is a follow-on (see the doc comment above). Both the
+		// converter spelling (attn_kv_a_norm) and the glm spelling (attn_kv_norm)
+		// converge on attn.kv_norm.weight.
+		"attn_q_a_norm.weight":  "attn.wq_a_norm.weight",
+		"attn_kv_norm.weight":   "attn.kv_norm.weight",
+		"attn_kv_a_norm.weight": "attn.kv_norm.weight",
+		// Native lightning indexer (admit :374-383, read :460-463).
+		"indexer.attn_q_b.weight": "indexer.wq_b.weight",
+		"indexer.attn_k.weight":   "indexer.wk.weight",
+		"indexer.k_norm.weight":   "indexer.k_norm.weight",
+		"indexer.proj.weight":     "indexer.weights_proj.weight",
+		// Native CED/CSA2 compressor (admit :352-358, read :407-409).
+		"attn_compressor_gate.weight": "attn.compressor.wgate.weight",
+		"attn_compressor_kv.weight":   "attn.compressor.wkv.weight",
+		"attn_compressor_norm.weight": "attn.compressor.norm.weight",
+		// Native MoE gate + score-correction bias and shared experts
+		// (admit :689-703, read :873-877).
+		"exp_probs_b.bias":      "ffn.gate.e_score_correction_bias",
+		"exp_probs_b_vl.bias":   "ffn.gate.e_score_correction_bias_vl",
+		"ffn_gate_shexp.weight": "ffn.shared_experts.w1.weight", // admit [I, H]
+		"ffn_up_shexp.weight":   "ffn.shared_experts.w3.weight", // admit [I, H]
+		"ffn_down_shexp.weight": "ffn.shared_experts.w2.weight", // admit [H, I]
 		// Hyper-connection taps (GUESSED canonical names ? model.Config carries only
 		// the HCMult/iters/eps scalars, and the native V4.1 forward is unimplemented;
 		// these map into a dedicated per-layer hc. namespace so a real file's

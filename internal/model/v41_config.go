@@ -85,11 +85,18 @@ type DeepSeekV41Config struct {
 	DSpark *DeepSeekV41DSparkConfig
 }
 
-// IsDeepSeekV41 reports either exact V4.1 wrapper/text identity. Parsed official
-// configs additionally retain and validate the pair in DeepSeekV41. V4.1 stays
-// distinct from deepseek_v4 because their forward layouts differ.
+// IsDeepSeekV41 reports a V4.1-family identity: either exact wrapper/text
+// identity ("deepseek_v41"/"deepseek_v41_text"), a parsed official config which
+// additionally retains and validates the pair in DeepSeekV41, or the GGUF
+// loader's canonical identity "deepseek41" (canonicalGGUFArch normalizes every
+// V4.1 GGUF spelling onto it). The safetensors "deepseek_v41" identity keeps its
+// fail-closed gates (refuseDeepSeekV41Native / admitDeepSeekV41Published); the
+// GGUF "deepseek41" identity reaches THIS predicate so a loaded GGUF routes to
+// the native non-MLA forwardV41 path instead of the GLM-DSA MLA forward. V4.1
+// stays distinct from deepseek_v4 because their forward layouts differ.
 func (c Config) IsDeepSeekV41() bool {
-	return c.DeepSeekV41 != nil || c.ModelType == "deepseek_v41" || c.ModelType == "deepseek_v41_text"
+	return c.DeepSeekV41 != nil || c.ModelType == "deepseek_v41" ||
+		c.ModelType == "deepseek_v41_text" || c.ModelType == "deepseek41"
 }
 
 type deepSeekV41TextMetadata struct {
@@ -381,7 +388,18 @@ func v41EqualInts(a, b []int) bool {
 	return true
 }
 
+// refuseDeepSeekV41Native is the safetensors "deepseek_v41" load gate: it refuses a
+// config that claims the published V4.1 identity without a parsed/validated envelope,
+// or whose native execution is still pending. It deliberately does NOT refuse the GGUF
+// loader's canonical "deepseek41" identity: that identity has no published envelope and
+// routes to the native non-MLA forwardV41 path (IsDeepSeekV41 -> stepV41/prefillV41),
+// whose own stage-aware admission ladder (v41ForwardAdmitted) is the fail-closed gate.
+// Refusing "deepseek41" here would block the exact staged vcruz GGUF at newModel /
+// NewFromF32Tensors before the forward could ever be reached.
 func refuseDeepSeekV41Native(c Config) error {
+	if c.ModelType == "deepseek41" {
+		return nil
+	}
 	if !c.IsDeepSeekV41() {
 		return nil
 	}
