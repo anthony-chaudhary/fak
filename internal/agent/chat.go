@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/httptrust"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -411,7 +412,16 @@ type Completion struct {
 	// benign empty turn — the kernel's permission floor must never be bypassed by a
 	// format it failed to parse. Set by normalizeCompletionToolCalls.
 	ToolCallsDropped bool
-	ServiceTier      modelroute.ServiceMode
+	// ToolCallsDroppedReason is the CLOSED abi.ReasonCode naming WHY a dropped
+	// tool call could not be recovered. It is the typed companion to
+	// ToolCallsDropped so the conformance gate can render a typed refusal with a
+	// closed reason token instead of an opaque gateway error. ReasonNone means
+	// "unspecified" (the generic unparseable-format case); ReasonMalformed names
+	// the specific case of a forced tool_choice whose advertised schema declared
+	// no required properties, so the runtime could not synthesize arguments
+	// (#2088). Set alongside ToolCallsDropped.
+	ToolCallsDroppedReason abi.ReasonCode
+	ServiceTier            modelroute.ServiceMode
 	// NativeInference is populated only when the caller explicitly requested a
 	// receipt and this planner executed the model math in-kernel. It is captured at
 	// the logits/decode seam, never reconstructed from text or gateway timing.

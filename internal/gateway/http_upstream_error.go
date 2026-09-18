@@ -119,7 +119,11 @@ func (s *Server) failClosedOnUnparsedToolCalls(w http.ResponseWriter, comp *agen
 		return false
 	}
 	if !started {
-		s.logf("gateway: upstream announced tool_calls but none parsed (%s); model=%s", preTag, s.model)
+		s.logf("gateway: upstream announced tool_calls but none parsed (%s); model=%s reason=%s", preTag, s.model, toolCallDropReasonName(comp))
+		if msg, code, typed := toolCallDropRefusal(comp); typed {
+			writeErrCode(w, http.StatusBadGateway, code, msg)
+			return true
+		}
 		writeErr(w, http.StatusBadGateway, "upstream tool-call format not recognized; refusing to skip adjudication")
 		return true
 	}

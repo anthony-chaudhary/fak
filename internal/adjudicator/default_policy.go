@@ -50,12 +50,36 @@ var interpreterEvalFlags = []interpreterEvalSpec{
 func DefaultPolicy() Policy {
 	return Policy{
 		Allow: map[string]bool{
-			// Standard coding tools
+			// Standard coding tools.
+			//
+			// Lowercase-native spellings (#2088): the opencode/native harness emits a
+			// built-in tool under its OWN lowercase name (agent.ToolSkill = "skill",
+			// agent.ToolTodoWrite = "todowrite", ...), NOT only the capital spelling the
+			// Claude-Code lineage advertised. The adjudicator's affirmative-allow lookup is
+			// an EXACT map access (decide.go affirmativeAllowVerdict), so a lowercase name
+			// whose only entry is the capital spelling falls through to default-deny - the
+			// witnessed "Unexpected server error" that kills an agentic turn. Each alias
+			// below is a name the native loop ACTUALLY emits (the Tool* constants declared
+			// in internal/agent); do NOT add speculative case variants. Keeping the alias
+			// explicit (a typed allow entry per admitted name) is preferred over
+			// case-folding the lookup, which would silently widen the floor to every
+			// capitalization of every allowlisted name.
+			//
+			// The lowercase set below is aligned 1:1 with the lowercase block of the
+			// shipped cmd/fak/guard-default-policy.json floor (the embedded manifest the
+			// harness profiles gate against), so the programmatic floor and the on-disk
+			// floor cannot drift: every lowercase built-in the JSON admits is admitted
+			// here too. Extend BOTH together when the native loop grows a built-in.
 			"Bash": true, "bash": true, "BashOutput": true, "KillShell": true, "PowerShell": true,
-			"Read": true, "Edit": true, "edit": true, "Write": true, "write": true, "NotebookEdit": true,
-			"Glob": true, "Grep": true, "LS": true, "TodoWrite": true,
-			"Task": true, "WebFetch": true, "WebSearch": true,
-			"ExitPlanMode": true, "Skill": true, "SlashCommand": true,
+			"Read": true, "read": true, "Edit": true, "edit": true, "Write": true, "write": true, "NotebookEdit": true,
+			"Glob": true, "glob": true, "Grep": true, "grep": true, "LS": true, "ls": true,
+			"multiedit": true, "patch": true, "apply_patch": true, "functions.apply_patch": true,
+			"TodoWrite": true, "todowrite": true, "todoread": true,
+			"Task": true, "task": true, "task_spawn": true, "task_wait": true, "task_status": true, "task_cancel": true,
+			"WebFetch": true, "webfetch": true, "fetch_web": true, "WebSearch": true,
+			"ExitPlanMode": true, "Skill": true, "skill": true, "SlashCommand": true,
+			"list": true, "question": true, "context_control": true, "lsp": true,
+			"execute_code": true, "write_file": true, "edit_file": true,
 
 			// Agent orchestration
 			"Agent": true, "AskUserQuestion": true, "DeferredToolPlaceholder": true,

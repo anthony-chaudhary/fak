@@ -485,9 +485,15 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 
 	// Tool-call conformance fail-closed (mirrors handleChatCompletions): the upstream
 	// announced tool calls but none survived parsing — refusing here is the only way
-	// to keep an unparsed call from crossing the gateway WITHOUT adjudication.
+	// to keep an unparsed call from crossing the gateway WITHOUT adjudication. When
+	// the drop names a closed reason (#2088), render the typed error code so a client
+	// can branch; ReasonNone keeps the historical opaque 502 fail-closed.
 	if comp.ToolCallsDropped && len(asst.ToolCalls) == 0 {
-		s.logf("gateway: upstream announced tool_calls but none parsed (conformance fail-closed); model=%s", s.model)
+		s.logf("gateway: upstream announced tool_calls but none parsed (conformance fail-closed); model=%s reason=%s", s.model, toolCallDropReasonName(comp))
+		if msg, code, typed := toolCallDropRefusal(comp); typed {
+			writeErrCode(w, http.StatusBadGateway, code, msg)
+			return
+		}
 		writeErr(w, http.StatusBadGateway, "upstream tool-call format not recognized; refusing to skip adjudication")
 		return
 	}

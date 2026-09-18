@@ -469,8 +469,6 @@ func normalizeCompletionToolCalls(comp *Completion) *Completion {
 	if len(comp.Message.ToolCalls) > 0 {
 		comp.FinishReason = "tool_calls"
 	} else if rawClaimedToolCalls {
-		// Upstream said tool_calls; we parsed none. Flag the silent no-op so the
-		// caller can fail closed rather than skip adjudication on an unparsed call.
 		comp.ToolCallsDropped = true
 	}
 	return comp

@@ -279,13 +279,22 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	// Tool-call conformance fail-closed (the buffered counterpart is
 	// handleResponses): the upstream announced tool_calls but none survived parsing
 	// — proceeding would skip adjudication on a call the model intended to make.
+	// Before the status line is spent this mirrors the buffered path: a closed drop
+	// reason (#2088) renders a typed error code, ReasonNone keeps the opaque 502.
+	// Mid-stream the HTTP status is already sent, so the typed code cannot ride —
+	// the terminal response.failed stays the fail-closed frame (parity with the
+	// buffered mid-stream arm, which also cannot carry a status).
 	if comp.ToolCallsDropped && len(comp.Message.ToolCalls) == 0 {
 		if started {
-			s.logf("gateway: upstream announced tool_calls but none parsed mid-stream (responses stream); model=%s", s.model)
+			s.logf("gateway: upstream announced tool_calls but none parsed mid-stream (responses stream); model=%s reason=%s", s.model, toolCallDropReasonName(comp))
 			emitResponseFailed()
 			return true
 		}
-		s.logf("gateway: upstream announced tool_calls but none parsed (responses stream); model=%s", s.model)
+		s.logf("gateway: upstream announced tool_calls but none parsed (responses stream); model=%s reason=%s", s.model, toolCallDropReasonName(comp))
+		if msg, code, typed := toolCallDropRefusal(comp); typed {
+			writeErrCode(w, http.StatusBadGateway, code, msg)
+			return true
+		}
 		writeErr(w, http.StatusBadGateway, "upstream tool-call format not recognized; refusing to skip adjudication")
 		return true
 	}

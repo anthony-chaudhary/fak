@@ -46,6 +46,32 @@ func fastPathLookupReceipt(ctx context.Context, c *abi.ToolCall) (*abi.Result, b
 
 const ReasonLoopBodyUnwitnessed = "LOOP_DONE_UNWITNESSED"
 
+// toolCallDropRefusal renders a dropped-but-typed tool call as a typed gateway
+// refusal. When Completion.ToolCallsDroppedReason names a closed abi.ReasonCode,
+// the refusal carries that token as the error `code` (so a client can branch on
+// the closed vocabulary rather than parse prose) and a message naming the reason.
+// It reports typed=false for ReasonNone — the generic unparseable-upstream-format
+// case, whose historical opaque message is preserved. This is the #2088 fix: an
+// empty-`properties` forced tool schema used to surface as an opaque 502 because
+// the runtime could not synthesize the forced call; it now surfaces as a typed
+// MALFORMED refusal.
+func toolCallDropRefusal(comp *agent.Completion) (msg, code string, typed bool) {
+	if comp == nil || comp.ToolCallsDroppedReason == abi.ReasonNone {
+		return "", "", false
+	}
+	name := abi.ReasonName(comp.ToolCallsDroppedReason)
+	return "upstream tool-call format not recognized; refusing to skip adjudication (typed refusal: " + name + " — the model's tool call could not be formed into an adjudicable call)", name, true
+}
+
+// toolCallDropReasonName is the log-only companion to toolCallDropRefusal: the
+// closed reason name, or NONE when unspecified.
+func toolCallDropReasonName(comp *agent.Completion) string {
+	if comp == nil {
+		return abi.ReasonName(abi.ReasonNone)
+	}
+	return abi.ReasonName(comp.ToolCallsDroppedReason)
+}
+
 // ReasonLivelockFuse is the refusal reason stamped when the livelock hard fuse
 // converts a repeated admitted call into a denial. It is RETRYABLE per-tool feedback
 // (the model can make progress by changing approach), never a deny-all session stop.

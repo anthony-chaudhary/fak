@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
@@ -543,7 +544,11 @@ func enforceForcedToolChoice(comp *Completion, choice json.RawMessage, tools []T
 		return comp
 	}
 	if comp.FinishReason == "length" {
+		// A forced named tool whose decode was truncated by the token budget: the
+		// call is OVERSIZE (the payload could not fit), so the gateway renders the
+		// typed OVERSIZE refusal instead of the opaque gap (#2088).
 		comp.ToolCallsDropped = true
+		comp.ToolCallsDroppedReason = abi.ReasonOversize
 		return comp
 	}
 	name := inKernelEffectiveToolName(choice, tools)
@@ -552,7 +557,12 @@ func enforceForcedToolChoice(comp *Completion, choice json.RawMessage, tools []T
 	}
 	args, ok := forcedToolArgumentsFromMessages(name, tools, messages, comp.Message.Content)
 	if !ok {
+		// No required properties were advertised for the forced tool (or none the
+		// runtime could synthesize), so no adjudicable call could be formed. This is
+		// the exact #2088 shape: a forced tool_choice with an empty-properties schema
+		// surfaces as a typed MALFORMED refusal, not an opaque 502.
 		comp.ToolCallsDropped = true
+		comp.ToolCallsDroppedReason = abi.ReasonMalformed
 		return comp
 	}
 	comp.Message.Content = ""

@@ -903,7 +903,15 @@ func hasElidedToolResult(messages []agent.Message) bool {
 
 func (s *Server) validateChatCompletionConformance(w http.ResponseWriter, stream *chatStreamWriter, comp *agent.Completion, asst agent.Message, receiptRequested, decodeTraceRequested, decodeTokenIDsRequested bool, inputTriggerRoute *InputTriggerRouteReceipt) bool {
 	if comp.ToolCallsDropped && len(asst.ToolCalls) == 0 {
-		s.logf("gateway: upstream announced tool_calls but none parsed (conformance fail-closed); model=%s", s.model)
+		s.logf("gateway: upstream announced tool_calls but none parsed (conformance fail-closed); model=%s reason=%s", s.model, toolCallDropReasonName(comp))
+		if msg, code, typed := toolCallDropRefusal(comp); typed {
+			if stream != nil {
+				stream.fail(http.StatusBadGateway, code, msg)
+				return false
+			}
+			writeErrCode(w, http.StatusBadGateway, code, msg)
+			return false
+		}
 		const conformanceMsg = "upstream tool-call format not recognized; refusing to skip adjudication"
 		if stream != nil {
 			stream.fail(http.StatusBadGateway, "", conformanceMsg)
