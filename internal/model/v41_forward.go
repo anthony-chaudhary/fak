@@ -656,13 +656,7 @@ func (m *Model) v41ForwardAdmitted() error {
 		if err := m.v41AdmitShape(layerName(l, "ffn_norm.weight"), v41StageLayer, l, H); err != nil {
 			return err
 		}
-		if err := m.v41AdmitShape(layerName(l, "mhc.mixes.weight"), v41StageMHC, l, v41MHCMixWidth, H); err != nil {
-			return err
-		}
-		if err := m.v41AdmitShape(layerName(l, "mhc.base"), v41StageMHC, l, v41MHCMixWidth); err != nil {
-			return err
-		}
-		if err := m.v41AdmitShape(layerName(l, "mhc.scale"), v41StageMHC, l, 3); err != nil {
+		if err := m.v41AdmitMHC(l); err != nil {
 			return err
 		}
 		if err := m.v41AdmitShape(layerName(l, "attn.wq_a.weight"), v41StageAttention, l, cfg.QLoraRank, H); err != nil {
@@ -716,6 +710,65 @@ func (m *Model) v41ForwardAdmitted() error {
 	}
 	_ = hd
 	return nil
+}
+
+// v41AdmitMHC admits a layer's mHC coefficient block in either the reduced
+// fixture's legacy [mixWidth, H] geometry or the published artifact's flattened
+// four-stream geometry. The reference (inference/model.py mHC) projects the
+// width-4H flattened residual through hc_attn_fn; the staged vcruz Q2_K artifact
+// stores that projection as [4H, 24] (input-major), while the forward consumes it
+// logically as [24, 4H] (coefficient-major). Both the logical [mixWidth, 4H]
+// orientation and the stored [4H, mixWidth] transpose are admitted here so a real
+// artifact load reaches the forward instead of refusing at admission; every other
+// shape (including the reduced [mixWidth, H]) still falls through to the named
+// two-axis shape guard and fails closed. The base/scale vectors are unchanged.
+func (m *Model) v41AdmitMHC(l int) error {
+	H := m.Cfg.HiddenSize
+	name := layerName(l, "mhc.mixes.weight")
+	out, in, ok := m.residentShape(name)
+	if !ok {
+		return v41StageErr(v41StageMHC, l, fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
+	}
+	switch {
+	case out == v41MHCMixWidth && (in == H || in == 4*H):
+		// logical [mixWidth, in]
+	case in == v41MHCMixWidth && out == 4*H:
+		// stored artifact transpose [4H, mixWidth]
+	default:
+		return v41StageErr(v41StageMHC, l,
+			fmt.Errorf("%w: tensor %s shape [%d %d], want [%d %d], [%d %d] or [%d %d]",
+				ErrV41ForwardStage, name, out, in, v41MHCMixWidth, H, v41MHCMixWidth, 4*H, 4*H, v41MHCMixWidth))
+	}
+	if err := m.v41AdmitShape(layerName(l, "mhc.base"), v41StageMHC, l, v41MHCMixWidth); err != nil {
+		return err
+	}
+	if err := m.v41AdmitShape(layerName(l, "mhc.scale"), v41StageMHC, l, 3); err != nil {
+		return err
+	}
+	return nil
+}
+
+// v41MHCWeightLayout reports how an admitted mhc.mixes.weight is laid out:
+// flat=true for the published flattened-four-stream projection (24 x 4H logical,
+// or the artifact's 4H x 24 storage transpose), flat=false for the reduced
+// fixture's legacy 24 x H single-stream matmul. ok=false means the weight is
+// absent or holds neither admitted geometry, so the caller fails closed rather
+// than reading a wrong sub-matrix.
+func (m *Model) v41MHCWeightLayout(l int) (flat, transposed, ok bool) {
+	out, in, present := m.residentShape(layerName(l, "mhc.mixes.weight"))
+	if !present {
+		return false, false, false
+	}
+	switch {
+	case out == v41MHCMixWidth && in == 4*m.Cfg.HiddenSize:
+		return true, false, true // logical [24, 4H]
+	case out == 4*m.Cfg.HiddenSize && in == v41MHCMixWidth:
+		return true, true, true // stored artifact transpose [4H, 24]
+	case out == v41MHCMixWidth && in == m.Cfg.HiddenSize:
+		return false, false, true // reduced legacy [24, H]
+	default:
+		return false, false, false
+	}
 }
 
 // v41AdmitShape asserts a named tensor is present with the expected shape.
@@ -895,6 +948,30 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 
 	seq := len(x)
 	// ---- mHC coefficient split (one split per layer) ----
+	//
+	// The mHC mix projection geometry is per-layer (it is a per-layer weight), so
+	// resolve it once. The published artifact's hc_attn_fn is the flattened
+	// four-stream projection (logical 24 x 4H, stored [4H, 24]); the reference
+	// (inference/model.py mHC; v4_flash_oracle_test.go:168) computes it over the
+	// four width-H streams laid end to end with a single shared flatten-RMS. The
+	// reduced fixture uses the legacy 24 x H single-stream matmul. Executing the
+	// flattened geometry is a distinct rung (it needs the flattened-residual
+	// projection through the resident quantized hc_attn_fn); it is admitted so a
+	// real artifact loads, but this forward refuses it BY NAME rather than
+	// silently projecting the wrong sub-matrix.
+	mhcFlat, mhcTransposed, mhcOK := m.v41MHCWeightLayout(l)
+	if !mhcOK {
+		return v41StageErr(v41StageMHC, l,
+			fmt.Errorf("%w: mHC mix weight holds no admitted geometry", ErrV41ForwardStage))
+	}
+	if mhcFlat {
+		orient := "logical [24,4H]"
+		if mhcTransposed {
+			orient = "stored [4H,24]"
+		}
+		return v41StageErr(v41StageMHC, l,
+			fmt.Errorf("%w: mHC mix weight is the published flattened four-stream projection (%s); the native forward executes only the reduced 24 x H single-stream projection until the flattened-residual projection rung lands", ErrV41ForwardStage, orient))
+	}
 	hcByPos := make([]v41MHCMix, seq)
 	preByPos := make([][]float32, seq)
 	for t := 0; t < seq; t++ {
