@@ -347,7 +347,6 @@ var maintainerDevCommands = []string{
 	"tier-calibrate",
 	"token-defaults-scorecard",
 	"token-profile",
-	"tool-coverage-audit",
 	"tool-width",
 	"toolproc",
 	"traj",

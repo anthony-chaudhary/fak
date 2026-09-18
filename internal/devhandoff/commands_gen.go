@@ -63,7 +63,6 @@ var Commands = []Command{
 	{Name: "study-priority", Owner: "dev", Handler: "devcmd.RunStudyPriority", SourceOrigin: "internal/devcmd/study_priority.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "study-tickets", Owner: "dev", Handler: "devcmd.RunStudyTickets", SourceOrigin: "internal/devcmd/study_tickets.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "ticket", Aliases: []string{"tickets"}, Owner: "dev", Handler: "devcmd.RunCompanionTicket", SourceOrigin: "internal/devcmd/companion_ticket.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
-	{Name: "tool-coverage-audit", Owner: "dev", Handler: "devcmd.RunToolCoverageAudit", SourceOrigin: "internal/devcmd/tool_coverage_audit.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "whats-changed", Owner: "dev", Handler: "devcmd.RunWhatsChanged", SourceOrigin: "internal/devcmd/whats_changed.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "wiki", Owner: "dev", Handler: "devcmd.RunWiki", SourceOrigin: "internal/devcmd/wiki.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "windows-setup", Owner: "dev", Handler: "runWindowsSetup", SourceOrigin: "cmd/fak-dev/windows_setup.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},

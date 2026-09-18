@@ -442,7 +442,6 @@ var verbTiers = map[string]VerbTier{
 	"tier-calibrate":                TierDev,
 	"token-defaults-scorecard":      TierDev,
 	"token-profile":                 TierDev,
-	"tool-coverage-audit":           TierDev,
 	"toolproc":                      TierDev,
 	"traj":                          TierDev,
 	"trajctl":                       TierDev,

@@ -449,7 +449,6 @@ var verbManifest = []Verb{
 	{Name: "tier-calibrate", Synopsis: "outcome-calibration fold over recorded tier decisions: propose threshold moves from witnessed outcomes", Lane: "cmd"},
 	{Name: "token-defaults-scorecard", Synopsis: "native token-saving-defaults control-pane payload", Lane: "cmd"},
 	{Name: "token-profile", Synopsis: "price a forecast of uncached/cached input and reserved output tokens into USD + scheduler weight units", Lane: "tokenprofile"},
-	{Name: "tool-coverage-audit", Synopsis: "audit load-bearing tool coverage for a workspace against the advisory minimum floor", Lane: "cmd"},
 	{Name: "tool-width", Synopsis: "fold tool-width observations and ratchet batched-turn rate against a baseline", Lane: "cmd"},
 	{Name: "toolproc", Synopsis: "the kernel's process table for tool calls: fold a lifecycle journal into deadline/stall/orphan/kill verdicts", Lane: "cmd", Doc: "docs/notes/CONCEPT-TOOL-PROCESS-TABLE-2026-07-02.md"},
 	{Name: "top", Synopsis: "= fak ps --watch (the live process-table top mode)", Lane: "cmd", Doc: "docs/operator-control-plane.md"},

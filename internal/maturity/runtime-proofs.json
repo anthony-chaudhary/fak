@@ -3977,11 +3977,6 @@
             "lane": "toolcatalog"
         },
         {
-            "command": "fak dev devindex leaf toolcoverage",
-            "output_contains": "toolcoverage",
-            "lane": "toolcoverage"
-        },
-        {
             "command": "fak dev devindex leaf toollint",
             "output_contains": "toollint",
             "lane": "toollint"

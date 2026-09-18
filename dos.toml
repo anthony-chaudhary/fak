@@ -378,7 +378,7 @@ concurrent = [
   "stopfailure", "stripeload", "strmatch", "supervisoragent", "supportmaturity",
   "supportmaturityscore", "swebenchsota", "sweepconfig", "syspromptmmu", "systemservice",
   "taskdecision", "taskgraph", "taskidentity", "terminalbench", "terminalrisk", "testroute",
-  "timeoutphase", "tokencache", "toolcoverage", "toolrollup", "toolsandbox", "toolseq",
+  "timeoutphase", "tokencache", "toolrollup", "toolsandbox", "toolseq",
   "toolshape", "tooltrend", "toon", "trajctlhook", "trajectory", "trajhook", "trajquery",
   "treedoctor", "trendreport", "trigram", "trunkbuildprobe", "turnkind", "turntaxmeter",
   "uiquality", "ultracodebench", "unwiredscore", "unwitnessedclaim", "usagelog", "vcachecal", "vcacheextract",
@@ -1355,7 +1355,6 @@ terminalrisk = ["internal/terminalrisk/**"]
 testroute = ["internal/testroute/**"]
 timeoutphase = ["internal/timeoutphase/**"]
 tokencache = ["internal/tokencache/**"]
-toolcoverage = ["internal/toolcoverage/**"]
 toolrollup = ["internal/toolrollup/**"]
 toolsandbox = ["internal/toolsandbox/**"]
 toolseq = ["internal/toolseq/**"]

@@ -99,8 +99,6 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunCodexHookRecurrence(stdout, stderr, argv[1:])
 	case "refactor-verify":
 		return devcmd.RunRefactorVerify(stdout, stderr, argv[1:])
-	case "tool-coverage-audit":
-		return devcmd.RunToolCoverageAudit(stdout, stderr, argv[1:])
 	case "workflow-audit":
 		return devcmd.RunWorkflowAudit(stdout, stderr, argv[1:])
 	case "fleetcap":
@@ -228,7 +226,6 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  codex-hook-profile [flags]           inspect effective Codex hook topology and readiness")
 	fmt.Fprintln(w, "  sessiondiag [flags]                  diagnose abrupt Codex/fak sessions")
 	fmt.Fprintln(w, "  refactor-verify [flags]              verify declaration-preserving code motion")
-	fmt.Fprintln(w, "  tool-coverage-audit [flags]          audit load-bearing tool test coverage")
 	fmt.Fprintln(w, "  workflow-audit [flags]               audit repository workflow refs and docs")
 	fmt.Fprintln(w, "  fleetcap [flags]                      plan fleet capacity (Little's law, no live worker)")
 	fmt.Fprintln(w, "  catchup [flags]                       measure repository development catch-up debt")

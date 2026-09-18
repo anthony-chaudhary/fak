@@ -868,23 +868,15 @@ jobs:
             || echo "::warning title=subject-coverage::witness-gradeable commit-subject coverage below the watched floor (advisory) — lead the description with a recognized verb (add/fix/implement/…); see tools/check_commit_msg.py"
           echo "::endgroup::"
 
-      # Load-bearing tool test-coverage (advisory): code_quality_scorecard grades GO
-      # only, so the python tools/ cluster (~196 modules, many a SKILL.md helper or a
-      # CI gate) had NO coverage gate -- exactly how the 470-line issue_triage.py
-      # shipped untested and invisible. tool_coverage_audit is the cheap STATIC
-      # complement (no test execution, zero added CI-time): it flags load-bearing
-      # modules (those a SKILL.md / ci.yml references) that have no sibling _test.py.
-      # Two-tier like its siblings: the unit tests are HARD, the coverage check runs
-      # --min-coverage as a ::warning:: floor. Pure filesystem read.
-      - name: tool test-coverage (advisory; unit tests HARD, load-bearing coverage a watched floor)
-        working-directory: ${{ github.workspace }}
-        run: |
-          go test ./internal/devcmd -run ToolCoverageAudit -count=1
-          echo "::group::tool-coverage-audit (load-bearing python tools/ test coverage, advisory)"
-          go run ./cmd/fak-dev tool-coverage-audit --min-coverage 75 \
-            || echo "::warning title=tool-coverage::load-bearing tool test-coverage below the watched floor (advisory) — add a sibling _test.py for the named modules; run fak-dev tool-coverage-audit"
-          echo "::endgroup::"
-
+      # Load-bearing tool test-coverage (advisory) MOVED to the private companion as
+      # `fak-sync tool-coverage-audit` (fak-private#186, public fak#6022): the audit is
+      # repository-maintainer control-plane work over the python tools/ cluster
+      # (load-bearing modules -- those a SKILL.md / ci.yml references -- lacking a
+      # sibling _test.py), not a runtime capability, so it left the open-core tree.
+      # It runs in the private repo's own CI, which has both the tools/ corpus and the
+      # companion checkout. Public CI keeps NO reference to the private command: the
+      # workflow-ref ratchet rejects a `go run ./cmd/...` target absent from this repo.
+      #
       # DOS trust-floor gate: the verdict IS the exit code. `dos review` fails the build
       # (exit 1) if any commit in the pushed range makes a code/test/doc claim its own diff
       # does not witness (a "fix: X" that didn't touch X, an empty "done"). This is DOS
