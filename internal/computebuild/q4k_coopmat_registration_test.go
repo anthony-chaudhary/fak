@@ -1,6 +1,11 @@
 package computebuild
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 // TestVulkanShadersIncludesQ4KCoopMat pins the q4k_matmul_coopmat shader in the
 // canonical Vulkan shader bundle (fak#12177). The 2D cooperative-matrix Q4_K
@@ -30,6 +35,35 @@ func TestVulkanShadersIncludesQ4KCoopMat(t *testing.T) {
 		}
 		if !ok {
 			t.Fatalf("VulkanShaders is missing %q; the Q4_K scalar/Wave32 fallback must stay registered", required)
+		}
+	}
+}
+
+// TestQ4KCoopMatShaderDeclaresRequiredExtensions pins the GLSL extension
+// declarations the cooperative-matrix Q4_K prefill arm needs to compile at all
+// (fak#13220). glslc 2026.3 rejects the bare shader: the `gl_ScopeSubgroup`
+// scope argument used by every `coopmat<...>` declaration is supplied by
+// GL_KHR_memory_scope_semantics, so a shader that enables only
+// GL_KHR_cooperative_matrix + GL_KHR_shader_subgroup_basic fails with
+// "'gl_ScopeSubgroup' : required extension not requested" and the whole
+// Vulkan binary build aborts BEFORE any physical run. This is a build-break
+// guard, not a runtime-capability guard: the arm still falls back to the
+// scalar kernel when the device lacks cooperative-matrix support.
+func TestQ4KCoopMatShaderDeclaresRequiredExtensions(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "compute", "shaders", "q4k_matmul_coopmat.comp"))
+	if err != nil {
+		t.Fatalf("read q4k_matmul_coopmat.comp: %v", err)
+	}
+	text := string(src)
+	if !strings.Contains(text, "gl_ScopeSubgroup") {
+		t.Skip("coopmat shader no longer uses gl_ScopeSubgroup; extension guard retired")
+	}
+	for _, ext := range []string{
+		"GL_KHR_cooperative_matrix",
+		"GL_KHR_memory_scope_semantics",
+	} {
+		if !strings.Contains(text, "#extension "+ext+" : enable") {
+			t.Fatalf("q4k_matmul_coopmat.comp must enable %s; without it glslc rejects gl_ScopeSubgroup and the Vulkan binary build aborts", ext)
 		}
 	}
 }
