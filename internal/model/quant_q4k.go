@@ -110,6 +110,13 @@ func (q *q4kTensor) materializeRaw() ([]byte, error) {
 	// first-token promotion — roughly another 10 GiB for Qwen3.8-27B. With no mapping the
 	// page-aligned output is still allocated once, but it is filled window-by-window out of a
 	// single reusable scratch buffer so the transient beyond it is bounded by the window.
+	//
+	// #13253 ledger note: unlike the non-Q4_K lazy k-quants (quant_kquant_lazy.go, which
+	// MEMOIZE into kQuantTensor.raw), the Q4_K lazy host bytes here are TRANSIENT — the caller
+	// hands them to the device and frees them (weightHALQ4K + the FAK_Q4K_FREE_CPU single-
+	// residency release), so there is no retained dense bytes to charge. This leaf therefore
+	// bounds only the memoizing k-quant path; Q4_K lazy host retention is covered by that
+	// transient single-residency release, not by the dense-resident ledger.
 	raw := makePageAlignedResidentBytes(q.lazy.Bytes)
 	window := q4kMaterializeWindowBytes
 	if window <= 0 || window > q.lazy.Bytes {

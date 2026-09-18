@@ -70,6 +70,18 @@ func (qt *kQuantTensor) ensureRawCPU(op string) {
 			"(#13216; the lazy range could not be faulted and a CPU k-quant matmul ran — refusing "+
 			"to read nil raw and silently produce zeros).", op, qt.kind, qt.out, qt.in, err))
 	}
+	// #13253: memoization RETENTION is bounded by the model's declared streamed-dense working
+	// set. A nil ledger (no bound declared) skips this entirely, so the default path is
+	// byte-for-byte unchanged. When a bound is declared, refuse to grow retained dense bytes
+	// past it by name rather than silently exceeding the declared budget and inviting the
+	// kernel OOM this bound exists to prevent. A refused charge must not retain: panic before
+	// the memoizing assignment.
+	if qt.denseBound != nil {
+		incoming := int64(len(raw))
+		if !qt.denseBound.chargeRetained(incoming) {
+			panic(denseResidentBoundPanic(op, qt.denseBound.bound, incoming, qt.denseBound.retained))
+		}
+	}
 	qt.raw = raw
 }
 
@@ -147,6 +159,8 @@ func (b *QuantBuilder) AddLazyKQuant(canon string, shape []int, kind kQuantKind,
 			nblk: shape[1] / blockWeights,
 			kind: kind,
 			lazy: &src,
+			// Shared model-level ledger; nil unless a dense bound was declared.
+			denseBound: b.m.denseLedger(),
 		}
 	})
 }

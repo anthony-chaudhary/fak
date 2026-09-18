@@ -595,6 +595,15 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 	if err := builder.SetMTPRetention(loadOpts.retainMTP); err != nil {
 		return nil, err
 	}
+	// #13253: make the declared bounded streamed-dense working set a real runtime consumer.
+	// Until now WithStreamedDenseQ4KWorkingSet only recorded o.streamedDenseBytes, so a lazy
+	// dense k-quant materialized + memoized its whole payload and grew host anon-RSS past the
+	// declared budget. With a bound declared, the builder's model refuses to retain more
+	// memoized dense bytes than the declaration allows; the default (no option, or the
+	// stream-through 0 budget) leaves the builder unbounded and byte-for-byte unchanged.
+	if loadOpts.streamedDenseBounded {
+		builder.SetDenseResidentBound(loadOpts.streamedDenseBytes)
+	}
 	kvbHalf := map[int]glmKVBHalf{} // MLA KV-b 2->1 merge buffer (see QuantModelProfile)
 	qwenMTPSeen := newQwen35MTPSeenWithRetention(cfg, loadOpts.retainMTP)
 	p.SetTotal(len(s.File.Tensors))

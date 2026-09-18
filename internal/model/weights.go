@@ -216,6 +216,17 @@ type Model struct {
 	// experts. nil unless such experts loaded; the f32/Q8/Q4_K paths never read it.
 	kqw map[string]*kQuantTensor
 
+	// denseResidentBoundBytes is the declared bounded streamed-dense host working set (0 =
+	// unbounded). It is set by QuantBuilder.SetDenseResidentBound from the loader's
+	// WithStreamedDenseQ4KWorkingSet decision (#13253) and is the model-level ceiling the shared
+	// denseResidentLedger enforces over memoized lazy dense materialization.
+	denseResidentBoundBytes int64
+
+	// denseResidentLedger is the model-wide retention accounting for memoized lazy dense
+	// materialization, created lazily by denseLedger() only when denseResidentBoundBytes > 0 so
+	// the default-off path allocates nothing. See dense_residency_bound.go.
+	denseResidentLedger *denseResidentLedger
+
 	// expertCheckpoint is the R5/#5616 tier BELOW the bounded device ring: the per-expert range
 	// reader that serves a routed-expert weight ABSENT from q4kw/kqw by faulting exactly that
 	// expert's stride out of the fused checkpoint slab. nil unless a loader attached one

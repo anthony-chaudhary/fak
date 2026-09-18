@@ -177,6 +177,12 @@ type kQuantTensor struct {
 	lazy          *LazyQ4KRange
 	replicas      *compute.NUMAReplicaSet
 	numaPool      *compute.NUMADecodePool
+
+	// denseBound is the model-wide retention ledger for memoized lazy dense materialization
+	// (#13253). It is pointer-shared with the Model so every lazy tensor of one model charges
+	// the same ceiling. nil when no bound was declared, and then materialization is unbounded
+	// and byte-for-byte unchanged.
+	denseBound *denseResidentLedger
 }
 
 func (qt *kQuantTensor) rawForNode(nodeID int) []byte {

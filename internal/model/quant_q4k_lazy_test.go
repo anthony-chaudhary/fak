@@ -596,3 +596,122 @@ func TestAddLazyKQuantPerTypeExportsReachThePrimitive(t *testing.T) {
 		})
 	}
 }
+
+// TestLazyKQuantCPUGEMVHonorsDenseResidentBound is the #13253 RED->GREEN witness that the
+// declared bounded streamed-dense working set has a genuine runtime consumer. Before the fix
+// WithStreamedDenseQ4KWorkingSet only recorded the budget; a lazy dense k-quant then
+// materialized + MEMOIZED its whole payload into qt.raw with nothing to stop retained dense
+// bytes from exceeding the declaration. After it, a bound attached to the model turns memoized
+// materialization into a fail-closed retention ceiling: the first payload fitting the bound
+// materializes and computes byte-identically to the resident tensor, and the next charge past
+// the bound panics by name instead of silently growing host anon-RSS.
+func TestLazyKQuantCPUGEMVHonorsDenseResidentBound(t *testing.T) {
+	kind := kindQ6K
+	payload := kQuantLazyLazyPayload(kind, 4, 256)
+	payloadLen := int64(len(payload))
+
+	newLazy := func() (*Model, *kQuantTensor) {
+		m := &Model{}
+		m.denseResidentBoundBytes = payloadLen // exactly one payload's worth
+		ledger := m.denseLedger()
+		if ledger == nil {
+			t.Fatal("declared bound produced a nil ledger")
+		}
+		reader := &chunkedProbeReaderAt{data: append([]byte(nil), payload...)}
+		return m, &kQuantTensor{
+			out: 4, in: 256, nblk: 1, kind: kind,
+			lazy:       &LazyQ4KRange{Reader: reader, Bytes: len(payload)},
+			denseBound: ledger,
+		}
+	}
+
+	x := make([]float32, 256)
+	for i := range x {
+		x[i] = float32(i%13) * 0.25
+	}
+	resident := &kQuantTensor{out: 4, in: 256, nblk: 1, kind: kind, raw: payload}
+	want := kQuantMatRows(resident, x)
+
+	// Sub-case GREEN/default-off: an UNBOUNDED model (no declaration) materializes two lazy
+	// tensors and computes byte-identically to the resident result — no new behavior.
+	t.Run("unbounded default-off", func(t *testing.T) {
+		unbounded := &Model{}
+		if unbounded.denseLedger() != nil {
+			t.Fatal("bound 0 allocated a ledger, want none")
+		}
+		for i := 0; i < 2; i++ {
+			reader := &chunkedProbeReaderAt{data: append([]byte(nil), payload...)}
+			lazy := &kQuantTensor{
+				out: 4, in: 256, nblk: 1, kind: kind,
+				lazy:       &LazyQ4KRange{Reader: reader, Bytes: len(payload)},
+				denseBound: unbounded.denseLedger(), // nil: default-off
+			}
+			got := kQuantMatRows(lazy, x)
+			if len(lazy.raw) == 0 {
+				t.Fatalf("tensor %d: unbounded model did not memoize", i)
+			}
+			for o := range want {
+				if math.Float32bits(got[o]) != math.Float32bits(want[o]) {
+					t.Fatalf("tensor %d row %d = %v, want %v", i, o, got[o], want[o])
+				}
+			}
+		}
+	})
+
+	// Sub-case GREEN/bounded: the first payload fits exactly; the second exceeds the ceiling
+	// and materialization panics by name with #13253, never silently retaining past the bound.
+	t.Run("bounded refuses over-budget retention", func(t *testing.T) {
+		_, first := newLazy()
+		firstGot := kQuantMatRows(first, x)
+		if len(first.raw) == 0 {
+			t.Fatal("first lazy tensor did not materialize under the bound")
+		}
+		for o := range want {
+			if math.Float32bits(firstGot[o]) != math.Float32bits(want[o]) {
+				t.Fatalf("first row %d = %v, want byte-identical resident result %v", o, firstGot[o], want[o])
+			}
+		}
+		if got := first.denseBound.retained; got != payloadLen {
+			t.Fatalf("retained after first = %d, want %d", got, payloadLen)
+		}
+
+		// Second tensor shares the SAME ledger; its payload would double retained past bound.
+		second := &kQuantTensor{
+			out: 4, in: 256, nblk: 1, kind: kind,
+			lazy:       &LazyQ4KRange{Reader: &chunkedProbeReaderAt{data: append([]byte(nil), payload...)}, Bytes: len(payload)},
+			denseBound: first.denseBound,
+		}
+		msg := recoverContains(func() { kQuantMatRows(second, x) })
+		if msg == "" {
+			t.Fatal("second materialization past the bound did not panic")
+		}
+		if !strings.Contains(msg, "dense resident bound") || !strings.Contains(msg, "#13253") {
+			t.Fatalf("bound panic = %q, want it to name the bound and #13253", msg)
+		}
+		// RED-proof: the refused charge must not retain, and retained must never exceed bound.
+		if len(second.raw) != 0 {
+			t.Fatalf("refused second materialization retained %d bytes, want none", len(second.raw))
+		}
+		if first.denseBound.retained > first.denseBound.bound {
+			t.Fatalf("retained %d exceeded bound %d", first.denseBound.retained, first.denseBound.bound)
+		}
+		if first.denseBound.retained != payloadLen {
+			t.Fatalf("refused charge moved retained to %d, want it unchanged at %d", first.denseBound.retained, payloadLen)
+		}
+	})
+}
+
+// TestSetDenseResidentBoundRefusesNegativeAsUnbounded pins the option contract: a negative
+// declared budget is not silently accepted as a real ceiling — SetDenseResidentBound clamps it
+// to 0 (unbounded) and never creates a ledger, matching WithStreamedDenseQ4KWorkingSet's
+// refusal of a negative budget at resolution.
+func TestSetDenseResidentBoundRefusesNegativeAsUnbounded(t *testing.T) {
+	b := NewQuantBuilder(Config{HiddenSize: 256}, false)
+	b.SetDenseResidentBound(-4096)
+	if b.m.denseResidentBoundBytes != 0 {
+		t.Fatalf("negative bound stored as %d, want 0", b.m.denseResidentBoundBytes)
+	}
+	if b.m.denseLedger() != nil {
+		t.Fatal("negative bound allocated a ledger, want none")
+	}
+}
