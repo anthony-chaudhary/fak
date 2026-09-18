@@ -343,6 +343,9 @@ func nativeReceiptEvidenceClass(receipt *model.NativeInferenceReceipt) string {
 	}
 
 	b := boundedBackend(receipt.Backend)
+	if b == "vulkan" {
+		return "vulkan"
+	}
 	if (b == "metal" || b == "cuda") && hasDeviceProof {
 		return "device"
 	}
@@ -366,6 +369,9 @@ func phaseReceiptEvidenceClass(receipt PhaseReceipt) string {
 		return "synthetic"
 	}
 	b := boundedBackend(receipt.Backend)
+	if b == "vulkan" {
+		return "vulkan"
+	}
 	hasDevicePhase := false
 	for _, p := range receipt.Phases {
 		if (p.Phase == PhaseKernel || p.Phase == PhaseHostUpload || p.Phase == PhaseHostDownload || p.Phase == PhaseSynchronization) &&
@@ -437,6 +443,8 @@ func boundedBackend(v string) string {
 		return "cuda"
 	case "metal":
 		return "metal"
+	case "vulkan":
+		return "vulkan"
 	case "cpu":
 		return "cpu"
 	case "synthetic", "mock":
@@ -452,6 +460,8 @@ func boundedForwardPath(v string) string {
 		return "qwen_metal"
 	case strings.Contains(v, "qwen") && strings.Contains(v, "cuda"):
 		return "qwen_cuda"
+	case strings.Contains(v, "qwen") && strings.Contains(v, "vulkan"):
+		return "qwen_vulkan"
 	case v == "synthetic" || v == "mock":
 		return "synthetic"
 	case v == "":
