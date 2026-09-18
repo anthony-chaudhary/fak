@@ -130,8 +130,9 @@
       "note": "harness 'model' field is the default label; actual loaded model is the 3B GGUF above"
     },
     "fak": {
-      "status": "BLOCKED",
-      "reason": "peer Metal lease + /v1/completions gap fak#13027"
+      "status": "QUIESCE_BLOCKED",
+      "reason": "host not quiesced: peer /tmp/fak-metaltest at ~578% CPU and peer fak-native (pid 79900) holding the shared GPU lease while idle; load avg never fell below 9.7 over a 2-minute watch",
+      "endpoint_gap": "fak#13027 RESOLVED (cmd/fak/up.go:1141 serves /v1/completions -> handleCompletions); not a blocker"
     },
     "geometry": {
       "prefix_tokens": 4096,
@@ -172,8 +173,26 @@
     },
     "llamacpp_command": "llama-server -m Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf --parallel 8 -c 32768 --host 127.0.0.1 --port 8081",
     "fak_arm": {
-      "status": "BLOCKED",
-      "reason": "peer Metal lease; /v1/completions vs /v1/chat/completions gap fak#13027"
+      "status": "QUIESCE_BLOCKED",
+      "reason": "host not quiesced; peer Metal lease + peer metaltest contention. Endpoint gap fak#13027 is RESOLVED and is no longer a blocker.",
+      "checked_at_utc": "2026-09-18T16:51:42Z",
+      "contention_evidence": {
+        "load_average_sweep_2min": [12.55, 11.32, 10.37, 9.90, 9.85, 9.73, 9.97, 12.61, 15.27],
+        "load_average_min_observed": 9.73,
+        "quiesce_threshold": 2.0,
+        "peer_metaltest": { "pid": 93463, "cpu_percent": 578.6, "elapsed": "05:46" },
+        "peer_fak_native": { "pid": 79900, "cpu_percent": 0.0, "elapsed": "16:10" },
+        "gpu_lease_path": "/var/folders/z2/qgyzc8gx6kn1mkh6kfhlb6qw0000gp/T/fak-gpu.lease",
+        "gpu_lease_contents": "79900",
+        "gpu_lease_holder": "fak-native pid 79900 (idle, holds lease open fd 11u per lsof)"
+      },
+      "mechanism_witness": {
+        "cmd_fak_TestTurnkeyConcurrentBatch": "go -C ../fak test ./cmd/fak/ -run TestTurnkeyConcurrentBatch -count=1 -> ok github.com/anthony-chaudhary/fak/cmd/fak 1.174s",
+        "cmd_fak_dev_TestSubagentFanoutConcurrencyScaling": "go test ./cmd/fak-dev/ -run TestSubagentFanoutConcurrencyScaling -count=1 -> ok github.com/anthony-chaudhary/fak/cmd/fak-dev 1.227s (run in the fak/ticket-1591 worktree; commit 8d10967e, in origin/main)",
+        "note": "mechanism half (same-prefix coalescing + deterministic concurrency-scaling cell) is independently witnessed and GREEN; only the quiesced physical run is blocked"
+      },
+      "repro_command": "fak-dev bench-subagent-fanout --live --arms fak,llamacpp --fak-url http://127.0.0.1:8082 --llamacpp-url http://127.0.0.1:8081 --fanout 1,4,8 --prefix-tokens 4096 --suffix-tokens 512 --decode-tokens 64 --trials 5 --json --out docs/benchmarks/receipts/mac-subagent-cache-reuse/m3pro.json",
+      "verdict": "quiesce-blocked; no live fak number measured, none modeled or inferred"
     },
     "label": "[SW-VERIFIED]"
   }

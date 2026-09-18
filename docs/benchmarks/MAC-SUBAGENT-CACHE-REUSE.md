@@ -161,9 +161,22 @@ changes one of these is not comparable (`MOMENT-IN-TIME-PROVENANCE-SPEC.md` §2.
 
 ## 5. Results
 
-**The `fak` arm cells remain `<PENDING>`.** The `llamacpp` (OSS reference) arm has
-produced a **real, live** baseline on this M3 Pro (2026-09-14); the `fak` arm was
-blocked (see below) and no number is estimated, projected, or extrapolated for it.
+**The `fak` arm cells remain `<PENDING — QUIESCE-BLOCKED>`.** The `llamacpp` (OSS reference) arm has
+produced a **real, live** baseline on this M3 Pro (2026-09-14); the `fak` arm is blocked by peer
+host contention (no quiesced window) and no number is estimated, projected, or extrapolated for it.
+
+> **Typed verdict (2026-09-18, `[SW-VERIFIED]` for the mechanism, `QUIESCE_BLOCKED` for the run).**
+> The full-geometry live head-to-head could not be run: the host was not quiesced. Over a 2-minute
+> watch the load average never fell below **9.73** (threshold `< 2.0`), a peer `/tmp/fak-metaltest`
+> held **~578.6% CPU** (pid 93463), and a peer `fak-native` (pid 79900) held the shared Metal lease
+> `/var/folders/.../T/fak-gpu.lease` while idle. Peer processes are out of policy to kill, so no
+> measurement was taken under contention. The endpoint gap `fak#13027` is **RESOLVED**
+> (`cmd/fak/up.go:1141` serves `/v1/completions`), so it is no longer a blocker — the sole remaining
+> blocker is host contention. The **mechanism half is independently witnessed and GREEN**:
+> `go -C ../fak test ./cmd/fak/ -run TestTurnkeyConcurrentBatch -count=1` (same-prefix fan-out
+> coalescing, #1590) and `go test ./cmd/fak-dev/ -run TestSubagentFanoutConcurrencyScaling -count=1`
+> (deterministic concurrency-scaling cell, #1591). Exact repro once a quiesced window exists:
+> `fak-dev bench-subagent-fanout --live --arms fak,llamacpp --fak-url http://127.0.0.1:8082 --llamacpp-url http://127.0.0.1:8081 --fanout 1,4,8 --prefix-tokens 4096 --suffix-tokens 512 --decode-tokens 64 --trials 5 --json --out docs/benchmarks/receipts/mac-subagent-cache-reuse/m3pro.json`.
 
 ### 5.0 What is measured vs. what is accounted (read before the table)
 
@@ -201,9 +214,9 @@ not yet the §3 contract geometry).
 |:---|:---:|:---:|:---:|:---:|:---:|:---:|
 | `llamacpp` | 1 | 86.7 | 86.7 | 57.4 | 0 | 0.00 |
 | `llamacpp` | 4 | 175.5 | 176.3 | 92.4 | 12,288 | 0.667 |
-| `fak` | 1 | `<PENDING>` | `<PENDING>` | `<PENDING>` | `<PENDING>` | `<PENDING>` |
-| `fak` | 4 | `<PENDING>` | `<PENDING>` | `<PENDING>` | `<PENDING>` | `<PENDING>` |
-| `fak` | 8 | `<PENDING>` | `<PENDING>` | `<PENDING>` | `<PENDING>` | `<PENDING>` |
+| `fak` | 1 | `<PENDING — QUIESCE-BLOCKED>` | `<PENDING — QUIESCE-BLOCKED>` | `<PENDING — QUIESCE-BLOCKED>` | `<PENDING — QUIESCE-BLOCKED>` | `<PENDING — QUIESCE-BLOCKED>` |
+| `fak` | 4 | `<PENDING — QUIESCE-BLOCKED>` | `<PENDING — QUIESCE-BLOCKED>` | `<PENDING — QUIESCE-BLOCKED>` | `<PENDING — QUIESCE-BLOCKED>` | `<PENDING — QUIESCE-BLOCKED>` |
+| `fak` | 8 | `<PENDING — QUIESCE-BLOCKED>` | `<PENDING — QUIESCE-BLOCKED>` | `<PENDING — QUIESCE-BLOCKED>` | `<PENDING — QUIESCE-BLOCKED>` | `<PENDING — QUIESCE-BLOCKED>` |
 
 Committed receipt: `docs/benchmarks/receipts/mac-subagent-cache-reuse/m3pro.json`.
 The N=4 `reused 12,288 = (4-1)*4096` and `prefix hit 0.667` are the harness's
@@ -211,15 +224,22 @@ The N=4 `reused 12,288 = (4-1)*4096` and `prefix hit 0.667` are the harness's
 cross-agent shared-prefix behavior that fak must beat, still to be confirmed
 against the server's own cache counters.
 
-### 5.2 `fak` arm status — endpoint gap RESOLVED; one environmental blocker remains (honest, not a number)
+### 5.2 `fak` arm status — endpoint gap RESOLVED; host-contention blocker persists (typed `QUIESCE_BLOCKED` verdict, not a number)
 
-Two blockers were found while attempting the live `fak` arm. Blocker 2 is now resolved;
-blocker 1 is environmental. Neither was ever a performance claim:
+Two blockers were found while attempting the live `fak` arm. Blocker 2 is resolved;
+blocker 1 persists as an environmental contention blocker (re-confirmed 2026-09-18).
+Neither was ever a performance claim:
 
-1. **Peer Metal lease.** A concurrent peer `fak serve` (27B, Metal) held the GPU
-   lease `/var/folders/.../T/fak-gpu.lease`, so `fak up` correctly refused with
-   `Metal residency admission refused ... lease held by pid <peer>`. Killing a
-   peer is out of policy; the 3B `fak up` was therefore not run on Metal.
+1. **Peer Metal lease + peer CPU load (re-confirmed 2026-09-18).** A concurrent peer
+   `fak-native` (pid 79900, 27B) held the GPU lease
+   `/var/folders/z2/qgyzc8gx6kn1mkh6kfhlb6qw0000gp/T/fak-gpu.lease` (contents `79900`,
+   open fd `11u` per `lsof`) while idle at 0% CPU, so any Metal `fak up` correctly refuses
+   with `Metal residency admission refused ... lease held by pid <peer>`. Independently, a
+   peer `/tmp/fak-metaltest` (pid 93463) held ~578.6% CPU, and over a 2-minute watch the
+   load average never fell below **9.73** (quiesce threshold `< 2.0`). Killing a peer is out
+   of policy, so the 3B `fak up` was not run; **no number was measured under contention**
+   (typed verdict `QUIESCE_BLOCKED`). The mechanism half is witnessed GREEN elsewhere
+   (#1590 `TestTurnkeyConcurrentBatch`, #1591 `TestSubagentFanoutConcurrencyScaling`).
 2. **Endpoint-path gap (filed as fak#13027) — RESOLVED.** The harness posts live cells to
    `/v1/completions` (`cmd/fak-dev/bench_subagent_fanout.go`). `fak serve` always exposed
    that route (`internal/gateway/completions.go`); the gap was the turnkey `fak up` server,
