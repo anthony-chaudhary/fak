@@ -54,7 +54,19 @@ func isQuantWeight(name string) bool {
 		strings.Contains(name, ".mlp.experts.") && strings.HasSuffix(name, ".down_proj.weight"),
 		strings.Contains(name, ".mlp.shared_experts.") && strings.HasSuffix(name, ".gate_proj.weight"),
 		strings.Contains(name, ".mlp.shared_experts.") && strings.HasSuffix(name, ".up_proj.weight"),
-		strings.Contains(name, ".mlp.shared_experts.") && strings.HasSuffix(name, ".down_proj.weight"):
+		strings.Contains(name, ".mlp.shared_experts.") && strings.HasSuffix(name, ".down_proj.weight"),
+		// DeepSeek-V4.1 native dense projections. forwardV41 (v41_forward.go:867-877)
+		// consumes these as quantized matmul weights, and ggufload's deepseek41CanonicalSuffix
+		// emits exactly these canonical names. They were previously absent from this gate, so
+		// every V4.1 dense k-quant tensor stayed on the raw device charge whole -> kernel OOM.
+		strings.HasSuffix(name, ".attn.wq_a.weight"),
+		strings.HasSuffix(name, ".attn.wq_b.weight"),
+		strings.HasSuffix(name, ".attn.wkv.weight"),
+		strings.HasSuffix(name, ".attn.wo_a.weight"),
+		strings.HasSuffix(name, ".attn.wo_b.weight"),
+		strings.HasSuffix(name, ".ffn.shared_experts.w1.weight"),
+		strings.HasSuffix(name, ".ffn.shared_experts.w3.weight"),
+		strings.HasSuffix(name, ".ffn.shared_experts.w2.weight"):
 		return true
 	}
 	return name == "lm_head.weight"

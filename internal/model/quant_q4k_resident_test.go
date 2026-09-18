@@ -134,3 +134,35 @@ func TestSessionQ4KKernelMixedDispatch(t *testing.T) {
 		}
 	}
 }
+
+// TestResidentKQuantEligibleDeepSeek41Dense pins the V4.1 residency gate: the eight
+// deepseek41 native dense projections that forwardV41 (v41_forward.go:867-877) reads as
+// quantized matmul weights must be admitted by isQuantWeight / ResidentKQuantEligible. They
+// were previously absent from that gate, so every V4.1 dense k-quant tensor stayed on the
+// raw whole-tensor device charge -> kernel OOM on the strix3 Q2_K staging path. None of the
+// eight end with the qwen35 unpermute suffixes (self_attn.qkv_proj / q_proj / k_proj) and
+// none contain ".linear_attn.", so ResidentQ4KEligible's identity guards must not refuse them.
+func TestResidentKQuantEligibleDeepSeek41Dense(t *testing.T) {
+	cfg := Config{ModelType: "deepseek41"}
+	if cfg.IsQwen35Hybrid() {
+		t.Fatal("fixture drift: a deepseek41 Config must not be qwen35 hybrid, or the source chain would remap the names")
+	}
+	names := []string{
+		"model.layers.0.attn.wq_a.weight",
+		"model.layers.0.attn.wq_b.weight",
+		"model.layers.0.attn.wkv.weight",
+		"model.layers.0.attn.wo_a.weight",
+		"model.layers.0.attn.wo_b.weight",
+		"model.layers.0.ffn.shared_experts.w1.weight",
+		"model.layers.0.ffn.shared_experts.w3.weight",
+		"model.layers.0.ffn.shared_experts.w2.weight",
+	}
+	for _, n := range names {
+		if !isQuantWeight(n) {
+			t.Errorf("isQuantWeight(%q)=false want true", n)
+		}
+		if !ResidentKQuantEligible(cfg, n) {
+			t.Errorf("ResidentKQuantEligible(deepseek41, %q)=false want true", n)
+		}
+	}
+}
