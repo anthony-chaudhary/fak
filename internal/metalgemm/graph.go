@@ -13,6 +13,10 @@ typedef struct {
     double gpu_milliseconds;
     double wait_milliseconds;
     int timing_available;
+    int status_code;
+    int error_code;
+    int device_ok;
+    char error_text[256];
 } mg_graph_receipt;
 void *mg_graph_begin(const float *xf, const signed char *xq, const float *xd, int P, int in);
 void *mg_graph_encode_q4k(void *graph, int wid);
@@ -302,6 +306,7 @@ type ProjectionGraph struct {
 	readbacks               int
 	hostUploadBytes         uint64
 	injectPostSubmitFailure bool
+	injectDeviceFault       bool
 	gdnLeases               []gdnGraphLease
 	gdnCheckpoints          []*GDNGraphCheckpoint
 }
@@ -564,6 +569,16 @@ func (c *GDNGraphCheckpoint) Restore() error {
 func (g *ProjectionGraph) InjectPostSubmitFailureForTest() {
 	if g != nil {
 		g.injectPostSubmitFailure = true
+	}
+}
+
+// InjectDeviceFaultForTest makes the native receipt report a committed command
+// buffer whose terminal status never reached Completed, without blocking on a
+// real device fault. It exists solely to witness the stall classification on the
+// real Finish path.
+func (g *ProjectionGraph) InjectDeviceFaultForTest() {
+	if g != nil {
+		g.injectDeviceFault = true
 	}
 }
 
@@ -1153,18 +1168,68 @@ func (g *ProjectionGraph) Finish() (GraphReceipt, error) {
 	if g.injectPostSubmitFailure {
 		inject = 1
 	}
+	if g.injectDeviceFault {
+		inject = 2
+	}
 	ok := C.mg_graph_finish(g.ptr, &r, inject) != 0
 	receipt := GraphReceipt{Committed: r.committed != 0, CompletedWait: r.completed_wait != 0, TimingAvailable: r.timing_available != 0, Encoders: int(r.encoders), HostReadbacks: int(r.host_readbacks), HostUploadBytes: g.hostUploadBytes, GPUMilliseconds: float64(r.gpu_milliseconds), WaitMilliseconds: float64(r.wait_milliseconds)}
 	g.finishGDNCheckpoints(receipt)
 	g.releaseGDNLeases(receipt.Committed && receipt.CompletedWait)
 	if !ok {
 		if receipt.Committed {
+			// A committed buffer that did not reach MTLCommandBufferStatusCompleted is the
+			// unbounded-wait failure metal_stall.go exists for. The native wait is not
+			// interruptible, so classify the OBSERVED terminal state as the typed stall the
+			// package already defines. The inject_post_submit_failure seam (inject=1) reports
+			// completed=1 and so deliberately keeps its GraphPostSubmitError; only a
+			// non-completed buffer becomes the typed stall.
+			if !receipt.CompletedWait {
+				return receipt, commandBufferStallError(receipt.WaitMilliseconds, int(r.status_code), int(r.error_code), cString(&r.error_text[0]), "graph finish")
+			}
 			return receipt, &GraphPostSubmitError{Reason: "injected or device completion failure"}
 		}
 		return receipt, errors.New("metalgemm: graph submit failed")
 	}
 	return receipt, nil
 }
+
+// commandBufferStallError converts a non-completed native command buffer into the
+// package's typed MetalCommandBufferStallError, folding in the device status and any
+// bounded NSError text the native receipt captured. CheckCommandBufferWait owns the
+// classification so the typed error is the same one every observer sees; when the
+// wait itself is under the limit the buffer still never reached Completed (a
+// device-side fault), and the same typed error is used so callers see one class.
+func commandBufferStallError(waitMS float64, statusCode, errorCode int, deviceText, op string) error {
+	err := CheckCommandBufferWait(op, waitMS, DefaultCommandBufferWaitLimit)
+	if err == nil {
+		err = MetalCommandBufferStallError{
+			Operation:          op,
+			WaitedMilliseconds: waitMS,
+			LimitMilliseconds:  DefaultCommandBufferWaitLimit,
+		}
+	}
+	if deviceText == "" {
+		return err
+	}
+	return fmt.Errorf("%w (native status=%d error=%d: %s)", err, statusCode, errorCode, deviceText)
+}
+
+// cString copies a fixed-size C char buffer into a Go string.
+func cString(p *C.char) string {
+	if p == nil {
+		return ""
+	}
+	var out []byte
+	for i := 0; i < 256; i++ {
+		c := *(*byte)(unsafe.Add(unsafe.Pointer(p), i))
+		if c == 0 {
+			break
+		}
+		out = append(out, c)
+	}
+	return string(out)
+}
+
 func (g *ProjectionGraph) Read(r *GraphResult) ([]float32, error) {
 	if g == nil || !g.finished || g.freed {
 		return nil, errGraphTerminal
