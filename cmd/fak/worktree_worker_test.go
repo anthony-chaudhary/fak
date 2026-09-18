@@ -2254,3 +2254,50 @@ func TestWorktreeWorkerLandRequireTestWitness(t *testing.T) {
 		}
 	})
 }
+
+// TestWorktreeWorkerLandSymptomTags covers the #13243 explicit-tags CLI seam: the
+// comma-separated --symptom-tags value is parsed by splitTagList into a trimmed,
+// emptiness-dropping tag slice (unset => nil = today's untagged behavior), and the
+// flag is threaded into the witness resolver's WithSymptomTags seam.
+func TestWorktreeWorkerLandSymptomTags(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{"unset-is-nil", "", nil},
+		{"whitespace-only-is-nil", "   ", nil},
+		{"single", "vulkan", []string{"vulkan"}},
+		{"trims-each-entry", " vulkan , metal ", []string{"vulkan", "metal"}},
+		{"drops-empty-entries", "a,,b", []string{"a", "b"}},
+		{"trailing-comma", "vulkan,", []string{"vulkan"}},
+		{"leading-comma", ",vulkan", []string{"vulkan"}},
+		{"only-commas-is-nil", ",,", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := splitTagList(tc.in)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("splitTagList(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+
+	// The flag must be accepted end-to-end: an explicit --symptom-tags on an existing
+	// red-then-green fixture leaves the successful land behavior unchanged.
+	t.Run("flag-accepted-and-land-unchanged", func(t *testing.T) {
+		repo, worktree, base := newSymptomWorkerFixture(t, true)
+		var out, errb bytes.Buffer
+		res, code := runWorktreeWorkerLand(&out, &errb, []string{
+			"--root", repo,
+			"--worktree", worktree,
+			"--base-sha", base,
+			"--paths", "pkg/calc.go",
+			"--paths", "pkg/calc_test.go",
+			"--symptom-tags", "vulkan,metal",
+		})
+		if !res.OK || code != 0 {
+			t.Fatalf("expected successful landing with --symptom-tags, got res=%+v code=%d err=%s", res, code, errb.String())
+		}
+	})
+}

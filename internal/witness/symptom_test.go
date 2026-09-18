@@ -382,6 +382,237 @@ func TestSymptomTaggedRedThenGreenConfirms(t *testing.T) {
 	assertRepoClean(t, dir)
 }
 
+// --- explicit caller tags (#13243, the explicit-tags half) ------------------------------
+
+// mergeTags is the UNION seam: an explicit caller hint can ADD a tag the //go:build
+// derivation missed but must NEVER drop a tag a changed test file declares. Both sides
+// are trimmed, de-duplicated, and sorted; both-empty yields nil so goTestArgv stays
+// byte-identical to the untagged form.
+func TestMergeTagsUnionSemantics(t *testing.T) {
+	cases := []struct {
+		name    string
+		a, b    []string
+		want    []string
+		wantNil bool
+	}{
+		{"both-empty-is-nil", nil, nil, nil, true},
+		{"empty-slices-are-nil", []string{}, []string{}, nil, true},
+		{"explicit-adds", nil, []string{"vulkan"}, []string{"vulkan"}, false},
+		{"derived-preserved", []string{"vulkan"}, nil, []string{"vulkan"}, false},
+		{"union-of-disjoint", []string{"vulkan"}, []string{"metal"}, []string{"metal", "vulkan"}, false},
+		{"derived-never-removed-by-explicit-subset", []string{"vulkan", "metal"}, []string{"vulkan"}, []string{"metal", "vulkan"}, false},
+		{"dedup-across-sides", []string{"vulkan"}, []string{"vulkan"}, []string{"vulkan"}, false},
+		{"duplicates-collapse", []string{"vulkan", "vulkan"}, []string{"vulkan"}, []string{"vulkan"}, false},
+		{"sorted-output", []string{"zulu"}, []string{"alpha"}, []string{"alpha", "zulu"}, false},
+		{"whitespace-only-side-normalizes-away", []string{"  ", "\t"}, nil, nil, true},
+		{"explicit-with-whitespace-still-unions", []string{"vulkan"}, []string{"  metal  "}, []string{"metal", "vulkan"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mergeTags(tc.a, tc.b)
+			if tc.wantNil {
+				if got != nil {
+					t.Fatalf("mergeTags(%v, %v) = %v, want nil", tc.a, tc.b, got)
+				}
+				return
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("mergeTags(%v, %v) = %v, want %v", tc.a, tc.b, got, tc.want)
+			}
+		})
+	}
+}
+
+// goTestArgv must append a comma-joined SORTED tag list when tags are present, and omit
+// -tags entirely when the set is nil/empty (byte-identical to the pre-#13243 untagged argv).
+func TestGoTestArgvTags(t *testing.T) {
+	t.Run("non-empty-emits-sorted-comma-joined-tags", func(t *testing.T) {
+		got := goTestArgv([]string{"./internal/compute"}, []string{"metal", "vulkan"})
+		want := []string{"go", "test", "-count=1", "./internal/compute", "-tags", "metal,vulkan"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("goTestArgv = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("nil-omits-tags", func(t *testing.T) {
+		got := goTestArgv([]string{"./internal/compute"}, nil)
+		want := []string{"go", "test", "-count=1", "./internal/compute"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("goTestArgv(nil tags) = %v, want %v", got, want)
+		}
+		if containsArg(got, "-tags") {
+			t.Fatalf("goTestArgv(nil tags) = %v, want NO -tags flag", got)
+		}
+	})
+
+	t.Run("empty-omits-tags", func(t *testing.T) {
+		got := goTestArgv([]string{"./internal/compute"}, []string{})
+		want := []string{"go", "test", "-count=1", "./internal/compute"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("goTestArgv(empty tags) = %v, want %v", got, want)
+		}
+	})
+}
+
+// The runner the execution rung uses must SEE the explicit tags: `go test -tags vulkan`
+// when invoked with {"vulkan"}, and no -tags at all when nil. Mirrors the recording-closure
+// pattern of TestSymptomGoTestArgvThreadsDerivedTags.
+func TestSymptomGoTestArgvThreadsExplicitTags(t *testing.T) {
+	ctx := context.Background()
+	var seen [][]string
+	runner := func(_ context.Context, _ string, argv ...string) (string, int, error) {
+		seen = append(seen, append([]string(nil), argv...))
+		return "", 0, nil
+	}
+
+	goTestPasses(ctx, runner, "/tmp", []string{"./internal/compute"}, []string{"vulkan"})
+	if len(seen) != 1 {
+		t.Fatalf("runner invoked %d times, want 1", len(seen))
+	}
+	wantTagged := []string{"go", "test", "-count=1", "./internal/compute", "-tags", "vulkan"}
+	if !reflect.DeepEqual(seen[0], wantTagged) {
+		t.Fatalf("explicit-tagged argv = %v, want %v", seen[0], wantTagged)
+	}
+
+	seen = nil
+	goTestPasses(ctx, runner, "/tmp", []string{"./internal/compute"}, nil)
+	if len(seen) != 1 {
+		t.Fatalf("runner invoked %d times, want 1", len(seen))
+	}
+	if containsArg(seen[0], "-tags") {
+		t.Fatalf("nil-tags argv = %v, want NO -tags flag", seen[0])
+	}
+	wantUntagged := []string{"go", "test", "-count=1", "./internal/compute"}
+	if !reflect.DeepEqual(seen[0], wantUntagged) {
+		t.Fatalf("nil-tags argv = %v, want %v", seen[0], wantUntagged)
+	}
+}
+
+// TestSymptomExplicitTagsReachExecutor is the composition proof for #13243: the explicit
+// tag seam must survive the WHOLE path from WithSymptomTags, through resolveSymptomExec,
+// into the injected executor. Unlike the pieces-prove-pieces tests above, this drives the
+// public ResolveSymptom over a real git repo (real `git show`/`rev-parse`/`worktree add`)
+// with a FAKE `go test` CommandRunner that records the argv.
+//
+// The changed _test.go is deliberately UNTAGGED so the //go:build derivation yields the
+// empty set: any `-tags vulkan` the executor sees can ONLY have come from the explicit
+// seam. The fake returns a realistic red at parent (a test FAILURE, not a build failure)
+// and green at the fix, so the rung walks its full exec path and CONFIRMS.
+func TestSymptomExplicitTagsReachExecutor(t *testing.T) {
+	requireGoAndGit(t)
+	dir := newGoModuleRepo(t)
+	ctx := context.Background()
+
+	// Parent: the buggy Sign (returns 0 for negatives) — the symptom.
+	writeRepoFile(t, dir, "sign.go", "package m\n\nfunc Sign(n int) int {\n\tif n > 0 {\n\t\treturn 1\n\t}\n\treturn 0\n}\n")
+	gitIn(t, dir, "add", "sign.go")
+	gitIn(t, dir, "commit", "-q", "-m", "parent: buggy Sign")
+
+	// Fix: correct Sign + an UNTAGGED test exercising the bug. No //go:build line, so the
+	// derived tag set is empty and the explicit `vulkan` hint is the only possible source.
+	writeRepoFile(t, dir, "sign.go", "package m\n\nfunc Sign(n int) int {\n\tif n > 0 {\n\t\treturn 1\n\t}\n\tif n < 0 {\n\t\treturn -1\n\t}\n\treturn 0\n}\n")
+	writeRepoFile(t, dir, "sign_test.go", "package m\n\nimport \"testing\"\n\nfunc TestSignNegative(t *testing.T) {\n\tif Sign(-3) != -1 {\n\t\tt.Fatalf(\"Sign(-3)=%d, want -1\", Sign(-3))\n\t}\n}\n")
+	gitIn(t, dir, "add", "sign.go", "sign_test.go")
+	gitIn(t, dir, "commit", "-q", "-m", "fix(m): Sign returns -1 for negatives")
+
+	// Record every exec argv. This closure is pointer-distinct from the package-default
+	// commandRunner, so runSelector uses it rather than falling through to RunPipeWitness.
+	// resolveSymptomExec runs GREEN at the fix FIRST, then RED at the parent, so:
+	//   - first go test invocation (green at the fix): a pass
+	//   - second (red at the parent): a REAL test failure — not a build failure, so it is
+	//     classified as red symptom evidence (no isGoBuildFailure marker is present).
+	var seen [][]string
+	goTestCalls := 0
+	exec := func(_ context.Context, _ string, argv ...string) (string, int, error) {
+		seen = append(seen, append([]string(nil), argv...))
+		if argv[0] != "go" || len(argv) < 2 || argv[1] != "test" {
+			return "", 0, nil
+		}
+		goTestCalls++
+		if goTestCalls == 1 {
+			return "", 0, nil // green at the fix
+		}
+		return "--- FAIL: TestSignNegative\n    sign_test.go:6: Sign(-3)=0, want -1\nFAIL\nFAIL\tm\t0.010s\nFAIL\n", 1, nil
+	}
+
+	r := NewWithRunners(gitRunner, exec, dir).WithSymptomTags([]string{"vulkan"})
+	if got := r.ResolveSymptom(ctx, "HEAD", true); got != abi.WitnessConfirmed {
+		t.Fatalf("explicit-tag symptom = %v, want confirmed (real git + recording fake exec)", got)
+	}
+
+	if len(seen) == 0 {
+		t.Fatal("executor was never invoked: the tag seam was not driven to completion")
+	}
+	// The composition claim: every recorded `go test` argv carries the explicit tag. The
+	// test file is untagged, so this tag could only have travelled from WithSymptomTags.
+	want := []string{"go", "test", "-count=1", "./.", "-tags", "vulkan"}
+	found := false
+	for _, argv := range seen {
+		if !containsArg(argv, "-tags") || !containsArg(argv, "vulkan") {
+			t.Fatalf("recorded go test argv = %v, want an explicit `-tags vulkan` (the #13243 seam dropped)", argv)
+		}
+		if reflect.DeepEqual(argv, want) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no recorded argv equalled %v; recorded: %v", want, seen)
+	}
+	assertRepoClean(t, dir)
+}
+
+// normalizeTags (the canonical store WithSymptomTags writes) trims, drops empties, dedups,
+// sorts, and — crucially — collapses a whitespace-only list to nil so the untagged default
+// is preserved when the caller passes junk.
+func TestNormalizeTags(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      []string
+		want    []string
+		wantNil bool
+	}{
+		{"nil-stays-nil", nil, nil, true},
+		{"whitespace-only-is-nil", []string{"", "   ", "\t"}, nil, true},
+		{"trims-and-sorts", []string{" metal ", "vulkan"}, []string{"metal", "vulkan"}, false},
+		{"dedups", []string{"vulkan", " vulkan ", "vulkan"}, []string{"vulkan"}, false},
+		{"drops-empties-keeps-real", []string{"", "vulkan", "  "}, []string{"vulkan"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalizeTags(tc.in)
+			if tc.wantNil {
+				if got != nil {
+					t.Fatalf("normalizeTags(%v) = %v, want nil", tc.in, got)
+				}
+				return
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("normalizeTags(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// WithSymptomTags must return the receiver (chainable) and store the canonicalized set the
+// execution rung later unions with the derived truth.
+func TestWithSymptomTagsStoresNormalizedSet(t *testing.T) {
+	r := NewWithRunner(nil, "")
+	if got := r.WithSymptomTags([]string{" metal ", "vulkan", "", "vulkan"}); got != r {
+		t.Fatalf("WithSymptomTags returned %p, want the receiver %p", got, r)
+	}
+	want := []string{"metal", "vulkan"}
+	if !reflect.DeepEqual(r.symptomTags, want) {
+		t.Fatalf("stored symptomTags = %v, want %v", r.symptomTags, want)
+	}
+
+	// A whitespace-only explicit list must leave the untagged default intact.
+	r2 := NewWithRunner(nil, "")
+	r2.WithSymptomTags([]string{"   ", "\t"})
+	if r2.symptomTags != nil {
+		t.Fatalf("whitespace-only WithSymptomTags stored %v, want nil", r2.symptomTags)
+	}
+}
+
 func containsArg(argv []string, want string) bool {
 	for _, a := range argv {
 		if a == want {

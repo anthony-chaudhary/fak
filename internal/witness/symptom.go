@@ -62,6 +62,42 @@ func SymptomExecEnabled() bool {
 	}
 }
 
+// WithSymptomTags supplies EXTRA build tags for the execution rung explicitly (#13243), for the
+// case where the tag derivation from the changed test files' //go:build constraints is unsafe or
+// incomplete. The tags are normalized (trimmed, empties dropped, de-duplicated, sorted) and
+// stored on the Resolver; resolveSymptomExec unions them with the derived set — explicit tags
+// never remove a derived tag. The empty default keeps the untagged behavior byte-identical.
+func (r *Resolver) WithSymptomTags(tags []string) *Resolver {
+	r.symptomTags = normalizeTags(tags)
+	return r
+}
+
+// normalizeTags trims, drops empties, de-duplicates, and sorts a tag list so the Resolver's
+// stored explicit set is canonical (and mergeTags is order-stable).
+func normalizeTags(tags []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, t := range tags {
+		t = strings.TrimSpace(t)
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// mergeTags returns the UNION of a and b: trimmed, empties dropped, de-duplicated, sorted.
+// Either side may be nil; both nil yields nil so the caller's untagged path stays byte-identical.
+func mergeTags(a, b []string) []string {
+	if len(a) == 0 && len(b) == 0 {
+		return nil
+	}
+	return normalizeTags(append(append([]string{}, a...), b...))
+}
+
 // ResolveSymptom adjudicates a `symptom:<ref>` claim: does the fix at <ref> carry a witness that
 // the symptom is gone? See the package doc for the two-rung contract.
 // When mandatoryExec is true, it forces the red-then-green execution check even when
@@ -175,7 +211,9 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 	// The build constraints the changed test files declare (#13243). A device-tagged test
 	// (`//go:build vulkan`, `metal`, `cuda`, …) is excluded from a bare `go test`, so without
 	// this the package passes trivially at BOTH refs and a genuine witness is falsely refuted.
-	tags := resolveGoBuildTags(ctx, r.run, r.dir, commit, tests)
+	// An explicit caller hint (WithSymptomTags) is UNIONED with the derived truth — the hint
+	// can add a tag the derivation missed but never remove one a test file declares.
+	tags := mergeTags(resolveGoBuildTags(ctx, r.run, r.dir, commit, tests), r.symptomTags)
 
 	// GREEN at the fix: the changed test must pass at <ref> as committed.
 	commitDir, cleanupCommit, err := v.scratchWorktree(ctx, commit)
