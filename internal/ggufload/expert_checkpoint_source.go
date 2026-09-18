@@ -243,6 +243,7 @@ func (s *WeightSource) FusedExpertTensors() ([]FusedExpertShard, error) {
 			Name:    info.Name,
 			Layer:   layer,
 			Proj:    proj,
+			Arch:    cfg.ModelType,
 			Quant:   quant,
 			Offset:  info.FileOffset,
 			Experts: experts,

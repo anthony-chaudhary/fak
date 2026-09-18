@@ -154,7 +154,13 @@ type FusedExpertTensor struct {
 	Layer int
 	// Proj is the canonical projection suffix without `.weight` â€” "gate_proj", "up_proj" or
 	// "down_proj".
-	Proj    string
+	Proj string
+	// Arch is the checkpoint's architecture (cfg.ModelType). It selects the
+	// per-expert canonical spelling the index is keyed on: arch "deepseek41"
+	// indexes the native V4.1 ffn.experts.<e>.{w1,w3,w2} leaves; an empty or any
+	// other arch keeps the historical mlp.experts.<e>.<proj> spelling
+	// byte-for-byte.
+	Arch    string
 	Quant   ExpertCheckpointQuant
 	Offset  int64
 	Experts int
@@ -271,6 +277,21 @@ func NewExpertCheckpointTier(hostBytes int64) *ExpertCheckpointTier {
 	}
 }
 
+// Has reports whether this tier indexes the named per-expert projection. It is an
+// INDEX lookup only: it reads no payload and does not fault, so the V4.1 forward
+// admission can confirm a streamed routed expert is servable without paying the
+// checkpoint IO the tier exists to defer. A nil tier (the no-tier default) has no
+// names and reports false.
+func (t *ExpertCheckpointTier) Has(name string) bool {
+	if t == nil {
+		return false
+	}
+	t.mu.Lock()
+	_, ok := t.index[name]
+	t.mu.Unlock()
+	return ok
+}
+
 // AddShard indexes one checkpoint shard's fused routed-expert tensors over r, whose readable extent
 // is size bytes. It performs NO payload IO: every description is validated against the declared
 // extent at construction, so a malformed layout is a load-time refusal rather than a decode-time
@@ -326,7 +347,7 @@ func (t *ExpertCheckpointTier) AddShardData(r io.ReaderAt, size int64, data []by
 	for i, f := range fused {
 		blockWeights, _, _ := f.Quant.blockGeometry()
 		for e := 0; e < f.Experts; e++ {
-			name := expertName(f.Layer, e, f.Proj+".weight")
+			name := expertNameArch(f.Arch, f.Layer, e, f.Proj+".weight")
 			if _, dup := t.index[name]; dup {
 				return fmt.Errorf("%w: %s already indexed when adding %s", ErrGGUFExpertMetadata, name, f.Name)
 			}

@@ -368,7 +368,54 @@ func routerBiasName(layer int) string {
 }
 
 func expertName(layer, expert int, suffix string) string {
+	return expertNameArch("", layer, expert, suffix)
+}
+
+// expertNameArch is the arch-aware per-expert canonical-name composer, mirroring
+// ggufload.batchedExpertCanonicalName EXACTLY so the loader's emitted per-expert
+// names and the names this package asks for cannot drift. For arch "deepseek41"
+// it maps the GGUF projection onto the native non-MLA V4.1 leaves
+// (gate_proj->w1, up_proj->w3, down_proj->w2) under the ffn.experts prefix:
+// model.layers.<layer>.ffn.experts.<expert>.<w>.weight. Every other arch, and the
+// empty arch, keeps the historical deepseek2/GLM spelling
+// model.layers.<layer>.mlp.experts.<expert>.<suffix>, byte-identical, so
+// expertName stays the default-arch wrapper and every existing caller is
+// unchanged. suffix is the projection segment plus any leaf suffix (e.g.
+// "gate_proj.weight"); only the projection segment is remapped, and a suffix that
+// is not a known routed projection falls through to the GLM spelling.
+func expertNameArch(arch string, layer, expert int, suffix string) string {
+	if arch == "deepseek41" {
+		if leaf, ok := v41ExpertLeaf(suffix); ok {
+			return layerName(layer, "ffn.experts."+itoa(expert)+"."+leaf)
+		}
+	}
 	return layerName(layer, "mlp.experts."+itoa(expert)+"."+suffix)
+}
+
+// v41ExpertLeaf maps a routed-expert projection suffix (the historical GLM
+// spelling, e.g. "gate_proj.weight") onto the native V4.1 ffn leaf (w1/w3/w2),
+// returning ok=false when suffix names no routed projection, in which case the
+// caller keeps the historical spelling. The projection is matched as a whole
+// segment so a non-projection suffix that merely shares a prefix cannot be
+// rewritten.
+func v41ExpertLeaf(suffix string) (string, bool) {
+	for proj, leaf := range v41ExpertLeafMap {
+		if suffix == proj {
+			return leaf, true
+		}
+		if len(suffix) > len(proj) && suffix[:len(proj)] == proj && suffix[len(proj)] == '.' {
+			return leaf + suffix[len(proj):], true
+		}
+	}
+	return "", false
+}
+
+// v41ExpertLeafMap is the single projection->leaf mapping for the native V4.1
+// routed experts. Keep it in lockstep with ggufload.batchedExpertCanonicalName.
+var v41ExpertLeafMap = map[string]string{
+	"gate_proj": "w1",
+	"up_proj":   "w3",
+	"down_proj": "w2",
 }
 
 // routePick is one selected (expert, gate-weight) pair from the router.

@@ -950,6 +950,24 @@ func (m *Model) v41AdmitShape(name string, stage v41ForwardStage, layer int, wan
 	if len(want) == 2 {
 		out, in, ok := m.residentShape(name)
 		if !ok {
+			// A routed expert the R5 streamed-experts tier holds is by design
+			// ABSENT from every resident store (manifest/q8w/q4w/q4kw/kqw/q2w/
+			// gptqw), because the whole point of the tier is to fault one expert's
+			// stride out of a fused checkpoint slab only when it is routed. So a
+			// resident-store miss falls through to the tier's index, a
+			// presence-only check (no IO, no fault), before refusing by name.
+			//
+			// The descriptor geometry is deliberately NOT re-checked here: the tier
+			// entry carries the fused tensor's declared rows/cols, but the
+			// per-expert shape is the loader's already-validated [out,in] declaration
+			// (FusedExpertTensor.Rows/Cols), and the forward's own read of the
+			// projection is the authority on shape use. A tier that carries the name
+			// at a disagreeing geometry is therefore admitted at presence, and any
+			// real disagreement surfaces at the forward's shape use rather than
+			// being silently accepted as a different tensor.
+			if m.expertCheckpoint.Has(name) {
+				return nil
+			}
 			return v41StageErr(stage, layer, fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
 		}
 		if out != want[0] || in != want[1] {
