@@ -740,12 +740,20 @@ func (m *Model) glmDsaAttnSeqShared(l int, xn [][]float32, sharedTopK *[][]int) 
 		// Dense-indexer layer: no indexer tensors and no preceding full layer to reuse
 		// (DeepSeek V4.1's strided indexer starts at layer 2, so layers 0/1 are
 		// dense-causal). Every query attends its full causal prefix, the identical
-		// selection the IndexNHeads==0 seam above builds; a later shared layer never
-		// follows a dense layer in the published schedule.
+		// selection the IndexNHeads==0 seam above builds.
 		full := glmDsaPositions(seq)
 		topK = make([][]int, seq)
 		for t := range topK {
 			topK[t] = full
+		}
+		// A dense layer publishes NO reusable sparse selection, so it must not be left
+		// standing as a share source: a later "shared" layer after it would otherwise
+		// silently reuse a stale (full-prefix) decision. This mirrors dsaIndexShare and
+		// the decode path's re-seed rule (glm_dsa_session.go). The published V4.1
+		// schedule never places a shared layer after a dense one, so this is a
+		// correctness guard on an unreachable-by-loader schedule, not a behavior change.
+		if sharedTopK != nil {
+			*sharedTopK = nil
 		}
 	} else if glmDsaIndexerIsShared(cfg, l) {
 		if sharedTopK == nil || *sharedTopK == nil {

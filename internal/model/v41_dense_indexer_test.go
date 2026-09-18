@@ -139,6 +139,57 @@ func TestV41DenseIndexSharePublishesNothing(t *testing.T) {
 	}
 }
 
+// TestV41DenseClearsBatchedShareSource pins the batched-path guard the adversarial
+// audit surfaced: a dense layer publishes NO reusable sparse selection, so it must
+// not be left standing as the share source. A {full, dense, shared} schedule is
+// unreachable from the GGUF loader (dense is emitted only before the first full
+// layer), but the batched forward must not silently reuse a stale full-prefix
+// decision for a following shared layer -- it must refuse, like dsaIndexShare does.
+//
+// It drives glmDsaAttnSeqShared directly with a sharedTopK pre-seeded as if a full
+// layer had run, then a dense layer, then asserts the shared source was cleared so
+// a subsequent shared layer panics rather than reusing stale state.
+func TestV41DenseClearsBatchedShareSource(t *testing.T) {
+	cfg := Config{
+		HiddenSize: 32, NumLayers: 3, NumHeads: 4, NumKVHeads: 4, HeadDim: 8,
+		IntermediateSize: 64, VocabSize: 41, RMSNormEps: 1e-5, RopeTheta: 10000,
+		ModelType: "glm_moe_dsa", Architectures: []string{"GlmMoeDsaForCausalLM"},
+		QLoraRank: 32, KVLoraRank: 32, QKNopeHeadDim: 4, QKRopeHeadDim: 4, VHeadDim: 8,
+		IndexNHeads: 4, IndexHeadDim: 8, IndexTopK: 2,
+		IndexerTypes: []string{"full", "dense", "shared"},
+		NumExperts:   4, NumExpertsPerTok: 2, NormTopKProb: true,
+		EOSTokenID: -1,
+	}
+	m := NewSyntheticGLMDsa(cfg)
+	seq := 3
+	xn := splitFlatRows(deterministicRows(seq, cfg.HiddenSize, 7), seq, cfg.HiddenSize)
+
+	// Seed sharedTopK as a real full layer would (layer 0 is full).
+	var sharedTopK [][]int
+	_ = m.glmDsaAttnSeqShared(0, xn, &sharedTopK)
+	if sharedTopK == nil {
+		t.Fatal("layer 0 (full) must seed the share source")
+	}
+
+	// The dense layer must clear it: a dense layer publishes no reusable selection.
+	out := m.glmDsaAttnSeqShared(1, xn, &sharedTopK)
+	if len(out) != seq {
+		t.Fatalf("dense layer output rows = %d, want %d", len(out), seq)
+	}
+	if sharedTopK != nil {
+		t.Fatalf("dense layer left a stale share source: %v", sharedTopK)
+	}
+
+	// With the source cleared, a following shared layer must refuse (panic), not
+	// silently reuse the dense layer's full-prefix selection.
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("a shared layer after a dense layer must panic (no share source), got no panic")
+		}
+	}()
+	m.glmDsaAttnSeqShared(2, xn, &sharedTopK)
+}
+
 // TestV41DenseUnknownIndexerStillFailsClosed retains the fail-closed half: an
 // unrecognized indexer type is still refused by both the classifier and the share
 // expansion, so the new "dense" kind did not open a silent fall-through.
