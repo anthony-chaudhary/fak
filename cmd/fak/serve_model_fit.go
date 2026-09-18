@@ -1167,6 +1167,14 @@ func serveStreamedCPUOffloadPlanForAperture(ws *ggufload.WeightSource, be comput
 	// EstimateCPUOffloadExpertsStreamedMemoryPlan.
 	var streamed compute.MemoryPlan
 	if denseBound, ok := serveBoundedDenseWorkingSetBound(serveCPUOffloadBoundedDenseOptions(be, fit)); ok {
+		// fak#13247: the bounded dense working set must be sized from the budget REMAINING after the
+		// resident expert bound, not from the whole host budget. Deriving both independently at
+		// (1-margin)*avail admitted their SUM (up to ~1.8*avail) and the kernel OOM-killed the serve
+		// mid-staging -- the [HW-WITNESSED] strix3 run. Min keeps a declared bound from inflating past
+		// the remainder the expert fold left.
+		if combined := serveCombinedStreamedDenseResidentBound(fit, bound); combined < denseBound {
+			denseBound = combined
+		}
 		streamed, err = ws.EstimateCPUOffloadExpertsStreamedBoundedDenseMemoryPlan(ranks, bound, denseBound)
 	} else {
 		streamed, err = ws.EstimateCPUOffloadExpertsStreamedMemoryPlan(bound)
@@ -1225,6 +1233,44 @@ func serveCPUOffloadSharedPoolResidentBound(fit serveFitBudget, deviceTransit in
 		return 0
 	}
 	remaining := avail - deviceTransit
+	if remaining <= 0 {
+		return 0
+	}
+	bound := int64(float64(remaining) * (1 - serveCPUOffloadStreamedResidentMargin))
+	if bound >= remaining {
+		// A razor-thin remainder must still land strictly below it, and never become negative.
+		bound = remaining - 1
+	}
+	if bound < 0 {
+		return 0
+	}
+	return bound
+}
+
+// serveCombinedStreamedDenseResidentBound is the bounded host-resident DENSE working set for the
+// COMBINED streamed-expert + bounded-dense arm (fak#13209/#13215), sized from the budget that
+// REMAINS after the resident EXPERT working set instead of from the whole host budget.
+//
+// Both working sets are simultaneously resident in host RAM: the streamed routed-expert set
+// (gguf-host-expert-offload-streamed) and the bounded dense staging working set
+// (gguf-host-dense-streamed). Deriving each independently as (1-margin)*avail admits their SUM at up
+// to ~1.8*avail -- the [HW-WITNESSED] strix3 OOM: MemTotal 62.4 GiB, host budget 48.65 GiB, expert
+// bound 43.788 GiB AND dense bound 43.788 GiB in one serve, kernel-OOM-killed at 57.8G peak / 28.1G
+// swap before the forward. Sizing the dense bound from the post-expert remainder keeps the plan's
+// host total strictly below the budget that judges it (the #13140 property, now over the SUM).
+//
+// expertBound is the SAME serveCPUOffloadStreamedResidentBoundForAperture value the streamed fold
+// threads (one measurement, so the two cannot disagree). A non-positive remainder yields zero
+// (stream-through) -- the honest floor, never negative.
+func serveCombinedStreamedDenseResidentBound(fit serveFitBudget, expertBound int64) int64 {
+	avail := fit.avail()
+	if avail <= 0 {
+		return 0
+	}
+	if expertBound < 0 {
+		expertBound = 0
+	}
+	remaining := avail - expertBound
 	if remaining <= 0 {
 		return 0
 	}

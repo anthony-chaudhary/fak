@@ -313,7 +313,19 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 	// and loader via the shared denseBoundedEligible predicate: an ineligible dense side produces no
 	// bounded row and keeps the full charge (fail-closed).
 	if (residentQ4K || (cpuOffloadExperts && cpuOffloadArm)) && (os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1") {
-		q4kOpts = append(q4kOpts, ggufload.WithStreamedDenseQ4KWorkingSet(serveStreamedDenseQ4KWorkingSetBound(hostFit)))
+		// fak#13247: when the streamed-EXPERT fold is also active, the bounded dense working set must
+		// be sized from the budget REMAINING after the resident expert bound, not the whole host
+		// budget. Both working sets are simultaneously host-resident; two independent (1-margin)*avail
+		// bounds admitted their SUM and the kernel OOM-killed the serve mid-staging. Deriving the dense
+		// bound from the SAME hostFit and the SAME expert bound the sizing path used keeps the estimate
+		// and the load on one measurement (they cannot disagree).
+		denseBound := serveStreamedDenseQ4KWorkingSetBound(hostFit)
+		if streamedOffload {
+			if combined := serveCombinedStreamedDenseResidentBound(hostFit, streamedBound); combined < denseBound {
+				denseBound = combined
+			}
+		}
+		q4kOpts = append(q4kOpts, ggufload.WithStreamedDenseQ4KWorkingSet(denseBound))
 	} // #1062 pre-launch load-path check: warn (don't refuse) before a large GGUF load when the
 	// weights sit on a network filesystem. NFS/CIFS read at network speed â€” the ~50-100x
 	// time-to-ready tax a CPU server hit loading GLM-5.2 off /projects (NFS, ~82 min) vs a local NVMe

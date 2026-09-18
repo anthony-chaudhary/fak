@@ -57,6 +57,15 @@ internal/model/testdata/deepseek_v4_flash_config.json text eol=lf
 # geometry digest fails locally while passing on Unix (#12973, same class as #12888).
 internal/model/testdata/v41_moe_dispatch_fixture.json text eol=lf
 
+# Fixtures under internal/model/testdata are read as raw checkout bytes by
+# internal/model tests (os.ReadFile + sha256, or byte-for-byte golden compares),
+# so a single digests must name one byte sequence on every OS. Enumerating
+# individual paths let internal/model/testdata/v41_oracle/token_path_golden.json
+# drift in as MIXED (1 CRLF + 41 bare LF), the same class as #12888/#12973;
+# pin the whole tree LF so the next fixture cannot silently reintroduce it
+# (#12946, #12888, #12973).
+internal/model/testdata/** text eol=lf
+
 # The devhandoff command manifest is a GENERATED file byte-compared by
 # internal/devindex TestGeneratedDevHandoffManifestIsCurrent; under
 # core.autocrlf=true a Windows checkout rewrites it to CRLF and the byte compare
