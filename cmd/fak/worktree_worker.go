@@ -515,8 +515,23 @@ func workerLandSymptomUnwitnessed(detail string) workerworktree.Result {
 	}
 }
 
-func verifyWorkerLandSymptom(wtPath, ref string) workerworktree.Result {
-	resolver := witness.NewWithRunner(nil, wtPath)
+// splitTagList parses the comma-separated --symptom-tags value into a tag slice: trim each
+// entry, drop empties. An unset flag yields nil, preserving today's untagged default.
+func splitTagList(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	var tags []string
+	for _, part := range strings.Split(s, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			tags = append(tags, part)
+		}
+	}
+	return tags
+}
+
+func verifyWorkerLandSymptom(wtPath, ref string, extraTags []string) workerworktree.Result {
+	resolver := witness.NewWithRunner(nil, wtPath).WithSymptomTags(extraTags)
 	outcome := resolver.ResolveSymptom(context.Background(), ref, true)
 	switch outcome {
 	case abi.WitnessConfirmed:
@@ -763,6 +778,8 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 	requireRemote := fs.Bool("require-remote-recovery", false, "refuse trunk CAS unless remote recovery read-back succeeds")
 	unsafeSkipSymptomWitness := fs.Bool("unsafe-skip-symptom-witness", false,
 		"bypass mandatory fail-to-pass symptom witness for fix(*) commits")
+	symptomTags := fs.String("symptom-tags", "",
+		"extra build tags to run the symptom witness with (comma-separated); merged with tags derived from the changed test files' //go:build constraints")
 	requireTestWitness := fs.Bool("require-test-witness", false,
 		"require verified test witness receipt before landing worker diff")
 	var paths repeatedString
@@ -819,7 +836,7 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 				if materializationErr != nil {
 					return workerLandSymptomUnwitnessed(materializationErr.Error())
 				}
-				return verifyWorkerLandSymptom(dir, "HEAD")
+				return verifyWorkerLandSymptom(dir, "HEAD", splitTagList(*symptomTags))
 			}
 			return workerworktree.LandProspectiveVerified(
 				repoRoot, worktreeDir, strings.TrimSpace(*baseSHA), strings.TrimSpace(*msgFile),

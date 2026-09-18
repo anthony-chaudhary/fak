@@ -185,6 +185,11 @@ type Resolver struct {
 	execRun CommandRunner
 	dir     string
 
+	// symptomTags are EXTRA build tags a caller supplies explicitly (#13243), unioned
+	// with the tags derived from the changed test files' //go:build constraints by
+	// resolveSymptomExec. Empty (the default) preserves the pre-#13243 untagged behavior.
+	symptomTags []string
+
 	// The content-addressed verdict cache (#2152, cache.go): cacheDir is resolved
 	// once per Resolver from `git rev-parse --git-common-dir` ("" = cache disabled
 	// for this Resolver).
