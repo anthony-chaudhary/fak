@@ -771,6 +771,58 @@ func (m *Model) v41MHCWeightLayout(l int) (flat, transposed, ok bool) {
 	}
 }
 
+// v41MHCProjectFull executes the published flattened-four-stream mHC mix
+// projection: the four width-H streams are laid end to end into xflat (4H), one
+// shared RMS scale 1/sqrt(mean(xflat^2)+eps) is computed over the whole flattened
+// residual, and the 24 mix coefficients are the linear projection of xflat scaled
+// by that rsqrt. It mirrors the pinned reference oracle
+// (v4_flash_oracle_test.go oracleV4FlashMHCProjection). transposed selects the
+// admitted storage orientation: false reads the logical row-major [24, 4H]
+// (mixes[m] = sum_i w[m*4H+i]*xflat[i]); true reads the artifact's stored
+// input-major [4H, 24] transpose (mixes[m] = sum_i w[i*24+m]*xflat[i]).
+//
+// It validates its own inputs so a wrong-width or wrong-stream-count residual
+// cannot masquerade as the flattened geometry and be silently mis-projected.
+func v41MHCProjectFull(wMix []float32, streams [][]float32, H int, eps float32, transposed bool) ([]float32, error) {
+	flatWidth := 4 * H
+	if len(streams) != 4 || H <= 0 {
+		return nil, fmt.Errorf("model: V41 full mHC projection wants 4 streams of width %d, got %d", H, len(streams))
+	}
+	for i, s := range streams {
+		if len(s) != H {
+			return nil, fmt.Errorf("model: V41 full mHC projection stream %d width %d, want %d", i, len(s), H)
+		}
+	}
+	if len(wMix) != v41MHCMixWidth*flatWidth {
+		return nil, fmt.Errorf("model: V41 full mHC projection weight has %d values, want %d", len(wMix), v41MHCMixWidth*flatWidth)
+	}
+	xflat := make([]float32, 0, flatWidth)
+	for _, s := range streams {
+		xflat = append(xflat, s...)
+	}
+	var ss float32
+	for _, v := range xflat {
+		ss += v * v
+	}
+	rsqrt := float32(1 / math.Sqrt(float64(ss/float32(len(xflat))+eps)))
+	mixes := make([]float32, v41MHCMixWidth)
+	for m := 0; m < v41MHCMixWidth; m++ {
+		var s float32
+		if transposed {
+			for i := 0; i < flatWidth; i++ {
+				s += wMix[i*v41MHCMixWidth+m] * xflat[i]
+			}
+		} else {
+			row := wMix[m*flatWidth : (m+1)*flatWidth]
+			for i := 0; i < flatWidth; i++ {
+				s += row[i] * xflat[i]
+			}
+		}
+		mixes[m] = s * rsqrt
+	}
+	return mixes, nil
+}
+
 // v41AdmitShape asserts a named tensor is present with the expected shape.
 // Presence + shape are resolved residency-completely (residentShape), so a
 // weight that a quantized serve keeps in a resident store (kqw/q4kw/q8w/...)
@@ -954,29 +1006,31 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	// four-stream projection (logical 24 x 4H, stored [4H, 24]); the reference
 	// (inference/model.py mHC; v4_flash_oracle_test.go:168) computes it over the
 	// four width-H streams laid end to end with a single shared flatten-RMS. The
-	// reduced fixture uses the legacy 24 x H single-stream matmul. Executing the
-	// flattened geometry is a distinct rung (it needs the flattened-residual
-	// projection through the resident quantized hc_attn_fn); it is admitted so a
-	// real artifact loads, but this forward refuses it BY NAME rather than
-	// silently projecting the wrong sub-matrix.
+	// reduced fixture uses the legacy 24 x H single-stream matmul. Both are
+	// executed here; only the reduced path's arithmetic is held byte-identical to
+	// pre-#13009.
 	mhcFlat, mhcTransposed, mhcOK := m.v41MHCWeightLayout(l)
 	if !mhcOK {
 		return v41StageErr(v41StageMHC, l,
 			fmt.Errorf("%w: mHC mix weight holds no admitted geometry", ErrV41ForwardStage))
 	}
-	if mhcFlat {
-		orient := "logical [24,4H]"
-		if mhcTransposed {
-			orient = "stored [4H,24]"
-		}
-		return v41StageErr(v41StageMHC, l,
-			fmt.Errorf("%w: mHC mix weight is the published flattened four-stream projection (%s); the native forward executes only the reduced 24 x H single-stream projection until the flattened-residual projection rung lands", ErrV41ForwardStage, orient))
-	}
 	hcByPos := make([]v41MHCMix, seq)
 	preByPos := make([][]float32, seq)
 	for t := 0; t < seq; t++ {
+		// The reduced path projects the normalized input through the legacy
+		// single-stream [24, H] block; the full path projects the four DISTINCT
+		// persistent streams through the flattened 4H residual with one shared RMS.
+		// xn is retained for the reduced pre-collapse stand-in below either way.
 		xn := rmsnormCfg(x[t], attnNorm, eps, cfg)
-		mixes := matRows(wMix, xn, v41MHCMixWidth, H)
+		var mixes []float32
+		if mhcFlat {
+			var err error
+			if mixes, err = v41MHCProjectFull(wMix, streams[t], H, eps, mhcTransposed); err != nil {
+				return v41StageErr(v41StageMHC, l, err)
+			}
+		} else {
+			mixes = matRows(wMix, xn, v41MHCMixWidth, H)
+		}
 		mix, err := v41MHCSplit(mixes, mixScale, mixBase, 4, hcIters, hcEps)
 		if err != nil {
 			return v41StageErr(v41StageMHC, l, err)

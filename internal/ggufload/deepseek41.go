@@ -878,9 +878,11 @@ func deepseek41EngramSuffixName(suffix string) (string, bool) {
 // mhc.ffn_* leaves. Before this arm existed the artifact's hc_attn_*/hc_ffn_*
 // suffixes fell through to the (now removed) dead per-layer hc.* namespace, so
 // the forward's required mhc.mixes.weight was never populated and admission
-// refused by name. This is name resolution only: no shape guard rejects the
-// [HCMult*H, 24] fn block (the forward's projection-input width reconciliation
-// is a separate leaf).
+// refused by name. This is name resolution only: the [HCMult*H, 24] fn block is
+// now consumed by the forward's flattened-four-stream projection, which reads the
+// stored [4H, 24] (or logical [24, 4H]) block over the four width-H streams laid
+// end to end with a single shared RMS (fak#13258). The reduced fixture's legacy
+// [24, H] single-stream geometry is unaffected.
 func deepseek41MHCSuffixName(suffix string) (string, bool) {
 	leaf := strings.TrimSuffix(suffix, ".weight")
 	switch leaf {
