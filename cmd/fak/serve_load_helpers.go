@@ -313,7 +313,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 	// and loader via the shared denseBoundedEligible predicate: an ineligible dense side produces no
 	// bounded row and keeps the full charge (fail-closed).
 	if (residentQ4K || (cpuOffloadExperts && cpuOffloadArm)) && (os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1") {
-		// fak#13247: when the streamed-EXPERT fold is also active, the bounded dense working set must
+		// fak#13249: when the streamed-EXPERT fold is also active, the bounded dense working set must
 		// be sized from the budget REMAINING after the resident expert bound, not the whole host
 		// budget. Both working sets are simultaneously host-resident; two independent (1-margin)*avail
 		// bounds admitted their SUM and the kernel OOM-killed the serve mid-staging. Deriving the dense

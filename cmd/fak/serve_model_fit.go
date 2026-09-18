@@ -1167,7 +1167,7 @@ func serveStreamedCPUOffloadPlanForAperture(ws *ggufload.WeightSource, be comput
 	// EstimateCPUOffloadExpertsStreamedMemoryPlan.
 	var streamed compute.MemoryPlan
 	if denseBound, ok := serveBoundedDenseWorkingSetBound(serveCPUOffloadBoundedDenseOptions(be, fit)); ok {
-		// fak#13247: the bounded dense working set must be sized from the budget REMAINING after the
+		// fak#13249: the bounded dense working set must be sized from the budget REMAINING after the
 		// resident expert bound, not from the whole host budget. Deriving both independently at
 		// (1-margin)*avail admitted their SUM (up to ~1.8*avail) and the kernel OOM-killed the serve
 		// mid-staging -- the [HW-WITNESSED] strix3 run. Min keeps a declared bound from inflating past
