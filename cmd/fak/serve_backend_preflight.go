@@ -128,6 +128,11 @@ type ServeStrixHaloPreflightResult struct {
 	UMAPointerManager *computestrix.UMAPointerManager
 	MALLTiler         *computestrix.MALLTiler
 	DeviceName        string
+	// KernelBridge is the public pkg/strix.AccelerationEngine adapter constructed on
+	// the detected GFX1151 path. It is the production invocation of the exported
+	// acceleration interface (#12615): without it the bridge exists but no serving
+	// entrypoint constructs it (orphan implementation).
+	KernelBridge *compute.StrixKernelBridge
 }
 
 // preflightServeStrixHalo probes for AMD Strix Halo (GFX1151) APU silicon via environment
@@ -172,11 +177,24 @@ func preflightServeStrixHaloWithSysfs(be compute.Backend, sysfsRoot string) Serv
 	umaMgr := computestrix.NewUMAPointerManager()
 	mallTiler := computestrix.NewMALLTiler()
 
+	// Invoke the exported public acceleration engine (#12615) on the same detected
+	// path. The bridge is constructed with the already-witnessed detection verdict so
+	// it cannot disagree with the preflight's own GFX1151 match, and it carries the
+	// canonical device profile plus the USWC GTT zero-copy allocator into the serving
+	// runtime instead of remaining an unconstructed orphan.
+	kernelBridge := compute.NewStrixKernelBridgeWithConfig(compute.StrixKernelBridgeConfig{
+		SysfsDRMRoot: sysfsRoot,
+		DetectFn: func() (bool, string, error) {
+			return true, matchedName, nil
+		},
+	})
+
 	return ServeStrixHaloPreflightResult{
 		Detected:          true,
 		UMAPointerManager: umaMgr,
 		MALLTiler:         mallTiler,
 		DeviceName:        matchedName,
+		KernelBridge:      kernelBridge,
 	}
 }
 

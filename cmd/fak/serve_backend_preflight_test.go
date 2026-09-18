@@ -15,6 +15,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
+	"github.com/anthony-chaudhary/fak/pkg/strix"
 )
 
 type servePreflightBackend struct {
@@ -591,5 +592,60 @@ func TestServeBackendPreflight_StrixHaloActivation(t *testing.T) {
 	}
 	if resVulkan.UMAPointerManager == nil || resVulkan.MALLTiler == nil {
 		t.Fatal("expected active UMAPointerManager and MALLTiler for vulkan Strix backend")
+	}
+}
+
+// TestServeBackendPreflight_StrixKernelBridgeInvoked pins that the public
+// pkg/strix.AccelerationEngine adapter is constructed (invoked) on the same
+// detected GFX1151 serving path as the UMA/MALL subsystems, and is absent when
+// no Strix Halo silicon is detected. This is the reachability witness for
+// fak#12615: the bridge must not remain an unconstructed orphan implementation.
+func TestServeBackendPreflight_StrixKernelBridgeInvoked(t *testing.T) {
+	defer os.Unsetenv("FAK_STRIX_GFX1151_OVERRIDE")
+
+	// Detected path (env override): the bridge is constructed and satisfies the
+	// exported public interface with the canonical GFX1151 profile.
+	os.Setenv("FAK_STRIX_GFX1151_OVERRIDE", "1")
+	res := preflightServeStrixHalo(nil)
+	if !res.Detected {
+		t.Fatal("expected Strix Halo detected=true via env override")
+	}
+	if res.KernelBridge == nil {
+		t.Fatal("expected KernelBridge constructed on the detected serving path (#12615)")
+	}
+	var engine strix.AccelerationEngine = res.KernelBridge
+	if engine.Name() != compute.DefaultStrixBridgeName {
+		t.Fatalf("bridge name = %q, want %q", engine.Name(), compute.DefaultStrixBridgeName)
+	}
+	if !engine.IsSupported() {
+		t.Fatal("expected bridge IsSupported()==true on the detected path")
+	}
+	if engine.WavefrontSize() != 32 || engine.ComputeUnits() != 40 {
+		t.Fatalf("bridge profile = wave%d/%dcu, want Wave32/40cu on GFX1151", engine.WavefrontSize(), engine.ComputeUnits())
+	}
+	profile := res.KernelBridge.Profile()
+	if profile.Architecture != "gfx1151" || profile.BusWidthBits != 256 {
+		t.Fatalf("unexpected bridge device profile: %+v", profile)
+	}
+	// The USWC GTT zero-copy allocator is live on the serving path.
+	addr, err := engine.AllocUSWCGTT(4096)
+	if err != nil {
+		t.Fatalf("AllocUSWCGTT on serving-path bridge failed: %v", err)
+	}
+	if addr == 0 {
+		t.Fatal("expected non-zero USWC GTT allocation from the serving-path bridge")
+	}
+	if err := res.KernelBridge.FreeUSWCGTT(addr); err != nil {
+		t.Fatalf("FreeUSWCGTT failed: %v", err)
+	}
+
+	// Non-detected path: no bridge is constructed (no orphan allocation).
+	os.Setenv("FAK_STRIX_GFX1151_OVERRIDE", "0")
+	resOff := preflightServeStrixHalo(nil)
+	if resOff.Detected {
+		t.Fatal("expected detected=false via explicit override disable")
+	}
+	if resOff.KernelBridge != nil {
+		t.Fatal("expected nil KernelBridge when GFX1151 is not detected")
 	}
 }
