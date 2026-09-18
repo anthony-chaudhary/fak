@@ -1190,3 +1190,89 @@ func TestDeepSeek41GGUFV41HyperconnectionTapsMap(t *testing.T) {
 		}
 	}
 }
+
+// TestDeepSeek41GGUFIndexerScheduleDerivedFromTensors witnesses the V4.1 DSA
+// indexer schedule fix: the published vcruz305 Q2_K artifact ships indexer.*
+// tensors on only a strided subset of layers (2, 8, 14, 20, 24, 28, 32, 36) and
+// carries NO indexer_types metadata key, so Config() must derive a per-layer
+// "full"/"shared" schedule from tensor presence. Before the fix cfg.IndexerTypes
+// stayed empty, glmDsaIndexerKind() defaulted every layer to "full", and the
+// native forward panicked demanding indexer.wq_b.weight on layer 0 (which ships
+// none). Layers without indexer tensors MUST classify "shared".
+func TestDeepSeek41GGUFIndexerScheduleDerivedFromTensors(t *testing.T) {
+	f := &File{
+		Metadata: ds41Meta("deepseek41"),
+		Tensors: []TensorInfo{
+			{Name: "blk.2.indexer.attn_q_b.weight", Dims: []uint64{128, 4096}, Type: TensorF32},
+			{Name: "blk.8.indexer.attn_q_b.weight", Dims: []uint64{128, 4096}, Type: TensorF32},
+		},
+	}
+	cfg, err := f.Config()
+	if err != nil {
+		t.Fatalf("Config: %v", err)
+	}
+	if len(cfg.IndexerTypes) != 40 {
+		t.Fatalf("len(cfg.IndexerTypes) = %d, want 40 (block_count)", len(cfg.IndexerTypes))
+	}
+	full := map[int]bool{2: true, 8: true}
+	for l := 0; l < 40; l++ {
+		want := "shared"
+		if full[l] {
+			want = "full"
+		}
+		if cfg.IndexerTypes[l] != want {
+			t.Errorf("cfg.IndexerTypes[%d] = %q, want %q", l, cfg.IndexerTypes[l], want)
+		}
+	}
+}
+
+// TestDeepSeek41GGUFIndexerScheduleHonorsMetadataKey pins the precedence rule:
+// an explicit indexer_types metadata array WINS over tensor-presence derivation,
+// verbatim. The real vcruz artifact has no such key, but a future converter that
+// emits one must be honored.
+func TestDeepSeek41GGUFIndexerScheduleHonorsMetadataKey(t *testing.T) {
+	meta := ds41Meta("deepseek41")
+	explicit := make([]Value, 40)
+	for l := range explicit {
+		if l == 5 {
+			explicit[l] = Value{Type: TypeString, Value: "full"}
+		} else {
+			explicit[l] = Value{Type: TypeString, Value: "shared"}
+		}
+	}
+	meta["deepseek41.indexer_types"] = Value{Type: TypeArray, Value: explicit}
+	f := &File{
+		Metadata: meta,
+		Tensors: []TensorInfo{
+			{Name: "blk.2.indexer.attn_q_b.weight", Dims: []uint64{128, 4096}, Type: TensorF32},
+		},
+	}
+	cfg, err := f.Config()
+	if err != nil {
+		t.Fatalf("Config: %v", err)
+	}
+	if len(cfg.IndexerTypes) != 40 {
+		t.Fatalf("len(cfg.IndexerTypes) = %d, want 40", len(cfg.IndexerTypes))
+	}
+	if cfg.IndexerTypes[5] != "full" {
+		t.Errorf("cfg.IndexerTypes[5] = %q, want %q (metadata key must win over tensor presence)", cfg.IndexerTypes[5], "full")
+	}
+	if cfg.IndexerTypes[2] != "shared" {
+		t.Errorf("cfg.IndexerTypes[2] = %q, want %q (metadata key must win; layer 2's tensor must NOT override it)", cfg.IndexerTypes[2], "shared")
+	}
+}
+
+// TestDeepSeek41GGUFIndexerScheduleStaysEmptyWithoutIndexerTensors is the
+// negative control: a header-only deepseek41 probe (metadata declares
+// indexer.head_count but the File carries no tensor directory) must NOT
+// fabricate an all-"shared" schedule. Empty stays empty.
+func TestDeepSeek41GGUFIndexerScheduleStaysEmptyWithoutIndexerTensors(t *testing.T) {
+	f := &File{Metadata: ds41Meta("deepseek41")}
+	cfg, err := f.Config()
+	if err != nil {
+		t.Fatalf("Config: %v", err)
+	}
+	if len(cfg.IndexerTypes) != 0 {
+		t.Fatalf("len(cfg.IndexerTypes) = %d, want 0 for a header-only probe with no tensors", len(cfg.IndexerTypes))
+	}
+}

@@ -157,6 +157,20 @@ type DeepSeek41Engram struct {
 	Offsets             []int
 }
 
+// ds41HasAnyIndexer reports whether ANY decoder layer carries a DSA learned-indexer
+// tensor. It is the V4.1 derivation sentinel, deliberately weaker than the
+// glm_moe_dsa path's glmLayerHasIndexer(f, 0): V4.1 runs its indexer on a strided
+// subset of layers starting at layer 2, so blk.0 legitimately ships NO indexer
+// tensors and a layer-0 probe would never fire for the real artifact.
+func ds41HasAnyIndexer(f *File, numLayers int) bool {
+	for l := 0; l < numLayers; l++ {
+		if glmLayerHasIndexer(f, l) {
+			return true
+		}
+	}
+	return false
+}
+
 // applyDeepSeek41Config reads the deepseek41 MoE + MLA + indexer + compress/
 // hyper-connection/grouped-output axes from the file's raw "<arch>." prefix into
 // cfg, and retains the Engram metadata on f. It mirrors applyGLMMoeDsaConfig's
@@ -233,6 +247,36 @@ func applyDeepSeek41Config(f *File, p string, cfg *model.Config, ropeDim int) er
 	}
 	if v := intValueOrZero(f, p+ds41KeyIndexTopK); v > 0 {
 		cfg.IndexTopK = v
+	}
+
+	// The per-layer DSA indexer SCHEDULE. V4.1 runs its lightning indexer on only a
+	// strided subset of layers: a "full" layer ships the indexer.* tensors and
+	// computes its own sparse top-k; every other layer reuses the most recent full
+	// layer's selection and ships NO indexer tensors. The artifact carries no
+	// indexer_types key, so derive the schedule from tensor presence exactly as the
+	// glm_moe_dsa path does (applyGLMMoeDsaConfig). Without this cfg.IndexerTypes
+	// stays empty, glmDsaIndexerKind() treats EVERY layer as "full" (its
+	// out-of-range default), and the native DSA forward panics demanding
+	// indexer.wq_b.weight on the first shared layer (blk.0, which ships none) at the
+	// first completion — the exact physical strix3 failure.
+	if types, ok := f.StringArray(p + glmKeyIndexerTypes); ok {
+		cfg.IndexerTypes = types
+	} else if cfg.NumLayers > 0 && len(f.Tensors) > 0 && ds41HasAnyIndexer(f, cfg.NumLayers) {
+		// Only derive for a genuine DSA-indexer checkpoint (SOME layer carries the
+		// indexer). A file with no indexer tensors at all leaves the schedule empty
+		// rather than fabricating an all-"shared" one. Note this does NOT key on
+		// layer 0 like the glm_moe_dsa path: V4.1's strided subset starts at layer 2,
+		// so blk.0 ships none and a layer-0 sentinel would never fire for the real
+		// artifact (leaving the original panic unfixed).
+		types := make([]string, cfg.NumLayers)
+		for l := 0; l < cfg.NumLayers; l++ {
+			if glmLayerHasIndexer(f, l) {
+				types[l] = "full"
+			} else {
+				types[l] = "shared"
+			}
+		}
+		cfg.IndexerTypes = types
 	}
 
 	// ---- V4 grouped low-rank output + hyper-connection + compression --------
