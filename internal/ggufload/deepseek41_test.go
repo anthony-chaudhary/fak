@@ -1240,12 +1240,20 @@ func TestDeepSeek41GGUFV41HyperconnectionTapsMap(t *testing.T) {
 				t.Errorf("published V4.1 hyper-connection tap %q did not resolve under deepseek41; the shard load hard-fails", ggufName)
 				continue
 			}
-			// The map strips the leading "hc_" and re-nests the tap under the
-			// per-layer hc.<leaf>.weight namespace, so hc_attn_fn.weight becomes
-			// model.layers.<L>.hc.attn_fn.weight.
-			want := layerName(layer, "hc."+strings.TrimPrefix(strings.TrimSuffix(tap, ".weight"), "hc_")+".weight")
+			// Per-sublayer dialect names resolve onto the forward-consumed leaves
+			// (fak#13258): the attention trio converges on mhc.base/mhc.scale/
+			// mhc.mixes.weight; the FFN trio gets its distinct mhc.ffn_* leaves.
+			wantLeaf := map[string]string{
+				"hc_attn_base.weight":  "mhc.base",
+				"hc_attn_scale.weight": "mhc.scale",
+				"hc_attn_fn.weight":    "mhc.mixes.weight",
+				"hc_ffn_base.weight":   "mhc.ffn_base",
+				"hc_ffn_scale.weight":  "mhc.ffn_scale",
+				"hc_ffn_fn.weight":     "mhc.ffn_mixes.weight",
+			}[tap]
+			want := layerName(layer, wantLeaf)
 			if got != want {
-				t.Errorf("CanonicalTensorNameArch(%q, deepseek41) = %q, want %q", ggufName, got, want)
+				t.Errorf("CanonicalTensorNameArch(%q, deepseek41) = %q, want forward-consumed %q (fak#13258)", ggufName, got, want)
 			}
 		}
 	}

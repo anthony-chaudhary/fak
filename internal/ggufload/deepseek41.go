@@ -792,16 +792,6 @@ func deepseek41CanonicalSuffix(suffix string) (string, bool) {
 		"ffn_gate_shexp.weight": "ffn.shared_experts.w1.weight", // admit [I, H]
 		"ffn_up_shexp.weight":   "ffn.shared_experts.w3.weight", // admit [I, H]
 		"ffn_down_shexp.weight": "ffn.shared_experts.w2.weight", // admit [H, I]
-		// Hyper-connection taps (GUESSED canonical names ? model.Config carries only
-		// the HCMult/iters/eps scalars, and the native V4.1 forward is unimplemented;
-		// these map into a dedicated per-layer hc. namespace so a real file's
-		// hc_attn_*/hc_ffn_* tensors do not hard-fail the shard load).
-		"hc_attn_fn.weight":    "hc.attn_fn.weight",
-		"hc_attn_base.weight":  "hc.attn_base.weight",
-		"hc_attn_scale.weight": "hc.attn_scale.weight",
-		"hc_ffn_fn.weight":     "hc.ffn_fn.weight",
-		"hc_ffn_base.weight":   "hc.ffn_base.weight",
-		"hc_ffn_scale.weight":  "hc.ffn_scale.weight",
 	}[suffix]
 	return mapped, ok
 }
@@ -869,6 +859,28 @@ func deepseek41EngramSuffixName(suffix string) (string, bool) {
 // forward leaf, mirroring deepseek41EngramSuffixName. The leaves stay inside the
 // dedicated per-layer mhc. namespace, so an mHC coefficient block can never fall
 // through to a generic attention/MLP canonical name.
+//
+// The staged vcruz305 Q2_K artifact (fak#13258) carries NEITHER of those: it
+// emits a PER-SUBLAYER dialect with one mHC coefficient block per sublayer
+// (reference: "For each sublayer (Attention / FFN)"). Dumped from the real GGUF
+// header at HiddenSize H=5120, hc_mult=4:
+//
+//	blk.<L>.hc_attn_base.weight  [24]           F32
+//	blk.<L>.hc_attn_fn.weight    [HCMult*H, 24] F32  (20480 = 4*H)
+//	blk.<L>.hc_attn_scale.weight [3]            F32
+//	blk.<L>.hc_ffn_base.weight   [24]           F32
+//	blk.<L>.hc_ffn_fn.weight     [HCMult*H, 24] F32
+//	blk.<L>.hc_ffn_scale.weight  [3]            F32
+//
+// The attention trio resolves onto the forward-consumed leaves above
+// (hc_attn_base -> mhc.base, hc_attn_scale -> mhc.scale, hc_attn_fn ->
+// mhc.mixes.weight); the FFN trio resolves onto distinct, non-colliding
+// mhc.ffn_* leaves. Before this arm existed the artifact's hc_attn_*/hc_ffn_*
+// suffixes fell through to the (now removed) dead per-layer hc.* namespace, so
+// the forward's required mhc.mixes.weight was never populated and admission
+// refused by name. This is name resolution only: no shape guard rejects the
+// [HCMult*H, 24] fn block (the forward's projection-input width reconciliation
+// is a separate leaf).
 func deepseek41MHCSuffixName(suffix string) (string, bool) {
 	leaf := strings.TrimSuffix(suffix, ".weight")
 	switch leaf {
@@ -878,6 +890,20 @@ func deepseek41MHCSuffixName(suffix string) (string, bool) {
 		return "mhc.base", true
 	case "mhc_scale", "mhc.scale":
 		return "mhc.scale", true
+	// Per-sublayer dialect (fak#13258): the attention trio reuses the
+	// forward-consumed leaves; the FFN trio gets distinct leaves.
+	case "hc_attn_base":
+		return "mhc.base", true
+	case "hc_attn_scale":
+		return "mhc.scale", true
+	case "hc_attn_fn":
+		return "mhc.mixes.weight", true
+	case "hc_ffn_base":
+		return "mhc.ffn_base", true
+	case "hc_ffn_scale":
+		return "mhc.ffn_scale", true
+	case "hc_ffn_fn":
+		return "mhc.ffn_mixes.weight", true
 	}
 	return "", false
 }
