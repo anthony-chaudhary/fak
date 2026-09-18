@@ -412,6 +412,12 @@ func q4kMatRowsSubset(qt *q4kTensor, x []float32, subset []int) []float32 {
 }
 
 func kQuantMatRowsSubset(qt *kQuantTensor, x []float32, subset []int) []float32 {
+	// Mirror the Q4_K subset twin (q4kMatRowsSubset) and the #13216-hardened CPU GEMV/GEMM
+	// entries: admit a checkpoint-backed (lazy) k-quant by materializing its bounded range
+	// before the parallel region, so a materializable lazy tensor computes and a genuinely
+	// unmaterializable one fails closed with a NAMED diagnostic instead of slicing a nil
+	// qt.raw into a bare slice-bounds panic (#13218).
+	qt.ensureRawCPU("subset projection")
 	y := newSubsetLogits(subset, qt.out)
 	if qt.kind == kindQ6K && kQuantSDOTEnabled(qt.kind) {
 		qv := quantizeVecQ8(x)
