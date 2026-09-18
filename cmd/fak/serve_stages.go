@@ -26,6 +26,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	computestrix "github.com/anthony-chaudhary/fak/internal/compute/strix"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
@@ -82,6 +83,95 @@ type serveRuntime struct {
 	qwen38Deps      *qwen38RuntimeDependencies
 	llamaProcess    qwen38ChildProcess
 	strixPreflight  ServeStrixHaloPreflightResult
+	// strixSubsystems retains the initialized Strix Halo UMA/MALL preflight
+	// subsystems for the serve lifetime, so activation is observable rather than
+	// a value the preflight hands out and immediately drops. Zero value = no
+	// Strix silicon (or no backend seam): the standard heap/VRAM path is used.
+	strixSubsystems serveStrixSubsystemBinding
+	// strixKVAllocation retains the zero-copy KV buffer pool pinned through the
+	// Strix Halo UMA pointer manager at startup, so the retained subsystems are
+	// CONSUMED (not merely recorded) by a real serving allocation. It is
+	// serve-lifetime state: the buffers stay pinned for the whole serve and are
+	// released at shutdown by releaseStrixKVBuffers. Zero value = no Strix
+	// silicon or a fallback to the standard heap/VRAM KV path.
+	strixKVAllocation serveStrixKVAllocation
+}
+
+// serveStrixSubsystemBinding records that the Strix Halo preflight UMA/MALL
+// subsystems were handed to the backend runtime. A zero value means no Strix
+// silicon was detected (or no backend exposed the seam), so every caller falls
+// back to standard heap/VRAM allocation with zero behavior change.
+type serveStrixSubsystemBinding struct {
+	Attached          bool
+	UMAPointerManager *computestrix.UMAPointerManager
+	MALLTiler         *computestrix.MALLTiler
+}
+
+// strixBackendAttacher is the optional backend seam that accepts the initialized
+// Strix Halo zero-copy UMA pointer manager and MALL tiler. Backends that do not
+// implement it (every discrete-GPU and CPU backend) keep today's allocation path.
+type strixBackendAttacher interface {
+	AttachStrixSubsystems(*computestrix.UMAPointerManager, *computestrix.MALLTiler) error
+}
+
+// attachStrixSubsystems retains the preflight subsystems on the runtime and,
+// when the backend exposes the seam, hands them to it. It never fails the serve:
+// a nil/undetected preflight or a backend without the seam is a no-op fallback.
+func (rt *serveRuntime) attachStrixSubsystems() {
+	pf := rt.strixPreflight
+	if !pf.Detected || pf.UMAPointerManager == nil || pf.MALLTiler == nil {
+		return
+	}
+	rt.strixSubsystems = serveStrixSubsystemBinding{
+		Attached:          true,
+		UMAPointerManager: pf.UMAPointerManager,
+		MALLTiler:         pf.MALLTiler,
+	}
+	if att, ok := rt.chatBackend.(strixBackendAttacher); ok {
+		if err := att.AttachStrixSubsystems(pf.UMAPointerManager, pf.MALLTiler); err != nil {
+			// Quarantined fallback: retaining subsystems for observability must never
+			// abort a serve; the allocation paths degrade to standard heap/VRAM.
+			rt.strixSubsystems.Attached = false
+			rt.addStartupMessage(newServeStartupMessage("strix-halo", "apu-subsystems", "warn",
+				fmt.Sprintf("attach failed, falling back to standard allocation: %v", err)))
+			return
+		}
+	}
+	rt.addStartupMessage(newServeStartupMessage("strix-halo", "apu-subsystems", "info",
+		fmt.Sprintf("uma_zero_copy=bound mall_tiling_32mb=bound device=%s", pf.DeviceName)))
+}
+
+// serveStrixKVAllocation records the zero-copy KV buffer pool the serve runtime
+// pinned through the Strix Halo UMA pointer manager. Empty when Strix silicon was
+// not detected or the allocation fell back to the standard path.
+type serveStrixKVAllocation struct {
+	AllocatedBytes int64
+	Buffers        []*computestrix.UMABuffer
+	Err            error
+}
+
+// strixKVProbeBytes is the bounded activation witness: one token of the
+// reference GQA KV footprint (4 KiB). It proves the retained UMA pointer
+// manager's zero-copy allocation path is live; it is NOT the resident KV pool.
+// The full multi-GB serving KV cache remains the model loader's responsibility
+// and is out of this ticket's scope, so this probe must never be read as full
+// KV wiring. Keeping it bounded also removes any risk of a huge allocation in a
+// test or a mis-sized startup.
+const strixKVProbeBytes = int64(computestrix.TokenFootprintBytes)
+
+// allocateStrixKVBuffers actively pins KV cache buffers through the retained
+// zero-copy UMA pointer manager. On non-Strix hosts, an undetected preflight, or
+// any allocation error it is a no-op/fallback: the standard heap/VRAM KV path is
+// used and the serve is never aborted (quarantined fallback).
+func (rt *serveRuntime) allocateStrixKVBuffers(kvBytes int64, align int64) serveStrixKVAllocation {
+	if !rt.strixSubsystems.Attached || rt.strixSubsystems.UMAPointerManager == nil || kvBytes <= 0 {
+		return serveStrixKVAllocation{}
+	}
+	buf, err := rt.strixSubsystems.UMAPointerManager.AllocateUMABuffer(kvBytes, align)
+	if err != nil {
+		return serveStrixKVAllocation{Err: err}
+	}
+	return serveStrixKVAllocation{AllocatedBytes: kvBytes, Buffers: []*computestrix.UMABuffer{buf}}
 }
 
 func newServeStartupMessage(source, kind, level, text string) gateway.StartupMessage {
@@ -469,6 +559,21 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 	if msg := serveStrixHaloPreflightMessage(rt.strixPreflight); msg.Text != "" {
 		rt.addStartupMessage(msg)
 	}
+	rt.attachStrixSubsystems()
+	// Consume the retained subsystems: pin a bounded zero-copy KV probe through the
+	// UMA pointer manager so activation is a real allocation, not just a recorded
+	// handoff. A non-Strix host, an unattached/undetected preflight, or any
+	// allocation error is a no-op fallback to the standard heap/VRAM KV path.
+	if rt.strixSubsystems.Attached {
+		rt.strixKVAllocation = rt.allocateStrixKVBuffers(strixKVProbeBytes, int64(computestrix.UMACacheLineAlignment))
+		if rt.strixKVAllocation.Err != nil {
+			rt.addStartupMessage(newServeStartupMessage("strix-halo", "kv-zero-copy", "warn",
+				fmt.Sprintf("KV zero-copy probe failed, using standard KV allocation: %v", rt.strixKVAllocation.Err)))
+		} else if rt.strixKVAllocation.AllocatedBytes > 0 {
+			rt.addStartupMessage(newServeStartupMessage("strix-halo", "kv-zero-copy", "info",
+				fmt.Sprintf("kv_zero_copy_pinned=%d buffers=%d", rt.strixKVAllocation.AllocatedBytes, len(rt.strixKVAllocation.Buffers))))
+		}
+	}
 
 	// Eager GGUF load: pull the weights resident BEFORE binding the listener so the
 	// (potentially multi-second) load is measured as part of time-to-ready and its
@@ -586,6 +691,19 @@ func (rt *serveRuntime) closeEPGroup() {
 	if rt.inKernelModel != nil {
 		_ = rt.inKernelModel.CloseWeights()
 	}
+	rt.releaseStrixKVBuffers()
+}
+
+// releaseStrixKVBuffers returns the startup zero-copy KV probe buffers pinned
+// through the Strix Halo UMA pointer manager. It is safe to call on a zero-value
+// allocation (no buffers) and never panics.
+func (rt *serveRuntime) releaseStrixKVBuffers() {
+	for _, buf := range rt.strixKVAllocation.Buffers {
+		if buf != nil && rt.strixSubsystems.UMAPointerManager != nil {
+			_ = rt.strixSubsystems.UMAPointerManager.FreeUMABuffer(buf)
+		}
+	}
+	rt.strixKVAllocation = serveStrixKVAllocation{}
 }
 
 // resolveSessionPlane resolves the auth/key material, validates the budget flags,

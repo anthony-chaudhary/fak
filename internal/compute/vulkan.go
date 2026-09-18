@@ -402,6 +402,11 @@ type vulkanBackend struct {
 	haveAttention   bool
 	transient       []*vulkanBuf
 	freeTransient   map[int][]*vulkanBuf
+	// Strix Halo (GFX1151) preflight subsystems, handed over by the serve runtime
+	// when Strix silicon is detected. Retained for the backend's zero-copy UMA and
+	// 32MB MALL allocation paths; nil on every discrete/CPU/non-Strix build.
+	strixUMA  *strix.UMAPointerManager
+	strixMALL *strix.MALLTiler
 	// Device-local residency budget (Stage-1 offload). budgetBytes is the cap on device-local
 	// memory fak will request for weights; 0 = unbounded (the prior behavior). dlUsed tracks
 	// bytes placed device-local so far. When the next weight would exceed the budget it is
