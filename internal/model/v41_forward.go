@@ -1478,18 +1478,16 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		routed := make([]float32, H)
 		for _, pick := range picks {
 			stem := "ffn.experts." + itoa(pick.expert)
-			w1, err := m.v41ProjF32(l, stem+".w1.weight")
-			if err != nil {
-				return err
-			}
-			w3, err := m.v41ProjF32(l, stem+".w3.weight")
-			if err != nil {
-				return err
-			}
-			w2, err := m.v41ProjF32(l, stem+".w2.weight")
-			if err != nil {
-				return err
-			}
+			// The routed-expert READ is a SEPARATE, still-open seam: a streamed
+			// routed expert is by design absent from every store residentF32Mat
+			// scans, so its read must go through the R5 tier (hal.go
+			// resolveExpertWeight), not v41ProjF32. Routing it here would convert
+			// the tier seam's current named-panic into a typed refusal and mask
+			// the rung; #13275 cleared only the ADMISSION of tier-resident
+			// experts, not this read. Kept on m.tensor deliberately.
+			w1 := m.tensor(layerName(l, stem+".w1.weight"))
+			w3 := m.tensor(layerName(l, stem+".w3.weight"))
+			w2 := m.tensor(layerName(l, stem+".w2.weight"))
 			y := v41SwiGLU(w1, w3, w2, xn, cfg.MoEIntermediateSize, H, cfg)
 			for i := range routed {
 				routed[i] += pick.weight * y[i]
