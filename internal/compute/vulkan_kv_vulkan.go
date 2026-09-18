@@ -250,9 +250,14 @@ func (k *vulkanKV) Evict(from, n int) int {
 			if newPos[i] == i {
 				continue // prefix survivor: position unchanged, post-RoPE K stays byte-for-byte
 			}
-			// K[i] <- Kraw[i] (disjoint buffers, no overlap) then one in-place rotation at i.
-			C.fvk_d2d_range(k.K[l].ptr, C.size_t(i*w*4), k.Kraw[l].ptr, C.size_t(i*w*4), C.size_t(w*4))
-			C.fvk_rope_f32(k.K[l].ptr, C.int(i), C.int(nKV), C.int(hd), C.double(k.cfg.RopeTheta))
+			// K[i] <- rope(Kraw[i], pos=i). fvk_rope_f32 rotates the buffer from offset
+			// zero, so stage the relocated pre-RoPE row through scratch at offset 0,
+			// rotate it at its new absolute position, then place the rotated row back at
+			// its own offset. Handing the kernel k.K[l].ptr would rotate row 0 at angle i
+			// and corrupt the prefix survivor (#12401 regression).
+			C.fvk_d2d_range(scratch, 0, k.Kraw[l].ptr, C.size_t(i*w*4), C.size_t(w*4))
+			C.fvk_rope_f32(scratch, C.int(i), C.int(nKV), C.int(hd), C.double(k.cfg.RopeTheta))
+			C.fvk_d2d_range(k.K[l].ptr, C.size_t(i*w*4), scratch, 0, C.size_t(w*4))
 		}
 	}
 	if scratch != nil {
@@ -267,11 +272,13 @@ func (k *vulkanKV) Evict(from, n int) int {
 
 // detachForRewrite gives a layer private device storage when the slice is still shared with
 // a clone, so an in-place eviction cannot corrupt a sibling's visible prefix. A sole owner
-// keeps its allocation; the shift is bounded by the survivors it already owns.
+// keeps its allocation; the shift is bounded by the survivors it already owns. The visible
+// prefix MUST be preserved: compactVSlice then shifts the live bytes in place, so a fresh
+// unpreserved buffer would compact uninitialized storage (#12401 regression).
 func (k *vulkanKV) detachForRewrite(d *vslice, layer int, site string) {
 	d.adoptBacking()
 	if d.backing != nil && d.backing.refs > 1 {
-		k.be.makeVSliceWritable(d, d.len, false, site+strconv.Itoa(layer))
+		k.be.makeVSliceWritable(d, d.len, true, site+strconv.Itoa(layer))
 	}
 }
 

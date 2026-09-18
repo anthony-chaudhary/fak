@@ -153,6 +153,67 @@ func TestVulkanKVDeviceResidentEviction(t *testing.T) {
 	B.Free()
 }
 
+// TestVulkanKVRopeRowOffsetOnEvict pins the exact defect repaired after #12401: the
+// device evict must re-RoPE the RELOCATED row at its own offset, not re-rotate row 0
+// from the buffer base. fvk_rope_f32 rotates a buffer starting at offset zero, so the
+// pre-fix Evict(0, n>0) call on k.K[l].ptr rotated the prefix survivor at angle i while
+// leaving every relocated suffix row with its stale rotation. On parent this is red two
+// ways: the prefix row changes bytes and the relocated row != rope(Kraw, newIndex).
+func TestVulkanKVRopeRowOffsetOnEvict(t *testing.T) {
+	v := vk(t)
+	c := cpu()
+	cfg := KVConfig{NumLayers: 1, NumKVHeads: 2, HeadDim: 4, RopeTheta: 10000}
+	w := cfg.NumKVHeads * cfg.HeadDim
+
+	rawK := func(p int) []float32 { s := lcg(31*p + 7); return randVec(&s, w) }
+	rawV := func(p int) []float32 { s := lcg(97*p + 11); return randVec(&s, w) }
+	appendPos := func(kv KVStore, srcPos, atPos int) {
+		kr := rawK(srcPos)
+		kRaw := v.Upload(NewF32(c, []int{w}, kr), F32)
+		kRoPE := v.RoPE(kRaw, atPos, cfg.NumKVHeads, cfg.HeadDim, cfg.RopeTheta)
+		val := v.Upload(NewF32(c, []int{w}, rawV(srcPos)), F32)
+		kv.AppendKV(0, kRaw, kRoPE, val, atPos)
+		v.Free(kRaw)
+		v.Free(kRoPE)
+		v.Free(val)
+	}
+
+	// Evict the HEAD span so every surviving row is relocated (row 0 of the buffer is
+	// itself a relocated row here) - the case the base-pointer rotation most directly
+	// corrupts. Positions 0,1,2,3 -> remove [0,2), survivors are original 2,3 at new 0,1.
+	const total, from, n = 4, 0, 2
+	A := v.NewKV(cfg)
+	for p := 0; p < total; p++ {
+		appendPos(A, p, p)
+	}
+	prePrefix := v.Read(A.KeysView(0))[:w] // original row 0, about to be evicted
+	if removed := A.Evict(from, n); removed != n || A.Len() != total-n {
+		A.Free()
+		t.Fatalf("evict removed %d (want %d), len %d (want %d)", removed, n, A.Len(), total-n)
+	}
+	gotK := v.Read(A.KeysView(0))
+
+	// Reference: for each survivor, rope(Kraw(origPos), newIndex) via the backend's own
+	// RoPE kernel - the exact bytes a never-saw cache would hold.
+	for newIdx, origPos := range []int{2, 3} {
+		kRaw := v.Upload(NewF32(c, []int{w}, rawK(origPos)), F32)
+		want := v.RoPE(kRaw, newIdx, cfg.NumKVHeads, cfg.HeadDim, cfg.RopeTheta)
+		wantHost := v.Read(want)
+		row := gotK[newIdx*w : (newIdx+1)*w]
+		if max := evictMaxAbs(row, wantHost); max > 1e-4 {
+			t.Errorf("relocated row %d (orig pos %d): max|delta|=%.3e > 1e-4 - row not rotated at its own offset (stale or row-0 rotation)", newIdx, origPos, max)
+		}
+		v.Free(kRaw)
+		v.Free(want)
+	}
+	// The evicted original row 0's bytes must NOT survive in the buffer: the base-pointer
+	// bug re-rotated row 0 at angle i, leaving a corrupted copy of it at index 0.
+	if evictEqualF32(prePrefix, gotK[:w]) {
+		t.Errorf("evicted prefix row 0 bytes survived at index 0 - the row-0 rotation bug is present")
+	}
+	A.Free()
+}
+
 // evictEqualF32 reports whether two equal-length float rows hold identical bits - the
 // byte-for-byte gate for the untouched-prefix assertion.
 func evictEqualF32(a, b []float32) bool {
