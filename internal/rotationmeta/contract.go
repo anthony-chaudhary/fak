@@ -31,6 +31,10 @@ const (
 	ReasonInvalidPlacement            Reason = "invalid_placement"
 	ReasonRuntimeRequired             Reason = "runtime_delegation_required"
 	ReasonRuntimeTransformUnavailable Reason = "runtime_transform_unavailable"
+	// ReasonInvalidSignVector: an explicit-sign recipe declared sign metadata that is
+	// internally inconsistent (widths do not sum to the vector length, an element is
+	// not -1/+1, or the vector is empty). Fail-closed: never silently drop signs.
+	ReasonInvalidSignVector Reason = "invalid_sign_vector"
 )
 
 // Placement states when the transform is applied.
@@ -48,6 +52,12 @@ const (
 	RecipeQuaRot    Recipe = "quarot"
 	RecipeSpinQuant Recipe = "spinquant"
 	RecipeLightRot  Recipe = "lightrot"
+	// RecipePrismHadamard is the prism-ml Ternary-Bonsai-2-27B GGUF rotation: a
+	// blockwise (1024) normalized Sylvester Walsh-Hadamard transform folded into the
+	// stored ternary weights, with an explicit per-row-width +/-1 sign vector applied
+	// to the runtime activation's last dimension. It is ONLINE placement: the runtime
+	// must apply the matching transform or refuse the file.
+	RecipePrismHadamard Recipe = "prism-hadamard-g128"
 )
 
 // Provenance pins the public source used to interpret a recipe. Digest is the
@@ -56,6 +66,15 @@ type Provenance struct {
 	URI     string `json:"uri"`
 	Version string `json:"version"`
 	SHA256  string `json:"sha256"`
+}
+
+// SignVector is the explicit-sign payload of an explicit-sign recipe such as
+// prism-hadamard-g128. Widths names the row-width class of each per-width sign
+// block; Values is the concatenation of those blocks. A descriptor carries it so a
+// runtime either applies the exact declared signs or refuses, never guessing.
+type SignVector struct {
+	Widths []int `json:"widths"`
+	Values []int `json:"values"`
 }
 
 // Transform describes one rotation that must be preserved by an artifact or
@@ -75,6 +94,9 @@ type Descriptor struct {
 	Provenance      Provenance  `json:"provenance"`
 	ArtifactFormat  string      `json:"artifact_format"`
 	Transforms      []Transform `json:"transforms"`
+	// Sign is the explicit per-width +/-1 sign payload. It is required for
+	// explicit-sign recipes (prism-hadamard-g128) and ignored for the rest.
+	Sign *SignVector `json:"sign,omitempty"`
 }
 
 // Capabilities are the runtime facts used for adjudication.
@@ -95,6 +117,10 @@ var pinned = map[Recipe]map[string]Provenance{
 	RecipeQuaRot:    {"arxiv:2404.00456v2": {URI: "https://arxiv.org/abs/2404.00456v2", Version: "arxiv:2404.00456v2", SHA256: "f611888c63ef63a5c0232e2c8416619f0c9ace08d0e05692731da82791202e3e"}},
 	RecipeSpinQuant: {"arxiv:2405.16406v4": {URI: "https://arxiv.org/abs/2405.16406v4", Version: "arxiv:2405.16406v4", SHA256: "fe437770d7c981eae9e028eacaa5c772ed0add900ed9dec54c10cfce6dfd86c3"}},
 	RecipeLightRot:  {"arxiv:2607.27704v1": {URI: "https://arxiv.org/abs/2607.27704v1", Version: "arxiv:2607.27704v1", SHA256: "e9e6093c0b0025e0fa40b575c416d8e40cb287d97d434373d6878ec6f3762696"}},
+	// The prism-hadamard-g128 provenance is the model card's own declared wire
+	// contract, pinned to the artifact revision we parsed (GGUF v3 header); SHA256
+	// is the digest of the model card README at that revision.
+	RecipePrismHadamard: {"prism-bonsai2-gguf-v1": {URI: "https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf", Version: "prism-bonsai2-gguf-v1", SHA256: "6ed5e12bf84b7a63069882c91dd9e9218647d17b"}},
 }
 
 // PinnedProvenance returns a copy of the reviewed public-source pin.
@@ -137,6 +163,13 @@ func Validate(d Descriptor) Decision {
 			return Decision{OutcomeUnsupported, ReasonMissingTransform, fmt.Sprintf("transforms[%d].fusion", i)}
 		}
 	}
+	// Explicit-sign recipes must carry a self-consistent sign payload; a descriptor
+	// that declares one but omits or corrupts the signs is refused, never guessed.
+	if recipeNeedsSigns(d.Recipe) {
+		if err := validateSignVector(d.Sign); err != "" {
+			return Decision{OutcomeUnsupported, ReasonInvalidSignVector, err}
+		}
+	}
 	return Decision{OutcomeSupported, ReasonSupported, "metadata is complete"}
 }
 
@@ -163,6 +196,38 @@ func contains(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// recipeNeedsSigns reports whether a recipe's explicit-sign payload is mandatory.
+func recipeNeedsSigns(r Recipe) bool { return r == RecipePrismHadamard }
+
+// validateSignVector returns a non-empty diagnostic string when the payload is
+// missing or inconsistent, and "" when it is usable. The widths must sum to the
+// value count (one sign per weight of each row-width class) and every sign must be
+// exactly -1 or +1; anything else is a corrupt declaration, not a fallback case.
+func validateSignVector(s *SignVector) string {
+	if s == nil {
+		return "explicit-sign recipe requires a sign payload"
+	}
+	if len(s.Widths) == 0 {
+		return "sign.widths is empty"
+	}
+	total := 0
+	for i, w := range s.Widths {
+		if w <= 0 {
+			return fmt.Sprintf("sign.widths[%d] must be positive, got %d", i, w)
+		}
+		total += w
+	}
+	if len(s.Values) != total {
+		return fmt.Sprintf("sign.values length %d does not match the %d widths total", len(s.Values), total)
+	}
+	for i, v := range s.Values {
+		if v != 1 && v != -1 {
+			return fmt.Sprintf("sign.values[%d] must be -1 or +1, got %d", i, v)
+		}
+	}
+	return ""
 }
 
 // ValidateOutcome permits callers to reject corrupt serialized decisions.
