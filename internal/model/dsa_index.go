@@ -234,6 +234,11 @@ func dsaFoldedMTPTopK(queryPositions, priorSelection []int, reusePrior, crossLay
 // layers compute indices and "shared" layers reuse the immediately preceding
 // full layer's top-k. This is the IndexShare contract GLM-5.2 relies on for
 // every-four-layer sharing; it is metadata/control-flow only, not attention math.
+//
+// A "dense" layer ships no indexer and has no preceding full layer to reuse
+// (DeepSeek V4.1's strided indexer starts at layer 2, so layers 0/1 are dense);
+// it publishes no sparse selection, so it yields an empty decision and clears the
+// share source — a later "shared" layer must still follow a real "full" layer.
 func dsaIndexShare(layerTypes []string, fullByLayer map[int][][]int) (map[int][][]int, bool) {
 	out := make(map[int][][]int, len(layerTypes))
 	var current [][]int
@@ -246,6 +251,9 @@ func dsaIndexShare(layerTypes []string, fullByLayer map[int][][]int) (map[int][]
 			}
 			current = cloneIndexDecision(decision)
 			out[layer] = cloneIndexDecision(current)
+		case "dense", "causal":
+			current = nil
+			out[layer] = nil
 		case "shared":
 			if current == nil {
 				return nil, false

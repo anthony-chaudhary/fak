@@ -308,7 +308,7 @@ func (m *Model) Quantize() {
 			// DSA lightning-indexer tensors are GLM-5.2-only (IndexNHeads>0); a real deepseek2
 			// checkpoint ships none, so enumerating them there would demand non-existent weights.
 			if m.Cfg.IndexNHeads > 0 {
-				if glmDsaIndexerIsShared(m.Cfg, l) {
+				if !glmDsaIndexerIsFull(m.Cfg, l) {
 					addIfPresent(p("self_attn.indexer.wq_b.weight"))
 					addIfPresent(p("self_attn.indexer.wk.weight"))
 					addIfPresent(p("self_attn.indexer.weights_proj.weight"))

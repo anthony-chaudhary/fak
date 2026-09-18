@@ -168,8 +168,8 @@ func (s *Session) decodeBandGLMDsa(id int, x []float32, lo, hi, pos int, isFirst
 	if lo < 0 || hi <= lo || hi > cfg.NumLayers {
 		return nil, fmt.Errorf("model: decodeBandGLMDsa range [%d,%d) invalid for %d layers", lo, hi, cfg.NumLayers)
 	}
-	if glmDsaIndexerIsShared(cfg, lo) {
-		return nil, fmt.Errorf("model: decodeBandGLMDsa cannot start at GLM shared-indexer layer %d (band must begin on a full-indexer layer)", lo)
+	if !glmDsaBandStartOK(cfg, lo) {
+		return nil, fmt.Errorf("model: decodeBandGLMDsa cannot start at GLM shared-indexer layer %d (band must begin on a full- or dense-indexer layer)", lo)
 	}
 	if isFirst {
 		H := cfg.HiddenSize
@@ -196,7 +196,11 @@ func (s *Session) decodeBandGLMDsa(id int, x []float32, lo, hi, pos int, isFirst
 			if !ok {
 				panic("model: glm_moe_dsa attention step failed")
 			}
-			if !glmDsaIndexerIsShared(cfg, layer) {
+			// Only a layer that actually PUBLISHES a selection seeds the shared top-k: a
+			// full layer computes one, a dense layer publishes the full causal prefix (a
+			// legal but useless share source — a later shared layer would reuse a dense
+			// layer's full prefix only if the schedule put one there, which it does not).
+			if glmDsaIndexerIsFull(cfg, layer) || glmDsaIndexerIsDense(cfg, layer) {
 				s.glmDsaSharedTopK = append(s.glmDsaSharedTopK[:0], topK...)
 			}
 			return out
@@ -274,6 +278,13 @@ func (m *Model) glmDsaAttentionStep(cache *glmDsaKVCache, layer, pos int, xn []f
 		// DeepSeek dense-MLA decode seam: no DSA indexer, so attend the full causal prefix
 		// [0..pos]. Skips glmDsaIndexStep entirely (the IndexK cache stays empty and unread);
 		// glmDsaAppendAttentionKV + glmDsaAttendCached run unchanged over the dense selection.
+		topK = glmDsaPositions(pos + 1)
+	} else if glmDsaIndexerIsDense(cfg, layer) {
+		// A dense-indexer layer ships NO indexer tensors and has no preceding full-indexer
+		// layer to reuse (DeepSeek V4.1's strided indexer starts at layer 2, so layers 0/1
+		// are dense-causal). It attends its full causal prefix [0..pos], exactly the
+		// IndexNHeads==0 seam above — there is no "previous selection" to share, so
+		// "shared" is unsatisfiable for it (dsaIndexShare refuses a leading shared layer).
 		topK = glmDsaPositions(pos + 1)
 	} else if glmDsaIndexerIsShared(cfg, layer) {
 		if len(sharedTopK) == 0 {

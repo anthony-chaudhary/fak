@@ -257,6 +257,19 @@ func glmDsaIndexerIsFull(cfg Config, layer int) bool {
 	return glmDsaIndexerKind(cfg, layer) == "full"
 }
 
+// glmDsaIndexerIsDense reports whether a layer runs NO sparse lightning indexer and
+// therefore attends its full causal prefix, the same selection the IndexNHeads==0
+// dense-MLA seam uses. It is the correct role for a layer that carries no indexer
+// tensors AND has no preceding full-indexer layer to reuse: there is no "previous
+// selection" to share, so "shared" is unsatisfiable (dsaIndexShare refuses a
+// leading shared layer). DeepSeek V4.1 Flash's published schedule is exactly this:
+// its lightning indexer is strided and starts at layer 2 (index_source_layer_ids
+// = {2,8,14,20,24,28,32,36}), so layers 0/1 have no source and are dense-causal
+// (their compress ratios are 0 in the reference's admitDeepSeekV41Published).
+func glmDsaIndexerIsDense(cfg Config, layer int) bool {
+	return glmDsaIndexerKind(cfg, layer) == "dense"
+}
+
 func glmDsaIndexerKind(cfg Config, layer int) string {
 	if layer < 0 || layer >= len(cfg.IndexerTypes) {
 		return "full"
@@ -266,9 +279,20 @@ func glmDsaIndexerKind(cfg Config, layer int) string {
 		return "full"
 	case "shared", "share":
 		return "shared"
+	case "dense", "causal":
+		return "dense"
 	default:
 		return "unknown"
 	}
+}
+
+// glmDsaBandStartOK reports whether a band may legally BEGIN at layer lo. A "full"
+// layer recomputes its own top-k; a "dense" layer attends its full causal prefix
+// and needs no predecessor state either, so both are valid band heads. Only a
+// "shared" layer is refused: it reuses the preceding full layer's selection, which
+// a band that starts on it would never have computed.
+func glmDsaBandStartOK(cfg Config, lo int) bool {
+	return !glmDsaIndexerIsShared(cfg, lo)
 }
 
 func glmDsaNormalizeLayerInput(m *Model, layer int, hidden []float32, seq int) ([]float32, bool) {

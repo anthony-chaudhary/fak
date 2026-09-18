@@ -736,6 +736,17 @@ func (m *Model) glmDsaAttnSeqShared(l int, xn [][]float32, sharedTopK *[][]int) 
 		for t := range topK {
 			topK[t] = full
 		}
+	} else if glmDsaIndexerIsDense(cfg, l) {
+		// Dense-indexer layer: no indexer tensors and no preceding full layer to reuse
+		// (DeepSeek V4.1's strided indexer starts at layer 2, so layers 0/1 are
+		// dense-causal). Every query attends its full causal prefix, the identical
+		// selection the IndexNHeads==0 seam above builds; a later shared layer never
+		// follows a dense layer in the published schedule.
+		full := glmDsaPositions(seq)
+		topK = make([][]int, seq)
+		for t := range topK {
+			topK[t] = full
+		}
 	} else if glmDsaIndexerIsShared(cfg, l) {
 		if sharedTopK == nil || *sharedTopK == nil {
 			panic("model: glm_moe_dsa shared indexer without previous full indexer")

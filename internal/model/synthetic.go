@@ -288,7 +288,7 @@ func NewSyntheticGLMDsa(cfg Config) *Model {
 		panic("model: NewSyntheticGLMDsa needs len(IndexerTypes) == NumLayers")
 	}
 	if cfg.NumLayers > 0 && glmDsaIndexerIsShared(cfg, 0) {
-		panic("model: NewSyntheticGLMDsa layer 0 must be a full indexer (no predecessor to share)")
+		panic("model: NewSyntheticGLMDsa layer 0 must be a full or dense indexer (no predecessor to share)")
 	}
 	nH := cfg.NumHeads
 	H, I, V := cfg.HiddenSize, cfg.IntermediateSize, cfg.VocabSize

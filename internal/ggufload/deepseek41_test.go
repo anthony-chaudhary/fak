@@ -1192,13 +1192,20 @@ func TestDeepSeek41GGUFV41HyperconnectionTapsMap(t *testing.T) {
 }
 
 // TestDeepSeek41GGUFIndexerScheduleDerivedFromTensors witnesses the V4.1 DSA
-// indexer schedule fix: the published vcruz305 Q2_K artifact ships indexer.*
-// tensors on only a strided subset of layers (2, 8, 14, 20, 24, 28, 32, 36) and
-// carries NO indexer_types metadata key, so Config() must derive a per-layer
-// "full"/"shared" schedule from tensor presence. Before the fix cfg.IndexerTypes
-// stayed empty, glmDsaIndexerKind() defaulted every layer to "full", and the
-// native forward panicked demanding indexer.wq_b.weight on layer 0 (which ships
-// none). Layers without indexer tensors MUST classify "shared".
+// indexer schedule: the published vcruz305 Q2_K artifact ships indexer.* tensors
+// on only a strided subset of layers (2, 8, 14, 20, 24, 28, 32, 36) and carries
+// NO indexer_types metadata key, so Config() must derive a per-layer schedule
+// from tensor presence. Before the fix cfg.IndexerTypes stayed empty,
+// glmDsaIndexerKind() defaulted every layer to "full", and the native forward
+// panicked demanding indexer.wq_b.weight on layer 0 (which ships none).
+//
+// The corrected contract distinguishes the PREFIX from the STREAM:
+//   - a layer BEFORE the first full layer has no preceding selection to reuse,
+//     so it cannot be "shared" (dsaIndexShare refuses a leading shared layer and
+//     the GLM DSA band contract forbids starting on one): it is "dense" and
+//     attends its full causal prefix (V4.1's strided indexer starts at layer 2,
+//     so layers 0/1 are dense-causal);
+//   - a layer AFTER a full layer reuses that layer's selection: "shared".
 func TestDeepSeek41GGUFIndexerScheduleDerivedFromTensors(t *testing.T) {
 	f := &File{
 		Metadata: ds41Meta("deepseek41"),
@@ -1219,6 +1226,9 @@ func TestDeepSeek41GGUFIndexerScheduleDerivedFromTensors(t *testing.T) {
 		want := "shared"
 		if full[l] {
 			want = "full"
+		} else if l < 2 {
+			// No full layer has been seen yet: the prefix is dense-causal, not shared.
+			want = "dense"
 		}
 		if cfg.IndexerTypes[l] != want {
 			t.Errorf("cfg.IndexerTypes[%d] = %q, want %q", l, cfg.IndexerTypes[l], want)

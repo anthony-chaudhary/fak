@@ -131,8 +131,9 @@ func (p PartitionPlan) Validate(cfg Config) error {
 		}
 		// A GLM DSA shared-indexer layer reuses the previous full layer's index, so a
 		// stage that BEGINS on it never computed that index. Reject the boundary here.
-		if i > 0 && cfg.isGLMMoeDsa() && glmDsaIndexerIsShared(cfg, s.Lo) {
-			return fmt.Errorf("model: stage %d boundary at GLM shared-indexer layer %d (boundaries must fall on full-indexer layers)", i, s.Lo)
+		// A full or dense head is legal: both compute (or publish) their own selection.
+		if i > 0 && cfg.isGLMMoeDsa() && !glmDsaBandStartOK(cfg, s.Lo) {
+			return fmt.Errorf("model: stage %d boundary at GLM shared-indexer layer %d (boundaries must fall on full- or dense-indexer layers)", i, s.Lo)
 		}
 	}
 	if p.Stages[len(p.Stages)-1].Hi != p.NumLayers {

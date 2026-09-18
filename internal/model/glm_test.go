@@ -785,7 +785,12 @@ func tinyGLMDsaSafetensorsFixtureN(t *testing.T, dtype string, numLayers int, in
 		addOnes(ap+"kv_a_layernorm.weight", cfg.KVLoraRank)
 		addSeq(ap+"kv_b_proj.weight", []int{nH * (cfg.QKNopeHeadDim + cfg.VHeadDim), cfg.KVLoraRank})
 		addSeq(ap+"o_proj.weight", []int{H, nH * cfg.VHeadDim})
-		if !omitSharedIndexer || !glmDsaIndexerIsShared(cfg, l) {
+		// Indexer tensors are emitted ONLY on a "full" layer. A "shared" layer reuses a
+		// prior full layer's selection; a "dense" layer ships no indexer at all and
+		// attends its full causal prefix (the real V4.1 artifact's layers 0/1). The
+		// omitSharedIndexer flag additionally strips them from shared layers so a
+		// constrained-load test can prove the forward reads none there.
+		if !glmDsaIndexerIsDense(cfg, l) && (!omitSharedIndexer || !glmDsaIndexerIsShared(cfg, l)) {
 			addSeq(ap+"indexer.wq_b.weight", []int{cfg.IndexNHeads * cfg.IndexHeadDim, cfg.QLoraRank})
 			addSeq(ap+"indexer.wk.weight", []int{cfg.IndexHeadDim, H})
 			addOnes(ap+"indexer.k_norm.weight", cfg.IndexHeadDim)

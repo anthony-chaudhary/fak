@@ -124,12 +124,13 @@ func (m *Model) ForwardBand(x [][]float32, lo, hi int, isLast bool) ([][]float32
 	if lo < 0 || hi <= lo || hi > cfg.NumLayers {
 		return nil, nil, fmt.Errorf("model: ForwardBand range [%d,%d) invalid for %d layers", lo, hi, cfg.NumLayers)
 	}
-	if cfg.isGLMMoeDsa() && glmDsaIndexerIsShared(cfg, lo) {
-		return nil, nil, fmt.Errorf("model: ForwardBand cannot start at GLM IndexShare shared layer %d (band must begin on a full-indexer layer)", lo)
+	if cfg.isGLMMoeDsa() && !glmDsaBandStartOK(cfg, lo) {
+		return nil, nil, fmt.Errorf("model: ForwardBand cannot start at GLM IndexShare shared layer %d (band must begin on a full- or dense-indexer layer)", lo)
 	}
 	// The IndexShare shared-top-k carries across layers WITHIN a band. A band that
-	// begins on a full-indexer layer (guarded above) recomputes its own group head,
-	// so a fresh per-band slice is correct.
+	// begins on a full-indexer layer (guarded above) recomputes its own group head;
+	// a dense-indexer head publishes the full causal prefix and needs no predecessor
+	// state either — so a fresh per-band slice is correct.
 	var glmDsaSharedTopK [][]int
 	for l := lo; l < hi; l++ {
 		rp := newRopeForLayer(cfg, l, len(x))
