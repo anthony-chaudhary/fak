@@ -272,6 +272,125 @@ func requireGoAndGit(t *testing.T) {
 	}
 }
 
+// --- build-tag threading (#13243) -------------------------------------------------------
+
+// taggedTestFiles derives the build constraints a changed test file declares, so the
+// execution rung can pass the matching -tags to `go test`. A test gated behind
+// `//go:build vulkan` is invisible to a bare `go test`, which let the gate pass
+// trivially at BOTH refs and falsely REFUTE a genuine device witness (#13243).
+func TestSymptomBuildTagsDerivedFromChangedTests(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{"none", "package m\n\nimport \"testing\"\n", nil},
+		{"single", "//go:build vulkan\n\npackage m\n", []string{"vulkan"}},
+		{"or", "//go:build vulkan || metal\n\npackage m\n", []string{"metal", "vulkan"}},
+		{"and", "//go:build linux && cuda\n\npackage m\n", []string{"cuda", "linux"}},
+		{"not", "//go:build !windows\n\npackage m\n", []string{"!windows"}},
+		{"parens", "//go:build (vulkan || metal) && !windows\n\npackage m\n", []string{"!windows", "metal", "vulkan"}},
+		{"legacy", "// +build vulkan\n\npackage m\n", []string{"vulkan"}},
+		{"blank-before-comment", "\n\n//go:build gpu\n\npackage m\n", []string{"gpu"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildTagsFromTestSources([]string{tc.body})
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("buildTagsFromTestSources(%q) = %v, want %v", tc.body, got, tc.want)
+			}
+		})
+	}
+}
+
+// The execution rung must run the changed package with the tags its test files declare.
+// This is the fail-to-pass core of #13243: before the fix the argv is a bare
+// `go test -count=1 <pkg>` (so a `//go:build vulkan` test is silently excluded and a
+// genuine device witness is refuted); after the fix the derived tag is threaded in.
+func TestSymptomGoTestArgvThreadsDerivedTags(t *testing.T) {
+	ctx := context.Background()
+	var seen [][]string
+	runner := func(_ context.Context, _ string, argv ...string) (string, int, error) {
+		seen = append(seen, append([]string(nil), argv...))
+		return "", 0, nil
+	}
+
+	// Tagged change: the derived constraint must land in the argv.
+	goTestPasses(ctx, runner, "/tmp", []string{"./internal/compute"}, []string{"vulkan"})
+	if len(seen) != 1 {
+		t.Fatalf("runner invoked %d times, want 1", len(seen))
+	}
+	if !containsArg(seen[0], "-tags") || !containsArg(seen[0], "vulkan") {
+		t.Fatalf("tagged argv = %v, want a -tags vulkan byte in it (bare `go test` = the #13243 defect)", seen[0])
+	}
+
+	// Untagged change: byte-identical to today — no -tags flag smuggled in.
+	seen = nil
+	goTestPasses(ctx, runner, "/tmp", []string{"./internal/compute"}, nil)
+	if len(seen) != 1 {
+		t.Fatalf("runner invoked %d times, want 1", len(seen))
+	}
+	if containsArg(seen[0], "-tags") {
+		t.Fatalf("untagged argv = %v, want NO -tags flag", seen[0])
+	}
+	want := []string{"go", "test", "-count=1", "./internal/compute"}
+	if !reflect.DeepEqual(seen[0], want) {
+		t.Fatalf("untagged argv = %v, want %v", seen[0], want)
+	}
+}
+
+// Tag derivation reads the REAL changed file contents (from git), not the request text:
+// a source-only change thread yields no tags and an untagged argv (#13243 scope guard).
+func TestSymptomDerivesTagsFromGitBlobs(t *testing.T) {
+	requireGoAndGit(t)
+	dir := newExecutionRepo(t)
+	ctx := context.Background()
+
+	writeRepoFile(t, dir, "a_test.go", "//go:build vulkan\n\npackage m\n")
+	writeRepoFile(t, dir, "b_test.go", "package m\n\nimport \"testing\"\n")
+	gitIn(t, dir, "add", "a_test.go", "b_test.go")
+	gitIn(t, dir, "commit", "-q", "-m", "add tagged and untagged tests")
+
+	// Both constraints come from the blobs at HEAD; the untagged file contributes nothing.
+	got := resolveGoBuildTags(ctx, gitRunner, dir, "HEAD", []string{"a_test.go", "b_test.go"})
+	if !reflect.DeepEqual(got, []string{"vulkan"}) {
+		t.Fatalf("tag derivation = %v, want [vulkan]", got)
+	}
+}
+
+// A tagged run that cannot build must ABSTAIN, never CONFIRM — fail-closed preserved (#13243).
+func TestSymptomTaggedRedThenGreenConfirms(t *testing.T) {
+	requireGoAndGit(t)
+	dir := newGoModuleRepo(t)
+	ctx := context.Background()
+	t.Setenv(SymptomFlagEnv, "1")
+
+	writeRepoFile(t, dir, "sign.go", "package m\n\nfunc Sign(n int) int {\n\tif n > 0 {\n\t\treturn 1\n\t}\n\treturn 0\n}\n")
+	gitIn(t, dir, "add", "sign.go")
+	gitIn(t, dir, "commit", "-q", "-m", "parent: buggy Sign")
+
+	// The ONLY test witnessing the fix is build-tag gated: a bare `go test` excludes it
+	// at both refs and the rung would falsely REFUTE (the #13243 symptom).
+	writeRepoFile(t, dir, "sign.go", "package m\n\nfunc Sign(n int) int {\n\tif n > 0 {\n\t\treturn 1\n\t}\n\tif n < 0 {\n\t\treturn -1\n\t}\n\treturn 0\n}\n")
+	writeRepoFile(t, dir, "sign_test.go", "//go:build vulkan\n\npackage m\n\nimport \"testing\"\n\nfunc TestSignNegative(t *testing.T) {\n\tif Sign(-3) != -1 {\n\t\tt.Fatalf(\"Sign(-3)=%d, want -1\", Sign(-3))\n\t}\n}\n")
+	gitIn(t, dir, "add", "sign.go", "sign_test.go")
+	gitIn(t, dir, "commit", "-q", "-m", "fix(m): Sign returns -1 for negatives (tagged witness)")
+
+	if got := NewWithRunner(gitRunner, dir).Resolve(ctx, nil, "symptom:HEAD"); got != abi.WitnessConfirmed {
+		t.Fatalf("tagged red-then-green symptom = %v, want confirmed (bare untagged `go test` = the #13243 false refutation)", got)
+	}
+	assertRepoClean(t, dir)
+}
+
+func containsArg(argv []string, want string) bool {
+	for _, a := range argv {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
 func requirePythonAndGit(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {

@@ -43,6 +43,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -171,13 +172,18 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 		return abi.WitnessAbstain
 	}
 
+	// The build constraints the changed test files declare (#13243). A device-tagged test
+	// (`//go:build vulkan`, `metal`, `cuda`, …) is excluded from a bare `go test`, so without
+	// this the package passes trivially at BOTH refs and a genuine witness is falsely refuted.
+	tags := resolveGoBuildTags(ctx, r.run, r.dir, commit, tests)
+
 	// GREEN at the fix: the changed test must pass at <ref> as committed.
 	commitDir, cleanupCommit, err := v.scratchWorktree(ctx, commit)
 	if err != nil {
 		return abi.WitnessAbstain
 	}
 	defer cleanupCommit()
-	if !allTestsPass(ctx, exec, commitDir, pkgs, pyTests) {
+	if !allTestsPass(ctx, exec, commitDir, pkgs, pyTests, tags) {
 		// The committed test does not even pass at the fix — not a usable witness; don't CONFIRM.
 		return abi.WitnessRefuted
 	}
@@ -192,7 +198,7 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 	if !overlayTestsAtRef(ctx, r.run, r.dir, commit, parentDir, tests) {
 		return abi.WitnessAbstain // could not stage the red test — uncertain, never a false CONFIRM
 	}
-	passed, buildErr := runParentTests(ctx, exec, parentDir, pkgs, pyTests)
+	passed, buildErr := runParentTests(ctx, exec, parentDir, pkgs, pyTests, tags)
 	if buildErr {
 		// Parent failed to compile/build (e.g. test references an API introduced by the fix) —
 		// this is unproven, never a false CONFIRM of behavioral reproduction (#12058).
@@ -239,8 +245,8 @@ func pythonTestFiles(tests []string) []string {
 	return pyTests
 }
 
-func allTestsPass(ctx context.Context, exec CommandRunner, dir string, pkgs, pyTests []string) bool {
-	if len(pkgs) > 0 && !goTestPasses(ctx, exec, dir, pkgs) {
+func allTestsPass(ctx context.Context, exec CommandRunner, dir string, pkgs, pyTests, tags []string) bool {
+	if len(pkgs) > 0 && !goTestPasses(ctx, exec, dir, pkgs, tags) {
 		return false
 	}
 	if len(pyTests) > 0 && !pythonTestsPass(ctx, exec, dir, pyTests) {
@@ -273,13 +279,118 @@ func overlayTestsAtRef(ctx context.Context, git Runner, repoDir, commit, destDir
 }
 
 // goTestPasses runs `go test` for the given packages in dir and reports whether it exited 0.
-func goTestPasses(ctx context.Context, run CommandRunner, dir string, pkgs []string) bool {
+// tags are the build constraints derived from the changed test files (#13243): a test gated
+// behind `//go:build vulkan` is excluded from a bare `go test`, so the execution rung would
+// see a trivially-passing package at BOTH refs and falsely REFUTE a genuine device witness.
+// A nil/empty tag set keeps the argv byte-identical to the pre-#13243 untagged form.
+func goTestPasses(ctx context.Context, run CommandRunner, dir string, pkgs []string, tags []string) bool {
 	if run == nil {
 		run = commandRunner
 	}
-	argv := append([]string{"go", "test", "-count=1"}, pkgs...)
-	_, code, err := run(ctx, dir, argv...)
+	_, code, err := run(ctx, dir, goTestArgv(pkgs, tags)...)
 	return err == nil && code == 0
+}
+
+// goTestArgv composes the `go test` argv. The -tags flag is appended only when a tag set was
+// derived, so an untagged change produces byte-identical argv to today (P1: preserved).
+func goTestArgv(pkgs, tags []string) []string {
+	argv := append([]string{"go", "test", "-count=1"}, pkgs...)
+	if len(tags) > 0 {
+		argv = append(argv, "-tags", strings.Join(tags, ","))
+	}
+	return argv
+}
+
+// buildTagsFromTestSources derives the build-constraint tag set from the bodies of the changed
+// test files (#13243). It reads the leading `//go:build` expression (and the legacy `// +build`
+// form), extracting each tag token and dropping the boolean operators. Unknown tokens (the
+// `go1.21` release tags, `cgo`) are kept as-is: `go test -tags` accepts them, and passing an
+// irrelevant tag is harmless, whereas DROPPING a real one silently excludes the witness again.
+// A file with no constraint contributes nothing.
+func buildTagsFromTestSources(bodies []string) []string {
+	seen := map[string]bool{}
+	var tags []string
+	for _, body := range bodies {
+		for _, tag := range parseBuildConstraints(body) {
+			if seen[tag] {
+				continue
+			}
+			seen[tag] = true
+			tags = append(tags, tag)
+		}
+	}
+	sort.Strings(tags)
+	return tags
+}
+
+// parseBuildConstraints extracts the tag tokens from a source file's leading build constraints,
+// stopping at the first non-comment, non-blank line (constraints must precede the package clause).
+func parseBuildConstraints(body string) []string {
+	var tags []string
+	for _, line := range strings.Split(body, "\n") {
+		s := strings.TrimSpace(line)
+		if s == "" {
+			continue
+		}
+		if !strings.HasPrefix(s, "//") {
+			break // the package clause (or any code) ends the build-constraint block
+		}
+		expr := ""
+		switch {
+		case strings.HasPrefix(s, "//go:build"):
+			expr = strings.TrimSpace(strings.TrimPrefix(s, "//go:build"))
+		case strings.HasPrefix(s, "// +build"):
+			// Legacy form: space-separated tags on the line, OPTIONS on extra lines.
+			// Legacy `,` is AND and a space is OR, but for -tags purposes either way each
+			// token is a tag name, so the naive split is sufficient.
+			expr = strings.TrimSpace(strings.TrimPrefix(s, "// +build"))
+			expr = strings.ReplaceAll(expr, ",", " ")
+		default:
+			continue
+		}
+		tags = append(tags, tokenizeConstraint(expr)...)
+	}
+	return tags
+}
+
+// tokenizeConstraint splits a build expression into its tag tokens, dropping the boolean
+// operators/punctuation (`&&`, `||`, `!`, `(`, `)`). `!windows` keeps its `!` so `go test`
+// applies the negation the file declared.
+func tokenizeConstraint(expr string) []string {
+	fields := strings.FieldsFunc(expr, func(r rune) bool {
+		return r == '(' || r == ')' || r == '&' || r == '|'
+	})
+	var tags []string
+	for _, f := range fields {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		tags = append(tags, f)
+	}
+	return tags
+}
+
+// resolveGoBuildTags reads each changed test file's content AT ref through the injected git
+// runner and returns the derived tag set. Any read failure yields nil (the untagged default),
+// never a guessed tag set: an unreadable constraint means we cannot know the tags, and the
+// caller's fail-closed ABSTAIN path handles the untagged run's outcome.
+func resolveGoBuildTags(ctx context.Context, git Runner, repoDir, ref string, tests []string) []string {
+	if git == nil {
+		git = gitRunner
+	}
+	var bodies []string
+	for _, rel := range tests {
+		if !strings.HasSuffix(rel, "_test.go") {
+			continue
+		}
+		content, code, err := git(ctx, repoDir, "show", ref+":"+rel)
+		if err != nil || code != 0 {
+			continue
+		}
+		bodies = append(bodies, content)
+	}
+	return buildTagsFromTestSources(bodies)
 }
 
 // pythonTestsPass runs each Python test script in dir and reports whether all exited 0.
@@ -319,11 +430,11 @@ func pythonBin() string {
 	return "python3"
 }
 
-func runParentTests(ctx context.Context, exec CommandRunner, dir string, pkgs, pyTests []string) (passed bool, buildErr bool) {
+func runParentTests(ctx context.Context, exec CommandRunner, dir string, pkgs, pyTests, tags []string) (passed bool, buildErr bool) {
 	goPassed := true
 	if len(pkgs) > 0 {
 		var err bool
-		goPassed, err = runGoTests(ctx, exec, dir, pkgs)
+		goPassed, err = runGoTests(ctx, exec, dir, pkgs, tags)
 		if err {
 			return false, true
 		}
@@ -342,12 +453,11 @@ func runParentTests(ctx context.Context, exec CommandRunner, dir string, pkgs, p
 	return false, false
 }
 
-func runGoTests(ctx context.Context, run CommandRunner, dir string, pkgs []string) (passed bool, buildErr bool) {
+func runGoTests(ctx context.Context, run CommandRunner, dir string, pkgs, tags []string) (passed bool, buildErr bool) {
 	if run == nil {
 		run = commandRunner
 	}
-	argv := append([]string{"go", "test", "-count=1"}, pkgs...)
-	out, code, err := run(ctx, dir, argv...)
+	out, code, err := run(ctx, dir, goTestArgv(pkgs, tags)...)
 	if err != nil {
 		return false, true
 	}
