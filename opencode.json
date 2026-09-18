@@ -1,149 +1,145 @@
-{
-  "$schema": "https://opencode.ai/config.json",
-  "share": "disabled",
-  "autoupdate": false,
-  "snapshot": false,
-  "subagent_depth": 2,
-  "model": "fak/qwen-2.5-coder-32b-instruct",
-  "instructions": [
-    "AGENTS.md"
-  ],
-  "skills": {
-    "paths": [
-      ".agents/skills"
-    ]
-  },
-  "agent": {
-    "build": {
-      "variant": "max",
-      "prompt": "Top-level coordinator vs. leaf worker role: (1) Coordinator mode (depth 0): Coordinate substantive work through parallel subagents by default. When independent work and capacity are available, launch 4\u20138 (up to 16 on high-capacity hosts) bounded subagents concurrently across pairwise tree-disjoint lanes; scale the fan-out to the useful independent tasks and available capacity. Structure work into parallel cohorts: (1) discovery/scoping via researcher and explore, (2) implementation via worker and deep-reason, and (3) adversarial verification via cross-validator, issue-auditor, and tester. Delegate investigation, implementation, and independent verification to the appropriate explore, researcher, worker, deep-reason, cross-validator, issue-auditor, tester, reviewer, or scout profiles. Give each worker one concrete deliverable, explicit file ownership, and a witness command. Use FAK's managed worker isolation and lane leases for implementation, with disjoint write sets. Launch independent tasks together before waiting for their results; sequence tasks that depend on earlier results. Keep trivial or inherently sequential work local. Collect compact receipts and independently inspect artifacts and execute the required witnesses before integrating results or claiming completion. (2) Leaf worker mode (depth 1 or assigned a leaf task): Execute directly within assigned package boundaries: do NOT invoke nested 'task' calls or spawn subagents (preventing subagent depth limit recursion failure, #12028). Instead, author reproduction unit tests, execute atomic code modifications directly, run package verification, and land changes via safe git sync. Keep trivial or inherently sequential work local. Follow AGENTS.md for guarded dispatch, landing, and verification."
-    },
-    "plan": {
-      "variant": "max",
-      "prompt": "Top-level coordinator vs. leaf worker role: (1) Coordinator mode (depth 0): Plan substantive work through parallel read-only subagents by default. When independent questions and capacity are available, launch 4\u20138 bounded explore or researcher subagents concurrently; scale the fan-out to the useful independent questions and available capacity. Give each subagent one concrete question, a scoped read-only surface, and the evidence to return. Explicitly require read-only investigation in every delegation: do not edit files, implement changes, or launch implementation workers during planning. Launch independent investigations together before waiting for their results; sequence questions that depend on earlier findings. Keep trivial or inherently sequential planning local. Collect compact findings, independently inspect the cited evidence, and synthesize a plan with disjoint implementation ownership, FAK managed worker isolation and lane leases, and checkable witnesses. (2) Leaf worker mode (depth 1): Execute read-only investigations directly without calling the 'task' tool. Follow AGENTS.md and preserve plan-mode restrictions."
-    },
-    "general": {
-      "variant": "max"
-    },
-    "explore": {
-      "variant": "max"
-    },
-    "deep-reason": {
-      "variant": "max",
-      "description": "High-reasoning subagent for deep architectural analysis, frozen ABI changes, or complex debugging"
-    },
-    "worker": {
-      "variant": "max",
-      "description": "Substantive implementation worker for atomic code modifications, reproduction tests, refactoring, package verification, and autonomous safe git landing by default (executes directly; prohibited from calling the 'task' tool)"
-    },
-    "researcher": {
-      "variant": "max",
-      "description": "Research and discovery subagent for investigating codebase layout, prior art, doc searches, and structured findings"
-    },
-    "cross-validator": {
-      "variant": "max",
-      "description": "Adversarial cross-validation subagent for verifying code changes, inspecting diffs, executing tests, and producing proof verdicts"
-    },
-    "lander": {
-      "variant": "max",
-      "description": "Safe git landing subagent for executing pre-commit package validation, lint checks, explicit-path commits, and unprompted push"
-    },
-    "issue-auditor": {
-      "variant": "max",
-      "description": "Issue discovery and auto-ticketing subagent for analyzing code diffs, uncovering edge cases and failure modes, and filing GitHub tickets"
-    },
-    "tester": {
-      "variant": "max",
-      "description": "Deterministic test execution subagent for running on-device test suites and generating proof receipts without modifying source code"
-    },
-    "reviewer": {
-      "variant": "max",
-      "description": "Independent code and architectural review subagent for inspecting diffs and checking 5-gate boundary invariants without modifying files"
-    },
-    "scout": {
-      "variant": "max",
-      "description": "Read-only research subagent for external docs, dependency inspection, upstream PR reviews, and library source analysis"
-    }
-  },
-  "mcp": {
-    "dos": {
-      "type": "local",
-      "command": [
-        "dos-mcp"
-      ],
-      "environment": {
-        "PYTHONIOENCODING": "utf-8"
-      },
-      "enabled": true
-    },
-    "fak": {
-      "type": "local",
-      "command": [
-        "fak",
-        "serve",
-        "--stdio",
-        "--defer-tools=true",
-        "--policy",
-        "examples/opencode-policy.json"
-      ],
-      "environment": {},
-      "enabled": true
-    }
-  },
-  "lsp": {
-    "gopls": {
-      "disabled": true
-    },
-    "fak-go": {
-      "command": [
-        "fak",
-        "lsp"
-      ],
-      "extensions": [
-        ".go"
-      ]
-    }
-  },
-  "permission": {
-    "skill": {
-      "phased-plan": "deny"
-    },
-    "lsp": "allow",
-    "fak*": "allow",
-    "dos*": "allow",
-    "fak_*": "allow",
-    "dos_*": "allow"
-  },
-  "provider": {
-    "fak": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "FAK Strix Halo (local)",
-      "options": {
-        "baseURL": "http://127.0.0.1:8080/v1"
-      },
-      "models": {
-        "qwen-2.5-coder-32b-instruct": {
-          "name": "Qwen 2.5 Coder 32B Instruct (Local Halo)",
-          "limit": {
-            "context": 131072,
-            "output": 8192
-          }
-        },
-        "Qwen3.8-27B-UD-Q2_K_XL": {
-          "name": "Qwen 3.8 27B UD Q2_K_XL (Local Halo)",
-          "limit": {
-            "context": 32768,
-            "output": 8192
-          }
-        },
-        "fak-local": {
-          "name": "FAK Local Serving",
-          "limit": {
-            "context": 32768,
-            "output": 8192
-          }
-        }
-      }
-    }
-  }
+﻿{
+    "$schema":  "https://opencode.ai/config.json",
+    "agent":  {
+                  "build":  {
+                                "prompt":  "Top-level coordinator vs. leaf worker role: (1) Coordinator mode (depth 0): Coordinate substantive work through parallel subagents by default. When independent work and capacity are available, launch 4â€“8 (up to 16 on high-capacity hosts) bounded subagents concurrently across pairwise tree-disjoint lanes; scale the fan-out to the useful independent tasks and available capacity. Structure work into parallel cohorts: (1) discovery/scoping via researcher and explore, (2) implementation via worker and deep-reason, and (3) adversarial verification via cross-validator, issue-auditor, and tester. Delegate investigation, implementation, and independent verification to the appropriate explore, researcher, worker, deep-reason, cross-validator, issue-auditor, tester, reviewer, or scout profiles. Give each worker one concrete deliverable, explicit file ownership, and a witness command. Use FAK\u0027s managed worker isolation and lane leases for implementation, with disjoint write sets. Launch independent tasks together before waiting for their results; sequence tasks that depend on earlier results. Keep trivial or inherently sequential work local. Collect compact receipts and independently inspect artifacts and execute the required witnesses before integrating results or claiming completion. (2) Leaf worker mode (depth 1 or assigned a leaf task): Execute directly within assigned package boundaries: do NOT invoke nested \u0027task\u0027 calls or spawn subagents (preventing subagent depth limit recursion failure, #12028). Instead, author reproduction unit tests, execute atomic code modifications directly, run package verification, and land changes via safe git sync. Keep trivial or inherently sequential work local. Follow AGENTS.md for guarded dispatch, landing, and verification.",
+                                "variant":  "max"
+                            },
+                  "cross-validator":  {
+                                          "description":  "Adversarial cross-validation subagent for verifying code changes, inspecting diffs, executing tests, and producing proof verdicts",
+                                          "variant":  "max"
+                                      },
+                  "deep-reason":  {
+                                      "description":  "High-reasoning subagent for deep architectural analysis, frozen ABI changes, or complex debugging",
+                                      "variant":  "max"
+                                  },
+                  "explore":  {
+                                  "variant":  "max"
+                              },
+                  "general":  {
+                                  "variant":  "max"
+                              },
+                  "issue-auditor":  {
+                                        "description":  "Issue discovery and auto-ticketing subagent for analyzing code diffs, uncovering edge cases and failure modes, and filing GitHub tickets",
+                                        "variant":  "max"
+                                    },
+                  "lander":  {
+                                 "description":  "Safe git landing subagent for executing pre-commit package validation, lint checks, explicit-path commits, and unprompted push",
+                                 "variant":  "max"
+                             },
+                  "plan":  {
+                               "prompt":  "Top-level coordinator vs. leaf worker role: (1) Coordinator mode (depth 0): Plan substantive work through parallel read-only subagents by default. When independent questions and capacity are available, launch 4â€“8 bounded explore or researcher subagents concurrently; scale the fan-out to the useful independent questions and available capacity. Give each subagent one concrete question, a scoped read-only surface, and the evidence to return. Explicitly require read-only investigation in every delegation: do not edit files, implement changes, or launch implementation workers during planning. Launch independent investigations together before waiting for their results; sequence questions that depend on earlier findings. Keep trivial or inherently sequential planning local. Collect compact findings, independently inspect the cited evidence, and synthesize a plan with disjoint implementation ownership, FAK managed worker isolation and lane leases, and checkable witnesses. (2) Leaf worker mode (depth 1): Execute read-only investigations directly without calling the \u0027task\u0027 tool. Follow AGENTS.md and preserve plan-mode restrictions.",
+                               "variant":  "max"
+                           },
+                  "researcher":  {
+                                     "description":  "Research and discovery subagent for investigating codebase layout, prior art, doc searches, and structured findings",
+                                     "variant":  "max"
+                                 },
+                  "reviewer":  {
+                                   "description":  "Independent code and architectural review subagent for inspecting diffs and checking 5-gate boundary invariants without modifying files",
+                                   "variant":  "max"
+                               },
+                  "scout":  {
+                                "description":  "Read-only research subagent for external docs, dependency inspection, upstream PR reviews, and library source analysis",
+                                "variant":  "max"
+                            },
+                  "tester":  {
+                                 "description":  "Deterministic test execution subagent for running on-device test suites and generating proof receipts without modifying source code",
+                                 "variant":  "max"
+                             },
+                  "worker":  {
+                                 "description":  "Substantive implementation worker for atomic code modifications, reproduction tests, refactoring, package verification, and autonomous safe git landing by default (executes directly; prohibited from calling the \u0027task\u0027 tool)",
+                                 "variant":  "max"
+                             }
+              },
+    "autoupdate":  false,
+    "instructions":  [
+                         "AGENTS.md"
+                     ],
+    "lsp":  {
+                "fak-go":  {
+                               "command":  [
+                                               "fak",
+                                               "lsp"
+                                           ],
+                               "extensions":  [
+                                                  ".go"
+                                              ]
+                           },
+                "gopls":  {
+                              "disabled":  true
+                          }
+            },
+    "mcp":  {
+                "dos":  {
+                            "command":  [
+                                            "dos-mcp"
+                                        ],
+                            "enabled":  true,
+                            "environment":  {
+                                                "PYTHONIOENCODING":  "utf-8"
+                                            },
+                            "type":  "local"
+                        },
+                "fak":  {
+                            "command":  [
+                                            "fak",
+                                            "serve",
+                                            "--stdio",
+                                            "--defer-tools=true",
+                                            "--policy",
+                                            "examples/opencode-policy.json"
+                                        ],
+                            "enabled":  true,
+                            "environment":  {
+
+                                            },
+                            "type":  "local"
+                        }
+            },
+    "model":  "hive-ai/deepseek-ai/DeepSeek-V4.1-Flash",
+    "permission":  {
+                       "dos*":  "allow",
+                       "dos_*":  "allow",
+                       "fak*":  "allow",
+                       "fak_*":  "allow",
+                       "lsp":  "allow",
+                       "skill":  {
+                                     "phased-plan":  "deny"
+                                 }
+                   },
+    "provider":  {
+                     "fak":  {
+                                 "models":  {
+                                                "Qwen3.8-27B-UD-Q2_K_XL":  {
+                                                                               "limit":  {
+                                                                                             "context":  32768,
+                                                                                             "output":  8192
+                                                                                         },
+                                                                               "name":  "Qwen 3.8 27B UD Q2_K_XL (Local Halo)"
+                                                                           },
+                                                "fak-local":  {
+                                                                  "limit":  {
+                                                                                "context":  32768,
+                                                                                "output":  8192
+                                                                            },
+                                                                  "name":  "FAK Local Serving"
+                                                              }
+                                            },
+                                 "name":  "FAK Strix Halo (local)",
+                                 "npm":  "@ai-sdk/openai-compatible",
+                                 "options":  {
+                                                 "baseURL":  "http://127.0.0.1:8080/v1"
+                                             }
+                             }
+                 },
+    "share":  "disabled",
+    "skills":  {
+                   "paths":  [
+                                 ".agents/skills"
+                             ]
+               },
+    "small_model":  "hive-ai/deepseek-ai/DeepSeek-V4.1-Flash",
+    "snapshot":  false,
+    "subagent_depth":  2
 }
