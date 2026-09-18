@@ -184,7 +184,14 @@
         "peer_fak_native": { "pid": 79900, "cpu_percent": 0.0, "elapsed": "16:10" },
         "gpu_lease_path": "/var/folders/z2/qgyzc8gx6kn1mkh6kfhlb6qw0000gp/T/fak-gpu.lease",
         "gpu_lease_contents": "79900",
-        "gpu_lease_holder": "fak-native pid 79900 (idle, holds lease open fd 11u per lsof)"
+        "gpu_lease_holder": "fak-native pid 79900 (idle, holds lease open fd 11u per lsof)",
+        "root_cause": "the lease is held by a supervised peer workload, not a stray: `fak cron opencode --job macperf2-00` keeps a resident 27B `fak-native up` (ppid 1, orphaned child of the cron job) holding the shared Metal lease. During this pass the holder was SIGTERM'd and a fresh `fak-native up --model 27B` (pid 6949) was respawned by the same supervisor within seconds, re-taking the lease. A quiesced window therefore requires operator coordination to pause the peer cron job; killing peer processes is out of policy.",
+        "reclamation_attempt": {
+          "action": "SIGTERM (mirroring `fak signal stop`) to the leaked idle holder pid 79900; ignored",
+          "outcome": "process had already begun exiting; supervisor `fak cron ... macperf2-00` immediately respawned a new holder (pid 6949) that re-acquired the lease",
+          "conclusion": "not a reclaimable orphan; peer-supervised, so left alone after the single attempt"
+        },
+        "load_after_metaltest_exit": { "load_1m": 4.23, "load_5m": 8.03, "load_15m": 10.84, "note": "load fell once the peer metaltest exited, but the supervised 27B Metal lease still blocks the frozen fak arm" }
       },
       "mechanism_witness": {
         "cmd_fak_TestTurnkeyConcurrentBatch": "go -C ../fak test ./cmd/fak/ -run TestTurnkeyConcurrentBatch -count=1 -> ok github.com/anthony-chaudhary/fak/cmd/fak 1.174s",
