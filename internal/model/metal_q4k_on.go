@@ -122,15 +122,16 @@ func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P in
 		return q4kGemm(qt, Xf, P)
 	}
 	Y := make([]float32, P*qt.out)
+	var stall error
 	if !s.M.withMetalQ4K(name, qt, func(w *metalgemm.Q4KWeight) {
 		if P == 1 {
 			s.metalExecution(metalgemm.ExecutionQ4KGEMV, func(observation *metalgemm.ExecutionObservation) {
-				w.GEMVWithEvents(Xf, Y, observation)
+				stall = w.GEMVWithEventsErr(Xf, Y, observation)
 			})
 			return
 		}
 		s.metalExecution(metalgemm.ExecutionQ4KGEMM, func(observation *metalgemm.ExecutionObservation) {
-			w.GEMMWithEvents(Xf, P, Y, observation)
+			_, stall = w.GEMMWithEventsModeErr(Xf, P, Y, observation, metalgemm.Q4KGEMMModeForPrompt(P))
 		})
 	}) {
 		route := MetalFallbackQ4KGEMMCPU
@@ -141,6 +142,16 @@ func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P in
 		if qt.lazy != nil {
 			panic("model: lazy Q4_K Metal GEMM upload failed: " + name)
 		}
+		return q4kGemm(qt, Xf, P)
+	}
+	if metalgemm.IsMetalCommandBufferStall(stall) {
+		// The bounded single-weight wait timed out, so Y holds no readable result. Decline to
+		// the proven CPU q4kGemm path so the served turn completes instead of returning garbage.
+		route := MetalFallbackQ4KGEMMCPU
+		if P == 1 {
+			route = MetalFallbackQ4KGEMVPanelCPU
+		}
+		s.recordMetalFallback(route)
 		return q4kGemm(qt, Xf, P)
 	}
 	return Y
@@ -179,10 +190,19 @@ func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]
 		return nil // not enough resident members to amortize a command buffer
 	}
 	var grouped [][]float32
+	var stall error
 	if P == 1 {
 		s.metalExecution(metalgemm.ExecutionQ4KGEMVGroup, func(observation *metalgemm.ExecutionObservation) {
-			grouped = metalgemm.GEMVGroupWithEvents(ws, Xf, observation)
+			grouped, stall = metalgemm.GEMVGroupWithEventsErr(ws, Xf, observation)
 		})
+		if metalgemm.IsMetalCommandBufferStall(stall) {
+			// The bounded Q4_K GEMV-group wait timed out, so the GPU command buffer never
+			// completed and the grouped outputs are not readable. Decline (nil) so the caller
+			// loops per-weight and the served turn still completes correctly instead of blocking
+			// on a wedged GPU.
+			s.recordMetalFallback(MetalFallbackQ4KGEMVGroupDispatch)
+			return nil
+		}
 	} else {
 		s.metalExecution(metalgemm.ExecutionQ4KGEMMGroup, func(observation *metalgemm.ExecutionObservation) {
 			if q4kMLPOutputSlabSelected(s.Q4KGateUpOutputSlab, names, pos, P) {
@@ -202,7 +222,7 @@ func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]
 					} else {
 						slab = slab[:need]
 					}
-					grouped = metalgemm.GEMMGroupIntoWithEvents(ws, Xf, P, slab, observation)
+					grouped, _, stall = metalgemm.GEMMGroupIntoWithEventsModeErr(ws, Xf, P, slab, observation, metalgemm.Q4KGEMMModeForPrompt(P))
 					if grouped != nil {
 						// Do not publish new backing into Session until the synchronous Metal call
 						// has completed and returned its aliases.
@@ -221,8 +241,18 @@ func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]
 					return
 				}
 			}
-			grouped = metalgemm.GEMMGroupWithEvents(ws, Xf, P, observation)
+			off := 0
+			for _, w := range ws {
+				off += P * w.Out
+			}
+			grouped, _, stall = metalgemm.GEMMGroupIntoWithEventsModeErr(ws, Xf, P, make([]float32, off), observation, metalgemm.Q4KGEMMModeForPrompt(P))
 		})
+		if metalgemm.IsMetalCommandBufferStall(stall) {
+			// Same wedged-GPU decline as the decode group above, on the batched prefill GEMM:
+			// decline (nil) so the caller's per-weight proj completes the turn on the proven path.
+			s.recordMetalFallback(MetalFallbackQ4KGEMMGroupDispatch)
+			return nil
+		}
 	}
 	if grouped == nil {
 		route := MetalFallbackQ4KGEMMGroupDispatch
@@ -578,10 +608,13 @@ func (s *Session) q4kFusedMLP(gateName, upName, downName string, x []float32) []
 		}
 		y := make([]float32, dt.out)
 		ok := false
+		var stall error
 		s.metalExecution(metalgemm.ExecutionQ4KFusedMLP, func(observation *metalgemm.ExecutionObservation) {
-			ok = metalgemm.FusedMLPWithEvents(gw, uw, dw, x, y, observation)
+			ok, stall = metalgemm.FusedMLPWithEventsErr(gw, uw, dw, x, y, observation)
 		})
-		if !ok {
+		if metalgemm.IsMetalCommandBufferStall(stall) || !ok {
+			// A wedged fused-MLP command buffer returns ok=true with unreadable y; decline either
+			// way so the caller runs the per-matmul path and the served turn completes.
 			s.recordMetalFallback(MetalFallbackFusedMLPDispatch)
 			return nil
 		}

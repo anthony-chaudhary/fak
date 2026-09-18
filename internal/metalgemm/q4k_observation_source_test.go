@@ -51,7 +51,7 @@ func TestMixedQ4KQ8ObservationSourceIsCallerOwned(t *testing.T) {
 	for _, want := range []string{
 		"mg_q4k_q8_gemv_group(", "mg_execution_event* event",
 		"event->command_buffer", "event->host_readback = 1",
-		"inject_post_submit_failure", "[cb waitUntilCompleted]",
+		"inject_post_submit_failure", "mg_q4k_commit_bounded(cb, event)",
 	} {
 		if !strings.Contains(string(nativeSource), want) {
 			t.Fatalf("mixed native source missing %q", want)

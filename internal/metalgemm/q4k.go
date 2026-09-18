@@ -98,6 +98,30 @@ func recordQ4KEvent(observation *ExecutionObservation, event *C.mg_execution_eve
 		float64(event.wait_milliseconds), event.timing_available != 0)
 }
 
+// q4kCommandBufferStall classifies one observed Q4_K command-buffer wait into the package's typed
+// stall. The native wait is bounded, but its terminal state is what decides: a committed buffer that
+// never reached MTLCommandBufferStatusCompleted (a device fault) is a stall even under the limit, and
+// an over-limit wait is a stall regardless. A nil event carries no observation and yields no error so
+// the pre-existing no-observation path is preserved.
+func q4kCommandBufferStall(event *C.mg_execution_event, statusCode, errorCode int, op string) error {
+	if event == nil {
+		return nil
+	}
+	return q4kStallFromReceipt(event.completed_wait != 0, float64(event.wait_milliseconds),
+		statusCode, errorCode, op)
+}
+
+// q4kStallFromReceipt is the cgo-free classification seam folds native receipts into: a committed
+// buffer that did not reach Completed (a device fault or a bounded timeout) is a stall even under the
+// limit, and an over-limit wait is a stall regardless. Keeping it plain-Go makes the classification
+// testable without a cgo test import.
+func q4kStallFromReceipt(completedWait bool, waitMS float64, statusCode, errorCode int, op string) error {
+	if completedWait {
+		return nil
+	}
+	return commandBufferStallError(waitMS, statusCode, errorCode, "", op)
+}
+
 type q4kGEMVExecution int
 
 const (
@@ -497,16 +521,21 @@ func UploadMTPQ4K(raw []byte, out, in int) *Q4KWeight {
 
 // GEMV computes y[Out] = W · x for one f32 activation row x (length In). y must have length
 // >= Out. Both slices are accessed only during the call. This is the decode GEMV.
-func (w *Q4KWeight) gemvWithEventsMode(x, y []float32, observation *ExecutionObservation, mode q4kGEMVMode) q4kGEMVExecution {
+func (w *Q4KWeight) gemvWithEventsModeErr(x, y []float32, observation *ExecutionObservation, mode q4kGEMVMode) (q4kGEMVExecution, error) {
 	if w == nil || w.id < 0 || len(x) < w.In || len(y) < w.Out {
-		return q4kGEMVNotExecuted
+		return q4kGEMVNotExecuted, nil
 	}
 	var event C.mg_execution_event
 	q4kExecutionMu.Lock()
 	executed := C.mg_q4k_gemv(w.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])), C.int(mode), &event)
 	q4kExecutionMu.Unlock()
 	recordQ4KEvent(observation, &event)
-	return q4kGEMVExecution(executed)
+	return q4kGEMVExecution(executed), q4kCommandBufferStall(&event, 0, 0, "q4k gemv")
+}
+
+func (w *Q4KWeight) gemvWithEventsMode(x, y []float32, observation *ExecutionObservation, mode q4kGEMVMode) q4kGEMVExecution {
+	executed, _ := w.gemvWithEventsModeErr(x, y, observation, mode)
+	return executed
 }
 
 func (w *Q4KWeight) gemvWithEvents(x, y []float32, observation *ExecutionObservation) q4kGEMVExecution {
@@ -519,6 +548,19 @@ func (w *Q4KWeight) gemvWithEvents(x, y []float32, observation *ExecutionObserva
 
 func (w *Q4KWeight) GEMVWithEvents(x, y []float32, observation *ExecutionObservation) {
 	w.gemvWithEvents(x, y, observation)
+}
+
+// GEMVWithEventsErr is GEMVWithEvents plus the observed terminal command-buffer classification: a
+// committed buffer that never reached Completed (a bounded timeout or a device fault) returns the
+// package's typed MetalCommandBufferStallError instead of a silent zero result. The observation is
+// still recorded so the existing counters path is unchanged.
+func (w *Q4KWeight) GEMVWithEventsErr(x, y []float32, observation *ExecutionObservation) error {
+	mode := q4kGEMVModeScalar
+	if q4kUseVectorized.Load() {
+		mode = q4kGEMVModeVectorized
+	}
+	_, err := w.gemvWithEventsModeErr(x, y, observation, mode)
+	return err
 }
 
 const (
@@ -567,15 +609,45 @@ func (w *Q4KWeight) GEMVBatchWithEvents(Xcat []float32, n int, Ycat []float32, o
 	w.gemvBatchRepeatedWithEvents(Xcat, n, Ycat, observation)
 }
 
+// GEMVBatchWithEventsErr is GEMVBatchWithEvents plus the observed terminal command-buffer
+// classification: a committed batch buffer that never reached Completed (a bounded timeout or a
+// device fault) returns the package's typed MetalCommandBufferStallError. The observation is still
+// recorded so the existing counters path is unchanged.
+func (w *Q4KWeight) GEMVBatchWithEventsErr(Xcat []float32, n int, Ycat []float32, observation *ExecutionObservation) error {
+	if w == nil || w.id < 0 || n <= 0 || len(Xcat) < n*w.In || len(Ycat) < n*w.Out {
+		return nil
+	}
+	var event C.mg_execution_event
+	q4kExecutionMu.Lock()
+	if q4kUseMultiVector(w.Out, w.In, n) {
+		C.mg_q4k_gemv_batch_multi(w.id, (*C.float)(unsafe.Pointer(&Xcat[0])), C.int(n), (*C.float)(unsafe.Pointer(&Ycat[0])), &event)
+	} else {
+		C.mg_q4k_gemv_batch(w.id, (*C.float)(unsafe.Pointer(&Xcat[0])), C.int(n), (*C.float)(unsafe.Pointer(&Ycat[0])), &event)
+	}
+	q4kExecutionMu.Unlock()
+	recordQ4KEvent(observation, &event)
+	return q4kCommandBufferStall(&event, 0, 0, "q4k gemv batch")
+}
+
 // GEMVGroup runs one decode GEMV per weight in ws — all reading the SAME activation x (length
 // In, shared) — in a SINGLE Metal command buffer, and returns one result slice per weight (each
 // length ws[i].Out). Every weight must share x's In. This is the live decode group pattern
 // (q/k/v, gate/up, the GDN in_proj quad): it pays the per-command-buffer submit/sync once for the
 // whole group and pipelines the dispatches. Returns nil on a shape mismatch or empty input.
 func GEMVGroupWithEvents(ws []*Q4KWeight, x []float32, observation *ExecutionObservation) [][]float32 {
+	out, _ := GEMVGroupWithEventsErr(ws, x, observation)
+	return out
+}
+
+// GEMVGroupWithEventsErr is GEMVGroupWithEvents plus the observed terminal command-buffer
+// classification: a committed group buffer that never reached Completed (a bounded timeout or a
+// device fault) returns the typed MetalCommandBufferStallError alongside the (best-effort, possibly
+// garbage) outputs, so a hung GPU surfaces as a diagnosable failure instead of a silent block. The
+// observation is still recorded.
+func GEMVGroupWithEventsErr(ws []*Q4KWeight, x []float32, observation *ExecutionObservation) ([][]float32, error) {
 	n := len(ws)
 	if n == 0 || ws[0] == nil || len(x) < ws[0].In {
-		return nil
+		return nil, nil
 	}
 	in := ws[0].In
 	wids := make([]C.int, n)
@@ -583,7 +655,7 @@ func GEMVGroupWithEvents(ws []*Q4KWeight, x []float32, observation *ExecutionObs
 	off := 0
 	for i, w := range ws {
 		if w == nil || w.id < 0 || w.In != in {
-			return nil
+			return nil, nil
 		}
 		wids[i] = w.id
 		yoff[i] = C.int(off)
@@ -603,7 +675,7 @@ func GEMVGroupWithEvents(ws []*Q4KWeight, x []float32, observation *ExecutionObs
 		out[i] = ycat[o : o+w.Out : o+w.Out]
 		o += w.Out
 	}
-	return out
+	return out, q4kCommandBufferStall(&event, 0, 0, "q4k gemv group")
 }
 
 const ExecutionMixedQ4KQ8QKV ExecutionOperation = "mixed-q4_k-q8-qkv"
@@ -721,21 +793,29 @@ func gemvGroupMixedQ4KQ8(q4ws []*Q4KWeight, q8ws []*Q8Weight, x []float32, xq []
 // down.In (=I); len(x)>=H, len(y)>=H. Returns false on a shape mismatch (caller uses the per-matmul
 // path). The activation is silu — the caller must gate on a non-GELU config.
 func FusedMLPWithEvents(gate, up, down *Q4KWeight, x, y []float32, observation *ExecutionObservation) bool {
+	ok, _ := FusedMLPWithEventsErr(gate, up, down, x, y, observation)
+	return ok
+}
+
+// FusedMLPWithEventsErr is FusedMLPWithEvents plus the observed terminal command-buffer
+// classification: a committed MLP buffer that never reached Completed (a bounded timeout or a device
+// fault) returns the package's typed MetalCommandBufferStallError. The observation is still recorded.
+func FusedMLPWithEventsErr(gate, up, down *Q4KWeight, x, y []float32, observation *ExecutionObservation) (bool, error) {
 	if gate == nil || up == nil || down == nil || gate.id < 0 || up.id < 0 || down.id < 0 {
-		return false
+		return false, nil
 	}
 	if gate.In != up.In || gate.Out != up.Out || down.In != gate.Out || down.Out != gate.In {
-		return false
+		return false, nil
 	}
 	if len(x) < gate.In || len(y) < down.Out {
-		return false
+		return false, nil
 	}
 	var event C.mg_execution_event
 	q4kExecutionMu.Lock()
 	C.mg_q4k_mlp(gate.id, up.id, down.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])), &event)
 	q4kExecutionMu.Unlock()
 	recordQ4KEvent(observation, &event)
-	return true
+	return true, q4kCommandBufferStall(&event, 0, 0, "q4k mlp")
 }
 
 func FusedMLP(gate, up, down *Q4KWeight, x, y []float32) bool {
@@ -992,19 +1072,27 @@ func (w *Q6KWeight) GEMM(X []float32, P int, Y []float32) { w.GEMMWithEvents(X, 
 // boundary). Requires gate.In==up.In==down.Out (=H), gate.Out==up.Out==down.In (=I); len(x)>=H,
 // len(y)>=down.Out. Returns false on a shape mismatch. The activation is silu.
 func FusedMLPQ6DownWithEvents(gate, up *Q4KWeight, down *Q6KWeight, x, y []float32, observation *ExecutionObservation) bool {
+	ok, _ := FusedMLPQ6DownWithEventsErr(gate, up, down, x, y, observation)
+	return ok
+}
+
+// FusedMLPQ6DownWithEventsErr is FusedMLPQ6DownWithEvents plus the observed terminal command-buffer
+// classification: a committed MLP buffer that never reached Completed (a bounded timeout or a device
+// fault) returns the package's typed MetalCommandBufferStallError. The observation is still recorded.
+func FusedMLPQ6DownWithEventsErr(gate, up *Q4KWeight, down *Q6KWeight, x, y []float32, observation *ExecutionObservation) (bool, error) {
 	if down == nil {
-		return false
+		return false, nil
 	}
 	q6kRegistryMu.RLock()
 	defer q6kRegistryMu.RUnlock()
 	if gate == nil || up == nil || gate.id < 0 || up.id < 0 || !q6kWeightValidLocked(down) {
-		return false
+		return false, nil
 	}
 	if gate.In != up.In || gate.Out != up.Out || down.In != gate.Out || down.Out != gate.In {
-		return false
+		return false, nil
 	}
 	if len(x) < gate.In || len(y) < down.Out {
-		return false
+		return false, nil
 	}
 	var event C.mg_execution_event
 	q4kExecutionMu.Lock()
@@ -1012,7 +1100,7 @@ func FusedMLPQ6DownWithEvents(gate, up *Q4KWeight, down *Q6KWeight, x, y []float
 		(*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])), &event)
 	q4kExecutionMu.Unlock()
 	recordQ4KEvent(observation, &event)
-	return true
+	return true, q4kCommandBufferStall(&event, 0, 0, "q4k mlp q6down")
 }
 
 func FusedMLPQ6Down(gate, up *Q4KWeight, down *Q6KWeight, x, y []float32) bool {
@@ -1028,9 +1116,18 @@ func FusedMLPQ6Down(gate, up *Q4KWeight, down *Q6KWeight, x, y []float32) bool {
 // down.In=I). Returns false if n<=0, len(x)<H, len(Ycat)<n*down.Out, any handle is invalid, or the
 // backend declines a shape — the caller then runs the proven per-expert FusedMLPQ6Down loop.
 func FusedMLPQ6DownBatchWithEvents(gate, up []*Q4KWeight, down []*Q6KWeight, x, Ycat []float32, observation *ExecutionObservation) bool {
+	ok, _ := FusedMLPQ6DownBatchWithEventsErr(gate, up, down, x, Ycat, observation)
+	return ok
+}
+
+// FusedMLPQ6DownBatchWithEventsErr is FusedMLPQ6DownBatchWithEvents plus the observed terminal
+// command-buffer classification: a committed expert-batch buffer that never reached Completed (a
+// bounded timeout or a device fault) returns the package's typed MetalCommandBufferStallError. The
+// observation is still recorded.
+func FusedMLPQ6DownBatchWithEventsErr(gate, up []*Q4KWeight, down []*Q6KWeight, x, Ycat []float32, observation *ExecutionObservation) (bool, error) {
 	n := len(gate)
 	if n == 0 || len(up) != n || len(down) != n || gate[0] == nil || up[0] == nil || down[0] == nil {
-		return false
+		return false, nil
 	}
 	q6kRegistryMu.RLock()
 	defer q6kRegistryMu.RUnlock()
@@ -1040,24 +1137,24 @@ func FusedMLPQ6DownBatchWithEvents(gate, up []*Q4KWeight, down []*Q6KWeight, x, 
 	dw := make([]C.int, n)
 	for _, d := range down {
 		if d == nil {
-			return false
+			return false, nil
 		}
 	}
 	for e := 0; e < n; e++ {
 		g, u, d := gate[e], up[e], down[e]
 		if g == nil || u == nil || d == nil || g.id < 0 || u.id < 0 || !q6kWeightValidLocked(d) {
-			return false
+			return false, nil
 		}
 		if g.In != u.In || g.Out != u.Out || d.In != g.Out || d.Out != g.In {
-			return false
+			return false, nil
 		}
 		if g.In != H || g.Out != I || d.Out != Dout {
-			return false // non-uniform batch geometry — decline (caller uses the per-expert loop)
+			return false, nil // non-uniform batch geometry — decline (caller uses the per-expert loop)
 		}
 		gw[e], uw[e], dw[e] = C.int(g.id), C.int(u.id), C.int(d.id)
 	}
 	if len(x) < H || len(Ycat) < n*Dout {
-		return false
+		return false, nil
 	}
 	var event C.mg_execution_event
 	q4kExecutionMu.Lock()
@@ -1065,7 +1162,10 @@ func FusedMLPQ6DownBatchWithEvents(gate, up []*Q4KWeight, down []*Q6KWeight, x, 
 		(*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&Ycat[0])), &event)
 	q4kExecutionMu.Unlock()
 	recordQ4KEvent(observation, &event)
-	return rc == 0
+	if err := q4kCommandBufferStall(&event, 0, 0, "q4k mlp q6down batch"); err != nil {
+		return false, err
+	}
+	return rc == 0, nil
 }
 
 func FusedMLPQ6DownBatch(gate, up []*Q4KWeight, down []*Q6KWeight, x, Ycat []float32) bool {
@@ -1078,8 +1178,17 @@ func FusedMLPQ6DownBatch(gate, up []*Q4KWeight, down []*Q6KWeight, x, Ycat []flo
 // requested MM32 / executed none without a command buffer, execution event, timing update, or
 // output mutation.
 func (w *Q4KWeight) GEMMWithEventsMode(X []float32, P int, Y []float32, observation *ExecutionObservation, mode Q4KGEMMMode) Q4KGEMMIdentity {
+	identity, _ := w.GEMMWithEventsModeErr(X, P, Y, observation, mode)
+	return identity
+}
+
+// GEMMWithEventsModeErr is GEMMWithEventsMode plus the observed terminal command-buffer
+// classification: a committed prefill buffer that never reached Completed (a bounded timeout or a
+// device fault) returns the package's typed MetalCommandBufferStallError alongside the executed
+// identity. The observation is still recorded.
+func (w *Q4KWeight) GEMMWithEventsModeErr(X []float32, P int, Y []float32, observation *ExecutionObservation, mode Q4KGEMMMode) (Q4KGEMMIdentity, error) {
 	if w == nil || w.id < 0 || P <= 0 || len(X) < P*w.In || len(Y) < P*w.Out {
-		return Q4KGEMMIdentity{}
+		return Q4KGEMMIdentity{}, nil
 	}
 	var gpuMs C.double
 	var event C.mg_execution_event
@@ -1091,7 +1200,7 @@ func (w *Q4KWeight) GEMMWithEventsMode(X []float32, P int, Y []float32, observat
 	if executed != Q4KGEMMNotExecuted {
 		lastGEMMGPUMs.Store(math.Float64bits(float64(gpuMs)))
 	}
-	return q4kGEMMIdentity(P, mode, executed)
+	return q4kGEMMIdentity(P, mode, executed), q4kCommandBufferStall(&event, 0, 0, "q4k gemm")
 }
 
 // GEMMWithEvents uses the process opt-in selected by SetGEMMUseMM. The default remains scalar and
@@ -1107,10 +1216,19 @@ func (w *Q4KWeight) GEMMWithEvents(X []float32, P int, Y []float32, observation 
 // dispatching when shapes are invalid, ycat is too small, or the requested candidate is unavailable.
 // The second return binds the group to the exact kernel identity shared by every encoded weight.
 func GEMMGroupIntoWithEventsMode(ws []*Q4KWeight, X []float32, P int, ycat []float32, observation *ExecutionObservation, mode Q4KGEMMMode) ([][]float32, Q4KGEMMIdentity) {
+	out, identity, _ := GEMMGroupIntoWithEventsModeErr(ws, X, P, ycat, observation, mode)
+	return out, identity
+}
+
+// GEMMGroupIntoWithEventsModeErr is GEMMGroupIntoWithEventsMode plus the observed terminal
+// command-buffer classification: a committed group buffer that never reached Completed (a bounded
+// timeout or a device fault) returns the package's typed MetalCommandBufferStallError and publishes
+// no result aliases, so a hung GPU surfaces as a diagnosable failure. The observation is recorded.
+func GEMMGroupIntoWithEventsModeErr(ws []*Q4KWeight, X []float32, P int, ycat []float32, observation *ExecutionObservation, mode Q4KGEMMMode) ([][]float32, Q4KGEMMIdentity, error) {
 	n := len(ws)
 	const maxCInt = int(^uint32(0) >> 1)
 	if n == 0 || P <= 0 || P > maxCInt || ws[0] == nil || ws[0].In <= 0 || len(X)/P < ws[0].In {
-		return nil, Q4KGEMMIdentity{}
+		return nil, Q4KGEMMIdentity{}, nil
 	}
 	in := ws[0].In
 	wids := make([]C.int, n)
@@ -1118,14 +1236,14 @@ func GEMMGroupIntoWithEventsMode(ws []*Q4KWeight, X []float32, P int, ycat []flo
 	off := 0
 	for i, w := range ws {
 		if w == nil || w.id < 0 || w.In != in || w.Out <= 0 || w.Out > (maxCInt-off)/P {
-			return nil, Q4KGEMMIdentity{}
+			return nil, Q4KGEMMIdentity{}, nil
 		}
 		wids[i] = w.id
 		yoff[i] = C.int(off)
 		off += P * w.Out
 	}
 	if len(ycat) < off {
-		return nil, Q4KGEMMIdentity{}
+		return nil, Q4KGEMMIdentity{}, nil
 	}
 	ycat = ycat[:off]
 	yoff[n] = C.int(off)
@@ -1138,8 +1256,12 @@ func GEMMGroupIntoWithEventsMode(ws []*Q4KWeight, X []float32, P int, ycat []flo
 	q4kExecutionMu.Unlock()
 	recordQ4KEvent(observation, &event)
 	identity := q4kGEMMIdentity(P, mode, executed)
+	stall := q4kCommandBufferStall(&event, 0, 0, "q4k gemm group")
+	if stall != nil {
+		return nil, identity, stall
+	}
 	if executed == Q4KGEMMNotExecuted {
-		return nil, identity
+		return nil, identity, nil
 	}
 	lastGEMMGPUMs.Store(math.Float64bits(float64(gpuMs)))
 
@@ -1148,7 +1270,7 @@ func GEMMGroupIntoWithEventsMode(ws []*Q4KWeight, X []float32, P int, ycat []flo
 	for i := range ws {
 		out[i] = ycat[int(yoff[i]):int(yoff[i+1]):int(yoff[i+1])]
 	}
-	return out, identity
+	return out, identity, nil
 }
 
 // GEMMGroupIntoWithEventsIdentity uses the process opt-in selected by SetGEMMUseMM and returns

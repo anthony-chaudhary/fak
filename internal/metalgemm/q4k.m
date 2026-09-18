@@ -22,10 +22,21 @@
 #import <Metal/Metal.h>
 #include "q8_bridge.h"
 #include <CoreFoundation/CoreFoundation.h>
+#include <dispatch/dispatch.h>
+#include <errno.h>
 #include <math.h>
 #include <stdatomic.h>
 #include <string.h>
 #include <unistd.h>
+
+// MG_Q4K_WAIT_LIMIT_MS bounds every Q4_K command-buffer wait. The old path called the
+// uninterruptible, unbounded `[cb waitUntilCompleted]`, so a stalled GPU (submit stuck in
+// IOGPUMetalCommandQueue _submitCommandBuffers) hung the served request forever. A
+// dispatch_semaphore completed-handler wait turns that into a bounded, reportable timeout.
+// Kept in parity with the Go-side classification budget, metal_stall.go
+// DefaultCommandBufferWaitLimit (10_000ms); the two must move together or the native timeout
+// and the Go classification diverge.
+static const int64_t MG_Q4K_WAIT_LIMIT_MS = 10000;
 
 typedef struct {
     uintptr_t command_buffer;
@@ -79,6 +90,27 @@ static inline void mg_execution_event_waited(mg_execution_event* event, id<MTLCo
 static inline void mg_execution_event_readback(mg_execution_event* event) {
     if (event == NULL) return;
     event->host_readback = 1;
+}
+
+// mg_q4k_commit_bounded is the single commit+wait used by every Q4_K path. It registers the
+// completion signal BEFORE commit (Metal requires the handler be attached to the uncommitted
+// buffer), commits, then waits at most MG_Q4K_WAIT_LIMIT_MS. Returns 1 when the buffer reached
+// MTLCommandBufferStatusCompleted, 0 when the bounded wait timed out. On timeout it records
+// completed_wait=0 in the event and does NOT call waitUntilCompleted to "bound" teardown - that
+// would re-introduce the unbounded block - so the caller must skip an unwritten output readback.
+static int mg_q4k_commit_bounded(id<MTLCommandBuffer> cb, mg_execution_event* event) {
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    [cb addCompletedHandler:^(id<MTLCommandBuffer> b){ (void)b; dispatch_semaphore_signal(sem); }];
+    [cb commit];
+    mg_execution_event_committed(event);
+    CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
+    long timed_out = dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MG_Q4K_WAIT_LIMIT_MS * NSEC_PER_MSEC)));
+    mg_execution_event_waited(event, cb, wait_started);
+    if (timed_out != 0) {
+        if (event != NULL) event->completed_wait = 0;
+        return 0;
+    }
+    return 1;
 }
 // Device + queue are owned by metal.m (mg_init); we reuse them.
 extern id<MTLDevice>       gDev;
@@ -918,13 +950,11 @@ void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y
         [e3 dispatchThreadgroups:MTLSizeMake((NSUInteger)D.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
         [e3 endEncoding];
 
-        [cb commit];
-        mg_execution_event_committed(event);
-        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
-        [cb waitUntilCompleted];
-        mg_execution_event_waited(event, cb, wait_started);
-        memcpy(y, yb.contents, (size_t)D.out * 4);
-        mg_execution_event_readback(event);
+        int completed = mg_q4k_commit_bounded(cb, event);
+        if (completed) {
+            memcpy(y, yb.contents, (size_t)D.out * 4);
+            mg_execution_event_readback(event);
+        }
     }
 }
 
@@ -1049,14 +1079,12 @@ void mg_q6k_gemv(int wid, const float* x, float* y, mg_execution_event* event) {
         [e dispatchThreadgroups:MTLSizeMake((NSUInteger)W.out, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
         [e endEncoding];
-        [cb commit];
-        mg_execution_event_committed(event);
-        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
-        [cb waitUntilCompleted];
-        mg_execution_event_waited(event, cb, wait_started);
+        int completed = mg_q4k_commit_bounded(cb, event);
 
-        memcpy(y, yb.contents, (size_t)W.out * 4);
-        mg_execution_event_readback(event);
+        if (completed) {
+            memcpy(y, yb.contents, (size_t)W.out * 4);
+            mg_execution_event_readback(event);
+        }
     }
 }
 
@@ -1086,14 +1114,12 @@ void mg_q6k_gemm(int wid, const float* X, int P, float* Y, mg_execution_event* e
         [e dispatchThreadgroups:MTLSizeMake((NSUInteger)W.out, (NSUInteger)P, 1)
             threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
         [e endEncoding];
-        [cb commit];
-        mg_execution_event_committed(event);
-        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
-        [cb waitUntilCompleted];
-        mg_execution_event_waited(event, cb, wait_started);
+        int completed = mg_q4k_commit_bounded(cb, event);
 
-        memcpy(Y, yb.contents, (size_t)P * W.out * 4);
-        mg_execution_event_readback(event);
+        if (completed) {
+            memcpy(Y, yb.contents, (size_t)P * W.out * 4);
+            mg_execution_event_readback(event);
+        }
     }
 }
 
@@ -1209,11 +1235,8 @@ int mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int*
         }
         [e3 endEncoding];
 
-        [cb commit];
-        mg_execution_event_committed(event);
-        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
-        [cb waitUntilCompleted];
-        mg_execution_event_waited(event, cb, wait_started);
+        int completed = mg_q4k_commit_bounded(cb, event);
+        if (!completed) return -1; // bounded timeout: the buffer never completed, so Ycat is unwritten
         memcpy(Ycat, gQYBufK.contents, (size_t)n * Dout * 4);
         mg_execution_event_readback(event);
     }
@@ -1281,13 +1304,11 @@ void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, f
         [e3 dispatchThreadgroups:MTLSizeMake((NSUInteger)D.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
         [e3 endEncoding];
 
-        [cb commit];
-        mg_execution_event_committed(event);
-        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
-        [cb waitUntilCompleted];
-        mg_execution_event_waited(event, cb, wait_started);
-        memcpy(y, yb.contents, (size_t)D.out * 4);
-        mg_execution_event_readback(event);
+        int completed = mg_q4k_commit_bounded(cb, event);
+        if (completed) {
+            memcpy(y, yb.contents, (size_t)D.out * 4);
+            mg_execution_event_readback(event);
+        }
     }
 }
 
@@ -1407,11 +1428,8 @@ int mg_q4k_gemv(int wid, const float* x, float* y, int vectorized_mode, mg_execu
         [e dispatchThreadgroups:MTLSizeMake((NSUInteger)W.out, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
         [e endEncoding];
-        [cb commit];
-        mg_execution_event_committed(event);
-        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
-        [cb waitUntilCompleted];
-        mg_execution_event_waited(event, cb, wait_started);
+        int completed = mg_q4k_commit_bounded(cb, event);
+        if (!completed) return 0; // bounded timeout: the buffer never completed, so y is unwritten
 
         memcpy(y, yb.contents, (size_t)W.out * 4);
         mg_execution_event_readback(event);
@@ -1475,14 +1493,12 @@ void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat, mg_execut
                 threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
         }
         [e endEncoding];
-        [cb commit];
-        mg_execution_event_committed(event);
-        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
-        [cb waitUntilCompleted];
-        mg_execution_event_waited(event, cb, wait_started);
+        int completed = mg_q4k_commit_bounded(cb, event);
 
-        memcpy(Ycat, yb.contents, (size_t)n * W.out * 4);
-        mg_execution_event_readback(event);
+        if (completed) {
+            memcpy(Ycat, yb.contents, (size_t)n * W.out * 4);
+            mg_execution_event_readback(event);
+        }
     }
 }
 
@@ -1512,14 +1528,12 @@ void mg_q4k_gemv_batch_multi(int wid, const float* Xcat, int n, float* Ycat, mg_
         [e dispatchThreadgroups:MTLSizeMake((NSUInteger)(W.out + 7) / 8, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
         [e endEncoding];
-        [cb commit];
-        mg_execution_event_committed(event);
-        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
-        [cb waitUntilCompleted];
-        mg_execution_event_waited(event, cb, wait_started);
+        int completed = mg_q4k_commit_bounded(cb, event);
 
-        memcpy(Ycat, yb.contents, (size_t)n * W.out * 4);
-        mg_execution_event_readback(event);
+        if (completed) {
+            memcpy(Ycat, yb.contents, (size_t)n * W.out * 4);
+            mg_execution_event_readback(event);
+        }
     }
 }
 
@@ -1584,14 +1598,12 @@ void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, cons
                 threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
         }
         [e endEncoding];
-        [cb commit];
-        mg_execution_event_committed(event);
-        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
-        [cb waitUntilCompleted];
-        mg_execution_event_waited(event, cb, wait_started);
+        int completed = mg_q4k_commit_bounded(cb, event);
 
-        memcpy(Ycat, yb.contents, (size_t)ytot * 4);
-        mg_execution_event_readback(event);
+        if (completed) {
+            memcpy(Ycat, yb.contents, (size_t)ytot * 4);
+            mg_execution_event_readback(event);
+        }
     }
 }
 
@@ -1644,12 +1656,8 @@ int mg_q4k_q8_gemv_group(const int* q4_wids, int nq4, const float* x, float* q4_
             return -1; // candidate encoding began; fail closed rather than falling back mid-batch.
         }
 		if (event != NULL) event->encoders += q8_encoders;
-        [cb commit];
-        mg_execution_event_committed(event);
-        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
-        [cb waitUntilCompleted];
-        mg_execution_event_waited(event, cb, wait_started);
-        if (cb.status != MTLCommandBufferStatusCompleted) return -1;
+        int completed = mg_q4k_commit_bounded(cb, event);
+        if (!completed) return -1;
         // The caller-scoped test injection is checked only after a real native submit and wait.
         // It proves that this function's post-submit return travels through the exported Go call
         // path as MixedQ4KQ8PostSubmitError without corrupting process-global Metal state.
@@ -1708,12 +1716,9 @@ int mg_q4k_gemm(int wid, const float* X, int P, float* Y, int mm_mode, double* o
                 threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG, 1, 1)];
         }
         [e endEncoding];
-        [cb commit];
-        mg_execution_event_committed(event);
-        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
-        [cb waitUntilCompleted];
-        mg_execution_event_waited(event, cb, wait_started);
-        // GPUStartTime/GPUEndTime are valid only after waitUntilCompleted returns (already-completed
+        int completed = mg_q4k_commit_bounded(cb, event);
+        if (!completed) return 0; // bounded timeout: the buffer never completed, so Y is unwritten
+        // GPUStartTime/GPUEndTime are valid only after the wait returns (already-completed
         // cb; reading them is cheap). This is the on-GPU execution window, excluding the CPU-side
         // encode/commit/sync/H2D that dominates the q4k_metal prefill wall we are trying to split.
         if (out_gpu_ms) *out_gpu_ms = (cb.GPUEndTime - cb.GPUStartTime) * 1000.0;
@@ -1778,11 +1783,8 @@ int mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Ycat
             }
         }
         [e endEncoding];
-        [cb commit];
-        mg_execution_event_committed(event);
-        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
-        [cb waitUntilCompleted];
-        mg_execution_event_waited(event, cb, wait_started);
+        int completed = mg_q4k_commit_bounded(cb, event);
+        if (!completed) return 0; // bounded timeout: the buffer never completed, so Ycat is unwritten
         // On-GPU execution window for the whole group (valid post-wait; excludes CPU encode/commit/
         // sync/H2D). Lets the model side split its wall-timed q4kTime into gpu_compute vs roundtrip.
         if (out_gpu_ms) *out_gpu_ms = (cb.GPUEndTime - cb.GPUStartTime) * 1000.0;
@@ -2063,13 +2065,14 @@ extern void *mg_q8_graph_encode(void *graph, int wid);
 extern void *mg_q8_graph_encode_from(void *graph, int wid, void *q, void *d, int elems);
 void *mg_graph_encode_q8(void *opaque,int wid){return mg_q8_graph_encode(opaque,wid);}
 void *mg_graph_encode_q8_from(void *opaque,int wid,void*q,void*d,int elems){return mg_q8_graph_encode_from(opaque,wid,q,d,elems);}
-// mg_graph_finish commits and waits on the graph command buffer. waitUntilCompleted is not
-// interruptible from Go, so the terminal STATUS is the only reliable signal: a buffer that is
-// not Completed after the wait (GPU/device fault) is recorded in the receipt (status_code,
-// error_code, device_ok, bounded error_text) so the caller can report a typed stall instead of
-// a silent hang. Return stays 1 only for a Completed, non-injected submit and 0 otherwise; the
-// receipt distinguishes an injected test failure from a real device failure.
-int mg_graph_finish(void *opaque,mg_graph_receipt*r,int inject_post_submit_failure){MGProjectionGraph*g=opaque;if(r)memset(r,0,sizeof(*r));if(!g||g->committed||g->encoders==0)return 0;g->committed=1;CFAbsoluteTime t=CFAbsoluteTimeGetCurrent();[g->cb commit];[g->cb waitUntilCompleted];g->wait_ms=(CFAbsoluteTimeGetCurrent()-t)*1000.;int completed=g->cb.status==MTLCommandBufferStatusCompleted;int inject_device_fault=inject_post_submit_failure==2;if(r){r->committed=1;r->completed_wait=inject_device_fault?0:completed;r->status_code=inject_device_fault?MTLCommandBufferStatusError:(int)g->cb.status;NSError*err=inject_device_fault?nil:g->cb.error;r->device_ok=(r->completed_wait&&err==nil)?1:0;if(inject_device_fault){snprintf(r->error_text,sizeof(r->error_text),"injected device fault");}else if(err){r->error_code=(int)err.code;NSString*desc=err.localizedDescription;if(desc){const char*u=[desc UTF8String];if(u)snprintf(r->error_text,sizeof(r->error_text),"%s",u);}}r->encoders=g->encoders;r->host_readbacks=g->readbacks;r->wait_milliseconds=g->wait_ms;if(@available(macOS 10.15,*)){double a=g->cb.GPUStartTime,b=g->cb.GPUEndTime;if(b>=a&&a>0){r->gpu_milliseconds=(b-a)*1000.;r->timing_available=1;}}}int observed=r?(inject_device_fault?0:completed):completed;return observed&&!inject_post_submit_failure;}
+// mg_graph_finish commits and waits on the graph command buffer. The wait is bounded by
+// MG_Q4K_WAIT_LIMIT_MS (a completed-handler semaphore, attached before commit), so a stalled GPU
+// cannot hang the caller indefinitely: a buffer that is not Completed after the wait (timeout or
+// GPU/device fault) is recorded in the receipt (status_code, error_code, device_ok, bounded
+// error_text) so the caller can report a typed stall instead of a silent hang. Return stays 1 only
+// for a Completed, non-injected submit and 0 otherwise; the receipt distinguishes an injected test
+// failure from a real device failure.
+int mg_graph_finish(void *opaque,mg_graph_receipt*r,int inject_post_submit_failure){MGProjectionGraph*g=opaque;if(r)memset(r,0,sizeof(*r));if(!g||g->committed||g->encoders==0)return 0;g->committed=1;CFAbsoluteTime t=CFAbsoluteTimeGetCurrent();dispatch_semaphore_t gsem=dispatch_semaphore_create(0);[g->cb addCompletedHandler:^(id<MTLCommandBuffer> b){(void)b;dispatch_semaphore_signal(gsem);}];[g->cb commit];long gto=dispatch_semaphore_wait(gsem,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(MG_Q4K_WAIT_LIMIT_MS*NSEC_PER_MSEC)));g->wait_ms=(CFAbsoluteTimeGetCurrent()-t)*1000.;int completed=gto==0&&g->cb.status==MTLCommandBufferStatusCompleted;int inject_device_fault=inject_post_submit_failure==2;if(r){r->committed=1;r->completed_wait=inject_device_fault?0:completed;r->status_code=inject_device_fault?MTLCommandBufferStatusError:(int)g->cb.status;NSError*err=inject_device_fault?nil:g->cb.error;r->device_ok=(r->completed_wait&&err==nil)?1:0;if(inject_device_fault){snprintf(r->error_text,sizeof(r->error_text),"injected device fault");}else if(err){r->error_code=(int)err.code;NSString*desc=err.localizedDescription;if(desc){const char*u=[desc UTF8String];if(u)snprintf(r->error_text,sizeof(r->error_text),"%s",u);}}r->encoders=g->encoders;r->host_readbacks=g->readbacks;r->wait_milliseconds=g->wait_ms;if(@available(macOS 10.15,*)){double a=g->cb.GPUStartTime,b=g->cb.GPUEndTime;if(b>=a&&a>0){r->gpu_milliseconds=(b-a)*1000.;r->timing_available=1;}}}int observed=r?(inject_device_fault?0:completed):completed;return observed&&!inject_post_submit_failure;}
 int mg_graph_read(void*opaque,void*result,float*dst,int n){MGProjectionGraph*g=opaque;id<MTLBuffer>y=(__bridge id<MTLBuffer>)result;if(!g||!g->committed||!y||!dst||n<0||![g->results containsObject:y])return 0;memcpy(dst,[y contents],(NSUInteger)n*sizeof(float));g->readbacks++;return 1;}
 int mg_graph_read_pack(void*opaque,void**results,const int*sizes,int count,float*dst,int total){MGProjectionGraph*g=opaque;if(!g||!g->committed||!results||!sizes||count<=0||!dst||total<0)return 0;int off=0;for(int i=0;i<count;i++){id<MTLBuffer>y=(__bridge id<MTLBuffer>)results[i];int n=sizes[i];if(!y||n<0||off>total-n||![g->results containsObject:y])return 0;memcpy(dst+off,[y contents],(NSUInteger)n*sizeof(float));off+=n;}if(off!=total)return 0;g->readbacks++;return 1;}
 void mg_graph_free(void*opaque){MGProjectionGraph*g=opaque;if(!g)return;g->cb=nil;g->pool=nil;g->pool_buffers=0;mg_graph_release_tracked_buffers(g);atomic_fetch_sub_explicit(&gGraphLiveOwners,1,memory_order_relaxed);free(g);}
