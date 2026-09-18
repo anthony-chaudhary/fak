@@ -976,6 +976,8 @@ var deepSeek41V41NativeSuffixContract = []struct {
 	{"ffn_gate_shexp.weight", "ffn.shared_experts.w1.weight"},
 	{"ffn_up_shexp.weight", "ffn.shared_experts.w3.weight"},
 	{"ffn_down_shexp.weight", "ffn.shared_experts.w2.weight"},
+	{"attn_norm.weight", "attn_norm.weight"},
+	{"ffn_norm.weight", "ffn_norm.weight"},
 }
 
 // TestDeepSeek41GGUFV41FullNativeSuffixMap binds EVERY V4.1 per-layer suffix the
@@ -1511,5 +1513,37 @@ func TestDeepSeek41GGUFLatentKeyLengthDialectFailsClosed(t *testing.T) {
 	}
 	if cfg.HeadDim != 320 {
 		t.Errorf("HeadDim = %d, want 320 (qk_nope 256 + qk_rope 64)", cfg.HeadDim)
+	}
+}
+
+// TestDeepSeek41AttnNormMapsToNativeName pins the fak#13255 seam: the V4.1
+// forward admits and reads model.layers.<L>.attn_norm.weight and
+// ffn_norm.weight (v41_forward.go:653-656 / :879-880), so a file's
+// blk.<L>.attn_norm.weight must canonicalize to that exact native name and NOT
+// fall through to the shared Llama base map's input_layernorm.weight /
+// post_attention_layernorm.weight. Red on the parent commit (both resolve to
+// the Llama names), green after the deepseek41 suffix-map fix.
+func TestDeepSeek41AttnNormMapsToNativeName(t *testing.T) {
+	cases := []struct {
+		suffix string
+		want   string
+	}{
+		{"attn_norm.weight", "attn_norm.weight"},
+		{"ffn_norm.weight", "ffn_norm.weight"},
+	}
+	for _, tc := range cases {
+		for _, layer := range []int{0, 7} {
+			ggufName := fmt.Sprintf("blk.%d.%s", layer, tc.suffix)
+			got := canonicalFor(t, ggufName)
+			want := layerName(layer, tc.want)
+			if got != want {
+				t.Errorf("CanonicalTensorNameArch(%q, deepseek41) = %q, want %q (native forward name)", ggufName, got, want)
+			}
+			// A fall-through to the Llama base map is the exact regression this
+			// leaf fixes; name it so the failure is legible.
+			if got == layerName(layer, "input_layernorm.weight") || got == layerName(layer, "post_attention_layernorm.weight") {
+				t.Errorf("CanonicalTensorNameArch(%q, deepseek41) fell through to the Llama base map: %q", ggufName, got)
+			}
+		}
 	}
 }

@@ -759,6 +759,16 @@ func deepseek41CanonicalSuffix(suffix string) (string, bool) {
 		"attn_output_a.weight": "attn.wo_a.weight", // admit [OLoraRank, qHeadDim]
 		"attn_output_b.weight": "attn.wo_b.weight", // admit [H, oDim]
 		"attn_sinks.weight":    "attn.sink",        // admit [nH]
+		// Per-layer block norms (admit v41_forward.go:653-656, read :879-880).
+		// The native non-MLA V4.1 forward reads model.layers.<L>.attn_norm.weight
+		// / ffn_norm.weight; the shared base map would rewrite these to the Llama
+		// input_layernorm / post_attention_layernorm names, so the forward's
+		// manifest admission (v41AdmitShape) would refuse a layer whose real
+		// tensor the file DOES carry. Map them here to the exact native names
+		// (fak#13255). ffn_norm stays distinct from the Llama post_attention norm
+		// for the same reason: the V4 forward reads the pre-MLP norm by that name.
+		"attn_norm.weight": "attn_norm.weight",
+		"ffn_norm.weight":  "ffn_norm.weight",
 		// Norms: NON-COLLIDING dedicated leaves. The native forward reads neither
 		// yet; wiring them is a follow-on (see the doc comment above). Both the
 		// converter spelling (attn_kv_a_norm) and the glm spelling (attn_kv_norm)
