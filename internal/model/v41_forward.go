@@ -926,6 +926,17 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	qHeads := make([][]float32, seq) // [t][nH*hd], rotated
 	kvRows := make([][]float32, seq) // [t][hd], rotated (single KV head)
 	qLatRows := make([][]float32, seq)
+	// RoPE geometry, fail-closed. The reference rotates only the LAST
+	// qk_rope_head_dim components of each head (the leading qk_nope_head_dim pass
+	// through byte-identical) using the interleaved adjacent-pair convention. A
+	// head width that cannot carry that slice (a non-positive, odd, or
+	// head-wider rope dim) is refused with a typed error rather than silently
+	// rotating a wrong sub-vector.
+	ropeDim := cfg.QKRopeHeadDim
+	if ropeDim <= 0 || ropeDim%2 != 0 || ropeDim > hd {
+		return v41StageErr(v41StageAttention, l,
+			fmt.Errorf("%w: attention qk_rope_head_dim must be a positive even value <= head_dim %d, got %d", ErrV41ForwardStage, hd, ropeDim))
+	}
 	for t := 0; t < seq; t++ {
 		c := preByPos[t]
 		qLat := matRows(wQA, c, cfg.QLoraRank, H)
@@ -948,11 +959,11 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		} else {
 			kv = matRows(wKV, c, hd, H)
 		}
-		cos, sin := ropeRowForLayer(cfg, l, t)
+		cos, sin := v41RopeTableForLayer(cfg, l, t)
 		for h := 0; h < nH; h++ {
-			applyRopeRow(q[h*hd:(h+1)*hd], cos, sin)
+			applyRopeTailInterleaved(q[h*hd:(h+1)*hd], cos, sin, ropeDim)
 		}
-		applyRopeRow(kv, cos, sin)
+		applyRopeTailInterleaved(kv, cos, sin, ropeDim)
 		qHeads[t] = q
 		kvRows[t] = kv
 		qLatRows[t] = qLat

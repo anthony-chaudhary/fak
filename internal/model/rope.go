@@ -213,3 +213,65 @@ func applyRopeRow(hv, cos, sin []float32) {
 		hv[j+half] = float32(b*cos[j]) + float32(a*sin[j])
 	}
 }
+
+// applyRopeTailInterleaved rotates ONLY the last ropeDim components of hv, using the
+// INTERLEAVED (adjacent-pair / GPT-J / complex) convention: the pair (hv[tail+2j],
+// hv[tail+2j+1]) is treated as a complex number and multiplied by e^{i*angle_j}. The
+// leading len(hv)-ropeDim components are left byte-identical. cos/sin must carry
+// ropeDim/2 frequencies built over the rope width (see v41RopeTableForLayer), NOT over
+// the full head width.
+//
+// This is the reference DeepSeek-V4.1-Flash contract:
+//
+//	freqs_cis = precompute_freqs_cis(self.rope_head_dim, ...)   # rope_head_dim freqs
+//	apply_rotary_emb(x):  x[..., -rope_head_dim:] * complex(freqs_cis)
+//
+// with torch.view_as_complex(x.unflatten(-1, (-1, 2))) then view_as_real(...).flatten(-2)
+// — i.e. the adjacent pair is the complex pair in BOTH directions. It deliberately does
+// NOT reuse applyRopeRow, whose half-split whole-row pairing is the wrong convention for
+// this path (and is load-bearing for the Llama/Qwen/GPT-NeoX/Cohere families and the
+// DeepSeek-V2/V3 MLA de-interleave).
+func applyRopeTailInterleaved(hv, cos, sin []float32, ropeDim int) {
+	tail := len(hv) - ropeDim
+	for j := 0; j < ropeDim/2; j++ {
+		i := tail + 2*j
+		a, b := hv[i], hv[i+1]
+		// Explicit float32() conversions pin each product to f32 precision (no FMA
+		// fusion), matching applyRopeRow's bit-determinism guarantee.
+		hv[i] = float32(a*cos[j]) - float32(b*sin[j])
+		hv[i+1] = float32(b*cos[j]) + float32(a*sin[j])
+	}
+}
+
+// v41RopeTableForLayer builds the DeepSeek-V4.1 rotary table for one layer and
+// position. Unlike ropeRowForLayer (whose table width and denominator follow
+// cfg.rotaryDim()/invFreqDenom(), i.e. the full head width for a non-MLA
+// layout), this table is sized to QKRopeHeadDim: len(cos)==len(sin)==QKRopeHeadDim/2
+// with inv[j] = 1/theta^(2j/QKRopeHeadDim), exactly the reference
+// precompute_freqs_cis(self.rope_head_dim, ...). It is the only table
+// applyRopeTailInterleaved may consume. The layer-specific theta and the
+// ropeAttentionFactor scaling are preserved so a scaled variant stays consistent
+// with its own frequency build.
+//
+// QKRopeHeadDim must be positive and even; callers validate that against the head
+// width and refuse with a typed error before calling. This builder assumes it.
+func v41RopeTableForLayer(cfg Config, layer, p int) (cos, sin []float32) {
+	n := cfg.QKRopeHeadDim / 2
+	theta := cfg.ropeThetaForLayer(layer)
+	scale := cfg.ropeAttentionFactor()
+	cos = make([]float32, n)
+	sin = make([]float32, n)
+	for j := 0; j < n; j++ {
+		a := float64(p) / math.Pow(theta, float64(2*j)/float64(cfg.QKRopeHeadDim))
+		cv := float32(math.Cos(a))
+		sv := float32(math.Sin(a))
+		if scale != 0 && scale != 1 {
+			s := float32(scale)
+			cv *= s
+			sv *= s
+		}
+		cos[j] = cv
+		sin[j] = sv
+	}
+	return cos, sin
+}

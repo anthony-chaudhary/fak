@@ -21,6 +21,11 @@ func v41TestReducedConfig(t *testing.T, layers, experts int) Config {
 	cfg.HiddenSize = 64
 	cfg.NumHeads = 2
 	cfg.HeadDim = 32
+	// Keep the MLA-style split internally consistent with the narrowed head:
+	// nope 16 + rope 16 = 32. The inherited published pair (448 + 64) would leave
+	// qk_rope_head_dim wider than head_dim, which the native forward now refuses.
+	cfg.QKNopeHeadDim = 16
+	cfg.QKRopeHeadDim = 16
 	cfg.QLoraRank = 32
 	cfg.OLoraRank = 16
 	cfg.OGroups = 2

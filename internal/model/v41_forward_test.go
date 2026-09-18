@@ -115,6 +115,28 @@ func hasSuffix(s, suffix string) bool {
 	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
 }
 
+// cpuOracleRopeTailInterleaved is the independent transcription of the published
+// DeepSeek-V4.1-Flash rotary contract, deliberately NOT applyRopeRow (half-split,
+// whole-row) and NOT v41RopeTableForLayer/applyRopeTailInterleaved (production):
+//
+//	freqs_cis = precompute_freqs_cis(ropeDim, ...)        # ropeDim-wide table
+//	x[..., -ropeDim:] viewed as complex adjacent pairs (view_as_complex) and
+//	multiplied by freqs_cis, then view_as_real(...).flatten(-2)
+//
+// so ONLY the last ropeDim components of hv rotate, and the pair (2j, 2j+1) is the
+// complex pair in both directions. The table is rebuilt from theta here.
+func cpuOracleRopeTailInterleaved(hv []float32, pos, hd, ropeDim int, theta float64) {
+	tail := hd - ropeDim
+	for j := 0; j < ropeDim/2; j++ {
+		angle := float64(pos) / math.Pow(theta, float64(2*j)/float64(ropeDim))
+		c, s := float32(math.Cos(angle)), float32(math.Sin(angle))
+		i := tail + 2*j
+		a, b := hv[i], hv[i+1]
+		hv[i] = float32(a*c) - float32(b*s)
+		hv[i+1] = float32(b*c) + float32(a*s)
+	}
+}
+
 // v41OracleForward is the independent scalar reference for the reduced forward.
 func v41OracleForward(t *testing.T, m *Model, ids []int) [][]float32 {
 	t.Helper()
@@ -189,9 +211,9 @@ func v41OracleForward(t *testing.T, m *Model, ids []int) [][]float32 {
 			q := cpuOracleMatVec(wQB, qLat, nH*hd, cfg.QLoraRank)
 			kv := cpuOracleMatVec(wKV, c, hd, H)
 			for h := 0; h < nH; h++ {
-				cpuOracleRope(q[h*hd:(h+1)*hd], tt, hd, cfg.RopeTheta)
+				cpuOracleRopeTailInterleaved(q[h*hd:(h+1)*hd], tt, hd, cfg.QKRopeHeadDim, cfg.RopeTheta)
 			}
-			cpuOracleRope(kv, tt, hd, cfg.RopeTheta)
+			cpuOracleRopeTailInterleaved(kv, tt, hd, cfg.QKRopeHeadDim, cfg.RopeTheta)
 			qHeads[tt] = q
 			kvRows[tt] = kv
 		}
@@ -970,9 +992,9 @@ func v41OracleEngramForward(t *testing.T, m *Model, layout V41EngramLayout, ids 
 			q := cpuOracleMatVec(wQB, qLat, nH*hd, cfg.QLoraRank)
 			kv := cpuOracleMatVec(wKV, c, hd, H)
 			for h := 0; h < nH; h++ {
-				cpuOracleRope(q[h*hd:(h+1)*hd], tt, hd, cfg.RopeTheta)
+				cpuOracleRopeTailInterleaved(q[h*hd:(h+1)*hd], tt, hd, cfg.QKRopeHeadDim, cfg.RopeTheta)
 			}
-			cpuOracleRope(kv, tt, hd, cfg.RopeTheta)
+			cpuOracleRopeTailInterleaved(kv, tt, hd, cfg.QKRopeHeadDim, cfg.RopeTheta)
 			qHeads[tt] = q
 			kvRows[tt] = kv
 		}
@@ -1472,5 +1494,108 @@ func TestV41CEDCSA2StagesIndependent(t *testing.T) {
 	}
 	if after != 0 {
 		t.Fatalf("(e) discriminating construction failed: ReLU-after = %g, want 0", after)
+	}
+}
+
+// TestV41ForwardRopeTailInterleavedContract pins the reference DeepSeek-V4.1-Flash
+// rotary contract on the two production helpers the native forward now uses:
+// v41RopeTableForLayer (a rope_head_dim-wide table) and applyRopeTailInterleaved
+// (tail-only, adjacent-pair). It checks, at several positions:
+//
+//  1. TAIL-ONLY: the leading nope_head_dim components are byte-identical to the
+//     pre-rotation vector, so no rotation leaks into the non-rope lanes.
+//  2. INTERLEAVED: the rotated tail equals the independent reference transcription
+//     cpuOracleRopeTailInterleaved (view_as_complex -> complex multiply ->
+//     view_as_real), NOT the whole-row half-split applyRopeRow.
+//  3. At a non-zero position the full-row applyRopeRow moves the prefix and
+//     produces a different tail, so the two conventions are genuinely distinct
+//     (the old production path).
+func TestV41ForwardRopeTailInterleavedContract(t *testing.T) {
+	const (
+		hd      = 32
+		ropeDim = 16
+		theta   = 10000.0
+	)
+	cfg := Config{HeadDim: hd, QKNopeHeadDim: hd - ropeDim, QKRopeHeadDim: ropeDim, RopeTheta: theta}
+	ident := func(n int) []float32 {
+		v := make([]float32, n)
+		for i := range v {
+			v[i] = float32(i+1) * 0.125
+		}
+		return v
+	}
+	for _, pos := range []int{0, 1, 7, 41} {
+		cos, sin := v41RopeTableForLayer(cfg, 0, pos)
+		if len(cos) != ropeDim/2 || len(sin) != ropeDim/2 {
+			t.Fatalf("pos %d: table len = %d/%d, want %d", pos, len(cos), len(sin), ropeDim/2)
+		}
+		got := ident(hd)
+		applyRopeTailInterleaved(got, cos, sin, ropeDim)
+		want := ident(hd)
+		cpuOracleRopeTailInterleaved(want, pos, hd, ropeDim, theta)
+		for i := 0; i < hd-ropeDim; i++ {
+			if got[i] != float32(i+1)*0.125 {
+				t.Fatalf("pos %d: prefix[%d] = %g, want %g (rotation leaked into the nope lane)", pos, i, got[i], float32(i+1)*0.125)
+			}
+			if got[i] != want[i] {
+				t.Fatalf("pos %d: prefix[%d] = %g, oracle %g", pos, i, got[i], want[i])
+			}
+		}
+		for i := 0; i < hd; i++ {
+			if got[i] != want[i] {
+				t.Fatalf("pos %d: tail-interleaved[%d] = %g, oracle %g", pos, i, got[i], want[i])
+			}
+		}
+		// At a non-zero position the old whole-row half-split must differ on both
+		// lanes, proving the test discriminates the two conventions rather than
+		// agreeing by construction. Position 0 is the identity rotation for both
+		// conventions, so it is excluded here (it still exercised the prefix rule).
+		if pos == 0 {
+			continue
+		}
+		legacy := ident(hd)
+		applyRopeRow(legacy, cos, sin)
+		prefixMoved, tailMoved := false, false
+		for i := 0; i < hd-ropeDim; i++ {
+			if legacy[i] != got[i] {
+				prefixMoved = true
+			}
+		}
+		for i := hd - ropeDim; i < hd; i++ {
+			if legacy[i] != got[i] {
+				tailMoved = true
+			}
+		}
+		if !prefixMoved || !tailMoved {
+			t.Fatalf("pos %d: legacy half-split did not diverge (prefixMoved=%v tailMoved=%v); construction is not discriminating", pos, prefixMoved, tailMoved)
+		}
+	}
+}
+
+// TestV41ForwardRopeDimFailsClosed is the negative control: a malformed
+// qk_rope_head_dim (zero, odd, or wider than head_dim) must make the native
+// forward refuse with a typed ErrV41ForwardStage error rather than silently
+// rotating a wrong sub-vector. It exercises the real Forward entry point so the
+// guard is proven on the production path, not just in isolation.
+func TestV41ForwardRopeDimFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		rope int
+		hd   int
+	}{
+		{"zero", 0, 32},
+		{"negative", -16, 32},
+		{"odd", 15, 32},
+		{"wider than head_dim", 64, 32},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := v41ReducedModel(t)
+			m.Cfg.HeadDim = tc.hd
+			m.Cfg.QKRopeHeadDim = tc.rope
+			err := panicAsError(func() { _ = m.Forward([]int{1, 2}) })
+			if !errors.Is(err, ErrV41ForwardStage) {
+				t.Fatalf("Forward with qk_rope_head_dim=%d head_dim=%d error = %v, want ErrV41ForwardStage", tc.rope, tc.hd, err)
+			}
+		})
 	}
 }

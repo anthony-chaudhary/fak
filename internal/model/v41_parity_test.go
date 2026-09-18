@@ -35,11 +35,58 @@ const v41ParityGoldenPath = "testdata/v41_oracle/token_path_golden.json"
 // position, and the flattened per-position logits.
 type v41ParityGolden struct {
 	Revision string    `json:"revision"`
+	Note     string    `json:"note,omitempty"`
 	IDs      []int     `json:"ids"`
 	Vocab    int       `json:"vocab"`
 	Hidden   int       `json:"hidden"`
 	Argmax   []int     `json:"argmax"`
 	Logits   []float32 `json:"logits"`
+}
+
+// v41ParityGoldenProvenance is the checked-in note accompanying the golden; it
+// pins the fixture's authority to the independent scalar oracle, never the
+// production forward under test.
+const v41ParityGoldenProvenance = "Expected token-path values produced by the INDEPENDENT scalar oracle in v41_oracle_test.go (oracleV41* / cpuOracle*) over the reduced in-memory V4.1 fixture built by v41ReducedModel. Never derived from the production forward under test."
+
+// TestV41ParityGoldenRegenerate re-derives the checked-in token-path golden from
+// the independent scalar oracle. It is a regeneration helper, not an assertion:
+// it does nothing unless V41_GOLDEN_UPDATE=1 is set in the environment. Run it
+// (go test ./internal/model -run TestV41ParityGoldenRegenerate -count=1 with the
+// var set) after any deliberate change to the reference rotary contract, then
+// review the diff to confirm the logits moved as the reference requires.
+func TestV41ParityGoldenRegenerate(t *testing.T) {
+	if os.Getenv("V41_GOLDEN_UPDATE") != "1" {
+		t.Skip("set V41_GOLDEN_UPDATE=1 to regenerate the token-path golden")
+	}
+	m := v41ReducedModel(t)
+	g := v41LoadParityGolden(t)
+	ids := g.IDs
+	if len(ids) == 0 {
+		ids = []int{1, 3, 5, 7}
+	}
+	out := v41OracleForward(t, m, ids)
+	next := v41ParityGolden{
+		Revision: v41OracleRevision,
+		Note:     v41ParityGoldenProvenance,
+		IDs:      append([]int(nil), ids...),
+		Vocab:    m.Cfg.VocabSize,
+		Hidden:   m.Cfg.HiddenSize,
+		Argmax:   make([]int, len(ids)),
+		Logits:   make([]float32, 0, len(ids)*m.Cfg.VocabSize),
+	}
+	for pos := range ids {
+		next.Argmax[pos] = argmaxF32(out[pos])
+		next.Logits = append(next.Logits, out[pos]...)
+	}
+	blob, err := json.MarshalIndent(next, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal golden: %v", err)
+	}
+	blob = append(blob, '\n')
+	if err := os.WriteFile(v41ParityGoldenPath, blob, 0o644); err != nil {
+		t.Fatalf("write golden: %v", err)
+	}
+	t.Logf("regenerated %s (%d positions)", v41ParityGoldenPath, len(ids))
 }
 
 func v41LoadParityGolden(t *testing.T) v41ParityGolden {
