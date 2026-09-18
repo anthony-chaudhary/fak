@@ -193,6 +193,16 @@ func (k *vulkanKV) ValuesView(layer int) Tensor {
 // Evict removes [from, from+n) from every layer and compacts the survivors, re-RoPE-ing
 // each shifted key from its stored pre-RoPE copy so the cache is byte-for-byte what it
 // would be had the span never been seen; it returns the number of positions removed.
+//
+// The compaction is DEVICE-RESIDENT: the survivors of K/Kraw/V are shifted down in VRAM
+// through a disjoint device scratch buffer, and each relocated key is re-rotated by the
+// same on-device RoPE kernel AppendKV used, so no K/Kraw/V byte crosses the host boundary.
+// This mirrors cudaKV.Evict (#479). The pre-change Vulkan path read all three planes to the
+// host and rewrote every layer, turning sliding-window maintenance into O(layers x context)
+// host traffic (#12401). The prefix [0,from) is left byte-for-byte untouched - only the
+// suffix is repositioned - which is the write-time quarantine asymmetry (MODEL-ARCH-SEAM
+// section 3, O1-O3): a span evicted before the query attends vanishes, but one evicted after
+// downstream tokens already attended cannot be un-seen.
 func (k *vulkanKV) Evict(from, n int) int {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -203,35 +213,83 @@ func (k *vulkanKV) Evict(from, n int) int {
 	if end > len(k.pos) {
 		end = len(k.pos)
 	}
+	removed := end - from
+	if removed <= 0 {
+		return 0
+	}
 	w := k.stride()
 	hd, nKV := k.cfg.HeadDim, k.cfg.NumKVHeads
+	fromF, endF := from*w, end*w
+	tailFloats := (len(k.pos) - end) * w // survivors after the span (shared by K/Kraw/V)
+	// Survivor positions after compaction: the prefix keeps its index, the suffix shifts down.
+	newPos := append(append([]int(nil), k.pos[:from]...), k.pos[end:]...)
+
+	// Rewriting a relocated layer in place must not clobber another owner's visible prefix,
+	// so take private storage for any layer still shared (clone) before mutating it.
 	for l := 0; l < k.cfg.NumLayers; l++ {
-		K := k.readVS(&k.K[l])
-		Kraw := k.readVS(&k.Kraw[l])
-		V := k.readVS(&k.V[l])
-		K = append(K[:from*w], K[end*w:]...)
-		Kraw = append(Kraw[:from*w], Kraw[end*w:]...)
-		V = append(V[:from*w], V[end*w:]...)
-		newPos := append(append([]int(nil), k.pos[:from]...), k.pos[end:]...)
-		for i := range newPos {
-			if newPos[i] != i {
-				cos, sin := ropeRow(k.cfg.RopeTheta, hd, i)
-				for h := 0; h < nKV; h++ {
-					dst := K[i*w+h*hd : i*w+(h+1)*hd]
-					copy(dst, Kraw[i*w+h*hd:i*w+(h+1)*hd])
-					applyRope(dst, cos, sin)
-				}
-			}
+		k.detachForRewrite(&k.K[l], l, "kv-key-evict layer ")
+		k.detachForRewrite(&k.Kraw[l], l, "kv-pre-rope-key-evict layer ")
+		k.detachForRewrite(&k.V[l], l, "kv-value-evict layer ")
+	}
+
+	// One reused scratch buffer for the leftward shift. An in-place device-to-device copy of
+	// overlapping regions is undefined, so the tail is staged through disjoint VRAM; a null
+	// tail means the span reached the end and nothing survives after it.
+	var scratch unsafe.Pointer
+	if tailFloats > 0 {
+		scratch = k.be.dallocKVFor(tailFloats*F32.Bytes(), "kv-evict-scratch").ptr
+		if scratch == nil {
+			panic(&DeviceAllocError{Bytes: tailFloats * F32.Bytes(), Site: "evict-scratch", Class: MemoryScratchpad})
 		}
-		k.writeVS(&k.K[l], K, "KV key cache rewrite layer "+strconv.Itoa(l))
-		k.writeVS(&k.Kraw[l], Kraw, "KV pre-RoPE key cache rewrite layer "+strconv.Itoa(l))
-		k.writeVS(&k.V[l], V, "KV value cache rewrite layer "+strconv.Itoa(l))
+	}
+	for l := 0; l < k.cfg.NumLayers; l++ {
+		compactVSlice(&k.K[l], fromF, endF, tailFloats, scratch)
+		compactVSlice(&k.Kraw[l], fromF, endF, tailFloats, scratch)
+		compactVSlice(&k.V[l], fromF, endF, tailFloats, scratch)
+		for i := range newPos {
+			if newPos[i] == i {
+				continue // prefix survivor: position unchanged, post-RoPE K stays byte-for-byte
+			}
+			// K[i] <- Kraw[i] (disjoint buffers, no overlap) then one in-place rotation at i.
+			C.fvk_d2d_range(k.K[l].ptr, C.size_t(i*w*4), k.Kraw[l].ptr, C.size_t(i*w*4), C.size_t(w*4))
+			C.fvk_rope_f32(k.K[l].ptr, C.int(i), C.int(nKV), C.int(hd), C.double(k.cfg.RopeTheta))
+		}
+	}
+	if scratch != nil {
+		C.fvk_free(scratch)
 	}
 	k.pos = append(k.pos[:from], k.pos[end:]...)
 	for i := range k.pos {
 		k.pos[i] = i
 	}
-	return end - from
+	return removed
+}
+
+// detachForRewrite gives a layer private device storage when the slice is still shared with
+// a clone, so an in-place eviction cannot corrupt a sibling's visible prefix. A sole owner
+// keeps its allocation; the shift is bounded by the survivors it already owns.
+func (k *vulkanKV) detachForRewrite(d *vslice, layer int, site string) {
+	d.adoptBacking()
+	if d.backing != nil && d.backing.refs > 1 {
+		k.be.makeVSliceWritable(d, d.len, false, site+strconv.Itoa(layer))
+	}
+}
+
+// compactVSlice removes the float span [fromF,endF) from a position-major device buffer in
+// place by shifting its tailFloats-long tail down through a caller-supplied disjoint scratch.
+// A direct leftward device-to-device copy would overlap (src and dst intersect), which
+// VkBufferCopy leaves undefined; staging through scratch is well-defined and never touches
+// the host. d.ptr is an opaque Buffer* handle, so offsets are byte offsets, not pointer math.
+func compactVSlice(d *vslice, fromF, endF, tailFloats int, scratch unsafe.Pointer) {
+	if tailFloats > 0 {
+		C.fvk_d2d_range(scratch, 0, d.ptr, C.size_t(endF*4), C.size_t(tailFloats*4))
+		C.fvk_d2d_range(d.ptr, C.size_t(fromF*4), scratch, 0, C.size_t(tailFloats*4))
+	}
+	d.len -= endF - fromF
+	d.adoptBacking()
+	if d.backing != nil && d.len > d.backing.highWater {
+		d.backing.highWater = d.len
+	}
 }
 
 // Clone shares immutable visible prefixes. Writers detach only when they would overwrite a
