@@ -27,6 +27,8 @@ func RunIssue(stdout, stderr io.Writer, argv []string) int {
 		return runIssueAuditLoop(stdout, stderr, argv[1:])
 	case "contract":
 		return runIssueContract(stdout, stderr, argv[1:])
+	case "contract-sections":
+		return runIssueContractSections(stdout, stderr, argv[1:])
 	case "reconcile":
 		return runIssueReconcile(stdout, stderr, argv[1:])
 	case "cohort":
@@ -1256,6 +1258,10 @@ func issueUsage(w io.Writer) {
   fak-dev issue contract --from-issues ISSUES.json [--json]
                      [--live --dedupe-checked --dedupe-cap N]
                      [--strict-model-tier] [--strict-scale]
+  fak-dev issue contract-sections [--json]
+                     The canonical, machine-readable required-section contract:
+                     every heading the runtime gate demands, its source gate,
+                     and its repair action. Read-only, no file argument.
                      JSON reviews include brief_readiness: ready/enforced plus beneficiary,
                      problem, alternative, advantage, outcome, scope, dependencies,
                      acceptance, witness, and placement fields;
