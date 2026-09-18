@@ -1286,3 +1286,106 @@ func TestDeepSeek41GGUFIndexerScheduleStaysEmptyWithoutIndexerTensors(t *testing
 		t.Fatalf("len(cfg.IndexerTypes) = %d, want 0 for a header-only probe with no tensors", len(cfg.IndexerTypes))
 	}
 }
+
+// TestDeepSeek41GGUFV41RealArtifactMLADims is the regression for the physical
+// blocker witnessed on strix3 at 0538f51da: the staged vcruz Q2_K V4.1 artifact
+// ships attention.key_length / attention.value_length (UNSUFFIXED), NO
+// attention.kv_lora_rank, and NONE of the *_mla / qk_* / v_head_dim spellings.
+// Reading only the *_mla keys left QKNopeHeadDim=VHeadDim=KVLoraRank=0, so
+// glmDsaAppendAttentionKV failed its preconditions and the first completion died
+// at the opaque "glm_moe_dsa attention step failed". The loader must mirror the
+// glm chain: key_length_mla -> key_length, value_length_mla -> value_length, and
+// derive kv_lora_rank from the attn_kv_a_norm / attn_kv tensor shape.
+//
+// Ground truth parsed from DeepSeek-V4.1-Flash-Q2_K-00001-of-00007.gguf on strix3:
+//
+//	block_count=40 embedding_length=5120 head_count=64
+//	attention.key_length=512 attention.value_length=512
+//	attention.q_lora_rank=1280 rope.dimension_count=64
+//	blk.0.attn_kv.weight [5120,512]  blk.0.attn_kv_a_norm.weight [512]
+func TestDeepSeek41GGUFV41RealArtifactMLADims(t *testing.T) {
+	const p = "deepseek41."
+	meta := ds41Meta("deepseek41")
+	// Reproduce the REAL artifact dialect exactly: drop the *_mla and qk_* keys the
+	// synthetic fixture carries, add the unsuffixed spellings the artifact ships, and
+	// omit attention.kv_lora_rank entirely (it is absent from the artifact).
+	for _, k := range []string{
+		p + "attention.kv_lora_rank",
+		p + "attention.key_length_mla",
+		p + "attention.value_length_mla",
+		p + "attention.qk_nope_head_dim",
+		p + "attention.qk_rope_head_dim",
+	} {
+		delete(meta, k)
+	}
+	meta[p+"attention.key_length"] = Value{Type: TypeUint64, Value: uint64(512)}
+	meta[p+"attention.value_length"] = Value{Type: TypeUint64, Value: uint64(512)}
+	meta[p+"rope.dimension_count"] = Value{Type: TypeUint64, Value: uint64(64)}
+	f := &File{
+		Metadata: meta,
+		Tensors: []TensorInfo{
+			{Name: "blk.0.attn_kv.weight", Dims: []uint64{5120, 512}, Type: TensorF32},
+			{Name: "blk.0.attn_kv_a_norm.weight", Dims: []uint64{512}, Type: TensorF32},
+			{Name: "blk.0.attn_q_a.weight", Dims: []uint64{5120, 1280}, Type: TensorF32},
+			{Name: "blk.0.attn_q_b.weight", Dims: []uint64{1280, 32768}, Type: TensorF32},
+			// A later full-indexer layer so the schedule derives (prefix stays dense).
+			{Name: "blk.2.indexer.attn_q_b.weight", Dims: []uint64{128, 4096}, Type: TensorF32},
+		},
+	}
+	cfg, err := f.Config()
+	if err != nil {
+		t.Fatalf("Config: %v", err)
+	}
+	if cfg.QKNopeHeadDim != 448 {
+		t.Errorf("QKNopeHeadDim = %d, want 448 (key_length 512 - rope 64)", cfg.QKNopeHeadDim)
+	}
+	if cfg.QKRopeHeadDim != 64 {
+		t.Errorf("QKRopeHeadDim = %d, want 64 (rope.dimension_count)", cfg.QKRopeHeadDim)
+	}
+	if cfg.VHeadDim != 512 {
+		t.Errorf("VHeadDim = %d, want 512 (attention.value_length)", cfg.VHeadDim)
+	}
+	if cfg.KVLoraRank != 512 {
+		t.Errorf("KVLoraRank = %d, want 512 (derived from attn_kv_a_norm / attn_kv shape)", cfg.KVLoraRank)
+	}
+	if cfg.QLoraRank != 1280 {
+		t.Errorf("QLoraRank = %d, want 1280", cfg.QLoraRank)
+	}
+	if cfg.HeadDim != 512 {
+		t.Errorf("HeadDim = %d, want 512 (qk_nope 448 + qk_rope 64)", cfg.HeadDim)
+	}
+}
+
+// TestDeepSeek41GGUFMLADimsPreferExplicitKeys pins precedence: an explicit
+// qk_nope / qk_rope / v_head_dim / kv_lora_rank must win over the key_length /
+// value_length / tensor-shape fallbacks (older or richer conversions).
+func TestDeepSeek41GGUFMLADimsPreferExplicitKeys(t *testing.T) {
+	const p = "deepseek41."
+	meta := ds41Meta("deepseek41")
+	// The fixture already carries explicit qk_nope=448 / qk_rope=64 / kv_lora_rank=512;
+	// add the unsuffixed fallback keys with DIFFERENT values so a fallback that wrongly
+	// overrode an explicit key would be caught.
+	meta[p+"attention.key_length"] = Value{Type: TypeUint64, Value: uint64(512)}
+	meta[p+"attention.value_length"] = Value{Type: TypeUint64, Value: uint64(999)}
+	meta[p+"attention.kv_lora_rank"] = Value{Type: TypeUint64, Value: uint64(576)}
+	f := &File{
+		Metadata: meta,
+		Tensors: []TensorInfo{
+			{Name: "blk.0.attn_kv.weight", Dims: []uint64{5120, 512}, Type: TensorF32},
+			{Name: "blk.0.attn_kv_a_norm.weight", Dims: []uint64{512}, Type: TensorF32},
+		},
+	}
+	cfg, err := f.Config()
+	if err != nil {
+		t.Fatalf("Config: %v", err)
+	}
+	if cfg.QKNopeHeadDim != 448 || cfg.QKRopeHeadDim != 64 {
+		t.Errorf("explicit qk dims lost: qkNope=%d qkRope=%d, want 448/64", cfg.QKNopeHeadDim, cfg.QKRopeHeadDim)
+	}
+	if cfg.VHeadDim != 512 {
+		t.Errorf("VHeadDim = %d, want 512 (explicit value_length_mla beats attention.value_length=999)", cfg.VHeadDim)
+	}
+	if cfg.KVLoraRank != 576 {
+		t.Errorf("KVLoraRank = %d, want 576 (explicit key beats tensor-shape 512)", cfg.KVLoraRank)
+	}
+}

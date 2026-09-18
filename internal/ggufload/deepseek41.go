@@ -81,6 +81,13 @@ const (
 	ds41KeyVHeadDim    = glmKeyVHeadDim
 	ds41KeyKeyLenMLA   = glmKeyKeyLengthMLA
 	ds41KeyValueLenMLA = glmKeyValueLengthMLA
+	// V4.1's staged vcruz artifact ships the UNSUFFIXED deepseek2 spellings attention.key_length
+	// (per-head qk width, 512 = qk_nope 448 + qk_rope 64) and attention.value_length (per-head v
+	// width). They are the fallback when the *_mla spelling is absent — the exact chain
+	// applyGLMMoeDsaConfig uses. Reading only *_mla left QKNopeHeadDim/VHeadDim at 0, which is
+	// how the first physical V4.1 completion died at glmDsaAppendAttentionKV's precondition.
+	ds41KeyKeyLength   = glmKeyKeyLength
+	ds41KeyValueLength = glmKeyValueLength
 
 	ds41KeyIndexNHeads  = glmKeyIndexNHeads
 	ds41KeyIndexHeadDim = glmKeyIndexHeadDim
@@ -171,6 +178,42 @@ func ds41HasAnyIndexer(f *File, numLayers int) bool {
 	return false
 }
 
+// ds41KVLoraRankFromTensors derives the MLA kv_lora_rank from the compressed-KV tensor
+// shape when the metadata key is absent. The staged vcruz Q2_K V4.1 artifact ships neither
+// attention.kv_lora_rank nor the *_mla dims, but every decoder layer carries
+// blk.<L>.attn_kv.weight [H, kvLora] (the single low-rank KV projection, mapped to
+// self_attn.kv_a_proj_with_mqa.weight) and blk.<L>.attn_kv_a_norm.weight [kvLora]. The norm
+// width is the unambiguous rank; the projection's out-dim is the fallback. Returns 0 when no
+// layer carries either, so a header-only fixture keeps deriving from metadata alone.
+func ds41KVLoraRankFromTensors(f *File, numLayers int) int {
+	if len(f.Tensors) == 0 {
+		return 0
+	}
+	for l := 0; l < numLayers; l++ {
+		pfx := fmt.Sprintf("blk.%d.", l)
+		for _, t := range f.Tensors {
+			if t.Name != pfx+"attn_kv_a_norm.weight" || len(t.Dims) == 0 {
+				continue
+			}
+			if v := int(t.Dims[0]); v > 0 {
+				return v
+			}
+		}
+	}
+	for l := 0; l < numLayers; l++ {
+		pfx := fmt.Sprintf("blk.%d.", l)
+		for _, t := range f.Tensors {
+			if t.Name != pfx+"attn_kv.weight" || len(t.Dims) < 2 {
+				continue
+			}
+			if v := int(t.Dims[1]); v > 0 {
+				return v
+			}
+		}
+	}
+	return 0
+}
+
 // applyDeepSeek41Config reads the deepseek41 MoE + MLA + indexer + compress/
 // hyper-connection/grouped-output axes from the file's raw "<arch>." prefix into
 // cfg, and retains the Engram metadata on f. It mirrors applyGLMMoeDsaConfig's
@@ -213,23 +256,42 @@ func applyDeepSeek41Config(f *File, p string, cfg *model.Config, ropeDim int) er
 	if v := intValueOrZero(f, p+ds41KeyQLoraRank); v > 0 {
 		cfg.QLoraRank = v
 	}
+	// kv_lora_rank: explicit key, else derive from the compressed-KV tensor shape. The
+	// staged vcruz Q2_K V4.1 artifact omits attention.kv_lora_rank entirely, but ships
+	// blk.<L>.attn_kv.weight [H, kvLora] and blk.<L>.attn_kv_a_norm.weight [kvLora]; a
+	// 0 here makes glmDsaAppendAttentionKV fail its preconditions (kvLora=0) and the
+	// first physical completion dies at the opaque "glm_moe_dsa attention step failed".
 	if v := intValueOrZero(f, p+ds41KeyKVLoraRank); v > 0 {
+		cfg.KVLoraRank = v
+	} else if v := ds41KVLoraRankFromTensors(f, cfg.NumLayers); v > 0 {
 		cfg.KVLoraRank = v
 	}
 	cfg.QKRopeHeadDim = intValueOrZero(f, p+ds41KeyQKRopeDim)
 	if cfg.QKRopeHeadDim == 0 {
 		cfg.QKRopeHeadDim = ropeDim
 	}
+	// qk_nope_head_dim: explicit key, else the per-head MLA key length minus rope. V4.1's
+	// staged artifact carries attention.key_length (512 = qk_nope 448 + qk_rope 64) and
+	// NOT the *_mla spelling, so fall back to it exactly as applyGLMMoeDsaConfig does;
+	// reading only key_length_mla leaves QKNopeHeadDim=0 and the attention step fails closed.
 	cfg.QKNopeHeadDim = intValueOrZero(f, p+ds41KeyQKNopeDim)
 	if cfg.QKNopeHeadDim == 0 {
 		kl := intValueOrZero(f, p+ds41KeyKeyLenMLA)
+		if kl == 0 {
+			kl = intValueOrZero(f, p+ds41KeyKeyLength)
+		}
 		if kl > cfg.QKRopeHeadDim {
 			cfg.QKNopeHeadDim = kl - cfg.QKRopeHeadDim
 		}
 	}
+	// v_head_dim: explicit key, else the per-head value length (value_length_mla, else
+	// attention.value_length - the spelling the staged V4.1 artifact actually ships).
 	cfg.VHeadDim = intValueOrZero(f, p+ds41KeyVHeadDim)
 	if cfg.VHeadDim == 0 {
 		cfg.VHeadDim = intValueOrZero(f, p+ds41KeyValueLenMLA)
+		if cfg.VHeadDim == 0 {
+			cfg.VHeadDim = intValueOrZero(f, p+ds41KeyValueLength)
+		}
 	}
 	// V4.1's per-head width is qk_nope + qk_rope (448 + 64 = 512). The generic
 	// Config derived hidden/heads (80) with no attention.key_length present, so
