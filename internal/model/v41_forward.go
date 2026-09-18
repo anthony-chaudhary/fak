@@ -830,8 +830,25 @@ func (m *Model) v41MHCWeightLayout(l int) (flat, transposed, ok bool) {
 // error naming the tensor rather than panicking.
 func (m *Model) v41MHCMixF32(l int) ([]float32, error) {
 	name := layerName(l, "mhc.mixes.weight")
+	if w, ok := m.residentF32Mat(name); ok {
+		return w, nil
+	}
+	return nil, v41StageErr(v41StageMHC, l,
+		fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
+}
+
+// residentF32Mat resolves a named V4.1 matmul weight to a full f32 block from
+// whichever store actually carries it: the f32 manifest first (returned
+// zero-copy, byte-identical), then the resident quant stores
+// (kqw/q2w/q8w/q4kw/q4w/gptqw), dequantizing the store's native row-major layout.
+// It reports false when the weight is resident in no store, so a caller can fail
+// closed with a typed error naming the tensor instead of panicking through
+// m.tensor. This is the read-side twin of residentShape: a quantized serve keeps
+// the weight in a store with no manifest entry, so a manifest-only read would
+// panic on a weight that admission (residentShape) already admitted.
+func (m *Model) residentF32Mat(name string) ([]float32, bool) {
 	if m.has(name) {
-		return m.tensor(name), nil
+		return m.tensor(name), true
 	}
 	if qt := m.kqw[name]; qt != nil {
 		qt.ensureRawCPU("mHC mix read")
@@ -844,18 +861,18 @@ func (m *Model) v41MHCMixF32(l int) ([]float32, error) {
 				kQuantDequantSuperBlock(w[b*qt.in+j*qt.kind.blockWeights():], row[j*bb:(j+1)*bb], qt.kind)
 			}
 		}
-		return w, nil
+		return w, true
 	}
 	if qt := m.q2w[name]; qt != nil {
-		return dequantQ2Tensor(qt), nil
+		return dequantQ2Tensor(qt), true
 	}
 	if qt := m.q8w[name]; qt != nil {
-		return dequantQ8Tensor(qt), nil
+		return dequantQ8Tensor(qt), true
 	}
 	if qt := m.q4kw[name]; qt != nil {
 		raw, err := qt.materializeRaw()
 		if err != nil {
-			return nil, fmt.Errorf("%w: tensor %s Q4_K materialization failed: %v", ErrV41ForwardStage, name, err)
+			return nil, false
 		}
 		rowBytes := qt.nblk * q4kBlockBytes
 		w := make([]float32, qt.out*qt.in)
@@ -865,7 +882,7 @@ func (m *Model) v41MHCMixF32(l int) ([]float32, error) {
 				q4kDequantSuperBlock(w[o*qt.in+j*qkK:], row[j*q4kBlockBytes:(j+1)*q4kBlockBytes])
 			}
 		}
-		return w, nil
+		return w, true
 	}
 	if qt := m.q4w[name]; qt != nil {
 		w := make([]float32, qt.out*qt.in)
@@ -874,17 +891,39 @@ func (m *Model) v41MHCMixF32(l int) ([]float32, error) {
 				dequantQ4Block(w[o*qt.in+b*qBlk4:], qt.d[o*qt.nblk+b], qt.q[o*qt.nblk*(qBlk4/2)+b*(qBlk4/2):])
 			}
 		}
-		return w, nil
+		return w, true
 	}
 	if qt := m.gptqw[name]; qt != nil {
 		w := make([]float32, qt.out*qt.in)
 		for o := 0; o < qt.out; o++ {
 			gptqDequantRow(w[o*qt.in:], qt, o)
 		}
-		return w, nil
+		return w, true
 	}
-	return nil, v41StageErr(v41StageMHC, l,
-		fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
+	return nil, false
+}
+
+// v41ProjF32 reads a per-layer V4.1 projection weight (an attention projection or
+// a shared-expert matmul leaf) as a full f32 block, resolved residency-completely
+// through the SAME store dispatch v41MHCMixF32 uses: the f32 manifest first, then
+// the resident quant stores (kqw/q2w/q8w/q4kw/q4w/gptqw). The reduced fixture
+// carries these tensors in the f32 manifest and that path returns the manifest
+// view unchanged (byte-identical to the pre-#13276 read); a real quantized serve
+// (the pinned Q2_K artifact) keeps them in a resident k-quant store, so the
+// manifest-only m.tensor read would panic "model: missing tensor ...".
+//
+// A projection absent from every store fails closed with a typed
+// ErrV41ForwardStage naming the tensor rather than panicking, preserving the
+// #13276 contract: the physical strix3 serve must reach a NAMED refusal, never a
+// silent mis-shape.
+func (m *Model) v41ProjF32(l int, leaf string) ([]float32, error) {
+	name := layerName(l, leaf)
+	w, ok := m.residentF32Mat(name)
+	if !ok {
+		return nil, v41StageErr(v41StageAttention, l,
+			fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
+	}
+	return w, nil
 }
 
 // v41MHCProjectFull executes the published flattened-four-stream mHC mix
@@ -1123,17 +1162,52 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	}
 	mixBase := m.tensor(layerName(l, "mhc.base"))
 	mixScale := m.tensor(layerName(l, "mhc.scale"))
-	wQA := m.tensor(layerName(l, "attn.wq_a.weight"))
-	wQB := m.tensor(layerName(l, "attn.wq_b.weight"))
-	wKV := m.tensor(layerName(l, "attn.wkv.weight"))
-	woA := m.tensor(layerName(l, "attn.wo_a.weight"))
-	woB := m.tensor(layerName(l, "attn.wo_b.weight"))
+	// Attention + shared-expert projections are read residency-completely: a
+	// quantized serve keeps them in a resident k-quant store (isQuantWeight admits
+	// every .attn.wq_a/.attn.wq_b/.attn.wkv/.attn.wo_a/.attn.wo_b and the shared
+	// ffn.shared_experts leaves), so a manifest-only m.tensor read panics on a
+	// weight admission (residentShape) already admitted (#13276). Each read fails
+	// closed with a typed error naming the tensor when absent from every store.
+	wQA, err := m.v41ProjF32(l, "attn.wq_a.weight")
+	if err != nil {
+		return err
+	}
+	wQB, err := m.v41ProjF32(l, "attn.wq_b.weight")
+	if err != nil {
+		return err
+	}
+	wKV, err := m.v41ProjF32(l, "attn.wkv.weight")
+	if err != nil {
+		return err
+	}
+	woA, err := m.v41ProjF32(l, "attn.wo_a.weight")
+	if err != nil {
+		return err
+	}
+	woB, err := m.v41ProjF32(l, "attn.wo_b.weight")
+	if err != nil {
+		return err
+	}
+	// attn.sink is a 1-D per-head vector (not an isQuantWeight matmul leaf), so it
+	// stays on the f32 manifest.
 	sink := m.tensor(layerName(l, "attn.sink"))
-	wGate := m.tensor(layerName(l, "ffn.gate.weight"))
+	wGate, err := m.v41ProjF32(l, "ffn.gate.weight")
+	if err != nil {
+		return err
+	}
 	gateBias := m.tensor(layerName(l, "ffn.gate.e_score_correction_bias"))
-	sharedW1 := m.tensor(layerName(l, "ffn.shared_experts.w1.weight"))
-	sharedW3 := m.tensor(layerName(l, "ffn.shared_experts.w3.weight"))
-	sharedW2 := m.tensor(layerName(l, "ffn.shared_experts.w2.weight"))
+	sharedW1, err := m.v41ProjF32(l, "ffn.shared_experts.w1.weight")
+	if err != nil {
+		return err
+	}
+	sharedW3, err := m.v41ProjF32(l, "ffn.shared_experts.w3.weight")
+	if err != nil {
+		return err
+	}
+	sharedW2, err := m.v41ProjF32(l, "ffn.shared_experts.w2.weight")
+	if err != nil {
+		return err
+	}
 
 	seq := len(x)
 	// ---- mHC coefficient split (one split per layer) ----
@@ -1404,9 +1478,18 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		routed := make([]float32, H)
 		for _, pick := range picks {
 			stem := "ffn.experts." + itoa(pick.expert)
-			w1 := m.tensor(layerName(l, stem+".w1.weight"))
-			w3 := m.tensor(layerName(l, stem+".w3.weight"))
-			w2 := m.tensor(layerName(l, stem+".w2.weight"))
+			w1, err := m.v41ProjF32(l, stem+".w1.weight")
+			if err != nil {
+				return err
+			}
+			w3, err := m.v41ProjF32(l, stem+".w3.weight")
+			if err != nil {
+				return err
+			}
+			w2, err := m.v41ProjF32(l, stem+".w2.weight")
+			if err != nil {
+				return err
+			}
 			y := v41SwiGLU(w1, w3, w2, xn, cfg.MoEIntermediateSize, H, cfg)
 			for i := range routed {
 				routed[i] += pick.weight * y[i]
