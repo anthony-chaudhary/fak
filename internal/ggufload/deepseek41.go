@@ -214,6 +214,31 @@ func ds41KVLoraRankFromTensors(f *File, numLayers int) int {
 	return 0
 }
 
+// ds41QBProjOutDim returns the out-dim (last axis) of the first decoder layer's
+// blk.<L>.attn_q_b.weight, the MLA query up-projection. That axis equals
+// num_heads * (qk_nope_head_dim + qk_rope_head_dim), the artifact's own ground
+// truth for the per-head qk width -- the arbiter that disambiguates a
+// per-head-semantics attention.key_length from a latent-semantics one
+// (issue #13244). Returns 0 when no layer carries the tensor, so a header-only
+// fixture keeps deriving from metadata alone without a spurious refusal.
+func ds41QBProjOutDim(f *File, numLayers int) int {
+	if len(f.Tensors) == 0 {
+		return 0
+	}
+	for l := 0; l < numLayers; l++ {
+		pfx := fmt.Sprintf("blk.%d.", l)
+		for _, t := range f.Tensors {
+			if t.Name != pfx+"attn_q_b.weight" || len(t.Dims) < 2 {
+				continue
+			}
+			if v := int(t.Dims[len(t.Dims)-1]); v > 0 {
+				return v
+			}
+		}
+	}
+	return 0
+}
+
 // applyDeepSeek41Config reads the deepseek41 MoE + MLA + indexer + compress/
 // hyper-connection/grouped-output axes from the file's raw "<arch>." prefix into
 // cfg, and retains the Engram metadata on f. It mirrors applyGLMMoeDsaConfig's
@@ -270,15 +295,33 @@ func applyDeepSeek41Config(f *File, p string, cfg *model.Config, ropeDim int) er
 	if cfg.QKRopeHeadDim == 0 {
 		cfg.QKRopeHeadDim = ropeDim
 	}
-	// qk_nope_head_dim: explicit key, else the per-head MLA key length minus rope. V4.1's
-	// staged artifact carries attention.key_length (512 = qk_nope 448 + qk_rope 64) and
-	// NOT the *_mla spelling, so fall back to it exactly as applyGLMMoeDsaConfig does;
-	// reading only key_length_mla leaves QKNopeHeadDim=0 and the attention step fails closed.
+	// qk_nope_head_dim: explicit key, else the per-head MLA key length minus rope.
+	//
+	// attention.key_length_mla is unambiguously the PER-HEAD qk width. The
+	// unsuffixed attention.key_length is DIALECT-DEPENDENT: V4.1's staged vcruz
+	// artifact ships the per-head width there (512 = qk_nope 448 + qk_rope 64), but
+	// a GLM-style latent-semantics file carries the LATENT key dim (576) under the
+	// same name. Subtracting rope from the latent value yields a plausible-but-wrong
+	// per-head width, silently mis-shaping the KV cache / kv_b split (issue #13244).
+	// The artifact's own attn_q_b.weight out-dim is the arbiter:
+	//   out = num_heads * (qk_nope + qk_rope).
+	// Admit the unsuffixed fallback only when it agrees with that ground truth;
+	// otherwise refuse, naming the offending key, rather than carry a wrong number.
 	cfg.QKNopeHeadDim = intValueOrZero(f, p+ds41KeyQKNopeDim)
 	if cfg.QKNopeHeadDim == 0 {
 		kl := intValueOrZero(f, p+ds41KeyKeyLenMLA)
 		if kl == 0 {
 			kl = intValueOrZero(f, p+ds41KeyKeyLength)
+			if kl > cfg.QKRopeHeadDim {
+				if qOut := ds41QBProjOutDim(f, cfg.NumLayers); qOut > 0 && cfg.NumHeads > 0 {
+					perHead := qOut / cfg.NumHeads
+					if perHead != kl {
+						return fmt.Errorf("gguf: deepseek41 %s=%d is %d-wide latent key semantics, not a per-head width "+
+							"(blk.0.attn_q_b.weight out=%d / head_count=%d = %d); rename to %s or %s",
+							ds41KeyKeyLength, kl, kl, qOut, cfg.NumHeads, perHead, ds41KeyKeyLenMLA, ds41KeyQKNopeDim)
+					}
+				}
+			}
 		}
 		if kl > cfg.QKRopeHeadDim {
 			cfg.QKNopeHeadDim = kl - cfg.QKRopeHeadDim

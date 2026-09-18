@@ -11,24 +11,24 @@ import (
 	"testing"
 )
 
-// deepseek41_test.go — the witness suite for issue #12903 (DeepSeek-V4.1-Flash
+// deepseek41_test.go â€” the witness suite for issue #12903 (DeepSeek-V4.1-Flash
 // GGUF header/metadata + shard-loading slice). It binds the four load-bearing
 // claims of deepseek41.go to runnable evidence:
 //
-//  1. ConfigMapsMetadata  — the raw "<spelling>." metadata axes land in
+//  1. ConfigMapsMetadata  â€” the raw "<spelling>." metadata axes land in
 //     model.Config field-for-field, and the Engram tables are retained on the
 //     File under DeepSeek41Engram.
-//  2. CanonicalArchSpellings — every sibling spelling normalizes onto the single
+//  2. CanonicalArchSpellings â€” every sibling spelling normalizes onto the single
 //     internal arch "deepseek41" and no sibling (deepseek2/llama) is
 //     over-normalized.
-//  3. EngramRoutesToDedicatedNamespace — an Engram tensor maps to its own
+//  3. EngramRoutesToDedicatedNamespace â€” an Engram tensor maps to its own
 //     model.engram.<L>.* root (never a generic self_attn./mlp. name), a normal
 //     MLA suffix maps correctly, and deepseek41 is NOT in the MLA+MoE loader
 //     layout gate.
-//  4. MalformedEngramFailsBeforeAllocation — an internally inconsistent Engram
+//  4. MalformedEngramFailsBeforeAllocation â€” an internally inconsistent Engram
 //     declaration is refused at Config() with the offending key named, before
 //     any large allocation.
-//  5. SplitShardsLoadPackedExpertBytes — a two-shard synthetic split carries a
+//  5. SplitShardsLoadPackedExpertBytes â€” a two-shard synthetic split carries a
 //     real Q4_K batched routed-expert blob whose per-expert byte pattern
 //     survives the merge byte-for-byte (still packed, never dequantized).
 
@@ -485,7 +485,7 @@ func TestDeepSeek41GGUFSplitShardsLoadPackedExpertBytes(t *testing.T) {
 		t.Fatalf("merged ModelType = %q, want deepseek41", cfg.ModelType)
 	}
 
-	// (b) TensorBytes returns the exact packed Q4_K bytes written, byte-for-byte —
+	// (b) TensorBytes returns the exact packed Q4_K bytes written, byte-for-byte â€”
 	// proving the split load preserved the still-quantized expert blob.
 	got, info, err := ws.TensorBytes(expertName)
 	if err != nil {
@@ -580,7 +580,7 @@ func TestDeepSeek41GGUFMoEOnlyHeaderDerivesConfig(t *testing.T) {
 // issue #13010 out-of-scope fence: "Do NOT relax any guard that would let an
 // incompatible artifact silently load." requiredDenseFFNLen derives the dense FFN
 // width from the expert width for a MoE-only deepseek41 artifact (correct), but its
-// derive branch keys only on the PRESENCE of "<p>expert_feed_forward_length" — it
+// derive branch keys only on the PRESENCE of "<p>expert_feed_forward_length" â€” it
 // never checks that the file is a MoE architecture. Before the fix, a plain dense
 // arch (e.g. gemma3, llama) that happened to carry an expert width but no dense
 // width silently admitted and projected IntermediateSize from the EXPERT width
@@ -1117,7 +1117,7 @@ func TestDeepSeek41GGUFV41SuffixMapClassifierConsistency(t *testing.T) {
 //
 // Fence: an arch that reaches the shared glm_moe_dsa MLA+MoE map
 // (archUsesMLAMoELayout: glm_moe_dsa, deepseek2) legitimately resolves the three
-// suffixes that map ALREADY shares with V4.1 — attn_kv_a_norm.weight,
+// suffixes that map ALREADY shares with V4.1 â€” attn_kv_a_norm.weight,
 // indexer.attn_k.weight, indexer.k_norm.weight. That coverage PREDATES #13112
 // (glmGGUFAttnKVANorm / glmGGUFIndexerWK / glmGGUFIndexerKNorm), so it is not a
 // leak this ticket introduced; asserting ok=false for those would pin a
@@ -1318,6 +1318,11 @@ func TestDeepSeek41GGUFV41RealArtifactMLADims(t *testing.T) {
 	} {
 		delete(meta, k)
 	}
+	// The real artifact ships head_count=64: attn_q_b out 32768 / 64 = 512 per-head
+	// (qk_nope 448 + qk_rope 64), which AGREES with attention.key_length. The
+	// arbiter in applyDeepSeek41Config therefore admits the unsuffixed fallback.
+	meta[p+"attention.head_count"] = Value{Type: TypeUint64, Value: uint64(64)}
+	meta[p+"attention.head_count_kv"] = Value{Type: TypeUint64, Value: uint64(64)}
 	meta[p+"attention.key_length"] = Value{Type: TypeUint64, Value: uint64(512)}
 	meta[p+"attention.value_length"] = Value{Type: TypeUint64, Value: uint64(512)}
 	meta[p+"rope.dimension_count"] = Value{Type: TypeUint64, Value: uint64(64)}
@@ -1387,5 +1392,66 @@ func TestDeepSeek41GGUFMLADimsPreferExplicitKeys(t *testing.T) {
 	}
 	if cfg.KVLoraRank != 576 {
 		t.Errorf("KVLoraRank = %d, want 576 (explicit key beats tensor-shape 512)", cfg.KVLoraRank)
+	}
+}
+
+// TestDeepSeek41GGUFLatentKeyLengthDialectFailsClosed pins the residual raised by
+// the cross-validator on 9a4cfc973 (#13244): attention.key_length is
+// dialect-dependent. The V4.1 artifact ships the PER-HEAD qk width there (512 =
+// qk_nope 448 + qk_rope 64), but a GLM-style deepseek41-branded file carries the
+// LATENT key dim (576) with no *_mla key to disambiguate. Subtracting rope from
+// the latent value yields a plausible-but-wrong per-head width (512 rather than
+// 256), silently mis-shaping the KV cache / kv_b split -- a wrong-number failure,
+// not a fail-closed refusal.
+//
+// The artifact's own attn_q_b.weight out-dim is the arbiter: it equals
+// num_heads * (qk_nope + qk_rope). A concat width that disagrees with it must be
+// refused with a named error naming attention.key_length.
+func TestDeepSeek41GGUFLatentKeyLengthDialectFailsClosed(t *testing.T) {
+	const p = "deepseek41."
+	meta := ds41Meta("deepseek41")
+	// Model a GLM-style latent dialect: drop the *_mla and qk_* disambiguators the
+	// synthetic fixture carries, and write the LATENT key dim (576) under the
+	// unsuffixed key -- the value a latent-semantics artifact would ship.
+	for _, k := range []string{
+		p + "attention.kv_lora_rank",
+		p + "attention.key_length_mla",
+		p + "attention.value_length_mla",
+		p + "attention.qk_nope_head_dim",
+		p + "attention.qk_rope_head_dim",
+	} {
+		delete(meta, k)
+	}
+	meta[p+"attention.key_length"] = Value{Type: TypeUint64, Value: uint64(576)}
+	meta[p+"attention.value_length"] = Value{Type: TypeUint64, Value: uint64(576)}
+	meta[p+"rope.dimension_count"] = Value{Type: TypeUint64, Value: uint64(64)}
+	meta[p+"attention.head_count"] = Value{Type: TypeUint64, Value: uint64(64)}
+	meta[p+"attention.head_count_kv"] = Value{Type: TypeUint64, Value: uint64(64)}
+	f := &File{
+		Metadata: meta,
+		Tensors: []TensorInfo{
+			{Name: "blk.0.attn_kv.weight", Dims: []uint64{5120, 512}, Type: TensorF32},
+			{Name: "blk.0.attn_kv_a_norm.weight", Dims: []uint64{512}, Type: TensorF32},
+			{Name: "blk.0.attn_q_a.weight", Dims: []uint64{5120, 1280}, Type: TensorF32},
+			// num_heads(64) * per-head(256 nope + 64 rope) = 20480: the artifact's
+			// own ground truth, which the latent reading (kl=576 -> 512) contradicts.
+			{Name: "blk.0.attn_q_b.weight", Dims: []uint64{1280, 20480}, Type: TensorF32},
+		},
+	}
+	cfg, err := f.Config()
+	if err != nil {
+		// A named refusal is an acceptable outcome; it must name the key.
+		if !strings.Contains(err.Error(), ds41KeyKeyLength) {
+			t.Fatalf("refusal does not name %s: %v", ds41KeyKeyLength, err)
+		}
+		return
+	}
+	// If it resolved, it must have used the artifact ground truth (per-head 320 =
+	// 256 nope + 64 rope), not the latent-derived 512.
+	if cfg.QKNopeHeadDim != 256 {
+		t.Errorf("QKNopeHeadDim = %d, want 256 (attn_q_b out-dim 40960/128 - rope 64): the latent key_length 576 was misread as a per-head width", cfg.QKNopeHeadDim)
+	}
+	if cfg.HeadDim != 320 {
+		t.Errorf("HeadDim = %d, want 320 (qk_nope 256 + qk_rope 64)", cfg.HeadDim)
 	}
 }
