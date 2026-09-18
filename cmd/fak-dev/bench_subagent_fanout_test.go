@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestBenchSubagentFanoutHelp(t *testing.T) {
@@ -657,4 +659,101 @@ func TestSubagentFanoutServeRefusalVocabularyIsClosed(t *testing.T) {
 			t.Errorf("unexpected refusal token %q", tok)
 		}
 	}
+}
+
+// TestSubagentFanoutConcurrencyScaling is the deterministic concurrency-scaling
+// cell for Issue #1591. It proves the cell's scaling ratio separates a
+// genuinely concurrent loopback fake from a serializing one, giving the
+// batched-path fix a repeatable regression gate. No external service required.
+func TestSubagentFanoutConcurrencyScaling(t *testing.T) {
+	const fanoutN = 6
+	const perRequestDelay = 40 * time.Millisecond
+
+	// scalingHandler entertains every request concurrently: each request sleeps
+	// independently on its own goroutine, so N concurrent requests complete in
+	// roughly one delay rather than N.
+	scalingHandler := func(serialize bool) http.HandlerFunc {
+		var mu sync.Mutex
+		return func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v1/completions" {
+				http.NotFound(w, r)
+				return
+			}
+			if serialize {
+				mu.Lock()
+				defer mu.Unlock()
+			}
+			time.Sleep(perRequestDelay)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"choices":[{"text":"tok"}]}`)
+		}
+	}
+
+	cfg := ConcurrencyScalingConfig{
+		FanoutN:         fanoutN,
+		PerRequestDelay: perRequestDelay,
+		PrefixTokens:    64,
+		SuffixTokens:    16,
+		DecodeTokens:    4,
+	}
+
+	t.Run("ConcurrentFakeScales", func(t *testing.T) {
+		srv := httptest.NewServer(scalingHandler(false))
+		defer srv.Close()
+
+		res, err := RunConcurrencyScalingCell(context.Background(), srv.URL, cfg)
+		if err != nil {
+			t.Fatalf("RunConcurrencyScalingCell: %v", err)
+		}
+		if res.RequestsIssued != fanoutN*2 {
+			t.Errorf("requests issued = %d, want %d", res.RequestsIssued, fanoutN*2)
+		}
+		if res.Schema != ConcurrencyScalingCellSchema {
+			t.Errorf("schema = %q, want %q", res.Schema, ConcurrencyScalingCellSchema)
+		}
+		// The sequential phase must cost ~N delays; the concurrent phase ~1.
+		// Assert a lower bound well inside the ideal N=6 ratio so a serializing
+		// regression fails while scheduler jitter does not.
+		const minRatio = 2.5
+		if res.ScalingRatio < minRatio {
+			t.Errorf("concurrent fake did not scale: ratio=%.2f (want >= %.2f) seq=%.1fms conc=%.1fms sum=%.1fms",
+				res.ScalingRatio, minRatio, res.SequentialWallMs, res.ConcurrentWallMs, res.SumOfRequestTimeMs)
+		}
+		if res.SequentialWallMs < res.ConcurrentWallMs {
+			t.Errorf("sequential wall (%.1fms) should exceed concurrent wall (%.1fms)",
+				res.SequentialWallMs, res.ConcurrentWallMs)
+		}
+		// Sum-of-request time must be close to N * delay, independent of phase.
+		wantSum := float64(fanoutN) * float64(perRequestDelay.Microseconds()) / 1000.0
+		if res.SumOfRequestTimeMs < wantSum*0.8 {
+			t.Errorf("sum-of-request time = %.1fms, want >= %.1fms", res.SumOfRequestTimeMs, wantSum*0.8)
+		}
+	})
+
+	t.Run("SerializingFakeDoesNotScale", func(t *testing.T) {
+		srv := httptest.NewServer(scalingHandler(true))
+		defer srv.Close()
+
+		res, err := RunConcurrencyScalingCell(context.Background(), srv.URL, cfg)
+		if err != nil {
+			t.Fatalf("RunConcurrencyScalingCell: %v", err)
+		}
+		// A server that serializes every request yields ~1.0: the "concurrent"
+		// phase takes just as long as the sequential one. The same lower bound
+		// that the scaling fake clears must fail here.
+		const minRatio = 2.5
+		if res.ScalingRatio >= minRatio {
+			t.Errorf("serializing fake unexpectedly scaled: ratio=%.2f (want < %.2f) seq=%.1fms conc=%.1fms",
+				res.ScalingRatio, minRatio, res.SequentialWallMs, res.ConcurrentWallMs)
+		}
+	})
+
+	t.Run("RejectsInvalidConfig", func(t *testing.T) {
+		srv := httptest.NewServer(scalingHandler(false))
+		defer srv.Close()
+		if _, err := RunConcurrencyScalingCell(context.Background(), srv.URL, ConcurrencyScalingConfig{FanoutN: 0}); err == nil {
+			t.Error("expected error for FanoutN=0")
+		}
+	})
 }
