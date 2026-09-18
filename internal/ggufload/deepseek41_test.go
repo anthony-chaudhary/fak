@@ -11,24 +11,24 @@ import (
 	"testing"
 )
 
-// deepseek41_test.go — the witness suite for issue #12903 (DeepSeek-V4.1-Flash
+// deepseek41_test.go ΓÇö the witness suite for issue #12903 (DeepSeek-V4.1-Flash
 // GGUF header/metadata + shard-loading slice). It binds the four load-bearing
 // claims of deepseek41.go to runnable evidence:
 //
-//  1. ConfigMapsMetadata  — the raw "<spelling>." metadata axes land in
+//  1. ConfigMapsMetadata  ΓÇö the raw "<spelling>." metadata axes land in
 //     model.Config field-for-field, and the Engram tables are retained on the
 //     File under DeepSeek41Engram.
-//  2. CanonicalArchSpellings — every sibling spelling normalizes onto the single
+//  2. CanonicalArchSpellings ΓÇö every sibling spelling normalizes onto the single
 //     internal arch "deepseek41" and no sibling (deepseek2/llama) is
 //     over-normalized.
-//  3. EngramRoutesToDedicatedNamespace — an Engram tensor maps to its own
+//  3. EngramRoutesToDedicatedNamespace ΓÇö an Engram tensor maps to its own
 //     model.engram.<L>.* root (never a generic self_attn./mlp. name), a normal
 //     MLA suffix maps correctly, and deepseek41 is NOT in the MLA+MoE loader
 //     layout gate.
-//  4. MalformedEngramFailsBeforeAllocation — an internally inconsistent Engram
+//  4. MalformedEngramFailsBeforeAllocation ΓÇö an internally inconsistent Engram
 //     declaration is refused at Config() with the offending key named, before
 //     any large allocation.
-//  5. SplitShardsLoadPackedExpertBytes — a two-shard synthetic split carries a
+//  5. SplitShardsLoadPackedExpertBytes ΓÇö a two-shard synthetic split carries a
 //     real Q4_K batched routed-expert blob whose per-expert byte pattern
 //     survives the merge byte-for-byte (still packed, never dequantized).
 
@@ -281,14 +281,15 @@ func TestDeepSeek41GGUFEngramRoutesToDedicatedNamespace(t *testing.T) {
 		t.Errorf("Engram mapped into a generic attention/MLP namespace: %q", got)
 	}
 
-	mla, ok := CanonicalTensorNameArch("blk.0.attn_kv.weight", "deepseek41")
+	kv, ok := CanonicalTensorNameArch("blk.0.attn_kv.weight", "deepseek41")
 	if !ok {
 		t.Fatal("CanonicalTensorNameArch(blk.0.attn_kv.weight, deepseek41) not mapped")
 	}
-	if want := "model.layers.0.self_attn.kv_a_proj_with_mqa.weight"; mla != want {
-		t.Errorf("attn_kv canonical name = %q, want %q", mla, want)
+	// V4.1 is NON-MLA: attn_kv [5120,512] is a direct per-head KV projection the
+	// native forward reads as attn.wkv.weight (admit [kvLatentRank=512, H]).
+	if want := "model.layers.0.attn.wkv.weight"; kv != want {
+		t.Errorf("attn_kv canonical name = %q, want %q", kv, want)
 	}
-
 	if archUsesMLAMoELayout("deepseek41") {
 		t.Error("archUsesMLAMoELayout(deepseek41) = true; the glm KV-b merge must never run for a V4 file")
 	}
@@ -485,7 +486,7 @@ func TestDeepSeek41GGUFSplitShardsLoadPackedExpertBytes(t *testing.T) {
 		t.Fatalf("merged ModelType = %q, want deepseek41", cfg.ModelType)
 	}
 
-	// (b) TensorBytes returns the exact packed Q4_K bytes written, byte-for-byte —
+	// (b) TensorBytes returns the exact packed Q4_K bytes written, byte-for-byte ΓÇö
 	// proving the split load preserved the still-quantized expert blob.
 	got, info, err := ws.TensorBytes(expertName)
 	if err != nil {
@@ -580,7 +581,7 @@ func TestDeepSeek41GGUFMoEOnlyHeaderDerivesConfig(t *testing.T) {
 // issue #13010 out-of-scope fence: "Do NOT relax any guard that would let an
 // incompatible artifact silently load." requiredDenseFFNLen derives the dense FFN
 // width from the expert width for a MoE-only deepseek41 artifact (correct), but its
-// derive branch keys only on the PRESENCE of "<p>expert_feed_forward_length" — it
+// derive branch keys only on the PRESENCE of "<p>expert_feed_forward_length" ΓÇö it
 // never checks that the file is a MoE architecture. Before the fix, a plain dense
 // arch (e.g. gemma3, llama) that happened to carry an expert width but no dense
 // width silently admitted and projected IntermediateSize from the EXPERT width
@@ -920,14 +921,79 @@ var deepSeek41V41RealSuffixes = []struct {
 	suffix string
 	want   func(l int) string
 }{
-	{"attn_kv_a_norm.weight", func(l int) string { return layerName(l, "self_attn.kv_a_layernorm.weight") }},
-	{"attn_compressor_gate.weight", func(l int) string { return layerName(l, "self_attn.compressor.wgate.weight") }},
-	{"attn_compressor_kv.weight", func(l int) string { return layerName(l, "self_attn.compressor.wkv.weight") }},
-	{"attn_compressor_norm.weight", func(l int) string { return layerName(l, "self_attn.compressor.norm.weight") }},
-	{"attn_sinks.weight", func(l int) string { return fmt.Sprintf("model.layers.%d.attn.attn_sink", l) }},
-	{"exp_probs_b_vl.bias", func(l int) string { return layerName(l, "mlp.gate.e_score_correction_bias_vl") }},
-	{"indexer.attn_k.weight", func(l int) string { return layerName(l, "self_attn.indexer.wk.weight") }},
-	{"indexer.k_norm.weight", func(l int) string { return layerName(l, "self_attn.indexer.k_norm.weight") }},
+	// Every canonical name below is the name the NATIVE non-MLA V4.1 forward
+	// reads (internal/model/v41_forward.go): attention projections at :668-688 /
+	// read :867-872, compressor :352-358 / :407-409, indexer :374-383 / :460-463,
+	// MoE gate + shared experts :689-703 / :873-877.
+	{"attn_q_a.weight", func(l int) string { return layerName(l, "attn.wq_a.weight") }},
+	{"attn_q_b.weight", func(l int) string { return layerName(l, "attn.wq_b.weight") }},
+	{"attn_kv.weight", func(l int) string { return layerName(l, "attn.wkv.weight") }},
+	{"attn_output_a.weight", func(l int) string { return layerName(l, "attn.wo_a.weight") }},
+	{"attn_output_b.weight", func(l int) string { return layerName(l, "attn.wo_b.weight") }},
+	{"attn_sinks.weight", func(l int) string { return layerName(l, "attn.sink") }},
+	{"attn_kv_a_norm.weight", func(l int) string { return layerName(l, "attn.kv_norm.weight") }},
+	{"attn_kv_norm.weight", func(l int) string { return layerName(l, "attn.kv_norm.weight") }},
+	{"exp_probs_b.bias", func(l int) string { return layerName(l, "ffn.gate.e_score_correction_bias") }},
+	{"exp_probs_b_vl.bias", func(l int) string { return layerName(l, "ffn.gate.e_score_correction_bias_vl") }},
+	{"ffn_gate_shexp.weight", func(l int) string { return layerName(l, "ffn.shared_experts.w1.weight") }},
+	{"ffn_up_shexp.weight", func(l int) string { return layerName(l, "ffn.shared_experts.w3.weight") }},
+	{"ffn_down_shexp.weight", func(l int) string { return layerName(l, "ffn.shared_experts.w2.weight") }},
+	{"attn_compressor_gate.weight", func(l int) string { return layerName(l, "attn.compressor.wgate.weight") }},
+	{"attn_compressor_kv.weight", func(l int) string { return layerName(l, "attn.compressor.wkv.weight") }},
+	{"attn_compressor_norm.weight", func(l int) string { return layerName(l, "attn.compressor.norm.weight") }},
+	{"indexer.attn_q_b.weight", func(l int) string { return layerName(l, "indexer.wq_b.weight") }},
+	{"indexer.attn_k.weight", func(l int) string { return layerName(l, "indexer.wk.weight") }},
+	{"indexer.k_norm.weight", func(l int) string { return layerName(l, "indexer.k_norm.weight") }},
+	{"indexer.proj.weight", func(l int) string { return layerName(l, "indexer.weights_proj.weight") }},
+}
+
+// deepSeek41V41NativeSuffixContract is the full V4.1 per-layer suffix -> native
+// canonical map, paired with the exact shape the native forward ADMITS
+// (internal/model/v41_forward.go:652-715). It is the single source of truth for
+// TestDeepSeek41GGUFV41FullNativeSuffixMap, which proves the loader's canonical
+// names are the ones the native admission actually reads (name-for-name), so a
+// loaded GGUF reaches the native non-MLA forward rather than the GLM-DSA MLA one.
+var deepSeek41V41NativeSuffixContract = []struct {
+	suffix string
+	canon  string
+}{
+	{"attn_q_a.weight", "attn.wq_a.weight"},
+	{"attn_q_b.weight", "attn.wq_b.weight"},
+	{"attn_kv.weight", "attn.wkv.weight"},
+	{"attn_output_a.weight", "attn.wo_a.weight"},
+	{"attn_output_b.weight", "attn.wo_b.weight"},
+	{"attn_sinks.weight", "attn.sink"},
+	{"attn_kv_a_norm.weight", "attn.kv_norm.weight"},
+	{"attn_kv_norm.weight", "attn.kv_norm.weight"},
+	{"indexer.attn_q_b.weight", "indexer.wq_b.weight"},
+	{"indexer.attn_k.weight", "indexer.wk.weight"},
+	{"indexer.k_norm.weight", "indexer.k_norm.weight"},
+	{"indexer.proj.weight", "indexer.weights_proj.weight"},
+	{"attn_compressor_gate.weight", "attn.compressor.wgate.weight"},
+	{"attn_compressor_kv.weight", "attn.compressor.wkv.weight"},
+	{"attn_compressor_norm.weight", "attn.compressor.norm.weight"},
+	{"exp_probs_b.bias", "ffn.gate.e_score_correction_bias"},
+	{"ffn_gate_shexp.weight", "ffn.shared_experts.w1.weight"},
+	{"ffn_up_shexp.weight", "ffn.shared_experts.w3.weight"},
+	{"ffn_down_shexp.weight", "ffn.shared_experts.w2.weight"},
+}
+
+// TestDeepSeek41GGUFV41FullNativeSuffixMap binds EVERY V4.1 per-layer suffix the
+// loader maps to the exact canonical name the native non-MLA V4.1 forward reads,
+// at layer 0 and a non-zero layer (7). It is the contract that closes the
+// route bug: the canonical names must reach v41_forward.go's admitted shapes,
+// not the GLM-DSA MLA forward.
+func TestDeepSeek41GGUFV41FullNativeSuffixMap(t *testing.T) {
+	for _, tc := range deepSeek41V41NativeSuffixContract {
+		for _, layer := range []int{0, 7} {
+			ggufName := fmt.Sprintf("blk.%d.%s", layer, tc.suffix)
+			got := canonicalFor(t, ggufName)
+			want := layerName(layer, tc.canon)
+			if got != want {
+				t.Errorf("CanonicalTensorNameArch(%q, deepseek41) = %q, want %q (native forward name)", ggufName, got, want)
+			}
+		}
+	}
 }
 
 // layerName formats a canonical per-layer name for layer l under a suffix.
@@ -1023,11 +1089,11 @@ func TestDeepSeek41GGUFV41SuffixMapEdges(t *testing.T) {
 		if newNorm != legacyNorm {
 			t.Errorf("attn_kv_a_norm canonical = %q, legacy attn_kv_norm canonical = %q; both must resolve to the same kv norm", newNorm, legacyNorm)
 		}
-		if want := "model.layers.0.self_attn.kv_a_layernorm.weight"; newNorm != want {
-			t.Errorf("kv norm canonical = %q, want %q", newNorm, want)
+		if want := "model.layers.0.attn.kv_norm.weight"; newNorm != want {
+			t.Errorf("kv norm canonical = %q, want %q (native non-MLA norm leaf)", newNorm, want)
 		}
-		if proj := "model.layers.0.self_attn.kv_a_proj_with_mqa.weight"; newNorm == proj {
-			t.Errorf("kv norm canonical = %q; a norm must never map to the kv_a projection", proj)
+		if proj := "model.layers.0.attn.wkv.weight"; newNorm == proj {
+			t.Errorf("kv norm canonical = %q; a norm must never map to the kv projection", proj)
 		}
 	})
 
@@ -1054,13 +1120,12 @@ func TestDeepSeek41GGUFV41SuffixMapEdges(t *testing.T) {
 	})
 }
 
-// TestDeepSeek41GGUFV41CompressorStaysForwardClassified is the ticket's required
-// negative arm. The admission functions live in internal/model (a different
-// package), so this is a comment-documented structural assertion instead: the
-// loader map resolving a compressor tensor is NOT sufficient to make the layer
-// admissible, because the compressor canonical names live under the
-// self_attn.compressor.* namespace that the reduced forward's supported tensor
-// set does not contain.
+// TestDeepSeek41GGUFV41CompressorStaysForwardClassified pins that the compressor
+// canonical names land under the attn.compressor.* namespace the native non-MLA
+// V4.1 forward ADMITS and READS (internal/model/v41_forward.go:352-358, :407-409).
+// Resolving an already-admitted name is expected; a name OUTSIDE that namespace
+// would let the tensor fall through unresolved and the native stage could not be
+// wired.
 func TestDeepSeek41GGUFV41CompressorStaysForwardClassified(t *testing.T) {
 	compressorNames := []string{
 		canonicalFor(t, "blk.0.attn_compressor_gate.weight"),
@@ -1068,8 +1133,8 @@ func TestDeepSeek41GGUFV41CompressorStaysForwardClassified(t *testing.T) {
 		canonicalFor(t, "blk.0.attn_compressor_norm.weight"),
 	}
 	for _, name := range compressorNames {
-		if !strings.Contains(name, "self_attn.compressor.") {
-			t.Errorf("compressor canonical name %q is not under the self_attn.compressor.* namespace; a reduced forward could fall through and wrongly admit the stage", name)
+		if !strings.Contains(name, "attn.compressor.") {
+			t.Errorf("compressor canonical name %q is not under the attn.compressor.* namespace the native forward admits", name)
 		}
 	}
 }
@@ -1081,28 +1146,30 @@ func TestDeepSeek41GGUFV41CompressorStaysForwardClassified(t *testing.T) {
 // under the raw attn. namespace. It also re-proves the unknown-suffix arm that
 // guards against the map becoming a catch-all for a non-V4 arch.
 func TestDeepSeek41GGUFV41SuffixMapClassifierConsistency(t *testing.T) {
-	subSelfAttn := []string{
+	// Native namespace: V4.1 tensors live under the raw attn./indexer./ffn.
+	// namespaces the native non-MLA forward reads, never under a generic
+	// self_attn./mlp. fall-through (which would route to the GLM-DSA MLA forward).
+	native := []string{
 		canonicalFor(t, "blk.0.attn_compressor_gate.weight"),
 		canonicalFor(t, "blk.0.attn_compressor_kv.weight"),
 		canonicalFor(t, "blk.0.attn_compressor_norm.weight"),
 		canonicalFor(t, "blk.0.indexer.attn_k.weight"),
 		canonicalFor(t, "blk.0.indexer.k_norm.weight"),
+		canonicalFor(t, "blk.0.attn_q_a.weight"),
+		canonicalFor(t, "blk.0.ffn_gate_shexp.weight"),
 	}
-	for _, name := range subSelfAttn {
-		if !strings.Contains(name, "self_attn.") {
-			t.Errorf("canonical name %q is not under a self_attn. namespace", name)
-		}
+	for _, name := range native {
 		if !strings.HasPrefix(name, "model.layers.0.") {
 			t.Errorf("canonical name %q is not rooted at model.layers.0.", name)
+		}
+		if strings.Contains(name, "self_attn.") || strings.Contains(name, "mlp.") {
+			t.Errorf("canonical name %q landed under a generic self_attn./mlp. namespace; it must route to the native non-MLA forward", name)
 		}
 	}
 
 	sink := canonicalFor(t, "blk.0.attn_sinks.weight")
-	if !strings.Contains(sink, ".attn.") {
-		t.Errorf("attn_sinks canonical name %q is not under the raw attn. namespace", sink)
-	}
-	if strings.Contains(sink, "self_attn.") {
-		t.Errorf("attn_sinks canonical name %q landed under self_attn.; the sink must stay distinguishable", sink)
+	if want := "model.layers.0.attn.sink"; sink != want {
+		t.Errorf("attn_sinks canonical name = %q, want %q (native attn.sink)", sink, want)
 	}
 
 	if got, ok := CanonicalTensorNameArch("blk.0.totally_unknown_suffix.weight", "deepseek41"); ok {
@@ -1112,47 +1179,38 @@ func TestDeepSeek41GGUFV41SuffixMapClassifierConsistency(t *testing.T) {
 
 // TestDeepSeek41GGUFV41SuffixesDoNotLeakToSiblings is the ticket #13112 negative
 // arm: the V4.1 arms are reached ONLY inside the deepseek41 branch of
-// CanonicalTensorNameArch (gated on archIsDeepSeek41). A sibling arch must
-// therefore resolve no suffix that the V4.1 branch ALONE introduced.
+// CanonicalTensorNameArch (gated on archIsDeepSeek41). Two precise invariants:
 //
-// Fence: an arch that reaches the shared glm_moe_dsa MLA+MoE map
-// (archUsesMLAMoELayout: glm_moe_dsa, deepseek2) legitimately resolves the three
-// suffixes that map ALREADY shares with V4.1 — attn_kv_a_norm.weight,
-// indexer.attn_k.weight, indexer.k_norm.weight. That coverage PREDATES #13112
-// (glmGGUFAttnKVANorm / glmGGUFIndexerWK / glmGGUFIndexerKNorm), so it is not a
-// leak this ticket introduced; asserting ok=false for those would pin a
-// pre-existing sibling behavior this ticket has no scope to change. The five
-// suffixes UNIQUE to V4.1 must stay refused by every sibling, and llama/qwen2
-// (which do not reach the glm map) must refuse all eight.
+//  1. A non-MLA sibling (llama, qwen2) must resolve NONE of the V4.1 suffixes
+//     (they reach neither the V4.1 branch nor the glm MLA map).
+//  2. A sibling that reaches the shared glm_moe_dsa MLA map (deepseek2,
+//     glm_moe_dsa) may resolve the suffixes that map already carries (a
+//     pre-existing coverage PREDATING this ticket ΓÇö attn_q_a/attn_q_b/
+//     attn_kv_a_norm/shared experts/indexer, etc.), but must NEVER produce the
+//     V4.1 NATIVE leaf (attn.wq_a.weight, attn.wkv.weight, attn.kv_norm.weight,
+//     attn.sink, ffn.shared_experts.w1.weight, indexer.wq_b.weight, ΓÇª). The
+//     deepseek41 branch is the ONLY place those names may be produced; a sibling
+//     emitting one is the leak this test forbids.
 func TestDeepSeek41GGUFV41SuffixesDoNotLeakToSiblings(t *testing.T) {
-	// Suffixes the shared glm_moe_dsa/deepseek2 map already carries at base.
-	sharedWithSiblingMLA := map[string]bool{
-		"attn_kv_a_norm.weight": true,
-		"indexer.attn_k.weight": true,
-		"indexer.k_norm.weight": true,
-	}
 	siblings := []string{"llama", "qwen2", "deepseek2", "glm_moe_dsa"}
 	for _, sibling := range siblings {
 		t.Run(sibling, func(t *testing.T) {
+			reachesGlmMLA := sibling == "deepseek2" || sibling == "glm_moe_dsa"
 			for _, tc := range deepSeek41V41RealSuffixes {
 				ggufName := "blk.0." + tc.suffix
 				got, ok := CanonicalTensorNameArch(ggufName, sibling)
 				if !ok {
 					continue // refused: the strongest form of no-leak
 				}
-				reachesGlmMLA := sibling == "deepseek2" || sibling == "glm_moe_dsa"
-				if reachesGlmMLA && sharedWithSiblingMLA[tc.suffix] {
-					// Pre-existing sibling coverage, not a #13112 leak. Pin the
-					// canonical it must keep producing so a future refactor that
-					// silently re-routes it is still caught.
-					if want := tc.want(0); got != want {
-						t.Errorf("sibling %q resolved shared suffix %q to %q, want %q",
-							sibling, tc.suffix, got, want)
-					}
+				if !reachesGlmMLA {
+					t.Errorf("V4.1 suffix LEAKED into non-MLA sibling %q: CanonicalTensorNameArch(%q, %q) = %q, want ok=false",
+						sibling, ggufName, sibling, got)
 					continue
 				}
-				t.Errorf("V4.1 arm LEAKED into sibling arch %q: CanonicalTensorNameArch(%q, %q) = %q, want ok=false; the deepseek41 branch must stay gated on archIsDeepSeek41",
-					sibling, ggufName, sibling, got)
+				if native := tc.want(0); got == native {
+					t.Errorf("sibling %q resolved %q to the V4.1 NATIVE canonical %q; only the deepseek41 branch may produce native leaves",
+						sibling, ggufName, got)
+				}
 			}
 		})
 	}
@@ -1318,6 +1376,11 @@ func TestDeepSeek41GGUFV41RealArtifactMLADims(t *testing.T) {
 	} {
 		delete(meta, k)
 	}
+	// The real artifact ships head_count=64: attn_q_b out 32768 / 64 = 512 per-head
+	// (qk_nope 448 + qk_rope 64), which AGREES with attention.key_length. The
+	// arbiter in applyDeepSeek41Config therefore admits the unsuffixed fallback.
+	meta[p+"attention.head_count"] = Value{Type: TypeUint64, Value: uint64(64)}
+	meta[p+"attention.head_count_kv"] = Value{Type: TypeUint64, Value: uint64(64)}
 	meta[p+"attention.key_length"] = Value{Type: TypeUint64, Value: uint64(512)}
 	meta[p+"attention.value_length"] = Value{Type: TypeUint64, Value: uint64(512)}
 	meta[p+"rope.dimension_count"] = Value{Type: TypeUint64, Value: uint64(64)}
@@ -1387,5 +1450,66 @@ func TestDeepSeek41GGUFMLADimsPreferExplicitKeys(t *testing.T) {
 	}
 	if cfg.KVLoraRank != 576 {
 		t.Errorf("KVLoraRank = %d, want 576 (explicit key beats tensor-shape 512)", cfg.KVLoraRank)
+	}
+}
+
+// TestDeepSeek41GGUFLatentKeyLengthDialectFailsClosed pins the residual raised by
+// the cross-validator on 9a4cfc973 (#13244): attention.key_length is
+// dialect-dependent. The V4.1 artifact ships the PER-HEAD qk width there (512 =
+// qk_nope 448 + qk_rope 64), but a GLM-style deepseek41-branded file carries the
+// LATENT key dim (576) with no *_mla key to disambiguate. Subtracting rope from
+// the latent value yields a plausible-but-wrong per-head width (512 rather than
+// 256), silently mis-shaping the KV cache / kv_b split -- a wrong-number failure,
+// not a fail-closed refusal.
+//
+// The artifact's own attn_q_b.weight out-dim is the arbiter: it equals
+// num_heads * (qk_nope + qk_rope). A concat width that disagrees with it must be
+// refused with a named error naming attention.key_length.
+func TestDeepSeek41GGUFLatentKeyLengthDialectFailsClosed(t *testing.T) {
+	const p = "deepseek41."
+	meta := ds41Meta("deepseek41")
+	// Model a GLM-style latent dialect: drop the *_mla and qk_* disambiguators the
+	// synthetic fixture carries, and write the LATENT key dim (576) under the
+	// unsuffixed key -- the value a latent-semantics artifact would ship.
+	for _, k := range []string{
+		p + "attention.kv_lora_rank",
+		p + "attention.key_length_mla",
+		p + "attention.value_length_mla",
+		p + "attention.qk_nope_head_dim",
+		p + "attention.qk_rope_head_dim",
+	} {
+		delete(meta, k)
+	}
+	meta[p+"attention.key_length"] = Value{Type: TypeUint64, Value: uint64(576)}
+	meta[p+"attention.value_length"] = Value{Type: TypeUint64, Value: uint64(576)}
+	meta[p+"rope.dimension_count"] = Value{Type: TypeUint64, Value: uint64(64)}
+	meta[p+"attention.head_count"] = Value{Type: TypeUint64, Value: uint64(64)}
+	meta[p+"attention.head_count_kv"] = Value{Type: TypeUint64, Value: uint64(64)}
+	f := &File{
+		Metadata: meta,
+		Tensors: []TensorInfo{
+			{Name: "blk.0.attn_kv.weight", Dims: []uint64{5120, 512}, Type: TensorF32},
+			{Name: "blk.0.attn_kv_a_norm.weight", Dims: []uint64{512}, Type: TensorF32},
+			{Name: "blk.0.attn_q_a.weight", Dims: []uint64{5120, 1280}, Type: TensorF32},
+			// num_heads(64) * per-head(256 nope + 64 rope) = 20480: the artifact's
+			// own ground truth, which the latent reading (kl=576 -> 512) contradicts.
+			{Name: "blk.0.attn_q_b.weight", Dims: []uint64{1280, 20480}, Type: TensorF32},
+		},
+	}
+	cfg, err := f.Config()
+	if err != nil {
+		// A named refusal is an acceptable outcome; it must name the key.
+		if !strings.Contains(err.Error(), ds41KeyKeyLength) {
+			t.Fatalf("refusal does not name %s: %v", ds41KeyKeyLength, err)
+		}
+		return
+	}
+	// If it resolved, it must have used the artifact ground truth (per-head 320 =
+	// 256 nope + 64 rope), not the latent-derived 512.
+	if cfg.QKNopeHeadDim != 256 {
+		t.Errorf("QKNopeHeadDim = %d, want 256 (attn_q_b out-dim 40960/128 - rope 64): the latent key_length 576 was misread as a per-head width", cfg.QKNopeHeadDim)
+	}
+	if cfg.HeadDim != 320 {
+		t.Errorf("HeadDim = %d, want 320 (qk_nope 256 + qk_rope 64)", cfg.HeadDim)
 	}
 }

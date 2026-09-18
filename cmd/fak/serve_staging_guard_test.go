@@ -530,3 +530,68 @@ func TestServeDeviceStagingStreamedBoundedTransitAdmitsWhereWholeTotalRefuses(t 
 		t.Fatalf("legacy refusal scope = %q, want %q", fe.Scope, compute.MemoryScopeHost)
 	}
 }
+
+// serve_staging_guard_test.go (fak#13247) - the COMBINED host working-set sum. The streamed-expert
+// resident bound (gguf-host-expert-offload-streamed) and the bounded-dense staging working set
+// (gguf-host-dense-streamed) are BOTH simultaneously resident in host RAM. Deriving each independently
+// as (1-margin)*avail admitted their SUM at up to ~1.8*avail: the [HW-WITNESSED] strix3 run had a
+// 48.65 GiB host budget, a 43.788 GiB expert bound AND a 43.788 GiB dense bound in one serve, and the
+// kernel OOM-killed it at 57.8G peak / 28.1G swap before the forward. serveCombinedStreamedDenseResidentBound
+// must size the dense bound from the budget REMAINING after the expert bound, so the two together land
+// strictly below the budget.
+
+// The combined dense bound is the post-expert remainder less the resident margin, STRICTLY below the
+// remainder, and the two working sets sum strictly below the host budget.
+func TestServeCombinedStreamedDenseResidentBoundSumsBelowBudget(t *testing.T) {
+	const gib = int64(1) << 30
+	hostFit := serveFitBudget{Base: 48*gib + 654<<20, Headroom: 0} // strix3 48.654 GiB host budget
+	expertBound := serveCPUOffloadStreamedResidentBound(hostFit)
+
+	// The historical independent derivation: both at (1-margin)*avail, summing ABOVE the budget.
+	if expertBound+expertBound <= hostFit.avail() {
+		t.Fatalf("fixture premise broken: independent bounds %d + %d do not exceed avail %d", expertBound, expertBound, hostFit.avail())
+	}
+
+	combined := serveCombinedStreamedDenseResidentBound(hostFit, expertBound)
+	if combined >= expertBound {
+		t.Fatalf("combined dense bound = %d, want STRICTLY below the independent bound %d", combined, expertBound)
+	}
+	if combined < 0 {
+		t.Fatalf("combined dense bound = %d, want non-negative", combined)
+	}
+	if expertBound+combined >= hostFit.avail() {
+		t.Fatalf("expert %d + combined dense %d = %d, want STRICTLY below avail %d", expertBound, combined, expertBound+combined, hostFit.avail())
+	}
+
+	// A non-positive remainder (expert bound at or above avail) yields stream-through, never negative.
+	if got := serveCombinedStreamedDenseResidentBound(hostFit, hostFit.avail()); got != 0 {
+		t.Fatalf("expert bound at avail -> dense bound = %d, want 0 (stream-through)", got)
+	}
+	if got := serveCombinedStreamedDenseResidentBound(hostFit, hostFit.avail()+gib); got != 0 {
+		t.Fatalf("expert bound above avail -> dense bound = %d, want 0 (stream-through)", got)
+	}
+	// An unprobeable host yields zero, exactly as every other bound here.
+	if got := serveCombinedStreamedDenseResidentBound(serveFitBudget{}, expertBound); got != 0 {
+		t.Fatalf("unprobeable host -> dense bound = %d, want 0", got)
+	}
+	// A negative expert bound clamps to zero rather than inflating the remainder.
+	if got := serveCombinedStreamedDenseResidentBound(hostFit, -gib); got != combineWantDenseBound(hostFit, 0) {
+		t.Fatalf("negative expert bound -> dense bound = %d, want the zero-expert form", got)
+	}
+}
+
+// combineWantDenseBound mirrors the remainder arithmetic for the negative-clamp assertion.
+func combineWantDenseBound(fit serveFitBudget, expertBound int64) int64 {
+	remaining := fit.avail() - expertBound
+	if remaining <= 0 {
+		return 0
+	}
+	bound := int64(float64(remaining) * (1 - serveCPUOffloadStreamedResidentMargin))
+	if bound >= remaining {
+		bound = remaining - 1
+	}
+	if bound < 0 {
+		return 0
+	}
+	return bound
+}

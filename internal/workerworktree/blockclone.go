@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 )
 
 const (
@@ -20,6 +21,15 @@ const (
 // ErrBlockCloneUnsupported reports that the host platform or filesystem cannot
 // provide copy-on-write block/directory cloning, so callers should fall back.
 var ErrBlockCloneUnsupported = errors.New("block clone unsupported")
+
+// treeCloneFastPath counts how many block-clone materializations used the
+// whole-tree native clone fast path instead of the per-file fallback loop.
+var treeCloneFastPath atomic.Int64
+
+// TreeCloneFastPathCount returns the number of materializations that took the
+// whole-tree native clone fast path. It exists so tests can witness the fast
+// path was exercised.
+func TreeCloneFastPathCount() int64 { return treeCloneFastPath.Load() }
 
 // CloneTree clones the directory tree at src to dst using the host's native
 // copy-on-write clone primitive when available.
@@ -113,14 +123,16 @@ func copyFileBytes(src, dst string, perm os.FileMode) error {
 
 type blockCloneProbe func(targetRoot string) error
 type blockCloneFile func(src, dst string) error
+type blockCloneTree func(src, dst string) error
 
 type blockClone struct {
-	probe blockCloneProbe
-	clone blockCloneFile
+	probe     blockCloneProbe
+	clone     blockCloneFile
+	treeClone blockCloneTree
 }
 
 func newBlockCloneBackend() blockClone {
-	return blockClone{probe: probeBlockClone, clone: cloneFileBlocks}
+	return blockClone{probe: probeBlockClone, clone: cloneFileBlocks, treeClone: CloneTree}
 }
 
 var _ ownedIsolationBackend = blockClone{}
@@ -211,6 +223,243 @@ func (b blockClone) materialize(root, lane, key, baseSHA, wtRoot string, git Git
 		return Result{OK: false, Path: wt, BaseSHA: base, Reason: reason}
 	}
 
+	// Whole-tree native clone fast path: only valid when the working tree is
+	// perfectly clean, because CloneTree copies the working tree verbatim and
+	// is equivalent to the committed base only with no dirty tracked files and
+	// no untracked files. Any dirt (or any decline) falls through to the
+	// per-file loop below, which reconciles each blob against the base tree.
+	if res, handled := b.materializeTreeClone(root, base, wt, git, fail); handled {
+		return res
+	}
+
+	return b.materializePerFile(root, base, wt, git, fail)
+}
+
+// treeCloneClean reports whether root's working tree can be cloned verbatim and
+// still be byte-equivalent to the committed base tree. It is strictly stronger
+// than "status is clean": a plain `git status --porcelain` empty output is NOT
+// sufficient because (1) ignored files still clone verbatim, (2) clean/smudge
+// and text=auto content filters make working bytes differ from the blob while
+// status reads clean, and (3) assume-unchanged/skip-worktree bits hide dirt from
+// status. Any git failure declines the fast path (fail-closed to the per-file
+// loop, which reconciles each blob against the base).
+func treeCloneClean(root string, git GitRunner) bool {
+	// (1) No tracked dirt, no untracked paths, and no ignored paths. Adding
+	// --ignored closes the hole where a gitignored file inside a tracked
+	// top-level tree would be cloned verbatim (status alone does not list it).
+	rc, out := run(git, root, []string{"status", "--porcelain=v1", "--untracked-files=all", "--ignored"})
+	if rc != 0 || strings.TrimSpace(out) != "" {
+		return false
+	}
+
+	// (2) No assume-unchanged / skip-worktree entries. `git ls-files -v` tags
+	// normal tracked files with an uppercase 'H' followed by a space; any other
+	// tag (lowercase h/s/S, etc.) marks assume-valid/skip-worktree, which hides
+	// dirt from status and would let the fast path clone the dirty bytes.
+	rc, listed := run(git, root, []string{"ls-files", "-v"})
+	if rc != 0 {
+		return false
+	}
+	for _, line := range strings.Split(listed, "\n") {
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "H ") {
+			return false
+		}
+	}
+
+	// (3) No byte-transforming content attribute on any tracked file, and no
+	// global eol policy. A clean/smudge filter, an eol/text attribute, or a
+	// working-tree-encoding attribute, or a core.autocrlf / core.eol config
+	// makes the working-tree bytes differ from the committed blob even though
+	// status reads clean; cloning the working bytes would materialize content
+	// that is not the base object. Decline any global eol policy first. A
+	// `config --get` on an unset key exits non-zero: that is a normal unset
+	// (continue), not a git failure.
+	rc, autocrlf := run(git, root, []string{"config", "--get", "core.autocrlf"})
+	if rc == 0 {
+		if v := strings.TrimSpace(autocrlf); v != "" && v != "false" {
+			return false
+		}
+	}
+	rc, eol := run(git, root, []string{"config", "--get", "core.eol"})
+	if rc == 0 && strings.TrimSpace(eol) != "" {
+		return false
+	}
+
+	rc, tracked := run(git, root, []string{"ls-files", "-z"})
+	if rc != 0 {
+		return false
+	}
+	var paths []string
+	for _, p := range strings.Split(tracked, "\x00") {
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	if len(paths) == 0 {
+		return true
+	}
+	// check-attr's `-z` output is NUL-separated triples:
+	// <path>\0<attribute>\0<value>\0. All four byte-transforming attributes are
+	// queried in one call per batch; any value other than the literal
+	// "unspecified" is active and unsound. Argument lists can be large, so batch
+	// the paths to stay well under the OS argv limit.
+	const checkAttrBatch = 500
+	for start := 0; start < len(paths); start += checkAttrBatch {
+		end := start + checkAttrBatch
+		if end > len(paths) {
+			end = len(paths)
+		}
+		args := append([]string{"check-attr", "-z", "text", "eol", "filter", "working-tree-encoding", "--"}, paths[start:end]...)
+		rc, attrs := run(git, root, args)
+		if rc != 0 {
+			return false
+		}
+		fields := strings.Split(attrs, "\x00")
+		for i := 0; i+2 < len(fields); i += 3 {
+			if fields[i+2] != "unspecified" {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// materializeTreeClone attempts the whole-tree native clone fast path for a
+// clean working tree. The returned handled flag means "final": handled=true
+// carries a Result materialize must return directly (success, or an
+// unrecoverable partial-materialization failure), and handled=false means a
+// clean decline for materialize to run the per-file fallback loop. A decline
+// has no side effects on wt: it is rolled back to the state git worktree add
+// created (empty except .git) for the fallback to fill.
+func (b blockClone) materializeTreeClone(root, base, wt string, git GitRunner, fail func(string) Result) (Result, bool) {
+	if !treeCloneClean(root, git) {
+		return Result{}, false
+	}
+	treeClone := b.treeClone
+	if treeClone == nil {
+		treeClone = CloneTree
+	}
+
+	rc, listing := run(git, root, []string{"ls-tree", "-z", "--full-tree", base})
+	if rc != 0 {
+		return Result{}, false
+	}
+	type topEntry struct {
+		mode string
+		typ  string
+		name string
+	}
+	var entries []topEntry
+	for _, record := range strings.Split(listing, "\x00") {
+		if record == "" {
+			continue
+		}
+		tab := strings.IndexByte(record, '\t')
+		if tab < 0 {
+			return Result{}, false
+		}
+		fields := strings.Fields(record[:tab])
+		if len(fields) != 3 {
+			return Result{}, false
+		}
+		entries = append(entries, topEntry{mode: fields[0], typ: fields[1], name: record[tab+1:]})
+	}
+
+	staging, err := os.MkdirTemp(filepath.Dir(wt), ".fak-treeclone-")
+	if err != nil {
+		return Result{}, false
+	}
+	defer os.RemoveAll(staging)
+
+	for _, entry := range entries {
+		name := filepath.FromSlash(entry.name)
+		src := filepath.Join(root, name)
+		dst := filepath.Join(staging, name)
+		switch entry.typ {
+		case "tree":
+			if err := treeClone(src, dst); err != nil {
+				return Result{}, false
+			}
+		case "blob":
+			info, err := os.Lstat(src)
+			if err != nil || !info.Mode().IsRegular() {
+				return Result{}, false
+			}
+			if info.Size() == 0 {
+				f, createErr := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
+				if createErr == nil {
+					createErr = f.Close()
+				}
+				if createErr != nil {
+					return Result{}, false
+				}
+			} else if err := b.clone(src, dst); err != nil {
+				return Result{}, false
+			}
+			if entry.mode == "100755" {
+				_ = os.Chmod(dst, 0o755)
+			}
+		default:
+			// Submodule gitlinks and any unexpected entry type are not cloned
+			// correctly by CloneTree; decline to the per-file loop.
+			return Result{}, false
+		}
+	}
+
+	// Move staged top-level entries into wt, which is empty except for .git.
+	// Same parent directory, so each move is a rename. A failure mid-loop would
+	// leave wt partially populated and break the per-file fallback (whose clone
+	// is O_EXCL-style), so roll back every entry already moved before declining.
+	staged, err := os.ReadDir(staging)
+	if err != nil {
+		return Result{}, false
+	}
+	var moved []string
+	rollbackMoved := func() bool {
+		ok := true
+		for i := len(moved) - 1; i >= 0; i-- {
+			name := moved[i]
+			if err := os.Rename(filepath.Join(wt, name), filepath.Join(staging, name)); err != nil {
+				ok = false
+			}
+		}
+		return ok
+	}
+	for _, entry := range staged {
+		name := entry.Name()
+		if err := os.Rename(filepath.Join(staging, name), filepath.Join(wt, name)); err != nil {
+			if !rollbackMoved() {
+				// wt is partially materialized and cannot be restored; the
+				// per-file loop would fail on the already-present entries, so
+				// do not decline. Report a truthful final failure and let the
+				// fail closure ForceReap the partial worktree, so materialize
+				// never falls through to a Reused git-worktree over live wt.
+				return fail("tree-clone partial materialization in " + wt + "; rollback failed"), true
+			}
+			return Result{}, false
+		}
+		moved = append(moved, name)
+	}
+
+	if rc, out := run(git, wt, []string{"reset", "--mixed", base}); rc != 0 {
+		// The whole tree is already moved into wt, so this is NOT a clean
+		// decline: the per-file fallback would collide with the populated wt.
+		// Report a truthful final failure; ForceReap removes the partial wt so
+		// materialize returns a failed Result instead of a Reused git-worktree.
+		return fail("tree-clone reset after materialization failed: " + tail(out, 200)), true
+	}
+	treeCloneFastPath.Add(1)
+	return Result{OK: true, Path: wt, BaseSHA: base, Detail: "tree-clone fast path"}, true
+}
+
+// materializePerFile is the fallback: it walks the base tree blob-by-blob,
+// reconciling each working-tree file against its committed object (dirty or
+// missing paths are force-checked-out from base) and block-cloning the clean
+// remainder. It is the original materialization loop, retained byte-for-byte.
+func (b blockClone) materializePerFile(root, base, wt string, git GitRunner, fail func(string) Result) Result {
 	rc, listing := run(git, root, []string{"ls-tree", "-r", "-z", "--full-tree", base})
 	if rc != 0 {
 		return fail("git ls-tree failed")

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -298,6 +299,8 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	kvPrecision := fs.String("kv-precision", "", "KV cache storage tier: f32 (default, exact) or q8_0 (dense mixed: f32 pre-RoPE K + q8_0 K/V; ~2x more context). Also settable via FAK_UP_KV_PRECISION.")
 	engineID := fs.String("engine", "inkernel", "model engine ID (default inkernel; mock only with --mock)")
 	gpuIdleExit := fs.Duration("gpu-idle-exit", defaultGPUIdleExit, "stop the resident server after this idle window (no in-flight request) so its GPU lease and model residency are released for a queued peer (e.g. modelbench, #13135); 0 keeps the historical process-lifetime holder")
+	maxRSS := fs.Uint64("max-rss", 0, "stop the resident server when its own RSS stays above this many bytes for --max-rss-sustain, so an unbounded-growth process cannot drive the host into swap exhaustion (launchd KeepAlive then restarts a fresh process); 0 disables the guard (historical unbounded holder). Env: FAK_UP_MAX_RSS")
+	maxRSSSustain := fs.Duration("max-rss-sustain", defaultMemGuardSustain, "how long RSS must stay above --max-rss before the guard stops the server; absorbs the model-load high-water")
 
 	if err := fs.Parse(argv); err != nil {
 		os.Exit(2)
@@ -343,6 +346,14 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 		if allocated < memoryBytes {
 			plan.HeadroomBytes = memoryBytes - allocated
 			plan.HeadroomRatio = float64(plan.HeadroomBytes) / float64(memoryBytes)
+		}
+	}
+
+	if *maxRSS == 0 {
+		if v := strings.TrimSpace(os.Getenv("FAK_UP_MAX_RSS")); v != "" {
+			if n, err := strconv.ParseUint(v, 10, 64); err == nil {
+				*maxRSS = n
+			}
 		}
 	}
 
@@ -401,6 +412,7 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 		ver += " (" + id + ")"
 	}
 	server.armGPUIdleExit(*gpuIdleExit)
+	server.armMemGuard(*maxRSS, *maxRSSSustain)
 	printTurnkeyReady(stdout, ver, server.Addr(), plan)
 	printTurnkeyBackendStamp(stdout, server.metalDecision, metalResidencyStampFrom(server.liveResidencyReport()))
 	if *gpuIdleExit > 0 {
@@ -466,6 +478,11 @@ type turnkeyServer struct {
 	// lease and model residency are released instead of pinned for the process
 	// lifetime (#13135). Nil preserves the historical lifetime holder.
 	idleExit *gpuIdleExitGovernor
+	// memGuard stops the resident server when its own RSS stays above a ceiling
+	// for a sustained window, so an unbounded-growth process cannot drive the
+	// host into the compressor/swap cascade that the macOS 27B turnkey incident
+	// exhibited. Nil preserves the historical unbounded holder.
+	memGuard *memGuardGovernor
 	// stop triggers the bounded stop from the idle governor; done is closed when
 	// the stop has been requested so the run loop can return through the same
 	// graceful-shutdown path a SIGTERM drives.
@@ -555,6 +572,20 @@ func (s *turnkeyServer) armGPUIdleExit(idle time.Duration) {
 	s.mu.Unlock()
 }
 
+// armMemGuard installs the bounded memory guard. A zero limit disables it,
+// preserving the historical unbounded holder. It is a no-op when the server has
+// no stop wired.
+func (s *turnkeyServer) armMemGuard(limit uint64, sustain time.Duration) {
+	if s == nil || s.stop == nil || limit == 0 {
+		return
+	}
+	s.mu.Lock()
+	s.memGuard = newMemGuardGovernor(limit, defaultMemGuardInterval, sustain, processRSSBytes, s.stop, func(format string, args ...any) {
+		fmt.Fprintf(os.Stderr, format+"\n", args...)
+	})
+	s.mu.Unlock()
+}
+
 func (s *turnkeyServer) Plan() macfit.TurnkeyProfile {
 	return s.plan
 }
@@ -567,8 +598,10 @@ func (s *turnkeyServer) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
 	s.stopping = true
 	idleExit := s.idleExit
+	memGuard := s.memGuard
 	s.mu.Unlock()
 	idleExit.close()
+	memGuard.close()
 	err := s.httpServer.Shutdown(ctx)
 	if err == nil {
 		s.requestResidencyRelease()
@@ -582,8 +615,10 @@ func (s *turnkeyServer) Close() error {
 	s.mu.Lock()
 	s.stopping = true
 	idleExit := s.idleExit
+	memGuard := s.memGuard
 	s.mu.Unlock()
 	idleExit.close()
+	memGuard.close()
 	err := s.httpServer.Close()
 	if err == nil {
 		s.requestResidencyRelease()

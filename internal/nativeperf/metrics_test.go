@@ -111,6 +111,68 @@ func TestReceiptMetricsConcurrentObserveAndScrape(t *testing.T) {
 	}
 }
 
+func TestReceiptMetricsRecognizesVulkanBackend(t *testing.T) {
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	m := NewReceiptMetrics(time.Minute)
+
+	// A served Strix Halo (gfx1151) Vulkan receipt projects honestly as
+	// backend="vulkan" with evidence_class="vulkan" instead of the generic
+	// "other" fallback. The receipt carries no Metal/CUDA device-identity
+	// artifacts, so the class must come from the backend itself, not from
+	// inferred device proof.
+	vk := fixtureNativeReceipt()
+	vk.Backend = "vulkan"
+	vk.ForwardPath = "vulkan/qwen35-gdn-ssm-decode-v1"
+	vk.Qwen35MetalForwardSequence = nil
+	vk.Qwen35MetalStateIdentity = nil
+	if ok := m.Observe(vk, now); !ok {
+		t.Fatal("Observe rejected a supported native Vulkan receipt")
+	}
+
+	out := m.Prometheus(now)
+	want := `fak_native_receipt_requests_total{engine="inkernel",backend="vulkan",forward_path="qwen_vulkan",evidence_class="vulkan"} 1`
+	if !strings.Contains(out, want) {
+		t.Fatalf("vulkan receipt not projected with its own backend/evidence class:\nwant %q\ngot:\n%s", want, out)
+	}
+	if strings.Contains(out, `evidence_class="other"`) {
+		t.Fatalf("vulkan receipt leaked into the generic other bucket:\n%s", out)
+	}
+
+	// The existing metal/cuda/cpu projections must not change.
+	if cl := nativeReceiptEvidenceClass(fixtureNativeReceipt()); cl != "device" {
+		t.Fatalf("metal device receipt evidence class = %q, want device", cl)
+	}
+	cpu := fixtureNativeReceipt()
+	cpu.Backend = "cpu"
+	cpu.ForwardPath = "cpu/reference"
+	cpu.Qwen35MetalForwardSequence = nil
+	cpu.Qwen35MetalStateIdentity = nil
+	if cl := nativeReceiptEvidenceClass(cpu); cl != "measured" {
+		t.Fatalf("cpu receipt evidence class = %q, want measured", cl)
+	}
+}
+
+func TestPhaseReceiptMetricsRecognizesVulkanBackend(t *testing.T) {
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	m := NewReceiptMetrics(time.Minute)
+
+	recorder := NewPhaseRecorder("inkernel", "vulkan", "vulkan/qwen35-gdn-ssm-decode-v1", 10*time.Millisecond)
+	_ = recorder.Add(PhaseKernel, "", 0, 5*time.Millisecond, WorkActive)
+	_ = recorder.Add(PhaseDecode, "", 5*time.Millisecond, 10*time.Millisecond, WorkActive)
+	p, err := recorder.Finalize(0)
+	if err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	if ok := m.ObservePhases(p, now); !ok {
+		t.Fatal("ObservePhases rejected a Vulkan phase receipt")
+	}
+
+	out := m.Prometheus(now)
+	if !strings.Contains(out, `evidence_class="vulkan"`) {
+		t.Fatalf("vulkan phase receipt not projected with evidence_class=vulkan:\n%s", out)
+	}
+}
+
 func fixtureNativeReceipt() *model.NativeInferenceReceipt {
 	return &model.NativeInferenceReceipt{
 		TokenIDs:       []int{1, 2, 3},

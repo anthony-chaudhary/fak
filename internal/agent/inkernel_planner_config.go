@@ -46,6 +46,16 @@ type InKernelPlannerConfig struct {
 	CompactHistoryBudget      int
 	ElideStaleReads           bool
 	DeferColdTools            bool
+	// RadixBudgetTokens bounds the process-scoped RadixAttention prefix cache to
+	// this many cached tokens. A negative value keeps the historical unbounded
+	// default (0 == unbounded); zero derives the bound from ContextTokens (see
+	// resolveInKernelRadixBudgetTokens). It exists so a long-running resident
+	// server (turnkey `fak up`) bounds the deep-chain footprint without an
+	// operator env: radixkv stores the FULL-prefix KV per node, so an unbounded
+	// tree accumulates nested KV clones on every turn of a growing conversation
+	// (see the MEMORY NOTE on InKernelPlanner.tree). FAK_INKERNEL_RADIX_BUDGET
+	// still wins whenever it is set, for callers that never set this field.
+	RadixBudgetTokens int
 	// BatchDecode opts this planner into the continuous-batch decode wiring
 	// (#401/#1590) at construction time instead of relying on the process-wide
 	// FAK_INKERNEL_BATCH env. It is the programmatic seam the turnkey `fak up`
@@ -101,7 +111,7 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 	// host DSA state and Qwen3.5/3.6's attention plus recurrent backend state.
 	if os.Getenv("FAK_INKERNEL_RADIX") != "off" && inKernelPlannerPrefixReuseSupported(m, backend) {
 		p.tree = radixkv.NewWithTierBudgetsAndEvictionPolicy(
-			envInt("FAK_INKERNEL_RADIX_BUDGET", 0),
+			resolveInKernelRadixBudgetTokens(cfg, contextTokensForRadixBudget(cfg, m)),
 			envInt64("FAK_INKERNEL_RADIX_SNAPSHOT_BYTES", 0),
 			envInt64("FAK_INKERNEL_RADIX_HOST_L2_BYTES", 0),
 			inKernelRadixEvictionPolicyFromEnv(),
@@ -227,6 +237,66 @@ func (p *InKernelPlanner) noteKVPrefixAdmitted() {
 		return
 	}
 	p.kvPrefixEverAdmitted.Store(true)
+}
+
+// contextTokensForRadixBudget picks the finite context ceiling the radix budget
+// default is derived from: the planner's explicit ContextTokens when set,
+// otherwise the model's declared context window. Both unknown (zero) means there
+// is no honest finite ceiling to derive, so the caller falls back to the
+// historical unbounded default via resolveInKernelRadixBudgetTokens.
+func contextTokensForRadixBudget(cfg InKernelPlannerConfig, m *model.Model) int {
+	configured := cfg.ContextTokens
+	declared := 0
+	if m != nil {
+		declared = m.Cfg.MaxPositionEmbeddings
+	}
+	switch {
+	case configured > 0 && declared > 0 && configured < declared:
+		return configured
+	case declared > 0:
+		return declared
+	case configured > 0:
+		return configured
+	default:
+		return 0
+	}
+}
+
+// resolveInKernelRadixBudgetTokens resolves the RadixAttention prefix-cache token
+// budget with precedence:
+//
+//  1. FAK_INKERNEL_RADIX_BUDGET when set (>= 0) — the historical operator knob
+//     still wins for every caller, so an explicit env cannot be silently
+//     overridden by this new default.
+//  2. cfg.RadixBudgetTokens when negative (keep-unbounded) or positive (explicit).
+//  3. Otherwise, when a finite context ceiling is known, bound the tree to ONE
+//     full context of cached prefix tokens. This is the leak fix: an unbounded
+//     tree stores the FULL-prefix KV per node, so a resident server that serves a
+//     long, growing conversation accumulates nested KV clones without limit. One
+//     context's worth of cached prefix preserves the maximal-reuse win for the
+//     common case (a static system+tool prefix reused turn after turn) while
+//     making the deep-chain footprint bounded and predictable.
+//  4. No finite ceiling known (contextTokens == 0): 0 == unbounded, preserving
+//     the historical default for a planner that cannot state a bound.
+//
+// It is pure and independent of env for the returned-value witnesses; the only
+// env read is the documented operator override in step 1.
+func resolveInKernelRadixBudgetTokens(cfg InKernelPlannerConfig, contextTokens int) int {
+	if v, ok := os.LookupEnv("FAK_INKERNEL_RADIX_BUDGET"); ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n >= 0 {
+			return n
+		}
+	}
+	if cfg.RadixBudgetTokens < 0 {
+		return 0
+	}
+	if cfg.RadixBudgetTokens > 0 {
+		return cfg.RadixBudgetTokens
+	}
+	if contextTokens > 0 {
+		return contextTokens
+	}
+	return 0
 }
 
 func inKernelRadixEvictionPolicyFromEnv() radixkv.EvictionPolicy {
