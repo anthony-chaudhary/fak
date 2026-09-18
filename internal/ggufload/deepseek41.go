@@ -866,11 +866,14 @@ func deepseek41EngramSuffixName(suffix string) (string, bool) {
 // header at HiddenSize H=5120, hc_mult=4:
 //
 //	blk.<L>.hc_attn_base.weight  [24]           F32
-//	blk.<L>.hc_attn_fn.weight    [HCMult*H, 24] F32  (20480 = 4*H)
+//	blk.<L>.hc_attn_fn.weight    [20480, 24]    Q2_K (4*H = 20480)
 //	blk.<L>.hc_attn_scale.weight [3]            F32
 //	blk.<L>.hc_ffn_base.weight   [24]           F32
-//	blk.<L>.hc_ffn_fn.weight     [HCMult*H, 24] F32
+//	blk.<L>.hc_ffn_fn.weight     [20480, 24]    Q2_K
 //	blk.<L>.hc_ffn_scale.weight  [3]            F32
+//
+// The fn blocks are Q2_K, not F32: the dims above are the GGUF header order,
+// which modelShapeFromGGUFDims reverses to the model [24, 4H] = [24, 20480].
 //
 // The attention trio resolves onto the forward-consumed leaves above
 // (hc_attn_base -> mhc.base, hc_attn_scale -> mhc.scale, hc_attn_fn ->

@@ -66,7 +66,13 @@ func isQuantWeight(name string) bool {
 		strings.HasSuffix(name, ".attn.wo_b.weight"),
 		strings.HasSuffix(name, ".ffn.shared_experts.w1.weight"),
 		strings.HasSuffix(name, ".ffn.shared_experts.w3.weight"),
-		strings.HasSuffix(name, ".ffn.shared_experts.w2.weight"):
+		strings.HasSuffix(name, ".ffn.shared_experts.w2.weight"),
+		// DeepSeek-V4.1 mHC mix projections (ggufload deepseek41MHCSuffixName emits
+		// mhc.mixes.weight / mhc.ffn_mixes.weight). forwardV41 consumes mhc.mixes.weight
+		// as a quantized matmul; without this arm the Q2_K block fell through to the
+		// eager f32 dequant and was charged whole, not held in the resident k-quant store.
+		strings.HasSuffix(name, ".mhc.mixes.weight"),
+		strings.HasSuffix(name, ".mhc.ffn_mixes.weight"):
 		return true
 	}
 	return name == "lm_head.weight"

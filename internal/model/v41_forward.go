@@ -771,6 +771,75 @@ func (m *Model) v41MHCWeightLayout(l int) (flat, transposed, ok bool) {
 	}
 }
 
+// v41MHCMixF32 reads a layer's mhc.mixes.weight as a full f32 block, resolved
+// residency-completely. The reduced fixture carries it in the f32 manifest, and
+// that path returns the manifest view unchanged (byte-identical to the pre-#13062
+// read); a real quantized serve keeps the Q2_K block in a resident store instead,
+// so the f32 manifest view would panic in m.tensor. Reading the resident store
+// here is what makes the flattened-four-stream forward reachable for the pinned
+// artifact. The returned buffer is in the STORE'S native row-major layout, so a
+// caller must consult v41MHCWeightLayout to interpret [24,4H] vs the stored
+// [4H,24] transpose. A weight absent from every store fails closed with a typed
+// error naming the tensor rather than panicking.
+func (m *Model) v41MHCMixF32(l int) ([]float32, error) {
+	name := layerName(l, "mhc.mixes.weight")
+	if m.has(name) {
+		return m.tensor(name), nil
+	}
+	if qt := m.kqw[name]; qt != nil {
+		qt.ensureRawCPU("mHC mix read")
+		bb := qt.kind.blockBytes()
+		rowBytes := qt.rowBytes()
+		w := make([]float32, qt.out*qt.in)
+		for b := 0; b < qt.out; b++ {
+			row := qt.raw[b*rowBytes : (b+1)*rowBytes]
+			for j := 0; j < qt.nblk; j++ {
+				kQuantDequantSuperBlock(w[b*qt.in+j*qt.kind.blockWeights():], row[j*bb:(j+1)*bb], qt.kind)
+			}
+		}
+		return w, nil
+	}
+	if qt := m.q2w[name]; qt != nil {
+		return dequantQ2Tensor(qt), nil
+	}
+	if qt := m.q8w[name]; qt != nil {
+		return dequantQ8Tensor(qt), nil
+	}
+	if qt := m.q4kw[name]; qt != nil {
+		raw, err := qt.materializeRaw()
+		if err != nil {
+			return nil, fmt.Errorf("%w: tensor %s Q4_K materialization failed: %v", ErrV41ForwardStage, name, err)
+		}
+		rowBytes := qt.nblk * q4kBlockBytes
+		w := make([]float32, qt.out*qt.in)
+		for o := 0; o < qt.out; o++ {
+			row := raw[o*rowBytes : (o+1)*rowBytes]
+			for j := 0; j < qt.nblk; j++ {
+				q4kDequantSuperBlock(w[o*qt.in+j*qkK:], row[j*q4kBlockBytes:(j+1)*q4kBlockBytes])
+			}
+		}
+		return w, nil
+	}
+	if qt := m.q4w[name]; qt != nil {
+		w := make([]float32, qt.out*qt.in)
+		for o := 0; o < qt.out; o++ {
+			for b := 0; b < qt.nblk; b++ {
+				dequantQ4Block(w[o*qt.in+b*qBlk4:], qt.d[o*qt.nblk+b], qt.q[o*qt.nblk*(qBlk4/2)+b*(qBlk4/2):])
+			}
+		}
+		return w, nil
+	}
+	if qt := m.gptqw[name]; qt != nil {
+		w := make([]float32, qt.out*qt.in)
+		for o := 0; o < qt.out; o++ {
+			gptqDequantRow(w[o*qt.in:], qt, o)
+		}
+		return w, nil
+	}
+	return nil, v41StageErr(v41StageMHC, l,
+		fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
+}
+
 // v41MHCProjectFull executes the published flattened-four-stream mHC mix
 // projection: the four width-H streams are laid end to end into xflat (4H), one
 // shared RMS scale 1/sqrt(mean(xflat^2)+eps) is computed over the whole flattened
@@ -983,7 +1052,10 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 
 	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
 	ffnNorm := m.tensor(layerName(l, "ffn_norm.weight"))
-	wMix := m.tensor(layerName(l, "mhc.mixes.weight"))
+	wMix, err := m.v41MHCMixF32(l)
+	if err != nil {
+		return err
+	}
 	mixBase := m.tensor(layerName(l, "mhc.base"))
 	mixScale := m.tensor(layerName(l, "mhc.scale"))
 	wQA := m.tensor(layerName(l, "attn.wq_a.weight"))
