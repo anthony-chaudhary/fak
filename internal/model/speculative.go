@@ -690,6 +690,17 @@ type SpeculativeEngineConfig struct {
 	TreeMode           bool
 	MaxBranches        int
 	BranchCache        *SpeculativeBranchCache
+
+	// MinAcceptanceRate is the rolling acceptance floor (default 0.50). When the
+	// full AcceptanceWindow falls below it, the engine falls back to unassisted
+	// serial decode for the rest of the request. A non-positive value disables
+	// the fallback trigger (observe-only).
+	MinAcceptanceRate float64
+	// AcceptanceWindow is the rolling evaluation window in tokens (default 32).
+	AcceptanceWindow int
+	// FallbackToSerial enables fail-closed fallback to serial decode when the
+	// rolling acceptance rate drops below MinAcceptanceRate. Default true.
+	FallbackToSerial bool
 }
 
 // DefaultSpeculativeEngineConfig returns standard greedy production defaults.
@@ -699,6 +710,9 @@ func DefaultSpeculativeEngineConfig() SpeculativeEngineConfig {
 		Temperature:        0.0,
 		TripwireStrict:     true,
 		SanitizeRepetition: true,
+		MinAcceptanceRate:  0.50,
+		AcceptanceWindow:   32,
+		FallbackToSerial:   true,
 	}
 }
 
@@ -710,6 +724,23 @@ type SpeculativeEngineStats struct {
 	VerificationRounds   int     `json:"verification_rounds"`
 	RollbackTokensCount  int     `json:"rollback_tokens_count"`
 	MeanAcceptanceRate   float64 `json:"mean_acceptance_rate"`
+}
+
+// SpeculativeAcceptanceStats reports the native rolling acceptance monitor for
+// the Qwen3.8 MTP speculative loop. RollingRate is computed over the last
+// AcceptanceWindow drafted tokens; WindowTokens is the number of tokens
+// currently in that window (less than the window size until it fills).
+type SpeculativeAcceptanceStats struct {
+	WindowProposed    int     `json:"window_proposed"`
+	WindowAccepted    int     `json:"window_accepted"`
+	WindowTokens      int     `json:"window_tokens"`
+	WindowSize        int     `json:"window_size"`
+	RollingRate       float64 `json:"rolling_acceptance_rate"`
+	LifetimeRate      float64 `json:"lifetime_acceptance_rate"`
+	MinAcceptanceRate float64 `json:"min_acceptance_rate"`
+	InFallback        bool    `json:"in_fallback"`
+	FallbackReason    string  `json:"fallback_reason,omitempty"`
+	TripwireTripped   bool    `json:"tripwire_tripped"`
 }
 
 // SpeculativeEngine coordinates multi-architecture draft proposal generation and parallel target verification.
@@ -724,13 +755,21 @@ type SpeculativeEngine struct {
 	stats            SpeculativeEngineStats
 	lastLogits       []float32
 	branchCache      *SpeculativeBranchCache
+
+	// Native rolling acceptance monitor (Qwen3.8 MTP). windowOutcomes holds one
+	// bool per drafted token over the trailing AcceptanceWindow tokens; a false
+	// entry is a rejected draft token. The window is filled before the floor is
+	// evaluated so a single bad round cannot trip the fallback prematurely.
+	windowOutcomes  []bool
+	windowHead      int
+	inFallback      bool
+	fallbackReason  string
+	tripwireTripped bool
 }
 
 // NewSpeculativeEngine creates a unified speculative decoding engine backed by a target Session.
 func NewSpeculativeEngine(target *Session, primary ProposalGenerator, cfg SpeculativeEngineConfig) *SpeculativeEngine {
-	if cfg.MaxDraft <= 0 {
-		cfg.MaxDraft = 4
-	}
+	cfg = normalizeSpeculativeEngineConfig(cfg)
 	sanitizer := NewRepetitionPenaltySanitizer(cfg.FrequencyPenalty, cfg.PresencePenalty)
 	eng := &SpeculativeEngine{
 		target:           target,
@@ -774,9 +813,7 @@ func (e *SpeculativeEngine) SetBranchCache(c *SpeculativeBranchCache) {
 
 // NewSpeculativeEngineWithVerifier creates an engine backed by a DraftVerifier capability contract.
 func NewSpeculativeEngineWithVerifier(verifier DraftVerifier, primary ProposalGenerator, cfg SpeculativeEngineConfig) *SpeculativeEngine {
-	if cfg.MaxDraft <= 0 {
-		cfg.MaxDraft = 4
-	}
+	cfg = normalizeSpeculativeEngineConfig(cfg)
 	sanitizer := NewRepetitionPenaltySanitizer(cfg.FrequencyPenalty, cfg.PresencePenalty)
 	eng := &SpeculativeEngine{
 		verifier:         verifier,
@@ -1042,6 +1079,21 @@ func (e *SpeculativeEngine) RecordVerification(generated, accepted, rollback int
 	e.RecordVerificationOutcome(generated, accepted, rollback, true)
 }
 
+// normalizeSpeculativeEngineConfig fills the production defaults the rolling
+// acceptance monitor depends on, so both constructors honor them uniformly.
+func normalizeSpeculativeEngineConfig(cfg SpeculativeEngineConfig) SpeculativeEngineConfig {
+	if cfg.MaxDraft <= 0 {
+		cfg.MaxDraft = 4
+	}
+	if cfg.AcceptanceWindow <= 0 {
+		cfg.AcceptanceWindow = 32
+	}
+	if cfg.MinAcceptanceRate <= 0 {
+		cfg.MinAcceptanceRate = 0.50
+	}
+	return cfg
+}
+
 // RecordVerificationOutcome updates execution statistics for an externally
 // driven verification round after its correction/bonus emission decision.
 func (e *SpeculativeEngine) RecordVerificationOutcome(generated, accepted, rollback int, bonusEmitted bool) {
@@ -1060,9 +1112,144 @@ func (e *SpeculativeEngine) RecordVerificationOutcome(generated, accepted, rollb
 	if e.stats.VerificationRounds > 0 {
 		e.stats.MeanAcceptanceRate = float64(e.stats.DraftTokensAccepted) / float64(e.stats.VerificationRounds)
 	}
+	e.recordRollingAcceptanceLocked(generated, accepted)
 }
 
-// Reset clears accumulated statistics and boundary state.
+// recordRollingAcceptanceLocked feeds one round's accepted/rejected draft tokens
+// into the trailing window and trips the serial fallback once the window is full
+// and its acceptance rate is below the configured floor. Callers hold e.mu.
+func (e *SpeculativeEngine) recordRollingAcceptanceLocked(generated, accepted int) {
+	if generated <= 0 {
+		return
+	}
+	if accepted < 0 {
+		accepted = 0
+	}
+	if accepted > generated {
+		accepted = generated
+	}
+	e.ensureWindowLocked()
+	for i := 0; i < generated; i++ {
+		outcome := i < accepted
+		if len(e.windowOutcomes) < e.cfg.AcceptanceWindow {
+			e.windowOutcomes = append(e.windowOutcomes, outcome)
+			continue
+		}
+		e.windowOutcomes[e.windowHead] = outcome
+		e.windowHead = (e.windowHead + 1) % e.cfg.AcceptanceWindow
+	}
+	e.evaluateFallbackLocked()
+}
+
+// ensureWindowLocked initializes the rolling window storage and clamps a stale
+// head index after a config change. Callers hold e.mu.
+func (e *SpeculativeEngine) ensureWindowLocked() {
+	if e.cfg.AcceptanceWindow <= 0 {
+		e.cfg.AcceptanceWindow = 32
+	}
+	if cap(e.windowOutcomes) < e.cfg.AcceptanceWindow {
+		grown := make([]bool, len(e.windowOutcomes), e.cfg.AcceptanceWindow)
+		copy(grown, e.windowOutcomes)
+		e.windowOutcomes = grown
+	}
+	if len(e.windowOutcomes) > e.cfg.AcceptanceWindow {
+		e.windowOutcomes = e.windowOutcomes[len(e.windowOutcomes)-e.cfg.AcceptanceWindow:]
+		e.windowHead = 0
+	}
+	if len(e.windowOutcomes) > 0 && e.windowHead >= len(e.windowOutcomes) {
+		e.windowHead = 0
+	}
+}
+
+// evaluateFallbackLocked decides whether the rolling window trips the serial
+// fallback. The window must be full before the floor is evaluated, so a partial
+// window warns without aborting. Once tripped the fallback is sticky until
+// Reset, so a single healthy round cannot silently resurrect speculation
+// mid-request. Callers hold e.mu.
+func (e *SpeculativeEngine) evaluateFallbackLocked() {
+	if !e.cfg.FallbackToSerial || e.cfg.MinAcceptanceRate <= 0 {
+		return
+	}
+	if e.inFallback {
+		return
+	}
+	if len(e.windowOutcomes) < e.cfg.AcceptanceWindow {
+		return
+	}
+	accepted := 0
+	for _, ok := range e.windowOutcomes {
+		if ok {
+			accepted++
+		}
+	}
+	rate := float64(accepted) / float64(len(e.windowOutcomes))
+	if rate < e.cfg.MinAcceptanceRate {
+		e.inFallback = true
+		e.tripwireTripped = true
+		e.fallbackReason = "rolling acceptance rate below floor"
+	}
+}
+
+// ResetAcceptanceMonitor clears only the rolling acceptance window and any
+// active serial fallback, leaving cumulative statistics and boundary logits
+// intact. The planner calls this at the start of each request so one degraded
+// request cannot force every later request onto serial decode.
+func (e *SpeculativeEngine) ResetAcceptanceMonitor() {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.windowOutcomes = e.windowOutcomes[:0]
+	e.windowHead = 0
+	e.inFallback = false
+	e.fallbackReason = ""
+	e.tripwireTripped = false
+}
+
+// AcceptanceStats returns a snapshot of the native rolling acceptance monitor.
+func (e *SpeculativeEngine) AcceptanceStats() SpeculativeAcceptanceStats {
+	if e == nil {
+		return SpeculativeAcceptanceStats{}
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	stats := SpeculativeAcceptanceStats{
+		WindowSize:        e.cfg.AcceptanceWindow,
+		WindowTokens:      len(e.windowOutcomes),
+		MinAcceptanceRate: e.cfg.MinAcceptanceRate,
+		InFallback:        e.inFallback,
+		FallbackReason:    e.fallbackReason,
+		TripwireTripped:   e.tripwireTripped,
+	}
+	for _, ok := range e.windowOutcomes {
+		if ok {
+			stats.WindowAccepted++
+		}
+	}
+	stats.WindowProposed = len(e.windowOutcomes)
+	if stats.WindowProposed > 0 {
+		stats.RollingRate = float64(stats.WindowAccepted) / float64(stats.WindowProposed)
+	}
+	if e.stats.DraftTokensGenerated > 0 {
+		stats.LifetimeRate = float64(e.stats.DraftTokensAccepted) / float64(e.stats.DraftTokensGenerated)
+	}
+	return stats
+}
+
+// InFallback reports whether the rolling acceptance monitor has tripped the
+// serial-decode fallback for this engine.
+func (e *SpeculativeEngine) InFallback() bool {
+	if e == nil {
+		return false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.inFallback
+}
+
+// Reset clears accumulated statistics, the rolling acceptance window, and any
+// active serial fallback so a new request starts speculative.
 func (e *SpeculativeEngine) Reset() {
 	if e == nil {
 		return
@@ -1071,6 +1258,11 @@ func (e *SpeculativeEngine) Reset() {
 	defer e.mu.Unlock()
 	e.stats = SpeculativeEngineStats{}
 	e.lastLogits = nil
+	e.windowOutcomes = e.windowOutcomes[:0]
+	e.windowHead = 0
+	e.inFallback = false
+	e.fallbackReason = ""
+	e.tripwireTripped = false
 }
 
 // ArgmaxF32 returns the index of the maximum float32 value in v.

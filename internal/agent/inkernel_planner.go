@@ -983,6 +983,7 @@ const (
 	vulkanMTPDowngradeEmptyProposal      = "empty-proposal"
 	vulkanMTPDowngradeProposalError      = "proposal-error"
 	vulkanMTPDowngradeTargetVerifier     = "target-verifier-downgrade"
+	vulkanMTPDowngradeAcceptanceFloor    = "acceptance-floor-fallback"
 	vulkanMTPDowngradeCancelled          = "cancelled"
 )
 
@@ -1340,6 +1341,9 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	p.configureNativeSession(s)
 
 	eng := p.speculativeEngine
+	// Each request begins with a clean rolling acceptance window so a prior
+	// request's degraded draft head cannot force this one onto serial decode.
+	eng.ResetAcceptanceMonitor()
 	proposalGenerator := eng.PrimaryGenerator()
 	if mtpExecution != nil {
 		var closeDraft func()
@@ -1469,6 +1473,18 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	for gen < maxNew {
 		if err = ctx.Err(); err != nil {
 			break
+		}
+
+		// Native rolling acceptance fallback (Qwen3.8 MTP): once the engine's
+		// trailing-window acceptance rate falls below the configured floor, stop
+		// drafting and continue with unassisted serial decode. The proposal
+		// generator is dropped rather than retried each token, so a degraded
+		// draft head cannot stall the session.
+		if proposalGenerator != nil && eng.InFallback() {
+			proposalGenerator = nil
+			if mtpExecution != nil {
+				mtpExecution.DowngradeReason = vulkanMTPDowngradeAcceptanceFloor
+			}
 		}
 
 		// Propose speculative candidate tokens
