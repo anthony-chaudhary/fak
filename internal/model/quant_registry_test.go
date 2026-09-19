@@ -290,6 +290,20 @@ func TestWeightHALKQuantCustomRegistrationDispatch(t *testing.T) {
 	}
 }
 
+type quantQ6UploadTestBackend struct {
+	*quantUploadTestBackend
+}
+
+func (r *quantQ6UploadTestBackend) Caps() compute.Caps {
+	c := r.quantUploadTestBackend.Caps()
+	c.DeviceMemory = true
+	return c
+}
+
+func (r *quantQ6UploadTestBackend) SupportsDeviceWeightDtype(dt compute.Dtype) bool {
+	return dt == compute.Q6_K
+}
+
 func TestMatWeightHALAndLMHeadHALRegistryIntegration(t *testing.T) {
 	ResetDefaultQuantDescriptors()
 	defer ResetDefaultQuantDescriptors()
@@ -304,7 +318,8 @@ func TestMatWeightHALAndLMHeadHALRegistryIntegration(t *testing.T) {
 			"lm_head.weight": qtQ6,
 		},
 	}
-	rec := &quantUploadTestBackend{Backend: compute.Default()}
+	recorder := &quantUploadTestBackend{Backend: compute.Default()}
+	rec := &quantQ6UploadTestBackend{quantUploadTestBackend: recorder}
 	s := &Session{
 		M:       m,
 		Backend: rec,
