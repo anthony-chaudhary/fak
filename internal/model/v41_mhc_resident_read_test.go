@@ -214,8 +214,10 @@ func v41RawFullFlattenedResidentMHC(t *testing.T) *Model {
 		{layerName(0, "mhc.base"), []int{v41MHCMixWidth}},
 		{layerName(0, "mhc.scale"), []int{3}},
 		{layerName(0, "attn.wq_a.weight"), []int{cfg.QLoraRank, H}},
+		{layerName(0, "attn.wq_a_norm.weight"), []int{cfg.QLoraRank}},
 		{layerName(0, "attn.wq_b.weight"), []int{qHeadDim, cfg.QLoraRank}},
 		{layerName(0, "attn.wkv.weight"), []int{v41KVLoraRank, H}},
+		{layerName(0, "attn.kv_norm.weight"), []int{v41KVLoraRank}},
 		{layerName(0, "attn.wo_a.weight"), []int{cfg.OLoraRank, qHeadDim}},
 		{layerName(0, "attn.wo_b.weight"), []int{H, oDim}},
 		{layerName(0, "attn.sink"), []int{cfg.NumHeads}},
@@ -236,7 +238,7 @@ func v41RawFullFlattenedResidentMHC(t *testing.T) *Model {
 
 	man, raw := synthBuildRaw(tensors, func(name string, next func() float32) float32 {
 		switch {
-		case name == "model.norm.weight" || hasSuffix(name, "attn_norm.weight") || hasSuffix(name, "ffn_norm.weight"):
+		case name == "model.norm.weight" || hasSuffix(name, "attn_norm.weight") || hasSuffix(name, "ffn_norm.weight") || hasSuffix(name, "attn.wq_a_norm.weight") || hasSuffix(name, "attn.kv_norm.weight"):
 			return 1.0
 		case hasSuffix(name, "mhc.scale"):
 			return 1.0

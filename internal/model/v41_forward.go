@@ -783,6 +783,12 @@ func (m *Model) v41ForwardAdmitted() error {
 	qHeadDim := nH * hd
 	oDim := cfg.OLoraRank * cfg.OGroups
 	I := cfg.MoEIntermediateSize
+	// full selects the artifact geometry over the reduced fixture. The V4.1 Q/KV
+	// latent norms are an artifact-only stage, so their admission is gated on it.
+	full, err := v41ForwardGeometry(cfg)
+	if err != nil {
+		return err
+	}
 	for l := 0; l < cfg.NumLayers; l++ {
 		if err := m.v41AdmitShape(layerName(l, "attn_norm.weight"), v41StageLayer, l, H); err != nil {
 			return err
@@ -798,6 +804,19 @@ func (m *Model) v41ForwardAdmitted() error {
 		}
 		if err := m.v41AdmitShape(layerName(l, "attn.wq_b.weight"), v41StageAttention, l, qHeadDim, cfg.QLoraRank); err != nil {
 			return err
+		}
+		// Q/KV latent norms (reference Attention: self.q_norm = RMSNorm(q_lora_rank)
+		// and self.kv_norm = RMSNorm(head_dim)). They are admitted and applied ONLY
+		// on the full path: the reduced fixture's pre-#13009 arithmetic has no such
+		// stage and must stay byte-identical, so a reduced config neither requires
+		// nor reads these leaves. See v41Layer's application site (#13290).
+		if full {
+			if err := m.v41AdmitShape(layerName(l, "attn.wq_a_norm.weight"), v41StageAttention, l, cfg.QLoraRank); err != nil {
+				return err
+			}
+			if err := m.v41AdmitShape(layerName(l, "attn.kv_norm.weight"), v41StageAttention, l, kvLatentRank); err != nil {
+				return err
+			}
 		}
 		if err := m.v41AdmitShape(layerName(l, "attn.wkv.weight"), v41StageAttention, l, kvLatentRank, H); err != nil {
 			return err
@@ -1703,6 +1722,20 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return err
 		}
+		// Reference: qr = self.q_norm(self.wq_a(x)) then q = self.wq_b(qr). The
+		// RMSNorm over the q-lora latent keeps its magnitude O(1) before the
+		// wq_b projection; omitting it lets ~1e18 activations reach the 512-term
+		// attention accumulation and overflow it to +Inf at HeadDim=512 (#13290).
+		// Artifact-only: the reduced fixture carries no q_norm leaf and its
+		// pre-#13009 arithmetic is unchanged.
+		if full {
+			qNorm := m.tensor(layerName(l, "attn.wq_a_norm.weight"))
+			if len(qNorm) != cfg.QLoraRank {
+				return v41StageErr(v41StageAttention, l,
+					fmt.Errorf("%w: q-lora norm has %d values, want %d", ErrV41ForwardStage, len(qNorm), cfg.QLoraRank))
+			}
+			qLat = rmsnormCfg(qLat, qNorm, eps, cfg)
+		}
 		q, err := m.v41ProjMatRows(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank)
 		if err != nil {
 			return err
@@ -1731,6 +1764,20 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			if err != nil {
 				return err
 			}
+		}
+		// Reference: kv = self.kv_norm(self.wkv(x)) then RoPE on the rope tail
+		// (_window_kv). The RMSNorm over the KV vector keeps its magnitude O(1);
+		// omitting it lets an unbounded projection reach the 512-term attention
+		// accumulation and overflow it to +Inf at HeadDim=512 (#13290). Applied to
+		// the full head_dim before the rope tail; artifact-only, so the reduced
+		// fixture's pre-#13009 arithmetic is unchanged.
+		if full {
+			kvNorm := m.tensor(layerName(l, "attn.kv_norm.weight"))
+			if len(kvNorm) != v41KVLoraRank {
+				return v41StageErr(v41StageAttention, l,
+					fmt.Errorf("%w: kv norm has %d values, want %d", ErrV41ForwardStage, len(kvNorm), v41KVLoraRank))
+			}
+			kv = rmsnormCfg(kv, kvNorm, eps, cfg)
 		}
 		cos, sin := v41RopeTableForLayer(cfg, l, t)
 		for h := 0; h < nH; h++ {
