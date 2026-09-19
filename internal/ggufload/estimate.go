@@ -208,7 +208,14 @@ func (s *WeightSource) EstimateQ4KLoadMemoryPlan(opts ...Q4KLoadOption) (compute
 		// reordered q/k, independently of ordinary target residency options.
 		packedQ4 := info.Type == TensorQ4_K && (qwenMTP || model.ResidentQ4KEligible(cfg, canon))
 		blockWeights, _, residentable := residentExpertBlockGeometry(info.Type)
-		retainKQuant := loadOpts.residentDenseKQuant || (loadOpts.residentDenseQ2K && info.Type == TensorQ2_K)
+		// retainKQuant mirrors the loader's dense k-quant retention predicate in
+		// quant_q4k_loader.go byte-for-byte: blanket k-quant residency, the selective Q2_K
+		// arm, and the selective Q6_K arm (fak#13310). A Q6-only effect must price eligible
+		// Q6_K at packed bytes here, or admission would charge the Q8 fallback while the
+		// loader retains the packed tensor.
+		retainKQuant := loadOpts.residentDenseKQuant ||
+			(loadOpts.residentDenseQ2K && info.Type == TensorQ2_K) ||
+			(loadOpts.residentDenseQ6K && info.Type == TensorQ6_K)
 		packedKQuant := info.Type != TensorQ4_K && residentable &&
 			((qwenMTP && info.Type == TensorQ6_K) || (retainKQuant && model.ResidentKQuantEligible(cfg, canon)))
 		n, dtype := payload, ggufTensorDTypeLabel(info.Type)

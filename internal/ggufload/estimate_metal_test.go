@@ -143,6 +143,7 @@ func TestEstimateMetalTransformedWeightResidency(t *testing.T) {
 		}{
 			{"retained-kquant", nil, layerPacked + vocab*210 + embeddingBytes},
 			{"q8-fallback", []Q4KLoadOption{WithDenseKQuantResident(false)}, layerPacked + vocab*dim/32*36 + embeddingBytes},
+			{"q6-only-resident", []Q4KLoadOption{WithDenseKQuantResident(false), WithDenseQ6KResident(true)}, layerPacked + vocab*210 + embeddingBytes},
 			{"packed-embedding", []Q4KLoadOption{WithQ2KEmbeddingResident(true)}, layerPacked + vocab*210 + vocab*84},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
@@ -164,4 +165,95 @@ func TestEstimateMetalTransformedWeightResidency(t *testing.T) {
 			t.Fatalf("streaming error=%v, want explicit unsupported", err)
 		}
 	})
+}
+
+// TestEstimateDenseQ6KResidentOptionParity proves the estimate fold prices an eligible
+// dense Q6_K tensor at packed on-disk bytes exactly when the selective Q6_K residency
+// option is set (with blanket dense k-quant residency off), matching the loader's
+// retained bytes. This is the fak#13310 admission/loader parity contract: before the
+// fold read the selective arm, admission priced the Q8 fallback while the loader
+// retained the packed tensor.
+func TestEstimateDenseQ6KResidentOptionParity(t *testing.T) {
+	const (
+		dim   = 256
+		vocab = 4
+	)
+	path := buildQwen35GGUFFixture(t, "qwen35", dim, vocab, TensorQ2_K, TensorQ6_K, false, false)
+	ws, err := OpenWeights(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ws.Close() })
+
+	const layerPacked = 3 * dim * dim / 256 * 144
+	const embeddingBytes = vocab * dim * 4
+	const packedQ6Output = vocab * blockQ6KBytes
+	const q8FallbackOutput = vocab * dim / 32 * 36
+
+	// The selective Q6_K option must price the head at packed bytes, not the Q8 fallback.
+	plan, err := ws.EstimateQ4KLoadMemoryPlan(WithDenseKQuantResident(false), WithDenseQ6KResident(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := LoadModelQ4KProfileOptions(path, nil, WithDenseKQuantResident(false), WithDenseQ6KResident(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = m.CloseWeights() })
+	const wantResident = layerPacked + packedQ6Output + embeddingBytes
+	if got := m.ResidentReport().TotalResidentBytes; got != wantResident {
+		t.Fatalf("selective Q6_K resident = %d, want %d (packed head)", got, wantResident)
+	}
+	if got := plan.Total(); got != wantResident {
+		t.Fatalf("selective Q6_K estimate = %d, want %d (loader-resident packed head)", got, wantResident)
+	}
+
+	// Without the option the head follows the Q8 fallback, and both sides agree on that.
+	fallback, err := ws.EstimateQ4KLoadMemoryPlan(WithDenseKQuantResident(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const wantFallback = layerPacked + q8FallbackOutput + embeddingBytes
+	if got := fallback.Total(); got != wantFallback {
+		t.Fatalf("Q8 fallback estimate = %d, want %d", got, wantFallback)
+	}
+}
+
+// TestEstimateDenseQ6KResidentOptionExcludesOtherFormats proves the selective Q6_K
+// estimate arm folds only Q6_K: a Q5_K head stays on the Q8 fallback price (the
+// non-Q6 formats are unchanged), so enabling the option cannot silently claim packed
+// bytes for a format the loader will not retain.
+func TestEstimateDenseQ6KResidentOptionExcludesOtherFormats(t *testing.T) {
+	const (
+		dim   = 256
+		vocab = 4
+	)
+	path := buildQwen35GGUFFixture(t, "qwen35", dim, vocab, TensorQ2_K, TensorQ5_K, false, false)
+	ws, err := OpenWeights(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ws.Close() })
+
+	const layerPacked = 3 * dim * dim / 256 * 144
+	const embeddingBytes = vocab * dim * 4
+	const q8FallbackOutput = vocab * dim / 32 * 36
+
+	// The Q6-only option must not price a Q5_K head at packed bytes.
+	plan, err := ws.EstimateQ4KLoadMemoryPlan(WithDenseKQuantResident(false), WithDenseQ6KResident(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := LoadModelQ4KProfileOptions(path, nil, WithDenseKQuantResident(false), WithDenseQ6KResident(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = m.CloseWeights() })
+	const want = layerPacked + q8FallbackOutput + embeddingBytes
+	if got := m.ResidentReport().TotalResidentBytes; got != want {
+		t.Fatalf("Q6-only over a Q5_K head resident = %d, want %d (Q8 fallback)", got, want)
+	}
+	if got := plan.Total(); got != want {
+		t.Fatalf("Q6-only over a Q5_K head estimate = %d, want %d (Q8 fallback unchanged)", got, want)
+	}
 }
