@@ -130,6 +130,110 @@ type v41ForwardState struct {
 	attn    *V41AttentionState
 }
 
+// v41ProjScratch is the per-forward REUSED materialization target for the two
+// grouped output projections (attn.wo_a.weight / attn.wo_b.weight), which the
+// forward consumes as whole f32 blocks through V41GroupedOutputProjection. It
+// exists to bound the in-kernel warmup's resident set (fak#13288).
+//
+// Before this scratch, v41Layer read wo_a/wo_b through v41ProjF32, which
+// allocates a FRESH whole-tensor f32 block per layer per forward
+// (residentF32Mat's make([]float32, out*in)). At the published V4.1 geometry
+// that is ~416 MiB/layer (wo_a [1024, 65536] + wo_b [5120, 8192]); across the
+// 40-layer stack it is ~16.25 GiB of transient that is charged to no ledger and
+// does not appear in the serve memory plan. Go's GC does not reclaim it
+// promptly while the streamed-expert tier holds ~43 GiB live, so the warmup's
+// RSS grew monotonically to 56.57 GiB against a 43.896 GiB staging-host-charge
+// and the kernel OOM-killed the process.
+//
+// The forward is strictly SEQUENTIAL across layers and calls
+// V41GroupedOutputProjection read-only, so the layer-l block is dead before
+// layer l+1 begins. Reusing ONE buffer per forward therefore bounds the
+// wo_a/wo_b term to a single layer's worth (~416 MiB) instead of the accumulated
+// 40-layer churn, with byte-identical arithmetic (the same f32 values land in
+// the same layout).
+type v41ProjScratch struct {
+	woA []float32
+	woB []float32
+}
+
+// v41ProjF32Into is the caller-buffer twin of v41ProjF32: it resolves a named
+// V4.1 per-layer projection and writes its f32 block into dst, growing dst when
+// needed, rather than allocating a fresh whole-tensor block on every call. The
+// f32-manifest path still returns the manifest view zero-copy (byte-identical to
+// v41ProjF32); the quant-store arms dequantize into dst with the exact same
+// loops and block order residentF32Mat uses, so the output is bit-identical.
+//
+// dst is returned with len exactly out*in. A weight absent from every store
+// fails closed with the same typed ErrV41ForwardStage naming the tensor that
+// #13276 requires (never a panic through residentF32Mat's m.tensor read).
+func (m *Model) v41ProjF32Into(l int, leaf string, dst []float32) ([]float32, error) {
+	name := layerName(l, leaf)
+	if m.has(name) {
+		return m.tensor(name), nil
+	}
+	grow := func(n int) []float32 {
+		if cap(dst) < n {
+			return make([]float32, n)
+		}
+		return dst[:n]
+	}
+	if qt := m.kqw[name]; qt != nil {
+		qt.ensureRawCPU("V4.1 grouped output projection read")
+		bb := qt.kind.blockBytes()
+		rowBytes := qt.rowBytes()
+		w := grow(qt.out * qt.in)
+		for b := 0; b < qt.out; b++ {
+			row := qt.raw[b*rowBytes : (b+1)*rowBytes]
+			for j := 0; j < qt.nblk; j++ {
+				kQuantDequantSuperBlock(w[b*qt.in+j*qt.kind.blockWeights():], row[j*bb:(j+1)*bb], qt.kind)
+			}
+		}
+		return w, nil
+	}
+	if qt := m.q2w[name]; qt != nil {
+		src := dequantQ2Tensor(qt)
+		return append(grow(len(src))[:0], src...), nil
+	}
+	if qt := m.q8w[name]; qt != nil {
+		src := dequantQ8Tensor(qt)
+		return append(grow(len(src))[:0], src...), nil
+	}
+	if qt := m.q4kw[name]; qt != nil {
+		raw, err := qt.materializeRaw()
+		if err != nil {
+			return nil, v41StageErr(v41StageAttention, l,
+				fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
+		}
+		rowBytes := qt.nblk * q4kBlockBytes
+		w := grow(qt.out * qt.in)
+		for o := 0; o < qt.out; o++ {
+			row := raw[o*rowBytes : (o+1)*rowBytes]
+			for j := 0; j < qt.nblk; j++ {
+				q4kDequantSuperBlock(w[o*qt.in+j*qkK:], row[j*q4kBlockBytes:(j+1)*q4kBlockBytes])
+			}
+		}
+		return w, nil
+	}
+	if qt := m.q4w[name]; qt != nil {
+		w := grow(qt.out * qt.in)
+		for o := 0; o < qt.out; o++ {
+			for b := 0; b < qt.nblk; b++ {
+				dequantQ4Block(w[o*qt.in+b*qBlk4:], qt.d[o*qt.nblk+b], qt.q[o*qt.nblk*(qBlk4/2)+b*(qBlk4/2):])
+			}
+		}
+		return w, nil
+	}
+	if qt := m.gptqw[name]; qt != nil {
+		w := grow(qt.out * qt.in)
+		for o := 0; o < qt.out; o++ {
+			gptqDequantRow(w[o*qt.in:], qt, o)
+		}
+		return w, nil
+	}
+	return nil, v41StageErr(v41StageAttention, l,
+		fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
+}
+
 func (st *v41ForwardState) attentionState(headDim, ratioCap int) (*V41AttentionState, error) {
 	if st.attn != nil {
 		return st.attn, nil
@@ -1275,8 +1379,13 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (*Activations, error)
 	}
 
 	act := &Activations{Seq: len(seq), Hidden: [][]float32{flatten(x)}}
+	// One scratch for the whole forward: the grouped output projections are read
+	// as whole f32 blocks but the layer loop is sequential, so a single reused
+	// buffer bounds the wo_a/wo_b term to one layer's worth instead of the
+	// 40-layer accumulated churn that OOM-killed the warmup (#13288).
+	scratch := &v41ProjScratch{}
 	for l := 0; l < cfg.NumLayers; l++ {
-		if err := m.v41Layer(l, seq, x, streams, full, hd, nH, H, eps, hcIters, hcEps, routeCfg, st); err != nil {
+		if err := m.v41Layer(l, seq, x, streams, full, hd, nH, H, eps, hcIters, hcEps, routeCfg, st, scratch); err != nil {
 			return nil, err
 		}
 		act.Hidden = append(act.Hidden, flatten(x))
@@ -1299,7 +1408,7 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (*Activations, error)
 // pre-#13009 arithmetic exactly (four identical stand-in streams derived from the
 // normalized input, and stream 0 of the post-mix written back); the full path
 // reads and writes all four DISTINCT persistent streams.
-func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float32, full bool, hd, nH, H int, eps float32, hcIters int, hcEps float32, routeCfg v41RouterConfig, st *v41ForwardState) error {
+func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float32, full bool, hd, nH, H int, eps float32, hcIters int, hcEps float32, routeCfg v41RouterConfig, st *v41ForwardState, scratch *v41ProjScratch) error {
 	cfg := m.Cfg
 
 	// Engram injection happens at the START of the layer, into the residual,
@@ -1329,18 +1438,26 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	// ffn.shared_experts leaves), so a manifest-only m.tensor read panics on a
 	// weight admission (residentShape) already admitted (#13276). Each read fails
 	// closed with a typed error naming the tensor when absent from every store.
-	// The two grouped output projections (attn.wo_a / attn.wo_b) stay on the
-	// full-f32 read: V41GroupedOutputProjection consumes whole f32 blocks, so the
-	// streaming matRows twin does not apply. They remain the only per-layer
-	// projections materialized to f32 (#2150 scope: the matRows-consumed leaves).
-	woA, err := m.v41ProjF32(l, "attn.wo_a.weight")
+	// The two grouped output projections (attn.wo_a / attn.wo_b) are consumed by
+	// V41GroupedOutputProjection as whole f32 blocks, so the streaming matRows
+	// twin does not apply. They are read INTO a forward-scoped reused scratch
+	// instead of a fresh whole-tensor allocation per layer: the f32 values and
+	// layout are byte-identical to the previous v41ProjF32 read, but the peak
+	// resident contribution is bounded to one layer instead of the accumulated
+	// 40-layer churn that OOM-killed the warmup (#13288).
+	if scratch == nil {
+		scratch = &v41ProjScratch{}
+	}
+	woA, err := m.v41ProjF32Into(l, "attn.wo_a.weight", scratch.woA)
 	if err != nil {
 		return err
 	}
-	woB, err := m.v41ProjF32(l, "attn.wo_b.weight")
+	scratch.woA = woA
+	woB, err := m.v41ProjF32Into(l, "attn.wo_b.weight", scratch.woB)
 	if err != nil {
 		return err
 	}
+	scratch.woB = woB
 	// The remaining per-layer projections are applied only through matRows, so
 	// they read through the streaming-safe v41ProjMatRows at their use site
 	// instead of materializing a whole f32 block here (#2150). Fail closed NOW,
