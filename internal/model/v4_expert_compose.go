@@ -109,6 +109,14 @@ func composeV4RoutedExperts(layer int, selected []v4RoutedExpert, x compute.Tens
 	var output []float32
 	for routeIndex, route := range selected {
 		names := orderedNames[routeIndex]
+		// Issue the gate and up transfers back to back before the first projection runs
+		// (#13044): the two weights are both consumed by this expert's SwiGLU, so up's
+		// host->device copy overlaps gate's GEMM instead of waiting behind it. Down is
+		// issued after the activation exists, so staging it cannot evict gate before
+		// gate's GEMM has run. On a synchronous backend the fence is nil and this is a
+		// pure reordering; the outputs are identical either way.
+		stager.stageInFlight(names.w1)
+		stager.stageInFlight(names.w3)
 		gate, err := stager.matMul(names.w1, x)
 		if err != nil {
 			return nil, err
@@ -133,6 +141,7 @@ func composeV4RoutedExperts(layer int, selected []v4RoutedExpert, x compute.Tens
 			activated[i] = route.Weight * v4SiLU(gateValue) * upValue
 		}
 		activation := stager.ring.be.Upload(compute.NewF32(stager.ring.be, []int{len(activated)}, activated), compute.F32)
+		stager.stageInFlight(names.w2)
 		projected, err := stager.matMul(names.w2, activation)
 		stager.ring.be.Free(activation)
 		if err != nil {

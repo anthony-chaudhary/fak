@@ -74,8 +74,13 @@ func TestComposeV4RoutedExpertsMatchesIndependentResidentOracle(t *testing.T) {
 	if reads.tensorReads != 6 || stats.SourceReads != 6 || stats.SourceBytes != 6*24 || stats.PageIn != 6 {
 		t.Fatalf("source/stage evidence reads=%d stats=%+v", reads.tensorReads, stats)
 	}
-	if stats.Hits != 0 || stats.Evictions != 4 || stats.PeakResidentBytes != 2*24 {
-		t.Fatalf("bounded ring stats=%+v, want hits=0 evictions=4 peak=48", stats)
+	// Each projection is now staged one GEMM ahead of its demand (#13044), so the demand
+	// matMul finds it resident: all six page-ins are HITS on the demand path, not misses.
+	// The page-in count, read count and eviction count are unchanged from the on-demand
+	// path — the same six weights are read, uploaded and evicted — only the demand's view
+	// of them moves from miss to hit, which is exactly the overlap the fuse buys.
+	if stats.Hits != 6 || stats.Evictions != 4 || stats.PeakResidentBytes != 2*24 {
+		t.Fatalf("bounded ring stats=%+v, want hits=6 evictions=4 peak=48", stats)
 	}
 	if ring.used() > ring.budget() {
 		t.Fatalf("ring used=%d exceeds budget=%d", ring.used(), ring.budget())
@@ -241,6 +246,131 @@ func TestComposeV4RoutedExpertsRejectsInvalidInputs(t *testing.T) {
 	}
 	if badReads.tensorReads != 0 || badRing.used() != 0 {
 		t.Fatalf("invalid composition mutated source/ring: reads=%d used=%d", badReads.tensorReads, badRing.used())
+	}
+}
+
+// v4OverlapBackend models a device whose host->device transfer lands while OTHER compute
+// runs: any pending fence is satisfied the moment a MatMul completes. That is the physical
+// behaviour staging a projection a GEMM ahead exists to exploit, and it is what makes the
+// fuse observable rather than merely asserted — a transfer issued before a GEMM is Done by
+// the time its own demand arrives (overlap), while one issued with no GEMM in between must
+// be waited on (blocking). MatMul also flags any GEMM against a not-yet-landed weight, so a
+// skipped fence fails the test rather than quietly multiplying stale bytes.
+type v4OverlapBackend struct {
+	compute.Backend
+	inflight      map[compute.Buffer]bool // weights whose transfer has not yet landed
+	unfencedGEMMs int
+	fences        int
+}
+
+func newV4OverlapBackend() *v4OverlapBackend {
+	return &v4OverlapBackend{Backend: compute.Default(), inflight: map[compute.Buffer]bool{}}
+}
+
+func (b *v4OverlapBackend) Name() string { return "vulkan-test-overlap" }
+
+func (b *v4OverlapBackend) UploadAsync(t compute.Tensor, as compute.Dtype) (compute.Tensor, compute.Fence) {
+	out := b.Backend.Upload(t, as)
+	if buf := out.Buf(); buf != nil {
+		b.inflight[buf] = true
+	}
+	b.fences++
+	return out, &v4OverlapFence{b: b, buf: out.Buf()}
+}
+
+type v4OverlapFence struct {
+	b      *v4OverlapBackend
+	buf    compute.Buffer
+	landed bool
+}
+
+func (f *v4OverlapFence) Done() bool { return f.landed || !f.b.inflight[f.buf] }
+func (f *v4OverlapFence) Wait() {
+	if !f.b.inflight[f.buf] {
+		f.landed = true
+		return
+	}
+	f.landed = true
+	delete(f.b.inflight, f.buf)
+}
+
+func (b *v4OverlapBackend) MatMul(w, x compute.Tensor) compute.Tensor {
+	if buf := w.Buf(); buf != nil && b.inflight[buf] {
+		b.unfencedGEMMs++
+	}
+	out := b.Backend.MatMul(w, x)
+	// Completing a GEMM lets every in-flight transfer land, modelling overlap.
+	for buf := range b.inflight {
+		delete(b.inflight, buf)
+	}
+	return out
+}
+
+// TestComposeV4RoutedExpertsStagesAheadOnAnAsyncBackend is the #13044 witness: on a
+// backend whose transfers land while other compute runs, staging a projection a GEMM ahead
+// of its demand lets that transfer land underneath the work between them, so the fuse is
+// observable as overlap rather than merely asserted. The backend flags any GEMM run against
+// a weight whose own transfer had not landed, so a skipped fence fails the test instead of
+// silently producing wrong numbers; the outputs are checked against the resident oracle.
+func TestComposeV4RoutedExpertsStagesAheadOnAnAsyncBackend(t *testing.T) {
+	const layer = 9
+	weights := map[int]map[string][]float32{
+		1: {
+			"w1": {1, -2, 0.5, 1, -1, 0.25},
+			"w2": {0.75, -1, 2, -0.5, 0.25, 1.5},
+			"w3": {-0.5, 1.5, 2, -1, 0.75, 0.5},
+		},
+	}
+	tensors := make(map[string]tinySTTensor)
+	for expert, matrices := range weights {
+		for projection, values := range matrices {
+			shape := []int{3, 2}
+			if projection == "w2" {
+				shape = []int{2, 3}
+			}
+			tensors[v4ComposeTensorName(layer, expert, projection)] = tinySTTensor{dtype: "F32", shape: shape, data: f32TestBytes(values)}
+		}
+	}
+	source, _ := newV4ComposeFixtureSource(t, tensors)
+	plan, err := source.planV4ExpertBatch(layer, []int{1}, 3*24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	be := newV4OverlapBackend()
+	ring := newPagedRing(be, 3*24)
+	decode := func(tensor v4ExpertTensor) (compute.Tensor, error) {
+		values := make([]float32, len(tensor.Bytes)/4)
+		for i := range values {
+			values[i] = math.Float32frombits(binary.LittleEndian.Uint32(tensor.Bytes[4*i:]))
+		}
+		return compute.NewF32(be, tensor.Shape, values), nil
+	}
+	stager, err := newV4ExpertStager(source, ring, plan, compute.F32, decode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	xHost := []float32{0.75, -1.25}
+	x := be.Upload(compute.NewF32(be, []int{2}, xHost), compute.F32)
+	defer be.Free(x)
+	routes := []v4RoutedExpert{{Expert: 1, Weight: 1}}
+	got, err := composeV4RoutedExperts(layer, routes, x, 0, stager)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if be.unfencedGEMMs != 0 {
+		t.Fatalf("%d GEMM(s) ran against a weight whose transfer had not landed", be.unfencedGEMMs)
+	}
+	if be.fences == 0 {
+		t.Fatal("no transfer went through UploadAsync; the async path was never taken")
+	}
+	if ring.asyncOverlapped == 0 {
+		t.Fatalf("asyncOverlapped=0 with %d async transfers: staging ahead must land at least one transfer under the work between them (waited=%d)", be.fences, ring.asyncWaited)
+	}
+	want := residentV4CompositionOracle(xHost, routes, weights)
+	for i := range want {
+		if delta := math.Abs(float64(got[i] - want[i])); delta > 1e-6 {
+			t.Fatalf("output[%d]=%.9g want %.9g delta %.3g", i, got[i], want[i], delta)
+		}
 	}
 }
 

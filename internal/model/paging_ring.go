@@ -394,6 +394,24 @@ func (r *pagedRing) discardStaged(id polymodel.ModelID) {
 	}
 }
 
+// stageInFlight makes the named weight device-resident under the ring budget WITHOUT
+// settling its transfer, issuing the upload back to back with its siblings so the
+// host->device copies overlap the compute that follows (#13044). It is `stage` minus the
+// demand-path await: the upload is put on the wire here, and the caller settles it by
+// demanding the weight through the ordinary path (matMul -> stage -> awaitStaged), which
+// books the fence as overlapped when its bytes landed under intervening work.
+//
+// Semantics are otherwise exactly `stage`: on a hit the resident handle is reused and no
+// transfer is issued; the `prefetching` flag is set for the duration so the transfer is
+// booked as a hint rather than a demand, and earns no heat under the value-aware policy —
+// the demand itself is booked by the matMul that follows.
+func (r *pagedRing) stageInFlight(name string, mk func() compute.Tensor, dtype compute.Dtype, weightBytes int64, pinned bool) (compute.Tensor, bool) {
+	wasPrefetching := r.prefetching
+	r.prefetching = true
+	defer func() { r.prefetching = wasPrefetching }()
+	return r.stage(name, mk, dtype, weightBytes, pinned)
+}
+
 // hold protects an already-staged weight from eviction for the span of a multi-weight computation,
 // and release ends that span. They exist because one MoE expert is THREE weights (gate/up/down) used
 // together: without a hold, staging `up` under a tight budget could evict `gate` and Free a handle

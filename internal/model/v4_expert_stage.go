@@ -147,4 +147,53 @@ func (s *v4ExpertStager) matMul(name string, x compute.Tensor) ([]float32, error
 	return got, nil
 }
 
+// stageInFlight issues the device transfer for one projection ahead of the GEMM that
+// demands it, so the host->device copy overlaps the arithmetic that runs in between
+// (#13044). It is the V4 stager's single-weight analogue of the R3 activated-set
+// prefetch (expert_ring_prefetch.go): the projection order is known before the first
+// GEMM, so a transfer can be put on the wire a GEMM early instead of being awaited
+// immediately behind the weight before it.
+//
+// It resolves the projection through the same resident-first rule matMul uses: an already
+// resident weight is skipped (no transfer), and a weight that cannot fit the budget, or
+// whose source read/decode fails, is simply not staged — the caller's matMul then falls
+// back to its own paging path, which surfaces the error exactly as it would without the
+// hint, so a hint can never mask a failure. On a synchronous backend every transfer has
+// already landed, so this is a pure reordering of the same uploads and the same resident
+// set; the ring's LRU admission remains free to evict unpinned weights as before.
+func (s *v4ExpertStager) stageInFlight(name string) {
+	if s == nil || s.ring == nil || name == "" {
+		return
+	}
+	if _, ok := s.selected[name]; !ok {
+		return
+	}
+	if s.ring.isResident(name) {
+		return
+	}
+	tensor, err := s.source.read(name)
+	if err != nil {
+		return
+	}
+	s.stats.SourceReads++
+	s.stats.SourceBytes += int64(len(tensor.Bytes))
+	decoded, err := s.decode(tensor)
+	if err != nil || decoded.Dtype != compute.F32 {
+		return
+	}
+	decodedBytes, ok := f32TensorBytes(decoded.Shape)
+	if !ok {
+		return
+	}
+	beforePageIn, beforeEvict := s.ring.pageIn, s.ring.evict
+	if _, ok := s.ring.stageInFlight(name, func() compute.Tensor { return decoded }, s.dtype, decodedBytes, false); !ok {
+		return
+	}
+	s.stats.PageIn += s.ring.pageIn - beforePageIn
+	s.stats.Evictions += s.ring.evict - beforeEvict
+	if s.ring.used() > s.stats.PeakResidentBytes {
+		s.stats.PeakResidentBytes = s.ring.used()
+	}
+}
+
 func (s *v4ExpertStager) Stats() v4ExpertStageStats { return s.stats }
