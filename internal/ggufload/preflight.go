@@ -149,6 +149,19 @@ func BuildModelPreflight(in PreflightInput) ModelPreflight {
 	out.Arch = cfg.ModelType
 	out.TensorCount = len(in.Source.File.Tensors)
 
+	// Rung 2.5: converter-aware attention descriptor compatibility, deepseek41 only.
+	// Every native V4.1 bring-up rung discovered a projection/shape problem only when
+	// later execution demanded the tensor; the header already carries the whole
+	// directory, so the same class is now aggregated OFF THE HEADER — before the byte
+	// estimate, and before any payload byte is read. Scoped to deepseek41 so non-V4.1
+	// preflight is byte-for-byte unchanged.
+	if diags := deepseek41AttentionDescriptorDiagnostics(in.Source, cfg); len(diags) > 0 {
+		out.Verdict = PreflightRefuseHeader
+		out.Reason = renderDeepSeek41AttentionDiagnostics(diags)
+		out.NextAction = "the deepseek41 checkpoint's attention tensor directory is incomplete or mis-shaped; reconvert the artifact so every layer carries the V4.1 attention descriptors the native forward reads, then re-run the preflight"
+		return out
+	}
+
 	// Rung 3: estimate the simultaneous load demands off the header. Ordinary regimes keep
 	// their historical single-demand estimate; Vulkan mixed Q4_K additionally separates the
 	// retained host store, device copy, and bounded worker staging peak.

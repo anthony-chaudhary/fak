@@ -1675,6 +1675,11 @@
           "category": "incidental",
           "reason": "tree speculative attention mask validator",
           "token": "ValidateTreeAttentionMask"
+        },
+        {
+          "category": "incidental",
+          "reason": "canonical V4.1 per-layer KV latent-norm tensor name (model.layers.<L>.attn.kv_norm.weight) carried as a string literal by the ggufload attention-descriptor preflight; an existing tensor-name leaf, not a new attention concept",
+          "token": "attnkvanorm"
         }
       ],
       "id": "attention",
@@ -1686,6 +1691,7 @@
         "ValidateTreeAttentionMask",
         "attentions",
         "attentive",
+        "attnkvanorm",
         "estimated_attention_s",
         "qwenfullattentionlayers",
         "tattn"
@@ -13751,6 +13757,11 @@
           "category": "incidental",
           "reason": "compaction summary helper in prompt ordering",
           "token": "RenderInvariantPrefix"
+        },
+        {
+          "category": "incidental",
+          "reason": "private ggufload helper that joins the aggregated deepseek41 attention-descriptor diagnostics into one bounded ModelPreflight.Reason string; formatting plumbing, not a distinct rendering concept",
+          "token": "renderdeepseek41attentiondiagnostics"
         }
       ],
       "id": "render-materialize",
@@ -13847,6 +13858,7 @@
         "renderWorkpattern",
         "renderauditdistributioncompact",
         "rendercanonicalentry",
+        "renderdeepseek41attentiondiagnostics",
         "rendered",
         "renderidentitypage",
         "rendering",
