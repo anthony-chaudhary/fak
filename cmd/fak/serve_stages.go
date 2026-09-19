@@ -468,7 +468,16 @@ func (rt *serveRuntime) resolveNativeContext(sf *serveFlags, ranks int) error {
 				return err
 			}
 			cfg, _ := ws.File.Config()
-			logServeAutoSizedContext(cfg.ContextSizeConfigWithPrecision(serveKVPrecision()), weights, fit, fit.avail(), requested, resolution.ResolvedTokens)
+			// fak#13286: log the SAME ceiling resolveServeNativeContext sized against, so the
+			// operator line's headroom/weights are honest on a shared-pool APU (the device aperture
+			// over-reports the physical pool the KV lives in).
+			logCfg := cfg.ContextSizeConfigWithPrecision(serveKVPrecision())
+			logCfg.PoolSharedWithHost = ggufload.BackendSharesHostRAM(rt.chatBackend)
+			logFit := fit
+			if logCfg.PoolSharedWithHost {
+				logFit = serveSharedPoolSizingFit(rt.chatBackend, fit)
+			}
+			logServeAutoSizedContext(logCfg, weights, logFit, logFit.avail(), requested, resolution.ResolvedTokens)
 		}
 	}
 	rt.nativeContext = resolution

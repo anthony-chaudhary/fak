@@ -417,6 +417,107 @@ func TestServeNativeContextUnknownAutoFallsBackToSchedulerDefault(t *testing.T) 
 	}
 }
 
+// #13286: on a SHARED-POOL integrated APU (ggufload.BackendSharesHostRAM) the KV store is
+// host-resident and competes with the host-scoped co-resident weights for the ONE physical
+// DRAM pool. The device aperture (a Vulkan unified heap, e.g. strix3's ~84.28 GiB against a
+// 62.4 GiB MemTotal) OVER-reports that pool, so sizing the context against it admits a KV
+// demand the physical host budget cannot hold: the witnessed boot log auto-sized to 99086
+// tokens (kv=22.679 GiB) on top of a ~44 GiB bounded host expert charge against a ~48.9 GiB
+// host budget, and warmup grew 34->62 GiB until kernel OOM with no token (fak#13286). The
+// sizer must size against the shared physical pool (the backend's host window) exactly as the
+// load path and the bounded streamed-expert derivation already do.
+//
+// The device cpu-offload arm returns the DEVICE aperture as `fit` (serveNativeContextSizingInputs),
+// so with a huge aperture and a small host pool the current code derives the full declared window
+// while the host pool can only hold wantTokens. RED: ResolvedTokens == MaxContext.
+func TestServeSharedPoolContextSizesAgainstHostPoolNotDeviceAperture(t *testing.T) {
+	ws := serveSynthWideWindowWeightSource(t)
+	// A realistically large declared window: the aperture-derived fit clamps to MaxContext,
+	// while the host-pool fit must shrink well below it.
+	ws.File.Metadata["qwen2.context_length"] = ggufload.Value{Type: ggufload.TypeUint64, Value: uint64(262144)}
+
+	cfg, err := ws.File.Config()
+	if err != nil {
+		t.Fatal(err)
+	}
+	csc := cfg.ContextSizeConfig()
+	perToken := int64(compute.EstimateKVStoreBytes(csc.KV, 1))
+	if perToken <= 0 {
+		t.Fatalf("fixture KV geometry unprobeable (perToken=%d)", perToken)
+	}
+	scratch := compute.EstimateHALTransientMemoryPlan(csc.Scratch).Total()
+	if csc.MaxContext <= 0 {
+		t.Fatalf("fixture must declare a window, got %d", csc.MaxContext)
+	}
+
+	// The witnessed shape: a modest device dense side beside a large HOST-scoped streamed expert
+	// set (the gguf-host-expert-offload-streamed row).
+	const deviceWeights = int64(4) << 20
+	const hostWeights = int64(40) << 20
+	weights := compute.MemoryPlan{
+		{Class: compute.MemoryWeights, Bytes: deviceWeights, Scope: compute.MemoryScopeDevice},
+		{Class: compute.MemoryOffload, Bytes: hostWeights, Scope: compute.MemoryScopeHost, Detail: "gguf-host-expert-offload-streamed"},
+	}
+
+	// The shared physical pool is the HOST window. Size it so the pool covers the co-resident
+	// weights, scratch, and exactly wantTokens of KV after the host headroom (the headroom is
+	// applied to the raw pool, so solve for the raw base that leaves wantTokens after it).
+	const wantTokens = 4096
+	wantNeed := int64(wantTokens)*perToken + weights.Total() + scratch
+	hostBase := int64(float64(wantNeed) / (1 - serveGGUFHostHeadroom))
+	for hostBase < wantNeed {
+		hostBase++
+	}
+	hostAvail := compute.BudgetAfterHeadroom(hostBase, serveGGUFHostHeadroom)
+	for (hostAvail-weights.Total()-scratch)/perToken < wantTokens {
+		hostBase++
+		hostAvail = compute.BudgetAfterHeadroom(hostBase, serveGGUFHostHeadroom)
+	}
+	if got := (hostAvail - weights.Total() - scratch) / perToken; got != wantTokens {
+		t.Fatalf("fixture host pool does not pin wantTokens: derived %d, want %d", got, wantTokens)
+	}
+
+	// The device aperture over-reports the same physical pool (the unified-heap shape): far
+	// larger than the host window, so an aperture-sized fit admits the full declared window.
+	const deviceAperture = int64(1) << 30
+	if deviceAperture <= hostBase {
+		t.Fatalf("fixture device aperture %d must exceed the host pool %d to reproduce the over-admission", deviceAperture, hostBase)
+	}
+	if wantTokens >= csc.MaxContext {
+		t.Fatalf("fixture wantTokens %d must sit below MaxContext %d", wantTokens, csc.MaxContext)
+	}
+
+	be := serveCapBackend{
+		Backend:     compute.Default(),
+		total:       deviceAperture,
+		free:        deviceAperture,
+		known:       true,
+		hostTotal:   hostBase,
+		hostFree:    hostBase,
+		hostKnown:   true,
+		uploadDtype: true,
+		tier:        "integrated:vulkan-test",
+	}
+	// fit is the DEVICE aperture, exactly as serveNativeContextSizingInputs returns it for the
+	// device cpu-offload arm.
+	fit := serveFitBudget{Base: deviceAperture, Headroom: serveGGUFDeviceHeadroom}
+
+	res, plan, err := resolveServeNativeContext(ws, be, weights, fit, 0)
+	if err != nil {
+		t.Fatalf("resolveServeNativeContext: %v", err)
+	}
+	if res.ResolvedTokens != wantTokens {
+		t.Fatalf("shared-pool auto context = %d tokens, want %d derived from the HOST pool; the device aperture %d over-reported the shared physical pool and the derived KV (kv=%s) cannot fit the host budget (hostBase=%s, see fak#13286)",
+			res.ResolvedTokens, wantTokens, deviceAperture, bytesText(uint64(compute.EstimateKVStoreBytes(csc.KV, res.ResolvedTokens))), bytesText(uint64(hostBase)))
+	}
+	// The emitted plan's simultaneous host footprint must fit the shared pool it was sized
+	// against: co-resident weights + KV + scratch <= host budget.
+	if hostFootprint := weights.Total() + plan.ByClass()[compute.MemoryKVCache]; hostFootprint > hostAvail {
+		t.Fatalf("shared-pool plan host footprint %d exceeds the host pool budget %d (weights=%d, kv=%d)",
+			hostFootprint, hostAvail, weights.Total(), plan.ByClass()[compute.MemoryKVCache])
+	}
+}
+
 func TestServeSizingArtifactReportsResolvedNativeContext(t *testing.T) {
 	ws := serveSynthWideWindowWeightSource(t)
 	artifact, err := buildServeSizingArtifact(ws, nil, false, 2048, "native-model.gguf", 0)

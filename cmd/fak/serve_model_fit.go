@@ -129,8 +129,42 @@ func resolveServeNativeContext(ws *ggufload.WeightSource, be compute.Backend, we
 	if requested > 0 {
 		override = requested
 	}
-	resolution.ResolvedTokens, _ = compute.AutoSizeContextPlan(csc, weights, fit.avail(), override)
+	// fak#13286: `fit` is the DEVICE fit budget the selected arm returned
+	// (serveNativeContextSizingInputs returns serveDeviceFitBudget(be) for a device arm). On a
+	// SHARED-POOL integrated APU the KV store is host-resident and competes with the host-scoped
+	// co-resident weights for ONE physical DRAM pool, and the device aperture (a Vulkan unified
+	// heap) OVER-reports that pool -- sizing the context against the aperture auto-sized 99086
+	// tokens / 22.679 GiB KV on top of a ~44 GiB bounded host charge against a ~48.9 GiB host
+	// budget, and warmup grew to the kernel OOM. Size against the shared physical pool (the
+	// backend's host window) instead, exactly as the load path and the streamed bound do.
+	sizingFit := fit
+	if csc.PoolSharedWithHost {
+		sizingFit = serveSharedPoolSizingFit(be, fit)
+	}
+	resolution.ResolvedTokens, _ = compute.AutoSizeContextPlan(csc, weights, sizingFit.avail(), override)
 	return resolution, csc.PerContextMemoryPlan(resolution.ResolvedTokens), nil
+}
+
+// serveSharedPoolSizingFit is the memory ceiling the context auto-sizer must size against when
+// the plan's KV store competes with host-resident co-resident weights for ONE physical DRAM pool
+// (PoolSharedWithHost, an integrated/APU tier; fak#13286). The passed `fit` is the DEVICE aperture
+// (serveDeviceFitBudget's stable device-local ceiling, e.g. strix3's 84.28 GiB heap) -- but the KV
+// store is host-resident, so the pool it must fit is the HOST window, not the aperture. The
+// backend's advertised host window (compute.HostMemoryInfo, which the Vulkan integrated backend
+// backs with hostSystemMemory = MemTotal/MemAvailable) is preferred; when the backend cannot report
+// it, the process host probe is used, mirroring RefuseUnifiedHostResidencyIfTooBig's preference.
+// A host pool that is unprobeable (Base<=0) returns `fit` unchanged, so the caller's avail<=0
+// fail-open path is preserved and a shared-pool box never gains extra context from the substitution.
+func serveSharedPoolSizingFit(be compute.Backend, fit serveFitBudget) serveFitBudget {
+	total, free, known := compute.HostMemoryInfo(be)
+	if !known {
+		total, free, known = compute.HostSystemMemoryInfo()
+	}
+	base := serveFitBudgetBase(total, free, known)
+	if base <= 0 {
+		return fit
+	}
+	return serveFitBudget{Base: base, Headroom: serveGGUFHostHeadroom}
 }
 
 // avail is the headroom-adjusted budget passed to compute.AutoSizeContextPlan Ã¢â‚¬â€ byte-identical to
