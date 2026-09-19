@@ -384,11 +384,16 @@ func runAgent(argv []string) {
 	}
 
 	var planner agent.Planner
-	if *af.offline || effectiveBaseURL == "" {
-		if !*af.offline {
-			fmt.Fprintln(os.Stderr, "fak agent: no --base-url given; using the offline mock planner (pass --base-url for a live run)")
-		}
+	if *af.offline {
+		// Explicit --offline opt-in: the deterministic mock demo (also `fak agentdemo`).
 		planner = agent.NewMockPlanner(*af.model)
+	} else if effectiveBaseURL == "" {
+		// The native agent is a REAL agent: a run with no model endpoint resolvable
+		// fails loud with guidance, never silently runs the offline scripted demo.
+		fmt.Fprintln(os.Stderr, "fak agent: no model endpoint configured - the native agent runs a real model, not the offline demo")
+		fmt.Fprintln(os.Stderr, "  live run    : pass --base-url URL --model M --api-key-env VAR (or set the provider base-url env, e.g. OPENAI_BASE_URL)")
+		fmt.Fprintln(os.Stderr, "  offline demo: fak agentdemo  (or --offline, the explicit opt-in)")
+		os.Exit(2)
 	} else {
 		key := os.Getenv(*af.apiKeyEnv)
 		if key == "" {

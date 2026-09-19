@@ -48,7 +48,7 @@ var overviewGroups = []struct {
 		{"up", "boot the unified agent runtime, gateway, policy, metrics, and session API"},
 		{"manage", "wrap an agent harness: manage every tool call in-process ('fak m'; legacy: guard)"},
 		{"serve", "the OpenAI-compatible gateway in front of a local or remote model"},
-		{"agent", "the offline proof: run one managed-agent task end to end ('fak agent --offline')"},
+		{"agent", "the real agent: run one managed-agent task end to end against a live model"},
 		{"ultracode", "plan, launch, and observe a bounded concurrent coding-agent fleet"},
 		{"run", "run an agent turn (or a recorded trace / 'fak replay') through the kernel"},
 		{"codex", "launch OpenAI Codex routed through the kernel"},
@@ -80,8 +80,8 @@ var overviewGroups = []struct {
 	{"models + housekeeping", []overviewEntry{
 		{"model", "resolve / cache an hf:// model ('fak pull' / 'fak ls' aliases)"},
 		{"self-update", "converge a built-from-source fak binary on origin/main"},
-		{"version", "print the fak version"},
 		{"help", "this overview; 'help <verb>' for depth, 'help --all' for the catalog"},
+		{"agentdemo", "the offline demo moved off 'fak agent': the scripted mock A/B, no network"},
 	}},
 }
 
@@ -179,6 +179,7 @@ func usageVerbs(w io.Writer) {
 		fmt.Fprintf(w, "  %-34s %-10s %s\n", name, "["+tier+"]", v.Synopsis)
 	}
 }
+
 // printVerbHelp prints one verb's deep help: the catalog synopsis line (when
 // available) over the verb's block(s) carved from the usage wall. Reports false
 // when neither source knows the verb.

@@ -269,6 +269,11 @@ const usageCoreText = `usage:
                 [--route-manifest FILE]
                 (--native runs one kernel-mediated arm and prints its final answer;
                  without it, the command preserves the LIVE turn-count A/B report)
+  fak agentdemo [--task STR] [--effort E] [--out agent-report.json]
+                (the OFFLINE demo moved off 'fak agent': the deterministic mock
+                 planner drives the LIVE turn-count A/B, no network/key/model;
+                 'fak agent' itself is the real agent -- it fails loud when no
+                 model endpoint is configured)
   fak chat      [--provider openai|anthropic|gemini|xai] [--base-url URL]
                 [--model M] [--api-key-env VAR] [--offline] [--max-turns N]
                 [--code-tools=true|false] [--workspace DIR] [--memory=true|false]

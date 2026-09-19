@@ -104,6 +104,7 @@ _fak() {
         'manage:wrap an agent harness: manage every tool call in-process'
         'serve:the OpenAI-compatible gateway in front of a local or remote model'
         'agent:run one managed-agent task end to end'
+        'agentdemo:the offline demo moved off fak agent (scripted mock A/B)'
         'ultracode:plan, launch, and observe a bounded concurrent coding-agent fleet'
         'run:run an agent turn (or a recorded trace) through the kernel'
         'claude:launch Claude Code directly against fak serve backend on Mac'
@@ -185,6 +186,7 @@ complete -c fak -n "__fak_needs_command" -a "up" -d "boot the unified agent runt
 complete -c fak -n "__fak_needs_command" -a "manage" -d "wrap an agent harness"
 complete -c fak -n "__fak_needs_command" -a "serve" -d "OpenAI-compatible gateway"
 complete -c fak -n "__fak_needs_command" -a "agent" -d "run one managed-agent task"
+complete -c fak -n "__fak_needs_command" -a "agentdemo" -d "the offline demo moved off fak agent"
 complete -c fak -n "__fak_needs_command" -a "ultracode" -d "plan, launch, and observe fleet"
 complete -c fak -n "__fak_needs_command" -a "run" -d "run an agent turn"
 complete -c fak -n "__fak_needs_command" -a "claude" -d "launch Claude Code"

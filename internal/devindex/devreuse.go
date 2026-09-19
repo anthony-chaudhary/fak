@@ -44,6 +44,10 @@ var portableDevPatterns = map[string]string{
 var maintainerDevCommands = []string{
 	"accounts",
 	"agent-queue",
+	// `agentdemo` is the offline mock demo moved off the front-door `fak agent`
+	// (the real agent loop). It demonstrates fak's own turn-count A/B, so it is
+	// fak-maintainer machinery, not a portable adopter pattern.
+	"agentdemo",
 	"agents",
 	"ailuminate",
 	"answer-shape",

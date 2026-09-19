@@ -57,10 +57,14 @@ const (
 var verbTiers = map[string]VerbTier{
 	// ---- frontdoor: the product (ceiling gated by TestFrontdoorTierStaysSmall) ----
 	"ablate": TierFrontdoor,
-	// `agent` is the README's headline proof (`fak agent --offline`) and the first
-	// command a new evaluator is told to run, so it belongs in the visible front
-	// door rather than under `fak dev` (#5464).
-	"agent":        TierFrontdoor,
+	// `agent` is fak's OWN native agent loop (epic #1315) and the first command a
+	// new evaluator is told to run, so it belongs in the visible front door rather
+	// than under `fak dev` (#5464). It is a REAL agent: it runs a real model and
+	// fails loud when none is configured — never the offline demo.
+	"agent": TierFrontdoor,
+	// `agentdemo` is the offline demo MOVED off `fak agent` (lower priority): the
+	// scripted mock turn-count A/B, no network/key/model. It must stay under `fak dev`.
+	"agentdemo":    TierDev,
 	"capabilities": TierFrontdoor,
 	"attest":       TierFrontdoor,
 	"audit":        TierFrontdoor,

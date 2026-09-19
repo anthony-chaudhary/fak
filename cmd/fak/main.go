@@ -127,6 +127,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		cmdRedTeam(args)
 	case "agent":
 		cmdAgent(args)
+	case "agentdemo":
+		cmdAgentDemo(args)
 	case "agentic":
 		cmdAgentic(args)
 	case "agentx":

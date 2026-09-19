@@ -204,6 +204,7 @@ func TestOverviewVerbsAdoptVerbFlagUsage(t *testing.T) {
 		"version": true, "help": true, "ps": true, "up": true,
 		"audit": true, "egress": true, "model": true, "signal": true, "codex": true, "manage": true,
 		"progress": true, "ultracode": true, "build": true, "self-update": true,
+		"agentdemo": true,
 	}
 	for _, g := range overviewGroups {
 		for _, e := range g.entries {
