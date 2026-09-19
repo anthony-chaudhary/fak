@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,6 +121,93 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 // measurement the static bench could not produce.
 func cmdAgent(argv []string) {
 	runAgent(argv)
+}
+
+// agentRouterOrigin is the unified endpoint's default origin: the local fak
+// serve gateway (`fak serve` binds 127.0.0.1:8080 by default), which fronts
+// every upstream behind one OpenAI-compatible address.
+const agentRouterOrigin = "http://127.0.0.1:8080"
+
+// agentRouterProbe probes the local fak router for liveness and the served
+// model id. It is a package var so tests override it with a stub instead of
+// binding 127.0.0.1:8080 — a dev-box mock serve on that port must never be
+// able to flip a test verdict.
+var agentRouterProbe = probeLocalRouter
+
+// probeLocalRouter probes the default fak router origin.
+func probeLocalRouter() (string, bool) { return probeLocalGateway(agentRouterOrigin) }
+
+// agentEndpoint is the resolved endpoint the fak agent runs on.
+type agentEndpoint struct {
+	// baseURL is the effective provider base URL; "" means no endpoint was
+	// resolvable (the fail-loud case, unless --offline was explicit).
+	baseURL string
+	// routerProbed is true when the native fak-router probe ran — the
+	// no-flag path. baseURL=="" + routerProbed means the router was probed
+	// and is not live, not that no endpoint question was asked.
+	routerProbed bool
+}
+
+// agentEndpointResolver is the injectable seam for runAgent; tests stub it via
+// agentRouterProbe, which it consults for the native-router default.
+var agentEndpointResolver = resolveAgentEndpoint
+
+// resolveAgentEndpoint resolves the endpoint `fak agent` runs on, in priority
+// order: explicit --base-url, the provider env var, an explicit provider's
+// default base URL, then a live probe of the local fak router — the NATIVE
+// default that mirrors `fak chat`'s auto-connect and the pi/opencode launchers:
+// the agent points at the unified endpoint without flags, so provider, key,
+// and model churn is absorbed behind the router instead of re-entering the
+// harness. The probed served model id is adopted only when --model was not
+// explicit and the id is not the mock serve's placeholder — a mock id must not
+// pollute a live run's model default (the witnessed probePiBackend class).
+func resolveAgentEndpoint(af *agentFlags, baseURLExplicit, providerExplicit, modelExplicit bool, stderr io.Writer) agentEndpoint {
+	if stderr == nil {
+		stderr = os.Stderr
+	}
+	effective := *af.baseURL
+	if effective == "" {
+		if env := os.Getenv(dropin.EnvVar(*af.provider, "")); env != "" {
+			effective = env
+		} else if providerExplicit && !*af.offline {
+			effective = dropin.DefaultBaseURL(*af.provider)
+		}
+	}
+	if effective == "" && !*af.offline && !baseURLExplicit {
+		if localModel, ok := agentRouterProbe(); ok {
+			effective = agentRouterOrigin + "/v1"
+			if !modelExplicit && localModel != "" && localModel != "mock" {
+				*af.model = localModel
+			}
+			fmt.Fprintf(stderr, "fak agent: auto-connected to the fak router at %s (model: %s)\n", effective, *af.model)
+			return agentEndpoint{baseURL: effective, routerProbed: true}
+		}
+		return agentEndpoint{routerProbed: true}
+	}
+	if effective != "" && !modelExplicit && !*af.offline {
+		if serverModel := detectServerModel(effective); serverModel != "" && serverModel != "mock" {
+			*af.model = serverModel
+			fmt.Fprintf(stderr, "fak agent: auto-detected model %q from %s\n", *af.model, effective)
+		}
+	}
+	return agentEndpoint{baseURL: effective}
+}
+
+// agentNoEndpointGuidance writes the fail-loud guidance emitted when a bare
+// `fak agent` has no model endpoint. When the native-router probe ran and the
+// router was not live, the message names the probed router rather than claiming
+// no base URL was given; the two explicit demo opt-ins are always named.
+func agentNoEndpointGuidance(stderr io.Writer, routerProbed bool) {
+	if stderr == nil {
+		stderr = os.Stderr
+	}
+	if routerProbed {
+		fmt.Fprintf(stderr, "fak agent: fak router at %s not responding; no model endpoint configured - the native agent runs a real model, not the offline demo\n", agentRouterOrigin)
+	} else {
+		fmt.Fprintln(stderr, "fak agent: no model endpoint configured - the native agent runs a real model, not the offline demo")
+	}
+	fmt.Fprintln(stderr, "  live run    : pass --base-url URL --model M --api-key-env VAR (or set the provider base-url env, e.g. OPENAI_BASE_URL, or start `fak serve`)")
+	fmt.Fprintln(stderr, "  offline demo: fak agentdemo  (or --offline, the explicit opt-in)")
 }
 
 func runAgent(argv []string) {
@@ -368,14 +456,8 @@ func runAgent(argv []string) {
 		runOpts = append(runOpts, agent.WithSessionCheckpoint(*af.session, defaultSessionDir))
 	}
 
-	effectiveBaseURL := *af.baseURL
-	if effectiveBaseURL == "" {
-		if env := os.Getenv(dropin.EnvVar(*af.provider, "")); env != "" {
-			effectiveBaseURL = env
-		} else if providerExplicit && !*af.offline {
-			effectiveBaseURL = dropin.DefaultBaseURL(*af.provider)
-		}
-	}
+	endpoint := agentEndpointResolver(af, baseURLExplicit, providerExplicit, modelExplicit, os.Stderr)
+	effectiveBaseURL := endpoint.baseURL
 	if *af.provider != "" {
 		runOpts = append(runOpts, agent.WithProvider(*af.provider))
 	}
@@ -390,9 +472,7 @@ func runAgent(argv []string) {
 	} else if effectiveBaseURL == "" {
 		// The native agent is a REAL agent: a run with no model endpoint resolvable
 		// fails loud with guidance, never silently runs the offline scripted demo.
-		fmt.Fprintln(os.Stderr, "fak agent: no model endpoint configured - the native agent runs a real model, not the offline demo")
-		fmt.Fprintln(os.Stderr, "  live run    : pass --base-url URL --model M --api-key-env VAR (or set the provider base-url env, e.g. OPENAI_BASE_URL)")
-		fmt.Fprintln(os.Stderr, "  offline demo: fak agentdemo  (or --offline, the explicit opt-in)")
+		agentNoEndpointGuidance(os.Stderr, endpoint.routerProbed)
 		os.Exit(2)
 	} else {
 		key := os.Getenv(*af.apiKeyEnv)
