@@ -2826,8 +2826,51 @@ const inKernelRequestPressureTrimMinMarginBytes = 64 << 20
 
 func (p *InKernelPlanner) logExecutionSummary(q8kern, q8fusedMark string, promptTok, cacheable, matched, computed int, prefillS, prefTPS float64, generated int, decodeS, decTPS float64) {
 	backend, forwardPath := p.executionIdentity()
-	log.Printf("inkernel_chat model=%s backend=%s forward_path=%s q4k=%v q8dec=%s%s/%dw prompt=%dtok cacheable=%dtok reused=%dtok prefill=%dtok/%.2fs/%.1ftok/s decode=%dtok/%.2fs/%.1ftok/s",
-		p.modelID, backend, forwardPath, p.q4k, q8kern, q8fusedMark, model.Q8DecodeWorkers(), promptTok, cacheable, matched, computed, prefillS, prefTPS, generated, decodeS, decTPS)
+	log.Printf("inkernel_chat model=%s backend=%s forward_path=%s q4k=%v q8dec=%s%s/%dw prompt=%dtok cacheable=%dtok reused=%dtok prefill=%dtok/%.2fs/%.1ftok/s decode=%dtok/%.2fs/%.1ftok/s%s",
+		p.modelID, backend, forwardPath, p.q4k, q8kern, q8fusedMark, model.Q8DecodeWorkers(), promptTok, cacheable, matched, computed, prefillS, prefTPS, generated, decodeS, decTPS, p.v41FaultAttributionClause())
+}
+
+// v41ExpertFaultAttributioner is the optional read seam a V4.1 model exposes
+// so the execution summary can attribute the routed-expert fault cost per
+// forward phase (#13294 DoD item 1). Every model WITHOUT the method — the
+// whole non-V4.1 fleet — fails this assertion and skips the clause, so their
+// summary lines stay byte-for-byte unchanged.
+type v41ExpertFaultAttributioner interface {
+	V41ExpertFaultAttribution() model.V41ExpertFaultAttribution
+}
+
+// v41FaultAttributionClause renders the appended clause of the execution
+// summary: the phase-split routed-expert fault attribution for the model the
+// turn ran on. Empty when the model does not expose it OR when both phase
+// ledgers are untouched — a non-V4.1 turn reports nothing rather than a zero
+// clause, keeping the existing line the physical receipts parse. The two
+// phase ledgers are read through their exported FIELDS (field access through
+// selectors never names the unexported ledger type), so the formatting stays
+// entirely in the agent layer.
+func (p *InKernelPlanner) v41FaultAttributionClause() string {
+	if p == nil || p.m == nil {
+		return ""
+	}
+	at := v41ExpertFaultAttributioner(p.m)
+	if at == nil {
+		return ""
+	}
+	fa := at.V41ExpertFaultAttribution()
+	if fa == (model.V41ExpertFaultAttribution{}) {
+		return ""
+	}
+	const mib = 1.0 / (1 << 20)
+	pre, dec := fa.Prefill, fa.Decode
+	hits, reads := pre.ResidentHits+dec.ResidentHits, pre.ResidentHits+dec.ResidentHits+pre.Faults+dec.Faults
+	hitFraction := 0.0
+	if reads > 0 {
+		hitFraction = float64(hits) / float64(reads)
+	}
+	return fmt.Sprintf(
+		" v41_faults prefill=[faults=%df/%.1ffpt faulted_bytes=%.1fMiB dequant=%.2fGiB] decode=[faults=%df/%.1ffpt faulted_bytes=%.1fMiB dequant=%.2fGiB] hit_fraction=%.2f",
+		pre.Faults, pre.FaultsPerToken, mib*float64(pre.FaultedBytes), float64(pre.DequantBytes)/(1<<30),
+		dec.Faults, dec.FaultsPerToken, mib*float64(dec.FaultedBytes), float64(dec.DequantBytes)/(1<<30),
+		hitFraction)
 }
 
 // executionIdentity makes the request log say which compute path actually produced

@@ -1329,9 +1329,20 @@ func expertWeightF32Into(w expertWeight, dst []float32) ([]float32, error) {
 // over it and silently overwrite model weights -- the exact aliasing bug the
 // adversarial review of #13288 found and 0480cf446 fixed. Copying removes the
 // alias with byte-identical values.
+//
+// Phase attribution (#13294 DoD item 1): each resolution is also attributed to
+// the phase the session entry point declared -- a resident-store read counts a
+// ResidentHit (zero tier IO, zero dequant), a tier fault counts
+// Faults/FaultedBytes/DequantBytes. The tier arm's FaultedBytes is the entry
+// stride the tier moved, reported here as len(ew.q4.raw)/len(ew.kq.raw) AFTER
+// materialization -- the same byte count ExpertCheckpointStats.BytesRead
+// records for the read -- and DequantBytes is len(out)*4, the f32 block the
+// dequant materialized (not a copy: the dequant BLK-COUNT math itself is
+// untouched). All notes are inert no-ops unless a phase was set.
 func (m *Model) v41ExpertF32Into(l int, leaf string, dst []float32) ([]float32, error) {
 	name := layerName(l, leaf)
 	if w, ok := m.residentF32Mat(name); ok {
+		m.v41NoteExpertResidentHit()
 		return append(dst[:0], w...), nil
 	}
 	if m.expertCheckpoint.Has(name) {
@@ -1340,17 +1351,35 @@ func (m *Model) v41ExpertF32Into(l int, leaf string, dst []float32) ([]float32, 
 			return nil, v41StageErr(v41StageMoE, l,
 				fmt.Errorf("%w: tensor %s: %w", ErrV41ForwardStage, name, err))
 		}
+		faultedBytes := faultedRawBytes(ew)
 		w, err := expertWeightF32Into(ew, dst)
 		if err != nil {
 			return nil, v41StageErr(v41StageMoE, l,
 				fmt.Errorf("%w: tensor %s: %v", ErrV41ForwardStage, name, err))
 		}
 		if w != nil {
+			m.v41NoteExpertTierFault(faultedBytes, int64(len(w))*4)
 			return w, nil
 		}
 	}
 	return nil, v41StageErr(v41StageMoE, l,
 		fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
+}
+
+// faultedRawBytes reports the raw CHECKPOINT byte stride one faulted
+// projection's weight carries after materialization -- the tier's per-fault IO
+// unit (FaultedBytes here, BytesRead on ExpertCheckpointStats). It counts only
+// the staged representations (q4 / k-quant); anything else reports 0, which a
+// successful dequant never produces because expertWeightF32Into returns nil
+// for it.
+func faultedRawBytes(w expertWeight) int64 {
+	if w.q4 != nil {
+		return int64(len(w.q4.raw))
+	}
+	if w.kq != nil {
+		return int64(len(w.kq.raw))
+	}
+	return 0
 }
 
 // v41MHCProjectFull executes the published flattened-four-stream mHC mix
@@ -2092,14 +2121,23 @@ func (m *Model) v41Head(x []float32) ([]float32, error) {
 // (panics) with a typed error before any math when a stage is missing, matching
 // the requirePreNorm convention but preserving the #12967 weightless-probe
 // errors.Is(err, ErrV41NativeUnsupported) contract.
+//
+// Phase attribution (#13294 DoD item 1): the whole pass runs under
+// V41PhasePrefill and one token is noted PER ID — the prompt delta this call
+// was ASKED to ingest — only after the forward succeeded, so a fail-closed
+// refusal never inflates the phase's denominator. The defer restores the phase
+// to the inert default, so anything the next forward path runs notes nothing.
 func (s *Session) prefillV41(ids []int) []float32 {
 	if err := s.M.v41ForwardAdmitted(); err != nil {
 		panic(err)
 	}
+	s.M.v41SetExpertFaultPhase(V41PhasePrefill)
+	defer s.M.v41SetExpertFaultPhase(V41PhaseUnknown)
 	act, err := s.M.forwardV41(ids, s.v41State())
 	if err != nil {
 		panic(err)
 	}
+	s.M.v41NoteExpertFaultToken(len(ids))
 	return lastLogits(act)
 }
 
@@ -2107,14 +2145,23 @@ func (s *Session) prefillV41(ids []int) []float32 {
 // cacheless: Step folds the token into the committed history and recomputes the
 // whole history, so its logits are exactly a longer Forward's last-position
 // logits (the #12901 prefill/step consistency property).
+//
+// Phase attribution (#13294): the step runs under V41PhaseDecode and notes ONE
+// token — the Step call, i.e. the served decode token the tok/s gate counts —
+// so the decode ledger's fault cost honestly includes the whole-history
+// recompute this cacheless assembly pays per step. That is exactly the number
+// the physical 5 tok/s target needs to attribute.
 func (s *Session) stepV41(id int) []float32 {
 	if err := s.M.v41ForwardAdmitted(); err != nil {
 		panic(err)
 	}
+	s.M.v41SetExpertFaultPhase(V41PhaseDecode)
+	defer s.M.v41SetExpertFaultPhase(V41PhaseUnknown)
 	act, err := s.M.forwardV41([]int{id}, s.v41State())
 	if err != nil {
 		panic(err)
 	}
+	s.M.v41NoteExpertFaultToken(1)
 	return lastLogits(act)
 }
 
