@@ -2305,8 +2305,20 @@ func (m *Model) v41Head(x []float32) ([]float32, error) {
 // was ASKED to ingest — only after the forward succeeded, so a fail-closed
 // refusal never inflates the phase's denominator. The defer restores the phase
 // to the inert default, so anything the next forward path runs notes nothing.
+//
+// Prefill first-token feasibility (#13294 follow-on): when the model declares a
+// routed-expert fault bandwidth AND a prior pass has measured a per-token fault
+// volume, the pass projects its first-token latency BEFORE entering the forward
+// and fails closed with the typed ErrV41PrefillLatency refusal when it cannot
+// clear the session's watchdog window. On the default (no declared bandwidth, or
+// no measurement yet) this is inert and the pass runs byte-for-byte as before —
+// the physical `fed6a6a37` rung's 0.1 tok/s prefill is exactly the case this
+// turns from a 492 s wedge into a named, pre-emptive "no".
 func (s *Session) prefillV41(ids []int) []float32 {
 	if err := s.M.v41ForwardAdmitted(); err != nil {
+		panic(err)
+	}
+	if err := s.M.v41PrefillFirstTokenAdmitted(len(ids)); err != nil {
 		panic(err)
 	}
 	s.M.v41SetExpertFaultPhase(V41PhasePrefill)

@@ -235,6 +235,16 @@ type Model struct {
 	expertCheckpoint *ExpertCheckpointTier
 	weightCloser     *weightCloserState
 
+	// v41PrefillFaultBandwidth is the declared routed-expert fault bandwidth (bytes/second) the
+	// V4.1 prefill first-token gate may project against, in B/s. 0 (the default) leaves the gate
+	// inert so a prefill runs byte-for-byte as before; > 0 lets the prefill path refuse UP FRONT
+	// (typed ErrV41PrefillLatency) when the projected first-token latency cannot clear the caller's
+	// watchdog window. See v41_prefill_latency_gate.go (fak#13294).
+	v41PrefillFaultBandwidth int64
+	// v41PrefillFirstTokenWindow is the first-token watchdog window (seconds) the prefill gate must
+	// clear. 0 (the default) means no window was declared and the gate never refuses.
+	v41PrefillFirstTokenWindow float64
+
 	// q2w holds the optional resident ternary Q2_0 copy of matmul weights, fed the raw
 	// GGUF group-128 blocks straight from the loader and consumed by q2MatRows.
 	q2w map[string]*q2Tensor
