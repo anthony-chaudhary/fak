@@ -94,6 +94,13 @@ func serveNativeControlConfig(sf *serveFlags) nativeControlConfig {
 			Q4KGateUpOutputSlab:       *sf.nativeQ4KGateUpOutputSlab,
 			DenseGPULayers:            gpuLayers,
 			KVPrecision:               prec,
+			// Opt the resident serve chat planner into the SAME continuous-batch
+			// decode coalescer `fak up` already wires (#1590), so N concurrent
+			// same-prefix turns share one batched forward instead of serializing on
+			// devMu (fak#13263). This is the structural gate only: the coalescer's
+			// device half (q4k && metal && qwen35-hybrid) still decides at run time,
+			// and a non-eligible model falls back to the byte-identical serial loop.
+			BatchDecode: true,
 		},
 		PrefixProfile:    *sf.nativePrefixProfile,
 		VulkanQ4KProfile: *sf.vulkanQ4KProfile,

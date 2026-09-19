@@ -48,6 +48,11 @@ func TestServeNativeFlagsReachTypedPlannerConfig(t *testing.T) {
 		QwenQ4KPrefillChunkTokens: 2048,
 		Qwen35MetalGDNSequence:    true,
 		Q4KGateUpOutputSlab:       true,
+		// fak#13263: the serve planner is structurally opted into the continuous
+		// batch-decode coalescer (same wiring `fak up` already applies, #1590), so
+		// concurrent same-prefix turns share one batched forward. The coalescer's
+		// device half (q4k && metal && qwen35-hybrid) still gates at run time.
+		BatchDecode: true,
 	}
 	if got := serveNativePlannerConfig(sf); !reflect.DeepEqual(got, want) {
 		t.Fatalf("typed planner config = %+v, want %+v", got, want)
