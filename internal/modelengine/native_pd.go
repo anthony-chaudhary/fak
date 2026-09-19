@@ -102,7 +102,12 @@ func (s *NativeScheduler) AdmitImported(ctx context.Context, c *abi.ToolCall, se
 	s.waiting = append(s.waiting, ln)
 	s.mu.Unlock()
 
-	s.started.Do(func() { go s.run() })
+	s.started.Do(func() {
+		s.mu.Lock()
+		s.runStarted = true
+		s.mu.Unlock()
+		go s.run()
+	})
 	s.signal()
 	return ln, nil
 }

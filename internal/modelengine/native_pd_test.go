@@ -2,6 +2,7 @@ package modelengine
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strconv"
 	"strings"
@@ -324,5 +325,64 @@ func assertKVRowsEqual(t *testing.T, label string, want, got *model.KVCache) {
 		if !reflect.DeepEqual(got.V[l], want.V[l]) {
 			t.Fatalf("%s: layer %d V differs", label, l)
 		}
+	}
+}
+
+// TestNativeSchedulerCloseAndWaitTracksImportedRunLoop guards the parity between
+// ordinary Admit and AdmitImported run-start bookkeeping: a scheduler started only
+// by AdmitImported must have CloseAndWait observe its run loop (returning
+// context.Canceled while an imported lane is still executing) instead of taking the
+// false runStarted early return and reporting a shutdown that never happened.
+func TestNativeSchedulerCloseAndWaitTracksImportedRunLoop(t *testing.T) {
+	m := model.NewSynthetic(SyntheticConfig())
+	s := NewNativeScheduler(m)
+	executeEntered := make(chan struct{})
+	releaseExecute := make(chan struct{})
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			close(releaseExecute)
+		}
+	}
+	defer release()
+	s.beforeModelExecute = func(_ nativeSchedulerEventKind, _ *schedLane) {
+		close(executeEntered)
+		<-releaseExecute
+	}
+
+	sess := m.NewSession()
+	prompt := []int{1, 2, 3}
+	logits := sess.Prefill(prompt)
+	req, err := s.AdmitImported(context.Background(), nil, ImportedSequence{
+		Session: sess, Logits: logits, Prompt: prompt, Tool: "audit-imported-close",
+	})
+	if err != nil {
+		t.Fatalf("AdmitImported: %v", err)
+	}
+
+	select {
+	case <-executeEntered:
+	}
+
+	waitCtx, cancelWait := context.WithCancel(context.Background())
+	cancelWait()
+	err = s.CloseAndWait(waitCtx)
+	if !errors.Is(err, context.Canceled) {
+		release()
+		for range req.Tokens() {
+		}
+		_, _ = req.Result()
+		t.Fatalf("CloseAndWait error = %v, want context.Canceled while imported lane is executing", err)
+	}
+
+	release()
+	for range req.Tokens() {
+	}
+	if _, err := req.Result(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Result error = %v, want context.Canceled", err)
+	}
+	if err := s.CloseAndWait(context.Background()); err != nil {
+		t.Fatalf("CloseAndWait after execution release: %v", err)
 	}
 }
