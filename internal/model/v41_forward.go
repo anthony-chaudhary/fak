@@ -159,23 +159,32 @@ type v41ProjScratch struct {
 // v41ProjF32Into is the caller-buffer twin of v41ProjF32: it resolves a named
 // V4.1 per-layer projection and writes its f32 block into dst, growing dst when
 // needed, rather than allocating a fresh whole-tensor block on every call. The
-// f32-manifest path still returns the manifest view zero-copy (byte-identical to
-// v41ProjF32); the quant-store arms dequantize into dst with the exact same
-// loops and block order residentF32Mat uses, so the output is bit-identical.
+// f32-manifest path COPIES the manifest view into dst (a manifest view aliases
+// the model's own m.raw, so it must never be returned as a reusable buffer); the
+// quant-store arms dequantize into dst with the exact same loops and block order
+// residentF32Mat uses, so the output is byte-identical.
 //
 // dst is returned with len exactly out*in. A weight absent from every store
 // fails closed with the same typed ErrV41ForwardStage naming the tensor that
 // #13276 requires (never a panic through residentF32Mat's m.tensor read).
 func (m *Model) v41ProjF32Into(l int, leaf string, dst []float32) ([]float32, error) {
 	name := layerName(l, leaf)
-	if m.has(name) {
-		return m.tensor(name), nil
-	}
 	grow := func(n int) []float32 {
 		if cap(dst) < n {
 			return make([]float32, n)
 		}
 		return dst[:n]
+	}
+	if m.has(name) {
+		// COPY the manifest view into dst, never return it aliasing. m.tensor
+		// resolves to an unsafe.Slice over the model's own m.raw backing store
+		// (weights.go manifestTensor), so returning it zero-copy would let a
+		// later layer's quant dequant (a different store for the same leaf, e.g.
+		// layer 0 wo_a = F32 and layer 1 wo_a = Q2_K) reuse the buffer via grow()
+		// and OVERWRITE the model's resident weights. The copy is byte-identical
+		// to the previous read; only the aliasing is removed.
+		view := m.tensor(name)
+		return append(grow(len(view))[:0], view...), nil
 	}
 	if qt := m.kqw[name]; qt != nil {
 		qt.ensureRawCPU("V4.1 grouped output projection read")

@@ -38,7 +38,15 @@ import (
 // (2+4)*4 = 24.
 func v41ReducedModel(t *testing.T) *Model {
 	t.Helper()
-	cfg := v41TestReducedConfig(t, 1, V41RouterExperts)
+	return v41ReducedModelLayers(t, 1)
+}
+
+// v41ReducedModelLayers is v41ReducedModel with an explicit layer count, so a
+// witness can exercise cross-layer behavior (e.g. a per-layer store transition
+// for the same leaf) on a model with more than one decoder layer.
+func v41ReducedModelLayers(t *testing.T, layers int) *Model {
+	t.Helper()
+	cfg := v41TestReducedConfig(t, layers, V41RouterExperts)
 	cfg.NumExpertsPerTok = V41RouterTopK
 	cfg.NSharedExperts = 1
 	cfg.RoutedScalingFactor = 1.5

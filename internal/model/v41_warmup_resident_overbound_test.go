@@ -213,3 +213,67 @@ func TestV41WarmupScratchForwardStaysFinite(t *testing.T) {
 		}
 	}
 }
+
+// TestV41ProjF32IntoManifestViewIsNotAliased is the regression witness for the
+// mixed-store aliasing the adversarial review of #13288 found: m.tensor resolves
+// the f32 manifest to an unsafe.Slice over the model's own m.raw backing store,
+// so a caller-buffer read that returned that view zero-copy would hand the
+// scratch a buffer aliasing resident weight memory. A later layer whose SAME
+// leaf is a quant store then reuses that buffer via grow() and the dequant
+// OVERWRITES the model's weights. This test drives exactly that sequence and
+// asserts the manifest weight is unchanged.
+func TestV41ProjF32IntoManifestViewIsNotAliased(t *testing.T) {
+	// Two layers so the fixture keeps a distinct resident weight per layer.
+	m := v41ReducedModelLayers(t, 2)
+
+	leaf := "attn.wo_a.weight"
+	manName := layerName(0, leaf)
+	manView := m.tensor(manName)
+	if len(manView) == 0 {
+		t.Fatalf("fixture is missing the f32 manifest weight %s", manName)
+	}
+	// Snapshot the bytes the model holds; the read must never mutate them.
+	want := append([]float32(nil), manView...)
+
+	shape := v41ProjectionShape(t, m, leaf)
+	out, in := shape[0], shape[1]
+
+	// Layer 0 reads from the f32 manifest and caches the result in the scratch.
+	scratch := &v41ProjScratch{}
+	got, err := m.v41ProjF32Into(0, leaf, scratch.woA)
+	if err != nil {
+		t.Fatalf("manifest read error = %v, want nil", err)
+	}
+	scratch.woA = got
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("manifest read[%d] = %v, want %v", i, got[i], want[i])
+		}
+	}
+	// The returned buffer must NOT alias the model's backing store.
+	if len(got) > 0 && &got[0] == &manView[0] {
+		t.Fatalf("v41ProjF32Into returned a buffer aliasing the model's manifest memory; a later layer's dequant would corrupt it")
+	}
+
+	// Move layer 1's same leaf to a resident Q8_0 store (a different store type
+	// for the same leaf, the mixed-GGUF case) and read it into the same scratch.
+	// Q8_0 blocks are 32-wide, so the reduced wo_a shape (in=64) is admitted.
+	raw := v41ResidentQ8Raw(out, in)
+	v41MoveProjToResidentKQuant(m, 1, leaf, shape, raw, kindQ8_0)
+	got2, err := m.v41ProjF32Into(1, leaf, scratch.woA)
+	if err != nil {
+		t.Fatalf("layer-1 quant read error = %v, want nil", err)
+	}
+	scratch.woA = got2
+
+	// The model's layer-0 manifest weight must be byte-for-byte unchanged.
+	after := m.tensor(manName)
+	if len(after) != len(want) {
+		t.Fatalf("layer-0 manifest weight len = %d, want %d", len(after), len(want))
+	}
+	for i := range want {
+		if after[i] != want[i] {
+			t.Fatalf("layer-0 manifest weight[%d] = %v, want unchanged %v (the reused scratch aliased model memory)", i, after[i], want[i])
+		}
+	}
+}
