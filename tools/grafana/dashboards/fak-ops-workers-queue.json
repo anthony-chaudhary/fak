@@ -288,25 +288,25 @@
       "id": 18,
       "type": "stat",
       "title": "Ops routines enabled",
-      "description": "From the Fak Ops statuses exporter (uid fak-ops-statuses). `fak_ops_schedule_enabled`.",
+      "description": "From the Fak Ops statuses exporter (uid fak-ops-statuses). sum(fak_ops_routines{job=\"fak_ops\",state=\"enabled\"}). No or vector(0): a missing scrape must read Unavailable, never a confident zero. (The worker exporter's fak_ops_schedule_enabled alias was renamed fak_ops_workers_routines_enabled to keep the two scrape jobs disjoint.)",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 5, "w": 6, "x": 0, "y": 29 },
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] }, "unit": "short" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "noValue": "Unavailable", "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] }, "unit": "short" }, "overrides": [] },
       "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
       "pluginVersion": "11.5.2",
-      "targets": [ { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max(fak_ops_schedule_enabled{job=\"fak_ops\"}) or vector(0)", "refId": "A" } ]
+      "targets": [ { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum(fak_ops_routines{job=\"fak_ops\",state=\"enabled\"})", "refId": "A" } ]
     },
     {
       "id": 19,
       "type": "stat",
       "title": "Ops routines stale",
-      "description": "Enabled routines whose last interval is stale. `fak_ops_schedule_stale`.",
+      "description": "Enabled routines whose last interval is stale. fak_ops_schedule_stale. A missing scrape reads Unavailable (noValue), never a fabricated 0.",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 5, "w": 6, "x": 6, "y": 29 },
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 10 } ] }, "unit": "short" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "noValue": "Unavailable", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 10 } ] }, "unit": "short" }, "overrides": [] },
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
       "pluginVersion": "11.5.2",
-      "targets": [ { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max(fak_ops_schedule_stale{job=\"fak_ops\"}) or vector(0)", "refId": "A" } ]
+      "targets": [ { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "fak_ops_schedule_stale{job=\"fak_ops\"}", "refId": "A" } ]
     },
     {
       "id": 20,
@@ -315,10 +315,10 @@
       "description": "Total stuck-work items folded by the Fak Ops statuses exporter. `fak_ops_stuck_total`.",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 5, "w": 6, "x": 12, "y": 29 },
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 25 } ] }, "unit": "short" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "noValue": "Unavailable", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 25 } ] }, "unit": "short" }, "overrides": [] },
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
       "pluginVersion": "11.5.2",
-      "targets": [ { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max(fak_ops_stuck_total{job=\"fak_ops\"}) or vector(0)", "refId": "A" } ]
+      "targets": [ { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "fak_ops_stuck_total{job=\"fak_ops\"}", "refId": "A" } ]
     },
     {
       "id": 21,
@@ -327,10 +327,10 @@
       "description": "Ops report failure rate over the trailing window. `fak_ops_reports_failure_rate`.",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 5, "w": 6, "x": 18, "y": 29 },
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 0.25 }, { "color": "red", "value": 0.5 } ] }, "unit": "percentunit", "decimals": 2 }, "overrides": [] },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "noValue": "Unavailable", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 0.25 }, { "color": "red", "value": 0.5 } ] }, "unit": "percentunit", "decimals": 2 }, "overrides": [] },
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
       "pluginVersion": "11.5.2",
-      "targets": [ { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max(fak_ops_reports_failure_rate{job=\"fak_ops\"}) or vector(0)", "refId": "A" } ]
+      "targets": [ { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "fak_ops_reports_failure_rate{job=\"fak_ops\"}", "refId": "A" } ]
     }
   ]
 }
