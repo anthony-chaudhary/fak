@@ -162,6 +162,64 @@ func TestAutoSizeContextPlanIgnoresHostScopedOffloadWeights(t *testing.T) {
 	}
 }
 
+// #13284: on a SHARED-POOL APU (Strix Halo; ggufload.BackendSharesHostRAM) the device aperture
+// and the host window are the SAME physical DRAM, so a cpu-offload serve's host-scoped routed
+// experts are co-resident with the KV store and MUST be subtracted alongside the device-scoped
+// weights. The discrete config (the zero value) keeps the historical device-only subtraction
+// byte-for-byte: the same host-scoped experts leave its device-side KV fit unchanged.
+func TestSharedPoolContextSizerChargesHostResidentWeights(t *testing.T) {
+	cfg := qwen36_27BContextSizeConfig() // 0.75 MiB/token, MaxContext 262144
+	const perToken = int64(786432)
+	if got := EstimateKVStoreBytes(cfg.KV, 1); got != perToken {
+		t.Fatalf("kv/token = %d, want 0.75 MiB (%d) for the Qwen3.6-27B geometry", got, perToken)
+	}
+	scratch := EstimateHALTransientMemoryPlan(cfg.Scratch).Total()
+
+	// The witnessed shape: a modest device dense side beside a large HOST-scoped expert pool.
+	const denseBytes = int64(20) << 30
+	const expertBytes = int64(45) << 30 // ~45 GiB host-resident routed experts
+	deviceOnly := MemoryPlan{{Class: MemoryWeights, Bytes: denseBytes, Scope: MemoryScopeDevice}}
+	withExperts := MemoryPlan{
+		{Class: MemoryWeights, Bytes: denseBytes, Scope: MemoryScopeDevice},
+		{Class: MemoryOffload, Bytes: expertBytes, Scope: MemoryScopeHost},
+	}
+
+	discrete := cfg // PoolSharedWithHost false (zero value)
+	shared := cfg
+	shared.PoolSharedWithHost = true
+
+	// (a) The device-only plan must derive the SAME context on both configs: the shared pool only
+	// changes what HOST-scoped weights are charged, so a plan with no host demands is a no-op.
+	// Anchor the budget to exactly 16384 tokens over the device weights + scratch.
+	const wantDiscrete = 16384
+	deviceAvail := int64(wantDiscrete)*perToken + denseBytes + scratch
+	discreteDevice, _ := AutoSizeContextPlan(discrete, deviceOnly, deviceAvail, -1)
+	sharedDevice, _ := AutoSizeContextPlan(shared, deviceOnly, deviceAvail, -1)
+	if discreteDevice != wantDiscrete || sharedDevice != wantDiscrete {
+		t.Fatalf("device-only plan must be unchanged by the shared pool: discrete=%d, shared=%d, want %d", discreteDevice, sharedDevice, wantDiscrete)
+	}
+
+	// (b) With host-scoped co-resident experts, give the box room for the expert pool AND a
+	// positive KV window: the budget covers the device weights, the host experts, scratch, and
+	// exactly 8192 tokens of KV. On the shared pool those host experts are charged, so the fit is
+	// 8192; on a discrete config they are ignored, so the fit is the larger residual (the same
+	// 8192 tokens of slack plus the whole 45 GiB expert charge). The shared fit must be STRICTLY
+	// smaller — the whole point of the shared-pool rule.
+	const wantShared = 8192
+	expertsAvail := int64(wantShared)*perToken + denseBytes + expertBytes + scratch
+
+	discreteExperts, _ := AutoSizeContextPlan(discrete, withExperts, expertsAvail, -1)
+	sharedExperts, _ := AutoSizeContextPlan(shared, withExperts, expertsAvail, -1)
+	if sharedExperts >= discreteExperts {
+		t.Fatalf("shared-pool config must derive a STRICTLY smaller context when host experts are co-resident: shared=%d, discrete=%d", sharedExperts, discreteExperts)
+	}
+	// Byte-arithmetic anchor: the shared fit is the budget less BOTH the device weights and the
+	// host experts (plus scratch), i.e. exactly wantShared.
+	if sharedExperts != wantShared {
+		t.Fatalf("shared-pool derived = %d, want %d (device weights + host experts both charged)", sharedExperts, wantShared)
+	}
+}
+
 // #1046/#13036: a known ceiling too small to hold even the weights clamps to the floor
 // (MinAutoContextTokens), not 0 — so the plan keeps a small KV demand and the LOAD-TIME fit check,
 // not this sizer, refuses a genuinely-too-small box. An explicit override is clamped the SAME way

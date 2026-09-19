@@ -441,7 +441,7 @@ func (rt *serveRuntime) resolveCompute(sf *serveFlags) {
 // tensor payload read or device allocation.
 func (rt *serveRuntime) resolveNativeContext(sf *serveFlags, ranks int) error {
 	requested := *sf.nativeContextTokens
-	resolution, _, err := resolveServeNativeContext(nil, nil, serveFitBudget{}, requested)
+	resolution, _, err := resolveServeNativeContext(nil, rt.chatBackend, nil, serveFitBudget{}, requested)
 	if err != nil {
 		return err
 	}
@@ -463,7 +463,7 @@ func (rt *serveRuntime) resolveNativeContext(sf *serveFlags, ranks int) error {
 				return inputErr
 			}
 			rt.fitBudget = &fit
-			resolution, _, err = resolveServeNativeContext(ws, weights, fit, requested)
+			resolution, _, err = resolveServeNativeContext(ws, rt.chatBackend, weights, fit, requested)
 			if err != nil {
 				return err
 			}
@@ -510,7 +510,7 @@ func serveExplicitBudgetWarning(w io.Writer, budget, window int) bool {
 }
 
 func resolveServeNativeContextDirectory(dir string, requested int) (serveNativeContextResolution, error) {
-	resolution, _, err := resolveServeNativeContext(nil, nil, serveFitBudget{}, requested)
+	resolution, _, err := resolveServeNativeContext(nil, nil, nil, serveFitBudget{}, requested)
 	if err != nil {
 		return resolution, err
 	}

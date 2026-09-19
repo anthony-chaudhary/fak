@@ -41,7 +41,7 @@ func TestResolveServeNativeContext(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, gotPlan, err := resolveServeNativeContext(ws, weights, fit, tt.requested)
+			got, gotPlan, err := resolveServeNativeContext(ws, nil, weights, fit, tt.requested)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -65,18 +65,18 @@ func TestResolveServeNativeContextRejectsInvalidExplicitLimits(t *testing.T) {
 	weights := compute.MemoryPlan{{Class: compute.MemoryWeights, Bytes: 1 << 20}}
 	fit := serveFitBudget{Base: 1 << 30}
 
-	if _, _, err := resolveServeNativeContext(ws, weights, fit, -1); err == nil || !strings.Contains(err.Error(), "0 (auto) or positive") {
+	if _, _, err := resolveServeNativeContext(ws, nil, weights, fit, -1); err == nil || !strings.Contains(err.Error(), "0 (auto) or positive") {
 		t.Fatalf("negative native context error = %v, want flag validation refusal", err)
 	}
 	// The fixture's WeightSource has no tensor payload reader. A typed header
 	// declaration is sufficient to reject the request before payload loading.
-	if _, _, err := resolveServeNativeContext(ws, weights, fit, 4097); err == nil || !strings.Contains(err.Error(), "exceeds model-declared context window 4096") {
+	if _, _, err := resolveServeNativeContext(ws, nil, weights, fit, 4097); err == nil || !strings.Contains(err.Error(), "exceeds model-declared context window 4096") {
 		t.Fatalf("over-declared native context error = %v, want header-only refusal", err)
 	}
 }
 
 func TestResolveServeNativeContextUnknownMetadataStaysTruthful(t *testing.T) {
-	got, plan, err := resolveServeNativeContext(nil, nil, serveFitBudget{}, 0)
+	got, plan, err := resolveServeNativeContext(nil, nil, nil, serveFitBudget{}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestResolveServeNativeContextUnknownMetadataStaysTruthful(t *testing.T) {
 		t.Fatalf("unknown auto resolution fabricated capacity: resolution=%+v plan=%+v", got, plan)
 	}
 
-	got, plan, err = resolveServeNativeContext(nil, nil, serveFitBudget{}, 32768)
+	got, plan, err = resolveServeNativeContext(nil, nil, nil, serveFitBudget{}, 32768)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestResolveServeNativeContextAutoCanExceedSchedulerDefault(t *testing.T) {
 	ws := serveSynthWideWindowWeightSource(t)
 	ws.File.Metadata["qwen2.context_length"] = ggufload.Value{Type: ggufload.TypeUint64, Value: uint64(65536)}
 	weights := compute.MemoryPlan{{Class: compute.MemoryWeights, Bytes: 1 << 20, Scope: compute.MemoryScopeDevice}}
-	got, _, err := resolveServeNativeContext(ws, weights, serveFitBudget{Base: 1 << 30}, 0)
+	got, _, err := resolveServeNativeContext(ws, nil, weights, serveFitBudget{Base: 1 << 30}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestServeNativeContextAutoAdmitsLongNativeHTTP(t *testing.T) {
 
 	ws := serveSynthWideWindowWeightSource(t)
 	ws.File.Metadata["qwen2.context_length"] = ggufload.Value{Type: ggufload.TypeUint64, Value: uint64(declaredWindow)}
-	resolution, _, err := resolveServeNativeContext(ws, nil, serveFitBudget{Base: 1 << 30}, 0)
+	resolution, _, err := resolveServeNativeContext(ws, nil, nil, serveFitBudget{Base: 1 << 30}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,11 +277,11 @@ func TestServeNativeContextDeviceSizingMatchesWeightBudgetedLoadPlan(t *testing.
 		t.Fatalf("host-visible weight spill = %d, want %d from the live load-plan split", got, want)
 	}
 
-	resolution, contextPlan, err := resolveServeNativeContext(ws, weights, fit, 0)
+	resolution, contextPlan, err := resolveServeNativeContext(ws, nil, weights, fit, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rawResolution, _, err := resolveServeNativeContext(ws, rawWeights, fit, 0)
+	rawResolution, _, err := resolveServeNativeContext(ws, nil, rawWeights, fit, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

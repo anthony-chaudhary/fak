@@ -100,7 +100,10 @@ func validateServeNativeContextTokens(tokens int) error {
 // resolveServeNativeContext is the header-only authority for the native model
 // window. weights and fit are the selected load arm's exact sizing inputs, so
 // auto mode returns the same token count later used to build the load plan.
-func resolveServeNativeContext(ws *ggufload.WeightSource, weights compute.MemoryPlan, fit serveFitBudget, requested int) (serveNativeContextResolution, compute.MemoryPlan, error) {
+// be is the backend the plan is destined for: on a shared-pool APU tier
+// (ggufload.BackendSharesHostRAM) host-scoped co-resident weights are charged
+// against the same KV budget (#13284); a nil/discrete backend is unchanged.
+func resolveServeNativeContext(ws *ggufload.WeightSource, be compute.Backend, weights compute.MemoryPlan, fit serveFitBudget, requested int) (serveNativeContextResolution, compute.MemoryPlan, error) {
 	resolution := serveNativeContextResolution{RequestedTokens: requested, Source: "auto"}
 	if err := validateServeNativeContextTokens(requested); err != nil {
 		return resolution, nil, err
@@ -117,6 +120,7 @@ func resolveServeNativeContext(ws *ggufload.WeightSource, weights compute.Memory
 		return resolution, nil, err
 	}
 	csc := cfg.ContextSizeConfigWithPrecision(serveKVPrecision())
+	csc.PoolSharedWithHost = ggufload.BackendSharesHostRAM(be)
 	resolution.ModelDeclaredTokens = csc.MaxContext
 	if requested > 0 && csc.MaxContext > 0 && requested > csc.MaxContext {
 		return resolution, nil, fmt.Errorf("--native-context-tokens %d exceeds model-declared context window %d", requested, csc.MaxContext)
@@ -685,7 +689,7 @@ func serveGGUFMemoryPlanForArm(ws *ggufload.WeightSource, arm serveLoadArm, cont
 	if err != nil {
 		return nil, err
 	}
-	return appendServeGGUFDevicePlan(ws, weights, contextBudgetTokens, fit), nil
+	return appendServeGGUFDevicePlan(ws, nil, weights, contextBudgetTokens, fit), nil
 }
 
 func serveGGUFWeightMemoryPlanForArm(ws *ggufload.WeightSource, arm serveLoadArm, q4kOpts ...ggufload.Q4KLoadOption) (compute.MemoryPlan, error) {
@@ -894,7 +898,10 @@ func serveGGUFCPUOffloadMemoryPlan(ws *ggufload.WeightSource, ranks, contextBudg
 	if err != nil {
 		return nil, err
 	}
-	return appendServeGGUFDevicePlan(ws, plan, contextBudgetTokens, fit), nil
+	// be is nil here: this arm has no backend in scope, so the context sizer keeps the
+	// historical device-only subtraction. Shared-pool serve arms thread be through the
+	// backend-aware paths (see serveStreamedCPUOffloadPlanForAperture) (#13284).
+	return appendServeGGUFDevicePlan(ws, nil, plan, contextBudgetTokens, fit), nil
 }
 
 // serveBoundedDenseWorkingSetBound reports the declared bounded streamed-dense host working set an
@@ -914,7 +921,10 @@ func serveBoundedDenseWorkingSetBound(opts []ggufload.Q4KLoadOption) (int64, boo
 	return eff.StreamedDenseBytes, true
 }
 
-func appendServeGGUFDevicePlan(ws *ggufload.WeightSource, plan compute.MemoryPlan, contextBudgetTokens int, fit serveFitBudget) compute.MemoryPlan {
+// appendServeGGUFDevicePlan sizes and appends the context plan to the weight plan. be is the
+// backend the plan is destined for: a shared-pool APU tier charges host-scoped co-resident
+// weights against the same KV budget (#13284); a nil/discrete backend is unchanged.
+func appendServeGGUFDevicePlan(ws *ggufload.WeightSource, be compute.Backend, plan compute.MemoryPlan, contextBudgetTokens int, fit serveFitBudget) compute.MemoryPlan {
 	cfg, err := ws.File.Config()
 	if err != nil {
 		return plan
@@ -926,6 +936,7 @@ func appendServeGGUFDevicePlan(ws *ggufload.WeightSource, plan compute.MemoryPla
 	// MaxPositionEmbeddings window and refusing Ã¢â‚¬â€ and log the derived size for the operator.
 	avail := fit.avail()
 	csc := cfg.ContextSizeConfigWithPrecision(serveKVPrecision())
+	csc.PoolSharedWithHost = ggufload.BackendSharesHostRAM(be)
 	tokens, ctxPlan := compute.AutoSizeContextPlan(csc, plan, avail, serveContextTokenOverride(contextBudgetTokens))
 	logServeAutoSizedContext(csc, plan, fit, avail, contextBudgetTokens, tokens)
 	return append(plan, ctxPlan...)
@@ -1281,7 +1292,7 @@ func serveStreamedCPUOffloadPlanForAperture(ws *ggufload.WeightSource, be comput
 	if err != nil {
 		return nil, false, err
 	}
-	return appendServeGGUFDevicePlan(ws, streamed, contextBudgetTokens, fit), true, nil
+	return appendServeGGUFDevicePlan(ws, be, streamed, contextBudgetTokens, fit), true, nil
 }
 
 // serveCPUOffloadStreamedResidentBoundForPool is the ONE derivation of the bounded host-resident

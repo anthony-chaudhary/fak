@@ -133,7 +133,7 @@ func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpu
 	if err != nil {
 		return serveSizingArtifact{}, err
 	}
-	resolution, contextPlan, err := resolveServeNativeContext(ws, weights, fit, requestedNativeContextTokens)
+	resolution, contextPlan, err := resolveServeNativeContext(ws, be, weights, fit, requestedNativeContextTokens)
 	if err != nil {
 		return serveSizingArtifact{}, err
 	}

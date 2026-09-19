@@ -58,5 +58,7 @@ func serveGGUFExpertParallelMemoryPlan(ws *ggufload.WeightSource, ranks, context
 	if err != nil {
 		return nil, err
 	}
-	return appendServeGGUFDevicePlan(ws, plan, contextBudgetTokens, fit), nil
+	// be is nil here: this helper has no backend in scope, so the context sizer keeps the
+	// historical device-only subtraction (#13284).
+	return appendServeGGUFDevicePlan(ws, nil, plan, contextBudgetTokens, fit), nil
 }

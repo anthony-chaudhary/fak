@@ -15,6 +15,14 @@ type ContextSizeConfig struct {
 	SessionState MemoryPlan // fixed context-independent state (for example a recurrent mixer)
 	Scratch      TransformerScratchConfig
 	MaxContext   int // model's declared full window (MaxPositionEmbeddings); <=0 = unknown
+
+	// PoolSharedWithHost reports that the device aperture and the host window are the
+	// SAME physical DRAM pool (an integrated/APU tier). When true, HOST-scoped
+	// co-resident weight demands (a cpu-offload serve's routed experts) compete with
+	// the KV store for the same budget and must be subtracted alongside the
+	// device-scoped ones. False (the zero value, every discrete backend) keeps the
+	// historical device-only subtraction byte-for-byte.
+	PoolSharedWithHost bool
 }
 
 // PerContextMemoryPlan builds the per-context memory demands — the KV store sized to
@@ -108,12 +116,23 @@ func (c ContextSizeConfig) contextTokens(override int, weights MemoryPlan, avail
 // per-token HAL scratch fits `avail` once the fixed `weights` already in that pool are
 // subtracted — the #1046 auto-fit-to-host derivation that replaces the old "size against the
 // full MaxContext window and refuse" fallback. `avail` is the headroom-adjusted budget the
-// matching load-time fit check uses, and KV + scratch are device-pool demands, so only the
-// device-scoped weights compete with them (a cpu-offload serve's host-resident experts do not —
-// see weights.DeviceTotal). The result is clamped to [MinAutoContextTokens, MaxContext]: at the
-// ceiling it is the full window (nothing to shrink); at the floor the plan stays small and the
-// load-time fit check refuses a box too small to hold even that. Fail-open: KV geometry it
-// cannot size yields the full window, never a refusal here.
+// matching load-time fit check uses, and KV + scratch are pool demands, so which fixed weights
+// compete with them depends on the pool topology:
+//
+//   - On a DISCRETE device (PoolSharedWithHost=false, the zero value) only the device-scoped
+//     weights compete with the KV store; a cpu-offload serve's host-resident experts do not
+//     (they live in independent VRAM/system pools) — the historical weights.DeviceTotal()
+//     subtraction, byte-for-byte.
+//   - On a SHARED pool (PoolSharedWithHost=true, an integrated/APU tier) the device aperture and
+//     the host window are the SAME physical DRAM, so HOST-scoped co-resident demands (the
+//     cpu-offload routed experts) consume the same budget the KV store does and are charged
+//     alongside the device-scoped ones — weights.Total() (#13284). Without this the sizer
+//     over-admits KV and the load-time fit check fatally refuses the sum.
+//
+// The result is clamped to [MinAutoContextTokens, MaxContext]: at the ceiling it is the full
+// window (nothing to shrink); at the floor the plan stays small and the load-time fit check
+// refuses a box too small to hold even that. Fail-open: KV geometry it cannot size yields the
+// full window, never a refusal here.
 func (c ContextSizeConfig) largestFittingContext(weights MemoryPlan, avail int64) int {
 	perToken := EstimateKVStoreBytes(c.KV, 1)
 	if perToken <= 0 {
@@ -121,7 +140,11 @@ func (c ContextSizeConfig) largestFittingContext(weights MemoryPlan, avail int64
 	}
 	scratch := EstimateHALTransientMemoryPlan(c.Scratch).Total()
 	fixed := c.SessionState.DeviceTotal()
-	fit := (avail - weights.DeviceTotal() - fixed - scratch) / perToken
+	weightScoped := weights.DeviceTotal()
+	if c.PoolSharedWithHost {
+		weightScoped = weights.Total()
+	}
+	fit := (avail - weightScoped - fixed - scratch) / perToken
 	floor := int64(MinAutoContextTokens)
 	if floor > int64(c.MaxContext) {
 		floor = int64(c.MaxContext) // a model whose full window is below the floor cannot exceed it
