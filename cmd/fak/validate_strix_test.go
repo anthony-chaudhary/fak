@@ -271,18 +271,48 @@ func TestIsGPURelatedValidation(t *testing.T) {
 			expected: true,
 		},
 		{
-			name:     "halo keyword in path",
-			mine:     []string{"configs/halo_apu.json"},
+			name:     "halo keyword in source path",
+			mine:     []string{"internal/amdgpu/halo_apu.go"},
 			expected: true,
 		},
 		{
-			name:     "vulkan keyword in path",
+			name:     "vulkan keyword in shader source path",
 			mine:     []string{"shaders/vulkan_kernel.spv"},
 			expected: true,
 		},
 		{
 			name:     "gfx115 keyword in path",
 			mine:     []string{"firmware/gfx1151.bin"},
+			expected: true,
+		},
+		{
+			name:     "docs path mentioning strix and halo must not trigger",
+			mine:     []string{"docs/tickets/strix-halo-franchise/INDEX.md"},
+			expected: false,
+		},
+		{
+			name:     "docs research path mentioning strix must not trigger",
+			mine:     []string{"docs/research/EXTREME-QUANTIZATION-UMA-MOAT-RISK-2026-09-18.md"},
+			expected: false,
+		},
+		{
+			name:     "json config path mentioning halo must not trigger",
+			mine:     []string{"configs/halo_apu.json"},
+			expected: false,
+		},
+		{
+			name:     "source path under gpu root triggers regardless of keyword",
+			mine:     []string{"internal/compute/strix/x.go"},
+			expected: true,
+		},
+		{
+			name:     "go source path containing gfx115 still triggers",
+			mine:     []string{"internal/amdgpu/gfx115_kernels.go"},
+			expected: true,
+		},
+		{
+			name:     "assembly path containing strix still triggers",
+			mine:     []string{"internal/amdgpu/strix_prefill.s"},
 			expected: true,
 		},
 	}

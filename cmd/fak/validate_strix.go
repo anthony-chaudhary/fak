@@ -31,18 +31,66 @@ func isGPURelatedValidation(mine []string) bool {
 	for _, p := range mine {
 		norm := strings.ReplaceAll(p, "\\", "/")
 		lower := strings.ToLower(norm)
-		for _, kw := range gpuKeywords {
-			if strings.Contains(lower, kw) {
-				return true
-			}
-		}
 		for _, root := range gpuRoots {
 			if norm == root || strings.HasPrefix(norm, root+"/") {
 				return true
 			}
 		}
+		// The loose keyword test applies only to source/kernel artifacts. A
+		// documentation or data path that merely mentions a GPU keyword must
+		// not force physical Strix hardware validation on a docs-only land.
+		if !isSourcePath(norm) {
+			continue
+		}
+		for _, kw := range gpuKeywords {
+			if strings.Contains(lower, kw) {
+				return true
+			}
+		}
 	}
 	return false
+}
+
+// sourcePathExtensions are the artifact kinds that can carry GPU/compute
+// implementation or device payloads and therefore justify the keyword-based
+// hardware-validation trigger. Documentation (`.md`), JSON, and other data
+// paths are excluded so a docs-only change cannot demand physical hardware.
+var sourcePathExtensions = map[string]bool{
+	".go":    true,
+	".s":     true,
+	".asm":   true,
+	".c":     true,
+	".cc":    true,
+	".cpp":   true,
+	".cxx":   true,
+	".h":     true,
+	".hh":    true,
+	".hpp":   true,
+	".cu":    true,
+	".cuh":   true,
+	".hip":   true,
+	".cl":    true,
+	".spv":   true,
+	".comp":  true,
+	".metal": true,
+	".rs":    true,
+	".bin":   true,
+	".fw":    true,
+	".elf":   true,
+}
+
+// isSourcePath reports whether a repo-relative path names an implementation
+// artifact or device payload rather than documentation, configuration, or data.
+func isSourcePath(norm string) bool {
+	name := norm
+	if idx := strings.LastIndex(norm, "/"); idx >= 0 {
+		name = norm[idx+1:]
+	}
+	dot := strings.LastIndex(name, ".")
+	if dot < 0 {
+		return false
+	}
+	return sourcePathExtensions[strings.ToLower(name[dot:])]
 }
 
 var (
