@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -162,12 +163,36 @@ func TestV4ShardedExpertSourceMissingIndexedTensorFailsBeforePayloadRead(t *test
 // in flight at once. It is the witness for the batch readahead: the serial batch path issues one
 // ReadAt at a time (peak 1), whereas a batch readahead fans the whole batch across the shared
 // ReadRanges workers so the peak rises above 1.
+//
+// The overlap is observed through a synchronization barrier, not a wall-clock sample. A reader that
+// arrives while fewer than `want` reads are in flight waits on a condvar until the `want`-th read
+// arrives (the fan-out case: every worker is already running, so the barrier releases
+// deterministically) or `hold` elapses (the genuinely serial case: the lone reader proceeds alone,
+// so a regression still reports peak 1 instead of deadlocking). A fixed spin-loop window was too
+// short to overlap the goroutines on the WSL drvfs /mnt/c path even though ReadRanges does spawn
+// them, which made the assertion filesystem/scheduler dependent.
 type v4ReadAtProbe struct {
-	inner    io.ReaderAt
+	inner io.ReaderAt
+	want  int
+
 	mu       sync.Mutex
+	cond     *sync.Cond
 	inFlight int
 	maxSeen  int
 	reads    int
+}
+
+// v4ReadAtProbeHold bounds how long a lone reader waits for peers. It is only reached on the
+// serial-regression path; a real fan-out satisfies the barrier as soon as the peers are scheduled.
+const v4ReadAtProbeHold = 250 * time.Millisecond
+
+func newV4ReadAtProbe(inner io.ReaderAt, want int) *v4ReadAtProbe {
+	if want < 1 {
+		want = 1
+	}
+	p := &v4ReadAtProbe{inner: inner, want: want}
+	p.cond = sync.NewCond(&p.mu)
+	return p
 }
 
 func (p *v4ReadAtProbe) ReadAt(b []byte, off int64) (int, error) {
@@ -177,20 +202,42 @@ func (p *v4ReadAtProbe) ReadAt(b []byte, off int64) (int, error) {
 		p.maxSeen = p.inFlight
 	}
 	p.reads++
-	p.mu.Unlock()
-
-	// A wide window so a serial caller can never have two of these overlapping regardless of how
-	// long the underlying read takes: any peak above 1 is a real concurrent issuance.
-	for i := 0; i < 20000; i++ {
-		_ = i
+	if p.inFlight >= p.want {
+		// The expected fan-out is reached: release every held reader at once.
+		p.cond.Broadcast()
+	} else {
+		p.waitForPeersLocked()
 	}
+	p.mu.Unlock()
 
 	n, err := p.inner.ReadAt(b, off)
 
 	p.mu.Lock()
 	p.inFlight--
+	p.cond.Broadcast()
 	p.mu.Unlock()
 	return n, err
+}
+
+// waitForPeersLocked blocks until `want` reads are concurrently in flight, or until the hold
+// elapses. Called with p.mu held; returns with p.mu held. The bounded hold is driven by a timer
+// goroutine so the wait never depends on how long the underlying ReadAt itself takes.
+func (p *v4ReadAtProbe) waitForPeersLocked() {
+	timedOut := false
+	timer := time.AfterFunc(v4ReadAtProbeHold, func() {
+		p.mu.Lock()
+		timedOut = true
+		p.cond.Broadcast()
+		p.mu.Unlock()
+	})
+	defer timer.Stop()
+	for p.inFlight < p.want && !timedOut {
+		p.cond.Wait()
+	}
+	if timedOut {
+		// Release any peer still held behind this reader so the serial path cannot wedge.
+		p.cond.Broadcast()
+	}
 }
 
 func (p *v4ReadAtProbe) Peak() int {
@@ -246,7 +293,7 @@ func TestV4ShardedExpertBatchIssuesReadAheadAndIsByteIdentical(t *testing.T) {
 	}
 	var probes []*v4ReadAtProbe
 	for _, h := range s.open {
-		p := &v4ReadAtProbe{inner: h.src.file.r}
+		p := newV4ReadAtProbe(h.src.file.r, 3)
 		h.src.file.r = p
 		probes = append(probes, p)
 	}
