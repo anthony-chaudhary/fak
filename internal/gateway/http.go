@@ -27,6 +27,25 @@ import (
 // tool-args payload.
 const maxBody = 4 << 20
 
+// Native batch evidence headers (#13317). The resident in-kernel coordinator
+// already stamps agent.Completion.InKernelBatch with the authoritative cohort
+// receipt; these headers carry that same receipt to an external benchmark so it
+// can distinguish a coordinated cohort from serial fallback without importing
+// public internal/* packages or inventing a second counter. The set is additive
+// and opt-in: it is emitted only for a buffered request that asked for the
+// native inference receipt and whose completion carries a valid batch receipt.
+// CohortSize is coordinator membership, never an observed GPU batch width;
+// SharedPanels=0 is authoritative serial/no-shared-panel evidence, and an absent
+// header set always means unknown.
+const (
+	// HeaderNativeCohortID names the coordinator cohort that served the turn.
+	HeaderNativeCohortID = "x-fak-native-cohort-id"
+	// HeaderNativeCohortSize names the coordinator membership of that cohort.
+	HeaderNativeCohortSize = "x-fak-native-cohort-size"
+	// HeaderNativeSharedPanels names how many panels the cohort shared.
+	HeaderNativeSharedPanels = "x-fak-native-shared-panels"
+)
+
 // maxTranscriptBody bounds an inbound /v1/messages or /v1/chat/completions body.
 // A RESUMED long-context session re-sends its whole transcript every turn, so the
 // request body legitimately grows past the 4 MiB tool-args cap — a 388k-token
@@ -807,6 +826,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	applyVulkanMTPExecutionHeaders(w, comp.VulkanMTP)
+	if receiptRequested {
+		applyNativeBatchReceiptHeaders(w, comp.InKernelBatch)
+	}
 
 	asst := comp.Message
 	asst.Role = agent.RoleAssistant
@@ -939,6 +961,49 @@ func (s *Server) validateChatCompletionConformance(w http.ResponseWriter, stream
 	if decodeTokenIDsRequested && comp.NativeDecodeTokenIDs == nil {
 		writeErr(w, http.StatusBadGateway, "fak-native planner did not produce native decode token IDs")
 		return false
+	}
+	return true
+}
+
+// applyNativeBatchReceiptHeaders emits the additive native-cohort headers from
+// the coordinator's own batch receipt (#13317). The set is atomic: it is
+// written only when the cohort id is non-empty and header-safe, the cohort
+// size is positive, and the shared-panel count is non-negative. An absent or
+// malformed receipt writes NO header, so a downstream benchmark always sees
+// either the complete evidence triple or "unknown" — never a partial set that
+// requested concurrency could be mistaken for. SharedPanels is written even
+// when zero: a present 0 is authoritative serial/no-shared-panel evidence,
+// distinct from an absent header. CohortSize is coordinator membership; this
+// function never labels it a GPU batch width.
+func applyNativeBatchReceiptHeaders(w http.ResponseWriter, receipt *agent.InKernelBatchReceipt) {
+	if w == nil || receipt == nil {
+		return
+	}
+	cohortID := strconv.FormatUint(receipt.CohortID, 10)
+	if receipt.CohortID == 0 || !headerSafeValue(cohortID) {
+		return
+	}
+	if receipt.CohortSize <= 0 || receipt.SharedPanels < 0 {
+		return
+	}
+	h := w.Header()
+	h.Set(HeaderNativeCohortID, cohortID)
+	h.Set(HeaderNativeCohortSize, strconv.Itoa(receipt.CohortSize))
+	h.Set(HeaderNativeSharedPanels, strconv.Itoa(receipt.SharedPanels))
+}
+
+// headerSafeValue reports whether a value is safe to place in a response
+// header: non-empty, ASCII printable, and free of control characters. The
+// coordinator's cohort id is numeric today, so this is a fail-closed guard
+// against a future non-numeric or injected value reaching the wire.
+func headerSafeValue(v string) bool {
+	if v == "" {
+		return false
+	}
+	for i := 0; i < len(v); i++ {
+		if c := v[i]; c < 0x20 || c > 0x7e {
+			return false
+		}
 	}
 	return true
 }

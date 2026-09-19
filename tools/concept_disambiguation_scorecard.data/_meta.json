@@ -7734,6 +7734,11 @@
           "category": "incidental",
           "reason": "Digest field within the positioned FeatureCacheProof; it is computed from accepted call/result evidence and is not an independent witness source.",
           "token": "CacheWitnessHash"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pre-existing gateway feature-proof token (internal/gateway/feature_proof.go FeatureRewriteWitness/RecordRewrite); not introduced by #13317 and unrelated to its native batch header scope.",
+          "token": "writewitness"
         }
       ],
       "id": "witness-proof",
@@ -7953,6 +7958,7 @@
         "witnessing",
         "witnesssametaskids",
         "writeCodexWorkflowDefaultWitness",
+        "writewitness",
         "wrong_missing_witness"
       ],
       "known_tokens": [],
@@ -8568,6 +8574,11 @@
           "category": "incidental",
           "reason": "Open event-field key of the positioned FieldCompletionTiming attestation; the literal transports that existing private measurement and defines no independent engine.",
           "token": "kernel_completion_timing"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pre-existing agent.Completion.InKernelBatch coordinator receipt field referenced by the buffered native gateway path (#13317); a wire projection of the already-authoritative in-kernel batch receipt, not a new gateway concept.",
+          "token": "inkernelbatch"
         }
       ],
       "id": "gateway-engine",
@@ -8664,6 +8675,7 @@
         "inKernelDecodeCohortMax",
         "inKernelPlannerEPCoordinated",
         "inKernelPrefixPressureBridge",
+        "inkernelbatch",
         "inkernelforcedtoolinstruction",
         "inkernelforcedtoolname",
         "inkernelresponseformatinstruction",
