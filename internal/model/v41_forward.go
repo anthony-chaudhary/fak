@@ -1526,16 +1526,28 @@ func (m *Model) v41ExpertF32Into(l int, leaf string, dst []float32) ([]float32, 
 		return append(dst[:0], w...), nil
 	}
 	if m.expertCheckpoint.Has(name) {
+		// #13299: time the fault door (the tier range read) separately from the
+		// f32 materialization below, so the ledger can attribute the physical
+		// 492 s first token (fak#13294) to disk wait vs dequant. Inert when no
+		// clock is installed (v41NowNanos == 0).
+		doorOpen := m.v41NowNanos()
 		ew, err := m.expertCheckpoint.fault(name)
 		if err != nil {
 			return nil, v41StageErr(v41StageMoE, l,
 				fmt.Errorf("%w: tensor %s: %w", ErrV41ForwardStage, name, err))
 		}
+		if doorOpen != 0 {
+			m.v41NoteExpertFaultDoorNanos(m.v41NowNanos() - doorOpen)
+		}
 		faultedBytes := faultedRawBytes(ew)
+		dequantOpen := m.v41NowNanos()
 		w, err := expertWeightF32Into(ew, dst)
 		if err != nil {
 			return nil, v41StageErr(v41StageMoE, l,
 				fmt.Errorf("%w: tensor %s: %v", ErrV41ForwardStage, name, err))
+		}
+		if dequantOpen != 0 {
+			m.v41NoteExpertDequantNanos(m.v41NowNanos() - dequantOpen)
 		}
 		if w != nil {
 			m.v41NoteExpertTierFault(faultedBytes, int64(len(w))*4)
@@ -2189,7 +2201,17 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			if err != nil {
 				return err
 			}
+			// #13299: time the routed-expert contraction (the SwiGLU the pick
+			// applies) separately from the fault/dequant that produced its
+			// weights, so the ledger can attribute the 492 s first token
+			// (fak#13294) to scalar contraction vs tier IO. Inert with no clock.
+			contractOpen := m.v41NowNanos()
 			y := v41SwiGLU(w1, w3, w2, xn, cfg.MoEIntermediateSize, H, cfg)
+			if contractOpen != 0 {
+				m.v41NoteExpertContractionNanos(m.v41NowNanos() - contractOpen)
+			} else {
+				m.v41NoteExpertContraction()
+			}
 			for i := range routed {
 				routed[i] += pick.weight * y[i]
 			}
