@@ -66,6 +66,7 @@ type q4kLoadOptions struct {
 	expertShard          ExpertShard
 	residentDenseKQuant  bool
 	residentDenseQ2K     bool
+	residentDenseQ6K     bool
 	residentQ2KEmbedding bool
 	residentQ4KEmbedding bool
 	streamedExperts      bool
@@ -114,6 +115,13 @@ func WithDenseKQuantResident(enabled bool) Q4KLoadOption {
 // dequant-to-Q8 round trip without stranding unsupported IQ/Q3 formats.
 func WithDenseQ2KResident(enabled bool) Q4KLoadOption {
 	return func(o *q4kLoadOptions) { o.residentDenseQ2K = enabled }
+}
+
+// WithDenseQ6KResident retains eligible dense Q6_K tensors even when blanket dense
+// k-quant residency is disabled. This lets a backend with a Q6_K HAL path avoid the
+// dequant-to-Q8 round trip without stranding Q5_K/Q3_K/Q2_K/IQ formats on a dequant path.
+func WithDenseQ6KResident(enabled bool) Q4KLoadOption {
+	return func(o *q4kLoadOptions) { o.residentDenseQ6K = enabled }
 }
 
 // WithExpertShard keeps only routed experts in [lo,hi) when splitting batched MoE expert GGUF
@@ -190,6 +198,7 @@ func probeQ4KLoadOptions(opts []Q4KLoadOption) q4kLoadOptions {
 type Q4KLoadOptionEffects struct {
 	DenseKQuantResident  bool
 	DenseQ2KResident     bool
+	DenseQ6KResident     bool
 	Q2KEmbeddingResident bool
 	Q4KEmbeddingResident bool
 	MTPRetention         bool
@@ -219,6 +228,7 @@ func ApplyQ4KLoadOptions(opts []Q4KLoadOption) Q4KLoadOptionEffects {
 	return Q4KLoadOptionEffects{
 		DenseKQuantResident:  o.residentDenseKQuant,
 		DenseQ2KResident:     o.residentDenseQ2K,
+		DenseQ6KResident:     o.residentDenseQ6K,
 		Q2KEmbeddingResident: o.residentQ2KEmbedding,
 		Q4KEmbeddingResident: o.residentQ4KEmbedding,
 		MTPRetention:         o.retainMTP,
@@ -1211,7 +1221,9 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 		tw.acctResident = true
 		return tw
 	}
-	retainDenseKQuant := loadOpts.residentDenseKQuant || (loadOpts.residentDenseQ2K && info.Type == TensorQ2_K)
+	retainDenseKQuant := loadOpts.residentDenseKQuant ||
+		(loadOpts.residentDenseQ2K && info.Type == TensorQ2_K) ||
+		(loadOpts.residentDenseQ6K && info.Type == TensorQ6_K)
 	if _, _, residentable := residentExpertBlockGeometry(info.Type); retainDenseKQuant && residentable &&
 		info.Type != TensorQ4_K && !archUsesMLAMoELayout(cfg.ModelType) &&
 		model.ResidentKQuantEligible(cfg, canon) {

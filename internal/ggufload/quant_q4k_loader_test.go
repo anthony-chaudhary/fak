@@ -304,6 +304,8 @@ func buildQwen35GGUFFixture(t *testing.T, arch string, dim, vocab int, embType, 
 		outBlkBytes = blockQ2KBytes
 	} else if outType == TensorQ6_K {
 		outBlkBytes = blockQ6KBytes
+	} else if outType == TensorQ5_K {
+		outBlkBytes = blockQ5KBytes
 	}
 	outBytes := (vocab * dim / 256) * outBlkBytes
 
@@ -512,5 +514,67 @@ func TestWithQ2KEmbeddingResidentLoad(t *testing.T) {
 	}
 	if !mDef.HasF32("model.embed_tokens.weight") {
 		t.Fatal("default load must retain model.embed_tokens.weight in F32 manifest")
+	}
+}
+
+// TestDenseQ6KResidentOptionSelectsOnlyQ6K proves the selective Q6_K option admits
+// exactly an eligible dense Q6_K tensor into the raw resident store, and a Q5_K dense
+// tensor stays on its established f32->Q8 fallback, with the blanket dense k-quant
+// option disabled.
+func TestDenseQ6KResidentOptionSelectsOnlyQ6K(t *testing.T) {
+	const (
+		dim   = 256
+		vocab = 4
+	)
+
+	// A. Eligible dense Q6_K head is retained raw by the Q6-only flag.
+	q6Path := buildQwen35GGUFFixture(t, "qwen35", dim, vocab, TensorQ2_K, TensorQ6_K, false, false)
+	mQ6, err := LoadModelQ4KProfileOptions(q6Path, nil, WithDenseKQuantResident(false), WithDenseQ6KResident(true))
+	if err != nil {
+		t.Fatalf("LoadModelQ4KProfileOptions with selective Q6_K residency: %v", err)
+	}
+	if !mQ6.HasKQuant("lm_head.weight") {
+		t.Fatal("selective Q6_K option did not retain eligible dense Q6_K lm_head.weight resident")
+	}
+	if raw, ok := mQ6.KQuantRaw("lm_head.weight"); !ok || len(raw) != vocab*blockQ6KBytes {
+		t.Fatalf("resident Q6_K output bytes = %d, %v; want %d, true", len(raw), ok, vocab*blockQ6KBytes)
+	}
+	if mQ6.HasQ8("lm_head.weight") {
+		t.Fatal("selective Q6_K option also sent the Q6_K head through the Q8 fallback")
+	}
+
+	// B. A dense Q5_K tensor is NOT admitted by the Q6-only flag.
+	q5Path := buildQwen35GGUFFixture(t, "qwen35", dim, vocab, TensorQ2_K, TensorQ5_K, false, false)
+	mQ5, err := LoadModelQ4KProfileOptions(q5Path, nil, WithDenseKQuantResident(false), WithDenseQ6KResident(true))
+	if err != nil {
+		t.Fatalf("LoadModelQ4KProfileOptions with selective Q6_K residency over a Q5_K head: %v", err)
+	}
+	if mQ5.HasKQuant("lm_head.weight") {
+		t.Fatal("Q6-only residency wrongly retained a non-Q6 (Q5_K) tensor raw")
+	}
+	if !mQ5.HasQ8("lm_head.weight") {
+		t.Fatal("Q6-only residency stranded a non-Q6 (Q5_K) tensor off the Q8 fallback")
+	}
+}
+
+// TestDenseQ6KResidentOptionDefaultFallback proves the Q6_K tensor follows the proven
+// dequant-to-Q8 path when the selective option is absent, even with the blanket dense
+// k-quant option disabled.
+func TestDenseQ6KResidentOptionDefaultFallback(t *testing.T) {
+	const (
+		dim   = 256
+		vocab = 4
+	)
+	path := buildQwen35GGUFFixture(t, "qwen35", dim, vocab, TensorQ2_K, TensorQ6_K, false, false)
+
+	m, err := LoadModelQ4KProfileOptions(path, nil, WithDenseKQuantResident(false))
+	if err != nil {
+		t.Fatalf("LoadModelQ4KProfileOptions default (Q6 selective off): %v", err)
+	}
+	if m.HasKQuant("lm_head.weight") {
+		t.Fatal("default load retained a dense Q6_K tensor without the selective option")
+	}
+	if !m.HasQ8("lm_head.weight") {
+		t.Fatal("default load did not route dense Q6_K through the Q8 fallback")
 	}
 }
