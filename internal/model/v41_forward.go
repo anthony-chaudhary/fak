@@ -154,6 +154,27 @@ type v41ForwardState struct {
 type v41ProjScratch struct {
 	woA []float32
 	woB []float32
+
+	// exp1/exp3/exp2 are the REUSED materialization targets for one routed
+	// expert's three projections (ffn.experts.<e>.w1/w3/w2.weight). They were
+	// the dominant remaining uncharged warmup term after #13288: expertWeightF32
+	// allocated a FRESH make([]float32, out*in) for EACH faulted projection
+	// (~135 MiB/expert at the published V4.1 geometry), and the MoE loop faults
+	// three projections per pick, many picks per token, across the 40-layer
+	// stack. The MoE loop is strictly SEQUENTIAL and v41SwiGLU consumes the
+	// three blocks read-only, so one triple reused across every pick/token/layer
+	// bounds the term to one expert's worth instead of the accumulated churn
+	// that still drove the warmup RSS ~14 GiB above the plan bound and thrashed
+	// the host at trunk 732956939 (#13288).
+	exp1 []float32
+	exp3 []float32
+	exp2 []float32
+
+	// mhc is the REUSED target for mhc.mixes.weight, the last whole-tensor f32
+	// materializer in the forward. It is read once per layer at the top of
+	// v41Layer and consumed read-only by the mHC split; the layer loop is
+	// sequential, so one buffer bounds it to a single layer's worth.
+	mhc []float32
 }
 
 // v41ProjF32Into is the caller-buffer twin of v41ProjF32: it resolves a named
@@ -950,6 +971,27 @@ func (m *Model) v41MHCMixF32(l int) ([]float32, error) {
 		fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
 }
 
+// v41MHCMixF32Into is the caller-buffer twin of v41MHCMixF32: it resolves the
+// layer's mhc.mixes.weight residency-completely and writes the f32 block into
+// dst, growing dst when needed, rather than materializing a fresh whole-tensor
+// block per layer. The layer loop is sequential and the mHC split consumes the
+// block read-only, so a single reused buffer bounds this term to one layer's
+// worth (#13288 companion seam).
+//
+// It COPIES on the f32-manifest path for the same reason v41ProjF32Into does: a
+// manifest tensor is an unsafe.Slice over the model's own m.raw, and returning it
+// as the reusable buffer would alias resident weight memory. A weight absent from
+// every store fails closed with the same typed ErrV41ForwardStage naming the
+// tensor.
+func (m *Model) v41MHCMixF32Into(l int, dst []float32) ([]float32, error) {
+	name := layerName(l, "mhc.mixes.weight")
+	if w, ok := m.residentF32Mat(name); ok {
+		return append(dst[:0], w...), nil
+	}
+	return nil, v41StageErr(v41StageMHC, l,
+		fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
+}
+
 // residentF32Mat resolves a named V4.1 matmul weight to a full f32 block from
 // whichever store actually carries it: the f32 manifest first (returned
 // zero-copy, byte-identical), then the resident quant stores
@@ -1200,6 +1242,98 @@ func expertWeightF32(w expertWeight) ([]float32, error) {
 	return nil, nil
 }
 
+// expertWeightF32Into is the caller-buffer twin of expertWeightF32: it
+// dequantizes one faulted checkpoint-tier projection into dst, growing dst when
+// needed, rather than allocating a fresh whole-tensor f32 block on every read.
+// The dequant loops and block order are the exact ones expertWeightF32 uses, so
+// the output is byte-identical; the ONLY difference is where the f32 block
+// lives. dst is returned with len exactly out*in.
+//
+// This is the bounded-allocation form the in-kernel warmup needs (#13288): the
+// MoE loop is strictly sequential and consumes each projection read-only, so a
+// single reused buffer per projection slot bounds the streamed-experts' per-fault
+// f32 materialization to one expert's worth instead of the fresh ~135 MiB block
+// expertWeightF32 allocated per fault. A nil/absent representation still returns
+// (nil, nil), which the caller surfaces as the named refusal.
+func expertWeightF32Into(w expertWeight, dst []float32) ([]float32, error) {
+	grow := func(n int) []float32 {
+		if cap(dst) < n {
+			return make([]float32, n)
+		}
+		return dst[:n]
+	}
+	if w.q4 != nil {
+		qt := w.q4
+		raw, err := qt.materializeRaw()
+		if err != nil {
+			return nil, err
+		}
+		rowBytes := qt.nblk * q4kBlockBytes
+		out := grow(qt.out * qt.in)
+		for o := 0; o < qt.out; o++ {
+			row := raw[o*rowBytes : (o+1)*rowBytes]
+			for j := 0; j < qt.nblk; j++ {
+				q4kDequantSuperBlock(out[o*qt.in+j*qkK:], row[j*q4kBlockBytes:(j+1)*q4kBlockBytes])
+			}
+		}
+		return out, nil
+	}
+	if w.kq != nil {
+		qt := w.kq
+		qt.ensureRawCPU("routed-expert tier read")
+		bb := qt.kind.blockBytes()
+		rowBytes := qt.rowBytes()
+		out := grow(qt.out * qt.in)
+		for b := 0; b < qt.out; b++ {
+			row := qt.raw[b*rowBytes : (b+1)*rowBytes]
+			for j := 0; j < qt.nblk; j++ {
+				kQuantDequantSuperBlock(out[b*qt.in+j*qt.kind.blockWeights():], row[j*bb:(j+1)*bb], qt.kind)
+			}
+		}
+		return out, nil
+	}
+	return nil, nil
+}
+
+// v41ExpertF32Into is the caller-buffer twin of v41ExpertF32: it resolves one
+// routed-expert projection residency-completely (resident stores first, then the
+// R5 checkpoint tier) and writes the f32 block into dst instead of allocating a
+// fresh one. It preserves every contract of v41ExpertF32 -- the resident stores
+// WIN byte-for-byte, a tier fault dequantizes byte-identically, and a projection
+// present in neither fails closed with the same typed ErrV41ForwardStage naming
+// the tensor (never a panic).
+//
+// The resident path COPIES into dst rather than returning the store's slice: a
+// resident f32-manifest tensor resolves to an unsafe.Slice over the model's own
+// backing memory (weights.go manifestTensor), so returning it as a reusable
+// buffer would let a later read (a different store for the same leaf) dequant
+// over it and silently overwrite model weights -- the exact aliasing bug the
+// adversarial review of #13288 found and 0480cf446 fixed. Copying removes the
+// alias with byte-identical values.
+func (m *Model) v41ExpertF32Into(l int, leaf string, dst []float32) ([]float32, error) {
+	name := layerName(l, leaf)
+	if w, ok := m.residentF32Mat(name); ok {
+		return append(dst[:0], w...), nil
+	}
+	if m.expertCheckpoint.Has(name) {
+		ew, err := m.expertCheckpoint.fault(name)
+		if err != nil {
+			return nil, v41StageErr(v41StageMoE, l,
+				fmt.Errorf("%w: tensor %s: %w", ErrV41ForwardStage, name, err))
+		}
+		w, err := expertWeightF32Into(ew, dst)
+		if err != nil {
+			return nil, v41StageErr(v41StageMoE, l,
+				fmt.Errorf("%w: tensor %s: %v", ErrV41ForwardStage, name, err))
+		}
+		if w != nil {
+			return w, nil
+		}
+	}
+	return nil, v41StageErr(v41StageMoE, l,
+		fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
+}
+
 // v41MHCProjectFull executes the published flattened-four-stream mHC mix
 // projection: the four width-H streams are laid end to end into xflat (4H), one
 // shared RMS scale 1/sqrt(mean(xflat^2)+eps) is computed over the whole flattened
@@ -1419,6 +1553,9 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (*Activations, error)
 // reads and writes all four DISTINCT persistent streams.
 func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float32, full bool, hd, nH, H int, eps float32, hcIters int, hcEps float32, routeCfg v41RouterConfig, st *v41ForwardState, scratch *v41ProjScratch) error {
 	cfg := m.Cfg
+	if scratch == nil {
+		scratch = &v41ProjScratch{}
+	}
 
 	// Engram injection happens at the START of the layer, into the residual,
 	// before attention and before attn_norm (ds41_graph_before_attention).
@@ -1435,10 +1572,15 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 
 	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
 	ffnNorm := m.tensor(layerName(l, "ffn_norm.weight"))
-	wMix, err := m.v41MHCMixF32(l)
+	// mhc.mixes.weight is the last whole-tensor f32 materializer in the forward.
+	// It is read once per layer and consumed read-only, so it reads into the
+	// forward-scoped scratch rather than allocating a fresh block per layer
+	// (#13288 companion seam). Values are byte-identical.
+	wMix, err := m.v41MHCMixF32Into(l, scratch.mhc)
 	if err != nil {
 		return err
 	}
+	scratch.mhc = wMix
 	mixBase := m.tensor(layerName(l, "mhc.base"))
 	mixScale := m.tensor(layerName(l, "mhc.scale"))
 	// Attention + shared-expert projections are read residency-completely: a
@@ -1454,9 +1596,6 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	// layout are byte-identical to the previous v41ProjF32 read, but the peak
 	// resident contribution is bounded to one layer instead of the accumulated
 	// 40-layer churn that OOM-killed the warmup (#13288).
-	if scratch == nil {
-		scratch = &v41ProjScratch{}
-	}
 	woA, err := m.v41ProjF32Into(l, "attn.wo_a.weight", scratch.woA)
 	if err != nil {
 		return err
@@ -1776,19 +1915,26 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			// The routed-expert READ resolves the same tiers the ADMISSION
 			// (v41AdmitShape) does: the resident stores first, then the R5
 			// checkpoint tier. #13275 cleared the tier ADMISSION; this read is the
-			// matching tier READ (#13278).
-			w1, err := m.v41ExpertF32(l, stem+".w1.weight")
+			// matching tier READ (#13278). The three projections read into the
+			// forward-scoped scratch instead of a fresh ~135 MiB f32 block per
+			// fault: the MoE loop is sequential and v41SwiGLU consumes them
+			// read-only, so one triple bounds the streamed-experts' per-fault f32
+			// materialization (#13288). Values are byte-identical.
+			w1, err := m.v41ExpertF32Into(l, stem+".w1.weight", scratch.exp1)
 			if err != nil {
 				return v41StageErr(v41StageMoE, l, err)
 			}
-			w3, err := m.v41ExpertF32(l, stem+".w3.weight")
+			scratch.exp1 = w1
+			w3, err := m.v41ExpertF32Into(l, stem+".w3.weight", scratch.exp3)
 			if err != nil {
 				return v41StageErr(v41StageMoE, l, err)
 			}
-			w2, err := m.v41ExpertF32(l, stem+".w2.weight")
+			scratch.exp3 = w3
+			w2, err := m.v41ExpertF32Into(l, stem+".w2.weight", scratch.exp2)
 			if err != nil {
 				return v41StageErr(v41StageMoE, l, err)
 			}
+			scratch.exp2 = w2
 			y := v41SwiGLU(w1, w3, w2, xn, cfg.MoEIntermediateSize, H, cfg)
 			for i := range routed {
 				routed[i] += pick.weight * y[i]
