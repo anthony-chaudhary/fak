@@ -1426,11 +1426,25 @@ func expertWeightF32Into(w expertWeight, dst []float32) ([]float32, error) {
 // v41ExpertF32Into (resident stores first, then the tier), so a model with no
 // tier and no cache budget keeps the pre-#13296 stream byte-for-byte. The values
 // handed to v41SwiGLU are byte-identical either way.
+//
+// Attribution (#13294 DoD item 1): a cache hit is a routed-expert read resolved
+// from residency, so it notes a ResidentHit exactly as a resident-store hit does
+// (v41ExpertF32Into). Every read the contraction issues is therefore accounted
+// for as either a tier fault or a residency hit, and the phase's
+// ResidentHitFraction reflects the #13296 cache's real contribution.
 func (m *Model) v41ExpertTripleInto(l int, stem string, scratch *v41ProjScratch) (w1, w3, w2 []float32, err error) {
 	leaves := [3]string{".w1.weight", ".w3.weight", ".w2.weight"}
 	for i, leaf := range leaves {
 		name := layerName(l, stem+leaf)
 		if w, ok := scratch.v41LayerCacheGet(name); ok {
+			// A layer-cache hit is a routed-expert read served from residency (it
+			// performs zero tier IO and zero dequant), so it counts in the SAME
+			// ledger bucket as a resident-store hit (#13294 DoD item 1). Without
+			// this note the read lands in NEITHER bucket and the phase's
+			// ResidentHitFraction denominator drops every cache hit, understating
+			// the residency the #13296 cache provides -- exactly the number the
+			// first-token throughput frontier is steered by.
+			m.v41NoteExpertResidentHit()
 			switch i {
 			case 0:
 				w1 = w
