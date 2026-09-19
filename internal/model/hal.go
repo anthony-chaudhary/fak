@@ -230,6 +230,28 @@ func (s *Session) useHALKQuantWeights() bool {
 	return s.M != nil && s.M.kqw != nil && s.Backend != nil && s.Backend.Caps().UploadDtype
 }
 
+// useHALKQuantWeight applies the exact native capability gate for dense Q6_K
+// weights. Backends whose device-weight dtype probe already promises a resident
+// Q6_K MatMul need no extra, backend-specific contract. When a backend exposes
+// the optional Q6_K execution probe, however, that probe is authoritative; this
+// keeps a Vulkan bundle with a missing optional shader on the dequantized path.
+// Other resident k-quant formats retain their established admission behavior.
+func (s *Session) useHALKQuantWeight(qt *kQuantTensor) bool {
+	if !s.useHALKQuantWeights() || qt == nil || !SupportsHALKQuant(qt.kind) {
+		return false
+	}
+	if qt.kind != kindQ6K {
+		return true
+	}
+	if !s.Backend.Caps().DeviceMemory || !compute.BackendSupportsDeviceWeightDtype(s.Backend, compute.Q6_K) {
+		return false
+	}
+	if native, ok := s.Backend.(compute.Qwen35MTPQ6KBackend); ok {
+		return native.SupportsQ6KMatMul()
+	}
+	return true
+}
+
 var halQ8BatchLayers = envIntMin("FAK_HAL_Q8_BATCH_LAYERS", 0, 2)
 
 // weightHALStaged caches one resident quantized weight on the backend under key,
@@ -480,7 +502,7 @@ func (s *Session) matWeightHAL(name string) compute.Tensor {
 		}
 	}
 	if s.useHALKQuantWeights() {
-		if qt, ok := s.M.kqw[name]; ok && qt != nil && SupportsHALKQuant(qt.kind) {
+		if qt, ok := s.M.kqw[name]; ok && s.useHALKQuantWeight(qt) {
 			return s.weightHALKQuant(name, qt)
 		}
 	}
@@ -516,7 +538,7 @@ func (s *Session) lmHeadMatHAL() compute.Tensor {
 		if _, ok := s.M.kqw[name]; !ok {
 			name = "model.embed_tokens.weight"
 		}
-		if qt, ok := s.M.kqw[name]; ok && qt != nil && SupportsHALKQuant(qt.kind) {
+		if qt, ok := s.M.kqw[name]; ok && s.useHALKQuantWeight(qt) {
 			return s.weightHALKQuant(name, qt)
 		}
 	}
