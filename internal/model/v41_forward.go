@@ -2352,7 +2352,11 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	// exactly this layer's routed experts (#13296).
 	scratch.v41LayerCacheReset()
 	if scratch.expertLayerCacheBytes == 0 {
-		scratch.expertLayerCacheBytes = m.v41LayerExpertCacheBudget()
+		if v41TestLayerCacheBudgetOverride > 0 {
+			scratch.expertLayerCacheBytes = v41TestLayerCacheBudgetOverride
+		} else {
+			scratch.expertLayerCacheBytes = m.v41LayerExpertCacheBudget()
+		}
 	}
 	perTokenPicks := make([][]routePick, seq)
 	for t := 0; t < seq; t++ {
@@ -2368,31 +2372,54 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		perTokenPicks[t] = picks
 	}
 
+	// ---- routed-expert contraction ----
+	//
+	// #13304: a multi-token prefill panel is contracted EXPERT-MAJOR when its
+	// routed union exceeds the layer cache. The grouped path materializes one
+	// expert triple, contracts every (token, slot) row assigned to it, releases
+	// it, then replays each token's weighted sum in original slot order -- so a
+	// panel whose alternating routes re-read the same experts faults each distinct
+	// projection once, and peak retained expert materialization stays one triple.
+	// When the union fits the layer cache the two paths are equivalent (the cache
+	// served the repeats either way); the single-token path keeps the historical
+	// token-major stream byte-for-byte.
+	routedByToken := make([][]float32, seq)
+	if seq > 1 && !v41ForceTokenMajor {
+		if err := m.v41ContractRoutedGrouped(l, x, perTokenPicks, scratch, ffnNorm, eps, cfg, routedByToken); err != nil {
+			return err
+		}
+	} else {
+		for t := 0; t < seq; t++ {
+			xn := rmsnormCfg(x[t], ffnNorm, eps, cfg)
+			routed := make([]float32, H)
+			for _, pick := range perTokenPicks[t] {
+				stem := "ffn.experts." + itoa(pick.expert)
+				w1, w3, w2, err := m.v41ExpertTripleInto(l, stem, scratch)
+				if err != nil {
+					return err
+				}
+				// #13299: time the routed-expert contraction (the SwiGLU the pick
+				// applies) separately from the fault/dequant that produced its
+				// weights, so the ledger can attribute the 492 s first token
+				// (fak#13294) to scalar contraction vs tier IO. Inert with no clock.
+				contractOpen := m.v41NowNanos()
+				y := v41SwiGLU(w1, w3, w2, xn, cfg.MoEIntermediateSize, H, cfg)
+				if contractOpen != 0 {
+					m.v41NoteExpertContractionNanos(m.v41NowNanos() - contractOpen)
+				} else {
+					m.v41NoteExpertContraction()
+				}
+				for i := range routed {
+					routed[i] += pick.weight * y[i]
+				}
+			}
+			routedByToken[t] = routed
+		}
+	}
+
 	for t := 0; t < seq; t++ {
 		xn := rmsnormCfg(x[t], ffnNorm, eps, cfg)
-		picks := perTokenPicks[t]
-		routed := make([]float32, H)
-		for _, pick := range picks {
-			stem := "ffn.experts." + itoa(pick.expert)
-			w1, w3, w2, err := m.v41ExpertTripleInto(l, stem, scratch)
-			if err != nil {
-				return err
-			}
-			// #13299: time the routed-expert contraction (the SwiGLU the pick
-			// applies) separately from the fault/dequant that produced its
-			// weights, so the ledger can attribute the 492 s first token
-			// (fak#13294) to scalar contraction vs tier IO. Inert with no clock.
-			contractOpen := m.v41NowNanos()
-			y := v41SwiGLU(w1, w3, w2, xn, cfg.MoEIntermediateSize, H, cfg)
-			if contractOpen != 0 {
-				m.v41NoteExpertContractionNanos(m.v41NowNanos() - contractOpen)
-			} else {
-				m.v41NoteExpertContraction()
-			}
-			for i := range routed {
-				routed[i] += pick.weight * y[i]
-			}
-		}
+		routed := routedByToken[t]
 		shared, err := m.v41SharedExpertSwiGLU(l, xn, cfg)
 		if err != nil {
 			return err
