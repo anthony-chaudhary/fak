@@ -17,16 +17,35 @@ func isGPURelatedValidation(mine []string) bool {
 		"internal/amdgpu",
 		"internal/compute",
 		"internal/roofline",
-		"internal/model",
 		"cmd/fak/validate_acceptance",
 		"cmd/fak/validate_acceptance.go",
 		"cmd/fak/validate_acceptance_test.go",
 	}
+	// internal/model is deliberately NOT a blanket GPU root: it is the largest
+	// package in the tree, and most of it (model geometry, quant math, routing,
+	// loaders, the V4.1 forward) is pure-CPU and host-independent. Only the
+	// device-surface files under internal/model justify physical hardware, and
+	// those are selected by the framework-marker test below.
+	const modelRoot = "internal/model"
 	gpuKeywords := []string{
 		"strix",
 		"halo",
 		"vulkan",
 		"gfx115",
+	}
+	// modelGPUMarkers name the device frameworks/backends that can appear in an
+	// internal/model path and mean the file carries GPU execution surface. A
+	// pure-CPU model file (llm.go, v41_forward.go, v4_topk_partial.go) matches
+	// none of these and must not demand physical Strix silicon.
+	modelGPUMarkers := []string{
+		"metal",
+		"vulkan",
+		"gpudirect",
+		"cuda",
+		"rocm",
+		"hip",
+		"amd",
+		"gfx",
 	}
 	for _, p := range mine {
 		norm := strings.ReplaceAll(p, "\\", "/")
@@ -45,6 +64,13 @@ func isGPURelatedValidation(mine []string) bool {
 		for _, kw := range gpuKeywords {
 			if strings.Contains(lower, kw) {
 				return true
+			}
+		}
+		if norm == modelRoot || strings.HasPrefix(norm, modelRoot+"/") {
+			for _, marker := range modelGPUMarkers {
+				if strings.Contains(lower, marker) {
+					return true
+				}
 			}
 		}
 	}

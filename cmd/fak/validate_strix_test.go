@@ -266,8 +266,33 @@ func TestIsGPURelatedValidation(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "model package change matches whole directory",
+			name:     "pure-CPU model package change must not demand physical hardware",
 			mine:     []string{"internal/model/llm.go"},
+			expected: false,
+		},
+		{
+			name:     "pure-CPU model router change must not demand physical hardware",
+			mine:     []string{"internal/model/v4_topk_partial.go"},
+			expected: false,
+		},
+		{
+			name:     "pure-CPU V4.1 forward change must not demand physical hardware",
+			mine:     []string{"internal/model/v41_forward.go"},
+			expected: false,
+		},
+		{
+			name:     "model Vulkan backend change still demands physical hardware",
+			mine:     []string{"internal/model/vulkan_glm_kda_physical_test.go"},
+			expected: true,
+		},
+		{
+			name:     "model Metal backend change still demands physical hardware",
+			mine:     []string{"internal/model/metal_decode.go"},
+			expected: true,
+		},
+		{
+			name:     "model GPU-direct swap change still demands physical hardware",
+			mine:     []string{"internal/model/qwen38_gpudirect_swap.go"},
 			expected: true,
 		},
 		{
