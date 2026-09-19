@@ -926,6 +926,78 @@ func (m *Model) v41ProjF32(l int, leaf string) ([]float32, error) {
 	return w, nil
 }
 
+// v41ProjMatRows is the streaming-safe twin of v41ProjF32 for the per-layer
+// linear projections the V4.1 forward applies through matRows. v41ProjF32
+// resolves the weight by expanding the WHOLE tensor to f32 (residentF32Mat's
+// make([]float32, out*in) at :857/878/888/897), an allocation ~13x the
+// compressed Q2_K raw that is charged to no ledger and does not appear in the
+// serve memory plan (#2150). On the streamed arm that uncharged per-layer f32
+// expansion is transient against the simultaneously-resident streamed-expert
+// tier cache, so the in-kernel warmup's resident set grows monotonically until
+// the kernel OOM-kills the process.
+//
+// This helper instead reads the weight in its resident store form through
+// residentMatRows (internal/model/kernel.go:263), whose k-quant arm reuses a
+// single block-sized scratch buffer (quant_kquant.go:448) instead of
+// materializing the tensor. It resolves residency-completely and fails closed
+// with the same typed ErrV41ForwardStage the #13276 contract requires when the
+// weight is in no store, so a physical serve still reaches a NAMED refusal
+// rather than a panic.
+//
+// The f32-manifest path is byte-identical to v41ProjF32+matRows:
+// residentMatRowsBase dispatches m.has(name) to matRows(m.tensor(name), ...),
+// exactly the pre-#2150 read.
+func (m *Model) v41ProjMatRows(l int, leaf string, x []float32, out, in int) ([]float32, error) {
+	name := layerName(l, leaf)
+	if !m.hasResidentWeight(name) {
+		return nil, v41StageErr(v41StageAttention, l,
+			fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
+	}
+	return m.residentMatRows(name, x, out, in), nil
+}
+
+// hasResidentWeight reports whether a named matmul weight is resident in ANY
+// store residentMatRows can read (the f32 manifest, the q8w/q4w/q4kw/kqw/q2w/
+// GPTQ stores), mirroring residentF32Mat's dispatch without materializing any
+// full f32 block. It is the presence predicate that lets v41ProjMatRows fail
+// closed with a typed error instead of tripping residentMatRowsBase's panic.
+func (m *Model) hasResidentWeight(name string) bool {
+	if m.has(name) {
+		return true
+	}
+	if m.kqw != nil {
+		if _, ok := m.kqw[name]; ok {
+			return true
+		}
+	}
+	if m.q2w != nil {
+		if _, ok := m.q2w[name]; ok {
+			return true
+		}
+	}
+	if m.q8w != nil {
+		if _, ok := m.q8w[name]; ok {
+			return true
+		}
+	}
+	if m.q4kw != nil {
+		if _, ok := m.q4kw[name]; ok {
+			return true
+		}
+	}
+	if m.q4w != nil {
+		if _, ok := m.q4w[name]; ok {
+			return true
+		}
+	}
+	if m.gptqw != nil {
+		if _, ok := m.gptqw[name]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // v41ExpertF32 reads one routed-expert projection (ffn.experts.<e>.w1/w3/w2.weight)
 // as a full f32 block, resolved residency-completely AND tier-completely. A routed
 // expert is deliberately absent from every resident store on the streamed arm --
@@ -1257,18 +1329,10 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	// ffn.shared_experts leaves), so a manifest-only m.tensor read panics on a
 	// weight admission (residentShape) already admitted (#13276). Each read fails
 	// closed with a typed error naming the tensor when absent from every store.
-	wQA, err := m.v41ProjF32(l, "attn.wq_a.weight")
-	if err != nil {
-		return err
-	}
-	wQB, err := m.v41ProjF32(l, "attn.wq_b.weight")
-	if err != nil {
-		return err
-	}
-	wKV, err := m.v41ProjF32(l, "attn.wkv.weight")
-	if err != nil {
-		return err
-	}
+	// The two grouped output projections (attn.wo_a / attn.wo_b) stay on the
+	// full-f32 read: V41GroupedOutputProjection consumes whole f32 blocks, so the
+	// streaming matRows twin does not apply. They remain the only per-layer
+	// projections materialized to f32 (#2150 scope: the matRows-consumed leaves).
 	woA, err := m.v41ProjF32(l, "attn.wo_a.weight")
 	if err != nil {
 		return err
@@ -1277,26 +1341,26 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	if err != nil {
 		return err
 	}
+	// The remaining per-layer projections are applied only through matRows, so
+	// they read through the streaming-safe v41ProjMatRows at their use site
+	// instead of materializing a whole f32 block here (#2150). Fail closed NOW,
+	// with the same typed #13276 refusal, if any is absent from every store, so
+	// the refuse happens before any layer arithmetic rather than mid-forward.
+	for _, leaf := range []string{
+		"attn.wq_a.weight", "attn.wq_b.weight", "attn.wkv.weight",
+		"ffn.gate.weight",
+		"ffn.shared_experts.w1.weight", "ffn.shared_experts.w3.weight",
+		"ffn.shared_experts.w2.weight",
+	} {
+		if !m.hasResidentWeight(layerName(l, leaf)) {
+			return v41StageErr(v41StageAttention, l,
+				fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, layerName(l, leaf)))
+		}
+	}
 	// attn.sink is a 1-D per-head vector (not an isQuantWeight matmul leaf), so it
 	// stays on the f32 manifest.
 	sink := m.tensor(layerName(l, "attn.sink"))
-	wGate, err := m.v41ProjF32(l, "ffn.gate.weight")
-	if err != nil {
-		return err
-	}
 	gateBias := m.tensor(layerName(l, "ffn.gate.e_score_correction_bias"))
-	sharedW1, err := m.v41ProjF32(l, "ffn.shared_experts.w1.weight")
-	if err != nil {
-		return err
-	}
-	sharedW3, err := m.v41ProjF32(l, "ffn.shared_experts.w3.weight")
-	if err != nil {
-		return err
-	}
-	sharedW2, err := m.v41ProjF32(l, "ffn.shared_experts.w2.weight")
-	if err != nil {
-		return err
-	}
 
 	seq := len(x)
 	// ---- mHC coefficient split (one split per layer) ----
@@ -1370,8 +1434,14 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	}
 	for t := 0; t < seq; t++ {
 		c := preByPos[t]
-		qLat := matRows(wQA, c, cfg.QLoraRank, H)
-		q := matRows(wQB, qLat, nH*hd, cfg.QLoraRank)
+		qLat, err := m.v41ProjMatRows(l, "attn.wq_a.weight", c, cfg.QLoraRank, H)
+		if err != nil {
+			return err
+		}
+		q, err := m.v41ProjMatRows(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank)
+		if err != nil {
+			return err
+		}
 		// KV latent seam. The full path admits and projects attn.wkv at the
 		// published latent rank (v41KVLoraRank = 512); the attention contraction
 		// below consumes a per-position row of width hd (head_dim), so the full
@@ -1386,9 +1456,16 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 				return v41StageErr(v41StageAttention, l,
 					fmt.Errorf("%w: attention head_dim %d exceeds full KV latent rank %d", ErrV41ForwardStage, hd, v41KVLoraRank))
 			}
-			kv = matRows(wKV, c, v41KVLoraRank, H)[:hd]
+			kvFull, err := m.v41ProjMatRows(l, "attn.wkv.weight", c, v41KVLoraRank, H)
+			if err != nil {
+				return err
+			}
+			kv = kvFull[:hd]
 		} else {
-			kv = matRows(wKV, c, hd, H)
+			kv, err = m.v41ProjMatRows(l, "attn.wkv.weight", c, hd, H)
+			if err != nil {
+				return err
+			}
 		}
 		cos, sin := v41RopeTableForLayer(cfg, l, t)
 		for h := 0; h < nH; h++ {
@@ -1559,7 +1636,10 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	// ---- MoE: router + shared expert + routed experts ----
 	for t := 0; t < seq; t++ {
 		xn := rmsnormCfg(x[t], ffnNorm, eps, cfg)
-		routerLogits := matRows(wGate, xn, cfg.NumExperts, H)
+		routerLogits, err := m.v41ProjMatRows(l, "ffn.gate.weight", xn, cfg.NumExperts, H)
+		if err != nil {
+			return err
+		}
 		picks, err := v41Route(routerLogits, gateBias, routeCfg)
 		if err != nil {
 			return v41StageErr(v41StageMoE, l, err)
@@ -1588,7 +1668,10 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 				routed[i] += pick.weight * y[i]
 			}
 		}
-		shared := v41SwiGLU(sharedW1, sharedW3, sharedW2, xn, cfg.MoEIntermediateSize, H, cfg)
+		shared, err := m.v41SharedExpertSwiGLU(l, xn, cfg)
+		if err != nil {
+			return err
+		}
 		moe, err := v41SharedExpertAdd(routed, shared, routeCfg)
 		if err != nil {
 			return v41StageErr(v41StageMoE, l, err)
@@ -1627,6 +1710,32 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 }
 
 // v41SwiGLU is the standard SwiGLU expert/sub-layer: down(silu(w1 x) * w3 x).
+// v41SharedExpertSwiGLU is the streaming-safe shared-expert SwiGLU: it applies the
+// three shared-expert leaves through v41ProjMatRows (resident store form, bounded
+// block scratch) instead of materializing each whole f32 weight, so the shared
+// expert adds no uncharged per-layer f32 expansion (#2150). Numerically identical
+// to v41SwiGLU over the same weights on the f32-manifest path.
+func (m *Model) v41SharedExpertSwiGLU(l int, xn []float32, cfg Config) ([]float32, error) {
+	I, H := cfg.MoEIntermediateSize, cfg.HiddenSize
+	h1, err := m.v41ProjMatRows(l, "ffn.shared_experts.w1.weight", xn, I, H)
+	if err != nil {
+		return nil, err
+	}
+	h3, err := m.v41ProjMatRows(l, "ffn.shared_experts.w3.weight", xn, I, H)
+	if err != nil {
+		return nil, err
+	}
+	h := make([]float32, I)
+	for i := 0; i < I; i++ {
+		h[i] = act(h1[i], cfg) * h3[i]
+	}
+	y, err := m.v41ProjMatRows(l, "ffn.shared_experts.w2.weight", h, H, I)
+	if err != nil {
+		return nil, err
+	}
+	return y, nil
+}
+
 func v41SwiGLU(w1, w3, w2, xn []float32, I, H int, cfg Config) []float32 {
 	h1 := matRows(w1, xn, I, H)
 	h3 := matRows(w3, xn, I, H)
