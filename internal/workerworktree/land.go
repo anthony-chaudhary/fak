@@ -182,11 +182,11 @@ func expandLandPaths(wtPath, diffRef string, requested []string, git GitRunner) 
 			return nil, fmt.Errorf("could not expose untracked land paths — fail open")
 		}
 	}
-	rc, changedOut := run(git, wtPath, []string{"diff", "--name-only", diffRef})
+	rc, changedOut := run(git, wtPath, []string{"diff", "--no-ext-diff", "--no-renames", "--name-only", "-z", diffRef})
 	if rc != 0 {
 		return nil, fmt.Errorf("could not inspect declared land paths — fail open")
 	}
-	changed := strings.Fields(changedOut)
+	changed := strings.FieldsFunc(changedOut, func(r rune) bool { return r == 0 })
 	if len(changed) == 0 {
 		// An entirely clean declared tree is a valid worker no-op. Keep the empty
 		// expansion distinct from the partial-land case below so Land can emit its
