@@ -947,8 +947,12 @@ func (m *Model) v41ExpertF32(l int, leaf string) ([]float32, error) {
 	if m.expertCheckpoint.Has(name) {
 		ew, err := m.expertCheckpoint.fault(name)
 		if err != nil {
+			// Double-wrap: ErrV41ForwardStage keeps the #13276/#13278 named-refusal
+			// contract while %w on the inner error keeps a typed tier refusal (the
+			// #13280 budget guard) reachable through errors.Is, so a bounded-residency
+			// refusal is legible and never masked as a generic missing-tensor stage.
 			return nil, v41StageErr(v41StageMoE, l,
-				fmt.Errorf("%w: tensor %s: %v", ErrV41ForwardStage, name, err))
+				fmt.Errorf("%w: tensor %s: %w", ErrV41ForwardStage, name, err))
 		}
 		w, err := expertWeightF32(ew)
 		if err != nil {

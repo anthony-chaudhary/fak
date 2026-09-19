@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -428,6 +429,61 @@ func (t *ExpertCheckpointTier) staging(name string) (*checkpointStaging, bool) {
 	}, true
 }
 
+// ErrExpertCheckpointBudget reports that a routed-expert fault could not be served within the
+// tier's declared hostBytes residency budget. A POSITIVE budget is a real ceiling on the bytes the
+// tier hands out and retains, so a projection that cannot be made resident within that ceiling is
+// refused BY NAME rather than streamed through unbounded -- the fail-closed guard against the
+// unbounded routed-expert working set that OOM-killed the physical strix3 V4.1 serve (fak#13280). A
+// budget of 0 (the default) is stream-through and never produces this error.
+var ErrExpertCheckpointBudget = errors.New("model: checkpoint expert exceeds the bounded host residency budget")
+
+// ExpertCheckpointBudgetError is the typed fail-closed refusal: which projection, how large its
+// faulted slab is, and which budget refused it. It wraps ErrExpertCheckpointBudget so errors.Is
+// reaches the closed class while the operands name the real tensor for the operator.
+type ExpertCheckpointBudgetError struct {
+	Tensor string
+	Bytes  int64
+	Budget int64
+}
+
+func (e *ExpertCheckpointBudgetError) Error() string {
+	return fmt.Sprintf("%v: tensor %s (slab %d bytes) cannot be made resident within budget %d bytes",
+		ErrExpertCheckpointBudget, e.Tensor, e.Bytes, e.Budget)
+}
+
+// Unwrap exposes the sentinel so errors.Is(err, ErrExpertCheckpointBudget) holds for the typed
+// refusal while the caller can still read the tensor and budget operands.
+func (e *ExpertCheckpointBudgetError) Unwrap() error { return ErrExpertCheckpointBudget }
+
+// admitBounded is the residency-ceiling guard shared by the overlay and dense fault paths, called
+// with t.mu held. It is EXACTLY the historical admit with one addition: when Admit fails AND the
+// tier declares a positive budget, the slab cannot be made resident within the ceiling at all
+// (Admit has already evicted every cold unpinned resident it may), so the fault fails closed with
+// the typed named budget refusal instead of handing out bytes past the bound. A zero budget is the
+// stream-through default: Admit is still called exactly as before, its error is still swallowed, and
+// the faulted slab is handed to the caller and dropped, byte-for-byte unchanged. It never mutates
+// the tier on refusal.
+func (t *ExpertCheckpointTier) admitBounded(id polymodel.ModelID, name string, w expertWeight, slab int64) (expertWeight, error) {
+	evicted, admitErr := t.pool.Admit(polymodel.Model{ID: id, WeightBytes: slab})
+	if admitErr != nil {
+		if t.pool.Budget() > 0 {
+			refusal := &ExpertCheckpointBudgetError{Tensor: name, Bytes: slab, Budget: t.pool.Budget()}
+			t.failures, t.lastErr = t.failures+1, refusal
+			return expertWeight{}, refusal
+		}
+		return w, nil // stream-through (the default): never refused, never retained
+	}
+	for _, vid := range evicted {
+		delete(t.host, vid)
+		t.evictions++
+	}
+	t.host[id] = w
+	if used := t.pool.Used(); used > t.peak {
+		t.peak = used
+	}
+	return w, nil
+}
+
 // fault answers one canonical per-expert tensor name by reading exactly that expert's stride â€” or
 // by serving a retained host copy when the bounded host cache holds one. It never returns a
 // partially-built weight.
@@ -473,19 +529,7 @@ func (t *ExpertCheckpointTier) fault(name string) (expertWeight, error) {
 				t.pool.Touch(id)
 				return prev, nil
 			}
-			evicted, admitErr := t.pool.Admit(polymodel.Model{ID: id, WeightBytes: int64(len(have))})
-			if admitErr != nil {
-				return w, nil // stream-through (the default) or an expert larger than the host budget
-			}
-			for _, vid := range evicted {
-				delete(t.host, vid)
-				t.evictions++
-			}
-			t.host[id] = w
-			if used := t.pool.Used(); used > t.peak {
-				t.peak = used
-			}
-			return w, nil
+			return t.admitBounded(id, name, w, int64(len(have)))
 		}
 	}
 
@@ -513,19 +557,7 @@ func (t *ExpertCheckpointTier) fault(name string) (expertWeight, error) {
 		t.pool.Touch(id)
 		return have, nil
 	}
-	evicted, admitErr := t.pool.Admit(polymodel.Model{ID: id, WeightBytes: int64(len(raw))})
-	if admitErr != nil {
-		return w, nil // stream-through (the default) or an expert larger than the whole host budget
-	}
-	for _, vid := range evicted {
-		delete(t.host, vid)
-		t.evictions++
-	}
-	t.host[id] = w
-	if used := t.pool.Used(); used > t.peak {
-		t.peak = used
-	}
-	return w, nil
+	return t.admitBounded(id, name, w, int64(len(raw)))
 }
 
 // ExpertCheckpointStats is the checkpoint tier's ledger â€” the evidence for this rung's claim that
