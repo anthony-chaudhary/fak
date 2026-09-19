@@ -33,6 +33,22 @@ const (
 	// SubagentFanoutComparisonSchema identifies the apples-to-apples benchmark receipt.
 	SubagentFanoutComparisonSchema = "fak.benchmark.subagent_fanout_apples_to_apples/v1"
 
+	// FanoutUnifiedThroughputSchema identifies the aggregate unified-throughput block
+	// (issue #13076): a measured sum of generated tokens over measured wall time,
+	// distinct from any single cell's per-N decode_throughput_tok_per_sec.
+	FanoutUnifiedThroughputSchema = "fak.benchmark.fanout_unified_throughput/v1"
+
+	// FanoutReuseSourceAnalytic is the source tag for reuse the harness computed
+	// arithmetically rather than observing from the server.
+	FanoutReuseSourceAnalytic = "analytic"
+	// FanoutReuseSourcePrometheus is the source tag for reuse read from the
+	// server's Prometheus text exposition.
+	FanoutReuseSourcePrometheus = "prometheus:/metrics"
+	// FanoutReuseSourceUnobserved marks a cell where no server telemetry could be
+	// read; observed reuse stays unmeasured rather than assumed (an evidence gap,
+	// never a silent pass).
+	FanoutReuseSourceUnobserved = "unobserved"
+
 	// The 4 Required Comparison Arms under Issue #6036:
 	ArmNoReuse = "no_reuse" // Arm 1: No-reuse baseline (cache disabled)
 	ArmSGLang  = "sglang"   // Arm 2: SGLang with RadixAttention
@@ -101,16 +117,33 @@ type ITLStats struct {
 
 // FanoutArmResult encapsulates the benchmark observations for a single (Fanout N, Arm) cell.
 type FanoutArmResult struct {
-	Arm                       string            `json:"arm"`
-	ArmDescription            string            `json:"arm_description"`
-	FanoutN                   int               `json:"fanout_n"`
-	Trials                    int               `json:"trials"`
-	PrefixTokens              int               `json:"prefix_tokens"`
-	SuffixTokens              int               `json:"suffix_tokens"`
-	DecodeTokens              int               `json:"decode_tokens"`
-	TotalPromptTokens         int64             `json:"total_prompt_tokens"`
-	ReusedTokens              int64             `json:"reused_tokens"`
-	PrefixHitRate             float64           `json:"prefix_hit_rate"`
+	Arm               string  `json:"arm"`
+	ArmDescription    string  `json:"arm_description"`
+	FanoutN           int     `json:"fanout_n"`
+	Trials            int     `json:"trials"`
+	PrefixTokens      int     `json:"prefix_tokens"`
+	SuffixTokens      int     `json:"suffix_tokens"`
+	DecodeTokens      int     `json:"decode_tokens"`
+	TotalPromptTokens int64   `json:"total_prompt_tokens"`
+	ReusedTokens      int64   `json:"reused_tokens"`
+	PrefixHitRate     float64 `json:"prefix_hit_rate"`
+	// ObservedReuseTokens is the cache reuse the SERVER reported for this cell's
+	// slot, read from live telemetry — distinct from ReusedTokens, which is the
+	// harness's analytic (n-1)*P estimate. A cell where no telemetry could be read
+	// leaves this zero and sets ReuseObservationSource to unobserved: an evidence
+	// gap, never a silent pass (issue #13076).
+	ObservedReuseTokens int64 `json:"observed_reuse_tokens"`
+	// ObservedHitRate is ObservedReuseTokens / TotalPromptTokens. It is the
+	// measured twin of PrefixHitRate.
+	ObservedHitRate float64 `json:"observed_hit_rate"`
+	// ReuseObservationSource names where ObservedReuseTokens came from
+	// (prometheus:/metrics) or why it is absent (analytic, unobserved).
+	ReuseObservationSource string `json:"reuse_observation_source"`
+	// ReuseDivergence is the fail flag: the analytic estimate claims reuse
+	// (PrefixHitRate > 0) on a shared-prefix arm but the server observed none.
+	// A run with any divergence must fail rather than publish an unfalsifiable
+	// reuse claim.
+	ReuseDivergence           bool              `json:"reuse_divergence,omitempty"`
 	TTFT                      DistributionStats `json:"ttft"`
 	ITL                       ITLStats          `json:"itl"`
 	DecodeThroughputTokPerSec float64           `json:"decode_throughput_tok_per_sec"`
@@ -232,6 +265,29 @@ type SubagentFanoutReceipt struct {
 	Contract       ContractValidation `json:"contract"`
 	Results        []FanoutArmResult  `json:"results"`
 	Summary        map[string]any     `json:"summary"`
+	// UnifiedThroughput is the measured aggregate tokens/sec across the whole
+	// sweep (issue #13076), distinct from any one cell's per-N throughput. It is
+	// nil when no cell produced a measurable wall time.
+	UnifiedThroughput *UnifiedThroughput `json:"unified_throughput,omitempty"`
+	// ReuseDivergenceArms names every shared-prefix arm whose analytic reuse the
+	// server did not observe. A non-empty list fails the run.
+	ReuseDivergenceArms []string `json:"reuse_divergence_arms,omitempty"`
+}
+
+// UnifiedThroughput is the measured aggregate throughput verdict for a sweep.
+// GeneratedTokens is the honest sum of generated tokens across the counted
+// cells; WallSeconds is the summed measured wall time; TokPerSec is their ratio.
+// An optional SLO floor (MinTokPerSec > 0) makes the verdict falsifiable: Met is
+// false when the measured aggregate falls short.
+type UnifiedThroughput struct {
+	Schema          string  `json:"schema"`
+	GeneratedTokens int64   `json:"generated_tokens"`
+	WallSeconds     float64 `json:"wall_seconds"`
+	TokPerSec       float64 `json:"tok_per_sec"`
+	MinTokPerSec    float64 `json:"min_tok_per_sec,omitempty"`
+	// Met is nil when no floor was set (an unconstrained measurement), so a
+	// reader can never mistake "no SLO" for "SLO passed".
+	Met *bool `json:"met,omitempty"`
 }
 
 // FanoutBenchConfig holds user flags and execution options.
@@ -251,6 +307,11 @@ type FanoutBenchConfig struct {
 	JSON           bool
 	OutputFile     string
 	Seed           int64
+	// MinUnifiedTPS is the optional unified-throughput SLO floor (tokens/sec)
+	// across the whole sweep. Zero disables the gate (an unconstrained
+	// measurement); a positive value fails the run when the measured aggregate
+	// falls short (issue #13076).
+	MinUnifiedTPS float64
 }
 
 // runBenchSubagentFanout executes the apples-to-apples subagent fanout benchmark harness.
@@ -310,7 +371,50 @@ func runBenchSubagentFanout(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
+	// Fail closed on a reuse claim the server did not corroborate (issue #13076).
+	// A receipt whose shared-prefix arms show analytic reuse but zero observed
+	// reuse is publishing an unfalsifiable claim, so it must not exit 0.
+	if len(receipt.ReuseDivergenceArms) > 0 {
+		fmt.Fprintf(stderr, "fak-dev bench-subagent-fanout: reuse divergence on arm(s) %s: analytic prefix_hit_rate > 0 but server observed 0 reused tokens\n",
+			strings.Join(receipt.ReuseDivergenceArms, ","))
+		return 1
+	}
+
+	// Enforce the optional unified-throughput SLO floor (issue #13076). Met is
+	// non-nil exactly when a floor was configured; a shortfall fails the run.
+	if ut := receipt.UnifiedThroughput; ut != nil && ut.Met != nil && !*ut.Met {
+		fmt.Fprintf(stderr, "fak-dev bench-subagent-fanout: unified throughput %.1f tok/s is below the SLO floor %.1f tok/s\n",
+			ut.TokPerSec, ut.MinTokPerSec)
+	}
+
+	// The measured-reuse and SLO verdicts gate the exit code through one pure
+	// function so a server-free test can witness each failure mode.
+	if code := fanoutGateExitCode(receipt); code != 0 {
+		return code
+	}
+
 	if cfg.VerifyContract && !receipt.Contract.Compliant {
+		return 1
+	}
+	return 0
+}
+
+// fanoutGateExitCode is the pure, deterministic exit verdict for a completed
+// receipt (issue #13076): it separates the measured-reuse and unified-throughput
+// gates from the byte-emitting run so a server-free test can witness each one
+// without a running server or a host timer. It returns 1 when a shared-prefix
+// reuse claim was not corroborated by server telemetry, or when an armed
+// unified-throughput SLO floor was missed; 0 otherwise. A nil UnifiedThroughput
+// (no measured wall) is not a gate failure — an unmeasured sweep cannot be
+// below a floor.
+func fanoutGateExitCode(receipt *SubagentFanoutReceipt) int {
+	if receipt == nil {
+		return 1
+	}
+	if len(receipt.ReuseDivergenceArms) > 0 {
+		return 1
+	}
+	if ut := receipt.UnifiedThroughput; ut != nil && ut.Met != nil && !*ut.Met {
 		return 1
 	}
 	return 0
@@ -339,9 +443,13 @@ func parseFanoutFlags(stderr io.Writer, argv []string) (*FanoutBenchConfig, erro
 	jsonOut := fs.Bool("json", false, "output benchmark results as JSON")
 	outFile := fs.String("out", "", "path to write benchmark receipt JSON")
 	seed := fs.Int64("seed", 42, "PRNG seed for deterministic simulation")
+	minUnifiedTPS := fs.Float64("min-unified-tps", 0, "optional unified-throughput SLO floor (tokens/sec) across the whole sweep; 0 disables the gate (issue #13076)")
 
 	if err := fs.Parse(argv); err != nil {
 		return nil, err
+	}
+	if *minUnifiedTPS < 0 {
+		return nil, fmt.Errorf("invalid -min-unified-tps %.3f: must be >= 0", *minUnifiedTPS)
 	}
 
 	fanouts, err := parseCommaInts(*fanoutStr)
@@ -387,6 +495,7 @@ func parseFanoutFlags(stderr io.Writer, argv []string) (*FanoutBenchConfig, erro
 		JSON:           *jsonOut,
 		OutputFile:     *outFile,
 		Seed:           *seed,
+		MinUnifiedTPS:  *minUnifiedTPS,
 	}, nil
 }
 
@@ -497,7 +606,18 @@ func validateContractInvariants(cfg *FanoutBenchConfig) ContractValidation {
 type SubagentFanoutHarness struct {
 	Config *FanoutBenchConfig
 	RNG    *rand.Rand
+	// ObserveReuse is the injectable server-telemetry seam (issue #13076). When
+	// nil the live path uses the defaultHTTPReuseObserver, which reads the
+	// server's Prometheus text exposition; a test injects a fake so the
+	// divergence and SLO verdicts are witnessed without a running server.
+	ObserveReuse reuseObserver
 }
+
+// reuseObserver reads the cache-reuse tokens a live server actually served from
+// its telemetry surface, and names the source. A non-nil error means the
+// telemetry could not be read — the cell records an evidence gap rather than
+// inventing a value.
+type reuseObserver func(ctx context.Context, endpoint string) (reusedTokens int64, source string, err error)
 
 // NewFanoutBenchmarkHarness creates a harness configured with the provided options.
 func NewFanoutBenchmarkHarness(cfg *FanoutBenchConfig) *SubagentFanoutHarness {
@@ -563,7 +683,60 @@ func (h *SubagentFanoutHarness) Run(ctx context.Context) (*SubagentFanoutReceipt
 	// Compute summary analytics.
 	receipt.Summary = h.computeSummary(receipt.Results)
 
+	// Fold the measured reuse-divergence and unified-throughput verdicts
+	// (issue #13076) into the receipt so a caller can fail the run.
+	receipt.ReuseDivergenceArms = reuseDivergenceArms(receipt.Results)
+	receipt.UnifiedThroughput = computeUnifiedThroughput(receipt.Results, h.Config.MinUnifiedTPS)
+
 	return receipt, nil
+}
+
+// reuseDivergenceArms names the distinct arms whose analytic reuse the server
+// did not observe, in result order. An empty list means every shared-prefix
+// arm's reuse claim is corroborated by server telemetry.
+func reuseDivergenceArms(results []FanoutArmResult) []string {
+	var arms []string
+	seen := make(map[string]bool)
+	for _, r := range results {
+		if r.ReuseDivergence && !seen[r.Arm] {
+			seen[r.Arm] = true
+			arms = append(arms, r.Arm)
+		}
+	}
+	return arms
+}
+
+// computeUnifiedThroughput aggregates measured decode throughput across the whole
+// sweep (issue #13076): the honest sum of generated tokens over the summed
+// measured wall time of the cells that carry a non-zero wall clock. It is the
+// falsifiable peer of any single cell's per-N throughput. A positive minTokPerSec
+// arms the SLO floor; Met is left nil when no floor is set so "no SLO" never
+// reads as "SLO passed".
+func computeUnifiedThroughput(results []FanoutArmResult, minTokPerSec float64) *UnifiedThroughput {
+	var genTokens int64
+	var wallSeconds float64
+	for _, r := range results {
+		if r.Error != "" || r.WallClockMs <= 0 {
+			continue
+		}
+		genTokens += int64(r.FanoutN) * int64(r.DecodeTokens) * int64(r.Trials)
+		wallSeconds += r.WallClockMs / 1000.0
+	}
+	if wallSeconds <= 0 {
+		return nil
+	}
+	ut := &UnifiedThroughput{
+		Schema:          FanoutUnifiedThroughputSchema,
+		GeneratedTokens: genTokens,
+		WallSeconds:     wallSeconds,
+		TokPerSec:       float64(genTokens) / wallSeconds,
+		MinTokPerSec:    minTokPerSec,
+	}
+	if minTokPerSec > 0 {
+		met := ut.TokPerSec >= minTokPerSec
+		ut.Met = &met
+	}
+	return ut
 }
 
 func (h *SubagentFanoutHarness) evaluateCell(ctx context.Context, arm string, n int) (FanoutArmResult, error) {
@@ -938,7 +1111,7 @@ func (h *SubagentFanoutHarness) executeLiveCell(ctx context.Context, arm string,
 		throughput = 1000.0 / itlDist.MeanMs * float64(n)
 	}
 
-	return FanoutArmResult{
+	res = FanoutArmResult{
 		Arm:                       arm,
 		ArmDescription:            ArmDescription[arm],
 		FanoutN:                   n,
@@ -957,7 +1130,114 @@ func (h *SubagentFanoutHarness) executeLiveCell(ctx context.Context, arm string,
 		OutputEquivalence:         true,
 		OutputHash:                deterministicOutputHash(arm, n, P, S, D),
 		ServeCompleteness:         completeness,
-	}, nil
+	}
+	// Read what the server actually reused (issue #13076). This is the measured
+	// twin of the analytic PrefixHitRate above; a read failure is recorded as an
+	// evidence gap, never fabricated.
+	h.observeCellReuse(ctx, arm, endpoint, &res)
+	return res, nil
+}
+
+// defaultHTTPReuseObserver reads the server's Prometheus text exposition and sums
+// every counter whose name ends in the cache-reuse token suffix. It is the
+// production implementation of the reuseObserver seam (issue #13076): the live
+// fan-out cell reads what the server actually reused instead of recomputing
+// (n-1)*P arithmetic. It returns an error when /metrics is unreachable or carries
+// no matching counter, so the caller records an evidence gap rather than zero.
+func defaultHTTPReuseObserver(ctx context.Context, endpoint string) (int64, string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", endpoint+"/metrics", nil)
+	if err != nil {
+		return 0, FanoutReuseSourceUnobserved, err
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, FanoutReuseSourceUnobserved, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, FanoutReuseSourceUnobserved, fmt.Errorf("GET /metrics: HTTP status %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return 0, FanoutReuseSourceUnobserved, err
+	}
+	total, found := parsePrometheusReuseTokens(string(body))
+	if !found {
+		return 0, FanoutReuseSourceUnobserved, fmt.Errorf("GET /metrics: no cache-reuse counter matching %q", reuseMetricSuffix)
+	}
+	return total, FanoutReuseSourcePrometheus, nil
+}
+
+// reuseMetricSuffix is the counter-name suffix the Prometheus reader sums. It
+// binds to the public cache-observability field spelling (internal/cacheobs
+// FieldReusedTokens = "reused_tokens"), so the harness reads the same metric the
+// gateway emits rather than a private re-spelling.
+const reuseMetricSuffix = "reused_tokens"
+
+// parsePrometheusReuseTokens sums every sample whose metric name ends in
+// reuseMetricSuffix (with or without the Prometheus `_total` counter suffix, so
+// both `..._reused_tokens` and `..._reused_tokens_total` bind), from a Prometheus
+// text exposition. It returns found=false when no matching sample is present, so
+// an absent metric is distinguishable from a measured zero.
+func parsePrometheusReuseTokens(body string) (int64, bool) {
+	var total int64
+	found := false
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		name := line
+		if i := strings.IndexAny(line, "{ \t"); i >= 0 {
+			name = line[:i]
+		}
+		name = strings.TrimSuffix(name, "_total")
+		if !strings.HasSuffix(name, reuseMetricSuffix) {
+			continue
+		}
+		// The value is the last whitespace-separated token on the line.
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		v, err := strconv.ParseFloat(fields[len(fields)-1], 64)
+		if err != nil {
+			continue
+		}
+		total += int64(v)
+		found = true
+	}
+	return total, found
+}
+
+// observeCellReuse reads server-side reuse for one live cell through the
+// injectable seam and folds it into the result: the measured counters, the
+// source tag, and the divergence verdict against the analytic estimate. A read
+// failure is an evidence gap (ObservedReuseTokens stays zero, source unobserved,
+// no divergence flag) — never a silent zero that reads as a measured result.
+func (h *SubagentFanoutHarness) observeCellReuse(ctx context.Context, arm, endpoint string, res *FanoutArmResult) {
+	obs := h.ObserveReuse
+	if obs == nil {
+		obs = defaultHTTPReuseObserver
+	}
+	reused, source, err := obs(ctx, endpoint)
+	if err != nil {
+		res.ReuseObservationSource = FanoutReuseSourceUnobserved
+		res.ObservedReuseTokens = 0
+		res.ObservedHitRate = 0
+		return
+	}
+	res.ReuseObservationSource = source
+	res.ObservedReuseTokens = reused
+	if res.TotalPromptTokens > 0 {
+		res.ObservedHitRate = float64(reused) / float64(res.TotalPromptTokens)
+	}
+	// Divergence: the analytic estimate claims shared-prefix reuse on a
+	// shared-prefix arm, but the server observed none.
+	if res.PrefixHitRate > 0 && reused == 0 {
+		res.ReuseDivergence = true
+	}
 }
 
 // verifyServedGeometry probes the reference server for the per-slot context
@@ -1384,6 +1664,22 @@ func renderPrettyReceipt(w io.Writer, r *SubagentFanoutReceipt) {
 	}
 
 	fmt.Fprintln(w, strings.Repeat("=", 120))
+	if r.UnifiedThroughput != nil {
+		ut := r.UnifiedThroughput
+		verdict := "no SLO floor set"
+		if ut.Met != nil {
+			if *ut.Met {
+				verdict = fmt.Sprintf("SLO MET (floor %.1f tok/s)", ut.MinTokPerSec)
+			} else {
+				verdict = fmt.Sprintf("SLO MISSED (floor %.1f tok/s)", ut.MinTokPerSec)
+			}
+		}
+		fmt.Fprintf(w, "Unified throughput (measured, issue #13076): %.1f tok/s | %d tokens / %.2fs | %s\n",
+			ut.TokPerSec, ut.GeneratedTokens, ut.WallSeconds, verdict)
+	}
+	if len(r.ReuseDivergenceArms) > 0 {
+		fmt.Fprintf(w, "REUSE DIVERGENCE (analytic reuse unobserved by server): %s\n", strings.Join(r.ReuseDivergenceArms, ", "))
+	}
 	fmt.Fprintf(w, "Issue #6036 Contract Audit: %s\n", contractStatusLabel(r.Contract.Compliant))
 	fmt.Fprintf(w, "  - All 4 Arms Present: %v\n", r.Contract.AllFourArmsPresent)
 	fmt.Fprintf(w, "  - Identical Weights & Quantization: %v (%s / %s)\n", r.Contract.IdenticalWeightsEnforced && r.Contract.IdenticalQuantization, r.Model, r.Quantization)

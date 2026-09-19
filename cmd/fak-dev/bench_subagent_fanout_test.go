@@ -757,3 +757,314 @@ func TestSubagentFanoutConcurrencyScaling(t *testing.T) {
 		}
 	})
 }
+
+// fanoutLiveReuseFixture serves the two endpoints a live fan-out cell needs:
+// /props with an adequate per-slot capacity, and a streaming /v1/completions.
+// The caller supplies the /metrics body (or metricsOK=false to 404 it) so the
+// observed-reuse read is exercised end to end.
+func fanoutLiveReuseFixture(t *testing.T, metricsBody string, metricsOK bool) (*httptest.Server, *int64) {
+	t.Helper()
+	var hits int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/props":
+			fmt.Fprint(w, `{"total_slots":8,"default_generation_settings":{"n_ctx":4096}}`)
+		case "/metrics":
+			if !metricsOK {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "text/plain")
+			fmt.Fprint(w, metricsBody)
+		case "/v1/completions":
+			atomic.AddInt64(&hits, 1)
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			flusher, _ := w.(http.Flusher)
+			for i := 0; i < 4; i++ {
+				fmt.Fprint(w, "data: {\"choices\":[{\"text\":\"tok\"}]}\n\n")
+				if flusher != nil {
+					flusher.Flush()
+				}
+			}
+			fmt.Fprint(w, "data: [DONE]\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &hits
+}
+
+// TestFanoutObservedReuseFromPrometheus proves the live cell records the reuse
+// the SERVER reports, distinct from the analytic estimate, and reads it from the
+// Prometheus text exposition (issue #13076).
+func TestFanoutObservedReuseFromPrometheus(t *testing.T) {
+	metrics := "# HELP fak_gateway_kv_prefix_reused_tokens_total reused\n# TYPE fak_gateway_kv_prefix_reused_tokens_total counter\nfak_gateway_kv_prefix_reused_tokens_total 4096\n"
+	srv, _ := fanoutLiveReuseFixture(t, metrics, true)
+
+	h := NewFanoutBenchmarkHarness(&FanoutBenchConfig{
+		Model:          "Qwen/Qwen2.5-Coder-7B-Instruct",
+		Quantization:   "Q4_K_M",
+		MemoryFraction: FixedMemoryFraction,
+		FanoutSweep:    []int{2},
+		Arms:           []string{ArmLLamaCPP},
+		PrefixTokens:   64,
+		SuffixTokens:   16,
+		DecodeTokens:   4,
+		Trials:         1,
+		Live:           true,
+		Endpoints:      map[string]string{ArmLLamaCPP: srv.URL},
+		Seed:           42,
+	})
+	receipt, err := h.Run(context.Background())
+	if err != nil {
+		t.Fatalf("live harness run: %v", err)
+	}
+	res := receipt.Results[0]
+	if res.Error != "" {
+		t.Fatalf("live cell error: %s", res.Error)
+	}
+	if res.ObservedReuseTokens != 4096 {
+		t.Errorf("observed reuse = %d, want 4096 (from /metrics)", res.ObservedReuseTokens)
+	}
+	if res.ReuseObservationSource != FanoutReuseSourcePrometheus {
+		t.Errorf("source = %q, want %q", res.ReuseObservationSource, FanoutReuseSourcePrometheus)
+	}
+	if res.ReuseDivergence {
+		t.Error("a server-corroborated reuse claim must not flag divergence")
+	}
+	if res.ReusedTokens != int64(1)*64 {
+		t.Errorf("analytic reused tokens = %d, want 64", res.ReusedTokens)
+	}
+	if res.ObservedHitRate <= 0 {
+		t.Errorf("observed hit rate = %f, want > 0", res.ObservedHitRate)
+	}
+	if len(receipt.ReuseDivergenceArms) != 0 {
+		t.Errorf("no divergence expected, got %v", receipt.ReuseDivergenceArms)
+	}
+}
+
+// TestFanoutReuseDivergenceFailsRun proves the fail-closed verdict: analytic
+// reuse > 0 but server-observed reuse == 0 is a divergence, and the run exits
+// non-zero rather than publishing an unfalsifiable reuse claim (issue #13076).
+func TestFanoutReuseDivergenceFailsRun(t *testing.T) {
+	// A well-formed /metrics that reports zero reused tokens.
+	srv, _ := fanoutLiveReuseFixture(t, "fak_gateway_kv_prefix_reused_tokens_total 0\n", true)
+
+	var stdout, stderr bytes.Buffer
+	code := runBenchSubagentFanout(&stdout, &stderr, []string{
+		"-live",
+		"-arms", "llamacpp",
+		"-llamacpp-url", srv.URL,
+		"-fanout", "2",
+		"-prefix-tokens", "64",
+		"-suffix-tokens", "16",
+		"-decode-tokens", "4",
+		"-trials", "1",
+		"-verify-contract=false",
+		"-json",
+	})
+	if code == 0 {
+		t.Fatalf("divergent reuse must fail the run; got exit 0 stdout=%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "reuse divergence") {
+		t.Errorf("stderr must name the divergence: %s", stderr.String())
+	}
+
+	var r SubagentFanoutReceipt
+	if err := json.Unmarshal(stdout.Bytes(), &r); err == nil {
+		if len(r.ReuseDivergenceArms) == 0 {
+			t.Error("receipt must name the divergent arm(s)")
+		}
+	}
+}
+
+// TestFanoutReuseObserverUnobservedIsEvidenceGap proves a telemetry read failure
+// is recorded as an unobserved evidence gap, not a fabricated zero, and does not
+// by itself flag divergence (an unmeasured value is not a measured zero).
+func TestFanoutReuseObserverUnobservedIsEvidenceGap(t *testing.T) {
+	srv, _ := fanoutLiveReuseFixture(t, "", false) // /metrics 404s
+
+	h := NewFanoutBenchmarkHarness(&FanoutBenchConfig{
+		Model:          "Qwen/Qwen2.5-Coder-7B-Instruct",
+		Quantization:   "Q4_K_M",
+		MemoryFraction: FixedMemoryFraction,
+		FanoutSweep:    []int{2},
+		Arms:           []string{ArmLLamaCPP},
+		PrefixTokens:   64,
+		SuffixTokens:   16,
+		DecodeTokens:   4,
+		Trials:         1,
+		Live:           true,
+		Endpoints:      map[string]string{ArmLLamaCPP: srv.URL},
+		Seed:           42,
+	})
+	receipt, err := h.Run(context.Background())
+	if err != nil {
+		t.Fatalf("live harness run: %v", err)
+	}
+	res := receipt.Results[0]
+	if res.Error != "" {
+		t.Fatalf("cell error: %s", res.Error)
+	}
+	if res.ReuseObservationSource != FanoutReuseSourceUnobserved {
+		t.Errorf("source = %q, want %q", res.ReuseObservationSource, FanoutReuseSourceUnobserved)
+	}
+	if res.ObservedReuseTokens != 0 {
+		t.Errorf("unobserved reuse must stay 0, got %d", res.ObservedReuseTokens)
+	}
+	if res.ReuseDivergence {
+		t.Error("an unread telemetry surface is an evidence gap, not a divergence")
+	}
+}
+
+// TestFanoutUnifiedThroughputSLOFloor proves the aggregate throughput verdict is
+// falsifiable: an unmet floor fails, a met floor passes, and no floor leaves Met
+// nil so "no SLO" never reads as "SLO passed" (issue #13076).
+func TestFanoutUnifiedThroughputSLOFloor(t *testing.T) {
+	t.Run("FloorMet", func(t *testing.T) {
+		ut := computeUnifiedThroughput([]FanoutArmResult{
+			{Arm: ArmFAK, FanoutN: 4, DecodeTokens: 8, Trials: 1, WallClockMs: 1000},
+		}, 10)
+		if ut == nil {
+			t.Fatal("expected a unified-throughput verdict")
+		}
+		if ut.Met == nil || !*ut.Met {
+			t.Fatalf("32 tokens / 1s = 32 tok/s must meet a 10 tok/s floor: %+v", ut)
+		}
+		if ut.GeneratedTokens != 32 {
+			t.Errorf("generated tokens = %d, want 32", ut.GeneratedTokens)
+		}
+		if ut.Schema != FanoutUnifiedThroughputSchema {
+			t.Errorf("schema = %q, want %q", ut.Schema, FanoutUnifiedThroughputSchema)
+		}
+	})
+	t.Run("FloorMissed", func(t *testing.T) {
+		ut := computeUnifiedThroughput([]FanoutArmResult{
+			{Arm: ArmFAK, FanoutN: 1, DecodeTokens: 1, Trials: 1, WallClockMs: 1000},
+		}, 300)
+		if ut == nil || ut.Met == nil {
+			t.Fatalf("expected an armed floor verdict: %+v", ut)
+		}
+		if *ut.Met {
+			t.Errorf("1 token / 1s must miss a 300 tok/s floor: %+v", ut)
+		}
+	})
+	t.Run("NoFloorLeavesMetNil", func(t *testing.T) {
+		ut := computeUnifiedThroughput([]FanoutArmResult{
+			{Arm: ArmFAK, FanoutN: 1, DecodeTokens: 1, Trials: 1, WallClockMs: 1000},
+		}, 0)
+		if ut == nil {
+			t.Fatal("expected a measurement even without a floor")
+		}
+		if ut.Met != nil {
+			t.Errorf("no floor must leave Met nil, got %v", *ut.Met)
+		}
+	})
+	t.Run("SkipsErroredCells", func(t *testing.T) {
+		ut := computeUnifiedThroughput([]FanoutArmResult{
+			{Arm: ArmNoReuse, Error: "boom", FanoutN: 8, DecodeTokens: 8, Trials: 1, WallClockMs: 5000},
+			{Arm: ArmFAK, FanoutN: 1, DecodeTokens: 4, Trials: 1, WallClockMs: 1000},
+		}, 0)
+		if ut == nil {
+			t.Fatal("expected a verdict from the one good cell")
+		}
+		if ut.GeneratedTokens != 4 {
+			t.Errorf("errored cells must not contribute tokens: got %d, want 4", ut.GeneratedTokens)
+		}
+	})
+	t.Run("NilWhenNoMeasuredWall", func(t *testing.T) {
+		if ut := computeUnifiedThroughput([]FanoutArmResult{{Arm: ArmFAK, Error: "boom"}}, 0); ut != nil {
+			t.Errorf("a sweep with no measured wall time has no aggregate, got %+v", ut)
+		}
+		if ut := computeUnifiedThroughput([]FanoutArmResult{{Arm: ArmFAK, WallClockMs: 0}}, 0); ut != nil {
+			t.Errorf("a zero-wall sweep has no aggregate, got %+v", ut)
+		}
+	})
+}
+
+// TestFanoutGateExitCode proves the pure run gate (issue #13076) is the single
+// place the measured-reuse and unified-throughput verdicts decide the exit
+// code, deterministically and without a server or a host timer.
+func TestFanoutGateExitCode(t *testing.T) {
+	t.Run("ReuseDivergenceFails", func(t *testing.T) {
+		if got := fanoutGateExitCode(&SubagentFanoutReceipt{
+			ReuseDivergenceArms: []string{ArmFAK},
+		}); got != 1 {
+			t.Errorf("divergent reuse must exit 1, got %d", got)
+		}
+	})
+	t.Run("MissedFloorFails", func(t *testing.T) {
+		met := false
+		if got := fanoutGateExitCode(&SubagentFanoutReceipt{
+			UnifiedThroughput: &UnifiedThroughput{Met: &met, MinTokPerSec: 300, TokPerSec: 10},
+		}); got != 1 {
+			t.Errorf("a missed armed floor must exit 1, got %d", got)
+		}
+	})
+	t.Run("MetFloorPasses", func(t *testing.T) {
+		met := true
+		if got := fanoutGateExitCode(&SubagentFanoutReceipt{
+			UnifiedThroughput: &UnifiedThroughput{Met: &met, MinTokPerSec: 10, TokPerSec: 300},
+		}); got != 0 {
+			t.Errorf("a met armed floor must exit 0, got %d", got)
+		}
+	})
+	t.Run("NoFloorPasses", func(t *testing.T) {
+		if got := fanoutGateExitCode(&SubagentFanoutReceipt{
+			UnifiedThroughput: &UnifiedThroughput{TokPerSec: 10},
+		}); got != 0 {
+			t.Errorf("no floor must not gate, got %d", got)
+		}
+	})
+	t.Run("NoMeasuredWallPasses", func(t *testing.T) {
+		if got := fanoutGateExitCode(&SubagentFanoutReceipt{}); got != 0 {
+			t.Errorf("an unmeasured sweep is not a shortfall, got %d", got)
+		}
+	})
+	t.Run("NilReceiptFails", func(t *testing.T) {
+		if got := fanoutGateExitCode(nil); got != 1 {
+			t.Errorf("a nil receipt must fail closed, got %d", got)
+		}
+	})
+}
+
+// TestParsePrometheusReuseTokens pins the reader: it sums matching counters,
+// ignores comments/HELP/TYPE lines, tolerates label sets, accepts both the bare
+// and `_total` counter spellings, and distinguishes an absent metric from a
+// measured zero.
+func TestParsePrometheusReuseTokens(t *testing.T) {
+	t.Run("SumsMatchingWithTotalSuffix", func(t *testing.T) {
+		body := "# HELP fak_gateway_kv_prefix_reused_tokens_total x\n" +
+			"# TYPE fak_gateway_kv_prefix_reused_tokens_total counter\n" +
+			"fak_gateway_kv_prefix_reused_tokens_total{arm=\"fak\"} 100\n" +
+			"fak_gateway_kv_prefix_reused_tokens_total{arm=\"other\"} 50\n" +
+			"unrelated_metric_total 9999\n"
+		got, found := parsePrometheusReuseTokens(body)
+		if !found || got != 150 {
+			t.Fatalf("got (%d, %v), want (150, true)", got, found)
+		}
+	})
+	t.Run("BareSuffixAlsoBinds", func(t *testing.T) {
+		got, found := parsePrometheusReuseTokens("fak_gateway_kv_prefix_reused_tokens 7\n")
+		if !found || got != 7 {
+			t.Fatalf("got (%d, %v), want (7, true)", got, found)
+		}
+	})
+	t.Run("MeasuredZeroIsFound", func(t *testing.T) {
+		got, found := parsePrometheusReuseTokens("fak_gateway_kv_prefix_reused_tokens_total 0\n")
+		if !found || got != 0 {
+			t.Fatalf("got (%d, %v), want (0, true)", got, found)
+		}
+	})
+	t.Run("AbsentIsNotFound", func(t *testing.T) {
+		got, found := parsePrometheusReuseTokens("some_other_metric 5\n")
+		if found || got != 0 {
+			t.Fatalf("got (%d, %v), want (0, false)", got, found)
+		}
+	})
+}
