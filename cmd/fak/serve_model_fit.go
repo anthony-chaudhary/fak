@@ -601,6 +601,26 @@ func serveNativeContextSizingInputs(ws *ggufload.WeightSource, be compute.Backen
 	}
 	if be != nil && cpuOffloadExperts {
 		if ok, err := serveArtifactCPUOffloadExperts(ws); ok && err == nil {
+			devFit := serveDeviceFitBudget(be)
+			// fak#13282: route the sizing arm through the SAME streamed-expert measurement the load
+			// arm takes (serveStreamedCPUOffloadPathDecision -> serveStreamedCPUOffloadPlanForAperture),
+			// so the auto-sizer's plan total and the loader's resident working set cannot disagree.
+			// Before this the sizing arm always called the bounded-DENSE estimator
+			// (EstimateCPUOffloadExpertsBoundedDenseMemoryPlan -> streamResident=-1), which charges the
+			// FULL routed-expert host set (V4.1: offload(host)=45.45 GiB) even though the loader was
+			// going to keep only the bounded resident set. The result was the witnessed strix3
+			// plan-total refusal (device dense 60.55 + full expert 45.45 = 105.97 GiB against a
+			// 62.4 GiB pool) on a serve whose load arm would in fact fit.
+			//
+			// The streamed decision is made against the TRUE HOST budget (serveStreamedHostFit, the
+			// fak#13142 rule) over the same opened checkpoint the load path uses, and the split
+			// aperture is made explicit (serveSplitAperture) exactly as the load path does. When the
+			// routed set is host-resident (or the host is unprobeable) the streamed plan does not fire
+			// and we fall through to the historical resident-arm sizing byte-for-byte.
+			hostFit := serveStreamedHostFit(be, &devFit)
+			if plan, streamed := serveCPUOffloadSizingStreamedPlan(ws, be, max(ranks, 1), hostFit); streamed {
+				return plan, devFit, nil
+			}
 			// fak#13209: thread the bounded streamed-dense option so the arm's estimate charges the
 			// eligible dense side at the working set, not the full on-disk dense total. The option
 			// list is the SAME serveQ4KFitOptions list the path-based load arm uses, so the sizing
@@ -613,16 +633,16 @@ func serveNativeContextSizingInputs(ws *ggufload.WeightSource, be compute.Backen
 			// over-admission fak#13249 removed from the load path. serveCPUOffloadSizingDenseBound is the
 			// ONE derivation -- post-expert remainder on the combined arm, the historical whole-budget
 			// bound on every other arm -- so the context plan and the load guard cannot disagree.
-			opts := serveQ4KFitOptions("", ws, be, serveLoadArmCPUOffloadExperts, serveDeviceFitBudget(be))
+			opts := serveQ4KFitOptions("", ws, be, serveLoadArmCPUOffloadExperts, devFit)
 			var weights compute.MemoryPlan
 			var perr error
 			if bound, bounded := serveBoundedDenseWorkingSetBound(opts); bounded {
-				bound = serveCPUOffloadSizingDenseBound(ws, be, serveDeviceFitBudget(be), bound)
+				bound = serveCPUOffloadSizingDenseBound(ws, be, devFit, bound)
 				weights, perr = ws.EstimateCPUOffloadExpertsBoundedDenseMemoryPlan(max(ranks, 1), bound)
 			} else {
 				weights, perr = ws.EstimateCPUOffloadExpertsExpertParallelMemoryPlan(max(ranks, 1))
 			}
-			return weights, serveDeviceFitBudget(be), perr
+			return weights, devFit, perr
 		}
 	}
 	path := ""
@@ -758,6 +778,35 @@ func serveCPUOffloadBoundedDenseOptions(be compute.Backend, fit serveFitBudget) 
 	return []ggufload.Q4KLoadOption{
 		ggufload.WithStreamedDenseQ4KWorkingSet(serveStreamedDenseQ4KWorkingSetBound(serveStreamedHostFit(be, &fit))),
 	}
+}
+
+// serveCPUOffloadSizingStreamedPlan is the context-sizing arm's streamed-expert measurement,
+// shared with the load arm (serveStreamedCPUOffloadPathDecision -> serveStreamedCPUOffloadPlanForAperture)
+// so the auto-sizer's plan total and the loader's resident working set cannot disagree (fak#13282).
+//
+// It answers the ONE question the sizing arm needs: on this host budget, will the loader keep the
+// BOUNDED RESIDENT expert set (streamed=true) or the full routed charge (streamed=false)? On the
+// streamed arm the returned plan already folds the bounded resident expert set AND the bounded
+// dense working set (EstimateCPUOffloadExpertsStreamedBoundedDenseMemoryPlan via
+// serveStreamedCPUOffloadPlanForAperture), so its grand total is bounded against the one physical
+// pool. Before this the sizing arm always took the bounded-dense-only estimator
+// (EstimateCPUOffloadExpertsBoundedDenseMemoryPlan, streamResident=-1) and charged the FULL routed
+// set even when the loader would bound it -- the witnessed strix3 plan-total refusal.
+//
+// hostFit is taken as a parameter (the caller derives it with serveStreamedHostFit over the same
+// measured budget) so the decision is unit-testable with an injected budget: a nil backend takes
+// the injected fit verbatim, exactly as serveStreamedHostFit and every other sizing seam here.
+// An error, or a non-streamed selection, returns streamed=false so the caller keeps the historical
+// resident-arm sizing byte-for-byte.
+func serveCPUOffloadSizingStreamedPlan(ws *ggufload.WeightSource, be compute.Backend, ranks int, hostFit serveFitBudget) (compute.MemoryPlan, bool) {
+	if ws == nil {
+		return nil, false
+	}
+	plan, streamed, err := serveStreamedCPUOffloadPlanForAperture(ws, be, max(ranks, 1), 0, hostFit, ggufload.BackendSharesHostRAM(be), serveSplitAperture(be))
+	if err != nil || !streamed {
+		return nil, false
+	}
+	return plan, true
 }
 
 // serveCPUOffloadSizingDenseBound folds the COMBINED streamed-expert remainder into the

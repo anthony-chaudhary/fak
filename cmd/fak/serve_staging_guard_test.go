@@ -663,3 +663,71 @@ func TestServeCPUOffloadSizingDenseBoundNoopWithoutStreamKnob(t *testing.T) {
 		t.Fatalf("knob unset -> %d, want the declared bound %d unchanged", got, declared)
 	}
 }
+
+// serve_staging_guard_test.go (fak#13282) — the sizing-arm/load-arm divergence at the plan TOTAL.
+// After the #13280 split-aperture guard landed, the physical strix3 serve refused fail-closed by
+// name (device dense 60.55 GiB + FULL routed-expert host charge 45.45 GiB = 105.97 GiB against a
+// 62.4 GiB pool) even though the LOAD arm would have kept only the BOUNDED resident expert set. The
+// sizing arm (serveNativeContextSizingInputs) took the bounded-dense-only estimator
+// (EstimateCPUOffloadExpertsBoundedDenseMemoryPlan, streamResident=-1) and never consulted the
+// streamed decision, so the auto-sizer's plan total overstated the expert claim. The fix routes the
+// sizing arm through serveCPUOffloadSizingStreamedPlan, the SAME measurement the load arm takes.
+
+// On a host budget the full routed charge cannot fit, the sizing helper must select the streamed
+// plan and return a plan whose host total is STRICTLY below avail — the bounded resident expert set
+// + bounded dense working set, not the full routed charge. The plan must be byte-identical to the
+// one the load-arm decision path (serveStreamedCPUOffloadPlanForAperture) produces, so the two
+// cannot disagree.
+func TestServeCPUOffloadSizingStreamedPlanBoundsPlanTotal(t *testing.T) {
+	t.Setenv("FAK_STREAM_Q4K", "1")
+	ws := serveStreamedSynthWeightSource(t)
+	resident, err := serveGGUFCPUOffloadMemoryPlan(ws, 1, 0, serveFitBudget{})
+	if err != nil {
+		t.Fatalf("resident plan: %v", err)
+	}
+	if resident.HostTotal() <= 0 {
+		t.Fatal("fixture must host-scope the routed experts (HostTotal>0)")
+	}
+	// A host budget below the full routed charge forces the streamed decision (the #13121 trigger).
+	hostFit := serveFitBudget{Base: resident.HostTotal() - 1, Headroom: 0}
+
+	// be==nil takes the injected hostFit verbatim (serveStreamedHostFit device-less rule), so this
+	// exercises the exact sizing-arm helper with a deterministic budget.
+	plan, streamed := serveCPUOffloadSizingStreamedPlan(ws, nil, 1, hostFit)
+	if !streamed {
+		t.Fatalf("sizing helper did not select the streamed arm with budget %d against routed set %d", hostFit.avail(), resident.HostTotal())
+	}
+	if plan == nil {
+		t.Fatal("streamed sizing helper returned streamed=true with a nil plan")
+	}
+	if plan.HostTotal() >= hostFit.avail() {
+		t.Fatalf("streamed sizing host total %d is not strictly below avail %d; the auto-sizer would still tie the pool", plan.HostTotal(), hostFit.avail())
+	}
+	if plan.HostTotal() >= resident.HostTotal() {
+		t.Fatalf("streamed sizing host total %d is not below the full routed charge %d; the sizing arm still charges the full expert set", plan.HostTotal(), resident.HostTotal())
+	}
+
+	// The load-arm decision path produces the SAME plan shape from the same measurement.
+	loadPlan, loadStreamed, err := serveStreamedCPUOffloadPlanForAperture(ws, nil, 1, 0, hostFit, false, false)
+	if err != nil {
+		t.Fatalf("load-arm streamed plan: %v", err)
+	}
+	if !loadStreamed {
+		t.Fatal("load arm did not select the streamed plan on the same budget; sizing and load disagree")
+	}
+	if plan.HostTotal() != loadPlan.HostTotal() || plan.DeviceTotal() != loadPlan.DeviceTotal() {
+		t.Fatalf("sizing plan host/device = %d/%d, load plan = %d/%d; the two arms disagree",
+			plan.HostTotal(), plan.DeviceTotal(), loadPlan.HostTotal(), loadPlan.DeviceTotal())
+	}
+
+	// A budget the full routed charge DOES fit keeps the historical resident-arm sizing: the helper
+	// must not fire, so every non-streamed serve is byte-identical.
+	bigFit := serveFitBudget{Base: resident.HostTotal() * 4, Headroom: 0}
+	if plan, streamed := serveCPUOffloadSizingStreamedPlan(ws, nil, 1, bigFit); streamed {
+		t.Fatalf("sizing helper fired the streamed arm although the full routed charge fits the budget; plan=%+v", plan)
+	}
+	// A nil source cannot plan; the helper reports not-streamed so the caller keeps its historical path.
+	if _, streamed := serveCPUOffloadSizingStreamedPlan(nil, nil, 1, hostFit); streamed {
+		t.Fatal("nil source selected the streamed arm")
+	}
+}
