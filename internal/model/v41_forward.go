@@ -182,6 +182,11 @@ type v41ProjScratch struct {
 	// the same (expert, projection) within one layer from RAM instead of re-faulting
 	// the checkpoint tier (#13296). The MoE loop is sequential and consumes each
 	// block read-only, and the store order is per-forward, so no aliasing escapes.
+	//
+	// layerExpertFIFO is the eviction queue in LEAST-RECENTLY-USED order: a hit
+	// (v41LayerCacheGet) refreshes the key's position, so it is an LRU queue, not
+	// an insertion-order FIFO (#13294). The prefill's interleaved routed-expert
+	// reads would otherwise evict a hot key before the next pass re-reads it.
 	layerExperts    map[string][]float32
 	layerExpertFIFO []string
 
@@ -334,17 +339,56 @@ func v41SatAdd(bound int64, vals ...int64) int64 {
 }
 
 // v41LayerCacheGet returns a retained f32 block for name, or nil on a miss.
+//
+// A HIT refreshes the key's recency (it is moved to the most-recently-used end
+// of layerExpertFIFO) so v41LayerCachePut's eviction becomes LRU rather than
+// FIFO. This is the #13294 frontier lever: the prefill's routed-expert reads are
+// interleaved across the token dimension, so the key re-read last pass is the
+// one FIFO had evicted first. Re-touching on the read that just used it keeps
+// the hot set resident, which is exactly the "raise the bounded resident hit
+// fraction" the first-token throughput seam names. The map lookup and promotion
+// are observation-only w.r.t. arithmetic: the RETURNED block is the same bytes.
 func (s *v41ProjScratch) v41LayerCacheGet(name string) ([]float32, bool) {
 	if s == nil || s.layerExperts == nil {
 		return nil, false
 	}
 	w, ok := s.layerExperts[name]
-	return w, ok
+	if !ok {
+		return nil, false
+	}
+	s.v41LayerCacheTouch(name)
+	return w, true
 }
 
-// v41LayerCachePut retains name's f32 block, evicting in insertion order until
-// the declared byte budget admits it. A block larger than the whole budget is not
-// cached (the caller still holds its own copy).
+// v41LayerCacheTouch moves name to the most-recently-used end of the eviction
+// queue. It is O(len) over the layer's resident keys (bounded by the cache
+// budget / block size, i.e. small) and is called on a cache hit and on the
+// insertion path, so the queue always reflects recency, never bare insertion
+// order. A name absent from the queue is a no-op (defensive: the map and queue
+// are only ever mutated together under the sequential MoE loop).
+func (s *v41ProjScratch) v41LayerCacheTouch(name string) {
+	if s == nil || len(s.layerExpertFIFO) == 0 {
+		return
+	}
+	// The common case is a touch of a key already at the MRU end (the
+	// immediately preceding insert); skip the rebuild then.
+	if s.layerExpertFIFO[len(s.layerExpertFIFO)-1] == name {
+		return
+	}
+	for i, v := range s.layerExpertFIFO {
+		if v == name {
+			s.layerExpertFIFO = append(s.layerExpertFIFO[:i], s.layerExpertFIFO[i+1:]...)
+			s.layerExpertFIFO = append(s.layerExpertFIFO, name)
+			return
+		}
+	}
+}
+
+// v41LayerCachePut retains name's f32 block, evicting the LEAST-RECENTLY-USED
+// entry until the declared byte budget admits it (a hit refreshes recency
+// through v41LayerCacheGet, so a re-read key is never evicted ahead of a colder
+// one). A block larger than the whole budget is not cached (the caller still
+// holds its own copy).
 func (s *v41ProjScratch) v41LayerCachePut(name string, w []float32) {
 	if s == nil || s.expertLayerCacheBytes <= 0 || len(w) == 0 {
 		return
@@ -357,6 +401,8 @@ func (s *v41ProjScratch) v41LayerCachePut(name string, w []float32) {
 		s.layerExperts = map[string][]float32{}
 	}
 	if _, dup := s.layerExperts[name]; dup {
+		// Already resident: refresh recency, do not double-count bytes.
+		s.v41LayerCacheTouch(name)
 		return
 	}
 	for s.layerExpertBytes+sz > s.expertLayerCacheBytes && len(s.layerExpertFIFO) > 0 {
