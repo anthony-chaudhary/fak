@@ -926,6 +926,91 @@ func (m *Model) v41ProjF32(l int, leaf string) ([]float32, error) {
 	return w, nil
 }
 
+// v41ExpertF32 reads one routed-expert projection (ffn.experts.<e>.w1/w3/w2.weight)
+// as a full f32 block, resolved residency-completely AND tier-completely. A routed
+// expert is deliberately absent from every resident store on the streamed arm --
+// the R5 checkpoint tier exists to fault exactly one expert's stride out of a fused
+// checkpoint slab only when it is routed -- so a manifest-only m.tensor read panics
+// on a tensor the admission (v41AdmitShape, which already falls through to
+// m.expertCheckpoint.Has) admitted. Resolution order mirrors
+// Session.resolveExpertWeight: the resident stores WIN (byte-identical to the
+// pre-tier path), then the checkpoint tier is faulted and its raw bytes dequantized
+// to f32 for the reduced all-CPU forward. A projection present in neither the
+// resident stores nor the tier fails closed with a typed ErrV41ForwardStage naming
+// the tensor rather than panicking, preserving the #13276/#13278 contract that the
+// physical serve reaches a NAMED refusal and never a silent mis-shape.
+func (m *Model) v41ExpertF32(l int, leaf string) ([]float32, error) {
+	name := layerName(l, leaf)
+	if w, ok := m.residentF32Mat(name); ok {
+		return w, nil
+	}
+	if m.expertCheckpoint.Has(name) {
+		ew, err := m.expertCheckpoint.fault(name)
+		if err != nil {
+			return nil, v41StageErr(v41StageMoE, l,
+				fmt.Errorf("%w: tensor %s: %v", ErrV41ForwardStage, name, err))
+		}
+		w, err := expertWeightF32(ew)
+		if err != nil {
+			return nil, v41StageErr(v41StageMoE, l,
+				fmt.Errorf("%w: tensor %s: %v", ErrV41ForwardStage, name, err))
+		}
+		if w != nil {
+			return w, nil
+		}
+	}
+	return nil, v41StageErr(v41StageMoE, l,
+		fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
+}
+
+// expertWeightF32 dequantizes one faulted checkpoint-tier projection to a full f32
+// row-major [out,in] block. It accepts exactly the representations the tier stages
+// (a Q4_K tensor or a k-quant super-block tensor) and rebuilds the same layout
+// residentF32Mat produces for a resident twin, so a tier-served expert computes
+// byte-identically to a resident one. A weight in no recognized representation
+// returns (nil, nil), which the caller surfaces as the named refusal; a staged
+// representation whose checkpoint range cannot be faulted returns the read error
+// so the caller can name it rather than compute on a silent zero buffer.
+//
+// Both branches MATERIALIZE before reading: a tier-faulted Q4_K tensor is staged
+// lazily (q4kTensor.lazy) and a k-quant tensor's raw may still be checkpoint-backed,
+// so slicing qt.raw straight away would read a zero-length buffer and miscompute.
+// This mirrors the materialize-then-dequant order residentF32Mat uses for the
+// resident twins (q4kw via q4kTensor.materializeRaw, kqw via ensureRawCPU).
+func expertWeightF32(w expertWeight) ([]float32, error) {
+	if w.q4 != nil {
+		qt := w.q4
+		raw, err := qt.materializeRaw()
+		if err != nil {
+			return nil, err
+		}
+		rowBytes := qt.nblk * q4kBlockBytes
+		out := make([]float32, qt.out*qt.in)
+		for o := 0; o < qt.out; o++ {
+			row := raw[o*rowBytes : (o+1)*rowBytes]
+			for j := 0; j < qt.nblk; j++ {
+				q4kDequantSuperBlock(out[o*qt.in+j*qkK:], row[j*q4kBlockBytes:(j+1)*q4kBlockBytes])
+			}
+		}
+		return out, nil
+	}
+	if w.kq != nil {
+		qt := w.kq
+		qt.ensureRawCPU("routed-expert tier read")
+		bb := qt.kind.blockBytes()
+		rowBytes := qt.rowBytes()
+		out := make([]float32, qt.out*qt.in)
+		for b := 0; b < qt.out; b++ {
+			row := qt.raw[b*rowBytes : (b+1)*rowBytes]
+			for j := 0; j < qt.nblk; j++ {
+				kQuantDequantSuperBlock(out[b*qt.in+j*qt.kind.blockWeights():], row[j*bb:(j+1)*bb], qt.kind)
+			}
+		}
+		return out, nil
+	}
+	return nil, nil
+}
+
 // v41MHCProjectFull executes the published flattened-four-stream mHC mix
 // projection: the four width-H streams are laid end to end into xflat (4H), one
 // shared RMS scale 1/sqrt(mean(xflat^2)+eps) is computed over the whole flattened
@@ -1478,16 +1563,22 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		routed := make([]float32, H)
 		for _, pick := range picks {
 			stem := "ffn.experts." + itoa(pick.expert)
-			// The routed-expert READ is a SEPARATE, still-open seam: a streamed
-			// routed expert is by design absent from every store residentF32Mat
-			// scans, so its read must go through the R5 tier (hal.go
-			// resolveExpertWeight), not v41ProjF32. Routing it here would convert
-			// the tier seam's current named-panic into a typed refusal and mask
-			// the rung; #13275 cleared only the ADMISSION of tier-resident
-			// experts, not this read. Kept on m.tensor deliberately.
-			w1 := m.tensor(layerName(l, stem+".w1.weight"))
-			w3 := m.tensor(layerName(l, stem+".w3.weight"))
-			w2 := m.tensor(layerName(l, stem+".w2.weight"))
+			// The routed-expert READ resolves the same tiers the ADMISSION
+			// (v41AdmitShape) does: the resident stores first, then the R5
+			// checkpoint tier. #13275 cleared the tier ADMISSION; this read is the
+			// matching tier READ (#13278).
+			w1, err := m.v41ExpertF32(l, stem+".w1.weight")
+			if err != nil {
+				return v41StageErr(v41StageMoE, l, err)
+			}
+			w3, err := m.v41ExpertF32(l, stem+".w3.weight")
+			if err != nil {
+				return v41StageErr(v41StageMoE, l, err)
+			}
+			w2, err := m.v41ExpertF32(l, stem+".w2.weight")
+			if err != nil {
+				return v41StageErr(v41StageMoE, l, err)
+			}
 			y := v41SwiGLU(w1, w3, w2, xn, cfg.MoEIntermediateSize, H, cfg)
 			for i := range routed {
 				routed[i] += pick.weight * y[i]
