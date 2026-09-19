@@ -159,8 +159,10 @@ func defaultTurnkeyNativeLoadDeps() turnkeyNativeLoadDeps {
 // status seam. The exact runtime qualification identity is not constructible
 // within this leaf, so it deliberately selects against a zero context: an empty
 // or unmatched reviewed catalog resolves to the NO_ELIGIBLE_QUALIFICATION_CONTEXT
-// refusal, and even a matched record must show an admitted planner coordinator
-// before MTP is reported active.
+// refusal. Reported status is derived from the SAME canary admission that gates
+// execution (Qwen38MTPCanaryResult), so mtp_active can never contradict observed
+// behavior: a matched record alone does not report active unless the planner's
+// canary admission actually selected MTP.
 func defaultResolveTurnkeyMTPStatus(result *turnkeyMTPQualificationResult, planner *agent.InKernelPlanner) (bool, string) {
 	if result == nil || result.Selection == nil {
 		reason := turnkeyMTPNoEligibleContext
@@ -169,19 +171,28 @@ func defaultResolveTurnkeyMTPStatus(result *turnkeyMTPQualificationResult, plann
 		}
 		return false, string(reason)
 	}
-	if planner == nil || planner.MetalMTPCoordinator() == nil {
-		// A matched record is not enough: without an admitted coordinator the
-		// planner still runs ordinary target decode, so the status must stay
-		// inactive with a concrete typed reason. A successful selection carries an
-		// empty Refusal, so fall back to the fail-closed token rather than emit an
-		// empty reason that would contradict "empty only when MTPActive is true".
+	if planner == nil {
+		// A matched record is not enough: without a planner there is no canary
+		// admission, so the status must stay inactive with a concrete typed
+		// reason. A successful selection carries an empty Refusal, so fall back to
+		// the fail-closed token rather than emit an empty reason that would
+		// contradict "empty only when MTPActive is true".
 		reason := result.Refusal
 		if reason == "" {
 			reason = turnkeyMTPNoEligibleContext
 		}
 		return false, string(reason)
 	}
-	return true, ""
+	// Derive the reported status from the same decision that gates execution.
+	decision := planner.Qwen38MTPCanaryResult()
+	if decision.Engine == fakmodel.Qwen38EngineMTP {
+		return true, ""
+	}
+	reason := result.Refusal
+	if reason == "" {
+		reason = turnkeyMTPNoEligibleContext
+	}
+	return false, string(reason)
 }
 
 // loadTurnkeyNativeResources performs the native-only portion of fak up startup.

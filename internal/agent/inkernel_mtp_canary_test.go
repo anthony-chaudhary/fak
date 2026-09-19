@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -161,5 +162,132 @@ func TestInKernelPlannerMTPCanaryRequiresWitnessedEnvelope(t *testing.T) {
 			t.Fatalf("disengaged kill switch did not restore witnessed MTP: %+v", gated.Qwen38MTPCanaryResult())
 		}
 		p.DisableMetalMTP()
+	})
+}
+
+// TestInKernelPlannerUnconfiguredPlannerRefusesMTPExecution is the #13248 focused
+// witness: the Qwen3.8 MTP canary admission is the SINGLE gate for both execution
+// and reported status. A planner that installs a Metal MTP coordinator through the
+// production EnableMetalMTP path, but has no witnessed canary admission bound, must
+// NOT execute speculative decode — it falls back to ordinary target decode — and the
+// reported canary result must agree with that outcome. Only a coordinator installed
+// through the explicit operator API (SetMetalMTPCoordinator) remains an override.
+func TestInKernelPlannerUnconfiguredPlannerRefusesMTPExecution(t *testing.T) {
+	ctx := context.Background()
+	m := model.NewSyntheticQwen38MTP()
+	m.Quantize()
+	prompt := []int{0, 1, 2}
+	const maxNew = 8
+	emit := func(int) bool { return false }
+
+	t.Run("EnableMetalMTP without canary admission is fail-closed", func(t *testing.T) {
+		p := NewInKernelPlanner(m, nil, "unconfigured", false, nil, false)
+		if err := p.EnableMetalMTP(); err != nil {
+			t.Fatalf("EnableMetalMTP: %v", err)
+		}
+		t.Cleanup(p.DisableMetalMTP)
+		if p.MetalMTPCoordinator() == nil {
+			t.Fatal("EnableMetalMTP did not install a coordinator")
+		}
+		if p.mtpExplicitOverride {
+			t.Fatal("EnableMetalMTP wrongly recorded an explicit override")
+		}
+		// The admission that gates generateReusedMetalMTP must refuse an
+		// unconfigured planner: this is the exact false-inactive fix.
+		if p.qwen38MTPCanaryAllowsExecution() {
+			t.Fatal("unconfigured planner admitted MTP execution with no witnessed canary")
+		}
+		if p.MetalMTPAdmitted() {
+			t.Fatal("MetalMTPAdmitted reported true while execution was refused")
+		}
+		// Execution still completes on the ordinary target-decode path.
+		res, err := p.generateReusedRecovering(ctx, prompt, maxNew, 0, 0, 0, nil, 0, 0, nil, emit)
+		if err != nil {
+			t.Fatalf("generate: %v", err)
+		}
+		if res.gen != maxNew {
+			t.Fatalf("gen = %d, want %d", res.gen, maxNew)
+		}
+		// Reported status must agree with execution: target decode, not MTP.
+		if decision := p.Qwen38MTPCanaryResult(); decision.Engine != model.Qwen38EngineTargetDecode {
+			t.Fatalf("reported canary engine = %q, want target decode", decision.Engine)
+		}
+	})
+
+	t.Run("explicit SetMetalMTPCoordinator remains an operator override", func(t *testing.T) {
+		p := NewInKernelPlanner(m, nil, "explicit", false, nil, false)
+		coord, err := model.NewMetalMTPCoordinator(nil, model.DefaultMetalMTPConfig())
+		if err != nil {
+			t.Fatalf("NewMetalMTPCoordinator: %v", err)
+		}
+		p.SetMetalMTPCoordinator(coord)
+		t.Cleanup(p.DisableMetalMTP)
+		if !p.qwen38MTPCanaryAllowsExecution() {
+			t.Fatal("explicit override did not admit MTP execution")
+		}
+		if !p.MetalMTPAdmitted() {
+			t.Fatal("explicit override did not report admitted")
+		}
+	})
+
+	t.Run("witnessed admission executes and reports MTP from the same decision", func(t *testing.T) {
+		now := time.Now().UTC()
+		artifact := strings.Repeat("ab", 32)
+		envelope := model.Qwen38CanaryEnvelope{
+			ModelFamily:   "Qwen3.8",
+			Format:        model.Qwen38MTPFormatQ4K,
+			Backend:       model.Qwen38MTPBackendMetal,
+			HeadroomBytes: 3 * 1024 * 1024 * 1024,
+			ArtifactHash:  artifact,
+			DraftDepth:    2,
+		}
+		mgr := model.NewQwen38MTPCanaryManager()
+		if err := mgr.RegisterCanaryEvidence(model.Qwen38MTPCanaryEvidence{
+			Receipt: model.Qwen38MTPCanaryReceipt{
+				SchemaVersion:   model.Qwen38MTPCanaryReceiptSchema,
+				ReceiptID:       "mtp-canary-receipt-13248",
+				DefaultOn:       true,
+				Engine:          model.Qwen38EngineMTP,
+				Envelope:        envelope,
+				Speedup:         1.1,
+				TokensProduced:  2,
+				TokensProposed:  1,
+				TokensAccepted:  1,
+				CircuitStatus:   model.CanaryCircuitClosed,
+				DowngradeReason: model.Qwen38MTPEligible,
+			},
+			ObservedAt: now.Add(-time.Hour),
+			ValidUntil: now.Add(time.Hour),
+		}); err != nil {
+			t.Fatalf("register evidence: %v", err)
+		}
+		p := NewInKernelPlanner(m, nil, "admitted", false, nil, false)
+		t.Cleanup(p.DisableMetalMTP)
+		decision, err := p.ConfigureQwen38MTPCanary(mgr, model.Qwen38CanaryRequest{
+			Envelope:          envelope,
+			EvidenceReceiptID: "mtp-canary-receipt-13248",
+			ModelReady:        true,
+		}, nil)
+		if err != nil {
+			t.Fatalf("ConfigureQwen38MTPCanary: %v", err)
+		}
+		if decision.Engine != model.Qwen38EngineMTP {
+			t.Fatalf("admission engine = %q, want MTP", decision.Engine)
+		}
+		if !p.MetalMTPAdmitted() {
+			t.Fatal("witnessed admission did not report admitted")
+		}
+		res, err := p.generateReusedRecovering(ctx, prompt, maxNew, 0, 0, 0, nil, 0, 0, nil, emit)
+		if err != nil {
+			t.Fatalf("generate: %v", err)
+		}
+		if res.gen != maxNew {
+			t.Fatalf("gen = %d, want %d", res.gen, maxNew)
+		}
+		// The reported result is derived from the SAME decision that admits
+		// execution, so mtp_active can never contradict observed behavior.
+		if decision := p.Qwen38MTPCanaryResult(); decision.Engine != model.Qwen38EngineMTP {
+			t.Fatalf("reported canary engine = %q, want MTP", decision.Engine)
+		}
 	})
 }

@@ -38,7 +38,7 @@ func (p *InKernelPlanner) cpuPrefixFlightEligible(reuse bool, matched int) bool 
 	// Multi-P prefill keeps its existing concurrent path until clone and wait
 	// overhead are shown to pay back there as well.
 	return p != nil && reuse && matched == 0 && p.backend == nil && !p.metal &&
-		p.speculativeEngine == nil && p.metalMTPCoordinator == nil && runtime.GOMAXPROCS(0) == 1
+		p.speculativeEngine == nil && p.MetalMTPCoordinator() == nil && runtime.GOMAXPROCS(0) == 1
 }
 
 type inKernelPrefillSession interface {

@@ -216,6 +216,11 @@ type InKernelPlanner struct {
 
 	metalMTPMu          sync.Mutex
 	metalMTPCoordinator *model.MetalMTPCoordinator
+	// mtpExplicitOverride records that a coordinator was installed through the
+	// pre-existing explicit API (SetMetalMTPCoordinator), which remains an
+	// operator escape hatch. A coordinator installed by EnableMetalMTP without a
+	// canary manager is NOT an override and stays fail-closed.
+	mtpExplicitOverride bool
 	mtpCanaryMu         sync.RWMutex
 	mtpCanaryManager    *model.Qwen38MTPCanaryManager
 	mtpCanaryRequest    model.Qwen38CanaryRequest
@@ -998,9 +1003,9 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 		}
 	}()
 	targetOnly := false
-	if p.metalMTPCoordinator != nil && p.qwen38MTPCanaryAllowsExecution() {
+	if coord := p.MetalMTPCoordinator(); coord != nil && p.qwen38MTPCanaryAllowsExecution() {
 		return p.generateReusedMetalMTP(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
-	} else if p.metalMTPCoordinator != nil {
+	} else if coord != nil {
 		targetOnly = true
 	}
 	if !targetOnly && p.greedySpeculativeRequestEligible(temp, logitBias, freqPenalty, presPenalty) {
@@ -1086,30 +1091,67 @@ func (p *InKernelPlanner) DisableSpeculativeDecoding() {
 }
 
 // SetMetalMTPCoordinator configures an explicit MetalMTPCoordinator on this planner.
+// This is the pre-existing explicit operator API: installing a coordinator this way
+// records an explicit override, so the canary evidence gate is bypassed (the caller
+// has taken responsibility for execution). Use ConfigureQwen38MTPCanary for the
+// evidence-bound path.
 func (p *InKernelPlanner) SetMetalMTPCoordinator(c *model.MetalMTPCoordinator) {
+	p.metalMTPMu.Lock()
 	p.metalMTPCoordinator = c
+	if c != nil {
+		p.mtpExplicitOverride = true
+	}
+	p.metalMTPMu.Unlock()
 }
 
 // MetalMTPCoordinator returns the active MetalMTPCoordinator, if any.
 func (p *InKernelPlanner) MetalMTPCoordinator() *model.MetalMTPCoordinator {
+	p.metalMTPMu.Lock()
+	defer p.metalMTPMu.Unlock()
 	return p.metalMTPCoordinator
 }
 
 // EnableMetalMTP enables the in-kernel Metal MTP draft-verify-rollback execution loop.
+// Installing a coordinator this way is NOT an explicit override: without a canary
+// manager bound to witnessed qualification evidence, qwen38MTPCanaryAllowsExecution
+// stays fail-closed and the planner runs ordinary target decode. Callers that have
+// witnessed evidence must bind it through ConfigureQwen38MTPCanary; callers that are
+// deliberately overriding the gate must use SetMetalMTPCoordinator.
 func (p *InKernelPlanner) EnableMetalMTP(cfg ...model.MetalMTPConfig) error {
 	c, err := model.NewMetalMTPCoordinator(nil, cfg...)
 	if err != nil {
 		return err
 	}
+	p.metalMTPMu.Lock()
 	p.metalMTPCoordinator = c
+	p.mtpExplicitOverride = false
+	p.metalMTPMu.Unlock()
+	return nil
+}
+
+// installMetalMTPCoordinator installs a coordinator without touching override or
+// canary state. It backs ConfigureQwen38MTPCanary, whose decision already governs
+// execution.
+func (p *InKernelPlanner) installMetalMTPCoordinator(cfg ...model.MetalMTPConfig) error {
+	c, err := model.NewMetalMTPCoordinator(nil, cfg...)
+	if err != nil {
+		return err
+	}
+	p.metalMTPMu.Lock()
+	p.metalMTPCoordinator = c
+	p.metalMTPMu.Unlock()
 	return nil
 }
 
 // DisableMetalMTP disables the Metal MTP execution loop on this planner.
 func (p *InKernelPlanner) DisableMetalMTP() {
-	if p.metalMTPCoordinator != nil {
-		_ = p.metalMTPCoordinator.Close()
-		p.metalMTPCoordinator = nil
+	p.metalMTPMu.Lock()
+	coord := p.metalMTPCoordinator
+	p.metalMTPCoordinator = nil
+	p.mtpExplicitOverride = false
+	p.metalMTPMu.Unlock()
+	if coord != nil {
+		_ = coord.Close()
 	}
 }
 
@@ -1146,7 +1188,7 @@ func (p *InKernelPlanner) ConfigureQwen38MTPCanary(
 		return decision, nil
 	}
 	p.DisableMetalMTP()
-	if err := p.EnableMetalMTP(cfg...); err != nil {
+	if err := p.installMetalMTPCoordinator(cfg...); err != nil {
 		decision = qwen38MTPTargetOnlyResult(request.Envelope, model.Qwen38MTPAttemptFailed, err.Error())
 		p.mtpCanaryMu.Lock()
 		p.mtpCanaryResult = decision
@@ -1170,12 +1212,23 @@ func (p *InKernelPlanner) qwen38MTPCanaryAllowsExecution() bool {
 	request := p.mtpCanaryRequest
 	killSwitch := p.mtpKillSwitch
 	p.mtpCanaryMu.RUnlock()
+	p.metalMTPMu.Lock()
+	explicitOverride := p.mtpExplicitOverride
+	p.metalMTPMu.Unlock()
 
-	// A coordinator installed through the pre-existing explicit API remains an
-	// explicit override. Only planners configured with a canary manager are
-	// subject to this evidence gate.
+	// Fail-closed when no canary manager is bound to witnessed qualification
+	// evidence: an unconfigured planner must not execute speculative decode. The
+	// one exception is a coordinator installed through the pre-existing explicit
+	// API (SetMetalMTPCoordinator), where the caller has deliberately taken the
+	// admission decision — that path stays an explicit operator override.
 	if manager == nil {
-		return true
+		if explicitOverride {
+			return true
+		}
+		p.mtpCanaryMu.Lock()
+		p.mtpCanaryResult = qwen38MTPTargetOnlyResult(request.Envelope, model.Qwen38MTPEvidenceMissing, "no witnessed MTP canary admission is configured for this planner")
+		p.mtpCanaryMu.Unlock()
+		return false
 	}
 	decision := manager.EvaluateCanary(request)
 	if killSwitch != nil {
@@ -1187,6 +1240,19 @@ func (p *InKernelPlanner) qwen38MTPCanaryAllowsExecution() bool {
 	p.mtpCanaryResult = decision
 	p.mtpCanaryMu.Unlock()
 	return decision.Engine == model.Qwen38EngineMTP
+}
+
+// MetalMTPAdmitted reports whether Metal MTP speculative decode is admitted for
+// actual execution on this planner right now. It is the single truth that both
+// the decode dispatch and any reported speculative status must consult: it is
+// true only when a coordinator is installed AND the canary admission (or an
+// explicit operator override) currently selects the MTP engine. It also refreshes
+// the stored Qwen38MTPCanaryResult so reported status agrees with execution.
+func (p *InKernelPlanner) MetalMTPAdmitted() bool {
+	if p == nil || p.MetalMTPCoordinator() == nil {
+		return false
+	}
+	return p.qwen38MTPCanaryAllowsExecution()
 }
 
 func qwen38MTPTargetOnlyResult(envelope model.Qwen38CanaryEnvelope, reason model.Qwen38MTPDowngradeReason, detail string) model.Qwen38CanaryDecision {
@@ -1918,6 +1984,9 @@ func (p *InKernelPlanner) generateReusedMetalMTP(
 	}
 
 	td := time.Now()
+	// metalMTPMu is already held for the duration of generateReusedMetalMTP
+	// (locked above), so read the field directly rather than via the locking
+	// accessor, which would self-deadlock.
 	coord := p.metalMTPCoordinator
 	coord.SetTargetSession(s)
 	checkpointMgr := ctxmmu.NewCheckpointManager(nil, nil, nil, nil)
