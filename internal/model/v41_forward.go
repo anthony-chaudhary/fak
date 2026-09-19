@@ -175,6 +175,95 @@ type v41ProjScratch struct {
 	// v41Layer and consumed read-only by the mHC split; the layer loop is
 	// sequential, so one buffer bounds it to a single layer's worth.
 	mhc []float32
+
+	// layerExperts is a LAYER-SCOPED f32 cache of routed-expert projections,
+	// keyed by tensor name and bounded by expertLayerCacheBytes. It is reset at the
+	// top of every layer (the layer is the reuse unit) and serves repeated reads of
+	// the same (expert, projection) within one layer from RAM instead of re-faulting
+	// the checkpoint tier (#13296). The MoE loop is sequential and consumes each
+	// block read-only, and the store order is per-forward, so no aliasing escapes.
+	layerExperts    map[string][]float32
+	layerExpertFIFO []string
+
+	// expertLayerCacheBytes bounds layerExperts. Zero disables the cache (the
+	// default path, byte-identical to the pre-#13296 stream).
+	expertLayerCacheBytes int64
+	layerExpertBytes      int64
+}
+
+// v41ExpertLayerCacheDefaultBytes is the FALLBACK bound for the layer-scoped
+// routed-expert f32 cache when the tier declares no resident budget. It is sized
+// to hold ONE position's distinct routed set at the published V4.1 geometry --
+// topK (6) triples, each triple w1+w3+w2 = 3 * 2304 * 5120 * 4 = 135 MiB, so
+// ~810 MiB -- which guarantees a repeated token is served entirely from RAM while
+// keeping the cache a bounded, layer-scoped transient (reset every layer) rather
+// than the accumulated f32 churn #13288 removed. A model with no checkpoint tier
+// leaves the cache OFF entirely.
+const v41ExpertLayerCacheDefaultBytes int64 = 810 << 20
+
+// v41LayerExpertCacheBudget sizes the layer-scoped routed-expert f32 cache for
+// one forward. It is a bounded constant sized to one position's distinct routed
+// set at the published geometry (~810 MiB), independent of the tier's resident
+// budget: that budget is denominated in QUANTIZED strides (~1/7 the f32 footprint
+// at these shapes), so binding an f32 cache to it would introduce a multi-GiB
+// uncharged f32 term -- exactly the #13288 failure mode. A model with no
+// checkpoint tier reports 0 and leaves the cache OFF, preserving the historical
+// byte-for-byte stream.
+func (m *Model) v41LayerExpertCacheBudget() int64 {
+	if m == nil || m.expertCheckpoint == nil {
+		return 0
+	}
+	return v41ExpertLayerCacheDefaultBytes
+}
+
+// v41LayerCacheGet returns a retained f32 block for name, or nil on a miss.
+func (s *v41ProjScratch) v41LayerCacheGet(name string) ([]float32, bool) {
+	if s == nil || s.layerExperts == nil {
+		return nil, false
+	}
+	w, ok := s.layerExperts[name]
+	return w, ok
+}
+
+// v41LayerCachePut retains name's f32 block, evicting in insertion order until
+// the declared byte budget admits it. A block larger than the whole budget is not
+// cached (the caller still holds its own copy).
+func (s *v41ProjScratch) v41LayerCachePut(name string, w []float32) {
+	if s == nil || s.expertLayerCacheBytes <= 0 || len(w) == 0 {
+		return
+	}
+	sz := int64(len(w)) * 4
+	if sz > s.expertLayerCacheBytes {
+		return
+	}
+	if s.layerExperts == nil {
+		s.layerExperts = map[string][]float32{}
+	}
+	if _, dup := s.layerExperts[name]; dup {
+		return
+	}
+	for s.layerExpertBytes+sz > s.expertLayerCacheBytes && len(s.layerExpertFIFO) > 0 {
+		old := s.layerExpertFIFO[0]
+		s.layerExpertFIFO = s.layerExpertFIFO[1:]
+		if prev, ok := s.layerExperts[old]; ok {
+			s.layerExpertBytes -= int64(len(prev)) * 4
+			delete(s.layerExperts, old)
+		}
+	}
+	s.layerExperts[name] = w
+	s.layerExpertFIFO = append(s.layerExpertFIFO, name)
+	s.layerExpertBytes += sz
+}
+
+// v41LayerCacheReset drops every retained block. Called at the top of a layer so
+// the cache's working set is exactly one layer's routed experts.
+func (s *v41ProjScratch) v41LayerCacheReset() {
+	if s == nil {
+		return
+	}
+	s.layerExperts = nil
+	s.layerExpertFIFO = nil
+	s.layerExpertBytes = 0
 }
 
 // v41ProjF32Into is the caller-buffer twin of v41ProjF32: it resolves a named
@@ -1314,6 +1403,97 @@ func expertWeightF32Into(w expertWeight, dst []float32) ([]float32, error) {
 	return nil, nil
 }
 
+// v41ExpertTripleInto resolves one routed expert's three SwiGLU projections
+// (w1/w3/w2) into reusable f32 blocks, serving repeated reads of the SAME
+// (expert, projection) within a layer from a layer-scoped f32 cache instead of
+// re-faulting the R5 checkpoint tier (#13296).
+//
+// The pre-fix prefill faulted the tier per (token, pick): with top-6 routing over
+// a 30-token prefill that is up to 30*6*3 = 540 tier reads at a layer, many of
+// them the SAME expert projection the token dimension had already read. The
+// tier's bounded host cache absorbs those repeats ONLY while the interleaved
+// working set fits its bound; on the published artifact the routed union (~126
+// GiB in f32-many strides) exceeds the resident bound (~43 GiB), so the per-token
+// order thrashes it and every position re-reads the same slab (measured at bound
+// < union: tier Reads scales linearly with token count, Hits stay 0). Retaining
+// the materialized f32 triple for the ONE layer in flight makes the second and
+// later reads of a repeated expert a RAM hit at ANY tier bound, so the layer's
+// tier Reads are bounded by its distinct routed set, independent of token count.
+//
+// The cache is layer-scoped by construction (reset at the top of v41Layer), and
+// the three blocks are handed back for a read-only v41SwiGLU, so no aliasing
+// escapes the layer. On a cache miss the read is the historical
+// v41ExpertF32Into (resident stores first, then the tier), so a model with no
+// tier and no cache budget keeps the pre-#13296 stream byte-for-byte. The values
+// handed to v41SwiGLU are byte-identical either way.
+func (m *Model) v41ExpertTripleInto(l int, stem string, scratch *v41ProjScratch) (w1, w3, w2 []float32, err error) {
+	leaves := [3]string{".w1.weight", ".w3.weight", ".w2.weight"}
+	for i, leaf := range leaves {
+		name := layerName(l, stem+leaf)
+		if w, ok := scratch.v41LayerCacheGet(name); ok {
+			switch i {
+			case 0:
+				w1 = w
+			case 1:
+				w3 = w
+			case 2:
+				w2 = w
+			}
+			continue
+		}
+		var dst []float32
+		switch i {
+		case 0:
+			dst = scratch.exp1
+		case 1:
+			dst = scratch.exp3
+		case 2:
+			dst = scratch.exp2
+		}
+		w, rerr := m.v41ExpertF32Into(l, stem+leaf, dst)
+		if rerr != nil {
+			return nil, nil, nil, v41StageErr(v41StageMoE, l, rerr)
+		}
+		switch i {
+		case 0:
+			scratch.exp1 = w
+			w1 = w
+		case 1:
+			scratch.exp3 = w
+			w3 = w
+		case 2:
+			scratch.exp2 = w
+			w2 = w
+		}
+	}
+	// Retain copies of the materialized triple in the layer cache so the next
+	// token that routes this expert is a RAM hit. Copies are required because the
+	// scratch exp1/exp3/exp2 buffers are reused for the NEXT expert; the caller's
+	// w1/w3/w2 keep pointing at the live scratch, never at the retained copies.
+	m.v41CacheExpertTriple(l, stem, scratch, w1, w3, w2)
+	return w1, w3, w2, nil
+}
+
+// v41CacheExpertTriple retains copies of one expert's three f32 projections in
+// the layer-scoped cache (see v41ExpertTripleInto). Copies are required because
+// the scratch buffers are reused for the next expert; a cached slice returned
+// from a later get must not alias live scratch.
+func (m *Model) v41CacheExpertTriple(l int, stem string, scratch *v41ProjScratch, w1, w3, w2 []float32) {
+	for i, w := range [][]float32{w1, w3, w2} {
+		if len(w) == 0 {
+			continue
+		}
+		leaf := [3]string{".w1.weight", ".w3.weight", ".w2.weight"}[i]
+		name := layerName(l, stem+leaf)
+		if _, ok := scratch.v41LayerCacheGet(name); ok {
+			continue
+		}
+		cp := make([]float32, len(w))
+		copy(cp, w)
+		scratch.v41LayerCachePut(name, cp)
+	}
+}
+
 // v41ExpertF32Into is the caller-buffer twin of v41ExpertF32: it resolves one
 // routed-expert projection residency-completely (resident stores first, then the
 // R5 checkpoint tier) and writes the f32 block into dst instead of allocating a
@@ -1975,6 +2155,17 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	}
 
 	// ---- MoE: router + shared expert + routed experts ----
+	//
+	// The router runs once per position and its picks are retained for the
+	// contraction loop below (byte-identical to the per-token router it replaces:
+	// the same v41ProjMatRows over the same rmsnormCfg(x[t]) and the same
+	// v41Route). The layer-scoped expert cache is reset here so its working set is
+	// exactly this layer's routed experts (#13296).
+	scratch.v41LayerCacheReset()
+	if scratch.expertLayerCacheBytes == 0 {
+		scratch.expertLayerCacheBytes = m.v41LayerExpertCacheBudget()
+	}
+	perTokenPicks := make([][]routePick, seq)
 	for t := 0; t < seq; t++ {
 		xn := rmsnormCfg(x[t], ffnNorm, eps, cfg)
 		routerLogits, err := m.v41ProjMatRows(l, "ffn.gate.weight", xn, cfg.NumExperts, H)
@@ -1985,32 +2176,19 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return v41StageErr(v41StageMoE, l, err)
 		}
+		perTokenPicks[t] = picks
+	}
+
+	for t := 0; t < seq; t++ {
+		xn := rmsnormCfg(x[t], ffnNorm, eps, cfg)
+		picks := perTokenPicks[t]
 		routed := make([]float32, H)
 		for _, pick := range picks {
 			stem := "ffn.experts." + itoa(pick.expert)
-			// The routed-expert READ resolves the same tiers the ADMISSION
-			// (v41AdmitShape) does: the resident stores first, then the R5
-			// checkpoint tier. #13275 cleared the tier ADMISSION; this read is the
-			// matching tier READ (#13278). The three projections read into the
-			// forward-scoped scratch instead of a fresh ~135 MiB f32 block per
-			// fault: the MoE loop is sequential and v41SwiGLU consumes them
-			// read-only, so one triple bounds the streamed-experts' per-fault f32
-			// materialization (#13288). Values are byte-identical.
-			w1, err := m.v41ExpertF32Into(l, stem+".w1.weight", scratch.exp1)
+			w1, w3, w2, err := m.v41ExpertTripleInto(l, stem, scratch)
 			if err != nil {
-				return v41StageErr(v41StageMoE, l, err)
+				return err
 			}
-			scratch.exp1 = w1
-			w3, err := m.v41ExpertF32Into(l, stem+".w3.weight", scratch.exp3)
-			if err != nil {
-				return v41StageErr(v41StageMoE, l, err)
-			}
-			scratch.exp3 = w3
-			w2, err := m.v41ExpertF32Into(l, stem+".w2.weight", scratch.exp2)
-			if err != nil {
-				return v41StageErr(v41StageMoE, l, err)
-			}
-			scratch.exp2 = w2
 			y := v41SwiGLU(w1, w3, w2, xn, cfg.MoEIntermediateSize, H, cfg)
 			for i := range routed {
 				routed[i] += pick.weight * y[i]
