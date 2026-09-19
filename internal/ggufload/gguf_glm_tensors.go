@@ -253,9 +253,23 @@ func archShipsMTPOrVisionSidecar(arch string) bool {
 
 // glmMoeDsaSkipGGUFTensorForType reports whether a tensor should be dropped from byte-accounting
 // for the given model type: true only for a file whose arch ships the MTP/vision sidecar AND
-// whose tensor is dropped by glmMoeDsaSkipGGUFTensor. It is the shared guard the byte-accounting
-// estimators use so the arch-family check stays in one place.
+// whose tensor is dropped by glmMoeDsaSkipGGUFTensor, or a deepseek41 file whose tensor is a
+// PACKED Engram table. It is the shared guard the byte-accounting estimators use so the
+// arch-family check stays in one place.
+//
+// The deepseek41 packed Engram table (blk.<L>.engram_embd.weight / engram_table) is the SAME
+// drop the materializing loader takes in computeQ4KTensorWork: the native forward reads it
+// row-wise through the bounded model.V41EngramRowSource seam (V41EngramQ2KOpen), never as an
+// f32 matrix, so it is never resident as a weight. The published vcruz Q2_K checkpoint carries
+// ONE [256, ~384M-row] Q2_K table = 32.26 GB; charging it as device dense weights added ~30
+// GiB of phantom demand that the loader never allocates, which is the dominant term in the
+// witnessed strix3 plan-total refusal (105.4 GiB vs the 62.4 GiB pool, fak-private#13290).
+// Dropping it here keeps the estimate and the loader in lockstep: the engram table's real
+// residency is governed by the separate bounded row-source seam, not this payload charge.
 func glmMoeDsaSkipGGUFTensorForType(modelType, name string) bool {
+	if archIsDeepSeek41(modelType) && deepseek41EngramTableTensor(name) {
+		return true
+	}
 	return archShipsMTPOrVisionSidecar(modelType) && glmMoeDsaSkipGGUFTensor(name)
 }
 
