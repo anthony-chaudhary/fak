@@ -45,9 +45,10 @@ func BackendSharesHostRAM(be compute.Backend) bool {
 // A split-aperture integrated box (a Strix Halo with a large BIOS/driver VRAM carve-out, e.g.
 // strix3: 64 GiB VRAM window + 62.4 GiB system window over 128 GB physical) exposes TWO windows
 // over the same DRAM. The plan's DEVICE-scoped bytes live in the VRAM window and its
-// HOST-scoped bytes in the system window, and the two together exceed neither window — so
-// collapsing them onto the system window alone (fak#13172) refuses a plan the hardware can run
-// and blocks the first physical V4.1 token (fak#13176). When both windows are known AND
+// HOST-scoped bytes in the system window, but the two windows are APERTURE WINDOWS OVER ONE
+// physical pool, not disjoint carve-outs: a plan that fits each window separately can still
+// exceed the one physical LPDDR5X pool and be OOM-killed at the kernel before the first token
+// (fak#13280). When both windows are known AND
 // distinct, each scope is judged against its OWN window; when the platform reports one window
 // (device == system, the pre-#13176 shape) or cannot report the device window, the plan's
 // GRAND total is judged against the system window exactly as before — keeping the fail-closed
@@ -126,11 +127,11 @@ func refuseUnifiedHostResidencyForReported(plan compute.MemoryPlan, total, free 
 // plan's GRAND total is judged against the system window — the pre-#13176 behavior, so the
 // kernel-OOM protection #13172 added is preserved exactly.
 //
-// The physical-total guard the issue names is the composition of these two checks in the split
-// arm: because the device window and the system window are disjoint CARVE-OUTS of the same
-// physical DRAM, a plan that fits each window separately cannot exceed the physical total
-// without exceeding one of them. No separate physical-total probe exists in compute (adding one
-// is out of scope per the issue), so the per-window checks are the conservative physical bound.
+// The physical-total guard is a THIRD check in the split arm (fak#13280): the device window and
+// the system window are aperture windows over ONE physical pool, so passing each scope's own
+// window does NOT bound the simultaneous total. After both per-window checks pass, the plan's
+// GRAND total is bounded against the physical pool (hostTotal = MemTotal), the ceiling the
+// kernel actually allocates from and OOM-kills on.
 func refuseUnifiedHostResidencyForReportedAperture(plan compute.MemoryPlan, deviceTotal, deviceFree int64, deviceKnown bool, hostTotal, hostFree int64, hostKnown bool, headroom float64) error {
 	if !hostKnown {
 		return nil
@@ -145,9 +146,43 @@ func refuseUnifiedHostResidencyForReportedAperture(plan compute.MemoryPlan, devi
 		if err := compute.RefuseMemoryPlanIfTooBigForReportedDevice(nil, plan, deviceTotal, deviceFree, true, headroom); err != nil {
 			return wrapUnifiedHostResidency(err)
 		}
-		return wrapUnifiedHostResidency(compute.RefuseMemoryPlanIfTooBigForReportedHost(hostScopedPlan(plan), hostTotal, hostFree, true, headroom))
+		if err := wrapUnifiedHostResidency(compute.RefuseMemoryPlanIfTooBigForReportedHost(hostScopedPlan(plan), hostTotal, hostFree, true, headroom)); err != nil {
+			return err
+		}
+		// Per-window checks pass; bound the SIMULTANEOUS total against the one physical pool the
+		// two windows are drawn from (fak#13280). The device and system windows are aperture
+		// windows over ONE pool, not disjoint carve-outs, so a plan that fits each window
+		// separately can still exceed the physical total at the kernel.
+		return refuseUnifiedHostResidencyPhysicalPool(plan, hostTotal, headroom)
 	}
 	return wrapUnifiedHostResidency(compute.RefuseMemoryPlanIfTooBigForReportedHost(plan, hostTotal, hostFree, hostKnown, headroom))
+}
+
+// refuseUnifiedHostResidencyPhysicalPool is the THIRD check in the split arm (fak#13280): after
+// each scope passes its OWN window, it bounds the plan's GRAND total against the ONE physical
+// DRAM pool the kernel allocates from. On a split-aperture integrated box that pool is the
+// system window (hostTotal = MemTotal), NOT deviceTotal+hostTotal: the RADV/Vulkan device
+// window reports a unified device-local+host-visible heap LARGER than physical RAM, so it is an
+// APERTURE over the same pool, not an independent carve-out. The two per-window checks therefore
+// accept a plan whose device half and host half each fit their window while their SUM exceeds
+// MemTotal - exactly the witnessed strix3 shape (device dense 63.092GiB + streamed expert cache
+// ~44GiB over a 62.4GiB MemTotal), which the kernel punishes with a global OOM kill before the
+// first token. A non-positive pool fails OPEN (matching every other capacity rung: an
+// unreportable pool cannot refuse). The returned *compute.FitError is wrapped with the
+// shared-pool provenance so the operator sees the physical-pool shortfall, not a per-window one
+// that already passed.
+func refuseUnifiedHostResidencyPhysicalPool(plan compute.MemoryPlan, hostTotal int64, headroom float64) error {
+	if hostTotal <= 0 {
+		return nil
+	}
+	budget := compute.BudgetAfterHeadroom(hostTotal, headroom)
+	if want := plan.Total(); want > budget {
+		return wrapUnifiedHostResidency(&compute.FitError{
+			Verdict: compute.FitTooBig, Want: want, Avail: budget,
+			Demands: plan, Scope: compute.MemoryScopeHost,
+		})
+	}
+	return nil
 }
 
 // wrapUnifiedHostResidency adds the shared-pool provenance to a typed refusal so an operator

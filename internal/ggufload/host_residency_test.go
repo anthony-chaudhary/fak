@@ -205,7 +205,13 @@ func splitApertureBackend(vramBytes, systemBytes int64) dualCapacityBackend {
 // TestRefuseUnifiedHostResidencyAdmitsSplitAperture is the fak#13176 RED->GREEN: a plan whose
 // device-scoped bytes fit the VRAM window and whose host-scoped bytes fit the system window is
 // ADMITTED even though the grand total exceeds the system window alone.
-func TestRefuseUnifiedHostResidencyAdmitsSplitAperture(t *testing.T) {
+func TestRefuseUnifiedHostResidencyRefusesPlanOverPhysicalPoolWitnessed(t *testing.T) {
+	// fak#13280 corrected this witness: the plan the pre-#13280 split form ADMITTED (device dense
+	// 63.092 GiB + streamed expert cache 8.425 GiB = 71.5 GiB over a 62.4 GiB MemTotal) is the exact
+	// shape that global-OOM-killed strix3 on clean silicon. The device window (64 GiB RADV unified
+	// heap) is an aperture over the same physical pool, not a disjoint carve-out, so the grand total
+	// must be bounded against MemTotal. This test pins the corrected verdict and keeps the
+	// split-vs-single-window distinction explicit.
 	const gib = int64(1 << 30)
 	deviceWeights := int64(witnessedDeviceWeightsGiB * float64(gib)) // 63.092 GiB
 	hostExperts := int64(witnessedHostExpertsGiB * float64(gib))     // 8.425 GiB
@@ -215,28 +221,40 @@ func TestRefuseUnifiedHostResidencyAdmitsSplitAperture(t *testing.T) {
 		t.Fatalf("fixture does not fit the split apertures (device %d<=%d, host %d<=%d)", deviceWeights, vram, hostExperts, system)
 	}
 	if deviceWeights+hostExperts <= system {
-		t.Fatalf("fixture does not reproduce the defect: grand total %d must exceed the system window %d", deviceWeights+hostExperts, system)
+		t.Fatalf("fixture does not reproduce the #13280 defect: grand total %d must exceed the system window %d", deviceWeights+hostExperts, system)
 	}
 	plan := compute.MemoryPlan{
 		{Class: compute.MemoryWeights, Scope: compute.MemoryScopeDevice, Bytes: deviceWeights, Detail: "gguf-device-dense-load"},
 		{Class: compute.MemoryKVCache, Scope: compute.MemoryScopeHost, Bytes: hostExperts, Detail: "gguf-host-expert-offload-streamed"},
 	}
-	// Split aperture, injectable: device fits VRAM, host fits system, sum > system -> ADMITTED.
-	if err := RefuseUnifiedHostResidencyIfTooBigForReportedAperture(plan, vram, vram, true, system, system, true, 0); err != nil {
-		t.Fatalf("split-aperture plan (device %d<=VRAM %d, host %d<=system %d) was refused: %v", deviceWeights, vram, hostExperts, system, err)
+	// Split aperture, injectable: device fits VRAM, host fits system, but the grand total exceeds
+	// the physical pool -> REFUSED (the #13280 correction).
+	err := RefuseUnifiedHostResidencyIfTooBigForReportedAperture(plan, vram, vram, true, system, system, true, 0)
+	if err == nil {
+		t.Fatalf("split-aperture plan (device %d<=VRAM %d, host %d<=system %d) with grand total %d over the pool %d was admitted; a physical-pool overflow must refuse (fak#13280)", deviceWeights, vram, hostExperts, system, deviceWeights+hostExperts, system)
+	}
+	var fe *compute.FitError
+	if !errors.As(err, &fe) || fe.Verdict != compute.FitTooBig {
+		t.Fatalf("refusal must be a typed FitTooBig *compute.FitError, got %T: %v", err, err)
 	}
 	// End-to-end through the backend-aware form, resolving BOTH windows off the backend probes.
-	be := splitApertureBackend(vram, system)
-	if err := RefuseUnifiedHostResidencyIfTooBig(plan, be, 0); err != nil {
-		t.Fatalf("backend-aware split-aperture admission refused the runnable V4.1 plan: %v", err)
+	if err := RefuseUnifiedHostResidencyIfTooBig(plan, splitApertureBackend(vram, system), 0); err == nil {
+		t.Fatal("backend-aware form admitted the witnessed over-pool V4.1 plan")
 	}
-	// The SAME plan through the pre-#13176 single-window form (no device window) still refuses:
-	// that is the defect the split form fixes, and it proves the two forms are not interchangeable.
-	if err := RefuseUnifiedHostResidencyIfTooBigForReportedHost(plan, system, system, true, 0); err == nil {
-		t.Fatal("single-window form admitted a grand total above the system window; the split form must be doing the admission")
+	// A plan that genuinely fits the physical pool is admitted: the correction must not refuse a
+	// runnable split plan (device 30 GiB + host 20 GiB = 50 GiB <= 62.4 GiB).
+	fits := compute.MemoryPlan{
+		{Class: compute.MemoryWeights, Scope: compute.MemoryScopeDevice, Bytes: 30 * gib, Detail: "dense"},
+		{Class: compute.MemoryKVCache, Scope: compute.MemoryScopeHost, Bytes: 20 * gib, Detail: "experts"},
+	}
+	if err := RefuseUnifiedHostResidencyIfTooBigForReportedAperture(fits, vram, vram, true, system, system, true, 0); err != nil {
+		t.Fatalf("a split plan within the physical pool must be admitted: %v", err)
 	}
 }
 
+// TestRefuseUnifiedHostResidencyRefusesDeviceOverflow is the negative test: a plan whose
+// device-scoped bytes exceed the VRAM window must still refuse with a typed FitError naming the
+// DEVICE aperture, even though its host side fits the system window.
 // TestRefuseUnifiedHostResidencyRefusesDeviceOverflow is the negative test: a plan whose
 // device-scoped bytes exceed the VRAM window must still refuse with a typed FitError naming the
 // DEVICE aperture, even though its host side fits the system window.
