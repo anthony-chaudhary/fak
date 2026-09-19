@@ -95,3 +95,19 @@ scrape_configs:
       - targets: ["host.docker.internal:9099"]
         labels:
           service: fak-native-slo
+
+  - job_name: fak_ops
+    # `fak-ops-dashboard` folds the Ops plane (cadence routines, queue items,
+    # report-window results, stuck-work join) into the fak_ops_* family at
+    # :9096/metrics. This is a live fold per scrape, so it can take a few
+    # seconds; the scrape_timeout below is raised to match.
+    # Start it with (from the fak-private repo):
+    #   fak-ops-dashboard --addr 0.0.0.0:9096 --repo-root .
+    # Feeds "FAK Ops | Ops Plane Statuses" (uid fak-ops-statuses).
+    metrics_path: /metrics
+    scrape_interval: 60s
+    scrape_timeout: 45s
+    static_configs:
+      - targets: ["host.docker.internal:9096"]
+        labels:
+          service: fak-ops
