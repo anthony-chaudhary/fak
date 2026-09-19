@@ -6,6 +6,8 @@ import (
 	"math/rand"
 	"reflect"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 func TestV4ScoredRouteMatchesIndependentOracle(t *testing.T) {
@@ -105,8 +107,8 @@ func v4NextAfter32(v float32) float32 {
 }
 
 // TestV4BitonicTopKMatchesStableSort is the load-bearing equivalence witness:
-// over adversarial fixtures the O(E log k) bitonic kernel must return the exact
-// same expert-index order as the reference stable sort, flag OFF vs ON.
+// over adversarial fixtures the opt-in partial-selection kernel must return the
+// exact same expert-index order as the reference stable sort, flag OFF vs ON.
 func TestV4BitonicTopKMatchesStableSort(t *testing.T) {
 	// want pins the expected top-6 selection order INDEPENDENT of the reference
 	// sort: descending value, lower expert index first on ties. It is derived by
@@ -303,11 +305,109 @@ func TestV41AndV4BitonicTopKWiringPreservesOracleSelection(t *testing.T) {
 	})
 }
 
-// BenchmarkV4TopKIndicesE384 measures the E=384 top-k selection both ways, so
-// the issue's before/after routing-time criterion is answerable. It is NOT a
-// speedup claim: the bitonic kernel pads 384 -> 512 and runs a full network
-// (~11520 compare-exchanges) against the reference sort's ~3300, so expect the
-// bitonic arm to be slower. The flag stays off by default for that reason.
+// TestV4PartialTopKFlagSelectsBoundedKernel is the fak#12975 reproduction
+// witness. Before the fix the flagged arm delegated to compute.PersistentBitonicTopK,
+// a FULL padded sort: at E=384 it materialised a 512-wide entry array and ran
+// ~11520 compare-exchanges, so opting in was a pessimisation and no O(E log k)
+// partial selection existed on the production path.
+//
+// The kernels are semantically equivalent (both return the correct top-k), so no
+// input value distinguishes them -- only their WORK does. The witness therefore
+// pins the flagged arm's deterministic allocation footprint, measured with
+// testing.Benchmark's AllocedBytesPerOp (allocation bytes, not wall-clock time,
+// so it is host-independent and reproducible). The O(E log k) heap retains a
+// k-wide working set and allocates ~152 B/op; the retired full sort padded to
+// 512 entries and allocated ~4144 B/op. The threshold 1000 B/op sits an order of
+// magnitude above the heap and far below the full sort, so a future swap back to
+// a full-sort kernel fails this witness loudly while machine noise cannot.
+func TestV4PartialTopKFlagSelectsBoundedKernel(t *testing.T) {
+	defer SetV4BitonicTopK(false) // restore the package-global default
+	const E, K = V41RouterExperts, V41RouterTopK
+	const boundedFootprintBytes = 1000 // heap ~152 B/op; full sort ~4144 B/op
+
+	rng := rand.New(rand.NewSource(12975))
+	choice := make([]float32, E)
+	for i := range choice {
+		choice[i] = rng.Float32()
+	}
+
+	// The bounded-heap kernel is exactly k wide, not E.
+	partial := v4PartialTopKIndices(choice, K)
+	if len(partial) != K {
+		t.Fatalf("partial-select width = %d, want %d (a bounded top-k, not a full sort)", len(partial), K)
+	}
+
+	// Flag OFF -> the reference full ordering (E wide).
+	SetV4BitonicTopK(false)
+	ref := v4TopKIndices(choice, K)
+	if len(ref) != E {
+		t.Fatalf("reference width = %d, want the full E=%d ordering", len(ref), E)
+	}
+
+	// Flag ON -> the bounded kernel selects the same experts in the pinned order.
+	SetV4BitonicTopK(true)
+	got := v4TopKIndices(choice, K)
+	if len(got) != K {
+		t.Fatalf("flagged width = %d, want %d: the flag did not route through the bounded "+
+			"O(E log k) partial selection (the retired bitonic arm returned the full E=%d ordering)",
+			len(got), K, E)
+	}
+	if !reflect.DeepEqual(got, ref[:K]) {
+		t.Fatalf("flagged partial-select order %v != reference top-k %v", got, ref[:K])
+	}
+	if !reflect.DeepEqual(got, partial) {
+		t.Fatalf("flagged arm %v did not route through v4PartialTopKIndices %v", got, partial)
+	}
+
+	// The load-bearing cost witness: the flagged seam must not carry a full-sort
+	// allocation. This is the assertion that FAILS against the retired bitonic
+	// delegation (~4144 B/op) and PASSES only with the bounded heap.
+	flagged := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_ = v4TopKIndices(choice, K)
+		}
+	})
+	if bytes := flagged.AllocedBytesPerOp(); bytes >= boundedFootprintBytes {
+		t.Fatalf("flagged top-k allocates %d B/op, want < %d: the flag is still routing through a "+
+			"full-sort kernel (the O(E log k) bounded heap allocates ~152 B/op)", bytes, boundedFootprintBytes)
+	}
+
+	// The retired kernel's own receipt proves the full-sort shape the flagged
+	// arm no longer carries; this keeps the contrast in the same test.
+	_, receipt, err := compute.PersistentBitonicTopK(choice, K)
+	if err != nil {
+		t.Fatalf("retired bitonic kernel: %v", err)
+	}
+	if receipt.PaddedN <= K {
+		t.Fatalf("fixture does not exercise the bitonic padding (padded=%d, K=%d)", receipt.PaddedN, K)
+	}
+	if receipt.Comparisons <= E {
+		t.Fatalf("retired full sort ran %d comparisons, want > E=%d (not a partial select)", receipt.Comparisons, E)
+	}
+
+	// Degenerate k must fail closed to the reference width on both the kernel
+	// helper and the flagged seam.
+	for _, k := range []int{0, -3, E + 1} {
+		if w := len(v4PartialTopKIndices(choice, k)); w != E {
+			t.Fatalf("degenerate k=%d kernel width = %d, want %d", k, w, E)
+		}
+		SetV4BitonicTopK(true)
+		if w := len(v4TopKIndices(choice, k)); w != E {
+			t.Fatalf("degenerate k=%d flagged width = %d, want %d", k, w, E)
+		}
+	}
+}
+
+// BenchmarkV4TopKIndicesE384 measures the E=384 top-k selection three ways: the
+// reference full stable sort, the opt-in partial-selection kernel the flag now
+// selects (v4PartialTopKIndices), and the retired full bitonic network it
+// replaced, so the issue's before/after routing-time criterion is answerable.
+//
+// The partial-select arm is the O(E log k) bounded heap (fak#12975): at E=384,
+// k=6 it beats the reference. The bitonic arm is retained as the documented
+// negative: it pads 384 -> 512 and runs a full network (~11520 compare-
+// exchanges) against the reference sort's ~3300, so it is slower -- which is
+// exactly why the flag now selects the heap and not the bitonic kernel.
 func BenchmarkV4TopKIndicesE384(b *testing.B) {
 	defer SetV4BitonicTopK(false) // restore the package-global default
 	const E, K = V41RouterExperts, V41RouterTopK
@@ -324,11 +424,17 @@ func BenchmarkV4TopKIndicesE384(b *testing.B) {
 			_ = v4TopKIndices(choice, K)
 		}
 	})
-	b.Run("bitonic_kernel", func(b *testing.B) {
+	b.Run("partial_select_kernel", func(b *testing.B) {
 		SetV4BitonicTopK(true)
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			_ = v4TopKIndices(choice, K)
+		}
+	})
+	b.Run("bitonic_full_sort_retired", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_, _, _ = compute.PersistentBitonicTopK(choice, K)
 		}
 	})
 }

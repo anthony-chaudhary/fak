@@ -17,106 +17,19 @@ import (
 	"encoding/json"
 	"math/rand"
 	"reflect"
-	"sort"
 	"testing"
 )
 
-// v41RouterPartialTopKIndices returns the expert indices of the k largest
-// selection scores, in the router's pinned order: descending score, lower
-// expert index first on ties.
+// v41RouterPartialTopKIndices is retained as the bench file's local alias for
+// the PRODUCTION O(E log k) partial selection v4PartialTopKIndices, which
+// fak#12975 promoted out of this scratch file into v4_topk_partial.go.
 //
-// It is a genuine O(E log k) partial selection: a bounded min-heap of size k
-// keeps the k best candidates seen so far, so each of the E elements costs at
-// most a log k sift rather than the reference's full O(E log E) sort.
-//
-// The pinned tie-break is preserved by making the heap "better" relation match
-// the reference exactly. sort.SliceStable over an index list initially in
-// ascending index order keeps equal-score experts in ascending index order; a
-// candidate is therefore strictly better than the heap's current worst iff it
-// has a higher score, or an equal score and a lower index. The heap root is
-// that worst element, so the final result is dumped in descending order under
-// the same relation.
-//
-// Degenerate k (k<=0 or k>len(choice)) mirrors v4TopKIndices's fail-closed
-// contract by returning the full reference ordering rather than a short or
-// overlong slice.
+// Before the promotion this file carried the only implementation (as
+// benchmark-only scratch). Promoting it and aliasing here keeps the cost
+// benchmark measuring the SAME kernel the router now selects, instead of a
+// drifting copy -- the duplicate body was retired with the promotion.
 func v41RouterPartialTopKIndices(choice []float32, k int) []int {
-	if k <= 0 || k > len(choice) {
-		indices := make([]int, len(choice))
-		for i := range indices {
-			indices[i] = i
-		}
-		sort.SliceStable(indices, func(i, j int) bool {
-			return choice[indices[i]] > choice[indices[j]]
-		})
-		return indices
-	}
-
-	// partialBetter reports whether index a ranks strictly ahead of index b in
-	// the pinned order (descending score, lower index first on ties).
-	partialBetter := func(a, b int) bool {
-		sa, sb := choice[a], choice[b]
-		if sa != sb {
-			return sa > sb
-		}
-		return a < b
-	}
-
-	// heap holds the current k best indices as a min-heap under partialBetter:
-	// heap[0] (the root) is the worst of the retained candidates.
-	heap := make([]int, 0, k)
-	siftUp := func(at int) {
-		for at > 0 {
-			parent := (at - 1) / 2
-			if !partialBetter(heap[parent], heap[at]) {
-				break
-			}
-			heap[parent], heap[at] = heap[at], heap[parent]
-			at = parent
-		}
-	}
-	siftDown := func(at int) {
-		for {
-			left, right := 2*at+1, 2*at+2
-			worst := at
-			if left < len(heap) && partialBetter(heap[worst], heap[left]) {
-				worst = left
-			}
-			if right < len(heap) && partialBetter(heap[worst], heap[right]) {
-				worst = right
-			}
-			if worst == at {
-				return
-			}
-			heap[at], heap[worst] = heap[worst], heap[at]
-			at = worst
-		}
-	}
-
-	for i := 0; i < len(choice); i++ {
-		if len(heap) < k {
-			heap = append(heap, i)
-			siftUp(len(heap) - 1)
-			continue
-		}
-		// Replace the root only when the new candidate is strictly better than
-		// the retained worst; equal candidates lose to the lower index already
-		// in the heap, which is the stable-sort tie-break.
-		if partialBetter(i, heap[0]) {
-			heap[0] = i
-			siftDown(0)
-		}
-	}
-
-	// The heap holds the correct k-set but with the worst at the root. Order
-	// the k retained candidates into the pinned sequence. k is bounded (top-k),
-	// so this final ordering is O(k log k) and does not change the O(E log k)
-	// selection bound.
-	out := append([]int(nil), heap...)
-	sort.SliceStable(out, func(i, j int) bool {
-		return partialBetter(out[i], out[j])
-	})
-	return out
+	return v4PartialTopKIndices(choice, k)
 }
 
 // TestV41RouterCostTopKSetEquality is the SW-VERIFIED equality witness for the

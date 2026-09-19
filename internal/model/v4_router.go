@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-
-	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // v4RouteError is a fail-closed admission error for the scored-layer V4
@@ -107,18 +105,22 @@ func v4BitonicTopKEnabled() bool { return v4BitonicTopK }
 // in the router's pinned order: descending score, lower expert index first on
 // ties.
 //
-// With the kernel opted in it delegates to compute.PersistentBitonicTopK. Note
-// that kernel is a *full* bitonic sorting network (it pads E up to the next
-// power of two and sorts all slots, then slices the first k), NOT an O(E log k)
-// partial selection: at E=384 it pads to 512 and performs ~11520 compare-
-// exchanges versus ~3300 for the reference sort. It is wired here as an
-// opt-in equivalence spine only; no speedup is claimed, and the reference path
-// remains the default.
+// With the kernel opted in it delegates to v4PartialTopKIndices, a genuine
+// O(E log k) bounded-heap partial selection (fak#12975). The reference full
+// stable sort remains the DEFAULT path, so the pre-kernel router stays
+// byte-identical; the flag turns on the faster kernel.
 //
-// On any kernel error, or on a returned index that is not a valid expert slot,
-// it falls back to the reference stable sort. The fallback is fail-closed: a
-// malformed kernel result can never select a non-existent expert or panic the
-// route.
+// History: the flag was first wired to compute.PersistentBitonicTopK, which is
+// NOT an O(E log k) partial select -- it is a full bitonic sorting network that
+// pads E to the next power of two and sorts every slot (E=384 -> 512, ~11520
+// compare-exchanges vs the reference's ~3300), so it measured ~1.7x SLOWER and
+// no speedup was ever claimed for it. v4PartialTopKIndices replaces that
+// equivalence-only spine with the partial selection this seam was meant to
+// carry.
+//
+// The fallback stays fail-closed: a malformed kernel result (an out-of-range
+// index or a short slice) can never select a non-existent expert or panic the
+// route -- it returns the reference ordering instead.
 func v4TopKIndices(choice []float32, k int) []int {
 	ref := func() []int {
 		indices := make([]int, len(choice))
@@ -138,20 +140,18 @@ func v4TopKIndices(choice []float32, k int) []int {
 	if !v4BitonicTopKEnabled() {
 		return ref()
 	}
-	entries, _, err := compute.PersistentBitonicTopK(choice, k)
-	if err != nil {
+	indices := v4PartialTopKIndices(choice, k)
+	// v4PartialTopKIndices mirrors the reference width contract, so a
+	// well-formed call returns exactly k in-range indices. Re-validate anyway:
+	// the seam is package-visible and a future kernel swap must not be able to
+	// route a non-existent expert.
+	if len(indices) != k {
 		return ref()
 	}
-	indices := make([]int, 0, k)
-	for _, e := range entries {
-		idx := int(e.Index)
+	for _, idx := range indices {
 		if idx < 0 || idx >= len(choice) {
 			return ref()
 		}
-		indices = append(indices, idx)
-	}
-	if len(indices) != k {
-		return ref()
 	}
 	return indices
 }
