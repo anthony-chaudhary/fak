@@ -328,6 +328,102 @@ func TestOpencodeLauncherAutoDetectedModelWiring(t *testing.T) {
 	})
 }
 
+// TestOpencodeLaunchSplit (Witness for #12304) proves `fak opencode` routes its split-view
+// flags into the `fak guard` child argv verbatim, defaults them, rejects bad values, and that
+// the split-plan terminal detection the guard process relies on reaches the new macOS hosts.
+func TestOpencodeLaunchSplit(t *testing.T) {
+	t.Run("dry-run forwards split flags", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := runOpencode(&stdout, &stderr, []string{
+			"--dry-run", "--split", "on", "--split-where", "right", "--split-interval", "3s",
+		})
+		if code != 0 {
+			t.Fatalf("runOpencode returned %d, stderr: %s", code, stderr.String())
+		}
+		out := stdout.String()
+		for _, want := range []string{"--split on", "--split-where right", "--split-interval 3s", "-- opencode"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("expected %q in dry-run stdout: %s", want, out)
+			}
+		}
+	})
+
+	t.Run("default split mode is auto", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := runOpencode(&stdout, &stderr, []string{"--dry-run"})
+		if code != 0 {
+			t.Fatalf("runOpencode returned %d, stderr: %s", code, stderr.String())
+		}
+		out := stdout.String()
+		if !strings.Contains(out, "--split auto") {
+			t.Errorf("expected default '--split auto' in dry-run stdout: %s", out)
+		}
+		if !strings.Contains(out, "--split-where bottom") {
+			t.Errorf("expected default '--split-where bottom' in dry-run stdout: %s", out)
+		}
+	})
+
+	t.Run("split off is honored", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := runOpencode(&stdout, &stderr, []string{"--dry-run", "--split", "off"})
+		if code != 0 {
+			t.Fatalf("runOpencode returned %d, stderr: %s", code, stderr.String())
+		}
+		if out := stdout.String(); !strings.Contains(out, "--split off") {
+			t.Errorf("expected '--split off' in dry-run stdout: %s", out)
+		}
+	})
+
+	t.Run("rejects bad split mode", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := runOpencode(&stdout, &stderr, []string{"--dry-run", "--split", "sideways"})
+		if code != 2 {
+			t.Fatalf("runOpencode returned %d, want 2; stderr: %s", code, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "split") {
+			t.Errorf("expected split error in stderr: %s", stderr.String())
+		}
+	})
+
+	t.Run("rejects bad split where", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := runOpencode(&stdout, &stderr, []string{"--dry-run", "--split-where", "diagonal"})
+		if code != 2 {
+			t.Fatalf("runOpencode returned %d, want 2; stderr: %s", code, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "split") {
+			t.Errorf("expected split error in stderr: %s", stderr.String())
+		}
+	})
+
+	t.Run("mac hosts resolve to a real split plan", func(t *testing.T) {
+		wez, err := buildGuardSplitPlan("darwin", envFunc(map[string]string{"WEZTERM_PANE": "1"}), lookPathOK, "fak", "bottom", guardOverlayArgs())
+		if err != nil {
+			t.Fatalf("wezterm: unexpected error: %v", err)
+		}
+		if wez.Host != "wezterm" {
+			t.Fatalf("wezterm host = %q, want wezterm", wez.Host)
+		}
+
+		ghostty, err := buildGuardSplitPlan("darwin", envFunc(map[string]string{"GHOSTTY_RESOURCES_DIR": "/x"}), lookPathOK, "fak", "bottom", guardOverlayArgs())
+		if err != nil {
+			t.Fatalf("ghostty: unexpected error: %v", err)
+		}
+		if ghostty.Host != "ghostty" {
+			t.Fatalf("ghostty host = %q, want ghostty", ghostty.Host)
+		}
+	})
+
+	t.Run("degraded banner is on by default and can be disabled", func(t *testing.T) {
+		if on := guardSplitDegradedBanner(envFunc(nil)); on == "" {
+			t.Fatal("degraded banner should be enabled by default")
+		}
+		if off := guardSplitDegradedBanner(envFunc(map[string]string{"FAK_SPLIT_BANNER": "0"})); off != "" {
+			t.Fatalf("FAK_SPLIT_BANNER=0 should disable the banner, got %q", off)
+		}
+	})
+}
+
 func TestOpencodeLauncherHaloFlag(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("FAK_HALO_HOST", "")
