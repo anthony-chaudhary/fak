@@ -1,0 +1,336 @@
+{
+  "uid": "fak-ops-workers-queue",
+  "title": "FAK Ops | Workers, Queue & Issue Throughput",
+  "description": "Live operator picture from fak-private: how many workers are live, how deep the ops queue is, and how many issues are completing over 6m / 30m / 60m / 12h / 24h windows. Fed by `fak-sync ops throughput-metrics --serve --addr 0.0.0.0:9094` (job fak_ops_workers). All numbers are read-only oracle folds: a failed plane sets its *_up gauge to 0 rather than fabricating a zero.",
+  "tags": ["fak", "ops", "throughput", "workers"],
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "links": [],
+  "annotations": {
+    "list": []
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 2,
+        "refresh": 1,
+        "regex": "",
+        "options": [],
+        "includeAll": false,
+        "multi": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Workers (live)",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Workers live",
+      "description": "Live flow worktrees in flight right now (the same population `fak-flow wip` prints). `fak_ops_workers_live`.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "fak_ops_workers_live{job=\"fak_ops_workers\"}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Workers at risk",
+      "description": "At-risk / unleased worktrees that need triage. `fak_ops_workers_at_risk`.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 20 } ] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "fak_ops_workers_at_risk{job=\"fak_ops_workers\"}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Worktree plane",
+      "description": "1 when the live worktree census succeeded. 0 means the worker plane is unavailable (the count is not a real zero). `fak_ops_worktree_plane_up`.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "fak_ops_worktree_plane_up{job=\"fak_ops_workers\"}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Queue depth (open)",
+      "description": "Ops queue items queued + running + unknown. `fak_ops_queue_items`.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 50 }, { "color": "red", "value": 200 } ] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum(fak_ops_queue_items{job=\"fak_ops_workers\",state=~\"queued|running|unknown\"}) or vector(0)", "refId": "A" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Workers live (over time)",
+      "description": "`fak_ops_workers_live` and `fak_ops_workers_at_risk` tracked over the selected range.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2, "fillOpacity": 10, "showPoints": "auto" }, "unit": "short" },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "fak_ops_workers_live{job=\"fak_ops_workers\"}", "legendFormat": "live", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "fak_ops_workers_at_risk{job=\"fak_ops_workers\"}", "legendFormat": "at risk", "refId": "B" }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Queue items by state (over time)",
+      "description": "`fak_ops_queue_items` folded by state.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2, "fillOpacity": 10, "showPoints": "auto", "stacking": { "mode": "normal" } }, "unit": "short" },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (state) (fak_ops_queue_items{job=\"fak_ops_workers\"})", "legendFormat": "{{state}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "Issue throughput (closed per window)",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Closed last 6m",
+      "description": "Issues closed in the trailing 6 minutes. `fak_ops_issues_closed{window=\"6m\"}`.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 15 },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "text", "value": null }, { "color": "green", "value": 1 } ] }, "unit": "short" }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "pluginVersion": "11.5.2",
+      "targets": [ { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "fak_ops_issues_closed{job=\"fak_ops_workers\",window=\"6m\"}", "refId": "A" } ]
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Closed last 30m",
+      "description": "Issues closed in the trailing 30 minutes. `fak_ops_issues_closed{window=\"30m\"}`.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 15 },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "text", "value": null }, { "color": "green", "value": 1 } ] }, "unit": "short" }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "pluginVersion": "11.5.2",
+      "targets": [ { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "fak_ops_issues_closed{job=\"fak_ops_workers\",window=\"30m\"}", "refId": "A" } ]
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Closed last 60m",
+      "description": "Issues closed in the trailing 60 minutes. `fak_ops_issues_closed{window=\"60m\"}`.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 4, "x": 8, "y": 15 },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "text", "value": null }, { "color": "green", "value": 1 } ] }, "unit": "short" }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "pluginVersion": "11.5.2",
+      "targets": [ { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "fak_ops_issues_closed{job=\"fak_ops_workers\",window=\"60m\"}", "refId": "A" } ]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Closed last 12h",
+      "description": "Issues closed in the trailing 12 hours. `fak_ops_issues_closed{window=\"12h\"}`.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 4, "x": 12, "y": 15 },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "text", "value": null }, { "color": "green", "value": 1 } ] }, "unit": "short" }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "pluginVersion": "11.5.2",
+      "targets": [ { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "fak_ops_issues_closed{job=\"fak_ops_workers\",window=\"12h\"}", "refId": "A" } ]
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Closed last 24h",
+      "description": "Issues closed in the trailing 24 hours. `fak_ops_issues_closed{window=\"24h\"}`.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 15 },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "text", "value": null }, { "color": "green", "value": 1 } ] }, "unit": "short" }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "pluginVersion": "11.5.2",
+      "targets": [ { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "fak_ops_issues_closed{job=\"fak_ops_workers\",window=\"24h\"}", "refId": "A" } ]
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Throughput source",
+      "description": "1 when the issue closure census succeeded and was not truncated. 0 means the counts are unavailable/partial (fail-closed), not that nothing closed. `fak_ops_throughput_up`, truncated marker `fak_ops_throughput_census_truncated`.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 15 },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] }, "unit": "short" }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "pluginVersion": "11.5.2",
+      "targets": [ { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "fak_ops_throughput_up{job=\"fak_ops_workers\"}", "refId": "A" } ]
+    },
+    {
+      "id": 15,
+      "type": "barchart",
+      "title": "Issues closed by window",
+      "description": "Side-by-side closure counts per trailing window.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" }, "overrides": [] },
+      "options": { "orientation": "horizontal", "showValue": "auto", "xTickLabelRotation": 0, "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "single", "sort": "none" } },
+      "pluginVersion": "11.5.2",
+      "targets": [ { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "fak_ops_issues_closed{job=\"fak_ops_workers\"}", "legendFormat": "{{window}}", "refId": "A", "instant": true } ]
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Net backlog change per hour (opened - closed)",
+      "description": "`fak_ops_issues_net_per_hour` by window. Negative = the backlog is draining; positive = it is growing.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2, "fillOpacity": 10, "showPoints": "auto" },
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 0 } ] }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "pluginVersion": "11.5.2",
+      "targets": [ { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "fak_ops_issues_net_per_hour{job=\"fak_ops_workers\"}", "legendFormat": "{{window}}", "refId": "A" } ]
+    },
+    {
+      "id": 17,
+      "type": "row",
+      "title": "Adjudication plane (companion)",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 28 }
+    },
+    {
+      "id": 18,
+      "type": "stat",
+      "title": "Ops routines enabled",
+      "description": "From the Fak Ops statuses exporter (uid fak-ops-statuses). `fak_ops_schedule_enabled`.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 29 },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] }, "unit": "short" }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "pluginVersion": "11.5.2",
+      "targets": [ { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max(fak_ops_schedule_enabled{job=\"fak_ops\"}) or vector(0)", "refId": "A" } ]
+    },
+    {
+      "id": 19,
+      "type": "stat",
+      "title": "Ops routines stale",
+      "description": "Enabled routines whose last interval is stale. `fak_ops_schedule_stale`.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 29 },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 10 } ] }, "unit": "short" }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "pluginVersion": "11.5.2",
+      "targets": [ { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max(fak_ops_schedule_stale{job=\"fak_ops\"}) or vector(0)", "refId": "A" } ]
+    },
+    {
+      "id": 20,
+      "type": "stat",
+      "title": "Stuck work",
+      "description": "Total stuck-work items folded by the Fak Ops statuses exporter. `fak_ops_stuck_total`.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 29 },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 25 } ] }, "unit": "short" }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "pluginVersion": "11.5.2",
+      "targets": [ { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max(fak_ops_stuck_total{job=\"fak_ops\"}) or vector(0)", "refId": "A" } ]
+    },
+    {
+      "id": 21,
+      "type": "stat",
+      "title": "Reports failure rate (24h)",
+      "description": "Ops report failure rate over the trailing window. `fak_ops_reports_failure_rate`.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 29 },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 0.25 }, { "color": "red", "value": 0.5 } ] }, "unit": "percentunit", "decimals": 2 }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "pluginVersion": "11.5.2",
+      "targets": [ { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max(fak_ops_reports_failure_rate{job=\"fak_ops\"}) or vector(0)", "refId": "A" } ]
+    }
+  ]
+}

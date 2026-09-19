@@ -111,3 +111,18 @@ scrape_configs:
       - targets: ["host.docker.internal:9096"]
         labels:
           service: fak-ops
+
+
+  - job_name: fak_ops_workers
+    # Live worker/queue/issue-throughput exporter from fak-private:
+    #   fak-sync ops throughput-metrics --serve --addr 0.0.0.0:9094
+    # ONE bounded gh census (24h) is folded into the 6m/30m/60m/12h/24h
+    # windows per scrape, plus the live worktree census and the ops queue fold.
+    # Feeds "FAK Ops | Workers, Queue & Issue Throughput" (uid fak-ops-workers-queue).
+    metrics_path: /metrics
+    scrape_interval: 60s
+    scrape_timeout: 60s
+    static_configs:
+      - targets: ["host.docker.internal:9094"]
+        labels:
+          service: fak-ops-workers
