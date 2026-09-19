@@ -1,8 +1,12 @@
 package model
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
+	"sort"
+	"strings"
 	"testing"
 )
 
@@ -405,5 +409,69 @@ func TestExpertHotSetLearnerPinsStayWithinBudgetUnderWarmPrior(t *testing.T) {
 	}
 	if st.PeakBytes > st.BudgetBytes {
 		t.Fatalf("peak resident %d exceeds budget %d across the disjoint-prior turn", st.PeakBytes, st.BudgetBytes)
+	}
+}
+
+// TestExpertHotSetLearnerHasExactlyOneLearnerSymbol is the #13040 reconciliation witness. A peer
+// once wrote an independent, UNWIRED `OnlineExpertHotSet` into this same package mid-task (recovered
+// issue #1435); that peer file was preserved out-of-tree at
+// %TEMP%\opencode\peer-1435-online-expert-hot-set.go. The landed canonical implementation is the
+// WIRED ExpertHotSetLearner (expert_hot_set.go, reached by Session.ExpertHotSetHysteresis ->
+// applyHotSetSwaps through expert_ring_pins.go / kv.go / paging_ring.go).
+//
+// The peer file no longer exists on any checked-out tree, and `OnlineExpertHotSet` appears nowhere in
+// the package (verified by direct grep on trunk). The reconciliation decision recorded here is
+// therefore DISCARD-AS-DUPLICATE: the landed wired learner is canonical, and there was no surviving
+// peer source to fold. This test locks that decision in structurally so the duplicate-concept trap
+// the issue names cannot silently re-appear: exactly ONE hot-set learner type may be declared in
+// internal/model, and it must be the canonical wired one.
+//
+// The scan is deterministic and source-level: it reads the package's own non-test .go files (the
+// authoritative declarations), finds every `type <Name> struct` whose name contains `HotSet` (excluding the value type
+// ExpertHotSetSwap), and asserts the learner set is exactly {ExpertHotSetLearner}. A reintroduced
+// OnlineExpertHotSet -- under any casing -- fails by name.
+func TestExpertHotSetLearnerHasExactlyOneLearnerSymbol(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read package dir: %v", err)
+	}
+
+	typeDecl := regexp.MustCompile(`(?m)^type\s+([A-Za-z0-9_]+)\s+struct\b`)
+	var hotSetTypes []string
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(filepath.Join(".", name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		for _, m := range typeDecl.FindAllStringSubmatch(string(src), -1) {
+			if strings.Contains(m[1], "HotSet") && m[1] != "ExpertHotSetSwap" {
+				hotSetTypes = append(hotSetTypes, m[1])
+			}
+		}
+	}
+	sort.Strings(hotSetTypes)
+
+	// Exactly one hot-set learner type, and it is the canonical wired one.
+	if len(hotSetTypes) != 1 || hotSetTypes[0] != "ExpertHotSetLearner" {
+		t.Fatalf("hot-set learner types in internal/model = %v, want exactly [ExpertHotSetLearner]; a "+
+			"second learner (e.g. OnlineExpertHotSet) is the #13040 duplicate-concept trap and must be "+
+			"reconciled, not added", hotSetTypes)
+	}
+
+	// The canonical symbol is reachable and wired: presence is not the claim; that the learner can be
+	// constructed and driven through its decision path is. This is the invokability half.
+	l := NewExpertHotSetLearner(2, DefaultExpertHotSetHysteresis)
+	l.Observe(0, 7)
+	l.Observe(0, 7)
+	l.Observe(0, 8)
+	if sw := l.Learn(); len(sw) == 0 {
+		t.Fatalf("canonical ExpertHotSetLearner.Learn() produced no swaps for a clear top-2 population")
+	}
+	if got := l.HotSet(); len(got) != 2 {
+		t.Fatalf("canonical learner committed %d units, want 2", len(got))
 	}
 }
