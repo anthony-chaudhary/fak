@@ -24,9 +24,36 @@
 package v41
 
 import (
+	"errors"
 	"fmt"
 	model "github.com/anthony-chaudhary/fak/internal/model"
 	"math"
+)
+
+// ErrV41SparseSinkNonFinite is the typed fail-closed refusal for the V4.1
+// sparse sink contraction (issue #13290). The contraction validates every
+// INPUT is finite but the 512-term score/value accumulations can overflow
+// float32 to +Inf while the inputs stay finite; +Inf then poisons the softmax
+// denominator (Inf-Inf = NaN) and the weighted value sum. This sentinel lets a
+// caller (and the layered forward's output projection guard) attribute a
+// downstream "non-finite value" refusal to the TRUE producing stage instead of
+// the first downstream tensor that happens to notice it.
+var ErrV41SparseSinkNonFinite = errors.New("model: DeepSeek V4.1 sparse sink produced a non-finite value")
+
+// v41SparseSinkStage names the arithmetic stage that first produced a
+// non-finite value in V41SparseAttentionSink.
+type v41SparseSinkStage string
+
+const (
+	// v41SinkStageScore is the scaled dot-product score accumulate
+	// (dot += q*kv; dot *= softmax). An overflow here makes maxScore +Inf.
+	v41SinkStageScore v41SparseSinkStage = "score accumulate"
+	// v41SinkStageSoftmax is the softmax denominator sum of exp terms. An
+	// Inf-Inf NaN in an exponent poisons sum without tripping the sum==0 guard.
+	v41SinkStageSoftmax v41SparseSinkStage = "softmax denominator"
+	// v41SinkStageValue is the weighted value accumulate
+	// (o[oBase+d] += weight*kv[...]).
+	v41SinkStageValue v41SparseSinkStage = "weighted value accumulate"
 )
 
 // V41SparseAttentionSinkOptions names the already-projected tensor geometry
@@ -137,6 +164,9 @@ func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V4
 						dot += q[qBase+d] * kv[kvBase+d]
 					}
 					dot *= opt.Softmax
+					if !model.Finite32(dot) {
+						return nil, sparseSinkNonFinite(v41SinkStageScore, b, m, h, i, -1, dot)
+					}
 					if dot > maxScore {
 						maxScore = dot
 					}
@@ -161,7 +191,14 @@ func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V4
 					for d := 0; d < opt.HeadDim; d++ {
 						dot += q[qBase+d] * kv[kvBase+d]
 					}
-					sum += exp32(dot*opt.Softmax - maxScore)
+					term := exp32(dot*opt.Softmax - maxScore)
+					if !model.Finite32(term) {
+						return nil, sparseSinkNonFinite(v41SinkStageSoftmax, b, m, h, i, -1, term)
+					}
+					sum += term
+				}
+				if !model.Finite32(sum) {
+					return nil, sparseSinkNonFinite(v41SinkStageSoftmax, b, m, h, -1, -1, sum)
 				}
 				if sum == 0 {
 					continue
@@ -179,8 +216,14 @@ func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V4
 						dot += q[qBase+d] * kv[kvBase+d]
 					}
 					weight := exp32(dot*opt.Softmax-maxScore) / sum
+					if !model.Finite32(weight) {
+						return nil, sparseSinkNonFinite(v41SinkStageValue, b, m, h, i, -1, weight)
+					}
 					for d := 0; d < opt.HeadDim; d++ {
 						o[oBase+d] += weight * kv[kvBase+d]
+						if !model.Finite32(o[oBase+d]) {
+							return nil, sparseSinkNonFinite(v41SinkStageValue, b, m, h, i, d, o[oBase+d])
+						}
 					}
 				}
 			}
@@ -272,6 +315,22 @@ func V41GroupedOutputProjection(o, woA, woB []float32, b, m, heads, headDim, gro
 		}
 	}
 	return out, nil
+}
+
+// sparseSinkNonFinite builds the typed refusal naming the TRUE producing
+// stage, batch, position, head, the KV row (i>=0) or -1, the offending output
+// element d (>=0) or -1, and the non-finite value. It wraps
+// ErrV41SparseSinkNonFinite so errors.Is reaches the closed class; the message
+// carries the "sparse sink" and stage tokens a caller can attribute.
+func sparseSinkNonFinite(stage v41SparseSinkStage, b, m, h, i, d int, v float32) error {
+	where := fmt.Sprintf("sparse sink %s produced a non-finite value b=%d m=%d h=%d", stage, b, m, h)
+	if i >= 0 {
+		where += fmt.Sprintf(" kvRow=%d", i)
+	}
+	if d >= 0 {
+		where += fmt.Sprintf(" element=%d", d)
+	}
+	return fmt.Errorf("%w: %s value=%v", ErrV41SparseSinkNonFinite, where, v)
 }
 
 func exp32(x float32) float32 { return float32(math.Exp(float64(x))) }

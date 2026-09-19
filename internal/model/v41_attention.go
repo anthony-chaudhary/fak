@@ -402,6 +402,9 @@ func V41AttentionCompressedForward(q []float32, values [][]float32, opt V41Atten
 					dot += q[hBase+d] * row[d]
 				}
 				dot *= opt.Softmax
+				if !finite32(dot) {
+					return nil, v41CompressedNonFinite(opt.Layer, v41CompressedStageScore, t, h, g, -1, dot)
+				}
 				if dot > maxScore {
 					maxScore = dot
 				}
@@ -419,7 +422,14 @@ func V41AttentionCompressedForward(q []float32, values [][]float32, opt V41Atten
 				for d := 0; d < opt.HeadDim; d++ {
 					dot += q[hBase+d] * row[d]
 				}
-				sum += exp32(dot*opt.Softmax - maxScore)
+				term := exp32(dot*opt.Softmax - maxScore)
+				if !finite32(term) {
+					return nil, v41CompressedNonFinite(opt.Layer, v41CompressedStageSoftmax, t, h, g, -1, term)
+				}
+				sum += term
+			}
+			if !finite32(sum) {
+				return nil, v41CompressedNonFinite(opt.Layer, v41CompressedStageSoftmax, t, h, -1, -1, sum)
 			}
 			if sum == 0 {
 				continue
@@ -431,8 +441,14 @@ func V41AttentionCompressedForward(q []float32, values [][]float32, opt V41Atten
 					dot += q[hBase+d] * row[d]
 				}
 				weight := exp32(dot*opt.Softmax-maxScore) / sum
+				if !finite32(weight) {
+					return nil, v41CompressedNonFinite(opt.Layer, v41CompressedStageValue, t, h, g, -1, weight)
+				}
 				for d := 0; d < opt.HeadDim; d++ {
 					out[hBase+d] += weight * row[d]
+					if !finite32(out[hBase+d]) {
+						return nil, v41CompressedNonFinite(opt.Layer, v41CompressedStageValue, t, h, g, d, out[hBase+d])
+					}
 				}
 			}
 		}
@@ -660,3 +676,38 @@ func maxInt(a, b int) int {
 
 // negInf32 is the sink's "no visible group" seed.
 const negInf32 = float32(-3.4028234e38)
+
+// v41CompressedStage names the arithmetic stage that first produced a
+// non-finite value in V41AttentionCompressedForward (issue #13290).
+type v41CompressedStage string
+
+const (
+	// v41CompressedStageScore is the scaled dot-product score accumulate
+	// (dot += q*value; dot *= softmax).
+	v41CompressedStageScore v41CompressedStage = "score accumulate"
+	// v41CompressedStageSoftmax is the softmax denominator sum of exp terms.
+	v41CompressedStageSoftmax v41CompressedStage = "softmax denominator"
+	// v41CompressedStageValue is the weighted value accumulate
+	// (out[hBase+d] += weight*value).
+	v41CompressedStageValue v41CompressedStage = "weighted value accumulate"
+)
+
+// v41CompressedNonFinite builds the typed fail-closed refusal that NAMES the
+// TRUE producer of a non-finite compressed-attention value, wrapping
+// ErrV41ForwardStage (so errors.Is reaches the closed class) and the layer. It
+// names the stage, position t, head h, the visible group g (or -1 when the
+// value is the whole-denominator sum), the offending output element d (or -1),
+// and the non-finite value. The #13290 physical layer-36 failure surfaced as a
+// downstream "grouped output non-finite value" refusal; this guard makes the
+// contraction attribute the true producer instead.
+func v41CompressedNonFinite(layer int, stage v41CompressedStage, t, h, g, d int, v float32) error {
+	where := fmt.Sprintf("compressed attention %s produced a non-finite value t=%d h=%d", stage, t, h)
+	if g >= 0 {
+		where += fmt.Sprintf(" group=%d", g)
+	}
+	if d >= 0 {
+		where += fmt.Sprintf(" element=%d", d)
+	}
+	return v41StageErr(v41StageAttention, layer,
+		fmt.Errorf("%w: %s value=%v", ErrV41ForwardStage, where, v))
+}
