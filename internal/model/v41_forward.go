@@ -191,7 +191,7 @@ type v41ProjScratch struct {
 	layerExpertBytes      int64
 }
 
-// v41ExpertLayerCacheDefaultBytes is the FALLBACK bound for the layer-scoped
+// V41ExpertLayerCacheDefaultBytes is the FALLBACK bound for the layer-scoped
 // routed-expert f32 cache when the tier declares no resident budget. It is sized
 // to hold ONE position's distinct routed set at the published V4.1 geometry --
 // topK (6) triples, each triple w1+w3+w2 = 3 * 2304 * 5120 * 4 = 135 MiB, so
@@ -199,7 +199,15 @@ type v41ProjScratch struct {
 // keeping the cache a bounded, layer-scoped transient (reset every layer) rather
 // than the accumulated f32 churn #13288 removed. A model with no checkpoint tier
 // leaves the cache OFF entirely.
-const v41ExpertLayerCacheDefaultBytes int64 = 810 << 20
+//
+// It is EXPORTED so the serve-side memory plan (fak#13300, cmd/fak) can charge
+// the SAME bound the runtime allocates: a plan that charged a different cache
+// size would reintroduce exactly the plan-vs-runtime disagreement #13288 was.
+const V41ExpertLayerCacheDefaultBytes int64 = 810 << 20
+
+// v41ExpertLayerCacheDefaultBytes is the package-internal alias the forward reads;
+// it is the one declaration (the exported constant), never a second copy.
+const v41ExpertLayerCacheDefaultBytes int64 = V41ExpertLayerCacheDefaultBytes
 
 // v41LayerExpertCacheBudget sizes the layer-scoped routed-expert f32 cache for
 // one forward. It is a bounded constant sized to one position's distinct routed
@@ -214,6 +222,115 @@ func (m *Model) v41LayerExpertCacheBudget() int64 {
 		return 0
 	}
 	return v41ExpertLayerCacheDefaultBytes
+}
+
+// V41TransientResidentBytes reports the exact high-water bytes the V4.1 native
+// forward holds SIMULTANEOUSLY in its forward-scoped scratch (v41ProjScratch)
+// and its layer-scoped routed-expert cache, derived from the loaded config
+// geometry. It is a read-only sizing value for the serve memory plan (#13300):
+// the buffers below were previously charged to no ledger, so the warmup's RSS
+// exceeded the declared plan and the kernel OOM-killed the process (#13288).
+//
+// The estimated buffers coexist at the layer's peak, so they are summed:
+//
+//   - woA  = attn.wo_a.weight f32 block: OLoraRank * NumHeads * HeadDim elems
+//   - woB  = attn.wo_b.weight f32 block: HiddenSize * (OLoraRank*OGroups) elems
+//   - exp1/exp3 = routed expert w1/w3 f32 blocks: MoEIntermediateSize * HiddenSize each
+//   - exp2 = routed expert w2 f32 block: HiddenSize * MoEIntermediateSize
+//   - mhc  = mhc.mixes.weight f32 block: v41MHCMixWidth * 4*HiddenSize elems
+//     (the published flattened four-stream form; the reduced fixture's
+//     24 x HiddenSize form is smaller, so charging the flattened width
+//     is conservative on both)
+//   - layerExperts = the #13296 layer cache, bounded by
+//     v41ExpertLayerCacheBudget(): the 810 MiB default when a checkpoint
+//     tier is attached, else 0 (cache off).
+//
+// A non-V4.1 model (no MoE intermediate size, no hidden size, or a
+// non-`deepseek41` family) returns 0, so every other serve is byte-for-byte
+// unchanged. All arithmetic is overflow-checked: any axis whose product or sum
+// would overflow int64 returns math.MaxInt64, so an unrepresentable estimate
+// can only refuse MORE, never wrap to a falsely-fitting small number.
+func (m *Model) V41TransientResidentBytes() int64 {
+	if m == nil {
+		return 0
+	}
+	return m.Cfg.V41TransientResidentBytes(m.v41LayerExpertCacheBudget())
+}
+
+// V41TransientResidentBytes returns the config-derived high-water bytes a V4.1
+// native forward holds simultaneously in its scratch and (optionally) its
+// layer-scoped routed-expert cache. cacheBudget is the layer cache bound in
+// bytes (0 = cache off; the #13296 default when a checkpoint tier is attached).
+//
+// It is exposed on Config, not only on *Model, so the serve memory plan can
+// charge the transient from the GGUF header BEFORE the model loads — the same
+// plan-vs-runtime disagreement (a charge the plan never saw) is the #13288
+// failure class. A non-V4.1 config, or one without a hidden/MoE-intermediate
+// geometry, returns 0 so every other serve is byte-for-byte unchanged. All
+// arithmetic saturates: an unrepresentable geometry returns math.MaxInt64, so
+// it can only refuse MORE, never wrap to a falsely-fitting number.
+func (c Config) V41TransientResidentBytes(cacheBudget int64) int64 {
+	H := c.HiddenSize
+	I := c.MoEIntermediateSize
+	if H <= 0 || I <= 0 {
+		// Not a V4.1-shaped (MoE, hidden-sized) config: no V4.1 forward runs,
+		// so there is no transient to charge. Fail open, byte-for-byte.
+		return 0
+	}
+	if !c.IsDeepSeekV41() {
+		return 0
+	}
+	const maxInt64 = int64(^uint64(0) >> 1)
+
+	// woA: OLoraRank * NumHeads * HeadDim elems.
+	woA := v41SatMul(maxInt64, int64(c.OLoraRank), int64(c.NumHeads), int64(c.HeadDim))
+	// woB: HiddenSize * (OLoraRank * OGroups) elems.
+	oDim := v41SatMul(maxInt64, int64(c.OLoraRank), int64(c.OGroups))
+	woB := v41SatMul(maxInt64, int64(H), oDim)
+	// exp1 + exp3: two routed-expert w1/w3 blocks of I*H elems each.
+	expW13 := v41SatMul(maxInt64, 2, int64(I), int64(H))
+	// exp2: one routed-expert w2 block of H*I elems.
+	expW2 := v41SatMul(maxInt64, int64(H), int64(I))
+	// mhc: v41MHCMixWidth * 4H elems (the published flattened four-stream
+	// projection; the reduced fixture's 24 x H form is smaller, so charging the
+	// flattened width is conservative on both).
+	mhc := v41SatMul(maxInt64, int64(v41MHCMixWidth), 4, int64(H))
+
+	elems := v41SatAdd(maxInt64, woA, woB, expW13, expW2, mhc)
+	total := v41SatMul(maxInt64, elems, 4) // f32 bytes
+	if cacheBudget > 0 {
+		total = v41SatAdd(maxInt64, total, cacheBudget)
+	}
+	return total
+}
+
+// v41SatMul returns the saturating product of its operands, clamping to bound
+// on any overflow so an unrepresentable geometry can only refuse MORE.
+func v41SatMul(bound int64, vals ...int64) int64 {
+	acc := int64(1)
+	for _, v := range vals {
+		if v == 0 {
+			return 0
+		}
+		if acc > 0 && v > 0 && acc > bound/v {
+			return bound
+		}
+		acc *= v
+	}
+	return acc
+}
+
+// v41SatAdd returns the saturating sum of its operands, clamping to bound on any
+// overflow. A negative operand is a geometry bug and clamps to bound as well.
+func v41SatAdd(bound int64, vals ...int64) int64 {
+	acc := int64(0)
+	for _, v := range vals {
+		if v < 0 || acc > bound-v {
+			return bound
+		}
+		acc += v
+	}
+	return acc
 }
 
 // v41LayerCacheGet returns a retained f32 block for name, or nil on a miss.

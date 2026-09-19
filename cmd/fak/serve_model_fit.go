@@ -963,6 +963,17 @@ func appendServeGGUFDevicePlan(ws *ggufload.WeightSource, be compute.Backend, pl
 	if err != nil {
 		return plan
 	}
+	// Charge the V4.1 native forward's transient scratch + layer-cache high-water
+	// ONCE (fak#13300). The forward reuses forward-scoped f32 buffers (wo_a/wo_b,
+	// the routed-expert triple, the mHC mix) plus the #13296 layer-scoped expert
+	// cache; before this row NONE of it appeared in the serve plan, so the
+	// warmup's RSS exceeded the declared plan and the kernel OOM-killed the
+	// process (#13288). The estimate is config-derived from the header, so the
+	// plan sees it before the model loads. It is charged into `plan` FIRST so the
+	// context auto-sizer sizes KV against the true simultaneous demand, not a
+	// weights-only view. Both arms (device and --cpu-offload-experts) reach the
+	// plan through this one function, so the charge cannot be skipped on one.
+	plan = appendServeV41TransientCharge(plan, cfg, serveV41TransientCacheBudget(ws))
 	// Delegate to the single context auto-sizer (#1049) so the serve boot path sizes its
 	// KV+scratch plan exactly as the in-kernel per-request planner does. #1046: pass the real
 	// (headroom-adjusted) memory ceiling so that when no native context override is set the sizer
@@ -1149,6 +1160,43 @@ func serveGGUFCPUOffloadPathMemoryPlan(ggufPath string, ranks, contextBudgetToke
 	return withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
 		return serveGGUFCPUOffloadMemoryPlan(ws, ranks, contextBudgetTokens, fit, q4kOpts...)
 	})
+}
+
+// appendServeV41TransientCharge adds the V4.1 native forward's transient
+// high-water to plan as ONE host-scoped scratchpad row (fak#13300), or returns
+// plan unchanged when the config is not V4.1-shaped (estimate 0). cacheBudget is
+// the layer-scoped expert cache bound the runtime will allocate (0 = cache off),
+// so the plan and the loader charge the same bytes. The row is host-scoped
+// because the forward's f32 scratch is anonymous host RAM on the APU tier. It is
+// pure, so the plan-level charge is unit-testable without a loaded model.
+func appendServeV41TransientCharge(plan compute.MemoryPlan, cfg fakmodel.Config, cacheBudget int64) compute.MemoryPlan {
+	tb := cfg.V41TransientResidentBytes(cacheBudget)
+	if tb <= 0 {
+		return plan
+	}
+	return append(plan, compute.MemoryDemand{
+		Class:  compute.MemoryScratchpad,
+		Bytes:  tb,
+		Detail: "v41-forward-transient-scratch",
+		Scope:  compute.MemoryScopeHost,
+		DType:  "f32",
+	})
+}
+
+// serveV41TransientCacheBudget reports the layer-scoped routed-expert f32 cache
+// bound the V4.1 forward will allocate at runtime, so the serve plan charges the
+// SAME number the runtime builds (fak#13300). The runtime bound is
+// model.(*Model).v41LayerExpertCacheBudget: the #13296 default when a checkpoint
+// tier is attached, else 0 (cache off). The tier attaches only for an artifact
+// whose routed-expert slabs the R5 checkpoint can stage one stride at a time --
+// the SAME serveStreamedExpertsCapable predicate the streamed load arm uses -- so
+// the plan and the loader agree on whether the cache exists. A non-V4.1 or
+// non-stream-capable artifact reports 0, leaving the plan byte-for-byte.
+func serveV41TransientCacheBudget(ws *ggufload.WeightSource) int64 {
+	if !serveStreamedExpertsCapable(ws) {
+		return 0
+	}
+	return fakmodel.V41ExpertLayerCacheDefaultBytes
 }
 
 // serveStreamedExpertsCapable reports whether this artifact's routed-expert slabs are servable one
