@@ -641,6 +641,172 @@ func jsonQuote(s string) string {
 	return string(b)
 }
 
+func TestDryRunRequiredComponentDisposition(t *testing.T) {
+	type disposition struct {
+		ComponentID string `json:"component_id"`
+		Disposition string `json:"disposition"`
+		Reason      string `json:"reason"`
+	}
+
+	dryRunConfig := func(t *testing.T, components string, cfg Config) []disposition {
+		t.Helper()
+		cfg.LockPath = writeContractLock(t, components, `[]`)
+		sup, err := NewSupervisor(cfg)
+		if err != nil {
+			t.Fatalf("NewSupervisor: %v", err)
+		}
+		plan, err := sup.DryRunTopology()
+		if err != nil {
+			t.Fatalf("DryRunTopology: %v", err)
+		}
+		raw, err := json.Marshal(plan)
+		if err != nil {
+			t.Fatalf("marshal topology: %v", err)
+		}
+		var report struct {
+			Dispositions []disposition `json:"dispositions"`
+		}
+		if err := json.Unmarshal(raw, &report); err != nil {
+			t.Fatalf("decode topology dispositions: %v", err)
+		}
+		return report.Dispositions
+	}
+	dryRun := func(t *testing.T, components string) []disposition {
+		t.Helper()
+		return dryRunConfig(t, components, Config{EngineDriver: contractStubEngine{}})
+	}
+
+	t.Run("reports selected components without inventing optional edges", func(t *testing.T) {
+		got := dryRun(t, `[
+          {"id":"weather-mcp","kind":"mcp","provider":"mcp","source":"weather-mcp"},
+          {"id":"selected-lsp","kind":"lsp","provider":"lsp","source":"selected"},
+          {"id":"custom","kind":"engine","provider":"custom","source":"in-process"}
+        ]`)
+		want := map[string]string{
+			"weather-mcp":  "supervised_child",
+			"selected-lsp": "unsupported",
+			"custom":       "consumed_in_process",
+		}
+		if len(got) != len(want) {
+			t.Fatalf("dispositions = %+v, want exactly the two locked components", got)
+		}
+		for _, item := range got {
+			if item.Disposition != want[item.ComponentID] {
+				t.Fatalf("disposition for %q = %q, want %q", item.ComponentID, item.Disposition, want[item.ComponentID])
+			}
+			if item.Reason == "" {
+				t.Fatalf("disposition for %q has no reason", item.ComponentID)
+			}
+			delete(want, item.ComponentID)
+		}
+		if len(want) != 0 {
+			t.Fatalf("missing locked component dispositions: %v", want)
+		}
+	})
+
+	t.Run("matching bound engine starts", func(t *testing.T) {
+		sup, err := NewSupervisor(Config{
+			LockPath: writeContractLock(t, `[
+              {"id":"custom","kind":"engine","provider":"custom","source":"in-process"}
+            ]`, `[]`),
+			Addr:         "127.0.0.1:0",
+			EngineDriver: contractStubEngine{},
+		})
+		if err != nil {
+			t.Fatalf("NewSupervisor: %v", err)
+		}
+		if err := sup.Start(context.Background()); err != nil {
+			t.Fatalf("Start rejected matching bound engine: %v", err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := sup.Shutdown(ctx); err != nil {
+			t.Fatalf("Shutdown: %v", err)
+		}
+	})
+
+	t.Run("named but unbound engine fails before startup", func(t *testing.T) {
+		components := `[{"id":"missing-engine","kind":"engine","provider":"native","source":"in-process"}]`
+		got := dryRunConfig(t, components, Config{Engine: "missing-engine"})
+		if len(got) != 1 || got[0].ComponentID != "missing-engine" || got[0].Disposition != "unsupported" || got[0].Reason == "" {
+			t.Fatalf("dry-run disposition = %+v, want unsupported unbound engine with reason", got)
+		}
+
+		sup, err := NewSupervisor(Config{
+			LockPath: writeContractLock(t, components, `[]`),
+			Addr:     "127.0.0.1:0",
+			Engine:   "missing-engine",
+		})
+		if err != nil {
+			t.Fatalf("NewSupervisor: %v", err)
+		}
+		err = sup.Start(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "missing-engine") {
+			t.Fatalf("Start error = %v, want refusal naming missing-engine", err)
+		}
+		if sup.Addr() != "" || sup.Broker() != nil || sup.Memory() != nil || sup.Engine() != nil {
+			t.Fatalf("startup side effect before refusal: addr=%q broker=%v memory=%v engine=%v", sup.Addr(), sup.Broker(), sup.Memory(), sup.Engine())
+		}
+	})
+
+	unsupported := []struct {
+		name, kind, componentID string
+	}{
+		{name: "lsp", kind: "lsp", componentID: "selected-lsp"},
+		{name: "tool", kind: "tool", componentID: "selected-tool"},
+		{name: "runtime", kind: "runtime", componentID: "selected-runtime"},
+		{name: "engine", kind: "engine", componentID: "selected-engine"},
+		{name: "typed_lsp_with_mcp_id", kind: "lsp", componentID: "mcp-language-client"},
+	}
+	for _, tc := range unsupported {
+		t.Run("unsupported_"+tc.name+"_fails_before_startup", func(t *testing.T) {
+			components := `[{"id":` + jsonQuote(tc.componentID) + `,"kind":` + jsonQuote(tc.kind) + `,"provider":` + jsonQuote(tc.kind) + `,"source":"selected"}]`
+			got := dryRun(t, components)
+			if len(got) != 1 || got[0].ComponentID != tc.componentID || got[0].Disposition != "unsupported" || got[0].Reason == "" {
+				t.Fatalf("dry-run disposition = %+v, want unsupported %q with reason", got, tc.componentID)
+			}
+			if tc.name == "typed_lsp_with_mcp_id" {
+				sup, err := NewSupervisor(Config{LockPath: writeContractLock(t, components, `[]`), EngineDriver: contractStubEngine{}})
+				if err != nil {
+					t.Fatalf("NewSupervisor for topology: %v", err)
+				}
+				plan, err := sup.DryRunTopology()
+				if err != nil {
+					t.Fatalf("DryRunTopology: %v", err)
+				}
+				for _, serverID := range plan.MCPServers {
+					if serverID == tc.componentID {
+						t.Fatalf("typed LSP %q leaked into MCPServers: %v", tc.componentID, plan.MCPServers)
+					}
+				}
+			}
+
+			sup, err := NewSupervisor(Config{
+				LockPath:     writeContractLock(t, components, `[]`),
+				Addr:         "127.0.0.1:0",
+				EngineDriver: contractStubEngine{},
+			})
+			if err != nil {
+				t.Fatalf("NewSupervisor: %v", err)
+			}
+			err = sup.Start(context.Background())
+			if err == nil || !strings.Contains(err.Error(), tc.componentID) {
+				t.Fatalf("Start error = %v, want refusal naming %q", err, tc.componentID)
+			}
+			if sup.running {
+				t.Fatal("supervisor remained running after admission refusal")
+			}
+			err = sup.Start(context.Background())
+			if err == nil || !strings.Contains(err.Error(), tc.componentID) || strings.Contains(err.Error(), "already running") {
+				t.Fatalf("second Start error = %v, want repeat refusal naming %q", err, tc.componentID)
+			}
+			if sup.running || sup.Addr() != "" || sup.Broker() != nil || sup.Memory() != nil || sup.Engine() != nil {
+				t.Fatalf("startup side effect before refusal: addr=%q broker=%v memory=%v engine=%v", sup.Addr(), sup.Broker(), sup.Memory(), sup.Engine())
+			}
+		})
+	}
+}
+
 func TestBundledRelativeMemorySurvivesShutdown(t *testing.T) {
 	dir := t.TempDir()
 

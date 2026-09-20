@@ -39,6 +39,14 @@ type MemoryEntry struct {
 	Data      json.RawMessage `json:"data,omitempty"`
 }
 
+// ComponentDisposition records how a selected locked component will be
+// activated, or why the current supervisor cannot activate it.
+type ComponentDisposition struct {
+	ComponentID string `json:"component_id"`
+	Disposition string `json:"disposition"`
+	Reason      string `json:"reason"`
+}
+
 // MemoryJournal manages the durable or in-memory recording of session activities.
 type MemoryJournal struct {
 	mu      sync.RWMutex
@@ -275,7 +283,21 @@ func (s *Supervisor) EvaluateHealth() HealthResponse {
 }
 
 func isMCPComponent(c lockv2.LockedComponent) bool {
-	if c.IsMCP() {
+	if c.IsLSP() {
+		return false
+	}
+	switch c.Kind {
+	case lockv2.ComponentKindMCP:
+		return true
+	case lockv2.ComponentKindLSP, lockv2.ComponentKindTool, lockv2.ComponentKindEngine, lockv2.ComponentKindRuntime:
+		return false
+	case "":
+		// Legacy locks predate the typed component vocabulary. Only these
+		// untyped rows may use metadata and naming heuristics.
+	default:
+		return false
+	}
+	if c.MCP != nil {
 		return true
 	}
 	lowerID := strings.ToLower(c.ID)
@@ -295,6 +317,59 @@ func isMCPComponent(c lockv2.LockedComponent) bool {
 		}
 	}
 	return false
+}
+
+func componentActivationDispositions(lock *lockv2.Lock, cfg Config) ([]ComponentDisposition, error) {
+	dispositions := make([]ComponentDisposition, 0, len(lock.Components))
+	unsupported := make([]string, 0)
+	boundEngine := strings.TrimSpace(cfg.ResolvedEngine())
+	engineAvailable := cfg.EngineDriver != nil || cfg.IsMock() || (cfg.Engine != "" && abi.Engine(cfg.Engine) != nil)
+
+	for _, component := range lock.Components {
+		componentID := strings.TrimSpace(component.ID)
+		if componentID == "" {
+			componentID = "<unnamed>"
+		}
+
+		disposition := ComponentDisposition{ComponentID: componentID}
+		switch {
+		case component.IsLSP():
+			disposition.Disposition = "unsupported"
+			disposition.Reason = "locked LSP component has no all-in-one activation path"
+		case component.Kind == lockv2.ComponentKindTool:
+			disposition.Disposition = "unsupported"
+			disposition.Reason = "locked tool component has no all-in-one activation path"
+		case component.Kind == lockv2.ComponentKindEngine || component.Kind == lockv2.ComponentKindRuntime:
+			if engineAvailable && strings.TrimSpace(component.ID) == boundEngine {
+				disposition.Disposition = "consumed_in_process"
+				disposition.Reason = fmt.Sprintf("locked %s component matches configured engine %q", component.Kind, boundEngine)
+			} else {
+				disposition.Disposition = "unsupported"
+				disposition.Reason = fmt.Sprintf("locked %s component has no available matching engine binding for %q", component.Kind, boundEngine)
+			}
+		case isMCPComponent(component):
+			if cfg.IsMock() {
+				disposition.Disposition = "consumed_in_process"
+				disposition.Reason = "explicit mock mode registers the MCP stand-in in the in-process broker"
+			} else {
+				disposition.Disposition = "supervised_child"
+				disposition.Reason = "MCP component is configured for broker-supervised child launch"
+			}
+		default:
+			disposition.Disposition = "unsupported"
+			disposition.Reason = fmt.Sprintf("locked component kind %q has no all-in-one activation path", component.Kind)
+		}
+
+		dispositions = append(dispositions, disposition)
+		if disposition.Disposition == "unsupported" {
+			unsupported = append(unsupported, fmt.Sprintf("%s: %s", componentID, disposition.Reason))
+		}
+	}
+
+	if len(unsupported) > 0 {
+		return dispositions, fmt.Errorf("allinone: unsupported locked components: %s", strings.Join(unsupported, "; "))
+	}
+	return dispositions, nil
 }
 
 func (s *Supervisor) validateLockOrBundle() (*lockv2.Lock, string, error) {
@@ -420,6 +495,7 @@ func (s *Supervisor) DryRunTopology() (*TopologySpec, error) {
 	if len(lock.Platforms) > 0 {
 		platform = lock.Platforms[0].String()
 	}
+	dispositions, _ := componentActivationDispositions(lock, s.cfg)
 
 	var mcpServers []string
 	for _, c := range lock.Components {
@@ -449,12 +525,13 @@ func (s *Supervisor) DryRunTopology() (*TopologySpec, error) {
 	}
 
 	return &TopologySpec{
-		LockID:      lockID,
-		Platform:    platform,
-		MCPServers:  mcpServers,
-		MemoryStore: memStore,
-		Engine:      eng,
-		Addr:        addr,
+		LockID:       lockID,
+		Platform:     platform,
+		MCPServers:   mcpServers,
+		MemoryStore:  memStore,
+		Engine:       eng,
+		Addr:         addr,
+		Dispositions: dispositions,
 	}, nil
 }
 
@@ -485,6 +562,13 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	// any child process.
 	if err := s.cfg.Validate(); err != nil {
 		s.health.SetStatus(SubsystemHTTP, false, err.Error())
+		return err
+	}
+	if _, err := componentActivationDispositions(lock, s.cfg); err != nil {
+		s.health.SetStatus(SubsystemHTTP, false, err.Error())
+		s.mu.Lock()
+		s.running = false
+		s.mu.Unlock()
 		return err
 	}
 

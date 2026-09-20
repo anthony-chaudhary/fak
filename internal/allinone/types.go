@@ -38,12 +38,13 @@ type HealthResponse struct {
 
 // TopologySpec describes the static deployment topology resolved from lock, bundle, or config.
 type TopologySpec struct {
-	LockID      string   `json:"lock_id"`
-	Platform    string   `json:"platform"`
-	MCPServers  []string `json:"mcp_servers"`
-	MemoryStore string   `json:"memory_store"`
-	Engine      string   `json:"engine"`
-	Addr        string   `json:"addr"`
+	LockID       string                 `json:"lock_id"`
+	Platform     string                 `json:"platform"`
+	MCPServers   []string               `json:"mcp_servers"`
+	MemoryStore  string                 `json:"memory_store"`
+	Engine       string                 `json:"engine"`
+	Addr         string                 `json:"addr"`
+	Dispositions []ComponentDisposition `json:"dispositions,omitempty"`
 }
 
 // ChildProcessInfo captures the runtime state and tracking metadata of a supervised child process.
