@@ -61,6 +61,13 @@ type InKernelPlanner struct {
 	// given a grade — leaves placement exactly as cpuOffloadExperts alone decided it. Resolved once
 	// by SetExpertSpill (inkernel_expert_spill.go), never per request.
 	expertSpill *model.ExpertSpillPlacement
+	// crossLayerGatePrefetch is the per-session next-layer gate-prefetch knob (#1297/#1401) this
+	// planner installs on every session it builds: while layer L computes, layer L+1's router gate is
+	// applied to L's hidden state and the predicted top-k is staged into the routed-expert ring as
+	// HINTS (never a demand). false — the default, zero value — is a no-op install that leaves every
+	// session byte-for-byte the model's own zero value. Set by SetCrossLayerGatePrefetch
+	// (inkernel_cross_layer_prefetch.go); inert without an expert ring.
+	crossLayerGatePrefetch bool
 	// contextTokens is the runtime ceiling; zero delegates to MaxPositionEmbeddings.
 	contextTokens int
 	maxNew        int
@@ -267,16 +274,12 @@ func (p *InKernelPlanner) Model() string { return p.modelID }
 func (p *InKernelPlanner) NativeDecodeTraceSupported() bool { return true }
 
 // nativePhaseTraceID returns the request trace id the planner binds a native-phase
-// observation to. It reads the gateway's request trace id from the typed context key the
-// served path stamps (WithRequestTraceID), falling back to the legacy plain-string
-// "trace_id" key the restore stash historically used. It is empty when the request carried
-// none — the observation then keys the empty bucket rather than fabricating an id (#13120).
+// observation to. It is the SAME "trace_id" context value the restore stash reads, and it
+// is empty when the request carried none — the observation then keys the empty bucket rather
+// than fabricating an id (#13120).
 func nativePhaseTraceID(ctx context.Context) string {
 	if ctx == nil {
 		return ""
-	}
-	if id := RequestTraceID(ctx); id != "" {
-		return id
 	}
 	if v := ctx.Value("trace_id"); v != nil {
 		if s, ok := v.(string); ok {
@@ -561,7 +564,12 @@ func (p *InKernelPlanner) ApplyPromptShrink(ctx context.Context, messages []Mess
 
 	var stash func(id, excerpt string, body []byte)
 	if p.restoreStash != nil {
-		traceID := nativePhaseTraceID(ctx)
+		traceID := ""
+		if traceVal := ctx.Value("trace_id"); traceVal != nil {
+			if s, ok := traceVal.(string); ok {
+				traceID = s
+			}
+		}
 		stash = func(id, excerpt string, body []byte) {
 			p.restoreStash(traceID, id, excerpt, body)
 		}

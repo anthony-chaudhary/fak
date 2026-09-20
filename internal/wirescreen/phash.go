@@ -189,6 +189,16 @@ func resetPhashStoreForTest() {
 	phmu.Unlock()
 }
 
+// ResetPhashStoreForTest clears the process-global remembered-frame store, so a caller
+// that asserts one-sided "a NEW frame must not dedup" semantics is independent of every
+// frame admitted earlier in the same process. The store is process-lifetime by design (a
+// re-send across a long session MUST dedup), which makes the reset the test-only escape
+// hatch a cross-package consumer (internal/ctxmmu's phash witness) needs to be
+// deterministic under `-count>1` and `-shuffle`. It is the exported peer of
+// resetPhashStoreForTest, which wirescreen's own tests call directly. It touches no
+// operator surface and no production path.
+func ResetPhashStoreForTest() { resetPhashStoreForTest() }
+
 // ---------------------------------------------------------------------------
 // Image extraction: handle the shapes a screenshot tool actually emits on the wire.
 // ---------------------------------------------------------------------------

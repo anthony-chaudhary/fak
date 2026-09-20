@@ -12,6 +12,28 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 )
 
+// isolateCAS gives one CAS-eviction test a clean, tightly-bounded PROCESS-GLOBAL
+// blob.Default, then restores the original bound on cleanup.
+//
+// Order matters. SetMaxBytes(n) evicts down to the new bound immediately, and a pinned blob
+// (Pin removes it from the LRU) is NOT evictable — so resetting only on cleanup, or shrinking
+// before resetting, leaves a prior test's abandoned pins resident and they crowd out THIS
+// test's freshly put blob, which is unpinned and therefore the instant eviction victim. The
+// result is a bogus "unknown digest" on a sibling test that never shared any state with this
+// one — the cross-test contamination witnessed under `-count=2`/`-shuffle` (private#1141
+// follow-up). Reset() clears blobs AND pins (store.go:253) from a clean slate, so it must run
+// BEFORE the shrink; cleanup resets again (dropping this test's pins) and restores the bound.
+func isolateCAS(t *testing.T) {
+	t.Helper()
+	old := blob.Default.MaxBytes()
+	blob.Default.Reset()
+	blob.Default.SetMaxBytes(8192) // tight enough that churn forces eviction
+	t.Cleanup(func() {
+		blob.Default.Reset()
+		blob.Default.SetMaxBytes(old)
+	})
+}
+
 // TestQuarantinePageInSurvivesCASEviction proves the held-quarantine CAS pin
 // end-to-end: a sealed result paged out to the BOUNDED global CAS still pages back
 // in (after a witness Clear) even after CAS churn that evicts unpinned blobs. The
@@ -19,9 +41,7 @@ import (
 // exists to protect.
 func TestQuarantinePageInSurvivesCASEviction(t *testing.T) {
 	ctx := context.Background()
-	old := blob.Default.MaxBytes()
-	blob.Default.SetMaxBytes(8192) // tight enough that churn forces eviction
-	defer blob.Default.SetMaxBytes(old)
+	isolateCAS(t)
 
 	m := ctxmmu.New()
 
@@ -64,9 +84,7 @@ func TestQuarantinePageInSurvivesCASEviction(t *testing.T) {
 
 func TestPagedResultSurvivesCASEviction(t *testing.T) {
 	ctx := context.Background()
-	old := blob.Default.MaxBytes()
-	blob.Default.SetMaxBytes(8192) // tight enough that churn forces eviction
-	defer blob.Default.SetMaxBytes(old)
+	isolateCAS(t)
 
 	m := ctxmmu.New()
 

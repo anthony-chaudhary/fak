@@ -343,7 +343,6 @@ concurrent = [
   # Declared so the arbiter detects same-tree collisions and a `(fak <leaf>)` stamp binds.
   # Deliberately NOT mirrored into [lanes].autopick (see the 2026-07-25 note).
   "generalizationdebt",
-  "debtlane",
   "gatewayusageledger", "ghexec", "ghspam", "glm52prefillsweep", "goalpark", "goalsync", "godsplitplan",
   "grafanapost", "growthgate", "guard", "guardaccuracy", "guardaudit", "guardcorpus",
   "guardrotate", "guardroute", "guardrsi", "guardsessions", "guardtrace", "guardvars",
@@ -1162,7 +1161,6 @@ frontierswe = ["internal/frontierswe/**"]
 fusedturn = ["internal/fusedturn/**"]
 gardenbundle = ["internal/gardenbundle/**"]
 generalizationdebt = ["internal/generalizationdebt/**"]
-debtlane = ["internal/debtlane/**"]
 gatewayusageledger = ["internal/gatewayusageledger/**"]
 ghexec = ["internal/ghexec/**"]
 ghspam = ["internal/ghspam/**"]
@@ -1210,7 +1208,6 @@ issuehygiene = ["internal/issuehygiene/**"]
 issuesmallness = ["internal/issuesmallness/**"]
 issuesolved = ["internal/issuesolved/**"]
 issuestriage = ["internal/issuestriage/**"]
-issueorchestrator = ["internal/issueorchestrator/**"]
 jsonlledger = ["internal/jsonlledger/**"]
 kimik3page = ["internal/kimik3page/**"]
 knobcensus = ["internal/knobcensus/**"]
@@ -2042,7 +2039,7 @@ category = "OPERATOR_GATE"
 refusal  = true
 summary  = "A commit introduced uninventoried stubs or mock substitutions instead of clear inventory gating concepts and real shift-left execution witnesses. Hermes' rule: mocks hide integration bugs."
 fix      = "Default to clear inventory gating concepts: register the concept in the disambiguation inventory (tools/concept_disambiguation_scorecard.data) or maturity ledger (internal/maturity/runtime-proofs.json), drive the real path with `fak validate --smoke` or `make smoke-exec`, and attach an `E2E-verified:` or `Shift-left-verified:` receipt. Floor: `internal/hooks/gate_inventory_admission.go` (advisory by default; FLEET_INVENTORY_GUARD=block enforces, ALLOW_UNINVENTORIED_STUB=1 skips once)."
-see_also = ["internal/hooks/gate_inventory_admission.go", "internal/hooks/gate_e2eovermocks.go", "docs/shift-left-task-organization.md", "internal/debtlane/detectors.go"]
+see_also = ["internal/hooks/gate_inventory_admission.go", "internal/hooks/gate_e2eovermocks.go", "docs/shift-left-task-organization.md"]
 
 # SHIFT_LEFT_UNPROVEN (#10819, #10820): refusal when code is claimed done without meaningful
 # shift-left execution in dogfood, integration, or sub-testing. Prohibits shallow mock-only

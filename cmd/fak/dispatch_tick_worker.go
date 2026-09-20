@@ -21,6 +21,19 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
+// Worker-worktree admission modes stamped into dispatch receipts. They live here
+// (not with the retired issue-orchestrator CLI) because the dispatch tick path is
+// their only remaining consumer.
+const (
+	worktreeModeManagedDefault       = "managed_default"
+	worktreeModeManagedExplicit      = "managed_explicit"
+	worktreeModeSharedExplicitOptOut = "shared_explicit_opt_out"
+)
+
+// prepareManagedWorkerWorktreeFunc is the seam dispatch_tick.go calls to
+// materialize a managed worker worktree; tests swap it for a stub.
+var prepareManagedWorkerWorktreeFunc = workerworktree.Prepare
+
 func dispatchWorkerEnv(backend, lane, root, runsDir string, account dispatchtick.Account, goal, goalProfile string) (map[string]string, error) {
 	env := envMap(os.Environ())
 	env["DISPATCH_WORKSPACE"] = root

@@ -221,6 +221,18 @@ func runOpsDaemon(stdout, stderr io.Writer, root string, cfg ops.Config, args []
 		return 2
 	}
 
+	if rest := fs.Args(); len(rest) > 0 {
+		switch rest[0] {
+		case "status":
+			return runOpsDaemonStatus(stdout, stderr, root, cfg, rest[1:])
+		case "stop":
+			return runOpsDaemonStop(stdout, stderr, root, cfg, rest[1:])
+		default:
+			fmt.Fprintf(stderr, "fak ops daemon: unknown subcommand %q (want status|stop)\n", rest[0])
+			return 2
+		}
+	}
+
 	engine, err := ops.NewEngine(root, cfg)
 	if err != nil {
 		fmt.Fprintf(stderr, "ops daemon: init engine: %v\n", err)
@@ -247,4 +259,36 @@ func runOpsDaemon(stdout, stderr io.Writer, root string, cfg ops.Config, args []
 			_ = engine.Tick(ctx, false)
 		}
 	}
+}
+
+func runOpsDaemonStatus(stdout, stderr io.Writer, root string, cfg ops.Config, args []string) int {
+	fs := flag.NewFlagSet("ops daemon status", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "emit JSON format")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if rest := fs.Args(); len(rest) > 0 {
+		fmt.Fprintf(stderr, "fak ops daemon status: unexpected argument %q\n", rest[0])
+		return 2
+	}
+
+	var jsonArgs []string
+	if *asJSON {
+		jsonArgs = []string{"--json"}
+	}
+	return runOpsStatus(stdout, stderr, root, cfg, jsonArgs)
+}
+
+func runOpsDaemonStop(stdout, stderr io.Writer, root string, cfg ops.Config, args []string) int {
+	fs := flag.NewFlagSet("ops daemon stop", flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if rest := fs.Args(); len(rest) > 0 {
+		fmt.Fprintf(stderr, "fak ops daemon stop: unexpected argument %q\n", rest[0])
+		return 2
+	}
+
+	fmt.Fprintln(stderr, "fak ops daemon stop: no owned daemon recorded (no tracked PID); refusing to stop an unowned process")
+	return 1
 }

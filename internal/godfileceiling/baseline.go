@@ -20,7 +20,6 @@ var Baseline = map[string]int{
 	"internal/compute/strix/mall_tiling.go":                        1552,
 	"internal/compute/vulkan.go":                                   2036,
 	"internal/computebuild/vulkan.go":                              1649,
-	"internal/debtlane/scan.go":                                    2197,
 	"internal/gateway/admission.go":                                1813,
 	"internal/gateway/debug.go":                                    1525,
 	"internal/gateway/http.go":                                     1564,

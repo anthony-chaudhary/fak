@@ -726,12 +726,6 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		// The unifying work-loss card (docs/notes/AGENTIC-DEV-ANTIPATTERNS-2026-07-02.md
 		// spine): folds REDUNDANT_REWORK + UNWIRED_PKG + ORPHAN_FUNC into one antipattern_debt.
 		cmdAntipatternScorecard(args)
-	case "debt-lanes":
-		cmdDebtLanes(args)
-	case "debt-orchestrator":
-		cmdDebtOrchestrator(args)
-	case "issue-orchestrator", "issue-queue", "issue-lanes":
-		cmdIssueOrchestrator(args)
 	case "issues-solved", "issues-recent", "issue-stats":
 		cmdIssuesSolved(args)
 	case "bench-effort":

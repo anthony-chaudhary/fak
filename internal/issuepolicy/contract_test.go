@@ -1017,6 +1017,63 @@ func TestContract_Dependencies(t *testing.T) {
 	}
 }
 
+func TestRepositoryQualifiedDependencies(t *testing.T) {
+	section := strings.Join([]string{
+		"- Start blocked by: owner/engine#77",
+		"- Start blocked by: owner/ops#77",
+		"- Start blocked by: https://github.com/owner/engine/issues/77",
+		"- Start blocked by: owner/engine#77 again",
+		"- Start blocked by: #77",
+		"- Coordinates with: owner/engine#77",
+		"- Promotion requires: owner/engine#77",
+		"- Start blocked by: not-a-repo/some/thing#9",
+	}, "\n")
+
+	deps := ParseIssueDependencies(section)
+
+	type wantDep struct {
+		relation string
+		issue    int
+		repo     string
+		blocking bool
+	}
+	want := []wantDep{
+		{RelStartBlockedBy, 77, "owner/engine", true},
+		{RelStartBlockedBy, 77, "owner/ops", true},
+		{RelStartBlockedBy, 77, "", true},
+		{RelCoordinatesWith, 77, "owner/engine", false},
+		{RelPromotionRequires, 77, "owner/engine", false},
+		{RelStartBlockedBy, 9, "", true},
+	}
+	if len(deps) != len(want) {
+		t.Fatalf("ParseIssueDependencies count = %d, want %d: %+v", len(deps), len(want), deps)
+	}
+	for i, w := range want {
+		got := deps[i]
+		if got.Relation != w.relation || got.Issue != w.issue || got.Repo != w.repo || got.Blocking != w.blocking {
+			t.Errorf("dep[%d] = %+v, want relation=%s issue=%d repo=%q blocking=%v", i, got, w.relation, w.issue, w.repo, w.blocking)
+		}
+	}
+
+	if got := deps[0].QualifiedID(); got != "owner/engine#77" {
+		t.Errorf("QualifiedID() = %q, want owner/engine#77", got)
+	}
+	if got := deps[2].QualifiedID(); got != "77" {
+		t.Errorf("unqualified QualifiedID() = %q, want 77", got)
+	}
+
+	cand := Candidate{Dependencies: deps}
+	cand.BlockedBy = CandidatePickupBlockedBy(deps)
+	wantBlocked := []string{"owner/engine#77", "owner/ops#77", "77", "9"}
+	if !reflect.DeepEqual(cand.BlockedBy, wantBlocked) {
+		t.Fatalf("BlockedBy = %v, want %v", cand.BlockedBy, wantBlocked)
+	}
+	wantIssues := []int{77, 77, 77, 9}
+	if !reflect.DeepEqual(cand.BlockedByIssues(), wantIssues) {
+		t.Fatalf("BlockedByIssues() = %v, want %v", cand.BlockedByIssues(), wantIssues)
+	}
+}
+
 func TestReviewIssueDraftLiveRejectsPlaceholderAgentContext(t *testing.T) {
 	body := strings.Join([]string{
 		"### Parent context",

@@ -139,6 +139,14 @@ func (s *Session) Close() {
 			s.halW = nil
 			s.borrowedHALW = nil
 		}
+		// Release the cross-layer gate-prediction ledger (#1297/#1401). It is session-owned, so it
+		// must be released for BOTH the shared-ring and private-ring cases and even a no-ring session;
+		// hence it sits outside the Backend branch. Clearing the pending map + stats drops the last
+		// references to the prediction state, so nothing about this session outlives its Close.
+		s.crossLayerMu.Lock()
+		s.crossLayerPending = nil
+		s.crossLayerStats = CrossLayerPrefetchStats{}
+		s.crossLayerMu.Unlock()
 		if s.modelWeightsHeld {
 			s.modelWeightsHeld = false
 			s.M.releaseWeightSession()
@@ -228,28 +236,6 @@ func (s *Session) useHALF16Weights() bool {
 // (Q5_K/Q6_K in m.kqw) directly onto a device backend that consumes quantized uploads (#9352).
 func (s *Session) useHALKQuantWeights() bool {
 	return s.M != nil && s.M.kqw != nil && s.Backend != nil && s.Backend.Caps().UploadDtype
-}
-
-// useHALKQuantWeight applies the exact native capability gate for dense Q6_K
-// weights. Backends whose device-weight dtype probe already promises a resident
-// Q6_K MatMul need no extra, backend-specific contract. When a backend exposes
-// the optional Q6_K execution probe, however, that probe is authoritative; this
-// keeps a Vulkan bundle with a missing optional shader on the dequantized path.
-// Other resident k-quant formats retain their established admission behavior.
-func (s *Session) useHALKQuantWeight(qt *kQuantTensor) bool {
-	if !s.useHALKQuantWeights() || qt == nil || !SupportsHALKQuant(qt.kind) {
-		return false
-	}
-	if qt.kind != kindQ6K {
-		return true
-	}
-	if !s.Backend.Caps().DeviceMemory || !compute.BackendSupportsDeviceWeightDtype(s.Backend, compute.Q6_K) {
-		return false
-	}
-	if native, ok := s.Backend.(compute.Qwen35MTPQ6KBackend); ok {
-		return native.SupportsQ6KMatMul()
-	}
-	return true
 }
 
 var halQ8BatchLayers = envIntMin("FAK_HAL_Q8_BATCH_LAYERS", 0, 2)
@@ -502,7 +488,7 @@ func (s *Session) matWeightHAL(name string) compute.Tensor {
 		}
 	}
 	if s.useHALKQuantWeights() {
-		if qt, ok := s.M.kqw[name]; ok && s.useHALKQuantWeight(qt) {
+		if qt, ok := s.M.kqw[name]; ok && qt != nil && SupportsHALKQuant(qt.kind) {
 			return s.weightHALKQuant(name, qt)
 		}
 	}
@@ -538,7 +524,7 @@ func (s *Session) lmHeadMatHAL() compute.Tensor {
 		if _, ok := s.M.kqw[name]; !ok {
 			name = "model.embed_tokens.weight"
 		}
-		if qt, ok := s.M.kqw[name]; ok && s.useHALKQuantWeight(qt) {
+		if qt, ok := s.M.kqw[name]; ok && qt != nil && SupportsHALKQuant(qt.kind) {
 			return s.weightHALKQuant(name, qt)
 		}
 	}

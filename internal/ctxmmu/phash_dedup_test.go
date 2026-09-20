@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
-	_ "github.com/anthony-chaudhary/fak/internal/blob" // CAS backend backing the dedup witness
+	"github.com/anthony-chaudhary/fak/internal/blob" // CAS backend backing the dedup witness
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/wirescreen" // PhashScreen: the phash dedup proposer seam
 )
@@ -38,6 +38,24 @@ var registerPhashOnce sync.Once
 // ctxmmu test's assertions.
 func ensurePhashScreen() {
 	registerPhashOnce.Do(func() { abi.RegisterSemanticScreen(wirescreen.PhashScreen()) })
+}
+
+// resetPhashStore resets the phash proposer's PROCESS-GLOBAL remembered-frame store so a
+// test's perception is independent of every frame admitted earlier in the same test binary.
+// The store (wirescreen phframes/phorder) is process-lifetime by design — a re-send across
+// sessions must dedup — but that means a test asserting "first sight must NOT dedup" is
+// only deterministic when the store starts empty. Without this reset the SECOND `-count`
+// iteration (and any test ordered after a phash test, under -shuffle) re-admits the identical
+// seed frames and observes a stale "unchanged, see frame#k" pointer: the cross-run
+// contamination witnessed by phash_dedup_test.go under `-count=2` (private#1141 follow-up).
+//
+// This injects the package-local reset (wirescreen.ResetPhashStoreForTest), the ctxmmu peer
+// of wirescreen's own tests calling resetPhashStoreForTest; abi.RegisterSemanticScreen has
+// no unregister, so the screen itself stays registered and this only clears its memory.
+func resetPhashStore() {
+	wirescreen.ResetPhashStoreForTest()
+	ctxmmu.ResetActiveMMUsForTest()
+	blob.Default.Reset()
 }
 
 // oversizedBase64Image renders a base64-encoded PNG screenshot body that exceeds
@@ -105,6 +123,8 @@ func stubDigest(t *testing.T, ctx context.Context, v abi.Verdict) string {
 // BYTE-EXACT — the dedup pointer is lossy display, the CAS bytes are the witness.
 func TestPhashDedupCollapseAndByteExactRestore(t *testing.T) {
 	ensurePhashScreen()
+	resetPhashStore()
+	t.Cleanup(resetPhashStore)
 	ctx := context.Background()
 	m := ctxmmu.New()
 	body := oversizedBase64Image(t, 1)
@@ -172,6 +192,8 @@ func TestPhashDedupCollapseAndByteExactRestore(t *testing.T) {
 // which is the default-inert guarantee for non-redundant frames.
 func TestPhashDedupNewAndDifferentFramesFallThrough(t *testing.T) {
 	ensurePhashScreen()
+	resetPhashStore()
+	t.Cleanup(resetPhashStore)
 	ctx := context.Background()
 	m := ctxmmu.New()
 
@@ -197,6 +219,8 @@ func TestPhashDedupNewAndDifferentFramesFallThrough(t *testing.T) {
 // byte-exact — a redundant frame is never lost across multiple collapses.
 func TestPhashDedupReSendNamesSamePriorFrame(t *testing.T) {
 	ensurePhashScreen()
+	resetPhashStore()
+	t.Cleanup(resetPhashStore)
 	ctx := context.Background()
 	m := ctxmmu.New()
 	body := oversizedBase64Image(t, 5)

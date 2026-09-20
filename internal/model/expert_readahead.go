@@ -3,7 +3,6 @@ package model
 import (
 	"fmt"
 	"sort"
-	"sync"
 )
 
 // expert_readahead.go Ã¢â‚¬â€ R3.5 of the activated-expert offload ladder (#5614 lineage, epic #5606):
@@ -26,51 +25,25 @@ import (
 //   - A HINT IS NOT A DEMAND. The predicted set is staged through the SAME rules as R3's
 //     activated-set prefetch: prefix that fits the budget, `prefetching=true` so no heat is earned
 //     under the R4 value-aware policy, and no fallback to permanent halW residency on a ring
-//     refusal. A mispredict therefore cannot change logits Ã¢â‚¬â€ it stages weights a later GEMM may or
+//     refusal. A mispredict therefore cannot change logits Ã¢â‚¬â€ it stages weights a later GEMM may or
 //     may not read, and an expert that is not resident when demanded takes the unchanged miss path.
 //     This is verified by construction (see prefetchNextLayerGateExperts).
-//   - DEFAULT OFF, BYTE-IDENTICAL. The whole feature hangs off one package-level gate,
-//     crossLayerGatePrefetchEnabled, whose zero value is false. Nothing in predictNextLayerExperts
-//     or prefetchNextLayerGateExperts runs until an operator calls the exported setter. The
-//     default forward is byte-for-byte the pre-rung path.
+//   - PER-SESSION AND DEFAULT OFF. The feature hangs off one Session field,
+//     Session.CrossLayerGatePrefetch, whose zero value is false. Nothing in predictNextLayerExperts
+//     or prefetchNextLayerGateExperts runs until a caller sets the field on ITS session. Enabling
+//     one session therefore leaves every other session on the same model byte-for-byte on the
+//     pre-rung path — the property a process-wide gate could not provide.
 //   - HINTS DO NOT FEED THE SAME-LAYER METER. r.prefetched is incremented (these really were
-//     staged ahead of a GEMM) but r.activatedExperts / r.activatedCovered are NOT Ã¢â‚¬â€ those count
+//     staged ahead of a GEMM) but r.activatedExperts / r.activatedCovered are NOT Ã¢â‚¬â€ those count
 //     the activated set of the layer being computed, and a cross-layer prediction is neither
 //     activated nor covered on this layer's account.
 //
-// Prototype status (documented limitation). The opt-in is a package-level bool rather than a
-// Session field, because the Session struct (kv.go) and the call sites (moe.go) are owned elsewhere
-// in this change. Likewise the precision/recall ledger is keyed by *Session in a package-level map,
-// not stored on the Session. Both are deliberately temporary: a later rung promotes the knob to a
-// Session field (ExpertPrefetch sibling) and the ledger to a Session field, and deletes the
-// package-level state. Until then this file is self-contained: no other file needs to change to
-// enable, measure or disable it, and no other file changes when it is off.
-
-// crossLayerGatePrefetchEnabled is the prototype opt-in gate. See the file header for why it is a
-// package-level variable instead of a Session field: the promotion to a per-session knob is the
-// next rung. Guarded by crossLayerGatePrefetchMu so a test toggling it concurrently with a forward
-// is race-clean.
-var (
-	crossLayerGatePrefetchMu      sync.Mutex
-	crossLayerGatePrefetchEnabled bool
-)
-
-// SetCrossLayerGatePrefetch turns next-layer gate prediction on or off process-wide. It is an
-// explicit operator/test opt-in: the default (never called) is OFF and the forward path is
-// byte-for-byte unchanged. This is a prototype knob; see the file header.
-func SetCrossLayerGatePrefetch(on bool) {
-	crossLayerGatePrefetchMu.Lock()
-	crossLayerGatePrefetchEnabled = on
-	crossLayerGatePrefetchMu.Unlock()
-}
-
-// crossLayerGatePrefetchOn reports the current opt-in under the same lock.
-func crossLayerGatePrefetchOn() bool {
-	crossLayerGatePrefetchMu.Lock()
-	on := crossLayerGatePrefetchEnabled
-	crossLayerGatePrefetchMu.Unlock()
-	return on
-}
+// Session-owned state (promoted from prototype). The opt-in is the Session field
+// CrossLayerGatePrefetch (kv.go), a sibling of ExpertPrefetch, and the precision/recall ledger
+// lives ON the Session (crossLayerStats + crossLayerPending, guarded by crossLayerMu) rather than
+// in a package-level map. There is no package-level state to leak: a session that never enables
+// the knob allocates no ledger, and Session.Close clears the ledger unconditionally, so nothing
+// outlives the session that owns it. The knobs stay inert without a ring, as before.
 
 // CrossLayerPrefetchStats is the precision/recall ledger for next-layer gate prediction. Every
 // counter is in EXPERT SLOTS, not experts: a layer predicts k experts and realizes k, so a layer
@@ -79,8 +52,8 @@ func crossLayerGatePrefetchOn() bool {
 // ratios and what lets a layer whose top-k is fully predicted and fully realized score 1.0.
 //
 // It is a GAUGE over the session's whole life, not a window: Reset it to start a measurement. The
-// ledger is keyed by *Session (see CrossLayerPrefetchStatsFor) rather than stored on the Session
-// because kv.go is owned elsewhere in this change.
+// ledger is stored ON the Session (crossLayerStats) and released at Close; CrossLayerPrefetchStatsFor
+// reads it under the session's own lock.
 type CrossLayerPrefetchStats struct {
 	Predicted int `json:"predicted"` // total predicted expert slots across layers
 	Actual    int `json:"actual"`    // total realized activated expert slots
@@ -107,30 +80,16 @@ func (s CrossLayerPrefetchStats) Recall() float64 {
 	return float64(s.Hits) / float64(s.Actual)
 }
 
-// crossLayerGateState is the package-level prototype ledger + pending-prediction store. One mutex
-// guards both maps; the critical sections are tiny (a few map ops) so a single lock is enough. The
-// maps are keyed by *Session, so Close cannot free the entry Ã¢â‚¬â€ the documented leak until the
-// promotion rung moves this onto the Session. Entries are created lazily and only for a session
-// that has actually predicted or recorded, so a default-off run allocates nothing.
-var crossLayerGateState = struct {
-	mu      sync.Mutex
-	stats   map[*Session]CrossLayerPrefetchStats
-	pending map[*Session]map[int]map[int]struct{}
-}{
-	stats:   map[*Session]CrossLayerPrefetchStats{},
-	pending: map[*Session]map[int]map[int]struct{}{},
-}
-
 // CrossLayerPrefetchStatsFor returns the next-layer gate-prediction ledger for s. A nil session, or
 // one that has never predicted, reports the zero ledger (Precision/Recall 0). Safe to call from
-// another goroutine.
+// another goroutine: the read is guarded by the session's own ledger lock.
 func CrossLayerPrefetchStatsFor(s *Session) CrossLayerPrefetchStats {
 	if s == nil {
 		return CrossLayerPrefetchStats{}
 	}
-	crossLayerGateState.mu.Lock()
-	defer crossLayerGateState.mu.Unlock()
-	return crossLayerGateState.stats[s]
+	s.crossLayerMu.Lock()
+	defer s.crossLayerMu.Unlock()
+	return s.crossLayerStats
 }
 
 // ResetCrossLayerPrefetchStats clears the ledger and any pending prediction for s, so a measurement
@@ -139,26 +98,27 @@ func ResetCrossLayerPrefetchStats(s *Session) {
 	if s == nil {
 		return
 	}
-	crossLayerGateState.mu.Lock()
-	delete(crossLayerGateState.stats, s)
-	delete(crossLayerGateState.pending, s)
-	crossLayerGateState.mu.Unlock()
+	s.crossLayerMu.Lock()
+	s.crossLayerStats = CrossLayerPrefetchStats{}
+	s.crossLayerPending = nil
+	s.crossLayerMu.Unlock()
 }
 
 // predictNextLayerExperts applies layer+1's router gate to `layer`'s hidden state (the cheap gate
 // path ONLY Ã¢â‚¬â€ mat.mul of the router weight, no expert GEMMs) and returns the predicted top-k picks.
 //
-// It returns nil when the cross-layer opt-in is off, the next layer has no router
-// (layer+1 >= NumLayers), the model is GPT-OSS (whose experts have no three-projection ring
-// staging), or mat is not a device-HAL-capable routed-expert kernel (routedExpertKQuantActive) Ã¢â‚¬â€
-// i.e. on every path where staging would upload bytes nothing reads.
+// It returns nil when the cross-layer opt-in is off for THIS session (s == nil or
+// !s.CrossLayerGatePrefetch), the next layer has no router (layer+1 >= NumLayers), the model is
+// GPT-OSS (whose experts have no three-projection ring staging), or mat is not a device-HAL-capable
+// routed-expert kernel (routedExpertKQuantActive) â€” i.e. on every path where staging would upload
+// bytes nothing reads.
 //
 // The picks carry their gate logit in weight: softmax is deliberately NOT applied, because the
 // predicted set is used only for staging and the weights are irrelevant. The tie-break matches
 // `route`'s torch.topk order (value desc, then lower expert index) so a prediction is a stable
 // function of the gate vector.
-func predictNextLayerExperts(m *Model, layer int, xn any, mat matKernel) []routePick {
-	if m == nil || !crossLayerGatePrefetchOn() {
+func predictNextLayerExperts(s *Session, m *Model, layer int, xn any, mat matKernel) []routePick {
+	if s == nil || !s.CrossLayerGatePrefetch || m == nil {
 		return nil
 	}
 	if layer+1 >= m.Cfg.NumLayers || m.Cfg.isGPTOSS() || !routedExpertKQuantActive(mat) {
@@ -197,12 +157,12 @@ func predictNextLayerExperts(m *Model, layer int, xn any, mat matKernel) []route
 // layer's real router runs.
 //
 // A mispredict cannot change logits by construction: nothing here writes a delta, mutates a pick,
-// or touches the demand path Ã¢â‚¬â€ an expert staged by a wrong guess is simply resident a little early,
+// or touches the demand path â€” an expert staged by a wrong guess is simply resident a little early,
 // and an expert not staged takes the unchanged miss path. The only shared state touched is the ring
-// (recency) and the package ledger (precision/recall). It is inert for a nil session, an empty
-// prediction, a session with no ring budget, a nil ring, or the default-off opt-in.
+// (recency) and the session ledger (precision/recall). It is inert for a nil session, a session that
+// did not opt in, an empty prediction, a session with no ring budget, or a nil ring.
 func (s *Session) prefetchNextLayerGateExperts(layer int, predicted []routePick) {
-	if s == nil || len(predicted) == 0 || s.ExpertRingBytes <= 0 || s.ExpertPrefetch == ExpertPrefetchOnDemand {
+	if s == nil || !s.CrossLayerGatePrefetch || len(predicted) == 0 || s.ExpertRingBytes <= 0 || s.ExpertPrefetch == ExpertPrefetchOnDemand {
 		return
 	}
 	target := layer + 1
@@ -287,19 +247,19 @@ func (s *Session) recordNextLayerActual(layer int, actual []routePick) {
 		actualSet[pk.expert] = struct{}{}
 	}
 
-	crossLayerGateState.mu.Lock()
-	defer crossLayerGateState.mu.Unlock()
-	byLayer := crossLayerGateState.pending[s]
+	s.crossLayerMu.Lock()
+	defer s.crossLayerMu.Unlock()
+	byLayer := s.crossLayerPending
 	predicted, ok := byLayer[layer]
 	if !ok {
 		return
 	}
 	delete(byLayer, layer)
 	if len(byLayer) == 0 {
-		delete(crossLayerGateState.pending, s)
+		s.crossLayerPending = nil
 	}
 
-	st := crossLayerGateState.stats[s]
+	st := s.crossLayerStats
 	st.Predicted += len(predicted)
 	st.Actual += len(actualSet)
 	for e := range predicted {
@@ -307,25 +267,26 @@ func (s *Session) recordNextLayerActual(layer int, actual []routePick) {
 			st.Hits++
 		}
 	}
-	crossLayerGateState.stats[s] = st
+	s.crossLayerStats = st
 }
 
 // recordCrossLayerPrediction stores a prediction for `target` layer as a set of experts, replacing
-// any earlier prediction for the same target (a layer entered twice Ã¢â‚¬â€ e.g. across tokens Ã¢â‚¬â€ keeps
-// only the most recent guess). Keyed by session in the package-level pending map.
+// any earlier prediction for the same target (a layer entered twice â€” e.g. across tokens â€” keeps
+// only the most recent guess). Stored on the session's own pending map, under its ledger lock.
 func recordCrossLayerPrediction(s *Session, target int, predicted []routePick) {
+	if s == nil {
+		return
+	}
 	set := make(map[int]struct{}, len(predicted))
 	for _, pk := range predicted {
 		set[pk.expert] = struct{}{}
 	}
-	crossLayerGateState.mu.Lock()
-	defer crossLayerGateState.mu.Unlock()
-	byLayer := crossLayerGateState.pending[s]
-	if byLayer == nil {
-		byLayer = map[int]map[int]struct{}{}
-		crossLayerGateState.pending[s] = byLayer
+	s.crossLayerMu.Lock()
+	defer s.crossLayerMu.Unlock()
+	if s.crossLayerPending == nil {
+		s.crossLayerPending = map[int]map[int]struct{}{}
 	}
-	byLayer[target] = set
+	s.crossLayerPending[target] = set
 }
 
 // expertSliceBounds returns the [start, end) byte range of expert e inside a fused expert
@@ -390,10 +351,12 @@ func (sf *safetensorsFile) willneedExpertSlice(base int64, e, expertCount int, s
 //     the predicted top-k as hints, so layer+1's page-ins are issued one whole layer early.
 //
 // It is the call-site wrapper the moe.go seams use, so the prediction never has to reach into a
-// matKernel private field twice. It is inert for a nil model, the default-off opt-in, or a kernel
-// with no session (residentKernel / splitKernel / f32Kernel — none of which reaches the ring).
+// matKernel private field twice. It derives the session from the mat kernel and consults THAT
+// session's own CrossLayerGatePrefetch, so it is inert for a nil model, a session that did not opt
+// in, or a kernel with no session (residentKernel / splitKernel / f32Kernel â€” none of which reaches
+// the ring). Keeping this wrapper's signature intact lets moe.go call it unchanged.
 func crossLayerGatePrefetch(m *Model, layer int, picks []routePick, xn any, mat matKernel) {
-	if m == nil || !crossLayerGatePrefetchOn() {
+	if m == nil {
 		return
 	}
 	var sess *Session
@@ -403,9 +366,9 @@ func crossLayerGatePrefetch(m *Model, layer int, picks []routePick, xn any, mat 
 	case backendKernel:
 		sess = mk.s
 	}
-	if sess == nil {
+	if sess == nil || !sess.CrossLayerGatePrefetch {
 		return
 	}
 	sess.recordNextLayerActual(layer, picks)
-	sess.prefetchNextLayerGateExperts(layer, predictNextLayerExperts(m, layer, xn, mat))
+	sess.prefetchNextLayerGateExperts(layer, predictNextLayerExperts(sess, m, layer, xn, mat))
 }

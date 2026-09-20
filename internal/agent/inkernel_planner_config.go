@@ -105,6 +105,11 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 	// cpuOffloadExperts alone made it. Resolved HERE, once, because sizing walks every resident
 	// tensor name and the device path builds a session per request.
 	p.setExpertSpillFromEnv()
+	// The per-session next-layer gate-prefetch knob (#1297/#1401) is OFF unless the operator asks:
+	// FAK_CROSS_LAYER_GATE_PREFETCH truthy sets the planner field every session install reads. Unset —
+	// every serve that has not opted in — nothing is set and every session keeps the model's own zero
+	// value, byte-for-byte the pre-rung forward. Read HERE, once, alongside the graded spill.
+	p.setCrossLayerGatePrefetchFromEnv()
 	// RadixAttention KV-prefix reuse is ON by default; FAK_INKERNEL_RADIX=off
 	// disables it (the A/B "tree OFF" arm). Device reuse is admitted only for
 	// architectures whose PrefixSnapshot owns every continuation byte: GLM's
