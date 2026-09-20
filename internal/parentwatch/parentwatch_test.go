@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/processalive"
 )
 
 // helperProcessEnv gates the re-exec'd test binary into a plain child process.
@@ -124,6 +126,71 @@ func TestWatchAlreadyDeadParent(t *testing.T) {
 	case <-ctx.Done():
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("ctx not canceled for already-dead parent")
+	}
+}
+
+// TestWatchReusedPIDCancels is the PID-reuse witness: the watched PID is live,
+// but the recorded creation time is stale (as if the original parent exited and
+// the number was recycled). Watch must cancel on the identity mismatch even
+// though the PID-only probe still reports the number alive. Where the platform
+// exposes no creation time (non-Windows), the guard cannot arm, so the test
+// asserts the documented PID-only fallback instead of a false positive.
+func TestWatchReusedPIDCancels(t *testing.T) {
+	c := startBlockingChild(t)
+	defer c.terminate(t)
+	pid := c.cmd.Process.Pid
+
+	live, ok := processalive.StartTime(pid)
+	if !ok {
+		// No creation time on this platform: the reuse guard is unavailable and
+		// Watch falls back to the PID-only probe. The live PID must NOT cancel.
+		ctx, stop := Watch(context.Background(), pid)
+		defer stop()
+		select {
+		case <-ctx.Done():
+			t.Fatal("ctx canceled for a live PID despite no StartTime guard")
+		case <-time.After(300 * time.Millisecond):
+		}
+		t.Skip("processalive.StartTime unavailable; reuse guard not armable")
+	}
+
+	stale := live.Add(-time.Hour)
+	ctx, stop := WatchIdent(context.Background(), pid, stale, true)
+	defer stop()
+
+	select {
+	case <-ctx.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatal("ctx not canceled for a reused PID (stale StartTime, live PID)")
+	}
+}
+
+// TestWatchMatchingStartTimeLive confirms the guard does not misfire when the
+// recorded creation time matches the live process.
+func TestWatchMatchingStartTimeLive(t *testing.T) {
+	c := startBlockingChild(t)
+	pid := c.cmd.Process.Pid
+
+	live, ok := processalive.StartTime(pid)
+	if !ok {
+		t.Skip("processalive.StartTime unavailable")
+	}
+
+	ctx, stop := WatchIdent(context.Background(), pid, live, true)
+	defer stop()
+
+	select {
+	case <-ctx.Done():
+		t.Fatal("ctx canceled while parent alive with matching StartTime")
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	c.terminate(t)
+
+	select {
+	case <-ctx.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatal("ctx not canceled after parent death with matching StartTime")
 	}
 }
 

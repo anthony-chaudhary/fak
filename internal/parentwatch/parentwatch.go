@@ -23,6 +23,18 @@ func ParentAlive(parentPID int) bool {
 // already dead, the returned ctx is already canceled. stop is idempotent and
 // safe to call after cancel.
 func Watch(parent context.Context, parentPID int) (context.Context, context.CancelFunc) {
+	startTime, ok := processalive.StartTime(parentPID)
+	return WatchIdent(parent, parentPID, startTime, ok)
+}
+
+// WatchIdent is Watch with the watched parent's creation time supplied by the
+// caller. The poll loop treats the parent as dead when the liveness probe fails
+// OR when startTime is known (ok) and the live creation time no longer matches:
+// a reused PID then reads as dead instead of keeping the child alive forever.
+// startTime/ok come from processalive.StartTime at Watch time; ok is false on
+// platforms where the creation time is unavailable (non-Windows), which falls
+// back to the PID-only probe.
+func WatchIdent(parent context.Context, parentPID int, startTime time.Time, ok bool) (context.Context, context.CancelFunc) {
 	if parentPID <= 1 {
 		return parent, func() {}
 	}
@@ -31,15 +43,38 @@ func Watch(parent context.Context, parentPID int) (context.Context, context.Canc
 	}
 
 	ctx, cancel := context.WithCancel(parent)
-	stop := watch(ctx, cancel, parentPID)
+	stop := watch(ctx, cancel, identity{pid: parentPID, start: startTime, startOK: ok})
 	return ctx, func() {
 		cancel()
 		stop()
 	}
 }
 
-func pollWatch(ctx context.Context, cancel context.CancelFunc, parentPID int) func() {
-	if !ParentAlive(parentPID) {
+// identity is the watched parent's PID paired with its creation time. startOK
+// reports whether start is a real probe result rather than the zero-value
+// fallback returned where the platform exposes no creation time.
+type identity struct {
+	pid     int
+	start   time.Time
+	startOK bool
+}
+
+// deadNow reports whether the watched parent is no longer the process that was
+// watched: the probe says it is gone, or the PID now names a different process
+// (same number, different creation time).
+func (id identity) deadNow() bool {
+	if !ParentAlive(id.pid) {
+		return true
+	}
+	if !id.startOK {
+		return false
+	}
+	start, ok := processalive.StartTime(id.pid)
+	return !ok || !start.Equal(id.start)
+}
+
+func pollWatch(ctx context.Context, cancel context.CancelFunc, id identity) func() {
+	if id.deadNow() {
 		cancel()
 		return func() {}
 	}
@@ -54,7 +89,7 @@ func pollWatch(ctx context.Context, cancel context.CancelFunc, parentPID int) fu
 			case <-done:
 				return
 			case <-ticker.C:
-				if !ParentAlive(parentPID) {
+				if id.deadNow() {
 					cancel()
 					return
 				}
