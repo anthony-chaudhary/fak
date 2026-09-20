@@ -2579,9 +2579,11 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	if prefillS > 0 {
 		prefTPS = float64(computed) / prefillS
 	}
-	if decodeS > 0 {
-		decTPS = float64(gen) / decodeS
-	}
+	// Decode throughput is reported over COMPLETED post-prefill intervals only.
+	// The first generated token is produced by the prefill block, so a one-token
+	// turn has no decode interval to report; the historical gen/decodeS form
+	// serialized that case as a near-arbitrary finite "success" rate (#13298).
+	decTPS, _ = nativeDecodeRate(gen, decodeS)
 	// #3176 Q1/Q2 decode witness: report the resolved Q8 SIMD kernel tier (+ whether the fused
 	// fast decode GEMV engaged) and the effective decode-worker count, so an operator can SEE —
 	// without wall-clock guessing — that the AVX2/AVX-512 lane fired (not the reference path) and
@@ -2861,6 +2863,21 @@ func (p *InKernelPlanner) ConcurrencyProfile() *ConcurrencyProfile {
 const inKernelRequestDeviceHeadroom = 0.15
 const inKernelRequestPressureTrimMarginRatio = 0.10
 const inKernelRequestPressureTrimMinMarginBytes = 64 << 20
+
+// nativeDecodeRate derives a sustained decode throughput from a generate call's
+// raw counters, or reports it unavailable. The first generated token is emitted
+// by the prefill block, so only the gen-1 completed post-prefill intervals are
+// decode work; a rate needs at least one such interval AND positive elapsed
+// decode time. When either is absent the rate is unavailable (ok=false) and the
+// caller must not serialize a finite success value — the defect #13298 where a
+// single warmup token with a near-zero window reported ~6957 tok/s. Raw counters
+// (gen, decodeS) are preserved untouched; only the derived rate is gated.
+func nativeDecodeRate(gen int, decodeS float64) (float64, bool) {
+	if gen < 2 || decodeS <= 0 {
+		return 0, false
+	}
+	return float64(gen-1) / decodeS, true
+}
 
 func (p *InKernelPlanner) logExecutionSummary(q8kern, q8fusedMark string, promptTok, cacheable, matched, computed int, prefillS, prefTPS float64, generated int, decodeS, decTPS float64) {
 	backend, forwardPath := p.executionIdentity()
