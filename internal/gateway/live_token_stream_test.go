@@ -22,8 +22,9 @@ import (
 // concatenation of those tokens — the exact shape a per-token in-kernel turn produces
 // with FAK_STREAM_INKERNEL_PER_TOKEN on.
 type liveTokenPlanner struct {
-	model  string
-	tokens []string
+	model          string
+	tokens         []string
+	perTokenStream *bool
 }
 
 func (p *liveTokenPlanner) Model() string { return p.model }
@@ -34,7 +35,12 @@ func (p *liveTokenPlanner) Complete(context.Context, []agent.Message, []agent.To
 
 func (p *liveTokenPlanner) StreamingSupported() bool { return true }
 
-func (p *liveTokenPlanner) CompleteStream(ctx context.Context, sink agent.StreamSink, _ []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+func (p *liveTokenPlanner) CompleteStream(ctx context.Context, sink agent.StreamSink, _ []agent.Message, _ []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	var params agent.SampleParams
+	for _, opt := range opts {
+		opt(&params)
+	}
+	p.perTokenStream = params.PerTokenStream
 	var full strings.Builder
 	for _, tok := range p.tokens {
 		select {
@@ -108,5 +114,8 @@ func TestLiveTokenStreamOneChunkPerToken(t *testing.T) {
 	}
 	if !sawDone {
 		t.Fatal("stream never terminated with [DONE]")
+	}
+	if planner.perTokenStream == nil || !*planner.perTokenStream {
+		t.Fatalf("streamed OpenAI chat per-token override = %v, want true", planner.perTokenStream)
 	}
 }
