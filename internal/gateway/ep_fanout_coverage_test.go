@@ -26,6 +26,9 @@ package gateway
 // therefore stands up a real follower rank, or it would assert nothing.
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -35,6 +38,34 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
+
+type nativeTokenizeProbePlanner struct {
+	encodeCalls   int
+	completeCalls int
+	messages      []agent.Message
+}
+
+func (p *nativeTokenizeProbePlanner) Model() string { return "test-model" }
+
+func (p *nativeTokenizeProbePlanner) Complete(context.Context, []agent.Message, []agent.ToolDef, ...agent.SampleOpt) (*agent.Completion, error) {
+	p.completeCalls++
+	return nil, errors.New("tokenize route must not enter decode")
+}
+
+func (p *nativeTokenizeProbePlanner) EncodePrompt(_ context.Context, messages []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (agent.PromptEncoding, error) {
+	p.encodeCalls++
+	p.messages = append([]agent.Message(nil), messages...)
+	return agent.PromptEncoding{
+		ModelID:              "test-model",
+		RendererID:           "test-renderer",
+		TokenizerID:          "test-tokenizer",
+		TokenIDs:             []int{17, 23, 42},
+		PromptTokens:         3,
+		ContextWindowTokens:  4096,
+		ReservedOutputTokens: 32,
+		RenderedSHA256:       strings.Repeat("a", 64),
+	}, nil
+}
 
 // epFanoutProbe drives ONE arm of ONE covered route end to end and says which follower
 // route that arm must mirror onto. Streaming and non-streaming are separate probes on
@@ -188,6 +219,7 @@ var epFanoutExemptRoutes = map[string]string{
 	"/v1/embeddings":            epExemptLocalCompute,
 	"/v1/moderations":           epExemptLocalCompute,
 	"/v1/messages/count_tokens": epExemptLocalCompute,
+	"/v1/fak/tokenize":          epExemptLocalCompute,
 
 	// The fak-native surface: syscall adjudication, admission, revocation, ledger reads,
 	// policy/route reloads, trace and session control, lease planes. All gateway state.
@@ -288,6 +320,57 @@ func TestEPFanoutCoverageClassifiesEveryServedRoute(t *testing.T) {
 			t.Errorf("epFanoutProbes drives %q, which routeTable() no longer serves — drop the stale probe", p.pattern)
 		}
 	}
+}
+
+// TestGatewayNativeTokenizeNoDecode is the route-level acceptance witness for the
+// preparation-only native tokenize surface. It proves the served gateway calls the exact
+// encoder capability, never enters Complete/decode, never echoes source, and is classified
+// as local compute rather than silently omitted from EP fanout coverage.
+func TestGatewayNativeTokenizeNoDecode(t *testing.T) {
+	planner := &nativeTokenizeProbePlanner{}
+	srv := newTestServer(t)
+	srv.planner = planner
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	const source = "package privatefixture; const credential = `must-not-echo`"
+	body := `{"model":"test-model","messages":[{"role":"user","content":` + nativeTokenizeJSONLiteral(source) + `}],"max_tokens":32}`
+	resp, err := http.Post(ts.URL+"/v1/fak/tokenize", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST native tokenize: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("native tokenize status = %d, want 200; body=%s", resp.StatusCode, raw)
+	}
+	var got agent.PromptEncoding
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode native tokenize response: %v; body=%s", err, raw)
+	}
+	if got.ModelID != "test-model" || got.TokenizerID != "test-tokenizer" || got.PromptTokens != 3 || len(got.TokenIDs) != 3 {
+		t.Fatalf("native tokenize encoding = %+v, want the planner's exact identity/counts", got)
+	}
+	if planner.encodeCalls != 1 || planner.completeCalls != 0 {
+		t.Fatalf("planner calls: EncodePrompt=%d Complete=%d, want 1/0", planner.encodeCalls, planner.completeCalls)
+	}
+	if len(planner.messages) != 1 || planner.messages[0].Content != source {
+		t.Fatalf("encoder messages = %+v, want exact source-bearing user message", planner.messages)
+	}
+	if strings.Contains(string(raw), source) || strings.Contains(string(raw), "must-not-echo") {
+		t.Fatalf("native tokenize response echoed source: %s", raw)
+	}
+	if reason := epFanoutExemptRoutes["/v1/fak/tokenize"]; reason != epExemptLocalCompute {
+		t.Fatalf("native tokenize EP classification = %q, want local-compute no-decode exemption", reason)
+	}
+}
+
+func nativeTokenizeJSONLiteral(value string) string {
+	raw, _ := json.Marshal(value)
+	return string(raw)
 }
 
 // TestEveryEPFanoutCoveredRouteReleasesFollowerRanks is the behavioral half, and the

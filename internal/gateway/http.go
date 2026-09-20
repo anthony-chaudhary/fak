@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -26,6 +27,14 @@ import (
 // unbounded read from an untrusted client). 4 MiB is far above any real
 // tool-args payload.
 const maxBody = 4 << 20
+
+// maxTokenizeBody bounds the stateless native prompt-preparation request. The
+// response contains token identities and counts, never the source transcript.
+const maxTokenizeBody = 1 << 20
+
+type nativePromptEncoder interface {
+	EncodePrompt(context.Context, []agent.Message, []agent.ToolDef, ...agent.SampleOpt) (agent.PromptEncoding, error)
+}
 
 // Native batch evidence headers (#13317). The resident in-kernel coordinator
 // already stamps agent.Completion.InKernelBatch with the authoritative cohort
@@ -74,6 +83,7 @@ func (s *Server) routeTable() []gatewayRoute {
 	return []gatewayRoute{
 		{"/v1/fak/features", s.handleFeatures},
 		{"/v1/fak/features/proof", s.handleFeatureProof},
+		{"/v1/fak/tokenize", s.handleFakTokenize},
 		{"/", s.handleHome},
 		// A2A Agent-to-Agent protocol surface (#1019).
 		{"/a2a/v1/messages", s.handleA2ASendMessage},
@@ -1505,6 +1515,69 @@ func (s *Server) decodeSyscall(w http.ResponseWriter, r *http.Request) (SyscallR
 	}
 	req.TraceID = s.useHTTPTrace(w, r, req.TraceID)
 	return req, true
+}
+
+// handleFakTokenize prepares the exact native prompt without entering decode,
+// admission, session mutation, or a fallback planner. Planners that do not
+// expose native prompt encoding fail closed.
+func (s *Server) handleFakTokenize(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	encoder, ok := s.planner.(nativePromptEncoder)
+	if !ok {
+		writeErr(w, http.StatusNotImplemented, "native prompt encoding unavailable")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxTokenizeBody)
+	decoder := json.NewDecoder(r.Body)
+	var req ChatRequest
+	if err := decoder.Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+		return
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = errors.New("multiple JSON values")
+		}
+		writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+		return
+	}
+
+	servedModel := strings.TrimSpace(s.model)
+	if requested := strings.TrimSpace(req.Model); requested != "" && requested != servedModel {
+		writeErrCode(w, http.StatusBadRequest, "model_mismatch", "requested model does not match the loaded native model")
+		return
+	}
+	encoding, err := encoder.EncodePrompt(r.Context(), req.Messages, req.Tools, nativeTokenizeSampleOpts(req)...)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "native prompt encoding failed")
+		return
+	}
+	if strings.TrimSpace(encoding.ModelID) != servedModel {
+		writeErr(w, http.StatusInternalServerError, "native prompt encoding model identity mismatch")
+		return
+	}
+	writeJSON(w, http.StatusOK, encoding)
+}
+
+func nativeTokenizeSampleOpts(req ChatRequest) []agent.SampleOpt {
+	return []agent.SampleOpt{
+		agent.WithModel(req.Model),
+		agent.WithMaxTokens(req.MaxTokens),
+		agent.WithTemperature(req.Temperature),
+		agent.WithTopP(req.TopP),
+		agent.WithStop(normalizeStop(req.Stop)),
+		agent.WithResponseFormat(req.ResponseFormat),
+		agent.WithToolChoice(req.ToolChoice),
+		agent.WithLogitBias(req.LogitBias),
+		agent.WithGuidedDecode(req.GuidedDecodeFields()),
+		agent.WithFrequencyPenalty(req.FrequencyPenalty),
+		agent.WithPresencePenalty(req.PresencePenalty),
+		agent.WithReasoningEffort(req.ReasoningEffort),
+	}
 }
 
 // decodeJSON reads a bounded body and decodes JSON. It does NOT reject unknown
