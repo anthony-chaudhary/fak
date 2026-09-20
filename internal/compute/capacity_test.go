@@ -521,3 +521,130 @@ type halfCeiling struct {
 }
 
 func (halfCeiling) DeviceLocalCeiling() (int64, bool) { return 24 << 30, true }
+
+func TestQwen35RuntimeExtraMemory(t *testing.T) {
+	// Exact-byte fixtures: hidden width 5120, planned 100k tokens, panel 256 tokens.
+	// Panel peak = 256 * 5120 * 4 = 5,242,880 bytes (device, scratchpad).
+	const hidden = 5120
+	const planned = 100000
+	const panel = 256
+	const panelBytes = int64(panel) * hidden * 4
+
+	base := Qwen35RuntimeExtraConfig{
+		HiddenWidth:   hidden,
+		PlannedTokens: planned,
+		PanelTokens:   panel,
+		Policy:        RuntimeExtraPolicyNone,
+	}
+
+	// 1. No panel excess over already-priced scratch, history off -> empty plan (base preserved).
+	noExcess := base
+	noExcess.AlreadyPricedHALTransientBytes = panelBytes
+	if plan, err := EstimateQwen35RuntimeExtraMemoryPlan(noExcess); err != nil || len(plan) != 0 {
+		t.Fatalf("no-excess/no-history = (%+v, %v), want empty plan, nil", plan, err)
+	}
+
+	// 2. Panel peak with zero already-priced scratch is the additive device demand.
+	plan, err := EstimateQwen35RuntimeExtraMemoryPlan(base)
+	if err != nil {
+		t.Fatalf("panel-only estimate errored: %v", err)
+	}
+	if len(plan) != 1 {
+		t.Fatalf("panel-only plan = %+v, want one device demand", plan)
+	}
+	if plan[0].Class != MemoryScratchpad || plan[0].Bytes != panelBytes ||
+		plan[0].Scope != MemoryScopeDevice || plan[0].Detail != "qwen35-vulkan-prefill-panel-additional" {
+		t.Fatalf("panel demand = %+v, want %d device scratchpad", plan[0], panelBytes)
+	}
+
+	// 3. Panel excess is max(0, peak - already-priced), never negative.
+	partial := base
+	partial.AlreadyPricedHALTransientBytes = panelBytes / 2
+	if p, err := EstimateQwen35RuntimeExtraMemoryPlan(partial); err != nil || len(p) != 1 || p[0].Bytes != panelBytes/2 {
+		t.Fatalf("partial-excess plan = (%+v, %v), want additional %d", p, err, panelBytes/2)
+	}
+
+	// 4. Retained history ON, 3 copies + 4096 checkpoint tokens, conservative slack.
+	// perRow = 5120*4 + 24 = 20504. rows = 3*100000 + 4096 = 304096.
+	// logical = 304096*20504 + 4096*8 = 6,235,184,384 + 32,768 = 6,235,217,152; slack*2.
+	hist := base
+	hist.RetainedHistory = true
+	hist.FullHistoryCopies = 3
+	hist.CheckpointTokens = 4096
+	hist.Policy = RuntimeExtraPolicyConservative
+	hist.AlreadyPricedHALTransientBytes = panelBytes
+	hp, err := EstimateQwen35RuntimeExtraMemoryPlan(hist)
+	if err != nil {
+		t.Fatalf("history estimate errored: %v", err)
+	}
+	var hostBytes, devBytes int64
+	for _, d := range hp {
+		switch d.Scope {
+		case MemoryScopeHost:
+			hostBytes += d.Bytes
+		case MemoryScopeDevice:
+			devBytes += d.Bytes
+		}
+	}
+	const wantHost = int64(2) * (int64(304096)*int64(20504) + int64(4096)*8)
+	if hostBytes != wantHost {
+		t.Fatalf("retained history host bytes = %d, want %d", hostBytes, wantHost)
+	}
+	if devBytes != 0 {
+		t.Fatalf("panel excess suppressed but got device bytes = %d, want 0", devBytes)
+	}
+
+	// 5. History disabled contributes zero even with copies set.
+	off := base
+	off.AlreadyPricedHALTransientBytes = panelBytes
+	off.RetainedHistory = false
+	off.FullHistoryCopies = 3
+	if p, err := EstimateQwen35RuntimeExtraMemoryPlan(off); err != nil || len(p) != 0 {
+		t.Fatalf("disabled history = (%+v, %v), want empty plan", p, err)
+	}
+
+	// 6. Exact-byte floor: policy none yields the unslacked logical bytes, never doubled.
+	exact := hist
+	exact.Policy = RuntimeExtraPolicyNone
+	ep, err := EstimateQwen35RuntimeExtraMemoryPlan(exact)
+	if err != nil {
+		t.Fatalf("exact-policy estimate errored: %v", err)
+	}
+	var exactHost int64
+	for _, d := range ep {
+		if d.Scope == MemoryScopeHost {
+			exactHost += d.Bytes
+		}
+	}
+	if want := int64(304096)*int64(20504) + int64(4096)*8; exactHost != want {
+		t.Fatalf("policy none host bytes = %d, want unslacked %d", exactHost, want)
+	}
+
+	// 7. Fail closed on missing/unknown inputs — never a silently cheap zero-byte plan.
+	for name, cfg := range map[string]Qwen35RuntimeExtraConfig{
+		"missing hidden":     {PlannedTokens: planned, PanelTokens: panel, Policy: RuntimeExtraPolicyNone},
+		"missing planned":    {HiddenWidth: hidden, PanelTokens: panel, Policy: RuntimeExtraPolicyNone},
+		"missing panel":      {HiddenWidth: hidden, PlannedTokens: planned, Policy: RuntimeExtraPolicyNone},
+		"unknown policy":     {HiddenWidth: hidden, PlannedTokens: planned, PanelTokens: panel, Policy: "cheap"},
+		"panel over planned": {HiddenWidth: hidden, PlannedTokens: panel, PanelTokens: planned, Policy: RuntimeExtraPolicyNone},
+		"history too few copies": {HiddenWidth: hidden, PlannedTokens: planned, PanelTokens: panel,
+			Policy: RuntimeExtraPolicyNone, RetainedHistory: true, FullHistoryCopies: 1},
+	} {
+		if _, err := EstimateQwen35RuntimeExtraMemoryPlan(cfg); err == nil {
+			t.Fatalf("%s: want typed capacity-unknown error, got nil", name)
+		} else if _, ok := err.(*RuntimeExtraCapacityUnknownError); !ok {
+			t.Fatalf("%s: error type = %T, want *RuntimeExtraCapacityUnknownError", name, err)
+		}
+	}
+
+	// 8. Overflow fails closed rather than saturating to a plausible number.
+	over := Qwen35RuntimeExtraConfig{
+		HiddenWidth:   1 << 62,
+		PlannedTokens: 1 << 40,
+		PanelTokens:   1 << 40,
+		Policy:        RuntimeExtraPolicyNone,
+	}
+	if _, err := EstimateQwen35RuntimeExtraMemoryPlan(over); err == nil {
+		t.Fatal("overflowing panel: want typed capacity-unknown error, got nil")
+	}
+}

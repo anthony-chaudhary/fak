@@ -329,6 +329,181 @@ func ExpertParallelPerRankPlan(replicatedWeightBytes, totalExpertWeightBytes int
 	return plan
 }
 
+// RuntimeExtraPolicy names the conservative backing slack applied to a
+// Qwen3.8 runtime-extras estimate. A policy must be explicit so an integration
+// site cannot silently pick a cheap one: an unknown/empty policy is a typed
+// capacity-unknown, never an implicit zero-slack plan.
+type RuntimeExtraPolicy string
+
+const (
+	// RuntimeExtraPolicyNone is the exact logical-byte count: no slice-growth or
+	// allocation-rounding slack. It is the declared floor for fixtures that pin
+	// exact byte math, not the production reservation default.
+	RuntimeExtraPolicyNone RuntimeExtraPolicy = "none"
+	// RuntimeExtraPolicyConservative is the production reservation default: it
+	// applies a named 2/1 slack (slice growth + allocation rounding) to the
+	// retained-history host payload.
+	RuntimeExtraPolicyConservative RuntimeExtraPolicy = "conservative"
+)
+
+// retainedHistoryRowMetadataBudget / retainedHistoryTokenMetadataBudget are the fixed
+// per-row and per-token host metadata terms the retained MTP hidden-history path
+// carries alongside the float32 rows (row slice headers plus per-token lineage).
+const (
+	retainedHistoryRowMetadataBudget   = 24
+	retainedHistoryTokenMetadataBudget = 8
+)
+
+// Qwen35RuntimeExtraConfig names the explicit inputs of a Qwen3.8 runtime-extras
+// reservation: the loaded geometry, the actual prompt/output bound, the Vulkan
+// prefill panel's simultaneous width, and the retained-MTP-history mode. Every
+// field is supplied by the caller from authoritative geometry — nothing is inferred
+// from a runtime side effect, and a caller that cannot bound a required input must
+// leave it zero so the estimator returns a typed capacity-unknown rather than a
+// silently cheap plan.
+type Qwen35RuntimeExtraConfig struct {
+	// HiddenWidth is the residual width whose f32 rows the retained history stores.
+	HiddenWidth int
+	// PlannedTokens is the actual P+O bound the caller will run at.
+	PlannedTokens int
+	// PanelTokens is the effective simultaneous width of the Vulkan prefill panel
+	// (the parked per-layer live set at peak). Zero means the caller has not bound
+	// it and no panel term may be produced.
+	PanelTokens int
+
+	// RetainedHistory enables the optional retained-MTP-target-history term.
+	RetainedHistory bool
+	// FullHistoryCopies is the count of coexisting full hidden histories: 3 when a
+	// full-prompt cache snapshot participates, 2 without it. Only read when
+	// RetainedHistory is true.
+	FullHistoryCopies int
+	// CheckpointTokens is the partial verification/rollback checkpoint row count;
+	// zero when absent. Only read when RetainedHistory is true.
+	CheckpointTokens int
+	// Policy names the backing slack. Empty/unknown => capacity-unknown.
+	Policy RuntimeExtraPolicy
+
+	// AlreadyPricedHALTransientBytes is the HAL transient/scratch already present in
+	// the caller's base plan for the SAME overlapping scope. It is only subtracted
+	// from the panel term (never from host history bytes), and only to the extent
+	// the panel peak exceeds it.
+	AlreadyPricedHALTransientBytes int64
+}
+
+// ErrRuntimeExtraCapacityUnknown is returned when a required bound or a named
+// backing-slack policy is missing. Taxonomy is closed: a missing bound is
+// capacity-unknown, not a zero-byte success.
+type RuntimeExtraCapacityUnknownError struct {
+	Missing string
+}
+
+func (e *RuntimeExtraCapacityUnknownError) Error() string {
+	return "runtime extras capacity unknown: " + e.Missing
+}
+
+// EstimateQwen35RuntimeExtraMemoryPlan prices the two Qwen3.8 runtime terms the
+// existing context plan omits: the simultaneous Vulkan prefill-panel peak (device
+// scope) and the optional retained-MTP target-hidden history (host scope).
+//
+// It is a PURE, overflow-safe reservation estimate beside the other capacity
+// functions. It deliberately does NOT recount KV, GDN/conv, resident weights or
+// generic token scratch already represented in the caller's plan: the panel term
+// is reduced by AlreadyPricedHALTransientBytes so integration cannot double count
+// overlapping decode/prefill scratch, and the retained-history term is host-scoped
+// so it never inflates a device demand.
+//
+// Invariants:
+//  1. The base plan is preserved: with no panel peak above the already-priced
+//     transient and retained history disabled, the returned plan is empty.
+//  2. The panel peak follows the simultaneous panel width, never the whole-prompt
+//     width.
+//  3. Disabled retained history contributes zero; enabled history includes
+//     coexisting copies, checkpoint rows, metadata and the named backing slack.
+//  4. Invalid/overflowing geometry and a missing required bound or policy return
+//     an explicit error — never a silently cheap zero-byte plan.
+//  5. Scope is preserved: panel is device, retained history is host; a calculator
+//     result alone grants no allocation or hardware readiness.
+func EstimateQwen35RuntimeExtraMemoryPlan(cfg Qwen35RuntimeExtraConfig) (MemoryPlan, error) {
+	if cfg.HiddenWidth <= 0 {
+		return nil, &RuntimeExtraCapacityUnknownError{Missing: "hidden width"}
+	}
+	if cfg.PlannedTokens <= 0 {
+		return nil, &RuntimeExtraCapacityUnknownError{Missing: "planned tokens (P+O)"}
+	}
+	switch cfg.Policy {
+	case RuntimeExtraPolicyNone, RuntimeExtraPolicyConservative:
+	default:
+		return nil, &RuntimeExtraCapacityUnknownError{Missing: "named backing-slack policy"}
+	}
+
+	var plan MemoryPlan
+
+	// Panel peak: only the simultaneous live set, and only the excess over scratch
+	// the caller already priced for the same scope.
+	if cfg.PanelTokens > 0 {
+		if cfg.PanelTokens > cfg.PlannedTokens {
+			return nil, &RuntimeExtraCapacityUnknownError{Missing: "panel width exceeds planned tokens"}
+		}
+		panelBytes := saturatingMulInt64(int64(cfg.PanelTokens), int64(cfg.HiddenWidth), 4)
+		if panelBytes == maxInt64Cap {
+			return nil, &RuntimeExtraCapacityUnknownError{Missing: "panel peak overflows int64"}
+		}
+		additional := panelBytes - cfg.AlreadyPricedHALTransientBytes
+		if additional > 0 {
+			plan = append(plan, MemoryDemand{
+				Class:  MemoryScratchpad,
+				Bytes:  additional,
+				Detail: "qwen35-vulkan-prefill-panel-additional",
+				Scope:  MemoryScopeDevice,
+				DType:  F32.String(),
+			})
+		}
+	} else {
+		return nil, &RuntimeExtraCapacityUnknownError{Missing: "prefill panel width"}
+	}
+
+	// Retained MTP target-hidden history (host scope).
+	if cfg.RetainedHistory {
+		if cfg.FullHistoryCopies < 2 {
+			return nil, &RuntimeExtraCapacityUnknownError{Missing: "full-history copy count (>=2)"}
+		}
+		if cfg.CheckpointTokens < 0 {
+			return nil, &RuntimeExtraCapacityUnknownError{Missing: "checkpoint token count"}
+		}
+		perRow := saturatingAddInt64(saturatingMulInt64(int64(cfg.HiddenWidth), 4), retainedHistoryRowMetadataBudget)
+		rows := saturatingAddInt64(
+			saturatingMulInt64(int64(cfg.FullHistoryCopies), int64(cfg.PlannedTokens)),
+			int64(cfg.CheckpointTokens),
+		)
+		logical := saturatingAddInt64(saturatingMulInt64(rows, perRow), int64(cfg.CheckpointTokens)*retainedHistoryTokenMetadataBudget)
+		if logical == maxInt64Cap {
+			return nil, &RuntimeExtraCapacityUnknownError{Missing: "retained history overflows int64"}
+		}
+		bytes := logical
+		if cfg.Policy == RuntimeExtraPolicyConservative {
+			bytes = saturatingMulInt64(logical, 2)
+			if bytes == maxInt64Cap {
+				return nil, &RuntimeExtraCapacityUnknownError{Missing: "retained history slack overflows int64"}
+			}
+		}
+		if bytes > 0 {
+			plan = append(plan, MemoryDemand{
+				Class:  MemoryActivation,
+				Bytes:  bytes,
+				Detail: "qwen35-mtp-retained-hidden-history",
+				Scope:  MemoryScopeHost,
+				DType:  F32.String(),
+			})
+		}
+	}
+
+	return plan, nil
+}
+
+// maxInt64Cap mirrors the saturating helpers' ceiling so callers can detect a
+// saturated (overflowing) estimate and refuse rather than trust it.
+const maxInt64Cap = int64(^uint64(0) >> 1)
+
 func saturatingAddInt64(vals ...int64) int64 {
 	const maxInt64 = int64(^uint64(0) >> 1)
 	var acc int64
