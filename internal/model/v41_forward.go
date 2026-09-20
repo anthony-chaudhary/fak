@@ -2114,30 +2114,46 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		return v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: attention qk_rope_head_dim must be a positive even value <= head_dim %d, got %d", ErrV41ForwardStage, hd, ropeDim))
 	}
+	// Batched query projections across the prefill panel: residentMatMulBatch
+	// reads each attn.wq_a / attn.wq_b weight row ONCE and reuses it across all
+	// seq prompt tokens, instead of the per-token GEMV loop re-streaming every
+	// weight seq times (#13301). The per-token q_norm and RoPE glue below stays
+	// scalar, so this is byte-for-byte the per-token v41ProjMatRows path (the
+	// adapter's contract); seq==1 (decode) stays entirely on that scalar path.
+	preFlat := make([]float32, seq*H)
 	for t := 0; t < seq; t++ {
-		c := preByPos[t]
-		qLat, err := m.v41ProjMatRows(l, "attn.wq_a.weight", c, cfg.QLoraRank, H)
-		if err != nil {
-			return err
-		}
-		// Reference: qr = self.q_norm(self.wq_a(x)) then q = self.wq_b(qr). The
-		// RMSNorm over the q-lora latent keeps its magnitude O(1) before the
-		// wq_b projection; omitting it lets ~1e18 activations reach the 512-term
-		// attention accumulation and overflow it to +Inf at HeadDim=512 (#13290).
-		// Artifact-only: the reduced fixture carries no q_norm leaf and its
-		// pre-#13009 arithmetic is unchanged.
+		copy(preFlat[t*H:(t+1)*H], preByPos[t])
+	}
+	qLatPanel, err := m.v41ProjPanel(l, "attn.wq_a.weight", preFlat, cfg.QLoraRank, H, seq)
+	if err != nil {
+		return err
+	}
+	for t := 0; t < seq; t++ {
+		qLat := qLatPanel[t*cfg.QLoraRank : (t+1)*cfg.QLoraRank]
 		if full {
 			qNorm := m.tensor(layerName(l, "attn.wq_a_norm.weight"))
 			if len(qNorm) != cfg.QLoraRank {
 				return v41StageErr(v41StageAttention, l,
 					fmt.Errorf("%w: q-lora norm has %d values, want %d", ErrV41ForwardStage, len(qNorm), cfg.QLoraRank))
 			}
-			qLat = rmsnormCfg(qLat, qNorm, eps, cfg)
+			// Reference: qr = self.q_norm(self.wq_a(x)). The RMSNorm over the
+			// q-lora latent keeps its magnitude O(1) before the wq_b projection;
+			// omitting it lets ~1e18 activations reach the 512-term attention
+			// accumulation and overflow it to +Inf at HeadDim=512 (#13290).
+			// Artifact-only: the reduced fixture carries no q_norm leaf and its
+			// pre-#13009 arithmetic is unchanged. Written back into the panel row
+			// so the batched wq_b panel reads the normed latents.
+			copy(qLat, rmsnormCfg(qLat, qNorm, eps, cfg))
 		}
-		q, err := m.v41ProjMatRows(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank)
-		if err != nil {
-			return err
-		}
+	}
+	qPanel, err := m.v41ProjPanel(l, "attn.wq_b.weight", qLatPanel, nH*hd, cfg.QLoraRank, seq)
+	if err != nil {
+		return err
+	}
+	for t := 0; t < seq; t++ {
+		c := preByPos[t]
+		q := qPanel[t*nH*hd : (t+1)*nH*hd]
+		qLat := qLatPanel[t*cfg.QLoraRank : (t+1)*cfg.QLoraRank]
 		// KV latent seam. The full path admits and projects attn.wkv at the
 		// published latent rank (v41KVLoraRank = 512); the attention contraction
 		// below consumes a per-position row of width hd (head_dim), so the full
