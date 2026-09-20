@@ -99,7 +99,7 @@ if [ -n "$companion" ]; then
     fi
 
     echo "Running 5-Gate boundary verification..."
-    if ! go -C "$companion" run ./cmd/fak-boundary check --staged --fak-dir "$REPO_ROOT" --private-dir "$companion"; then
+    if ! go -C "$companion" run ./cmd/fak-boundary check --staged --staged-repo fak --fak-dir "$REPO_ROOT" --private-dir "$companion"; then
         echo "" >&2
         echo "❌ COMMIT BLOCKED: 5-Gate boundary encapsulation or placement violation detected!" >&2
         echo "   Please review diagnostics above and see BOUNDARY.md for remediation." >&2

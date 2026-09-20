@@ -115,7 +115,7 @@ if ($companion) {
     }
 
     Write-Host "Running 5-Gate boundary verification..."
-    & go -C "$companion" run ./cmd/fak-boundary check --staged --fak-dir "$repoRoot" --private-dir "$companion"
+    & go -C "$companion" run ./cmd/fak-boundary check --staged --staged-repo fak --fak-dir "$repoRoot" --private-dir "$companion"
     if ($LASTEXITCODE -ne 0) {
         Write-Host ""
         [Console]::Error.WriteLine("❌ COMMIT BLOCKED: 5-Gate boundary encapsulation or placement violation detected!")
