@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bytes"
 	"encoding/binary"
 	"testing"
 
@@ -335,6 +336,351 @@ func TestExpertSwiGLUDeviceDownStaysHostWithoutDeviceKernel(t *testing.T) {
 		}
 		routedExpertParity(t, "vulkan-q6k-down device", got, want)
 	})
+}
+
+// q2kFixtureTensor builds a resident or checkpoint-backed Q2_K projection with a
+// pinned positive f16 scale (d=1.0, min=0), so the seam's device path dequantizes to
+// finite values and the host oracle is comparable. 84-byte super-block; d at byte 80.
+func q2kFixtureTensor(out, in int, seed uint64) *kQuantTensor {
+	nblk := in / qkK
+	raw := make([]byte, out*nblk*q2kBlockBytes)
+	lcgBytes(raw, seed)
+	pinResidentQuantScales(raw, out, nblk, kindQ2K)
+	return &kQuantTensor{out: out, in: in, nblk: nblk, kind: kindQ2K, raw: raw}
+}
+
+// TestExpertSwiGLUDeviceQ2KGateUpResident is the fak#13357 resident witness: a routed
+// expert whose gate/up are resident Q2_K (the DeepSeek-V4.1 Flash expert slate, packed in
+// m.kqw) on a DeviceMemory backend must run gate MatMul + up MatMul + SwiGLU on the device
+// through the incremental seam — before this leaf only resident Q4_K was admitted. The
+// Q3_K down projection is unsupported on the backend, so it cleanly declines to the host
+// down projection: the exact gate/up-only contract the issue names.
+func TestExpertSwiGLUDeviceQ2KGateUpResident(t *testing.T) {
+	setQ4KSDOTForTest(false)
+	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+
+	for _, tc := range []struct {
+		name  string
+		downK kQuantKind
+	}{
+		{name: "q2k-down-declines", downK: kindQ3K},
+		{name: "q2k-down-device", downK: kindQ6K},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const H, I = 256, 256
+			cfg := expertHALTestConfig(H)
+			cfg.IntermediateSize = I
+			cfg.MoEIntermediateSize = I
+			m := NewSyntheticMoE(cfg)
+			names := [3]string{
+				expertName(0, 0, "gate_proj.weight"),
+				expertName(0, 0, "up_proj.weight"),
+				expertName(0, 0, "down_proj.weight"),
+			}
+			// Resident Q2_K gate/up; a down projection of a kind the backend may or may
+			// not serve (Q3_K never; Q6_K does).
+			m.q4kw = map[string]*q4kTensor{}
+			m.kqw = map[string]*kQuantTensor{
+				names[0]: q2kFixtureTensor(I, H, 0x13357),
+				names[1]: q2kFixtureTensor(I, H, 0x13358),
+			}
+			if tc.downK == kindQ3K {
+				m.kqw[names[2]] = q3kFixtureTensor(H, I)
+			} else {
+				m.kqw[names[2]] = deviceDownKQuant(t, kindQ6K, H, I, 403)
+			}
+			for _, name := range names {
+				delete(m.manifest, name)
+			}
+			x := make([]float32, H)
+			for i := range x {
+				x[i] = float32((i%19)-9) / 64
+			}
+			want := expertSwiGLU(m, 0, 0, x, residentKernel{m})
+
+			rec := &expertHALRecordingBackend{Backend: compute.Default(), uploads: map[compute.Dtype]int{}}
+			be := &vulkanLikeSeamBackend{expertHALRecordingBackend: rec}
+			s := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
+
+			var got []float32
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						t.Fatalf("Q2_K gate/up %s PANICKED instead of running or declining: %v", tc.name, r)
+					}
+				}()
+				got = expertSwiGLU(m, 0, 0, x, sessionQ4KKernel{s: s})
+			}()
+
+			// gate + up ran on the device; the down projection only when its kind has a
+			// backend kernel (Q6_K), never for Q3_K.
+			wantMatmuls := 2
+			if tc.downK == kindQ6K {
+				wantMatmuls = 3
+			}
+			if be.matmuls != wantMatmuls || be.swiglu != 1 {
+				t.Fatalf("seam ops matmul=%d swiglu=%d, want %d/1 (Q2_K gate/up on device)", be.matmuls, be.swiglu, wantMatmuls)
+			}
+			// The Q2_K gate/up staged verbatim on the backend under the shared ring key.
+			if be.uploads[compute.Q2_K] < 2 {
+				t.Fatalf("Q2_K uploads=%d, want one per gate/up projection", be.uploads[compute.Q2_K])
+			}
+			if _, ok := s.halW["kquant-raw:"+names[0]]; !ok {
+				t.Fatalf("Q2_K gate_proj not staged verbatim; halW holds %d entries", len(s.halW))
+			}
+			if _, ok := s.halW["kquant-raw:"+names[1]]; !ok {
+				t.Fatalf("Q2_K up_proj not staged verbatim; halW holds %d entries", len(s.halW))
+			}
+			if tc.downK == kindQ3K {
+				if _, ok := s.halW["kquant-raw:"+names[2]]; ok {
+					t.Fatal("Q3_K down with no device kernel was staged on the backend")
+				}
+			}
+			routedExpertParity(t, "incremental device Q2_K gate/up "+tc.name, got, want)
+		})
+	}
+}
+
+// TestExpertSwiGLUDeviceQ2KGateUpCheckpointBacked is the fak#13357 checkpoint-backed
+// witness: gate/up live ONLY in the R5/#5616 checkpoint tier as Q2_K and must resolve,
+// stage through the same bounded path as a resident weight, and run gate MatMul + up
+// MatMul + SwiGLU on the device. The Q3_K down stays the caller's host responsibility.
+func TestExpertSwiGLUDeviceQ2KGateUpCheckpointBacked(t *testing.T) {
+	setQ4KSDOTForTest(false)
+	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+
+	const H, I = 256, 256
+	cfg := expertHALTestConfig(H)
+	cfg.IntermediateSize = I
+	cfg.MoEIntermediateSize = I
+	m := NewSyntheticMoE(cfg)
+	names := [3]string{
+		expertName(0, 0, "gate_proj.weight"),
+		expertName(0, 0, "up_proj.weight"),
+		expertName(0, 0, "down_proj.weight"),
+	}
+	// The tier indexes gate/up as Q2_K fused slabs under the default (non-deepseek41)
+	// spelling expertName produces. Each slab carries one expert stride.
+	tier := NewExpertCheckpointTier(0)
+	for i, proj := range []string{"gate_proj", "up_proj"} {
+		qt := q2kFixtureTensor(I, H, uint64(0x2000+i))
+		if err := tier.AddShard(bytes.NewReader(qt.raw), int64(len(qt.raw)), []FusedExpertTensor{{
+			Name: "blk.0.ffn_" + proj + "_exps.weight", Layer: 0, Proj: proj,
+			Quant: ExpertCheckpointQ2K, Offset: 0, Experts: 1, Rows: I, Cols: H,
+		}}); err != nil {
+			t.Fatalf("AddShard over the Q2_K %s slab: %v", proj, err)
+		}
+	}
+	m.expertCheckpoint = tier
+	// gate/up are reachable ONLY through the tier; the Q3_K down stays resident so the
+	// host down projection still produces a signal.
+	m.q4kw = map[string]*q4kTensor{}
+	m.kqw = map[string]*kQuantTensor{names[2]: q3kFixtureTensor(H, I)}
+	for _, name := range names {
+		delete(m.manifest, name)
+	}
+	if _, ok := m.residentF32Mat(names[0]); ok {
+		t.Fatalf("fixture still resolves %s resident; the tier read is not exercised", names[0])
+	}
+	if !m.expertCheckpoint.Has(names[0]) || !m.expertCheckpoint.Has(names[1]) {
+		t.Fatal("fixture tier does not index Q2_K gate/up; the read cannot resolve")
+	}
+
+	x := make([]float32, H)
+	for i := range x {
+		x[i] = float32((i%19)-9) / 64
+	}
+	// Host oracle built DIRECTLY from the same bytes the device path consumes: the
+	// residentKernel cannot read a tier-only weight, so compose the identical host
+	// arithmetic (Q2_K gate/up GEMV, SwiGLU, then the Q3_K host down GEMV the seam's
+	// declined down projection falls back to).
+	gateQ2 := q2kFixtureTensor(I, H, 0x2000)
+	upQ2 := q2kFixtureTensor(I, H, 0x2001)
+	downHost := q3kFixtureTensor(H, I)
+	want := make([]float32, H)
+	{
+		g := make([]float32, I)
+		u := make([]float32, I)
+		kQuantMatRowsRange(gateQ2, x, g, 0, I)
+		kQuantMatRowsRange(upQ2, x, u, 0, I)
+		fused := make([]float32, I)
+		for i := 0; i < I; i++ {
+			fused[i] = act(g[i], m.Cfg) * u[i]
+		}
+		kQuantMatRowsRange(downHost, fused, want, 0, H)
+	}
+
+	rec := &expertHALRecordingBackend{Backend: compute.Default(), uploads: map[compute.Dtype]int{}}
+	be := &vulkanLikeSeamBackend{expertHALRecordingBackend: rec}
+	s := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
+
+	got := expertSwiGLU(m, 0, 0, x, sessionQ4KKernel{s: s})
+
+	// gate + up ran on the device through the checkpoint tier; Q3_K down declined to host.
+	if be.matmuls != 2 || be.swiglu != 1 {
+		t.Fatalf("seam ops matmul=%d swiglu=%d, want 2/1 (checkpoint Q2_K gate/up on device)", be.matmuls, be.swiglu)
+	}
+	if be.uploads[compute.Q2_K] < 2 {
+		t.Fatalf("checkpoint Q2_K uploads=%d, want one per gate/up projection", be.uploads[compute.Q2_K])
+	}
+	if _, ok := s.halW["kquant-raw:"+names[0]]; !ok {
+		t.Fatalf("checkpoint Q2_K gate_proj not staged; halW holds %d entries", len(s.halW))
+	}
+	if _, ok := s.halW["kquant-raw:"+names[1]]; !ok {
+		t.Fatalf("checkpoint Q2_K up_proj not staged; halW holds %d entries", len(s.halW))
+	}
+	routedExpertParity(t, "checkpoint-backed device Q2_K gate/up", got, want)
+
+	// A warm token reuses every staged weight: only the activation re-uploads.
+	q2Uploads := be.uploads[compute.Q2_K]
+	expertSwiGLU(m, 0, 0, x, sessionQ4KKernel{s: s})
+	if be.matmuls != 4 || be.swiglu != 2 {
+		t.Fatalf("warm-token device ops matmul=%d swiglu=%d, want 4/2", be.matmuls, be.swiglu)
+	}
+	if be.uploads[compute.Q2_K] != q2Uploads {
+		t.Fatalf("warm token re-uploaded the checkpoint Q2_K weights: %d -> %d", q2Uploads, be.uploads[compute.Q2_K])
+	}
+}
+
+// TestExpertSwiGLUDeviceQ2KGateUpDeclinesCleanly pins the fak#13357 fail-closed admission
+// negatives: a Q3_K gate/up (no HAL descriptor), a backend with no Q2_K MatMul case, a
+// GELU expert, and a biased projection all decline to the host path — never a panic and
+// never a device MatMul on a dtype the backend cannot serve.
+func TestExpertSwiGLUDeviceQ2KGateUpDeclinesCleanly(t *testing.T) {
+	setQ4KSDOTForTest(false)
+	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+
+	const H, I = 256, 256
+	buildModel := func() (*Model, [3]string) {
+		cfg := expertHALTestConfig(H)
+		cfg.IntermediateSize = I
+		cfg.MoEIntermediateSize = I
+		m := NewSyntheticMoE(cfg)
+		names := [3]string{
+			expertName(0, 0, "gate_proj.weight"),
+			expertName(0, 0, "up_proj.weight"),
+			expertName(0, 0, "down_proj.weight"),
+		}
+		m.q4kw = map[string]*q4kTensor{}
+		m.kqw = map[string]*kQuantTensor{
+			names[0]: q2kFixtureTensor(I, H, 0x3001),
+			names[1]: q2kFixtureTensor(I, H, 0x3002),
+			names[2]: deviceDownKQuant(t, kindQ6K, H, I, 403),
+		}
+		for _, name := range names {
+			delete(m.manifest, name)
+		}
+		return m, names
+	}
+
+	t.Run("q3k-gate-up-no-hal-descriptor", func(t *testing.T) {
+		m, names := buildModel()
+		m.kqw[names[0]] = q3kFixtureTensor(I, H)
+		x := make([]float32, H)
+		for i := range x {
+			x[i] = float32((i%19)-9) / 64
+		}
+		want := expertSwiGLU(m, 0, 0, x, residentKernel{m})
+		rec := &expertHALRecordingBackend{Backend: compute.Default(), uploads: map[compute.Dtype]int{}}
+		be := &vulkanLikeSeamBackend{expertHALRecordingBackend: rec}
+		s := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
+		got := expertSwiGLU(m, 0, 0, x, sessionQ4KKernel{s: s})
+		if be.matmuls != 0 || be.swiglu != 0 {
+			t.Fatalf("Q3_K gate/up ran device ops matmul=%d swiglu=%d, want 0/0 (host fallback)", be.matmuls, be.swiglu)
+		}
+		routedExpertParity(t, "q3k gate/up host fallback", got, want)
+	})
+
+	t.Run("backend-without-q2k-kernel", func(t *testing.T) {
+		m, names := buildModel()
+		x := make([]float32, H)
+		for i := range x {
+			x[i] = float32((i%19)-9) / 64
+		}
+		want := expertSwiGLU(m, 0, 0, x, residentKernel{m})
+		rec := &expertHALRecordingBackend{Backend: compute.Default(), uploads: map[compute.Dtype]int{}}
+		// A backend whose MatMul serves neither Q2_K nor Q6_K (only Q4_K).
+		be := &q4kOnlySeamBackend{expertHALRecordingBackend: rec}
+		s := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
+		got := expertSwiGLU(m, 0, 0, x, sessionQ4KKernel{s: s})
+		if be.matmuls != 0 || be.swiglu != 0 {
+			t.Fatalf("Q2_K gate/up ran device ops matmul=%d swiglu=%d, want 0/0 on a Q4_K-only backend", be.matmuls, be.swiglu)
+		}
+		if be.uploads[compute.Q2_K] != 0 {
+			t.Fatalf("Q2_K staged on a backend with no Q2_K kernel: uploads=%d", be.uploads[compute.Q2_K])
+		}
+		routedExpertParity(t, "no-q2k-kernel host fallback", got, want)
+		_ = names
+	})
+
+	t.Run("gelu-expert-declines", func(t *testing.T) {
+		m, _ := buildModel()
+		m.Cfg.ActGeluTanh = true
+		x := make([]float32, H)
+		for i := range x {
+			x[i] = float32((i%19)-9) / 64
+		}
+		rec := &expertHALRecordingBackend{Backend: compute.Default(), uploads: map[compute.Dtype]int{}}
+		be := &vulkanLikeSeamBackend{expertHALRecordingBackend: rec}
+		s := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
+		expertSwiGLU(m, 0, 0, x, sessionQ4KKernel{s: s})
+		if be.matmuls != 0 || be.swiglu != 0 {
+			t.Fatalf("GELU expert ran device ops matmul=%d swiglu=%d, want 0/0", be.matmuls, be.swiglu)
+		}
+	})
+
+	t.Run("biased-projection-declines", func(t *testing.T) {
+		m, names := buildModel()
+		// A bias on the gate projection is a clean decline for the device seam (it is a
+		// SiLU-only, bias-free contract). Assert at the admission boundary; the host path
+		// itself is out of this leaf's scope.
+		m.manifest[names[0][:len(names[0])-len("weight")]+"bias"] = tensorMeta{Shape: []int{I}}
+		rec := &expertHALRecordingBackend{Backend: compute.Default(), uploads: map[compute.Dtype]int{}}
+		be := &vulkanLikeSeamBackend{expertHALRecordingBackend: rec}
+		s := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
+		x := make([]float32, H)
+		if _, _, _, _, _, ok := expertInputDeviceAdmitted(s, names[0], names[1], x, H); ok {
+			t.Fatal("biased gate projection was admitted to the device seam; want a clean decline")
+		}
+		if be.matmuls != 0 || be.swiglu != 0 {
+			t.Fatalf("biased gate projection ran device ops matmul=%d swiglu=%d, want 0/0", be.matmuls, be.swiglu)
+		}
+	})
+
+	t.Run("wrong-hidden-width-declines", func(t *testing.T) {
+		m, names := buildModel()
+		rec := &expertHALRecordingBackend{Backend: compute.Default(), uploads: map[compute.Dtype]int{}}
+		be := &vulkanLikeSeamBackend{expertHALRecordingBackend: rec}
+		s := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
+		x := make([]float32, H/2)
+		if _, _, _, _, _, ok := expertInputDeviceAdmitted(s, names[0], names[1], x, H); ok {
+			t.Fatal("wrong-width activation was admitted; want a clean decline")
+		}
+		if be.matmuls != 0 || be.swiglu != 0 {
+			t.Fatalf("wrong-width activation ran device ops matmul=%d swiglu=%d, want 0/0", be.matmuls, be.swiglu)
+		}
+	})
+}
+
+// q4kOnlySeamBackend is the negative-control backend for the Q2_K admission: it presents
+// DeviceMemory and no routed-expert capability (so the incremental seam is reached) but its
+// MatMul serves ONLY Q4_K — Q2_K and Q6_K have no case, exactly the fail-closed world the
+// backend-dtype predicate exists to refuse.
+type q4kOnlySeamBackend struct {
+	*expertHALRecordingBackend
+}
+
+func (b *q4kOnlySeamBackend) Caps() compute.Caps {
+	c := b.expertHALRecordingBackend.Backend.Caps()
+	c.UploadDtype = true
+	c.DeviceMemory = true
+	return c
+}
+
+func (b *q4kOnlySeamBackend) SupportsRoutedExpertKQuant() bool { return false }
+
+func (b *q4kOnlySeamBackend) SupportsDeviceWeightDtype(dt compute.Dtype) bool {
+	return dt == compute.F32 || dt == compute.Q4_K
 }
 
 // nonDeviceSeamBackend presents recorder counters but floors the Caps the seam keys on
