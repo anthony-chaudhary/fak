@@ -17,6 +17,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/childprocess"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/projectassets"
+	"github.com/anthony-chaudhary/fak/pkg/fakclient"
 )
 
 type piLaunchOptions struct {
@@ -109,9 +110,14 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	backendActive := false
 
 	// Probe backend to verify reachability and auto-detect served model if unspecified
-	detectedModel, reachable := probePiBackend(targetBaseURL, 1500*time.Millisecond)
+	detectedModel, reachable, resolvedBaseURL := probePiBackend(targetBaseURL, 1500*time.Millisecond)
 	if reachable {
 		backendActive = true
+		// Adopt the origin that answered: a loopback literal can be refused while
+		// the same gateway is live on the other address family (a WSL2 gateway is
+		// exposed to the Windows host as [::1] only), so launching Pi at the
+		// literal would hand it a dead base URL.
+		targetBaseURL = resolvedBaseURL
 		if targetModel == "" && detectedModel != "" && detectedModel != "mock" {
 			targetModel = detectedModel
 		}
@@ -191,8 +197,27 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	return piLaunchRun(stdout, stderr, argvOut, env)
 }
 
-func probePiBackend(baseURL string, timeout time.Duration) (string, bool) {
+// probePiBackend probes a Pi backend and returns the served model, whether it
+// answered, and the base URL that answered. When the supplied base URL is a
+// loopback literal that is refused, the probe retries through the loopback
+// address-family fallback (127.0.0.1 / [::1] -> localhost) and reports that
+// origin so the caller launches Pi against the family that is actually live.
+func probePiBackend(baseURL string, timeout time.Duration) (model string, ok bool, resolvedBaseURL string) {
 	client := &http.Client{Timeout: timeout}
+	if m, ok := probePiBackendOnce(client, baseURL); ok {
+		return m, true, baseURL
+	}
+	if fallback, ok := fakclient.LoopbackFallbackURL(baseURL); ok {
+		if m, ok := probePiBackendOnce(client, fallback); ok {
+			return m, true, fallback
+		}
+	}
+	return "", false, baseURL
+}
+
+// probePiBackendOnce probes a single backend base URL: GET <root>/healthz, then
+// fall back to <base>/models for the served model id.
+func probePiBackendOnce(client *http.Client, baseURL string) (string, bool) {
 	healthURL := strings.TrimRight(strings.TrimSuffix(baseURL, "/v1"), "/") + "/healthz"
 	resp, err := client.Get(healthURL)
 	if err == nil && resp.StatusCode == http.StatusOK {
