@@ -119,15 +119,15 @@ func v41StageErr(stage v41ForwardStage, layer int, err error) error {
 }
 
 // v41ForwardState is the session-owned continuation state for the reduced V4.1
-// text forward. It carries the committed token history plus a lazily-built
-// V41AttentionState used to validate the per-layer projected KV window. The
-// assembly is cacheless (it recomputes the full history each call, exactly like
-// the dedicated gemma4 session bridge), so Prefill followed by Step is
-// guaranteed consistent with a single longer Forward: the Step path simply
-// re-runs the whole history.
+// text forward. It carries committed token history and one bounded temporal
+// attention state per decoder layer. attn is the per-forward registry through
+// which source layers publish completed rows and selections to later readers.
+// Session.Step still recomputes full history; these states are seeded for later
+// incremental leaves and do not activate incremental arithmetic.
 type v41ForwardState struct {
 	history []int
 	attn    *V41AttentionState
+	layers  []*V41AttentionState
 }
 
 // v41ProjScratch is the per-forward REUSED materialization target for the two
@@ -528,8 +528,31 @@ func (st *v41ForwardState) attentionState(headDim, ratioCap int) (*V41AttentionS
 	return state, nil
 }
 
-func (st *v41ForwardState) appendHistory(ids []int) {
-	st.history = append(st.history, ids...)
+func (st *v41ForwardState) layerState(layer int) *V41AttentionState {
+	if st == nil || layer < 0 || layer >= len(st.layers) {
+		return nil
+	}
+	return st.layers[layer]
+}
+
+func (st *v41ForwardState) setLayerState(layer, count int, state *V41AttentionState) {
+	if len(st.layers) != count {
+		st.layers = make([]*V41AttentionState, count)
+	}
+	st.layers[layer] = state
+}
+
+func (st *v41ForwardState) retainedCopyCount() int {
+	if st == nil {
+		return 0
+	}
+	total := 0
+	for _, layer := range st.layers {
+		if layer != nil {
+			total += layer.retainedCopies
+		}
+	}
+	return total
 }
 
 // ---- reduced V4.1 geometry helpers -----------------------------------------
@@ -1864,7 +1887,7 @@ func (m *Model) v41AdmitShape(name string, stage v41ForwardStage, layer int, wan
 // logits. Every stage is checked; a missing stage returns a typed error and no
 // logits. It is package-private: the public entry points are Model.Forward and
 // Session.Prefill/Step.
-func (m *Model) forwardV41(ids []int, st *v41ForwardState) (*Activations, error) {
+func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, err error) {
 	if err := m.v41ForwardAdmitted(); err != nil {
 		return nil, err
 	}
@@ -1873,11 +1896,23 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (*Activations, error)
 	// ids into its history and recomputes the whole history so Step is consistent
 	// with a single longer Forward.
 	seq := ids
+	runState := st
+	committed := false
 	if st != nil {
-		st.appendHistory(ids)
+		historyLen := len(st.history)
+		st.history = append(st.history, ids...)
 		seq = st.history
+		runState = &v41ForwardState{history: seq}
+		defer func() {
+			if !committed {
+				st.history = st.history[:historyLen]
+			}
+		}()
 	}
 	if len(seq) == 0 {
+		if st != nil {
+			committed = true
+		}
 		return &Activations{}, nil
 	}
 	for _, id := range seq {
@@ -1938,14 +1973,14 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (*Activations, error)
 		return nil, err
 	}
 
-	act := &Activations{Seq: len(seq), Hidden: [][]float32{flatten(x)}}
+	act = &Activations{Seq: len(seq), Hidden: [][]float32{flatten(x)}}
 	// One scratch for the whole forward: the grouped output projections are read
 	// as whole f32 blocks but the layer loop is sequential, so a single reused
 	// buffer bounds the wo_a/wo_b term to one layer's worth instead of the
 	// 40-layer accumulated churn that OOM-killed the warmup (#13288).
 	scratch := &v41ProjScratch{}
 	for l := 0; l < cfg.NumLayers; l++ {
-		if err := m.v41Layer(l, seq, x, streams, full, hd, nH, H, eps, hcIters, hcEps, routeCfg, st, scratch); err != nil {
+		if err := m.v41Layer(l, seq, x, streams, full, hd, nH, H, eps, hcIters, hcEps, routeCfg, runState, scratch); err != nil {
 			return nil, err
 		}
 		act.Hidden = append(act.Hidden, flatten(x))
@@ -1958,6 +1993,12 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (*Activations, error)
 			return nil, err
 		}
 		act.Logits[t] = logits
+	}
+	if st != nil {
+		st.layers = runState.layers
+		// Completed cross-layer publications are step-local and can be released.
+		st.attn = nil
+		committed = true
 	}
 	return act, nil
 }
@@ -2263,32 +2304,29 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	// KV window. It runs no projection and never changes the arithmetic; it fails
 	// closed on malformed geometry before the sink contraction reads the rows.
 	//
-	// The state's window ring is a fixed v41WindowSize rows (v41_attention_state.go).
-	// It is a BOUNDED validation anchor, not the attention path: when the committed
-	// history exceeds the window the assembly still contracts every causal row below
-	// through the scalar sink, so it seeds the anchor only up to the window and never
-	// fails a legitimate long sequence on the anchor's own bound.
+	// Each layer gets independent temporal ownership. Completed source rows stay
+	// in the per-forward registry; retained session state contains only the
+	// configured window tail and incomplete compressor group.
 	if st != nil {
-		attn, err := st.attentionState(hd, 8)
+		layerState, err := NewV41AttentionState(hd, 8)
 		if err != nil {
 			return v41StageErr(v41StageAttention, l, err)
 		}
-		attn.Reset()
-		seed := kvRows
-		if len(seed) > v41WindowSize {
-			seed = seed[len(seed)-v41WindowSize:]
+		if err := layerState.seedTemporal(kvRows, plan.Ratio, cfg.windowForLayer(l)); err != nil {
+			return v41StageErr(v41StageAttention, l, err)
+		}
+		st.setLayerState(l, cfg.NumLayers, layerState)
+
+		registry, err := st.attentionState(hd, 8)
+		if err != nil {
+			return v41StageErr(v41StageAttention, l, err)
 		}
 		// A declared source layer publishes its compressed rows and index keys so
 		// later readers can resolve them within this same forward pass (the
 		// V41AttentionState source-then-consumer ordering).
 		updates := m.v41AttentionSourceUpdates(plan, compressedKV, qLatRows)
-		if len(seed) > 0 {
-			if err := attn.Prefill(seed, updates); err != nil {
-				return v41StageErr(v41StageAttention, l, err)
-			}
-		} else if len(updates) > 0 {
-			// A source layer with no projected window rows still publishes.
-			if err := attn.PublishCandidates(plan.Ratio, nil); err != nil {
+		if len(updates) > 0 {
+			if err := registry.publishUpdates(updates); err != nil {
 				return v41StageErr(v41StageAttention, l, err)
 			}
 		}
@@ -2301,7 +2339,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			for t := range rows {
 				rows[t] = append([]int32(nil), indexList[t*plan.TopKWidth:(t+1)*plan.TopKWidth]...)
 			}
-			if err := attn.PublishTopK(plan.Ratio, rows); err != nil {
+			if err := registry.PublishTopK(plan.Ratio, rows); err != nil {
 				return v41StageErr(v41StageIndexer, l, err)
 			}
 		}

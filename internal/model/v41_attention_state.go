@@ -112,6 +112,14 @@ type V41AttentionStateUpdate struct {
 	IndexKey []float32
 }
 
+// v41AttentionPublicationKey binds a completed compressed publication to its
+// source identity and absolute half-open compressed-row range.
+type v41AttentionPublicationKey struct {
+	sourceLayer int
+	start       int
+	end         int
+}
+
 // V41AttentionState is session-owned state shared by the sequential attention
 // stack. One instance replaces the reference's process-global shared runtime so
 // concurrent sessions cannot alias each other. A source layer publishes before
@@ -125,12 +133,17 @@ type V41AttentionState struct {
 	headDim    int
 	ratioCap   int
 
-	nextWindowPos   int
-	nextCompressRow int
+	nextWindowPos      int
+	nextCompressRow    int
+	retainedWindowRows int
+	partialKV          [][]float32
+	retainedCopies     int
 
-	window    [][]float32
-	kvRows    map[int][][]float32
-	indexKeys map[int][][]float32
+	window            [][]float32
+	kvPublications    map[v41AttentionPublicationKey][]float32
+	indexPublications map[v41AttentionPublicationKey][]float32
+	kvPublishedEnd    map[int]int
+	indexPublishedEnd map[int]int
 
 	candidates     []bool
 	candidateRatio int
@@ -151,12 +164,14 @@ func NewV41AttentionState(headDim, ratioCap int) (*V41AttentionState, error) {
 		return nil, fmt.Errorf("model: V41 attention state ratio cap %d must be positive", ratioCap)
 	}
 	s := &V41AttentionState{
-		windowSize: v41WindowSize,
-		headDim:    headDim,
-		ratioCap:   ratioCap,
-		window:     make([][]float32, v41WindowSize),
-		kvRows:     make(map[int][][]float32),
-		indexKeys:  make(map[int][][]float32),
+		windowSize:        v41WindowSize,
+		headDim:           headDim,
+		ratioCap:          ratioCap,
+		window:            make([][]float32, v41WindowSize),
+		kvPublications:    make(map[v41AttentionPublicationKey][]float32),
+		indexPublications: make(map[v41AttentionPublicationKey][]float32),
+		kvPublishedEnd:    make(map[int]int),
+		indexPublishedEnd: make(map[int]int),
 	}
 	for i := range s.window {
 		s.window[i] = make([]float32, headDim)
@@ -192,6 +207,107 @@ func (s *V41AttentionState) Prefill(projectedKV [][]float32, updates []V41Attent
 	}
 	s.nextWindowPos = len(projectedKV)
 	s.nextCompressRow = len(projectedKV)
+	s.publish(updates)
+	return nil
+}
+
+// seedTemporal replaces the receiver with the bounded temporal subset needed by
+// a later incremental layer step. Completed compressed rows remain in the
+// per-forward publication registry and are not copied into session state.
+func (s *V41AttentionState) seedTemporal(projectedKV [][]float32, ratio, configuredWindow int) error {
+	if s == nil {
+		return fmt.Errorf("model: nil V41 attention state")
+	}
+	if len(projectedKV) == 0 {
+		return fmt.Errorf("model: V41 temporal seed requires at least one position")
+	}
+	if ratio < 0 || ratio > s.ratioCap {
+		return fmt.Errorf("model: V41 temporal seed ratio %d outside [0,%d]", ratio, s.ratioCap)
+	}
+	if configuredWindow == 0 || configuredWindow < -1 {
+		return fmt.Errorf("model: V41 temporal seed window %d must be -1 or positive", configuredWindow)
+	}
+	if err := s.validateKV(projectedKV); err != nil {
+		return err
+	}
+
+	retain := min(len(projectedKV), s.windowSize)
+	if configuredWindow > 0 {
+		retain = min(retain, configuredWindow)
+	}
+	start := len(projectedKV) - retain
+	window := make([][]float32, s.windowSize)
+	for i := range window {
+		window[i] = make([]float32, s.headDim)
+	}
+	for pos := start; pos < len(projectedKV); pos++ {
+		copy(window[pos%s.windowSize], projectedKV[pos])
+	}
+	var partialKV [][]float32
+	retainedCopies := retain
+
+	if ratio > 1 {
+		partial := len(projectedKV) % ratio
+		if partial > 0 {
+			partialKV = make([][]float32, partial)
+			for i, row := range projectedKV[len(projectedKV)-partial:] {
+				partialKV[i] = append([]float32(nil), row...)
+			}
+			retainedCopies += partial
+		}
+	}
+	// Commit only after every validation and allocation above succeeds.
+	s.window = window
+	s.nextWindowPos = len(projectedKV)
+	s.nextCompressRow = len(projectedKV)
+	s.retainedWindowRows = retain
+	s.partialKV = partialKV
+	s.retainedCopies = retainedCopies
+	s.kvPublications = make(map[v41AttentionPublicationKey][]float32)
+	s.indexPublications = make(map[v41AttentionPublicationKey][]float32)
+	s.kvPublishedEnd = make(map[int]int)
+	s.indexPublishedEnd = make(map[int]int)
+	s.candidates = nil
+	s.candidatesSet = false
+	s.topk = nil
+	s.topkSet = false
+	return nil
+}
+
+// retainedWindowKV returns the populated logical window tail, oldest row first.
+func (s *V41AttentionState) retainedWindowKV() [][]float32 {
+	if s == nil || s.retainedWindowRows == 0 {
+		return nil
+	}
+	out := make([][]float32, s.retainedWindowRows)
+	start := s.nextWindowPos - s.retainedWindowRows
+	for i := range out {
+		out[i] = append([]float32(nil), s.window[(start+i)%s.windowSize]...)
+	}
+	return out
+}
+
+// partialGroupKV returns a copy of the incomplete compressor group.
+func (s *V41AttentionState) partialGroupKV() [][]float32 {
+	if s == nil {
+		return nil
+	}
+	out := make([][]float32, len(s.partialKV))
+	for i, row := range s.partialKV {
+		out[i] = append([]float32(nil), row...)
+	}
+	return out
+}
+
+// publishUpdates atomically adds completed source publications to the
+// per-forward registry without conflating them with temporal layer state.
+func (s *V41AttentionState) publishUpdates(updates []V41AttentionStateUpdate) error {
+	if s == nil {
+		return fmt.Errorf("model: nil V41 attention state")
+	}
+	if err := s.validateUpdates(updates); err != nil {
+		return err
+	}
 	s.publish(updates)
 	return nil
 }
@@ -271,8 +387,13 @@ func (s *V41AttentionState) Reset() {
 	}
 	s.nextWindowPos = 0
 	s.nextCompressRow = 0
-	s.kvRows = make(map[int][][]float32)
-	s.indexKeys = make(map[int][][]float32)
+	s.retainedWindowRows = 0
+	s.partialKV = nil
+	s.retainedCopies = 0
+	s.kvPublications = make(map[v41AttentionPublicationKey][]float32)
+	s.indexPublications = make(map[v41AttentionPublicationKey][]float32)
+	s.kvPublishedEnd = make(map[int]int)
+	s.indexPublishedEnd = make(map[int]int)
 	s.candidates = nil
 	s.candidatesSet = false
 	s.candidateRatio = 0
@@ -300,13 +421,18 @@ func (s *V41AttentionState) KVSourceRows(sourceLayerID int) ([][]float32, bool) 
 	if s == nil {
 		return nil, false
 	}
-	rows, ok := s.kvRows[sourceLayerID]
-	if !ok {
+	end := s.kvPublishedEnd[sourceLayerID]
+	if end == 0 {
 		return nil, false
 	}
-	out := make([][]float32, len(rows))
-	for i, row := range rows {
-		out[i] = append([]float32(nil), row...)
+	out := make([][]float32, 0, end)
+	for start := 0; start < end; start++ {
+		key := v41AttentionPublicationKey{sourceLayer: sourceLayerID, start: start, end: start + 1}
+		row, ok := s.kvPublications[key]
+		if !ok {
+			return nil, false
+		}
+		out = append(out, append([]float32(nil), row...))
 	}
 	return out, true
 }
@@ -317,13 +443,18 @@ func (s *V41AttentionState) IndexKeys(sourceLayerID int) ([][]float32, bool) {
 	if s == nil {
 		return nil, false
 	}
-	keys, ok := s.indexKeys[sourceLayerID]
-	if !ok {
+	end := s.indexPublishedEnd[sourceLayerID]
+	if end == 0 {
 		return nil, false
 	}
-	out := make([][]float32, len(keys))
-	for i, key := range keys {
-		out[i] = append([]float32(nil), key...)
+	out := make([][]float32, 0, end)
+	for start := 0; start < end; start++ {
+		key := v41AttentionPublicationKey{sourceLayer: sourceLayerID, start: start, end: start + 1}
+		row, ok := s.indexPublications[key]
+		if !ok {
+			return nil, false
+		}
+		out = append(out, append([]float32(nil), row...))
 	}
 	return out, true
 }
@@ -429,10 +560,16 @@ func (s *V41AttentionState) finiteRow(row []float32, what string) error {
 func (s *V41AttentionState) publish(updates []V41AttentionStateUpdate) {
 	for _, up := range updates {
 		if up.Latent != nil {
-			s.kvRows[up.Ref.LayerID] = append(s.kvRows[up.Ref.LayerID], append([]float32(nil), up.Latent...))
+			start := s.kvPublishedEnd[up.Ref.LayerID]
+			key := v41AttentionPublicationKey{sourceLayer: up.Ref.LayerID, start: start, end: start + 1}
+			s.kvPublications[key] = append([]float32(nil), up.Latent...)
+			s.kvPublishedEnd[up.Ref.LayerID] = start + 1
 		}
 		if up.IndexKey != nil {
-			s.indexKeys[up.Ref.LayerID] = append(s.indexKeys[up.Ref.LayerID], append([]float32(nil), up.IndexKey...))
+			start := s.indexPublishedEnd[up.Ref.LayerID]
+			key := v41AttentionPublicationKey{sourceLayer: up.Ref.LayerID, start: start, end: start + 1}
+			s.indexPublications[key] = append([]float32(nil), up.IndexKey...)
+			s.indexPublishedEnd[up.Ref.LayerID] = start + 1
 		}
 	}
 }
