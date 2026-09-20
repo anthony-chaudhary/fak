@@ -33,6 +33,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
@@ -1095,6 +1096,16 @@ func (e *InKernelCapacityError) Error() string {
 // reports handled=false so the caller re-panics — the recover stays surgical and never swallows
 // a genuine bug (a nil deref, a non-device validation panic).
 func recoverDevicePanic(r any) (err error, handled bool) {
+	if e, ok := r.(error); ok {
+		var stall metalgemm.MetalCommandBufferStallError
+		if errors.As(e, &stall) {
+			return e, true
+		}
+		var stallPtr *metalgemm.MetalCommandBufferStallError
+		if errors.As(e, &stallPtr) {
+			return e, true
+		}
+	}
 	var dae *compute.DeviceAllocError
 	if e, ok := r.(error); ok && errors.As(e, &dae) {
 		return &InKernelOOMError{Bytes: dae.Bytes, Class: dae.DemandClass(), Site: dae.Site}, true

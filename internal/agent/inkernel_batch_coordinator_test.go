@@ -3,11 +3,58 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"os/exec"
 	"sync"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
+
+func TestCoalescedMetalStallReturnsRequestError(t *testing.T) {
+	if os.Getenv("FAK_TEST_COALESCED_METAL_STALL_HELPER") == "1" {
+		cfg := tinyConcurrencyConfig()
+		cfg.EOSTokenID = -1
+		cfg.LayerTypes = []string{"linear_attention"}
+		cfg.LinearConvKernelDim = 3
+		cfg.LinearKeyHeadDim = 8
+		cfg.LinearNumKeyHeads = 2
+		cfg.LinearValueHeadDim = 8
+		cfg.LinearNumValueHeads = 4
+		m := model.NewSynthetic(cfg)
+		m.Quantize()
+		p := NewInKernelPlanner(m, loadProbeTok(t), "synthetic-metal-stall", true, nil, false)
+		p.maxNew, p.batchDecode, p.metal = 1, true, true
+		p.coalesceReadyHook = func() {}
+		var batchCalls int
+		p.coalesceBatchHook = func(int) {
+			batchCalls++
+			panic(fmt.Errorf("decode cohort: %w", metalgemm.MetalCommandBufferStallError{
+				Operation: "graph finish", WaitedMilliseconds: 10_001, LimitMilliseconds: 10_000,
+			}))
+		}
+		comp, err := p.Complete(context.Background(), []Message{{Role: RoleUser, Content: "stall"}}, nil)
+		if comp != nil || err == nil {
+			t.Fatalf("Complete = (%#v, %v), want nil typed stall", comp, err)
+		}
+		var stall metalgemm.MetalCommandBufferStallError
+		if !errors.As(err, &stall) {
+			t.Fatalf("Complete error = %T %v, want MetalCommandBufferStallError", err, err)
+		}
+		if batchCalls != 1 {
+			t.Fatalf("decode cohort calls = %d, want 1 (no retry)", batchCalls)
+		}
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestCoalescedMetalStallReturnsRequestError$", "-test.v")
+	cmd.Env = append(os.Environ(), "FAK_TEST_COALESCED_METAL_STALL_HELPER=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("coalesced Metal stall killed the worker process instead of returning a request error: %v\n%s", err, out)
+	}
+}
 
 func TestInKernelPlannerCoalescesConcurrentQwenTurns(t *testing.T) {
 	restoreProbe := installQwenSharedReceiptProbeForTest(func(bs *model.BatchSession, ids []int, active []bool) ([][]float32, int, int64, bool) {
