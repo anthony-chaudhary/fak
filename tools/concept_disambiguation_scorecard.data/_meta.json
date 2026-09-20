@@ -14931,6 +14931,21 @@
           "category": "incidental",
           "reason": "Shared scoped MemoryPlan fit helper with injected device capacity; no additional planning abstraction.",
           "token": "fitsMemoryPlanByScopeWithDevice"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pure Qwen3.8 runtime-extras memory estimator (#13315); it prices additional demands on the existing MemoryPlan admission contract and introduces no new plan concept.",
+          "token": "EstimateQwen35RuntimeExtraMemoryPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Planner helper composing the existing per-request MemoryPlan with the priced runtime extras (#13354); a call-site wrapper, not a new plan concept.",
+          "token": "requestMemoryPlanWithExtras"
+        },
+        {
+          "category": "incidental",
+          "reason": "Sums the device-scope activation/scratch bytes already present in a MemoryPlan so the panel term subtracts only overlapping transient scratch; local accounting helper for the existing plan.",
+          "token": "deviceTransientBytesInPlan"
         }
       ],
       "exclude": [
@@ -15085,7 +15100,9 @@
         "dedupCandidate",
         "defaultsCheckPlanner",
         "deriveSelfUpdateCandidateCacheDisposition",
+        "deviceTransientBytesInPlan",
         "dispatchWaveExecutionPlanWithSize",
+        "estimateqwen35runtimeextramemoryplan",
         "fitandplanserveggufexpertparallelpathondevice",
         "fitsMemoryPlanByScopeWithDevice",
         "fixturePlanner",
@@ -15133,6 +15150,7 @@
         "removeCandidate",
         "reportFromSessions",
         "requestedExecutionPlan",
+        "requestMemoryPlanWithExtras",
         "rollbackCodexMarketplaceCandidate",
         "runAblatePlan",
         "runContinuitySyncPlan",

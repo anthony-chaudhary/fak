@@ -3144,7 +3144,17 @@ func (p *InKernelPlanner) refuseOversizeRequest(promptTokens, maxNew int) error 
 	if p == nil || p.backend == nil || p.m == nil {
 		return nil
 	}
-	plan := p.requestMemoryPlan(promptTokens, maxNew)
+	plan, extrasErr := p.requestMemoryPlanWithExtras(promptTokens, maxNew, p.requestMTPHistoryEligible(maxNew))
+	if extrasErr != nil {
+		// A required runtime-extras bound is missing (unknown panel width or history
+		// lifetime). Refuse before allocation with a typed capacity-unknown error rather
+		// than trusting a silently cheap plan.
+		return &InKernelCapacityError{
+			Class: compute.MemoryUnknown,
+			Scope: compute.MemoryScopeDevice,
+			Site:  "runtime-extras-unknown",
+		}
+	}
 	if len(plan) == 0 {
 		return nil
 	}
@@ -3367,8 +3377,23 @@ func requestMemoryCapacity(scope string, total, free int64, known bool) RequestM
 }
 
 func (p *InKernelPlanner) requestMemoryPlan(promptTokens, maxNew int) compute.MemoryPlan {
+	plan, _ := p.requestMemoryPlanWithExtras(promptTokens, maxNew, false)
+	return plan
+}
+
+// requestMemoryPlanWithExtras composes the base context plan (#1049) with the Qwen3.8
+// runtime-extras reservation (#13315): the simultaneous Vulkan prefill-panel peak and the
+// optional retained-MTP target-hidden history. retainMTPHistory is REQUEST-LOCAL — it must be
+// derived from configured support PLUS this request's sampling eligibility known before
+// admission, never from planner-wide VulkanMTPEnabled() alone (a downgraded or non-decode
+// request must not reserve retained-history bytes).
+//
+// It returns a typed RuntimeExtraCapacityUnknownError when the enabled extras cannot be
+// bounded (missing panel width or history lifetime inputs); the caller refuses the request
+// before allocation rather than trusting a silently cheap plan.
+func (p *InKernelPlanner) requestMemoryPlanWithExtras(promptTokens, maxNew int, retainMTPHistory bool) (compute.MemoryPlan, error) {
 	if p == nil || p.m == nil {
-		return nil
+		return nil, nil
 	}
 	if promptTokens < 0 {
 		promptTokens = 0
@@ -3390,7 +3415,82 @@ func (p *InKernelPlanner) requestMemoryPlan(promptTokens, maxNew int) compute.Me
 			plan = append(compute.MemoryPlan{{Class: compute.MemoryWeights, Bytes: r.TotalResidentBytes, Detail: "resident-weights", DType: "mixed"}}, plan...)
 		}
 	}
-	return plan
+	extras, err := p.qwen35RuntimeExtraDemands(plannedTokens, retainMTPHistory, plan)
+	if err != nil {
+		return nil, err
+	}
+	if len(extras) > 0 {
+		plan = append(plan, extras...)
+	}
+	return plan, nil
+}
+
+// qwen35RuntimeExtraDemands prices the panel and retained-history terms via the pure #13315
+// estimator. It charges only the panel peak ABOVE the HAL transient scratch already present in
+// basePlan (device scope) so integration cannot double count, and only reserves retained history
+// when retainMTPHistory is set for THIS request.
+//
+// The panel width is the gate: when the request is not on the priced Qwen3.8 prefill-panel path
+// (nativeInferencePrefillChunkTokens()==0) the extras estimator is not invoked and the base plan
+// is preserved byte-for-byte — the same fail-open contract every other capacity helper uses for
+// incomplete geometry. When the panel width IS bound but other required bounds are missing, the
+// estimator returns its typed capacity-unknown and the caller refuses before allocation.
+func (p *InKernelPlanner) qwen35RuntimeExtraDemands(plannedTokens int, retainMTPHistory bool, basePlan compute.MemoryPlan) (compute.MemoryPlan, error) {
+	if p == nil || p.m == nil || p.m.Cfg.HiddenSize <= 0 {
+		return nil, nil
+	}
+	panelTokens := p.nativeInferencePrefillChunkTokens()
+	if panelTokens <= 0 {
+		return nil, nil
+	}
+	cfg := compute.Qwen35RuntimeExtraConfig{
+		HiddenWidth:                    p.m.Cfg.HiddenSize,
+		PlannedTokens:                  plannedTokens,
+		PanelTokens:                    panelTokens,
+		RetainedHistory:                retainMTPHistory,
+		AlreadyPricedHALTransientBytes: deviceTransientBytesInPlan(basePlan),
+		Policy:                         compute.RuntimeExtraPolicyConservative,
+	}
+	if retainMTPHistory {
+		cfg.FullHistoryCopies = p.retainedMTPFullHistoryCopies()
+	}
+	return compute.EstimateQwen35RuntimeExtraMemoryPlan(cfg)
+}
+
+// retainedMTPFullHistoryCopies is the count of coexisting full hidden histories: 3 when a
+// full-prompt cache snapshot participates (reuse is active), 2 without it. It is the copy
+// lifetime bound the #13315 estimator expects and never infers enablement from tensor presence.
+func (p *InKernelPlanner) retainedMTPFullHistoryCopies() int {
+	if p.tree != nil && inKernelPlannerPrefixReuseSupported(p.m, p.backend) {
+		return 3
+	}
+	return 2
+}
+
+// requestMTPHistoryEligible reports whether THIS request will run the retained-MTP-history
+// decode path: planner-wide MTP support must be configured AND the request must be a real
+// decode (a positive output budget). It is the request-local predicate the extras reservation
+// needs, evaluated before admission.
+func (p *InKernelPlanner) requestMTPHistoryEligible(maxNew int) bool {
+	return p != nil && maxNew > 0 && p.VulkanMTPEnabled()
+}
+
+// deviceTransientBytesInPlan sums the device-scope activation/scratch demands already priced in
+// a plan, so the panel term subtracts only the overlapping HAL transient scratch.
+func deviceTransientBytesInPlan(plan compute.MemoryPlan) int64 {
+	var total int64
+	for _, d := range plan {
+		if d.ScopeOrDefault() != compute.MemoryScopeDevice {
+			continue
+		}
+		switch d.Class {
+		case compute.MemoryActivation, compute.MemoryScratchpad:
+			if d.Bytes > 0 {
+				total += d.Bytes
+			}
+		}
+	}
+	return total
 }
 
 func (p *InKernelPlanner) includeResidentWeightsInRequestFit() bool {

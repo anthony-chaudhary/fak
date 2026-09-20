@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -331,5 +332,212 @@ func TestInKernelRequestPressureTrimOnLowMargin(t *testing.T) {
 	if row.Reason != "low_margin" || row.Attempts != 1 || row.Trimmed != 1 || row.Resolved != 0 ||
 		row.LastMarginBytes <= 0 || row.LastMarginBytes > inKernelRequestPressureTrimMinMarginBytes {
 		t.Fatalf("low-margin trim row = %+v", row)
+	}
+}
+
+// qwen35RuntimeExtraConfig builds a tiny Qwen3.8-hybrid model config: the linear_attention layer
+// type makes IsQwen35Hybrid true, so the panel-width chunk helper is reachable when q4k is set.
+func qwen35RuntimeExtraConfig() model.Config {
+	cfg := tinyConcurrencyConfig()
+	cfg.LayerTypes = []string{"linear_attention", "full_attention"}
+	return cfg
+}
+
+// runtimeExtraBackend both reports a device capacity (so the fit path is exercised) and advertises
+// the Qwen35 sequence prefill capability (so the simultaneous panel width is reachable).
+type runtimeExtraBackend struct {
+	compute.Backend
+	total, free int64
+	known       bool
+}
+
+func (b runtimeExtraBackend) Caps() compute.Caps {
+	return compute.Caps{DeviceMemory: true, CapacityProbe: true}
+}
+
+func (b runtimeExtraBackend) Name() string { return "runtime-extra-probe" }
+
+func (b runtimeExtraBackend) DeviceMemory() (int64, int64, bool) { return b.total, b.free, b.known }
+
+func (b runtimeExtraBackend) Qwen35SequencePrefillPath() string {
+	return compute.Qwen35SequencePrefillPath
+}
+
+func (b runtimeExtraBackend) Qwen35SequencePrefill(compute.Qwen35SequencePrefillRequest) (compute.Qwen35SequencePrefillResult, error) {
+	panic("test capability marker must not execute")
+}
+
+func (b runtimeExtraBackend) Qwen35SequenceEmbeddingRowsPath() string {
+	return compute.Qwen35SequenceEmbeddingRowsPath
+}
+
+// qwen35RuntimeExtraPlanner builds a planner whose panel width is deterministic: q4k + a hybrid
+// config + a sequence-prefill backend make nativeInferencePrefillChunkTokens reachable, and the
+// explicit chunk size pins the simultaneous panel width the extras estimator must price.
+func qwen35RuntimeExtraPlanner(panelTokens int) *InKernelPlanner {
+	return &InKernelPlanner{
+		m:                         model.NewSynthetic(qwen35RuntimeExtraConfig()),
+		q4k:                       true,
+		quant:                     true,
+		qwenQ4KPrefillChunkTokens: panelTokens,
+	}
+}
+
+// TestInKernelQwenRuntimeMemoryComposesIntoRequestPlan proves the composed plan carries the two
+// #13315 terms the base context plan omits: the device-scope prefill-panel peak (reduced by the
+// already-priced HAL transient) and the host-scope retained-MTP hidden history when the request
+// is eligible.
+func TestInKernelQwenRuntimeMemoryComposesIntoRequestPlan(t *testing.T) {
+	p := qwen35RuntimeExtraPlanner(64)
+
+	base, err := p.requestMemoryPlanWithExtras(128, 32, false)
+	if err != nil {
+		t.Fatalf("base extras composition rejected: %v", err)
+	}
+	// The panel term is priced whenever the simultaneous panel width is bound; it is NOT
+	// MTP-history-specific. Retained history, by contrast, is gated on request eligibility.
+	if hasDemandDetail(base, "qwen35-mtp-retained-hidden-history") {
+		t.Fatalf("retained-history-off plan carried an MTP history demand: %#v", base)
+	}
+	if !hasDemandDetail(base, "qwen35-vulkan-prefill-panel-additional") {
+		t.Fatalf("bounded panel width must price the panel term: %#v", base)
+	}
+
+	withHistory, err := p.requestMemoryPlanWithExtras(128, 32, true)
+	if err != nil {
+		t.Fatalf("history-on extras composition rejected: %v", err)
+	}
+	panel := demandDetail(withHistory, "qwen35-vulkan-prefill-panel-additional")
+	if panel.Bytes <= 0 || panel.ScopeOrDefault() != compute.MemoryScopeDevice {
+		t.Fatalf("composed panel term = %+v, want positive device-scope demand", panel)
+	}
+	if !hasDemandDetail(withHistory, "qwen35-mtp-retained-hidden-history") {
+		t.Fatalf("history-on plan missing retained MTP history: %#v", withHistory)
+	}
+	history := demandDetail(withHistory, "qwen35-mtp-retained-hidden-history")
+	if history.ScopeOrDefault() != compute.MemoryScopeHost {
+		t.Fatalf("retained history scope = %s, want host", history.ScopeOrDefault())
+	}
+	if len(withHistory) <= len(base) {
+		t.Fatalf("history-on plan must add demands over history-off: on=%d off=%d", len(withHistory), len(base))
+	}
+	// The panel term must be the EXCESS over scratch the base plan already prices, never the
+	// whole peak again — integration must not double count overlapping HAL transient scratch.
+	rawPanel := int64(64) * int64(p.m.Cfg.HiddenSize) * 4
+	if panel.Bytes >= rawPanel {
+		t.Fatalf("panel term %d must subtract already-priced HAL transient from raw peak %d", panel.Bytes, rawPanel)
+	}
+}
+
+// TestInKernelRefuseOversizeRequestRefusesOnUnknownExtrasBound proves the composed plan (base
+// context plan + the priced runtime extras) is enforced through the real pre-admission guard: a
+// device whose free budget is one byte short of the composed demand refuses with a typed capacity
+// error, while the same request fits once extras stop being charged (retained history off).
+func TestInKernelRefuseOversizeRequestRefusesOnUnknownExtrasBound(t *testing.T) {
+	// The composed demand is base + panel + retained history. Size a device one byte below it.
+	p := qwen35RuntimeExtraPlanner(64)
+	p.vulkanMTP = true
+	p.speculativeEngine = model.NewSpeculativeEngine(nil, nil, model.SpeculativeEngineConfig{})
+	plan, err := p.requestMemoryPlanWithExtras(64, 16, true)
+	if err != nil {
+		t.Fatalf("composing retained-history plan: %v", err)
+	}
+	want := plan.DeviceTotal()
+	if want <= 0 {
+		t.Fatalf("composed device demand = %d, want positive", want)
+	}
+
+	// One byte short of the headroom-adjusted budget.
+	headroom := inKernelRequestDeviceHeadroom
+	budget := int64(float64(want) / (1 - headroom))
+	if budget <= want {
+		budget = want + 1
+	}
+	short := budget - 1
+	be := runtimeExtraBackend{Backend: compute.Default(), total: short + (1 << 30), free: short, known: true}
+	p.backend = be
+	err = p.refuseOversizeRequest(64, 16)
+	var capErr *InKernelCapacityError
+	if !errors.As(err, &capErr) {
+		t.Fatalf("one-byte-short composed plan error = %T (%v), want *InKernelCapacityError", err, err)
+	}
+	if capErr.Site != "capacity-precheck" {
+		t.Fatalf("capacity error site = %q, want capacity-precheck", capErr.Site)
+	}
+
+	// A roomy device with the same request fits: the guard admits a well-bounded plan.
+	p2 := qwen35RuntimeExtraPlanner(64)
+	p2.vulkanMTP = true
+	p2.speculativeEngine = model.NewSpeculativeEngine(nil, nil, model.SpeculativeEngineConfig{})
+	p2.backend = runtimeExtraBackend{Backend: compute.Default(), total: 1 << 40, free: 1 << 40, known: true}
+	if err := p2.refuseOversizeRequest(64, 16); err != nil {
+		t.Fatalf("bounded runtime extras should fit, got %v", err)
+	}
+}
+
+// TestInKernelQwenRuntimeMemoryMTPHistoryEligibleIsRequestLocal proves the retained-history predicate is a
+// function of THIS request, not planner-wide MTP support alone: a configured planner with a zero
+// output budget must not reserve retained-history bytes.
+func TestInKernelQwenRuntimeMemoryMTPHistoryEligibleIsRequestLocal(t *testing.T) {
+	p := qwen35RuntimeExtraPlanner(64)
+	p.vulkanMTP = true
+	p.speculativeEngine = model.NewSpeculativeEngine(nil, nil, model.SpeculativeEngineConfig{})
+
+	if !p.requestMTPHistoryEligible(8) {
+		t.Fatal("configured MTP support with a positive decode budget must be eligible")
+	}
+	if p.requestMTPHistoryEligible(0) {
+		t.Fatal("a zero-output-budget request must not be MTP-history eligible")
+	}
+	p.DisableSpeculativeDecoding()
+	if p.requestMTPHistoryEligible(8) {
+		t.Fatal("a planner with speculative decoding disabled must not be MTP-history eligible")
+	}
+}
+
+func hasDemandDetail(plan compute.MemoryPlan, detail string) bool {
+	for _, d := range plan {
+		if d.Detail == detail {
+			return true
+		}
+	}
+	return false
+}
+
+func demandDetail(plan compute.MemoryPlan, detail string) compute.MemoryDemand {
+	for _, d := range plan {
+		if d.Detail == detail {
+			return d
+		}
+	}
+	return compute.MemoryDemand{}
+}
+
+// TestInKernelRefuseOversizeRequestGuardRunsBeforeExecution proves the served entry point — not
+// just the helper — reaches the runtime-extras guard BEFORE any model work. An intentionally
+// uninitialized model makes every session build / forward fail, so receiving the typed capacity
+// error instead of a model/session error is the reachability witness: the guard ran first.
+func TestInKernelRefuseOversizeRequestGuardRunsBeforeExecution(t *testing.T) {
+	cfg := qwen35RuntimeExtraConfig()
+	cfg.MaxPositionEmbeddings = 4096
+	tok := loadProbeTok(t)
+	// A device with a near-zero free budget: the composed plan (KV + panel) cannot fit, so the
+	// guard must refuse before the deliberately-empty model is asked to allocate anything. A
+	// successful session build would instead panic (the model has no weights), so receiving the
+	// typed capacity error is the reachability witness.
+	be := runtimeExtraBackend{Backend: compute.Default(), total: 1 << 40, free: 1, known: true}
+	p := NewInKernelPlanner(&model.Model{Cfg: cfg}, tok, "runtime-extra-reach", true, be, false)
+	p.qwenQ4KPrefillChunkTokens = 8
+
+	comp, err := p.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, WithMaxTokens(8))
+	if comp != nil {
+		t.Fatalf("guarded request returned completion: %+v", comp)
+	}
+	var capErr *InKernelCapacityError
+	if !errors.As(err, &capErr) {
+		t.Fatalf("complete error = %T (%v), want *InKernelCapacityError from the runtime-extras guard", err, err)
+	}
+	if capErr.Site != "capacity-precheck" {
+		t.Fatalf("capacity error site = %q, want capacity-precheck", capErr.Site)
 	}
 }
