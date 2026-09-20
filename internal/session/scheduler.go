@@ -21,6 +21,7 @@ package session
 // clock, no randomness) so every policy is unit-testable to an exact pick sequence.
 
 import (
+	"math"
 	"sort"
 	"sync"
 	"time"
@@ -165,14 +166,58 @@ type Scheduler struct {
 	// is bounded and a session that leaves contention forgets its stale credit).
 	credits      map[string]int64
 	reservations map[reservationKey]SlotReservation
-	onSlot       func(SlotEvent)
+	// intents is the reservation LEDGER (#13384): the first-observed deadline for every
+	// (trace, prefix) intent, retained for the LIFETIME OF THE INTENT GENERATION rather
+	// than the lifetime of the reservation. A reservation is pruned the moment its grace
+	// closes; this ledger is what remembers the deadline AFTER the reservation is gone,
+	// so a scan at now >= the original expiry can tell "this intent already expired"
+	// apart from "this intent is new" and decline instead of re-basing a fresh hold.
+	// Keyed exactly like a reservation, it is released whenever the trace leaves the
+	// snapshot or its hint turns terminal, so it tracks live membership (R-5).
+	intents map[reservationKey]reservationIntent
+	// epochs remembers, per trace, the last intent identity the scheduler observed.
+	// It is what distinguishes a fresh publication (a NEW identity -> a new intent
+	// generation, so a fresh deadline is minted) from a repeated scan of the SAME hint
+	// (the ledger tombstone governs). A terminal hint overwrites the epoch with the
+	// terminal identity, so a clear-then-republish is a witnessed change. Keyed by
+	// trace, one row per live trace, released when the trace leaves the snapshot (R-5).
+	epochs map[string]reservationIntentIdentity
+	onSlot func(SlotEvent)
+}
+
+// reservationIntent is one entry of the first-deadline ledger: the identity of the
+// intent generation that minted a reservation and its FIRST-observed arrival/expiry
+// stamps, which are never re-based. A later scan whose intent identity matches treats
+// the ledger as a tombstone: before expiresAtUnixNano it returns the SAME stamps, and
+// at/after it declines rather than minting a fresh deadline (R-1 / R-2).
+type reservationIntent struct {
+	identity           reservationIntentIdentity
+	reservedAtUnixNano int64
+	arrivesAtUnixNano  int64
+	expiresAtUnixNano  int64
+}
+
+// reservationIntentIdentity is the scheduler-VISIBLE identity of a TurnIntent for
+// reservation purposes. State.Rev is deliberately NOT part of it: Rev is a record
+// version bumped by any write (SetPriority, SetPace, a byte-identical SetTurnIntent),
+// so keying on it would renew the hold on an unrelated write (SPEC R-3). The identity
+// is exactly the fields that change what reservation a hint asks for — the prefix and
+// the forward arrival delay — so a prefix change is a NEW generation while a repeated
+// scan of the same hint is the SAME one.
+type reservationIntentIdentity struct {
+	prefix           string
+	arrivingInMillis int64
+}
+
+func intentIdentityOf(st State) reservationIntentIdentity {
+	return reservationIntentIdentity{prefix: st.Intent.Prefix, arrivingInMillis: st.Intent.ArrivingInMillis}
 }
 
 // NewScheduler builds an unattached scheduler under the given Policy. Bind it to a
 // table with Attach before calling Pick; an unattached scheduler's Pick returns no
 // winner.
 func NewScheduler(policy Policy) *Scheduler {
-	return &Scheduler{policy: policy, credits: map[string]int64{}, reservations: map[reservationKey]SlotReservation{}}
+	return &Scheduler{policy: policy, credits: map[string]int64{}, reservations: map[reservationKey]SlotReservation{}, intents: map[reservationKey]reservationIntent{}, epochs: map[string]reservationIntentIdentity{}}
 }
 
 // Attach binds the scheduler to a table and installs the internal slot-freed handlers
@@ -321,6 +366,24 @@ func (s *Scheduler) lockAndPruneReservations(now time.Time) (dropped []SlotReser
 // best-effort slot warm. They are strictly lower class than real requests: Pick ignores
 // them, and ExpireReservations/PromoteReservation reclaim them without touching table
 // state. now is supplied by the caller so the policy remains deterministic in tests.
+//
+// FIRST-DEADLINE WINS (#13384). The first time a (trace, prefix) intent is observed
+// establishes its arrival and expiry from THAT call's now, and every later scan of the
+// same intent identity returns those SAME stamps. Reservations are pruned the moment
+// their grace closes, so the stamps are remembered in the intents ledger, not in the
+// reservation map: this is what lets a scan at now >= the original expiry recognize the
+// hint as ALREADY EXPIRED and decline, instead of re-deriving a fresh unexpired hold
+// from the unchanged hint and resurrecting it forever. A NEW generation is minted only
+// on a witnessed identity change (prefix moved, or the hint was cleared and then
+// re-published); an identical hint that was never observed as cleared is conservatively
+// declined (R-4).
+//
+// BOOKKEEPING follows live membership, not the reservation lifetime: a trace that
+// leaves the snapshot, or whose hint turns terminal (zero/negative arrival, empty
+// prefix, WillDiscard), releases both its reservation and its ledger row, so a churning
+// table cannot grow the scheduler without bound. A reservation whose grace has closed
+// keeps its ledger row as the expiry tombstone; the row is released when the intent
+// generation changes or the trace itself leaves.
 func (s *Scheduler) ReserveKnownComing(now time.Time) []SlotReservation {
 	if s == nil {
 		return nil
@@ -331,22 +394,125 @@ func (s *Scheduler) ReserveKnownComing(now time.Time) []SlotReservation {
 		return nil
 	}
 	snap := s.table.Snapshot()
+	// One row of deferred state: a ledger row and/or a minted reservation. Writing
+	// decisions are staged and applied after the scan so a mint this scan observes is
+	// always paired with its ledger row, and a superseded generation's delete lands
+	// after (never before) the row it replaces.
+	type intentUpdate struct {
+		key     reservationKey
+		ledger  reservationIntent
+		res     SlotReservation
+		hasRes  bool
+		hasLedg bool
+	}
+	pending := make([]intentUpdate, 0, len(snap))
+	// live keys the ledger rows this snapshot owns; present keys the traces in it, so
+	// the release pass can drop every row belonging to a trace that has left the table.
+	live := make(map[reservationKey]struct{}, len(snap))
+	present := make(map[string]struct{}, len(snap))
 	out := make([]SlotReservation, 0)
 	for _, st := range snap {
+		present[st.TraceID] = struct{}{}
+		ident := intentIdentityOf(st)
+		prevIdent, hadEpoch := s.epochs[st.TraceID]
 		r, ok := reservationFromState(st, now)
 		if !ok {
+			// Terminal hint (zero/negative/unrepresentable arrival, empty prefix,
+			// WillDiscard): release the trace's advisory state and mint nothing. The
+			// epoch records the terminal identity so a later clear-then-republish IS a
+			// witnessed generation change, while a re-scan of the same terminal hint
+			// stays a no-op.
 			s.dropReservationsForTraceLocked(st.TraceID, "")
+			pending = append(pending, intentUpdate{
+				key:     reservationKey{trace: st.TraceID, prefix: prevIdent.prefix},
+				hasLedg: true, // clearing this trace's ledger rows (empty identity below)
+			})
+			s.epochs[st.TraceID] = ident
 			continue
 		}
-		s.dropReservationsForTraceLocked(st.TraceID, r.Prefix)
 		key := reservationKey{trace: r.TraceID, prefix: r.Prefix}
-		if cur, exists := s.reservations[key]; exists && cur.SourceRev == r.SourceRev {
-			out = append(out, cur)
+		live[key] = struct{}{}
+		// sameGeneration is true only when the trace's intent identity is unchanged AND
+		// the scheduler has actually observed this trace before. A first-ever sighting
+		// (or a prefix/arrival change) is a NEW generation and gets a fresh deadline.
+		sameGeneration := hadEpoch && prevIdent == ident
+		if !sameGeneration {
+			// A new generation supersedes this trace's ENTIRE older advisory state: drop
+			// every reservation and ledger row for the trace so a stale prefix can never
+			// be promoted and a stale deadline (even at the SAME prefix but a changed
+			// arrival delay) can never shadow the new generation (R-4a).
+			s.dropReservationsForTraceLocked(st.TraceID, "")
+			pending = append(pending, intentUpdate{
+				key:     reservationKey{trace: st.TraceID, prefix: prevIdent.prefix},
+				hasLedg: true,
+			})
+			s.epochs[st.TraceID] = ident
+		}
+		if prevRes, hasRes := s.reservations[key]; hasRes {
+			// A live reservation is this generation's first-observed deadline; a repeat
+			// scan returns it verbatim and never re-bases the stamps (R-1).
+			out = append(out, prevRes)
 			continue
 		}
-		s.reservations[key] = r
+		if led, hasLedger := s.intents[key]; sameGeneration && hasLedger {
+			// The reservation is gone but the generation is unchanged: its grace either
+			// closed (decline, R-2) or it was promoted (re-mint the SAME stamps).
+			if now.UTC().UnixNano() >= led.expiresAtUnixNano {
+				continue
+			}
+			r.ReservedAtUnixNano = led.reservedAtUnixNano
+			r.ArrivesAtUnixNano = led.arrivesAtUnixNano
+			r.ExpiresAtUnixNano = led.expiresAtUnixNano
+			pending = append(pending, intentUpdate{key: key, res: r, hasRes: true, ledger: led, hasLedg: true})
+			out = append(out, r)
+			continue
+		}
+		// First observation of this generation's deadline: the established stamps come
+		// from THIS call's now, and the ledger remembers them past the reservation (R-1).
+		led := reservationIntent{
+			identity:           ident,
+			reservedAtUnixNano: r.ReservedAtUnixNano,
+			arrivesAtUnixNano:  r.ArrivesAtUnixNano,
+			expiresAtUnixNano:  r.ExpiresAtUnixNano,
+		}
+		pending = append(pending, intentUpdate{key: key, res: r, hasRes: true, ledger: led, hasLedg: true})
 		out = append(out, r)
 	}
+	for _, u := range pending {
+		if u.hasRes {
+			s.reservations[u.key] = u.res
+		}
+		if u.hasLedg {
+			if u.ledger.identity == (reservationIntentIdentity{}) {
+				delete(s.intents, u.key)
+			} else {
+				s.intents[u.key] = u.ledger
+			}
+		}
+	}
+	// Release every ledger row the current snapshot does not own: the trace left the
+	// table (LRU eviction / Reset), its prefix moved, or its hint turned terminal. This
+	// is the R-5 bound — live membership is the only state that persists.
+	for key := range s.intents {
+		if _, ok := live[key]; !ok {
+			delete(s.intents, key)
+		}
+	}
+	// A reservation whose trace left the table is released immediately rather than left
+	// to age out of its grace: the hold exists to pin KV for a LIVE session, so a Reset /
+	// LRU eviction (or a terminal hint, already dropped above) must not keep scheduler
+	// state alive (R-5). This also makes a churn loop return to an empty reservation map.
+	for key := range s.reservations {
+		if _, ok := present[key.trace]; !ok {
+			delete(s.reservations, key)
+		}
+	}
+	for trace := range s.epochs {
+		if _, ok := present[trace]; !ok {
+			delete(s.epochs, trace)
+		}
+	}
+	sortReservations(out)
 	return out
 }
 
@@ -528,24 +694,81 @@ type reservationKey struct {
 	prefix string
 }
 
+// MaxArrivingMillis is the STATIC upper bound on an ArrivingInMillis hint: the
+// integer-division ceiling that keeps time.Duration(ms)*time.Millisecond from wrapping
+// int64. The multiply overflows for MaxArrivingMillis+1 (MaxInt64 ns wraps to a NEGATIVE
+// duration, so an oversized hint would otherwise look like an arrival in the past).
+//
+// It guards the MULTIPLY only, and is deliberately retained as the static half of the
+// R-6 gate (SPEC §5): a delay anywhere in [1, MaxArrivingMillis] multiplies cleanly. The
+// ADD is a separate hazard and is bounded separately by arrivingMillisOK, which subtracts
+// the caller's nowNs (and the grace tail) from the ceiling. Do NOT use this constant alone
+// as an admission test — it is a multiply bound, not an arrival bound.
+const MaxArrivingMillis = math.MaxInt64 / int64(time.Millisecond)
+
+// arrivingMillisOK is the R-6 gate: a hint must be a positive, representable delay whose
+// arrival AND expiry from now both stay inside the int64 nanosecond timeline. Two bounds
+// are required, because the two arithmetic steps overflow independently:
+//
+//   - the MULTIPLY bound: ms <= MaxArrivingMillis keeps ms*time.Millisecond <= MaxInt64.
+//     Static arithmetic alone is insufficient: it says nothing about the SUM.
+//   - the ADD bound: the reservation computes ReservedAtUnixNano = nowNs and
+//     ArrivesAtUnixNano = nowNs + ms*1e6, ExpiresAtUnixNano = that + grace. So the ceiling
+//     must leave room for nowNs AND the grace tail:
+//     ms <= (MaxInt64 - nowNs - graceNs) / 1e6.
+//     Without the nowNs term a near-max hint wraps the SUM negative and mints an inverted
+//     row (ExpiresAt < ArrivesAt < ReservedAt) — exactly what R-6 forbids. Without the
+//     grace term an arrival landing at MaxInt64 overflows one step later.
+//
+// Checked BEFORE any multiply or Add, so a pathological hint can never overflow into a
+// bogus (negative or past) arrival; rejection mints nothing and never panics.
+func arrivingMillisOK(ms int64, now time.Time) bool {
+	if ms <= 0 || ms > MaxArrivingMillis {
+		return false
+	}
+	nowNs := now.UTC().UnixNano()
+	// Leave room for the constant grace tail as well as the delay itself. graceNs is a
+	// small positive constant (DefaultReservationGrace), so the subtraction is exact and
+	// cannot itself underflow for any representable now.
+	ceilingNs := int64(math.MaxInt64) - nowNs - int64(DefaultReservationGrace)
+	if ceilingNs < 0 {
+		// now is already within one grace of the representable timeline end: no positive
+		// delay can be added without wrapping, so decline.
+		return false
+	}
+	return ms <= ceilingNs/int64(time.Millisecond)
+}
+
 func reservationFromState(st State, now time.Time) (SlotReservation, bool) {
-	if st.Intent.ArrivingInMillis <= 0 || st.Intent.Prefix == "" {
+	if st.Intent.Prefix == "" {
 		return SlotReservation{}, false
 	}
 	if st.Intent.WillDiscard {
 		return SlotReservation{}, false
 	}
-	nowNs := now.UTC().UnixNano()
-	arrives := now.UTC().Add(time.Duration(st.Intent.ArrivingInMillis) * time.Millisecond)
+	if !arrivingMillisOK(st.Intent.ArrivingInMillis, now) {
+		return SlotReservation{}, false
+	}
+	nowT := now.UTC()
+	nowNs := nowT.UnixNano()
+	arrives := nowT.Add(time.Duration(st.Intent.ArrivingInMillis) * time.Millisecond)
 	expires := arrives.Add(DefaultReservationGrace)
-	return SlotReservation{
+	res := SlotReservation{
 		TraceID:            st.TraceID,
 		Prefix:             st.Intent.Prefix,
 		SourceRev:          st.Rev,
 		ReservedAtUnixNano: nowNs,
 		ArrivesAtUnixNano:  arrives.UnixNano(),
 		ExpiresAtUnixNano:  expires.UnixNano(),
-	}, true
+	}
+	// Belt-and-suspenders: reject rather than mint any row that violates the R-6 ordering
+	// invariant ReservedAtNano <= ArrivesAtNano <= ExpiresAtNano. arrivingMillisOK should
+	// make this unreachable for a live hint, but the invariant is cheap to assert and is the
+	// property callers actually rely on, so it is enforced where the row is built.
+	if res.ArrivesAtUnixNano < res.ReservedAtUnixNano || res.ExpiresAtUnixNano < res.ArrivesAtUnixNano {
+		return SlotReservation{}, false
+	}
+	return res, true
 }
 
 func (s *Scheduler) pruneReservationsLocked(now time.Time) []SlotReservation {
