@@ -19,6 +19,16 @@ import (
 
 const Schema = "fak.compute_trace.v1"
 
+// Bounds on optional activation-sample capture. Sampling is a diagnostic aid,
+// never a tensor dump: each event may carry at most MaxActivationSamplesPerEvent
+// values and a recorder retains at most MaxActivationSamplesTotal across all of
+// its events. Excess values are dropped and counted, keeping a trace bounded on
+// a memory-constrained host and keeping the comparator fail-closed.
+const (
+	MaxActivationSamplesPerEvent = 32
+	MaxActivationSamplesTotal    = 4096
+)
+
 type Event struct {
 	Sequence         int64     `json:"sequence"`
 	RunID            string    `json:"run_id"`
@@ -44,6 +54,19 @@ type Event struct {
 	Shapes           [][]int   `json:"shapes,omitempty"`
 	Status           string    `json:"status"`
 	ProvenanceDigest string    `json:"provenance_digest"`
+
+	// Optional bounded activation-sample record (additive; historical v1
+	// artifacts without these fields still decode). Layer and Token give the
+	// sample a stable identity within a forward; InputDigest and WeightDigest
+	// carry the provenance a comparator uses to refuse an apples-to-oranges
+	// comparison. SampleIndices are logical indices into the stage's output;
+	// SampleValues are the matching values.
+	Layer         int       `json:"layer,omitempty"`
+	Token         int       `json:"token,omitempty"`
+	InputDigest   string    `json:"input_digest,omitempty"`
+	WeightDigest  string    `json:"weight_digest,omitempty"`
+	SampleIndices []int     `json:"sample_indices,omitempty"`
+	SampleValues  []float32 `json:"sample_values,omitempty"`
 }
 
 type Artifact struct {
@@ -51,14 +74,22 @@ type Artifact struct {
 	Events             []Event `json:"events"`
 	Dropped            uint64  `json:"dropped_events"`
 	ObserverOverheadNS int64   `json:"observer_overhead_ns"`
+
+	// Activation-sample accounting, distinct from Dropped (dropped EVENTS). A
+	// nonzero sample-drop counter means the trace is incomplete and the
+	// comparator must report INCOMPARABLE rather than agreement.
+	RetainedSampleValues uint64 `json:"retained_sample_values,omitempty"`
+	DroppedSampleValues  uint64 `json:"dropped_sample_values,omitempty"`
 }
 
 type Recorder struct {
-	mu       sync.Mutex
-	limit    int
-	events   []Event
-	dropped  uint64
-	overhead int64
+	mu          sync.Mutex
+	limit       int
+	events      []Event
+	dropped     uint64
+	overhead    int64
+	retained    uint64
+	droppedSamp uint64
 }
 
 // New returns a disabled recorder when limit is zero. Enabled recorders retain at most limit events.
@@ -81,8 +112,42 @@ func (r *Recorder) Record(e Event) {
 		e.Status = "ok"
 	}
 	e.Shapes = cloneShapes(e.Shapes)
+	e.SampleIndices, e.SampleValues = r.boundSamples(e.SampleIndices, e.SampleValues)
 	r.events = append(r.events, e)
 	r.overhead += time.Since(began).Nanoseconds()
+}
+
+// boundSamples enforces the per-event and recorder-total sample caps, returning
+// deep copies so a caller mutating its slice after Record cannot alias the
+// retained record. Values dropped past either cap increment droppedSamp; the
+// indices are clipped to the retained values so the two slices stay parallel.
+func (r *Recorder) boundSamples(idx []int, vals []float32) ([]int, []float32) {
+	if len(vals) == 0 {
+		return nil, nil
+	}
+	keep := len(vals)
+	if keep > MaxActivationSamplesPerEvent {
+		keep = MaxActivationSamplesPerEvent
+	}
+	if room := MaxActivationSamplesTotal - int(r.retained); keep > room {
+		keep = room
+	}
+	if dropped := len(vals) - keep; dropped > 0 {
+		r.droppedSamp += uint64(dropped)
+	}
+	if keep <= 0 {
+		return nil, nil
+	}
+	outIdx := make([]int, keep)
+	for i := 0; i < keep; i++ {
+		if i < len(idx) {
+			outIdx[i] = idx[i]
+		}
+	}
+	outVals := make([]float32, keep)
+	copy(outVals, vals[:keep])
+	r.retained += uint64(keep)
+	return outIdx, outVals
 }
 func (r *Recorder) Artifact() Artifact {
 	if r == nil {
@@ -90,7 +155,20 @@ func (r *Recorder) Artifact() Artifact {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return Artifact{Schema: Schema, Events: append([]Event(nil), r.events...), Dropped: r.dropped, ObserverOverheadNS: r.overhead}
+	events := make([]Event, len(r.events))
+	for i := range r.events {
+		events[i] = r.events[i]
+		events[i].SampleIndices = append([]int(nil), r.events[i].SampleIndices...)
+		events[i].SampleValues = append([]float32(nil), r.events[i].SampleValues...)
+	}
+	return Artifact{
+		Schema:               Schema,
+		Events:               events,
+		Dropped:              r.dropped,
+		ObserverOverheadNS:   r.overhead,
+		RetainedSampleValues: r.retained,
+		DroppedSampleValues:  r.droppedSamp,
+	}
 }
 func (r *Recorder) Write(w io.Writer) error { return json.NewEncoder(w).Encode(r.Artifact()) }
 func Read(rd io.Reader) (Artifact, error) {
