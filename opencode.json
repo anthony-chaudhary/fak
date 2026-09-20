@@ -118,6 +118,13 @@
                                                                                          },
                                                                                "name":  "Qwen 3.8 27B UD Q2_K_XL (Local Halo)"
                                                                            },
+                                                "qwen3.8-27b-q4_k_m":  {
+                                                                             "limit":  {
+                                                                                           "context":  20480,
+                                                                                           "output":  4096
+                                                                                       },
+                                                                             "name":  "Qwen 3.8 27B Q4_K_M (Native Mac)"
+                                                                         },
                                                 "fak-local":  {
                                                                   "limit":  {
                                                                                 "context":  32768,

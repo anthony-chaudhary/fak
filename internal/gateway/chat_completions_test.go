@@ -98,6 +98,10 @@ func TestChatCompletionsMetalMTPSpeculativeHeaderAndDispatch(t *testing.T) {
 	if coord == nil {
 		t.Fatal("expected non-nil MetalMTPCoordinator on server")
 	}
+	// MetalMTP config constructs the coordinator but intentionally remains
+	// evidence-gated. This execution witness takes the explicit operator route so
+	// the request is admitted and can prove actual draft generation.
+	srv.SetMetalMTPCoordinator(coord)
 
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -158,6 +162,11 @@ func TestChatCompletionsMetalMTPStreamingHeaderAndDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
 	}
+	coord := srv.MetalMTPCoordinator()
+	if coord == nil {
+		t.Fatal("expected non-nil MetalMTPCoordinator on server")
+	}
+	srv.SetMetalMTPCoordinator(coord)
 
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -207,6 +216,9 @@ func TestChatCompletionsMetalMTPStreamingHeaderAndDispatch(t *testing.T) {
 	}
 	if len(chunks) == 0 {
 		t.Fatal("expected stream chunks before [DONE]")
+	}
+	if stats := coord.Stats(); stats.TotalGenerated == 0 {
+		t.Fatal("expected MetalMTPCoordinator TotalGenerated > 0 after streaming completions dispatch")
 	}
 }
 

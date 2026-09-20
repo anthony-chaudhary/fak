@@ -253,10 +253,8 @@ func TestServedAdmissionDrivesReservations(t *testing.T) {
 		t.Fatal("hinted control minted no reservation; the equality above would be vacuous")
 	}
 
-	// Edge: Generation differs when a reservation for the same trace+prefix is
-	// created, reclaimed at its expiry boundary, and re-created. The hint stays LIVE,
-	// so the SAME scan prunes the expired hold and re-mints it; the controller
-	// attributes the reclaim as an "expired" observation and mints a fresh generation.
+	// Edge: expiry is terminal for an unchanged intent. A genuinely cleared and
+	// re-published intent may then establish a fresh generation for the same trace+prefix.
 	ctl3, tbl3, sched3 := newReservationDriverController(t, 1000, 2)
 	saturateRealQueue(t, ctl3)
 	tbl3.SetTurnIntent("gen-hint", session.TurnIntent{ArrivingInMillis: 30, Prefix: "sha256:gen-prefix"})
@@ -271,9 +269,8 @@ func TestServedAdmissionDrivesReservations(t *testing.T) {
 	ctl3.SetClock(func() time.Time { return expiredAt })
 	ctl3.Schedule()
 
-	// The CONTROLLER's own readback is the deliverable: the reclaim must surface as an
-	// "expired" ReservationObservation. (The scheduler itself re-mints for a still-live
-	// hint in the same call, so its own Reservations() is NOT the witness here.)
+	// The controller's own readback is the deliverable: the reclaim must surface as an
+	// "expired" ReservationObservation and the unchanged hint must not re-mint a hold.
 	var expiredSeen bool
 	for _, o := range ctl3.ReservationObservations() {
 		if o.Action == "expired" && o.TraceID == "gen-hint" && o.Prefix == "sha256:gen-prefix" {
@@ -283,12 +280,26 @@ func TestServedAdmissionDrivesReservations(t *testing.T) {
 	if !expiredSeen {
 		t.Fatalf("no 'expired' observation for gen-hint after crossing the expiry boundary: %+v", ctl3.ReservationObservations())
 	}
+	if got := sched3.Reservations(expiredAt); len(got) != 0 {
+		t.Fatalf("unchanged expired intent re-minted reservations: %+v", got)
+	}
+	if got := latestCreated(ctl3.ReservationObservations(), "gen-hint", "sha256:gen-prefix"); got == nil || got.Generation != firstCreated.Generation {
+		t.Fatalf("unchanged expired intent minted a new generation: first=%+v latest=%+v", firstCreated, got)
+	}
 
-	// The re-minted hold for the same trace+prefix is a NEW generation, strictly after
-	// the first, with the current captured clock.
+	// Clear is a witnessed identity transition. Re-publishing after that transition
+	// may establish a new generation at the newly captured clock.
+	clearedAt := expiredAt.Add(time.Hour)
+	ctl3.SetClock(func() time.Time { return clearedAt })
+	tbl3.SetTurnIntent("gen-hint", session.TurnIntent{})
+	ctl3.Schedule()
+	republishedAt := clearedAt.Add(time.Hour)
+	ctl3.SetClock(func() time.Time { return republishedAt })
+	tbl3.SetTurnIntent("gen-hint", session.TurnIntent{ArrivingInMillis: 30, Prefix: "sha256:gen-prefix"})
+	ctl3.Schedule()
 	secondCreated := latestCreated(ctl3.ReservationObservations(), "gen-hint", "sha256:gen-prefix")
 	if secondCreated == nil {
-		t.Fatalf("no re-created observation for gen-hint: %+v", ctl3.ReservationObservations())
+		t.Fatalf("no created observation after clear and re-publish: %+v", ctl3.ReservationObservations())
 	}
 	if secondCreated.Generation == firstCreated.Generation {
 		t.Fatalf("re-created reservation kept Generation %d; want a distinct generation for the same trace+prefix",
@@ -298,14 +309,14 @@ func TestServedAdmissionDrivesReservations(t *testing.T) {
 		t.Fatalf("re-created Generation %d not strictly after first %d; generation must be monotonic",
 			secondCreated.Generation, firstCreated.Generation)
 	}
-	if !secondCreated.At.Equal(expiredAt) {
-		t.Fatalf("re-created At = %v, want the current captured clock %v", secondCreated.At, expiredAt)
+	if !secondCreated.At.Equal(republishedAt) {
+		t.Fatalf("re-created At = %v, want the re-publish clock %v", secondCreated.At, republishedAt)
 	}
 
 	// Now make the hint GENUINELY vanish from the scheduler's scan (WillDiscard), so
 	// `ReserveKnownComing` reports nothing and the scheduler truly drops the hold.
 	// ONLY then may the "scheduler holds none" assertion be made.
-	vanishAt := expiredAt.Add(time.Hour)
+	vanishAt := republishedAt.Add(time.Hour)
 	ctl3.SetClock(func() time.Time { return vanishAt })
 	tbl3.SetTurnIntent("gen-hint", session.TurnIntent{
 		ArrivingInMillis: 30,
