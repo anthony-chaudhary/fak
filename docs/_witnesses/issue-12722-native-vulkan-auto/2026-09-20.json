@@ -1,0 +1,279 @@
+{
+  "schema": "fak.native-vulkan-auto-smoke/v1",
+  "witnessed_at": "2026-09-20T02:32:37Z",
+  "claim": "One buffered fak serve request selected and invoked native Vulkan on physical Strix Halo with the backend selector omitted.",
+  "issue": 12722,
+  "auto_selection_commit": "3ff74e43267209b5f8c68bd684e4ce69013ca70d",
+  "source_revision": "8626616d520438eb690c40dc2cd9c86e41d0f09b",
+  "binary_sha256": "7c8d00c1371ee216fd9548f6de5a2090f3ad11e3a5253a6bda94f989f74a441d",
+  "model_sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+  "model": "Qwen3.8-27B-Q4_K_M",
+  "hardware": {
+    "device": "AMD Strix Halo",
+    "pci_id": "1002:1586",
+    "driver": "amdgpu",
+    "gfx_arch": "gfx1151"
+  },
+  "invocation": {
+    "backend_flag_present": false,
+    "FAK_BACKEND_present": false,
+    "engine": "inkernel",
+    "native_context_tokens": 2048,
+    "native_admission_token_budget": 2048,
+    "session_registry": "off",
+    "native_code_tools": false,
+    "FAK_GGUF_LOAD_WORKERS": 1,
+    "GOMEMLIMIT": "28GiB",
+    "shaders": "deployed SPIR-V directory",
+    "icd": "RADV",
+    "listener": "loopback-only",
+    "transient_user": "fak",
+    "hard_memory_limit_bytes": 42949672960,
+    "swap_limit_bytes": 0,
+    "runtime_limit_seconds": 300
+  },
+  "request": {
+    "prompt": "Reply with exactly: native GPU test",
+    "max_tokens": 8,
+    "stream": false,
+    "temperature": 0,
+    "native_inference_receipt": true,
+    "decode_trace": true
+  },
+  "result": {
+    "generated_text": "native GPU test",
+    "completion_tokens": 3,
+    "native": {
+      "caller_attestations": {
+        "expected_model": "Qwen3.8-27B-Q4_K_M",
+        "expected_backend": "vulkan",
+        "expected_forward_path": "vulkan/qwen35-gdn-ssm-decode-v1",
+        "caller_attested_binary_sha256": "7c8d00c1371ee216fd9548f6de5a2090f3ad11e3a5253a6bda94f989f74a441d",
+        "caller_attested_source_revision": "8626616d520438eb690c40dc2cd9c86e41d0f09b",
+        "caller_attested_usage_zero_omission_verified": false
+      },
+      "receipt": {
+        "token_ids": [
+          28767,
+          21966,
+          1228
+        ],
+        "token_logprobs": [
+          -0.001735797778662839,
+          -7.939931605442309E-05,
+          -4.057767079053051E-05
+        ],
+        "prompt_token_ids": [
+          248045,
+          846,
+          198,
+          20206,
+          440,
+          6681,
+          25,
+          9575,
+          21966,
+          1228,
+          248046,
+          198,
+          248045,
+          74455,
+          198,
+          248068,
+          271,
+          248069,
+          271
+        ],
+        "tokenizer_id": "sha256:c7562ae192f8d42338b1f138c8aa050651395e41a1afa06e966fbab874840832",
+        "renderer_id": "ornith-qwen35-chatml-v1:no-thinking",
+        "rendered_sha256": "2d659900843941ad10ec928afb1e4e66bd97f234836eaddd9d2414350719f421",
+        "prefill_seconds": 1.4510080969999999,
+        "ttft_seconds": 1.506761809,
+        "decode_seconds": 0.534797695,
+        "model": "Qwen3.8-27B-Q4_K_M",
+        "engine": "inkernel",
+        "planner": "inkernel",
+        "owner": "fak",
+        "backend": "vulkan",
+        "forward_path": "vulkan/qwen35-gdn-ssm-decode-v1",
+        "q4k": true,
+        "fallback_active": false,
+        "prefill_chunk_tokens": 512,
+        "kernel_selection": {
+          "schema": "fak.kernel-selection/v1",
+          "model_ref": "Qwen3.8-27B-Q4_K_M",
+          "backend": "vulkan",
+          "forward_path": "vulkan/qwen35-gdn-ssm-decode-v1",
+          "quantization": "Q4_K",
+          "prefill_chunk_tokens": 512,
+          "cpu_offload_experts": 0,
+          "q4k_gate_up_output_slab": false
+        },
+        "kernel_selection_digest": "sha256:3a31fc31cb4191d6bb1a905f0d34c1b8bfd7d2f67f992f30221de24bfaa2a9e1",
+        "qwen35_sequence_prefill_route": {
+          "prefill_calls": 1,
+          "observed_calls": 1,
+          "complete": true,
+          "native_performance_qualifying": true,
+          "status": {
+            "requested_path": "qwen35-hybrid-sequence-prefill-v1",
+            "effective_path": "qwen35-hybrid-sequence-prefill-v1",
+            "fallback_active": false,
+            "native_performance_qualifying": true,
+            "embedding_panel_bytes": 389120
+          }
+        }
+      },
+      "decode_trace": {
+        "schema": "fak.native-decode-trace/1",
+        "engine": "fak-native",
+        "events": [
+          {
+            "token_index": 1,
+            "elapsed_ns": 1520588,
+            "forward": {
+              "kind": "session_step",
+              "duration_ns": 200718774,
+              "active_lanes": 1
+            }
+          },
+          {
+            "token_index": 2,
+            "elapsed_ns": 204522199,
+            "forward": {
+              "kind": "session_step",
+              "duration_ns": 163008509,
+              "active_lanes": 1
+            }
+          },
+          {
+            "token_index": 3,
+            "elapsed_ns": 369110119,
+            "forward": {
+              "kind": "session_step",
+              "duration_ns": 165588401,
+              "active_lanes": 1
+            }
+          }
+        ]
+      },
+      "prompt_replay": {
+        "prompt_token_ids": [
+          248045,
+          846,
+          198,
+          20206,
+          440,
+          6681,
+          25,
+          9575,
+          21966,
+          1228,
+          248046,
+          198,
+          248045,
+          74455,
+          198,
+          248068,
+          271,
+          248069,
+          271
+        ],
+        "tokenizer_id": "sha256:c7562ae192f8d42338b1f138c8aa050651395e41a1afa06e966fbab874840832",
+        "renderer_id": "ornith-qwen35-chatml-v1:no-thinking",
+        "rendered_sha256": "2d659900843941ad10ec928afb1e4e66bd97f234836eaddd9d2414350719f421",
+        "eligible": true
+      },
+      "ttft_seconds": 1.506761809,
+      "prefill_phase_seconds": 1.4510080969999999,
+      "prefill_computed_tokens": 0,
+      "prefill_measured": false,
+      "prefill_phase_rate_tok_per_s": 0,
+      "decode_phase_seconds": 0.534797695,
+      "decode_phase_forward_rate_tok_per_s": 5.6095978498935,
+      "decode_forward_calls": 3,
+      "decode_forward_seconds": 0.529315684,
+      "decode_forward_rate_tok_per_s": 5.66769527275145
+    },
+    "measurement_warning": "native phases measured; raw parity requires observed prompt reuse and at least one decode forward",
+    "benchmark_verdict": "WARN",
+    "benchmark_exit_code": 1,
+    "performance_qualification": "not claimed"
+  },
+  "process_gpu_witness": {
+    "pid": 1270530,
+    "drm_client_id": 10361,
+    "driver": "amdgpu",
+    "counter": "drm-engine-gfx",
+    "before_utc": "2026-09-20T02:32:37Z",
+    "before_ns": 1445716992,
+    "after_utc": "2026-09-20T02:33:07Z",
+    "after_ns": 3329885092,
+    "delta_ns": 1884168100,
+    "canonical_gpu_lease_held_by_pid": true,
+    "source": "/proc/<pid>/fdinfo/*",
+    "serving_log": "backend=vulkan forward_path=vulkan/qwen35-gdn-ssm-decode-v1 q4k=true q8dec=avx512+fused/32w"
+  },
+  "resource_observation": {
+    "memory_peak_bytes": 42949677056,
+    "cgroup_max_events": 4547,
+    "cgroup_oom_events": 0,
+    "cgroup_oom_kill_events": 0,
+    "swap_used_before_mib": 16417,
+    "swap_used_after_mib": 16417,
+    "host_available_after_request_mib": 19028,
+    "host_available_after_cleanup_mib": 47058
+  },
+  "prior_attempts": [
+    {
+      "model": "Qwen3.8-27B-UD-Q2_K_XL",
+      "hard_memory_limit_gib": 48,
+      "outcome": "startup cgroup OOM; no request"
+    },
+    {
+      "model": "Qwen3.8-27B-Q4_K_M",
+      "hard_memory_limit_gib": 40,
+      "loader_workers": "default",
+      "outcome": "startup cgroup OOM; no request"
+    },
+    {
+      "model": "Qwen3.8-27B-Q4_K_M",
+      "outcome": "experiment user mismatch refused canonical GPU lock; corrected to deployed service user before load"
+    }
+  ],
+  "cleanup": {
+    "utc": "2026-09-20T02:34:18Z",
+    "transient_unit": "inactive",
+    "listener_absent": true,
+    "gpu_lock_unheld": true,
+    "ssh_tunnel_stopped": true,
+    "hardware_lease_released": true,
+    "reference_services_healthy": true,
+    "reference_pids_before": [
+      1269408,
+      1269453
+    ],
+    "reference_pids_after": [
+      1269408,
+      1269453
+    ],
+    "persistent_service_configuration_changed": false
+  },
+  "verification": {
+    "auto_tests": "go test ./cmd/fak -run TestServeBackendAuto -count=1",
+    "auto_tests_result": "PASS",
+    "receipt_tests": "go test ./internal/gateway -run NativeInferenceReceipt -count=1",
+    "receipt_tests_result": "PASS",
+    "independent_readback": "sidecar_review: PASS for native Vulkan invocation; no performance qualification",
+    "raw_benchmark_sha256": "9a9aaf536b9f48bb2318d3bb54bd14d15c866b1d47104fece576abcdd96a3db3"
+  },
+  "limits": [
+    "One short Qwen3.8 request, not DeepSeek V4.1 model qualification.",
+    "No all-operations-on-GPU, numerical parity, sustained throughput, concurrency, or endurance claim.",
+    "Benchmark WARN retained: prefix reuse unmeasured. Performance campaign remains issue 11959.",
+    "The successful loader-setting bundle was tested together; no individual-setting attribution.",
+    "Memory plan reported device residency, not startup process peak.",
+    "Existing fleet reference-serving mode preserved.",
+    "Public artifact projects relevant raw receipt fields and omits private host identifiers."
+  ]
+}

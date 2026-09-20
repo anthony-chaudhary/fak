@@ -224,3 +224,46 @@ remaining output as source defects in this change.
 Scoped RED/GREEN evidence, normal prospective build checks, and ordinary commit
 hooks are retained; no unsafe symptom-skip flag or test-selection environment
 workaround is used to represent the full package as passing.
+
+## Physical automatic-selection witness (2026-09-20)
+
+[Receipt](../../_witnesses/issue-12722-native-vulkan-auto/2026-09-20.json):
+[HW-WITNESSED] one buffered Qwen3.8-27B-Q4_K_M request ran through native Vulkan
+on physical Strix Halo. The deployed binary at `8626616d5204` already contains
+`3ff74e432672`, so this closes the invocation-evidence gap without a new resolver.
+The process launched with `FAK_BACKEND` absent and no `--backend` flag. It returned
+`native GPU test` with three finite token log-probabilities, backend `vulkan`, and
+forward path `vulkan/qwen35-gdn-ssm-decode-v1`.
+
+The same serving process held the canonical GPU lease. Its AMDGPU client 10361
+`drm-engine-gfx` counter advanced from 1,445,716,992 to 3,329,885,092 ns around the
+request (delta 1,884,168,100 ns). This independent process counter supplements the
+request receipt; the receipt's `fallback_active=false` alone is not dispatch proof.
+The simultaneous `q8dec=avx512+fused/32w` diagnostic does not identify the selected
+execution backend and must not be read as evidence of a CPU-only request.
+
+Reproduction uses a Vulkan-enabled build with initialized RADV and deployed
+SPIR-V, the pinned model artifact, an omitted backend selector, a 2,048-token
+native context, `FAK_GGUF_LOAD_WORKERS=1`, and `GOMEMLIMIT=28GiB`. The transient
+server ran as the deployed service user with a 40 GiB cgroup memory cap, no swap,
+and a five-minute lifetime. The two loader settings were tested as one bundle.
+Default-worker attempts reached their experimental memory caps before serving;
+the device-residency plan is not a startup-host-memory estimate.
+
+Before and after a buffered `/v1/chat/completions` request, sample the native
+process's AMDGPU render-file descriptors under `/proc/<pid>/fdinfo/`. Require the
+same PID/client, a positive engine-time delta, the Vulkan native receipt, finite
+log-probabilities, and the expected nonempty output. Recheck the canonical GPU
+lease owner and incumbent health, then stop the transient server and release its
+lease. This run left the incumbent reference services healthy with unchanged
+PIDs, and removed its listener, tunnel, and GPU-lock holder.
+
+Software guards also passed: `go test ./cmd/fak -run TestServeBackendAuto -count=1`
+and `go test ./internal/gateway -run NativeInferenceReceipt -count=1`. An independent
+reviewer read back the raw identity, request, GPU-counter and cleanup artifacts.
+
+This is an invocation smoke witness, not full-model or performance qualification.
+The benchmark's original `WARN` and exit code 1 are retained because prompt reuse
+was unmeasured. Matched cold/warm performance remains [#11959](https://github.com/anthony-chaudhary/fak/issues/11959).
+No ROCm execution, DeepSeek V4.1 qualification, all-GPU execution, numerical parity,
+concurrency, or sustained-load result is asserted. No persistent fleet mode changed.
