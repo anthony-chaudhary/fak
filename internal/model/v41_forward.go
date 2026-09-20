@@ -2336,15 +2336,20 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			attnOut[t] = projected
 			continue
 		}
-		rows := t + 1
-		idx := make([]int32, rows+1) // one trailing -1 marks an empty slot beyond the causal prefix
-		for i := 0; i < rows; i++ {
-			idx[i] = int32(i)
-		}
-		idx[rows] = -1
+		// #13303: the plain layer's visible keys are its CONFIGURED causal
+		// window, not the unconditioned full prefix. A positive
+		// Config.Window[l] restricts the row set to the trailing w causal keys
+		// max(0,t-w+1)..t; the -1 sentinel (and a nil/short Window, which
+		// windowForLayer defaults to -1) keeps the historical full-causal
+		// prefix 0..t byte-for-byte. The window changes only WHICH ordered rows
+		// are contracted; the score/softmax/value math is untouched.
+		window := cfg.windowForLayer(l)
+		keys := v41PlainWindowKeys(t, window)
+		idx := v41PlainWindowIndexList(keys)
+		rows := len(keys)
 		flatKV := make([]float32, 0, rows*hd)
-		for i := 0; i <= t; i++ {
-			flatKV = append(flatKV, kvRows[i]...)
+		for _, k := range keys {
+			flatKV = append(flatKV, kvRows[k]...)
 		}
 		o, err := V41SparseAttentionSink(qHeads[t], flatKV, sink, idx, V41SparseAttentionSinkOptions{
 			B: 1, M: 1, Heads: nH, HeadDim: hd, TopK: rows + 1, N: rows, Softmax: scale,
