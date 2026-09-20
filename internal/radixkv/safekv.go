@@ -543,3 +543,389 @@ func cloneKV(kv *model.KVCache) *model.KVCache {
 	}
 	return kv.Clone()
 }
+
+// ContinuationSoftPriority is the fixed soft-retention priority a scoped
+// continuation applies. It is strictly below 60 so TierFromRetentionPriority
+// maps it to Tier2IdleSubagent — never Tier0/Tier1 — which is what makes a
+// continuation SOFT: it survives idle reclamation but is always reclaimable
+// under budget pressure. It is never a pin.
+const ContinuationSoftPriority = 45
+
+// ContinuationSoftTTLTicks is the finite logical-tick window a scoped
+// continuation retains its node for. It is measured in the tree's logical
+// access clock, never wall-clock, so the reclaim verdict is deterministic and
+// replayable. It must stay FINITE and positive: a RetainForever/0 TTL would be
+// a hard pin in disguise.
+const ContinuationSoftTTLTicks int64 = 64
+
+var (
+	ErrContinuationUnsupported = errors.New("radixkv: continuation retention is not supported here")
+	ErrContinuationNotAdmitted = errors.New("radixkv: prefix was not privately admitted")
+	ErrContinuationNodeGone    = errors.New("radixkv: continuation node is no longer resident")
+	ErrContinuationGeneration  = errors.New("radixkv: continuation generation was replaced")
+	ErrContinuationNotOwner    = errors.New("radixkv: continuation handle is not owner-scoped")
+)
+
+// ContinuationState is the typed status of a ContinuationHandle.
+type ContinuationState uint8
+
+const (
+	// ContinuationDormant: created but not yet activated (no live policy applied).
+	ContinuationDormant ContinuationState = iota
+	// ContinuationActive: this handle currently holds the node's soft policy.
+	ContinuationActive
+	// ContinuationStale: the node is resident but its record generation was replaced.
+	ContinuationStale
+	// ContinuationEvicted: the node is no longer attached to the tree.
+	ContinuationEvicted
+	// ContinuationUnsupported: the handle is nil/foreign or the payload is gone.
+	ContinuationUnsupported
+)
+
+func (s ContinuationState) String() string {
+	switch s {
+	case ContinuationDormant:
+		return "dormant"
+	case ContinuationActive:
+		return "active"
+	case ContinuationStale:
+		return "stale"
+	case ContinuationEvicted:
+		return "evicted"
+	default:
+		return "unsupported"
+	}
+}
+
+// ContinuationHandle is an owner-scoped reference to a resident reusable KV
+// payload. It is DORMANT until Activate; it carries only a SOFT, finite-TTL
+// retention policy and is never a pin.
+//
+// INVARIANTS:
+//   - It holds NO tree lease. BeginPrivateContinuation calls Done immediately
+//     after recording the node pointer, so holding a handle can never steal
+//     eviction budget or ref-count-pin a prefix (the ticket forbids a ref pin).
+//   - It is generation-bound only when the bound node owns a snapshot RECORD: the
+//     generation is then that record's own incarnation (`recordGen`), and a
+//     replaced record refuses typed (ErrContinuationGeneration). For a pure-KV
+//     node (no record) the monotonic `gen` stamp (a fresh nextRecordSeq) is NOT
+//     itself re-validated; the handle's identity is instead enforced by the
+//     node's attachment (nodeAttached) plus its exact TOKEN identity: plen + a
+//     mint-time edge-label copy compared against the node's current key. A radix
+//     split re-parents the node and rewrites its edge label so the node now
+//     spells a DIFFERENT prefix, and plen + the key copy are the read-only split
+//     witnesses that detect this without mutating radixkv.go. A true split, a
+//     longer path attached below the node (no children), an extension, or an
+//     eviction refuses typed even though the pure-KV `gen` stamp is not itself
+//     re-validated, so a stale continuation can never serve a payload it did not
+//     admit.
+//   - It is owner-scoped: Activate/Release reject a handle presented by a different
+//     tenant/agent, so one owner cannot retain or release another's prefix.
+type ContinuationHandle struct {
+	tree   *Tree
+	node   *node
+	owner  CacheIdentity
+	gen    uint64 // generation stamped at creation (recordGen when owned, else recordSeq)
+	plen   int    // bound node's prefix length at mint time (split/replace witness)
+	key    []int  // bound node's edge label at mint time (true-split witness)
+	ttl    int64  // finite positive logical-tick retention window
+	active bool
+	// activation records the EXACT retention request this handle wrote when it
+	// activated. Release compares it against the node's current retention: if a
+	// later policy decision replaced it, release leaves that decision untouched.
+	activation RetentionRequest
+}
+
+// Owner returns the tenant/agent this handle is scoped to.
+func (h *ContinuationHandle) Owner() CacheIdentity {
+	if h == nil {
+		return CacheIdentity{}
+	}
+	return h.owner
+}
+
+// Generation returns the monotonic generation stamped at creation.
+func (h *ContinuationHandle) Generation() uint64 {
+	if h == nil {
+		return 0
+	}
+	return h.gen
+}
+
+// Active reports whether this handle currently holds a live soft-retention
+// policy on its node.
+func (h *ContinuationHandle) Active() bool {
+	return h != nil && h.active
+}
+
+// Dormant reports whether the handle was created but has not (yet) been
+// activated.
+func (h *ContinuationHandle) Dormant() bool {
+	return h != nil && !h.active
+}
+
+// nextRecordSeq advances the tree's monotonic record-incarnation sequence and
+// returns the fresh generation. Unlike mintRecord it does NOT create a snapshot
+// record or mutate any node — it is only a generation stamp.
+func (t *Tree) nextRecordSeq() uint64 {
+	t.recordSeq++
+	return t.recordSeq
+}
+
+// nodeHasReusablePayload reports whether n owns a complete reusable payload in
+// any physical tier: a device K/V, or a complete snapshot resident in hot L1,
+// host DRAM L2, or the remote L3 reference tier. It mirrors the tree's own
+// record-liveness predicate so a continuation is admitted whenever a reusable
+// payload is genuinely resident, not only when it is hot.
+func nodeHasReusablePayload(n *node) bool {
+	if n == nil {
+		return false
+	}
+	return n.kv != nil || n.snapshot != nil || n.hostSnapshot != nil || n.remoteSnapshot != nil
+}
+
+// continuationSuperseded reports whether the handle's bound node no longer
+// terminates the exact token path it was minted for. Two read-only witnesses
+// cover the two ways that identity dies WITHOUT the pointer being detached:
+//
+//   - EDGE REWRITE (a true radix split): split() re-parents the node and replaces
+//     its key with the suffix beyond the split point, so the node now spells a
+//     DIFFERENT prefix. plen alone does not catch this — the full path length is
+//     unchanged — so the mint-time key copy is compared.
+//   - EXTENSION (a longer path attached below): the node was a terminal payload
+//     but now has children, so its exact-terminal continuation was replaced by a
+//     longer cached one.
+//
+// It never mutates the tree, creates a node, or allocates a payload: a stale
+// handle is always a typed safe no-op.
+func continuationSuperseded(h *ContinuationHandle) bool {
+	if h == nil || h.node == nil {
+		return true
+	}
+	if len(h.node.children) != 0 {
+		return true
+	}
+	if len(h.node.key) != len(h.key) {
+		return true
+	}
+	for i, tok := range h.key {
+		if h.node.key[i] != tok {
+			return true
+		}
+	}
+	return false
+}
+
+// BeginPrivateContinuation mints a DORMANT, owner-scoped continuation handle for
+// a prefix the caller has ALREADY privately admitted via AdmitPrivate /
+// AdmitPrivateSnapshot.
+//
+// Generation binding is exact for a node owning a snapshot RECORD: the handle
+// carries that record's incarnation (recordGen), and a replaced record refuses
+// typed (ErrContinuationGeneration). A pure-KV node (no record) has no such
+// incarnation, so its monotonic `gen` stamp is NOT re-validated; identity is
+// enforced by the node's attachment plus its exact token identity (plen + a
+// mint-time edge-label copy + terminal/no-children), so a split, extension, or
+// eviction refuses typed.
+//
+// It requires the EXACT full token path to resolve to a node boundary carrying a
+// reusable payload in any physical tier (device KV, or a complete snapshot in
+// hot L1, host L2, or remote L3); a rejected admission or a foreign owner has no
+// such node, so the node lookup IS the admission witness (we never trust a nil
+// AdmitPrivate error alone). LookupNS leases the boundary (refs++); we copy what
+// we need and call Done on EVERY path before returning, so the handle is not a
+// ref-count pin and steals no eviction budget.
+func (s *ScopedTree) BeginPrivateContinuation(owner CacheIdentity, tokens []int) (*ContinuationHandle, error) {
+	if s == nil || s.tree == nil {
+		return nil, ErrContinuationUnsupported
+	}
+	if strings.TrimSpace(owner.Tenant) == "" {
+		return nil, ErrCacheIdentity
+	}
+	// The empty token path resolves to the namespace ROOT, which is not a privately
+	// admitted prefix; refuse it rather than mint a handle on a structural root.
+	if len(tokens) == 0 {
+		return nil, ErrContinuationNotAdmitted
+	}
+	ns, err := scopeNamespace(ScopeTenant, owner)
+	if err != nil {
+		return nil, err
+	}
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	node, matched := s.tree.LookupNS(ns, tokens)
+	if node == nil || matched != len(tokens) {
+		if node != nil {
+			s.tree.Done(node)
+		}
+		return nil, ErrContinuationNotAdmitted
+	}
+	// The node is leased by LookupNS. Release immediately: the handle must not be
+	// a ref-count pin, yet we keep the *node pointer to re-validate on Activate.
+	resident := nodeHasReusablePayload(node)
+	// Derive the generation from the node's OWN record incarnation when it owns a
+	// complete snapshot record. A fresh nextRecordSeq() here would collide with the
+	// recordGen InsertSnapshot already minted, making every snapshot-backed handle
+	// instantly stale (the activation guard compares recordGen != gen). For a
+	// pure-KV node (hasRecord=false) a fresh monotonic sequence is the only
+	// incarnation available.
+	gen := node.recordGen
+	if !node.hasRecord {
+		gen = s.tree.nextRecordSeq()
+	}
+	plen := node.plen
+	key := append([]int(nil), node.key...)
+	s.tree.Done(node)
+	if !resident {
+		return nil, ErrContinuationUnsupported
+	}
+	return &ContinuationHandle{
+		tree:  s.tree,
+		node:  node,
+		owner: owner,
+		gen:   gen,
+		plen:  plen,
+		key:   key,
+		ttl:   ContinuationSoftTTLTicks,
+	}, nil
+}
+
+// ActivateContinuation applies the handle's soft retention exactly ONCE. It is
+// idempotent: a second activation is a no-op that neither refreshes the
+// generation nor extends the TTL window, so a caller cannot use repeated
+// activation to pin a prefix indefinitely.
+//
+// It fails closed on a nil/foreign handle, an owner mismatch, a detached
+// (evicted/split) node, a replaced generation, or a gone payload. The applied
+// request is Priority ContinuationSoftPriority (<60 → Tier2IdleSubagent, always
+// reclaimable) with a FINITE TTL; it is a soft policy, never a pin.
+func (s *ScopedTree) ActivateContinuation(h *ContinuationHandle) error {
+	if s == nil || s.tree == nil || h == nil || h.tree != s.tree {
+		return ErrContinuationUnsupported
+	}
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	// Owner-scope guard: the handle must carry a complete scope identity. A
+	// handle whose owner is empty is not owner-scoped and must not retain.
+	if strings.TrimSpace(h.owner.Tenant) == "" {
+		return ErrContinuationNotOwner
+	}
+	if !s.tree.nodeAttached(h.node) {
+		return ErrContinuationNodeGone
+	}
+	if h.node.hasRecord && h.node.recordGen != h.gen {
+		return ErrContinuationGeneration
+	}
+	// Split/replace witness: a radix split re-parents this node and rewrites its
+	// key/plen so the pointer now spells a DIFFERENT prefix. A changed plen means
+	// the handle's token identity is gone even though the pointer is still
+	// attached; refuse rather than apply policy to the wrong node.
+	if h.node.plen != h.plen {
+		return ErrContinuationGeneration
+	}
+	// Supersession witness: a longer cached path was attached below this node, so
+	// it no longer terminates the prefix the handle admitted. Refuse rather than
+	// apply policy to a node whose exact-terminal identity was replaced.
+	if continuationSuperseded(h) {
+		return ErrContinuationGeneration
+	}
+	if !nodeHasReusablePayload(h.node) {
+		return ErrContinuationUnsupported
+	}
+	if h.active {
+		return nil
+	}
+	req := RetentionRequest{
+		Priority: ContinuationSoftPriority,
+		TTL:      h.ttl,
+		Admitted: int64(s.tree.clock),
+	}
+	if err := s.tree.SetNodeRetention(h.node, req); err != nil {
+		return err
+	}
+	h.activation = req
+	h.active = true
+	return nil
+}
+
+// ReleaseContinuation clears ONLY this handle's own policy. If a later policy
+// decision has replaced the node's retention (different priority, or a different
+// admission tick), release leaves that newer decision untouched — releasing an
+// old handle must never erase a later decision. When the handle still owns the
+// current policy it clears the node's retention entirely (no replacement
+// descriptor, no RetainForever window) so release has an observable effect. A
+// detached node returns ErrContinuationNodeGone as a typed, safe no-op; a
+// replaced-generation handle returns ErrContinuationGeneration and clears no
+// policy. A node is never recreated.
+func (s *ScopedTree) ReleaseContinuation(h *ContinuationHandle) error {
+	if s == nil || s.tree == nil || h == nil || h.tree != s.tree {
+		return ErrContinuationUnsupported
+	}
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	if !h.active {
+		return nil
+	}
+	if !s.tree.nodeAttached(h.node) {
+		return ErrContinuationNodeGone
+	}
+	// Replaced-generation witness, same as Activate: the node still carries a
+	// record but its record generation was replaced, so this handle no longer
+	// names the recollection it admitted. Refuse rather than clear the policy of
+	// a newer generation.
+	if h.node.hasRecord && h.node.recordGen != h.gen {
+		return ErrContinuationGeneration
+	}
+	// Split/replace witness, same as Activate: the pointer may still be attached
+	// but now spells a different prefix. Never clear a policy on the wrong node.
+	if h.node.plen != h.plen {
+		return ErrContinuationGeneration
+	}
+	// Supersession witness, same as Activate: a longer path attached below the node
+	// means this handle's exact-terminal identity was replaced. Release must be a
+	// typed safe no-op (it must never clear a policy it no longer owns).
+	if continuationSuperseded(h) {
+		return ErrContinuationGeneration
+	}
+	if cur, ok := s.tree.NodeRetention(h.node); ok {
+		// Only clear when the node still carries the EXACT request this handle
+		// wrote; otherwise a later (stronger or refreshed) decision wins.
+		if cur.Priority == h.activation.Priority && cur.Admitted == h.activation.Admitted {
+			// Clear the soft policy outright (retention nil, tier unset) rather than
+			// stamping a replacement descriptor: a release must leave NO retention
+			// decision of its own, and must never write a RetainForever/0 window.
+			s.tree.UnpinNode(h.node)
+		}
+	}
+	h.active = false
+	return nil
+}
+
+// ContinuationStatus classifies a handle without mutating it, for typed stale/
+// evicted reporting that mirrors the error-returning operations.
+func (s *ScopedTree) ContinuationStatus(h *ContinuationHandle) (ContinuationState, error) {
+	if s == nil || s.tree == nil || h == nil || h.tree != s.tree {
+		return ContinuationUnsupported, ErrContinuationUnsupported
+	}
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	if !s.tree.nodeAttached(h.node) {
+		return ContinuationEvicted, ErrContinuationNodeGone
+	}
+	if h.node.hasRecord && h.node.recordGen != h.gen {
+		return ContinuationStale, ErrContinuationGeneration
+	}
+	if h.node.plen != h.plen {
+		return ContinuationStale, ErrContinuationGeneration
+	}
+	if continuationSuperseded(h) {
+		return ContinuationStale, ErrContinuationGeneration
+	}
+	if !nodeHasReusablePayload(h.node) {
+		return ContinuationUnsupported, ErrContinuationUnsupported
+	}
+	if h.active {
+		return ContinuationActive, nil
+	}
+	return ContinuationDormant, nil
+}
