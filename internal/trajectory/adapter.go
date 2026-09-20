@@ -44,7 +44,7 @@ func NewAdapterRegistry(adapters ...Adapter) (*AdapterRegistry, error) {
 }
 
 func DefaultAdapterRegistry() *AdapterRegistry {
-	r, _ := NewAdapterRegistry(CodexJSONLAdapter{}, AGUIJSONLAdapter{}, ClaudeCodeJSONLAdapter{}, OpenAIChatExportAdapter{})
+	r, _ := NewAdapterRegistry(CodexJSONLAdapter{}, AGUIJSONLAdapter{}, ClaudeCodeJSONLAdapter{}, OpenAIChatExportAdapter{}, NativeReceiptAdapter{})
 	return r
 }
 
@@ -108,6 +108,113 @@ func newReceipt(sourceType, adapter, version string, data []byte) FidelityReceip
 func digestBytes(data []byte) string {
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+const (
+	nativeReceiptSchema      = "fak.agent.native.v1"
+	nativeReceiptCallsSchema = "fak.agent.native.calls.v1"
+)
+
+// NativeReceiptAdapter imports the bounded decision trace carried by a native
+// agent receipt. It deliberately does not infer result bodies, source times, or
+// per-call usage from the receipt's aggregate metrics.
+type NativeReceiptAdapter struct{}
+
+func (NativeReceiptAdapter) Name() string       { return "fak-agent-native-receipt-json" }
+func (NativeReceiptAdapter) Version() string    { return "1" }
+func (NativeReceiptAdapter) SourceType() string { return "fak-agent-native-receipt-json" }
+
+type nativeReceiptImport struct {
+	Schema string `json:"schema"`
+	Calls  *struct {
+		Schema  string            `json:"schema"`
+		Entries []json.RawMessage `json:"entries"`
+	} `json:"calls"`
+}
+
+type nativeCallImport struct {
+	Turn    int    `json:"turn"`
+	Tool    string `json:"tool"`
+	Verdict string `json:"verdict"`
+}
+
+func (a NativeReceiptAdapter) Ingest(data []byte) ([]Event, FidelityReceipt, error) {
+	receipt := newReceipt(a.SourceType(), a.Name(), a.Version(), data)
+	receipt.InputRecords = 1
+	var native nativeReceiptImport
+	if err := json.Unmarshal(data, &native); err != nil {
+		receipt.MalformedRecord = 1
+		return nil, receipt, fmt.Errorf("native receipt: %w", err)
+	}
+	if native.Schema != nativeReceiptSchema {
+		_ = finishReceipt(&receipt, nil)
+		return nil, receipt, fmt.Errorf("unsupported native receipt schema %q", native.Schema)
+	}
+	if native.Calls == nil {
+		receipt.Warnings = append(receipt.Warnings, "aggregate-only native receipt has no call records and cannot establish a fully audited coding trajectory")
+		if err := finishReceipt(&receipt, nil); err != nil {
+			return nil, receipt, err
+		}
+		return nil, receipt, nil
+	}
+	if native.Calls.Schema != nativeReceiptCallsSchema {
+		_ = finishReceipt(&receipt, nil)
+		return nil, receipt, fmt.Errorf("unsupported native calls schema %q", native.Calls.Schema)
+	}
+
+	sessionID := "native:" + strings.TrimPrefix(receipt.SourceDigest, "sha256:")[:16]
+	events := make([]Event, 0, len(native.Calls.Entries))
+	for i, raw := range native.Calls.Entries {
+		var call nativeCallImport
+		if err := json.Unmarshal(raw, &call); err != nil {
+			receipt.MalformedRecord = 1
+			return nil, receipt, fmt.Errorf("native receipt call %d: %w", i+1, err)
+		}
+		sequence := i + 1
+		action := "adjudicated"
+		switch strings.ToUpper(call.Verdict) {
+		case "ALLOW":
+			action = "admitted"
+		case "DENY":
+			action = "denied"
+		}
+		event := Event{
+			Schema:         EventSchema,
+			ID:             canonicalEventID("native-call", sequence, ""),
+			ConversationID: sessionID,
+			Kind:           EventTool,
+			Action:         action,
+			Timestamp:      time.Unix(0, int64(sequence)).UTC(),
+			Sequence:       uint64(sequence),
+			Visibility:     VisibilityRestricted,
+			Source: EventSource{
+				Type:           a.SourceType(),
+				SessionID:      sessionID,
+				OrderingKey:    strconv.Itoa(sequence),
+				RawDigest:      digestBytes(raw),
+				Adapter:        a.Name(),
+				AdapterVersion: a.Version(),
+			},
+			Payload: append(json.RawMessage(nil), raw...),
+			Loss: &LossReport{
+				Reason: "native receipt omits source timestamp, tool result body, and exact per-call usage",
+			},
+		}
+		if err := event.Validate(); err != nil {
+			return nil, receipt, fmt.Errorf("native receipt call %d: %w", sequence, err)
+		}
+		events = append(events, event)
+	}
+	receipt.SyntheticTimes = len(events)
+	receipt.Warnings = append(receipt.Warnings,
+		"native call records omit source timestamps; deterministic synthetic timestamps were used",
+		"native call records omit tool result bodies",
+		"native receipt exposes aggregate usage only; exact per-call usage is unavailable",
+	)
+	if err := finishReceipt(&receipt, events); err != nil {
+		return nil, receipt, err
+	}
+	return events, receipt, nil
 }
 
 type CodexJSONLAdapter struct{}

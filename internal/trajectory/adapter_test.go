@@ -2,10 +2,102 @@ package trajectory
 
 import (
 	"bytes"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestNativeReceiptAdapter(t *testing.T) {
+	const source = "fak-agent-native-receipt-json"
+	versioned := []byte(`{
+		"schema":"fak.agent.native.v1",
+		"task":"repair the adapter",
+		"model":"fixture",
+		"status":"completed",
+		"metrics":{"arm":"fak","turns":2},
+		"calls":{"schema":"fak.agent.native.calls.v1","entries":[
+			{"arm":"fak","turn":1,"tool":"read_file","verdict":"ALLOW","by":"policy-floor","args":"{\"path\":\"README.md\"}"},
+			{"arm":"fak","turn":2,"tool":"write_file","verdict":"DENY","reason":"POLICY_BLOCK","by":"workspace-floor","disposition":"TERMINAL","args":"{\"path\":\"outside.txt\"}"}
+		]}
+	}`)
+
+	t.Run("versioned ordered calls preserve deny evidence without invented fidelity", func(t *testing.T) {
+		registry := DefaultAdapterRegistry()
+		first, firstReceipt, err := registry.Ingest(source, versioned)
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, secondReceipt, err := registry.Ingest(source, versioned)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(first, second) || !reflect.DeepEqual(firstReceipt, secondReceipt) {
+			t.Fatal("native receipt reingest is not deterministic")
+		}
+		if len(first) != 2 || firstReceipt.InputRecords != 1 || firstReceipt.EmittedEvents != 2 {
+			t.Fatalf("events=%d receipt=%+v", len(first), firstReceipt)
+		}
+		if firstReceipt.SourceType != source || firstReceipt.SourceDigest != digestBytes(versioned) {
+			t.Fatalf("source identity lost: %+v", firstReceipt)
+		}
+		for i, event := range first {
+			if event.Kind != EventTool || event.Sequence != uint64(i+1) || event.Source.OrderingKey != string(rune('1'+i)) {
+				t.Fatalf("event[%d] order/kind=%+v", i, event)
+			}
+			var call struct {
+				Turn        int    `json:"turn"`
+				Tool        string `json:"tool"`
+				Verdict     string `json:"verdict"`
+				Reason      string `json:"reason"`
+				Disposition string `json:"disposition"`
+			}
+			if err := json.Unmarshal(event.Payload, &call); err != nil {
+				t.Fatal(err)
+			}
+			if call.Turn != i+1 {
+				t.Fatalf("event[%d] turn=%d, want %d", i, call.Turn, i+1)
+			}
+			if i == 1 && (call.Tool != "write_file" || call.Verdict != "DENY" || call.Reason != "POLICY_BLOCK" || call.Disposition != "TERMINAL") {
+				t.Fatalf("deny evidence lost: %+v", call)
+			}
+		}
+		warnings := strings.ToLower(strings.Join(firstReceipt.Warnings, " "))
+		for _, limitation := range []string{"timestamp", "tool result", "usage"} {
+			if !strings.Contains(warnings, limitation) {
+				t.Fatalf("receipt does not disclose missing %s fidelity: %+v", limitation, firstReceipt)
+			}
+		}
+	})
+
+	t.Run("legacy aggregate receipt is identifiable but not fully audited", func(t *testing.T) {
+		legacy := []byte(`{"schema":"fak.agent.native.v1","task":"legacy","model":"fixture","status":"completed","metrics":{"arm":"fak","turns":2}}`)
+		events, receipt, err := DefaultAdapterRegistry().Ingest(source, legacy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range events {
+			if event.Kind == EventTool {
+				t.Fatalf("aggregate-only receipt invented audited tool event: %+v", event)
+			}
+		}
+		warnings := strings.ToLower(strings.Join(receipt.Warnings, " "))
+		if receipt.SourceDigest != digestBytes(legacy) || !strings.Contains(warnings, "aggregate") || !strings.Contains(warnings, "audit") {
+			t.Fatalf("legacy fidelity limitation missing: events=%+v receipt=%+v", events, receipt)
+		}
+	})
+
+	t.Run("unsupported call envelope is refused with source identity", func(t *testing.T) {
+		unsupported := []byte(`{"schema":"fak.agent.native.v1","task":"future","model":"fixture","calls":{"schema":"fak.agent.native.calls.v2","entries":[]}}`)
+		_, receipt, err := DefaultAdapterRegistry().Ingest(source, unsupported)
+		if err == nil || !strings.Contains(strings.ToLower(err.Error()), "unsupported") {
+			t.Fatalf("unsupported native calls version accepted: err=%v receipt=%+v", err, receipt)
+		}
+		if receipt.SourceType != source || receipt.SourceDigest != digestBytes(unsupported) {
+			t.Fatalf("refusal lost source identity: %+v", receipt)
+		}
+	})
+}
 
 func TestCodexAdapterProducesDeterministicFidelityReceipt(t *testing.T) {
 	input := []byte(strings.Join([]string{
@@ -70,7 +162,7 @@ func TestAGUIAdapterPreservesStreamingAndStateSemantics(t *testing.T) {
 
 func TestAdapterRegistryRequiresExplicitSource(t *testing.T) {
 	registry := DefaultAdapterRegistry()
-	if got := strings.Join(registry.Sources(), ","); got != "ag-ui-jsonl,claude-code-jsonl,codex-jsonl,openai-chat-export-jsonl" {
+	if got := strings.Join(registry.Sources(), ","); got != "ag-ui-jsonl,claude-code-jsonl,codex-jsonl,fak-agent-native-receipt-json,openai-chat-export-jsonl" {
 		t.Fatalf("sources=%q", got)
 	}
 	if _, _, err := registry.Ingest("guess", []byte(`{}`)); err == nil || !strings.Contains(err.Error(), "no trajectory adapter") {
@@ -121,7 +213,7 @@ func TestClaudeAndOpenAIExportAdaptersPreserveSemanticsAndFidelity(t *testing.T)
 		}, "\n") + "\n", []EventKind{EventMessage, EventTool}},
 	}
 	registry := DefaultAdapterRegistry()
-	if got := strings.Join(registry.Sources(), ","); got != "ag-ui-jsonl,claude-code-jsonl,codex-jsonl,openai-chat-export-jsonl" {
+	if got := strings.Join(registry.Sources(), ","); got != "ag-ui-jsonl,claude-code-jsonl,codex-jsonl,fak-agent-native-receipt-json,openai-chat-export-jsonl" {
 		t.Fatalf("sources=%q", got)
 	}
 	for _, tc := range cases {
