@@ -17,6 +17,18 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
+type metalMTPRoutePlanner struct {
+	agent.Planner
+	coord    *model.MetalMTPCoordinator
+	admitted bool
+}
+
+func (p *metalMTPRoutePlanner) MetalMTPCoordinator() *model.MetalMTPCoordinator {
+	return p.coord
+}
+
+func (p *metalMTPRoutePlanner) MetalMTPAdmitted() bool { return p.admitted }
+
 // TestOpenAICompletionMetalMTPRoute drives the REAL HTTP chat-wire path (httptest over
 // srv.Handler(), POST /v1/chat/completions): with a DualPlanner (remote-model proxy +
 // local in-kernel planner) and a server-level Metal MTP coordinator configured, the
@@ -89,5 +101,51 @@ func TestOpenAICompletionMetalMTPRoute(t *testing.T) {
 	}
 	if got := resp.Header.Get(HeaderSpeculative); got != "" {
 		t.Fatalf("remote must not inherit local Metal MTP header: %s = %q, want empty", HeaderSpeculative, got)
+	}
+
+	// A coordinator is only configuration. Request routing must also observe the
+	// planner's live qualification decision before claiming MTP on the wire. The
+	// ordinary completion path remains available when that decision is false.
+	testMetalMTPAdmissionRoute(t, coord, true, SpeculativeMTPMetal)
+}
+
+func TestOpenAICompletionMetalMTPDeniedAdmissionStaysOrdinary(t *testing.T) {
+	coord, err := model.NewMetalMTPCoordinator(nil, model.DefaultMetalMTPConfig())
+	if err != nil {
+		t.Fatalf("NewMetalMTPCoordinator: %v", err)
+	}
+	defer coord.Close()
+	testMetalMTPAdmissionRoute(t, coord, false, "")
+}
+
+func testMetalMTPAdmissionRoute(t *testing.T, coord *model.MetalMTPCoordinator, admitted bool, want string) {
+	t.Helper()
+	planner := &metalMTPRoutePlanner{
+		Planner:  agent.NewMockPlanner("local"),
+		coord:    coord,
+		admitted: admitted,
+	}
+	routeServer := &Server{
+		model:   "local",
+		planner: planner,
+		logf:    func(format string, args ...any) { t.Logf(format, args...) },
+		k:       kernel.New("test"),
+	}
+	routeServer.metrics = newGatewayMetrics(time.Now())
+	routeHTTP := httptest.NewServer(routeServer.Handler())
+	defer routeHTTP.Close()
+
+	payload := `{"model":"local","messages":[{"role":"user","content":"hi"}],"temperature":0}`
+	resp, err := http.Post(routeHTTP.URL+"/v1/chat/completions", "application/json", strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("POST /v1/chat/completions: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200; body = %s", resp.StatusCode, body)
+	}
+	if got := resp.Header.Get(HeaderSpeculative); got != want {
+		t.Fatalf("%s = %q, want %q", HeaderSpeculative, got, want)
 	}
 }

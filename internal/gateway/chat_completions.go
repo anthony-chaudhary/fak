@@ -32,7 +32,12 @@ func (s *Server) isMetalMTPActive(reqModel string) bool {
 	if s == nil {
 		return false
 	}
-	return metalMTPCoordinatorFromPlanner(s.plannerForRequest(reqModel)) != nil
+	planner := s.plannerForRequest(reqModel)
+	if metalMTPCoordinatorFromPlanner(planner) == nil {
+		return false
+	}
+	admission, ok := planner.(interface{ MetalMTPAdmitted() bool })
+	return ok && admission.MetalMTPAdmitted()
 }
 
 // activeMetalMTPCoordinator extracts the active MetalMTPCoordinator from Server or its planner.
