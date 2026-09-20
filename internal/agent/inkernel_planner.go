@@ -27,6 +27,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
@@ -344,22 +345,137 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var sinkErr error
-	guard := newToolSpanGuard(sink)
+	sp := applySampleOpts(opts...)
+	rendered := renderInKernelChatMLRequest(messages, tools, p.m.Cfg, sp.ResponseFormat, sp.ToolChoice, sp)
+	startsInReasoning := strings.HasSuffix(rendered, qwenThinkAssistantSeed)
+	projector := newInKernelStreamProjector(sink, sp.Stop, startsInReasoning)
+	// Prompt shrinking preserves the complete trailing tool run: stale-read elision
+	// protects the recent tail, and compaction moves keepStart behind a trailing tool
+	// batch. AssessTranscriptTurn therefore yields the same budget context here as it
+	// does over Complete's prepared messages.
+	var turnContext []TurnAssessment
+	if ta, ok := AssessTranscriptTurn(messages); ok {
+		turnContext = append(turnContext, ta)
+	}
+	effectiveBudget := ResolveEffortBudget(sp.ReasoningEffort, sp.ThinkingBudget, turnContext...)
+	var streamThinkBudget *ThinkBudget
+	if effectiveBudget > 0 {
+		streamThinkBudget = NewThinkBudget(effectiveBudget, startsInReasoning)
+	}
 	comp, err := p.Complete(streamCtx, messages, tools, append(opts, WithDecodeTokenObserver(func(tokenPiece, rawText string) {
 		if sinkErr != nil || tokenPiece == "" {
 			return
 		}
-		if sinkErr = guard.feed(tokenPiece); sinkErr != nil {
+		if sinkErr = projector.feed(tokenPiece); sinkErr != nil {
 			cancel()
+			return
+		}
+		// Complete may inject a synthetic reasoning close when the budget is
+		// exhausted. DecodeTokenObserver intentionally reports one decoded token,
+		// so mirror that deterministic projection-only append here.
+		if streamThinkBudget != nil && streamThinkBudget.Observe(tokenPiece) {
+			if sinkErr = projector.feed("\n</think>\n\n"); sinkErr != nil {
+				cancel()
+			}
 		}
 	}))...)
-	if sinkErr == nil {
-		sinkErr = guard.flush()
+	// Do not flush withheld stop prefixes or ambiguous control delimiters after a
+	// decode error: those bytes were never established as safe visible content.
+	if sinkErr == nil && err == nil {
+		sinkErr = projector.flush()
 	}
 	if sinkErr != nil {
 		return comp, sinkErr
 	}
 	return comp, err
+}
+
+// inKernelStreamProjector keeps raw decode control text off the content stream.
+// The span guard suppresses reasoning and tool-call regions while stopSuffixGuard
+// retains a possible stop suffix until it is known to be ordinary prose. Both run
+// before the caller's sink, so a sink failure cancels decode without another delivery.
+type inKernelStreamProjector struct {
+	spans *toolSpanGuard
+	stops *stopSuffixGuard
+}
+
+func newInKernelStreamProjector(emit StreamSink, stops []string, startsInReasoning ...bool) *inKernelStreamProjector {
+	seededReasoning := len(startsInReasoning) > 0 && startsInReasoning[0]
+	spanGuard := newToolSpanGuardState(emit, seededReasoning)
+	stopGuard := newStopSuffixGuard(spanGuard.feed, stops)
+	return &inKernelStreamProjector{spans: spanGuard, stops: stopGuard}
+}
+
+func (p *inKernelStreamProjector) feed(piece string) error { return p.stops.feed(piece) }
+
+func (p *inKernelStreamProjector) flush() error {
+	if err := p.stops.flush(); err != nil {
+		return err
+	}
+	return p.spans.flush()
+}
+
+type stopSuffixGuard struct {
+	emit    StreamSink
+	stops   []string
+	held    string
+	stopped bool
+}
+
+func newStopSuffixGuard(emit StreamSink, stops []string) *stopSuffixGuard {
+	filtered := make([]string, 0, len(stops))
+	for _, stop := range stops {
+		if stop != "" {
+			filtered = append(filtered, stop)
+		}
+	}
+	return &stopSuffixGuard{emit: emit, stops: filtered}
+}
+
+func (g *stopSuffixGuard) feed(piece string) error {
+	if piece == "" || g.stopped {
+		return nil
+	}
+	buf := g.held + piece
+	g.held = ""
+	if trimmed, hit := checkStop(buf, g.stops); hit {
+		g.stopped = true
+		return g.emitText(trimmed)
+	}
+	keep := 0
+	for _, stop := range g.stops {
+		max := len(stop) - 1
+		if max > len(buf) {
+			max = len(buf)
+		}
+		for n := max; n > keep; n-- {
+			if strings.HasSuffix(buf, stop[:n]) {
+				keep = n
+				break
+			}
+		}
+	}
+	if keep > 0 {
+		g.held = buf[len(buf)-keep:]
+		buf = buf[:len(buf)-keep]
+	}
+	return g.emitText(buf)
+}
+
+func (g *stopSuffixGuard) flush() error {
+	if g.stopped {
+		return nil
+	}
+	held := g.held
+	g.held = ""
+	return g.emitText(held)
+}
+
+func (g *stopSuffixGuard) emitText(text string) error {
+	if text == "" {
+		return nil
+	}
+	return g.emit(text)
 }
 
 // toolSpanGuard sits between the in-kernel per-token decode seam and the client sink.
@@ -376,21 +492,27 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 // is legitimate prose and is never suppressed. Partial openers split across token pieces
 // are held until they resolve (open) or definitively cannot be an opener (flushed).
 type toolSpanGuard struct {
-	emit    StreamSink
-	held    strings.Builder
-	span    strings.Builder
-	inSpan  bool
-	closers []string
-	cap     int
+	emit                StreamSink
+	held                strings.Builder
+	span                strings.Builder
+	inSpan              bool
+	spanReasoning       bool
+	trimReasoningOutput bool
+	contentStarted      bool
+	trailingSpace       strings.Builder
+	closers             []string
+	cap                 int
 }
 
 // toolSpanOpeners lists the explicit tool-call span openers the guard suppresses, each
 // paired with the closers that end its span. An opener with no closer drops to the end
 // of the turn (there is no reliable terminator in that dialect).
 var toolSpanOpeners = []struct {
-	open    string
-	closers []string
+	open      string
+	closers   []string
+	reasoning bool
 }{
+	{open: thinkOpen, closers: []string{thinkClose}, reasoning: true},
 	{open: "<tool_call>", closers: []string{"</tool_call>"}},
 	{open: "<function_call>", closers: []string{"</function_call>"}},
 	{open: "<|python_tag|>", closers: []string{"<|eom_id|>", "<|eot_id|>"}},
@@ -400,7 +522,17 @@ var toolSpanOpeners = []struct {
 const toolSpanGuardMaxBytes = 4 << 20
 
 func newToolSpanGuard(emit StreamSink) *toolSpanGuard {
-	return &toolSpanGuard{emit: emit, cap: toolSpanGuardMaxBytes}
+	return newToolSpanGuardState(emit, false)
+}
+
+func newToolSpanGuardState(emit StreamSink, startsInReasoning bool) *toolSpanGuard {
+	g := &toolSpanGuard{emit: emit, cap: toolSpanGuardMaxBytes}
+	if startsInReasoning {
+		g.inSpan = true
+		g.spanReasoning = true
+		g.closers = []string{thinkClose}
+	}
+	return g
 }
 
 // feed consumes one raw decoded piece and forwards only prose.
@@ -420,7 +552,13 @@ func (g *toolSpanGuard) flush() error {
 	}
 	rest := g.held.String()
 	g.held.Reset()
-	return g.emitText(rest)
+	if err := g.emitText(rest); err != nil {
+		return err
+	}
+	// splitReasoning trims final content only after a reasoning span. Retained
+	// whitespace is therefore a trailing trim candidate and must not be emitted.
+	g.trailingSpace.Reset()
+	return nil
 }
 
 // drainSpan drops buffered span text through the first closer, then hands any trailing
@@ -431,9 +569,14 @@ func (g *toolSpanGuard) drainSpan() error {
 	for _, closer := range g.closers {
 		if idx := strings.Index(buf, closer); idx >= 0 {
 			tail := buf[idx+len(closer):]
+			wasReasoning := g.spanReasoning
 			g.span.Reset()
 			g.inSpan = false
+			g.spanReasoning = false
 			g.closers = nil
+			if wasReasoning {
+				g.trimReasoningOutput = true
+			}
 			g.held.WriteString(tail)
 			return g.drainHeld()
 		}
@@ -452,9 +595,10 @@ func (g *toolSpanGuard) drainHeld() error {
 	buf := g.held.String()
 	earliest := -1
 	var matched []string
+	matchedReasoning := false
 	for _, o := range toolSpanOpeners {
 		if idx := strings.Index(buf, o.open); idx >= 0 && (earliest < 0 || idx < earliest) {
-			earliest, matched = idx, o.closers
+			earliest, matched, matchedReasoning = idx, o.closers, o.reasoning
 		}
 	}
 	if earliest >= 0 {
@@ -466,6 +610,7 @@ func (g *toolSpanGuard) drainHeld() error {
 		g.span.Reset()
 		g.span.WriteString(tail)
 		g.inSpan = true
+		g.spanReasoning = matchedReasoning
 		g.closers = matched
 		return g.drainSpan()
 	}
@@ -486,7 +631,26 @@ func (g *toolSpanGuard) emitText(text string) error {
 	if text == "" {
 		return nil
 	}
-	return g.emit(text)
+	if !g.trimReasoningOutput {
+		return g.emit(text)
+	}
+	if !g.contentStarted {
+		text = strings.TrimLeftFunc(text, unicode.IsSpace)
+		if text == "" {
+			return nil
+		}
+		g.contentStarted = true
+	}
+	text = g.trailingSpace.String() + text
+	g.trailingSpace.Reset()
+	visible := strings.TrimRightFunc(text, unicode.IsSpace)
+	if len(visible) < len(text) {
+		g.trailingSpace.WriteString(text[len(visible):])
+	}
+	if visible == "" {
+		return nil
+	}
+	return g.emit(visible)
 }
 
 // lenMatchedOpener returns the byte length of the opener that prefixes s, so the opener

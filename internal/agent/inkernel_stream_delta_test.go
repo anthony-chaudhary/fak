@@ -319,3 +319,62 @@ func TestToolSpanGuardUnclosedSpanDropsToEnd(t *testing.T) {
 		t.Fatalf("unclosed span: streamed = %q, want %q", got.String(), "answer: ")
 	}
 }
+
+// TestInKernelCompleteStreamProjectsStopBeforeSink exercises the production
+// CompleteStream observer, rather than the projector helper alone. The synthetic
+// model is deterministic, so a suffix learned from a buffered turn is the same
+// suffix the streamed turn encounters. CompleteStream must trim it before any
+// bytes reach the sink and the emitted bytes must equal final visible Content.
+func TestInKernelCompleteStreamProjectsStopBeforeSink(t *testing.T) {
+	t.Setenv("FAK_STREAM_INKERNEL_PER_TOKEN", "1")
+	m := model.NewSynthetic(tinyConcurrencyConfig())
+	m.Quantize()
+	tok := loadProbeTok(t)
+	messages := []Message{{Role: RoleUser, Content: "alpha beta gamma delta"}}
+
+	buffered, err := NewInKernelPlanner(m, tok, "tiny-stream-stop-probe", false, nil, false).Complete(
+		context.Background(), messages, nil, WithMaxTokens(8))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(buffered.Message.Content) < 2 {
+		t.Fatalf("deterministic probe content too short: %q", buffered.Message.Content)
+	}
+	stop := buffered.Message.Content[len(buffered.Message.Content)-2:]
+
+	var streamed strings.Builder
+	comp, err := NewInKernelPlanner(m, tok, "tiny-stream-stop-witness", false, nil, false).CompleteStream(
+		context.Background(), func(delta string) error {
+			streamed.WriteString(delta)
+			return nil
+		}, messages, nil, WithMaxTokens(8), WithStop([]string{stop}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(streamed.String(), stop) {
+		t.Fatalf("configured stop %q leaked into stream %q", stop, streamed.String())
+	}
+	if streamed.String() != comp.Message.Content {
+		t.Fatalf("streamed content %q != final projected content %q", streamed.String(), comp.Message.Content)
+	}
+}
+
+func TestInKernelCompleteStreamProjectsForcedReasoningClose(t *testing.T) {
+	t.Setenv("FAK_STREAM_INKERNEL_PER_TOKEN", "1")
+	t.Setenv("FAK_INKERNEL_ENABLE_THINKING", "1")
+	m := model.NewSynthetic(tinyConcurrencyConfig())
+	m.Quantize()
+	var streamed strings.Builder
+	comp, err := NewInKernelPlanner(m, loadProbeTok(t), "tiny-stream-forced-think", false, nil, false).CompleteStream(
+		context.Background(), func(delta string) error {
+			streamed.WriteString(delta)
+			return nil
+		}, []Message{{Role: RoleUser, Content: "alpha beta gamma delta"}}, nil,
+		WithMaxTokens(8), WithThinkingBudget(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(streamed.String(), thinkClose) || streamed.String() != comp.Message.Content {
+		t.Fatalf("forced-close stream %q != final projected content %q", streamed.String(), comp.Message.Content)
+	}
+}
