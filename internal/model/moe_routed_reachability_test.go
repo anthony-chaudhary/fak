@@ -277,6 +277,12 @@ type routedIncapableBackend struct{ *expertHALRecordingBackend }
 
 func (routedIncapableBackend) SupportsRoutedExpertKQuant() bool { return false }
 
+// SupportsDeviceWeightDtype declines too: since fak#13360 the routed-expert HAL route admits on
+// per-operand device dtype support, so a fixture that flips only the marker would be admitted by the
+// inherited cpu-ref dtype predicate (which serves Q4_K) and the "no capability -> host route" contract
+// this negative control pins would no longer hold. Both must be off for the backend to be incapable.
+func (routedIncapableBackend) SupportsDeviceWeightDtype(compute.Dtype) bool { return false }
+
 // TestGLMDsaMatKernelRoutedExpertStaysHostWithoutCapability is the negative control
 // for the two witnesses above AND the no-regression gate for every non-CUDA backend:
 // cpu-ref and Metal do not advertise the routed k-quant capability, so their routed

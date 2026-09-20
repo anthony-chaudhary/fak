@@ -302,3 +302,200 @@ func TestExpertRingDefaultOffIsUnchanged(t *testing.T) {
 		t.Fatalf("halW holds %d routed expert weights, want %d", staged, E*3)
 	}
 }
+
+// --- dtype-based routed-expert admission (fak#13360) --------------------------------
+//
+// The routed-expert HAL route (expertSwiGLUHAL) used to be gated ONLY by the explicit
+// SupportsRoutedExpertKQuant marker interface, which only CUDA advertises. Vulkan already
+// reports per-dtype device support through SupportsDeviceWeightDtype, so a Q2_K/Q5_K/Q6_K
+// expert slate that the backend CAN serve was refused solely because the marker was absent.
+//
+// The capfence below replaces the marker-only authority with a per-operand admission: every
+// resolved projection must have a device MatMul case for its ACTUAL operand dtype. A marker
+// alone never invents support, and a backend that lacks the marker is no longer barred from
+// a dtype it genuinely serves.
+
+// dtypeAdmissionBackend is a DeviceMemory recorder whose per-dtype device MatMul support is
+// stated explicitly, so a test can model any backend (Vulkan's Q2_K/Q6_K set, ROCm's
+// no-Q2_K set, or a liar that advertises the marker while refusing every dtype).
+type dtypeAdmissionBackend struct {
+	*expertHALRecordingBackend
+	marker bool
+	dtypes map[compute.Dtype]bool
+	probed []compute.Dtype
+}
+
+func (b *dtypeAdmissionBackend) SupportsRoutedExpertKQuant() bool { return b.marker }
+
+func (b *dtypeAdmissionBackend) SupportsDeviceWeightDtype(dt compute.Dtype) bool {
+	b.probed = append(b.probed, dt)
+	if b.dtypes == nil {
+		return false
+	}
+	return b.dtypes[dt]
+}
+
+// q2kExpertModel builds a single-layer MoE whose routed expert 0 carries resident Q2_K
+// gate/up/down: the DeepSeek-V4.1 Flash expert slate the marker-only authority refused.
+func q2kExpertModel(t *testing.T) (*Model, [3]string) {
+	t.Helper()
+	const H, I = 256, 256
+	cfg := expertHALTestConfig(H)
+	cfg.IntermediateSize = I
+	cfg.MoEIntermediateSize = I
+	m := NewSyntheticMoE(cfg)
+	names := [3]string{
+		expertName(0, 0, "gate_proj.weight"),
+		expertName(0, 0, "up_proj.weight"),
+		expertName(0, 0, "down_proj.weight"),
+	}
+	m.q4kw = map[string]*q4kTensor{}
+	m.kqw = map[string]*kQuantTensor{
+		names[0]: q2kFixtureTensor(I, H, 0x13360),
+		names[1]: q2kFixtureTensor(I, H, 0x13361),
+		names[2]: q2kFixtureTensor(H, I, 0x13362),
+	}
+	for _, name := range names {
+		delete(m.manifest, name)
+	}
+	return m, names
+}
+
+func q2kExpertInput(h int) []float32 {
+	x := make([]float32, h)
+	for i := range x {
+		x[i] = float32((i%19)-9) / 64
+	}
+	return x
+}
+
+// TestExpertHALDtypeAdmissionWithoutMarker is the fak#13360 positive witness: a backend that
+// does NOT advertise SupportsRoutedExpertKQuant but DOES serve Q2_K through its device MatMul
+// must be admitted to the routed-expert HAL route. A full Q2_K expert slate runs gate, up,
+// SwiGLU and down on the device (3 MatMuls / 1 SwiGLU) with the invocation counters proving
+// it, and the result matches the host oracle.
+func TestExpertHALDtypeAdmissionWithoutMarker(t *testing.T) {
+	setQ4KSDOTForTest(false)
+	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+
+	m, names := q2kExpertModel(t)
+	x := q2kExpertInput(256)
+	want := expertSwiGLU(m, 0, 0, x, residentKernel{m})
+
+	rec := &expertHALRecordingBackend{Backend: compute.Default(), uploads: map[compute.Dtype]int{}}
+	be := &dtypeAdmissionBackend{
+		expertHALRecordingBackend: rec,
+		marker:                    false, // Vulkan-like: no SupportsRoutedExpertKQuant
+		dtypes:                    map[compute.Dtype]bool{compute.F32: true, compute.Q2_K: true},
+	}
+	s := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
+
+	got := expertSwiGLU(m, 0, 0, x, sessionQ4KKernel{s: s})
+
+	if rec.matmuls != 3 || rec.swiglu != 1 {
+		t.Fatalf("marker-less Q2_K expert ran matmul=%d swiglu=%d, want 3/1 on the device route", rec.matmuls, rec.swiglu)
+	}
+	if rec.uploads[compute.Q2_K] < 3 {
+		t.Fatalf("Q2_K uploads=%d, want one per projection", rec.uploads[compute.Q2_K])
+	}
+	for _, name := range names {
+		if _, ok := s.halW["kquant-raw:"+name]; !ok {
+			t.Fatalf("Q2_K %s not staged through the routed HAL route; halW holds %d entries", name, len(s.halW))
+		}
+	}
+	routedExpertParity(t, "marker-less device Q2_K expert", got, want)
+}
+
+// TestExpertHALMarkerAloneDoesNotAdmit is the fak#13360 negative control: a backend that
+// advertises the marker but whose device MatMul refuses the operand dtype must DECLINE before
+// staging. A marker is not support; the per-operand dtype check is authoritative.
+func TestExpertHALMarkerAloneDoesNotAdmit(t *testing.T) {
+	m, _ := q2kExpertModel(t)
+	x := q2kExpertInput(256)
+
+	rec := &expertHALRecordingBackend{Backend: compute.Default(), uploads: map[compute.Dtype]int{}}
+	be := &dtypeAdmissionBackend{
+		expertHALRecordingBackend: rec,
+		marker:                    true,
+		dtypes:                    map[compute.Dtype]bool{compute.F32: true}, // no Q2_K case
+	}
+	s := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
+
+	got := expertSwiGLU(m, 0, 0, x, sessionQ4KKernel{s: s})
+	if len(got) != 256 {
+		t.Fatalf("declined expert produced len=%d, want the host fallback result", len(got))
+	}
+	if rec.matmuls != 0 {
+		t.Fatalf("a marker-only backend ran %d device MatMuls; Q2_K has no device case", rec.matmuls)
+	}
+	for key := range s.halW {
+		t.Fatalf("marker-only backend staged %q despite refusing the Q2_K dtype", key)
+	}
+}
+
+// TestExpertHALMixedOperandSupportDeclines pins the per-operand rule at the HAL boundary: a
+// backend that serves gate/up Q2_K but NOT the down projection's dtype must not admit the
+// expert through the three-operand HAL route. Admission is all-or-nothing across the three
+// operands, so the unsupported down projection is never staged under its HAL key. The
+// incremental seam below may still run the two supported gate/up projections - that is the
+// pre-existing #13129 contract, not the HAL route - so the witness is the absence of a staged
+// unsupported operand, not a zero device-op count.
+func TestExpertHALMixedOperandSupportDeclines(t *testing.T) {
+	m, names := q2kExpertModel(t)
+	x := q2kExpertInput(256)
+
+	rec := &expertHALRecordingBackend{Backend: compute.Default(), uploads: map[compute.Dtype]int{}}
+	// The down projection is swapped to Q6_K, which this backend cannot serve.
+	m.kqw[names[2]] = deviceDownKQuant(t, kindQ6K, 256, 256, 0x13363)
+	be := &dtypeAdmissionBackend{
+		expertHALRecordingBackend: rec,
+		marker:                    false,
+		dtypes:                    map[compute.Dtype]bool{compute.F32: true, compute.Q2_K: true}, // Q6_K absent
+	}
+	s := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
+
+	got := expertSwiGLU(m, 0, 0, x, sessionQ4KKernel{s: s})
+	if len(got) != 256 {
+		t.Fatalf("mixed-unsupported expert produced len=%d, want a full expert output", len(got))
+	}
+	if rec.uploads[compute.Q6_K] != 0 {
+		t.Fatalf("the unsupported Q6_K down projection was staged (%d uploads); one unsupported operand must decline the whole HAL route", rec.uploads[compute.Q6_K])
+	}
+	if _, ok := s.halW["kquant-raw:"+names[2]]; ok {
+		t.Fatal("the unsupported Q6_K down projection took the HAL route's shared staging key")
+	}
+}
+
+// TestExpertHALMalformedMetadataDeclines pins fail-closed admission for a k-quant operand whose
+// kind has no registered HAL descriptor: the three-operand HAL route must decline (never panic,
+// never stage), leaving the expert to the host/incremental fallback.
+func TestExpertHALMalformedMetadataDeclines(t *testing.T) {
+	m, names := q2kExpertModel(t)
+	x := q2kExpertInput(256)
+
+	// A down projection with an unregistered kind (no descriptor -> no HAL dtype).
+	m.kqw[names[2]] = q3kFixtureTensor(256, 256)
+	rec := &expertHALRecordingBackend{Backend: compute.Default(), uploads: map[compute.Dtype]int{}}
+	be := &dtypeAdmissionBackend{
+		expertHALRecordingBackend: rec,
+		marker:                    true,
+		dtypes:                    map[compute.Dtype]bool{compute.F32: true, compute.Q2_K: true},
+	}
+	s := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
+
+	var got []float32
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("unregistered-kind operand PANICKED instead of declining: %v", r)
+			}
+		}()
+		got = expertSwiGLU(m, 0, 0, x, sessionQ4KKernel{s: s})
+	}()
+	if len(got) != 256 {
+		t.Fatalf("malformed-metadata expert produced len=%d, want a full expert output", len(got))
+	}
+	if _, ok := s.halW["kquant-raw:"+names[2]]; ok {
+		t.Fatal("the unregistered-kind down projection took the HAL route's shared staging key")
+	}
+}

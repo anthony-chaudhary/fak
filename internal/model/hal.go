@@ -334,6 +334,62 @@ func (s *Session) supportsRoutedExpertKQuant() bool {
 	return ok && routed.SupportsRoutedExpertKQuant()
 }
 
+// expertWeightDtype reports the device operand dtype this resolved expert projection would be
+// staged as, or ok=false when no device representation exists. It mirrors the tier dispatch in
+// expertSwiGLUHAL's resident() closure: a resident Q4_K tensor is compute.Q4_K, a resident
+// k-quant is the dtype its registered HAL descriptor names, and a checkpoint-served projection
+// carries its own device dtype. A k-quant whose kind is unregistered (or not HAL-capable) has
+// no device representation and reports ok=false so admission fails closed rather than panic.
+func (w expertWeight) deviceDtype() (compute.Dtype, bool) {
+	switch {
+	case w.q4 != nil:
+		return compute.Q4_K, true
+	case w.kq != nil:
+		desc, ok := LookupQuantDescriptor(w.kq.kind)
+		if !ok || !desc.SupportsHAL() || desc.Dtype() == 0 {
+			return 0, false
+		}
+		return desc.Dtype(), true
+	case w.ck != nil:
+		if w.ck.dt == 0 {
+			return 0, false
+		}
+		return w.ck.dt, true
+	default:
+		return 0, false
+	}
+}
+
+// supportsExpertWeight reports whether the session backend can stage this resolved routed-expert
+// projection as a device weight the HAL route may execute.
+//
+// The authority is the backend's per-dtype device MatMul support (BackendSupportsDeviceWeightDtype)
+// — NOT the SupportsRoutedExpertKQuant marker, which only CUDA advertises. A backend that reports
+// support for the ACTUAL operand dtype of every projection is admitted even without the marker, so
+// Vulkan's Q2_K/Q4_K/Q6_K expert slate is no longer barred from a route it can genuinely run.
+//
+// Backward compatibility (fak#13360): a backend that advertises the legacy SupportsRoutedExpertKQuant
+// marker without implementing SupportsDeviceWeightDtype retains the pre-change admission — the
+// dtype check is a strict BROADENING for marker-less backends and must never narrow a route that
+// previously ran. A marker ALONE still never admits a dtype the backend's MatMul cannot serve: when
+// the backend implements the predicate, its verdict is consulted and can refuse (see the marker-only
+// negative control). A projection with no device representation (unregistered/non-HAL k-quant, or a
+// dtype-less checkpoint descriptor) fails closed here rather than panicking inside staging.
+func (s *Session) supportsExpertWeight(w expertWeight) bool {
+	if s == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory {
+		return false
+	}
+	dt, ok := w.deviceDtype()
+	if !ok {
+		return false
+	}
+	if _, typed := s.Backend.(compute.KQuantDeviceKernel); typed {
+		return compute.BackendSupportsDeviceWeightDtype(s.Backend, dt)
+	}
+	// Marker-only backend (no per-dtype predicate): preserve the legacy admission.
+	return s.supportsRoutedExpertKQuant()
+}
+
 // expertWeight is one resolved routed-expert projection: its canonical tensor name plus whichever
 // tier can serve it — a resident quantized representation the model carries (q4 or kq), or the
 // R5/#5616 checkpoint descriptor (ck) that says how to fault it out of the fused slab. Exactly one
@@ -406,7 +462,14 @@ func (s *Session) resolveExpertWeight(name string) (expertWeight, bool) {
 // activation on Backend. It admits only projections with an honest resident Q4_K
 // or one-time-staged F16 Q5_K/Q6_K representation.
 func (s *Session) expertSwiGLUHAL(gateName, upName, downName string, x []float32) ([]float32, bool) {
-	if s == nil || s.halW == nil || !s.supportsRoutedExpertKQuant() {
+	if s == nil || s.halW == nil {
+		return nil, false
+	}
+	// A --n-cpu-moe session has deliberately routed the expert BYTES to host RAM
+	// (hostOffloadWeight); the three-operand HAL route would stage them to device memory and
+	// defeat the offload budget. Engine selection for those experts belongs to the split's
+	// device seam (#13128), so decline here and let expertSwiGLU's split branch decide.
+	if s.CPUOffloadExperts {
 		return nil, false
 	}
 	weights := make([]expertWeight, 3)
@@ -414,6 +477,18 @@ func (s *Session) expertSwiGLUHAL(gateName, upName, downName string, x []float32
 		var found bool
 		weights[i], found = s.resolveExpertWeight(name)
 		if !found {
+			return nil, false
+		}
+		// Admission is per-operand and all-or-nothing: EVERY projection's ACTUAL operand
+		// dtype must have a resident device MatMul kernel before any of the three is
+		// staged. The SupportsRoutedExpertKQuant marker is no longer the authority (a
+		// marker alone never admits an unserved dtype), so a backend that reports
+		// per-dtype support - Vulkan's Q2_K/Q4_K/Q6_K set, say - is no longer barred from
+		// an expert slate it can genuinely run, while a backend that cannot serve any
+		// operand still declines exactly as before. A projection with no device
+		// representation (unregistered/non-HAL k-quant, or a dtype-less checkpoint
+		// descriptor) fails closed here rather than panicking inside staging. (fak#13360)
+		if !s.supportsExpertWeight(weights[i]) {
 			return nil, false
 		}
 	}

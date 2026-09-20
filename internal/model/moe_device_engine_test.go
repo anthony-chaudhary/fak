@@ -89,8 +89,11 @@ type splitDeviceEngineBackend struct {
 	expertHALRecordingBackend
 }
 
-// SupportsRoutedExpertKQuant keeps the LEGACY capability OFF: expertHALRecordingBackend implements it
-// returning true, so delegating here would re-arm the #5111 HAL route and mask the new branch.
+// SupportsRoutedExpertKQuant keeps the LEGACY capability OFF. The routed-expert HAL route's remaining
+// isolation comes from CPUOffloadExperts (always set by this test's session): since fak#13360 the HAL
+// route declines for a --n-cpu-moe session, so the split engine branch is still the only device route
+// that can fire. The per-dtype predicate is deliberately NOT overridden — the split engine's own
+// admission keys on it, so declining it here would disable the branch under test.
 func (b *splitDeviceEngineBackend) SupportsRoutedExpertKQuant() bool { return false }
 
 // TestSplitKernelDeviceEngineMatchesHostCPU is the parity + execution witness. A routed expert whose
