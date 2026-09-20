@@ -261,11 +261,16 @@ def _work_rules(n: int, lane: str) -> list[tuple[str, str, str]]:
         ("lane-lease",
          "Take the lease for the lane whose files you will actually edit before "
          f"touching them (`{lane}` here) and never --force onto a lane a LIVE holder "
-         "owns. A refusal here is a pause, not your stop condition: acquire the lane "
+         "owns. Choose the mode explicitly: take --mode shared when your files are "
+         "DISJOINT from other in-flight work in the lane (the common case - shared "
+         "leases may overlap), and --mode exclusive only for a whole-lane or serial "
+         "mutation where no sibling may run at all; `dos lease-lane acquire` defaults "
+         "to exclusive, so an omitted --mode over-serializes file-disjoint siblings. "
+         "A refusal here is a pause, not your stop condition: acquire the lane "
          "that matches your files, or - if the holder is provably dead, meaning its "
          "pid is gone AND its lease is long past heartbeat - reap it by naming that "
          "dead holder in a release, then re-acquire",
-         f"dos lease-lane acquire --lane {lane} --owner <you>"),
+         f"dos lease-lane acquire --lane {lane} --mode shared --owner <you>"),
         # The single highest-value rule in this set: forensics over 111 zero-commit
         # worker sessions found 16% ended the instant a turn hit a kernel refusal,
         # because the old lane-lease rule's "honor a REFUSE (pick nothing and stop)"

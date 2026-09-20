@@ -195,6 +195,39 @@ func TestHonestBailRequiresDurableDeliverable(t *testing.T) {
 	}
 }
 
+// The lane-lease witness must name an explicit --mode. Live `dos lease-lane acquire`
+// defaults to `exclusive`, so a witness with no --mode teaches every worker that follows
+// it to take an exclusive lease — and two workers on file-DISJOINT trees inside one lane
+// then serialize (measured on the live journal: nearly all entries exclusive, one
+// `internal/model/**` holder blocking every other model worker). The rule must emit
+// `--mode shared` for the common disjoint case and name when `exclusive` is warranted.
+func TestLaneLeaseWitnessNamesAMode(t *testing.T) {
+	var lease PromptRule
+	for _, rule := range WorkRules(13127, "dispatchtick") {
+		if rule.ID == "lane-lease" {
+			lease = rule
+			break
+		}
+	}
+	if lease.ID == "" {
+		t.Fatal("lane-lease rule missing")
+	}
+	if !strings.Contains(lease.Witness, "--mode") {
+		t.Fatalf("lane-lease witness %q names no --mode, so it defaults to exclusive "+
+			"and over-serializes file-disjoint in-lane work", lease.Witness)
+	}
+	if !strings.Contains(lease.Witness, "--mode shared") {
+		t.Fatalf("lane-lease witness %q does not name the shared mode the disjoint case needs", lease.Witness)
+	}
+	// The imperative must state the discriminator, not just the flag.
+	for _, want := range []string{"shared", "exclusive"} {
+		if !strings.Contains(lease.Imperative, want) {
+			t.Fatalf("lane-lease imperative %q never names %q — the worker cannot "+
+				"choose the right mode from this rule", lease.Imperative, want)
+		}
+	}
+}
+
 func TestPromptRulesAreWellFormedData(t *testing.T) {
 	idRe := regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 	seen := map[string]bool{}
