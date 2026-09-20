@@ -399,6 +399,7 @@ func BuildCommittedTargetContext(ctx context.Context, root, target string) (bool
 	if err := extractTar(&arBuf, tmp); err != nil {
 		return false, "", fmt.Errorf("extract: %v", err)
 	}
+	neutralizeEscapingGoWork(tmp)
 
 	build := windowgate.CommandContext(ctx, goBin, "build", target)
 	build.Dir = tmp
@@ -411,6 +412,134 @@ func BuildCommittedTargetContext(ctx context.Context, root, target string) (bool
 		return false, output, fmt.Errorf("committed tree build timed out: %w", ctx.Err())
 	}
 	return runErr == nil, output, nil
+}
+
+// neutralizeEscapingGoWork removes a committed `go.work` in the extracted tree
+// when any of its `use` directives names a path that escapes the extract root.
+// A workspace file is a local multi-module convenience; inside a single-repo
+// probe it can only refer to siblings that are not present, so `go build`
+// fails on module resolution rather than on the committed code. Dropping such a
+// file lets the probe answer the question it actually asks -- "does this
+// commit's own module build?" -- instead of reporting a phantom red tree.
+//
+// A go.work whose use paths all resolve within the extract is left untouched,
+// so a genuinely in-repo workspace still probes exactly as committed. The check
+// is deliberately conservative: only a cleanly-parsed `use` directive naming a
+// path that leaves the root triggers removal; any parse ambiguity keeps the
+// file (fail-closed toward the stronger poison signal).
+func neutralizeEscapingGoWork(root string) {
+	path := filepath.Join(root, "go.work")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	if !goWorkUsesEscapingPath(string(data), root) {
+		return
+	}
+	_ = os.Remove(path)
+}
+
+// goWorkUsesEscapingPath reports whether a go.work body declares a `use`
+// directive whose path resolves outside root. It understands the single-line
+// form (`use ./x`), the block form (`use ( .` / `../fak )`), and inline `//`
+// comments.
+func goWorkUsesEscapingPath(body, root string) bool {
+	inBlock := false
+	for _, raw := range strings.Split(body, "\n") {
+		line := raw
+		if i := strings.Index(line, "//"); i >= 0 {
+			line = line[:i]
+		}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if inBlock {
+			if strings.HasSuffix(line, ")") {
+				inBlock = false
+				line = strings.TrimSpace(strings.TrimSuffix(line, ")"))
+			}
+			if line == "" {
+				continue
+			}
+			if goWorkPathEscapes(line, root) {
+				return true
+			}
+			continue
+		}
+		if !strings.HasPrefix(line, "use") {
+			continue
+		}
+		rest := strings.TrimSpace(strings.TrimPrefix(line, "use"))
+		switch {
+		case rest == "(":
+			inBlock = true
+		case strings.HasPrefix(rest, "("):
+			// `use ( .` -- block opens with an operand on the same line.
+			inBlock = true
+			operand := strings.TrimSpace(strings.TrimPrefix(rest, "("))
+			if strings.HasSuffix(operand, ")") {
+				inBlock = false
+				operand = strings.TrimSpace(strings.TrimSuffix(operand, ")"))
+			}
+			if operand != "" && goWorkPathEscapes(operand, root) {
+				return true
+			}
+		case rest == "":
+			// bare `use` with no operand: malformed, keep the file.
+			continue
+		default:
+			if goWorkPathEscapes(rest, root) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// goWorkPathEscapes reports whether a single `use` operand path leaves root.
+// Absolute paths and paths whose cleaned form climbs above root are escaping.
+//
+// Ambiguity is fail-CLOSED toward keeping the file: a path whose relation to
+// root cannot be established (a Windows namespace path such as `\\?\C:\x` that
+// filepath.Rel cannot relate, an unreadable root) returns false, so the
+// committed workspace is preserved rather than silently dropped. Resolution is
+// lexical, not symlink-resolved; a `use ./link` whose target symlinks outside
+// the extract is treated as in-tree (the committed state is preserved either
+// way, so this cannot weaken the poison signal).
+func goWorkPathEscapes(operand, root string) bool {
+	operand = strings.Trim(strings.TrimSpace(operand), `"`)
+	if operand == "" {
+		return false
+	}
+	operand = stripWindowsNamespace(operand)
+	rootAbs, err := filepath.Abs(stripWindowsNamespace(root))
+	if err != nil {
+		return false
+	}
+	var resolved string
+	if filepath.IsAbs(operand) {
+		resolved = filepath.Clean(operand)
+	} else {
+		resolved = filepath.Clean(filepath.Join(root, filepath.FromSlash(operand)))
+	}
+	rel, err := filepath.Rel(rootAbs, resolved)
+	if err != nil {
+		// Cannot establish the relation; keep the committed file (fail-closed
+		// toward the stronger poison signal rather than deleting on ambiguity).
+		return false
+	}
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// stripWindowsNamespace removes a Win32 namespace prefix (`\\?\` or `\\.\`) so
+// a long-path/device operand is compared by its real target rather than being
+// rejected as un-relatable by filepath.Rel.
+func stripWindowsNamespace(p string) string {
+	if len(p) >= 4 && (strings.HasPrefix(p, `\\?\`) || strings.HasPrefix(p, `\\.\`)) {
+		return p[4:]
+	}
+	return p
 }
 
 // extractTar writes every regular file of a tar stream under dest.

@@ -1233,6 +1233,17 @@ func dispatchProbeTreeBuildRun(cacheRoot, head string, stamp binstamp.Stamp, bui
 		strings.Contains(lowered, "executable file not found") ||
 		strings.Contains(lowered, "go.mod file not found") ||
 		strings.Contains(lowered, "cannot find main module") ||
+		// A probe whose build TARGET does not exist in the extracted root is a
+		// misconfigured probe, not a red tree. This is the fak-private shape:
+		// the probe builds ./cmd/fak, which lives in the sibling public repo,
+		// not in this one -- so the archived tree has no such directory and
+		// `go build` reports "stat .../cmd/fak: directory not found". Failing
+		// closed here froze the whole fleet over a probe-target mismatch. The
+		// match is anchored to the canonical Go PathError suffix so a genuine
+		// compiler diagnostic cannot embed it.
+		strings.Contains(lowered, ": directory not found") ||
+		strings.Contains(lowered, "cannot load module") ||
+		strings.Contains(lowered, "listed in go.work") ||
 		strings.Contains(lowered, "not a valid object name: head") ||
 		strings.Contains(lowered, "not a git repository") ||
 		strings.Contains(lowered, "does not have any commits yet") ||
