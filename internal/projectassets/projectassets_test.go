@@ -430,6 +430,13 @@ func TestVerifyOpenCodeSnapshot(t *testing.T) {
 		t.Fatalf("expected valid opencode.json to pass, got: %v", err)
 	}
 
+	// Test BOM-prefixed valid snapshot: false in temp dir
+	bomTmp := t.TempDir()
+	write(t, bomTmp, "opencode.json", "\uFEFF"+`{"snapshot": false}`)
+	if err := VerifyOpenCodeSnapshot(bomTmp); err != nil {
+		t.Fatalf("expected BOM-prefixed opencode.json to pass, got: %v", err)
+	}
+
 	// Test missing file
 	emptyTmp := t.TempDir()
 	if err := VerifyOpenCodeSnapshot(emptyTmp); err == nil {

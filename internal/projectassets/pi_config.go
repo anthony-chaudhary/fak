@@ -1,12 +1,19 @@
 package projectassets
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// stripUTF8BOM removes a leading UTF-8 byte-order mark (EF BB BF) if present, so
+// config files written by Windows editors still parse as standard JSON.
+func stripUTF8BOM(data []byte) []byte {
+	return bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
+}
 
 // DefaultPiBaseURL is the standard local gateway address used by fak serve.
 const DefaultPiBaseURL = "http://127.0.0.1:8080/v1"
@@ -174,7 +181,7 @@ func EnsurePiProviderConfig(target, baseURL, modelID string) (string, bool, erro
 	}
 
 	var raw map[string]interface{}
-	if unmarshalErr := json.Unmarshal(data, &raw); unmarshalErr != nil {
+	if unmarshalErr := json.Unmarshal(stripUTF8BOM(data), &raw); unmarshalErr != nil {
 		return path, false, fmt.Errorf("parse existing %s: %w", path, unmarshalErr)
 	}
 	if raw == nil {

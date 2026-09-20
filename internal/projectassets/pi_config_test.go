@@ -1,6 +1,7 @@
 package projectassets
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -266,5 +267,79 @@ func TestNormalizePiModelID(t *testing.T) {
 	}
 	if got := NormalizePiModelID("custom-model"); got != "custom-model" {
 		t.Errorf("NormalizePiModelID(\"custom-model\") = %q, want %q", got, "custom-model")
+	}
+}
+
+func TestEnsurePiProviderConfigToleratesUTF8BOM(t *testing.T) {
+	tmp := t.TempDir()
+	targetPath := filepath.Join(tmp, "models.json")
+	initialConfig := "\uFEFF" + `{
+  "providers": {
+    "anthropic": {
+      "baseUrl": "https://api.anthropic.com",
+      "apiKey": "$ANTHROPIC_API_KEY"
+    }
+  }
+}`
+	if err := os.WriteFile(targetPath, []byte(initialConfig), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	resolvedPath, modified, err := EnsurePiProviderConfig(targetPath, "http://127.0.0.1:8080/v1", "qwen38:27b-q4")
+	if err != nil {
+		t.Fatalf("BOM-prefixed config must parse, got error: %v", err)
+	}
+	if !modified {
+		t.Fatalf("expected modified=true when adding fak provider")
+	}
+	if resolvedPath != targetPath {
+		t.Errorf("resolvedPath = %q, want %q", resolvedPath, targetPath)
+	}
+
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.HasPrefix(data, []byte{0xEF, 0xBB, 0xBF}) {
+		t.Errorf("rewritten output must not carry a BOM")
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("rewritten output must parse as standard JSON: %v", err)
+	}
+	provs := parsed["providers"].(map[string]interface{})
+	if provs["anthropic"] == nil {
+		t.Errorf("lost anthropic provider")
+	}
+	fak, ok := provs["fak"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("missing fak provider")
+	}
+	if fak["baseUrl"] != "http://127.0.0.1:8080/v1" {
+		t.Errorf("unexpected baseUrl: %v", fak["baseUrl"])
+	}
+}
+
+func TestEnsurePiProviderConfigMalformedRefusesWithoutModifying(t *testing.T) {
+	tmp := t.TempDir()
+	targetPath := filepath.Join(tmp, "models.json")
+	malformed := []byte("{ this is not valid json ")
+	if err := os.WriteFile(targetPath, malformed, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, modified, err := EnsurePiProviderConfig(targetPath, "http://127.0.0.1:8080/v1", "qwen38:27b-q4")
+	if err == nil {
+		t.Fatalf("malformed JSON must be refused")
+	}
+	if modified {
+		t.Errorf("malformed JSON must not report modified=true")
+	}
+	after, readErr := os.ReadFile(targetPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(after) != string(malformed) {
+		t.Errorf("malformed original file must be left byte-unchanged")
 	}
 }

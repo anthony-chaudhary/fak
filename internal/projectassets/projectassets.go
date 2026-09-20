@@ -643,7 +643,7 @@ func VerifyOpenCodeSnapshot(root string) error {
 		return fmt.Errorf("read opencode.json: %w", err)
 	}
 	var raw map[string]interface{}
-	if err := json.Unmarshal(b, &raw); err != nil {
+	if err := json.Unmarshal(stripUTF8BOM(b), &raw); err != nil {
 		return fmt.Errorf("parse opencode.json: %w", err)
 	}
 	val, ok := raw["snapshot"]
@@ -900,7 +900,7 @@ function mutationPaths(tool, args) {
 }
 
 /**
- * dos-proof-guard.js — opencode plugin for DOS on-device proof & cross-validation lifecycle.
+ * dos-proof-guard.js â€” opencode plugin for DOS on-device proof & cross-validation lifecycle.
  *
  * Reminds agents after file modifications to:
  * 1. Run on-device tests (CLAIM_TEST_GREEN)
