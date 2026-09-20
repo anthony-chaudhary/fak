@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestAgentDemoRunsOfflineDemo pins that `fak agentdemo` still runs the full
@@ -45,6 +47,9 @@ func TestAgentDemoRunsOfflineDemo(t *testing.T) {
 // make the bare run resolve a live endpoint and attempt a network call.
 func TestAgentNoEndpointFailsLoud(t *testing.T) {
 	if os.Getenv("TEST_AGENT_FAILLOUD_HELPER") == "1" {
+		// The integration arm must exercise real runAgent and its os.Exit(2),
+		// while making endpoint availability independent of an ambient router.
+		agentRouterProbe = func() (string, bool) { return "", false }
 		for i, arg := range os.Args {
 			if arg == "--" {
 				runAgent(os.Args[i+1:])
@@ -58,19 +63,31 @@ func TestAgentNoEndpointFailsLoud(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.Executable: %v", err)
 	}
-	cmd := exec.Command(exe, "-test.run=TestAgentNoEndpointFailsLoud", "--")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, exe, "-test.run=TestAgentNoEndpointFailsLoud", "--")
+	cmd.WaitDelay = 3 * time.Second
+	cmd.Dir = t.TempDir()
 	env := make([]string, 0, len(os.Environ()))
 	for _, kv := range os.Environ() {
+		key, _, _ := strings.Cut(kv, "=")
 		switch {
-		case strings.HasPrefix(kv, "OPENAI_BASE_URL="),
-			strings.HasPrefix(kv, "ANTHROPIC_BASE_URL="),
-			strings.HasPrefix(kv, "GOOGLE_GEMINI_BASE_URL="):
+		case strings.EqualFold(key, "OPENAI_BASE_URL"),
+			strings.EqualFold(key, "ANTHROPIC_BASE_URL"),
+			strings.EqualFold(key, "GOOGLE_GEMINI_BASE_URL"),
+			strings.EqualFold(key, "TEST_AGENT_FAILLOUD_HELPER"):
 			continue
 		}
 		env = append(env, kv)
 	}
 	cmd.Env = append(env, "TEST_AGENT_FAILLOUD_HELPER=1")
 	out, err := cmd.CombinedOutput()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Fatalf("bare `fak agent` helper timed out after 20s; output:\n%s", out)
+	}
+	if errors.Is(err, exec.ErrWaitDelay) {
+		t.Fatalf("bare `fak agent` helper left output pipes open after exit: %v\noutput:\n%s", err, out)
+	}
 
 	var ee *exec.ExitError
 	if !errors.As(err, &ee) {
