@@ -340,7 +340,10 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	s.MarkReady()
 	// Start the in-kernel background loops on the serve lifecycle context: from here
 	// until ctx is done, registered loops keep progressing (the heartbeat, plus any a
-	// host registered), observable at /v1/fak/loops and via fak_bgloop_* metrics.
+	// host registered), observable at /v1/fak/loops and via fak_bgloop_* metrics. The
+	// replica fleet's live health/drain loop (issue fak-private#2417) is one of them —
+	// registered as "fleet-health" in newBgloopSupervisor, so it starts here and is
+	// cancelled AND joined by stopLoops on shutdown.
 	s.startLoops(ctx)
 	if s.logf != nil {
 		s.logf("fak gateway listening on http://%s (planner=%s engine=%s model=%s vdso=%v auth=%v)",

@@ -30,6 +30,15 @@ type PickPolicy interface {
 type PlannerReplica struct {
 	Name    string
 	Planner agent.Planner
+
+	// Endpoint is the upstream dial URL this replica fronts (the operator's
+	// --base-url/--replica-base-url value, after a name=URL split). It is carried
+	// so the health loop can register the worker with the endpoint it actually
+	// probes/dispatches against — WorkerSpec.Endpoint — rather than overloading
+	// that field with the replica identity. Empty on a hand-built test replica; the
+	// membership then records no endpoint, which the router never reads for placement
+	// (it binds by Name == WorkerSpec.ID).
+	Endpoint string
 }
 
 // ReplicaInfo is the read-only registry view exposed by ReplicaRouter.
@@ -49,8 +58,21 @@ type ReplicaRouter struct {
 	// When attached (WithMembership), pick() routes only to replicas the loop
 	// currently marks admissible — so an unhealthy or draining worker drops out of
 	// the rotation within the health interval — and returns ErrNoHealthyWorker (a
-	// typed verdict, never a silent drop) when none is admissible.
-	membership *FleetMembership
+	// typed verdict, never a silent drop) when none is admissible. It is an atomic
+	// pointer because the host arms it at Serve — with the gateway already accepting
+	// requests — so the publish genuinely races the request-goroutine reads; every
+	// read goes through liveMembership().
+	membership atomic.Pointer[FleetMembership]
+
+	// fleet is the live membership this router was BUILT against but has not yet armed.
+	// newProxyPlanner registers the configured replica roster here so the host can start
+	// the health loop on the serve lifecycle context and arm admission ONCE, at Serve —
+	// rather than at construction, where a not-yet-probed roster would read as an outage
+	// for any request racing the first beat, and where construction would have to do a
+	// blocking network probe. WithMembership promotes it to the live membership the
+	// placement paths read (see runFleetHealthLoop). nil for a router built without a
+	// fleet (a lone upstream, or a hand-built test router).
+	fleet *FleetMembership
 
 	// policy is the optional cache-aware placement policy (issue #41). When nil the
 	// router keeps its round-robin pick unchanged; when set (WithPickPolicy), pick()
@@ -172,18 +194,41 @@ func deriveReplicaName(rawURL string) string {
 	return "replica-" + hex.EncodeToString(sum[:3])
 }
 
+// FleetMembership returns the live membership the router was BUILT against, or nil when
+// it was built without one. It is the handle the host hands to the health loop; the
+// membership is unarmed until the host promotes it via WithMembership.
+func (r *ReplicaRouter) FleetMembership() *FleetMembership {
+	if r == nil {
+		return nil
+	}
+	return r.fleet
+}
+
 // WithMembership attaches a live FleetMembership so the router routes only to
 // admissible (healthy, non-draining) replicas. A replica is bound to a worker by
 // Name == WorkerSpec.ID; a replica absent from membership, still unknown, drained,
 // or unhealthy is dropped from the rotation, and a pick with no admissible worker
 // returns ErrNoHealthyWorker instead of falling through to a dead upstream. Passing
-// nil restores the policy-free blind round-robin. Returns r for chaining.
+// nil restores the policy-free blind round-robin. Returns r for chaining. It is safe
+// to call concurrently with routing: the publish is a single atomic store the
+// request-goroutine reads observe through liveMembership.
 func (r *ReplicaRouter) WithMembership(m *FleetMembership) *ReplicaRouter {
 	if r == nil {
 		return nil
 	}
-	r.membership = m
+	r.membership.Store(m)
 	return r
+}
+
+// liveMembership reads the atomically-published membership, or nil when the router
+// is nil or no membership has been attached. It is the single read seam every
+// placement path uses, so a concurrent WithMembership publish can never be read as a
+// torn or stale pointer.
+func (r *ReplicaRouter) liveMembership() *FleetMembership {
+	if r == nil {
+		return nil
+	}
+	return r.membership.Load()
 }
 
 // WithPickPolicy attaches a cache-aware placement policy (issue #41). pick() then asks
@@ -350,7 +395,8 @@ func (r *ReplicaRouter) reserveOnEngineWithDecode(prefix []string, skip map[stri
 	if r == nil || len(r.replicas) == 0 {
 		return reservedPlannerReplica{}, ErrReplicaRouterEmpty
 	}
-	if r.membership == nil {
+	membership := r.liveMembership()
+	if membership == nil {
 		candidates := r.replicas
 		if len(skip) > 0 {
 			candidates = make([]PlannerReplica, 0, len(r.replicas))
@@ -383,7 +429,7 @@ func (r *ReplicaRouter) reserveOnEngineWithDecode(prefix []string, skip map[stri
 		allowed[repl.Name] = struct{}{}
 	}
 	var booking *decodeFootprintReservation
-	reservation, err := r.membership.reserveForModel(r.model, engine, allowed, skip, r.reservationPicker(prefix, byName, req, nil, &booking))
+	reservation, err := membership.reserveForModel(r.model, engine, allowed, skip, r.reservationPicker(prefix, byName, req, nil, &booking))
 	if err != nil {
 		if booking != nil {
 			booking.releaseOnce("booking_failure")
@@ -525,7 +571,7 @@ func (r *ReplicaRouter) pickByPolicy(prefix []string) (repl PlannerReplica, err 
 		return PlannerReplica{}, cerr, true
 	}
 	if len(candidates) == 0 {
-		if r.membership != nil {
+		if r.liveMembership() != nil {
 			return PlannerReplica{}, ErrNoHealthyWorker, true
 		}
 		return PlannerReplica{}, ErrReplicaRouterEmpty, true
@@ -544,10 +590,11 @@ func (r *ReplicaRouter) pickByPolicy(prefix []string) (repl PlannerReplica, err 
 // model), ErrNoHealthyWorker when a holder exists but none is admissible. Routing that
 // distinction up unchanged is the point: a config mistake must not read as an outage.
 func (r *ReplicaRouter) admitSet() (map[string]struct{}, error) {
-	if r.membership == nil {
+	membership := r.liveMembership()
+	if membership == nil {
 		return nil, nil
 	}
-	adm, err := r.membership.CandidatesForModel(r.model)
+	adm, err := membership.CandidatesForModel(r.model)
 	if err != nil {
 		return nil, err
 	}
@@ -564,7 +611,8 @@ func (r *ReplicaRouter) admitSet() (map[string]struct{}, error) {
 // is no membership to read load from, so the policy scores on residency alone). A
 // non-nil error is membership's typed verdict and is returned to the caller as-is.
 func (r *ReplicaRouter) candidatesAndLoad() ([]PlannerReplica, func(string) int, error) {
-	if r.membership == nil {
+	membership := r.liveMembership()
+	if membership == nil {
 		return r.replicas, nil, nil
 	}
 	admit, err := r.admitSet()
@@ -578,7 +626,7 @@ func (r *ReplicaRouter) candidatesAndLoad() ([]PlannerReplica, func(string) int,
 		}
 	}
 	inflight := make(map[string]int, len(candidates))
-	for _, st := range r.membership.Snapshot() {
+	for _, st := range membership.Snapshot() {
 		inflight[st.Spec.ID] = st.Inflight
 	}
 	return candidates, func(name string) int { return inflight[name] }, nil
@@ -591,7 +639,7 @@ func (r *ReplicaRouter) candidatesAndLoad() ([]PlannerReplica, func(string) int,
 func (r *ReplicaRouter) pickRoundRobin() (PlannerReplica, error) {
 	n := uint64(len(r.replicas))
 	start := r.next.Add(1) - 1 // advance the shared cursor exactly once per pick
-	if r.membership == nil {
+	if r.liveMembership() == nil {
 		return r.replicas[int(start%n)], nil
 	}
 	// Membership-gated: round-robin only over the replicas the live health/drain

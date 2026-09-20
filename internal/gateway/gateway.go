@@ -317,6 +317,15 @@ func New(cfg Config) (*Server, error) {
 	}
 	s.installRichDashboardManager(cfg.RichDashboards)
 
+	// Recover the fleet handle newProxyPlanner stashed on the replica router (issue
+	// fak-private#2417): install it as the Server's live membership so /metrics publishes
+	// its transitions, and remember the router so Serve's health loop can arm it. A nil
+	// router (any non-fleet deployment) leaves both unset and the fleet surface inert.
+	if router := replicaRouterOf(s.planner); router != nil {
+		s.fleetRouter = router
+		s.SetFleetMembership(router.FleetMembership())
+	}
+
 	// #4003: seed the model-routing hot-reload seam behind POST /v1/fak/route/reload.
 	// The watcher is normally installed AFTER New via SetRouteWatcher (it needs the
 	// server's live routing holder), so this is a no-op unless a host/test supplies a
@@ -873,8 +882,9 @@ func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner
 			return nil, err
 		}
 		replicas = append(replicas, PlannerReplica{
-			Name:    name,
-			Planner: p,
+			Name:     name,
+			Planner:  p,
+			Endpoint: dialURL,
 		})
 	}
 	router, err := NewReplicaRouter(model, replicas)
@@ -882,7 +892,35 @@ func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner
 		return nil, err
 	}
 	router.Hedge = cfg.HedgePolicy
+	// Build the live health/drain registry over exactly these replicas and stash it
+	// UNARMED (issue fak-private#2417): the router keeps its blind round-robin until
+	// the Serve-run fleet-health loop probes once and arms it (runFleetHealthLoop), so
+	// construction stays free of network I/O and a request racing startup is not
+	// answered from a not-yet-probed roster. A failure to register is impossible after
+	// NewReplicaRouter validated unique, non-empty replica names, but it is surfaced
+	// rather than dropped.
+	fm, err := buildReplicaMembership(replicas, model)
+	if err != nil {
+		return nil, err
+	}
+	router.fleet = fm
 	return router, nil
+}
+
+// replicaRouterOf returns the ReplicaRouter reachable from p — p itself, or the proxy
+// side of a DualPlanner — or nil when the deployment is not a replica fleet (a lone
+// upstream, the in-kernel model, or the mock). It is how New recovers the fleet handle
+// newProxyPlanner stashed on the router, without widening newProxyPlanner's signature.
+func replicaRouterOf(p agent.Planner) *ReplicaRouter {
+	switch v := p.(type) {
+	case *ReplicaRouter:
+		return v
+	case *DualPlanner:
+		if rr, ok := v.Proxy().(*ReplicaRouter); ok {
+			return rr
+		}
+	}
+	return nil
 }
 
 // newConfiguredHTTPPlanner dials one upstream and applies every Config-derived knob to

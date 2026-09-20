@@ -53,6 +53,19 @@ func newBgloopSupervisor(s *Server) *bgloop.Supervisor {
 			Tick: s.marketingTick,
 		})
 	}
+	// The replica fleet's live health/drain loop (issue fak-private#2417). Registered
+	// here — not as a bare go — so startLoops starts it on the serve context and
+	// stopLoops cancels AND joins it, and it is observable at /v1/fak/loops and via
+	// fak_bgloop_*. The body arms the router after its first probe and then runs
+	// RunHealthLoop, which paces itself and blocks until ctx is done: that is the
+	// CONTINUOUS (Interval 0) contract bgloop.Loop documents, so the Tick owns its own
+	// ticker. The body is a no-op when no fleet was wired, so a non-fleet deployment
+	// still gets a supervised (idle) "fleet-health" row rather than a missing one.
+	_ = sup.Register(bgloop.Loop{
+		Name:     "fleet-health",
+		Interval: 0,
+		Tick:     s.runFleetHealthLoop,
+	})
 	return sup
 }
 

@@ -1048,6 +1048,13 @@ type Server struct {
 	fleet        *FleetMembership
 	fleetMetrics *FleetMembershipMetrics
 
+	// fleetRouter is the ReplicaRouter the fleet loop arms at Serve (issue
+	// fak-private#2417): newProxyPlanner stashes the built-but-unarmed membership on it,
+	// and runFleetHealthLoop promotes it after the first probe. nil for a non-fleet
+	// deployment (lone upstream, in-kernel model, or mock). Immutable after New, so it
+	// needs no lock of its own.
+	fleetRouter *ReplicaRouter
+
 	// admissionCtl is the optional native-serving ADMISSION / PRIORITY / FAIRNESS gate
 	// (#35, admission.go) — the policy layer above modelengine.NativeScheduler's
 	// continuous-batching loop. nil (the default) leaves the /metrics surface free of the

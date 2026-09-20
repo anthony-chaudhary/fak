@@ -207,7 +207,7 @@ func (r *ReplicaRouter) completeHedged(ctx context.Context, primary reservedPlan
 	}
 
 	var alternate reservedPlannerReplica
-	if r.membership == nil {
+	if r.liveMembership() == nil {
 		if _, decodeAware := r.policy.(decodeFootprintPickPolicy); decodeAware {
 			var err error
 			alternate, err = r.reserveOnEngineWithDecode(
