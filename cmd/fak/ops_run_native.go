@@ -122,6 +122,21 @@ func runOpsNative(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, "ops run native:", err)
 		return 1
 	}
+	if *provider != "openai" {
+		preflight := opsRunInferenceRefusal(*provider, *baseURL, *model, "unsupported_provider_protocol")
+		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
+	}
+	preflight, err := opsRunInferencePreflight(ctx, *baseURL, *model)
+	receipt.InferencePreflight = &preflight
+	if err != nil {
+		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
+	}
+	// Persist the qualifying reference before launch. A receipt write failure
+	// cannot produce an unqualified native child process.
+	if err := writeOpsRunReceipt(*receiptPath, receipt); err != nil {
+		fmt.Fprintln(stderr, "ops run native:", err)
+		return 1
+	}
 	cmd := exec.CommandContext(ctx, tuiExecutable(), argv...)
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	cmd.WaitDelay = 5 * time.Second

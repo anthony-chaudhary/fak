@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,10 +17,157 @@ import (
 // The real subprocess executes the production chat entry point, including its
 // file transport, HTTP planner and kernel tools, rather than a fake child receipt.
 func init() {
+	if sentinel := os.Getenv("FAK_OPS_NATIVE_PREFLIGHT_CHILD_SENTINEL"); sentinel != "" && len(os.Args) > 1 && os.Args[1] == "chat" {
+		if err := os.WriteFile(sentinel, []byte("launched"), 0600); err != nil {
+			os.Exit(2)
+		}
+		for i := 2; i+1 < len(os.Args); i++ {
+			if os.Args[i] == "--receipt" {
+				_ = os.WriteFile(os.Args[i+1], []byte(`{"schema":"fak.agent.native.v1","status":"completed","metrics":{"arm":"fak"}}`), 0600)
+				break
+			}
+		}
+		os.Exit(0)
+	}
 	if os.Getenv("FAK_OPS_NATIVE_TEST_CHILD") == "1" && len(os.Args) > 1 && os.Args[1] == "chat" {
 		cmdChat(os.Args[2:])
 		os.Exit(0)
 	}
+}
+
+func serveOpsNativeInferencePreflight(t *testing.T, w http.ResponseWriter, r *http.Request) bool {
+	t.Helper()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Errorf("read provider request: %v", err)
+		return false
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	var request struct {
+		Model  string `json:"model"`
+		Stream bool   `json:"stream"`
+		Tools  []struct {
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		} `json:"tools"`
+	}
+	if json.Unmarshal(body, &request) != nil || !request.Stream {
+		return false
+	}
+	found := false
+	for _, tool := range request.Tools {
+		if tool.Function.Name == opsRunInferenceProbeTool {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return false
+	}
+	if request.Model != "fixture" {
+		t.Errorf("preflight model = %q, want fixture", request.Model)
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	fmt.Fprintf(w, "data: {\"model\":\"fixture\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"native-preflight\",\"type\":\"function\",\"function\":{\"name\":%q,\"arguments\":\"{\\\"ok\\\":true}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n", opsRunInferenceProbeTool)
+	_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	return true
+}
+
+func TestOpsNativeInferencePreflight(t *testing.T) {
+	newGateway := func(t *testing.T, status int, probes *atomic.Int32) *httptest.Server {
+		t.Helper()
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			probes.Add(1)
+			if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
+				t.Errorf("probe = %s %s, want POST /v1/chat/completions", r.Method, r.URL.Path)
+			}
+			var req struct {
+				Model  string `json:"model"`
+				Stream bool   `json:"stream"`
+				Tools  []struct {
+					Function struct {
+						Name string `json:"name"`
+					} `json:"function"`
+				} `json:"tools"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Errorf("decode probe: %v", err)
+			}
+			if req.Model != "fixture" || !req.Stream || len(req.Tools) != 1 || req.Tools[0].Function.Name != opsRunInferenceProbeTool {
+				t.Errorf("probe did not bind native route: %+v", req)
+			}
+			if status != http.StatusOK {
+				http.Error(w, "refused", status)
+				return
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprintf(w, "data: {\"model\":\"fixture\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"native-preflight\",\"type\":\"function\",\"function\":{\"name\":%q,\"arguments\":\"{\\\"ok\\\":true}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n", opsRunInferenceProbeTool)
+			_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+		}))
+	}
+
+	run := func(t *testing.T, baseURL string) (int, opsRunReceipt, bool) {
+		t.Helper()
+		dir := t.TempDir()
+		prompt := filepath.Join(dir, "prompt.txt")
+		receiptPath := filepath.Join(dir, "receipt.json")
+		sentinel := filepath.Join(dir, "child-launched")
+		if err := os.WriteFile(prompt, []byte("native preflight witness"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("FAK_OPS_NATIVE_PREFLIGHT_CHILD_SENTINEL", sentinel)
+		code := runOpsRun(io.Discard, io.Discard, []string{
+			"--harness", "native", "--prompt-file", prompt, "--receipt", receiptPath,
+			"--provider", "openai", "--model", "fixture", "--base-url", baseURL,
+			"--max-turns", "1", "--timeout", "5s",
+		})
+		data, err := os.ReadFile(receiptPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var receipt opsRunReceipt
+		if err := json.Unmarshal(data, &receipt); err != nil {
+			t.Fatal(err)
+		}
+		_, err = os.Stat(sentinel)
+		return code, receipt, err == nil
+	}
+
+	t.Run("failed_probe_launches_no_child", func(t *testing.T) {
+		var probes atomic.Int32
+		gateway := newGateway(t, http.StatusUnauthorized, &probes)
+		defer gateway.Close()
+		code, receipt, launched := run(t, gateway.URL+"/v1")
+		if code == 0 || launched {
+			t.Fatalf("failed inference probe: exit=%d child_launched=%v", code, launched)
+		}
+		if probes.Load() != 1 || receipt.InferencePreflight == nil || receipt.InferencePreflight.Status != "failed" {
+			t.Fatalf("failed inference receipt/probe mismatch: probes=%d receipt=%+v", probes.Load(), receipt.InferencePreflight)
+		}
+	})
+
+	t.Run("qualified_route_is_bound_and_route_change_reprobes", func(t *testing.T) {
+		var firstProbes, secondProbes atomic.Int32
+		first := newGateway(t, http.StatusOK, &firstProbes)
+		defer first.Close()
+		second := newGateway(t, http.StatusOK, &secondProbes)
+		defer second.Close()
+
+		firstCode, firstReceipt, firstLaunched := run(t, first.URL+"/v1")
+		secondCode, secondReceipt, secondLaunched := run(t, second.URL+"/v1")
+		if firstCode != 0 || secondCode != 0 || !firstLaunched || !secondLaunched {
+			t.Fatalf("qualified native launch: first=(%d,%v) second=(%d,%v)", firstCode, firstLaunched, secondCode, secondLaunched)
+		}
+		if firstProbes.Load() != 1 || secondProbes.Load() != 1 {
+			t.Fatalf("route-specific probes = (%d,%d), want (1,1)", firstProbes.Load(), secondProbes.Load())
+		}
+		if firstReceipt.InferencePreflight == nil || secondReceipt.InferencePreflight == nil ||
+			firstReceipt.InferencePreflight.Status != "qualified" || secondReceipt.InferencePreflight.Status != "qualified" ||
+			firstReceipt.InferencePreflight.ReceiptRef == "" || firstReceipt.InferencePreflight.ReceiptRef == secondReceipt.InferencePreflight.ReceiptRef {
+			t.Fatalf("native route receipts are not bound to distinct qualified probes: first=%+v second=%+v", firstReceipt.InferencePreflight, secondReceipt.InferencePreflight)
+		}
+	})
 }
 
 func TestOpsNativeRealExecution(t *testing.T) {
@@ -39,6 +187,9 @@ func TestOpsNativeRealExecution(t *testing.T) {
 			var requests atomic.Int32
 			releaseHandler := make(chan struct{})
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if serveOpsNativeInferencePreflight(t, w, r) {
+					return
+				}
 				var request map[string]any
 				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 					t.Errorf("provider request: %v", err)
@@ -132,6 +283,9 @@ func TestOpsNativeRetainsExplicitPolicy(t *testing.T) {
 
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveOpsNativeInferencePreflight(t, w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		n := requests.Add(1)
 		switch n {
@@ -287,6 +441,9 @@ func TestOpsNativePolicyExactCommand(t *testing.T) {
 
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveOpsNativeInferencePreflight(t, w, r) {
+			return
+		}
 		var request map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&request)
 		w.Header().Set("Content-Type", "application/json")
