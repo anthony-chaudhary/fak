@@ -2593,6 +2593,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	if sp.NativeInferenceReceipt && (temp != 0 || topP != 0 || topK > 0 || len(logitBias) > 0 || freqPenalty != 0 || presPenalty != 0) {
 		return nil, &model.NativeInferenceReceiptUnsupportedError{Reason: "requires greedy sampling over unmodified logits"}
 	}
+	retainMTPHistory := p.VulkanMTPEnabled() && p.greedySpeculativeRequestEligible(temp, logitBias, freqPenalty, presPenalty)
 	prepared, err := p.preparePrompt(ctx, messages, tools, sp, opts...)
 	if err != nil {
 		return nil, err
@@ -2671,7 +2672,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			p.concurrencyProfile.forwardExit(phase)
 			p.devMu.Unlock()
 		}()
-		if err := p.refuseOversizeRequest(len(ids), maxNew); err != nil {
+		if err := p.refuseOversizeRequest(len(ids), maxNew, retainMTPHistory); err != nil {
 			return nil, err
 		}
 	} else if p.concurrencyProfile != nil {
@@ -2683,7 +2684,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		defer p.concurrencyProfile.forwardExit(phase)
 	}
 	if p.coalescesQwenDecode() {
-		if err := p.refuseOversizeRequest(len(ids), maxNew); err != nil {
+		if err := p.refuseOversizeRequest(len(ids), maxNew, retainMTPHistory); err != nil {
 			return nil, err
 		}
 	}
@@ -3140,11 +3141,15 @@ func (p *InKernelPlanner) executionIdentity() (backend, forwardPath string) {
 	}
 	return backend, forwardPath
 }
-func (p *InKernelPlanner) refuseOversizeRequest(promptTokens, maxNew int) error {
+func (p *InKernelPlanner) refuseOversizeRequest(promptTokens, maxNew int, retainMTPHistory ...bool) error {
 	if p == nil || p.backend == nil || p.m == nil {
 		return nil
 	}
-	plan := p.requestMemoryPlan(promptTokens, maxNew)
+	retainHistory := len(retainMTPHistory) > 0 && retainMTPHistory[0]
+	plan, err := p.requestRuntimeMemoryPlan(promptTokens, maxNew, retainHistory)
+	if err != nil {
+		return err
+	}
 	if len(plan) == 0 {
 		return nil
 	}
@@ -3171,6 +3176,45 @@ func (p *InKernelPlanner) refuseOversizeRequest(promptTokens, maxNew int) error 
 		p.recordRequestMemoryPlan(promptTokens, maxNew, plan)
 	}
 	return nil
+}
+
+func (p *InKernelPlanner) requestRuntimeMemoryPlan(promptTokens, maxNew int, retainMTPHistory bool) (compute.MemoryPlan, error) {
+	plan := p.requestMemoryPlan(promptTokens, maxNew)
+	if p == nil || p.m == nil || !p.qwenQ4KPrefillChunkTarget() {
+		return plan, nil
+	}
+	plannedTokens := promptTokens + maxNew
+	if plannedTokens < promptTokens {
+		plannedTokens = promptTokens
+	}
+	panelTokens := p.effectiveQwenQ4KPrefillChunkTokens()
+	if panelTokens > promptTokens {
+		panelTokens = promptTokens
+	}
+
+	fullHistoryCopies, checkpointTokens := 0, 0
+	if retainMTPHistory {
+		fullHistoryCopies = 2
+		if p.tree != nil && inKernelPlannerPrefixReuseSupported(p.m, p.backend) {
+			fullHistoryCopies++
+			checkpointTokens = inKernelSnapshotCheckpoint(0, promptTokens)
+		}
+	}
+	byClass := plan.ByClass()
+	extra, err := compute.EstimateQwen35RuntimeExtraMemoryPlan(compute.Qwen35RuntimeExtraConfig{
+		HiddenWidth:                    p.m.Cfg.HiddenSize,
+		PlannedTokens:                  plannedTokens,
+		PanelTokens:                    panelTokens,
+		RetainedHistory:                retainMTPHistory,
+		FullHistoryCopies:              fullHistoryCopies,
+		CheckpointTokens:               checkpointTokens,
+		Policy:                         compute.RuntimeExtraPolicyConservative,
+		AlreadyPricedHALTransientBytes: byClass[compute.MemoryActivation] + byClass[compute.MemoryScratchpad],
+	})
+	if err != nil {
+		return nil, err
+	}
+	return append(plan, extra...), nil
 }
 
 type requestPressureFit struct {

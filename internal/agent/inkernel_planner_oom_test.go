@@ -1,13 +1,139 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
+
+type qwenRuntimeAdmissionBackend struct {
+	compute.Backend
+	total, free int64
+	panelBytes  int64
+	modelWork   int
+}
+
+func (b *qwenRuntimeAdmissionBackend) Caps() compute.Caps {
+	caps := b.Backend.Caps()
+	caps.DeviceMemory = true
+	caps.CapacityProbe = true
+	return caps
+}
+
+func (b *qwenRuntimeAdmissionBackend) DeviceMemory() (int64, int64, bool) {
+	return b.total, b.free, true
+}
+
+func (b *qwenRuntimeAdmissionBackend) MaxWeightBufferBytes() int64 { return b.panelBytes }
+
+func (b *qwenRuntimeAdmissionBackend) Qwen35SequencePrefillPath() string {
+	return compute.Qwen35SequencePrefillPath
+}
+
+func (b *qwenRuntimeAdmissionBackend) Qwen35SequenceEmbeddingRowsPath() string {
+	return compute.Qwen35SequenceEmbeddingRowsPath
+}
+
+func (b *qwenRuntimeAdmissionBackend) Qwen35SequencePrefill(compute.Qwen35SequencePrefillRequest) (compute.Qwen35SequencePrefillResult, error) {
+	b.modelWork++
+	return compute.Qwen35SequencePrefillResult{}, errors.New("sequence prefill reached before runtime-memory admission")
+}
+
+func TestInKernelQwenRuntimeMemoryCompleteRefusesBeforeModelWork(t *testing.T) {
+	cfg := tinyConcurrencyConfig()
+	cfg.ModelType = "qwen3_5_text"
+	cfg.LayerTypes = []string{"linear_attention", "full_attention"}
+	cfg.LinearConvKernelDim = 3
+	cfg.LinearNumKeyHeads, cfg.LinearKeyHeadDim = 2, 8
+	cfg.LinearNumValueHeads, cfg.LinearValueHeadDim = 4, 8
+	if !cfg.IsQwen35Hybrid() {
+		t.Fatal("test config must select the Qwen3.8 hybrid runtime")
+	}
+
+	const panelTokens = 128
+	widest, ok := qwenPrefillMaxTokenPanelWidth(cfg)
+	if !ok {
+		t.Fatal("test config must have a bounded Qwen prefill panel")
+	}
+	be := &qwenRuntimeAdmissionBackend{
+		Backend:    compute.Default(),
+		total:      1 << 30,
+		free:       1 << 30,
+		panelBytes: int64(panelTokens) * widest * 4,
+	}
+	m := model.NewSynthetic(cfg)
+	m.Quantize()
+	p := NewInKernelPlannerWithConfig(m, loadProbeTok(t), "qwen-runtime-admission", true, be, false, InKernelPlannerConfig{QwenQ4KPrefillChunkTokens: panelTokens})
+
+	messages := []Message{{Role: RoleUser, Content: strings.Repeat("capacity ", 96)}}
+	opts := []SampleOpt{WithMaxTokens(1)}
+	prepared, err := p.preparePrompt(context.Background(), messages, nil, applySampleOpts(opts...), opts...)
+	if err != nil {
+		t.Fatalf("prepare prompt: %v", err)
+	}
+	if len(prepared.ids) <= panelTokens {
+		t.Fatalf("prompt tokens = %d, want > panel bound %d", len(prepared.ids), panelTokens)
+	}
+	base := p.requestMemoryPlan(len(prepared.ids), prepared.maxNew)
+	byClass := base.ByClass()
+	extra, err := compute.EstimateQwen35RuntimeExtraMemoryPlan(compute.Qwen35RuntimeExtraConfig{
+		HiddenWidth:                    cfg.HiddenSize,
+		PlannedTokens:                  len(prepared.ids) + prepared.maxNew,
+		PanelTokens:                    panelTokens,
+		Policy:                         compute.RuntimeExtraPolicyConservative,
+		AlreadyPricedHALTransientBytes: byClass[compute.MemoryActivation] + byClass[compute.MemoryScratchpad],
+	})
+	if err != nil {
+		t.Fatalf("estimate Qwen runtime extras: %v", err)
+	}
+	if extra.DeviceTotal() <= 0 {
+		t.Fatalf("runtime extras = %+v, want positive panel demand", extra)
+	}
+	combined := append(append(compute.MemoryPlan(nil), base...), extra...)
+	want := combined.DeviceTotal()
+	for free := int64(float64(want-1)/(1-inKernelRequestDeviceHeadroom)) - 4; ; free++ {
+		budget := ApplyByteHeadroom(free, inKernelRequestDeviceHeadroom)
+		if budget < want-1 {
+			continue
+		}
+		if budget != want-1 {
+			t.Fatalf("cannot construct one-byte-short capacity: want=%d budget=%d", want, budget)
+		}
+		be.free = free
+		break
+	}
+	if err := compute.RefuseMemoryPlanIfTooBig(be, base, inKernelRequestDeviceHeadroom); err != nil {
+		t.Fatalf("base request plan must fit: %v", err)
+	}
+	var fitErr *compute.FitError
+	if err := compute.RefuseMemoryPlanIfTooBig(be, combined, inKernelRequestDeviceHeadroom); !errors.As(err, &fitErr) || fitErr.Want-fitErr.Avail != 1 {
+		t.Fatalf("base+runtime plan refusal = %T %v, want one-byte-short *compute.FitError", err, err)
+	}
+
+	var modelPanic any
+	func() {
+		defer func() { modelPanic = recover() }()
+		_, err = p.Complete(context.Background(), messages, nil, opts...)
+	}()
+	if modelPanic != nil {
+		t.Fatalf("Complete reached model allocation before runtime-memory admission: %v", modelPanic)
+	}
+	var capacityErr *InKernelCapacityError
+	if !errors.As(err, &capacityErr) {
+		t.Fatalf("Complete error = %T %v, want *InKernelCapacityError before model work", err, err)
+	}
+	if capacityErr.Want-capacityErr.Avail != 1 || capacityErr.Scope != compute.MemoryScopeDevice {
+		t.Fatalf("Complete capacity refusal = %+v, want one-byte-short device refusal", capacityErr)
+	}
+	if be.modelWork != 0 {
+		t.Fatalf("sequence prefill calls = %d, want zero before capacity refusal", be.modelWork)
+	}
+}
 
 // These tests cover the recover boundary that turns an in-kernel device-allocation panic into
 // a typed, actionable error instead of crashing the serving goroutine. They need NO GPU: the
