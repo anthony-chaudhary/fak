@@ -202,6 +202,11 @@ func guardInfoTrendsPanelRows(ctx guardInfoPanelCtx, level guardInfoPanelLevel) 
 	if cacheObserved {
 		rows = append(rows, fmt.Sprintf(" hit   %s  %.0f%%  ×%.2f", sparklineTUI(ctx.tr.hit, ctx.sparkW), guardInfoHitPct(v), guardInfoMult(v)))
 	}
+	if reuse := guardInfoCrossAgentReuseRollup(v.Sessions); reuse.subagents > 0 {
+		rows = append(rows, fmt.Sprintf(" x-reuse %s  current %.0f%% · avg %.0f%% · %s",
+			sparklineTUI(ctx.tr.crossAgentReuse, ctx.sparkW), reuse.ratio*100,
+			meanTUI(ctx.tr.crossAgentReuse)*100, crossAgentReuseTrendTUI(ctx.tr.crossAgentReuse)))
+	}
 	rows = append(rows, fmt.Sprintf(" work  %s  %d replies · busy %d", sparklineTUI(ctx.tr.turns, ctx.sparkW), v.Inference.Turns, v.Gateway.InflightRequests))
 	if len(ctx.tr.costPerTurn) > 0 {
 		last := len(ctx.tr.costPerTurn) - 1
@@ -256,7 +261,21 @@ func guardInfoTasksPanelRows(ctx guardInfoPanelCtx, level guardInfoPanelLevel) [
 	if level == guardPanelMini {
 		return []string{cacheRow}
 	}
-	rows := []string{cacheRow, " safety " + guardInfoSafetyText(v)}
+	rows := []string{cacheRow}
+	if reuse := guardInfoCrossAgentReuseRollup(v.Sessions); reuse.subagents > 0 {
+		subagentNoun := "subagents"
+		if reuse.subagents == 1 {
+			subagentNoun = "subagent"
+		}
+		tokenNoun := "tokens"
+		if reuse.sharedTokens == 1 {
+			tokenNoun = "token"
+		}
+		rows = append(rows, fmt.Sprintf(" x-reuse %s %.0f%%  %s shared %s · %d %s",
+			gaugeBarTUI(reuse.ratio, ctx.gaugeW), reuse.ratio*100,
+			guardInfoShortCount(reuse.sharedTokens), tokenNoun, reuse.subagents, subagentNoun))
+	}
+	rows = append(rows, " safety "+guardInfoSafetyText(v))
 	// The adjudication "why" detail — the top deny reasons + held/deferred tallies the guard
 	// exit summary prints — promoted live under the safety count. Silent (no row) when the
 	// gateway reported no adjudication block or the session refused nothing with a reason, so
@@ -473,11 +492,7 @@ func guardInfoAgentText(s guardInfoSession) string {
 // hold an in-flight request right now, and cross-agent token reuse rate.
 func guardInfoAgentsSummary(ss []guardInfoSession) string {
 	continued, deepest, spawned, inflight := 0, 0, 0, 0
-	subagents := 0
-	totalSubPromptTokens := 0
-	totalSubSharedTokens := 0
-	sumReuseRate := 0.0
-	reuseCount := 0
+	reuse := guardInfoCrossAgentReuseRollup(ss)
 
 	for _, s := range ss {
 		if s.InflightSeconds > 0 {
@@ -497,49 +512,20 @@ func guardInfoAgentsSummary(ss []guardInfoSession) string {
 			}
 		}
 
-		isSub := strings.TrimSpace(s.ParentSessionID) != "" ||
-			strings.TrimSpace(s.SubagentType) != "" ||
-			strings.HasPrefix(strings.TrimSpace(s.Role), "sub") ||
-			strings.HasPrefix(strings.TrimSpace(s.Role), "[sub")
-		if isSub {
-			subagents++
-			if s.PromptTokens > 0 {
-				totalSubPromptTokens += s.PromptTokens
-			}
-			if s.SharedTokens > 0 {
-				totalSubSharedTokens += s.SharedTokens
-			}
-			if s.ReuseRate > 0 {
-				rate := s.ReuseRate
-				if rate > 1.0 {
-					rate = rate / 100.0
-				}
-				sumReuseRate += rate
-				reuseCount++
-			}
-		}
 	}
 
-	if subagents > 0 {
+	if reuse.subagents > 0 {
 		parts := []string{fmt.Sprintf("%d active", len(ss))}
-		if continued > 0 && subagents == 0 {
-			parts[0] += fmt.Sprintf(" (%d continued, deepest g%d)", continued, deepest)
-		}
 		subNoun := "subagents"
-		if subagents == 1 {
+		if reuse.subagents == 1 {
 			subNoun = "subagent"
 		}
-		parts = append(parts, fmt.Sprintf("%d %s", subagents, subNoun))
+		parts = append(parts, fmt.Sprintf("%d %s", reuse.subagents, subNoun))
 		if inflight > 0 {
 			parts = append(parts, fmt.Sprintf("%d in-flight", inflight))
 		}
-		if totalSubPromptTokens > 0 && totalSubSharedTokens > 0 {
-			reusePct := int(math.Round(float64(totalSubSharedTokens) / float64(totalSubPromptTokens) * 100))
-			parts = append(parts, fmt.Sprintf("%d%% x-agent reuse", reusePct))
-		} else if reuseCount > 0 {
-			avgReuse := sumReuseRate / float64(reuseCount)
-			reusePct := int(math.Round(avgReuse * 100))
-			parts = append(parts, fmt.Sprintf("%d%% x-agent reuse", reusePct))
+		if reuse.observed {
+			parts = append(parts, fmt.Sprintf("%d%% x-agent reuse", int(math.Round(reuse.ratio*100))))
 		}
 		return strings.Join(parts, " · ")
 	}
@@ -555,6 +541,72 @@ func guardInfoAgentsSummary(ss []guardInfoSession) string {
 		out += fmt.Sprintf(", %d in-flight", inflight)
 	}
 	return out
+}
+
+type guardInfoCrossAgentReuse struct {
+	ratio        float64
+	sharedTokens int
+	subagents    int
+	observed     bool
+}
+
+// guardInfoCrossAgentReuseRollup folds live subagent telemetry once for every consumer.
+// Exact shared/prompt token counts take precedence; normalized per-session reuse rates are
+// the fallback for providers that do not report shared-token counts.
+func guardInfoCrossAgentReuseRollup(ss []guardInfoSession) guardInfoCrossAgentReuse {
+	var out guardInfoCrossAgentReuse
+	totalPrompt, rateCount := 0, 0
+	rateTotal := 0.0
+	for _, s := range ss {
+		if !guardInfoIsSubagent(s) {
+			continue
+		}
+		out.subagents++
+		if s.PromptTokens > 0 {
+			totalPrompt += s.PromptTokens
+		}
+		if s.SharedTokens > 0 {
+			out.sharedTokens += s.SharedTokens
+		}
+		if s.ReuseRate > 0 {
+			rate := s.ReuseRate
+			if rate > 1 {
+				rate /= 100
+			}
+			if rate > 1 {
+				rate = 1
+			}
+			rateTotal += rate
+			rateCount++
+		}
+	}
+	if totalPrompt > 0 && out.sharedTokens > 0 {
+		out.ratio = math.Min(1, float64(out.sharedTokens)/float64(totalPrompt))
+		out.observed = true
+		return out
+	}
+	if rateCount > 0 {
+		out.ratio = rateTotal / float64(rateCount)
+		out.observed = true
+	}
+	return out
+}
+
+func guardInfoIsSubagent(s guardInfoSession) bool {
+	role := strings.TrimSpace(s.Role)
+	return strings.TrimSpace(s.ParentSessionID) != "" ||
+		strings.TrimSpace(s.SubagentType) != "" ||
+		strings.HasPrefix(role, "sub") || strings.HasPrefix(role, "[sub")
+}
+
+func crossAgentReuseTrendTUI(vals []float64) string {
+	if len(vals) < 2 || vals[len(vals)-1] == vals[len(vals)-2] {
+		return "→ flat"
+	}
+	if vals[len(vals)-1] > vals[len(vals)-2] {
+		return "↗ rising"
+	}
+	return "↘ falling"
 }
 
 func guardInfoBytesText(b uint64) string { return harnessres.CompactBytes(b) }

@@ -323,3 +323,48 @@ func TestGuardInfoTrendsPanelCapturesPerTurnPhaseAndCost(t *testing.T) {
 		t.Fatalf("token-only endpoint was rendered as currency:\n%s", got)
 	}
 }
+
+func TestGuardInfoTrendsPanelCrossAgentReuse(t *testing.T) {
+	tr := newGuardInfoTrend(guardInfoTrendCap)
+	var current guardInfoVars
+	for _, sharedPerSubagent := range []int{10, 30, 45} {
+		current = provenVisualVars()
+		current.Sessions = []guardInfoSession{
+			{TraceID: "coord", Role: "coord"},
+			{TraceID: "worker-a", ParentSessionID: "coord", SubagentType: "worker", PromptTokens: 50, SharedTokens: sharedPerSubagent},
+			{TraceID: "worker-b", ParentSessionID: "coord", SubagentType: "tester", PromptTokens: 50, SharedTokens: sharedPerSubagent},
+		}
+		tr.push(current)
+	}
+
+	ctx := guardInfoPanelCtx{v: current, tr: tr, width: 120, sparkW: 8, gaugeW: 10}
+	trends := strings.Join(guardInfoTrendsPanelRows(ctx, guardPanelFull), "\n")
+	for _, want := range []string{"▁▅█", "current 90%", "avg 57%", "↗ rising"} {
+		if !strings.Contains(trends, want) {
+			t.Errorf("cross-agent reuse trends missing %q:\n%s", want, trends)
+		}
+	}
+
+	tasks := strings.Join(guardInfoTasksPanelRows(ctx, guardPanelFull), "\n")
+	for _, want := range []string{gaugeBarTUI(0.9, 10), "90 shared tokens", "2 subagents"} {
+		if !strings.Contains(tasks, want) {
+			t.Errorf("cross-agent reuse tasks missing %q:\n%s", want, tasks)
+		}
+	}
+
+	for i := 0; i < guardInfoTrendCap; i++ {
+		tr.push(current)
+	}
+	if got := len(tr.crossAgentReuse); got != guardInfoTrendCap {
+		t.Fatalf("cross-agent reuse history length = %d, want cap %d", got, guardInfoTrendCap)
+	}
+
+	tr.baseline.ID = "obsolete-baseline"
+	tr.push(current)
+	if got := len(tr.crossAgentReuse); got != 1 {
+		t.Fatalf("baseline reset left %d cross-agent reuse samples, want a restarted ring of 1", got)
+	}
+	if got := tr.crossAgentReuse[0]; got != 0.9 {
+		t.Fatalf("restarted cross-agent reuse sample = %.2f, want 0.90", got)
+	}
+}

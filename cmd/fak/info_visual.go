@@ -44,6 +44,7 @@ type guardInfoTrend struct {
 	inflight        []float64 // requests in flight right now
 	heap            []float64 // gateway heap-alloc bytes — the resources panel's live memory trend
 	savedCalls      []float64 // cumulative engine calls fak avoided (turns saved) — its slope is the saving rate
+	crossAgentReuse []float64 // live cross-agent shared/prompt ratio, sampled once per poll
 	prefillPerTurn  []float64 // prompt/prefill tokens for each newly completed turn
 	decodePerTurn   []float64 // completion/decode tokens for each newly completed turn
 	costPerTurn     []float64 // observed token-equivalent cost per newly completed turn
@@ -71,7 +72,7 @@ func (t *guardInfoTrend) push(v guardInfoVars) {
 	} else if !guardInfoWorkDoneBaselineCompatible(t.baseline, baseline) {
 		t.baseline = baseline
 		t.baselineChanges++
-		t.saved, t.hit, t.turns, t.inflight, t.heap, t.savedCalls = nil, nil, nil, nil, nil, nil
+		t.saved, t.hit, t.turns, t.inflight, t.heap, t.savedCalls, t.crossAgentReuse = nil, nil, nil, nil, nil, nil, nil
 		t.prefillPerTurn, t.decodePerTurn, t.costPerTurn = nil, nil, nil
 		t.usagePrimed = false
 	}
@@ -86,6 +87,8 @@ func (t *guardInfoTrend) push(v guardInfoVars) {
 	t.inflight = appendCappedTUI(t.inflight, float64(v.Gateway.InflightRequests), t.cap)
 	t.heap = appendCappedTUI(t.heap, float64(v.Runtime.Memory.HeapAllocBytes), t.cap)
 	t.savedCalls = appendCappedTUI(t.savedCalls, float64(guardInfoTurnsSaved(v)), t.cap)
+	reuse := guardInfoCrossAgentReuseRollup(v.Sessions)
+	t.crossAgentReuse = appendCappedTUI(t.crossAgentReuse, reuse.ratio, t.cap)
 	t.pushTurnUsage(v)
 }
 
