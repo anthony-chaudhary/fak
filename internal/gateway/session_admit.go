@@ -67,6 +67,12 @@ type servedSessionTurn struct {
 func (s *Server) beginServedRequest(w http.ResponseWriter, r *http.Request) (context.Context, string, servedSessionTurn, bool, bool) {
 	ctx := r.Context()
 	trace := s.useHTTPTrace(w, r, "")
+	// Stamp the minted/resolved request trace onto the request context under the agent's
+	// typed request-trace key so the in-kernel planner's native-phase observations are
+	// keyed on the SAME id the live session registry (and thus mostRecentLiveTrace)
+	// enumerates — the join the /debug/vars request_admission block needs (#13120
+	// reachability). No-op on an empty trace.
+	ctx = agent.WithRequestTraceID(ctx, trace)
 	if r != nil {
 		spec := parseAgentSpecFromRequest(r, trace)
 		ctx = carrierWithSpec(ctx, spec)

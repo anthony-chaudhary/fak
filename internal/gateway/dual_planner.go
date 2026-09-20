@@ -89,6 +89,23 @@ func (d *DualPlanner) Proxy() agent.Planner { return d.proxy }
 // Local exposes the in-kernel side (tests, banners).
 func (d *DualPlanner) Local() agent.Planner { return d.local }
 
+// NativePhaseObservation forwards to the in-kernel side when it implements the optional
+// agent.NativePhaseReporter seam, so the /debug/vars request_admission native-phase half
+// renders on a DUAL serve exactly as it does on a pure in-kernel serve (#13120). Without
+// this, s.planner is *DualPlanner and the debug handler's NativePhaseReporter type
+// assertion fails, silently omitting the half even though the local planner recorded it.
+// The proxy side has no native phase, so it never answers.
+func (d *DualPlanner) NativePhaseObservation(traceID string) (agent.NativePhaseObservation, bool) {
+	if d == nil {
+		return agent.NativePhaseObservation{}, false
+	}
+	reporter, ok := d.local.(agent.NativePhaseReporter)
+	if !ok {
+		return agent.NativePhaseObservation{}, false
+	}
+	return reporter.NativePhaseObservation(traceID)
+}
+
 // WalkPlanners traverses each direct child planner in the dual planner.
 func (d *DualPlanner) WalkPlanners(fn func(agent.Planner)) {
 	if d == nil {

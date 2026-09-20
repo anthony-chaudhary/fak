@@ -12,6 +12,42 @@ type outboundTraceContext struct {
 }
 type outboundTraceContextKey struct{}
 
+// requestTraceIDKey is the typed context key carrying the gateway's per-request session
+// trace id (e.g. "gw-7") from the served HTTP boundary to the planner, so a native-phase
+// observation is keyed on the SAME id the debug reader enumerates from the live session
+// registry. A typed struct{} key (not a bare string) keeps it from colliding with any
+// other context value and matches how every production setter in the gateway attaches
+// values (#13120 reachability).
+type requestTraceIDKey struct{}
+
+// WithRequestTraceID stamps the gateway's request trace id onto ctx. The served path calls
+// this once at the request boundary; the in-kernel planner reads it back through
+// nativePhaseTraceID so the /debug/vars request_admission block joins the decision and
+// native-phase halves on the same live trace. An empty id stamps nothing, so a caller can
+// pass a minted-or-default trace unconditionally.
+func WithRequestTraceID(ctx context.Context, traceID string) context.Context {
+	traceID = strings.TrimSpace(traceID)
+	if traceID == "" {
+		return ctx
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, requestTraceIDKey{}, traceID)
+}
+
+// RequestTraceID returns the gateway request trace id stamped by WithRequestTraceID, or ""
+// when none was set.
+func RequestTraceID(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if v, ok := ctx.Value(requestTraceIDKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
 // WithTraceContext carries validated W3C context from an ingress adapter to provider calls.
 func WithTraceContext(ctx context.Context, traceparent, tracestate string) context.Context {
 	if ctx == nil {

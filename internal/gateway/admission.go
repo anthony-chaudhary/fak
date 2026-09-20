@@ -180,6 +180,26 @@ func baseTraceID(traceID string) string {
 	return strings.TrimSpace(traceID)
 }
 
+// admissionSuffixMatch reports whether cand is exactly prefix followed by the controller's
+// own single numeric suffix (prefix is "<bare-id>#"). It rejects a candidate that merely
+// shares a textual prefix but carries a further "#" segment — "foo" must not resolve the
+// stored "foo#bar#1".
+func admissionSuffixMatch(cand, prefix string) bool {
+	if !strings.HasPrefix(cand, prefix) {
+		return false
+	}
+	suffix := cand[len(prefix):]
+	if suffix == "" || strings.Contains(suffix, "#") {
+		return false
+	}
+	for _, r := range suffix {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // AdmissionVerdict is the outcome of offering a request to the gate.
 type AdmissionVerdict uint8
 
@@ -527,13 +547,48 @@ func (c *AdmissionController) recordDecisionLocked(req SeqRequest, verdict Admis
 // traceID, and whether one exists. It is the durable per-request read-back the serve path
 // (or a diagnostic reader) consults; the returned slice is a copy so a caller cannot
 // mutate controller state.
+//
+// The lookup accepts EITHER the exact stored key (an already-suffixed "<base>#<seq>" id, as
+// an in-band caller holds) OR the BARE session id that mostRecentLiveTrace() enumerates. The
+// served path mints the bare id and Acquire stores the receipt under "<bare>#<seq>", so a
+// bare read must resolve to the latest suffixed receipt for that base; without this the
+// /debug/vars request_admission decision half could never render on a live serve (#13120
+// reachability). Base-trace matching is scoped by baseTraceID, so a different base never
+// borrows this base's receipt.
 func (c *AdmissionController) LastAdmissionDecision(traceID string) (AdmissionDecisionReceipt, bool) {
 	if c == nil {
 		return AdmissionDecisionReceipt{}, false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	rec, ok := c.decisions[traceID]
+	key := strings.TrimSpace(traceID)
+	rec, ok := c.decisions[key]
+	if !ok && key != "" {
+		// Fall back to the latest suffixed receipt whose base matches the bare id. A
+		// stored receipt is "<base>#<seq>", so a bare read must match a stored key that is
+		// this id plus the controller's OWN numeric suffix ("gw-7" -> "gw-7#1"). The
+		// suffix check is numeric and single-segment on purpose: it rejects a client id
+		// that merely shares a textual prefix ("foo" must NOT match "foo#bar#1").
+		//
+		// When the id ITSELF contains "#" (an unsanitized client X-Trace-Id like "foo#bar"
+		// stored as "foo#bar#1", where the controller appended a SECOND "#") baseTraceID
+		// equality covers it; that branch is gated on key != base so plain "foo" never
+		// borrows "foo#bar#1". decisionOrder preserves recording order, so scan
+		// newest-first; a different base (gw-1 vs gw-10) never matches either branch.
+		base := baseTraceID(key)
+		prefix := key + "#"
+		for i := len(c.decisionOrder) - 1; i >= 0; i-- {
+			cand := c.decisionOrder[i]
+			match := admissionSuffixMatch(cand, prefix)
+			if !match && key != base && base != "" {
+				match = baseTraceID(cand) == base
+			}
+			if match {
+				rec, ok = c.decisions[cand]
+				break
+			}
+		}
+	}
 	if !ok {
 		return AdmissionDecisionReceipt{}, false
 	}
