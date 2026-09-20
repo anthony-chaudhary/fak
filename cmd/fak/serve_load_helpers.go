@@ -40,7 +40,26 @@ func serveDenseKQuantOptions(backend compute.Backend) []ggufload.Q4KLoadOption {
 	if cap, ok := backend.(q2kCapableBackend); ok && cap.SupportsQ2K() && backend.Caps().UploadDtype {
 		opts = append(opts, ggufload.WithDenseQ2KResident(true))
 	}
+	if serveNativeDenseQ6K(backend) {
+		opts = append(opts, ggufload.WithDenseQ6KResident(true))
+	}
 	return opts
+}
+
+// serveNativeDenseQ6K admits packed Q6_K only when the selected device can
+// upload that dtype and execute it natively. The exact dtype probe is the common
+// contract for CUDA/ROCm and other backends. A backend that also exposes the
+// optional Q6_K execution probe must pass it, so a Vulkan bundle missing its
+// optional Q6_K shader remains on the established dequantized path.
+func serveNativeDenseQ6K(backend compute.Backend) bool {
+	if backend == nil || !backend.Caps().DeviceMemory || !backend.Caps().UploadDtype ||
+		!compute.BackendSupportsDeviceWeightDtype(backend, compute.Q6_K) {
+		return false
+	}
+	if native, ok := backend.(compute.Qwen35MTPQ6KBackend); ok {
+		return native.SupportsQ6KMatMul()
+	}
+	return true
 }
 
 // serveResidentQ4KLoadOptions keeps loader and admission storage selection on

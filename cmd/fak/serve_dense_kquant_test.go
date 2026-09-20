@@ -73,3 +73,70 @@ func TestServeDenseKQuantOptionsRetainQ2KOnlyWhenBackendAdvertisesBoth(t *testin
 		})
 	}
 }
+
+type q6kCapBackend struct {
+	compute.Backend
+	deviceMemory, uploadDtype, q6k bool
+}
+
+func (b q6kCapBackend) Caps() compute.Caps {
+	c := b.Backend.Caps()
+	c.DeviceMemory, c.UploadDtype = b.deviceMemory, b.uploadDtype
+	return c
+}
+func (b q6kCapBackend) SupportsDeviceWeightDtype(dt compute.Dtype) bool {
+	return dt == compute.Q6_K && b.q6k
+}
+
+type optionalQ6KCapBackend struct {
+	q6kCapBackend
+	native bool
+}
+
+func (b optionalQ6KCapBackend) SupportsQ6KMatMul() bool { return b.native }
+
+func TestServeDenseKQuantOptionsEnableQ6KOnlyWhenBackendAdvertisesBoth(t *testing.T) {
+	backends := []struct {
+		name    string
+		backend compute.Backend
+	}{
+		{name: "common-dtype-contract", backend: q6kCapBackend{Backend: compute.Default(), deviceMemory: true, uploadDtype: true, q6k: true}},
+		{name: "optional-native-contract", backend: optionalQ6KCapBackend{q6kCapBackend: q6kCapBackend{Backend: compute.Default(), deviceMemory: true, uploadDtype: true, q6k: true}, native: true}},
+	}
+	for _, tc := range backends {
+		t.Run(tc.name, func(t *testing.T) {
+			effects := ggufload.ApplyQ4KLoadOptions(serveDenseKQuantOptions(tc.backend))
+			if !effects.DenseQ6KResident {
+				t.Fatal("DenseQ6KResident = false, want true")
+			}
+			if effects.DenseKQuantResident || effects.DenseQ2KResident {
+				t.Fatalf("Q6_K admission changed other residency: %+v", effects)
+			}
+		})
+	}
+}
+
+func TestServeDenseKQuantOptionsDeclinesQ6KPartialCapability(t *testing.T) {
+	backends := []struct {
+		name    string
+		backend compute.Backend
+	}{
+		{name: "nil", backend: nil},
+		{name: "cpu", backend: compute.Default()},
+		{name: "upload-only", backend: q6kCapBackend{Backend: compute.Default(), deviceMemory: true, uploadDtype: true}},
+		{name: "execution-only", backend: q6kCapBackend{Backend: compute.Default(), deviceMemory: true, q6k: true}},
+		{name: "host-memory", backend: q6kCapBackend{Backend: compute.Default(), uploadDtype: true, q6k: true}},
+		{name: "optional-bundle-missing", backend: optionalQ6KCapBackend{q6kCapBackend: q6kCapBackend{Backend: compute.Default(), deviceMemory: true, uploadDtype: true, q6k: true}}},
+	}
+	for _, tc := range backends {
+		t.Run(tc.name, func(t *testing.T) {
+			effects := ggufload.ApplyQ4KLoadOptions(serveDenseKQuantOptions(tc.backend))
+			if effects.DenseQ6KResident {
+				t.Fatal("DenseQ6KResident = true, want false")
+			}
+			if effects.DenseKQuantResident || effects.DenseQ2KResident {
+				t.Fatalf("declined Q6_K changed other residency: %+v", effects)
+			}
+		})
+	}
+}
