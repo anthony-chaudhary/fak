@@ -835,7 +835,6 @@ var tier = map[string]int{
 	"codedebt":                   1, // pure code-debt query, deterministic scanner, and model fold; stdlib-only, no internal imports, off the hot path (#10939).
 	"archcheck":                  2, // shift-left architecture import DAG and tier preflight validator; stdlib-only, off the hot path (#10918).
 	"ctxplanlint":                1,
-	"debtlane":                   2, // debt-lane lease and status discovery; imports processalive(1), off the hot path.
 	"armtracking":                1, // ARM performance counter and event tracking; stdlib-only, off the hot path.
 	"pacing":                     2, // adaptive token-bucket and inference slot governor (#11168); imports leaseref(2), off the hot path.
 	"sessionview":                1, // session view model, terminal view, and sink primitives; stdlib-only, off the hot path.
@@ -854,7 +853,6 @@ var tier = map[string]int{
 	"breathgate":                 1,
 	"kv":                         1,
 	"mcpbroker":                  1,
-	"issueorchestrator":          3,
 	"storage":                    1,
 	"harnesshint":                1,
 	"harnesslint":                1,

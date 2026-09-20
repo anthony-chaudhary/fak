@@ -295,6 +295,17 @@ type Session struct {
 	// (the default, expert_ring_prefetch.go, #5614) or discovered one expert at a time as the GEMMs
 	// reach for it. Inert without a ring, like every knob above it.
 	ExpertPrefetch ExpertPrefetchMode
+	// CrossLayerGatePrefetch enables next-layer gate prediction (#5614/#1297) for THIS session only:
+	// while layer L computes, apply layer L+1's router gate to L's hidden state and stage the predicted
+	// top-k into the routed-expert ring as HINTS. A hint is never a demand, so a mispredict cannot change
+	// logits. The ZERO VALUE (false) is OFF and leaves every existing session byte-for-byte unchanged.
+	// Inert without an expert ring (ExpertRingBytes==0). Sibling of ExpertPrefetch.
+	CrossLayerGatePrefetch bool
+	// crossLayerMu guards the two per-session ledger maps below. The ledger is session-owned (not a
+	// package map), so it is released with the session at Close and no default-off run allocates it.
+	crossLayerMu      sync.Mutex
+	crossLayerStats   CrossLayerPrefetchStats
+	crossLayerPending map[int]map[int]struct{}
 	// ExpertRingBatchAware enables the batch-aware hot-set policy (expert_ring_policy.go, #1295).
 	// It couples the resident hot-set budget and prefetch aggressiveness to ExpertAdmittedBatch.
 	// Zero value (Enabled=false) is OFF and leaves the static budget byte-for-byte unchanged.

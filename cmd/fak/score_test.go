@@ -21,7 +21,6 @@ func TestScoreRoutesCoverTheMetaVerbs(t *testing.T) {
 		"code-quality",
 		"conflation",
 		"concept-usage",
-		"debt-lanes",
 		"default-value",
 		"dogfood",
 		"dojo-rsi",

@@ -34,8 +34,6 @@ var scoreRoutes = map[string]func(argv []string){
 	"code-quality":        cmdCodeQualityScore,
 	"conflation":          cmdConflationScorecard,
 	"concept-usage":       cmdConceptUsageScore,
-	"debt-lanes":          cmdDebtLanesScorecard,
-	"debt-orchestrator":   cmdDebtOrchestratorScorecard,
 	"default-value":       cmdDefaultValueScorecard,
 	"dogfood":             cmdDogfoodScore,
 	"dojo-rsi":            cmdDojoRSI,

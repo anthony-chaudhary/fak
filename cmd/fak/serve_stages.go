@@ -554,6 +554,14 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 	// not the load's: a mistyped --n-cpu-moe refuses here rather than after the weights are
 	// resident. Carried to the planner through agent.ExpertSpillEnv (serve_ncpumoe.go).
 	must(applyServeNCPUMoE(*sf.nCPUMoE))
+	// The per-session next-layer gate-prefetch knob (#1297/#1401) is an OPERATOR opt-in, so it is
+	// validated here too, before the load, and carried to the planner through
+	// agent.CrossLayerGatePrefetchEnv (serve_cross_layer_prefetch.go). Only an EXPLICITLY PASSED flag
+	// reaches applyServeCrossLayerGatePrefetch: an unset flag leaves the ambient env alone and every
+	// session byte-for-byte unchanged, while an explicit =false is honored as a real off.
+	if sf.isExplicitFlag(serveCrossLayerGatePrefetchFlag) && sf.crossLayerGatePrefetch != nil {
+		must(applyServeCrossLayerGatePrefetch(fmt.Sprintf("%t", *sf.crossLayerGatePrefetch)))
+	}
 	expertRanks := 1
 	if rt.ep.sharded {
 		expertRanks = rt.ep.ranks

@@ -863,11 +863,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/debtlane",
-            "lane": "debtlane"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/decodemigrate",
             "lane": "decodemigrate"
         },
@@ -1925,11 +1920,6 @@
             "command": "fak version modules",
             "output_contains": "internal/issuehygiene",
             "lane": "issuehygiene"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/issueorchestrator",
-            "lane": "issueorchestrator"
         },
         {
             "command": "fak version modules",

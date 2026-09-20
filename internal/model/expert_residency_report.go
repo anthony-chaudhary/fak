@@ -159,7 +159,12 @@ type MoEResidencyReport struct {
 	Placement  ExpertPlacementReport `json:"placement"`
 	// Regret is the #4233 comparison, present only when MoEResidencyOptions.Regret asked for it and
 	// the window produced a replayable trace.
-	Regret         *ExpertRingEvictDecision   `json:"regret,omitempty"`
+	Regret *ExpertRingEvictDecision `json:"regret,omitempty"`
+	// CrossLayer is the cross-layer gate-prediction precision/recall ledger (#1297, #1401), present on
+	// every session. It is the zero ledger (Predicted=Actual=Hits=0, Precision/Recall 0) unless the
+	// session opted in via Session.CrossLayerGatePrefetch AND actually predicted. Pointer so the JSON
+	// omits it when the session never enabled the knob; nil when !s.CrossLayerGatePrefetch.
+	CrossLayer     *CrossLayerPrefetchStats   `json:"cross_layer,omitempty"`
 	Rates          MoEResidencyRates          `json:"rates"`
 	Reconciliation MoEResidencyReconciliation `json:"reconciliation"`
 }
@@ -178,6 +183,16 @@ func (s *Session) MoEResidency(opts MoEResidencyOptions) MoEResidencyReport {
 	rep := MoEResidencyReport{Shape: moeShapeOf(s.M)}
 	if s.M != nil {
 		rep.Checkpoint = s.M.ExpertCheckpointStats()
+	}
+
+	// The cross-layer ledger is present only on a session that opted in. Read it under the session's
+	// own lock; the session may still report the zero ledger if it opted in but never predicted, which
+	// is the honest reading for "enabled, not yet measured".
+	if s.CrossLayerGatePrefetch {
+		s.crossLayerMu.Lock()
+		st := s.crossLayerStats
+		s.crossLayerMu.Unlock()
+		rep.CrossLayer = &st
 	}
 
 	if r := s.expertRing; r != nil {

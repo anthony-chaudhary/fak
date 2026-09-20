@@ -77,6 +77,9 @@ var keyRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$`)
 var markdownHeadingRE = regexp.MustCompile(`^#{1,6}\s+(.+?)\s*$`)
 var codeSpanRE = regexp.MustCompile("`([^`]+)`")
 var issueReferenceRE = regexp.MustCompile(`#([1-9][0-9]*)`)
+var qualifiedIssueReferenceRE = regexp.MustCompile(`(?i)(?:^|[^\w./-])([A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*)#([1-9][0-9]*)`)
+var githubIssueURLREF = regexp.MustCompile(`(?i)https?://github\.com/([A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*)/issues/([1-9][0-9]*)`)
+var repoPartRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 var issueMarkerKeyRE = regexp.MustCompile(`<!--\s*fak-[A-Za-z0-9_-]+-key:\s*([^>\s]+)\s*-->`)
 var unexpandedIssueTemplateRE = regexp.MustCompile(`(?m)(\$\(@\{|System\.Collections|System\.Management\.Automation|\$\(System\.|\bSource:\s*\$source\b)`)
 var unexpandedIssueTemplateMarkerRE = regexp.MustCompile(`(?m)\$\(@\{[^)\r\n]*\}\.[A-Za-z0-9_]+\)|\$\((?:System\.Collections|System\.Management\.Automation)[^)\r\n]*\)|^\s*(?:[-*]\s*)?Source:\s*\$source[^\r\n]*`)
@@ -117,8 +120,22 @@ type TemplateRepairPlan struct {
 type DependencyRef struct {
 	Relation string `json:"relation"`
 	Issue    int    `json:"issue"`
+	// Repo is the optional repository identity (owner/name) a qualified
+	// reference names before its issue number. It is empty for a bare #N,
+	// which stays explicitly unqualified so a later caller can scope it.
+	Repo     string `json:"repo,omitempty"`
 	Blocking bool   `json:"blocking"`
 	Raw      string `json:"raw,omitempty"`
+}
+
+// QualifiedID is the canonical repository-qualified identity of a dependency
+// reference: "owner/repo#N" when a repository is known, else the bare issue
+// number "N" for an explicitly unqualified reference.
+func (d DependencyRef) QualifiedID() string {
+	if d.Repo == "" {
+		return strconv.Itoa(d.Issue)
+	}
+	return d.Repo + "#" + strconv.Itoa(d.Issue)
 }
 
 // Candidate is the pure input shape a producer can review before rendering or
@@ -1077,9 +1094,11 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 	return c
 }
 
-// CandidatePickupBlockedBy extracts deduped issue IDs (as strconv.Itoa(dep.Issue))
-// for blocking dependency references (dep.Blocking == true). Advisory ('coordinates-with')
+// CandidatePickupBlockedBy extracts deduped repository-qualified issue IDs
+// ("owner/repo#N", or bare "N" for an unqualified reference) for blocking
+// dependency references (dep.Blocking == true). Advisory ('coordinates-with')
 // and promotion ('promotion-requires') references never populate this set.
+// Two repositories sharing an issue number remain distinct blockers.
 func CandidatePickupBlockedBy(deps []DependencyRef) []string {
 	var out []string
 	seen := map[string]bool{}
@@ -1087,7 +1106,7 @@ func CandidatePickupBlockedBy(deps []DependencyRef) []string {
 		if !dep.Blocking || dep.Issue <= 0 || dep.Relation == RelCoordinatesWith || dep.Relation == RelPromotionRequires || dep.Relation == "related" {
 			continue
 		}
-		id := strconv.Itoa(dep.Issue)
+		id := dep.QualifiedID()
 		if seen[id] {
 			continue
 		}
@@ -1097,7 +1116,10 @@ func CandidatePickupBlockedBy(deps []DependencyRef) []string {
 	return out
 }
 
-// BlockedByIssues returns the numeric issue IDs from BlockedBy for convenience.
+// BlockedByIssues returns the numeric issue IDs from BlockedBy for
+// convenience. A repository-qualified entry ("owner/repo#N") yields its
+// trailing issue number N; the repository qualifier is intentionally dropped
+// because this accessor is numeric-only.
 func (c Candidate) BlockedByIssues() []int {
 	blocked := c.BlockedBy
 	if len(blocked) == 0 && len(c.Dependencies) > 0 {
@@ -1108,9 +1130,79 @@ func (c Candidate) BlockedByIssues() []int {
 	}
 	out := make([]int, 0, len(blocked))
 	for _, s := range blocked {
+		if i := strings.LastIndex(s, "#"); i >= 0 {
+			s = s[i+1:]
+		}
 		if n, err := strconv.Atoi(s); err == nil {
 			out = append(out, n)
 		}
+	}
+	return out
+}
+
+// parseIssueReferences extracts dependency references from a marker value,
+// preserving repository identity. Qualified references (owner/repo#N or a
+// GitHub issue URL) carry their normalized owner/repo; a bare #N stays
+// explicitly unqualified (empty Repo). Equivalent URL and shorthand forms for
+// the same repository+issue collapse to one reference.
+func parseIssueReferences(value string) []DependencyRef {
+	type span struct {
+		repo  string
+		issue int
+		start int
+		end   int
+	}
+	var spans []span
+	claimed := make([]bool, len(value))
+
+	for _, m := range githubIssueURLREF.FindAllStringSubmatchIndex(value, -1) {
+		issue, err := strconv.Atoi(value[m[4]:m[5]])
+		if err != nil || issue <= 0 {
+			continue
+		}
+		for i := m[0]; i < m[1]; i++ {
+			claimed[i] = true
+		}
+		spans = append(spans, span{repo: strings.ToLower(value[m[2]:m[3]]), issue: issue, start: m[0], end: m[1]})
+	}
+	for _, m := range qualifiedIssueReferenceRE.FindAllStringSubmatchIndex(value, -1) {
+		if claimed[m[0]] {
+			continue
+		}
+		issue, err := strconv.Atoi(value[m[4]:m[5]])
+		if err != nil || issue <= 0 {
+			continue
+		}
+		for i := m[0]; i < m[1]; i++ {
+			claimed[i] = true
+		}
+		spans = append(spans, span{repo: strings.ToLower(value[m[2]:m[3]]), issue: issue, start: m[0], end: m[1]})
+	}
+	for _, m := range issueReferenceRE.FindAllStringSubmatchIndex(value, -1) {
+		if claimed[m[0]] {
+			continue
+		}
+		issue, err := strconv.Atoi(value[m[2]:m[3]])
+		if err != nil || issue <= 0 {
+			continue
+		}
+		for i := m[0]; i < m[1]; i++ {
+			claimed[i] = true
+		}
+		spans = append(spans, span{repo: "", issue: issue, start: m[0], end: m[1]})
+	}
+
+	sort.SliceStable(spans, func(i, j int) bool { return spans[i].start < spans[j].start })
+
+	var out []DependencyRef
+	seen := map[string]bool{}
+	for _, s := range spans {
+		key := s.repo + "#" + strconv.Itoa(s.issue)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, DependencyRef{Repo: s.repo, Issue: s.issue})
 	}
 	return out
 }
@@ -1134,19 +1226,16 @@ func ParseIssueDependencies(section string) []DependencyRef {
 		if !ok {
 			continue
 		}
-		for _, m := range issueReferenceRE.FindAllStringSubmatch(rest, -1) {
-			issue, err := strconv.Atoi(m[1])
-			if err != nil || issue <= 0 {
-				continue
-			}
-			seenKey := relation + "#" + strconv.Itoa(issue)
+		for _, ref := range parseIssueReferences(rest) {
+			seenKey := relation + "#" + ref.Repo + "#" + strconv.Itoa(ref.Issue)
 			if seen[seenKey] {
 				continue
 			}
 			seen[seenKey] = true
 			out = append(out, DependencyRef{
 				Relation: relation,
-				Issue:    issue,
+				Issue:    ref.Issue,
+				Repo:     ref.Repo,
 				Blocking: blocking,
 				Raw:      raw,
 			})
@@ -1380,7 +1469,8 @@ func normalizeDependencies(in []DependencyRef) []DependencyRef {
 		if !ok || dep.Issue <= 0 {
 			continue
 		}
-		seenKey := relation + "#" + strconv.Itoa(dep.Issue)
+		repo := normalizeRepoQualifier(dep.Repo)
+		seenKey := relation + "#" + repo + "#" + strconv.Itoa(dep.Issue)
 		if seen[seenKey] {
 			continue
 		}
@@ -1388,11 +1478,32 @@ func normalizeDependencies(in []DependencyRef) []DependencyRef {
 		out = append(out, DependencyRef{
 			Relation: relation,
 			Issue:    dep.Issue,
+			Repo:     repo,
 			Blocking: blocking,
 			Raw:      strings.TrimSpace(dep.Raw),
 		})
 	}
 	return out
+}
+
+// normalizeRepoQualifier canonicalizes an optional owner/repo qualifier to
+// lowercase. A value that is not shaped like a repository identity is dropped
+// (returns "") so a malformed qualifier cannot fabricate another repository.
+func normalizeRepoQualifier(repo string) string {
+	repo = strings.ToLower(strings.TrimSpace(repo))
+	if repo == "" {
+		return ""
+	}
+	parts := strings.Split(repo, "/")
+	if len(parts) != 2 {
+		return ""
+	}
+	for _, p := range parts {
+		if p == "" || !repoPartRE.MatchString(p) {
+			return ""
+		}
+	}
+	return repo
 }
 
 func appendUnique(out []string, items ...string) []string {

@@ -19,7 +19,8 @@ import (
 // The tests drive the predictor/stager/recorder directly (the moe.go call sites are owned by a
 // separate lane and are not wired here), which is exactly the seam a caller would use:
 //
-//	predicted := predictNextLayerExperts(m, L, xn, mat)
+//	s.CrossLayerGatePrefetch = true                    // per-session opt-in; zero value is OFF
+//	predicted := predictNextLayerExperts(s, m, L, xn, mat)
 //	s.prefetchNextLayerGateExperts(L, predicted)   // stage L+1's set as hints during L
 //	// ... layer L+1 computes, its router names the realized set ...
 //	s.recordNextLayerActual(L+1, actual)
@@ -83,8 +84,7 @@ func TestCrossLayerGatePrefetchRecordsPrecisionRecall(t *testing.T) {
 	s, _ := expertCrossLayerSession(m, perWeight*3*E) // holds the whole activated set
 	defer s.Close()
 
-	SetCrossLayerGatePrefetch(true)
-	defer SetCrossLayerGatePrefetch(false)
+	s.CrossLayerGatePrefetch = true
 
 	x := expertRingTestInput(H)
 	mat := sessionQ4KKernel{s: s}
@@ -92,7 +92,7 @@ func TestCrossLayerGatePrefetchRecordsPrecisionRecall(t *testing.T) {
 	// Layer 0 compute, then predict layer 1's experts from layer 0's hidden state, stage them
 	// as hints, and record layer 1's realized activation (its own router's picks).
 	moeFFN{}.apply(m, 0, x, mat)
-	predicted := predictNextLayerExperts(m, 0, x, mat)
+	predicted := predictNextLayerExperts(s, m, 0, x, mat)
 	if len(predicted) == 0 {
 		t.Fatal("prediction came back empty with the gate ON and a 2-layer model; the witness is vacuous")
 	}
@@ -141,8 +141,7 @@ func TestCrossLayerGatePrefetchMispredictDoesNotChangeOutputs(t *testing.T) {
 	budget := perWeight * 3 * E
 	x := expertRingTestInput(H)
 
-	// OFF arm: default gate is false; run layers 0 and 1 plainly and capture layer 1's output.
-	SetCrossLayerGatePrefetch(false)
+	// OFF arm: default field is false; run layers 0 and 1 plainly and capture layer 1's output.
 	off, _ := expertCrossLayerSession(m, budget)
 	defer off.Close()
 	matOff := sessionQ4KKernel{s: off}
@@ -153,10 +152,9 @@ func TestCrossLayerGatePrefetchMispredictDoesNotChangeOutputs(t *testing.T) {
 	on, _ := expertCrossLayerSession(m, budget)
 	defer on.Close()
 	matOn := sessionQ4KKernel{s: on}
-	SetCrossLayerGatePrefetch(true)
-	defer SetCrossLayerGatePrefetch(false)
+	on.CrossLayerGatePrefetch = true
 	moeFFN{}.apply(m, 0, x, matOn)
-	predicted := predictNextLayerExperts(m, 0, x, matOn)
+	predicted := predictNextLayerExperts(on, m, 0, x, matOn)
 	on.prefetchNextLayerGateExperts(0, predicted)
 	onOut := moeFFN{}.apply(m, 1, x, matOn)
 	on.recordNextLayerActual(1, route(m, 1, x, matOn))
@@ -173,9 +171,9 @@ func TestCrossLayerGatePrefetchMispredictDoesNotChangeOutputs(t *testing.T) {
 	}
 }
 
-// TestCrossLayerGatePrefetchDefaultOffIsInert pins the package-level opt-in default: with the
-// gate never turned on, the predictor refuses (nil), the stager stages nothing, the ledger stays
-// the zero value, and the ring ledger matches a plain run byte-for-byte.
+// TestCrossLayerGatePrefetchDefaultOffIsInert pins the per-session opt-in default: with the
+// session's field never set (false), the predictor refuses (nil), the stager stages nothing, the
+// ledger stays the zero value, and the ring ledger matches a plain run byte-for-byte.
 func TestCrossLayerGatePrefetchDefaultOffIsInert(t *testing.T) {
 	const H, E, K = 256, 8, 2
 	m := expertCrossLayerModel(t, H, E, K)
@@ -183,21 +181,20 @@ func TestCrossLayerGatePrefetchDefaultOffIsInert(t *testing.T) {
 	budget := perWeight * 3 * E
 	x := expertRingTestInput(H)
 
-	SetCrossLayerGatePrefetch(false)
 	s, _ := expertCrossLayerSession(m, budget)
 	defer s.Close()
 	mat := sessionQ4KKernel{s: s}
 	moeFFN{}.apply(m, 0, x, mat)
 
-	// The predictor must refuse outright with the gate off ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â no picks means no staging offered.
-	if got := predictNextLayerExperts(m, 0, x, mat); got != nil {
-		t.Fatalf("predictNextLayerExperts returned %v with the gate OFF, want nil", expertIDs(got))
+	// The predictor must refuse outright with the session opt-in off â€” no picks means no staging offered.
+	if got := predictNextLayerExperts(s, m, 0, x, mat); got != nil {
+		t.Fatalf("predictNextLayerExperts returned %v with the opt-in OFF, want nil", expertIDs(got))
 	}
 	// Even if a caller hands the stager a record, the default-off path stages nothing and the
 	// ledger stays zero: prefetchNextLayerGateExperts is inert for an empty prediction.
 	s.prefetchNextLayerGateExperts(0, nil)
 	if st := CrossLayerPrefetchStatsFor(s); st != (CrossLayerPrefetchStats{}) {
-		t.Fatalf("cross-layer stats=%+v with the gate OFF, want the zero value", st)
+		t.Fatalf("cross-layer stats=%+v with the opt-in OFF, want the zero value", st)
 	}
 
 	// A plain run (no cross-layer calls at all) must leave an identical ring ledger.
@@ -226,20 +223,19 @@ func TestCrossLayerGatePrefetchStagesBeforeNextLayerGEMM(t *testing.T) {
 	s, be := expertCrossLayerSession(m, perWeight*3*E)
 	defer s.Close()
 
-	SetCrossLayerGatePrefetch(true)
-	defer SetCrossLayerGatePrefetch(false)
+	s.CrossLayerGatePrefetch = true
 
 	x := expertRingTestInput(H)
 	mat := sessionQ4KKernel{s: s}
 
-	// Layer 0 computes THROUGH THE LIVE SEAM: with the gate ON, moeFFN.apply runs its router and
+	// Layer 0 computes THROUGH THE LIVE SEAM: with the opt-in ON, moeFFN.apply runs its router and
 	// then crossLayerGatePrefetch predicts layer 1's set and stages it as hints. We capture the
 	// prediction the seam made so the residency assertion below is about the real pre-GEMM state.
 	moeFFN{}.apply(m, 0, x, mat)
 	if len(be.events) == 0 {
 		t.Fatal("layer 0 recorded no upload/GEMM events; the ordering witness is vacuous")
 	}
-	predicted := predictNextLayerExperts(m, 0, x, mat)
+	predicted := predictNextLayerExperts(s, m, 0, x, mat)
 	if len(predicted) == 0 {
 		t.Fatal("predictor returned no picks for layer 1; the ordering witness is vacuous")
 	}
@@ -264,6 +260,91 @@ func TestCrossLayerGatePrefetchStagesBeforeNextLayerGEMM(t *testing.T) {
 	if st := s.ExpertRing(); st.Hits <= hitsBefore {
 		t.Fatalf("layer 1 recorded no new ring hits after a cross-layer prefetch: hits %d -> %d; the hints were not resident when demanded",
 			hitsBefore, st.Hits)
+	}
+}
+
+// TestCrossLayerGatePrefetchIsPerSessionNotProcessWide is the load-bearing witness for the promotion
+// (#1401): the opt-in is a SESSION field, so enabling one session leaves every other session on the
+// same model byte-for-byte untouched. Two sessions share ONE model; the ON session predicts, stages
+// and records a non-zero ledger, while the OFF session's predictor returns nil and its ledger stays
+// the zero value. This is exactly the property the old process-wide gate could not provide.
+func TestCrossLayerGatePrefetchIsPerSessionNotProcessWide(t *testing.T) {
+	const H, E, K = 256, 8, 2
+	m := expertCrossLayerModel(t, H, E, K)
+	perWeight := expertRingWeightBytes(t, m)
+	budget := perWeight * 3 * E
+	x := expertRingTestInput(H)
+
+	on, _ := expertCrossLayerSession(m, budget)
+	defer on.Close()
+	on.CrossLayerGatePrefetch = true
+
+	off, _ := expertCrossLayerSession(m, budget)
+	defer off.Close()
+	// off.CrossLayerGatePrefetch is the zero value: OFF, unchanged.
+
+	// Each session gets its OWN kernel over the SAME model.
+	matOn := sessionQ4KKernel{s: on}
+	matOff := sessionQ4KKernel{s: off}
+
+	// The OFF session must refuse to predict even though a peer is enabled, and its stager must be
+	// inert, leaving its ledger at zero.
+	if got := predictNextLayerExperts(off, m, 0, x, matOff); got != nil {
+		t.Fatalf("OFF session predicted %v while a peer session was enabled; the knob leaked process-wide", expertIDs(got))
+	}
+	off.prefetchNextLayerGateExperts(0, nil)
+	off.recordNextLayerActual(1, route(m, 1, x, matOff))
+	if st := CrossLayerPrefetchStatsFor(off); st != (CrossLayerPrefetchStats{}) {
+		t.Fatalf("OFF session ledger=%+v, want the zero value (no process-wide leak)", st)
+	}
+
+	// The ON session predicts, stages and records; its ledger is non-zero.
+	moeFFN{}.apply(m, 0, x, matOn)
+	predicted := predictNextLayerExperts(on, m, 0, x, matOn)
+	if len(predicted) == 0 {
+		t.Fatal("ON session predicted nothing; the per-session witness is vacuous")
+	}
+	on.prefetchNextLayerGateExperts(0, predicted)
+	on.recordNextLayerActual(1, route(m, 1, x, matOn))
+	if onSt := CrossLayerPrefetchStatsFor(on); onSt == (CrossLayerPrefetchStats{}) {
+		t.Fatal("ON session ledger stayed zero after predicting/recording; the per-session opt-in did not take effect")
+	}
+
+	// And the OFF session's ledger is STILL zero: the ON session's activity never touched it.
+	if st := CrossLayerPrefetchStatsFor(off); st != (CrossLayerPrefetchStats{}) {
+		t.Fatalf("OFF session ledger became %+v after the peer session computed; the ledger is not session-owned", st)
+	}
+}
+
+// TestCrossLayerPrefetchLedgerReleasedAtClose pins that the session-owned ledger is released at
+// Close. After enabling, predicting, staging and recording a non-zero ledger, Close must return the
+// ledger to the zero value â€” there is no package-level map to leak.
+func TestCrossLayerPrefetchLedgerReleasedAtClose(t *testing.T) {
+	const H, E, K = 256, 8, 2
+	m := expertCrossLayerModel(t, H, E, K)
+	perWeight := expertRingWeightBytes(t, m)
+	budget := perWeight * 3 * E
+	x := expertRingTestInput(H)
+
+	s, _ := expertCrossLayerSession(m, budget)
+	s.CrossLayerGatePrefetch = true
+	mat := sessionQ4KKernel{s: s}
+
+	moeFFN{}.apply(m, 0, x, mat)
+	predicted := predictNextLayerExperts(s, m, 0, x, mat)
+	if len(predicted) == 0 {
+		t.Fatal("prediction came back empty; the release witness is vacuous")
+	}
+	s.prefetchNextLayerGateExperts(0, predicted)
+	s.recordNextLayerActual(1, route(m, 1, x, mat))
+	if st := CrossLayerPrefetchStatsFor(s); st == (CrossLayerPrefetchStats{}) {
+		t.Fatal("ledger stayed zero before Close; the release witness is vacuous")
+	}
+
+	s.Close()
+
+	if st := CrossLayerPrefetchStatsFor(s); st != (CrossLayerPrefetchStats{}) {
+		t.Fatalf("ledger=%+v after Close, want the zero value (released)", st)
 	}
 }
 

@@ -76,6 +76,7 @@ func (p *InKernelPlanner) configureNativeSession(s *model.Session) {
 	s.DenseGPULayers = p.denseGPULayers
 	s.GPULayers = p.denseGPULayers
 	p.applyExpertSpill(s)
+	p.applyCrossLayerGatePrefetch(s)
 	if p.backend == nil && p.metal {
 		s.Metal = true
 		s.MetalQ4K = p.q4k
