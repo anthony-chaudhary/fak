@@ -1404,6 +1404,25 @@ func cmdManageCommand(commandName string, argv []string) {
 	if err != nil {
 		abortChildWiring(cancel, "Pi extension setup", err, 1)
 	}
+	if piInstall.Applied {
+		// finishGuardChildAndReport ends with os.Exit, so defer alone cannot cover the child
+		// lifecycle. Bind cleanup to cancel (called synchronously before every terminal exit)
+		// and retain the defer for setup paths that return normally. The once keeps both safe.
+		var piCleanupOnce sync.Once
+		cleanupPi := func() {
+			piCleanupOnce.Do(func() {
+				if err := cleanupGuardPiExtension(piInstall); err != nil {
+					fmt.Fprintf(os.Stderr, "fak guard: Pi extension cleanup failed: %v\n", err)
+				}
+			})
+		}
+		defer cleanupPi()
+		cancelGateway := cancel
+		cancel = func() {
+			cleanupPi()
+			cancelGateway()
+		}
+	}
 	var opencodeInstall openCodeConfigInstall
 	if guardIsOpencode(launchPlan.agentBaseName()) {
 		var opencodeEnv [][2]string
@@ -1529,6 +1548,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	if arbitrateErr != nil {
 		startupProgress.Abort()
 		fmt.Fprintf(os.Stderr, "fak guard: %v\n", arbitrateErr)
+		cancel()
 		os.Exit(1)
 	}
 	if arbitrateLease != nil {

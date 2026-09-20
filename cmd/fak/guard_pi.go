@@ -6,9 +6,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
+	"github.com/anthony-chaudhary/fak/internal/projectassets"
 )
 
 // guard_pi.go — the first-class `fak guard -- pi` wiring for Pi (earendil-works). It is the
@@ -88,7 +90,30 @@ func installGuardPiExtension(command []string, enabled bool, gwURL string) ([]st
 	if err != nil {
 		return command, guardPiInstall{}, err
 	}
-	return installGuardPiExtensionAt(command, gwURL, dir)
+	rewritten, install, err := installGuardPiExtensionAt(command, gwURL, dir)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+	}
+	return rewritten, install, err
+}
+
+// cleanupGuardPiExtension removes only the per-session directory allocated for Pi's injected
+// provider extension. The ownership checks keep a malformed install record from widening an
+// RemoveAll to an arbitrary path; dead-owner reaping remains the fallback for hard process death.
+func cleanupGuardPiExtension(in guardPiInstall) error {
+	if !in.Applied {
+		return nil
+	}
+	extPath := filepath.Clean(in.ExtensionPath)
+	if filepath.Base(extPath) != guardPiExtensionFileName {
+		return fmt.Errorf("refusing to clean unexpected Pi extension path %q", in.ExtensionPath)
+	}
+	dir := filepath.Dir(extPath)
+	hook, pid, ok := guardTempDirOwner(filepath.Base(dir))
+	if !ok || hook != "pi" || pid != os.Getpid() {
+		return fmt.Errorf("refusing to clean unowned Pi extension directory %q", dir)
+	}
+	return os.RemoveAll(dir)
 }
 
 // installGuardPiExtensionAt is installGuardPiExtension with the session directory injected, so
@@ -98,19 +123,68 @@ func installGuardPiExtensionAt(command []string, gwURL, dir string) ([]string, g
 	if len(command) == 0 || !guardIsPi(command[0]) {
 		return command, guardPiInstall{Reason: "non-pi-child"}, nil
 	}
+	provider, model, err := guardPiWireSelection(command[1:])
+	if err != nil {
+		return command, guardPiInstall{}, err
+	}
 	if strings.TrimSpace(dir) == "" {
 		return command, guardPiInstall{}, fmt.Errorf("empty Pi extension directory")
+	}
+	base := guardPiBaseURL(gwURL)
+	source := guardPiExtensionSource(base)
+	if provider == projectassets.DefaultPiProviderID {
+		base = projectassets.NormalizePiBaseURL(gwURL)
+		source, err = guardPiFakExtensionSource(base, model)
+		if err != nil {
+			return command, guardPiInstall{}, err
+		}
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return command, guardPiInstall{}, err
 	}
-	base := guardPiBaseURL(gwURL)
 	extPath := filepath.Join(dir, guardPiExtensionFileName)
-	if err := writeGuardPiExtension(extPath, base); err != nil {
+	if err := os.WriteFile(extPath, []byte(source), 0o600); err != nil {
 		return command, guardPiInstall{}, err
 	}
 	install := guardPiInstall{Applied: true, ExtensionPath: extPath, BaseURL: base}
 	return appendPiExtensionArg(command, extPath), install, nil
+}
+
+// guardPiWireSelection returns the provider route explicitly selected by Pi. The guard owns
+// the first -e extension, so a later user extension is refused rather than being allowed to
+// replace the session-scoped route after qualification.
+func guardPiWireSelection(args []string) (provider, model string, err error) {
+	provider = "anthropic"
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "-e" || arg == "--extension" || strings.HasPrefix(arg, "--extension="):
+			return "", "", fmt.Errorf("Pi extension override is not supported under fak guard")
+		case arg == "--provider":
+			if i+1 >= len(args) {
+				return "", "", fmt.Errorf("Pi --provider requires a value")
+			}
+			i++
+			provider = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "--provider="):
+			provider = strings.TrimSpace(strings.TrimPrefix(arg, "--provider="))
+		case arg == "--model":
+			if i+1 >= len(args) {
+				return "", "", fmt.Errorf("Pi --model requires a value")
+			}
+			i++
+			model = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "--model="):
+			model = strings.TrimSpace(strings.TrimPrefix(arg, "--model="))
+		}
+	}
+	if provider != "anthropic" && provider != projectassets.DefaultPiProviderID {
+		return "", "", fmt.Errorf("unsupported Pi provider %q under fak guard", provider)
+	}
+	if provider == projectassets.DefaultPiProviderID && model == "" {
+		return "", "", fmt.Errorf("Pi provider %q requires an explicit --model", provider)
+	}
+	return provider, model, nil
 }
 
 // guardPiBaseURL is the base URL the extension hands Pi's anthropic provider: the bare gateway
@@ -147,6 +221,68 @@ func guardPiExtensionSource(baseURL string) string {
 		"export default function (pi) {\n" +
 		"  pi.registerProvider(\"anthropic\", { baseUrl: " + string(url) + " });\n" +
 		"}\n"
+}
+
+// guardPiFakExtensionSource derives the session-only OpenAI-completions provider from the
+// canonical Pi config generator. It never writes Pi's global models.json.
+func guardPiFakExtensionSource(baseURL, model string) (string, error) {
+	raw, err := projectassets.GeneratePiConfig(baseURL, model)
+	if err != nil {
+		return "", err
+	}
+	var cfg struct {
+		Providers map[string]any `json:"providers"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return "", fmt.Errorf("decode generated Pi provider: %w", err)
+	}
+	provider, ok := cfg.Providers[projectassets.DefaultPiProviderID]
+	if !ok {
+		return "", fmt.Errorf("generated Pi config omitted provider %q", projectassets.DefaultPiProviderID)
+	}
+	literal, err := guardPiTSLiteral(provider)
+	if err != nil {
+		return "", err
+	}
+	return "// fak guard: session-scoped Pi OpenAI-completions route.\n" +
+		"export default function (pi) {\n" +
+		"  pi.registerProvider(\"" + projectassets.DefaultPiProviderID + "\", " + literal + ");\n" +
+		"}\n", nil
+}
+
+func guardPiTSLiteral(value any) (string, error) {
+	switch v := value.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(v))
+		for key := range v {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, key := range keys {
+			encoded, err := guardPiTSLiteral(v[key])
+			if err != nil {
+				return "", err
+			}
+			parts = append(parts, key+": "+encoded)
+		}
+		return "{ " + strings.Join(parts, ", ") + " }", nil
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			encoded, err := guardPiTSLiteral(item)
+			if err != nil {
+				return "", err
+			}
+			parts = append(parts, encoded)
+		}
+		return "[" + strings.Join(parts, ", ") + "]", nil
+	case nil, string, bool, float64:
+		encoded, err := json.Marshal(v)
+		return string(encoded), err
+	default:
+		return "", fmt.Errorf("unsupported generated Pi config value %T", value)
+	}
 }
 
 // appendPiExtensionArg inserts `-e <path>` immediately after the pi executable — before any
