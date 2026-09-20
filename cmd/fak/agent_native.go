@@ -10,21 +10,32 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/canon"
 )
 
 const nativeAgentReceiptSchema = "fak.agent.native.v1"
+const nativeAgentCallsSchema = "fak.agent.native.calls.v1"
+
+const nativeAgentCallPreviewLimit = 160
+
+type nativeAgentCalls struct {
+	Schema  string            `json:"schema"`
+	Entries []agent.CallTrace `json:"entries"`
+}
 
 type nativeAgentReceipt struct {
-	Schema       string           `json:"schema"`
-	Task         string           `json:"task"`
-	Model        string           `json:"model"`
-	Status       string           `json:"status,omitempty"`
-	TouchedPaths []string         `json:"touched_paths,omitempty"`
-	GitDiffHash  string           `json:"git_diff_hash,omitempty"`
-	FinalAnswer  string           `json:"final_answer,omitempty"`
-	Metrics      agent.ArmMetrics `json:"metrics"`
+	Schema       string            `json:"schema"`
+	Task         string            `json:"task"`
+	Model        string            `json:"model"`
+	Status       string            `json:"status,omitempty"`
+	TouchedPaths []string          `json:"touched_paths,omitempty"`
+	GitDiffHash  string            `json:"git_diff_hash,omitempty"`
+	FinalAnswer  string            `json:"final_answer,omitempty"`
+	Metrics      agent.ArmMetrics  `json:"metrics"`
+	Calls        *nativeAgentCalls `json:"calls,omitempty"`
 }
 
 func newNativeAgentReceipt(task, model string, metrics agent.ArmMetrics) nativeAgentReceipt {
@@ -34,6 +45,44 @@ func newNativeAgentReceipt(task, model string, metrics agent.ArmMetrics) nativeA
 		Model:   model,
 		Metrics: metrics,
 	}
+}
+
+func nativeAgentCallPreview(value string) string {
+	value = strings.Join(strings.Fields(value), " ")
+	if value == "" {
+		return ""
+	}
+	raw := []byte(value)
+	if !canon.RawSecretComplete(raw) {
+		return "[redacted:secret]"
+	}
+	redacted, _ := canon.RedactSecrets(raw)
+	if canon.Scan(redacted).Secret {
+		return "[redacted:secret]"
+	}
+	value = string(redacted)
+	if len(value) <= nativeAgentCallPreviewLimit {
+		return value
+	}
+	const suffix = "..."
+	limit := nativeAgentCallPreviewLimit - len(suffix)
+	for limit > 0 && !utf8.RuneStart(value[limit]) {
+		limit--
+	}
+	return value[:limit] + suffix
+}
+
+func nativeAgentCallsFromTrace(calls []agent.CallTrace) *nativeAgentCalls {
+	if len(calls) == 0 {
+		return nil
+	}
+	entries := make([]agent.CallTrace, len(calls))
+	for i, call := range calls {
+		entries[i] = call
+		entries[i].Args = nativeAgentCallPreview(call.Args)
+		entries[i].Note = nativeAgentCallPreview(call.Note)
+	}
+	return &nativeAgentCalls{Schema: nativeAgentCallsSchema, Entries: entries}
 }
 
 func extractTouchedPaths(calls []agent.CallTrace) []string {
@@ -142,6 +191,7 @@ func newHeadlessAgentReceipt(task, model string, metrics agent.ArmMetrics, calls
 		GitDiffHash:  computeGitDiffHash(workspace),
 		FinalAnswer:  metrics.FinalAnswer,
 		Metrics:      metrics,
+		Calls:        nativeAgentCallsFromTrace(calls),
 	}
 }
 

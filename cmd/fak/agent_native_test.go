@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/canon"
 )
 
 func TestNativeAgentReceiptIsSingleKernelArm(t *testing.T) {
@@ -34,6 +36,145 @@ func TestNativeAgentReceiptIsSingleKernelArm(t *testing.T) {
 	if bytes.Contains(body, []byte(`"baseline"`)) {
 		t.Fatalf("single-arm receipt leaked benchmark arm: %s", body)
 	}
+}
+
+func TestNativeAgentReceiptCalls(t *testing.T) {
+	t.Run("versioned ordered calls preserve adjudication fields", func(t *testing.T) {
+		calls := []agent.CallTrace{
+			{Arm: "fak", Turn: 1, Tool: "read_file", Verdict: "ALLOW", By: "policy-floor", Args: `{"path":"README.md"}`, Note: "served by the kernel"},
+			{Arm: "fak", Turn: 2, Tool: "write_file", Verdict: "DENY", Reason: "POLICY_BLOCK", By: "workspace-floor", Disposition: "TERMINAL", Args: `{"path":"outside.txt"}`, Note: "outside the granted workspace"},
+		}
+
+		body, err := json.Marshal(newHeadlessAgentReceipt("fix it", "fixture", agent.ArmMetrics{}, calls, "", nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got struct {
+			Schema string `json:"schema"`
+			Calls  *struct {
+				Schema  string            `json:"schema"`
+				Entries []agent.CallTrace `json:"entries"`
+			} `json:"calls,omitempty"`
+		}
+		if err := json.Unmarshal(body, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Schema != nativeAgentReceiptSchema {
+			t.Fatalf("receipt schema = %q, want %q", got.Schema, nativeAgentReceiptSchema)
+		}
+		if got.Calls == nil {
+			t.Fatalf("calls missing from native receipt: %s", body)
+		}
+		if got.Calls.Schema != "fak.agent.native.calls.v1" {
+			t.Fatalf("calls schema = %q, want fak.agent.native.calls.v1", got.Calls.Schema)
+		}
+		if len(got.Calls.Entries) != len(calls) {
+			t.Fatalf("calls = %#v, want %#v", got.Calls.Entries, calls)
+		}
+		for i, want := range calls {
+			entry := got.Calls.Entries[i]
+			if entry.Turn != want.Turn || entry.Tool != want.Tool || entry.Verdict != want.Verdict ||
+				entry.Reason != want.Reason || entry.By != want.By || entry.Disposition != want.Disposition {
+				t.Fatalf("call[%d] = %#v, want ordered adjudication %#v", i, entry, want)
+			}
+		}
+		var wire struct {
+			Calls struct {
+				Entries []map[string]json.RawMessage `json:"entries"`
+			} `json:"calls"`
+		}
+		if err := json.Unmarshal(body, &wire); err != nil {
+			t.Fatal(err)
+		}
+		for i, entry := range wire.Calls.Entries {
+			for _, unsupported := range []string{"result", "output", "executed", "succeeded"} {
+				if _, ok := entry[unsupported]; ok {
+					t.Fatalf("call[%d] invented unsupported %q field: %s", i, unsupported, body)
+				}
+			}
+		}
+	})
+
+	t.Run("legacy receipt remains valid and omits calls", func(t *testing.T) {
+		legacy := []byte(`{"schema":"fak.agent.native.v1","task":"fix it","model":"fixture","metrics":{"arm":"fak"}}`)
+		var receipt nativeAgentReceipt
+		if err := json.Unmarshal(legacy, &receipt); err != nil {
+			t.Fatalf("legacy receipt no longer decodes: %v", err)
+		}
+		body, err := json.Marshal(receipt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]json.RawMessage
+		if err := json.Unmarshal(body, &got); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := got["calls"]; ok {
+			t.Fatalf("zero-call legacy receipt emitted optional calls: %s", body)
+		}
+		if receipt.Schema != nativeAgentReceiptSchema || receipt.Task != "fix it" || receipt.Model != "fixture" {
+			t.Fatalf("legacy receipt identity changed: %#v", receipt)
+		}
+	})
+
+	t.Run("arguments and notes are bounded and secret shaped data is redacted", func(t *testing.T) {
+		const secret = "sk-ant-api03-native-receipt-secret-0123456789"
+		calls := []agent.CallTrace{{
+			Arm: "fak", Turn: 1, Tool: "http_request", Verdict: "DENY", Reason: "SECRET_EXFIL", By: "secret-floor",
+			Args: `{"authorization":"Bearer ` + secret + `","padding":"` + strings.Repeat("x", 256) + `"}`,
+			Note: "rejected credential " + secret + " " + strings.Repeat("n", 256),
+		}}
+
+		body, err := json.Marshal(newHeadlessAgentReceipt("fix it", "fixture", agent.ArmMetrics{}, calls, "", nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(body, []byte(secret)) {
+			t.Fatalf("native receipt leaked secret-shaped data: %s", body)
+		}
+		var got struct {
+			Calls *struct {
+				Entries []agent.CallTrace `json:"entries"`
+			} `json:"calls,omitempty"`
+		}
+		if err := json.Unmarshal(body, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Calls == nil || len(got.Calls.Entries) != 1 {
+			t.Fatalf("redacted call trace missing: %s", body)
+		}
+		entry := got.Calls.Entries[0]
+		if len(entry.Args) > 163 || len(entry.Note) > 163 {
+			t.Fatalf("call preview is unbounded: args=%d note=%d", len(entry.Args), len(entry.Note))
+		}
+	})
+
+	t.Run("mixed raw and obfuscated credentials seal the preview", func(t *testing.T) {
+		const rawSecret = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"
+		const decodedSecret = "sk-abcdef0123456789abcdef0123"
+		obfuscatedSecret := base64.StdEncoding.EncodeToString([]byte(decodedSecret))
+		mixed := []byte(`{"raw":"` + rawSecret + `","encoded":"` + obfuscatedSecret + `"}`)
+
+		partiallyRedacted, masked := canon.RedactSecrets(mixed)
+		if masked != 1 || !canon.Scan(partiallyRedacted).Secret {
+			t.Fatalf("fixture must leave the canonical obfuscated credential after one raw mask: masked=%d redacted=%q", masked, partiallyRedacted)
+		}
+		body, err := json.Marshal(newHeadlessAgentReceipt("fix it", "fixture", agent.ArmMetrics{}, []agent.CallTrace{{
+			Arm: "fak", Turn: 1, Tool: "http_request", Verdict: "DENY", Reason: "SECRET_EXFIL", By: "secret-floor",
+			Args: string(mixed), Note: "mixed credential rejected",
+		}}, "", nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, leaked := range []string{rawSecret, decodedSecret, obfuscatedSecret} {
+			if bytes.Contains(body, []byte(leaked)) {
+				t.Fatalf("native receipt leaked credential bytes %q: %s", leaked, body)
+			}
+		}
+		if !bytes.Contains(body, []byte(`[redacted:secret]`)) {
+			t.Fatalf("mixed credential preview was not sealed: %s", body)
+		}
+	})
 }
 
 func TestNativeAgentOfflinePrintsAnswerAndWritesReceipt(t *testing.T) {
