@@ -12347,6 +12347,11 @@
           "category": "incidental",
           "reason": "Closed error spelling for rejecting a collector feature ID outside the supported producer set, not a system capability verdict.",
           "token": "UNSUPPORTED_PROOF_FEATURE"
+        },
+        {
+          "category": "incidental",
+          "reason": "compute.BackendSupportsDeviceWeightDtype is a backend CAPABILITY PROBE (does this backend's MatMul have a resident kernel for the dtype) used by the dense k-quant HAL staging seam (hal.go) and the MoE device gate/up seam (moe_device_gateup.go); it shares only the word 'Support' with the support-maturity family and names no maturity rung.",
+          "token": "BackendSupportsDeviceWeightDtype"
         }
       ],
       "exclude": [
@@ -12357,6 +12362,7 @@
       "ignore": [
         "AckUnsupported",
         "BAD_ACHIEVED_MATURITY",
+        "BackendSupportsDeviceWeightDtype",
         "CONFIG_OPINION_UNSUPPORTED",
         "CancellationReceipt",
         "CancellationSupported",
