@@ -29,6 +29,17 @@ func graphStallFixture(t *testing.T) *ProjectionGraph {
 	return g
 }
 
+func waitForGraphOwnerCount(t *testing.T, want int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for graphLiveOwnerCount() != want && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := graphLiveOwnerCount(); got != want {
+		t.Fatalf("native graph owner count=%d want %d", got, want)
+	}
+}
+
 // TestProjectionGraphFinishClassifiesNonCompletedBufferAsStall is the witness
 // for the unbounded `waitUntilCompleted` defect: a command buffer whose terminal
 // status is not Completed must surface the package's typed stall, not a silent
@@ -148,6 +159,7 @@ func TestProjectionGraphTerminalGateTestSeam(t *testing.T) {
 			g.awaitTerminalForTest()
 		}
 		g.Free()
+		waitForGraphOwnerCount(t, owners)
 	})
 	if err := g.holdTerminalForTest(5 * time.Millisecond); err != nil {
 		t.Fatal(err)
@@ -163,14 +175,103 @@ func TestProjectionGraphTerminalGateTestSeam(t *testing.T) {
 		t.Fatalf("held graph buffer count=%d want >%d", got, buffers)
 	}
 	g.releaseTerminalForTest()
-	if !g.awaitTerminalForTest() {
+	if g.ptr != nil && !g.awaitTerminalForTest() {
 		t.Fatal("released terminal fence did not complete command buffer")
 	}
 	g.Free()
-	if got := graphLiveOwnerCount(); got != owners {
-		t.Fatalf("released graph owner count=%d want %d", got, owners)
-	}
+	waitForGraphOwnerCount(t, owners)
 	if got := graphLiveBufferCount(); got != buffers {
 		t.Fatalf("released graph buffer count=%d want %d", got, buffers)
+	}
+}
+
+// TestProjectionGraphFinishTimeoutQuarantinesOwnersUntilRealTerminalCompletion
+// reproduces #12958 with a real command-buffer fence held past Finish's bounded
+// wait. The graph and its GDN owner must remain live while Metal can still touch
+// them; caller Free is idempotent and cannot release either owner early.
+func TestProjectionGraphFinishTimeoutQuarantinesOwnersUntilRealTerminalCompletion(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	t.Cleanup(ResetQ4K)
+	ownerBaseline, graphBufferBaseline := graphLiveOwnerCount(), graphLiveBufferCount()
+	gdnBufferBaseline := GDNLiveBufferCount()
+	g, state, _, _ := newProjectionGraphGDNLeaseFixture(t)
+	t.Cleanup(state.Close)
+	t.Cleanup(func() {
+		g.releaseTerminalForTest()
+		if g.ptr != nil && g.finished {
+			g.awaitTerminalForTest()
+		}
+		g.Free()
+		waitForGraphOwnerCount(t, ownerBaseline)
+	})
+	if err := g.holdTerminalForTest(5 * time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+
+	receipt, err := g.Finish()
+	if !IsMetalCommandBufferStall(err) || !receipt.Committed || receipt.CompletedWait {
+		t.Fatalf("held terminal receipt=%+v err=%T %v, want committed typed stall", receipt, err, err)
+	}
+	state.mu.Lock()
+	busy := state.graphDone != nil
+	state.mu.Unlock()
+	if !busy {
+		t.Fatal("timed-out graph released its GDN lease before real terminal completion")
+	}
+	if got := graphLiveOwnerCount(); got != ownerBaseline+1 {
+		t.Fatalf("quarantined graph owner count=%d want %d", got, ownerBaseline+1)
+	}
+	if got := graphLiveBufferCount(); got <= graphBufferBaseline {
+		t.Fatalf("quarantined graph buffer count=%d want >%d", got, graphBufferBaseline)
+	}
+	if _, err := BeginProjectionGraph(q4kTestVector(256, 12958), nil, nil, 1, 256); err == nil {
+		t.Fatal("new graph admitted while a timed-out command buffer was quarantined")
+	}
+
+	resetDone := make(chan error, 1)
+	go func() { resetDone <- state.Reset() }()
+	waitForGDNGraphWaiters(t, state, 1)
+	g.Free()
+	g.Free()
+	select {
+	case err := <-resetDone:
+		t.Fatalf("GDN owner escaped quarantine before terminal completion: %v", err)
+	default:
+	}
+
+	g.releaseTerminalForTest()
+	select {
+	case err := <-resetDone:
+		if err != nil {
+			t.Fatalf("GDN owner remained unusable after terminal cleanup: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("GDN owner did not release after terminal completion")
+	}
+	waitForGraphOwnerCount(t, ownerBaseline)
+	if got := graphLiveBufferCount(); got != graphBufferBaseline {
+		t.Fatalf("quarantine leaked native graph buffers: got %d want %d", got, graphBufferBaseline)
+	}
+	var probe *ProjectionGraph
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		probe, err = BeginProjectionGraph(q4kTestVector(256, 12959), nil, nil, 1, 256)
+		if err == nil {
+			break
+		}
+		if err.Error() != "metalgemm: projection graph unavailable while a timed-out command buffer remains quarantined" {
+			t.Fatalf("unexpected post-terminal graph admission error: %v", err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("graph admission remained quarantined after terminal cleanup: %v", err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	probe.Free()
+	state.Close()
+	if got := GDNLiveBufferCount(); got != gdnBufferBaseline {
+		t.Fatalf("quarantine leaked GDN buffers: got %d want %d", got, gdnBufferBaseline)
 	}
 }

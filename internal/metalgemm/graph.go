@@ -77,6 +77,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 )
@@ -84,6 +85,11 @@ import (
 var (
 	errGraphTerminal = errors.New("metalgemm: graph is terminal")
 	errGraphEmpty    = errors.New("metalgemm: graph has no encoded projections")
+	// Once a timeout is observed, refuse new graph admissions until every
+	// quarantined graph is terminal. Graphs already admitted before the first
+	// timeout can still join the quarantine; their count is bounded by the
+	// caller's pre-existing in-flight set rather than by this gate.
+	projectionGraphQuarantines atomic.Int64
 )
 
 type GraphPostSubmitError struct{ Reason string }
@@ -316,6 +322,7 @@ type ProjectionGraph struct {
 	gdnLeases               []gdnGraphLease
 	gdnCheckpoints          []*GDNGraphCheckpoint
 	testTerminalGate        unsafe.Pointer
+	quarantineDone          chan struct{}
 }
 
 type gdnGraphLease struct {
@@ -624,6 +631,9 @@ func graphLiveBufferCount() int { return int(C.mg_graph_live_buffers()) }
 // BeginProjectionGraph uploads one activation panel for all projections in the graph.
 // xf is required by Q4_K/Q6_K; xq/xd are required by Q8. Supplying both permits mixed graphs.
 func BeginProjectionGraph(xf []float32, xq []int8, xd []float32, P, in int) (*ProjectionGraph, error) {
+	if projectionGraphQuarantines.Load() > 0 {
+		return nil, errors.New("metalgemm: projection graph unavailable while a timed-out command buffer remains quarantined")
+	}
 	if P <= 0 || in <= 0 || len(xf) != 0 && len(xf) != P*in || len(xq) != 0 && len(xq) != P*in || len(xd) != 0 && len(xd) != P*(in/32) {
 		return nil, fmt.Errorf("metalgemm: invalid projection graph panel P=%d in=%d xf=%d xq=%d xd=%d", P, in, len(xf), len(xq), len(xd))
 	}
@@ -1212,6 +1222,10 @@ func (g *ProjectionGraph) Finish() (GraphReceipt, error) {
 	}
 	ok := C.mg_graph_finish(g.ptr, &r, inject) != 0
 	receipt := GraphReceipt{Committed: r.committed != 0, CompletedWait: r.completed_wait != 0, TimingAvailable: r.timing_available != 0, Encoders: int(r.encoders), HostReadbacks: int(r.host_readbacks), HostUploadBytes: g.hostUploadBytes, GPUMilliseconds: float64(r.gpu_milliseconds), WaitMilliseconds: float64(r.wait_milliseconds)}
+	if !ok && receipt.Committed && !receipt.CompletedWait {
+		g.quarantineCommittedGraph()
+		return receipt, commandBufferStallError(receipt.WaitMilliseconds, int(r.status_code), int(r.error_code), cString(&r.error_text[0]), "graph finish")
+	}
 	g.finishGDNCheckpoints(receipt)
 	g.releaseGDNLeases(receipt.Committed && receipt.CompletedWait)
 	if !ok {
@@ -1222,14 +1236,31 @@ func (g *ProjectionGraph) Finish() (GraphReceipt, error) {
 			// package already defines. The inject_post_submit_failure seam (inject=1) reports
 			// completed=1 and so deliberately keeps its GraphPostSubmitError; only a
 			// non-completed buffer becomes the typed stall.
-			if !receipt.CompletedWait {
-				return receipt, commandBufferStallError(receipt.WaitMilliseconds, int(r.status_code), int(r.error_code), cString(&r.error_text[0]), "graph finish")
-			}
 			return receipt, &GraphPostSubmitError{Reason: "injected or device completion failure"}
 		}
 		return receipt, errors.New("metalgemm: graph submit failed")
 	}
 	return receipt, nil
+}
+
+// quarantineCommittedGraph transfers the sole native owner to a background
+// terminal waiter. Metal may still reference every graph result and GDN owner,
+// so caller Free becomes a no-op until the real command buffer is terminal.
+// The failed request stays failed even if the device later reports Completed.
+func (g *ProjectionGraph) quarantineCommittedGraph() {
+	ptr := g.ptr
+	g.ptr = nil
+	g.freed = true
+	g.quarantineDone = make(chan struct{})
+	projectionGraphQuarantines.Add(1)
+	go func() {
+		defer close(g.quarantineDone)
+		defer projectionGraphQuarantines.Add(-1)
+		_ = C.mg_graph_await_terminal(ptr)
+		g.finishGDNCheckpoints(GraphReceipt{Committed: true, CompletedWait: false})
+		g.releaseGDNLeases(false)
+		C.mg_graph_free(ptr)
+	}()
 }
 
 // commandBufferStallError converts a non-completed native command buffer into the
