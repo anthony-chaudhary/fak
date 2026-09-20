@@ -195,31 +195,34 @@ type qwen35GDNSequenceSnapshotter interface {
 // has not produced a terminal receipt; a committed post-submit failure remains
 // available so callers can distinguish it from the default path.
 type Qwen35MetalForwardSequenceReceipt struct {
-	Path                  string                           `json:"path"`
-	Available             bool                             `json:"available"`
-	SelectorState         Qwen35MetalSequenceSelectorState `json:"selector_state"`
-	EvidenceState         Qwen35MetalSequenceEvidenceState `json:"evidence_state"`
-	Tokens                int                              `json:"tokens"`
-	CommandBuffers        int                              `json:"command_buffers"`
-	Encoders              int                              `json:"encoders"`
-	IntermediateWaits     int                              `json:"intermediate_waits"`
-	IntermediateReadbacks int                              `json:"intermediate_readbacks"`
-	TerminalWaits         int                              `json:"terminal_waits"`
-	TerminalReadbacks     int                              `json:"terminal_readbacks"`
-	HostUploadBytes       uint64                           `json:"host_upload_bytes"`
-	HostReadbackBytes     uint64                           `json:"host_readback_bytes"`
-	Committed             bool                             `json:"committed"`
-	CompletedWait         bool                             `json:"completed_wait"`
-	TimingAvailable       bool                             `json:"timing_available"`
-	GPUMilliseconds       float64                          `json:"gpu_milliseconds"`
-	WaitMilliseconds      float64                          `json:"wait_milliseconds"`
-	StateIdentity         *Qwen35MetalStateIdentityReceipt `json:"state_identity,omitempty"`
-	SelectedPanels        int                              `json:"selected_panels,omitempty"`
-	ExecutedPanels        int                              `json:"executed_panels,omitempty"`
-	FallbackCount         int                              `json:"fallback_count,omitempty"`
-	Device                string                           `json:"device,omitempty"`
-	SourceRevision        string                           `json:"source_revision,omitempty"`
-	ArtifactSHA256        string                           `json:"artifact_sha256,omitempty"`
+	Path                        string                           `json:"path"`
+	Available                   bool                             `json:"available"`
+	SelectorState               Qwen35MetalSequenceSelectorState `json:"selector_state"`
+	EvidenceState               Qwen35MetalSequenceEvidenceState `json:"evidence_state"`
+	Tokens                      int                              `json:"tokens"`
+	CommandBuffers              int                              `json:"command_buffers"`
+	Encoders                    int                              `json:"encoders"`
+	IntermediateWaits           int                              `json:"intermediate_waits"`
+	IntermediateReadbacks       int                              `json:"intermediate_readbacks"`
+	TerminalWaits               int                              `json:"terminal_waits"`
+	TerminalReadbacks           int                              `json:"terminal_readbacks"`
+	HostUploadBytes             uint64                           `json:"host_upload_bytes"`
+	HostReadbackBytes           uint64                           `json:"host_readback_bytes"`
+	DeviceKVAttentionLayers     int                              `json:"device_kv_attention_layers,omitempty"`
+	DeviceKVPrefixUploadBytes   uint64                           `json:"device_kv_prefix_upload_bytes,omitempty"`
+	DeviceKVSuffixReadbackBytes uint64                           `json:"device_kv_suffix_readback_bytes,omitempty"`
+	Committed                   bool                             `json:"committed"`
+	CompletedWait               bool                             `json:"completed_wait"`
+	TimingAvailable             bool                             `json:"timing_available"`
+	GPUMilliseconds             float64                          `json:"gpu_milliseconds"`
+	WaitMilliseconds            float64                          `json:"wait_milliseconds"`
+	StateIdentity               *Qwen35MetalStateIdentityReceipt `json:"state_identity,omitempty"`
+	SelectedPanels              int                              `json:"selected_panels,omitempty"`
+	ExecutedPanels              int                              `json:"executed_panels,omitempty"`
+	FallbackCount               int                              `json:"fallback_count,omitempty"`
+	Device                      string                           `json:"device,omitempty"`
+	SourceRevision              string                           `json:"source_revision,omitempty"`
+	ArtifactSHA256              string                           `json:"artifact_sha256,omitempty"`
 }
 
 type qwen35MetalForwardSequenceRunner interface {
@@ -248,6 +251,10 @@ type qwen35MetalDeviceKVAdmitter interface {
 	// disagrees with the cache.
 	ReconcileDeviceKV(s *Session, base, rows int) error
 }
+
+// qwen35MetalDeviceKVKeeper is the optional persistent-decode extension. Keeping
+// it separate preserves panel-only admitters and their historical detach contract.
+type qwen35MetalDeviceKVKeeper interface{ KeepDeviceKV(*Session) bool }
 
 type qwen35MetalStateIdentityBinder interface {
 	bindQwen35MetalStateIdentity(Qwen35MetalStateIdentityReceipt)
@@ -409,6 +416,7 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 				// to the historical host-append walk with KV/state unmutated.
 				var deviceKV *metalgemm.DeviceKV
 				var deviceAdmitter qwen35MetalDeviceKVAdmitter
+				deviceRetained := false
 				deviceBase := s.Cache.Len()
 				if admitter, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalDeviceKVAdmitter); ok {
 					if kv := admitter.AdmitDeviceKV(s, panelCover); kv != nil {
@@ -420,6 +428,9 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 				}
 				if deviceKV != nil {
 					defer func() {
+						if deviceRetained {
+							return
+						}
 						if attached := deviceAdmitter.DetachDeviceKV(); attached != nil {
 							attached.Close()
 						}
@@ -489,8 +500,13 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 						if err := deviceAdmitter.ReconcileDeviceKV(s, deviceBase, executedRows); err != nil {
 							panic(s.failQwen35MetalForwardSequence(err))
 						}
-						if attached := deviceAdmitter.DetachDeviceKV(); attached != nil {
-							attached.Close()
+						if keeper, ok := deviceAdmitter.(qwen35MetalDeviceKVKeeper); ok {
+							deviceRetained = keeper.KeepDeviceKV(s)
+						}
+						if !deviceRetained {
+							if attached := deviceAdmitter.DetachDeviceKV(); attached != nil {
+								attached.Close()
+							}
 						}
 					}
 					rem := ids[panelCover:]

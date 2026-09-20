@@ -53,7 +53,17 @@ type metalQwen35GDNSequenceBackend struct {
 	// panels when the device-resident lever is admitted (#13087). It is set by
 	// DeviceKVPrefix / the walk owner and cleared when the walk ends. Nil keeps the
 	// historical per-panel host append + prefix re-upload byte-identical.
-	deviceKV *metalgemm.DeviceKV
+	deviceKV                       *metalgemm.DeviceKV
+	deviceKVCache                  *KVCache
+	deviceKVRows, deviceKVCapacity int
+	deviceKVLineageLen             int
+	deviceKVLineageTail            uint32
+	deviceKVLineage                []uint32
+	deviceKVPersistent             bool
+}
+
+func qwen35PersistentDecodeDeviceKV() bool {
+	return os.Getenv("FAK_QWEN35_PERSISTENT_DECODE_DKV") == "1"
 }
 
 const (
@@ -1001,7 +1011,27 @@ func (b *metalQwen35GDNSequenceBackend) AdmitDeviceKV(s *Session, tokens int) *m
 	if b.deviceKV != nil {
 		return nil // a walk is already in flight; never share the triple across walks
 	}
-	kv := metalgemm.NewDeviceKV(layers, total, kvWidth)
+	capacity := total
+	if qwen35PersistentDecodeDeviceKV() {
+		capacity = -1
+		for l := 0; l < cfg.NumLayers; l++ {
+			if cfg.isLinearAttnLayer(l) {
+				continue
+			}
+			for _, plane := range [][]float32{s.Cache.Kraw[l], s.Cache.K[l], s.Cache.V[l]} {
+				c := cap(plane) / kvWidth
+				if capacity < 0 {
+					capacity = c
+				} else if c != capacity {
+					return nil
+				}
+			}
+		}
+		if capacity < total {
+			return nil
+		}
+	}
+	kv := metalgemm.NewDeviceKV(layers, capacity, kvWidth)
 	if kv == nil {
 		return nil
 	}
@@ -1036,6 +1066,15 @@ func (b *metalQwen35GDNSequenceBackend) AdmitDeviceKV(s *Session, tokens int) *m
 		}
 	}
 	b.deviceKV = kv
+	b.deviceKVCache = s.Cache
+	b.deviceKVRows = base
+	b.deviceKVCapacity = capacity
+	b.deviceKVLineageLen = len(s.Cache.lineage.ids)
+	b.deviceKVLineage = append(b.deviceKVLineage[:0], s.Cache.lineage.ids...)
+	if b.deviceKVLineageLen > 0 {
+		b.deviceKVLineageTail = s.Cache.lineage.ids[b.deviceKVLineageLen-1]
+	}
+	b.deviceKVPersistent = qwen35PersistentDecodeDeviceKV()
 	return kv
 }
 
@@ -1050,7 +1089,81 @@ func (b *metalQwen35GDNSequenceBackend) DetachDeviceKV() *metalgemm.DeviceKV {
 	defer b.mu.Unlock()
 	kv := b.deviceKV
 	b.deviceKV = nil
+	b.deviceKVCache = nil
+	b.deviceKVRows, b.deviceKVCapacity, b.deviceKVLineageLen = 0, 0, 0
+	b.deviceKVLineage = nil
+	b.deviceKVPersistent = false
 	return kv
+}
+
+func (b *metalQwen35GDNSequenceBackend) KeepDeviceKV(s *Session) bool {
+	if b == nil || s == nil || !qwen35PersistentDecodeDeviceKV() {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.deviceKV == nil || !b.deviceKVPersistent || b.deviceKVCache != s.Cache {
+		return false
+	}
+	b.deviceKVRows = s.Cache.Len()
+	b.deviceKVLineageLen = len(s.Cache.lineage.ids)
+	b.deviceKVLineage = append(b.deviceKVLineage[:0], s.Cache.lineage.ids...)
+	if b.deviceKVLineageLen > 0 {
+		b.deviceKVLineageTail = s.Cache.lineage.ids[b.deviceKVLineageLen-1]
+	}
+	return true
+}
+
+func (b *metalQwen35GDNSequenceBackend) decodeDeviceKV(s *Session) *metalgemm.DeviceKV {
+	if b == nil || s == nil || !qwen35PersistentDecodeDeviceKV() {
+		return nil
+	}
+	b.mu.Lock()
+	valid := b.deviceKV != nil && b.deviceKVPersistent && b.deviceKVCache == s.Cache &&
+		b.deviceKVRows == s.Cache.Len() && b.deviceKVCapacity > s.Cache.Len() &&
+		b.deviceKVLineageLen == len(s.Cache.lineage.ids) && b.deviceKVLineageLen == s.Cache.Len()
+	if valid && b.deviceKVLineageLen > 0 {
+		valid = b.deviceKVLineageTail == s.Cache.lineage.ids[b.deviceKVLineageLen-1]
+	}
+	if valid {
+		for i := range b.deviceKVLineage {
+			if b.deviceKVLineage[i] != s.Cache.lineage.ids[i] {
+				valid = false
+				break
+			}
+		}
+	}
+	if valid {
+		kvWidth := s.M.Cfg.NumKVHeads * s.M.Cfg.HeadDim
+		for l := 0; l < s.M.Cfg.NumLayers && valid; l++ {
+			if s.M.Cfg.isLinearAttnLayer(l) {
+				continue
+			}
+			want := b.deviceKVRows * kvWidth
+			valid = len(s.Cache.Kraw[l]) == want && len(s.Cache.K[l]) == want && len(s.Cache.V[l]) == want
+		}
+	}
+	if valid {
+		kv := b.deviceKV
+		b.mu.Unlock()
+		return kv
+	}
+	kv := b.deviceKV
+	b.deviceKV = nil
+	b.deviceKVCache = nil
+	b.deviceKVPersistent = false
+	b.deviceKVLineage = nil
+	b.mu.Unlock()
+	if kv != nil {
+		kv.Close()
+	}
+	return nil
+}
+
+func (b *metalQwen35GDNSequenceBackend) invalidateDeviceKV() {
+	if kv := b.DetachDeviceKV(); kv != nil {
+		kv.Close()
+	}
 }
 
 // ReconcileDeviceKV downloads the device triple once and appends each
@@ -1146,6 +1259,7 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 		return nil, receipt, false, nil
 	}
 	base, H, P := s.Cache.Len(), cfg.HiddenSize, 1
+	deviceKV := b.decodeDeviceKV(s)
 	// The decode full-attention route is uncapped: above 2048 context
 	// mg_qwen35_graph_attention uses split-KV (qg_attn_split + qg_attn_combine,
 	// one SIMDgroup per (head, KV split)), below it the ordered qg_attn_online;
@@ -1163,6 +1277,12 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 		return nil, receipt, false, err
 	}
 	defer g.Free()
+	deviceKVCompleted := false
+	defer func() {
+		if deviceKV != nil && !deviceKVCompleted {
+			b.invalidateDeviceKV()
+		}
+	}()
 	// The whole-token graph is P=1: route every Q4_K/Q6_K/Q8 projection through the
 	// historical decode GEMV kernels instead of the prefill GEMM pipeline. At P=1 the
 	// GEMM's 64-wide token tile wastes 63/64 of its work and emits a small dispatch per
@@ -1179,6 +1299,9 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 	if os.Getenv("FAK_QWEN35_WHOLE_TOKEN_POOL") == "1" {
 		g.SetBufferPool(8)
 	}
+	if b.injectForwardPostSubmitFailure {
+		g.InjectPostSubmitFailureForTest()
+	}
 	x, err := g.Input(H)
 	if err != nil {
 		return nil, receipt, true, err
@@ -1189,6 +1312,7 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 		kraw, kpost, v *metalgemm.GraphResult
 	}
 	var kvResults []kvResult
+	deviceAttnOrdinal := 0
 	eps := float32(cfg.RMSNormEps)
 	for l := 0; l < cfg.NumLayers; l++ {
 		p := func(suffix string) string { return layerName(l, suffix) }
@@ -1236,8 +1360,15 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 			qnorm, knorm := m.tensor(p("self_attn.q_norm.weight")), m.tensor(p("self_attn.k_norm.weight"))
 			rotary := cfg.rotaryDim()
 			cos, sin := ropeRowForLayer(cfg, l, base)
-			attention, runErr := g.FullAttention(q, qkv[1], qkv[2], gate, qnorm, knorm, cos, sin,
-				s.Cache.K[l], s.Cache.V[l], base, cfg.NumHeads, cfg.NumKVHeads, cfg.HeadDim, rotary, cfg.attnScale(), cfg.qkNormEps(), cfg.NormGain1p, cfg.QKNorm)
+			var attention metalgemm.Qwen35GraphAttentionResult
+			if deviceKV != nil {
+				attention, runErr = g.FullAttentionDevice(q, qkv[1], qkv[2], gate, deviceKV, deviceAttnOrdinal,
+					qnorm, knorm, cos, sin, base, cfg.NumHeads, cfg.NumKVHeads, cfg.HeadDim, rotary, cfg.attnScale(), cfg.qkNormEps(), cfg.NormGain1p, cfg.QKNorm)
+				deviceAttnOrdinal++
+			} else {
+				attention, runErr = g.FullAttention(q, qkv[1], qkv[2], gate, qnorm, knorm, cos, sin,
+					s.Cache.K[l], s.Cache.V[l], base, cfg.NumHeads, cfg.NumKVHeads, cfg.HeadDim, rotary, cfg.attnScale(), cfg.qkNormEps(), cfg.NormGain1p, cfg.QKNorm)
+			}
 			if runErr != nil {
 				return nil, receipt, true, runErr
 			}
@@ -1303,6 +1434,10 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 		Committed: graphReceipt.Committed, CompletedWait: graphReceipt.CompletedWait, TimingAvailable: graphReceipt.TimingAvailable,
 		GPUMilliseconds: graphReceipt.GPUMilliseconds, WaitMilliseconds: graphReceipt.WaitMilliseconds,
 	}
+	if deviceKV != nil {
+		receipt.DeviceKVAttentionLayers = deviceAttnOrdinal
+		receipt.DeviceKVSuffixReadbackBytes = uint64(deviceAttnOrdinal * 3 * cfg.NumKVHeads * cfg.HeadDim * 4)
+	}
 	if err != nil || !graphReceipt.Committed || !graphReceipt.CompletedWait || graphReceipt.HostReadbacks != 1 {
 		if err == nil {
 			err = fmt.Errorf("metalgemm: incomplete Qwen decode-token graph receipt: %+v", graphReceipt)
@@ -1337,6 +1472,13 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 		outIndex += 3
 	}
 	s.Cache.appendPosition(base, id)
+	if deviceKV != nil {
+		if !b.KeepDeviceKV(s) {
+			b.invalidateDeviceKV()
+		} else {
+			deviceKVCompleted = true
+		}
+	}
 	if captureRaw {
 		s.rememberTargetHidden(base, id, rawHidden[0:H])
 	}
@@ -1448,9 +1590,20 @@ func (b *metalQwen35GDNSequenceBackend) FreeQwen35GDNAuxState(handles Qwen35GDNA
 	b.mu.Lock()
 	state := b.states[handles]
 	delete(b.states, handles)
+	var kv *metalgemm.DeviceKV
+	if len(b.states) == 0 {
+		kv = b.deviceKV
+		b.deviceKV = nil
+		b.deviceKVCache = nil
+		b.deviceKVPersistent = false
+		b.deviceKVLineage = nil
+	}
 	b.mu.Unlock()
 	if state != nil {
 		state.Close()
+	}
+	if kv != nil {
+		kv.Close()
 	}
 	return nil
 }

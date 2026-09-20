@@ -24,6 +24,7 @@ package model
 
 import (
 	"math"
+	"slices"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
@@ -294,6 +295,139 @@ func TestMetalQwen35P1PublishesTargetHidden(t *testing.T) {
 	control.Close()
 	captured.Close()
 	primer.Close()
+}
+
+// TestQwen35MetalP32TwoP1PersistentDeviceKV is the #13428 physical spine: the
+// production P32->P1 route retains one fixed-capacity device KV owner and each
+// decode token uses all full-attention device slices without uploading a prefix.
+func TestQwen35MetalP32TwoP1PersistentDeviceKV(t *testing.T) {
+	if !metalgemm.Available() || metalgemm.DeviceName() == "" {
+		t.Skip("persistent decode KV requires a physical Metal device")
+	}
+	setQ4KSDOTForTest(false)
+	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+	cfg := qwen35HybridQ4KTestCfg()
+	cfg.QKNorm = true
+	// Keep the real Qwen3.8 count of sixteen full-attention planes while retaining
+	// the synthetic 256-wide fixture's sub-64 MiB allocation envelope.
+	cfg.NumLayers = 17
+	cfg.LayerTypes = make([]string, cfg.NumLayers)
+	cfg.LayerTypes[0] = "linear_attention"
+	for i := 1; i < len(cfg.LayerTypes); i++ {
+		cfg.LayerTypes[i] = "full_attention"
+	}
+	cfg.FullAttentionInterval = 1
+	m := NewSynthetic(cfg)
+	m.Quantize()
+	fillQ4KMajority(t, m, cfg)
+	prompt := make([]int, 32)
+	for i := range prompt {
+		prompt[i] = (i*19 + 7) % cfg.VocabSize
+	}
+
+	run := func(persistent bool) (*Session, [][]float32, []Qwen35MetalForwardSequenceReceipt) {
+		t.Helper()
+		if persistent {
+			t.Setenv("FAK_QWEN35_PERSISTENT_DECODE_DKV", "1")
+		} else {
+			t.Setenv("FAK_QWEN35_PERSISTENT_DECODE_DKV", "0")
+		}
+		s := m.NewSession()
+		s.Q4K, s.MetalQ4K = true, true
+		s.Cache.Reserve(35)
+		if err := s.EnableQwen35MetalGDNPreprojectedSequence(); err != nil {
+			t.Fatal(err)
+		}
+		s.Prefill(prompt)
+		if executed, err := s.FinalizeQwen35MetalGDNPreprojectedSequence(); err != nil || !executed {
+			t.Fatalf("finalize persistent=%v executed=%v err=%v", persistent, executed, err)
+		}
+		out := make([][]float32, 2)
+		receipts := make([]Qwen35MetalForwardSequenceReceipt, 2)
+		for i, id := range []int{7, 11} {
+			out[i] = append([]float32(nil), s.Step(id)...)
+			r := s.Qwen35MetalForwardSequenceReceipt()
+			receipts[i] = r
+			if persistent {
+				if r.DeviceKVAttentionLayers != 16 || r.DeviceKVPrefixUploadBytes != 0 ||
+					r.DeviceKVSuffixReadbackBytes != uint64(16*3*cfg.NumKVHeads*cfg.HeadDim*4) ||
+					r.CommandBuffers != 1 || r.TerminalWaits != 1 || r.IntermediateReadbacks != 0 {
+					t.Fatalf("persistent P1[%d] receipt=%+v", i, r)
+				}
+			}
+		}
+		return s, out, receipts
+	}
+
+	control, want, controlReceipts := run(false)
+	defer control.Close()
+	candidate, got, candidateReceipts := run(true)
+	defer candidate.Close()
+	for i := range want {
+		if cosine(want[i], got[i]) < 0.9999 || argmaxF(want[i]) != argmaxF(got[i]) {
+			t.Fatalf("P1[%d] parity cosine=%g argmax=%d/%d", i, cosine(want[i], got[i]), argmaxF(want[i]), argmaxF(got[i]))
+		}
+		base := 32 + i
+		wantSaved := uint64(16 * 2 * base * cfg.NumKVHeads * cfg.HeadDim * 4)
+		if controlReceipts[i].HostUploadBytes < candidateReceipts[i].HostUploadBytes ||
+			controlReceipts[i].HostUploadBytes-candidateReceipts[i].HostUploadBytes != wantSaved {
+			t.Fatalf("P1[%d] host upload control=%d device=%d saved=%d want=%d", i,
+				controlReceipts[i].HostUploadBytes, candidateReceipts[i].HostUploadBytes,
+				controlReceipts[i].HostUploadBytes-candidateReceipts[i].HostUploadBytes, wantSaved)
+		}
+	}
+	if candidate.Cache.Len() != control.Cache.Len() || !slices.Equal(control.Cache.lineage.ids, candidate.Cache.lineage.ids) {
+		t.Fatalf("candidate cache positions=%d lineage=%d control=%d", candidate.Cache.Len(), len(candidate.Cache.lineage.ids), control.Cache.Len())
+	}
+	for l := 0; l < cfg.NumLayers; l++ {
+		if cfg.isLinearAttnLayer(l) {
+			continue
+		}
+		if cosine(control.Cache.Kraw[l], candidate.Cache.Kraw[l]) < 0.9999 ||
+			cosine(control.Cache.K[l], candidate.Cache.K[l]) < 0.9999 ||
+			cosine(control.Cache.V[l], candidate.Cache.V[l]) < 0.9999 {
+			t.Fatalf("device KV host reconcile parity failed at layer %d", l)
+		}
+	}
+	backend := candidate.qwen35HAL.sequenceBackend.(*metalQwen35GDNSequenceBackend)
+	backend.mu.Lock()
+	capacity, rows := backend.deviceKVCapacity, backend.deviceKVRows
+	backend.mu.Unlock()
+	if capacity != 35 || rows != 34 {
+		t.Fatalf("device KV capacity=%d rows=%d want 35/34", capacity, rows)
+	}
+	if live := backend.decodeDeviceKV(candidate); live == nil {
+		t.Fatal("accepted-error arm did not begin with an active persistent device KV")
+	}
+	backend.injectForwardPostSubmitFailure = true
+	_, _, accepted, err := backend.Qwen35MetalDecodeToken(candidate, 13)
+	if !accepted || err == nil {
+		t.Fatalf("injected accepted error accepted=%v err=%v", accepted, err)
+	}
+	backend.mu.Lock()
+	live := backend.deviceKV
+	backend.mu.Unlock()
+	if live != nil {
+		t.Fatal("accepted graph error retained uncertain device KV")
+	}
+	// Reattach one physical owner to the still-live backend so Session.Close's
+	// final FreeQwen35GDNAuxState path, rather than error invalidation, owns it.
+	teardownKV := metalgemm.NewDeviceKV(16, 1, cfg.NumKVHeads*cfg.HeadDim)
+	if teardownKV == nil {
+		t.Fatal("teardown DeviceKV allocation declined")
+	}
+	backend.mu.Lock()
+	backend.deviceKV = teardownKV
+	backend.deviceKVCache = candidate.Cache
+	backend.deviceKVPersistent = true
+	backend.mu.Unlock()
+	candidate.Close()
+	backend.mu.Lock()
+	live = backend.deviceKV
+	backend.mu.Unlock()
+	if live != nil {
+		t.Fatal("Session.Close retained final device KV owner")
+	}
 }
 
 // assertFloat32BitsEqualOptional reports whether two float32 slices are
