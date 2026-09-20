@@ -20,6 +20,148 @@ import (
 	"time"
 )
 
+func TestOpsRunWorkspace(t *testing.T) {
+	t.Run("nonexistent_refuses_before_launch", func(t *testing.T) {
+		dir := t.TempDir()
+		prompt := filepath.Join(dir, "prompt.txt")
+		receipt := filepath.Join(dir, "receipt.json")
+		if err := os.WriteFile(prompt, []byte("must not launch\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		old := opsRunExecute
+		t.Cleanup(func() { opsRunExecute = old })
+		var launches atomic.Int32
+		opsRunExecute = func(context.Context, io.Writer, io.Writer, []string, []string, []byte) (int, bool, bool, []opsRunLifecycleRecord) {
+			launches.Add(1)
+			return 0, true, false, nil
+		}
+
+		code := runOpsRun(io.Discard, io.Discard, []string{
+			"--workspace", filepath.Join(dir, "does-not-exist"),
+			"--prompt-file", prompt,
+			"--receipt", receipt,
+			"--model", "fixture",
+			"--provider", "openai",
+			"--base-url", "http://127.0.0.1:1/v1",
+		})
+		if code != 2 {
+			t.Fatalf("nonexistent workspace exit=%d, want 2", code)
+		}
+		if launches.Load() != 0 {
+			t.Fatalf("nonexistent workspace launched child %d time(s)", launches.Load())
+		}
+		if _, err := os.Stat(receipt); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("nonexistent workspace created receipt: %v", err)
+		}
+	})
+
+	t.Run("canonical_alias_bound_to_child_and_receipt", func(t *testing.T) {
+		workspace := t.TempDir()
+		if err := os.Mkdir(filepath.Join(workspace, ".git"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(workspace, "dos.toml"), []byte("[lanes]\n[lanes.trees]\ncmd = [\"cmd/**\"]\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		workspaceAlias := filepath.Join(t.TempDir(), "workspace-alias")
+		if err := os.Symlink(workspace, workspaceAlias); err != nil {
+			aliasChild := filepath.Join(workspace, "alias-child")
+			if err := os.Mkdir(aliasChild, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			workspaceAlias = workspace + string(os.PathSeparator) + "alias-child" + string(os.PathSeparator) + ".."
+		}
+		coordinator, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		helperDir := t.TempDir()
+		helperSource := filepath.Join(helperDir, "main.go")
+		helper := filepath.Join(helperDir, "workspace-child")
+		if runtime.GOOS == "windows" {
+			helper += ".exe"
+		}
+		const source = `package main
+import (
+	"fmt"
+	"os"
+)
+func main() {
+	wd, err := os.Getwd()
+	if err != nil { panic(err) }
+	if err := os.WriteFile(os.Getenv("FAK_OPS_WORKSPACE_MARKER"), []byte(wd), 0600); err != nil { panic(err) }
+	fmt.Println("{\"type\":\"step_finish\",\"part\":{\"reason\":\"stop\"}}")
+}
+`
+		if err := os.WriteFile(helperSource, []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		build := exec.Command("go", "build", "-o", helper, helperSource)
+		if out, err := build.CombinedOutput(); err != nil {
+			t.Fatalf("build workspace child: %v\n%s", err, out)
+		}
+
+		gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, `data: {"id":"preflight","object":"chat.completion.chunk","model":"fixture","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_preflight","type":"function","function":{"name":"fak_inference_preflight","arguments":"{\"ok\":true}"}}]},"finish_reason":"tool_calls"}]}`+"\n\n")
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		}))
+		defer gateway.Close()
+
+		marker := filepath.Join(t.TempDir(), "cwd.txt")
+		prompt := filepath.Join(t.TempDir(), "prompt.txt")
+		receipt := filepath.Join(t.TempDir(), "receipt.json")
+		if err := os.WriteFile(prompt, []byte("check workspace\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("FAK_OPS_WORKSPACE_MARKER", marker)
+		t.Setenv(guardE2EHelperEnv, strings.Join([]string{"--provider", "openai", "--split", "off", "--model", "fixture", "--base-url", gateway.URL + "/v1", "--", helper}, " "))
+
+		var stderr bytes.Buffer
+		code := runOpsRun(io.Discard, &stderr, []string{
+			"--workspace", workspaceAlias,
+			"--prompt-file", prompt,
+			"--receipt", receipt,
+			"--model", "fixture",
+			"--provider", "openai",
+			"--base-url", gateway.URL + "/v1",
+		})
+		if code != 0 {
+			t.Fatalf("ops run exit=%d, want 0: %s", code, stderr.String())
+		}
+		rawCWD, err := os.ReadFile(marker)
+		if err != nil {
+			t.Fatalf("read child cwd marker: %v", err)
+		}
+		gotCWD, err := filepath.Abs(string(rawCWD))
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantCWD, err := filepath.Abs(workspace)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.EqualFold(filepath.Clean(gotCWD), filepath.Clean(wantCWD)) {
+			t.Fatalf("child cwd=%q, want isolated workspace %q (coordinator cwd=%q)", gotCWD, wantCWD, coordinator)
+		}
+		data, err := os.ReadFile(receipt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got struct {
+			Workspace string `json:"workspace"`
+		}
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.EqualFold(filepath.Clean(got.Workspace), filepath.Clean(wantCWD)) {
+			t.Fatalf("receipt workspace=%q, want %q", got.Workspace, wantCWD)
+		}
+	})
+}
+
 func TestOpsRunInferencePreflight(t *testing.T) {
 	for _, tc := range []struct {
 		name       string

@@ -33,6 +33,7 @@ import (
 type opsRunReceipt struct {
 	Schema             string                           `json:"schema"`
 	Harness            string                           `json:"harness"`
+	Workspace          string                           `json:"workspace"`
 	Status             string                           `json:"status"`
 	ExitCode           int                              `json:"exit_code"`
 	Started            time.Time                        `json:"started_at"`
@@ -363,6 +364,40 @@ var (
 
 var opsRunExecute = executeOpsRun
 
+type opsRunWorkspaceKey struct{}
+
+func resolveOpsRunWorkspace(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", errors.New("workspace is required")
+	}
+	abs, err := filepath.Abs(raw)
+	if err != nil {
+		return "", fmt.Errorf("resolve workspace: %w", err)
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("resolve workspace: %w", err)
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", fmt.Errorf("stat workspace: %w", err)
+	}
+	if !info.IsDir() {
+		return "", errors.New("workspace must be a directory")
+	}
+	return filepath.Clean(resolved), nil
+}
+
+func withOpsRunWorkspace(ctx context.Context, workspace string) context.Context {
+	return context.WithValue(ctx, opsRunWorkspaceKey{}, workspace)
+}
+
+func opsRunWorkspace(ctx context.Context) string {
+	workspace, _ := ctx.Value(opsRunWorkspaceKey{}).(string)
+	return workspace
+}
+
 func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	for i, arg := range args {
 		if arg == "--harness=native" || arg == "-harness=native" || ((arg == "--harness" || arg == "-harness") && i+1 < len(args) && args[i+1] == "native") {
@@ -374,6 +409,7 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	harness := fs.String("harness", "opencode", "headless harness: opencode or native (use --harness native --help for native options)")
 	provider := fs.String("provider", "openai", "upstream wire: openai or gemini (native Google adapter)")
 	promptFile := fs.String("prompt-file", "", "UTF-8 prompt file, delivered over stdin")
+	workspace := fs.String("workspace", "", "existing workspace directory for the child process (required except dry-run)")
 	timeout := fs.Duration("timeout", 5*time.Minute, "positive wall-clock deadline")
 	receiptPath := fs.String("receipt", "", "execution metadata JSON file (required except dry-run)")
 	model := fs.String("model", "", "upstream model identifier without an OpenCode provider prefix (required)")
@@ -391,9 +427,18 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 		}
 		return 2
 	}
-	if fs.NArg() != 0 || *harness != "opencode" || (*provider != "openai" && *provider != "gemini") || *timeout <= 0 || strings.TrimSpace(*model) == "" || *promptFile == "" || (!*dryRun && *receiptPath == "") {
-		fmt.Fprintln(stderr, "ops run: require --harness opencode, --provider openai|gemini, --model, --prompt-file, --receipt and a positive --timeout; no positional arguments")
+	if fs.NArg() != 0 || *harness != "opencode" || (*provider != "openai" && *provider != "gemini") || *timeout <= 0 || strings.TrimSpace(*model) == "" || *promptFile == "" || (!*dryRun && (*receiptPath == "" || strings.TrimSpace(*workspace) == "")) {
+		fmt.Fprintln(stderr, "ops run: require --harness opencode, --provider openai|gemini, --model, --prompt-file, --workspace, --receipt and a positive --timeout; no positional arguments (--workspace and --receipt may be omitted only for --dry-run)")
 		return 2
+	}
+	resolvedWorkspace := ""
+	if strings.TrimSpace(*workspace) != "" {
+		var err error
+		resolvedWorkspace, err = resolveOpsRunWorkspace(*workspace)
+		if err != nil {
+			fmt.Fprintf(stderr, "ops run: invalid workspace: %v\n", err)
+			return 2
+		}
 	}
 	if *provider == "gemini" && (*apiKeyEnv == "" || strings.TrimSpace(os.Getenv(*apiKeyEnv)) == "") {
 		fmt.Fprintln(stderr, "ops run: --provider gemini requires --api-key-env naming a nonempty upstream key")
@@ -478,7 +523,7 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	encoded, _ := json.Marshal(config)
 	env := replaceOpsRunEnv(os.Environ(), "OPENCODE_CONFIG_CONTENT", string(encoded))
 	if *dryRun {
-		_ = json.NewEncoder(stdout).Encode(map[string]any{"schema": "fak-ops-run-plan/1", "harness": *harness, "provider": *provider, "guarded": true, "prompt_delivery": "stdin", "timeout": timeout.String(), "auto": *auto, "pure": *pure})
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"schema": "fak-ops-run-plan/1", "harness": *harness, "provider": *provider, "workspace": resolvedWorkspace, "guarded": true, "prompt_delivery": "stdin", "timeout": timeout.String(), "auto": *auto, "pure": *pure})
 		return 0
 	}
 	sigCtx, stop := signal.NotifyContext(context.Background(), terminatingSignals()...)
@@ -488,7 +533,8 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	ctx = withSignalChecker(ctx, func() bool {
 		return sigCtx.Err() != nil
 	})
-	receipt := opsRunReceipt{Schema: "fak-ops-run/1", Harness: *harness, Status: "running", Started: time.Now().UTC()}
+	ctx = withOpsRunWorkspace(ctx, resolvedWorkspace)
+	receipt := opsRunReceipt{Schema: "fak-ops-run/1", Harness: *harness, Workspace: resolvedWorkspace, Status: "running", Started: time.Now().UTC()}
 	if err := writeOpsRunReceipt(*receiptPath, receipt); err != nil {
 		fmt.Fprintf(stderr, "ops run: write receipt: %v\n", err)
 		return 1
@@ -636,6 +682,7 @@ func (w *opsRunEvents) finishLine() {
 func executeOpsRun(ctx context.Context, stdout, stderr io.Writer, argv, env []string, prompt []byte) (int, bool, bool, []opsRunLifecycleRecord) {
 	events := &opsRunEvents{output: stdout}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Dir = opsRunWorkspace(ctx)
 	cmd.Env = env
 	cmd.Stdin = bytes.NewReader(prompt)
 	cmd.Stdout, cmd.Stderr = events, stderr
