@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/conceptcatalog"
+	"github.com/anthony-chaudhary/fak/internal/processstart"
 )
 
 func stubDisambiguationReader(fn func(repo, tree string) DisambiguationWitness) boundedReader {
@@ -794,6 +795,205 @@ func TestDisambiguationWitnessPersistentContentCache(t *testing.T) {
 	}
 	if misses != 1 || hits != callers-1 {
 		t.Fatalf("concurrent cache states miss/hit = %d/%d, want 1/%d", misses, hits, callers-1)
+	}
+}
+
+type disambiguationLockOwnerFixture struct {
+	PID                  int    `json:"pid"`
+	ProcessStartIdentity string `json:"process_start_identity"`
+}
+
+func writeDisambiguationLockOwnerFixture(t *testing.T, lock string, owner disambiguationLockOwnerFixture) {
+	t.Helper()
+	if err := os.Mkdir(lock, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(lock, "owner.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func withDisambiguationLockFixture(t *testing.T) (cacheRoot, key string) {
+	t.Helper()
+	oldResolve := resolveDisambiguationTree
+	oldRoot := disambiguationCacheRoot
+	t.Cleanup(func() {
+		resolveDisambiguationTree = oldResolve
+		disambiguationCacheRoot = oldRoot
+	})
+	resolveDisambiguationTree = func(context.Context, string, string) (string, error) { return "tree-lock-owner", nil }
+	cacheRoot = t.TempDir()
+	disambiguationCacheRoot = func(string) (string, error) { return cacheRoot, nil }
+	key = disambiguationCacheKey("tree-lock-owner")
+	return cacheRoot, key
+}
+
+func seedDisambiguationLockCache(t *testing.T, root, key string) {
+	t.Helper()
+	w := DisambiguationWitness{Tree: "tree-lock-owner", Fresh: true, SemanticValid: true, CriticalClean: true, Coverage: 1}
+	if err := writeCachedDisambiguation(filepath.Join(root, key+".json"), key, w); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDisambiguationCacheLockOwnerRecovery(t *testing.T) {
+	started, startOK := processstart.Start(os.Getpid())
+	liveIdentity := started.UTC().Format(time.RFC3339Nano)
+
+	for _, tc := range []struct {
+		name       string
+		prepare    func(*testing.T, string)
+		wantReap   bool
+		wantReason string
+	}{
+		{
+			name: "dead owner reclaimed",
+			prepare: func(t *testing.T, lock string) {
+				writeDisambiguationLockOwnerFixture(t, lock, disambiguationLockOwnerFixture{PID: 1 << 30, ProcessStartIdentity: "dead-owner-start"})
+			},
+			wantReap: true, wantReason: "stale-owner-reclaimed",
+		},
+		{
+			name: "reused pid reclaimed",
+			prepare: func(t *testing.T, lock string) {
+				if !startOK {
+					t.Skip("current process start identity unavailable")
+				}
+				writeDisambiguationLockOwnerFixture(t, lock, disambiguationLockOwnerFixture{PID: os.Getpid(), ProcessStartIdentity: liveIdentity + "-previous"})
+			},
+			wantReap: true, wantReason: "stale-owner-reclaimed",
+		},
+		{
+			name: "live owner not stolen",
+			prepare: func(t *testing.T, lock string) {
+				if !startOK {
+					t.Skip("current process start identity unavailable")
+				}
+				writeDisambiguationLockOwnerFixture(t, lock, disambiguationLockOwnerFixture{PID: os.Getpid(), ProcessStartIdentity: liveIdentity})
+			},
+		},
+		{
+			name: "malformed owner fails closed",
+			prepare: func(t *testing.T, lock string) {
+				if err := os.Mkdir(lock, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(lock, "owner.json"), []byte("{not-json"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "unreadable owner fails closed",
+			prepare: func(t *testing.T, lock string) {
+				if err := os.MkdirAll(filepath.Join(lock, "owner.json"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cacheRoot, key := withDisambiguationLockFixture(t)
+			seedDisambiguationLockCache(t, cacheRoot, key)
+			lock := filepath.Join(cacheRoot, key+".lock")
+			tc.prepare(t, lock)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+			defer cancel()
+			got := readDisambiguationWitness(ctx, "/repo", "HEAD", func(string) {})
+			if tc.wantReap {
+				if ctx.Err() != nil || got.CacheState != "hit" || !strings.Contains(got.CacheReason, tc.wantReason) {
+					t.Fatalf("recover result=%+v ctx=%v, want cache hit with %q before deadline", got, ctx.Err(), tc.wantReason)
+				}
+				return
+			}
+			if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				t.Fatalf("unsafe owner metadata was not held fail-closed: result=%+v ctx=%v", got, ctx.Err())
+			}
+			if _, err := os.Stat(lock); err != nil {
+				t.Fatalf("fail-closed owner lock was removed: %v", err)
+			}
+		})
+	}
+}
+
+func TestDisambiguationCacheLockConcurrentReclaimSingleflight(t *testing.T) {
+	cacheRoot, key := withDisambiguationLockFixture(t)
+	lock := filepath.Join(cacheRoot, key+".lock")
+	writeDisambiguationLockOwnerFixture(t, lock, disambiguationLockOwnerFixture{PID: 1 << 30, ProcessStartIdentity: "dead-owner-start"})
+
+	oldList := listDisambiguationTree
+	oldReadObject := readDisambiguationObject
+	oldAnalyzer := runAnalyzer
+	t.Cleanup(func() {
+		listDisambiguationTree = oldList
+		readDisambiguationObject = oldReadObject
+		runAnalyzer = oldAnalyzer
+	})
+	bodies := map[string][]byte{
+		"readme": []byte("readme\n"),
+		"index":  []byte("index\n"),
+		"meta":   []byte(`{"families":[]}`),
+	}
+	listing := disambiguationTreeListing(
+		disambiguationTreeEntry{Mode: "100644", ObjectID: "readme", Size: int64(len(bodies["readme"])), Path: conceptcatalog.GeneratedReadme},
+		disambiguationTreeEntry{Mode: "100644", ObjectID: "index", Size: int64(len(bodies["index"])), Path: conceptcatalog.GeneratedIndex},
+		disambiguationTreeEntry{Mode: "100644", ObjectID: "meta", Size: int64(len(bodies["meta"])), Path: "tools/concept_disambiguation_scorecard.data/_meta.json"},
+	)
+	listDisambiguationTree = func(context.Context, string, string) ([]byte, error) { return append([]byte(nil), listing...), nil }
+	readDisambiguationObject = func(_ context.Context, _ string, objectID string) ([]byte, error) {
+		return append([]byte(nil), bodies[objectID]...), nil
+	}
+	var mu sync.Mutex
+	analyzerCalls := 0
+	runAnalyzer = func(_ context.Context, _ string, generated string) ([]byte, error) {
+		mu.Lock()
+		analyzerCalls++
+		mu.Unlock()
+		writeDisambiguationFixture(t, generated, "README.md", "readme\n")
+		writeDisambiguationFixture(t, generated, "INDEX.md", "index\n")
+		return []byte(`{"ok":true,"corpus":{"coverage_debt":0,"clarity_defects":0,"coverage":{"coverage_pct":100}}}`), nil
+	}
+
+	const callers = 8
+	results := make(chan DisambiguationWitness, callers)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			results <- readDisambiguationWitness(ctx, "/repo", "HEAD", func(string) {})
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	mu.Lock()
+	calls := analyzerCalls
+	mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("competing stale-lock reclaimers ran analyzer %d times, want exactly 1", calls)
+	}
+	reclaimedReceipt := false
+	for got := range results {
+		if strings.Contains(got.CacheReason, "stale-owner-reclaimed") {
+			reclaimedReceipt = true
+		}
+		if got.CacheState != "miss" && got.CacheState != "hit" {
+			t.Fatalf("reclaimer cache state = %q, want miss or hit: %+v", got.CacheState, got)
+		}
+	}
+	if !reclaimedReceipt {
+		t.Fatal("stale-lock recovery was not observable in any cache receipt")
 	}
 }
 

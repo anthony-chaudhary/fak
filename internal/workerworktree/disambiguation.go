@@ -22,6 +22,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/conceptcatalog"
 	"github.com/anthony-chaudhary/fak/internal/gitbroker"
+	"github.com/anthony-chaudhary/fak/internal/processalive"
+	"github.com/anthony-chaudhary/fak/internal/processstart"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -47,6 +49,8 @@ const (
 )
 
 const disambiguationAnalyzerContractPath = "tools/concept_disambiguation_scorecard.py"
+
+var disambiguationCacheLockStripes [64]sync.Mutex
 
 const (
 	disambiguationRecoveryDefault  = "default"
@@ -95,6 +99,137 @@ type DisambiguationWitnesses struct {
 	Before    DisambiguationWitness        `json:"before"`
 	Worktree  DisambiguationWitness        `json:"worktree"`
 	PostApply DisambiguationWitness        `json:"post_apply"`
+}
+
+type disambiguationLockOwner struct {
+	PID                  int    `json:"pid"`
+	ProcessStartIdentity string `json:"process_start_identity"`
+}
+
+const disambiguationLockOwnerFile = "owner.json"
+
+func currentDisambiguationLockOwner() (disambiguationLockOwner, bool) {
+	started, ok := processstart.Start(os.Getpid())
+	if !ok || started.IsZero() {
+		return disambiguationLockOwner{}, false
+	}
+	return disambiguationLockOwner{
+		PID:                  os.Getpid(),
+		ProcessStartIdentity: started.UTC().Format(time.RFC3339Nano),
+	}, true
+}
+
+func tryAcquireDisambiguationLock(lock string) (bool, error) {
+	owner, ok := currentDisambiguationLockOwner()
+	if !ok {
+		return false, errors.New("process-start identity unavailable")
+	}
+	if err := os.Mkdir(lock, 0o700); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	raw, err := json.Marshal(owner)
+	if err != nil {
+		_ = os.Remove(lock)
+		return false, err
+	}
+	if err := os.WriteFile(filepath.Join(lock, disambiguationLockOwnerFile), raw, 0o600); err != nil {
+		_ = os.Remove(lock)
+		return false, err
+	}
+	return true, nil
+}
+
+func readDisambiguationLockOwner(lock string) (disambiguationLockOwner, error) {
+	raw, err := os.ReadFile(filepath.Join(lock, disambiguationLockOwnerFile))
+	if err != nil {
+		return disambiguationLockOwner{}, err
+	}
+	var owner disambiguationLockOwner
+	if err := json.Unmarshal(raw, &owner); err != nil {
+		return disambiguationLockOwner{}, err
+	}
+	if owner.PID <= 0 || strings.TrimSpace(owner.ProcessStartIdentity) == "" {
+		return disambiguationLockOwner{}, errors.New("invalid disambiguation lock owner")
+	}
+	return owner, nil
+}
+
+func disambiguationLockOwnerStale(owner disambiguationLockOwner) bool {
+	if !processalive.Check(owner.PID) {
+		return true
+	}
+	started, ok := processstart.Start(owner.PID)
+	if !ok || started.IsZero() {
+		return false
+	}
+	return started.UTC().Format(time.RFC3339Nano) != owner.ProcessStartIdentity
+}
+
+// tryReclaimDisambiguationLock removes only a lock whose stamped owner is
+// provably dead or whose PID now names a different process. The exclusive claim
+// serializes competing reclaimers; re-reading after the claim closes the ABA
+// window where another caller may already have published a new live lock.
+func tryReclaimDisambiguationLock(cacheRoot, lock, key string) (bool, error) {
+	owner, err := readDisambiguationLockOwner(lock)
+	if err != nil || !disambiguationLockOwnerStale(owner) {
+		return false, nil
+	}
+	claim := filepath.Join(lock, ".reclaim")
+	f, err := os.OpenFile(claim, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) || errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	_ = f.Close()
+	defer os.Remove(claim)
+	owner, err = readDisambiguationLockOwner(lock)
+	if err != nil || !disambiguationLockOwnerStale(owner) {
+		return false, nil
+	}
+	tombstone, err := os.MkdirTemp(cacheRoot, "."+key+".lock-reclaim-")
+	if err != nil {
+		return false, err
+	}
+	if err := os.Remove(tombstone); err != nil {
+		return false, err
+	}
+	if err := os.Rename(lock, tombstone); err != nil {
+		return false, nil
+	}
+	if err := os.RemoveAll(tombstone); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func releaseDisambiguationLock(lock string) {
+	parent := filepath.Dir(lock)
+	tombstone, err := os.MkdirTemp(parent, "."+filepath.Base(lock)+".release-")
+	if err != nil {
+		return
+	}
+	if err := os.Remove(tombstone); err != nil {
+		return
+	}
+	if err := os.Rename(lock, tombstone); err != nil {
+		return
+	}
+	_ = os.RemoveAll(tombstone)
+}
+
+func disambiguationCacheReason(reason, recovery string) string {
+	if recovery == "" {
+		return reason
+	}
+	if reason == "" {
+		return recovery
+	}
+	return reason + "; " + recovery
 }
 
 func disambiguationRelevant(paths []string) bool {
@@ -431,6 +566,9 @@ func readDisambiguationWitness(ctx context.Context, repo, tree string, setSubpha
 
 	key := disambiguationCacheKey(treeID)
 	w.CacheIdentity = key
+	stripe := &disambiguationCacheLockStripes[int(key[0])%len(disambiguationCacheLockStripes)]
+	stripe.Lock()
+	defer stripe.Unlock()
 	cacheRoot, cacheErr := disambiguationCacheRoot(repo)
 	if cacheErr != nil {
 		w.CacheState, w.CacheReason = "bypass", "git-common-dir-unavailable"
@@ -445,13 +583,26 @@ func readDisambiguationWitness(ctx context.Context, repo, tree string, setSubpha
 
 	lock := filepath.Join(cacheRoot, key+".lock")
 	setSubphase("cache-lock")
+	recoveryReason := ""
 	for {
-		if err := os.Mkdir(lock, 0700); err == nil {
-			break
-		} else if !errors.Is(err, os.ErrExist) {
+		acquired, err := tryAcquireDisambiguationLock(lock)
+		if err != nil {
 			w.CacheState, w.CacheReason = "bypass", "cache-lock-unavailable"
 			result, _ := computeDisambiguationWitness(ctx, repo, treeID, w, setSubphase)
 			return result
+		}
+		if acquired {
+			break
+		}
+		reclaimed, err := tryReclaimDisambiguationLock(cacheRoot, lock, key)
+		if err != nil {
+			w.CacheState, w.CacheReason = "bypass", "cache-lock-unavailable"
+			result, _ := computeDisambiguationWitness(ctx, repo, treeID, w, setSubphase)
+			return result
+		}
+		if reclaimed {
+			recoveryReason = "stale-owner-reclaimed"
+			continue
 		}
 		select {
 		case <-ctx.Done():
@@ -460,16 +611,16 @@ func readDisambiguationWitness(ctx context.Context, repo, tree string, setSubpha
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	defer os.Remove(lock)
+	defer releaseDisambiguationLock(lock)
 
 	cachePath := filepath.Join(cacheRoot, key+".json")
 	setSubphase("cache-read")
 	if cached, reason, ok := readCachedDisambiguation(cachePath, key); ok {
 		cached.Tree = tree
-		cached.CacheIdentity, cached.CacheState, cached.CacheReason = key, "hit", reason
+		cached.CacheIdentity, cached.CacheState, cached.CacheReason = key, "hit", disambiguationCacheReason(reason, recoveryReason)
 		return cached
 	} else {
-		w.CacheState, w.CacheReason = "miss", reason
+		w.CacheState, w.CacheReason = "miss", disambiguationCacheReason(reason, recoveryReason)
 	}
 
 	w, complete := computeDisambiguationWitness(ctx, repo, treeID, w, setSubphase)
