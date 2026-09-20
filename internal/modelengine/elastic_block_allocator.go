@@ -117,6 +117,10 @@ type ElasticBlockAllocator struct {
 
 	// Track free physical block IDs in this elastic allocator.
 	freeBlocks map[int]bool
+	// recycledBlocks is a LIFO ordering hint for released, non-cached blocks.
+	// Adapted from vLLM v1/core block-pool.py at revision
+	// 975dca5bb5db302077674cfa9afe851ee700ad73 (Apache-2.0).
+	recycledBlocks []int
 	// Track allocated physical block IDs to ensure ownership and invariant verification.
 	allocatedBlocks map[int]bool
 
@@ -283,11 +287,25 @@ func (a *ElasticBlockAllocator) AllocBlock(seqID string) (int, error) {
 		return -1, ErrAllocCapacityExceeded
 	}
 
-	// Pick a free block (deterministically lowest block ID)
-	var blkID int = -1
-	for id := range a.freeBlocks {
-		if blkID == -1 || id < blkID {
-			blkID = id
+	// Prefer the most recently released block. The free map remains authoritative:
+	// stale or retired ordering entries are discarded without allocation.
+	blkID := -1
+	for len(a.recycledBlocks) > 0 {
+		last := len(a.recycledBlocks) - 1
+		candidate := a.recycledBlocks[last]
+		a.recycledBlocks = a.recycledBlocks[:last]
+		if a.freeBlocks[candidate] {
+			blkID = candidate
+			break
+		}
+	}
+
+	// Blocks that have never been released retain deterministic lowest-ID order.
+	if blkID == -1 {
+		for id := range a.freeBlocks {
+			if blkID == -1 || id < blkID {
+				blkID = id
+			}
 		}
 	}
 	delete(a.freeBlocks, blkID)
@@ -330,8 +348,9 @@ func (a *ElasticBlockAllocator) releaseBlockLocked(blkID int) {
 		a.pool.Release(blkID)
 		a.currentTotal--
 	} else {
-		// Recycle into free set
+		// Recycle into the authoritative free set and record locality order.
 		a.freeBlocks[blkID] = true
+		a.recycledBlocks = append(a.recycledBlocks, blkID)
 	}
 }
 
@@ -413,6 +432,15 @@ func (a *ElasticBlockAllocator) reclaimFreeBlocksLocked() {
 		a.currentTotal--
 		needed--
 	}
+
+	// Retired IDs must not survive until a later expansion reuses their numbers.
+	kept := a.recycledBlocks[:0]
+	for _, id := range a.recycledBlocks {
+		if a.freeBlocks[id] {
+			kept = append(kept, id)
+		}
+	}
+	a.recycledBlocks = kept
 }
 
 func (a *ElasticBlockAllocator) checkDrainCompletionLocked() {
