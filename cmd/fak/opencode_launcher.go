@@ -276,6 +276,9 @@ func buildOpencodeLaunchArgv(fakBin string, o opencodeLaunchOptions) []string {
 	appendKV("--tokenizer", o.tokenizerPath)
 
 	argv = append(argv, "--", "opencode")
+	if childModel := strings.TrimPrefix(strings.TrimSpace(o.model), "fak/"); childModel != "" {
+		argv = append(argv, "--model", "fak/"+childModel)
+	}
 	if o.probePrompt != "" {
 		argv = append(argv, "run", o.probePrompt, "--format", "json")
 		if o.auto || o.skipPermissions {

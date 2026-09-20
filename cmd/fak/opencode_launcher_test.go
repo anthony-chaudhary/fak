@@ -100,12 +100,73 @@ func TestOpencodeLauncherOptions(t *testing.T) {
 		"--audit my-audit.jsonl",
 		"--quiet",
 		"--local",
-		"-- opencode run do task",
+		"-- opencode --model fak/glm-5.3-flash run do task",
 	}
 	for _, part := range expectedParts {
 		if !strings.Contains(line, part) {
 			t.Errorf("missing expected part %q in argv line: %s", part, line)
 		}
+	}
+}
+
+func TestOpencodeLauncherPinsChildModelOverProjectAgent(t *testing.T) {
+	tests := []struct {
+		name      string
+		opts      opencodeLaunchOptions
+		wantChild []string
+	}{
+		{
+			name: "interactive avoids double provider prefix and preserves passthrough",
+			opts: opencodeLaunchOptions{
+				splitMode: "off", splitWhere: "bottom",
+				model:       "fak/Qwen3.8-27B-UD-Q2_K_XL",
+				passthrough: []string{"--agent", "build"},
+			},
+			wantChild: []string{
+				"--model", "fak/Qwen3.8-27B-UD-Q2_K_XL", "--agent", "build",
+			},
+		},
+		{
+			name: "probe pins child before run and preserves passthrough",
+			opts: opencodeLaunchOptions{
+				splitMode: "off", splitWhere: "bottom", model: "Qwen3.8-27B-UD-Q2_K_XL",
+				probePrompt: "inspect repo", auto: true, pure: true,
+				passthrough: []string{"--log-level", "ERROR"},
+			},
+			wantChild: []string{
+				"--model", "fak/Qwen3.8-27B-UD-Q2_K_XL", "run", "inspect repo",
+				"--format", "json", "--auto", "--pure", "--log-level", "ERROR",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildOpencodeLaunchArgv("fak", tc.opts)
+			separator := -1
+			for i := 0; i+1 < len(got); i++ {
+				if got[i] == "--" && got[i+1] == "opencode" {
+					separator = i
+					break
+				}
+			}
+			if separator < 0 {
+				t.Fatalf("argv has no child boundary `-- opencode`: %#v", got)
+			}
+			child := got[separator+2:]
+			if strings.Join(child, "\x00") != strings.Join(tc.wantChild, "\x00") {
+				t.Fatalf("child argv = %#v, want %#v", child, tc.wantChild)
+			}
+			modelFlags := 0
+			for _, arg := range child {
+				if arg == "--model" {
+					modelFlags++
+				}
+			}
+			if modelFlags != 1 {
+				t.Fatalf("child argv has %d --model flags, want exactly one: %#v", modelFlags, child)
+			}
+		})
 	}
 }
 
