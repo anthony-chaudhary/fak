@@ -128,7 +128,43 @@ type v41ForwardState struct {
 	history []int
 	attn    *V41AttentionState
 	layers  []*V41AttentionState
+
+	// expertGateUp is the OPTIONAL device gate/up callback the session installs
+	// when its backend can run a routed expert's gate/up projections plus SwiGLU
+	// (the shared q4kExpertInputHAL operation from TICKET-05, bound in
+	// Session.v41State). When non-nil the MoE loop offers each pick to it first:
+	// on a handled result the I-wide fused intermediate comes from the device and
+	// only the existing host down contraction runs over it, so the gate/up f32
+	// weights are never materialized on the host. A nil callback (Model.Forward,
+	// a non-device session, or a backend the shared operation declines) preserves
+	// the historical host triple byte-for-byte.
+	expertGateUp v41ExpertGateUpFunc
 }
+
+// v41ExpertGateUpOutcome is the closed result vocabulary of one v41ExpertGateUpFunc
+// call. handled-success returns the I-wide fused intermediate for the existing host
+// down contraction; declined leaves the pick to the historical host gate/up/down
+// triple; handled-error is a SELECTED execution failure and must surface, never be
+// swallowed as a decline.
+type v41ExpertGateUpOutcome uint8
+
+const (
+	// v41GateUpDeclined: the shared device operation did not admit this expert, so
+	// the caller falls through to the host triple byte-for-byte.
+	v41GateUpDeclined v41ExpertGateUpOutcome = iota
+	// v41GateUpHandled: gate MatMul, up MatMul and SwiGLU all ran on the backend
+	// and the returned slice is the I-wide fused intermediate.
+	v41GateUpHandled
+	// v41GateUpError: a selected device execution failed; it must remain visible.
+	v41GateUpError
+)
+
+// v41ExpertGateUpFunc is the optional per-pick device gate/up operation. It
+// receives the routed expert's layer stem and the normalized input, and reports
+// one of the closed v41ExpertGateUpOutcome values. On v41GateUpHandled it returns
+// the I-wide fused intermediate (gate ⊙ silu, then SwiGLU) produced on the device
+// backend, sized to the expert intermediate width.
+type v41ExpertGateUpFunc func(layer int, stem string, xn []float32) ([]float32, v41ExpertGateUpOutcome, error)
 
 // v41ProjScratch is the per-forward REUSED materialization target for the two
 // grouped output projections (attn.wo_a.weight / attn.wo_b.weight), which the
@@ -1674,6 +1710,28 @@ func (m *Model) v41ExpertTripleInto(l int, stem string, scratch *v41ProjScratch)
 	return w1, w3, w2, nil
 }
 
+// hostExpertDown resolves ONLY the routed expert's down projection (w2) into the
+// reusable scratch buffer for the device gate/up seam (#13358): the gate and up
+// projections ran on the backend, so materializing them on the host is exactly
+// the uncharged f32 expansion this seam removes. It reuses the same
+// residency-complete, fail-closed resolution the full triple uses
+// (v41ExpertF32Into: resident stores first, then the R5 checkpoint tier), so a
+// projection present in neither still refuses with the same typed
+// ErrV41ForwardStage naming the tensor.
+func (m *Model) hostExpertDown(l int, stem string, scratch *v41ProjScratch) ([]float32, error) {
+	name := layerName(l, stem+".w2.weight")
+	if w, ok := scratch.v41LayerCacheGet(name); ok {
+		m.v41NoteExpertResidentHit()
+		return w, nil
+	}
+	w, rerr := m.v41ExpertF32Into(l, stem+".w2.weight", scratch.exp2)
+	if rerr != nil {
+		return nil, v41StageErr(v41StageMoE, l, rerr)
+	}
+	scratch.exp2 = w
+	return w, nil
+}
+
 // v41CacheExpertTriple retains copies of one expert's three f32 projections in
 // the layer-scoped cache (see v41ExpertTripleInto). Copies are required because
 // the scratch buffers are reused for the next expert; a cached slice returned
@@ -1902,7 +1960,10 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		historyLen := len(st.history)
 		st.history = append(st.history, ids...)
 		seq = st.history
-		runState = &v41ForwardState{history: seq}
+		// The step-local run state carries the session-owned device gate/up callback
+		// (#13358) so the MoE loop offers each pick to the device seam. It is not
+		// step-local continuation data and is never written back below.
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp}
 		defer func() {
 			if !committed {
 				st.history = st.history[:historyLen]
@@ -2453,6 +2514,35 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			routed := make([]float32, H)
 			for _, pick := range perTokenPicks[t] {
 				stem := "ffn.experts." + itoa(pick.expert)
+				// #13358: offer the pick to the session's optional device gate/up
+				// seam first. A handled result returns the I-wide fused intermediate
+				// from the backend, so the existing host down contraction below runs
+				// over it WITHOUT ever materializing the gate/up f32 weights. A
+				// decline (or no callback at all) keeps the historical host triple
+				// byte-for-byte. A selected device failure must surface.
+				if st != nil && st.expertGateUp != nil {
+					h, outcome, gerr := st.expertGateUp(l, stem, xn)
+					switch outcome {
+					case v41GateUpError:
+						return v41StageErr(v41StageMoE, l, gerr)
+					case v41GateUpHandled:
+						w2, err := m.hostExpertDown(l, stem, scratch)
+						if err != nil {
+							return err
+						}
+						contractOpen := m.v41NowNanos()
+						y := matRows(w2, h, H, cfg.MoEIntermediateSize)
+						if contractOpen != 0 {
+							m.v41NoteExpertContractionNanos(m.v41NowNanos() - contractOpen)
+						} else {
+							m.v41NoteExpertContraction()
+						}
+						for i := range routed {
+							routed[i] += pick.weight * y[i]
+						}
+						continue
+					}
+				}
 				w1, w3, w2, err := m.v41ExpertTripleInto(l, stem, scratch)
 				if err != nil {
 					return err
@@ -2640,12 +2730,46 @@ func (s *Session) stepV41(id int) []float32 {
 	return lastLogits(act)
 }
 
-// v41State lazily installs the session's V4.1 continuation state.
+// v41State lazily installs the session's V4.1 continuation state. When the
+// session's backend can run a routed expert's gate/up projections plus SwiGLU on
+// device (the shared q4kExpertInputHAL operation from TICKET-05), the state also
+// binds the optional device gate/up callback so the MoE loop can keep the gate/up
+// f32 weights off the host and feed the existing host down contraction. A
+// non-device session or a backend the shared operation declines leaves the
+// callback nil, preserving the historical host triple byte-for-byte.
 func (s *Session) v41State() *v41ForwardState {
 	if s.v41Forward == nil {
-		s.v41Forward = &v41ForwardState{}
+		s.v41Forward = &v41ForwardState{
+			expertGateUp: s.v41ExpertGateUpFunc(),
+		}
 	}
 	return s.v41Forward
+}
+
+// v41ExpertGateUpFunc binds the shared device gate/up operation (#13357) onto the
+// V4.1 session backend, or returns nil when the session has no device backend
+// that could execute it. It resolves the two gate/up projection names from the
+// routed expert stem exactly as the host triple does, runs the shared
+// q4kExpertInputHAL (which itself admits only bias-free SiLU experts whose gate
+// and up weights have a device representation the ACTUAL backend can serve), and
+// maps its (out, ok) result onto the closed outcome vocabulary. The helper's own
+// admission is the gate: a non-device backend, a GELU expert, a biased
+// projection, or an unservable dtype returns ok=false here as v41GateUpDeclined,
+// never a panic and never a silent host fallback.
+func (s *Session) v41ExpertGateUpFunc() v41ExpertGateUpFunc {
+	if s == nil || s.Backend == nil || s.M == nil || !s.Backend.Caps().DeviceMemory {
+		return nil
+	}
+	cfg := s.M.Cfg
+	return func(layer int, stem string, xn []float32) ([]float32, v41ExpertGateUpOutcome, error) {
+		gateName := layerName(layer, stem+".w1.weight")
+		upName := layerName(layer, stem+".w3.weight")
+		out, ok := q4kExpertInputHAL(s, gateName, upName, xn, cfg.MoEIntermediateSize, cfg.HiddenSize)
+		if !ok {
+			return nil, v41GateUpDeclined, nil
+		}
+		return out, v41GateUpHandled, nil
+	}
 }
 
 func lastLogits(act *Activations) []float32 {
