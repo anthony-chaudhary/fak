@@ -1,15 +1,19 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -27,13 +31,253 @@ import (
 
 // Receipts deliberately omit prompts, provider responses and credentials.
 type opsRunReceipt struct {
-	Schema    string                  `json:"schema"`
-	Harness   string                  `json:"harness"`
-	Status    string                  `json:"status"`
-	ExitCode  int                     `json:"exit_code"`
-	Started   time.Time               `json:"started_at"`
-	Finished  time.Time               `json:"finished_at"`
-	Lifecycle []opsRunLifecycleRecord `json:"lifecycle,omitempty"`
+	Schema             string                           `json:"schema"`
+	Harness            string                           `json:"harness"`
+	Status             string                           `json:"status"`
+	ExitCode           int                              `json:"exit_code"`
+	Started            time.Time                        `json:"started_at"`
+	Finished           time.Time                        `json:"finished_at"`
+	Lifecycle          []opsRunLifecycleRecord          `json:"lifecycle,omitempty"`
+	InferencePreflight *opsRunInferencePreflightReceipt `json:"inference_preflight,omitempty"`
+}
+
+const (
+	opsRunInferencePreflightSchema = "fak.ops-run.inference-preflight.v1"
+	opsRunInferenceProbeTool       = "fak_inference_preflight"
+	opsRunInferenceProbeTTL        = time.Minute
+	opsRunInferenceProbeTimeout    = 5 * time.Second
+	opsRunInferenceProbeMaxBytes   = 256 * 1024
+)
+
+type opsRunInferencePreflightReceipt struct {
+	Schema     string `json:"schema"`
+	ReceiptRef string `json:"receipt_ref"`
+	Status     string `json:"status"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+type opsRunInferenceProbeCacheEntry struct {
+	RecordedAt time.Time
+	Receipt    opsRunInferencePreflightReceipt
+	Failure    string
+}
+
+var opsRunInferenceProbeCache = struct {
+	sync.Mutex
+	entries map[string]opsRunInferenceProbeCacheEntry
+}{entries: make(map[string]opsRunInferenceProbeCacheEntry)}
+
+func opsRunInferencePreflight(ctx context.Context, baseURL, model string) (opsRunInferencePreflightReceipt, error) {
+	configSum := sha256.Sum256([]byte(strings.TrimSpace(baseURL) + "\x00" + strings.TrimSpace(model)))
+	cacheKey := hex.EncodeToString(configSum[:])
+	now := time.Now().UTC()
+
+	// Holding the lock across the one bounded request is deliberate: concurrent
+	// launches with identical configuration share one witnessed probe per TTL.
+	opsRunInferenceProbeCache.Lock()
+	defer opsRunInferenceProbeCache.Unlock()
+	if cached, ok := opsRunInferenceProbeCache.entries[cacheKey]; ok && now.Sub(cached.RecordedAt) < opsRunInferenceProbeTTL {
+		if cached.Failure != "" {
+			return cached.Receipt, errors.New(cached.Failure)
+		}
+		return cached.Receipt, nil
+	}
+
+	reason := opsRunProbeInferenceRoute(ctx, baseURL, model)
+	status := "qualified"
+	if reason != "" {
+		status = "failed"
+	}
+	refSum := sha256.Sum256([]byte(opsRunInferencePreflightSchema + "\x00" + cacheKey + "\x00" + status + "\x00" + reason))
+	receipt := opsRunInferencePreflightReceipt{
+		Schema:     opsRunInferencePreflightSchema,
+		ReceiptRef: "sha256:" + hex.EncodeToString(refSum[:]),
+		Status:     status,
+		Reason:     reason,
+	}
+	opsRunInferenceProbeCache.entries[cacheKey] = opsRunInferenceProbeCacheEntry{RecordedAt: now, Receipt: receipt, Failure: reason}
+	if reason != "" {
+		return receipt, errors.New(reason)
+	}
+	return receipt, nil
+}
+
+func opsRunInferenceRefusal(provider, baseURL, model, reason string) opsRunInferencePreflightReceipt {
+	configSum := sha256.Sum256([]byte(strings.TrimSpace(provider) + "\x00" + strings.TrimSpace(baseURL) + "\x00" + strings.TrimSpace(model)))
+	refSum := sha256.Sum256([]byte(opsRunInferencePreflightSchema + "\x00" + hex.EncodeToString(configSum[:]) + "\x00failed\x00" + reason))
+	return opsRunInferencePreflightReceipt{
+		Schema:     opsRunInferencePreflightSchema,
+		ReceiptRef: "sha256:" + hex.EncodeToString(refSum[:]),
+		Status:     "failed",
+		Reason:     reason,
+	}
+}
+
+func failOpsRunInferencePreflight(stderr io.Writer, receiptPath string, receipt opsRunReceipt, preflight opsRunInferencePreflightReceipt) int {
+	receipt.InferencePreflight = &preflight
+	receipt.Status = "failed"
+	receipt.ExitCode = 1
+	receipt.Finished = time.Now().UTC()
+	if err := writeOpsRunReceipt(receiptPath, receipt); err != nil {
+		fmt.Fprintf(stderr, "ops run: write receipt: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stderr, "ops run: inference preflight: %s\n", preflight.Reason)
+	return 1
+}
+
+func opsRunProbeInferenceRoute(ctx context.Context, baseURL, model string) string {
+	endpoint, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || endpoint.Scheme == "" || endpoint.Host == "" {
+		return "invalid_endpoint"
+	}
+	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/chat/completions"
+	endpoint.RawQuery = ""
+	endpoint.Fragment = ""
+	payload := map[string]any{
+		"model":  model,
+		"stream": true,
+		"messages": []map[string]string{{
+			"role":    "user",
+			"content": "Return exactly one fak_inference_preflight tool call with {\"ok\":true}; do not execute any tool.",
+		}},
+		"tools": []map[string]any{{
+			"type": "function",
+			"function": map[string]any{
+				"name":        opsRunInferenceProbeTool,
+				"description": "Non-mutating inference route readiness witness.",
+				"parameters": map[string]any{
+					"type":       "object",
+					"properties": map[string]any{"ok": map[string]string{"type": "boolean"}},
+					"required":   []string{"ok"},
+				},
+			},
+		}},
+		"tool_choice": map[string]any{"type": "function", "function": map[string]string{"name": opsRunInferenceProbeTool}},
+		"max_tokens":  32,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "request_encoding"
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, opsRunInferenceProbeTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
+	if err != nil {
+		return "request_build"
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		if requestCtx.Err() != nil {
+			return "timeout"
+		}
+		return "transport"
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Sprintf("http_status_%d", resp.StatusCode)
+	}
+	if !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		return "malformed_sse"
+	}
+
+	type streamedToolCall struct {
+		ID        string
+		Type      string
+		Name      string
+		Arguments strings.Builder
+	}
+	toolCalls := make(map[int]*streamedToolCall)
+	seenModel, finishReason, done := false, "", false
+	limited := io.LimitReader(resp.Body, opsRunInferenceProbeMaxBytes+1)
+	scanner := bufio.NewScanner(limited)
+	scanner.Buffer(make([]byte, 4096), opsRunInferenceProbeMaxBytes+1)
+	readBytes := 0
+	for scanner.Scan() {
+		line := scanner.Text()
+		readBytes += len(line) + 1
+		if readBytes > opsRunInferenceProbeMaxBytes {
+			return "response_too_large"
+		}
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "[DONE]" {
+			done = true
+			continue
+		}
+		var chunk struct {
+			Model   string `json:"model"`
+			Choices []struct {
+				Delta struct {
+					ToolCalls []struct {
+						Index    int    `json:"index"`
+						ID       string `json:"id"`
+						Type     string `json:"type"`
+						Function struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						} `json:"function"`
+					} `json:"tool_calls"`
+				} `json:"delta"`
+				FinishReason string `json:"finish_reason"`
+			} `json:"choices"`
+		}
+		if data == "" || json.Unmarshal([]byte(data), &chunk) != nil || len(chunk.Choices) == 0 {
+			return "malformed_sse"
+		}
+		if chunk.Model != "" {
+			if chunk.Model != model {
+				return "model_mismatch"
+			}
+			seenModel = true
+		}
+		for _, choice := range chunk.Choices {
+			if choice.FinishReason != "" {
+				finishReason = choice.FinishReason
+			}
+			for _, delta := range choice.Delta.ToolCalls {
+				call := toolCalls[delta.Index]
+				if call == nil {
+					call = &streamedToolCall{}
+					toolCalls[delta.Index] = call
+				}
+				if delta.ID != "" {
+					call.ID = delta.ID
+				}
+				if delta.Type != "" {
+					call.Type = delta.Type
+				}
+				if delta.Function.Name != "" {
+					call.Name = delta.Function.Name
+				}
+				call.Arguments.WriteString(delta.Function.Arguments)
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		if requestCtx.Err() != nil {
+			return "timeout"
+		}
+		return "malformed_sse"
+	}
+	if !done || !seenModel || finishReason != "tool_calls" || len(toolCalls) != 1 {
+		return "incomplete_sse"
+	}
+	call := toolCalls[0]
+	if call == nil || call.ID == "" || call.Type != "function" || call.Name != opsRunInferenceProbeTool {
+		return "malformed_tool_call"
+	}
+	var arguments struct {
+		OK bool `json:"ok"`
+	}
+	if json.Unmarshal([]byte(call.Arguments.String()), &arguments) != nil || !arguments.OK {
+		return "malformed_tool_call"
+	}
+	return ""
 }
 
 const maxOpsRunLifecycleRecords = 16
@@ -245,6 +489,25 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 		return sigCtx.Err() != nil
 	})
 	receipt := opsRunReceipt{Schema: "fak-ops-run/1", Harness: *harness, Status: "running", Started: time.Now().UTC()}
+	if err := writeOpsRunReceipt(*receiptPath, receipt); err != nil {
+		fmt.Fprintf(stderr, "ops run: write receipt: %v\n", err)
+		return 1
+	}
+	if *provider != "openai" {
+		preflight := opsRunInferenceRefusal(*provider, *baseURL, *model, "unsupported_provider_protocol")
+		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
+	}
+	if strings.TrimSpace(*baseURL) == "" {
+		preflight := opsRunInferenceRefusal(*provider, *baseURL, *model, "missing_explicit_base_url")
+		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
+	}
+	preflight, err := opsRunInferencePreflight(ctx, *baseURL, *model)
+	receipt.InferencePreflight = &preflight
+	if err != nil {
+		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
+	}
+	// Persist the qualifying reference before launch. A receipt write failure
+	// cannot produce an unqualified child process.
 	if err := writeOpsRunReceipt(*receiptPath, receipt); err != nil {
 		fmt.Fprintf(stderr, "ops run: write receipt: %v\n", err)
 		return 1

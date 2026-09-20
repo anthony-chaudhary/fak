@@ -5,16 +5,178 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestOpsRunInferencePreflight(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		statusCode int
+		malformed  bool
+		timeout    bool
+		wantLaunch bool
+		invokes    int
+	}{
+		{name: "unauthorized_prevents_child_launch", statusCode: http.StatusUnauthorized, invokes: 1},
+		{name: "rate_limit_prevents_child_launch", statusCode: http.StatusTooManyRequests, invokes: 1},
+		{name: "unavailable_prevents_child_launch", statusCode: http.StatusServiceUnavailable, invokes: 1},
+		{name: "malformed_stream_prevents_child_launch", statusCode: http.StatusOK, malformed: true, invokes: 1},
+		{name: "timeout_prevents_child_launch", statusCode: http.StatusOK, timeout: true, invokes: 1},
+		{name: "qualified_gateway_proceeds_and_reuses_probe", statusCode: http.StatusOK, wantLaunch: true, invokes: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var probes atomic.Int32
+			gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				probes.Add(1)
+				if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
+					t.Errorf("probe = %s %s, want POST /v1/chat/completions", r.Method, r.URL.Path)
+				}
+				var req struct {
+					Model  string `json:"model"`
+					Stream bool   `json:"stream"`
+					Tools  []struct {
+						Type     string `json:"type"`
+						Function struct {
+							Name string `json:"name"`
+						} `json:"function"`
+					} `json:"tools"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Errorf("decode probe request: %v", err)
+				}
+				if req.Model != "fixture" || !req.Stream || len(req.Tools) != 1 || req.Tools[0].Type != "function" || req.Tools[0].Function.Name == "" {
+					t.Errorf("probe request did not bind intended model + streamed tool-call witness: %+v", req)
+				}
+				if tc.statusCode != http.StatusOK {
+					http.Error(w, "unavailable", tc.statusCode)
+					return
+				}
+				if tc.timeout {
+					time.Sleep(100 * time.Millisecond)
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				if tc.malformed {
+					_, _ = io.WriteString(w, "data: {not-json}\n\n")
+					return
+				}
+				chunk, err := json.Marshal(map[string]any{
+					"id": "preflight", "object": "chat.completion.chunk", "model": "fixture",
+					"choices": []any{map[string]any{
+						"delta": map[string]any{"tool_calls": []any{map[string]any{
+							"index": 0, "id": "call_preflight", "type": "function",
+							"function": map[string]any{"name": req.Tools[0].Function.Name, "arguments": "{\"ok\":true}"},
+						}}},
+						"finish_reason": "tool_calls",
+					}},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, _ = io.WriteString(w, "data: "+string(chunk)+"\n\n")
+				_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			}))
+			defer gateway.Close()
+
+			dir := t.TempDir()
+			prompt := filepath.Join(dir, "prompt.txt")
+			if err := os.WriteFile(prompt, []byte("private prompt\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+
+			old := opsRunExecute
+			t.Cleanup(func() { opsRunExecute = old })
+			var launches atomic.Int32
+			opsRunExecute = func(context.Context, io.Writer, io.Writer, []string, []string, []byte) (int, bool, bool, []opsRunLifecycleRecord) {
+				launches.Add(1)
+				return 0, true, false, nil
+			}
+
+			var code int
+			for i := 0; i < tc.invokes; i++ {
+				receipt := filepath.Join(dir, fmt.Sprintf("receipt-%d.json", i))
+				args := []string{"--prompt-file", prompt, "--receipt", receipt, "--model", "fixture", "--provider", "openai", "--base-url", gateway.URL + "/v1"}
+				if tc.timeout {
+					args = append(args, "--timeout", "20ms")
+				}
+				code = runOpsRun(io.Discard, io.Discard, args)
+
+				data, err := os.ReadFile(receipt)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var got struct {
+					InferencePreflight struct {
+						ReceiptRef string `json:"receipt_ref"`
+					} `json:"inference_preflight"`
+				}
+				if err := json.Unmarshal(data, &got); err != nil {
+					t.Fatal(err)
+				}
+				if got.InferencePreflight.ReceiptRef == "" {
+					t.Fatalf("receipt missing inference_preflight.receipt_ref: %s", data)
+				}
+			}
+			if probes.Load() != 1 {
+				t.Fatalf("inference preflight probes = %d, want exactly 1 across %d unchanged invocation(s)", probes.Load(), tc.invokes)
+			}
+			wantLaunches := int32(0)
+			if tc.wantLaunch {
+				wantLaunches = int32(tc.invokes)
+			}
+			if launches.Load() != wantLaunches {
+				t.Fatalf("child launches = %d, want %d (exit=%d)", launches.Load(), wantLaunches, code)
+			}
+			if tc.wantLaunch != (code == 0) {
+				t.Fatalf("exit = %d, want success=%v", code, tc.wantLaunch)
+			}
+		})
+	}
+
+	for _, provider := range []string{"openai", "gemini"} {
+		t.Run(provider+"_without_explicit_route_fails_closed", func(t *testing.T) {
+			dir := t.TempDir()
+			prompt := filepath.Join(dir, "prompt.txt")
+			receipt := filepath.Join(dir, "receipt.json")
+			if err := os.WriteFile(prompt, []byte("private prompt\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if provider == "gemini" {
+				t.Setenv("FAK_OPS_GEMINI_TEST_KEY", "fixture-only")
+			}
+
+			old := opsRunExecute
+			t.Cleanup(func() { opsRunExecute = old })
+			var launches atomic.Int32
+			opsRunExecute = func(context.Context, io.Writer, io.Writer, []string, []string, []byte) (int, bool, bool, []opsRunLifecycleRecord) {
+				launches.Add(1)
+				return 0, true, false, nil
+			}
+
+			args := []string{"--prompt-file", prompt, "--receipt", receipt, "--model", "fixture", "--provider", provider}
+			if provider == "gemini" {
+				args = append(args, "--api-key-env", "FAK_OPS_GEMINI_TEST_KEY")
+			}
+			if code := runOpsRun(io.Discard, io.Discard, args); code == 0 {
+				t.Fatalf("%s without an explicit qualified route returned success", provider)
+			}
+			if launches.Load() != 0 {
+				t.Fatalf("%s without an explicit qualified route bypassed preflight and launched child %d time(s)", provider, launches.Load())
+			}
+		})
+	}
+}
 
 func TestOpsRunGuardedReceipt(t *testing.T) {
 	dir := t.TempDir()
