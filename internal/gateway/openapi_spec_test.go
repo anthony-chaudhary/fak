@@ -130,6 +130,148 @@ func TestOpenAPISpecDocumentsEveryServedRoute(t *testing.T) {
 	}
 }
 
+// TestNativeTokenizeOpenAPIContract is the focused schema-first witness for
+// fak#13382: it declares the shipped `POST /v1/fak/tokenize` wire in the
+// committed OpenAPI document WITHOUT registering a served route.
+//
+// It proves the declaration is complete and honest:
+//   - the path exists and documents POST (the shipped `fak up` method);
+//   - the request schema fixes the 1 MiB body bound;
+//   - the response schema declares the identity fields, the exact token
+//     IDs/count, and the rendered-prompt hash;
+//   - the source prompt text is never echoed by the declared response; and
+//   - the ordinary-serving adapter subset is declared as its own fence.
+//
+// routeTable() must remain UNCHANGED: schema-first means the contract lands
+// before the route, and gateway invokability is tracked separately (#13389).
+// TestServedRouteMappingIsExhaustive/TestOpenAPISpecDocumentsEveryServedRoute
+// stay green because the extra path is a permitted addition, not a served one.
+func TestNativeTokenizeOpenAPIContract(t *testing.T) {
+	raw, err := os.ReadFile(filepath.FromSlash(openAPISpecPath))
+	if err != nil {
+		t.Fatalf("read %s: %v", openAPISpecPath, err)
+	}
+	spec := string(raw)
+
+	// The path and method are declared, matching the shipped `fak up` wire.
+	if !specHasPathKey(spec, "/v1/fak/tokenize") {
+		t.Fatalf("docs/fak/openapi.yaml does not declare the /v1/fak/tokenize path")
+	}
+	if !specDeclaresPostForPath(spec, "/v1/fak/tokenize") {
+		t.Errorf("docs/fak/openapi.yaml declares /v1/fak/tokenize but not a POST operation")
+	}
+
+	// The request schema is declared, fixes the 1 MiB bound, and is wired to
+	// the path's requestBody.
+	for _, want := range []string{
+		"NativeTokenizeRequest:",
+		"1 MiB",
+		"'#/components/schemas/NativeTokenizeRequest'",
+	} {
+		if !strings.Contains(spec, want) {
+			t.Errorf("docs/fak/openapi.yaml is missing %q for the native tokenize request", want)
+		}
+	}
+
+	// The response schema is declared and wires the path's 200 response.
+	if !strings.Contains(spec, "PromptEncoding:") {
+		t.Errorf("docs/fak/openapi.yaml is missing the PromptEncoding schema")
+	}
+	if !strings.Contains(spec, "'#/components/schemas/PromptEncoding'") {
+		t.Errorf("docs/fak/openapi.yaml does not reference PromptEncoding from the tokenize 200 response")
+	}
+
+	// The response declares the identity fields, exact token IDs/count, and the
+	// rendered hash — and declares that the source prompt is never echoed.
+	promptEncoding := specSchemaBlock(spec, "PromptEncoding")
+	if promptEncoding == "" {
+		t.Fatalf("PromptEncoding schema block not found")
+	}
+	for _, field := range []string{
+		"model_id:", "renderer_id:", "tokenizer_id:",
+		"token_ids:", "prompt_tokens:",
+		"context_window_tokens:", "reserved_output_tokens:",
+		"rendered_sha256:",
+	} {
+		if !strings.Contains(promptEncoding, field) {
+			t.Errorf("PromptEncoding schema does not declare %q", field)
+		}
+	}
+	if !strings.Contains(promptEncoding, "equals `len(token_ids)`") {
+		t.Errorf("PromptEncoding must tie prompt_tokens to the exact len(token_ids)")
+	}
+	if !strings.Contains(promptEncoding, "NEVER echoed") {
+		t.Errorf("PromptEncoding must declare that the source prompt text is never echoed")
+	}
+
+	// The ordinary-serving adapter subset is declared as its own fence.
+	req := specSchemaBlock(spec, "NativeTokenizeRequest")
+	if !strings.Contains(req, "ordinary-serving adapter subset") {
+		t.Errorf("NativeTokenizeRequest must declare the ordinary-serving adapter subset")
+	}
+
+	// The leaf is schema-first: it must NOT register the route. A served route
+	// without a specPathFor entry fails the sibling exhaustiveness test.
+	for _, rt := range (&Server{}).routeTable() {
+		if rt.pattern == "/v1/fak/tokenize" {
+			t.Errorf("routeTable() registers /v1/fak/tokenize; #13382 is schema-only (registration is #13389)")
+		}
+	}
+}
+
+// specDeclaresPostForPath reports whether the OpenAPI document declares a POST
+// operation under the given path key. It scans for the path key line and then,
+// before the next sibling path key, looks for an operation line `post:`.
+func specDeclaresPostForPath(spec, path string) bool {
+	lines := strings.Split(spec, "\n")
+	inPath := false
+	for _, line := range lines {
+		key := strings.TrimSpace(line)
+		trimmed := strings.Trim(strings.TrimSuffix(key, ":"), "'\"")
+		switch {
+		case trimmed == path && strings.HasSuffix(key, ":"):
+			inPath = true
+		case inPath && strings.HasPrefix(key, "/") && strings.HasSuffix(key, ":"):
+			// Reached the next sibling path key without finding POST.
+			return false
+		case inPath && key == "post:":
+			return true
+		}
+	}
+	return false
+}
+
+// specSchemaBlock returns the text of a components/schemas block (from its
+// `Name:` line up to the next schema at the same indentation), or "" if absent.
+func specSchemaBlock(spec, name string) string {
+	lines := strings.Split(spec, "\n")
+	start := -1
+	for i, line := range lines {
+		if strings.TrimSpace(line) == name+":" {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return ""
+	}
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed == "" {
+			continue
+		}
+		// A sibling schema is indented exactly like the schema name line.
+		if len(lines[i])-len(strings.TrimLeft(lines[i], " ")) ==
+			len(lines[start])-len(strings.TrimLeft(lines[start], " ")) &&
+			strings.HasSuffix(trimmed, ":") {
+			end = i
+			break
+		}
+	}
+	return strings.Join(lines[start:end], "\n")
+}
+
 // specHasPathKey reports whether the OpenAPI document declares path as a mapping
 // key (i.e. a `paths:` entry). It deliberately avoids a YAML dependency (the repo
 // is zero-dep): a path key is the only "/"-leading mapping key in the document,

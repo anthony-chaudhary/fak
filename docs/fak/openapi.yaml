@@ -767,6 +767,82 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /v1/fak/tokenize:
+    post:
+      tags: [fak-native]
+      summary: Native prompt preparation (tokenize without decode)
+      description: |
+        Returns the EXACT native prompt representation the model would consume for
+        a given body, WITHOUT running prefill or decode. It is the preparation oracle
+        the long-context Strix Halo performance benchmarks size their rendered
+        prompts against, so a measured rate is bound to a real prepared prompt
+        rather than a lexical approximation.
+
+        This documents the protocol `fak up` already serves
+        (`cmd/fak/up_tokenize.go`, backed by `InKernelPlanner.EncodePrompt`). Ordinary
+        `fak serve` does NOT yet register this route; declaring it here freezes the
+        wire contract first so the served registration can land without a second
+        protocol. Invokability on `fak serve` is tracked separately.
+
+        The response echoes the token IDs/count and the tokenizer/renderer/model
+        identities plus the rendered-prompt SHA-256, so preparation can be attested
+        and later matched against a native receipt. The rendered source prompt text
+        is never echoed.
+      parameters:
+        - $ref: '#/components/parameters/XTraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NativeTokenizeRequest' }
+            example:
+              model: qwen3.8-27b
+              messages: [{ role: user, content: "Say hello." }]
+      responses:
+        '200':
+          description: The exact prepared prompt. `prompt_tokens` equals the length of `token_ids`; `rendered_sha256` hashes the rendered prompt that `token_ids` encode, and the source prompt text is never returned.
+          headers:
+            X-Trace-Id: { $ref: '#/components/headers/XTraceIdResp' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PromptEncoding' }
+              example:
+                model_id: qwen3.8-27b
+                renderer_id: qwen-chatml-v1:no-thinking
+                tokenizer_id: qwen3.8-bpe-v1
+                token_ids: [151644, 8948, 198]
+                prompt_tokens: 3
+                context_window_tokens: 262144
+                reserved_output_tokens: 512
+                rendered_sha256: 9f2c1b7e6f1c0a4d2e5b8a3c7d1f0e9a6b4c8d2f5a1e3b7c9d0f2a4b6c8e0d1f
+        '400':
+          description: Malformed body, a trailing JSON value, or a `model` that does not match the loaded native model (`invalid_request_error` / code `model_mismatch`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '415':
+          description: A body larger than the 1 MiB endpoint limit is refused before decoding; escaping/overhead counts against the limit, so a corpus that fits only before encoding is still refused.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '500':
+          description: The encoder produced an identity that disagrees with the loaded native model.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '501':
+          description: No native prompt encoder is attached (mock or non-encoding planner); returned as `native prompt encoding unavailable`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '503':
+          description: The server is shutting down and is not accepting new preparation requests.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
   /v1/fak/changes:
     get:
       tags: [fak-native]
@@ -3172,6 +3248,58 @@ components:
               finish_reason: { type: string, description: '`tool_calls` when a call survived; `stop` otherwise.' }
         usage: { $ref: '#/components/schemas/Usage' }
         fak: { $ref: '#/components/schemas/FakExt' }
+
+    NativeTokenizeRequest:
+      type: object
+      required: [messages]
+      description: |
+        The request body for native prompt preparation. It is the SAME OpenAI chat body
+        shape `fak up` parses (`gateway.ChatRequest`), so a client can prepare a prompt
+        with the exact bytes it will later send to `/v1/chat/completions`.
+
+        The ordinary-serving adapter subset this route declares is deliberately narrow:
+        one stateless plain user message. `tools`, `tool_choice`, `response_format`,
+        and continue/session/input-trigger shapes are not part of the declared adapter
+        and are refused before any transform. Unknown OpenAI fields are accepted and
+        ignored, exactly as on `/v1/chat/completions`.
+      properties:
+        model: { type: string, description: 'Optional; when set it must equal the served model or the request is refused with code `model_mismatch`.' }
+        messages:
+          type: array
+          description: 'The conversation to prepare. The declared adapter subset is exactly one plain `role: "user"` message with string content.'
+          items: { type: object, additionalProperties: true }
+        tools:
+          type: array
+          items: { type: object, additionalProperties: true }
+        max_tokens: { type: integer, description: Sizes the reserved-output headroom; forwarded into the preparation. }
+        temperature: { type: number, format: float }
+        top_p: { type: number, format: float }
+        stop:
+          description: A bare string OR an array of strings (either shape accepted).
+      x-max-body-bytes:
+        type: integer
+        description: The endpoint refuses a request body larger than 1 MiB (1048576 bytes) BEFORE decoding; escaping and envelope overhead count against the limit, so a corpus that only fits before encoding is still refused.
+
+    PromptEncoding:
+      type: object
+      description: |
+        The exact native prompt representation the model would consume — returned WITHOUT
+        running prefill or decode. `prompt_tokens` equals the length of `token_ids`, and
+        `rendered_sha256` hashes the rendered prompt that `token_ids` encode. The rendered
+        source prompt text is NEVER echoed.
+      required: [model_id, renderer_id, tokenizer_id, token_ids, prompt_tokens, context_window_tokens, reserved_output_tokens, rendered_sha256]
+      properties:
+        model_id: { type: string, description: The loaded native model identity; always equals the served model. }
+        renderer_id: { type: string, description: The chat-template renderer identity (e.g. `qwen-chatml-v1:no-thinking`). }
+        tokenizer_id: { type: string, description: The tokenizer identity whose BPE produced `token_ids`. }
+        token_ids:
+          type: array
+          items: { type: integer }
+          description: The exact token ids; its length equals `prompt_tokens`.
+        prompt_tokens: { type: integer, description: 'The exact prepared prompt length in tokens; equals `len(token_ids)`.' }
+        context_window_tokens: { type: integer, description: The served context window the prompt is sized against. }
+        reserved_output_tokens: { type: integer, description: Output headroom reserved for the generation that will follow. }
+        rendered_sha256: { type: string, description: SHA-256 over the rendered prompt that `token_ids` encode; attests preparation so it can be matched against a later native receipt. }
 
     CompletionRequest:
       type: object
