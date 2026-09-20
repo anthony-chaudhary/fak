@@ -305,6 +305,48 @@ type AdmissionDecisionReceipt struct {
 	Reservations []AdmissionReservation
 }
 
+// reservationObservationHistory is the fixed bound on retained reservation lifecycle
+// observations — the advisory readback never grows unboundedly (#13388), mirroring the
+// admissionDecisionHistory ring above.
+const reservationObservationHistory = 64
+
+// ReservationObservation is the bounded readback of ONE reservation lifecycle event
+// observed while driving the scheduler's advisory known-coming scan from the served
+// admission path. It is observability only: it never grants capacity or authorizes
+// memory access, and it never claims a verified cache hit.
+type ReservationObservation struct {
+	// TraceID is the hinted session's trace id, as the scheduler's table reports it.
+	TraceID string
+	// Prefix is the exact KV prefix identity the advisory reservation holds.
+	Prefix string
+	// Generation is a monotonic per-controller identity for this (trace, prefix),
+	// incremented on every create so create→expire→re-create is distinguishable.
+	Generation uint64
+	// Action is the lifecycle token: "created" | "expired" | "canceled".
+	Action string
+	// Reason is a non-empty human-readable token for the transition.
+	Reason string
+	// At is the ONE captured scan time for the round; every observation minted in the
+	// same round shares this identical value.
+	At time.Time
+}
+
+// trackedReservation is the controller's retained prior-state record for one (trace,
+// prefix) pair, so a later round can detect the created / expired / re-created
+// transitions without re-minting a "created" for a hold that never lapsed. A hold's
+// identity is its (trace, prefix); the generation is minted once per distinct hold and
+// survives unrelated table writes.
+type trackedReservation struct {
+	// sourceRev is the table revision the live hold was minted from, retained as
+	// readback provenance (the lifecycle decision itself keys on the expiry boundary).
+	sourceRev  uint64
+	generation uint64
+	// expiresAtUnixNano is the tracked hold's expiry boundary: while it is in the
+	// future the hold is live (an unchanged hint mints nothing), and once it passes
+	// the same scan reports an "expired" reclaim before re-creating.
+	expiresAtUnixNano int64
+}
+
 // AdmissionController is the admission/priority/fairness gate over the native loop. The
 // zero value is not usable — build one with NewAdmissionController. It is safe for
 // concurrent use (the gateway request path and the loop both touch it).
@@ -329,6 +371,20 @@ type AdmissionController struct {
 	// admissionDecisionHistory entries), guarded by mu like every other controller field.
 	decisions     map[string]AdmissionDecisionReceipt
 	decisionOrder []string // FIFO of retained trace ids; len ≤ admissionDecisionHistory
+	// reservationObs retains the most recent advisory reservation lifecycle events
+	// (bounded ring of reservationObservationHistory entries, oldest-first), and
+	// reservationTracked is the prior (trace, prefix) → {sourceRev, generation} state the
+	// next scan compares against so an unchanged hint never re-mints a "created".
+	// reservationGen is the monotonic per-controller generation counter. All are guarded
+	// by mu like every other controller field; NONE of them affects admission capacity.
+	reservationObs     []ReservationObservation
+	reservationTracked map[string]trackedReservation
+	reservationGen     uint64
+}
+
+// reservationKey builds the (trace, prefix) identity the reservation readback is keyed on.
+func reservationKey(traceID, prefix string) string {
+	return traceID + "\x00" + prefix
 }
 
 // waitEntry is one queued request plus the round it was enqueued, so aging can measure
@@ -483,6 +539,169 @@ func (c *AdmissionController) LastAdmissionDecision(traceID string) (AdmissionDe
 	}
 	rec.Reservations = append([]AdmissionReservation(nil), rec.Reservations...)
 	return rec, true
+}
+
+// ReservationObservations returns a copy of the retained advisory reservation lifecycle
+// observations (oldest-first, bounded by reservationObservationHistory). It is the
+// observability readback of the served path's drive of the scheduler's known-coming scan;
+// a nil controller yields nil. The caller cannot mutate controller state.
+func (c *AdmissionController) ReservationObservations() []ReservationObservation {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]ReservationObservation(nil), c.reservationObs...)
+}
+
+// recordReservationObservationLocked appends one lifecycle observation to the bounded ring,
+// evicting the oldest once the ring is at its fixed bound. Caller holds c.mu.
+func (c *AdmissionController) recordReservationObservationLocked(o ReservationObservation) {
+	if len(c.reservationObs) >= reservationObservationHistory {
+		copy(c.reservationObs, c.reservationObs[1:])
+		c.reservationObs = c.reservationObs[:len(c.reservationObs)-1]
+	}
+	c.reservationObs = append(c.reservationObs, o)
+}
+
+// scanReservationsLocked drives the scheduler's advisory known-coming scan from the served
+// admission round and records the bounded lifecycle readback. It captures the round's time
+// EXACTLY ONCE — passing that same value to ReserveKnownComing and using it as every
+// observation's At, so every event minted this round shares one identical timestamp:
+//
+//   - a (trace, prefix) the scan now holds for the first time, or under a source revision
+//     that differs from the tracked one, mints ONE "created" observation for a fresh
+//     generation. When a prior generation was tracked, it is retired first — as "expired"
+//     when its hold was reclaimed at its expiry boundary (or superseded under a newer
+//     revision), so a create→expire→re-create is distinguishable;
+//   - an unchanged (trace, prefix) under the SAME source revision and a still-live expiry
+//     mints nothing, so a repeated scan of a steady hint never duplicates a "created";
+//   - a (trace, prefix) the controller tracked but the scan no longer reports is retired:
+//     "expired" when the table still carries the same live hint (the hold was reclaimed at
+//     its grace boundary), "canceled" when the hint vanished from the table (WillDiscard, a
+//     cleared / changed intent, or a reclaimed prefix) before it ever arrived.
+//
+// A terminal hint (WillDiscard, empty Prefix, or non-positive ArrivingInMillis) never
+// becomes a reservation, so it is never tracked and never observed.
+//
+// It is observability only: it never promotes a reservation (no PromoteReservation), never
+// touches capacity, the running set, the token gauges, or the waiting queue, and with no
+// bound table or scheduler it records nothing rather than fabricating a hold. Caller holds
+// c.mu.
+func (c *AdmissionController) scanReservationsLocked() {
+	if c.scheduler == nil || c.table == nil {
+		return
+	}
+	now := c.nowLocked()
+	nowNs := now.UTC().UnixNano()
+	got := c.scheduler.ReserveKnownComing(now)
+
+	if c.reservationTracked == nil {
+		c.reservationTracked = map[string]trackedReservation{}
+	}
+
+	present := make(map[string]struct{}, len(got))
+	for _, r := range got {
+		key := reservationKey(r.TraceID, r.Prefix)
+		present[key] = struct{}{}
+
+		prior, tracked := c.reservationTracked[key]
+		if tracked {
+			// The hold's IDENTITY is (trace, prefix); a newer source revision for the SAME
+			// prefix is an in-place refresh of a hold that never lapsed (e.g. an unrelated
+			// TurnIntent field or a rank change bumped the table Rev). Refreshing the
+			// tracked revision while minting NO event keeps a steady hint idempotent, so
+			// the bounded readback records real lifecycle transitions rather than one
+			// fabricated expire/create pair per table write.
+			live := prior.expiresAtUnixNano > nowNs
+			if live {
+				c.reservationTracked[key] = trackedReservation{
+					sourceRev:         r.SourceRev,
+					generation:        prior.generation,
+					expiresAtUnixNano: r.ExpiresAtUnixNano,
+				}
+				continue
+			}
+			// The prior hold lapsed at its expiry boundary and the still-live hint was
+			// re-minted in the same scan: retire the old generation as "expired" before
+			// minting the fresh one, so create→expire→re-create is distinguishable.
+			c.recordReservationObservationLocked(ReservationObservation{
+				TraceID:    r.TraceID,
+				Prefix:     r.Prefix,
+				Generation: prior.generation,
+				Action:     "expired",
+				Reason:     "advisory reservation reclaimed at expiry",
+				At:         now,
+			})
+		}
+		c.reservationGen++
+		gen := c.reservationGen
+		c.reservationTracked[key] = trackedReservation{
+			sourceRev:         r.SourceRev,
+			generation:        gen,
+			expiresAtUnixNano: r.ExpiresAtUnixNano,
+		}
+		c.recordReservationObservationLocked(ReservationObservation{
+			TraceID:    r.TraceID,
+			Prefix:     r.Prefix,
+			Generation: gen,
+			Action:     "created",
+			Reason:     "known-coming hint reserved advisory prefix",
+			At:         now,
+		})
+	}
+
+	// Retire tracked holds the scan no longer reports. A hint that still names the same
+	// live prefix but is no longer held was RECLAIMED at its expiry boundary — a
+	// self-timed end, so it is "expired". A hint that has vanished from the table
+	// (WillDiscard, a cleared/changed intent, or a reclaimed prefix) was dropped before
+	// it ever arrived — a cancel, not an expiry. Keeping the two tokens distinct is what
+	// lets a reader tell "the grace window closed" from "the producer withdrew the hint".
+	for key, prior := range c.reservationTracked {
+		if _, ok := present[key]; ok {
+			continue
+		}
+		action, reason := "canceled", "known-coming hint withdrawn before arrival"
+		if liveHintMatches(c.table, prior.traceID(key), prior.prefix(key)) {
+			action, reason = "expired", "advisory reservation reclaimed at expiry"
+		}
+		c.recordReservationObservationLocked(ReservationObservation{
+			TraceID:    prior.traceID(key),
+			Prefix:     prior.prefix(key),
+			Generation: prior.generation,
+			Action:     action,
+			Reason:     reason,
+			At:         now,
+		})
+		delete(c.reservationTracked, key)
+	}
+}
+
+// liveHintMatches reports whether the table still carries a live known-coming hint for
+// (trace, prefix) — the same predicate reservationFromState applies, minus the clock-dependent
+// arrival math (a still-present hint whose hold was reclaimed is an expiry, not a cancel).
+func liveHintMatches(tbl *session.Table, trace, prefix string) bool {
+	if tbl == nil {
+		return false
+	}
+	st := tbl.Get(trace)
+	return st.Intent.ArrivingInMillis > 0 && st.Intent.Prefix == prefix && !st.Intent.WillDiscard
+}
+
+// traceID returns the trace half of a reservation key built by reservationKey.
+func (t trackedReservation) traceID(key string) string {
+	if i := strings.IndexByte(key, 0); i >= 0 {
+		return key[:i]
+	}
+	return key
+}
+
+// prefix returns the prefix half of a reservation key built by reservationKey.
+func (t trackedReservation) prefix(key string) string {
+	if i := strings.IndexByte(key, 0); i >= 0 {
+		return key[i+1:]
+	}
+	return ""
 }
 
 // SetTable attaches or replaces the session table.
@@ -871,6 +1090,10 @@ func (c *AdmissionController) Schedule() []SeqRequest {
 
 func (c *AdmissionController) scheduleLocked() []SeqRequest {
 	c.round++
+	// Drive the scheduler's advisory known-coming scan every round — before the
+	// empty-queue early return — so a hint-only round still mints its bounded readback
+	// while never touching admission capacity (pub#13388).
+	c.scanReservationsLocked()
 	if len(c.waiting) == 0 {
 		c.credits = make(map[string]int64)
 		return nil
