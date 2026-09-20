@@ -281,6 +281,24 @@
       "gaps": []
     },
     {
+      "id": "x-plan-estimateqwen35runtimeextramemoryplan",
+      "canonical": "EstimateQwen35RuntimeExtraMemoryPlan (Qwen runtime extras)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/compute's EstimateQwen35RuntimeExtraMemoryPlan produces the classed device prefill-panel and optional host retained-history demands omitted from the base Qwen3.5/Qwen3.8 request memory plan.",
+      "distinction": "It adds only Qwen runtime extras after subtracting already-priced HAL transients; unlike EstimateKVStoreMemoryPlan, it does not estimate the request's KV cache or generic context scratch.",
+      "distinct_from": [
+        "EstimateKVStoreMemoryPlan (compute)"
+      ],
+      "aliases": [],
+      "grounding": "EstimateQwen35RuntimeExtraMemoryPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
       "id": "x-plan-requestmemoryplansnapshot",
       "canonical": "requestMemoryPlanSnapshot (gateway)",
       "family": "plan",
