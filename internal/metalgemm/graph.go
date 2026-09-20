@@ -27,9 +27,14 @@ void *mg_graph_encode_q6k_from(void *graph, int wid, void *input, int elems);
 void *mg_graph_quantize_q8(void *graph, void *input, int elems, void **scales);
 void *mg_graph_encode_q8_from(void *graph, int wid, void *q, void *d, int elems);
 int mg_graph_finish(void *graph, mg_graph_receipt *receipt, int inject_post_submit_failure);
+int mg_graph_await_terminal(void *graph);
 int mg_graph_read(void *graph, void *result, float *dst, int n);
 int mg_graph_read_pack(void *graph, void **results, const int *sizes, int count, float *dst, int total);
 void mg_graph_free(void *graph);
+int mg_graph_live_owners(void);
+int mg_graph_live_buffers(void);
+void *mg_graph_test_hold_terminal(void *graph, int wait_limit_ms);
+void mg_graph_test_release_terminal(void *gate);
 void *mg_graph_xf_buffer(void *graph);
 int mg_graph_set_gemv_vectorized(void *graph, int mode);
 int mg_graph_set_gemv_p1(void *graph, int mode);
@@ -72,6 +77,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 	"unsafe"
 )
 
@@ -309,6 +315,7 @@ type ProjectionGraph struct {
 	injectDeviceFault       bool
 	gdnLeases               []gdnGraphLease
 	gdnCheckpoints          []*GDNGraphCheckpoint
+	testTerminalGate        unsafe.Pointer
 }
 
 type gdnGraphLease struct {
@@ -581,6 +588,38 @@ func (g *ProjectionGraph) InjectDeviceFaultForTest() {
 		g.injectDeviceFault = true
 	}
 }
+
+// holdTerminalForTest appends a real command-buffer wait behind the graph's
+// encoded work and shortens only this graph's Finish timeout. Tests must install
+// releaseTerminalForTest as cleanup immediately after this succeeds.
+func (g *ProjectionGraph) holdTerminalForTest(wait time.Duration) error {
+	if err := g.open(); err != nil {
+		return err
+	}
+	if wait <= 0 || wait > time.Second {
+		return errors.New("metalgemm: invalid test terminal wait")
+	}
+	gate := C.mg_graph_test_hold_terminal(g.ptr, C.int(wait.Milliseconds()))
+	if gate == nil {
+		return errors.New("metalgemm: install test terminal gate")
+	}
+	g.testTerminalGate = gate
+	return nil
+}
+
+func (g *ProjectionGraph) releaseTerminalForTest() {
+	if g != nil && g.testTerminalGate != nil {
+		C.mg_graph_test_release_terminal(g.testTerminalGate)
+		g.testTerminalGate = nil
+	}
+}
+
+func (g *ProjectionGraph) awaitTerminalForTest() bool {
+	return g != nil && g.ptr != nil && C.mg_graph_await_terminal(g.ptr) != 0
+}
+
+func graphLiveOwnerCount() int  { return int(C.mg_graph_live_owners()) }
+func graphLiveBufferCount() int { return int(C.mg_graph_live_buffers()) }
 
 // BeginProjectionGraph uploads one activation panel for all projections in the graph.
 // xf is required by Q4_K/Q6_K; xq/xd are required by Q8. Supplying both permits mixed graphs.

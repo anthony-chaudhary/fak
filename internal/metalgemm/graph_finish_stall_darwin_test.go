@@ -5,6 +5,7 @@ package metalgemm
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 // graphStallFixture builds the smallest committable Q4_K graph so Finish can
@@ -128,5 +129,48 @@ func TestProjectionGraphFinishInjectedFailureStaysPostSubmitError(t *testing.T) 
 	}
 	if !receipt.Committed {
 		t.Fatalf("receipt=%+v, want committed", receipt)
+	}
+}
+
+// TestProjectionGraphTerminalGateTestSeam proves the deterministic #12958
+// reproducer itself uses a real Metal terminal fence and always has a cleanup
+// path that opens the fence before freeing native graph ownership.
+func TestProjectionGraphTerminalGateTestSeam(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	t.Cleanup(ResetQ4K)
+	owners, buffers := graphLiveOwnerCount(), graphLiveBufferCount()
+	g := graphStallFixture(t)
+	t.Cleanup(func() {
+		g.releaseTerminalForTest()
+		if g.finished {
+			g.awaitTerminalForTest()
+		}
+		g.Free()
+	})
+	if err := g.holdTerminalForTest(5 * time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := g.Finish()
+	if !IsMetalCommandBufferStall(err) || !receipt.Committed || receipt.CompletedWait {
+		t.Fatalf("held terminal receipt=%+v err=%T %v, want committed typed stall", receipt, err, err)
+	}
+	if got := graphLiveOwnerCount(); got != owners+1 {
+		t.Fatalf("held graph owner count=%d want %d", got, owners+1)
+	}
+	if got := graphLiveBufferCount(); got <= buffers {
+		t.Fatalf("held graph buffer count=%d want >%d", got, buffers)
+	}
+	g.releaseTerminalForTest()
+	if !g.awaitTerminalForTest() {
+		t.Fatal("released terminal fence did not complete command buffer")
+	}
+	g.Free()
+	if got := graphLiveOwnerCount(); got != owners {
+		t.Fatalf("released graph owner count=%d want %d", got, owners)
+	}
+	if got := graphLiveBufferCount(); got != buffers {
+		t.Fatalf("released graph buffer count=%d want %d", got, buffers)
 	}
 }
