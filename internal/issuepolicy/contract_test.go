@@ -1,7 +1,9 @@
 package issuepolicy
 
 import (
+	"encoding/json"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -1322,4 +1324,75 @@ func has(items []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestRepositoryQualifiedDependencies(t *testing.T) {
+	deps := ParseIssueDependencies(strings.Join([]string{
+		"- Start blocked by: owner/engine#77 must land first.",
+		"- Start blocked by: owner/ops#77 is a different repository prerequisite.",
+		"- Start blocked by: https://github.com/owner/engine/issues/77 duplicates the shorthand.",
+		"- Start blocked by: #77 is an unqualified legacy reference.",
+	}, "\n"))
+
+	if len(deps) != 3 {
+		t.Fatalf("deps = %+v, want three distinct qualified/unqualified references", deps)
+	}
+
+	byKey := map[string]DependencyRef{}
+	for _, dep := range deps {
+		byKey[dep.Repository+"|"+strconv.Itoa(dep.Issue)] = dep
+	}
+
+	engine, ok := byKey["owner/engine|77"]
+	if !ok {
+		t.Fatalf("deps = %+v, want owner/engine#77 preserved", deps)
+	}
+	if engine.Repository != "owner/engine" || engine.Issue != 77 || !engine.Blocking {
+		t.Fatalf("engine dep = %+v, want qualified blocking owner/engine#77", engine)
+	}
+
+	ops, ok := byKey["owner/ops|77"]
+	if !ok {
+		t.Fatalf("deps = %+v, want owner/ops#77 preserved separately", deps)
+	}
+	if ops.Repository != "owner/ops" || ops.Issue != 77 || !ops.Blocking {
+		t.Fatalf("ops dep = %+v, want qualified blocking owner/ops#77", ops)
+	}
+
+	legacy, ok := byKey["|77"]
+	if !ok {
+		t.Fatalf("deps = %+v, want bare #77 retained as explicitly unqualified", deps)
+	}
+	if legacy.Repository != "" || legacy.Issue != 77 {
+		t.Fatalf("legacy dep = %+v, want unqualified #77 with empty repository", legacy)
+	}
+
+	blocked := CandidatePickupBlockedBy(deps)
+	wantBlocked := []string{"owner/engine#77", "owner/ops#77", "77"}
+	if !reflect.DeepEqual(blocked, wantBlocked) {
+		t.Fatalf("CandidatePickupBlockedBy = %v, want %v", blocked, wantBlocked)
+	}
+
+	normalized := normalizeDependencies(deps)
+	if len(normalized) != 3 {
+		t.Fatalf("normalizeDependencies = %+v, want three distinct references", normalized)
+	}
+	wantRepo := map[int]string{0: "owner/engine", 1: "owner/ops", 2: ""}
+	for i, want := range wantRepo {
+		if normalized[i].Repository != want {
+			t.Fatalf("normalized[%d] = %+v, want repository %q", i, normalized[i], want)
+		}
+	}
+
+	raw, err := json.Marshal(deps)
+	if err != nil {
+		t.Fatalf("marshal deps: %v", err)
+	}
+	var round []DependencyRef
+	if err := json.Unmarshal(raw, &round); err != nil {
+		t.Fatalf("unmarshal deps: %v", err)
+	}
+	if !reflect.DeepEqual(round, deps) {
+		t.Fatalf("json round-trip = %+v, want %+v", round, deps)
+	}
 }

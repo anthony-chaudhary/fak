@@ -77,6 +77,64 @@ var keyRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$`)
 var markdownHeadingRE = regexp.MustCompile(`^#{1,6}\s+(.+?)\s*$`)
 var codeSpanRE = regexp.MustCompile("`([^`]+)`")
 var issueReferenceRE = regexp.MustCompile(`#([1-9][0-9]*)`)
+
+// repositoryReferenceRE captures an optional "owner/repo" qualifier immediately
+// preceding a #N marker (e.g. owner/engine#77). The owner/repo segment excludes
+// whitespace and path separators so a bare #77 stays unqualified.
+var repositoryReferenceRE = regexp.MustCompile(`(?:^|[\s(\[])([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([1-9][0-9]*)`)
+
+// issueURLRE captures a GitHub issue URL and its owner/repo qualifier.
+var issueURLRE = regexp.MustCompile(`https?://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/issues/([1-9][0-9]*)`)
+
+// issueRef is one qualified or unqualified issue reference extracted from a
+// dependency marker value.
+type issueRef struct {
+	Repository string
+	Issue      int
+}
+
+// extractIssueRefs returns every issue reference in a dependency marker value,
+// preserving the first-seen order. Qualified owner/repo#N and GitHub issue URLs
+// carry their repository; a bare #N is returned explicitly unqualified.
+func extractIssueRefs(value string) []issueRef {
+	var out []issueRef
+	seen := map[string]bool{}
+	add := func(repo string, issue int) {
+		key := repo + "#" + strconv.Itoa(issue)
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, issueRef{Repository: repo, Issue: issue})
+	}
+	for _, m := range repositoryReferenceRE.FindAllStringSubmatch(value, -1) {
+		issue, err := strconv.Atoi(m[2])
+		if err != nil || issue <= 0 {
+			continue
+		}
+		add(m[1], issue)
+	}
+	for _, m := range issueURLRE.FindAllStringSubmatch(value, -1) {
+		issue, err := strconv.Atoi(m[2])
+		if err != nil || issue <= 0 {
+			continue
+		}
+		add(m[1], issue)
+	}
+	// Remove the qualified references already captured so the bare-#N fallback
+	// does not also emit a spurious unqualified reference for the same marker.
+	remainder := repositoryReferenceRE.ReplaceAllString(value, " ")
+	remainder = issueURLRE.ReplaceAllString(remainder, " ")
+	for _, m := range issueReferenceRE.FindAllStringSubmatch(remainder, -1) {
+		issue, err := strconv.Atoi(m[1])
+		if err != nil || issue <= 0 {
+			continue
+		}
+		add("", issue)
+	}
+	return out
+}
+
 var issueMarkerKeyRE = regexp.MustCompile(`<!--\s*fak-[A-Za-z0-9_-]+-key:\s*([^>\s]+)\s*-->`)
 var unexpandedIssueTemplateRE = regexp.MustCompile(`(?m)(\$\(@\{|System\.Collections|System\.Management\.Automation|\$\(System\.|\bSource:\s*\$source\b)`)
 var unexpandedIssueTemplateMarkerRE = regexp.MustCompile(`(?m)\$\(@\{[^)\r\n]*\}\.[A-Za-z0-9_]+\)|\$\((?:System\.Collections|System\.Management\.Automation)[^)\r\n]*\)|^\s*(?:[-*]\s*)?Source:\s*\$source[^\r\n]*`)
@@ -113,12 +171,15 @@ type TemplateRepairPlan struct {
 	DryRunOnly               bool     `json:"dry_run_only"`
 }
 
-// DependencyRef is one parsed issue-body dependency marker.
+// DependencyRef is one parsed issue-body dependency marker. Repository carries
+// the optional "owner/repo" qualifier from a cross-repository reference; an
+// empty Repository is an explicitly unqualified (legacy bare #N) reference.
 type DependencyRef struct {
-	Relation string `json:"relation"`
-	Issue    int    `json:"issue"`
-	Blocking bool   `json:"blocking"`
-	Raw      string `json:"raw,omitempty"`
+	Relation   string `json:"relation"`
+	Issue      int    `json:"issue"`
+	Blocking   bool   `json:"blocking"`
+	Repository string `json:"repository,omitempty"`
+	Raw        string `json:"raw,omitempty"`
 }
 
 // Candidate is the pure input shape a producer can review before rendering or
@@ -1088,6 +1149,9 @@ func CandidatePickupBlockedBy(deps []DependencyRef) []string {
 			continue
 		}
 		id := strconv.Itoa(dep.Issue)
+		if dep.Repository != "" {
+			id = dep.Repository + "#" + id
+		}
 		if seen[id] {
 			continue
 		}
@@ -1134,21 +1198,18 @@ func ParseIssueDependencies(section string) []DependencyRef {
 		if !ok {
 			continue
 		}
-		for _, m := range issueReferenceRE.FindAllStringSubmatch(rest, -1) {
-			issue, err := strconv.Atoi(m[1])
-			if err != nil || issue <= 0 {
-				continue
-			}
-			seenKey := relation + "#" + strconv.Itoa(issue)
+		for _, ref := range extractIssueRefs(rest) {
+			seenKey := relation + "|" + ref.Repository + "#" + strconv.Itoa(ref.Issue)
 			if seen[seenKey] {
 				continue
 			}
 			seen[seenKey] = true
 			out = append(out, DependencyRef{
-				Relation: relation,
-				Issue:    issue,
-				Blocking: blocking,
-				Raw:      raw,
+				Relation:   relation,
+				Issue:      ref.Issue,
+				Blocking:   blocking,
+				Repository: ref.Repository,
+				Raw:        raw,
 			})
 		}
 	}
@@ -1372,6 +1433,27 @@ func missingRequiredIssueSections(body string, c Candidate) []string {
 	return missing
 }
 
+// repositoryNameRE validates a canonical "owner/repo" qualifier. It rejects
+// values that do not carry exactly one slash, so a malformed owner or URL
+// fragment cannot be normalized into another repository's identity.
+var repositoryNameRE = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9_.-]*[A-Za-z0-9])?/[A-Za-z0-9](?:[A-Za-z0-9_.-]*[A-Za-z0-9])?$`)
+
+// normalizeRepository canonicalizes an optional repository qualifier. An empty
+// value is a valid, explicitly unqualified reference. A non-empty value must be
+// a well-formed "owner/repo" (case-insensitive; normalized to lower case);
+// malformed values are rejected so they cannot be mistaken for another
+// repository.
+func normalizeRepository(repo string) (string, bool) {
+	repo = strings.TrimSpace(repo)
+	if repo == "" {
+		return "", true
+	}
+	if !repositoryNameRE.MatchString(repo) {
+		return "", false
+	}
+	return strings.ToLower(repo), true
+}
+
 func normalizeDependencies(in []DependencyRef) []DependencyRef {
 	seen := map[string]bool{}
 	out := make([]DependencyRef, 0, len(in))
@@ -1380,16 +1462,21 @@ func normalizeDependencies(in []DependencyRef) []DependencyRef {
 		if !ok || dep.Issue <= 0 {
 			continue
 		}
-		seenKey := relation + "#" + strconv.Itoa(dep.Issue)
+		repository, repoOK := normalizeRepository(dep.Repository)
+		if !repoOK {
+			continue
+		}
+		seenKey := relation + "|" + repository + "#" + strconv.Itoa(dep.Issue)
 		if seen[seenKey] {
 			continue
 		}
 		seen[seenKey] = true
 		out = append(out, DependencyRef{
-			Relation: relation,
-			Issue:    dep.Issue,
-			Blocking: blocking,
-			Raw:      strings.TrimSpace(dep.Raw),
+			Relation:   relation,
+			Issue:      dep.Issue,
+			Blocking:   blocking,
+			Repository: repository,
+			Raw:        strings.TrimSpace(dep.Raw),
 		})
 	}
 	return out
