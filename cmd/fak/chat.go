@@ -17,6 +17,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dropin"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/systools"
+	"github.com/anthony-chaudhary/fak/pkg/fakclient"
 )
 
 type chatFlags struct {
@@ -496,9 +497,11 @@ func extractPolicyExactCommands(p adjudicator.Policy) []string {
 	return exacts
 }
 
-func probeLocalGateway(addr string) (string, bool) {
-	client := &http.Client{Timeout: 150 * time.Millisecond}
-	resp, err := client.Get(strings.TrimRight(addr, "/") + "/healthz")
+// probeGatewayOnce probes a single gateway origin: GET origin/healthz, decode
+// the health payload, and fall back to origin/v1/models for model discovery.
+func probeGatewayOnce(client *http.Client, origin string) (string, bool) {
+	origin = strings.TrimRight(origin, "/")
+	resp, err := client.Get(origin + "/healthz")
 	if err != nil {
 		return "", false
 	}
@@ -515,11 +518,28 @@ func probeLocalGateway(addr string) (string, bool) {
 	}
 	model := strings.TrimSpace(health.Model)
 	if model == "" || model == "mock" {
-		if discovered := probeServerModels(client, strings.TrimRight(addr, "/")+"/v1/models"); discovered != "" {
+		if discovered := probeServerModels(client, origin+"/v1/models"); discovered != "" {
 			model = discovered
 		}
 	}
 	return model, true
+}
+
+// probeLocalGateway probes a gateway origin, retrying once via a loopback
+// family fallback (e.g. 127.0.0.1 -> localhost) when the first probe fails.
+// On Windows the loopback may be reachable only on one address family, so an
+// IPv4 literal can fail while "localhost" resolves to the live family.
+func probeLocalGateway(addr string) (string, bool) {
+	client := &http.Client{Timeout: 150 * time.Millisecond}
+	if model, ok := probeGatewayOnce(client, addr); ok {
+		return model, true
+	}
+	if fallback, ok := fakclient.LoopbackFallbackURL(addr); ok {
+		if model, ok := probeGatewayOnce(client, fallback); ok {
+			return model, true
+		}
+	}
+	return "", false
 }
 
 func detectServerModel(baseURL string) string {

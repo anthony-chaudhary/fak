@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/systools"
+	"github.com/anthony-chaudhary/fak/pkg/fakclient"
 )
 
 type agentFlags struct {
@@ -128,14 +130,44 @@ func cmdAgent(argv []string) {
 // every upstream behind one OpenAI-compatible address.
 const agentRouterOrigin = "http://127.0.0.1:8080"
 
-// agentRouterProbe probes the local fak router for liveness and the served
-// model id. It is a package var so tests override it with a stub instead of
-// binding 127.0.0.1:8080 — a dev-box mock serve on that port must never be
-// able to flip a test verdict.
-var agentRouterProbe = probeLocalRouter
+// agentRouterProbe probes the local fak router for liveness, the served model
+// id, and the origin that actually answered (the literal origin or its loopback
+// family fallback, e.g. 127.0.0.1 -> localhost). It is a package var so tests
+// override it with a stub instead of binding 127.0.0.1:8080 — a dev-box mock
+// serve on that port must never be able to flip a test verdict.
+var agentRouterProbe = probeLocalRouterOrigin
 
-// probeLocalRouter probes the default fak router origin.
-func probeLocalRouter() (string, bool) { return probeLocalGateway(agentRouterOrigin) }
+// routerOrigin returns the origin to probe: the default agentRouterOrigin, or
+// FAK_AGENT_ROUTER_ORIGIN when set so a test (or an operator fronting the
+// gateway on a non-default address family) can point the probe elsewhere.
+func routerOrigin() string {
+	if o := strings.TrimSpace(os.Getenv("FAK_AGENT_ROUTER_ORIGIN")); o != "" {
+		return o
+	}
+	return agentRouterOrigin
+}
+
+// probeLocalRouterOrigin probes the default fak router origin and reports the
+// origin that answered, so a caller that later dials the endpoint uses the
+// address family that is actually live (a WSL2 gateway can be exposed on [::1]
+// only, where the 127.0.0.1 literal is refused).
+func probeLocalRouterOrigin() (origin, model string, ok bool) {
+	o := routerOrigin()
+	client := &http.Client{Timeout: 150 * time.Millisecond}
+	// Probe the literal and its family fallback with the single-origin probe so
+	// the ORIGIN THAT ANSWERED is known — probeLocalGateway would silently retry
+	// the fallback and report the literal as live, sending the eventual inference
+	// call back to the unreachable address family.
+	if m, ok := probeGatewayOnce(client, o); ok {
+		return o, m, true
+	}
+	if fallback, ok := fakclient.LoopbackFallbackURL(o); ok {
+		if m, ok := probeGatewayOnce(client, fallback); ok {
+			return fallback, m, true
+		}
+	}
+	return "", "", false
+}
 
 // agentEndpoint is the resolved endpoint the fak agent runs on.
 type agentEndpoint struct {
@@ -174,8 +206,8 @@ func resolveAgentEndpoint(af *agentFlags, baseURLExplicit, providerExplicit, mod
 		}
 	}
 	if effective == "" && !*af.offline && !baseURLExplicit {
-		if localModel, ok := agentRouterProbe(); ok {
-			effective = agentRouterOrigin + "/v1"
+		if origin, localModel, ok := agentRouterProbe(); ok {
+			effective = origin + "/v1"
 			if !modelExplicit && localModel != "" && localModel != "mock" {
 				*af.model = localModel
 			}
@@ -202,7 +234,7 @@ func agentNoEndpointGuidance(stderr io.Writer, routerProbed bool) {
 		stderr = os.Stderr
 	}
 	if routerProbed {
-		fmt.Fprintf(stderr, "fak agent: fak router at %s not responding; no model endpoint configured - the native agent runs a real model, not the offline demo\n", agentRouterOrigin)
+		fmt.Fprintf(stderr, "fak agent: fak router at %s not responding; no model endpoint configured - the native agent runs a real model, not the offline demo\n", routerOrigin())
 	} else {
 		fmt.Fprintln(stderr, "fak agent: no model endpoint configured - the native agent runs a real model, not the offline demo")
 	}

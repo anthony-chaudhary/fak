@@ -42,7 +42,10 @@ func TestAgentDemoRunsOfflineDemo(t *testing.T) {
 // endpoint fails loud (exit 2) with the guidance block, never silently running
 // the offline demo. The three provider base-url env vars are cleared because
 // this appliance may carry an ambient OPENAI_BASE_URL, which would otherwise
-// make the bare run resolve a live endpoint and attempt a network call.
+// make the bare run resolve a live endpoint and attempt a network call. The
+// router origin is also pinned to a dead port: the loopback family fallback
+// would otherwise find an ambient `fak serve` (e.g. exposed on ::1 only) and
+// make the bare run auto-connect instead of failing loud.
 func TestAgentNoEndpointFailsLoud(t *testing.T) {
 	if os.Getenv("TEST_AGENT_FAILLOUD_HELPER") == "1" {
 		for i, arg := range os.Args {
@@ -69,7 +72,7 @@ func TestAgentNoEndpointFailsLoud(t *testing.T) {
 		}
 		env = append(env, kv)
 	}
-	cmd.Env = append(env, "TEST_AGENT_FAILLOUD_HELPER=1")
+	cmd.Env = append(env, "TEST_AGENT_FAILLOUD_HELPER=1", "FAK_AGENT_ROUTER_ORIGIN=http://127.0.0.1:1")
 	out, err := cmd.CombinedOutput()
 
 	var ee *exec.ExitError

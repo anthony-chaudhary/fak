@@ -16,11 +16,23 @@ import (
 func stubAgentRouterProbe(t *testing.T, model string, ok bool, hit *bool) {
 	t.Helper()
 	prev := agentRouterProbe
-	agentRouterProbe = func() (string, bool) {
+	agentRouterProbe = func() (string, string, bool) {
 		if hit != nil {
 			*hit = true
 		}
-		return model, ok
+		return agentRouterOrigin, model, ok
+	}
+	t.Cleanup(func() { agentRouterProbe = prev })
+}
+
+// stubAgentRouterProbeOrigin installs a canned router probe that reports a
+// specific origin (e.g. the localhost fallback) so a test can pin that the
+// resolver adopts the origin that actually answered.
+func stubAgentRouterProbeOrigin(t *testing.T, origin, model string, ok bool) {
+	t.Helper()
+	prev := agentRouterProbe
+	agentRouterProbe = func() (string, string, bool) {
+		return origin, model, ok
 	}
 	t.Cleanup(func() { agentRouterProbe = prev })
 }
@@ -189,5 +201,29 @@ func TestAgentNativeRouterFallbackBareRun(t *testing.T) {
 	}
 	if !strings.Contains(out, "fak agentdemo") || !strings.Contains(out, "--offline") {
 		t.Fatalf("fail-loud guidance did not name the explicit demo opt-ins:\n%s", out)
+	}
+}
+
+// TestAgentEndpointResolverUsesProbedOrigin pins the loopback family fix: when
+// the probe answers via a fallback origin (e.g. localhost for a host where the
+// 127.0.0.1 literal is refused), the resolver must build the effective baseURL
+// from THAT origin, not the hardcoded literal, or the later inference calls
+// would fail on the same family the probe just fell back from.
+func TestAgentEndpointResolverUsesProbedOrigin(t *testing.T) {
+	const fallbackOrigin = "http://localhost:8080"
+	stubAgentRouterProbeOrigin(t, fallbackOrigin, "qwen38:27b-q4", true)
+	fs, af := newAgentFlagSet()
+	if err := fs.Parse([]string{}); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	ep := agentEndpointResolver(af, false, false, false, io.Discard)
+	if ep.baseURL != fallbackOrigin+"/v1" {
+		t.Fatalf("baseURL = %q, want %q (the origin that actually answered)", ep.baseURL, fallbackOrigin+"/v1")
+	}
+	if !ep.routerProbed {
+		t.Fatal("routerProbed = false, want true")
+	}
+	if *af.model != "qwen38:27b-q4" {
+		t.Fatalf("model = %q, want the probed served model id", *af.model)
 	}
 }

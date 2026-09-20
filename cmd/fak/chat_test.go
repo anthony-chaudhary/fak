@@ -289,6 +289,63 @@ func TestProbeLocalGateway_Offline(t *testing.T) {
 	}
 }
 
+// TestProbeGatewayOnce_SuccessAndModelDiscovery exercises the inner probe
+// directly: the healthz path yields the served model, and a mock/blank model
+// falls through to /v1/models discovery.
+func TestProbeGatewayOnce_SuccessAndModelDiscovery(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "model": "qwen38:27b-q4"})
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{{"id": "discovered-model"}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	client := &http.Client{}
+	model, ok := probeGatewayOnce(client, ts.URL)
+	if !ok {
+		t.Fatalf("probeGatewayOnce(%q) failed, want ok: true", ts.URL)
+	}
+	if model != "qwen38:27b-q4" {
+		t.Fatalf("probeGatewayOnce model = %q, want %q", model, "qwen38:27b-q4")
+	}
+}
+
+func TestProbeGatewayOnce_MockFallsThroughToModels(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "model": "mock"})
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{{"id": "discovered-model"}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	client := &http.Client{}
+	model, ok := probeGatewayOnce(client, ts.URL)
+	if !ok {
+		t.Fatalf("probeGatewayOnce(%q) failed, want ok: true", ts.URL)
+	}
+	if model != "discovered-model" {
+		t.Fatalf("probeGatewayOnce model = %q, want %q", model, "discovered-model")
+	}
+}
+
 func TestDetectServerModel_FromHealthz(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" {
