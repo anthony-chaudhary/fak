@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // `fak guard --split`: the default-launch UI/UX upgrade. A bare `fak guard -- claude` hands
@@ -38,8 +40,9 @@ var (
 
 // guardSplitPlan is the resolved inline-split plan. Spawn is the host argv that opens
 // the overlay surface; Overlay is the fak-info command that surface runs (recorded for
-// the dry-run/json surfaces). Host names the resolved split host ("tmux" | "wt" |
-// "iterm2" | "terminal-app" | "none"). There is no Agent/Claude field: the agent always
+// the dry-run/json surfaces). Host names the resolved split host ("tmux" | "zellij" |
+// "wt" | "wezterm" | "ghostty" | "iterm2" | "terminal-app" | "none"). There is no
+// Agent/Claude field: the agent always
 // launches inline in the current pane AFTER this plan opens the overlay, so guard keeps
 // its in-process gateway.
 type guardSplitPlan struct {
@@ -54,9 +57,11 @@ type guardSplitPlan struct {
 // buildGuardSplitPlan resolves the split host and assembles the argv that opens the
 // overlay surface. It is pure: goos/getenv/lookPath are injected, and overlayArgs are
 // the child argv AFTER the fak executable (selfExe is prepended here). Detection order:
-// inside tmux ($TMUX) -> inside Windows Terminal ($WT_SESSION + `wt`) -> a macOS
-// terminal app scriptable via osascript (iTerm2 splits the current window; Apple
-// Terminal has no split panes, so it gets a companion window) -> none.
+// inside tmux ($TMUX) -> inside zellij ($ZELLIJ) -> inside Windows Terminal ($WT_SESSION
+// + `wt`) -> a macOS terminal app: WezTerm (real `wezterm cli` 20% split of the current
+// pane) -> Ghostty (no current-pane split; companion window) -> iTerm2 / Apple Terminal
+// via osascript (iTerm2 splits the current window; Apple Terminal has no split panes, so
+// it gets a companion window) -> none.
 func buildGuardSplitPlan(goos string, getenv func(string) string, lookPath func(string) (string, error), selfExe, where string, overlayArgs []string) (guardSplitPlan, error) {
 	where = strings.TrimSpace(strings.ToLower(where))
 	if where == "" {
@@ -88,6 +93,24 @@ func buildGuardSplitPlan(goos string, getenv func(string) string, lookPath func(
 		return plan, nil
 	}
 
+	// 1b. Inside zellij: $ZELLIJ is set for any shell running in a zellij session (the
+	// analogue of $TMUX). `zellij run -- <cmd...>` runs the overlay command in a NEW pane.
+	// zellij's `run` subcommand takes -d/--direction down|right; we emit `-d down` for the
+	// bottom strip and `-d right` for the right column. The overlay command follows `--` so
+	// zellij never parses it as a zellij flag. `zellij run` does not force focus onto the new
+	// pane in the same way tmux `-d` does, but it is the documented form for running a command
+	// in a new pane; the agent still launches inline in the current pane.
+	if strings.TrimSpace(getenv("ZELLIJ")) != "" {
+		dir := "down"
+		if where == "right" {
+			dir = "right"
+		}
+		plan.Host = "zellij"
+		spawn := []string{"zellij", "run", "-d", dir, "--"}
+		plan.Spawn = append(spawn, overlayCmd...)
+		return plan, nil
+	}
+
 	// 2. Inside Windows Terminal: $WT_SESSION is set for any shell running in a WT pane, which
 	// is the reliable "we are inside WT" signal (the analogue of $TMUX). `wt -w 0` targets the
 	// CURRENT window, so split-pane adds the overlay beside this session rather than opening a
@@ -115,11 +138,55 @@ func buildGuardSplitPlan(goos string, getenv func(string) string, lookPath func(
 		}
 	}
 
-	// 3. macOS terminal apps, scripted via osascript (always present on macOS). A stock Mac
+	// 3. macOS terminal apps. WezTerm comes FIRST among them because it is the only macOS
+	// host with a real CLI split of the CURRENT pane: `wezterm cli split-pane --percent 20`
+	// opens a genuine 20% pane beside the agent, strictly better than iTerm2's even
+	// AppleScript split and Apple Terminal's companion window. Its CLI is a thin client to
+	// the running mux, so no focus-return trick is needed; WezTerm has no documented
+	// "don't focus the new pane" flag, so the advisory comment below records that gap rather
+	// than inventing a flag. The overlay command is passed after `--`, so wezterm runs
+	// `wezterm info ...` (its own argv) directly in the new pane rather than needing a
+	// separate send-text round trip to discover the pane id.
+	if app := macSplitTerminalApp(goos, getenv); app == "wezterm" {
+		if _, err := lookPath("wezterm"); err == nil {
+			orient := "--bottom"
+			if where == "right" {
+				orient = "--right"
+			}
+			// --percent 20 requests the 20% overlay; WezTerm honors it where the terminal
+			// grid allows, and clamps otherwise. NOTE: WezTerm has no no-focus flag for
+			// split-pane, so focus may land on the overlay pane; pass --percent with the
+			// command after `--` so the overlay starts immediately without a send-text step.
+			plan.Host = "wezterm"
+			spawn := []string{"wezterm", "cli", "split-pane", orient, "--percent", "20", "--"}
+			plan.Spawn = append(spawn, overlayCmd...)
+			return plan, nil
+		}
+	}
+
+	// 3c. Ghostty has no stable CLI to split the CURRENT pane (its `+new-window` /
+	// `+new-tab` open a NEW window/tab, not a split), and its AppleScript `sdef` is
+	// macOS-only and not reliably present. So like Apple Terminal, the overlay opens as a
+	// companion window — here a fresh Ghostty instance via `open -na Ghostty --args -e ...`.
+	// That never orphans the gateway: the agent still launches inline in THIS window, and
+	// the companion only polls the loopback gateway URL. This rung is deliberately OUTSIDE
+	// the osascript gate below: Ghostty's spawn uses `open`, never osascript, so it must not
+	// require osascript on PATH; `open` is always present on macOS.
+	if app := macSplitTerminalApp(goos, getenv); app == "ghostty" {
+		if _, err := lookPath("open"); err == nil {
+			plan.Host = "ghostty"
+			plan.Geometry = "agent (this window) / fak info (companion Ghostty window)"
+			spawn := []string{"open", "-na", "Ghostty", "--args", "-e"}
+			plan.Spawn = append(spawn, overlayCmd...)
+			return plan, nil
+		}
+	}
+
+	// 3d. macOS terminal apps scriptable via osascript (always present on macOS). A stock Mac
 	// ships neither tmux nor Windows Terminal, so before this rung an attended `fak guard
 	// -- claude` in Terminal.app/iTerm2 silently skipped the split and fak stayed invisible
 	// for the whole session — the one attended platform with NO fak surface at all.
-	if app := macSplitTerminalApp(goos, getenv); app != "" {
+	if app := macSplitTerminalApp(goos, getenv); app != "" && app != "ghostty" {
 		if _, err := lookPath("osascript"); err == nil {
 			if app == "iterm2" {
 				// iTerm2 is a true inline split of the CURRENT window. Its AppleScript verbs
@@ -168,21 +235,34 @@ func buildGuardSplitPlan(goos string, getenv func(string) string, lookPath func(
 	return plan, nil
 }
 
-// macSplitTerminalApp resolves which scriptable macOS terminal app this session is
-// attended in: "iterm2" (true inline split panes), "terminal-app" (Apple Terminal —
-// no split panes, companion window instead), or "" (neither, or not macOS). iTerm2
-// is recognized by either of its two markers ($ITERM_SESSION_ID survives shells that
-// rewrite $TERM_PROGRAM); Apple Terminal only by $TERM_PROGRAM. Every other
-// TERM_PROGRAM (vscode, ...) stays "" — an unknown host must keep today's silent
-// no-op, not gain a surprise osascript spawn.
+// macSplitTerminalApp resolves which macOS terminal app this session is attended in:
+// "wezterm" (real CLI split of the current pane), "ghostty" (no stable current-pane
+// split — companion window), "iterm2" (true inline split panes via osascript), or
+// "terminal-app" (Apple Terminal — no split panes, companion window instead); "" means
+// none of those, or not macOS.
+//
+// Each host is recognized by its most durable marker, mirroring the iTerm2 rule: WezTerm
+// by $WEZTERM_PANE (the pane id, set inside every WezTerm pane and unrewritable by a
+// shell) or $TERM_PROGRAM; Ghostty by $GHOSTTY_RESOURCES_DIR or $TERM_PROGRAM. iTerm2 by
+// either of its two markers ($ITERM_SESSION_ID survives shells that rewrite
+// $TERM_PROGRAM); Apple Terminal only by $TERM_PROGRAM. Every other TERM_PROGRAM (vscode,
+// ...) stays "" — an unknown host must keep today's silent no-op, not gain a surprise
+// spawn.
 func macSplitTerminalApp(goos string, getenv func(string) string) string {
 	if goos != "darwin" {
 		return ""
 	}
-	if strings.TrimSpace(getenv("ITERM_SESSION_ID")) != "" || strings.TrimSpace(getenv("TERM_PROGRAM")) == "iTerm.app" {
+	term := strings.TrimSpace(getenv("TERM_PROGRAM"))
+	if strings.TrimSpace(getenv("WEZTERM_PANE")) != "" || term == "WezTerm" {
+		return "wezterm"
+	}
+	if strings.TrimSpace(getenv("GHOSTTY_RESOURCES_DIR")) != "" || term == "ghostty" {
+		return "ghostty"
+	}
+	if strings.TrimSpace(getenv("ITERM_SESSION_ID")) != "" || term == "iTerm.app" {
 		return "iterm2"
 	}
-	if strings.TrimSpace(getenv("TERM_PROGRAM")) == "Apple_Terminal" {
+	if term == "Apple_Terminal" {
 		return "terminal-app"
 	}
 	return ""
@@ -269,12 +349,37 @@ func guardSplitGeometryLabel(where string) string {
 	return "agent 80% (top) / fak info 20% (bottom strip)"
 }
 
+// guardSplitDegradedBanner renders ONE inline LAUNCH-time notice for the no-split-host
+// degraded case: when --split cannot find a multiplexer there is no overlay pane to host
+// `fak info`, so the single-pane operator gets nothing. Rather than fabricate live telemetry
+// (this runs once at launch and has no uptime/cache/token numbers), it points the operator at
+// `fak info` in another pane for the live status, and at the silence knob. It is pure and
+// deterministic (getenv injected): "" when the operator has turned the banner off via
+// FAK_SPLIT_BANNER=0|off|false|no, otherwise the one-line notice.
+func guardSplitDegradedBanner(getenv func(string) string) string {
+	if !guardSplitBannerEnabled(getenv) {
+		return ""
+	}
+	return "fak guard --split: no split host found — fak telemetry stays off-screen. " +
+		"Run `fak info` in another pane for the live cache/token/floor status " +
+		"(or set FAK_SPLIT_BANNER=0 to silence)."
+}
+
+// runGuardSplitNotify is the exec seam for the best-effort no-host milestone notification, so a
+// test can capture the argv without spawning osascript. windowgate suppresses the transient
+// console window on Windows (the same hook every other background helper in cmd/fak uses).
+var runGuardSplitNotify = func(name string, args ...string) error {
+	c := execCommand(name, args...)
+	windowgate.ConfigureBackgroundCommand(c)
+	return c.Run()
+}
+
 // guardSplitFallbackRecipe is printed when no multiplexer context is found: how to open a
 // second pane and the exact overlay command to run in it.
 func guardSplitFallbackRecipe(overlayCmd []string) string {
 	var b strings.Builder
-	b.WriteString("fak guard --split: no splittable terminal context found (looked for $TMUX; on Windows, $WT_SESSION + `wt`; on macOS, $TERM_PROGRAM naming iTerm2 or Apple Terminal).\n")
-	b.WriteString("open a second pane/window yourself (tmux split, Windows Terminal Alt+Shift+- / Alt+Shift+plus, or a second terminal window) and run the fak-info overlay there:\n")
+	b.WriteString("fak guard --split: no splittable terminal context found (looked for $TMUX; $ZELLIJ; on Windows, $WT_SESSION + `wt`; on macOS, $WEZTERM_PANE / $GHOSTTY_RESOURCES_DIR or $TERM_PROGRAM naming WezTerm, Ghostty, iTerm2, or Apple Terminal).\n")
+	b.WriteString("open a second pane/window yourself (tmux split, zellij pane, Windows Terminal Alt+Shift+- / Alt+Shift+plus, or a second terminal window) and run the fak-info overlay there:\n")
 	fmt.Fprintf(&b, "  %s\n", strings.Join(overlayCmd, " "))
 	return b.String()
 }
@@ -295,6 +400,12 @@ func renderGuardSplitPlan(p guardSplitPlan) string {
 	// (iTerm2's AppleScript split is even; Apple Terminal gets a companion window).
 	agentLabel, infoLabel := "agent pane (80%): current pane", "fak info pane (20%)"
 	switch p.Host {
+	case "zellij":
+		agentLabel, infoLabel = "agent pane: current pane", "fak info pane (zellij run)"
+	case "wezterm":
+		agentLabel, infoLabel = "agent pane (80%): current pane", "fak info pane (20% — wezterm split-pane)"
+	case "ghostty":
+		agentLabel, infoLabel = "agent: this window", "fak info (companion Ghostty window)"
 	case "iterm2":
 		agentLabel, infoLabel = "agent pane: current pane", "fak info pane (even split)"
 	case "terminal-app":
@@ -307,8 +418,9 @@ func renderGuardSplitPlan(p guardSplitPlan) string {
 
 // guardSplitEnabled resolves the --split tri-state (auto|on|off) into a decision. AUTO (the
 // default) enables the inline fak-info pane ONLY for an attended interactive launch inside a
-// known splittable terminal context (tmux, Windows Terminal, or — via the guardSplitGOOS
-// seam — a scriptable macOS terminal app: iTerm2 / Apple Terminal), and never recursively
+// known splittable terminal context (tmux, zellij, Windows Terminal, or — via the
+// guardSplitGOOS seam — a recognized macOS terminal app: WezTerm / Ghostty / iTerm2 / Apple
+// Terminal), and never recursively
 // (the spawned pane and the agent inherit FAK_GUARD_SPLIT=1). on forces it (the runner
 // prints the fallback recipe when no host is found); off disables it. Every
 // non-interactive / headless / CI / plain-terminal launch falls through to a no-op, so the
@@ -335,7 +447,8 @@ func guardSplitEnabled(mode string, getenv func(string) string, stdinInteractive
 		if !stdinInteractive || !childInteractive {
 			return false, nil // headless / piped / -p run: nothing to sit beside.
 		}
-		inMux := strings.TrimSpace(getenv("TMUX")) != "" || strings.TrimSpace(getenv("WT_SESSION")) != "" ||
+		inMux := strings.TrimSpace(getenv("TMUX")) != "" || strings.TrimSpace(getenv("ZELLIJ")) != "" ||
+			strings.TrimSpace(getenv("WT_SESSION")) != "" ||
 			macSplitTerminalApp(guardSplitGOOS, getenv) != ""
 		return inMux, nil
 	case "on", "true", "1", "yes":
@@ -370,6 +483,13 @@ func openGuardInfoPane(stderr io.Writer, getenv func(string) string, where, gwUR
 		return
 	}
 	if plan.Host == "none" {
+		if banner := guardSplitDegradedBanner(getenv); banner != "" {
+			fmt.Fprintln(stderr, banner)
+		}
+		// Best-effort milestone toast so a single-pane operator notices the guard is live even
+		// though --split could not open an overlay. A failure here changes nothing: the banner
+		// above is already printed and the fallback recipe below still follows.
+		guardSplitMilestoneNotify(guardSplitGOOS, guardSplitLookPath, runGuardSplitNotify, "fak guard", "split host not found — fak telemetry is on your status line; run `fak info` in another pane for live metrics")
 		fmt.Fprint(stderr, plan.Fallback)
 		return
 	}
