@@ -235,6 +235,14 @@ type InKernelPlanner struct {
 	mtpCanaryRequest    model.Qwen38CanaryRequest
 	mtpKillSwitch       *model.Qwen38MTPKillSwitch
 	mtpCanaryResult     model.Qwen38CanaryDecision
+
+	// warmState is the planner-owned startup KV-cache warm lifecycle (CW-27, the
+	// InKernelWarmState type below). It owns the bounded single-profile coalescing slot,
+	// the in-flight warm cancellation, and the idempotent release of the abstract
+	// residency claim handed over by the later warm API. Its zero value is a usable
+	// idle state, so every constructor — including a bare &InKernelPlanner{} — can
+	// begin a startup warm with no initialization step to forget.
+	warmState InKernelWarmState
 }
 
 type inKernelOOMRetryClassStats struct {
@@ -3519,3 +3527,233 @@ func (p *InKernelPlanner) includeResidentWeightsInRequestFit() bool {
 // node can never race our read of its KV. Returns the generated-token count, the prompt
 // length, the reused-prefix length, prefill/decode seconds, and whether a stop (not maxNew)
 // ended the turn.
+
+// InKernelWarmState is the planner-owned startup KV-cache warm lifecycle (CW-27 of the
+// agent-startup cache-warm program). It exists because a helper in another Go file cannot
+// add struct fields to InKernelPlanner, and a package-global planner-pointer map would leak:
+// the bounded, synchronized warm lifecycle must live on the planner itself.
+//
+// It deliberately makes NO cache and runs NO warming. It owns exactly four things:
+//
+//  1. A BOUNDED SINGLE-PROFILE coalescing slot: at most one startup warm profile is active
+//     at a time; a second concurrent Begin for the SAME profile joins the in-flight work
+//     (the coalescing win) while a Begin for a DIFFERENT profile is refused rather than
+//     silently queued or duplicated.
+//  2. Explicit synchronization over that slot (one mutex; no lock-free "just a bool").
+//  3. A cancellation context derived from the caller's, cancelled by Release, so a
+//     shutdown or an admitted demand can stop optional startup work.
+//  4. An abstract RELEASE callback — the residency claim handover owned by the later warm
+//     API (fak#13341). This leaf never dereferences a radix claim; it only guarantees the
+//     callback fires at most once, idempotently, on Complete or Release.
+//
+// The zero value is a usable idle state, so every constructor — including a bare
+// &InKernelPlanner{} in a test — can Begin a startup warm with no initialization step to
+// forget (the same idiom as inKernelTurnTaxState and moeResidencyState).
+type InKernelWarmState struct {
+	mu sync.Mutex
+	// phase is the closed lifecycle vocabulary. It starts at warmStateIdle (the zero
+	// value) and only Release moves it to warmStateReleased, which is terminal: a released
+	// planner never starts another startup warm until an explicit Reset.
+	phase warmPhase
+	// profileID names the single active/coalesced warm profile. Empty while idle.
+	profileID string
+	// slotComplete records that the active profile finished (Complete) and the release
+	// callback has been invoked; the lock is still held by the lifecycle until Release/Reset.
+	slotComplete bool
+	// ctx is the cancellation context handed to every Begin caller joined onto this slot.
+	ctx context.Context
+	// cancel cancels ctx on Release. Nil while idle.
+	cancel context.CancelFunc
+	// release is the abstract residency-release callback (fak#13341), invoked at most once.
+	release func()
+	// coalesced counts Begin callers that joined an already-active profile (the winning
+	// half of the bounded single-profile slot); refused counts Begin callers refused because
+	// a DIFFERENT profile was active. Both are readbacks, never gates.
+	coalesced int
+	refused   int
+}
+
+type warmPhase uint8
+
+const (
+	// warmStateIdle is the zero value: no startup warm active, none released.
+	warmStateIdle warmPhase = iota
+	// warmStateActive: one profile owns the slot until Complete or Release.
+	warmStateActive
+	// warmStateReleased: the planner's startup warm owner shut down; Begin is refused and
+	// the release callback has fired. Terminal until Reset.
+	warmStateReleased
+)
+
+// ErrInKernelWarmReleased is returned by Begin after the planner's startup warm owner has
+// released: a shut-down planner must not start new optional startup work.
+var ErrInKernelWarmReleased = errors.New("agent: in-kernel startup warm already released")
+
+// ErrInKernelWarmProfileBusy is returned by Begin when a DIFFERENT profile already owns the
+// bounded single-profile slot. The caller may retry once the active profile completes or the
+// planner releases; this is a refusal, never a silent queue (the "bounded" in the contract).
+var ErrInKernelWarmProfileBusy = errors.New("agent: in-kernel startup warm slot held by another profile")
+
+// Begin opens (or joins) the single startup warm slot for profileID, deriving a cancellable
+// context from parent. It returns the context the caller must use for the optional startup
+// work, and coalesced=true when this call JOINED an already-active profile with the SAME id
+// (the winner of the coalescing contract) rather than starting new work.
+//
+// A different active profile is refused with ErrInKernelWarmProfileBusy; a released planner
+// is refused with ErrInKernelWarmReleased. A nil parent uses context.Background. The returned
+// context is cancelled by Release.
+func (s *InKernelWarmState) Begin(parent context.Context, profileID string) (ctx context.Context, coalesced bool, err error) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch s.phase {
+	case warmStateReleased:
+		return nil, false, ErrInKernelWarmReleased
+	case warmStateActive:
+		if !s.slotComplete && s.profileID == profileID {
+			s.coalesced++
+			if s.ctx == nil {
+				s.ctx, s.cancel = context.WithCancel(parent)
+			}
+			return s.ctx, true, nil
+		}
+		if s.profileID != profileID || s.slotComplete {
+			s.refused++
+			return nil, false, ErrInKernelWarmProfileBusy
+		}
+	}
+	// Idle, or the same profile after completion: (re)open the slot.
+	s.phase = warmStateActive
+	s.profileID = profileID
+	s.slotComplete = false
+	s.ctx, s.cancel = context.WithCancel(parent)
+	return s.ctx, false, nil
+}
+
+// BindRelease attaches the abstract residency-release callback for the active slot. It is
+// invoked at most once, by Complete or Release, whichever happens first; nil clears it. It
+// is the seam the later warm API (fak#13341) uses to bind the radix claim without this leaf
+// ever dereferencing one.
+func (s *InKernelWarmState) BindRelease(release func()) {
+	s.mu.Lock()
+	s.release = release
+	s.mu.Unlock()
+}
+
+// Complete marks the active profile finished and fires the bound release callback exactly
+// once (idempotently). It is safe to call more than once and safe when no warm is active: a
+// completed slot refuses new Begin calls for the same profile id until Reset, so a stale
+// completion cannot resurrect finished startup work.
+func (s *InKernelWarmState) Complete() {
+	s.mu.Lock()
+	if s.phase != warmStateActive || s.slotComplete {
+		s.mu.Unlock()
+		return
+	}
+	s.slotComplete = true
+	release := s.release
+	s.release = nil
+	s.mu.Unlock()
+	if release != nil {
+		release()
+	}
+}
+
+// Release is the startup-context shutdown owner: it cancels any in-flight warm, fires the
+// bound release callback at most once, and moves the state to terminal released so no further
+// startup warm can begin. It is idempotent — the second and later calls are no-ops, and the
+// release callback never runs twice.
+func (s *InKernelWarmState) Release() {
+	s.mu.Lock()
+	if s.phase == warmStateReleased {
+		s.mu.Unlock()
+		return
+	}
+	cancel := s.cancel
+	release := s.release
+	s.release = nil
+	s.cancel = nil
+	s.phase = warmStateReleased
+	s.slotComplete = false
+	s.profileID = ""
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if release != nil {
+		release()
+	}
+}
+
+// Reset returns a released or completed state to a usable idle slot for a new startup warm
+// (the explicit reset the contract requires). It is idempotent and never fires the release
+// callback: a caller that wants release semantics must call Release, not Reset.
+func (s *InKernelWarmState) Reset() {
+	s.mu.Lock()
+	s.phase = warmStateIdle
+	s.profileID = ""
+	s.slotComplete = false
+	s.ctx = nil
+	s.cancel = nil
+	s.release = nil
+	s.coalesced = 0
+	s.refused = 0
+	s.mu.Unlock()
+}
+
+// Active reports whether a startup warm profile currently owns the slot. It is a readback
+// seam for startup callers and receipts; it never mutates the state.
+func (s *InKernelWarmState) Active() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.phase == warmStateActive && !s.slotComplete
+}
+
+// ProfileID returns the profile currently owning the active slot, or "" when idle/released.
+func (s *InKernelWarmState) ProfileID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.phase != warmStateActive || s.slotComplete {
+		return ""
+	}
+	return s.profileID
+}
+
+// CoalescedCount returns how many Begin calls joined an already-active same-profile slot, and
+// RefusedCount how many were refused because a different profile held the bounded slot. Both
+// are cumulative for the slot's lifetime and reset by Reset.
+func (s *InKernelWarmState) CoalescedCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.coalesced
+}
+
+// RefusedCount returns how many Begin calls were refused by the bounded single-profile slot.
+func (s *InKernelWarmState) RefusedCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.refused
+}
+
+// StartupWarmState exposes the planner-owned startup warm lifecycle so startup callers can
+// Begin a bounded, cancellable warm and the shutdown owner can Release it. The returned
+// pointer aliases planner state; callers must not retain it past the planner's lifetime.
+func (p *InKernelPlanner) StartupWarmState() *InKernelWarmState {
+	if p == nil {
+		return nil
+	}
+	return &p.warmState
+}
+
+// ReleaseStartupWarm is the planner's shutdown-owner hook: it delegates to the owned
+// InKernelWarmState, cancelling any in-flight startup warm and firing the bound release
+// callback at most once. A nil planner is a no-op. Startup callers that own the planner's
+// lifetime call this in their shutdown path (there is no InKernelPlanner.Close yet).
+func (p *InKernelPlanner) ReleaseStartupWarm() {
+	if p == nil {
+		return
+	}
+	p.warmState.Release()
+}
