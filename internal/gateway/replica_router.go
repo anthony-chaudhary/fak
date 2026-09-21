@@ -13,15 +13,15 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
-var ErrReplicaRouterEmpty = errors.New("gateway: replica router has no replicas")
+var ErrReplicaDispatchEmpty = errors.New("gateway: replica dispatch has no replicas")
 
-// PickPolicy is the pluggable placement policy behind ReplicaRouter.pick(). The
+// PickPolicy is the pluggable placement policy behind ReplicaDispatch.pick(). The
 // skeleton supplies the candidate set (the live admissible replicas), the request's
 // shared prefix (a leading run of stable segment identities — see prefixSegments),
 // and a load function (each candidate's live in-flight count, 0 when unknown); the
-// policy returns the chosen replica. Returning ok=false makes the router fall back to
+// policy returns the chosen replica. Returning ok=false makes the dispatch fall back to
 // its built-in round-robin, so a policy is purely additive and never strands a request.
-// CacheAwarePolicy is the issue-#41 implementation; nil leaves the router policy-free.
+// CacheAwarePolicy is the issue-#41 implementation; nil leaves the dispatch policy-free.
 type PickPolicy interface {
 	Pick(candidates []PlannerReplica, prefix []string, load func(name string) int) (PlannerReplica, bool)
 }
@@ -36,25 +36,25 @@ type PlannerReplica struct {
 	// so the health loop can register the worker with the endpoint it actually
 	// probes/dispatches against — WorkerSpec.Endpoint — rather than overloading
 	// that field with the replica identity. Empty on a hand-built test replica; the
-	// membership then records no endpoint, which the router never reads for placement
+	// membership then records no endpoint, which the dispatch never reads for placement
 	// (it binds by Name == WorkerSpec.ID).
 	Endpoint string
 }
 
-// ReplicaInfo is the read-only registry view exposed by ReplicaRouter.
+// ReplicaInfo is the read-only registry view exposed by ReplicaDispatch.
 type ReplicaInfo struct {
 	Name  string
 	Model string
 }
 
-// ReplicaRouter is an agent.Planner that dispatches turns across a fixed replica set.
-type ReplicaRouter struct {
+// ReplicaDispatch is an agent.Planner that dispatches turns across a fixed replica set.
+type ReplicaDispatch struct {
 	model    string
 	replicas []PlannerReplica
 	next     atomic.Uint64
 
-	// membership is the optional live health/drain/failover loop the router reads.
-	// When nil the router stays policy-free (blind round-robin over every replica).
+	// membership is the optional live health/drain/failover loop the dispatch reads.
+	// When nil the dispatch stays policy-free (blind round-robin over every replica).
 	// When attached (WithMembership), pick() routes only to replicas the loop
 	// currently marks admissible — so an unhealthy or draining worker drops out of
 	// the rotation within the health interval — and returns ErrNoHealthyWorker (a
@@ -64,18 +64,18 @@ type ReplicaRouter struct {
 	// read goes through liveMembership().
 	membership atomic.Pointer[FleetMembership]
 
-	// fleet is the live membership this router was BUILT against but has not yet armed.
+	// fleet is the live membership this dispatch was BUILT against but has not yet armed.
 	// newProxyPlanner registers the configured replica roster here so the host can start
 	// the health loop on the serve lifecycle context and arm admission ONCE, at Serve —
 	// rather than at construction, where a not-yet-probed roster would read as an outage
 	// for any request racing the first beat, and where construction would have to do a
 	// blocking network probe. WithMembership promotes it to the live membership the
-	// placement paths read (see runFleetHealthLoop). nil for a router built without a
-	// fleet (a lone upstream, or a hand-built test router).
+	// placement paths read (see runFleetHealthLoop). nil for a dispatch built without a
+	// fleet (a lone upstream, or a hand-built test dispatch).
 	fleet *FleetMembership
 
 	// policy is the optional cache-aware placement policy (issue #41). When nil the
-	// router keeps its round-robin pick unchanged; when set (WithPickPolicy), pick()
+	// dispatch keeps its round-robin pick unchanged; when set (WithPickPolicy), pick()
 	// scores the admissible candidates by prefix residency × inverse load and falls
 	// back to round-robin only if the policy declines. It composes with membership:
 	// the candidate set is the admissible subset, and the load function is each
@@ -131,15 +131,15 @@ func (r reservedPlannerReplica) currentDecodeDecision() (DecodeFootprintRouteDec
 	return r.decode.decisionSnapshot()
 }
 
-// NewReplicaRouter builds a static, in-process planner fleet. It is intentionally
+// NewReplicaDispatch builds a static, in-process planner fleet. It is intentionally
 // policy-free: later residency/health work can choose smarter placement without changing
 // the gateway's Planner seam.
-func NewReplicaRouter(model string, replicas []PlannerReplica) (*ReplicaRouter, error) {
+func NewReplicaDispatch(model string, replicas []PlannerReplica) (*ReplicaDispatch, error) {
 	if model == "" {
-		return nil, errors.New("gateway: replica router model id is empty")
+		return nil, errors.New("gateway: replica dispatch model id is empty")
 	}
 	if len(replicas) == 0 {
-		return nil, ErrReplicaRouterEmpty
+		return nil, ErrReplicaDispatchEmpty
 	}
 	seen := make(map[string]struct{}, len(replicas))
 	cp := make([]PlannerReplica, len(replicas))
@@ -156,7 +156,7 @@ func NewReplicaRouter(model string, replicas []PlannerReplica) (*ReplicaRouter, 
 		seen[repl.Name] = struct{}{}
 		cp[i] = repl
 	}
-	return &ReplicaRouter{model: model, replicas: cp}, nil
+	return &ReplicaDispatch{model: model, replicas: cp}, nil
 }
 
 // parseReplicaEntry splits an optional operator-chosen identity from a
@@ -183,7 +183,7 @@ func parseReplicaEntry(raw string) (name, url string) {
 // peer (#3968). Positional replica-N naming silently reassigned identity on any reorder
 // or removal: dropping URL 1 of 3 renamed the survivors and restarted their counters.
 // Two entries that resolve to the same endpoint collide on this derived name and are
-// rejected by NewReplicaRouter's duplicate-name check; give same-endpoint replicas the
+// rejected by NewReplicaDispatch's duplicate-name check; give same-endpoint replicas the
 // explicit name=URL form to keep them distinct.
 func deriveReplicaName(rawURL string) string {
 	key := strings.TrimSpace(rawURL)
@@ -194,17 +194,17 @@ func deriveReplicaName(rawURL string) string {
 	return "replica-" + hex.EncodeToString(sum[:3])
 }
 
-// FleetMembership returns the live membership the router was BUILT against, or nil when
+// FleetMembership returns the live membership the dispatch was BUILT against, or nil when
 // it was built without one. It is the handle the host hands to the health loop; the
 // membership is unarmed until the host promotes it via WithMembership.
-func (r *ReplicaRouter) FleetMembership() *FleetMembership {
+func (r *ReplicaDispatch) FleetMembership() *FleetMembership {
 	if r == nil {
 		return nil
 	}
 	return r.fleet
 }
 
-// WithMembership attaches a live FleetMembership so the router routes only to
+// WithMembership attaches a live FleetMembership so the dispatch routes only to
 // admissible (healthy, non-draining) replicas. A replica is bound to a worker by
 // Name == WorkerSpec.ID; a replica absent from membership, still unknown, drained,
 // or unhealthy is dropped from the rotation, and a pick with no admissible worker
@@ -212,7 +212,7 @@ func (r *ReplicaRouter) FleetMembership() *FleetMembership {
 // nil restores the policy-free blind round-robin. Returns r for chaining. It is safe
 // to call concurrently with routing: the publish is a single atomic store the
 // request-goroutine reads observe through liveMembership.
-func (r *ReplicaRouter) WithMembership(m *FleetMembership) *ReplicaRouter {
+func (r *ReplicaDispatch) WithMembership(m *FleetMembership) *ReplicaDispatch {
 	if r == nil {
 		return nil
 	}
@@ -220,11 +220,11 @@ func (r *ReplicaRouter) WithMembership(m *FleetMembership) *ReplicaRouter {
 	return r
 }
 
-// liveMembership reads the atomically-published membership, or nil when the router
+// liveMembership reads the atomically-published membership, or nil when the dispatch
 // is nil or no membership has been attached. It is the single read seam every
 // placement path uses, so a concurrent WithMembership publish can never be read as a
 // torn or stale pointer.
-func (r *ReplicaRouter) liveMembership() *FleetMembership {
+func (r *ReplicaDispatch) liveMembership() *FleetMembership {
 	if r == nil {
 		return nil
 	}
@@ -235,7 +235,7 @@ func (r *ReplicaRouter) liveMembership() *FleetMembership {
 // the policy to choose among the admissible candidates, falling back to round-robin if
 // the policy declines. Passing nil restores the policy-free round-robin. Returns r for
 // chaining (composes with WithMembership).
-func (r *ReplicaRouter) WithPickPolicy(p PickPolicy) *ReplicaRouter {
+func (r *ReplicaDispatch) WithPickPolicy(p PickPolicy) *ReplicaDispatch {
 	if r == nil {
 		return nil
 	}
@@ -243,7 +243,7 @@ func (r *ReplicaRouter) WithPickPolicy(p PickPolicy) *ReplicaRouter {
 	return r
 }
 
-func (r *ReplicaRouter) Model() string {
+func (r *ReplicaDispatch) Model() string {
 	if r == nil {
 		return ""
 	}
@@ -251,7 +251,7 @@ func (r *ReplicaRouter) Model() string {
 }
 
 // Replicas returns a stable snapshot of the static registry.
-func (r *ReplicaRouter) Replicas() []ReplicaInfo {
+func (r *ReplicaDispatch) Replicas() []ReplicaInfo {
 	if r == nil || len(r.replicas) == 0 {
 		return nil
 	}
@@ -263,7 +263,7 @@ func (r *ReplicaRouter) Replicas() []ReplicaInfo {
 }
 
 // WalkPlanners traverses each direct child planner in the replica set.
-func (r *ReplicaRouter) WalkPlanners(fn func(agent.Planner)) {
+func (r *ReplicaDispatch) WalkPlanners(fn func(agent.Planner)) {
 	if r == nil {
 		return
 	}
@@ -274,7 +274,7 @@ func (r *ReplicaRouter) WalkPlanners(fn func(agent.Planner)) {
 	}
 }
 
-func (r *ReplicaRouter) pickDistinctReplica(primary string) (PlannerReplica, bool) {
+func (r *ReplicaDispatch) pickDistinctReplica(primary string) (PlannerReplica, bool) {
 	admit, err := r.admitSet()
 	if err != nil {
 		return PlannerReplica{}, false
@@ -292,7 +292,7 @@ func (r *ReplicaRouter) pickDistinctReplica(primary string) (PlannerReplica, boo
 	}
 	return PlannerReplica{}, false
 }
-func (r *ReplicaRouter) Complete(ctx context.Context, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+func (r *ReplicaDispatch) Complete(ctx context.Context, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
 	route, err := r.reserveForMessages(messages, opts)
 	if err != nil {
 		return nil, err
@@ -308,7 +308,7 @@ func (r *ReplicaRouter) Complete(ctx context.Context, messages []agent.Message, 
 	return r.completeHedged(ctx, route, messages, tools, opts...)
 }
 
-func (r *ReplicaRouter) completeReserved(ctx context.Context, route reservedPlannerReplica, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (comp *agent.Completion, err error) {
+func (r *ReplicaDispatch) completeReserved(ctx context.Context, route reservedPlannerReplica, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (comp *agent.Completion, err error) {
 	defer func() { route.finish(ctx, comp, err, false) }()
 	tried := make(map[string]struct{}, len(r.replicas))
 	for {
@@ -347,7 +347,7 @@ func replicaFallbackAllowed(ctx context.Context, err error) bool {
 	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
 }
 
-func (r *ReplicaRouter) StreamingSupported() bool {
+func (r *ReplicaDispatch) StreamingSupported() bool {
 	if r == nil || len(r.replicas) == 0 {
 		return false
 	}
@@ -360,7 +360,7 @@ func (r *ReplicaRouter) StreamingSupported() bool {
 	return true
 }
 
-func (r *ReplicaRouter) CompleteStream(ctx context.Context, sink agent.StreamSink, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (comp *agent.Completion, err error) {
+func (r *ReplicaDispatch) CompleteStream(ctx context.Context, sink agent.StreamSink, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (comp *agent.Completion, err error) {
 	route, err := r.reserveForMessages(messages, opts)
 	if err != nil {
 		return nil, err
@@ -375,7 +375,7 @@ func (r *ReplicaRouter) CompleteStream(ctx context.Context, sink agent.StreamSin
 	return comp, err
 }
 
-func (r *ReplicaRouter) reserveForMessages(messages []agent.Message, opts []agent.SampleOpt) (reservedPlannerReplica, error) {
+func (r *ReplicaDispatch) reserveForMessages(messages []agent.Message, opts []agent.SampleOpt) (reservedPlannerReplica, error) {
 	var prefix []string
 	if r != nil && r.policy != nil {
 		prefix = prefixSegments(messages)
@@ -383,17 +383,17 @@ func (r *ReplicaRouter) reserveForMessages(messages []agent.Message, opts []agen
 	return r.reserveWithDecode(prefix, nil, decodeFootprintRouteRequest{ExpectedOutputTokens: sampleMaxTokens(opts)})
 }
 
-func (r *ReplicaRouter) reserve(prefix []string, skip map[string]struct{}) (reservedPlannerReplica, error) {
+func (r *ReplicaDispatch) reserve(prefix []string, skip map[string]struct{}) (reservedPlannerReplica, error) {
 	return r.reserveWithDecode(prefix, skip, decodeFootprintRouteRequest{})
 }
 
-func (r *ReplicaRouter) reserveWithDecode(prefix []string, skip map[string]struct{}, req decodeFootprintRouteRequest) (reservedPlannerReplica, error) {
+func (r *ReplicaDispatch) reserveWithDecode(prefix []string, skip map[string]struct{}, req decodeFootprintRouteRequest) (reservedPlannerReplica, error) {
 	return r.reserveOnEngineWithDecode(prefix, skip, "", req)
 }
 
-func (r *ReplicaRouter) reserveOnEngineWithDecode(prefix []string, skip map[string]struct{}, engine EngineKind, req decodeFootprintRouteRequest) (reservedPlannerReplica, error) {
+func (r *ReplicaDispatch) reserveOnEngineWithDecode(prefix []string, skip map[string]struct{}, engine EngineKind, req decodeFootprintRouteRequest) (reservedPlannerReplica, error) {
 	if r == nil || len(r.replicas) == 0 {
-		return reservedPlannerReplica{}, ErrReplicaRouterEmpty
+		return reservedPlannerReplica{}, ErrReplicaDispatchEmpty
 	}
 	membership := r.liveMembership()
 	if membership == nil {
@@ -407,7 +407,7 @@ func (r *ReplicaRouter) reserveOnEngineWithDecode(prefix []string, skip map[stri
 			}
 		}
 		if len(candidates) == 0 {
-			return reservedPlannerReplica{}, ErrReplicaRouterEmpty
+			return reservedPlannerReplica{}, ErrReplicaDispatchEmpty
 		}
 		if policy, ok := r.policy.(decodeFootprintPickPolicy); ok {
 			if repl, booking, picked := policy.reserveDecodeFootprint(candidates, prefix, nil, nil, req); picked {
@@ -452,7 +452,7 @@ func (r *ReplicaRouter) reserveOnEngineWithDecode(prefix []string, skip map[stri
 	return reservedPlannerReplica{replica: repl, reservation: reservation, prefix: prefix, decode: booking, decodeDecision: decision}, nil
 }
 
-func (r *ReplicaRouter) retargetReserved(reservation *fleetReservation, booking *decodeFootprintReservation, prefix []string, skip map[string]struct{}) (PlannerReplica, error) {
+func (r *ReplicaDispatch) retargetReserved(reservation *fleetReservation, booking *decodeFootprintReservation, prefix []string, skip map[string]struct{}) (PlannerReplica, error) {
 	byName := make(map[string]PlannerReplica, len(r.replicas))
 	allowed := make(map[string]struct{}, len(r.replicas))
 	for _, repl := range r.replicas {
@@ -474,7 +474,7 @@ func (r *ReplicaRouter) retargetReserved(reservation *fleetReservation, booking 
 	return repl, nil
 }
 
-func (r *ReplicaRouter) reservationPicker(prefix []string, byName map[string]PlannerReplica, req decodeFootprintRouteRequest, existing *decodeFootprintReservation, capture **decodeFootprintReservation) fleetReservationPick {
+func (r *ReplicaDispatch) reservationPicker(prefix []string, byName map[string]PlannerReplica, req decodeFootprintRouteRequest, existing *decodeFootprintReservation, capture **decodeFootprintReservation) fleetReservationPick {
 	return func(statuses []WorkerStatus) (fleetReservationPickResult, bool) {
 		candidates := make([]PlannerReplica, 0, len(statuses))
 		inflight := make(map[string]int, len(statuses))
@@ -534,7 +534,7 @@ func bookingBlocks(created, existing *decodeFootprintReservation) int {
 	return booking.bookedBlocks()
 }
 
-func (r *ReplicaRouter) roundRobinCandidate(candidates map[string]int) (string, bool) {
+func (r *ReplicaDispatch) roundRobinCandidate(candidates map[string]int) (string, bool) {
 	if len(candidates) == 0 || len(r.replicas) == 0 {
 		return "", false
 	}
@@ -549,9 +549,9 @@ func (r *ReplicaRouter) roundRobinCandidate(candidates map[string]int) (string, 
 	return "", false
 }
 
-func (r *ReplicaRouter) pick(prefix []string) (PlannerReplica, error) {
+func (r *ReplicaDispatch) pick(prefix []string) (PlannerReplica, error) {
 	if r == nil || len(r.replicas) == 0 {
-		return PlannerReplica{}, ErrReplicaRouterEmpty
+		return PlannerReplica{}, ErrReplicaDispatchEmpty
 	}
 	if r.policy != nil {
 		if repl, err, handled := r.pickByPolicy(prefix); handled {
@@ -565,7 +565,7 @@ func (r *ReplicaRouter) pick(prefix []string) (PlannerReplica, error) {
 // handled=false means the policy declined and the caller should fall back to
 // round-robin; handled=true carries the policy's decision (or the typed no-worker
 // verdict when membership leaves nothing admissible).
-func (r *ReplicaRouter) pickByPolicy(prefix []string) (repl PlannerReplica, err error, handled bool) {
+func (r *ReplicaDispatch) pickByPolicy(prefix []string) (repl PlannerReplica, err error, handled bool) {
 	candidates, load, cerr := r.candidatesAndLoad()
 	if cerr != nil {
 		return PlannerReplica{}, cerr, true
@@ -574,7 +574,7 @@ func (r *ReplicaRouter) pickByPolicy(prefix []string) (repl PlannerReplica, err 
 		if r.liveMembership() != nil {
 			return PlannerReplica{}, ErrNoHealthyWorker, true
 		}
-		return PlannerReplica{}, ErrReplicaRouterEmpty, true
+		return PlannerReplica{}, ErrReplicaDispatchEmpty, true
 	}
 	if chosen, ok := r.policy.Pick(candidates, prefix, load); ok {
 		return chosen, nil, true
@@ -582,14 +582,14 @@ func (r *ReplicaRouter) pickByPolicy(prefix []string) (repl PlannerReplica, err 
 	return PlannerReplica{}, nil, false
 }
 
-// admitSet is the router's membership read: the ids membership currently offers for
-// THIS router's model, with the model filter applied BEFORE the health filter. A nil
+// admitSet is the dispatch's membership read: the ids membership currently offers for
+// THIS dispatch's model, with the model filter applied BEFORE the health filter. A nil
 // membership yields a nil set (the caller then keeps the blind rotation). The error is
 // the typed placement verdict membership decided — ErrNoWorkerForModel when the roster
 // holds no worker for r.model (a heterogeneous fleet that simply does not carry this
 // model), ErrNoHealthyWorker when a holder exists but none is admissible. Routing that
 // distinction up unchanged is the point: a config mistake must not read as an outage.
-func (r *ReplicaRouter) admitSet() (map[string]struct{}, error) {
+func (r *ReplicaDispatch) admitSet() (map[string]struct{}, error) {
 	membership := r.liveMembership()
 	if membership == nil {
 		return nil, nil
@@ -610,7 +610,7 @@ func (r *ReplicaRouter) admitSet() (map[string]struct{}, error) {
 // plus a load function that reports each worker's live in-flight count (nil when there
 // is no membership to read load from, so the policy scores on residency alone). A
 // non-nil error is membership's typed verdict and is returned to the caller as-is.
-func (r *ReplicaRouter) candidatesAndLoad() ([]PlannerReplica, func(string) int, error) {
+func (r *ReplicaDispatch) candidatesAndLoad() ([]PlannerReplica, func(string) int, error) {
 	membership := r.liveMembership()
 	if membership == nil {
 		return r.replicas, nil, nil
@@ -634,9 +634,9 @@ func (r *ReplicaRouter) candidatesAndLoad() ([]PlannerReplica, func(string) int,
 
 // pickRoundRobin is the policy-free placement: round-robin over every replica, or —
 // when membership is attached — over the admissible subset, returning the typed
-// no-worker verdict rather than routing to a dead upstream. This is the router's
+// no-worker verdict rather than routing to a dead upstream. This is the dispatch's
 // behavior whenever no cache-aware policy is attached or the policy declines.
-func (r *ReplicaRouter) pickRoundRobin() (PlannerReplica, error) {
+func (r *ReplicaDispatch) pickRoundRobin() (PlannerReplica, error) {
 	n := uint64(len(r.replicas))
 	start := r.next.Add(1) - 1 // advance the shared cursor exactly once per pick
 	if r.liveMembership() == nil {
@@ -646,7 +646,7 @@ func (r *ReplicaRouter) pickRoundRobin() (PlannerReplica, error) {
 	// loop currently admits FOR THIS ROUTER'S MODEL, scanning forward from the cursor
 	// so picks still spread across the admissible subset. A worker that does not hold
 	// r.model is filtered out before health is even consulted, so a heterogeneous
-	// fleet never hands this router's request to a worker serving a different model;
+	// fleet never hands this dispatch's request to a worker serving a different model;
 	// an unhealthy or draining holder drops from the rotation within the health
 	// interval; and when nothing is left we return the typed verdict membership
 	// decided rather than route to a wrong or dead upstream.

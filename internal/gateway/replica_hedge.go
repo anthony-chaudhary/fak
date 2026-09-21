@@ -110,7 +110,7 @@ func hedgeIneligibility(policy *HedgePolicy, replicas int, tools []agent.ToolDef
 	return ""
 }
 
-func (r *ReplicaRouter) observeHedgeAbstention(primary PlannerReplica, reason string) {
+func (r *ReplicaDispatch) observeHedgeAbstention(primary PlannerReplica, reason string) {
 	policy := r.Hedge
 	if policy == nil || policy.Observe == nil {
 		return
@@ -132,7 +132,7 @@ type hedgeResult struct {
 	finished   time.Time
 }
 
-func (r *ReplicaRouter) completeHedged(ctx context.Context, primary reservedPlannerReplica, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+func (r *ReplicaDispatch) completeHedged(ctx context.Context, primary reservedPlannerReplica, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
 	policy := r.Hedge
 	receipt := HedgeReceipt{
 		Schema:                  hedgeReceiptSchema,

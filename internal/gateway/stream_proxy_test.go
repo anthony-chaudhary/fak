@@ -110,7 +110,7 @@ func TestChatProxyStreamsUpstreamContentLive(t *testing.T) {
 	}
 }
 
-func TestChatProxyStreamUsesReplicaRouter(t *testing.T) {
+func TestChatProxyStreamUsesReplicaDispatch(t *testing.T) {
 	abi.ResetForTest()
 	abi.RegisterRegionBackend(inlineBackend{})
 	abi.RegisterEngine("test", echoEngine{})

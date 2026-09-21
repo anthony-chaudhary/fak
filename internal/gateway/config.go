@@ -259,7 +259,7 @@ type Config struct {
 	BaseURL string
 	// ReplicaBaseURLs adds static upstream replicas to the live proxy. When BaseURL
 	// plus ReplicaBaseURLs names two or more endpoints, New wraps the per-endpoint
-	// HTTP planners in a ReplicaRouter and dispatches turns round-robin. Empty keeps
+	// HTTP planners in a ReplicaDispatch and dispatches turns round-robin. Empty keeps
 	// the historical single-upstream behavior.
 	ReplicaBaseURLs []string
 	// HedgePolicy explicitly enables bounded delayed hedging for eligible buffered

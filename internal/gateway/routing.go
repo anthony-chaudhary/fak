@@ -21,10 +21,10 @@ import (
 // ADDITIVE: it touches no existing request path and breaks no API, so it can be wired
 // into dispatch incrementally (the host picks the EngineID from Route().Tier.Model).
 // The whole policy is data-in / decision-out — no I/O, no goroutines on the hot path —
-// so it is trivially A/B-testable: run two RouterConfigs over the same RequestClass and
+// so it is trivially A/B-testable: run two TierPolicyConfigs over the same RequestClass and
 // diff the selected tiers.
 //
-// THE ALGORITHM (Router.Route).
+// THE ALGORITHM (TierPolicy.Route).
 //  1. CANDIDATES — keep every tier that is (a) healthy, (b) has capacity for the
 //     prompt (Tier.MaxPromptTokens == 0 means unbounded, else >= PromptTokens), (c) is
 //     Interactive-capable when the request demands interactive latency, and (d) meets
@@ -41,7 +41,7 @@ import (
 //     walks to the next. If NO tier qualifies, Route returns ErrNoTier (a structured
 //     refusal the caller routes to a 503 / replan, never a silent mis-route).
 //
-// Tiers are CONFIGURABLE (RouterConfig.Tiers) and the strategy is selectable, so a
+// Tiers are CONFIGURABLE (TierPolicyConfig.Tiers) and the strategy is selectable, so a
 // deployment expresses its own size/latency/cost trade-off without a code change.
 
 // RoutingStrategy selects how Route picks among the tiers that satisfy a request.
@@ -103,7 +103,7 @@ func (c Complexity) floorIndex(nTiers int) int {
 
 // Tier is one serving tier: a (model, hardware) class with a capacity ceiling, a
 // relative cost, and whether it is suitable for interactive latency. Tiers are ordered
-// in RouterConfig.Tiers ascending by capability (smallest/cheapest first).
+// in TierPolicyConfig.Tiers ascending by capability (smallest/cheapest first).
 type Tier struct {
 	// Name is the tier label used in decisions and metrics (e.g. "small").
 	Name string
@@ -137,17 +137,17 @@ type RequestClass struct {
 	AffinityKey string
 }
 
-// RouterConfig is the configurable routing policy: the strategy and the ordered tiers.
-type RouterConfig struct {
+// TierPolicyConfig is the configurable routing policy: the strategy and the ordered tiers.
+type TierPolicyConfig struct {
 	Strategy RoutingStrategy
 	Tiers    []Tier
 }
 
-// DefaultRouterConfig returns a sensible three-tier hybrid policy (small / medium /
+// DefaultTierPolicyConfig returns a sensible three-tier hybrid policy (small / medium /
 // large) for out-of-the-box use. Capacities and costs are relative defaults a
 // deployment is expected to override.
-func DefaultRouterConfig() RouterConfig {
-	return RouterConfig{
+func DefaultTierPolicyConfig() TierPolicyConfig {
+	return TierPolicyConfig{
 		Strategy: StrategyHybrid,
 		Tiers: []Tier{
 			{Name: "small", Model: "small", MaxPromptTokens: 4096, CostPerMTok: 1, Interactive: true},
@@ -157,9 +157,9 @@ func DefaultRouterConfig() RouterConfig {
 	}
 }
 
-// Validate checks a RouterConfig is well-formed: at least one tier, unique non-empty
+// Validate checks a TierPolicyConfig is well-formed: at least one tier, unique non-empty
 // names, non-negative capacities, and a known strategy ("" defaults to size-based).
-func (c RouterConfig) Validate() error {
+func (c TierPolicyConfig) Validate() error {
 	if len(c.Tiers) == 0 {
 		return errors.New("routing: config has no tiers")
 	}
@@ -200,10 +200,10 @@ type Decision struct {
 	Reason    string
 }
 
-// Router selects a serving tier for a classified request under a configured policy,
+// TierPolicy selects a serving tier for a classified request under a configured policy,
 // tracking per-tier health for fallback. It is safe for concurrent use.
-type Router struct {
-	cfg      RouterConfig
+type TierPolicy struct {
+	cfg      TierPolicyConfig
 	strategy RoutingStrategy
 
 	mu        sync.RWMutex
@@ -212,8 +212,8 @@ type Router struct {
 	now       func() time.Time     // injectable clock; nil => time.Now (kept testable)
 }
 
-// NewRouter validates cfg and returns a Router with every tier healthy.
-func NewRouter(cfg RouterConfig) (*Router, error) {
+// NewTierPolicy validates cfg and returns a TierPolicy with every tier healthy.
+func NewTierPolicy(cfg TierPolicyConfig) (*TierPolicy, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -221,12 +221,12 @@ func NewRouter(cfg RouterConfig) (*Router, error) {
 	if strategy == "" {
 		strategy = StrategySizeBased
 	}
-	return &Router{cfg: cfg, strategy: strategy, unhealthy: make(map[string]bool), cooldown: make(map[string]time.Time)}, nil
+	return &TierPolicy{cfg: cfg, strategy: strategy, unhealthy: make(map[string]bool), cooldown: make(map[string]time.Time)}, nil
 }
 
-// clock returns the Router's time source, defaulting to time.Now. Injectable so the cooldown
+// clock returns the TierPolicy's time source, defaulting to time.Now. Injectable so the cooldown
 // expiry is unit-testable without sleeping.
-func (r *Router) clock() time.Time {
+func (r *TierPolicy) clock() time.Time {
 	if r.now != nil {
 		return r.now()
 	}
@@ -236,7 +236,7 @@ func (r *Router) clock() time.Time {
 // SetHealth marks a tier up (healthy=true) or down (healthy=false) for fallback. An
 // unknown tier name is a no-op. Health checking is the caller's job; this is where the
 // result lands so Route can route around a failed tier.
-func (r *Router) SetHealth(name string, healthy bool) {
+func (r *TierPolicy) SetHealth(name string, healthy bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if healthy {
@@ -257,7 +257,7 @@ func (r *Router) SetHealth(name string, healthy bool) {
 // change, a lifted abuse gate) is picked up automatically with no operator un-demote, so a
 // transient-but-slow 403 cannot strand a tier forever. A non-positive cooldown is a no-op (nothing
 // to demote for no time); an unknown model matches no tier and is harmless.
-func (r *Router) DemoteModel(model string, cooldown time.Duration) {
+func (r *TierPolicy) DemoteModel(model string, cooldown time.Duration) {
 	if model == "" || cooldown <= 0 {
 		return
 	}
@@ -278,7 +278,7 @@ func (r *Router) DemoteModel(model string, cooldown time.Duration) {
 // demotedLocked reports whether a tier is currently under an unexpired cooldown demotion. Caller
 // holds r.mu. Expiry is lazy: a lapsed entry is treated as healthy (and left for the next write to
 // clean up) so a read never has to take the write lock.
-func (r *Router) demotedLocked(name string) bool {
+func (r *TierPolicy) demotedLocked(name string) bool {
 	until, ok := r.cooldown[name]
 	if !ok {
 		return false
@@ -288,7 +288,7 @@ func (r *Router) demotedLocked(name string) bool {
 
 // Healthy reports whether the named tier is currently considered up: neither hard-flagged down
 // (SetHealth) nor under an unexpired entitlement-403 cooldown (DemoteModel).
-func (r *Router) Healthy(name string) bool {
+func (r *TierPolicy) Healthy(name string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return !r.unhealthy[name] && !r.demotedLocked(name)
@@ -296,7 +296,7 @@ func (r *Router) Healthy(name string) bool {
 
 // Route classifies and selects. It returns the chosen Decision or ErrNoTier when no
 // healthy tier qualifies. Pure given the current health snapshot — no I/O.
-func (r *Router) Route(req RequestClass) (Decision, error) {
+func (r *TierPolicy) Route(req RequestClass) (Decision, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 

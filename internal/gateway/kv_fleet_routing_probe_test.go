@@ -17,7 +17,7 @@ func TestKVAwareFleetRoutingHitRate(t *testing.T) {
 
 	const (
 		wantStream   = 464
-		wantBlindHit = 0.8512931034482759 // cache-blind round-robin (what ReplicaRouter does today)
+		wantBlindHit = 0.8512931034482759 // cache-blind round-robin (what ReplicaDispatch does today)
 		wantAwareHit = 0.9396551724137931 // KV-aware locality routing
 		wantLift     = 1.1037974683544303 // aware / blind
 		eps          = 1e-9

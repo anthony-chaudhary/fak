@@ -40,7 +40,7 @@ func plannerKind(p agent.Planner) string {
 		return "mock"
 	case *agent.HTTPPlanner:
 		return "proxy"
-	case *ReplicaRouter:
+	case *ReplicaDispatch:
 		return "replica"
 	case *agent.InKernelPlanner:
 		return "inkernel"

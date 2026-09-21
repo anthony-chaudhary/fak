@@ -10,7 +10,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
-type replicaRouterTestPlanner struct {
+type replicaDispatchTestPlanner struct {
 	name               string
 	streaming          bool
 	streamingSupported bool
@@ -23,18 +23,18 @@ type replicaRouterTestPlanner struct {
 	gotSamples  []agent.SampleParams
 }
 
-func (p *replicaRouterTestPlanner) Model() string { return p.name }
+func (p *replicaDispatchTestPlanner) Model() string { return p.name }
 
-func (p *replicaRouterTestPlanner) Complete(ctx context.Context, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+func (p *replicaDispatchTestPlanner) Complete(ctx context.Context, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
 	p.record(false, messages, tools, opts...)
 	return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: p.name}, Model: p.name}, nil
 }
 
-func (p *replicaRouterTestPlanner) StreamingSupported() bool {
+func (p *replicaDispatchTestPlanner) StreamingSupported() bool {
 	return p.streaming && p.streamingSupported
 }
 
-func (p *replicaRouterTestPlanner) CompleteStream(ctx context.Context, sink agent.StreamSink, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+func (p *replicaDispatchTestPlanner) CompleteStream(ctx context.Context, sink agent.StreamSink, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
 	if !p.StreamingSupported() {
 		return nil, agent.ErrStreamingUnsupported
 	}
@@ -47,7 +47,7 @@ func (p *replicaRouterTestPlanner) CompleteStream(ctx context.Context, sink agen
 	return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: p.name}, Model: p.name}, nil
 }
 
-func (p *replicaRouterTestPlanner) record(stream bool, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) {
+func (p *replicaDispatchTestPlanner) record(stream bool, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) {
 	var sp agent.SampleParams
 	for _, opt := range opts {
 		opt(&sp)
@@ -64,20 +64,20 @@ func (p *replicaRouterTestPlanner) record(stream bool, messages []agent.Message,
 	p.gotSamples = append(p.gotSamples, sp)
 }
 
-func (p *replicaRouterTestPlanner) counts() (complete, stream int) {
+func (p *replicaDispatchTestPlanner) counts() (complete, stream int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.completeN, p.streamN
 }
 
-func (p *replicaRouterTestPlanner) samples() []agent.SampleParams {
+func (p *replicaDispatchTestPlanner) samples() []agent.SampleParams {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]agent.SampleParams(nil), p.gotSamples...)
 }
 
-func TestReplicaRouterValidatesStaticRegistry(t *testing.T) {
-	replica := &replicaRouterTestPlanner{name: "r1"}
+func TestReplicaDispatchValidatesStaticRegistry(t *testing.T) {
+	replica := &replicaDispatchTestPlanner{name: "r1"}
 	tests := []struct {
 		name     string
 		model    string
@@ -85,35 +85,35 @@ func TestReplicaRouterValidatesStaticRegistry(t *testing.T) {
 		wantIs   error
 	}{
 		{name: "empty model", replicas: []PlannerReplica{{Name: "r1", Planner: replica}}},
-		{name: "empty replicas", model: "fleet", wantIs: ErrReplicaRouterEmpty},
+		{name: "empty replicas", model: "fleet", wantIs: ErrReplicaDispatchEmpty},
 		{name: "empty replica name", model: "fleet", replicas: []PlannerReplica{{Planner: replica}}},
 		{name: "nil planner", model: "fleet", replicas: []PlannerReplica{{Name: "r1"}}},
 		{name: "duplicate name", model: "fleet", replicas: []PlannerReplica{{Name: "r1", Planner: replica}, {Name: "r1", Planner: replica}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewReplicaRouter(tt.model, tt.replicas)
+			_, err := NewReplicaDispatch(tt.model, tt.replicas)
 			if err == nil {
-				t.Fatalf("NewReplicaRouter() succeeded, want validation error")
+				t.Fatalf("NewReplicaDispatch() succeeded, want validation error")
 			}
 			if tt.wantIs != nil && !errors.Is(err, tt.wantIs) {
-				t.Fatalf("NewReplicaRouter() error = %v, want %v", err, tt.wantIs)
+				t.Fatalf("NewReplicaDispatch() error = %v, want %v", err, tt.wantIs)
 			}
 		})
 	}
 }
 
-func TestReplicaRouterRoundRobinsCompleteAndForwardsInputs(t *testing.T) {
-	a := &replicaRouterTestPlanner{name: "r1"}
-	b := &replicaRouterTestPlanner{name: "r2"}
-	c := &replicaRouterTestPlanner{name: "r3"}
-	router, err := NewReplicaRouter("fleet", []PlannerReplica{
+func TestReplicaDispatchRoundRobinsCompleteAndForwardsInputs(t *testing.T) {
+	a := &replicaDispatchTestPlanner{name: "r1"}
+	b := &replicaDispatchTestPlanner{name: "r2"}
+	c := &replicaDispatchTestPlanner{name: "r3"}
+	router, err := NewReplicaDispatch("fleet", []PlannerReplica{
 		{Name: "a", Planner: a},
 		{Name: "b", Planner: b},
 		{Name: "c", Planner: c},
 	})
 	if err != nil {
-		t.Fatalf("NewReplicaRouter: %v", err)
+		t.Fatalf("NewReplicaDispatch: %v", err)
 	}
 	if got := router.Model(); got != "fleet" {
 		t.Fatalf("Model() = %q, want fleet", got)
@@ -137,7 +137,7 @@ func TestReplicaRouterRoundRobinsCompleteAndForwardsInputs(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("round-robin = %v, want %v", got, want)
 	}
-	for _, planner := range []*replicaRouterTestPlanner{a, b, c} {
+	for _, planner := range []*replicaDispatchTestPlanner{a, b, c} {
 		for _, sp := range planner.samples() {
 			if sp.MaxTokens == nil || *sp.MaxTokens != 17 {
 				t.Fatalf("%s MaxTokens = %v, want 17", planner.name, sp.MaxTokens)
@@ -149,12 +149,12 @@ func TestReplicaRouterRoundRobinsCompleteAndForwardsInputs(t *testing.T) {
 	}
 }
 
-func TestReplicaRouterCompleteIsConcurrentSafe(t *testing.T) {
-	a := &replicaRouterTestPlanner{name: "r1"}
-	b := &replicaRouterTestPlanner{name: "r2"}
-	router, err := NewReplicaRouter("fleet", []PlannerReplica{{Name: "a", Planner: a}, {Name: "b", Planner: b}})
+func TestReplicaDispatchCompleteIsConcurrentSafe(t *testing.T) {
+	a := &replicaDispatchTestPlanner{name: "r1"}
+	b := &replicaDispatchTestPlanner{name: "r2"}
+	router, err := NewReplicaDispatch("fleet", []PlannerReplica{{Name: "a", Planner: a}, {Name: "b", Planner: b}})
 	if err != nil {
-		t.Fatalf("NewReplicaRouter: %v", err)
+		t.Fatalf("NewReplicaDispatch: %v", err)
 	}
 	const calls = 100
 	var wg sync.WaitGroup
@@ -177,7 +177,7 @@ func TestReplicaRouterCompleteIsConcurrentSafe(t *testing.T) {
 
 // dispatchCounts runs n round-robin Completes and tallies which replica served each
 // (the test planner echoes its own model name as the completion content).
-func dispatchCounts(t *testing.T, router *ReplicaRouter, n int) map[string]int {
+func dispatchCounts(t *testing.T, router *ReplicaDispatch, n int) map[string]int {
 	t.Helper()
 	got := make(map[string]int)
 	for i := 0; i < n; i++ {
@@ -190,15 +190,15 @@ func dispatchCounts(t *testing.T, router *ReplicaRouter, n int) map[string]int {
 	return got
 }
 
-func TestReplicaRouterRoutesOnlyToHealthyWorkersWithHysteresis(t *testing.T) {
-	a := &replicaRouterTestPlanner{name: "ra"}
-	b := &replicaRouterTestPlanner{name: "rb"}
-	router, err := NewReplicaRouter("fleet", []PlannerReplica{
+func TestReplicaDispatchRoutesOnlyToHealthyWorkersWithHysteresis(t *testing.T) {
+	a := &replicaDispatchTestPlanner{name: "ra"}
+	b := &replicaDispatchTestPlanner{name: "rb"}
+	router, err := NewReplicaDispatch("fleet", []PlannerReplica{
 		{Name: "w-a", Planner: a},
 		{Name: "w-b", Planner: b},
 	})
 	if err != nil {
-		t.Fatalf("NewReplicaRouter: %v", err)
+		t.Fatalf("NewReplicaDispatch: %v", err)
 	}
 
 	var mu sync.Mutex
@@ -249,15 +249,15 @@ func TestReplicaRouterRoutesOnlyToHealthyWorkersWithHysteresis(t *testing.T) {
 	}
 }
 
-func TestReplicaRouterDrainStopsNewWorkAndTypedVerdict(t *testing.T) {
-	a := &replicaRouterTestPlanner{name: "ra"}
-	b := &replicaRouterTestPlanner{name: "rb"}
-	router, err := NewReplicaRouter("fleet", []PlannerReplica{
+func TestReplicaDispatchDrainStopsNewWorkAndTypedVerdict(t *testing.T) {
+	a := &replicaDispatchTestPlanner{name: "ra"}
+	b := &replicaDispatchTestPlanner{name: "rb"}
+	router, err := NewReplicaDispatch("fleet", []PlannerReplica{
 		{Name: "w-a", Planner: a},
 		{Name: "w-b", Planner: b},
 	})
 	if err != nil {
-		t.Fatalf("NewReplicaRouter: %v", err)
+		t.Fatalf("NewReplicaDispatch: %v", err)
 	}
 	mem := NewFleetMembership(MembershipConfig{
 		HealthyAfter:   1,
@@ -291,26 +291,26 @@ func TestReplicaRouterDrainStopsNewWorkAndTypedVerdict(t *testing.T) {
 	}
 }
 
-// TestReplicaRouterWithoutMembershipStaysBlindRoundRobin pins the opt-in contract:
+// TestReplicaDispatchWithoutMembershipStaysBlindRoundRobin pins the opt-in contract:
 // a router with no membership attached keeps the policy-free rotation unchanged.
-func TestReplicaRouterWithoutMembershipStaysBlindRoundRobin(t *testing.T) {
-	a := &replicaRouterTestPlanner{name: "ra"}
-	b := &replicaRouterTestPlanner{name: "rb"}
-	router, err := NewReplicaRouter("fleet", []PlannerReplica{{Name: "w-a", Planner: a}, {Name: "w-b", Planner: b}})
+func TestReplicaDispatchWithoutMembershipStaysBlindRoundRobin(t *testing.T) {
+	a := &replicaDispatchTestPlanner{name: "ra"}
+	b := &replicaDispatchTestPlanner{name: "rb"}
+	router, err := NewReplicaDispatch("fleet", []PlannerReplica{{Name: "w-a", Planner: a}, {Name: "w-b", Planner: b}})
 	if err != nil {
-		t.Fatalf("NewReplicaRouter: %v", err)
+		t.Fatalf("NewReplicaDispatch: %v", err)
 	}
 	if got := dispatchCounts(t, router, 4); got["ra"] != 2 || got["rb"] != 2 {
 		t.Fatalf("blind round-robin = %v, want ra:2 rb:2", got)
 	}
 }
 
-func TestReplicaRouterStreamsOnlyWhenEveryReplicaSupportsStreaming(t *testing.T) {
-	streaming := &replicaRouterTestPlanner{name: "stream", streaming: true, streamingSupported: true}
-	buffered := &replicaRouterTestPlanner{name: "buffered"}
-	mixed, err := NewReplicaRouter("fleet", []PlannerReplica{{Name: "stream", Planner: streaming}, {Name: "buffered", Planner: buffered}})
+func TestReplicaDispatchStreamsOnlyWhenEveryReplicaSupportsStreaming(t *testing.T) {
+	streaming := &replicaDispatchTestPlanner{name: "stream", streaming: true, streamingSupported: true}
+	buffered := &replicaDispatchTestPlanner{name: "buffered"}
+	mixed, err := NewReplicaDispatch("fleet", []PlannerReplica{{Name: "stream", Planner: streaming}, {Name: "buffered", Planner: buffered}})
 	if err != nil {
-		t.Fatalf("NewReplicaRouter mixed: %v", err)
+		t.Fatalf("NewReplicaDispatch mixed: %v", err)
 	}
 	if mixed.StreamingSupported() {
 		t.Fatalf("mixed router advertised streaming support")
@@ -322,11 +322,11 @@ func TestReplicaRouterStreamsOnlyWhenEveryReplicaSupportsStreaming(t *testing.T)
 		t.Fatalf("second non-streaming replica error = %v, want ErrStreamingUnsupported", err)
 	}
 
-	a := &replicaRouterTestPlanner{name: "a", streaming: true, streamingSupported: true}
-	b := &replicaRouterTestPlanner{name: "b", streaming: true, streamingSupported: true}
-	router, err := NewReplicaRouter("fleet", []PlannerReplica{{Name: "a", Planner: a}, {Name: "b", Planner: b}})
+	a := &replicaDispatchTestPlanner{name: "a", streaming: true, streamingSupported: true}
+	b := &replicaDispatchTestPlanner{name: "b", streaming: true, streamingSupported: true}
+	router, err := NewReplicaDispatch("fleet", []PlannerReplica{{Name: "a", Planner: a}, {Name: "b", Planner: b}})
 	if err != nil {
-		t.Fatalf("NewReplicaRouter streaming: %v", err)
+		t.Fatalf("NewReplicaDispatch streaming: %v", err)
 	}
 	if !router.StreamingSupported() {
 		t.Fatalf("streaming router did not advertise streaming support")

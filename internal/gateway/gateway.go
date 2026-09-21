@@ -321,7 +321,7 @@ func New(cfg Config) (*Server, error) {
 	// fak-private#2417): install it as the Server's live membership so /metrics publishes
 	// its transitions, and remember the router so Serve's health loop can arm it. A nil
 	// router (any non-fleet deployment) leaves both unset and the fleet surface inert.
-	if router := replicaRouterOf(s.planner); router != nil {
+	if router := replicaDispatchOf(s.planner); router != nil {
 		s.fleetRouter = router
 		s.SetFleetMembership(router.FleetMembership())
 	}
@@ -579,7 +579,7 @@ func envEnabled(name string) bool {
 }
 
 // walkHTTPPlanners calls fn for every *agent.HTTPPlanner reachable from p,
-// traversing composite planners (DualPlanner, ReplicaRouter, or any type
+// traversing composite planners (DualPlanner, ReplicaDispatch, or any type
 // implementing WalkPlanners).
 func walkHTTPPlanners(p agent.Planner, fn func(*agent.HTTPPlanner)) {
 	if p == nil {
@@ -887,7 +887,7 @@ func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner
 			Endpoint: dialURL,
 		})
 	}
-	router, err := NewReplicaRouter(model, replicas)
+	router, err := NewReplicaDispatch(model, replicas)
 	if err != nil {
 		return nil, err
 	}
@@ -897,7 +897,7 @@ func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner
 	// the Serve-run fleet-health loop probes once and arms it (runFleetHealthLoop), so
 	// construction stays free of network I/O and a request racing startup is not
 	// answered from a not-yet-probed roster. A failure to register is impossible after
-	// NewReplicaRouter validated unique, non-empty replica names, but it is surfaced
+	// NewReplicaDispatch validated unique, non-empty replica names, but it is surfaced
 	// rather than dropped.
 	fm, err := buildReplicaMembership(replicas, model)
 	if err != nil {
@@ -907,16 +907,16 @@ func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner
 	return router, nil
 }
 
-// replicaRouterOf returns the ReplicaRouter reachable from p — p itself, or the proxy
+// replicaDispatchOf returns the ReplicaDispatch reachable from p — p itself, or the proxy
 // side of a DualPlanner — or nil when the deployment is not a replica fleet (a lone
 // upstream, the in-kernel model, or the mock). It is how New recovers the fleet handle
 // newProxyPlanner stashed on the router, without widening newProxyPlanner's signature.
-func replicaRouterOf(p agent.Planner) *ReplicaRouter {
+func replicaDispatchOf(p agent.Planner) *ReplicaDispatch {
 	switch v := p.(type) {
-	case *ReplicaRouter:
+	case *ReplicaDispatch:
 		return v
 	case *DualPlanner:
-		if rr, ok := v.Proxy().(*ReplicaRouter); ok {
+		if rr, ok := v.Proxy().(*ReplicaDispatch); ok {
 			return rr
 		}
 	}

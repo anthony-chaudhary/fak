@@ -16,7 +16,7 @@ import "strconv"
 // on a worker that must re-prefill a prefix another worker already holds. The
 // router below carries the same residency signal across instances. A cold prefix
 // lands on the least-loaded instance and is kept balanced, the overlap-minus-load
-// placement the Dynamo Smart Router / SGLang cache-aware router approximate.
+// placement the Dynamo Smart TierPolicy / SGLang cache-aware router approximate.
 //
 // What is measured here is the routing DECISION hit-rate — does the router send a
 // request to an instance that already holds its prefix? — the same kind of number
@@ -79,7 +79,7 @@ type FleetRouter interface {
 }
 
 // CacheBlindRouter is the baseline: round-robin placement that ignores residency
-// (what the existing ReplicaRouter.pick does). It still records whether the chosen
+// (what the existing ReplicaDispatch.pick does). It still records whether the chosen
 // instance happened to hold the prefix, so its hit-rate is directly comparable to
 // the KV-aware router's on the same request stream.
 type CacheBlindRouter struct {
@@ -247,7 +247,7 @@ type KVFleetCompetitor struct {
 
 // KVFleetRoutingResult is the committed witness: both policies' hit-rates on the
 // same stream, the lift, and the competitor bar. The cache_blind_round_robin arm
-// is fak's own cache-blind baseline (what ReplicaRouter does today), so the lift
+// is fak's own cache-blind baseline (what ReplicaDispatch does today), so the lift
 // isolates KV-aware ROUTING the way the on-instance row isolated cache-aware
 // SCHEDULING (FCFS 62.1% -> DFS 86.7%) on one held-constant kernel.
 type KVFleetRoutingResult struct {

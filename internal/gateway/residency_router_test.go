@@ -201,22 +201,22 @@ func TestCacheAwareSkewFallbackAvoidsHerding(t *testing.T) {
 	}
 }
 
-// TestReplicaRouterCacheAwarePolicyPinsByResidency is the AC-6 witness: the index +
-// scorer are reachable from the live ReplicaRouter skeleton (build-on #45) — attaching
+// TestReplicaDispatchCacheAwarePolicyPinsByResidency is the AC-6 witness: the index +
+// scorer are reachable from the live ReplicaDispatch skeleton (build-on #45) — attaching
 // a CacheAwarePolicy makes pick() route each distinct request prefix to a stable home
 // replica (residency locality) rather than blind round-robin, while distinct prefixes
 // land on distinct homes (load spreading).
-func TestReplicaRouterCacheAwarePolicyPinsByResidency(t *testing.T) {
-	a := &replicaRouterTestPlanner{name: "r1"}
-	b := &replicaRouterTestPlanner{name: "r2"}
-	c := &replicaRouterTestPlanner{name: "r3"}
-	router, err := NewReplicaRouter("fleet", []PlannerReplica{
+func TestReplicaDispatchCacheAwarePolicyPinsByResidency(t *testing.T) {
+	a := &replicaDispatchTestPlanner{name: "r1"}
+	b := &replicaDispatchTestPlanner{name: "r2"}
+	c := &replicaDispatchTestPlanner{name: "r3"}
+	router, err := NewReplicaDispatch("fleet", []PlannerReplica{
 		{Name: "w0", Planner: a},
 		{Name: "w1", Planner: b},
 		{Name: "w2", Planner: c},
 	})
 	if err != nil {
-		t.Fatalf("NewReplicaRouter: %v", err)
+		t.Fatalf("NewReplicaDispatch: %v", err)
 	}
 	router.WithPickPolicy(NewCacheAwarePolicy(NewPrefixResidencyIndex(8), DefaultSkewThreshold()))
 
