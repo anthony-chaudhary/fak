@@ -560,6 +560,149 @@ func TestOpsRunConfigPolicy(t *testing.T) {
 	}
 }
 
+func TestOpsRunLaunchIdentity(t *testing.T) {
+	t.Run("stable_redacted_identity_with_explicit_unknowns", func(t *testing.T) {
+		dir := t.TempDir()
+		prompt := filepath.Join(dir, "prompt.txt")
+		receiptPath := filepath.Join(dir, "receipt.json")
+		policyPath := filepath.Join(dir, "private-policy-sentinel.json")
+		binaryPath := filepath.Join(dir, "private-opencode-sentinel.exe")
+		model := "private-model-sentinel"
+		if err := os.WriteFile(prompt, []byte("launch identity probe\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(policyPath, []byte(`{"version":1,"deny":["private-policy-sentinel"]}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(binaryPath, []byte("deterministic fake opencode binary\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("OPENCODE_CONFIG_CONTENT", `{"theme":"private-theme-sentinel"}`)
+		gateway := newOpsRunQualifiedGateway(t)
+
+		old := opsRunExecute
+		t.Cleanup(func() { opsRunExecute = old })
+		var start map[string]any
+		opsRunExecute = func(context.Context, io.Writer, io.Writer, []string, []string, []byte) (int, bool, bool, []opsRunLifecycleRecord) {
+			data, err := os.ReadFile(receiptPath)
+			if err != nil {
+				t.Fatalf("read start receipt: %v", err)
+			}
+			if err := json.Unmarshal(data, &start); err != nil {
+				t.Fatalf("decode start receipt: %v", err)
+			}
+			return 0, true, false, nil
+		}
+
+		var stderr bytes.Buffer
+		code := runOpsRun(io.Discard, &stderr, []string{
+			"--workspace", dir,
+			"--prompt-file", prompt,
+			"--receipt", receiptPath,
+			"--provider", "openai",
+			"--model", model,
+			"--base-url", gateway.URL + "/v1",
+			"--policy", policyPath,
+			"--opencode-bin", binaryPath,
+			"--pure",
+		})
+		if code != 0 {
+			t.Fatalf("ops run exit=%d: %s", code, stderr.String())
+		}
+		terminalData, err := os.ReadFile(receiptPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var terminal map[string]any
+		if err := json.Unmarshal(terminalData, &terminal); err != nil {
+			t.Fatal(err)
+		}
+		startIdentity := requireOpsRunLaunchIdentity(t, start)
+		terminalIdentity := requireOpsRunLaunchIdentity(t, terminal)
+		startJSON, _ := json.Marshal(startIdentity)
+		terminalJSON, _ := json.Marshal(terminalIdentity)
+		if !bytes.Equal(startJSON, terminalJSON) {
+			t.Fatalf("launch identity changed between start and terminal receipts:\nstart=%s\nterminal=%s", startJSON, terminalJSON)
+		}
+
+		for key, want := range map[string]any{
+			"schema":                  "fak.ops-run.launch-identity.v1",
+			"harness":                 "opencode",
+			"binary_version":          "unknown",
+			"policy_source":           "flag",
+			"guard_requested":         "fail_closed",
+			"guard_effective":         "unknown",
+			"guard_evidence_ref":      "unknown",
+			"capability_evidence_ref": "unknown",
+			"auto":                    false,
+			"pure":                    true,
+		} {
+			if got := terminalIdentity[key]; got != want {
+				t.Errorf("launch_identity.%s=%v want=%v", key, got, want)
+			}
+		}
+		if runID, _ := terminalIdentity["run_id"].(string); strings.TrimSpace(runID) == "" || runID == "unknown" {
+			t.Errorf("launch_identity.run_id=%q, want a per-run opaque identity", runID)
+		}
+		for _, key := range []string{"binary_digest", "workspace_digest", "route_digest", "effective_config_digest", "policy_digest"} {
+			value, _ := terminalIdentity[key].(string)
+			if !strings.HasPrefix(value, "sha256:") || len(value) != len("sha256:")+64 {
+				t.Errorf("launch_identity.%s=%q, want redacted sha256 digest", key, value)
+			}
+		}
+		preflight := terminal["inference_preflight"].(map[string]any)
+		if got := terminalIdentity["inference_probe_ref"]; got == "unknown" || got != preflight["receipt_ref"] {
+			t.Errorf("launch_identity.inference_probe_ref=%v want=%v", got, preflight["receipt_ref"])
+		}
+		encoded := string(terminalJSON)
+		for _, raw := range []string{dir, binaryPath, policyPath, model, gateway.URL, "private-theme-sentinel", "private-policy-sentinel"} {
+			if strings.Contains(encoded, raw) {
+				t.Errorf("launch identity leaked raw value %q: %s", raw, encoded)
+			}
+		}
+	})
+
+	t.Run("legacy_receipt_still_decodes", func(t *testing.T) {
+		legacy := []byte(`{"schema":"fak-ops-run/1","harness":"opencode","workspace":"legacy","status":"succeeded","exit_code":0,"started_at":"2026-09-20T00:00:00Z","finished_at":"2026-09-20T00:00:01Z"}`)
+		var receipt opsRunReceipt
+		if err := json.Unmarshal(legacy, &receipt); err != nil {
+			t.Fatalf("legacy receipt decode: %v", err)
+		}
+		if receipt.Schema != "fak-ops-run/1" || receipt.Harness != "opencode" || receipt.Status != "succeeded" {
+			t.Fatalf("legacy receipt changed on decode: %+v", receipt)
+		}
+	})
+
+	t.Run("dry_run_does_not_claim_guarded", func(t *testing.T) {
+		dir := t.TempDir()
+		prompt := filepath.Join(dir, "prompt.txt")
+		if err := os.WriteFile(prompt, []byte("plan identity probe\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		if code := runOpsRun(&stdout, &stderr, []string{"--dry-run", "--prompt-file", prompt, "--provider", "openai", "--model", "plan-model"}); code != 0 {
+			t.Fatalf("dry run exit=%d: %s", code, stderr.String())
+		}
+		var plan map[string]any
+		if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+			t.Fatal(err)
+		}
+		if guarded, _ := plan["guarded"].(bool); guarded {
+			t.Fatalf("dry-run plan made an unwitnessed guarded claim: %s", stdout.Bytes())
+		}
+	})
+}
+
+func requireOpsRunLaunchIdentity(t *testing.T, receipt map[string]any) map[string]any {
+	t.Helper()
+	identity, ok := receipt["launch_identity"].(map[string]any)
+	if !ok {
+		data, _ := json.Marshal(receipt)
+		t.Fatalf("receipt lacks launch_identity: %s", data)
+	}
+	return identity
+}
+
 func TestOpsRunGuardedReceipt(t *testing.T) {
 	dir := t.TempDir()
 	gateway := newOpsRunQualifiedGateway(t)

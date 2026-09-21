@@ -34,6 +34,7 @@ type opsRunReceipt struct {
 	Schema             string                           `json:"schema"`
 	Harness            string                           `json:"harness"`
 	Workspace          string                           `json:"workspace"`
+	LaunchIdentity     *opsRunLaunchIdentityReceipt     `json:"launch_identity,omitempty"`
 	Status             string                           `json:"status"`
 	ExitCode           int                              `json:"exit_code"`
 	Started            time.Time                        `json:"started_at"`
@@ -41,6 +42,97 @@ type opsRunReceipt struct {
 	Lifecycle          []opsRunLifecycleRecord          `json:"lifecycle,omitempty"`
 	InferencePreflight *opsRunInferencePreflightReceipt `json:"inference_preflight,omitempty"`
 	ConfigPolicy       *opsRunConfigPolicyReceipt       `json:"config_policy,omitempty"`
+}
+
+const opsRunLaunchIdentitySchema = "fak.ops-run.launch-identity.v1"
+
+type opsRunLaunchIdentityReceipt struct {
+	Schema                string `json:"schema"`
+	RunID                 string `json:"run_id"`
+	Harness               string `json:"harness"`
+	BinaryVersion         string `json:"binary_version"`
+	BinaryDigest          string `json:"binary_digest"`
+	WorkspaceDigest       string `json:"workspace_digest"`
+	ModelDigest           string `json:"model_digest"`
+	RouteDigest           string `json:"route_digest"`
+	EffectiveConfigDigest string `json:"effective_config_digest"`
+	PolicySource          string `json:"policy_source"`
+	PolicyDigest          string `json:"policy_digest"`
+	GuardRequested        string `json:"guard_requested"`
+	GuardEffective        string `json:"guard_effective"`
+	GuardEvidenceRef      string `json:"guard_evidence_ref"`
+	InferenceProbeRef     string `json:"inference_probe_ref"`
+	CapabilityEvidenceRef string `json:"capability_evidence_ref"`
+	Auto                  bool   `json:"auto"`
+	Pure                  bool   `json:"pure"`
+}
+
+func opsRunDigest(parts ...string) string {
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func opsRunFileDigest(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "unknown"
+	}
+	resolved := path
+	if candidate, err := exec.LookPath(path); err == nil {
+		resolved = candidate
+	}
+	f, err := os.Open(resolved)
+	if err != nil {
+		return "unknown"
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "unknown"
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil))
+}
+
+func newOpsRunLaunchIdentity(runID, harness, workspace, provider, baseURL, model, opencodeBin, encodedConfig, policy string, auto, pure bool) opsRunLaunchIdentityReceipt {
+	policySource, policyDigest := "builtin", "unknown"
+	if strings.TrimSpace(policy) != "" {
+		policySource, policyDigest = "flag", opsRunFileDigest(policy)
+	}
+	configDigest := "unknown"
+	if encodedConfig != "" {
+		configDigest = opsRunDigest(encodedConfig)
+	}
+	return opsRunLaunchIdentityReceipt{
+		Schema:                opsRunLaunchIdentitySchema,
+		RunID:                 runID,
+		Harness:               harness,
+		BinaryVersion:         "unknown",
+		BinaryDigest:          opsRunFileDigest(opencodeBin),
+		WorkspaceDigest:       opsRunDigest(workspace),
+		ModelDigest:           opsRunDigest(model),
+		RouteDigest:           opsRunDigest(provider, baseURL, model),
+		EffectiveConfigDigest: configDigest,
+		PolicySource:          policySource,
+		PolicyDigest:          policyDigest,
+		GuardRequested:        "fail_closed",
+		GuardEffective:        "unknown",
+		GuardEvidenceRef:      "unknown",
+		InferenceProbeRef:     "unknown",
+		CapabilityEvidenceRef: "unknown",
+		Auto:                  auto,
+		Pure:                  pure,
+	}
+}
+
+func opsRunAddCapabilityEvidence(identity *opsRunLaunchIdentityReceipt, refs ...string) {
+	if identity == nil {
+		return
+	}
+	for _, ref := range refs {
+		if strings.HasPrefix(ref, "sha256:") {
+			identity.InferenceProbeRef = ref
+		}
+	}
 }
 
 type opsRunConfigPolicyReceipt struct {
@@ -558,6 +650,12 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 			argv = append(argv, pair[0], pair[1])
 		}
 	}
+	var nonce [12]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		fmt.Fprintln(stderr, "ops run: create run identity failed")
+		return 1
+	}
+	runID := "ops-" + hex.EncodeToString(nonce[:])
 	config, configPolicy := qualifyOpsRunConfig(os.Getenv("OPENCODE_CONFIG_CONTENT"), *auto, *pure)
 	if configPolicy.Status != "qualified" {
 		fmt.Fprintf(stderr, "ops run: inherited OpenCode config refused: %s\n", configPolicy.Reason)
@@ -565,7 +663,8 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 			return 2
 		}
 		now := time.Now().UTC()
-		receipt := opsRunReceipt{Schema: "fak-ops-run/1", Harness: *harness, Workspace: resolvedWorkspace, Status: "refused", ExitCode: 1, Started: now, Finished: now, ConfigPolicy: &configPolicy}
+		identity := newOpsRunLaunchIdentity(runID, *harness, resolvedWorkspace, *provider, *baseURL, *model, *opencodeBin, "", *policy, *auto, *pure)
+		receipt := opsRunReceipt{Schema: "fak-ops-run/1", Harness: *harness, Workspace: resolvedWorkspace, LaunchIdentity: &identity, Status: "refused", ExitCode: 1, Started: now, Finished: now, ConfigPolicy: &configPolicy}
 		if err := writeOpsRunReceipt(*receiptPath, receipt); err != nil {
 			fmt.Fprintf(stderr, "ops run: write receipt: %v\n", err)
 		}
@@ -573,11 +672,6 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	}
 	// A fresh provider name prevents deep-merging model/provider overrides from
 	// global or project config into the route owned by this invocation.
-	var nonce [12]byte
-	if _, err := rand.Read(nonce[:]); err != nil {
-		fmt.Fprintln(stderr, "ops run: create provider identity failed")
-		return 1
-	}
 	providerID := "fak_ops_" + hex.EncodeToString(nonce[:])
 	modelID := providerID + "/" + *model
 	argv = append(argv, "--", *opencodeBin, "run", "--format", "json", "--model", modelID)
@@ -605,8 +699,9 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	config["small_model"] = modelID
 	config["enabled_providers"] = []string{providerID}
 	encoded, _ := json.Marshal(config)
+	identity := newOpsRunLaunchIdentity(runID, *harness, resolvedWorkspace, *provider, *baseURL, *model, *opencodeBin, string(encoded), *policy, *auto, *pure)
 	if *dryRun {
-		_ = json.NewEncoder(stdout).Encode(map[string]any{"schema": "fak-ops-run-plan/1", "harness": *harness, "provider": *provider, "workspace": resolvedWorkspace, "guarded": true, "prompt_delivery": "stdin", "timeout": timeout.String(), "auto": *auto, "pure": *pure, "config_policy": configPolicy})
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"schema": "fak-ops-run-plan/1", "harness": *harness, "provider": *provider, "workspace": resolvedWorkspace, "guarded": false, "prompt_delivery": "stdin", "timeout": timeout.String(), "auto": *auto, "pure": *pure, "config_policy": configPolicy})
 		return 0
 	}
 	env, cleanupEnv, err := opsRunChildEnvironment(string(encoded), *apiKeyEnv)
@@ -615,6 +710,11 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 		return 1
 	}
 	defer cleanupEnv()
+	receipt := opsRunReceipt{Schema: "fak-ops-run/1", Harness: *harness, Workspace: resolvedWorkspace, LaunchIdentity: &identity, Status: "running", Started: time.Now().UTC(), ConfigPolicy: &configPolicy}
+	if err := writeOpsRunReceipt(*receiptPath, receipt); err != nil {
+		fmt.Fprintf(stderr, "ops run: write receipt: %v\n", err)
+		return 1
+	}
 	sigCtx, stop := signal.NotifyContext(context.Background(), terminatingSignals()...)
 	defer stop()
 	ctx, cancel := context.WithTimeout(sigCtx, *timeout)
@@ -623,11 +723,6 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 		return sigCtx.Err() != nil
 	})
 	ctx = withOpsRunWorkspace(ctx, resolvedWorkspace)
-	receipt := opsRunReceipt{Schema: "fak-ops-run/1", Harness: *harness, Workspace: resolvedWorkspace, Status: "running", Started: time.Now().UTC(), ConfigPolicy: &configPolicy}
-	if err := writeOpsRunReceipt(*receiptPath, receipt); err != nil {
-		fmt.Fprintf(stderr, "ops run: write receipt: %v\n", err)
-		return 1
-	}
 	if *provider != "openai" {
 		preflight := opsRunInferenceRefusal(*provider, *baseURL, *model, "unsupported_provider_protocol")
 		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
@@ -641,6 +736,7 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	if err != nil {
 		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
 	}
+	opsRunAddCapabilityEvidence(receipt.LaunchIdentity, configPolicy.Digest, preflight.ReceiptRef)
 	// Persist the qualifying reference before launch. A receipt write failure
 	// cannot produce an unqualified child process.
 	if err := writeOpsRunReceipt(*receiptPath, receipt); err != nil {
