@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"sort"
+
+	"github.com/anthony-chaudhary/fak/internal/model/ffn"
 )
 
 // MoE (Mixture-of-Experts) FFN — the rank-7 structural axis of MODEL-ARCH-SEAM.
@@ -138,10 +140,12 @@ func (denseSwiGLU) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
 	g, u := gu[0], gu[1]
 	m.addBiasIfPresent(g, p("mlp.gate_proj.bias"))
 	m.addBiasIfPresent(u, p("mlp.up_proj.bias"))
-	for i := 0; i < I; i++ {
-		g[i] = act(g[i], cfg) * u[i]
+	out, err := ffn.Gated(g, u, func(v float32) float32 { return act(v, cfg) }, func(activated []float32) ([]float32, error) {
+		return mat.mul(p("mlp.down_proj.weight"), mat.prep(activated), H, I), nil
+	})
+	if err != nil {
+		panic(err)
 	}
-	out := mat.mul(p("mlp.down_proj.weight"), mat.prep(g), H, I)
 	m.addBiasIfPresent(out, p("mlp.down_proj.bias"))
 	return out
 }

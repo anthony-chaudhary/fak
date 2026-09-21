@@ -47,6 +47,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+
+	"github.com/anthony-chaudhary/fak/internal/model/ffn"
 )
 
 // ErrV41ForwardStage reports that a required V4.1 forward stage could not be
@@ -2626,25 +2628,21 @@ func (m *Model) v41SharedExpertSwiGLU(l int, xn []float32, cfg Config) ([]float3
 	if err != nil {
 		return nil, err
 	}
-	h := make([]float32, I)
-	for i := 0; i < I; i++ {
-		h[i] = act(h1[i], cfg) * h3[i]
-	}
-	y, err := m.v41ProjMatRows(l, "ffn.shared_experts.w2.weight", h, H, I)
-	if err != nil {
-		return nil, err
-	}
-	return y, nil
+	return ffn.Gated(h1, h3, func(v float32) float32 { return act(v, cfg) }, func(activated []float32) ([]float32, error) {
+		return m.v41ProjMatRows(l, "ffn.shared_experts.w2.weight", activated, H, I)
+	})
 }
 
 func v41SwiGLU(w1, w3, w2, xn []float32, I, H int, cfg Config) []float32 {
 	h1 := matRows(w1, xn, I, H)
 	h3 := matRows(w3, xn, I, H)
-	h := make([]float32, I)
-	for i := 0; i < I; i++ {
-		h[i] = act(h1[i], cfg) * h3[i]
+	y, err := ffn.Gated(h1, h3, func(v float32) float32 { return act(v, cfg) }, func(activated []float32) ([]float32, error) {
+		return matRows(w2, activated, H, I), nil
+	})
+	if err != nil {
+		panic(err)
 	}
-	return matRows(w2, h, H, I)
+	return y
 }
 
 // v41Head runs the final norm and LM head for one hidden vector. The final norm
