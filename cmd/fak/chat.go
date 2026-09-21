@@ -48,6 +48,7 @@ type chatFlags struct {
 	memory                *bool
 	memoryStore           *string
 	reasoningProfile      *string
+	verbose               *bool
 	asJSON                *bool
 	receiptOut            *string
 }
@@ -82,6 +83,7 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 	cf.memory = fs.Bool("memory", true, "discover and inject verified workspace memory notes into agent prompt; use --memory=false to disable")
 	cf.memoryStore = fs.String("memory-store", "", "optional custom memory store path (directory or MEMORY.md); defaults to auto-discovery")
 	cf.reasoningProfile = fs.String("reasoning-profile", agent.ReasoningProfileDefault, "named reasoning profile: default|baseline|deep-reason (default: default)")
+	cf.verbose = fs.Bool("verbose", false, "show tool arguments and turn diagnostics in interactive chat")
 	cf.asJSON = fs.Bool("json", false, "emit machine-readable JSON execution receipt in headless mode")
 	cf.receiptOut = fs.String("receipt", "", "write machine-readable execution receipt JSON to file in headless mode")
 	return fs, cf
@@ -281,7 +283,7 @@ func cmdChat(argv []string) {
 		}
 		return
 	}
-	runChat(os.Stdin, os.Stdout, planner, *cf.maxTurns, runOpts...)
+	runChatWithDisplay(os.Stdin, os.Stdout, planner, *cf.maxTurns, *cf.verbose, runOpts...)
 }
 
 // chatPlanner picks the planner the REPL drives: the offline mock (no upstream)
@@ -374,7 +376,12 @@ func runChatHeadless(out io.Writer, planner agent.Planner, task string, maxTurns
 // model as a value (recorded in ArmMetrics.Denies) and never executed
 // (DestructiveExecuted stays false). The per-turn summary surfaces that boundary.
 func runChat(in io.Reader, out io.Writer, planner agent.Planner, maxTurns int, opts ...agent.RunOption) {
-	fmt.Fprintf(out, "fak chat — native REPL on the owned loop (model %s). One line = one turn; Ctrl-D to exit.\n", planner.Model())
+	runChatWithDisplay(in, out, planner, maxTurns, false, opts...)
+}
+
+func runChatWithDisplay(in io.Reader, out io.Writer, planner agent.Planner, maxTurns int, verbose bool, opts ...agent.RunOption) {
+	fmt.Fprintf(out, "fak chat | %s\n", chatModelLabel(planner))
+	fmt.Fprintln(out, "Type a message. /help for commands; Ctrl-D or /exit to quit.")
 	sc := bufio.NewScanner(in)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	turn := 0
@@ -396,16 +403,168 @@ func runChat(in io.Reader, out io.Writer, planner agent.Planner, maxTurns int, o
 			fmt.Fprintln(out, "fak> conversation cleared.")
 			continue
 		}
+		if line == "/help" {
+			renderChatHelp(out)
+			continue
+		}
+		if line == "/status" {
+			detail := "hidden"
+			if verbose {
+				detail = "visible"
+			}
+			fmt.Fprintf(out, "fak> Model: %s; tool details: %s; turn limit: %d steps.\n", chatModelLabel(planner), detail, maxTurns)
+			continue
+		}
+		if line == "/verbose" || strings.HasPrefix(line, "/verbose ") {
+			var message string
+			verbose, message = updateChatVerbose(line, verbose)
+			fmt.Fprintln(out, message)
+			continue
+		}
 		turn++
 
 		currentConv := append(history, agent.Message{Role: agent.RoleUser, Content: line})
 		turnOpts := append([]agent.RunOption{agent.WithConversation(currentConv)}, opts...)
 
-		m, calls, err := agent.RunGovernedArmStream(ctx(), planner, line, maxTurns, streamAssistantTo(out), turnOpts...)
+		stream := &chatStreamState{out: out}
+		m, calls, err := agent.RunGovernedArmStream(ctx(), planner, line, maxTurns, stream.write, turnOpts...)
+		stream.finish()
 		if err != nil {
-			renderChatTermination(out, err)
+			renderInteractiveChatTermination(out, err, verbose)
+			renderInteractiveChatActivity(out, calls, m, turn, verbose, true)
 			continue
 		}
+
+		finalAnswer := strings.TrimSpace(m.FinalAnswer)
+		if !stream.wrote && finalAnswer != "" {
+			fmt.Fprintf(out, "fak> %s\n", finalAnswer)
+		}
+		if m.HitTurnCap {
+			renderChatTurnLimit(out, maxTurns, stream.wrote || finalAnswer != "")
+		} else if !stream.wrote && finalAnswer == "" {
+			fmt.Fprintln(out, "fak> I could not produce an answer. Try again, or use /verbose for details.")
+		}
+		renderInteractiveChatActivity(out, calls, m, turn, verbose, false)
+
+		history = currentConv
+		if finalAnswer != "" {
+			history = append(history, agent.Message{Role: agent.RoleAssistant, Content: m.FinalAnswer})
+		}
+	}
+}
+
+func chatModelLabel(planner agent.Planner) string {
+	if planner == nil {
+		return "model unavailable"
+	}
+	model := strings.TrimSpace(planner.Model())
+	if model == "" {
+		return "model unavailable"
+	}
+	model = strings.ReplaceAll(model, "\\", "/")
+	if i := strings.LastIndex(model, "/"); i >= 0 {
+		model = model[i+1:]
+	}
+	if len(model) > len(".gguf") && strings.EqualFold(model[len(model)-len(".gguf"):], ".gguf") {
+		model = model[:len(model)-len(".gguf")]
+	}
+	if model == "" {
+		return "model unavailable"
+	}
+	return model
+}
+
+func renderChatHelp(out io.Writer) {
+	fmt.Fprintln(out, "fak> Commands:")
+	fmt.Fprintln(out, "     /clear             clear conversation history")
+	fmt.Fprintln(out, "     /status            show the model and detail level")
+	fmt.Fprintln(out, "     /verbose [on|off]  show or hide tool details")
+	fmt.Fprintln(out, "     /exit              leave chat")
+}
+
+func updateChatVerbose(line string, current bool) (bool, string) {
+	fields := strings.Fields(line)
+	if len(fields) == 1 {
+		current = !current
+	} else if len(fields) == 2 {
+		switch strings.ToLower(fields[1]) {
+		case "on":
+			current = true
+		case "off":
+			current = false
+		default:
+			return current, "fak> Usage: /verbose [on|off]"
+		}
+	} else {
+		return current, "fak> Usage: /verbose [on|off]"
+	}
+	state := "off"
+	if current {
+		state = "on"
+	}
+	return current, fmt.Sprintf("fak> Tool details are %s.", state)
+}
+
+type chatStreamState struct {
+	out     io.Writer
+	started bool
+	wrote   bool
+}
+
+func (s *chatStreamState) write(delta string) error {
+	if s == nil || s.out == nil || delta == "" {
+		return nil
+	}
+	if !s.started {
+		if _, err := io.WriteString(s.out, "fak> "); err != nil {
+			return err
+		}
+		s.started = true
+	}
+	if _, err := io.WriteString(s.out, delta); err != nil {
+		return err
+	}
+	s.wrote = true
+	return nil
+}
+
+func (s *chatStreamState) finish() {
+	if s != nil && s.out != nil && s.started {
+		fmt.Fprintln(s.out)
+	}
+}
+
+func renderChatTurnLimit(out io.Writer, maxTurns int, hasAnswer bool) {
+	prefix := "fak> "
+	if hasAnswer {
+		prefix = "     "
+	}
+	fmt.Fprintf(out, "%sThis response is incomplete: I reached this turn's %d-step limit. Try a narrower request or raise --max-turns.\n", prefix, maxTurns)
+}
+
+func renderInteractiveChatTermination(out io.Writer, err error, verbose bool) {
+	t := agent.ClassifyTermination(err)
+	message := "I could not finish this turn. Try again, or use /verbose for details."
+	switch t.Cause {
+	case agent.TerminationCanceled:
+		message = "The request stopped before I could answer. Try again."
+	case agent.TerminationRateLimited:
+		message = "The model is rate-limited. Wait a moment and try again."
+	case agent.TerminationContextLimit:
+		message = "This conversation is too long for the model. Use /clear, then try again."
+	case agent.TerminationRefused:
+		message = "fak blocked this turn. Rephrase the request or use /verbose for details."
+	case agent.TerminationProvider:
+		message = "I lost the model connection before it answered. This chat is still open; try again."
+	}
+	fmt.Fprintf(out, "fak> %s [%s]\n", message, t.Cause)
+	if verbose {
+		fmt.Fprintf(out, "     %s\n", t.Evidence)
+	}
+}
+
+func renderInteractiveChatActivity(out io.Writer, calls []agent.CallTrace, m agent.ArmMetrics, turn int, verbose, interrupted bool) {
+	if verbose {
 		for _, c := range calls {
 			if c.Verdict == "ALLOW" {
 				fmt.Fprintf(out, "     [tool] %s(%s) => ALLOW\n", c.Tool, c.Args)
@@ -413,30 +572,52 @@ func runChat(in io.Reader, out io.Writer, planner agent.Planner, maxTurns int, o
 				fmt.Fprintf(out, "     [tool] %s(%s) => %s (%s by %s)\n", c.Tool, c.Args, c.Verdict, c.Reason, c.By)
 			}
 		}
-		fmt.Fprintf(out, "fak> %s\n", strings.TrimSpace(m.FinalAnswer))
 		fmt.Fprintf(out, "     [turn %d: %d model turns, %d engine calls, %d denied, %d served]\n",
 			turn, m.Turns, m.EngineCalls, m.Denies, m.VDSOHits)
-
-		history = append(currentConv, agent.Message{Role: agent.RoleAssistant, Content: m.FinalAnswer})
+		return
 	}
-}
-
-// streamAssistantTo returns a StreamSink that writes assistant content deltas
-// straight to out as they arrive — plain text, no colors, no TUI — so fak chat
-// shows prose the moment the model emits it. The sink is nil-safe: a nil sink
-// selects the loop's internal discard behavior and the buffered final answer is
-// still printed after adjudication.
-func streamAssistantTo(out io.Writer) agent.StreamSink {
-	if out == nil {
-		return nil
+	if len(calls) == 0 {
+		return
 	}
-	return func(delta string) error {
-		if delta == "" {
-			return nil
+	if len(calls) == 1 {
+		verdict := strings.ToUpper(strings.TrimSpace(calls[0].Verdict))
+		if verdict == "" {
+			verdict = "UNKNOWN"
 		}
-		_, err := io.WriteString(out, delta)
-		return err
+		fmt.Fprintf(out, "     [tool] %s => %s", calls[0].Tool, verdict)
+		if m.Denies > 0 {
+			fmt.Fprintf(out, " (%d denied)", m.Denies)
+		}
+		if interrupted {
+			fmt.Fprint(out, " before interruption")
+		}
+		fmt.Fprintln(out)
+		return
 	}
+
+	const maxNames = 3
+	names := make([]string, 0, maxNames)
+	seen := make(map[string]struct{}, maxNames)
+	for _, c := range calls {
+		if _, ok := seen[c.Tool]; ok {
+			continue
+		}
+		seen[c.Tool] = struct{}{}
+		if len(names) < maxNames {
+			names = append(names, c.Tool)
+		}
+	}
+	fmt.Fprintf(out, "     [tools] %d actions: %s", len(calls), strings.Join(names, ", "))
+	if len(seen) > len(names) {
+		fmt.Fprintf(out, " (+%d more)", len(seen)-len(names))
+	}
+	if m.Denies > 0 {
+		fmt.Fprintf(out, "; %d denied", m.Denies)
+	}
+	if interrupted {
+		fmt.Fprint(out, " before interruption")
+	}
+	fmt.Fprintln(out)
 }
 
 func renderChatTermination(out io.Writer, err error) {

@@ -40,6 +40,69 @@ func finalTurn(text string) *agent.Completion {
 	return &agent.Completion{Message: agent.Message{Content: text}}
 }
 
+type namedChatPlanner struct {
+	*chatScript
+	model string
+}
+
+func (p *namedChatPlanner) Model() string { return p.model }
+
+type streamingChatScript struct {
+	chunks []string
+	final  string
+}
+
+func (p *streamingChatScript) Complete(_ context.Context, _ []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+	return finalTurn(p.final), nil
+}
+
+func (p *streamingChatScript) CompleteStream(_ context.Context, sink agent.StreamSink, _ []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+	for _, chunk := range p.chunks {
+		if err := sink(chunk); err != nil {
+			return nil, err
+		}
+	}
+	return finalTurn(p.final), nil
+}
+
+func (p *streamingChatScript) StreamingSupported() bool { return true }
+func (p *streamingChatScript) Model() string            { return "streaming-chat-script" }
+
+type providerRecoveryChatPlanner struct {
+	failures  int
+	successes int
+}
+
+func (p *providerRecoveryChatPlanner) Complete(_ context.Context, messages []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+	for _, message := range messages {
+		if strings.Contains(message.Content, "first request") {
+			p.failures++
+			return nil, errors.New("provider status 429: secret upstream body")
+		}
+	}
+	p.successes++
+	return finalTurn("Recovered on the next input."), nil
+}
+
+func (p *providerRecoveryChatPlanner) Model() string { return "provider-recovery-chat-planner" }
+
+type turnCapHistoryPlanner struct {
+	recorded [][]agent.Message
+	calls    int
+}
+
+func (p *turnCapHistoryPlanner) Complete(_ context.Context, messages []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+	cp := append([]agent.Message(nil), messages...)
+	p.recorded = append(p.recorded, cp)
+	p.calls++
+	if p.calls == 1 {
+		return toolTurn("get_user_details", `{"user_id":"mia_li_3668"}`), nil
+	}
+	return finalTurn("Continued after the capped turn."), nil
+}
+
+func (p *turnCapHistoryPlanner) Model() string { return "turn-cap-history-planner" }
+
 // TestChatTwoTurnsWithDeniedDestructive is the acceptance witness for #1320: a
 // scripted two-turn `fak chat` session driven entirely through agent.RunArm with
 // kernel.Syscall as the sole tool path. Turn 1 is an ordinary read that resolves
@@ -107,6 +170,147 @@ func TestRenderChatTerminationUsesSharedSafeClassification(t *testing.T) {
 	got := out.String()
 	if !strings.Contains(got, "[rate_limited]") || !strings.Contains(got, "provider reported rate limiting") || strings.Contains(got, "secret") {
 		t.Fatalf("%q", got)
+	}
+}
+
+func TestChatDefaultOutputIsCompact(t *testing.T) {
+	planner := &chatScript{turns: []*agent.Completion{
+		toolTurn("get_user_details", `{"user_id":"private-user-3668"}`),
+		finalTurn("Account found."),
+	}}
+
+	var out strings.Builder
+	runChat(strings.NewReader("find my account\n"), &out, planner, 10)
+	got := out.String()
+	if strings.Count(got, "Account found.") != 1 {
+		t.Fatalf("final answer should appear exactly once:\n%s", got)
+	}
+	if !strings.Contains(got, "[tool] get_user_details") {
+		t.Fatalf("compact output should retain concise tool activity:\n%s", got)
+	}
+	for _, noisy := range []string{"private-user-3668", "model turns", "engine calls"} {
+		if strings.Contains(got, noisy) {
+			t.Fatalf("compact output leaked verbose detail %q:\n%s", noisy, got)
+		}
+	}
+}
+
+func TestChatModelPathRendersShortLabel(t *testing.T) {
+	planner := &namedChatPlanner{
+		chatScript: &chatScript{turns: []*agent.Completion{finalTurn("Ready.")}},
+		model:      `/var/lib/fak/models/Qwen3.8-27B-UD-Q2_K_XL.gguf`,
+	}
+
+	var out strings.Builder
+	runChat(strings.NewReader("hello\n"), &out, planner, 10)
+	got := out.String()
+	if !strings.Contains(got, "Qwen3.8-27B-UD-Q2_K_XL") {
+		t.Fatalf("chat header missing short model label:\n%s", got)
+	}
+	for _, leaked := range []string{"/var/lib/fak/models", ".gguf"} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("chat header leaked model path detail %q:\n%s", leaked, got)
+		}
+	}
+}
+
+func TestChatMultipleToolsRenderOneCompactActivityLine(t *testing.T) {
+	planner := &chatScript{turns: []*agent.Completion{
+		{Message: agent.Message{ToolCalls: []agent.ToolCall{
+			{ID: "a", Function: agent.Func{Name: "get_user_details", Arguments: `{"user_id":"secret-a"}`}},
+			{ID: "b", Function: agent.Func{Name: "get_user_details", Arguments: `{"user_id":"secret-b"}`}},
+			{ID: "c", Function: agent.Func{Name: "get_user_details", Arguments: `{"user_id":"secret-c"}`}},
+		}}},
+		finalTurn("Three lookups finished."),
+	}}
+
+	var out strings.Builder
+	runChat(strings.NewReader("look up three accounts\n"), &out, planner, 10)
+	got := out.String()
+	if strings.Count(got, "[tools]") != 1 || !strings.Contains(got, "[tools] 3 actions: get_user_details") {
+		t.Fatalf("multiple calls should render as one aggregate activity line:\n%s", got)
+	}
+	for _, leaked := range []string{"secret-a", "secret-b", "secret-c", `{"user_id"`} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("aggregate activity leaked raw argument %q:\n%s", leaked, got)
+		}
+	}
+}
+
+func TestChatHelpAndVerboseOptIn(t *testing.T) {
+	planner := &recordingChatPlanner{answers: []string{"Verbose answer."}}
+	var out strings.Builder
+	runChat(strings.NewReader("/help\n/verbose\ninspect this\n"), &out, planner, 10)
+	got := out.String()
+	if len(planner.recorded) != 1 {
+		t.Fatalf("slash commands must not reach the provider; calls=%d output:\n%s", len(planner.recorded), got)
+	}
+	for _, want := range []string{"/help", "/verbose", "model turns", "engine calls", "Verbose answer."} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("help/verbose output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestChatStreamingFinalAnswerNotDuplicated(t *testing.T) {
+	planner := &streamingChatScript{
+		chunks: []string{"Streamed ", "answer."},
+		final:  "Streamed answer.",
+	}
+	var out strings.Builder
+	runChat(strings.NewReader("answer me\n"), &out, planner, 10)
+	if got := out.String(); strings.Count(got, "Streamed answer.") != 1 {
+		t.Fatalf("streamed final answer must render exactly once:\n%s", got)
+	}
+}
+
+func TestChatTurnCapRendersExplicitIncompleteResponse(t *testing.T) {
+	planner := &chatScript{turns: []*agent.Completion{
+		toolTurn("get_user_details", `{"user_id":"mia_li_3668"}`),
+	}}
+	var out strings.Builder
+	runChat(strings.NewReader("keep working\n"), &out, planner, 1)
+	got := out.String()
+	lower := strings.ToLower(got)
+	if !strings.Contains(lower, "incomplete") && !strings.Contains(lower, "turn limit") {
+		t.Fatalf("turn cap needs an explicit incomplete response:\n%s", got)
+	}
+	if strings.Contains(got, "fak> \n") {
+		t.Fatalf("turn cap must not render a blank assistant response:\n%s", got)
+	}
+}
+
+func TestChatTurnCapPreservesUserRequestForContinue(t *testing.T) {
+	planner := &turnCapHistoryPlanner{}
+	var out strings.Builder
+	runChat(strings.NewReader("inspect my account\ncontinue\n"), &out, planner, 1)
+
+	if len(planner.recorded) != 2 {
+		t.Fatalf("provider calls = %d, want 2; output:\n%s", len(planner.recorded), out.String())
+	}
+	var sawCappedRequest, sawContinue bool
+	for _, message := range planner.recorded[1] {
+		if message.Role != agent.RoleUser {
+			continue
+		}
+		sawCappedRequest = sawCappedRequest || strings.Contains(message.Content, "inspect my account")
+		sawContinue = sawContinue || strings.Contains(message.Content, "continue")
+	}
+	if !sawCappedRequest || !sawContinue {
+		t.Fatalf("second provider call lost capped-turn context (capped=%v continue=%v):\n%+v", sawCappedRequest, sawContinue, planner.recorded[1])
+	}
+}
+
+func TestChatProviderFailureIsSanitizedAndNextInputSucceeds(t *testing.T) {
+	planner := &providerRecoveryChatPlanner{}
+	var out strings.Builder
+	runChat(strings.NewReader("first request\nsecond request\n"), &out, planner, 10)
+	got := out.String()
+	if !strings.Contains(got, "[rate_limited]") || strings.Contains(got, "secret upstream body") {
+		t.Fatalf("provider failure was not safely classified:\n%s", got)
+	}
+	if planner.failures < 2 || planner.successes != 1 || !strings.Contains(got, "Recovered on the next input.") {
+		t.Fatalf("REPL did not continue after the failed turn (failures=%d successes=%d):\n%s", planner.failures, planner.successes, got)
 	}
 }
 
