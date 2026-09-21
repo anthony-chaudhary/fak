@@ -40,6 +40,82 @@ type opsRunReceipt struct {
 	Finished           time.Time                        `json:"finished_at"`
 	Lifecycle          []opsRunLifecycleRecord          `json:"lifecycle,omitempty"`
 	InferencePreflight *opsRunInferencePreflightReceipt `json:"inference_preflight,omitempty"`
+	ConfigPolicy       *opsRunConfigPolicyReceipt       `json:"config_policy,omitempty"`
+}
+
+type opsRunConfigPolicyReceipt struct {
+	Source string `json:"source"`
+	Digest string `json:"digest"`
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
+}
+
+func qualifyOpsRunConfig(raw string, auto, pure bool) (map[string]any, opsRunConfigPolicyReceipt) {
+	raw = strings.TrimSpace(raw)
+	sum := sha256.Sum256([]byte(raw))
+	receipt := opsRunConfigPolicyReceipt{
+		Source: "OPENCODE_CONFIG_CONTENT",
+		Digest: "sha256:" + hex.EncodeToString(sum[:]),
+		Status: "qualified",
+	}
+	config := map[string]any{}
+	if raw == "" {
+		return config, receipt
+	}
+	var inherited map[string]any
+	if err := json.Unmarshal([]byte(raw), &inherited); err != nil || inherited == nil {
+		receipt.Status, receipt.Reason = "refused", "malformed_inherited_config"
+		return nil, receipt
+	}
+	for key, value := range inherited {
+		switch key {
+		case "$schema", "theme", "keybinds":
+			config[key] = value
+		case "model", "small_model", "enabled_providers", "disabled_providers":
+			// The explicit run route owns these values and replaces them below.
+		case "permission":
+			if auto || !opsRunApprovedPermission(value) {
+				receipt.Status, receipt.Reason = "refused", "unapproved_permission"
+				return nil, receipt
+			}
+		case "plugin":
+			if pure {
+				continue
+			}
+			if !opsRunApprovedPlugin(value) {
+				receipt.Status, receipt.Reason = "refused", "unapproved_plugin"
+				return nil, receipt
+			}
+		case "provider", "mcp", "tools", "command", "agent":
+			receipt.Status, receipt.Reason = "refused", "unapproved_"+key
+			return nil, receipt
+		default:
+			receipt.Status, receipt.Reason = "refused", "unknown_config_field"
+			return nil, receipt
+		}
+	}
+	return config, receipt
+}
+
+func opsRunApprovedPermission(value any) bool {
+	permission, ok := value.(map[string]any)
+	if !ok || permission["*"] != "deny" {
+		return false
+	}
+	for key, verdict := range permission {
+		if key == "*" {
+			continue
+		}
+		if key != "read" || (verdict != "allow" && verdict != "deny") {
+			return false
+		}
+	}
+	return true
+}
+
+func opsRunApprovedPlugin(value any) bool {
+	plugins, ok := value.([]any)
+	return ok && len(plugins) == 1 && plugins[0] == "protection"
 }
 
 const (
@@ -482,6 +558,19 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 			argv = append(argv, pair[0], pair[1])
 		}
 	}
+	config, configPolicy := qualifyOpsRunConfig(os.Getenv("OPENCODE_CONFIG_CONTENT"), *auto, *pure)
+	if configPolicy.Status != "qualified" {
+		fmt.Fprintf(stderr, "ops run: inherited OpenCode config refused: %s\n", configPolicy.Reason)
+		if *dryRun {
+			return 2
+		}
+		now := time.Now().UTC()
+		receipt := opsRunReceipt{Schema: "fak-ops-run/1", Harness: *harness, Workspace: resolvedWorkspace, Status: "refused", ExitCode: 1, Started: now, Finished: now, ConfigPolicy: &configPolicy}
+		if err := writeOpsRunReceipt(*receiptPath, receipt); err != nil {
+			fmt.Fprintf(stderr, "ops run: write receipt: %v\n", err)
+		}
+		return 1
+	}
 	// A fresh provider name prevents deep-merging model/provider overrides from
 	// global or project config into the route owned by this invocation.
 	var nonce [12]byte
@@ -501,7 +590,6 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	// Interpolation happens in the child after guard injects its local endpoint.
 	// Start from a fresh config: ambient OpenCode configuration belongs to a
 	// different trust boundary and must not alter this run's provider route.
-	config := map[string]any{}
 	providers, _ := config["provider"].(map[string]any)
 	if providers == nil {
 		providers = map[string]any{}
@@ -518,7 +606,7 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	config["enabled_providers"] = []string{providerID}
 	encoded, _ := json.Marshal(config)
 	if *dryRun {
-		_ = json.NewEncoder(stdout).Encode(map[string]any{"schema": "fak-ops-run-plan/1", "harness": *harness, "provider": *provider, "workspace": resolvedWorkspace, "guarded": true, "prompt_delivery": "stdin", "timeout": timeout.String(), "auto": *auto, "pure": *pure})
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"schema": "fak-ops-run-plan/1", "harness": *harness, "provider": *provider, "workspace": resolvedWorkspace, "guarded": true, "prompt_delivery": "stdin", "timeout": timeout.String(), "auto": *auto, "pure": *pure, "config_policy": configPolicy})
 		return 0
 	}
 	env, cleanupEnv, err := opsRunChildEnvironment(string(encoded), *apiKeyEnv)
@@ -535,7 +623,7 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 		return sigCtx.Err() != nil
 	})
 	ctx = withOpsRunWorkspace(ctx, resolvedWorkspace)
-	receipt := opsRunReceipt{Schema: "fak-ops-run/1", Harness: *harness, Workspace: resolvedWorkspace, Status: "running", Started: time.Now().UTC()}
+	receipt := opsRunReceipt{Schema: "fak-ops-run/1", Harness: *harness, Workspace: resolvedWorkspace, Status: "running", Started: time.Now().UTC(), ConfigPolicy: &configPolicy}
 	if err := writeOpsRunReceipt(*receiptPath, receipt); err != nil {
 		fmt.Fprintf(stderr, "ops run: write receipt: %v\n", err)
 		return 1
