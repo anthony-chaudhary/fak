@@ -141,6 +141,15 @@ func (s *Server) MarkWarmupComplete(d time.Duration) {
 // wasting no steady-state compute. Safe on a nil Server or nil planner (a serve
 // with no local backend to warm): it releases any armed gate so readiness is never
 // stuck pending.
+//
+// Completion is CONTINGENT on the warmup actually succeeding (#13353): a planner
+// error or a cancelled context leaves an armed gate PENDING and returns the
+// original error, so a failed boot cannot advertise warm readiness. The gate stays
+// armed — and readiness stays held — until a LATER RunWarmup succeeds; a
+// subsequent successful call completes it exactly once. This keeps cancellation,
+// backend failure and a successful retry distinguishable without adding a retry
+// loop. The nil-planner case is explicit and separate: there is no backend to
+// warm, so the gate is released (as before) rather than held forever.
 func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 	if s == nil {
 		return 0, nil
@@ -153,6 +162,9 @@ func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 	start := time.Now()
 	_, err := s.planner.Complete(ctx, msgs, nil, agent.WithMaxTokens(1))
 	d := time.Since(start)
+	if err != nil {
+		return d, err
+	}
 	s.MarkWarmupComplete(d)
 
 	if rep, ok := s.planner.(agent.KVMemoryReporter); ok {

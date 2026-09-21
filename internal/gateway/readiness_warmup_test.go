@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -373,5 +374,99 @@ func TestRunWarmupDerivesAdmissionTokenBudget(t *testing.T) {
 	}
 	if got, want := ctl.TokenBudgetProvenance(), "measured"; got != want {
 		t.Fatalf("post-warmup TokenBudgetProvenance = %q, want 'measured'", got)
+	}
+}
+
+// failingWarmupPlanner is a MockPlanner that returns a scripted error for its
+// first N completions, then behaves like the deterministic mock on success. It
+// lets the warmup-failure tests distinguish a backend failure (an error reply)
+// from a cancellation (a context error surfaced by the mock) from the eventual
+// successful retry, all offline.
+type failingWarmupPlanner struct {
+	*agent.MockPlanner
+	failures int
+	err      error
+	calls    int
+}
+
+func (p *failingWarmupPlanner) Complete(ctx context.Context, msgs []agent.Message, defs []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	p.calls++
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if p.failures > 0 {
+		p.failures--
+		return nil, p.err
+	}
+	return p.MockPlanner.Complete(ctx, msgs, defs, opts...)
+}
+
+// TestWarmupFailureKeepsCacheGatePending pins #13353: a warmup that FAILS (the
+// planner returns an error) must leave an armed gate PENDING and return the
+// original error — a failed boot may not advertise warm readiness. A LATER
+// successful call then completes the gate exactly once, so failure and recovery
+// are distinguishable without a retry loop.
+func TestWarmupFailureKeepsCacheGatePending(t *testing.T) {
+	backendErr := errors.New("backend warmup exploded")
+	srv := &Server{planner: &failingWarmupPlanner{
+		MockPlanner: agent.NewMockPlanner("warmup-test"),
+		failures:    1,
+		err:         backendErr,
+	}}
+	srv.ArmWarmupGate()
+	if !srv.warmup.pending() {
+		t.Fatal("armed gate should be pending before RunWarmup")
+	}
+
+	if _, err := srv.RunWarmup(context.Background()); !errors.Is(err, backendErr) {
+		t.Fatalf("failed RunWarmup err = %v, want %v", err, backendErr)
+	}
+	if !srv.warmup.pending() {
+		t.Fatal("failed warmup released the gate, want still pending (a failed boot must not advertise readiness)")
+	}
+	if code, body := warmupHealthz(t, srv); code != http.StatusServiceUnavailable || body["ok"] != false {
+		t.Fatalf("post-failure serve: /healthz = %d ok=%v, want 503 ok=false", code, body["ok"])
+	}
+	if _, ok := srv.warmup.ready(); ok {
+		t.Fatal("failed warmup reported ready, want not-ready")
+	}
+
+	// A later successful call completes the gate exactly once.
+	if d, err := srv.RunWarmup(context.Background()); err != nil {
+		t.Fatalf("retry RunWarmup err = %v, want nil", err)
+	} else if d < 0 {
+		t.Fatalf("retry RunWarmup d = %v, want >= 0", d)
+	}
+	if srv.warmup.pending() {
+		t.Fatal("gate still pending after successful retry")
+	}
+	body := warmupHealthzBody(t, srv)
+	if body["ok"] != true {
+		t.Fatalf("post-retry serve: /healthz ok = %v, want true", body["ok"])
+	}
+	if _, present := body["time_to_ready_ms"]; !present {
+		t.Fatalf("post-retry serve: /healthz missing time_to_ready_ms, got %v", body)
+	}
+}
+
+// TestWarmupCancellationKeepsCacheGatePending pins the cancellation arm of
+// #13353: a cancelled context surfaces as an error, so the gate stays PENDING and
+// readiness remains held — a cancelled warmup is not a warm backend.
+func TestWarmupCancellationKeepsCacheGatePending(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	srv := &Server{planner: &failingWarmupPlanner{
+		MockPlanner: agent.NewMockPlanner("warmup-test"),
+	}}
+	srv.ArmWarmupGate()
+
+	if _, err := srv.RunWarmup(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled RunWarmup err = %v, want %v", err, context.Canceled)
+	}
+	if !srv.warmup.pending() {
+		t.Fatal("cancelled warmup released the gate, want still pending")
+	}
+	if _, ok := srv.warmup.ready(); ok {
+		t.Fatal("cancelled warmup reported ready, want not-ready")
 	}
 }
