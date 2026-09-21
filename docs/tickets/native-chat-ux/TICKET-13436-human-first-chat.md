@@ -50,7 +50,7 @@ Witness: `go test ./cmd/fak -run '^(TestChat|TestRunChat|TestRenderChat)' -count
 
 ## Definition of done
 
-- [x] Short model label and `/help` hint replace the absolute-path banner.
+- [x] Every startup line, including auto-connect notices, hides the absolute model path; the banner uses a short model label and points to `/help`.
 - [x] Default output hides raw tool arguments and engine/model counters.
 - [x] `/verbose` opt-in exposes the bounded existing diagnostics.
 - [x] Streamed final answers are not duplicated.
@@ -61,6 +61,7 @@ Witness: `go test ./cmd/fak -run '^(TestChat|TestRunChat|TestRenderChat)' -count
 
 - The full deterministic chat witness passed after the final code edit.
 - The real `fak chat` entrypoint rendered the short model label and handled `/help`, `/status`, and `/verbose` without a provider call.
+- A post-push entrypoint smoke check exposed the remaining auto-connect path leak; `TestChatAutoConnectDiagnosticUsesShortModelLabel` reproduced it through `cmdChat`, failed on the parent, and passed after both automatic connection notices stopped printing raw model identifiers.
 - `TestFeatureIslandsWiredAudit`, staged leak audit, and all five placement gates passed.
 - Independent review found and drove a turn-cap history regression from RED to GREEN, then reported no remaining findings.
 

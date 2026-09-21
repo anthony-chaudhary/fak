@@ -201,12 +201,12 @@ func cmdChat(argv []string) {
 			if !modelExplicit && localModel != "" && localModel != "mock" {
 				*cf.model = localModel
 			}
-			fmt.Fprintf(os.Stderr, "fak chat: auto-connected to local gateway at %s (model: %s)\n", effectiveBaseURL, *cf.model)
+			fmt.Fprintln(os.Stderr, "fak chat: connected to local gateway")
 		}
 	} else if effectiveBaseURL != "" && !modelExplicit && !*cf.offline {
 		if serverModel := detectServerModel(effectiveBaseURL); serverModel != "" && serverModel != "mock" {
 			*cf.model = serverModel
-			fmt.Fprintf(os.Stderr, "fak chat: auto-detected model %q from %s\n", *cf.model, effectiveBaseURL)
+			fmt.Fprintf(os.Stderr, "fak chat: connected to %s\n", effectiveBaseURL)
 		}
 	}
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -457,6 +458,71 @@ func TestChatClearCommandResetsContext(t *testing.T) {
 	for _, m := range turn2Msgs {
 		if strings.Contains(m.Content, "message before clear") {
 			t.Fatalf("cleared message leaked into turn 2 context:\n%+v", turn2Msgs)
+		}
+	}
+}
+
+func TestChatAutoConnectDiagnosticUsesShortModelLabel(t *testing.T) {
+	const (
+		fullModel  = `/var/lib/fak/models/Qwen3.8-27B-UD-Q2_K_XL.gguf`
+		shortModel = "Qwen3.8-27B-UD-Q2_K_XL"
+	)
+	oldTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != "http://127.0.0.1:8080/healthz" {
+			t.Fatalf("unexpected auto-connect probe: %s", r.URL)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"model":"` + fullModel + `"}`)),
+			Request:    r,
+		}, nil
+	})
+	defer func() { http.DefaultTransport = oldTransport }()
+
+	stdinR, stdinW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = stdinW.Close()
+	oldStdin, oldStdout, oldStderr := os.Stdin, os.Stdout, os.Stderr
+	os.Stdin, os.Stdout, os.Stderr = stdinR, stdoutW, stderrW
+	defer func() {
+		os.Stdin, os.Stdout, os.Stderr = oldStdin, oldStdout, oldStderr
+		_ = stdinR.Close()
+		_ = stdoutR.Close()
+		_ = stderrR.Close()
+	}()
+
+	t.Setenv("CHAT_TEST_EMPTY_KEY", "")
+	cmdChat([]string{"--tools=none", "--memory=false", "--api-key-env=CHAT_TEST_EMPTY_KEY"})
+	os.Stdin, os.Stdout, os.Stderr = oldStdin, oldStdout, oldStderr
+	_ = stdoutW.Close()
+	_ = stderrW.Close()
+	stdout, err := io.ReadAll(stdoutR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr, err := io.ReadAll(stderrR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(stdout) + string(stderr)
+	if !strings.Contains(got, shortModel) {
+		t.Fatalf("auto-connect output missing short model label:\n%s", got)
+	}
+	for _, leaked := range []string{"/var/lib/fak/models", ".gguf"} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("auto-connect output leaked model path detail %q:\n%s", leaked, got)
 		}
 	}
 }
