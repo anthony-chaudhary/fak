@@ -42,7 +42,20 @@ type opsRunReceipt struct {
 	Lifecycle          []opsRunLifecycleRecord          `json:"lifecycle,omitempty"`
 	InferencePreflight *opsRunInferencePreflightReceipt `json:"inference_preflight,omitempty"`
 	ConfigPolicy       *opsRunConfigPolicyReceipt       `json:"config_policy,omitempty"`
+	HarnessProtocol    string                           `json:"harness_protocol,omitempty"`
+	SourceSessionID    string                           `json:"source_session_id,omitempty"`
+	SourceSessionRef   string                           `json:"source_session_ref,omitempty"`
+	AuditRef           string                           `json:"audit_ref,omitempty"`
 }
+
+const opsRunPiRPCProtocol = "earendil-works.pi.rpc-jsonl.v1"
+
+type opsRunPiEvidence struct {
+	SessionID  string
+	SessionRef string
+}
+
+type opsRunPiEvidenceKey struct{}
 
 const opsRunLaunchIdentitySchema = "fak.ops-run.launch-identity.v1"
 
@@ -604,6 +617,15 @@ func opsRunWorkspace(ctx context.Context) string {
 	return workspace
 }
 
+func withOpsRunPiEvidence(ctx context.Context, evidence *opsRunPiEvidence) context.Context {
+	return context.WithValue(ctx, opsRunPiEvidenceKey{}, evidence)
+}
+
+func opsRunPiEvidenceFromContext(ctx context.Context) *opsRunPiEvidence {
+	evidence, _ := ctx.Value(opsRunPiEvidenceKey{}).(*opsRunPiEvidence)
+	return evidence
+}
+
 func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	for i, arg := range args {
 		if arg == "--harness=native" || arg == "-harness=native" || ((arg == "--harness" || arg == "-harness") && i+1 < len(args) && args[i+1] == "native") {
@@ -612,7 +634,7 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	}
 	fs := flag.NewFlagSet("ops run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	harness := fs.String("harness", "opencode", "headless harness: opencode or native (use --harness native --help for native options)")
+	harness := fs.String("harness", "opencode", "headless harness: opencode, pi, or native (use --harness native --help for native options)")
 	provider := fs.String("provider", "openai", "upstream wire: openai or gemini (native Google adapter)")
 	promptFile := fs.String("prompt-file", "", "UTF-8 prompt file, delivered over stdin")
 	workspace := fs.String("workspace", "", "existing workspace directory for the child process (required except dry-run)")
@@ -625,6 +647,7 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	audit := fs.String("audit", "", "guard audit journal file")
 	guardModeFlag := fs.String("guard-mode", "enforce", "guard posture: enforce (audit-only/off are unsupported)")
 	opencodeBin := fs.String("opencode-bin", "opencode", "OpenCode executable; use the native .exe on Windows")
+	piBin := fs.String("pi-bin", "pi", "Pi executable used with --harness pi")
 	auto := fs.Bool("auto", false, "ask OpenCode to approve permissions not explicitly denied")
 	pure := fs.Bool("pure", false, "disable OpenCode external plugins")
 	dryRun := fs.Bool("dry-run", false, "validate and print metadata without launching")
@@ -634,8 +657,8 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 		}
 		return 2
 	}
-	if fs.NArg() != 0 || *harness != "opencode" || (*provider != "openai" && *provider != "gemini") || *timeout <= 0 || strings.TrimSpace(*model) == "" || *promptFile == "" || (!*dryRun && (*receiptPath == "" || strings.TrimSpace(*workspace) == "")) {
-		fmt.Fprintln(stderr, "ops run: require --harness opencode, --provider openai|gemini, --model, --prompt-file, --workspace, --receipt and a positive --timeout; no positional arguments (--workspace and --receipt may be omitted only for --dry-run)")
+	if fs.NArg() != 0 || (*harness != "opencode" && *harness != "pi") || (*provider != "openai" && *provider != "gemini") || *timeout <= 0 || strings.TrimSpace(*model) == "" || *promptFile == "" || (!*dryRun && (*receiptPath == "" || strings.TrimSpace(*workspace) == "")) || (*harness == "pi" && (*auto || *pure)) {
+		fmt.Fprintln(stderr, "ops run: require --harness opencode|pi, --provider openai|gemini, --model, --prompt-file, --workspace, --receipt and a positive --timeout; no positional arguments; --auto/--pure are OpenCode-only (--workspace and --receipt may be omitted only for --dry-run)")
 		return 2
 	}
 	resolvedWorkspace := ""
@@ -664,7 +687,7 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 			}
 		}
 	}
-	if runtime.GOOS == "windows" && *opencodeBin == "opencode" {
+	if *harness == "opencode" && runtime.GOOS == "windows" && *opencodeBin == "opencode" {
 		// npm exposes a shell shim on PATH; choose its installed native binary.
 		if native := filepath.Join(os.Getenv("APPDATA"), "npm", "node_modules", "opencode-ai", "bin", "opencode.exe"); os.Getenv("APPDATA") != "" {
 			if info, err := os.Stat(native); err == nil && !info.IsDir() {
@@ -672,7 +695,7 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 			}
 		}
 	}
-	if runtime.GOOS != "windows" && *opencodeBin == "opencode" {
+	if *harness == "opencode" && runtime.GOOS != "windows" && *opencodeBin == "opencode" {
 		// Cron/launchd children inherit a minimal PATH that misses user-local
 		// install dirs. Resolve the well-known binary locations when the bare
 		// name is not on PATH so the guarded launch does not fail spuriously;
@@ -709,52 +732,63 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 		}
 		return 1
 	}
-	config, configPolicy := qualifyOpsRunConfig(os.Getenv("OPENCODE_CONFIG_CONTENT"), *auto, *pure)
-	if configPolicy.Status != "qualified" {
-		fmt.Fprintf(stderr, "ops run: inherited OpenCode config refused: %s\n", configPolicy.Reason)
-		if *dryRun {
-			return 2
+	configPolicy := opsRunConfigPolicyReceipt{Source: opsRunPiRPCProtocol, Digest: opsRunDigest(opsRunPiRPCProtocol), Status: "qualified"}
+	encoded := []byte(nil)
+	childBin := *piBin
+	if *harness == "opencode" {
+		config, qualified := qualifyOpsRunConfig(os.Getenv("OPENCODE_CONFIG_CONTENT"), *auto, *pure)
+		configPolicy = qualified
+		if configPolicy.Status != "qualified" {
+			fmt.Fprintf(stderr, "ops run: inherited OpenCode config refused: %s\n", configPolicy.Reason)
+			if *dryRun {
+				return 2
+			}
+			now := time.Now().UTC()
+			identity := newOpsRunLaunchIdentity(runID, *harness, resolvedWorkspace, *provider, *baseURL, *model, *opencodeBin, "", *policy, guardMode, *auto, *pure)
+			receipt := opsRunReceipt{Schema: "fak-ops-run/1", Harness: *harness, Workspace: resolvedWorkspace, LaunchIdentity: &identity, Status: "refused", ExitCode: 1, Started: now, Finished: now, ConfigPolicy: &configPolicy}
+			if err := writeOpsRunReceipt(*receiptPath, receipt); err != nil {
+				fmt.Fprintf(stderr, "ops run: write receipt: %v\n", err)
+			}
+			return 1
 		}
-		now := time.Now().UTC()
-		identity := newOpsRunLaunchIdentity(runID, *harness, resolvedWorkspace, *provider, *baseURL, *model, *opencodeBin, "", *policy, guardMode, *auto, *pure)
-		receipt := opsRunReceipt{Schema: "fak-ops-run/1", Harness: *harness, Workspace: resolvedWorkspace, LaunchIdentity: &identity, Status: "refused", ExitCode: 1, Started: now, Finished: now, ConfigPolicy: &configPolicy}
-		if err := writeOpsRunReceipt(*receiptPath, receipt); err != nil {
-			fmt.Fprintf(stderr, "ops run: write receipt: %v\n", err)
+		// A fresh provider name prevents deep-merging model/provider overrides from
+		// global or project config into the route owned by this invocation.
+		providerID := "fak_ops_" + hex.EncodeToString(nonce[:])
+		modelID := providerID + "/" + *model
+		argv = append(argv, "--", *opencodeBin, "run", "--format", "json", "--model", modelID)
+		if *auto {
+			argv = append(argv, "--auto")
 		}
-		return 1
+		if *pure {
+			argv = append(argv, "--pure")
+		}
+		// Interpolation happens in the child after guard injects its local endpoint.
+		providers, _ := config["provider"].(map[string]any)
+		if providers == nil {
+			providers = map[string]any{}
+		}
+		npm, childBase, childKey := "@ai-sdk/openai-compatible", "{env:OPENAI_BASE_URL}", "{env:OPENAI_API_KEY}"
+		if *provider == "gemini" {
+			npm, childBase, childKey = "@ai-sdk/google", "{env:GOOGLE_GEMINI_BASE_URL}/v1beta", "fak-ops-guard"
+		}
+		providers[providerID] = map[string]any{"npm": npm, "options": map[string]string{"baseURL": childBase, "apiKey": childKey}, "models": map[string]any{*model: map[string]any{}}}
+		config["provider"], config["model"] = providers, modelID
+		config["small_model"] = modelID
+		config["enabled_providers"] = []string{providerID}
+		encoded, _ = json.Marshal(config)
+		childBin = *opencodeBin
+	} else {
+		// Pi RPC is a pinned JSONL contract. The guard's existing Pi extension
+		// repoints the child provider to the run-scoped gateway before this command.
+		argv = append(argv, "--", *piBin, "--mode", "rpc", "--provider", "anthropic", "--model", *model)
 	}
-	// A fresh provider name prevents deep-merging model/provider overrides from
-	// global or project config into the route owned by this invocation.
-	providerID := "fak_ops_" + hex.EncodeToString(nonce[:])
-	modelID := providerID + "/" + *model
-	argv = append(argv, "--", *opencodeBin, "run", "--format", "json", "--model", modelID)
-	if *auto {
-		argv = append(argv, "--auto")
-	}
-	if *pure {
-		argv = append(argv, "--pure")
-	}
-	// Interpolation happens in the child after guard injects its local endpoint.
-	// Start from a fresh config: ambient OpenCode configuration belongs to a
-	// different trust boundary and must not alter this run's provider route.
-	providers, _ := config["provider"].(map[string]any)
-	if providers == nil {
-		providers = map[string]any{}
-	}
-	npm, childBase, childKey := "@ai-sdk/openai-compatible", "{env:OPENAI_BASE_URL}", "{env:OPENAI_API_KEY}"
-	if *provider == "gemini" {
-		// Native Google carries thoughtSignature across tool turns. The compatible
-		// adapter used above lost that metadata in the witnessed Gemini tool loop.
-		npm, childBase, childKey = "@ai-sdk/google", "{env:GOOGLE_GEMINI_BASE_URL}/v1beta", "fak-ops-guard"
-	}
-	providers[providerID] = map[string]any{"npm": npm, "options": map[string]string{"baseURL": childBase, "apiKey": childKey}, "models": map[string]any{*model: map[string]any{}}}
-	config["provider"], config["model"] = providers, modelID
-	config["small_model"] = modelID
-	config["enabled_providers"] = []string{providerID}
-	encoded, _ := json.Marshal(config)
-	identity := newOpsRunLaunchIdentity(runID, *harness, resolvedWorkspace, *provider, *baseURL, *model, *opencodeBin, string(encoded), *policy, guardMode, *auto, *pure)
+	identity := newOpsRunLaunchIdentity(runID, *harness, resolvedWorkspace, *provider, *baseURL, *model, childBin, string(encoded), *policy, guardMode, *auto, *pure)
 	if *dryRun {
-		_ = json.NewEncoder(stdout).Encode(map[string]any{"schema": "fak-ops-run-plan/1", "harness": *harness, "provider": *provider, "workspace": resolvedWorkspace, "guarded": false, "guard_requested": "fail_closed", "guard_effective": "unknown", "guard_mode_requested": guardMode, "guard_mode_effective": "unknown", "prompt_delivery": "stdin", "timeout": timeout.String(), "auto": *auto, "pure": *pure, "config_policy": configPolicy})
+		plan := map[string]any{"schema": "fak-ops-run-plan/1", "harness": *harness, "provider": *provider, "workspace": resolvedWorkspace, "guarded": false, "guard_requested": "fail_closed", "guard_effective": "unknown", "guard_mode_requested": guardMode, "guard_mode_effective": "unknown", "prompt_delivery": "stdin", "timeout": timeout.String(), "auto": *auto, "pure": *pure, "config_policy": configPolicy}
+		if *harness == "pi" {
+			plan["harness_protocol"] = opsRunPiRPCProtocol
+		}
+		_ = json.NewEncoder(stdout).Encode(plan)
 		return 0
 	}
 	env, cleanupEnv, err := opsRunChildEnvironment(string(encoded), *apiKeyEnv)
@@ -764,6 +798,15 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	}
 	defer cleanupEnv()
 	receipt := opsRunReceipt{Schema: "fak-ops-run/1", Harness: *harness, Workspace: resolvedWorkspace, LaunchIdentity: &identity, Status: "running", Started: time.Now().UTC(), ConfigPolicy: &configPolicy}
+	childInput := prompt
+	var piEvidence opsRunPiEvidence
+	if *harness == "pi" {
+		receipt.HarnessProtocol = opsRunPiRPCProtocol
+		receipt.AuditRef = strings.TrimSpace(*audit)
+		stateCommand, _ := json.Marshal(map[string]any{"id": "fak-state", "type": "get_state"})
+		promptCommand, _ := json.Marshal(map[string]any{"id": "fak-prompt", "type": "prompt", "message": string(prompt)})
+		childInput = append(append(stateCommand, '\n'), append(promptCommand, '\n')...)
+	}
 	if err := writeOpsRunReceipt(*receiptPath, receipt); err != nil {
 		fmt.Fprintf(stderr, "ops run: write receipt: %v\n", err)
 		return 1
@@ -776,6 +819,9 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 		return sigCtx.Err() != nil
 	})
 	ctx = withOpsRunWorkspace(ctx, resolvedWorkspace)
+	if *harness == "pi" {
+		ctx = withOpsRunPiEvidence(ctx, &piEvidence)
+	}
 	if *provider != "openai" {
 		preflight := opsRunInferenceRefusal(*provider, *baseURL, *model, "unsupported_provider_protocol")
 		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
@@ -796,7 +842,11 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stderr, "ops run: write receipt: %v\n", err)
 		return 1
 	}
-	code, complete, eventError, lifecycle := opsRunExecute(ctx, stdout, stderr, argv, env, prompt)
+	code, complete, eventError, lifecycle := opsRunExecute(ctx, stdout, stderr, argv, env, childInput)
+	if *harness == "pi" {
+		receipt.SourceSessionID = piEvidence.SessionID
+		receipt.SourceSessionRef = piEvidence.SessionRef
+	}
 	if len(lifecycle) > 0 {
 		receipt.Lifecycle = append(receipt.Lifecycle, lifecycle...)
 	}
@@ -825,7 +875,7 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	} else if code == 0 {
 		if eventError || !complete {
 			code = 1
-			fmt.Fprintln(stderr, "ops run: OpenCode did not report a successful completed turn")
+			fmt.Fprintf(stderr, "ops run: %s did not report a successful completed turn\n", *harness)
 		} else {
 			receipt.Status = "succeeded"
 		}
@@ -936,6 +986,12 @@ type opsRunEvents struct {
 	overflow bool
 	complete bool
 	failed   bool
+	pi       bool
+	accepted bool
+	toolOpen bool
+	toolDone bool
+	evidence *opsRunPiEvidence
+	terminal func()
 }
 
 func (w *opsRunEvents) Write(p []byte) (int, error) {
@@ -960,7 +1016,18 @@ func (w *opsRunEvents) finishLine() {
 	}
 	if !w.overflow {
 		var ev struct {
-			Type string `json:"type"`
+			Type      string `json:"type"`
+			Command   string `json:"command"`
+			Success   *bool  `json:"success"`
+			IsError   bool   `json:"isError"`
+			WillRetry bool   `json:"willRetry"`
+			Data      struct {
+				SessionID   string `json:"sessionId"`
+				SessionFile string `json:"sessionFile"`
+			} `json:"data"`
+			Message struct {
+				StopReason string `json:"stopReason"`
+			} `json:"message"`
 			Part struct {
 				Reason string `json:"reason"`
 				State  struct {
@@ -969,6 +1036,48 @@ func (w *opsRunEvents) finishLine() {
 			} `json:"part"`
 		}
 		if json.Unmarshal(w.pending, &ev) == nil {
+			if w.pi {
+				switch ev.Type {
+				case "response":
+					if ev.Success != nil && !*ev.Success {
+						w.failed = true
+						if ev.Command == "prompt" && w.terminal != nil {
+							w.terminal()
+						}
+					}
+					if ev.Command == "prompt" && ev.Success != nil && *ev.Success {
+						w.accepted = true
+					}
+					if ev.Command == "get_state" && ev.Success != nil && *ev.Success && w.evidence != nil {
+						w.evidence.SessionID = ev.Data.SessionID
+						w.evidence.SessionRef = ev.Data.SessionFile
+					}
+				case "tool_execution_start":
+					w.toolOpen = true
+				case "tool_execution_end":
+					if ev.IsError || !w.toolOpen {
+						w.failed = true
+					} else {
+						w.toolDone = true
+					}
+				case "message_end":
+					if ev.Message.StopReason == "error" || ev.Message.StopReason == "aborted" {
+						w.failed = true
+					}
+				case "agent_end":
+					if ev.WillRetry {
+						w.failed = true
+					}
+				case "agent_settled":
+					hasSource := w.evidence != nil && (w.evidence.SessionID != "" || w.evidence.SessionRef != "")
+					w.complete = w.accepted && w.toolDone && hasSource && !w.failed
+					if w.terminal != nil {
+						w.terminal()
+					}
+				case "extension_error":
+					w.failed = true
+				}
+			}
 			if ev.Type == "error" || (ev.Type == "tool_use" && ev.Part.State.Status == "error") {
 				w.failed = true
 			}
@@ -987,11 +1096,11 @@ func (w *opsRunEvents) finishLine() {
 }
 
 func executeOpsRun(ctx context.Context, stdout, stderr io.Writer, argv, env []string, prompt []byte) (int, bool, bool, []opsRunLifecycleRecord) {
-	events := &opsRunEvents{output: stdout}
+	piEvidence := opsRunPiEvidenceFromContext(ctx)
+	events := &opsRunEvents{output: stdout, pi: piEvidence != nil, evidence: piEvidence}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = opsRunWorkspace(ctx)
 	cmd.Env = env
-	cmd.Stdin = bytes.NewReader(prompt)
 	cmd.Stdout, cmd.Stderr = events, stderr
 	cmd.WaitDelay = 5 * time.Second
 	procguard.ConfigureProcessTreeCancel(cmd)
@@ -1044,7 +1153,27 @@ func executeOpsRun(ctx context.Context, stdout, stderr io.Writer, argv, env []st
 		return cancelErr
 	}
 
-	err := cmd.Run()
+	var err error
+	if piEvidence == nil {
+		cmd.Stdin = bytes.NewReader(prompt)
+		err = cmd.Run()
+	} else {
+		stdin, pipeErr := cmd.StdinPipe()
+		if pipeErr != nil {
+			fmt.Fprintf(stderr, "ops run: child stdin: %v\n", pipeErr)
+			return 1, false, true, nil
+		}
+		var closeOnce sync.Once
+		events.terminal = func() { closeOnce.Do(func() { _ = stdin.Close() }) }
+		if err = cmd.Start(); err == nil {
+			if _, err = stdin.Write(prompt); err == nil {
+				err = cmd.Wait()
+			} else {
+				events.terminal()
+				_ = cmd.Wait()
+			}
+		}
+	}
 	events.finishLine()
 
 	mu.Lock()
