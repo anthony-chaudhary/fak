@@ -825,6 +825,51 @@ cdb = ["internal/cdb/**"]
 ctxmmu = ["internal/ctxmmu/**"]
 engine = ["internal/engine/**"]
 gateway = ["internal/gateway/**"]
+# --- Sub-lanes for `internal/gateway` (2026-09-21 census: 270 non-test files, 1 package) --
+# WHY: `internal/gateway` is 270 non-test Go files in ONE co-compiling package, so
+# the parent glob `gateway = ["internal/gateway/**"]` is a fat lane: open
+# `lane: gateway` issues serialize on it even when their real file sets are
+# disjoint (witnessed 2026-09-21: #2454 and #2466 both refused as lane-wave
+# conflict though one owns health/http and the other replica_router+routing).
+# These ADDITIVE sub-lanes give each surface its own addressable root so the wave
+# arbiter (tree overlap) and the preflight agree; the parent glob is UNCHANGED,
+# so nothing that resolved before regresses. Route a ticket at a sub-lane by its
+# ```routing `lane:` key.
+# HONESTY NOTE: this is ONE Go package, so these sub-lanes buy WRITE disjointness
+# only, not build independence — a worker must keep `go build ./internal/gateway/`
+# and `go test ./internal/gateway/...` green, and the land gate still serializes
+# on the package. The package-splitting fix is tracked separately.
+# Globs name real file families from the census, so adding a file needs no edit.
+#
+# --- COMPLETION PASS (2026-09-21): covered all 270 non-test files across 22 additive
+# sub-lanes with ZERO uncovered and no same-lane glob double-match. The 5 INTENTIONAL
+# cross-lane overlaps (a file that is genuinely both concerns, matched by two different
+# lanes) are: kv_fleet_routing (routing + native), mcp_defer and mcp_toolproc (mcp +
+# tools), session_admit (session + admission), tool_schema_telemetry (metrics + tools).
+# `route_*.go` was dropped from gateway-routing because `rout*.go` already subsumes it
+# (it had double-matched route_control.go and route_objective.go in the SAME lane).
+"gateway-session" = ["internal/gateway/session_*.go", "internal/gateway/sessions_*.go", "internal/gateway/agent_sessions*.go"]
+"gateway-mcp" = ["internal/gateway/mcp*.go"]
+"gateway-protocol" = ["internal/gateway/messages_*.go", "internal/gateway/responses_*.go", "internal/gateway/anthropic_*.go", "internal/gateway/gemini_*.go", "internal/gateway/deepseek_*.go", "internal/gateway/chat_*.go", "internal/gateway/completions*.go", "internal/gateway/stream_*.go", "internal/gateway/sse_*.go", "internal/gateway/dual_planner*.go", "internal/gateway/messages.go", "internal/gateway/responses.go"]
+"gateway-cache" = ["internal/gateway/cache_*.go", "internal/gateway/vcache_*.go", "internal/gateway/ttl_*.go", "internal/gateway/shrink_lever_*.go", "internal/gateway/compaction_*.go"]
+"gateway-metrics" = ["internal/gateway/metrics*.go", "internal/gateway/serving_metrics*.go", "internal/gateway/trajctl_metrics*.go", "internal/gateway/tool_schema_telemetry*.go", "internal/gateway/otlp_export*.go", "internal/gateway/tracecontext*.go"]
+"gateway-routing" = ["internal/gateway/rout*.go", "internal/gateway/replica_*.go", "internal/gateway/residency_router*.go", "internal/gateway/fleet_*.go", "internal/gateway/kv_fleet_routing*.go", "internal/gateway/tier_*.go"]
+"gateway-tools" = ["internal/gateway/tool_*.go", "internal/gateway/tooldefer_*.go", "internal/gateway/mcp_defer*.go", "internal/gateway/mcp_toolproc*.go", "internal/gateway/coretool_*.go", "internal/gateway/negative_*.go", "internal/gateway/negframe_*.go", "internal/gateway/positive_complement_*.go", "internal/gateway/toolproc_reuse*.go", "internal/gateway/defer_inert*.go"]
+"gateway-http" = ["internal/gateway/http*.go", "internal/gateway/server*.go", "internal/gateway/debug*.go", "internal/gateway/home*.go", "internal/gateway/rich_dashboard*.go"]
+"gateway-ctx" = ["internal/gateway/ctx*.go", "internal/gateway/memory*.go", "internal/gateway/past_compact*.go", "internal/gateway/prompt_order*.go"]
+"gateway-admission" = ["internal/gateway/admission*.go", "internal/gateway/token_admission*.go", "internal/gateway/session_admit*.go", "internal/gateway/gateway_admit*.go", "internal/gateway/rate_limit_*.go", "internal/gateway/spend_governor*.go", "internal/gateway/preemption*.go", "internal/gateway/drain_*.go", "internal/gateway/batchbudget*.go", "internal/gateway/batchsched*.go"]
+"gateway-native" = ["internal/gateway/native_*.go", "internal/gateway/kv_*.go", "internal/gateway/inkernel_*.go", "internal/gateway/decode_footprint_*.go", "internal/gateway/enginecapability*.go", "internal/gateway/ep_fanout_*.go", "internal/gateway/kvmmu_*.go", "internal/gateway/jenga_block_pool*.go", "internal/gateway/ucx_topology*.go", "internal/gateway/peer_fetch_tier*.go"]
+"gateway-guard" = ["internal/gateway/guard_*.go", "internal/gateway/policy_*.go", "internal/gateway/scope_guard*.go", "internal/gateway/refusal_*.go", "internal/gateway/result_contract*.go", "internal/gateway/stop_*.go", "internal/gateway/upstream_failure*.go", "internal/gateway/upstream_observe*.go", "internal/gateway/upstream_transport_kind*.go", "internal/gateway/crossagent_*.go", "internal/gateway/context_query_audit*.go", "internal/gateway/error_affordance*.go", "internal/gateway/reversibility_note*.go", "internal/gateway/anchor_refusal*.go", "internal/gateway/subagent_depth*.go"]
+"gateway-a2a" = ["internal/gateway/a2a*.go"]
+"gateway-l3" = ["internal/gateway/l3*.go"]
+"gateway-lease" = ["internal/gateway/lease*.go"]
+"gateway-auth" = ["internal/gateway/auth_gate*.go", "internal/gateway/keyset*.go", "internal/gateway/principal*.go", "internal/gateway/account_rehome*.go", "internal/gateway/forbidden_detail*.go"]
+"gateway-observe" = ["internal/gateway/observation*.go", "internal/gateway/observer*.go", "internal/gateway/lifecycle_signals*.go", "internal/gateway/logvault_metrics*.go", "internal/gateway/harness_metrics*.go", "internal/gateway/debezium*.go"]
+"gateway-static" = ["internal/gateway/readiness*.go", "internal/gateway/startup*.go", "internal/gateway/served_failure*.go", "internal/gateway/serving_autoscaler*.go", "internal/gateway/serving_report_producer*.go", "internal/gateway/config*.go", "internal/gateway/defaults_selfcheck*.go", "internal/gateway/control*.go"]
+"gateway-features" = ["internal/gateway/feature*.go", "internal/gateway/fak_tasks*.go", "internal/gateway/fak_sharedtask*.go", "internal/gateway/arms*.go", "internal/gateway/delivery_*.go"]
+"gateway-adjudication" = ["internal/gateway/adjudicate_proposed*.go", "internal/gateway/subagent_witness*.go", "internal/gateway/noprogress_zerodiff*.go", "internal/gateway/result_livelock*.go", "internal/gateway/swap_error_keep_query*.go", "internal/gateway/staged_mutation*.go", "internal/gateway/reframe_journal*.go", "internal/gateway/invariant_reseed*.go", "internal/gateway/query_not_chat*.go", "internal/gateway/steer_class*.go", "internal/gateway/role_alternation*.go", "internal/gateway/coherence*.go", "internal/gateway/architect_editor*.go"]
+"gateway-wire" = ["internal/gateway/wire*.go", "internal/gateway/jsonrepair*.go", "internal/gateway/inprocess_read*.go", "internal/gateway/keepalive*.go", "internal/gateway/delta_coalescer*.go", "internal/gateway/sync_writer*.go", "internal/gateway/embeddings*.go", "internal/gateway/moderations*.go", "internal/gateway/gemini*.go", "internal/gateway/fallback*.go", "internal/gateway/dynamic_effort*.go", "internal/gateway/thinking_budget*.go", "internal/gateway/turn_cost*.go", "internal/gateway/usage_record*.go", "internal/gateway/token_savings_debug*.go", "internal/gateway/work_effect_calibration*.go", "internal/gateway/speculative_calibration*.go", "internal/gateway/bgloop*.go"]
+"gateway-lifecycle" = ["internal/gateway/reset_*.go", "internal/gateway/pinsurvival*.go", "internal/gateway/harness_coherence*.go", "internal/gateway/resume*.go", "internal/gateway/scaletozero_warmresume*.go", "internal/gateway/gateway.go"]
 ggufload = ["internal/ggufload/**"]
 grammar = ["internal/grammar/**"]
 toolgrammar = ["internal/toolgrammar/**"]
