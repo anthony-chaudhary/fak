@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,30 @@ import (
 // The real subprocess executes the production chat entry point, including its
 // file transport, HTTP planner and kernel tools, rather than a fake child receipt.
 func init() {
+	if mode := os.Getenv("FAK_OPS_NATIVE_RECEIPT_MODE"); mode != "" && len(os.Args) > 1 && os.Args[1] == "chat" {
+		var payload string
+		switch mode {
+		case "complete":
+			payload = `{"schema":"fak.agent.native.v1","status":"completed","metrics":{"arm":"fak","task_completed":true}}`
+		case "incomplete":
+			payload = `{"schema":"fak.agent.native.v1","status":"running","metrics":{"arm":"fak"}}`
+		case "unsupported":
+			payload = `{"schema":"fak.agent.native.v999","status":"completed","metrics":{"arm":"fak","task_completed":true}}`
+		case "missing":
+			os.Exit(0)
+		default:
+			os.Exit(2)
+		}
+		for i := 2; i+1 < len(os.Args); i++ {
+			if os.Args[i] == "--receipt" {
+				if os.WriteFile(os.Args[i+1], []byte(payload), 0600) != nil {
+					os.Exit(2)
+				}
+				break
+			}
+		}
+		os.Exit(0)
+	}
 	if marker := os.Getenv("FAK_OPS_NATIVE_SELECTED"); marker != "" && len(os.Args) > 1 && os.Args[1] == "chat" {
 		observed := make(map[string]string)
 		for _, key := range []string{
@@ -57,6 +82,105 @@ func init() {
 		cmdChat(os.Args[2:])
 		os.Exit(0)
 	}
+}
+
+func TestOpsNativeLaunchIdentity(t *testing.T) {
+	run := func(t *testing.T, mode string) (int, opsRunNativeReceipt, []byte, string) {
+		t.Helper()
+		root := t.TempDir()
+		prompt := filepath.Join(root, "prompt.txt")
+		policy := filepath.Join(root, "policy.json")
+		receiptPath := filepath.Join(root, "run.json")
+		if err := os.WriteFile(prompt, []byte("private-native-launch-sentinel\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(policy, []byte(`{"posture":"fail_closed","allow":[]}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("FAK_OPS_NATIVE_RECEIPT_MODE", mode)
+		gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !serveOpsNativeInferencePreflight(t, w, r) {
+				t.Errorf("unexpected native provider request: %s %s", r.Method, r.URL.Path)
+			}
+		}))
+		defer gateway.Close()
+
+		var stderr bytes.Buffer
+		code := runOpsNativeFixture(io.Discard, &stderr, "FAK_OPS_NATIVE_RECEIPT_MODE", []string{
+			"--harness", "native", "--workspace", root,
+			"--prompt-file", prompt, "--receipt", receiptPath,
+			"--provider", "openai", "--model", "fixture", "--base-url", gateway.URL + "/v1",
+			"--policy", policy, "--max-turns", "1", "--timeout", "5s",
+		})
+		data, err := os.ReadFile(receiptPath)
+		if err != nil {
+			t.Fatalf("read receipt: %v; stderr=%s", err, &stderr)
+		}
+		var receipt opsRunNativeReceipt
+		if err := json.Unmarshal(data, &receipt); err != nil {
+			t.Fatal(err)
+		}
+		return code, receipt, data, receiptPath
+	}
+
+	t.Run("durable_redacted_child_receipt_binds_actual_launch", func(t *testing.T) {
+		code, receipt, data, receiptPath := run(t, "complete")
+		if code != 0 || receipt.Status != "succeeded" || receipt.LaunchIdentity == nil {
+			t.Fatalf("native launch code=%d status=%q identity=%+v", code, receipt.Status, receipt.LaunchIdentity)
+		}
+		identity := receipt.LaunchIdentity
+		if identity.Harness != "native" || identity.PolicySource != "flag" || identity.PolicyDigest == "" || identity.PolicyDigest == "unknown" {
+			t.Errorf("native policy identity is not explicit: %+v", identity.opsRunLaunchIdentityReceipt)
+		}
+		if identity.WorkspaceDigest == "" || identity.WorkspaceDigest == "unknown" || identity.InferenceProbeRef == "" || identity.InferenceProbeRef == "unknown" {
+			t.Errorf("native workspace/route evidence missing: %+v", identity.opsRunLaunchIdentityReceipt)
+		}
+		if identity.Tools.System || identity.Tools.MCP || identity.Tools.Skills || identity.Tools.Memory {
+			t.Errorf("native receipt did not preserve actual disabled tool toggles: %+v", identity.Tools)
+		}
+		if !strings.HasPrefix(identity.ChildReceiptRef, "sha256:") || identity.ChildReceiptArtifact == "" || identity.ChildReceiptArtifact == "unknown" || filepath.IsAbs(identity.ChildReceiptArtifact) {
+			t.Fatalf("child receipt is not durably content-addressed: ref=%q artifact=%q", identity.ChildReceiptRef, identity.ChildReceiptArtifact)
+		}
+		artifactPath := filepath.Join(filepath.Dir(receiptPath), filepath.FromSlash(identity.ChildReceiptArtifact))
+		artifact, err := os.ReadFile(artifactPath)
+		if err != nil {
+			t.Fatalf("redacted artifact did not survive temporary receipt deletion: %v", err)
+		}
+		sum := sha256.Sum256(artifact)
+		if got := fmt.Sprintf("sha256:%x", sum); got != identity.ChildReceiptRef {
+			t.Fatalf("artifact digest=%q want=%q", got, identity.ChildReceiptRef)
+		}
+		combined := string(data) + string(artifact)
+		for _, raw := range []string{"private-native-launch-sentinel", filepath.Dir(receiptPath)} {
+			if strings.Contains(combined, raw) {
+				t.Errorf("native receipt leaked raw private value %q", raw)
+			}
+		}
+	})
+
+	for _, mode := range []string{"missing", "incomplete"} {
+		t.Run("zero_exit_"+mode+"_child_receipt_is_failure", func(t *testing.T) {
+			code, receipt, _, _ := run(t, mode)
+			if code == 0 || receipt.Status == "succeeded" {
+				t.Fatalf("zero-exit %s child receipt was accepted: code=%d status=%q", mode, code, receipt.Status)
+			}
+		})
+	}
+
+	t.Run("unsupported_child_evidence_cannot_inherit_qualification", func(t *testing.T) {
+		t.Setenv("OPENCODE_CONFIG_CONTENT", `{"permission":{"*":"allow"}}`)
+		code, receipt, _, _ := run(t, "unsupported")
+		if code == 0 || receipt.Status == "succeeded" || receipt.LaunchIdentity == nil {
+			t.Fatalf("unsupported native evidence was accepted: code=%d receipt=%+v", code, receipt)
+		}
+		identity := receipt.LaunchIdentity
+		if identity.ChildReceiptRef != "unknown" || identity.GuardEffective != "unknown" || identity.GuardEvidenceRef != "unknown" || identity.CapabilityEvidenceRef != "unknown" {
+			t.Errorf("unsupported child evidence appeared qualified: %+v", identity.opsRunLaunchIdentityReceipt)
+		}
+		if receipt.ConfigPolicy == nil || receipt.ConfigPolicy.Status == "qualified" || receipt.ConfigPolicy.Source == "OPENCODE_CONFIG_CONTENT" {
+			t.Errorf("unsupported native evidence inherited qualification: %+v", receipt.ConfigPolicy)
+		}
+	})
 }
 
 // runOpsNativeFixture explicitly admits the one marker that turns the test
