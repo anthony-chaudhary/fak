@@ -6,6 +6,13 @@ layout(set=0,binding=1) readonly buffer X { float x[]; };
 layout(set=0,binding=2) writeonly buffer Y { float y[]; };
 layout(push_constant) uniform PC { int outDim; int inDim; int tokens; } pc;
 
+// Fold eight independent F32 accumulation chains in the same tree order the
+// scalar path has always used. Keeping the fold identical is what preserves
+// bit-for-bit parity with the P=1 control.
+float fold8(float a0, float a1, float a2, float a3, float a4, float a5, float a6, float a7) {
+    return ((a0 + a1) + (a2 + a3)) + ((a4 + a5) + (a6 + a7));
+}
+
 void main() {
     int globalIdx = int(gl_GlobalInvocationID.x);
     // The host dispatch is deliberately one-dimensional: ceil(outDim*tokens/64)
@@ -13,21 +20,106 @@ void main() {
     // share one unambiguous flattening for every token count, including tokens==1.
     int row = globalIdx % pc.outDim;
     int token = globalIdx / pc.outDim;
-    if (row >= pc.outDim || token >= pc.tokens) return;
+    if (row >= pc.outDim) return;
+
+    // Small-panel weight reuse (P2-P4). For 2..4 tokens the flattened order puts
+    // every row's token-0 invocation in the first `outDim` slots, so the token-0
+    // invocation can serve all tokens for its row from one resident weight load;
+    // the remaining host-dispatched invocations return harmlessly. P=1 and P>=5
+    // keep the original one-(row,token)-per-invocation route untouched.
+    int panel = pc.tokens;
+    bool reuse = panel >= 2 && panel <= 4;
+    if (reuse) {
+        if (token != 0) return;
+    } else if (token >= pc.tokens) {
+        return;
+    }
+
     int blocks = pc.inDim / 256;
-    // Eight independent accumulation chains. The products and their evaluation
-    // order within each chain are unchanged from the scalar path; only the
-    // dependency structure differs, giving the compiler bounded instruction-level
-    // overlap across the long in=5120 / in=17408 decode rows. The eight partials
-    // are folded once at the end.
-    float acc0 = 0.0;
-    float acc1 = 0.0;
-    float acc2 = 0.0;
-    float acc3 = 0.0;
-    float acc4 = 0.0;
-    float acc5 = 0.0;
-    float acc6 = 0.0;
-    float acc7 = 0.0;
+
+    if (!reuse) {
+        // Eight independent accumulation chains. The products and their evaluation
+        // order within each chain are unchanged from the scalar path; only the
+        // dependency structure differs, giving the compiler bounded instruction-level
+        // overlap across the long in=5120 / in=17408 decode rows. The eight partials
+        // are folded once at the end.
+        float acc0 = 0.0;
+        float acc1 = 0.0;
+        float acc2 = 0.0;
+        float acc3 = 0.0;
+        float acc4 = 0.0;
+        float acc5 = 0.0;
+        float acc6 = 0.0;
+        float acc7 = 0.0;
+        for (int sb = 0; sb < blocks; ++sb) {
+            uint baseWord = uint((row * blocks + sb) * 36);
+            vec2 d_dm = unpackHalf2x16(raw[baseWord]);
+            float d = d_dm.x;
+            float dm = d_dm.y;
+
+            uint w1 = raw[baseWord + 1u];
+            uint w2 = raw[baseWord + 2u];
+            uint w3 = raw[baseWord + 3u];
+
+            float d_sc[8];
+            float dm_mn[8];
+
+            for (int j = 0; j < 4; ++j) {
+                uint sc = bitfieldExtract(w1, j * 8, 6);
+                uint mn = bitfieldExtract(w2, j * 8, 6);
+                d_sc[j] = d * float(sc);
+                dm_mn[j] = dm * float(mn);
+            }
+            for (int j = 4; j < 8; ++j) {
+                int k = j - 4;
+                uint sc = bitfieldExtract(w3, k * 8, 4) | (bitfieldExtract(w1, k * 8 + 6, 2) << 4u);
+                uint mn = bitfieldExtract(w3, k * 8 + 4, 4) | (bitfieldExtract(w2, k * 8 + 6, 2) << 4u);
+                d_sc[j] = d * float(sc);
+                dm_mn[j] = dm * float(mn);
+            }
+
+            for (int pair = 0; pair < 4; ++pair) {
+                int g_even = pair * 2;
+                int g_odd = pair * 2 + 1;
+                float d_sc_e = d_sc[g_even];
+                float dm_mn_e = dm_mn[g_even];
+                float d_sc_o = d_sc[g_odd];
+                float dm_mn_o = dm_mn[g_odd];
+
+                int xBase_even = token * pc.inDim + sb * 256 + g_even * 32;
+                int xBase_odd = xBase_even + 32;
+                uint weightBase = baseWord + 4u + uint(pair * 8);
+
+                for (int w = 0; w < 8; ++w) {
+                    uint qw = raw[weightBase + uint(w)];
+                    int lane = w * 4;
+
+                    // 4 low nibbles for even group
+                    acc0 += (d_sc_e * float(bitfieldExtract(qw, 0, 4)) - dm_mn_e) * x[xBase_even + lane + 0];
+                    acc1 += (d_sc_e * float(bitfieldExtract(qw, 8, 4)) - dm_mn_e) * x[xBase_even + lane + 1];
+                    acc2 += (d_sc_e * float(bitfieldExtract(qw, 16, 4)) - dm_mn_e) * x[xBase_even + lane + 2];
+                    acc3 += (d_sc_e * float(bitfieldExtract(qw, 24, 4)) - dm_mn_e) * x[xBase_even + lane + 3];
+
+                    // 4 high nibbles for odd group
+                    acc4 += (d_sc_o * float(bitfieldExtract(qw, 4, 4)) - dm_mn_o) * x[xBase_odd + lane + 0];
+                    acc5 += (d_sc_o * float(bitfieldExtract(qw, 12, 4)) - dm_mn_o) * x[xBase_odd + lane + 1];
+                    acc6 += (d_sc_o * float(bitfieldExtract(qw, 20, 4)) - dm_mn_o) * x[xBase_odd + lane + 2];
+                    acc7 += (d_sc_o * float(bitfieldExtract(qw, 28, 4)) - dm_mn_o) * x[xBase_odd + lane + 3];
+                }
+            }
+        }
+        y[token * pc.outDim + row] = fold8(acc0, acc1, acc2, acc3, acc4, acc5, acc6, acc7);
+        return;
+    }
+
+    // P2-P4: one row-weight load, independent per-token chains. Each token keeps
+    // the same eight-chain structure and fold order, so every token's result is
+    // identical to what the non-reuse path would have produced for that token;
+    // only the weight traffic is shared.
+    float accA[32];
+    for (int i = 0; i < 32; ++i) {
+        accA[i] = 0.0;
+    }
     for (int sb = 0; sb < blocks; ++sb) {
         uint baseWord = uint((row * blocks + sb) * 36);
         vec2 d_dm = unpackHalf2x16(raw[baseWord]);
@@ -63,7 +155,7 @@ void main() {
             float d_sc_o = d_sc[g_odd];
             float dm_mn_o = dm_mn[g_odd];
 
-            int xBase_even = token * pc.inDim + sb * 256 + g_even * 32;
+            int xBase_even = sb * 256 + g_even * 32;
             int xBase_odd = xBase_even + 32;
             uint weightBase = baseWord + 4u + uint(pair * 8);
 
@@ -71,20 +163,33 @@ void main() {
                 uint qw = raw[weightBase + uint(w)];
                 int lane = w * 4;
 
-                // 4 low nibbles for even group
-                acc0 += (d_sc_e * float(bitfieldExtract(qw, 0, 4)) - dm_mn_e) * x[xBase_even + lane + 0];
-                acc1 += (d_sc_e * float(bitfieldExtract(qw, 8, 4)) - dm_mn_e) * x[xBase_even + lane + 1];
-                acc2 += (d_sc_e * float(bitfieldExtract(qw, 16, 4)) - dm_mn_e) * x[xBase_even + lane + 2];
-                acc3 += (d_sc_e * float(bitfieldExtract(qw, 24, 4)) - dm_mn_e) * x[xBase_even + lane + 3];
+                float cv0 = d_sc_e * float(bitfieldExtract(qw, 0, 4)) - dm_mn_e;
+                float cv1 = d_sc_e * float(bitfieldExtract(qw, 8, 4)) - dm_mn_e;
+                float cv2 = d_sc_e * float(bitfieldExtract(qw, 16, 4)) - dm_mn_e;
+                float cv3 = d_sc_e * float(bitfieldExtract(qw, 24, 4)) - dm_mn_e;
+                float cv4 = d_sc_o * float(bitfieldExtract(qw, 4, 4)) - dm_mn_o;
+                float cv5 = d_sc_o * float(bitfieldExtract(qw, 12, 4)) - dm_mn_o;
+                float cv6 = d_sc_o * float(bitfieldExtract(qw, 20, 4)) - dm_mn_o;
+                float cv7 = d_sc_o * float(bitfieldExtract(qw, 28, 4)) - dm_mn_o;
 
-                // 4 high nibbles for odd group
-                acc4 += (d_sc_o * float(bitfieldExtract(qw, 4, 4)) - dm_mn_o) * x[xBase_odd + lane + 0];
-                acc5 += (d_sc_o * float(bitfieldExtract(qw, 12, 4)) - dm_mn_o) * x[xBase_odd + lane + 1];
-                acc6 += (d_sc_o * float(bitfieldExtract(qw, 20, 4)) - dm_mn_o) * x[xBase_odd + lane + 2];
-                acc7 += (d_sc_o * float(bitfieldExtract(qw, 28, 4)) - dm_mn_o) * x[xBase_odd + lane + 3];
+                for (int t = 0; t < panel; ++t) {
+                    int xb = t * pc.inDim;
+                    int base = t * 8;
+                    accA[base + 0] += cv0 * x[xb + xBase_even + lane + 0];
+                    accA[base + 1] += cv1 * x[xb + xBase_even + lane + 1];
+                    accA[base + 2] += cv2 * x[xb + xBase_even + lane + 2];
+                    accA[base + 3] += cv3 * x[xb + xBase_even + lane + 3];
+                    accA[base + 4] += cv4 * x[xb + xBase_odd + lane + 0];
+                    accA[base + 5] += cv5 * x[xb + xBase_odd + lane + 1];
+                    accA[base + 6] += cv6 * x[xb + xBase_odd + lane + 2];
+                    accA[base + 7] += cv7 * x[xb + xBase_odd + lane + 3];
+                }
             }
         }
     }
-    float sum = ((acc0 + acc1) + (acc2 + acc3)) + ((acc4 + acc5) + (acc6 + acc7));
-    y[token * pc.outDim + row] = sum;
+    for (int t = 0; t < panel; ++t) {
+        int base = t * 8;
+        y[t * pc.outDim + row] = fold8(accA[base + 0], accA[base + 1], accA[base + 2], accA[base + 3],
+                                       accA[base + 4], accA[base + 5], accA[base + 6], accA[base + 7]);
+    }
 }

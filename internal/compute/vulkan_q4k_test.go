@@ -645,3 +645,88 @@ func TestVulkanQ4KWave32CapabilityAdmission(t *testing.T) {
 		}
 	})
 }
+
+// TestVulkanQ4KSmallPanelWeightReuseParity is the independent software witness for
+// the P2-P4 small-panel weight-reuse specialization (#12693). The shader loads each
+// packed Q4_K row once and serves every token's dot from that resident load; the
+// canonical CPU Q4_K reference is the oracle, so any reassociation or reuse damage
+// surfaces as a parity failure rather than being re-derived in the test.
+//
+// P1 and P5 are explicit non-regression controls: P1 keeps the original scalar route,
+// and P5 exceeds the reuse panel and must fall back to the original route too.
+func TestVulkanQ4KSmallPanelWeightReuseParity(t *testing.T) {
+	v := q4Device(t)
+	const out = 70 // crosses a 64-lane workgroup boundary and is not a multiple of 64
+
+	for _, in := range []int{256, 512, 5120, 17408} {
+		t.Run(fmtInt(in), func(t *testing.T) {
+			blocks := in / q4kSuper
+			raw := make([]byte, out*blocks*q4kSuperBlock)
+			rng := rand.New(rand.NewSource(int64(in) + 12693))
+			for b := 0; b < out*blocks; b++ {
+				if b%3 == 0 {
+					fillCraftedQ4KBlock(raw[b*q4kSuperBlock:(b+1)*q4kSuperBlock], b)
+				} else {
+					randQ4KBlockC(rng, raw[b*q4kSuperBlock:(b+1)*q4kSuperBlock])
+				}
+			}
+
+			for _, P := range []int{1, 2, 3, 4, 5} {
+				t.Run("P"+fmtInt(P), func(t *testing.T) {
+					x := make([]float32, P*in)
+					for i := range x {
+						// Mixed signs exercise cancellation across the eight chains.
+						x[i] = rng.Float32()*2 - 1
+					}
+
+					hw := NewQ4K(Default(), []int{out, in}, raw)
+					hx := NewF32(Default(), []int{P, in}, x)
+					dw := v.Upload(hw, Q4_K)
+					defer v.Free(dw)
+					dx := v.Upload(hx, F32)
+					defer v.Free(dx)
+
+					dy := v.BatchedMatMul(dw, dx, P)
+					defer v.Free(dy)
+					got := v.Read(dy)
+					want := Default().Read(Default().BatchedMatMul(hw, hx, P))
+					if len(got) != P*out || len(want) != P*out {
+						t.Fatalf("output len got=%d want=%d, expected %d", len(got), len(want), P*out)
+					}
+
+					refScale := 1.0
+					for _, value := range want {
+						if a := math.Abs(float64(value)); a > refScale {
+							refScale = a
+						}
+					}
+					maxAbs := 2e-5 * refScale
+
+					for tok := 0; tok < P; tok++ {
+						gRow := got[tok*out : (tok+1)*out]
+						wRow := want[tok*out : (tok+1)*out]
+						for row, value := range gRow {
+							if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+								t.Fatalf("token %d row %d is non-finite: %v", tok, row, value)
+							}
+						}
+						for i := range gRow {
+							if d := math.Abs(float64(gRow[i]) - float64(wRow[i])); d > maxAbs {
+								t.Fatalf("token %d elem %d abs err %g > %g (ref scale %g)", tok, i, d, maxAbs, refScale)
+							}
+						}
+						if ga, wa := argmaxF32(gRow), argmaxF32(wRow); ga != wa {
+							t.Fatalf("token %d argmax=%d want %d", tok, ga, wa)
+						}
+						if c := cosineC(gRow, wRow); c < 0.99999 {
+							t.Fatalf("token %d cosine %.10f < 0.99999", tok, c)
+						}
+						if l2 := relativeL2(gRow, wRow); l2 > 1e-4 {
+							t.Fatalf("token %d relative L2 %.10f > 1e-4", tok, l2)
+						}
+					}
+				})
+			}
+		})
+	}
+}
