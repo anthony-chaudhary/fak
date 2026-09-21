@@ -309,7 +309,30 @@ func (v *vulkanBackend) Argmax(logits Tensor) int {
 	return int(C.fvk_argmax_f32(v.vp(logits), C.int(logits.Numel())))
 }
 
+// readHostF32Locked returns the tensor as host f32 without acquiring vulkanMu. It is
+// the lock-free D2H used by callers that already hold the section (Backend.Read takes
+// vulkanMu and would deadlock). A host-backed buffer is returned directly; a device
+// buffer is copied D2H through the same fence Backend.Read uses.
+func (v *vulkanBackend) readHostF32Locked(t Tensor) []float32 {
+	return readF32Tensor(t, func(buf Buffer, out []float32) {
+		db := buf.(*vulkanBuf)
+		if len(out) > 0 {
+			status := int(C.fvk_d2h(unsafe.Pointer(&out[0]), db.ptr, C.size_t(len(out)*4)))
+			if status != 0 {
+				panic(vulkanReadError(status))
+			}
+		}
+	})
+}
+
 // AttentionDequantOnce runs multi-head attention using the dequant-once KV scratchpad pipeline on vulkanBackend.
+//
+// Lock ordering: this method holds vulkanMu across the scratchpad mutation and the
+// device work below. It therefore must never call a lock-taking helper
+// (Backend.Read / Backend.Upload) while the section is held -- both re-acquire the
+// non-reentrant vulkanMu and self-deadlock. The query read and result upload use the
+// lock-free D2H/H2D primitives (readF32Tensor + fvk_d2h / devTr + fvk_h2d), matching
+// the invariant witnessed by TestVulkanDequantOnceLockContract.
 func (v *vulkanBackend) AttentionDequantOnce(
 	q Tensor,
 	kv KVStore,
@@ -350,8 +373,8 @@ func (v *vulkanBackend) AttentionDequantOnce(
 		vk.scratchpad = sp
 	}
 
-	// Read query from device if resident
-	qHost := v.Read(q)
+	// Read query lock-free: Read takes vulkanMu and would deadlock here.
+	qHost := v.readHostF32Locked(q)
 
 	// Execute attention using the dequant-once pipeline
 	outHost, err := ExecuteVulkanAttentionWithDequantOnce(qHost, sp, rawK, rawV, nH, scale)
@@ -359,12 +382,19 @@ func (v *vulkanBackend) AttentionDequantOnce(
 		return Tensor{}, err
 	}
 
-	// Upload result back to device
-	out := v.Upload(NewF32(Default(), []int{nH * hd}, outHost), F32)
+	// Upload result lock-free: Upload takes vulkanMu and would deadlock here.
+	out, _ := v.devTr([]int{nH * hd}, F32)
+	if len(outHost) > 0 {
+		C.fvk_h2d(v.vp(out), unsafe.Pointer(&outHost[0]), C.size_t(len(outHost)*4))
+	}
 	return out, nil
 }
 
 // AttentionQuantizedKV executes attention for one layer over quantized KV caches using the dequant-once scratchpad.
+//
+// Lock ordering: like AttentionDequantOnce, this holds vulkanMu across the scratchpad
+// build and device work, so it uses the lock-free D2H/H2D primitives instead of
+// Backend.Read / Backend.Upload (which re-acquire vulkanMu and would self-deadlock).
 func (v *vulkanBackend) AttentionQuantizedKV(
 	q Tensor,
 	rawK, rawV []byte,
@@ -374,7 +404,7 @@ func (v *vulkanBackend) AttentionQuantizedKV(
 ) (Tensor, *VulkanKVScratchpad, error) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
-	qHost := v.Read(q)
+	qHost := v.readHostF32Locked(q)
 	arch := "gfx1151"
 	scratch, err := NewVulkanKVScratchpad(v, arch, format, nPos, nKV, headDim)
 	if err != nil {
@@ -388,6 +418,8 @@ func (v *vulkanBackend) AttentionQuantizedKV(
 		return Tensor{}, nil, fmt.Errorf("vulkan: dequant-once attention failed: %w", err)
 	}
 	outDev, _ := v.devTr([]int{nQ * headDim}, F32)
-	C.fvk_h2d(v.vp(outDev), unsafe.Pointer(&outHost[0]), C.size_t(len(outHost)*4))
+	if len(outHost) > 0 {
+		C.fvk_h2d(v.vp(outDev), unsafe.Pointer(&outHost[0]), C.size_t(len(outHost)*4))
+	}
 	return outDev, scratch, nil
 }

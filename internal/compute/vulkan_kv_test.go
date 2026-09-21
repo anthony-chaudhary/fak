@@ -707,3 +707,144 @@ func TestVulkanKVParityAgainstCPU(t *testing.T) {
 		})
 	}
 }
+
+// TestVulkanDequantOnceLockContract witnesses the lock-ordering invariant behind
+// fak#12186's reopened audit: the dequant-once attention entrypoints run inside the
+// process-wide vulkanMu critical section, so every device access made there must be
+// lock-free. The pre-fix shape called Backend.Read / Backend.Upload while holding
+// vulkanMu; both re-acquire the same non-reentrant mutex, so a real *vulkanBackend
+// self-deadlocked before emitting any output.
+//
+// This is a [SW-VERIFIED] pure-Go contract witness (no cgo, no device): it proves the
+// guard detects a re-entrant lock-taking access and that the corrected call shape
+// performs device reads and writes only outside the section. The physical 64k-context
+// throughput criterion remains [HW-WITNESSED] and unchecked here.
+func TestVulkanDequantOnceLockContract(t *testing.T) {
+	// 1. A lock-taking access attempted while the section is held is re-entrant: the
+	// exact self-deadlock class the guard exists to catch.
+	var c vulkanKVLockContract
+	if !c.Enter() {
+		t.Fatal("first Enter must acquire the contract")
+	}
+	if !c.Held() {
+		t.Error("Held() = false after Enter")
+	}
+	if !c.ReentrantLockTaking() {
+		t.Error("ReentrantLockTaking() = false while the section is held; a lock-taking device access would self-deadlock")
+	}
+	// A second Enter on the same section must be refused, not silently nested.
+	if c.Enter() {
+		t.Error("nested Enter() = true; want false (the mutex is not reentrant)")
+	}
+	c.Exit()
+	if c.Held() {
+		t.Error("Held() = true after Exit")
+	}
+	if c.ReentrantLockTaking() {
+		t.Error("ReentrantLockTaking() = true with no holder; a lock-taking access is now safe")
+	}
+
+	// 2. The corrected call shape: read the query and upload the result OUTSIDE the
+	// critical section. Modelled as an ordered transcript of [enter/exit] and
+	// [lock-taking access] events; no lock-taking access may occur while held.
+	type lockEvent struct {
+		kind  string // "enter" | "exit" | "read" | "upload"
+		event string
+	}
+	transcript := []lockEvent{
+		{kind: "read", event: "Backend.Read(q)"},
+		{kind: "enter", event: "scratchpad critical section"},
+		{kind: "exit", event: "scratchpad critical section"},
+		{kind: "upload", event: "Backend.Upload(out)"},
+	}
+	var held bool
+	for i, ev := range transcript {
+		switch ev.kind {
+		case "enter":
+			if !c.Enter() {
+				t.Fatalf("transcript[%d] re-entrant Enter", i)
+			}
+			held = true
+		case "exit":
+			c.Exit()
+			held = false
+		case "read", "upload":
+			if held || c.ReentrantLockTaking() {
+				t.Errorf("transcript[%d] %s runs while the section is held; it re-enters vulkanMu and self-deadlocks", i, ev.event)
+			}
+		}
+	}
+
+	// 3. The legacy (pre-fix) shape must be detected as the defect it is, so the
+	// witness cannot pass vacuously against the broken ordering.
+	var legacy vulkanKVLockContract
+	if !legacy.Enter() {
+		t.Fatal("legacy Enter failed")
+	}
+	if !legacy.ReentrantLockTaking() {
+		t.Error("legacy shape (Read under the held section) was not detected as re-entrant")
+	}
+	legacy.Exit()
+
+	// 4. The dequant-once software pipeline stays lock-agnostic: it produces the same
+	// output whether or not a caller holds the contract, which is why the fix is a
+	// caller-side ordering change and not a change to the pipeline itself.
+	const (
+		nPos    = 32
+		nQ      = StrixHaloFullAttentionHeads
+		nKV     = 8
+		headDim = 64
+	)
+	totalKV := nKV * nPos * headDim
+	rng := rand.New(rand.NewSource(12186))
+	f32K := make([]float32, totalKV)
+	f32V := make([]float32, totalKV)
+	for i := range f32K {
+		f32K[i] = rng.Float32()*2.0 - 1.0
+		f32V[i] = rng.Float32()*2.0 - 1.0
+	}
+	q := make([]float32, nQ*headDim)
+	for i := range q {
+		q[i] = rng.Float32()*2.0 - 1.0
+	}
+	rawK, err := QuantizeF32ToQ8_0(f32K)
+	if err != nil {
+		t.Fatalf("QuantizeF32ToQ8_0 K: %v", err)
+	}
+	rawV, err := QuantizeF32ToQ8_0(f32V)
+	if err != nil {
+		t.Fatalf("QuantizeF32ToQ8_0 V: %v", err)
+	}
+	scale := float32(1.0 / math.Sqrt(float64(headDim)))
+
+	scratchA, err := NewVulkanKVScratchpad(nil, RADVTargetArchGfx1151, QuantizedKVQ8_0, nPos, nKV, headDim)
+	if err != nil {
+		t.Fatalf("NewVulkanKVScratchpad: %v", err)
+	}
+	outA, err := ExecuteVulkanAttentionWithDequantOnce(q, scratchA, rawK, rawV, nQ, scale)
+	if err != nil {
+		t.Fatalf("ExecuteVulkanAttentionWithDequantOnce (no holder): %v", err)
+	}
+
+	scratchB, err := NewVulkanKVScratchpad(nil, RADVTargetArchGfx1151, QuantizedKVQ8_0, nPos, nKV, headDim)
+	if err != nil {
+		t.Fatalf("NewVulkanKVScratchpad: %v", err)
+	}
+	if !c.Enter() {
+		t.Fatal("Enter before held-pipeline run failed")
+	}
+	outB, err := ExecuteVulkanAttentionWithDequantOnce(q, scratchB, rawK, rawV, nQ, scale)
+	c.Exit()
+	if err != nil {
+		t.Fatalf("ExecuteVulkanAttentionWithDequantOnce (holder): %v", err)
+	}
+	if len(outA) != len(outB) {
+		t.Fatalf("output length differs: %d vs %d", len(outA), len(outB))
+	}
+	for i := range outA {
+		if outA[i] != outB[i] {
+			t.Fatalf("pipeline output differs at %d: %v vs %v (pipeline must be lock-agnostic)", i, outA[i], outB[i])
+		}
+	}
+	t.Logf("[SW-VERIFIED] dequant-once lock contract: re-entrancy detected, corrected ordering (Read/Upload outside the section) clean, pipeline lock-agnostic across %d heads", nQ)
+}

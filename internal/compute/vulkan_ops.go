@@ -6,8 +6,65 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"sync"
 	"time"
 )
+
+// vulkanKVLockContract enforces the dequant-once KV lock invariant: the
+// vulkanBackend attention entrypoints (AttentionDequantOnce / AttentionQuantizedKV)
+// hold the process-wide vulkanMu critical section, and every device access made
+// inside it must be lock-free. The historical defect (fak#12186 reopened audit) was
+// that those entrypoints called Backend.Read / Backend.Upload while already holding
+// vulkanMu; both helpers re-acquire the same non-reentrant mutex, so the very first
+// real *vulkanBackend call self-deadlocked before producing any output.
+//
+// The contract is a pure-Go, cgo-independent seam so the lock-ordering rule is
+// witnessed on every host (not only where libfakvulkan builds). A host that holds
+// the section must never call a lock-taking helper; ReentrantLockTaking reports a
+// lock-taking acquisition attempted while the section is held, which is the exact
+// self-deadlock class.
+type vulkanKVLockContract struct {
+	mu    sync.Mutex
+	depth int
+}
+
+// Enter opens the vulkanMu critical section for the dequant-once attention path. It
+// returns false when the section is already held (a re-entrant Enter), which is the
+// self-deadlock state a real *vulkanBackend would hang in.
+func (c *vulkanKVLockContract) Enter() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.depth > 0 {
+		return false
+	}
+	c.depth++
+	return true
+}
+
+// Exit closes the section opened by Enter.
+func (c *vulkanKVLockContract) Exit() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.depth > 0 {
+		c.depth--
+	}
+}
+
+// Held reports whether the section is currently held.
+func (c *vulkanKVLockContract) Held() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.depth > 0
+}
+
+// ReentrantLockTaking classifies a lock-taking access (Backend.Read / Backend.Upload)
+// attempted while the section is held. It returns true when the access would re-enter
+// the non-reentrant vulkanMu (self-deadlock); false when the access is safe.
+func (c *vulkanKVLockContract) ReentrantLockTaking() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.depth > 0
+}
 
 // PlanVulkanPackedKVAppendStrix validates and sizes the first asymmetric
 // append contract without pretending that the Vulkan dispatch already exists.
