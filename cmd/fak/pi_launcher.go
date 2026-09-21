@@ -153,7 +153,9 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	if servedWindow <= 0 {
 		servedWindow = detectedWindow
 	}
-	budget := projectassets.PiSafeContextBudget(servedWindow)
+	// Per-model budget: a named model (e.g. DeepSeek-V4.1-Flash) resolves its own served
+	// window rather than inheriting whatever the backend advertised for the local engine.
+	budget := projectassets.PiModelContextBudget(targetModel, *window)
 
 	if *printEnv {
 		fmt.Fprintln(stdout, "# Environment configuration for Pi with fak serve backend on Mac")
@@ -418,7 +420,11 @@ func runPiConfig(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	baseURL := projectassets.NormalizePiBaseURL(*addr)
-	budget := projectassets.PiSafeContextBudget(*window)
+	// Per-model budget: the status line and the compaction block must agree with the
+	// contextWindow EnsurePiProviderConfigForWindow writes for THIS model. A flat
+	// PiSafeContextBudget(*window) reports/writes the wrong envelope for a named model
+	// (e.g. DeepSeek's 500k resident target would print as the Qwen 65536).
+	budget := projectassets.PiModelContextBudget(*model, *window)
 	if *write {
 		resolvedPath, modified, err := projectassets.EnsurePiProviderConfigForWindow(*path, baseURL, *model, *window)
 		if err != nil {

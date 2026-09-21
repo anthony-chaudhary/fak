@@ -98,7 +98,10 @@ func GeneratePiConfigForWindow(baseURL, modelID string, servedWindow int) ([]byt
 	baseURL = NormalizePiBaseURL(baseURL)
 	modelID = NormalizePiModelID(modelID)
 	modelName := formatPiModelName(modelID)
-	budget := PiSafeContextBudget(servedWindow)
+	// Per-model budget: the registry names the served window for a known id (DeepSeek
+	// V4.1 Flash -> 500k resident), and servedWindow is the caller's override for an
+	// unnamed one. See pi_model_windows.go.
+	budget := PiModelContextBudget(modelID, servedWindow)
 
 	cfg := map[string]interface{}{
 		"providers": map[string]interface{}{
@@ -176,7 +179,10 @@ func EnsurePiProviderConfigForWindow(target, baseURL, modelID string, servedWind
 	modelID = NormalizePiModelID(modelID)
 	modelName := formatPiModelName(modelID)
 
-	budget := PiSafeContextBudget(servedWindow)
+	// Per-model budget: a known id (DeepSeek V4.1 Flash) uses the registry window, an
+	// unknown one falls back to the caller's servedWindow. servedWindow is therefore an
+	// override for an unnamed model, not the single source it used to be.
+	budget := PiModelContextBudget(modelID, servedWindow)
 	targetModel := piModelEntry(modelID, modelName, budget)
 
 	data, err := os.ReadFile(path)
@@ -261,10 +267,13 @@ func EnsurePiProviderConfigForWindow(target, baseURL, modelID string, servedWind
 						modelsList[i] = mObj
 						modified = true
 					}
-					// Repair the pre-doctrine context budget: fak previously wrote the raw
-					// window (131072) as contextWindow, which let Pi fill the whole window
-					// before compacting. Pin it back to the safe resident target.
-					if repairPiModelBudget(mObj, budget) {
+					// Repair the pre-doctrine context budget for THIS model: fak previously
+					// wrote the raw window (131072) as contextWindow, and before per-model
+					// resolution it wrote whatever the backend last advertised — so a
+					// DeepSeek entry inherited the Qwen 65536. Recompute against this
+					// entry's own model id so the fix also REPAIRS an existing catalog.
+					entryBudget := PiModelContextBudget(modelID, servedWindow)
+					if repairPiModelBudget(mObj, entryBudget) {
 						modelsList[i] = mObj
 						modified = true
 					}

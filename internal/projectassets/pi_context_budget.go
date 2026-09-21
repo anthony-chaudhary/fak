@@ -48,6 +48,15 @@ const DefaultPiServedWindow = 131072
 // only reached by a model smaller than ~8K and is a safety rail, not the common path.
 const MinPiResidentTarget = 4096
 
+// MaxPiOutputReserve caps the derived output reserve (written as Pi's compaction
+// reserveTokens and as the model's maxTokens). Pi's own default is 16384 and the guard's
+// OpenCode fraction is bounded the same way, so the cap keeps a very large resident target
+// (the 500k DeepSeek window) from reserving an absurd slab of output tokens: a 500k target
+// divides to 125000 without the cap, which would leave the model an output budget no
+// backend accepts. The cap is the OUTPUT half of the cap-vs-target split and does not
+// shrink the resident target itself.
+const MaxPiOutputReserve = 32768
+
 // PiContextBudget is the derived safe envelope written into Pi's configuration. All three
 // numbers are computed from ServedWindow; none is a raw literal at a call site.
 type PiContextBudget struct {
@@ -72,9 +81,9 @@ type PiContextBudget struct {
 //
 // The three derived quantities:
 //   - ResidentTarget = min(window, window/2), floored at MinPiResidentTarget.
-//   - OutputReserve  = ResidentTarget/4, clamped to [512, 8192] — the same bounded
-//     fraction guard uses for OpenCode's output limit (guard_opencode.go), so the two
-//     harnesses are configured on one rule instead of two.
+//   - OutputReserve  = ResidentTarget/4, clamped to [512, MaxPiOutputReserve] — the same
+//     bounded fraction guard uses for OpenCode's output limit (guard_opencode.go), so the
+//     two harnesses are configured on one rule instead of two.
 //   - KeepRecentTokens = ResidentTarget/2, floored at 2000 — half the resident target is
 //     kept as working context, matching Pi's own default ratio (20k kept in a 128k model
 //     is ~1/6; half is the conservative end that keeps a fire from rebounding).
@@ -96,8 +105,8 @@ func PiSafeContextBudget(servedWindow int) PiContextBudget {
 	}
 
 	reserve := target / 4
-	if reserve > 8192 {
-		reserve = 8192
+	if reserve > MaxPiOutputReserve {
+		reserve = MaxPiOutputReserve
 	}
 	if reserve < 512 {
 		reserve = 512
@@ -121,13 +130,23 @@ func PiSafeContextBudget(servedWindow int) PiContextBudget {
 }
 
 // repairPiModelBudget rewrites an existing fak model entry's contextWindow/maxTokens to the
-// derived safe budget, returning true when it changed anything. It only ever LOWERS an
-// over-large contextWindow (an advertised cap) down to the resident target; an entry already at
-// or below the target is left alone, so an operator who deliberately pinned a smaller budget is
-// not fought. Reported as modified so the write path persists it.
+// derived safe budget, returning true when it changed anything.
+//
+// Two directions are repaired:
+//
+//   - OVER-large: an entry advertising the raw served window (131072) is lowered to the
+//     resident target, so Pi compacts inside the safe envelope rather than at the ceiling.
+//   - UNDER-large: an entry advertising a window that is not this model's at all — the
+//     pre-per-model bug, where every catalog entry inherited whichever window the backend
+//     last advertised (DeepSeek V4.1 Flash was written with the Qwen 65536) — is raised to
+//     this model's own resident target. Without this, a catalog written by the buggy path
+//     would keep the wrong number forever, because the old repair only lowered.
+//
+// An entry that already equals the target is left alone (reported unmodified), so the writer
+// stays idempotent on a correctly configured file.
 func repairPiModelBudget(mObj map[string]interface{}, budget PiContextBudget) bool {
 	changed := false
-	if cw, ok := numericField(mObj["contextWindow"]); ok && cw > budget.ResidentTarget {
+	if cw, ok := numericField(mObj["contextWindow"]); !ok || cw != budget.ResidentTarget {
 		mObj["contextWindow"] = budget.ResidentTarget
 		changed = true
 	}
