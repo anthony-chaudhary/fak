@@ -20,6 +20,23 @@ import (
 	"time"
 )
 
+func newOpsRunQualifiedGateway(t *testing.T) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode preflight: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "data: {\"id\":\"preflight\",\"object\":\"chat.completion.chunk\",\"model\":%q,\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_preflight\",\"type\":\"function\",\"function\":{\"name\":\"fak_inference_preflight\",\"arguments\":\"{\\\"ok\\\":true}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n", request.Model)
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
 func TestOpsRunWorkspace(t *testing.T) {
 	t.Run("nonexistent_refuses_before_launch", func(t *testing.T) {
 		dir := t.TempDir()
@@ -116,8 +133,12 @@ func main() {
 		if err := os.WriteFile(prompt, []byte("check workspace\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		t.Setenv("FAK_OPS_WORKSPACE_MARKER", marker)
-		t.Setenv(guardE2EHelperEnv, strings.Join([]string{"--provider", "openai", "--split", "off", "--model", "fixture", "--base-url", gateway.URL + "/v1", "--", helper}, " "))
+
+		old := opsRunExecute
+		t.Cleanup(func() { opsRunExecute = old })
+		opsRunExecute = func(ctx context.Context, stdout, stderr io.Writer, _ []string, env []string, prompt []byte) (int, bool, bool, []opsRunLifecycleRecord) {
+			return executeOpsRun(ctx, stdout, stderr, []string{helper}, append(env, "FAK_OPS_WORKSPACE_MARKER="+marker), prompt)
+		}
 
 		var stderr bytes.Buffer
 		code := runOpsRun(io.Discard, &stderr, []string{
@@ -160,6 +181,152 @@ func main() {
 			t.Fatalf("receipt workspace=%q, want %q", got.Workspace, wantCWD)
 		}
 	})
+}
+
+func TestOpsRunEnvironment(t *testing.T) {
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "sentinel-aws-secret")
+	t.Setenv("ANTHROPIC_API_KEY", "sentinel-anthropic-secret")
+	t.Setenv("NODE_OPTIONS", "--require=sentinel-startup-hook.js")
+	ambientConfig := filepath.Join(t.TempDir(), "ambient-config")
+	ambientData := filepath.Join(t.TempDir(), "ambient-data")
+	t.Setenv("XDG_CONFIG_HOME", ambientConfig)
+	t.Setenv("XDG_DATA_HOME", ambientData)
+	t.Setenv("OPENCODE_HOME", filepath.Join(t.TempDir(), "ambient-opencode"))
+	t.Setenv("FAK_OPS_SELECTED_A", "sentinel-selected-a")
+	t.Setenv("FAK_OPS_SELECTED_B", "sentinel-selected-b")
+
+	qualifiedGateway := func() *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var request struct {
+				Model string `json:"model"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Errorf("decode preflight: %v", err)
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprintf(w, "data: {\"id\":\"preflight\",\"object\":\"chat.completion.chunk\",\"model\":%q,\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_preflight\",\"type\":\"function\",\"function\":{\"name\":\"fak_inference_preflight\",\"arguments\":\"{\\\"ok\\\":true}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n", request.Model)
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		}))
+	}
+
+	type observation struct {
+		model string
+		env   map[string]string
+	}
+	observed := make(chan observation, 2)
+	old := opsRunExecute
+	t.Cleanup(func() { opsRunExecute = old })
+	opsRunExecute = func(_ context.Context, _, _ io.Writer, argv, env []string, _ []byte) (int, bool, bool, []opsRunLifecycleRecord) {
+		model := ""
+		for i := 0; i+1 < len(argv); i++ {
+			if argv[i] == "--model" {
+				model = argv[i+1]
+			}
+		}
+		values := make(map[string]string, len(env))
+		for _, item := range env {
+			key, value, ok := strings.Cut(item, "=")
+			if ok {
+				values[strings.ToUpper(key)] = value
+			}
+		}
+		observed <- observation{model: model, env: values}
+		return 0, true, false, nil
+	}
+
+	type runResult struct {
+		name           string
+		code           int
+		stdout, stderr string
+		receipt        []byte
+	}
+	results := make(chan runResult, 2)
+	var wg sync.WaitGroup
+	for _, tc := range []struct {
+		name, model, keyEnv string
+	}{
+		{name: "a", model: "model-a", keyEnv: "FAK_OPS_SELECTED_A"},
+		{name: "b", model: "model-b", keyEnv: "FAK_OPS_SELECTED_B"},
+	} {
+		gateway := qualifiedGateway()
+		defer gateway.Close()
+		dir := t.TempDir()
+		prompt := filepath.Join(dir, "prompt.txt")
+		receipt := filepath.Join(dir, "receipt.json")
+		if err := os.WriteFile(prompt, []byte("inspect environment\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		wg.Add(1)
+		go func(name, model, keyEnv, baseURL, workspace, prompt, receipt string) {
+			defer wg.Done()
+			var stdout, stderr bytes.Buffer
+			code := runOpsRun(&stdout, &stderr, []string{
+				"--workspace", workspace,
+				"--prompt-file", prompt,
+				"--receipt", receipt,
+				"--model", model,
+				"--provider", "openai",
+				"--base-url", baseURL + "/v1",
+				"--api-key-env", keyEnv,
+			})
+			data, _ := os.ReadFile(receipt)
+			results <- runResult{name: name, code: code, stdout: stdout.String(), stderr: stderr.String(), receipt: data}
+		}(tc.name, tc.model, tc.keyEnv, gateway.URL, dir, prompt, receipt)
+	}
+	wg.Wait()
+	close(results)
+	close(observed)
+
+	for result := range results {
+		if result.code != 0 {
+			t.Errorf("run %s exit=%d, want 0: %s", result.name, result.code, result.stderr)
+		}
+		material := result.stdout + result.stderr + string(result.receipt)
+		for _, secret := range []string{"sentinel-aws-secret", "sentinel-anthropic-secret", "sentinel-selected-a", "sentinel-selected-b", "sentinel-startup-hook.js"} {
+			if strings.Contains(material, secret) {
+				t.Errorf("run %s leaked sentinel %q through output/error/receipt", result.name, secret)
+			}
+		}
+	}
+
+	byModel := map[string]observation{}
+	for got := range observed {
+		if strings.HasSuffix(got.model, "/model-a") {
+			byModel["model-a"] = got
+		}
+		if strings.HasSuffix(got.model, "/model-b") {
+			byModel["model-b"] = got
+		}
+	}
+	if len(byModel) != 2 {
+		t.Fatalf("executor observations = %#v, want both model routes", byModel)
+	}
+	for model, got := range byModel {
+		for _, forbidden := range []string{"AWS_SECRET_ACCESS_KEY", "ANTHROPIC_API_KEY", "NODE_OPTIONS", "OPENCODE_HOME"} {
+			if _, ok := got.env[forbidden]; ok {
+				t.Errorf("%s child inherited forbidden %s", model, forbidden)
+			}
+		}
+		selected, other := "FAK_OPS_SELECTED_A", "FAK_OPS_SELECTED_B"
+		if model == "model-b" {
+			selected, other = other, selected
+		}
+		if got.env[selected] == "" || got.env[other] != "" {
+			t.Errorf("%s credential scope: selected=%q other=%q", model, got.env[selected], got.env[other])
+		}
+		if got.env["PATH"] == "" {
+			t.Errorf("%s child lost PATH", model)
+		}
+		if got.env["TMP"] == "" && got.env["TEMP"] == "" && got.env["TMPDIR"] == "" {
+			t.Errorf("%s child lost platform temp environment", model)
+		}
+		if got.env["XDG_CONFIG_HOME"] == "" || got.env["XDG_CONFIG_HOME"] == ambientConfig || got.env["XDG_DATA_HOME"] == "" || got.env["XDG_DATA_HOME"] == ambientData {
+			t.Errorf("%s child config/auth roots are not run-scoped: config=%q data=%q", model, got.env["XDG_CONFIG_HOME"], got.env["XDG_DATA_HOME"])
+		}
+	}
+	if byModel["model-a"].env["XDG_CONFIG_HOME"] == byModel["model-b"].env["XDG_CONFIG_HOME"] || byModel["model-a"].env["XDG_DATA_HOME"] == byModel["model-b"].env["XDG_DATA_HOME"] {
+		t.Fatal("concurrent runs shared an OpenCode config or auth root")
+	}
 }
 
 func TestOpsRunInferencePreflight(t *testing.T) {
@@ -248,7 +415,7 @@ func TestOpsRunInferencePreflight(t *testing.T) {
 			var code int
 			for i := 0; i < tc.invokes; i++ {
 				receipt := filepath.Join(dir, fmt.Sprintf("receipt-%d.json", i))
-				args := []string{"--prompt-file", prompt, "--receipt", receipt, "--model", "fixture", "--provider", "openai", "--base-url", gateway.URL + "/v1"}
+				args := []string{"--workspace", dir, "--prompt-file", prompt, "--receipt", receipt, "--model", "fixture", "--provider", "openai", "--base-url", gateway.URL + "/v1"}
 				if tc.timeout {
 					args = append(args, "--timeout", "20ms")
 				}
@@ -306,7 +473,7 @@ func TestOpsRunInferencePreflight(t *testing.T) {
 				return 0, true, false, nil
 			}
 
-			args := []string{"--prompt-file", prompt, "--receipt", receipt, "--model", "fixture", "--provider", provider}
+			args := []string{"--workspace", dir, "--prompt-file", prompt, "--receipt", receipt, "--model", "fixture", "--provider", provider}
 			if provider == "gemini" {
 				args = append(args, "--api-key-env", "FAK_OPS_GEMINI_TEST_KEY")
 			}
@@ -322,6 +489,7 @@ func TestOpsRunInferencePreflight(t *testing.T) {
 
 func TestOpsRunGuardedReceipt(t *testing.T) {
 	dir := t.TempDir()
+	gateway := newOpsRunQualifiedGateway(t)
 	prompt := filepath.Join(dir, "prompt.txt")
 	if err := os.WriteFile(prompt, []byte("private prompt\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -335,12 +503,13 @@ func TestOpsRunGuardedReceipt(t *testing.T) {
 		complete, failed bool
 		exit, want       int
 		status           string
+		wantLaunch       bool
 	}{
-		{"complete", true, false, 0, 0, "succeeded"},
-		{"gemini", true, false, 0, 0, "succeeded"},
-		{"missing_completion", false, false, 0, 1, "failed"},
-		{"tool_error", true, true, 0, 1, "failed"},
-		{"child_error", true, false, 7, 7, "failed"},
+		{"complete", true, false, 0, 0, "succeeded", true},
+		{"gemini", true, false, 0, 1, "failed", false},
+		{"missing_completion", false, false, 0, 1, "failed", true},
+		{"tool_error", true, true, 0, 1, "failed", true},
+		{"child_error", true, false, 7, 7, "failed", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			wire := "openai"
@@ -348,6 +517,9 @@ func TestOpsRunGuardedReceipt(t *testing.T) {
 				wire = "gemini"
 			}
 			opsRunExecute = func(ctx context.Context, out, errOut io.Writer, argv, env []string, p []byte) (int, bool, bool, []opsRunLifecycleRecord) {
+				if !tc.wantLaunch {
+					t.Fatal("unsupported provider launched child")
+				}
 				if string(p) != "private prompt\n" || strings.Contains(strings.Join(argv, " "), "private prompt") {
 					t.Fatal("prompt must travel only on stdin")
 				}
@@ -374,14 +546,14 @@ func TestOpsRunGuardedReceipt(t *testing.T) {
 						t.Fatalf("Gemini native route not pinned: %v", p)
 					}
 				}
-				if cfg["permission"].(map[string]any)["*"] != "deny" || cfg["plugin"].([]any)[0] != "protection" {
-					t.Fatal("operator protections changed")
+				if cfg["permission"] != nil || cfg["plugin"] != nil {
+					t.Fatalf("ambient OpenCode configuration leaked into isolated run: %v", cfg)
 				}
 				return tc.exit, tc.complete, tc.failed, nil
 			}
 			receipt := filepath.Join(dir, tc.name+".json")
 			var out, errs bytes.Buffer
-			got := runOpsRun(&out, &errs, []string{"--prompt-file", prompt, "--receipt", receipt, "--model", "fixture", "--provider", wire, "--api-key-env", "FAK_OPS_TEST_KEY"})
+			got := runOpsRun(&out, &errs, []string{"--workspace", dir, "--prompt-file", prompt, "--receipt", receipt, "--model", "fixture", "--provider", wire, "--base-url", gateway.URL + "/v1", "--api-key-env", "FAK_OPS_TEST_KEY"})
 			if got != tc.want {
 				t.Fatalf("exit=%d want=%d stderr=%s", got, tc.want, errs.String())
 			}
@@ -402,7 +574,7 @@ func TestOpsRunGuardedReceipt(t *testing.T) {
 		t.Fatal("aliased receipt launched child")
 		return 0, true, false, nil
 	}
-	if got := runOpsRun(io.Discard, io.Discard, []string{"--prompt-file", prompt, "--receipt", prompt, "--model", "fixture"}); got != 2 {
+	if got := runOpsRun(io.Discard, io.Discard, []string{"--workspace", dir, "--prompt-file", prompt, "--receipt", prompt, "--model", "fixture"}); got != 2 {
 		t.Fatalf("alias exit=%d", got)
 	}
 }
@@ -505,6 +677,7 @@ func TestOpsRunCancelChild(t *testing.T) {
 
 func TestOpsRunReceiptLifecycleCancellation(t *testing.T) {
 	dir := t.TempDir()
+	gateway := newOpsRunQualifiedGateway(t)
 	prompt := filepath.Join(dir, "prompt.txt")
 	if err := os.WriteFile(prompt, []byte("sentinel prompt\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -529,7 +702,7 @@ func TestOpsRunReceiptLifecycleCancellation(t *testing.T) {
 	}
 
 	var out, errs bytes.Buffer
-	_ = runOpsRun(&out, &errs, []string{"--prompt-file", prompt, "--receipt", receipt, "--model", "fixture", "--timeout", "5s"})
+	_ = runOpsRun(&out, &errs, []string{"--workspace", dir, "--prompt-file", prompt, "--receipt", receipt, "--model", "fixture", "--provider", "openai", "--base-url", gateway.URL + "/v1", "--timeout", "5s"})
 	data, err := os.ReadFile(receipt)
 	if err != nil {
 		t.Fatal(err)
@@ -733,6 +906,7 @@ func TestOpsRunLifecycleReasonsAndContext(t *testing.T) {
 
 func TestOpsRunReceiptTimedOutFallback(t *testing.T) {
 	dir := t.TempDir()
+	gateway := newOpsRunQualifiedGateway(t)
 	prompt := filepath.Join(dir, "prompt.txt")
 	if err := os.WriteFile(prompt, []byte("prompt text\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -747,7 +921,7 @@ func TestOpsRunReceiptTimedOutFallback(t *testing.T) {
 	}
 
 	var out, errs bytes.Buffer
-	got := runOpsRun(&out, &errs, []string{"--prompt-file", prompt, "--receipt", receipt, "--model", "fixture", "--timeout", "20ms"})
+	got := runOpsRun(&out, &errs, []string{"--workspace", dir, "--prompt-file", prompt, "--receipt", receipt, "--model", "fixture", "--provider", "openai", "--base-url", gateway.URL + "/v1", "--timeout", "20ms"})
 	if got != 124 {
 		t.Fatalf("exit = %d, want 124", got)
 	}

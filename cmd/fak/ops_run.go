@@ -499,13 +499,9 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 		argv = append(argv, "--pure")
 	}
 	// Interpolation happens in the child after guard injects its local endpoint.
+	// Start from a fresh config: ambient OpenCode configuration belongs to a
+	// different trust boundary and must not alter this run's provider route.
 	config := map[string]any{}
-	if existing := os.Getenv("OPENCODE_CONFIG_CONTENT"); strings.TrimSpace(existing) != "" {
-		if json.Unmarshal([]byte(existing), &config) != nil || config == nil {
-			fmt.Fprintln(stderr, "ops run: OPENCODE_CONFIG_CONTENT must be a JSON object")
-			return 2
-		}
-	}
 	providers, _ := config["provider"].(map[string]any)
 	if providers == nil {
 		providers = map[string]any{}
@@ -521,11 +517,16 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	config["small_model"] = modelID
 	config["enabled_providers"] = []string{providerID}
 	encoded, _ := json.Marshal(config)
-	env := replaceOpsRunEnv(os.Environ(), "OPENCODE_CONFIG_CONTENT", string(encoded))
 	if *dryRun {
 		_ = json.NewEncoder(stdout).Encode(map[string]any{"schema": "fak-ops-run-plan/1", "harness": *harness, "provider": *provider, "workspace": resolvedWorkspace, "guarded": true, "prompt_delivery": "stdin", "timeout": timeout.String(), "auto": *auto, "pure": *pure})
 		return 0
 	}
+	env, cleanupEnv, err := opsRunChildEnvironment(string(encoded), *apiKeyEnv)
+	if err != nil {
+		fmt.Fprintf(stderr, "ops run: create isolated child environment: %v\n", err)
+		return 1
+	}
+	defer cleanupEnv()
 	sigCtx, stop := signal.NotifyContext(context.Background(), terminatingSignals()...)
 	defer stop()
 	ctx, cancel := context.WithTimeout(sigCtx, *timeout)
@@ -600,15 +601,84 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	return code
 }
 
-func replaceOpsRunEnv(env []string, key, value string) []string {
-	out := make([]string, 0, len(env)+1)
-	for _, item := range env {
-		name, _, _ := strings.Cut(item, "=")
-		if !strings.EqualFold(name, key) {
-			out = append(out, item)
+func opsRunChildEnvironment(configContent, apiKeyEnv string) ([]string, func(), error) {
+	runRoot, err := os.MkdirTemp("", "fak-ops-run-")
+	if err != nil {
+		return nil, func() {}, err
+	}
+	cleanup := func() { _ = os.RemoveAll(runRoot) }
+	configHome := filepath.Join(runRoot, "config")
+	dataHome := filepath.Join(runRoot, "data")
+	home := filepath.Join(runRoot, "home")
+	for _, dir := range []string{configHome, dataHome, home} {
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			cleanup()
+			return nil, func() {}, err
 		}
 	}
-	return append(out, key+"="+value)
+
+	out := make([]string, 0, 20)
+	seen := make(map[string]bool)
+	for _, item := range os.Environ() {
+		name, _, ok := strings.Cut(item, "=")
+		canonical := strings.ToUpper(name)
+		if !ok || seen[canonical] || !opsRunAllowedPlatformEnv(canonical) {
+			continue
+		}
+		seen[canonical] = true
+		out = append(out, item)
+	}
+	apiKeyEnv = strings.TrimSpace(apiKeyEnv)
+	if apiKeyEnv != "" {
+		canonical := strings.ToUpper(apiKeyEnv)
+		if !opsRunValidEnvName(apiKeyEnv) || opsRunControlledEnv(canonical) || opsRunAllowedPlatformEnv(canonical) {
+			cleanup()
+			return nil, func() {}, fmt.Errorf("unsafe --api-key-env name %q", apiKeyEnv)
+		}
+		if value, ok := os.LookupEnv(apiKeyEnv); ok {
+			out = append(out, apiKeyEnv+"="+value)
+		}
+	}
+	out = append(out,
+		"OPENCODE_CONFIG_CONTENT="+configContent,
+		"XDG_CONFIG_HOME="+configHome,
+		"XDG_DATA_HOME="+dataHome,
+		"HOME="+home,
+		"USERPROFILE="+home,
+	)
+	return out, cleanup, nil
+}
+
+func opsRunAllowedPlatformEnv(name string) bool {
+	switch name {
+	case "PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "SYSTEMDRIVE",
+		"OS", "PROCESSOR_ARCHITECTURE", "PROCESSOR_IDENTIFIER", "NUMBER_OF_PROCESSORS",
+		"TEMP", "TMP", "TMPDIR", "LANG", "LANGUAGE", "LC_ALL", "TZ",
+		"TERM", "COLORTERM", "NO_COLOR", "SSL_CERT_FILE", "SSL_CERT_DIR":
+		return true
+	default:
+		return strings.HasPrefix(name, "LC_")
+	}
+}
+
+func opsRunControlledEnv(name string) bool {
+	switch name {
+	case "NODE_OPTIONS", "OPENCODE_HOME", "OPENCODE_CONFIG", "OPENCODE_CONFIG_CONTENT",
+		"XDG_CONFIG_HOME", "XDG_DATA_HOME", "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH":
+		return true
+	default:
+		return false
+	}
+}
+
+func opsRunValidEnvName(name string) bool {
+	for i, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_' || (i > 0 && r >= '0' && r <= '9') {
+			continue
+		}
+		return false
+	}
+	return name != ""
 }
 
 func opsRunSamePath(a, b string) bool {
