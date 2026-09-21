@@ -306,12 +306,16 @@ func opsRunInferencePreflight(ctx context.Context, baseURL, model string) (opsRu
 }
 
 func opsRunInferenceRefusal(provider, baseURL, model, reason string) opsRunInferencePreflightReceipt {
+	return opsRunInferenceRefusalWithStatus(provider, baseURL, model, reason, "failed")
+}
+
+func opsRunInferenceRefusalWithStatus(provider, baseURL, model, reason, status string) opsRunInferencePreflightReceipt {
 	configSum := sha256.Sum256([]byte(strings.TrimSpace(provider) + "\x00" + strings.TrimSpace(baseURL) + "\x00" + strings.TrimSpace(model)))
-	refSum := sha256.Sum256([]byte(opsRunInferencePreflightSchema + "\x00" + hex.EncodeToString(configSum[:]) + "\x00failed\x00" + reason))
+	refSum := sha256.Sum256([]byte(opsRunInferencePreflightSchema + "\x00" + hex.EncodeToString(configSum[:]) + "\x00" + status + "\x00" + reason))
 	return opsRunInferencePreflightReceipt{
 		Schema:     opsRunInferencePreflightSchema,
 		ReceiptRef: "sha256:" + hex.EncodeToString(refSum[:]),
-		Status:     "failed",
+		Status:     status,
 		Reason:     reason,
 	}
 }
@@ -777,7 +781,7 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
 	}
 	if strings.TrimSpace(*baseURL) == "" {
-		preflight := opsRunInferenceRefusal(*provider, *baseURL, *model, "missing_explicit_base_url")
+		preflight := opsRunInferenceRefusalWithStatus(*provider, *baseURL, *model, "missing_explicit_base_url", "refused")
 		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
 	}
 	preflight, err := opsRunInferencePreflight(ctx, *baseURL, *model)
