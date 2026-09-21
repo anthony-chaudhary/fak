@@ -215,9 +215,21 @@ func runOpsLog(stdout, stderr io.Writer, root string, args []string) int {
 
 func runOpsDaemon(stdout, stderr io.Writer, root string, cfg ops.Config, args []string) int {
 	fs := flag.NewFlagSet("ops daemon", flag.ContinueOnError)
+	fs.SetOutput(stderr)
 	interval := fs.Duration("interval", 60*time.Second, "ops loop tick interval")
 	once := fs.Bool("once", false, "run one tick and exit")
 	if err := fs.Parse(args); err != nil {
+		if len(args) > 0 {
+			fmt.Fprintf(stderr, "fak ops daemon: unexpected argument %q\n", args[0])
+		} else {
+			fmt.Fprintf(stderr, "fak ops daemon: parse error: %v\n", err)
+		}
+		fmt.Fprintln(stderr, "usage: fak ops daemon [--interval <duration>] [--once]")
+		return 2
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(stderr, "fak ops daemon: unexpected argument %q\n", fs.Arg(0))
+		fmt.Fprintln(stderr, "usage: fak ops daemon [--interval <duration>] [--once]")
 		return 2
 	}
 
