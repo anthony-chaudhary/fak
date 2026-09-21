@@ -137,7 +137,19 @@ type V41AttentionState struct {
 	nextCompressRow    int
 	retainedWindowRows int
 	partialKV          [][]float32
-	retainedCopies     int
+	// partialInputs is the retained incomplete compressor-source group's
+	// PRE-ATTENTION INPUT rows (the carrier wkv/wgate project), exactly parallel
+	// to partialPositions. It is the #13307 seed for an incremental compressed
+	// source: at most ratio-1 rows, so a later append can pool the group once
+	// without replaying historical inputs. It is distinct from partialKV, which
+	// holds the PROJECTED rows the leaf-06 temporal seed retained.
+	partialInputs [][]float32
+	// partialPositions is the ABSOLUTE pre-attention input position of each
+	// retained incomplete-group row in partialInputs, oldest first. It is exactly
+	// parallel to partialInputs and is what a later compressed row's covered range
+	// is derived from (#13307); the rows alone cannot recover their own positions.
+	partialPositions []int
+	retainedCopies   int
 
 	window            [][]float32
 	kvPublications    map[v41AttentionPublicationKey][]float32
@@ -299,6 +311,205 @@ func (s *V41AttentionState) partialGroupKV() [][]float32 {
 	return out
 }
 
+// PartialGroupPositions returns the absolute pre-attention input positions of
+// the retained incomplete compressor group, oldest first, as an inspection
+// copy. It is parallel to PartialGroupInputs; an empty group returns nil.
+func (s *V41AttentionState) PartialGroupPositions() []int {
+	if s == nil || len(s.partialPositions) == 0 {
+		return nil
+	}
+	return append([]int(nil), s.partialPositions...)
+}
+
+// PartialGroupInputs returns a copy of the retained incomplete compressor
+// group's pre-attention INPUT rows, oldest first. The rows are the layer's
+// pre-collapse inputs (the carrier `v41CompressedRows` projects through
+// wkv/wgate), not the projected latents, so the group can be pooled once at
+// completion without retaining any projected intermediate.
+func (s *V41AttentionState) PartialGroupInputs() [][]float32 {
+	if s == nil {
+		return nil
+	}
+	out := make([][]float32, len(s.partialInputs))
+	for i, row := range s.partialInputs {
+		out[i] = append([]float32(nil), row...)
+	}
+	return out
+}
+
+// appendCompressorSource advances ONE compressed source layer by one
+// pre-attention INPUT position, WITHOUT replaying the historical inputs that
+// already left the incomplete group (#13307).
+//
+// The full-sequence path (v41CompressedRows) re-projects and re-pools EVERY
+// position on every call: it walks inputs[0..n) through a fresh pool, so the
+// work is O(sequence) per forward and each completed group's arithmetic is
+// recomputed from scratch. This seam keeps the bounded causal state instead:
+// at most ratio-1 prior INPUT rows are retained (PartialGroupInputs /
+// PartialGroupPositions), the new input is appended ONCE, and only when that
+// append completes a group is the compressor arithmetic run -- once -- and
+// exactly one compressed KV row appended, tagged with the source layer and the
+// group's absolute half-open input range [start,end).
+//
+// input is the ONE new position's pre-attention carrier (the same carrier
+// v41CompressedRows projects), projected here through wkv/wgate only when the
+// group completes. projectKV/projectScore are the caller's projection closures;
+// they are invoked exactly ratio times on completion and zero times for an
+// incomplete group, so no historical input is ever re-projected before its
+// group closes. The call is atomic: any validation failure leaves the retained
+// group unchanged, so a malformed input can never advance the source. The
+// layer/range identity is returned to the caller and recorded in the
+// publication registry under the layer's own key, so a reader that resolves a
+// group can attribute it to the exact source positions it pooled. No index key
+// is projected or published here; that is a separate leaf.
+func (s *V41AttentionState) appendCompressorSource(
+	layer, ratio, pos int,
+	input []float32,
+	pool *V41CompressorPool,
+	projectKV func([]float32) ([]float32, error),
+	projectScore func([]float32) ([]float32, error),
+	normWeight []float32,
+	eps float32,
+) (latent []float32, emitted bool, start, end int, err error) {
+	if s == nil {
+		return nil, false, 0, 0, fmt.Errorf("model: nil V41 attention state")
+	}
+	if layer < 0 {
+		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source layer %d is negative", layer)
+	}
+	if ratio <= 1 || ratio > s.ratioCap {
+		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source ratio %d outside (1,%d]", ratio, s.ratioCap)
+	}
+	if pool == nil {
+		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source requires a pool")
+	}
+	if pool.Width() != s.headDim {
+		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source pool width %d, want %d", pool.Width(), s.headDim)
+	}
+	if pos != s.nextCompressRow {
+		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source position %d is not the next input position %d", pos, s.nextCompressRow)
+	}
+	if len(s.partialInputs) != len(s.partialPositions) {
+		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source retained %d inputs but %d positions", len(s.partialInputs), len(s.partialPositions))
+	}
+	if len(s.partialInputs) >= ratio {
+		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source already retains %d rows, the full ratio %d", len(s.partialInputs), ratio)
+	}
+	groupLo := pos - len(s.partialPositions)
+	if !positionsContiguous(s.partialPositions, groupLo) {
+		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source retained positions %v are not contiguous from %d", s.partialPositions, groupLo)
+	}
+	if err := finiteRow32(input, "compressor source input"); err != nil {
+		return nil, false, 0, 0, err
+	}
+	if normWeight != nil && len(normWeight) != s.headDim {
+		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source norm width %d, want %d", len(normWeight), s.headDim)
+	}
+
+	// Incomplete group: append the one input and synthesize no output. At most
+	// ratio-1 rows are retained by construction (the guard above refuses a full
+	// group). This is the append-only fast path: no projection runs.
+	if len(s.partialInputs)+1 < ratio {
+		s.partialInputs = append(s.partialInputs, append([]float32(nil), input...))
+		s.partialPositions = append(s.partialPositions, pos)
+		s.retainedCopies++
+		s.nextCompressRow = pos + 1
+		return nil, false, 0, 0, nil
+	}
+
+	// Group completes with this input. Build the contiguous group of INPUT rows
+	// oldest-first and project+pool it exactly once. The pool is the arithmetic
+	// authority, so this reproduces the exact values v41CompressedRows emits for
+	// the group, at one group's cost instead of O(sequence).
+	staged := make([][]float32, 0, ratio)
+	staged = append(staged, s.partialInputs...)
+	staged = append(staged, append([]float32(nil), input...))
+	stagedPos := append(append([]int(nil), s.partialPositions...), pos)
+	if len(staged) != ratio || stagedPos[0] != groupLo {
+		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source group is %d rows spanning [%d,%d], want %d from %d", len(staged), stagedPos[0], pos, ratio, groupLo)
+	}
+	replay, err := NewV41CompressorPool(ratio, s.headDim)
+	if err != nil {
+		return nil, false, 0, 0, err
+	}
+	var pooled []float32
+	didEmit := false
+	for i, row := range staged {
+		kv, err := projectKV(row)
+		if err != nil {
+			return nil, false, 0, 0, err
+		}
+		score, err := projectScore(row)
+		if err != nil {
+			return nil, false, 0, 0, err
+		}
+		// A fresh pool is contiguity-checked from position 0, so the group is
+		// replayed with GROUP-RELATIVE positions 0..ratio-1, exactly as
+		// v41CompressedRows drives a fresh pool with its 0-based sequence
+		// positions. The pooled arithmetic is position-independent; the absolute
+		// covered range [groupLo,pos] is preserved separately and returned.
+		out, emitted, err := replay.PushNormalized(i, kv, score, normWeight, eps)
+		if err != nil {
+			return nil, false, 0, 0, err
+		}
+		if emitted {
+			pooled, didEmit = out, true
+		}
+	}
+	if !didEmit {
+		return nil, false, 0, 0, fmt.Errorf("model: V41 compressor source full group %d from %d emitted no latent", ratio, groupLo)
+	}
+
+	// Build and validate the publication BEFORE mutating any state, so a
+	// well-formedness failure cannot clear a retained group while emitting
+	// nothing.
+	start, end = groupLo, pos+1
+	upd := V41AttentionStateUpdate{
+		Ref:    V41AttentionStateRef{LayerID: layer, Ratio: ratio, IsKVSource: true},
+		Latent: pooled,
+	}
+	if err := s.validateUpdates([]V41AttentionStateUpdate{upd}); err != nil {
+		return nil, false, 0, 0, err
+	}
+
+	// Commit only after every validation and the whole group's pooling succeeded.
+	released := len(s.partialInputs)
+	s.partialInputs = nil
+	s.partialPositions = nil
+	// The completed group's retained input copies leave the bounded state with
+	// it; the counter tracks live retained rows, so it must fall by the released
+	// count rather than keep growing for the whole session.
+	if released > 0 {
+		s.retainedCopies -= released
+		if s.retainedCopies < 0 {
+			s.retainedCopies = 0
+		}
+	}
+	s.nextCompressRow = pos + 1
+	s.publish([]V41AttentionStateUpdate{upd})
+	return append([]float32(nil), pooled...), true, start, end, nil
+}
+
+// finiteRow32 validates one projected row's width-agnostic finiteness.
+func finiteRow32(row []float32, what string) error {
+	for i, value := range row {
+		if !finite32(value) {
+			return fmt.Errorf("model: %s[%d] is non-finite", what, i)
+		}
+	}
+	return nil
+}
+
+// positionsContiguous reports whether positions is exactly lo, lo+1, ...
+func positionsContiguous(positions []int, lo int) bool {
+	for i, p := range positions {
+		if p != lo+i {
+			return false
+		}
+	}
+	return true
+}
+
 // publishUpdates atomically adds completed source publications to the
 // per-forward registry without conflating them with temporal layer state.
 func (s *V41AttentionState) publishUpdates(updates []V41AttentionStateUpdate) error {
@@ -389,6 +600,7 @@ func (s *V41AttentionState) Reset() {
 	s.nextCompressRow = 0
 	s.retainedWindowRows = 0
 	s.partialKV = nil
+	s.partialPositions = nil
 	s.retainedCopies = 0
 	s.kvPublications = make(map[v41AttentionPublicationKey][]float32)
 	s.indexPublications = make(map[v41AttentionPublicationKey][]float32)
