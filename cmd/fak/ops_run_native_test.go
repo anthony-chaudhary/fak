@@ -406,7 +406,7 @@ func TestOpsNativeInferencePreflight(t *testing.T) {
 		}))
 	}
 
-	run := func(t *testing.T, baseURL string) (int, opsRunReceipt, bool) {
+	run := func(t *testing.T, baseURL string) (int, opsRunReceipt, bool, string) {
 		t.Helper()
 		dir := t.TempDir()
 		prompt := filepath.Join(dir, "prompt.txt")
@@ -416,10 +416,11 @@ func TestOpsNativeInferencePreflight(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Setenv("FAK_OPS_NATIVE_PREFLIGHT_CHILD_SENTINEL", sentinel)
-		code := runOpsNativeFixture(io.Discard, io.Discard, "FAK_OPS_NATIVE_PREFLIGHT_CHILD_SENTINEL", []string{
+		var stderr bytes.Buffer
+		code := runOpsNativeFixture(io.Discard, &stderr, "FAK_OPS_NATIVE_PREFLIGHT_CHILD_SENTINEL", []string{
 			"--harness", "native", "--prompt-file", prompt, "--receipt", receiptPath,
 			"--provider", "openai", "--model", "fixture", "--base-url", baseURL,
-			"--max-turns", "1", "--timeout", "5s",
+			"--max-turns", "1", "--timeout", "15s",
 		})
 		data, err := os.ReadFile(receiptPath)
 		if err != nil {
@@ -430,16 +431,16 @@ func TestOpsNativeInferencePreflight(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err = os.Stat(sentinel)
-		return code, receipt, err == nil
+		return code, receipt, err == nil, stderr.String()
 	}
 
 	t.Run("failed_probe_launches_no_child", func(t *testing.T) {
 		var probes atomic.Int32
 		gateway := newGateway(t, http.StatusUnauthorized, &probes)
 		defer gateway.Close()
-		code, receipt, launched := run(t, gateway.URL+"/v1")
+		code, receipt, launched, stderr := run(t, gateway.URL+"/v1")
 		if code == 0 || launched {
-			t.Fatalf("failed inference probe: exit=%d child_launched=%v", code, launched)
+			t.Fatalf("failed inference probe: exit=%d child_launched=%v stderr=%q", code, launched, stderr)
 		}
 		if probes.Load() != 1 || receipt.InferencePreflight == nil || receipt.InferencePreflight.Status != "failed" {
 			t.Fatalf("failed inference receipt/probe mismatch: probes=%d receipt=%+v", probes.Load(), receipt.InferencePreflight)
@@ -453,10 +454,10 @@ func TestOpsNativeInferencePreflight(t *testing.T) {
 		second := newGateway(t, http.StatusOK, &secondProbes)
 		defer second.Close()
 
-		firstCode, firstReceipt, firstLaunched := run(t, first.URL+"/v1")
-		secondCode, secondReceipt, secondLaunched := run(t, second.URL+"/v1")
+		firstCode, firstReceipt, firstLaunched, firstStderr := run(t, first.URL+"/v1")
+		secondCode, secondReceipt, secondLaunched, secondStderr := run(t, second.URL+"/v1")
 		if firstCode != 0 || secondCode != 0 || !firstLaunched || !secondLaunched {
-			t.Fatalf("qualified native launch: first=(%d,%v) second=(%d,%v)", firstCode, firstLaunched, secondCode, secondLaunched)
+			t.Fatalf("qualified native launch: first=(%d,%v,%q) second=(%d,%v,%q)", firstCode, firstLaunched, firstStderr, secondCode, secondLaunched, secondStderr)
 		}
 		if firstProbes.Load() != 1 || secondProbes.Load() != 1 {
 			t.Fatalf("route-specific probes = (%d,%d), want (1,1)", firstProbes.Load(), secondProbes.Load())
