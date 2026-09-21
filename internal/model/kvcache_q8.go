@@ -53,6 +53,40 @@ func (p *kvPackedRow) appendRow(row []float32) {
 	p.scales = append(p.scales, q.Scale...)
 }
 
+// appendRowsBulk encodes `p` contiguous rows (p*w elements, row-major) in ONE
+// quantization pass and appends them. This is the deferred-prefill primitive
+// (#12274): the per-row appendRow path calls QuantizeKVQ8_0 p times, allocating a
+// Scale+Codes pair each call through the hot prefill loop, whereas this stages the
+// whole panel once and converts it in a single bulk pass. Because the Q8_0 block
+// width (32) divides every supported row width (a head_dim multiple of 32), a block
+// never straddles two rows, so the bulk pass produces the exact bytes p separate
+// appendRow calls would have — the conversion is deferred, not approximated.
+func (p *kvPackedRow) appendRowsBulk(panel []float32, rows, width int) {
+	if p == nil || rows <= 0 || width <= 0 {
+		return
+	}
+	if p.width == 0 {
+		p.width = width
+	}
+	n := rows * width
+	if n > len(panel) {
+		return
+	}
+	if width != p.width {
+		// A caller whose stride disagrees with the packing cannot be bulk-encoded on
+		// this packing's row boundaries without changing the bytes; fall back to the
+		// single-row path so correctness wins over the batched conversion.
+		for t := 0; t < rows; t++ {
+			p.appendRow(panel[t*width : (t+1)*width])
+		}
+		return
+	}
+	// Block-aligned: one codec call over the whole panel.
+	q := QuantizeKVQ8_0(panel[:n])
+	p.codes = append(p.codes, q.Codes...)
+	p.scales = append(p.scales, q.Scale...)
+}
+
 // appendPacked appends another packed row-set verbatim (used by Clone fast-paths
 // and by batch prefill where rows were packed upstream).
 func (p *kvPackedRow) appendPacked(other *kvPackedRow) {
@@ -415,16 +449,16 @@ func (c *KVCache) rewriteVRow(l, i int, row []float32) {
 
 // appendBatchedKV appends P positions' post-RoPE K and V rows (row-major, P*w
 // elements, as the batched prefill produces) to layer l. On the f32 path it is the
-// historical single append; on the q8 path it encodes each row in turn.
+// historical single append; on the q8 path it defers the whole panel to one bulk
+// conversion pass (#12274) rather than quantizing each row in turn, which is the
+// prefill hot path where the per-row codec allocation dominated.
 func (c *KVCache) appendBatchedKV(l int, K, V []float32, p, w int) {
 	if c.quantized() {
 		if l < 0 || l >= len(c.kQ8) {
 			return
 		}
-		for t := 0; t < p; t++ {
-			c.kQ8[l].appendRow(K[t*w : (t+1)*w])
-			c.vQ8[l].appendRow(V[t*w : (t+1)*w])
-		}
+		c.kQ8[l].appendRowsBulk(K, p, w)
+		c.vQ8[l].appendRowsBulk(V, p, w)
 		return
 	}
 	if l < 0 || l >= len(c.K) {
