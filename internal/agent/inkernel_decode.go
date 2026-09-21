@@ -143,6 +143,12 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	if err = ctx.Err(); err != nil {
 		return
 	}
+	// CW-03 (#13351): when this run is a cache-POPULATE, the caller has asked only
+	// for the production lookup -> suffix prefill -> full-state admission to happen.
+	// The purpose exits at the step-4 seam below, BEFORE the decode lane is built, so
+	// a prime can never sample, emit, run a tool or bill demand usage. The flag is a
+	// request-local purpose: it is read once here and never mutates the served path.
+	cachePopulate := p.cachePopulate
 	reuse := p.tree != nil && inKernelPlannerPrefixReuseSupported(p.m, p.backend)
 
 	// 1) Acquire a session, reusing the longest cached KV prefix when enabled. The clone
@@ -347,8 +353,17 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// gate above has settled (a prefix that matched but could not be served is still
 	// visible as cacheable > 0 with matched == 0), while NO prefill or decode compute has happened
 	// yet. Transient CPU flight reuse settles during step 2 and does not rewrite this ahead-of-work
-	// persistent-cache decision. One append per turn that reaches this seam.
-	p.recordTurnTax(promptTok, cacheable, matched)
+	// persistent-cache decision. One append per demand turn that reaches this seam.
+	//
+	// CW-03 (#13351): a cache-POPULATE is not demand traffic, so it is EXCLUDED from the
+	// turn-tax ledger. The ledger answers "what did this demand turn do about the cache
+	// and what did it cost"; a populate is preparation for a later demand turn, and
+	// booking it as a demand decision would inflate the strategy counts and tax totals
+	// with work no client requested. The exclusion is explicit here rather than a
+	// post-hoc filter so the ledger never contains a prime entry to un-count.
+	if !cachePopulate {
+		p.recordTurnTax(promptTok, cacheable, matched)
+	}
 
 	// 2) Prefill ONLY the divergent suffix (the whole prompt on a miss). Device hybrid
 	// snapshots cannot be truncated when a radix edge later splits: recurrent GDN state is
@@ -483,6 +498,16 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		}
 	}
 
+	// 3b) CW-03 (#13351): cache-POPULATE purpose exits HERE — after full-state admission,
+	// before any decode. The production prefill/snapshot/admission path above is exactly
+	// the served path, so the state now resident is the state a later continuation will
+	// restore. No decodeLane is constructed, so no sampler, emitter, tool runner or
+	// demand-usage sink is ever reached; `gen` stays 0 and the turn books prefill-only
+	// work. An admission that produced no reusable state is reported by the caller.
+	if cachePopulate {
+		return
+	}
+
 	// 4) Decode. The per-token step (sample → token-ID stop → penalty count → string-suffix
 	// emit → the maxNew-1 skip-the-unused-final-Step) is factored into decodeLane.decodeOne so
 	// the SAME step drives both the serial forward (Session.Step, the default) and the opt-in
@@ -515,6 +540,8 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		presPenalty: presPenalty,
 		maxNew:      maxNew,
 		measurement: measurement,
+		samplerHook: p.cachePrimeSamplerHook,
+		emitHook:    p.cachePrimeEmitHook,
 	}
 	if reuse {
 		// A continuation is cacheable only after its token has actually crossed the
@@ -766,6 +793,12 @@ type decodeLane struct {
 	presPenalty float64
 	maxNew      int
 	measurement *nativeInferenceMeasurement
+	// samplerHook / emitHook are the CW-03 (#13351) purpose-observation taps. They are
+	// nil on the served path (a literal no-op) and set only by a cache-prime caller's
+	// witness; decodeOne fires them at the exact sample and emit seams, so a prime that
+	// ever reached decode would trip them. They observe only; they never change output.
+	samplerHook func()
+	emitHook    func()
 	// forwarded contains generated tokens whose Session.Step (or active batched
 	// equivalent) completed. A non-nil empty slice arms continuation tracking.
 	forwarded []int
@@ -966,6 +999,9 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 		ln.err, ln.done = err, true
 		return 0, false
 	}
+	if ln.samplerHook != nil {
+		ln.samplerHook()
+	}
 	next = sampleLogitsWithPenalty(ln.logits, ln.temp, ln.topP, ln.topK, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, ln.rng)
 	if next < 0 || ln.stops[next] {
 		ln.stopped, ln.done = true, true
@@ -977,6 +1013,9 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 	}
 	if ln.counts != nil && next < len(ln.counts) {
 		ln.counts[next]++
+	}
+	if ln.emitHook != nil {
+		ln.emitHook()
 	}
 	emitStopped := ln.emit != nil && ln.emit(next)
 	ln.gen++ // this non-stop token was emitted/generated; trace only after this count.
@@ -1264,4 +1303,108 @@ func envFloat(key string, def float64) float64 {
 		}
 	}
 	return def
+}
+
+// inkernel_cache_prime.go semantics (CW-03, fak#13351), implemented here alongside the
+// decode seam it reuses:
+//
+// PrimeCacheState runs the EXACT production prefill/admission path (the same lookup,
+// suffix prefill, snapshot and tree admission that generateReusedContextWithBias
+// performs in steps 1–3) and then EXITS BEFORE the decode lane. Its purpose is cache
+// MATERIALIZATION: the outcome is persisted state a later demand turn restores, not a
+// generated token. Consequently a prime:
+//
+//   - never samples, emits, runs a tool or bills demand usage (the purpose returns at
+//     the step-3b seam, before any decodeLane exists);
+//   - is excluded from demand turn-tax: recordTurnTax is a per-demand-turn decision and
+//     a populate is not demand traffic, so a prime does not append to the ledger;
+//   - reports a closed receipt: Admitted / Cold / Unsupported.
+
+// ErrCachePrimeUnsupported is the fail-closed refusal for a planner whose prefix-reuse
+// path cannot populate a cache (no tree, or a model/backend pair the reuse path does not
+// support). It mirrors the "explicit unsupported status" the issue requires: a caller
+// must never read a zero-value receipt as a successful prime.
+var ErrCachePrimeUnsupported = errors.New("agent: cache populate is unsupported on this planner")
+
+// Closed receipt vocabulary. cachePrimeReasonAdmitted means full prompt state is
+// resident; cachePrimeReasonCold means the path ran but admitted no state (a legitimate,
+// explicitly-labelled outcome, never a silent claim); cachePrimeReasonUnsupported means
+// the planner cannot prime at all.
+const (
+	cachePrimeReasonAdmitted    = "admitted"
+	cachePrimeReasonCold        = "cold"
+	cachePrimeReasonUnsupported = "unsupported"
+)
+
+// CachePrimeReceipt is the closed result of a cache populate. Admitted is the single
+// load-bearing bit: only an admitted receipt with matching TokenCount may be treated as
+// a usable warm. Usable() folds the invariant so a caller cannot misread a cold or
+// partial prime as a hit.
+type CachePrimeReceipt struct {
+	// Admitted is true only when the full prompt state was admitted to the cache.
+	Admitted bool
+	// Reason is the closed reason token (admitted | cold | unsupported).
+	Reason string
+	// Tokens is the number of prompt tokens whose state is resident (0 unless admitted).
+	Tokens int
+	// PromptTokens is the prompt length the prime was asked to materialize.
+	PromptTokens int
+}
+
+// Usable reports whether this receipt describes a restorable warm. It is the AND of the
+// admitted bit and a non-empty admitted prefix, so a cancelled or partial prime can
+// never read as usable.
+func (r CachePrimeReceipt) Usable() bool {
+	return r.Admitted && r.Reason == cachePrimeReasonAdmitted && r.Tokens > 0
+}
+
+// primeCacheStateOnce runs one populate through the production path with the decode lane
+// suppressed. It sets the request-local purpose, calls the same method the served path
+// calls, and clears the purpose before returning (including on error), so the flag can
+// never leak into an ordinary turn.
+//
+// The returned int is the RESIDENT prefix length AFTER admission, read back from the
+// same cache the next demand turn will consult (p.cachedPrefixLen). The generate
+// result's own `matched` is the prefix served BEFORE this prime (normally 0) and is not
+// the materialization outcome; the read-back is.
+func (p *InKernelPlanner) primeCacheStateOnce(ctx context.Context, ids []int) (int, error) {
+	p.cachePopulate = true
+	defer func() { p.cachePopulate = false }()
+	if _, _, _, _, _, _, _, _, err := p.generateReusedContextWithBias(
+		ctx, ids, 0, 0, 0, 0, nil, 0, 0, map[int]bool{}, nil); err != nil {
+		return 0, err
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	return p.cachedPrefixLen(ids), nil
+}
+
+// PrimeCacheState materializes the KV/expert state for ids without generating a token.
+// It is the CW-03 cache-populate purpose: full lookup + suffix prefill + full-state
+// admission, then exit before sampling or decode. The returned receipt reports whether
+// the full prompt state is now resident; an unsupported planner is refused with
+// ErrCachePrimeUnsupported, and a cancelled context returns its error with no usable
+// receipt (the failed preparation never claims a cache hit).
+func (p *InKernelPlanner) PrimeCacheState(ctx context.Context, ids []int) (CachePrimeReceipt, error) {
+	if p == nil {
+		return CachePrimeReceipt{Reason: cachePrimeReasonUnsupported}, ErrCachePrimeUnsupported
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return CachePrimeReceipt{Reason: cachePrimeReasonCold}, err
+	}
+	if len(ids) == 0 || p.tree == nil || !inKernelPlannerPrefixReuseSupported(p.m, p.backend) {
+		return CachePrimeReceipt{Reason: cachePrimeReasonUnsupported, PromptTokens: len(ids)}, ErrCachePrimeUnsupported
+	}
+	matched, err := p.primeCacheStateOnce(ctx, ids)
+	if err != nil {
+		return CachePrimeReceipt{Reason: cachePrimeReasonCold, PromptTokens: len(ids)}, err
+	}
+	if matched < len(ids) {
+		return CachePrimeReceipt{Admitted: false, Reason: cachePrimeReasonCold, Tokens: matched, PromptTokens: len(ids)}, nil
+	}
+	return CachePrimeReceipt{Admitted: true, Reason: cachePrimeReasonAdmitted, Tokens: matched, PromptTokens: len(ids)}, nil
 }

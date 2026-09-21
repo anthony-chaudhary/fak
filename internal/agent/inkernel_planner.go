@@ -243,6 +243,19 @@ type InKernelPlanner struct {
 	// idle state, so every constructor — including a bare &InKernelPlanner{} — can
 	// begin a startup warm with no initialization step to forget.
 	warmState InKernelWarmState
+
+	// cachePopulate marks the CW-03 (#13351) cache-POPULATE execution purpose for the
+	// duration of one prime: generateReusedContextWithBias reads it once and returns at
+	// the step-3b seam, after full-state admission and before any decode. It is set and
+	// cleared by primeCacheStateOnce, so an ordinary demand turn never observes it true.
+	cachePopulate bool
+
+	// Cache-populate purpose observation taps (nil on the served path: a literal
+	// no-op). They are bound onto the decodeLane a prime would have to construct, and
+	// fired at the exact sample and token-emit seams, so a regression that let a prime
+	// reach decode would trip them. They observe only; they never change output.
+	cachePrimeSamplerHook func()
+	cachePrimeEmitHook    func()
 }
 
 type inKernelOOMRetryClassStats struct {
