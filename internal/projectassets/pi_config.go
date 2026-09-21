@@ -81,10 +81,24 @@ func NormalizePiModelID(raw string) string {
 }
 
 // GeneratePiConfig creates a standalone models.json configuration targeting a fak serve gateway.
+//
+// It uses the default served-window prior for the safe context budget; callers that know the
+// real served window should use GeneratePiConfigForWindow so the resident target is derived
+// from it (see pi_context_budget.go and docs/long-context-defaults.md: cap is not target).
 func GeneratePiConfig(baseURL, modelID string) ([]byte, error) {
+	return GeneratePiConfigForWindow(baseURL, modelID, DefaultPiServedWindow)
+}
+
+// GeneratePiConfigForWindow creates a standalone models.json whose "fak" provider advertises a
+// SAFE resident context target derived from servedWindow (at most half the window) instead of the
+// raw hard cap. The written contextWindow is a Pi auto-compaction tripwire
+// (`contextTokens > contextWindow - reserveTokens`), so a smaller value makes Pi compact inside
+// the safe envelope rather than at the ceiling.
+func GeneratePiConfigForWindow(baseURL, modelID string, servedWindow int) ([]byte, error) {
 	baseURL = NormalizePiBaseURL(baseURL)
 	modelID = NormalizePiModelID(modelID)
 	modelName := formatPiModelName(modelID)
+	budget := PiSafeContextBudget(servedWindow)
 
 	cfg := map[string]interface{}{
 		"providers": map[string]interface{}{
@@ -93,28 +107,35 @@ func GeneratePiConfig(baseURL, modelID string) ([]byte, error) {
 				"apiKey":  "fak",
 				"api":     "openai-completions",
 				"models": []interface{}{
-					map[string]interface{}{
-						"id":            modelID,
-						"name":          modelName,
-						"reasoning":     false,
-						"input":         []interface{}{"text"},
-						"contextWindow": 131072,
-						"maxTokens":     16384,
-						"cost": map[string]interface{}{
-							"input":      0,
-							"output":     0,
-							"cacheRead":  0,
-							"cacheWrite": 0,
-						},
-						"compat": map[string]interface{}{
-							piDeveloperRoleKey: false,
-						},
-					},
+					piModelEntry(modelID, modelName, budget),
 				},
 			},
 		},
 	}
 	return json.MarshalIndent(cfg, "", "  ")
+}
+
+// piModelEntry builds one Pi model entry from the derived safe budget. The contextWindow is the
+// RESIDENT TARGET (at most half the served window), and maxTokens carries the output reserve, so
+// the single JSON object encodes both halves of the cap-vs-target split. See pi_context_budget.go.
+func piModelEntry(modelID, modelName string, budget PiContextBudget) map[string]interface{} {
+	return map[string]interface{}{
+		"id":            modelID,
+		"name":          modelName,
+		"reasoning":     false,
+		"input":         []interface{}{"text"},
+		"contextWindow": budget.ResidentTarget,
+		"maxTokens":     budget.OutputReserve,
+		"cost": map[string]interface{}{
+			"input":      0,
+			"output":     0,
+			"cacheRead":  0,
+			"cacheWrite": 0,
+		},
+		"compat": map[string]interface{}{
+			piDeveloperRoleKey: false,
+		},
+	}
 }
 
 func formatPiModelName(modelID string) string {
@@ -138,29 +159,25 @@ func formatPiModelName(modelID string) string {
 // to baseURL with modelID, while preserving all existing providers and models.
 // If target is empty, DefaultPiConfigPath() is used.
 // Returns (resolvedPath, modified, error).
+//
+// It uses the default served-window prior; callers that know the real served window should use
+// EnsurePiProviderConfigForWindow so the safe resident target is derived from it.
 func EnsurePiProviderConfig(target, baseURL, modelID string) (string, bool, error) {
+	return EnsurePiProviderConfigForWindow(target, baseURL, modelID, DefaultPiServedWindow)
+}
+
+// EnsurePiProviderConfigForWindow is EnsurePiProviderConfig with an explicit served window, so
+// the written contextWindow is a SAFE resident target (at most half the window) rather than the
+// raw cap. It also REPAIRS an existing fak model entry whose contextWindow still advertises the
+// raw window (the pre-doctrine value), so an upgrade path exists for configs fak itself wrote.
+func EnsurePiProviderConfigForWindow(target, baseURL, modelID string, servedWindow int) (string, bool, error) {
 	path := ResolvePiConfigPath(target)
 	baseURL = NormalizePiBaseURL(baseURL)
 	modelID = NormalizePiModelID(modelID)
 	modelName := formatPiModelName(modelID)
 
-	targetModel := map[string]interface{}{
-		"id":            modelID,
-		"name":          modelName,
-		"reasoning":     false,
-		"input":         []interface{}{"text"},
-		"contextWindow": 131072,
-		"maxTokens":     16384,
-		"cost": map[string]interface{}{
-			"input":      0,
-			"output":     0,
-			"cacheRead":  0,
-			"cacheWrite": 0,
-		},
-		"compat": map[string]interface{}{
-			piDeveloperRoleKey: false,
-		},
-	}
+	budget := PiSafeContextBudget(servedWindow)
+	targetModel := piModelEntry(modelID, modelName, budget)
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -168,7 +185,7 @@ func EnsurePiProviderConfig(target, baseURL, modelID string) (string, bool, erro
 			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 				return path, false, fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
 			}
-			out, genErr := GeneratePiConfig(baseURL, modelID)
+			out, genErr := GeneratePiConfigForWindow(baseURL, modelID, servedWindow)
 			if genErr != nil {
 				return path, false, fmt.Errorf("generate models.json: %w", genErr)
 			}
@@ -241,6 +258,13 @@ func EnsurePiProviderConfig(target, baseURL, modelID string) (string, bool, erro
 					modelFound = true
 					if mObj["compat"] == nil {
 						mObj["compat"] = map[string]interface{}{piDeveloperRoleKey: false}
+						modelsList[i] = mObj
+						modified = true
+					}
+					// Repair the pre-doctrine context budget: fak previously wrote the raw
+					// window (131072) as contextWindow, which let Pi fill the whole window
+					// before compacting. Pin it back to the safe resident target.
+					if repairPiModelBudget(mObj, budget) {
 						modelsList[i] = mObj
 						modified = true
 					}

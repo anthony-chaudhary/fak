@@ -159,8 +159,8 @@ Pi reads custom provider definitions from `~/.pi/agent/models.json` (or `$PI_COD
           "input": [
             "text"
           ],
-          "contextWindow": 131072,
-          "maxTokens": 16384,
+          "contextWindow": 65536,
+          "maxTokens": 8192,
           "cost": {
             "input": 0,
             "output": 0,
@@ -185,7 +185,39 @@ Pi reads custom provider definitions from `~/.pi/agent/models.json` (or `$PI_COD
 | `api` | `openai-completions` | Pi streams tool calling via OpenAI Chat Completions API. |
 | `apiKey` | `"fak"` | Placeholder token; satisfies Pi's auth check for model availability in `/model`. |
 | `compat.supportsDeveloperRole` | `false` | Instructs Pi to send system instructions with `role: "system"` rather than `role: "developer"`. |
-| `contextWindow` | `131072` | In-kernel RadixAttention cache supports 128k+ tokens. |
+| `contextWindow` | `min(served window, window/2)` | A SAFE resident target, **not** the served cap. See below. |
+| `maxTokens` | derived output reserve | Tokens held back for the model's answer/tool args. |
+
+### Safe context budgeting (cap is not target)
+
+The served model's advertised context window is a hard CAP, never the target resident budget
+([`docs/long-context-defaults.md`](../long-context-defaults.md)). Pi decides when to
+auto-compact with `contextTokens > contextWindow - reserveTokens`, so the `contextWindow` fak
+writes is a deliberate tripwire, not a ceiling to aim at. fak therefore writes:
+
+- **`contextWindow` = `min(served window, window/2)`** — the resident target is held at or below
+  **50%** of the served window, so Pi compacts well before the hard cap.
+- **`maxTokens` = the derived output reserve** (`target/4`, clamped to `[512, 8192]`), so the
+  request never fills the window as input.
+- A matching **`compaction` block** in Pi's `settings.json` (`reserveTokens`, `keepRecentTokens`)
+  derived from the same budget, so the post-fire working set agrees with the tripwire.
+
+`fak pi` derives the served window from the backend's `/v1/models` `context_length`, falling
+back to the default prior when the backend is unreachable. Override it explicitly:
+
+```bash
+fak pi --window 131072                       # 128k backend -> contextWindow 65536
+fak pi config --window 32768                 # preview the derived budget
+fak pi config --write --window 32768         # write models.json AND settings.json
+fak pi config --write --settings-path ~/.pi/agent/settings.json
+```
+
+`fak pi config --write` also **repairs** a `models.json` fak itself wrote before this doctrine:
+an existing `contextWindow` advertising the raw window is lowered to the safe target
+(`repairPiModelBudget`). An operator's deliberately smaller budget is never raised.
+
+The budget carries a provenance label (`MODELED`: a doctrine-derived prior, not a same-task fak
+witness) surfaced by `fak pi --dry-run` and `fak pi config`.
 
 ---
 
@@ -199,6 +231,10 @@ Pick the model tier that matches your Mac's RAM:
 | **32 GB – 36 GB** | `qwen38` (`qwen38:27b-q2k`) | UD-Q2_K_XL | ~9.4 GB | Fast 27B inference with ample KV headroom |
 | **36 GB – 48 GB** | `qwen38:27b-q4` | Q4_K_M | ~16.3 GB | Canonical 27B benchmark weight; high precision |
 | **64 GB+** | `qwen38:27b-q4` (large context) | Q4_K_M | 16.3 GB + KV | Deep multi-turn agent sessions |
+
+> **Context safety:** regardless of the model tier, fak writes a `contextWindow` at or below
+> **half** the served window (see [Safe context budgeting](#safe-context-budgeting-cap-is-not-target)),
+> so a long session compacts inside the envelope instead of running to the hard cap.
 
 ---
 

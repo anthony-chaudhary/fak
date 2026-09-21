@@ -65,6 +65,9 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	checkBackend := fs.Bool("check-backend", true, "verify fak serve backend is reachable before starting Pi")
 	thinking := fs.String("thinking", "", "thinking/reasoning level passed to pi (--thinking <level>)")
 	tools := fs.String("tools", "", "tool allowlist passed to pi (--tools <list>)")
+	window := fs.Int("window", 0, "served model context window in tokens for the SAFE Pi resident budget (default: auto-detect from the backend /v1/models context_length, else the default prior). fak writes contextWindow = min(window, window/2) so Pi auto-compacts inside the safe envelope instead of at the hard cap.")
+	safeSettings := fs.Bool("safe-settings", true, "write a safe Pi compaction block (reserveTokens/keepRecentTokens derived from the served window) into Pi's settings.json")
+	settingsPath := fs.String("settings-path", "", "destination path or directory for Pi's settings.json (default: ~/.pi/agent/settings.json)")
 	quiet := fs.Bool("quiet", false, "suppress launcher banner and diagnostics")
 	command := fs.String("command", "pi", "executable name or path for Pi CLI")
 
@@ -109,8 +112,8 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	targetModel := strings.TrimSpace(*model)
 	backendActive := false
 
-	// Probe backend to verify reachability and auto-detect served model if unspecified
-	detectedModel, reachable, resolvedBaseURL := probePiBackend(targetBaseURL, 1500*time.Millisecond)
+	// Probe backend to verify reachability and auto-detect the served model + context window
+	detectedModel, reachable, detectedWindow, resolvedBaseURL := probePiBackendWithWindow(targetBaseURL, 1500*time.Millisecond)
 	if reachable {
 		backendActive = true
 		// Adopt the origin that answered: a loopback literal can be refused while
@@ -126,6 +129,15 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	if targetModel == "" {
 		targetModel = projectassets.DefaultPiModelID
 	}
+
+	// Safe context budget: an explicit --window wins; otherwise the window the backend
+	// advertised; otherwise the default prior. PiSafeContextBudget clamps it and halves it so
+	// the resident target is at most 50% of the served window (docs/long-context-defaults.md).
+	servedWindow := *window
+	if servedWindow <= 0 {
+		servedWindow = detectedWindow
+	}
+	budget := projectassets.PiSafeContextBudget(servedWindow)
 
 	if *printEnv {
 		fmt.Fprintln(stdout, "# Environment configuration for Pi with fak serve backend on Mac")
@@ -161,11 +173,20 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if launch.writeConfig {
-		resolvedPath, modified, err := projectassets.EnsurePiProviderConfig(launch.configPath, launch.baseURL, launch.model)
+		resolvedPath, modified, err := projectassets.EnsurePiProviderConfigForWindow(launch.configPath, launch.baseURL, launch.model, servedWindow)
 		if err != nil && !launch.quiet {
 			fmt.Fprintf(stderr, "fak pi: warning: could not update Pi config %s: %v\n", resolvedPath, err)
 		} else if modified && !launch.quiet {
-			fmt.Fprintf(stderr, "fak pi: updated %s with provider \"fak\" (baseURL: %s, model: %s)\n", resolvedPath, launch.baseURL, launch.model)
+			fmt.Fprintf(stderr, "fak pi: updated %s with provider \"fak\" (baseURL: %s, model: %s, contextWindow: %d = safe 50%% of %d)\n", resolvedPath, launch.baseURL, launch.model, budget.ResidentTarget, budget.ServedWindow)
+		}
+	}
+
+	if *safeSettings {
+		sPath, modified, err := projectassets.EnsurePiSafeCompaction(*settingsPath, budget)
+		if err != nil && !launch.quiet {
+			fmt.Fprintf(stderr, "fak pi: warning: could not update Pi settings %s: %v\n", sPath, err)
+		} else if modified && !launch.quiet {
+			fmt.Fprintf(stderr, "fak pi: wrote safe compaction to %s (reserveTokens: %d, keepRecentTokens: %d)\n", sPath, budget.OutputReserve, budget.KeepRecentTokens)
 		}
 	}
 
@@ -176,6 +197,8 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "  backend     = %s (raw without guard)\n", launch.baseURL)
 		fmt.Fprintf(stderr, "  provider    = %s\n", launch.provider)
 		fmt.Fprintf(stderr, "  model       = %s\n", launch.model)
+		fmt.Fprintf(stderr, "  context     = resident target %d tokens (safe 50%% of %d served window, %s)\n", budget.ResidentTarget, budget.ServedWindow, budget.Provenance)
+		fmt.Fprintf(stderr, "  compaction  = reserve %d, keep %d (write=%t)\n", budget.OutputReserve, budget.KeepRecentTokens, *safeSettings)
 		fmt.Fprintln(stderr, "  command     = "+strings.Join(argvOut, " "))
 		fmt.Fprintln(stdout, strings.Join(argvOut, " "))
 		return 0
@@ -203,21 +226,38 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 // address-family fallback (127.0.0.1 / [::1] -> localhost) and reports that
 // origin so the caller launches Pi against the family that is actually live.
 func probePiBackend(baseURL string, timeout time.Duration) (model string, ok bool, resolvedBaseURL string) {
-	client := &http.Client{Timeout: timeout}
-	if m, ok := probePiBackendOnce(client, baseURL); ok {
-		return m, true, baseURL
-	}
-	if fallback, ok := fakclient.LoopbackFallbackURL(baseURL); ok {
-		if m, ok := probePiBackendOnce(client, fallback); ok {
-			return m, true, fallback
-		}
-	}
-	return "", false, baseURL
+	m, ok, _, resolved := probePiBackendWithWindow(baseURL, timeout)
+	return m, ok, resolved
 }
 
-// probePiBackendOnce probes a single backend base URL: GET <root>/healthz, then
-// fall back to <base>/models for the served model id.
+// probePiBackendWithWindow probes the backend and also returns the served context window (tokens,
+// 0 if unadvertised) plus the base URL that actually answered, so the caller can derive a SAFE
+// resident target from the real window instead of an assumed prior (see
+// projectassets.PiSafeContextBudget).
+func probePiBackendWithWindow(baseURL string, timeout time.Duration) (model string, ok bool, window int, resolvedBaseURL string) {
+	client := &http.Client{Timeout: timeout}
+	if m, ok, w := probePiBackendWindow(client, baseURL); ok {
+		return m, true, w, baseURL
+	}
+	if fallback, ok := fakclient.LoopbackFallbackURL(baseURL); ok {
+		if m, ok, w := probePiBackendWindow(client, fallback); ok {
+			return m, true, w, fallback
+		}
+	}
+	return "", false, 0, baseURL
+}
+
+// probePiBackendOnce probes a single backend base URL for the served model id.
 func probePiBackendOnce(client *http.Client, baseURL string) (string, bool) {
+	model, ok, _ := probePiBackendWindow(client, baseURL)
+	return model, ok
+}
+
+// probePiBackendWindow probes a single backend base URL: GET <root>/healthz, then read
+// <base>/models for the served model id AND its advertised context_length (the window the safe
+// budget is derived from).
+func probePiBackendWindow(client *http.Client, baseURL string) (model string, ok bool, window int) {
+	healthy := false
 	healthURL := strings.TrimRight(strings.TrimSuffix(baseURL, "/v1"), "/") + "/healthz"
 	resp, err := client.Get(healthURL)
 	if err == nil && resp.StatusCode == http.StatusOK {
@@ -227,28 +267,44 @@ func probePiBackendOnce(client *http.Client, baseURL string) (string, bool) {
 			Model string `json:"model"`
 		}
 		if json.NewDecoder(resp.Body).Decode(&h) == nil && (h.OK || h.Model != "") {
-			return h.Model, true
+			model = h.Model
 		}
-		return "", true
+		healthy = true
 	}
 
-	// Fallback to /v1/models
+	// /v1/models carries the served model id AND its advertised context length. Query it even
+	// when /healthz answered, because healthz does not report the window.
 	modelsURL := strings.TrimRight(baseURL, "/") + "/models"
 	mResp, mErr := client.Get(modelsURL)
 	if mErr == nil && mResp.StatusCode == http.StatusOK {
 		defer mResp.Body.Close()
 		var catalog struct {
 			Data []struct {
-				ID string `json:"id"`
+				ID            string `json:"id"`
+				ContextLength int    `json:"context_length"`
 			} `json:"data"`
 		}
 		if json.NewDecoder(mResp.Body).Decode(&catalog) == nil && len(catalog.Data) > 0 {
-			return catalog.Data[0].ID, true
+			if model == "" {
+				model = catalog.Data[0].ID
+			}
+			for _, row := range catalog.Data {
+				if row.ContextLength > 0 && (row.ID == model || model == "") {
+					window = row.ContextLength
+					break
+				}
+			}
+			if window == 0 {
+				window = catalog.Data[0].ContextLength
+			}
+			return model, true, window
 		}
-		return "", true
+		return model, healthy, 0
 	}
-
-	return "", false
+	if healthy {
+		return model, true, 0
+	}
+	return "", false, 0
 }
 
 func buildPiLaunchArgv(opts piLaunchOptions) []string {
@@ -311,30 +367,44 @@ func runPiConfig(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	addr := fs.String("addr", "127.0.0.1:8080", "fak serve gateway listen address")
 	model := fs.String("model", projectassets.DefaultPiModelID, "served model ID")
-	write := fs.Bool("write", false, "write or update ~/.pi/agent/models.json (or --path)")
+	window := fs.Int("window", 0, "served model context window in tokens (default: the default prior). The written contextWindow is min(window, window/2) so Pi auto-compacts inside the safe envelope.")
+	write := fs.Bool("write", false, "write or update ~/.pi/agent/models.json (or --path) and the safe Pi compaction settings")
 	path := fs.String("path", "", "destination path or directory for models.json")
+	settingsPath := fs.String("settings-path", "", "destination path or directory for Pi's settings.json (default: ~/.pi/agent/settings.json)")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
 	baseURL := projectassets.NormalizePiBaseURL(*addr)
+	budget := projectassets.PiSafeContextBudget(*window)
 	if *write {
-		resolvedPath, modified, err := projectassets.EnsurePiProviderConfig(*path, baseURL, *model)
+		resolvedPath, modified, err := projectassets.EnsurePiProviderConfigForWindow(*path, baseURL, *model, *window)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak pi config: %v\n", err)
 			return 1
 		}
 		if modified {
-			fmt.Fprintf(stdout, "fak pi config: updated %s with provider \"fak\" (baseURL: %s, model: %s)\n", resolvedPath, baseURL, *model)
+			fmt.Fprintf(stdout, "fak pi config: updated %s with provider \"fak\" (baseURL: %s, model: %s, contextWindow: %d = safe 50%% of %d)\n", resolvedPath, baseURL, *model, budget.ResidentTarget, budget.ServedWindow)
 		} else {
 			fmt.Fprintf(stdout, "fak pi config: %s already has up-to-date provider \"fak\"\n", resolvedPath)
 		}
+		sPath, sModified, sErr := projectassets.EnsurePiSafeCompaction(*settingsPath, budget)
+		if sErr != nil {
+			fmt.Fprintf(stderr, "fak pi config: %v\n", sErr)
+			return 1
+		}
+		if sModified {
+			fmt.Fprintf(stdout, "fak pi config: wrote safe compaction to %s (reserveTokens: %d, keepRecentTokens: %d)\n", sPath, budget.OutputReserve, budget.KeepRecentTokens)
+		} else {
+			fmt.Fprintf(stdout, "fak pi config: %s already has a safe compaction block\n", sPath)
+		}
 		return 0
 	}
-	out, err := projectassets.GeneratePiConfig(baseURL, *model)
+	out, err := projectassets.GeneratePiConfigForWindow(baseURL, *model, *window)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak pi config: %v\n", err)
 		return 1
 	}
 	fmt.Fprintln(stdout, string(out))
+	fmt.Fprintf(stderr, "fak pi config: safe context envelope: resident target %d tokens (50%% of %d served window, %s); compaction reserve %d, keep %d\n", budget.ResidentTarget, budget.ServedWindow, budget.Provenance, budget.OutputReserve, budget.KeepRecentTokens)
 	return 0
 }

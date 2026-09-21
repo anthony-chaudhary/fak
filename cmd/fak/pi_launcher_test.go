@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -235,5 +236,90 @@ func TestRunPiMockExecution(t *testing.T) {
 	}
 	if !foundEnv {
 		t.Errorf("expected PI_CODING_AGENT_DIR in env: %v", capturedEnv)
+	}
+}
+
+// TestProbePiBackendWithWindow witnesses that the backend probe reports the served model's
+// advertised context_length, which is what the safe Pi budget is derived from.
+func TestProbePiBackendWithWindow(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models", "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"data":[{"id":"qwen38:27b-q4","context_length":131072}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	model, ok, window, _ := probePiBackendWithWindow(ts.URL+"/v1", time.Second)
+	if !ok || model != "qwen38:27b-q4" {
+		t.Fatalf("probe window = (%q, %v), want (qwen38:27b-q4, true)", model, ok)
+	}
+	if window != 131072 {
+		t.Fatalf("window = %d, want 131072", window)
+	}
+}
+
+// TestRunPiConfigWriteSafeContext is the end-to-end witness for the goal: `fak pi config --write`
+// must write a SAFE resident context target (at most half the served window) and a safe Pi
+// compaction block, never the raw hard cap.
+func TestRunPiConfigWriteSafeContext(t *testing.T) {
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, "models.json")
+	settingsPath := filepath.Join(tmp, "settings.json")
+
+	var stdout, stderr bytes.Buffer
+	code := runPi(&stdout, &stderr, []string{
+		"config",
+		"--write",
+		"--path", modelsPath,
+		"--settings-path", settingsPath,
+		"--addr", "127.0.0.1:9000",
+		"--model", "qwen38:27b-q4",
+		"--window", "131072",
+	})
+	if code != 0 {
+		t.Fatalf("runPi config --write returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	var models map[string]interface{}
+	modelsData, err := os.ReadFile(modelsPath)
+	if err != nil {
+		t.Fatalf("read models.json: %v", err)
+	}
+	if err := json.Unmarshal(modelsData, &models); err != nil {
+		t.Fatalf("parse models.json: %v", err)
+	}
+	model := models["providers"].(map[string]interface{})["fak"].(map[string]interface{})["models"].([]interface{})[0].(map[string]interface{})
+	cw, _ := model["contextWindow"].(float64)
+	if cw != 65536 {
+		t.Fatalf("contextWindow = %v, want 65536 (safe 50%% of 131072)", cw)
+	}
+	if cw == 131072 {
+		t.Fatal("models.json advertises the raw served window (cap-is-not-target violation)")
+	}
+
+	var settings map[string]interface{}
+	settingsData, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings.json: %v", err)
+	}
+	if err := json.Unmarshal(settingsData, &settings); err != nil {
+		t.Fatalf("parse settings.json: %v", err)
+	}
+	block, ok := settings["compaction"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("settings.json missing compaction block: %v", settings)
+	}
+	if enabled, _ := block["enabled"].(bool); !enabled {
+		t.Fatal("compaction.enabled should be true")
+	}
+	if _, hasReserve := block["reserveTokens"]; !hasReserve {
+		t.Fatal("compaction.reserveTokens missing")
+	}
+	if _, hasKeep := block["keepRecentTokens"]; !hasKeep {
+		t.Fatal("compaction.keepRecentTokens missing")
 	}
 }

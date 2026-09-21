@@ -43,9 +43,19 @@ func runServePiConfig(sf *serveFlags, out io.Writer, write bool) {
 		} else {
 			fmt.Fprintf(out, "fak serve: %s is already configured with provider \"fak\" (%s, model: %s)\n", path, baseURL, modelID)
 		}
+		// Also write the SAFE Pi compaction settings so a long session compacts inside the
+		// resident envelope instead of running to the hard cap. See projectassets/pi_settings.go.
+		settingsPath, sModified, sErr := projectassets.EnsurePiSafeCompaction("", projectassets.PiSafeContextBudget(projectassets.DefaultPiServedWindow))
+		if sErr != nil {
+			fmt.Fprintf(out, "fak serve: update %s: %v\n", settingsPath, sErr)
+			os.Exit(1)
+		}
+		if sModified {
+			fmt.Fprintf(out, "fak serve: wrote safe Pi compaction to %s\n", settingsPath)
+		}
 		return
 	}
-	raw, err := projectassets.GeneratePiConfig(baseURL, modelID)
+	raw, err := projectassets.GeneratePiConfigForWindow(baseURL, modelID, projectassets.DefaultPiServedWindow)
 	if err != nil {
 		fmt.Fprintf(out, "fak serve: generate models.json: %v\n", err)
 		os.Exit(1)
