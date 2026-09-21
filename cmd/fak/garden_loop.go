@@ -45,6 +45,45 @@ const (
 	gardenLoopTaskName        = "FleetStaleWorkGarden"
 )
 
+// gardenLoopExecutable resolves the binary path baked into the persisted OS
+// schedule. It is a seam (mirroring loopExecutable in loop.go) so tests can
+// override it hermetically instead of registering a real, durable host task
+// that points at the transient `go test` binary.
+var gardenLoopExecutable = os.Executable
+
+// transientExecutable reports whether a resolved executable path is a
+// transient test/build artifact rather than a durable installed binary. A path
+// containing a Go build work dir, a `/b001/` link step, or a `.test[.exe]`
+// suffix is the artifact of a `go test` / `go build` run: persisting it into a
+// host-scheduler unit (Windows Task Scheduler, systemd, launchd) plants a unit
+// that breaks with ERROR_FILE_NOT_FOUND the moment the temp dir is cleaned —
+// the live `FleetStaleWorkGarden` failure class. Registration must refuse it.
+func transientExecutable(path string) bool {
+	if path == "" {
+		return false
+	}
+	lower := strings.ToLower(filepath.ToSlash(path))
+	if strings.Contains(lower, "go-build") ||
+		strings.Contains(lower, "/b001/") ||
+		strings.Contains(lower, ".gotmp") ||
+		strings.Contains(lower, ".worktrees/") ||
+		strings.HasSuffix(lower, ".test") ||
+		strings.HasSuffix(lower, ".test.exe") ||
+		strings.Contains(lower, ".test.exe") {
+		return true
+	}
+	tmp := strings.ToLower(filepath.ToSlash(os.TempDir()))
+	if tmp != "" {
+		if !strings.HasSuffix(tmp, "/") {
+			tmp += "/"
+		}
+		if strings.HasPrefix(lower, tmp) {
+			return true
+		}
+	}
+	return false
+}
+
 type gardenLoopOptions struct {
 	Repo            string
 	Interval        time.Duration
@@ -364,11 +403,31 @@ func registerGardenPlatformScheduler(stdout, stderr io.Writer, root, ledgerPath,
 		gardenLoopID, int64(interval.Seconds()), registryPath)
 
 	fakBin := "fak"
-	if self, err := os.Executable(); err == nil && self != "" {
+	if self, err := gardenLoopExecutable(); err == nil && self != "" {
 		fakBin = self
 	}
 
+	// Refuse to bake a transient test/build artifact into a durable host
+	// scheduler unit. Persisting the `go test` binary path plants a task that
+	// breaks (ERROR_FILE_NOT_FOUND) as soon as the temp dir is cleaned, and it
+	// OVERWRITES the real task by name (`/F`). Leave the existing durable task
+	// untouched and exit 0: the registry half above succeeded, and a skipped OS
+	// step is a valid outcome, not a failure.
+	if transientExecutable(fakBin) {
+		fmt.Fprintf(stdout, "skipped native OS scheduler registration: resolved binary %q is a transient test/build artifact, not a durable install; existing %q task left untouched\n",
+			fakBin, gardenLoopTaskName)
+		return 0
+	}
+
 	// Step 2: Configure the native OS scheduler for this platform.
+	return gardenLoopRegisterOS(stdout, stderr, fakBin, root, interval, live)
+}
+
+// gardenLoopRegisterOS is the platform OS-scheduler registration step as a
+// seam. Tests override it so a `--register` unit test never shells out to
+// schtasks/systemctl/launchctl and never persists a host task pointing at a
+// transient test binary (the live FleetStaleWorkGarden failure class).
+var gardenLoopRegisterOS = func(stdout, stderr io.Writer, fakBin, root string, interval time.Duration, live bool) int {
 	switch runtime.GOOS {
 	case "windows":
 		return registerWindowsTaskScheduler(stdout, stderr, fakBin, root, interval, live)
