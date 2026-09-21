@@ -107,12 +107,12 @@ func writeOpsNativeFixtureReceipt(args []string, schema, status string, taskComp
 		if err != nil {
 			return err
 		}
-		payload["enforcement"] = map[string]any{
-			"schema":           opsRunNativeEnforcementSchema,
-			"guard_posture":    "fail_closed",
-			"policy_digest":    guardPolicyDigest(policyBytes),
-			"workspace_digest": opsRunDigest(workspace),
-			"tools":            map[string]bool{"system": false, "mcp": false, "skills": false, "memory": false},
+		payload["enforcement"] = nativeAgentEnforcement{
+			opsRunNativeEnforcementSchema,
+			"fail_closed",
+			guardPolicyDigest(policyBytes),
+			opsRunDigest(workspace),
+			nativeAgentToolCapabilities{},
 		}
 	}
 	data, err := json.Marshal(payload)
