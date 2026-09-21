@@ -19,28 +19,27 @@ import (
 // file transport, HTTP planner and kernel tools, rather than a fake child receipt.
 func init() {
 	if mode := os.Getenv("FAK_OPS_NATIVE_RECEIPT_MODE"); mode != "" && len(os.Args) > 1 && os.Args[1] == "chat" {
-		var payload string
 		switch mode {
 		case "complete":
-			payload = `{"schema":"fak.agent.native.v1","status":"completed","metrics":{"arm":"fak","task_completed":true}}`
+			if writeOpsNativeFixtureReceipt(os.Args[2:], nativeAgentReceiptSchema, "completed", true, true) != nil {
+				os.Exit(2)
+			}
+			os.Exit(0)
 		case "incomplete":
-			payload = `{"schema":"fak.agent.native.v1","status":"running","metrics":{"arm":"fak"}}`
+			if writeOpsNativeFixtureReceipt(os.Args[2:], nativeAgentReceiptSchema, "running", false, false) != nil {
+				os.Exit(2)
+			}
+			os.Exit(0)
 		case "unsupported":
-			payload = `{"schema":"fak.agent.native.v999","status":"completed","metrics":{"arm":"fak","task_completed":true}}`
+			if writeOpsNativeFixtureReceipt(os.Args[2:], "fak.agent.native.v999", "completed", true, false) != nil {
+				os.Exit(2)
+			}
+			os.Exit(0)
 		case "missing":
 			os.Exit(0)
 		default:
 			os.Exit(2)
 		}
-		for i := 2; i+1 < len(os.Args); i++ {
-			if os.Args[i] == "--receipt" {
-				if os.WriteFile(os.Args[i+1], []byte(payload), 0600) != nil {
-					os.Exit(2)
-				}
-				break
-			}
-		}
-		os.Exit(0)
 	}
 	if marker := os.Getenv("FAK_OPS_NATIVE_SELECTED"); marker != "" && len(os.Args) > 1 && os.Args[1] == "chat" {
 		observed := make(map[string]string)
@@ -58,11 +57,8 @@ func init() {
 		if err != nil || os.WriteFile(marker, data, 0600) != nil {
 			os.Exit(2)
 		}
-		for i := 2; i+1 < len(os.Args); i++ {
-			if os.Args[i] == "--receipt" {
-				_ = os.WriteFile(os.Args[i+1], []byte(`{"schema":"fak.agent.native.v1","status":"completed","metrics":{"arm":"fak"}}`), 0600)
-				break
-			}
+		if writeOpsNativeFixtureReceipt(os.Args[2:], nativeAgentReceiptSchema, "completed", true, true) != nil {
+			os.Exit(2)
 		}
 		os.Exit(0)
 	}
@@ -70,11 +66,8 @@ func init() {
 		if err := os.WriteFile(sentinel, []byte("launched"), 0600); err != nil {
 			os.Exit(2)
 		}
-		for i := 2; i+1 < len(os.Args); i++ {
-			if os.Args[i] == "--receipt" {
-				_ = os.WriteFile(os.Args[i+1], []byte(`{"schema":"fak.agent.native.v1","status":"completed","metrics":{"arm":"fak"}}`), 0600)
-				break
-			}
+		if writeOpsNativeFixtureReceipt(os.Args[2:], nativeAgentReceiptSchema, "completed", true, true) != nil {
+			os.Exit(2)
 		}
 		os.Exit(0)
 	}
@@ -82,6 +75,51 @@ func init() {
 		cmdChat(os.Args[2:])
 		os.Exit(0)
 	}
+}
+
+func writeOpsNativeFixtureReceipt(args []string, schema, status string, taskCompleted, includeEnforcement bool) error {
+	values := make(map[string]string)
+	for i := 0; i+1 < len(args); i++ {
+		switch args[i] {
+		case "--receipt", "--policy", "--code-workspace":
+			values[args[i]] = args[i+1]
+			i++
+		}
+	}
+	if values["--receipt"] == "" || values["--code-workspace"] == "" {
+		return fmt.Errorf("fixture lacks receipt/workspace binding")
+	}
+	payload := map[string]any{
+		"schema":  schema,
+		"status":  status,
+		"metrics": map[string]any{"arm": "fak", "task_completed": taskCompleted},
+	}
+	if includeEnforcement {
+		policyBytes := guardDefaultPolicyJSON
+		if path := values["--policy"]; path != "" {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			policyBytes = data
+		}
+		workspace, err := resolveOpsRunWorkspace(values["--code-workspace"])
+		if err != nil {
+			return err
+		}
+		payload["enforcement"] = map[string]any{
+			"schema":           opsRunNativeEnforcementSchema,
+			"guard_posture":    "fail_closed",
+			"policy_digest":    guardPolicyDigest(policyBytes),
+			"workspace_digest": opsRunDigest(workspace),
+			"tools":            map[string]bool{"system": false, "mcp": false, "skills": false, "memory": false},
+		}
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(values["--receipt"], data, 0600)
 }
 
 func TestOpsNativeLaunchIdentity(t *testing.T) {
