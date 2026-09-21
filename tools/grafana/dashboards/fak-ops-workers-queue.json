@@ -69,7 +69,7 @@
       "id": 3,
       "type": "stat",
       "title": "Workers at risk",
-      "description": "At-risk / unleased worktrees that need triage. `fak_ops_workers_at_risk`.",
+      "description": "At-risk / unleased worktrees that need triage. `fak_ops_at_risk_worktrees`.",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
       "fieldConfig": {
@@ -84,7 +84,7 @@
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
       "pluginVersion": "11.5.2",
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "fak_ops_workers_at_risk{job=\"fak_ops_workers\"}", "refId": "A" }
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "fak_ops_at_risk_worktrees{job=\"fak_ops_workers\"}", "refId": "A" }
       ]
     },
     {
@@ -135,7 +135,7 @@
       "id": 6,
       "type": "timeseries",
       "title": "Workers live (over time)",
-      "description": "`fak_ops_workers_live` and `fak_ops_workers_at_risk` tracked over the selected range.",
+      "description": "`fak_ops_workers_live` and `fak_ops_at_risk_worktrees` tracked over the selected range.",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
       "fieldConfig": {
@@ -146,7 +146,7 @@
       "pluginVersion": "11.5.2",
       "targets": [
         { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "fak_ops_workers_live{job=\"fak_ops_workers\"}", "legendFormat": "live", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "fak_ops_workers_at_risk{job=\"fak_ops_workers\"}", "legendFormat": "at risk", "refId": "B" }
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "fak_ops_at_risk_worktrees{job=\"fak_ops_workers\"}", "legendFormat": "at risk", "refId": "B" }
       ]
     },
     {
