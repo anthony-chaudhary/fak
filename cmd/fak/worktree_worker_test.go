@@ -2301,3 +2301,212 @@ func TestWorktreeWorkerLandSymptomTags(t *testing.T) {
 		}
 	})
 }
+
+func newPreparedCLIWorkerFixture(t *testing.T, fix bool) (repo, worktree, base string, paths []string) {
+	t.Helper()
+	root := t.TempDir()
+	repo = filepath.Join(root, "repo")
+	if err := os.MkdirAll(filepath.Join(repo, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git -C %s %s: %v: %s", dir, strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git(repo, "init", "-q", "-b", "main")
+	git(repo, "config", "user.email", "t@t")
+	git(repo, "config", "user.name", "t")
+	git(repo, "config", "commit.gpgsign", "false")
+	git(repo, "config", "core.hooksPath", "")
+	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module example.com/preparedcli\n\ngo 1.21\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "pkg", "calc.go"), []byte("package pkg\n\nfunc Calc(n int) int { if n > 0 { return n }; return 0 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(repo, "add", ".")
+	git(repo, "commit", "-qm", "base")
+	base = git(repo, "rev-parse", "HEAD")
+	prep := workerworktree.Prepare(repo, "prepared-cli", map[bool]string{true: "fix", false: "feat"}[fix], base, t.TempDir(), nil)
+	if !prep.OK {
+		t.Fatalf("prepare managed worker: %+v", prep)
+	}
+	worktree = prep.Path
+	if err := os.WriteFile(filepath.Join(worktree, "pkg", "calc.go"), []byte("package pkg\n\nfunc Calc(n int) int { if n < 0 { return -n }; return n }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	paths = []string{"pkg/calc.go"}
+	subject := "feat(calc): extend calculation (fak calc)"
+	if fix {
+		subject = "fix(calc): fix negative calculation (fak calc)"
+		if err := os.WriteFile(filepath.Join(worktree, "pkg", "calc_test.go"), []byte("package pkg\n\nimport \"testing\"\n\nfunc TestCalcNegative(t *testing.T) { if Calc(-2) != 2 { t.Fatal(Calc(-2)) } }\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, "pkg/calc_test.go")
+	}
+	git(worktree, "add", ".")
+	git(worktree, "commit", "-qm", subject)
+	return repo, worktree, base, paths
+}
+
+func preparedCLIArgs(mode, repo, worktree, base string, paths []string) []string {
+	args := []string{mode, "--root", repo, "--worktree", worktree, "--base-sha", base, "--verify", "go-build"}
+	for _, path := range paths {
+		args = append(args, "--paths", path)
+	}
+	return args
+}
+
+func runPreparedCLI(t *testing.T, args []string) (workerworktree.Result, *workerworktree.PreparedLandReceipt, int, string) {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	res, code := runWorktreeWorkerLand(&stdout, &stderr, args)
+	var out worktreeWorkerPreparedLandOut
+	if stdout.Len() > 0 {
+		if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+			t.Fatalf("decode prepared land JSON: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+		}
+	}
+	return res, out.PreparedReceipt, code, stderr.String()
+}
+
+func TestWorktreeWorkerLandPrepareAccept(t *testing.T) {
+	t.Setenv("GOFLAGS", "-tags=preparedcli")
+	repo, wt, base, paths := newPreparedCLIWorkerFixture(t, false)
+	before := strings.TrimSpace(testGit(t, repo, "rev-parse", "refs/heads/main"))
+	prep, receipt, code, stderr := runPreparedCLI(t, preparedCLIArgs("prepare", repo, wt, base, paths))
+	if code != 0 || !prep.OK || receipt == nil || receipt.ReceiptID == "" {
+		t.Fatalf("prepare result=%+v receipt=%+v code=%d stderr=%s", prep, receipt, code, stderr)
+	}
+	if after := strings.TrimSpace(testGit(t, repo, "rev-parse", "refs/heads/main")); after != before {
+		t.Fatalf("prepare moved trunk: %s -> %s", before, after)
+	}
+	originalBuild, originalSymptom := worktreeWorkerPreparedGoBuildVerify, worktreeWorkerPreparedSymptomVerify
+	buildCalls, symptomCalls := 0, 0
+	worktreeWorkerPreparedGoBuildVerify = func(string) (bool, string) { buildCalls++; return false, "accept must not build" }
+	worktreeWorkerPreparedSymptomVerify = func(string, string, []string) workerworktree.Result {
+		symptomCalls++
+		return workerworktree.Result{OK: false}
+	}
+	t.Cleanup(func() {
+		worktreeWorkerPreparedGoBuildVerify, worktreeWorkerPreparedSymptomVerify = originalBuild, originalSymptom
+	})
+	acceptArgs := preparedCLIArgs("accept", repo, wt, base, paths)
+	acceptArgs = append(acceptArgs, "--receipt-id", receipt.ReceiptID)
+	accepted, _, code, stderr := runPreparedCLI(t, acceptArgs)
+	if code != 0 || !accepted.OK || !accepted.Committed {
+		t.Fatalf("accept result=%+v code=%d stderr=%s", accepted, code, stderr)
+	}
+	if buildCalls != 0 || symptomCalls != 0 {
+		t.Fatalf("accept invoked verifiers: build=%d symptom=%d", buildCalls, symptomCalls)
+	}
+	if head := strings.TrimSpace(testGit(t, repo, "rev-parse", "refs/heads/main")); head != receipt.CandidateSHA {
+		t.Fatalf("accepted head=%s candidate=%s", head, receipt.CandidateSHA)
+	}
+}
+
+func TestWorktreeWorkerLandPrepareFixRunsBuildAndSymptom(t *testing.T) {
+	repo, wt, base, paths := newPreparedCLIWorkerFixture(t, true)
+	originalBuild, originalSymptom := worktreeWorkerPreparedGoBuildVerify, worktreeWorkerPreparedSymptomVerify
+	buildCalls, symptomCalls := 0, 0
+	worktreeWorkerPreparedGoBuildVerify = func(string) (bool, string) { buildCalls++; return true, "built" }
+	worktreeWorkerPreparedSymptomVerify = func(string, string, []string) workerworktree.Result {
+		symptomCalls++
+		return workerworktree.Result{OK: true}
+	}
+	t.Cleanup(func() {
+		worktreeWorkerPreparedGoBuildVerify, worktreeWorkerPreparedSymptomVerify = originalBuild, originalSymptom
+	})
+	args := preparedCLIArgs("prepare", repo, wt, base, paths)
+	args = append(args, "--symptom-tags", "vulkan,metal,vulkan")
+	res, receipt, code, stderr := runPreparedCLI(t, args)
+	if code != 0 || !res.OK || receipt == nil {
+		t.Fatalf("fix prepare result=%+v receipt=%+v code=%d stderr=%s", res, receipt, code, stderr)
+	}
+	if buildCalls != 1 || symptomCalls != 1 {
+		t.Fatalf("fix prepare calls build=%d symptom=%d, want 1 each", buildCalls, symptomCalls)
+	}
+}
+
+func TestWorktreeWorkerPreparedBindingIncludesGOFLAGSAndNormalizesTags(t *testing.T) {
+	t.Setenv("GOFLAGS", "-tags=one -timeout=2m")
+	one, err := worktreeWorkerPreparedVerificationBinding("go-build", true, []string{"vulkan", "metal", "vulkan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOFLAGS", "-tags=two -timeout=2m")
+	two, err := worktreeWorkerPreparedVerificationBinding("go-build", true, []string{"metal", "vulkan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if one.Command == two.Command || !reflect.DeepEqual(one.Tags, []string{"metal", "vulkan"}) || !reflect.DeepEqual(two.Tags, one.Tags) {
+		t.Fatalf("bindings do not preserve GOFLAGS and normalized tags: one=%+v two=%+v", one, two)
+	}
+}
+
+func TestWorktreeWorkerLandAcceptRejectsChangedExpectation(t *testing.T) {
+	tests := []string{"paths", "tags", "goflags", "stale-parent"}
+	for _, name := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("GOFLAGS", "-tags=prepared-one")
+			repo, wt, base, paths := newPreparedCLIWorkerFixture(t, false)
+			args := preparedCLIArgs("prepare", repo, wt, base, paths)
+			args = append(args, "--symptom-tags", "metal")
+			prep, receipt, code, stderr := runPreparedCLI(t, args)
+			if code != 0 || !prep.OK || receipt == nil {
+				t.Fatalf("prepare result=%+v receipt=%+v code=%d stderr=%s", prep, receipt, code, stderr)
+			}
+			accept := preparedCLIArgs("accept", repo, wt, base, paths)
+			accept = append(accept, "--symptom-tags", "metal", "--receipt-id", receipt.ReceiptID)
+			switch name {
+			case "paths":
+				accept = preparedCLIArgs("accept", repo, wt, base, []string{"pkg/calc_test.go"})
+				accept = append(accept, "--symptom-tags", "metal", "--receipt-id", receipt.ReceiptID)
+			case "tags":
+				for i := range accept {
+					if accept[i] == "metal" {
+						accept[i] = "vulkan"
+					}
+				}
+			case "goflags":
+				t.Setenv("GOFLAGS", "-tags=prepared-two")
+			case "stale-parent":
+				if err := os.WriteFile(filepath.Join(repo, "peer.txt"), []byte("peer\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				testGit(t, repo, "add", "peer.txt")
+				testGit(t, repo, "commit", "-qm", "peer advance")
+			}
+			before := strings.TrimSpace(testGit(t, repo, "rev-parse", "refs/heads/main"))
+			got, _, code, _ := runPreparedCLI(t, accept)
+			if code == 0 || got.OK {
+				t.Fatalf("changed %s accepted: %+v code=%d", name, got, code)
+			}
+			if name == "stale-parent" && got.Code != workerworktree.LandResultPreparedReprepare {
+				t.Fatalf("stale parent code=%q, want %q", got.Code, workerworktree.LandResultPreparedReprepare)
+			}
+			if after := strings.TrimSpace(testGit(t, repo, "rev-parse", "refs/heads/main")); after != before {
+				t.Fatalf("changed %s moved trunk: %s -> %s", name, before, after)
+			}
+		})
+	}
+}
+
+func TestWorktreeWorkerLandLegacyPreparedRouting(t *testing.T) {
+	repo, wt, base, paths := newPreparedCLIWorkerFixture(t, false)
+	args := preparedCLIArgs("", repo, wt, base, paths)[1:]
+	var stdout, stderr bytes.Buffer
+	res, code := runWorktreeWorkerLand(&stdout, &stderr, args)
+	if code != 0 || !res.OK || !res.Committed {
+		t.Fatalf("legacy flag-first land result=%+v code=%d stderr=%s", res, code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "prepared_receipt") {
+		t.Fatalf("legacy output changed to prepared wrapper: %s", stdout.String())
+	}
+}
