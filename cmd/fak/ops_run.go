@@ -780,7 +780,7 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	} else {
 		// Pi RPC is a pinned JSONL contract. The guard's existing Pi extension
 		// repoints the child provider to the run-scoped gateway before this command.
-		argv = append(argv, "--", *piBin, "--mode", "rpc", "--provider", "anthropic", "--model", *model)
+		argv = append(argv, "--", *piBin, "--mode", "rpc", "--no-session", "--provider", "fak", "--model", *model)
 	}
 	identity := newOpsRunLaunchIdentity(runID, *harness, resolvedWorkspace, *provider, *baseURL, *model, childBin, string(encoded), *policy, guardMode, *auto, *pure)
 	if *dryRun {
@@ -791,7 +791,7 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 		_ = json.NewEncoder(stdout).Encode(plan)
 		return 0
 	}
-	env, cleanupEnv, err := opsRunChildEnvironment(string(encoded), *apiKeyEnv)
+	env, cleanupEnv, err := opsRunChildEnvironment(string(encoded), *apiKeyEnv, *harness == "pi")
 	if err != nil {
 		fmt.Fprintf(stderr, "ops run: create isolated child environment: %v\n", err)
 		return 1
@@ -799,13 +799,12 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	defer cleanupEnv()
 	receipt := opsRunReceipt{Schema: "fak-ops-run/1", Harness: *harness, Workspace: resolvedWorkspace, LaunchIdentity: &identity, Status: "running", Started: time.Now().UTC(), ConfigPolicy: &configPolicy}
 	childInput := prompt
-	var piEvidence opsRunPiEvidence
+	piEvidence := opsRunPiEvidence{SessionID: runID, SessionRef: "ephemeral:" + runID}
 	if *harness == "pi" {
 		receipt.HarnessProtocol = opsRunPiRPCProtocol
 		receipt.AuditRef = strings.TrimSpace(*audit)
-		stateCommand, _ := json.Marshal(map[string]any{"id": "fak-state", "type": "get_state"})
-		promptCommand, _ := json.Marshal(map[string]any{"id": "fak-prompt", "type": "prompt", "message": string(prompt)})
-		childInput = append(append(stateCommand, '\n'), append(promptCommand, '\n')...)
+		promptCommand, _ := json.Marshal(map[string]any{"type": "prompt", "message": strings.TrimRight(string(prompt), "\r\n")})
+		childInput = append(promptCommand, '\n')
 	}
 	if err := writeOpsRunReceipt(*receiptPath, receipt); err != nil {
 		fmt.Fprintf(stderr, "ops run: write receipt: %v\n", err)
@@ -888,7 +887,7 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	return code
 }
 
-func opsRunChildEnvironment(configContent, apiKeyEnv string) ([]string, func(), error) {
+func opsRunChildEnvironment(configContent, apiKeyEnv string, pi ...bool) ([]string, func(), error) {
 	runRoot, err := os.MkdirTemp("", "fak-ops-run-")
 	if err != nil {
 		return nil, func() {}, err
@@ -897,7 +896,13 @@ func opsRunChildEnvironment(configContent, apiKeyEnv string) ([]string, func(), 
 	configHome := filepath.Join(runRoot, "config")
 	dataHome := filepath.Join(runRoot, "data")
 	home := filepath.Join(runRoot, "home")
-	for _, dir := range []string{configHome, dataHome, home} {
+	dirs := []string{configHome, dataHome, home}
+	piConfigHome := ""
+	if len(pi) > 0 && pi[0] {
+		piConfigHome = filepath.Join(runRoot, "pi")
+		dirs = append(dirs, piConfigHome)
+	}
+	for _, dir := range dirs {
 		if err := os.Mkdir(dir, 0o700); err != nil {
 			cleanup()
 			return nil, func() {}, err
@@ -933,6 +938,9 @@ func opsRunChildEnvironment(configContent, apiKeyEnv string) ([]string, func(), 
 		"HOME="+home,
 		"USERPROFILE="+home,
 	)
+	if piConfigHome != "" {
+		out = append(out, "PI_CODING_AGENT_DIR="+piConfigHome)
+	}
 	return out, cleanup, nil
 }
 
