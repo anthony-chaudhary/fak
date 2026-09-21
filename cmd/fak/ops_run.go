@@ -61,6 +61,12 @@ type opsRunLaunchIdentityReceipt struct {
 	GuardRequested        string `json:"guard_requested"`
 	GuardEffective        string `json:"guard_effective"`
 	GuardEvidenceRef      string `json:"guard_evidence_ref"`
+	GuardModeRequested    string `json:"guard_mode_requested"`
+	GuardModeEffective    string `json:"guard_mode_effective"`
+	InferenceGuard        string `json:"inference_guard"`
+	RepositoryProofHooks  string `json:"repository_proof_hooks"`
+	NativeToolMediation   string `json:"native_tool_mediation"`
+	OSIsolation           string `json:"os_isolation"`
 	InferenceProbeRef     string `json:"inference_probe_ref"`
 	CapabilityEvidenceRef string `json:"capability_evidence_ref"`
 	Auto                  bool   `json:"auto"`
@@ -93,7 +99,7 @@ func opsRunFileDigest(path string) string {
 	return "sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
-func newOpsRunLaunchIdentity(runID, harness, workspace, provider, baseURL, model, opencodeBin, encodedConfig, policy string, auto, pure bool) opsRunLaunchIdentityReceipt {
+func newOpsRunLaunchIdentity(runID, harness, workspace, provider, baseURL, model, opencodeBin, encodedConfig, policy, guardMode string, auto, pure bool) opsRunLaunchIdentityReceipt {
 	policySource, policyDigest := "builtin", "unknown"
 	if strings.TrimSpace(policy) != "" {
 		policySource, policyDigest = "flag", opsRunFileDigest(policy)
@@ -117,11 +123,39 @@ func newOpsRunLaunchIdentity(runID, harness, workspace, provider, baseURL, model
 		GuardRequested:        "fail_closed",
 		GuardEffective:        "unknown",
 		GuardEvidenceRef:      "unknown",
+		GuardModeRequested:    guardMode,
+		GuardModeEffective:    "unknown",
+		InferenceGuard:        "unknown",
+		RepositoryProofHooks:  "unknown",
+		NativeToolMediation:   "unknown",
+		OSIsolation:           "unknown",
 		InferenceProbeRef:     "unknown",
 		CapabilityEvidenceRef: "unknown",
 		Auto:                  auto,
 		Pure:                  pure,
 	}
+}
+
+func qualifyOpsRunGuardMode(raw string) (string, opsRunConfigPolicyReceipt) {
+	requested := strings.ToLower(strings.TrimSpace(raw))
+	if requested == "" {
+		requested = "enforce"
+	}
+	receipt := opsRunConfigPolicyReceipt{
+		Source: "--guard-mode",
+		Digest: opsRunDigest(requested),
+		Status: "qualified",
+	}
+	if requested == "enforce" {
+		return requested, receipt
+	}
+	switch requested {
+	case "audit", "audit-only", "off", "disabled":
+		receipt.Status, receipt.Reason = "refused", "unsupported_guard_mode"
+	default:
+		receipt.Status, receipt.Reason = "refused", "unknown_guard_mode"
+	}
+	return requested, receipt
 }
 
 func opsRunAddCapabilityEvidence(identity *opsRunLaunchIdentityReceipt, refs ...string) {
@@ -272,12 +306,16 @@ func opsRunInferencePreflight(ctx context.Context, baseURL, model string) (opsRu
 }
 
 func opsRunInferenceRefusal(provider, baseURL, model, reason string) opsRunInferencePreflightReceipt {
+	return opsRunInferenceRefusalWithStatus(provider, baseURL, model, reason, "failed")
+}
+
+func opsRunInferenceRefusalWithStatus(provider, baseURL, model, reason, status string) opsRunInferencePreflightReceipt {
 	configSum := sha256.Sum256([]byte(strings.TrimSpace(provider) + "\x00" + strings.TrimSpace(baseURL) + "\x00" + strings.TrimSpace(model)))
-	refSum := sha256.Sum256([]byte(opsRunInferencePreflightSchema + "\x00" + hex.EncodeToString(configSum[:]) + "\x00failed\x00" + reason))
+	refSum := sha256.Sum256([]byte(opsRunInferencePreflightSchema + "\x00" + hex.EncodeToString(configSum[:]) + "\x00" + status + "\x00" + reason))
 	return opsRunInferencePreflightReceipt{
 		Schema:     opsRunInferencePreflightSchema,
 		ReceiptRef: "sha256:" + hex.EncodeToString(refSum[:]),
-		Status:     "failed",
+		Status:     status,
 		Reason:     reason,
 	}
 }
@@ -585,6 +623,7 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	apiKeyEnv := fs.String("api-key-env", "", "environment variable holding the upstream key")
 	policy := fs.String("policy", "", "guard capability-floor policy file")
 	audit := fs.String("audit", "", "guard audit journal file")
+	guardModeFlag := fs.String("guard-mode", "enforce", "guard posture: enforce (audit-only/off are unsupported)")
 	opencodeBin := fs.String("opencode-bin", "opencode", "OpenCode executable; use the native .exe on Windows")
 	auto := fs.Bool("auto", false, "ask OpenCode to approve permissions not explicitly denied")
 	pure := fs.Bool("pure", false, "disable OpenCode external plugins")
@@ -656,6 +695,20 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 		return 1
 	}
 	runID := "ops-" + hex.EncodeToString(nonce[:])
+	guardMode, guardPolicy := qualifyOpsRunGuardMode(*guardModeFlag)
+	if guardPolicy.Status != "qualified" {
+		fmt.Fprintf(stderr, "ops run: guard mode refused: %s\n", guardPolicy.Reason)
+		if *dryRun {
+			return 2
+		}
+		now := time.Now().UTC()
+		identity := newOpsRunLaunchIdentity(runID, *harness, resolvedWorkspace, *provider, *baseURL, *model, *opencodeBin, "", *policy, guardMode, *auto, *pure)
+		receipt := opsRunReceipt{Schema: "fak-ops-run/1", Harness: *harness, Workspace: resolvedWorkspace, LaunchIdentity: &identity, Status: "refused", ExitCode: 1, Started: now, Finished: now, ConfigPolicy: &guardPolicy}
+		if err := writeOpsRunReceipt(*receiptPath, receipt); err != nil {
+			fmt.Fprintf(stderr, "ops run: write receipt: %v\n", err)
+		}
+		return 1
+	}
 	config, configPolicy := qualifyOpsRunConfig(os.Getenv("OPENCODE_CONFIG_CONTENT"), *auto, *pure)
 	if configPolicy.Status != "qualified" {
 		fmt.Fprintf(stderr, "ops run: inherited OpenCode config refused: %s\n", configPolicy.Reason)
@@ -663,7 +716,7 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 			return 2
 		}
 		now := time.Now().UTC()
-		identity := newOpsRunLaunchIdentity(runID, *harness, resolvedWorkspace, *provider, *baseURL, *model, *opencodeBin, "", *policy, *auto, *pure)
+		identity := newOpsRunLaunchIdentity(runID, *harness, resolvedWorkspace, *provider, *baseURL, *model, *opencodeBin, "", *policy, guardMode, *auto, *pure)
 		receipt := opsRunReceipt{Schema: "fak-ops-run/1", Harness: *harness, Workspace: resolvedWorkspace, LaunchIdentity: &identity, Status: "refused", ExitCode: 1, Started: now, Finished: now, ConfigPolicy: &configPolicy}
 		if err := writeOpsRunReceipt(*receiptPath, receipt); err != nil {
 			fmt.Fprintf(stderr, "ops run: write receipt: %v\n", err)
@@ -699,9 +752,9 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	config["small_model"] = modelID
 	config["enabled_providers"] = []string{providerID}
 	encoded, _ := json.Marshal(config)
-	identity := newOpsRunLaunchIdentity(runID, *harness, resolvedWorkspace, *provider, *baseURL, *model, *opencodeBin, string(encoded), *policy, *auto, *pure)
+	identity := newOpsRunLaunchIdentity(runID, *harness, resolvedWorkspace, *provider, *baseURL, *model, *opencodeBin, string(encoded), *policy, guardMode, *auto, *pure)
 	if *dryRun {
-		_ = json.NewEncoder(stdout).Encode(map[string]any{"schema": "fak-ops-run-plan/1", "harness": *harness, "provider": *provider, "workspace": resolvedWorkspace, "guarded": false, "prompt_delivery": "stdin", "timeout": timeout.String(), "auto": *auto, "pure": *pure, "config_policy": configPolicy})
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"schema": "fak-ops-run-plan/1", "harness": *harness, "provider": *provider, "workspace": resolvedWorkspace, "guarded": false, "guard_requested": "fail_closed", "guard_effective": "unknown", "guard_mode_requested": guardMode, "guard_mode_effective": "unknown", "prompt_delivery": "stdin", "timeout": timeout.String(), "auto": *auto, "pure": *pure, "config_policy": configPolicy})
 		return 0
 	}
 	env, cleanupEnv, err := opsRunChildEnvironment(string(encoded), *apiKeyEnv)
@@ -728,7 +781,7 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
 	}
 	if strings.TrimSpace(*baseURL) == "" {
-		preflight := opsRunInferenceRefusal(*provider, *baseURL, *model, "missing_explicit_base_url")
+		preflight := opsRunInferenceRefusalWithStatus(*provider, *baseURL, *model, "missing_explicit_base_url", "refused")
 		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
 	}
 	preflight, err := opsRunInferencePreflight(ctx, *baseURL, *model)

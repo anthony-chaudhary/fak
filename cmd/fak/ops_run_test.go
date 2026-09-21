@@ -703,6 +703,133 @@ func requireOpsRunLaunchIdentity(t *testing.T, receipt map[string]any) map[strin
 	return identity
 }
 
+func TestOpsRunGuardMode(t *testing.T) {
+	t.Setenv("OPENCODE_CONFIG_CONTENT", "")
+	t.Setenv("FAK_OPS_GUARD_MODE", "")
+	old := opsRunExecute
+	t.Cleanup(func() { opsRunExecute = old })
+	var launches atomic.Int64
+	opsRunExecute = func(context.Context, io.Writer, io.Writer, []string, []string, []byte) (int, bool, bool, []opsRunLifecycleRecord) {
+		launches.Add(1)
+		return 0, true, false, nil
+	}
+
+	run := func(t *testing.T, baseURL string, extra ...string) (int, map[string]any, string) {
+		t.Helper()
+		dir := t.TempDir()
+		prompt := filepath.Join(dir, "prompt.txt")
+		receiptPath := filepath.Join(dir, "receipt.json")
+		if err := os.WriteFile(prompt, []byte("guard posture probe\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		args := []string{
+			"--workspace", dir,
+			"--prompt-file", prompt,
+			"--receipt", receiptPath,
+			"--provider", "openai",
+			"--model", "guard-posture-fixture",
+		}
+		if baseURL != "" {
+			args = append(args, "--base-url", baseURL)
+		}
+		args = append(args, extra...)
+		var stderr bytes.Buffer
+		code := runOpsRun(io.Discard, &stderr, args)
+		var receipt map[string]any
+		data, err := os.ReadFile(receiptPath)
+		if err != nil {
+			t.Fatalf("read typed guard receipt after exit %d: %v; stderr=%s", code, err, stderr.String())
+		}
+		if err := json.Unmarshal(data, &receipt); err != nil {
+			t.Fatalf("decode guard receipt: %v; raw=%s", err, data)
+		}
+		return code, receipt, stderr.String()
+	}
+
+	for _, tc := range []struct {
+		name  string
+		extra []string
+	}{
+		{name: "absent_defaults_to_enforce"},
+		{name: "explicit_enforce", extra: []string{"--guard-mode", "enforce"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			launches.Store(0)
+			gateway := newOpsRunQualifiedGateway(t)
+			code, receipt, stderr := run(t, gateway.URL+"/v1", tc.extra...)
+			if code != 0 || launches.Load() != 1 {
+				t.Fatalf("enforce run code=%d launches=%d stderr=%s receipt=%v", code, launches.Load(), stderr, receipt)
+			}
+			identity := requireOpsRunLaunchIdentity(t, receipt)
+			for key, want := range map[string]any{
+				"guard_mode_requested":   "enforce",
+				"guard_mode_effective":   "unknown",
+				"inference_guard":        "unknown",
+				"repository_proof_hooks": "unknown",
+				"native_tool_mediation":  "unknown",
+				"os_isolation":           "unknown",
+			} {
+				if got := identity[key]; got != want {
+					t.Errorf("launch_identity.%s=%v want=%v", key, got, want)
+				}
+			}
+		})
+	}
+
+	refusals := []struct {
+		name       string
+		mode       string
+		extra      []string
+		config     string
+		envMode    string
+		wantReason string
+	}{
+		{name: "disabled", mode: "disabled", wantReason: "unsupported_guard_mode"},
+		{name: "disabled_auto_cannot_override", mode: "disabled", extra: []string{"--auto"}, wantReason: "unsupported_guard_mode"},
+		{name: "disabled_pure_cannot_override", mode: "disabled", extra: []string{"--pure"}, wantReason: "unsupported_guard_mode"},
+		{name: "disabled_environment_cannot_override", mode: "disabled", envMode: "enforce", wantReason: "unsupported_guard_mode"},
+		{name: "disabled_config_cannot_override", mode: "disabled", config: `{"guard_mode":"enforce","guarded":true}`, wantReason: "unsupported_guard_mode"},
+		{name: "unknown", mode: "mystery", wantReason: "unknown_guard_mode"},
+	}
+	for _, tc := range refusals {
+		t.Run(tc.name, func(t *testing.T) {
+			launches.Store(0)
+			t.Setenv("FAK_OPS_GUARD_MODE", tc.envMode)
+			t.Setenv("OPENCODE_CONFIG_CONTENT", tc.config)
+			gateway := newOpsRunQualifiedGateway(t)
+			extra := append([]string{"--guard-mode", tc.mode}, tc.extra...)
+			code, receipt, _ := run(t, gateway.URL+"/v1", extra...)
+			if code == 0 || launches.Load() != 0 {
+				t.Fatalf("refused mode %q code=%d launches=%d receipt=%v", tc.mode, code, launches.Load(), receipt)
+			}
+			policy, ok := receipt["config_policy"].(map[string]any)
+			if !ok || policy["source"] != "--guard-mode" || policy["status"] != "refused" || policy["reason"] != tc.wantReason {
+				t.Fatalf("mode %q lacks typed refusal: %#v", tc.mode, policy)
+			}
+			identity := requireOpsRunLaunchIdentity(t, receipt)
+			if identity["guard_mode_requested"] != tc.mode || identity["guard_mode_effective"] != "unknown" {
+				t.Fatalf("mode %q identity=%#v", tc.mode, identity)
+			}
+		})
+	}
+
+	t.Run("enforce_does_not_bypass_inference_route", func(t *testing.T) {
+		launches.Store(0)
+		code, receipt, _ := run(t, "")
+		if code == 0 || launches.Load() != 0 {
+			t.Fatalf("missing route code=%d launches=%d receipt=%v", code, launches.Load(), receipt)
+		}
+		identity := requireOpsRunLaunchIdentity(t, receipt)
+		if identity["guard_mode_requested"] != "enforce" {
+			t.Fatalf("default guard mode=%v want enforce", identity["guard_mode_requested"])
+		}
+		preflight, ok := receipt["inference_preflight"].(map[string]any)
+		if !ok || preflight["status"] != "refused" || preflight["reason"] != "missing_explicit_base_url" {
+			t.Fatalf("guard posture masked inference route refusal: %#v", preflight)
+		}
+	})
+}
+
 func TestOpsRunGuardedReceipt(t *testing.T) {
 	dir := t.TempDir()
 	gateway := newOpsRunQualifiedGateway(t)
