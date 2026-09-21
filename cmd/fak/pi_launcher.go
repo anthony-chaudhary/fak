@@ -59,7 +59,7 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	fs.StringVar(promptFlag, "p", "", "alias for probe prompt")
 	addr := fs.String("addr", "127.0.0.1:8080", "fak serve gateway listen address (default: 127.0.0.1:8080 or FAK_SERVE_ADDR)")
 	baseURL := fs.String("base-url", "", "fak serve provider base URL (default: http://<addr>/v1)")
-	model := fs.String("model", "", "model ID (default: auto-detect from fak serve /healthz or qwen38:27b-q4)")
+	model := fs.String("model", "", "model ID (default: --model flag > existing settings.json defaultModel > auto-detect from fak serve /healthz > qwen38:27b-q4)")
 	configPath := fs.String("config-path", "", "custom destination path for Pi models.json (default: ~/.pi/agent/models.json)")
 	writeConfig := fs.Bool("write-config", true, "ensure ~/.pi/agent/models.json is configured with provider 'fak' before launching")
 	checkBackend := fs.Bool("check-backend", true, "verify fak serve backend is reachable before starting Pi")
@@ -111,6 +111,10 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 
 	targetModel := strings.TrimSpace(*model)
 	backendActive := false
+	// adoptedDetected records whether the launch model came from the backend's /healthz
+	// label rather than a deliberate operator/configured pin. It only gates the diagnostic
+	// wording below; the precedence itself is decided by ShouldAdoptDetectedPiModel.
+	adoptedDetected := false
 
 	// Probe backend to verify reachability and auto-detect the served model + context window
 	detectedModel, reachable, detectedWindow, resolvedBaseURL := probePiBackendWithWindow(targetBaseURL, 1500*time.Millisecond)
@@ -121,13 +125,25 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		// exposed to the Windows host as [::1] only), so launching Pi at the
 		// literal would hand it a dead base URL.
 		targetBaseURL = resolvedBaseURL
-		if targetModel == "" && detectedModel != "" && detectedModel != "mock" {
+		// Auto-detect seeds defaultModel only when no deliberate pin exists: an explicit
+		// --model wins outright, and an existing non-empty settings.json defaultModel is a
+		// deliberate choice the launcher must not clobber with the router's local label.
+		if projectassets.ShouldAdoptDetectedPiModel(*settingsPath, *model, detectedModel) {
 			targetModel = detectedModel
+			adoptedDetected = true
 		}
 	}
 
 	if targetModel == "" {
-		targetModel = projectassets.DefaultPiModelID
+		// No explicit --model and auto-detect was not adopted. Honor a deliberate
+		// settings.json defaultModel before falling back to the built-in prior, so the
+		// default pin below repairs the PROVIDER without re-pointing the MODEL a user
+		// chose on purpose.
+		if existing, err := projectassets.PiSettingsDefaultModel(*settingsPath); err == nil && existing != "" {
+			targetModel = existing
+		} else {
+			targetModel = projectassets.DefaultPiModelID
+		}
 	}
 
 	// Safe context budget: an explicit --window wins; otherwise the window the backend
@@ -209,7 +225,7 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak pi: dry-run - not launching")
 		fmt.Fprintf(stderr, "  backend     = %s (raw without guard)\n", launch.baseURL)
 		fmt.Fprintf(stderr, "  provider    = %s\n", launch.provider)
-		fmt.Fprintf(stderr, "  model       = %s\n", launch.model)
+		fmt.Fprintf(stderr, "  model       = %s (%s)\n", launch.model, piModelSource(*model, adoptedDetected))
 		fmt.Fprintf(stderr, "  context     = resident target %d tokens (safe 50%% of %d served window, %s)\n", budget.ResidentTarget, budget.ServedWindow, budget.Provenance)
 		fmt.Fprintf(stderr, "  compaction  = reserve %d, keep %d (write=%t)\n", budget.OutputReserve, budget.KeepRecentTokens, *safeSettings)
 		fmt.Fprintln(stderr, "  command     = "+strings.Join(argvOut, " "))
@@ -231,6 +247,20 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	return piLaunchRun(stdout, stderr, argvOut, env)
+}
+
+// piModelSource names where the effective launch model came from, for the dry-run
+// diagnostic: an operator --model wins first, then an adopted /healthz detect, else the
+// configured/default fallback. It is display-only and never changes the model.
+func piModelSource(explicitModel string, adoptedDetected bool) string {
+	switch {
+	case strings.TrimSpace(explicitModel) != "":
+		return "explicit --model"
+	case adoptedDetected:
+		return "auto-detected from /healthz"
+	default:
+		return "configured/existing default"
+	}
 }
 
 // probePiBackend probes a Pi backend and returns the served model, whether it

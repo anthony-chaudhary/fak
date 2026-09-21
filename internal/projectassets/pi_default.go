@@ -22,6 +22,58 @@ import (
 // other user key, the same non-clobbering discipline EnsurePiProviderConfig (models) and
 // EnsurePiSafeCompaction (compaction) already use.
 
+// PiSettingsDefaultModel reads the top-level `defaultModel` from Pi's settings.json and
+// returns it trimmed. An absent file, absent key, non-string value, or blank value all
+// report "" (no deliberate default configured) with a nil error; only a read or parse
+// failure other than not-exist is an error.
+//
+// This is the read half of the auto-detect guard: a launcher MUST NOT overwrite a
+// deliberately configured defaultModel with a `/healthz`-detected id, so the caller asks
+// whether a default is already configured before adopting a detected model.
+func PiSettingsDefaultModel(target string) (string, error) {
+	path := ResolvePiSettingsPath(target)
+	data, err := os.ReadFile(path)
+	switch {
+	case os.IsNotExist(err):
+		return "", nil
+	case err != nil:
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	raw := map[string]interface{}{}
+	if unmarshalErr := json.Unmarshal(stripUTF8BOM(data), &raw); unmarshalErr != nil {
+		return "", fmt.Errorf("parse existing %s: %w", path, unmarshalErr)
+	}
+	cur, _ := raw["defaultModel"].(string)
+	return strings.TrimSpace(cur), nil
+}
+
+// ShouldAdoptDetectedPiModel reports whether a `/healthz`-detected model id may become the
+// launch model. It is a pure predicate over PiSettingsDefaultModel, so precedence is
+// unit-testable without a live backend. It returns:
+//
+//   - false when detectedModel is blank or the non-model sentinel "mock";
+//   - false when explicitModel is non-blank (an operator --model always wins; the caller
+//     applies the flag directly, so this predicate refuses to override it);
+//   - false when settings.json already carries a deliberate, non-blank defaultModel;
+//   - true otherwise (no default configured: auto-detect seeds the first-ever value).
+//
+// A read/parse error degrades conservatively to false: a settings file we cannot read is
+// not license to clobber whatever default it may hold.
+func ShouldAdoptDetectedPiModel(target, explicitModel, detectedModel string) bool {
+	if strings.TrimSpace(explicitModel) != "" {
+		return false
+	}
+	detectedModel = strings.TrimSpace(detectedModel)
+	if detectedModel == "" || detectedModel == "mock" {
+		return false
+	}
+	existing, err := PiSettingsDefaultModel(target)
+	if err != nil {
+		return false
+	}
+	return existing == ""
+}
+
 // EnsurePiDefaultProviderModel points Pi's default provider/model at the fak router.
 //
 // It sets settings.json `defaultProvider` = providerID and `defaultModel` = modelID,
