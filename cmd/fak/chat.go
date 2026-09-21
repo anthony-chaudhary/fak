@@ -296,19 +296,35 @@ func cmdChat(argv []string) {
 		must(configureChatCodexSubscription(httpPlanner, *cf.codexHome))
 	}
 	if *cf.task != "" {
-		receiptContext := nativeAgentReceiptContext{Enforcement: nativeAgentEnforcement{
-			Schema:          nativeAgentEnforcementSchema,
-			GuardPosture:    string(effectivePosture),
-			PolicyDigest:    policyDigest,
-			WorkspaceDigest: opsRunDigest(root),
-			Tools:           receiptTools,
-		}}
+		receiptContext := nativeAgentReceiptContext{}
+		if guardPosture, supported := nativeAgentPostureName(effectivePosture); supported {
+			receiptContext.Enforcement = nativeAgentEnforcement{
+				Schema:          nativeAgentEnforcementSchema,
+				GuardPosture:    guardPosture,
+				PolicyDigest:    policyDigest,
+				WorkspaceDigest: opsRunDigest(root),
+				Tools:           receiptTools,
+			}
+		}
 		if err := runChatHeadlessWithContext(os.Stdout, planner, *cf.task, *cf.maxTurns, *cf.asJSON, *cf.receiptOut, root, receiptContext, runOpts...); err != nil {
 			os.Exit(1)
 		}
 		return
 	}
 	runChatWithDisplay(os.Stdin, os.Stdout, planner, *cf.maxTurns, *cf.verbose, runOpts...)
+}
+
+func nativeAgentPostureName(posture adjudicator.Posture) (string, bool) {
+	switch posture {
+	case adjudicator.PostureFailClosed:
+		return "fail_closed", true
+	case adjudicator.PostureAdmitAndLog:
+		return "admit_and_log", true
+	case adjudicator.PostureDefaultOpen:
+		return "default_open", true
+	default:
+		return "", false
+	}
 }
 
 // chatPlanner picks the planner the REPL drives: the offline mock (no upstream)
