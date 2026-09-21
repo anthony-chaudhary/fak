@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/processalive"
 )
 
 func newOpsRunQualifiedGateway(t *testing.T) *httptest.Server {
@@ -703,141 +705,250 @@ func requireOpsRunLaunchIdentity(t *testing.T, receipt map[string]any) map[strin
 	return identity
 }
 
-// TestOpsRunPi fixes the harness-selection contract at the ops boundary. Pi is
-// selected once, before execution, and uses its documented LF-delimited RPC
-// mode; terminal evidence is then normalized by the common receipt lifecycle.
-func TestOpsRunPi(t *testing.T) {
-	t.Setenv("OPENCODE_CONFIG_CONTENT", "")
-	gateway := newOpsRunQualifiedGateway(t)
+type opsRunPiFixtureControl struct {
+	Mode        string
+	Observation string
+	Launches    string
+	DirectURL   string
+	Heartbeat   string
+}
 
+type opsRunPiFixtureObservation struct {
+	Args       []string
+	Endpoint   string
+	PromptType string
+	Prompt     string
+	ConfigHome string
+	ToolCall   bool
+	Survivor   int
+}
+
+const opsRunPiFixtureSource = `package main
+import (
+ "bufio"
+ "bytes"
+ "encoding/json"
+ "fmt"
+ "io"
+ "net/http"
+ "os"
+ "os/exec"
+ "path/filepath"
+ "strconv"
+ "strings"
+ "time"
+)
+type control struct { Mode, Observation, Launches, DirectURL, Heartbeat string }
+type observation struct { Args []string; Endpoint, PromptType, Prompt, ConfigHome string; ToolCall bool; Survivor int }
+func field(src, key string) string {
+ i := strings.Index(src, key+":")
+ if i < 0 { return "" }
+ rest := strings.TrimSpace(src[i+len(key)+1:])
+ var value string
+ if json.NewDecoder(strings.NewReader(rest)).Decode(&value) != nil { return "" }
+ return value
+}
+func write(path string, value any) { data, _ := json.Marshal(value); _ = os.WriteFile(path, data, 0600) }
+func main() {
+ if len(os.Args) == 3 && os.Args[1] == "--survivor" {
+  for { _ = os.WriteFile(os.Args[2], []byte(strconv.FormatInt(time.Now().UnixNano(), 10)), 0600); time.Sleep(20*time.Millisecond) }
+ }
+ cwd, err := os.Getwd(); if err != nil { os.Exit(39) }
+ controlPath := filepath.Join(cwd, "pi-control.json")
+ var ctl control
+ data, err := os.ReadFile(controlPath); if err != nil || json.Unmarshal(data, &ctl) != nil { os.Exit(40) }
+ f, err := os.OpenFile(ctl.Launches, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600); if err != nil { os.Exit(41) }
+ _, _ = fmt.Fprintln(f, "pi"); _ = f.Close()
+ obs := observation{Args: append([]string(nil), os.Args[1:]...), ConfigHome: os.Getenv("PI_CODING_AGENT_DIR")}
+ var extension, provider, model, mode string
+ for i := 1; i < len(os.Args); i++ { switch os.Args[i] {
+ case "-e", "--extension": i++; if i < len(os.Args) { extension = os.Args[i] }
+ case "--provider": i++; if i < len(os.Args) { provider = os.Args[i] }
+ case "--model": i++; if i < len(os.Args) { model = os.Args[i] }
+ case "--mode": i++; if i < len(os.Args) { mode = os.Args[i] }
+ } }
+ if mode != "rpc" || provider != "fak" || model != "fixture" || obs.ConfigHome == "" { write(ctl.Observation, obs); os.Exit(42) }
+ ext, err := os.ReadFile(extension); if err != nil { write(ctl.Observation, obs); os.Exit(43) }
+ base := ctl.DirectURL
+ if strings.Contains(string(ext), "registerProvider(\"fak\"") { base = field(string(ext), "baseUrl") }
+ obs.Endpoint = strings.TrimRight(base, "/") + "/chat/completions"
+ body, _ := json.Marshal(map[string]any{"model":model,"stream":true,"messages":[]map[string]string{{"role":"user","content":"call inspect"}},"tools":[]map[string]any{{"type":"function","function":map[string]any{"name":"inspect","parameters":map[string]string{"type":"object"}}}}})
+ req, _ := http.NewRequest(http.MethodPost, obs.Endpoint, bytes.NewReader(body)); req.Header.Set("Content-Type", "application/json")
+ resp, err := http.DefaultClient.Do(req); if err != nil { write(ctl.Observation, obs); os.Exit(44) }
+ scan := bufio.NewScanner(io.LimitReader(resp.Body, 1<<20)); for scan.Scan() { if strings.Contains(scan.Text(), "tool_calls") { obs.ToolCall = true } }; _ = resp.Body.Close()
+ var prompt struct { Type, Message string }
+ if err := json.NewDecoder(os.Stdin).Decode(&prompt); err != nil { write(ctl.Observation, obs); os.Exit(45) }
+ obs.PromptType, obs.Prompt = prompt.Type, prompt.Message
+ fmt.Println(` + "`" + `{"type":"response","command":"prompt","success":true}` + "`" + `)
+ fmt.Println(` + "`" + `{"type":"response","command":"get_state","success":true,"data":{"sessionId":"pi-session-fixture","sessionFile":"session://pi-session-fixture"}}` + "`" + `)
+ fmt.Println(` + "`" + `{"type":"tool_execution_start"}` + "`" + `)
+ fmt.Println(` + "`" + `{"type":"tool_execution_end","isError":false}` + "`" + `)
+ switch ctl.Mode {
+ case "success":
+  write(ctl.Observation, obs); fmt.Println(` + "`" + `{"type":"agent_end","willRetry":false}` + "`" + `); fmt.Println(` + "`" + `{"type":"agent_settled"}` + "`" + `)
+ case "malformed":
+  write(ctl.Observation, obs); fmt.Println("{malformed")
+ case "side_effect_failure":
+  write(ctl.Observation, obs); fmt.Println(` + "`" + `{"type":"extension_error"}` + "`" + `); fmt.Println(` + "`" + `{"type":"agent_settled"}` + "`" + `)
+ case "cancellation":
+  child := exec.Command(os.Args[0], "--survivor", ctl.Heartbeat); if child.Start() != nil { os.Exit(46) }
+  obs.Survivor = child.Process.Pid; write(ctl.Observation, obs)
+  for { time.Sleep(time.Hour) }
+ default: os.Exit(47)
+ }
+}
+`
+
+func buildOpsRunPiFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	source := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(source, []byte(opsRunPiFixtureSource), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Guard recognizes the Pi adapter by its executable identity and injects the
+	// run-scoped provider extension only for that selected harness.
+	binary := filepath.Join(dir, "pi")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
+	cmd := exec.Command("go", "build", "-o", binary, source)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build Pi Ops fixture: %v\n%s", err, output)
+	}
+	return binary
+}
+
+// TestOpsRunPi exercises the real guard + Pi subprocess path and Pi's pinned
+// LF-delimited RPC event parser. The child consumes the installed guarded
+// provider, performs one tool-call turn, and supplies terminal/session evidence.
+func TestOpsRunPi(t *testing.T) {
+	piPath := buildOpsRunPiFixture(t)
 	for _, tc := range []struct {
-		name       string
-		execute    func(context.Context) (int, bool, bool)
+		mode       string
 		wantCode   int
 		wantStatus string
 	}{
-		{
-			name: "settled_tool_turn_succeeds",
-			execute: func(context.Context) (int, bool, bool) {
-				return 0, true, false
-			},
-			wantCode:   0,
-			wantStatus: "succeeded",
-		},
-		{
-			name: "malformed_terminal_event_fails_closed",
-			execute: func(context.Context) (int, bool, bool) {
-				return 0, false, true
-			},
-			wantCode:   1,
-			wantStatus: "failed",
-		},
-		{
-			name: "side_effect_then_failure_never_retries_another_harness",
-			execute: func(context.Context) (int, bool, bool) {
-				return 17, false, false
-			},
-			wantCode:   17,
-			wantStatus: "failed",
-		},
-		{
-			name: "deadline_cancels_the_selected_pi_child",
-			execute: func(ctx context.Context) (int, bool, bool) {
-				<-ctx.Done()
-				return 124, false, false
-			},
-			wantCode:   124,
-			wantStatus: "timed_out",
-		},
+		{mode: "success", wantCode: 0, wantStatus: "succeeded"},
+		{mode: "malformed", wantCode: 1, wantStatus: "failed"},
+		{mode: "side_effect_failure", wantCode: 1, wantStatus: "failed"},
+		{mode: "cancellation", wantCode: 124, wantStatus: "timed_out"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.mode, func(t *testing.T) {
 			dir := t.TempDir()
 			promptPath := filepath.Join(dir, "prompt.txt")
 			receiptPath := filepath.Join(dir, "receipt.json")
-			piPath := filepath.Join(dir, "pi-fixture")
-			if runtime.GOOS == "windows" {
-				piPath += ".exe"
-			}
+			auditPath := filepath.Join(dir, "audit.jsonl")
+			controlPath := filepath.Join(dir, "pi-control.json")
+			observationPath := filepath.Join(dir, "observation.json")
+			launchesPath := filepath.Join(dir, "launches.txt")
+			heartbeatPath := filepath.Join(dir, "survivor-heartbeat")
 			if err := os.WriteFile(promptPath, []byte("perform one deterministic tool turn\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(piPath, []byte("deterministic Pi fixture\n"), 0o700); err != nil {
+			var directHits atomic.Int64
+			direct := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { directHits.Add(1) }))
+			t.Cleanup(direct.Close)
+			control := opsRunPiFixtureControl{Mode: tc.mode, Observation: observationPath, Launches: launchesPath, DirectURL: direct.URL + "/v1", Heartbeat: heartbeatPath}
+			controlData, _ := json.Marshal(control)
+			if err := os.WriteFile(controlPath, controlData, 0o600); err != nil {
 				t.Fatal(err)
 			}
-
-			old := opsRunExecute
-			t.Cleanup(func() { opsRunExecute = old })
-			var launches atomic.Int64
-			opsRunExecute = func(ctx context.Context, _ io.Writer, _ io.Writer, argv, env []string, stdin []byte) (int, bool, bool, []opsRunLifecycleRecord) {
-				launches.Add(1)
-				joined := strings.Join(argv, "\x00")
-				for _, required := range []string{"guard", "--", piPath, "--mode", "rpc", "--no-session", "--provider", "fak", "--model", "fixture"} {
-					if !strings.Contains(joined, required) {
-						t.Errorf("Pi argv lacks %q: %q", required, argv)
-					}
+			var upstreamCalls atomic.Int64
+			gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				upstreamCalls.Add(1)
+				var request struct {
+					Model string `json:"model"`
+					Tools []struct {
+						Function struct {
+							Name string `json:"name"`
+						} `json:"function"`
+					} `json:"tools"`
 				}
-				if strings.Contains(joined, "opencode") {
-					t.Errorf("Pi selection fell through to OpenCode: %q", argv)
+				_ = json.NewDecoder(r.Body).Decode(&request)
+				tool := "inspect"
+				if len(request.Tools) > 0 && request.Tools[0].Function.Name != "" {
+					tool = request.Tools[0].Function.Name
 				}
-				var command struct {
-					Type    string `json:"type"`
-					Message string `json:"message"`
+				arguments := "{}"
+				if tool == opsRunInferenceProbeTool {
+					arguments = `{"ok":true}`
 				}
-				if err := json.Unmarshal(bytes.TrimSpace(stdin), &command); err != nil || command.Type != "prompt" || command.Message != "perform one deterministic tool turn" {
-					t.Errorf("Pi stdin is not one RPC prompt command: %q (decoded=%+v err=%v)", stdin, command, err)
-				}
-				if !opsRunEnvHasNonempty(env, "PI_CODING_AGENT_DIR") {
-					t.Error("Pi child lacks run-scoped PI_CODING_AGENT_DIR")
-				}
-				code, complete, eventError := tc.execute(ctx)
-				return code, complete, eventError, nil
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = fmt.Fprintf(w, "data: {\"model\":%q,\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"pi-tool\",\"type\":\"function\",\"function\":{\"name\":%q,\"arguments\":%q}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n", request.Model, tool, arguments)
+			}))
+			t.Cleanup(gateway.Close)
+			guardArgs := []string{
+				"--provider", "openai", "--split", "off", "--model", "fixture",
+				"--base-url", gateway.URL + "/v1", "--api-key-env", guardE2EHelperEnv, "--audit", auditPath,
+				"--", piPath, "--mode", "rpc", "--no-session", "--provider", "fak", "--model", "fixture",
 			}
+			t.Setenv(guardE2EHelperEnv, strings.Join(guardArgs, " "))
 
-			timeout := "2s"
-			if tc.wantStatus == "timed_out" {
-				timeout = "20ms"
+			// The real guard performs registration, gateway startup, and audit
+			// finalization; keep the acceptance budget above contended Windows CI.
+			timeout := "15s"
+			if tc.mode == "cancellation" {
+				// Leave enough budget for the guarded child to start and publish its
+				// descendant PID before exercising the production deadline path.
+				timeout = "4s"
 			}
 			var stderr bytes.Buffer
 			code := runOpsRun(io.Discard, &stderr, []string{
-				"--harness", "pi",
-				"--workspace", dir,
-				"--prompt-file", promptPath,
-				"--receipt", receiptPath,
-				"--provider", "openai",
-				"--model", "fixture",
-				"--base-url", gateway.URL + "/v1",
-				"--pi-bin", piPath,
-				"--timeout", timeout,
+				"--harness", "pi", "--workspace", dir,
+				"--prompt-file", promptPath, "--receipt", receiptPath,
+				"--provider", "openai", "--model", "fixture", "--base-url", gateway.URL + "/v1",
+				"--api-key-env", guardE2EHelperEnv, "--audit", auditPath,
+				"--pi-bin", piPath, "--timeout", timeout,
 			})
 			if code != tc.wantCode {
 				t.Fatalf("ops run Pi exit=%d want=%d: %s", code, tc.wantCode, stderr.String())
 			}
-			if got := launches.Load(); got != 1 {
-				t.Fatalf("Pi launch count=%d want=1 (selection must not retry/fallback)", got)
+			launches, err := os.ReadFile(launchesPath)
+			if err != nil || strings.Count(string(launches), "pi\n") != 1 {
+				t.Fatalf("Pi launch count must be exactly one (no fallback): %q err=%v", launches, err)
+			}
+			var observation opsRunPiFixtureObservation
+			observed, err := os.ReadFile(observationPath)
+			if err != nil || json.Unmarshal(observed, &observation) != nil {
+				t.Fatalf("read Pi observation: %v %s", err, observed)
+			}
+			if observation.PromptType != "prompt" || observation.Prompt != "perform one deterministic tool turn" || observation.ConfigHome == "" || !observation.ToolCall {
+				t.Fatalf("Pi did not consume RPC/config/tool turn: %+v", observation)
+			}
+			if strings.Contains(strings.Join(observation.Args, "\x00"), "opencode") || directHits.Load() != 0 || upstreamCalls.Load() < 2 {
+				t.Fatalf("Pi route escaped/fell back: args=%q direct=%d upstream=%d", observation.Args, directHits.Load(), upstreamCalls.Load())
 			}
 			data, err := os.ReadFile(receiptPath)
 			if err != nil {
-				t.Fatalf("read Pi receipt: %v", err)
+				t.Fatal(err)
 			}
 			var receipt opsRunReceipt
 			if err := json.Unmarshal(data, &receipt); err != nil {
-				t.Fatalf("decode Pi receipt: %v", err)
+				t.Fatal(err)
 			}
-			if receipt.Harness != "pi" || receipt.Status != tc.wantStatus {
-				t.Fatalf("Pi receipt harness/status=%q/%q want pi/%s: %s", receipt.Harness, receipt.Status, tc.wantStatus, data)
+			if receipt.Harness != "pi" || receipt.HarnessProtocol != opsRunPiRPCProtocol || receipt.Status != tc.wantStatus {
+				t.Fatalf("Pi receipt harness/protocol/status mismatch: %s", data)
+			}
+			if receipt.SourceSessionID != "pi-session-fixture" || receipt.SourceSessionRef != "session://pi-session-fixture" || receipt.AuditRef != auditPath {
+				t.Fatalf("Pi receipt lacks source-session/audit refs: %s", data)
+			}
+			if tc.mode == "cancellation" {
+				if observation.Survivor <= 0 {
+					t.Fatal("cancellation fixture did not spawn descendant")
+				}
+				before, err := os.ReadFile(heartbeatPath)
+				if err != nil {
+					t.Fatalf("descendant never became live: %v", err)
+				}
+				time.Sleep(250 * time.Millisecond)
+				after, _ := os.ReadFile(heartbeatPath)
+				if processalive.Check(observation.Survivor) || !bytes.Equal(before, after) {
+					t.Fatalf("Pi descendant survived cancellation: pid=%d before=%q after=%q", observation.Survivor, before, after)
+				}
 			}
 		})
 	}
-}
-
-func opsRunEnvHasNonempty(env []string, key string) bool {
-	prefix := key + "="
-	for _, entry := range env {
-		if strings.HasPrefix(entry, prefix) && strings.TrimPrefix(entry, prefix) != "" {
-			return true
-		}
-	}
-	return false
 }
 
 func TestOpsRunGuardMode(t *testing.T) {
