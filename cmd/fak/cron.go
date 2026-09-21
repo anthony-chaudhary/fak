@@ -79,7 +79,8 @@ func runCronEmit(stdout, stderr io.Writer, argv []string) int {
 	runner := fs.Bool("runner", false, "emit a unit invoking `fak cron run` for bounded scheduled tasks")
 	opencode := fs.Bool("opencode", false, "emit a unit invoking `fak cron opencode` for bounded OpenCode sessions")
 	job := fs.String("job", "", "job id for the bounded runner or opencode (required with --runner or --opencode)")
-	timeout := fs.Duration("timeout", 0, "command execution timeout for the bounded runner (required with --runner)")
+	timeout := fs.Duration("timeout", 0, "runner execution timeout, or maximum OpenCode output silence (required with --runner)")
+	hardTimeout := fs.Duration("hard-timeout", 0, "absolute ceiling for each OpenCode attempt")
 	until := fs.String("until", "", "expiration deadline passed through to the runner (RFC3339 or duration)")
 	workdir := fs.String("workdir", "", "working directory for the scheduled unit")
 	env := fs.String("env", "", "environment variables KEY=VAL (semicolon-separated)")
@@ -268,6 +269,9 @@ func runCronEmit(stdout, stderr io.Writer, argv []string) int {
 		}
 		if *timeout > 0 {
 			runArgs = append(runArgs, "--timeout", timeout.String())
+		}
+		if *hardTimeout > 0 {
+			runArgs = append(runArgs, "--hard-timeout", hardTimeout.String())
 		}
 		if resolvedUntil != "" {
 			runArgs = append(runArgs, "--until", resolvedUntil)
@@ -566,10 +570,14 @@ func cronUsage(w io.Writer) {
   fak cron emit --runner --target launchd|systemd|taskscheduler --job ID
                 --ledger FILE --interval DUR --timeout DUR [--fak-bin PATH]
                 [--label NAME] -- CMD ARG...
+  fak cron emit --opencode --target launchd|systemd|taskscheduler --job ID
+                --ledger FILE --interval DUR [--timeout DUR] [--hard-timeout DUR]
+                [--fak-bin PATH] [--label NAME] -- CMD ARG...
 
   fak cron run    --job ID --ledger FILE --interval DUR --timeout DUR [--json]
                   [--at RFC3339] [--slot KEY] -- CMD ARG...
   fak cron opencode [--job ID] [--ledger FILE] [--interval DUR] [--timeout DUR]
+                  [--hard-timeout DUR]
                   [--at RFC3339] [--slot KEY] [--run-id ID] [--passthrough] -- CMD ARG...
   fak cron fire   --job ID --ledger FILE [--interval DUR] [--at RFC3339] [--slot KEY]
   fak cron audit  --ledger FILE [--job ID] [--json]

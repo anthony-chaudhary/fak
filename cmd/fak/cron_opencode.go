@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -50,6 +51,13 @@ func cronOpenCodeEffectiveTimeout(requested time.Duration) time.Duration {
 	return requested
 }
 
+func cronOpenCodeEffectiveHardTimeout(requested time.Duration) time.Duration {
+	if requested <= 0 || requested > cronOpenCodeMaxTimeout {
+		return cronOpenCodeMaxTimeout
+	}
+	return requested
+}
+
 // OpenCodeRunReceipt records the terminal outcome, duration, and session join of an
 // OpenCode execution. WitnessRef is explicitly serialized as null when absent.
 type OpenCodeRunReceipt struct {
@@ -73,6 +81,14 @@ type OpenCodeRunReceipt struct {
 	CrashRecovered  bool   `json:"crash_recovered,omitempty"`  // final outcome succeeded after a Bun crash
 	OpenCodeVersion string `json:"opencode_version,omitempty"` // best-effort `opencode --version`
 	BunVersion      string `json:"bun_version,omitempty"`      // best-effort Bun runtime version
+
+	// Progress-aware timeout telemetry (#2372). TimeoutExtensions counts idle
+	// deadline refreshes; ProgressEvents counts non-empty output writes.
+	ProgressEvents    int64  `json:"progress_events,omitempty"`
+	TimeoutExtensions int64  `json:"timeout_extensions,omitempty"`
+	SoftTimeoutMS     int64  `json:"soft_timeout_ms,omitempty"`
+	HardTimeoutMS     int64  `json:"hard_timeout_ms,omitempty"`
+	StopReason        string `json:"stop_reason,omitempty"`
 
 	// Session token/cost/model join (#1559). Additive + omitempty so a receipt with
 	// no session join stays byte-identical to the fak-opencode-run/1 shape above.
@@ -230,12 +246,33 @@ func cronBoundedOutputTail(s string, maxBytes int) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
+// cronOpenCodeProgressWriter turns non-empty child output into a coalesced
+// activity signal while retaining the full event count for receipt telemetry.
+type cronOpenCodeProgressWriter struct {
+	writer   io.Writer
+	progress chan<- struct{}
+	events   *int64
+}
+
+func (w cronOpenCodeProgressWriter) Write(p []byte) (int, error) {
+	n, err := w.writer.Write(p)
+	if n > 0 {
+		atomic.AddInt64(w.events, 1)
+		select {
+		case w.progress <- struct{}{}:
+		default:
+		}
+	}
+	return n, err
+}
+
 // ScheduledOpenCodeOptions carries the configuration for a scheduled OpenCode execution.
 type ScheduledOpenCodeOptions struct {
 	Job         string
 	Ledger      string
 	Interval    time.Duration
-	Timeout     time.Duration
+	Timeout     time.Duration // maximum silence between child stdout/stderr writes
+	HardTimeout time.Duration // absolute ceiling for each child attempt
 	At          string
 	Slot        string
 	RunID       string
@@ -468,6 +505,7 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 	}
 
 	effectiveTimeout := cronOpenCodeEffectiveTimeout(opts.Timeout)
+	effectiveHardTimeout := cronOpenCodeEffectiveHardTimeout(opts.HardTimeout)
 	crashRetries := opts.CrashRetries
 	if crashRetries < 0 {
 		crashRetries = 0
@@ -483,25 +521,29 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 	}
 
 	var (
-		sessionID      string
-		exitCode       int
-		outcome        string
-		runErr         error
-		startTime      time.Time
-		endedTime      time.Time
-		attempts       int
-		crashSignature bool
-		bunVersion     string
-		lastStderr     string
-		lastStdout     string
+		sessionID         string
+		exitCode          int
+		outcome           string
+		runErr            error
+		startTime         time.Time
+		endedTime         time.Time
+		attempts          int
+		crashSignature    bool
+		bunVersion        string
+		lastStderr        string
+		lastStdout        string
+		progressEvents    int64
+		timeoutExtensions int64
+		stopReason        string
 	)
 
 	for {
 		attempts++
 
-		ctx, cancel := context.WithTimeout(context.Background(), effectiveTimeout)
+		hardCtx, cancel := context.WithTimeout(context.Background(), effectiveHardTimeout)
+		progress := make(chan struct{}, 1)
 
-		c := exec.CommandContext(ctx, cmdName, cmdRest...)
+		c := exec.CommandContext(hardCtx, cmdName, cmdRest...)
 		configureDispatchHelperCommand(c)
 		if opts.Workdir != "" {
 			c.Dir = opts.Workdir
@@ -514,7 +556,11 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 		var childStderrBuf bytes.Buffer
 
 		var stdoutWriters []io.Writer
-		stdoutWriters = append(stdoutWriters, &childStdoutBuf)
+		stdoutWriters = append(stdoutWriters, cronOpenCodeProgressWriter{
+			writer:   &childStdoutBuf,
+			progress: progress,
+			events:   &progressEvents,
+		})
 		if opts.ChildStdout != nil {
 			stdoutWriters = append(stdoutWriters, opts.ChildStdout)
 		}
@@ -524,7 +570,11 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 		c.Stdout = io.MultiWriter(stdoutWriters...)
 
 		var stderrWriters []io.Writer
-		stderrWriters = append(stderrWriters, &childStderrBuf)
+		stderrWriters = append(stderrWriters, cronOpenCodeProgressWriter{
+			writer:   &childStderrBuf,
+			progress: progress,
+			events:   &progressEvents,
+		})
 		if opts.Stderr != nil {
 			stderrWriters = append(stderrWriters, opts.Stderr)
 		}
@@ -538,9 +588,72 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 			return nil
 		}
 
+		stopReason = "completed"
 		startTime = time.Now()
-		runErr = c.Run()
+		runErr = c.Start()
+		if runErr == nil {
+			softTimer := time.NewTimer(effectiveTimeout)
+			waitDone := make(chan error, 1)
+			go func() {
+				waitDone <- c.Wait()
+			}()
+
+			waiting := true
+			for waiting {
+				select {
+				case runErr = <-waitDone:
+					if errors.Is(hardCtx.Err(), context.DeadlineExceeded) {
+						stopReason = "hard_ceiling"
+					}
+					waiting = false
+				case <-progress:
+					timeoutExtensions++
+					if !softTimer.Stop() {
+						select {
+						case <-softTimer.C:
+						default:
+						}
+					}
+					softTimer.Reset(effectiveTimeout)
+				case <-softTimer.C:
+					// Prefer an output signal that raced timer delivery.
+					select {
+					case <-progress:
+						timeoutExtensions++
+						softTimer.Reset(effectiveTimeout)
+						continue
+					default:
+					}
+					stopReason = "progress_silence"
+					cancel()
+					runErr = <-waitDone
+					waiting = false
+				case <-hardCtx.Done():
+					stopReason = "hard_ceiling"
+					runErr = <-waitDone
+					waiting = false
+				}
+			}
+			if !softTimer.Stop() {
+				select {
+				case <-softTimer.C:
+				default:
+				}
+			}
+		} else {
+			stopReason = "start_error"
+		}
 		endedTime = time.Now()
+		cancel()
+
+		if opts.Stderr != nil {
+			switch stopReason {
+			case "progress_silence":
+				fmt.Fprintf(opts.Stderr, "fak cron opencode: no child output for %s; stopping attempt %d/%d\n", effectiveTimeout, attempts, maxAttempts)
+			case "hard_ceiling":
+				fmt.Fprintf(opts.Stderr, "fak cron opencode: hard ceiling %s reached; stopping attempt %d/%d\n", effectiveHardTimeout, attempts, maxAttempts)
+			}
+		}
 
 		lastStdout = childStdoutBuf.String()
 		lastStderr = childStderrBuf.String()
@@ -550,7 +663,7 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 			sessionID = extractOpenCodeSessionID(lastStderr)
 		}
 
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		if stopReason == "progress_silence" || stopReason == "hard_ceiling" {
 			outcome = "timeout"
 			var exitErr *exec.ExitError
 			if errors.As(runErr, &exitErr) {
@@ -570,8 +683,6 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 			outcome = "succeeded"
 			exitCode = 0
 		}
-		cancel()
-
 		if bv := cronExtractBunVersion(lastStderr + "\n" + lastStdout); bv != "" {
 			bunVersion = bv
 		}
@@ -595,20 +706,25 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 	crashRecovered := crashSignature && outcome == "succeeded"
 
 	receipt := OpenCodeRunReceipt{
-		Schema:          cronOpenCodeRunSchema,
-		RunID:           runID,
-		SessionID:       sessionID,
-		ExitCode:        exitCode,
-		Outcome:         outcome,
-		StartedAt:       startTime.UTC().Format(time.RFC3339),
-		EndedAt:         endedTime.UTC().Format(time.RFC3339),
-		DurationMS:      durationMS,
-		WitnessRef:      nil,
-		Attempts:        attempts,
-		CrashSignature:  crashSignature,
-		CrashRecovered:  crashRecovered,
-		OpenCodeVersion: openCodeVersion,
-		BunVersion:      bunVersion,
+		Schema:            cronOpenCodeRunSchema,
+		RunID:             runID,
+		SessionID:         sessionID,
+		ExitCode:          exitCode,
+		Outcome:           outcome,
+		StartedAt:         startTime.UTC().Format(time.RFC3339),
+		EndedAt:           endedTime.UTC().Format(time.RFC3339),
+		DurationMS:        durationMS,
+		WitnessRef:        nil,
+		Attempts:          attempts,
+		CrashSignature:    crashSignature,
+		CrashRecovered:    crashRecovered,
+		OpenCodeVersion:   openCodeVersion,
+		BunVersion:        bunVersion,
+		ProgressEvents:    atomic.LoadInt64(&progressEvents),
+		TimeoutExtensions: timeoutExtensions,
+		SoftTimeoutMS:     effectiveTimeout.Milliseconds(),
+		HardTimeoutMS:     effectiveHardTimeout.Milliseconds(),
+		StopReason:        stopReason,
 
 		// Provider-failure classification (#1866): stamped on failed/timeout runs
 		// only (empty on succeeded). cronClassifyFailureClass returns "ongoing" for
@@ -664,7 +780,8 @@ func runCronOpenCode(stdout, stderr io.Writer, argv []string) int {
 	job := fs.String("job", "", "job/loop id")
 	ledger := fs.String("ledger", "", "witness ledger path, JSONL")
 	interval := fs.Duration("interval", 0, "firing cadence; tick is quantized to this slot")
-	timeout := fs.Duration("timeout", 0, "command execution timeout")
+	timeout := fs.Duration("timeout", 0, "maximum silence between child stdout/stderr writes")
+	hardTimeout := fs.Duration("hard-timeout", 0, "absolute timeout for each child attempt (default and maximum 2h)")
 	at := fs.String("at", "", "wall-clock tick time (RFC3339); default now — injectable for tests")
 	slot := fs.String("slot", "", "override computed slot key directly")
 	runID := fs.String("run-id", "", "explicit run ID")
@@ -711,6 +828,7 @@ func runCronOpenCode(stdout, stderr io.Writer, argv []string) int {
 		Ledger:       *ledger,
 		Interval:     *interval,
 		Timeout:      *timeout,
+		HardTimeout:  *hardTimeout,
 		At:           *at,
 		Slot:         *slot,
 		RunID:        *runID,

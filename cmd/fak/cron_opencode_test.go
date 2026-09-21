@@ -304,6 +304,116 @@ func TestCronOpenCodeTimeout(t *testing.T) {
 	}
 }
 
+func TestCronOpenCodeProgressExtendsSilenceTimeoutButHonorsHardCeiling(t *testing.T) {
+	if mode := os.Getenv("FAK_CRON_PROGRESS_HELPER"); mode != "" {
+		switch mode {
+		case "progress":
+			for i := 0; i < 7; i++ {
+				fmt.Fprintf(os.Stdout, "progress-%d\n", i)
+				time.Sleep(100 * time.Millisecond)
+			}
+		case "stalled":
+			time.Sleep(3 * time.Second)
+		case "hard-ceiling":
+			for i := 0; i < 50; i++ {
+				fmt.Fprintf(os.Stdout, "progress-%d\n", i)
+				time.Sleep(100 * time.Millisecond)
+			}
+		default:
+			t.Fatalf("unknown helper mode %q", mode)
+		}
+		return
+	}
+
+	type receiptTelemetry struct {
+		Outcome           string `json:"outcome"`
+		StopReason        string `json:"stop_reason"`
+		ProgressEvents    int64  `json:"progress_events"`
+		TimeoutExtensions int64  `json:"timeout_extensions"`
+		SoftTimeoutMS     int64  `json:"soft_timeout_ms"`
+		HardTimeoutMS     int64  `json:"hard_timeout_ms"`
+	}
+	run := func(t *testing.T, mode string, hardTimeout time.Duration) (receiptTelemetry, time.Duration) {
+		t.Helper()
+		t.Setenv("FAK_CRON_PROGRESS_HELPER", mode)
+		var stdout, stderr bytes.Buffer
+		started := time.Now()
+		code := runCronOpenCode(&stdout, &stderr, []string{
+			"--job", "job-progress-" + mode,
+			"--ledger", filepath.Join(t.TempDir(), "opencode_progress.jsonl"),
+			"--timeout", "250ms",
+			"--hard-timeout", hardTimeout.String(),
+			"--",
+			os.Args[0], "-test.run=^TestCronOpenCodeProgressExtendsSilenceTimeoutButHonorsHardCeiling$",
+		})
+		if code == 2 {
+			t.Fatalf("cron opencode CLI rejected progress timeout contract: %s", stderr.String())
+		}
+		var receipt receiptTelemetry
+		if err := json.Unmarshal(stdout.Bytes(), &receipt); err != nil {
+			t.Fatalf("decode cron opencode receipt: %v (exit=%d stdout=%q stderr=%q)", err, code, stdout.String(), stderr.String())
+		}
+		return receipt, time.Since(started)
+	}
+
+	t.Run("progress extends past base timeout", func(t *testing.T) {
+		receipt, elapsed := run(t, "progress", 2*time.Second)
+		if receipt.Outcome != "succeeded" {
+			t.Fatalf("progressing attempt = %+v, want succeeded (elapsed %s)", receipt, elapsed)
+		}
+		if receipt.StopReason != "completed" {
+			t.Fatalf("progressing stop_reason = %q, want completed (events=%d extensions=%d)", receipt.StopReason, receipt.ProgressEvents, receipt.TimeoutExtensions)
+		}
+		if receipt.ProgressEvents == 0 || receipt.TimeoutExtensions == 0 {
+			t.Fatalf("progressing telemetry = events:%d extensions:%d, want observed progress and refreshed silence deadline", receipt.ProgressEvents, receipt.TimeoutExtensions)
+		}
+		if receipt.SoftTimeoutMS != 250 || receipt.HardTimeoutMS != 2000 {
+			t.Fatalf("progressing timeout telemetry = soft:%dms hard:%dms, want 250ms/2000ms", receipt.SoftTimeoutMS, receipt.HardTimeoutMS)
+		}
+		if elapsed < 600*time.Millisecond {
+			t.Fatalf("progressing attempt completed in %s, want execution beyond the 250ms base timeout", elapsed)
+		}
+	})
+
+	t.Run("silence does not extend", func(t *testing.T) {
+		receipt, elapsed := run(t, "stalled", 2*time.Second)
+		if receipt.Outcome != "timeout" {
+			t.Fatalf("stalled attempt = %+v, want timeout (elapsed %s)", receipt, elapsed)
+		}
+		if receipt.StopReason != "progress_silence" {
+			t.Fatalf("stalled stop_reason = %q, want progress_silence (events=%d extensions=%d)", receipt.StopReason, receipt.ProgressEvents, receipt.TimeoutExtensions)
+		}
+		if receipt.ProgressEvents != 0 || receipt.TimeoutExtensions != 0 {
+			t.Fatalf("stalled telemetry = events:%d extensions:%d, want no observed progress", receipt.ProgressEvents, receipt.TimeoutExtensions)
+		}
+		if receipt.SoftTimeoutMS != 250 || receipt.HardTimeoutMS != 2000 {
+			t.Fatalf("stalled timeout telemetry = soft:%dms hard:%dms, want 250ms/2000ms", receipt.SoftTimeoutMS, receipt.HardTimeoutMS)
+		}
+		if elapsed >= 1500*time.Millisecond {
+			t.Fatalf("stalled attempt ran for %s, want inactivity timeout well before hard ceiling", elapsed)
+		}
+	})
+
+	t.Run("continuous progress is bounded", func(t *testing.T) {
+		receipt, elapsed := run(t, "hard-ceiling", 800*time.Millisecond)
+		if receipt.Outcome != "timeout" {
+			t.Fatalf("continually progressing attempt outcome = %q, want timeout (elapsed %s)", receipt.Outcome, elapsed)
+		}
+		if receipt.StopReason != "hard_ceiling" {
+			t.Fatalf("continually progressing stop_reason = %q, want hard_ceiling (events=%d extensions=%d)", receipt.StopReason, receipt.ProgressEvents, receipt.TimeoutExtensions)
+		}
+		if receipt.ProgressEvents == 0 || receipt.TimeoutExtensions == 0 {
+			t.Fatalf("continually progressing telemetry = events:%d extensions:%d, want progress through the hard ceiling", receipt.ProgressEvents, receipt.TimeoutExtensions)
+		}
+		if receipt.SoftTimeoutMS != 250 || receipt.HardTimeoutMS != 800 {
+			t.Fatalf("hard-ceiling timeout telemetry = soft:%dms hard:%dms, want 250ms/800ms", receipt.SoftTimeoutMS, receipt.HardTimeoutMS)
+		}
+		if elapsed < 600*time.Millisecond || elapsed >= 2*time.Second {
+			t.Fatalf("hard-ceiling attempt = %+v after %s, want a bounded timeout near 800ms", receipt, elapsed)
+		}
+	})
+}
+
 func TestCronOpenCodeCASDeduplication(t *testing.T) {
 	ledger := filepath.Join(t.TempDir(), "opencode_dedup.jsonl")
 	var stdout, stderr bytes.Buffer

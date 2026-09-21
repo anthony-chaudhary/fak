@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -150,15 +151,23 @@ func cmdWorktreeWorker(argv []string) {
 // --root, else discovered from cwd. An empty result is a usage error (mirrors the
 // Python CLI, which requires a resolvable repo).
 func worktreeWorkerRoot(flagVal string) string {
+	root, err := resolveWorktreeWorkerRoot(flagVal)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	return root
+}
+
+func resolveWorktreeWorkerRoot(flagVal string) (string, error) {
 	root := strings.TrimSpace(flagVal)
 	if root == "" {
 		root = discoverRepoRoot()
 	}
 	if root == "" {
-		fmt.Fprintln(os.Stderr, "fak worktree worker: could not resolve a git repo root (pass --root)")
-		os.Exit(2)
+		return "", fmt.Errorf("fak worktree worker: could not resolve a git repo root (pass --root)")
 	}
-	return root
+	return root, nil
 }
 
 // worktreeWorkerEmit prints one JSON object (compact, one line) — the single
@@ -543,6 +552,74 @@ func verifyWorkerLandSymptom(wtPath, ref string, extraTags []string) workerworkt
 	}
 }
 
+var (
+	worktreeWorkerPreparedGoBuildVerify = worktreeWorkerGoBuildVerify
+	worktreeWorkerPreparedSymptomVerify = verifyWorkerLandSymptom
+)
+
+type worktreeWorkerPreparedLandOut struct {
+	workerworktree.Result
+	PreparedReceipt *workerworktree.PreparedLandReceipt `json:"prepared_receipt,omitempty"`
+}
+
+type worktreeWorkerPreparedVerificationRecipe struct {
+	Schema       string     `json:"schema"`
+	Mode         string     `json:"mode"`
+	VerifierArgv [][]string `json:"verifier_argv"`
+	PolicyChecks []string   `json:"policy_checks,omitempty"`
+	FixPolicy    string     `json:"fix_policy"`
+	GOFLAGS      string     `json:"goflags"`
+}
+
+func worktreeWorkerPreparedVerificationBinding(verify string, requireSymptomWitness bool, tags []string) (workerworktree.ProspectiveVerificationBinding, error) {
+	fixPolicy := "not-required"
+	if requireSymptomWitness {
+		fixPolicy = "red-parent-green-candidate"
+	}
+	return worktreeWorkerPreparedVerificationBindingForPolicy(verify, fixPolicy, tags)
+}
+
+func worktreeWorkerPreparedVerificationBindingForPolicy(verify, fixPolicy string, tags []string) (workerworktree.ProspectiveVerificationBinding, error) {
+	mode := strings.ToLower(strings.TrimSpace(verify))
+	verifierArgv := make([][]string, 0, 1)
+	switch mode {
+	case "off", "none":
+		mode = "off"
+	case "", "go-build", "gobuild", "build":
+		mode = "go-build"
+		verifierArgv = append(verifierArgv, []string{"go", "build", "./..."})
+	default:
+		return workerworktree.ProspectiveVerificationBinding{}, fmt.Errorf("unknown --verify %q", verify)
+	}
+	policyChecks := []string(nil)
+	if fixPolicy == "red-parent-green-candidate" {
+		policyChecks = append(policyChecks, "resolve-symptom(parent=red,candidate=green,ref=HEAD)")
+	}
+	recipe, err := json.Marshal(worktreeWorkerPreparedVerificationRecipe{
+		Schema: "fak.worker-land-verification/v1", Mode: mode, VerifierArgv: verifierArgv,
+		PolicyChecks: policyChecks, FixPolicy: fixPolicy, GOFLAGS: os.Getenv("GOFLAGS"),
+	})
+	if err != nil {
+		return workerworktree.ProspectiveVerificationBinding{}, err
+	}
+	normalizedTags := append([]string(nil), tags...)
+	sort.Strings(normalizedTags)
+	uniq := normalizedTags[:0]
+	for _, tag := range normalizedTags {
+		tag = strings.TrimSpace(tag)
+		if tag != "" && (len(uniq) == 0 || uniq[len(uniq)-1] != tag) {
+			uniq = append(uniq, tag)
+		}
+	}
+	return workerworktree.ProspectiveVerificationBinding{Command: string(recipe), Tags: uniq}, nil
+}
+
+func emitWorktreeWorkerPreparedLand(w io.Writer, out worktreeWorkerPreparedLandOut) {
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(out)
+}
+
 func verifyWorkerLandTestWitness(wtPath string) workerworktree.Result {
 	candidates := []string{
 		filepath.Join(wtPath, ".fak", "test-witness.json"),
@@ -764,6 +841,16 @@ func validateTestWitnessBytes(data []byte) (bool, string) {
 }
 
 func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworktree.Result, int) {
+	mode := "legacy"
+	if len(argv) > 0 && (argv[0] == "prepare" || argv[0] == "accept") {
+		mode, argv = argv[0], argv[1:]
+	}
+	returnEarly := func(res workerworktree.Result, code int) (workerworktree.Result, int) {
+		if mode != "legacy" {
+			emitWorktreeWorkerPreparedLand(stdout, worktreeWorkerPreparedLandOut{Result: res})
+		}
+		return res, code
+	}
 	fs := flag.NewFlagSet("worktree worker land", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	worktree := fs.String("worktree", "", "the worker's worktree dir to land from (required)")
@@ -782,24 +869,35 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 		"extra build tags to run the symptom witness with (comma-separated); merged with tags derived from the changed test files' //go:build constraints")
 	requireTestWitness := fs.Bool("require-test-witness", false,
 		"require verified test witness receipt before landing worker diff")
+	receiptID := fs.String("receipt-id", "", "prepared landing receipt ID (required by accept)")
 	var paths repeatedString
 	fs.Var(&paths, "paths", "path to scope the commit to (repeatable); omit to commit the whole applied diff")
 	if err := fs.Parse(argv); err != nil {
-		return workerworktree.Result{OK: false, Reason: err.Error()}, 2
+		return returnEarly(workerworktree.Result{OK: false, Reason: err.Error()}, 2)
 	}
 
 	worktreeDir := strings.TrimSpace(*worktree)
 	if worktreeDir == "" {
 		fmt.Fprintln(stderr, "fak worktree worker land: --worktree is required")
-		return workerworktree.Result{OK: false, Reason: "--worktree is required"}, 2
+		return returnEarly(workerworktree.Result{OK: false, Reason: "--worktree is required"}, 2)
 	}
-	repoRoot := worktreeWorkerRoot(*root)
+	var repoRoot string
+	if mode == "legacy" {
+		repoRoot = worktreeWorkerRoot(*root)
+	} else {
+		var rootErr error
+		repoRoot, rootErr = resolveWorktreeWorkerRoot(*root)
+		if rootErr != nil {
+			fmt.Fprintln(stderr, rootErr)
+			return returnEarly(workerworktree.Result{OK: false, Reason: rootErr.Error()}, 2)
+		}
+	}
 
 	// Mandatory test witness receipt check (#11532)
 	if *requireTestWitness {
 		testWitnessRes := verifyWorkerLandTestWitness(worktreeDir)
 		if !testWitnessRes.OK {
-			return testWitnessRes, 1
+			return returnEarly(testWitnessRes, 1)
 		}
 	}
 
@@ -815,7 +913,7 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 		hook = worktreeWorkerGoBuildVerify
 	default:
 		fmt.Fprintf(stderr, "fak worktree worker land: unknown --verify %q (want off|go-build)\n", *verify)
-		return workerworktree.Result{OK: false, Reason: fmt.Sprintf("unknown --verify %q", *verify)}, 2
+		return returnEarly(workerworktree.Result{OK: false, Reason: fmt.Sprintf("unknown --verify %q", *verify)}, 2)
 	}
 
 	opts := []workerworktree.LandOption{
@@ -828,6 +926,65 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 			remote = "origin"
 		}
 		opts = append(opts, workerworktree.WithRecoveryRemote(remote, *requireRemote))
+	}
+	if mode != "legacy" {
+		fixPolicy := "not-required"
+		if isFixSubject(subj) {
+			fixPolicy = "unsafe-bypass"
+			if requireSymptomWitness {
+				fixPolicy = "red-parent-green-candidate"
+			}
+		}
+		binding, bindingErr := worktreeWorkerPreparedVerificationBindingForPolicy(*verify, fixPolicy, splitTagList(*symptomTags))
+		if bindingErr != nil {
+			fmt.Fprintf(stderr, "fak worktree worker land: %v (want off|go-build)\n", bindingErr)
+			return returnEarly(workerworktree.Result{OK: false, Reason: bindingErr.Error()}, 2)
+		}
+		var preparedReceipt *workerworktree.PreparedLandReceipt
+		var res workerworktree.Result
+		if mode == "prepare" {
+			prospectiveVerify := func(dir string, materializationErr error) workerworktree.Result {
+				if materializationErr != nil {
+					return workerworktree.Result{OK: false, Code: workerworktree.LandResultPreparedMismatch, Reason: "could not materialize exact prospective candidate", Detail: materializationErr.Error()}
+				}
+				if hook != nil {
+					if ok, detail := worktreeWorkerPreparedGoBuildVerify(dir); !ok {
+						return workerworktree.Result{OK: false, Reason: "prospective candidate verification failed", Detail: detail}
+					}
+				}
+				if requireSymptomWitness {
+					return worktreeWorkerPreparedSymptomVerify(dir, "HEAD", splitTagList(*symptomTags))
+				}
+				return workerworktree.Result{OK: true}
+			}
+			var err error
+			res, err = withWorkerLandDisambiguationTimeout(*disambiguationTimeoutMS, flagWasSet(fs, "disambiguation-timeout-ms"), func() workerworktree.Result {
+				receipt, got := workerworktree.PrepareProspectiveLand(
+					repoRoot, worktreeDir, strings.TrimSpace(*baseSHA), strings.TrimSpace(*msgFile), []string(paths),
+					binding, nil, prospectiveVerify, nil, opts...,
+				)
+				if got.OK {
+					preparedReceipt = &receipt
+				}
+				return got
+			})
+			if err != nil {
+				res = workerworktree.Result{OK: false, Code: workerworktree.DisambiguationTimeoutCode, Reason: "configure worker land disambiguation timeout: " + err.Error()}
+			}
+		} else {
+			if strings.TrimSpace(*receiptID) == "" {
+				fmt.Fprintln(stderr, "fak worktree worker land accept: --receipt-id is required")
+				return returnEarly(workerworktree.Result{OK: false, Reason: "--receipt-id is required"}, 2)
+			}
+			res = workerworktree.AcceptPreparedLand(repoRoot, worktreeDir, workerworktree.PreparedLandExpectation{
+				ReceiptID: strings.TrimSpace(*receiptID), Paths: []string(paths), Verification: binding,
+			}, nil, opts...)
+		}
+		emitWorktreeWorkerPreparedLand(stdout, worktreeWorkerPreparedLandOut{Result: res, PreparedReceipt: preparedReceipt})
+		if !res.OK {
+			return res, 1
+		}
+		return res, 0
 	}
 	timeoutSet := flagWasSet(fs, "disambiguation-timeout-ms")
 	res, err := withWorkerLandDisambiguationTimeout(*disambiguationTimeoutMS, timeoutSet, func() workerworktree.Result {
@@ -859,7 +1016,9 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 
 func worktreeWorkerLand(argv []string) {
 	res, code := runWorktreeWorkerLand(os.Stdout, os.Stderr, argv)
-	worktreeWorkerEmit(res)
+	if len(argv) == 0 || (argv[0] != "prepare" && argv[0] != "accept") {
+		worktreeWorkerEmit(res)
+	}
 	if !res.OK {
 		if code != 0 {
 			os.Exit(code)
