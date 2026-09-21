@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -18,6 +19,7 @@ import (
 
 const nativeAgentReceiptSchema = "fak.agent.native.v1"
 const nativeAgentCallsSchema = "fak.agent.native.calls.v1"
+const nativeAgentEnforcementSchema = "fak.agent.native.enforcement.v1"
 
 const nativeAgentCallPreviewLimit = 160
 
@@ -26,16 +28,39 @@ type nativeAgentCalls struct {
 	Entries []agent.CallTrace `json:"entries"`
 }
 
+type nativeAgentToolCapabilities struct {
+	System bool `json:"system"`
+	MCP    bool `json:"mcp"`
+	Skills bool `json:"skills"`
+	Memory bool `json:"memory"`
+}
+
+type nativeAgentEnforcement struct {
+	Schema          string                      `json:"schema"`
+	GuardPosture    string                      `json:"guard_posture"`
+	PolicyDigest    string                      `json:"policy_digest"`
+	WorkspaceDigest string                      `json:"workspace_digest"`
+	Tools           nativeAgentToolCapabilities `json:"tools"`
+}
+
+// nativeAgentReceiptContext is an immutable, child-owned snapshot of the
+// configuration that cmdChat actually applied. It is passed directly to the
+// receipt writer rather than recovered from ambient state or launch argv.
+type nativeAgentReceiptContext struct {
+	Enforcement nativeAgentEnforcement
+}
+
 type nativeAgentReceipt struct {
-	Schema       string            `json:"schema"`
-	Task         string            `json:"task"`
-	Model        string            `json:"model"`
-	Status       string            `json:"status,omitempty"`
-	TouchedPaths []string          `json:"touched_paths,omitempty"`
-	GitDiffHash  string            `json:"git_diff_hash,omitempty"`
-	FinalAnswer  string            `json:"final_answer,omitempty"`
-	Metrics      agent.ArmMetrics  `json:"metrics"`
-	Calls        *nativeAgentCalls `json:"calls,omitempty"`
+	Schema       string                  `json:"schema"`
+	Task         string                  `json:"task"`
+	Model        string                  `json:"model"`
+	Status       string                  `json:"status,omitempty"`
+	TouchedPaths []string                `json:"touched_paths,omitempty"`
+	GitDiffHash  string                  `json:"git_diff_hash,omitempty"`
+	FinalAnswer  string                  `json:"final_answer,omitempty"`
+	Metrics      agent.ArmMetrics        `json:"metrics"`
+	Calls        *nativeAgentCalls       `json:"calls,omitempty"`
+	Enforcement  *nativeAgentEnforcement `json:"enforcement,omitempty"`
 }
 
 func newNativeAgentReceipt(task, model string, metrics agent.ArmMetrics) nativeAgentReceipt {
@@ -170,7 +195,30 @@ func computeGitDiffHash(workspace string) string {
 	return fmt.Sprintf("sha256:%x", h)
 }
 
+func canonicalNativeReceiptWorkspace(workspace string) (string, error) {
+	abs, err := filepath.Abs(strings.TrimSpace(workspace))
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("workspace must be a directory")
+	}
+	return filepath.Clean(resolved), nil
+}
+
 func newHeadlessAgentReceipt(task, model string, metrics agent.ArmMetrics, calls []agent.CallTrace, workspace string, runErr error) nativeAgentReceipt {
+	return newHeadlessAgentReceiptWithContext(task, model, metrics, calls, workspace, runErr, nativeAgentReceiptContext{})
+}
+
+func newHeadlessAgentReceiptWithContext(task, model string, metrics agent.ArmMetrics, calls []agent.CallTrace, workspace string, runErr error, receiptContext nativeAgentReceiptContext) nativeAgentReceipt {
 	var status string
 	if runErr != nil {
 		status = "failed"
@@ -182,7 +230,7 @@ func newHeadlessAgentReceipt(task, model string, metrics agent.ArmMetrics, calls
 		status = "completed"
 	}
 
-	return nativeAgentReceipt{
+	receipt := nativeAgentReceipt{
 		Schema:       nativeAgentReceiptSchema,
 		Task:         task,
 		Model:        model,
@@ -193,6 +241,11 @@ func newHeadlessAgentReceipt(task, model string, metrics agent.ArmMetrics, calls
 		Metrics:      metrics,
 		Calls:        nativeAgentCallsFromTrace(calls),
 	}
+	if receiptContext.Enforcement.Schema != "" {
+		enforcement := receiptContext.Enforcement
+		receipt.Enforcement = &enforcement
+	}
+	return receipt
 }
 
 const rawAgentReceiptSchema = "agent.raw-receipt.v1"

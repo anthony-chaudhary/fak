@@ -178,17 +178,28 @@ func cmdChat(argv []string) {
 	}
 
 	var runOpts []agent.RunOption
+	policyDigest := guardPolicyDigest(guardDefaultPolicyJSON)
+	var effectivePosture adjudicator.Posture
 	if *cf.policyPath != "" {
+		policyDigest = configFileDigest(*cf.policyPath)
+		if policyDigest == "" {
+			must(fmt.Errorf("fak chat: policy digest unavailable"))
+		}
 		applyPolicy(*cf.policyPath)
+		if loadedDigest := configFileDigest(*cf.policyPath); loadedDigest != policyDigest {
+			must(fmt.Errorf("fak chat: policy changed while loading"))
+		}
 		effMode := parseChatMode(rawMode)
 		agent.SetConfiguredPosture(effMode)
 		snap := adjudicator.Default.PolicySnapshot()
 		if postureExplicit {
 			snap.Posture = effMode
 		}
+		effectivePosture = snap.Posture
 		runOpts = append(runOpts, agent.WithPolicySnapshot(snap))
 	} else {
 		initDevRules(rawMode)
+		effectivePosture = adjudicator.Default.PolicySnapshot().Posture
 	}
 
 	effectiveBaseURL := *cf.baseURL
@@ -221,6 +232,9 @@ func cmdChat(argv []string) {
 		root, err = os.Getwd()
 		must(err)
 	}
+	root, err := canonicalNativeReceiptWorkspace(root)
+	must(err)
+	receiptTools := nativeAgentToolCapabilities{}
 	useCodeTools := *cf.codeTools && *cf.tools != "demo" && *cf.tools != "none"
 	if *cf.tools == "code" || useCodeTools {
 		var extraDirs []string
@@ -242,6 +256,7 @@ func cmdChat(argv []string) {
 		defer agent.DisarmCodeTools()
 		catalog = append(catalog, codeCat...)
 		hasCustomCatalog = true
+		receiptTools.Skills = *cf.skills
 	}
 	if *cf.sysTools && *cf.tools != "demo" && *cf.tools != "none" {
 		sysCatalog, sysErr := agent.ArmSysTools(systools.Config{})
@@ -249,6 +264,7 @@ func cmdChat(argv []string) {
 		defer agent.DisarmSysTools()
 		catalog = append(catalog, sysCatalog...)
 		hasCustomCatalog = true
+		receiptTools.System = true
 	}
 	if *cf.mcpTools && *cf.tools != "demo" && *cf.tools != "none" {
 		mcpCatalog, mcpErr := agent.ArmMCPTools()
@@ -256,6 +272,7 @@ func cmdChat(argv []string) {
 		defer agent.DisarmMCPTools()
 		catalog = append(catalog, mcpCatalog...)
 		hasCustomCatalog = true
+		receiptTools.MCP = true
 	}
 	if hasCustomCatalog {
 		runOpts = append(runOpts, agent.WithToolCatalog(catalog))
@@ -264,6 +281,7 @@ func cmdChat(argv []string) {
 	}
 	if memOpt, _ := resolveAgentMemoryOption(*cf.memory, *cf.memoryStore, root); memOpt != nil {
 		runOpts = append(runOpts, memOpt)
+		receiptTools.Memory = true
 	}
 	if cf.reasoningProfile != nil && *cf.reasoningProfile != "" {
 		runOpts = append(runOpts, agent.WithReasoningProfile(*cf.reasoningProfile))
@@ -278,12 +296,35 @@ func cmdChat(argv []string) {
 		must(configureChatCodexSubscription(httpPlanner, *cf.codexHome))
 	}
 	if *cf.task != "" {
-		if err := runChatHeadless(os.Stdout, planner, *cf.task, *cf.maxTurns, *cf.asJSON, *cf.receiptOut, root, runOpts...); err != nil {
+		receiptContext := nativeAgentReceiptContext{}
+		if guardPosture, supported := nativeAgentPostureName(effectivePosture); supported {
+			receiptContext.Enforcement = nativeAgentEnforcement{
+				Schema:          nativeAgentEnforcementSchema,
+				GuardPosture:    guardPosture,
+				PolicyDigest:    policyDigest,
+				WorkspaceDigest: opsRunDigest(root),
+				Tools:           receiptTools,
+			}
+		}
+		if err := runChatHeadlessWithContext(os.Stdout, planner, *cf.task, *cf.maxTurns, *cf.asJSON, *cf.receiptOut, root, receiptContext, runOpts...); err != nil {
 			os.Exit(1)
 		}
 		return
 	}
 	runChatWithDisplay(os.Stdin, os.Stdout, planner, *cf.maxTurns, *cf.verbose, runOpts...)
+}
+
+func nativeAgentPostureName(posture adjudicator.Posture) (string, bool) {
+	switch posture {
+	case adjudicator.PostureFailClosed:
+		return "fail_closed", true
+	case adjudicator.PostureAdmitAndLog:
+		return "admit_and_log", true
+	case adjudicator.PostureDefaultOpen:
+		return "default_open", true
+	default:
+		return "", false
+	}
 }
 
 // chatPlanner picks the planner the REPL drives: the offline mock (no upstream)
@@ -329,13 +370,17 @@ func chatPlannerWithStderr(stderr io.Writer, offline bool, baseURL, provider, mo
 // any executed tool calls and the final answer directly to out, or outputting/writing
 // a structured execution receipt if asJSON is true or receiptOut is non-empty.
 func runChatHeadless(out io.Writer, planner agent.Planner, task string, maxTurns int, asJSON bool, receiptOut string, workspace string, opts ...agent.RunOption) error {
+	return runChatHeadlessWithContext(out, planner, task, maxTurns, asJSON, receiptOut, workspace, nativeAgentReceiptContext{}, opts...)
+}
+
+func runChatHeadlessWithContext(out io.Writer, planner agent.Planner, task string, maxTurns int, asJSON bool, receiptOut string, workspace string, receiptContext nativeAgentReceiptContext, opts ...agent.RunOption) error {
 	m, calls, err := agent.RunGovernedArm(ctx(), planner, task, maxTurns, opts...)
 	if asJSON || receiptOut != "" {
 		model := ""
 		if planner != nil {
 			model = planner.Model()
 		}
-		receipt := newHeadlessAgentReceipt(task, model, m, calls, workspace, err)
+		receipt := newHeadlessAgentReceiptWithContext(task, model, m, calls, workspace, err, receiptContext)
 		data, marshalErr := json.MarshalIndent(receipt, "", "  ")
 		if marshalErr != nil {
 			return marshalErr
