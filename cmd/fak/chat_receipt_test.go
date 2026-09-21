@@ -209,3 +209,113 @@ func TestChatReceiptGitDiffHash(t *testing.T) {
 		t.Fatalf("expected sha256:<64-hex> (len 71), got len %d: %q", len(recDirty.GitDiffHash), recDirty.GitDiffHash)
 	}
 }
+
+func TestNativeAgentEnforcementReceipt(t *testing.T) {
+	const helperEnv = "FAK_CHAT_ENFORCEMENT_RECEIPT_HELPER"
+	if os.Getenv(helperEnv) == "1" {
+		for i, arg := range os.Args {
+			if arg == "--" {
+				cmdChat(os.Args[i+1:])
+				return
+			}
+		}
+		t.Fatal("chat enforcement receipt helper missing -- separator")
+	}
+
+	type toolState struct {
+		System bool `json:"system"`
+		MCP    bool `json:"mcp"`
+		Skills bool `json:"skills"`
+		Memory bool `json:"memory"`
+	}
+	type enforcementEvidence struct {
+		Schema          string    `json:"schema"`
+		GuardPosture    string    `json:"guard_posture"`
+		PolicyDigest    string    `json:"policy_digest"`
+		WorkspaceDigest string    `json:"workspace_digest"`
+		Tools           toolState `json:"tools"`
+	}
+	type receiptEnvelope struct {
+		Schema      string               `json:"schema"`
+		Enforcement *enforcementEvidence `json:"enforcement"`
+	}
+
+	for _, tc := range []struct {
+		name  string
+		extra []string
+		want  toolState
+	}{
+		{name: "effective_enabled", want: toolState{System: true, MCP: true, Skills: true, Memory: true}},
+		{
+			name: "explicit_disabled",
+			extra: []string{
+				"--tools=none", "--code-tools=false", "--sys-tools=false", "--mcp-tools=false", "--skills=false", "--memory=false",
+			},
+			want: toolState{},
+		},
+		{
+			name: "skills_requested_without_code_tools",
+			extra: []string{
+				"--tools=none", "--code-tools=false", "--sys-tools=false", "--mcp-tools=false", "--skills=true", "--memory=false",
+			},
+			want: toolState{},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			buildTestMemoryStore(t, filepath.Join(workspace, ".fak", "memory"))
+			policyBytes := append([]byte(nil), guardDefaultPolicyJSON...)
+			policyPath := filepath.Join(workspace, "policy.json")
+			if err := os.WriteFile(policyPath, policyBytes, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			receiptPath := filepath.Join(t.TempDir(), "receipt.json")
+			args := []string{
+				os.Args[0], "-test.run=^TestNativeAgentEnforcementReceipt$", "--",
+				"--offline", "--task", "emit enforcement receipt", "--max-turns", "1",
+				"--receipt", receiptPath, "--code-workspace", workspace, "--policy", policyPath,
+			}
+			args = append(args, tc.extra...)
+			cmd := exec.Command(args[0], args[1:]...)
+			cmd.Env = append(os.Environ(), helperEnv+"=1", "FAK_AGENT_POSTURE=default_open", "FAK_GUARD_POSTURE=admit_and_log")
+			if output, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("real fak chat receipt producer failed: %v\n%s", err, output)
+			}
+
+			data, err := os.ReadFile(receiptPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var receipt receiptEnvelope
+			if err := json.Unmarshal(data, &receipt); err != nil {
+				t.Fatalf("decode native receipt: %v\n%s", err, data)
+			}
+			if receipt.Schema != nativeAgentReceiptSchema {
+				t.Fatalf("receipt schema = %q, want %q", receipt.Schema, nativeAgentReceiptSchema)
+			}
+			if receipt.Enforcement == nil {
+				t.Fatalf("receipt lacks child-originated enforcement evidence: %s", data)
+			}
+			got := receipt.Enforcement
+			if got.Schema != "fak.agent.native.enforcement.v1" {
+				t.Errorf("enforcement schema = %q", got.Schema)
+			}
+			if got.GuardPosture != "fail_closed" {
+				t.Errorf("effective guard posture = %q, want fail_closed", got.GuardPosture)
+			}
+			if want := guardPolicyDigest(policyBytes); got.PolicyDigest != want {
+				t.Errorf("policy digest = %q, want %q", got.PolicyDigest, want)
+			}
+			canonicalWorkspace, err := resolveOpsRunWorkspace(workspace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := opsRunDigest(canonicalWorkspace); got.WorkspaceDigest != want {
+				t.Errorf("workspace digest = %q, want %q", got.WorkspaceDigest, want)
+			}
+			if got.Tools != tc.want {
+				t.Errorf("effective tools = %+v, want %+v", got.Tools, tc.want)
+			}
+		})
+	}
+}
