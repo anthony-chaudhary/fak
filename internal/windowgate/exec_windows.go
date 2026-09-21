@@ -190,6 +190,20 @@ func ConfigureDetachedCommand(cmd *exec.Cmd) {
 	sysproc.ConfigureDetached(cmd)
 }
 
+// ConfigureDurableChildCommand prepares a headless worker spawn that must OUTLIVE
+// the launcher: the no-console flags PLUS CREATE_NEW_PROCESS_GROUP, deliberately
+// NOT DETACHED_PROCESS. Use it instead of ConfigureDetachedCommand for
+// `fak-flow spawn`, worktree adoption, and service-plane launch, where a
+// DETACHED_PROCESS child would be torn down with the launcher and leave 0-byte
+// worker logs (fak#13468).
+//
+// Unlike ConfigureDetachedCommand this ALLOCATES a console (hosted by
+// conhost.exe/OpenConsole.exe), so it pays the per-console cost #3597 removed for
+// short-lived work; durability is the trade the caller is opting into.
+func ConfigureDurableChildCommand(cmd *exec.Cmd) {
+	sysproc.ConfigureDurableChild(cmd)
+}
+
 // ConfigureWorkerCommand prepares a long-lived dispatched-worker / loop-child
 // spawn: the no-window background flags PLUS CREATE_NEW_PROCESS_GROUP so a
 // group-directed signal reaches the worker's whole tree. Pair it with

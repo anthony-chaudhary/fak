@@ -55,6 +55,37 @@ func TestConfigureDetached(t *testing.T) {
 	}
 }
 
+// TestConfigureDurableChild asserts the durability seam emits
+// CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP with HideWindow, and critically
+// does NOT set DETACHED_PROCESS (which would kill the child with the launcher,
+// fak#13468).
+func TestConfigureDurableChild(t *testing.T) {
+	cmd := exec.Command("cmd", "/c", "exit", "0")
+	// First configure as detached to prove ConfigureDurableChild clears it.
+	ConfigureDetached(cmd)
+	ConfigureDurableChild(cmd)
+
+	if cmd.SysProcAttr == nil {
+		t.Fatal("SysProcAttr is nil on Windows")
+	}
+	if !cmd.SysProcAttr.HideWindow {
+		t.Error("HideWindow is false, want true")
+	}
+	if cmd.SysProcAttr.CreationFlags&CreateNoWindow == 0 {
+		t.Errorf("CreationFlags=%#x missing CreateNoWindow (%#x)", cmd.SysProcAttr.CreationFlags, CreateNoWindow)
+	}
+	if cmd.SysProcAttr.CreationFlags&CreateNewProcessGroup == 0 {
+		t.Errorf("CreationFlags=%#x missing CreateNewProcessGroup (%#x)", cmd.SysProcAttr.CreationFlags, CreateNewProcessGroup)
+	}
+	if cmd.SysProcAttr.CreationFlags&DetachedProcess != 0 {
+		t.Errorf("CreationFlags=%#x must NOT set DetachedProcess (%#x): a detached child dies with its launcher", cmd.SysProcAttr.CreationFlags, DetachedProcess)
+	}
+}
+
+func TestConfigureDurableChildNilSafety(t *testing.T) {
+	ConfigureDurableChild(nil) // must not panic
+}
+
 func TestConfigureProcessGroup(t *testing.T) {
 	cmd := exec.Command("cmd", "/c", "exit", "0")
 	ConfigureProcessGroup(cmd)

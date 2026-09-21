@@ -26,6 +26,12 @@ func ConfigureBackgroundCommand(_ *exec.Cmd) {}
 // of dropping the controlling terminal.
 func ConfigureDetachedCommand(_ *exec.Cmd) {}
 
+// ConfigureDurableChildCommand is a no-op off Windows: there is no console object
+// to decline and setsid (applied by the dispatch spawn) already detaches the child
+// from the launcher's session and controlling terminal. Matches the Windows
+// durability seam so callers stay uniform across build tags (fak#13468).
+func ConfigureDurableChildCommand(_ *exec.Cmd) {}
+
 // JobObject is a no-op placeholder off Windows. POSIX teardown uses ordinary
 // process-group semantics (Setpgid + a group signal), so there is no job handle
 // to own; Close is always a nil-error no-op. Kept so callers can hold a
