@@ -148,14 +148,14 @@ func persistOpsRunNativeChildReceipt(receiptPath string, child nativeAgentReceip
 
 func qualifyOpsRunNativeEnforcement(child nativeAgentReceipt, identity opsRunNativeLaunchIdentityReceipt) bool {
 	evidence := child.Enforcement
-	encoded, err := json.Marshal(evidence)
-	return evidence != nil &&
-		err == nil &&
-		evidence.Schema == opsRunNativeEnforcementSchema &&
-		strings.Contains(string(encoded), `"guard_posture":"fail_closed"`) &&
-		evidence.PolicyDigest == identity.PolicyDigest &&
-		evidence.WorkspaceDigest == identity.WorkspaceDigest &&
-		!evidence.Tools.System && !evidence.Tools.MCP && !evidence.Tools.Skills && !evidence.Tools.Memory
+	expected := nativeAgentEnforcement{
+		opsRunNativeEnforcementSchema,
+		"fail_closed",
+		identity.PolicyDigest,
+		identity.WorkspaceDigest,
+		nativeAgentToolCapabilities{},
+	}
+	return evidence != nil && *evidence == expected
 }
 
 func failOpsRunNativeInferencePreflight(stderr io.Writer, receiptPath string, receipt opsRunNativeReceipt, preflight opsRunInferencePreflightReceipt) int {
