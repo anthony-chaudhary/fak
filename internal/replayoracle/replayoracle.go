@@ -64,7 +64,7 @@ func Belady(events []Event, budget int) Result {
 	sizes := make([]int, len(spanIDs))
 	for _, ev := range filtered {
 		idx := spanIndex[ev.SpanID]
-		if sizes[idx] == 0 {
+		if ev.Tokens > sizes[idx] {
 			sizes[idx] = ev.Tokens
 		}
 	}
@@ -108,8 +108,14 @@ func Belady(events []Event, budget int) Result {
 			return v
 		}
 
+		// A miss MUST admit the accessed span, so only subsets of mask|bit that
+		// contain bit are legal continuations. Seed with the sentinel -1 and let
+		// the enumerated legal candidates raise it: a state that omits the missed
+		// span (e.g. mask&^bit == mask) can exceed budget and would otherwise
+		// score a hit no real cache can reach, inflating the "exact" optimum.
+		// The miss itself contributes no hit tokens; only future reuses score.
 		candidates := mask | bit
-		bestFuture := best(pos+1, mask&^bit) // do not keep the missed span.
+		bestFuture := -1
 		for sub := candidates; ; sub = (sub - 1) & candidates {
 			if sub&bit != 0 && maskWeight(sub) <= budget {
 				if v := best(pos+1, sub); v > bestFuture {
@@ -119,6 +125,11 @@ func Belady(events []Event, budget int) Result {
 			if sub == 0 {
 				break
 			}
+		}
+		if bestFuture < 0 {
+			// No legal state admits the span (its size alone exceeds budget).
+			// The miss cannot be converted into a hit; continue without it.
+			bestFuture = best(pos+1, mask)
 		}
 		memo[k] = bestFuture
 		return bestFuture
