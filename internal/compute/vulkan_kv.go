@@ -264,21 +264,23 @@ type VulkanPackedKVAppendContract struct {
 // respecting 32MB MALL Infinity Cache line boundaries, all 40 attention heads stream contiguous
 // FP16/FP32 tiles into WMMA reduction, delivering a 3.26x throughput boost at 64k context (>= 230 tok/s).
 type VulkanKVScratchpad struct {
-	be             Backend
-	Arch           string          `json:"arch"`
-	Format         QuantizedKVType `json:"format"`
-	NumPos         int             `json:"num_pos"`
-	NumKVHeads     int             `json:"num_kv_heads"`
-	HeadDim        int             `json:"head_dim"`
-	TileTokens     int             `json:"tile_tokens"`
-	AllocatedBytes int64           `json:"allocated_bytes"`
-	TileBytes      int64           `json:"tile_bytes"`
-	ScratchK       []float32       `json:"-"`
-	ScratchV       []float32       `json:"-"`
-	DeviceBufK     any             `json:"-"`
-	DeviceBufV     any             `json:"-"`
-	DequantCount   int             `json:"dequant_count"` // Number of dequant passes executed (must be 1 per attention pass)
-	HeadReuses     int             `json:"head_reuses"`   // Number of head evaluations reusing scratchpad (e.g. 40 heads)
+	be               Backend
+	Arch             string          `json:"arch"`
+	Format           QuantizedKVType `json:"format"`
+	NumPos           int             `json:"num_pos"`
+	NumKVHeads       int             `json:"num_kv_heads"`
+	HeadDim          int             `json:"head_dim"`
+	TileTokens       int             `json:"tile_tokens"`
+	AllocatedBytes   int64           `json:"allocated_bytes"`
+	TileBytes        int64           `json:"tile_bytes"`
+	ScratchK         []float32       `json:"-"`
+	ScratchV         []float32       `json:"-"`
+	DeviceBufK       any             `json:"-"`
+	DeviceBufV       any             `json:"-"`
+	DequantCount     int             `json:"dequant_count"`     // Number of dequant passes executed (must be 1 per attention pass)
+	HeadReuses       int             `json:"head_reuses"`       // Number of head evaluations reusing scratchpad (e.g. 40 heads)
+	DeviceDispatches int             `json:"device_dispatches"` // Real Vulkan attention dispatches issued through this scratchpad
+	DeviceTransfers  int             `json:"device_transfers"`  // Device uploads of dequantized tiles through this scratchpad
 }
 
 // NewVulkanKVScratchpad allocates a contiguous transposed UMA scratchpad for dequantized KV tiles.
@@ -415,6 +417,8 @@ func (s *VulkanKVScratchpad) GetHeadSlice(headIdx int) (kHead, vHead []float32, 
 func (s *VulkanKVScratchpad) ResetReuse() {
 	s.DequantCount = 0
 	s.HeadReuses = 0
+	s.DeviceDispatches = 0
+	s.DeviceTransfers = 0
 }
 
 // SpeedupMultiplier returns the modeled throughput lift from eliminating the per-head dequantization tax.

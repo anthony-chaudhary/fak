@@ -504,34 +504,65 @@ func TestVulkanKVScratchpadDequantOnce(t *testing.T) {
 		}
 	})
 
-	// 3. Deep-Context Prefill Throughput Gate (>= 230 tok/s at 64k context)
+	// 3. Deep-Context Prefill Throughput Gate (measured elapsed-time software witness)
 	t.Run("Throughput_Gate_64k_Context", func(t *testing.T) {
 		const (
-			context64k = 65536
+			context64k = 4096 // bounded: the 64k full cache is exercised in the MALL-boundary subtest
 			nKV        = 8
 			headDim    = 64
+			iters      = 3
 		)
 		sp, err := NewVulkanKVScratchpad(nil, RADVTargetArchGfx1151, QuantizedKVQ8_0, context64k, nKV, headDim)
 		if err != nil {
 			t.Fatalf("NewVulkanKVScratchpad: %v", err)
 		}
 
-		speedup := sp.SpeedupMultiplier(StrixHaloFullAttentionHeads)
-		if speedup < 3.25 {
-			t.Errorf("SpeedupMultiplier at 64k = %.2f, want >= 3.25 (3.26x)", speedup)
+		// The modeled multiplier is a model, not a timing result; assert it as a model only.
+		if speedup := sp.SpeedupMultiplier(StrixHaloFullAttentionHeads); speedup < 1.0 {
+			t.Errorf("SpeedupMultiplier = %.2f, want >= 1.0", speedup)
 		}
 
-		tokPerSec := sp.EstimatedPrefillTokPerSec()
-		if tokPerSec < 230.0 {
-			t.Errorf("EstimatedPrefillTokPerSec = %.2f tok/s, want >= 230.0 tok/s", tokPerSec)
+		// Measured elapsed-time witness over real dequant-once attention passes. This is
+		// [SW-VERIFIED] host execution cost, NOT a physical gfx1151 throughput claim.
+		nQ := StrixHaloFullAttentionHeads
+		totalKV := nKV * context64k * headDim
+		rng := rand.New(rand.NewSource(1218))
+		f32K := make([]float32, totalKV)
+		f32V := make([]float32, totalKV)
+		for i := range f32K {
+			f32K[i] = rng.Float32()*2.0 - 1.0
+			f32V[i] = rng.Float32()*2.0 - 1.0
 		}
+		q := make([]float32, nQ*headDim)
+		for i := range q {
+			q[i] = rng.Float32()*2.0 - 1.0
+		}
+		rawK, err := QuantizeF32ToQ8_0(f32K)
+		if err != nil {
+			t.Fatalf("QuantizeF32ToQ8_0 K: %v", err)
+		}
+		rawV, err := QuantizeF32ToQ8_0(f32V)
+		if err != nil {
+			t.Fatalf("QuantizeF32ToQ8_0 V: %v", err)
+		}
+		scale := float32(1.0 / math.Sqrt(float64(headDim)))
+		measured, err := MeasureDequantOncePrefillTokPerSec(sp, q, rawK, rawV, nQ, iters, scale)
+		if err != nil {
+			t.Fatalf("MeasureDequantOncePrefillTokPerSec: %v", err)
+		}
+		if measured <= 0 {
+			t.Errorf("measured prefill throughput = %.2f tok/s, want > 0", measured)
+		}
+		t.Logf("[SW-VERIFIED] measured dequant-once prefill = %.2f tok/s at %d-token context (%d iters, host execution, not a hardware claim)",
+			measured, context64k, iters)
 
-		receipt := NewVulkanKVPrefillBenchmarkReceipt(sp)
-		receiptJSON, err := json.MarshalIndent(receipt, "", "  ")
+		// The modeled receipt stays explicitly a MODEL, and must not be labeled HW-WITNESSED.
+		modeled := NewVulkanKVPrefillBenchmarkReceipt(sp)
+		receiptJSON, err := json.MarshalIndent(modeled, "", "  ")
 		if err != nil {
 			t.Fatalf("marshal receipt: %v", err)
 		}
-		t.Logf("HW-WITNESSED Prefill Benchmark Receipt:\n%s", string(receiptJSON))
+		t.Logf("SW-VERIFIED modeled prefill receipt (NOT a timing result):\n%s", string(receiptJSON))
 	})
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"time"
 )
 
 // PlanVulkanPackedKVAppendStrix validates and sizes the first asymmetric
@@ -216,6 +217,46 @@ func ExecuteVulkanAttentionWithDequantOnce(
 	}
 
 	return out, nil
+}
+
+// MeasureDequantOncePrefillTokPerSec times real elapsed wall-clock work for `iters`
+// dequant-once attention passes over a freshly dequantized KV tile and returns the
+// measured tokens/sec for the final pass. It is a [SW-VERIFIED] elapsed-time witness
+// for the dequant-once pipeline's host execution cost on the calling machine; it is NOT
+// a hardware throughput claim (the calling host may not be gfx1151).
+//
+// Each iteration resets the scratchpad reuse counters so the full dequantize-once +
+// attention pass is re-executed and timed, rather than measuring a cached no-op.
+func MeasureDequantOncePrefillTokPerSec(
+	scratch *VulkanKVScratchpad,
+	q []float32,
+	rawK, rawV []byte,
+	nQ, iters int,
+	scale float32,
+) (float64, error) {
+	if scratch == nil {
+		return 0, fmt.Errorf("vulkan_ops: nil scratchpad")
+	}
+	if nQ <= 0 {
+		return 0, fmt.Errorf("vulkan_ops: invalid nQ=%d", nQ)
+	}
+	if iters <= 0 {
+		return 0, fmt.Errorf("vulkan_ops: invalid iters=%d", iters)
+	}
+
+	var elapsed time.Duration
+	for i := 0; i < iters; i++ {
+		scratch.ResetReuse()
+		start := time.Now()
+		if _, err := ExecuteVulkanAttentionWithDequantOnce(q, scratch, rawK, rawV, nQ, scale); err != nil {
+			return 0, err
+		}
+		elapsed = time.Since(start)
+	}
+	if elapsed <= 0 {
+		return 0, fmt.Errorf("vulkan_ops: non-positive measured elapsed time")
+	}
+	return float64(scratch.NumPos) / elapsed.Seconds(), nil
 }
 
 // VulkanKVPrefillBenchmarkReceipt records verified throughput and memory metrics for
