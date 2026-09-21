@@ -38,7 +38,7 @@ func TestHTTPMetricsEndpointExposesGatewayAndKernelCounters(t *testing.T) {
 	for _, want := range []string{
 		"# TYPE fak_gateway_up gauge",
 		"fak_gateway_up 1",
-		`fak_gateway_build_info{version="dev",engine="test",model="test-model",vdso="true"} 1`,
+		`fak_gateway_build_info{version="dev",dispatch_engine="test",planner="mock",model="test-model",vdso="true"} 1`,
 		`fak_gateway_http_requests_total{route="/v1/fak/syscall",method="POST",status="200"} 1`,
 		`fak_gateway_http_request_duration_seconds_count{route="/v1/fak/syscall",method="POST",status="200"} 1`,
 		`fak_gateway_operations_total{operation="syscall",verdict="ALLOW",reason="",refusal_subtype="",disposition="",by="test"} 1`,

@@ -262,9 +262,15 @@ func (s *Server) renderMetrics() string {
 	writeInflightRequestMetrics(&b, m)
 
 	writeScopeRefusalMetrics(&b, m)
-	writeHelpType(&b, "fak_gateway_build_info", "Static fak gateway build and runtime labels.", "gauge")
-	fmt.Fprintf(&b, "fak_gateway_build_info{version=\"%s\",engine=\"%s\",model=\"%s\",vdso=\"%s\"} 1\n",
-		promQuote(s.version), promQuote(s.engineID), promQuote(s.model), promQuote(strconv.FormatBool(s.k.VDSOEnabled())))
+	// dispatch_engine is the abi engine fak_syscall dispatches to — a CAPABILITY
+	// IDENTITY, NOT a serving mode. It is paired with planner, the /v1/* backend
+	// that actually answers chat, so a scrape can tell the two orthogonal axes
+	// apart. The label was named "engine" alone, which read as "this deployment
+	// serves mock text" on a live proxy serve; rename is deliberate (this metric
+	// is a static build label, not a per-turn counter series).
+	writeHelpType(&b, "fak_gateway_build_info", "Static fak gateway build and runtime labels: dispatch_engine = abi engine fak_syscall dispatches to (capability identity, not a serving mode); planner = /v1/chat/completions serving-mode backend.", "gauge")
+	fmt.Fprintf(&b, "fak_gateway_build_info{version=\"%s\",dispatch_engine=\"%s\",planner=\"%s\",model=\"%s\",vdso=\"%s\"} 1\n",
+		promQuote(s.version), promQuote(s.engineID), promQuote(plannerKind(s.planner)), promQuote(s.model), promQuote(strconv.FormatBool(s.k.VDSOEnabled())))
 
 	writeHttpRequestMetrics(&b, httpRows)
 
