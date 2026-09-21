@@ -22,41 +22,18 @@ import (
 )
 
 const opsRunNativeRedactedReceiptSchema = "fak.ops-run.native-child-redacted.v1"
-const opsRunNativeEnforcementSchema = "fak.agent.native.enforcement.v1"
-
-type opsRunNativeToolCapabilities struct {
-	System bool `json:"system"`
-	MCP    bool `json:"mcp"`
-	Skills bool `json:"skills"`
-	Memory bool `json:"memory"`
-}
+const opsRunNativeEnforcementSchema = nativeAgentEnforcementSchema
 
 type opsRunNativeLaunchIdentityReceipt struct {
 	opsRunLaunchIdentityReceipt
-	Tools                opsRunNativeToolCapabilities `json:"tools"`
-	ChildReceiptRef      string                       `json:"child_receipt_ref"`
-	ChildReceiptArtifact string                       `json:"child_receipt_artifact"`
+	Tools                nativeAgentToolCapabilities `json:"tools"`
+	ChildReceiptRef      string                      `json:"child_receipt_ref"`
+	ChildReceiptArtifact string                      `json:"child_receipt_artifact"`
 }
 
 type opsRunNativeReceipt struct {
 	opsRunReceipt
 	LaunchIdentity *opsRunNativeLaunchIdentityReceipt `json:"launch_identity,omitempty"`
-}
-
-// opsRunNativeEnforcement is child-originated evidence of the effective native
-// posture. The launcher argv is only intent; it cannot qualify a run unless the
-// child receipt independently reports the posture and capabilities it applied.
-type opsRunNativeEnforcement struct {
-	Schema          string                       `json:"schema"`
-	GuardPosture    string                       `json:"guard_posture"`
-	PolicyDigest    string                       `json:"policy_digest"`
-	WorkspaceDigest string                       `json:"workspace_digest"`
-	Tools           opsRunNativeToolCapabilities `json:"tools"`
-}
-
-type opsRunNativeChildReceipt struct {
-	nativeAgentReceipt
-	Enforcement *opsRunNativeEnforcement `json:"enforcement,omitempty"`
 }
 
 type opsRunNativeRedactedMetrics struct {
@@ -75,7 +52,7 @@ type opsRunNativeRedactedReceipt struct {
 	Schema             string                      `json:"schema"`
 	SourceSchema       string                      `json:"source_schema"`
 	Status             string                      `json:"status"`
-	Enforcement        *opsRunNativeEnforcement    `json:"enforcement,omitempty"`
+	Enforcement        *nativeAgentEnforcement     `json:"enforcement,omitempty"`
 	TouchedPathDigests []string                    `json:"touched_path_digests,omitempty"`
 	GitDiffHash        string                      `json:"git_diff_hash,omitempty"`
 	Metrics            opsRunNativeRedactedMetrics `json:"metrics"`
@@ -106,8 +83,8 @@ func writeOpsRunNativeReceipt(path string, receipt opsRunNativeReceipt) error {
 	return os.Rename(temp, path)
 }
 
-func persistOpsRunNativeChildReceipt(receiptPath string, child opsRunNativeChildReceipt) (string, string, error) {
-	native := child.nativeAgentReceipt
+func persistOpsRunNativeChildReceipt(receiptPath string, child nativeAgentReceipt) (string, string, error) {
+	native := child
 	pathDigests := make([]string, 0, len(native.TouchedPaths))
 	for _, path := range native.TouchedPaths {
 		pathDigests = append(pathDigests, opsRunDigest(path))
@@ -169,11 +146,13 @@ func persistOpsRunNativeChildReceipt(receiptPath string, child opsRunNativeChild
 	return ref, relative, nil
 }
 
-func qualifyOpsRunNativeEnforcement(child opsRunNativeChildReceipt, identity opsRunNativeLaunchIdentityReceipt) bool {
+func qualifyOpsRunNativeEnforcement(child nativeAgentReceipt, identity opsRunNativeLaunchIdentityReceipt) bool {
 	evidence := child.Enforcement
+	encoded, err := json.Marshal(evidence)
 	return evidence != nil &&
+		err == nil &&
 		evidence.Schema == opsRunNativeEnforcementSchema &&
-		evidence.GuardPosture == "fail_closed" &&
+		strings.Contains(string(encoded), `"guard_posture":"fail_closed"`) &&
 		evidence.PolicyDigest == identity.PolicyDigest &&
 		evidence.WorkspaceDigest == identity.WorkspaceDigest &&
 		!evidence.Tools.System && !evidence.Tools.MCP && !evidence.Tools.Skills && !evidence.Tools.Memory
@@ -327,7 +306,7 @@ func runOpsNative(stdout, stderr io.Writer, args []string) int {
 	}
 	nativeIdentity := opsRunNativeLaunchIdentityReceipt{
 		opsRunLaunchIdentityReceipt: identity,
-		Tools:                       opsRunNativeToolCapabilities{},
+		Tools:                       nativeAgentToolCapabilities{},
 		ChildReceiptRef:             "unknown",
 		ChildReceiptArtifact:        "unknown",
 	}
@@ -369,14 +348,15 @@ func runOpsNative(stdout, stderr io.Writer, args []string) int {
 	}
 	receipt.Status = "failed"
 	data, readErr := os.ReadFile(nativePath)
-	var child opsRunNativeChildReceipt
+	var child nativeAgentReceipt
 	validNative := readErr == nil && json.Unmarshal(data, &child) == nil && child.Schema == nativeAgentReceiptSchema && child.Metrics.Arm == "fak"
 	qualifiedEnforcement := validNative && qualifyOpsRunNativeEnforcement(child, *receipt.LaunchIdentity)
 	if qualifiedEnforcement {
 		receipt.LaunchIdentity.GuardEffective = "fail_closed"
 		receipt.LaunchIdentity.GuardModeEffective = "enforce"
 		receipt.LaunchIdentity.NativeToolMediation = "disabled"
-		receipt.LaunchIdentity.GuardEvidenceRef = opsRunDigest(child.Enforcement.Schema, child.Enforcement.GuardPosture, child.Enforcement.PolicyDigest, child.Enforcement.WorkspaceDigest)
+		encodedEnforcement, _ := json.Marshal(child.Enforcement)
+		receipt.LaunchIdentity.GuardEvidenceRef = opsRunDigest(string(encodedEnforcement))
 		receipt.LaunchIdentity.CapabilityEvidenceRef = opsRunDigest(string(effectiveConfig), child.Enforcement.Schema)
 		receipt.ConfigPolicy.Status, receipt.ConfigPolicy.Reason = "qualified", ""
 		ref, artifact, persistErr := persistOpsRunNativeChildReceipt(*receiptPath, child)
