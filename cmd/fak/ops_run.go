@@ -47,22 +47,24 @@ type opsRunReceipt struct {
 const opsRunLaunchIdentitySchema = "fak.ops-run.launch-identity.v1"
 
 type opsRunLaunchIdentityReceipt struct {
-	Schema                 string   `json:"schema"`
-	RunID                  string   `json:"run_id"`
-	Harness                string   `json:"harness"`
-	HarnessBinaryDigest    string   `json:"harness_binary_digest"`
-	ChildBinaryDigest      string   `json:"child_binary_digest"`
-	WorkspaceDigest        string   `json:"workspace_digest"`
-	ModelDigest            string   `json:"model_digest"`
-	RouteDigest            string   `json:"route_digest"`
-	EffectiveConfigDigest  string   `json:"effective_config_digest"`
-	PolicySource           string   `json:"policy_source"`
-	PolicyDigest           string   `json:"policy_digest"`
-	GuardRequested         string   `json:"guard_requested"`
-	GuardEffective         string   `json:"guard_effective"`
-	Auto                   bool     `json:"auto"`
-	Pure                   bool     `json:"pure"`
-	CapabilityEvidenceRefs []string `json:"capability_evidence_refs"`
+	Schema                string `json:"schema"`
+	RunID                 string `json:"run_id"`
+	Harness               string `json:"harness"`
+	BinaryVersion         string `json:"binary_version"`
+	BinaryDigest          string `json:"binary_digest"`
+	WorkspaceDigest       string `json:"workspace_digest"`
+	ModelDigest           string `json:"model_digest"`
+	RouteDigest           string `json:"route_digest"`
+	EffectiveConfigDigest string `json:"effective_config_digest"`
+	PolicySource          string `json:"policy_source"`
+	PolicyDigest          string `json:"policy_digest"`
+	GuardRequested        string `json:"guard_requested"`
+	GuardEffective        string `json:"guard_effective"`
+	GuardEvidenceRef      string `json:"guard_evidence_ref"`
+	InferenceProbeRef     string `json:"inference_probe_ref"`
+	CapabilityEvidenceRef string `json:"capability_evidence_ref"`
+	Auto                  bool   `json:"auto"`
+	Pure                  bool   `json:"pure"`
 }
 
 func opsRunDigest(parts ...string) string {
@@ -92,31 +94,33 @@ func opsRunFileDigest(path string) string {
 }
 
 func newOpsRunLaunchIdentity(runID, harness, workspace, provider, baseURL, model, opencodeBin, encodedConfig, policy string, auto, pure bool) opsRunLaunchIdentityReceipt {
-	policySource, policyDigest := "builtin_guard_default", "unknown"
+	policySource, policyDigest := "builtin", "unknown"
 	if strings.TrimSpace(policy) != "" {
-		policySource, policyDigest = "explicit_file", opsRunFileDigest(policy)
+		policySource, policyDigest = "flag", opsRunFileDigest(policy)
 	}
 	configDigest := "unknown"
 	if encodedConfig != "" {
 		configDigest = opsRunDigest(encodedConfig)
 	}
 	return opsRunLaunchIdentityReceipt{
-		Schema:                 opsRunLaunchIdentitySchema,
-		RunID:                  runID,
-		Harness:                harness,
-		HarnessBinaryDigest:    opsRunFileDigest(tuiExecutable()),
-		ChildBinaryDigest:      opsRunFileDigest(opencodeBin),
-		WorkspaceDigest:        opsRunDigest(workspace),
-		ModelDigest:            opsRunDigest(model),
-		RouteDigest:            opsRunDigest(provider, baseURL, model),
-		EffectiveConfigDigest:  configDigest,
-		PolicySource:           policySource,
-		PolicyDigest:           policyDigest,
-		GuardRequested:         "fail_closed",
-		GuardEffective:         "unknown",
-		Auto:                   auto,
-		Pure:                   pure,
-		CapabilityEvidenceRefs: []string{"unknown"},
+		Schema:                opsRunLaunchIdentitySchema,
+		RunID:                 runID,
+		Harness:               harness,
+		BinaryVersion:         "unknown",
+		BinaryDigest:          opsRunFileDigest(opencodeBin),
+		WorkspaceDigest:       opsRunDigest(workspace),
+		ModelDigest:           opsRunDigest(model),
+		RouteDigest:           opsRunDigest(provider, baseURL, model),
+		EffectiveConfigDigest: configDigest,
+		PolicySource:          policySource,
+		PolicyDigest:          policyDigest,
+		GuardRequested:        "fail_closed",
+		GuardEffective:        "unknown",
+		GuardEvidenceRef:      "unknown",
+		InferenceProbeRef:     "unknown",
+		CapabilityEvidenceRef: "unknown",
+		Auto:                  auto,
+		Pure:                  pure,
 	}
 }
 
@@ -124,14 +128,10 @@ func opsRunAddCapabilityEvidence(identity *opsRunLaunchIdentityReceipt, refs ...
 	if identity == nil {
 		return
 	}
-	identity.CapabilityEvidenceRefs = identity.CapabilityEvidenceRefs[:0]
 	for _, ref := range refs {
 		if strings.HasPrefix(ref, "sha256:") {
-			identity.CapabilityEvidenceRefs = append(identity.CapabilityEvidenceRefs, ref)
+			identity.InferenceProbeRef = ref
 		}
-	}
-	if len(identity.CapabilityEvidenceRefs) == 0 {
-		identity.CapabilityEvidenceRefs = append(identity.CapabilityEvidenceRefs, "unknown")
 	}
 }
 
@@ -701,7 +701,7 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	encoded, _ := json.Marshal(config)
 	identity := newOpsRunLaunchIdentity(runID, *harness, resolvedWorkspace, *provider, *baseURL, *model, *opencodeBin, string(encoded), *policy, *auto, *pure)
 	if *dryRun {
-		_ = json.NewEncoder(stdout).Encode(map[string]any{"schema": "fak-ops-run-plan/1", "harness": *harness, "provider": *provider, "workspace": resolvedWorkspace, "guarded": true, "prompt_delivery": "stdin", "timeout": timeout.String(), "auto": *auto, "pure": *pure, "config_policy": configPolicy})
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"schema": "fak-ops-run-plan/1", "harness": *harness, "provider": *provider, "workspace": resolvedWorkspace, "guarded": false, "prompt_delivery": "stdin", "timeout": timeout.String(), "auto": *auto, "pure": *pure, "config_policy": configPolicy})
 		return 0
 	}
 	env, cleanupEnv, err := opsRunChildEnvironment(string(encoded), *apiKeyEnv)
