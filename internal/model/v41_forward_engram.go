@@ -284,6 +284,127 @@ func (m *Model) v41EngramInject(l int, x [][]float32, seq []int, eps float32) er
 	return nil
 }
 
+// V41EngramWarmDelta reports the cache-counter movement caused by one
+// WarmV41EngramPrefix call. It is the machine-checkable receipt the startup
+// warmer hands to its caller: a no-op warm (cold-only, unsupported model, or a
+// fully resident prefix) reports zero on `Reads`/`BytesRead` rather than a
+// success with no work.
+type V41EngramWarmDelta struct {
+	// Layers is the number of declared Engram layers touched.
+	Layers int `json:"layers"`
+	// Requested is the number of row addresses presented to the caches.
+	Requested int64 `json:"requested"`
+	// Hits is the number of requested rows already resident before this call.
+	Hits int64 `json:"hits"`
+	// Misses is the number of requested rows that required a backing read.
+	Misses int64 `json:"misses"`
+	// BytesRead is the number of backing bytes read by this call.
+	BytesRead int64 `json:"bytes_read"`
+}
+
+// Resident reports whether the call left every requested row resident (no
+// requested row needed a backing read) and at least one row was requested.
+func (d V41EngramWarmDelta) Resident() bool { return d.Requested > 0 && d.Misses == 0 }
+
+// WarmV41EngramPrefix prefetches the Engram rows a token prefix will consume
+// into the very caches the reduced forward reads, WITHOUT dequantizing,
+// projecting, or advancing any live hash history. It is the bounded public entry
+// point the startup warmer (CW-11) binds to; warming a detached stream would
+// fill caches the forward never touches, so this method drives the
+// model-attached stage directly.
+//
+// The row addresses are derived from the stage's own hash layout by hashing the
+// prefix with a fresh state — exactly the sequence-start schedule the reduced
+// forward recomputes each call (see v41EngramInject) — so a following forward
+// over the same tokens sees cache hits. Binding is verified before any read: a
+// model with no V4.1 config, no declared Engram layers, no wired stage, or a
+// stage whose per-layer geometry disagrees with the hash layout is refused with
+// ErrV41NativeUnsupported rather than reporting a warm success.
+//
+// A cold fallback is always preserved: an unsupported model returns
+// ErrV41NativeUnsupported and callers keep serving un-warmed.
+func (m *Model) WarmV41EngramPrefix(tokens []int, mask []bool) (V41EngramWarmDelta, error) {
+	var zero V41EngramWarmDelta
+	if m == nil || m.Cfg.DeepSeekV41 == nil {
+		return zero, fmt.Errorf("%w: Engram warm needs a V4.1 config", ErrV41NativeUnsupported)
+	}
+	if len(m.Cfg.DeepSeekV41.EngramLayerIDs) == 0 {
+		return zero, fmt.Errorf("%w: model declares no Engram layers", ErrV41NativeUnsupported)
+	}
+	stage := m.v41EngramStageFor()
+	if stage == nil {
+		return zero, fmt.Errorf("%w: Engram stage is not wired", ErrV41NativeUnsupported)
+	}
+	if len(stage.caches) != len(stage.layout.Rows) || len(stage.layerIDs) != len(stage.caches) {
+		return zero, fmt.Errorf("%w: Engram stage geometry is inconsistent", ErrV41NativeUnsupported)
+	}
+
+	// Hash the prefix from a fresh state. The reduced forward recomputes the
+	// whole history each call, so a fresh hash (tails start DEAD) is exactly the
+	// sequence-start schedule the forward will re-derive; nothing live is touched.
+	hash, err := NewV41EngramHashState(stage.layout)
+	if err != nil {
+		return zero, v41StageErr(v41StageEngram, -1, fmt.Errorf("%w: %v", ErrV41NativeUnsupported, err))
+	}
+	rows, err := hash.Hash(tokens, mask)
+	if err != nil {
+		return zero, v41StageErr(v41StageEngram, -1, fmt.Errorf("%w: %v", ErrV41NativeUnsupported, err))
+	}
+	cols := stage.columns
+	layers := len(stage.caches)
+	stride := layers * cols
+	if stride <= 0 || len(rows)%stride != 0 {
+		return zero, v41StageErr(v41StageEngram, -1,
+			fmt.Errorf("%w: hashed row geometry is not a whole number of tokens", ErrV41NativeUnsupported))
+	}
+
+	// Take the before-snapshot, then establish residency for each requested
+	// address in that layer's own cache. V41EngramRowCache.Row only prefetches
+	// forward from idx+1 and never retains idx itself (see v41_cache.go:223-249),
+	// so warming must read the row AND store it: a following forward's
+	// GatherV41EngramRows -> Row(rowID) then hits exactly these entries. A
+	// repeated address within one layer is read once; the store makes the second
+	// lookup a hit.
+	before := make([]V41EngramRowStats, layers)
+	for i, cache := range stage.caches {
+		before[i] = cache.Stats()
+	}
+	for layer, cache := range stage.caches {
+		seen := make(map[uint32]struct{}, len(rows)/layers)
+		for token := 0; token < len(rows)/stride; token++ {
+			lo := token*stride + layer*cols
+			for _, row := range rows[lo : lo+cols] {
+				if _, ok := seen[row]; ok {
+					continue
+				}
+				seen[row] = struct{}{}
+				payload, err := cache.Row(int(row))
+				if err != nil {
+					return zero, v41StageErr(v41StageEngram, stage.layerIDs[layer],
+						fmt.Errorf("%w: %v", ErrV41NativeUnsupported, err))
+				}
+				if err := cache.inner.Put(0, int(row), payload); err != nil {
+					return zero, v41StageErr(v41StageEngram, stage.layerIDs[layer],
+						fmt.Errorf("%w: %v", ErrV41NativeUnsupported, err))
+				}
+			}
+		}
+	}
+
+	// Project the delta from the counter snapshots. Every field is additive and
+	// monotone, so a concurrent caller can only shrink the delta, never inflate it.
+	var delta V41EngramWarmDelta
+	delta.Layers = layers
+	for i, cache := range stage.caches {
+		now := cache.Stats()
+		delta.Hits += now.Hits - before[i].Hits
+		delta.Misses += now.Misses - before[i].Misses
+		delta.BytesRead += now.BytesRead - before[i].BytesRead
+	}
+	delta.Requested = delta.Hits + delta.Misses
+	return delta, nil
+}
+
 // ---- scalar helpers (kept local so the Engram math is self-contained) --------
 
 func absf(x float32) float32 {
