@@ -703,6 +703,143 @@ func requireOpsRunLaunchIdentity(t *testing.T, receipt map[string]any) map[strin
 	return identity
 }
 
+// TestOpsRunPi fixes the harness-selection contract at the ops boundary. Pi is
+// selected once, before execution, and uses its documented LF-delimited RPC
+// mode; terminal evidence is then normalized by the common receipt lifecycle.
+func TestOpsRunPi(t *testing.T) {
+	t.Setenv("OPENCODE_CONFIG_CONTENT", "")
+	gateway := newOpsRunQualifiedGateway(t)
+
+	for _, tc := range []struct {
+		name       string
+		execute    func(context.Context) (int, bool, bool)
+		wantCode   int
+		wantStatus string
+	}{
+		{
+			name: "settled_tool_turn_succeeds",
+			execute: func(context.Context) (int, bool, bool) {
+				return 0, true, false
+			},
+			wantCode:   0,
+			wantStatus: "succeeded",
+		},
+		{
+			name: "malformed_terminal_event_fails_closed",
+			execute: func(context.Context) (int, bool, bool) {
+				return 0, false, true
+			},
+			wantCode:   1,
+			wantStatus: "failed",
+		},
+		{
+			name: "side_effect_then_failure_never_retries_another_harness",
+			execute: func(context.Context) (int, bool, bool) {
+				return 17, false, false
+			},
+			wantCode:   17,
+			wantStatus: "failed",
+		},
+		{
+			name: "deadline_cancels_the_selected_pi_child",
+			execute: func(ctx context.Context) (int, bool, bool) {
+				<-ctx.Done()
+				return 124, false, false
+			},
+			wantCode:   124,
+			wantStatus: "timed_out",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			promptPath := filepath.Join(dir, "prompt.txt")
+			receiptPath := filepath.Join(dir, "receipt.json")
+			piPath := filepath.Join(dir, "pi-fixture")
+			if runtime.GOOS == "windows" {
+				piPath += ".exe"
+			}
+			if err := os.WriteFile(promptPath, []byte("perform one deterministic tool turn\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(piPath, []byte("deterministic Pi fixture\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+
+			old := opsRunExecute
+			t.Cleanup(func() { opsRunExecute = old })
+			var launches atomic.Int64
+			opsRunExecute = func(ctx context.Context, _ io.Writer, _ io.Writer, argv, env []string, stdin []byte) (int, bool, bool, []opsRunLifecycleRecord) {
+				launches.Add(1)
+				joined := strings.Join(argv, "\x00")
+				for _, required := range []string{"guard", "--", piPath, "--mode", "rpc", "--no-session", "--provider", "fak", "--model", "fixture"} {
+					if !strings.Contains(joined, required) {
+						t.Errorf("Pi argv lacks %q: %q", required, argv)
+					}
+				}
+				if strings.Contains(joined, "opencode") {
+					t.Errorf("Pi selection fell through to OpenCode: %q", argv)
+				}
+				var command struct {
+					Type    string `json:"type"`
+					Message string `json:"message"`
+				}
+				if err := json.Unmarshal(bytes.TrimSpace(stdin), &command); err != nil || command.Type != "prompt" || command.Message != "perform one deterministic tool turn" {
+					t.Errorf("Pi stdin is not one RPC prompt command: %q (decoded=%+v err=%v)", stdin, command, err)
+				}
+				if !opsRunEnvHasNonempty(env, "PI_CODING_AGENT_DIR") {
+					t.Error("Pi child lacks run-scoped PI_CODING_AGENT_DIR")
+				}
+				code, complete, eventError := tc.execute(ctx)
+				return code, complete, eventError, nil
+			}
+
+			timeout := "2s"
+			if tc.wantStatus == "timed_out" {
+				timeout = "20ms"
+			}
+			var stderr bytes.Buffer
+			code := runOpsRun(io.Discard, &stderr, []string{
+				"--harness", "pi",
+				"--workspace", dir,
+				"--prompt-file", promptPath,
+				"--receipt", receiptPath,
+				"--provider", "openai",
+				"--model", "fixture",
+				"--base-url", gateway.URL + "/v1",
+				"--pi-bin", piPath,
+				"--timeout", timeout,
+			})
+			if code != tc.wantCode {
+				t.Fatalf("ops run Pi exit=%d want=%d: %s", code, tc.wantCode, stderr.String())
+			}
+			if got := launches.Load(); got != 1 {
+				t.Fatalf("Pi launch count=%d want=1 (selection must not retry/fallback)", got)
+			}
+			data, err := os.ReadFile(receiptPath)
+			if err != nil {
+				t.Fatalf("read Pi receipt: %v", err)
+			}
+			var receipt opsRunReceipt
+			if err := json.Unmarshal(data, &receipt); err != nil {
+				t.Fatalf("decode Pi receipt: %v", err)
+			}
+			if receipt.Harness != "pi" || receipt.Status != tc.wantStatus {
+				t.Fatalf("Pi receipt harness/status=%q/%q want pi/%s: %s", receipt.Harness, receipt.Status, tc.wantStatus, data)
+			}
+		})
+	}
+}
+
+func opsRunEnvHasNonempty(env []string, key string) bool {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) && strings.TrimPrefix(entry, prefix) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func TestOpsRunGuardMode(t *testing.T) {
 	t.Setenv("OPENCODE_CONFIG_CONTENT", "")
 	t.Setenv("FAK_OPS_GUARD_MODE", "")
