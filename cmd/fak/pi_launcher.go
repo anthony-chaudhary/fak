@@ -190,6 +190,19 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
+	// Pin Pi's harness DEFAULT onto the fak router. A plain `pi` launch (no --provider/
+	// --model flags) resolves defaultProvider/defaultModel from settings.json, so without
+	// this the `fak` provider written above is configured but never used by default. Same
+	// non-clobbering discipline as models.json and compaction; idempotent.
+	if launch.writeConfig {
+		dPath, dModified, dErr := projectassets.EnsurePiDefaultProviderModel(*settingsPath, launch.provider, launch.model)
+		if dErr != nil && !launch.quiet {
+			fmt.Fprintf(stderr, "fak pi: warning: could not pin Pi default provider/model in %s: %v\n", dPath, dErr)
+		} else if dModified && !launch.quiet {
+			fmt.Fprintf(stderr, "fak pi: pinned Pi default to provider %q model %q in %s\n", launch.provider, launch.model, dPath)
+		}
+	}
+
 	argvOut := buildPiLaunchArgv(launch)
 
 	if launch.dryRun {
@@ -396,6 +409,18 @@ func runPiConfig(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stdout, "fak pi config: wrote safe compaction to %s (reserveTokens: %d, keepRecentTokens: %d)\n", sPath, budget.OutputReserve, budget.KeepRecentTokens)
 		} else {
 			fmt.Fprintf(stdout, "fak pi config: %s already has a safe compaction block\n", sPath)
+		}
+		// Pin the harness default so a bare `pi` launch uses the fak router, not merely
+		// having it configured in models.json.
+		dPath, dModified, dErr := projectassets.EnsurePiDefaultProviderModel(*settingsPath, projectassets.DefaultPiProviderID, *model)
+		if dErr != nil {
+			fmt.Fprintf(stderr, "fak pi config: %v\n", dErr)
+			return 1
+		}
+		if dModified {
+			fmt.Fprintf(stdout, "fak pi config: pinned Pi default to provider %q model %q in %s\n", projectassets.DefaultPiProviderID, *model, dPath)
+		} else {
+			fmt.Fprintf(stdout, "fak pi config: %s already defaults to provider %q model %q\n", dPath, projectassets.DefaultPiProviderID, *model)
 		}
 		return 0
 	}

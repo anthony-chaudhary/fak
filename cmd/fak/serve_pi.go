@@ -53,6 +53,16 @@ func runServePiConfig(sf *serveFlags, out io.Writer, write bool) {
 		if sModified {
 			fmt.Fprintf(out, "fak serve: wrote safe Pi compaction to %s\n", settingsPath)
 		}
+		// Pin the harness default onto the fak router so a bare `pi` launch (no flags)
+		// actually uses the provider written above. See projectassets/pi_default.go.
+		dPath, dModified, dErr := projectassets.EnsurePiDefaultProviderModel("", projectassets.DefaultPiProviderID, modelID)
+		if dErr != nil {
+			fmt.Fprintf(out, "fak serve: update %s: %v\n", dPath, dErr)
+			os.Exit(1)
+		}
+		if dModified {
+			fmt.Fprintf(out, "fak serve: pinned Pi default to provider %q model %q in %s\n", projectassets.DefaultPiProviderID, modelID, dPath)
+		}
 		return
 	}
 	raw, err := projectassets.GeneratePiConfigForWindow(baseURL, modelID, projectassets.DefaultPiServedWindow)
