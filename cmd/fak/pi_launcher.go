@@ -34,6 +34,7 @@ type piLaunchOptions struct {
 	quiet        bool
 	command      string
 	provider     string
+	skillPack    string
 	passthrough  []string
 }
 
@@ -206,6 +207,7 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		quiet:        *quiet,
 		command:      *command,
 		provider:     projectassets.DefaultPiProviderID,
+		skillPack:    discoverPiSkillPack(""),
 		passthrough:  fs.Args(),
 	}
 
@@ -260,6 +262,11 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "  backend     = %s (raw without guard)\n", launch.baseURL)
 		fmt.Fprintf(stderr, "  provider    = %s\n", launch.provider)
 		fmt.Fprintf(stderr, "  model       = %s (%s)\n", launch.model, piModelSource(*model, adoptedDetected))
+		if launch.skillPack != "" {
+			fmt.Fprintf(stderr, "  skills      = %s\n", launch.skillPack)
+		} else {
+			fmt.Fprintln(stderr, "  skills      = (no project skill pack discovered)")
+		}
 		fmt.Fprintf(stderr, "  context     = resident target %d tokens (safe 50%% of %d served window, %s)\n", budget.ResidentTarget, budget.ServedWindow, budget.Provenance)
 		fmt.Fprintf(stderr, "  compaction  = reserve %d, keep %d (write=%t)\n", budget.OutputReserve, budget.KeepRecentTokens, *safeSettings)
 		fmt.Fprintln(stderr, "  command     = "+strings.Join(argvOut, " "))
@@ -431,8 +438,62 @@ func buildPiLaunchArgv(opts piLaunchOptions) []string {
 	if opts.tools != "" {
 		argv = append(argv, "--tools", opts.tools)
 	}
+	// Wire the project skill pack into Pi. Pi discovers .agents/skills only when the
+	// working directory is a project that ships them, so a launch from elsewhere loses
+	// the pack. --skill makes it explicit and location-independent; it is repeatable,
+	// so emit one flag per discovered skill root.
+	if opts.skillPack != "" {
+		for _, root := range strings.Split(opts.skillPack, string(os.PathListSeparator)) {
+			if root = strings.TrimSpace(root); root != "" {
+				argv = append(argv, "--skill", root)
+			}
+		}
+	}
 	argv = append(argv, opts.passthrough...)
 	return argv
+}
+
+// defaultPiSkillPackRoots lists the project-asset skill roots Pi understands, in
+// preference order: the generated .agents/skills adapters (Pi-native discovery dir)
+// and the canonical .claude/skills pack. Both are relative to a project root.
+var defaultPiSkillPackRoots = []string{
+	filepath.Join(".agents", "skills"),
+	filepath.Join(".claude", "skills"),
+}
+
+// discoverPiSkillPack walks up from startDir looking for the first directory that
+// contains a project skill pack, and returns the discovered skill root directories
+// joined by the OS path-list separator (empty when none is found). Walking up means
+// `fak pi` launched from a subdirectory of a fak project still resolves the pack.
+// The FAK_PI_SKILLS environment variable overrides discovery when set.
+func discoverPiSkillPack(startDir string) string {
+	if override := strings.TrimSpace(os.Getenv("FAK_PI_SKILLS")); override != "" {
+		return override
+	}
+	dir := startDir
+	if dir == "" {
+		dir, _ = os.Getwd()
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	for {
+		var found []string
+		for _, rel := range defaultPiSkillPackRoots {
+			candidate := filepath.Join(dir, rel)
+			if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+				found = append(found, candidate)
+			}
+		}
+		if len(found) > 0 {
+			return strings.Join(found, string(os.PathListSeparator))
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }
 
 func execPiLaunchChild(stdout, stderr io.Writer, argv, env []string) int {

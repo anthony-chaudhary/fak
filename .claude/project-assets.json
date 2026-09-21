@@ -23,6 +23,7 @@
     "claude": {"skills": "canonical .claude/skills", "memories": "canonical .claude/memory", "goal_prompts": "classified canonical templates"},
     "codex": {"skills": "generated .agents/skills adapters", "memories": "startup recall command", "goal_prompts": "classified canonical templates"},
     "fak-native": {"skills": "manifest canonical paths", "memories": "startup recall command", "goal_prompts": "manifest classified templates"},
-    "opencode": {"skills": "generated .agents/skills adapters", "memories": "startup recall command", "goal_prompts": "classified canonical templates"}
+    "opencode": {"skills": "generated .agents/skills adapters", "memories": "startup recall command", "goal_prompts": "classified canonical templates"},
+    "pi": {"skills": "generated .agents/skills adapters passed explicitly via fak pi --skill", "memories": "startup recall command", "goal_prompts": "classified canonical templates"}
   }
 }

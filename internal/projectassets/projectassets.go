@@ -541,6 +541,9 @@ func Build(root string, write bool) (Receipt, error) {
 	sort.Strings(codexImports)
 	r.Harnesses["codex"] = HarnessReceipt{all, codexImports, ex, dup, stale}
 	r.Harnesses["opencode"] = HarnessReceipt{all, codexImports, ex, dup, stale}
+	// Pi consumes the generated .agents/skills adapters the same way codex/opencode do;
+	// it differs only in that cmd/fak's launcher passes them explicitly via --skill.
+	r.Harnesses["pi"] = HarnessReceipt{all, codexImports, ex, dup, stale}
 	nativeImports := append(append([]string{}, canon...), prompts...)
 	nativeImports = append(nativeImports, m.Memories.StartupCommand)
 	sort.Strings(nativeImports)
@@ -548,7 +551,11 @@ func Build(root string, write bool) (Receipt, error) {
 	_, cok := m.Harnesses["codex"]
 	_, nok := m.Harnesses["fak-native"]
 	_, ook := m.Harnesses["opencode"]
-	r.ZeroUnexplainedGaps = len(dup) == 0 && len(stale) == 0 && cok && nok && ook
+	// The pi harness is derived (not manifest-declared): every project that ships the
+	// generated .agents/skills adapters can be driven by `fak pi --skill`, so its
+	// receipt must exist and carry no stale entries, exactly like codex/opencode.
+	piStale := len(r.Harnesses["pi"].Stale) == 0
+	r.ZeroUnexplainedGaps = len(dup) == 0 && len(stale) == 0 && cok && nok && ook && piStale
 	if write {
 		opencodeDir := filepath.Join(root, ".opencode")
 		pluginPath := filepath.Join(root, filepath.FromSlash(OpenCodePluginPath))
@@ -590,7 +597,7 @@ func EnsureSync(root string) (Receipt, bool, error) {
 		}
 	}
 
-	if err == nil && r.ZeroUnexplainedGaps && len(r.Harnesses["codex"].Stale) == 0 && len(r.Harnesses["opencode"].Stale) == 0 && !pluginNeedsSync {
+	if err == nil && r.ZeroUnexplainedGaps && !pluginNeedsSync {
 		return r, false, nil
 	}
 

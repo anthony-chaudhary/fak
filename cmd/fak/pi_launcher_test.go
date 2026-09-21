@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/projectassets"
 )
 
 func TestBuildPiLaunchArgv(t *testing.T) {
@@ -503,4 +505,105 @@ func TestRunPiConfigWriteSafeContext(t *testing.T) {
 	if _, hasKeep := block["keepRecentTokens"]; !hasKeep {
 		t.Fatal("compaction.keepRecentTokens missing")
 	}
+}
+
+// TestPiLaunchSkillWiring is the witness for fak#13462: the launcher must
+// explicitly pass the discovered project skill pack to Pi via repeatable
+// --skill flags, so the pack survives launches whose working directory is not
+// the project root (Pi only auto-discovers .agents/skills from cwd).
+func TestPiLaunchSkillWiring(t *testing.T) {
+	root := t.TempDir()
+	agentsSkills := filepath.Join(root, ".agents", "skills")
+	if err := os.MkdirAll(filepath.Join(agentsSkills, "goal"), 0o755); err != nil {
+		t.Fatalf("mkdir .agents/skills: %v", err)
+	}
+	claudeSkills := filepath.Join(root, ".claude", "skills")
+	if err := os.MkdirAll(filepath.Join(claudeSkills, "fak-flow"), 0o755); err != nil {
+		t.Fatalf("mkdir .claude/skills: %v", err)
+	}
+
+	// Discovery walks up from a nested working directory, so launching from a
+	// subdirectory of the project still resolves the pack.
+	nested := filepath.Join(root, "cmd", "fak")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+	got := discoverPiSkillPack(nested)
+	wantRoots := []string{agentsSkills, claudeSkills}
+	for _, want := range wantRoots {
+		if !strings.Contains(got, want) {
+			t.Errorf("discoverPiSkillPack(%q) = %q, want it to contain %q", nested, got, want)
+		}
+	}
+
+	argv := buildPiLaunchArgv(piLaunchOptions{command: "pi", provider: "fak", model: "m", skillPack: got})
+	want := []string{
+		"pi", "--provider", "fak", "--model", "m",
+		"--skill", agentsSkills,
+		"--skill", claudeSkills,
+	}
+	if len(argv) != len(want) {
+		t.Fatalf("argv length = %d, want %d: %v", len(argv), len(want), argv)
+	}
+	for i := range argv {
+		if argv[i] != want[i] {
+			t.Errorf("argv[%d] = %q, want %q", i, argv[i], want[i])
+		}
+	}
+
+	// No pack discovered -> no --skill flags (never emit an empty path).
+	if argv := buildPiLaunchArgv(piLaunchOptions{command: "pi"}); len(argv) != 1 {
+		t.Errorf("argv without a skill pack = %v, want just the command", argv)
+	}
+
+	// An explicit override wins over filesystem discovery.
+	t.Setenv("FAK_PI_SKILLS", filepath.Join(root, "custom"))
+	if got := discoverPiSkillPack(nested); got != filepath.Join(root, "custom") {
+		t.Errorf("FAK_PI_SKILLS override = %q, want the custom root", got)
+	}
+}
+
+// TestPiHarnessRegisteredInManifest is the witness for the second half of
+// fak#13462: the project-assets sync must reconcile a "pi" harness entry the
+// same way it does for codex/opencode, and its absence must be an unexplained gap.
+func TestPiHarnessRegisteredInManifest(t *testing.T) {
+	root := t.TempDir()
+	manifest := `{
+  "schema": "fak-project-assets/1",
+  "skills": {"canonical_root": ".claude/skills", "codex_root": ".agents/skills", "include": ["SKILL.md"], "exclude": []},
+  "memories": {"canonical_root": ".claude/memory", "include": ["*.md"], "exclude": []},
+  "goal_prompts": {"canonical_root": ".claude/goal-prompts", "include": ["*.md"], "exclude": []},
+  "harnesses": {}
+}`
+	if err := os.MkdirAll(filepath.Join(root, ".claude"), 0o755); err != nil {
+		t.Fatalf("mkdir .claude: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".claude", "project-assets.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	receipt, err := projectassets.Build(root, false)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if _, ok := receipt.Harnesses["pi"]; !ok {
+		t.Fatalf("receipt has no pi harness; harnesses = %v", keys(receipt.Harnesses))
+	}
+	// The pi receipt is derived, not manifest-declared, so it must reconcile cleanly
+	// (no stale adapters) exactly like the codex/opencode receipts it mirrors.
+	if got := receipt.Harnesses["pi"]; len(got.Stale) != 0 {
+		t.Errorf("pi harness has stale entries %v; it must track the generated .agents/skills adapters", got.Stale)
+	}
+	pi, opencode := receipt.Harnesses["pi"], receipt.Harnesses["opencode"]
+	if len(pi.Imported) != len(opencode.Imported) {
+		t.Errorf("pi imported %d entries, opencode imported %d; pi must mirror the same adapter set", len(pi.Imported), len(opencode.Imported))
+	}
+}
+
+func keys(m map[string]projectassets.HarnessReceipt) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
