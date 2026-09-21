@@ -74,6 +74,98 @@ func ShouldAdoptDetectedPiModel(target, explicitModel, detectedModel string) boo
 	return existing == ""
 }
 
+// resolvePiWindowRow is lookupPiModelWindow without the value: it reports whether the
+// registry names this model id (exact id, alias, or family glob).
+func resolvePiWindowRow(modelID string) bool {
+	_, ok := lookupPiModelWindow(modelID)
+	return ok
+}
+
+// IsPiKnownModel reports whether fak has a per-model entry for this id in the served-window
+// registry (see pi_model_windows.go). A registered id is a model fak knows how to route and
+// size, so it is a plausible deliberate default even when the backend currently answering the
+// liveness probe does not advertise it (a routing-mode router only lists the models whose
+// backends are up, and /healthz names just the local engine).
+//
+// This is the companion to IsPiModelAdvertised: advertised-OR-known is the test for
+// "a deliberate default", while neither is the test for "a stale placeholder" that the
+// launcher is allowed to replace. Matching tolerates case, surrounding space, and a
+// provider-qualified form, exactly like the registry itself.
+func IsPiKnownModel(modelID string) bool {
+	return resolvePiWindowRow(modelID)
+}
+
+// PiDefaultModelIsDeliberate reports whether an existing settings.json defaultModel must be
+// honored rather than replaced by a backend-detected id. It is true when the id is one fak's
+// per-model registry knows OR one the backend actually advertises; false only for an id that
+// is neither AND that a live catalog positively omits (a stale placeholder such as
+// `custom-model`, which would otherwise be re-confirmed forever).
+//
+// An EMPTY advertised set returns true for an unregistered id: no catalog observed is not
+// evidence against the id, and the launcher must never clobber a default on absence of
+// evidence. The replacement path therefore requires a live catalog that omits the id, so a
+// backend that is merely down cannot rewrite the operator's pin.
+func PiDefaultModelIsDeliberate(modelID string, advertised []string) bool {
+	if IsPiKnownModel(modelID) {
+		return true
+	}
+	return IsPiModelAdvertised(modelID, advertised)
+}
+
+// IsPiModelAdvertised reports whether a configured Pi defaultModel is one of the ids a
+// backend actually advertises on its /v1/models catalog.
+//
+// This is the guard against a SELF-PERPETUATING bad default. Once a placeholder id (the
+// `custom-model` a test or a stale tool wrote) lands in settings.json, the launcher's
+// "honor an existing deliberate defaultModel" rule would re-confirm it on every run and
+// even write it into models.json, so the wrong model is never corrected — the harness
+// resolves provider `fak` (the router) with a model the router does not serve, which
+// reads as "the default keeps slipping back to the router". An advertised catalog is the
+// external witness that distinguishes a real operator pin from a stale placeholder: a
+// model the backend does not list cannot be a deliberate choice for THAT backend.
+//
+// IsPiModelAdvertised treats an empty advertised set as true (nothing to check against —
+// never clobber from absence of evidence). Matching tolerates case, surrounding space, and a
+// provider-qualified form on either side, so `provider/model` and `model` agree.
+func IsPiModelAdvertised(modelID string, advertised []string) bool {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return false
+	}
+	if len(advertised) == 0 {
+		return true
+	}
+	want := modelKeyCandidates(modelID)
+	for _, id := range advertised {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		for have := range modelKeyCandidates(id) {
+			if want[have] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// modelKeyCandidates returns the comparison keys for a model id: the normalized whole id
+// and its last path segment (the bare model name of a provider-qualified id), so
+// `deepseek-ai/DeepSeek-V4.1-Flash` and `DeepSeek-V4.1-Flash` compare equal.
+func modelKeyCandidates(id string) map[string]bool {
+	keys := map[string]bool{}
+	full := normalizePiModelKey(id)
+	if full == "" {
+		return keys
+	}
+	keys[full] = true
+	if leaf := lastPathSegment(full); leaf != "" {
+		keys[leaf] = true
+	}
+	return keys
+}
+
 // EnsurePiDefaultProviderModel points Pi's default provider/model at the fak router.
 //
 // It sets settings.json `defaultProvider` = providerID and `defaultModel` = modelID,
@@ -83,8 +175,42 @@ func ShouldAdoptDetectedPiModel(target, explicitModel, detectedModel string) boo
 //
 // providerID/modelID are normalized the same way models.json is (NormalizePiModelID),
 // so the default cannot drift from the id the `fak` provider actually advertises.
+//
+// Callers that sourced modelID from a backend's /healthz label rather than from
+// deliberate operator intent must use EnsurePiDefaultProviderModelIfAbsent instead: on
+// a routing-mode router /healthz names the local planner engine, not the routed model
+// set, so adopting it as the default would clobber the operator's chosen route.
+//
 // Returns (resolvedPath, modified, error).
 func EnsurePiDefaultProviderModel(target, providerID, modelID string) (string, bool, error) {
+	return writePiDefaultProviderModel(target, providerID, modelID, false)
+}
+
+// EnsurePiDefaultProviderModelIfAbsent is the seed-only variant of
+// EnsurePiDefaultProviderModel: it writes `defaultProvider`/`defaultModel` only when
+// settings.json has no non-empty `defaultModel` yet, and leaves a deliberate default
+// untouched otherwise.
+//
+// This is the correct writer for a launcher whose model id was auto-detected from a
+// backend liveness surface. /healthz describes the engine the backend happens to be
+// running; it is NOT a statement about which model the operator wants a bare `pi` to
+// default to. A routing-mode router fronts N models (with ordered fallbacks), so
+// pinning its local engine label as the harness default makes the configured routing
+// ladder unreachable in practice. Seeding when absent keeps a first-ever config
+// working without ever overwriting operator intent.
+//
+// When a default already exists (or when --model was passed explicitly, which flows
+// through EnsurePiDefaultProviderModel), this reports modified=false.
+// Returns (resolvedPath, modified, error).
+func EnsurePiDefaultProviderModelIfAbsent(target, providerID, modelID string) (string, bool, error) {
+	return writePiDefaultProviderModel(target, providerID, modelID, true)
+}
+
+// writePiDefaultProviderModel is the shared body for the authoritative and seed-only
+// default writers. When seedOnly is true an existing non-empty `defaultModel` is left
+// in place (provider is still set, so a bare launch reaches the fak router) and the
+// function reports modified=false.
+func writePiDefaultProviderModel(target, providerID, modelID string, seedOnly bool) (string, bool, error) {
 	path := ResolvePiSettingsPath(target)
 
 	providerID = strings.TrimSpace(providerID)
@@ -116,7 +242,16 @@ func EnsurePiDefaultProviderModel(target, providerID, modelID string) (string, b
 		raw["defaultProvider"] = providerID
 		modified = true
 	}
-	if cur, _ := raw["defaultModel"].(string); strings.TrimSpace(cur) != modelID {
+
+	curModel, _ := raw["defaultModel"].(string)
+	if seedOnly && strings.TrimSpace(curModel) != "" {
+		// A deliberate default is already pinned; never overwrite it with a detected id.
+		if !modified {
+			return path, false, nil
+		}
+		return writePiSettings(path, raw)
+	}
+	if strings.TrimSpace(curModel) != modelID {
 		raw["defaultModel"] = modelID
 		modified = true
 	}
@@ -124,6 +259,11 @@ func EnsurePiDefaultProviderModel(target, providerID, modelID string) (string, b
 	if !modified {
 		return path, false, nil
 	}
+	return writePiSettings(path, raw)
+}
+
+// writePiSettings marshals raw and writes it back to path with a trailing newline.
+func writePiSettings(path string, raw map[string]interface{}) (string, bool, error) {
 	out, marshalErr := json.MarshalIndent(raw, "", "  ")
 	if marshalErr != nil {
 		return path, false, fmt.Errorf("serialize %s: %w", path, marshalErr)

@@ -110,6 +110,13 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	targetModel := strings.TrimSpace(*model)
+	modelAutoDetected := false
+	// modelReplacedStaleDefault records that targetModel was chosen by REPLACING a
+	// configured default the backend does not advertise (a stale placeholder such as
+	// `custom-model`). That replacement is authoritative intent: the seed-only writer
+	// must not preserve the very value we just decided is wrong, so this forces the
+	// authoritative default writer even though the id was auto-detected.
+	modelReplacedStaleDefault := false
 	backendActive := false
 	// adoptedDetected records whether the launch model came from the backend's /healthz
 	// label rather than a deliberate operator/configured pin. It only gates the diagnostic
@@ -117,7 +124,7 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	adoptedDetected := false
 
 	// Probe backend to verify reachability and auto-detect the served model + context window
-	detectedModel, reachable, detectedWindow, resolvedBaseURL := probePiBackendWithWindow(targetBaseURL, 1500*time.Millisecond)
+	detectedModel, reachable, detectedWindow, resolvedBaseURL, advertisedModels := probePiBackendWithCatalog(targetBaseURL, 1500*time.Millisecond)
 	if reachable {
 		backendActive = true
 		// Adopt the origin that answered: a loopback literal can be refused while
@@ -131,6 +138,7 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		if projectassets.ShouldAdoptDetectedPiModel(*settingsPath, *model, detectedModel) {
 			targetModel = detectedModel
 			adoptedDetected = true
+			modelAutoDetected = true
 		}
 	}
 
@@ -139,10 +147,21 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		// settings.json defaultModel before falling back to the built-in prior, so the
 		// default pin below repairs the PROVIDER without re-pointing the MODEL a user
 		// chose on purpose.
-		if existing, err := projectassets.PiSettingsDefaultModel(*settingsPath); err == nil && existing != "" {
+		if existing, err := projectassets.PiSettingsDefaultModel(*settingsPath); err == nil && existing != "" && projectassets.PiDefaultModelIsDeliberate(existing, advertisedModels) {
 			targetModel = existing
 		} else {
-			targetModel = projectassets.DefaultPiModelID
+			// Either nothing is configured, or the configured default is NOT one of the
+			// ids this backend advertises. A non-advertised default (a stale placeholder
+			// such as `custom-model`) cannot be a deliberate choice for this router and
+			// would otherwise be re-confirmed forever, so replace it with the id the
+			// backend actually serves — the detected one when we have it, else the prior.
+			if detectedModel != "" && detectedModel != "mock" {
+				targetModel = detectedModel
+				modelAutoDetected = true
+				modelReplacedStaleDefault = true
+			} else {
+				targetModel = projectassets.DefaultPiModelID
+			}
 		}
 	}
 
@@ -212,8 +231,21 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	// --model flags) resolves defaultProvider/defaultModel from settings.json, so without
 	// this the `fak` provider written above is configured but never used by default. Same
 	// non-clobbering discipline as models.json and compaction; idempotent.
+	//
+	// Precedence: an explicit --model is operator intent and writes authoritatively. A
+	// model auto-detected from the backend's /healthz is only a fallback seed — on a
+	// routing-mode router /healthz names the local planner engine, not the routed model
+	// set, so adopting it would silently clobber the operator's configured route (and
+	// make the routing ladder unreachable). Seed when absent, never overwrite.
 	if launch.writeConfig {
-		dPath, dModified, dErr := projectassets.EnsurePiDefaultProviderModel(*settingsPath, launch.provider, launch.model)
+		var dPath string
+		var dModified bool
+		var dErr error
+		if modelAutoDetected && !modelReplacedStaleDefault {
+			dPath, dModified, dErr = projectassets.EnsurePiDefaultProviderModelIfAbsent(*settingsPath, launch.provider, launch.model)
+		} else {
+			dPath, dModified, dErr = projectassets.EnsurePiDefaultProviderModel(*settingsPath, launch.provider, launch.model)
+		}
 		if dErr != nil && !launch.quiet {
 			fmt.Fprintf(stderr, "fak pi: warning: could not pin Pi default provider/model in %s: %v\n", dPath, dErr)
 		} else if dModified && !launch.quiet {
@@ -280,16 +312,25 @@ func probePiBackend(baseURL string, timeout time.Duration) (model string, ok boo
 // resident target from the real window instead of an assumed prior (see
 // projectassets.PiSafeContextBudget).
 func probePiBackendWithWindow(baseURL string, timeout time.Duration) (model string, ok bool, window int, resolvedBaseURL string) {
+	model, ok, window, resolved, _ := probePiBackendWithCatalog(baseURL, timeout)
+	return model, ok, window, resolved
+}
+
+// probePiBackendWithCatalog is probePiBackendWithWindow plus the backend's advertised model
+// catalog from /v1/models, so the caller can tell a real, servable default from a stale
+// placeholder id (see projectassets.PiDefaultModelIsDeliberate). The catalog is collected from
+// whichever origin answered the probe.
+func probePiBackendWithCatalog(baseURL string, timeout time.Duration) (model string, ok bool, window int, resolvedBaseURL string, advertised []string) {
 	client := &http.Client{Timeout: timeout}
-	if m, ok, w := probePiBackendWindow(client, baseURL); ok {
-		return m, true, w, baseURL
+	if m, ok, w, ids := probePiBackendWindowFull(client, baseURL); ok {
+		return m, true, w, baseURL, ids
 	}
 	if fallback, ok := fakclient.LoopbackFallbackURL(baseURL); ok {
-		if m, ok, w := probePiBackendWindow(client, fallback); ok {
-			return m, true, w, fallback
+		if m, ok, w, ids := probePiBackendWindowFull(client, fallback); ok {
+			return m, true, w, fallback, ids
 		}
 	}
-	return "", false, 0, baseURL
+	return "", false, 0, baseURL, nil
 }
 
 // probePiBackendOnce probes a single backend base URL for the served model id.
@@ -302,6 +343,14 @@ func probePiBackendOnce(client *http.Client, baseURL string) (string, bool) {
 // <base>/models for the served model id AND its advertised context_length (the window the safe
 // budget is derived from).
 func probePiBackendWindow(client *http.Client, baseURL string) (model string, ok bool, window int) {
+	model, ok, window, _ = probePiBackendWindowFull(client, baseURL)
+	return model, ok, window
+}
+
+// probePiBackendWindowFull is probePiBackendWindow plus every advertised model id in the
+// /v1/models catalog, so a caller can validate a configured default against what the
+// backend actually serves.
+func probePiBackendWindowFull(client *http.Client, baseURL string) (model string, ok bool, window int, advertised []string) {
 	healthy := false
 	healthURL := strings.TrimRight(strings.TrimSuffix(baseURL, "/v1"), "/") + "/healthz"
 	resp, err := client.Get(healthURL)
@@ -330,6 +379,11 @@ func probePiBackendWindow(client *http.Client, baseURL string) (model string, ok
 			} `json:"data"`
 		}
 		if json.NewDecoder(mResp.Body).Decode(&catalog) == nil && len(catalog.Data) > 0 {
+			for _, row := range catalog.Data {
+				if row.ID != "" {
+					advertised = append(advertised, row.ID)
+				}
+			}
 			if model == "" {
 				model = catalog.Data[0].ID
 			}
@@ -342,14 +396,14 @@ func probePiBackendWindow(client *http.Client, baseURL string) (model string, ok
 			if window == 0 {
 				window = catalog.Data[0].ContextLength
 			}
-			return model, true, window
+			return model, true, window, advertised
 		}
-		return model, healthy, 0
+		return model, healthy, 0, advertised
 	}
 	if healthy {
-		return model, true, 0
+		return model, true, 0, advertised
 	}
-	return "", false, 0
+	return "", false, 0, nil
 }
 
 func buildPiLaunchArgv(opts piLaunchOptions) []string {

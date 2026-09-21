@@ -189,6 +189,67 @@ func TestProbePiBackendLoopbackFallback(t *testing.T) {
 	}
 }
 
+// TestRunPiAutoDetectPreservesPinnedDefault is the launcher-level regression: a backend
+// whose /healthz reports a routing-mode local engine label (a nemotron-class id) must NOT
+// overwrite a deliberately pinned defaultModel, while the provider is still repointed to
+// fak so a bare launch reaches the router. On a routing-mode router /healthz names the
+// local planner engine, not the routed model set; adopting it makes the routing ladder
+// unreachable and silently changes which model answers.
+func TestRunPiAutoDetectPreservesPinnedDefault(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"ok":true,"model":"nemotron-3-super-120b-a12b","engine":"inkernel"}`))
+		case "/models", "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"data":[{"id":"nemotron-3-super-120b-a12b","context_length":131072}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, "models.json")
+	settingsPath := filepath.Join(tmp, "settings.json")
+	// The operator's deliberate default survives the launcher auto-detect.
+	seed := `{"defaultProvider":"fak","defaultModel":"deepseek-ai/DeepSeek-V4.1-Flash"}`
+	if err := os.WriteFile(settingsPath, []byte(seed), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	origRun := piLaunchRun
+	defer func() { piLaunchRun = origRun }()
+	piLaunchRun = func(stdout, stderr io.Writer, argv, env []string) int { return 0 }
+
+	var stdout, stderr bytes.Buffer
+	code := runPi(&stdout, &stderr, []string{
+		"--config-path", modelsPath,
+		"--settings-path", settingsPath,
+		"--base-url", ts.URL + "/v1",
+		"--quiet",
+	})
+	if code != 0 {
+		t.Fatalf("runPi returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	var settings map[string]interface{}
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings.json: %v", err)
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("parse settings.json: %v", err)
+	}
+	if settings["defaultModel"] != "deepseek-ai/DeepSeek-V4.1-Flash" {
+		t.Errorf("defaultModel = %v, want the pinned default preserved (auto-detect must not clobber)", settings["defaultModel"])
+	}
+	if settings["defaultProvider"] != "fak" {
+		t.Errorf("defaultProvider = %v, want fak", settings["defaultProvider"])
+	}
+}
+
 func TestRunPiMockExecution(t *testing.T) {
 	origRun := piLaunchRun
 	defer func() { piLaunchRun = origRun }()
@@ -259,6 +320,126 @@ func TestProbePiBackendWithWindow(t *testing.T) {
 	}
 	if window != 131072 {
 		t.Fatalf("window = %d, want 131072", window)
+	}
+}
+
+// TestRunPiReplacesNonAdvertisedDefault is the launcher-level regression for the
+// self-perpetuating placeholder default: a settings.json defaultModel the backend does
+// NOT advertise (`custom-model`) must be corrected to an id the catalog actually lists,
+// instead of being honored verbatim and re-written on every launch.
+func TestRunPiReplacesNonAdvertisedDefault(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"ok":true,"model":"deepseek-ai/DeepSeek-V4.1-Flash","engine":"router"}`))
+		case "/models", "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"data":[{"id":"deepseek-ai/DeepSeek-V4.1-Flash","context_length":1000000},{"id":"Qwen3.8-27B-UD-Q2_K_XL","context_length":131072}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, "models.json")
+	settingsPath := filepath.Join(tmp, "settings.json")
+	// The stale placeholder that must NOT be re-confirmed.
+	seed := `{"defaultProvider":"fak","defaultModel":"custom-model"}`
+	if err := os.WriteFile(settingsPath, []byte(seed), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	origRun := piLaunchRun
+	defer func() { piLaunchRun = origRun }()
+	var capturedArgv []string
+	piLaunchRun = func(stdout, stderr io.Writer, argv, env []string) int {
+		capturedArgv = argv
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runPi(&stdout, &stderr, []string{
+		"--config-path", modelsPath,
+		"--settings-path", settingsPath,
+		"--base-url", ts.URL + "/v1",
+		"--quiet",
+	})
+	if code != 0 {
+		t.Fatalf("runPi returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	var settings map[string]interface{}
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings.json: %v", err)
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("parse settings.json: %v", err)
+	}
+	if settings["defaultModel"] == "custom-model" {
+		t.Errorf("defaultModel still %q; a non-advertised placeholder must be replaced", settings["defaultModel"])
+	}
+	if settings["defaultModel"] != "deepseek-ai/DeepSeek-V4.1-Flash" {
+		t.Errorf("defaultModel = %v, want the backend-advertised id", settings["defaultModel"])
+	}
+	// The rebound model must also reach the launch argv (not just the file).
+	if !containsArgPair(capturedArgv, "--model", "deepseek-ai/DeepSeek-V4.1-Flash") {
+		t.Errorf("launch argv did not rebind the model: %v", capturedArgv)
+	}
+}
+
+// TestRunPiPreservesAdvertisedDefault: the counterpart guard — a default the backend DOES
+// advertise is a real operator pin and must survive untouched.
+func TestRunPiPreservesAdvertisedDefault(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"ok":true,"model":"deepseek-ai/DeepSeek-V4.1-Flash","engine":"router"}`))
+		case "/models", "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"data":[{"id":"deepseek-ai/DeepSeek-V4.1-Flash","context_length":1000000},{"id":"Qwen3.8-27B-UD-Q2_K_XL","context_length":131072}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, "models.json")
+	settingsPath := filepath.Join(tmp, "settings.json")
+	seed := `{"defaultProvider":"fak","defaultModel":"Qwen3.8-27B-UD-Q2_K_XL"}`
+	if err := os.WriteFile(settingsPath, []byte(seed), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	origRun := piLaunchRun
+	defer func() { piLaunchRun = origRun }()
+	piLaunchRun = func(stdout, stderr io.Writer, argv, env []string) int { return 0 }
+
+	var stdout, stderr bytes.Buffer
+	code := runPi(&stdout, &stderr, []string{
+		"--config-path", modelsPath,
+		"--settings-path", settingsPath,
+		"--base-url", ts.URL + "/v1",
+		"--quiet",
+	})
+	if code != 0 {
+		t.Fatalf("runPi returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	var settings map[string]interface{}
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings.json: %v", err)
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("parse settings.json: %v", err)
+	}
+	if settings["defaultModel"] != "Qwen3.8-27B-UD-Q2_K_XL" {
+		t.Errorf("defaultModel = %v, want the advertised default preserved", settings["defaultModel"])
 	}
 }
 
