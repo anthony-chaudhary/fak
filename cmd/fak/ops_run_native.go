@@ -323,7 +323,7 @@ func runOpsNative(stdout, stderr io.Writer, args []string) int {
 	})
 	identity := newOpsRunLaunchIdentity("ops-"+hex.EncodeToString(nonce[:]), "native", resolvedWorkspace, *provider, *baseURL, *model, tuiExecutable(), string(effectiveConfig), *policy, "enforce", false, true)
 	if identity.PolicySource == "builtin" {
-		identity.PolicyDigest = opsRunDigest("native-default-fail-closed")
+		identity.PolicyDigest = guardPolicyDigest(guardDefaultPolicyJSON)
 	}
 	nativeIdentity := opsRunNativeLaunchIdentityReceipt{
 		opsRunLaunchIdentityReceipt: identity,
