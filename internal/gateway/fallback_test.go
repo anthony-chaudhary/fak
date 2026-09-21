@@ -672,7 +672,7 @@ func (p *failoverTestPlanner) Complete(_ context.Context, _ []agent.Message, _ [
 	return p.comp, nil
 }
 
-func TestHaltExceptionReplicaRouterCompleteStopsFallback(t *testing.T) {
+func TestHaltExceptionReplicaDispatchCompleteStopsFallback(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("gateway exception stops replica router fallback", func(t *testing.T) {

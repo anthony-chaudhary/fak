@@ -14,9 +14,9 @@ func replicaNames(t *testing.T, urls ...string) []string {
 	if err != nil {
 		t.Fatalf("newProxyPlanner(%v): %v", urls, err)
 	}
-	rr, ok := p.(*ReplicaRouter)
+	rr, ok := p.(*ReplicaDispatch)
 	if !ok {
-		t.Fatalf("planner = %T, want *ReplicaRouter", p)
+		t.Fatalf("planner = %T, want *ReplicaDispatch", p)
 	}
 	names := make([]string, 0, len(urls))
 	for _, r := range rr.Replicas() {

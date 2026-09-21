@@ -31,24 +31,24 @@ func modelFleet(t *testing.T, holdings map[string][]string) *FleetMembership {
 	return m
 }
 
-func glmQwenRouter(t *testing.T, model string) (*ReplicaRouter, *replicaRouterTestPlanner, *replicaRouterTestPlanner) {
+func glmQwenRouter(t *testing.T, model string) (*ReplicaDispatch, *replicaDispatchTestPlanner, *replicaDispatchTestPlanner) {
 	t.Helper()
-	glm := &replicaRouterTestPlanner{name: "glm-upstream"}
-	qwen := &replicaRouterTestPlanner{name: "qwen-upstream"}
-	router, err := NewReplicaRouter(model, []PlannerReplica{
+	glm := &replicaDispatchTestPlanner{name: "glm-upstream"}
+	qwen := &replicaDispatchTestPlanner{name: "qwen-upstream"}
+	router, err := NewReplicaDispatch(model, []PlannerReplica{
 		{Name: "glm-w", Planner: glm},
 		{Name: "qwen-w", Planner: qwen},
 	})
 	if err != nil {
-		t.Fatalf("NewReplicaRouter(%s): %v", model, err)
+		t.Fatalf("NewReplicaDispatch(%s): %v", model, err)
 	}
 	return router, glm, qwen
 }
 
-// TestReplicaRouterRoutesOnlyToWorkersHoldingItsModel is the router-level form of the
+// TestReplicaDispatchRoutesOnlyToWorkersHoldingItsModel is the router-level form of the
 // bug: a heterogeneous fleet must never serve this router's model from the worker
 // holding the other one.
-func TestReplicaRouterRoutesOnlyToWorkersHoldingItsModel(t *testing.T) {
+func TestReplicaDispatchRoutesOnlyToWorkersHoldingItsModel(t *testing.T) {
 	router, glm, qwen := glmQwenRouter(t, "glm-4.6")
 	router.WithMembership(modelFleet(t, map[string][]string{
 		"glm-w":  {"glm-4.6"},
@@ -70,10 +70,10 @@ func TestReplicaRouterRoutesOnlyToWorkersHoldingItsModel(t *testing.T) {
 	}
 }
 
-// TestReplicaRouterModelVerdictIsDistinctFromOutage pins that the router propagates
+// TestReplicaDispatchModelVerdictIsDistinctFromOutage pins that the router propagates
 // membership's two verdicts unmerged — the single most expensive confusion in this
 // area is a configuration mistake that reads as a fleet outage.
-func TestReplicaRouterModelVerdictIsDistinctFromOutage(t *testing.T) {
+func TestReplicaDispatchModelVerdictIsDistinctFromOutage(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("no worker holds the router model", func(t *testing.T) {
@@ -124,10 +124,10 @@ func TestReplicaRouterModelVerdictIsDistinctFromOutage(t *testing.T) {
 	})
 }
 
-// TestReplicaRouterUnlabeledMembershipIsUnchanged is the compatibility arm at the
+// TestReplicaDispatchUnlabeledMembershipIsUnchanged is the compatibility arm at the
 // router seam: membership registered the pre-labeling way (no Models) keeps the exact
 // health-gated round-robin the router has always had.
-func TestReplicaRouterUnlabeledMembershipIsUnchanged(t *testing.T) {
+func TestReplicaDispatchUnlabeledMembershipIsUnchanged(t *testing.T) {
 	router, _, _ := glmQwenRouter(t, "fleet")
 	router.WithMembership(modelFleet(t, map[string][]string{
 		"glm-w":  nil,
@@ -156,10 +156,10 @@ func (p *pickFirstPolicy) Pick(candidates []PlannerReplica, _ []string, _ func(s
 	return candidates[0], true
 }
 
-// TestReplicaRouterPolicyPathIsModelFiltered covers the second placement path: a
+// TestReplicaDispatchPolicyPathIsModelFiltered covers the second placement path: a
 // cache-aware policy must be offered only candidates that hold the router's model,
 // and must never be consulted at all when nothing holds it.
-func TestReplicaRouterPolicyPathIsModelFiltered(t *testing.T) {
+func TestReplicaDispatchPolicyPathIsModelFiltered(t *testing.T) {
 	ctx := context.Background()
 	holdings := map[string][]string{"glm-w": {"glm-4.6"}, "qwen-w": {"qwen3-32b"}}
 

@@ -85,15 +85,15 @@ func nativeReservationFleet(t *testing.T, ids ...string) *FleetMembership {
 	return m
 }
 
-func nativeReservationRouter(t *testing.T, m *FleetMembership, policy PickPolicy, planners ...*reservationTestPlanner) *ReplicaRouter {
+func nativeReservationRouter(t *testing.T, m *FleetMembership, policy PickPolicy, planners ...*reservationTestPlanner) *ReplicaDispatch {
 	t.Helper()
 	replicas := make([]PlannerReplica, len(planners))
 	for i, planner := range planners {
 		replicas[i] = PlannerReplica{Name: planner.worker, Planner: planner}
 	}
-	r, err := NewReplicaRouter("Qwen3.8", replicas)
+	r, err := NewReplicaDispatch("Qwen3.8", replicas)
 	if err != nil {
-		t.Fatalf("NewReplicaRouter: %v", err)
+		t.Fatalf("NewReplicaDispatch: %v", err)
 	}
 	r.WithMembership(m).WithPickPolicy(policy)
 	return r
@@ -113,7 +113,7 @@ func assertReservationFleetClean(t *testing.T, m *FleetMembership) {
 
 // The winner must be booked before the membership lock is released. Otherwise a
 // concurrent drain removes it while its planner is already serving the request.
-func TestReplicaRouterReservationKeepsWinnerUntilSendFinishes(t *testing.T) {
+func TestReplicaDispatchReservationKeepsWinnerUntilSendFinishes(t *testing.T) {
 	m := nativeReservationFleet(t, "w1")
 	release := make(chan struct{})
 	planner := &reservationTestPlanner{
@@ -172,7 +172,7 @@ func (p namedPickPolicy) Pick(candidates []PlannerReplica, _ []string, _ func(st
 
 // A policy result that cannot be booked must be rejected before the send and fall
 // back to a real admissible replica under the same membership lock.
-func TestReplicaRouterBookingFailureFallsBackBeforeSend(t *testing.T) {
+func TestReplicaDispatchBookingFailureFallsBackBeforeSend(t *testing.T) {
 	m := nativeReservationFleet(t, "w1")
 	booked := &reservationTestPlanner{worker: "w1", membership: m}
 	ghost := &reservationTestPlanner{worker: "ghost", membership: m}
@@ -197,7 +197,7 @@ func TestReplicaRouterBookingFailureFallsBackBeforeSend(t *testing.T) {
 
 // Cancellation is terminal for the request: release its one booking exactly once
 // and do not re-send the canceled request to a fallback.
-func TestReplicaRouterCancellationReleasesWithoutFallback(t *testing.T) {
+func TestReplicaDispatchCancellationReleasesWithoutFallback(t *testing.T) {
 	m := nativeReservationFleet(t, "w1", "w2")
 	if err := m.Acquire("w1"); err != nil {
 		t.Fatalf("sentinel Acquire(w1): %v", err)
@@ -243,7 +243,7 @@ func TestReplicaRouterCancellationReleasesWithoutFallback(t *testing.T) {
 // Endpoint failure retargets the same logical reservation to an untried worker.
 // Both physical sends must see a booking, and the final release must leave zero
 // (never negative) occupancy on every worker.
-func TestReplicaRouterEndpointFailureRetargetsBookedFallback(t *testing.T) {
+func TestReplicaDispatchEndpointFailureRetargetsBookedFallback(t *testing.T) {
 	m := nativeReservationFleet(t, "w1", "w3")
 	mustAdd(t, m, WorkerSpec{
 		ID:     "w2",
@@ -286,7 +286,7 @@ func TestReplicaRouterEndpointFailureRetargetsBookedFallback(t *testing.T) {
 	assertReservationFleetClean(t, m)
 }
 
-func TestReplicaRouterHedgeBooksBothPhysicalAttempts(t *testing.T) {
+func TestReplicaDispatchHedgeBooksBothPhysicalAttempts(t *testing.T) {
 	m := nativeReservationFleet(t, "w1", "w2")
 	primary := &reservationTestPlanner{
 		worker:     "w1",

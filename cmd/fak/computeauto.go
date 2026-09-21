@@ -213,7 +213,7 @@ func autoSelectComputeTarget(parent context.Context, reg *targetRegistry, hc *ht
 		})
 		byName[p.t.Name] = p.t
 	}
-	router, err := gateway.NewRouter(gateway.RouterConfig{Strategy: gateway.StrategyCostBased, Tiers: tiers})
+	router, err := gateway.NewTierPolicy(gateway.TierPolicyConfig{Strategy: gateway.StrategyCostBased, Tiers: tiers})
 	if err != nil {
 		return autoDecisionReport{}, nil, err
 	}

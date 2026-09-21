@@ -8,10 +8,10 @@ import (
 
 // threeTier is the standard fixture: small (4k, cheap, interactive), medium (32k,
 // mid, interactive), large (unbounded, premium, batch-only).
-func threeTier(strategy RoutingStrategy) *Router {
-	cfg := DefaultRouterConfig()
+func threeTier(strategy RoutingStrategy) *TierPolicy {
+	cfg := DefaultTierPolicyConfig()
 	cfg.Strategy = strategy
-	r, err := NewRouter(cfg)
+	r, err := NewTierPolicy(cfg)
 	if err != nil {
 		panic(err)
 	}
@@ -115,7 +115,7 @@ func TestRouter_Latency_InteractivePrefersSmallestTier(t *testing.T) {
 
 func TestRouter_Cost_PicksCheapestThatFits(t *testing.T) {
 	// Custom config where the cheapest tier is NOT the smallest, to prove cost wins.
-	cfg := RouterConfig{
+	cfg := TierPolicyConfig{
 		Strategy: StrategyCostBased,
 		Tiers: []Tier{
 			{Name: "a", Model: "a", MaxPromptTokens: 10000, CostPerMTok: 8, Interactive: true},
@@ -123,9 +123,9 @@ func TestRouter_Cost_PicksCheapestThatFits(t *testing.T) {
 			{Name: "c", Model: "c", MaxPromptTokens: 10000, CostPerMTok: 5, Interactive: true},
 		},
 	}
-	r, err := NewRouter(cfg)
+	r, err := NewTierPolicy(cfg)
 	if err != nil {
-		t.Fatalf("NewRouter: %v", err)
+		t.Fatalf("NewTierPolicy: %v", err)
 	}
 	d, err := r.Route(Classify(100, LatencyUnknown, ComplexityLow))
 	if err != nil {
@@ -197,7 +197,7 @@ func TestRouter_MaxCost_CostStrategyRespectsCeiling(t *testing.T) {
 	// Cost strategy would pick the cheapest tier (b=3); a $4 ceiling that still admits
 	// b confirms the ceiling and the strategy agree, and a $2 ceiling that excludes ALL
 	// refuses rather than picking the next-cheapest above budget.
-	cfg := RouterConfig{
+	cfg := TierPolicyConfig{
 		Strategy: StrategyCostBased,
 		Tiers: []Tier{
 			{Name: "a", Model: "a", MaxPromptTokens: 10000, CostPerMTok: 8, Interactive: true},
@@ -205,9 +205,9 @@ func TestRouter_MaxCost_CostStrategyRespectsCeiling(t *testing.T) {
 			{Name: "c", Model: "c", MaxPromptTokens: 10000, CostPerMTok: 5, Interactive: true},
 		},
 	}
-	r, err := NewRouter(cfg)
+	r, err := NewTierPolicy(cfg)
 	if err != nil {
-		t.Fatalf("NewRouter: %v", err)
+		t.Fatalf("NewTierPolicy: %v", err)
 	}
 	rc := Classify(100, LatencyUnknown, ComplexityLow)
 	rc.MaxCostPerMTok = 4
@@ -275,19 +275,19 @@ func TestRouter_SetHealth_UnknownTierIsNoop(t *testing.T) {
 	}
 }
 
-func TestRouterConfig_Validate(t *testing.T) {
-	if err := DefaultRouterConfig().Validate(); err != nil {
+func TestTierPolicyConfig_Validate(t *testing.T) {
+	if err := DefaultTierPolicyConfig().Validate(); err != nil {
 		t.Fatalf("default config should validate, got %v", err)
 	}
 	cases := []struct {
 		name string
-		cfg  RouterConfig
+		cfg  TierPolicyConfig
 	}{
-		{"no tiers", RouterConfig{Strategy: StrategySizeBased}},
-		{"bad strategy", RouterConfig{Strategy: "bogus", Tiers: []Tier{{Name: "x"}}}},
-		{"empty name", RouterConfig{Tiers: []Tier{{Name: ""}}}},
-		{"dup name", RouterConfig{Tiers: []Tier{{Name: "x"}, {Name: "x"}}}},
-		{"negative capacity", RouterConfig{Tiers: []Tier{{Name: "x", MaxPromptTokens: -1}}}},
+		{"no tiers", TierPolicyConfig{Strategy: StrategySizeBased}},
+		{"bad strategy", TierPolicyConfig{Strategy: "bogus", Tiers: []Tier{{Name: "x"}}}},
+		{"empty name", TierPolicyConfig{Tiers: []Tier{{Name: ""}}}},
+		{"dup name", TierPolicyConfig{Tiers: []Tier{{Name: "x"}, {Name: "x"}}}},
+		{"negative capacity", TierPolicyConfig{Tiers: []Tier{{Name: "x", MaxPromptTokens: -1}}}},
 	}
 	for _, c := range cases {
 		if err := c.cfg.Validate(); err == nil {
@@ -296,18 +296,18 @@ func TestRouterConfig_Validate(t *testing.T) {
 	}
 }
 
-func TestNewRouter_RejectsInvalidConfig(t *testing.T) {
-	if _, err := NewRouter(RouterConfig{}); err == nil {
-		t.Fatal("NewRouter should reject an empty config")
+func TestNewTierPolicy_RejectsInvalidConfig(t *testing.T) {
+	if _, err := NewTierPolicy(TierPolicyConfig{}); err == nil {
+		t.Fatal("NewTierPolicy should reject an empty config")
 	}
 }
 
-func TestNewRouter_DefaultsEmptyStrategyToSize(t *testing.T) {
-	cfg := DefaultRouterConfig()
+func TestNewTierPolicy_DefaultsEmptyStrategyToSize(t *testing.T) {
+	cfg := DefaultTierPolicyConfig()
 	cfg.Strategy = ""
-	r, err := NewRouter(cfg)
+	r, err := NewTierPolicy(cfg)
 	if err != nil {
-		t.Fatalf("NewRouter: %v", err)
+		t.Fatalf("NewTierPolicy: %v", err)
 	}
 	d, err := r.Route(Classify(100, LatencyUnknown, ComplexityLow))
 	if err != nil {

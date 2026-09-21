@@ -71,16 +71,16 @@ func (p *decodeFootprintStreamPlanner) CompleteStream(_ context.Context, sink ag
 	}, nil
 }
 
-func decodeFootprintRouter(t *testing.T, membership *FleetMembership, policy *CacheAwarePolicy, planners ...agent.Planner) *ReplicaRouter {
+func decodeFootprintRouter(t *testing.T, membership *FleetMembership, policy *CacheAwarePolicy, planners ...agent.Planner) *ReplicaDispatch {
 	t.Helper()
 	replicas := make([]PlannerReplica, len(planners))
 	for i, planner := range planners {
 		worker := planner.(*decodeFootprintTestPlanner).worker
 		replicas[i] = PlannerReplica{Name: worker, Planner: planner}
 	}
-	router, err := NewReplicaRouter("Qwen3.8", replicas)
+	router, err := NewReplicaDispatch("Qwen3.8", replicas)
 	if err != nil {
-		t.Fatalf("NewReplicaRouter: %v", err)
+		t.Fatalf("NewReplicaDispatch: %v", err)
 	}
 	return router.WithMembership(membership).WithPickPolicy(policy)
 }
@@ -349,9 +349,9 @@ func TestDecodeFootprintStreamCompletionReconcilesThenReleasesExactlyOnce(t *tes
 	membership := nativeReservationFleet(t, "w1")
 	policy := NewCacheAwarePolicy(nil, DefaultSkewThreshold())
 	planner := &decodeFootprintStreamPlanner{worker: "w1", completionTokens: 7}
-	router, err := NewReplicaRouter("Qwen3.8", []PlannerReplica{{Name: "w1", Planner: planner}})
+	router, err := NewReplicaDispatch("Qwen3.8", []PlannerReplica{{Name: "w1", Planner: planner}})
 	if err != nil {
-		t.Fatalf("NewReplicaRouter: %v", err)
+		t.Fatalf("NewReplicaDispatch: %v", err)
 	}
 	router.WithMembership(membership).WithPickPolicy(policy)
 	var streamed string
@@ -380,12 +380,12 @@ func TestDecodeFootprintNoMembershipHedgeBooksBothPhysicalAttempts(t *testing.T)
 	policy := NewCacheAwarePolicy(nil, DefaultSkewThreshold())
 	primary := &decodeFootprintTestPlanner{worker: "w1", started: make(chan struct{}), wait: make(chan struct{})}
 	alternate := &decodeFootprintTestPlanner{worker: "w2", completionTokens: 11}
-	router, err := NewReplicaRouter("Qwen3.8", []PlannerReplica{
+	router, err := NewReplicaDispatch("Qwen3.8", []PlannerReplica{
 		{Name: "w1", Planner: primary},
 		{Name: "w2", Planner: alternate},
 	})
 	if err != nil {
-		t.Fatalf("NewReplicaRouter: %v", err)
+		t.Fatalf("NewReplicaDispatch: %v", err)
 	}
 	router.WithPickPolicy(policy)
 	router.Hedge = eligibleHedgePolicy(nil)

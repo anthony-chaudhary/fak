@@ -13,7 +13,7 @@ import (
 )
 
 // Cache-aware fleet routing POLICY — the per-worker prefix-residency index + the
-// power-of-two-choices scorer that lands on the ReplicaRouter skeleton's pick()
+// power-of-two-choices scorer that lands on the ReplicaDispatch skeleton's pick()
 // seam (issue #41, build-on #45). The skeleton supplies the replica set and the
 // dispatch path; this file supplies only the PLACEMENT POLICY: given a request's
 // shared prefix and the live worker set, which worker already holds (or should
@@ -27,7 +27,7 @@ import (
 //     gateway importing the cache implementation.
 // Both populate the SAME PrefixResidencyIndex schema; the scorer is emitter-blind.
 //
-// SOTA posture (not a strawman): SGLang Router keeps an APPROXIMATE per-worker radix
+// SOTA posture (not a strawman): SGLang TierPolicy keeps an APPROXIMATE per-worker radix
 // tree, scores longest-prefix overlap, and falls back to plain load-balancing once
 // the per-worker trees skew past a balancing threshold — so shared-prefix traffic
 // does not herd onto one hot replica. This file mirrors that policy class. It is
@@ -461,7 +461,7 @@ func (x *PrefixResidencyIndex) ResidentWorkers(prefix []string) []ResidentWorker
 // SkewThreshold is the documented balancing threshold that decides when the per-worker
 // trees have skewed far enough that locality routing would herd shared-prefix traffic
 // onto one hot replica — at which point the scorer drops locality and routes purely by
-// load (SGLang Router's balancing-threshold behavior). A fleet is "skewed" when BOTH
+// load (SGLang TierPolicy's balancing-threshold behavior). A fleet is "skewed" when BOTH
 // hold: the busiest candidate's load exceeds the idlest by at least AbsLoad (absolute
 // guard, so a near-balanced fleet is never tripped by noise) AND is at least RelLoad×
 // the idlest (relative guard, so the threshold scales with fleet load). Rationale: the

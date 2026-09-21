@@ -403,18 +403,18 @@ type Server struct {
 	// (Config.UpstreamFailureObserver), retained so a gateway-onset terminal failure at a
 	// served wire boundary (e.g. an HTTP 200 whose completion fails to decode) can emit
 	// ONE truthful receipt the transport observer never saw (#11567). nil = off.
-	upstreamFailureObserver   func(UpstreamFailureReceipt)
-	version                  string
-	logf                     func(format string, args ...any)
-	debugStatsf              func(format string, args ...any) // optional per-turn human debug sink (#793); nil = off
-	turnCacheStatsMu         sync.Mutex
-	turnCacheStats           turnCacheHistory // successful-turn cache economics rendered by fak-turn
-	feed                     *coherenceFeed   // the cross-agent "what changed" feed (vdso coherence bus)
-	sessionFeed              *sessionFeed     // the drive-state revision feed (#630; host-pushed via PublishSessionRevision)
-	metrics                  *gatewayMetrics
-	otlp                     *otlpExporter
-	orgAudit                 *auditreceipt.Exporter
-	traceparentInvalid       uint64
+	upstreamFailureObserver func(UpstreamFailureReceipt)
+	version                 string
+	logf                    func(format string, args ...any)
+	debugStatsf             func(format string, args ...any) // optional per-turn human debug sink (#793); nil = off
+	turnCacheStatsMu        sync.Mutex
+	turnCacheStats          turnCacheHistory // successful-turn cache economics rendered by fak-turn
+	feed                    *coherenceFeed   // the cross-agent "what changed" feed (vdso coherence bus)
+	sessionFeed             *sessionFeed     // the drive-state revision feed (#630; host-pushed via PublishSessionRevision)
+	metrics                 *gatewayMetrics
+	otlp                    *otlpExporter
+	orgAudit                *auditreceipt.Exporter
+	traceparentInvalid      uint64
 	// toolPages is the tool catalog's home (#2440): each advertised tool schema is a
 	// content-hashed read-only page owned by the ctxmmu, registered at the
 	// maybeCompactInboundTools seam. The page table — not the transcript — is the
@@ -553,7 +553,7 @@ type Server struct {
 	accountRehomeFn func(reason string) (AccountRehome, error)
 
 	// planner generates the assistant turn for the /v1/chat/completions proxy. A
-	// live HTTPPlanner/ReplicaRouter when BaseURL/ReplicaBaseURLs are set, else the
+	// live HTTPPlanner/ReplicaDispatch when BaseURL/ReplicaBaseURLs are set, else the
 	// offline MockPlanner. Settable in-package for tests.
 	planner agent.Planner
 	// kvStatsMu guards kvStatsCache/kvStatsAt/kvStatsValid, the scrape-scoped
@@ -1048,12 +1048,12 @@ type Server struct {
 	fleet        *FleetMembership
 	fleetMetrics *FleetMembershipMetrics
 
-	// fleetRouter is the ReplicaRouter the fleet loop arms at Serve (issue
+	// fleetRouter is the ReplicaDispatch the fleet loop arms at Serve (issue
 	// fak-private#2417): newProxyPlanner stashes the built-but-unarmed membership on it,
 	// and runFleetHealthLoop promotes it after the first probe. nil for a non-fleet
 	// deployment (lone upstream, in-kernel model, or mock). Immutable after New, so it
 	// needs no lock of its own.
-	fleetRouter *ReplicaRouter
+	fleetRouter *ReplicaDispatch
 
 	// admissionCtl is the optional native-serving ADMISSION / PRIORITY / FAIRNESS gate
 	// (#35, admission.go) — the policy layer above modelengine.NativeScheduler's

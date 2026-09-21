@@ -1,7 +1,7 @@
 package gateway
 
 // replica_membership.go — production wiring of the live health/drain registry
-// (FleetMembership) into the ReplicaRouter (issue fak-private#2417, gap 1). The router
+// (FleetMembership) into the ReplicaDispatch (issue fak-private#2417, gap 1). The router
 // has always been a blind round-robin over CONFIGURED replicas; here the gateway builds
 // a membership over exactly those replicas and runs its health loop on the serve
 // lifecycle context, so a dead upstream drops out of rotation and traffic fails over to
@@ -68,7 +68,7 @@ func newReplicaHealthProbe(replicas []PlannerReplica) Probe {
 // router's model-before-health filter (servesModel) admits it for this router's requests
 // and a heterogeneous fleet is describable; an empty model normalizes to unconstrained,
 // which is the fail-open reading that keeps an unmodeled deployment unchanged. The
-// membership is returned UNARMED (see ReplicaRouter.fleet) — the host arms it at Serve
+// membership is returned UNARMED (see ReplicaDispatch.fleet) — the host arms it at Serve
 // after the first probe.
 func buildReplicaMembership(replicas []PlannerReplica, model string) (*FleetMembership, error) {
 	fm := NewFleetMembership(MembershipConfig{Probe: newReplicaHealthProbe(replicas)})

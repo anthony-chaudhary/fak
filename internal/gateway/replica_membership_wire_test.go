@@ -70,7 +70,7 @@ func (p *fleetWireProbeReplica) probes() int {
 }
 
 // fleetWireTally runs n Completes and tallies which replica served each.
-func fleetWireTally(t *testing.T, router *ReplicaRouter, n int) map[string]int {
+func fleetWireTally(t *testing.T, router *ReplicaDispatch, n int) map[string]int {
 	t.Helper()
 	got := make(map[string]int)
 	for i := 0; i < n; i++ {
@@ -90,12 +90,12 @@ func fleetWireTally(t *testing.T, router *ReplicaRouter, n int) map[string]int {
 func TestReplicaMembershipWireUnhealthyReplicaDropsFromRotation(t *testing.T) {
 	a := &fleetWireReplica{name: "ra"}
 	b := &fleetWireReplica{name: "rb"}
-	router, err := NewReplicaRouter("fleet", []PlannerReplica{
+	router, err := NewReplicaDispatch("fleet", []PlannerReplica{
 		{Name: "w-a", Planner: a},
 		{Name: "w-b", Planner: b},
 	})
 	if err != nil {
-		t.Fatalf("NewReplicaRouter: %v", err)
+		t.Fatalf("NewReplicaDispatch: %v", err)
 	}
 
 	var mu sync.Mutex
@@ -141,12 +141,12 @@ func TestReplicaMembershipWireUnhealthyReplicaDropsFromRotation(t *testing.T) {
 func TestReplicaMembershipWireDrainExcludesReplica(t *testing.T) {
 	a := &fleetWireReplica{name: "ra"}
 	b := &fleetWireReplica{name: "rb"}
-	router, err := NewReplicaRouter("fleet", []PlannerReplica{
+	router, err := NewReplicaDispatch("fleet", []PlannerReplica{
 		{Name: "w-a", Planner: a},
 		{Name: "w-b", Planner: b},
 	})
 	if err != nil {
-		t.Fatalf("NewReplicaRouter: %v", err)
+		t.Fatalf("NewReplicaDispatch: %v", err)
 	}
 	fm := NewFleetMembership(MembershipConfig{
 		HealthyAfter:   1,
@@ -176,12 +176,12 @@ func TestReplicaMembershipWireDrainExcludesReplica(t *testing.T) {
 func TestReplicaMembershipWireAllUnhealthyVerdict(t *testing.T) {
 	a := &fleetWireReplica{name: "ra"}
 	b := &fleetWireReplica{name: "rb"}
-	router, err := NewReplicaRouter("fleet", []PlannerReplica{
+	router, err := NewReplicaDispatch("fleet", []PlannerReplica{
 		{Name: "w-a", Planner: a},
 		{Name: "w-b", Planner: b},
 	})
 	if err != nil {
-		t.Fatalf("NewReplicaRouter: %v", err)
+		t.Fatalf("NewReplicaDispatch: %v", err)
 	}
 	fm := NewFleetMembership(MembershipConfig{
 		HealthyAfter:   1,
@@ -214,12 +214,12 @@ func TestReplicaMembershipWireAllUnhealthyVerdict(t *testing.T) {
 func TestReplicaMembershipWireOptOutStaysBlind(t *testing.T) {
 	a := &fleetWireReplica{name: "ra"}
 	b := &fleetWireReplica{name: "rb"}
-	router, err := NewReplicaRouter("fleet", []PlannerReplica{
+	router, err := NewReplicaDispatch("fleet", []PlannerReplica{
 		{Name: "w-a", Planner: a},
 		{Name: "w-b", Planner: b},
 	})
 	if err != nil {
-		t.Fatalf("NewReplicaRouter: %v", err)
+		t.Fatalf("NewReplicaDispatch: %v", err)
 	}
 	if got := fleetWireTally(t, router, 4); got["ra"] != 2 || got["rb"] != 2 {
 		t.Fatalf("no-membership blind round-robin = %v, want ra:2 rb:2", got)
@@ -233,15 +233,15 @@ func TestReplicaMembershipWireOptOutStaysBlind(t *testing.T) {
 }
 
 // TestReplicaMembershipWireSingleUpstreamBuildsNoFleet is the reachability guard: a
-// single base URL must yield a planner whose replicaRouterOf is nil — proving the
+// single base URL must yield a planner whose replicaDispatchOf is nil — proving the
 // single-upstream path builds no membership at all.
 func TestReplicaMembershipWireSingleUpstreamBuildsNoFleet(t *testing.T) {
 	planner, err := newProxyPlanner(Config{Provider: "openai", APIKey: "k"}, "m", []string{"http://127.0.0.1:1/v1"})
 	if err != nil {
 		t.Fatalf("newProxyPlanner(single): %v", err)
 	}
-	if router := replicaRouterOf(planner); router != nil {
-		t.Fatalf("single-upstream replicaRouterOf = %+v, want nil (no fleet)", router)
+	if router := replicaDispatchOf(planner); router != nil {
+		t.Fatalf("single-upstream replicaDispatchOf = %+v, want nil (no fleet)", router)
 	}
 	if fm := plannerFleetMembership(planner); fm != nil {
 		t.Fatalf("single-upstream planner carried a fleet membership %+v, want nil", fm)
@@ -249,7 +249,7 @@ func TestReplicaMembershipWireSingleUpstreamBuildsNoFleet(t *testing.T) {
 }
 
 func plannerFleetMembership(p agent.Planner) *FleetMembership {
-	if r := replicaRouterOf(p); r != nil {
+	if r := replicaDispatchOf(p); r != nil {
 		return r.FleetMembership()
 	}
 	return nil
@@ -285,9 +285,9 @@ func TestReplicaMembershipWireBuildRegistersReplicaIDs(t *testing.T) {
 		}
 	}
 
-	router, err := NewReplicaRouter("fleet", replicas)
+	router, err := NewReplicaDispatch("fleet", replicas)
 	if err != nil {
-		t.Fatalf("NewReplicaRouter: %v", err)
+		t.Fatalf("NewReplicaDispatch: %v", err)
 	}
 	fm.ProbeOnce(context.Background()) // both probe healthy (200)
 	router.WithMembership(fm)

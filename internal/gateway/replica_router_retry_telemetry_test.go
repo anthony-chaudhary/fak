@@ -14,7 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
-func TestReplicaRouterRetryTelemetry(t *testing.T) {
+func TestReplicaDispatchRetryTelemetry(t *testing.T) {
 	t.Setenv("FAK_PLANNER_MAX_ATTEMPTS", "2")
 	t.Setenv("FAK_PLANNER_RETRY_BUDGET", "0")
 
@@ -94,20 +94,20 @@ func TestReplicaRouterRetryTelemetry(t *testing.T) {
 	}
 }
 
-func TestReplicaRouterWalkPlanners(t *testing.T) {
-	var nilRouter *ReplicaRouter
+func TestReplicaDispatchWalkPlanners(t *testing.T) {
+	var nilRouter *ReplicaDispatch
 	nilRouter.WalkPlanners(func(agent.Planner) {
 		t.Fatal("nil router should not walk planners")
 	})
 
 	p1 := agent.NewHTTPPlanner("http://localhost:1", "m1", "")
 	p2 := agent.NewHTTPPlanner("http://localhost:2", "m2", "")
-	router, err := NewReplicaRouter("fleet", []PlannerReplica{
+	router, err := NewReplicaDispatch("fleet", []PlannerReplica{
 		{Name: "r1", Planner: p1},
 		{Name: "r2", Planner: p2},
 	})
 	if err != nil {
-		t.Fatalf("NewReplicaRouter: %v", err)
+		t.Fatalf("NewReplicaDispatch: %v", err)
 	}
 
 	var visited []agent.Planner
@@ -134,7 +134,7 @@ func TestDualPlannerWalkPlanners(t *testing.T) {
 	})
 
 	proxy := agent.NewHTTPPlanner("http://localhost:1", "proxy-m", "")
-	local := &replicaRouterTestPlanner{name: "local-m"}
+	local := &replicaDispatchTestPlanner{name: "local-m"}
 	dual, err := NewDualPlanner(proxy, local, "local")
 	if err != nil {
 		t.Fatalf("NewDualPlanner: %v", err)
