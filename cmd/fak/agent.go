@@ -71,7 +71,7 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
 	verbFlagUsage(fs, "agent")
 	af := &agentFlags{}
-	af.task = fs.String("task", agent.DefaultTask, "the user task the agent must complete")
+	af.task = fs.String("task", agent.DefaultTask, "run one task and write a report; omit one-shot selectors to start the interactive governed agent")
 	af.outputStyle = fs.String("output-style", agentDefaultOutputStyle, "response shape: full|native:{low|medium|high}|caveman:{low|medium|high}; defaults to caveman:medium, full disables it (see `fak agent profiles`)")
 	af.consoleConfig = fs.String("console-config", defaultTUIConsoleFile(), "persisted operator preferences (default: FAK_CONSOLE_FILE, else ~/.fak/console.json)")
 	af.workProfile = fs.String("work-profile", agentDefaultWorkProfile, "implementation policy: ponytail:{low|medium|high}|standard; defaults to ponytail:medium, standard disables it (see `fak agent profiles`)")
@@ -86,7 +86,7 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.offline = fs.Bool("offline", false, "use the deterministic mock planner (no network)")
 	af.native = fs.Bool("native", false, "run one kernel-mediated arm and print its final answer (basic terminal mode)")
 	af.raw = fs.Bool("raw", false, "run one unmediated baseline harness arm (skipping the mediated fak kernel arm)")
-	af.mode = fs.String("mode", "", "execution mode: dual (default), native, or raw")
+	af.mode = fs.String("mode", "", "one-shot execution mode: dual (default with an explicit task), native, or raw")
 	af.stream = fs.String("stream", "auto", "(--native) transport for the arm: auto streams when the planner supports it (self-healing a stream-only upstream), on forces the streaming arm, off forces the buffered arm (byte-identical to pre-stream behavior)")
 	af.maxTurns = fs.Int("max-turns", 10, "max model turns per arm")
 	af.out = fs.String("out", "agent-report.json", "report output path")
@@ -115,12 +115,10 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	return fs, af
 }
 
-// fak agent  -  the LIVE agentic loop. A real model (or the offline mock) drives a
-// multi-turn tool-calling conversation TWICE over the same task: once with every
-// tool call mediated by the in-process kernel (fak arm), once naive (the "now"
-// baseline). It reports turns, tokens, in-syscall repairs, vDSO dedup hits,
-// adjudicator denies, and MMU quarantines for each arm  -  the real turn-use-vs-now
-// measurement the static bench could not produce.
+// fak agent starts a governed native REPL when invoked without one-shot selectors.
+// An explicit task, resume, workflow, execution mode, or report output preserves the
+// one-shot harness: a real model (or the offline mock) drives a multi-turn tool-calling
+// conversation through the selected native, raw, or dual A/B execution path.
 func cmdAgent(argv []string) {
 	runAgent(argv)
 }
@@ -281,6 +279,14 @@ func runAgent(argv []string) {
 	providerExplicit := false
 	baseURLExplicit := false
 	sessionExplicit := false
+	modeExplicit := false
+	rawExplicit := false
+	nativeExplicit := false
+	offlineExplicit := false
+	workflowExplicit := false
+	resumeExplicit := false
+	outExplicit := false
+	logExplicit := false
 	sessionDirExplicit := false
 	fs.Visit(func(f *flag.Flag) {
 		switch f.Name {
@@ -298,6 +304,22 @@ func runAgent(argv []string) {
 			sessionExplicit = true
 		case "session-dir":
 			sessionDirExplicit = true
+		case "mode":
+			modeExplicit = true
+		case "raw":
+			rawExplicit = true
+		case "native":
+			nativeExplicit = true
+		case "offline":
+			offlineExplicit = true
+		case "workflow":
+			workflowExplicit = true
+		case "resume":
+			resumeExplicit = true
+		case "out":
+			outExplicit = true
+		case "log":
+			logExplicit = true
 		}
 	})
 
@@ -357,6 +379,9 @@ func runAgent(argv []string) {
 
 	isRaw, isNative, err := resolveAgentMode(*af.raw, *af.native, *af.mode)
 	must(err)
+	interactive := !taskExplicit && !modeExplicit && !rawExplicit && !nativeExplicit &&
+		!offlineExplicit && !workflowExplicit && !resumeExplicit && !outExplicit && !logExplicit &&
+		strings.TrimSpace(*af.resume) == "" && strings.TrimSpace(*af.workflow) == ""
 
 	if af.reasoningProfile != nil && *af.reasoningProfile != "" {
 		if err := validateReasoningProfile(*af.reasoningProfile); err != nil {
@@ -526,7 +551,7 @@ func runAgent(argv []string) {
 	if *af.subagents {
 		prof := agent.ResolveSubagentEffortProfile(*af.effort)
 		if prof.SubagentsEnabled {
-			if isNative {
+			if isNative || interactive {
 				childOpts := []agent.RunOption{
 					agent.WithProvider(*af.provider),
 					agent.WithResponseProfileSource(preference.Source),
@@ -571,6 +596,15 @@ func runAgent(argv []string) {
 		}()
 		auditJournal = j
 		runOpts = append(runOpts, agent.WithAuditJournal(j))
+	}
+
+	if interactive {
+		activeWakeReleaser, _ := acquireAgentRunKeepAwake(*af.keepAwake)
+		if activeWakeReleaser != nil {
+			defer activeWakeReleaser.Release()
+		}
+		runChat(os.Stdin, os.Stdout, planner, *af.maxTurns, runOpts...)
+		return
 	}
 
 	if isRaw {
