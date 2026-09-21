@@ -645,10 +645,173 @@ func (m *Model) SetExpertCheckpoint(t *ExpertCheckpointTier) {
 }
 
 // ExpertCheckpointStats reports this model's checkpoint-tier ledger (the zero value when it has
-// none) â€” the operator-facing counterpart of Session.ExpertRing() one rung down.
+// none) — the operator-facing counterpart of Session.ExpertRing() one rung down.
 func (m *Model) ExpertCheckpointStats() ExpertCheckpointStats {
 	if m == nil {
 		return ExpertCheckpointStats{}
 	}
 	return m.expertCheckpoint.Stats()
+}
+
+// ---- agent-startup expert cache warming (CW-15, #13343) ----------------------
+//
+// expert_warm_profile.go (CW-10, #13349) SELECTS a bounded warm set: given a recorded
+// demand profile and the tier's index, ExpertWarmPlanFor returns canonical routed-expert
+// names whose bytes fit a budget. This section EXECUTES that plan: it faults exactly the
+// selected projections through the existing tier fault + bounded pool admission, so a
+// later real v41ExpertF32Into demand for a retained projection is served from residency
+// with zero source reads — the disk fault the prefill first-token path pays (fak#13294)
+// is removed for the routed experts a workload is about to touch.
+//
+// Three invariants make the warm safe rather than a second, hidden loader:
+//
+//   - Bounded reuse only. The warm set is the SELECTED prefix of the plan, and a
+//     projection is faulted only when it fits the pool's REMAINING budget without
+//     eviction. A warm that would evict a resident to seat a speculative expert is a
+//     pessimization (it drops demanded state for a guess), so the executor simply stops
+//     instead. The warm never resizes the pool, never pins, and never raises a ceiling.
+//
+//   - Demand hot state is preserved. The fit check above means admission never needs to
+//     evict; whatever the demand path already made resident stays resident. No permanent
+//     pins are added and no ExpertRing is introduced.
+//
+//   - Attributed separately. Warm source reads land in the tier's own gate counters
+//     (Reads/BytesRead through the same fault door), and the result reports the actual
+//     retained/read/skipped counts. The caller's profile value is never mutated, so a
+//     warm can never feed the recorded-demand histogram it was selected from.
+//
+// A zero or insufficient retention budget warms nothing and reports skipped, never
+// "warm": issuing reads a zero-budget tier streams and drops is not residency.
+
+// ExpertWarmResult is the typed receipt of one warm execution. Its counters are ACTUAL, read
+// back from the tier and the pool after the run — never the plan's projections — so a caller
+// can distinguish "selected N" from "retained N" and can never mistake a plan for a residency.
+type ExpertWarmResult struct {
+	// Reason is the closed verdict: the plan's own reason when selection declined, or
+	// ExpertWarmReasonPlanned when at least one projection was retained.
+	Reason ExpertWarmReason
+	// Selected is how many projections the plan named; Retained how many were faulted and
+	// kept. Retained <= Selected always.
+	Selected int
+	// Retained/RetainedBytes are the projections actually seated in the host cache and
+	// their resident bytes. Skipped counts selected projections the bounded warm declined
+	// (they did not fit the remaining budget without eviction).
+	Retained      int
+	RetainedBytes int64
+	Skipped       int
+	// Reads/ReadBytes are the source reads the warm issued, as the tier gate counted them
+	// (a projection already resident costs none). Evicted is how many residents admission
+	// retired; by construction the bounded warm performs no eviction, so this is 0 on a
+	// successful warm and is carried only so a caller can detect an unexpected one.
+	Reads     int
+	ReadBytes int64
+	Evicted   int
+	// Failed counts selected projections whose fault errored (IO failure or a typed
+	// budget refusal). A warm is best-effort: a failure seats nothing and never claims a
+	// hit, so the demand path still faults the projection itself.
+	Failed int
+}
+
+// Warmed reports whether the warm retained at least one projection's bytes. It is the single
+// bit a caller branches on to decide whether a later demand can hit residency; a selected but
+// unseated plan (insufficient budget, stale identity, IO failure) reports false.
+func (r ExpertWarmResult) Warmed() bool { return r.Retained > 0 && r.RetainedBytes > 0 }
+
+// WarmExpertProfile executes a bounded warm of the expert cache from a recorded demand
+// profile. It selects the set with the tier's ExpertWarmPlanFor (CW-10, #13349) and faults
+// exactly the selected projections that fit the tier's REMAINING residency budget without
+// eviction, returning the ACTUAL retained/read/skipped counters.
+//
+// It is inert on the default path: an absent/empty/stale profile, an unindexed expert, a
+// zero budget or a budget smaller than one projection all warm nothing and return the
+// plan's own reason, so a model that never opts into warming keeps the historical path
+// byte-for-byte. A nil model or a model with no checkpoint tier warms nothing and never
+// panics.
+//
+// budgetBytes is the caller's ceiling on bytes this warm may retain. It is a second bound
+// on top of the tier's own host budget, not a replacement for it: the warm never seats more
+// than min(budgetBytes, remaining pool budget).
+func (m *Model) WarmExpertProfile(profile ExpertWarmProfile, identity ExpertWarmProfileIdentity, budgetBytes int64) ExpertWarmResult {
+	if m == nil || m.expertCheckpoint == nil {
+		// Nothing to warm from. Reuse the closed vocabulary: a profile with no indexed
+		// expert is exactly this shape, and it is honest for a tier-less model.
+		return ExpertWarmResult{Reason: ExpertWarmReasonNoIndexedExpert}
+	}
+	t := m.expertCheckpoint
+
+	plan := t.ExpertWarmPlanFor(profile, identity, budgetBytes)
+	res := ExpertWarmResult{
+		Reason:   plan.Reason,
+		Selected: len(plan.Selected),
+		Skipped:  plan.Skipped,
+	}
+	if plan.Empty() {
+		// Selection declined (no profile, stale identity, zero budget, nothing fits, or
+		// no indexed expert): warm nothing, never stream-and-drop.
+		return res
+	}
+
+	before := t.Stats()
+	// The running allowance starts at the caller's full budget, NOT budgetBytes minus the
+	// plan total: the plan's own byte sum is the projection to be seated, and deducting it
+	// up front would leave no room to seat any of it. Each seated projection then charges
+	// its real stride against the allowance below.
+	remaining := budgetBytes
+	for _, sel := range plan.Selected {
+		// The byte ceiling, checked on the actual stride the tier reported, never a
+		// profile estimate. A projection that cannot fit the remaining allowance is
+		// skipped, not overrun.
+		if sel.Bytes <= 0 || sel.Bytes > remaining {
+			res.Skipped++
+			continue
+		}
+		if !t.warmFits(sel.Bytes) {
+			// Seating this projection would require evicting a resident — i.e. demanded
+			// hot state. A speculative warm must never displace demanded residency, so the
+			// bounded warm stops here and reports the projections it declined.
+			res.Skipped++
+			continue
+		}
+		if _, err := t.fault(sel.Name); err != nil {
+			res.Failed++
+			continue
+		}
+		res.Retained++
+		res.RetainedBytes += sel.Bytes
+		remaining -= sel.Bytes
+	}
+
+	after := t.Stats()
+	res.Reads = after.Reads - before.Reads
+	res.ReadBytes = after.BytesRead - before.BytesRead
+	res.Evicted = after.Evictions - before.Evictions
+	if res.Retained == 0 {
+		// Selection produced a plan but the bounded execution seated nothing: report the
+		// plan's reason so the caller sees why no residency was established.
+		if res.Reason == ExpertWarmReasonPlanned {
+			res.Reason = ExpertWarmReasonNoFit
+		}
+		return res
+	}
+	res.Reason = ExpertWarmReasonPlanned
+	return res
+}
+
+// warmFits reports whether a slab of slabBytes can be made resident within the pool's
+// REMAINING budget without evicting any current resident — the fit-before-fault guard that
+// keeps a speculative warm from displacing demanded hot state. It takes the tier lock only
+// long enough to read the pool's used/budget, and performs no mutation, so a caller can
+// decide to skip before paying the fault. A zero-budget (stream-through) pool never fits
+// anything, which is the intended "never warm" default.
+func (t *ExpertCheckpointTier) warmFits(slabBytes int64) bool {
+	if t == nil || t.pool == nil || slabBytes <= 0 {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	budget := t.pool.Budget()
+	if budget <= 0 {
+		return false
+	}
+	return t.pool.Used()+slabBytes <= budget
 }
