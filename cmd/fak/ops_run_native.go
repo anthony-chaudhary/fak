@@ -109,10 +109,20 @@ func runOpsNative(stdout, stderr io.Writer, args []string) int {
 	}
 	if *codexAuth {
 		argv = append(argv, "--codex-auth")
-		if *codexHome != "" {
-			argv = append(argv, "--codex-home", *codexHome)
+		selectedCodexHome := strings.TrimSpace(*codexHome)
+		if selectedCodexHome == "" {
+			selectedCodexHome, _ = resolveCodexHome("", true)
+		}
+		if selectedCodexHome != "" {
+			argv = append(argv, "--codex-home", selectedCodexHome)
 		}
 	}
+	env, cleanupEnv, err := opsRunChildEnvironment("{}", *keyEnv)
+	if err != nil {
+		fmt.Fprintln(stderr, "ops run native: create isolated child environment:", err)
+		return 1
+	}
+	defer cleanupEnv()
 	ctx, stop := signal.NotifyContext(context.Background(), terminatingSignals()...)
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, *timeout)
@@ -139,6 +149,7 @@ func runOpsNative(stdout, stderr io.Writer, args []string) int {
 	}
 	cmd := exec.CommandContext(ctx, tuiExecutable(), argv...)
 	cmd.Stdout, cmd.Stderr = stdout, stderr
+	cmd.Env = env
 	cmd.WaitDelay = 5 * time.Second
 	procguard.ConfigureProcessTreeCancel(cmd)
 	windowgate.ConfigureBackgroundCommand(cmd)

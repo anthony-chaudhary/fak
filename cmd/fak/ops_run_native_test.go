@@ -17,6 +17,30 @@ import (
 // The real subprocess executes the production chat entry point, including its
 // file transport, HTTP planner and kernel tools, rather than a fake child receipt.
 func init() {
+	if marker := os.Getenv("FAK_OPS_NATIVE_SELECTED"); marker != "" && len(os.Args) > 1 && os.Args[1] == "chat" {
+		observed := make(map[string]string)
+		for _, key := range []string{
+			"FAK_OPS_NATIVE_SELECTED",
+			"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "AWS_SECRET_ACCESS_KEY",
+			"NODE_OPTIONS", "OPENCODE_HOME", "OPENCODE_CONFIG", "OPENCODE_CONFIG_CONTENT",
+			"XDG_CONFIG_HOME", "XDG_DATA_HOME", "HOME", "USERPROFILE", "PATH", "TEMP", "TMP", "TMPDIR",
+		} {
+			if value, ok := os.LookupEnv(key); ok {
+				observed[key] = value
+			}
+		}
+		data, err := json.Marshal(observed)
+		if err != nil || os.WriteFile(marker, data, 0600) != nil {
+			os.Exit(2)
+		}
+		for i := 2; i+1 < len(os.Args); i++ {
+			if os.Args[i] == "--receipt" {
+				_ = os.WriteFile(os.Args[i+1], []byte(`{"schema":"fak.agent.native.v1","status":"completed","metrics":{"arm":"fak"}}`), 0600)
+				break
+			}
+		}
+		os.Exit(0)
+	}
 	if sentinel := os.Getenv("FAK_OPS_NATIVE_PREFLIGHT_CHILD_SENTINEL"); sentinel != "" && len(os.Args) > 1 && os.Args[1] == "chat" {
 		if err := os.WriteFile(sentinel, []byte("launched"), 0600); err != nil {
 			os.Exit(2)
@@ -33,6 +57,119 @@ func init() {
 		cmdChat(os.Args[2:])
 		os.Exit(0)
 	}
+}
+
+// runOpsNativeFixture explicitly admits the one marker that turns the test
+// binary into the native child fixture. Production strips ambient startup
+// controls; selecting the marker through the child-environment seam keeps these
+// tests honest without weakening that boundary.
+func runOpsNativeFixture(stdout, stderr io.Writer, marker string, args []string) int {
+	fixtureArgs := append([]string(nil), args...)
+	fixtureArgs = append(fixtureArgs, "--api-key-env", marker)
+	return runOpsRun(stdout, stderr, fixtureArgs)
+}
+
+func TestOpsNativeEnvironment(t *testing.T) {
+	run := func(t *testing.T) (map[string]string, []byte) {
+		t.Helper()
+		root := t.TempDir()
+		prompt := filepath.Join(root, "prompt.txt")
+		receipt := filepath.Join(root, "receipt.json")
+		observation := filepath.Join(root, "environment.json")
+		if err := os.WriteFile(prompt, []byte("inspect isolated native environment\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("FAK_OPS_NATIVE_SELECTED", observation)
+
+		gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !serveOpsNativeInferencePreflight(t, w, r) {
+				t.Errorf("unexpected native provider request: %s %s", r.Method, r.URL.Path)
+			}
+		}))
+		defer gateway.Close()
+
+		var stderr bytes.Buffer
+		code := runOpsRun(io.Discard, &stderr, []string{
+			"--harness", "native", "--workspace", root,
+			"--prompt-file", prompt, "--receipt", receipt,
+			"--provider", "openai", "--model", "fixture", "--base-url", gateway.URL + "/v1",
+			"--api-key-env", "FAK_OPS_NATIVE_SELECTED", "--max-turns", "1", "--timeout", "5s",
+		})
+		if code != 0 {
+			t.Fatalf("native run exit=%d: %s", code, stderr.String())
+		}
+		data, err := os.ReadFile(observation)
+		if err != nil {
+			t.Fatalf("read child environment: %v", err)
+		}
+		var observed map[string]string
+		if err := json.Unmarshal(data, &observed); err != nil {
+			t.Fatal(err)
+		}
+		receiptData, err := os.ReadFile(receipt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return observed, receiptData
+	}
+
+	t.Run("retains_only_selected_provider_credential", func(t *testing.T) {
+		for key, value := range map[string]string{
+			"OPENAI_API_KEY":        "ambient-openai-secret",
+			"ANTHROPIC_API_KEY":     "ambient-anthropic-secret",
+			"GOOGLE_API_KEY":        "ambient-google-secret",
+			"AWS_SECRET_ACCESS_KEY": "ambient-aws-secret",
+		} {
+			t.Setenv(key, value)
+		}
+		observed, receipt := run(t)
+		if observed["FAK_OPS_NATIVE_SELECTED"] == "" {
+			t.Fatal("native child lost explicitly selected credential")
+		}
+		for _, key := range []string{"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "AWS_SECRET_ACCESS_KEY"} {
+			if value := observed[key]; value != "" {
+				t.Errorf("native child inherited unrelated %s=%q", key, value)
+			}
+		}
+		for _, secret := range []string{"ambient-openai-secret", "ambient-anthropic-secret", "ambient-google-secret", "ambient-aws-secret"} {
+			if strings.Contains(string(receipt), secret) {
+				t.Errorf("metadata receipt leaked ambient credential %q", secret)
+			}
+		}
+	})
+
+	t.Run("strips_startup_config_and_rehomes_runtime", func(t *testing.T) {
+		ambientConfig := filepath.Join(t.TempDir(), "ambient-config")
+		ambientData := filepath.Join(t.TempDir(), "ambient-data")
+		for key, value := range map[string]string{
+			"NODE_OPTIONS":            "--require=ambient-startup-hook.js",
+			"OPENCODE_HOME":           filepath.Join(t.TempDir(), "ambient-opencode"),
+			"OPENCODE_CONFIG":         filepath.Join(t.TempDir(), "ambient-opencode.json"),
+			"OPENCODE_CONFIG_CONTENT": `{"provider":{"ambient":{}},"plugin":["ambient"]}`,
+			"XDG_CONFIG_HOME":         ambientConfig,
+			"XDG_DATA_HOME":           ambientData,
+		} {
+			t.Setenv(key, value)
+		}
+		observed, receipt := run(t)
+		for _, key := range []string{"NODE_OPTIONS", "OPENCODE_HOME", "OPENCODE_CONFIG"} {
+			if value := observed[key]; value != "" {
+				t.Errorf("native child inherited startup control %s=%q", key, value)
+			}
+		}
+		if strings.Contains(observed["OPENCODE_CONFIG_CONTENT"], "ambient") {
+			t.Errorf("native child inherited executable provider config: %q", observed["OPENCODE_CONFIG_CONTENT"])
+		}
+		if observed["XDG_CONFIG_HOME"] == "" || observed["XDG_CONFIG_HOME"] == ambientConfig || observed["XDG_DATA_HOME"] == "" || observed["XDG_DATA_HOME"] == ambientData {
+			t.Errorf("native child runtime roots are not isolated: config=%q data=%q", observed["XDG_CONFIG_HOME"], observed["XDG_DATA_HOME"])
+		}
+		if observed["PATH"] == "" || (observed["TEMP"] == "" && observed["TMP"] == "" && observed["TMPDIR"] == "") {
+			t.Errorf("native child lost required platform runtime: PATH=%q TEMP=%q TMP=%q TMPDIR=%q", observed["PATH"], observed["TEMP"], observed["TMP"], observed["TMPDIR"])
+		}
+		if strings.Contains(string(receipt), "ambient-startup-hook") || strings.Contains(string(receipt), `"ambient"`) {
+			t.Fatalf("metadata receipt leaked ambient startup config: %s", receipt)
+		}
+	})
 }
 
 func serveOpsNativeInferencePreflight(t *testing.T, w http.ResponseWriter, r *http.Request) bool {
@@ -117,7 +254,7 @@ func TestOpsNativeInferencePreflight(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Setenv("FAK_OPS_NATIVE_PREFLIGHT_CHILD_SENTINEL", sentinel)
-		code := runOpsRun(io.Discard, io.Discard, []string{
+		code := runOpsNativeFixture(io.Discard, io.Discard, "FAK_OPS_NATIVE_PREFLIGHT_CHILD_SENTINEL", []string{
 			"--harness", "native", "--prompt-file", prompt, "--receipt", receiptPath,
 			"--provider", "openai", "--model", "fixture", "--base-url", baseURL,
 			"--max-turns", "1", "--timeout", "5s",
@@ -217,7 +354,7 @@ func TestOpsNativeRealExecution(t *testing.T) {
 				deadline = "2s"
 			}
 			var stdout, stderr bytes.Buffer
-			code := runOpsRun(&stdout, &stderr, []string{"--harness", "native", "--prompt-file", prompt, "--receipt", receipt, "--provider", "openai", "--model", "fixture", "--base-url", server.URL + "/v1", "--workspace", root, "--policy", policy, "--max-turns", "3", "--timeout", deadline, "--effort", "low"})
+			code := runOpsNativeFixture(&stdout, &stderr, "FAK_OPS_NATIVE_TEST_CHILD", []string{"--harness", "native", "--prompt-file", prompt, "--receipt", receipt, "--provider", "openai", "--model", "fixture", "--base-url", server.URL + "/v1", "--workspace", root, "--policy", policy, "--max-turns", "3", "--timeout", deadline, "--effort", "low"})
 			close(releaseHandler)
 			data, err := os.ReadFile(receipt)
 			if err != nil {
@@ -366,7 +503,7 @@ func TestOpsNativeRetainsExplicitPolicy(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := runOpsRun(&stdout, &stderr, []string{
+	code := runOpsNativeFixture(&stdout, &stderr, "FAK_OPS_NATIVE_TEST_CHILD", []string{
 		"--harness", "native",
 		"--prompt-file", prompt,
 		"--receipt", receipt,
@@ -565,7 +702,7 @@ func TestOpsNativePolicyExactCommand(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := runOpsRun(&stdout, &stderr, []string{
+	code := runOpsNativeFixture(&stdout, &stderr, "FAK_OPS_NATIVE_TEST_CHILD", []string{
 		"--harness", "native",
 		"--prompt-file", prompt,
 		"--receipt", receipt,
