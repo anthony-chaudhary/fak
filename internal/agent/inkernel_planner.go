@@ -276,6 +276,22 @@ type InKernelPlanner struct {
 	// for real requests). It exists so a witness can inject a counting fake without
 	// building a checkpoint tier or an Engram stage; the served path never sets it.
 	auxAdapter auxWarmAdapter
+
+	// warmClaim carries the OPTIONAL bounded-residency startup claim config (CW-06,
+	// #13341): the spare byte/token quota and the TTL. It is inert until
+	// SetWarmClaimConfig is called, so a planner that never opts in warms exactly as
+	// CW-04 did and leaves WarmReceipt.Claim nil. Guarded by mu.
+	warmClaim    radixkv.StartupClaimConfig
+	warmClaimSet bool
+	// warmClaimCache is the lazily built bounded-residency boundary over p.tree. It
+	// SHARES p.mu as its locker (the same ScopedTree discipline), so claim
+	// acquisition/validation/release serialize with every other tree access and can
+	// never race a demand path. Nil until the first claim-bearing warm. Guarded by mu.
+	warmClaimCache *radixkv.StartupCache
+	// warmClaimHandle is the currently bound startup claim (CW-06, #13341). It is the
+	// finite residency handle the last successful warm acquired; the lifecycle's
+	// BindRelease callback owns releasing it on Complete/Release. Guarded by mu.
+	warmClaimHandle radixkv.StartupClaim
 }
 
 type inKernelOOMRetryClassStats struct {

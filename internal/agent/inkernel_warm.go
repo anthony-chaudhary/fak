@@ -120,6 +120,61 @@ type WarmReceipt struct {
 	// OWN status/counters — a KV-ready warm with a declined expert layer reports
 	// ready + expert:unsupported, never a single conflated bit.
 	Aux *AuxWarmReceipt `json:"aux,omitempty"`
+
+	// Claim carries the OPTIONAL bounded-residency evidence (CW-06, #13341): the finite
+	// startup claim the warm acquired over the restored prefix. It is present only when
+	// the caller configured a claim via SetWarmClaimConfig; a planner without it leaves
+	// Claim nil, so the historical CW-04 receipt is byte-for-byte unchanged. A ready warm
+	// whose claim could NOT be acquired is downgraded to cold (a warm that may be evicted
+	// before the first request is not a durable warm), so Ready==true implies a live
+	// claim whenever Claim is configured.
+	Claim *WarmClaimReceipt `json:"claim,omitempty"`
+}
+
+// WarmClaimReceipt is the machine-checkable evidence that a warm's restored prefix is
+// held by a FINITE, expiring startup claim — not merely resident at the moment of an
+// immediate readback. It is a value handle (scalars + a copied deadline); it carries no
+// prompt text and no model weights.
+//
+// The load-bearing bit is Live. A claim that has expired, been released, or whose node
+// incarnation was replaced validates false, so a stale receipt can never report warm
+// readiness the next request cannot actually reuse.
+type WarmClaimReceipt struct {
+	// Live is true only when the claim validated against the tree at receipt time.
+	Live bool `json:"live"`
+	// Generation is the claim's monotonic incarnation stamp. Two warms over the same
+	// token prefix carry different generations, so a handle from the older warm is
+	// distinguishable from the newer incarnation.
+	Generation uint64 `json:"generation"`
+	// Tokens is the claimed prefix length in tokens.
+	Tokens int `json:"tokens"`
+	// Bytes is the claimed prefix's resident payload bytes — the finite byte budget the
+	// claim may pin. It draws ONLY on spare capacity, never on demand residency.
+	Bytes int64 `json:"bytes"`
+	// ExpiresAtMillis is the claim's deadline in Unix milliseconds, or 0 when the claim
+	// carries no TTL (a caller that promises an explicit Release). A non-zero deadline is
+	// the moment after which Validate reports the claim stale.
+	ExpiresAtMillis int64 `json:"expires_at_ms,omitempty"`
+	// Reason is the closed sub-reason for a non-live claim (e.g. "quota", "expired",
+	// "stale_incarnation", "released", "no_tree"). Empty when live.
+	Reason string `json:"reason,omitempty"`
+}
+
+// WarmClaimConfig bounds the optional finite-residency startup claim a warm acquires
+// (CW-06, #13341). SpareBytes/SpareTokens draw ONLY on capacity that is not already
+// holding demand residency, so a claim can never displace a real request's prefix; TTL
+// bounds how long the claim may pin. It is inert by default: a planner with no config
+// warms exactly as CW-04 did and leaves WarmReceipt.Claim nil.
+type WarmClaimConfig struct {
+	// SpareBytes is the total spare byte budget claims may draw on. Zero means the byte
+	// axis is unbounded (only the token quota applies).
+	SpareBytes int64
+	// SpareTokens is the total spare token budget claims may draw on. Zero means the
+	// token axis is unbounded.
+	SpareTokens int
+	// TTL bounds how long a claim may pin before it lazily expires. Zero means the claim
+	// never expires on its own (the caller promises an explicit Release on shutdown).
+	TTL time.Duration
 }
 
 // Aux status vocabulary — the closed set an AuxLayerReceipt.Status may carry. It mirrors
@@ -325,14 +380,163 @@ func (p *InKernelPlanner) WarmPrefix(ctx context.Context, spec WarmPrefixSpec) (
 	receipt.Ready = true
 	receipt.Status = WarmStatusReady
 	receipt.Reason = ""
-	// Flip the first-demand latch ONLY now: a real restore was observed, so the following
-	// turn's prompt is genuinely eligible to reuse this prefix.
+	// CW-06 (#13341): bind the restored prefix to a FINITE residency claim, so the warm
+	// survives the gap before the first real request instead of being the first LRU
+	// victim. This runs BEFORE the readiness latch: a configured claim that cannot be
+	// acquired means the prefix may be evicted before demand looks, so an unclaimed warm
+	// is downgraded to cold rather than reporting a readiness the next request cannot use.
+	if p.warmClaimConfigured() {
+		claim, _ := p.acquireWarmClaim(tokens, spec)
+		receipt.Claim = claim
+		if claim == nil || !claim.Live {
+			receipt.Ready = false
+			receipt.Status = WarmStatusCold
+			receipt.Reason = "claim_unavailable"
+			return finishWarm(receipt, started), nil
+		}
+	}
+	// Flip the first-demand latch ONLY now: a real restore was observed (and, when
+	// configured, durably claimed), so the following turn's prompt is genuinely eligible
+	// to reuse this prefix.
 	p.noteKVPrefixAdmitted()
 	// Optional auxiliary warming runs LAST, after the KV prefix is genuinely restorable,
 	// so a failed optional layer can never cost the KV warm its readiness. It is inert
 	// unless the caller configured it, and it stops on the request's own cancellation.
 	receipt.Aux = p.warmAuxiliaryCaches(ctx, p.warmIsV41())
 	return finishWarm(receipt, started), nil
+}
+
+// warmClaimConfigured reports whether a finite-residency startup claim was configured.
+// It reads under mu alongside every other planner-owned warm field.
+func (p *InKernelPlanner) warmClaimConfigured() bool {
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.warmClaimSet
+}
+
+// SetWarmClaimConfig installs the optional finite-residency startup claim config (CW-06,
+// #13341). A planner that never calls it warms exactly as CW-04 did and leaves
+// WarmReceipt.Claim nil.
+func (p *InKernelPlanner) SetWarmClaimConfig(cfg WarmClaimConfig) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.warmClaim = radixkv.StartupClaimConfig{
+		SpareBytes:  cfg.SpareBytes,
+		SpareTokens: cfg.SpareTokens,
+		TTL:         cfg.TTL,
+	}
+	p.warmClaimSet = true
+	p.mu.Unlock()
+}
+
+// acquireWarmClaim takes a bounded, expiring lease on the just-restored prefix through the
+// shared claim boundary, binds its release to the planner's startup-warm lifecycle, and
+// returns the machine-checkable receipt. It returns a non-live receipt (never a nil claim)
+// with a closed reason when the claim cannot be honored, so a caller can always tell WHY.
+//
+// The claim boundary SHARES p.mu as its locker (the same ScopedTree discipline), so claim
+// mutation serializes with every other tree access. It must therefore never be reached
+// while p.mu is held; WarmPrefix releases the lock before calling here.
+func (p *InKernelPlanner) acquireWarmClaim(tokens []int, spec WarmPrefixSpec) (*WarmClaimReceipt, string) {
+	if p == nil || len(tokens) == 0 {
+		return &WarmClaimReceipt{Reason: "no_tree"}, "no_tree"
+	}
+
+	// Resolve the claim boundary and config under the lock, then call OUTSIDE it: the
+	// StartupCache re-acquires p.mu itself, so holding it here would self-deadlock.
+	p.mu.Lock()
+	tree := p.tree
+	cfg := p.warmClaim
+	cache := p.warmClaimCache
+	if tree == nil {
+		p.mu.Unlock()
+		return &WarmClaimReceipt{Reason: "no_tree"}, "no_tree"
+	}
+	// A previous claim over this planner may still be bound: capture it here and release
+	// it AFTER unlocking (the boundary shares p.mu, so releasing under the lock would
+	// self-deadlock). Repeated warm calls thus cannot multiply reservations.
+	prev := p.warmClaimHandle
+	p.warmClaimHandle = radixkv.StartupClaim{}
+	if cache == nil {
+		// Share p.mu as the boundary's locker: claim acquisition/validation/release then
+		// serialize with every other tree access over this planner, exactly as scopedTree
+		// does. A separate lock would race the demand path.
+		cache = radixkv.NewStartupCacheWithLocker(tree, &p.mu)
+		p.warmClaimCache = cache
+	}
+	p.mu.Unlock()
+
+	if prev.Gen() != 0 {
+		cache.Release(prev)
+	}
+
+	// WarmInsert the restored prefix (idempotent: an already-cached prefix is upgraded,
+	// never double-counted) and take the bounded lease. The kv argument is nil: the warm
+	// path already admitted the payload through the scoped/unscoped tree, and the claim's
+	// byte accounting falls back to the 4-bytes/token bound, which is the finite quota
+	// that matters here.
+	claim, err := cache.AcquireStartup(radixkv.StartupClaimConfig{
+		SpareBytes:  cfg.SpareBytes,
+		SpareTokens: cfg.SpareTokens,
+		TTL:         cfg.TTL,
+	}, tokens, nil)
+	if err != nil {
+		reason := "quota"
+		if errors.Is(err, radixkv.ErrStartupClaimExpired) {
+			reason = "expired"
+		}
+		return &WarmClaimReceipt{Reason: reason}, reason
+	}
+
+	// Bind the claim's release into the planner's startup-warm lifecycle: a shutdown
+	// (ReleaseStartupWarm) or a completed slot releases the lease exactly once, so a
+	// prepared prefix returns to normal demand residency rather than pinning forever.
+	bound := claim
+	p.warmState.BindRelease(func() { cache.Release(bound) })
+
+	// Validate the lease in the same serialized turn that acquired it. A live claim is
+	// the readiness evidence; an immediate validation failure is reported honestly.
+	live := cache.Validate(claim)
+	rec := &WarmClaimReceipt{
+		Live:       live,
+		Generation: claim.Gen(),
+		Tokens:     claim.Tokens(),
+		Bytes:      claim.Bytes(),
+	}
+	if exp, ok := claim.ExpiresAt(); ok {
+		rec.ExpiresAtMillis = exp.UnixMilli()
+	}
+	if !live {
+		rec.Reason = "stale_incarnation"
+	}
+
+	p.mu.Lock()
+	p.warmClaimHandle = claim
+	p.mu.Unlock()
+	return rec, rec.Reason
+}
+
+// WarmClaimLive reports whether the planner's currently bound startup claim still
+// validates: the claimed leaf is still attached, still carries this claim's incarnation,
+// and has not expired. A planner with no bound claim reports false. It is the readback a
+// first-demand handoff consults before treating prepared cache state as reusable.
+func (p *InKernelPlanner) WarmClaimLive() bool {
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	cache := p.warmClaimCache
+	handle := p.warmClaimHandle
+	p.mu.Unlock()
+	if cache == nil || handle.Gen() == 0 {
+		return false
+	}
+	return cache.Validate(handle)
 }
 
 // warmAuxiliaryCaches orchestrates the OPTIONAL auxiliary-cache layers (expert profile and
