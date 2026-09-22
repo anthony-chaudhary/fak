@@ -158,8 +158,12 @@ func TestSuggestStamp(t *testing.T) {
 
 func TestParseDocs(t *testing.T) {
 	c, _ := Load(writeSyntheticRepo(t))
-	if len(c.Docs) != 4 {
-		t.Fatalf("got %d docs, want 4: %+v", len(c.Docs), c.Docs)
+	// The synthetic repo links README, FLEET, and gateway in INDEX.md but also
+	// writes docs/generation.md on disk without linking it; tree discovery
+	// (fak-private#1656) promotes that unlisted file to a fifth row, so the catalog
+	// holds five docs, not four.
+	if len(c.Docs) != 5 {
+		t.Fatalf("got %d docs, want 5: %+v", len(c.Docs), c.Docs)
 	}
 	var fleet *Doc
 	for i := range c.Docs {
@@ -175,6 +179,29 @@ func TestParseDocs(t *testing.T) {
 	}
 	if fleet.Blurb != "watch the agent fleet on a host." {
 		t.Errorf("blurb = %q", fleet.Blurb)
+	}
+	if fleet.Discovered {
+		t.Errorf("curated tools/FLEET.md marked Discovered: %+v", fleet)
+	}
+	// The unlisted doc on disk is discovered, tree-sourced, and titled by filename
+	// with its H1 surfaced as the blurb.
+	var generation *Doc
+	for i := range c.Docs {
+		if c.Docs[i].Path == "docs/generation.md" {
+			generation = &c.Docs[i]
+		}
+	}
+	if generation == nil {
+		t.Fatal("unlisted docs/generation.md missing from catalog — tree discovery did not run")
+	}
+	if !generation.Discovered {
+		t.Errorf("unlisted docs/generation.md not marked Discovered: %+v", generation)
+	}
+	if generation.Title != "generation" {
+		t.Errorf("discovered title = %q, want humanized filename %q", generation.Title, "generation")
+	}
+	if generation.Blurb != "Generation Contract" {
+		t.Errorf("discovered blurb = %q, want H1 %q", generation.Blurb, "Generation Contract")
 	}
 }
 

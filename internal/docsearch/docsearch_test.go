@@ -198,3 +198,323 @@ func TestSearchDocsEmptyQuery(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscoverDocsFindsUnlistedDoc(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "# Born Bottlenecks\n\nA doc that is never linked from a curated source.\n"
+	if err := os.WriteFile(filepath.Join(root, "docs", "only-on-disk.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := DiscoverDocs(root)
+	if len(got) != 1 {
+		t.Fatalf("DiscoverDocs returned %d docs, want 1: %+v", len(got), got)
+	}
+	d := got[0]
+	if d.Path != "docs/only-on-disk.md" {
+		t.Errorf("Path = %q, want docs/only-on-disk.md", d.Path)
+	}
+	if d.Title != "only on disk" {
+		t.Errorf("Title = %q, want humanized filename %q", d.Title, "only on disk")
+	}
+	if d.Blurb != "Born Bottlenecks" {
+		t.Errorf("Blurb = %q, want H1 %q", d.Blurb, "Born Bottlenecks")
+	}
+	if !d.Discovered {
+		t.Errorf("Discovered = false, want true")
+	}
+	if strings.Join(d.Sources, ",") != "tree" {
+		t.Errorf("Sources = %v, want [tree]", d.Sources)
+	}
+}
+
+func TestDiscoverDocsIsShallowAndBounded(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "top.md"), []byte("# Top\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "note.txt"), []byte("# Note\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "skip.go"), []byte("package x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "nested", "deep.md"), []byte("# Deep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := DiscoverDocs(root)
+	if len(got) != 2 {
+		t.Fatalf("DiscoverDocs = %+v, want only the two top-level .md/.txt files", got)
+	}
+	if got[0].Path != "docs/note.txt" || got[1].Path != "docs/top.md" {
+		t.Fatalf("DiscoverDocs paths = %q,%q, want sorted docs/note.txt,docs/top.md", got[0].Path, got[1].Path)
+	}
+}
+
+func TestDiscoverDocsMissingTreeIsNil(t *testing.T) {
+	if got := DiscoverDocs(t.TempDir()); got != nil {
+		t.Fatalf("DiscoverDocs on a root with no docs/ = %+v, want nil", got)
+	}
+}
+
+func TestLoadDocsIncludesUnlistedDoc(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"INDEX.md":  "- [Gateway](docs/gateway.md) — the performance gate\n",
+		"llms.txt":  "- [Only In Llms](docs/only-llms.md) — blurb only here\n",
+		"README.md": "Deeper context: [Linked Page](docs/linked.md) explains the seam.\n",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "unlisted-observability.md"), []byte("# Observability Ledger\n\nbody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := LoadDocs(root)
+	byPath := map[string]Doc{}
+	for _, d := range c.Docs {
+		if _, dup := byPath[d.Path]; dup {
+			t.Fatalf("path %s appears twice: %+v", d.Path, c.Docs)
+		}
+		byPath[d.Path] = d
+	}
+	unlisted, ok := byPath["docs/unlisted-observability.md"]
+	if !ok {
+		t.Fatalf("docs/unlisted-observability.md missing from catalog: %+v", c.Docs)
+	}
+	if !unlisted.Discovered || unlisted.Title != "unlisted observability" || unlisted.Blurb != "Observability Ledger" {
+		t.Errorf("unlisted doc = %+v, want discovered filename-title %q with H1 blurb %q", unlisted, "unlisted observability", "Observability Ledger")
+	}
+	gateway, ok := byPath["docs/gateway.md"]
+	if !ok {
+		t.Fatalf("curated docs/gateway.md missing from catalog: %+v", c.Docs)
+	}
+	if gateway.Discovered {
+		t.Errorf("curated gateway doc marked Discovered: %+v", gateway)
+	}
+}
+
+func TestLoadDocsDeduplicatesCuratedPath(t *testing.T) {
+	root := t.TempDir()
+	body := "# Gateway Contract\n"
+	if err := os.WriteFile(filepath.Join(root, "INDEX.md"), []byte("- [Gateway](docs/gateway.md) — the real blurb\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "gateway.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := LoadDocs(root)
+	n := 0
+	for _, d := range c.Docs {
+		if d.Path == "docs/gateway.md" {
+			n++
+			if d.Discovered {
+				t.Errorf("curated path was re-added as discovered: %+v", d)
+			}
+			if d.Blurb != "the real blurb" {
+				t.Errorf("curated blurb was overwritten by discovery: %q", d.Blurb)
+			}
+		}
+	}
+	if n != 1 {
+		t.Fatalf("docs/gateway.md appears %d times, want 1 (curated dedup, discovery must not duplicate)", n)
+	}
+}
+
+func TestSearchDocsReturnsUnlistedDoc(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "INDEX.md"), []byte("- [Gateway](docs/gateway.md) — the performance gate\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"unlisted-observability.md": "# Observability Ledger\n\nbody\n",
+		"born-bottlenecks.md":       "# Born Bottlenecks\n\nbody\n",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(root, "docs", name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := LoadDocs(root)
+
+	got := c.SearchDocs("observability")
+	if len(got) == 0 || got[0].Path != "docs/unlisted-observability.md" {
+		t.Fatalf("SearchDocs(observability) = %+v, want docs/unlisted-observability.md first", got)
+	}
+	if got[0].Approx {
+		t.Errorf("filename match on an unlisted doc fell through to the fuzzy fallback: %+v", got[0])
+	}
+
+	multi := c.SearchDocs("born bottlenecks")
+	found := false
+	for _, d := range multi {
+		if d.Path == "docs/born-bottlenecks.md" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("SearchDocs(born bottlenecks) did not return docs/born-bottlenecks.md: %+v", multi)
+	}
+}
+
+func TestSearchDocsCuratedPrecedenceOverDiscovered(t *testing.T) {
+	c := &Catalog{
+		Root: ".",
+		Docs: []Doc{
+			{Title: "Gateway", Path: "docs/notes/gateway.md", Sources: []string{"INDEX.md"}},
+			{Title: "discovered gateway", Path: "docs/discovered-gateway.md", Sources: []string{"tree"}, Discovered: true},
+		},
+	}
+	got := c.SearchDocs("gateway")
+	if len(got) < 2 {
+		t.Fatalf("SearchDocs(gateway) = %+v, want both curated and discovered rows", got)
+	}
+	if got[0].Path != "docs/notes/gateway.md" {
+		t.Fatalf("SearchDocs(gateway) top hit = %q, want curated docs/notes/gateway.md", got[0].Path)
+	}
+	if got[1].Path != "docs/discovered-gateway.md" {
+		t.Fatalf("SearchDocs(gateway) second hit = %q, want discovered docs/discovered-gateway.md", got[1].Path)
+	}
+}
+
+// TestSearchDocsPrecedenceNotOutgrownByExtraFields is the adversarial regression
+// for the falsified constant-penalty design: a discovered row matching MORE fields
+// (title+path+blurb) must not outrank a curated row at equal token coverage whose
+// score is lower. Provenance is the primary key, so curated still wins.
+func TestSearchDocsPrecedenceNotOutgrownByExtraFields(t *testing.T) {
+	c := &Catalog{
+		Root: ".",
+		Docs: []Doc{
+			{Title: "memory skill guide", Path: "docs/notes/memory-skill-guide.md", Blurb: "memory skill", Sources: []string{"INDEX.md"}},
+			{Title: "skill memory", Path: "docs/skill-memory.md", Blurb: "skill memory", Sources: []string{"tree"}, Discovered: true},
+		},
+	}
+	got := c.SearchDocs("skill memory")
+	if len(got) < 2 {
+		t.Fatalf("SearchDocs(skill memory) = %+v, want both rows", got)
+	}
+	if got[0].Path != "docs/notes/memory-skill-guide.md" {
+		t.Fatalf("top hit = %q, want curated docs/notes/memory-skill-guide.md ahead of the higher-scoring discovered row", got[0].Path)
+	}
+}
+
+func TestSearchDocsPrecedenceSingleTokenBlurbOnly(t *testing.T) {
+	c := &Catalog{
+		Root: ".",
+		Docs: []Doc{
+			{Title: "zeta", Path: "docs/notes/zeta.md", Blurb: "gateway related", Sources: []string{"INDEX.md"}},
+			{Title: "gateway", Path: "docs/gateway.md", Blurb: "gateway", Sources: []string{"tree"}, Discovered: true},
+		},
+	}
+	got := c.SearchDocs("gateway")
+	if len(got) < 2 {
+		t.Fatalf("SearchDocs(gateway) = %+v, want both rows", got)
+	}
+	if got[0].Path != "docs/notes/zeta.md" {
+		t.Fatalf("top hit = %q, want curated blurb-only docs/notes/zeta.md first", got[0].Path)
+	}
+}
+
+// TestSearchDocsPrecedenceHoldsInFuzzyFallback pins the second adversarial finding:
+// the typo fallback bypassed the tier clause, so a discovered row could jump a
+// curated one on a near-miss query.
+func TestSearchDocsPrecedenceHoldsInFuzzyFallback(t *testing.T) {
+	c := &Catalog{
+		Root: ".",
+		Docs: []Doc{
+			{Title: "zeta guide", Path: "docs/notes/gateway-guide.md", Blurb: "gateway usage", Sources: []string{"INDEX.md"}},
+			{Title: "gateway", Path: "docs/gateway.md", Blurb: "gateway", Sources: []string{"tree"}, Discovered: true},
+		},
+	}
+	got := c.SearchDocs("gatway")
+	if len(got) < 2 {
+		t.Fatalf("SearchDocs(gatway) = %+v, want both near-miss rows", got)
+	}
+	if got[0].Discovered {
+		t.Fatalf("fuzzy fallback top hit = %q (discovered), want the curated row first", got[0].Path)
+	}
+	if !got[0].Approx {
+		t.Errorf("fuzzy hit %q not marked approximate", got[0].Path)
+	}
+}
+
+// TestSearchDocsUnlistedOnlyMatchNotDropped pins that an unlisted on-disk doc is
+// returned for a query matching only its H1 (blurb) and for a filename query — the
+// discovery payoff (#1656). The per-token penalty must not silently drop these.
+func TestSearchDocsUnlistedOnlyMatchNotDropped(t *testing.T) {
+	c := &Catalog{
+		Root: ".",
+		Docs: []Doc{
+			{Title: "xyz", Path: "docs/xyz.md", Blurb: "Quantum Foam", Sources: []string{"tree"}, Discovered: true},
+			{Title: "born bottlenecks", Path: "docs/born-bottlenecks.md", Blurb: "Born Bottlenecks", Sources: []string{"tree"}, Discovered: true},
+		},
+	}
+	got := c.SearchDocs("quantum")
+	if len(got) != 1 || got[0].Path != "docs/xyz.md" {
+		t.Fatalf("SearchDocs(quantum) = %+v, want the H1-only discovered doc docs/xyz.md", got)
+	}
+	if got[0].Approx {
+		t.Errorf("H1-only discovered match dropped from the exact path and rescued as Approx: %+v", got[0])
+	}
+	if got := c.SearchDocs("bottlenecks"); len(got) != 1 || got[0].Path != "docs/born-bottlenecks.md" {
+		t.Fatalf("SearchDocs(bottlenecks) = %+v, want the filename-matched discovered doc", got)
+	}
+}
+
+func TestLoadDocsMissingDocsTreeDegradesQuietly(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"INDEX.md": "- [Gateway](docs/gateway.md) — the performance gate\n",
+		"llms.txt": "- [Only In Llms](docs/only-llms.md) — blurb only here\n",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := LoadDocs(root)
+	if len(c.Docs) != 2 {
+		t.Fatalf("LoadDocs with no docs/ tree returned %d docs, want 2 curated rows: %+v", len(c.Docs), c.Docs)
+	}
+	for _, d := range c.Docs {
+		if d.Discovered {
+			t.Errorf("curated doc marked Discovered with no docs/ tree: %+v", d)
+		}
+	}
+}
+
+// TestSearchDocsDeterministicTiebreak pins the third adversarial finding: two rows
+// with an equal title must still order deterministically (by path), so a
+// hand-built catalog cannot produce input-order-dependent results.
+func TestSearchDocsDeterministicTiebreak(t *testing.T) {
+	a := Doc{Title: "same", Path: "docs/a.md", Sources: []string{"INDEX.md"}}
+	b := Doc{Title: "same", Path: "docs/b.md", Sources: []string{"INDEX.md"}}
+	first := (&Catalog{Root: ".", Docs: []Doc{a, b}}).SearchDocs("same")
+	second := (&Catalog{Root: ".", Docs: []Doc{b, a}}).SearchDocs("same")
+	if len(first) != 2 || len(second) != 2 {
+		t.Fatalf("SearchDocs(same) = %v / %v, want two rows each", first, second)
+	}
+	if first[0].Path != second[0].Path || first[1].Path != second[1].Path {
+		t.Fatalf("tiebreak is input-order dependent: %q,%q vs %q,%q",
+			first[0].Path, first[1].Path, second[0].Path, second[1].Path)
+	}
+	if first[0].Path != "docs/a.md" {
+		t.Fatalf("tiebreak top = %q, want docs/a.md (path order)", first[0].Path)
+	}
+}

@@ -8,6 +8,7 @@
 package docsearch
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -25,6 +26,9 @@ type Doc struct {
 	Blurb   string   `json:"blurb,omitempty"`
 	Sources []string `json:"sources,omitempty"`
 	Approx  bool     `json:"approx,omitempty"`
+	// Discovered marks a doc found by walking the tree rather than parsed from a
+	// curated source file, so a caller can tell a curated row from a discovered one.
+	Discovered bool `json:"discovered,omitempty"`
 }
 
 // Catalog is the narrow documentation authority shared by runtime discovery and
@@ -46,6 +50,8 @@ func Load(root string) (*Catalog, error) {
 
 // LoadDocs reads only the documentation sources. Development indexing already
 // validates dos.toml as its taxonomy authority before calling this helper.
+// Tree discovery runs AFTER the curated sources so curated rows keep precedence;
+// a missing docs/ tree is a no-op, keeping bare temp roots valid.
 func LoadDocs(root string) *Catalog {
 	c := &Catalog{Root: root}
 	for _, source := range []string{"INDEX.md", "llms.txt", "README.md", "AGENTS.md"} {
@@ -53,7 +59,97 @@ func LoadDocs(root string) *Catalog {
 			c.parse(source, string(data))
 		}
 	}
+	for _, discovered := range DiscoverDocs(root) {
+		if c.hasPath(discovered.Path) {
+			continue
+		}
+		c.Docs = append(c.Docs, discovered)
+	}
 	return c
+}
+
+// hasPath reports whether the catalog already holds a doc at the normalized path.
+func (c *Catalog) hasPath(path string) bool {
+	want := normPath(path)
+	for i := range c.Docs {
+		if normPath(c.Docs[i].Path) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// h1RE matches an ATX H1 heading and captures the heading text.
+var h1RE = regexp.MustCompile(`^#\s+(.+)$`)
+
+// discoverHeadBytes bounds the per-file read used to find an H1. Large notes are
+// common under docs/, so discovery never reads a whole file.
+const discoverHeadBytes = 64 << 10
+
+// DiscoverDocs walks ONLY the top level of root/docs (not subdirectories; docs/
+// holds thousands of dated notes and deeper trees are out of scope) and returns
+// every regular .md/.txt file directly inside it as a Doc. It is deterministic
+// (sorted by Path) and degrades quietly: an absent or unreadable docs/ tree
+// yields no docs, never an error.
+//
+// A discovered row's Title is the file's humanized NAME (pathTitle, e.g.
+// "born bottlenecks" for born-bottlenecks.md) and its Blurb is the file's first
+// ATX H1 within the first 64 KiB, so a query matches on either the filename or
+// the heading. This mirrors how the curated linker titles (pathTitle) and
+// link-line blurbs are already surfaced, so discovery and curation score alike —
+// only the provenance tier in SearchDocs orders a curated row first.
+func DiscoverDocs(root string) []Doc {
+	entries, err := os.ReadDir(filepath.Join(root, "docs"))
+	if err != nil {
+		return nil
+	}
+	var docs []Doc
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		if ext != ".md" && ext != ".txt" {
+			continue
+		}
+		path := "docs/" + filepath.ToSlash(entry.Name())
+		h1 := discoverH1(filepath.Join(root, "docs", entry.Name()))
+		if h1 == "" {
+			h1 = pathTitle(path)
+		}
+		docs = append(docs, Doc{
+			Title:      pathTitle(path),
+			Path:       path,
+			Blurb:      h1,
+			Sources:    []string{"tree"},
+			Discovered: true,
+		})
+	}
+	sort.Slice(docs, func(i, j int) bool { return docs[i].Path < docs[j].Path })
+	return docs
+}
+
+// discoverH1 returns the file's first ATX H1 heading text, or "" when the head
+// holds no H1 or the file cannot be read. It reads at most discoverHeadBytes so a
+// large note never costs a full read.
+func discoverH1(file string) string {
+	f, err := os.Open(file)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	head, err := io.ReadAll(io.LimitReader(f, discoverHeadBytes))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(head), "\n") {
+		if m := h1RE.FindStringSubmatch(strings.TrimRight(line, "\r")); m != nil {
+			if title := strings.TrimSpace(strings.TrimLeft(m[1], "#")); title != "" {
+				return title
+			}
+		}
+	}
+	return ""
 }
 
 var docLineRE = regexp.MustCompile(`^\s*[-*]\s*\[(.+?)\]\(([^)]+)\)\s*(?:[—–-]\s*(.*))?$`)
@@ -162,6 +258,7 @@ func (c *Catalog) SearchDocs(query string) []Doc {
 		d        Doc
 		s        int
 		coverage int
+		tier     int
 	}
 	var hits []scored
 	for _, d := range c.Docs {
@@ -185,17 +282,42 @@ func (c *Catalog) SearchDocs(query string) []Doc {
 				coverage++
 			}
 		}
-		if score > 0 {
-			if len(toks) > 1 {
-				score += canonicalBonus(d)
-			}
-			hits = append(hits, scored{d: d, s: score, coverage: coverage})
+		if score == 0 {
+			continue
+		}
+		if len(toks) > 1 {
+			score += canonicalBonus(d)
+		}
+		// Discovered rows rank BELOW curated ones. A constant subtraction cannot
+		// express that: a discovered row matching more fields than a curated row
+		// would out-grow any fixed penalty. So provenance is a categorical, primary
+		// sort key (curated tier 0, discovered tier 1) and the score ranks within a
+		// tier. The per-token penalty orders discovered rows among themselves.
+		if d.Discovered {
+			score -= discoveredPenalty * coverage
+		}
+		// Admit on score>=0, not score>0: the per-token penalty can land a genuine
+		// discovered match on exactly 0 when its only signal is the H1 blurb (the
+		// discovered shape is Title=filename, Blurb=H1, so an H1-only query scores
+		// raw 1 - 1 = 0). A curated row can never score <0 here (its raw score is
+		// positive and it takes no penalty), so this relaxation admits only
+		// discovered rows a stricter test would have silently dropped — the precise
+		// "unlisted doc is invisible" failure #1656 exists to remove.
+		if score >= 0 {
+			hits = append(hits, scored{d: d, s: score, coverage: coverage, tier: provenanceTier(d)})
 		}
 	}
 	if len(hits) == 0 {
 		return c.fuzzy(toks)
 	}
 	sort.SliceStable(hits, func(i, j int) bool {
+		// Provenance first: every curated row ranks above every discovered row,
+		// regardless of score. Curated rows are all tier 0, so this clause is inert
+		// for the pre-existing curated-only ranking (their relative order is decided
+		// below, unchanged); it only demotes discovered rows wholesale.
+		if hits[i].tier != hits[j].tier {
+			return hits[i].tier < hits[j].tier
+		}
 		if len(toks) > 1 {
 			if hits[i].coverage != hits[j].coverage {
 				return hits[i].coverage > hits[j].coverage
@@ -215,7 +337,12 @@ func (c *Catalog) SearchDocs(query string) []Doc {
 				return iTitle < jTitle
 			}
 		}
-		return hits[i].d.Title < hits[j].d.Title
+		if hits[i].d.Title != hits[j].d.Title {
+			return hits[i].d.Title < hits[j].d.Title
+		}
+		// Path is the final, total tiebreak so the ordering is deterministic even
+		// for a hand-built catalog holding two rows with an identical title.
+		return normPath(hits[i].d.Path) < normPath(hits[j].d.Path)
 	})
 	out := make([]Doc, len(hits))
 	for i, hit := range hits {
@@ -223,6 +350,25 @@ func (c *Catalog) SearchDocs(query string) []Doc {
 	}
 	return out
 }
+
+// provenanceTier is the primary ranking key SearchDocs sorts on: 0 for a row
+// parsed from a curated source file, 1 for a row discovered by walking the tree.
+// Curated rows therefore always outrank discovered rows for the same query, as a
+// categorical fact rather than a subtraction any score can out-grow.
+func provenanceTier(d Doc) int {
+	if d.Discovered {
+		return 1
+	}
+	return 0
+}
+
+// discoveredPenalty is the per-matched-token subtraction applied to a discovered
+// row's score so its own matches still rank among themselves. It is deliberately
+// small — 1, the weight of a blurb hit — so it never drops a genuine match: the
+// worst case (an H1-only match, raw 1 - 1 = 0) is still admitted by the `>= 0`
+// test, and a filename match scores 3 - 1 = 2. Cross-provenance precedence is
+// enforced by provenanceTier, NOT by this constant.
+const discoveredPenalty = 1
 
 func canonicalBonus(d Doc) int {
 	bonus := 2 * len(d.Sources)
@@ -254,10 +400,19 @@ func (c *Catalog) fuzzy(toks []string) []Doc {
 		}
 	}
 	sort.SliceStable(hits, func(i, j int) bool {
+		// Provenance first, exactly as the exact-match path orders: a curated row
+		// outranks a discovered row even in the near-miss fallback, so a typo query
+		// cannot let a tree-discovered doc jump a curated one.
+		if it, jt := provenanceTier(hits[i].d), provenanceTier(hits[j].d); it != jt {
+			return it < jt
+		}
 		if hits[i].s != hits[j].s {
 			return hits[i].s > hits[j].s
 		}
-		return hits[i].d.Title < hits[j].d.Title
+		if hits[i].d.Title != hits[j].d.Title {
+			return hits[i].d.Title < hits[j].d.Title
+		}
+		return normPath(hits[i].d.Path) < normPath(hits[j].d.Path)
 	})
 	out := make([]Doc, len(hits))
 	for i, hit := range hits {
