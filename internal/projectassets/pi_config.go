@@ -241,6 +241,9 @@ func EnsurePiProviderConfigForWindow(target, baseURL, modelID string, servedWind
 			providersMap[DefaultPiProviderID] = fakMap
 			modified = true
 		}
+		if repairPiProviderKeyCommand(fakMap) {
+			modified = true
+		}
 		if bURL, _ := fakMap["baseUrl"].(string); bURL != baseURL {
 			fakMap["baseUrl"] = baseURL
 			modified = true
@@ -286,6 +289,26 @@ func EnsurePiProviderConfigForWindow(target, baseURL, modelID string, servedWind
 			modified = true
 		}
 		fakMap["models"] = modelsList
+	}
+
+	// Repair every OTHER configured provider that still carries the fragile
+	// `!powershell ... Get-Content <keyfile>` apiKey form. Pi executes such a value as a
+	// subprocess on each resolution, and it fails outright whenever the resolving process's
+	// PATH cannot reach WindowsPowerShell (or when the cmd fallback leg sees a
+	// forward-slash path) — surfacing as `Failed to resolve API key for provider ...
+	// from shell command`. Normalizing to a PATH-independent read removes that failure
+	// class without touching an operator's deliberate value.
+	for id, prov := range providersMap {
+		if id == DefaultPiProviderID {
+			continue
+		}
+		provMap, ok := prov.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if repairPiProviderKeyCommand(provMap) {
+			modified = true
+		}
 	}
 
 	if modified {

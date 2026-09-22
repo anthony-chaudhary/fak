@@ -193,3 +193,4 @@ This dossier establishes the conceptual foundation (R0) of the superset claim: *
 | M8 | R0 | #3143 | **CLOSED (SKIP)**: High quality tax on coding agents |
 | M9 | R1 | #2241 | Hybrid SWA/GDN/Mamba unified memory plane |
 | M10 | R2 | #3414 | **CLOSED (SHIPPED)**: Economically-priced spill-before-drop |
+| W6 | R0 | #2625 | **CLOSED (SKIP)**: A-MEM neighbor-rewrite declined; value already held by proposal-only `consolidate` + `recall.Dream` + W5 supersession + read-time verifier + `memory-compact`. See [CONCEPT-STUDY-A-MEM-NOTE-EVOLUTION-W6-2026-09-21](../notes/CONCEPT-STUDY-A-MEM-NOTE-EVOLUTION-W6-2026-09-21.md). |
