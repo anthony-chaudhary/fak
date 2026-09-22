@@ -1158,6 +1158,47 @@ func (c Config) InKernelBackendPrefixReuseSupportedFor(be compute.Backend) bool 
 	return c.InKernelBackendPrefixReuseSupported()
 }
 
+// HostCompletePrefixSnapshotSupported reports whether a HOST PrefixSnapshot for
+// this Config carries the COMPLETE prefix continuation state, so a prefix restore
+// from a device-less capture is well-defined. It is the host-side capability that
+// is deliberately DISTINCT from bare KVPrefixReuseSupported: the bare predicate
+// answers "is the generic KVCache alone a complete prefix", while this one
+// answers "does the host snapshot OWNER carry every continuation byte".
+//
+// The distinction exists because the two qualified differently for V4.1:
+//
+//   - KVPrefixReuseSupported stays FALSE for V4.1: the bare *KVCache omits the
+//     V4.1 committed token history, per-layer temporal attention state and the
+//     shared source-publication registry, so SessionFromPrefix / radix truncate
+//     on a bare cache clone remain refused (fak#13338 keeps that guard).
+//   - HostCompletePrefixSnapshotSupported is TRUE for V4.1: since fak#13342 the
+//     host PrefixSnapshot.v41 field (v41ForwardSnapshot) carries exactly that
+//     missing state, so a snapshot captured and restored through the snapshot
+//     codec IS a complete prefix. This makes host snapshot eligibility EXPLICIT
+//     rather than redefining the meaning of the legacy bare-KV capability.
+//
+// It stays FALSE for the gemma4 recompute bridge: that session's state is the
+// token history (gemma4Hist) recomputed on every ingest, which no host snapshot
+// carries, so a clone would silently omit the entire prefix (the #5548 defect).
+// A recompute-only architecture that is neither gemma4 nor V4.1 has no host
+// snapshot continuation contract, so the default is refuse.
+//
+// It NEVER consults a backend and does NOT by itself enable serving reuse or
+// device snapshots: it is a host-snapshot eligibility statement. The backend
+// (device) counterpart is InKernelBackendPrefixReuseSupportedFor and the
+// snapshot-side v41BackendSnapshotSupported; the consuming planner owns wiring
+// (fak#13335, fak#13330).
+func (c Config) HostCompletePrefixSnapshotSupported() bool {
+	if c.isGemma4() {
+		return false
+	}
+	// V4.1 and every legacy cached architecture qualify here: V4.1 through the
+	// host v41ForwardSnapshot continuation state landed by fak#13342, the legacy
+	// cached architectures through their generic KVCache. Both are carried by a
+	// complete host PrefixSnapshot, which is what this predicate asserts.
+	return true
+}
+
 // isMiniMax reports a MiniMax-family model (model_type / architectures such as
 // "minimax_m3", "minimax_m2", "MiniMaxM3ForCausalLM"). The family key lowercases
 // model_type + architectures with separators stripped, so "minimax_m3" ->
