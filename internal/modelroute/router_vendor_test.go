@@ -62,4 +62,13 @@ func TestDefaultRosterRegistersRouter(t *testing.T) {
 	if !found {
 		t.Fatalf("DefaultRoster() has no KindRouter account")
 	}
+	// The shipped "router" route must resolve to the vendor's catalog default, not
+	// the literal route id (router.com serves no model named "router").
+	target, err := roster.Resolve("router")
+	if err != nil {
+		t.Fatalf("DefaultRoster().Resolve(router) = %v", err)
+	}
+	if target.UpstreamModel != RouterDefaultModel {
+		t.Fatalf("router binding upstream = %q, want %q", target.UpstreamModel, RouterDefaultModel)
+	}
 }

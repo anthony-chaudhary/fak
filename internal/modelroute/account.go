@@ -131,6 +131,11 @@ const (
 	RouterAPIKeyEnv = "ROUTER_API_KEY"
 	// RouterOpenAIBaseURL is router.com's OpenAI Responses API root.
 	RouterOpenAIBaseURL = "https://api.router.com/v1"
+	// RouterDefaultModel is the router.com catalog id the default roster binds the
+	// "router" route to — DeepSeek V4.1 Flash, the vendor's own documented default
+	// selection. Chosen from the live catalog at https://api.router.com/v1/models
+	// (an empty model on the wire also lets router pick server-side).
+	RouterDefaultModel = "deepseek-v4.1-flash"
 )
 
 // ---------------------------------------------------------------------------
@@ -912,7 +917,7 @@ func DefaultRoster() Roster {
 			{Model: "deepseek-reasoner-compat", Account: "deepseek", UpstreamModel: "deepseek-reasoner", CompatibilityOnly: true, DeprecatedAfterUTC: DeepSeekLegacyAliasRetiresUTC, DeprecatedAliasFor: DeepSeekV4FlashModel + " thinking mode"},
 			{Model: "openrouter-free", Account: "openrouter", UpstreamModel: "openrouter/auto"},
 			{Model: "openrouter-best", Account: "openrouter", UpstreamModel: "openrouter/best"},
-			{Model: "router", Account: "router"},
+			{Model: "router", Account: "router", UpstreamModel: RouterDefaultModel},
 		},
 	}
 }
