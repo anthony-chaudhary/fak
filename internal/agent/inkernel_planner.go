@@ -256,6 +256,14 @@ type InKernelPlanner struct {
 	// reach decode would trip them. They observe only; they never change output.
 	cachePrimeSamplerHook func()
 	cachePrimeEmitHook    func()
+
+	// warmInputs carries the stable inputs a WarmPrefixSpec was derived from (CW-04,
+	// #13344), so WarmPrefix can re-encode the descriptor's exact stable token boundary
+	// without re-reading prompt text. It is set at the startup seam via
+	// SetWarmPrefixInputs, where descriptor + inputs are both in hand; a planner with no
+	// carrier refuses a warm closed rather than guessing the boundary. Guarded by mu
+	// alongside every other planner-owned warm field.
+	warmInputs *warmInputsCarrier
 }
 
 type inKernelOOMRetryClassStats struct {
