@@ -46,6 +46,20 @@ func AdmitDeepSeekV4Config(c Config) error {
 		{"scoring_func", c.ScoringFunc == "sqrtsoftplus", c.ScoringFunc},
 		{"topk_method", c.TopKMethod == "noaux_tc", c.TopKMethod},
 		{"swiglu_limit", c.SwigluLimit >= 0 && !math.IsNaN(c.SwigluLimit) && !math.IsInf(c.SwigluLimit, 0), c.SwigluLimit},
+		// The declared position limit is load-bearing for agent use: it is the window
+		// the native planner enforces (InKernelPlanner.ContextWindow) and the capacity
+		// the model catalog advertises. The pinned Flash checkpoint declares 1048576,
+		// and nothing else in this ladder reads the field, so a config that silently
+		// dropped the window would be admitted while serving no enforced context at all
+		// (ContextWindow() returns 0 and refuseContextLength becomes a no-op).
+		//
+		// The predicate is "declared and positive" rather than a literal, because this
+		// ladder admits BOTH the Pro and Flash profiles and only the Flash fixture is
+		// in-tree; pinning one number would invent a value for a checkpoint this repo
+		// cannot read. The exact Flash value is pinned by
+		// TestDeepSeekV4FlashOfficialConfigIsPinnedAndAdmitted's config digest, which
+		// covers the magic number end to end.
+		{"max_position_embeddings declared", c.MaxPositionEmbeddings > 0, c.MaxPositionEmbeddings},
 	}
 	if flashProfile {
 		checks = append(checks,

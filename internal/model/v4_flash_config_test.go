@@ -67,6 +67,29 @@ func TestDeepSeekV4FlashRejectsMixedFlashAndProTuples(t *testing.T) {
 	}
 }
 
+func TestDeepSeekV4RejectsUndeclaredContextWindow(t *testing.T) {
+	// The declared position limit is the window the native planner enforces. A
+	// config that drops it makes InKernelPlanner.ContextWindow() return 0, which
+	// turns refuseContextLength into a no-op: the engine would accept an
+	// arbitrarily long request it cannot represent instead of refusing it.
+	tests := []struct {
+		name   string
+		window int
+	}{
+		{name: "window dropped", window: 0},
+		{name: "window negative", window: -1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := pinnedV4Config()
+			cfg.MaxPositionEmbeddings = tt.window
+			if err := AdmitDeepSeekV4Config(cfg); !errors.Is(err, ErrV4ConfigAdmission) {
+				t.Fatalf("err=%v; want ErrV4ConfigAdmission for max_position_embeddings=%d", err, tt.window)
+			}
+		})
+	}
+}
+
 func TestDeepSeekV4FlashAdmissionPreservesProAndRejectsUnknownIdentifiers(t *testing.T) {
 	if err := AdmitDeepSeekV4Config(pinnedV4Config()); err != nil {
 		t.Fatalf("pinned V4 Pro config regressed: %v", err)
