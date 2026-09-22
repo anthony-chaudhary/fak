@@ -5,15 +5,19 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/systools"
 )
 
 // The real subprocess executes the production chat entry point, including its
@@ -1012,6 +1016,339 @@ func TestOpsNativeLaunchIdentity(t *testing.T) {
 		}
 		if plan["guard_requested"] != "fail_closed" || plan["guard_effective"] != "unknown" {
 			t.Errorf("native dry-run plan overstated enforcement: %s", stdout.Bytes())
+		}
+	})
+}
+
+// opsNativeFixtureManifest renders a valid policy manifest that affirmatively
+// grants the named tools on the sys floor. Every refusal case below is a
+// deliberate perturbation of this one document.
+func opsNativeFixtureManifest(allow ...string) string {
+	encoded, _ := json.Marshal(map[string]any{"posture": "fail_closed", "allow": allow})
+	return string(encoded)
+}
+
+// opsNativePolicyFile writes manifest into a temp dir and returns its path.
+func opsNativePolicyFile(t *testing.T, manifest string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "policy.json")
+	if err := os.WriteFile(path, []byte(manifest), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// TestOpsNativeToolProfile is the witness for the explicit bounded native tool
+// capability profile (#13381). It proves, at the qualification seam the launch
+// actually calls, that:
+//
+//   - the default run stays tool-disabled;
+//   - the one approved profile arms only the approved sys subset, and only with
+//     explicit workspace AND policy identity whose manifest grants that subset;
+//   - missing, unreadable, unparseable, or non-granting policy cannot widen
+//     access — it refuses with a zero-value floor;
+//   - requested and effective capability are stamped distinctly and the digest
+//     tracks the profile/approved set;
+//   - no profile token other than the approved one can set System=true, and no
+//     token at all can set MCP/Skills/Memory true.
+//
+// Scope note: this witnesses the QUALIFICATION seam
+// (qualifyOpsNativeCapabilityProfile) and the argv/dry-run stamping seam. The
+// full live tool-mediation path — one allowed sys-tool call admitted and an
+// out-of-scope call refused by the running child — needs a live model turn and
+// is NOT exercised here.
+func TestOpsNativeToolProfile(t *testing.T) {
+	t.Run("default_run_stays_tool_disabled", func(t *testing.T) {
+		floor, err := qualifyOpsNativeCapabilityProfile(opsNativeProfileDefault, "", "")
+		if err != nil {
+			t.Fatalf("restrictive default must not refuse: %v", err)
+		}
+		if floor.Posture != "fail_closed" {
+			t.Errorf("default posture = %q, want fail_closed", floor.Posture)
+		}
+		if floor.Profile != opsNativeProfileDefault {
+			t.Errorf("default effective profile = %q, want the restrictive default", floor.Profile)
+		}
+		if floor.System || floor.MCP || floor.Skills || floor.Memory {
+			t.Errorf("default floor armed a tool family: %+v", floor)
+		}
+		if got := floor.mediation(); got != "native:sys=false,mcp=false,skills=false,memory=false" {
+			t.Errorf("default mediation = %q, want every family false", got)
+		}
+		if got := floor.approval(); got != "none" {
+			t.Errorf("default approved tools = %q, want none", got)
+		}
+		if len(floor.ApprovedS) != 0 {
+			t.Errorf("default floor carries approved tools: %v", floor.ApprovedS)
+		}
+	})
+
+	t.Run("approved_profile_arms_only_the_approved_sys_subset", func(t *testing.T) {
+		workspace := t.TempDir()
+		manifest := opsNativeFixtureManifest("Read", systools.ToolGetTime, "Write")
+		policyPath := opsNativePolicyFile(t, manifest)
+		floor, err := qualifyOpsNativeCapabilityProfile(opsNativeProfileSysReadonly, workspace, policyPath)
+		if err != nil {
+			t.Fatalf("approved profile with explicit identity refused: %v", err)
+		}
+		if floor.Profile != opsNativeProfileSysReadonly || floor.Posture != "fail_closed" {
+			t.Errorf("approved floor = %+v, want sys-readonly/fail_closed", floor)
+		}
+		if !floor.System {
+			t.Error("approved profile did not arm the sys subset")
+		}
+		if floor.MCP || floor.Skills || floor.Memory {
+			t.Errorf("approved profile widened beyond sys: %+v", floor)
+		}
+		if got := floor.mediation(); got != "native:sys=true,mcp=false,skills=false,memory=false" {
+			t.Errorf("approved mediation = %q", got)
+		}
+		if !slices.Equal(floor.ApprovedS, opsNativeApprovedSysTools) {
+			t.Errorf("approved tools = %v, want the approved subset %v", floor.ApprovedS, opsNativeApprovedSysTools)
+		}
+		if got := floor.approval(); got != systools.ToolGetTime {
+			t.Errorf("approval token = %q, want %q", got, systools.ToolGetTime)
+		}
+		// The approved set must be a copy: a caller mutating it cannot widen the
+		// floor a later launch stamps.
+		floor.ApprovedS[0] = "mutated"
+		fresh, err := qualifyOpsNativeCapabilityProfile(opsNativeProfileSysReadonly, workspace, policyPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fresh.ApprovedS[0] != systools.ToolGetTime {
+			t.Errorf("approved subset aliases caller memory: %v", fresh.ApprovedS)
+		}
+	})
+
+	t.Run("no_widening_refusals_return_zero_floor", func(t *testing.T) {
+		workspace := t.TempDir()
+		granting := opsNativePolicyFile(t, opsNativeFixtureManifest(systools.ToolGetTime))
+		nonGranting := opsNativePolicyFile(t, opsNativeFixtureManifest("Read", "Write"))
+		unparseable := opsNativePolicyFile(t, "{\"allow\": [")
+		unreadable := filepath.Join(t.TempDir(), "absent-policy.json")
+
+		cases := []struct {
+			name      string
+			profile   string
+			workspace string
+			policy    string
+		}{
+			{name: "unsupported_profile_token", profile: "sys-readwrite", workspace: workspace, policy: granting},
+			{name: "unknown_profile_token", profile: "root", workspace: workspace, policy: granting},
+			{name: "sys_readonly_without_workspace", profile: opsNativeProfileSysReadonly, workspace: "   ", policy: granting},
+			{name: "sys_readonly_without_policy", profile: opsNativeProfileSysReadonly, workspace: workspace, policy: ""},
+			{name: "unreadable_policy", profile: opsNativeProfileSysReadonly, workspace: workspace, policy: unreadable},
+			{name: "policy_does_not_parse", profile: opsNativeProfileSysReadonly, workspace: workspace, policy: unparseable},
+			{name: "policy_does_not_grant_approved_tool", profile: opsNativeProfileSysReadonly, workspace: workspace, policy: nonGranting},
+			{name: "policy_is_a_directory", profile: opsNativeProfileSysReadonly, workspace: workspace, policy: workspace},
+			{name: "policy_has_unknown_field", profile: opsNativeProfileSysReadonly, workspace: workspace, policy: opsNativePolicyFile(t, "{\"allow\":[\"get_time\"],\"allow_typo\":true}")},
+			{name: "policy_allow_wrong_type", profile: opsNativeProfileSysReadonly, workspace: workspace, policy: opsNativePolicyFile(t, "{\"allow\":\"get_time\"}")},
+			{name: "policy_claims_approved_tool_in_deny_only", profile: opsNativeProfileSysReadonly, workspace: workspace, policy: opsNativePolicyFile(t, "{\"deny\":{\"get_time\":\"POLICY_BLOCK\"}}")},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				floor, err := qualifyOpsNativeCapabilityProfile(tc.profile, tc.workspace, tc.policy)
+				if err == nil {
+					t.Fatalf("profile=%q workspace=%q policy=%q widened access instead of refusing: %+v", tc.profile, tc.workspace, tc.policy, floor)
+				}
+				if floor.Profile != "" || floor.Posture != "" || floor.System || floor.MCP || floor.Skills || floor.Memory || len(floor.ApprovedS) != 0 {
+					t.Fatalf("refusal returned a non-zero floor: %+v", floor)
+				}
+			})
+		}
+	})
+
+	t.Run("unsupported_token_names_the_closed_vocabulary", func(t *testing.T) {
+		_, err := qualifyOpsNativeCapabilityProfile("sys-readwrite", t.TempDir(), opsNativePolicyFile(t, opsNativeFixtureManifest(systools.ToolGetTime)))
+		if !errors.Is(err, errOpsNativeProfileUnsupported) {
+			t.Fatalf("unsupported token error = %v, want errOpsNativeProfileUnsupported", err)
+		}
+	})
+
+	t.Run("stamping_distinguishes_requested_from_effective", func(t *testing.T) {
+		workspace := t.TempDir()
+		policyPath := opsNativePolicyFile(t, opsNativeFixtureManifest(systools.ToolGetTime))
+
+		defaultFloor, err := qualifyOpsNativeCapabilityProfile(opsNativeProfileDefault, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := defaultFloor.capabilityStamp(opsNativeProfileDefault), "profile_requested=default,profile_effective=default,approved_tools=none"; got != want {
+			t.Errorf("default stamp = %q, want %q", got, want)
+		}
+		// A request that was narrowed stays visible: requested is what the
+		// operator asked for, effective is what this launch validated.
+		if got, want := defaultFloor.capabilityStamp(opsNativeProfileSysReadonly), "profile_requested=sys-readonly,profile_effective=default,approved_tools=none"; got != want {
+			t.Errorf("narrowed stamp = %q, want %q", got, want)
+		}
+
+		approvedFloor, err := qualifyOpsNativeCapabilityProfile(opsNativeProfileSysReadonly, workspace, policyPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "profile_requested=sys-readonly,profile_effective=sys-readonly,approved_tools=" + systools.ToolGetTime
+		if got := approvedFloor.capabilityStamp(opsNativeProfileSysReadonly); got != want {
+			t.Errorf("approved stamp = %q, want %q", got, want)
+		}
+
+		// The digest tracks profile + mediation + approved set. A floor that is
+		// semantically identical (same profile, same mediation, same approved set)
+		// shares the digest; any change to those inputs changes it.
+		if defaultFloor.digest() == approvedFloor.digest() {
+			t.Error("armed and disabled floors share a digest")
+		}
+		identical := opsNativeCapabilityFloor{Profile: opsNativeProfileSysReadonly, System: true, ApprovedS: []string{systools.ToolGetTime}}
+		if identical.digest() != approvedFloor.digest() {
+			t.Errorf("semantically identical floors disagree on digest: %q vs %q", identical.digest(), approvedFloor.digest())
+		}
+		for _, mut := range []opsNativeCapabilityFloor{
+			{Profile: opsNativeProfileSysReadonly, System: true, ApprovedS: []string{systools.ToolGetTime, "mutated"}},
+			{Profile: opsNativeProfileSysReadonly, System: false, ApprovedS: []string{systools.ToolGetTime}},
+			{Profile: opsNativeProfileDefault, System: true, ApprovedS: []string{systools.ToolGetTime}},
+		} {
+			if mut.digest() == approvedFloor.digest() {
+				t.Errorf("digest ignores a profile/approved-set change: %+v", mut)
+			}
+		}
+	})
+
+	t.Run("config_policy_is_qualified_or_refused", func(t *testing.T) {
+		workspace := t.TempDir()
+		policyPath := opsNativePolicyFile(t, opsNativeFixtureManifest(systools.ToolGetTime))
+		floor, err := qualifyOpsNativeCapabilityProfile(opsNativeProfileSysReadonly, workspace, policyPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		qualified := floor.configPolicy("")
+		if qualified.Source != opsNativeConfigPolicySource || qualified.Status != opsNativeGuardEvidenceQualified || qualified.Reason != "" {
+			t.Errorf("unreasoned config policy = %+v, want qualified/%s", qualified, opsNativeConfigPolicySource)
+		}
+		if qualified.Digest != floor.digest() {
+			t.Errorf("config policy digest = %q, want the floor digest %q", qualified.Digest, floor.digest())
+		}
+		refused := floor.configPolicy("tool_capability_mismatch")
+		if refused.Status != opsNativeGuardEvidenceRefused || refused.Reason != "tool_capability_mismatch" {
+			t.Errorf("reasoned config policy = %+v, want refused with the typed reason", refused)
+		}
+	})
+
+	// The restrictive default is provably preserved: the admitted vocabulary is
+	// closed, and no token reaches MCP/skills/memory even when the manifest
+	// grants every name those families could want.
+	t.Run("no_other_token_widens_the_floor", func(t *testing.T) {
+		workspace := t.TempDir()
+		policyPath := opsNativePolicyFile(t, opsNativeFixtureManifest(
+			systools.ToolGetTime, systools.ToolFetchWeb, systools.ToolWebSearch, "Read", "Write", "Bash", "mcp", "skills", "memory",
+		))
+		// Any token that is not exactly the approved (post-trim) profile token and
+		// is accepted must be the restrictive default. The whitespace-padded
+		// spellings of the approved token are covered as approved below, not here.
+		tokens := []string{
+			opsNativeProfileDefault,
+			"default", "none", "off", "readonly", "read-only", "sys",
+			"sys_readonly", "SYS-READONLY", "all", "full", "mcp", "skills", "memory", "unrestricted",
+		}
+		for _, token := range tokens {
+			floor, err := qualifyOpsNativeCapabilityProfile(token, workspace, policyPath)
+			if err != nil {
+				continue // refusal is the expected outcome for an unsupported token
+			}
+			if floor.Profile != opsNativeProfileDefault {
+				t.Errorf("token %q qualified a non-default profile %q", token, floor.Profile)
+			}
+			if floor.System {
+				t.Errorf("token %q armed the sys subset", token)
+			}
+			if floor.MCP || floor.Skills || floor.Memory {
+				t.Errorf("token %q widened MCP/skills/memory: %+v", token, floor)
+			}
+			if len(floor.ApprovedS) != 0 {
+				t.Errorf("token %q carried approved tools: %v", token, floor.ApprovedS)
+			}
+		}
+		// Even the approved token cannot reach any family but sys. The
+		// whitespace-padded spelling qualifies the SAME approved floor.
+		for _, token := range []string{opsNativeProfileSysReadonly, "  " + opsNativeProfileSysReadonly + "\n"} {
+			approved, err := qualifyOpsNativeCapabilityProfile(token, workspace, policyPath)
+			if err != nil {
+				t.Fatalf("approved token %q refused: %v", token, err)
+			}
+			if approved.Profile != opsNativeProfileSysReadonly || !approved.System || !slices.Equal(approved.ApprovedS, opsNativeApprovedSysTools) {
+				t.Errorf("token %q did not qualify the approved subset: %+v", token, approved)
+			}
+			if approved.MCP || approved.Skills || approved.Memory {
+				t.Errorf("approved token %q widened a non-sys family: %+v", token, approved)
+			}
+		}
+	})
+
+	// The flag/argv seam: --dry-run must stamp the EFFECTIVE profile without
+	// launching a child, and an unsupported token must refuse before execution.
+	t.Run("dry_run_stamps_effective_profile_without_launching", func(t *testing.T) {
+		root := t.TempDir()
+		prompt := filepath.Join(root, "prompt.txt")
+		policyPath := opsNativePolicyFile(t, opsNativeFixtureManifest(systools.ToolGetTime))
+		if err := os.WriteFile(prompt, []byte("native tool profile plan probe\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		run := func(t *testing.T, extra ...string) (int, map[string]any, string) {
+			t.Helper()
+			args := append([]string{
+				"--harness", "native", "--dry-run", "--prompt-file", prompt,
+				"--provider", "openai", "--model", "fixture", "--base-url", "http://127.0.0.1:1/v1",
+			}, extra...)
+			var stdout, stderr bytes.Buffer
+			code := runOpsRun(&stdout, &stderr, args)
+			var plan map[string]any
+			if code == 0 {
+				if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+					t.Fatalf("decode native plan: %v; raw=%s", err, stdout.String())
+				}
+			}
+			return code, plan, stderr.String()
+		}
+
+		code, plan, stderr := run(t)
+		if code != 0 {
+			t.Fatalf("default native dry run exit=%d: %s", code, stderr)
+		}
+		if plan["tool_profile_requested"] != "" || plan["tool_profile_effective"] != "" {
+			t.Errorf("default dry-run plan claimed a profile: %v", plan)
+		}
+		if plan["approved_tools_effective"] != "none" {
+			t.Errorf("default approved tools = %v, want none", plan["approved_tools_effective"])
+		}
+		if plan["native_tool_mediation"] != "native:sys=false,mcp=false,skills=false,memory=false" {
+			t.Errorf("default mediation = %v, want every family false", plan["native_tool_mediation"])
+		}
+
+		code, plan, stderr = run(t, "--tool-profile", opsNativeProfileSysReadonly, "--workspace", root, "--policy", policyPath)
+		if code != 0 {
+			t.Fatalf("approved native dry run exit=%d: %s", code, stderr)
+		}
+		if plan["tool_profile_requested"] != opsNativeProfileSysReadonly || plan["tool_profile_effective"] != opsNativeProfileSysReadonly {
+			t.Errorf("approved dry-run plan = %v, want requested/effective %s", plan, opsNativeProfileSysReadonly)
+		}
+		if plan["approved_tools_effective"] != systools.ToolGetTime {
+			t.Errorf("approved tools = %v, want %s", plan["approved_tools_effective"], systools.ToolGetTime)
+		}
+		if plan["native_tool_mediation"] != "native:sys=true,mcp=false,skills=false,memory=false" {
+			t.Errorf("approved mediation = %v, want only sys armed", plan["native_tool_mediation"])
+		}
+
+		// An unsupported token refuses BEFORE any execution; it may not silently
+		// fall back to the default and report success.
+		code, _, stderr = run(t, "--tool-profile", "sys-readwrite", "--workspace", root, "--policy", policyPath)
+		if code == 0 || !strings.Contains(stderr, errOpsNativeProfileUnsupported.Error()) {
+			t.Errorf("unsupported profile dry run = exit %d stderr %q, want a pre-execution refusal", code, stderr)
+		}
+
+		// The approved token without explicit identity refuses too.
+		code, _, _ = run(t, "--tool-profile", opsNativeProfileSysReadonly)
+		if code == 0 {
+			t.Error("approved profile without explicit workspace/policy did not refuse")
 		}
 	})
 }
