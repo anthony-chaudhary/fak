@@ -52,18 +52,6 @@ func TestMain(m *testing.M) {
 	// Keep console-pane tests hermetic. The production default reads ~/.fak/console.json;
 	// a developer's local preference file must not change package test behavior.
 	_ = os.Setenv("FAK_CONSOLE_FILE", filepath.Join(os.TempDir(), "fak-test-missing-console.json"))
-	// Keep Pi harness-config writes hermetic. runPi/runServePiConfig default their
-	// --settings-path/--config-path to the REAL ~/.pi/agent/{settings,models}.json, so an
-	// unguarded test silently rewrote the operator's live harness default (defaultModel)
-	// and pointed models.json at a dead test port — which made a bare `pi` launch stop
-	// resolving to the live fak router. A package-level throwaway dir makes that class
-	// impossible for every test in this package, not just the ones that remember to guard.
-	piAgentDir, piErr := os.MkdirTemp("", "fak-test-pi-agent-")
-	if piErr != nil {
-		panic(piErr)
-	}
-	defer os.RemoveAll(piAgentDir)
-	_ = os.Setenv("PI_CODING_AGENT_DIR", piAgentDir)
 	// Keep registered agent launches off the machine-global journal. Linux CI cannot write
 	// /var/lib/fak, and package tests must never publish real session registrations.
 	registryDir, err := os.MkdirTemp("", "fak-test-session-registry-")
