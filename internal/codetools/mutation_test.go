@@ -78,6 +78,109 @@ func TestEditExactConflictAndReplaceAll(t *testing.T) {
 	}
 }
 
+// TestEditRelativeIndentDriftIsRecovered proves the tolerant fallback is actually
+// reachable through the real Edit engine: an old_string written with 2-space
+// indentation against a 4-space-indented source is applied (rather than refused
+// with EDIT_CONFLICT), and the target's indentation is preserved.
+func TestEditRelativeIndentDriftIsRecovered(t *testing.T) {
+	ts, root := newTestToolset(t)
+	p := filepath.Join(root, "a.go")
+	mustWrite(t, p, "func f() {\n    x := 1\n    return\n}\n")
+	version := observedVersion(t, ts, "a.go")
+
+	out, bad := ts.edit(context.Background(), argsOf(t, EditArgs{
+		FilePath:        "a.go",
+		OldString:       "  x := 1\n  return",
+		NewString:       "  x := 2\n  return",
+		ExpectedVersion: version,
+	}))
+	if bad {
+		t.Fatalf("drift edit refused instead of recovered: %s", out)
+	}
+	got, _ := os.ReadFile(p)
+	if string(got) != "func f() {\n    x := 2\n    return\n}\n" {
+		t.Fatalf("drift edit = %q", got)
+	}
+}
+
+// TestEditExactMatchPrecedenceOverTolerant proves the tolerant path never
+// pre-empts an exact match: when old_string occurs exactly once byte-for-byte,
+// that occurrence is the one replaced even if a trimmed window also exists.
+func TestEditExactMatchPrecedenceOverTolerant(t *testing.T) {
+	ts, root := newTestToolset(t)
+	p := filepath.Join(root, "a.go")
+	mustWrite(t, p, "    keep := 1\n  keep := 2\n")
+	version := observedVersion(t, ts, "a.go")
+
+	out, bad := ts.edit(context.Background(), argsOf(t, EditArgs{
+		FilePath:        "a.go",
+		OldString:       "  keep := 2",
+		NewString:       "  keep := 9",
+		ExpectedVersion: version,
+	}))
+	if bad {
+		t.Fatalf("exact edit refused: %s", out)
+	}
+	got, _ := os.ReadFile(p)
+	if string(got) != "    keep := 1\n  keep := 9\n" {
+		t.Fatalf("exact precedence edit = %q", got)
+	}
+}
+
+// TestEditAmbiguousTolerantMatchStillRefuses proves a non-unique tolerant match
+// is not guessed at: the engine refuses with EDIT_CONFLICT and leaves bytes
+// untouched.
+func TestEditAmbiguousTolerantMatchStillRefuses(t *testing.T) {
+	ts, root := newTestToolset(t)
+	p := filepath.Join(root, "a.go")
+	before := "        a := 1\n    b := 0\n        a := 1\n"
+	mustWrite(t, p, before)
+	version := observedVersion(t, ts, "a.go")
+
+	out, bad := ts.edit(context.Background(), argsOf(t, EditArgs{
+		FilePath:        "a.go",
+		OldString:       "  a := 1",
+		NewString:       "  a := 2",
+		ExpectedVersion: version,
+	}))
+	if !bad || errCode(t, out) != CodeEditConflict {
+		t.Fatalf("ambiguous tolerant match = %s", out)
+	}
+	if got, _ := os.ReadFile(p); string(got) != before {
+		t.Fatalf("ambiguous tolerant edit mutated bytes to %q", got)
+	}
+}
+
+// TestEditStaleOldStringDiagnosticNamesNearestLine proves a semantically-stale
+// old_string refusal carries a content-free nearest-line hint (the measured
+// dominant failure class), not just a generic retry message.
+func TestEditStaleOldStringDiagnosticNamesNearestLine(t *testing.T) {
+	ts, root := newTestToolset(t)
+	p := filepath.Join(root, "a.go")
+	mustWrite(t, p, "package x\n\nfunc Alpha() {\n\treturn 1\n}\n\nfunc Beta() {\n\treturn 2\n}\n")
+	version := observedVersion(t, ts, "a.go")
+
+	out, bad := ts.edit(context.Background(), argsOf(t, EditArgs{
+		FilePath:        "a.go",
+		OldString:       "func Beta() {\n\treturn 3\n}",
+		NewString:       "func Beta() {\n\treturn 9\n}",
+		ExpectedVersion: version,
+	}))
+	if !bad || errCode(t, out) != CodeEditConflict {
+		t.Fatalf("stale edit = %s", out)
+	}
+	msg := string(out)
+	if !strings.Contains(msg, "matched 0 occurrences") || !strings.Contains(msg, "line 7") {
+		t.Errorf("diagnostic should name the nearest line, got: %s", msg)
+	}
+	if strings.Contains(msg, "return 3") || strings.Contains(msg, "return 2") {
+		t.Errorf("diagnostic leaked file/old content: %s", msg)
+	}
+	if got, _ := os.ReadFile(p); string(got) != "package x\n\nfunc Alpha() {\n\treturn 1\n}\n\nfunc Beta() {\n\treturn 2\n}\n" {
+		t.Fatalf("stale edit mutated bytes: %q", got)
+	}
+}
+
 func TestEditRefusesAStaleObservedVersionWithoutChangingPeerBytes(t *testing.T) {
 	ts, root := newTestToolset(t)
 	p := filepath.Join(root, "a.txt")

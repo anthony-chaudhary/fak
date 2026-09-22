@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
 
 // mutation.go owns the side-effecting filesystem engines. They do not invoke a shell.
@@ -206,7 +207,23 @@ func (t *Toolset) editLocked(ctx context.Context, a EditArgs, target mutationTar
 	newBytes := []byte(a.NewString)
 	n := bytes.Count(b, oldBytes)
 	if n == 0 {
-		return refuse(CodeEditConflict, "Edit old_string matched 0 occurrences; file not changed. Read the same authorized file_path with bounded offset and limit around the intended edit; use the returned version as expected_version and current exact text with unique surrounding context for one explicit Edit retry. If unresolved, stop; do not guess or retry automatically.").JSON(), true
+		// Tolerant fallback. The dominant LLM edit failure is drift, not wrong
+		// intent: the same block re-emitted with relative-indentation or
+		// tabs-vs-spaces differences, or trailing whitespace trimmed. Exact match
+		// always wins (this branch is unreachable when n >= 1); a UNIQUE
+		// relative-indentation match is applied in place, and an ambiguous match
+		// still refuses rather than guessing which occurrence the model meant.
+		if tolerant, ok := vdso.MatchAndReplaceRelativeIndent(string(b), a.OldString, a.NewString); ok {
+			next := []byte(tolerant)
+			if int64(len(next)) > t.limits.MaxWriteBytes {
+				return refuse(CodeTooLarge, "Edit result exceeds byte bound").JSON(), true
+			}
+			return t.finishEdit(ctx, a, target, info, observed, next, 1)
+		}
+		if _, comparable := vdso.RelativeIndentMatchCount(string(b), a.OldString); comparable {
+			return refuse(CodeEditConflict, "Edit old_string matched 0 occurrences"+nearestHint(string(b), a.OldString)+"; file not changed. Read the same authorized file_path with bounded offset and limit around the intended edit; use the returned version as expected_version and current exact text with unique surrounding context for one explicit Edit retry. If unresolved, stop; do not guess or retry automatically.").JSON(), true
+		}
+		return refuse(CodeEditConflict, "Edit old_string matched 0 occurrences"+nearestHint(string(b), a.OldString)+"; file not changed. Read the same authorized file_path with bounded offset and limit around the intended edit; use the returned version as expected_version and current exact text with unique surrounding context for one explicit Edit retry. If unresolved, stop; do not guess or retry automatically.").JSON(), true
 	}
 	if !a.ReplaceAll && n != 1 {
 		return refuse(CodeEditConflict, fmt.Sprintf("Edit old_string matched %d occurrences; want exactly 1; file not changed. Read the same authorized file_path with bounded offset and limit around the intended edit; use the returned version as expected_version and extend old_string with exact unique surrounding context for one explicit Edit retry. If unresolved, stop; do not guess or retry automatically.", n)).JSON(), true
@@ -223,20 +240,6 @@ func (t *Toolset) editLocked(ctx context.Context, a EditArgs, target mutationTar
 	}
 	if r := canceled(ctx); r != nil {
 		return r.JSON(), true
-	}
-	fresh, r := t.resolveMutation(a.FilePath)
-	if r != nil {
-		return r.JSON(), true
-	}
-	if fresh.Key != target.Key {
-		return staleVersion("Edit target identity changed before publication")
-	}
-	current, r := observeFile(ctx, fresh.Abs, 0)
-	if r != nil {
-		return r.JSON(), true
-	}
-	if current.Version != observed.Version {
-		return staleVersion("Edit target changed before publication")
 	}
 
 	buf := AcquireBuffer(newLen)
@@ -259,6 +262,30 @@ func (t *Toolset) editLocked(ctx context.Context, a EditArgs, target mutationTar
 	w += len(rem)
 	next := buf[:w]
 
+	return t.finishEdit(ctx, a, target, info, observed, next, repCount)
+}
+
+// finishEdit performs the shared publication tail for every admitted Edit: reject a
+// changed workspace or file version observed since the read (the stale-version
+// guard), atomically replace the bytes, then observe the result to return its new
+// version. The exact-match path and the tolerant relative-indentation path converge
+// here so neither can bypass the safety checks.
+func (t *Toolset) finishEdit(ctx context.Context, a EditArgs, target mutationTarget, info fs.FileInfo, observed fileObservation, next []byte, repCount int) ([]byte, bool) {
+	fresh, r := t.resolveMutation(a.FilePath)
+	if r != nil {
+		return r.JSON(), true
+	}
+	if fresh.Key != target.Key {
+		return staleVersion("Edit target identity changed before publication")
+	}
+	current, r := observeFile(ctx, fresh.Abs, 0)
+	if r != nil {
+		return r.JSON(), true
+	}
+	if current.Version != observed.Version {
+		return staleVersion("Edit target changed before publication")
+	}
+
 	if err := atomicReplace(fresh.Abs, next, true, info.Mode().Perm()); err != nil {
 		return refuse(CodeIO, err.Error()).JSON(), true
 	}
@@ -267,6 +294,23 @@ func (t *Toolset) editLocked(ctx context.Context, a EditArgs, target mutationTar
 		return r.JSON(), true
 	}
 	return okJSON(mutationResult{Path: fresh.Rel, Bytes: len(next), Replacements: repCount, Version: after.Version}), false
+}
+
+// nearestHint renders a bounded, content-free location hint for an edit whose
+// old_string matched nothing: the 1-based line of the best-matching region and a
+// coarse similarity percentage. It names a LOCATION only — never file content —
+// so the Refusal contract ("detail carries no content") holds, while a stale or
+// wrong-revision old_string becomes actionable (re-read here) instead of a dead
+// end. Returns "" when no comparable region exists.
+func nearestHint(content, oldString string) string {
+	line, score, ok := vdso.NearestLineHint(content, oldString)
+	if !ok {
+		return ""
+	}
+	if score >= 100 {
+		return fmt.Sprintf(" (an ordered line-content match exists near line %d, but not as one contiguous exact block; re-read there and use the returned exact text)", line)
+	}
+	return fmt.Sprintf(" (closest line-content match is near line %d, similarity ~%d%%, so old_string looks stale or from a different revision; re-read there)", line, score)
 }
 
 func staleVersion(detail string) ([]byte, bool) {
