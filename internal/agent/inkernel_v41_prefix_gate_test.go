@@ -129,3 +129,128 @@ func TestV41PlannerPrefixGate(t *testing.T) {
 		}
 	})
 }
+
+// v41CountingBackend is the CW-28 counting capability fixture. It wraps a real backend and
+// counts how many times its Name() identity is consulted, so the witness can prove the
+// planner seam reaches the MODEL predicate FOR THIS BACKEND rather than admitting on a
+// model-side capability that ignores the device. It changes ONLY the reported name.
+type v41CountingBackend struct {
+	compute.Backend
+	mu    sync.Mutex
+	name  string
+	calls int
+}
+
+func (b *v41CountingBackend) Name() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.calls++
+	return b.name
+}
+
+func (b *v41CountingBackend) nameCalls() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.calls
+}
+
+// TestV41BackendPlannerPrefixGate is the named fak#13330 (agent-startup-cache-warm CW-28)
+// witness. fak#13335 landed the V4.1 planner branch on the complete-snapshot capabilities;
+// this leaf owns the BACKEND-AWARE half: the selected backend's IDENTITY must reach the
+// model predicate (Config.InKernelBackendPrefixReuseSupportedFor), a second unqualified
+// backend with the SAME model configuration must be refused, host/non-V4.1 eligibility is
+// unchanged, and constructor success alone must not fabricate a warm/hit receipt.
+func TestV41BackendPlannerPrefixGate(t *testing.T) {
+	t.Setenv("FAK_INKERNEL_RADIX", "on")
+	v41 := tinyV41Cfg()
+	if !v41.IsDeepSeekV41() {
+		t.Fatal("precondition: tinyV41Cfg must be recognized as V4.1")
+	}
+	m := model.NewSynthetic(v41)
+
+	cpuRef := compute.Pick("cpu-ref")
+	if cpuRef == nil {
+		t.Skip("cpu-ref backend is not registered in this build")
+	}
+
+	// sameConfigQualified and sameConfigUnqualified share ONE model configuration (v41,
+	// identical geometry); only the backend descriptor identity differs. Any admission
+	// divergence between them can therefore only come from the backend, never the config.
+	qualified := &v41CountingBackend{Backend: cpuRef, name: cpuRef.Name()}
+	unqualified := &v41CountingBackend{Backend: cpuRef, name: "v41-unqualified-planner-device"}
+
+	t.Run("qualified selected backend constructs the scoped prefix cache", func(t *testing.T) {
+		p := NewInKernelPlanner(m, nil, "v41-qualified", false, qualified, false)
+		if p.tree == nil {
+			t.Fatal("qualified selected backend built no scoped prefix cache")
+		}
+		if p.scopedTree == nil {
+			t.Fatal("qualified selected backend built no scoped tree wrapper")
+		}
+		if qualified.nameCalls() == 0 {
+			t.Fatal("qualified backend identity was never consulted by the admission seam")
+		}
+	})
+
+	t.Run("same-config unqualified backend constructs no cache", func(t *testing.T) {
+		p := NewInKernelPlanner(m, nil, "v41-unqualified", false, unqualified, false)
+		if p.tree != nil {
+			t.Fatal("an unqualified backend with the same model configuration built a cache")
+		}
+		if unqualified.nameCalls() == 0 {
+			t.Fatal("unqualified backend identity was never consulted by the admission seam")
+		}
+	})
+
+	t.Run("counting fixture proves the selected backend reaches the model predicate", func(t *testing.T) {
+		// The predicate is backend-AWARE: the counting identity must be consulted, and the
+		// two same-config backends must take different branches.
+		before := qualified.nameCalls()
+		if !v41.InKernelBackendPrefixReuseSupportedFor(qualified) {
+			t.Fatal("the qualified backend did not reach the model predicate as admitted")
+		}
+		if qualified.nameCalls() <= before {
+			t.Fatal("the model predicate answered without consulting the backend identity")
+		}
+		if v41.InKernelBackendPrefixReuseSupportedFor(unqualified) {
+			t.Fatal("the model predicate admitted an unqualified backend identity")
+		}
+		// And the seam that consumes it must agree, for the exact same config.
+		if inKernelPlannerPrefixReuseSupported(m, qualified) == inKernelPlannerPrefixReuseSupported(m, unqualified) {
+			t.Fatal("the planner seam did not distinguish two backends under one model configuration")
+		}
+	})
+
+	t.Run("host V4.1 and existing Qwen/GLM eligibility unchanged", func(t *testing.T) {
+		if !v41.HostCompletePrefixSnapshotSupported() || !inKernelPlannerPrefixReuseSupported(m, nil) {
+			t.Fatal("host V4.1 complete-snapshot eligibility regressed")
+		}
+		glm := model.Config{
+			ModelType:     "glm_moe_dsa",
+			Architectures: []string{"GlmMoeDsaForCausalLM"},
+		}
+		if !inKernelPlannerPrefixReuseSupported(model.NewSynthetic(glm), nil) {
+			t.Fatal("GLM host eligibility unchanged-from-before failed")
+		}
+		qwen := model.Config{ModelType: "qwen35", LayerTypes: []string{"linear_attention", "full_attention"}}
+		if !inKernelPlannerPrefixReuseSupported(model.NewSynthetic(qwen), cpuRef) {
+			t.Fatal("Qwen3.5 hybrid backend eligibility regressed")
+		}
+	})
+
+	t.Run("constructor success alone emits no warm or hit receipt", func(t *testing.T) {
+		p := NewInKernelPlanner(m, nil, "v41-qualified-nohit", false, qualified, false)
+		if p.tree == nil {
+			t.Fatal("precondition: qualified planner must have built a cache")
+		}
+		if p.WarmClaimLive() {
+			t.Fatal("constructor success alone reported a live warm claim")
+		}
+		if p.kvPrefixEverAdmitted.Load() {
+			t.Fatal("constructor success alone flipped the first-demand hit latch")
+		}
+		if got := p.kvPrefixEligiblePromptTokens(64); got != 0 {
+			t.Fatalf("cold planner reported %d eligible prompt tokens, want 0", got)
+		}
+	})
+}
