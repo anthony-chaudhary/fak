@@ -2696,12 +2696,73 @@ func (s *Session) prefillV41(ids []int) []float32 {
 	}
 	s.M.v41SetExpertFaultPhase(V41PhasePrefill)
 	defer s.M.v41SetExpertFaultPhase(V41PhaseUnknown)
+	// Suffix-prefill cache reuse (#13346): when the session already holds a
+	// seeded, plain-layer continuation state, append the incoming tokens through
+	// the same transactional incremental step Session.Step uses (#13313) instead
+	// of re-folding the entire committed history. Each suffix token advances one
+	// position; only the final token's logits are returned (Prefill's contract).
+	// A cold session (no state, or a non-plain/compressed plan) keeps the
+	// historical full-prefill path byte-for-byte, so the first request still
+	// seeds the cache and a failed step never claims a cache hit.
+	if s.v41IncrementalEligible() && len(s.v41Forward.history) > 0 {
+		return s.prefillV41Suffix(ids)
+	}
 	act, err := s.M.forwardV41(ids, s.v41State())
 	if err != nil {
 		panic(err)
 	}
 	s.M.v41NoteExpertFaultToken(len(ids))
 	return lastLogits(act)
+}
+
+// v41PrefillStepProbe is an optional test-only observer invoked once per suffix
+// token advanced on the INCREMENTAL prefill route (#13346). It is nil in
+// production (a single nil check on the success path) and exists so a witness can
+// prove the production Prefill entry point reused prepared cache state rather
+// than re-folding the whole history.
+var v41PrefillStepProbe func()
+
+// prefillV41Suffix advances each incoming token through the shadow incremental
+// seam (forwardV41Step, #13311) over the session's already-seeded state, so the
+// committed prefix P is never reprocessed. It is the cached continuation of a
+// nonempty session. Each step commits exactly one token and returns the last
+// token's logits, matching Prefill's single-last-row contract.
+//
+// Commit discipline mirrors Session.Step: a typed ErrV41ForwardStage refusal
+// (e.g. the retained cursor no longer matches the step position) leaves the
+// history untouched and falls back to the full-history route for the WHOLE
+// suffix, so a failed suffix never partially advances the session and never
+// reports a cache hit. Only a non-stage error is fatal.
+func (s *Session) prefillV41Suffix(ids []int) []float32 {
+	st := s.v41Forward
+	startLen := len(st.history)
+	var logits []float32
+	for i, id := range ids {
+		got, _, err := s.M.forwardV41Step(id, st, &v41ProjScratch{})
+		if err != nil {
+			if !errors.Is(err, ErrV41ForwardStage) {
+				panic(err)
+			}
+			// Roll the suffix back to the pre-call boundary and re-fold the
+			// whole suffix on the reference path so the session state and the
+			// returned logits are exactly what a cold prefill would produce.
+			st.history = st.history[:startLen]
+			act, ferr := s.M.forwardV41(ids, st)
+			if ferr != nil {
+				panic(ferr)
+			}
+			s.M.v41NoteExpertFaultToken(len(ids))
+			return lastLogits(act)
+		}
+		if v41PrefillStepProbe != nil {
+			v41PrefillStepProbe()
+		}
+		if i == len(ids)-1 {
+			logits = got
+		}
+	}
+	s.M.v41NoteExpertFaultToken(len(ids))
+	return logits
 }
 
 // v41IncrementalStepProbe is an optional test-only observer invoked after
