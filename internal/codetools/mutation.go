@@ -220,8 +220,8 @@ func (t *Toolset) editLocked(ctx context.Context, a EditArgs, target mutationTar
 			}
 			return t.finishEdit(ctx, a, target, info, observed, next, 1)
 		}
-		if _, comparable := vdso.RelativeIndentMatchCount(string(b), a.OldString); comparable {
-			return refuse(CodeEditConflict, "Edit old_string matched 0 occurrences"+nearestHint(string(b), a.OldString)+"; file not changed. Read the same authorized file_path with bounded offset and limit around the intended edit; use the returned version as expected_version and current exact text with unique surrounding context for one explicit Edit retry. If unresolved, stop; do not guess or retry automatically.").JSON(), true
+		if count, comparable := vdso.RelativeIndentMatchCount(string(b), a.OldString); comparable && count >= 2 {
+			return refuse(CodeEditConflict, fmt.Sprintf("Edit old_string matched 0 exact bytes and %d relative-indentation-tolerant candidates; want exactly 1, so the edit is too ambiguous to apply; file not changed. Extend old_string with more unique surrounding context for one explicit Edit retry. If unresolved, stop; do not guess.", count)+nearestHint(string(b), a.OldString)).JSON(), true
 		}
 		return refuse(CodeEditConflict, "Edit old_string matched 0 occurrences"+nearestHint(string(b), a.OldString)+"; file not changed. Read the same authorized file_path with bounded offset and limit around the intended edit; use the returned version as expected_version and current exact text with unique surrounding context for one explicit Edit retry. If unresolved, stop; do not guess or retry automatically.").JSON(), true
 	}

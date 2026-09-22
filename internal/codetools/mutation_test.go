@@ -151,6 +151,33 @@ func TestEditAmbiguousTolerantMatchStillRefuses(t *testing.T) {
 	}
 }
 
+// TestEditAmbiguousIndentCandidatesReportCount proves that when the exact bytes
+// are absent but the block appears more than once under indentation drift, the
+// refusal names the candidate count and still applies nothing.
+func TestEditAmbiguousIndentCandidatesReportCount(t *testing.T) {
+	ts, root := newTestToolset(t)
+	p := filepath.Join(root, "a.go")
+	before := "        alpha()\n\tbeta()\n        alpha()\n\tbeta()\n"
+	mustWrite(t, p, before)
+	version := observedVersion(t, ts, "a.go")
+
+	out, bad := ts.edit(context.Background(), argsOf(t, EditArgs{
+		FilePath:        "a.go",
+		OldString:       "  alpha()\n  beta()",
+		NewString:       "  gamma()\n  beta()",
+		ExpectedVersion: version,
+	}))
+	if !bad || errCode(t, out) != CodeEditConflict {
+		t.Fatalf("ambiguous indent candidates = %s", out)
+	}
+	if !strings.Contains(string(out), "tolerant candidates") {
+		t.Errorf("refusal should name the tolerant candidate count, got: %s", out)
+	}
+	if got, _ := os.ReadFile(p); string(got) != before {
+		t.Fatalf("ambiguous indent edit mutated bytes: %q", got)
+	}
+}
+
 // TestEditStaleOldStringDiagnosticNamesNearestLine proves a semantically-stale
 // old_string refusal carries a content-free nearest-line hint (the measured
 // dominant failure class), not just a generic retry message.
