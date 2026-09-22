@@ -20,7 +20,9 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/canon"
 	"github.com/anthony-chaudhary/fak/internal/childprocess"
+	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
+	"github.com/anthony-chaudhary/fak/internal/systools"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -39,24 +41,136 @@ const (
 	opsNativeConfigPolicySource = "native-capability-floor"
 )
 
+// opsNativeProfileDefault is the restrictive posture an unprofiled launch takes:
+// every tool family, including the sys subset, stays disabled. Only an explicit,
+// validated profile may widen the floor, and only for the approved sys subset.
+const opsNativeProfileDefault = ""
+
+// opsNativeProfileSysReadonly is the one profile admitted today. It enables the
+// approved read-only system utility subset and nothing else: MCP, skills and
+// memory cannot be reached through any profile token.
+const opsNativeProfileSysReadonly = "sys-readonly"
+
+// opsNativeApprovedSysTools is the approved sys-tool subset a profile may turn
+// on. Membership is checked against the EXISTING public floor surfaces — the
+// internal/systools Policy and the operator's policy-manifest Allow list — so an
+// approved name cannot drift from the tools the kernel actually adjudicates.
+var opsNativeApprovedSysTools = []string{systools.ToolGetTime}
+
+// errOpsNativeProfileUnsupported is the pre-execution refusal raised for a
+// profile token that is not in the closed vocabulary. It is returned before any
+// child process exists so an unsupported profile can never widen access.
+var errOpsNativeProfileUnsupported = errors.New("unsupported native tool profile")
+
 // opsNativeCapabilityFloor is the exact tool surface this launch asks the child
-// to apply. The native arm runs fail_closed with sys/MCP/skills/memory disabled
-// (see the argv built in runOpsNative), so the receipt states the requested
-// toggles instead of inferring a guarded:true stub from ambient state.
+// to apply. The native arm runs fail_closed; with no profile every family stays
+// disabled, and with the approved profile only the approved sys subset is armed.
+// The receipt therefore states the requested toggles instead of inferring a
+// guarded:true stub from ambient state.
 type opsNativeCapabilityFloor struct {
-	Posture string
-	System  bool
-	MCP     bool
-	Skills  bool
-	Memory  bool
+	Posture   string
+	Profile   string
+	System    bool
+	MCP       bool
+	Skills    bool
+	Memory    bool
+	ApprovedS []string
 }
 
+// requestedOpsNativeCapabilityFloor is the restrictive default: no profile, no
+// tools. It is the only floor available without an explicitly validated profile.
 func requestedOpsNativeCapabilityFloor() opsNativeCapabilityFloor {
-	return opsNativeCapabilityFloor{Posture: "fail_closed"}
+	return opsNativeCapabilityFloor{Posture: "fail_closed", Profile: opsNativeProfileDefault}
+}
+
+// qualifyOpsNativeCapabilityProfile validates an explicit profile token against
+// the existing public tool floor before any child process exists.
+//
+// The restrictive default is preserved: an absent profile stays tool-disabled,
+// and an unknown token is refused outright. The approved profile additionally
+// requires explicit workspace AND policy identity, and the policy manifest must
+// itself allow every approved tool — a changed or missing policy cannot widen
+// access, it only withdraws the grant.
+func qualifyOpsNativeCapabilityProfile(profile, workspace, policyPath string) (opsNativeCapabilityFloor, error) {
+	trimmed := strings.TrimSpace(profile)
+	if trimmed == opsNativeProfileDefault {
+		return requestedOpsNativeCapabilityFloor(), nil
+	}
+	if trimmed != opsNativeProfileSysReadonly {
+		return opsNativeCapabilityFloor{}, fmt.Errorf("%w %q (want %q or %q)", errOpsNativeProfileUnsupported, profile, opsNativeProfileDefault, opsNativeProfileSysReadonly)
+	}
+	// Explicit identity is a precondition, not a default: a cwd-bound workspace
+	// is not a filesystem sandbox, so the operator must name both the workspace
+	// the approved tools are bound to and the policy that grants them.
+	if strings.TrimSpace(workspace) == "" {
+		return opsNativeCapabilityFloor{}, fmt.Errorf("profile %q requires an explicit --workspace", opsNativeProfileSysReadonly)
+	}
+	if strings.TrimSpace(policyPath) == "" {
+		return opsNativeCapabilityFloor{}, fmt.Errorf("profile %q requires an explicit --policy", opsNativeProfileSysReadonly)
+	}
+	raw, err := os.ReadFile(policyPath)
+	if err != nil {
+		return opsNativeCapabilityFloor{}, fmt.Errorf("profile %q: policy must be readable: %w", opsNativeProfileSysReadonly, err)
+	}
+	manifest, err := policy.ParseManifest(raw)
+	if err != nil {
+		return opsNativeCapabilityFloor{}, fmt.Errorf("profile %q: policy does not parse: %w", opsNativeProfileSysReadonly, err)
+	}
+	allowed := make(map[string]bool, len(manifest.Allow))
+	for _, name := range manifest.Allow {
+		allowed[strings.ToLower(strings.TrimSpace(name))] = true
+	}
+	// Approved names must be live systool names, not manifest strings that happen
+	// to collide: the public systools floor is the authority for what the kernel
+	// can actually advertise, and the manifest must affirmatively grant each one.
+	sysFloor := systools.DefaultPolicy()
+	for _, tool := range opsNativeApprovedSysTools {
+		if !sysFloor.Allow[tool] {
+			return opsNativeCapabilityFloor{}, fmt.Errorf("profile %q: %q is not an approved sys tool", opsNativeProfileSysReadonly, tool)
+		}
+		if !allowed[strings.ToLower(tool)] {
+			return opsNativeCapabilityFloor{}, fmt.Errorf("profile %q: policy does not allow approved tool %q", opsNativeProfileSysReadonly, tool)
+		}
+	}
+	return opsNativeCapabilityFloor{
+		Posture:   "fail_closed",
+		Profile:   opsNativeProfileSysReadonly,
+		System:    true,
+		ApprovedS: append([]string(nil), opsNativeApprovedSysTools...),
+	}, nil
+}
+
+// approval stamps the approved-tool surface in one stable token so a receipt
+// reader can tell "no approved tools" from "these approved tools".
+func (f opsNativeCapabilityFloor) approval() string {
+	if len(f.ApprovedS) == 0 {
+		return "none"
+	}
+	return strings.Join(f.ApprovedS, ",")
+}
+
+// capabilityStamp renders the REQUESTED and EFFECTIVE capability profile in one
+// token pair. Requested and effective are distinct on purpose: the requested
+// profile is what the operator asked for and the effective profile is what this
+// launch validated and will apply, so a request that was narrowed (or that fell
+// back to the restrictive default) stays visible in the receipt instead of
+// being silently reconciled away.
+func (f opsNativeCapabilityFloor) capabilityStamp(requested string) string {
+	return fmt.Sprintf("profile_requested=%s,profile_effective=%s,approved_tools=%s",
+		opsNativeProfileLabel(strings.TrimSpace(requested)), opsNativeProfileLabel(f.Profile), f.approval())
+}
+
+// opsNativeProfileLabel renders the empty (restrictive-default) profile token as
+// a readable word so a receipt reader never sees a blank field.
+func opsNativeProfileLabel(value string) string {
+	if value == "" {
+		return "default"
+	}
+	return value
 }
 
 func (f opsNativeCapabilityFloor) digest() string {
-	return opsRunDigest(f.mediation())
+	return opsRunDigest(f.Profile, f.mediation(), f.approval())
 }
 
 // mediation renders the requested toggles for the shared launch-identity field
@@ -65,11 +179,16 @@ func (f opsNativeCapabilityFloor) mediation() string {
 	return actualOpsNativeToolMediation(nativeAgentToolCapabilities{System: f.System, MCP: f.MCP, Skills: f.Skills, Memory: f.Memory})
 }
 
-func (f opsNativeCapabilityFloor) configPolicy() opsRunConfigPolicyReceipt {
+func (f opsNativeCapabilityFloor) configPolicy(reason string) opsRunConfigPolicyReceipt {
+	status := opsNativeGuardEvidenceQualified
+	if reason != "" {
+		status = opsNativeGuardEvidenceRefused
+	}
 	return opsRunConfigPolicyReceipt{
 		Source: opsNativeConfigPolicySource,
 		Digest: f.digest(),
-		Status: opsNativeGuardEvidenceQualified,
+		Status: status,
+		Reason: reason,
 	}
 }
 
@@ -230,6 +349,7 @@ func runOpsNative(stdout, stderr io.Writer, args []string) int {
 	promptFile := fs.String("prompt-file", "", "UTF-8 task file")
 	receiptPath := fs.String("receipt", "", "metadata-only execution receipt")
 	policy := fs.String("policy", "", "native capability floor policy file")
+	toolProfile := fs.String("tool-profile", opsNativeProfileDefault, "explicit bounded native tool capability profile; empty keeps every tool family disabled, "+opsNativeProfileSysReadonly+" arms the approved read-only sys subset (requires --workspace and --policy)")
 	workspace := fs.String("workspace", "", "root for bounded code tools (default current directory)")
 	fs.StringVar(workspace, "code-workspace", "", "alias for --workspace")
 	maxTurns := fs.Int("max-turns", 10, "positive native model turn ceiling")
@@ -275,6 +395,14 @@ func runOpsNative(stdout, stderr io.Writer, args []string) int {
 			return 2
 		}
 	}
+	// An explicit, validated capability profile is the ONLY way past the
+	// restrictive default. An unsupported token — or an approved profile without
+	// explicit workspace/policy identity — refuses here, before any child exists.
+	floor, floorErr := qualifyOpsNativeCapabilityProfile(*toolProfile, *workspace, *policy)
+	if floorErr != nil {
+		fmt.Fprintf(stderr, "ops run native: %v\n", floorErr)
+		return 2
+	}
 	for _, input := range []string{*promptFile, *policy} {
 		if input != "" && *receiptPath != "" && opsRunSamePath(input, *receiptPath) {
 			fmt.Fprintln(stderr, "ops run native: receipt must be distinct from prompt and policy")
@@ -282,7 +410,7 @@ func runOpsNative(stdout, stderr io.Writer, args []string) int {
 		}
 	}
 	if *dryRun {
-		_ = json.NewEncoder(stdout).Encode(map[string]any{"schema": "fak-ops-run-plan/1", "harness": opsNativeHarness, "provider": *provider, "guarded": false, "guard_requested": "fail_closed", "guard_effective": "unknown", "prompt_delivery": "file", "timeout": timeout.String(), "max_turns": *maxTurns, "native_tool_mediation": requestedOpsNativeCapabilityFloor().mediation()})
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"schema": "fak-ops-run-plan/1", "harness": opsNativeHarness, "provider": *provider, "guarded": false, "guard_requested": "fail_closed", "guard_effective": "unknown", "prompt_delivery": "file", "timeout": timeout.String(), "max_turns": *maxTurns, "tool_profile_requested": strings.TrimSpace(*toolProfile), "tool_profile_effective": floor.Profile, "approved_tools_effective": floor.approval(), "native_tool_mediation": floor.mediation()})
 		return 0
 	}
 	// The native receipt contains task text. Keep it private and ephemeral; the
@@ -300,7 +428,7 @@ func runOpsNative(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	argv := []string{"chat", "--task-file", promptPath, "--provider", *provider, "--model", *model, "--base-url", *baseURL, "--api-key-env", *keyEnv, "--receipt", nativePath, "--max-turns", fmt.Sprint(*maxTurns), "--posture", "fail_closed", "--sys-tools=false", "--mcp-tools=false", "--skills=false", "--memory=false"}
+	argv := []string{"chat", "--task-file", promptPath, "--provider", *provider, "--model", *model, "--base-url", *baseURL, "--api-key-env", *keyEnv, "--receipt", nativePath, "--max-turns", fmt.Sprint(*maxTurns), "--posture", floor.Posture, "--sys-tools=" + fmt.Sprint(floor.System), "--mcp-tools=false", "--skills=false", "--memory=false"}
 	for _, pair := range [][2]string{{"--policy", *policy}, {"--code-workspace", *workspace}, {"--effort", *effort}} {
 		if pair[1] != "" {
 			argv = append(argv, pair[0], pair[1])
@@ -335,8 +463,7 @@ func runOpsNative(stdout, stderr io.Writer, args []string) int {
 	if canonical, resolveErr := resolveOpsRunWorkspace(resolvedWorkspace); resolveErr == nil {
 		resolvedWorkspace = canonical
 	}
-	floor := requestedOpsNativeCapabilityFloor()
-	configPolicy := floor.configPolicy()
+	configPolicy := floor.configPolicy("")
 	var nonce [12]byte
 	runID := "ops-native-unknown"
 	if _, randErr := rand.Read(nonce[:]); randErr == nil {
@@ -397,6 +524,13 @@ func runOpsNative(stdout, stderr io.Writer, args []string) int {
 	evidenceStatus, evidenceReason := opsNativeFinalizeEvidence(receipt.LaunchIdentity, nativePath, floor)
 	configPolicy.Status = evidenceStatus
 	configPolicy.Reason = evidenceReason
+	if evidenceStatus == opsNativeGuardEvidenceQualified {
+		// Stamp the REQUESTED/EFFECTIVE capability profile on a qualified verdict.
+		// Refused and unknown verdicts keep their own typed reason (the receipt-shape
+		// witness binds those exactly), so the capability stamp never masks why
+		// enforcement was rejected or left unevidenced.
+		configPolicy.Reason = floor.capabilityStamp(*toolProfile)
+	}
 	receipt.ConfigPolicy = &configPolicy
 	if evidenceStatus == opsNativeGuardEvidenceRefused && receipt.Status != "cancelled" && receipt.Status != "timed_out" {
 		code, receipt.Status = 1, "refused"
