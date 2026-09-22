@@ -204,7 +204,7 @@ are public here):
 
 | Scrape job | Exporter | Serves | Feeds |
 |---|---|---|---|
-| `fak_ops` | `fak-ops-dashboard --addr 0.0.0.0:9101 --repo-root .` | `fak_ops_*` at `:9101/metrics` — the ops plane fold: routines, queue, report window, stuck-work join, canonical goals, child resources | **FAK Ops \| Ops Plane Statuses** (uid `fak-ops-statuses`) |
+| `fak_ops` | `fak-ops-dashboard --addr 0.0.0.0:9101 --repo-root .` | `fak_ops_*` at `:9101/metrics` — the ops plane fold: routines, queue, report window, stuck-work join, canonical goals, child resources **plus the fleet-work plane** (unlanded worktree census, ARL-1 agent-run attribution, public/private ticket split) | **FAK Ops \| Ops Plane Statuses** (uid `fak-ops-statuses`) and **FAK Ops \| Fleet Work in Flight & Agent Attribution** (uid `fak-ops-fleet-work`) |
 | `fak_ops_workers` | `fak-sync ops throughput-metrics --serve --addr 0.0.0.0:9094` | `fak_ops_*` at `:9094/metrics` — the live worktree/session census plus one bounded (24h) `gh` issue census folded into the 6m/30m/60m/12h/24h windows | **FAK Ops \| Workers, Queue & Issue Throughput** (uid `fak-ops-workers-queue`) |
 
 Both jobs scrape at `60s` with a raised `scrape_timeout` (`45s` / `60s`) because each is a live
@@ -212,11 +212,19 @@ disk fold per scrape, not a hot path.
 
 ### The ops dashboards are hand-authored JSON
 
-`dashboards/fak-ops-statuses.json` and `dashboards/fak-ops-workers-queue.json` are **edited
+`dashboards/fak-ops-statuses.json`, `dashboards/fak-ops-workers-queue.json` and
+`dashboards/fak-ops-fleet-work.json` are **edited
 directly** — they are *not* emitted by [`gen_dashboard.py`](gen_dashboard.py), which writes
 only the fleet / gateway / cache / guard / dogfood / startup set (see [Regenerate the
 dashboard](#regenerate-the-dashboard)). Re-running the generator will not touch them and will
 not undo a panel fix; open the JSON, not the generator.
+
+The `fak-ops-fleet-work` panels answer: unlanded work volume by census state and by worktree, which
+harness / router model provider / model each agent run used, per-harness wall vs **derived**
+productive time, and the public-vs-private ticket split. Every panel carries a `*_present` gauge;
+a `0` presence means *unavailable*, never a measured zero. The metric-name contract between the
+exporter (`platform/ops/dashboard/fleetwork.go`) and this dashboard is witnessed by
+`TestFleetWork_DashboardMetricContract` in fak-private.
 
 ### Ops alert rules — fire on the confession, never on a coincidence of zeros
 
