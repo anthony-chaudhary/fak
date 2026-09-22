@@ -69,7 +69,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "Scheduler, queue, report-window and stuck-work telemetry folded by the Fak Ops statuses exporter (`fak_ops_*`, scraped from the ops dashboard server). **Unavailable means missing evidence**, not zero: an absent `.fak/ops.json` or report ledger folds to an honest empty plane, and a failed probe renders as partial with a named diagnostic on the exporter's /status page. Run `fak-ops-dashboard` (default `127.0.0.1:9096`) and point the `fak_ops` file-SD target at it."
+        "content": "Scheduler, queue, report-window and stuck-work telemetry folded by the Fak Ops statuses exporter (`fak_ops_*`, scraped from the ops dashboard server). **Unavailable means missing evidence**, not zero: an absent `.fak/ops.json` or report ledger folds to an honest empty plane, and a failed probe renders as partial with a named diagnostic on the exporter's /status page. Run `fak-ops-dashboard` (default `127.0.0.1:9101`) and point the `fak_ops` file-SD target at it."
       },
       "id": 1
     },

@@ -204,7 +204,7 @@ are public here):
 
 | Scrape job | Exporter | Serves | Feeds |
 |---|---|---|---|
-| `fak_ops` | `fak-ops-dashboard --addr 0.0.0.0:9096 --repo-root .` | `fak_ops_*` at `:9096/metrics` — the ops plane fold: routines, queue, report window, stuck-work join, canonical goals, child resources | **FAK Ops \| Ops Plane Statuses** (uid `fak-ops-statuses`) |
+| `fak_ops` | `fak-ops-dashboard --addr 0.0.0.0:9101 --repo-root .` | `fak_ops_*` at `:9101/metrics` — the ops plane fold: routines, queue, report window, stuck-work join, canonical goals, child resources | **FAK Ops \| Ops Plane Statuses** (uid `fak-ops-statuses`) |
 | `fak_ops_workers` | `fak-sync ops throughput-metrics --serve --addr 0.0.0.0:9094` | `fak_ops_*` at `:9094/metrics` — the live worktree/session census plus one bounded (24h) `gh` issue census folded into the 6m/30m/60m/12h/24h windows | **FAK Ops \| Workers, Queue & Issue Throughput** (uid `fak-ops-workers-queue`) |
 
 Both jobs scrape at `60s` with a raised `scrape_timeout` (`45s` / `60s`) because each is a live
@@ -239,12 +239,14 @@ The two exporters are deliberately **name-disjoint**: the dashboard exporter emi
 `fak_ops_workers_routines_enabled` / `fak_ops_workers_routines_stale`, so a selector without an
 explicit `job=` can never silently sum both. Every rule names its job.
 
-> **Port conflict, not yet reconciled.** `:9096` is documented for **two** things: the
+> **Port conflict — resolved.** `:9096` was documented for **two** things: the
 > `fak-ops-dashboard` Prometheus scrape target (job `fak_ops`, above) **and** the `fak slack
 > alert --serve` Alertmanager webhook receiver (see [Alerts → Slack](#alerts--slack-alertmanager--fak-receiver--durable-outbox)
-> and the [Ports](#ports) table). Only one process can bind `:9096`. This is a known clash with
-> no resolution chosen yet — do not read either mention as authoritative; pick a port for one of
-> the two before running both on one host.
+> and the [Ports](#ports) table). Only one process can bind a port, so the ops dashboard
+> exporter **moved to `:9101`** (job `fak_ops` targets `host.docker.internal:9101`); `:9096`
+> remains the `fak slack alert --serve` webhook receiver, which is alert-critical and referenced
+> by `alertmanager.yml`. Update any local `fak_ops` file-SD target from `:9096` to `:9101` when
+> running both on one host.
 
 ## Run Operations: home → run drill-down
 
@@ -345,6 +347,7 @@ lock-step with emitted metric names (`fleet_bottleneck_test.py` asserts this).
 | 9091 | Prometheus | Prometheus UI + API |
 | 9093 | Alertmanager | Docker-only alert routing UI + API (POSTs the webhook) |
 | 9096 | `fak slack alert --serve` | Webhook receiver → durable Slack outbox (host) |
+| 9101 | `fak-ops-dashboard` | Ops plane fold exporter (`fak_ops_*`, scraped by job `fak_ops`) (host) |
 | 3000 | Grafana | Dashboard UI (localhost only) |
 
 > These match the metrics-service stack's ports. If you run **both** stacks on one

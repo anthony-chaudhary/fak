@@ -343,7 +343,7 @@ groups:
           description: "The gateway-usage ledger has {{ $value }} folded rows but none carries a session_id, so every per-session cost/cache panel is blank while the fleet roll-ups are populated. `fak serve` rows are unidentified by design (one process, many sessions); a fleet of `fak guard` sessions should be producing identified rows."
 
   # ---------------------------------------------------------------------------
-  # Fak Ops plane (exporter `fak-ops-dashboard`, scrape job fak_ops, :9096; and
+  # Fak Ops plane (exporter `fak-ops-dashboard`, scrape job fak_ops, :9101; and
   # `fak-sync ops throughput-metrics`, scrape job fak_ops_workers, :9094).
   # These enforce the repo's own fail-closed doctrine for the autonomous
   # factory: a skipped plane, an unreadable state file, a stale routine and a
@@ -370,7 +370,7 @@ groups:
           severity: warning
         annotations:
           summary: "fak ops dashboard exporter is not scrapeable"
-          description: "Prometheus cannot scrape fak-ops-dashboard at :9096/metrics for 5m, so every Ops Plane Statuses panel is blank. This is an observability outage, not necessarily an ops outage. Start it with `fak-ops-dashboard --addr 0.0.0.0:9096 --repo-root .` or `fak-obs-stack check`."
+          description: "Prometheus cannot scrape fak-ops-dashboard at :9101/metrics for 5m, so every Ops Plane Statuses panel is blank. This is an observability outage, not necessarily an ops outage. Start it with `fak-ops-dashboard --addr 0.0.0.0:9101 --repo-root .` or `fak-obs-stack check`."
 
       - alert: FakOpsWorkersExporterDown
         expr: up{job="fak_ops_workers"} == 0
