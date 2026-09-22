@@ -270,7 +270,7 @@ func modelAccountAPIHostProvider(k modelroute.ProviderKind) string {
 		return "xai"
 	case modelroute.KindDeepSeek:
 		return "deepseek"
-	case modelroute.KindLocal, modelroute.KindFleet, modelroute.KindOpenAIResponses:
+	case modelroute.KindLocal, modelroute.KindFleet, modelroute.KindOpenAIResponses, modelroute.KindRouter:
 		return "openai-compatible"
 	default:
 		return string(k)

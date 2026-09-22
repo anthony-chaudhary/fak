@@ -233,6 +233,7 @@ func vendorUpstreamHosts() map[string]bool {
 		modelroute.KindGemini,
 		modelroute.KindXAI,
 		modelroute.KindDeepSeek,
+		modelroute.KindRouter,
 	} {
 		add(modelroute.KindBaseURL(k))
 	}

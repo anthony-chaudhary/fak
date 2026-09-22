@@ -192,7 +192,7 @@ func (s *Server) bindChatRoute(ctx context.Context, requestedModel string) (*cha
 	switch target.Kind {
 	case modelroute.KindLocal, modelroute.KindFleet, modelroute.KindDeepSeek, modelroute.KindOpenRouter:
 		provider = string(agent.ProviderOpenAI)
-	case modelroute.KindOpenAI, modelroute.KindOpenAIResponses, modelroute.KindAnthropic, modelroute.KindGemini, modelroute.KindXAI:
+	case modelroute.KindOpenAI, modelroute.KindOpenAIResponses, modelroute.KindAnthropic, modelroute.KindGemini, modelroute.KindXAI, modelroute.KindRouter:
 	default:
 		return nil, fmt.Errorf("gateway: chat route: account %q has unsupported provider kind %q", target.Account, target.Kind)
 	}

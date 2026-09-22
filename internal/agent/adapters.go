@@ -26,7 +26,7 @@ func ParseProvider(s string) (Provider, bool) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "", "openai", "gpt", "chat-completions", "openai-compatible":
 		return ProviderOpenAI, true
-	case "responses", "responses-api", "openai-responses", "astra":
+	case "responses", "responses-api", "openai-responses", "astra", "router":
 		return ProviderOpenAIResponses, true
 	case "anthropic", "claude":
 		return ProviderAnthropic, true

@@ -124,6 +124,13 @@ const (
 	OpenRouterAPIKeyEnv = "OPENROUTER_API_KEY"
 	// OpenRouterOpenAIBaseURL is OpenRouter's OpenAI-compatible API root.
 	OpenRouterOpenAIBaseURL = "https://openrouter.ai/api/v1"
+	// RouterProviderKey is the account-roster provider key for router.com's
+	// OpenAI Responses (item) wire.
+	RouterProviderKey = "router"
+	// RouterAPIKeyEnv is the credential env-var name router.com examples use.
+	RouterAPIKeyEnv = "ROUTER_API_KEY"
+	// RouterOpenAIBaseURL is router.com's OpenAI Responses API root.
+	RouterOpenAIBaseURL = "https://api.router.com/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -161,6 +168,12 @@ const (
 	// KindOpenRouter is OpenRouter's OpenAI-compatible Chat Completions wire.
 	// It is a provider marketplace that routes to 300+ upstream models.
 	KindOpenRouter ProviderKind = OpenRouterProviderKey
+	// KindRouter is router.com's vendor-marketplace wire. Unlike the OpenRouter
+	// marketplace (OpenAI Chat Completions), router.com speaks the OpenAI
+	// **Responses** item wire (POST /v1/responses). An empty/default model is
+	// chosen server-side by the router (e.g. DeepSeek Flash 4.1), so a binding
+	// may leave UpstreamModel empty and let the wire fallback stand.
+	KindRouter ProviderKind = RouterProviderKey
 	// KindLocal is an on-box, OpenAI-compatible server (ollama / vLLM / llama.cpp /
 	// the in-kernel model). It is the ONLY local kind, so locality is exactly
 	// Kind == KindLocal — there is no separate flag. A call routed to it is
@@ -183,7 +196,7 @@ const (
 // knownKind reports whether k is one of the closed ProviderKind set.
 func knownKind(k ProviderKind) bool {
 	switch k {
-	case KindOpenAI, KindOpenAIResponses, KindAnthropic, KindGemini, KindXAI, KindDeepSeek, KindOpenRouter, KindLocal, KindFleet:
+	case KindOpenAI, KindOpenAIResponses, KindAnthropic, KindGemini, KindXAI, KindDeepSeek, KindOpenRouter, KindRouter, KindLocal, KindFleet:
 		return true
 	}
 	return false
@@ -213,6 +226,8 @@ func KindBaseURL(k ProviderKind) string {
 		return DeepSeekOpenAIBaseURL
 	case KindOpenRouter:
 		return OpenRouterOpenAIBaseURL
+	case KindRouter:
+		return RouterOpenAIBaseURL
 	}
 	return ""
 }
@@ -872,6 +887,7 @@ func DefaultRoster() Roster {
 			{ID: "deepseek", Kind: KindDeepSeek, CredEnv: DeepSeekAPIKeyEnv, ContextTokens: DeepSeekV4ContextTokens, MaxOutputTokens: DeepSeekV4MaxOutputTokens, Label: "DeepSeek V4 OpenAI-compatible API: 1M context, 384K max output"},
 			{ID: "deepseek-anthropic", Kind: KindAnthropic, BaseURL: DeepSeekAnthropicBaseURL, CredEnv: DeepSeekAPIKeyEnv, ContextTokens: DeepSeekV4ContextTokens, MaxOutputTokens: DeepSeekV4MaxOutputTokens, Label: "DeepSeek V4 Anthropic-compatible API; visible to acceptance, not probed as OpenAI /models"},
 			{ID: "openrouter", Kind: KindOpenRouter, CredEnv: OpenRouterAPIKeyEnv, Label: "OpenRouter marketplace (300+ models via OpenAI-compatible wire; credential stays in OPENROUTER_API_KEY)"},
+			{ID: "router", Kind: KindRouter, CredEnv: RouterAPIKeyEnv, Label: "router.com router (OpenAI Responses wire /v1/responses; empty model = router's own default, e.g. DeepSeek Flash 4.1; credential stays in ROUTER_API_KEY)"},
 		},
 		Default: "openai-personal",
 		Bindings: []Binding{
@@ -896,6 +912,7 @@ func DefaultRoster() Roster {
 			{Model: "deepseek-reasoner-compat", Account: "deepseek", UpstreamModel: "deepseek-reasoner", CompatibilityOnly: true, DeprecatedAfterUTC: DeepSeekLegacyAliasRetiresUTC, DeprecatedAliasFor: DeepSeekV4FlashModel + " thinking mode"},
 			{Model: "openrouter-free", Account: "openrouter", UpstreamModel: "openrouter/auto"},
 			{Model: "openrouter-best", Account: "openrouter", UpstreamModel: "openrouter/best"},
+			{Model: "router", Account: "router"},
 		},
 	}
 }
