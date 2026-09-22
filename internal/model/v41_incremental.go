@@ -1,136 +1,202 @@
 package model
 
-// v41_incremental.go — the fak#13311 SHADOW full-stack single-token V4.1
-// composition (halo-ds41-100-30 packet 11).
+// v41_incremental.go — the fak#13311 shadow incremental one-token composition
+// for the V4.1 native decode path (halo-ds41-100-30 packet ...).
 //
-// Session.Step (stepV41, v41_forward.go) routes every decode token through
-// forwardV41, which folds the token into the session history and RECOMPUTES the
-// whole history: embedding, mHC streams, per-layer projections and the
-// attention contraction over every prefix position, then the head over every
-// position. That is exactly what a prefill needs and exactly the cost the
-// 100/30 plan's "Session decode recomputes all history" finding names.
+// It composes the ALREADY-LANDED single-position plain-layer seam
+// (v41LayerStep, fak#13306) into the ticket's through-line:
 //
-// forwardV41Step is the one-position counterpart. It composes the ALREADY-LANDED
-// per-layer seam (v41LayerStep, v41_layer_step.go, leaf 07/#13306) across the
-// configured layer stack for exactly ONE token: embed the token, carry the four
-// persistent mHC streams through the layer sequence, then run the head on the
-// final row. It introduces NO new arithmetic — every per-layer function is the
-// same one v41Layer calls with seq == 1, reached through v41LayerStep.
+//	"embed one token, carry the four mHC streams through the configured layer
+//	 sequence, then run the existing head."
 //
-// Scope (fak#13311): this is a SHADOW/test-only composition. The production
-// Session.Step route is deliberately NOT switched here; leaf 10 owns activation.
+// forwardV41 (v41_forward.go) is a FULL-SEQUENCE assembly: it reprojects and
+// re-contracts the entire history to emit one token. forwardV41Step consumes
+// exactly ONE new token -- the position it advances is pos = len(st.history) --
+// and never recomputes old history. It is a SHADOW/TEST-ONLY composition: it
+// does NOT touch stepV41, Session.Step, or forwardV41's behavior, and it makes
+// no production activation, benchmark success claim, sampling change, or hidden
+// old-history recomputation.
 //
-// Transactional contract (never a silent partial commit):
-//   - the session history append and every per-layer ring advance are STAGED as
-//     per-token deltas; only the small scalars needed to undo an append are
-//     snapshotted, never a prefix-sized copy of the retained state;
-//   - commit happens only after EVERY layer AND the head succeed;
-//   - any failure rolls back by truncating the staged history append and
-//     restoring each layer's ring cursor to its staged pre-value, so a failed
-//     step behaves as if it never occurred and a retry sees the same prefix.
+// Commit discipline (the ticket's "roll back by truncation/restoration, never by
+// cloning prefix-sized state"):
+//   - The token id is appended to st.history only AFTER the full layer sequence
+//     AND the head succeed.
+//   - Each layer's per-step scalars (V41AttentionState.nextWindowPos and
+//     nextCompressRow) are staged before that layer runs and restored on a fault
+//     in any layer, so every already-stepped layer's cursors are rolled back in
+//     O(1) -- no prefix-sized clone.
+//   - A layer's Step ALSO writes one row into the fixed windowSize-row ring, at
+//     the slot nextWindowPos%windowSize. Restoring only the cursor would leave
+//     that overwritten slot holding the failed step's KV row -- visible through
+//     retainedTailRows() once the ring has wrapped -- so the composition stages
+//     the ONE row at the slot the step would overwrite (its contents, not the
+//     slice header) before the layer runs and copies it back on rollback. That
+//     is one O(HiddenSize) row per stepped layer (O(NumLayers) rows total), never
+//     a copy of the ring or the session history.
+//   - The commit is a truncation/restoration of those per-layer scalars and the
+//     at-most-one-row ring slot each layer overwrote, never a copy of the
+//     retained ring or the session history.
 //
-// Fail-closed: a nil state, a non-positive id range, a malformed geometry, or a
-// layer whose role the step seam refuses (compressed/source/reader) surfaces the
-// typed ErrV41ForwardStage and mutates nothing.
+// A layer whose role is compressed/reader is refused by v41LayerStep itself with
+// the typed ErrV41ForwardStage; that refusal is surfaced, never bypassed (making
+// compressed layers step is a later leaf).
 
 import "fmt"
 
-// v41StepTxnStage records the minimal undo state for one layer's ring advance:
-// the ring cursor before the step. The ring is a fixed-size circular buffer, so
-// restoring this scalar is a complete rollback of the logical append — no
-// prefix-sized buffer copy is ever taken.
-type v41StepTxnStage struct {
-	layer           int
-	state           *V41AttentionState
-	prevWindowPos   int
-	prevCompressRow int
+// v41StepStats is the observable per-step counter block the shadow composition
+// returns. It carries ONLY single-row counters -- never prefix-sized state -- so
+// a test can prove (a) exactly NumLayers single-position layer calls happen per
+// decode step and (b) a fault in the last layer rolls the whole step back.
+//
+// It is owned by the CALLER (returned by value from forwardV41Step), not stored
+// on Model: the ticket forbids mutable globals on Model, and a returned struct
+// keeps state ownership with the step's caller.
+type v41StepStats struct {
+	// LayerCalls counts the single-position v41LayerStep invocations made by
+	// this step. On success it equals cfg.NumLayers.
+	LayerCalls int
+	// LayersRolledBack counts layers whose staged nextWindowPos, nextCompressRow
+	// and overwritten ring row were restored after a fault. On success it is 0;
+	// on a fault in layer l it is l+1 (layer l's own failed arithmetic plus
+	// every earlier layer).
+	LayersRolledBack int
+	// Committed reports whether the step append and step-scoped publication were
+	// published (history append). False with a nil error cannot happen; a false
+	// with a non-nil error marks a fully rolled-back fault.
+	Committed bool
 }
 
-// forwardV41Step advances the session by exactly ONE token through the full
-// configured layer stack, as a SHADOW composition. It returns the final hidden
-// row and the head logits for that one position.
+// forwardV41Step advances the shadow V4.1 decode path by exactly one token.
 //
-// It never touches the production route: a caller (a parity test, or a future
-// activation leaf) owns the decision to prefer it. st carries the session-owned
-// retained per-layer temporal state (seeded by a prior full forward) and the
-// optional device gate/up callback; it is updated on success and left unchanged
-// on any failure.
-func (m *Model) forwardV41Step(id int, st *v41ForwardState) (hidden []float32, logits []float32, err error) {
-	if err := m.v41ForwardAdmitted(); err != nil {
-		return nil, nil, err
-	}
+// id is the new token (in [0, cfg.VocabSize)); its position is pos =
+// len(st.history). st must already carry a seeded, append-ready retained state
+// for EVERY layer -- a shadow step cannot seed a prefix, so a nil per-layer
+// state fails closed. scratch is the optional reused projection scratch; nil is
+// replaced with a fresh empty one.
+//
+// It embeds the token, carries the four mHC streams (stream 0 == x) through
+// every configured layer via v41LayerStep, runs the existing v41Head, and only
+// then commits: append id to st.history and publish the step-scoped layer state
+// (st.attn = nil, matching forwardV41's cross-layer publication release).
+//
+// On any layer or head fault it returns the typed ErrV41ForwardStage with
+// already-stepped layers rolled back by restoring their staged cursors
+// (nextWindowPos, nextCompressRow) and the one ring row each overwrote, and the
+// uncommitted history left untouched. It returns one logits row on success.
+func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScratch) (logits []float32, stats v41StepStats, err error) {
 	if st == nil {
-		return nil, nil, v41StageErr(v41StageEmbedding, -1,
-			fmt.Errorf("%w: forwardV41Step requires session state", ErrV41ForwardStage))
+		return nil, stats, v41StageErr(v41StageEmbedding, -1,
+			fmt.Errorf("%w: forwardV41Step requires a seeded session state", ErrV41ForwardStage))
+	}
+	if scratch == nil {
+		scratch = &v41ProjScratch{}
+	}
+	if err := m.v41ForwardAdmitted(); err != nil {
+		return nil, stats, err
 	}
 	cfg := m.Cfg
 	if id < 0 || id >= cfg.VocabSize {
-		return nil, nil, v41StageErr(v41StageEmbedding, -1,
+		return nil, stats, v41StageErr(v41StageEmbedding, -1,
 			fmt.Errorf("%w: token id %d out of range [0,%d)", ErrV41ForwardStage, id, cfg.VocabSize))
-	}
-	if _, err := v41ForwardGeometry(cfg); err != nil {
-		return nil, nil, err
-	}
-	if len(st.layers) != cfg.NumLayers {
-		return nil, nil, v41StageErr(v41StageAttention, -1,
-			fmt.Errorf("%w: session state carries %d layer states, want %d", ErrV41ForwardStage, len(st.layers), cfg.NumLayers))
 	}
 
 	H := cfg.HiddenSize
+	// This step consumes the NEXT token, so its absolute position is the current
+	// committed history length. The per-layer retained states must already match.
 	pos := len(st.history)
 
-	// ---- stage the history append (undo state is its prior length) ----
-	prevHistory := len(st.history)
-	st.history = append(st.history, id)
-
-	// ---- stage per-layer ring cursors ----
-	stages := make([]v41StepTxnStage, cfg.NumLayers)
-	for l := 0; l < cfg.NumLayers; l++ {
-		ls := st.layers[l]
-		if ls == nil {
-			st.history = st.history[:prevHistory]
-			return nil, nil, v41StageErr(v41StageAttention, l,
-				fmt.Errorf("%w: layer %d has no retained decode state", ErrV41ForwardStage, l))
-		}
-		stages[l] = v41StepTxnStage{layer: l, state: ls, prevWindowPos: ls.nextWindowPos, prevCompressRow: ls.nextCompressRow}
-	}
-
-	rollback := func() {
-		st.history = st.history[:prevHistory]
-		for i := range stages {
-			stages[i].state.nextWindowPos = stages[i].prevWindowPos
-			stages[i].state.nextCompressRow = stages[i].prevCompressRow
-		}
-	}
-
-	// ---- embedding for the one position ----
+	// Embed the token into a fresh hidden row.
 	embed := m.tensor("model.embed_tokens.weight")
 	if len(embed) < cfg.VocabSize*H {
-		rollback()
-		return nil, nil, v41StageErr(v41StageEmbedding, -1,
+		return nil, stats, v41StageErr(v41StageEmbedding, -1,
 			fmt.Errorf("%w: embedding table has %d values, want %d", ErrV41ForwardStage, len(embed), cfg.VocabSize*H))
 	}
 	x := append([]float32(nil), embed[id*H:(id+1)*H]...)
 	scaleEmbedInPlace(x, cfg)
-	// The four persistent mHC streams a full forward initializes: stream 0 is the
-	// live hidden, streams 1..3 the zero residuals.
+
+	// The four persistent mHC streams: stream 0 is the live hidden row, streams
+	// 1..3 are the persistent zero residuals a full forward initializes them to.
 	streams := [][]float32{x, make([]float32, H), make([]float32, H), make([]float32, H)}
 
-	// ---- one position through every configured layer ----
-	scratch := &v41ProjScratch{}
+	// Fail closed BEFORE any mutation: every layer needs a seeded retained state.
+	// A shadow step cannot seed a prefix -- the caller must seed.
 	for l := 0; l < cfg.NumLayers; l++ {
-		if err := m.v41LayerStep(l, x, streams, pos, st.layers[l], scratch); err != nil {
-			rollback()
-			return nil, nil, err
+		if st.layerState(l) == nil {
+			return nil, stats, v41StageErr(v41StageLayer, l,
+				fmt.Errorf("%w: layer %d has no seeded retained state; forwardV41Step cannot seed a prefix", ErrV41ForwardStage, l))
 		}
 	}
 
-	// ---- head on the final row (the last commit gate) ----
-	out, err := m.v41Head(x)
-	if err != nil {
-		rollback()
-		return nil, nil, err
+	// Stage, for each layer, its pre-step cursors AND the one ring row that
+	// layer's Step may overwrite. The staged slices hold one entry per stepped
+	// layer -- per-step scalars plus at most one O(HiddenSize) row each -- never
+	// a prefix-sized clone. This is the entire rollback ledger.
+	//
+	// V41AttentionState.Step writes exactly one row into the fixed
+	// windowSize-row ring, at slot nextWindowPos%windowSize, and increments
+	// nextWindowPos/nextCompressRow. retainedTailRows() derives the visible
+	// tail from nextWindowPos, so once the ring has wrapped (pos >= windowSize)
+	// a later fault rolled back by cursor alone would still expose the failed
+	// step's row at that slot. Staging the row's CONTENT (copied, so a later
+	// in-place write cannot alias the backup) and restoring it on rollback makes
+	// the retained ring byte-identical to its pre-step contents.
+	//
+	// At pos == 0 the layer commits via Prefill, not Step: Prefill requires an
+	// empty state (nextWindowPos == 0) and writes sequentially from slot 0
+	// without wrapping, so it cannot clobber a pre-existing row. Its cursor
+	// restore is still staged below; the ring-row backup is nil then.
+	stagedPos := make([]int, 0, cfg.NumLayers)
+	stagedCompress := make([]int, 0, cfg.NumLayers)
+	stagedRow := make([][]float32, 0, cfg.NumLayers)
+	rollback := func() {
+		for i := len(stagedPos) - 1; i >= 0; i-- {
+			state := st.layerState(i)
+			state.nextWindowPos = stagedPos[i]
+			state.nextCompressRow = stagedCompress[i]
+			if row := stagedRow[i]; row != nil && state.windowSize > 0 {
+				slot := stagedPos[i] % state.windowSize
+				if slot >= 0 && slot < len(state.window) && len(state.window[slot]) == len(row) {
+					copy(state.window[slot], row)
+				}
+			}
+		}
+		stats.LayersRolledBack = len(stagedPos)
 	}
 
-	return append([]float32(nil), x...), out, nil
+	for l := 0; l < cfg.NumLayers; l++ {
+		state := st.layerState(l)
+		stagedPos = append(stagedPos, state.nextWindowPos)
+		stagedCompress = append(stagedCompress, state.nextCompressRow)
+		// Capture the ring row Step will overwrite. pos != 0 (Step) writes
+		// window[nextWindowPos%windowSize]; pos == 0 (Prefill) cannot clobber a
+		// pre-existing row and gets a nil backup.
+		var rowBackup []float32
+		if pos != 0 && state.windowSize > 0 && len(state.window) > 0 {
+			slot := state.nextWindowPos % state.windowSize
+			if slot >= 0 && slot < len(state.window) {
+				rowBackup = append([]float32(nil), state.window[slot]...)
+			}
+		}
+		stagedRow = append(stagedRow, rowBackup)
+		stats.LayerCalls++
+		if lerr := m.v41LayerStep(l, x, streams, pos, state, scratch); lerr != nil {
+			rollback()
+			return nil, stats, lerr
+		}
+	}
+
+	// Head runs BEFORE any commit; a head fault rolls back exactly like a layer
+	// fault (truncate/restore, no clone).
+	res, herr := m.v41Head(x)
+	if herr != nil {
+		rollback()
+		return nil, stats, herr
+	}
+
+	// Commit: append the token and publish the step-scoped layer state. History
+	// grows by exactly one; attn is released to match forwardV41.
+	st.history = append(st.history, id)
+	st.attn = nil
+	stats.Committed = true
+	return res, stats, nil
 }
