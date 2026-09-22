@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -95,6 +96,12 @@ type serveRuntime struct {
 	// released at shutdown by releaseStrixKVBuffers. Zero value = no Strix
 	// silicon or a fallback to the standard heap/VRAM KV path.
 	strixKVAllocation serveStrixKVAllocation
+
+	// agentWarmReleaseOnce makes the planner's startup-warm release fire exactly once
+	// across the serve lifecycle (normal shutdown and startup cancellation both
+	// converge on releaseServeAgentWarm). CW-08 (#13329); the turnkey counterpart is
+	// turnkeyServer.agentWarmReleaseOnce in up.go.
+	agentWarmReleaseOnce sync.Once
 }
 
 // serveStrixSubsystemBinding records that the Strix Halo preflight UMA/MALL
@@ -1025,8 +1032,22 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 	// serve.go uses to route chat in-kernel (local model, no upstream base-url, no
 	// replica fleet); a proxy/replica serve pays no such tax and skips warm-start.
 	if rt.inKernelModel != nil && rt.inKernelTok != nil && strings.TrimSpace(*sf.baseURL) == "" && len(sf.replicaBaseURLs.Values()) == 0 {
+		// CW-08 (#13329): install the effective agent KV-cache warm profile BEFORE the
+		// listener binds, so /healthz reports agent_warm_pending (a held readiness) from
+		// the first probe and the operator's first real turn cannot land on a cold prefix
+		// the serve promised to warm. The workspace whose AGENTS.md seeds the warm is the
+		// resolved native code workspace; a serve with no readable snapshot leaves the
+		// gate unconfigured (readiness unaffected). Materialized on the background path
+		// below, and released once at shutdown/cancellation.
+		agentWarmArmed := installServeAgentWarm(rt.srv, *sf.nativeCodeWorkspace, os.Stderr)
+		defer rt.releaseServeAgentWarm()
 		rt.srv.ArmWarmupGate()
-		go func() { _, _ = rt.srv.RunWarmup(ctx) }()
+		go func() {
+			_, _ = rt.srv.RunWarmup(ctx)
+			if agentWarmArmed {
+				runServeAgentWarmup(ctx, rt.srv)
+			}
+		}()
 	}
 	if err := rt.srv.ListenAndServe(ctx, *sf.addr); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		must(err)
@@ -1046,4 +1067,122 @@ func resolveServeRequiredKey(envName, flagName, summary, want string) string {
 	})
 	os.Exit(2)
 	return ""
+}
+
+// ---------------------------------------------------------------------------
+// CW-08 (#13329): the serve-side producer for the gateway's agent KV-cache warm
+// readiness gate. `fak serve` already arms the #3051 backend warmup gate; that only
+// answers "is the backend LOADED?". The gateway owns the "is a warm PREFIX resident
+// and reusable?" half (internal/gateway/readiness_warmup.go, CW-07 #13333). This is
+// the counterpart of up.go's CW-09 (#13332) turnkey install: resolve the effective
+// agent instruction snapshot + ordered tool catalog, install them on the gateway
+// before readiness binds, materialize the warm on the background startup path, and
+// release the planner's startup-warm ownership exactly once.
+// ---------------------------------------------------------------------------
+
+// serveAgentWarmWorkspaceTenant is the cache scope a `fak serve`-owned agent warm is
+// bounded to. A local serve owns exactly one tenant on the appliance; the demand path
+// binds the SAME tenant so the primed prefix is reusable (mirrors the turnkey
+// turnkeyAgentWarmWorkspaceTenant / CW-18 binding).
+const serveAgentWarmWorkspaceTenant = "serve-local"
+
+// serveAgentWarmReleaser is the shutdown-owner hook the serve lifecycle invokes
+// exactly once when it installed a startup agent warm. *agent.InKernelPlanner
+// satisfies it; a planner without the seam is left untouched.
+type serveAgentWarmReleaser interface {
+	ReleaseStartupWarm()
+}
+
+// deriveServeAgentWarmInputs resolves the STABLE warm inputs the serve startup path
+// hands the gateway: the workspace instruction snapshot (AGENTS.md) — the same bytes
+// the forward path encodes — and the ordered kernel coding-tool catalog. It returns
+// ok=false when the workspace is empty or carries no readable instruction snapshot,
+// so the caller leaves the gate unconfigured rather than inventing a profile.
+func deriveServeAgentWarmInputs(workspace string) (agent.WarmPrefixInputs, bool) {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return agent.WarmPrefixInputs{}, false
+	}
+	instructions, err := os.ReadFile(filepath.Join(workspace, "AGENTS.md"))
+	if err != nil || len(instructions) == 0 {
+		return agent.WarmPrefixInputs{}, false
+	}
+	return agent.WarmPrefixInputs{
+		Instructions: instructions,
+		Tools:        agent.ToolCatalog(),
+	}, true
+}
+
+// installServeAgentWarm installs the effective agent KV-cache warm profile on the
+// gateway BEFORE readiness is bound. It resolves the workspace instruction snapshot,
+// hands it to the gateway via SetAgentWarmProfile (which derives the descriptor
+// identity through the installed warmer), and returns true only when a bounded
+// profile was actually installed. It is deliberately fail-open: an unresolved
+// workspace, an unreadable AGENTS.md, or a planner that cannot derive a bounded
+// descriptor is reported and leaves the gate unconfigured — readiness is never held
+// on a profile that cannot be realized. Never fatal: a warm is an optimization.
+func installServeAgentWarm(srv *gateway.Server, workspace string, log io.Writer) bool {
+	if srv == nil {
+		return false
+	}
+	inputs, ok := deriveServeAgentWarmInputs(workspace)
+	if !ok {
+		if log != nil {
+			fmt.Fprintf(log, "fak serve: agent cache warm unconfigured (no readable AGENTS.md under %q)\n", workspace)
+		}
+		return false
+	}
+	identity, err := srv.SetAgentWarmProfile(gateway.AgentWarmProfile{
+		Tenant: serveAgentWarmWorkspaceTenant,
+		Inputs: inputs,
+	})
+	if err != nil {
+		if log != nil {
+			fmt.Fprintf(log, "fak serve: agent cache warm unavailable: %v\n", err)
+		}
+		return false
+	}
+	if log != nil {
+		fmt.Fprintf(log, "fak serve: agent cache warm armed identity=%s (materialized on the background startup path)\n", identity)
+	}
+	return true
+}
+
+// runServeAgentWarmup materializes the profile installed by installServeAgentWarm
+// through the gateway's warmer and adjudicates readiness from the returned receipt.
+// It is the execution half: the serve host calls it in the background alongside the
+// #3051 RunWarmup. A gate that was never configured, or a planner that is not a
+// warmer, is an explicit no-op (the gateway reports it unconfigured).
+func runServeAgentWarmup(ctx context.Context, srv *gateway.Server) {
+	if srv == nil {
+		return
+	}
+	_, _ = srv.RunAgentWarmup(ctx)
+}
+
+// releaseServeAgentWarmOnce is the release-once primitive: it fires the planner's
+// ReleaseStartupWarm at most once behind the shared sync.Once, so normal shutdown and
+// startup cancellation cannot double-release. A planner without the seam is never
+// touched. Split from the serveRuntime method so the witness can drive it with a fake
+// planner (a cmd/fak test cannot build a gateway.Server with an injected planner).
+func releaseServeAgentWarmOnce(once *sync.Once, planner agent.Planner) {
+	if once == nil {
+		return
+	}
+	once.Do(func() {
+		if releaser, ok := planner.(serveAgentWarmReleaser); ok {
+			releaser.ReleaseStartupWarm()
+		}
+	})
+}
+
+// releaseServeAgentWarm releases the planner's startup-warm ownership exactly once.
+// It is the shutdown half of CW-08: normal shutdown and startup cancellation both
+// converge here, so a released warm can never be double-released. A nil runtime or a
+// gateway with no planner is a no-op.
+func (rt *serveRuntime) releaseServeAgentWarm() {
+	if rt == nil || rt.srv == nil {
+		return
+	}
+	releaseServeAgentWarmOnce(&rt.agentWarmReleaseOnce, rt.srv.Planner())
 }
