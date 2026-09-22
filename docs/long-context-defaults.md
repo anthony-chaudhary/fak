@@ -62,6 +62,36 @@ optimal forever: `--compact-history-budget` sheds old compactible turns after ro
 tokens, and `--ctx-view-budget` defaults the planned resident view to 8K. Those values
 should move only with a stronger witness or a clearly labeled re-budgeting decision.
 
+### Native (in-kernel) resident budget
+
+The two values above are Anthropic-passthrough and ctxplan controls. The **native
+in-kernel wire** has its own resident line, `--native-compact-history-budget`, derived per
+launch from the resolved native window rather than fixed at 48K/96K:
+
+```text
+shed_line = (resolved_native_context_tokens - 32000 output reserve) * 60%
+```
+
+This exists because the native path had no resident line at all until it was wired: the
+planner was constructed without a compaction budget, so a transcript that outgrew the
+window was hard-refused with HTTP 400 `context_length_exceeded` instead of being
+compacted. The share is 60% of the post-reserve window and the reserve is 32K, matching
+the ctxplan envelopes' `OutputReserve`. A 150,000-token resolved window therefore yields
+a 70,800-token shed-line — materially above the provider-shaped 48K/96K defaults, because
+a 1M-declared native model must not be flattened to a small-model budget.
+
+Two boundaries are deliberate and load-bearing, and both keep the *conservative*
+direction the doctrine asks for:
+
+- A window at or below the 32K reserve derives `0` — compaction **off**, the historical
+default. There is no slack to spend, and a positive budget there would shed the live task.
+- An unresolved window derives `0` as well. With no honest bound, fak does not invent one.
+
+The derivation is pure and monotone (`agent.DeriveCompactHistoryBudget`), witnessed by
+`TestDeriveCompactHistoryBudget`. Provenance: `MODELED` — the 60%/32K shape is a
+doctrine-derived prior held below the raw cap, not a measured effective window. It
+upgrades to `WITNESSED` only when a same-task bench measures the exact native route.
+
 Two things about that 48K a reader will otherwise get wrong (#5430):
 
 - **48K is the flag's default, not what a `fak manage` launch runs at.** Every `fak manage`

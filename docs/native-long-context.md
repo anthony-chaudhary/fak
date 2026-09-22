@@ -58,6 +58,54 @@ To name a local model source and its native ceiling directly:
 fak up --gguf MODEL.gguf --native-context-tokens 131072
 ```
 
+## Resident history budget (the compaction shed-line)
+
+A resolved window is the *cap*, not the resident target. Sizing a request to the
+whole window leaves no room for the answer, and a conversation that outgrows the
+window would otherwise hard-fail. The native path therefore derives a compaction
+shed-line from the resolved window and compacts old turns down to it **before**
+tokenization, so an over-window transcript is shrunk and served instead of being
+refused.
+
+```text
+shed_line = (resolved_native_context_tokens - 32000 output reserve) * 60%
+```
+
+The derivation lives in `agent.DeriveCompactHistoryBudget`, the single authority
+for both `fak serve` and turnkey `fak up`. It is pure and monotone: a larger
+window never yields a smaller shed-line. Two boundaries are deliberate:
+
+- A window at or below the 32k output reserve yields `0`, which means **no
+  compaction** (the historical default). There is no resident slack to spend, and
+a positive budget there would shed the live task itself.
+- An unresolved window (`0`) also yields `0`. With no honest bound to derive
+  from, the runtime does not invent one.
+
+Override it explicitly when the default shape is wrong for a workload:
+
+```bash
+fak serve --gguf MODEL.gguf --native-context-tokens 131072 --native-compact-history-budget 40000
+```
+
+Worked examples of the default:
+
+| Resolved window | Shed-line |
+|---:|---:|
+| 32,000 | 0 (at the reserve; no compaction) |
+| 40,000 | 32,000 (floored at the reserve) |
+| 150,000 | 70,800 |
+| 1,048,576 | 609,945 |
+
+`--native-compact-history-budget` is **not** the same control as
+`--compact-history-budget`. The latter applies to the Anthropic passthrough only
+and governs the outbound request body against an upstream provider; this one
+applies to the native in-kernel wire. `--native-context-tokens` sets the window;
+this sets how much of it may stay resident as history.
+
+Compaction preserves the leading system prefix byte-for-byte (the RadixAttention
+anchor) and emits a restore handle for what it sheds, so a dropped middle turn
+is recoverable rather than lost.
+
 ## Request boundary
 
 A request that reaches the native planner is within its model window when:

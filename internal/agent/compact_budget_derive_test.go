@@ -60,3 +60,26 @@ func TestDeriveCompactHistoryBudgetIsMonotone(t *testing.T) {
 		prev = got
 	}
 }
+
+// TestDeriveCompactHistoryBudgetMatchesDocTable keeps the worked-examples table in
+// docs/native-long-context.md from drifting away from the implementation. The doc
+// states the derivation in prose an operator will trust; this pins the same numbers
+// in code so an edit to one without the other fails here.
+func TestDeriveCompactHistoryBudgetMatchesDocTable(t *testing.T) {
+	// Mirrors the "Worked examples of the default" table in
+	// docs/native-long-context.md. Update BOTH or this fails.
+	docTable := []struct {
+		window int
+		want   int
+	}{
+		{window: 32000, want: 0},        // at the reserve; no compaction
+		{window: 40000, want: 32000},    // floored at the reserve
+		{window: 150000, want: 70800},   // the agent 150k target
+		{window: 1048576, want: 609945}, // the published V4.1 window
+	}
+	for _, row := range docTable {
+		if got := DeriveCompactHistoryBudget(row.window, 0); got != row.want {
+			t.Errorf("window=%d: implementation gives %d, docs/native-long-context.md table claims %d", row.window, got, row.want)
+		}
+	}
+}
