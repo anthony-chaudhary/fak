@@ -334,7 +334,16 @@ func (p *InKernelPlanner) WarmPrefix(ctx context.Context, spec WarmPrefixSpec) (
 		receipt.Reason = "recompute_only"
 		return finishWarm(receipt, started), ErrWarmPrefixUnsupported
 	}
-	if p.warmIsV41() {
+	// CW-23 (#13331): the V4.1 route is admitted when, and only when, its COMPLETE-snapshot
+	// continuation capability is present for the route in hand. The predecessor leaves
+	// (#13334/#13335/#13338/#13342) landed HostCompletePrefixSnapshotSupported (a device-less
+	// PrefixSnapshot carries the full v41ForwardSnapshot continuation state) and the
+	// backend-aware device admission; this placeholder refused BOTH while that chain was
+	// pending and returned the closed "v41_continuation_pending" reason. Now the reason is
+	// reserved for a V4.1 route that genuinely lacks the capability (an unqualified device
+	// route), so a host V4.1 warm proceeds to the real restore readback below and fails
+	// closed on its own terms (boundary/prime/readback) rather than at a blanket gate.
+	if p.warmIsV41() && !p.warmV41CompleteSnapshotSupported() {
 		receipt.Reason = "v41_continuation_pending"
 		return finishWarm(receipt, started), ErrWarmPrefixUnsupported
 	}
@@ -798,12 +807,34 @@ func (p *InKernelPlanner) SetAuxWarmConfig(cfg AuxWarmConfig) {
 	p.mu.Unlock()
 }
 
-// warmIsV41 reports whether this planner's runtime is the DeepSeek V4.1 family, whose
-// complete-snapshot continuation admission is owned by a later, unlanded leaf
-// (fak#13342/#13338/#13334). The check reads the model config's own V4.1 identity, never
-// a caller flag, so it cannot be bypassed by a mis-set option.
+// warmIsV41 reports whether this planner's runtime is the DeepSeek V4.1 family. The check
+// reads the model config's own V4.1 identity, never a caller flag, so it cannot be bypassed
+// by a mis-set option. It is the FAMILY discriminator only; whether a V4.1 route may warm
+// is decided by warmV41CompleteSnapshotSupported (CW-23, #13331).
 func (p *InKernelPlanner) warmIsV41() bool {
 	return p != nil && p.m != nil && p.m.Cfg.IsDeepSeekV41()
+}
+
+// warmV41CompleteSnapshotSupported reports whether the V4.1 route in hand owns a COMPLETE
+// continuation snapshot, which is the precondition for a restorable warm (CW-23, #13331).
+// It is deliberately the SAME route split the planner eligibility seam uses
+// (inKernelPlannerPrefixReuseSupported): the host route (backend == nil) is admitted by the
+// host complete-snapshot capability, and a device route only by the backend-aware
+// qualification — so an unqualified backend fails closed rather than warming a state the
+// device cannot restore. A planner that reaches here is already V4.1 (the caller gates on
+// warmIsV41), so a non-V4.1 model answers true via the same host capability it always had.
+func (p *InKernelPlanner) warmV41CompleteSnapshotSupported() bool {
+	if p == nil || p.m == nil {
+		return false
+	}
+	cfg := p.m.Cfg
+	if !cfg.IsDeepSeekV41() {
+		return true
+	}
+	if p.backend == nil {
+		return cfg.HostCompletePrefixSnapshotSupported()
+	}
+	return cfg.InKernelBackendPrefixReuseSupportedFor(p.backend)
 }
 
 // warmStableTokens re-encodes the descriptor's stable source into the exact token

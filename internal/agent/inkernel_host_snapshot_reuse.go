@@ -28,8 +28,30 @@ package agent
 // This helper is the one predicate for "the host-session recurrent-hybrid path, where the
 // snapshot tier is the ONLY restorable boundary". It is deliberately narrow: an ordinary
 // (evictable) cache keeps the historical KV-clone split, byte-for-byte.
+//
+// CW-23 (#13331): the same predicate admits the V4.1 HOST route. V4.1's bare *KVCache is
+// deliberately incomplete (it omits the committed token history and per-layer temporal
+// state), so the legacy KV-clone split is not a restorable boundary there either — the
+// complete PrefixSnapshot is, and PrefixSnapshot captures the full v41ForwardSnapshot
+// continuation state (fak#13342, HostCompletePrefixSnapshotSupported, fak#13338). The
+// capability is consulted with the concrete route in hand, so an unqualified or
+// non-host route never gets the snapshot tier by accident.
 
 func inKernelHostSnapshotReuse(p *InKernelPlanner) bool {
-	return p != nil && p.backend == nil && p.tree != nil &&
-		p.m != nil && p.m.Cfg.IsQwen35Hybrid()
+	if p == nil || p.backend != nil || p.tree == nil || p.m == nil {
+		return false
+	}
+	if p.m.Cfg.IsQwen35Hybrid() {
+		return true
+	}
+	return p.hostV41CompleteSnapshot()
+}
+
+// hostV41CompleteSnapshot reports whether this planner is the V4.1 HOST route whose complete
+// continuation snapshot is the only restorable boundary (CW-23, #13331). It is the narrow
+// predicate the full-prompt admission consults, so a V4.1 host admits the complete
+// PrefixSnapshot while every other host route keeps its historical bare-cache admission.
+func (p *InKernelPlanner) hostV41CompleteSnapshot() bool {
+	return p != nil && p.backend == nil && p.m != nil &&
+		p.m.Cfg.IsDeepSeekV41() && p.m.Cfg.HostCompletePrefixSnapshotSupported()
 }

@@ -496,7 +496,25 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 				}
 			}
 		} else {
-			if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped && p.scopedTree != nil {
+			// CW-23 (#13331): a V4.1 host route's bare *KVCache is deliberately
+			// incomplete (it omits the committed token history and per-layer temporal
+			// state), so the KV-clone admission below cannot carry a restorable prefix.
+			// Only the COMPLETE PrefixSnapshot is a valid boundary there; capture and
+			// admit it through the snapshot tier exactly as the device path does, so a
+			// later demand turn (and the warm readback) restores the full continuation
+			// state. Every non-V4.1 host route keeps its historical admission unchanged.
+			if p.hostV41CompleteSnapshot() {
+				snap, snapErr := s.PrefixSnapshot()
+				if snapErr != nil {
+					err = snapErr
+					return
+				}
+				if admitErr := p.admitPrefixSnapshot(ctx, ids, snap, logits); admitErr != nil {
+					snap.Close()
+					err = admitErr
+					return
+				}
+			} else if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped && p.scopedTree != nil {
 				if admitErr := p.scopedTree.AdmitPrivate(owner, ids, s.Cache, logits); admitErr != nil {
 					err = admitErr
 					return
