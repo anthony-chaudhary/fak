@@ -16,7 +16,19 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/projectassets"
 )
 
+// isolatePiHome points PI_CODING_AGENT_DIR at a throwaway directory for the duration of
+// the test. runPi defaults `--settings-path`/`--config-path` to the REAL user Pi config
+// (~/.pi/agent/{settings,models}.json), so a test that omits those flags rewrites the
+// operator's live harness default — the exact drift class that let a bare `pi` launch
+// stop resolving to the live fak router. Every test that calls runPi must call this
+// first. TestMain in guard_login_e2e_test.go also sets it package-wide as a backstop.
+func isolatePiHome(t *testing.T) {
+	t.Helper()
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
+}
+
 func TestBuildPiLaunchArgv(t *testing.T) {
+	isolatePiHome(t)
 	opts := piLaunchOptions{
 		command:     "pi",
 		provider:    "fak",
@@ -49,6 +61,7 @@ func TestBuildPiLaunchArgv(t *testing.T) {
 }
 
 func TestRunPiDryRun(t *testing.T) {
+	isolatePiHome(t)
 	var stdout, stderr bytes.Buffer
 	// Pin a dead addr so the dry-run never adopts a dev-box `fak serve` on the
 	// default port (a live gateway on ::1/127.0.0.1 would resolve the base URL
@@ -72,7 +85,61 @@ func TestRunPiDryRun(t *testing.T) {
 	}
 }
 
+// TestRunPiWritesOnlyUnderIsolatedHome is the hermeticity regression: a launcher turn that
+// omits --settings-path/--config-path must confine its writes to PI_CODING_AGENT_DIR and
+// never touch the real ~/.pi/agent. This is the drift class that silently rewrote the
+// operator's harness defaultModel (and pointed models.json at a dead test port) on every
+// `go test ./cmd/fak/` run, so a bare `pi` launch regressed away from the live fak router.
+func TestRunPiWritesOnlyUnderIsolatedHome(t *testing.T) {
+	isolated := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", isolated)
+
+	realHome, err := os.UserHomeDir()
+	if err != nil || realHome == "" {
+		t.Skip("no resolvable user home to guard")
+	}
+	realSettings := filepath.Join(realHome, ".pi", "agent", "settings.json")
+	realModels := filepath.Join(realHome, ".pi", "agent", "models.json")
+	beforeSettings, settingsErr := os.ReadFile(realSettings)
+	beforeModels, modelsErr := os.ReadFile(realModels)
+
+	var stdout, stderr bytes.Buffer
+	code := runPi(&stdout, &stderr, []string{
+		"--dry-run",
+		"--addr", "127.0.0.1:65531",
+		"--model", "custom-model",
+		"--check-backend=false",
+		"--quiet",
+	})
+	if code != 0 {
+		t.Fatalf("runPi returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	if _, err := os.Stat(filepath.Join(isolated, "settings.json")); err != nil {
+		t.Errorf("expected settings.json under PI_CODING_AGENT_DIR: %v", err)
+	}
+	if settingsErr == nil {
+		afterSettings, err := os.ReadFile(realSettings)
+		if err != nil {
+			t.Fatalf("real settings.json vanished: %v", err)
+		}
+		if string(beforeSettings) != string(afterSettings) {
+			t.Errorf("runPi rewrote the REAL ~/.pi/agent/settings.json despite PI_CODING_AGENT_DIR isolation")
+		}
+	}
+	if modelsErr == nil {
+		afterModels, err := os.ReadFile(realModels)
+		if err != nil {
+			t.Fatalf("real models.json vanished: %v", err)
+		}
+		if string(beforeModels) != string(afterModels) {
+			t.Errorf("runPi rewrote the REAL ~/.pi/agent/models.json despite PI_CODING_AGENT_DIR isolation")
+		}
+	}
+}
+
 func TestRunPiConfigSubcommand(t *testing.T) {
+	isolatePiHome(t)
 	var stdout, stderr bytes.Buffer
 	code := runPi(&stdout, &stderr, []string{"config", "--addr", "127.0.0.1:8080", "--model", "qwen38:27b-q4"})
 	if code != 0 {
@@ -92,6 +159,7 @@ func TestRunPiConfigSubcommand(t *testing.T) {
 }
 
 func TestRunPiConfigSubcommandWrite(t *testing.T) {
+	isolatePiHome(t)
 	tmp := t.TempDir()
 	targetPath := filepath.Join(tmp, "models.json")
 
@@ -198,6 +266,7 @@ func TestProbePiBackendLoopbackFallback(t *testing.T) {
 // local planner engine, not the routed model set; adopting it makes the routing ladder
 // unreachable and silently changes which model answers.
 func TestRunPiAutoDetectPreservesPinnedDefault(t *testing.T) {
+	isolatePiHome(t)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/healthz":
@@ -253,6 +322,7 @@ func TestRunPiAutoDetectPreservesPinnedDefault(t *testing.T) {
 }
 
 func TestRunPiMockExecution(t *testing.T) {
+	isolatePiHome(t)
 	origRun := piLaunchRun
 	defer func() { piLaunchRun = origRun }()
 
@@ -330,6 +400,7 @@ func TestProbePiBackendWithWindow(t *testing.T) {
 // NOT advertise (`custom-model`) must be corrected to an id the catalog actually lists,
 // instead of being honored verbatim and re-written on every launch.
 func TestRunPiReplacesNonAdvertisedDefault(t *testing.T) {
+	isolatePiHome(t)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/healthz":
@@ -395,6 +466,7 @@ func TestRunPiReplacesNonAdvertisedDefault(t *testing.T) {
 // TestRunPiPreservesAdvertisedDefault: the counterpart guard — a default the backend DOES
 // advertise is a real operator pin and must survive untouched.
 func TestRunPiPreservesAdvertisedDefault(t *testing.T) {
+	isolatePiHome(t)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/healthz":
@@ -449,6 +521,7 @@ func TestRunPiPreservesAdvertisedDefault(t *testing.T) {
 // must write a SAFE resident context target (at most half the served window) and a safe Pi
 // compaction block, never the raw hard cap.
 func TestRunPiConfigWriteSafeContext(t *testing.T) {
+	isolatePiHome(t)
 	tmp := t.TempDir()
 	modelsPath := filepath.Join(tmp, "models.json")
 	settingsPath := filepath.Join(tmp, "settings.json")
