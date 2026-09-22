@@ -16,7 +16,9 @@ const Schema = "fak-monitored-repositories/1"
 const (
 	InventorySchema         = "fak-study-inventory-report/1"
 	InventoryModeStandard   = "standard"
+	InventoryModeScoped     = "scoped"
 	InventoryModeExhaustive = "exhaustive"
+	InventoryModeRefresh    = "refresh"
 )
 
 var RequiredInventorySourceClasses = []string{
@@ -28,6 +30,7 @@ var RequiredInventorySourceClasses = []string{
 	"open_closed_issues_prs_discussions",
 	"roadmap_todos",
 	"license_provenance",
+	"hardware_reproduction",
 	"fak_selfquery_witness",
 	"candidate_matrix",
 	"completeness_critic",
@@ -153,7 +156,7 @@ func (r Registry) Validate() error {
 		}
 		if repo.Inventory != nil {
 			mode := strings.TrimSpace(repo.Inventory.Mode)
-			if mode != "" && mode != InventoryModeStandard && mode != InventoryModeExhaustive {
+			if mode != "" && mode != InventoryModeStandard && mode != InventoryModeScoped && mode != InventoryModeExhaustive && mode != InventoryModeRefresh {
 				return fmt.Errorf("%s: unsupported inventory mode %q", prefix, repo.Inventory.Mode)
 			}
 			for j, class := range repo.Inventory.SourceClasses {
@@ -242,7 +245,7 @@ func buildInventoryReport(registry Registry, repoRoot string) InventoryReport {
 }
 
 func validateInventoryMapFile(row *InventoryRow, repo Repository, repoRoot string) *InventoryMap {
-	if row.Mode != InventoryModeExhaustive || row.MapPath == "" {
+	if !isFullInventoryMode(row.Mode) || row.MapPath == "" {
 		return nil
 	}
 	path := row.MapPath
@@ -339,7 +342,7 @@ func inventoryMapDispositionAllowed(class, status string) bool {
 	switch class {
 	case "open_closed_issues_prs_discussions":
 		return status == InventoryClassPartial || status == InventoryClassExternalRequired
-	case "fak_selfquery_witness", "candidate_matrix", "issue_tracking":
+	case "hardware_reproduction", "fak_selfquery_witness", "candidate_matrix", "issue_tracking":
 		return status == InventoryClassExternalRequired
 	case "completeness_critic":
 		return status == InventoryClassCovered
@@ -378,7 +381,7 @@ func inventoryBaseRow(repo Repository) InventoryRow {
 }
 
 func finalizeInventoryRow(row *InventoryRow, repo Repository, inventoryMap *InventoryMap) {
-	if row.Mode != InventoryModeExhaustive {
+	if !isFullInventoryMode(row.Mode) {
 		return
 	}
 	if row.MapPath == "" {
@@ -416,6 +419,9 @@ func inventorySatisfiedSourceClasses(row *InventoryRow, inventoryMap *InventoryM
 	if inventoryMap != nil {
 		for _, class := range inventoryMap.SourceClasses {
 			name := strings.TrimSpace(class.Class)
+			if name == "hardware_reproduction" {
+				continue
+			}
 			switch strings.TrimSpace(class.Status) {
 			case InventoryClassCovered, InventoryClassCheckedAbsent:
 				satisfied[name] = true
@@ -428,6 +434,12 @@ func inventorySatisfiedSourceClasses(row *InventoryRow, inventoryMap *InventoryM
 		}
 	}
 	for _, class := range row.SourceClasses {
+		// A repository tree can describe benchmark machinery, but it cannot
+		// witness that the studied claim was reproduced on physical hardware.
+		// Keep this class bound to an explicit study disposition or receipt.
+		if class == "hardware_reproduction" {
+			continue
+		}
 		if inventoryMap == nil || inventoryMapSatisfiesSourceClass(inventoryMap, class) || inventoryEvidenceSatisfiesSourceClass(row.SourceEvidence, class) {
 			satisfied[class] = true
 		}
@@ -461,6 +473,9 @@ func validateInventoryDeclaredSourceClasses(row *InventoryRow, inventoryMap *Inv
 }
 
 func inventoryMapSatisfiesSourceClass(inventoryMap *InventoryMap, class string) bool {
+	if class == "hardware_reproduction" {
+		return false
+	}
 	status, ok := inventoryMapSourceClassStatus(inventoryMap, class)
 	if !ok {
 		return false
@@ -546,6 +561,12 @@ func missingInventoryEvidenceFacets(class string, evidence []string) []string {
 		}
 	}
 	return nil
+}
+
+func isFullInventoryMode(mode string) bool {
+	// A refresh re-checks an already exhaustively studied repository, so it
+	// carries the same full inventory contract as an exhaustive first study.
+	return mode == InventoryModeExhaustive || mode == InventoryModeRefresh
 }
 
 func effectiveInventoryMode(repo Repository) string {

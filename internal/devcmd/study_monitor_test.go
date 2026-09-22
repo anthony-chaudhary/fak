@@ -109,6 +109,7 @@ func TestStudyMonitorInventoryCheckAcceptsMachineMap(t *testing.T) {
 			{Class: "open_closed_issues_prs_discussions", Status: studymonitor.InventoryClassExternalRequired},
 			{Class: "roadmap_todos", Status: studymonitor.InventoryClassCheckedAbsent},
 			{Class: "license_provenance", Status: studymonitor.InventoryClassCovered, Evidence: []string{"LICENSE"}},
+			{Class: "hardware_reproduction", Status: studymonitor.InventoryClassExternalRequired},
 			{Class: "fak_selfquery_witness", Status: studymonitor.InventoryClassExternalRequired},
 			{Class: "candidate_matrix", Status: studymonitor.InventoryClassExternalRequired},
 			{Class: "completeness_critic", Status: studymonitor.InventoryClassCovered},
@@ -139,6 +140,7 @@ func TestStudyMonitorInventoryCheckAcceptsMachineMap(t *testing.T) {
 				MapPath:         mapPath,
 				IndexedRevision: "abcdef1234567890",
 				SourceEvidence: []studymonitor.InventorySourceEvidence{
+					{Class: "hardware_reproduction", Evidence: []string{"docs/research/HARDWARE-EXPERIMENTS.md#owner-repo-not-applicable"}, Note: "not applicable: this study makes no hardware performance claim"},
 					{Class: "open_closed_issues_prs_discussions", Evidence: []string{
 						"gh issue list --state all --repo owner/repo",
 						"gh pr list --state all --repo owner/repo",

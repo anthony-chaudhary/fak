@@ -478,6 +478,7 @@ func forgeInventoryRegistryForTest(mapPath, receiptPath string) Registry {
 			IndexedRevision:  "abc",
 			SourceClasses:    append([]string(nil), RequiredInventorySourceClasses...),
 			SourceEvidence: []InventorySourceEvidence{
+				{Class: "hardware_reproduction", Evidence: []string{"docs/research/HARDWARE-EXPERIMENTS.md#owner-repo-not-applicable"}, Note: "not applicable: forge census study makes no hardware performance claim"},
 				{Class: "fak_selfquery_witness", Evidence: []string{"fak capabilities owner/repo"}},
 				{Class: "candidate_matrix", Evidence: []string{"docs/notes/STUDY.md#candidate-matrix"}},
 				{Class: "issue_tracking", Evidence: []string{"#123"}},

@@ -111,7 +111,7 @@ type StudyForgeNonAtomicDeltaPolicy struct {
 }
 
 func validateStudyForgeReceiptFile(row *InventoryRow, repo Repository, repoRoot string) bool {
-	if row.Mode != InventoryModeExhaustive || row.ForgeReceiptPath == "" {
+	if !isFullInventoryMode(row.Mode) || row.ForgeReceiptPath == "" {
 		return false
 	}
 	path := row.ForgeReceiptPath

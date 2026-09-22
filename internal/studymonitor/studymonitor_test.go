@@ -28,6 +28,61 @@ func TestRegistryValidationRejectsUnsupportedInventoryMode(t *testing.T) {
 	}
 }
 
+// TestRegistryValidationAcceptsScopedAndRefreshInventoryModes pins the two
+// inventory modes the monitored-repository registry actually carries. Before
+// this the public copy accepted only standard|exhaustive, so a registry row
+// using "scoped" (a partial first pass) or "refresh" (a re-check of an
+// exhaustive study) failed Validate and study-monitor exited before reporting.
+func TestRegistryValidationAcceptsScopedAndRefreshInventoryModes(t *testing.T) {
+	for _, mode := range []string{InventoryModeScoped, InventoryModeRefresh} {
+		r := Registry{Schema: Schema, Methodology: "ranked", Repositories: []Repository{
+			{Repository: "owner/repo", URL: "https://github.com/owner/repo", Status: "studied", Priority: 1, Why: "rescan", LastChecked: "2026-08-14", CheckedRevision: "abc", Inventory: &InventoryContract{Mode: mode}},
+		}}
+		if err := r.Validate(); err != nil {
+			t.Fatalf("Validate() error = %v, want nil for %q mode", err, mode)
+		}
+		if got := effectiveInventoryMode(r.Repositories[0]); got != mode {
+			t.Fatalf("effectiveInventoryMode() = %q, want %q", got, mode)
+		}
+	}
+	if !isFullInventoryMode(InventoryModeRefresh) {
+		t.Fatalf("isFullInventoryMode(%q) = false, want true", InventoryModeRefresh)
+	}
+	if isFullInventoryMode(InventoryModeScoped) {
+		t.Fatalf("isFullInventoryMode(%q) = true, want false", InventoryModeScoped)
+	}
+	if isFullInventoryMode(InventoryModeStandard) {
+		t.Fatalf("isFullInventoryMode(%q) = true, want false", InventoryModeStandard)
+	}
+	if !isFullInventoryMode(InventoryModeExhaustive) {
+		t.Fatalf("isFullInventoryMode(%q) = false, want true", InventoryModeExhaustive)
+	}
+}
+
+// TestValidateStudyForgeReceiptFileTreatsRefreshAsFullMode pins that a refresh
+// row carries the same full inventory contract as an exhaustive first study,
+// so its forge receipt is validated (and fails loudly on a missing file) while
+// a scoped row skips the full-contract receipt check entirely.
+func TestValidateStudyForgeReceiptFileTreatsRefreshAsFullMode(t *testing.T) {
+	repoRoot := t.TempDir()
+
+	refresh := &InventoryRow{Mode: InventoryModeRefresh, ForgeReceiptPath: "does-not-exist.json"}
+	if validateStudyForgeReceiptFile(refresh, Repository{}, repoRoot) {
+		t.Fatal("validateStudyForgeReceiptFile() = true for refresh row, want false")
+	}
+	if len(refresh.Reasons) == 0 {
+		t.Fatal("refresh row reasons are empty, want a readable-JSON failure reason")
+	}
+
+	scoped := &InventoryRow{Mode: InventoryModeScoped, ForgeReceiptPath: "does-not-exist.json"}
+	if validateStudyForgeReceiptFile(scoped, Repository{}, repoRoot) {
+		t.Fatal("validateStudyForgeReceiptFile() = true for scoped row, want false")
+	}
+	if len(scoped.Reasons) != 0 {
+		t.Fatalf("scoped row reasons = %v, want none added", scoped.Reasons)
+	}
+}
+
 func TestBuildReportSortsAndRenderMarksDue(t *testing.T) {
 	r := Registry{Schema: Schema, Methodology: "ranked", Repositories: []Repository{
 		{Repository: "owner/later", URL: "https://example/later", Status: "watch", Priority: 2, Why: "later", LastChecked: "2026-08-13", CheckedRevision: "123456789012345", StarsAtCheck: 2},
@@ -161,6 +216,7 @@ func TestInventoryReportWithMapFilesValidatesMachineMap(t *testing.T) {
 				IndexedRevision: "abc",
 				SourceClasses:   append([]string(nil), RequiredInventorySourceClasses...),
 				SourceEvidence: []InventorySourceEvidence{
+					{Class: "hardware_reproduction", Evidence: []string{"docs/research/HARDWARE-EXPERIMENTS.md#owner-repo-blocked"}, Note: "blocked: required device was unavailable"},
 					{Class: "open_closed_issues_prs_discussions", Evidence: []string{
 						"gh issue list --state all --repo owner/repo",
 						"gh pr list --state all --repo owner/repo",
@@ -241,7 +297,12 @@ func TestInventoryReportWithMapFilesRejectsForgedMapEvidence(t *testing.T) {
 		{
 			name: "external class claimed absent",
 			mutate: func(report *InventoryMap) {
-				report.SourceClasses[8].Status = InventoryClassCheckedAbsent
+				for i := range report.SourceClasses {
+					if report.SourceClasses[i].Class == "fak_selfquery_witness" {
+						report.SourceClasses[i].Status = InventoryClassCheckedAbsent
+						return
+					}
+				}
 			},
 			want: "source class fak_selfquery_witness cannot use status checked_absent",
 		},
@@ -291,6 +352,80 @@ func TestInventoryReportWithMapFilesRejectsForgedMapEvidence(t *testing.T) {
 			got := BuildInventoryReportWithMapFiles(registry, ".")
 			if got.OK || !strings.Contains(strings.Join(got.Repositories[0].Reasons, "\n"), tt.want) {
 				t.Fatalf("report = %+v, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestMachineMapWithoutHardwareDispositionReportsMissingClass pins the rule
+// that hardware_reproduction is never satisfiable from repository files: a
+// machine map whose hardware_reproduction class is claiming to be covered or
+// checked-absent from tree contents is rejected, so the class is reported
+// missing until an explicit study disposition or receipt is supplied.
+func TestMachineMapWithoutHardwareDispositionReportsMissingClass(t *testing.T) {
+	tests := []struct {
+		name      string
+		withClass bool
+		status    string
+	}{
+		{name: "class absent from map"},
+		{name: "class claims covered from tree", withClass: true, status: InventoryClassCovered},
+		{name: "class claims checked absent from tree", withClass: true, status: InventoryClassCheckedAbsent},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			inventoryMap := validInventoryMapForTest()
+			if !tt.withClass {
+				filtered := inventoryMap.SourceClasses[:0]
+				for _, row := range inventoryMap.SourceClasses {
+					if row.Class != "hardware_reproduction" {
+						filtered = append(filtered, row)
+					}
+				}
+				inventoryMap.SourceClasses = filtered
+			} else {
+				for i := range inventoryMap.SourceClasses {
+					if inventoryMap.SourceClasses[i].Class == "hardware_reproduction" {
+						inventoryMap.SourceClasses[i].Status = tt.status
+						inventoryMap.SourceClasses[i].Evidence = []string{"docs/benchmarks/receipts/apparent-run.json"}
+					}
+				}
+			}
+			var mapBytes bytes.Buffer
+			if err := WriteInventoryMapJSON(&mapBytes, inventoryMap); err != nil {
+				t.Fatal(err)
+			}
+			mapPath := filepath.Join(dir, "owner-repo.json")
+			if err := os.WriteFile(mapPath, mapBytes.Bytes(), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			registry := Registry{Schema: Schema, Methodology: "ranked", Repositories: []Repository{{
+				Repository:      "owner/repo",
+				URL:             "https://example/repo",
+				Status:          "candidate",
+				Priority:        1,
+				Why:             "fresh",
+				LastChecked:     "2026-08-14",
+				CheckedRevision: "abc",
+				Inventory: &InventoryContract{
+					MapPath:            mapPath,
+					IndexedRevision:    "abc",
+					SourceClasses:      append([]string(nil), RequiredInventorySourceClasses...),
+					SubsystemCount:     1,
+					CompletenessCritic: "checked",
+				},
+			}}}
+			report := BuildInventoryReportWithMapFiles(registry, ".")
+			row := report.Repositories[0]
+			if report.OK || row.Ready {
+				t.Fatalf("report = %+v, want hardware_reproduction incomplete", report)
+			}
+			if !containsString(row.MissingSourceClasses, "hardware_reproduction") {
+				t.Fatalf("missing source classes = %v, want hardware_reproduction", row.MissingSourceClasses)
+			}
+			if tt.withClass && !strings.Contains(strings.Join(row.Reasons, "\n"), "source class hardware_reproduction cannot use status "+tt.status) {
+				t.Fatalf("reasons = %q, want forged tree-derived status rejected", strings.Join(row.Reasons, "\n"))
 			}
 		})
 	}
@@ -348,6 +483,7 @@ func validInventoryMapForTest() InventoryMap {
 			{Class: "open_closed_issues_prs_discussions", Status: InventoryClassExternalRequired},
 			{Class: "roadmap_todos", Status: InventoryClassCheckedAbsent},
 			{Class: "license_provenance", Status: InventoryClassCovered, Evidence: []string{"LICENSE"}},
+			{Class: "hardware_reproduction", Status: InventoryClassExternalRequired},
 			{Class: "fak_selfquery_witness", Status: InventoryClassExternalRequired},
 			{Class: "candidate_matrix", Status: InventoryClassExternalRequired},
 			{Class: "completeness_critic", Status: InventoryClassCovered},

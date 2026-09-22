@@ -366,6 +366,9 @@ func classifyInventoryFile(rel string) inventoryFileClass {
 }
 
 func inventorySourceClassDisposition(class string, evidence []string) (string, string) {
+	if class == "hardware_reproduction" {
+		return InventoryClassExternalRequired, "local tree contents cannot prove physical execution; add explicit source_evidence pointing to the per-study run/disposition report, following docs/research/HARDWARE-EXPERIMENTS.md"
+	}
 	if len(evidence) > 0 {
 		if class == "open_closed_issues_prs_discussions" {
 			return InventoryClassPartial, "local templates found; open/closed issue, PR, and discussion history still require GitHub or forge read-back"

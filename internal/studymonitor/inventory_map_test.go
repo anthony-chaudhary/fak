@@ -114,6 +114,32 @@ func TestBuildInventoryMapCompletenessNoteIncludesPartial(t *testing.T) {
 		t.Fatalf("completeness note = %q, want %q", report.CompletenessNote, want)
 	}
 }
+func TestBuildInventoryMapNeverInfersHardwareReproductionFromRepositoryFiles(t *testing.T) {
+	root := t.TempDir()
+	for _, rel := range []string{
+		"README.md",
+		"benchmarks/hardware_benchmark_test.go",
+		"docs/benchmarks/receipts/strix-halo.json",
+		"testdata/device-run-receipt.json",
+	} {
+		writeInventoryFixture(t, root, rel, "hardware benchmark receipt reproduction\n")
+	}
+
+	report, err := BuildInventoryMap(root, InventoryMapOptions{
+		Repository:      "owner/repo",
+		IndexedRevision: "abc123",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertClassStatus(t, report, "hardware_reproduction", InventoryClassExternalRequired)
+	for _, row := range report.SourceClasses {
+		if row.Class == "hardware_reproduction" && len(row.Evidence) != 0 {
+			t.Fatalf("hardware reproduction evidence = %v, want no tree-derived qualification evidence", row.Evidence)
+		}
+	}
+}
+
 func writeInventoryFixture(t *testing.T, root, rel, text string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))
