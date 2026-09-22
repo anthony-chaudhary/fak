@@ -184,6 +184,99 @@ type ArbitrationOutcome struct {
 
 	// Interpretation is a human-readable one-line verdict summary (GO/STOP advice).
 	Interpretation string `json:"interpretation"`
+
+	// LeaseSource names which live-lease view produced this verdict (ArbitrateSet only).
+	LeaseSource LeaseSource `json:"lease_source,omitempty"`
+
+	// LeaseGeneration is the generation counter of the deciding live-lease set.
+	LeaseGeneration int `json:"lease_generation,omitempty"`
+
+	// LeaseObservedUnix is the observation time of the deciding live-lease set, in Unix seconds.
+	LeaseObservedUnix int64 `json:"lease_observed_unix,omitempty"`
+}
+
+// LeaseSource identifies where a LiveLeaseSet's rows were read from, so a verdict
+// can be audited against the view that produced it.
+type LeaseSource string
+
+const (
+	// LeaseSourceSnapshot names a caller-supplied point-in-time snapshot.
+	LeaseSourceSnapshot LeaseSource = "snapshot"
+
+	// LeaseSourceLiveJournal names rows re-read from the live lane journal.
+	LeaseSourceLiveJournal LeaseSource = "live-journal"
+
+	// LeaseSourceCaller names rows handed in explicitly by the caller.
+	LeaseSourceCaller LeaseSource = "caller"
+
+	// LeaseSourceInMemory names the AdapterClient's own in-process lease table.
+	LeaseSourceInMemory LeaseSource = "in-memory"
+
+	// LeaseSourceUnreadable names a view that could not be read; fail closed.
+	LeaseSourceUnreadable LeaseSource = "unreadable"
+)
+
+// LiveLeaseSet is an explicit, self-describing view of the live leases an
+// arbitration decision is adjudicated against. It carries its own provenance
+// (Source, Generation, ObservedUnix) so a stale snapshot cannot silently
+// disagree with the live journal: the caller can observe staleness and re-derive.
+type LiveLeaseSet struct {
+	// Source names where these rows came from.
+	Source LeaseSource
+
+	// Generation increments whenever the underlying lease view changes.
+	Generation int
+
+	// ObservedUnix is when the rows were observed, in Unix seconds (0 == unknown).
+	ObservedUnix int64
+
+	// leases holds the observed holders; adjudication reads only this slice.
+	leases []LeaseRequest
+}
+
+// NewLiveLeaseSet builds a LiveLeaseSet from an explicit set of lease rows.
+func NewLiveLeaseSet(leases []LeaseRequest, observed time.Time, generation int, source LeaseSource) LiveLeaseSet {
+	rows := make([]LeaseRequest, len(leases))
+	copy(rows, leases)
+
+	var observedUnix int64
+	if !observed.IsZero() {
+		observedUnix = observed.Unix()
+	}
+	return LiveLeaseSet{
+		Source:       source,
+		Generation:   generation,
+		ObservedUnix: observedUnix,
+		leases:       rows,
+	}
+}
+
+// DeriveLiveLeaseSet re-derives a LiveLeaseSet from an observation. It is
+// observably identical to NewLiveLeaseSet for identical inputs; the distinct
+// name marks the caller's intent to RE-DERIVE the live set after a reap.
+func DeriveLiveLeaseSet(leases []LeaseRequest, observed time.Time, generation int, source LeaseSource) LiveLeaseSet {
+	return NewLiveLeaseSet(leases, observed, generation, source)
+}
+
+// Stale reports whether this view is too old to trust as fresh.
+// Guard: fail-closed — an unreadable source, an unknown observation time, or an
+// observation older than maxAge is stale. The boundary is half-open: an age
+// exactly equal to maxAge is still fresh (age > maxAge is stale).
+func (s LiveLeaseSet) Stale(now time.Time, maxAge time.Duration) bool {
+	if s.Source == LeaseSourceUnreadable {
+		return true
+	}
+	if s.ObservedUnix <= 0 {
+		return true
+	}
+	observed := time.Unix(s.ObservedUnix, 0)
+	return now.Sub(observed) > maxAge
+}
+
+// Describe returns a non-empty diagnostic naming the source token.
+func (s LiveLeaseSet) Describe() string {
+	return fmt.Sprintf("live-lease-set{source=%s generation=%d observed_unix=%d holders=%d}",
+		s.Source, s.Generation, s.ObservedUnix, len(s.leases))
 }
 
 // AdapterClient coordinates lease arbitration, witness verification, and refusal handling.
@@ -192,6 +285,7 @@ type AdapterClient struct {
 	activeLeases map[string]LeaseRequest
 	clock        func() time.Time
 	issuer       string
+	generation   int
 }
 
 // ClientOption configures an AdapterClient.
@@ -560,25 +654,70 @@ func (c *AdapterClient) Arbitrate(req LeaseRequest) (ArbitrationOutcome, error) 
 		return outcome, fmt.Errorf("%w: %v", ErrInvalidLease, err)
 	}
 
-	mode := normalizeLockMode(req.LockMode)
-	req.LockMode = mode
-	now := time.Now()
-	if c.clock != nil {
-		now = c.clock()
+	now := c.now()
+	issuer := c.effectiveIssuer()
+
+	c.mu.RLock()
+	active := make([]LeaseRequest, 0, len(c.activeLeases))
+	for _, l := range c.activeLeases {
+		active = append(active, l)
 	}
+	generation := c.generation
+	c.mu.RUnlock()
+
+	outcome, err := c.adjudicate(req, active, now, issuer)
+	outcome.LeaseSource = LeaseSourceInMemory
+	outcome.LeaseGeneration = generation
+	return outcome, err
+}
+
+// ArbitrateSet adjudicates req against an explicit LiveLeaseSet, never the
+// client's own in-memory table, and stamps the deciding set's provenance on both
+// outcomes. A zero now falls back to the client clock.
+// Guard: fail-closed — a stale or unreadable set still decides against its rows.
+func (c *AdapterClient) ArbitrateSet(req LeaseRequest, set LiveLeaseSet, now time.Time) (ArbitrationOutcome, error) {
+	if err := ValidateLease(req); err != nil {
+		outcome := HandleFallback(req, err)
+		return outcome, fmt.Errorf("%w: %v", ErrInvalidLease, err)
+	}
+
+	if now.IsZero() {
+		now = c.now()
+	}
+	issuer := c.effectiveIssuer()
+
+	outcome, err := c.adjudicate(req, set.leases, now, issuer)
+	outcome.LeaseSource = set.Source
+	outcome.LeaseGeneration = set.Generation
+	outcome.LeaseObservedUnix = set.ObservedUnix
+	return outcome, err
+}
+
+// now resolves the client clock, defaulting to time.Now.
+func (c *AdapterClient) now() time.Time {
+	if c.clock != nil {
+		return c.clock()
+	}
+	return time.Now()
+}
+
+// effectiveIssuer resolves the witness issuer, defaulting to "fak/dosadapter".
+func (c *AdapterClient) effectiveIssuer() string {
 	issuer := c.issuer
 	if strings.TrimSpace(issuer) == "" {
 		issuer = "fak/dosadapter"
 	}
+	return issuer
+}
 
-	c.mu.RLock()
-	var active []LeaseRequest
-	for _, l := range c.activeLeases {
-		active = append(active, l)
-	}
-	c.mu.RUnlock()
+// adjudicate is the shared decision body for Arbitrate and ArbitrateSet: it
+// validates+normalizes the request, checks it against the supplied holders, and
+// mints the decision witness for both the refuse and acquire verdicts.
+func (c *AdapterClient) adjudicate(req LeaseRequest, holders []LeaseRequest, now time.Time, issuer string) (ArbitrationOutcome, error) {
+	mode := normalizeLockMode(req.LockMode)
+	req.LockMode = mode
 
-	if err := CheckDisjoint(req, active); err != nil {
+	if err := CheckDisjoint(req, holders); err != nil {
 		decisionStr := fmt.Sprintf("decision:refuse:%s:%s:%s", req.Lane, req.ID, ReasonCollisionRisk)
 		h := sha256.Sum256([]byte(decisionStr))
 		decisionSHA := hex.EncodeToString(h[:])
@@ -638,6 +777,7 @@ func (c *AdapterClient) RegisterLease(req LeaseRequest) error {
 		c.activeLeases = make(map[string]LeaseRequest)
 	}
 	c.activeLeases[req.ID] = req
+	c.generation++
 	return nil
 }
 
@@ -648,6 +788,7 @@ func (c *AdapterClient) ReleaseLease(leaseID string) bool {
 
 	if _, exists := c.activeLeases[leaseID]; exists {
 		delete(c.activeLeases, leaseID)
+		c.generation++
 		return true
 	}
 	return false
