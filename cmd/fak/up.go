@@ -786,6 +786,22 @@ func (g *turnkeyAgentWarmGate) configuration() (agent.WarmPrefixSpec, bool) {
 // is bounded to; a local turnkey serve owns exactly one tenant on the appliance.
 const turnkeyAgentWarmWorkspaceTenant = "turnkey-local"
 
+// turnkeyRequestContext binds the turnkey-owned prefix-cache identity to a request
+// context (CW-18, #13328). The turnkey path owns exactly one tenant on the
+// appliance, and CW-09 (#13332) materializes its startup warm under that tenant's
+// SCOPED cache tree. Without this binding a real turnkey request reaches the
+// planner UNSCOPED: its lookup consults the shared tree, never sees the warmed
+// prefix, and pays a full prefill the warm promised to avoid. Binding the same
+// tenant on both the warm ctx and the demand ctx makes the demand lookup consult
+// the scoped tree the warm restored into. A tenant-free context preserves the
+// legacy single-user namespace.
+func turnkeyRequestContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return agent.WithPrefixCacheIdentity(ctx, turnkeyAgentWarmWorkspaceTenant, "")
+}
+
 // resolveUpAgentWarmWorkspace resolves the workspace whose AGENTS.md seeds the
 // turnkey startup agent warm: an explicit --code-workspace wins, otherwise
 // FAK_UP_CODE_WORKSPACE, otherwise the current directory. It mirrors
@@ -937,7 +953,10 @@ func (ts *turnkeyServer) runTurnkeyAgentWarmup(ctx context.Context) {
 	if !configured {
 		return
 	}
-	receipt, err := warmer.WarmPrefix(ctx, spec)
+	// CW-18 (#13328): materialize the warm under the SAME turnkey tenant the demand
+	// path binds, so the prime admits into the scoped tree the readback consults
+	// (an unscoped prime would admit to the shared tree and read back as a miss).
+	receipt, err := warmer.WarmPrefix(turnkeyRequestContext(ctx), spec)
 	unsupported := errors.Is(err, agent.ErrWarmPrefixUnsupported)
 	ts.agentWarm.observe(receipt, unsupported, err)
 }
@@ -1726,7 +1745,7 @@ func (s *turnkeyServer) handleCompletions(w http.ResponseWriter, r *http.Request
 
 	if !s.mock && s.planner != nil {
 		sampleOpts := turnkeyChatSampleOpts(chatReq, s.plan.ContextBudgetTokens)
-		comp, err := s.planner.Complete(r.Context(), chatReq.Messages, nil, sampleOpts...)
+		comp, err := s.planner.Complete(turnkeyRequestContext(r.Context()), chatReq.Messages, nil, sampleOpts...)
 		if err != nil {
 			writeTurnkeyInferenceError(w, err)
 			return
@@ -1840,7 +1859,7 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 		if req.Fak != nil {
 			sampleOpts = append(sampleOpts, agent.WithNativeInferenceReceipt(req.Fak.NativeInferenceReceipt))
 		}
-		comp, err := s.planner.Complete(r.Context(), req.Messages, req.Tools, sampleOpts...)
+		comp, err := s.planner.Complete(turnkeyRequestContext(r.Context()), req.Messages, req.Tools, sampleOpts...)
 		if err != nil {
 			writeTurnkeyInferenceError(w, err)
 			return

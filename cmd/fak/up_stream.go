@@ -176,7 +176,7 @@ func (s *turnkeyCompletionStream) fail(message, code string) {
 func (s *turnkeyServer) handleCompletionsStream(w http.ResponseWriter, r *http.Request, req gateway.ChatRequest, modelID string, sp agent.StreamingPlanner) {
 	stream := newTurnkeyCompletionStream(w, modelID)
 	opts := append(turnkeyChatSampleOpts(req, s.plan.ContextBudgetTokens), agent.WithPerTokenStream(true))
-	comp, err := sp.CompleteStream(r.Context(), stream.contentDelta, req.Messages, req.Tools, opts...)
+	comp, err := sp.CompleteStream(turnkeyRequestContext(r.Context()), stream.contentDelta, req.Messages, req.Tools, opts...)
 	if err != nil {
 		if !stream.started {
 			writeTurnkeyInferenceError(w, err)
@@ -250,7 +250,7 @@ func (s *turnkeyServer) handleChatCompletionsStream(w http.ResponseWriter, r *ht
 	// planner to forward each decoded prose piece live. toolSpanGuard inside
 	// CompleteStream holds explicit tool-call spans back for post-decode adjudication.
 	opts := append(turnkeyChatSampleOpts(req, s.plan.ContextBudgetTokens), agent.WithPerTokenStream(true))
-	comp, err := sp.CompleteStream(r.Context(), stream.contentDelta, req.Messages, req.Tools, opts...)
+	comp, err := sp.CompleteStream(turnkeyRequestContext(r.Context()), stream.contentDelta, req.Messages, req.Tools, opts...)
 	if err != nil {
 		if !stream.started {
 			writeTurnkeyInferenceError(w, err)
