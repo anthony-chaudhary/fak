@@ -511,6 +511,39 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	} else if ttr, ok := s.warmup.ready(); ok {
 		health["time_to_ready_ms"] = ttr.Milliseconds()
 	}
+	// #13333: a CONFIGURED agent KV-cache warm profile holds readiness until a LIVE
+	// warm prefix has been observed. This is the second half of #3051: a completed
+	// synthetic warmup proves the backend is loaded, not that a warm PREFIX is
+	// resident and reusable. The block is reported independently — a cache that is
+	// "unconfigured" or "unsupported" does NOT flip ok:false (there is no cache
+	// contract to enforce), while "pending"/"degraded" does, with the closed reason.
+	// A serve that never installs a profile is byte-for-byte unaffected. See
+	// readiness_warmup.go.
+	if blocked, status, reason := s.agentWarm.admit(); blocked {
+		health["ok"] = false
+		aw := map[string]any{"status": status, "pending": true}
+		if reason != "" {
+			aw["reason"] = reason
+		}
+		if _, _, receipt, _ := s.agentWarm.snapshot(); receipt != nil {
+			aw["identity"] = receipt.Identity
+			aw["restored_tokens"] = receipt.RestoredTokens
+			aw["requested_tokens"] = receipt.RequestedTokens
+		}
+		health["agent_warm"] = aw
+	} else if status, reason, receipt, configured := s.agentWarm.snapshot(); configured {
+		aw := map[string]any{"status": status}
+		if reason != "" {
+			aw["reason"] = reason
+		}
+		if receipt != nil {
+			aw["identity"] = receipt.Identity
+			aw["restored_tokens"] = receipt.RestoredTokens
+			aw["requested_tokens"] = receipt.RequestedTokens
+			aw["source_tier"] = string(receipt.SourceTier)
+		}
+		health["agent_warm"] = aw
+	}
 	// #2336: a recent recovered panic on a served completion route disqualifies
 	// the unqualified ok:true — a green liveness probe over crashing completions
 	// keeps watchdogs routing work to a broken native serve. Window-bounded

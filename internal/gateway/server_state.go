@@ -470,6 +470,17 @@ type Server struct {
 	// See readiness_decode.go.
 	startupDecode startupDecodeProbe
 
+	// agentWarm is the #13333 agent-KV-cache-warm readiness gate behind /healthz. It
+	// is separate from warmup (the #3051 synthetic-warmup timing gate): a completed
+	// synthetic warmup proves the backend is loaded, NOT that a warm PREFIX is resident
+	// and reusable. When the host installs an agent warm profile
+	// (SetAgentWarmProfile) and runs the native warm (RunAgentWarmup), readiness is
+	// admitted only against a LIVE warm receipt — matching identity, a restored prefix
+	// count reaching the stable boundary, and a live residency claim. Zero value ==
+	// unconfigured, so a serve that never calls SetAgentWarmProfile is byte-for-byte
+	// unaffected. See readiness_warmup.go.
+	agentWarm agentWarmGate
+
 	// routeWatcher is the model-routing manifest hot-reload seam behind POST
 	// /v1/fak/route/reload (#4003) — the SIGHUP-style manual twin of the background
 	// Watcher.Run poll loop. It is an atomic pointer because the host installs the

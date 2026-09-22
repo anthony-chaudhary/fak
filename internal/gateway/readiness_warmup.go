@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -205,11 +206,315 @@ func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 // checkWarmupPending checks if the server warmup gate is still armed and incomplete.
 // If warmup is pending, it writes HTTP 503 (StatusServiceUnavailable) with a Retry-After: 1
 // header and a typed "warmup_pending" error, returning true.
+//
+// A CONFIGURED agent-warm profile (#13333) is held the same way: while its cache is
+// pending or degraded, served inference answers 503 with a typed "agent_warm_pending"
+// error so a first turn cannot land on a cold prefix the serve promised to warm. An
+// unconfigured or unsupported cache never blocks — there is no prefix contract to
+// enforce, so the serve behaves exactly as before.
 func (s *Server) checkWarmupPending(w http.ResponseWriter) bool {
-	if s == nil || !s.warmup.pending() {
+	if s == nil {
+		return false
+	}
+	if blocked, _, reason := s.agentWarm.admit(); blocked {
+		w.Header().Set("Retry-After", "1")
+		msg := "server agent cache is warming up; please retry shortly"
+		if reason != "" {
+			msg = "server agent cache is not warm (" + reason + "); please retry shortly"
+		}
+		writeErrCode(w, http.StatusServiceUnavailable, "agent_warm_pending", msg)
+		return true
+	}
+	if !s.warmup.pending() {
 		return false
 	}
 	w.Header().Set("Retry-After", "1")
 	writeErrCode(w, http.StatusServiceUnavailable, "warmup_pending", "server is warming up; please retry shortly")
 	return true
 }
+
+// ---------------------------------------------------------------------------
+// CW-07 (#13333): agent KV-cache warm readiness.
+//
+// The #3051 warmup gate above answers "is the backend LOADED?" — a synthetic
+// inference returned its first token, so weight load + CUDA-graph capture + JIT
+// compile are done. It does NOT answer "is a warm PREFIX resident and reusable?":
+// its complete bit is a timing observation, not cache-residency evidence. A
+// gateway can be fully warmed and still send the operator's first real turn into a
+// full prefix prefill.
+//
+// This gate is the missing second half. The host installs an agent warm profile
+// (the descriptor-bearing inputs) via SetAgentWarmProfile, then runs the native
+// warm (RunAgentWarmup) through the narrow AgentWarmWarmer interface. Readiness
+// for a configured profile is admitted ONLY against a LIVE receipt: the warm
+// reported Ready, restored a prefix reaching the descriptor's stable boundary, and
+// (when a finite-residency claim is configured) holds a Live claim. A backend
+// warmup completion cannot satisfy it, and a failed/expired/invalidated warm can
+// never leave a stale warm-ready bit.
+//
+// Default-silent, exactly like the warmup gate: a serve that never calls
+// SetAgentWarmProfile reports the cache as "unconfigured" and readiness is
+// unaffected — byte-for-byte the pre-#13333 behavior.
+// ---------------------------------------------------------------------------
+
+// Agent-warm status vocabulary — the closed set an agentWarmGate reports. The set
+// is deliberately small: a caller (or a /healthz reader) branches on the token and
+// never parses prose. "unconfigured" and "unsupported" are BOTH non-blocking (the
+// serve is byte-for-byte unaffected); only "pending" and "degraded" hold readiness.
+const (
+	// AgentWarmUnconfigured means no agent warm profile was installed; the gate is
+	// silent and readiness is unaffected.
+	AgentWarmUnconfigured = "unconfigured"
+	// AgentWarmPending means a profile is configured but no live warm receipt has been
+	// observed yet. Readiness is held.
+	AgentWarmPending = "pending"
+	// AgentWarmReady means a live warm receipt was observed: the prefix is restored to
+	// the stable boundary and (when configured) a residency claim is live.
+	AgentWarmReady = "ready"
+	// AgentWarmDegraded means the warm was attempted and failed to produce a usable
+	// live prefix (cold/unsupported/partial restore, a stale identity, a dead claim, or
+	// a planner error). Readiness is held and the closed reason names why; this is not
+	// a silent success.
+	AgentWarmDegraded = "degraded"
+	// AgentWarmUnsupported means the planner cannot warm a prefix at all (recompute-only
+	// model, no tree, an unqualified backend). This is reported independently and does
+	// NOT hold readiness — there is no cache to warm, so the serve is unaffected.
+	AgentWarmUnsupported = "unsupported"
+)
+
+// AgentWarmProfile is the descriptor-bearing configuration the host installs to
+// make the gateway gate readiness on a live warm prefix. It carries the stable
+// inputs a warm descriptor is derived from plus the expectation the observed
+// receipt must match.
+type AgentWarmProfile struct {
+	// Tenant is the authenticated cache scope owner; required (a warm with no owner
+	// cannot be bounded). Agent is the optional per-agent scope.
+	Tenant string
+	Agent  string
+	// Inputs are the STABLE warm inputs (instructions, resident blocks, ordered tools,
+	// KV layout, adapter). They are copied by SetAgentWarmProfile.
+	Inputs agent.WarmPrefixInputs
+	// RequireLiveClaim, when true, additionally requires the observed receipt to carry
+	// a live residency claim. A planner without claim configuration leaves the claim
+	// nil; setting this true against such a planner degrades the warm explicitly rather
+	// than reporting a readiness the next request cannot rely on.
+	RequireLiveClaim bool
+}
+
+// AgentWarmWarmer is the narrow seam the gateway calls to derive and materialize the
+// configured agent prefix. *agent.InKernelPlanner satisfies it; a witness injects a
+// fake without a live model. The gateway adds no cache math of its own — it derives a
+// descriptor, warms it, and adjudicates the returned receipt.
+type AgentWarmWarmer interface {
+	DeriveWarmPrefix(tenant, agent string, in agent.WarmPrefixInputs) (agent.WarmPrefixSpec, error)
+	WarmPrefix(ctx context.Context, spec agent.WarmPrefixSpec) (agent.WarmReceipt, error)
+}
+
+// agentWarmGate is the agent-warm readiness state machine. It mirrors warmupGate's
+// shape (own mutex, value receipt) but its admission rule is the stronger
+// live-receipt rule: a configured profile is ready only when a matching, restored,
+// live-claimed warm has been observed. Zero value == unconfigured (silent).
+type agentWarmGate struct {
+	mu         sync.Mutex
+	configured bool
+	// spec is the derived, bounded descriptor the warm targets. Its Identity bounds
+	// the observed receipt: a receipt for a different descriptor (a changed
+	// profile/renderer/KV layout) is a mismatch, never a hit.
+	spec             agent.WarmPrefixSpec
+	requireLiveClaim bool
+
+	status  string
+	reason  string
+	receipt *agent.WarmReceipt
+}
+
+// configure installs a derived descriptor and moves the gate to pending (armed but
+// not yet warm). Reconfiguring clears any prior receipt, so a generation change can
+// never reuse the previous profile's warm readiness.
+func (g *agentWarmGate) configure(spec agent.WarmPrefixSpec, requireLiveClaim bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.configured = true
+	g.spec = spec
+	g.requireLiveClaim = requireLiveClaim
+	g.status = AgentWarmPending
+	g.reason = ""
+	g.receipt = nil
+}
+
+// observe records the result of a native warm attempt and adjudicates readiness from
+// the receipt — never from the attempt's mere completion. A receipt that is not
+// Ready, whose identity does not match the configured descriptor, whose restored
+// prefix does not reach the stable boundary, or (when required) whose claim is not
+// live, is DEGRADED with a closed reason. A nil receipt/planner with an error is
+// reported per the planner's own unsupported signal.
+func (g *agentWarmGate) observe(receipt agent.WarmReceipt, unsupported bool, err error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.configured {
+		// A late observation after an unconfigured gate is inert: a serve that never
+		// configured a profile stays unaffected.
+		g.status = AgentWarmUnconfigured
+		g.receipt = nil
+		return
+	}
+	g.receipt = nil
+	switch {
+	case unsupported:
+		// The planner cannot warm a prefix at all: report it independently, do NOT hold
+		// readiness (there is no cache to warm), and do NOT fabricate a ready bit.
+		g.status = AgentWarmUnsupported
+		g.reason = receipt.Reason
+		if g.reason == "" {
+			g.reason = "unsupported"
+		}
+		return
+	case err != nil:
+		g.status = AgentWarmDegraded
+		g.reason = receipt.Reason
+		if g.reason == "" {
+			g.reason = "warm_error"
+		}
+		return
+	}
+	// A live receipt requires ALL of: matching descriptor identity, the Ready bit, and
+	// a restored prefix reaching the stable boundary. Any miss is an explicit degrade —
+	// never a silent hit.
+	switch {
+	case receipt.Identity == "" || receipt.Identity != g.spec.Identity:
+		g.status = AgentWarmDegraded
+		g.reason = "identity_mismatch"
+		return
+	case !receipt.Ready:
+		g.status = AgentWarmDegraded
+		g.reason = receipt.Reason
+		if g.reason == "" {
+			g.reason = "not_ready"
+		}
+		return
+	case receipt.RestoredTokens < receipt.RequestedTokens || receipt.RestoredTokens <= 0:
+		g.status = AgentWarmDegraded
+		g.reason = "partial_restore"
+		return
+	case receipt.Status != agent.WarmStatusReady:
+		g.status = AgentWarmDegraded
+		g.reason = "status_not_ready"
+		return
+	}
+	if g.requireLiveClaim {
+		// A configured live-claim expectation cannot be satisfied by a receipt with no
+		// claim, or a claim whose Live bit is false (expired/released/stale incarnation).
+		// Without this the "complete bit" would be the only evidence — the exact trap
+		// CW-07 exists to close.
+		if receipt.Claim == nil {
+			g.status = AgentWarmDegraded
+			g.reason = "claim_absent"
+			return
+		}
+		if !receipt.Claim.Live {
+			g.status = AgentWarmDegraded
+			g.reason = receipt.Claim.Reason
+			if g.reason == "" {
+				g.reason = "claim_not_live"
+			}
+			return
+		}
+	}
+	g.status = AgentWarmReady
+	g.reason = ""
+	r := receipt
+	g.receipt = &r
+}
+
+// admit reports whether readiness may be admitted for a configured agent-warm profile
+// and, if not, the closed blocking status/reason. A ready gate admits. An unconfigured
+// or unsupported gate does NOT block (there is no cache contract to enforce). A
+// pending or degraded gate blocks with its reason. The bool is "blocked".
+func (g *agentWarmGate) admit() (blocked bool, status, reason string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	switch g.status {
+	case AgentWarmPending, AgentWarmDegraded:
+		return true, g.status, g.reason
+	default:
+		return false, g.status, g.reason
+	}
+}
+
+// snapshot returns the gate's current status, closed reason and receipt for a
+// read-only reader (e.g. the /healthz agent_warm block). The receipt carries no prompt
+// text, so it is safe to expose.
+func (g *agentWarmGate) snapshot() (status, reason string, receipt *agent.WarmReceipt, configured bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.status, g.reason, g.receipt, g.configured
+}
+
+// SetAgentWarmProfile installs the agent KV-cache warm profile this serve gates
+// readiness on (CW-07, #13333). Until RunAgentWarmup observes a live warm, /healthz
+// holds readiness with agent_warm_pending. It derives the expected descriptor
+// identity from the configured inputs through the installed warmer, so a receipt for
+// any other descriptor is refused. A serve that never calls it is byte-for-byte
+// unaffected (the cache reports "unconfigured"). Safe on a nil Server.
+//
+// It returns the derived descriptor identity for the host to log/bind, or an error
+// when the warmer cannot derive a bounded descriptor (the gate is then left
+// unconfigured so readiness is not held on a profile that cannot be realized).
+func (s *Server) SetAgentWarmProfile(spec AgentWarmProfile) (string, error) {
+	if s == nil {
+		return "", ErrAgentWarmUnconfigured
+	}
+	warmer, ok := s.planner.(AgentWarmWarmer)
+	if !ok {
+		return "", ErrAgentWarmUnconfigured
+	}
+	desc, err := warmer.DeriveWarmPrefix(spec.Tenant, spec.Agent, spec.Inputs)
+	if err != nil {
+		return "", err
+	}
+	s.agentWarm.configure(desc, spec.RequireLiveClaim)
+	return desc.Identity, nil
+}
+
+// RunAgentWarmup derives and materializes the configured agent prefix through the
+// installed warmer, then adjudicates readiness from the returned receipt. It is the
+// execution half of CW-07: the host calls it at boot (typically alongside the #3051
+// RunWarmup) after SetAgentWarmProfile. It returns the observed receipt for the
+// host's startup log.
+//
+// A planner that is not an AgentWarmWarmer, or a gate that was never configured,
+// yields ErrAgentWarmUnconfigured. A warm that fails to produce a live prefix leaves
+// the gate DEGRADED with a closed reason (readiness held) rather than reporting a
+// readiness the first real request cannot use.
+func (s *Server) RunAgentWarmup(ctx context.Context) (agent.WarmReceipt, error) {
+	if s == nil {
+		return agent.WarmReceipt{}, ErrAgentWarmUnconfigured
+	}
+	warmer, ok := s.planner.(AgentWarmWarmer)
+	if !ok {
+		s.agentWarm.observe(agent.WarmReceipt{}, true, ErrAgentWarmUnconfigured)
+		return agent.WarmReceipt{}, ErrAgentWarmUnconfigured
+	}
+	spec, configured := s.agentWarm.configuration()
+	if !configured {
+		return agent.WarmReceipt{}, ErrAgentWarmUnconfigured
+	}
+	receipt, err := warmer.WarmPrefix(ctx, spec)
+	unsupported := errors.Is(err, agent.ErrWarmPrefixUnsupported)
+	s.agentWarm.observe(receipt, unsupported, err)
+	return receipt, err
+}
+
+// configuration returns the installed, derived descriptor as a value copy and whether
+// a profile is configured. WarmPrefix receives exactly the descriptor whose identity
+// the gate will bind the receipt against.
+func (g *agentWarmGate) configuration() (agent.WarmPrefixSpec, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.spec, g.configured
+}
+
+// ErrAgentWarmUnconfigured is the closed refusal for an agent-warm call with no
+// installed profile or a planner that cannot warm a prefix. It is fail-closed: a
+// caller must never read an unconfigured gate as a warm.
+var ErrAgentWarmUnconfigured = errors.New("gateway: agent warm profile is not configured")

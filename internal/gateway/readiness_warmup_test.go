@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
 
 // TestWarmupGate pins the #3051 timing policy as a pure state machine: a
@@ -468,5 +469,196 @@ func TestWarmupCancellationKeepsCacheGatePending(t *testing.T) {
 	}
 	if _, ok := srv.warmup.ready(); ok {
 		t.Fatal("cancelled warmup reported ready, want not-ready")
+	}
+}
+
+// ---- CW-07 (#13333): agent KV-cache warm readiness -------------------------------
+
+// fakeAgentWarmer is an AgentWarmWarmer whose DeriveWarmPrefix returns a fixed,
+// bounded descriptor and whose WarmPrefix returns a scripted receipt/error. It lets
+// the readiness witness drive every receipt shape (ready+live claim, partial
+// restore, identity mismatch, dead claim, unsupported) with no live model.
+type fakeAgentWarmer struct {
+	identity string
+	receipt  agent.WarmReceipt
+	err      error
+	calls    int
+}
+
+func (f *fakeAgentWarmer) Model() string { return "fake-agent-warmer" }
+
+func (f *fakeAgentWarmer) Complete(_ context.Context, _ []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+	return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: "ok"}}, nil
+}
+
+func (f *fakeAgentWarmer) DeriveWarmPrefix(tenant, agentName string, _ agent.WarmPrefixInputs) (agent.WarmPrefixSpec, error) {
+	if tenant == "" {
+		return agent.WarmPrefixSpec{}, agent.ErrWarmPrefixUnavailable
+	}
+	return agent.WarmPrefixSpec{
+		StableTokens:      16,
+		StableTokenDigest: "sha256:stable",
+		InstructionDigest: "sha256:instr",
+		AdapterID:         "native-inkernel",
+		Identity:          f.identity,
+		Scope:             radixkv.CacheIdentity{Tenant: tenant, Agent: agentName},
+	}, nil
+}
+
+func (f *fakeAgentWarmer) WarmPrefix(_ context.Context, _ agent.WarmPrefixSpec) (agent.WarmReceipt, error) {
+	f.calls++
+	return f.receipt, f.err
+}
+
+// readyWarmReceipt builds a receipt that satisfies the strongest admission rule:
+// matching identity, ready status, full restore to the stable boundary, and a live
+// claim. Tests mutate one axis at a time to prove the gate is not satisfied by the
+// completion bit alone.
+func readyWarmReceipt(identity string) agent.WarmReceipt {
+	return agent.WarmReceipt{
+		Ready:             true,
+		Status:            agent.WarmStatusReady,
+		Identity:          identity,
+		StableTokenDigest: "sha256:stable",
+		Scope:             radixkv.CacheIdentity{Tenant: "tenant-a", Agent: "agent-1"},
+		RequestedTokens:   16,
+		RestoredTokens:    16,
+		Claim:             &agent.WarmClaimReceipt{Live: true, Tokens: 16, Bytes: 4096},
+	}
+}
+
+// agentWarmHealthz serves one /healthz request against s and returns the decoded
+// agent_warm block, or nil when the block is absent.
+func agentWarmHealthz(t *testing.T, s *Server) (int, map[string]any) {
+	t.Helper()
+	code, body := warmupHealthz(t, s)
+	aw, _ := body["agent_warm"].(map[string]any)
+	return code, aw
+}
+
+// TestAgentCacheWarmReadiness is the CW-07 (#13333) witness: a CONFIGURED agent warm
+// profile admits readiness only against a LIVE receipt � matching identity, restored
+// prefix reaching the stable boundary, and (when required) a live residency claim.
+// The #3051 backend-warmup completion bit alone cannot satisfy it; a cold, partial,
+// mismatched, or claim-dead warm leaves readiness held with a closed reason; an
+// unconfigured or unsupported cache never holds readiness at all.
+func TestAgentCacheWarmReadiness(t *testing.T) {
+	// (0) unconfigured serve: no agent_warm block, readiness unaffected even though
+	// MarkWarmupComplete has been called (a loaded backend is NOT a warm prefix).
+	unconfigured := &Server{}
+	unconfigured.MarkWarmupComplete(time.Millisecond)
+	if body := warmupHealthzBody(t, unconfigured); body["agent_warm"] != nil {
+		t.Fatalf("unconfigured serve: /healthz agent_warm = %v, want absent", body["agent_warm"])
+	}
+
+	// (1) configured but never run: readiness HELD (pending), 503, typed block.
+	warmer := &fakeAgentWarmer{identity: "sha256:desc-1"}
+	pending := &Server{planner: warmer}
+	if _, err := pending.SetAgentWarmProfile(AgentWarmProfile{
+		Tenant: "tenant-a", Agent: "agent-1", RequireLiveClaim: true,
+	}); err != nil {
+		t.Fatalf("SetAgentWarmProfile: %v", err)
+	}
+	code, aw := agentWarmHealthz(t, pending)
+	if code != http.StatusServiceUnavailable || aw == nil || aw["status"] != AgentWarmPending {
+		t.Fatalf("configured-unwarmed: /healthz code=%d agent_warm=%v, want 503 status=pending", code, aw)
+	}
+
+	// (2) a live warm receipt admits readiness.
+	warmer.receipt = readyWarmReceipt("sha256:desc-1")
+	if _, err := pending.RunAgentWarmup(context.Background()); err != nil {
+		t.Fatalf("RunAgentWarmup (ready): %v", err)
+	}
+	code, aw = agentWarmHealthz(t, pending)
+	if code != http.StatusOK || aw == nil || aw["status"] != AgentWarmReady {
+		t.Fatalf("live-warm: /healthz code=%d agent_warm=%v, want 200 status=ready", code, aw)
+	}
+	if got := aw["restored_tokens"]; got != float64(16) {
+		t.Fatalf("live-warm: restored_tokens = %v, want 16", got)
+	}
+
+	// (3) a partial restore (restored < requested) is a DEGRADE, not a hit.
+	warmer.receipt = readyWarmReceipt("sha256:desc-1")
+	warmer.receipt.RestoredTokens = 8
+	if _, err := pending.RunAgentWarmup(context.Background()); err != nil {
+		t.Fatalf("RunAgentWarmup (partial): %v", err)
+	}
+	if code, aw = agentWarmHealthz(t, pending); code != http.StatusServiceUnavailable ||
+		aw == nil || aw["status"] != AgentWarmDegraded || aw["reason"] != "partial_restore" {
+		t.Fatalf("partial-restore: /healthz code=%d agent_warm=%v, want 503 degraded/partial_restore", code, aw)
+	}
+
+	// (4) an identity mismatch (a different descriptor warmed) is a DEGRADE.
+	warmer.receipt = readyWarmReceipt("sha256:desc-OTHER")
+	if _, err := pending.RunAgentWarmup(context.Background()); err != nil {
+		t.Fatalf("RunAgentWarmup (mismatch): %v", err)
+	}
+	if code, aw = agentWarmHealthz(t, pending); aw == nil || aw["reason"] != "identity_mismatch" {
+		t.Fatalf("identity-mismatch: /healthz agent_warm=%v, want reason=identity_mismatch", aw)
+	}
+
+	// (5) a ready receipt whose required claim is absent or dead is a DEGRADE � the
+	// completion/ready bit alone cannot satisfy a configured live-claim contract.
+	warmer.receipt = readyWarmReceipt("sha256:desc-1")
+	warmer.receipt.Claim = nil
+	if _, err := pending.RunAgentWarmup(context.Background()); err != nil {
+		t.Fatalf("RunAgentWarmup (no claim): %v", err)
+	}
+	if code, aw = agentWarmHealthz(t, pending); aw == nil || aw["reason"] != "claim_absent" {
+		t.Fatalf("claim-absent: /healthz agent_warm=%v, want reason=claim_absent", aw)
+	}
+	warmer.receipt = readyWarmReceipt("sha256:desc-1")
+	warmer.receipt.Claim = &agent.WarmClaimReceipt{Live: false, Reason: "expired"}
+	if _, err := pending.RunAgentWarmup(context.Background()); err != nil {
+		t.Fatalf("RunAgentWarmup (dead claim): %v", err)
+	}
+	if code, aw = agentWarmHealthz(t, pending); aw == nil || aw["reason"] != "expired" {
+		t.Fatalf("dead-claim: /healthz agent_warm=%v, want reason=expired", aw)
+	}
+
+	// (6) a backend ERROR leaves the gate DEGRADED with a bounded reason (no hang),
+	// and served inference is held with the typed agent_warm_pending code.
+	warmer.receipt = agent.WarmReceipt{Status: agent.WarmStatusCold, Reason: "prime_failed"}
+	warmer.err = errors.New("boom")
+	if _, err := pending.RunAgentWarmup(context.Background()); err == nil {
+		t.Fatal("RunAgentWarmup (error) err = nil, want the backend error")
+	}
+	if code, aw = agentWarmHealthz(t, pending); aw == nil || aw["reason"] != "prime_failed" {
+		t.Fatalf("warm-error: /healthz agent_warm=%v, want reason=prime_failed", aw)
+	}
+	rec := httptest.NewRecorder()
+	pending.checkWarmupPending(rec)
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), `"code":"agent_warm_pending"`) {
+		t.Fatalf("held inference: code=%d body=%s, want 503 agent_warm_pending", rec.Code, rec.Body.String())
+	}
+
+	// (7) an UNSUPPORTED planner does not hold readiness: there is no cache contract,
+	// so the serve is unaffected. No live model is involved.
+	unsupported := &Server{planner: &fakeAgentWarmer{identity: "sha256:desc-1", err: agent.ErrWarmPrefixUnsupported}}
+	if _, err := unsupported.SetAgentWarmProfile(AgentWarmProfile{Tenant: "tenant-a"}); err != nil {
+		t.Fatalf("SetAgentWarmProfile (unsupported): %v", err)
+	}
+	if _, err := unsupported.RunAgentWarmup(context.Background()); err == nil {
+		t.Fatal("RunAgentWarmup (unsupported) err = nil, want ErrWarmPrefixUnsupported")
+	}
+	code, aw = agentWarmHealthz(t, unsupported)
+	if code != http.StatusOK || aw == nil || aw["status"] != AgentWarmUnsupported {
+		t.Fatalf("unsupported: /healthz code=%d agent_warm=%v, want 200 status=unsupported", code, aw)
+	}
+}
+
+// TestAgentWarmProfileUnconfiguredWhenPlannerNotWarmer pins that a non-native planner
+// (no AgentWarmWarmer) leaves the profile unconfigured rather than arming a gate that
+// can never be satisfied � the serve stays unaffected.
+func TestAgentWarmProfileUnconfiguredWhenPlannerNotWarmer(t *testing.T) {
+	srv := &Server{planner: agent.NewMockPlanner("no-warm")}
+	if _, err := srv.SetAgentWarmProfile(AgentWarmProfile{Tenant: "tenant-a"}); !errors.Is(err, ErrAgentWarmUnconfigured) {
+		t.Fatalf("SetAgentWarmProfile on non-warmer err = %v, want ErrAgentWarmUnconfigured", err)
+	}
+	if code, aw := agentWarmHealthz(t, srv); code != http.StatusOK || aw != nil {
+		t.Fatalf("non-warmer: /healthz code=%d agent_warm=%v, want 200 absent", code, aw)
+	}
+	if _, err := srv.RunAgentWarmup(context.Background()); !errors.Is(err, ErrAgentWarmUnconfigured) {
+		t.Fatalf("RunAgentWarmup on non-warmer err = %v, want ErrAgentWarmUnconfigured", err)
 	}
 }
