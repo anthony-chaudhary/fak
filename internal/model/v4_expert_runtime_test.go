@@ -14,7 +14,12 @@ import (
 )
 
 func pinnedV4RuntimeConfig() Config {
-	return Config{ModelType: "deepseek_v4", NumLayers: 61, HiddenSize: 7168, NumExperts: 384, NumExpertsPerTok: 6, MoEIntermediateSize: 3072, NSharedExperts: 1, ExpertDtype: "fp4", NormTopKProb: true, RoutedScalingFactor: 2.5, ScoringFunc: "sqrtsoftplus", TopKMethod: "noaux_tc", SwigluLimit: 10}
+	// MaxPositionEmbeddings is part of the admitted V4 contract: AdmitDeepSeekV4Config
+	// requires a declared, positive window because a config without one makes the
+	// native planner's ContextWindow() return 0, turning refuseContextLength into a
+	// no-op. A fixture that omitted it would build a config the engine must refuse.
+	// The pinned V4 checkpoints declare 1048576.
+	return Config{ModelType: "deepseek_v4", NumLayers: 61, HiddenSize: 7168, NumExperts: 384, NumExpertsPerTok: 6, MoEIntermediateSize: 3072, NSharedExperts: 1, ExpertDtype: "fp4", NormTopKProb: true, RoutedScalingFactor: 2.5, ScoringFunc: "sqrtsoftplus", TopKMethod: "noaux_tc", SwigluLimit: 10, MaxPositionEmbeddings: 1048576}
 }
 
 func writeV4RuntimeFixture(t *testing.T) (string, map[string][]float32) {
