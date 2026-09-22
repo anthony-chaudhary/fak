@@ -183,6 +183,41 @@ func TestDeepSeekV41RejectsMalformedAttentionGeometry(t *testing.T) {
 	}
 }
 
+// TestDeepSeekV41RejectsShrunkContextWindow pins the load-bearing position limit.
+//
+// The declared window is not decoration: it is the ceiling the native planner
+// enforces (InKernelPlanner.ContextWindow) and the capacity the model catalog
+// advertises, and the ~150k-token agent envelope this runtime targets is only
+// meaningful because the published checkpoint declares 1,048,576 with YaRN
+// factor 16 from 65536. Before this check the admission ladder validated
+// geometry, MoE, compression, and RoPE theta but never the window, so a config
+// that silently dropped or shrank max_position_embeddings was admitted as the
+// published checkpoint while serving a much smaller context.
+func TestDeepSeekV41RejectsShrunkContextWindow(t *testing.T) {
+	tests := []struct {
+		name     string
+		from, to string
+	}{
+		{name: "window shrunk", from: `"max_position_embeddings": 1048576`, to: `"max_position_embeddings": 65536`},
+		{name: "window dropped", from: `"max_position_embeddings": 1048576,`, to: ``},
+		{name: "yarn factor shrunk", from: `"factor": 16`, to: `"factor": 4`},
+		{name: "yarn original context changed", from: `"original_max_position_embeddings": 65536`, to: `"original_max_position_embeddings": 8192`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, _ := readDeepSeekV41Config(t)
+			malformed := bytes.Replace(raw, []byte(tt.from), []byte(tt.to), 1)
+			if bytes.Equal(malformed, raw) {
+				t.Fatalf("fixture did not contain %q", tt.from)
+			}
+			var cfg Config
+			if err := json.Unmarshal(malformed, &cfg); !errors.Is(err, ErrV41ConfigAdmission) {
+				t.Fatalf("error=%v want ErrV41ConfigAdmission", err)
+			}
+		})
+	}
+}
+
 // TestDeepSeekV41AttentionAxesMarshalFromFlatConfig pins the marshal/parse
 // symmetry the typed axes depend on: MarshalJSON emits the nested text_config
 // geometry from the same flat fields parseDeepSeekV41Metadata derives Attention

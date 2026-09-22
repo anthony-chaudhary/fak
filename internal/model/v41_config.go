@@ -366,6 +366,15 @@ func admitDeepSeekV41Published(c Config, m *DeepSeekV41Config) error {
 		{"engram layers", v41EqualInts(m.EngramLayerIDs, []int{1, 14}) && v41EqualInts(m.EngramNumEmbeddings, []int{384006168, 384016682}), fmt.Sprintf("layers=%v embeddings=%v", m.EngramLayerIDs, m.EngramNumEmbeddings)},
 		{"engram geometry", m.EngramMaxNgramSize == 4 && m.EngramVocabSize == 16000000 && m.EngramNHeads == 8 && m.EngramHeadDim == 256 && m.EngramPadTokenID == 2 && m.EngramCompressedVocabSize == 99092, fmt.Sprintf("ngram=%d vocab=%d heads=%d dim=%d pad=%d compressed=%d", m.EngramMaxNgramSize, m.EngramVocabSize, m.EngramNHeads, m.EngramHeadDim, m.EngramPadTokenID, m.EngramCompressedVocabSize)},
 		{"quantization", m.Quantization.Method == "fp8" && m.Quantization.Activation == "dynamic" && v41EqualInts(m.Quantization.WeightBlockSize, []int{32, 32}) && m.Quantization.ScaleFormat == "ue8m0" && m.Quantization.ExpertDtype == "fp4", fmt.Sprintf("method=%s activation=%s block=%v scale=%s expert=%s", m.Quantization.Method, m.Quantization.Activation, m.Quantization.WeightBlockSize, m.Quantization.ScaleFormat, m.Quantization.ExpertDtype)},
+		// The declared position limit is LOAD-BEARING for agent use: it is the
+		// window the native planner enforces (InKernelPlanner.ContextWindow) and the
+		// capacity the catalog advertises, and the ~150k-token agent envelope the
+		// runtime targets depends on it being the published 1M with YaRN factor 16
+		// from 65536. Nothing else in this ladder checked it, so a config that
+		// silently dropped or shrank the window would be admitted as the published
+		// checkpoint while serving a much smaller context.
+		{"context window declared", c.MaxPositionEmbeddings == 1048576, fmt.Sprintf("max_position_embeddings=%d", c.MaxPositionEmbeddings)},
+		{"rope scaling is yarn x16 from 65536", c.RopeScaling == "yarn" && c.RopeFactor == 16 && c.RopeOrigContext == 65536, fmt.Sprintf("type=%s factor=%g orig=%d", c.RopeScaling, c.RopeFactor, c.RopeOrigContext)},
 		{"decoder/attention axes retained", m.Attention == (DeepSeekV41AttentionGeometry{NumLayers: 40, HiddenSize: 5120, NumHeads: 64, NumKVHeads: 1, HeadDim: 512, QKRopeHeadDim: 64, QLoraRank: 1280, OLoraRank: 1024, OGroups: 8, NumExperts: 384, NSharedExperts: 1, NumExpertsPerTok: 6, MoEIntermediateSize: 2304}), fmt.Sprintf("layers=%d hidden=%d heads=%d kv_heads=%d head_dim=%d rope=%d qrank=%d orank=%d groups=%d experts=%d shared=%d topk=%d width=%d", m.Attention.NumLayers, m.Attention.HiddenSize, m.Attention.NumHeads, m.Attention.NumKVHeads, m.Attention.HeadDim, m.Attention.QKRopeHeadDim, m.Attention.QLoraRank, m.Attention.OLoraRank, m.Attention.OGroups, m.Attention.NumExperts, m.Attention.NSharedExperts, m.Attention.NumExpertsPerTok, m.Attention.MoEIntermediateSize)},
 	}
 	for _, check := range checks {
