@@ -198,13 +198,32 @@ func inKernelPlannerPrefixReuseSupported(m *model.Model, backend compute.Backend
 	// KV-prefix KPI, and a recompute forward re-runs the whole prefix on every ingest, so any
 	// non-zero reuse it reported would be a saving it never realized. Reuse returns when #5496
 	// lands the cached path.
-	if m != nil && !m.Cfg.KVPrefixReuseSupported() {
+	if m == nil {
+		return backend == nil
+	}
+	// V4.1 is the ONE architecture whose bare *KVCache is deliberately incomplete (it omits
+	// the committed token history and per-layer temporal state), so the legacy bare-KV
+	// predicate stays FALSE for it and it can never be admitted through that gate. It earns
+	// planner reuse through the TWO complete-snapshot capabilities that the warming program
+	// landed: the HOST route (#13338, HostCompletePrefixSnapshotSupported — a device-less
+	// PrefixSnapshot carries the full v41ForwardSnapshot continuation state) and the DEVICE
+	// route (#13334/#13338, InKernelBackendPrefixReuseSupportedFor — only the qualified
+	// backend identity that witnessed the snapshot contract). Both are consulted with the
+	// concrete route in hand, and both fail closed on an unqualified backend. This leaf
+	// (#13335) is the planner-side consumer; it does not weaken the bare-KV refusal.
+	if m.Cfg.IsDeepSeekV41() {
+		if backend == nil {
+			return m.Cfg.HostCompletePrefixSnapshotSupported()
+		}
+		return m.Cfg.InKernelBackendPrefixReuseSupportedFor(backend)
+	}
+	if !m.Cfg.KVPrefixReuseSupported() {
 		return false
 	}
 	if backend == nil {
 		return true
 	}
-	return m != nil && m.Cfg.InKernelBackendPrefixReuseSupported()
+	return m.Cfg.InKernelBackendPrefixReuseSupported()
 }
 
 // kvPrefixEligiblePromptTokens is the eligibility witness for one served turn (#3391):
