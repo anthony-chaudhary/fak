@@ -2059,11 +2059,32 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 	}
 	if st != nil {
 		st.layers = runState.layers
-		// Completed cross-layer publications are step-local and can be released.
-		st.attn = nil
+		// Completed cross-layer publications are step-local and can be released
+		// -- EXCEPT when the schedule has a compressed / shared-source / reader
+		// role (#13480): a later incremental Step's reader resolves the source's
+		// published compressed rows from this registry, so it must survive the
+		// prefill. A plain-only session keeps the historical release byte-for-byte.
+		if !m.v41RoleSchedule() {
+			st.attn = nil
+		}
 		committed = true
 	}
 	return act, nil
+}
+
+// v41RoleSchedule reports whether any configured layer resolves to a non-plain
+// attention role. It is the release gate for the shared source registry: a role
+// schedule must retain the source publications across a prefill so a later
+// incremental Step can resolve them (#13480).
+func (m *Model) v41RoleSchedule() bool {
+	cfg := m.Cfg
+	roles := m.v41AttentionRolesCached()
+	for l := 0; l < cfg.NumLayers; l++ {
+		if role, ok := roles[l]; ok && role != V41AttentionRolePerLayer {
+			return true
+		}
+	}
+	return false
 }
 
 // v41Layer applies one V4.1 decoder layer to x in place, updating the persistent
@@ -2375,7 +2396,18 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return v41StageErr(v41StageAttention, l, err)
 		}
-		if err := layerState.seedTemporal(kvRows, plan.Ratio, cfg.windowForLayer(l)); err != nil {
+		// Seed the retained temporal state. For a compressed source layer the
+		// incomplete trailing group's PRE-ATTENTION carriers are passed through so
+		// the incremental source append (#13480) can continue a mid-group prefix
+		// without replaying the projected latents; a non-compressed layer passes
+		// none and keeps the historical seed byte-for-byte.
+		var seedInputs [][]float32
+		if plan.Ratio > 1 {
+			if partial := len(preByPos) % plan.Ratio; partial > 0 {
+				seedInputs = preByPos[len(preByPos)-partial:]
+			}
+		}
+		if err := layerState.seedTemporalWithInputs(kvRows, seedInputs, plan.Ratio, cfg.windowForLayer(l)); err != nil {
 			return v41StageErr(v41StageAttention, l, err)
 		}
 		st.setLayerState(l, cfg.NumLayers, layerState)
@@ -2775,10 +2807,18 @@ var v41IncrementalStepProbe func()
 // v41IncrementalEligible reports whether the session can advance its next Step
 // with the shadow one-token seam (forwardV41Step, #13311) instead of a
 // full-history recompute. It is the EXPLICIT eligibility status the #13313 leaf
-// requires: every configured layer must hold a seeded retained state and declare
-// the plain per-layer role, so the seam's own refusals (a compressed / source /
-// reader role, or an unseeded state) never fire mid-step. Anything else, or a
-// session that has not prefilled yet, keeps the historical cold/full route.
+// requires: every configured layer must hold a seeded retained state and carry a
+// resolved plan the one-position seam can execute -- a plain per-layer window
+// (v41LayerStep) OR a compressed / shared-source / reader role, which the
+// role-aware composition (v41LayerStepRole, #13480) advances over the retained
+// compressed stream. Anything else, or a session that has not prefilled yet,
+// keeps the historical cold/full route.
+//
+// The role gate is now an ADMISSION check, not a blanket refusal: a role layer is
+// admissible only when a preceding shared source is resolvable for a reader (so a
+// reader can never be stepped before its source has published a row). An
+// unresolvable reader keeps the full-history fallback rather than letting the
+// seam refuse mid-step.
 func (s *Session) v41IncrementalEligible() bool {
 	st := s.v41Forward
 	if st == nil {
@@ -2794,7 +2834,9 @@ func (s *Session) v41IncrementalEligible() bool {
 		if err != nil {
 			return false
 		}
-		if plan.Role != V41AttentionRolePerLayer || plan.Ratio > 1 {
+		if plan.Role != V41AttentionRolePerLayer && plan.Ratio <= 1 && plan.KVSourceLayer < 0 {
+			// A reader role with no resolvable shared source cannot be stepped;
+			// keep the full-history fallback.
 			return false
 		}
 	}

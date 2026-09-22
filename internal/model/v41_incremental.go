@@ -126,33 +126,46 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 				fmt.Errorf("%w: layer %d has no seeded retained state; forwardV41Step cannot seed a prefix", ErrV41ForwardStage, l))
 		}
 	}
+	// The shared source registry a role layer publishes into / resolves from. It
+	// is resolved lazily (a plain-layer session may never have built it) so a role
+	// step always sees the same store the full forward used.
+	registry, err := st.attentionState(cfg.HeadDim, 8)
+	if err != nil {
+		return nil, stats, v41StageErr(v41StageAttention, -1, err)
+	}
 
-	// Stage, for each layer, its pre-step cursors AND the one ring row that
-	// layer's Step may overwrite. The staged slices hold one entry per stepped
-	// layer -- per-step scalars plus at most one O(HiddenSize) row each -- never
-	// a prefix-sized clone. This is the entire rollback ledger.
-	//
-	// V41AttentionState.Step writes exactly one row into the fixed
-	// windowSize-row ring, at slot nextWindowPos%windowSize, and increments
-	// nextWindowPos/nextCompressRow. retainedTailRows() derives the visible
-	// tail from nextWindowPos, so once the ring has wrapped (pos >= windowSize)
-	// a later fault rolled back by cursor alone would still expose the failed
-	// step's row at that slot. Staging the row's CONTENT (copied, so a later
-	// in-place write cannot alias the backup) and restoring it on rollback makes
-	// the retained ring byte-identical to its pre-step contents.
-	//
-	// At pos == 0 the layer commits via Prefill, not Step: Prefill requires an
-	// empty state (nextWindowPos == 0) and writes sequentially from slot 0
-	// without wrapping, so it cannot clobber a pre-existing row. Its cursor
-	// restore is still staged below; the ring-row backup is nil then.
+	// Stage, for each layer, its PRE-STEP state so a fault in any layer or the
+	// head can be rolled back by IN-PLACE restoration. A plain layer's Step writes
+	// one row into the fixed windowSize-row ring and advances
+	// nextWindowPos/nextCompressRow; a role layer's source append ALSO advances the
+	// compressor group (partialInputs/partialPositions) and publishes into the
+	// shared registry. The staged ledger holds one entry per STEPPED layer -- the
+	// cursor scalars, the one O(state) ring row the step may overwrite, and a copy
+	// of the at-most-(ratio-1)-row partial group -- so it is O(NumLayers) bounded
+	// rows, never a prefix-sized clone. Restoration writes back INTO the same state
+	// objects (never replacing st.layers[i]), so a caller holding a layer-state
+	// pointer observes the restored contents.
 	stagedPos := make([]int, 0, cfg.NumLayers)
 	stagedCompress := make([]int, 0, cfg.NumLayers)
 	stagedRow := make([][]float32, 0, cfg.NumLayers)
+	stagedInputs := make([][][]float32, 0, cfg.NumLayers)
+	stagedInputPos := make([][]int, 0, cfg.NumLayers)
+	// The shared registry a role source publishes into is staged too: a fault in a
+	// LATER layer must not leave an earlier source's just-published row visible to
+	// a reader. Only the mutable publication/cursor surface is copied.
+	registryKVEnd := cloneV41IntMap(registry.kvPublishedEnd)
+	registryIndexEnd := cloneV41IntMap(registry.indexPublishedEnd)
+	registryKV := cloneV41PublicationRows(registry.kvPublications)
+	registryIndex := cloneV41PublicationRows(registry.indexPublications)
+	registryTopK := cloneV41TopKRows(registry.topk)
+	registryTopKSet, registryTopKRatio := registry.topkSet, registry.topkRatio
 	rollback := func() {
 		for i := len(stagedPos) - 1; i >= 0; i-- {
 			state := st.layerState(i)
 			state.nextWindowPos = stagedPos[i]
 			state.nextCompressRow = stagedCompress[i]
+			state.partialInputs = stagedInputs[i]
+			state.partialPositions = stagedInputPos[i]
 			if row := stagedRow[i]; row != nil && state.windowSize > 0 {
 				slot := stagedPos[i] % state.windowSize
 				if slot >= 0 && slot < len(state.window) && len(state.window[slot]) == len(row) {
@@ -160,13 +173,28 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 				}
 			}
 		}
+		registry.kvPublishedEnd = registryKVEnd
+		registry.indexPublishedEnd = registryIndexEnd
+		registry.kvPublications = registryKV
+		registry.indexPublications = registryIndex
+		registry.topk = registryTopK
+		registry.topkSet = registryTopKSet
+		registry.topkRatio = registryTopKRatio
 		stats.LayersRolledBack = len(stagedPos)
 	}
+
+	// roleSession reports whether any configured layer resolves to a non-plain
+	// role. A plain-only session keeps the historical post-step release of the
+	// shared registry (st.attn = nil) byte-for-byte; a role session must RETAIN it
+	// so a reader layer can resolve a source's published rows on the next Step.
+	roleSession := m.v41RoleSchedule()
 
 	for l := 0; l < cfg.NumLayers; l++ {
 		state := st.layerState(l)
 		stagedPos = append(stagedPos, state.nextWindowPos)
 		stagedCompress = append(stagedCompress, state.nextCompressRow)
+		stagedInputs = append(stagedInputs, cloneV41Rows(state.partialInputs))
+		stagedInputPos = append(stagedInputPos, append([]int(nil), state.partialPositions...))
 		// Capture the ring row Step will overwrite. pos != 0 (Step) writes
 		// window[nextWindowPos%windowSize]; pos == 0 (Prefill) cannot clobber a
 		// pre-existing row and gets a nil backup.
@@ -179,7 +207,7 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 		}
 		stagedRow = append(stagedRow, rowBackup)
 		stats.LayerCalls++
-		if lerr := m.v41LayerStep(l, x, streams, pos, state, scratch); lerr != nil {
+		if lerr := m.v41LayerStepWithRegistry(l, x, streams, pos, state, registry, scratch); lerr != nil {
 			rollback()
 			return nil, stats, lerr
 		}
@@ -193,10 +221,36 @@ func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScra
 		return nil, stats, herr
 	}
 
-	// Commit: append the token and publish the step-scoped layer state. History
-	// grows by exactly one; attn is released to match forwardV41.
+	// Commit: append the token and, for a plain-only session, release the
+	// step-scoped registry to match forwardV41. A role session retains the registry
+	// because it is the cross-step source publication store a reader resolves.
 	st.history = append(st.history, id)
-	st.attn = nil
+	if !roleSession {
+		st.attn = nil
+	}
 	stats.Committed = true
 	return res, stats, nil
+}
+
+// cloneV41IntMap copies a small int-keyed map so a staged rollback snapshot
+// cannot alias live state.
+func cloneV41IntMap(m map[int]int) map[int]int {
+	out := make(map[int]int, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// cloneV41TopKRows copies a top-k selection so a staged snapshot cannot alias the
+// live publication.
+func cloneV41TopKRows(rows [][]int32) [][]int32 {
+	if rows == nil {
+		return nil
+	}
+	out := make([][]int32, len(rows))
+	for i, row := range rows {
+		out[i] = append([]int32(nil), row...)
+	}
+	return out
 }

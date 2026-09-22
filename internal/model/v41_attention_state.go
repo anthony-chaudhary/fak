@@ -226,7 +226,23 @@ func (s *V41AttentionState) Prefill(projectedKV [][]float32, updates []V41Attent
 // seedTemporal replaces the receiver with the bounded temporal subset needed by
 // a later incremental layer step. Completed compressed rows remain in the
 // per-forward publication registry and are not copied into session state.
+//
+// partialInputs carries the incomplete trailing compressor group's PRE-ATTENTION
+// carrier rows (the same carriers v41CompressedRows projects through wkv/wgate),
+// oldest first, when ratio > 1. The incremental source append
+// (appendCompressorSource) consumes exactly those carriers, so seeding them here
+// is what lets a source layer continue a mid-group prefix without replaying the
+// projected latents: a nil/empty partialInputs keeps the historical
+// projected-partialKV-only seed. When partialInputs is non-nil its length must
+// equal len(projectedKV)%ratio, matching the group the projected rows imply.
 func (s *V41AttentionState) seedTemporal(projectedKV [][]float32, ratio, configuredWindow int) error {
+	return s.seedTemporalWithInputs(projectedKV, nil, ratio, configuredWindow)
+}
+
+// seedTemporalWithInputs is seedTemporal plus the incomplete group's pre-attention
+// carriers. It is the seeding seam #13480 requires so a compressed source role
+// can step incrementally from a mid-group prefix.
+func (s *V41AttentionState) seedTemporalWithInputs(projectedKV, partialInputs [][]float32, ratio, configuredWindow int) error {
 	if s == nil {
 		return fmt.Errorf("model: nil V41 attention state")
 	}
@@ -241,6 +257,19 @@ func (s *V41AttentionState) seedTemporal(projectedKV [][]float32, ratio, configu
 	}
 	if err := s.validateKV(projectedKV); err != nil {
 		return err
+	}
+	for i, row := range partialInputs {
+		if len(row) == 0 || (i > 0 && len(row) != len(partialInputs[0])) {
+			return fmt.Errorf("model: V41 temporal seed partial input %d width %d is inconsistent", i, len(row))
+		}
+	}
+	if len(partialInputs) > 0 {
+		if ratio <= 1 {
+			return fmt.Errorf("model: V41 temporal seed carries %d partial inputs at ratio %d", len(partialInputs), ratio)
+		}
+		if len(partialInputs) != len(projectedKV)%ratio {
+			return fmt.Errorf("model: V41 temporal seed carries %d partial inputs but the projected stream implies %d", len(partialInputs), len(projectedKV)%ratio)
+		}
 	}
 
 	retain := min(len(projectedKV), s.windowSize)
@@ -274,6 +303,18 @@ func (s *V41AttentionState) seedTemporal(projectedKV [][]float32, ratio, configu
 	s.nextCompressRow = len(projectedKV)
 	s.retainedWindowRows = retain
 	s.partialKV = partialKV
+	if len(partialInputs) > 0 {
+		carriers := make([][]float32, len(partialInputs))
+		positions := make([]int, len(partialInputs))
+		groupLo := len(projectedKV) - len(partialInputs)
+		for i, row := range partialInputs {
+			carriers[i] = append([]float32(nil), row...)
+			positions[i] = groupLo + i
+		}
+		s.partialInputs = carriers
+		s.partialPositions = positions
+		retainedCopies += len(carriers)
+	}
 	s.retainedCopies = retainedCopies
 	s.kvPublications = make(map[v41AttentionPublicationKey][]float32)
 	s.indexPublications = make(map[v41AttentionPublicationKey][]float32)
