@@ -4,6 +4,10 @@ global:
 
 rule_files:
   - "prometheus-alerts.yml"
+  # The native-performance alert rules were previously NOT loaded (this list
+  # named only prometheus-alerts.yml), so the 5 fak_native_* rules existed but
+  # were never evaluated. Loading them here makes the native SLO alerts fire.
+  - "native-performance-alerts.yml"
 
 # Where firing alerts go. Prometheus evaluates prometheus-alerts.yml and hands firing
 # alerts to Alertmanager, which groups/routes them and POSTs a webhook to the fak

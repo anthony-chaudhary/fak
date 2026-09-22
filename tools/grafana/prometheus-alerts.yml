@@ -341,3 +341,200 @@ groups:
         annotations:
           summary: "no fak fleet usage row carries a session id"
           description: "The gateway-usage ledger has {{ $value }} folded rows but none carries a session_id, so every per-session cost/cache panel is blank while the fleet roll-ups are populated. `fak serve` rows are unidentified by design (one process, many sessions); a fleet of `fak guard` sessions should be producing identified rows."
+
+  # ---------------------------------------------------------------------------
+  # Fak Ops plane (exporter `fak-ops-dashboard`, scrape job fak_ops, :9096; and
+  # `fak-sync ops throughput-metrics`, scrape job fak_ops_workers, :9094).
+  # These enforce the repo's own fail-closed doctrine for the autonomous
+  # factory: a skipped plane, an unreadable state file, a stale routine and a
+  # degraded stuck-join are all DANGEROUS WHEN SILENT, because every ops panel
+  # renders a healthy-looking number (often zero) in exactly those cases. Each
+  # rule below therefore fires on the CONFESSION metric (up, *_partial,
+  # *_present, truncated, *_plane_up), never on a coincidence of zeros.
+  #
+  # Metric-name note: the two exporters are deliberately name-disjoint. The ops
+  # dashboard owns fak_ops_schedule_enabled/stale; the workers exporter emits
+  # fak_ops_workers_routines_enabled/stale instead (see
+  # cmd/fak-sync/ops_throughput_metrics.go) so a cross-job selector can never
+  # silently sum both. The rules below always name the job explicitly.
+  - name: fak_ops_availability
+    rules:
+      # `up == 0` is the authoritative "process gone" signal, matching
+      # FleetBottleneckEngineDown / FakGatewayDown. A dead ops exporter is an
+      # OBSERVABILITY outage: the factory may be running perfectly and be
+      # completely unwatched.
+      - alert: FakOpsExporterDown
+        expr: up{job="fak_ops"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fak ops dashboard exporter is not scrapeable"
+          description: "Prometheus cannot scrape fak-ops-dashboard at :9096/metrics for 5m, so every Ops Plane Statuses panel is blank. This is an observability outage, not necessarily an ops outage. Start it with `fak-ops-dashboard --addr 0.0.0.0:9096 --repo-root .` or `fak-obs-stack check`."
+
+      - alert: FakOpsWorkersExporterDown
+        expr: up{job="fak_ops_workers"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fak ops workers/throughput exporter is not scrapeable"
+          description: "Prometheus cannot scrape `fak-sync ops throughput-metrics` at :9094/metrics for 5m, so workers, queue depth and issue-throughput panels are blank. Start it with `fak-sync ops throughput-metrics --serve --addr 0.0.0.0:9094`."
+
+      # The exporter folds per scrape; a served snapshot older than the refresh
+      # interval means the content routes show a stale fold while `up` stays 1.
+      # Without this rule a frozen fold is invisible.
+      - alert: FakOpsSnapshotStale
+        expr: fak_ops_up == 1 and fak_ops_snapshot_age_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fak ops dashboard is serving a stale snapshot"
+          description: "The ops exporter responds but its cached snapshot is {{ $value | printf \"%.0f\" }}s old for 5m (the refresh interval is far shorter). The background fold is wedged, so every panel is a frozen past. Check for a stuck stuck-work probe and restart the exporter."
+
+  - name: fak_ops_degradation
+    rules:
+      # fak_ops_partial / fak_ops_stuck_partial are the exporter's own
+      # confession that a plane FAILED. A failed plane is not a zero, and the
+      # dashboard cannot tell the two apart on its own -- this makes it loud.
+      - alert: FakOpsPlaneDegraded
+        expr: fak_ops_partial == 1 or fak_ops_stuck_partial == 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fak ops is folding a degraded/partial snapshot"
+          description: "The ops exporter reports partial=true (or stuck_partial=true) for 10m: at least one plane failed or was deliberately skipped, so the counts understate work. Read the named diagnostics on the exporter `/status` page and `skipped_planes` -- do NOT read the numbers as zero."
+
+      # A failed stuck plane means an entire class of work is UNCOUNTED while the
+      # Stuck total looks calm.
+      - alert: FakOpsStuckPlaneFailed
+        expr: fak_ops_stuck_planes_failed > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fak ops stuck-work join has a failed plane"
+          description: "{{ $value }} stuck-work plane(s) failed for 10m, so stuck work in those planes is invisible and the stuck total is a LOWER BOUND. Inspect `fak-sync ops stuck` and the exporter diagnostics."
+
+      # An unreadable state file and an idle queue look identical on every other
+      # panel (both render zero items), which is exactly why the exporter emits
+      # this presence gauge separately.
+      - alert: FakOpsStateUnreadable
+        expr: fak_ops_up == 1 and fak_ops_state_present == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fak ops cannot read its own state file"
+          description: "The ops exporter is up but `.fak/ops.json` has been unreadable for 15m, so routines/queue/intervals read as empty while knowing nothing. Do NOT read the factory as idle. Check the state path and its permissions."
+
+      - alert: FakOpsReportsLedgerMissing
+        expr: fak_ops_up == 1 and fak_ops_reports_ledger_present == 0
+        for: 1h
+        labels:
+          severity: info
+        annotations:
+          summary: "fak ops report ledger is absent"
+          description: "The ops exporter has been up for 1h but `.fak/ops-reports.jsonl` is absent, so every reports-window panel is empty by construction rather than by inactivity. Confirm the ops runs are writing their report ledger."
+
+      - alert: FakOpsGoalRegistryMissing
+        expr: fak_ops_up == 1 and fak_ops_canonical_goal_registry_present == 0
+        for: 1h
+        labels:
+          severity: info
+        annotations:
+          summary: "fak canonical goal registry is unreadable"
+          description: "The ops exporter cannot read the canonical fak goal registry for 1h, so goal-lifecycle and goal-closure panels are blank while the registry may simply be empty. A missing registry is not a closed goal."
+
+      # The failure-rate series is deliberately OMITTED when the window holds no
+      # terminal result, so a plain `> X` rule cannot see "no data at all".
+      # This uses the same absent() idiom as FleetAuditEmpty to catch the silent
+      # case.
+      - alert: FakOpsReportsWindowEmpty
+        expr: fak_ops_up == 1 and absent(fak_ops_reports_failure_rate)
+        for: 1h
+        labels:
+          severity: info
+        annotations:
+          summary: "fak ops has no terminal report results in the window"
+          description: "The ops report window has contained no ok/failed interval for 1h (the exporter omits the failure rate rather than emitting zero). Either ops is not running or its reports are not landing -- check `fak-sync ops status` and the scheduler cadence."
+
+  - name: fak_ops_health
+    rules:
+      # A stale routine is enabled but not firing: the scheduler believes it is
+      # live while it produces nothing.
+      - alert: FakOpsRoutinesStale
+        expr: fak_ops_schedule_stale > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fak ops has stale enabled routines"
+          description: "{{ $value }} enabled ops routine(s) are past the stale threshold for 15m -- they are scheduled but not firing. Re-arm them with `fak-sync ops routine-rearm` or inspect `fak-sync ops status`."
+
+      - alert: FakOpsWorkersRoutinesStale
+        expr: fak_ops_workers_routines_stale > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fak ops workers view reports stale routines"
+          description: "The workers exporter counts {{ $value }} stale enabled routine(s) for 15m. See `fak-sync ops status`; re-arm with `fak-sync ops routine-rearm`."
+
+      # A persistently failing factory is the ops-plane equivalent of a red
+      # build: work is being admitted and thrown away.
+      - alert: FakOpsHighFailureRate
+        expr: fak_ops_reports_failure_rate > 0.25
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fak ops report failure rate is high"
+          description: "{{ $value | printf \"%.2f\" }} of terminal ops intervals in the window failed for 30m. Inspect `fak-sync ops failure-catalog` and the failing routine's recent intervals."
+
+      # The goal-closure SLO is the factory's throughput truth; it had zero
+      # alerting before this group.
+      - alert: FakOpsGoalClosureLow
+        expr: fak_ops_canonical_goal_health{status="LOW"} == 1
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "fak canonical goal closure rate is below floor"
+          description: "Independently witnessed goal closures have been below the configured floor for 1h. The factory is producing work but not closing goals -- check for work accumulating in-flight: `fak-flow wip` and `fak-flow cycle`."
+
+      # Backlog growth is the slowest-moving and most important ops signal:
+      # closed-per-hour below opened-per-hour means the factory is losing.
+      - alert: FakOpsIssueBacklogGrowing
+        expr: fak_ops_issues_net_per_hour{window="12h"} > 0
+        for: 2h
+        labels:
+          severity: info
+        annotations:
+          summary: "fak issue backlog is growing"
+          description: "Issues are being opened faster than closed over the trailing 12h window (net {{ $value | printf \"%.1f\" }}/h) for 2h. This is a throughput trend, not an incident; see the Workers & Issue Throughput dashboard (uid fak-ops-workers-queue)."
+
+      # A truncated census renders a table that LOOKS complete. Alerting on the
+      # confession is the only way an operator learns the throughput view is a
+      # lower bound.
+      - alert: FakOpsThroughputCensusTruncated
+        expr: fak_ops_throughput_census_truncated > 0
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: "fak ops issue-throughput census is truncated"
+          description: "The GitHub issue census is truncated ({{ $value }} items outside the bound) for 30m, so closure counts are a LOWER BOUND. Raise the census bound or narrow the window."
+
+      # A plane-readiness gauge at 0 means the worktree/session census could not
+      # be read, which is different from zero live workers.
+      - alert: FakOpsWorktreePlaneDown
+        expr: fak_ops_worktree_plane_up == 0 or fak_ops_sessions_plane_up == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fak ops worktree/session plane is unreadable"
+          description: "The live worktree or session census plane has been down for 15m, so live-worker and at-risk-worktree counts are unknown, not zero. Check the worktree root and git availability on the exporting host."
