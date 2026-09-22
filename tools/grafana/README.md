@@ -195,6 +195,57 @@ Unlike the other dashboards it does **not** read `fak serve`; scrape the dedicat
 `fak_cachevalue` job instead (`fak cachevalue metrics --serve --addr 127.0.0.1:9097`,
 folded from `docs/nightrun/*.jsonl` + `experiments/ablate/*.json`).
 
+## Ops plane — the autonomous factory's own surfaces
+
+The **Ops plane** is the repository watching its own autonomous work: cadence routines, the
+queue, the report window, the stuck-work join, goal lifecycle, and the worker/issue-throughput
+census. Two exporters feed it (both live in the private companion repo; the *rules and panels*
+are public here):
+
+| Scrape job | Exporter | Serves | Feeds |
+|---|---|---|---|
+| `fak_ops` | `fak-ops-dashboard --addr 0.0.0.0:9096 --repo-root .` | `fak_ops_*` at `:9096/metrics` — the ops plane fold: routines, queue, report window, stuck-work join, canonical goals, child resources | **FAK Ops \| Ops Plane Statuses** (uid `fak-ops-statuses`) |
+| `fak_ops_workers` | `fak-sync ops throughput-metrics --serve --addr 0.0.0.0:9094` | `fak_ops_*` at `:9094/metrics` — the live worktree/session census plus one bounded (24h) `gh` issue census folded into the 6m/30m/60m/12h/24h windows | **FAK Ops \| Workers, Queue & Issue Throughput** (uid `fak-ops-workers-queue`) |
+
+Both jobs scrape at `60s` with a raised `scrape_timeout` (`45s` / `60s`) because each is a live
+disk fold per scrape, not a hot path.
+
+### The ops dashboards are hand-authored JSON
+
+`dashboards/fak-ops-statuses.json` and `dashboards/fak-ops-workers-queue.json` are **edited
+directly** — they are *not* emitted by [`gen_dashboard.py`](gen_dashboard.py), which writes
+only the fleet / gateway / cache / guard / dogfood / startup set (see [Regenerate the
+dashboard](#regenerate-the-dashboard)). Re-running the generator will not touch them and will
+not undo a panel fix; open the JSON, not the generator.
+
+### Ops alert rules — fire on the confession, never on a coincidence of zeros
+
+`prometheus-alerts.yml` carries three ops groups. The doctrine is the load-bearing part: **an
+unreadable plane renders zero on a panel**, so an idle factory and a blind one look identical.
+Every ops rule therefore fires on a **CONFESSION metric** (`up`, `*_partial`, `*_present`,
+`truncated`, `*_plane_up`) rather than on a value that happens to be 0.
+
+- **`fak_ops_availability`** — `FakOpsExporterDown`, `FakOpsWorkersExporterDown`,
+  `FakOpsSnapshotStale`
+- **`fak_ops_degradation`** — `FakOpsPlaneDegraded`, `FakOpsStuckPlaneFailed`,
+  `FakOpsStateUnreadable`, `FakOpsReportsLedgerMissing`, `FakOpsGoalRegistryMissing`,
+  `FakOpsReportsWindowEmpty`
+- **`fak_ops_health`** — `FakOpsRoutinesStale`, `FakOpsWorkersRoutinesStale`,
+  `FakOpsHighFailureRate`, `FakOpsGoalClosureLow`, `FakOpsIssueBacklogGrowing`,
+  `FakOpsThroughputCensusTruncated`, `FakOpsWorktreePlaneDown`
+
+The two exporters are deliberately **name-disjoint**: the dashboard exporter emits
+`fak_ops_schedule_enabled` / `fak_ops_schedule_stale`, while the workers exporter emits
+`fak_ops_workers_routines_enabled` / `fak_ops_workers_routines_stale`, so a selector without an
+explicit `job=` can never silently sum both. Every rule names its job.
+
+> **Port conflict, not yet reconciled.** `:9096` is documented for **two** things: the
+> `fak-ops-dashboard` Prometheus scrape target (job `fak_ops`, above) **and** the `fak slack
+> alert --serve` Alertmanager webhook receiver (see [Alerts → Slack](#alerts--slack-alertmanager--fak-receiver--durable-outbox)
+> and the [Ports](#ports) table). Only one process can bind `:9096`. This is a known clash with
+> no resolution chosen yet — do not read either mention as authoritative; pick a port for one of
+> the two before running both on one host.
+
 ## Run Operations: home → run drill-down
 
 The **FAK Run Operations** home (uid `fak-fleet-overview`) and **FAK Run Operations —
