@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -56,6 +58,27 @@ func init() {
 	if os.Getenv("FAK_OPS_NATIVE_TEST_CHILD") == "1" && len(os.Args) > 1 && os.Args[1] == "chat" {
 		cmdChat(os.Args[2:])
 		os.Exit(0)
+	}
+	// Receipt-shape fixtures for the launch-identity witness. The marker value
+	// travels through --api-key-env, which is the one ambient variable the native
+	// child environment deliberately admits, so no production boundary weakens.
+	if fixture := os.Getenv("FAK_OPS_NATIVE_RECEIPT_FIXTURE"); fixture != "" && len(os.Args) > 1 && os.Args[1] == "chat" {
+		writeOpsNativeFixtureReceipt([]byte(fixture))
+		os.Exit(0)
+	}
+	if os.Getenv("FAK_OPS_NATIVE_NO_RECEIPT") == "1" && len(os.Args) > 1 && os.Args[1] == "chat" {
+		os.Exit(0)
+	}
+}
+
+// writeOpsNativeFixtureReceipt mirrors the production child's receipt write: the
+// file named by --receipt is the only durable handoff the parent reads.
+func writeOpsNativeFixtureReceipt(body []byte) {
+	for i := 2; i+1 < len(os.Args); i++ {
+		if os.Args[i] == "--receipt" {
+			_ = os.WriteFile(os.Args[i+1], body, 0600)
+			return
+		}
 	}
 }
 
@@ -732,4 +755,263 @@ func TestOpsNativePolicyExactCommand(t *testing.T) {
 	if code != 0 || got.Status != "succeeded" {
 		t.Fatalf("code=%d, status=%q, stderr=%s", code, got.Status, &stderr)
 	}
+}
+
+// opsNativeLaunchRun drives one native launch through the receipt-shape fixture
+// and returns the observed process exit plus the decoded shared receipt.
+func opsNativeLaunchRun(t *testing.T, gatewayURL, marker, markerValue string) (int, opsRunReceipt, string) {
+	t.Helper()
+	root := t.TempDir()
+	prompt := filepath.Join(root, "prompt.txt")
+	receiptPath := filepath.Join(root, "run.json")
+	if err := os.WriteFile(prompt, []byte("native launch identity task\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(marker, markerValue)
+	var stderr bytes.Buffer
+	code := runOpsNativeFixture(io.Discard, &stderr, marker, []string{
+		"--harness", "native", "--workspace", root,
+		"--prompt-file", prompt, "--receipt", receiptPath,
+		"--provider", "openai", "--model", "fixture", "--base-url", gatewayURL,
+		"--max-turns", "1", "--timeout", "10s",
+	})
+	data, err := os.ReadFile(receiptPath)
+	if err != nil {
+		t.Fatalf("read shared receipt after exit %d: %v; stderr=%s", code, err, stderr.String())
+	}
+	var receipt opsRunReceipt
+	if err := json.Unmarshal(data, &receipt); err != nil {
+		t.Fatalf("decode shared receipt: %v; raw=%s", err, data)
+	}
+	return code, receipt, stderr.String()
+}
+
+const (
+	opsNativeFixturePolicySHA = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	opsNativeFixtureSecret    = "xoxb-1234567890-abcdefghijklmnop"
+)
+
+var (
+	opsNativeToolsDisabled = `{"system":false,"mcp":false,"skills":false,"memory":false}`
+	opsNativeToolsSystemOn = `{"system":true,"mcp":false,"skills":false,"memory":false}`
+)
+
+// opsNativeFixtureReceipt renders a child-owned Fak-arm receipt with the given
+// enforcement block. enforcement is spliced verbatim so a case can declare an
+// absent, malformed, or unsupported enforcement surface.
+func opsNativeFixtureReceipt(enforcement string) string {
+	body := `{"schema":"fak.agent.native.v1","status":"completed","task":"private native task sentinel",` +
+		`"model":"fixture","metrics":{"arm":"fak"},"note":"` + opsNativeFixtureSecret + `"`
+	if enforcement != "" {
+		body += `,"enforcement":` + enforcement
+	}
+	return body + "}"
+}
+
+func opsNativeEnforcement(posture, tools string) string {
+	return `{"schema":"fak.agent.native.enforcement.v1","guard_posture":"` + posture +
+		`","policy_digest":"` + opsNativeFixturePolicySHA + `","workspace_digest":"` + opsNativeFixturePolicySHA +
+		`","tools":` + tools + `}`
+}
+
+// TestOpsNativeLaunchIdentity is the witness for the native launch identity: the
+// shared receipt must carry the tool surface the child actually applied, a
+// durable content-addressed reference to the redacted child receipt, and an
+// evidence-level guard verdict that cannot claim qualification it cannot witness.
+func TestOpsNativeLaunchIdentity(t *testing.T) {
+	newGateway := func(t *testing.T) *httptest.Server {
+		t.Helper()
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !serveOpsNativeInferencePreflight(t, w, r) {
+				t.Errorf("unexpected native provider request: %s %s", r.Method, r.URL.Path)
+			}
+		}))
+	}
+
+	t.Run("records_actual_capabilities_and_durable_child_receipt", func(t *testing.T) {
+		store := t.TempDir()
+		t.Setenv(opsNativeReceiptStoreEnv, store)
+		gateway := newGateway(t)
+		defer gateway.Close()
+
+		code, receipt, stderr := opsNativeLaunchRun(t, gateway.URL+"/v1", "FAK_OPS_NATIVE_RECEIPT_FIXTURE", opsNativeFixtureReceipt(opsNativeEnforcement("fail_closed", opsNativeToolsDisabled)))
+		if code != 0 || receipt.Status != "succeeded" {
+			t.Fatalf("qualified native run code=%d status=%q stderr=%s", code, receipt.Status, stderr)
+		}
+		if receipt.LaunchIdentity == nil {
+			t.Fatal("native receipt lacks the shared launch identity")
+		}
+		identity := receipt.LaunchIdentity
+		if identity.Harness != opsNativeHarness || identity.Schema != opsRunLaunchIdentitySchema {
+			t.Fatalf("launch identity = %#v, want native %s", identity, opsRunLaunchIdentitySchema)
+		}
+		if identity.NativeToolMediation != "native:sys=false,mcp=false,skills=false,memory=false" {
+			t.Errorf("native_tool_mediation=%q, want the ACTUAL disabled tool surface", identity.NativeToolMediation)
+		}
+		if identity.GuardEffective != opsNativeGuardEvidenceQualified || identity.GuardModeEffective != "enforce" {
+			t.Errorf("guard_effective=%q guard_mode_effective=%q, want qualified/enforce", identity.GuardEffective, identity.GuardModeEffective)
+		}
+		if identity.PolicyDigest != opsNativeFixturePolicySHA || identity.PolicySource != "child_receipt" {
+			t.Errorf("policy provenance = %q/%q, want the child-attested builtin-floor digest", identity.PolicySource, identity.PolicyDigest)
+		}
+		if receipt.InferencePreflight == nil || receipt.InferencePreflight.Status != "qualified" {
+			t.Fatalf("route/probe identity not recorded: %+v", receipt.InferencePreflight)
+		}
+		if identity.InferenceProbeRef != receipt.InferencePreflight.ReceiptRef {
+			t.Errorf("inference_probe_ref=%q, want the qualified probe ref %q", identity.InferenceProbeRef, receipt.InferencePreflight.ReceiptRef)
+		}
+		if receipt.ConfigPolicy == nil || receipt.ConfigPolicy.Source != opsNativeConfigPolicySource || receipt.ConfigPolicy.Status != opsNativeGuardEvidenceQualified {
+			t.Fatalf("native config policy = %+v, want a qualified %s receipt", receipt.ConfigPolicy, opsNativeConfigPolicySource)
+		}
+
+		// The durable artifact must exist, be content-addressed, and carry the
+		// redacted child receipt; the deleted temp path must never be referenced.
+		ref := identity.CapabilityEvidenceRef
+		if ref != identity.GuardEvidenceRef || !strings.HasPrefix(ref, "sha256:") || len(ref) != len("sha256:")+64 {
+			t.Fatalf("child receipt reference = %q (guard=%q), want one content-addressed sha256 ref", ref, identity.GuardEvidenceRef)
+		}
+		artifact := filepath.Join(store, "sha256", strings.TrimPrefix(ref, "sha256:")+".json")
+		body, err := os.ReadFile(artifact)
+		if err != nil {
+			t.Fatalf("durable child receipt %s missing: %v", artifact, err)
+		}
+		sum := sha256.Sum256(body)
+		if got := "sha256:" + hex.EncodeToString(sum[:]); got != ref {
+			t.Errorf("artifact digest = %s, want the referenced %s", got, ref)
+		}
+		if !strings.Contains(string(body), "private native task sentinel") {
+			t.Errorf("durable artifact dropped the child evidence: %s", body)
+		}
+		if strings.Contains(string(body), opsNativeFixtureSecret) {
+			t.Errorf("durable artifact retained a credential-shaped span: %s", body)
+		}
+		encoded, _ := json.Marshal(receipt)
+		if strings.Contains(string(encoded), "fak-ops-native-") {
+			t.Errorf("shared receipt referenced the deleted temp receipt path: %s", encoded)
+		}
+	})
+
+	t.Run("exit_zero_without_fak_arm_receipt_is_not_success", func(t *testing.T) {
+		t.Setenv(opsNativeReceiptStoreEnv, t.TempDir())
+		gateway := newGateway(t)
+		defer gateway.Close()
+
+		cases := []struct {
+			name   string
+			marker string
+			value  string
+		}{
+			{name: "receipt_never_written", marker: "FAK_OPS_NATIVE_NO_RECEIPT", value: "1"},
+			{name: "baseline_arm", marker: "FAK_OPS_NATIVE_RECEIPT_FIXTURE", value: `{"schema":"fak.agent.native.v1","status":"completed","metrics":{"arm":"baseline"}}`},
+			{name: "turn_cap_exceeded", marker: "FAK_OPS_NATIVE_RECEIPT_FIXTURE", value: `{"schema":"fak.agent.native.v1","status":"turn_cap_exceeded","metrics":{"arm":"fak","hit_turn_cap":true}}`},
+			{name: "wrong_schema", marker: "FAK_OPS_NATIVE_RECEIPT_FIXTURE", value: `{"schema":"fak.agent.other.v1","status":"completed","metrics":{"arm":"fak"}}`},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				code, receipt, _ := opsNativeLaunchRun(t, gateway.URL+"/v1", tc.marker, tc.value)
+				if code == 0 || receipt.Status == "succeeded" {
+					t.Fatalf("exit-zero child without a completed Fak-arm receipt was accepted: code=%d status=%q", code, receipt.Status)
+				}
+				identity := receipt.LaunchIdentity
+				if identity == nil || identity.GuardEffective == opsNativeGuardEvidenceQualified {
+					t.Fatalf("unwitnessed child inherited a qualified guard verdict: %+v", identity)
+				}
+			})
+		}
+	})
+
+	t.Run("unsupported_guard_evidence_is_refused_and_cannot_inherit_opencode_qualification", func(t *testing.T) {
+		t.Setenv(opsNativeReceiptStoreEnv, t.TempDir())
+		gateway := newGateway(t)
+		defer gateway.Close()
+
+		cases := []struct {
+			name        string
+			enforcement string
+			wantReason  string
+		}{
+			{name: "unsupported_posture", enforcement: opsNativeEnforcement("mystery", opsNativeToolsDisabled), wantReason: "unsupported_guard_posture"},
+			{name: "posture_mismatch", enforcement: opsNativeEnforcement("default_open", opsNativeToolsDisabled), wantReason: "guard_posture_mismatch"},
+			{name: "unsupported_enforcement_schema", enforcement: `{"schema":"fak.agent.native.unknown.v1","guard_posture":"fail_closed","tools":` + opsNativeToolsDisabled + `}`, wantReason: "unsupported_enforcement_schema"},
+			{name: "tool_surface_contradicts_requested_floor", enforcement: opsNativeEnforcement("fail_closed", opsNativeToolsSystemOn), wantReason: "tool_capability_mismatch"},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				code, receipt, _ := opsNativeLaunchRun(t, gateway.URL+"/v1", "FAK_OPS_NATIVE_RECEIPT_FIXTURE", opsNativeFixtureReceipt(tc.enforcement))
+				if code == 0 || receipt.Status != "refused" {
+					t.Fatalf("unsupported child evidence was accepted: code=%d status=%q", code, receipt.Status)
+				}
+				identity := receipt.LaunchIdentity
+				if identity == nil {
+					t.Fatal("refused run lacks a launch identity")
+				}
+				if identity.GuardEffective != opsNativeGuardEvidenceRefused || identity.GuardModeEffective == "enforce" {
+					t.Errorf("guard verdict = %q/%q, want refused with no inherited enforce qualification", identity.GuardEffective, identity.GuardModeEffective)
+				}
+				if identity.NativeToolMediation != "native:sys=false,mcp=false,skills=false,memory=false" {
+					t.Errorf("native_tool_mediation=%q, want the requested floor on a refusal", identity.NativeToolMediation)
+				}
+				// The native arm must never borrow the OpenCode qualification seam.
+				if receipt.ConfigPolicy == nil || receipt.ConfigPolicy.Source != opsNativeConfigPolicySource {
+					t.Fatalf("native refusal borrowed the OpenCode policy seam: identity=%#v config_policy=%+v", identity, receipt.ConfigPolicy)
+				}
+				if receipt.ConfigPolicy.Status != opsNativeGuardEvidenceRefused || receipt.ConfigPolicy.Reason != tc.wantReason {
+					t.Errorf("config_policy = %+v, want refused/%s", receipt.ConfigPolicy, tc.wantReason)
+				}
+				if receipt.InferencePreflight == nil || receipt.InferencePreflight.Status != "qualified" {
+					t.Errorf("route evidence must remain distinct from the refused guard evidence: %+v", receipt.InferencePreflight)
+				}
+				if identity.InferenceProbeRef != receipt.InferencePreflight.ReceiptRef {
+					t.Errorf("inference_probe_ref=%q, want %q", identity.InferenceProbeRef, receipt.InferencePreflight.ReceiptRef)
+				}
+			})
+		}
+	})
+
+	t.Run("missing_enforcement_stays_unknown_not_qualified", func(t *testing.T) {
+		t.Setenv(opsNativeReceiptStoreEnv, t.TempDir())
+		gateway := newGateway(t)
+		defer gateway.Close()
+
+		code, receipt, stderr := opsNativeLaunchRun(t, gateway.URL+"/v1", "FAK_OPS_NATIVE_RECEIPT_FIXTURE", opsNativeFixtureReceipt(""))
+		if code != 0 || receipt.Status != "succeeded" {
+			t.Fatalf("legacy child receipt should still complete: code=%d status=%q stderr=%s", code, receipt.Status, stderr)
+		}
+		identity := receipt.LaunchIdentity
+		if identity == nil {
+			t.Fatal("run without enforcement evidence lacks a launch identity")
+		}
+		if identity.GuardEffective != opsNativeGuardEvidenceUnknown || identity.GuardModeEffective == "enforce" {
+			t.Errorf("guard verdict = %q/%q, want unknown with no inherited qualification", identity.GuardEffective, identity.GuardModeEffective)
+		}
+		if receipt.ConfigPolicy == nil || receipt.ConfigPolicy.Status != opsNativeGuardEvidenceUnknown || receipt.ConfigPolicy.Reason != "missing_child_enforcement_evidence" {
+			t.Fatalf("config_policy = %+v, want an unknown missing-evidence verdict", receipt.ConfigPolicy)
+		}
+	})
+
+	t.Run("dry_run_does_not_claim_guarded_or_qualified", func(t *testing.T) {
+		root := t.TempDir()
+		prompt := filepath.Join(root, "prompt.txt")
+		if err := os.WriteFile(prompt, []byte("native plan identity probe\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		code := runOpsRun(&stdout, &stderr, []string{
+			"--harness", "native", "--dry-run", "--prompt-file", prompt,
+			"--provider", "openai", "--model", "fixture", "--base-url", "http://127.0.0.1:1/v1",
+		})
+		if code != 0 {
+			t.Fatalf("native dry run exit=%d: %s", code, stderr.String())
+		}
+		var plan map[string]any
+		if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+			t.Fatal(err)
+		}
+		if guarded, _ := plan["guarded"].(bool); guarded {
+			t.Fatalf("native dry-run plan claimed an unwitnessed guarded posture: %s", stdout.Bytes())
+		}
+		if plan["guard_requested"] != "fail_closed" || plan["guard_effective"] != "unknown" {
+			t.Errorf("native dry-run plan overstated enforcement: %s", stdout.Bytes())
+		}
+	})
 }
