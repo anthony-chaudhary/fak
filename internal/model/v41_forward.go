@@ -2704,22 +2704,82 @@ func (s *Session) prefillV41(ids []int) []float32 {
 	return lastLogits(act)
 }
 
-// stepV41 is the DeepSeek V4.1 branch of Session.Step. The assembly is
-// cacheless: Step folds the token into the committed history and recomputes the
-// whole history, so its logits are exactly a longer Forward's last-position
-// logits (the #12901 prefill/step consistency property).
+// v41IncrementalStepProbe is an optional test-only observer invoked after
+// Session.Step advances on the INCREMENTAL route (#13313). It is nil in
+// production (a single nil check on the step's success path) and exists so a
+// witness can prove the production entry point actually takes the incremental
+// seam rather than the full-history fallback.
+var v41IncrementalStepProbe func()
+
+// v41IncrementalEligible reports whether the session can advance its next Step
+// with the shadow one-token seam (forwardV41Step, #13311) instead of a
+// full-history recompute. It is the EXPLICIT eligibility status the #13313 leaf
+// requires: every configured layer must hold a seeded retained state and declare
+// the plain per-layer role, so the seam's own refusals (a compressed / source /
+// reader role, or an unseeded state) never fire mid-step. Anything else, or a
+// session that has not prefilled yet, keeps the historical cold/full route.
+func (s *Session) v41IncrementalEligible() bool {
+	st := s.v41Forward
+	if st == nil {
+		return false
+	}
+	cfg := s.M.Cfg
+	roles := s.M.v41AttentionRolesCached()
+	for l := 0; l < cfg.NumLayers; l++ {
+		if st.layerState(l) == nil {
+			return false
+		}
+		plan, err := v41AttentionPlanFor(cfg, l, roles)
+		if err != nil {
+			return false
+		}
+		if plan.Role != V41AttentionRolePerLayer || plan.Ratio > 1 {
+			return false
+		}
+	}
+	return true
+}
+
+// stepV41 is the DeepSeek V4.1 branch of Session.Step. When the session holds a
+// seeded, plain-layer decode state it advances ONE token through the shadow
+// incremental seam (forwardV41Step, #13311): the token is embedded, carried
+// through every configured layer and the head, and committed to history only on
+// success. The logits are byte-identical to the full-history recompute's
+// last-position logits (the #12901 prefill/step consistency property), without
+// replaying the prepared prefix. A session that is not incrementally eligible --
+// no state yet, a compressed / shared-source / reader layer, or a malformed
+// plan -- keeps the cacheless full-history route, so cold requests remain
+// usable with an explicit unsupported status and a failed step never claims a
+// cache hit.
 //
 // Phase attribution (#13294): the step runs under V41PhaseDecode and notes ONE
 // token — the Step call, i.e. the served decode token the tok/s gate counts —
-// so the decode ledger's fault cost honestly includes the whole-history
-// recompute this cacheless assembly pays per step. That is exactly the number
-// the physical 5 tok/s target needs to attribute.
+// on both routes, so the decode ledger's fault cost honestly attributes the
+// per-step work the assembly actually pays (the incremental seam on a prepared
+// state, the whole-history recompute on the fallback).
 func (s *Session) stepV41(id int) []float32 {
 	if err := s.M.v41ForwardAdmitted(); err != nil {
 		panic(err)
 	}
 	s.M.v41SetExpertFaultPhase(V41PhaseDecode)
 	defer s.M.v41SetExpertFaultPhase(V41PhaseUnknown)
+	if s.v41IncrementalEligible() {
+		logits, _, err := s.M.forwardV41Step(id, s.v41Forward, &v41ProjScratch{})
+		if err == nil {
+			s.M.v41NoteExpertFaultToken(1)
+			if v41IncrementalStepProbe != nil {
+				v41IncrementalStepProbe()
+			}
+			return logits
+		}
+		if !errors.Is(err, ErrV41ForwardStage) {
+			panic(err)
+		}
+		// A typed stage refusal the eligibility check could not foresee (e.g. the
+		// step position does not match the retained cursor). The seam rolled the
+		// step back, so history is untouched; fall through to the reference path,
+		// which re-folds the token into the committed history.
+	}
 	act, err := s.M.forwardV41([]int{id}, s.v41State())
 	if err != nil {
 		panic(err)
