@@ -60,6 +60,30 @@ type PrefixSnapshot struct {
 	captureTargetHidden bool
 	targetHidden        [][]float32
 	targetHiddenTokens  []int
+	// v41 captures the DeepSeek V4.1 session-owned continuation state (the
+	// v41ForwardState committed token history plus each layer's bounded temporal
+	// V41AttentionState) delivered by #13305/#13313. The generic Cache alone does
+	// not carry it, so restoring a V4.1 prefix from Cache is incomplete; this
+	// field is what makes the clone a COMPLETE V4.1 prefix (fak#13342).
+	v41 *v41ForwardSnapshot
+}
+
+// v41ForwardSnapshot is the deep-owned copy of a session's V4.1 continuation
+// state. It mirrors exactly the mutable continuation fields the arithmetic
+// reads -- token history, the per-layer temporal attention states, and the
+// shared source-publication registry -- and NEVER the expertGateUp callback,
+// which is a per-session device binding rather than continuation data, and
+// never any weight table. Ownership is deep: every row is copied, so mutating
+// or closing one branch cannot alter another (fak#13342).
+type v41ForwardSnapshot struct {
+	history []int
+	attn    *V41AttentionState
+	layers  []*V41AttentionState
+	// hadState records whether the owner session held a live v41ForwardState at
+	// capture. A snapshot of a session that never ran a V4.1 forward carries the
+	// nil-state contract, so restoring it leaves the target session's V4.1 state
+	// absent rather than inventing an empty-but-present one.
+	hadState bool
 }
 
 // PrefixSnapshot captures an independently owned prefix. Qwen recurrent layers
@@ -83,6 +107,14 @@ func (s *Session) PrefixSnapshot() (*PrefixSnapshot, error) {
 	out.targetHidden = cloneTargetHidden(s.targetHidden)
 	out.targetHiddenTokens = append([]int(nil), s.targetHiddenTokens...)
 	s.targetHiddenMu.RUnlock()
+	// V4.1 session state is part of the prefix just as surely as KV: the generic
+	// Cache does not carry the token history or the per-layer temporal states the
+	// assembly reads, so a snapshot that copied Cache alone would restore a
+	// session that has ingested nothing while its caller believes it holds the
+	// prefix (#13342, same failure family as #5548). Capture it whenever the
+	// session has one; a session that never ran a V4.1 forward keeps the absent
+	// contract.
+	out.v41 = captureV41ForwardSnapshot(s.v41Forward)
 	if s.Backend == nil {
 		return out, nil
 	}
@@ -116,6 +148,7 @@ func (p *PrefixSnapshot) Clone() (*PrefixSnapshot, error) {
 		captureTargetHidden: p.captureTargetHidden,
 		targetHidden:        cloneTargetHidden(p.targetHidden),
 		targetHiddenTokens:  append([]int(nil), p.targetHiddenTokens...),
+		v41:                 p.v41.clone(),
 	}
 	if p.Backend == nil {
 		return out, nil
@@ -179,6 +212,17 @@ func (p *PrefixSnapshot) Restore(s *Session) error {
 	s.targetHidden, s.targetHiddenTokens = p.targetHidden, p.targetHiddenTokens
 	s.targetHiddenMu.Unlock()
 	p.targetHidden, p.targetHiddenTokens = nil, nil
+	// Install the complete V4.1 continuation state and transfer ownership. A
+	// snapshot captured from a session with no V4.1 state restores the absent
+	// contract (nil), so the target never appears to hold a prefix it does not.
+	if p.v41 != nil {
+		if p.v41.hadState {
+			s.v41Forward = p.v41.restore()
+		} else {
+			s.v41Forward = nil
+		}
+		p.v41 = nil
+	}
 	return nil
 }
 
@@ -199,6 +243,138 @@ func (p *PrefixSnapshot) Close() {
 	}
 	p.Cache = nil
 	p.targetHidden, p.targetHiddenTokens = nil, nil
+	p.v41 = nil
+}
+
+// captureV41ForwardSnapshot deep-copies a session's V4.1 continuation state, or
+// returns nil when the session never ran a V4.1 forward. The per-layer temporal
+// states and the shared source-publication registry are copied row-by-row so the
+// snapshot owns them independently of the session; the expertGateUp callback is
+// deliberately NOT captured (it is a per-session device binding, not
+// continuation data), matching the step-local run state the assembly builds.
+func captureV41ForwardSnapshot(st *v41ForwardState) *v41ForwardSnapshot {
+	if st == nil {
+		return nil
+	}
+	out := &v41ForwardSnapshot{
+		history:  append([]int(nil), st.history...),
+		attn:     st.attn.clone(),
+		hadState: true,
+	}
+	if len(st.layers) > 0 {
+		out.layers = make([]*V41AttentionState, len(st.layers))
+		for i, layer := range st.layers {
+			out.layers[i] = layer.clone()
+		}
+	}
+	return out
+}
+
+// clone makes a second deep-owned copy, so two branches of one snapshot never
+// alias mutable rows. A nil snapshot clones to nil.
+func (n *v41ForwardSnapshot) clone() *v41ForwardSnapshot {
+	if n == nil {
+		return nil
+	}
+	out := &v41ForwardSnapshot{
+		history:  append([]int(nil), n.history...),
+		attn:     n.attn.clone(),
+		hadState: n.hadState,
+	}
+	if len(n.layers) > 0 {
+		out.layers = make([]*V41AttentionState, len(n.layers))
+		for i, layer := range n.layers {
+			out.layers[i] = layer.clone()
+		}
+	}
+	return out
+}
+
+// restore builds a fresh v41ForwardState that takes ownership of the snapshot's
+// deep-owned rows. It never aliases the snapshot: the history is copied and the
+// layer slice is handed over, then the snapshot's references are cleared by the
+// caller. expertGateUp is left nil so the restored session rebinds it on first
+// use through Session.v41State.
+func (n *v41ForwardSnapshot) restore() *v41ForwardState {
+	if n == nil {
+		return nil
+	}
+	out := &v41ForwardState{
+		history: append([]int(nil), n.history...),
+		attn:    n.attn,
+		layers:  n.layers,
+	}
+	n.history, n.attn, n.layers = nil, nil, nil
+	return out
+}
+
+// clone deep-copies one temporal attention state, including the window ring, the
+// incomplete compressor group and positions, the shared compressed/index
+// publications and their ranges, and the latest candidate/top-k selections. It
+// returns nil for nil so an absent per-layer state stays absent.
+func (s *V41AttentionState) clone() *V41AttentionState {
+	if s == nil {
+		return nil
+	}
+	out := &V41AttentionState{
+		windowSize:         s.windowSize,
+		headDim:            s.headDim,
+		ratioCap:           s.ratioCap,
+		nextWindowPos:      s.nextWindowPos,
+		nextCompressRow:    s.nextCompressRow,
+		retainedWindowRows: s.retainedWindowRows,
+		retainedCopies:     s.retainedCopies,
+		kvPublishedEnd:     make(map[int]int, len(s.kvPublishedEnd)),
+		indexPublishedEnd:  make(map[int]int, len(s.indexPublishedEnd)),
+		candidatesSet:      s.candidatesSet,
+		candidateRatio:     s.candidateRatio,
+		topkSet:            s.topkSet,
+		topkRatio:          s.topkRatio,
+	}
+	out.window = cloneV41Rows(s.window)
+	out.partialKV = cloneV41Rows(s.partialKV)
+	out.partialInputs = cloneV41Rows(s.partialInputs)
+	out.partialPositions = append([]int(nil), s.partialPositions...)
+	out.kvPublications = cloneV41PublicationRows(s.kvPublications)
+	out.indexPublications = cloneV41PublicationRows(s.indexPublications)
+	for k, v := range s.kvPublishedEnd {
+		out.kvPublishedEnd[k] = v
+	}
+	for k, v := range s.indexPublishedEnd {
+		out.indexPublishedEnd[k] = v
+	}
+	if s.candidates != nil {
+		out.candidates = append([]bool(nil), s.candidates...)
+	}
+	if s.topk != nil {
+		out.topk = make([][]int32, len(s.topk))
+		for i, row := range s.topk {
+			out.topk[i] = append([]int32(nil), row...)
+		}
+	}
+	return out
+}
+
+func cloneV41Rows(in [][]float32) [][]float32 {
+	if in == nil {
+		return nil
+	}
+	out := make([][]float32, len(in))
+	for i, row := range in {
+		out[i] = append([]float32(nil), row...)
+	}
+	return out
+}
+
+func cloneV41PublicationRows(in map[v41AttentionPublicationKey][]float32) map[v41AttentionPublicationKey][]float32 {
+	if in == nil {
+		return nil
+	}
+	out := make(map[v41AttentionPublicationKey][]float32, len(in))
+	for k, row := range in {
+		out[k] = append([]float32(nil), row...)
+	}
+	return out
 }
 
 func cloneTargetHidden(in [][]float32) [][]float32 {
