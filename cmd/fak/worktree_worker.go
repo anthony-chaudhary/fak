@@ -854,7 +854,7 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 	fs := flag.NewFlagSet("worktree worker land", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	worktree := fs.String("worktree", "", "the worker's worktree dir to land from (required)")
-	baseSHA := fs.String("base-sha", "", "the sha the worktree was pinned at — the diff ref (default: HEAD)")
+	baseSHA := fs.String("base-sha", "", "the sha the worktree was pinned at — the diff ref (default: HEAD); must match the prepared worktree intent base")
 	msgFile := fs.String("msg-file", "", "commit message file for `git commit -s -F` (default: derive from the worktree tip)")
 	verify := fs.String("verify", "go-build", "pre-land witness run IN the worktree: off | go-build (default: go-build)")
 	root := fs.String("root", "", "repo root the change lands on (default: discover from cwd)")

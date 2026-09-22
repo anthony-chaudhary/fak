@@ -23,6 +23,13 @@ const (
 	// The worker remains the durable source of the candidate while an operator or
 	// later retry reconciles it; the shared trunk index/worktree were not used.
 	LandResultReconciliationRequired = "reconciliation-required"
+	// LandResultBaseIntentMismatch refuses a caller-supplied base that disagrees
+	// with the worktree's durable prepared-base intent (a reused worktree landed
+	// against the wrong base would sweep unrelated history).
+	LandResultBaseIntentMismatch = "base-intent-mismatch"
+	// LandResultScopeEscape refuses a candidate whose tree delta reaches outside
+	// the explicitly declared land paths — a pre-CAS fence so trunk is untouched.
+	LandResultScopeEscape = "path-scope-escape"
 )
 
 func isolatedLandReconciliation(wtPath, reason, detail string) (Result, bool) {
@@ -40,7 +47,9 @@ func isolatedLandReconciliation(wtPath, reason, detail string) (Result, bool) {
 // disambiguation/recovery fields are consumed by existing operators.
 func isolatedLandReconciliationResult(wtPath string, result Result) Result {
 	result.OK = false
-	result.Code = LandResultReconciliationRequired
+	if result.Code == "" {
+		result.Code = LandResultReconciliationRequired
+	}
 	result.Preserved = true
 	if result.Path == "" {
 		result.Path = wtPath
@@ -161,6 +170,29 @@ func CountPathsOutsideTrees(changed, trees []string) int {
 		}
 	}
 	return outside
+}
+
+// countCandidateScopeEscapes returns how many paths the candidate tree changes
+// relative to oldHEAD fall outside the declared pathset. ok is false when the
+// name list cannot be read, so the caller can fail closed rather than treat an
+// unreadable scope as an empty (safe) one.
+func countCandidateScopeEscapes(genv GitEnvRunner, git GitRunner, root string, env map[string]string, oldHEAD, treeSHA string, paths []string) (escaped int, ok bool) {
+	if oldHEAD == "" || treeSHA == "" {
+		return 0, false
+	}
+	// -z keeps a path containing spaces a single field (strings.Fields would split it).
+	args := []string{"diff", "--name-only", "-z", oldHEAD, treeSHA}
+	var rc int
+	var out string
+	if genv != nil {
+		rc, out = runEnv(genv, root, env, args)
+	} else {
+		rc, out = run(git, root, args)
+	}
+	if rc != 0 {
+		return 0, false
+	}
+	return CountPathsOutsideTrees(strings.FieldsFunc(out, func(r rune) bool { return r == 0 }), paths), true
 }
 
 func expandLandPaths(wtPath, diffRef string, requested []string, git GitRunner) ([]string, error) {
@@ -299,7 +331,14 @@ func landPrepared(root, wtPath, baseSHA, commitMsgFile string, paths []string, v
 		}
 	}
 	stripWorktreeWIPFences(wtPath, paths)
-	rc, diff := run(git, wtPath, []string{"diff", "--binary", diffRef})
+	diffArgs := []string{"diff", "--binary", diffRef}
+	if len(paths) > 0 {
+		// Scope the captured patch to the declared pathset so only these files
+		// enter the throwaway index; without it the whole-worktree delta lands.
+		diffArgs = append(diffArgs, "--")
+		diffArgs = append(diffArgs, paths...)
+	}
+	rc, diff := run(git, wtPath, diffArgs)
 	if rc != 0 {
 		return Result{OK: false, Reason: "could not read worktree diff vs " + diffRef + " (git error) — fail open"}
 	}
@@ -309,9 +348,25 @@ func landPrepared(root, wtPath, baseSHA, commitMsgFile string, paths []string, v
 		return landNoOpResult(diffRef)
 	}
 	checkBase := strings.TrimSpace(baseSHA)
-	if checkBase == "" {
-		if in, err := LoadIntent(wtPath); err == nil {
-			checkBase = strings.TrimSpace(in.BaseSHA)
+	if in, err := LoadIntent(wtPath); err == nil {
+		intentBase := strings.TrimSpace(in.BaseSHA)
+		if checkBase != "" && intentBase != "" && checkBase != intentBase {
+			// A reused worktree carries a durable prepared-base intent; landing it
+			// against a different caller base would capture (and apply) the whole
+			// delta from the wrong ref. Refuse before any candidate construction.
+			return Result{
+				OK:        false,
+				Code:      LandResultBaseIntentMismatch,
+				Applied:   false,
+				Committed: false,
+				Preserved: true,
+				BaseSHA:   checkBase,
+				Reason: fmt.Sprintf("caller base %s differs from worktree prepared base %s (base-intent mismatch)",
+					shortSHA(checkBase), shortSHA(intentBase)),
+			}
+		}
+		if checkBase == "" {
+			checkBase = intentBase
 		}
 	}
 	if checkBase != "" {
@@ -854,6 +909,24 @@ func landIsolatedProspectivePrepared(root, wtPath, diff, msgFile string, paths [
 				return isolatedLandReconciliation(wtPath, "could not write isolated candidate tree", tree)
 			}
 			finishIndex()
+		}
+		// Pre-CAS candidate delta fence: the built tree must not change any path
+		// outside the declared scope. Refuse BEFORE commit-tree/update-ref so trunk
+		// (the branch ref) is never touched. Empty paths = legacy whole-tree land.
+		if len(paths) > 0 {
+			finishFence := beginLandPhase(tracker, "candidate-scope-fence", attempt)
+			if escaped, ok := countCandidateScopeEscapes(genv, git, root, env, oldHEAD, treeSHA, paths); !ok {
+				finishFence()
+				return isolatedLandReconciliation(wtPath, "could not inspect candidate tree scope", "")
+			} else if escaped > 0 {
+				finishFence()
+				return isolatedLandReconciliationResult(wtPath, Result{
+					Code:             LandResultScopeEscape,
+					Reason:           fmt.Sprintf("candidate tree changes %d path(s) outside the declared scope", escaped),
+					DroppedOutOfLane: escaped,
+				}), true
+			}
+			finishFence()
 		}
 		disambiguation = nil
 		if disambiguationRelevant(paths) {
