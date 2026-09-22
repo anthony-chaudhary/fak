@@ -125,6 +125,7 @@ func TestIsolatedLandProgressFollowsStateMachineOrder(t *testing.T) {
 	want := []string{
 		"isolated-admission",
 		"index-construction",
+		"candidate-scope-fence",
 		"commit-construction",
 		"recovery-ref-publication",
 		"trunk-cas",

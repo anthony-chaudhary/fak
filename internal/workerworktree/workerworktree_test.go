@@ -915,8 +915,14 @@ func TestLandIsolatedHappyPathUsesTempIndexAndCASRefUpdate(t *testing.T) {
 }
 
 func TestLandIsolatedSyncsIntermediatePeerCommits(t *testing.T) {
+	// Two ordered diff reads share the per-verb queue: first the pre-CAS
+	// candidate-scope fence (declared scope {"x"}), then the post-CAS whole-tree
+	// sync that carries the peer path. The fence read is `-z` (NUL-separated), so
+	// its reply is a NUL-terminated in-scope name; keeping it inside scope lets the
+	// land proceed while the sync read still observes peer.txt.
 	g := isolatedHappyFake().
-		reply("diff", 0, "x\npeer.txt\n").
+		replyOnce("diff", 0, "x\x00").
+		replyOnce("diff", 0, "x\npeer.txt\n").
 		reply("status", 0, "")
 	msg := writeMsg(t, "feat(x): do the thing (fak x)")
 	res, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", msg, []string{"x"}, "oldhead000", g.run, g.runEnv)
@@ -933,8 +939,12 @@ func TestLandIsolatedSyncsIntermediatePeerCommits(t *testing.T) {
 }
 
 func TestLandIsolatedSkipsConflictedRemotePaths(t *testing.T) {
+	// Same ordered reads as the peer-sync case: the pre-CAS fence must see only the
+	// in-scope NUL-terminated name, then the post-CAS sync read reports the peer
+	// path that the dirty status excludes from the checkout.
 	g := isolatedHappyFake().
-		reply("diff", 0, "x\npeer.txt\n").
+		replyOnce("diff", 0, "x\x00").
+		replyOnce("diff", 0, "x\npeer.txt\n").
 		reply("status", 0, " M peer.txt\n")
 	msg := writeMsg(t, "feat(x): do the thing (fak x)")
 	res, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", msg, []string{"x"}, "oldhead000", g.run, g.runEnv)
@@ -1600,6 +1610,332 @@ func TestLandReportsDroppedOutOfLanePaths(t *testing.T) {
 	}
 	if res.DroppedOutOfLane != 1 {
 		t.Fatalf("DroppedOutOfLane = %d, want 1", res.DroppedOutOfLane)
+	}
+}
+
+// ---- base-intent binding + candidate path-scope fence (#839) --------------- //
+
+// TestLandSecondBaseIntentMismatchRefusesBeforeCandidate is the base-intent gate
+// regression: a worktree carrying a durable prepared-base intent (B1) must refuse a
+// caller-supplied base (B2) that disagrees, BEFORE any candidate/commit is built, so
+// the trunk ref cannot move. Real git, so the refusal shape is observed on real refs.
+func TestLandSecondBaseIntentMismatchRefusesBeforeCandidate(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := t.TempDir()
+	mustGit(t, root, "init", "-q", "-b", "main")
+	mustGit(t, root, "config", "user.email", "tester@test")
+	mustGit(t, root, "config", "user.name", "tester")
+	mustGit(t, root, "config", "commit.gpgsign", "false")
+
+	if err := os.WriteFile(filepath.Join(root, "owned.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, root, "add", "owned.txt")
+	mustGit(t, root, "commit", "-q", "-m", "base")
+	intentBase := strings.TrimSpace(mustGit(t, root, "rev-parse", "HEAD"))
+
+	// Advance trunk: a second commit whose SHA is an ancestor of (and equal to) trunk
+	// HEAD, but a DIFFERENT base than the prepared intent.
+	if err := os.WriteFile(filepath.Join(root, "peer.txt"), []byte("peer\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, root, "add", "peer.txt")
+	mustGit(t, root, "commit", "-q", "-m", "peer")
+	callerBase := strings.TrimSpace(mustGit(t, root, "rev-parse", "HEAD"))
+	if callerBase == intentBase {
+		t.Fatal("fixture: caller base must differ from intent base")
+	}
+
+	wtRoot := t.TempDir()
+	prep := Prepare(root, "lane", "mismatch", intentBase, wtRoot, nil)
+	if !prep.OK {
+		t.Fatalf("prepare failed: %+v", prep)
+	}
+	t.Cleanup(func() { _ = Reap(root, prep.Path, nil) })
+	if err := SaveIntent(prep.Path, intentBase, "feat(x): bound (#839) (fak x)", []string{"owned.txt"}); err != nil {
+		t.Fatalf("SaveIntent: %v", err)
+	}
+	// A real worker delta so the land reaches the base-intent gate (non-empty diff).
+	if err := os.WriteFile(filepath.Join(prep.Path, "owned.txt"), []byte("worker change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	beforeHead := strings.TrimSpace(mustGit(t, root, "rev-parse", "HEAD"))
+	res := Land(root, prep.Path, callerBase, "", []string{"owned.txt"}, nil, nil)
+	if res.Code != LandResultBaseIntentMismatch || res.OK || res.Committed || res.Applied || !res.Preserved {
+		t.Fatalf("base-intent mismatch must refuse-preserve: %+v", res)
+	}
+	if res.BaseSHA != callerBase {
+		t.Fatalf("BaseSHA = %q, want supplied caller base %q", res.BaseSHA, callerBase)
+	}
+	afterHead := strings.TrimSpace(mustGit(t, root, "rev-parse", "HEAD"))
+	if afterHead != beforeHead {
+		t.Fatalf("trunk ref moved on a base-intent refusal: %s -> %s", beforeHead, afterHead)
+	}
+}
+
+// TestLandCandidateScopeEscapeRefusesBeforeCAS forces the pre-CAS candidate fence
+// to observe a changed name outside the declared scope. It must refuse with
+// path-scope-escape, preserve the worker, count the escape, and leave the trunk ref
+// untouched: neither commit-tree nor update-ref may run.
+func TestLandCandidateScopeEscapeRefusesBeforeCAS(t *testing.T) {
+	// The `-z` fence read reports a NUL-separated name outside the declared {"x"}.
+	g := isolatedHappyFake().
+		replyOnce("diff", 0, "x\x00unrelated.md\x00")
+	msg := writeMsg(t, "feat(x): do the thing (fak x)")
+	res, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", msg, []string{"x"}, "oldhead000", g.run, g.runEnv)
+	if !handled {
+		t.Fatalf("expected the isolated path to handle the land, got handled=%v", handled)
+	}
+	if res.Code != LandResultScopeEscape || res.OK || res.Committed || res.Applied || !res.Preserved {
+		t.Fatalf("candidate scope escape must refuse-preserve: %+v", res)
+	}
+	if res.DroppedOutOfLane != 1 {
+		t.Fatalf("DroppedOutOfLane = %d, want 1", res.DroppedOutOfLane)
+	}
+	if !strings.Contains(res.Reason, "1") {
+		t.Fatalf("Reason must name the escaped count: %q", res.Reason)
+	}
+	if strings.Contains(res.Reason, "unrelated.md") {
+		t.Fatalf("Reason must NOT leak the escaped path text: %q", res.Reason)
+	}
+	if n := len(g.envCallsWithPrefix("commit-tree")); n != 0 {
+		t.Fatalf("commit-tree ran before the fence refusal: %d calls, %v", n, g.envCalls)
+	}
+	if n := len(g.callsWithPrefix("commit-tree")) + len(g.envCallsWithPrefix("commit-tree")); n != 0 {
+		t.Fatalf("commit-tree ran before the fence refusal: %d calls", n)
+	}
+	if n := len(g.callsWithPrefix("update-ref")) + len(g.envCallsWithPrefix("update-ref")); n != 0 {
+		t.Fatalf("update-ref (trunk CAS) ran before the fence refusal: %d calls", n)
+	}
+}
+
+// TestLandSecondLandIncidentShapeRefusesUnrelatedDeletion is the incident-shaped
+// regression: a reused worktree has a durable base intent B1, the caller supplies a
+// DIFFERENT earlier base B2, the land declares three paths, and the worktree also
+// carries an unrelated out-of-lane DELETION. The base-intent gate must refuse before
+// any candidate is constructed, so the unrelated deletion can never enter a commit
+// and no trunk ref moves.
+func TestLandSecondLandIncidentShapeRefusesUnrelatedDeletion(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := t.TempDir()
+	mustGit(t, root, "init", "-q", "-b", "main")
+	mustGit(t, root, "config", "user.email", "tester@test")
+	mustGit(t, root, "config", "user.name", "tester")
+	mustGit(t, root, "config", "commit.gpgsign", "false")
+
+	declared := []string{"a.txt", "b.txt", "c.txt"}
+	for _, f := range append(append([]string{}, declared...), "unrelated.txt") {
+		if err := os.WriteFile(filepath.Join(root, f), []byte(f+" base\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustGit(t, root, "add", ".")
+	mustGit(t, root, "commit", "-q", "-m", "base")
+	intentBase := strings.TrimSpace(mustGit(t, root, "rev-parse", "HEAD"))
+
+	// The earlier caller base is a distinct ancestor: advance trunk by one commit.
+	if err := os.WriteFile(filepath.Join(root, "advance.txt"), []byte("advance\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, root, "add", "advance.txt")
+	mustGit(t, root, "commit", "-q", "-m", "advance")
+	callerBase := strings.TrimSpace(mustGit(t, root, "rev-parse", "HEAD"))
+
+	wtRoot := t.TempDir()
+	prep := Prepare(root, "lane", "incident", intentBase, wtRoot, nil)
+	if !prep.OK {
+		t.Fatalf("prepare failed: %+v", prep)
+	}
+	t.Cleanup(func() { _ = Reap(root, prep.Path, nil) })
+	if err := SaveIntent(prep.Path, intentBase, "feat(app): incident (#839) (fak app)", declared); err != nil {
+		t.Fatalf("SaveIntent: %v", err)
+	}
+	// Three declared in-scope edits plus one unrelated out-of-lane DELETION.
+	for _, f := range declared {
+		if err := os.WriteFile(filepath.Join(prep.Path, f), []byte(f+" worker\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Remove(filepath.Join(prep.Path, "unrelated.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	beforeHead := strings.TrimSpace(mustGit(t, root, "rev-parse", "HEAD"))
+	beforeCount := strings.TrimSpace(mustGit(t, root, "rev-list", "--count", "HEAD"))
+	res := Land(root, prep.Path, callerBase, "", declared, nil, nil)
+	if res.Code != LandResultBaseIntentMismatch || res.OK || res.Committed || res.Applied || !res.Preserved {
+		t.Fatalf("incident-shape land must refuse-preserve: %+v", res)
+	}
+	afterHead := strings.TrimSpace(mustGit(t, root, "rev-parse", "HEAD"))
+	if afterHead != beforeHead {
+		t.Fatalf("trunk ref moved on the incident-shape refusal: %s -> %s", beforeHead, afterHead)
+	}
+	if afterCount := strings.TrimSpace(mustGit(t, root, "rev-list", "--count", "HEAD")); afterCount != beforeCount {
+		t.Fatalf("a candidate commit entered trunk: count %s -> %s", beforeCount, afterCount)
+	}
+	// The unrelated deletion never reached trunk: it is still present at HEAD.
+	// mustGit fails the test if `cat-file -e` cannot resolve HEAD:unrelated.txt.
+	mustGit(t, root, "cat-file", "-e", "HEAD:unrelated.txt")
+	// The worker's out-of-lane deletion is preserved in the worktree, not applied.
+	if _, err := os.Stat(filepath.Join(prep.Path, "unrelated.txt")); !os.IsNotExist(err) {
+		t.Fatalf("worker worktree mutation was not preserved: %v", err)
+	}
+}
+
+// TestLandShortBasePrefixMatchesPreparedIntent is the adversarial F2 regression:
+// the caller base is compared to the durable prepared intent SEMANTICALLY, by
+// resolving both to a full commit sha, not textually. A caller passing the first 8
+// hex of the full intent base (or a tag/branch naming the same commit) must be
+// ACCEPTED — the land must proceed — while a genuinely DIFFERENT commit is still
+// refused with base-intent-mismatch. Real git, so rev-parse resolution is real.
+func TestLandShortBasePrefixMatchesPreparedIntent(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := t.TempDir()
+	mustGit(t, root, "init", "-q", "-b", "main")
+	mustGit(t, root, "config", "user.email", "tester@test")
+	mustGit(t, root, "config", "user.name", "tester")
+	mustGit(t, root, "config", "commit.gpgsign", "false")
+
+	if err := os.WriteFile(filepath.Join(root, "owned.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, root, "add", "owned.txt")
+	mustGit(t, root, "commit", "-q", "-m", "base")
+	intentBase := strings.TrimSpace(mustGit(t, root, "rev-parse", "HEAD"))
+	if len(intentBase) != 40 {
+		t.Fatalf("fixture: expected a full 40-hex intent base, got %q", intentBase)
+	}
+
+	// A genuinely different commit to prove the differential: the sibling commit
+	// below is an ANCESTOR of trunk, so its refusal can only come from the
+	// base-intent gate, never from the stale-base ancestor check.
+	if err := os.WriteFile(filepath.Join(root, "owned.txt"), []byte("second\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, root, "add", "owned.txt")
+	mustGit(t, root, "commit", "-q", "-m", "second")
+	diffBase := strings.TrimSpace(mustGit(t, root, "rev-parse", "HEAD"))
+	if diffBase == intentBase {
+		t.Fatal("fixture: differential base must differ from intent base")
+	}
+
+	prepareWT := func(t *testing.T) string {
+		t.Helper()
+		wtRoot := t.TempDir()
+		prep := Prepare(root, "lane", "shortbase", intentBase, wtRoot, nil)
+		if !prep.OK {
+			t.Fatalf("prepare failed: %+v", prep)
+		}
+		t.Cleanup(func() { _ = Reap(root, prep.Path, nil) })
+		if err := SaveIntent(prep.Path, intentBase, "feat(x): prefix (#839) (fak x)", []string{"owned.txt"}); err != nil {
+			t.Fatalf("SaveIntent: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(prep.Path, "owned.txt"), []byte("worker change\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return prep.Path
+	}
+
+	// F2 positive: a SHORT PREFIX of the true intent base names the same commit and
+	// must NOT be refused for base-intent mismatch.
+	shortWT := prepareWT(t)
+	res := Land(root, shortWT, intentBase[:8], "", []string{"owned.txt"}, nil, nil)
+	if res.Code == LandResultBaseIntentMismatch {
+		t.Fatalf("short prefix %q of intent base %q was refused as base-intent mismatch: %+v",
+			intentBase[:8], intentBase, res)
+	}
+
+	// F2 negative: a DIFFERENT commit (an ancestor, so not stale) is still refused.
+	mismatchWT := prepareWT(t)
+	res = Land(root, mismatchWT, diffBase, "", []string{"owned.txt"}, nil, nil)
+	if res.Code != LandResultBaseIntentMismatch || res.OK || res.Committed || res.Applied || !res.Preserved {
+		t.Fatalf("a different caller base must refuse-preserve base-intent mismatch: %+v", res)
+	}
+	if res.BaseSHA != diffBase {
+		t.Fatalf("BaseSHA = %q, want supplied caller base %q", res.BaseSHA, diffBase)
+	}
+}
+
+// TestLandScopeFenceRenameEscape is the adversarial F1 regression: the pre-CAS
+// candidate scope fence must see BOTH sides of a rename, so a rename whose SOURCE
+// is out of the declared scope cannot smuggle an out-of-scope deletion past it.
+// With rename detection on, `--name-only` reports only the destination and hides
+// the source deletion; the fence now runs with --no-renames.
+func TestLandScopeFenceRenameEscape(t *testing.T) {
+	// The fence's observable counting contract: a delta carrying the rename SOURCE
+	// and DESTINATION counts the source (outside {"data.txt"}) as an escape.
+	if got := CountPathsOutsideTrees([]string{"secret/data.txt", "data.txt"}, []string{"data.txt"}); got != 1 {
+		t.Fatalf("CountPathsOutsideTrees rename delta = %d, want 1", got)
+	}
+
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := t.TempDir()
+	mustGit(t, root, "init", "-q", "-b", "main")
+	mustGit(t, root, "config", "user.email", "tester@test")
+	mustGit(t, root, "config", "user.name", "tester")
+	mustGit(t, root, "config", "commit.gpgsign", "false")
+
+	if err := os.MkdirAll(filepath.Join(root, "secret"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "secret", "data.txt"), []byte("secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, root, "add", "secret/data.txt")
+	mustGit(t, root, "commit", "-q", "-m", "base")
+	oldHEAD := strings.TrimSpace(mustGit(t, root, "rev-parse", "HEAD"))
+
+	// Real rename: secret/data.txt -> data.txt. `git mv` stages it, so the tree the
+	// fence inspects genuinely contains the source deletion AND the destination add.
+	mustGit(t, root, "mv", "secret/data.txt", "data.txt")
+	mustGit(t, root, "commit", "-q", "-m", "rename")
+	treeSHA := strings.TrimSpace(mustGit(t, root, "rev-parse", "HEAD^{tree}"))
+
+	realGit := func(r string, args []string) (int, string) {
+		return rawGit(t, r, args...)
+	}
+	// The fence must resolve the rename into two names (--no-renames) and count the
+	// out-of-scope SOURCE as one escape. With rename detection on it would report
+	// only `data.txt` and return 0 — the exact smuggle this behavior closes.
+	escaped, ok := countCandidateScopeEscapes(nil, realGit, root, nil, oldHEAD, treeSHA, []string{"data.txt"})
+	if !ok {
+		t.Fatalf("countCandidateScopeEscapes could not read the candidate scope")
+	}
+	if escaped != 1 {
+		t.Fatalf("fence escaped = %d, want 1 (rename source secret/data.txt must count)", escaped)
+	}
+
+	// End-to-end: the same two names through the fence's diff read must refuse the
+	// isolated land with path-scope-escape and preserve the worker before any CAS.
+	g := isolatedHappyFake().
+		replyOnce("diff", 0, "secret/data.txt\x00data.txt\x00")
+	msg := writeMsg(t, "feat(x): rename (fak x)")
+	res, handled := landIsolated("/trunk", "/wt",
+		"diff --git a/secret/data.txt b/data.txt\nsimilarity index 100%\nrename from secret/data.txt\nrename to data.txt\n",
+		msg, []string{"data.txt"}, "oldhead000", g.run, g.runEnv)
+	if !handled {
+		t.Fatalf("expected the isolated path to handle the land, got handled=%v", handled)
+	}
+	if res.Code != LandResultScopeEscape || res.OK || res.Committed || res.Applied || !res.Preserved {
+		t.Fatalf("rename scope escape must refuse-preserve: %+v", res)
+	}
+	if res.DroppedOutOfLane != 1 {
+		t.Fatalf("DroppedOutOfLane = %d, want 1", res.DroppedOutOfLane)
+	}
+	if n := len(g.envCallsWithPrefix("commit-tree")) + len(g.callsWithPrefix("commit-tree")); n != 0 {
+		t.Fatalf("commit-tree ran before the fence refusal: %d calls", n)
+	}
+	if n := len(g.envCallsWithPrefix("update-ref")) + len(g.callsWithPrefix("update-ref")); n != 0 {
+		t.Fatalf("update-ref (trunk CAS) ran before the fence refusal: %d calls", n)
 	}
 }
 

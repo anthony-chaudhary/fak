@@ -172,6 +172,20 @@ func CountPathsOutsideTrees(changed, trees []string) int {
 	return outside
 }
 
+// resolveLandCommit returns the full commit sha a caller-supplied base or ref
+// resolves to, or "" when it cannot be resolved. Used to compare a caller base
+// with the durable intent without a textual short-vs-full mismatch.
+func resolveLandCommit(git GitRunner, root, ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	if rc, out := run(git, root, []string{"rev-parse", "--verify", "--quiet", ref + "^{commit}"}); rc == 0 {
+		return strings.TrimSpace(out)
+	}
+	return ""
+}
+
 // countCandidateScopeEscapes returns how many paths the candidate tree changes
 // relative to oldHEAD fall outside the declared pathset. ok is false when the
 // name list cannot be read, so the caller can fail closed rather than treat an
@@ -181,7 +195,12 @@ func countCandidateScopeEscapes(genv GitEnvRunner, git GitRunner, root string, e
 		return 0, false
 	}
 	// -z keeps a path containing spaces a single field (strings.Fields would split it).
-	args := []string{"diff", "--name-only", "-z", oldHEAD, treeSHA}
+	// --no-renames is required: with rename detection on, --name-only reports ONLY the
+	// rename destination, so a rename whose SOURCE is out of scope (e.g.
+	// secret/data.txt -> data.txt) would hide the source deletion from this fence.
+	// Reporting both sides as separate names matches expandLandPaths and lets the
+	// deletion be counted as an escape.
+	args := []string{"diff", "--no-renames", "--name-only", "-z", oldHEAD, treeSHA}
 	var rc int
 	var out string
 	if genv != nil {
@@ -350,7 +369,14 @@ func landPrepared(root, wtPath, baseSHA, commitMsgFile string, paths []string, v
 	checkBase := strings.TrimSpace(baseSHA)
 	if in, err := LoadIntent(wtPath); err == nil {
 		intentBase := strings.TrimSpace(in.BaseSHA)
-		if checkBase != "" && intentBase != "" && checkBase != intentBase {
+		// Canonicalize BOTH sides to a resolved commit sha before comparing: the caller
+		// may pass a SHORT sha, a tag, a branch name, or upper-case hex that names the
+		// SAME commit as the durable full-hex intent, and a textual compare would wrongly
+		// refuse a legitimate land. Fail OPEN on anything unresolvable — the stale-base
+		// ancestor check and `git diff` below handle an unresolvable base.
+		cb := resolveLandCommit(git, root, checkBase)
+		ib := resolveLandCommit(git, root, intentBase)
+		if checkBase != "" && intentBase != "" && cb != "" && ib != "" && cb != ib {
 			// A reused worktree carries a durable prepared-base intent; landing it
 			// against a different caller base would capture (and apply) the whole
 			// delta from the wrong ref. Refuse before any candidate construction.
@@ -486,7 +512,9 @@ func landPrepared(root, wtPath, baseSHA, commitMsgFile string, paths []string, v
 	landingOp := func() Result {
 		if prospectiveVerify != nil {
 			r, _ := landIsolatedProspectivePrepared(root, wtPath, diff, msgFile, paths, prospectiveVerify, prepared, verify, git, isolatedGitEnv, cfg, checkBase)
-			r.DroppedOutOfLane = droppedOutOfLane
+			if r.DroppedOutOfLane == 0 {
+				r.DroppedOutOfLane = droppedOutOfLane
+			}
 			if r.OK && r.Committed {
 				r.Code = LandResultSuccess
 			}
@@ -502,7 +530,9 @@ func landPrepared(root, wtPath, baseSHA, commitMsgFile string, paths []string, v
 				return r
 			}
 			r, _ := landIsolated(root, wtPath, diff, msgFile, paths, verify, git, isolatedGitEnv, cfg, checkBase)
-			r.DroppedOutOfLane = droppedOutOfLane
+			if r.DroppedOutOfLane == 0 {
+				r.DroppedOutOfLane = droppedOutOfLane
+			}
 			if r.OK && r.Committed {
 				r.Code = LandResultSuccess
 			}
