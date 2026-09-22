@@ -490,6 +490,72 @@ func (s *V41AttentionState) appendCompressorSource(
 	return append([]float32(nil), pooled...), true, start, end, nil
 }
 
+// appendCompressorSourceIndex is appendCompressorSource PLUS the index-key
+// publication leaf (#13309): when a group completes, the pooled compressed KV
+// row is projected through projectIndex EXACTLY ONCE and the resulting index key
+// is staged as a second publication under the same source layer and the same
+// absolute half-open input range [start,end).
+//
+// The two operands stay distinct: latent is the pooled KV row (what compressed
+// attention contracts), indexKey is its projection through the index weight (what
+// the lightning indexer scores). A caller that needs only the KV stream uses
+// appendCompressorSource; a reader layer consumes the staged pair through
+// v41IndexReaderStep.
+//
+// projectIndex runs exactly once per COMPLETED group and zero times for an
+// incomplete one, so no historical compressed row is ever reprojected. The KV
+// latent is projected from the pooled row, not from the group's inputs, so the
+// published index key is the projection of the row v41CompressedRows emits. The
+// call is atomic: any validation, projection or well-formedness failure leaves
+// the retained group and both publication registries unchanged.
+func (s *V41AttentionState) appendCompressorSourceIndex(
+	layer, ratio, pos int,
+	input []float32,
+	pool *V41CompressorPool,
+	projectKV func([]float32) ([]float32, error),
+	projectScore func([]float32) ([]float32, error),
+	projectIndex func([]float32) ([]float32, error),
+	normWeight []float32,
+	eps float32,
+) (latent []float32, indexKey []float32, emitted bool, start, end int, err error) {
+	if projectIndex == nil {
+		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source index projection is nil")
+	}
+	// Reuse the KV-source leaf verbatim so the pooled row and the released
+	// retained state are bit-identical to appendCompressorSource. A failure here
+	// leaves both registries untouched.
+	latent, emitted, start, end, err = s.appendCompressorSource(
+		layer, ratio, pos, input, pool, projectKV, projectScore, normWeight, eps)
+	if err != nil || !emitted {
+		return latent, nil, emitted, start, end, err
+	}
+
+	// The index key is the projection of the POOLED row, so it is derived from the
+	// exact latent published above rather than re-pooled from the inputs.
+	indexKey, err = projectIndex(latent)
+	if err != nil {
+		return nil, nil, false, 0, 0, err
+	}
+	if len(indexKey) != s.headDim {
+		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source index key width %d, want %d", len(indexKey), s.headDim)
+	}
+
+	// Stage the index publication and validate it BEFORE it is committed. The KV
+	// latent has already been published by appendCompressorSource, so a failure
+	// here must not be reported as a successful emit of a matched pair: surface
+	// the error and report emitted=false so the caller cannot treat a half-staged
+	// group as consumed.
+	idxUpd := V41AttentionStateUpdate{
+		Ref:      V41AttentionStateRef{LayerID: layer, Ratio: ratio, IsKVSource: true, IsIndexSource: true},
+		IndexKey: indexKey,
+	}
+	if verr := s.validateUpdates([]V41AttentionStateUpdate{idxUpd}); verr != nil {
+		return nil, nil, false, 0, 0, verr
+	}
+	s.publish([]V41AttentionStateUpdate{idxUpd})
+	return append([]float32(nil), latent...), append([]float32(nil), indexKey...), true, start, end, nil
+}
+
 // finiteRow32 validates one projected row's width-agnostic finiteness.
 func finiteRow32(row []float32, what string) error {
 	for i, value := range row {

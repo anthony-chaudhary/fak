@@ -423,6 +423,114 @@ func (s *V41AttentionState) retainedTailRows() [][]float32 {
 	return out
 }
 
+// v41IndexReaderStep resolves the ONE committed index publication a reader
+// layer may consume for the group-closing absolute position pos (#13309).
+//
+// It is the read half of appendCompressorSourceIndex: the source seam stages a
+// (KV latent, index key) pair keyed by [source layer, absolute half-open range),
+// and this seam returns the index key of the publication whose range ends at
+// pos+1, for the reader's RESOLVED index source. sourceLayer is the candidate
+// source named by the caller; it is checked against the layer's plan rather than
+// trusted, so naming another layer's stream refuses instead of silently reading
+// it.
+//
+// Fail-closed. Missing, stale (the publication ends behind pos+1),
+// duplicate/out-of-order (a hole in the contiguous set) and wrong-source
+// publications each refuse with the typed ErrV41ForwardStage before any reader
+// mutation, and every refusal is a pure read: no publication registry, retained
+// group or position cursor is changed. A hole is detected by the same
+// contiguity oracle IndexKeys applies, so the two agree on what a complete
+// stream is.
+//
+// The returned key is a COPY: mutating it cannot alter the publication, so a
+// reader may hold it while the source layer keeps appending.
+func (m *Model) v41IndexReaderStep(layer, sourceLayer, pos int, state *V41AttentionState) ([]float32, error) {
+	if state == nil {
+		return nil, fmt.Errorf("%w: index reader layer %d has no attention state", ErrV41ForwardStage, layer)
+	}
+	if layer < 0 {
+		return nil, fmt.Errorf("%w: index reader layer %d is negative", ErrV41ForwardStage, layer)
+	}
+	if sourceLayer < 0 {
+		return nil, fmt.Errorf("%w: index reader layer %d names no index source", ErrV41ForwardStage, layer)
+	}
+	if pos < 0 {
+		return nil, fmt.Errorf("%w: index reader layer %d position %d is negative", ErrV41ForwardStage, layer, pos)
+	}
+
+	// The plan is the authority on which source this layer may read. An
+	// undecodable schedule refuses rather than falling back to the caller's guess.
+	plan, err := m.v41AttentionPlan(layer)
+	if err != nil {
+		return nil, err
+	}
+	if plan.IndexSourceLayer < 0 {
+		return nil, fmt.Errorf("%w: index reader layer %d resolves no index source", ErrV41ForwardStage, layer)
+	}
+	if sourceLayer != plan.IndexSourceLayer {
+		return nil, fmt.Errorf("%w: index reader layer %d declares index source %d, not %d", ErrV41ForwardStage, layer, plan.IndexSourceLayer, sourceLayer)
+	}
+
+	// The position must close a group under the source's ratio: only a
+	// group-closing position carries a committed row.
+	ratio := plan.Ratio
+	if ratio <= 1 {
+		return nil, fmt.Errorf("%w: index reader layer %d declares ratio %d, not a compressed regime", ErrV41ForwardStage, layer, ratio)
+	}
+	if (pos+1)%ratio != 0 {
+		return nil, fmt.Errorf("%w: index reader layer %d position %d does not close a ratio-%d group", ErrV41ForwardStage, layer, pos, ratio)
+	}
+
+	// The reader's own span must be covered: the source must have committed the
+	// group that ends exactly at pos+1 (end index pos+1-ratio+1). A publication
+	// that stops short is stale; one whose rows are not contiguous is holed.
+	group := (pos + 1) / ratio
+	start := group - 1
+	end := group
+	if end < 1 {
+		return nil, fmt.Errorf("%w: index reader layer %d position %d has no preceding group", ErrV41ForwardStage, layer, pos)
+	}
+	publishedEnd := state.indexPublishedEnd[sourceLayer]
+	if publishedEnd == 0 {
+		return nil, fmt.Errorf("%w: index reader layer %d has no committed index publication from source %d", ErrV41ForwardStage, layer, sourceLayer)
+	}
+	if publishedEnd < end {
+		return nil, fmt.Errorf("%w: index reader layer %d position %d is stale: source %d published %d row(s), need %d", ErrV41ForwardStage, layer, pos, sourceLayer, publishedEnd, end)
+	}
+
+	// Contiguity: every row in [0,end) must be present. A hole or an
+	// out-of-order/duplicate staging refuses, matching IndexKeys' oracle.
+	key := v41AttentionPublicationKey{sourceLayer: sourceLayer, start: start, end: end}
+	row, ok := state.indexPublications[key]
+	if !ok {
+		return nil, fmt.Errorf("%w: index reader layer %d position %d: no publication for group [%d,%d)", ErrV41ForwardStage, layer, pos, start, end)
+	}
+	for i := 0; i < end; i++ {
+		if _, present := state.indexPublications[v41AttentionPublicationKey{sourceLayer: sourceLayer, start: i, end: i + 1}]; !present {
+			return nil, fmt.Errorf("%w: index reader layer %d position %d: publication set has a hole at row %d", ErrV41ForwardStage, layer, pos, i)
+		}
+	}
+	if len(row) != state.headDim {
+		return nil, fmt.Errorf("%w: index reader layer %d position %d: published row width %d, want %d", ErrV41ForwardStage, layer, pos, len(row), state.headDim)
+	}
+
+	// A pure read: return a copy so the caller cannot alias the publication.
+	return append([]float32(nil), row...), nil
+}
+
+// v41AttentionPlan resolves one layer's attention plan from the receiver's config
+// and the cached role map. It mirrors v41AttentionPlanFor's authority so a
+// reader validates its source against the SAME schedule the execution path uses.
+func (m *Model) v41AttentionPlan(layer int) (V41AttentionPlan, error) {
+	if m == nil {
+		return V41AttentionPlan{}, fmt.Errorf("%w: nil model", ErrV41ForwardStage)
+	}
+	if m.Cfg.DeepSeekV41 == nil {
+		return V41AttentionPlan{}, fmt.Errorf("%w: layer %d has no V4.1 attention schedule", ErrV41ForwardStage, layer)
+	}
+	return v41AttentionPlanFor(m.Cfg, layer, m.v41AttentionRolesCached())
+}
+
 func hcEpsOrDefault(cfg Config) float32 {
 	if cfg.DeepSeekV41 != nil && cfg.DeepSeekV41.HCEps > 0 {
 		return float32(cfg.DeepSeekV41.HCEps)
