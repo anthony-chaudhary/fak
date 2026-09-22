@@ -55,9 +55,28 @@ Two consequences that follow from the table:
 
 DeepSeek V4.1's window and YaRN parameters are asserted by
 `admitDeepSeekV41Published` (witnessed by
-`TestDeepSeekV41RejectsShrunkContextWindow`). The other three are not yet asserted —
-a config that silently shrank one of them would be admitted today. That is an open
-gap, not a shipped guarantee.
+`TestDeepSeekV41RejectsShrunkContextWindow`).
+
+The three other checkpoints are **not** equally protected, and the difference is
+worth stating precisely because a grep for the assertion is misleading — a window
+check can exist and still be unreachable:
+
+| checkpoint | window asserted? | invokable in production? |
+|---|---|---|
+| DeepSeek V4.1 Flash | yes (`admitDeepSeekV41Published`) | **yes** — reached from config parse |
+| DeepSeek V4 Flash / Pro | **yes, added 2026-09-22** (`AdmitDeepSeekV4Config`) | **yes** — reached from config parse |
+| GLM-5 Next | yes (`isExactGLM5NextConfig`) | **yes** — `config.go` sets `c.GLM5Next` from it |
+| Qwen 4-Exp / 3.8 | yes (`Qwen4ExpFlashNextConfig.Validate`) | **NO — test-only** |
+
+The Qwen row is the presence≠invokability trap: `Validate()` does assert
+`MaxPositionEmbeddings != 262144`, but `LoadQwen4ExpFlashNextConfig` has **no
+caller outside its own test file**. The guard is real code that cannot fire in
+production. A reader who greps `262144` and concludes "Qwen is protected" is
+wrong — today a Qwen config reaches the engine without passing that check.
+
+Next checkable step: wire `LoadQwen4ExpFlashNextConfig`/`Validate` into the Qwen
+config parse path, or assert the window where Qwen configs are actually admitted.
+Until then, Qwen's declared 262,144 is unenforced.
 
 ### B — the native shed-line
 
