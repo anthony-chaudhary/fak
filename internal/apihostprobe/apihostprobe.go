@@ -85,6 +85,10 @@ var (
 		"openai":            true,
 		"xai":               true,
 		"deepseek":          true,
+		// router.com exposes an OpenAI-shaped, auth-gated /models list while its
+		// inference endpoint is the OpenAI Responses wire (/v1/responses), so the
+		// /models probe applies even though chat completions does not.
+		"router": true,
 	}
 	nativeProviders = map[string]bool{
 		"anthropic": true,

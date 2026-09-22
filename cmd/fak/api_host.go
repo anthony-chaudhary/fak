@@ -251,7 +251,7 @@ func modelAccountBaseURL(a modelroute.Account) string {
 
 func modelAccountSupportsModelsProbe(k modelroute.ProviderKind) bool {
 	switch k {
-	case modelroute.KindOpenAI, modelroute.KindOpenAIResponses, modelroute.KindXAI, modelroute.KindDeepSeek, modelroute.KindLocal, modelroute.KindFleet:
+	case modelroute.KindOpenAI, modelroute.KindOpenAIResponses, modelroute.KindXAI, modelroute.KindDeepSeek, modelroute.KindRouter, modelroute.KindLocal, modelroute.KindFleet:
 		// KindFleet is an org-operated OpenAI-compatible server (vLLM / SGLang /
 		// llama-server), so it answers /models exactly as the on-box kind does.
 		return true

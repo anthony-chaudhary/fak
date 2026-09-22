@@ -237,6 +237,31 @@ func TestAcceptanceOpenAICompatibleReadyForLiveBridgeRun(t *testing.T) {
 	}
 }
 
+func TestRouterWireSupportedAndModelsProbeReady(t *testing.T) {
+	if !supportedProvider("router") {
+		t.Fatal("supportedProvider(\"router\") = false, want true")
+	}
+	if got := ContractClass("router"); got != "openai_compatible_upstream" {
+		t.Fatalf("ContractClass(\"router\") = %q, want openai_compatible_upstream", got)
+	}
+	status, reason := AcceptanceStatus("router", "MODELS_CONFIRMED")
+	if status != "READY_FOR_LIVE_BRIDGE_RUN" {
+		t.Fatalf("AcceptanceStatus(\"router\", MODELS_CONFIRMED) = %q (%s), want READY_FOR_LIVE_BRIDGE_RUN", status, reason)
+	}
+
+	server := testServer()
+	defer server.Close()
+	row := ClassifyAcceptanceTarget(context.Background(), AcceptanceTarget{
+		Name: "router", Provider: "router", BaseURL: server.URL + "/ok", ModelHint: "m1",
+	}, AcceptanceOptions{Timeout: 2 * time.Second}, nil)
+	if row.Status != "READY_FOR_LIVE_BRIDGE_RUN" {
+		t.Fatalf("router acceptance status = %s, want READY_FOR_LIVE_BRIDGE_RUN", row.Status)
+	}
+	if row.ContractClass != "openai_compatible_upstream" {
+		t.Fatalf("router contract class = %s", row.ContractClass)
+	}
+}
+
 func TestAcceptanceTypedExternalBlockerAndShapeMismatch(t *testing.T) {
 	server := testServer()
 	defer server.Close()
