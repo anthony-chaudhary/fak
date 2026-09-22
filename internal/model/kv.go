@@ -66,7 +66,60 @@ type PrefixSnapshot struct {
 	// not carry it, so restoring a V4.1 prefix from Cache is incomplete; this
 	// field is what makes the clone a COMPLETE V4.1 prefix (fak#13342).
 	v41 *v41ForwardSnapshot
+	// v41DeviceIdentity records the exact backend this snapshot's V4.1 state was
+	// captured on. It is the snapshot-side half of the backend-prefix contract:
+	// a V4.1 continuation restored onto a DIFFERENT backend has no continuity
+	// guarantee, so a mismatch is refused rather than silently reused. It is
+	// meaningful only when hasV41DeviceIdentity is true; a host-only session
+	// (Backend == nil) records the absent contract rather than inventing an
+	// identity for a backend it never ran on (fak#13337).
+	v41DeviceIdentity    compute.Backend
+	hasV41DeviceIdentity bool
+	// v41Tokens is the exact position authority -- the committed token count --
+	// this snapshot's V4.1 continuation state represents. V4.1 keeps its position
+	// authority in the committed history rather than in the generic KVCache, so a
+	// restore must refuse a target whose resident length disagrees with the
+	// carried history instead of installing a state the arithmetic will index
+	// past. hasV41Tokens distinguishes a snapshot that carries no V4.1 state
+	// (absent contract) from one whose authority is a legitimate zero.
+	v41Tokens    int
+	hasV41Tokens bool
 }
+
+// v41BackendSnapshotSupported reports whether the exact backend this snapshot
+// was captured on owns every byte of a complete V4.1 continuation prefix. It is
+// the snapshot-side, backend-aware counterpart of
+// Config.InKernelBackendPrefixReuseSupported and is deliberately fail-closed:
+//
+//   - a host-only capture (no device identity) is refused -- a backend prefix
+//     must name the backend it was prepared on;
+//   - a backend whose name is empty is refused -- an unnamed device cannot be
+//     compared, so the identity cannot be trusted;
+//   - a V4.1 backend is admitted ONLY when it is an explicit member of the
+//     qualified set. The qualified set is the one backend identity witnessed to
+//     own the complete V4.1 continuation contract in-tree (the cpu-ref counting
+//     fixture); a different or unknown backend must be qualified on its own
+//     before reuse, so the default answer is refuse (fak#13337).
+//
+// It never consults the generic Config capability, and it does not by itself
+// enable serving reuse: the consuming planner owns that (fak#13330).
+func (p *PrefixSnapshot) v41BackendSnapshotSupported() bool {
+	if p == nil || !p.hasV41DeviceIdentity || p.v41DeviceIdentity == nil {
+		return false
+	}
+	if p.v41DeviceIdentity.Name() == "" {
+		return false
+	}
+	return p.v41DeviceIdentity.Name() == v41QualifiedBackendName
+}
+
+// v41QualifiedBackendName is the exact backend identity whose complete V4.1
+// continuation contract is witnessed in-tree (fak#13337). It is a single
+// explicit name rather than a capability inference: "owns a KVStore" is not
+// evidence that a backend owns the V4.1 shared/publication state, so admission
+// is by named qualification and every other backend stays refused until it is
+// witnessed on its own.
+const v41QualifiedBackendName = "cpu-ref"
 
 // v41ForwardSnapshot is the deep-owned copy of a session's V4.1 continuation
 // state. It mirrors exactly the mutable continuation fields the arithmetic
@@ -115,6 +168,20 @@ func (s *Session) PrefixSnapshot() (*PrefixSnapshot, error) {
 	// session has one; a session that never ran a V4.1 forward keeps the absent
 	// contract.
 	out.v41 = captureV41ForwardSnapshot(s.v41Forward)
+	// A V4.1 prefix is not portable across backends and its position authority is
+	// the committed history, not the generic cache. Record both at capture so
+	// Restore can fail closed on a mismatched backend or token count instead of
+	// installing state the target arithmetic cannot own (fak#13337). The identity
+	// and count are recorded only when there IS V4.1 state to describe; a bare or
+	// non-V4.1 snapshot keeps the absent contract and is unaffected.
+	if out.v41 != nil && out.v41.hadState {
+		out.v41Tokens = len(out.v41.history)
+		out.hasV41Tokens = true
+		if s.Backend != nil {
+			out.v41DeviceIdentity = s.Backend
+			out.hasV41DeviceIdentity = true
+		}
+	}
 	if s.Backend == nil {
 		return out, nil
 	}
@@ -149,6 +216,13 @@ func (p *PrefixSnapshot) Clone() (*PrefixSnapshot, error) {
 		targetHidden:        cloneTargetHidden(p.targetHidden),
 		targetHiddenTokens:  append([]int(nil), p.targetHiddenTokens...),
 		v41:                 p.v41.clone(),
+		// A backend identity is copied by reference (it names the device the state
+		// belongs to, never device memory this snapshot owns), so a clone keeps the
+		// same backend-prefix contract as its source.
+		v41DeviceIdentity:    p.v41DeviceIdentity,
+		hasV41DeviceIdentity: p.hasV41DeviceIdentity,
+		v41Tokens:            p.v41Tokens,
+		hasV41Tokens:         p.hasV41Tokens,
 	}
 	if p.Backend == nil {
 		return out, nil
@@ -185,6 +259,35 @@ func (p *PrefixSnapshot) Restore(s *Session) error {
 	}
 	if p.Backend != s.Backend {
 		return fmt.Errorf("model: prefix snapshot backend mismatch")
+	}
+	// A V4.1 continuation is a backend-session prefix, not a portable host blob:
+	// the arithmetic reads state bound to the device it was prepared on, so a
+	// DEVICE capture that names no device, names an unqualified device, or names a
+	// different device than the target is refused atomically -- the snapshot must
+	// survive so a valid target can still consume it (fak#13337). The check is
+	// scoped to snapshots that actually carry device-backed V4.1 state, so a
+	// host-only or non-V4.1 prefix keeps its prior restore behavior byte-for-byte.
+	deviceBackedV41 := p.v41 != nil && p.v41.hadState && p.hasV41DeviceIdentity
+	if deviceBackedV41 {
+		if !p.v41BackendSnapshotSupported() {
+			return fmt.Errorf("model: V4.1 backend prefix snapshot has no qualified device identity")
+		}
+		if s.Backend == nil {
+			return fmt.Errorf("model: V4.1 backend prefix snapshot requires a device session")
+		}
+		if p.v41DeviceIdentity != s.Backend {
+			return fmt.Errorf("model: V4.1 prefix snapshot device mismatch")
+		}
+	}
+	if p.v41 != nil && p.v41.hadState && p.hasV41Tokens {
+		// A target that has never committed V4.1 positions is a legitimate
+		// restore destination -- Restore replaces its continuation state. Only a
+		// target that HAS a committed history is required to agree with the
+		// snapshot's, so a diverged branch is refused rather than silently
+		// re-based.
+		if s.v41Forward != nil && len(s.v41Forward.history) != p.v41Tokens {
+			return fmt.Errorf("model: V4.1 prefix snapshot token authority mismatch: committed=%d snapshot=%d", len(s.v41Forward.history), p.v41Tokens)
+		}
 	}
 	if s.Backend != nil {
 		if p.halKV == nil {
@@ -244,6 +347,23 @@ func (p *PrefixSnapshot) Close() {
 	p.Cache = nil
 	p.targetHidden, p.targetHiddenTokens = nil, nil
 	p.v41 = nil
+}
+
+// snapshotResidentPositions reports a restore target's resident position count
+// from its authoritative store: the device KV store on a HAL session, the host
+// KVCache otherwise. It mirrors PrefixSnapshot's own Tokens resolution so the
+// token-authority guard compares like with like.
+func snapshotResidentPositions(s *Session) int {
+	if s == nil {
+		return 0
+	}
+	if s.Backend != nil && s.halKV != nil {
+		return s.halKV.Len()
+	}
+	if s.Cache == nil {
+		return 0
+	}
+	return s.Cache.Len()
 }
 
 // captureV41ForwardSnapshot deep-copies a session's V4.1 continuation state, or

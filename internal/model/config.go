@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // Config mirrors the subset of the HF model config the forward pass needs. It is
@@ -1124,6 +1126,36 @@ func (c Config) usesMLAMoELayout() bool {
 // snapshots additionally own backend attention KV plus convolution/recurrent state.
 func (c Config) InKernelBackendPrefixReuseSupported() bool {
 	return c.isGLMMoeDsa() || c.IsQwen35Hybrid()
+}
+
+// InKernelBackendPrefixReuseSupportedFor reports whether PrefixSnapshot owns
+// every architecture-specific continuation byte for a session running on the
+// EXACT backend named by be. It is the backend-AWARE form of
+// InKernelBackendPrefixReuseSupported: the bare predicate answers "does this
+// architecture's snapshot contract cover a backend session at all", while this
+// one additionally requires the backend to be the qualified identity that
+// witnessed the contract, so a planner cannot admit a device it never qualified.
+//
+// It is deliberately narrow and fail-closed:
+//
+//   - a nil backend is refused -- "reuse on the device" without a device is not a
+//     statement about anything;
+//   - the backend-aware contract is currently witnessed for V4.1 only, on the
+//     single named identity v41QualifiedBackendName. Every other architecture
+//     keeps answering through InKernelBackendPrefixReuseSupported, so this leaf
+//     changes no existing admission;
+//   - the legacy Config.InKernelBackendPrefixReuseSupported blanket V4.1 refusal
+//     is preserved and independent: this method exists for a consumer that has a
+//     concrete backend in hand (fak#13334 consumes it; fak#13330 owns wiring it
+//     into the serving planner). It does not enable serving reuse by itself.
+func (c Config) InKernelBackendPrefixReuseSupportedFor(be compute.Backend) bool {
+	if be == nil {
+		return false
+	}
+	if c.IsDeepSeekV41() {
+		return be.Name() == v41QualifiedBackendName
+	}
+	return c.InKernelBackendPrefixReuseSupported()
 }
 
 // isMiniMax reports a MiniMax-family model (model_type / architectures such as
