@@ -609,10 +609,13 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 		if arg == "--harness=native" || arg == "-harness=native" || ((arg == "--harness" || arg == "-harness") && i+1 < len(args) && args[i+1] == "native") {
 			return runOpsNative(stdout, stderr, args)
 		}
+		if arg == "--harness=pi" || arg == "-harness=pi" || ((arg == "--harness" || arg == "-harness") && i+1 < len(args) && args[i+1] == "pi") {
+			return runOpsPi(stdout, stderr, args)
+		}
 	}
 	fs := flag.NewFlagSet("ops run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	harness := fs.String("harness", "opencode", "headless harness: opencode or native (use --harness native --help for native options)")
+	harness := fs.String("harness", "opencode", "headless harness: opencode, native, or pi (use --harness native --help / --harness pi --help for their options)")
 	provider := fs.String("provider", "openai", "upstream wire: openai or gemini (native Google adapter)")
 	promptFile := fs.String("prompt-file", "", "UTF-8 prompt file, delivered over stdin")
 	workspace := fs.String("workspace", "", "existing workspace directory for the child process (required except dry-run)")
