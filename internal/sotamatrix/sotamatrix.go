@@ -393,6 +393,7 @@ var matrix = []Op{
 			"SPECTRA: Pushing the KV Cache Beyond the 2-Bit Cliff via Spectral Transform Coding (Zhang et al., 2026) arXiv:2608.07915v1",
 			"Palu: Compressing KV-Cache with Low-Rank Projection (Chang et al., 2024) arXiv:2407.21118",
 			"KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache (Liu et al., 2024) arXiv:2402.02750",
+			"The Minimax Risk of KV Cache Compression (Haverbeck et al., 2026) arXiv:2607.01520",
 		},
 		Note: "Borrow the transform and allocation math only after the existing Q4+recovery baseline is measured; analytical capacity, filler allocation, or a disconnected kernel microbenchmark is not a throughput witness, and no runtime/backend fallback is permitted.",
 	},

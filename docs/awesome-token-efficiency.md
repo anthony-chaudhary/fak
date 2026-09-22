@@ -227,6 +227,19 @@ fak's.
   path. Its README's own caveat — 99.5%+ attention cosine "does not guarantee working generation,"
   5x@3-bit shows generation failures — is why fak gates the lossy tier behind a served quality
   witness. See [triage #1266](notes/RESEARCH-turboquant-kv-quant-triage-1266.md).
+- **Minimax risk of KV cache compression** (Haverbeck et al., 2026) — a theory/limits paper, not a
+  quantizer: recasts compression as sparse approximation of the attention "context measure" and
+  derives a spectral lower bound ("compressors cannot beat the spectral barrier") from the spectrum
+  of a covariance operator Σ built from each token's response profile; safe only insofar as the
+  summary preserves context *future* queries can use. [arXiv:2607.01520](https://arxiv.org/abs/2607.01520).
+  **fak: 🟡** prior art to cite on the `kv-cache-transform-compression` SOTA row — it names the risk
+  fak *already budgets*: `EstimatedError` / `AccuracyBudget` / `Eligible` in
+  `internal/engine/kv_quantization.go` gate the lossy tier, and a demote past the budget is refused
+  (`Reason = "accuracy-budget"`). Not adopted (a limits result, not a kernel; its object is
+  approximation error inside *one* context, not fak's bit-exact eviction / prefix reuse). Honest
+  limits: the measure depends on the unknown future-query distribution ν (hence the ν-free `tr(Σ)`
+  surrogate); no single safe/unsafe numeric threshold; the paper never addresses cross-request
+  prefix reuse. See [triage #2656](notes/RESEARCH-minimax-kv-compression-risk-2656.md).
 - **INT8 / INT4 KV (engine-native)** — LMDeploy/TensorRT-LLM/vLLM online KV quant. **fak: ➖** engine-side.
 - **FP8 / NVFP4 KV** — hardware-native low-precision KV (Hopper/Blackwell). **fak: ➖** engine-side.
 
