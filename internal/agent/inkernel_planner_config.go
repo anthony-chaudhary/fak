@@ -258,6 +258,58 @@ func (p *InKernelPlanner) noteKVPrefixAdmitted() {
 	p.kvPrefixEverAdmitted.Store(true)
 }
 
+// DefaultNativeOutputReserveTokens is the output reserve the native serve/turnkey
+// path holds back from a resolved context window before spending any of it on
+// resident history. It matches the 32K reserve the ctxplan envelopes use
+// (internal/ctxplan/envelope.go), so the two budget layers agree on one number.
+const DefaultNativeOutputReserveTokens = 32000
+
+// NativeCompactResidentSharePercent is the share of the post-reserve window that
+// may stay resident as compactible history. It encodes the long-context-defaults
+// doctrine that "the model's advertised context window is a hard cap, not a
+// target": the raw window is never the resident line, but a 1M-declared native
+// model must not be flattened to the 48K/96K provider-shaped defaults either. At
+// a 150K window this leaves ~70K resident, which is what makes a ~150k agent turn
+// usable rather than a 400 wall.
+const NativeCompactResidentSharePercent = 60
+
+// DeriveCompactHistoryBudget is the single authority for the compaction shed-line
+// on the NATIVE (in-kernel) path, given a resolved context window. It exists
+// because InKernelPlannerConfig.CompactHistoryBudget previously had no production
+// setter: both `fak serve` (serveNativePlannerConfigWithContext) and turnkey
+// `fak up` (newTurnkeyInKernelPlanner) constructed the planner without it, so
+// ApplyPromptShrink short-circuited on `compactBudget <= 0` and an over-window
+// transcript hit refuseContextLength at full size -> HTTP 400
+// context_length_exceeded with no second chance.
+//
+// Precedence and shape:
+//
+//   - requested > 0 wins verbatim (an explicit operator budget is never second-guessed).
+//   - window <= 0 returns 0: no resolved window means no honest shed-line, and 0
+//     preserves the historical no-compaction default rather than inventing a bound.
+//   - a window at or below the reserve yields 0 as well; there is no resident
+//     slack to spend, and a positive budget there would shed the live task itself.
+//   - otherwise: (window - reserve) * share%, floored at
+//     DefaultNativeOutputReserveTokens so a small-window model still gets a usable
+//     line instead of a degenerate one.
+//
+// It is pure: same window in, same budget out, with no env or clock read, so the
+// serve planner, the turnkey planner, and their tests all agree by construction.
+func DeriveCompactHistoryBudget(windowTokens, requested int) int {
+	if requested > 0 {
+		return requested
+	}
+	if windowTokens <= DefaultNativeOutputReserveTokens {
+		return 0
+	}
+	usable := windowTokens - DefaultNativeOutputReserveTokens
+	budget := usable * NativeCompactResidentSharePercent / 100
+	if budget < DefaultNativeOutputReserveTokens {
+		return DefaultNativeOutputReserveTokens
+	}
+	return budget
+}
+
 // contextTokensForRadixBudget picks the finite context ceiling the radix budget
 // default is derived from: the planner's explicit ContextTokens when set,
 // otherwise the model's declared context window. Both unknown (zero) means there

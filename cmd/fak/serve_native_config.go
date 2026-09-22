@@ -87,6 +87,10 @@ func serveNativeControlConfig(sf *serveFlags) nativeControlConfig {
 		gpuLayers = *sf.nativeGPULayers
 	}
 	prec, _ := resolveKVPrecisionValue(*sf.kvPrecision)
+	var compactBudget int
+	if sf.nativeCompactHistoryBudget != nil {
+		compactBudget = *sf.nativeCompactHistoryBudget
+	}
 	return nativeControlConfig{
 		Planner: agent.InKernelPlannerConfig{
 			QwenQ4KPrefillChunkTokens: *sf.nativeQwenQ4KPrefillChunk,
@@ -94,6 +98,10 @@ func serveNativeControlConfig(sf *serveFlags) nativeControlConfig {
 			Q4KGateUpOutputSlab:       *sf.nativeQ4KGateUpOutputSlab,
 			DenseGPULayers:            gpuLayers,
 			KVPrecision:               prec,
+			// An explicit --native-compact-history-budget wins; 0 leaves the field
+			// zero and serveNativePlannerConfigWithContext derives it from the
+			// resolved window once that is known.
+			CompactHistoryBudget: compactBudget,
 			// Opt the resident serve chat planner into the SAME continuous-batch
 			// decode coalescer `fak up` already wires (#1590), so N concurrent
 			// same-prefix turns share one batched forward instead of serializing on

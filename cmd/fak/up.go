@@ -1149,8 +1149,13 @@ func newTurnkeyInKernelPlanner(model *fakmodel.Model, tok *tokenizer.Tokenizer, 
 	// remains the typed fallback and the FAK_INKERNEL_BATCH=off env still opts out.
 	return agent.NewInKernelPlannerWithConfig(model, tok, modelID, q4k, backend, metal, agent.InKernelPlannerConfig{
 		ContextTokens: contextTokens,
-		KVPrecision:   kvPrec,
-		BatchDecode:   true,
+		// Same shed-line derivation the resident serve path uses, so `fak up` and
+		// `fak serve` compact a long transcript at the same point instead of one
+		// refusing at the window and the other shrinking. See
+		// agent.DeriveCompactHistoryBudget for why this is not the raw window.
+		CompactHistoryBudget: agent.DeriveCompactHistoryBudget(contextTokens, 0),
+		KVPrecision:          kvPrec,
+		BatchDecode:          true,
 	})
 }
 

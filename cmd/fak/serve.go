@@ -184,6 +184,7 @@ type serveFlags struct {
 	sessionRegistry              *string
 	contextBudgetTokens          *int
 	nativeContextTokens          *int
+	nativeCompactHistoryBudget   *int
 	resetOnBudget                *bool
 	cpuOffloadExperts            *bool
 	nCPUMoE                      *string
@@ -326,6 +327,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.contextBudgetTokens = fs.Int("context-budget-tokens", 0, "seed the default session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
 	fs.IntVar(sf.contextBudgetTokens, "ctx", 0, "alias for --context-budget-tokens: managed-session lifetime prompt/context-token budget")
 	sf.nativeContextTokens = fs.Int("native-context-tokens", 0, "with --gguf: native model context window in prompt plus reserved output tokens (0 = auto-size from model metadata and memory headroom)")
+	sf.nativeCompactHistoryBudget = fs.Int("native-compact-history-budget", 0, "on the NATIVE (in-kernel) wire: compact old conversation turns down to this resident-token budget before tokenization, so a transcript that outgrows the resolved window is SHRUNK and served instead of refused with HTTP 400 context_length_exceeded. 0 = derive from the resolved --native-context-tokens window as (window - 32000 output reserve) * 60%, so a 1M-declared model is neither flattened to the 48k passthrough default nor allowed to treat the raw cap as a target (docs/long-context-defaults.md). Distinct from --compact-history-budget, which is Anthropic-passthrough-only.")
 	sf.resetOnBudget = fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
 	sf.cpuOffloadExperts = fs.Bool("cpu-offload-experts", false, "with --gguf --backend: keep the MoE expert GEMMs on host RAM while dense projections + router + attention run on the device — the `--n-cpu-moe` hybrid that lets a model whose experts dwarf VRAM (e.g. GLM-5.2 Q4 ~424GB experts) serve at all on a smaller VRAM pool. The device load uses the memory-lean Q8 quantize-at-load path when the backend advertises quantized upload; otherwise it falls back to F32 weights until that backend implements UploadDtype.")
 	sf.nCPUMoE = fs.String(serveNCPUMoEFlag, "", "with --gguf --backend: GRADE the expert spill instead of taking --cpu-offload-experts' all-or-nothing split (#5628, epic #5606). `auto` sizes the number of host-spilled MoE layers against the device budget compute.DeviceMemoryInfo measures, keeping the rest device-resident behind a bounded expert ring; `N` spills exactly N MoE layers; `off` (the default) is the ungraded placement --cpu-offload-experts alone makes, byte-for-byte. Spelled as llama.cpp spells it, so a working --n-cpu-moe number carries over. A grade that is not auto/off/a count >= 0 REFUSES the launch here, before the multi-minute load — a misspelled grade must never fall back to a placement the operator did not choose. Equivalent to "+agent.ExpertSpillEnv+"; passing the flag WINS over that env var, including an explicit `off`.")
@@ -395,6 +397,13 @@ func (sf *serveFlags) effectiveMaxTotalTokens() int {
 func serveNativePlannerConfigWithContext(sf *serveFlags, resolvedContextTokens int) agent.InKernelPlannerConfig {
 	cfg := serveNativePlannerConfig(sf)
 	cfg.ContextTokens = resolvedContextTokens
+	// Spend part of the resolved window on a compaction shed-line. Without this the
+	// native path never shrinks: ApplyPromptShrink short-circuits on a zero budget
+	// and an over-window transcript is refused with HTTP 400 context_length_exceeded
+	// instead of being compacted and served. An explicit operator budget still wins.
+	if cfg.CompactHistoryBudget <= 0 {
+		cfg.CompactHistoryBudget = agent.DeriveCompactHistoryBudget(resolvedContextTokens, 0)
+	}
 	return cfg
 }
 
