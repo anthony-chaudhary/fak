@@ -9,6 +9,7 @@ import (
 )
 
 func TestServePiConfigPrintsSnippet(t *testing.T) {
+	isolatePiHome(t)
 	var buf bytes.Buffer
 	sf := &serveFlags{
 		addr:  strPtr("127.0.0.1:8080"),
@@ -33,6 +34,7 @@ func TestServePiConfigPrintsSnippet(t *testing.T) {
 }
 
 func TestServePiConfigWritesFile(t *testing.T) {
+	isolatePiHome(t)
 	ws := t.TempDir()
 	configPath := filepath.Join(ws, "models.json")
 
