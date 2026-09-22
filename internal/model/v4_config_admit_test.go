@@ -8,11 +8,15 @@ import (
 )
 
 func pinnedV4Config() Config {
-	return Config{ModelType: "deepseek_v4", NumLayers: 61, HiddenSize: 7168, NumExperts: 384, NumExpertsPerTok: 6, MoEIntermediateSize: 3072, NSharedExperts: 1, ExpertDtype: "fp4", NormTopKProb: true, RoutedScalingFactor: 2.5, ScoringFunc: "sqrtsoftplus", TopKMethod: "noaux_tc", SwigluLimit: 10}
+	// MaxPositionEmbeddings is set because it is part of the admitted contract: a
+	// config without a declared window makes InKernelPlanner.ContextWindow() return 0
+	// and refuseContextLength a no-op, so AdmitDeepSeekV4Config refuses it. The Pro
+	// checkpoint declares the same 1048576 position limit as Flash.
+	return Config{ModelType: "deepseek_v4", NumLayers: 61, HiddenSize: 7168, NumExperts: 384, NumExpertsPerTok: 6, MoEIntermediateSize: 3072, NSharedExperts: 1, ExpertDtype: "fp4", NormTopKProb: true, RoutedScalingFactor: 2.5, ScoringFunc: "sqrtsoftplus", TopKMethod: "noaux_tc", SwigluLimit: 10, MaxPositionEmbeddings: 1048576}
 }
 
 func TestAdmitDeepSeekV4ConfigPinnedArtifact(t *testing.T) {
-	const raw = `{"model_type":"deepseek_v4","num_hidden_layers":61,"hidden_size":7168,"n_routed_experts":384,"num_experts_per_tok":6,"moe_intermediate_size":3072,"n_shared_experts":1,"expert_dtype":"fp4","norm_topk_prob":true,"routed_scaling_factor":2.5,"scoring_func":"sqrtsoftplus","topk_method":"noaux_tc","swiglu_limit":10}`
+	const raw = `{"model_type":"deepseek_v4","num_hidden_layers":61,"hidden_size":7168,"n_routed_experts":384,"num_experts_per_tok":6,"moe_intermediate_size":3072,"n_shared_experts":1,"expert_dtype":"fp4","norm_topk_prob":true,"routed_scaling_factor":2.5,"scoring_func":"sqrtsoftplus","topk_method":"noaux_tc","swiglu_limit":10,"max_position_embeddings":1048576}`
 	var cfg Config
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
 		t.Fatal(err)
