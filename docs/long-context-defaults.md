@@ -5,6 +5,11 @@ description: "How fak treats advertised context windows, effective context, mini
 
 # Long-context defaults doctrine
 
+> **Disambiguation first.** `fak` has three independent context budgets — the model
+> window, the native shed-line, and the hosted-worker envelope. They are routinely
+> conflated. Read [`context-budget-planes.md`](context-budget-planes.md) before
+> changing any number on this page.
+
 The model's advertised context window is a hard cap, not a target. fak defaults should
 optimize for the smallest resident view that still satisfies the task, preserve explicit
 output reserve, and label every default by the strength of its evidence.

@@ -1,5 +1,9 @@
 # Native context windows
 
+> This page describes budget **A** (the model window) and budget **B** (the native
+> shed-line). A third budget — the hosted-worker envelope **C** — is unrelated to
+> this wire. See [`context-budget-planes.md`](context-budget-planes.md).
+
 `fak serve` uses one resolved native context window for model loading, request
 admission, and model discovery. `fak up` exposes the same native context control
 for turnkey launches. The window counts the complete rendered prompt, including
