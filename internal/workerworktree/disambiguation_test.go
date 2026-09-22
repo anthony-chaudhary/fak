@@ -544,9 +544,13 @@ func TestLandIsolatedDisambiguationTimeoutIsTypedCancellableAndPreCAS(t *testing
 		outcomeCh <- outcome{result: res, handled: handled}
 	}()
 
+	// Load-tolerant start bound: the landIsolated goroutine runs admission,
+	// index-construction, and the candidate-scope fence before it reaches the
+	// analyzer seam. A 1s window is a wall-clock race under host load and made
+	// this witness flaky; wait longer for the deterministic signal to arrive.
 	select {
 	case <-scorecardStarted:
-	case <-time.After(time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("scorecard witness command did not start")
 	}
 	manual.expire()
