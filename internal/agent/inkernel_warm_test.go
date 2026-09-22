@@ -292,3 +292,199 @@ func TestInKernelWarmPrefixReadback(t *testing.T) {
 		}
 	})
 }
+
+// auxCountingAdapter is a counting fake for the auxWarmAdapter seam. It lets the witness
+// prove the exported model adapters are CALLED (and with which budget) without building a
+// model that carries a checkpoint tier or an Engram stage — the counters on
+// ExpertCheckpointStats / V41EngramRowStats already own the residency claims, and this
+// leaf only orchestrates their invocation.
+type auxCountingAdapter struct {
+	expertCalls   int
+	engramCalls   int
+	lastBudget    int64
+	lastProfile   model.ExpertWarmProfile
+	lastEngram    []int
+	expertResult  model.ExpertWarmResult
+	engramResult  model.V41EngramWarmDelta
+	engramErr     error
+	returnUnsuppt bool
+}
+
+func (a *auxCountingAdapter) WarmExpertProfile(profile model.ExpertWarmProfile, identity model.ExpertWarmProfileIdentity, budgetBytes int64) model.ExpertWarmResult {
+	a.expertCalls++
+	a.lastBudget = budgetBytes
+	a.lastProfile = profile
+	if a.returnUnsuppt {
+		return model.ExpertWarmResult{Reason: model.ExpertWarmReasonNoIndexedExpert}
+	}
+	return a.expertResult
+}
+
+func (a *auxCountingAdapter) WarmV41EngramPrefix(tokens []int, mask []bool) (model.V41EngramWarmDelta, error) {
+	a.engramCalls++
+	a.lastEngram = append([]int(nil), tokens...)
+	if a.engramErr != nil {
+		return model.V41EngramWarmDelta{}, a.engramErr
+	}
+	return a.engramResult, nil
+}
+
+// warmReady runs a descriptor+inputs warm to Ready and returns the receipt, so the
+// auxiliary sub-tests share one exact pre-state.
+func warmReady(t *testing.T, p *InKernelPlanner) WarmReceipt {
+	t.Helper()
+	in := warmFixtureInputs()
+	spec, err := p.DeriveWarmPrefix("tenant-a", "agent-1", in)
+	if err != nil {
+		t.Fatalf("DeriveWarmPrefix: %v", err)
+	}
+	p.SetWarmPrefixInputs(in)
+	receipt, err := p.WarmPrefix(WithPrefixCacheIdentity(context.Background(), spec.Scope.Tenant, spec.Scope.Agent), spec)
+	if err != nil || !receipt.Ready {
+		t.Fatalf("WarmPrefix: err=%v receipt=%+v", err, receipt)
+	}
+	return receipt
+}
+
+// TestWarmPrefixAuxiliaryCaches is the leaf's named witness (fak#13340). It proves the
+// three acceptance criteria the issue names:
+//
+//  1. The counting exported model adapters are invoked on the same model retained for
+//     real requests, and an unsupported layer stays explicit rather than silently zero.
+//  2. KV plus optional reservations never exceed the startup limit, and a cancellation
+//     or a spent reserve stops optional work before it runs.
+//  3. Warm receipts preserve INDEPENDENT layer statuses and counters; no expert-routing
+//     or admission policy is added.
+func TestWarmPrefixAuxiliaryCaches(t *testing.T) {
+	const projBytes = int64(1024)
+
+	t.Run("configured adapters are invoked with the remaining reserve after headroom", func(t *testing.T) {
+		p := warmFixturePlanner(t)
+		fake := &auxCountingAdapter{
+			expertResult: model.ExpertWarmResult{
+				Reason: model.ExpertWarmReasonPlanned, Selected: 3, Retained: 2,
+				RetainedBytes: 2 * projBytes, ReadBytes: 2 * projBytes,
+			},
+			engramResult: model.V41EngramWarmDelta{Layers: 1, Requested: 5, Hits: 0, Misses: 5, BytesRead: 5 * projBytes},
+		}
+		p.auxAdapter = fake
+		p.SetAuxWarmConfig(AuxWarmConfig{
+			ExpertProfile: model.ExpertWarmProfile{
+				Identity: model.ExpertWarmProfileIdentity{Checkpoint: "ckpt", Quantization: "Q2_K", Layout: "fused"},
+				Entries:  []model.ExpertWarmDemandEntry{{Layer: 0, Expert: 0, Count: 3}},
+			},
+			ReserveBytes:    4 * projBytes,
+			KVHeadroomBytes: 1 * projBytes,
+		})
+		receipt := warmReady(t, p)
+		if receipt.Aux == nil {
+			t.Fatal("configured aux warm left WarmReceipt.Aux nil")
+		}
+		if fake.expertCalls != 1 {
+			t.Fatalf("WarmExpertProfile calls = %d, want 1", fake.expertCalls)
+		}
+		if fake.lastBudget != 3*projBytes {
+			t.Fatalf("expert budget = %d, want remaining reserve %d (4-1 projections)", fake.lastBudget, 3*projBytes)
+		}
+		if len(fake.lastProfile.Entries) != 1 {
+			t.Fatalf("adapter saw profile entries = %d, want 1 (the caller's profile)", len(fake.lastProfile.Entries))
+		}
+		if receipt.Aux.ReserveBytes != 3*projBytes {
+			t.Fatalf("aux reserve = %d, want %d", receipt.Aux.ReserveBytes, 3*projBytes)
+		}
+		if receipt.Aux.Expert.Status != AuxStatusReady || receipt.Aux.Expert.Retained != 2 {
+			t.Fatalf("expert layer = %+v, want ready/retained=2", receipt.Aux.Expert)
+		}
+		if receipt.Aux.Expert.BytesRetained != 2*projBytes || receipt.Aux.Expert.BytesRead != 2*projBytes {
+			t.Fatalf("expert bytes not folded from the adapter: %+v", receipt.Aux.Expert)
+		}
+		// The synthetic model is not V4.1: the Engram layer is explicitly unsupported,
+		// and the adapter must NOT have been called for it.
+		if receipt.Aux.Engram.Status != AuxStatusUnsupported || receipt.Aux.Engram.Reason != "not_v41" {
+			t.Fatalf("engram layer = %+v, want unsupported/not_v41", receipt.Aux.Engram)
+		}
+		if fake.engramCalls != 0 {
+			t.Fatalf("engram adapter called %d times on a non-V4.1 model, want 0", fake.engramCalls)
+		}
+	})
+
+	t.Run("a spent reserve and a cancellation skip optional work before it runs", func(t *testing.T) {
+		// Reserve exactly covers headroom: no remainder, so no optional work.
+		p := warmFixturePlanner(t)
+		fake := &auxCountingAdapter{}
+		p.auxAdapter = fake
+		p.SetAuxWarmConfig(AuxWarmConfig{ReserveBytes: projBytes, KVHeadroomBytes: projBytes})
+		receipt := warmReady(t, p)
+		if receipt.Aux == nil {
+			t.Fatal("configured aux warm left WarmReceipt.Aux nil")
+		}
+		if receipt.Aux.Expert.Status != AuxStatusSkipped || receipt.Aux.Expert.Reason != "no_reserve" {
+			t.Fatalf("expert layer = %+v, want skipped/no_reserve", receipt.Aux.Expert)
+		}
+		if fake.expertCalls != 0 || fake.engramCalls != 0 {
+			t.Fatalf("optional work ran on a spent reserve: expert=%d engram=%d", fake.expertCalls, fake.engramCalls)
+		}
+	})
+
+	t.Run("a cancelled request never runs optional warming", func(t *testing.T) {
+		p := warmFixturePlanner(t)
+		fake := &auxCountingAdapter{expertResult: model.ExpertWarmResult{Reason: model.ExpertWarmReasonPlanned, Selected: 1, Retained: 1, RetainedBytes: projBytes}}
+		p.auxAdapter = fake
+		p.SetAuxWarmConfig(AuxWarmConfig{ReserveBytes: 8 * projBytes, KVHeadroomBytes: 0})
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		// The KV warm refuses a cancelled context before any cache work, so drive the
+		// orchestration seam directly with the cancelled context to isolate the guard.
+		aux := p.warmAuxiliaryCaches(ctx, false)
+		if aux == nil || aux.Expert.Reason != "cancelled" || aux.Engram.Reason != "cancelled" {
+			t.Fatalf("cancelled aux = %+v, want cancelled on both layers", aux)
+		}
+		if fake.expertCalls != 0 || fake.engramCalls != 0 {
+			t.Fatalf("optional work ran on a cancelled request: expert=%d engram=%d", fake.expertCalls, fake.engramCalls)
+		}
+	})
+
+	t.Run("independent layer statuses: an unsupported expert never masks the engran layer", func(t *testing.T) {
+		p := warmFixturePlanner(t)
+		// Force the V4.1 gate true so the Engram layer is attempted, and make the expert
+		// adapter report the tier-less model (unsupported). The two statuses must diverge.
+		fake := &auxCountingAdapter{
+			returnUnsuppt: true,
+			engramResult:  model.V41EngramWarmDelta{Layers: 1, Requested: 4, Hits: 4, Misses: 0, BytesRead: 0},
+		}
+		p.auxAdapter = fake
+		p.SetAuxWarmConfig(AuxWarmConfig{
+			EngramTokens:    []int{1, 2, 3},
+			ReserveBytes:    8 * projBytes,
+			KVHeadroomBytes: 0,
+		})
+		aux := p.warmAuxiliaryCaches(context.Background(), true)
+		if aux.Expert.Status != AuxStatusUnsupported || aux.Expert.Reason != "no_indexed_expert" {
+			t.Fatalf("expert layer = %+v, want unsupported/no_indexed_expert", aux.Expert)
+		}
+		if aux.Engram.Status != AuxStatusReady {
+			t.Fatalf("engram layer = %+v, want ready (a resident prefix reads nothing but is ready)", aux.Engram)
+		}
+		if fake.engramCalls != 1 {
+			t.Fatalf("engram adapter calls = %d, want 1", fake.engramCalls)
+		}
+		if len(fake.lastEngram) != 3 {
+			t.Fatalf("engram adapter saw tokens = %v, want the configured prefix", fake.lastEngram)
+		}
+	})
+
+	t.Run("an unconfigured planner leaves the KV receipt byte-for-byte unchanged", func(t *testing.T) {
+		p := warmFixturePlanner(t)
+		receipt := warmReady(t, p)
+		if receipt.Aux != nil {
+			t.Fatalf("unconfigured planner grew an aux block: %+v", receipt.Aux)
+		}
+		blob, err := json.Marshal(receipt)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if strings.Contains(string(blob), "\"aux\"") {
+			t.Fatalf("unconfigured receipt carries an aux key: %s", blob)
+		}
+	})
+}

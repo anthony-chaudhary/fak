@@ -264,6 +264,18 @@ type InKernelPlanner struct {
 	// carrier refuses a warm closed rather than guessing the boundary. Guarded by mu
 	// alongside every other planner-owned warm field.
 	warmInputs *warmInputsCarrier
+
+	// auxWarm / auxWarmSet carry the OPTIONAL auxiliary-cache warming config (CW-12,
+	// #13340): the recorded expert profile, the V4.1 Engram prefix and the startup
+	// reserve. They are inert until SetAuxWarmConfig is called, so a planner that never
+	// opts in warms only KV and leaves WarmReceipt.Aux nil. Guarded by mu.
+	auxWarm    AuxWarmConfig
+	auxWarmSet bool
+	// auxAdapter is the narrow override seam the warm orchestrator calls for optional
+	// auxiliary warming; nil selects the planner's own model (the real adapter retained
+	// for real requests). It exists so a witness can inject a counting fake without
+	// building a checkpoint tier or an Engram stage; the served path never sets it.
+	auxAdapter auxWarmAdapter
 }
 
 type inKernelOOMRetryClassStats struct {

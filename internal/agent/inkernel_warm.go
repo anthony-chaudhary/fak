@@ -39,6 +39,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
 
@@ -111,6 +112,108 @@ type WarmReceipt struct {
 	// PrimeDuration is the wall-clock time the materialize+readback took. It is a
 	// [SW-VERIFIED] host timing observation, not a hardware cache-hit claim.
 	PrimeDuration time.Duration `json:"prime_duration_ns"`
+
+	// Aux carries the OPTIONAL auxiliary-cache warming evidence (expert-profile and
+	// V4.1 Engram layers). It is present only when the caller configured auxiliary
+	// warming via SetAuxWarmConfig; a planner without it leaves Aux nil, so the
+	// historical KV-only receipt is byte-for-byte unchanged. Each layer carries its
+	// OWN status/counters — a KV-ready warm with a declined expert layer reports
+	// ready + expert:unsupported, never a single conflated bit.
+	Aux *AuxWarmReceipt `json:"aux,omitempty"`
+}
+
+// Aux status vocabulary — the closed set an AuxLayerReceipt.Status may carry. It mirrors
+// the WarmStatus set so a receipt reader branches on the same ready/cold/unsupported
+// trichotomy for every layer, plus "skipped" for optional work a cancellation or the
+// remaining-reserve gate stopped before it could run.
+const (
+	// AuxStatusReady means the layer's optional warming ran and established residency.
+	AuxStatusReady = "ready"
+	// AuxStatusCold means the layer ran but retained/restored nothing usable (an honest
+	// miss — e.g. an empty profile or a zero remaining reserve).
+	AuxStatusCold = "cold"
+	// AuxStatusUnsupported means the model cannot warm this layer at all (no expert
+	// checkpoint tier, no Engram stage). It is fail-closed.
+	AuxStatusUnsupported = "unsupported"
+	// AuxStatusSkipped means the layer was configured but optional work did not run:
+	// the request was cancelled, or the remaining reserve after KV/request headroom
+	// was non-positive. Optional warming must never run on a cancel or a spent budget.
+	AuxStatusSkipped = "skipped"
+)
+
+// AuxLayerReceipt is the machine-checkable result of warming ONE optional auxiliary
+// layer. Every field is a scalar/copied value; it carries no prompt text and no model
+// weights. Ready is the single bit a caller branches on; the counters are the layer's
+// own independent ledger, so a layer that ran but seated nothing cannot read as ready.
+type AuxLayerReceipt struct {
+	// Status is the closed token (ready | cold | unsupported | skipped).
+	Status string `json:"status"`
+	// Reason is the closed sub-reason for a non-ready status (e.g. "no_checkpoint_tier",
+	// "no_engram_stage", "cancelled", "no_reserve"). Empty when ready.
+	Reason string `json:"reason,omitempty"`
+	// Requested is how many units the layer was asked to warm (expert projections
+	// selected, or Engram row addresses presented).
+	Requested int `json:"requested"`
+	// Retained is how many units the layer actually seated (retained projections or
+	// resident Engram rows). Zero on a declined/unsupported/skipped layer.
+	Retained int `json:"retained"`
+	// BytesRead is the backing bytes the layer's warm read, from the layer's own
+	// counter snapshot — never inferred from configuration.
+	BytesRead int64 `json:"bytes_read"`
+	// BytesRetained is the resident bytes the layer established (expert layers only;
+	// zero for Engram, which reports residency in rows).
+	BytesRetained int64 `json:"bytes_retained,omitempty"`
+}
+
+// AuxWarmReceipt folds the two optional auxiliary layers into one bounded receipt, each
+// with its own independent status and counters. It is attached to WarmReceipt.Aux only
+// when auxiliary warming is configured, so a KV-only warm never grows this block.
+type AuxWarmReceipt struct {
+	// Expert is the expert-profile (Model.WarmExpertProfile) layer result.
+	Expert AuxLayerReceipt `json:"expert"`
+	// Engram is the V4.1 Engram-prefix (Model.WarmV41EngramPrefix) layer result.
+	Engram AuxLayerReceipt `json:"engram"`
+	// ReserveBytes is the remaining startup reserve this call was allowed to spend on
+	// optional warming, after KV/request headroom was deducted. It is the bound the
+	// layer budgets were clamped against.
+	ReserveBytes int64 `json:"reserve_bytes"`
+}
+
+// AuxWarmConfig configures OPTIONAL auxiliary-cache warming performed by WarmPrefix after
+// the KV prefix is restored. It is inert by default: a planner with no config warms only
+// KV and leaves WarmReceipt.Aux nil. The expert identity is presented (not derived) so a
+// stale recorded profile is refused by the model's own identity check rather than warming
+// the wrong projections.
+type AuxWarmConfig struct {
+	// ExpertProfile is the recorded demand profile to warm the expert cache from. An
+	// empty profile warms nothing (the model reports no_profile).
+	ExpertProfile model.ExpertWarmProfile
+	// ExpertIdentity is the (checkpoint, quantization, layout) identity the profile was
+	// recorded against; a mismatch makes the profile stale and the warm declines.
+	ExpertIdentity model.ExpertWarmProfileIdentity
+	// EngramTokens is the token prefix whose Engram rows are prefetched on a V4.1 model.
+	// Empty (with EngramMask) skips the Engram layer explicitly.
+	EngramTokens []int
+	// EngramMask is the optional per-token mask for the Engram prefix hash.
+	EngramMask []bool
+	// ReserveBytes is the total startup reserve available to optional warming, BEFORE
+	// KV/request headroom is deducted. The orchestrator spends what remains after the
+	// caller-declared KVHeadroomBytes; a non-positive remainder skips optional work.
+	ReserveBytes int64
+	// KVHeadroomBytes is the slice of ReserveBytes reserved for the KV cache and request
+	// headroom. It is deducted before any optional layer runs, so a reserve that only
+	// covers KV never speculatively warms the expert/Engram caches.
+	KVHeadroomBytes int64
+}
+
+// auxWarmAdapter is the narrow seam the warm orchestrator calls for OPTIONAL auxiliary
+// warming. It is satisfied by *model.Model (the real adapter, retained on the planner for
+// real requests) and lets a witness inject a counting fake without constructing a model
+// with a checkpoint tier or an Engram stage. Every method mirrors an exported model
+// capability; the orchestrator adds no selection, faulting or cache math of its own.
+type auxWarmAdapter interface {
+	WarmExpertProfile(profile model.ExpertWarmProfile, identity model.ExpertWarmProfileIdentity, budgetBytes int64) model.ExpertWarmResult
+	WarmV41EngramPrefix(tokens []int, mask []bool) (model.V41EngramWarmDelta, error)
 }
 
 // Usable reports whether this receipt describes a restorable warm. It is the AND of the
@@ -225,7 +328,164 @@ func (p *InKernelPlanner) WarmPrefix(ctx context.Context, spec WarmPrefixSpec) (
 	// Flip the first-demand latch ONLY now: a real restore was observed, so the following
 	// turn's prompt is genuinely eligible to reuse this prefix.
 	p.noteKVPrefixAdmitted()
+	// Optional auxiliary warming runs LAST, after the KV prefix is genuinely restorable,
+	// so a failed optional layer can never cost the KV warm its readiness. It is inert
+	// unless the caller configured it, and it stops on the request's own cancellation.
+	receipt.Aux = p.warmAuxiliaryCaches(ctx, p.warmIsV41())
 	return finishWarm(receipt, started), nil
+}
+
+// warmAuxiliaryCaches orchestrates the OPTIONAL auxiliary-cache layers (expert profile and
+// V4.1 Engram) on top of a successful KV warm. It is inert when no config is installed
+// (Aux stays nil) and never mutates the KV readiness. Each layer gets an INDEPENDENT
+// status: a declined expert warm does not make the Engram layer cold, and vice versa.
+//
+// The remaining reserve after KV/request headroom is the aggregate budget the layers
+// share: the expert layer is clamped to it, and a non-positive remainder skips optional
+// work entirely rather than reading bytes that cannot become residency. A cancelled
+// request stops before doing optional work. No selection, faulting or cache math happens
+// here — every producer is the model's own exported capability.
+func (p *InKernelPlanner) warmAuxiliaryCaches(ctx context.Context, isV41 bool) *AuxWarmReceipt {
+	cfg, ok := p.auxWarmConfigSnapshot()
+	if !ok {
+		return nil
+	}
+	reserve := cfg.ReserveBytes - cfg.KVHeadroomBytes
+	aux := &AuxWarmReceipt{
+		ReserveBytes: reserve,
+		Expert:       AuxLayerReceipt{Status: AuxStatusSkipped, Reason: "no_reserve"},
+		Engram:       AuxLayerReceipt{Status: AuxStatusSkipped, Reason: "no_reserve"},
+	}
+	// A cancelled request does no optional work: the KV warm it already observed stands,
+	// but speculative reads must never run against a caller that has gone away.
+	if ctx != nil && ctx.Err() != nil {
+		aux.Expert.Reason = "cancelled"
+		aux.Engram.Reason = "cancelled"
+		return aux
+	}
+	if reserve <= 0 {
+		return aux
+	}
+
+	adapter := p.auxWarmAdapter()
+	aux.Expert = warmExpertLayer(adapter, cfg, reserve)
+	// The Engram layer runs only for a genuinely V4.1 runtime whose stage is wired; a
+	// non-V4.1 model or an unwired stage is reported unsupported, never a silent zero.
+	aux.Engram = warmEngramLayer(adapter, isV41, cfg)
+	return aux
+}
+
+// warmExpertLayer runs the expert-profile warm clamped to the remaining reserve and folds
+// the model's own counters into a layer receipt. A nil adapter or a tier-less model is
+// reported unsupported; a zero/empty plan is an honest cold result.
+func warmExpertLayer(adapter auxWarmAdapter, cfg AuxWarmConfig, reserve int64) AuxLayerReceipt {
+	if adapter == nil {
+		return AuxLayerReceipt{Status: AuxStatusUnsupported, Reason: "no_model"}
+	}
+	budget := reserve
+	if budget > cfg.ReserveBytes {
+		budget = cfg.ReserveBytes
+	}
+	res := adapter.WarmExpertProfile(cfg.ExpertProfile, cfg.ExpertIdentity, budget)
+	layer := AuxLayerReceipt{
+		Requested:     res.Selected,
+		Retained:      res.Retained,
+		BytesRead:     res.ReadBytes,
+		BytesRetained: res.RetainedBytes,
+	}
+	switch {
+	case res.Retained > 0:
+		layer.Status = AuxStatusReady
+		layer.Reason = string(res.Reason)
+	case string(res.Reason) == "no_indexed_expert":
+		// A model with no checkpoint tier is not a miss: the capability is absent.
+		layer.Status = AuxStatusUnsupported
+		layer.Reason = string(res.Reason)
+	default:
+		layer.Status = AuxStatusCold
+		layer.Reason = string(res.Reason)
+	}
+	return layer
+}
+
+// warmEngramLayer runs the V4.1 Engram-prefix warm. It is unsupported on a non-V4.1
+// runtime or when the caller supplied no prefix; a warm that reads nothing (an already
+// resident prefix) is an honest ready-with-zero-read result, distinguished from a miss by
+// the delta's own Requested/Resident accounting.
+func warmEngramLayer(adapter auxWarmAdapter, isV41 bool, cfg AuxWarmConfig) AuxLayerReceipt {
+	if !isV41 {
+		return AuxLayerReceipt{Status: AuxStatusUnsupported, Reason: "not_v41"}
+	}
+	if adapter == nil {
+		return AuxLayerReceipt{Status: AuxStatusUnsupported, Reason: "no_model"}
+	}
+	if len(cfg.EngramTokens) == 0 {
+		return AuxLayerReceipt{Status: AuxStatusSkipped, Reason: "no_prefix"}
+	}
+	delta, err := adapter.WarmV41EngramPrefix(cfg.EngramTokens, cfg.EngramMask)
+	if err != nil {
+		// The model refused the warm (no V4.1 config, no Engram layers, an unwired or
+		// inconsistent stage): an explicit unsupported layer, never a silent zero.
+		return AuxLayerReceipt{Status: AuxStatusUnsupported, Reason: "engram_unsupported"}
+	}
+	layer := AuxLayerReceipt{
+		Requested: int(delta.Requested),
+		Retained:  int(delta.Requested - delta.Misses),
+		BytesRead: delta.BytesRead,
+	}
+	if delta.Requested > 0 && delta.Misses == 0 {
+		layer.Status = AuxStatusReady
+		return layer
+	}
+	if delta.Requested > 0 {
+		layer.Status = AuxStatusReady
+		layer.Reason = "partial_residency"
+		return layer
+	}
+	layer.Status = AuxStatusCold
+	layer.Reason = "no_rows"
+	return layer
+}
+
+// auxWarmAdapter returns the seam the orchestrator calls: the injected test adapter when
+// set, else the planner's own model (the real adapter retained for real requests). A nil
+// model yields a nil adapter, which every layer reports as unsupported.
+func (p *InKernelPlanner) auxWarmAdapter() auxWarmAdapter {
+	if p.auxAdapter != nil {
+		return p.auxAdapter
+	}
+	if p.m == nil {
+		return nil
+	}
+	return p.m
+}
+
+// auxWarmConfigSnapshot returns the configured auxiliary warming plus whether any is
+// configured. It reads under mu alongside every other planner-owned warm field.
+func (p *InKernelPlanner) auxWarmConfigSnapshot() (AuxWarmConfig, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.auxWarmSet {
+		return AuxWarmConfig{}, false
+	}
+	return p.auxWarm, true
+}
+
+// SetAuxWarmConfig installs the optional auxiliary-cache warming configuration. It copies
+// every slice so the caller cannot mutate the planner's config after the fact. A planner
+// that never calls it warms only KV and leaves WarmReceipt.Aux nil.
+func (p *InKernelPlanner) SetAuxWarmConfig(cfg AuxWarmConfig) {
+	if p == nil {
+		return
+	}
+	stored := cfg
+	stored.EngramTokens = append([]int(nil), cfg.EngramTokens...)
+	stored.EngramMask = append([]bool(nil), cfg.EngramMask...)
+	stored.ExpertProfile.Entries = append([]model.ExpertWarmDemandEntry(nil), cfg.ExpertProfile.Entries...)
+	p.mu.Lock()
+	p.auxWarm = stored
+	p.auxWarmSet = true
+	p.mu.Unlock()
 }
 
 // warmIsV41 reports whether this planner's runtime is the DeepSeek V4.1 family, whose
