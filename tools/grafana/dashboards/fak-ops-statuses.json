@@ -7,7 +7,7 @@
     "appliance"
   ],
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": false,
   "timezone": "browser",
   "refresh": "30s",
@@ -18,63 +18,44 @@
   "links": [
     {
       "type": "link",
-      "title": "Index",
-      "url": "/d/fak-strix-index",
-      "keepTime": true,
-      "includeVars": true
-    },
-    {
-      "type": "link",
-      "title": "Appliance",
-      "url": "/d/fak-strix-appliance",
-      "keepTime": true,
-      "includeVars": true
-    },
-    {
-      "type": "link",
-      "title": "Serving",
-      "url": "/d/fak-strix-serving",
-      "keepTime": true,
-      "includeVars": true
-    },
-    {
-      "type": "link",
-      "title": "Cache & recovery",
-      "url": "/d/fak-strix-cache",
-      "keepTime": true,
-      "includeVars": true
-    },
-    {
-      "type": "link",
-      "title": "Cluster fleet",
-      "url": "/d/fak-strix-cluster",
-      "keepTime": true,
-      "includeVars": true
-    },
-    {
-      "type": "link",
-      "title": "Orchestration",
-      "url": "/d/fak-strix-orchestration",
-      "keepTime": true,
-      "includeVars": true
-    },
-    {
-      "type": "link",
-      "title": "Agents & harness",
-      "url": "/d/fak-strix-agents",
-      "keepTime": true,
-      "includeVars": true
-    },
-    {
-      "type": "link",
       "title": "Ops statuses",
       "url": "/d/fak-ops-statuses",
       "keepTime": true,
       "includeVars": true
+    },
+    {
+      "type": "link",
+      "title": "Workers, queue & issue throughput",
+      "url": "/d/fak-ops-workers-queue",
+      "keepTime": true,
+      "includeVars": true,
+      "icon": "external link"
+    },
+    {
+      "type": "link",
+      "title": "Fleet overview",
+      "url": "/d/fak-fleet-overview",
+      "keepTime": true,
+      "includeVars": true,
+      "icon": "external link"
     }
   ],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 2,
+        "refresh": 1,
+        "regex": "",
+        "options": [],
+        "includeAll": false,
+        "multi": false
+      }
+    ]
   },
   "panels": [
     {
@@ -111,7 +92,7 @@
       "description": "Prometheus reachability of the Fak Ops statuses exporter.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "x": 0,
@@ -126,7 +107,7 @@
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "range": false,
           "instant": true
@@ -135,7 +116,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "noValue": "Unavailable",
+          "noValue": "UNAVAILABLE",
           "color": {
             "mode": "palette-classic"
           },
@@ -150,8 +131,12 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "blue",
+                "color": "red",
                 "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
               }
             ]
           }
@@ -186,10 +171,10 @@
     {
       "type": "stat",
       "title": "Routines enabled",
-      "description": "",
+      "description": "Enabled ops routines in the scheduler. Reads 0 when none are enabled; a routine that is enabled but not firing shows up as stale below.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "x": 4,
@@ -204,7 +189,7 @@
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "range": false,
           "instant": true
@@ -213,7 +198,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "noValue": "Unavailable",
+          "noValue": "UNAVAILABLE",
           "color": {
             "mode": "palette-classic"
           },
@@ -228,8 +213,12 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "blue",
+                "color": "green",
                 "value": null
+              },
+              {
+                "color": "red",
+                "value": 0
               }
             ]
           }
@@ -267,7 +256,7 @@
       "description": "Items waiting, executing, or held-unknown. Unknown holds block overlapping routines.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "x": 8,
@@ -282,7 +271,7 @@
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "range": false,
           "instant": true
@@ -291,7 +280,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "noValue": "Unavailable",
+          "noValue": "UNAVAILABLE",
           "color": {
             "mode": "palette-classic"
           },
@@ -306,8 +295,16 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "blue",
+                "color": "green",
                 "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
               }
             ]
           }
@@ -345,7 +342,7 @@
       "description": "Stuck-work items carrying at least one closed reason.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "x": 12,
@@ -360,7 +357,7 @@
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "range": false,
           "instant": true
@@ -369,7 +366,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "noValue": "Unavailable",
+          "noValue": "UNAVAILABLE",
           "color": {
             "mode": "palette-classic"
           },
@@ -384,8 +381,16 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "blue",
+                "color": "green",
                 "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
               }
             ]
           }
@@ -423,7 +428,7 @@
       "description": "Report-window failure ratio. Absent when the window holds no terminal result (never a fabricated zero).",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "x": 16,
@@ -438,7 +443,7 @@
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "range": false,
           "instant": true
@@ -447,7 +452,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "percentunit",
-          "noValue": "Unavailable",
+          "noValue": "UNAVAILABLE",
           "color": {
             "mode": "palette-classic"
           },
@@ -462,8 +467,16 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "blue",
+                "color": "green",
                 "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.1
+              },
+              {
+                "color": "red",
+                "value": 0.25
               }
             ]
           }
@@ -501,7 +514,7 @@
       "description": "Any plane degraded. Read the named diagnostics on the exporter's /status page.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "x": 20,
@@ -516,7 +529,7 @@
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "range": false,
           "instant": true
@@ -525,7 +538,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "noValue": "Unavailable",
+          "noValue": "UNAVAILABLE",
           "color": {
             "mode": "palette-classic"
           },
@@ -540,8 +553,12 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "blue",
+                "color": "green",
                 "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
               }
             ]
           }
@@ -589,10 +606,10 @@
     {
       "type": "timeseries",
       "title": "Routines by state",
-      "description": "",
+      "description": "Routines partitioned by lifecycle state over time. A flat line at 0 means no routines are registered \u2014 which is different from an exporter outage.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "x": 0,
@@ -607,7 +624,7 @@
           "legendFormat": "{{state}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "range": true,
           "instant": false
@@ -631,8 +648,16 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "blue",
+                "color": "green",
                 "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
               }
             ]
           }
@@ -667,10 +692,10 @@
     {
       "type": "timeseries",
       "title": "Queue items by state",
-      "description": "",
+      "description": "Queued/executing/held items over time. An empty panel means the state file was unreadable, not that the queue is empty.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "x": 8,
@@ -685,7 +710,7 @@
           "legendFormat": "{{state}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "range": true,
           "instant": false
@@ -709,8 +734,16 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "blue",
+                "color": "green",
                 "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
               }
             ]
           }
@@ -745,10 +778,10 @@
     {
       "type": "timeseries",
       "title": "Intervals by state",
-      "description": "",
+      "description": "Terminal interval outcomes over time. Empty when no interval has completed in the retained history.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "x": 16,
@@ -763,7 +796,7 @@
           "legendFormat": "{{state}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "range": true,
           "instant": false
@@ -787,8 +820,16 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "blue",
+                "color": "green",
                 "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
               }
             ]
           }
@@ -835,11 +876,11 @@
     },
     {
       "type": "timeseries",
-      "title": "Report intervals folded",
-      "description": "",
+      "title": "Report intervals folded (increase)",
+      "description": "Per-scrape increase of admitted reports intervals. A flat 0 means the ops runner is not folding intervals.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "x": 0,
@@ -850,11 +891,11 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "fak_ops_reports_intervals_total{job=\"fak_ops\"}",
+          "expr": "increase(fak_ops_reports_intervals_total{job=\"fak_ops\"}[$__rate_interval])",
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "range": true,
           "instant": false
@@ -878,8 +919,16 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "blue",
+                "color": "green",
                 "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
               }
             ]
           }
@@ -913,11 +962,11 @@
     },
     {
       "type": "timeseries",
-      "title": "Items admitted",
-      "description": "",
+      "title": "Items admitted (increase)",
+      "description": "Per-scrape increase of admitted queue items. A flat 0 means nothing is being admitted, not that the exporter is broken.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "x": 6,
@@ -928,11 +977,11 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "fak_ops_reports_items_admitted_total{job=\"fak_ops\"}",
+          "expr": "increase(fak_ops_reports_items_admitted_total{job=\"fak_ops\"}[$__rate_interval])",
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "range": true,
           "instant": false
@@ -956,8 +1005,16 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "blue",
+                "color": "green",
                 "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
               }
             ]
           }
@@ -992,10 +1049,10 @@
     {
       "type": "timeseries",
       "title": "Report results by outcome",
-      "description": "",
+      "description": "Report outcomes (ok/failed/unknown) in the trailing window. Absent series mean the window held no terminal result.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "x": 12,
@@ -1010,7 +1067,7 @@
           "legendFormat": "{{result}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "range": true,
           "instant": false
@@ -1034,8 +1091,16 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "blue",
+                "color": "green",
                 "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
               }
             ]
           }
@@ -1073,7 +1138,7 @@
       "description": "Whether the ops-report ledger exists. Absent folds to an honest empty window.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "x": 18,
@@ -1088,7 +1153,7 @@
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "range": false,
           "instant": true
@@ -1097,7 +1162,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "noValue": "Unavailable",
+          "noValue": "UNAVAILABLE",
           "color": {
             "mode": "palette-classic"
           },
@@ -1112,8 +1177,12 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "blue",
+                "color": "red",
                 "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
               }
             ]
           }
@@ -1161,10 +1230,10 @@
     {
       "type": "timeseries",
       "title": "Stuck planes census",
-      "description": "",
+      "description": "Stuck-work census by plane. Empty means the stuck join produced no rows; check 'Stuck planes failed' before reading it as clean.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "x": 0,
@@ -1179,7 +1248,7 @@
           "legendFormat": "{{plane}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "range": true,
           "instant": false
@@ -1203,8 +1272,16 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "blue",
+                "color": "green",
                 "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
               }
             ]
           }
@@ -1239,10 +1316,10 @@
     {
       "type": "timeseries",
       "title": "Stuck by closed reason",
-      "description": "",
+      "description": "Stuck items partitioned by closed reason. An empty panel means no reason was recorded, which is not the same as no stuck work.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "x": 6,
@@ -1257,7 +1334,7 @@
           "legendFormat": "{{reason}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "range": true,
           "instant": false
@@ -1281,8 +1358,16 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "blue",
+                "color": "green",
                 "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
               }
             ]
           }
@@ -1317,10 +1402,10 @@
     {
       "type": "timeseries",
       "title": "Schedule enabled vs stale",
-      "description": "",
+      "description": "Enabled vs stale routine counts. The stale line rising above 0 means enabled routines have stopped firing and need re-arming.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "x": 12,
@@ -1335,7 +1420,7 @@
           "legendFormat": "Enabled",
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "range": true,
           "instant": false
@@ -1346,7 +1431,7 @@
           "legendFormat": "Stale",
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "range": true,
           "instant": false
@@ -1370,8 +1455,16 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "blue",
+                "color": "green",
                 "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
               }
             ]
           }
@@ -1409,7 +1502,7 @@
       "description": "Stuck-work planes that failed to probe. Failed planes render partial, never clean.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "x": 18,
@@ -1424,7 +1517,7 @@
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "range": false,
           "instant": true
@@ -1433,7 +1526,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "noValue": "Unavailable",
+          "noValue": "UNAVAILABLE",
           "color": {
             "mode": "palette-classic"
           },
@@ -1448,8 +1541,12 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "blue",
+                "color": "green",
                 "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
               }
             ]
           }
@@ -1480,6 +1577,136 @@
         "textMode": "auto"
       },
       "id": 22
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "Reports failure rate (trend)",
+      "description": "Report-window failure ratio over time. The stat tile shows only now; this shows a failure storm developing. Absent means the window held no terminal result.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "UNAVAILABLE",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.1
+              },
+              {
+                "color": "red",
+                "value": 0.25
+              }
+            ]
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "fak_ops_reports_failure_rate{job=\"fak_ops\"}",
+          "legendFormat": "__auto",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "Snapshot age (s) \u2014 fold freshness",
+      "description": "Age of the cached ops snapshot the exporter serves. A rising line means the background fold is wedged and every panel is a frozen past, even while the exporter answers.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 43
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "UNAVAILABLE",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 300
+              },
+              {
+                "color": "red",
+                "value": 900
+              }
+            ]
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "fak_ops_snapshot_age_seconds{job=\"fak_ops\"}",
+          "legendFormat": "__auto",
+          "refId": "A"
+        }
+      ]
     }
   ]
 }
