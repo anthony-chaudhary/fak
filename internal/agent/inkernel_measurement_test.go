@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
 
 func TestNativeInferenceMeasurementMatchesRawModelLogSoftmax(t *testing.T) {
@@ -425,4 +427,201 @@ func TestNativeInferenceReceiptRejectsModifiedLogits(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestWarmCacheMeasurementSeparation is the CW-13 (fak#13339) named witness: the
+// startup KV-cache work must be reported SEPARATELY from the first-request prefill
+// accounting, so a request that restores a primed prefix reports its OWN restored
+// vs computed split — never folding a prime into a demand throughput sample.
+//
+// It proves the three scoped acceptance criteria binary:
+//
+//  1. A request that restored a primed prefix reports RESTORED tokens plus the ACTUAL
+//     computed suffix, and a failed prime cannot manufacture a cache hit (cold).
+//  2. Zero-work (cold), partial-hit and exact-hit arms obey token conservation
+//     (restored + computed == total prompt); a zero-work turn reports no fabricated
+//     restore.
+//  3. Startup priming is separated from demand: the warm generates NO token and is
+//     never counted as a served request, while ordinary served requests keep their
+//     existing usage projection.
+func TestWarmCacheMeasurementSeparation(t *testing.T) {
+	// --- (2) direct conservation matrix on the re-projection helper. -------------
+	t.Run("accounting conserves tokens across the hit arms", func(t *testing.T) {
+		p := &InKernelPlanner{modelID: "synthetic"}
+		cases := []struct {
+			name     string
+			facts    nativeCacheAccountingFacts
+			wantOp   model.NativeCacheOperation
+			wantSrc  model.NativeCacheRestoreSource
+			demand   bool
+			wantRest int
+			wantComp int
+		}{
+			{
+				name:     "cold",
+				facts:    nativeCacheAccountingFacts{promptTokens: 100, cacheableTokens: 0, matchedTokens: 0, sourceTier: radixkv.SnapshotTierMiss, generated: 8},
+				wantOp:   model.NativeCacheCold,
+				wantSrc:  model.NativeCacheRestoreNone,
+				demand:   true,
+				wantRest: 0,
+				wantComp: 100,
+			},
+			{
+				name:     "exact hit",
+				facts:    nativeCacheAccountingFacts{promptTokens: 100, cacheableTokens: 100, matchedTokens: 100, sourceTier: radixkv.SnapshotTierDeviceL1, prefillSecs: 0.01, generated: 5},
+				wantOp:   model.NativeCacheExactHit,
+				wantSrc:  model.NativeCacheRestoreDevice,
+				demand:   true,
+				wantRest: 100,
+				wantComp: 0,
+			},
+			{
+				name:     "partial hit computes the suffix",
+				facts:    nativeCacheAccountingFacts{promptTokens: 100, cacheableTokens: 80, matchedTokens: 80, sourceTier: radixkv.SnapshotTierHostL2, prefillSecs: 0.02, generated: 6},
+				wantOp:   model.NativeCachePartialHit,
+				wantSrc:  model.NativeCacheRestoreHost,
+				demand:   true,
+				wantRest: 80,
+				wantComp: 20,
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				got := p.nativeCacheAccountingFor(tc.facts)
+				if got == nil {
+					t.Fatal("accounting block absent")
+				}
+				if err := got.Validate(); err != nil {
+					t.Fatalf("conservation violation: %v (%+v)", err, got)
+				}
+				if got.Operation != tc.wantOp || got.RestoreSource != tc.wantSrc {
+					t.Fatalf("op/source = %q/%q, want %q/%q", got.Operation, got.RestoreSource, tc.wantOp, tc.wantSrc)
+				}
+				if got.RestoredTokens != tc.wantRest || got.ComputedTokens != tc.wantComp {
+					t.Fatalf("restored/computed = %d/%d, want %d/%d", got.RestoredTokens, got.ComputedTokens, tc.wantRest, tc.wantComp)
+				}
+				if got.RestoredTokens+got.ComputedTokens != got.TotalPromptTokens {
+					t.Fatalf("tokens do not conserve: %d+%d != %d", got.RestoredTokens, got.ComputedTokens, got.TotalPromptTokens)
+				}
+				if got.SatisfiesDemandThroughput() != tc.demand {
+					t.Fatalf("SatisfiesDemandThroughput = %v, want %v", got.SatisfiesDemandThroughput(), tc.demand)
+				}
+			})
+		}
+	})
+
+	// --- (2b) a failed/exact-cold prime cannot manufacture a hit. ----------------
+	t.Run("zero-work turn never fabricates a restore", func(t *testing.T) {
+		p := &InKernelPlanner{modelID: "synthetic"}
+		got := p.nativeCacheAccountingFor(nativeCacheAccountingFacts{
+			promptTokens: 40, cacheableTokens: 40, matchedTokens: 0,
+			sourceTier: radixkv.SnapshotTierHostL2, generated: 3,
+		})
+		if got.RestoreSource != model.NativeCacheRestoreNone || got.RestoredTokens != 0 {
+			t.Fatalf("cold turn claimed a restore: %+v", got)
+		}
+		if err := got.Validate(); err != nil {
+			t.Fatalf("cold block invalid: %v", err)
+		}
+	})
+
+	// --- (1)+(3) end-to-end: warm, then a served request reports the split. -------
+	t.Run("a served request after a warm reports restored plus computed suffix", func(t *testing.T) {
+		ctx := context.Background()
+		p := warmFixturePlanner(t)
+		in := warmFixtureInputs()
+		spec, err := p.DeriveWarmPrefix("tenant-a", "agent-1", in)
+		if err != nil {
+			t.Fatalf("DeriveWarmPrefix: %v", err)
+		}
+		p.SetWarmPrefixInputs(in)
+		scoped := WithPrefixCacheIdentity(ctx, spec.Scope.Tenant, spec.Scope.Agent)
+		warm, err := p.WarmPrefix(scoped, spec)
+		if err != nil || !warm.Usable() {
+			t.Fatalf("WarmPrefix: err=%v receipt=%+v", err, warm)
+		}
+		if warm.PrimeDuration <= 0 {
+			t.Fatalf("prime duration not reported: %+v", warm)
+		}
+		// The warm is startup preparation: it generated nothing and flipped the
+		// first-demand latch only after a real restore readback. That is the
+		// startup/demand separation — the prime is NOT a served request.
+		if !warm.ZeroGenerated || !p.kvPrefixEverAdmitted.Load() {
+			t.Fatalf("warm did not separate prime from demand: zero_generated=%v admitted=%v", warm.ZeroGenerated, p.kvPrefixEverAdmitted.Load())
+		}
+
+		// A next demand request on the SAME planner reuses the warmed stable prefix.
+		// It must report the restored prefix AND the actually-computed suffix.
+		comp, err := p.Complete(scoped,
+			[]Message{{Role: RoleSystem, Content: string(in.Instructions)}},
+			in.Tools, WithMaxTokens(3), WithNativeInferenceReceipt(true))
+		if err != nil {
+			t.Fatalf("Complete: %v", err)
+		}
+		if comp.NativeInference == nil || comp.NativeInference.NativeCacheAccounting == nil {
+			t.Fatalf("served receipt carries no cache accounting: %+v", comp.NativeInference)
+		}
+		acct := comp.NativeInference.NativeCacheAccounting
+		if err := acct.Validate(); err != nil {
+			t.Fatalf("served accounting violates conservation: %v (%+v)", err, acct)
+		}
+		if acct.Operation == model.NativeCacheCold {
+			t.Fatalf("request after a ready warm booked cold: %+v", acct)
+		}
+		if acct.RestoredTokens <= 0 {
+			t.Fatalf("restored tokens = %d, want > 0 after a warm", acct.RestoredTokens)
+		}
+		if acct.ComputedTokens < 0 || acct.RestoredTokens+acct.ComputedTokens != acct.TotalPromptTokens {
+			t.Fatalf("restored+computed != total: %+v", acct)
+		}
+		if acct.GeneratedTokens != comp.Usage.CompletionTokens {
+			t.Fatalf("generated = %d, want the parent receipt completion count %d", acct.GeneratedTokens, comp.Usage.CompletionTokens)
+		}
+		if !acct.SatisfiesDemandThroughput() {
+			t.Fatalf("a served demand turn was marked non-demand: %+v", acct)
+		}
+		// The usage projection still carries the realized reuse, unchanged.
+		if comp.Usage.PromptTokensDetails == nil || comp.Usage.PromptTokensDetails.CachedTokens != acct.RestoredTokens {
+			t.Fatalf("usage cache detail = %+v, want restored %d", comp.Usage.PromptTokensDetails, acct.RestoredTokens)
+		}
+	})
+
+	// --- (3) a startup prime is never a demand throughput sample. ----------------
+	t.Run("a startup prime is not a demand sample and reports a prime duration", func(t *testing.T) {
+		ctx := context.Background()
+		p := warmFixturePlanner(t)
+		tokens := synthIDs(warmCfg().VocabSize, 12, 2711)
+		prime, err := p.PrimeCacheState(ctx, tokens)
+		if err != nil {
+			t.Fatalf("PrimeCacheState: %v", err)
+		}
+		if !prime.Usable() {
+			t.Fatalf("prime did not admit state: %+v", prime)
+		}
+		// The populate purpose generates nothing and never bills demand: the
+		// startup work is materialization, separated from the served turn.
+		if prime.Tokens != len(tokens) || prime.PromptTokens != len(tokens) {
+			t.Fatalf("prime tokens = %d/%d, want %d", prime.Tokens, prime.PromptTokens, len(tokens))
+		}
+	})
+
+	// --- (3b) absent block preserves the pre-existing receipt shape. -------------
+	t.Run("no cache state leaves the accounting block absent", func(t *testing.T) {
+		p := &InKernelPlanner{modelID: "synthetic"}
+		if got := p.nativeCacheAccountingFor(nativeCacheAccountingFacts{}); got != nil {
+			t.Fatalf("empty facts produced a block: %+v", got)
+		}
+		measurement := &nativeInferenceMeasurement{tokenIDs: []int{7}, logprobs: []float64{-0.25}}
+		raw, err := json.Marshal(p.buildNativeInferenceReceipt(measurement, 0, 0))
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		var decoded map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if _, present := decoded["native_cache_accounting"]; present {
+			t.Fatalf("absent accounting leaked into the wire receipt: %s", raw)
+		}
+	})
 }

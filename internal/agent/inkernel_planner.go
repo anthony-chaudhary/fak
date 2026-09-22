@@ -2871,7 +2871,15 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		VulkanMTP:     genRes.vulkanMTP,
 	}
 	if sp.NativeInferenceReceipt {
-		receipt := p.buildNativeInferenceReceipt(measurement, prefillS, decodeS)
+		accounting := p.nativeCacheAccountingFor(nativeCacheAccountingFacts{
+			promptTokens:    promptTok,
+			cacheableTokens: genRes.cacheable,
+			matchedTokens:   matched,
+			sourceTier:      genRes.sourceTier,
+			prefillSecs:     prefillS,
+			generated:       gen,
+		})
+		receipt := p.buildNativeInferenceReceipt(measurement, prefillS, decodeS, accounting)
 		renderedSum := sha256.Sum256([]byte(prepared.rendered))
 		receipt.PromptTokenIDs = append([]int(nil), prepared.ids...)
 		receipt.TokenizerID = p.tok.Identity()
@@ -2924,7 +2932,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	return comp, nil
 }
 
-func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferenceMeasurement, prefillS, decodeS float64) *model.NativeInferenceReceipt {
+func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferenceMeasurement, prefillS, decodeS float64, accounting ...*model.NativeCacheAccounting) *model.NativeInferenceReceipt {
 	backend, forwardPath := p.executionIdentity()
 	nativeSelection, nativeSelectionDigest, _ := p.nativeSelectionIdentity()
 	var qwen35MetalForwardSequence *model.Qwen35MetalForwardSequenceReceipt
@@ -2972,6 +2980,128 @@ func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferen
 		Qwen35MetalStateIdentity:   qwen35MetalStateIdentity,
 		Qwen35SequencePrefillRoute: cloneNativeSequencePrefillRouteReceipt(measurement.qwen35SequencePrefillRoute),
 		CUDAImmutableWeightUploads: cudaImmutableWeightUploads,
+		NativeCacheAccounting:      firstNativeCacheAccounting(accounting),
+	}
+}
+
+// firstNativeCacheAccounting returns the first non-nil accounting block from the
+// optional variadic argument, or nil. It lets existing 3-argument call sites
+// (tests and internal builders that predate #13339) compile unchanged while the
+// served path attaches the accounting block.
+func firstNativeCacheAccounting(accounting []*model.NativeCacheAccounting) *model.NativeCacheAccounting {
+	for _, a := range accounting {
+		if a != nil {
+			return a
+		}
+	}
+	return nil
+}
+
+// nativeCacheAccountingFacts carries the served-request facts the cache
+// accounting block is derived from. They are the SAME values the served path
+// already computes for the witness line and the provider-cache projection
+// (cacheable from #3390's lookup-side match, matched from the realized serve),
+// so the accounting block is a re-projection of observed numbers, never a
+// second, independently-guessed source of truth.
+type nativeCacheAccountingFacts struct {
+	promptTokens    int
+	cacheableTokens int
+	matchedTokens   int
+	sourceTier      radixkv.SnapshotTier
+	prefillSecs     float64
+	generated       int
+}
+
+// nativeCacheAccountingFor re-projects the served request's already-observed
+// facts into the optional model.NativeCacheAccounting block (#13339). It
+// separates the request's own restore from the startup preparation that made
+// that restore possible: the block reports restored vs computed tokens and the
+// restore duration of THIS request, and startup priming (a populate that
+// generates nothing and never enters demand) is accounted by the warming path
+// that performs it, not folded into a served turn.
+//
+// Conservation is structural: computed is prompt - matched and restored is the
+// matched serve, so restored + computed == prompt by construction and the
+// block passes model.NativeCacheAccounting.Validate() for every branch. A cold
+// turn (no reuse) is the always-usable fallback and needs no cache state.
+//
+// The block is attached only when a native receipt was requested, so an
+// ordinary receipt keeps its existing shape. It is NOT attached when nothing
+// was prompt-presented or generated: an absent block reads as "no cache state
+// to account", which is more honest than a fabricated zero-token record.
+func (p *InKernelPlanner) nativeCacheAccountingFor(f nativeCacheAccountingFacts) *model.NativeCacheAccounting {
+	prompt := f.promptTokens
+	if prompt < 0 {
+		prompt = 0
+	}
+	matched := f.matchedTokens
+	if matched < 0 {
+		matched = 0
+	}
+	if matched > prompt {
+		matched = prompt
+	}
+	cacheable := f.cacheableTokens
+	if cacheable < 0 {
+		cacheable = 0
+	}
+	if cacheable > prompt {
+		cacheable = prompt
+	}
+	if cacheable < matched {
+		cacheable = matched
+	}
+	if prompt == 0 && f.generated == 0 {
+		// Nothing was prompt-presented or generated: leave the block absent
+		// rather than emit a zero-token record that implies a decision.
+		return nil
+	}
+	computed := prompt - matched
+	src := nativeCacheRestoreSourceFor(f.sourceTier, matched)
+
+	acct := &model.NativeCacheAccounting{
+		TotalPromptTokens: prompt,
+		StableTokens:      cacheable,
+		CachedTokens:      cacheable,
+		RestoredTokens:    matched,
+		ComputedTokens:    computed,
+		RestoreSource:     src,
+		GeneratedTokens:   f.generated,
+	}
+	if matched > 0 {
+		acct.RestoreDurationSecs = f.prefillSecs
+	}
+	switch {
+	case matched == 0:
+		acct.Operation = model.NativeCacheCold
+		acct.RestoreSource = model.NativeCacheRestoreNone
+		acct.RestoreDurationSecs = 0
+	case matched == prompt:
+		acct.Operation = model.NativeCacheExactHit
+	default:
+		acct.Operation = model.NativeCachePartialHit
+	}
+	return acct
+}
+
+// nativeCacheRestoreSourceFor maps a radix snapshot tier onto the closed
+// restore-source vocabulary. A miss (or any non-positive match) is "none";
+// device-resident state is "device"; every host-side and remote transfer plane
+// is "host" (it crossed the host boundary, not the device-resident L1 cache).
+func nativeCacheRestoreSourceFor(tier radixkv.SnapshotTier, matched int) model.NativeCacheRestoreSource {
+	if matched <= 0 {
+		return model.NativeCacheRestoreNone
+	}
+	switch tier {
+	case radixkv.SnapshotTierDeviceL1:
+		return model.NativeCacheRestoreDevice
+	case radixkv.SnapshotTierHostL2, radixkv.SnapshotTierRemoteL3:
+		return model.NativeCacheRestoreHost
+	default:
+		// A live match under an unknown tier cannot be claimed as a device hit;
+		// leave it source-less so the block reads as an un-attributed restore
+		// rather than an optimistic device claim.
+		return model.NativeCacheRestoreNone
 	}
 }
 
