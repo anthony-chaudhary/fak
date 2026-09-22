@@ -15,9 +15,22 @@ package main
 //	    exact tool namespace fak will admit), 3 = preflight failed closed,
 //	    1 = manifest unreadable, 2 = usage.
 //
+//	fak eve import [--json] [--kind ndjson|otel] [--include-bodies] FILE
+//	    the read-only observability importer (#2606): folds a SAVED Eve NDJSON
+//	    session stream or `eve.*` OTel span export into session-ledger rows and
+//	    prints the compact operator summary (root session, turns, subagents,
+//	    failed steps, token totals, evidence source path). --kind is inferred
+//	    from FILE's extension when omitted; message/reasoning bodies are
+//	    redacted by default and --include-bodies is a fixture/debugging opt-in.
+//	    The summary goes to stdout and a one-line verdict to stderr; --json
+//	    emits the typed Run plus the joined ledger rows instead. Exit 0 = a
+//	    legible verdict was reconstructed, including observation "partial" or
+//	    "INDETERMINATE" (modelled outcomes, not errors), 1 = FILE unreadable,
+//	    2 = usage. See cmd/fak/eve_import.go.
+//
 // All impurity lives here (file/stdin read, the `eve info --json` exec, flag
 // parsing, exit codes); the checks themselves are the pure fold in
-// internal/evebridge.
+// internal/evebridge and internal/eveimport.
 
 import (
 	"context"
@@ -51,13 +64,19 @@ func runEve(stdout, stderr io.Writer, stdin io.Reader, argv []string) int {
 		// #2601: compile the authored agent/ layout (or a compiled .eve/)
 		// into the fak policy/mount inspect manifest. See cmd/fak/eve_inspect.go.
 		return runEveInspect(stdout, stderr, argv[1:])
+	case "import":
+		// #2606: fold a saved Eve NDJSON stream / eve.* OTel span export into
+		// session-ledger rows and print the compact operator summary.
+		// See cmd/fak/eve_import.go.
+		return runEveImport(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		fmt.Fprintln(stderr, "fak eve: preflight connections  (mechanical security preflight over eve MCP/OpenAPI connections)")
 		fmt.Fprintln(stderr, "         inspect [--json] [--policy-draft] [ROOT]  (compile an Eve app's authored shape into the fak policy/mount manifest)")
+		fmt.Fprintln(stderr, "         import [--json] [--kind ndjson|otel] [--include-bodies] FILE  (fold a saved Eve NDJSON stream / eve.* OTel span export into session-ledger rows; redacts message bodies by default)")
 		fmt.Fprintln(stderr, "         schedules [--json] [--host HOST] [ROOT]  (project Eve schedules into the fak recurring-job ledger)")
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak eve: unknown subcommand %q (want preflight|inspect|schedules|dispatch-receipt)\n", argv[0])
+		fmt.Fprintf(stderr, "fak eve: unknown subcommand %q (want preflight|inspect|import|schedules|dispatch-receipt)\n", argv[0])
 		return 2
 	}
 }
