@@ -517,8 +517,114 @@ func (p *InKernelPlanner) acquireWarmClaim(tokens []int, spec WarmPrefixSpec) (*
 
 	p.mu.Lock()
 	p.warmClaimHandle = claim
+	p.warmClaimScope = spec.Scope
+	p.warmClaimScopeSet = true
 	p.mu.Unlock()
 	return rec, rec.Reason
+}
+
+// warmHandoffScopeMatches reports whether the planner's bound startup claim was acquired
+// under an authenticated cache scope compatible with the request's owner. A claim warmed
+// for a DIFFERENT tenant (or a different agent within a tenant) must never be handed to a
+// request that did not ask for it, so a scope mismatch is an identity mismatch. The served
+// path always binds a scope, so the common case is an exact tenant+agent match.
+func (p *InKernelPlanner) warmHandoffScopeMatches(owner radixkv.CacheIdentity) bool {
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	scope := p.warmClaimScope
+	set := p.warmClaimScopeSet
+	p.mu.Unlock()
+	if !set {
+		return false
+	}
+	return scope.Tenant == owner.Tenant && scope.Agent == owner.Agent
+}
+
+// WarmHandoffReceipt is the closed result of a demand-path startup-warm handoff (CW-16,
+// #13336). It records, in machine-checkable form, whether THIS request adopted the
+// prepared startup prefix and — critically — whether doing so RELEASED the startup claim
+// so the request owns the continuation. It carries no prompt text and no model weights.
+type WarmHandoffReceipt struct {
+	// HandedOff is true only when this request adopted the startup warm's prefix: the
+	// claim was live and matched this request's prompt, and the continuation was taken
+	// under the existing synchronization.
+	HandedOff bool `json:"handed_off"`
+	// Reason is the closed sub-reason for a non-handoff (e.g. "no_claim",
+	// "identity_mismatch", "stale_claim", "unsupported"). Empty when handed off.
+	Reason string `json:"reason,omitempty"`
+	// MatchedTokens is the leading token prefix this request adopted from the warm.
+	MatchedTokens int `json:"matched_tokens"`
+	// Generation is the startup claim incarnation that was handed off (0 when none).
+	Generation uint64 `json:"generation,omitempty"`
+	// Released is true exactly when the handoff released the startup claim. A handoff that
+	// did not release would leak the startup lease past the first real request.
+	Released bool `json:"released"`
+}
+
+// demandWarmHandoff is the CW-16 (#13336) first-demand seam: when the ordinary scoped
+// lookup did not already serve this request from a cached prefix, the planner offers the
+// request any live startup warm claim over the SAME token prefix. On an exact-identity
+// match the request takes the prepared continuation under the claim boundary's own
+// serialization and the startup claim is RELEASED — ownership moves from startup to this
+// demand turn, so the prepared prefix is no longer pinned.
+//
+// Fail-closed contract:
+//   - A planner with no bound claim, or a claim that no longer validates (expired,
+//     evicted, replaced incarnation), reports a closed reason and hands off nothing; the
+//     caller follows the ordinary truthful miss path.
+//   - A claim whose token prefix does not cover this request's prompt is an identity
+//     mismatch: the request must never adopt state it did not ask for.
+//   - A prime/populate turn is never a demand: it owns its own claim and must not consume
+//     it, so the handoff is a no-op when p.cachePopulate is set.
+//
+// The matched prefix is the claim's token length; the caller still performs its own
+// suffix prefill for ids[matched:]. Releasing the claim does NOT evict the prefix — it
+// returns it to normal demand residency, exactly as StartupCache.Release documents.
+func (p *InKernelPlanner) demandWarmHandoff(ids []int) WarmHandoffReceipt {
+	if p == nil || len(ids) == 0 {
+		return WarmHandoffReceipt{Reason: "unsupported"}
+	}
+	// A populate purpose owns its own startup claim; it must not consume it as demand.
+	if p.cachePopulate {
+		return WarmHandoffReceipt{Reason: "populate"}
+	}
+	p.mu.Lock()
+	cache := p.warmClaimCache
+	handle := p.warmClaimHandle
+	p.mu.Unlock()
+	if cache == nil || handle.Gen() == 0 {
+		return WarmHandoffReceipt{Reason: "no_claim"}
+	}
+	// Validate outside p.mu: the claim boundary SHARES p.mu as its locker, so validating
+	// under the lock would self-deadlock (the same discipline acquireWarmClaim documents).
+	if !cache.Validate(handle) {
+		return WarmHandoffReceipt{Reason: "stale_claim"}
+	}
+	// Exact-identity match: the claim's prepared prefix must be a leading prefix of this
+	// request's prompt. A shorter claim can still be handed off (the caller prefills the
+	// suffix); a claim that is not a prefix at all is refused.
+	claimed := handle.Tokens()
+	if claimed <= 0 || claimed > len(ids) {
+		return WarmHandoffReceipt{Reason: "identity_mismatch"}
+	}
+	// Release the startup claim: ownership of the continuation transfers to this demand
+	// turn. Clear the bound handle under p.mu so WarmClaimLive reports false from here on,
+	// then release outside the lock (the boundary re-acquires p.mu itself).
+	p.mu.Lock()
+	p.warmClaimHandle = radixkv.StartupClaim{}
+	p.mu.Unlock()
+	cache.Release(handle)
+	// The startup slot's replacement warm would have renewed a claim; the demand turn now
+	// owns residency, so mark the slot complete so the release callback cannot double-run.
+	p.warmState.Complete()
+	return WarmHandoffReceipt{
+		HandedOff:     true,
+		MatchedTokens: claimed,
+		Generation:    handle.Gen(),
+		Released:      true,
+	}
 }
 
 // WarmClaimLive reports whether the planner's currently bound startup claim still

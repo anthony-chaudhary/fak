@@ -292,6 +292,12 @@ type InKernelPlanner struct {
 	// finite residency handle the last successful warm acquired; the lifecycle's
 	// BindRelease callback owns releasing it on Complete/Release. Guarded by mu.
 	warmClaimHandle radixkv.StartupClaim
+	// warmClaimScope / warmClaimScopeSet record the authenticated cache scope the bound
+	// startup claim was acquired under (CW-16, #13336), so the first-demand handoff can
+	// refuse to hand a different tenant's (or agent's) prepared prefix to a request that
+	// did not ask for it. Inert until the first claim-bearing warm. Guarded by mu.
+	warmClaimScope    radixkv.CacheIdentity
+	warmClaimScopeSet bool
 }
 
 type inKernelOOMRetryClassStats struct {

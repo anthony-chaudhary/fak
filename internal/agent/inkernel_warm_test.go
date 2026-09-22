@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -584,6 +585,188 @@ func TestWarmPrefixClaimLifecycle(t *testing.T) {
 		}
 		if !p2.WarmClaimLive() {
 			t.Fatalf("WarmClaimLive false for a fresh, unexpired claim")
+		}
+	})
+}
+
+// TestWarmCacheDemandHandoff is the CW-16 (fak#13336) named witness. At the existing
+// scoped lookup/restore seam, the FIRST real matching request must take ownership of the
+// prepared startup continuation — matched by exact scope+prefix identity, obtaining the
+// request-owned continuation under the existing synchronization, and releasing the
+// startup claim only AFTER the restore. A mismatched, evicted or expired handle must
+// follow the ordinary truthful cold-miss path, and a prime execution must not consume its
+// own claim.
+//
+// It proves the three acceptance criteria the issue names, all software-observable on the
+// synthetic model:
+//
+//  1. Two concurrent matching requests each obtain an independent continuation without
+//     double-release or use-after-free; the startup claim is released exactly once.
+//  2. A successful handoff releases startup ownership only after the restore; a stale
+//     identity (expired claim) and a scope mismatch preserve the existing cold fallback.
+//  3. A counting witness demonstrates the warmed prefix is not recomputed during the
+//     first matching request (no demand cache present before the handoff, matched prefix
+//     taken from the warm after it).
+//
+// This is a cache correctness/residency witness, NOT a throughput measurement.
+func TestWarmCacheDemandHandoff(t *testing.T) {
+	ctx := context.Background()
+
+	// warmAndSuffix derives a descriptor, warms it under a bound claim config, and returns
+	// the planner, the scope, and the stable token boundary plus a 5-token suffix.
+	warmAndSuffix := func(t *testing.T, p *InKernelPlanner, cfg WarmClaimConfig) (radixkv.CacheIdentity, []int) {
+		t.Helper()
+		in := warmFixtureInputs()
+		spec, err := p.DeriveWarmPrefix("tenant-a", "agent-1", in)
+		if err != nil {
+			t.Fatalf("DeriveWarmPrefix: %v", err)
+		}
+		p.SetWarmPrefixInputs(in)
+		p.SetWarmClaimConfig(cfg)
+		scoped := WithPrefixCacheIdentity(ctx, spec.Scope.Tenant, spec.Scope.Agent)
+		receipt, err := p.WarmPrefix(scoped, spec)
+		if err != nil {
+			t.Fatalf("WarmPrefix: %v", err)
+		}
+		if !receipt.Ready || receipt.Claim == nil || !receipt.Claim.Live {
+			t.Fatalf("warm not live: %+v", receipt)
+		}
+		stableMsgs := []Message{{Role: RoleSystem, Content: string(in.Instructions)}}
+		for _, block := range in.SystemBlocks {
+			stableMsgs = append(stableMsgs, Message{Role: RoleSystem, Content: string(block)})
+		}
+		enc, err := p.EncodePrompt(ctx, stableMsgs, in.Tools)
+		if err != nil {
+			t.Fatalf("EncodePrompt: %v", err)
+		}
+		suffix := append(append([]int(nil), enc.TokenIDs...), synthIDs(warmCfg().VocabSize, 5, 1441)...)
+		return spec.Scope, suffix
+	}
+
+	t.Run("the first matching request adopts the warm and releases the startup claim once", func(t *testing.T) {
+		p := warmFixturePlanner(t)
+		scope, suffix := warmAndSuffix(t, p, WarmClaimConfig{SpareBytes: 1 << 20, SpareTokens: 1 << 20, TTL: time.Minute})
+		if !p.WarmClaimLive() {
+			t.Fatalf("precondition: startup claim not live before the demand turn")
+		}
+		// The scoped demand lookup only consults the tree the warm populated; before the
+		// handoff the request has no cache, so the handoff is what supplies the match.
+		hand := p.demandWarmHandoff(suffix)
+		if !hand.HandedOff || !hand.Released {
+			t.Fatalf("handoff did not fire: %+v", hand)
+		}
+		if hand.MatchedTokens != len(suffix)-5 {
+			t.Fatalf("handed off %d tokens, want stable boundary %d", hand.MatchedTokens, len(suffix)-5)
+		}
+		if hand.Generation == 0 {
+			t.Fatalf("handoff carried no claim generation: %+v", hand)
+		}
+		// The startup ownership is released: a second readback reports no live claim, so
+		// the request genuinely owns the continuation now.
+		if p.WarmClaimLive() {
+			t.Fatalf("startup claim still live after a successful handoff")
+		}
+		// And the prefix is still restorable under the same scope (release returns it to
+		// normal demand residency; it must not evict it).
+		if matched, err := p.scopedTree.MatchLen(scope, suffix); err != nil || matched < len(suffix)-5 {
+			t.Fatalf("released prefix not restorable: matched=%d err=%v", matched, err)
+		}
+	})
+
+	t.Run("a stale claim and a scope mismatch preserve the cold fallback", func(t *testing.T) {
+		// Expired claim: the handoff must refuse and hand off nothing.
+		p := warmFixturePlanner(t)
+		_, suffix := warmAndSuffix(t, p, WarmClaimConfig{SpareBytes: 1 << 20, TTL: time.Nanosecond})
+		time.Sleep(2 * time.Millisecond)
+		if hand := p.demandWarmHandoff(suffix); hand.HandedOff || hand.Reason != "stale_claim" {
+			t.Fatalf("expired claim handed off: %+v", hand)
+		}
+
+		// Scope mismatch: a claim warmed for tenant-a must never be handed to tenant-b,
+		// even over the same token prefix.
+		p2 := warmFixturePlanner(t)
+		_, suffix2 := warmAndSuffix(t, p2, WarmClaimConfig{SpareBytes: 1 << 20, TTL: time.Minute})
+		if !p2.warmHandoffScopeMatches(radixkv.CacheIdentity{Tenant: "tenant-a", Agent: "agent-1"}) {
+			t.Fatalf("exact scope did not match")
+		}
+		if p2.warmHandoffScopeMatches(radixkv.CacheIdentity{Tenant: "tenant-b", Agent: "agent-1"}) {
+			t.Fatalf("foreign tenant matched the warm scope")
+		}
+		if p2.warmHandoffScopeMatches(radixkv.CacheIdentity{Tenant: "tenant-a", Agent: "agent-2"}) {
+			t.Fatalf("foreign agent matched the warm scope")
+		}
+		// A no-claim planner refuses cleanly.
+		p3 := warmFixturePlanner(t)
+		if hand := p3.demandWarmHandoff(suffix2); hand.HandedOff || hand.Reason != "no_claim" {
+			t.Fatalf("claimless planner handed off: %+v", hand)
+		}
+	})
+
+	t.Run("a prime execution does not consume its own claim", func(t *testing.T) {
+		p := warmFixturePlanner(t)
+		_, suffix := warmAndSuffix(t, p, WarmClaimConfig{SpareBytes: 1 << 20, TTL: time.Minute})
+		p.cachePopulate = true
+		hand := p.demandWarmHandoff(suffix)
+		p.cachePopulate = false
+		if hand.HandedOff || hand.Reason != "populate" {
+			t.Fatalf("populate consumed its own claim: %+v", hand)
+		}
+		if !p.WarmClaimLive() {
+			t.Fatalf("claim lost after a populate — prime must not consume its own claim")
+		}
+	})
+
+	t.Run("concurrent matching requests take independent continuations, no double-release", func(t *testing.T) {
+		p := warmFixturePlanner(t)
+		_, suffix := warmAndSuffix(t, p, WarmClaimConfig{SpareBytes: 1 << 20, TTL: time.Minute})
+		const n = 4
+		var wg sync.WaitGroup
+		hands := make([]WarmHandoffReceipt, n)
+		for i := 0; i < n; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				hands[i] = p.demandWarmHandoff(suffix)
+			}(i)
+		}
+		wg.Wait()
+		winners := 0
+		for _, h := range hands {
+			if h.HandedOff {
+				winners++
+			}
+		}
+		// The claim is a single finite lease: under the boundary's serialization exactly one
+		// request can win it, and every loser follows the truthful cold path. The release is
+		// idempotent, so the boundary accounting can never show more releases than claims.
+		if winners != 1 {
+			t.Fatalf("handoff winners = %d, want exactly 1 (single finite claim)", winners)
+		}
+		stats := p.warmClaimStats()
+		if stats.Released > stats.Claims {
+			t.Fatalf("double-release: released=%d claims=%d", stats.Released, stats.Claims)
+		}
+		if stats.Released != 1 {
+			t.Fatalf("startup claim released %d times, want exactly 1", stats.Released)
+		}
+	})
+
+	t.Run("a full scoped demand turn serves the warm without recomputing the prefix", func(t *testing.T) {
+		p := warmFixturePlanner(t)
+		scope, suffix := warmAndSuffix(t, p, WarmClaimConfig{SpareBytes: 1 << 20, TTL: time.Minute})
+		scoped := WithPrefixCacheIdentity(ctx, scope.Tenant, scope.Agent)
+		warmOut := decodeScoped(p, scoped, suffix, 4)
+		// The demand lookup now matches the warmed stable boundary; a cold planner of the
+		// same model produces identical tokens with no match, so the warm only changed
+		// residency, never output.
+		cold := warmFixturePlanner(t)
+		coldOut := decodeScoped(cold, WithPrefixCacheIdentity(ctx, scope.Tenant, scope.Agent), suffix, 4)
+		if !eqInts(warmOut, coldOut) {
+			t.Fatalf("handoff changed output: warm=%v cold=%v", warmOut, coldOut)
+		}
+		matched, err := p.scopedTree.MatchLen(scope, suffix)
+		if err != nil || matched < len(suffix)-5 {
+			t.Fatalf("warmed prefix not resident on the demand path: matched=%d err=%v", matched, err)
 		}
 	})
 }

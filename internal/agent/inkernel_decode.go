@@ -175,6 +175,19 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 				matchedSnapshot, cachedLogits, m, sourceScope, tier, err = p.scopedTree.LookupSnapshotTieredContext(ctx, owner, ids)
 			} else {
 				matchedKV, cachedLogits, m, _, err = p.scopedTree.Lookup(owner, ids)
+				if err == nil && p.warmHandoffScopeMatches(owner) {
+					// CW-16 (#13336): the scoped lookup did not serve this request, but a
+					// live startup warm may own a prepared prefix over the SAME scope. The
+					// handoff adopts that prefix (reading it back through this same scoped
+					// tree) and releases the startup claim, so the first real request owns
+					// the continuation instead of re-prefilling it. A mismatch/expiry is a
+					// truthful miss: the ordinary cold path below runs unchanged.
+					if hand := p.demandWarmHandoff(ids); hand.HandedOff && hand.MatchedTokens > m {
+						if hKV, hLogits, hMatched, _, hErr := p.scopedTree.Lookup(owner, ids); hErr == nil && hKV != nil {
+							matchedKV, cachedLogits, m = hKV, hLogits, hMatched
+						}
+					}
+				}
 				if inKernelHostSnapshotReuse(p) && matchedKV == nil {
 					// Recurrent hybrid on the host-session (Metal) seam: a mid-edge
 					// split carries no KV because span eviction is unsupported, so the
