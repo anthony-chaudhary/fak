@@ -171,7 +171,7 @@
     {
       "type": "stat",
       "title": "Routines enabled",
-      "description": "Enabled ops routines in the scheduler. Reads 0 when none are enabled; a routine that is enabled but not firing shows up as stale below.",
+      "description": "Retained snapshot: enabled ops routines as the exporter last folded them. Reads 0 when none are enabled; a routine that is enabled but not firing shows up as stale below. A retired routine is decommissioned by design, not failed or retried.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -339,7 +339,7 @@
     {
       "type": "stat",
       "title": "Stuck total",
-      "description": "Stuck-work items carrying at least one closed reason.",
+      "description": "Retained snapshot: stuck-work items carrying at least one closed reason, as of the exporter's last fold. This aggregate can be INCOMPLETE (skipped or failed planes lower it) and its reasons can OVERLAP, so it is not a precise defect count. Read 'Skipped planes' and 'Stuck planes failed' alongside it.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -425,7 +425,7 @@
     {
       "type": "stat",
       "title": "Reports failure rate",
-      "description": "Report-window failure ratio. Absent when the window holds no terminal result (never a fabricated zero).",
+      "description": "Failure ratio over the exporter-configured report window (default 24h, a trailing window set on the ops exporter, not this dashboard). Changing Grafana's graph time range does NOT recompute this ratio. Denominator counts terminal report outcomes only; unknown outcomes are excluded rather than counted as failures. Absent when the configured window holds no terminal result (never a fabricated zero).",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -511,7 +511,7 @@
     {
       "type": "stat",
       "title": "Exporter partial (1 = degraded)",
-      "description": "Any plane degraded. Read the named diagnostics on the exporter's /status page.",
+      "description": "Any plane degraded (partial read). Partial reads lower aggregate stuck counts, so a partial exporter can hide stuck work. Read the named diagnostics on the exporter's /status page.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -606,7 +606,7 @@
     {
       "type": "timeseries",
       "title": "Routines by state",
-      "description": "Routines partitioned by lifecycle state over time. A flat line at 0 means no routines are registered \u2014 which is different from an exporter outage.",
+      "description": "Retained snapshot: routines partitioned by lifecycle state as the exporter last folded them, re-read each scrape. These are held state values, not events that occurred inside Grafana's graph range, so the graph range only selects how much retained history to draw. A flat line at 0 means no routines are registered - which is different from an exporter outage. A 'retired' routine is decommissioned by design; it is not a failure and is not being retried.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -692,7 +692,7 @@
     {
       "type": "timeseries",
       "title": "Queue items by state",
-      "description": "Queued/executing/held items over time. An empty panel means the state file was unreadable, not that the queue is empty.",
+      "description": "Retained snapshot: queued/executing/held queue items as the exporter last folded them, re-read each scrape rather than counted as events in Grafana's graph range. An empty panel means the state file was unreadable, not that the queue is empty.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -778,7 +778,7 @@
     {
       "type": "timeseries",
       "title": "Intervals by state",
-      "description": "Terminal interval outcomes over time. Empty when no interval has completed in the retained history.",
+      "description": "Retained snapshot: terminal interval outcomes held in the exporter's retained history, re-read each scrape. The graph range selects how much retained history to draw; it does not re-fold the outcomes. Empty when no interval has completed in the retained history.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -877,7 +877,7 @@
     {
       "type": "timeseries",
       "title": "Report intervals folded (increase)",
-      "description": "Per-scrape increase of admitted reports intervals. A flat 0 means the ops runner is not folding intervals.",
+      "description": "Counter increase of admitted report intervals, computed by Prometheus over the Grafana graph range (a scratch/rate window), NOT over the exporter-configured report window. Use it to see fold activity; use 'Reports failure rate' for the configured-window ratio. A flat 0 means the ops runner is not folding intervals in this graph range.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -963,7 +963,7 @@
     {
       "type": "timeseries",
       "title": "Items admitted (increase)",
-      "description": "Per-scrape increase of admitted queue items. A flat 0 means nothing is being admitted, not that the exporter is broken.",
+      "description": "Counter increase of admitted queue items, computed by Prometheus over the Grafana graph range, NOT over the exporter-configured report window. A flat 0 means nothing is being admitted in this graph range, not that the exporter is broken.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -1049,7 +1049,7 @@
     {
       "type": "timeseries",
       "title": "Report results by outcome",
-      "description": "Report outcomes (ok/failed/unknown) in the trailing window. Absent series mean the window held no terminal result.",
+      "description": "Report outcomes (ok/failed/unknown) folded over the exporter-configured report window (default 24h, set on the ops exporter). Grafana's graph time range does NOT recompute this fold. Only terminal outcomes contribute to the failure denominator; unknown outcomes are reported for visibility but excluded from it. Absent series mean the configured window held no terminal result.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -1230,7 +1230,7 @@
     {
       "type": "timeseries",
       "title": "Stuck planes census",
-      "description": "Stuck-work census by plane. Empty means the stuck join produced no rows; check 'Stuck planes failed' before reading it as clean.",
+      "description": "Retained snapshot: stuck-work census by plane from the exporter's last fold. Counts can be INCOMPLETE - skipped planes are omitted and failed planes contribute nothing - and reasons can OVERLAP. Empty means the stuck join produced no rows; check 'Stuck planes failed' and 'Skipped planes' before reading it as clean.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -1316,7 +1316,7 @@
     {
       "type": "timeseries",
       "title": "Stuck by closed reason",
-      "description": "Stuck items partitioned by closed reason. An empty panel means no reason was recorded, which is not the same as no stuck work.",
+      "description": "Retained snapshot: stuck items partitioned by closed reason. Reasons can OVERLAP, so this partition may not sum to 'Stuck total'. The aggregate can be incomplete when planes are skipped or fail to probe. An empty panel means no reason was recorded, which is not the same as no stuck work.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -1499,7 +1499,7 @@
     {
       "type": "stat",
       "title": "Stuck planes failed",
-      "description": "Stuck-work planes that failed to probe. Failed planes render partial, never clean.",
+      "description": "Stuck-work planes that failed to probe. Failed planes render the exporter partial, never clean, and their absence from the stuck census makes aggregate stuck counts incomplete. Always read this alongside 'Stuck total' and 'Stuck planes census'.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -1582,7 +1582,7 @@
       "id": 30,
       "type": "timeseries",
       "title": "Reports failure rate (trend)",
-      "description": "Report-window failure ratio over time. The stat tile shows only now; this shows a failure storm developing. Absent means the window held no terminal result.",
+      "description": "Failure ratio over the exporter-configured report window (default 24h, set on the ops exporter), re-read each scrape: each point is that configured-window ratio at that scrape, not a ratio recomputed from Grafana's graph range. Only terminal outcomes form the denominator; unknown outcomes are excluded. The stat tile shows only now; this shows a failure storm developing. Absent means the configured window held no terminal result.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -1646,7 +1646,7 @@
     {
       "id": 31,
       "type": "timeseries",
-      "title": "Snapshot age (s) \u2014 fold freshness",
+      "title": "Snapshot age (s) - fold freshness",
       "description": "Age of the cached ops snapshot the exporter serves. A rising line means the background fold is wedged and every panel is a frozen past, even while the exporter answers.",
       "datasource": {
         "type": "prometheus",
