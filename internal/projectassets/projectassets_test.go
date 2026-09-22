@@ -725,14 +725,16 @@ func TestVerifyOpenCodePlugin(t *testing.T) {
 		t.Fatalf("expected missing live_leases error, got: %v", err)
 	}
 
-	// Test missing 120s timeout
-	write(t, tmp, OpenCodePluginPath, "export default function() { return { 'tool.execute.before': async () => { const m = ['write', 'edit', 'apply_patch']; fak('leaseref'); fak('loop'); live_leases; arbitrate; } }; }")
+	// Test missing 120s timeout. The fixture must carry the COMPLIANT live_leases probe
+	// (`live_leases(cfg, expire_dead=True)`), otherwise verification stops at the earlier
+	// live_leases check and this fixture never reaches the timeout assertion it is testing.
+	write(t, tmp, OpenCodePluginPath, "export default function() { return { 'tool.execute.before': async () => { const m = ['write', 'edit', 'apply_patch']; fak('leaseref'); fak('loop'); live_leases(cfg, expire_dead=True); arbitrate; } }; }")
 	if err := VerifyOpenCodePlugin(tmp); err == nil || !strings.Contains(err.Error(), "timeout: 120000") {
 		t.Fatalf("expected missing timeout: 120000 error, got: %v", err)
 	}
 
 	// Test missing Windows platform binary extension check
-	write(t, tmp, OpenCodePluginPath, "export default function() { return { 'tool.execute.before': async () => { const m = ['write', 'edit', 'apply_patch']; fak('leaseref'); fak('loop'); live_leases; arbitrate; timeout: 120000; } }; }")
+	write(t, tmp, OpenCodePluginPath, "export default function() { return { 'tool.execute.before': async () => { const m = ['write', 'edit', 'apply_patch']; fak('leaseref'); fak('loop'); live_leases(cfg, expire_dead=True); arbitrate; timeout: 120000; } }; }")
 	if err := VerifyOpenCodePlugin(tmp); err == nil || !strings.Contains(err.Error(), "win32") {
 		t.Fatalf("expected missing win32 error, got: %v", err)
 	}
