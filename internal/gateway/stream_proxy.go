@@ -635,11 +635,19 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 			emittedAdjudicationNote = true
 		}
 	}
-	// Parity with the buffered path: when every proposed call was refused AND the turn
-	// carried no content of its own, give even a fak-unaware client an actionable note
-	// (which tools were denied and why) rather than an empty turn.
-	if !emittedAdjudicationNote && len(kept) == 0 && dropped > 0 && guard.streamed() == "" && remaining == "" {
-		if err := emitContent(denySummary(adjs)); err != nil {
+	// Parity with the buffered path: when every proposed call was refused, give
+	// even a fak-unaware client an actionable note. Preserve the historical
+	// summary for empty prose; with model prose, append the detailed note so
+	// the no-tool finish cannot be mistaken for task completion.
+	if !emittedAdjudicationNote && len(kept) == 0 && dropped > 0 {
+		// The empty-prose summary is the established OpenAI wire shape. With
+		// model prose, append the detailed refusal note after it so clients can
+		// distinguish an all-refused tool turn from a completed answer.
+		note := adjudicationNote(adjs)
+		if guard.streamed() == "" && remaining == "" {
+			note = denySummary(adjs)
+		}
+		if err := emitContent(note); err != nil {
 			return true
 		}
 	}

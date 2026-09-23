@@ -220,6 +220,7 @@ func guardPiExtensionSource(baseURL string) string {
 		"// Generated per session by installGuardPiExtension (cmd/fak/guard_pi.go); safe to delete.\n" +
 		"export default function (pi) {\n" +
 		"  pi.registerProvider(\"anthropic\", { baseUrl: " + string(url) + " });\n" +
+		guardPiContinuationSource() +
 		"}\n"
 }
 
@@ -247,7 +248,61 @@ func guardPiFakExtensionSource(baseURL, model string) (string, error) {
 	return "// fak guard: session-scoped Pi OpenAI-completions route.\n" +
 		"export default function (pi) {\n" +
 		"  pi.registerProvider(\"" + projectassets.DefaultPiProviderID + "\", " + literal + ");\n" +
+		guardPiContinuationSource() +
 		"}\n", nil
+}
+
+// guardPiContinuationSource is the Pi-native actuator for an all-refused tool
+// turn. The gateway must end that wire response with no tool call, or Pi waits
+// for a result that can never arrive. Pi's turn_end boundary can append a
+// context message and request the next model turn without a synthetic user
+// prompt. Anthropic Messages and OpenAI Completions emit adjudicationNote for
+// refusal feedback; an empty-prose OpenAI turn uses denySummary instead. Both
+// forms are recognized. No shared /metrics gauge is used, because another
+// session could change it between the response and this hook.
+// The same-feedback and total-feedback caps stand down on a stuck model.
+func guardPiContinuationSource() string {
+	return `  let lastRefusal = "";
+  let sameRefusals = 0;
+  let consecutiveRefusals = 0;
+  pi.on("turn_end", (event) => {
+    const blocks = event?.message?.content;
+    const text = Array.isArray(blocks) ? blocks.filter((block) => block?.type === "text")
+      .map((block) => block.text).filter((part) => typeof part === "string").join("\n") : "";
+    const detailedAt = text.indexOf("[fak] Allowed next step for ");
+    const summaryAt = text.indexOf("Allowed next step for each refused tool call: ");
+    const noteAt = detailedAt < 0 ? summaryAt : summaryAt < 0 ? detailedAt : Math.min(detailedAt, summaryAt);
+    const note = noteAt < 0 ? "" : text.slice(noteAt);
+    const hasRefusalNote = (note.startsWith("[fak] Allowed next step for ") &&
+      note.includes(" refused tool call(s): ")) ||
+      note.startsWith("Allowed next step for each refused tool call: ");
+    const constraints = [...note.matchAll(/Constraint:[^;\n]*?\([A-Z_]+\/([A-Z_]+)\)/g)];
+    const refused = event?.outcome === "completed" && event?.message?.role === "assistant" &&
+      hasRefusalNote && constraints.length > 0 &&
+      blocks.every((block) => block?.type !== "toolCall") &&
+      Array.isArray(event.toolResults) && event.toolResults.length === 0;
+    if (!refused) {
+      lastRefusal = "";
+      sameRefusals = 0;
+      consecutiveRefusals = 0;
+      return;
+    }
+    consecutiveRefusals++;
+    sameRefusals = note === lastRefusal ? sameRefusals + 1 : 1;
+    lastRefusal = note;
+    const allRetryable = constraints.every((match) => match[1] === "RETRYABLE");
+    if ((!allRetryable && sameRefusals >= 6) || consecutiveRefusals >= 25) return;
+    return {
+      entries: [{
+        type: "custom_message",
+        customType: "fak_guard_tool_feedback",
+        content: "The previous turn contains fak tool feedback, not task completion. Continue the user's request using the stated allowed alternative or explain the witnessed blocker.",
+        display: false,
+      }],
+      continue: true,
+    };
+  });
+`
 }
 
 func guardPiTSLiteral(value any) (string, error) {

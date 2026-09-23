@@ -1137,7 +1137,10 @@ func (s *Server) applyAdjudicatedTurn(asst *agent.Message, adjs []ToolAdjudicati
 	if servedHits > 0 {
 		s.metrics.recordServedInline(servedHits)
 	}
-	if anyLivelock(adjs) {
+	// A refused OpenAI call can coexist with model prose. Preserve that prose,
+	// but make the refusal visible to clients that ignore the fak extension;
+	// otherwise a no-tool stop looks like completed work to their harness.
+	if anyLivelock(adjs) || (dropped > 0 && len(kept) == 0 && asst.Content != "") {
 		asst.Content = prependAdjudicationContentNote(asst.Content, adjs)
 	}
 	finish := upstreamFinish
