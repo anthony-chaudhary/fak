@@ -216,6 +216,7 @@ func Run(argv []string) {
 		// If the target can't self-report, stamp stays as Self() but fleetTarget forces the
 		// build below regardless — a fleet binary we cannot prove current gets refreshed.
 	}
+	stamp = selfUpdateIdentityAwareStamp(installTargetOr(*target), stamp)
 	verdict := binstamp.Compare(stamp, headRev)
 
 	// Beyond the coarse Fresh/Stale/Unknown, classify the stamp by git ANCESTRY vs origin/main.
@@ -330,7 +331,7 @@ func selectSelfUpdateManifest(manifestURL, manifestID, manifestStatePath, manife
 func runSelfUpdateCheck(repoRoot, headRev, target string, verdict binstamp.Freshness, skew versionskew.Assessment) {
 	clearSelfUpdateProgressBar()
 	reportAsideFootprint(installTargetOr(target))
-	audit := selfUpdateAudit(repoRoot, headRev)
+	audit := selfUpdateAudit(repoRoot, headRev, installTargetOr(target))
 	printHotCopyAudit(audit)
 	emitSelfUpdateCheckOutcome(installTargetOr(target), fmt.Sprintf("%s/%s", verdict, skew.Verdict), verdict, audit.Partition())
 }
@@ -430,9 +431,51 @@ func selfUpdateInvoker() selfinstall.HotCopy {
 	return c
 }
 
-// selfUpdateAudit grades every declared hot copy against origin/main.
-func selfUpdateAudit(repoRoot, headRev string) selfinstall.Audit {
-	return selfinstall.AuditCopies(selfinstall.Census(selfUpdateHost(repoRoot), selfUpdateProbe), headRev)
+// selfUpdateIdentitySource resolves digest-bound source freshness for one installed artifact.
+// Missing, malformed, or digest-mismatched state returns no evidence and leaves the embedded
+// build stamp authoritative.
+func selfUpdateIdentitySource(identityTarget, artifactPath string) (string, bool) {
+	state, err := selfinstall.ReadInstallIdentity(selfinstall.IdentityStatePath(identityTarget))
+	if err != nil {
+		return "", false
+	}
+	return selfinstall.SelectedSourceForArtifact(state, artifactPath)
+}
+
+func selfUpdateIdentityAwareStamp(target string, stamp binstamp.Stamp) binstamp.Stamp {
+	if stamp.Dirty || !stamp.HasVCS || strings.TrimSpace(stamp.Revision) == "" {
+		return stamp
+	}
+	if source, ok := selfUpdateIdentitySource(target, target); ok {
+		stamp.Revision, stamp.HasVCS = source, true
+	}
+	return stamp
+}
+
+func selfUpdateIdentityAwareCopies(copies []selfinstall.HotCopy, identityTarget string) []selfinstall.HotCopy {
+	selectedSource, identityOK := selfUpdateIdentitySource(identityTarget, identityTarget)
+	if !identityOK {
+		return copies
+	}
+	for i := range copies {
+		copy := &copies[i]
+		if !copy.Present || copy.Dirty || !copy.Attested {
+			continue
+		}
+		equal, err := selfinstall.ArtifactsEqual(identityTarget, copy.Path)
+		if err == nil && equal {
+			copy.Build, copy.Attested, copy.Err = selectedSource, true, ""
+		}
+	}
+	return copies
+}
+
+// selfUpdateAudit grades every declared hot copy against origin/main. A clean copy whose bytes
+// exactly match the target's verified current artifact inherits its selected source revision;
+// dirty copies retain their embedded provenance and remain fail-closed.
+func selfUpdateAudit(repoRoot, headRev, identityTarget string) selfinstall.Audit {
+	copies := selfinstall.Census(selfUpdateHost(repoRoot), selfUpdateProbe)
+	return selfinstall.AuditCopies(selfUpdateIdentityAwareCopies(copies, identityTarget), headRev)
 }
 
 // printHotCopyAudit prints one greppable line per hot copy plus the verdict.

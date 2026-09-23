@@ -196,6 +196,21 @@ func VerifiedArtifact(state InstallIdentity, digest string) (ArtifactRecord, boo
 	return ArtifactRecord{}, false
 }
 
+// SelectedSourceForArtifact returns the source revision selected for path only when the
+// persisted install identity is well formed and path still contains the exact verified current
+// artifact. This is the safe bridge for metadata-only source advances: callers may use the
+// selected source as freshness evidence without weakening byte identity.
+func SelectedSourceForArtifact(state InstallIdentity, path string) (string, bool) {
+	if validateInstallIdentity(state) != nil {
+		return "", false
+	}
+	active, ok := VerifiedArtifact(state, state.CurrentDigest)
+	if !ok || filepath.Clean(active.Path) != filepath.Clean(path) || !recordMatchesPath(active, path) {
+		return "", false
+	}
+	return state.SelectedSourceCommit, true
+}
+
 func validateStateUpdate(candidate StateUpdate) error {
 	if !validCommit(strings.ToLower(strings.TrimSpace(candidate.SelectedSourceCommit))) {
 		return fmt.Errorf("selected source commit is not a full Git object ID")

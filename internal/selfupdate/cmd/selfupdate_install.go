@@ -321,10 +321,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		cleanupAttempt()
 		os.Exit(1)
 	}
-	activeIdentityPath := installTarget
-	if artifact != nil {
-		activeIdentityPath = candidate
-	}
+	activeIdentityPath := selfUpdateActiveIdentityPath(artifact != nil, primaryEqual, installTarget, candidate)
 	_, identityErr = selfinstall.AdvanceInstallIdentity(identityPath, priorIdentity, selfinstall.StateUpdate{
 		SignedMetadataGeneration: metadataGeneration,
 		SelectedSourceCommit:     res.SourceCommit, ArtifactSourceCommit: res.ArtifactSourceCommit,
@@ -343,7 +340,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	// shared dirty checkout that may be held live) is never swapped unattended — so an explicit,
 	// greppable audit line is the only thing that keeps it from drifting unnoticed.
 	stopHeartbeat = startSelfUpdateHeartbeat(92, "verifying installed hot copies")
-	audit := selfUpdateAudit(repoRoot, headRev)
+	audit := selfUpdateAudit(repoRoot, headRev, installTarget)
 	stopHeartbeat()
 	printHotCopyAudit(audit)
 	posture := selfupdate.ClassifyInstall(audit.Partition())
@@ -379,6 +376,13 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		emitSelfUpdateOutcome(outcomeInstalled, installTarget, res.Detail)
 	}
 
+}
+
+func selfUpdateActiveIdentityPath(hasArtifact, primaryEqual bool, installTarget, candidate string) string {
+	if hasArtifact && !primaryEqual {
+		return candidate
+	}
+	return installTarget
 }
 
 // prepareSelfUpdateAttempt materializes the immutable commit selected by the admission
