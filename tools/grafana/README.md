@@ -25,7 +25,7 @@ Prometheus-scrapes-`:9095/metrics` → Grafana shape, scoped to fleet signals.
 ## One command (recommended)
 
 ```bash
-tools/grafana/up.sh        # brings up the whole stack; open http://localhost:3000 (admin / fleet)
+tools/grafana/up.sh        # brings up the whole stack; open http://<host>:3000 as an anonymous Viewer
 tools/grafana/down.sh      # stops only processes this stack owns (--purge drops Docker volumes)
 ```
 
@@ -48,10 +48,23 @@ tools/grafana/down.sh      # stops only processes this stack owns (--purge drops
    off disk — so it
    starts even under `FAK_NO_GATEWAY=1`, which is the "chart fleet metrics only" mode
    this exporter most belongs to.
-5. **Prometheus** (`127.0.0.1:9091`) and **Grafana** (`127.0.0.1:3000`). Docker
+5. **Prometheus** (`127.0.0.1:9091`) and **Grafana** (`0.0.0.0:3000`). Docker
    Compose remains the default. On macOS, `up.sh` first finds the Docker Desktop
    CLI in the app bundle and starts its daemon if needed; only when Docker remains
-   unavailable does it use locally installed Homebrew Prometheus and Grafana.
+   unavailable does it use locally installed Homebrew Prometheus and Grafana. The
+   Docker deployment grants anonymous users the `Viewer` role, leaves the login
+   form available for existing administrators, and does not create an initial
+   administrator on a fresh volume. Gateway and inference API authentication are
+   configured separately by `fak serve` and are unaffected.
+
+Before exposing a volume previously initialized with the old `admin` / `fleet`
+default, rotate that account's password. This updates the persisted Grafana
+database; changing container environment variables does not update an existing
+account:
+
+```bash
+docker exec fleet-grafana grafana cli --homepath /usr/share/grafana admin reset-admin-password '<new-strong-password>'
+```
 
 ### macOS without Docker
 
