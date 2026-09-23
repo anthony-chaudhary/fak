@@ -946,7 +946,7 @@ func (s *Server) maybeUpgradeAnthropicCacheTTL1HScoped(req *agent.AnthropicMessa
 // cached prefix. agent.ElideAnthropicResultsWithOutcome is fail-safe: it returns req.Raw unchanged
 // on any ambiguity, never touches a cache_control-bearing message, and proves the protected prefix
 // stays byte-identical, so this never breaks a turn or busts the cache. Returns whether it FIRED.
-func (s *Server) maybeElideAnthropicRaw(req *agent.AnthropicMessagesRequest) (fired bool) {
+func (s *Server) maybeElideAnthropicRaw(req *agent.AnthropicMessagesRequest, trace ...string) (fired bool) {
 	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) {
 		return false
 	}
@@ -954,8 +954,17 @@ func (s *Server) maybeElideAnthropicRaw(req *agent.AnthropicMessagesRequest) (fi
 		return false // configured OFF
 	}
 	before := req.Raw
-	out, outcome := agent.ElideAnthropicResultsWithOutcome(before, s.elideResultBytes)
+	restoreTrace := ""
+	if len(trace) > 0 {
+		restoreTrace = trace[0]
+	} else {
+		restoreTrace = s.traceFor("")
+	}
+	out, outcome := agent.ElideAnthropicResultsWithOutcome(before, s.elideResultBytes, restoreTrace)
 	req.Raw = out
+	for _, r := range outcome.Restores {
+		s.stashRestore(restoreTrace, r.ID, r.Excerpt, r.Bytes)
+	}
 	if outcome.Reason == agent.ElideReasonNone {
 		s.recordAnthropicRewriteProof(FeatureElideResults, before, out, agent.CompactAnchorFirstBP, outcome.ShedBytes)
 	}

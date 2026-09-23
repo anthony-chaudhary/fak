@@ -132,7 +132,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	defer lease.Release()
 
 	messages := s.maybePlanMessages(r.Context(), reqTrace, req.Messages)
-	messages = s.maybeElideMessagesWithContext(r.Context(), messages)
+	messages = s.maybeElideMessagesWithContext(r.Context(), messages, reqTrace)
 	start()
 	if note := s.toolFailureNoteOnce(reqTrace, req.Messages); note != "" {
 		emitAnthropicTextBlock(sendLocked, &outIdx, note)

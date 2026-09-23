@@ -36,6 +36,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 )
 
 // elideRecentKeepMsgs is the recent working-set window elision never shrinks: the last N
@@ -47,8 +48,15 @@ const elideRecentKeepMsgs = 4
 // elideMarkerf renders the in-band notice that stands in for the omitted middle of a shrunk
 // tool_result, so the model (and a human reading the wire) sees that detail was elided rather
 // than silently truncated.
-func elideMarkerf(omittedRunes int) string {
-	return fmt.Sprintf("\n\n…[fak: %d characters of older tool_result output elided to stay within the context budget; head and tail are preserved]…\n\n", omittedRunes)
+func elideMarkerf(omittedRunes int, restoreID ...string) string {
+	pointer := ""
+	if len(restoreID) > 0 && restoreID[0] != "" {
+		pointer = "; fak_context_restore " + compactRestoreIDField + restoreID[0]
+		if len(restoreID) > 1 && restoreID[1] != "" {
+			pointer += " trace_id=" + strconv.Quote(restoreID[1])
+		}
+	}
+	return fmt.Sprintf("\n\n…[fak: %d characters of older tool_result output elided; head and tail are preserved%s]…\n\n", omittedRunes, pointer)
 }
 
 // Elision bail-reason vocabulary — the closed set of identity-return causes, mirrored on
@@ -87,6 +95,7 @@ type ElideOutcome struct {
 	Reason    string
 	Elided    int
 	ShedBytes int
+	Restores  []StaleRestore // full original text for each surviving head+tail marker
 }
 
 // ElideAnthropicResults shrinks oversized tool_result bodies in an outbound Anthropic
@@ -103,7 +112,7 @@ func ElideAnthropicResults(raw []byte, threshold int) []byte {
 // is the byte size above which a single tool_result text payload is shrunk; the documented
 // candidate is gateway.DocumentedElideResultBytes. The byte-level guarantees are identical to the
 // wrapper.
-func ElideAnthropicResultsWithOutcome(raw []byte, threshold int) ([]byte, ElideOutcome) {
+func ElideAnthropicResultsWithOutcome(raw []byte, threshold int, trace ...string) ([]byte, ElideOutcome) {
 	if threshold <= 0 || len(raw) == 0 {
 		return raw, ElideOutcome{Reason: ElideReasonOff}
 	}
@@ -122,10 +131,16 @@ func ElideAnthropicResultsWithOutcome(raw []byte, threshold int) ([]byte, ElideO
 	// window, and never a message with cache_control reachable by the shrinker. Editing here keeps
 	// the head prefix byte-identical (proven below); later breakpoints cascade-burst, as documented.
 	var edits []spliceEdit
+	var restores []StaleRestore
 	shed := 0
+	traceID := ""
+	if len(trace) > 0 {
+		traceID = trace[0]
+	}
 	lastEligible := eachElidableMessage(elems, spans, pfxEnd, func(start, _ int, elem json.RawMessage) {
-		es, sh := collectResultElisionEdits(start, elem, threshold)
+		es, rs, sh := collectResultElisionEdits(start, elem, threshold, traceID)
 		edits = append(edits, es...)
+		restores = append(restores, rs...)
 		shed += sh
 	})
 
@@ -137,14 +152,17 @@ func ElideAnthropicResultsWithOutcome(raw []byte, threshold int) ([]byte, ElideO
 	// the head+tail ones, all lie strictly after the protected prefix, so the cached head is safe.
 	if ctEdits, ctShed := collectCrossTurnDedupEdits(raw, elems, spans, pfxEnd, lastEligible); len(ctEdits) > 0 {
 		merged := make([]spliceEdit, 0, len(edits)+len(ctEdits))
-		for _, e := range edits {
+		keptRestores := make([]StaleRestore, 0, len(restores))
+		for i, e := range edits {
 			if spliceEditOverlapsAny(e, ctEdits) {
 				shed -= (e.end - e.start) - len(e.repl) // superseded by a dedup fold on the same value
 				continue
 			}
 			merged = append(merged, e)
+			keptRestores = append(keptRestores, restores[i])
 		}
 		edits = append(merged, ctEdits...)
+		restores = keptRestores
 		shed += ctShed
 	}
 
@@ -170,7 +188,7 @@ func ElideAnthropicResultsWithOutcome(raw []byte, threshold int) ([]byte, ElideO
 	case spliceVerdictMalformedResult:
 		return raw, ElideOutcome{Reason: ElideReasonMalformedResult}
 	}
-	return out, ElideOutcome{Reason: ElideReasonNone, Elided: len(edits), ShedBytes: shed}
+	return out, ElideOutcome{Reason: ElideReasonNone, Elided: len(edits), ShedBytes: shed, Restores: restores}
 }
 
 // elideAnchorReasons carries ONE elision pass's own Reason vocabulary into the shared preamble
@@ -301,12 +319,12 @@ type spliceEdit struct {
 // bytes.Index over the whole block, which a sibling field with identical bytes — e.g. a
 // tool_use_id equal to the content — would mis-locate). A non-user message, a non-array content,
 // a tool_result that itself carries cache_control, or a shape it cannot parse yields no edits.
-func collectResultElisionEdits(msgBase int, el json.RawMessage, threshold int) (edits []spliceEdit, shed int) {
+func collectResultElisionEdits(msgBase int, el json.RawMessage, threshold int, traceID string) (edits []spliceEdit, restores []StaleRestore, shed int) {
 	var m struct {
 		Role string `json:"role"`
 	}
 	if json.Unmarshal(el, &m) != nil || m.Role != "user" {
-		return nil, 0
+		return nil, nil, 0
 	}
 	forEachToolResultBlock(msgBase, el, func(blk json.RawMessage, blkBase int) {
 		// Defense in depth: never shrink a tool_result that carries cache_control on the block
@@ -322,8 +340,9 @@ func collectResultElisionEdits(msgBase int, el json.RawMessage, threshold int) (
 		cVal := blk[cStart:cEnd]
 		switch {
 		case len(cVal) > 0 && cVal[0] == '"': // content is a bare JSON string
-			if e, sh, ok := elideStringEdit(blkBase+cStart, cVal, threshold); ok {
+			if e, r, sh, ok := elideStringEditWithRestore(blkBase+cStart, cVal, threshold, traceID); ok {
 				edits = append(edits, e)
+				restores = append(restores, r)
 				shed += sh
 			}
 		case len(cVal) > 0 && cVal[0] == '[': // content is an array of blocks — shrink each oversized text block
@@ -342,14 +361,15 @@ func collectResultElisionEdits(msgBase int, el json.RawMessage, threshold int) (
 				if !ok {
 					continue
 				}
-				if e, sh, ok := elideStringEdit(blkBase+cStart+innerSpans[k].start+tStart, ib[tStart:tEnd], threshold); ok {
+				if e, r, sh, ok := elideStringEditWithRestore(blkBase+cStart+innerSpans[k].start+tStart, ib[tStart:tEnd], threshold, traceID); ok {
 					edits = append(edits, e)
+					restores = append(restores, r)
 					shed += sh
 				}
 			}
 		}
 	})
-	return edits, shed
+	return edits, restores, shed
 }
 
 // arrayElementSpans decodes a JSON array's elements with spans RELATIVE TO arr (base 0). Unlike
@@ -407,27 +427,34 @@ func toolResultContentHasCacheControl(blk json.RawMessage) bool {
 // is strictly shorter. ok is false (no edit) when the value is not a string, not oversized, cannot
 // be decoded, or would not actually save.
 func elideStringEdit(valAbs int, valBytes []byte, threshold int) (spliceEdit, int, bool) {
+	e, _, shed, ok := elideStringEditWithRestore(valAbs, valBytes, threshold)
+	return e, shed, ok
+}
+
+func elideStringEditWithRestore(valAbs int, valBytes []byte, threshold int, trace ...string) (spliceEdit, StaleRestore, int, bool) {
 	if len(valBytes) <= threshold || len(valBytes) == 0 || valBytes[0] != '"' {
-		return spliceEdit{}, 0, false
+		return spliceEdit{}, StaleRestore{}, 0, false
 	}
 	var s string
 	if json.Unmarshal(valBytes, &s) != nil {
-		return spliceEdit{}, 0, false
+		return spliceEdit{}, StaleRestore{}, 0, false
 	}
-	shrunk := elideHeadTail(s, threshold)
+	shrunk := elideHeadTailWithRestore(s, threshold, s, trace...)
 	// Source-side invariant guard (belt-and-suspenders for the post-splice semantic check): the
 	// shrunk value must never be the empty string, since an empty `text`/tool_result value is
 	// exactly the shape the Anthropic API 400s. elideHeadTail joins head+marker+tail and the marker
 	// is non-empty, so this is unreachable in practice — but keep it load-bearing so a future
 	// threshold/marker change cannot silently ship an empty value past this line.
 	if shrunk == "" {
-		return spliceEdit{}, 0, false
+		return spliceEdit{}, StaleRestore{}, 0, false
 	}
 	newVal, err := json.Marshal(shrunk)
 	if err != nil || len(newVal) >= len(valBytes) {
-		return spliceEdit{}, 0, false
+		return spliceEdit{}, StaleRestore{}, 0, false
 	}
-	return spliceEdit{start: valAbs, end: valAbs + len(valBytes), repl: newVal}, len(valBytes) - len(newVal), true
+	original := []byte(s)
+	restore := StaleRestore{ID: originatingTaskDigestID(original), Bytes: original, Excerpt: "oversized tool_result output"}
+	return spliceEdit{start: valAbs, end: valAbs + len(valBytes), repl: newVal}, restore, len(valBytes) - len(newVal), true
 }
 
 // elideHeadTail returns the head+tail-shrunk form of s: the first ~3/4·threshold and last
@@ -435,6 +462,12 @@ func elideStringEdit(valAbs int, valBytes []byte, threshold int) (spliceEdit, in
 // so the result is always valid UTF-8. If s is not meaningfully longer than head+tail it is
 // returned unchanged (the caller's "strictly shorter" guard then drops the edit).
 func elideHeadTail(s string, threshold int) string {
+	return elideHeadTailWithRestore(s, threshold, s)
+}
+
+// elideHeadTailWithRestore can shorten a decoded value after cross-turn folding while
+// keeping the handle addressed to the original tool result, before either rewrite.
+func elideHeadTailWithRestore(s string, threshold int, restoreText string, trace ...string) string {
 	head := threshold * 3 / 4
 	tail := threshold - head
 	r := []rune(s)
@@ -442,7 +475,11 @@ func elideHeadTail(s string, threshold int) string {
 		return s
 	}
 	omitted := len(r) - head - tail
-	return string(r[:head]) + elideMarkerf(omitted) + string(r[len(r)-tail:])
+	markerFields := []string{originatingTaskDigestID([]byte(restoreText))}
+	if len(trace) > 0 {
+		markerFields = append(markerFields, trace[0])
+	}
+	return string(r[:head]) + elideMarkerf(omitted, markerFields...) + string(r[len(r)-tail:])
 }
 
 // objectValueSpan returns the [start,end) byte span (relative to obj) of the VALUE for the given

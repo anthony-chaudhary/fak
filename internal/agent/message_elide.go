@@ -80,7 +80,7 @@ func dedupMessagesCrossTurn(messages []Message, lastEligible int) (out []Message
 // is identity. The recent elideRecentKeepMsgs messages are always left intact. Outcome.Elided/
 // ShedBytes are meaningful only on a fire (Reason == ElideReasonNone); otherwise the input is
 // returned unchanged.
-func ElideMessages(messages []Message, threshold int) ([]Message, ElideOutcome) {
+func ElideMessages(messages []Message, threshold int, trace ...string) ([]Message, ElideOutcome) {
 	if threshold <= 0 || len(messages) == 0 {
 		return messages, ElideOutcome{Reason: ElideReasonOff}
 	}
@@ -91,12 +91,13 @@ func ElideMessages(messages []Message, threshold int) ([]Message, ElideOutcome) 
 	work, folded, foldShed := dedupMessagesCrossTurn(messages, lastEligible)
 	var out []Message // copy-on-write over work — allocated only on the first head+tail shrink
 	elided, shed := 0, 0
+	var restores []StaleRestore
 	for i := 0; i < lastEligible; i++ {
 		m := work[i]
 		if m.Role != "tool" || len(m.Content) <= threshold {
 			continue
 		}
-		shrunk := elideHeadTail(m.Content, threshold)
+		shrunk := elideHeadTailWithRestore(m.Content, threshold, messages[i].Content, trace...)
 		if len(shrunk) >= len(m.Content) {
 			continue // no genuine savings — leave it
 		}
@@ -104,6 +105,8 @@ func ElideMessages(messages []Message, threshold int) ([]Message, ElideOutcome) 
 			out = append([]Message(nil), work...)
 		}
 		shed += len(m.Content) - len(shrunk)
+		original := []byte(messages[i].Content)
+		restores = append(restores, StaleRestore{ID: originatingTaskDigestID(original), Bytes: original, Excerpt: "oversized tool_result output"})
 		out[i].Content = shrunk
 		elided++
 	}
@@ -113,5 +116,5 @@ func ElideMessages(messages []Message, threshold int) ([]Message, ElideOutcome) 
 	if elided == 0 && folded == 0 {
 		return messages, ElideOutcome{Reason: ElideReasonUnderThreshold}
 	}
-	return out, ElideOutcome{Reason: ElideReasonNone, Elided: elided + folded, ShedBytes: shed + foldShed}
+	return out, ElideOutcome{Reason: ElideReasonNone, Elided: elided + folded, ShedBytes: shed + foldShed, Restores: restores}
 }

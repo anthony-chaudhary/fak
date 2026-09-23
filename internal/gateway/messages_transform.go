@@ -153,7 +153,7 @@ func (s *Server) prepareServedAnthropicRequest(ctx context.Context, r *http.Requ
 	// before the size shrinker means the stashed original is the FULL body, not an already head+tail-
 	// shrunk one, so a restore returns full fidelity. Same cache-prefix proof; OFF by default.
 	s.maybeElideStaleReads(req, reqTrace)
-	if s.maybeElideAnthropicRaw(req) {
+	if s.maybeElideAnthropicRaw(req, reqTrace) {
 		FeatureActivationTrackerFromContext(ctx).RecordActivation(FeatureElideResults, FeatureOutcomeUsed)
 	}
 	// Inbound twin of #555: prune tool DEFINITIONS the floor can never admit from the

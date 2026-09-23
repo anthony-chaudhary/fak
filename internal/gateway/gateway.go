@@ -1328,11 +1328,20 @@ func (s *Server) maybeElideMessages(messages []agent.Message) []agent.Message {
 	return s.maybeElideMessagesWithContext(context.Background(), messages)
 }
 
-func (s *Server) maybeElideMessagesWithContext(ctx context.Context, messages []agent.Message) []agent.Message {
+func (s *Server) maybeElideMessagesWithContext(ctx context.Context, messages []agent.Message, trace ...string) []agent.Message {
 	if s.elideResultBytes <= 0 || s.anthropicPassthrough() {
 		return messages
 	}
-	out, outcome := agent.ElideMessages(messages, s.elideResultBytes)
+	restoreTrace := agent.RequestTraceID(ctx)
+	if len(trace) > 0 {
+		restoreTrace = trace[0]
+	} else if restoreTrace == "" {
+		restoreTrace = s.traceFor("")
+	}
+	out, outcome := agent.ElideMessages(messages, s.elideResultBytes, restoreTrace)
+	for _, r := range outcome.Restores {
+		s.stashRestore(restoreTrace, r.ID, r.Excerpt, r.Bytes)
+	}
 	s.metrics.observeUncachedTrim(outcome)
 	if outcome.Elided > 0 && outcome.ShedBytes > 0 {
 		FeatureActivationTrackerFromContext(ctx).RecordActivation(FeatureElideResults, FeatureOutcomeUsed)
@@ -1434,7 +1443,7 @@ func (s *Server) complete(ctx context.Context, trace string, messages []agent.Me
 	// elision never fires. Shrinks old oversized tool-role content to head+tail; default-on,
 	// fail-safe, recent working set protected. No-op on the Anthropic passthrough (handled on
 	// req.Raw there).
-	messages = s.maybeElideMessagesWithContext(ctx, messages)
+	messages = s.maybeElideMessagesWithContext(ctx, messages, trace)
 	start := time.Now()
 	comp, err = s.chatPlanner(ctx).Complete(ctx, messages, tools, chatRouteOpts(ctx, opts)...)
 	dur := time.Since(start)
