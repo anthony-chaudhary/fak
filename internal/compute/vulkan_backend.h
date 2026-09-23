@@ -208,6 +208,16 @@ int fvk_argmax_f32(const void *dLogits, int n);
 void fvk_batch_begin(void);
 void fvk_batch_flush(void);
 bool fvk_batch_active(void);
+/* ---- exact batch resource hazards (#12218) -------------------------------------
+ * The default batched recorder fences every recorded dispatch against its predecessor
+ * with one coarse compute->compute barrier because it has no per-dispatch hazard input.
+ * fvk_batch_hazards_arm(n) selects the exact-barrier lowering: n!=0 arms it (the Go
+ * lowering has already proven the window's declarations complete), n==0 forces the
+ * coarse barrier for the next and every subsequent batch (fail closed). The flag is
+ * process-wide and defaults to 0, so an unarmed build is byte-identical to the prior
+ * behavior. fvk_batch_hazards_armed() reports the live value. */
+void fvk_batch_hazards_arm(int armed);
+int fvk_batch_hazards_armed(void);
 /* Request retirement uses the same completion fence without counting an extra public
  * FlushBatch call when the token path already closed its batch. */
 void fvk_retire_request(void);

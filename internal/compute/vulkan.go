@@ -27,6 +27,16 @@ void *fvk_malloc_weight(size_t bytes, uint64_t max_arena_bytes);
 void fvk_weight_arena_stats(uint64_t *memory_allocations, uint64_t *buffer_bindings,
                             uint64_t *reserved_bytes, uint64_t *live_bytes,
                             uint64_t *peak_reserved_bytes);
+
+// #12218 exact batch resource hazards: the Go lowering proves a window's declarations
+// complete, then arms the shim and sets one ordinal-keyed sync verdict per declared
+// dispatch. The ordinal is the shim's own recorded-op index, read at declaration time, so
+// a verdict can only elide the exact dispatch it was computed for.
+void fvk_batch_hazards_arm(int armed);
+int fvk_batch_hazards_armed(void);
+int fvk_batch_next_ordinal(void);
+void fvk_batch_hazards_set(int ordinal, int needs_sync);
+void fvk_batch_hazards_reset(void);
 */
 import "C"
 
@@ -394,9 +404,12 @@ type vulkanQ8Chunk struct {
 func (b *vulkanBuf) Ready() bool { return true }
 
 type vulkanBackend struct {
-	name            string
-	tier            string
-	haveQ8          bool
+	name   string
+	tier   string
+	haveQ8 bool
+	// batchNodeSeq advances per declared dispatch inside a batch window so the hazard
+	// ledger's edges are unique and deterministic (#12218).
+	batchNodeSeq    int
 	haveQ8GDNInProj bool
 	haveCoopmat     bool
 	haveAttention   bool
@@ -655,15 +668,73 @@ func (v *vulkanBackend) HostMemory() (total, free int64, known bool) {
 func (v *vulkanBackend) BeginBatch() {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
+	v.batchNodeSeq = 0
+	vulkanBatchLedger().begin()
 	C.fvk_batch_begin()
 }
 
 // FlushBatch submits the recorded command batch to the device, ending the batching
-// window opened by BeginBatch.
+// window opened by BeginBatch. The window's declared buffer ranges lower to an exact
+// hazard plan (#12218) whose receipt is accumulated; the coarse barrier remains the
+// default until FAK_VULKAN_BATCH_HAZARDS arms the exact path, and any incomplete
+// window falls closed to the coarse floor.
 func (v *vulkanBackend) FlushBatch() {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
+	armed := VulkanHazardLoweringArmed(os.Getenv)
+	plan, stats := vulkanBatchLedger().lower(armed)
+	vulkanBatchStatsGlobal.observe(stats)
+	// Arm the shim only for a window the lowering fully proved, and set one verdict per
+	// edge keyed by the successor's recorder ordinal. An unarmed or non-exact window
+	// leaves the shim on the coarse global barrier (fail closed).
+	if armed && plan.Exact {
+		C.fvk_batch_hazards_reset()
+		C.fvk_batch_hazards_arm(1)
+		for _, edge := range plan.Edges {
+			sync := C.int(0)
+			if edge.NeedsSync {
+				sync = C.int(1)
+			}
+			C.fvk_batch_hazards_set(C.int(edge.NextShimOrdinal), sync)
+		}
+	} else {
+		C.fvk_batch_hazards_arm(0)
+	}
 	C.fvk_batch_flush()
+	C.fvk_batch_hazards_arm(0)
+	C.fvk_batch_hazards_reset()
+}
+
+// recordBatchDispatch declares one batched dispatch's buffer ranges to the open hazard
+// window. It is a no-op outside a window, so a caller never has to check batch state.
+// The node id advances per declaration so a window's edges are stable and unique, and
+// the shim's current op ordinal is captured so a verdict binds to the exact recorded op.
+func (v *vulkanBackend) recordBatchDispatch(accesses ...VulkanBufferAccess) {
+	v.batchNodeSeq++
+	ordinal := 0
+	if C.fvk_batch_active() {
+		ordinal = int(C.fvk_batch_next_ordinal())
+	}
+	vulkanBatchLedger().record(VulkanDispatchAccess{
+		NodeID:      v.batchNodeSeq,
+		ShimOrdinal: ordinal,
+		Declared:    true,
+		Accesses:    accesses,
+	})
+}
+
+// bufferIdentity returns a stable identity for a tensor's device buffer, used only to
+// decide whether two batched dispatches touch the same resource. 0 means "unknown", and
+// two distinct buffers never share a non-zero identity.
+func (v *vulkanBackend) bufferIdentity(t Tensor) int64 {
+	if t.buf == nil {
+		return 0
+	}
+	b, ok := t.buf.(*vulkanBuf)
+	if !ok || b == nil || b.ptr == nil {
+		return 0
+	}
+	return int64(uintptr(b.ptr))
 }
 
 // TeardownResources flushes in-flight work before releasing backend-owned
@@ -1772,6 +1843,11 @@ func (v *vulkanBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		panic(fmt.Sprintf("compute: vulkan BatchedMatMul input numel=%d, want P*in=%d*%d", X.Numel(), P, in))
 	}
 	y, _ := v.devTr([]int{P, out}, F32)
+	v.recordBatchDispatch(
+		VulkanBufferAccess{BufferID: v.bufferIdentity(w), Size: 0, Mode: VulkanAccessRead},
+		VulkanBufferAccess{BufferID: v.bufferIdentity(X), Size: 0, Mode: VulkanAccessRead},
+		VulkanBufferAccess{BufferID: v.bufferIdentity(y), Size: 0, Mode: VulkanAccessWrite},
+	)
 	switch w.Dtype {
 	case F32:
 		C.fvk_matmul_f32(v.vp(w), v.vp(X), v.vp(y), C.int(out), C.int(in), C.int(P))
@@ -1829,6 +1905,11 @@ func (v *vulkanBackend) MatMulAddInPlace(dst, w, x Tensor) {
 	if dst.Numel() != P*out {
 		panic("compute: vulkan MatMulAddInPlace dst shape does not match projection output")
 	}
+	v.recordBatchDispatch(
+		VulkanBufferAccess{BufferID: v.bufferIdentity(w), Size: 0, Mode: VulkanAccessRead},
+		VulkanBufferAccess{BufferID: v.bufferIdentity(x), Size: 0, Mode: VulkanAccessRead},
+		VulkanBufferAccess{BufferID: v.bufferIdentity(dst), Size: 0, Mode: VulkanAccessReadWrite},
+	)
 	C.fvk_matmul_add_f32(v.vp(w), v.vp(x), v.vp(dst), C.int(out), C.int(in), C.int(P))
 }
 

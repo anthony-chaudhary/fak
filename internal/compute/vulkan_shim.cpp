@@ -49,6 +49,7 @@ struct DispatchProfileCounters {
     std::atomic<uint64_t> otherMatmul{0}, otherNorm{0}, otherRope{0}, otherSwiGLU{0};
     std::atomic<uint64_t> otherAdd{0}, otherAttention{0}, otherArgmax{0}, otherGDN{0}, otherUnclassified{0};
     std::atomic<uint64_t> barriers{0}, d2d{0}, batchSubmits{0}, batchFlushes{0}, oneShotSubmits{0};
+    std::atomic<uint64_t> barriersElided{0};
     std::atomic<uint64_t> oneShotCompute{0}, oneShotH2D{0}, oneShotD2H{0}, oneShotD2D{0};
 };
 static DispatchProfileCounters g_dp;
@@ -1021,6 +1022,39 @@ void recordComputeBarrier(VkCommandBuffer cmd) {
         0, 1, &mb, 0, nullptr, 0, nullptr);
 }
 
+// Exact batch resource hazards (#12218). Default-off: when unarmed the recorder keeps the
+// coarse global barrier and the recorded bytes are identical to the prior behavior. The Go
+// ledger proves a window's declarations complete before arming, so the shim never has to
+// infer hazard metadata it was not handed; an unarmed or incomplete window falls closed.
+int g_batchHazardsArmed = 0;
+
+// Per-dispatch sync verdicts keyed by the dispatch's ordinal within the batch window. The
+// key is the op ordinal the shim itself assigns (g_batchOps BEFORE the increment), so a
+// verdict can only ever elide the exact dispatch it was computed for. A missing entry
+// fails closed to "needs sync": because Go declares only the matmul-family seams, every
+// other dispatch (RMSNorm/RoPE/attention/...) simply has no entry and keeps its barrier.
+// A positional queue would misalign the moment an undeclared dispatch interleaves, so the
+// verdict is addressed, not streamed.
+std::unordered_map<int, char> g_batchHazardSync; // ordinal -> 1 needs sync, 0 elidable
+
+bool nextHazardSync(int ordinal) {
+    if (!g_batchHazardsArmed) return true;
+    auto it = g_batchHazardSync.find(ordinal);
+    if (it == g_batchHazardSync.end()) return true;   // fail closed
+    return it->second != 0;
+}
+
+// Record the barrier between two adjacent dispatches. When hazards are armed, a dispatch
+// whose Go-side plan already proved it disjoint from its predecessor needs no device fence
+// at all, so the elided case records nothing. The coarse path records the global barrier.
+void recordDispatchBarrier(VkCommandBuffer cmd, int ordinal) {
+    if (g_batchHazardsArmed && !nextHazardSync(ordinal)) {
+        dp_inc(g_dp.barriersElided);
+        return;
+    }
+    recordComputeBarrier(cmd);
+}
+
 void batchBegin() {
 	if (g_batching) return;          // already recording — the model brackets each token
 	g_batchCmd = beginCmd();
@@ -1030,6 +1064,10 @@ void batchBegin() {
 	g_batchD2DBytes = 0;
 	g_batchD2DValid = true;
 	g_batchSets.clear();
+	// A new window owns a fresh hazard verdict queue; anything left from the prior window
+	// must not leak into this one (the Go ledger re-lowers each window independently).
+	g_batchHazardSync.clear();
+	g_batchHazardCursor = 0;
 }
 
 void batchFlush() {
@@ -1237,7 +1275,9 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
     if (g_batching) {
         // RECORD into the open batch buffer: barrier against the prior op, then dispatch.
         // The descriptor set must outlive recording, so park it for post-submit free.
-        if (g_batchOps > 0) recordComputeBarrier(g_batchCmd);
+        // When the Go ledger armed exact hazards, it also queued this dispatch's sync
+        // verdict by ordinal; an elided verdict (proven disjoint) records no device fence.
+        if (g_batchOps > 0) recordDispatchBarrier(g_batchCmd, g_batchOps);
         vkCmdBindPipeline(g_batchCmd, VK_PIPELINE_BIND_POINT_COMPUTE, k.pipe);
         vkCmdBindDescriptorSets(g_batchCmd, VK_PIPELINE_BIND_POINT_COMPUTE, k.layout, 0, 1, &rec.set, 0, nullptr);
         if (pcsize > 0) vkCmdPushConstants(g_batchCmd, k.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pcsize, pc);
@@ -1814,7 +1854,7 @@ void fvk_debug_d2h_staging_failure_once(int enabled) {
 void fvk_d2d_range(void* dst, size_t dst_off, const void* src, size_t src_off, size_t bytes) {
     if (bytes == 0 || !dst || !src) return;
     if (g_batching) {
-        if (g_batchOps > 0) recordComputeBarrier(g_batchCmd);
+        if (g_batchOps > 0) recordDispatchBarrier(g_batchCmd, g_batchOps);
         VkBufferCopy region{src_off, dst_off, bytes};
         dp_inc(g_dp.d2d);
         vkCmdCopyBuffer(g_batchCmd, B((void*)src)->buf, B(dst)->buf, 1, &region);
@@ -1851,6 +1891,22 @@ void fvk_d2d_off(void* dst, size_t dst_off, const void* src, size_t bytes) {
 void fvk_batch_begin(void) { batchBegin(); }
 void fvk_batch_flush(void) { dp_inc(g_dp.batchFlushes); batchFlush(); }
 bool fvk_batch_active(void) { return g_batching; }
+void fvk_batch_hazards_arm(int armed) { g_batchHazardsArmed = armed != 0 ? 1 : 0; }
+int fvk_batch_hazards_armed(void) { return g_batchHazardsArmed; }
+/* The ordinal the NEXT recorded dispatch will carry. Because a barrier is emitted before
+ * op k against op k-1, that barrier's verdict key is k = the value returned here. A Go
+ * seam declares its verdict under this key so the verdict can only ever elide the exact
+ * dispatch it was computed for, regardless of interleaved undeclared dispatches. */
+int fvk_batch_next_ordinal(void) { return g_batchOps; }
+void fvk_batch_hazards_set(int ordinal, int needs_sync) {
+    g_batchHazardSync[ordinal] = needs_sync != 0 ? 1 : 0;
+}
+void fvk_batch_hazards_reset(void) {
+    g_batchHazardSync.clear();
+}
+uint64_t fvk_batch_barriers_elided(void) {
+    return g_dp.barriersElided.load(std::memory_order_relaxed);
+}
 void fvk_retire_request(void) { batchFlush(); }
 int fvk_submission_status(void) { return (int)g_submissionStatus; }
 void fvk_submission_reset(void) {
