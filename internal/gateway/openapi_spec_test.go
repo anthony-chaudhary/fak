@@ -39,6 +39,7 @@ var specPathFor = map[string]string{
 	"/v1/messages/count_tokens":     "/v1/messages/count_tokens",
 	"/v1beta/":                      "/v1beta/models/{model}:generateContent",
 	"/v1/fak/syscall":               "/v1/fak/syscall",
+	"/v1/fak/tokenize":              "/v1/fak/tokenize",
 	"/v1/fak/features":              "/v1/fak/features",
 	"/v1/fak/adjudicate":            "/v1/fak/adjudicate",
 	"/v1/fak/admit":                 "/v1/fak/admit",
@@ -132,7 +133,7 @@ func TestOpenAPISpecDocumentsEveryServedRoute(t *testing.T) {
 
 // TestNativeTokenizeOpenAPIContract is the focused schema-first witness for
 // fak#13382: it declares the shipped `POST /v1/fak/tokenize` wire in the
-// committed OpenAPI document WITHOUT registering a served route.
+// committed OpenAPI document and maps the served route.
 //
 // It proves the declaration is complete and honest:
 //   - the path exists and documents POST (the shipped `fak up` method);
@@ -142,10 +143,8 @@ func TestOpenAPISpecDocumentsEveryServedRoute(t *testing.T) {
 //   - the source prompt text is never echoed by the declared response; and
 //   - the ordinary-serving adapter subset is declared as its own fence.
 //
-// routeTable() must remain UNCHANGED: schema-first means the contract lands
-// before the route, and gateway invokability is tracked separately (#13389).
-// TestServedRouteMappingIsExhaustive/TestOpenAPISpecDocumentsEveryServedRoute
-// stay green because the extra path is a permitted addition, not a served one.
+// The route is now registered by #13389, and the exhaustiveness gate above
+// requires it to map to this declared path.
 func TestNativeTokenizeOpenAPIContract(t *testing.T) {
 	raw, err := os.ReadFile(filepath.FromSlash(openAPISpecPath))
 	if err != nil {
@@ -210,12 +209,12 @@ func TestNativeTokenizeOpenAPIContract(t *testing.T) {
 		t.Errorf("NativeTokenizeRequest must declare the ordinary-serving adapter subset")
 	}
 
-	// The leaf is schema-first: it must NOT register the route. A served route
-	// without a specPathFor entry fails the sibling exhaustiveness test.
+	served := false
 	for _, rt := range (&Server{}).routeTable() {
-		if rt.pattern == "/v1/fak/tokenize" {
-			t.Errorf("routeTable() registers /v1/fak/tokenize; #13382 is schema-only (registration is #13389)")
-		}
+		served = served || rt.pattern == "/v1/fak/tokenize"
+	}
+	if !served {
+		t.Error("routeTable() does not register the documented /v1/fak/tokenize route")
 	}
 }
 
