@@ -545,9 +545,9 @@ func (k *Kernel) Reap(ctx context.Context, h abi.SubmissionHandle) (*abi.Result,
 	// Time the EvDispatch->EvComplete engine span (#1149): the engine cost, stamped
 	// on the completion event so a cost observer can separate engine time from the
 	// adjudication tax EvDecide already carries.
-	t0 := time.Now()
+	t0 := startMeasuredSpan()
 	r, err := eng.Complete(ctx, p.call)
-	engNs := time.Since(t0).Nanoseconds()
+	engNs := t0.elapsedNanos()
 	if err != nil {
 		return nil, err
 	}

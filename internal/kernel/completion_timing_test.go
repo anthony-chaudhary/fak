@@ -22,6 +22,36 @@ func (e completionTimingEngine) Complete(_ context.Context, c *abi.ToolCall) (*a
 
 func (completionTimingEngine) Caps() []abi.Capability { return nil }
 
+// immediateTimingEngine exercises the sub-tick engine path that can round to
+// zero on Windows when measured only with time.Since.
+type immediateTimingEngine struct{}
+
+func (immediateTimingEngine) Complete(_ context.Context, c *abi.ToolCall) (*abi.Result, error) {
+	return &abi.Result{Call: c, Status: abi.StatusOK}, nil
+}
+
+func (immediateTimingEngine) Caps() []abi.Capability { return nil }
+
+func TestImmediateCompletionHasTrustedTiming(t *testing.T) {
+	setup()
+	abi.RegisterAdjudicator(0, fakeAdj{v: abi.Verdict{Kind: abi.VerdictAllow}})
+	abi.RegisterEngine("immediate-timed", immediateTimingEngine{})
+	recorder := &recordEmitter{}
+	abi.RegisterEmitter(recorder)
+
+	result, verdict := New("immediate-timed").Syscall(context.Background(), call("immediate", `{}`))
+	if verdict.Kind != abi.VerdictAllow || result == nil || result.Status != abi.StatusOK {
+		t.Fatalf("immediate completion failed: verdict=%+v result=%+v", verdict, result)
+	}
+	event, ok := find(recorder, abi.EvComplete, "immediate")
+	if !ok {
+		t.Fatal("kernel emitted no immediate completion event")
+	}
+	if duration, ok := CompletionTimingNanos(event); !ok || duration <= 0 {
+		t.Fatalf("immediate completion timing=(%d,%v), want positive trusted measurement", duration, ok)
+	}
+}
+
 func TestCompletionTimingRequiresKernelAttestation(t *testing.T) {
 	setup()
 	abi.RegisterAdjudicator(0, fakeAdj{v: abi.Verdict{Kind: abi.VerdictAllow}})
