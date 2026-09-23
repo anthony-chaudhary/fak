@@ -10,6 +10,7 @@ import (
 	"errors"
 	"hash/crc32"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -18,6 +19,122 @@ import (
 	"sync"
 	"testing"
 )
+
+func TestStrixGitObjectSnapshotManagedWorktree(t *testing.T) {
+	base := t.TempDir()
+	mainRoot := filepath.Join(base, "main")
+	linkedRoot := filepath.Join(base, "linked")
+	if err := os.Mkdir(mainRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runGit := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit(mainRoot, "init")
+	if err := os.WriteFile(filepath.Join(mainRoot, "seed.txt"), []byte("linked-worktree-object\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(mainRoot, "add", "seed.txt")
+	runGit(mainRoot, "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-m", "seed")
+	tip := runGit(mainRoot, "rev-parse", "HEAD")
+	runGit(mainRoot, "worktree", "add", "-b", "linked", linkedRoot)
+
+	snapshot, err := newStrixGitObjectSnapshot(context.Background(), linkedRoot)
+	if err != nil {
+		t.Fatalf("valid linked worktree refused: %v", err)
+	}
+	object := filepath.Join(snapshot.gitDir(), "objects", tip[:2], tip[2:])
+	if _, err := os.Stat(object); err != nil {
+		t.Fatalf("common-store commit object missing from sterile snapshot: %v", err)
+	}
+	if err := snapshot.close(); err != nil {
+		t.Fatal(err)
+	}
+
+	gitfile := filepath.Join(linkedRoot, ".git")
+	original, err := os.ReadFile(gitfile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"traversal", "gitdir: ../../outside\n"},
+		{"malformed", "not-a-gitdir\n"},
+		{"oversized", "gitdir: " + strings.Repeat("x", 8192) + "\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.WriteFile(gitfile, []byte(tc.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.WriteFile(gitfile, original, 0o600) })
+			if snapshot, err := newStrixGitObjectSnapshot(context.Background(), linkedRoot); err == nil {
+				_ = snapshot.close()
+				t.Fatal("malformed worktree pointer admitted")
+			}
+		})
+	}
+	if err := os.WriteFile(gitfile, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("symlink ancestor in common path", func(t *testing.T) {
+		alias := filepath.Join(base, "aliased-main")
+		if err := os.Symlink(mainRoot, alias); err != nil {
+			t.Skipf("directory symlink unavailable: %v", err)
+		}
+		redirected := filepath.Join(alias, ".git", "worktrees", "linked")
+		if err := os.WriteFile(gitfile, []byte("gitdir: "+redirected+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.WriteFile(gitfile, original, 0o600) })
+		if snapshot, err := newStrixGitObjectSnapshot(context.Background(), linkedRoot); err == nil {
+			_ = snapshot.close()
+			t.Fatal("symlink ancestor redirected common object store")
+		}
+	})
+	gitdir := strings.TrimSpace(strings.TrimPrefix(string(original), "gitdir:"))
+	if !filepath.IsAbs(gitdir) {
+		gitdir = filepath.Join(linkedRoot, gitdir)
+	}
+	backpointer := filepath.Join(gitdir, "gitdir")
+	backpointerOriginal, err := os.ReadFile(backpointer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(backpointer, []byte(filepath.Join(base, "other", ".git")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot, err := newStrixGitObjectSnapshot(context.Background(), linkedRoot); err == nil {
+		_ = snapshot.close()
+		t.Fatal("broken worktree backpointer admitted")
+	}
+	if err := os.WriteFile(backpointer, backpointerOriginal, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	commondir := filepath.Join(gitdir, "commondir")
+	commondirOriginal, err := os.ReadFile(commondir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(commondir, []byte(filepath.Join(base, "other")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot, err := newStrixGitObjectSnapshot(context.Background(), linkedRoot); err == nil {
+		_ = snapshot.close()
+		t.Fatal("redirected common object store admitted")
+	}
+	if err := os.WriteFile(commondir, commondirOriginal, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestStrixGitObjectSnapshotFreezesOpenedHandlesWithoutLivePathFallback(t *testing.T) {
 	const packID = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"

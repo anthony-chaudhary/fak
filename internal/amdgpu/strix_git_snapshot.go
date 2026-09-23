@@ -182,7 +182,7 @@ func snapshotStrixGitObjects(ctx context.Context, repoRoot string, rawOpts strix
 	}
 	defer repository.Close()
 
-	gitRoot, err := openVerifiedStrixDirectory(repository, ".git")
+	gitRoot, err := openStrixGitCommonDirectory(repository, repoRoot)
 	if err != nil {
 		return nil, refuseStrixGitSnapshot()
 	}
@@ -279,6 +279,139 @@ func snapshotStrixGitObjects(ctx context.Context, repoRoot string, rawOpts strix
 	}
 	cleanupRequired = false
 	return owned, nil
+}
+
+// openStrixGitCommonDirectory accepts a normal .git directory or the canonical
+// gitfile used by a linked worktree. The latter is admitted only when the
+// common/worktrees entry points back to this exact repository gitfile.
+func openStrixGitCommonDirectory(repository *os.Root, repoRoot string) (*os.Root, error) {
+	info, err := repository.Lstat(".git")
+	if err != nil {
+		return nil, err
+	}
+	if info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+		return openVerifiedStrixDirectory(repository, ".git")
+	}
+	gitfile, err := readVerifiedStrixGitPointer(repository, ".git")
+	if err != nil {
+		return nil, err
+	}
+	const prefix = "gitdir: "
+	if !strings.HasPrefix(gitfile, prefix) || !strings.HasSuffix(gitfile, "\n") || strings.Count(gitfile, "\n") != 1 {
+		return nil, fmt.Errorf("invalid gitfile")
+	}
+	gitDirPath := strings.TrimSuffix(strings.TrimPrefix(gitfile, prefix), "\n")
+	if !canonicalStrixGitPointerPath(gitDirPath) {
+		return nil, fmt.Errorf("invalid gitdir path")
+	}
+	entryName := filepath.Base(gitDirPath)
+	worktreesPath := filepath.Dir(gitDirPath)
+	commonPath := filepath.Dir(worktreesPath)
+	if entryName == "." || entryName == ".." || entryName == "" ||
+		filepath.Base(commonPath) != ".git" ||
+		filepath.Base(worktreesPath) != "worktrees" ||
+		!sameStrixFilesystemPath(filepath.Join(commonPath, "worktrees", entryName), gitDirPath) {
+		return nil, fmt.Errorf("invalid gitdir structure")
+	}
+	common, err := openVerifiedStrixAbsoluteDirectory(commonPath)
+	if err != nil {
+		return nil, err
+	}
+	worktrees, err := openVerifiedStrixDirectory(common, "worktrees")
+	if err != nil {
+		_ = common.Close()
+		return nil, err
+	}
+	entry, err := openVerifiedStrixDirectory(worktrees, entryName)
+	_ = worktrees.Close()
+	if err != nil {
+		_ = common.Close()
+		return nil, err
+	}
+	defer entry.Close()
+	commondir, err := readVerifiedStrixGitPointer(entry, "commondir")
+	if err != nil || commondir != "../..\n" {
+		_ = common.Close()
+		return nil, fmt.Errorf("invalid common directory pointer")
+	}
+	backpointer, err := readVerifiedStrixGitPointer(entry, "gitdir")
+	if err != nil {
+		_ = common.Close()
+		return nil, err
+	}
+	backPath := strings.TrimSuffix(backpointer, "\n")
+	if !strings.HasSuffix(backpointer, "\n") || strings.Count(backpointer, "\n") != 1 ||
+		!canonicalStrixGitPointerPath(backPath) ||
+		!sameStrixFilesystemPath(backPath, filepath.Join(repoRoot, ".git")) {
+		_ = common.Close()
+		return nil, fmt.Errorf("gitdir backpointer mismatch")
+	}
+	gitfileAfter, err := readVerifiedStrixGitPointer(repository, ".git")
+	finalInfo, statErr := repository.Lstat(".git")
+	if err != nil || statErr != nil || gitfileAfter != gitfile || !sameStrixFileView(info, finalInfo) {
+		_ = common.Close()
+		return nil, fmt.Errorf("gitfile changed during verification")
+	}
+	return common, nil
+}
+
+// Resolve an external Git directory from the filesystem root, pinning every
+// component with os.Root before descending. In particular, a swapped ancestor
+// cannot redirect a later open to a different object store.
+func openVerifiedStrixAbsoluteDirectory(path string) (*os.Root, error) {
+	if !canonicalStrixGitPointerPath(path) {
+		return nil, fmt.Errorf("invalid absolute directory")
+	}
+	volume := filepath.VolumeName(path)
+	anchorPath := volume + string(filepath.Separator)
+	anchor, err := os.OpenRoot(anchorPath)
+	if err != nil {
+		return nil, err
+	}
+	rel, err := filepath.Rel(anchorPath, path)
+	if err != nil || rel == "." || !filepath.IsLocal(rel) {
+		_ = anchor.Close()
+		return nil, fmt.Errorf("invalid absolute directory")
+	}
+	for _, component := range strings.Split(filepath.ToSlash(rel), "/") {
+		child, openErr := openVerifiedStrixDirectory(anchor, component)
+		_ = anchor.Close()
+		if openErr != nil {
+			return nil, openErr
+		}
+		anchor = child
+	}
+	return anchor, nil
+}
+
+func canonicalStrixGitPointerPath(path string) bool {
+	return filepath.IsAbs(path) && filepath.ToSlash(filepath.Clean(path)) == filepath.ToSlash(path)
+}
+
+func readVerifiedStrixGitPointer(root *os.Root, name string) (string, error) {
+	const maxPointerBytes = 4096
+	before, err := root.Lstat(name)
+	if err != nil || !before.Mode().IsRegular() || before.Size() <= 0 || before.Size() > maxPointerBytes {
+		return "", fmt.Errorf("invalid git pointer")
+	}
+	file, err := root.Open(name)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !sameStrixFileView(before, opened) {
+		return "", fmt.Errorf("git pointer changed while opening")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxPointerBytes+1))
+	after, statErr := root.Lstat(name)
+	openedAfter, openedErr := file.Stat()
+	if err != nil || statErr != nil || openedErr != nil || len(data) == 0 || len(data) > maxPointerBytes ||
+		!sameStrixFileView(before, openedAfter) || !sameStrixFileView(openedAfter, after) ||
+		int64(len(data)) != openedAfter.Size() || strings.IndexByte(string(data), 0) >= 0 {
+		return "", fmt.Errorf("git pointer changed while reading")
+	}
+	return string(data), nil
 }
 
 func openCleanStrixRepositoryRoot(repoRoot string) (*os.Root, error) {
