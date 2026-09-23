@@ -20,7 +20,20 @@ type LaunchSpec struct {
 type LaunchReceipt struct {
 	IntentID       string   `json:"intent_id"`
 	IdempotencyKey string   `json:"idempotency_key"`
+	AttemptID      string   `json:"attempt_id"`
+	Nonce          string   `json:"nonce"`
 	Command        []string `json:"command"`
+}
+
+// LaunchHandoff is the durable launch identity the parent fenced before process
+// creation and hands to the guarded dispatch wrapper. AttemptID and Nonce are
+// the values persisted by Store.BeginLaunching; StatePath is the absolute
+// durable snapshot path so the wrapper (or a later reconciliation) can read the
+// exact attempt back without guessing after a crash.
+type LaunchHandoff struct {
+	AttemptID string `json:"attempt_id"`
+	Nonce     string `json:"nonce"`
+	StatePath string `json:"queue_state"`
 }
 
 type CommandRunner interface {
@@ -40,7 +53,12 @@ func (ExecRunner) Run(ctx context.Context, name string, args ...string) error {
 // Actuate executes only starts accepted by Store.Reserve. It deliberately does
 // not implement another worker executor; each accepted reservation is handed to
 // fak dispatch tick, the repository's guarded end-to-end worker lifecycle.
-func Actuate(ctx context.Context, fakPath string, snapshot Snapshot, starts []StartAction, runner CommandRunner) ([]LaunchReceipt, error) {
+//
+// Every start must carry the handoff fenced by Store.BeginLaunching, so no
+// process is created before its launch identity is durable. Actuate never
+// registers the wrapper or marks the attempt running/completed: dispatch tick
+// stays the single owner of the downstream lifecycle.
+func Actuate(ctx context.Context, fakPath string, snapshot Snapshot, starts []StartAction, handoffs map[string]LaunchHandoff, runner CommandRunner) ([]LaunchReceipt, error) {
 	if strings.TrimSpace(fakPath) == "" {
 		return nil, errors.New("agentqueue: fak executable is required")
 	}
@@ -60,17 +78,33 @@ func Actuate(ctx context.Context, fakPath string, snapshot Snapshot, starts []St
 		if intent.Launch.Issue <= 0 || strings.TrimSpace(intent.Launch.Lane) == "" {
 			return receipts, fmt.Errorf("agentqueue: intent %q requires launch issue and lane", intent.ID)
 		}
+		handoff, ok := handoffs[start.IdempotencyKey]
+		if !ok {
+			return receipts, fmt.Errorf("agentqueue: start %q has no fenced launch handoff", start.IdempotencyKey)
+		}
+		if handoff.AttemptID != start.IdempotencyKey || handoff.Nonce == "" || handoff.StatePath == "" {
+			return receipts, fmt.Errorf("agentqueue: start %q has an incomplete launch handoff", start.IdempotencyKey)
+		}
 		args := []string{
 			"dispatch", "tick",
 			"--target-issue", strconv.Itoa(intent.Launch.Issue),
 			"--lane", intent.Launch.Lane,
 			"--lease-id", start.IdempotencyKey,
+			"--attempt-id", handoff.AttemptID,
+			"--launch-nonce", handoff.Nonce,
+			"--queue-state", handoff.StatePath,
 			"--live", "--json",
 		}
 		if err := runner.Run(ctx, fakPath, args...); err != nil {
 			return receipts, fmt.Errorf("agentqueue: launch intent %q: %w", intent.ID, err)
 		}
-		receipts = append(receipts, LaunchReceipt{IntentID: intent.ID, IdempotencyKey: start.IdempotencyKey, Command: append([]string{fakPath}, args...)})
+		receipts = append(receipts, LaunchReceipt{
+			IntentID:       intent.ID,
+			IdempotencyKey: start.IdempotencyKey,
+			AttemptID:      handoff.AttemptID,
+			Nonce:          handoff.Nonce,
+			Command:        append([]string{fakPath}, args...),
+		})
 	}
 	return receipts, nil
 }

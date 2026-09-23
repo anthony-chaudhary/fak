@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -16,6 +17,20 @@ import (
 // ErrFenced means an attempt transition presented stale state, nonce, or
 // wrapper identity and must not be retried as a fresh launch.
 var ErrFenced = errors.New("agentqueue: attempt fenced")
+
+// StatePath returns the absolute durable snapshot path. It is the reference
+// handed to the guarded dispatch wrapper alongside the launch nonce so a later
+// stage can read the exact fenced attempt back instead of guessing.
+func (s Store) StatePath() (string, error) {
+	if s.Path == "" {
+		return "", errors.New("agentqueue: snapshot path is required")
+	}
+	abs, err := filepath.Abs(s.Path)
+	if err != nil {
+		return "", fmt.Errorf("agentqueue: resolve snapshot path: %w", err)
+	}
+	return abs, nil
+}
 
 // BeginLaunching durably advances one reserved attempt into its pre-start
 // launching state. Repeating the same nonce returns the persisted attempt

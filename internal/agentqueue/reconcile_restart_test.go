@@ -133,7 +133,7 @@ func TestReconcileRestartCrashRecoveryE2E(t *testing.T) {
 	}
 	activeCount := 0
 	for _, a := range final.Attempts {
-		if a.State == AttemptReserved || a.State == AttemptRunning {
+		if a.State == AttemptReserved || a.State == AttemptLaunching || a.State == AttemptRunning {
 			activeCount++
 		}
 	}

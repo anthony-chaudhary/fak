@@ -66,7 +66,7 @@ func TestControllerSustainsDesiredAndNeverExceedsMax(t *testing.T) {
 	}
 	active := 0
 	for _, attempt := range final.Attempts {
-		if attempt.State == AttemptReserved || attempt.State == AttemptRunning {
+		if attempt.State == AttemptReserved || attempt.State == AttemptLaunching || attempt.State == AttemptRunning {
 			active++
 		}
 	}
