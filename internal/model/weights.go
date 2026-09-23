@@ -24,6 +24,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unsafe"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // windowLo is the read-time SWA mask, expressed as a lower-bound START INDEX into the
@@ -283,6 +285,12 @@ type Model struct {
 	Vision *VisionTower
 	// sourceDir anchors V4 lazy expert/index range reads to the admitted snapshot.
 	sourceDir string
+
+	// v4ExpertOwners is the per-(Model, Backend) registry of shared V4 routed-expert runtime
+	// owners (fak#13479), built lazily by v4ExpertOwnerFor. Sessions attach and detach; each
+	// owner is freed exactly once by CloseWeights at model-weight teardown. nil until the first
+	// V4 session attaches, so non-V4 models allocate nothing.
+	v4ExpertOwners map[compute.Backend]*v4ExpertOwner
 
 	// Q2KEmbedding holds the optional resident Q2_K embedding table for native row gathering.
 	// When populated, embedRows() refuses whole-table expansion, while native row gathering

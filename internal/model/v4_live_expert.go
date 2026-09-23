@@ -5,11 +5,16 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 var ErrV4LiveExpert = errors.New("model: DeepSeek V4 live expert forward failed")
+
+// ErrV4ExpertOwnerClosed means the (model, backend) V4 runtime owner has been torn down by
+// weight close, so no session may attach a new one to it.
+var ErrV4ExpertOwnerClosed = errors.New("model: V4 expert runtime owner is closed")
 
 const (
 	defaultV4ExpertRingBytes int64 = 480 << 30
@@ -22,8 +27,130 @@ type v4LiveExpertRuntime interface {
 	Stats() v4ExpertRuntimeStats
 }
 
+// v4LiveExpertRuntimeBuilder is the construction seam for the shared V4 runtime. The shipped
+// implementation builds the concrete paged-ring runtime; tests inject a counting fake so the
+// lifetime contract (one build across sessions, one free at teardown) is measurable without
+// touching real weights.
+var v4LiveExpertRuntimeBuilder = func(dir string, cfg Config, be compute.Backend) (v4LiveExpertRuntime, error) {
+	return newV4LiveExpert(dir, cfg, be)
+}
+
 type v4LiveExpert struct {
 	runtime *v4ExpertRuntime
+}
+
+// v4ExpertOwner is the single bounded V4 routed-expert runtime for ONE (Model, Backend) pair.
+// It is the missing mechanism under perf(model) fak#13479: before it, each Session built its own
+// runtime (newV4LiveExpert) and Session.Close freed the ring, so sequential requests paid the
+// expert page-in again and concurrent requests could hold duplicate rings under separate budgets.
+//
+// Sessions keep their own logits/KV/router state; only the model-constant routed-expert bytes and
+// their ring are shared. attach() refuses a backend whose identity differs from the owner's,
+// because a device handle is only valid on the device that produced it.
+//
+// Lifetime: attach() refcounts; detach() releases the session without freeing. free() runs once,
+// from Model.CloseWeights, after the last detach. The mutex guards clients/build/closed.
+type v4ExpertOwner struct {
+	mu      sync.Mutex
+	m       *Model
+	be      compute.Backend
+	clients int
+	build   v4LiveExpertRuntime
+	closed  bool
+}
+
+func (o *v4ExpertOwner) attach(m *Model, be compute.Backend) (v4LiveExpertRuntime, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.closed {
+		return nil, fmt.Errorf("%w: %v", ErrV4LiveExpert, ErrV4ExpertOwnerClosed)
+	}
+	if o.build == nil {
+		if m == nil {
+			return nil, fmt.Errorf("%w: nil model", ErrV4LiveExpert)
+		}
+		if m.sourceDir == "" {
+			return nil, fmt.Errorf("%w: model was not loaded from an indexed safetensors directory", ErrV4LiveExpert)
+		}
+		// Fail fast on invalid ring/open caps before constructing anything, so a
+		// misconfiguration is reported as a typed V4 error rather than a partial build.
+		if _, _, err := v4RuntimeLimits(); err != nil {
+			return nil, err
+		}
+		built, err := v4LiveExpertRuntimeBuilder(m.sourceDir, m.Cfg, be)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrV4LiveExpert, err)
+		}
+		o.build = built
+	}
+	o.clients++
+	return o.build, nil
+}
+
+// detach releases one client WITHOUT freeing resident pages: the bytes belong to the (model,
+// device) pair, so a conversation ending must leave them for the sessions still using them.
+func (o *v4ExpertOwner) detach() {
+	if o == nil {
+		return
+	}
+	o.mu.Lock()
+	if o.clients > 0 {
+		o.clients--
+	}
+	o.mu.Unlock()
+}
+
+// free releases the ring exactly once, at model-weight teardown, after the last session has
+// detached. It is a no-op on a second call and on an owner that never built a runtime.
+func (o *v4ExpertOwner) free() error {
+	if o == nil {
+		return nil
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.closed {
+		return nil
+	}
+	o.closed = true
+	if o.build == nil {
+		return nil
+	}
+	err := o.build.Close()
+	o.build = nil
+	return err
+}
+
+// v4ExpertOwnerFor returns the model's sole V4 runtime owner, building the registry lazily. The
+// owner is NOT freed here; Model.CloseWeights calls each owner's free once.
+func (m *Model) v4ExpertOwnerFor(be compute.Backend) *v4ExpertOwner {
+	v4ExpertOwnerInitMu.Lock()
+	defer v4ExpertOwnerInitMu.Unlock()
+	if m.v4ExpertOwners == nil {
+		m.v4ExpertOwners = map[compute.Backend]*v4ExpertOwner{}
+	}
+	o := m.v4ExpertOwners[be]
+	if o == nil {
+		o = &v4ExpertOwner{m: m, be: be}
+		m.v4ExpertOwners[be] = o
+	}
+	return o
+}
+
+var v4ExpertOwnerInitMu sync.Mutex
+
+// freeV4ExpertOwners frees every (model, backend) V4 runtime owner exactly once, at
+// model-weight teardown. It is the single owner-side free the issue's acceptance gate names.
+func (m *Model) freeV4ExpertOwners() {
+	if m == nil {
+		return
+	}
+	v4ExpertOwnerInitMu.Lock()
+	owners := m.v4ExpertOwners
+	m.v4ExpertOwners = nil
+	v4ExpertOwnerInitMu.Unlock()
+	for _, o := range owners {
+		_ = o.free()
+	}
 }
 
 func v4RuntimeLimits() (int64, int, error) {
@@ -104,12 +231,17 @@ func (s *Session) ensureV4LiveExpert() (v4LiveExpertRuntime, error) {
 	if s.v4Expert != nil {
 		return s.v4Expert, nil
 	}
-	v, err := newV4LiveExpert(s.M.sourceDir, s.M.Cfg, s.Backend)
+	// Attach to the (Model, Backend)-scoped owner rather than constructing a per-session
+	// runtime (fak#13479). The bytes and ring are model-constant; only session state stays
+	// per-session. The owner is freed once, by Model.CloseWeights.
+	owner := s.M.v4ExpertOwnerFor(s.Backend)
+	rt, err := owner.attach(s.M, s.Backend)
 	if err != nil {
 		return nil, err
 	}
-	s.v4Expert = v
-	return v, nil
+	s.v4Expert = rt
+	s.v4ExpertOwner = owner
+	return rt, nil
 }
 
 // applyV4ExpertHAL is the live HAL seam for the V4 routed FFN. It keeps the

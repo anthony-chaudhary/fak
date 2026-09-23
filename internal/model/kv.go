@@ -840,6 +840,10 @@ type Session struct {
 	// arithmetic change (TestDecodeStepAllocationStaysBounded guards the bound).
 	decodeScores []float32
 	v4Expert     v4LiveExpertRuntime
+	// v4ExpertOwner is the (Model, Backend)-scoped owner this session attached to for its V4
+	// routed-expert runtime (fak#13479). Session.Close DETACHES without freeing resident pages;
+	// Model.CloseWeights frees it once. nil for every non-V4 session.
+	v4ExpertOwner *v4ExpertOwner
 	// closeOnce covers backend resources and the model-weight reference. Legacy sessions also
 	// participate because retained no-copy Metal weights borrow model-owned backing.
 	closeOnce        sync.Once

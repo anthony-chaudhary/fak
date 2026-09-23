@@ -125,9 +125,16 @@ func (s *Session) Close() {
 			if kv, ok := s.halKV.(interface{ Free() }); ok {
 				kv.Free()
 			}
+			// The V4 routed-expert runtime is (model, backend)-scoped (fak#13479): this
+			// conversation ending must DETACH and leave every resident page for the sessions
+			// still using it. Freeing here would page out a peer's working set. The owner is
+			// freed once by Model.CloseWeights after the last detach.
 			if s.v4Expert != nil {
-				_ = s.v4Expert.Close()
 				s.v4Expert = nil
+			}
+			if s.v4ExpertOwner != nil {
+				s.v4ExpertOwner.detach()
+				s.v4ExpertOwner = nil
 			}
 			if r, ok := s.Backend.(interface{ Recycle() }); ok {
 				r.Recycle()

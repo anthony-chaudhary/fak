@@ -738,6 +738,10 @@ func (m *Model) finishWeightClose(s *weightCloserState) {
 		releaseModelQ4KHandles(m)
 		m.releaseMetalQ8Residency()
 		_ = m.FreeNUMAReplicas()
+		// The (model, backend)-scoped V4 routed-expert runtime owners are freed exactly once
+		// here, after the last session has detached (fak#13479). Sessions detach in Close and
+		// never free resident pages themselves.
+		m.freeV4ExpertOwners()
 		if s.c != nil {
 			s.err = s.c.Close()
 		}
