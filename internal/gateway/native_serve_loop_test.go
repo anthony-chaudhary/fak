@@ -523,6 +523,9 @@ func TestNativeServeGoTestCompilationContained(t *testing.T) {
 	abi.ResetForTest()
 	agent.Configure()
 	abi.RegisterRegionBackend(inlineBackend{})
+	// The fixture is a standalone module. Do not let an outer repository's
+	// workspace selection make its go test command reject the temporary root.
+	t.Setenv("GOWORK", "off")
 	root := t.TempDir()
 	write := func(name, body string) {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
