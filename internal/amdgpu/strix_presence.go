@@ -59,6 +59,12 @@ const (
 )
 
 var strixSSHHostnameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
+var strixSSHUserRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]*$`)
+
+const (
+	strixSSHUserEnv         = "FAK_STRIX_SSH_USER"
+	strixSSHIdentityFileEnv = "FAK_STRIX_SSH_IDENTITY_FILE"
+)
 
 var (
 	errStrixSSHRetryable         = errors.New("STRIX_SSH_REMOTE_UNAVAILABLE")
@@ -185,6 +191,44 @@ func strixSSHChildEnvironment(env []string) []string {
 	return clean
 }
 
+// strixSSHCredentials accepts only an explicit login and a local, regular key
+// file. SSH config remains disabled so credentials cannot change host trust.
+func strixSSHCredentials(env []string, lstat func(string) (os.FileInfo, error)) ([]string, error) {
+	values := make(map[string]string, 2)
+	for _, item := range env {
+		name, value, ok := strings.Cut(item, "=")
+		if !ok {
+			continue
+		}
+		for _, allowed := range []string{strixSSHUserEnv, strixSSHIdentityFileEnv} {
+			if strings.EqualFold(name, allowed) {
+				if name != allowed || value == "" || values[allowed] != "" {
+					return nil, strixTrustRefused("invalid ssh credential setting")
+				}
+				values[allowed] = value
+			}
+		}
+	}
+	args := make([]string, 0, 5)
+	if user := values[strixSSHUserEnv]; user != "" {
+		if len(user) > 64 || !strixSSHUserRE.MatchString(user) {
+			return nil, strixTrustRefused("invalid ssh user")
+		}
+		args = append(args, "-l", user)
+	}
+	if identity := values[strixSSHIdentityFileEnv]; identity != "" {
+		if !filepath.IsAbs(identity) || filepath.Clean(identity) != identity || strings.ContainsAny(identity, "\x00\r\n%") {
+			return nil, strixTrustRefused("invalid ssh identity file")
+		}
+		info, err := lstat(identity)
+		if err != nil || info == nil || !info.Mode().IsRegular() {
+			return nil, strixTrustRefused("invalid ssh identity file")
+		}
+		args = append(args, "-o", "IdentitiesOnly=yes", "-i", identity)
+	}
+	return args, nil
+}
+
 func newStrixSSHCommand(ctx context.Context, host string, connectTimeout time.Duration, command string, stdin []byte, deps strixSSHTransportDeps) (_ *strixSSHCommand, err error) {
 	if ctx == nil || deps.startBroker == nil || deps.lookPath == nil || deps.executable == nil || deps.lstat == nil || deps.sameFile == nil || deps.fileDigest == nil || deps.commandContext == nil || deps.combinedOutput == nil || deps.environ == nil {
 		return nil, strixTrustRefused("invalid ssh transport")
@@ -234,6 +278,10 @@ func newStrixSSHCommand(ctx context.Context, host string, connectTimeout time.Du
 	if seconds < 1 || connectTimeout != time.Duration(seconds)*time.Second {
 		return nil, strixTrustRefused("invalid ssh timeout")
 	}
+	credentialArgs, err := strixSSHCredentials(deps.environ(), deps.lstat)
+	if err != nil {
+		return nil, err
+	}
 	args := []string{
 		"-F", "none",
 		"-o", "BatchMode=yes",
@@ -245,8 +293,9 @@ func newStrixSSHCommand(ctx context.Context, host string, connectTimeout time.Du
 		"-o", "HostKeyAlias=" + StrixKnownHostsAlias,
 		"-o", "UpdateHostKeys=no",
 		"-o", "KnownHostsCommand=" + knownHostsCommand,
-		"--", host, command,
 	}
+	args = append(args, credentialArgs...)
+	args = append(args, "--", host, command)
 	cmd := deps.commandContext(ctx, sshPath, args...)
 	if cmd == nil {
 		return nil, strixTrustRefused("ssh command unavailable")

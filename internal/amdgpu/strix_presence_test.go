@@ -374,6 +374,72 @@ func TestStrixSSHTrustConstructor(t *testing.T) {
 	})
 }
 
+func TestStrixSSHExplicitCredentials(t *testing.T) {
+	fixture := newStrixSSHTransportFixture(t)
+	identity := filepath.Join(t.TempDir(), "private identity")
+	if err := os.WriteFile(identity, []byte("test-only identity"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deps := fixture.deps()
+	deps.environ = func() []string {
+		return []string{
+			strixSSHUserEnv + "=fak",
+			strixSSHIdentityFileEnv + "=" + identity,
+			"PROCESS_SECRET=do-not-forward",
+		}
+	}
+	invocation, err := newStrixSSHCommand(context.Background(), "192.168.1.208", 2*time.Second, "true", nil, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := invocation.combinedOutput(); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.commands) != 1 {
+		t.Fatalf("SSH commands = %d, want one", len(fixture.commands))
+	}
+	cmd := fixture.commands[0]
+	args := strings.Join(cmd.Args, "\x00")
+	for _, required := range []string{"-F\x00none", "StrictHostKeyChecking=yes", "KnownHostsCommand=", "-l\x00fak", "IdentitiesOnly=yes", "-i\x00" + identity} {
+		if !strings.Contains(args, required) {
+			t.Fatalf("SSH argv missing %q: %#v", required, cmd.Args)
+		}
+	}
+	if got := cmd.Args[len(cmd.Args)-2]; got != "192.168.1.208" {
+		t.Fatalf("SSH destination = %q", got)
+	}
+	if strings.Contains(strings.Join(cmd.Env, "\x00"), "PROCESS_SECRET") || strings.Contains(strings.Join(cmd.Env, "\x00"), strixSSHIdentityFileEnv) {
+		t.Fatalf("SSH child environment leaked credentials: %#v", cmd.Env)
+	}
+
+	for _, tc := range []struct {
+		name string
+		env  []string
+	}{
+		{"injected user", []string{strixSSHUserEnv + "=-oProxyCommand=bad"}},
+		{"relative identity", []string{strixSSHIdentityFileEnv + "=relative-key"}},
+		{"directory identity", []string{strixSSHIdentityFileEnv + "=" + t.TempDir()}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newStrixSSHTransportFixture(t)
+			deps := fixture.deps()
+			deps.environ = func() []string { return tc.env }
+			_, err := newStrixSSHCommand(context.Background(), "strix1", 2*time.Second, "true", nil, deps)
+			if !errors.Is(err, ErrStrixHostTrustRefused) {
+				t.Fatalf("invalid credentials: %v, want trust refusal", err)
+			}
+			if fixture.processStarts != 0 || len(fixture.commands) != 0 {
+				t.Fatalf("invalid credentials constructed SSH process: %d/%d", fixture.processStarts, len(fixture.commands))
+			}
+			for _, item := range tc.env {
+				if _, value, ok := strings.Cut(item, "="); ok && value != "" && strings.Contains(err.Error(), value) {
+					t.Fatalf("error leaked credential value: %v", err)
+				}
+			}
+		})
+	}
+}
+
 type strixSSHTestBroker struct {
 	command      string
 	commandErr   error
