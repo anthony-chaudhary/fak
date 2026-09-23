@@ -103,9 +103,13 @@ func ReconcileRestart(snapshot Snapshot, liveness ProcessLivenessChecker, opts R
 		attempts := attemptsByIntent[intent.ID]
 
 		var activeAttempts []*Attempt
+		var launchingAttempt *Attempt
 		for _, att := range attempts {
-			if att.State == AttemptReserved || att.State == AttemptRunning {
+			if att.State == AttemptReserved || att.State == AttemptLaunching || att.State == AttemptRunning {
 				activeAttempts = append(activeAttempts, att)
+			}
+			if att.State == AttemptLaunching {
+				launchingAttempt = att
 			}
 		}
 
@@ -123,6 +127,25 @@ func ReconcileRestart(snapshot Snapshot, liveness ProcessLivenessChecker, opts R
 			pid = latestActive.PID
 		} else if intent.PID > 0 {
 			pid = intent.PID
+		}
+
+		// A launching attempt is deliberately ambiguous after controller restart.
+		// The wrapper may exist before registration is durably observed, and a PID
+		// or elapsed launch deadline alone cannot prove that it never started or is
+		// safe to replace. Preserve the complete launch identity for explicit
+		// reconciliation and refuse both adoption and replacement here.
+		if launchingAttempt != nil {
+			launchPID := pid
+			if launchingAttempt.PID > 0 {
+				launchPID = launchingAttempt.PID
+			}
+			rec.Held = append(rec.Held, AttemptDisposition{
+				IntentID: intent.ID,
+				Action:   AttemptActionHold,
+				PID:      launchPID,
+				Reason:   "launch outcome ambiguous",
+			})
+			continue
 		}
 
 		isExpired := false
