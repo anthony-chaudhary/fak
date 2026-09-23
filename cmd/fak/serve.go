@@ -253,17 +253,17 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	fs.Var(&sf.replicaBaseURLs, "replica-base-url", "additional upstream provider base URL for a static round-robin replica fleet; repeat for N replicas. If --base-url is set, it is replica 1. Each replica's identity defaults to a stable endpoint-derived id (replica-<digest>) so the same upstream keeps its metric/residency labels regardless of flag order or a dropped peer; pass name=URL to pin an operator-chosen id.")
 	sf.model = fs.String("model", "mock", "model id (advertised by /v1/models; used for the upstream call)")
 	sf.mock = fs.Bool("mock", false, "run with deterministic offline mock planner (scripted responses, no model execution)")
-	sf.opencode = fs.Bool("opencode", false, "one-touch OpenCode setup: write or update opencode.json in the current workspace with this server's provider config")
+	sf.opencode = fs.Bool("opencode", false, "serve an OpenCode-compatible endpoint without changing persistent project configuration")
 	sf.opencodeConfig = fs.Bool("opencode-config", false, "print opencode.json provider configuration for this server and exit without binding a listener")
 	sf.writeOpencodeConfig = fs.Bool("write-opencode-config", false, "write or update opencode.json in the current workspace with this server's provider config and exit without binding a listener")
 	sf.pi = fs.Bool("pi", false, "serve a Pi-compatible endpoint without changing Pi's persistent configuration")
 	sf.piConfig = fs.Bool("pi-config", false, "print Pi models.json provider configuration for this server and exit without binding a listener")
 	sf.writePiConfig = fs.Bool("write-pi-config", false, "write or update ~/.pi/agent/models.json with this server's provider config and exit without binding a listener")
 	sf.piConfigPath = fs.String("pi-config-path", "", "custom destination path or directory for Pi models.json (default: ~/.pi/agent/models.json)")
-	sf.claude = fs.Bool("claude", false, "one-touch Claude Code setup: write or update .claude/settings.json in the current workspace with this server's backend environment")
+	sf.claude = fs.Bool("claude", false, "serve a Claude Code-compatible endpoint without changing persistent project configuration")
 	sf.claudeConfig = fs.Bool("claude-config", false, "print .claude/settings.json configuration for this server and exit without binding a listener")
 	sf.writeClaudeConfig = fs.Bool("write-claude-config", false, "write or update .claude/settings.json in the current workspace with this server's backend environment and exit without binding a listener")
-	sf.codex = fs.Bool("codex", false, "one-touch Codex setup: write or update config.toml with this server's provider config")
+	sf.codex = fs.Bool("codex", false, "serve a Codex-compatible endpoint without changing persistent Codex configuration")
 	sf.codexConfig = fs.Bool("codex-config", false, "print Codex config.toml configuration for this server and exit without binding a listener")
 	sf.writeCodexConfig = fs.Bool("write-codex-config", false, "write or update config.toml with this server's provider config and exit without binding a listener")
 	sf.codexConfigPath = fs.String("codex-config-path", "", "custom destination path for Codex config.toml (default: $CODEX_HOME/config.toml or ~/.codex/config.toml)")
@@ -596,10 +596,8 @@ func cmdServe(argv []string) {
 		runServeOpenCodeConfig(sf, os.Stderr, true)
 		return
 	}
-	// --opencode: ensure opencode.json is configured before booting listener.
-	if *sf.opencode {
-		runServeOpenCodeConfig(sf, os.Stderr, true)
-	}
+	// --opencode is a compatibility marker for a normal server launch. Persistent
+	// project configuration remains an explicit --write-opencode-config operation.
 
 	// --pi-config: emit Pi models.json provider configuration and exit before load.
 	if sf.piConfig != nil && *sf.piConfig {
@@ -624,10 +622,8 @@ func cmdServe(argv []string) {
 		runServeCodexConfig(sf, os.Stderr, true)
 		return
 	}
-	// --codex: ensure Codex config.toml is configured before booting listener.
-	if sf.codex != nil && *sf.codex {
-		runServeCodexConfig(sf, os.Stderr, true)
-	}
+	// --codex is a compatibility marker for a normal server launch. Persistent
+	// Codex configuration remains an explicit --write-codex-config operation.
 
 	// Advisory (#3094): a serve launched from a non-fak cwd silently indexes whatever
 	// tree it was dropped into (dojo corpus, devindex, session state all resolve against
