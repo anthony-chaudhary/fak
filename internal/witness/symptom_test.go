@@ -622,6 +622,175 @@ func containsArg(argv []string, want string) bool {
 	return false
 }
 
+func TestSymptomSelectedChangedTestOverlayAndExactScope(t *testing.T) {
+	requireGoAndGit(t)
+	dir := newGoModuleRepo(t)
+	ctx := context.Background()
+
+	writeRepoFile(t, dir, "sign.go", "package m\n\nfunc Sign(n int) int {\n\tif n > 0 { return 1 }\n\treturn 0\n}\n")
+	gitIn(t, dir, "add", "sign.go")
+	gitIn(t, dir, "commit", "-q", "-m", "parent: negative sign bug")
+
+	writeRepoFile(t, dir, "sign.go", "package m\n\nfunc Sign(n int) int {\n\tif n > 0 { return 1 }\n\tif n < 0 { return -1 }\n\treturn 0\n}\n")
+	writeRepoFile(t, dir, "sign_test.go", `package m
+
+import "testing"
+
+func TestSelectedSignNegative(t *testing.T) {
+	if Sign(-3) != -1 { t.Fatalf("Sign(-3)=%d, want -1", Sign(-3)) }
+}
+
+func TestUnselectedAlwaysFails(t *testing.T) { t.Fatal("outside selected symptom scope") }
+`)
+	gitIn(t, dir, "add", "sign.go", "sign_test.go")
+	gitIn(t, dir, "commit", "-q", "-m", "fix(m): negative sign")
+
+	r := NewWithRunner(gitRunner, dir).WithSymptomTests([]string{"^TestSelectedSignNegative$"})
+	got, detail := r.ResolveSymptomWithDetail(ctx, "HEAD", true)
+	if got != abi.WitnessConfirmed || detail != "selected symptom test failed at parent and passed at candidate" {
+		t.Fatalf("selected overlay outcome=%v detail=%q, want confirmed exact-scope red/green", got, detail)
+	}
+	assertRepoClean(t, dir)
+}
+
+func TestSymptomSelectedTestsFailClosed(t *testing.T) {
+	requireGoAndGit(t)
+	tests := []struct {
+		name     string
+		selector string
+		testBody string
+		want     abi.WitnessOutcome
+		detail   string
+	}{
+		{
+			name: "invalid selector", selector: "[", want: abi.WitnessAbstain,
+			detail: "invalid symptom test selector",
+			testBody: `package m
+import "testing"
+func TestSignNegative(t *testing.T) { if Sign(-1) != -1 { t.Fatal(Sign(-1)) } }
+`,
+		},
+		{
+			name: "zero matches", selector: "^TestDoesNotExist$", want: abi.WitnessAbstain,
+			detail: "explicit symptom selector matched no changed top-level Test/Example",
+			testBody: `package m
+import "testing"
+func TestSignNegative(t *testing.T) { if Sign(-1) != -1 { t.Fatal(Sign(-1)) } }
+`,
+		},
+		{
+			name: "candidate failure", selector: "^TestSelected$", want: abi.WitnessRefuted,
+			detail: "candidate selected symptom test failed",
+			testBody: `package m
+import "testing"
+func TestSelected(t *testing.T) { t.Fatal("still broken at candidate") }
+`,
+		},
+		{
+			name: "parent pass", selector: "^TestSelected$", want: abi.WitnessRefuted,
+			detail: "selected symptom test passed at parent",
+			testBody: `package m
+import "testing"
+func TestSelected(t *testing.T) { if Sign(2) != 1 { t.Fatal(Sign(2)) } }
+`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := newGoModuleRepo(t)
+			writeRepoFile(t, dir, "sign.go", "package m\n\nfunc Sign(n int) int { if n > 0 { return 1 }; return 0 }\n")
+			gitIn(t, dir, "add", "sign.go")
+			gitIn(t, dir, "commit", "-q", "-m", "parent")
+			writeRepoFile(t, dir, "sign.go", "package m\n\nfunc Sign(n int) int { if n > 0 { return 1 }; if n < 0 { return -1 }; return 0 }\n")
+			writeRepoFile(t, dir, "sign_test.go", tc.testBody)
+			gitIn(t, dir, "add", "sign.go", "sign_test.go")
+			gitIn(t, dir, "commit", "-q", "-m", "fix(m): candidate")
+
+			got, detail := NewWithRunner(gitRunner, dir).
+				WithSymptomTests([]string{tc.selector}).
+				ResolveSymptomWithDetail(context.Background(), "HEAD", true)
+			if got != tc.want || detail != tc.detail {
+				t.Fatalf("outcome=%v detail=%q, want %v %q", got, detail, tc.want, tc.detail)
+			}
+			assertRepoClean(t, dir)
+		})
+	}
+}
+
+func TestSymptomTestsEmptyPreservesDefaultExecutionArgv(t *testing.T) {
+	var seen []string
+	run := func(_ context.Context, _ string, argv ...string) (string, int, error) {
+		seen = append([]string(nil), argv...)
+		return "", 0, nil
+	}
+	runSelected := NewWithRunners((&fakeGit{out: "x_test.go\n", code: 0}).run, run, "").WithSymptomTests(nil)
+	if runSelected.symptomTests != nil {
+		t.Fatalf("empty selector changed default state: %v", runSelected.symptomTests)
+	}
+	goTestPasses(context.Background(), run, "/tmp", []string{"./."}, nil)
+	want := []string{"go", "test", "-count=1", "./."}
+	if !reflect.DeepEqual(seen, want) {
+		t.Fatalf("default argv=%v, want legacy %v", seen, want)
+	}
+}
+
+func TestSymptomSelectedParentFailureMustNameTheSelectedTest(t *testing.T) {
+	requireGoAndGit(t)
+	dir := newGoModuleRepo(t)
+	writeRepoFile(t, dir, "value.go", "package m\n\nfunc Value() int { return 1 }\n")
+	gitIn(t, dir, "add", "value.go")
+	gitIn(t, dir, "commit", "-q", "-m", "parent")
+	writeRepoFile(t, dir, "value_test.go", `package m
+import "testing"
+func TestSelected(t *testing.T) { if Value() != 1 { t.Fatal(Value()) } }
+`)
+	gitIn(t, dir, "add", "value_test.go")
+	gitIn(t, dir, "commit", "-q", "-m", "test(m): add selected witness")
+
+	pass := "{\"Action\":\"run\",\"Package\":\"m\",\"Test\":\"TestSelected\"}\n" +
+		"{\"Action\":\"pass\",\"Package\":\"m\",\"Test\":\"TestSelected\"}\n"
+	tests := []struct {
+		name      string
+		parentOut string
+		want      abi.WitnessOutcome
+		detail    string
+	}{
+		{
+			name: "unrelated package failure after selected pass",
+			parentOut: pass +
+				"{\"Action\":\"fail\",\"Package\":\"m/unrelated\",\"Output\":\"compile failed\"}\n",
+			want: abi.WitnessAbstain, detail: "parent selected test outcome obscured by unrelated failure",
+		},
+		{
+			name:      "TestMain failure before selected run",
+			parentOut: "{\"Action\":\"fail\",\"Package\":\"m\",\"Output\":\"TestMain failed\"}\n",
+			want:      abi.WitnessRefuted, detail: "parent symptom selector matched no executed test",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			exec := func(_ context.Context, _ string, argv ...string) (string, int, error) {
+				calls++
+				if calls == 1 {
+					return pass, 0, nil
+				}
+				return tc.parentOut, 1, nil
+			}
+			got, detail := NewWithRunners(gitRunner, exec, dir).
+				WithSymptomTests([]string{"^TestSelected$"}).
+				ResolveSymptomWithDetail(context.Background(), "HEAD", true)
+			if got != tc.want || detail != tc.detail {
+				t.Fatalf("outcome=%v detail=%q, want %v %q", got, detail, tc.want, tc.detail)
+			}
+			if calls != 2 {
+				t.Fatalf("selected executor calls=%d, want candidate and parent", calls)
+			}
+		})
+	}
+	assertRepoClean(t, dir)
+}
+
 func requirePythonAndGit(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
