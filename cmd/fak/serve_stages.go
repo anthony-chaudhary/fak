@@ -1043,7 +1043,7 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 		defer rt.releaseServeAgentWarm()
 		rt.srv.ArmWarmupGate()
 		go func() {
-			_, _ = rt.srv.RunWarmup(ctx)
+			runServeBackendWarmup(ctx, rt.srv.RunWarmup, os.Stderr)
 			if agentWarmArmed {
 				runServeAgentWarmup(ctx, rt.srv)
 			}
@@ -1053,6 +1053,10 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 		must(err)
 	}
 	persistServeExitObservations("http")
+}
+
+func runServeBackendWarmup(ctx context.Context, run func(context.Context) (time.Duration, error), _ io.Writer) {
+	_, _ = run(ctx)
 }
 
 func resolveServeRequiredKey(envName, flagName, summary, want string) string {
