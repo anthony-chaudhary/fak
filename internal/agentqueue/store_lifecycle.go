@@ -116,6 +116,118 @@ func (s Store) RegisterWrapper(ctx context.Context, attemptID, nonce string, pid
 	return result, err
 }
 
+// MarkRunning durably promotes a registered wrapper and its intent to running.
+// Repeating the same identity after promotion is an idempotent readback.
+func (s Store) MarkRunning(ctx context.Context, attemptID, nonce string, pid int, startAt time.Time) (Attempt, error) {
+	startAt, err := validateLifecycleIdentity(attemptID, nonce, pid, startAt)
+	if err != nil {
+		return Attempt{}, err
+	}
+	var result Attempt
+	err = s.withLifecycleState(ctx, "mark running", func(snapshot *Snapshot) (bool, error) {
+		attempt, err := findLifecycleAttempt(snapshot, attemptID)
+		if err != nil {
+			return false, err
+		}
+		intent, err := findLifecycleIntent(snapshot, attempt.IntentID)
+		if err != nil {
+			return false, err
+		}
+		if attempt.Nonce != nonce || attempt.PID != pid || !attempt.StartedAt.Equal(startAt) {
+			return false, fmt.Errorf("%w: attempt %q has a different wrapper identity", ErrFenced, attemptID)
+		}
+		switch attempt.State {
+		case AttemptLaunching:
+			if intent.State != IntentQueued {
+				return false, fmt.Errorf("%w: intent %q is %q before running", ErrFenced, intent.ID, intent.State)
+			}
+			attempt.State = AttemptRunning
+			intent.State = IntentRunning
+			intent.PID = pid
+			result = *attempt
+			snapshot.Generation = nextLifecycleGeneration(snapshot.Generation, "running", result)
+			return true, nil
+		case AttemptRunning:
+			if intent.State != IntentRunning || intent.PID != pid {
+				return false, fmt.Errorf("%w: intent %q does not match running attempt", ErrFenced, intent.ID)
+			}
+			result = *attempt
+			return false, nil
+		default:
+			return false, fmt.Errorf("%w: attempt %q is %q", ErrFenced, attemptID, attempt.State)
+		}
+	})
+	return result, err
+}
+
+// CompleteAttempt durably records one running wrapper's terminal result on the
+// attempt and intent. It never releases external resource grants.
+func (s Store) CompleteAttempt(ctx context.Context, attemptID, nonce string, pid int, startAt time.Time, success bool) (Attempt, error) {
+	startAt, err := validateLifecycleIdentity(attemptID, nonce, pid, startAt)
+	if err != nil {
+		return Attempt{}, err
+	}
+	targetAttempt := AttemptFailed
+	targetIntent := IntentFailed
+	transition := "failed"
+	if success {
+		targetAttempt = AttemptSucceeded
+		targetIntent = IntentCompleted
+		transition = "succeeded"
+	}
+
+	var result Attempt
+	err = s.withLifecycleState(ctx, "complete attempt", func(snapshot *Snapshot) (bool, error) {
+		attempt, err := findLifecycleAttempt(snapshot, attemptID)
+		if err != nil {
+			return false, err
+		}
+		intent, err := findLifecycleIntent(snapshot, attempt.IntentID)
+		if err != nil {
+			return false, err
+		}
+		if attempt.Nonce != nonce || attempt.PID != pid || !attempt.StartedAt.Equal(startAt) {
+			return false, fmt.Errorf("%w: attempt %q has a different wrapper identity", ErrFenced, attemptID)
+		}
+		switch attempt.State {
+		case AttemptRunning:
+			if intent.State != IntentRunning || intent.PID != pid {
+				return false, fmt.Errorf("%w: intent %q does not match running attempt", ErrFenced, intent.ID)
+			}
+			attempt.State = targetAttempt
+			intent.State = targetIntent
+			result = *attempt
+			snapshot.Generation = nextLifecycleGeneration(snapshot.Generation, transition, result)
+			return true, nil
+		case targetAttempt:
+			if intent.State != targetIntent || intent.PID != pid {
+				return false, fmt.Errorf("%w: intent %q does not match terminal attempt", ErrFenced, intent.ID)
+			}
+			result = *attempt
+			return false, nil
+		default:
+			return false, fmt.Errorf("%w: attempt %q is %q, not %q", ErrFenced, attemptID, attempt.State, targetAttempt)
+		}
+	})
+	return result, err
+}
+
+func validateLifecycleIdentity(attemptID, nonce string, pid int, startAt time.Time) (time.Time, error) {
+	if attemptID == "" {
+		return time.Time{}, errors.New("agentqueue: attempt id is required")
+	}
+	if nonce == "" {
+		return time.Time{}, errors.New("agentqueue: launch nonce is required")
+	}
+	if pid <= 0 {
+		return time.Time{}, errors.New("agentqueue: wrapper PID must be positive")
+	}
+	if startAt.IsZero() {
+		return time.Time{}, errors.New("agentqueue: wrapper start time is required")
+	}
+	return startAt.UTC(), nil
+}
+
 func (s Store) withLifecycleState(ctx context.Context, operation string, mutate func(*Snapshot) (bool, error)) error {
 	if s.Path == "" {
 		return errors.New("agentqueue: snapshot path is required")
@@ -168,6 +280,23 @@ func findLifecycleAttempt(snapshot *Snapshot, attemptID string) (*Attempt, error
 	}
 	if found == nil {
 		return nil, fmt.Errorf("%w: attempt %q is absent", ErrFenced, attemptID)
+	}
+	return found, nil
+}
+
+func findLifecycleIntent(snapshot *Snapshot, intentID string) (*Intent, error) {
+	var found *Intent
+	for i := range snapshot.Intents {
+		if snapshot.Intents[i].ID != intentID {
+			continue
+		}
+		if found != nil {
+			return nil, fmt.Errorf("%w: duplicate intent id %q", ErrFenced, intentID)
+		}
+		found = &snapshot.Intents[i]
+	}
+	if found == nil {
+		return nil, fmt.Errorf("%w: intent %q is absent", ErrFenced, intentID)
 	}
 	return found, nil
 }
