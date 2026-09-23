@@ -24,9 +24,9 @@ There are two useful fak entry points:
 | If you run... | Use this fak path | Why |
 |---|---|---|
 | Current Codex CLI or IDE extension | `fak serve --stdio` as an MCP server | Codex supports MCP, and fak exposes verdict tools without changing Codex's model wire. |
-| Codex Desktop App for Windows (UI/UX) | `fak codex mcp install` + capability floor | Connects fak as an immutable local MCP server in the desktop app's Settings -> MCP panel; lets you run `approval_policy = "never"` safely without modal prompt fatigue or destructive execution risk. |
-| Codex CLI with an OpenAI API key and you want fak in front of the model wire | `fak codex -- <codex args...>` | One command starts `fak manage`, launches Codex, and injects per-run Codex `-c model_provider=fak` overrides for the Responses wire. |
-| Codex CLI on Mac against local `fak serve` ("raw", without guard) | `fak codex --raw` | First-class raw Codex harness against native Apple Silicon Metal `fak serve` backend with automated `-c` provider injection. |
+| Codex Desktop App for Windows (UI/UX) | `fak codex mcp install` + capability floor | Connects fak as an immutable local MCP server in the desktop app's Settings -> MCP panel. Fak tools are available for explicit calls; Codex's own shell calls are not automatically mediated. |
+| Codex CLI when you want a guarded launch | `fak codex --guard -- <codex args...>` | Starts the Fak guard and launches Codex through the guarded route. Check its dry-run command before relying on that boundary. |
+| Codex CLI on Mac against local `fak serve` (raw, without guard) | `fak codex` (or `fak codex --raw`) | The default launcher uses the raw local serving route and Codex's native approvals and sandbox. |
 | OpenAI SDKs, OpenAI Agents SDK, LangChain, LlamaIndex, or any Chat Completions client | `fak serve` as an OpenAI-compatible gateway | The client already calls `/v1/chat/completions`, so you repoint its base URL to fak. Endpoint-by-endpoint compatibility and current limits: [openai.md](openai.md). |
 
 Honest wire boundary: current Codex model-provider docs are Responses-oriented. fak can
@@ -42,9 +42,9 @@ OpenAI-compatible SDKs and Chat Completions agents, use the base-URL proxy path 
 ## Why this matters to Codex
 
 Codex reads `AGENTS.md` before it works in this repo. The repo-level rules already tell
-it the build, test, commit, and guardrail contract. fak adds a second layer: the kernel can
-adjudicate proposed tool calls and tool results with a default-deny floor that a prompt
-cannot talk around.
+it the build, test, commit, and guardrail contract. Fak can adjudicate proposed tool
+calls and results when they cross its MCP or guarded model-wire boundary. The
+verdict also depends on the loaded policy; the example dev policy is `default_open`.
 
 Use the right path for the job:
 
@@ -123,14 +123,14 @@ For Codex CLI sessions where you have an `OPENAI_API_KEY` available and want fak
 mediate Codex's model wire directly, use the launcher:
 
 ```bash
-./fak codex --dry-run --split off -- exec --json "List active MCP servers only."
-./fak codex -- exec --json "Summarize AGENTS.md."
+./fak codex --guard --dry-run --split off -- exec --json "List active MCP servers only."
+./fak codex --guard -- exec --json "Summarize AGENTS.md."
 ```
 
 The dry-run should print a command shaped like:
 
 ```text
-fak manage --split off ... -- codex --dangerously-bypass-approvals-and-sandbox exec --json ...
+fak guard --split off ... -- codex --dangerously-bypass-approvals-and-sandbox exec --json ...
 ```
 
 ### UserPromptSubmit modes
@@ -200,7 +200,7 @@ CODEX_HOME="$HOME/.codex-codexFOUR" fak guard -- codex
 
 The expected status after successful ChatGPT authentication is `Logged in using ChatGPT`.
 When hardened mode blocks a direct session because fak cannot enforce its next model
-call, relaunch with `fak codex` (preferred) or `fak manage -- codex`.
+call, relaunch with `fak codex --guard` (preferred) or `fak manage -- codex`.
 
 For a deliberately direct-provider continuation while hardened mode remains selected,
 pass `--allow-direct` when invoking the hook, or set
@@ -279,7 +279,7 @@ $env:CODEX_HOME = 'C:\Users\USER\.codex-codexFOUR'
 This direct launch is only an authentication-bootstrap escape hatch. Return ordinary and
 model-bearing sessions to `fak guard` as soon as status reports `Logged in using ChatGPT`.
 The normal response to a raw-session continuation block is to exit and restart with
-`fak codex`. For one deliberately unguarded repair session, use the scoped break-glass
+`fak codex --guard`. For one deliberately unguarded repair session, use the scoped break-glass
 launcher. It starts raw Codex by default, prints an unavoidable warning, removes any inherited
 loopback/guard state, and restores the normal default as soon as that child exits:
 
@@ -321,8 +321,8 @@ and prove normal service:
 
 ```powershell
 Remove-Item Env:FAK_CODEX_RAW_RECOVERY -ErrorAction SilentlyContinue
-fak codex --dry-run
-fak codex
+fak codex --guard --dry-run
+fak codex --guard
 ```
 
 Do not persist the variable in a shell profile, user environment, worker manifest, or CI
@@ -754,14 +754,19 @@ In the Codex Desktop App:
 2. Verify `fak` appears as a connected server exposing `fak_adjudicate` and `fak_syscall`.
 3. Restart or reload Codex Desktop to ensure the background app-server binds the updated entry.
 
-### 2. Solving Approval Prompt Fatigue with an External Capability Floor
+### 2. Keep the MCP and Codex approval boundaries distinct
 
 Codex Desktop introduces granular approval modes (`approval_policy = "always" | "on-request" | "never"`) and sandbox profiles (`sandbox_mode = ":workspace" | "danger-full-access"`).
 
-* **The Problem:** Operators face modal approval fatigue on every routine command, or select `approval_policy = "never"` / `danger-full-access` which exposes the system to catastrophic deletion (`rm -rf`, `Remove-Item -Force`) and repo clobbering (`git push`).
-* **The `fak` Solution:** Keep `approval_policy = "never"` in Codex Desktop while letting `fak` enforce the default-deny capability floor:
-  - Benign dev actions (`go test`, `git status`, file reads) proceed autonomously with zero modal dialogs.
-  - Destructive commands (`rm -rf`, unconstrained pipes) and self-modifications (`.git/`, kernel files) are structurally blocked (`POLICY_BLOCK`, `SELF_MODIFY`).
+The MCP install exposes Fak tools, including `fak_adjudicate` for a verdict
+before Codex executes a proposed call, `fak_syscall` for registered calls Fak
+executes, and `fak_admit` for screening results Codex obtained elsewhere.
+Codex's native shell calls do not automatically cross this MCP boundary.
+Keep Codex approvals and sandbox settings appropriate to those calls. For a
+separate guarded Codex CLI process, use the explicit `fak codex --guard` route
+and verify its dry-run launch shape. A policy's actual posture and deny rules
+must be checked with `fak policy --check` and `fak preflight` before claiming a
+specific command is blocked.
 
 ### 3. Mitigating Windows Desktop Quirks & Upstream Issues
 
@@ -777,15 +782,15 @@ For a deep empirical study of the local Windows install, architecture, and issue
 
 ## What the kernel blocks for coding workflows
 
-`examples/dev-agent-policy.json` is the coding-agent floor. It allows ordinary
-read/search/list flows plus build and test commands. It blocks publish and
-self-modification surfaces.
+`examples/dev-agent-policy.json` is an example coding-agent floor. It uses
+`default_open`, allows common read/build/test names, and explicitly denies
+some publish operations. The table applies to calls that actually reach Fak.
 
 | Attempt | Kernel result |
 |---|---|
 | Read/search/list calls | Allowed when the tool is on the allow-list or prefix allow-list. |
 | `git_diff`, `git_log`, `git_status`, `go_build`, `go_test`, `run_tests` | Allowed by the dev-agent policy. |
-| `git_add`, `git_commit` | Denied by the default-deny floor unless routed through a narrower release/ship gate. |
+| `git_add`, `git_commit`, and other unlisted names | Allowed by this `default_open` example unless another policy rung denies the particular arguments. |
 | `git_push`, `git_merge`, `git_tag` | Denied with `POLICY_BLOCK`. |
 | Writes to `.git/`, `internal/kernel/`, `internal/policy/`, `VERSION`, or `dos.toml` | Denied by the self-modify floor. |
 | Secret-shaped fields such as `api_key`, `token`, or `authorization` | Redacted or quarantined by result-side guards. |
@@ -825,7 +830,7 @@ Clients still call fak's supported inbound routes. That means:
 | `codex exec --json` has no fak events | The MCP server is not enabled for that Codex run, or the task did not call fak. |
 | OpenAI SDK gets 404 | OpenAI-compatible clients need the `/v1` suffix: `http://127.0.0.1:8080/v1`. |
 | Anthropic SDK gets 404 | Anthropic clients need the origin without `/v1`: `http://127.0.0.1:8080`. |
-| Everything is denied | Load a policy with `--policy`; with no policy the floor fails closed. |
+| An unexpected call is allowed | Inspect `fak policy --check <policy>` and run `fak preflight` for that exact tool and arguments; the example policy is `default_open`. |
 | You tried to point default Codex model traffic at fak | Use MCP instead, or use a client/framework path that explicitly speaks Chat Completions to fak. |
 
 ## Source alignment
