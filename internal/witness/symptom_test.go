@@ -545,18 +545,19 @@ func TestSymptomExplicitTagsReachExecutor(t *testing.T) {
 	}
 	// The composition claim: every recorded `go test` argv carries the explicit tag. The
 	// test file is untagged, so this tag could only have travelled from WithSymptomTags.
-	want := []string{"go", "test", "-count=1", "./.", "-tags", "vulkan"}
+	wantLegacy := []string{"go", "test", "-count=1", "./.", "-tags", "vulkan"}
+	wantSelected := append(append([]string(nil), wantLegacy...), "-run", "^TestSignNegative$")
 	found := false
 	for _, argv := range seen {
 		if !containsArg(argv, "-tags") || !containsArg(argv, "vulkan") {
 			t.Fatalf("recorded go test argv = %v, want an explicit `-tags vulkan` (the #13243 seam dropped)", argv)
 		}
-		if reflect.DeepEqual(argv, want) {
+		if reflect.DeepEqual(argv, wantLegacy) || reflect.DeepEqual(argv, wantSelected) {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("no recorded argv equalled %v; recorded: %v", want, seen)
+		t.Fatalf("no recorded argv equalled tagged legacy %v or exact selection %v; recorded: %v", wantLegacy, wantSelected, seen)
 	}
 	assertRepoClean(t, dir)
 }
