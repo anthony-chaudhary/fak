@@ -7,6 +7,72 @@ import (
 	"time"
 )
 
+// TestSweepWMMABFTilesReportsModelOnlyWithoutDeviceKernel witnesses the sweep
+// provenance branch: with no device kernel the sweep MUST report TFLOPs == 0 and
+// label the row model-only, and with a real device kernel fn it MUST report a
+// non-zero measured TFLOPs labeled measured. This is the SW-side witness for the
+// "efficiency constants labeled model-only / measured" acceptance criterion.
+func TestSweepWMMABFTilesReportsModelOnlyWithoutDeviceKernel(t *testing.T) {
+	rows, err := SweepWMMABFTiles(32, 32, 32, WMMASweepOptions{Simulate: true})
+	if err != nil {
+		t.Fatalf("SweepWMMABFTiles(model-only): %v", err)
+	}
+	if len(rows) == 0 {
+		t.Fatalf("expected at least one sweep row")
+	}
+	for _, r := range rows {
+		if r.EfficiencyLabel != EfficiencyLabelModelOnly {
+			t.Errorf("%s: no device kernel must be labeled model-only, got %q", r.Primitive, r.EfficiencyLabel)
+		}
+		if r.MeasuredTFLOPs != 0 {
+			t.Errorf("%s: no device kernel must report 0 measured TFLOPs, got %v", r.Primitive, r.MeasuredTFLOPs)
+		}
+		if r.ExecutionClass != SweepExecutionClassDeviceMeasured && r.ExecutionClass == "" {
+			t.Errorf("%s: execution class must be named", r.Primitive)
+		}
+	}
+
+	// A real device kernel fn drives a measured, non-zero TFLOPs row.
+	dev := func(M, N, K, tm, tn, tk int) (time.Duration, error) {
+		return 2 * time.Millisecond, nil
+	}
+	rows, err = SweepWMMABFTiles(32, 32, 32, WMMASweepOptions{DeviceKernel: dev})
+	if err != nil {
+		t.Fatalf("SweepWMMABFTiles(device): %v", err)
+	}
+	for _, r := range rows {
+		if r.EfficiencyLabel != EfficiencyLabelMeasured {
+			t.Errorf("%s: device kernel must be labeled measured, got %q", r.Primitive, r.EfficiencyLabel)
+		}
+		if r.MeasuredTFLOPs <= 0 {
+			t.Errorf("%s: device kernel must report positive TFLOPs, got %v", r.Primitive, r.MeasuredTFLOPs)
+		}
+		if r.ExecutionClass != SweepExecutionClassDeviceMeasured {
+			t.Errorf("%s: device kernel must report measured execution class, got %q", r.Primitive, r.ExecutionClass)
+		}
+	}
+}
+
+// TestSweepWMMAFailsClosedWhenDeviceKernelAbsent witnesses the fail-closed
+// requirement for the sweep path: with no device kernel and Simulate unset, the
+// sweep still returns rows, but every row is model-only with zero measured
+// TFLOPs " it never silently substitutes a simulated throughput number.
+func TestSweepWMMAFailsClosedWhenDeviceKernelAbsent(t *testing.T) {
+	rows, err := SweepWMMABFTiles(32, 32, 32, WMMASweepOptions{})
+	if err != nil {
+		t.Fatalf("SweepWMMABFTiles(no device): %v", err)
+	}
+	if len(rows) != len(sweepGeometries()) {
+		t.Fatalf("expected %d rows, got %d", len(sweepGeometries()), len(rows))
+	}
+	for _, r := range rows {
+		if r.EfficiencyLabel != EfficiencyLabelModelOnly || r.MeasuredTFLOPs != 0 {
+			t.Errorf("%s: absent device kernel must fail closed to model-only/0, got label=%q tflops=%v",
+				r.Primitive, r.EfficiencyLabel, r.MeasuredTFLOPs)
+		}
+	}
+}
+
 // targetTFLOPs is the issue's named acceptance target for BF16 WMMA on gfx1151.
 // It may ONLY be claimed from an [HW-WITNESSED] (physical device) measurement.
 const targetTFLOPs = 47.52
