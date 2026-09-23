@@ -54,7 +54,10 @@ tools/grafana/down.sh      # stops only processes this stack owns (--purge drops
    unavailable does it use locally installed Homebrew Prometheus and Grafana. The
    Docker deployment grants anonymous users the `Viewer` role, leaves the login
    form available for existing administrators, and does not create an initial
-   administrator on a fresh volume. Gateway and inference API authentication are
+   administrator on a fresh volume. Dashboards default to the **light theme**
+   (`GF_USERS_DEFAULT_THEME=light`, the env alias of `[users] default_theme`),
+   because the fleet charts are read on white backgrounds; anonymous and logged-in
+   users may still switch per session. Gateway and inference API authentication are
    configured separately by `fak serve` and are unaffected.
 
 Before exposing a volume previously initialized with the old `admin` / `fleet`

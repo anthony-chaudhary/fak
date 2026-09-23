@@ -273,3 +273,23 @@ func TestFakOpsStatusesPopulationLabels(t *testing.T) {
 		}
 	})
 }
+
+// TestDockerComposeDefaultsLightTheme pins the light-theme default for every
+// Grafana surface provisioned by this stack. Read-heavy fleet dashboards are
+// meant to be legible on white backgrounds; the theme is an instance default
+// (GF_USERS_DEFAULT_THEME, the env alias of [users] default_theme), not a
+// dashboard-JSON field, so the compose file is where it must be asserted.
+// Anonymous Viewers inherit it too — verified against grafana/grafana:11.5.2.
+func TestDockerComposeDefaultsLightTheme(t *testing.T) {
+	raw, err := os.ReadFile("docker-compose.yml")
+	if err != nil {
+		t.Fatalf("read docker-compose.yml: %v", err)
+	}
+	compose := string(raw)
+	if !strings.Contains(compose, "GF_USERS_DEFAULT_THEME=light") {
+		t.Error("docker-compose.yml must set GF_USERS_DEFAULT_THEME=light so dashboards default to the light theme")
+	}
+	if strings.Contains(compose, "GF_USERS_DEFAULT_THEME=dark") {
+		t.Error("docker-compose.yml must not force the dark theme")
+	}
+}
