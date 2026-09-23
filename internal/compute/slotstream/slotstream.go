@@ -15,6 +15,14 @@ const (
 
 	// DefaultVRAMBudgetBytes is the 24 GB consumer GPU VRAM cap.
 	DefaultVRAMBudgetBytes int64 = 24 * 1024 * 1024 * 1024
+
+	// DefaultGLM5NextSlotsPerLayer is the preallocated resident expert-slot
+	// count per GLM5Next sparse MoE layer. 288 routed experts are served from
+	// 54 hot slots, with cold tail experts streamed in on demand.
+	DefaultGLM5NextSlotsPerLayer = 54
+
+	// GLM5NextNumExperts is the routed-expert topology size for GLM-5.3-Flash.
+	GLM5NextNumExperts = 288
 )
 
 // ExpertSlot represents a preallocated device buffer slot holding one expert's parameters.

@@ -15462,6 +15462,16 @@
           "category": "incidental",
           "reason": "Constructor for internal Kimi K3 paged attention allocator",
           "token": "NewPagePool"
+        },
+        {
+          "category": "incidental",
+          "reason": "Exported",
+          "token": "MultiTensorSlotPool"
+        },
+        {
+          "category": "incidental",
+          "reason": "Constructor",
+          "token": "NewMultiTensorSlotPool"
         }
       ],
       "exclude": [
@@ -15471,6 +15481,8 @@
       "ignore": [
         "ErrNotPoolable",
         "FLEET_WORKER_WORKTREE_POOL",
+        "MultiTensorSlotPool",
+        "NewMultiTensorSlotPool",
         "NewPagePool",
         "NewSeatPool",
         "PagePool",
