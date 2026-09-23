@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -15,14 +16,37 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agentqueue"
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
+const (
+	agentQueueStatePathEnv = "FAK_AGENTQUEUE_STATE_PATH"
+	agentQueueAttemptIDEnv = "FAK_AGENTQUEUE_ATTEMPT_ID"
+	agentQueueNonceEnv     = "FAK_AGENTQUEUE_NONCE"
+)
+
+// Environment keys are case-insensitive on Windows. Remove every spelling
+// before passing queue identity across a process boundary, or an inherited
+// mixed-case entry can override the newly minted fenced identity.
+func stripAgentQueueEnv(env map[string]string) {
+	for key := range env {
+		if strings.EqualFold(key, agentQueueStatePathEnv) ||
+			strings.EqualFold(key, agentQueueAttemptIDEnv) ||
+			strings.EqualFold(key, agentQueueNonceEnv) {
+			delete(env, key)
+		}
+	}
+}
+
 func dispatchWorkerEnv(backend, lane, root, runsDir string, account dispatchtick.Account, goal, goalProfile string) (map[string]string, error) {
 	env := envMap(os.Environ())
+	// Queue launch identity is explicit per spawn. Never inherit a stale identity
+	// from the dispatcher's ambient environment into an unrelated worker.
+	stripAgentQueueEnv(env)
 	env["DISPATCH_WORKSPACE"] = root
 	env["DISPATCH_LANE"] = lane
 	env["DISPATCH_BACKEND"] = backend
@@ -356,9 +380,52 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 	// resource ceiling. Launch the guard as an ordinary hidden-background process
 	// here, matching the Unix detached lifetime instead of nesting it under the
 	// launcher's kill-on-close job.
+	queueStatePath := strings.TrimSpace(env[agentQueueStatePathEnv])
+	queueAttemptID := strings.TrimSpace(env[agentQueueAttemptIDEnv])
+	stripAgentQueueEnv(env)
+	if (queueStatePath == "") != (queueAttemptID == "") {
+		_ = fh.Close()
+		return dispatchSpawnResult{}, errors.New("agentqueue launch identity must include state path and attempt id")
+	}
+	if queueStatePath != "" && !filepath.IsAbs(queueStatePath) {
+		_ = fh.Close()
+		return dispatchSpawnResult{}, errors.New("agentqueue state path must be absolute")
+	}
+	var queueNonce string
+	if queueStatePath != "" {
+		env[agentQueueStatePathEnv] = queueStatePath
+		env[agentQueueAttemptIDEnv] = queueAttemptID
+		nonceBytes := make([]byte, 16)
+		if _, err := rand.Read(nonceBytes); err != nil {
+			_ = fh.Close()
+			return dispatchSpawnResult{}, fmt.Errorf("mint agentqueue launch nonce: %w", err)
+		}
+		queueNonce = hex.EncodeToString(nonceBytes)
+		launchCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, started, beginErr := agentqueue.FileStore(queueStatePath).BeginLaunching(launchCtx, queueAttemptID, queueNonce, time.Now().UTC().Add(2*time.Minute))
+		cancel()
+		if beginErr != nil {
+			_ = fh.Close()
+			return dispatchSpawnResult{}, fmt.Errorf("begin agentqueue launch: %w", beginErr)
+		}
+		if !started {
+			_ = fh.Close()
+			return dispatchSpawnResult{}, fmt.Errorf("begin agentqueue launch: attempt %q was already launching", queueAttemptID)
+		}
+		env[agentQueueNonceEnv] = queueNonce
+	}
+	cmd.Env = envSliceFromMap(env)
 	err = cmd.Start()
 	if err != nil {
 		_ = fh.Close()
+		if queueStatePath != "" && cmd.Process == nil {
+			abortCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_, abortErr := agentqueue.FileStore(queueStatePath).AbortLaunching(abortCtx, queueAttemptID, queueNonce, 0, time.Time{})
+			cancel()
+			if abortErr != nil {
+				return dispatchSpawnResult{}, errors.Join(err, fmt.Errorf("abort agentqueue launch: %w", abortErr))
+			}
+		}
 		return dispatchSpawnResult{}, err
 	}
 	_ = fh.Close()

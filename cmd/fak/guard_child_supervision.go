@@ -341,6 +341,12 @@ func guardParkProbeStatus(rec goalpark.Record, now time.Time) string {
 }
 
 func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, codexSessionStatePath string, wireErrors *guardWireErrorGauge, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool, startupProgress *guardStartupProgress) {
+	queueLifecycle, queueErr := guardAgentQueueLifecycleFromEnv()
+	if queueErr != nil {
+		startupProgress.Abort()
+		finishGuardChildAndReport(queueErr, nil, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+		return
+	}
 	// The startup renderer created the card and queued its control replies. Bind its
 	// periodic status fold to the live gateway before the child starts; finalizeOutcome
 	// below stops the updater and replaces the root with the terminal state.
@@ -348,8 +354,9 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 	var err error
 	spawnMeta.PromptFuel, err = preparePromptFuel(command, os.Stdin, spawnMeta.AgentRunID)
 	if err != nil {
+		err = errors.Join(err, queueLifecycle.abortLaunching())
 		startupProgress.Abort()
-		finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+		finishGuardChildAndReport(err, nil, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 		return
 	}
 	spawnBroker := toolprocgate.NewSpawnBroker()
@@ -369,9 +376,10 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		startupProgress.Phase("broker/preparing child")
 		_, child, err := launchGuardChildWithBroker(command, injected, pinUpstream, spawnMeta, spawnBroker, rotation.launcher())
 		if err != nil {
+			err = errors.Join(err, queueLifecycle.abortLaunching())
 			startupProgress.Abort()
 			guardDumpStartupReportOnLaunchFail(os.Stderr, srv, dumpStartupOnLaunchFail)
-			finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			finishGuardChildAndReport(err, nil, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
 		childStderr := guardCaptureChildStderr(child, agentName)
@@ -384,9 +392,12 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		resourcePolicy := guardResourcePolicyConfigured()
 		job, releaseHostGrant, startErr := startGuardChildWithHostGrant(context.Background(), child, windowgate.ManagedJobConfig{MemoryLimitBytes: resourcePolicy.MaxTreeBytes})
 		if startErr != nil {
+			if child.Process == nil {
+				startErr = errors.Join(startErr, queueLifecycle.abortLaunching())
+			}
 			startupProgress.Abort()
 			terminalGuardChild(child, startErr, "launch_failed")
-			finishGuardChildAndReport(startErr, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			finishGuardChildAndReport(startErr, nil, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
 		terminalRestore.RepairAfterStart()
@@ -401,7 +412,15 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			} else {
 				err = errors.Join(err, waitErr, finishGuardChildHostGrant(job, releaseHostGrant))
 			}
-			finishGuardChildAndReport(err, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			finishGuardChildAndReport(err, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			return
+		}
+		if err := queueLifecycle.markRunning(); err != nil {
+			startupProgress.Abort()
+			_ = child.Process.Kill()
+			waitErr := child.Wait()
+			err = errors.Join(err, waitErr, finishGuardChildHostGrant(job, releaseHostGrant))
+			finishGuardChildAndReport(err, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
 		startupProgress.Started()
@@ -419,12 +438,12 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			if child.ProcessState == nil {
 				closeErr := job.Close()
 				lifecycle.finish(false)
-				finishGuardChildAndReport(errors.Join(runErr, closeErr), child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				finishGuardChildAndReport(errors.Join(runErr, closeErr), child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}
 			if cleanupErr := finishGuardChildHostGrant(job, releaseHostGrant); cleanupErr != nil {
 				lifecycle.finish(false)
-				finishGuardChildAndReport(errors.Join(runErr, cleanupErr), child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				finishGuardChildAndReport(errors.Join(runErr, cleanupErr), child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}
 			lifecycle.finish(false)
@@ -436,7 +455,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			if receiptErr != nil {
 				resourceErr = guardHandleResourceReceiptFailure(os.Stderr, rsiSession, guardTraceID, agentName, receiptErr)
 				fmt.Fprintf(os.Stderr, "fak guard: %v\n", resourceErr)
-				finishGuardChildAndReport(resourceErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				finishGuardChildAndReport(resourceErr, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}
 			verdict := resourceRetries.decide(event, agentName, sessionStartSHA())
@@ -446,7 +465,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 					guardRecordResourceReattachUnavailable(auditJournal, agentName, guardTraceID)
 					fmt.Fprintln(os.Stderr, guardResourceReattachUnavailableStatus(agentName, guardTraceID, reattachErr))
 					resourceErr = fmt.Errorf("%s: %w", guardResourceReattachUnavailable, resourceErr)
-					finishGuardChildAndReport(resourceErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+					finishGuardChildAndReport(resourceErr, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 					return
 				}
 				guardReportResourceRestart(os.Stderr, agentName, verdict, nextCommand)
@@ -464,17 +483,18 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 				fmt.Fprintln(os.Stderr, guardResourceReattachUnavailableStatus(agentName, guardTraceID, nil))
 				resourceErr = fmt.Errorf("%s: %w", guardResourceReattachUnavailable, resourceErr)
 			}
-			finishGuardChildAndReport(resourceErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			finishGuardChildAndReport(resourceErr, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
 		close(resourceStop)
 		lifecycle.finish(runErr == nil)
 		if cleanupErr := finishGuardChildHostGrant(job, releaseHostGrant); cleanupErr != nil {
-			finishGuardChildAndReport(errors.Join(runErr, cleanupErr), child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			finishGuardChildAndReport(errors.Join(runErr, cleanupErr), child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
 		terminalGuardChild(child, runErr, "")
 		if rec, parked := guardGoalParked(); parked {
+			queueLifecycle.hold(guardAgentQueueHoldParked)
 			fmt.Fprintf(os.Stderr, "fak guard: goal parked outside active context budget until %d; reason=%s; %s; next=%s\n", rec.ParkedUntil, rec.Reason, guardParkProbeStatus(rec, time.Now()), rec.NextAction)
 			// #5862: a bare `break` here left the loop with NO teardown at all — no
 			// witness row, no journal flush/Close, no refusal carry-forward sidecar, and
@@ -485,12 +505,12 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			// sibling drops it — a park is a scheduled resume, not a session failure, so
 			// the process keeps the exit-0 semantics the `break` already had.
 			appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted, spawnMeta.PromptFuel)
-			finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			finishGuardChildAndReport(nil, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
 		if guardRefuseCodexCLIUsage(runErr, child.ProcessState, agentName, guardTraceID, childStderr.String(), childStarted, auditJournal, os.Stderr) ||
 			guardRefuseCodexInvalidJSON(runErr, child.ProcessState, agentName, guardTraceID, childStdout.String(), childStarted, auditJournal, os.Stderr) {
-			finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			finishGuardChildAndReport(runErr, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
 		if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
@@ -518,7 +538,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			if reap {
 				guardRecordCrashRestartGiveUp(auditJournal, agentName, guardTraceID)
 				fmt.Fprintln(os.Stderr, guardCrashRestartGiveUpStatus(crashNoProgressLimit, guardTraceID))
-				finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				finishGuardChildAndReport(runErr, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}
 			guardReportCrashRestart(os.Stderr, agentName, class, code, crashRestarts, crashLimit, command)
@@ -531,7 +551,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			guardDumpStartupReportOnLaunchFail(os.Stderr, srv, dumpStartupOnLaunchFail)
 		}
 		appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, runErr, child.ProcessState, childStarted, spawnMeta.PromptFuel)
-		finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+		finishGuardChildAndReport(runErr, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 		return
 	}
 }
@@ -564,14 +584,21 @@ func guardTimeBudgetExhausted(sessions *session.Table, traceID string, now time.
 }
 
 func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, codexSessionStatePath string, restarter *guardBudgetRestarter, deadlineCfg guardDeadlineConfig, wireErrors *guardWireErrorGauge, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool, startupProgress *guardStartupProgress) {
+	queueLifecycle, queueErr := guardAgentQueueLifecycleFromEnv()
+	if queueErr != nil {
+		startupProgress.Abort()
+		finishGuardChildAndReport(queueErr, nil, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+		return
+	}
 	// Same live card as the unsupervised path; child restarts stay one session and one
 	// Slack thread, so the updater spans the whole supervision loop and finalizes once.
 	guardSessionCardHandle.startUpdater(srv)
 	var err error
 	spawnMeta.PromptFuel, err = preparePromptFuel(command, os.Stdin, spawnMeta.AgentRunID)
 	if err != nil {
+		err = errors.Join(err, queueLifecycle.abortLaunching())
 		startupProgress.Abort()
-		finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+		finishGuardChildAndReport(err, nil, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 		return
 	}
 	spawnBroker := toolprocgate.NewSpawnBroker()
@@ -609,24 +636,27 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 	defer stopLoginHijackWatch()
 	relaunchFiles, err := captureGuardRelaunchFiles(command)
 	if err != nil {
+		err = errors.Join(err, queueLifecycle.abortLaunching())
 		startupProgress.Abort()
-		finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+		finishGuardChildAndReport(err, nil, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 		return
 	}
 	var softDeadlineWarned bool
 	for {
 		if err := relaunchFiles.ensure(); err != nil {
+			err = errors.Join(err, queueLifecycle.abortLaunching())
 			startupProgress.Abort()
-			finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			finishGuardChildAndReport(err, nil, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
 		startupProgress.Phase("broker/preparing child")
 		_, child, err := launchGuardChildWithBroker(command, injected, pinUpstream, spawnMeta, spawnBroker, nil, extraEnv...)
 		wait := make(chan error, 1)
 		if err != nil {
+			err = errors.Join(err, queueLifecycle.abortLaunching())
 			startupProgress.Abort()
 			guardDumpStartupReportOnLaunchFail(os.Stderr, srv, dumpStartupOnLaunchFail)
-			finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			finishGuardChildAndReport(err, nil, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
 		childStderr := guardCaptureChildStderr(child, agentName)
@@ -639,11 +669,14 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		resourcePolicy := guardResourcePolicyConfigured()
 		job, releaseHostGrant, err := startGuardChildWithHostGrant(context.Background(), child, windowgate.ManagedJobConfig{MemoryLimitBytes: resourcePolicy.MaxTreeBytes})
 		if err != nil {
+			if child.Process == nil {
+				err = errors.Join(err, queueLifecycle.abortLaunching())
+			}
 			startupProgress.Abort()
 			// Start/containment failing IS a launch failure: either the child never ran, or
 			// StartInNewJob reaped it because the teardown invariant could not be armed.
 			guardDumpStartupReportOnLaunchFail(os.Stderr, srv, dumpStartupOnLaunchFail)
-			finishGuardChildAndReport(err, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			finishGuardChildAndReport(err, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
 		terminalRestore.RepairAfterStart()
@@ -658,7 +691,15 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			} else {
 				err = errors.Join(err, waitErr, finishGuardChildHostGrant(job, releaseHostGrant))
 			}
-			finishGuardChildAndReport(err, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			finishGuardChildAndReport(err, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			return
+		}
+		if err := queueLifecycle.markRunning(); err != nil {
+			startupProgress.Abort()
+			_ = child.Process.Kill()
+			waitErr := child.Wait()
+			err = errors.Join(err, waitErr, finishGuardChildHostGrant(job, releaseHostGrant))
+			finishGuardChildAndReport(err, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
 		startupProgress.Started()
@@ -686,7 +727,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		case guardChildResourceLimit:
 			markGuardChildTerminalIntent(child, "resource_limit")
 			if stopErr := stopGuardChild(child, wait, 0); isGuardHostGrantCleanupError(stopErr) || child.ProcessState == nil {
-				finishGuardChildAndReport(stopErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				finishGuardChildAndReport(stopErr, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}
 			receiptErr := guardWriteResourceReceipt(event, guardTraceID, agentName, child.Process.Pid)
@@ -698,7 +739,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				if restarter.stderr != nil {
 					fmt.Fprintf(restarter.stderr, "fak guard: %v\n", resourceErr)
 				}
-				finishGuardChildAndReport(resourceErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				finishGuardChildAndReport(resourceErr, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}
 			verdict := resourceRetries.decide(event, agentName, sessionStartSHA())
@@ -710,7 +751,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 						fmt.Fprintln(restarter.stderr, guardResourceReattachUnavailableStatus(agentName, guardTraceID, reattachErr))
 					}
 					resourceErr = fmt.Errorf("%s: %w", guardResourceReattachUnavailable, resourceErr)
-					finishGuardChildAndReport(resourceErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+					finishGuardChildAndReport(resourceErr, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 					return
 				}
 				guardReportResourceRestart(restarter.stderr, agentName, verdict, nextCommand)
@@ -732,15 +773,16 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				}
 				resourceErr = fmt.Errorf("%s: %w", guardResourceReattachUnavailable, resourceErr)
 			}
-			finishGuardChildAndReport(resourceErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			finishGuardChildAndReport(resourceErr, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		case guardChildCompleted:
 			runErr := event.RunErr
 			if isGuardHostGrantCleanupError(runErr) {
-				finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				finishGuardChildAndReport(runErr, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}
 			if rec, parked := guardGoalParked(); parked {
+				queueLifecycle.hold(guardAgentQueueHoldParked)
 				fmt.Fprintf(os.Stderr, "fak guard: goal parked outside active context budget until %d; reason=%s; %s; next=%s\n", rec.ParkedUntil, rec.Reason, guardParkProbeStatus(rec, time.Now()), rec.NextAction)
 				// #5862: this is the branch the FLEET takes. Dispatch always passes
 				// --max-duration (1740s), and maxDurationLimit > 0 routes every dispatched
@@ -752,12 +794,12 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				// already exited on this branch, so there is nothing to stop: append the
 				// witness before the report, which closes the journal.
 				appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted, spawnMeta.PromptFuel)
-				finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				finishGuardChildAndReport(nil, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}
 			if guardRefuseCodexCLIUsage(runErr, child.ProcessState, agentName, guardTraceID, childStderr.String(), childStarted, auditJournal, restarter.stderr) ||
 				guardRefuseCodexInvalidJSON(runErr, child.ProcessState, agentName, guardTraceID, childStdout.String(), childStarted, auditJournal, restarter.stderr) {
-				finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				finishGuardChildAndReport(runErr, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}
 			if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
@@ -802,10 +844,11 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				command = guardRestartRelaunchCommand(command, agentName)
 				continue
 			}
-			finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			finishGuardChildAndReport(runErr, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		case guardChildRestart:
 			if rec, parked := guardGoalParked(); parked {
+				queueLifecycle.hold(guardAgentQueueHoldParked)
 				if !quiet {
 					fmt.Fprintf(os.Stderr, "fak guard: context budget signal ignored as terminal; goal parked until %d reason=%s %s\n", rec.ParkedUntil, rec.Reason, guardParkProbeStatus(rec, time.Now()))
 				}
@@ -815,7 +858,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				if !isGuardHostGrantCleanupError(stopErr) {
 					stopErr = nil
 				}
-				finishGuardChildAndReport(stopErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				finishGuardChildAndReport(stopErr, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}
 			ev := event.Restart
@@ -825,7 +868,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 					fmt.Fprintln(restarter.stderr, guardEquivalentRestartStatus(equivalentRestarts, ev))
 				}
 				runErr := <-wait
-				finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				finishGuardChildAndReport(runErr, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}
 			// #4609: advance or reset the no-progress counter by whether HEAD moved since the
@@ -843,7 +886,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 					fmt.Fprintln(restarter.stderr, guardNoProgressReapStatus(noProgressLimit, ev))
 				}
 				runErr := <-wait
-				finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				finishGuardChildAndReport(runErr, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}
 			if restarter.limit > 0 && restarts >= restarter.limit {
@@ -851,7 +894,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 					fmt.Fprintln(restarter.stderr, guardRestartLimitStatus(restarter.limit, ev))
 				}
 				runErr := <-wait
-				finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				finishGuardChildAndReport(runErr, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}
 			restarts++
@@ -898,10 +941,11 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			time.Sleep(750 * time.Millisecond)
 			markGuardChildTerminalIntent(child, "restart")
 			if stopErr := stopGuardChild(child, wait, 2*time.Second); isGuardHostGrantCleanupError(stopErr) || child.ProcessState == nil {
-				finishGuardChildAndReport(stopErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				finishGuardChildAndReport(stopErr, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}
 		case guardChildTimeBudget:
+			queueLifecycle.hold(guardAgentQueueHoldBudget)
 			inFlight, commitDetail := isGuardCommitInFlight(child.Process.Pid, repoRoot())
 			if inFlight && deadlineCfg.CommitGracePeriod > 0 {
 				fmt.Fprintf(os.Stderr, "fak guard: %s — wall-clock deadline reached for %s, but commit in-flight (%s); granting up to %s grace period\n", event.Reason, guardTraceID, commitDetail, deadlineCfg.CommitGracePeriod.Round(time.Second))
@@ -913,7 +957,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				case guardCommitGraceChildExited:
 					fmt.Fprintf(os.Stderr, "fak guard: wrapped agent exited during commit grace period: %v\n", childErr)
 					appendGuardChildExitWitnessWithReason(auditJournal, agentName, guardTraceID, childErr, child.ProcessState, childStarted, session.ReasonTimeBudgetExhausted, spawnMeta.PromptFuel)
-					finishGuardChildAndReport(childErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+					finishGuardChildAndReport(childErr, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 					return
 				case guardCommitGraceCompleted:
 					fmt.Fprintf(os.Stderr, "fak guard: in-flight commit completed within grace period; stopping wrapped agent\n")
@@ -938,7 +982,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			if !isGuardHostGrantCleanupError(stopErr) {
 				stopErr = nil
 			}
-			finishGuardChildAndReport(stopErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			finishGuardChildAndReport(stopErr, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
 	}
@@ -1199,7 +1243,7 @@ func appendGuardChildExitWitnessWithReason(j *journal.Journal, agentName, traceI
 	return j.AppendChildExit(agentName, traceID, class, exitCode, wall, lastHook)
 }
 
-func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler) {
+func finishGuardChildAndReport(runErr error, childState *os.ProcessState, queueLifecycle *guardAgentQueueLifecycle, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler) {
 	var currentRefusals []guardRefusalCarry
 
 	// Tear the gateway down and report what the kernel decided this session.
@@ -1361,6 +1405,22 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 		guardExitCode = 1
 	}
 	guardSessionCardHandle.finalizeOutcome(guardExitCode, srv.AdjudicationSummary())
+	if isGuardSystemCommitHeadroom(runErr) {
+		queueLifecycle.hold(guardAgentQueueHoldHeadroom)
+	}
+	if guardExitCode == 0 && childClean {
+		// Guard process success is not an issue-resolution witness. Dispatch's
+		// later exited-worker sweep owns the commit/issue witness, so retain this
+		// intent visibly held until that independent receipt is reconciled.
+		queueLifecycle.hold(guardAgentQueueHoldWitness)
+	}
+	// Child host grants are released at inner-attempt boundaries, including before
+	// retry decisions. Queue state belongs to the longer-lived wrapper, so persist
+	// its terminal result only here after every retry decision is final. A failed
+	// write deliberately leaves the attempt Running for conservative reconciliation.
+	if err := queueLifecycle.complete(false, childState != nil); err != nil {
+		fmt.Fprintf(os.Stderr, "fak guard: %v\n", err)
+	}
 	if !quiet {
 		renderGuardPromotionOffers(os.Stderr)
 	}

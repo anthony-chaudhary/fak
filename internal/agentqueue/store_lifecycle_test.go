@@ -157,6 +157,34 @@ func TestStoreLifecycleExpiredBeginLeavesReserved(t *testing.T) {
 	}
 }
 
+func TestStoreLifecycleAbortTransitionsFenceIdentityAndState(t *testing.T) {
+	store, _, _ := reservedActuatorFixture(t, 2)
+	deadline := time.Now().Add(time.Hour)
+	if _, started, err := store.BeginLaunching(context.Background(), "attempt-0", "nonce-0", deadline); err != nil || !started {
+		t.Fatalf("BeginLaunching = started %v, err %v", started, err)
+	}
+
+	if _, err := store.AbortReserved(context.Background(), "attempt-0"); !errors.Is(err, ErrFenced) {
+		t.Fatalf("AbortReserved launching error = %v, want ErrFenced", err)
+	}
+	if _, err := store.AbortLaunching(context.Background(), "attempt-0", "wrong-nonce", 0, time.Time{}); !errors.Is(err, ErrFenced) {
+		t.Fatalf("AbortLaunching wrong nonce error = %v, want ErrFenced", err)
+	}
+	aborted, err := store.AbortLaunching(context.Background(), "attempt-0", "nonce-0", 0, time.Time{})
+	if err != nil || aborted.State != AttemptFailed {
+		t.Fatalf("AbortLaunching = %+v, err %v", aborted, err)
+	}
+	if _, err := store.AbortLaunching(context.Background(), "attempt-0", "nonce-0", 0, time.Time{}); err != nil {
+		t.Fatalf("idempotent AbortLaunching: %v", err)
+	}
+	if _, err := store.AbortLaunching(context.Background(), "attempt-1", "nonce-1", 0, time.Time{}); !errors.Is(err, ErrFenced) {
+		t.Fatalf("AbortLaunching reserved error = %v, want ErrFenced", err)
+	}
+	if _, err := store.AbortReserved(context.Background(), "attempt-1"); err != nil {
+		t.Fatalf("AbortReserved: %v", err)
+	}
+}
+
 func TestStoreLifecycleRegisteredWrapperIdempotentAfterDeadline(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agentqueue.json")
 	pid := 4242
@@ -191,6 +219,79 @@ func TestStoreLifecycleRegisteredWrapperIdempotentAfterDeadline(t *testing.T) {
 	}
 	if _, err := store.RegisterWrapper(context.Background(), "attempt-unregistered", "nonce-b", pid, startedAt); !errors.Is(err, ErrFenced) {
 		t.Fatalf("new identity after deadline error = %v, want ErrFenced", err)
+	}
+}
+
+func TestStoreLifecycleHoldAttemptPersistsAndFencesIdentityAndReason(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agentqueue.json")
+	store := FileStore(path)
+	pid := 4242
+	startedAt := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	reason := "agent_guard_denied"
+	seed := Snapshot{
+		Schema:     Schema,
+		Generation: "generation-running",
+		Pool:       PoolSpec{ID: "pool", Desired: 1, Max: 1},
+		Intents: []Intent{{
+			ID: "intent-a", State: IntentRunning, RetryEligible: true, PID: pid,
+		}},
+		Attempts: []Attempt{{
+			ID: "attempt-a", IntentID: "intent-a", State: AttemptRunning,
+			Nonce: "nonce-a", LaunchDeadline: time.Now().Add(time.Hour), PID: pid, StartedAt: startedAt,
+		}},
+	}
+	if err := store.Save(seed); err != nil {
+		t.Fatalf("seed running attempt: %v", err)
+	}
+
+	held, err := store.HoldAttempt(context.Background(), "attempt-a", "nonce-a", pid, startedAt, reason)
+	if err != nil {
+		t.Fatalf("HoldAttempt: %v", err)
+	}
+	if held.State != AttemptFailed {
+		t.Fatalf("held attempt state = %q, want failed", held.State)
+	}
+	persisted, err := FileStore(path).Load()
+	if err != nil {
+		t.Fatalf("reopen held snapshot: %v", err)
+	}
+	if persisted.Generation == seed.Generation {
+		t.Fatal("HoldAttempt did not advance generation")
+	}
+	gotAttempt := lifecycleAttempt(t, persisted, "attempt-a")
+	gotIntent := persisted.Intents[0]
+	if gotAttempt.State != AttemptFailed || gotIntent.State != IntentHeld || gotIntent.HoldReason != reason || gotIntent.RetryEligible {
+		t.Fatalf("persisted hold = attempt %+v intent %+v", gotAttempt, gotIntent)
+	}
+
+	idempotent, err := FileStore(path).HoldAttempt(context.Background(), "attempt-a", "nonce-a", pid, startedAt, reason)
+	if err != nil || idempotent.State != AttemptFailed {
+		t.Fatalf("idempotent HoldAttempt = %+v, err %v", idempotent, err)
+	}
+	afterIdempotent, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterIdempotent.Generation != persisted.Generation {
+		t.Fatalf("idempotent hold advanced generation from %q to %q", persisted.Generation, afterIdempotent.Generation)
+	}
+
+	for name, candidate := range map[string]struct {
+		nonce     string
+		pid       int
+		startedAt time.Time
+		reason    string
+	}{
+		"stale nonce":      {nonce: "nonce-stale", pid: pid, startedAt: startedAt, reason: reason},
+		"stale pid":        {nonce: "nonce-a", pid: pid + 1, startedAt: startedAt, reason: reason},
+		"stale start time": {nonce: "nonce-a", pid: pid, startedAt: startedAt.Add(time.Second), reason: reason},
+		"different reason": {nonce: "nonce-a", pid: pid, startedAt: startedAt, reason: "budget_exhausted"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := store.HoldAttempt(context.Background(), "attempt-a", candidate.nonce, candidate.pid, candidate.startedAt, candidate.reason); !errors.Is(err, ErrFenced) {
+				t.Fatalf("HoldAttempt error = %v, want ErrFenced", err)
+			}
+		})
 	}
 }
 

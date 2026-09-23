@@ -43,6 +43,7 @@ type Intent struct {
 	ID            string      `json:"id"`
 	State         IntentState `json:"state"`
 	RetryEligible bool        `json:"retry_eligible,omitempty"`
+	HoldReason    string      `json:"hold_reason,omitempty"`
 	Launch        LaunchSpec  `json:"launch,omitempty"`
 	PID           int         `json:"pid,omitempty"`
 	ExpiresAt     time.Time   `json:"expires_at,omitempty"`

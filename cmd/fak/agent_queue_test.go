@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,12 +12,33 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agentqueue"
+	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 )
 
 func init() {
 	if len(os.Args) > 1 && os.Args[1] == "dispatch" {
+		statePath, hasState := agentQueueTestCommandFlag(os.Args[2:], "--agentqueue-state")
+		attemptID, hasAttempt := agentQueueTestCommandFlag(os.Args[2:], "--agentqueue-attempt")
+		if hasState != hasAttempt {
+			os.Exit(2)
+		}
+		if hasState {
+			nonce := fmt.Sprintf("cmd-fak-test-%d-%d", os.Getpid(), time.Now().UnixNano())
+			if _, started, err := agentqueue.FileStore(statePath).BeginLaunching(context.Background(), attemptID, nonce, time.Now().Add(time.Minute)); err != nil || !started {
+				os.Exit(1)
+			}
+		}
 		os.Exit(0)
 	}
+}
+
+func agentQueueTestCommandFlag(args []string, name string) (string, bool) {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == name {
+			return args[i+1], true
+		}
+	}
+	return "", false
 }
 
 func TestAgentQueueRunOnceJSON(t *testing.T) {
@@ -283,6 +305,219 @@ func TestAgentQueueUsageAndErrors(t *testing.T) {
 		if !strings.Contains(stderr.String(), "agent-queue run:") {
 			t.Fatalf("expected 'agent-queue run:' error, got: %s", stderr.String())
 		}
+	}
+}
+
+func TestAgentQueueDispatchIdentityFlagsMustBePaired(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "queue.json")
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{name: "state without attempt", args: []string{"--agentqueue-state", statePath}},
+		{name: "attempt without state", args: []string{"--agentqueue-attempt", "attempt-a"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stderr bytes.Buffer
+			_, ok, code := parseDispatchTickFlags(&stderr, tc.args)
+			if ok || code != 2 {
+				t.Fatalf("parse result ok=%v code=%d, want false/2", ok, code)
+			}
+			if !strings.Contains(stderr.String(), "must be provided together") {
+				t.Fatalf("stderr = %q, want paired-identity diagnostic", stderr.String())
+			}
+		})
+	}
+}
+
+func TestAgentQueueEnvScrubIsCaseInsensitive(t *testing.T) {
+	env := map[string]string{
+		agentQueueStatePathEnv:      "canonical-state",
+		"fak_agentqueue_state_path": "mixed-case-state",
+		"Fak_AgentQueue_Attempt_Id": "mixed-case-attempt",
+		"FAK_agentqueue_NONCE":      "mixed-case-nonce",
+		"PATH":                      "preserved-path",
+		"Worker_Mode":               "preserved-mode",
+	}
+
+	stripAgentQueueEnv(env)
+	for name, value := range env {
+		if strings.EqualFold(name, agentQueueStatePathEnv) || strings.EqualFold(name, agentQueueAttemptIDEnv) || strings.EqualFold(name, agentQueueNonceEnv) {
+			t.Errorf("inherited queue identity survived scrub: %s=%q", name, value)
+		}
+	}
+	if len(env) != 2 || env["PATH"] != "preserved-path" || env["Worker_Mode"] != "preserved-mode" {
+		t.Fatalf("scrub did not preserve the unrelated environment exactly: %#v", env)
+	}
+}
+
+func TestAgentQueueGuardWrapperRegistersAndScrubsIdentity(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "queue.json")
+	store := agentqueue.FileStore(statePath)
+	const (
+		attemptID = "attempt-wrapper"
+		nonce     = "nonce-wrapper"
+	)
+	snapshot := agentqueue.Snapshot{
+		Schema:     agentqueue.Schema,
+		Generation: "g0",
+		Pool:       agentqueue.PoolSpec{ID: "pool-wrapper", Desired: 1, Max: 1},
+		Intents: []agentqueue.Intent{{
+			ID: "intent-wrapper", State: agentqueue.IntentQueued,
+		}},
+		Attempts: []agentqueue.Attempt{{
+			ID: attemptID, IntentID: "intent-wrapper", State: agentqueue.AttemptReserved,
+		}},
+	}
+	if err := store.Save(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if _, started, err := store.BeginLaunching(context.Background(), attemptID, nonce, time.Now().Add(time.Minute)); err != nil || !started {
+		t.Fatalf("BeginLaunching started=%v err=%v", started, err)
+	}
+
+	t.Setenv(guardAgentQueueStatePathEnv, statePath)
+	t.Setenv(guardAgentQueueAttemptIDEnv, attemptID)
+	t.Setenv(guardAgentQueueNonceEnv, nonce)
+	lifecycle, err := guardAgentQueueLifecycleFromEnv()
+	if err != nil {
+		t.Fatalf("guardAgentQueueLifecycleFromEnv: %v", err)
+	}
+	if lifecycle == nil || lifecycle.pid != os.Getpid() || lifecycle.startedAt.IsZero() {
+		t.Fatalf("lifecycle = %+v, want current wrapper identity", lifecycle)
+	}
+	for _, name := range []string{guardAgentQueueStatePathEnv, guardAgentQueueAttemptIDEnv, guardAgentQueueNonceEnv} {
+		if value := os.Getenv(name); value != "" {
+			t.Errorf("%s survived wrapper registration: %q", name, value)
+		}
+	}
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := loaded.Attempts[0]
+	if got.State != agentqueue.AttemptLaunching || got.Nonce != nonce || got.PID != os.Getpid() || !got.StartedAt.Equal(lifecycle.startedAt) {
+		t.Fatalf("registered attempt = %+v, want launching wrapper pid=%d start=%s", got, os.Getpid(), lifecycle.startedAt)
+	}
+	if err := lifecycle.abortLaunching(); err != nil {
+		t.Fatalf("abortLaunching: %v", err)
+	}
+	aborted, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aborted.Attempts[0].State != agentqueue.AttemptFailed || aborted.Intents[0].State != agentqueue.IntentQueued {
+		t.Fatalf("aborted state = attempt %q intent %q, want failed/queued", aborted.Attempts[0].State, aborted.Intents[0].State)
+	}
+}
+
+func TestAgentQueueGuardCompletionRequiresJoinedChildAndPersistsHold(t *testing.T) {
+	t.Run("joined failure persists typed hold", func(t *testing.T) {
+		lifecycle, store := newRunningAgentQueueGuardLifecycle(t)
+		lifecycle.hold(guardAgentQueueHoldWitness)
+		if err := lifecycle.complete(false, true); err != nil {
+			t.Fatalf("complete joined held child: %v", err)
+		}
+		loaded, err := store.Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if loaded.Attempts[0].State != agentqueue.AttemptFailed || loaded.Intents[0].State != agentqueue.IntentHeld || loaded.Intents[0].HoldReason != guardAgentQueueHoldWitness {
+			t.Fatalf("held terminal state = attempt %q intent %q reason %q", loaded.Attempts[0].State, loaded.Intents[0].State, loaded.Intents[0].HoldReason)
+		}
+	})
+
+	t.Run("uncertain child exit remains running", func(t *testing.T) {
+		lifecycle, store := newRunningAgentQueueGuardLifecycle(t)
+		lifecycle.hold(guardAgentQueueHoldWitness)
+		if err := lifecycle.complete(false, false); err != nil {
+			t.Fatalf("complete unjoined child: %v", err)
+		}
+		loaded, err := store.Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if loaded.Attempts[0].State != agentqueue.AttemptRunning || loaded.Intents[0].State != agentqueue.IntentRunning || loaded.Intents[0].HoldReason != "" {
+			t.Fatalf("uncertain terminal state = attempt %q intent %q reason %q, want running/running/empty", loaded.Attempts[0].State, loaded.Intents[0].State, loaded.Intents[0].HoldReason)
+		}
+	})
+}
+
+func newRunningAgentQueueGuardLifecycle(t *testing.T) (*guardAgentQueueLifecycle, agentqueue.Store) {
+	t.Helper()
+	statePath := filepath.Join(t.TempDir(), "queue.json")
+	store := agentqueue.FileStore(statePath)
+	const (
+		attemptID = "attempt-running-wrapper"
+		nonce     = "nonce-running-wrapper"
+	)
+	if err := store.Save(agentqueue.Snapshot{
+		Schema: agentqueue.Schema, Generation: "g0",
+		Pool:     agentqueue.PoolSpec{ID: "pool-running-wrapper", Desired: 1, Max: 1},
+		Intents:  []agentqueue.Intent{{ID: "intent-running-wrapper", State: agentqueue.IntentQueued}},
+		Attempts: []agentqueue.Attempt{{ID: attemptID, IntentID: "intent-running-wrapper", State: agentqueue.AttemptReserved}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, started, err := store.BeginLaunching(context.Background(), attemptID, nonce, time.Now().Add(time.Minute)); err != nil || !started {
+		t.Fatalf("BeginLaunching started=%v err=%v", started, err)
+	}
+	t.Setenv(guardAgentQueueStatePathEnv, statePath)
+	t.Setenv(guardAgentQueueAttemptIDEnv, attemptID)
+	t.Setenv(guardAgentQueueNonceEnv, nonce)
+	lifecycle, err := guardAgentQueueLifecycleFromEnv()
+	if err != nil {
+		t.Fatalf("guardAgentQueueLifecycleFromEnv: %v", err)
+	}
+	if err := lifecycle.markRunning(); err != nil {
+		t.Fatalf("markRunning: %v", err)
+	}
+	return lifecycle, store
+}
+
+func TestAgentQueueBrokerCannotRewriteGuardedCommand(t *testing.T) {
+	root := initRegionTestRepo(t)
+	t.Setenv("FAK_LEASE_OWNER", "agentqueue-broker-rewrite-test")
+	t.Setenv("FLEET_DOGFOOD_GUARD", "1")
+	t.Setenv("FLEET_WORKER_WORKTREE", "0")
+
+	oldBroker, oldSpawner := launchSpawnBroker, dispatchIssueWorkerSpawner
+	spawned := false
+	launchSpawnBroker = func(attempt launchBrokerAttempt) launchBrokerGrant {
+		grant := allowLaunchBrokerGrant(attempt, "unit-test-rewrite")
+		grant.Argv = []string{"codex", "exec", "bypassed-guard"}
+		return grant
+	}
+	dispatchIssueWorkerSpawner = func([]string, map[string]string, string, string, int, string, string, string, []string, dispatchtick.Account, *dispatchtick.Membership, string, string, float64) (dispatchSpawnResult, error) {
+		spawned = true
+		return dispatchSpawnResult{PID: 999}, nil
+	}
+	t.Cleanup(func() {
+		launchSpawnBroker = oldBroker
+		dispatchIssueWorkerSpawner = oldSpawner
+	})
+
+	statePath := filepath.Join(root, "queue.json")
+	got, err := dispatchTickLiveSpawn(
+		root, filepath.Join(root, dispatchtick.RunsDirName),
+		dispatchTickOptions{
+			Backend: "codex", Live: true, WorkerTimeoutS: 1200,
+			AgentQueueState: statePath, AgentQueueAttempt: "attempt-a",
+		},
+		dispatchLanePick{Lane: "gateway", Tree: []string{"internal/gateway/**"}},
+		"resolve-gateway", dispatchtick.Account{Tag: "seat-a"}, dispatchtick.WorkerLaunch{},
+		dispatchWorkerPreflightRequest{}, nil, 42,
+		map[string]any{"prompt": "resolve #42"}, map[string]any{},
+		func(payload map[string]any) map[string]any { return payload },
+	)
+	if err != nil {
+		t.Fatalf("dispatchTickLiveSpawn: %v", err)
+	}
+	if spawned {
+		t.Fatal("queue worker spawned after broker stripped the guard")
+	}
+	if got["action"] != "agentqueue_guard_rewritten" || got["ok"] != false {
+		t.Fatalf("rewrite refusal = action %v ok %v, want agentqueue_guard_rewritten/false", got["action"], got["ok"])
 	}
 }
 

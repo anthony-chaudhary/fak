@@ -900,8 +900,9 @@ func TestRunAccountsLaunchDirectNoGuard(t *testing.T) {
 	if rc != 0 {
 		t.Fatalf("launch --guard=false rc=%d stderr=%s", rc, errb.String())
 	}
-	// Default --ultracode=on => the ultracode --settings rides even an unguarded launch.
-	want := []string{"claude", "--dangerously-skip-permissions", "--model", defaultLaunchModel, "--settings", ultracodeSettingsArg}
+	// A direct launch keeps native permissions unless --skip-permissions is explicit;
+	// default --ultracode=on still adds the session-scoped settings.
+	want := []string{"claude", "--model", defaultLaunchModel, "--settings", ultracodeSettingsArg}
 	if !reflect.DeepEqual(gotArgv, want) {
 		t.Fatalf("direct launch argv = %#v, want %#v", gotArgv, want)
 	}
