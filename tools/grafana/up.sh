@@ -299,6 +299,15 @@ start_native_stack() {
       --web.enable-lifecycle \
       --web.listen-address=127.0.0.1:9091
 
+  # GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH is NOT the routing mechanism (see
+  # docker-compose.yml): Grafana 11's SPA bypasses the legacy redirect it feeds,
+  # so this variable alone leaves an anonymous visitor on the Welcome splash. The
+  # org home preference is the working seam, pinned by `fak-obs-stack`. It is kept
+  # here as a legacy hint and names the SAME uid the supervisor pins.
+  #
+  # NOTE: keep this comment OUT of the continuation below. A `#` inside a
+  # backslash-continued command ends the command, silently discarding every
+  # argument after it (the Grafana binary included) — `bash -n` does not catch it.
   start_bg grafana "3000 /api/health" \
     env \
       GF_PATHS_PROVISIONING="$NATIVE_PROVISIONING" \
@@ -310,7 +319,8 @@ start_native_stack() {
       GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer \
       GF_AUTH_ANONYMOUS_ORG_NAME="Main Org." \
       GF_USERS_ALLOW_SIGN_UP=false \
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH="$GRAFANA_DIR/dashboards/fleet-bottleneck-overview.json" \
+      GF_USERS_DEFAULT_THEME=light \
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH="$GRAFANA_DIR/dashboards/fak-fleet-overview.json" \
       GF_SERVER_HTTP_ADDR=0.0.0.0 \
       GF_SERVER_HTTP_PORT=3000 \
       "${grafana_command[@]}" --homepath "$grafana_home" --packaging=brew

@@ -74,7 +74,22 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      - GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION=true
+      # A FRESH volume must still get an admin, or `fak-obs-stack` cannot pin the
+      # default home dashboard. GF_SECURITY_ADMIN_USER/PASSWORD arrive from the
+      # --env-file the supervisor passes (written 0600 outside this repo).
+      # GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION defaults to TRUE here so an
+      # UNSET password can never mint an admin with an empty/known password; the
+      # supervisor's env-file flips it to false together with a real secret.
+      # Anonymous read-only Viewer access is independent of having an admin, so
+      # the login-free LAN posture is unchanged (witnessed on grafana:11.5.2).
+      - GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION=${GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION:-true}
+      - GF_SECURITY_ADMIN_USER=${GF_SECURITY_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD:-}
+      # A non-secret fingerprint of the credential above. `--env-file` only feeds
+      # interpolation, so a changed credential would NOT recreate an existing
+      # container; including this value in the service definition forces exactly
+      # that recreation, and only when the credential actually changes.
+      - FAK_GRAFANA_ADMIN_FP=${FAK_GRAFANA_ADMIN_FP:-unset}
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
       - GF_AUTH_ANONYMOUS_ORG_NAME=Main Org.
@@ -82,6 +97,14 @@ services:
       # Read-heavy fleet dashboards default to the light theme (env alias of
       # [users] default_theme); anonymous Viewers may still switch per session.
       - GF_USERS_DEFAULT_THEME=light
+      # NOTE: this variable is NOT what routes an anonymous visitor to the home
+      # dashboard. Grafana 11's SPA bypasses the legacy server-side redirect it
+      # feeds, so `/` still renders the Welcome splash when the org home
+      # preference is unset — verified against grafana/grafana:11.5.2 on a fresh
+      # volume with this variable set and the dashboard provisioned. It is kept
+      # as a documented legacy hint; the working mechanism is the org home
+      # dashboard preference, pinned idempotently by `fak-obs-stack`
+      # (platform/obs/stack/grafana_home.go).
       - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/fak-fleet-overview.json
       - GF_SERVER_HTTP_PORT=3000
     volumes:

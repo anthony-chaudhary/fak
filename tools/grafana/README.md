@@ -168,6 +168,56 @@ Model Load**, and **FAK Guard — Kernel Adjudication** dashboards appear alongs
 and populate once Prometheus scrapes `fak serve` (or, for the guard view, a
 `fak guard --addr 127.0.0.1:8080` session — see below).
 
+### What actually makes a dashboard the default home
+
+`GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH` is **not** the mechanism, despite the
+name. Grafana 11's SPA bypasses the legacy server-side redirect that variable feeds,
+so with only that variable set an anonymous visitor hitting `/` still gets the
+Welcome splash — witnessed against `grafana/grafana:11.5.2` on a **fresh volume**
+with the variable set and the dashboard provisioned. It is kept in the compose file
+as a documented legacy hint, not as the fix.
+
+The working mechanism is the **org home dashboard preference**, which the anonymous
+`GET /api/dashboards/home` endpoint reads back to route the visitor:
+
+```text
+unset preference -> {"meta":...,"dashboard":{<the blank splash board>}}
+set preference   -> {"redirectUri":"/d/fak-fleet-overview/fak-run-operations"}
+```
+
+`fak-obs-stack` pins this idempotently on every supervision poll
+(`platform/obs/stack/grafana_home.go`, private repo): it reads the preference, writes
+it only when it differs, reads it back, and never treats a refused write as success.
+That runs on a cadence rather than at first boot because a Grafana whose volume is
+recreated comes back with an **empty** preference even though the container env still
+names a home dashboard — a first-boot-only fix would silently regress to the splash.
+
+To set or repair it by hand (the write is admin-only, so the anonymous `Viewer` role
+cannot perform it):
+
+```bash
+# credentials live OUTSIDE any repository
+pw="$(cat ~/.fak/grafana/admin-password.txt)"
+curl -u "admin:$pw" -H 'Content-Type: application/json' \
+  -X PUT http://127.0.0.1:3000/api/org/preferences \
+  -d '{"homeDashboardUID":"fak-fleet-overview"}'
+# witness it as an anonymous client, exactly as the SPA does:
+curl -s http://127.0.0.1:3000/api/dashboards/home
+```
+
+`fak-obs-stack status` confesses an unpinned home as `HOME-UNPINNED` on the otherwise
+healthy `grafana` row (and `"grafana_home_ok": false` under `--json`), because a
+reachable stack that lands nowhere is a degradation a health probe cannot express.
+An absent verdict (`grafana_home_ok` omitted) means *undecidable* — no credential was
+found — and must never be read as OK.
+
+```bash
+# no credential yet? write the one the supervisor reads:
+docker exec fleet-grafana grafana cli --homepath /usr/share/grafana \
+  admin reset-admin-password "$(openssl rand -base64 32)"   # then persist it:
+mkdir -p ~/.fak/grafana && printf '%s' '<that password>' > ~/.fak/grafana/admin-password.txt
+```
+
 The startup dashboard is the one-time boot timeline of a fak gateway: time-to-ready,
 a bottleneck-first breakdown of every boot phase (flag-parse, policy-load,
 planner-init, vdso-config, kernel-init, listener-bind, and model-load with `--gguf`),

@@ -10,6 +10,29 @@ import gen_dashboard as dashboard
 HERE = Path(__file__).resolve().parent
 
 
+def previous_line_ended_in_backslash(text: str, lineno: int) -> bool:
+    """Return True when line ``lineno`` is an argument of a backslash-continued
+    command, i.e. some earlier line in the same command ends with ``\\``.
+
+    This exists because a ``#`` comment inside a continuation silently truncates
+    the command (bash treats it as the end of the command, dropping the rest of
+    the continued arguments) while ``bash -n`` still reports the file as valid.
+    """
+    lines = text.splitlines()
+    index = lineno - 1
+    while index > 0:
+        index -= 1
+        candidate = lines[index].rstrip()
+        if candidate.endswith("\\"):
+            return True
+        if candidate.strip() == "":
+            continue
+        if candidate.strip().startswith("#"):
+            continue
+        return False
+    return False
+
+
 def test_steps_preserves_absolute_threshold_order_and_null_floor():
     thresholds = dashboard.steps((None, "green"), (30, "yellow"), (80, "red"))
     assert thresholds == {
@@ -74,11 +97,55 @@ def test_run_operations_is_stable_uid_default_home():
     assert home["title"] == "FAK Run Operations"
     assert drill["uid"] == "fak-fleet-session"
     assert drill["title"] == "FAK Run Operations — Run Drill-down"
+
+    # Every surface must agree on the SAME uid. They previously disagreed:
+    # docker-compose named fak-fleet-overview while up.sh's native fallback named
+    # fleet-bottleneck-overview, so the two deployment paths landed on different
+    # boards.
     compose = (HERE / "docker-compose.yml").read_text(encoding="utf-8")
     assert (
         "GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH="
         "/var/lib/grafana/dashboards/fak-fleet-overview.json"
     ) in compose
+    up_sh = (HERE / "up.sh").read_text(encoding="utf-8")
+    assert 'GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH="$GRAFANA_DIR/dashboards/fak-fleet-overview.json"' in up_sh
+    assert "fleet-bottleneck-overview.json" not in up_sh
+
+    # A `#` comment inside a backslash-continued command ENDS the command, silently
+    # discarding every argument after it — including the Grafana binary. `bash -n`
+    # does not catch it, and a pure text-presence assertion passes on the broken
+    # launch (this exact regression shipped once). So assert structurally: no line
+    # that is part of a continuation may be a comment.
+    for lineno, line in enumerate(up_sh.splitlines(), start=1):
+        stripped = line.strip()
+        is_continuation_arg = previous_line_ended_in_backslash(up_sh, lineno)
+        if is_continuation_arg and stripped.startswith("#"):
+            raise AssertionError(
+                f"up.sh:{lineno}: comment inside a backslash continuation silently "
+                f"truncates the command: {stripped!r}"
+            )
+
+    # The env var is a legacy hint, NOT the routing mechanism: Grafana 11's SPA
+    # bypasses the server-side redirect it feeds. Pin that the file says so, so
+    # nobody "simplifies" the checksum by deleting the note and re-inheriting the
+    # belief that the variable is sufficient. The working seam is the org home
+    # dashboard preference, pinned idempotently by fak-obs-stack.
+    assert "NOT what routes an anonymous visitor" in compose
+
+    # A fresh volume must still get an admin or the reconcile cannot write the
+    # preference, so the admin variables must be interpolable and default to the
+    # SAFE value (no admin) when no env-file supplies a real secret.
+    assert "GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION=${GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION:-true}" in compose
+    assert "GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD:-}" in compose
+    # And the credential fingerprint must be in the SERVICE DEFINITION, not just
+    # the env-file: --env-file only feeds interpolation, so without this a rotated
+    # credential would never recreate the container and the new password would be
+    # silently ignored.
+    assert "FAK_GRAFANA_ADMIN_FP=${FAK_GRAFANA_ADMIN_FP:-unset}" in compose
+
+    readme = (HERE / "README.md").read_text(encoding="utf-8")
+    assert "What actually makes a dashboard the default home" in readme
+    assert "api/org/preferences" in readme
 
 
 def test_run_operations_keeps_live_inventory_and_registration_history_separate():
