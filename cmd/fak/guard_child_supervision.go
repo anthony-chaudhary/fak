@@ -382,7 +382,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
 		startupProgress.Phase("OS process start")
 		resourcePolicy := guardResourcePolicyConfigured()
-		job, startErr := windowgate.StartManagedAgentInNewJob(child, windowgate.ManagedJobConfig{MemoryLimitBytes: resourcePolicy.MaxTreeBytes})
+		job, releaseHostGrant, startErr := startGuardChildWithHostGrant(context.Background(), child, windowgate.ManagedJobConfig{MemoryLimitBytes: resourcePolicy.MaxTreeBytes})
 		if startErr != nil {
 			startupProgress.Abort()
 			terminalGuardChild(child, startErr, "launch_failed")
@@ -394,8 +394,13 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		if err := startBoundGuardRegistration(child); err != nil {
 			startupProgress.Abort()
 			_ = child.Process.Kill()
-			_, _ = child.Process.Wait()
-			_ = job.Close()
+			var waitErr error
+			child.ProcessState, waitErr = child.Process.Wait()
+			if child.ProcessState == nil {
+				err = errors.Join(err, waitErr, job.Close())
+			} else {
+				err = errors.Join(err, waitErr, finishGuardChildHostGrant(job, releaseHostGrant))
+			}
 			finishGuardChildAndReport(err, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
@@ -410,8 +415,18 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		runErr, event, contain := waitGuardChildWithoutRestart(wait, resourceEvents, os.Stderr)
 		if contain {
 			markGuardChildTerminalIntent(child, "resource_limit")
-			_ = job.Close()
 			runErr = stopGuardChild(child, wait, 0)
+			if child.ProcessState == nil {
+				closeErr := job.Close()
+				lifecycle.finish(false)
+				finishGuardChildAndReport(errors.Join(runErr, closeErr), child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				return
+			}
+			if cleanupErr := finishGuardChildHostGrant(job, releaseHostGrant); cleanupErr != nil {
+				lifecycle.finish(false)
+				finishGuardChildAndReport(errors.Join(runErr, cleanupErr), child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				return
+			}
 			lifecycle.finish(false)
 			terminalGuardChild(child, runErr, "resource_limit")
 			receiptErr := guardWriteResourceReceipt(event, guardTraceID, agentName, child.Process.Pid)
@@ -454,7 +469,10 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		}
 		close(resourceStop)
 		lifecycle.finish(runErr == nil)
-		_ = job.Close()
+		if cleanupErr := finishGuardChildHostGrant(job, releaseHostGrant); cleanupErr != nil {
+			finishGuardChildAndReport(errors.Join(runErr, cleanupErr), child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			return
+		}
 		terminalGuardChild(child, runErr, "")
 		if rec, parked := guardGoalParked(); parked {
 			fmt.Fprintf(os.Stderr, "fak guard: goal parked outside active context budget until %d; reason=%s; %s; next=%s\n", rec.ParkedUntil, rec.Reason, guardParkProbeStatus(rec, time.Now()), rec.NextAction)
@@ -619,7 +637,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
 		startupProgress.Phase("OS process start")
 		resourcePolicy := guardResourcePolicyConfigured()
-		job, err := windowgate.StartManagedAgentInNewJob(child, windowgate.ManagedJobConfig{MemoryLimitBytes: resourcePolicy.MaxTreeBytes})
+		job, releaseHostGrant, err := startGuardChildWithHostGrant(context.Background(), child, windowgate.ManagedJobConfig{MemoryLimitBytes: resourcePolicy.MaxTreeBytes})
 		if err != nil {
 			startupProgress.Abort()
 			// Start/containment failing IS a launch failure: either the child never ran, or
@@ -633,8 +651,13 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		if err := startBoundGuardRegistration(child); err != nil {
 			startupProgress.Abort()
 			_ = child.Process.Kill()
-			_, _ = child.Process.Wait()
-			_ = job.Close()
+			var waitErr error
+			child.ProcessState, waitErr = child.Process.Wait()
+			if child.ProcessState == nil {
+				err = errors.Join(err, waitErr, job.Close())
+			} else {
+				err = errors.Join(err, waitErr, finishGuardChildHostGrant(job, releaseHostGrant))
+			}
 			finishGuardChildAndReport(err, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
@@ -644,8 +667,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			runErr := child.Wait()
 			lifecycle.finish(runErr == nil)
 			terminalGuardChild(child, runErr, "")
-			_ = job.Close()
-			wait <- runErr
+			wait <- errors.Join(runErr, finishGuardChildHostGrant(job, releaseHostGrant))
 		}()
 		resourceStop := make(chan struct{})
 		resourcePolicy.Stop = resourceStop
@@ -663,8 +685,10 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		switch event.Kind {
 		case guardChildResourceLimit:
 			markGuardChildTerminalIntent(child, "resource_limit")
-			_ = job.Close()
-			_ = stopGuardChild(child, wait, 0)
+			if stopErr := stopGuardChild(child, wait, 0); isGuardHostGrantCleanupError(stopErr) || child.ProcessState == nil {
+				finishGuardChildAndReport(stopErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				return
+			}
 			receiptErr := guardWriteResourceReceipt(event, guardTraceID, agentName, child.Process.Pid)
 			guardReportChildResourceReaped(os.Stderr, event)
 			resourceErr := fmt.Errorf("child resource limit: %s", event.Reason)
@@ -712,6 +736,10 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			return
 		case guardChildCompleted:
 			runErr := event.RunErr
+			if isGuardHostGrantCleanupError(runErr) {
+				finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				return
+			}
 			if rec, parked := guardGoalParked(); parked {
 				fmt.Fprintf(os.Stderr, "fak guard: goal parked outside active context budget until %d; reason=%s; %s; next=%s\n", rec.ParkedUntil, rec.Reason, guardParkProbeStatus(rec, time.Now()), rec.NextAction)
 				// #5862: this is the branch the FLEET takes. Dispatch always passes
@@ -782,9 +810,12 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 					fmt.Fprintf(os.Stderr, "fak guard: context budget signal ignored as terminal; goal parked until %d reason=%s %s\n", rec.ParkedUntil, rec.Reason, guardParkProbeStatus(rec, time.Now()))
 				}
 				markGuardChildTerminalIntent(child, "cancelled")
-				stopGuardChild(child, wait, 2*time.Second)
+				stopErr := stopGuardChild(child, wait, 2*time.Second)
 				appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted, spawnMeta.PromptFuel)
-				finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				if !isGuardHostGrantCleanupError(stopErr) {
+					stopErr = nil
+				}
+				finishGuardChildAndReport(stopErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}
 			ev := event.Restart
@@ -866,7 +897,10 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			// stopping the process that initiated it.
 			time.Sleep(750 * time.Millisecond)
 			markGuardChildTerminalIntent(child, "restart")
-			stopGuardChild(child, wait, 2*time.Second)
+			if stopErr := stopGuardChild(child, wait, 2*time.Second); isGuardHostGrantCleanupError(stopErr) || child.ProcessState == nil {
+				finishGuardChildAndReport(stopErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				return
+			}
 		case guardChildTimeBudget:
 			inFlight, commitDetail := isGuardCommitInFlight(child.Process.Pid, repoRoot())
 			if inFlight && deadlineCfg.CommitGracePeriod > 0 {
@@ -899,9 +933,12 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			}
 			markGuardChildTerminalIntent(child, "time_budget")
 			stopGrace := deadlineCfg.ChildStopGrace
-			stopGuardChild(child, wait, stopGrace)
+			stopErr := stopGuardChild(child, wait, stopGrace)
 			appendGuardChildExitWitnessWithReason(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted, session.ReasonTimeBudgetExhausted, spawnMeta.PromptFuel)
-			finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			if !isGuardHostGrantCleanupError(stopErr) {
+				stopErr = nil
+			}
+			finishGuardChildAndReport(stopErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
 	}
