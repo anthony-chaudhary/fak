@@ -150,7 +150,7 @@ func (r *armRunner) run(ctx context.Context, maxTurns int) error {
 		// closed-token continuation, and squash any speculation (it was never confirmed by
 		// an authoritative call). When the budget is spent the error is returned below —
 		// the loop can never spin on a persistent upstream failure.
-		if err != nil && r.lastInfraClass == infraReprompt && r.repromptRemaining > 0 {
+		if err != nil && r.lastInfraClass == infraReprompt && r.repromptRemaining > 0 && turn+1 < maxTurns {
 			r.repromptRemaining--
 			r.metrics.InfraReprompts++
 			r.cfg.emitProgress(ProgressEvent{Kind: ProgressInfraReprompt, Turn: turn + 1, Reason: r.lastInfraReason})
