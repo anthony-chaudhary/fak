@@ -1171,21 +1171,61 @@ func runValidateWSLCommandWithin(ctx context.Context, root string, args ...strin
 	return cmd.CombinedOutput()
 }
 
+func runValidateWSLCommandStreamsWithin(ctx context.Context, root string, args ...string) (stdout, stderr []byte, err error) {
+	command := "set -euo pipefail; cd " + posixQuote(root) + "; exec"
+	for _, arg := range args {
+		command += " " + posixQuote(arg)
+	}
+	cmd := windowgate.CommandContext(ctx, "wsl.exe", "bash", "-lc", command)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	var stdoutBuffer, stderrBuffer bytes.Buffer
+	cmd.Stdout = &stdoutBuffer
+	cmd.Stderr = &stderrBuffer
+	err = cmd.Run()
+	return stdoutBuffer.Bytes(), stderrBuffer.Bytes(), err
+}
+
+func validateWSLCommandError(err error, stderr []byte) error {
+	detail := validateWSLCommandStderr(stderr)
+	if detail == "" {
+		return err
+	}
+	return fmt.Errorf("%w: %s", err, detail)
+}
+
+func validateWSLCommandStderr(stderr []byte) string {
+	const maxStderrBytes = 4 << 10
+	detail := bytes.TrimSpace(stderr)
+	if len(detail) == 0 {
+		return ""
+	}
+	if len(detail) > maxStderrBytes {
+		detail = append(append([]byte(nil), detail[:maxStderrBytes]...), "... (truncated)"...)
+	}
+	return string(detail)
+}
+
 func validateGoListGraphWithin(ctx context.Context, root string, wsl bool) (fileToPkg map[string]string, edges map[string][]string, total int, err error) {
 	if !wsl {
 		return goListGraphWithin(ctx, root)
 	}
-	out, runErr := runValidateWSLCommandWithin(ctx, root, "go", "list", "-e", "-json", "./...")
+	out, stderr, runErr := runValidateWSLCommandStreamsWithin(ctx, root, "go", "list", "-e", "-json", "./...")
 	if ctx.Err() != nil {
 		return nil, nil, 0, ctx.Err()
 	}
 	fileToPkg, edges, total, err = parseGoList(bytes.NewReader(out))
 	if err != nil {
+		if runErr != nil {
+			return nil, nil, 0, fmt.Errorf("parse go list output after command failure (%v): %w", validateWSLCommandError(runErr, stderr), err)
+		}
 		return nil, nil, 0, err
 	}
 	if total == 0 {
 		if runErr != nil {
-			return nil, nil, 0, fmt.Errorf("go list produced no packages: %w", runErr)
+			return nil, nil, 0, fmt.Errorf("go list produced no packages: %w", validateWSLCommandError(runErr, stderr))
+		}
+		if detail := validateWSLCommandStderr(stderr); detail != "" {
+			return nil, nil, 0, fmt.Errorf("go list produced no packages: %s", detail)
 		}
 		return nil, nil, 0, fmt.Errorf("go list produced no packages")
 	}

@@ -18,6 +18,32 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
+func TestValidateGoListGraphWSLPreservesCommandDiagnostic(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("wsl.exe command boundary is Windows-specific")
+	}
+	if _, err := exec.LookPath("wsl.exe"); err != nil {
+		t.Skip("wsl.exe unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	const missingRoot = "/proc/fak-validate-missing-go-list-root"
+	_, _, total, err := validateGoListGraphWithin(ctx, missingRoot, true)
+	if err == nil {
+		t.Fatalf("go list in missing directory unexpectedly succeeded with %d packages", total)
+	}
+	detail := strings.ToLower(err.Error())
+	if !strings.Contains(detail, missingRoot) || !strings.Contains(detail, "no such file or directory") {
+		t.Fatalf("error lost the bounded WSL cd diagnostic: %v", err)
+	}
+	if strings.Contains(detail, "invalid character") {
+		t.Fatalf("stderr was parsed as go list JSON instead of preserved as a command diagnostic: %v", err)
+	}
+	if len(detail) > 5<<10 {
+		t.Fatalf("command diagnostic is %d bytes, want at most 5 KiB", len(detail))
+	}
+}
+
 func TestValidateTimeoutReturnsStructuredPartialResultAndProgress(t *testing.T) {
 	oldHook := validatePhaseHook
 	validatePhaseHook = func(ctx context.Context, phase string) {
