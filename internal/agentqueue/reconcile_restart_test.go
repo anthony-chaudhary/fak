@@ -104,7 +104,7 @@ func TestReconcileRestartCrashRecoveryE2E(t *testing.T) {
 		t.Fatalf("save updated snapshot: %v", err)
 	}
 
-	runner := &recordingRunner{}
+	runner := &launchingRecordingRunner{}
 	controller := Controller{Store: store, FakPath: "fak", Runner: runner}
 
 	tickReceipt, err := controller.Tick(context.Background())
@@ -133,7 +133,7 @@ func TestReconcileRestartCrashRecoveryE2E(t *testing.T) {
 	}
 	activeCount := 0
 	for _, a := range final.Attempts {
-		if a.State == AttemptReserved || a.State == AttemptRunning {
+		if a.State == AttemptReserved || a.State == AttemptLaunching || a.State == AttemptRunning {
 			activeCount++
 		}
 	}
@@ -167,7 +167,7 @@ func TestControllerWithReconcileOnStart(t *testing.T) {
 		t.Fatalf("store.Save: %v", err)
 	}
 
-	runner := &recordingRunner{}
+	runner := &launchingRecordingRunner{}
 	controller := Controller{
 		Store:            store,
 		FakPath:          "fak",
@@ -332,5 +332,154 @@ func TestReconcileRestartFencesPriorController(t *testing.T) {
 	_, _, err = store.Reserve(context.Background(), priorGen)
 	if err == nil {
 		t.Fatal("expected ErrGenerationConflict, got nil")
+	}
+}
+
+func TestReconcileRestartDeadNonceBoundRunningAttemptStaysHeld(t *testing.T) {
+	snapshot := Snapshot{
+		Schema:     Schema,
+		Generation: "g-before-wrapper-exit",
+		Pool:       PoolSpec{ID: "pool-wrapper-exit", Min: 0, Desired: 1, Max: 1},
+		Intents: []Intent{
+			{ID: "intent-wrapper-exit", State: IntentRunning, RetryEligible: true},
+		},
+		Attempts: []Attempt{
+			{
+				ID:       "attempt-wrapper-exit",
+				IntentID: "intent-wrapper-exit",
+				State:    AttemptRunning,
+				Nonce:    "launch-nonce",
+				PID:      4242,
+			},
+		},
+	}
+	liveness := func(int) bool { return false }
+
+	first, updated, err := ReconcileRestart(snapshot, liveness, RestartOptions{})
+	if err != nil {
+		t.Fatalf("first ReconcileRestart: %v", err)
+	}
+	assertWrapperExitHeld := func(label string, rec RestartReconciliation, got Snapshot, wantDisposition bool) {
+		t.Helper()
+		if len(rec.Replaced) != 0 || len(rec.Adopted) != 0 {
+			t.Fatalf("%s reconciliation replaced=%+v adopted=%+v, want neither", label, rec.Replaced, rec.Adopted)
+		}
+		if wantDisposition && (len(rec.Held) != 1 || rec.Held[0].IntentID != "intent-wrapper-exit" || rec.Held[0].Action != AttemptActionHold) {
+			t.Fatalf("%s held=%+v, want one hold for intent-wrapper-exit", label, rec.Held)
+		}
+		if len(got.Intents) != 1 || got.Intents[0].State != IntentHeld || got.Intents[0].RetryEligible || got.Intents[0].HoldReason != "WRAPPER_EXIT_UNWITNESSED" {
+			t.Fatalf("%s intent=%+v, want held, retry-ineligible WRAPPER_EXIT_UNWITNESSED", label, got.Intents)
+		}
+		if len(got.Attempts) != 1 || got.Attempts[0].State != AttemptFailed {
+			t.Fatalf("%s attempts=%+v, want original attempt failed with no replacement", label, got.Attempts)
+		}
+	}
+	assertWrapperExitHeld("first", first, updated, true)
+
+	second, repeated, err := ReconcileRestart(updated, liveness, RestartOptions{})
+	if err != nil {
+		t.Fatalf("second ReconcileRestart: %v", err)
+	}
+	assertWrapperExitHeld("second", second, repeated, false)
+}
+
+func TestReconcileRestartLiveNonceBoundRunningAttemptRequiresMatchingStartIdentity(t *testing.T) {
+	startedAt := time.Date(2026, time.September, 23, 12, 0, 0, 0, time.UTC)
+	for _, tt := range []struct {
+		name      string
+		startTime func(int) (time.Time, bool)
+	}{
+		{
+			name: "mismatched",
+			startTime: func(int) (time.Time, bool) {
+				return startedAt.Add(time.Second), true
+			},
+		},
+		{
+			name: "unavailable",
+			startTime: func(int) (time.Time, bool) {
+				return time.Time{}, false
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot := Snapshot{
+				Schema:     Schema,
+				Generation: "g-before-identity-check",
+				Pool:       PoolSpec{ID: "pool-identity-check", Min: 0, Desired: 1, Max: 1},
+				Intents: []Intent{
+					{ID: "intent-identity-check", State: IntentRunning, RetryEligible: true},
+				},
+				Attempts: []Attempt{
+					{
+						ID:        "attempt-identity-check",
+						IntentID:  "intent-identity-check",
+						State:     AttemptRunning,
+						Nonce:     "launch-nonce",
+						PID:       4242,
+						StartedAt: startedAt,
+					},
+				},
+			}
+
+			rec, updated, err := ReconcileRestart(snapshot, func(int) bool { return true }, RestartOptions{StartTime: tt.startTime})
+			if err != nil {
+				t.Fatalf("ReconcileRestart: %v", err)
+			}
+			if len(rec.Adopted) != 0 || len(rec.Replaced) != 0 {
+				t.Fatalf("adopted=%+v replaced=%+v, want neither", rec.Adopted, rec.Replaced)
+			}
+			if len(rec.Held) != 1 || rec.Held[0].IntentID != "intent-identity-check" || rec.Held[0].Action != AttemptActionHold {
+				t.Fatalf("held=%+v, want one hold for intent-identity-check", rec.Held)
+			}
+			if got := updated.Intents[0]; got.State != IntentHeld || got.RetryEligible || got.HoldReason != "WRAPPER_IDENTITY_UNVERIFIED" {
+				t.Fatalf("intent=%+v, want held, retry-ineligible WRAPPER_IDENTITY_UNVERIFIED", got)
+			}
+			if got := updated.Attempts[0]; got.State != AttemptFailed {
+				t.Fatalf("attempt state=%q, want %q", got.State, AttemptFailed)
+			}
+		})
+	}
+}
+
+func TestReconcileRestartLiveNonceBoundRunningAttemptAdoptsMatchingStartIdentity(t *testing.T) {
+	startedAt := time.Date(2026, time.September, 23, 12, 0, 0, 0, time.UTC)
+	snapshot := Snapshot{
+		Schema:     Schema,
+		Generation: "g-before-identity-check",
+		Pool:       PoolSpec{ID: "pool-identity-check", Min: 0, Desired: 1, Max: 1},
+		Intents: []Intent{
+			{ID: "intent-identity-check", State: IntentRunning},
+		},
+		Attempts: []Attempt{
+			{
+				ID:        "attempt-identity-check",
+				IntentID:  "intent-identity-check",
+				State:     AttemptRunning,
+				Nonce:     "launch-nonce",
+				PID:       4242,
+				StartedAt: startedAt,
+			},
+		},
+	}
+	startTime := func(pid int) (time.Time, bool) {
+		if pid != 4242 {
+			t.Fatalf("start identity checked pid=%d, want 4242", pid)
+		}
+		return startedAt, true
+	}
+
+	rec, updated, err := ReconcileRestart(snapshot, func(int) bool { return true }, RestartOptions{StartTime: startTime})
+	if err != nil {
+		t.Fatalf("ReconcileRestart: %v", err)
+	}
+	if len(rec.Adopted) != 1 || rec.Adopted[0].IntentID != "intent-identity-check" || rec.Adopted[0].Action != AttemptActionAdopt {
+		t.Fatalf("adopted=%+v, want one adoption for intent-identity-check", rec.Adopted)
+	}
+	if len(rec.Held) != 0 || len(rec.Replaced) != 0 {
+		t.Fatalf("held=%+v replaced=%+v, want neither", rec.Held, rec.Replaced)
+	}
+	if updated.Intents[0].State != IntentRunning || updated.Attempts[0].State != AttemptRunning {
+		t.Fatalf("intent=%+v attempt=%+v, want both running", updated.Intents[0], updated.Attempts[0])
 	}
 }

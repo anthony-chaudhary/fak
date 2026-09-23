@@ -36,6 +36,7 @@ import (
 // Injectable seams mirroring the Python sweep's git= / audit_runner= test params.
 var dispatchWitnessResolvingSHA = dispatchWitnessResolvingSHAGit
 var dispatchWitnessCommitAudit = dispatchWitnessCommitAuditDos
+var dispatchWitnessExactIssueCites = dispatchWitnessExactIssueCitesGit
 
 // dispatchWitnessTestRun is the #3838 test-run seam: given a resolving commit, run its
 // changed package's tests and report (ran, passed). Injectable so the sweep test pins
@@ -77,6 +78,19 @@ func landAndReapWorkerWorktree(root, stem, base string) workerworktree.Result {
 	tree := readResolveLeaseTree(stem + dispatchLeaseTreeSidecarSuffix)
 	res := dispatchWitnessLandReap(root, wtPath, base, tree)
 	if res.OK {
+		if _, err := os.Stat(stem + dispatchAgentQueueBindingSuffix); err == nil {
+			raw, marshalErr := json.Marshal(res)
+			if marshalErr != nil {
+				res.OK = false
+				res.Reason = "could not encode agentqueue land receipt: " + marshalErr.Error()
+				return res
+			}
+			if writeErr := writeFileAtomic(stem+dispatchAgentQueueLandSuffix, raw, 0o600); writeErr != nil {
+				res.OK = false
+				res.Reason = "could not persist agentqueue land receipt: " + writeErr.Error()
+				return res
+			}
+		}
 		// Landed and reaped once: drop the sidecar so a later sweep never re-lands.
 		// A refusal keeps this pointer as the durable next-action input.
 		_ = os.Remove(stem + dispatchWorktreeSidecarSuffix)
@@ -278,6 +292,7 @@ func mergeDispatchWitnessRecords(durable, fresh []dispatchtick.WitnessRecord) []
 
 func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []dispatchtick.WitnessRecord) {
 	audited := []any{}
+	queueResolutionErrors := []any{}
 	buckets := map[string][]any{
 		dispatchtick.ClaimWitnessed:   {},
 		dispatchtick.ClaimUnwitnessed: {},
@@ -298,18 +313,45 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 		}
 		stem := strings.TrimSuffix(log, filepath.Ext(log))
 		reconcileLateCommit := false
+		var priorLand *workerworktree.Result
+		if raw, err := os.ReadFile(stem + dispatchAgentQueueLandSuffix); err == nil {
+			var landed workerworktree.Result
+			if json.Unmarshal(raw, &landed) == nil && landed.OK {
+				priorLand = &landed
+			}
+		}
 		if raw, err := os.ReadFile(stem + dispatchtick.WitnessSidecarSuffix); err == nil {
 			var prior struct {
-				Claim  string `json:"claim"`
-				Reason string `json:"reason"`
+				Issue        int                    `json:"issue"`
+				Log          string                 `json:"log"`
+				SHA          string                 `json:"sha"`
+				Claim        string                 `json:"claim"`
+				Verdict      string                 `json:"verdict"`
+				Witness      string                 `json:"witness"`
+				TestClaim    string                 `json:"test_claim"`
+				Reason       string                 `json:"reason"`
+				WorktreeLand *workerworktree.Result `json:"worktree_land"`
 			}
 			if json.Unmarshal(raw, &prior) != nil || prior.Claim != dispatchtick.ClaimNoCommit || prior.Reason != dispatchWitnessDiedBeforeEpilogue {
+				if live && prior.TestClaim == dispatchtick.ClaimTestGreen {
+					rec := dispatchtick.WitnessRecord{Issue: prior.Issue, Log: prior.Log, SHA: prior.SHA,
+						Claim: prior.Claim, Verdict: prior.Verdict, Witness: prior.Witness, TestClaim: prior.TestClaim}
+					if err := resolveDispatchAgentQueueWitness(stem, rec, nil); err != nil {
+						queueResolutionErrors = append(queueResolutionErrors, map[string]any{"log": filepath.Base(log), "error": err.Error()})
+					}
+				}
 				continue // terminal evidence is immutable unless the timeout raced a late commit
 			}
 			reconcileLateCommit = true
+			if priorLand == nil {
+				priorLand = prior.WorktreeLand
+			}
 		}
 		if !reconcileLateCommit {
 			pid, ok := readPID(stem + ".pid")
+			if !ok {
+				pid, ok = readDispatchAgentQueuePID(stem)
+			}
 			if !ok {
 				continue // no pid -> cannot prove the worker finished -> not yet auditable
 			}
@@ -337,7 +379,7 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 		// — the stranded-poison revert rung below must never fire for it.
 		_, wtErr := os.Stat(stem + dispatchWorktreeSidecarSuffix)
 		ranInWorktree := wtErr == nil
-		var worktreeLand *workerworktree.Result
+		worktreeLand := priorLand
 		// #3168: the pid is provably dead. If this worker ran in a per-worker git
 		// worktree, land its diff onto the trunk and reap the worktree BEFORE the
 		// resolving-SHA scan, so the just-landed commit is what gets witnessed. All
@@ -345,11 +387,31 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 		// audit the resolve log exactly as today (a leaked worktree is reaped later
 		// by worktree_doctor.py --sweep-disposable, which knows the marker). Only in a
 		// live sweep — a dry-run must never mutate the trunk.
-		if live && !reconcileLateCommit && ranInWorktree {
+		if live && ranInWorktree && worktreeLand == nil {
 			res := landAndReapWorkerWorktree(root, stem, base)
 			worktreeLand = &res
 		}
-		sha := dispatchWitnessResolvingSHA(root, issue, base)
+		_, bindingErr := os.Stat(stem + dispatchAgentQueueBindingSuffix)
+		queueBound := bindingErr == nil
+		sha := ""
+		queueExactIssue := false
+		if queueBound {
+			if worktreeLand != nil {
+				// A newer peer may also cite this issue. Only the commit accepted
+				// by this worker's isolated land can become its queue witness.
+				sha = worktreeLand.CommitSHA
+				if sha != "" {
+					var citeErr error
+					queueExactIssue, citeErr = dispatchWitnessExactIssueCites(root, sha, issue)
+					if citeErr != nil {
+						queueResolutionErrors = append(queueResolutionErrors, map[string]any{"log": filepath.Base(log), "error": "exact issue citation: " + citeErr.Error()})
+						continue // uncertain probe: retry; never freeze an unwitnessed row
+					}
+				}
+			}
+		} else {
+			sha = dispatchWitnessResolvingSHA(root, issue, base)
+		}
 		if reconcileLateCommit && sha == "" {
 			continue // the original no-commit claim is still true; preserve it byte-for-byte
 		}
@@ -375,8 +437,12 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 			}
 		} else {
 			verdict, witness := dispatchWitnessCommitAudit(root, sha)
+			if queueBound && verdict == "" && witness == "" {
+				queueResolutionErrors = append(queueResolutionErrors, map[string]any{"log": filepath.Base(log), "error": "exact commit audit unavailable; witness will retry"})
+				continue
+			}
 			claim := dispatchtick.ClaimUnwitnessed
-			if dispatchtick.CommitWitnessed(verdict, witness) {
+			if dispatchtick.CommitWitnessed(verdict, witness) && (!queueBound || queueExactIssue) {
 				claim = dispatchtick.ClaimWitnessed
 			}
 			rec = dispatchtick.WitnessRecord{
@@ -459,7 +525,13 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 		buckets[rec.Claim] = append(buckets[rec.Claim], row)
 		if live {
 			if b, err := json.Marshal(row); err == nil {
-				_ = os.WriteFile(stem+dispatchtick.WitnessSidecarSuffix, b, 0o644)
+				if err := writeFileAtomic(stem+dispatchtick.WitnessSidecarSuffix, b, 0o644); err != nil {
+					queueResolutionErrors = append(queueResolutionErrors, map[string]any{"log": filepath.Base(log), "error": "persist work witness: " + err.Error()})
+				} else if rec.TestClaim == dispatchtick.ClaimTestGreen {
+					if err := resolveDispatchAgentQueueWitness(stem, rec, row); err != nil {
+						queueResolutionErrors = append(queueResolutionErrors, map[string]any{"log": filepath.Base(log), "error": err.Error()})
+					}
+				}
 			}
 		}
 	}
@@ -469,6 +541,9 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 		"witnessed":   buckets[dispatchtick.ClaimWitnessed],
 		"unwitnessed": buckets[dispatchtick.ClaimUnwitnessed],
 		"no_commit":   buckets[dispatchtick.ClaimNoCommit],
+	}
+	if len(queueResolutionErrors) > 0 {
+		payload["agentqueue_witness_errors"] = queueResolutionErrors
 	}
 	// #5864: the beat outcomes, by closed-vocabulary reason, so "which lanes were
 	// attested and why were the rest not" is countable straight off the tick
@@ -527,6 +602,22 @@ func dispatchWitnessResolvingSHAGit(root string, issue int, baseSHA string) stri
 		return ""
 	}
 	return dispatchtick.FirstResolvingSHA(string(out), issue)
+}
+
+func dispatchWitnessExactIssueCitesGit(root, sha string, issue int) (bool, error) {
+	if sha == "" || issue <= 0 {
+		return false, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := windowgate.CommandContext(ctx, "git", "show", "-s", "--format=%s", "--no-patch", sha)
+	cmd.Dir = root
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return false, err
+	}
+	return dispatchtick.SubjectCitesIssue(strings.TrimSpace(string(out)), issue), nil
 }
 
 func dispatchWitnessCommitPathsGit(root, sha string) ([]string, bool) {

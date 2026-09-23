@@ -151,14 +151,18 @@ func IsolationBackends() []IsolationBackend {
 // Result is the fail-open outcome of a git-touching op. OK is the one bit callers
 // branch on; the rest carries evidence for the record/log.
 type Result struct {
-	OK             bool   `json:"ok"`
-	Code           string `json:"code,omitempty"`
-	Backend        string `json:"backend,omitempty"`
-	Path           string `json:"path,omitempty"`
-	BaseSHA        string `json:"base_sha,omitempty"`
-	Reused         bool   `json:"reused,omitempty"`
-	Applied        bool   `json:"applied,omitempty"`
-	Committed      bool   `json:"committed,omitempty"`
+	OK        bool   `json:"ok"`
+	Code      string `json:"code,omitempty"`
+	Backend   string `json:"backend,omitempty"`
+	Path      string `json:"path,omitempty"`
+	BaseSHA   string `json:"base_sha,omitempty"`
+	Reused    bool   `json:"reused,omitempty"`
+	Applied   bool   `json:"applied,omitempty"`
+	Committed bool   `json:"committed,omitempty"`
+	// CommitSHA is the exact commit accepted by the isolated-index CAS. A
+	// committed result without this value is not enough to attribute work to a
+	// particular queued attempt under concurrent same-issue landings.
+	CommitSHA      string `json:"commit_sha,omitempty"`
 	Removed        bool   `json:"removed,omitempty"`
 	Preserved      bool   `json:"preserved,omitempty"`
 	Reason         string `json:"reason,omitempty"`

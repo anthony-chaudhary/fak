@@ -107,8 +107,12 @@ func TestPrepareProspectiveLandBindsExactCandidateAndAcceptDoesNotVerify(t *test
 	if obs.verify != v || obs.prospective != p {
 		t.Fatal("accept reran verification")
 	}
-	if head := strings.TrimSpace(mustGit(t, f.root, "rev-parse", "refs/heads/main")); head != r.CandidateSHA {
+	head := strings.TrimSpace(mustGit(t, f.root, "rev-parse", "refs/heads/main"))
+	if head != r.CandidateSHA {
 		t.Fatalf("head=%s candidate=%s", head, r.CandidateSHA)
+	}
+	if got.CommitSHA != head {
+		t.Fatalf("accepted commit SHA=%q, want exact trunk head %q", got.CommitSHA, head)
 	}
 }
 
@@ -171,6 +175,9 @@ func TestAcceptPreparedLandRejectsAlteredBindingsWithoutRefMovement(t *testing.T
 			got := AcceptPreparedLand(f.root, f.wt, want, nil)
 			if got.OK || got.Code != LandResultPreparedMismatch || !got.Preserved {
 				t.Fatalf("altered %s accepted: %+v", tc.name, got)
+			}
+			if got.CommitSHA != "" {
+				t.Fatalf("altered %s returned commit SHA %q", tc.name, got.CommitSHA)
 			}
 			if after := strings.TrimSpace(mustGit(t, f.root, "rev-parse", "refs/heads/main")); after != before {
 				t.Fatalf("%s moved ref %s -> %s", tc.name, before, after)

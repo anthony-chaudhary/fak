@@ -150,7 +150,7 @@ func AcceptPreparedLand(root, wtPath string, expected PreparedLandExpectation, g
 	if rc, out := run(git, root, coArgs); rc != 0 {
 		detail += "; landed " + shortSHA(receipt.CandidateSHA) + " but working-tree sync failed: " + tail(out, 200)
 	}
-	return Result{OK: true, Code: LandResultSuccess, Applied: true, Committed: true,
+	return Result{OK: true, Code: LandResultSuccess, Applied: true, Committed: true, CommitSHA: receipt.CandidateSHA,
 		Reason: "accepted verified prospective landing " + shortSHA(receipt.CandidateSHA),
 		Detail: detail, RecoveryRef: receipt.RecoveryRef}
 }

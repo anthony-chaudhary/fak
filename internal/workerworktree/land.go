@@ -1146,7 +1146,7 @@ func landIsolatedProspectivePrepared(root, wtPath, diff, msgFile string, paths [
 			}
 		}
 		finishSync()
-		return Result{OK: true, Code: LandResultSuccess, Applied: true, Committed: true,
+		return Result{OK: true, Code: LandResultSuccess, Applied: true, Committed: true, CommitSHA: newCommit,
 			Reason: "isolated-index land " + shortSHA(newCommit) + " (race-free, #3547)",
 			Detail: detail, Disambiguation: disambiguation, RecoveryRef: recoveryRef, RemoteRecovery: remoteReceipt}, true
 	}

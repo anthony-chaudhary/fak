@@ -15,14 +15,37 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agentqueue"
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
+const (
+	agentQueueStatePathEnv = "FAK_AGENTQUEUE_STATE_PATH"
+	agentQueueAttemptIDEnv = "FAK_AGENTQUEUE_ATTEMPT_ID"
+	agentQueueNonceEnv     = "FAK_AGENTQUEUE_NONCE"
+)
+
+// Environment keys are case-insensitive on Windows. Remove every spelling
+// before passing queue identity across a process boundary, or an inherited
+// mixed-case entry can override the newly minted fenced identity.
+func stripAgentQueueEnv(env map[string]string) {
+	for key := range env {
+		if strings.EqualFold(key, agentQueueStatePathEnv) ||
+			strings.EqualFold(key, agentQueueAttemptIDEnv) ||
+			strings.EqualFold(key, agentQueueNonceEnv) {
+			delete(env, key)
+		}
+	}
+}
+
 func dispatchWorkerEnv(backend, lane, root, runsDir string, account dispatchtick.Account, goal, goalProfile string) (map[string]string, error) {
 	env := envMap(os.Environ())
+	// Queue launch identity is explicit per spawn. Never inherit a stale identity
+	// from the dispatcher's ambient environment into an unrelated worker.
+	stripAgentQueueEnv(env)
 	env["DISPATCH_WORKSPACE"] = root
 	env["DISPATCH_LANE"] = lane
 	env["DISPATCH_BACKEND"] = backend
@@ -288,7 +311,44 @@ func dispatchWorkerNeedsHiddenConsole(backend string) bool {
 	return strings.EqualFold(strings.TrimSpace(backend), "codex")
 }
 
-func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA, stdinPayload string, probeS float64) (dispatchSpawnResult, error) {
+func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA, stdinPayload string, probeS float64) (result dispatchSpawnResult, spawnErr error) {
+	queueStatePath := strings.TrimSpace(env[agentQueueStatePathEnv])
+	queueAttemptID := strings.TrimSpace(env[agentQueueAttemptIDEnv])
+	queueNonce := strings.TrimSpace(env[agentQueueNonceEnv])
+	stripAgentQueueEnv(env)
+	queueFields := 0
+	for _, value := range []string{queueStatePath, queueAttemptID, queueNonce} {
+		if value != "" {
+			queueFields++
+		}
+	}
+	if queueFields != 0 && queueFields != 3 {
+		return dispatchSpawnResult{}, errors.New("agentqueue launch identity must include state path, attempt id, and nonce")
+	}
+	queueStartMayHaveHappened := false
+	if queueFields == 3 {
+		if err := validateDispatchAgentQueueHandoffIdentity(queueStatePath, queueAttemptID, queueNonce, issue, lane); err != nil {
+			return dispatchSpawnResult{}, err
+		}
+		env[agentQueueStatePathEnv] = queueStatePath
+		env[agentQueueAttemptIDEnv] = queueAttemptID
+		env[agentQueueNonceEnv] = queueNonce
+		// Every normal return before Start is proof that no wrapper exists. A
+		// process crash does not run this defer and conservatively leaves Launching.
+		defer func() {
+			if queueStartMayHaveHappened {
+				return
+			}
+			abortCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := agentqueue.FileStore(queueStatePath).AbortLaunching(abortCtx, queueAttemptID, queueNonce, 0, time.Time{}); err != nil {
+				spawnErr = errors.Join(spawnErr, fmt.Errorf("abort agentqueue launch: %w", err))
+			}
+		}()
+		if err := validateDispatchAgentQueueHandoff(queueStatePath, queueAttemptID, queueNonce, issue, lane); err != nil {
+			return dispatchSpawnResult{}, err
+		}
+	}
 	if len(command) == 0 {
 		return dispatchSpawnResult{}, errors.New("empty worker command")
 	}
@@ -296,9 +356,26 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 		return dispatchSpawnResult{}, err
 	}
 	stamp := time.Now().UTC().Format("20060102-150405")
-	outLog := filepath.Join(runsDir, fmt.Sprintf("resolve-%d-%s.log", issue, stamp))
+	if queueFields == 3 {
+		// The nonce makes simultaneous queue launches distinct even within one
+		// second, and O_EXCL below prevents a replay from truncating prior evidence.
+		stamp += "-" + queueNonce[:min(len(queueNonce), 12)]
+	}
+	var outLog string
+	var fh *os.File
+	var err error
+	for collision := 0; collision < 16; collision++ {
+		suffix := ""
+		if collision > 0 {
+			suffix = fmt.Sprintf("-%02d", collision)
+		}
+		outLog = filepath.Join(runsDir, fmt.Sprintf("resolve-%d-%s%s.log", issue, stamp, suffix))
+		fh, err = os.OpenFile(outLog, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if !errors.Is(err, os.ErrExist) {
+			break
+		}
+	}
 	exe := resolveDispatchWorkerExecutable(backend, command[0])
-	fh, err := os.OpenFile(outLog, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return dispatchSpawnResult{}, err
 	}
@@ -356,30 +433,66 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 	// resource ceiling. Launch the guard as an ordinary hidden-background process
 	// here, matching the Unix detached lifetime instead of nesting it under the
 	// launcher's kill-on-close job.
+	cmd.Env = envSliceFromMap(env)
+	if queueFields == 3 {
+		worktreePath := ""
+		if workerworktree.IsWorkerWorktree(cwd) {
+			worktreePath = cwd
+		}
+		// The launcher may die immediately after Start. Persist the worktree,
+		// base and lease evidence needed by the independent sweep beforehand.
+		tree = dispatchTrimTree(tree)
+		if err := stageDispatchAgentQueueSidecars(stem, worktreePath, baseSHA, leaseID, tree); err != nil {
+			_ = fh.Close()
+			return dispatchSpawnResult{}, err
+		}
+		if err := writeDispatchAgentQueueBinding(stem, queueStatePath, queueAttemptID, queueNonce, issue, lane, worktreePath); err != nil {
+			_ = fh.Close()
+			return dispatchSpawnResult{}, err
+		}
+	}
+	queueStartMayHaveHappened = true
 	err = cmd.Start()
 	if err != nil {
 		_ = fh.Close()
-		return dispatchSpawnResult{}, err
+		if cmd.Process == nil {
+			queueStartMayHaveHappened = false
+			return dispatchSpawnResult{}, err
+		}
+		// A process handle despite Start's error is ambiguous. Preserve the PID
+		// and the lane fence so a later sweep can observe its terminal state.
+		_ = os.WriteFile(stem+".pid", []byte(strconv.Itoa(cmd.Process.Pid)), 0o644)
+		if leaseID != "" {
+			_ = os.WriteFile(stem+dispatchLeaseIDSidecarSuffix, []byte(leaseID), 0o644)
+		}
+		return dispatchSpawnResult{PID: cmd.Process.Pid, Log: outLog, Issue: issue, Lane: lane, Backend: backend, LeaseID: leaseID}, err
 	}
 	_ = fh.Close()
 
-	_ = os.WriteFile(stem+".pid", []byte(strconv.Itoa(cmd.Process.Pid)), 0o644)
+	if queueFields == 3 {
+		if err := writeFileAtomic(stem+".pid", []byte(strconv.Itoa(cmd.Process.Pid)), 0o644); err != nil {
+			return dispatchSpawnResult{PID: cmd.Process.Pid, Log: outLog, Issue: issue, Lane: lane, Backend: backend, LeaseID: leaseID},
+				fmt.Errorf("persist agentqueue wrapper PID: %w", err)
+		}
+	} else {
+		_ = os.WriteFile(stem+".pid", []byte(strconv.Itoa(cmd.Process.Pid)), 0o644)
+	}
 	_ = os.WriteFile(stem+".backend", []byte(backend), 0o644)
-	if leaseID != "" {
+	if queueFields != 3 && leaseID != "" {
 		_ = os.WriteFile(stem+dispatchLeaseIDSidecarSuffix, []byte(leaseID), 0o644)
 	}
 	tree = dispatchTrimTree(tree)
-	if len(tree) > 0 {
+	if queueFields != 3 && len(tree) > 0 {
 		if b, err := json.Marshal(tree); err == nil {
 			_ = os.WriteFile(stem+dispatchLeaseTreeSidecarSuffix, b, 0o644)
 		}
 	}
-	if baseSHA != "" {
+	if queueFields != 3 && baseSHA != "" {
 		_ = os.WriteFile(stem+dispatchtick.BaseSHASidecarSuffix, []byte(baseSHA), 0o644)
 	}
 	// #3168: when the worker ran in a per-worker git worktree (cwd carries the marker),
 	// record it so the witness sweep can land+reap it after the pid dies.
-	if workerworktree.IsWorkerWorktree(cwd) {
+	if queueFields != 3 && workerworktree.IsWorkerWorktree(cwd) {
 		_ = os.WriteFile(stem+dispatchWorktreeSidecarSuffix, []byte(cwd), 0o644)
 	}
 	acct := dispatchtick.AccountSidecar(account)
@@ -400,6 +513,34 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 		res.EarlyExit = probeDispatchSpawn(cmd, outLog, probeS)
 	}
 	return res, nil
+}
+
+func stageDispatchAgentQueueSidecars(stem, worktreePath, baseSHA, leaseID string, tree []string) error {
+	for _, item := range []struct {
+		suffix string
+		value  string
+	}{
+		{dispatchWorktreeSidecarSuffix, worktreePath},
+		{dispatchtick.BaseSHASidecarSuffix, baseSHA},
+		{dispatchLeaseIDSidecarSuffix, leaseID},
+	} {
+		if item.value == "" {
+			continue
+		}
+		if err := writeFileAtomic(stem+item.suffix, []byte(item.value), 0o600); err != nil {
+			return fmt.Errorf("stage agentqueue %s sidecar: %w", item.suffix, err)
+		}
+	}
+	if len(tree) > 0 {
+		b, err := json.Marshal(tree)
+		if err != nil {
+			return err
+		}
+		if err := writeFileAtomic(stem+dispatchLeaseTreeSidecarSuffix, b, 0o600); err != nil {
+			return fmt.Errorf("stage agentqueue lease tree: %w", err)
+		}
+	}
+	return nil
 }
 
 // stageDispatchPromptStdin writes the worker prompt to a durable sidecar beside

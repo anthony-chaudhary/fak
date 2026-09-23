@@ -412,7 +412,7 @@ func TestDispatchCodexSeatCountsMarkedWorker(t *testing.T) {
 	}
 }
 
-func TestDispatchCodexAmbientOAuthBucketAdmitsUntilCap(t *testing.T) {
+func TestDispatchCodexAmbientOAuthBucketKeepsConfiguredCap(t *testing.T) {
 	t.Setenv("FAK_CODEX_OAUTH_SESSIONS", "10")
 	home := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
@@ -426,25 +426,32 @@ func TestDispatchCodexAmbientOAuthBucketAdmitsUntilCap(t *testing.T) {
 	withDispatchJSONHelper(t, func(root string, args ...string) (map[string]any, error) {
 		return map[string]any{"ok": true}, nil
 	})
-	old := dispatchProbeCodexProcessRows
-	dispatchProbeCodexProcessRows = func() ([]dispatchCodexProcessRow, error) {
+	oldCodex, oldWorkers := dispatchProbeCodexProcessRows, dispatchProbeWorkerProcessRows
+	rows := func() ([]dispatchCodexProcessRow, error) {
 		return []dispatchCodexProcessRow{
-			{PID: 42, Name: "codex.exe"},
-			{PID: 43, Name: "codex.exe"},
-			{PID: 44, Name: "codex.exe"},
+			{PID: 42, Name: "codex.exe", Cmdline: `codex`},
+			{PID: 43, Name: "node.exe", Cmdline: `node C:\npm\@openai\codex\bin\codex.js`},
+			{PID: 44, PPID: 43, Name: "codex.exe", Cmdline: `codex`},
 		}, nil
 	}
-	t.Cleanup(func() { dispatchProbeCodexProcessRows = old })
+	dispatchProbeCodexProcessRows, dispatchProbeWorkerProcessRows = rows, rows
+	t.Cleanup(func() {
+		dispatchProbeCodexProcessRows, dispatchProbeWorkerProcessRows = oldCodex, oldWorkers
+	})
 
-	got, err := dispatchPreflight(t.TempDir(), io.Discard, 4, "engineering", "codex")
+	root := t.TempDir()
+	if workers := dispatchProductWorkerCount(root, "codex"); workers != 0 {
+		t.Fatalf("attributable codex workers = %d, want 0 for ambient UI processes", workers)
+	}
+	got, err := dispatchPreflight(root, io.Discard, 4, "engineering", "codex")
 	if err != nil {
 		t.Fatalf("dispatchPreflight: %v", err)
 	}
 	if got["verdict"] != dispatchtick.PreflightOKVerdict {
 		t.Fatalf("verdict = %v, want SPAWN_OK; payload=%v", got["verdict"], got)
 	}
-	if got["cap"] != 3 {
-		t.Fatalf("cap = %v, want 3", got["cap"])
+	if got["cap"] != 4 {
+		t.Fatalf("cap = %v, want configured cap 4", got["cap"])
 	}
 }
 
