@@ -2,8 +2,10 @@ package gateway
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +33,13 @@ const maxBody = 4 << 20
 // maxTokenizeBody bounds the stateless native prompt-preparation request. The
 // response contains token identities and counts, never the source transcript.
 const maxTokenizeBody = 1 << 20
+
+const (
+	healthAuthChallengeHeader = "X-Fak-Auth-Challenge"
+	healthAuthProofHeader     = "X-Fak-Auth-Proof"
+	healthAuthProofDomain     = "fak-health-v1\x00"
+	healthAuthNonceBytes      = 32
+)
 
 type nativePromptEncoder interface {
 	EncodePrompt(context.Context, []agent.Message, []agent.ToolDef, ...agent.SampleOpt) (agent.PromptEncoding, error)
@@ -225,11 +234,28 @@ func (s *Server) routeTable() []gatewayRoute {
 		{"/v1/sessions", s.handleLeaseSessions},
 		// MCP-over-HTTP, operational endpoints.
 		{"/mcp", s.handleMCPHTTP},
-		{"/healthz", s.handleHealth},
+		{"/healthz", s.handleHealthWithAuthProof},
 		{"/metrics", s.handleMetrics},
 		{"/debug/vars", s.handleDebugVars},
 		{"/debug/guard-audit", handleGuardAuditDebug},
 	}
+}
+
+// handleHealthWithAuthProof preserves the unauthenticated health response while
+// allowing a client that already holds the configured gateway key to authenticate
+// this process before sending that key as a bearer token. Invalid or absent
+// challenges reveal nothing and leave /healthz byte-for-byte unchanged.
+func (s *Server) handleHealthWithAuthProof(w http.ResponseWriter, r *http.Request) {
+	if s.requireKey != "" {
+		encoded := r.Header.Get(healthAuthChallengeHeader)
+		if nonce, err := base64.StdEncoding.DecodeString(encoded); err == nil && len(nonce) == healthAuthNonceBytes {
+			mac := hmac.New(sha256.New, []byte(s.requireKey))
+			_, _ = mac.Write([]byte(healthAuthProofDomain))
+			_, _ = mac.Write(nonce)
+			w.Header().Set(healthAuthProofHeader, base64.StdEncoding.EncodeToString(mac.Sum(nil)))
+		}
+	}
+	s.handleHealth(w, r)
 }
 
 // Handler builds the gateway's HTTP routes (routeTable) wrapped in the metrics

@@ -119,6 +119,19 @@ func TestInfraRepromptBudgetExhausts(t *testing.T) {
 	}
 }
 
+func TestInfraRepromptAtTurnCapPropagatesProviderError(t *testing.T) {
+	providerErr := errors.New("provider unavailable")
+	p := &infraRepromptPlanner{script: []infraStep{{err: providerErr}}}
+
+	m, err := RunArm(context.Background(), p, "task", false, 1, nil, WithInfraRepromptBudget(3))
+	if !errors.Is(err, providerErr) {
+		t.Fatalf("RunArm error = %v, want provider error", err)
+	}
+	if m.HitTurnCap {
+		t.Fatal("provider error was masked by HitTurnCap")
+	}
+}
+
 func TestInfraRepromptTerminalStops(t *testing.T) {
 	p := &infraRepromptPlanner{script: []infraStep{
 		infraStatus(404, "unknown model"),

@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -172,6 +176,10 @@ type agentEndpoint struct {
 	// baseURL is the effective provider base URL; "" means no endpoint was
 	// resolvable (the fail-loud case, unless --offline was explicit).
 	baseURL string
+	// routerKey is populated only after the auto-connected path proves possession
+	// of the candidate credential. This is not process identity: a local proxy could
+	// relay the challenge to a real gateway. The credential is never logged.
+	routerKey string
 	// routerProbed is true when the native fak-router probe ran — the
 	// no-flag path. baseURL=="" + routerProbed means the router was probed
 	// and is not live, not that no endpoint question was asked.
@@ -209,8 +217,9 @@ func resolveAgentEndpoint(af *agentFlags, baseURLExplicit, providerExplicit, mod
 			if !modelExplicit && localModel != "" && localModel != "mock" {
 				*af.model = localModel
 			}
+			routerKey := resolveRouterAPIKey("", false, true, effective)
 			fmt.Fprintf(stderr, "fak agent: auto-connected to the fak router at %s (model: %s)\n", effective, *af.model)
-			return agentEndpoint{baseURL: effective, routerProbed: true}
+			return agentEndpoint{baseURL: effective, routerKey: routerKey, routerProbed: true}
 		}
 		return agentEndpoint{routerProbed: true}
 	}
@@ -278,6 +287,7 @@ func runAgent(argv []string) {
 	modelExplicit := false
 	providerExplicit := false
 	baseURLExplicit := false
+	apiKeyExplicit := false
 	sessionExplicit := false
 	modeExplicit := false
 	rawExplicit := false
@@ -300,6 +310,8 @@ func runAgent(argv []string) {
 			providerExplicit = true
 		case "base-url":
 			baseURLExplicit = true
+		case "api-key-env":
+			apiKeyExplicit = true
 		case "session":
 			sessionExplicit = true
 		case "session-dir":
@@ -532,11 +544,18 @@ func runAgent(argv []string) {
 		agentNoEndpointGuidance(os.Stderr, endpoint.routerProbed)
 		os.Exit(2)
 	} else {
-		key := os.Getenv(*af.apiKeyEnv)
+		key := resolveRouterAPIKey(*af.apiKeyEnv, apiKeyExplicit, false, effectiveBaseURL)
+		if endpoint.routerProbed && !apiKeyExplicit {
+			key = endpoint.routerKey
+		}
 		if key == "" {
-			// A local endpoint (e.g. the transformers shim) needs no key; a remote
-			// one will return 401, which the planner surfaces clearly. Warn, proceed.
-			fmt.Fprintf(os.Stderr, "fak agent: env %s is empty  -  proceeding with no auth header (fine for a local endpoint)\n", *af.apiKeyEnv)
+			if endpoint.routerProbed && !apiKeyExplicit {
+				fmt.Fprintln(os.Stderr, "fak agent: automatic gateway credential withheld because the router did not prove it; restart an updated fak serve or pass --api-key-env VAR")
+			} else {
+				// A local endpoint (e.g. the transformers shim) needs no key; a remote
+				// one will return 401, which the planner surfaces clearly. Warn, proceed.
+				fmt.Fprintf(os.Stderr, "fak agent: env %s is empty  -  proceeding with no auth header (fine for a local endpoint)\n", *af.apiKeyEnv)
+			}
 		}
 		p, err := agent.NewProviderHTTPPlanner(*af.provider, effectiveBaseURL, *af.model, key)
 		must(err)
@@ -616,7 +635,7 @@ func runAgent(argv []string) {
 		if activeWakeReleaser != nil {
 			_ = activeWakeReleaser.Release()
 		}
-		must(err)
+		mustAgentRun(err)
 		if auditJournal != nil {
 			_ = auditJournal.Flush()
 		}
@@ -660,7 +679,7 @@ func runAgent(argv []string) {
 		if activeWakeReleaser != nil {
 			_ = activeWakeReleaser.Release()
 		}
-		must(err)
+		mustAgentRun(err)
 		if auditJournal != nil {
 			_ = auditJournal.Flush()
 		}
@@ -676,7 +695,7 @@ func runAgent(argv []string) {
 	if activeWakeReleaser != nil {
 		_ = activeWakeReleaser.Release()
 	}
-	must(err)
+	mustAgentRun(err)
 	if auditJournal != nil {
 		_ = auditJournal.Flush()
 	}
@@ -691,6 +710,128 @@ func runAgent(argv []string) {
 	announceAgentReport(os.Stderr, *af.out)
 }
 
+func mustAgentRun(err error) {
+	if err == nil {
+		return
+	}
+	termination := agent.ClassifyTermination(err)
+	if termination.Cause == agent.TerminationAuth {
+		fmt.Fprintf(os.Stderr, "fak agent: model authentication failed [%s]: %s\n", termination.Cause, termination.Evidence)
+		fmt.Fprintln(os.Stderr, "  Set FAK_GATEWAY_KEY to the gateway key, or pass --api-key-env VAR, then retry.")
+		os.Exit(1)
+	}
+	must(err)
+}
+
+const (
+	routerAuthChallengeHeader = "X-Fak-Auth-Challenge"
+	routerAuthProofHeader     = "X-Fak-Auth-Proof"
+	routerAuthProofDomain     = "fak-health-v1\x00"
+)
+
+// verifiedRouterCredential checks key possession on the selected endpoint path.
+// A successful proof can be relayed, so it must not be treated as process identity.
+func verifiedRouterCredential(origin, candidate string) string {
+	if candidate == "" {
+		return ""
+	}
+	client := &http.Client{Timeout: 150 * time.Millisecond}
+	if probeRouterAuthProof(client, origin, candidate) {
+		return candidate
+	}
+	if fallback, ok := fakclient.LoopbackFallbackURL(origin); ok && probeRouterAuthProof(client, fallback, candidate) {
+		return candidate
+	}
+	return ""
+}
+
+func probeRouterAuthProof(client *http.Client, origin, candidate string) bool {
+	if client == nil || candidate == "" {
+		return false
+	}
+	nonce := make([]byte, 32)
+	if _, err := rand.Read(nonce); err != nil {
+		return false
+	}
+	origin = strings.TrimRight(strings.TrimSuffix(strings.TrimRight(origin, "/"), "/v1"), "/")
+	req, err := http.NewRequest(http.MethodGet, origin+"/healthz", nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set(routerAuthChallengeHeader, base64.StdEncoding.EncodeToString(nonce))
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	proof, err := base64.StdEncoding.DecodeString(strings.TrimSpace(resp.Header.Get(routerAuthProofHeader)))
+	if err != nil || len(proof) != sha256.Size {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(candidate))
+	_, _ = mac.Write([]byte(routerAuthProofDomain))
+	_, _ = mac.Write(nonce)
+	return hmac.Equal(proof, mac.Sum(nil))
+}
+func resolveRouterAPIKey(apiKeyEnv string, explicitKeyEnv, autoRouter bool, baseURL string) string {
+	if autoRouter && !explicitKeyEnv {
+		if key := os.Getenv("FAK_GATEWAY_KEY"); key != "" {
+			origin := strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1")
+			return verifiedRouterCredential(origin, key)
+		}
+		return workspaceRouterAPIKey(baseURL)
+	}
+	if apiKeyEnv == "" {
+		return ""
+	}
+	return os.Getenv(apiKeyEnv)
+}
+
+func workspaceRouterAPIKey(baseURL string) string {
+	data, err := os.ReadFile("opencode.json")
+	if err != nil {
+		return ""
+	}
+	var cfg struct {
+		Provider map[string]struct {
+			Options struct {
+				APIKey  string `json:"apiKey"`
+				BaseURL string `json:"baseURL"`
+			} `json:"options"`
+		} `json:"provider"`
+	}
+	if json.Unmarshal(data, &cfg) != nil {
+		return ""
+	}
+	options := cfg.Provider["fak-router"].Options
+	if options.BaseURL != baseURL {
+		return ""
+	}
+	key := strings.TrimSpace(options.APIKey)
+	if isTemplateCredential(key) {
+		return ""
+	}
+	return key
+}
+
+func isTemplateCredential(key string) bool {
+	if key == "" {
+		return true
+	}
+	lower := strings.ToLower(key)
+	return strings.HasPrefix(key, "$") ||
+		strings.Contains(key, "${") ||
+		strings.Contains(key, "{{") ||
+		strings.Contains(key, "}}") ||
+		strings.Contains(key, "<") ||
+		strings.Contains(key, ">") ||
+		lower == "changeme" ||
+		lower == "replace-me" ||
+		lower == "your-api-key"
+}
 func loadAgentRouteOptions(path string) (*modelroute.Manifest, []agent.RunOption, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
