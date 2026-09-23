@@ -260,9 +260,13 @@ func TestToolBearingStreamNeverLeaksTextFormCallBuriedInContent(t *testing.T) {
 			finish = *c.Choices[0].FinishReason
 		}
 	}
-	// The leading prose still streamed; the call text was stripped.
-	if got := strings.TrimSpace(content.String()); got != "On it." {
-		t.Fatalf("client content = %q, want %q (only the prose, call stripped)", got, "On it.")
+	// The leading prose still streamed; the call text was stripped. The all-denied
+	// turn now appends structured, model-visible feedback after that prose so a
+	// fak-unaware client can continue with an allowed alternative.
+	got := content.String()
+	note := "[fak] Allowed next step for 1 refused tool call(s):"
+	if !strings.HasPrefix(got, "On it.") || !strings.Contains(got, note) || !strings.Contains(got, "Constraint: deny_y") || strings.Index(got, note) <= strings.Index(got, "On it.") {
+		t.Fatalf("client content = %q, want prose followed by structured refusal note", got)
 	}
 	if finish != "stop" {
 		t.Fatalf("finish = %q, want stop (every proposed call was denied)", finish)
