@@ -37,6 +37,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/parentwatch"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/policy"
+	"github.com/anthony-chaudhary/fak/internal/servewarmup"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
@@ -1055,8 +1056,8 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 	persistServeExitObservations("http")
 }
 
-func runServeBackendWarmup(ctx context.Context, run func(context.Context) (time.Duration, error), _ io.Writer) {
-	_, _ = run(ctx)
+func runServeBackendWarmup(ctx context.Context, run func(context.Context) (time.Duration, error), stderr io.Writer) {
+	servewarmup.Run(ctx, run, stderr)
 }
 
 func resolveServeRequiredKey(envName, flagName, summary, want string) string {
