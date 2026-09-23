@@ -16,6 +16,7 @@ const (
 	TerminationCanceled     = "canceled"
 	TerminationRateLimited  = "rate_limited"
 	TerminationContextLimit = "context_limit"
+	TerminationAuth         = "authentication"
 	TerminationRefused      = "refused"
 	TerminationProvider     = "provider_error"
 	TerminationUnknown      = "unknown"
@@ -36,6 +37,8 @@ func ClassifyTermination(err error) Termination {
 		return Termination{Cause: TerminationRateLimited, Evidence: "provider reported rate limiting"}
 	case containsAny(s, "context window", "context length", "maximum context", "too many tokens", "token limit"):
 		return Termination{Cause: TerminationContextLimit, Evidence: "request exceeded the model context limit"}
+	case containsAny(s, "401 unauthorized", "status 401", "http 401", "status code 401", "403 forbidden", "status 403", "http 403", "status code 403", "missing_credentials", "invalid_credentials"):
+		return Termination{Cause: TerminationAuth, Evidence: "model endpoint rejected the configured credentials"}
 	case containsAny(s, "policy_block", "policy block", "refused", "denied by", "stop gate", "guard blocked"):
 		return Termination{Cause: TerminationRefused, Evidence: "fak refused the turn"}
 	case containsAny(s, "upstream", "provider", "status 5", "http 5"):

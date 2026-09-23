@@ -203,12 +203,16 @@ func cmdChat(argv []string) {
 	}
 
 	effectiveBaseURL := *cf.baseURL
+	autoRouter := false
+	autoRouterKey := ""
 	if effectiveBaseURL == "" && providerExplicit && !*cf.offline {
 		effectiveBaseURL = dropin.DefaultBaseURL(*cf.provider)
 	}
 	if effectiveBaseURL == "" && !*cf.offline && !baseURLExplicit {
 		if localModel, ok := probeLocalGateway("http://127.0.0.1:8080"); ok {
 			effectiveBaseURL = "http://127.0.0.1:8080/v1"
+			autoRouter = true
+			autoRouterKey = resolveRouterAPIKey("", false, true, effectiveBaseURL)
 			if !modelExplicit && localModel != "" && localModel != "mock" {
 				*cf.model = localModel
 			}
@@ -287,7 +291,26 @@ func cmdChat(argv []string) {
 		runOpts = append(runOpts, agent.WithReasoningProfile(*cf.reasoningProfile))
 	}
 
-	planner := chatPlanner(*cf.offline, effectiveBaseURL, *cf.provider, *cf.model, *cf.apiKeyEnv, *cf.anthropicAuth, *cf.codexAuth)
+	plannerKey := resolveRouterAPIKey(*cf.apiKeyEnv, apiKeyExplicit, false, effectiveBaseURL)
+	if autoRouter && !apiKeyExplicit {
+		plannerKey = autoRouterKey
+	}
+	autoRouterProofMissing := autoRouter && !apiKeyExplicit && plannerKey == ""
+	if autoRouterProofMissing {
+		fmt.Fprintln(os.Stderr, "fak chat: automatic gateway credential withheld because the router did not prove it; restart an updated fak serve or pass --api-key-env VAR")
+	}
+	planner := chatPlannerWithResolvedKey(
+		os.Stderr,
+		*cf.offline,
+		effectiveBaseURL,
+		*cf.provider,
+		*cf.model,
+		plannerKey,
+		*cf.apiKeyEnv,
+		*cf.anthropicAuth,
+		*cf.codexAuth,
+		!autoRouterProofMissing,
+	)
 	if *cf.codexAuth {
 		httpPlanner, ok := planner.(*agent.HTTPPlanner)
 		if !ok {
@@ -335,6 +358,10 @@ func chatPlanner(offline bool, baseURL, provider, model, apiKeyEnv, anthropicAut
 }
 
 func chatPlannerWithStderr(stderr io.Writer, offline bool, baseURL, provider, model, apiKeyEnv, anthropicAuth string, codexAuth bool) agent.Planner {
+	return chatPlannerWithResolvedKey(stderr, offline, baseURL, provider, model, resolveRouterAPIKey(apiKeyEnv, true, false, baseURL), apiKeyEnv, anthropicAuth, codexAuth, true)
+}
+
+func chatPlannerWithResolvedKey(stderr io.Writer, offline bool, baseURL, provider, model, key, apiKeyEnv, anthropicAuth string, codexAuth, warnMissingKey bool) agent.Planner {
 	if stderr == nil {
 		stderr = os.Stderr
 	}
@@ -345,14 +372,10 @@ func chatPlannerWithStderr(stderr io.Writer, offline bool, baseURL, provider, mo
 		}
 		return agent.NewMockPlanner(model)
 	}
-	var key string
 	if codexAuth {
 		fmt.Fprintln(stderr, "fak chat: auth mode: codex-auth")
 	} else {
-		if apiKeyEnv != "" {
-			key = os.Getenv(apiKeyEnv)
-		}
-		if key == "" {
+		if key == "" && warnMissingKey {
 			fmt.Fprintf(stderr, "fak chat: env %s is empty  -  proceeding with no auth header (fine for a local endpoint)\n", apiKeyEnv)
 		}
 	}
@@ -599,6 +622,8 @@ func renderInteractiveChatTermination(out io.Writer, err error, verbose bool) {
 		message = "This conversation is too long for the model. Use /clear, then try again."
 	case agent.TerminationRefused:
 		message = "fak blocked this turn. Rephrase the request or use /verbose for details."
+	case agent.TerminationAuth:
+		message = "The model rejected the credential. Set FAK_GATEWAY_KEY to the gateway key, or pass --api-key-env VAR, then try again."
 	case agent.TerminationProvider:
 		message = "I lost the model connection before it answered. This chat is still open; try again."
 	}
