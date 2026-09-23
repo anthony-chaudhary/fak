@@ -391,8 +391,11 @@ func kQuantMatRowsIntoWorkers(qt *kQuantTensor, x, y []float32, workers int) {
 			_ = qt.numaPool.Dispatch(qt.out, func(nodeID, lo, hi int) {
 				raw := qt.rawForNode(nodeID)
 				ranger := q5kMatRowsRangeInt8Raw
-				if qt.kind == kindQ6K {
+				switch qt.kind {
+				case kindQ6K:
 					ranger = q6kMatRowsRangeInt8Raw
+				case kindQ8_0, kindQ4_0:
+					ranger = ciqMatRowsRangeInt8Raw
 				}
 				ranger(raw, qt, qv, y, lo, hi)
 			})
@@ -419,12 +422,18 @@ func kQuantMatRowsIntoWorkers(qt *kQuantTensor, x, y []float32, workers int) {
 		// int8 k-quant decode path: quantize the activation ONCE and reuse it across every output
 		// row, so the per-row work is the compact int8 reduction instead of a 256-wide f32
 		// dequant+dot â€” the lever for GLM-5.2's mixed-quant offloaded experts. Q5_K
-		// (quant_kquant_int8.go) and Q6_K (quant_kquant_int8_q6k.go) each have a reducer; the f32
-		// kQuantMatRowsRange below is untouched + byte-identical (TestKQuantMatRowsMatchesF32).
+		// (quant_kquant_int8.go) and Q6_K (quant_kquant_int8_q6k.go) each have a reducer, and the
+		// legacy ggml Q8_0/Q4_0 blocks ride the compute CIQ kernel (quant_kquant_ciq.go, #12275);
+		// the f32 kQuantMatRowsRange below is untouched + byte-identical (TestKQuantMatRowsMatchesF32).
 		qv := quantizeVecQ8(x)
-		ranger := q5kMatRowsRangeInt8
-		if qt.kind == kindQ6K {
+		var ranger func(*kQuantTensor, q8Vec, []float32, int, int)
+		switch qt.kind {
+		case kindQ6K:
 			ranger = q6kMatRowsRangeInt8
+		case kindQ8_0, kindQ4_0:
+			ranger = ciqMatRowsRangeInt8
+		default: // kindQ5K
+			ranger = q5kMatRowsRangeInt8
 		}
 		parForRangeWorkers(qt.out, qt.out*qt.in, workers, func(lo, hi int) { ranger(qt, qv, y, lo, hi) })
 		return
