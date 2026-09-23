@@ -250,6 +250,47 @@ type VulkanPackedKVAppendContract struct {
 	ProofLevel             VulkanPackedKVProofLevel    `json:"proof_level"`
 }
 
+// VulkanKVProofLevel separates a software storage/attention contract from a
+// source-bound physical execution receipt. A host-executed reference pass is NOT
+// device work, so it must never be admitted at a physical proof level.
+type VulkanKVProofLevel string
+
+const (
+	// VulkanKVSoftwareContract is the level of a host-executed dequant-plus-attention
+	// pass: the math is witnessed on the calling CPU, but no Vulkan dispatch occurred.
+	VulkanKVSoftwareContract VulkanKVProofLevel = "software_contract"
+	// VulkanKVDeviceDispatched is the level of a pass that issued at least one real
+	// Vulkan dispatch through the scratchpad (DeviceDispatches > 0).
+	VulkanKVDeviceDispatched VulkanKVProofLevel = "device_dispatched"
+)
+
+// VulkanKVScratchpadExecutionContract is the typed proof classification for one
+// dequant-once attention pass. It exists to make the presence/execution gap
+// un-forgeable: the historical defect was that ExecuteVulkanAttentionWithDequantOnce
+// is named "Vulkan" yet runs a pure host Go loop, so a caller could read a
+// "successful" pass and mistakenly believe a GPU rank executed it.
+//
+// HostExecuted and DeviceDispatched are mutually exclusive; PhysicalPromotionReady
+// is true only when a real device dispatch occurred AND the host path was not used.
+type VulkanKVScratchpadExecutionContract struct {
+	Schema                 string             `json:"schema"`
+	Arch                   string             `json:"arch"`
+	Format                 QuantizedKVType    `json:"format"`
+	Positions              int                `json:"positions"`
+	NumKVHeads             int                `json:"num_kv_heads"`
+	HeadDim                int                `json:"head_dim"`
+	QueryHeads             int                `json:"query_heads"`
+	DequantCount           int                `json:"dequant_count"`
+	HeadReuses             int                `json:"head_reuses"`
+	DeviceDispatches       int                `json:"device_dispatches"`
+	DeviceTransfers        int                `json:"device_transfers"`
+	HostExecuted           bool               `json:"host_executed"`
+	DeviceDispatched       bool               `json:"device_dispatched"`
+	HostCodecAllowed       bool               `json:"host_codec_allowed"`
+	PhysicalPromotionReady bool               `json:"physical_promotion_ready"`
+	ProofLevel             VulkanKVProofLevel `json:"proof_level"`
+}
+
 // VulkanKVScratchpad manages a contiguous, transposed scratchpad in GPU UMA memory sized
 // to hold active dequantized KV tiles for full-attention layers on AMD Strix Halo (gfx1151).
 //

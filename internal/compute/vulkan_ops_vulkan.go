@@ -376,16 +376,22 @@ func (v *vulkanBackend) AttentionDequantOnce(
 	// Read query lock-free: Read takes vulkanMu and would deadlock here.
 	qHost := v.readHostF32Locked(q)
 
-	// Execute attention using the dequant-once pipeline
+	// Execute attention using the dequant-once pipeline. NOTE: this is the host Go
+	// reference loop -- no attention kernel is dispatched to the device. The
+	// scratchpad therefore records no DeviceDispatch and classifies as
+	// VulkanKVSoftwareContract (HostExecuted). See ClassifyVulkanKVScratchpadExecution.
 	outHost, err := ExecuteVulkanAttentionWithDequantOnce(qHost, sp, rawK, rawV, nH, scale)
 	if err != nil {
 		return Tensor{}, err
 	}
 
 	// Upload result lock-free: Upload takes vulkanMu and would deadlock here.
+	// This is a device TRANSFER (H2D), not an attention dispatch: record it as such
+	// so the execution contract cannot present host math as GPU work.
 	out, _ := v.devTr([]int{nH * hd}, F32)
 	if len(outHost) > 0 {
 		C.fvk_h2d(v.vp(out), unsafe.Pointer(&outHost[0]), C.size_t(len(outHost)*4))
+		sp.DeviceTransfers++
 	}
 	return out, nil
 }
@@ -420,6 +426,7 @@ func (v *vulkanBackend) AttentionQuantizedKV(
 	outDev, _ := v.devTr([]int{nQ * headDim}, F32)
 	if len(outHost) > 0 {
 		C.fvk_h2d(v.vp(outDev), unsafe.Pointer(&outHost[0]), C.size_t(len(outHost)*4))
+		scratch.DeviceTransfers++
 	}
 	return outDev, scratch, nil
 }

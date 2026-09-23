@@ -1680,6 +1680,11 @@
           "category": "incidental",
           "reason": "canonical V4.1 per-layer KV latent-norm tensor name (model.layers.<L>.attn.kv_norm.weight) carried as a string literal by the ggufload attention-descriptor preflight; an existing tensor-name leaf, not a new attention concept",
           "token": "attnkvanorm"
+        },
+        {
+          "category": "incidental",
+          "reason": "pre-existing dequant-once attention entrypoint referenced by the execution-contract classifier doc; not a new concept",
+          "token": "executevulkanattentionwithdequantonce"
         }
       ],
       "id": "attention",
@@ -1693,6 +1698,7 @@
         "attentive",
         "attnkvanorm",
         "estimated_attention_s",
+        "executevulkanattentionwithdequantonce",
         "qwenfullattentionlayers",
         "tattn"
       ],

@@ -848,3 +848,98 @@ func TestVulkanDequantOnceLockContract(t *testing.T) {
 	}
 	t.Logf("[SW-VERIFIED] dequant-once lock contract: re-entrancy detected, corrected ordering (Read/Upload outside the section) clean, pipeline lock-agnostic across %d heads", nQ)
 }
+
+// TestVulkanKVScratchpadExecutionContractClassifiesHostPass is the anti-forgery witness
+// for fak#12186's reopened audit: the scratchpad exposes DeviceDispatches/DeviceTransfers,
+// so a caller could otherwise read a "successful" dequant-once pass and believe a GPU
+// kernel executed it. ExecuteVulkanAttentionWithDequantOnce is a host Go reference loop,
+// so a pass with no device dispatch MUST classify as VulkanKVSoftwareContract with
+// HostExecuted=true and PhysicalPromotionReady=false.
+//
+// This is a [SW-VERIFIED] contract witness: it proves the classifier cannot present host
+// math as device work. The physical prefill throughput criterion remains [HW-WITNESSED]
+// and is NOT claimed here.
+func TestVulkanKVScratchpadExecutionContractClassifiesHostPass(t *testing.T) {
+	const (
+		nPos    = 32
+		nQ      = StrixHaloFullAttentionHeads
+		nKV     = 8
+		headDim = 64
+	)
+	totalKV := nKV * nPos * headDim
+	rng := rand.New(rand.NewSource(12187))
+	f32K := make([]float32, totalKV)
+	f32V := make([]float32, totalKV)
+	for i := range f32K {
+		f32K[i] = rng.Float32()*2.0 - 1.0
+		f32V[i] = rng.Float32()*2.0 - 1.0
+	}
+	q := make([]float32, nQ*headDim)
+	for i := range q {
+		q[i] = rng.Float32()*2.0 - 1.0
+	}
+	rawK, err := QuantizeF32ToQ8_0(f32K)
+	if err != nil {
+		t.Fatalf("QuantizeF32ToQ8_0 K: %v", err)
+	}
+	rawV, err := QuantizeF32ToQ8_0(f32V)
+	if err != nil {
+		t.Fatalf("QuantizeF32ToQ8_0 V: %v", err)
+	}
+	scale := float32(1.0 / math.Sqrt(float64(headDim)))
+
+	// 1. nil scratchpad is fail-closed: it can never be admitted as device work.
+	if c := ClassifyVulkanKVScratchpadExecution(nil, nQ); !c.HostExecuted || c.DeviceDispatched || c.PhysicalPromotionReady {
+		t.Errorf("nil scratchpad contract = {host:%v device:%v physical:%v}, want fail-closed host-only",
+			c.HostExecuted, c.DeviceDispatched, c.PhysicalPromotionReady)
+	}
+
+	// 2. A fresh host-executed pass classifies as software_contract, never device work.
+	scratch, err := NewVulkanKVScratchpad(nil, RADVTargetArchGfx1151, QuantizedKVQ8_0, nPos, nKV, headDim)
+	if err != nil {
+		t.Fatalf("NewVulkanKVScratchpad: %v", err)
+	}
+	if _, err := ExecuteVulkanAttentionWithDequantOnce(q, scratch, rawK, rawV, nQ, scale); err != nil {
+		t.Fatalf("ExecuteVulkanAttentionWithDequantOnce: %v", err)
+	}
+	hostContract := ClassifyVulkanKVScratchpadExecution(scratch, nQ)
+	if !hostContract.HostExecuted {
+		t.Error("HostExecuted = false for a host Go attention pass; presence of a successful pass must not imply device execution")
+	}
+	if hostContract.DeviceDispatched {
+		t.Error("DeviceDispatched = true with zero dispatched kernels; the contract is forgeable")
+	}
+	if hostContract.PhysicalPromotionReady {
+		t.Error("PhysicalPromotionReady = true for a host-executed pass; a software pass must never be promoted")
+	}
+	if hostContract.ProofLevel != VulkanKVSoftwareContract {
+		t.Errorf("ProofLevel = %q, want %q", hostContract.ProofLevel, VulkanKVSoftwareContract)
+	}
+	if hostContract.DequantCount != 1 || hostContract.HeadReuses != nQ {
+		t.Errorf("contract counters = {dequant:%d reuses:%d}, want {1, %d}", hostContract.DequantCount, hostContract.HeadReuses, nQ)
+	}
+
+	// 3. A pass that records a real device dispatch does promote, and does not claim
+	// host execution. This exercises the classifier's device branch without a device.
+	scratch.DeviceDispatches = 1
+	devContract := ClassifyVulkanKVScratchpadExecution(scratch, nQ)
+	if devContract.HostExecuted {
+		t.Error("HostExecuted = true when a device dispatch was recorded")
+	}
+	if !devContract.DeviceDispatched {
+		t.Error("DeviceDispatched = false when DeviceDispatches > 0")
+	}
+	if !devContract.PhysicalPromotionReady {
+		t.Error("PhysicalPromotionReady = false with a real device dispatch and no host execution")
+	}
+	if devContract.ProofLevel != VulkanKVDeviceDispatched {
+		t.Errorf("device ProofLevel = %q, want %q", devContract.ProofLevel, VulkanKVDeviceDispatched)
+	}
+
+	// 4. The classification is emitted as a durable, inspectable receipt payload.
+	js, err := json.Marshal(hostContract)
+	if err != nil {
+		t.Fatalf("marshal execution contract: %v", err)
+	}
+	t.Logf("[SW-VERIFIED] dequant-once execution contract (host pass, NOT a hardware claim): %s", string(js))
+}

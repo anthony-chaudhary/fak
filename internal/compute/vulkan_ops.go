@@ -276,6 +276,55 @@ func ExecuteVulkanAttentionWithDequantOnce(
 	return out, nil
 }
 
+// ClassifyVulkanKVScratchpadExecution derives the typed proof classification for one
+// dequant-once attention pass from the scratchpad's observed counters.
+//
+// It is the anti-forgery seam for Issue #12186: ExecuteVulkanAttentionWithDequantOnce
+// is a host Go reference loop. A pass that issued no Vulkan dispatch MUST classify as
+// VulkanKVSoftwareContract with HostExecuted=true, so that a caller can never mistake
+// a successful host pass for GPU work. PhysicalPromotionReady is true only when at
+// least one real device dispatch was observed and the host path was not taken.
+func ClassifyVulkanKVScratchpadExecution(scratch *VulkanKVScratchpad, nQ int) VulkanKVScratchpadExecutionContract {
+	if scratch == nil {
+		return VulkanKVScratchpadExecutionContract{
+			Schema:                 "fak-vulkan-kv-scratchpad-execution/1",
+			ProofLevel:             VulkanKVSoftwareContract,
+			HostExecuted:           true,
+			HostCodecAllowed:       false,
+			PhysicalPromotionReady: false,
+		}
+	}
+	deviceDispatched := scratch.DeviceDispatches > 0
+	// A host-executed pass is one where the dequant-once host loop ran and no device
+	// dispatch was issued. When a device dispatch is present the host loop is the
+	// fallback, not the executor.
+	hostExecuted := !deviceDispatched
+
+	proof := VulkanKVSoftwareContract
+	if deviceDispatched {
+		proof = VulkanKVDeviceDispatched
+	}
+
+	return VulkanKVScratchpadExecutionContract{
+		Schema:                 "fak-vulkan-kv-scratchpad-execution/1",
+		Arch:                   scratch.Arch,
+		Format:                 scratch.Format,
+		Positions:              scratch.NumPos,
+		NumKVHeads:             scratch.NumKVHeads,
+		HeadDim:                scratch.HeadDim,
+		QueryHeads:             nQ,
+		DequantCount:           scratch.DequantCount,
+		HeadReuses:             scratch.HeadReuses,
+		DeviceDispatches:       scratch.DeviceDispatches,
+		DeviceTransfers:        scratch.DeviceTransfers,
+		HostExecuted:           hostExecuted,
+		DeviceDispatched:       deviceDispatched,
+		HostCodecAllowed:       false,
+		PhysicalPromotionReady: deviceDispatched && !hostExecuted,
+		ProofLevel:             proof,
+	}
+}
+
 // MeasureDequantOncePrefillTokPerSec times real elapsed wall-clock work for `iters`
 // dequant-once attention passes over a freshly dequantized KV tile and returns the
 // measured tokens/sec for the final pass. It is a [SW-VERIFIED] elapsed-time witness
