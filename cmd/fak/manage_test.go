@@ -156,3 +156,30 @@ func TestExecCodexLaunchChildContextCancelsChild(t *testing.T) {
 		t.Fatalf("child process did not terminate promptly on context cancel, took %v", dur)
 	}
 }
+
+func TestManageCommandKeepsDedicatedLaunchersGuarded(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		argv []string
+	}{
+		{name: "codex", argv: []string{"codex"}},
+		{name: "opencode", argv: []string{"opencode"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var managed, codex, opencode []string
+			dispatchManageCommand(
+				tc.argv,
+				func(args []string) { managed = append([]string(nil), args...) },
+				func(args []string) { codex = append([]string(nil), args...) },
+				func(args []string) { opencode = append([]string(nil), args...) },
+			)
+			got := codex
+			if tc.name == "opencode" {
+				got = opencode
+			}
+			if strings.Join(got, "\x00") != "--guard" || managed != nil {
+				t.Fatalf("managed=%v codex=%v opencode=%v, want dedicated %s --guard", managed, codex, opencode, tc.name)
+			}
+		})
+	}
+}

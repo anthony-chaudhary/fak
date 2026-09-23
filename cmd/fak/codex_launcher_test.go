@@ -1344,3 +1344,29 @@ func TestCodexDirectPermissionChoice(t *testing.T) {
 		})
 	}
 }
+
+func TestCodexDirectLaunchPreservesSavedConfig(t *testing.T) {
+	home := t.TempDir()
+	configPath := filepath.Join(home, "config.toml")
+	want := []byte("model = \"saved-model\"\napproval_policy = \"on-request\"\n")
+	if err := os.WriteFile(configPath, want, 0600); err != nil {
+		t.Fatal(err)
+	}
+	orig := codexLaunchRun
+	t.Cleanup(func() { codexLaunchRun = orig })
+	codexLaunchRun = func(_, _ io.Writer, _ []string, _ []string) int { return 0 }
+	var stdout, stderr bytes.Buffer
+	if code := runCodex(&stdout, &stderr, []string{
+		"--split", "off", "--loop-gate", "off", "--quiet", "--codex-home", home,
+		"--", "exec", "status",
+	}); code != 0 {
+		t.Fatalf("runCodex code=%d stderr=%s", code, stderr.String())
+	}
+	got, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("direct launch changed saved config:\n got %s\nwant %s", got, want)
+	}
+}

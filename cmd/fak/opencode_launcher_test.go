@@ -594,3 +594,47 @@ func argvHasPair(argv []string, flag, val string) bool {
 	}
 	return false
 }
+
+func TestOpenCodeDirectLaunchUsesSessionConfigWithoutPersistentOverwrite(t *testing.T) {
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	configPath := filepath.Join(workspace, "opencode.json")
+	want := []byte(`{"model":"saved/model","permission":{"read":"ask"}}`)
+	if err := os.WriteFile(configPath, want, 0600); err != nil {
+		t.Fatal(err)
+	}
+	orig := opencodeLaunchRun
+	t.Cleanup(func() { opencodeLaunchRun = orig })
+	var gotEnv []string
+	opencodeLaunchRun = func(_, _ io.Writer, _ []string, env []string) int {
+		gotEnv = append([]string(nil), env...)
+		return 0
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runOpencode(&stdout, &stderr, []string{
+		"--split", "off", "--quiet", "--model", "fixture",
+		"--base-url", "http://127.0.0.1:65531/v1", "--", "run", "status",
+	}); code != 0 {
+		t.Fatalf("runOpencode code=%d stderr=%s", code, stderr.String())
+	}
+	got, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("direct launch changed saved config:\n got %s\nwant %s", got, want)
+	}
+	foundSessionConfig := false
+	for _, entry := range gotEnv {
+		if strings.HasPrefix(entry, "OPENCODE_CONFIG_CONTENT=") {
+			foundSessionConfig = true
+			break
+		}
+	}
+	if !foundSessionConfig {
+		t.Fatalf("direct launch omitted OPENCODE_CONFIG_CONTENT: %v", gotEnv)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".agents")); !os.IsNotExist(err) {
+		t.Fatalf("direct launch wrote project assets: err=%v", err)
+	}
+}

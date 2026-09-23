@@ -325,3 +325,36 @@ func TestClaudeDirectPermissionChoice(t *testing.T) {
 		})
 	}
 }
+
+func TestClaudeDirectLaunchPreservesSavedSettings(t *testing.T) {
+	configDir := t.TempDir()
+	settingsPath := filepath.Join(configDir, "settings.json")
+	want := []byte(`{"env":{"ANTHROPIC_MODEL":"saved-model"},"permissions":{"allow":["Read"]}}`)
+	if err := os.WriteFile(settingsPath, want, 0600); err != nil {
+		t.Fatal(err)
+	}
+	orig := claudeLaunchRun
+	t.Cleanup(func() { claudeLaunchRun = orig })
+	var gotEnv []string
+	claudeLaunchRun = func(_, _ io.Writer, _ []string, env []string) int {
+		gotEnv = append([]string(nil), env...)
+		return 0
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runClaude(&stdout, &stderr, []string{
+		"--no-probe", "--quiet", "--claude-config-dir", configDir,
+		"--gateway-url", "http://127.0.0.1:65531", "--model", "fixture", "--", "--version",
+	}); code != 0 {
+		t.Fatalf("runClaude code=%d stderr=%s", code, stderr.String())
+	}
+	got, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("direct launch changed saved settings:\n got %s\nwant %s", got, want)
+	}
+	if !slices.Contains(gotEnv, "CLAUDE_CONFIG_DIR="+configDir) {
+		t.Fatalf("direct launch omitted session config directory: %v", gotEnv)
+	}
+}
