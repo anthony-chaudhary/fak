@@ -56,6 +56,17 @@ import (
 	"github.com/anthony-chaudhary/fak/pkg/turncost"
 )
 
+// ConfigError reports a gateway configuration that cannot safely serve the
+// requested mode. Field identifies the invalid or missing Config field.
+type ConfigError struct {
+	Field  string
+	Reason string
+}
+
+func (e *ConfigError) Error() string {
+	return fmt.Sprintf("gateway: invalid configuration: %s: %s", e.Field, e.Reason)
+}
+
 // New builds a Server. It validates that the ABI is wired (a resolver is
 // registered — i.e. internal/registrations was imported) and that EngineID names
 // a registered engine. It fails loud rather than degrade to a permissive default.
@@ -476,8 +487,7 @@ func (s *Server) installRichDashboardManager(cfg RichDashboardConfig) {
 // selectChatPlanner picks the chat backend for the /v1/chat/completions and
 // /v1/messages surfaces from the wired configuration — a dual (local-alongside-API)
 // planner, a proxy planner, the in-kernel chat planner, or the deterministic mock —
-// records the planner-init startup phase, and reports whether real weights are loaded
-// for syscalls but chat still falls back to the mock (missing tokenizer, #1115).
+// records the planner-init startup phase. The legacy mock-on-loaded-model flag stays false because missing-tokenizer configuration is rejected.
 func selectChatPlanner(cfg Config, model string, proxyURLs []string, logf func(string, ...any), startup *startupProfile) (agent.Planner, servingLocality, *servingLocality, bool, error) {
 	var planner agent.Planner
 	var err error
@@ -533,20 +543,18 @@ func selectChatPlanner(cfg Config, model string, proxyURLs []string, logf func(s
 		planner = newInKernelChatPlanner(cfg, model, logf)
 		// Every turn decodes on this box against weights we host.
 		side = localitySelfHosted
+	case cfg.InKernelModel != nil:
+		return nil, localityUnknown, nil, false, &ConfigError{
+			Field:  "Tokenizer",
+			Reason: "loaded in-kernel model cannot fall back to scripted chat without a tokenizer; configure Tokenizer or an explicit proxy",
+		}
 	default:
 		// No upstream (--base-url) and no in-kernel model (--gguf/FAK_MODEL_DIR): the
 		// chat surface silently fell back to the deterministic offline mock. Warn
 		// LOUDLY so an operator never mistakes scripted demo text for real model
 		// output — the /healthz planner:"mock" field carries the same signal to a
 		// liveness probe.
-		if cfg.InKernelModel != nil && cfg.Tokenizer == nil {
-			// #1115: kernel has real weights loaded (for fak_syscalls) but chat
-			// falls back to mock due to missing tokenizer. Flag for witness fidelity.
-			inKernelModelButChatIsMock = true
-			logf("gateway: WARNING — POST /v1/chat/completions is served by the DETERMINISTIC MOCK planner: responses are SCRIPTED, not model output. --gguf was passed but no BPE tokenizer was found (GGUF has no embedded BPE tokenizer and no --tokenizer was provided). Pass --tokenizer <dir|file> to enable real chat, or --base-url to proxy a real provider.")
-		} else {
-			logf("gateway: WARNING — POST /v1/chat/completions is served by the DETERMINISTIC MOCK planner: responses are SCRIPTED, not model output. Pass --base-url (proxy a real provider) or --gguf/FAK_MODEL_DIR (serve the in-kernel model) to disable the mock.")
-		}
+		logf("gateway: WARNING — POST /v1/chat/completions is served by the DETERMINISTIC MOCK planner: responses are SCRIPTED, not model output. Pass --base-url (proxy a real provider) or --gguf/FAK_MODEL_DIR (serve the in-kernel model) to disable the mock.")
 		planner = agent.NewMockPlanner(model)
 		// Scripted text is not inference, from here or from a vendor. It stays
 		// UNCLASSIFIED so a mock run can never pad the self-hosted share with turns

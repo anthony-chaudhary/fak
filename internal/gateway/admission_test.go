@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -311,6 +312,84 @@ func TestNativeGatewayNewAttachesAdmissionController(t *testing.T) {
 	if proxy.admissionCtl != nil {
 		t.Fatal("proxy admission controller attached by default, want native-only attachment")
 	}
+}
+
+// TestLoadedModelMissingTokenizer is the #13478 startup-admission witness: weights
+// without a tokenizer cannot expose scripted chat, while each intentional serving
+// mode remains available.
+func TestLoadedModelMissingTokenizer(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	base := Config{EngineID: "test", Model: "test-model", Logf: func(string, ...any) {}}
+
+	t.Run("refuses loaded weights before a chat handler is available", func(t *testing.T) {
+		cfg := base
+		cfg.InKernelModel = &model.Model{}
+		srv, err := New(cfg)
+		if err == nil {
+			if srv != nil {
+				srv.Close()
+			}
+			t.Fatal("New(weights without tokenizer) = nil error, want typed configuration error")
+		}
+		if srv != nil {
+			srv.Close()
+			t.Fatal("New(weights without tokenizer) returned a server; chat handler must be unavailable")
+		}
+		errType := reflect.TypeOf(err)
+		if errType == nil || errType.Kind() != reflect.Pointer || errType.Elem().Name() != "ConfigError" || errType.Elem().PkgPath() != "github.com/anthony-chaudhary/fak/internal/gateway" {
+			t.Fatalf("New(weights without tokenizer) error = %T %v, want *gateway.ConfigError", err, err)
+		}
+		errValue := reflect.ValueOf(err).Elem()
+		field := errValue.FieldByName("Field")
+		if !field.IsValid() || field.Kind() != reflect.String || field.String() != "Tokenizer" {
+			t.Fatalf("ConfigError.Field = %v, want Tokenizer", field)
+		}
+		reason := errValue.FieldByName("Reason")
+		if !reason.IsValid() || reason.Kind() != reflect.String || reason.String() == "" {
+			t.Fatal("ConfigError.Reason is empty, want actionable reason")
+		}
+	})
+
+	t.Run("keeps explicit offline synthetic mode", func(t *testing.T) {
+		srv, err := New(base)
+		if err != nil {
+			t.Fatalf("New(offline synthetic): %v", err)
+		}
+		srv.Close()
+		if _, ok := srv.planner.(*agent.MockPlanner); !ok {
+			t.Fatalf("offline planner = %T, want *agent.MockPlanner", srv.planner)
+		}
+	})
+
+	t.Run("keeps valid local model and tokenizer", func(t *testing.T) {
+		cfg := base
+		cfg.InKernelModel = &model.Model{}
+		cfg.Tokenizer = &tokenizer.Tokenizer{}
+		srv, err := New(cfg)
+		if err != nil {
+			t.Fatalf("New(valid local model): %v", err)
+		}
+		srv.Close()
+		if _, ok := srv.planner.(*agent.InKernelPlanner); !ok {
+			t.Fatalf("local planner = %T, want *agent.InKernelPlanner", srv.planner)
+		}
+	})
+
+	t.Run("keeps explicit proxy with loaded weights and nil tokenizer", func(t *testing.T) {
+		cfg := base
+		cfg.InKernelModel = &model.Model{}
+		cfg.BaseURL = "http://127.0.0.1:1"
+		srv, err := New(cfg)
+		if err != nil {
+			t.Fatalf("New(explicit proxy): %v", err)
+		}
+		srv.Close()
+		if _, ok := srv.planner.(*agent.HTTPPlanner); !ok {
+			t.Fatalf("proxy planner = %T, want *agent.HTTPPlanner", srv.planner)
+		}
+	})
 }
 
 // TestServedAdmissionSheds429BeforePlanner is the live issue-#35 backpressure witness:
