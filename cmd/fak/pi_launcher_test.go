@@ -790,3 +790,206 @@ func keys(m map[string]projectassets.HarnessReceipt) []string {
 	}
 	return out
 }
+
+func TestRunPiGuardChoiceIsSessionScoped(t *testing.T) {
+	isolatePiHome(t)
+	origRun := piLaunchRun
+	t.Cleanup(func() { piLaunchRun = origRun })
+
+	for _, tc := range []struct {
+		name        string
+		choice      []string
+		wantGuarded bool
+	}{
+		{name: "unset launches direct"},
+		{name: "explicit guard false launches direct", choice: []string{"--guard=false"}},
+		{name: "explicit no-guard launches direct", choice: []string{"--no-guard"}},
+		{name: "explicit guard launches managed", choice: []string{"--guard"}, wantGuarded: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			modelsPath := filepath.Join(tmp, "models.json")
+			settingsPath := filepath.Join(tmp, "settings.json")
+			modelsBefore := []byte("{\n  \"sentinel\": \"models-original\"\n}\n")
+			settingsBefore := []byte("{\n  \"defaultProvider\": \"operator\",\n  \"defaultModel\": \"operator-model\",\n  \"sentinel\": \"settings-original\"\n}\n")
+			if err := os.WriteFile(modelsPath, modelsBefore, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(settingsPath, settingsBefore, 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			calls := 0
+			var extensionPath string
+			piLaunchRun = func(_, _ io.Writer, argv, _ []string) int {
+				calls++
+				guarded := len(argv) > 1 && argv[1] == "guard"
+				if guarded != tc.wantGuarded {
+					t.Fatalf("guarded=%v want %v; argv=%#v", guarded, tc.wantGuarded, argv)
+				}
+				if guarded {
+					if !containsArg(argv, "--") || !containsArg(argv, "pi") {
+						t.Fatalf("guarded Pi argv omitted child delimiter/command: %#v", argv)
+					}
+					if containsArg(argv, "-e") {
+						t.Fatalf("guarded launcher preinstalled direct extension instead of leaving it to guard: %#v", argv)
+					}
+					return 23
+				}
+				if len(argv) == 0 || guardAgentBaseName(argv[0]) != "pi" {
+					t.Fatalf("direct Pi argv=%#v", argv)
+				}
+				for i := 0; i+1 < len(argv); i++ {
+					if argv[i] == "-e" {
+						extensionPath = argv[i+1]
+						break
+					}
+				}
+				if extensionPath == "" {
+					t.Fatalf("direct Pi launch omitted session extension: %#v", argv)
+				}
+				raw, err := os.ReadFile(extensionPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(string(raw), `registerProvider("fak"`) {
+					t.Fatalf("direct Pi extension omitted fak provider:\n%s", raw)
+				}
+				return 23
+			}
+
+			args := append([]string{}, tc.choice...)
+			args = append(args,
+				"--check-backend=false",
+				"--quiet",
+				"--addr", "127.0.0.1:65531",
+				"--model", "qwen38:27b-q4",
+				"--config-path", modelsPath,
+				"--settings-path", settingsPath,
+			)
+			var stdout, stderr bytes.Buffer
+			if code := runPi(&stdout, &stderr, args); code != 23 {
+				t.Fatalf("runPi code=%d want child code 23; stderr=%s", code, stderr.String())
+			}
+			if calls != 1 {
+				t.Fatalf("Pi launch invoked %d children, want one", calls)
+			}
+			if extensionPath != "" {
+				if _, err := os.Stat(extensionPath); !os.IsNotExist(err) {
+					t.Fatalf("direct Pi session extension was not cleaned up: %v", err)
+				}
+			}
+			for path, before := range map[string][]byte{modelsPath: modelsBefore, settingsPath: settingsBefore} {
+				after, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(after, before) {
+					t.Fatalf("Pi %s mutated persistent config %s\nbefore: %s\nafter: %s", tc.name, path, before, after)
+				}
+			}
+		})
+	}
+}
+
+func TestInstallPiLaunchProviderExtensionRendersAPIKeyEnvReference(t *testing.T) {
+	const secret = "super-secret-test-value"
+	t.Setenv("FAK_OPS_TEST_KEY", secret)
+	argv, cleanup, err := installPiLaunchProviderExtension(
+		[]string{"pi", "--provider", "fak"},
+		"http://127.0.0.1:8080/v1",
+		"qwen38:27b-q4",
+		80000,
+		"$FAK_OPS_TEST_KEY",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	var extensionPath string
+	for i := 0; i+1 < len(argv); i++ {
+		if argv[i] == "-e" {
+			extensionPath = argv[i+1]
+			break
+		}
+	}
+	if extensionPath == "" {
+		t.Fatalf("session extension missing from argv: %#v", argv)
+	}
+	raw, err := os.ReadFile(extensionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	if !strings.Contains(source, "$FAK_OPS_TEST_KEY") {
+		t.Fatalf("extension omitted API key env reference:\n%s", source)
+	}
+	if strings.Contains(source, secret) {
+		t.Fatalf("extension embedded secret value instead of env reference:\n%s", source)
+	}
+	cleanup()
+	if _, err := os.Stat(extensionPath); !os.IsNotExist(err) {
+		t.Fatalf("session extension was not cleaned up: %v", err)
+	}
+}
+
+func TestRunPiDryRunReportsGuardModeWithoutWrites(t *testing.T) {
+	isolatePiHome(t)
+	origRun := piLaunchRun
+	t.Cleanup(func() { piLaunchRun = origRun })
+	for _, tc := range []struct {
+		name     string
+		choice   []string
+		wantMode string
+	}{
+		{name: "unset reports direct", wantMode: "direct"},
+		{name: "explicit guard reports guarded", choice: []string{"--guard"}, wantMode: "guarded"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			modelsPath := filepath.Join(tmp, "models.json")
+			settingsPath := filepath.Join(tmp, "settings.json")
+			modelsBefore := []byte("{\n  \"sentinel\": \"models-dry-run-original\"\n}\n")
+			settingsBefore := []byte("{\n  \"defaultProvider\": \"operator\",\n  \"defaultModel\": \"operator-model\",\n  \"sentinel\": \"settings-dry-run-original\"\n}\n")
+			if err := os.WriteFile(modelsPath, modelsBefore, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(settingsPath, settingsBefore, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			piLaunchRun = func(_, _ io.Writer, _, _ []string) int {
+				calls++
+				return 23
+			}
+			args := append([]string{}, tc.choice...)
+			args = append(args,
+				"--dry-run",
+				"--check-backend=false",
+				"--addr", "127.0.0.1:65531",
+				"--model", "qwen38:27b-q4",
+				"--config-path", modelsPath,
+				"--settings-path", settingsPath,
+			)
+			var stdout, stderr bytes.Buffer
+			if code := runPi(&stdout, &stderr, args); code != 0 {
+				t.Fatalf("runPi dry-run code=%d stderr=%s", code, stderr.String())
+			}
+			if calls != 0 {
+				t.Fatalf("Pi dry-run spawned %d children", calls)
+			}
+			if want := "mode        = " + tc.wantMode; !strings.Contains(stderr.String(), want) {
+				t.Fatalf("Pi dry-run omitted %q:\n%s", want, stderr.String())
+			}
+			for path, before := range map[string][]byte{modelsPath: modelsBefore, settingsPath: settingsBefore} {
+				after, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(after, before) {
+					t.Fatalf("Pi %s dry-run mutated %s\nbefore: %s\nafter: %s", tc.wantMode, path, before, after)
+				}
+			}
+		})
+	}
+}

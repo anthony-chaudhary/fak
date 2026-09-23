@@ -22,6 +22,7 @@ import (
 
 type piLaunchOptions struct {
 	dryRun       bool
+	guarded      bool
 	probePrompt  string
 	addr         string
 	baseURL      string
@@ -54,6 +55,8 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	verbFlagUsage(fs, "pi")
 
 	dryRun := fs.Bool("dry-run", false, "print the Pi launch command and exit without executing")
+	guarded := fs.Bool("guard", false, "launch Pi through the session-scoped fak guard")
+	noGuard := fs.Bool("no-guard", false, "launch Pi directly (default; overrides --guard)")
 	printEnv := fs.Bool("print-env", false, "print shell export statements for Pi environment and exit")
 	probePrompt := fs.String("probe", "", "run a single headless probe turn with this prompt and exit")
 	promptFlag := fs.String("prompt", "", "alias for probe prompt (or pass -p)")
@@ -77,7 +80,7 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "       fak pi config [--write] [--addr ADDR] [--model MODEL] [--path PATH]")
 		fmt.Fprintln(stderr, "")
 		fmt.Fprintln(stderr, "First-class support for Pi coding agent as harness with fak serve on Mac as backend.")
-		fmt.Fprintln(stderr, "Runs Pi directly targeting fak serve backend (for now raw, without guard).")
+		fmt.Fprintln(stderr, "Runs Pi directly against fak serve by default; pass --guard for session-scoped policy enforcement.")
 		fmt.Fprintln(stderr, "")
 		fmt.Fprintln(stderr, "examples:")
 		fmt.Fprintln(stderr, "  fak pi                                        # interactive session on local Mac fak serve")
@@ -195,6 +198,7 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 
 	launch := piLaunchOptions{
 		dryRun:       *dryRun,
+		guarded:      *guarded && !*noGuard,
 		probePrompt:  effectivePrompt,
 		addr:         targetAddr,
 		baseURL:      targetBaseURL,
@@ -256,10 +260,18 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	argvOut := buildPiLaunchArgv(launch)
+	if launch.guarded {
+		argvOut = buildPiGuardLaunchArgv(tuiExecutable(), launch, argvOut)
+	}
 
 	if launch.dryRun {
 		fmt.Fprintln(stderr, "fak pi: dry-run - not launching")
-		fmt.Fprintf(stderr, "  backend     = %s (raw without guard)\n", launch.baseURL)
+		mode := "direct"
+		if launch.guarded {
+			mode = "guarded"
+		}
+		fmt.Fprintf(stderr, "  mode        = %s\n", mode)
+		fmt.Fprintf(stderr, "  backend     = %s\n", launch.baseURL)
 		fmt.Fprintf(stderr, "  provider    = %s\n", launch.provider)
 		fmt.Fprintf(stderr, "  model       = %s (%s)\n", launch.model, piModelSource(*model, adoptedDetected))
 		if launch.skillPack != "" {
@@ -269,21 +281,25 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		}
 		fmt.Fprintf(stderr, "  context     = resident target %d tokens (safe 50%% of %d served window, %s)\n", budget.ResidentTarget, budget.ServedWindow, budget.Provenance)
 		fmt.Fprintf(stderr, "  compaction  = reserve %d, keep %d (write=%t)\n", budget.OutputReserve, budget.KeepRecentTokens, *safeSettings)
-		fmt.Fprintln(stderr, "  provider-ext= -e <session-provider-extension> (generated only for a real launch; no persistent config write)")
+		fmt.Fprintln(stderr, "  provider-ext= -e <session-provider-extension> (installed and cleaned by the selected launch mode; no persistent config write)")
 		fmt.Fprintln(stderr, "  command     = "+strings.Join(argvOut, " "))
 		fmt.Fprintln(stdout, strings.Join(argvOut, " "))
 		return 0
 	}
 
-	// Keep an ordinary launch free of persistent Pi config writes while still making the
-	// fak provider reachable on a fresh install. Pi loads this provider definition for this
-	// child only; explicit user extensions remain supported and follow it in argv order.
-	argvOut, cleanupProvider, err := installPiLaunchProviderExtension(argvOut, launch.baseURL, launch.model, servedWindow)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak pi: install session provider: %v\n", err)
-		return 1
+	if !launch.guarded {
+		// Keep an ordinary launch free of persistent Pi config writes while still making the
+		// fak provider reachable on a fresh install. Pi loads this provider definition for this
+		// child only; explicit user extensions remain supported and follow it in argv order.
+		var cleanupProvider func()
+		var err error
+		argvOut, cleanupProvider, err = installPiLaunchProviderExtension(argvOut, launch.baseURL, launch.model, servedWindow, "")
+		if err != nil {
+			fmt.Fprintf(stderr, "fak pi: install session provider: %v\n", err)
+			return 1
+		}
+		defer cleanupProvider()
 	}
-	defer cleanupProvider()
 
 	env := os.Environ()
 	if launch.configPath != "" {
@@ -295,7 +311,11 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if !launch.quiet {
-		fmt.Fprintf(stderr, "fak pi: launching Pi (raw without guard) -> backend %s (model: %s)\n", launch.baseURL, launch.model)
+		mode := "direct"
+		if launch.guarded {
+			mode = "through fak guard"
+		}
+		fmt.Fprintf(stderr, "fak pi: launching Pi (%s) -> backend %s (model: %s)\n", mode, launch.baseURL, launch.model)
 	}
 
 	return piLaunchRun(stdout, stderr, argvOut, env)
@@ -304,13 +324,13 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 // installPiLaunchProviderExtension gives a raw `fak pi` child a launch-local `fak`
 // provider without touching ~/.pi/agent/models.json. Unlike the guarded Pi installer,
 // it does not reject user -e flags: raw Pi owns its extension policy.
-func installPiLaunchProviderExtension(command []string, baseURL, model string, servedWindow int) ([]string, func(), error) {
+func installPiLaunchProviderExtension(command []string, baseURL, model string, servedWindow int, apiKey string) ([]string, func(), error) {
 	dir, err := guardSessionTempDir("pi")
 	if err != nil {
 		return command, func() {}, err
 	}
 	cleanup := func() { _ = os.RemoveAll(dir) }
-	source, err := piLaunchProviderExtensionSource(projectassets.NormalizePiBaseURL(baseURL), model, servedWindow)
+	source, err := piLaunchProviderExtensionSource(projectassets.NormalizePiBaseURL(baseURL), model, servedWindow, apiKey)
 	if err != nil {
 		cleanup()
 		return command, func() {}, err
@@ -323,7 +343,7 @@ func installPiLaunchProviderExtension(command []string, baseURL, model string, s
 	return appendPiExtensionArg(command, extPath), cleanup, nil
 }
 
-func piLaunchProviderExtensionSource(baseURL, model string, servedWindow int) (string, error) {
+func piLaunchProviderExtensionSource(baseURL, model string, servedWindow int, apiKey string) (string, error) {
 	raw, err := projectassets.GeneratePiConfigForWindow(baseURL, model, servedWindow)
 	if err != nil {
 		return "", err
@@ -337,6 +357,13 @@ func piLaunchProviderExtensionSource(baseURL, model string, servedWindow int) (s
 	provider, ok := cfg.Providers[projectassets.DefaultPiProviderID]
 	if !ok {
 		return "", fmt.Errorf("generated Pi config omitted provider %q", projectassets.DefaultPiProviderID)
+	}
+	if key := strings.TrimSpace(apiKey); key != "" {
+		providerMap, ok := provider.(map[string]any)
+		if !ok {
+			return "", fmt.Errorf("generated Pi provider %q is not an object", projectassets.DefaultPiProviderID)
+		}
+		providerMap["apiKey"] = key
 	}
 	literal, err := guardPiTSLiteral(provider)
 	if err != nil {
@@ -509,6 +536,24 @@ func buildPiLaunchArgv(opts piLaunchOptions) []string {
 	}
 	argv = append(argv, opts.passthrough...)
 	return argv
+}
+
+func buildPiGuardLaunchArgv(fakBin string, opts piLaunchOptions, child []string) []string {
+	argv := []string{
+		fakBin,
+		"guard",
+		"--provider", "openai",
+		"--base-url", opts.baseURL,
+		"--model", opts.model,
+	}
+	if opts.probePrompt != "" {
+		argv = append(argv, "--probe")
+	}
+	if opts.quiet {
+		argv = append(argv, "--quiet")
+	}
+	argv = append(argv, "--")
+	return append(argv, child...)
 }
 
 // defaultPiSkillPackRoots lists the project-asset skill roots Pi understands, in
