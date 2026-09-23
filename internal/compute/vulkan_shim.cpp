@@ -1067,7 +1067,6 @@ void batchBegin() {
 	// A new window owns a fresh hazard verdict queue; anything left from the prior window
 	// must not leak into this one (the Go ledger re-lowers each window independently).
 	g_batchHazardSync.clear();
-	g_batchHazardCursor = 0;
 }
 
 void batchFlush() {
@@ -1646,7 +1645,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
             !buildKernel(g_kern[K_Q8_MATMUL3], P("q8_matmul3.spv"), 10, 5 * sizeof(int)) ||
             !buildKernel(g_kern[K_RMSNORM_Q8_MATMUL2], P("rmsnorm_q8_matmul2.spv"), 8, 4 * sizeof(int) + sizeof(float)) ||
             !buildKernel(g_kern[K_RMSNORM_Q8_MATMUL3], P("rmsnorm_q8_matmul3.spv"), 11, 5 * sizeof(int) + sizeof(float)) ||
-            !buildKernel(g_kern[K_SWIGLU_Q8_MATMUL_ADD], P("swiglu_q8_matmul_add.spv"), 5, 3 * sizeof(int))) {
+            !buildKernel(g_kern[K_SWIGLU_Q8_MATMUL_ADD], P("swiglu_q8_matmul_add.spv"), 5, 5 * sizeof(int))) {
             g_have_q8 = 0;
         }
     }
@@ -2313,12 +2312,17 @@ void fvk_swiglu_q8_matmul_add_f32(const void* dWcodes, const void* dWscale,
         fprintf(stderr, "fak-vulkan: swiglu_q8_matmul_add requested but int8/8-bit-storage features are unavailable\n");
         abort();
     }
-    struct { int outDim, inDim, P; } pc{out, in, P};
+    struct { int outDim, inDim, P, outGroupBase, tokenBase; } pc{out, in, P, 0, 0};
     Buffer* bufs[5] = {
         B((void*)dWcodes), B((void*)dWscale), B((void*)dG), B((void*)dU), B(dD),
     };
-    uint32_t outGroups = ((uint32_t)out + 255u) / 256u;
-    dispatch(g_kern[K_SWIGLU_Q8_MATMUL_ADD], bufs, &pc, sizeof(pc), (uint32_t)P * outGroups);
+    // Cooperative two-dimensional grid: eight outputs per 256-thread workgroup on X and one
+    // token row per workgroup on Y. Both dimensions are bounded by their device limits; the
+    // static outGroupBase/tokenBase push constants (0 here) keep large-output/large-token
+    // shapes expressible without flattening onto a single >65,535 dimension.
+    uint32_t outputsPerGroup = 8u;
+    uint32_t outGroups = ((uint32_t)out + outputsPerGroup - 1u) / outputsPerGroup;
+    dispatch(g_kern[K_SWIGLU_Q8_MATMUL_ADD], bufs, &pc, sizeof(pc), outGroups, (uint32_t)P);
 }
 
 void fvk_rmsnorm_q4k_matmul2_f32(const void* dW0, const void* dW1,

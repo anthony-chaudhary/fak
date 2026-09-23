@@ -8,15 +8,27 @@
 // quantized per 32-block on the fly (amax/127, round half away from zero), reproducing cpuref
 // quantizeVecQ8 + qdot8scalar so the result holds the Approx gate.
 //
+// Cooperative organization (mirrors q8_matmul_decode.comp): eight outputs share one
+// 256-thread workgroup, with 32 lanes computing whole integer blocks per output. Each lane
+// produces whole-block partials; the output owner (lane 0) accumulates them in the scalar
+// kernel's original block/window order so the result is bit-order-identical to the serial
+// kernel. The result is then ADDED into the residual D (the fused o_proj/down_proj residual
+// add).
+//
 // This op's input dim is the FFN intermediate (e.g. 8960 for a 1.5B), which exceeds the shared
 // staging cap, so windowing over whole blocks is mandatory — each window stages silu(G)*U,
-// quantizes it, and dots it against the int8 codes, ACCUMULATING into acc across windows. The
-// result is then ADDED into the residual D (the fused o_proj/down_proj residual add).
+// quantizes it, and dots it against the int8 codes, ACCUMULATING into acc across windows.
+//
+// Dispatch is two-dimensional: output groups on x (ceil(out/8) per tile), token rows on y
+// (bounded rows per tile). The internal outGroupBase/tokenBase push constants let a bounded
+// 2D grid cover outputs and token rows that would exceed the 65,535-group limit if flattened
+// onto a single dimension.
 layout(local_size_x = 256) in;
 
 const uint BLOCK = 32u;
 const uint SHARED_CAP = 2048u;
 const uint WIN_BLOCKS = SHARED_CAP / BLOCK;
+const uint PARTIAL_STRIDE = WIN_BLOCKS + 2u; // 66 floats (Pad-2)
 
 layout(std430, binding = 0) readonly buffer Wq { int8_t Wcodes[]; };
 layout(std430, binding = 1) readonly buffer Ws { float Wscale[]; };
@@ -24,10 +36,11 @@ layout(std430, binding = 2) readonly buffer Gb { float G[]; };
 layout(std430, binding = 3) readonly buffer Ub { float U[]; };
 layout(std430, binding = 4) buffer Db { float D[]; };
 
-layout(push_constant) uniform Push { int outDim; int inDim; int P; } pc;
+layout(push_constant) uniform Push { int outDim; int inDim; int P; int outGroupBase; int tokenBase; } pc;
 
 shared int8_t Xq[SHARED_CAP];
-shared float  Xs[SHARED_CAP / 32u];
+shared float  Xs[WIN_BLOCKS];
+shared float  partial[8u * PARTIAL_STRIDE];
 
 int8_t q8round(float x) {
     int t = int(x);
@@ -38,47 +51,45 @@ int8_t q8round(float x) {
 }
 
 void main() {
-    uint out_ = uint(pc.outDim);
-    uint outGroups = (out_ + 255u) / 256u;
-    uint t = gl_WorkGroupID.x / outGroups;
-    if (t >= uint(pc.P)) return;
-    uint outGroup = gl_WorkGroupID.x - t * outGroups;
+    uint tokenRow = gl_WorkGroupID.y + uint(pc.tokenBase);
+    if (tokenRow >= uint(pc.P)) return;
+    uint outGroup = gl_WorkGroupID.x + uint(pc.outGroupBase);
     uint tid = gl_LocalInvocationID.x;
+    uint lane = tid % BLOCK;
+    uint row = tid / BLOCK;
+    uint out_ = uint(pc.outDim);
+    uint outputRow = outGroup * 8u + row;
     uint in_ = uint(pc.inDim);
     uint nblk = in_ / BLOCK;
-    uint xbase = t * in_;
-
-    uint o = outGroup * 256u + tid;
-    uint wbase = o * in_;
-    uint sbase = o * nblk;
+    uint inputBase = tokenRow * in_;
     float acc = 0.0;
 
     for (uint wb = 0u; wb < nblk; wb += WIN_BLOCKS) {
         uint winBlocks = min(WIN_BLOCKS, nblk - wb);
-        uint winBase = wb * BLOCK;
-
         for (uint b = tid; b < winBlocks; b += 256u) {
             uint base = b * BLOCK;
-            uint gbase = winBase + base;
+            uint gbase = (wb + b) * BLOCK;
             float amax = 0.0;
             for (uint i = 0u; i < BLOCK; ++i) {
-                float g = G[xbase + gbase + i];
-                float act = (g / (1.0 + exp(-g))) * U[xbase + gbase + i];
+                float g = G[inputBase + gbase + i];
+                float act = (g / (1.0 + exp(-g))) * U[inputBase + gbase + i];
                 amax = max(amax, abs(act));
             }
             float d = amax / 127.0;
             Xs[b] = d;
             float qd = d > 0.0 ? 1.0 / d : 0.0;
             for (uint i = 0u; i < BLOCK; ++i) {
-                float g = G[xbase + gbase + i];
-                float act = (g / (1.0 + exp(-g))) * U[xbase + gbase + i];
+                float g = G[inputBase + gbase + i];
+                float act = (g / (1.0 + exp(-g))) * U[inputBase + gbase + i];
                 Xq[base + i] = (d > 0.0) ? q8round(act * qd) : int8_t(0);
             }
         }
         barrier();
 
-        if (o < out_) {
-            for (uint lb = 0u; lb < winBlocks; ++lb) {
+        if (outputRow < out_) {
+            uint wbase = outputRow * in_;
+            uint sbase = outputRow * nblk;
+            for (uint lb = lane; lb < winBlocks; lb += BLOCK) {
                 uint cb = wbase + (wb + lb) * BLOCK;
                 uint xb = lb * BLOCK;
                 int s0 = 0, s1 = 0, s2 = 0, s3 = 0;
@@ -88,13 +99,19 @@ void main() {
                     s2 += int(Wcodes[cb + i + 2u]) * int(Xq[xb + i + 2u]);
                     s3 += int(Wcodes[cb + i + 3u]) * int(Xq[xb + i + 3u]);
                 }
-                acc += float((s0 + s1) + (s2 + s3)) * Wscale[sbase + wb + lb] * Xs[lb];
+                partial[row * PARTIAL_STRIDE + lb] = float((s0 + s1) + (s2 + s3)) * Wscale[sbase + wb + lb];
+            }
+        }
+        barrier();
+        if (lane == 0u && outputRow < out_) {
+            for (uint lb = 0u; lb < winBlocks; ++lb) {
+                acc += partial[row * PARTIAL_STRIDE + lb] * Xs[lb];
             }
         }
         barrier();
     }
 
-    if (o < out_) {
-        D[t * out_ + o] += acc;
+    if (lane == 0u && outputRow < out_) {
+        D[tokenRow * out_ + outputRow] += acc;
     }
 }
