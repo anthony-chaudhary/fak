@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -21,19 +22,12 @@ import (
 //
 // What is proven at which seam:
 //
-//   - PURE units: opsPiClassify, opsPiComplete, opsPiProviderWire and opsPiChildArgv
-//     (including the @file prompt delivery that keeps the prompt off argv).
-//   - DISPATCHER: runOpsRun selects Pi once and hands the args to runOpsPi; a wrong or
-//     unsupported selection is refused before any child is launched (no harness retry).
-//   - BOUNDED CHILD: opsPiExecute is exercised against REAL child processes (this test
-//     binary re-exec'd in helper mode) for the success, error-event, malformed-event,
-//     timeout, cancellation and process-tree cases.
-//   - RUN SPINE: runOpsPi is driven end to end (real gateway preflight via httptest, real
-//     receipt write, real identity) with only the single `opsPiRunExecute` seam swapped so
-//     no `fak guard`/pi binary is needed; the swap STILL runs a real fake-Pi child and the
-//     real opsPiEvents classifier, and asserts the child consumed the injected gateway
-//     configuration. The outer `fak guard ... -- pi ...` argv is asserted, not executed:
-//     the guard injection itself is not proven here.
+//   - PURE units: classification, child argv, and run-scoped provider extension content.
+//   - DISPATCHER: runOpsRun selects Pi once and rejects unsupported selections without retry.
+//   - BOUNDED CHILD: opsPiExecute exercises real child processes for success and cancellation.
+//   - RUN SPINE: runOpsPi retains inference preflight and receipt behavior while launching Pi
+//     directly with a temporary provider extension. The extension pins URL, model, wire, and
+//     the named API key reference, and is removed when the run ends.
 //
 // Nothing reaches the network except the in-process httptest gateway, and every child wait
 // is bounded.
@@ -136,19 +130,40 @@ func TestOpsRunPi(t *testing.T) {
 		}
 	})
 
+	t.Run("provider_extension", func(t *testing.T) {
+		source, err := opsPiProviderExtensionSource("http://127.0.0.1:8080", "qwen3.8-27b", "FAK_OPS_PI_KEY")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{
+			"pi.registerProvider(\"fak\", provider)",
+			"\"baseUrl\":\"http://127.0.0.1:8080/v1\"",
+			"\"api\":\"openai-completions\"",
+			"provider.apiKey = process.env[\"FAK_OPS_PI_KEY\"]",
+			"\"id\":\"qwen3.8-27b\"",
+		} {
+			if !strings.Contains(source, want) {
+				t.Errorf("provider extension missing %q:\n%s", want, source)
+			}
+		}
+		if strings.Contains(source, "fixture-only") {
+			t.Fatalf("provider extension embedded a credential: %s", source)
+		}
+	})
+
 	t.Run("dispatcher_selects_pi_once", func(t *testing.T) {
 		dir := t.TempDir()
 		prompt := writeOpsPiPrompt(t, dir)
 		var stdout, stderr bytes.Buffer
-		if got := runOpsRun(&stdout, &stderr, []string{"--harness", "pi", "--dry-run", "--model", "fixture-model", "--prompt-file", prompt, "--base-url", "http://127.0.0.1:1"}); got != 0 {
+		if got := runOpsRun(&stdout, &stderr, []string{"--harness", "pi", "--dry-run", "--model", "fixture-model", "--prompt-file", prompt, "--base-url", "http://127.0.0.1:8080"}); got != 0 {
 			t.Fatalf("runOpsRun --harness pi --dry-run exit=%d stderr=%s", got, stderr.String())
 		}
 		var plan map[string]any
 		if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
 			t.Fatalf("decode plan: %v; out=%s", err, stdout.String())
 		}
-		if plan["schema"] != "fak-ops-run-plan/1" || plan["harness"] != "pi" || plan["guarded"] != true || plan["prompt_delivery"] != "file" {
-			t.Fatalf("plan not the Pi plan: %v", plan)
+		if plan["schema"] != "fak-ops-run-plan/1" || plan["harness"] != "pi" || plan["guarded"] != false || plan["guard_mode"] != "off" || plan["prompt_delivery"] != "file" {
+			t.Fatalf("plan not the direct Pi plan: %v", plan)
 		}
 		if plan["wire"] != "openai" {
 			t.Fatalf("plan wire=%v want openai", plan["wire"])
@@ -158,9 +173,11 @@ func TestOpsRunPi(t *testing.T) {
 		for _, a := range argv {
 			parts = append(parts, fmt.Sprint(a))
 		}
-		joined := strings.Join(parts, " ")
-		if !strings.Contains(joined, "guard --provider openai") || !strings.Contains(joined, " -- pi -p ") || !strings.Contains(joined, "@") {
-			t.Fatalf("plan argv is not the guarded Pi launch: %v", argv)
+		if len(parts) < 5 || parts[0] != "pi" || parts[1] != "-e" || parts[2] != "<run-scoped-provider-extension>" || parts[3] != "-p" {
+			t.Fatalf("plan argv is not a direct Pi launch: %v", argv)
+		}
+		if strings.Contains(strings.Join(parts, " "), " guard ") || !strings.Contains(strings.Join(parts, " "), "@") {
+			t.Fatalf("plan argv contains guard or omits prompt file: %v", argv)
 		}
 	})
 
@@ -181,6 +198,8 @@ func TestOpsRunPi(t *testing.T) {
 		receipt := filepath.Join(dir, "refused.json")
 		for _, args := range [][]string{
 			{"--harness", "pi", "--provider", "openai", "--workspace", dir, "--prompt-file", prompt, "--receipt", receipt, "--model", "m", "--base-url", "http://127.0.0.1:1"},
+			{"--harness", "pi", "--policy", "guard-only.json", "--workspace", dir, "--prompt-file", prompt, "--receipt", receipt, "--model", "m", "--base-url", "http://127.0.0.1:1"},
+			{"--harness", "pi", "--audit", "guard-only.jsonl", "--workspace", dir, "--prompt-file", prompt, "--receipt", receipt, "--model", "m", "--base-url", "http://127.0.0.1:1"},
 			{"--harness", "pi", "--workspace", dir, "--prompt-file", prompt, "--receipt", prompt, "--model", "m", "--base-url", "http://127.0.0.1:1"},
 			{"--harness", "pi", "--positional"},
 		} {
@@ -203,21 +222,49 @@ func TestOpsRunPi(t *testing.T) {
 		prompt := writeOpsPiPrompt(t, dir)
 		receipt := filepath.Join(dir, "receipt.json")
 		model := "pi-witness-model"
+		t.Setenv("FAK_OPS_PI_KEY", "fixture-only")
 
 		old := opsPiRunExecute
 		t.Cleanup(func() { opsPiRunExecute = old })
-		var childSawGateway string
+		var childSawGateway, extensionPath, extensionDigest string
 		opsPiRunExecute = func(ctx context.Context, stdout, stderr io.Writer, argv, env []string, promptBytes []byte) (int, bool, bool, []opsRunLifecycleRecord) {
 			// The prompt must never appear on argv; it travels as @file.
 			joined := strings.Join(argv, " ")
 			if strings.Contains(joined, "opswitness") {
 				t.Fatalf("prompt leaked into argv: %q", argv)
 			}
-			if !strings.Contains(joined, "@"+prompt) || !strings.Contains(joined, "--provider fak") {
-				t.Fatalf("pi child argv not pinned: %q", argv)
+			if len(argv) < 5 || argv[0] != os.Args[0] || argv[1] != "-e" || !strings.Contains(joined, "@"+prompt) || !strings.Contains(joined, "--provider fak") {
+				t.Fatalf("direct pi child argv not pinned: %q", argv)
 			}
-			// Inject the gateway configuration the guard wrapper received and run a REAL
-			// fake-Pi child; classification uses the production opsPiEvents reader.
+			if strings.Contains(joined, " guard ") {
+				t.Fatalf("direct Pi launch unexpectedly used fak guard: %q", argv)
+			}
+			extensionPath = argv[2]
+			source, err := os.ReadFile(extensionPath)
+			if err != nil {
+				t.Fatalf("read run-scoped provider extension: %v", err)
+			}
+			extensionDigest = opsRunDigest(string(source))
+			for _, want := range []string{
+				"\"baseUrl\":\"" + gateway.URL + "/v1\"",
+				"\"api\":\"openai-completions\"",
+				"provider.apiKey = process.env[\"FAK_OPS_PI_KEY\"]",
+				"\"id\":\"" + model + "\"",
+			} {
+				if !strings.Contains(string(source), want) {
+					t.Errorf("provider extension missing %q: %s", want, source)
+				}
+			}
+			selectedKey := false
+			for _, item := range env {
+				if item == "FAK_OPS_PI_KEY=fixture-only" {
+					selectedKey = true
+				}
+			}
+			if !selectedKey {
+				t.Fatalf("named Pi credential not forwarded: %v", env)
+			}
+			// Run a REAL fake-Pi child; classification uses the production opsPiEvents reader.
 			childEnv := append(append([]string{}, env...),
 				fakePiChildEnv+"=complete",
 				fakePiGatewayEnv+"="+gateway.URL,
@@ -253,7 +300,8 @@ func TestOpsRunPi(t *testing.T) {
 			"--prompt-file", prompt,
 			"--workspace", dir,
 			"--receipt", receipt,
-			"--base-url", gateway.URL + "/v1",
+			"--base-url", gateway.URL,
+			"--api-key-env", "FAK_OPS_PI_KEY",
 			"--pi-bin", os.Args[0],
 			"--timeout", "30s",
 		})
@@ -279,8 +327,11 @@ func TestOpsRunPi(t *testing.T) {
 		}
 		// Source-session identity: the run is identified by its own run id, and the route
 		// digest binds provider + gateway + model for that run.
-		if r.LaunchIdentity.ModelDigest == "" || r.LaunchIdentity.RouteDigest == "" || r.LaunchIdentity.ModelDigest != opsRunDigest(model) {
-			t.Fatalf("route/model identity not bound: %s", data)
+		if r.LaunchIdentity.ModelDigest != opsRunDigest(model) ||
+			r.LaunchIdentity.RouteDigest != opsRunDigest("fak", gateway.URL+"/v1", model) ||
+			r.LaunchIdentity.EffectiveConfigDigest != extensionDigest ||
+			r.LaunchIdentity.NativeToolMediation != "pi" {
+			t.Fatalf("direct Pi route/config identity not bound: %s", data)
 		}
 		if r.LaunchIdentity.InferenceProbeRef != r.InferencePreflight.ReceiptRef {
 			t.Fatalf("receipt ref not persisted into identity: %s", data)
@@ -290,6 +341,12 @@ func TestOpsRunPi(t *testing.T) {
 		}
 		if childSawGateway != gateway.URL {
 			t.Fatalf("fake Pi did not consume the injected gateway configuration: got %q want %q", childSawGateway, gateway.URL)
+		}
+		if extensionPath == "" {
+			t.Fatal("direct Pi run did not install a provider extension")
+		}
+		if _, err := os.Stat(extensionPath); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("run-scoped provider extension was not cleaned up: %v", err)
 		}
 	})
 

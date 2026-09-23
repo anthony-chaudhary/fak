@@ -59,7 +59,7 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("opencode", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	verbFlagUsage(fs, "opencode")
-	dryRun := fs.Bool("dry-run", false, "print the guarded OpenCode command and exit without launching")
+	dryRun := fs.Bool("dry-run", false, "print the OpenCode command and exit without launching")
 	probePrompt := fs.String("probe", "", "run a single headless probe turn with this prompt and exit")
 	skipPermissions := fs.Bool("skip-permissions", true, "pass --auto to the OpenCode child when running unattended")
 	pure := fs.Bool("pure", false, "pass --pure to opencode child to prevent reading untracked global state")
@@ -71,10 +71,10 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 	apiKeyEnv := fs.String("api-key-env", "", "env var holding the upstream OpenAI API key (default: OPENAI_API_KEY)")
 	baseURL := fs.String("base-url", "", "upstream provider base URL; advanced override passed to fak guard")
 	remoteServe := fs.String("remote-serve", "", "send inference to a remote fak serve (HOST or HOST:PORT), while this local guard adjudicates")
-	model := fs.String("model", "", "upstream model id override passed to fak guard")
+	model := fs.String("model", "", "OpenCode model id under the fak provider")
 	auditPath := fs.String("audit", "", "write guard's decision journal to this file (or 'off')")
 	noAudit := fs.Bool("no-audit", false, "disable guard's decision journal")
-	quiet := fs.Bool("quiet", false, "suppress guard's startup banner and exit summary")
+	quiet := fs.Bool("quiet", false, "suppress launcher startup banner")
 	localAuto := fs.Bool("local", false, "auto-detect a local OpenAI-compatible model server for guard's upstream")
 	halo := fs.Bool("halo", false, "target local AMD Strix Halo appliance server (http://127.0.0.1:8080/v1)")
 	strix := fs.Bool("strix", false, "alias for --halo")
@@ -89,7 +89,8 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "  e.g. fak opencode")
 		fmt.Fprintln(stderr, "       fak opencode --dry-run")
 		fmt.Fprintln(stderr, "       fak opencode --probe \"Use bash to print hello\"")
-		fmt.Fprintln(stderr, "       fak opencode --policy my-floor.json -- run \"check the repo\"")
+		fmt.Fprintln(stderr, "       fak opencode --model qwen38:27b -- run \"check the repo\"")
+		fmt.Fprintln(stderr, "  Guard-only legacy launcher flags are rejected; configure provider routing with fak opencode config.")
 		fmt.Fprintln(stderr, "")
 		fs.PrintDefaults()
 	}
@@ -100,76 +101,26 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak opencode: %v\n", err)
 		return 2
 	}
-
-	if *halo || *strix {
-		if *baseURL == "" {
-			host := os.Getenv("FAK_HALO_HOST")
-			if host == "" {
-				host = os.Getenv("FAK_STRIX_HOST")
-			}
-			if host == "" {
-				host = "127.0.0.1:8080"
-			}
-			if !strings.HasPrefix(host, "http://") && !strings.HasPrefix(host, "https://") {
-				host = "http://" + host
-			}
-			if !strings.HasSuffix(host, "/v1") {
-				host = strings.TrimSuffix(host, "/") + "/v1"
-			}
-			*baseURL = host
-		}
-		if *model == "" {
-			*model = projectassets.ResolveDynamicHaloModel(".")
-		}
-		if !*quiet {
-			fmt.Fprintf(stderr, "fak opencode: targeting local Halo server at %s (model: %s)\n", *baseURL, *model)
-		}
+	// Guard-specific launcher flags have no meaning when OpenCode runs directly.
+	// Refuse them instead of silently accepting settings that would be ignored.
+	guardOnly := map[string]bool{
+		"split": true, "split-where": true, "split-interval": true,
+		"policy": true, "api-key-env": true, "base-url": true, "remote-serve": true,
+		"audit": true, "no-audit": true, "local": true, "halo": true, "strix": true,
+		"metal": true, "gguf": true, "backend": true, "tokenizer": true,
 	}
-	*ggufPath = pathutil.ExpandTilde(*ggufPath)
-	*tokenizerPath = pathutil.ExpandTilde(*tokenizerPath)
-
-	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
-		if *metal || (*ggufPath != "" && *gpuBackend == "") {
-			// Apple-Silicon Metal is the CPU-session forward (`fak guard --metal`), NOT a
-			// compute --backend: leave gpuBackend empty so guard resolves the session seam.
-			*metal = true
+	var unsupported []string
+	fs.Visit(func(f *flag.Flag) {
+		if guardOnly[f.Name] {
+			unsupported = append(unsupported, "--"+f.Name)
 		}
-	}
-	if *baseURL == "" && *remoteServe == "" && *ggufPath == "" && *apiKeyEnv == "" && !*localAuto {
-		if os.Getenv("OPENAI_API_KEY") == "" {
-			if base, modelID, label, found := guardDetectLocalBackend(); found {
-				*localAuto = true
-				if *model == "" {
-					*model = modelID
-				}
-				if !*quiet {
-					fmt.Fprintf(stderr, "fak opencode: auto-connected to local %s at %s (model: %s) (one-touch)\n", label, base, modelID)
-				}
-			} else {
-				// On Apple Silicon macOS, if no local server is running and no API key is set, assume gguf default with Metal!
-				if runtime.GOOS == "darwin" {
-					*ggufPath = "default"
-					if *model == "" {
-						*model = "qwen38:27b"
-					}
-					if runtime.GOARCH == "arm64" {
-						// Session seam, not a compute --backend (one-touch must not pass
-						// `--backend metal`, which is unregistered on this host).
-						*metal = true
-					}
-					if !*quiet {
-						fmt.Fprintln(stderr, "fak opencode: no local model server running — assuming in-kernel model (qwen38:27b) with Metal GPU acceleration (one-touch)")
-					}
-				} else {
-					if *model == "" {
-						*model = projectassets.ResolveDynamicHaloModel(".")
-					}
-				}
-			}
-		}
+	})
+	if len(unsupported) != 0 {
+		fmt.Fprintf(stderr, "fak opencode: guard-only flags are unavailable for a direct launch: %s\n", strings.Join(unsupported, ", "))
+		return 2
 	}
 
-	fakBin := tuiExecutable()
+	opencodeBin := resolveOpencodeLaunchBinary()
 	launch := opencodeLaunchOptions{
 		dryRun:          *dryRun,
 		probePrompt:     *probePrompt,
@@ -195,12 +146,10 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 		skipPermissions: *skipPermissions,
 		passthrough:     fs.Args(),
 	}
-	argvOut := buildOpencodeLaunchArgv(fakBin, launch)
+	argvOut := buildOpencodeLaunchArgv(opencodeBin, launch)
 
 	if launch.dryRun {
 		fmt.Fprintln(stderr, "fak opencode: dry-run - not launching")
-		fmt.Fprintln(stderr, "  view        = agent 80% / fak info 20% (--split "+launch.splitMode+")")
-		fmt.Fprintln(stderr, "  provider    = openai (Chat Completions /v1/chat/completions)")
 		fmt.Fprintln(stderr, "  command     = "+strings.Join(argvOut, " "))
 		fmt.Fprintln(stdout, strings.Join(argvOut, " "))
 		return 0
@@ -214,9 +163,11 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	started := time.Now()
-	fmt.Fprintln(stderr, "fak opencode: launching OpenCode through fak guard ...")
+	if !launch.quiet {
+		fmt.Fprintln(stderr, "fak opencode: launching OpenCode directly ...")
+	}
 	code := opencodeLaunchRun(stdout, stderr, argvOut, os.Environ())
-	if code == 0 {
+	if code == 0 && !launch.quiet {
 		fmt.Fprintf(stderr, "fak opencode: OpenCode completed successfully in %s\n", time.Since(started).Round(time.Millisecond))
 	}
 	return code
@@ -236,46 +187,8 @@ func validateOpencodeLaunchSplit(mode, where string) error {
 	}
 }
 
-func buildOpencodeLaunchArgv(fakBin string, o opencodeLaunchOptions) []string {
-	argv := []string{
-		fakBin,
-		"guard",
-		"--provider", "openai",
-		"--split", firstNonEmpty(strings.TrimSpace(o.splitMode), "auto"),
-		"--split-where", firstNonEmpty(strings.TrimSpace(o.splitWhere), "bottom"),
-		"--split-interval", o.splitInterval.String(),
-	}
-	appendKV := func(flag, value string) {
-		if strings.TrimSpace(value) != "" {
-			argv = append(argv, flag, value)
-		}
-	}
-	appendKV("--policy", o.policyPath)
-	appendKV("--api-key-env", o.apiKeyEnv)
-	appendKV("--base-url", o.baseURL)
-	appendKV("--remote-serve", o.remoteServe)
-	appendKV("--model", o.model)
-	appendKV("--audit", o.auditPath)
-	if o.noAudit {
-		argv = append(argv, "--audit", "off")
-	}
-	if o.quiet {
-		argv = append(argv, "--quiet")
-	}
-	if o.localAuto {
-		argv = append(argv, "--local")
-	}
-	if o.probePrompt != "" {
-		argv = append(argv, "--probe")
-	}
-	appendKV("--gguf", o.ggufPath)
-	if o.metal {
-		argv = append(argv, "--metal")
-	}
-	appendKV("--backend", o.gpuBackend)
-	appendKV("--tokenizer", o.tokenizerPath)
-
-	argv = append(argv, "--", "opencode")
+func buildOpencodeLaunchArgv(opencodeBin string, o opencodeLaunchOptions) []string {
+	argv := []string{opencodeBin}
 	if childModel := strings.TrimPrefix(strings.TrimSpace(o.model), "fak/"); childModel != "" {
 		argv = append(argv, "--model", "fak/"+childModel)
 	}
@@ -289,6 +202,26 @@ func buildOpencodeLaunchArgv(fakBin string, o opencodeLaunchOptions) []string {
 		}
 	}
 	return append(argv, o.passthrough...)
+}
+
+func resolveOpencodeLaunchBinary() string {
+	if runtime.GOOS == "windows" {
+		if appData := os.Getenv("APPDATA"); appData != "" {
+			native := filepath.Join(appData, "npm", "node_modules", "opencode-ai", "bin", "opencode.exe")
+			if info, err := os.Stat(native); err == nil && !info.IsDir() {
+				return native
+			}
+		}
+	}
+	if binary, err := exec.LookPath("opencode"); err == nil {
+		return binary
+	}
+	if runtime.GOOS != "windows" {
+		if binary := resolvePOSIXOpenCodeBinary(""); binary != "" {
+			return binary
+		}
+	}
+	return "opencode"
 }
 
 func execOpencodeLaunchChild(stdout, stderr io.Writer, argv, env []string) int {

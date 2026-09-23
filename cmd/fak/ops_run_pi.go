@@ -28,10 +28,9 @@ import (
 // subprocess lifecycle the OpenCode arm owns (bounded deadline, process-tree
 // cancellation, run-scoped config, shared receipt) instead of a second driver.
 //
-// Routing. The launch is wrapped by `fak guard -- pi ...`: guard injects the
-// session-scoped `-e` extension (guard_pi.go) that registers the `fak` provider
-// at the in-process kernel gateway origin, so every Pi tool call crosses the
-// capability floor and inference proxies through the Fak Router (fak serve). Pi
+// Routing. Ops launches Pi directly with a run-scoped `-e` extension that
+// registers the `fak` provider at the supplied gateway. Explicit `fak guard -- pi`
+// remains a separate opt-in path. Pi
 // speaks the OpenAI-completions wire for the `fak` provider (projectassets
 // GeneratePiConfig: api "openai-completions"), which is why the inference
 // preflight below is the OpenAI-wire probe the OpenCode arm already uses.
@@ -114,6 +113,60 @@ func opsPiChildArgv(piBin, promptPath, provider, model, thinking string) []strin
 		argv = append(argv, "--thinking", t)
 	}
 	return argv
+}
+
+// opsPiProviderExtensionSource renders the run-scoped provider extension from the
+// canonical Pi provider schema. A named key is read from the child environment at load time.
+func opsPiProviderExtensionSource(baseURL, model, apiKeyEnv string) (string, error) {
+	raw, err := projectassets.GeneratePiConfig(baseURL, model)
+	if err != nil {
+		return "", err
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return "", fmt.Errorf("decode generated Pi provider: %w", err)
+	}
+	providers, ok := cfg["providers"].(map[string]any)
+	if !ok {
+		return "", fmt.Errorf("generated Pi config omitted providers")
+	}
+	provider, ok := providers[projectassets.DefaultPiProviderID].(map[string]any)
+	if !ok {
+		return "", fmt.Errorf("generated Pi config omitted provider %q", projectassets.DefaultPiProviderID)
+	}
+	keyAssignment := ""
+	if keyEnv := strings.TrimSpace(apiKeyEnv); keyEnv != "" {
+		canonical := strings.ToUpper(keyEnv)
+		if !opsRunValidEnvName(keyEnv) || opsRunControlledEnv(canonical) || opsRunAllowedPlatformEnv(canonical) {
+			return "", fmt.Errorf("unsafe --api-key-env name %q", keyEnv)
+		}
+		encodedName, _ := json.Marshal(keyEnv)
+		keyAssignment = "  provider.apiKey = process.env[" + string(encodedName) + "] || \"\";\n"
+	}
+	literal, err := json.Marshal(provider)
+	if err != nil {
+		return "", fmt.Errorf("encode generated Pi provider: %w", err)
+	}
+	return "// fak ops run: run-scoped Pi OpenAI-completions route.\n" +
+		"export default function (pi) {\n" +
+		"  const provider = " + string(literal) + ";\n" +
+		keyAssignment +
+		"  pi.registerProvider(\"" + projectassets.DefaultPiProviderID + "\", provider);\n" +
+		"}\n", nil
+}
+
+func installOpsPiProviderExtension(command []string, source string) ([]string, func(), error) {
+	dir, err := os.MkdirTemp("", "fak-ops-run-pi-")
+	if err != nil {
+		return command, func() {}, err
+	}
+	cleanup := func() { _ = os.RemoveAll(dir) }
+	extPath := filepath.Join(dir, "fak-ops-pi-provider.ts")
+	if err := os.WriteFile(extPath, []byte(source), 0o600); err != nil {
+		cleanup()
+		return command, func() {}, err
+	}
+	return appendPiExtensionArg(command, extPath), cleanup, nil
 }
 
 // opsPiEvents reads Pi's `--mode json` stream, forwarding it while retaining only
@@ -289,7 +342,7 @@ func runOpsPi(stdout, stderr io.Writer, args []string) int {
 	receiptPath := fs.String("receipt", "", "execution metadata JSON file (required except dry-run)")
 	policy := fs.String("policy", "", "guard capability-floor policy file")
 	audit := fs.String("audit", "", "guard audit journal file")
-	guardModeFlag := fs.String("guard-mode", "enforce", "guard posture: enforce (audit-only/off are unsupported)")
+	guardModeFlag := fs.String("guard-mode", "off", "guard posture: off for direct Pi launch; use explicit fak guard -- pi for enforcement")
 	piBin := fs.String("pi-bin", "pi", "Pi executable; use the native .exe on Windows")
 	thinking := fs.String("thinking", "", "Pi thinking effort (omitted when unset)")
 	dryRun := fs.Bool("dry-run", false, "validate and print metadata without launching")
@@ -301,6 +354,10 @@ func runOpsPi(stdout, stderr io.Writer, args []string) int {
 	}
 	if *harness != opsPiHarness || fs.NArg() != 0 || *timeout <= 0 || strings.TrimSpace(*model) == "" || *promptFile == "" || (!*dryRun && (*receiptPath == "" || strings.TrimSpace(*workspace) == "")) {
 		fmt.Fprintln(stderr, "ops run pi: require --harness pi, --provider fak|anthropic, --model, --prompt-file, --workspace, --receipt and a positive --timeout; no positional arguments (--workspace and --receipt may be omitted only for --dry-run)")
+		return 2
+	}
+	if strings.TrimSpace(*policy) != "" || strings.TrimSpace(*audit) != "" {
+		fmt.Fprintln(stderr, "ops run pi: --policy and --audit require an explicit fak guard -- pi launch")
 		return 2
 	}
 	wire, ok := opsPiProviderWire(strings.ToLower(strings.TrimSpace(*provider)))
@@ -357,19 +414,15 @@ func runOpsPi(stdout, stderr io.Writer, args []string) int {
 	guardMode, guardPolicy := qualifyOpsRunGuardMode(*guardModeFlag)
 	configPolicy := guardPolicy
 	piArgv := opsPiChildArgv(resolvedPi, promptPath, *provider, *model, *thinking)
-	gatewayProbeURL := strings.TrimSpace(*baseURL)
-	// Guard wraps the Pi child: it injects the session-scoped provider extension
-	// that repoints Pi at the gateway, and holds the real upstream credential.
-	guardArgv := []string{tuiExecutable(), "guard", "--provider", wire, "--split", "off", "--model", *model}
-	for _, pair := range [][2]string{{"--base-url", *baseURL}, {"--api-key-env", *apiKeyEnv}, {"--policy", *policy}, {"--audit", *audit}} {
-		if pair[1] != "" {
-			guardArgv = append(guardArgv, pair[0], pair[1])
-		}
+	normalizedBaseURL := projectassets.NormalizePiBaseURL(*baseURL)
+	gatewayProbeURL := normalizedBaseURL
+	extensionSource, err := opsPiProviderExtensionSource(normalizedBaseURL, *model, *apiKeyEnv)
+	if err != nil {
+		fmt.Fprintf(stderr, "ops run pi: create direct provider config: %v\n", err)
+		return 2
 	}
-	argv := append(append([]string{}, guardArgv...), "--")
-	argv = append(argv, piArgv...)
 
-	identity := newOpsRunLaunchIdentity(runID, opsPiHarness, resolvedWorkspace, *provider, *baseURL, *model, resolvedPi, "", *policy, guardMode, false, false)
+	identity := newOpsRunLaunchIdentity(runID, opsPiHarness, resolvedWorkspace, *provider, normalizedBaseURL, *model, resolvedPi, extensionSource, "", guardMode, false, false)
 
 	if *dryRun {
 		_ = json.NewEncoder(stdout).Encode(map[string]any{
@@ -379,11 +432,11 @@ func runOpsPi(stdout, stderr io.Writer, args []string) int {
 			"wire":            wire,
 			"model":           *model,
 			"workspace":       resolvedWorkspace,
-			"guarded":         true,
+			"guarded":         false,
 			"guard_mode":      guardMode,
 			"prompt_delivery": "file",
 			"timeout":         timeout.String(),
-			"argv":            argv,
+			"argv":            appendPiExtensionArg(piArgv, "<run-scoped-provider-extension>"),
 		})
 		return 0
 	}
@@ -404,6 +457,13 @@ func runOpsPi(stdout, stderr io.Writer, args []string) int {
 		return 1
 	}
 	defer cleanupEnv()
+
+	argv, cleanupExtension, err := installOpsPiProviderExtension(piArgv, extensionSource)
+	if err != nil {
+		fmt.Fprintf(stderr, "ops run pi: create direct provider extension: %v\n", err)
+		return 1
+	}
+	defer cleanupExtension()
 
 	receipt := opsRunReceipt{Schema: "fak-ops-run/1", Harness: opsPiHarness, Workspace: resolvedWorkspace, LaunchIdentity: &identity, Status: "running", Started: time.Now().UTC(), ConfigPolicy: &configPolicy}
 	if err := writeOpsRunReceipt(*receiptPath, receipt); err != nil {

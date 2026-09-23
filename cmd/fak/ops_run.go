@@ -108,6 +108,11 @@ func newOpsRunLaunchIdentity(runID, harness, workspace, provider, baseURL, model
 	if encodedConfig != "" {
 		configDigest = opsRunDigest(encodedConfig)
 	}
+	nativeToolMediation := "unknown"
+	switch harness {
+	case "opencode", "pi":
+		nativeToolMediation = harness
+	}
 	return opsRunLaunchIdentityReceipt{
 		Schema:                opsRunLaunchIdentitySchema,
 		RunID:                 runID,
@@ -120,15 +125,15 @@ func newOpsRunLaunchIdentity(runID, harness, workspace, provider, baseURL, model
 		EffectiveConfigDigest: configDigest,
 		PolicySource:          policySource,
 		PolicyDigest:          policyDigest,
-		GuardRequested:        "fail_closed",
-		GuardEffective:        "unknown",
-		GuardEvidenceRef:      "unknown",
+		GuardRequested:        "disabled",
+		GuardEffective:        "disabled",
+		GuardEvidenceRef:      "none",
 		GuardModeRequested:    guardMode,
-		GuardModeEffective:    "unknown",
-		InferenceGuard:        "unknown",
+		GuardModeEffective:    "off",
+		InferenceGuard:        "none",
 		RepositoryProofHooks:  "unknown",
-		NativeToolMediation:   "unknown",
-		OSIsolation:           "unknown",
+		NativeToolMediation:   nativeToolMediation,
+		OSIsolation:           "isolated_child_environment",
 		InferenceProbeRef:     "unknown",
 		CapabilityEvidenceRef: "unknown",
 		Auto:                  auto,
@@ -139,19 +144,19 @@ func newOpsRunLaunchIdentity(runID, harness, workspace, provider, baseURL, model
 func qualifyOpsRunGuardMode(raw string) (string, opsRunConfigPolicyReceipt) {
 	requested := strings.ToLower(strings.TrimSpace(raw))
 	if requested == "" {
-		requested = "enforce"
+		requested = "off"
 	}
 	receipt := opsRunConfigPolicyReceipt{
 		Source: "--guard-mode",
 		Digest: opsRunDigest(requested),
 		Status: "qualified",
 	}
-	if requested == "enforce" {
-		return requested, receipt
+	if requested == "off" || requested == "disabled" {
+		return "off", receipt
 	}
 	switch requested {
-	case "audit", "audit-only", "off", "disabled":
-		receipt.Status, receipt.Reason = "refused", "unsupported_guard_mode"
+	case "enforce", "audit", "audit-only":
+		receipt.Status, receipt.Reason = "refused", "guard_mode_requires_guard_harness"
 	default:
 		receipt.Status, receipt.Reason = "refused", "unknown_guard_mode"
 	}
@@ -622,11 +627,11 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	timeout := fs.Duration("timeout", 5*time.Minute, "positive wall-clock deadline")
 	receiptPath := fs.String("receipt", "", "execution metadata JSON file (required except dry-run)")
 	model := fs.String("model", "", "upstream model identifier without an OpenCode provider prefix (required)")
-	baseURL := fs.String("base-url", "", "upstream endpoint for guard (Gemini native uses /v1beta)")
+	baseURL := fs.String("base-url", "", "upstream endpoint for OpenCode (OpenAI routes are normalized to /v1)")
 	apiKeyEnv := fs.String("api-key-env", "", "environment variable holding the upstream key")
-	policy := fs.String("policy", "", "guard capability-floor policy file")
-	audit := fs.String("audit", "", "guard audit journal file")
-	guardModeFlag := fs.String("guard-mode", "enforce", "guard posture: enforce (audit-only/off are unsupported)")
+	policy := fs.String("policy", "", "guard-only capability-floor policy file (unsupported by direct OpenCode)")
+	audit := fs.String("audit", "", "guard-only audit journal file (unsupported by direct OpenCode)")
+	guardModeFlag := fs.String("guard-mode", "off", "guard posture: off (other modes require an explicit guard harness)")
 	opencodeBin := fs.String("opencode-bin", "opencode", "OpenCode executable; use the native .exe on Windows")
 	auto := fs.Bool("auto", false, "ask OpenCode to approve permissions not explicitly denied")
 	pure := fs.Bool("pure", false, "disable OpenCode external plugins")
@@ -641,6 +646,16 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, "ops run: require --harness opencode, --provider openai|gemini, --model, --prompt-file, --workspace, --receipt and a positive --timeout; no positional arguments (--workspace and --receipt may be omitted only for --dry-run)")
 		return 2
 	}
+	guardOnlyFlag := ""
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "policy" || f.Name == "audit" {
+			guardOnlyFlag = f.Name
+		}
+	})
+	if guardOnlyFlag != "" {
+		fmt.Fprintf(stderr, "ops run: --%s requires an explicit guard harness and is unused by direct OpenCode\n", guardOnlyFlag)
+		return 2
+	}
 	resolvedWorkspace := ""
 	if strings.TrimSpace(*workspace) != "" {
 		var err error
@@ -650,7 +665,19 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 			return 2
 		}
 	}
-	if *provider == "gemini" && (*apiKeyEnv == "" || strings.TrimSpace(os.Getenv(*apiKeyEnv)) == "") {
+	keyEnv := strings.TrimSpace(*apiKeyEnv)
+	if keyEnv != "" {
+		canonical := strings.ToUpper(keyEnv)
+		if !opsRunValidEnvName(keyEnv) || opsRunControlledEnv(canonical) || opsRunAllowedPlatformEnv(canonical) {
+			fmt.Fprintf(stderr, "ops run: unsafe --api-key-env name %q\n", keyEnv)
+			return 2
+		}
+	}
+	if *provider == "gemini" && strings.TrimSpace(*baseURL) == "" {
+		fmt.Fprintln(stderr, "ops run: --provider gemini requires an explicit --base-url")
+		return 2
+	}
+	if *provider == "gemini" && (keyEnv == "" || strings.TrimSpace(os.Getenv(keyEnv)) == "") {
 		fmt.Fprintln(stderr, "ops run: --provider gemini requires --api-key-env naming a nonempty upstream key")
 		return 2
 	}
@@ -678,18 +705,12 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	if runtime.GOOS != "windows" && *opencodeBin == "opencode" {
 		// Cron/launchd children inherit a minimal PATH that misses user-local
 		// install dirs. Resolve the well-known binary locations when the bare
-		// name is not on PATH so the guarded launch does not fail spuriously;
-		// guard leaves explicit paths (containing a separator) to exec.
+		// name is not on PATH so the direct launch does not fail spuriously;
+		// leave explicit paths (containing a separator) to exec.
 		if _, lookErr := exec.LookPath(*opencodeBin); lookErr != nil {
 			if native := resolvePOSIXOpenCodeBinary(""); native != "" {
 				*opencodeBin = native
 			}
-		}
-	}
-	argv := []string{tuiExecutable(), "guard", "--provider", *provider, "--split", "off", "--model", *model}
-	for _, pair := range [][2]string{{"--base-url", *baseURL}, {"--api-key-env", *apiKeyEnv}, {"--policy", *policy}, {"--audit", *audit}} {
-		if pair[1] != "" {
-			argv = append(argv, pair[0], pair[1])
 		}
 	}
 	var nonce [12]byte
@@ -730,34 +751,38 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	// global or project config into the route owned by this invocation.
 	providerID := "fak_ops_" + hex.EncodeToString(nonce[:])
 	modelID := providerID + "/" + *model
-	argv = append(argv, "--", *opencodeBin, "run", "--format", "json", "--model", modelID)
+	directBaseURL := opsRunDirectBaseURL(*provider, *baseURL)
+	directAPIKey := "fak-ops-local"
+	if keyEnv != "" {
+		directAPIKey = "{env:" + keyEnv + "}"
+	}
+	argv := []string{*opencodeBin, "run", "--format", "json", "--model", modelID}
 	if *auto {
 		argv = append(argv, "--auto")
 	}
 	if *pure {
 		argv = append(argv, "--pure")
 	}
-	// Interpolation happens in the child after guard injects its local endpoint.
 	// Start from a fresh config: ambient OpenCode configuration belongs to a
-	// different trust boundary and must not alter this run's provider route.
+	// different trust boundary and must not alter this run's direct provider route.
 	providers, _ := config["provider"].(map[string]any)
 	if providers == nil {
 		providers = map[string]any{}
 	}
-	npm, childBase, childKey := "@ai-sdk/openai-compatible", "{env:OPENAI_BASE_URL}", "{env:OPENAI_API_KEY}"
+	npm := "@ai-sdk/openai-compatible"
 	if *provider == "gemini" {
 		// Native Google carries thoughtSignature across tool turns. The compatible
 		// adapter used above lost that metadata in the witnessed Gemini tool loop.
-		npm, childBase, childKey = "@ai-sdk/google", "{env:GOOGLE_GEMINI_BASE_URL}/v1beta", "fak-ops-guard"
+		npm = "@ai-sdk/google"
 	}
-	providers[providerID] = map[string]any{"npm": npm, "options": map[string]string{"baseURL": childBase, "apiKey": childKey}, "models": map[string]any{*model: map[string]any{}}}
+	providers[providerID] = map[string]any{"npm": npm, "options": map[string]string{"baseURL": directBaseURL, "apiKey": directAPIKey}, "models": map[string]any{*model: map[string]any{}}}
 	config["provider"], config["model"] = providers, modelID
 	config["small_model"] = modelID
 	config["enabled_providers"] = []string{providerID}
 	encoded, _ := json.Marshal(config)
-	identity := newOpsRunLaunchIdentity(runID, *harness, resolvedWorkspace, *provider, *baseURL, *model, *opencodeBin, string(encoded), *policy, guardMode, *auto, *pure)
+	identity := newOpsRunLaunchIdentity(runID, *harness, resolvedWorkspace, *provider, directBaseURL, *model, *opencodeBin, string(encoded), *policy, guardMode, *auto, *pure)
 	if *dryRun {
-		_ = json.NewEncoder(stdout).Encode(map[string]any{"schema": "fak-ops-run-plan/1", "harness": *harness, "provider": *provider, "workspace": resolvedWorkspace, "guarded": false, "guard_requested": "fail_closed", "guard_effective": "unknown", "guard_mode_requested": guardMode, "guard_mode_effective": "unknown", "prompt_delivery": "stdin", "timeout": timeout.String(), "auto": *auto, "pure": *pure, "config_policy": configPolicy})
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"schema": "fak-ops-run-plan/1", "harness": *harness, "provider": *provider, "workspace": resolvedWorkspace, "guarded": false, "guard_requested": "disabled", "guard_effective": "disabled", "guard_mode_requested": guardMode, "guard_mode_effective": "off", "prompt_delivery": "stdin", "timeout": timeout.String(), "auto": *auto, "pure": *pure, "config_policy": configPolicy})
 		return 0
 	}
 	env, cleanupEnv, err := opsRunChildEnvironment(string(encoded), *apiKeyEnv)
@@ -780,14 +805,10 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 	})
 	ctx = withOpsRunWorkspace(ctx, resolvedWorkspace)
 	if *provider != "openai" {
-		preflight := opsRunInferenceRefusal(*provider, *baseURL, *model, "unsupported_provider_protocol")
+		preflight := opsRunInferenceRefusal(*provider, directBaseURL, *model, "unsupported_provider_protocol")
 		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
 	}
-	if strings.TrimSpace(*baseURL) == "" {
-		preflight := opsRunInferenceRefusalWithStatus(*provider, *baseURL, *model, "missing_explicit_base_url", "refused")
-		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
-	}
-	preflight, err := opsRunInferencePreflight(ctx, *baseURL, *model)
+	preflight, err := opsRunInferencePreflight(ctx, directBaseURL, *model)
 	receipt.InferencePreflight = &preflight
 	if err != nil {
 		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
@@ -839,6 +860,28 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 		return 1
 	}
 	return code
+}
+
+func opsRunDirectBaseURL(provider, raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		if provider == "openai" {
+			return "http://127.0.0.1:8080/v1"
+		}
+		return ""
+	}
+	if provider != "openai" {
+		return strings.TrimRight(raw, "/")
+	}
+	endpoint, err := url.Parse(raw)
+	if err != nil || endpoint.Scheme == "" || endpoint.Host == "" {
+		return raw
+	}
+	endpoint.Path = strings.TrimRight(endpoint.Path, "/")
+	if !strings.HasSuffix(endpoint.Path, "/v1") {
+		endpoint.Path += "/v1"
+	}
+	return endpoint.String()
 }
 
 func opsRunChildEnvironment(configContent, apiKeyEnv string) ([]string, func(), error) {

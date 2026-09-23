@@ -565,13 +565,9 @@ func TestOpsRunLaunchIdentity(t *testing.T) {
 		dir := t.TempDir()
 		prompt := filepath.Join(dir, "prompt.txt")
 		receiptPath := filepath.Join(dir, "receipt.json")
-		policyPath := filepath.Join(dir, "private-policy-sentinel.json")
 		binaryPath := filepath.Join(dir, "private-opencode-sentinel.exe")
 		model := "private-model-sentinel"
 		if err := os.WriteFile(prompt, []byte("launch identity probe\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(policyPath, []byte(`{"version":1,"deny":["private-policy-sentinel"]}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(binaryPath, []byte("deterministic fake opencode binary\n"), 0o700); err != nil {
@@ -602,7 +598,6 @@ func TestOpsRunLaunchIdentity(t *testing.T) {
 			"--provider", "openai",
 			"--model", model,
 			"--base-url", gateway.URL + "/v1",
-			"--policy", policyPath,
 			"--opencode-bin", binaryPath,
 			"--pure",
 		})
@@ -629,10 +624,15 @@ func TestOpsRunLaunchIdentity(t *testing.T) {
 			"schema":                  "fak.ops-run.launch-identity.v1",
 			"harness":                 "opencode",
 			"binary_version":          "unknown",
-			"policy_source":           "flag",
-			"guard_requested":         "fail_closed",
-			"guard_effective":         "unknown",
-			"guard_evidence_ref":      "unknown",
+			"policy_source":           "builtin",
+			"guard_requested":         "disabled",
+			"guard_effective":         "disabled",
+			"guard_evidence_ref":      "none",
+			"guard_mode_requested":    "off",
+			"guard_mode_effective":    "off",
+			"inference_guard":         "none",
+			"native_tool_mediation":   "opencode",
+			"os_isolation":            "isolated_child_environment",
 			"capability_evidence_ref": "unknown",
 			"auto":                    false,
 			"pure":                    true,
@@ -644,7 +644,7 @@ func TestOpsRunLaunchIdentity(t *testing.T) {
 		if runID, _ := terminalIdentity["run_id"].(string); strings.TrimSpace(runID) == "" || runID == "unknown" {
 			t.Errorf("launch_identity.run_id=%q, want a per-run opaque identity", runID)
 		}
-		for _, key := range []string{"binary_digest", "workspace_digest", "route_digest", "effective_config_digest", "policy_digest"} {
+		for _, key := range []string{"binary_digest", "workspace_digest", "route_digest", "effective_config_digest"} {
 			value, _ := terminalIdentity[key].(string)
 			if !strings.HasPrefix(value, "sha256:") || len(value) != len("sha256:")+64 {
 				t.Errorf("launch_identity.%s=%q, want redacted sha256 digest", key, value)
@@ -655,7 +655,7 @@ func TestOpsRunLaunchIdentity(t *testing.T) {
 			t.Errorf("launch_identity.inference_probe_ref=%v want=%v", got, preflight["receipt_ref"])
 		}
 		encoded := string(terminalJSON)
-		for _, raw := range []string{dir, binaryPath, policyPath, model, gateway.URL, "private-theme-sentinel", "private-policy-sentinel"} {
+		for _, raw := range []string{dir, binaryPath, model, gateway.URL, "private-theme-sentinel"} {
 			if strings.Contains(encoded, raw) {
 				t.Errorf("launch identity leaked raw value %q: %s", raw, encoded)
 			}
@@ -713,8 +713,7 @@ func TestOpsRunGuardMode(t *testing.T) {
 		launches.Add(1)
 		return 0, true, false, nil
 	}
-
-	run := func(t *testing.T, baseURL string, extra ...string) (int, map[string]any, string) {
+	run := func(t *testing.T, extra ...string) (int, map[string]any, string) {
 		t.Helper()
 		dir := t.TempDir()
 		prompt := filepath.Join(dir, "prompt.txt")
@@ -722,16 +721,8 @@ func TestOpsRunGuardMode(t *testing.T) {
 		if err := os.WriteFile(prompt, []byte("guard posture probe\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		args := []string{
-			"--workspace", dir,
-			"--prompt-file", prompt,
-			"--receipt", receiptPath,
-			"--provider", "openai",
-			"--model", "guard-posture-fixture",
-		}
-		if baseURL != "" {
-			args = append(args, "--base-url", baseURL)
-		}
+		gateway := newOpsRunQualifiedGateway(t)
+		args := []string{"--workspace", dir, "--prompt-file", prompt, "--receipt", receiptPath, "--provider", "openai", "--model", "guard-posture-fixture", "--base-url", gateway.URL}
 		args = append(args, extra...)
 		var stderr bytes.Buffer
 		code := runOpsRun(io.Discard, &stderr, args)
@@ -745,29 +736,26 @@ func TestOpsRunGuardMode(t *testing.T) {
 		}
 		return code, receipt, stderr.String()
 	}
-
 	for _, tc := range []struct {
 		name  string
 		extra []string
 	}{
-		{name: "absent_defaults_to_enforce"},
-		{name: "explicit_enforce", extra: []string{"--guard-mode", "enforce"}},
+		{name: "absent_defaults_off"},
+		{name: "explicit_off", extra: []string{"--guard-mode", "off"}},
+		{name: "disabled_alias", extra: []string{"--guard-mode", "disabled"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			launches.Store(0)
-			gateway := newOpsRunQualifiedGateway(t)
-			code, receipt, stderr := run(t, gateway.URL+"/v1", tc.extra...)
+			code, receipt, stderr := run(t, tc.extra...)
 			if code != 0 || launches.Load() != 1 {
-				t.Fatalf("enforce run code=%d launches=%d stderr=%s receipt=%v", code, launches.Load(), stderr, receipt)
+				t.Fatalf("direct run code=%d launches=%d stderr=%s receipt=%v", code, launches.Load(), stderr, receipt)
 			}
 			identity := requireOpsRunLaunchIdentity(t, receipt)
 			for key, want := range map[string]any{
-				"guard_mode_requested":   "enforce",
-				"guard_mode_effective":   "unknown",
-				"inference_guard":        "unknown",
-				"repository_proof_hooks": "unknown",
-				"native_tool_mediation":  "unknown",
-				"os_isolation":           "unknown",
+				"guard_requested": "disabled", "guard_effective": "disabled",
+				"guard_mode_requested": "off", "guard_mode_effective": "off",
+				"inference_guard": "none", "native_tool_mediation": "opencode",
+				"os_isolation": "isolated_child_environment",
 			} {
 				if got := identity[key]; got != want {
 					t.Errorf("launch_identity.%s=%v want=%v", key, got, want)
@@ -775,69 +763,34 @@ func TestOpsRunGuardMode(t *testing.T) {
 			}
 		})
 	}
-
-	refusals := []struct {
-		name       string
-		mode       string
-		extra      []string
-		config     string
-		envMode    string
-		wantReason string
-	}{
-		{name: "disabled", mode: "disabled", wantReason: "unsupported_guard_mode"},
-		{name: "disabled_auto_cannot_override", mode: "disabled", extra: []string{"--auto"}, wantReason: "unsupported_guard_mode"},
-		{name: "disabled_pure_cannot_override", mode: "disabled", extra: []string{"--pure"}, wantReason: "unsupported_guard_mode"},
-		{name: "disabled_environment_cannot_override", mode: "disabled", envMode: "enforce", wantReason: "unsupported_guard_mode"},
-		{name: "disabled_config_cannot_override", mode: "disabled", config: `{"guard_mode":"enforce","guarded":true}`, wantReason: "unsupported_guard_mode"},
-		{name: "unknown", mode: "mystery", wantReason: "unknown_guard_mode"},
-	}
-	for _, tc := range refusals {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, tc := range []struct{ mode, reason string }{
+		{mode: "enforce", reason: "guard_mode_requires_guard_harness"},
+		{mode: "audit", reason: "guard_mode_requires_guard_harness"},
+		{mode: "audit-only", reason: "guard_mode_requires_guard_harness"},
+		{mode: "mystery", reason: "unknown_guard_mode"},
+	} {
+		t.Run("refuses_"+tc.mode, func(t *testing.T) {
 			launches.Store(0)
-			t.Setenv("FAK_OPS_GUARD_MODE", tc.envMode)
-			t.Setenv("OPENCODE_CONFIG_CONTENT", tc.config)
-			gateway := newOpsRunQualifiedGateway(t)
-			extra := append([]string{"--guard-mode", tc.mode}, tc.extra...)
-			code, receipt, _ := run(t, gateway.URL+"/v1", extra...)
+			code, receipt, _ := run(t, "--guard-mode", tc.mode)
 			if code == 0 || launches.Load() != 0 {
 				t.Fatalf("refused mode %q code=%d launches=%d receipt=%v", tc.mode, code, launches.Load(), receipt)
 			}
 			policy, ok := receipt["config_policy"].(map[string]any)
-			if !ok || policy["source"] != "--guard-mode" || policy["status"] != "refused" || policy["reason"] != tc.wantReason {
+			if !ok || policy["source"] != "--guard-mode" || policy["status"] != "refused" || policy["reason"] != tc.reason {
 				t.Fatalf("mode %q lacks typed refusal: %#v", tc.mode, policy)
-			}
-			identity := requireOpsRunLaunchIdentity(t, receipt)
-			if identity["guard_mode_requested"] != tc.mode || identity["guard_mode_effective"] != "unknown" {
-				t.Fatalf("mode %q identity=%#v", tc.mode, identity)
 			}
 		})
 	}
-
-	t.Run("enforce_does_not_bypass_inference_route", func(t *testing.T) {
-		launches.Store(0)
-		code, receipt, _ := run(t, "")
-		if code == 0 || launches.Load() != 0 {
-			t.Fatalf("missing route code=%d launches=%d receipt=%v", code, launches.Load(), receipt)
-		}
-		identity := requireOpsRunLaunchIdentity(t, receipt)
-		if identity["guard_mode_requested"] != "enforce" {
-			t.Fatalf("default guard mode=%v want enforce", identity["guard_mode_requested"])
-		}
-		preflight, ok := receipt["inference_preflight"].(map[string]any)
-		if !ok || preflight["status"] != "refused" || preflight["reason"] != "missing_explicit_base_url" {
-			t.Fatalf("guard posture masked inference route refusal: %#v", preflight)
-		}
-	})
 }
 
-func TestOpsRunGuardedReceipt(t *testing.T) {
+func TestOpsRunDirectReceipt(t *testing.T) {
 	dir := t.TempDir()
 	gateway := newOpsRunQualifiedGateway(t)
 	prompt := filepath.Join(dir, "prompt.txt")
-	if err := os.WriteFile(prompt, []byte("private prompt\n"), 0600); err != nil {
+	if err := os.WriteFile(prompt, []byte("private prompt\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("OPENCODE_CONFIG_CONTENT", `{"permission":{"*":"deny","read":"allow"},"plugin":["protection"],"small_model":"outside/model","enabled_providers":["outside"]}`)
+	t.Setenv("OPENCODE_CONFIG_CONTENT", "{\"permission\":{\"*\":\"deny\",\"read\":\"allow\"},\"plugin\":[\"protection\"],\"small_model\":\"outside/model\",\"enabled_providers\":[\"outside\"]}")
 	t.Setenv("FAK_OPS_TEST_KEY", "fixture-only")
 	old := opsRunExecute
 	t.Cleanup(func() { opsRunExecute = old })
@@ -846,48 +799,49 @@ func TestOpsRunGuardedReceipt(t *testing.T) {
 		complete, failed bool
 		exit, want       int
 		status           string
-		wantLaunch       bool
 	}{
-		{"complete", true, false, 0, 0, "succeeded", true},
-		{"gemini", true, false, 0, 1, "failed", false},
-		{"missing_completion", false, false, 0, 1, "failed", true},
-		{"tool_error", true, true, 0, 1, "failed", true},
-		{"child_error", true, false, 7, 7, "failed", true},
+		{"complete", true, false, 0, 0, "succeeded"},
+		{"missing_completion", false, false, 0, 1, "failed"},
+		{"tool_error", true, true, 0, 1, "failed"},
+		{"child_error", true, false, 7, 7, "failed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			wire := "openai"
-			if tc.name == "gemini" {
-				wire = "gemini"
-			}
-			opsRunExecute = func(ctx context.Context, out, errOut io.Writer, argv, env []string, p []byte) (int, bool, bool, []opsRunLifecycleRecord) {
-				if !tc.wantLaunch {
-					t.Fatal("unsupported provider launched child")
-				}
-				if string(p) != "private prompt\n" || strings.Contains(strings.Join(argv, " "), "private prompt") {
+			opsRunExecute = func(_ context.Context, _ io.Writer, _ io.Writer, argv, env []string, promptBytes []byte) (int, bool, bool, []opsRunLifecycleRecord) {
+				if string(promptBytes) != "private prompt\n" || strings.Contains(strings.Join(argv, " "), "private prompt") {
 					t.Fatal("prompt must travel only on stdin")
 				}
-				if len(argv) < 10 || argv[1] != "guard" || !strings.Contains(strings.Join(argv, " "), "--provider "+wire+" --split off") {
-					t.Fatalf("unguarded argv: %q", argv)
+				binary := strings.TrimSuffix(strings.ToLower(filepath.Base(argv[0])), ".exe")
+				if len(argv) < 6 || binary != "opencode" || argv[1] != "run" || argv[2] != "--format" || argv[3] != "json" || argv[4] != "--model" {
+					t.Fatalf("OpenCode was not launched directly: %q", argv)
+				}
+				if strings.Contains(strings.Join(argv, " "), " guard ") || argv[0] == tuiExecutable() {
+					t.Fatalf("direct OpenCode launch unexpectedly used fak guard: %q", argv)
 				}
 				var cfg map[string]any
-				for _, e := range env {
-					if strings.HasPrefix(e, "OPENCODE_CONFIG_CONTENT=") {
-						if err := json.Unmarshal([]byte(strings.TrimPrefix(e, "OPENCODE_CONFIG_CONTENT=")), &cfg); err != nil {
+				childEnv := map[string]string{}
+				for _, item := range env {
+					key, value, ok := strings.Cut(item, "=")
+					if ok {
+						childEnv[key] = value
+					}
+					if key == "OPENCODE_CONFIG_CONTENT" {
+						if err := json.Unmarshal([]byte(value), &cfg); err != nil {
 							t.Fatal(err)
 						}
 					}
 				}
 				model := cfg["model"].(string)
 				provider, _, _ := strings.Cut(model, "/")
-				if !strings.HasPrefix(provider, "fak_ops_") || cfg["small_model"] != model || cfg["enabled_providers"].([]any)[0] != provider {
-					t.Fatalf("routing not pinned: %v", cfg)
+				if argv[5] != model || !strings.HasPrefix(provider, "fak_ops_") || cfg["small_model"] != model || cfg["enabled_providers"].([]any)[0] != provider {
+					t.Fatalf("routing not pinned: argv=%q config=%v", argv, cfg)
 				}
-				if wire == "gemini" {
-					p := cfg["provider"].(map[string]any)[provider].(map[string]any)
-					opts := p["options"].(map[string]any)
-					if p["npm"] != "@ai-sdk/google" || opts["baseURL"] != "{env:GOOGLE_GEMINI_BASE_URL}/v1beta" || opts["apiKey"] != "fak-ops-guard" {
-						t.Fatalf("Gemini native route not pinned: %v", p)
-					}
+				pinned := cfg["provider"].(map[string]any)[provider].(map[string]any)
+				opts := pinned["options"].(map[string]any)
+				if pinned["npm"] != "@ai-sdk/openai-compatible" || opts["baseURL"] != gateway.URL+"/v1" || opts["apiKey"] != "{env:FAK_OPS_TEST_KEY}" {
+					t.Fatalf("direct provider route not pinned: %v", pinned)
+				}
+				if childEnv["FAK_OPS_TEST_KEY"] != "fixture-only" {
+					t.Fatalf("selected credential was not forwarded: env=%v", childEnv)
 				}
 				if cfg["permission"] != nil || cfg["plugin"] != nil {
 					t.Fatalf("ambient OpenCode configuration leaked into isolated run: %v", cfg)
@@ -896,7 +850,7 @@ func TestOpsRunGuardedReceipt(t *testing.T) {
 			}
 			receipt := filepath.Join(dir, tc.name+".json")
 			var out, errs bytes.Buffer
-			got := runOpsRun(&out, &errs, []string{"--workspace", dir, "--prompt-file", prompt, "--receipt", receipt, "--model", "fixture", "--provider", wire, "--base-url", gateway.URL + "/v1", "--api-key-env", "FAK_OPS_TEST_KEY"})
+			got := runOpsRun(&out, &errs, []string{"--workspace", dir, "--prompt-file", prompt, "--receipt", receipt, "--model", "fixture", "--provider", "openai", "--base-url", gateway.URL, "--api-key-env", "FAK_OPS_TEST_KEY"})
 			if got != tc.want {
 				t.Fatalf("exit=%d want=%d stderr=%s", got, tc.want, errs.String())
 			}
@@ -910,6 +864,9 @@ func TestOpsRunGuardedReceipt(t *testing.T) {
 			}
 			if r.Status != tc.status || r.ExitCode != tc.want || r.Finished.IsZero() || strings.Contains(string(data), "private prompt") {
 				t.Fatalf("invalid receipt: %s", data)
+			}
+			if r.InferencePreflight == nil || r.InferencePreflight.Status != "qualified" || r.LaunchIdentity == nil || r.LaunchIdentity.GuardEffective != "disabled" {
+				t.Fatalf("direct receipt lost preflight or launch identity: %s", data)
 			}
 		})
 	}
