@@ -7,7 +7,7 @@
 //
 // Ownership is deliberately explicit and repeatable; the verb never guesses from git
 // status because this checkout contains concurrent peers' tracked and untracked WIP.
-package main
+package validate
 
 import (
 	"bytes"
@@ -15,6 +15,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -28,7 +29,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/affectedtests"
 	"github.com/anthony-chaudhary/fak/internal/amdgpu"
-	"github.com/anthony-chaudhary/fak/internal/validate"
+	"github.com/anthony-chaudhary/fak/internal/interspersedflags"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -173,25 +174,187 @@ func (r *validateRecorder) finish() {
 	r.res.ElapsedMS = elapsed.Milliseconds()
 }
 
-func cmdValidate(argv []string) { os.Exit(runValidate(os.Stdout, os.Stderr, argv)) }
+func cmdValidate(argv []string) { os.Exit(Run(os.Stdout, os.Stderr, argv)) }
 
 // runValidate checks committed ref plus only explicitly-owned working-tree paths.
-func runValidate(stdout, stderr io.Writer, argv []string) int {
-	for _, arg := range argv {
-		if strings.HasPrefix(arg, "--acceptance") || strings.HasPrefix(arg, "-acceptance") {
-			return runValidateAcceptanceCLI(stdout, stderr, argv)
+func Run(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	root := fs.String("root", "", "repo root (default: git toplevel from cwd)")
+	ref := fs.String("ref", "HEAD", "committed base ref or sha")
+	asJSON := fs.Bool("json", false, "emit the result as JSON")
+	timeout := fs.Duration("timeout", defaultValidateTimeout, "maximum total validation time")
+	progress := fs.Bool("progress", validateWriterIsTerminal(stderr), "emit phase progress to stderr (default on when stderr is a TTY)")
+	testOnly := fs.Bool("test-only", false, "skip affected-package build/vet and run only affected tests in the isolated checkout")
+	wslTests := fs.Bool("wsl-tests", defaultValidateWSLTests(runtime.GOOS), "run isolated affected tests through WSL (default on Windows hosts)")
+	testRun := fs.String("test-run", "", "go test -run expression for isolated affected tests")
+	auditSelection := fs.Bool("audit-selection", false, "compare affected tests with a full-suite truth run")
+	smoke := fs.Bool("smoke", false, "run real-world binary smoke tests against the freshly compiled fak binary in the isolated checkout")
+	strix := fs.Bool("strix", false, "execute physical device validation on AMD Strix Halo appliance")
+	strixHost := fs.String("strix-host", "", "target hostname for AMD Strix Halo validation (default: strix1)")
+	subkernels := fs.String("subkernels", "", "sub-kernel functions to validate on Strix Halo (comma-separated, or 'all')")
+	ablate := fs.String("ablate", "", "ablation arms to evaluate on Strix Halo (comma-separated, or 'all')")
+	var mine pathList
+	fs.Var(&mine, "mine", "owned changed path to overlay (repeatable; files and directories accepted)")
+	positional, parseErr := interspersedflags.Parse(fs, argv)
+	if parseErr != nil {
+		return 2
+	}
+	for _, p := range positional {
+		if p = strings.TrimSpace(p); p != "" {
+			mine = append(mine, p)
 		}
 	}
-	return validate.RunWithHooks(stdout, stderr, argv, validate.Hooks{
-		Phase:               validatePhaseHook,
-		WSLLookPath:         validateWSLLookPath,
-		WSLCommand:          validateWSLCommand,
-		DiscoverStrixTarget: discoverStrixTargetFn,
-		NewStrixAuthority:   newStrixControllerAuthorityFn,
-		StrixAuthorityValid: strixControllerAuthorityValidFn,
-		RunStrixValidation:  runStrixValidationFn,
-		BuildStrixCandidate: buildStrixCandidateArchiveFn,
+	if len(mine) == 0 {
+		fmt.Fprintln(stderr, "fak validate: at least one --mine path is required; ownership is never inferred from a peer-dirty tree")
+		return 2
+	}
+	if *timeout <= 0 {
+		fmt.Fprintln(stderr, "fak validate: --timeout must be greater than zero")
+		return 2
+	}
+	mode := "full"
+	if *testOnly {
+		mode = "test-only"
+	}
+	started := validateNow()
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
+	res := validateResult{
+		Schema: "fak-validate/1", Mode: mode, Ref: *ref, Mine: requestedMinePaths(mine), OK: true,
+		TimeoutMS: timeout.Milliseconds(), Phases: []validatePhase{}, SkippedPhases: []string{},
+		Overlays: validateOverlayProgress{Checked: []string{}, Skipped: requestedMinePaths(mine)},
+		Failures: []ciPreflightFailure{},
+	}
+	phaseOrder := validatePhaseOrder(*testOnly, *auditSelection, *smoke)
+	recorder := validateRecorder{ctx: ctx, stderr: stderr, progress: *progress, started: started, phaseOrder: phaseOrder, res: &res}
+
+	phase := recorder.start("resolve_root")
+	r := resolveRootWithin(ctx, *root)
+	phase.finish(ctx.Err())
+	if ctx.Err() != nil {
+		return finishValidateTimeout(stdout, &res, &recorder, "resolve_root", *asJSON)
+	}
+	if r == "" {
+		fmt.Fprintln(stderr, "fak validate: not in a git repo (or git unavailable)")
+		return 2
+	}
+	phase = recorder.start("resolve_ref")
+	tip, err := gitRevParseWithin(ctx, r, *ref)
+	if code, failed := finishValidateRequiredPhase(stdout, stderr, &res, &recorder, phase, "resolve_ref", err, *asJSON,
+		fmt.Sprintf("fak validate: cannot resolve ref %q: %v", *ref, err)); failed {
+		return code
+	}
+	res.Tip = tip
+	if runtime.GOOS == "windows" && *wslTests {
+		phase = recorder.start("wsl_preflight")
+		verdict := preflightValidateWSLCapabilitiesWithin(ctx)
+		res.WSLPreflight = &verdict
+		if ctx.Err() != nil {
+			phase.finish(ctx.Err())
+			return finishValidateTimeout(stdout, &res, &recorder, "wsl_preflight", *asJSON)
+		}
+		if verdict.Status != "ready" {
+			phase.finishAs("failed", verdict.Detail)
+			return finishValidateWSLCapabilityRefusal(stdout, stderr, &res, &recorder, verdict, *asJSON)
+		}
+		phase.finish(nil)
+	} else {
+		recorder.skip("wsl_preflight", "native workspace selected")
+	}
+	prep, code, failed := prepareValidateWorkspace(validateWorkspaceRequest{
+		stdout: stdout, stderr: stderr, ctx: ctx, result: &res, recorder: &recorder,
+		root: r, tip: tip, mine: mine, testRun: *testRun, wslTests: *wslTests, asJSON: *asJSON,
 	})
+	if failed {
+		return code
+	}
+	paths, effectiveTestRun := prep.paths, prep.testRun
+	dir, wslWorkspace := prep.dir, prep.wslWorkspace
+	defer prep.cleanup()
+	// Keep the base graph as well as the overlaid graph: a deleted file/package no longer
+	// appears in `go list`, but its importers are still affected and must be built and vetted.
+	baseFileToPkg := map[string]string{}
+	baseEdges := map[string][]string{}
+	if hasDeletedMinePath(r, paths) {
+		phase = recorder.start("base_graph")
+		baseFileToPkg, baseEdges, _, err = validateGoListGraphWithin(ctx, dir, wslWorkspace)
+		if code, timedOut := finishValidatePhaseOrTimeout(stdout, &res, &recorder, phase, "base_graph", err, *asJSON); timedOut {
+			return code
+		}
+		// Preserve the old fail-toward-running behavior: the post-overlay graph remains the
+		// authoritative error, while a base graph failure merely loses deletion coverage.
+		if err != nil {
+			baseFileToPkg = map[string]string{}
+			baseEdges = map[string][]string{}
+		}
+	} else {
+		recorder.skip("base_graph", "no deleted owned paths")
+	}
+	phase = recorder.start("overlay")
+	checked := func(path string) {
+		res.Overlays.Checked = append(res.Overlays.Checked, path)
+		res.Overlays.Skipped = subtractValidatePaths(paths, res.Overlays.Checked)
+	}
+	if wslWorkspace {
+		err = overlayMinePathsWSLWithin(ctx, r, dir, paths, checked)
+	} else {
+		err = overlayMinePathsWithin(ctx, r, dir, paths, checked)
+	}
+	if err == nil {
+		err = prepareValidateWorkfile(ctx, r, dir, wslWorkspace)
+	}
+	if code, failed := finishValidateRequiredPhase(stdout, stderr, &res, &recorder, phase, "overlay", err, *asJSON,
+		fmt.Sprintf("fak validate: cannot overlay owned paths: %v", err)); failed {
+		return code
+	}
+	if !*testOnly {
+		if code, timedOut := runValidateGofmtPhase(ctx, stdout, &res, &recorder, r, dir, paths, wslWorkspace, *asJSON); timedOut {
+			return code
+		}
+	}
+	phase = recorder.start("list_graph")
+	fileToPkg, edges, _, graphErr := validateGoListGraphWithin(ctx, dir, wslWorkspace)
+	phase.finish(graphErr)
+	if ctx.Err() != nil {
+		return finishValidateTimeout(stdout, &res, &recorder, "list_graph", *asJSON)
+	}
+	if graphErr != nil {
+		res.OK = false
+		res.Failures = append(res.Failures, ciPreflightFailure{Step: "test-select", Detail: graphErr.Error()})
+	} else {
+		buildTargets := selectValidatePackages(&res, &recorder, dir, paths, fileToPkg, edges, baseFileToPkg, baseEdges)
+		if !*testOnly {
+			if code, timedOut := runValidateBuildAndVet(ctx, stdout, &res, &recorder, dir, wslWorkspace, *asJSON, buildTargets); timedOut {
+				return code
+			}
+		}
+		selectedObservation, code, timedOut := runValidateTestsPhase(ctx, stdout, &res, &recorder, r, dir, tip, effectiveTestRun, fileToPkg, *wslTests, wslWorkspace, *auditSelection, *asJSON)
+		if timedOut {
+			return code
+		}
+		if *auditSelection {
+			if code, timedOut := runValidateAuditSelectionPhase(ctx, stdout, &res, &recorder, r, dir, tip, paths, fileToPkg, selectedObservation, *wslTests, wslWorkspace, *asJSON); timedOut {
+				return code
+			}
+		}
+		if *smoke {
+			if code, timedOut := runValidateSmokePhase(ctx, stdout, &res, &recorder, dir, wslWorkspace, *asJSON); timedOut {
+				return code
+			}
+		}
+		if shouldRunStrixValidation(*strix, paths) {
+			if err := executeStrixValidationPhase(ctx, stdout, stderr, &res, &recorder, r, *strix, *strixHost, *subkernels, *ablate, paths); err != nil {
+				res.OK = false
+			}
+		}
+	}
+	recorder.finish()
+	emitValidateResult(stdout, res, *asJSON)
+	if !res.OK {
+		return 1
+	}
+	return 0
 }
 
 func runValidateGofmtPhase(ctx context.Context, stdout io.Writer, res *validateResult, recorder *validateRecorder, r, dir string, paths []string, wslWorkspace, asJSON bool) (int, bool) {

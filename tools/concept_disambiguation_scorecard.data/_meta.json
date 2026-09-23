@@ -9858,6 +9858,21 @@
           "category": "incidental",
           "reason": "reasoning posture helper in child resource guard",
           "token": "FAK_GUARD_REASONING_POSTURE"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing validation phase wire label duplicated by the extracted CLI; it does not name a separate policy or capability.",
+          "token": "wsl_preflight"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local path variable for the existing smoke policy, not an independent policy or capability.",
+          "token": "policyRel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Package-local result type copied for the narrow CLI; it reports the existing WSL probe and adds no capability class.",
+          "token": "validateWSLCapabilityVerdict"
         }
       ],
       "exclude": [
@@ -10034,6 +10049,7 @@
         "policyLocked",
         "policyOK",
         "policyOf",
+        "policyRel",
         "policyScore",
         "policy_admission",
         "policy_changed",
@@ -10098,9 +10114,11 @@
         "ultracodePosture",
         "ultracodePostureWord",
         "unnamed_capability",
+        "validateWSLCapabilityVerdict",
         "verifyTailPolicyMatrix",
         "windowReceipt",
-        "windowResult"
+        "windowResult",
+        "wsl_preflight"
       ],
       "known_tokens": [],
       "min_files": 3,
@@ -10749,6 +10767,11 @@
           "category": "incidental",
           "reason": "Gateway adapter that records the existing NativeCompactionObservation scalar evidence after successful completion; it neither manages context nor performs compaction.",
           "token": "recordNativeCompaction"
+        },
+        {
+          "category": "incidental",
+          "reason": "Package-local output formatter moved with validation; context here is the existing test-run summary, not a new context plane.",
+          "token": "writeValidateTestContext"
         }
       ],
       "exclude": [
@@ -10890,7 +10913,8 @@
         "shedOldContext",
         "takeCompactionContract",
         "traceContext",
-        "wctx"
+        "wctx",
+        "writeValidateTestContext"
       ],
       "known_tokens": [],
       "min_files": 3,
@@ -13786,6 +13810,11 @@
           "category": "incidental",
           "reason": "private ggufload helper that joins the aggregated deepseek41 attention-descriptor diagnostics into one bounded ModelPreflight.Reason string; formatting plumbing, not a distinct rendering concept",
           "token": "renderdeepseek41attentiondiagnostics"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing validation phase wire label duplicated by the extracted CLI; it names test workspace creation, not a rendering or materialization subsystem.",
+          "token": "test_materialize"
         }
       ],
       "id": "render-materialize",
@@ -13896,6 +13925,7 @@
         "runTUIRenderControl",
         "runTUIRenderSeat",
         "runTUIRenderServe",
+        "test_materialize",
         "tuiRenderSchema",
         "tuiRenderUsage",
         "tuioverviewsavingsrender",
@@ -14952,6 +14982,16 @@
           "category": "incidental",
           "reason": "Sums the device-scope activation/scratch bytes already present in a MemoryPlan so the panel term subtracts only overlapping transient scratch; local accounting helper for the existing plan.",
           "token": "deviceTransientBytesInPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Validator hook field selecting the existing amdgpu.BuildStrixCandidateArchive operation; it is an injection point, not another candidate or plan.",
+          "token": "BuildStrixCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Concrete amdgpu return type reused by the extracted validator; the duplicate reference does not define a second archive or plan.",
+          "token": "StrixCandidateArchive"
         }
       ],
       "exclude": [
@@ -14967,6 +15007,7 @@
         "ApplyListPlan",
         "BaselineDecodeMicroseconds",
         "BaselineTaskAccuracy",
+        "BuildStrixCandidate",
         "BuildSweepPlan",
         "CandidateArm",
         "CandidateDecodeMicroseconds",
@@ -15055,6 +15096,7 @@
         "SinkCandidate",
         "SinkCandidates",
         "SnapshotPressureCandidate",
+        "StrixCandidateArchive",
         "SweepPlanGreedy",
         "SweepPlanMain",
         "SweepPlanPairwise",
