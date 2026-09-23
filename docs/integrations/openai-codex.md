@@ -501,24 +501,6 @@ does not run:
 
 ```powershell
 python tools\codex_fak_gate.py `
-  --tool git_add `
-  --expect-deny `
-  --expect-reason DEFAULT_DENY `
-  --redact-command `
-  --command-label git-add-deny `
-  --json `
-  --dry-run `
-  --out experiments\agent-live\codex-fak-gate-git-add-deny-$env:CODEX_THREAD_ID.json
-python tools\codex_fak_gate.py `
-  --tool git_commit `
-  --expect-deny `
-  --expect-reason DEFAULT_DENY `
-  --redact-command `
-  --command-label git-commit-deny `
-  --json `
-  --dry-run `
-  --out experiments\agent-live\codex-fak-gate-git-commit-deny-$env:CODEX_THREAD_ID.json
-python tools\codex_fak_gate.py `
   --tool git_push `
   --expect-deny `
   --expect-reason POLICY_BLOCK `
@@ -529,11 +511,14 @@ python tools\codex_fak_gate.py `
   --out experiments\agent-live\codex-fak-gate-git-push-deny-$env:CODEX_THREAD_ID.json
 ```
 
-Use this for Codex's own operating loop: `run_tests` before Python test commands,
-`go_test` before Go test commands, default-denied names such as `git_add` and
-`git_commit` before local history mutation, and deny-listed names such as
-`git_push` before any publish path. JSON reports record the verdict, command
-identity, and exit code; command stdout/stderr are dropped unless
+Use this for Codex's own operating loop: `run_tests` before Python test commands
+and `go_test` before Go test commands. The example dev policy is `default_open`:
+`git_add` and `git_commit` are allowed in a direct preflight, so these probes
+cannot serve as a local history gate. Use Fak's scoped commit and landing verbs
+for repository changes, and verify a stricter policy explicitly if needed.
+`git_push` is explicitly denied when that named call crosses the Fak boundary;
+this does not intercept an independent Codex shell command. JSON reports record
+the verdict, command identity, and exit code; command stdout/stderr are dropped unless
 `--include-command-output` is set.
 
 Fold the gate reports into the dogfood witness when you want one report to prove both
