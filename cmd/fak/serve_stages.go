@@ -1043,7 +1043,9 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 		defer rt.releaseServeAgentWarm()
 		rt.srv.ArmWarmupGate()
 		go func() {
-			_, _ = rt.srv.RunWarmup(ctx)
+			if elapsed, err := rt.srv.RunWarmup(ctx); err != nil {
+				fmt.Fprintf(os.Stderr, "fak serve: backend startup warmup failed after %s; readiness remains pending: %v\n", elapsed.Round(time.Millisecond), err)
+			}
 			if agentWarmArmed {
 				runServeAgentWarmup(ctx, rt.srv)
 			}
