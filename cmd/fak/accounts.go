@@ -192,6 +192,18 @@ func parseAccountsCmd(stderr io.Writer, sub string, rest []string) (accountsCmd,
 	if err := fs.Parse(rest[lead:]); err != nil {
 		return accountsCmd{}, 2
 	}
+	// Pi and OpenCode launch directly unless the operator explicitly selects --guard.
+	// The named fak guard -- pi command remains the guarded Pi entrypoint.
+	if sub == "launch" && !flagSet(fs, "guard") {
+		name := strings.ToLower(filepath.Base(strings.TrimSpace(*launchCommand)))
+		switch ext := filepath.Ext(name); ext {
+		case ".exe", ".cmd", ".bat", ".com":
+			name = strings.TrimSuffix(name, ext)
+		}
+		if name == "pi" || name == "opencode" {
+			*launchGuard = false
+		}
+	}
 	// Defense-in-depth against a view-clobber footgun: the dos-view default is computed
 	// from the process home (os.UserHomeDir) at flag-definition time, so a caller that
 	// redirects --home to an isolated tree (every accounts test does) would STILL write the

@@ -4,44 +4,41 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestOpencodeLauncherDryRunBasic(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	args := []string{"--dry-run", "--split", "off"}
+	args := []string{"--dry-run"}
 	code := runOpencode(&stdout, &stderr, args)
 	if code != 0 {
 		t.Fatalf("runOpencode returned %d, stderr: %s", code, stderr.String())
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "guard") {
-		t.Errorf("expected guard in dry-run stdout: %s", out)
+	if strings.Contains(out, " guard ") {
+		t.Errorf("direct OpenCode launch unexpectedly routed through guard: %s", out)
 	}
-	if !strings.Contains(out, "--provider openai") {
-		t.Errorf("expected --provider openai in dry-run stdout: %s", out)
+	if !strings.Contains(strings.ToLower(out), "opencode") {
+		t.Errorf("expected direct OpenCode executable in dry-run stdout: %s", out)
 	}
-	if !strings.Contains(out, "-- opencode") {
-		t.Errorf("expected '-- opencode' in dry-run stdout: %s", out)
+	if strings.Contains(out, "--provider openai") || strings.Contains(out, "-- opencode") {
+		t.Errorf("direct OpenCode launch emitted guard-only wrapper arguments: %s", out)
 	}
 }
 
 func TestOpencodeLauncherProbeWiring(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	args := []string{"--dry-run", "--probe", "say hello from test", "--split", "off", "--pure"}
+	args := []string{"--dry-run", "--probe", "say hello from test", "--pure"}
 	code := runOpencode(&stdout, &stderr, args)
 	if code != 0 {
 		t.Fatalf("runOpencode returned %d, stderr: %s", code, stderr.String())
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "--probe") {
-		t.Errorf("expected --probe flag for guard in dry-run stdout: %s", out)
+	if strings.Contains(out, "--probe") {
+		t.Errorf("direct OpenCode launch emitted guard-only --probe: %s", out)
 	}
 	if !strings.Contains(out, "run \"say hello from test\" --format json") && !strings.Contains(out, "run say hello from test --format json") {
 		t.Errorf("expected probe run command in dry-run stdout: %s", out)
@@ -75,36 +72,29 @@ func TestOpencodeLauncherSkipPermissionsFalsePreservesNativePrompts(t *testing.T
 }
 
 func TestOpencodeLauncherOptions(t *testing.T) {
-	opts := opencodeLaunchOptions{
-		splitMode:     "off",
-		splitWhere:    "bottom",
-		splitInterval: 1 * time.Second,
-		policyPath:    "custom-policy.json",
-		apiKeyEnv:     "MY_API_KEY",
-		baseURL:       "http://127.0.0.1:8001/v1",
-		model:         "glm-5.3-flash",
-		auditPath:     "my-audit.jsonl",
-		quiet:         true,
-		localAuto:     true,
-		passthrough:   []string{"run", "do task"},
+	opts := opencodeLaunchOptions{model: "glm-5.3-flash", passthrough: []string{"run", "do task"}}
+	argv := buildOpencodeLaunchArgv("opencode", opts)
+	want := []string{"opencode", "--model", "fak/glm-5.3-flash", "run", "do task"}
+	if strings.Join(argv, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("direct argv = %#v, want %#v", argv, want)
 	}
-	argv := buildOpencodeLaunchArgv("fak", opts)
-	line := strings.Join(argv, " ")
-	expectedParts := []string{
-		"fak guard",
-		"--provider openai",
-		"--policy custom-policy.json",
-		"--api-key-env MY_API_KEY",
-		"--base-url http://127.0.0.1:8001/v1",
-		"--model glm-5.3-flash",
-		"--audit my-audit.jsonl",
-		"--quiet",
-		"--local",
-		"-- opencode --model fak/glm-5.3-flash run do task",
+	for _, guardOnly := range []string{"guard", "--provider", "--policy", "--base-url", "--audit", "--"} {
+		if argvHas(argv, guardOnly) {
+			t.Errorf("direct argv contains guard-only %q: %#v", guardOnly, argv)
+		}
 	}
-	for _, part := range expectedParts {
-		if !strings.Contains(line, part) {
-			t.Errorf("missing expected part %q in argv line: %s", part, line)
+}
+
+func TestOpencodeLauncherRejectsGuardOnlyOptions(t *testing.T) {
+	for _, args := range [][]string{
+		{"--dry-run", "--split", "off"}, {"--dry-run", "--policy", "policy.json"},
+		{"--dry-run", "--api-key-env", "OPENAI_API_KEY"}, {"--dry-run", "--base-url", "http://127.0.0.1:8080/v1"},
+		{"--dry-run", "--audit", "audit.jsonl"}, {"--dry-run", "--local"},
+		{"--dry-run", "--gguf", "model.gguf"}, {"--dry-run", "--metal"}, {"--dry-run", "--backend", "cpu"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := runOpencode(&stdout, &stderr, args); code != 2 {
+			t.Errorf("runOpencode(%v) code=%d, want 2; stdout=%s stderr=%s", args, code, stdout.String(), stderr.String())
 		}
 	}
 }
@@ -142,18 +132,14 @@ func TestOpencodeLauncherPinsChildModelOverProjectAgent(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildOpencodeLaunchArgv("fak", tc.opts)
-			separator := -1
-			for i := 0; i+1 < len(got); i++ {
-				if got[i] == "--" && got[i+1] == "opencode" {
-					separator = i
-					break
-				}
+			got := buildOpencodeLaunchArgv("opencode", tc.opts)
+			if len(got) == 0 || got[0] != "opencode" {
+				t.Fatalf("direct argv = %#v", got)
 			}
-			if separator < 0 {
-				t.Fatalf("argv has no child boundary `-- opencode`: %#v", got)
+			if argvHas(got, "guard") || argvHas(got, "--") {
+				t.Fatalf("wrapper token in direct argv: %#v", got)
 			}
-			child := got[separator+2:]
+			child := got[1:]
 			if strings.Join(child, "\x00") != strings.Join(tc.wantChild, "\x00") {
 				t.Fatalf("child argv = %#v, want %#v", child, tc.wantChild)
 			}
@@ -297,121 +283,36 @@ func TestOpencodeLauncherVerifiesSnapshotWarning(t *testing.T) {
 }
 
 func TestOpencodeLauncherModelDefault(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "")
 	var stdout, stderr bytes.Buffer
-	args := []string{"--dry-run", "--split", "off"}
-	code := runOpencode(&stdout, &stderr, args)
-	if code != 0 {
+	if code := runOpencode(&stdout, &stderr, []string{"--dry-run"}); code != 0 {
 		t.Fatalf("runOpencode returned %d, stderr: %s", code, stderr.String())
 	}
-	out := stdout.String()
-	if !strings.Contains(out, "--model") {
-		t.Errorf("expected --model in dry-run stdout: %s", out)
+	if out := stdout.String(); strings.Contains(out, "guard") || strings.Contains(out, "--model") {
+		t.Errorf("bare direct launch acquired a guard/model default: %s", out)
 	}
 }
 
 func TestOpencodeLauncherAutoDetectedModelWiring(t *testing.T) {
-	t.Run("buildOpencodeLaunchArgv wires detected model", func(t *testing.T) {
-		opts := opencodeLaunchOptions{
-			splitMode:  "off",
-			splitWhere: "bottom",
-			model:      "qwen2.5-coder:7b",
-		}
-		argv := buildOpencodeLaunchArgv("fak", opts)
-		foundModel := false
-		for i, arg := range argv {
-			if arg == "--model" && i+1 < len(argv) && argv[i+1] == "qwen2.5-coder:7b" {
-				foundModel = true
-				break
-			}
-		}
-		if !foundModel {
-			t.Errorf("buildOpencodeLaunchArgv missing '--model qwen2.5-coder:7b', got argv: %v", argv)
+	t.Run("explicit model is wired", func(t *testing.T) {
+		argv := buildOpencodeLaunchArgv("opencode", opencodeLaunchOptions{model: "qwen2.5-coder:7b"})
+		if !argvHasPair(argv, "--model", "fak/qwen2.5-coder:7b") {
+			t.Fatalf("argv=%v", argv)
 		}
 	})
-
-	t.Run("buildOpencodeLaunchArgv omits model flag when empty", func(t *testing.T) {
-		opts := opencodeLaunchOptions{
-			splitMode:  "off",
-			splitWhere: "bottom",
-			model:      "",
-		}
-		argv := buildOpencodeLaunchArgv("fak", opts)
-		for _, arg := range argv {
-			if arg == "--model" {
-				t.Errorf("buildOpencodeLaunchArgv unexpectedly included '--model' when model was empty: %v", argv)
-			}
-		}
-	})
-
-	t.Run("runOpencode auto-detects local backend model", func(t *testing.T) {
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/api/tags" {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(`{"models":[{"name":"qwen2.5-coder:7b"}]}`))
-				return
-			}
-			http.NotFound(w, r)
-		}))
-		defer ts.Close()
-
-		t.Setenv("OLLAMA_HOST", ts.URL)
-		t.Setenv("OPENAI_API_KEY", "")
-
-		var stdout, stderr bytes.Buffer
-		args := []string{"--dry-run", "--split", "off"}
-		code := runOpencode(&stdout, &stderr, args)
-		if code != 0 {
-			t.Fatalf("runOpencode returned %d, stderr: %s", code, stderr.String())
-		}
-		out := stdout.String()
-		if !strings.Contains(out, "--model qwen2.5-coder:7b") {
-			t.Errorf("expected '--model qwen2.5-coder:7b' in dry-run stdout: %s", out)
-		}
-		errOut := stderr.String()
-		if !strings.Contains(errOut, "auto-connected to local Ollama") || !strings.Contains(errOut, "qwen2.5-coder:7b") {
-			t.Errorf("expected auto-connection diagnostics in stderr: %s", errOut)
-		}
-	})
-
-	t.Run("runOpencode with explicit model flag overrides auto-detection", func(t *testing.T) {
-		var stdout, stderr bytes.Buffer
-		args := []string{"--dry-run", "--split", "off", "--model", "custom-model:32b"}
-		code := runOpencode(&stdout, &stderr, args)
-		if code != 0 {
-			t.Fatalf("runOpencode returned %d, stderr: %s", code, stderr.String())
-		}
-		out := stdout.String()
-		if !strings.Contains(out, "--model custom-model:32b") {
-			t.Errorf("expected '--model custom-model:32b' in dry-run stdout: %s", out)
+	t.Run("empty model is omitted", func(t *testing.T) {
+		argv := buildOpencodeLaunchArgv("opencode", opencodeLaunchOptions{})
+		if argvHas(argv, "--model") {
+			t.Fatalf("argv=%v", argv)
 		}
 	})
 }
 
 func TestOpencodeLauncherHaloFlag(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "")
-	t.Setenv("FAK_HALO_HOST", "")
-	t.Setenv("FAK_STRIX_HOST", "")
-
 	for _, flag := range []string{"--halo", "--strix"} {
 		t.Run(flag, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			args := []string{"--dry-run", "--split", "off", flag}
-			code := runOpencode(&stdout, &stderr, args)
-			if code != 0 {
-				t.Fatalf("runOpencode %s returned %d, stderr: %s", flag, code, stderr.String())
-			}
-			out := stdout.String()
-			if !strings.Contains(out, "--base-url http://127.0.0.1:8080/v1") {
-				t.Errorf("expected '--base-url http://127.0.0.1:8080/v1' in dry-run stdout: %s", out)
-			}
-			if !strings.Contains(out, "--model qwen-2.5-coder-32b-instruct") {
-				t.Errorf("expected '--model qwen-2.5-coder-32b-instruct' in dry-run stdout: %s", out)
-			}
-			errOut := stderr.String()
-			if !strings.Contains(errOut, "targeting local Halo server") {
-				t.Errorf("expected targeting diagnostics in stderr: %s", errOut)
+			if code := runOpencode(&stdout, &stderr, []string{"--dry-run", flag}); code != 2 {
+				t.Fatalf("guard-only %s code=%d, want 2; stdout=%s stderr=%s", flag, code, stdout.String(), stderr.String())
 			}
 		})
 	}
@@ -445,24 +346,27 @@ func TestOpencodeConfigHaloFlag(t *testing.T) {
 	}
 }
 
-func TestOpencodeLauncherHaloDynamicModel(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "")
-	t.Setenv("FAK_HALO_HOST", "")
-	t.Setenv("FAK_STRIX_HOST", "")
+func TestOpencodeConfigHaloDynamicModelFromEnv(t *testing.T) {
 	t.Setenv("FAK_HALO_MODEL", "my-custom-qwen-70b")
-
+	tmp := t.TempDir()
 	var stdout, stderr bytes.Buffer
-	args := []string{"--dry-run", "--split", "off", "--halo"}
-	code := runOpencode(&stdout, &stderr, args)
-	if code != 0 {
-		t.Fatalf("runOpencode --halo returned %d, stderr: %s", code, stderr.String())
+	if code := runOpencode(&stdout, &stderr, []string{"config", "--halo", "--write", "--dir", tmp}); code != 0 {
+		t.Fatalf("runOpencode config --halo returned %d, stderr: %s", code, stderr.String())
 	}
-	out := stdout.String()
-	if !strings.Contains(out, "--model my-custom-qwen-70b") {
-		t.Errorf("expected dynamic model in dry-run stdout: %s", out)
+	data, err := os.ReadFile(filepath.Join(tmp, "opencode.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	providers := parsed["provider"].(map[string]interface{})
+	models := providers["fak"].(map[string]interface{})["models"].(map[string]interface{})
+	if models["my-custom-qwen-70b"] == nil {
+		t.Fatalf("expected dynamic Halo model in config: %v", models)
 	}
 }
-
 func TestOpencodeConfigHaloDynamicModelFromDir(t *testing.T) {
 	tmp := t.TempDir()
 	initialConfig := `{"model": "fak/qwen-2.5-coder-7b"}`
@@ -500,45 +404,20 @@ func TestOpencodeConfigHaloDynamicModelFromDir(t *testing.T) {
 }
 
 func TestOpencodeLauncherDarwinOneTouchMetalSession(t *testing.T) {
-	// The one-touch darwin path sets ggufPath="default" and metal=true but must NOT set
-	// gpuBackend: Apple-Silicon Metal is the guard session forward (`fak guard --metal`),
-	// not the unregistered compute backend `metal`.
-	opts := opencodeLaunchOptions{
-		splitMode:  "off",
-		splitWhere: "bottom",
-		ggufPath:   "default",
-		metal:      true,
-	}
-	argv := buildOpencodeLaunchArgv("fak", opts)
-
-	if !argvHas(argv, "--metal") {
-		t.Errorf("expected '--metal' in argv: %v", argv)
-	}
-	if !argvHas(argv, "--gguf") {
-		t.Errorf("expected '--gguf' in argv: %v", argv)
-	}
-	for i, arg := range argv {
-		if arg == "--backend" && i+1 < len(argv) && argv[i+1] == "metal" {
-			t.Errorf("one-touch Metal must not pass '--backend metal'; argv: %v", argv)
+	argv := buildOpencodeLaunchArgv("opencode", opencodeLaunchOptions{ggufPath: "default", metal: true})
+	for _, guardOnly := range []string{"guard", "--metal", "--gguf", "--backend"} {
+		if argvHas(argv, guardOnly) {
+			t.Errorf("direct argv contains guard-only %q: %v", guardOnly, argv)
 		}
 	}
 }
 
 func TestOpencodeLauncherBackendStillEmittedWithMetal(t *testing.T) {
-	// --backend remains available alongside explicit non-Metal backends; --metal is additive.
-	opts := opencodeLaunchOptions{
-		splitMode:  "off",
-		splitWhere: "bottom",
-		ggufPath:   "default",
-		gpuBackend: "cpu",
-		metal:      true,
-	}
-	argv := buildOpencodeLaunchArgv("fak", opts)
-	if !argvHas(argv, "--metal") {
-		t.Errorf("expected '--metal' in argv: %v", argv)
-	}
-	if !argvHasPair(argv, "--backend", "cpu") {
-		t.Errorf("expected '--backend cpu' in argv: %v", argv)
+	argv := buildOpencodeLaunchArgv("opencode", opencodeLaunchOptions{ggufPath: "default", gpuBackend: "cpu", metal: true})
+	for _, guardOnly := range []string{"guard", "--metal", "--gguf", "--backend"} {
+		if argvHas(argv, guardOnly) {
+			t.Errorf("direct argv contains guard-only %q: %v", guardOnly, argv)
+		}
 	}
 }
 

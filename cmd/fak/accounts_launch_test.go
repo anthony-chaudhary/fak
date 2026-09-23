@@ -197,6 +197,33 @@ func TestAccountsLaunchSkipPermissionsOptionResolution(t *testing.T) {
 	}
 }
 
+func TestAccountsLaunchGuardOptionResolution(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "Claude keeps guarded default", args: []string{"--command", "claude"}, want: true},
+		{name: "Pi defaults direct", args: []string{"--command", "pi"}, want: false},
+		{name: "Pi Windows shim defaults direct", args: []string{"--command", "C:\\tools\\pi.cmd"}, want: false},
+		{name: "OpenCode defaults direct", args: []string{"--command", "opencode"}, want: false},
+		{name: "OpenCode Windows shim defaults direct", args: []string{"--command", "C:\\tools\\opencode.bat"}, want: false},
+		{name: "Pi explicit guard", args: []string{"--command", "pi", "--guard=true"}, want: true},
+		{name: "OpenCode explicit guard", args: []string{"--command", "opencode", "--guard"}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, code := parseAccountsCmd(io.Discard, "launch", tc.args)
+			if code != 0 {
+				t.Fatalf("parseAccountsCmd code=%d", code)
+			}
+			if got := *cmd.launchGuard; got != tc.want {
+				t.Fatalf("resolved guard=%v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // launchRegistry writes a registry with one active seat pointed at by the active role and
 // returns (registryPath, seatDir).
 func launchRegistry(t *testing.T, home string) (string, string) {
