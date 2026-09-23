@@ -52,18 +52,22 @@ type AttemptState string
 
 const (
 	AttemptReserved  AttemptState = "reserved"
+	AttemptLaunching AttemptState = "launching"
 	AttemptRunning   AttemptState = "running"
 	AttemptSucceeded AttemptState = "succeeded"
 	AttemptFailed    AttemptState = "failed"
 )
 
 type Attempt struct {
-	ID           string       `json:"id"`
-	IntentID     string       `json:"intent_id"`
-	State        AttemptState `json:"state"`
-	PID          int          `json:"pid,omitempty"`
-	ExpiresAt    time.Time    `json:"expires_at,omitempty"`
-	LeaseExpires time.Time    `json:"lease_expires,omitempty"`
+	ID             string       `json:"id"`
+	IntentID       string       `json:"intent_id"`
+	State          AttemptState `json:"state"`
+	Nonce          string       `json:"nonce,omitempty"`
+	LaunchDeadline time.Time    `json:"launch_deadline,omitempty"`
+	PID            int          `json:"pid,omitempty"`
+	StartedAt      time.Time    `json:"started_at,omitempty"`
+	ExpiresAt      time.Time    `json:"expires_at,omitempty"`
+	LeaseExpires   time.Time    `json:"lease_expires,omitempty"`
 }
 type Snapshot struct {
 	Schema     string    `json:"schema,omitempty"`
@@ -113,7 +117,7 @@ func Reconcile(s Snapshot) (Receipt, error) {
 		if _, ok := m[a.IntentID]; !ok {
 			return Receipt{}, fmt.Errorf("attempt references unknown intent %q", a.IntentID)
 		}
-		if a.State == AttemptReserved || a.State == AttemptRunning {
+		if a.State == AttemptReserved || a.State == AttemptLaunching || a.State == AttemptRunning {
 			active[a.IntentID] = true
 		}
 	}
