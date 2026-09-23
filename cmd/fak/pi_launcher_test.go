@@ -130,6 +130,49 @@ func TestRunPiDryRunDoesNotMutateExistingConfig(t *testing.T) {
 	}
 }
 
+func TestPiLaunchPreservesSavedDefaultRouteWithWriteConfig(t *testing.T) {
+	isolatePiHome(t)
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, "models.json")
+	settingsPath := filepath.Join(tmp, "settings.json")
+	seed := []byte(`{"defaultProvider":"hive-ai","defaultModel":"deepseek-ai/DeepSeek-V4.1-Flash","theme":"dark"}`)
+	if err := os.WriteFile(settingsPath, seed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origRun := piLaunchRun
+	defer func() { piLaunchRun = origRun }()
+	piLaunchRun = func(stdout, stderr io.Writer, argv, env []string) int {
+		joined := strings.Join(argv, " ")
+		if !strings.Contains(joined, "--provider fak") || !strings.Contains(joined, "--model qwen38:27b-q4") {
+			t.Errorf("launch argv omitted session route: %v", argv)
+		}
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runPi(&stdout, &stderr, []string{
+		"--write-config=true",
+		"--check-backend=false",
+		"--model", "qwen38:27b-q4",
+		"--config-path", modelsPath,
+		"--settings-path", settingsPath,
+	})
+	if code != 0 {
+		t.Fatalf("runPi returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	after, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, seed) {
+		t.Errorf("write-config launch changed saved Pi defaults:\nbefore=%s\nafter=%s", seed, after)
+	}
+	if _, err := os.Stat(modelsPath); err != nil {
+		t.Errorf("write-config launch did not write models catalog: %v", err)
+	}
+}
+
 func TestRunPiFreshConfigUsesSessionExtensionWithoutPersistentWrites(t *testing.T) {
 	isolatePiHome(t)
 	tmp := t.TempDir()
@@ -268,12 +311,14 @@ func TestRunPiConfigSubcommandWrite(t *testing.T) {
 	isolatePiHome(t)
 	tmp := t.TempDir()
 	targetPath := filepath.Join(tmp, "models.json")
+	settingsPath := filepath.Join(tmp, "settings.json")
 
 	var stdout, stderr bytes.Buffer
 	code := runPi(&stdout, &stderr, []string{
 		"config",
 		"--write",
 		"--path", targetPath,
+		"--settings-path", settingsPath,
 		"--addr", "127.0.0.1:9000",
 		"--model", "qwen38:27b-q4",
 	})
@@ -292,6 +337,86 @@ func TestRunPiConfigSubcommandWrite(t *testing.T) {
 	}
 	if !strings.Contains(content, "qwen38:27b-q4") {
 		t.Errorf("expected model in written file: %s", content)
+	}
+	settingsData, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	var settings map[string]interface{}
+	if err := json.Unmarshal(settingsData, &settings); err != nil {
+		t.Fatalf("parse settings: %v", err)
+	}
+	if settings["defaultProvider"] != "fak" || settings["defaultModel"] != "qwen38:27b-q4" {
+		t.Errorf("explicit config --write defaults = (%v, %v), want (fak, qwen38:27b-q4)", settings["defaultProvider"], settings["defaultModel"])
+	}
+}
+
+func TestRunPiConfigDisablePreservesCatalogAndUnrelatedSettings(t *testing.T) {
+	isolatePiHome(t)
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, "models.json")
+	settingsPath := filepath.Join(tmp, "settings.json")
+	modelsSeed := []byte(`{"providers":{"fak":{"baseUrl":"http://example.test/v1"}},"custom":true}`)
+	settingsSeed := []byte(`{"defaultProvider":"fak","defaultModel":"qwen38:27b-q4","theme":"dark"}`)
+	if err := os.WriteFile(modelsPath, modelsSeed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, settingsSeed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runPi(&stdout, &stderr, []string{"config", "--disable", "--path", modelsPath, "--settings-path", settingsPath})
+	if code != 0 {
+		t.Fatalf("runPi config --disable returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `provider "fak" -> unset`) || !strings.Contains(stdout.String(), "changed=true") {
+		t.Errorf("status = %q, want readable removal status", stdout.String())
+	}
+	raw := map[string]interface{}{}
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["defaultProvider"]; ok {
+		t.Errorf("defaultProvider remains: %v", raw["defaultProvider"])
+	}
+	if _, ok := raw["defaultModel"]; ok {
+		t.Errorf("defaultModel remains: %v", raw["defaultModel"])
+	}
+	if raw["theme"] != "dark" {
+		t.Errorf("theme = %v, want dark", raw["theme"])
+	}
+	modelsAfter, err := os.ReadFile(modelsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(modelsAfter, modelsSeed) {
+		t.Errorf("models catalog changed:\nbefore=%s\nafter=%s", modelsSeed, modelsAfter)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := runPi(&stdout, &stderr, []string{"config", "--disable", "--settings-path", settingsPath}); code != 0 {
+		t.Fatalf("second disable returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "provider unset -> unset") || !strings.Contains(stdout.String(), "changed=false") {
+		t.Errorf("idempotent status = %q", stdout.String())
+	}
+}
+
+func TestRunPiConfigRejectsWriteAndDisable(t *testing.T) {
+	isolatePiHome(t)
+	var stdout, stderr bytes.Buffer
+	code := runPi(&stdout, &stderr, []string{"config", "--write", "--disable"})
+	if code != 2 {
+		t.Fatalf("runPi config --write --disable returned %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "mutually exclusive") {
+		t.Errorf("stderr = %q, want mutually exclusive diagnostic", stderr.String())
 	}
 }
 
@@ -504,11 +629,10 @@ func TestProbePiBackendWithWindow(t *testing.T) {
 	}
 }
 
-// TestRunPiReplacesNonAdvertisedDefault is the launcher-level regression for the
-// self-perpetuating placeholder default: a settings.json defaultModel the backend does
-// NOT advertise (`custom-model`) must be corrected to an id the catalog actually lists,
-// instead of being honored verbatim and re-written on every launch.
-func TestRunPiReplacesNonAdvertisedDefault(t *testing.T) {
+// TestRunPiRebindsNonAdvertisedDefaultForSessionOnly verifies that a stale placeholder
+// does not reach the child, while the saved default remains operator-owned. Persistence
+// is reserved for `fak pi config --write`.
+func TestRunPiRebindsNonAdvertisedDefaultForSessionOnly(t *testing.T) {
 	isolatePiHome(t)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -561,11 +685,8 @@ func TestRunPiReplacesNonAdvertisedDefault(t *testing.T) {
 	if err := json.Unmarshal(data, &settings); err != nil {
 		t.Fatalf("parse settings.json: %v", err)
 	}
-	if settings["defaultModel"] == "custom-model" {
-		t.Errorf("defaultModel still %q; a non-advertised placeholder must be replaced", settings["defaultModel"])
-	}
-	if settings["defaultModel"] != "deepseek-ai/DeepSeek-V4.1-Flash" {
-		t.Errorf("defaultModel = %v, want the backend-advertised id", settings["defaultModel"])
+	if settings["defaultModel"] != "custom-model" {
+		t.Errorf("defaultModel = %v, want saved placeholder preserved for explicit config management", settings["defaultModel"])
 	}
 	// The rebound model must also reach the launch argv (not just the file).
 	if !containsArgPair(capturedArgv, "--model", "deepseek-ai/DeepSeek-V4.1-Flash") {

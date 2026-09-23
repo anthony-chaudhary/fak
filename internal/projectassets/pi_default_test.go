@@ -1,6 +1,7 @@
 package projectassets
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -105,6 +106,57 @@ func TestEnsurePiDefaultProviderModelIdempotent(t *testing.T) {
 	}
 	if string(before) != string(after) {
 		t.Errorf("file changed on an idempotent call:\nbefore=%s\nafter=%s", before, after)
+	}
+}
+
+func TestDisablePiDefaultProviderModelRemovesOwnedPairOnly(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "settings.json")
+	seed := `{"theme":"light","compaction":{"enabled":true},"defaultProvider":"fak","defaultModel":"qwen38:27b-q4"}`
+	if err := os.WriteFile(target, []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path, beforeProvider, modified, err := DisablePiDefaultProviderModel(target)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if path != target || beforeProvider != "fak" || !modified {
+		t.Fatalf("disable = (%q, %q, %v), want (%q, fak, true)", path, beforeProvider, modified, target)
+	}
+	raw := readSettings(t, target)
+	if _, ok := raw["defaultProvider"]; ok {
+		t.Errorf("defaultProvider remains: %v", raw["defaultProvider"])
+	}
+	if _, ok := raw["defaultModel"]; ok {
+		t.Errorf("defaultModel remains: %v", raw["defaultModel"])
+	}
+	if raw["theme"] != "light" || raw["compaction"] == nil {
+		t.Errorf("unrelated settings changed: %v", raw)
+	}
+}
+
+func TestDisablePiDefaultProviderModelPreservesForeignAndIsIdempotent(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "settings.json")
+	seed := []byte(`{"defaultProvider":"hive-ai","defaultModel":"deepseek-ai/DeepSeek-V4.1-Flash","theme":"dark"}`)
+	if err := os.WriteFile(target, seed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, beforeProvider, modified, err := DisablePiDefaultProviderModel(target)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if modified || beforeProvider != "hive-ai" {
+		t.Fatalf("foreign disable = (before=%q, modified=%v), want (hive-ai, false)", beforeProvider, modified)
+	}
+	after, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, seed) {
+		t.Errorf("foreign settings changed:\nbefore=%s\nafter=%s", seed, after)
+	}
+	missing := filepath.Join(t.TempDir(), "settings.json")
+	if _, beforeProvider, modified, err := DisablePiDefaultProviderModel(missing); err != nil || modified || beforeProvider != "" {
+		t.Fatalf("missing disable = (before=%q, modified=%v, err=%v), want (empty, false, nil)", beforeProvider, modified, err)
 	}
 }
 
