@@ -37,14 +37,24 @@ package witness
 // test which genuinely constrains the bug. Same git evidence, opposite polarity.
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"go/ast"
+	"go/format"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -69,6 +79,13 @@ func SymptomExecEnabled() bool {
 // never remove a derived tag. The empty default keeps the untagged behavior byte-identical.
 func (r *Resolver) WithSymptomTags(tags []string) *Resolver {
 	r.symptomTags = normalizeTags(tags)
+	return r
+}
+
+// WithSymptomTests narrows the Go execution rung to explicit test-name regexes.
+// Changed tests are still overlaid onto the parent before the selected tests run.
+func (r *Resolver) WithSymptomTests(tests []string) *Resolver {
+	r.symptomTests = normalizeTags(tests)
 	return r
 }
 
@@ -103,9 +120,16 @@ func mergeTags(a, b []string) []string {
 // When mandatoryExec is true, it forces the red-then-green execution check even when
 // FAK_WITNESS_SYMPTOM is not set in the environment.
 func (r *Resolver) ResolveSymptom(ctx context.Context, ref string, mandatoryExec bool) abi.WitnessOutcome {
+	outcome, _ := r.ResolveSymptomWithDetail(ctx, ref, mandatoryExec)
+	return outcome
+}
+
+// ResolveSymptomWithDetail returns the witness outcome plus a bounded diagnostic.
+// Diagnostics contain no test output or source bytes, so land receipts stay compact.
+func (r *Resolver) ResolveSymptomWithDetail(ctx context.Context, ref string, mandatoryExec bool) (abi.WitnessOutcome, string) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return abi.WitnessAbstain
+		return abi.WitnessAbstain, "missing symptom ref"
 	}
 	git := r.run
 	if git == nil {
@@ -115,16 +139,16 @@ func (r *Resolver) ResolveSymptom(ctx context.Context, ref string, mandatoryExec
 	// STRUCTURAL rung: which _test.go files did the commit add or modify?
 	out, code, err := git(ctx, r.dir, "show", "--name-only", "--format=", ref)
 	if err != nil || code != 0 {
-		return abi.WitnessAbstain // bad ref / git missing — never a false CONFIRM
+		return abi.WitnessAbstain, "could not inspect changed tests" // never a false CONFIRM
 	}
 	tests := changedTestFiles(out)
 	if len(tests) == 0 {
-		return abi.WitnessRefuted // a fix with no symptom witness — the whole point
+		return abi.WitnessRefuted, "no changed test file"
 	}
 
 	// EXECUTION rung is opt-in via env or mandatoryExec; without it the structural pass is as far as we honestly go.
 	if !mandatoryExec && !SymptomExecEnabled() {
-		return abi.WitnessAbstain
+		return abi.WitnessAbstain, "symptom execution disabled"
 	}
 	return r.resolveSymptomExec(ctx, ref, tests)
 }
@@ -186,7 +210,7 @@ func isUnderTestdata(p string) bool {
 // resolveSymptomExec runs the red-then-green check: the changed test(s), taken at <ref>, must
 // FAIL against the parent's source and PASS at <ref>. All git/exec goes through the injected
 // runners so this is exercised without a real repo (NewWithRunners).
-func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []string) abi.WitnessOutcome {
+func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []string) (abi.WitnessOutcome, string) {
 	exec := r.execRun
 	if exec == nil {
 		exec = commandRunner
@@ -195,17 +219,31 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 
 	commit, ok := v.revParse(ctx, ref+"^{commit}")
 	if !ok {
-		return abi.WitnessAbstain
+		return abi.WitnessAbstain, "candidate commit not found"
 	}
 	parent, ok := v.revParse(ctx, commit+"^")
 	if !ok {
-		return abi.WitnessAbstain // a root commit has no parent to red-test against
+		return abi.WitnessAbstain, "parent commit not found"
 	}
 
 	pkgs := testPackages(tests)
 	pyTests := pythonTestFiles(tests)
 	if len(pkgs) == 0 && len(pyTests) == 0 {
-		return abi.WitnessAbstain
+		return abi.WitnessAbstain, "changed tests have no executable package"
+	}
+	if len(r.symptomTests) > 0 {
+		if len(pkgs) == 0 {
+			return abi.WitnessAbstain, "symptom test selector requires a changed Go test"
+		}
+		for _, selector := range r.symptomTests {
+			if _, err := regexp.Compile(selector); err != nil {
+				return abi.WitnessAbstain, "invalid symptom test selector"
+			}
+		}
+	}
+	selections, selectionDetail := discoverSymptomSelections(ctx, r.run, r.dir, commit, parent, tests, r.symptomTests)
+	if len(pkgs) > 0 && len(selections) == 0 {
+		return abi.WitnessAbstain, selectionDetail
 	}
 
 	// The build constraints the changed test files declare (#13243). A device-tagged test
@@ -218,35 +256,283 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 	// GREEN at the fix: the changed test must pass at <ref> as committed.
 	commitDir, cleanupCommit, err := v.scratchWorktree(ctx, commit)
 	if err != nil {
-		return abi.WitnessAbstain
+		return abi.WitnessAbstain, "candidate scratch worktree failed"
 	}
 	defer cleanupCommit()
-	if !allTestsPass(ctx, exec, commitDir, pkgs, pyTests, tags) {
+	if len(selections) > 0 {
+		for _, selection := range selections {
+			result := runSelectedGoTests(ctx, exec, commitDir, []string{selection.Package}, tags, exactTestSelectors(selection.Tests))
+			switch {
+			case result.timedOut:
+				return abi.WitnessAbstain, "candidate selected symptom test timed out"
+			case result.runErr != nil:
+				return abi.WitnessAbstain, "candidate selected test execution failed"
+			case result.buildFailure:
+				return abi.WitnessRefuted, "candidate selected symptom test failed"
+			case !result.matched:
+				return abi.WitnessRefuted, "candidate symptom selector matched no executed test"
+			case !result.passed:
+				return abi.WitnessRefuted, "candidate selected symptom test failed"
+			}
+		}
+		if len(pyTests) > 0 {
+			passed, buildErr := runPythonTests(ctx, exec, commitDir, pyTests)
+			switch {
+			case buildErr:
+				return abi.WitnessRefuted, "candidate changed Python symptom test failed to execute"
+			case !passed:
+				return abi.WitnessRefuted, "candidate changed Python symptom test failed"
+			}
+		}
+	} else if !allTestsPass(ctx, exec, commitDir, pkgs, pyTests, tags) {
 		// The committed test does not even pass at the fix — not a usable witness; don't CONFIRM.
-		return abi.WitnessRefuted
+		return abi.WitnessRefuted, "candidate changed-test package failed"
 	}
 
 	// RED at the parent: overlay each changed test file (its <ref> content) onto the parent
 	// worktree, then run it. It must FAIL — the test reproduces the bug against the old source.
 	parentDir, cleanupParent, err := v.scratchWorktree(ctx, parent)
 	if err != nil {
-		return abi.WitnessAbstain
+		return abi.WitnessAbstain, "parent scratch worktree failed"
 	}
 	defer cleanupParent()
 	if !overlayTestsAtRef(ctx, r.run, r.dir, commit, parentDir, tests) {
-		return abi.WitnessAbstain // could not stage the red test — uncertain, never a false CONFIRM
+		return abi.WitnessAbstain, "could not overlay changed tests onto parent"
+	}
+	if len(selections) > 0 {
+		parentRed := false
+		for _, selection := range selections {
+			result := runSelectedGoTests(ctx, exec, parentDir, []string{selection.Package}, tags, exactTestSelectors(selection.Tests))
+			switch {
+			case result.timedOut:
+				return abi.WitnessAbstain, "parent selected symptom test timed out"
+			case result.runErr != nil:
+				return abi.WitnessAbstain, "parent selected test execution failed"
+			case result.buildFailure:
+				return abi.WitnessAbstain, "parent selected symptom test did not build"
+			case !result.matched:
+				return abi.WitnessRefuted, "parent symptom selector matched no executed test"
+			case !result.passed && !result.selectedFailed:
+				return abi.WitnessAbstain, "parent selected test outcome obscured by unrelated failure"
+			case result.selectedFailed:
+				parentRed = true
+			}
+		}
+		if len(pyTests) > 0 {
+			passed, buildErr := runPythonTests(ctx, exec, parentDir, pyTests)
+			switch {
+			case buildErr:
+				return abi.WitnessAbstain, "parent changed Python symptom test did not execute"
+			case !passed:
+				parentRed = true
+			}
+		}
+		if !parentRed {
+			return abi.WitnessRefuted, "selected symptom test passed at parent"
+		}
+		return abi.WitnessConfirmed, "selected symptom test failed at parent and passed at candidate"
 	}
 	passed, buildErr := runParentTests(ctx, exec, parentDir, pkgs, pyTests, tags)
 	if buildErr {
 		// Parent failed to compile/build (e.g. test references an API introduced by the fix) —
 		// this is unproven, never a false CONFIRM of behavioral reproduction (#12058).
-		return abi.WitnessAbstain
+		return abi.WitnessAbstain, "parent changed-test package did not build"
 	}
 	if passed {
 		// The test passes against the OLD source too: it constrains nothing about the bug.
-		return abi.WitnessRefuted
+		return abi.WitnessRefuted, "changed tests passed at parent"
 	}
-	return abi.WitnessConfirmed
+	return abi.WitnessConfirmed, "changed tests failed at parent and passed at candidate"
+}
+
+type symptomSelection struct {
+	Package string
+	Tests   []string
+}
+
+// discoverSymptomSelections derives the executable witness from candidate source.
+// Each package owns its selector set; selectors are never unioned across packages.
+// An explicit selector is only a disambiguation hint and still has to match a
+// top-level Test/Example in a changed candidate file.
+func discoverSymptomSelections(ctx context.Context, git Runner, repoDir, commit, parent string, tests, explicit []string) ([]symptomSelection, string) {
+	if git == nil {
+		git = gitRunner
+	}
+	type packageTests map[string]string
+	candidateByPackage := map[string]packageTests{}
+	changedByPackage := map[string]map[string]bool{}
+	changedPackages := map[string]bool{}
+	var explicitRegex []*regexp.Regexp
+	for _, selector := range explicit {
+		re, err := regexp.Compile(selector)
+		if err != nil {
+			return nil, "invalid symptom test selector"
+		}
+		explicitRegex = append(explicitRegex, re)
+	}
+	explicitMatched := make([]bool, len(explicitRegex))
+
+	for _, rel := range tests {
+		rel = strings.ReplaceAll(strings.TrimSpace(rel), "\\", "/")
+		if !strings.HasSuffix(rel, "_test.go") {
+			continue
+		}
+		changedPackages[goTestPackage(rel)] = true
+		testSource, code, err := git(ctx, repoDir, "show", commit+":"+rel)
+		if err != nil || code != 0 {
+			continue // deleted tests cannot witness a fix
+		}
+		candidateFuncs, err := topLevelGoTests(testSource)
+		if err != nil {
+			return nil, "candidate changed test source did not parse"
+		}
+		pkg := goTestPackage(rel)
+		if candidateByPackage[pkg] == nil {
+			candidateByPackage[pkg] = packageTests{}
+		}
+		for name, fingerprint := range candidateFuncs {
+			candidateByPackage[pkg][name] = fingerprint
+		}
+
+		parentFuncs := map[string]string{}
+		if parentSource, parentCode, parentErr := git(ctx, repoDir, "show", parent+":"+rel); parentErr == nil && parentCode == 0 {
+			parentFuncs, err = topLevelGoTests(parentSource)
+			if err != nil {
+				return nil, "parent changed test source did not parse"
+			}
+		}
+		for name, fingerprint := range candidateFuncs {
+			selected := len(explicitRegex) == 0 && parentFuncs[name] != fingerprint
+			for i, re := range explicitRegex {
+				if re.MatchString(name) {
+					explicitMatched[i] = true
+					selected = true
+				}
+			}
+			if selected {
+				if changedByPackage[pkg] == nil {
+					changedByPackage[pkg] = map[string]bool{}
+				}
+				changedByPackage[pkg][name] = true
+			}
+		}
+	}
+	if len(explicitRegex) > 0 {
+		tree, code, err := git(ctx, repoDir, "ls-tree", "-r", "--name-only", commit)
+		if err != nil || code != 0 {
+			return nil, "could not inspect candidate tests for explicit selector"
+		}
+		for _, rel := range strings.Split(tree, "\n") {
+			rel = strings.ReplaceAll(strings.TrimSpace(rel), "\\", "/")
+			pkg := goTestPackage(rel)
+			if !changedPackages[pkg] || !strings.HasSuffix(rel, "_test.go") {
+				continue
+			}
+			source, showCode, showErr := git(ctx, repoDir, "show", commit+":"+rel)
+			if showErr != nil || showCode != 0 {
+				return nil, "could not inspect candidate test for explicit selector"
+			}
+			funcs, parseErr := topLevelGoTests(source)
+			if parseErr != nil {
+				return nil, "candidate package test source did not parse"
+			}
+			for name := range funcs {
+				for i, re := range explicitRegex {
+					if !re.MatchString(name) {
+						continue
+					}
+					explicitMatched[i] = true
+					if changedByPackage[pkg] == nil {
+						changedByPackage[pkg] = map[string]bool{}
+					}
+					changedByPackage[pkg][name] = true
+				}
+			}
+		}
+	}
+
+	for _, matched := range explicitMatched {
+		if !matched {
+			return nil, "explicit symptom selector matched no changed top-level Test/Example"
+		}
+	}
+	if len(changedByPackage) == 0 {
+		if len(candidateByPackage) == 0 {
+			return nil, "changed Go tests contain no top-level Test/Example"
+		}
+		return nil, "automatic symptom selection ambiguous: no added or modified top-level Test/Example"
+	}
+
+	packages := make([]string, 0, len(changedByPackage))
+	for pkg := range changedByPackage {
+		packages = append(packages, pkg)
+	}
+	sort.Strings(packages)
+	selections := make([]symptomSelection, 0, len(packages))
+	for _, pkg := range packages {
+		names := make([]string, 0, len(changedByPackage[pkg]))
+		for name := range changedByPackage[pkg] {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		selections = append(selections, symptomSelection{Package: pkg, Tests: names})
+	}
+	return selections, ""
+}
+
+func goTestPackage(rel string) string {
+	dir := path.Dir(strings.ReplaceAll(rel, "\\", "/"))
+	if dir == "." || dir == "" {
+		return "./."
+	}
+	return "./" + strings.TrimPrefix(dir, "./")
+}
+
+func topLevelGoTests(source string) (map[string]string, error) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "candidate_test.go", source, parser.ParseComments)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || !isGoTestEntryName(fn.Name.Name) {
+			continue
+		}
+		var rendered bytes.Buffer
+		if err := format.Node(&rendered, fset, fn); err != nil {
+			return nil, err
+		}
+		out[fn.Name.Name] = rendered.String()
+	}
+	return out, nil
+}
+
+func isGoTestEntryName(name string) bool {
+	for _, prefix := range []string{"Test", "Example"} {
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(name, prefix)
+		if prefix == "Example" && rest == "" {
+			return true
+		}
+		if rest == "" {
+			return false
+		}
+		first, _ := utf8.DecodeRuneInString(rest)
+		return !unicode.IsLower(first)
+	}
+	return false
+}
+
+func exactTestSelectors(names []string) []string {
+	selectors := make([]string, 0, len(names))
+	for _, name := range names {
+		selectors = append(selectors, "^"+regexp.QuoteMeta(name)+"$")
+	}
+	return selectors
 }
 
 // testPackages maps the changed `_test.go` paths to their parent package directories (deduped),
@@ -293,6 +579,77 @@ func allTestsPass(ctx context.Context, exec CommandRunner, dir string, pkgs, pyT
 	return true
 }
 
+type goTestJSONEvent struct {
+	Action  string `json:"Action"`
+	Package string `json:"Package"`
+	Test    string `json:"Test"`
+}
+
+type selectedGoTestResult struct {
+	passed, matched, selectedFailed bool
+	buildFailure, timedOut          bool
+	runErr                          error
+}
+
+// runSelectedGoTests executes only the requested names and proves every selector
+// matched a test that actually started. `go test -run` exits zero for zero matches,
+// so the JSON run-event check is part of the fail-closed witness contract.
+func runSelectedGoTests(ctx context.Context, run CommandRunner, dir string, pkgs, tags, selectors []string) selectedGoTestResult {
+	if run == nil {
+		run = commandRunner
+	}
+	parts := make([]string, 0, len(selectors))
+	compiled := make([]*regexp.Regexp, 0, len(selectors))
+	for _, selector := range selectors {
+		parts = append(parts, "(?:"+selector+")")
+		compiled = append(compiled, regexp.MustCompile(selector))
+	}
+	out, code, err := run(ctx, dir, goTestArgvSelected(pkgs, tags, strings.Join(parts, "|"))...)
+	if err != nil {
+		return selectedGoTestResult{timedOut: errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled), runErr: err}
+	}
+	seen := make([]bool, len(compiled))
+	failed := make([]bool, len(compiled))
+	for _, line := range strings.Split(out, "\n") {
+		var event goTestJSONEvent
+		if json.Unmarshal([]byte(line), &event) != nil {
+			continue
+		}
+		if event.Test == "" {
+			continue
+		}
+		for i, selector := range compiled {
+			if selector.MatchString(event.Test) {
+				switch event.Action {
+				case "run":
+					seen[i] = true
+				case "fail":
+					failed[i] = true
+				}
+			}
+		}
+	}
+	for _, matched := range seen {
+		if !matched {
+			return selectedGoTestResult{
+				passed: code == 0, buildFailure: code != 0 && isGoBuildFailure(out),
+				timedOut: strings.Contains(out, "panic: test timed out"),
+			}
+		}
+	}
+	selectedFailed := true
+	for _, testFailed := range failed {
+		if !testFailed {
+			selectedFailed = false
+			break
+		}
+	}
+	return selectedGoTestResult{
+		passed: code == 0, matched: true, selectedFailed: selectedFailed,
+		timedOut: strings.Contains(out, "panic: test timed out"),
+	}
+}
+
 // overlayTestsAtRef writes each changed test file's content AT <commit> into the corresponding
 // path under destDir, so the parent worktree runs the NEW test against the OLD source. It reads
 // the blob with `git show <commit>:<path>` through the injected runner.
@@ -333,6 +690,15 @@ func goTestPasses(ctx context.Context, run CommandRunner, dir string, pkgs []str
 // derived, so an untagged change produces byte-identical argv to today (P1: preserved).
 func goTestArgv(pkgs, tags []string) []string {
 	argv := append([]string{"go", "test", "-count=1"}, pkgs...)
+	if len(tags) > 0 {
+		argv = append(argv, "-tags", strings.Join(tags, ","))
+	}
+	return argv
+}
+
+func goTestArgvSelected(pkgs, tags []string, selector string) []string {
+	argv := []string{"go", "test", "-json", "-count=1", "-run", selector}
+	argv = append(argv, pkgs...)
 	if len(tags) > 0 {
 		argv = append(argv, "-tags", strings.Join(tags, ","))
 	}

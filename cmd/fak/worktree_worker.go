@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -540,16 +541,41 @@ func splitTagList(s string) []string {
 }
 
 func verifyWorkerLandSymptom(wtPath, ref string, extraTags []string) workerworktree.Result {
-	resolver := witness.NewWithRunner(nil, wtPath).WithSymptomTags(extraTags)
-	outcome := resolver.ResolveSymptom(context.Background(), ref, true)
+	return verifyWorkerLandSymptomSelected(wtPath, ref, extraTags, nil)
+}
+
+func verifyWorkerLandSymptomSelected(wtPath, ref string, extraTags, testSelectors []string) workerworktree.Result {
+	resolver := witness.NewWithRunner(nil, wtPath).WithSymptomTags(extraTags).WithSymptomTests(testSelectors)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	outcome, detail := resolver.ResolveSymptomWithDetail(ctx, ref, true)
 	switch outcome {
 	case abi.WitnessConfirmed:
 		return workerworktree.Result{OK: true}
 	case abi.WitnessRefuted:
-		return workerLandSymptomUnwitnessed("symptom witness was refuted")
+		return workerLandSymptomUnwitnessed(symptomRefusalDetail("refuted", detail))
 	default:
-		return workerLandSymptomUnwitnessed("symptom witness abstained")
+		return workerLandSymptomUnwitnessed(symptomRefusalDetail("abstained", detail))
 	}
+}
+
+// symptomRefusalDetail keeps the established top-level SYMPTOM_UNWITNESSED code
+// while exposing a stable subtype for automation and operator remediation.
+func symptomRefusalDetail(outcome, detail string) string {
+	subtype := "SYMPTOM_OTHER"
+	switch {
+	case strings.Contains(detail, "matched no"):
+		subtype = "SYMPTOM_NO_MATCH"
+	case strings.Contains(detail, "parent") && (strings.Contains(detail, "did not build") || strings.Contains(detail, "did not parse")):
+		subtype = "SYMPTOM_PARENT_BUILD"
+	case strings.Contains(detail, "timed out"):
+		subtype = "SYMPTOM_TIMEOUT"
+	case strings.Contains(detail, "candidate") && strings.Contains(detail, "failed"):
+		subtype = "SYMPTOM_CANDIDATE_FAILED"
+	case strings.Contains(detail, "ambiguous"):
+		subtype = "SYMPTOM_SELECTION_AMBIGUOUS"
+	}
+	return subtype + ": symptom witness was " + outcome + ": " + detail
 }
 
 var (
@@ -563,12 +589,14 @@ type worktreeWorkerPreparedLandOut struct {
 }
 
 type worktreeWorkerPreparedVerificationRecipe struct {
-	Schema       string     `json:"schema"`
-	Mode         string     `json:"mode"`
-	VerifierArgv [][]string `json:"verifier_argv"`
-	PolicyChecks []string   `json:"policy_checks,omitempty"`
-	FixPolicy    string     `json:"fix_policy"`
-	GOFLAGS      string     `json:"goflags"`
+	Schema           string     `json:"schema"`
+	Mode             string     `json:"mode"`
+	VerifierArgv     [][]string `json:"verifier_argv"`
+	PolicyChecks     []string   `json:"policy_checks,omitempty"`
+	FixPolicy        string     `json:"fix_policy"`
+	SymptomSelection string     `json:"symptom_selection,omitempty"`
+	SymptomTests     []string   `json:"symptom_tests,omitempty"`
+	GOFLAGS          string     `json:"goflags"`
 }
 
 func worktreeWorkerPreparedVerificationBinding(verify string, requireSymptomWitness bool, tags []string) (workerworktree.ProspectiveVerificationBinding, error) {
@@ -580,6 +608,10 @@ func worktreeWorkerPreparedVerificationBinding(verify string, requireSymptomWitn
 }
 
 func worktreeWorkerPreparedVerificationBindingForPolicy(verify, fixPolicy string, tags []string) (workerworktree.ProspectiveVerificationBinding, error) {
+	return worktreeWorkerPreparedVerificationBindingForPolicyAndTests(verify, fixPolicy, tags, nil)
+}
+
+func worktreeWorkerPreparedVerificationBindingForPolicyAndTests(verify, fixPolicy string, tags, symptomTests []string) (workerworktree.ProspectiveVerificationBinding, error) {
 	mode := strings.ToLower(strings.TrimSpace(verify))
 	verifierArgv := make([][]string, 0, 1)
 	switch mode {
@@ -595,9 +627,18 @@ func worktreeWorkerPreparedVerificationBindingForPolicy(verify, fixPolicy string
 	if fixPolicy == "red-parent-green-candidate" {
 		policyChecks = append(policyChecks, "resolve-symptom(parent=red,candidate=green,ref=HEAD)")
 	}
+	normalizedTests := normalizeWorkerLandStrings(symptomTests)
+	selectionMode := ""
+	if fixPolicy == "red-parent-green-candidate" {
+		selectionMode = "automatic-changed-top-level"
+		if len(normalizedTests) > 0 {
+			selectionMode = "explicit-changed-top-level"
+		}
+	}
 	recipe, err := json.Marshal(worktreeWorkerPreparedVerificationRecipe{
 		Schema: "fak.worker-land-verification/v1", Mode: mode, VerifierArgv: verifierArgv,
-		PolicyChecks: policyChecks, FixPolicy: fixPolicy, GOFLAGS: os.Getenv("GOFLAGS"),
+		PolicyChecks: policyChecks, FixPolicy: fixPolicy, SymptomSelection: selectionMode,
+		SymptomTests: normalizedTests, GOFLAGS: os.Getenv("GOFLAGS"),
 	})
 	if err != nil {
 		return workerworktree.ProspectiveVerificationBinding{}, err
@@ -612,6 +653,23 @@ func worktreeWorkerPreparedVerificationBindingForPolicy(verify, fixPolicy string
 		}
 	}
 	return workerworktree.ProspectiveVerificationBinding{Command: string(recipe), Tags: uniq}, nil
+}
+
+func normalizeWorkerLandStrings(values []string) []string {
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			normalized = append(normalized, value)
+		}
+	}
+	sort.Strings(normalized)
+	uniq := normalized[:0]
+	for _, value := range normalized {
+		if len(uniq) == 0 || uniq[len(uniq)-1] != value {
+			uniq = append(uniq, value)
+		}
+	}
+	return uniq
 }
 
 func emitWorktreeWorkerPreparedLand(w io.Writer, out worktreeWorkerPreparedLandOut) {
@@ -867,6 +925,9 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 		"bypass mandatory fail-to-pass symptom witness for fix(*) commits")
 	symptomTags := fs.String("symptom-tags", "",
 		"extra build tags to run the symptom witness with (comma-separated); merged with tags derived from the changed test files' //go:build constraints")
+	var symptomTests repeatedString
+	fs.Var(&symptomTests, "symptom-test",
+		"Go test-name regex to run for the mandatory red-then-green witness (repeatable; changed tests are overlaid onto the parent)")
 	requireTestWitness := fs.Bool("require-test-witness", false,
 		"require verified test witness receipt before landing worker diff")
 	receiptID := fs.String("receipt-id", "", "prepared landing receipt ID (required by accept)")
@@ -874,6 +935,15 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 	fs.Var(&paths, "paths", "path to scope the commit to (repeatable); omit to commit the whole applied diff")
 	if err := fs.Parse(argv); err != nil {
 		return returnEarly(workerworktree.Result{OK: false, Reason: err.Error()}, 2)
+	}
+	selectedSymptomTests := normalizeWorkerLandStrings([]string(symptomTests))
+	if len(symptomTests) > 0 && len(selectedSymptomTests) == 0 {
+		return returnEarly(workerworktree.Result{OK: false, Code: "SYMPTOM_SELECTOR_INVALID", Reason: "--symptom-test requires a non-empty Go test-name regex"}, 2)
+	}
+	for _, selector := range selectedSymptomTests {
+		if _, err := regexp.Compile(selector); err != nil {
+			return returnEarly(workerworktree.Result{OK: false, Code: "SYMPTOM_SELECTOR_INVALID", Reason: "invalid --symptom-test regex", Detail: err.Error()}, 2)
+		}
 	}
 
 	worktreeDir := strings.TrimSpace(*worktree)
@@ -935,7 +1005,9 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 				fixPolicy = "red-parent-green-candidate"
 			}
 		}
-		binding, bindingErr := worktreeWorkerPreparedVerificationBindingForPolicy(*verify, fixPolicy, splitTagList(*symptomTags))
+		binding, bindingErr := worktreeWorkerPreparedVerificationBindingForPolicyAndTests(
+			*verify, fixPolicy, splitTagList(*symptomTags), selectedSymptomTests,
+		)
 		if bindingErr != nil {
 			fmt.Fprintf(stderr, "fak worktree worker land: %v (want off|go-build)\n", bindingErr)
 			return returnEarly(workerworktree.Result{OK: false, Reason: bindingErr.Error()}, 2)
@@ -953,6 +1025,9 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 					}
 				}
 				if requireSymptomWitness {
+					if len(selectedSymptomTests) > 0 {
+						return verifyWorkerLandSymptomSelected(dir, "HEAD", splitTagList(*symptomTags), selectedSymptomTests)
+					}
 					return worktreeWorkerPreparedSymptomVerify(dir, "HEAD", splitTagList(*symptomTags))
 				}
 				return workerworktree.Result{OK: true}
@@ -993,7 +1068,7 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 				if materializationErr != nil {
 					return workerLandSymptomUnwitnessed(materializationErr.Error())
 				}
-				return verifyWorkerLandSymptom(dir, "HEAD", splitTagList(*symptomTags))
+				return verifyWorkerLandSymptomSelected(dir, "HEAD", splitTagList(*symptomTags), selectedSymptomTests)
 			}
 			return workerworktree.LandProspectiveVerified(
 				repoRoot, worktreeDir, strings.TrimSpace(*baseSHA), strings.TrimSpace(*msgFile),

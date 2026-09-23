@@ -190,6 +190,10 @@ type Resolver struct {
 	// resolveSymptomExec. Empty (the default) preserves the pre-#13243 untagged behavior.
 	symptomTags []string
 
+	// symptomTests optionally narrows the Go execution rung to named test regexes.
+	// The resolver still overlays every changed test file onto the parent.
+	symptomTests []string
+
 	// The content-addressed verdict cache (#2152, cache.go): cacheDir is resolved
 	// once per Resolver from `git rev-parse --git-common-dir` ("" = cache disabled
 	// for this Resolver).
