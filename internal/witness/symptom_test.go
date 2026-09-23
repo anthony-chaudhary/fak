@@ -159,6 +159,87 @@ func TestSymptomRedThenGreenConfirms(t *testing.T) {
 	assertRepoClean(t, dir)
 }
 
+// An unrelated failing test in the same package must not consume the fix's
+// symptom witness. The changed regression itself still has to fail on the
+// parent source and pass on the candidate source.
+func TestSymptomExactSelectionIgnoresUnrelatedPackageFailure(t *testing.T) {
+	requireGoAndGit(t)
+	dir := newGoModuleRepo(t)
+	ctx := context.Background()
+	t.Setenv(SymptomFlagEnv, "1")
+
+	writeRepoFile(t, dir, "sign.go", "package m\nfunc Sign(n int) int { return 0 }\n")
+	writeRepoFile(t, dir, "unrelated_test.go", "package m\nimport \"testing\"\nfunc TestUnrelatedFailure(t *testing.T) { t.Fatal(\"unrelated baseline failure\") }\n")
+	gitIn(t, dir, "add", "sign.go", "unrelated_test.go")
+	gitIn(t, dir, "commit", "-q", "-m", "parent with unrelated failing test")
+
+	writeRepoFile(t, dir, "sign.go", "package m\nfunc Sign(n int) int { if n < 0 { return -1 }; return 0 }\n")
+	writeRepoFile(t, dir, "sign_test.go", "package m\nimport \"testing\"\nfunc TestSignNegative(t *testing.T) { if got := Sign(-3); got != -1 { t.Fatalf(\"Sign(-3)=%d\", got) } }\n")
+	gitIn(t, dir, "add", "sign.go", "sign_test.go")
+	gitIn(t, dir, "commit", "-q", "-m", "fix(m): witness negative Sign only")
+
+	if got := NewWithRunner(gitRunner, dir).Resolve(ctx, nil, "symptom:HEAD"); got != abi.WitnessConfirmed {
+		t.Fatalf("exact changed regression = %v, want confirmed despite unrelated failure", got)
+	}
+	assertRepoClean(t, dir)
+}
+
+// When a candidate edits one test function in a file, an unchanged failing
+// sibling in that same file must not be selected as the symptom witness.
+func TestSymptomExactSelectionIgnoresUnchangedSiblingFunction(t *testing.T) {
+	requireGoAndGit(t)
+	dir := newGoModuleRepo(t)
+	ctx := context.Background()
+	t.Setenv(SymptomFlagEnv, "1")
+
+	writeRepoFile(t, dir, "sign.go", "package m\nfunc Sign(n int) int { return 0 }\n")
+	writeRepoFile(t, dir, "sign_test.go", "package m\nimport \"testing\"\nfunc TestUnrelatedFailure(t *testing.T) { t.Fatal(\"unrelated baseline failure\") }\nfunc TestSignNegative(t *testing.T) { if got := Sign(-3); got != 0 { t.Fatalf(\"Sign(-3)=%d\", got) } }\n")
+	gitIn(t, dir, "add", "sign.go", "sign_test.go")
+	gitIn(t, dir, "commit", "-q", "-m", "parent with tautological regression and failing sibling")
+
+	writeRepoFile(t, dir, "sign.go", "package m\nfunc Sign(n int) int { if n < 0 { return -1 }; return 0 }\n")
+	writeRepoFile(t, dir, "sign_test.go", "package m\nimport \"testing\"\nfunc TestUnrelatedFailure(t *testing.T) { t.Fatal(\"unrelated baseline failure\") }\nfunc TestSignNegative(t *testing.T) { if got := Sign(-3); got != -1 { t.Fatalf(\"Sign(-3)=%d\", got) } }\n")
+	gitIn(t, dir, "add", "sign.go", "sign_test.go")
+	gitIn(t, dir, "commit", "-q", "-m", "fix(m): tighten negative Sign regression")
+
+	if got := NewWithRunner(gitRunner, dir).Resolve(ctx, nil, "symptom:HEAD"); got != abi.WitnessConfirmed {
+		t.Fatalf("changed test function = %v, want confirmed despite unchanged failing sibling", got)
+	}
+	assertRepoClean(t, dir)
+}
+
+// Test names must stay bound to the package that changed them. A union regex
+// over both packages would run the unrelated TestANegative in package b.
+func TestSymptomExactSelectionIsPackageScoped(t *testing.T) {
+	requireGoAndGit(t)
+	dir := newGoModuleRepo(t)
+	ctx := context.Background()
+	t.Setenv(SymptomFlagEnv, "1")
+	for _, subdir := range []string{"a", "b"} {
+		if err := os.MkdirAll(filepath.Join(dir, subdir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeRepoFile(t, dir, "a/a.go", "package a\nfunc A() int { return 0 }\n")
+	writeRepoFile(t, dir, "b/b.go", "package b\nfunc B() int { return 0 }\n")
+	writeRepoFile(t, dir, "b/b_test.go", "package b\nimport \"testing\"\nfunc TestANegative(t *testing.T) { t.Fatal(\"unrelated baseline failure\") }\n")
+	gitIn(t, dir, "add", "a/a.go", "b/b.go", "b/b_test.go")
+	gitIn(t, dir, "commit", "-q", "-m", "parent with failing b package test")
+
+	writeRepoFile(t, dir, "a/a.go", "package a\nfunc A() int { return 1 }\n")
+	writeRepoFile(t, dir, "b/b.go", "package b\nfunc B() int { return 1 }\n")
+	writeRepoFile(t, dir, "a/a_test.go", "package a\nimport \"testing\"\nfunc TestANegative(t *testing.T) { if A() != 1 { t.Fatal(\"A still buggy\") } }\n")
+	writeRepoFile(t, dir, "b/b_test.go", "package b\nimport \"testing\"\nfunc TestANegative(t *testing.T) { t.Fatal(\"unrelated baseline failure\") }\nfunc TestBPositive(t *testing.T) { if B() != 1 { t.Fatal(\"B still buggy\") } }\n")
+	gitIn(t, dir, "add", "a/a.go", "b/b.go", "a/a_test.go", "b/b_test.go")
+	gitIn(t, dir, "commit", "-q", "-m", "fix(m): witness both packages exactly")
+
+	if got := NewWithRunner(gitRunner, dir).Resolve(ctx, nil, "symptom:HEAD"); got != abi.WitnessConfirmed {
+		t.Fatalf("package-scoped changed regressions = %v, want confirmed", got)
+	}
+	assertRepoClean(t, dir)
+}
+
 // TestSymptomTautologicalTestRefutes: the fix adds a test, but the test passes against the
 // parent's source too (it constrains nothing about the bug) → REFUTED.
 func TestSymptomTautologicalTestRefutes(t *testing.T) {

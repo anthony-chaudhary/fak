@@ -38,12 +38,18 @@ package witness
 
 import (
 	"context"
+	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -207,6 +213,12 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 	if len(pkgs) == 0 && len(pyTests) == 0 {
 		return abi.WitnessAbstain
 	}
+	goTests, selected := selectAffectedGoTests(ctx, r.run, r.dir, parent, commit, tests)
+	if len(pkgs) > 0 && (!selected || len(goTests) == 0) {
+		// A changed helper or an unreadable/ambiguous diff does not authorize a
+		// package-wide fallback. The managed land gate fails closed instead.
+		return abi.WitnessAbstain
+	}
 
 	// The build constraints the changed test files declare (#13243). A device-tagged test
 	// (`//go:build vulkan`, `metal`, `cuda`, …) is excluded from a bare `go test`, so without
@@ -221,8 +233,22 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 		return abi.WitnessAbstain
 	}
 	defer cleanupCommit()
-	if !allTestsPass(ctx, exec, commitDir, pkgs, pyTests, tags) {
-		// The committed test does not even pass at the fix — not a usable witness; don't CONFIRM.
+	if len(pkgs) > 0 {
+		for _, selection := range goTests {
+			if listed := validateGoTestList(ctx, exec, commitDir, []string{selection.pkg}, selection.names, tags); listed != goTestsPassed {
+				return abi.WitnessAbstain
+			}
+			candidateResult := runExactGoTests(ctx, exec, commitDir, []string{selection.pkg}, selection.names, tags)
+			switch candidateResult {
+			case goTestsPassed:
+			case goTestsFailed:
+				return abi.WitnessRefuted
+			default:
+				return abi.WitnessAbstain
+			}
+		}
+	}
+	if len(pyTests) > 0 && !pythonTestsPass(ctx, exec, commitDir, pyTests) {
 		return abi.WitnessRefuted
 	}
 
@@ -236,17 +262,274 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 	if !overlayTestsAtRef(ctx, r.run, r.dir, commit, parentDir, tests) {
 		return abi.WitnessAbstain // could not stage the red test — uncertain, never a false CONFIRM
 	}
-	passed, buildErr := runParentTests(ctx, exec, parentDir, pkgs, pyTests, tags)
-	if buildErr {
-		// Parent failed to compile/build (e.g. test references an API introduced by the fix) —
-		// this is unproven, never a false CONFIRM of behavioral reproduction (#12058).
-		return abi.WitnessAbstain
+	parentRed := false
+	if len(pkgs) > 0 {
+		for _, selection := range goTests {
+			if listed := validateGoTestList(ctx, exec, parentDir, []string{selection.pkg}, selection.names, tags); listed != goTestsPassed {
+				return abi.WitnessAbstain
+			}
+			switch runExactGoTests(ctx, exec, parentDir, []string{selection.pkg}, selection.names, tags) {
+			case goTestsFailed:
+				parentRed = true
+			case goTestsPassed:
+			default:
+				return abi.WitnessAbstain
+			}
+		}
 	}
-	if passed {
-		// The test passes against the OLD source too: it constrains nothing about the bug.
+	if len(pyTests) > 0 {
+		passed, buildErr := runPythonTests(ctx, exec, parentDir, pyTests)
+		if buildErr {
+			return abi.WitnessAbstain
+		}
+		if !passed {
+			parentRed = true
+		}
+	}
+	if !parentRed {
+		// Every selected regression passes against the old source too.
 		return abi.WitnessRefuted
 	}
 	return abi.WitnessConfirmed
+}
+
+type changedLineSpan struct {
+	start int
+	end   int
+}
+
+type goTestSelection struct {
+	pkg   string
+	names []string
+}
+
+// selectAffectedGoTests maps candidate-side changed lines to their enclosing
+// top-level Test, Example, or Fuzz declarations. Source changes outside one of
+// those declarations are deliberately ambiguous and never widen to the package.
+func selectAffectedGoTests(ctx context.Context, git Runner, repoDir, parent, commit string, tests []string) ([]goTestSelection, bool) {
+	if git == nil {
+		git = gitRunner
+	}
+	namesByPackage := map[string]map[string]bool{}
+	for _, rel := range tests {
+		if !strings.HasSuffix(rel, "_test.go") {
+			continue
+		}
+		pkg := testPackage(rel)
+		seen := namesByPackage[pkg]
+		if seen == nil {
+			seen = map[string]bool{}
+			namesByPackage[pkg] = seen
+		}
+		src, code, err := git(ctx, repoDir, "show", commit+":"+rel)
+		if err != nil || code != 0 {
+			return nil, false
+		}
+		diff, code, err := git(ctx, repoDir, "diff", "--unified=0", "--no-ext-diff", parent, commit, "--", rel)
+		if err != nil || code != 0 {
+			return nil, false
+		}
+		spans, ok := changedCandidateLineSpans(diff)
+		if !ok {
+			return nil, false
+		}
+		fileSet := token.NewFileSet()
+		file, parseErr := parser.ParseFile(fileSet, rel, src, 0)
+		if parseErr != nil {
+			return nil, false
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv != nil || !validGoRegressionName(fn.Name.Name) {
+				continue
+			}
+			start := fileSet.Position(fn.Pos()).Line
+			end := fileSet.Position(fn.End()).Line
+			if !spansOverlapFunction(spans, start, end) || seen[fn.Name.Name] {
+				continue
+			}
+			seen[fn.Name.Name] = true
+		}
+	}
+	selections := make([]goTestSelection, 0, len(namesByPackage))
+	for pkg, seen := range namesByPackage {
+		if len(seen) == 0 {
+			continue
+		}
+		names := make([]string, 0, len(seen))
+		for name := range seen {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		selections = append(selections, goTestSelection{pkg: pkg, names: names})
+	}
+	sort.Slice(selections, func(i, j int) bool { return selections[i].pkg < selections[j].pkg })
+	return selections, true
+}
+
+func validGoRegressionName(name string) bool {
+	for _, prefix := range []string{"Test", "Fuzz"} {
+		if strings.HasPrefix(name, prefix) {
+			rest := strings.TrimPrefix(name, prefix)
+			return rest == "" || (rest[0] < 'a' || rest[0] > 'z')
+		}
+	}
+	if strings.HasPrefix(name, "Example") {
+		rest := strings.TrimPrefix(name, "Example")
+		return rest == "" || rest[0] == '_' || (rest[0] < 'a' || rest[0] > 'z')
+	}
+	return false
+}
+
+// changedCandidateLineSpans parses the candidate side of zero-context hunks.
+// A deletion-only hunk is represented by its insertion point and the preceding
+// line so deleting a statement from a test still selects that enclosing test.
+func changedCandidateLineSpans(diff string) ([]changedLineSpan, bool) {
+	var spans []changedLineSpan
+	for _, line := range strings.Split(strings.ReplaceAll(diff, "\r\n", "\n"), "\n") {
+		if !strings.HasPrefix(line, "@@ ") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 3 || !strings.HasPrefix(fields[2], "+") {
+			return nil, false
+		}
+		start, count, ok := parseDiffRange(strings.TrimPrefix(fields[2], "+"))
+		if !ok {
+			return nil, false
+		}
+		if count == 0 {
+			lo := start
+			if lo > 1 {
+				lo--
+			}
+			spans = append(spans, changedLineSpan{start: lo, end: start})
+			continue
+		}
+		spans = append(spans, changedLineSpan{start: start, end: start + count - 1})
+	}
+	return spans, true
+}
+
+func parseDiffRange(raw string) (start, count int, ok bool) {
+	startPart, countPart, found := strings.Cut(raw, ",")
+	if !found {
+		countPart = "1"
+	}
+	start, err := strconv.Atoi(startPart)
+	if err != nil || start < 0 {
+		return 0, 0, false
+	}
+	count, err = strconv.Atoi(countPart)
+	if err != nil || count < 0 {
+		return 0, 0, false
+	}
+	return start, count, true
+}
+
+func spansOverlapFunction(spans []changedLineSpan, start, end int) bool {
+	for _, span := range spans {
+		if span.start <= end && span.end >= start {
+			return true
+		}
+	}
+	return false
+}
+
+type goTestResult uint8
+
+const (
+	goTestsPassed goTestResult = iota
+	goTestsFailed
+	goTestsBuildFailed
+	goTestsUnmatched
+	goTestsTimedOut
+	goTestsLaunchFailed
+)
+
+func exactTestPattern(names []string) string {
+	quoted := make([]string, 0, len(names))
+	for _, name := range names {
+		quoted = append(quoted, regexp.QuoteMeta(name))
+	}
+	return "^(" + strings.Join(quoted, "|") + ")$"
+}
+
+func exactGoTestArgv(pkgs, names, tags []string, list bool) []string {
+	argv := []string{"go", "test"}
+	if list {
+		argv = append(argv, "-list", exactTestPattern(names))
+	} else {
+		argv = append(argv, "-count=1", "-run", exactTestPattern(names))
+	}
+	argv = append(argv, pkgs...)
+	if len(tags) > 0 {
+		argv = append(argv, "-tags", strings.Join(tags, ","))
+	}
+	return argv
+}
+
+func validateGoTestList(ctx context.Context, run CommandRunner, dir string, pkgs, names, tags []string) goTestResult {
+	if run == nil {
+		run = commandRunner
+	}
+	out, code, err := run(ctx, dir, exactGoTestArgv(pkgs, names, tags, true)...)
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(ctx.Err(), context.Canceled) {
+		return goTestsTimedOut
+	}
+	if err != nil {
+		return goTestsLaunchFailed
+	}
+	if code != 0 {
+		if isGoBuildFailure(out) {
+			return goTestsBuildFailed
+		}
+		return goTestsLaunchFailed
+	}
+	listed := map[string]bool{}
+	for _, line := range strings.Split(strings.ReplaceAll(out, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		for _, name := range names {
+			if line == name {
+				listed[name] = true
+			}
+		}
+	}
+	for _, name := range names {
+		if !listed[name] {
+			return goTestsUnmatched
+		}
+	}
+	return goTestsPassed
+}
+
+func runExactGoTests(ctx context.Context, run CommandRunner, dir string, pkgs, names, tags []string) goTestResult {
+	if run == nil {
+		run = commandRunner
+	}
+	out, code, err := run(ctx, dir, exactGoTestArgv(pkgs, names, tags, false)...)
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(ctx.Err(), context.Canceled) {
+		return goTestsTimedOut
+	}
+	if err != nil {
+		return goTestsLaunchFailed
+	}
+	if code == 0 {
+		return goTestsPassed
+	}
+	if isGoBuildFailure(out) {
+		return goTestsBuildFailed
+	}
+	return goTestsFailed
+}
+
+func testPackage(test string) string {
+	test = strings.ReplaceAll(strings.TrimSpace(test), "\\", "/")
+	dir := path.Dir(test)
+	if dir == "." || dir == "" {
+		return "./."
+	}
+	return "./" + strings.TrimPrefix(dir, "./")
 }
 
 // testPackages maps the changed `_test.go` paths to their parent package directories (deduped),
@@ -259,13 +542,10 @@ func testPackages(tests []string) []string {
 		if !strings.HasSuffix(t, "_test.go") {
 			continue
 		}
-		dir := path.Dir(t)
-		if dir == "." || dir == "" {
-			dir = "."
-		}
-		if !seen[dir] {
-			seen[dir] = true
-			pkgs = append(pkgs, "./"+strings.TrimPrefix(dir, "./"))
+		pkg := testPackage(t)
+		if !seen[pkg] {
+			seen[pkg] = true
+			pkgs = append(pkgs, pkg)
 		}
 	}
 	return pkgs
