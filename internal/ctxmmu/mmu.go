@@ -37,6 +37,9 @@ const (
 	// ReadOversizeBytes: file read results use this higher threshold so normal code files
 	// (up to 1 MiB, matching codetools.MaxReadBytes) are not paged out to stubs.
 	ReadOversizeBytes = 1 << 20
+	// SearchExecOversizeBytes keeps ordinary search and command output in context;
+	// larger results still page out to a recoverable pointer.
+	SearchExecOversizeBytes = 1 << 20
 	// PointerMax: the injected pointer must be smaller than this (unit 65).
 	PointerMax = 2048
 	// DefaultMaxHeld bounds the quarantine ledger so a long-lived gate driven by
@@ -1317,11 +1320,56 @@ func isReadFileCall(c *abi.ToolCall, r *abi.Result) bool {
 	return false
 }
 
-func (m *MMU) oversizeThreshold(c *abi.ToolCall, r *abi.Result) int {
-	if isReadFileCall(c, r) {
-		return numfmt.EnvPositiveInt("FAK_READ_OVERSIZE_BYTES", ReadOversizeBytes)
+type outputToolClass uint8
+
+const (
+	outputToolOther outputToolClass = iota
+	outputToolRead
+	outputToolSearchExec
+)
+
+func isSearchExecTool(tool string) bool {
+	t := strings.ToLower(strings.TrimSpace(tool))
+	if idx := strings.LastIndex(t, "__"); idx >= 0 {
+		t = t[idx+2:]
 	}
-	return OversizeBytes
+	t = strings.TrimPrefix(t, "functions.")
+	t = strings.TrimPrefix(t, "codetools.")
+	switch t {
+	case "bash", "powershell", "pwsh", "shell", "exec", "exec_command", "shell_command", "run_terminal_cmd", "rg", "ripgrep", "grep":
+		return true
+	default:
+		return false
+	}
+}
+
+func classifyOutputTool(c *abi.ToolCall, r *abi.Result) outputToolClass {
+	if isReadFileCall(c, r) {
+		return outputToolRead
+	}
+	if c != nil && (isSearchExecTool(c.Tool) || isSearchExecTool(c.Engine)) {
+		return outputToolSearchExec
+	}
+	if r != nil && isSearchExecTool(r.Meta["engine"]) {
+		return outputToolSearchExec
+	}
+	return outputToolOther
+}
+
+// oversizeThresholdForClass is the single tool-class to page-out limit mapping.
+func oversizeThresholdForClass(class outputToolClass) int {
+	switch class {
+	case outputToolRead:
+		return numfmt.EnvPositiveInt("FAK_READ_OVERSIZE_BYTES", ReadOversizeBytes)
+	case outputToolSearchExec:
+		return SearchExecOversizeBytes
+	default:
+		return OversizeBytes
+	}
+}
+
+func (m *MMU) oversizeThreshold(c *abi.ToolCall, r *abi.Result) int {
+	return oversizeThresholdForClass(classifyOutputTool(c, r))
 }
 
 func classifyDurability(c *abi.ToolCall, body []byte) string {
