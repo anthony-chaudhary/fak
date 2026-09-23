@@ -691,6 +691,7 @@ func ReviewIssueDraft(d IssueDraft, opt Options) Review {
 		review.Dispatchability = Refused
 		addReviewReason(&review, ReasonUnexpandedTemplate)
 	}
+	applyTracerBulletReview(&review, d)
 	return review
 }
 

@@ -396,6 +396,15 @@ func auditIssueDraftDiscoverability(draft issuepolicy.IssueDraft, opts issuepoli
 			repairActions = append(repairActions, "reconcile closure claim with witnessed standard")
 		case issuepolicy.ReasonClosureProductionGap:
 			repairActions = append(repairActions, "bridge production gap for closure")
+		case issuepolicy.ReasonHorizontalFragment:
+			tracer := issuepolicy.AssessTracerBullet(draft)
+			if len(tracer.RepairActions) > 0 {
+				repairActions = append(repairActions, tracer.RepairActions...)
+			} else {
+				repairActions = append(repairActions, "declare input/trigger -> engine execution -> external witness or durable receipt in the Working spine")
+			}
+		case issuepolicy.ReasonFragmentationSpike:
+			repairActions = append(repairActions, "combine more than three declared child issues into a working tracer bullet before horizontal expansion")
 		default:
 			repairActions = append(repairActions, "resolve contract refusal: "+r)
 		}
