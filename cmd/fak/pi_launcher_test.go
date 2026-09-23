@@ -85,6 +85,55 @@ func TestRunPiDryRun(t *testing.T) {
 	}
 }
 
+func TestPiLaunchPreservesSavedDefaultRoute(t *testing.T) {
+	isolatePiHome(t)
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, "models.json")
+	settingsPath := filepath.Join(tmp, "settings.json")
+	seed := `{"defaultProvider":"hive-ai","defaultModel":"deepseek-ai/DeepSeek-V4.1-Flash"}`
+	if err := os.WriteFile(settingsPath, []byte(seed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	origRun := piLaunchRun
+	defer func() { piLaunchRun = origRun }()
+	var captured []string
+	piLaunchRun = func(stdout, stderr io.Writer, argv, env []string) int {
+		captured = append([]string(nil), argv...)
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runPi(&stdout, &stderr, []string{
+		"--check-backend=false",
+		"--config-path", modelsPath,
+		"--settings-path", settingsPath,
+		"--model", "qwen38:27b-q4",
+		"--quiet",
+	})
+	if code != 0 {
+		t.Fatalf("runPi returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if got := strings.Join(captured, " "); !strings.Contains(got, "pi --provider fak --model qwen38:27b-q4") {
+		t.Fatalf("session was not routed explicitly through fak: %v", captured)
+	}
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settings map[string]interface{}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatal(err)
+	}
+	if got := settings["defaultProvider"]; got != "hive-ai" {
+		t.Errorf("defaultProvider = %v, want saved value hive-ai", got)
+	}
+	if got := settings["defaultModel"]; got != "deepseek-ai/DeepSeek-V4.1-Flash" {
+		t.Errorf("defaultModel = %v, want saved value deepseek-ai/DeepSeek-V4.1-Flash", got)
+	}
+}
+
 // TestRunPiWritesOnlyUnderIsolatedHome is the hermeticity regression: a launcher turn that
 // omits --settings-path/--config-path must confine its writes to PI_CODING_AGENT_DIR and
 // never touch the real ~/.pi/agent. This is the drift class that silently rewrote the
@@ -162,12 +211,14 @@ func TestRunPiConfigSubcommandWrite(t *testing.T) {
 	isolatePiHome(t)
 	tmp := t.TempDir()
 	targetPath := filepath.Join(tmp, "models.json")
+	settingsPath := filepath.Join(tmp, "settings.json")
 
 	var stdout, stderr bytes.Buffer
 	code := runPi(&stdout, &stderr, []string{
 		"config",
 		"--write",
 		"--path", targetPath,
+		"--settings-path", settingsPath,
 		"--addr", "127.0.0.1:9000",
 		"--model", "qwen38:27b-q4",
 	})
@@ -186,6 +237,90 @@ func TestRunPiConfigSubcommandWrite(t *testing.T) {
 	}
 	if !strings.Contains(content, "qwen38:27b-q4") {
 		t.Errorf("expected model in written file: %s", content)
+	}
+
+	settingsData, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("failed to read written settings %s: %v", settingsPath, err)
+	}
+	var settings map[string]interface{}
+	if err := json.Unmarshal(settingsData, &settings); err != nil {
+		t.Fatalf("parse written settings: %v", err)
+	}
+	if got := settings["defaultProvider"]; got != "fak" {
+		t.Errorf("defaultProvider = %v, want fak after explicit config --write", got)
+	}
+	if got := settings["defaultModel"]; got != "qwen38:27b-q4" {
+		t.Errorf("defaultModel = %v, want qwen38:27b-q4 after explicit config --write", got)
+	}
+}
+
+func TestRunPiConfigDisablePreservesCatalogAndUnrelatedSettings(t *testing.T) {
+	isolatePiHome(t)
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, "models.json")
+	settingsPath := filepath.Join(tmp, "settings.json")
+	modelsSeed := []byte(`{"providers":{"fak":{"baseUrl":"http://example.test/v1"}},"custom":true}`)
+	settingsSeed := []byte(`{"defaultProvider":"fak","defaultModel":"qwen38:27b-q4","theme":"dark"}`)
+	if err := os.WriteFile(modelsPath, modelsSeed, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, settingsSeed, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runPi(&stdout, &stderr, []string{"config", "--disable", "--path", modelsPath, "--settings-path", settingsPath})
+	if code != 0 {
+		t.Fatalf("runPi config --disable returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `provider "fak" -> unset`) || !strings.Contains(stdout.String(), "changed=true") {
+		t.Errorf("status = %q, want readable removal status", stdout.String())
+	}
+	raw := map[string]interface{}{}
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["defaultProvider"]; ok {
+		t.Errorf("defaultProvider remains: %v", raw["defaultProvider"])
+	}
+	if _, ok := raw["defaultModel"]; ok {
+		t.Errorf("defaultModel remains: %v", raw["defaultModel"])
+	}
+	if raw["theme"] != "dark" {
+		t.Errorf("theme = %v, want dark", raw["theme"])
+	}
+	modelsAfter, err := os.ReadFile(modelsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(modelsAfter) != string(modelsSeed) {
+		t.Errorf("models catalog changed:\nbefore=%s\nafter=%s", modelsSeed, modelsAfter)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := runPi(&stdout, &stderr, []string{"config", "--disable", "--settings-path", settingsPath}); code != 0 {
+		t.Fatalf("second disable returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "provider unset -> unset") || !strings.Contains(stdout.String(), "changed=false") {
+		t.Errorf("idempotent status = %q", stdout.String())
+	}
+}
+
+func TestRunPiConfigRejectsWriteAndDisable(t *testing.T) {
+	isolatePiHome(t)
+	var stdout, stderr bytes.Buffer
+	code := runPi(&stdout, &stderr, []string{"config", "--write", "--disable"})
+	if code != 2 {
+		t.Fatalf("runPi config --write --disable returned %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "mutually exclusive") {
+		t.Errorf("stderr = %q, want mutually exclusive diagnostic", stderr.String())
 	}
 }
 

@@ -108,6 +108,75 @@ func TestEnsurePiDefaultProviderModelIdempotent(t *testing.T) {
 	}
 }
 
+func TestDisablePiDefaultProviderModelRemovesOwnedPairOnly(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "settings.json")
+	seed := `{
+  "theme": "light",
+  "compaction": {"enabled": true},
+  "defaultProvider": "fak",
+  "defaultModel": "qwen38:27b-q4"
+}`
+	if err := os.WriteFile(target, []byte(seed), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	path, beforeProvider, modified, err := DisablePiDefaultProviderModel(target)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if path != target || !modified {
+		t.Fatalf("DisablePiDefaultProviderModel() = (%q, %v), want (%q, true)", path, modified, target)
+	}
+	if beforeProvider != "fak" {
+		t.Errorf("beforeProvider = %q, want fak", beforeProvider)
+	}
+	raw := readSettings(t, target)
+	if _, ok := raw["defaultProvider"]; ok {
+		t.Errorf("defaultProvider remains: %v", raw["defaultProvider"])
+	}
+	if _, ok := raw["defaultModel"]; ok {
+		t.Errorf("defaultModel remains: %v", raw["defaultModel"])
+	}
+	if raw["theme"] != "light" || raw["compaction"] == nil {
+		t.Errorf("unrelated settings changed: %v", raw)
+	}
+}
+
+func TestDisablePiDefaultProviderModelPreservesForeignAndIsIdempotent(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "settings.json")
+	seed := `{"defaultProvider":"hive-ai","defaultModel":"deepseek-ai/DeepSeek-V4.1-Flash","theme":"dark"}`
+	if err := os.WriteFile(target, []byte(seed), 0644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, beforeProvider, modified, err := DisablePiDefaultProviderModel(target)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if modified {
+		t.Fatal("modified foreign defaults, want no-op")
+	}
+	if beforeProvider != "hive-ai" {
+		t.Errorf("beforeProvider = %q, want hive-ai", beforeProvider)
+	}
+	after, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("foreign settings changed:\nbefore=%s\nafter=%s", before, after)
+	}
+
+	missing := filepath.Join(t.TempDir(), "settings.json")
+	if _, beforeProvider, modified, err := DisablePiDefaultProviderModel(missing); err != nil || modified || beforeProvider != "" {
+		t.Fatalf("missing-file disable = (modified=%v, err=%v), want (false, nil)", modified, err)
+	}
+}
+
 // TestEnsurePiDefaultProviderModelDefaultsProvider: an empty provider id falls back
 // to the canonical fak provider rather than writing a blank key.
 func TestEnsurePiDefaultProviderModelDefaultsProvider(t *testing.T) {

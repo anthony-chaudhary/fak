@@ -18,9 +18,10 @@ import (
 // `hive-ai` + a hosted DeepSeek id), so `fak pi`'s models.json work is invisible to a
 // plain `pi` launch — the router is configured but NOT the default.
 //
-// This file is the third, smallest leg: it sets exactly two keys and preserves every
-// other user key, the same non-clobbering discipline EnsurePiProviderConfig (models) and
-// EnsurePiSafeCompaction (compaction) already use.
+// This file is the third, smallest leg: the explicit `fak pi config --write` path sets
+// exactly two keys, and its disable path removes them only when fak owns the provider.
+// Both preserve every other user key, matching the non-clobbering discipline used by
+// EnsurePiProviderConfig (models) and EnsurePiSafeCompaction (compaction).
 
 // PiSettingsDefaultModel reads the top-level `defaultModel` from Pi's settings.json and
 // returns it trimmed. An absent file, absent key, non-string value, or blank value all
@@ -170,8 +171,8 @@ func modelKeyCandidates(id string) map[string]bool {
 //
 // It sets settings.json `defaultProvider` = providerID and `defaultModel` = modelID,
 // creating the file when missing and preserving every unrelated key. A value that is
-// already correct is left untouched (and reports modified=false), so `fak pi` is
-// idempotent and never rewrites a file it does not need to.
+// already correct is left untouched (and reports modified=false), so explicit config
+// writes are idempotent and never rewrite a file they do not need to.
 //
 // providerID/modelID are normalized the same way models.json is (NormalizePiModelID),
 // so the default cannot drift from the id the `fak` provider actually advertises.
@@ -204,6 +205,34 @@ func EnsurePiDefaultProviderModel(target, providerID, modelID string) (string, b
 // Returns (resolvedPath, modified, error).
 func EnsurePiDefaultProviderModelIfAbsent(target, providerID, modelID string) (string, bool, error) {
 	return writePiDefaultProviderModel(target, providerID, modelID, true)
+}
+
+// DisablePiDefaultProviderModel removes the default pair only when fak currently owns it.
+// Foreign defaults and all unrelated Pi settings are preserved. A missing settings file or
+// an already-disabled/foreign default is an idempotent no-op.
+func DisablePiDefaultProviderModel(target string) (string, string, bool, error) {
+	path := ResolvePiSettingsPath(target)
+	data, err := os.ReadFile(path)
+	switch {
+	case os.IsNotExist(err):
+		return path, "", false, nil
+	case err != nil:
+		return path, "", false, fmt.Errorf("read %s: %w", path, err)
+	}
+
+	raw := map[string]interface{}{}
+	if unmarshalErr := json.Unmarshal(stripUTF8BOM(data), &raw); unmarshalErr != nil {
+		return path, "", false, fmt.Errorf("parse existing %s: %w", path, unmarshalErr)
+	}
+	provider, _ := raw["defaultProvider"].(string)
+	provider = strings.TrimSpace(provider)
+	if !strings.EqualFold(strings.TrimSpace(provider), DefaultPiProviderID) {
+		return path, provider, false, nil
+	}
+	delete(raw, "defaultProvider")
+	delete(raw, "defaultModel")
+	path, modified, writeErr := writePiSettings(path, raw)
+	return path, provider, modified, writeErr
 }
 
 // writePiDefaultProviderModel is the shared body for the authoritative and seed-only

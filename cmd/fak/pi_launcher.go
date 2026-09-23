@@ -74,7 +74,7 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: fak pi [launcher flags] [-- <pi args...>]")
-		fmt.Fprintln(stderr, "       fak pi config [--write] [--addr ADDR] [--model MODEL] [--path PATH]")
+		fmt.Fprintln(stderr, "       fak pi config [--write|--disable] [--addr ADDR] [--model MODEL] [--path PATH]")
 		fmt.Fprintln(stderr, "")
 		fmt.Fprintln(stderr, "First-class support for Pi coding agent as harness with fak serve on Mac as backend.")
 		fmt.Fprintln(stderr, "Runs Pi directly targeting fak serve backend (for now raw, without guard).")
@@ -85,6 +85,7 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "  fak pi --print-env                            # print shell export lines")
 		fmt.Fprintln(stderr, "  fak pi --probe \"Explain unified memory\"       # headless probe turn")
 		fmt.Fprintln(stderr, "  fak pi config --write                         # write ~/.pi/agent/models.json")
+		fmt.Fprintln(stderr, "  fak pi config --disable                       # remove Fak-owned saved Pi defaults")
 		fmt.Fprintln(stderr, "")
 		fs.PrintDefaults()
 	}
@@ -111,13 +112,6 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	targetModel := strings.TrimSpace(*model)
-	modelAutoDetected := false
-	// modelReplacedStaleDefault records that targetModel was chosen by REPLACING a
-	// configured default the backend does not advertise (a stale placeholder such as
-	// `custom-model`). That replacement is authoritative intent: the seed-only writer
-	// must not preserve the very value we just decided is wrong, so this forces the
-	// authoritative default writer even though the id was auto-detected.
-	modelReplacedStaleDefault := false
 	backendActive := false
 	// adoptedDetected records whether the launch model came from the backend's /healthz
 	// label rather than a deliberate operator/configured pin. It only gates the diagnostic
@@ -139,7 +133,6 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		if projectassets.ShouldAdoptDetectedPiModel(*settingsPath, *model, detectedModel) {
 			targetModel = detectedModel
 			adoptedDetected = true
-			modelAutoDetected = true
 		}
 	}
 
@@ -158,8 +151,6 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 			// backend actually serves — the detected one when we have it, else the prior.
 			if detectedModel != "" && detectedModel != "mock" {
 				targetModel = detectedModel
-				modelAutoDetected = true
-				modelReplacedStaleDefault = true
 			} else {
 				targetModel = projectassets.DefaultPiModelID
 			}
@@ -229,32 +220,9 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
-	// Pin Pi's harness DEFAULT onto the fak router. A plain `pi` launch (no --provider/
-	// --model flags) resolves defaultProvider/defaultModel from settings.json, so without
-	// this the `fak` provider written above is configured but never used by default. Same
-	// non-clobbering discipline as models.json and compaction; idempotent.
-	//
-	// Precedence: an explicit --model is operator intent and writes authoritatively. A
-	// model auto-detected from the backend's /healthz is only a fallback seed — on a
-	// routing-mode router /healthz names the local planner engine, not the routed model
-	// set, so adopting it would silently clobber the operator's configured route (and
-	// make the routing ladder unreachable). Seed when absent, never overwrite.
-	if launch.writeConfig {
-		var dPath string
-		var dModified bool
-		var dErr error
-		if modelAutoDetected && !modelReplacedStaleDefault {
-			dPath, dModified, dErr = projectassets.EnsurePiDefaultProviderModelIfAbsent(*settingsPath, launch.provider, launch.model)
-		} else {
-			dPath, dModified, dErr = projectassets.EnsurePiDefaultProviderModel(*settingsPath, launch.provider, launch.model)
-		}
-		if dErr != nil && !launch.quiet {
-			fmt.Fprintf(stderr, "fak pi: warning: could not pin Pi default provider/model in %s: %v\n", dPath, dErr)
-		} else if dModified && !launch.quiet {
-			fmt.Fprintf(stderr, "fak pi: pinned Pi default to provider %q model %q in %s\n", launch.provider, launch.model, dPath)
-		}
-	}
-
+	// Route only this child through fak. Persistent defaultProvider/defaultModel changes
+	// belong to the explicit `fak pi config --write` operation below, while the launch argv
+	// always carries --provider/--model and therefore does not depend on Pi's saved defaults.
 	argvOut := buildPiLaunchArgv(launch)
 
 	if launch.dryRun {
@@ -529,10 +497,32 @@ func runPiConfig(stdout, stderr io.Writer, argv []string) int {
 	model := fs.String("model", projectassets.DefaultPiModelID, "served model ID")
 	window := fs.Int("window", 0, "served model context window in tokens (default: the default prior). The written contextWindow is min(window, window/2) so Pi auto-compacts inside the safe envelope.")
 	write := fs.Bool("write", false, "write or update ~/.pi/agent/models.json (or --path) and the safe Pi compaction settings")
+	disable := fs.Bool("disable", false, "remove Fak-owned defaultProvider/defaultModel from Pi settings")
 	path := fs.String("path", "", "destination path or directory for models.json")
 	settingsPath := fs.String("settings-path", "", "destination path or directory for Pi's settings.json (default: ~/.pi/agent/settings.json)")
 	if !parseFlags(fs, argv) {
 		return 2
+	}
+	if *write && *disable {
+		fmt.Fprintln(stderr, "fak pi config: --write and --disable are mutually exclusive")
+		return 2
+	}
+	if *disable {
+		resolvedPath, beforeProvider, modified, err := projectassets.DisablePiDefaultProviderModel(*settingsPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak pi config: %v\n", err)
+			return 1
+		}
+		if modified {
+			fmt.Fprintf(stdout, "fak pi config: Pi default provider %q -> unset in %s (changed=true; removed Fak-owned Pi default pair)\n", beforeProvider, resolvedPath)
+		} else {
+			before := "unset"
+			if beforeProvider != "" {
+				before = fmt.Sprintf("%q", beforeProvider)
+			}
+			fmt.Fprintf(stdout, "fak pi config: Pi default provider %s -> %s in %s (changed=false; no Fak-owned Pi default)\n", before, before, resolvedPath)
+		}
+		return 0
 	}
 	baseURL := projectassets.NormalizePiBaseURL(*addr)
 	// Per-model budget: the status line and the compaction block must agree with the
