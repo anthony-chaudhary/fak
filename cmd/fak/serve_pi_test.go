@@ -2,11 +2,80 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestServePiDoesNotWritePersistentConfig(t *testing.T) {
+	const helperEnv = "FAK_TEST_SERVE_PI_NO_WRITE_HELPER"
+	if os.Getenv(helperEnv) == "1" {
+		cmdServe([]string{
+			"--mock",
+			"--pi",
+			"--pi-config-path", os.Getenv("FAK_TEST_SERVE_PI_MODELS"),
+			"--addr", os.Getenv("FAK_TEST_SERVE_PI_ADDR"),
+			"--session-state", "off",
+			"--keep-awake", "off",
+		})
+		return
+	}
+
+	piHome := t.TempDir()
+	modelsPath := filepath.Join(piHome, "models.json")
+	settingsPath := filepath.Join(piHome, "settings.json")
+	modelsBefore := []byte("{\n  \"providers\": [],\n  \"sentinel\": \"serve-models-original\"\n}\n")
+	settingsBefore := []byte("{\n  \"defaultProvider\": \"operator\",\n  \"defaultModel\": \"operator-model\",\n  \"sentinel\": \"serve-settings-original\"\n}\n")
+	if err := os.WriteFile(modelsPath, modelsBefore, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, settingsBefore, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	addr := reserveServeStartupAddr(t)
+	stateDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestServePiDoesNotWritePersistentConfig$")
+	cmd.Env = append(os.Environ(),
+		helperEnv+"=1",
+		"FAK_TEST_SERVE_PI_ADDR="+addr,
+		"FAK_TEST_SERVE_PI_MODELS="+modelsPath,
+		"PI_CODING_AGENT_DIR="+piHome,
+		"FAK_SESSION_REGISTRY="+filepath.Join(stateDir, "sessions.json"),
+		"HOME="+stateDir,
+		"USERPROFILE="+stateDir,
+		"XDG_CONFIG_HOME="+filepath.Join(stateDir, ".config"),
+	)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if cmd.ProcessState == nil || !cmd.ProcessState.Exited() {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+	})
+
+	_ = readLiveFeatureCatalog(t, "http://"+addr+"/v1/fak/features", 12*time.Second)
+	cancel()
+	_ = cmd.Wait()
+
+	for path, before := range map[string][]byte{modelsPath: modelsBefore, settingsPath: settingsBefore} {
+		after, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read Pi config after serve --pi: %v", err)
+		}
+		if !bytes.Equal(after, before) {
+			t.Errorf("ordinary fak serve --pi mutated %s\nbefore: %s\nafter:  %s", filepath.Base(path), before, after)
+		}
+	}
+}
 
 func TestServePiConfigPrintsSnippet(t *testing.T) {
 	isolatePiHome(t)

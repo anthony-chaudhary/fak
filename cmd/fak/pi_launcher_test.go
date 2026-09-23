@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -85,8 +86,112 @@ func TestRunPiDryRun(t *testing.T) {
 	}
 }
 
+func TestRunPiDryRunDoesNotMutateExistingConfig(t *testing.T) {
+	isolatePiHome(t)
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, "models.json")
+	settingsPath := filepath.Join(tmp, "settings.json")
+
+	modelsBefore := []byte("{\n  \"providers\": [],\n  \"sentinel\": \"models-original\"\n}\n")
+	settingsBefore := []byte("{\n  \"defaultProvider\": \"operator\",\n  \"defaultModel\": \"operator-model\",\n  \"compaction\": {\"reserveTokens\": 777, \"keepRecentTokens\": 555},\n  \"sentinel\": \"settings-original\"\n}\n")
+	if err := os.WriteFile(modelsPath, modelsBefore, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, settingsBefore, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runPi(&stdout, &stderr, []string{
+		"--dry-run",
+		"--check-backend=false",
+		"--addr", "127.0.0.1:65531",
+		"--model", "qwen38:27b-q4",
+		"--config-path", modelsPath,
+		"--settings-path", settingsPath,
+	})
+	if code != 0 {
+		t.Fatalf("runPi --dry-run returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	modelsAfter, err := os.ReadFile(modelsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(modelsAfter, modelsBefore) {
+		t.Errorf("ordinary fak pi dry-run mutated models.json\nbefore: %s\nafter:  %s", modelsBefore, modelsAfter)
+	}
+	settingsAfter, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(settingsAfter, settingsBefore) {
+		t.Errorf("ordinary fak pi dry-run mutated settings.json\nbefore: %s\nafter:  %s", settingsBefore, settingsAfter)
+	}
+}
+
+func TestRunPiFreshConfigUsesSessionExtensionWithoutPersistentWrites(t *testing.T) {
+	isolatePiHome(t)
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, "models.json")
+	settingsPath := filepath.Join(tmp, "settings.json")
+
+	origRun := piLaunchRun
+	defer func() { piLaunchRun = origRun }()
+	var extensionPath string
+	piLaunchRun = func(stdout, stderr io.Writer, argv, env []string) int {
+		for i := 1; i+1 < len(argv); i++ {
+			if argv[i] == "-e" {
+				extensionPath = argv[i+1]
+				break
+			}
+		}
+		if extensionPath == "" {
+			t.Errorf("Pi launch argv omitted session extension: %v", argv)
+			return 0
+		}
+		raw, err := os.ReadFile(extensionPath)
+		if err != nil {
+			t.Errorf("read live Pi session extension: %v", err)
+			return 0
+		}
+		if !strings.Contains(string(raw), `registerProvider("fak"`) {
+			t.Errorf("session extension does not register provider fak:\n%s", raw)
+		}
+		budget := projectassets.PiModelContextBudget("qwen38:27b-q4", 80000)
+		if want := fmt.Sprintf("contextWindow: %d", budget.ResidentTarget); !strings.Contains(string(raw), want) {
+			t.Errorf("session extension omitted explicit --window budget %q:\n%s", want, raw)
+		}
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runPi(&stdout, &stderr, []string{
+		"--check-backend=false",
+		"--addr", "127.0.0.1:65531",
+		"--model", "qwen38:27b-q4",
+		"--window", "80000",
+		"--config-path", modelsPath,
+		"--settings-path", settingsPath,
+	})
+	if code != 0 {
+		t.Fatalf("runPi returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if extensionPath == "" {
+		t.Fatal("Pi session extension was not observed")
+	}
+	if _, err := os.Stat(extensionPath); !os.IsNotExist(err) {
+		t.Errorf("Pi session extension was not cleaned up: %v", err)
+	}
+	for _, path := range []string{modelsPath, settingsPath} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("ordinary Pi launch created persistent config %s: %v", path, err)
+		}
+	}
+}
+
 // TestRunPiWritesOnlyUnderIsolatedHome is the hermeticity regression: a launcher turn that
-// omits --settings-path/--config-path must confine its writes to PI_CODING_AGENT_DIR and
+// explicitly requests safe settings but omits --settings-path/--config-path must confine its writes to PI_CODING_AGENT_DIR and
 // never touch the real ~/.pi/agent. This is the drift class that silently rewrote the
 // operator's harness defaultModel (and pointed models.json at a dead test port) on every
 // `go test ./cmd/fak/` run, so a bare `pi` launch regressed away from the live fak router.
@@ -109,6 +214,7 @@ func TestRunPiWritesOnlyUnderIsolatedHome(t *testing.T) {
 		"--addr", "127.0.0.1:65531",
 		"--model", "custom-model",
 		"--check-backend=false",
+		"--safe-settings=true",
 		"--quiet",
 	})
 	if code != 0 {
@@ -341,6 +447,7 @@ func TestRunPiMockExecution(t *testing.T) {
 	code := runPi(&stdout, &stderr, []string{
 		"--check-backend=false",
 		"--config-path", configPath,
+		"--write-config=true",
 		"--model", "qwen38:27b-q4",
 		"--probe", "hello from pi",
 	})
@@ -349,8 +456,10 @@ func TestRunPiMockExecution(t *testing.T) {
 	}
 
 	// Check argv
-	cmdStr := strings.Join(capturedArgv, " ")
-	if !strings.Contains(cmdStr, "pi --provider fak --model qwen38:27b-q4 -p hello from pi") {
+	if len(capturedArgv) == 0 || capturedArgv[0] != "pi" ||
+		!containsArgPair(capturedArgv, "--provider", "fak") ||
+		!containsArgPair(capturedArgv, "--model", "qwen38:27b-q4") ||
+		!containsArgPair(capturedArgv, "-p", "hello from pi") {
 		t.Errorf("unexpected captured argv: %v", capturedArgv)
 	}
 
@@ -437,6 +546,7 @@ func TestRunPiReplacesNonAdvertisedDefault(t *testing.T) {
 		"--config-path", modelsPath,
 		"--settings-path", settingsPath,
 		"--base-url", ts.URL + "/v1",
+		"--write-config=true",
 		"--quiet",
 	})
 	if code != 0 {

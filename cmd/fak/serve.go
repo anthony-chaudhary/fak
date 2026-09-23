@@ -256,7 +256,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.opencode = fs.Bool("opencode", false, "one-touch OpenCode setup: write or update opencode.json in the current workspace with this server's provider config")
 	sf.opencodeConfig = fs.Bool("opencode-config", false, "print opencode.json provider configuration for this server and exit without binding a listener")
 	sf.writeOpencodeConfig = fs.Bool("write-opencode-config", false, "write or update opencode.json in the current workspace with this server's provider config and exit without binding a listener")
-	sf.pi = fs.Bool("pi", false, "one-touch Pi setup: write or update ~/.pi/agent/models.json with this server's provider config")
+	sf.pi = fs.Bool("pi", false, "serve a Pi-compatible endpoint without changing Pi's persistent configuration")
 	sf.piConfig = fs.Bool("pi-config", false, "print Pi models.json provider configuration for this server and exit without binding a listener")
 	sf.writePiConfig = fs.Bool("write-pi-config", false, "write or update ~/.pi/agent/models.json with this server's provider config and exit without binding a listener")
 	sf.piConfigPath = fs.String("pi-config-path", "", "custom destination path or directory for Pi models.json (default: ~/.pi/agent/models.json)")
@@ -611,10 +611,8 @@ func cmdServe(argv []string) {
 		runServePiConfig(sf, os.Stderr, true)
 		return
 	}
-	// --pi: ensure Pi models.json is configured before booting listener.
-	if sf.pi != nil && *sf.pi {
-		runServePiConfig(sf, os.Stderr, true)
-	}
+	// --pi is a compatibility marker for a normal server launch. Persistent Pi
+	// configuration remains an explicit --write-pi-config operation.
 
 	// --codex-config: emit Codex config.toml provider configuration and exit before load.
 	if sf.codexConfig != nil && *sf.codexConfig {

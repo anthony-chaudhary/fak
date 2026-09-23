@@ -62,12 +62,12 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	baseURL := fs.String("base-url", "", "fak serve provider base URL (default: http://<addr>/v1)")
 	model := fs.String("model", "", "model ID (default: --model flag > existing settings.json defaultModel > auto-detect from fak serve /healthz > qwen38:27b-q4)")
 	configPath := fs.String("config-path", "", "custom destination path for Pi models.json (default: ~/.pi/agent/models.json)")
-	writeConfig := fs.Bool("write-config", true, "ensure ~/.pi/agent/models.json is configured with provider 'fak' before launching")
+	writeConfig := fs.Bool("write-config", false, "ensure ~/.pi/agent/models.json is configured with provider 'fak' before launching")
 	checkBackend := fs.Bool("check-backend", true, "verify fak serve backend is reachable before starting Pi")
 	thinking := fs.String("thinking", "", "thinking/reasoning level passed to pi (--thinking <level>)")
 	tools := fs.String("tools", "", "tool allowlist passed to pi (--tools <list>)")
 	window := fs.Int("window", 0, "served model context window in tokens for the SAFE Pi resident budget (default: auto-detect from the backend /v1/models context_length, else the default prior). fak writes contextWindow = min(window, window/2) so Pi auto-compacts inside the safe envelope instead of at the hard cap.")
-	safeSettings := fs.Bool("safe-settings", true, "write a safe Pi compaction block (reserveTokens/keepRecentTokens derived from the served window) into Pi's settings.json")
+	safeSettings := fs.Bool("safe-settings", false, "write a safe Pi compaction block (reserveTokens/keepRecentTokens derived from the served window) into Pi's settings.json")
 	settingsPath := fs.String("settings-path", "", "destination path or directory for Pi's settings.json (default: ~/.pi/agent/settings.json)")
 	quiet := fs.Bool("quiet", false, "suppress launcher banner and diagnostics")
 	command := fs.String("command", "pi", "executable name or path for Pi CLI")
@@ -269,10 +269,21 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		}
 		fmt.Fprintf(stderr, "  context     = resident target %d tokens (safe 50%% of %d served window, %s)\n", budget.ResidentTarget, budget.ServedWindow, budget.Provenance)
 		fmt.Fprintf(stderr, "  compaction  = reserve %d, keep %d (write=%t)\n", budget.OutputReserve, budget.KeepRecentTokens, *safeSettings)
+		fmt.Fprintln(stderr, "  provider-ext= -e <session-provider-extension> (generated only for a real launch; no persistent config write)")
 		fmt.Fprintln(stderr, "  command     = "+strings.Join(argvOut, " "))
 		fmt.Fprintln(stdout, strings.Join(argvOut, " "))
 		return 0
 	}
+
+	// Keep an ordinary launch free of persistent Pi config writes while still making the
+	// fak provider reachable on a fresh install. Pi loads this provider definition for this
+	// child only; explicit user extensions remain supported and follow it in argv order.
+	argvOut, cleanupProvider, err := installPiLaunchProviderExtension(argvOut, launch.baseURL, launch.model, servedWindow)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak pi: install session provider: %v\n", err)
+		return 1
+	}
+	defer cleanupProvider()
 
 	env := os.Environ()
 	if launch.configPath != "" {
@@ -288,6 +299,53 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	return piLaunchRun(stdout, stderr, argvOut, env)
+}
+
+// installPiLaunchProviderExtension gives a raw `fak pi` child a launch-local `fak`
+// provider without touching ~/.pi/agent/models.json. Unlike the guarded Pi installer,
+// it does not reject user -e flags: raw Pi owns its extension policy.
+func installPiLaunchProviderExtension(command []string, baseURL, model string, servedWindow int) ([]string, func(), error) {
+	dir, err := guardSessionTempDir("pi")
+	if err != nil {
+		return command, func() {}, err
+	}
+	cleanup := func() { _ = os.RemoveAll(dir) }
+	source, err := piLaunchProviderExtensionSource(projectassets.NormalizePiBaseURL(baseURL), model, servedWindow)
+	if err != nil {
+		cleanup()
+		return command, func() {}, err
+	}
+	extPath := filepath.Join(dir, guardPiExtensionFileName)
+	if err := os.WriteFile(extPath, []byte(source), 0o600); err != nil {
+		cleanup()
+		return command, func() {}, err
+	}
+	return appendPiExtensionArg(command, extPath), cleanup, nil
+}
+
+func piLaunchProviderExtensionSource(baseURL, model string, servedWindow int) (string, error) {
+	raw, err := projectassets.GeneratePiConfigForWindow(baseURL, model, servedWindow)
+	if err != nil {
+		return "", err
+	}
+	var cfg struct {
+		Providers map[string]any `json:"providers"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return "", fmt.Errorf("decode generated Pi provider: %w", err)
+	}
+	provider, ok := cfg.Providers[projectassets.DefaultPiProviderID]
+	if !ok {
+		return "", fmt.Errorf("generated Pi config omitted provider %q", projectassets.DefaultPiProviderID)
+	}
+	literal, err := guardPiTSLiteral(provider)
+	if err != nil {
+		return "", err
+	}
+	return "// fak pi: launch-scoped OpenAI-completions route.\n" +
+		"export default function (pi) {\n" +
+		"  pi.registerProvider(\"" + projectassets.DefaultPiProviderID + "\", " + literal + ");\n" +
+		"}\n", nil
 }
 
 // piModelSource names where the effective launch model came from, for the dry-run
