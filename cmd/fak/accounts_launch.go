@@ -254,20 +254,22 @@ type launchParams struct {
 	// rotate launches the NEXT account in the rotation instead of the active/named seat —
 	// the round-robin that lets an operator hop off a walled account onto a fresh bucket.
 	// after is the anchor it rotates OFF of (empty => the named seat, else the active seat).
-	rotate           bool
-	after            string
-	useHeadroom      bool   // default true — order the rotation by the live runtime headroom signal
-	useGuard         bool   // default true
-	skipPerms        bool   // resolved per harness: Claude defaults true; Codex defaults false
-	ultracodePosture string // ultracode posture: auto|on|off (default on — resolved by resolveUltracodePosture)
-	model            string // default Opus 4.8 — the model a switched Claude launch pins via --model ("" => seat default)
-	modelExplicit    bool
-	fallbackModel    string // default Fable 5 — comma-separated fallback CHAIN tried when the default Opus 4.8 startup is unavailable
-	managedCache     string // managed-cache posture: auto|on|off (default $FAK_MANAGED_CACHE, else on — best-effort; explicit "auto" restores guard's billing-gated auto)
-	dryRun           bool   // print the plan, do not exec
-	passthrough      []string
-	registryPath     string
-	homeDir          string
+	rotate             bool
+	after              string
+	useHeadroom        bool   // default true — order the rotation by the live runtime headroom signal
+	useGuard           bool   // default true
+	launchModeExplicit bool   // --guard appeared on argv; otherwise a third-party seat defaults direct
+	skipPerms          bool   // resolved per harness: Claude defaults true; Codex defaults false
+	skipPermsExplicit  bool   // --skip-permissions appeared on argv; direct launches otherwise keep native permissions
+	ultracodePosture   string // ultracode posture: auto|on|off (default on — resolved by resolveUltracodePosture)
+	model              string // default Opus 4.8 — the model a switched Claude launch pins via --model ("" => seat default)
+	modelExplicit      bool
+	fallbackModel      string // default Fable 5 — comma-separated fallback CHAIN tried when the default Opus 4.8 startup is unavailable
+	managedCache       string // managed-cache posture: auto|on|off (default $FAK_MANAGED_CACHE, else on — best-effort; explicit "auto" restores guard's billing-gated auto)
+	dryRun             bool   // print the plan, do not exec
+	passthrough        []string
+	registryPath       string
+	homeDir            string
 }
 
 // launchRunResult is the exec seam result. Stderr carries a bounded tail only, so the

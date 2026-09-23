@@ -1,6 +1,9 @@
 package main
 
-import "os"
+import (
+	"fmt"
+	"os"
+)
 
 // cmdManage is the primary agent-management surface. It intentionally delegates
 // to the mature guard implementation while that implementation is renamed in
@@ -15,7 +18,48 @@ func cmdManage(argv []string) {
 		cmdLaunchParityCheck(argv[1:])
 		return
 	}
-	dispatchManageLaunch(argv, cmdCodex, func(args []string) { cmdManageCommand("manage", args) })
+	dispatchManageCommand(
+		argv,
+		func(args []string) { cmdManageCommand("manage", args) },
+		cmdCodex,
+		cmdOpencode,
+		cmdManageDirect,
+	)
+}
+
+func dispatchManageCommand(argv []string, managed, codex, opencode, direct func([]string)) {
+	if manageOperatorCommand(argv) {
+		managed(argv)
+		return
+	}
+	if len(argv) > 0 && argv[0] == "--guard" {
+		managed(argv[1:])
+		return
+	}
+	dispatchManageLaunchWithOpencode(argv, codex, opencode, direct)
+}
+
+func manageOperatorCommand(argv []string) bool {
+	if len(argv) == 0 {
+		return true
+	}
+	switch argv[0] {
+	case "allow", "deny", "disable", "policy", "compile", "restart-audit", "sessions", "resume", "--resume", "--help", "-h":
+		return true
+	default:
+		return false
+	}
+}
+
+func cmdManageDirect(argv []string) {
+	if len(argv) > 0 && argv[0] == "--" {
+		argv = argv[1:]
+	}
+	if len(argv) == 0 {
+		fmt.Fprintln(os.Stderr, "fak manage: missing agent command (pass --guard to enable kernel adjudication)")
+		return
+	}
+	os.Exit(execOpencodeLaunchChild(os.Stdout, os.Stderr, argv, os.Environ()))
 }
 
 // dispatchManageLaunch keeps the convenient bare managed-Codex spelling on the

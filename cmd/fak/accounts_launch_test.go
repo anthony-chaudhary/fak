@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1127,4 +1128,114 @@ func testEnvValue(env []string, key string) string {
 		}
 	}
 	return ""
+}
+
+func TestAccountsLaunchGuardChoiceForThirdPartySeat(t *testing.T) {
+	writeRegistry := func(t *testing.T, thirdParty bool) (string, string) {
+		t.Helper()
+		home := t.TempDir()
+		regPath, seat := launchRegistry(t, home)
+		if thirdParty {
+			body, err := os.ReadFile(regPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body = bytes.Replace(body, []byte(`"dir":"`+jsonPath(seat)+`"`), []byte(`"dir":"`+jsonPath(seat)+`","base_url":"https://gateway.example.test"`), 1)
+			if err := os.WriteFile(regPath, body, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return home, regPath
+	}
+
+	origRun := accountsLaunchRun
+	origAssess := accountsLaunchAssess
+	t.Cleanup(func() {
+		accountsLaunchRun = origRun
+		accountsLaunchAssess = origAssess
+	})
+	accountsLaunchAssess = func() versionskew.Assessment {
+		return versionskew.Assessment{Verdict: versionskew.Ahead}
+	}
+
+	t.Run("first-party default remains guarded", func(t *testing.T) {
+		home, regPath := writeRegistry(t, false)
+		accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) launchRunResult {
+			if len(argv) < 2 || argv[1] != "guard" {
+				t.Fatalf("first-party default argv = %#v, want fak guard", argv)
+			}
+			return launchRunResult{}
+		}
+		var out, errb bytes.Buffer
+		if rc := runAccounts(&out, &errb, []string{"launch", "--registry", regPath, "--home", home}); rc != 0 {
+			t.Fatalf("first-party launch rc=%d stderr=%s", rc, errb.String())
+		}
+	})
+
+	t.Run("third-party default launches direct", func(t *testing.T) {
+		home, regPath := writeRegistry(t, true)
+		accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) launchRunResult {
+			if len(argv) == 0 || argv[0] != "claude" || (len(argv) > 1 && argv[1] == "guard") {
+				t.Fatalf("third-party default argv = %#v, want direct claude", argv)
+			}
+			if slices.Contains(argv, "--dangerously-skip-permissions") {
+				t.Fatalf("third-party direct default bypassed Claude permissions: %#v", argv)
+			}
+			return launchRunResult{}
+		}
+		var out, errb bytes.Buffer
+		if rc := runAccounts(&out, &errb, []string{"launch", "--registry", regPath, "--home", home}); rc != 0 {
+			t.Fatalf("third-party launch rc=%d stderr=%s", rc, errb.String())
+		}
+	})
+
+	t.Run("third-party direct explicit skip permissions", func(t *testing.T) {
+		home, regPath := writeRegistry(t, true)
+		accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) launchRunResult {
+			if !slices.Contains(argv, "--dangerously-skip-permissions") {
+				t.Fatalf("third-party explicit skip-permissions argv = %#v", argv)
+			}
+			return launchRunResult{}
+		}
+		var out, errb bytes.Buffer
+		if rc := runAccounts(&out, &errb, []string{"launch", "--skip-permissions", "--registry", regPath, "--home", home}); rc != 0 {
+			t.Fatalf("third-party explicit skip-permissions rc=%d stderr=%s", rc, errb.String())
+		}
+	})
+
+	t.Run("third-party explicit guard launches managed without writes", func(t *testing.T) {
+		home, regPath := writeRegistry(t, true)
+		paths := []string{
+			regPath,
+			filepath.Join(home, ".claude-gem8-seat", ".claude.json"),
+			filepath.Join(home, ".claude-gem8-seat", ".credentials.json"),
+		}
+		before := make(map[string][]byte, len(paths))
+		for _, path := range paths {
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before[path] = body
+		}
+		accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) launchRunResult {
+			if len(argv) < 2 || argv[1] != "guard" {
+				t.Fatalf("third-party explicit --guard argv = %#v, want fak guard", argv)
+			}
+			return launchRunResult{}
+		}
+		var out, errb bytes.Buffer
+		if rc := runAccounts(&out, &errb, []string{"launch", "--guard", "--registry", regPath, "--home", home}); rc != 0 {
+			t.Fatalf("third-party --guard rc=%d stderr=%s", rc, errb.String())
+		}
+		for _, path := range paths {
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(after, before[path]) {
+				t.Fatalf("third-party --guard mutated persistent asset %s", path)
+			}
+		}
+	})
 }

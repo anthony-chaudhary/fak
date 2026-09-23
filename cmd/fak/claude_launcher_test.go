@@ -9,10 +9,46 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestClaudeLauncherGuardChoice(t *testing.T) {
+	orig := claudeLaunchRun
+	t.Cleanup(func() { claudeLaunchRun = orig })
+
+	for _, tc := range []struct {
+		name        string
+		choice      []string
+		wantGuarded bool
+	}{
+		{name: "direct default"},
+		{name: "explicit guard", choice: []string{"--guard"}, wantGuarded: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []string
+			claudeLaunchRun = func(_, _ io.Writer, argv, _ []string) int {
+				got = append([]string(nil), argv...)
+				return 23
+			}
+			args := append([]string{}, tc.choice...)
+			args = append(args, "--no-probe", "--quiet", "--gateway-url", "http://127.0.0.1:65531", "--model", "fixture", "--", "--version")
+			var stdout, stderr bytes.Buffer
+			if code := runClaude(&stdout, &stderr, args); code != 23 {
+				t.Fatalf("runClaude code = %d, want child code 23; stderr=%s", code, stderr.String())
+			}
+			guarded := len(got) > 1 && got[1] == "guard"
+			if guarded != tc.wantGuarded {
+				t.Fatalf("guarded = %v, want %v; argv=%v", guarded, tc.wantGuarded, got)
+			}
+			if !guarded && (len(got) == 0 || guardAgentBaseName(got[0]) != "claude") {
+				t.Fatalf("direct launch did not execute Claude: %v", got)
+			}
+		})
+	}
+}
 
 func TestClaudeLauncherDryRun(t *testing.T) {
 	var stdout, stderr bytes.Buffer
@@ -257,5 +293,35 @@ func TestClaudeLauncherConfig(t *testing.T) {
 	}
 	if env["ANTHROPIC_MODEL"] != "qwen38:27b-q4" {
 		t.Errorf("ANTHROPIC_MODEL = %v, want qwen38:27b-q4", env["ANTHROPIC_MODEL"])
+	}
+}
+
+func TestClaudeDirectPermissionChoice(t *testing.T) {
+	orig := claudeLaunchRun
+	t.Cleanup(func() { claudeLaunchRun = orig })
+	for _, tc := range []struct {
+		name       string
+		extra      []string
+		wantBypass bool
+	}{
+		{name: "default keeps native permissions"},
+		{name: "explicit skip permissions", extra: []string{"--skip-permissions"}, wantBypass: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []string
+			claudeLaunchRun = func(_, _ io.Writer, argv, _ []string) int {
+				got = append([]string(nil), argv...)
+				return 23
+			}
+			args := append([]string{}, tc.extra...)
+			args = append(args, "--no-probe", "--quiet", "--gateway-url", "http://127.0.0.1:65531", "--model", "fixture", "--", "--version")
+			var stdout, stderr bytes.Buffer
+			if code := runClaude(&stdout, &stderr, args); code != 23 {
+				t.Fatalf("runClaude code=%d stderr=%s", code, stderr.String())
+			}
+			if gotBypass := slices.Contains(got, "--dangerously-skip-permissions"); gotBypass != tc.wantBypass {
+				t.Fatalf("permission bypass present=%v, want %v; argv=%#v", gotBypass, tc.wantBypass, got)
+			}
+		})
 	}
 }

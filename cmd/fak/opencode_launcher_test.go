@@ -13,6 +13,41 @@ import (
 	"time"
 )
 
+func TestOpenCodeLauncherGuardChoice(t *testing.T) {
+	orig := opencodeLaunchRun
+	t.Cleanup(func() { opencodeLaunchRun = orig })
+
+	for _, tc := range []struct {
+		name        string
+		choice      []string
+		wantGuarded bool
+	}{
+		{name: "direct default"},
+		{name: "explicit guard", choice: []string{"--guard"}, wantGuarded: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []string
+			opencodeLaunchRun = func(_, _ io.Writer, argv, _ []string) int {
+				got = append([]string(nil), argv...)
+				return 23
+			}
+			args := append([]string{}, tc.choice...)
+			args = append(args, "--split", "off", "--quiet", "--model", "fixture", "--base-url", "http://127.0.0.1:65531/v1", "--", "run", "status")
+			var stdout, stderr bytes.Buffer
+			if code := runOpencode(&stdout, &stderr, args); code != 23 {
+				t.Fatalf("runOpencode code = %d, want child code 23; stderr=%s", code, stderr.String())
+			}
+			guarded := len(got) > 1 && got[1] == "guard"
+			if guarded != tc.wantGuarded {
+				t.Fatalf("guarded = %v, want %v; argv=%v", guarded, tc.wantGuarded, got)
+			}
+			if !guarded && (len(got) == 0 || guardAgentBaseName(got[0]) != "opencode") {
+				t.Fatalf("direct launch did not execute OpenCode: %v", got)
+			}
+		})
+	}
+}
+
 func TestOpencodeLauncherDryRunBasic(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	args := []string{"--dry-run", "--split", "off"}

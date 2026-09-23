@@ -96,6 +96,7 @@ func cmdCodex(argv []string) {
 func runCodex(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("codex", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	guard := fs.Bool("guard", false, "launch Codex through fak guard for this session")
 	raw := fs.Bool("raw", false, "launch Codex directly against fak serve without fak guard (\"raw\" mode)")
 	noGuard := fs.Bool("no-guard", false, "alias for --raw")
 	probePrompt := fs.String("probe", "", "with --raw: run a single headless probe turn with this prompt and exit")
@@ -157,11 +158,11 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 
 	fakBin := tuiExecutable()
 	launch := codexLaunchOptions{
-		raw:             *raw || *noGuard,
+		raw:             !*guard || *raw || *noGuard,
 		probePrompt:     *probePrompt,
 		wireAPI:         *wireAPI,
 		dryRun:          *dryRun,
-		skipPermissions: *skipPermissions && !*nativePermissions && !*approveForMe,
+		skipPermissions: (*guard || flagSet(fs, "skip-permissions")) && *skipPermissions && !*nativePermissions && !*approveForMe,
 		approveForMe:    *approveForMe,
 		verbose:         *verbose,
 		splitMode:       *splitMode,

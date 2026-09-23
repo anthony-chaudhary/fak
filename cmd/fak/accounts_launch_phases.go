@@ -117,6 +117,12 @@ func resolveAccountsLaunch(stdout, stderr io.Writer, state *accountsLaunchState)
 
 func prepareAccountsLaunch(stderr io.Writer, state *accountsLaunchState) int {
 	p, command, home := state.params, state.command, state.home
+	if home.ThirdParty() && !p.launchModeExplicit {
+		p.useGuard = false
+	}
+	if !p.useGuard && !p.skipPermsExplicit {
+		p.skipPerms = false
+	}
 	fixes, id := state.fixes, state.identity
 	fakBin, err := os.Executable()
 	if err != nil || strings.TrimSpace(fakBin) == "" {
@@ -154,6 +160,9 @@ func prepareAccountsLaunch(stderr io.Writer, state *accountsLaunchState) int {
 		p.model = resolved
 	}
 	guardCacheArgs := guardCachePostureArgs(mcMode, launchSeatAPIKeyEnv(home))
+	if p.useGuard && home.ThirdParty() {
+		guardCacheArgs = append([]string{"--provider", "anthropic", "--base-url", strings.TrimSpace(home.BaseURL)}, guardCacheArgs...)
+	}
 	argv := buildLaunchArgv(fakBin, launchOpts{
 		command:         command,
 		useGuard:        p.useGuard,
@@ -164,10 +173,6 @@ func prepareAccountsLaunch(stderr io.Writer, state *accountsLaunchState) int {
 		codexHome:       codexHomeForCommand(command, home),
 		passthrough:     p.passthrough,
 	})
-	if why, conflict := thirdPartyGuardConflict(home, p.useGuard); conflict {
-		fmt.Fprintf(stderr, "fak accounts launch: %s\n", why)
-		return 2
-	}
 	// Validation is enforced HERE as well as at write time: a registry is a plaintext file an
 	// operator can hand-edit, so the launch is the last point that can refuse to hand a
 	// credential-shaped variable to a child process.

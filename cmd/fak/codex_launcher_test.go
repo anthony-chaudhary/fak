@@ -11,12 +11,50 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/projectassets"
 )
+
+func TestCodexLauncherGuardChoice(t *testing.T) {
+	orig := codexLaunchRun
+	t.Cleanup(func() { codexLaunchRun = orig })
+
+	for _, tc := range []struct {
+		name        string
+		choice      []string
+		wantGuarded bool
+	}{
+		{name: "direct default"},
+		{name: "explicit guard", choice: []string{"--guard"}, wantGuarded: true},
+		{name: "raw compatibility", choice: []string{"--raw"}},
+		{name: "no-guard compatibility", choice: []string{"--no-guard"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []string
+			codexLaunchRun = func(_, _ io.Writer, argv, _ []string) int {
+				got = append([]string(nil), argv...)
+				return 23
+			}
+			args := append([]string{}, tc.choice...)
+			args = append(args, "--split", "off", "--loop-gate", "off", "--quiet", "--codex-home", t.TempDir(), "--", "exec", "status")
+			var stdout, stderr bytes.Buffer
+			if code := runCodex(&stdout, &stderr, args); code != 23 {
+				t.Fatalf("runCodex code = %d, want child code 23; stderr=%s", code, stderr.String())
+			}
+			guarded := len(got) > 1 && got[1] == "guard"
+			if guarded != tc.wantGuarded {
+				t.Fatalf("guarded = %v, want %v; argv=%v", guarded, tc.wantGuarded, got)
+			}
+			if !guarded && (len(got) == 0 || guardAgentBaseName(got[0]) != "codex") {
+				t.Fatalf("direct launch did not execute Codex: %v", got)
+			}
+		})
+	}
+}
 
 func TestBuildCodexLaunchArgvDefault(t *testing.T) {
 	got := buildCodexLaunchArgv("/bin/fak", codexLaunchOptions{
@@ -1275,4 +1313,34 @@ func TestConfigureGuardCodexApproveForMe(t *testing.T) {
 			t.Fatalf("configureGuardCodexApproveForMe duplicated flag = %#v, want %#v", got, cmd)
 		}
 	})
+}
+
+func TestCodexDirectPermissionChoice(t *testing.T) {
+	orig := codexLaunchRun
+	t.Cleanup(func() { codexLaunchRun = orig })
+	for _, tc := range []struct {
+		name       string
+		extra      []string
+		wantBypass bool
+	}{
+		{name: "default keeps native permissions"},
+		{name: "explicit skip permissions", extra: []string{"--skip-permissions"}, wantBypass: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []string
+			codexLaunchRun = func(_, _ io.Writer, argv, _ []string) int {
+				got = append([]string(nil), argv...)
+				return 23
+			}
+			args := append([]string{}, tc.extra...)
+			args = append(args, "--split", "off", "--loop-gate", "off", "--quiet", "--codex-home", t.TempDir(), "--", "exec", "status")
+			var stdout, stderr bytes.Buffer
+			if code := runCodex(&stdout, &stderr, args); code != 23 {
+				t.Fatalf("runCodex code=%d stderr=%s", code, stderr.String())
+			}
+			if gotBypass := slices.Contains(got, "--dangerously-bypass-approvals-and-sandbox"); gotBypass != tc.wantBypass {
+				t.Fatalf("sandbox bypass present=%v, want %v; argv=%#v", gotBypass, tc.wantBypass, got)
+			}
+		})
+	}
 }

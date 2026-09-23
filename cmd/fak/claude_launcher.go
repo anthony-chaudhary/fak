@@ -24,6 +24,7 @@ import (
 
 // claudeLaunchOptions contains configuration for launching raw Claude Code against fak serve.
 type claudeLaunchOptions struct {
+	guard           bool
 	dryRun          bool
 	printEnv        bool
 	probePrompt     string
@@ -99,6 +100,7 @@ func runClaude(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	verbFlagUsage(fs, "claude")
 
+	guard := fs.Bool("guard", false, "launch Claude Code through fak guard for this session")
 	dryRun := fs.Bool("dry-run", false, "print the Claude Code command and environment and exit without launching")
 	printEnv := fs.Bool("print-env", false, "print shell export statements for Claude Code environment and exit")
 	probePrompt := fs.String("probe", "", "run a single headless probe turn with this prompt and exit with JSON output")
@@ -172,6 +174,7 @@ func runClaude(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	launch := claudeLaunchOptions{
+		guard:           *guard,
 		dryRun:          *dryRun,
 		printEnv:        *printEnv,
 		probePrompt:     effectivePrompt,
@@ -182,7 +185,7 @@ func runClaude(stdout, stderr io.Writer, argv []string) int {
 		apiTimeoutMS:    *apiTimeoutMS,
 		claudeConfigDir: pathutil.ExpandTilde(*claudeConfigDir),
 		command:         *command,
-		skipPermissions: *skipPermissions && *dangerouslySkipPermissions,
+		skipPermissions: (*guard || flagSet(fs, "skip-permissions") || flagSet(fs, "dangerously-skip-permissions")) && *skipPermissions && *dangerouslySkipPermissions,
 		quiet:           *quiet,
 		noProbe:         *noProbe,
 		passthrough:     fs.Args(),
@@ -196,12 +199,19 @@ func runClaude(stdout, stderr io.Writer, argv []string) int {
 	argvOut := buildClaudeLaunchArgv(launch)
 	envMap := buildClaudeLaunchEnvMap(launch)
 	envList := mergeEnv(os.Environ(), envMap)
+	if launch.guard {
+		argvOut = buildClaudeGuardLaunchArgv(tuiExecutable(), launch, argvOut)
+	}
 
 	if launch.dryRun {
 		fmt.Fprintln(stderr, "fak claude: dry-run - not launching")
 		fmt.Fprintf(stderr, "  gateway     = %s\n", launch.serverURL)
 		fmt.Fprintf(stderr, "  model       = %s\n", launch.model)
-		fmt.Fprintf(stderr, "  harness     = claude (raw, without guard)\n")
+		if launch.guard {
+			fmt.Fprintf(stderr, "  harness     = claude (fak guard enabled)\n")
+		} else {
+			fmt.Fprintf(stderr, "  harness     = claude (direct; pass --guard for kernel adjudication)\n")
+		}
 		fmt.Fprintf(stderr, "  backend     = fak serve on Mac (/v1/messages)\n")
 		fmt.Fprintln(stderr, "  environment =")
 		for _, k := range []string{
@@ -247,7 +257,11 @@ func runClaude(stdout, stderr io.Writer, argv []string) int {
 			srvLabel = fmt.Sprintf("fak serve (%s)", statusInfo.Backend)
 		}
 		fmt.Fprintf(stderr, "fak claude: connected to %s at %s (model: %s)\n", srvLabel, launch.serverURL, launch.model)
-		fmt.Fprintln(stderr, "fak claude: launching Claude Code directly (raw harness, without guard) ...")
+		if launch.guard {
+			fmt.Fprintln(stderr, "fak claude: launching Claude Code through fak guard ...")
+		} else {
+			fmt.Fprintln(stderr, "fak claude: launching Claude Code directly (without guard) ...")
+		}
 	}
 
 	started := time.Now()
@@ -256,6 +270,24 @@ func runClaude(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak claude: Claude Code session ended successfully (%s)\n", time.Since(started).Round(time.Millisecond))
 	}
 	return code
+}
+
+func buildClaudeGuardLaunchArgv(fakBin string, o claudeLaunchOptions, child []string) []string {
+	argv := []string{fakBin, "guard", "--provider", "anthropic"}
+	if o.serverURL != "" {
+		argv = append(argv, "--base-url", o.serverURL)
+	}
+	if o.model != "" {
+		argv = append(argv, "--model", o.model)
+	}
+	if o.apiKeyEnv != "" {
+		argv = append(argv, "--api-key-env", o.apiKeyEnv)
+	}
+	if o.probePrompt != "" {
+		argv = append(argv, "--probe")
+	}
+	argv = append(argv, "--")
+	return append(argv, child...)
 }
 
 func fetchClaudeServerStatus(serverURL string, timeout time.Duration) (*claudeStatusReport, error) {

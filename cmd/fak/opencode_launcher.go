@@ -20,6 +20,7 @@ import (
 )
 
 type opencodeLaunchOptions struct {
+	guard           bool
 	dryRun          bool
 	probePrompt     string
 	splitMode       string
@@ -59,7 +60,8 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("opencode", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	verbFlagUsage(fs, "opencode")
-	dryRun := fs.Bool("dry-run", false, "print the guarded OpenCode command and exit without launching")
+	guard := fs.Bool("guard", false, "launch OpenCode through fak guard for this session")
+	dryRun := fs.Bool("dry-run", false, "print the OpenCode command and exit without launching")
 	probePrompt := fs.String("probe", "", "run a single headless probe turn with this prompt and exit")
 	skipPermissions := fs.Bool("skip-permissions", true, "pass --auto to the OpenCode child when running unattended")
 	pure := fs.Bool("pure", false, "pass --pure to opencode child to prevent reading untracked global state")
@@ -139,6 +141,9 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 		if os.Getenv("OPENAI_API_KEY") == "" {
 			if base, modelID, label, found := guardDetectLocalBackend(); found {
 				*localAuto = true
+				if !*guard {
+					*baseURL = base
+				}
 				if *model == "" {
 					*model = modelID
 				}
@@ -171,6 +176,7 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 
 	fakBin := tuiExecutable()
 	launch := opencodeLaunchOptions{
+		guard:           *guard,
 		dryRun:          *dryRun,
 		probePrompt:     *probePrompt,
 		splitMode:       *splitMode,
@@ -192,34 +198,80 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 		tokenizerPath:   *tokenizerPath,
 		pure:            *pure,
 		auto:            *auto,
-		skipPermissions: *skipPermissions,
+		skipPermissions: (*guard || flagSet(fs, "skip-permissions")) && *skipPermissions,
 		passthrough:     fs.Args(),
 	}
 	argvOut := buildOpencodeLaunchArgv(fakBin, launch)
+	launchEnv := os.Environ()
+	if !launch.guard {
+		argvOut = buildOpencodeDirectArgv(launch)
+		directBase := launch.baseURL
+		if directBase == "" && launch.remoteServe != "" {
+			resolved, err := resolveGuardRemoteServe(launch.remoteServe)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak opencode: --remote-serve: %v\n", err)
+				return 2
+			}
+			directBase = strings.TrimRight(resolved, "/") + "/v1"
+		}
+		config, err := projectassets.GenerateOpenCodeConfig(directBase, launch.model)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak opencode: session config: %v\n", err)
+			return 1
+		}
+		launchEnv = append(launchEnv, "OPENCODE_CONFIG_CONTENT="+string(config))
+	}
 
 	if launch.dryRun {
 		fmt.Fprintln(stderr, "fak opencode: dry-run - not launching")
-		fmt.Fprintln(stderr, "  view        = agent 80% / fak info 20% (--split "+launch.splitMode+")")
+		if launch.guard {
+			fmt.Fprintln(stderr, "  view        = agent 80% / fak info 20% (--split "+launch.splitMode+")")
+		} else {
+			fmt.Fprintln(stderr, "  guard       = off (pass --guard for kernel adjudication)")
+		}
 		fmt.Fprintln(stderr, "  provider    = openai (Chat Completions /v1/chat/completions)")
 		fmt.Fprintln(stderr, "  command     = "+strings.Join(argvOut, " "))
 		fmt.Fprintln(stdout, strings.Join(argvOut, " "))
 		return 0
 	}
 
-	if _, err := projectassets.Ensure(".", true); err != nil && !launch.quiet {
-		fmt.Fprintf(stderr, "fak opencode: warning: %v\n", err)
+	if launch.guard {
+		if _, err := projectassets.Ensure(".", true); err != nil && !launch.quiet {
+			fmt.Fprintf(stderr, "fak opencode: warning: %v\n", err)
+		}
 	}
 	if err := projectassets.VerifyOpenCodeSnapshot("."); err != nil && !launch.quiet {
 		fmt.Fprintf(stderr, "fak opencode: warning: %v\n", err)
 	}
 
 	started := time.Now()
-	fmt.Fprintln(stderr, "fak opencode: launching OpenCode through fak guard ...")
-	code := opencodeLaunchRun(stdout, stderr, argvOut, os.Environ())
+	if launch.guard {
+		fmt.Fprintln(stderr, "fak opencode: launching OpenCode through fak guard ...")
+	} else {
+		fmt.Fprintln(stderr, "fak opencode: launching OpenCode directly (without guard) ...")
+	}
+	code := opencodeLaunchRun(stdout, stderr, argvOut, launchEnv)
 	if code == 0 {
 		fmt.Fprintf(stderr, "fak opencode: OpenCode completed successfully in %s\n", time.Since(started).Round(time.Millisecond))
 	}
 	return code
+}
+
+func buildOpencodeDirectArgv(o opencodeLaunchOptions) []string {
+	argv := []string{"opencode"}
+	if childModel := strings.TrimPrefix(strings.TrimSpace(o.model), "fak/"); childModel != "" {
+		argv = append(argv, "--model", "fak/"+childModel)
+	}
+	if o.probePrompt != "" {
+		argv = append(argv, "run", o.probePrompt, "--format", "json")
+		if o.auto || o.skipPermissions {
+			argv = append(argv, "--auto")
+		}
+		if o.pure {
+			argv = append(argv, "--pure")
+		}
+	}
+	return append(argv, o.passthrough...)
 }
 
 func validateOpencodeLaunchSplit(mode, where string) error {
