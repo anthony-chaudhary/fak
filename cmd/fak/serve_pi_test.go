@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -106,6 +107,11 @@ func TestServePiConfigWritesFile(t *testing.T) {
 	isolatePiHome(t)
 	ws := t.TempDir()
 	configPath := filepath.Join(ws, "models.json")
+	settingsPath := filepath.Join(os.Getenv("PI_CODING_AGENT_DIR"), "settings.json")
+	settingsBefore := []byte(`{"defaultProvider":"operator","defaultModel":"operator-model","sentinel":"keep"}`)
+	if err := os.WriteFile(settingsPath, settingsBefore, 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	var buf bytes.Buffer
 	sf := &serveFlags{
@@ -130,5 +136,25 @@ func TestServePiConfigWritesFile(t *testing.T) {
 	}
 	if !strings.Contains(content, `"openai-completions"`) {
 		t.Errorf("expected api in file: %s", content)
+	}
+	settingsAfter, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(settingsAfter, &settings); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{
+		"defaultProvider": "operator",
+		"defaultModel":    "operator-model",
+		"sentinel":        "keep",
+	} {
+		if got := settings[key]; got != want {
+			t.Errorf("serve --write-pi-config changed %s: got %v, want %q", key, got, want)
+		}
+	}
+	if _, ok := settings["compaction"]; !ok {
+		t.Error("serve --write-pi-config did not preserve the safe compaction write")
 	}
 }
