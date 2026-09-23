@@ -84,8 +84,19 @@ under the ignored `tools/grafana/.run/native/` directory:
 - Grafana receives a generated Prometheus datasource at
   `http://127.0.0.1:9091` and provisions the tracked `dashboards/` directory,
   including the bundled native-performance dashboards.
-- Prometheus binds only `127.0.0.1:9091`; Grafana binds only
-  `127.0.0.1:3000`.
+- Prometheus binds only `127.0.0.1:9091`; Grafana binds `0.0.0.0:3000` and
+  uses the same anonymous `Viewer` policy as the Docker deployment. The login
+  form remains available for administrators, and a fresh native data directory
+  does not create an initial administrator.
+
+Before exposing native data previously initialized with the old `admin` /
+`fleet` default, rotate that persisted account too:
+
+```bash
+grafana cli --homepath "$(brew --prefix grafana)/share/grafana" \
+  --configOverrides cfg:default.paths.data="$PWD/tools/grafana/.run/native/grafana-data" \
+  admin reset-admin-password '<new-strong-password>'
+```
 
 Healthy services already on those endpoints are adopted, not restarted. `up.sh`
 records only the supervisor processes it actually launches, with an invocation
@@ -146,7 +157,7 @@ reach it via `host.docker.internal`. The gateway is optional — omit it to char
 fleet metrics only; the **FAK Gateway Observability** dashboard simply shows no
 data until `fak serve` is scrapeable.
 
-Open `http://localhost:3000`, log in `admin` / `fleet`.
+Open `http://<host>:3000` as an anonymous Viewer.
 The **FAK Run Operations** dashboard (stable uid `fak-fleet-overview`) is the default
 home; the
 **FAK Gateway Observability**, **FAK Dogfood Slow Requests**, **FAK Startup &
@@ -369,7 +380,7 @@ lock-step with emitted metric names (`fleet_bottleneck_test.py` asserts this).
 | 9093 | Alertmanager | Docker-only alert routing UI + API (POSTs the webhook) |
 | 9096 | `fak slack alert --serve` | Webhook receiver → durable Slack outbox (host) |
 | 9101 | `fak-ops-dashboard` | Ops plane fold exporter (`fak_ops_*`, scraped by job `fak_ops`) (host) |
-| 3000 | Grafana | Dashboard UI (localhost only) |
+| 3000 | Grafana | LAN-visible dashboard UI (anonymous Viewer) |
 
 > These match the metrics-service stack's ports. If you run **both** stacks on one
 > box, offset one set (e.g. Grafana `3001:3000`, Prometheus `9092:9091`) to avoid

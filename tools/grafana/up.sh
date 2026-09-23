@@ -305,10 +305,13 @@ start_native_stack() {
       GF_PATHS_DATA="$NATIVE_DIR/grafana-data" \
       GF_PATHS_LOGS="$NATIVE_DIR/grafana-logs" \
       GF_PATHS_PLUGINS="$NATIVE_DIR/grafana-data/plugins" \
-      GF_SECURITY_ADMIN_USER=admin \
-      GF_SECURITY_ADMIN_PASSWORD=fleet \
+      GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION=true \
+      GF_AUTH_ANONYMOUS_ENABLED=true \
+      GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer \
+      GF_AUTH_ANONYMOUS_ORG_NAME="Main Org." \
+      GF_USERS_ALLOW_SIGN_UP=false \
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH="$GRAFANA_DIR/dashboards/fleet-bottleneck-overview.json" \
-      GF_SERVER_HTTP_ADDR=127.0.0.1 \
+      GF_SERVER_HTTP_ADDR=0.0.0.0 \
       GF_SERVER_HTTP_PORT=3000 \
       "${grafana_command[@]}" --homepath "$grafana_home" --packaging=brew
 }
@@ -407,7 +410,7 @@ else
 fi
 cat >&2 <<EOF
 
-  Grafana     http://localhost:3000      (admin / fleet)
+  Grafana     http://<host>:3000         (anonymous Viewer)
   Prometheus  http://localhost:9091
   fleet src   http://localhost:$BOTTLENECK_PORT/metrics
   gateway     http://$GATEWAY_HOSTPORT/metrics   (engine=inkernel model=$MODEL_LABEL)
