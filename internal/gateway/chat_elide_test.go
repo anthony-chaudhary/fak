@@ -14,6 +14,7 @@ import (
 )
 
 func TestChatElide_NonStreaming(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_ELIDE_THRESHOLD", "1024")
 	srv := newTestServer(t)
 	planner := &capturingResponsesPlanner{
 		comp: &agent.Completion{
@@ -115,6 +116,7 @@ func TestChatElide_NonStreaming(t *testing.T) {
 }
 
 func TestChatElide_Streaming(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_ELIDE_THRESHOLD", "1024")
 	srv := newTestServer(t)
 	planner := &capturingResponsesPlanner{
 		comp: &agent.Completion{

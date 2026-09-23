@@ -12,13 +12,14 @@ import (
 )
 
 const (
-	defaultResponsesElideThreshold = 1024
+	defaultResponsesElideThreshold = DocumentedElideResultBytes
 	elideRecentKeepMsgs            = 4
 	responsesCASThreshold          = 32 << 10 // 32 KiB
 )
 
 // responsesElideThreshold returns the byte size threshold for eliding tool outputs on /v1/responses.
-// Defaults to 1024 bytes, configurable via FAK_RESPONSES_ELIDE_THRESHOLD.
+// Defaults to DocumentedElideResultBytes (16384). A positive
+// FAK_RESPONSES_ELIDE_THRESHOLD overrides it; unset, zero, or invalid values use the default.
 func (s *Server) responsesElideThreshold() int {
 	if v := strings.TrimSpace(os.Getenv("FAK_RESPONSES_ELIDE_THRESHOLD")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {

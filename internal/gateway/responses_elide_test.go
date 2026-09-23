@@ -19,6 +19,7 @@ import (
 // are replaced with fak_context_restore markers while the most recent 4 tool results
 // remain intact.
 func TestResponsesElideOlderToolOutputs(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_ELIDE_THRESHOLD", "1024")
 	srv := newTestServer(t)
 	const trace = "t-responses-elide-protect"
 
@@ -74,6 +75,7 @@ func TestResponsesElideOlderToolOutputs(t *testing.T) {
 // TestResponsesElideRoundTripRestoreStash proves fak_context_restore pages back
 // the exact byte-identical tool output from the in-memory stash.
 func TestResponsesElideRoundTripRestoreStash(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_ELIDE_THRESHOLD", "1024")
 	srv := newTestServer(t)
 	const trace = "t-responses-stash-roundtrip"
 
@@ -163,6 +165,7 @@ func TestResponsesElideRoundTripRestoreCAS(t *testing.T) {
 
 // TestResponsesElideHttpIntegration proves elision runs through POST /v1/responses.
 func TestResponsesElideHttpIntegration(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_ELIDE_THRESHOLD", "1024")
 	srv := newTestServer(t)
 	planner := &capturingResponsesPlanner{
 		comp: &agent.Completion{
@@ -214,6 +217,7 @@ func TestResponsesElideHttpIntegration(t *testing.T) {
 }
 
 func TestResponsesElideToolAlignment(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_ELIDE_THRESHOLD", "1024")
 	srv := newTestServer(t)
 	const trace = "t-responses-elide-alignment"
 

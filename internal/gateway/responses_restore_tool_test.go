@@ -179,6 +179,7 @@ func TestResponsesRestoreToolInBandInterception(t *testing.T) {
 }
 
 func TestResponsesElideMarkerUsesAlignedToolName(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_ELIDE_THRESHOLD", "1024")
 	srv := newTestServer(t)
 	const trace = "t-responses-elide-aligned-name"
 
