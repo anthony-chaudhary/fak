@@ -640,15 +640,33 @@ func TestVerifySourceBinding_DirectChecks(t *testing.T) {
 }
 
 func TestBuildStrixCandidateArchiveDeterministicAndTamperClosed(t *testing.T) {
-	rootBytes, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
-	if err != nil {
+	// The validator runs affected tests in an isolated source tree without .git.
+	// Give this archive test its own repository instead of borrowing the caller's.
+	root := t.TempDir()
+	runGit := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit("init")
+	runGit("config", "user.email", "test@example.invalid")
+	runGit("config", "user.name", "test")
+	overlay := filepath.Join(root, "internal", "amdgpu", "strix_receipt.go")
+	if err := os.MkdirAll(filepath.Dir(overlay), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	tipBytes, err := exec.Command("git", "rev-parse", "HEAD").Output()
-	if err != nil {
+	if err := os.WriteFile(overlay, []byte("package amdgpu\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	root, tip := strings.TrimSpace(string(rootBytes)), strings.TrimSpace(string(tipBytes))
+	runGit("add", "internal/amdgpu/strix_receipt.go")
+	runGit("commit", "-m", "fixture")
+	tip := runGit("rev-parse", "HEAD")
+	var err error
 	a, err := BuildStrixCandidateArchive(context.Background(), root, tip, []string{"internal/amdgpu/strix_receipt.go"})
 	if err != nil {
 		t.Fatalf("first archive: %v", err)
