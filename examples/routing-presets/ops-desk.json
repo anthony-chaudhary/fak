@@ -1,0 +1,165 @@
+{
+  "version": "fak-route/v1",
+  "default": {
+    "members": [
+      {
+        "model": "glm53-flash",
+        "role": "primary"
+      }
+    ],
+    "reason": "ops-desk: fak Ops worker desk - several workers name GLM 5.3 Flash; the desk routes the middle-ground tier by default (glm53-flash) and auto-swaps among the elected seats by the shape of the work (deepseek-v4-pro for ordinary medium implementation, gpt-6-astra for genuinely hard work and the destructive/high-risk security-release floor tierpolicy fixes for T0). Unmatched normal fak-Ops work -\u003e glm53-flash, the T1 middle ground."
+  },
+  "rules": [
+    {
+      "name": "opsdesk-destructive-astra",
+      "match": {
+        "aspect": "tool_call",
+        "tool": "delete_*"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "gpt-6-astra"
+          }
+        ],
+        "reason": "destructive/irreversible tool call (delete): the security-release floor never drops to the middle tier however small the call looks -\u003e the most careful orchestration seat gpt-6-astra (tierpolicy T0 floor beats latency/complexity)"
+      }
+    },
+    {
+      "name": "opsdesk-drop-astra",
+      "match": {
+        "aspect": "tool_call",
+        "tool": "drop_*"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "gpt-6-astra"
+          }
+        ],
+        "reason": "destructive tool call (drop): same security-release floor as delete -\u003e gpt-6-astra orchestration seat; never the fast middle-ground route for a drop-shaped call"
+      }
+    },
+    {
+      "name": "opsdesk-riskhigh-astra",
+      "match": {
+        "labels": {
+          "risk": "high"
+        }
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "gpt-6-astra"
+          }
+        ],
+        "reason": "caller tagged the aspect high-risk (push/release/migration or a security/policy surface): irreversible outward-facing work rides the gpt-6-astra orchestration seat -\u003e exhaustive orchestration with adversarial verification, never the T1 middle ground"
+      }
+    },
+    {
+      "name": "opsdesk-ultrahard-astra",
+      "match": {
+        "min_complexity": "high"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "gpt-6-astra"
+          }
+        ],
+        "reason": "ultra-hard/long-horizon fak-Ops work (large refactor, migration, cross-cutting design, deep debugging) -\u003e gpt-6-astra orchestration seat: the cost of exhaustive multi-agent orchestration is bought back by correctness on the hardest work (T0). Placed before the read/search rules so a high-flagged aspect escalates even when it is read-shaped"
+      }
+    },
+    {
+      "name": "opsdesk-fakops-astra",
+      "match": {
+        "labels": {
+          "work_kind": "fak-ops"
+        }
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "gpt-6-astra"
+          }
+        ],
+        "reason": "fak-Ops facade work: the desk attests the routed seat for the workspace surface (root turn, plan audit, view-only candidates) -\u003e gpt-6-astra orchestration seat carries the facade; state/routed facade rows are the operator-facing triage surface"
+      }
+    },
+    {
+      "name": "opsdesk-impl-deepseek",
+      "match": {
+        "min_complexity": "medium"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "deepseek-v4-pro",
+            "role": "primary"
+          }
+        ],
+        "reason": "moderate fak-Ops work (ordinary feature/bugfix/focused edit) -\u003e deepseek-v4-pro, the strong implementation seat. Named explicitly (a floor \u003e= medium) so medium work lands on the impl seat instead of falling through to the low-\u003eglm53-flash rule below"
+      }
+    },
+    {
+      "name": "opsdesk-cheap-glm53",
+      "match": {
+        "min_complexity": "low"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "glm53-flash"
+          }
+        ],
+        "reason": "low-complexity fak-Ops aspect (small mechanical edit, quick lookup) -\u003e glm53-flash, the T1 middle-ground tier; reached only after the medium rule, so it bands to genuinely-low work"
+      }
+    },
+    {
+      "name": "opsdesk-read-glm53",
+      "match": {
+        "aspect": "tool_call",
+        "tool": "read_*"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "glm53-flash"
+          }
+        ],
+        "reason": "read-shaped tool call (read/inspect): cheap, low-stakes, not destructive and not flagged hard -\u003e glm53-flash (fast); a wrong read costs a re-run, not a bad write"
+      }
+    },
+    {
+      "name": "opsdesk-search-glm53",
+      "match": {
+        "aspect": "tool_call",
+        "tool": "search_*"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "glm53-flash"
+          }
+        ],
+        "reason": "search/lookup tool call: cheap read-shaped work -\u003e glm53-flash, the T1 middle-ground tier"
+      }
+    },
+    {
+      "name": "opsdesk-short-interactive-glm53",
+      "match": {
+        "aspect": "request",
+        "max_prompt_tokens": 4096,
+        "latency": "interactive"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "glm53-flash"
+          }
+        ],
+        "reason": "short interactive fak-Ops turn (quick question/tiny edit, no complexity flag) -\u003e glm53-flash for low latency"
+      }
+    }
+  ]
+}
