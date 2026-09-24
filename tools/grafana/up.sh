@@ -220,6 +220,14 @@ write_native_configs() {
     skip_alerting { next }
     {
       gsub(/host[.]docker[.]internal/, "127.0.0.1")
+      # Strip a trailing CR before comparing: the tracked prometheus.yml is
+      # committed with CRLF (raw blob, no .gitattributes eol pin), so `$0` would
+      # carry a trailing \r and the equality test below would silently never
+      # fire — leaving the native config with a relative rules path that
+      # Prometheus resolves against its own CWD. Observed as
+      # TestGeneratedNativeConfigurationIsLoopbackOnly "lacks absolute rules
+      # path" on the Linux/WSL path.
+      sub(/\r$/, "")
       if ($0 == "  - \"prometheus-alerts.yml\"") {
         print "  - \"" rules "\""
       } else {

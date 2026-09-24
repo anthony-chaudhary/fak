@@ -89,6 +89,14 @@
       "lifetime": "stack-local",
       "description": "fleet-wide tool call observability — invocation rate across all sessions, top active tools & integrations, policy denial taxonomy, JIT auth paging hit rates, and runaway tool loop detection",
       "source": "tools/grafana/dashboards/fak-harness-toolcall-fleet.json"
+    },
+    {
+      "title": "FAK Router | Unified model routing",
+      "uid": "fak-router",
+      "category": "debug",
+      "lifetime": "stack-local",
+      "description": "unified router — request rate, streaming share, upstream prompt/decode tokens, per-backend and per-status routing attempts, failover rate",
+      "source": "tools/grafana/dashboards/fak-router.json"
     }
   ]
 }

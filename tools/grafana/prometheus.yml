@@ -54,6 +54,18 @@ scrape_configs:
         labels:
           service: fak-gateway
 
+  - job_name: fak_router
+    # The SCM-supervised router listens on :18101 and is the process that emits
+    # fak_router_attempts_total{backend,fallback,status} (plus every
+    # fak_gateway_* family). This is DISTINCT from the generic fak_gateway job
+    # on :8080, which serves the fak_gateway_* families but does NOT emit
+    # fak_router_attempts_total. Scrape the real router here.
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:18101"]
+        labels:
+          service: fak-router
+
   - job_name: fak_cachevalue
     # `fak cachevalue metrics --serve` re-folds the docs/nightrun/*.jsonl ledgers +
     # experiments/ablate/*.json arms on each scrape and exposes the two-track cache-value
@@ -130,3 +142,23 @@ scrape_configs:
       - targets: ["host.docker.internal:9094"]
         labels:
           service: fak-ops-workers
+  - job_name: strix_halo
+    # Per-node telemetry for the AMD Strix Halo appliances on the LAN.
+    #
+    # Each appliance's fak-node-exporter.service binds 127.0.0.1:9100 only, so
+    # the scrape does not reach the node directly: the host builds ONE pinned
+    # ssh -L forward per node onto a loopback port and Prometheus scrapes that
+    # through the Docker host bridge. No inbound firewall rule is opened on the
+    # appliance and no appliance exporter is exposed to the LAN.
+    #
+    # The forwards are supervised by `fak-obs-stack` (private repo,
+    # platform/obs/stack) exactly like the local exporters. The target list is
+    # written there rather than tracked here, because a node's LAN identity and
+    # loopback port are deployment facts, not repo facts. Generate it with:
+    #   fak-obs-stack halo targets --out provisioning/strix-halo-targets.json
+    # and mount that filename beside this config.
+    metrics_path: /metrics
+    scrape_interval: 30s
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/strix-halo-targets.json
