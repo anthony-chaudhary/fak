@@ -55,38 +55,56 @@ type Request struct {
 // Grant is the fencing token returned by admission. ExpiresAt is evidence for
 // reconciliation; expiry alone never releases or stops charging the grant.
 type Grant struct {
-	ID         string    `json:"id"`
-	Generation uint64    `json:"generation"`
-	Owner      Owner     `json:"owner"`
-	Cost       Vector    `json:"cost"`
-	ExpiresAt  time.Time `json:"expires_at"`
+	ID                 string    `json:"id"`
+	Generation         uint64    `json:"generation"`
+	Owner              Owner     `json:"owner"`
+	Cost               Vector    `json:"cost"`
+	ExpiresAt          time.Time `json:"expires_at"`
+	UsesControlReserve bool      `json:"uses_control_reserve,omitempty"`
 }
 
 // Store is a durable host-local grant ledger. All mutations serialize through
 // Path+".lock" and replace Path only after the new file has been flushed.
 type Store struct {
-	Path     string
-	Capacity Vector
+	Path           string
+	Capacity       Vector
+	ControlReserve Vector
 }
 
 type diskState struct {
 	Schema         string           `json:"schema"`
 	Capacity       Vector           `json:"capacity"`
+	ControlReserve Vector           `json:"control_reserve"`
 	NextGeneration uint64           `json:"next_generation"`
 	Grants         map[string]Grant `json:"grants"`
 }
 
+type admissionClass uint8
+
+const (
+	ordinaryAdmission admissionClass = iota
+	trustedControlAdmission
+)
+
 // TryAcquire atomically reserves req.Cost. Repeating an active ID with the same
 // owner and cost returns the existing grant, including after its advisory TTL.
 func (s Store) TryAcquire(ctx context.Context, req Request) (Grant, error) {
+	return s.tryAcquire(ctx, req, ordinaryAdmission)
+}
+
+// tryAcquire keeps the future trusted-control seam below the public package
+// boundary. Current callers cannot choose a class: every Request is ordinary
+// and therefore cannot spend ControlReserve.
+func (s Store) tryAcquire(ctx context.Context, req Request, class admissionClass) (Grant, error) {
 	if err := validateRequest(req); err != nil {
 		return Grant{}, err
 	}
 	req.Owner = normalizeOwner(req.Owner)
 	var out Grant
 	err := s.withState(ctx, func(st *diskState) (bool, error) {
+		usesControlReserve := class == trustedControlAdmission
 		if current, ok := st.Grants[req.ID]; ok {
-			if !sameOwner(current.Owner, req.Owner) || current.Cost != req.Cost {
+			if !sameOwner(current.Owner, req.Owner) || current.Cost != req.Cost || current.UsesControlReserve != usesControlReserve {
 				return false, fmt.Errorf("%w: active id %q has different owner or cost", ErrFenced, req.ID)
 			}
 			out = current
@@ -96,19 +114,28 @@ func (s Store) TryAcquire(ctx context.Context, req Request) (Grant, error) {
 		if err != nil {
 			return false, err
 		}
-		if !fits(st.Capacity, used, req.Cost) {
-			return false, fmt.Errorf("%w: requested %+v, used %+v, capacity %+v", ErrFull, req.Cost, used, st.Capacity)
+		limit, err := admissionLimit(st, class)
+		if err != nil {
+			return false, err
+		}
+		charged := used.Ordinary
+		if usesControlReserve {
+			charged = used.Total
+		}
+		if !fits(limit, charged, req.Cost) || !fits(st.Capacity, used.Total, req.Cost) {
+			return false, fmt.Errorf("%w: requested %+v, used %+v, admission capacity %+v", ErrFull, req.Cost, charged, limit)
 		}
 		generation, err := nextGeneration(st)
 		if err != nil {
 			return false, err
 		}
 		out = Grant{
-			ID:         req.ID,
-			Generation: generation,
-			Owner:      req.Owner,
-			Cost:       req.Cost,
-			ExpiresAt:  time.Now().UTC().Add(req.TTL),
+			ID:                 req.ID,
+			Generation:         generation,
+			Owner:              req.Owner,
+			Cost:               req.Cost,
+			ExpiresAt:          time.Now().UTC().Add(req.TTL),
+			UsesControlReserve: usesControlReserve,
 		}
 		st.Grants[req.ID] = out
 		return true, nil
@@ -158,6 +185,9 @@ func (s Store) withState(ctx context.Context, mutate func(*diskState) (bool, err
 	if s.Path == "" {
 		return errors.New("hostgrant: store path is required")
 	}
+	if err := validateReserve(s.Capacity, s.ControlReserve); err != nil {
+		return err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -189,8 +219,8 @@ func (s Store) withState(ctx context.Context, mutate func(*diskState) (bool, err
 	if err != nil {
 		return err
 	}
-	if st.Capacity != s.Capacity {
-		return fmt.Errorf("%w: configured %+v, persisted %+v", ErrCapacityMismatch, s.Capacity, st.Capacity)
+	if st.Capacity != s.Capacity || st.ControlReserve != s.ControlReserve {
+		return fmt.Errorf("%w: configured capacity %+v reserve %+v, persisted capacity %+v reserve %+v", ErrCapacityMismatch, s.Capacity, s.ControlReserve, st.Capacity, st.ControlReserve)
 	}
 	changed, err := mutate(&st)
 	if err != nil {
@@ -210,7 +240,7 @@ func (s Store) withState(ctx context.Context, mutate func(*diskState) (bool, err
 func (s Store) loadState() (diskState, bool, error) {
 	body, err := os.ReadFile(s.Path)
 	if errors.Is(err, os.ErrNotExist) {
-		return diskState{Schema: schema, Capacity: s.Capacity, NextGeneration: 1, Grants: map[string]Grant{}}, true, nil
+		return diskState{Schema: schema, Capacity: s.Capacity, ControlReserve: s.ControlReserve, NextGeneration: 1, Grants: map[string]Grant{}}, true, nil
 	}
 	if err != nil {
 		return diskState{}, false, fmt.Errorf("hostgrant: read store: %w", err)
@@ -233,6 +263,9 @@ func (s Store) loadState() (diskState, bool, error) {
 	}
 	if st.NextGeneration == 0 {
 		return diskState{}, false, errors.New("hostgrant: invalid zero next generation")
+	}
+	if err := validateReserve(st.Capacity, st.ControlReserve); err != nil {
+		return diskState{}, false, fmt.Errorf("hostgrant: invalid persisted control reserve: %w", err)
 	}
 	if st.Grants == nil {
 		st.Grants = map[string]Grant{}
@@ -260,8 +293,15 @@ func (s Store) loadState() (diskState, bool, error) {
 	if err != nil {
 		return diskState{}, false, err
 	}
-	if !fits(st.Capacity, Vector{}, used) {
-		return diskState{}, false, fmt.Errorf("hostgrant: persisted usage %+v exceeds capacity %+v", used, st.Capacity)
+	ordinaryCapacity, err := admissionLimit(&st, ordinaryAdmission)
+	if err != nil {
+		return diskState{}, false, err
+	}
+	if !fits(st.Capacity, Vector{}, used.Total) {
+		return diskState{}, false, fmt.Errorf("hostgrant: persisted total usage %+v exceeds capacity %+v", used.Total, st.Capacity)
+	}
+	if !fits(ordinaryCapacity, Vector{}, used.Ordinary) {
+		return diskState{}, false, fmt.Errorf("hostgrant: persisted ordinary usage %+v exceeds admission capacity %+v", used.Ordinary, ordinaryCapacity)
 	}
 	return st, false, nil
 }
@@ -337,13 +377,25 @@ func validateOwner(owner Owner) error {
 	return nil
 }
 
-func usedResources(grants map[string]Grant) (Vector, error) {
-	var used Vector
+type resourceUsage struct {
+	Total    Vector
+	Ordinary Vector
+}
+
+func usedResources(grants map[string]Grant) (resourceUsage, error) {
+	var used resourceUsage
 	for _, grant := range grants {
 		var ok bool
-		used, ok = add(used, grant.Cost)
+		used.Total, ok = add(used.Total, grant.Cost)
 		if !ok {
-			return Vector{}, errors.New("hostgrant: persisted resource usage overflows uint64")
+			return resourceUsage{}, errors.New("hostgrant: persisted total resource usage overflows uint64")
+		}
+		if grant.UsesControlReserve {
+			continue
+		}
+		used.Ordinary, ok = add(used.Ordinary, grant.Cost)
+		if !ok {
+			return resourceUsage{}, errors.New("hostgrant: persisted ordinary resource usage overflows uint64")
 		}
 	}
 	return used, nil
@@ -369,6 +421,37 @@ func fits(capacity, used, requested Vector) bool {
 		used.ModelCalls <= capacity.ModelCalls && requested.ModelCalls <= capacity.ModelCalls-used.ModelCalls
 }
 
+func admissionLimit(st *diskState, class admissionClass) (Vector, error) {
+	switch class {
+	case ordinaryAdmission:
+		return subtract(st.Capacity, st.ControlReserve)
+	case trustedControlAdmission:
+		return st.Capacity, nil
+	default:
+		return Vector{}, errors.New("hostgrant: invalid admission class")
+	}
+}
+
+func validateReserve(capacity, reserve Vector) error {
+	if _, err := subtract(capacity, reserve); err != nil {
+		return fmt.Errorf("hostgrant: invalid control reserve: %w", err)
+	}
+	return nil
+}
+
+func subtract(capacity, reserve Vector) (Vector, error) {
+	if reserve.AgentSteps > capacity.AgentSteps || reserve.Processes > capacity.Processes ||
+		reserve.Compilers > capacity.Compilers || reserve.ModelCalls > capacity.ModelCalls {
+		return Vector{}, errors.New("reserve exceeds capacity")
+	}
+	return Vector{
+		AgentSteps: capacity.AgentSteps - reserve.AgentSteps,
+		Processes:  capacity.Processes - reserve.Processes,
+		Compilers:  capacity.Compilers - reserve.Compilers,
+		ModelCalls: capacity.ModelCalls - reserve.ModelCalls,
+	}, nil
+}
+
 func nextGeneration(st *diskState) (uint64, error) {
 	if st.NextGeneration == 0 || st.NextGeneration == math.MaxUint64 {
 		return 0, errors.New("hostgrant: generation space exhausted")
@@ -379,7 +462,7 @@ func nextGeneration(st *diskState) (uint64, error) {
 }
 
 func sameGrant(a, b Grant) bool {
-	return a.ID == b.ID && a.Generation == b.Generation && sameOwner(a.Owner, b.Owner) && a.Cost == b.Cost && a.ExpiresAt.Equal(b.ExpiresAt)
+	return a.ID == b.ID && a.Generation == b.Generation && sameOwner(a.Owner, b.Owner) && a.Cost == b.Cost && a.ExpiresAt.Equal(b.ExpiresAt) && a.UsesControlReserve == b.UsesControlReserve
 }
 
 func sameOwner(a, b Owner) bool {

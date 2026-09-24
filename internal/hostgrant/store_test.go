@@ -3,6 +3,7 @@ package hostgrant_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -14,6 +15,149 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/hostgrant"
 )
+
+func TestStoreOrdinaryAdmissionPreservesControlReserve(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "grants.json")
+	store := hostgrant.Store{
+		Path:           path,
+		Capacity:       hostgrant.Vector{Processes: 2},
+		ControlReserve: hostgrant.Vector{Processes: 1},
+	}
+	first := hostgrant.Request{
+		ID:    "ordinary-first",
+		Owner: hostgrant.Owner{ID: "agent-first", PID: 101, StartedAt: time.Date(2026, time.September, 23, 8, 0, 0, 0, time.UTC)},
+		Cost:  hostgrant.Vector{Processes: 1},
+		TTL:   time.Minute,
+	}
+	grant, err := store.TryAcquire(context.Background(), first)
+	if err != nil {
+		t.Fatalf("first ordinary TryAcquire: %v", err)
+	}
+	if grant.UsesControlReserve {
+		t.Fatal("public TryAcquire marked ordinary grant as using control reserve")
+	}
+
+	second := first
+	second.ID = "ordinary-second"
+	second.Owner.ID = "agent-second"
+	second.Owner.PID = 202
+	if _, err := store.TryAcquire(context.Background(), second); !errors.Is(err, hostgrant.ErrFull) {
+		t.Fatalf("second ordinary TryAcquire error = %v, want ErrFull", err)
+	}
+
+	var persisted struct {
+		ControlReserve hostgrant.Vector           `json:"control_reserve"`
+		Grants         map[string]hostgrant.Grant `json:"grants"`
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read persisted store: %v", err)
+	}
+	if err := json.Unmarshal(body, &persisted); err != nil {
+		t.Fatalf("decode persisted store: %v", err)
+	}
+	if persisted.ControlReserve != store.ControlReserve {
+		t.Fatalf("persisted control reserve = %+v, want %+v", persisted.ControlReserve, store.ControlReserve)
+	}
+	if len(persisted.Grants) != 1 || persisted.Grants[first.ID].ID != first.ID {
+		t.Fatalf("persisted grants = %#v, want only %q", persisted.Grants, first.ID)
+	}
+}
+
+func TestStoreInvalidControlReserveFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "grants.json")
+	store := hostgrant.Store{
+		Path:           path,
+		Capacity:       hostgrant.Vector{Processes: 1},
+		ControlReserve: hostgrant.Vector{Processes: 2},
+	}
+	_, err := store.TryAcquire(context.Background(), hostgrant.Request{
+		ID:    "ordinary",
+		Owner: hostgrant.Owner{ID: "agent", PID: 101, StartedAt: time.Date(2026, time.September, 23, 8, 0, 0, 0, time.UTC)},
+		Cost:  hostgrant.Vector{Processes: 1},
+		TTL:   time.Minute,
+	})
+	if err == nil {
+		t.Fatal("TryAcquire with reserve above capacity succeeded")
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("invalid configuration persisted state: stat error = %v, want not-exist", statErr)
+	}
+}
+
+func TestStoreRestartWithDifferentControlReserveFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "grants.json")
+	configured := hostgrant.Store{
+		Path:           path,
+		Capacity:       hostgrant.Vector{Processes: 2},
+		ControlReserve: hostgrant.Vector{Processes: 1},
+	}
+	request := hostgrant.Request{
+		ID:    "ordinary-first",
+		Owner: hostgrant.Owner{ID: "agent-first", PID: 101, StartedAt: time.Date(2026, time.September, 23, 8, 0, 0, 0, time.UTC)},
+		Cost:  hostgrant.Vector{Processes: 1},
+		TTL:   time.Minute,
+	}
+	if _, err := configured.TryAcquire(context.Background(), request); err != nil {
+		t.Fatalf("initialize store: %v", err)
+	}
+
+	restarted := hostgrant.Store{Path: path, Capacity: configured.Capacity}
+	request.ID = "ordinary-after-restart"
+	request.Owner.ID = "agent-after-restart"
+	request.Owner.PID = 202
+	if _, err := restarted.TryAcquire(context.Background(), request); !errors.Is(err, hostgrant.ErrCapacityMismatch) {
+		t.Fatalf("TryAcquire after reserve mismatch error = %v, want ErrCapacityMismatch", err)
+	}
+}
+
+func TestStoreRejectsPersistedOrdinaryOvercommitIntoReserve(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "grants.json")
+	expires := time.Date(2026, time.September, 24, 8, 0, 0, 0, time.UTC)
+	state := map[string]any{
+		"schema":          "fak.hostgrant/v1",
+		"capacity":        hostgrant.Vector{Processes: 2},
+		"control_reserve": hostgrant.Vector{Processes: 1},
+		"next_generation": uint64(3),
+		"grants": map[string]hostgrant.Grant{
+			"ordinary-a": {ID: "ordinary-a", Generation: 1, Owner: hostgrant.Owner{ID: "agent-a", PID: 101, StartedAt: expires.Add(-time.Hour)}, Cost: hostgrant.Vector{Processes: 1}, ExpiresAt: expires},
+			"ordinary-b": {ID: "ordinary-b", Generation: 2, Owner: hostgrant.Owner{ID: "agent-b", PID: 202, StartedAt: expires.Add(-time.Hour)}, Cost: hostgrant.Vector{Processes: 1}, ExpiresAt: expires},
+		},
+	}
+	body, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("encode overcommitted state: %v", err)
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatalf("write overcommitted state: %v", err)
+	}
+
+	store := hostgrant.Store{
+		Path:           path,
+		Capacity:       hostgrant.Vector{Processes: 2},
+		ControlReserve: hostgrant.Vector{Processes: 1},
+	}
+	_, err = store.TryAcquire(context.Background(), hostgrant.Request{
+		ID:    "ordinary-c",
+		Owner: hostgrant.Owner{ID: "agent-c", PID: 303, StartedAt: expires.Add(-time.Hour)},
+		Cost:  hostgrant.Vector{Processes: 1},
+		TTL:   time.Minute,
+	})
+	if err == nil {
+		t.Fatal("TryAcquire accepted store with ordinary usage in control reserve")
+	}
+	if !bytes.Contains([]byte(err.Error()), []byte("persisted ordinary usage")) {
+		t.Fatalf("TryAcquire error = %v, want persisted ordinary usage failure", err)
+	}
+}
 
 func TestStoreCrossProcessCapacity(t *testing.T) {
 	dir := t.TempDir()

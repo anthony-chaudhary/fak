@@ -132,6 +132,41 @@ func TestGuardHostGrantRequestIDWithoutStoreFailsClosed(t *testing.T) {
 	_ = child.stdin.Close()
 }
 
+func TestGuardHostGrantReserveMismatchDoesNotStartChild(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "host-grants.json")
+	seed := hostgrant.Store{
+		Path:           path,
+		Capacity:       hostgrant.Vector{Processes: 2},
+		ControlReserve: hostgrant.Vector{Processes: 1},
+	}
+	grant, err := seed.TryAcquire(context.Background(), hostgrant.Request{
+		ID:    "ordinary-first",
+		Owner: hostgrant.Owner{ID: "seed-owner", PID: os.Getpid(), StartedAt: time.Now().UTC()},
+		Cost:  hostgrant.Vector{Processes: 1},
+		TTL:   time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("seed reserved store: %v", err)
+	}
+	t.Cleanup(func() { _ = seed.Release(context.Background(), grant) })
+
+	t.Setenv("FAK_GUARD_HOSTGRANT_PATH", path)
+	t.Setenv("FAK_GUARD_HOSTGRANT_CAPACITY", "2")
+	t.Setenv("FAK_GUARD_HOSTGRANT_REQUEST_ID", "ordinary-second")
+	child := newGuardHostGrantChild(t, filepath.Join(t.TempDir(), "must-not-start.started"))
+	job, release, err := startGuardChildWithHostGrant(context.Background(), child.cmd, windowgate.ManagedJobConfig{})
+	if !errors.Is(err, hostgrant.ErrCapacityMismatch) {
+		t.Fatalf("start with missing reserve configuration error = %v, want ErrCapacityMismatch", err)
+	}
+	if job != nil || release != nil || child.cmd.Process != nil {
+		t.Fatalf("reserve-mismatch child launched or returned lifecycle: job=%v release=%v process=%v", job, release != nil, child.cmd.Process)
+	}
+	if _, statErr := os.Stat(child.marker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("reserve-mismatch child marker stat error = %v, want not-exist", statErr)
+	}
+	_ = child.stdin.Close()
+}
+
 func TestGuardHostGrantUnconfiguredIsNoop(t *testing.T) {
 	t.Setenv("FAK_GUARD_HOSTGRANT_PATH", "")
 	t.Setenv("FAK_GUARD_HOSTGRANT_CAPACITY", "")
