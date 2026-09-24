@@ -2042,8 +2042,12 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 	// buffer bounds the wo_a/wo_b term to one layer's worth instead of the
 	// 40-layer accumulated churn that OOM-killed the warmup (#13288).
 	scratch := &v41ProjScratch{}
+	// #13325: resolve the optional activation-checkpoint producer ONCE per
+	// forward. Disabled (the default) it is nil and every emit is skipped, so the
+	// forward is byte-for-byte unchanged and adds no allocations.
+	trace := m.v41ActivationTracer(seq)
 	for l := 0; l < cfg.NumLayers; l++ {
-		if err := m.v41Layer(l, seq, x, streams, full, hd, nH, H, eps, hcIters, hcEps, routeCfg, runState, scratch); err != nil {
+		if err := m.v41Layer(l, seq, x, streams, full, hd, nH, H, eps, hcIters, hcEps, routeCfg, runState, scratch, trace); err != nil {
 			return nil, err
 		}
 		act.Hidden = append(act.Hidden, flatten(x))
@@ -2093,7 +2097,7 @@ func (m *Model) v41RoleSchedule() bool {
 // pre-#13009 arithmetic exactly (four identical stand-in streams derived from the
 // normalized input, and stream 0 of the post-mix written back); the full path
 // reads and writes all four DISTINCT persistent streams.
-func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float32, full bool, hd, nH, H int, eps float32, hcIters int, hcEps float32, routeCfg v41RouterConfig, st *v41ForwardState, scratch *v41ProjScratch) error {
+func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float32, full bool, hd, nH, H int, eps float32, hcIters int, hcEps float32, routeCfg v41RouterConfig, st *v41ForwardState, scratch *v41ProjScratch, trace *v41ActivationTraceState) error {
 	cfg := m.Cfg
 	if scratch == nil {
 		scratch = &v41ProjScratch{}
@@ -2270,6 +2274,9 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			// so the batched wq_b panel reads the normed latents.
 			copy(qLat, rmsnormCfg(qLat, qNorm, eps, cfg))
 		}
+		// #13325 q_latent: the q-lora latent as fed to wq_b, after the optional q
+		// RMSNorm. Captured BEFORE the wq_b panel consumes it.
+		trace.record(l, t, v41TraceStageQLatent, qLat)
 	}
 	qPanel, err := m.v41ProjPanel(l, "attn.wq_b.weight", qLatPanel, nH*hd, cfg.QLoraRank, seq)
 	if err != nil {
@@ -2318,6 +2325,10 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			}
 			kv = rmsnormCfg(kv, kvNorm, eps, cfg)
 		}
+		// #13325 kv_latent: the KV row after the optional kv RMSNorm and BEFORE
+		// RoPE, so a rotary or geometry fault is distinguishable from a projection
+		// fault. Captured here because the RoPE just below rotates `kv` in place.
+		trace.record(l, t, v41TraceStageKVLatent, kv)
 		cos, sin := v41RopeTableForLayer(cfg, l, t)
 		for h := 0; h < nH; h++ {
 			applyRopeTailInterleaved(q[h*hd:(h+1)*hd], cos, sin, ropeDim)
@@ -2467,6 +2478,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 				return v41StageErr(v41StageAttention, l, err)
 			}
 			attnOut[t] = projected
+			trace.record(l, t, v41TraceStageAttnOut, projected)
 			continue
 		}
 		// #13303: the plain layer's visible keys are its CONFIGURED causal
@@ -2495,6 +2507,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			return v41StageErr(v41StageAttention, l, err)
 		}
 		attnOut[t] = projected
+		trace.record(l, t, v41TraceStageAttnOut, projected)
 	}
 
 	// ---- MoE: router + shared expert + routed experts ----
@@ -2611,6 +2624,10 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return v41StageErr(v41StageMoE, l, err)
 		}
+		// #13325 moe_sum: the summed routed + shared expert output, captured BEFORE
+		// the delta/residual mixing so an expert-contraction fault is distinguishable
+		// from an mHC post-mix fault.
+		trace.record(l, t, v41TraceStageMoESum, moe)
 
 		// delta = attention + MoE, then the mHC post-mix back into four streams.
 		delta := make([]float32, H)
