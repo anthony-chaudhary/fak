@@ -84,21 +84,31 @@ type landConfig struct {
 	tracker         *landProgressTracker
 	queue           *LandingQueue
 	LeasedGlobs     []string
-	// trunkRef names the branch the stale-base ancestor check tests against. It
-	// defaults to "main" when unset so a main-based land is judged against the
-	// trunk even while the shared-root checkout HEAD sits on a peer ticket branch.
-	trunkRef string
+	// branchRef is the ONE explicit trunk ref a main-based land targets. It is
+	// used for the stale-base ancestor check, the commit parent, and the
+	// compare-and-swap update-ref target, so a worktree pinned to main can land
+	// onto main even while the shared-root checkout HEAD sits on a peer ticket
+	// branch. Empty means: resolve the root's symbolic-ref HEAD (backward
+	// compatible), i.e. land onto whatever branch the root checkout is on.
+	branchRef string
 }
 
 // LandTrunkRefDefault is the trunk branch the stale-base ancestor check falls back
 // to when no explicit ref is supplied and no local trunk resolves.
 const LandTrunkRefDefault = "main"
 
-// WithLandTrunkRef names the trunk ref the stale-base ancestor check tests the
-// pinned base against, instead of the shared-root checkout's HEAD (which may be on
-// a peer ticket branch). An empty ref keeps the default.
+// WithLandBranch names the explicit trunk ref the whole land targets — (a) the
+// stale-base ancestor check, (b) the commit parent, and (c) the compare-and-swap
+// update-ref target — instead of the shared-root checkout's symbolic-ref HEAD
+// (which may be on a peer ticket branch). An empty ref keeps the default.
+func WithLandBranch(ref string) LandOption {
+	return func(c *landConfig) { c.branchRef = strings.TrimSpace(ref) }
+}
+
+// WithLandTrunkRef is the historical spelling of WithLandBranch, kept for
+// backward compatibility.
 func WithLandTrunkRef(ref string) LandOption {
-	return func(c *landConfig) { c.trunkRef = strings.TrimSpace(ref) }
+	return WithLandBranch(ref)
 }
 
 // WithLeasedGlobs configures the leased path globs for pathspec disjointness fencing.

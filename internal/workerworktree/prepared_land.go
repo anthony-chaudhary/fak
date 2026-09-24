@@ -169,9 +169,16 @@ func revalidatePreparedLand(root, wtPath string, receipt PreparedLandReceipt, cf
 	if rootErr != nil || worktreeErr != nil || rootStatErr != nil || worktreeStatErr != nil || !os.SameFile(rootInfo, worktreeInfo) {
 		return preparedReprepare("prepared worktree belongs to a different repository", "")
 	}
-	rc, branch := run(git, root, []string{"symbolic-ref", "--quiet", "HEAD"})
-	if rc != 0 || strings.TrimSpace(branch) != receipt.TargetRef {
-		return preparedReprepare("checked-out target branch changed; prepare again", tail(branch, 200))
+	// The checked-out-branch equality is only meaningful for the default land,
+	// which targets whatever the root checkout has checked out. With an explicit
+	// branch ref the land targets that ref regardless of the root's HEAD, so the
+	// equality is not required (and would wrongly refuse a main-based land while
+	// the root sits on a peer branch).
+	if cfg.branchRef == "" {
+		rc, branch := run(git, root, []string{"symbolic-ref", "--quiet", "HEAD"})
+		if rc != 0 || strings.TrimSpace(branch) != receipt.TargetRef {
+			return preparedReprepare("checked-out target branch changed; prepare again", tail(branch, 200))
+		}
 	}
 	rc, parent := run(git, root, []string{"rev-parse", "--verify", receipt.CandidateSHA + "^1"})
 	if rc != 0 || strings.TrimSpace(parent) != receipt.ParentSHA {

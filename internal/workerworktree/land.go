@@ -396,17 +396,24 @@ func landPrepared(root, wtPath, baseSHA, commitMsgFile string, paths []string, v
 		}
 	}
 	if checkBase != "" {
-		trunkRef := cfg.trunkRef
-		if trunkRef == "" {
-			trunkRef = LandTrunkRefDefault
+		// The ancestor check tests the SAME explicit trunk ref the land targets,
+		// never blindly the shared-root checkout HEAD: the root may sit on a peer
+		// ticket branch, so HEAD there is not the trunk a main-based land must
+		// descend from. When no explicit ref is supplied, resolve the root's
+		// symbolic-ref HEAD (backward compatible); when that is empty too, fall
+		// back to HEAD. When the ref does not resolve (local-only/offline repo),
+		// fall back to HEAD — fail open.
+		target := cfg.branchRef
+		if target == "" {
+			if rc, ref := run(git, root, []string{"symbolic-ref", "--quiet", "HEAD"}); rc == 0 {
+				target = strings.TrimSpace(ref)
+			}
 		}
-		// The ancestor check tests the TRUNK ref, never the shared-root checkout
-		// HEAD: the root may sit on a peer ticket branch, so HEAD there is not the
-		// trunk a main-based land must descend from. When the trunk ref does not
-		// resolve (local-only/offline repo), fall back to HEAD — fail open.
-		target := "HEAD"
-		if rc, _ := run(git, root, []string{"rev-parse", "--verify", "--quiet", trunkRef + "^{commit}"}); rc == 0 {
-			target = trunkRef
+		if target == "" {
+			target = "HEAD"
+		}
+		if rc, _ := run(git, root, []string{"rev-parse", "--verify", "--quiet", target + "^{commit}"}); rc != 0 {
+			target = "HEAD"
 		}
 		rc, _ := run(git, root, []string{"merge-base", "--is-ancestor", checkBase, target})
 		if rc != 0 {
@@ -800,17 +807,38 @@ func landIsolatedProspectivePrepared(root, wtPath, diff, msgFile string, paths [
 			finishIsolationAdmission()
 		}
 	}()
-	// The branch to move. Detached HEAD has no branch ref to CAS safely.
-	rc, ref := run(git, root, []string{"symbolic-ref", "--quiet", "HEAD"})
-	branch := strings.TrimSpace(ref)
-	if rc != 0 || branch == "" {
-		return isolatedLandReconciliation(wtPath, "trunk HEAD is detached or has no branch ref", ref)
+	// The branch to move: the ONE explicit trunk ref when supplied, else the
+	// root checkout's symbolic-ref HEAD. Detached HEAD has no branch ref to CAS
+	// safely, so it is refused only on the default path.
+	branch := cfg.branchRef
+	if branch == "" {
+		rc, ref := run(git, root, []string{"symbolic-ref", "--quiet", "HEAD"})
+		branch = strings.TrimSpace(ref)
+		if rc != 0 || branch == "" {
+			return isolatedLandReconciliation(wtPath, "trunk HEAD is detached or has no branch ref", ref)
+		}
+	} else if rc, full := run(git, root, []string{"rev-parse", "--symbolic-full-name", branch}); rc == 0 && strings.TrimSpace(full) != "" {
+		// Canonicalize a short explicit name ("main") to its full refname
+		// ("refs/heads/main"): `update-ref` (the CAS) and the shared-root
+		// comparison both need the full form.
+		branch = strings.TrimSpace(full)
 	}
-	// The exact base our commit parents AND the compare-and-swap old-value.
-	rc, head := run(git, root, []string{"rev-parse", "HEAD"})
-	oldHEAD := strings.TrimSpace(head)
-	if rc != 0 || oldHEAD == "" {
-		return isolatedLandReconciliation(wtPath, "could not resolve trunk HEAD", head)
+	// The exact base our commit parents AND the compare-and-swap old-value. With
+	// an explicit branch ref, resolve THAT ref (never the root checkout's HEAD,
+	// which may sit on a peer branch); otherwise keep resolving HEAD.
+	var oldHEAD string
+	if cfg.branchRef != "" {
+		rc, head := run(git, root, []string{"rev-parse", "--verify", "--quiet", branch + "^{commit}"})
+		oldHEAD = strings.TrimSpace(head)
+		if rc != 0 || oldHEAD == "" {
+			return isolatedLandReconciliation(wtPath, "could not resolve explicit trunk ref "+branch, head)
+		}
+	} else {
+		rc, head := run(git, root, []string{"rev-parse", "HEAD"})
+		oldHEAD = strings.TrimSpace(head)
+		if rc != 0 || oldHEAD == "" {
+			return isolatedLandReconciliation(wtPath, "could not resolve trunk HEAD", head)
+		}
 	}
 	initialBase := baseSHA
 	if initialBase == "" {
@@ -874,7 +902,15 @@ func landIsolatedProspectivePrepared(root, wtPath, diff, msgFile string, paths [
 			// the peer just moved so this attempt re-builds on the NEW HEAD.
 			casRetrySleep(attempt)
 			finishRebase := beginLandPhase(tracker, "cas-rebase", attempt)
-			rc, head := run(git, root, []string{"rev-parse", "HEAD"})
+			// Re-resolve the SAME targeted ref: the explicit trunk branch when one
+			// was supplied, else the root's HEAD.
+			var head string
+			var rc int
+			if cfg.branchRef != "" {
+				rc, head = run(git, root, []string{"rev-parse", "--verify", "--quiet", branch + "^{commit}"})
+			} else {
+				rc, head = run(git, root, []string{"rev-parse", "HEAD"})
+			}
 			finishRebase()
 			newHEAD := strings.TrimSpace(head)
 			if rc != 0 || newHEAD == "" {
@@ -1137,6 +1173,26 @@ func landIsolatedProspectivePrepared(root, wtPath, diff, msgFile string, paths [
 			}
 		}
 
+		// When we landed onto an EXPLICIT branch that is not the branch the shared
+		// root checkout is on, do NOT write the new commit into the shared working
+		// tree: the root holds a PEER branch's content, and `checkout <newCommit> --
+		// paths` would splice trunk content into a peer checkout (clobbering peer
+		// WIP). The default path (target == root's checked-out branch) is unchanged.
+		skipSharedSync := false
+		if cfg.branchRef != "" {
+			rcRoot, rootRef := run(git, root, []string{"symbolic-ref", "--quiet", "HEAD"})
+			rootBranch := strings.TrimSpace(rootRef)
+			if rcRoot != 0 || rootBranch != branch {
+				skipSharedSync = true
+				detail += "; shared-root sync skipped (target " + branch + " != checked-out " + rootBranch + ")"
+			}
+		}
+		if skipSharedSync {
+			finishSync()
+			return Result{OK: true, Code: LandResultSuccess, Applied: true, Committed: true, CommitSHA: newCommit,
+				Reason: "isolated-index land " + shortSHA(newCommit) + " (race-free, #3547)",
+				Detail: detail, Disambiguation: disambiguation, RecoveryRef: recoveryRef, RemoteRecovery: remoteReceipt}, true
+		}
 		coArgs := append([]string{"checkout", newCommit, "--"}, syncPaths...)
 		if rc, out := run(git, root, coArgs); rc != 0 {
 			detail += "; landed " + shortSHA(newCommit) + " but working-tree sync failed: " + tail(out, 200)

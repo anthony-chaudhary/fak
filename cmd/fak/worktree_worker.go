@@ -921,6 +921,7 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 		"independent witness claim that clears a hard-self core-lock land (same claim vocabulary as fak commit)")
 	recoveryRemote := fs.String("recovery-remote", "", "publish/read-back candidate on this git remote before trunk CAS")
 	requireRemote := fs.Bool("require-remote-recovery", false, "refuse trunk CAS unless remote recovery read-back succeeds")
+	branch := fs.String("branch", "", "trunk ref to land onto (default: resolved symbolic-ref HEAD)")
 	unsafeSkipSymptomWitness := fs.Bool("unsafe-skip-symptom-witness", false,
 		"bypass mandatory fail-to-pass symptom witness for fix(*) commits")
 	symptomTags := fs.String("symptom-tags", "",
@@ -989,6 +990,9 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 	opts := []workerworktree.LandOption{
 		workerworktree.WithCoreLockWitness(*coreLockWitness),
 		workerworktree.WithLandProgress(worktreeWorkerProgressEmitter(stderr)),
+	}
+	if strings.TrimSpace(*branch) != "" {
+		opts = append(opts, workerworktree.WithLandBranch(strings.TrimSpace(*branch)))
 	}
 	if strings.TrimSpace(*recoveryRemote) != "" || *requireRemote {
 		remote := strings.TrimSpace(*recoveryRemote)
