@@ -1,0 +1,44 @@
+{
+  "version": "fak-accounts/v1",
+  "accounts": [
+    {
+      "id": "hive-ai",
+      "kind": "openai",
+      "base_url": "https://api.thehive.ai/api/v3",
+      "cred_env": "HIVE_API_KEY",
+      "label": "hive-ai hosted flash pool (OpenAI-compatible; one wire carries BOTH same-class seats of the ops-desk hosted-flash rotation, so each can rotate onto the other - key in HIVE_API_KEY)",
+      "context_tokens": 1048576,
+      "max_output_tokens": 32768
+    },
+    {
+      "id": "nebius",
+      "kind": "openai",
+      "base_url": "https://api.tokenfactory.us-north1.nebius.com/v1/",
+      "cred_env": "NEBIUS_API_KEY",
+      "label": "Nebius Token Factory rung carrying the same deepseek upstream (service account, token factory) - the account-level rotation rung under the same seat (key in NEBIUS_API_KEY)",
+      "context_tokens": 1048576,
+      "max_output_tokens": 131072
+    },
+    {
+      "id": "modal",
+      "kind": "openai",
+      "base_url": "https://anthony-mw-chaudhary--ep-deepseek-v4-1-flash-server.us-west.modal.direct/v1",
+      "cred_env": "MODAL_API_KEY",
+      "label": "Modal serverless rung carrying the same deepseek upstream (deepseek-v4-1-flash serve) - a second account-level rotation rung under the same seat (key in MODAL_API_KEY)",
+      "context_tokens": 1048576,
+      "max_output_tokens": 131072
+    }
+  ],
+  "bindings": [
+    {
+      "model": "glm-5.3-flash",
+      "account": "hive-ai",
+      "upstream_model": "zai-org/glm-5.3-flash"
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "account": "hive-ai",
+      "upstream_model": "deepseek-ai/DeepSeek-V4.1-Flash"
+    }
+  ]
+}
