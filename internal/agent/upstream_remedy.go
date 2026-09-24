@@ -213,7 +213,14 @@ func regionWalled(body []byte) bool {
 // of credit). The same request on a funded sibling account succeeds, so it is a failover
 // case rather than a terminal one.
 func creditExhausted(body []byte) bool {
-	return bodyContainsAny(body, "credit balance is too low", "insufficient_quota")
+	return bodyContainsAny(body,
+		"credit balance is too low", // Anthropic
+		"insufficient_quota",        // OpenAI
+		"payment required",          // RFC 402 status text echoed in the body
+		"exhausted your budget",     // Nebius Token Factory (witnessed live 2026-09-24)
+		"add funds",                 // the same family's remediation clause
+		"out of credit",
+	)
 }
 
 // modelNotEntitled reports whether a 403 body names a MODEL/feature entitlement refusal —
