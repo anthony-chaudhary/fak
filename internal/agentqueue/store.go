@@ -11,6 +11,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/flock"
@@ -33,6 +35,52 @@ func NewFileStore(path string) Store {
 }
 
 var ErrGenerationConflict = errors.New("agentqueue: generation conflict")
+
+var agentqueueReadSnapshotFile = os.ReadFile
+var agentqueueRenameSnapshotFile = os.Rename
+
+// A Windows reader can briefly meet a writer's atomic replacement with a
+// sharing violation. The snapshot is immutable while open, so retrying that
+// narrow error preserves the read contract without taking the writer lock.
+func readAgentQueueSnapshot(path string) ([]byte, error) {
+	const attempts = 12
+	var body []byte
+	var err error
+	for n := 0; n < attempts; n++ {
+		body, err = agentqueueReadSnapshotFile(path)
+		if err == nil || !agentqueueTransientShare(err) {
+			return body, err
+		}
+		if n+1 < attempts {
+			time.Sleep(8 * time.Millisecond)
+		}
+	}
+	return nil, err
+}
+
+func agentqueueTransientShare(err error) bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	return errors.Is(err, syscall.Errno(32)) || // ERROR_SHARING_VIOLATION
+		errors.Is(err, syscall.Errno(33)) || // ERROR_LOCK_VIOLATION
+		errors.Is(err, syscall.Errno(5)) // ERROR_ACCESS_DENIED during replace
+}
+
+func renameAgentQueueSnapshot(from, to string) error {
+	const attempts = 12
+	var err error
+	for n := 0; n < attempts; n++ {
+		err = agentqueueRenameSnapshotFile(from, to)
+		if err == nil || !agentqueueTransientShare(err) {
+			return err
+		}
+		if n+1 < attempts {
+			time.Sleep(8 * time.Millisecond)
+		}
+	}
+	return err
+}
 
 // Reserve serializes the read-plan-write transition across processes. The
 // expected generation is a compare-and-swap token, so a stale reconciler cannot
@@ -99,7 +147,7 @@ func nextGeneration(current string, starts []StartAction) string {
 }
 
 func (s Store) Load() (Snapshot, error) {
-	body, err := os.ReadFile(s.Path)
+	body, err := readAgentQueueSnapshot(s.Path)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("agentqueue: read snapshot: %w", err)
 	}
@@ -172,7 +220,7 @@ func (s Store) Save(snapshot Snapshot) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("agentqueue: close snapshot temp: %w", err)
 	}
-	if err := os.Rename(tmpPath, s.Path); err != nil {
+	if err := renameAgentQueueSnapshot(tmpPath, s.Path); err != nil {
 		return fmt.Errorf("agentqueue: commit snapshot: %w", err)
 	}
 	committed = true

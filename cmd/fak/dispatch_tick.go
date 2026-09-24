@@ -8,12 +8,15 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agentqueue"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/leasequeue"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
@@ -24,23 +27,29 @@ import (
 )
 
 type dispatchTickOptions struct {
-	Workspace       string
-	MaxWorkers      int
-	WorkKind        string
-	Lane            string
-	TargetIssue     int
-	LeaseID         string
-	LeaseTree       []string
-	Backend         string
-	BackendExplicit bool
-	WorkerSpeed     string
-	Goal            string
-	GoalProfile     string
-	ExcludeLanes    []string
-	Live            bool
-	Refresh         bool
-	PreferNewest    bool
-	Generation      string
+	Workspace         string
+	MaxWorkers        int
+	WorkKind          string
+	Lane              string
+	TargetIssue       int
+	LeaseID           string
+	LeaseTree         []string
+	AgentQueueState   string
+	AgentQueueAttempt string
+	AgentQueueNonce   string
+	// Set immediately before entering the spawner. A normal refusal before that
+	// boundary proves no wrapper could have started and can return the queue item.
+	agentQueueSpawnAttempted *bool
+	Backend                  string
+	BackendExplicit          bool
+	WorkerSpeed              string
+	Goal                     string
+	GoalProfile              string
+	ExcludeLanes             []string
+	Live                     bool
+	Refresh                  bool
+	PreferNewest             bool
+	Generation               string
 	// View scopes the tick's issue routing to a named issue-view from
 	// .github/issue-views.json (#1411). Empty disables the scoping; the CLI
 	// flag defaults it to the operator-marked `current` board/milestone focus.
@@ -207,10 +216,37 @@ func dispatchModelDowngradeDefault() bool {
 	return dispatchBoolValue(raw)
 }
 
-func runDispatchTick(stdout, stderr io.Writer, argv []string) int {
+func runDispatchTick(stdout, stderr io.Writer, argv []string) (exitCode int) {
 	opts, asJSON, code := parseDispatchTickFlags(stderr, argv)
 	if code != 0 {
 		return code
+	}
+	if opts.AgentQueueState != "" {
+		if opts.LeaseID != opts.AgentQueueAttempt {
+			fmt.Fprintln(stderr, "fak dispatch tick: agentqueue lease id must match attempt id")
+			return 1
+		}
+		if err := validateDispatchAgentQueueHandoff(opts.AgentQueueState, opts.AgentQueueAttempt, opts.AgentQueueNonce, opts.TargetIssue, opts.Lane); err != nil {
+			fmt.Fprintf(stderr, "fak dispatch tick: %v\n", err)
+			return 1
+		}
+		spawnAttempted := false
+		opts.agentQueueSpawnAttempted = &spawnAttempted
+		defer func() {
+			if spawnAttempted {
+				return
+			}
+			abortCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := agentqueue.FileStore(opts.AgentQueueState).AbortLaunching(abortCtx, opts.AgentQueueAttempt, opts.AgentQueueNonce, 0, time.Time{}); err != nil {
+				fmt.Fprintf(stderr, "fak dispatch tick: return unstarted agentqueue launch: %v\n", err)
+				exitCode = 1
+			}
+		}()
+		if !opts.Live || dispatchtick.IsMicroBackend(opts.Backend) {
+			fmt.Fprintln(stderr, "fak dispatch tick: agentqueue handoff requires a live guarded CLI backend")
+			return 1
+		}
 	}
 	payload, err := evaluateDispatchTick(opts, stderr)
 	if err != nil {
@@ -273,6 +309,9 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	targetIssue := fs.Int("target-issue", 0, "explicit issue number for the selected lane")
 	leaseID := fs.String("lease-id", "", "explicit lane/issue lease id")
 	leaseTree := fs.String("lease-tree", "", "comma-separated lease tree globs for the explicit lease")
+	agentQueueState := fs.String("agentqueue-state", "", "internal: absolute path to durable agent queue state")
+	agentQueueAttempt := fs.String("agentqueue-attempt", "", "internal: launching agent queue attempt id")
+	agentQueueNonce := fs.String("agentqueue-nonce", "", "internal: fenced launch nonce")
 	workerSpeed := fs.String("speed", firstString(strings.TrimSpace(os.Getenv("FAK_CLAUDE_SPEED")), "auto"), "Claude launch speed posture (auto|fast|standard); ignored by non-Claude backends")
 	backend := fs.String("backend", firstString(strings.TrimSpace(os.Getenv("FLEET_WORKER_BACKEND")), "codex"), "worker backend (claude|opencode|codex|micro); micro (#2030, opt-in) enrolls the routed lane into the in-process microagent host instead of a detached CLI — default follows $FLEET_WORKER_BACKEND, else codex")
 	goal := fs.String("goal", "", "durable dispatch loop goal id (for example throughput or high-priority); known goal ids also select the default --goal-profile")
@@ -318,6 +357,23 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	waveSize := fs.Int("wave-size", 0, "internal: wave size sidecar")
 	waveShortfall := fs.Int("wave-shortfall", 0, "internal: wave shortfall sidecar")
 	if err := fs.Parse(argv); err != nil {
+		return dispatchTickOptions{}, false, 2
+	}
+	queueState := strings.TrimSpace(*agentQueueState)
+	queueAttempt := strings.TrimSpace(*agentQueueAttempt)
+	queueNonce := strings.TrimSpace(*agentQueueNonce)
+	queueFields := 0
+	for _, value := range []string{queueState, queueAttempt, queueNonce} {
+		if value != "" {
+			queueFields++
+		}
+	}
+	if queueFields != 0 && queueFields != 3 {
+		fmt.Fprintln(stderr, "fak dispatch tick: --agentqueue-state, --agentqueue-attempt, and --agentqueue-nonce must be provided together")
+		return dispatchTickOptions{}, false, 2
+	}
+	if queueState != "" && !filepath.IsAbs(queueState) {
+		fmt.Fprintln(stderr, "fak dispatch tick: --agentqueue-state must be an absolute path")
 		return dispatchTickOptions{}, false, 2
 	}
 
@@ -379,6 +435,9 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 		TargetIssue:             *targetIssue,
 		LeaseID:                 strings.TrimSpace(*leaseID),
 		LeaseTree:               splitCommaList(*leaseTree),
+		AgentQueueState:         queueState,
+		AgentQueueAttempt:       queueAttempt,
+		AgentQueueNonce:         queueNonce,
 		Backend:                 b,
 		BackendExplicit:         explicitBackend,
 		WorkerSpeed:             speed,
@@ -876,6 +935,14 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 	if guarded {
 		augmentGuardEnvDefaults()
 	}
+	if opts.AgentQueueState != "" && !guarded {
+		payload["ok"] = false
+		payload["action"] = "agentqueue_guard_required"
+		payload["reason"] = "agentqueue-backed dispatch requires a guarded worker launch"
+		releaseAbandonedLaneLease(root, lease, payload)
+		recordDispatchPayload(runsDir, opts.Backend, payload)
+		return finish(payload), nil
+	}
 	env, err := dispatchWorkerEnv(opts.Backend, pick.Lane, root, runsDir, account, opts.Goal, opts.GoalProfile)
 	if err != nil {
 		releaseAbandonedLaneLease(root, lease, payload) // #5565, as above: no worker, no slot, no releaser.
@@ -912,8 +979,31 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		recordDispatchPayload(runsDir, opts.Backend, payload)
 		return finish(payload), nil
 	}
+	// Queue identity is meaningful only when the admitted argv still invokes the
+	// guarded wrapper. A broker rewrite must be reviewed before it can receive a
+	// durable launch attempt; otherwise a direct agent could start unregistered.
+	if opts.AgentQueueState != "" && !slices.Equal(grant.Argv, launchCommand) {
+		payload["ok"] = false
+		payload["action"] = "agentqueue_guard_rewritten"
+		payload["reason"] = "spawn broker changed guarded queue launch command"
+		releaseAbandonedLaneLease(root, lease, payload)
+		recordDispatchPayload(runsDir, opts.Backend, payload)
+		return finish(payload), nil
+	}
 	launchCommand = grant.Argv
 	env = grant.Env
+	if env == nil {
+		env = make(map[string]string)
+	}
+	// The broker may rewrite the environment. Queue identity is injected only
+	// after that boundary so it cannot be dropped, replaced, or inherited from
+	// the dispatcher's ambient process environment.
+	stripAgentQueueEnv(env)
+	if opts.AgentQueueState != "" {
+		env[agentQueueStatePathEnv] = opts.AgentQueueState
+		env[agentQueueAttemptIDEnv] = opts.AgentQueueAttempt
+		env[agentQueueNonceEnv] = opts.AgentQueueNonce
+	}
 	spawnCWD := firstString(grant.CWD, root)
 
 	// Managed worktrees are the portable default. Preparation is an admission
@@ -930,18 +1020,40 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		recordDispatchPayload(runsDir, opts.Backend, payload)
 		return finish(payload), nil
 	}
+	if opts.AgentQueueState != "" && !workerworktree.IsWorkerWorktree(spawnCWD) {
+		payload["ok"] = false
+		payload["action"] = "agentqueue_worktree_required"
+		payload["verdict"] = "AGENTQUEUE_WORKTREE_REQUIRED"
+		payload["reason"] = "queued concurrency requires an isolated managed worker worktree"
+		releaseAbandonedLaneLease(root, lease, payload)
+		recordDispatchPayload(runsDir, opts.Backend, payload)
+		return finish(payload), nil
+	}
 
 	stdinPayload := dispatchtick.WorkerStdinPayload(opts.Backend, prompt)
+	if opts.agentQueueSpawnAttempted != nil {
+		*opts.agentQueueSpawnAttempted = true
+	}
 	spawned, err := dispatchIssueWorkerSpawner(launchCommand, env, spawnCWD, runsDir, target, pick.Lane, opts.Backend, leaseID, pick.Tree, account, opts.Membership, baseSHA, stdinPayload, opts.SpawnProbeS)
 	if err != nil {
 		payload["ok"] = false
-		payload["action"] = "spawn_failed"
-		payload["verdict"] = "SPAWN_FAILED"
 		payload["reason"] = err.Error()
-		// #5565: the spawner failed before any process existed (and so before any log
-		// stem or fence sidecar was written), the second of the two paths no releaser
-		// could ever reach. Hand the lane back now.
-		releaseAbandonedLaneLease(root, lease, payload)
+		if spawned.PID > 0 {
+			payload["action"] = "spawn_ambiguous"
+			payload["verdict"] = "SPAWN_AMBIGUOUS"
+			payload["pid"] = spawned.PID
+			payload["log"] = spawned.Log
+			if handoffErr := handoffDispatchWorktreeOwner(payload, spawned.PID); handoffErr != nil {
+				payload["worktree_owner_handoff_error"] = handoffErr.Error()
+			}
+			// A process may exist. Keep both the queue attempt and lane lease
+			// fenced until the wrapper or witness sweep proves termination.
+		} else {
+			payload["action"] = "spawn_failed"
+			payload["verdict"] = "SPAWN_FAILED"
+			// No process could have started; return the unused lane now.
+			releaseAbandonedLaneLease(root, lease, payload)
+		}
 		recordDispatchPayload(runsDir, opts.Backend, payload)
 		return finish(payload), nil
 	}
@@ -960,9 +1072,9 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		payload["verdict"] = "WORKTREE_OWNER_HANDOFF_FAILED"
 		payload["reason"] = err.Error()
 		payload["pid"] = spawned.PID
-		if !uncertainStartup {
-			releaseAbandonedLaneLease(root, lease, payload)
-		}
+		// The worker already has a PID. A failed owner handoff does not prove its
+		// process tree stopped, so keep the lane fenced until witness or TTL
+		// reconciliation proves it safe to release.
 		recordDispatchPayload(runsDir, opts.Backend, payload)
 		return finish(payload), nil
 	}

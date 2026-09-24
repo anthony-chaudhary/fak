@@ -110,7 +110,7 @@ func (c Controller) Tick(ctx context.Context) (TickReceipt, error) {
 	if runner == nil {
 		runner = ExecRunner{}
 	}
-	launches, err := Actuate(ctx, c.FakPath, reserved, plan.Start, runner)
+	launches, err := ActuateReserved(ctx, c.FakPath, c.Store, reserved, plan.Start, runner)
 	if err != nil {
 		return TickReceipt{Generation: reserved.Generation, Plan: plan, Launches: launches, Restart: restartRec}, err
 	}

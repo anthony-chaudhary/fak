@@ -48,6 +48,7 @@ type RestartOptions struct {
 	LeaseTimeout  time.Duration                              `json:"lease_timeout,omitempty"`
 	IsExpired     func(intent Intent, attempt *Attempt) bool `json:"-"`
 	Indeterminate func(intent Intent, attempt *Attempt) bool `json:"-"`
+	StartTime     func(pid int) (time.Time, bool)            `json:"-"`
 }
 
 func ReconcileRestart(snapshot Snapshot, liveness ProcessLivenessChecker, opts RestartOptions) (RestartReconciliation, Snapshot, error) {
@@ -196,7 +197,39 @@ func ReconcileRestart(snapshot Snapshot, liveness ProcessLivenessChecker, opts R
 			continue
 		}
 
-		if pid > 0 && liveness(pid) {
+		processLive := pid > 0 && liveness(pid)
+		guardedRunning := latestActive != nil && latestActive.State == AttemptRunning && latestActive.Nonce != ""
+		if guardedRunning {
+			startTime := opts.StartTime
+			if startTime == nil {
+				startTime = processalive.StartTime
+			}
+			matched := false
+			if processLive {
+				if actual, ok := startTime(pid); ok && actual.Equal(latestActive.StartedAt) {
+					matched = true
+				}
+			}
+			if !matched {
+				reason := "WRAPPER_IDENTITY_UNVERIFIED"
+				receiptReason := "wrapper identity unverified"
+				if !processLive {
+					reason = "WRAPPER_EXIT_UNWITNESSED"
+					receiptReason = "wrapper exit unwitnessed"
+				}
+				intent.State = IntentHeld
+				intent.RetryEligible = false
+				intent.HoldReason = reason
+				for _, att := range activeAttempts {
+					att.State = AttemptFailed
+				}
+				rec.Held = append(rec.Held, AttemptDisposition{
+					IntentID: intent.ID, Action: AttemptActionHold, PID: pid, Reason: receiptReason,
+				})
+				continue
+			}
+		}
+		if processLive {
 			intent.State = IntentRunning
 			for _, att := range activeAttempts {
 				att.State = AttemptRunning

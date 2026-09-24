@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/flock"
@@ -16,6 +17,31 @@ import (
 // ErrFenced means an attempt transition presented stale state, nonce, or
 // wrapper identity and must not be retried as a fresh launch.
 var ErrFenced = errors.New("agentqueue: attempt fenced")
+
+const HoldAwaitingWorkWitness = "AWAITING_WORK_WITNESS"
+
+// WorkWitnessProof is the independent dispatch sweep's terminal evidence for
+// one exact issue attempt. The queue admits success only on all three rungs:
+// an identified commit, a diff witness, and green changed-package tests.
+type WorkWitnessProof struct {
+	Issue     int
+	PID       int
+	LogStem   string
+	SHA       string
+	Claim     string
+	Verdict   string
+	Witness   string
+	TestClaim string
+}
+
+func (p WorkWitnessProof) digest() (string, error) {
+	if p.Issue <= 0 || p.PID <= 0 || p.LogStem == "" || p.SHA == "" || p.Claim != "CLAIM_WITNESSED" ||
+		!strings.EqualFold(p.Verdict, "OK") || p.Witness != "diff-witnessed" || p.TestClaim != "CLAIM_TEST_GREEN" {
+		return "", errors.New("agentqueue: work witness is not a green diff-and-test proof")
+	}
+	h := sha256.Sum256([]byte(fmt.Sprintf("%d\x00%d\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s", p.Issue, p.PID, p.LogStem, p.SHA, p.Claim, p.Verdict, p.Witness, p.TestClaim)))
+	return hex.EncodeToString(h[:]), nil
+}
 
 // BeginLaunching durably advances one reserved attempt into its pre-start
 // launching state. Repeating the same nonce returns the persisted attempt
@@ -116,6 +142,98 @@ func (s Store) RegisterWrapper(ctx context.Context, attemptID, nonce string, pid
 	return result, err
 }
 
+// AbortLaunching records that a matching launch did not start an inner agent.
+// Callers must have positive proof that the inner agent never started before
+// using this transition. The launch identity is retained for audit purposes.
+func (s Store) AbortLaunching(ctx context.Context, attemptID, nonce string, pid int, startAt time.Time) (Attempt, error) {
+	if attemptID == "" {
+		return Attempt{}, errors.New("agentqueue: attempt id is required")
+	}
+	if nonce == "" {
+		return Attempt{}, errors.New("agentqueue: launch nonce is required")
+	}
+	if pid < 0 {
+		return Attempt{}, errors.New("agentqueue: wrapper PID must not be negative")
+	}
+	if (pid == 0) != startAt.IsZero() {
+		return Attempt{}, errors.New("agentqueue: wrapper PID and start time must both be present or absent")
+	}
+	startAt = startAt.UTC()
+
+	var result Attempt
+	err := s.withLifecycleState(ctx, "abort launching", func(snapshot *Snapshot) (bool, error) {
+		attempt, err := findLifecycleAttempt(snapshot, attemptID)
+		if err != nil {
+			return false, err
+		}
+		intent, err := findLifecycleIntent(snapshot, attempt.IntentID)
+		if err != nil {
+			return false, err
+		}
+		if attempt.Nonce != nonce || attempt.PID != pid || !attempt.StartedAt.Equal(startAt) {
+			return false, fmt.Errorf("%w: attempt %q has a different wrapper identity", ErrFenced, attemptID)
+		}
+		if intent.State != IntentQueued {
+			return false, fmt.Errorf("%w: intent %q is %q before launch abort", ErrFenced, intent.ID, intent.State)
+		}
+		switch attempt.State {
+		case AttemptLaunching:
+			attempt.State = AttemptFailed
+			result = *attempt
+			snapshot.Generation = nextLifecycleGeneration(snapshot.Generation, "abort-launching", result)
+			return true, nil
+		case AttemptFailed:
+			result = *attempt
+			return false, nil
+		default:
+			return false, fmt.Errorf("%w: attempt %q is %q", ErrFenced, attemptID, attempt.State)
+		}
+	})
+	return result, err
+}
+
+// AbortReserved records that a reservation could not be handed to a launcher.
+// The queued intent remains eligible for a later reservation.
+func (s Store) AbortReserved(ctx context.Context, attemptID string) (Attempt, error) {
+	if attemptID == "" {
+		return Attempt{}, errors.New("agentqueue: attempt id is required")
+	}
+
+	var result Attempt
+	err := s.withLifecycleState(ctx, "abort reserved", func(snapshot *Snapshot) (bool, error) {
+		attempt, err := findLifecycleAttempt(snapshot, attemptID)
+		if err != nil {
+			return false, err
+		}
+		intent, err := findLifecycleIntent(snapshot, attempt.IntentID)
+		if err != nil {
+			return false, err
+		}
+		if intent.State != IntentQueued {
+			return false, fmt.Errorf("%w: intent %q is %q before reservation abort", ErrFenced, intent.ID, intent.State)
+		}
+		switch attempt.State {
+		case AttemptReserved:
+			if attempt.Nonce != "" || !attempt.LaunchDeadline.IsZero() || attempt.PID != 0 || !attempt.StartedAt.IsZero() {
+				return false, fmt.Errorf("%w: reserved attempt %q carries launch identity", ErrFenced, attemptID)
+			}
+			attempt.State = AttemptFailed
+			result = *attempt
+			snapshot.Generation = nextLifecycleGeneration(snapshot.Generation, "abort-reserved", result)
+			return true, nil
+		case AttemptFailed:
+			if attempt.Nonce != "" || !attempt.LaunchDeadline.IsZero() || attempt.PID != 0 || !attempt.StartedAt.IsZero() {
+				return false, fmt.Errorf("%w: failed attempt %q carries launch identity", ErrFenced, attemptID)
+			}
+			result = *attempt
+			return false, nil
+		default:
+			return false, fmt.Errorf("%w: attempt %q is %q", ErrFenced, attemptID, attempt.State)
+		}
+	})
+	return result, err
+}
+
 // MarkRunning durably promotes a registered wrapper and its intent to running.
 // Repeating the same identity after promotion is an idempotent readback.
 func (s Store) MarkRunning(ctx context.Context, attemptID, nonce string, pid int, startAt time.Time) (Attempt, error) {
@@ -208,6 +326,99 @@ func (s Store) CompleteAttempt(ctx context.Context, attemptID, nonce string, pid
 		default:
 			return false, fmt.Errorf("%w: attempt %q is %q, not %q", ErrFenced, attemptID, attempt.State, targetAttempt)
 		}
+	})
+	return result, err
+}
+
+// HoldAttempt records a guard-directed terminal hold for a running wrapper.
+// Repeating the same identity and reason returns the persisted attempt without
+// another write; any competing terminal outcome is fenced.
+func (s Store) HoldAttempt(ctx context.Context, attemptID, nonce string, pid int, startAt time.Time, reason string) (Attempt, error) {
+	startAt, err := validateLifecycleIdentity(attemptID, nonce, pid, startAt)
+	if err != nil {
+		return Attempt{}, err
+	}
+	if reason == "" {
+		return Attempt{}, errors.New("agentqueue: hold reason is required")
+	}
+
+	var result Attempt
+	err = s.withLifecycleState(ctx, "hold attempt", func(snapshot *Snapshot) (bool, error) {
+		attempt, err := findLifecycleAttempt(snapshot, attemptID)
+		if err != nil {
+			return false, err
+		}
+		intent, err := findLifecycleIntent(snapshot, attempt.IntentID)
+		if err != nil {
+			return false, err
+		}
+		if attempt.Nonce != nonce || attempt.PID != pid || !attempt.StartedAt.Equal(startAt) {
+			return false, fmt.Errorf("%w: attempt %q has a different wrapper identity", ErrFenced, attemptID)
+		}
+		switch attempt.State {
+		case AttemptRunning:
+			if intent.State != IntentRunning || intent.PID != pid {
+				return false, fmt.Errorf("%w: intent %q does not match running attempt", ErrFenced, intent.ID)
+			}
+			attempt.State = AttemptFailed
+			intent.State = IntentHeld
+			intent.RetryEligible = false
+			intent.HoldReason = reason
+			result = *attempt
+			snapshot.Generation = nextLifecycleGeneration(snapshot.Generation, "held", result)
+			return true, nil
+		case AttemptFailed:
+			if intent.State != IntentHeld || intent.PID != pid || intent.RetryEligible || intent.HoldReason != reason {
+				return false, fmt.Errorf("%w: intent %q does not match held attempt", ErrFenced, intent.ID)
+			}
+			result = *attempt
+			return false, nil
+		default:
+			return false, fmt.Errorf("%w: attempt %q is %q", ErrFenced, attemptID, attempt.State)
+		}
+	})
+	return result, err
+}
+
+// ResolveWitnessHeld completes only the cleanly joined wrapper attempt that
+// was parked for independent work evidence. A crash-held or differently fenced
+// attempt cannot be laundered into success by a later issue-level commit.
+func (s Store) ResolveWitnessHeld(ctx context.Context, attemptID, nonce string, proof WorkWitnessProof) (Attempt, error) {
+	if attemptID == "" || nonce == "" {
+		return Attempt{}, errors.New("agentqueue: attempt id and nonce are required")
+	}
+	digest, err := proof.digest()
+	if err != nil {
+		return Attempt{}, err
+	}
+	var result Attempt
+	err = s.withLifecycleState(ctx, "resolve work witness", func(snapshot *Snapshot) (bool, error) {
+		attempt, err := findLifecycleAttempt(snapshot, attemptID)
+		if err != nil {
+			return false, err
+		}
+		intent, err := findLifecycleIntent(snapshot, attempt.IntentID)
+		if err != nil {
+			return false, err
+		}
+		if attempt.Nonce != nonce || attempt.PID != proof.PID || attempt.StartedAt.IsZero() || intent.Launch.Issue != proof.Issue {
+			return false, fmt.Errorf("%w: work witness does not match attempt %q", ErrFenced, attemptID)
+		}
+		if attempt.State == AttemptSucceeded && intent.State == IntentCompleted && attempt.WitnessDigest == digest {
+			result = *attempt
+			return false, nil
+		}
+		if attempt.State != AttemptFailed || intent.State != IntentHeld || intent.HoldReason != HoldAwaitingWorkWitness || attempt.WitnessDigest != "" {
+			return false, fmt.Errorf("%w: attempt %q is not awaiting the work witness", ErrFenced, attemptID)
+		}
+		attempt.State = AttemptSucceeded
+		attempt.WitnessDigest = digest
+		intent.State = IntentCompleted
+		intent.RetryEligible = false
+		intent.HoldReason = ""
+		result = *attempt
+		snapshot.Generation = nextLifecycleGeneration(snapshot.Generation, "work-witness", result)
+		return true, nil
 	})
 	return result, err
 }

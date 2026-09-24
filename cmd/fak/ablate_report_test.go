@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -108,11 +109,15 @@ func TestAblateReportMissingPath(t *testing.T) {
 	}
 }
 
-// A committed cross-agent artifact (a different schema, no runs[]) is rejected rather
-// than rendered as an empty table.
+// A cross-agent artifact (a different schema, no runs[]) is rejected rather than
+// rendered as an empty table.
 func TestAblateReportRejectsNonArmArtifact(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cross-agent.json")
+	if err := os.WriteFile(path, []byte(`{"schema":"fak.cross-agent-ablation.v1","regime":"test"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	var out, errb bytes.Buffer
-	code := runAblate(&out, &errb, []string{"--report", "../../experiments/ablate/cross-agent-pong-opus.json"})
+	code := runAblate(&out, &errb, []string{"--report", path})
 	if code != 1 {
 		t.Fatalf("exit=%d, want 1 for a non-arm artifact; stdout=%s stderr=%s", code, out.String(), errb.String())
 	}

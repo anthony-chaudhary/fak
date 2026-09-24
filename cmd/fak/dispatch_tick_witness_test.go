@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,7 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agentqueue"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
@@ -1087,5 +1090,221 @@ func TestMergeDispatchWitnessRecordsFreshWins(t *testing.T) {
 	got := mergeDispatchWitnessRecords(durable, fresh)
 	if len(got) != 2 || got[0].Issue != 12 || got[0].Claim != dispatchtick.ClaimWitnessed || got[0].SHA != "new" || got[1].Issue != 13 {
 		t.Fatalf("got=%+v", got)
+	}
+}
+
+func seedDispatchWitnessHeldAttempt(t *testing.T, issue int) (agentqueue.Store, string, string, string, int) {
+	t.Helper()
+	store, statePath, attemptID, nonce := newLaunchingDispatchHandoff(t, issue, "cmd")
+	pid := deadDispatchPID - issue
+	startedAt := time.Now().UTC().Add(-time.Second)
+	if _, err := store.RegisterWrapper(context.Background(), attemptID, nonce, pid, startedAt); err != nil {
+		t.Fatalf("RegisterWrapper: %v", err)
+	}
+	if _, err := store.MarkRunning(context.Background(), attemptID, nonce, pid, startedAt); err != nil {
+		t.Fatalf("MarkRunning: %v", err)
+	}
+	if _, err := store.HoldAttempt(context.Background(), attemptID, nonce, pid, startedAt, agentqueue.HoldAwaitingWorkWitness); err != nil {
+		t.Fatalf("HoldAttempt: %v", err)
+	}
+	return store, statePath, attemptID, nonce, pid
+}
+
+func writeDispatchAgentQueueBindingFixture(t *testing.T, stem, statePath, attemptID, nonce string, issue int) {
+	t.Helper()
+	binding := map[string]any{
+		"schema":     dispatchAgentQueueBindingSchema,
+		"state_path": filepath.Clean(statePath),
+		"attempt_id": attemptID,
+		"nonce":      nonce,
+		"issue":      issue,
+		"lane":       "cmd",
+		"stem":       filepath.Clean(stem),
+	}
+	raw, err := json.Marshal(binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stem+".agentqueue", raw, 0o600); err != nil {
+		t.Fatalf("write agentqueue binding: %v", err)
+	}
+}
+
+func assertDispatchWitnessAttemptHeld(t *testing.T, store agentqueue.Store) {
+	t.Helper()
+	snapshot, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Attempts) != 1 || len(snapshot.Intents) != 1 ||
+		snapshot.Attempts[0].State != agentqueue.AttemptFailed || snapshot.Attempts[0].WitnessDigest != "" ||
+		snapshot.Intents[0].State != agentqueue.IntentHeld || snapshot.Intents[0].HoldReason != agentqueue.HoldAwaitingWorkWitness {
+		t.Fatalf("queue state = attempt %+v intent %+v, want witness-held without digest", snapshot.Attempts, snapshot.Intents)
+	}
+}
+
+func dispatchGreenWitnessRecord(issue int, stem string) dispatchtick.WitnessRecord {
+	return dispatchtick.WitnessRecord{
+		Issue: issue, Log: filepath.Base(stem) + ".log", SHA: "abc123", Claim: dispatchtick.ClaimWitnessed,
+		Verdict: "OK", Witness: dispatchtick.WitnessOK, TestClaim: dispatchtick.ClaimTestGreen,
+	}
+}
+
+func writeDispatchWitnessRecordFixture(t *testing.T, stem string, rec dispatchtick.WitnessRecord) {
+	t.Helper()
+	raw, err := json.Marshal(rec.Map())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stem+dispatchtick.WitnessSidecarSuffix, raw, 0o600); err != nil {
+		t.Fatalf("write durable witness: %v", err)
+	}
+}
+
+func TestDispatchAgentQueueWitnessExactBindingCompletesAndReplays(t *testing.T) {
+	const issue = 7811
+	store, statePath, attemptID, nonce, pid := seedDispatchWitnessHeldAttempt(t, issue)
+	stem := filepath.Join(t.TempDir(), "resolve-7811-20260923-010101")
+	writeDispatchAgentQueueBindingFixture(t, stem, statePath, attemptID, nonce, issue)
+	if err := os.WriteFile(stem+".pid", []byte(fmt.Sprint(pid)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec := dispatchGreenWitnessRecord(issue, stem)
+	writeDispatchWitnessRecordFixture(t, stem, rec)
+	if err := resolveDispatchAgentQueueWitness(stem, rec, rec.Map()); err != nil {
+		t.Fatalf("resolve green witness: %v", err)
+	}
+	first, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Attempts[0].State != agentqueue.AttemptSucceeded || first.Attempts[0].WitnessDigest == "" ||
+		first.Intents[0].State != agentqueue.IntentCompleted || first.Intents[0].HoldReason != "" {
+		t.Fatalf("resolved queue = attempt %+v intent %+v", first.Attempts[0], first.Intents[0])
+	}
+	if err := resolveDispatchAgentQueueWitness(stem, rec, rec.Map()); err != nil {
+		t.Fatalf("replay green witness: %v", err)
+	}
+	second, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Generation != first.Generation || second.Attempts[0].WitnessDigest != first.Attempts[0].WitnessDigest {
+		t.Fatalf("replay mutated queue: first=%+v second=%+v", first, second)
+	}
+}
+
+func TestDispatchAgentQueueWitnessSweepCompletesExactHeldAttempt(t *testing.T) {
+	const issue = 7813
+	const workerSHA = "abc123"
+	root := t.TempDir()
+	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
+	stem := filepath.Join(runsDir, "resolve-7813-20260923-030303")
+	store, statePath, attemptID, nonce, pid := seedDispatchWitnessHeldAttempt(t, issue)
+	writeWitnessWorker(t, runsDir, filepath.Base(stem), "# fak-spawn issue=7813 lane=cmd\ndone\n", pid)
+	worktreePath := filepath.Join(root, workerworktree.WorktreeMarker+"-7813")
+	binding := dispatchAgentQueueBinding{
+		Schema: dispatchAgentQueueBindingSchema, StatePath: filepath.Clean(statePath),
+		AttemptID: attemptID, Nonce: nonce, Issue: issue, Lane: "cmd", Stem: filepath.Clean(stem),
+		WorktreePath: filepath.Clean(worktreePath),
+	}
+	raw, err := json.Marshal(binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stem+dispatchAgentQueueBindingSuffix, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stem+dispatchWorktreeSidecarSuffix, []byte(worktreePath), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	withWitnessStubs(t, func(_ string, gotIssue int, _ string) string {
+		if gotIssue != issue {
+			t.Fatalf("resolving issue = %d, want %d", gotIssue, issue)
+		}
+		return workerSHA
+	}, "OK", dispatchtick.WitnessOK)
+	oldCites := dispatchWitnessExactIssueCites
+	dispatchWitnessExactIssueCites = func(_ string, sha string, gotIssue int) (bool, error) {
+		if sha != workerSHA || gotIssue != issue {
+			t.Fatalf("exact issue citation = %q/%d, want %q/%d", sha, gotIssue, workerSHA, issue)
+		}
+		return true, nil
+	}
+	oldLand := dispatchWitnessLandReap
+	dispatchWitnessLandReap = func(_ string, path, _ string, _ []string) workerworktree.Result {
+		return workerworktree.Result{
+			OK: true, Code: workerworktree.LandResultSuccess, Applied: true, Committed: true,
+			CommitSHA: workerSHA, Path: path, Removed: true,
+		}
+	}
+	t.Cleanup(func() {
+		dispatchWitnessExactIssueCites = oldCites
+		dispatchWitnessLandReap = oldLand
+	})
+	dispatchWitnessTestRun = func(_ string, sha string) (bool, bool) {
+		return sha == workerSHA, sha == workerSHA
+	}
+
+	_, records := witnessExitedWorkers(root, runsDir, true)
+	if len(records) != 1 || records[0].Claim != dispatchtick.ClaimWitnessed || records[0].TestClaim != dispatchtick.ClaimTestGreen {
+		t.Fatalf("witness records = %+v, want one green witnessed record", records)
+	}
+	snapshot, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Attempts[0].State != agentqueue.AttemptSucceeded || snapshot.Attempts[0].WitnessDigest == "" ||
+		snapshot.Intents[0].State != agentqueue.IntentCompleted {
+		t.Fatalf("sweep did not complete bound queue attempt: attempt=%+v intent=%+v", snapshot.Attempts[0], snapshot.Intents[0])
+	}
+	if _, err := os.Stat(stem + dispatchtick.WitnessSidecarSuffix); err != nil {
+		t.Fatalf("durable witness missing before queue completion: %v", err)
+	}
+	landRaw, err := os.ReadFile(stem + dispatchAgentQueueLandSuffix)
+	if err != nil {
+		t.Fatalf("durable land receipt missing: %v", err)
+	}
+	var land workerworktree.Result
+	if err := json.Unmarshal(landRaw, &land); err != nil || land.CommitSHA != workerSHA {
+		t.Fatalf("durable land receipt = %+v, err=%v, want commit %q", land, err, workerSHA)
+	}
+}
+
+func TestDispatchAgentQueueWitnessIncompleteEvidenceRemainsHeld(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		binding   bool
+		stale     bool
+		testClaim string
+		wantErr   bool
+	}{
+		{name: "missing binding", testClaim: dispatchtick.ClaimTestGreen},
+		{name: "stale binding", binding: true, stale: true, testClaim: dispatchtick.ClaimTestGreen, wantErr: true},
+		{name: "unrun tests", binding: true, testClaim: dispatchtick.ClaimTestUnrun},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const issue = 7812
+			store, statePath, attemptID, nonce, pid := seedDispatchWitnessHeldAttempt(t, issue)
+			stem := filepath.Join(t.TempDir(), "resolve-7812-20260923-020202")
+			if tc.binding {
+				bindingNonce := nonce
+				if tc.stale {
+					bindingNonce = "stale-" + nonce
+				}
+				writeDispatchAgentQueueBindingFixture(t, stem, statePath, attemptID, bindingNonce, issue)
+			}
+			if err := os.WriteFile(stem+".pid", []byte(fmt.Sprint(pid)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			rec := dispatchGreenWitnessRecord(issue, stem)
+			rec.TestClaim = tc.testClaim
+			writeDispatchWitnessRecordFixture(t, stem, rec)
+			err := resolveDispatchAgentQueueWitness(stem, rec, rec.Map())
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("resolve error = %v, wantErr=%v", err, tc.wantErr)
+			}
+			assertDispatchWitnessAttemptHeld(t, store)
+		})
 	}
 }
