@@ -40,6 +40,8 @@ var specPathFor = map[string]string{
 	"/v1beta/":                      "/v1beta/models/{model}:generateContent",
 	"/v1/fak/syscall":               "/v1/fak/syscall",
 	"/v1/fak/tokenize":              "/v1/fak/tokenize",
+	"/v1/fak/control/directives":    "/v1/fak/control/directives",
+	"/v1/fak/control/directives/":   "/v1/fak/control/directives/{id}",
 	"/v1/fak/features":              "/v1/fak/features",
 	"/v1/fak/adjudicate":            "/v1/fak/adjudicate",
 	"/v1/fak/admit":                 "/v1/fak/admit",
@@ -218,10 +220,99 @@ func TestNativeTokenizeOpenAPIContract(t *testing.T) {
 	}
 }
 
+// TestProvisionalControlIngressOpenAPIContract is the schema-first witness for
+// leaf 1A.3. The route mappings are deliberately prepared before routeTable()
+// registers them; the later wiring leaf can therefore make both routes live
+// without inventing or changing their wire contract.
+func TestProvisionalControlIngressOpenAPIContract(t *testing.T) {
+	raw, err := os.ReadFile(filepath.FromSlash(openAPISpecPath))
+	if err != nil {
+		t.Fatalf("read %s: %v", openAPISpecPath, err)
+	}
+	spec := string(raw)
+
+	if !specDeclaresMethodForPath(spec, "/v1/fak/control/directives", "post") {
+		t.Error("control directive collection must declare POST")
+	}
+	if !specDeclaresMethodForPath(spec, "/v1/fak/control/directives/{id}", "get") {
+		t.Error("control directive item must declare GET")
+	}
+	if got := specPathFor["/v1/fak/control/directives"]; got != "/v1/fak/control/directives" {
+		t.Errorf("collection route mapping = %q", got)
+	}
+	if got := specPathFor["/v1/fak/control/directives/"]; got != "/v1/fak/control/directives/{id}" {
+		t.Errorf("item subtree route mapping = %q", got)
+	}
+
+	directive := specSchemaBlock(spec, "ControlDirective")
+	for _, want := range []string{
+		"additionalProperties: false",
+		"required: [id, target, generation, action]",
+		"1 MiB (1048576 bytes)",
+		"maxLength: 1024",
+		"pattern: '^(?!\\.{1,2}$)[A-Za-z0-9._~-]+$'",
+		"format: uint64",
+		"minimum: 1",
+		"increments by exactly one",
+		"enum: [cancel, pause, resume, steer, reprioritize, redirect, stop]",
+		"x-max-body-bytes: 1048576",
+	} {
+		if !strings.Contains(directive, want) {
+			t.Errorf("ControlDirective schema is missing %q", want)
+		}
+	}
+	if got := strings.Count(directive, "maxLength: 1024"); got != 2 {
+		t.Errorf("ControlDirective must bound both id and target at 1024 bytes; found %d bounds", got)
+	}
+
+	receipt := specSchemaBlock(spec, "ControlReceipt")
+	for _, want := range []string{
+		"required: [id, target, action, state, generation, sequence]",
+		"enum: [accepted, delivered, unknown, unavailable, denied]",
+		"provisioned single-writer journal",
+		"durable commit could not be",
+		"it is not an accepted or delivered receipt",
+	} {
+		if !strings.Contains(receipt, want) {
+			t.Errorf("ControlReceipt schema is missing %q", want)
+		}
+	}
+
+	collection := specPathBlock(spec, "/v1/fak/control/directives")
+	for _, want := range []string{
+		"'202':", "'409':", "'503':",
+		"same canonical directive is idempotent",
+		"including for LAN callers",
+		"not human C0 proof",
+		"bearerAuth: []", "apiKeyAuth: []",
+		"text/plain:",
+	} {
+		if !strings.Contains(collection, want) {
+			t.Errorf("control directive collection contract is missing %q", want)
+		}
+	}
+	item := specPathBlock(spec, "/v1/fak/control/directives/{id}")
+	if !strings.Contains(item, "'503':") {
+		t.Error("control directive item contract must declare unavailable as 503")
+	}
+	for _, want := range []string{"The latest known receipt", "response body is empty", "text/plain:", "pattern: '^(?!\\.{1,2}$)[A-Za-z0-9._~-]+$'"} {
+		if !strings.Contains(item, want) {
+			t.Errorf("control directive item contract is missing %q", want)
+		}
+	}
+	if strings.Contains(item, "#/components/responses/NotFound") {
+		t.Error("control directive GET 404 must not claim the shared JSON NotFound envelope")
+	}
+}
+
 // specDeclaresPostForPath reports whether the OpenAPI document declares a POST
 // operation under the given path key. It scans for the path key line and then,
 // before the next sibling path key, looks for an operation line `post:`.
 func specDeclaresPostForPath(spec, path string) bool {
+	return specDeclaresMethodForPath(spec, path, "post")
+}
+
+func specDeclaresMethodForPath(spec, path, method string) bool {
 	lines := strings.Split(spec, "\n")
 	inPath := false
 	for _, line := range lines {
@@ -231,13 +322,37 @@ func specDeclaresPostForPath(spec, path string) bool {
 		case trimmed == path && strings.HasSuffix(key, ":"):
 			inPath = true
 		case inPath && strings.HasPrefix(key, "/") && strings.HasSuffix(key, ":"):
-			// Reached the next sibling path key without finding POST.
+			// Reached the next sibling path key without finding the method.
 			return false
-		case inPath && key == "post:":
+		case inPath && key == method+":":
 			return true
 		}
 	}
 	return false
+}
+
+func specPathBlock(spec, path string) string {
+	lines := strings.Split(spec, "\n")
+	start := -1
+	for i, line := range lines {
+		key := strings.Trim(strings.TrimSuffix(strings.TrimSpace(line), ":"), "'\"")
+		if key == path {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return ""
+	}
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		key := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(key, "/") && strings.HasSuffix(key, ":") {
+			end = i
+			break
+		}
+	}
+	return strings.Join(lines[start:end], "\n")
 }
 
 // specSchemaBlock returns the text of a components/schemas block (from its

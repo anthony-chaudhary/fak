@@ -843,6 +843,102 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
 
+  /v1/fak/control/directives:
+    post:
+      tags: [fak-native]
+      summary: Durably accept a provisional control directive
+      description: |
+        Records a bounded control directive in the provisioned single-writer
+        journal. The ingress appends and syncs the journal before returning a
+        `202 accepted` receipt; accepted means recorded, not delivered or
+        applied. Delivery is asynchronous and does not grant execution priority.
+
+        Retrying the same `id` with the same canonical directive is idempotent
+        and returns its existing receipt. Reusing an `id` for different content,
+        or skipping/replaying the target's next generation, returns `409`.
+
+        This provisional route always requires a configured bearer or keyset
+        credential door, including for LAN callers. That credential authenticates
+        a caller or tenant only. A readable bearer, same-user process, loopback or
+        LAN origin is not human C0 proof and confers no human authority.
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ControlDirective' }
+      responses:
+        '202':
+          description: The directive is durably accepted, or an identical retry returns its existing receipt.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlReceipt' }
+        '400':
+          description: The body is malformed, exceeds the 1 MiB (1048576 byte) bound, has unknown fields, or contains an invalid directive; the receipt state is `denied`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlReceipt' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: The directive id conflicts with a different payload, or the generation is not the target's exact next generation; the receipt state is `denied`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlReceipt' }
+        '405':
+          description: Wrong HTTP method; the handler returns a bounded plain-text error.
+          content:
+            text/plain:
+              schema: { type: string }
+        '503':
+          description: No credential door or durable ingress is configured, the bounded queue/journal is full, or journal durability is unavailable or indeterminate; the receipt state is `unavailable` or `unknown`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlReceipt' }
+
+  /v1/fak/control/directives/{id}:
+    get:
+      tags: [fak-native]
+      summary: Read the latest provisional control receipt
+      description: |
+        Reads the bounded in-memory receipt index recovered from the provisioned
+        single-writer journal. This route has the same mandatory configured
+        bearer/keyset door as submission, including for LAN callers. Possession
+        of that credential is not human C0 proof.
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 1024
+            pattern: '^(?!\.{1,2}$)[A-Za-z0-9._~-]+$'
+          description: The URL-safe directive id supplied at submission.
+      responses:
+        '200':
+          description: The latest known receipt.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlReceipt' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: The directive id is unknown; the response body is empty.
+        '405':
+          description: Wrong HTTP method; the handler returns a bounded plain-text error.
+          content:
+            text/plain:
+              schema: { type: string }
+        '503':
+          description: No credential door or durable ingress is configured.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlReceipt' }
+
   /v1/fak/changes:
     get:
       tags: [fak-native]
@@ -3300,6 +3396,61 @@ components:
         context_window_tokens: { type: integer, description: The served context window the prompt is sized against. }
         reserved_output_tokens: { type: integer, description: Output headroom reserved for the generation that will follow. }
         rendered_sha256: { type: string, description: SHA-256 over the rendered prompt that `token_ids` encode; attests preparation so it can be matched against a later native receipt. }
+
+    ControlDirective:
+      type: object
+      additionalProperties: false
+      required: [id, target, generation, action]
+      description: |
+        A provisional durable control intent. The complete JSON request body is
+        limited to 1 MiB (1048576 bytes). `id` identifies an idempotent submit;
+        `generation` must be exactly one greater than the last accepted generation
+        for the same target.
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          pattern: '^(?!\.{1,2}$)[A-Za-z0-9._~-]+$'
+        target:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: Mission or control target whose generations are compared independently.
+        generation:
+          type: integer
+          format: uint64
+          minimum: 1
+          description: Monotonic target generation; the first accepted directive is 1 and each later directive increments by exactly one.
+        action:
+          type: string
+          enum: [cancel, pause, resume, steer, reprioritize, redirect, stop]
+        payload:
+          nullable: true
+          description: Optional action-specific JSON value, canonicalized before idempotence comparison.
+      x-max-body-bytes: 1048576
+
+    ControlReceipt:
+      type: object
+      required: [id, target, action, state, generation, sequence]
+      description: |
+        Latest known state for a provisional directive. `accepted` means the
+        provisioned single-writer journal committed the directive; it does not
+        mean delivered, applied, quiesced, or authenticated as human C0.
+        `unknown` means an append or sync began but durable commit could not be
+        confirmed; it is not an accepted or delivered receipt.
+      properties:
+        id: { type: string, maxLength: 1024 }
+        target: { type: string, maxLength: 1024 }
+        action: { type: string, enum: [cancel, pause, resume, steer, reprioritize, redirect, stop] }
+        state:
+          type: string
+          enum: [accepted, delivered, unknown, unavailable, denied]
+        digest: { type: string, description: SHA-256 of the canonical directive; present for accepted/delivered/unknown receipts. }
+        reason: { type: string, description: Stable refusal or durability reason when state is denied, unavailable, or unknown. }
+        generation: { type: integer, format: uint64, minimum: 0, description: Zero is retained on a rejected body whose generation was absent or invalid. }
+        sequence: { type: integer, format: uint64, minimum: 0 }
+        accepted_at: { type: string, format: date-time, description: Journal acceptance time when durable acceptance is known. }
 
     CompletionRequest:
       type: object
