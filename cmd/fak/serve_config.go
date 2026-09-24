@@ -111,21 +111,21 @@ var serveManifestSpecs = buildServeManifestSpecs()
 
 func buildServeManifestSpecs() map[string]serveManifestSpec {
 	specs := map[string]serveManifestSpec{
-		"agent_templates.dir":    {reason: "agent templates are started by the all-in-one orchestrator", nextAction: "use fak up when agent-template orchestration ships"},
-		"audit.journal":          {reason: "audit journal lifecycle belongs to the all-in-one orchestrator", nextAction: "use the existing serve audit controls until fak up owns this field"},
-		"audit.retention_days":   {reason: "retention requires the audit lifecycle manager", nextAction: "configure retention through the audit subsystem until fak up owns this field"},
-		"auth.allow_lan":         {flagName: "allow-lan", reason: "mapped directly to allow unauthenticated access from local network"},
-		"auth.require_key_env":   {flagName: "require-key-env", reason: "mapped directly to serve authentication"},
-		"budgets.default_tokens": {flagName: "context-budget-tokens", reason: "mapped directly to the default session token budget"},
+		"agent_templates.dir":             {reason: "agent templates are started by the all-in-one orchestrator", nextAction: "use fak up when agent-template orchestration ships"},
+		"audit.journal":                   {reason: "audit journal lifecycle belongs to the all-in-one orchestrator", nextAction: "use the existing serve audit controls until fak up owns this field"},
+		"audit.retention_days":            {reason: "retention requires the audit lifecycle manager", nextAction: "configure retention through the audit subsystem until fak up owns this field"},
+		"auth.allow_lan":                  {flagName: "allow-lan", reason: "mapped directly to allow unauthenticated access from local network"},
+		"auth.require_key_env":            {flagName: "require-key-env", reason: "mapped directly to serve authentication"},
+		"budgets.default_tokens":          {flagName: "context-budget-tokens", reason: "mapped directly to the default session token budget"},
 		"observability.appliance_profile": {flagName: "appliance-observability", reason: "mapped directly to appliance dashboard catalog selection"},
 		"observability.bind":              {flagName: "addr", reason: "mapped directly to the serve listener"},
-		"observability.metrics":  {appliedValue: true, hasAppliedValue: true, reason: "the gateway serves its metrics surface whenever serve is running", nextAction: "use fak up when endpoint enablement becomes topology-selectable"},
-		"policy.floor":           {flagName: "policy", reason: "mapped directly to the capability-floor path"},
-		"policy.inline":          {reason: "serve accepts a policy path, not unmaterialized inline policy", nextAction: "write the policy to a reviewed file and set policy.floor"},
-		"runtimes.agent_runtime": {reason: "serve starts only the gateway process", nextAction: "use fak up when multi-runtime orchestration ships"},
-		"runtimes.gateway":       {appliedValue: true, hasAppliedValue: true, reason: "invoking fak serve necessarily starts the gateway", nextAction: "omit fak serve when gateway=false; use fak up for topology selection"},
-		"runtimes.model":         {reason: "model source selection requires the full backend/provider flag set", nextAction: "use explicit serve backend/provider flags until fak up maps this field"},
-		"tenants.enabled":        {reason: "tenant lifecycle belongs to the all-in-one orchestrator", nextAction: "leave tenants disabled until fak up owns tenant provisioning"},
+		"observability.metrics":           {appliedValue: true, hasAppliedValue: true, reason: "the gateway serves its metrics surface whenever serve is running", nextAction: "use fak up when endpoint enablement becomes topology-selectable"},
+		"policy.floor":                    {flagName: "policy", reason: "mapped directly to the capability-floor path"},
+		"policy.inline":                   {reason: "serve accepts a policy path, not unmaterialized inline policy", nextAction: "write the policy to a reviewed file and set policy.floor"},
+		"runtimes.agent_runtime":          {reason: "serve starts only the gateway process", nextAction: "use fak up when multi-runtime orchestration ships"},
+		"runtimes.gateway":                {appliedValue: true, hasAppliedValue: true, reason: "invoking fak serve necessarily starts the gateway", nextAction: "omit fak serve when gateway=false; use fak up for topology selection"},
+		"runtimes.model":                  {reason: "model source selection requires the full backend/provider flag set", nextAction: "use explicit serve backend/provider flags until fak up maps this field"},
+		"tenants.enabled":                 {reason: "tenant lifecycle belongs to the all-in-one orchestrator", nextAction: "leave tenants disabled until fak up owns tenant provisioning"},
 	}
 	for _, key := range deploymanifest.KnownKeys() {
 		if strings.HasPrefix(key.Dotted(), "tool_plugins.") {

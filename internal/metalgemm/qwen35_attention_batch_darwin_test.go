@@ -166,7 +166,7 @@ func TestQwen35FullAttentionDecodeBatchLongContextParity(t *testing.T) {
 			}
 			for row, pos := range positions {
 				want := attentionBatchCPUOracle(t, Qwen35FullAttentionBatchRequest{
-					Input: append([]float32(nil), req.Input[row*modelWidth:(row+1)*modelWidth]...),
+					Input:   append([]float32(nil), req.Input[row*modelWidth:(row+1)*modelWidth]...),
 					Weights: req.Weights, Lanes: []Qwen35FullAttentionLane{req.Lanes[row]},
 					QNorm: req.QNorm, KNorm: req.KNorm, Cos: req.Cos, Sin: req.Sin,
 					NumHeads: req.NumHeads, NumKVHeads: req.NumKVHeads, HeadDim: req.HeadDim,

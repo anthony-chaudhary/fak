@@ -1,4 +1,4 @@
-﻿package model
+package model
 
 // v41_index_reader_step_test.go - independent regression for fak#13309: publish
 // one V4.1 compressed index row alongside its KV latent and consume it through
