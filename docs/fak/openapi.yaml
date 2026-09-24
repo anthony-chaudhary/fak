@@ -3002,7 +3002,7 @@ components:
         sessions:
           type: array
           items: { $ref: '#/components/schemas/SessionState' }
-        count: { type: integer, description: len(sessions), surfaced so a "0 live sessions" reading is explicit. }
+        count: { type: integer, description: 'len(sessions), surfaced so a "0 live sessions" reading is explicit.' }
 
     ObservationEnvelope:
       type: object
@@ -3209,7 +3209,7 @@ components:
         events:
           type: array
           items: { $ref: '#/components/schemas/SessionChangeEvent' }
-        cursor: { type: integer, description: The client's next cursor — the feed's GLOBAL highest seq, shared with /v1/fak/session/changes. }
+        cursor: { type: integer, description: "The client's next cursor — the feed's GLOBAL highest seq, shared with /v1/fak/session/changes." }
         complete:
           type: boolean
           description: |
@@ -3447,7 +3447,7 @@ components:
           type: string
           enum: [accepted, delivered, unknown, unavailable, denied]
         digest: { type: string, description: SHA-256 of the canonical directive; present for accepted/delivered/unknown receipts. }
-        reason: { type: string, description: Stable refusal or durability reason when state is denied, unavailable, or unknown. }
+        reason: { type: string, description: 'Stable refusal or durability reason when state is denied, unavailable, or unknown.' }
         generation: { type: integer, format: uint64, minimum: 0, description: Zero is retained on a rejected body whose generation was absent or invalid. }
         sequence: { type: integer, format: uint64, minimum: 0 }
         accepted_at: { type: string, format: date-time, description: Journal acceptance time when durable acceptance is known. }
@@ -3663,8 +3663,8 @@ components:
           description: '`-32700` parse error · `-32600` invalid request · `-32601` method not found · `-32602` invalid params · `-32603` internal error.'
         message: { type: string }
 
-     # ----- Error envelope (OpenAI-style) -------------------------------------
-     SessionDiscoveryRecord:
+    # ----- Error envelope (OpenAI-style) -------------------------------------
+    SessionDiscoveryRecord:
       type: object
       required: [schema, session_id, relay_url, execution_epoch, generation, expires_at]
       properties:
@@ -3701,10 +3701,10 @@ components:
              param:
                description: Always `null` (reserved for future use).
 
-     # ----- A2A (Agent-to-Agent) protocol schemas ----------------------------
-     A2ASendMessageRequest:
-       type: object
-       required: [message]
+    # ----- A2A (Agent-to-Agent) protocol schemas ----------------------------
+    A2ASendMessageRequest:
+      type: object
+      required: [message]
       properties:
         message:
           type: object
@@ -3742,10 +3742,10 @@ components:
                     type: object
                     description: JSON Schema for the tool's arguments.
 
-     A2ASendMessageResponse:
-       type: object
-       required: [task_id, status, created_at]
-       properties:
+    A2ASendMessageResponse:
+      type: object
+      required: [task_id, status, created_at]
+      properties:
         task_id:
           type: string
           pattern: '^a2a_[a-f0-9]{16}$'
@@ -3759,19 +3759,19 @@ components:
           format: date-time
           description: RFC3339 timestamp of task creation.
 
-     A2ATasksResponse:
-       type: object
-       required: [tasks]
-       properties:
+    A2ATasksResponse:
+      type: object
+      required: [tasks]
+      properties:
         tasks:
           type: array
           items:
             $ref: '#/components/schemas/A2ATaskSummary'
 
-     A2ATaskSummary:
-       type: object
-       required: [task_id, status, created_at]
-       properties:
+    A2ATaskSummary:
+      type: object
+      required: [task_id, status, created_at]
+      properties:
         task_id:
           type: string
           pattern: '^a2a_[a-f0-9]{16}$'
@@ -3782,10 +3782,10 @@ components:
           type: string
           format: date-time
 
-     A2AAgentCardResponse:
-       type: object
-       required: [agent, capabilities]
-       properties:
+    A2AAgentCardResponse:
+      type: object
+      required: [agent, capabilities]
+      properties:
         agent:
           type: object
           required: [name, description, version]
@@ -3818,10 +3818,10 @@ components:
           items:
             $ref: '#/components/schemas/A2ASkill'
 
-     A2ASkill:
-       type: object
-       required: [name, description]
-       properties:
+    A2ASkill:
+      type: object
+      required: [name, description]
+      properties:
         name:
           type: string
           description: Skill name (matches the registered tool name).
@@ -3829,10 +3829,10 @@ components:
           type: string
           description: Human-readable description of what the skill does.
 
-     A2ATaskResponse:
-       type: object
-       required: [task_id, status, created_at]
-       properties:
+    A2ATaskResponse:
+      type: object
+      required: [task_id, status, created_at]
+      properties:
         task_id:
           type: string
           pattern: '^a2a_[a-f0-9]{16}$'
@@ -3864,10 +3864,10 @@ components:
           type: string
           description: Error message if status is "failed".
 
-     A2ACancelTaskResponse:
-       type: object
-       required: [task_id, status]
-       properties:
+    A2ACancelTaskResponse:
+      type: object
+      required: [task_id, status]
+      properties:
         task_id:
           type: string
           pattern: '^a2a_[a-f0-9]{16}$'
@@ -3875,4 +3875,3 @@ components:
           type: string
           enum: [canceled]
           description: New task state (always "canceled" on successful cancellation).
-              description: Always `null` (reserved for future use).
