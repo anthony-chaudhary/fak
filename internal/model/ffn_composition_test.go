@@ -127,6 +127,145 @@ func TestFFNGatedAdaptersBitExact(t *testing.T) {
 	})
 }
 
+// TestFFNAdapterActivationMatrix extends the independent old-body parity of
+// TestFFNGatedAdaptersBitExact across every supported activation policy for each
+// of the three production adapters (routed V4.1, shared V4.1, dense). The prior
+// test paired each adapter with a single policy, so the adapter's dispatch of
+// act() was never compared against the old inline body for the policies it did
+// not happen to use. It also pins that both gelu flags resolve to tanh, and that
+// the adapters leave the caller-owned input and weights bit-identical.
+func TestFFNAdapterActivationMatrix(t *testing.T) {
+	policies := []struct {
+		name string
+		cfg  Config
+	}{
+		{name: "silu", cfg: Config{}},
+		{name: "gelu_tanh", cfg: Config{ActGeluTanh: true}},
+		{name: "gelu_erf", cfg: Config{ActGeluErf: true}},
+		{name: "both_flags_tanh_wins", cfg: Config{ActGeluTanh: true, ActGeluErf: true}},
+	}
+
+	t.Run("routed expert", func(t *testing.T) {
+		const H, I = 3, 5
+		for _, pol := range policies {
+			t.Run(pol.name, func(t *testing.T) {
+				xn := []float32{0.75, -0.5, 0.25}
+				w1 := ffnTestValues(I*H, 0.07)
+				w3 := ffnTestValues(I*H, -0.05)
+				w2 := ffnTestValues(H*I, 0.03)
+				xnBefore := append([]float32(nil), xn...)
+				w1Before := append([]float32(nil), w1...)
+				w3Before := append([]float32(nil), w3...)
+				w2Before := append([]float32(nil), w2...)
+
+				want := legacyV41SwiGLU(w1, w3, w2, xn, I, H, pol.cfg)
+				got := v41SwiGLU(w1, w3, w2, xn, I, H, pol.cfg)
+				assertFloat32BitsEqual(t, "v41 routed expert", want, got)
+
+				// The adapter owns its gate/up scratch; the caller's input and
+				// weights must come back bit-identical.
+				assertFloat32BitsEqual(t, "routed xn", xnBefore, xn)
+				assertFloat32BitsEqual(t, "routed w1", w1Before, w1)
+				assertFloat32BitsEqual(t, "routed w3", w3Before, w3)
+				assertFloat32BitsEqual(t, "routed w2", w2Before, w2)
+			})
+		}
+	})
+
+	t.Run("v41 shared expert", func(t *testing.T) {
+		for _, pol := range policies {
+			t.Run(pol.name, func(t *testing.T) {
+				m := v41DecodeStateModel(t, 1)
+				cfg := m.Cfg
+				cfg.ActGeluTanh = pol.cfg.ActGeluTanh
+				cfg.ActGeluErf = pol.cfg.ActGeluErf
+				xn := ffnTestValues(cfg.HiddenSize, 0.015625)
+				xnBefore := append([]float32(nil), xn...)
+
+				h1, err := m.v41ProjMatRows(0, "ffn.shared_experts.w1.weight", xn, cfg.MoEIntermediateSize, cfg.HiddenSize)
+				if err != nil {
+					t.Fatalf("reference gate projection: %v", err)
+				}
+				h3, err := m.v41ProjMatRows(0, "ffn.shared_experts.w3.weight", xn, cfg.MoEIntermediateSize, cfg.HiddenSize)
+				if err != nil {
+					t.Fatalf("reference up projection: %v", err)
+				}
+				for i := range h1 {
+					h1[i] = act(h1[i], cfg) * h3[i]
+				}
+				want, err := m.v41ProjMatRows(0, "ffn.shared_experts.w2.weight", h1, cfg.HiddenSize, cfg.MoEIntermediateSize)
+				if err != nil {
+					t.Fatalf("reference down projection: %v", err)
+				}
+				got, err := m.v41SharedExpertSwiGLU(0, xn, cfg)
+				if err != nil {
+					t.Fatalf("shared expert adapter: %v", err)
+				}
+				assertFloat32BitsEqual(t, "v41 shared expert", want, got)
+				assertFloat32BitsEqual(t, "shared xn", xnBefore, xn)
+			})
+		}
+	})
+
+	t.Run("dense non-fused with biases", func(t *testing.T) {
+		for _, pol := range policies {
+			t.Run(pol.name, func(t *testing.T) {
+				cfg := Config{HiddenSize: 2, IntermediateSize: 3}
+				cfg.ActGeluTanh = pol.cfg.ActGeluTanh
+				cfg.ActGeluErf = pol.cfg.ActGeluErf
+				pn := func(s string) string { return layerName(0, s) }
+				m, err := NewFromF32Tensors(cfg, []NamedTensorF32{
+					{Name: pn("mlp.gate_proj.weight"), Shape: []int{3, 2}, Data: ffnTestValues(6, 0.11)},
+					{Name: pn("mlp.gate_proj.bias"), Shape: []int{3}, Data: []float32{0.1, -0.2, 0.3}},
+					{Name: pn("mlp.up_proj.weight"), Shape: []int{3, 2}, Data: ffnTestValues(6, -0.09)},
+					{Name: pn("mlp.up_proj.bias"), Shape: []int{3}, Data: []float32{-0.05, 0.15, -0.25}},
+					{Name: pn("mlp.down_proj.weight"), Shape: []int{2, 3}, Data: ffnTestValues(6, 0.13)},
+					{Name: pn("mlp.down_proj.bias"), Shape: []int{2}, Data: []float32{0.01, -0.02}},
+				})
+				if err != nil {
+					t.Fatalf("NewFromF32Tensors: %v", err)
+				}
+				xn := []float32{0.75, -0.5}
+				xnBefore := append([]float32(nil), xn...)
+				want := legacyDenseSwiGLUApply(m, 0, xn, f32Kernel{m})
+				got := denseSwiGLU{}.apply(m, 0, xn, f32Kernel{m})
+				assertFloat32BitsEqual(t, "dense adapter", want, got)
+				assertFloat32BitsEqual(t, "dense xn", xnBefore, xn)
+			})
+		}
+	})
+
+	// act() checks ActGeluTanh before ActGeluErf, so a config that carries both
+	// must run tanh. Pin the precedence at the primitive and at the adapter so a
+	// future reorder cannot silently switch the working activation.
+	t.Run("both flags resolve to tanh", func(t *testing.T) {
+		both := Config{ActGeluTanh: true, ActGeluErf: true}
+		tanhOnly := Config{ActGeluTanh: true}
+		erfOnly := Config{ActGeluErf: true}
+		differ := false
+		for _, z := range []float32{-2, -0.5, 0.25, 1, 2.5} {
+			if math.Float32bits(act(z, both)) != math.Float32bits(act(z, tanhOnly)) {
+				t.Fatalf("act(%g, both flags) = %g, want tanh %g", z, act(z, both), act(z, tanhOnly))
+			}
+			if math.Float32bits(act(z, tanhOnly)) != math.Float32bits(act(z, erfOnly)) {
+				differ = true
+			}
+		}
+		if !differ {
+			t.Fatal("tanh and erf agree on every probe point; the fixture cannot witness precedence")
+		}
+
+		const H, I = 3, 5
+		xn := []float32{0.75, -0.5, 0.25}
+		w1 := ffnTestValues(I*H, 0.07)
+		w3 := ffnTestValues(I*H, -0.05)
+		w2 := ffnTestValues(H*I, 0.03)
+		assertFloat32BitsEqual(t, "both-vs-tanh",
+			v41SwiGLU(w1, w3, w2, xn, I, H, tanhOnly),
+			v41SwiGLU(w1, w3, w2, xn, I, H, both))
+	})
+}
+
 var ffnAdapterTestSink []float32
 
 func legacyV41SwiGLU(w1, w3, w2, xn []float32, I, H int, cfg Config) []float32 {
