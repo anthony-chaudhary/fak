@@ -43,8 +43,12 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      - name: install pinned OpenAPI validator
+        run: python -m pip install --quiet --disable-pip-version-check PyYAML==6.0.2 openapi-spec-validator==0.7.2
       - name: validate and execute routed go test
         shell: bash
+        env:
+          FAK_REQUIRE_OPENAPI_VALIDATOR: "1"
         run: |
           if ! jq -e 'type == "array" and all(.[]; type == "string")' <<<"$GO_TEST_ARGS_JSON" >/dev/null; then
             echo "go_test_args_json must be a JSON array of strings" >&2
@@ -158,11 +162,16 @@ jobs:
       - name: install dos-kernel before the tests (#5518)
         run: python -m pip install --quiet --disable-pip-version-check dos-kernel
 
+      - name: install pinned OpenAPI validator
+        run: python -m pip install --quiet --disable-pip-version-check PyYAML==6.0.2 openapi-spec-validator==0.7.2
+
       # Test + coverage profile in one run (E-002): the same `go test ./...` gate, now
       # also writing a merged statement-coverage profile so the total is reported every
       # run. Reporting (not a hard threshold) is the foundation — a specific floor is a
       # follow-on tuning once the baseline is known (issue #34).
       - name: test (+ coverage profile)
+        env:
+          FAK_REQUIRE_OPENAPI_VALIDATOR: "1"
         run: go test -coverprofile=coverage.out ./...
 
       # Coverage report + gap analysis + trend surfacing (E-002 / #233): the profile
