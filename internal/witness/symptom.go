@@ -637,10 +637,10 @@ func runSelectedGoTests(ctx context.Context, run CommandRunner, dir string, pkgs
 			}
 		}
 	}
-	selectedFailed := true
+	selectedFailed := false
 	for _, testFailed := range failed {
-		if !testFailed {
-			selectedFailed = false
+		if testFailed {
+			selectedFailed = true
 			break
 		}
 	}

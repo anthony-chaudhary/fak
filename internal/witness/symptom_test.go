@@ -734,6 +734,37 @@ func TestSymptomTestsEmptyPreservesDefaultExecutionArgv(t *testing.T) {
 	}
 }
 
+func TestRunSelectedGoTestsAttributesMixedSelectedFailure(t *testing.T) {
+	const selectedPass = "{\"Action\":\"run\",\"Package\":\"m\",\"Test\":\"TestSelectedPass\"}\n" +
+		"{\"Action\":\"pass\",\"Package\":\"m\",\"Test\":\"TestSelectedPass\"}\n"
+	const selectedFail = "{\"Action\":\"run\",\"Package\":\"m\",\"Test\":\"TestSelectedFail\"}\n" +
+		"{\"Action\":\"fail\",\"Package\":\"m\",\"Test\":\"TestSelectedFail\"}\n"
+	const unrelatedFail = "{\"Action\":\"fail\",\"Package\":\"m/unrelated\"}\n"
+
+	for _, tc := range []struct {
+		name           string
+		out            string
+		selectedFailed bool
+	}{
+		{"one exact selection fails", selectedPass + selectedFail + unrelatedFail, true},
+		{"only unrelated package fails", selectedPass + unrelatedFail, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run := func(context.Context, string, ...string) (string, int, error) {
+				return tc.out, 1, nil
+			}
+			selectors := []string{"^TestSelectedPass$"}
+			if tc.selectedFailed {
+				selectors = append(selectors, "^TestSelectedFail$")
+			}
+			got := runSelectedGoTests(context.Background(), run, t.TempDir(), []string{"./..."}, nil, selectors)
+			if !got.matched || got.selectedFailed != tc.selectedFailed {
+				t.Fatalf("result=%+v, want matched=true selectedFailed=%v", got, tc.selectedFailed)
+			}
+		})
+	}
+}
+
 func TestSymptomSelectedParentFailureMustNameTheSelectedTest(t *testing.T) {
 	requireGoAndGit(t)
 	dir := newGoModuleRepo(t)
