@@ -366,13 +366,54 @@ func (r *ReplicaDispatch) CompleteStream(ctx context.Context, sink agent.StreamS
 		return nil, err
 	}
 	defer func() { route.finish(ctx, comp, err, true) }()
-	repl := route.replica
-	sp, ok := repl.Planner.(agent.StreamingPlanner)
-	if !ok || !sp.StreamingSupported() {
-		return nil, agent.ErrStreamingUnsupported
+	tried := make(map[string]struct{}, len(r.replicas))
+	// emitted counts content fragments already handed to the caller's sink. Once a
+	// single fragment has crossed it, the client holds part of an answer and the
+	// turn can NOT be retargeted — a replay against another replica would duplicate
+	// content on the wire. So the retarget loop below is armed only while the sink
+	// is still clean, exactly as the buffered path can retry a turn that wrote
+	// nothing. A backend 4xx (405/404/408/429) is returned by the upstream BEFORE
+	// any body fragment, so the common failure shape stays retargetable.
+	emitted := false
+	guarded := func(delta string) error {
+		if delta != "" {
+			emitted = true
+		}
+		if sink == nil {
+			return nil
+		}
+		return sink(delta)
 	}
-	comp, err = sp.CompleteStream(ctx, sink, messages, tools, opts...)
-	return comp, err
+	for {
+		repl := route.replica
+		sp, ok := repl.Planner.(agent.StreamingPlanner)
+		if !ok || !sp.StreamingSupported() {
+			return nil, agent.ErrStreamingUnsupported
+		}
+		comp, err = sp.CompleteStream(ctx, guarded, messages, tools, opts...)
+		if err == nil {
+			return comp, nil
+		}
+		// A retarget is legal only when nothing was emitted (no partial answer to
+		// duplicate) and the reservation can select a fresh replica. This mirrors
+		// completeReserved's `route.reservation == nil || !replicaFallbackAllowed`
+		// guard; the emitted check is the streaming-only addition.
+		if emitted || route.reservation == nil || !replicaFallbackAllowed(ctx, err) {
+			return comp, err
+		}
+		tried[route.replica.Name] = struct{}{}
+		next, retargetErr := r.retargetReserved(route.reservation, route.decode, route.prefix, tried)
+		if retargetErr != nil {
+			if errors.Is(retargetErr, ErrNoWorkerForModel) {
+				return nil, retargetErr
+			}
+			return nil, fmt.Errorf("%w: every admissible worker failed: %w", ErrNoHealthyWorker, err)
+		}
+		route.replica = next
+		if decision, ok := route.currentDecodeDecision(); ok {
+			route.decodeDecision = decision
+		}
+	}
 }
 
 func (r *ReplicaDispatch) reserveForMessages(messages []agent.Message, opts []agent.SampleOpt) (reservedPlannerReplica, error) {
