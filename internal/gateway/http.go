@@ -150,6 +150,10 @@ func (s *Server) routeTable() []gatewayRoute {
 		{"/v1/fak/control/events", s.handleControlEvents},
 		{"/v1/control/telemetry", s.handleControlTelemetry},
 		{"/v1/fak/control/telemetry", s.handleControlTelemetry},
+		// The provisional durable directive store is reachable through the same
+		// gateway auth door. It does not confer human C0 authority or priority.
+		{"/v1/fak/control/directives", s.handleControlDirectives},
+		{"/v1/fak/control/directives/", s.handleControlDirectives},
 		// /v1/fak/policy (exact, GET) is the read-only floor attestation (#3960); the
 		// longer exact /v1/fak/policy/reload (POST) is matched independently by the mux,
 		// so the observe route never shadows the reload route.
@@ -239,6 +243,22 @@ func (s *Server) routeTable() []gatewayRoute {
 		{"/debug/vars", s.handleDebugVars},
 		{"/debug/guard-audit", handleGuardAuditDebug},
 	}
+}
+
+// handleControlDirectives refuses an unconfigured credential door even on the
+// loopback default, where withAuth otherwise passes requests through. The
+// durable store performs method, body, id, and journal validation itself.
+func isControlDirectivePath(path string) bool {
+	return path == durableControlDirectivePath || strings.HasPrefix(path, durableControlDirectivePath+"/")
+}
+
+func (s *Server) handleControlDirectives(w http.ResponseWriter, r *http.Request) {
+	if s.controlIngress == nil || (s.requireKey == "" && s.keyset == nil) {
+		writeControlReceipt(w, http.StatusServiceUnavailable,
+			rejectedControlReceipt(ControlDirective{}, "unavailable", "journal_unavailable"))
+		return
+	}
+	s.controlIngress.ServeHTTP(w, r)
 }
 
 // handleHealthWithAuthProof preserves the unauthenticated health response while
@@ -554,6 +574,11 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 // authExempt reports whether a request may skip the bearer check on an
 // authenticated gateway.
 func (s *Server) authExempt(r *http.Request) bool {
+	// A LAN peer must still present the configured credential
+	// before it can submit or read a provisional control directive.
+	if isControlDirectivePath(r.URL.Path) {
+		return false
+	}
 	if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
 		return true
 	}
@@ -644,6 +669,12 @@ func gatewayCredential(r *http.Request) (string, bool) {
 	}
 	if k := r.Header.Get("X-Api-Key"); k != "" {
 		return k, true
+	}
+	// Control directives use only their declared bearer and X-Api-Key doors.
+	// A query-string secret can be logged or copied with a URL; Gemini's
+	// X-Goog-Api-Key scheme is not a credential for this operator route.
+	if isControlDirectivePath(r.URL.Path) {
+		return "", false
 	}
 	if g := r.Header.Get("X-Goog-Api-Key"); g != "" {
 		return g, true
