@@ -647,6 +647,95 @@ func TestAgentCacheWarmReadiness(t *testing.T) {
 	}
 }
 
+// hangingWarmupPlanner is a planner whose Complete never returns and which IGNORES
+// its context — the exact strix1 hang shape (#13500): the backend forward spins in
+// a user-space tight loop (a stale SPIR-V bundle makes the CPU-side q4k/q8 path
+// spin before any device dispatch) and never observes cancellation. It blocks on a
+// package-lifetime channel so the goroutine is parked, not CPU-spinning, in tests.
+//
+// The regression below is deliberately written WITHOUT naming any symbol the fix
+// introduces (ErrWarmupTimeout, warmupCeiling): the mandatory red-then-green
+// symptom witness overlays this whole file onto the PARENT source, so a reference
+// to a fix-only symbol would fail to compile there and the witness would ABSTAIN
+// instead of reproducing the hang. It asserts behavior instead.
+type hangingWarmupPlanner struct{ block chan struct{} }
+
+func (p *hangingWarmupPlanner) Model() string { return "hanging-warmup-planner" }
+
+func (p *hangingWarmupPlanner) Complete(context.Context, []agent.Message, []agent.ToolDef, ...agent.SampleOpt) (*agent.Completion, error) {
+	<-p.block // never closes: the forward never returns, and ctx is deliberately ignored
+	return nil, nil
+}
+
+// TestRunWarmupBoundedTimeoutOnNonReturningBackend is the #13500 regression: a
+// non-returning backend forward must NOT hold readiness warmup_pending forever.
+// With a 1s ceiling, RunWarmup returns a timeout promptly, the gate stays PENDING
+// (a hung backend is not warm), and /healthz still reports 503 warmup_pending —
+// a typed, reported outcome instead of a silent hold. RED at the parent source
+// (RunWarmup blocks forever, so the 5s guard trips); GREEN at the fix.
+func TestRunWarmupBoundedTimeoutOnNonReturningBackend(t *testing.T) {
+	t.Setenv("FAK_WARMUP_CEILING_S", "1")
+	srv := &Server{planner: &hangingWarmupPlanner{block: make(chan struct{})}}
+	srv.ArmWarmupGate()
+
+	type result struct {
+		d   time.Duration
+		err error
+	}
+	done := make(chan result, 1)
+	begin := time.Now()
+	go func() {
+		d, err := srv.RunWarmup(context.Background())
+		done <- result{d: d, err: err}
+	}()
+
+	select {
+	case r := <-done:
+		if r.err == nil {
+			t.Fatal("RunWarmup on a non-returning backend returned nil error, want a bounded timeout")
+		}
+		if !strings.Contains(r.err.Error(), "timed out") {
+			t.Fatalf("RunWarmup timeout err = %v, want a message naming the timeout", r.err)
+		}
+		if r.d <= 0 {
+			t.Fatalf("RunWarmup reported elapsed %v, want > 0", r.d)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("RunWarmup did not return within 5s on a non-returning backend — readiness is held unbounded (want a bounded ~1s timeout)")
+	}
+	if elapsed := time.Since(begin); elapsed > 5*time.Second {
+		t.Fatalf("RunWarmup bounded wait took %v, want ~1s (the ceiling must bound the hold)", elapsed)
+	}
+	if !srv.warmup.pending() {
+		t.Fatal("timed-out warmup released the gate, want still pending (a hung backend must not advertise readiness)")
+	}
+	if _, ok := srv.warmup.ready(); ok {
+		t.Fatal("timed-out warmup reported ready, want not-ready")
+	}
+	if code, body := warmupHealthz(t, srv); code != http.StatusServiceUnavailable || body["ok"] != false {
+		t.Fatalf("post-timeout serve: /healthz = %d ok=%v, want 503 ok=false", code, body["ok"])
+	}
+}
+
+// TestRunWarmupCeilingNegativeDisablesBound pins the explicit opt-out: a negative
+// FAK_WARMUP_CEILING_S restores the historical unbounded wait, so a backend that
+// DOES return still completes the gate normally (the bound is skipped, not faked).
+func TestRunWarmupCeilingNegativeDisablesBound(t *testing.T) {
+	t.Setenv("FAK_WARMUP_CEILING_S", "-1")
+	srv := &Server{planner: agent.NewMockPlanner("warmup-test")}
+	srv.ArmWarmupGate()
+	d, err := srv.RunWarmup(context.Background())
+	if err != nil {
+		t.Fatalf("RunWarmup (unbounded) err = %v, want nil", err)
+	}
+	if d < 0 {
+		t.Fatalf("RunWarmup (unbounded) d = %v, want >= 0", d)
+	}
+	if srv.warmup.pending() {
+		t.Fatal("unbounded warmup left the gate pending, want complete")
+	}
+}
+
 // TestAgentWarmProfileUnconfiguredWhenPlannerNotWarmer pins that a non-native planner
 // (no AgentWarmWarmer) leaves the profile unconfigured rather than arming a gate that
 // can never be satisfied � the serve stays unaffected.

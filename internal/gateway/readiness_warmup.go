@@ -3,7 +3,10 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -32,6 +35,57 @@ import (
 // gate (proxy, mock, or a local model with no warmup step) is byte-for-byte
 // unaffected — readiness stays governed only by port-bind + the existing gates.
 // The POLICY lives here in the gateway; the host owns the warmup turn itself.
+
+// ErrWarmupTimeout is returned by RunWarmup when the backend's synthetic warmup
+// inference does not return its first token within the configured boot/warmup
+// ceiling. It is a TYPED, bounded failure — the fix for the strix1 hang where a
+// non-returning forward (a stale SPIR-V bundle makes the CPU-side q4k/q8 path spin
+// before any device dispatch, in a user-space tight loop that ignores ctx) held
+// readiness warmup_pending FOREVER with no journal line. RunWarmup calls
+// planner.Complete on a worker goroutine and waits with the ceiling, so a
+// non-returning backend is reported instead of holding readiness unbounded. The
+// gate stays PENDING on a timeout (a hung backend is not warm) exactly as it does
+// on an error/cancellation, so a failed boot never advertises readiness. The
+// synthetic turn may still be spinning on the leaked goroutine; this is the best a
+// bounded wait can do without cooperative cancellation from the backend.
+var ErrWarmupTimeout = errors.New("backend startup warmup timed out")
+
+// DefaultWarmupCeiling is the boot/warmup ceiling applied to a synthetic warmup
+// inference when the host sets no override. It is generous by design — a local
+// 27B serve can legitimately pay a multi-minute first-decode tax (weight load +
+// CUDA-graph capture + JIT compile) — while still bounding the pathological
+// non-returning case. Override with FAK_WARMUP_CEILING_S.
+const DefaultWarmupCeiling = 10 * time.Minute
+
+// warmupCeilingEnv overrides DefaultWarmupCeiling with an integer-seconds value.
+// 0 (or unset/unparseable) selects the default. A negative value disables the
+// bound entirely (an explicit opt-out for a host that wants an unbounded hold).
+const warmupCeilingEnv = "FAK_WARMUP_CEILING_S"
+
+// warmupCeiling resolves the effective boot/warmup ceiling from the environment,
+// mirroring durEnv's integer-seconds convention: unset/unparseable keeps def; a
+// non-negative integer wins (0 => def, never an accidental instant timeout); a
+// negative integer disables the bound (returns 0, meaning "wait indefinitely").
+func warmupCeiling(getenv func(string) string) time.Duration {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	v := getenv(warmupCeilingEnv)
+	if v == "" {
+		return DefaultWarmupCeiling
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return DefaultWarmupCeiling
+	}
+	if n < 0 {
+		return 0
+	}
+	if n == 0 {
+		return DefaultWarmupCeiling
+	}
+	return time.Duration(n) * time.Second
+}
 
 // warmupGate records whether a boot-time warmup inference is expected and, once
 // run, how long boot->first-token took. Zero value == not armed (the gate is
@@ -151,6 +205,17 @@ func (s *Server) MarkWarmupComplete(d time.Duration) {
 // backend failure and a successful retry distinguishable without adding a retry
 // loop. The nil-planner case is explicit and separate: there is no backend to
 // warm, so the gate is released (as before) rather than held forever.
+//
+// The wait is BOUNDED (#13500): planner.Complete runs on a worker goroutine and
+// RunWarmup waits at most the boot/warmup ceiling (warmupCeiling, default
+// DefaultWarmupCeiling, override FAK_WARMUP_CEILING_S). A backend whose forward
+// never returns — the live strix1 stale-SPIR-V hang, a user-space tight loop that
+// ignores ctx — can no longer hold readiness warmup_pending forever with no
+// journal line. On expiry RunWarmup returns ErrWarmupTimeout (a typed, bounded
+// failure a watchdog/operator can branch on) and leaves the gate PENDING (a hung
+// backend is not warm). The synthetic turn's goroutine is abandoned; only
+// cooperative cancellation from the backend could reclaim it, which is #993's
+// shader-attestation territory, not this readiness policy's.
 func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 	if s == nil {
 		return 0, nil
@@ -161,10 +226,40 @@ func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 	}
 	msgs := []agent.Message{{Role: agent.RoleUser, Content: "warmup"}}
 	start := time.Now()
-	_, err := s.planner.Complete(ctx, msgs, nil, agent.WithMaxTokens(1))
+
+	ceiling := warmupCeiling(os.Getenv)
+	done := make(chan struct{})
+	var compErr error
+	go func() {
+		_, compErr = s.planner.Complete(ctx, msgs, nil, agent.WithMaxTokens(1))
+		close(done)
+	}()
+	if ceiling > 0 {
+		timer := time.NewTimer(ceiling)
+		defer timer.Stop()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			// A cancelled/expired caller context surfaces as before, leaving the gate
+			// PENDING; the worker goroutine is abandoned.
+			return time.Since(start), ctx.Err()
+		case <-timer.C:
+			return time.Since(start), fmt.Errorf("%w after %s (ceiling %s); the backend forward never returned its first token — readiness remains pending",
+				ErrWarmupTimeout, time.Since(start).Round(time.Millisecond), ceiling)
+		}
+	} else {
+		// A negative FAK_WARMUP_CEILING_S disables the bound: wait indefinitely, but
+		// still surface a caller cancellation.
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return time.Since(start), ctx.Err()
+		}
+	}
+
 	d := time.Since(start)
-	if err != nil {
-		return d, err
+	if compErr != nil {
+		return d, compErr
 	}
 	s.MarkWarmupComplete(d)
 
@@ -200,7 +295,7 @@ func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 			s.SetWarmupBlockCapacity(bc)
 		}
 	}
-	return d, err
+	return d, compErr
 }
 
 // checkWarmupPending checks if the server warmup gate is still armed and incomplete.
