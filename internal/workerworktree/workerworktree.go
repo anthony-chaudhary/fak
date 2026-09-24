@@ -525,7 +525,6 @@ func PrepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRun
 }
 
 func prepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRunner, backend IsolationBackend, owner OwnerStamp, verifyReady bool) Result {
-	sweepDeadWorktrees(root, wtRoot, git)
 	if backend == nil {
 		backend = defaultIsolationBackend
 	}
