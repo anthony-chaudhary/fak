@@ -240,6 +240,7 @@ func New(cfg Config) (*Server, error) {
 		harnessRouter:                harnessRouter,
 		engineID:                     engineID,
 		model:                        model,
+		controlIngress:               cfg.ControlIngress,
 		servedSide:                   servedSide,
 		upstream:                     upstreamSide,
 		requireKey:                   cfg.RequireKey,

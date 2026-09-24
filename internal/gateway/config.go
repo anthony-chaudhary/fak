@@ -232,9 +232,17 @@ const DefaultElideStaleReads = true
 // the embedded Config zero value stays OFF, so an SDK embedder opts in explicitly.
 const DefaultDeferColdTools = true
 
+// ControlIngress handles operator control requests admitted by the gateway.
+type ControlIngress interface {
+	ServeHTTP(http.ResponseWriter, *http.Request)
+}
+
 // Config configures a gateway Server. The zero value is not valid — use New,
 // which fills defaults and validates against the registered ABI.
 type Config struct {
+	// ControlIngress optionally supplies the operator control request handler.
+	// Nil leaves the control ingress disabled.
+	ControlIngress ControlIngress
 	// RichDashboards controls the lazy Grafana integration and single-port reverse proxy.
 	// New wires the manager to the Server's actual bound listener so owned bundled
 	// Prometheus instances scrape the live port, including an ephemeral or non-default

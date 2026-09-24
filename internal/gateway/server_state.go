@@ -376,6 +376,7 @@ type Server struct {
 	toolPreferences toolplugin.PreferenceLayers
 	engineID        string
 	model           string
+	controlIngress  ControlIngress
 	richDashboards  *richDashboardManager
 	requireKey      string
 	allowLAN        bool
