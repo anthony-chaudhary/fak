@@ -530,6 +530,12 @@ func (s *Server) nativeRunOptions(ctx context.Context, reqTrace string) ([]agent
 				}
 				s.debitSession(ctx, trace, SessionUsage{CompletionTokens: out, ContextTokens: cx})
 			},
+			TerminateSignal: func(trace string) <-chan struct{} {
+				if s.table == nil {
+					return nil
+				}
+				return s.table.TerminateSignal(trace)
+			},
 		}, reqTrace))
 	}
 	if s.stopGate != nil {

@@ -41,6 +41,43 @@ type nativeStreamingPlanner struct {
 	releaseSecond chan struct{}
 }
 
+// nativeTerminatePressurePlanner parks the first model turn until the test has
+// received the session-control response, then announces two tool calls. A wired
+// terminate signal cancels the parked call before it can announce new work; an
+// unwired signal lets both calls reach the loop's independent tool_started feed.
+type nativeTerminatePressurePlanner struct {
+	turns   int32
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (p *nativeTerminatePressurePlanner) Model() string { return "native-terminate-pressure" }
+
+func (p *nativeTerminatePressurePlanner) StreamingSupported() bool { return true }
+
+func (p *nativeTerminatePressurePlanner) CompleteStream(ctx context.Context, _ agent.StreamSink, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	return p.Complete(ctx, messages, tools, opts...)
+}
+
+func (p *nativeTerminatePressurePlanner) Complete(ctx context.Context, _ []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+	if atomic.AddInt32(&p.turns, 1) != 1 {
+		return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: "done"}, FinishReason: "stop"}, nil
+	}
+	close(p.entered)
+	select {
+	case <-p.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return &agent.Completion{
+		Message: agent.Message{Role: agent.RoleAssistant, ToolCalls: []agent.ToolCall{
+			{ID: "after_terminate_1", Type: "function", Function: agent.Func{Name: "search", Arguments: `{"query":"first"}`}},
+			{ID: "after_terminate_2", Type: "function", Function: agent.Func{Name: "search", Arguments: `{"query":"second"}`}},
+		}},
+		FinishReason: "tool_calls",
+	}, nil
+}
+
 func (p *nativeStreamingPlanner) Model() string { return "native-stream" }
 
 func (p *nativeStreamingPlanner) Complete(ctx context.Context, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
@@ -223,6 +260,112 @@ func TestNativeServeLoopDrivesRunArmWithPerTurnSessionGate(t *testing.T) {
 	// the gate ran against real drive state, not a no-op.
 	if st := tbl.Get(trace); st.Rev == 0 {
 		t.Fatalf("session table Rev for %q is 0 — the per-turn gate never touched the live drive state", trace)
+	}
+}
+
+func TestNativeServeTerminateStopsToolDispatchAfterControlReceipt(t *testing.T) {
+	agent.Configure()
+	abi.RegisterRegionBackend(inlineBackend{})
+
+	const trace = "native-serve-terminate-pressure"
+	tbl := session.NewTable()
+	tbl.Decide(trace)
+	planner := &nativeTerminatePressurePlanner{entered: make(chan struct{}), release: make(chan struct{})}
+	srv, err := New(Config{
+		EngineID:       "localtools",
+		Model:          "test-model",
+		VDSO:           true,
+		Native:         true,
+		NativeMaxTurns: 4,
+		Table:          tbl,
+		DecideSession: func(_ context.Context, tr string) SessionVerdict {
+			v := tbl.Decide(tr)
+			return SessionVerdict{Proceed: v.Proceed, MaxTokens: v.MaxTokens, MinGapMs: v.MinGapMs, Stop: v.Stop, Reason: v.Reason}
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(srv.Close)
+	srv.planner = planner
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	client := &http.Client{Timeout: 5 * time.Second}
+	body, _ := json.Marshal(map[string]any{
+		"model":      "test-model",
+		"max_tokens": 64,
+		"stream":     true,
+		"messages":   []map[string]string{{"role": "user", "content": "keep searching"}},
+	})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/messages", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Trace-Id", trace)
+	type messagesResult struct {
+		status int
+		body   []byte
+		err    error
+	}
+	messagesDone := make(chan messagesResult, 1)
+	go func() {
+		resp, err := client.Do(req)
+		if err != nil {
+			messagesDone <- messagesResult{err: err}
+			return
+		}
+		defer resp.Body.Close()
+		raw, readErr := io.ReadAll(resp.Body)
+		messagesDone <- messagesResult{status: resp.StatusCode, body: raw, err: readErr}
+	}()
+
+	select {
+	case <-planner.entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("native planner did not enter its first model turn")
+	}
+
+	controlDone := make(chan struct{})
+	var controlStatus int
+	var controlBody []byte
+	var controlErr error
+	go func() {
+		defer close(controlDone)
+		var controlResp *http.Response
+		controlResp, controlErr = client.Post(ts.URL+"/v1/fak/session/"+trace+"/run", "application/json", strings.NewReader(`{"run":"terminating"}`))
+		if controlErr != nil {
+			return
+		}
+		defer controlResp.Body.Close()
+		controlStatus = controlResp.StatusCode
+		controlBody, controlErr = io.ReadAll(controlResp.Body)
+	}()
+	select {
+	case <-controlDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("termination control did not return promptly while the model turn was in flight")
+	}
+	if controlErr != nil {
+		t.Fatalf("POST session terminating: %v", controlErr)
+	}
+	if controlStatus != http.StatusOK || !bytes.Contains(controlBody, []byte(`"run":"terminating"`)) {
+		t.Fatalf("termination control receipt = status %d body %s, want prompt 200 terminating receipt", controlStatus, controlBody)
+	}
+
+	close(planner.release)
+	var messages messagesResult
+	select {
+	case messages = <-messagesDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("native messages request did not stop after the terminating control receipt")
+	}
+	if messages.err != nil {
+		t.Fatalf("POST /v1/messages after termination: %v", messages.err)
+	}
+	if messages.status != http.StatusOK {
+		t.Fatalf("messages status = %d, want 200; body=%s", messages.status, messages.body)
+	}
+	if got := bytes.Count(messages.body, []byte("event: tool_started")); got != 0 {
+		t.Fatalf("tool dispatches after the terminating control receipt = %d, want 0; stream=%s", got, messages.body)
 	}
 }
 

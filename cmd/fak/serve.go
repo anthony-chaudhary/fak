@@ -960,6 +960,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		TrajctlMetrics:               trajctlMetrics,
 		DecideSession:                decideSession,
 		DebitSession:                 debitSession,
+		Table:                        serveSessions,
 		ResetOnBudget:                resetOnBudgetHook(*sf.resetOnBudget, *sf.contextBudgetTokens),
 		DefaultTraceID:               rt.defaultTraceID,
 		StartTime:                    rt.t0,
