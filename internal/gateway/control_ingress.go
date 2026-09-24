@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -31,6 +32,10 @@ const (
 )
 
 var errControlJournalFull = errors.New("control journal is full")
+
+var errControlJournalOwned = errors.New("control ingress: journal already has a writer")
+
+var errControlJournalReplaced = errors.New("control ingress: journal path no longer names the owned file")
 
 // ControlDirective is a durable request for an operator-side control action.
 // This provisional transport records the directive but does not confer human
@@ -85,6 +90,28 @@ type controlJournalRecord struct {
 	Checksum  string           `json:"checksum"`
 }
 
+type controlJournalOwnership struct {
+	file    *os.File
+	info    fs.FileInfo
+	release func() error
+}
+
+func (o *controlJournalOwnership) Close() error {
+	if o == nil {
+		return nil
+	}
+	var releaseErr error
+	if o.release != nil {
+		releaseErr = o.release()
+	}
+	if o.file != nil {
+		if err := o.file.Close(); releaseErr == nil {
+			releaseErr = err
+		}
+	}
+	return releaseErr
+}
+
 // DurableControlIngress owns a bounded index and append-only journal. Its
 // acknowledgement path never calls Deliver; a dedicated worker performs
 // at-least-once delivery after the accepted record has been synced.
@@ -92,6 +119,8 @@ type DurableControlIngress struct {
 	mu sync.Mutex
 
 	journal         controlIngressJournalFile
+	ownership       *controlJournalOwnership
+	journalPath     string
 	journalBytes    int64
 	maxJournalBytes int64
 	maxPending      int
@@ -115,9 +144,20 @@ type DurableControlIngress struct {
 // making the ingress available. Any malformed, corrupt, or torn frame fails
 // closed; recovery never silently truncates accepted control intent.
 func OpenDurableControlIngress(opts DurableControlIngressOptions) (*DurableControlIngress, error) {
-	path := strings.TrimSpace(opts.JournalPath)
-	if path == "" {
+	configuredPath := strings.TrimSpace(opts.JournalPath)
+	if configuredPath == "" {
 		return nil, errors.New("control ingress: journal path is required")
+	}
+	path, err := filepath.Abs(configuredPath)
+	if err != nil {
+		return nil, fmt.Errorf("control ingress: resolve journal path: %w", err)
+	}
+	resolvedPath, err := filepath.EvalSymlinks(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, errors.New("control ingress: journal must be provisioned before open")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("control ingress: resolve journal path: %w", err)
 	}
 	maxJournalBytes := opts.MaxJournalBytes
 	if maxJournalBytes == 0 {
@@ -140,7 +180,21 @@ func OpenDurableControlIngress(opts DurableControlIngressOptions) (*DurableContr
 		return nil, fmt.Errorf("control ingress: max pending exceeds hard limit %d", maxControlPending)
 	}
 
-	data, recoveredFile, err := readControlJournal(path, maxJournalBytes)
+	ownership, err := acquireControlJournalOwnership(path, resolvedPath)
+	if err != nil {
+		return nil, err
+	}
+	releaseOwnership := true
+	defer func() {
+		if releaseOwnership {
+			_ = ownership.Close()
+		}
+	}()
+
+	if err := verifyControlJournalPath(path, ownership.info); err != nil {
+		return nil, err
+	}
+	data, recoveredFile, err := readControlJournal(ownership, maxJournalBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -155,6 +209,8 @@ func OpenDurableControlIngress(opts DurableControlIngressOptions) (*DurableContr
 		generations:     make(map[string]uint64),
 		queue:           make(chan string, maxPending),
 		done:            make(chan struct{}),
+		ownership:       ownership,
+		journalPath:     path,
 	}
 	if err := d.recover(data); err != nil {
 		return nil, fmt.Errorf("control ingress: recover journal: %w", err)
@@ -210,30 +266,19 @@ func OpenDurableControlIngress(opts DurableControlIngressOptions) (*DurableContr
 	if d.deliver != nil {
 		go d.deliveryLoop()
 	}
+	releaseOwnership = false
 	return d, nil
 }
 
-func readControlJournal(path string, maxBytes int64) ([]byte, fs.FileInfo, error) {
-	f, err := os.Open(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil, errors.New("control ingress: journal must be provisioned before open")
-	}
-	if err != nil {
-		return nil, nil, fmt.Errorf("control ingress: open journal for recovery: %w", err)
-	}
-	defer f.Close()
-	fileInfo, err := f.Stat()
-	if err != nil {
-		return nil, nil, fmt.Errorf("control ingress: stat recovery journal: %w", err)
-	}
-	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+func readControlJournal(ownership *controlJournalOwnership, maxBytes int64) ([]byte, fs.FileInfo, error) {
+	data, err := io.ReadAll(io.NewSectionReader(ownership.file, 0, maxBytes+1))
 	if err != nil {
 		return nil, nil, fmt.Errorf("control ingress: read journal: %w", err)
 	}
 	if int64(len(data)) > maxBytes {
 		return nil, nil, errors.New("control ingress: journal exceeds configured bound")
 	}
-	return data, fileInfo, nil
+	return data, ownership.info, nil
 }
 
 // Close stops new acceptance and closes the journal. A delivery callback that
@@ -249,6 +294,9 @@ func (d *DurableControlIngress) Close() error {
 		close(d.done)
 		if d.journal != nil {
 			d.closeErr = d.journal.Close()
+		}
+		if err := d.ownership.Close(); d.closeErr == nil {
+			d.closeErr = err
 		}
 	})
 	return d.closeErr
@@ -326,6 +374,13 @@ func (d *DurableControlIngress) accept(directive ControlDirective) (ControlRecei
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
+	if d.closed {
+		return rejectedControlReceipt(directive, "unavailable", "journal_unavailable"), http.StatusServiceUnavailable
+	}
+	if err := d.verifyJournalPathLocked(); err != nil {
+		d.poisoned = true
+		return rejectedControlReceipt(directive, "unavailable", "journal_replaced"), http.StatusServiceUnavailable
+	}
 	if existing, ok := d.receipts[directive.ID]; ok {
 		if existing.Digest != digest {
 			return rejectedControlReceipt(directive, "denied", "id_conflict"), http.StatusConflict
@@ -333,9 +388,12 @@ func (d *DurableControlIngress) accept(directive ControlDirective) (ControlRecei
 		if existing.State == "unknown" {
 			return existing, http.StatusServiceUnavailable
 		}
+		if d.poisoned {
+			return rejectedControlReceipt(directive, "unavailable", "journal_unavailable"), http.StatusServiceUnavailable
+		}
 		return existing, http.StatusAccepted
 	}
-	if d.closed || d.poisoned {
+	if d.poisoned {
 		return rejectedControlReceipt(directive, "unavailable", "journal_unavailable"), http.StatusServiceUnavailable
 	}
 	currentGeneration := d.generations[directive.Target]
@@ -368,7 +426,11 @@ func (d *DurableControlIngress) accept(directive ControlDirective) (ControlRecei
 		d.poisoned = true
 		unknown := receipt
 		unknown.State = "unknown"
-		unknown.Reason = "journal_indeterminate"
+		if errors.Is(err, errControlJournalReplaced) {
+			unknown.Reason = "journal_replaced"
+		} else {
+			unknown.Reason = "journal_indeterminate"
+		}
 		// Retain the indeterminate receipt so GET and a same-ID retry report
 		// uncertainty until restart recovery establishes whether this exact
 		// digest reached durable storage.
@@ -468,7 +530,11 @@ func (d *DurableControlIngress) recordDelivered(id string) {
 		}
 		d.poisoned = true
 		receipt.State = "unknown"
-		receipt.Reason = "journal_indeterminate"
+		if errors.Is(err, errControlJournalReplaced) {
+			receipt.Reason = "journal_replaced"
+		} else {
+			receipt.Reason = "journal_indeterminate"
+		}
 		d.receipts[id] = receipt
 		return
 	}
@@ -480,6 +546,9 @@ func (d *DurableControlIngress) recordDelivered(id string) {
 }
 
 func (d *DurableControlIngress) appendRecordLocked(record controlJournalRecord) error {
+	if err := d.verifyJournalPathLocked(); err != nil {
+		return err
+	}
 	record.Checksum = ""
 	checksumPayload, err := json.Marshal(record)
 	if err != nil {
@@ -502,7 +571,25 @@ func (d *DurableControlIngress) appendRecordLocked(record controlJournalRecord) 
 	if err := d.journal.Sync(); err != nil {
 		return err
 	}
+	if err := d.verifyJournalPathLocked(); err != nil {
+		return err
+	}
 	d.journalBytes += frameBytes
+	return nil
+}
+
+func (d *DurableControlIngress) verifyJournalPathLocked() error {
+	return verifyControlJournalPath(d.journalPath, d.ownership.info)
+}
+
+func verifyControlJournalPath(path string, owned fs.FileInfo) error {
+	current, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errControlJournalReplaced, err)
+	}
+	if !os.SameFile(owned, current) {
+		return errControlJournalReplaced
+	}
 	return nil
 }
 
