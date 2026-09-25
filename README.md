@@ -17,6 +17,17 @@ decoding and physical GPU Direct paths are not universally enabled or qualified.
 See the [local-agent milestone](docs/local-agent-milestone.md) for the current
 wiring, the meaning of automatic, and the evidence required to earn the claim.
 
+**Where it stands on speed:** on an Apple M3 Pro running Qwen3.8-27B,
+fak's own Metal engine measured 6.86 decode tok/s, 0.985× a pinned llama.cpp
+reference build on the same Mac, with token-for-token identical output
+(observed 2026-09-03). That is
+parity with the strongest local engine, not yet a lead; see the
+[Qwen results](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) for the receipt.
+
+**Pick your path:** run a local agent → [Try fak](#try-fak) · guard an agent you
+already use → [`fak guard`](#governance-for-external-agents-fak-guard) · check the
+evidence → [benchmarks](docs/benchmarks/README.md) and [claims](CLAIMS.md).
+
 ## Try fak
 
 Install with `curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh` (or `go install github.com/anthony-chaudhary/fak/cmd/fak@latest`).
@@ -25,8 +36,9 @@ Try the local workflow on a supported Apple Silicon configuration:
 
 1. Start local inference (`fak up`):
    Probes unified memory with `macfit` to choose a model/context budget with
-   headroom. Starts the local OpenAI-compatible endpoint on `:8080` and opens
-   an interactive chat REPL. Use `fak up --mock` to inspect the workflow without
+   headroom, and a memory-pressure governor holds new work back instead of
+   pushing the Mac into swap. Starts the local OpenAI-compatible endpoint on
+   `:8080` and opens an interactive chat REPL. Use `fak up --mock` to inspect the workflow without
    a model or GPU; mock output is not inference performance evidence.
    ```bash
    fak up
@@ -44,6 +56,8 @@ Try the local workflow on a supported Apple Silicon configuration:
    ```
    "Using parallel subagents, audit the packages under internal/ and report their status"
    ```
+   The same local endpoint also backs Claude Code (`fak claude`, via an
+   Anthropic Messages adapter), Codex (`fak codex`), and [Pi](docs/integrations/pi.md).
    Compatible agents can reuse shared instructions and repository context.
    Inspect actual cache reuse and task outcomes; a fresh prefix still requires
    prefill, and reuse depends on model state, backend support, and cache identity.
@@ -61,7 +75,7 @@ Try the local workflow on a supported Apple Silicon configuration:
 
 ### Governance for external agents (`fak guard`)
 
-Already running Claude Code or Codex? Wrap the agent you already run with one command to add a default-deny capability floor. fak forwards Codex subscription credentials with no API key required and blocks tools outside the allowed policy without breaking the task:
+Already running Claude Code or Codex? Wrap the agent you already run with one command to add a default-deny capability floor (only allowed tools run; everything else is blocked). fak forwards Codex subscription credentials with no API key required and blocks tools outside the allowed policy without breaking the task:
 
 ```bash
 fak guard -- codex
@@ -69,7 +83,7 @@ fak guard -- codex
 
 In-kernel policy adjudication checks every tool call in under a microsecond before execution. See the [interactive showcase](docs/showcase.html) for a guided tour, or run `fak agent --offline` (# -> task completed) to inspect policy decisions with zero setup.
 
-## Latest hardware results — 2026-09-08
+## Latest hardware results — 2026-09-25
 
 The front page shows one row per supported hardware family. Latest means the newest
 committed performance receipt for that platform, not the newest code change. A row can be
@@ -110,13 +124,13 @@ receipts. For Mac local model setup and head-to-head Apple Silicon Metal measure
   on linux/amd64, including AMD Strix Halo. NVIDIA users are directed to
   `ghcr.io/anthony-chaudhary/fak:cuda-latest` with `--gpus all`.
   CPU archives are secondary references selected with `--variant cpu`.
-  The Metal archive is available on v0.54.0, backfilled from that exact tag.
-  Vulkan publication remains pending its release and hardware gate. Missing GPU
-  assets fail with an actionable message.
+  The latest published GitHub release carries the Metal archive; v0.55.x assets
+  follow its publication. Vulkan publication remains pending its release and
+  hardware gate. Missing GPU assets fail with an actionable message.
   Apple acceleration is fak-native Metal; MLX is a comparison runtime.
   New native-performance work prefers Qwen3.8. Choose a supported model/backend
   and measure the actual local workflow.
-- **Default-deny capability floor:** Protect your workspace from unintended commands, path escapes, or tool poisoning. Every tool call is verified against a capability floor before execution. Drop-in wrappers protect existing agents like Claude Code, Codex, OpenCode, and Cursor with zero rewrites.
+- **Default-deny capability floor:** Protect your workspace from unintended commands, path escapes, or tool poisoning. Every tool call is verified against a capability floor before execution; subagents get their own narrower floor, and a circuit breaker stops an agent stuck retrying a failing tool. Drop-in wrappers protect existing agents like Claude Code, Codex, OpenCode, and Cursor with zero rewrites.
 
 Native inference provides direct execution on local silicon, with external engines supported as an explicit reference; see the [native inference goal](docs/native-inference-goal.md) for details.
 
@@ -160,7 +174,7 @@ Balanced defaults are `ponytail:medium` for work discipline and `caveman:medium`
 | Check what is shipped, limited, or planned | [Status](STATUS.md) · [claims](CLAIMS.md) · [feature matrix](docs/supported/features.md) |
 | Browse performance evidence | [Mac](docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md) · [AMD](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) · [NVIDIA](docs/_witnesses/issue-10944-nvidia-gcp-overnight/README.md) · [all benchmarks](docs/benchmarks/README.md) |
 | Is the cache paying off? (trend) | [Cache-value roll-up](docs/cache-value-rollup.md) — kernel reuse and provider-dollar savings kept in separate, unblended tracks |
-| Connect another agent or model | [Codex](docs/integrations/openai-codex.md) · [Claude Code](docs/integrations/claude.md) · [subagents](docs/subagents-guide.md) · [Mac local models](docs/fak/mac-local-models.md) · [all integrations](docs/integrations/) |
+| Connect another agent or model | [Codex](docs/integrations/openai-codex.md) · [Claude Code](docs/integrations/claude.md) · [Pi](docs/integrations/pi.md) · [subagents](docs/subagents-guide.md) · [Mac local models](docs/fak/mac-local-models.md) · [all integrations](docs/integrations/) |
 | Understand the runtime | [Architecture](ARCHITECTURE.md) · [capability map](docs/CAPABILITIES.md) · [CLI reference](docs/cli-reference.md) |
 | Learn in prerequisite order | [Start here](START-HERE.md) · [learning path](LEARNING-PATH.md) · [documentation index](docs/index.md) |
 | Build on fak | [Go API](pkg/) · [harness contract](docs/harness-kit-contract.md) · [contributing](CONTRIBUTING.md) |
@@ -173,4 +187,4 @@ Provenance: gtm-t08 commercial-serving touchpoint.
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-09-12 vs VERSION 0.54.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-09 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
+<!-- readme-verified: 2026-09-25 vs VERSION 0.55.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-09 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->

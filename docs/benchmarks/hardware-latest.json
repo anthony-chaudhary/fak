@@ -1,6 +1,6 @@
 {
   "schema": "fak-hardware-latest/1",
-  "as_of": "2026-09-08",
+  "as_of": "2026-09-25",
   "platforms": {
     "Mac": {
       "observed": "2026-09-03",
