@@ -537,6 +537,55 @@ func TestGuardOpenCodeExistingConfigContentPreserved(t *testing.T) {
 	}
 }
 
+// TestGuardOpenCodeSubagentOverlayRepointsChildPins is the guard-escape witness:
+// OpenCode gives agent.<name>.model precedence over the session default, so a
+// child left on its own pinned model (hosted or local `fak/`) would bypass the
+// guarded provider. Every explicit child pin must be rewritten onto the guarded
+// model, while an agent with no model stays free to inherit the parent.
+func TestGuardOpenCodeSubagentOverlayRepointsChildPins(t *testing.T) {
+	existingJSON := `{
+		"model": "hive-ai/deepseek-ai/DeepSeek-V4.1-Flash",
+		"agent": {
+			"worker": {"model": "hive-ai/deepseek-ai/DeepSeek-V4.1-Flash"},
+			"reviewer": {"model": "fak/Qwen3.8-27B-UD-Q2_K_XL", "reason": "opt-in dogfood"},
+			"scout": {"description": "no explicit model"}
+		}
+	}`
+	getenv := func(k string) string {
+		if k == "OPENCODE_CONFIG_CONTENT" {
+			return existingJSON
+		}
+		return ""
+	}
+	injected, install := installGuardOpenCodeConfig([]string{"opencode"}, "http://127.0.0.1:54321", "qwen38", getenv)
+	if !install.Applied {
+		t.Fatal("OpenCode config injection was not applied")
+	}
+	var config map[string]any
+	for _, pair := range injected {
+		if pair[0] == "OPENCODE_CONFIG_CONTENT" {
+			if err := json.Unmarshal([]byte(pair[1]), &config); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	agents := config["agent"].(map[string]any)
+	if got := agents["worker"].(map[string]any)["model"]; got != "fak/qwen38" {
+		t.Fatalf("worker model = %v, want guarded fak/qwen38", got)
+	}
+	// The guard boundary repoints local `fak/` pins too (unlike the private
+	// failover repair), so the child cannot reach an unguarded endpoint.
+	if got := agents["reviewer"].(map[string]any)["model"]; got != "fak/qwen38" {
+		t.Fatalf("reviewer local pin was not forced onto the guard: %v", got)
+	}
+	if got := agents["reviewer"].(map[string]any)["reason"]; got != "opt-in dogfood" {
+		t.Fatalf("unrelated agent fields were dropped: %v", agents["reviewer"])
+	}
+	if _, hasModel := agents["scout"].(map[string]any)["model"]; hasModel {
+		t.Fatalf("agent with no explicit model should inherit the parent: %v", agents["scout"])
+	}
+}
+
 func TestGuardOpenCodeModelOverrideFromCommand(t *testing.T) {
 	t.Run("-m flag override", func(t *testing.T) {
 		command := []string{"opencode", "-m", "my-custom-model"}

@@ -158,8 +158,15 @@ func installGuardOpenCodeConfig(command []string, gwURL, modelID string, getenv 
 	providerMap["fak"] = fakProvider
 	config["provider"] = providerMap
 
-	config["model"] = "fak/" + cleanModel
-	config["small_model"] = "fak/" + cleanModel
+	guardedModel := "fak/" + cleanModel
+	config["model"] = guardedModel
+	config["small_model"] = guardedModel
+	// The guard owns the child model plane. OpenCode gives agent.<name>.model
+	// precedence over the session default, so a subagent left on its own pin
+	// (especially a local `fak/` opt-in) would clear the guarded provider and
+	// escape the kernel adjudication. Rewrite every explicit child pin onto the
+	// guarded model; an agent with no model still inherits the guarded parent.
+	guardOpenCodeSubagentOverlay(config, guardedModel)
 
 	encodedJSON, err := json.Marshal(config)
 	if err != nil {
@@ -206,6 +213,28 @@ func discoverGuardOpenCodeModelLimits(gwURL, modelID string) guardOpenCodeModelL
 		return roster.Data[0]
 	}
 	return guardOpenCodeModelLimits{}
+}
+
+// guardOpenCodeSubagentOverlay forces every explicitly pinned OpenCode subagent
+// onto the guard-selected model. Unlike the private failover repair (which
+// preserves local `fak/` opt-ins), the guard overlay is a security boundary and
+// must repoint local pins too: a child session that kept a `fak/` pin would
+// speak to a different endpoint than the guarded gateway. Agents with no model
+// are left to inherit the guarded parent model.
+func guardOpenCodeSubagentOverlay(config map[string]any, guardedModel string) {
+	agents, ok := config["agent"].(map[string]any)
+	if !ok {
+		return
+	}
+	for _, spec := range agents {
+		entry, ok := spec.(map[string]any)
+		if !ok {
+			continue
+		}
+		if _, hasModel := entry["model"]; hasModel {
+			entry["model"] = guardedModel
+		}
+	}
 }
 
 func mergeOpenCodeModel(models map[string]any, id string) {
