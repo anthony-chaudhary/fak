@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/procguard"
+	"github.com/anthony-chaudhary/fak/internal/session"
 )
 
 const (
@@ -45,59 +46,68 @@ var (
 )
 
 type guardResourcePolicy struct {
-	PollInterval      time.Duration
-	Metric            procguard.MemoryMetric
-	MaxTreeBytes      uint64
-	MinSystemHeadroom uint64
-	HeadroomDebounce  time.Duration
-	ReasoningPosture  string
-	Stop              <-chan struct{}
+	PollInterval             time.Duration
+	Metric                   procguard.MemoryMetric
+	MaxTreeBytes             uint64
+	MinSystemHeadroom        uint64
+	HeadroomDebounce         time.Duration
+	ReasoningPosture         string
+	ResourceBudget           session.ResourceBudget
+	NativeIORateControlError string
+	Stop                     <-chan struct{}
 }
 
 type guardResourceDecision struct {
-	Stop             bool
-	Reason           string
-	Metric           procguard.MemoryMetric
-	Offender         procguard.MemoryProcess
-	TreeBytes        uint64
-	SystemBytes      uint64
-	SystemLimit      uint64
-	ThresholdBytes   uint64
-	HeadroomBytes    uint64
-	OwnedPIDs        []int
-	Detail           string
-	ReasoningPosture string
+	Stop                bool
+	Reason              string
+	Metric              procguard.MemoryMetric
+	Offender            procguard.MemoryProcess
+	TreeBytes           uint64
+	SystemBytes         uint64
+	SystemLimit         uint64
+	ThresholdBytes      uint64
+	HeadroomBytes       uint64
+	OwnedPIDs           []int
+	Detail              string
+	ReasoningPosture    string
+	ResourceAxis        session.ResourceBudgetAxis
+	ResourceUsage       session.ResourceUsage
+	ResourceEnforcement string
 }
 
 type guardResourceReceipt struct {
-	Schema             string  `json:"schema"`
-	At                 string  `json:"at"`
-	TraceID            string  `json:"trace_id"`
-	Agent              string  `json:"agent"`
-	RootPID            int     `json:"root_pid"`
-	OffenderPID        int     `json:"offender_pid"`
-	OffenderPPID       int     `json:"offender_ppid"`
-	OffenderName       string  `json:"offender_name"`
-	OffenderCommand    string  `json:"offender_command,omitempty"`
-	MemoryMetric       string  `json:"memory_metric"`
-	TreeMemoryBytes    uint64  `json:"tree_memory_bytes"`
-	SystemMemoryBytes  uint64  `json:"system_memory_bytes,omitempty"`
-	SystemMemoryLimit  uint64  `json:"system_memory_limit,omitempty"`
-	TreeCommitBytes    *uint64 `json:"tree_commit_bytes,omitempty"`
-	SystemCommitBytes  *uint64 `json:"system_commit_bytes,omitempty"`
-	SystemCommitLimit  *uint64 `json:"system_commit_limit,omitempty"`
-	TreeRSSBytes       *uint64 `json:"tree_rss_bytes,omitempty"`
-	ThresholdBytes     uint64  `json:"threshold_bytes"`
-	HeadroomBytes      uint64  `json:"headroom_bytes"`
-	Reason             string  `json:"reason"`
-	Action             string  `json:"action"`
-	DescendantsSurvive bool    `json:"descendants_survive"`
-	Detail             string  `json:"detail,omitempty"`
-	BuildCommit        string  `json:"build_commit,omitempty"`
-	BuildModule        string  `json:"build_module,omitempty"`
-	BuildDirty         bool    `json:"build_dirty,omitempty"`
-	ActivationID       string  `json:"activation_id,omitempty"`
-	ReasoningPosture   string  `json:"reasoning_posture,omitempty"`
+	Schema              string                     `json:"schema"`
+	At                  string                     `json:"at"`
+	TraceID             string                     `json:"trace_id"`
+	Agent               string                     `json:"agent"`
+	RootPID             int                        `json:"root_pid"`
+	OffenderPID         int                        `json:"offender_pid"`
+	OffenderPPID        int                        `json:"offender_ppid"`
+	OffenderName        string                     `json:"offender_name"`
+	OffenderCommand     string                     `json:"offender_command,omitempty"`
+	MemoryMetric        string                     `json:"memory_metric"`
+	TreeMemoryBytes     uint64                     `json:"tree_memory_bytes"`
+	SystemMemoryBytes   uint64                     `json:"system_memory_bytes,omitempty"`
+	SystemMemoryLimit   uint64                     `json:"system_memory_limit,omitempty"`
+	TreeCommitBytes     *uint64                    `json:"tree_commit_bytes,omitempty"`
+	SystemCommitBytes   *uint64                    `json:"system_commit_bytes,omitempty"`
+	SystemCommitLimit   *uint64                    `json:"system_commit_limit,omitempty"`
+	TreeRSSBytes        *uint64                    `json:"tree_rss_bytes,omitempty"`
+	ThresholdBytes      uint64                     `json:"threshold_bytes"`
+	HeadroomBytes       uint64                     `json:"headroom_bytes"`
+	Reason              string                     `json:"reason"`
+	Action              string                     `json:"action"`
+	DescendantsSurvive  bool                       `json:"descendants_survive"`
+	Detail              string                     `json:"detail,omitempty"`
+	BuildCommit         string                     `json:"build_commit,omitempty"`
+	BuildModule         string                     `json:"build_module,omitempty"`
+	BuildDirty          bool                       `json:"build_dirty,omitempty"`
+	ActivationID        string                     `json:"activation_id,omitempty"`
+	ReasoningPosture    string                     `json:"reasoning_posture,omitempty"`
+	ResourceBudget      session.ResourceBudget     `json:"resource_budget,omitempty,omitzero"`
+	ResourceAxis        session.ResourceBudgetAxis `json:"resource_axis,omitempty"`
+	ResourceUsage       session.ResourceUsage      `json:"resource_usage,omitempty,omitzero"`
+	ResourceEnforcement string                     `json:"resource_enforcement,omitempty"`
 }
 
 type guardResourceConfig struct {
@@ -107,6 +117,7 @@ type guardResourceConfig struct {
 	UsagePath        string
 	HeadroomDebounce time.Duration
 	ReasoningPosture string
+	ResourceBudget   session.ResourceBudget
 }
 
 var guardResourceConfigured guardResourceConfig
@@ -263,6 +274,7 @@ func guardResourcePolicyConfigured() guardResourcePolicy {
 	if posture != "" {
 		p.ReasoningPosture = normalizeGuardReasoningPosture(posture)
 	}
+	p.ResourceBudget = guardResourceConfigured.ResourceBudget
 	return p
 }
 
@@ -523,11 +535,56 @@ var (
 	guardResumeProcess  = procguard.ResumeProcess
 )
 
+func guardResourceUsageFromSnapshot(previous procguard.ResourceSnapshot, previousAt time.Time, current procguard.ResourceSnapshot, now time.Time, peakRSS *uint64) session.ResourceUsage {
+	usage := session.ResourceUsage{
+		HaveProcessCount: current.HaveProcessCount,
+		ProcessCount:     current.ProcessCount,
+	}
+	if current.HaveCPU {
+		usage.CPUSeconds = current.CPUSeconds
+		usage.HaveCPUSeconds = true
+	}
+	if current.HaveRSS {
+		if current.RSSBytes > *peakRSS {
+			*peakRSS = current.RSSBytes
+		}
+		usage.PeakRSSBytes = *peakRSS
+		usage.HavePeakRSS = true
+	}
+	if current.HaveIO && !previousAt.IsZero() && now.After(previousAt) && current.ReadBytes >= previous.ReadBytes && current.WriteBytes >= previous.WriteBytes {
+		seconds := now.Sub(previousAt).Seconds()
+		usage.ReadBytesPerSecond = uint64(float64(current.ReadBytes-previous.ReadBytes) / seconds)
+		usage.WriteBytesPerSecond = uint64(float64(current.WriteBytes-previous.WriteBytes) / seconds)
+		usage.HaveReadRate = true
+		usage.HaveWriteRate = true
+	}
+	return usage
+}
+
+func decideGuardResourceBudget(policy guardResourcePolicy, usage session.ResourceUsage) guardResourceDecision {
+	decision := policy.ResourceBudget.Decide(usage)
+	if !decision.Stop {
+		return guardResourceDecision{ResourceUsage: usage}
+	}
+	return guardResourceDecision{
+		Stop:          true,
+		Reason:        session.ReasonResourceBudgetExhausted + " axis=" + string(decision.Axis),
+		ResourceAxis:  decision.Axis,
+		ResourceUsage: usage,
+	}
+}
+
+type guardResourceCollector func(int) (procguard.ResourceSnapshot, bool, string)
+
 func startGuardChildResourceMonitor(rootPID int, traceID, agent string, policy guardResourcePolicy) <-chan guardChildWaitEvent {
-	return startGuardChildResourceMonitorWithCollector(rootPID, traceID, agent, policy, procguard.CollectMemorySnapshot)
+	return startGuardChildResourceMonitorWithCollectors(rootPID, traceID, agent, policy, procguard.CollectMemorySnapshot, procguard.CollectResourceSnapshot)
 }
 
 func startGuardChildResourceMonitorWithCollector(rootPID int, traceID, agent string, policy guardResourcePolicy, collect func(int) (procguard.MemorySnapshot, bool, string)) <-chan guardChildWaitEvent {
+	return startGuardChildResourceMonitorWithCollectors(rootPID, traceID, agent, policy, collect, nil)
+}
+
+func startGuardChildResourceMonitorWithCollectors(rootPID int, traceID, agent string, policy guardResourcePolicy, collect func(int) (procguard.MemorySnapshot, bool, string), collectResource guardResourceCollector) <-chan guardChildWaitEvent {
 	recordGuardChildResourceUsage(traceID, agent, rootPID, policy)
 	out := make(chan guardChildWaitEvent, 1)
 	debounceWindow := policy.effectiveHeadroomDebounce()
@@ -535,6 +592,9 @@ func startGuardChildResourceMonitorWithCollector(rootPID int, traceID, agent str
 		ticker := time.NewTicker(policy.PollInterval)
 		defer ticker.Stop()
 		var headroomFirstSeen time.Time
+		var previousResource procguard.ResourceSnapshot
+		var previousResourceAt time.Time
+		var peakRSS uint64
 		var childSuspended bool
 		defer func() {
 			if childSuspended {
@@ -575,6 +635,38 @@ func startGuardChildResourceMonitorWithCollector(rootPID int, traceID, agent str
 				return
 			}
 			decision := decideGuardResource(policy, snapshot)
+			if !decision.Stop && collectResource != nil && !policy.ResourceBudget.IsZero() {
+				resourceSnapshot, resourceSupported, resourceDetail := collectResource(rootPID)
+				if resourceSupported && resourceDetail == "" {
+					now := time.Now()
+					usage := guardResourceUsageFromSnapshot(previousResource, previousResourceAt, resourceSnapshot, now, &peakRSS)
+					resourceDecision := decideGuardResourceBudget(policy, usage)
+					for _, process := range snapshot.Processes {
+						resourceDecision.OwnedPIDs = append(resourceDecision.OwnedPIDs, process.PID)
+					}
+					if len(snapshot.Processes) > 0 {
+						resourceDecision.Metric = snapshot.Metric
+						resourceDecision.TreeBytes = snapshot.TreeBytes
+						resourceDecision.SystemBytes = snapshot.SystemBytes
+						resourceDecision.SystemLimit = snapshot.SystemLimit
+						resourceDecision.Offender = snapshot.Processes[0]
+					}
+					if serveSessions != nil {
+						_, sessionStopped, sessionDecision := serveSessions.ObserveResource(traceID, usage)
+						if sessionStopped && !resourceDecision.Stop {
+							resourceDecision = decideGuardResourceBudget(policy, sessionDecision.Usage)
+							resourceDecision.Stop = true
+							resourceDecision.Reason = session.ReasonResourceBudgetExhausted + " axis=" + string(sessionDecision.Axis)
+							resourceDecision.ResourceAxis = sessionDecision.Axis
+						}
+					}
+					previousResource = resourceSnapshot
+					previousResourceAt = now
+					if resourceDecision.Stop {
+						decision = resourceDecision
+					}
+				}
+			}
 			if !decision.Stop {
 				if childSuspended {
 					_ = guardResumeProcess(rootPID)
@@ -597,6 +689,7 @@ func startGuardChildResourceMonitorWithCollector(rootPID int, traceID, agent str
 					continue
 				}
 			}
+			decision.ResourceEnforcement = guardResourceEnforcement(policy)
 			out <- guardChildWaitEvent{Kind: guardChildResourceLimit, Reason: guardResourceReason(decision), Resource: &decision}
 			return
 		}
@@ -671,6 +764,19 @@ func newGuardResourceActivationID() string {
 	return hex.EncodeToString(b[:])
 }
 
+func guardResourceEnforcement(policy guardResourcePolicy) string {
+	if policy.ResourceBudget.IsZero() {
+		return ""
+	}
+	if policy.ResourceBudget.ReadBytesPerSecond == 0 && policy.ResourceBudget.WriteBytesPerSecond == 0 {
+		return "sample_monitor"
+	}
+	if policy.NativeIORateControlError == "" {
+		return "native_io_rate+sample_monitor"
+	}
+	return "sample_monitor_only: " + policy.NativeIORateControlError
+}
+
 func newGuardResourceInvocationReceipt(traceID, agent string, rootPID int, policy guardResourcePolicy) guardResourceReceipt {
 	identity := guardResourceBuildIdentity()
 	metric := policy.Metric
@@ -678,22 +784,24 @@ func newGuardResourceInvocationReceipt(traceID, agent string, rootPID int, polic
 		metric = procguard.MemoryMetricCommit
 	}
 	receipt := guardResourceReceipt{
-		Schema:             "fak.guard.child-resource.v1",
-		At:                 time.Now().UTC().Format(time.RFC3339Nano),
-		TraceID:            traceID,
-		Agent:              agent,
-		RootPID:            rootPID,
-		MemoryMetric:       string(metric),
-		ThresholdBytes:     policy.MaxTreeBytes,
-		HeadroomBytes:      policy.effectiveMinSystemHeadroom(),
-		Reason:             "CHILD_RESOURCE_CONTAINMENT_ACTIVE",
-		Action:             "containment_active",
-		DescendantsSurvive: true,
-		BuildCommit:        identity.Commit,
-		BuildModule:        identity.ModuleVersion,
-		BuildDirty:         identity.Dirty,
-		ActivationID:       guardResourceActivationID,
-		ReasoningPosture:   normalizeGuardReasoningPosture(policy.ReasoningPosture),
+		Schema:              "fak.guard.child-resource.v1",
+		At:                  time.Now().UTC().Format(time.RFC3339Nano),
+		TraceID:             traceID,
+		Agent:               agent,
+		RootPID:             rootPID,
+		MemoryMetric:        string(metric),
+		ThresholdBytes:      policy.MaxTreeBytes,
+		HeadroomBytes:       policy.effectiveMinSystemHeadroom(),
+		Reason:              "CHILD_RESOURCE_CONTAINMENT_ACTIVE",
+		Action:              "containment_active",
+		DescendantsSurvive:  true,
+		BuildCommit:         identity.Commit,
+		BuildModule:         identity.ModuleVersion,
+		BuildDirty:          identity.Dirty,
+		ActivationID:        guardResourceActivationID,
+		ReasoningPosture:    normalizeGuardReasoningPosture(policy.ReasoningPosture),
+		ResourceBudget:      policy.ResourceBudget,
+		ResourceEnforcement: guardResourceEnforcement(policy),
 	}
 	if receipt.BuildModule == "" {
 		receipt.BuildModule = "cmd/fak"
@@ -723,7 +831,7 @@ func newGuardResourceReceipt(traceID, agent string, rootPID int, d guardResource
 		action = "observe_only"
 		descendantsSurvive = true
 	}
-	receipt := guardResourceReceipt{Schema: "fak.guard.child-resource.v1", At: time.Now().UTC().Format(time.RFC3339Nano), TraceID: traceID, Agent: agent, RootPID: rootPID, OffenderPID: d.Offender.PID, OffenderPPID: d.Offender.PPID, OffenderName: d.Offender.Name, MemoryMetric: string(d.Metric), TreeMemoryBytes: d.TreeBytes, SystemMemoryBytes: d.SystemBytes, SystemMemoryLimit: d.SystemLimit, ThresholdBytes: d.ThresholdBytes, HeadroomBytes: d.HeadroomBytes, Reason: d.Reason, Action: action, DescendantsSurvive: descendantsSurvive, Detail: scrubGuardResourceDetail(d.Detail), BuildCommit: identity.Commit, BuildModule: identity.ModuleVersion, BuildDirty: identity.Dirty, ActivationID: guardResourceActivationID, ReasoningPosture: d.ReasoningPosture}
+	receipt := guardResourceReceipt{Schema: "fak.guard.child-resource.v1", At: time.Now().UTC().Format(time.RFC3339Nano), TraceID: traceID, Agent: agent, RootPID: rootPID, OffenderPID: d.Offender.PID, OffenderPPID: d.Offender.PPID, OffenderName: d.Offender.Name, MemoryMetric: string(d.Metric), TreeMemoryBytes: d.TreeBytes, SystemMemoryBytes: d.SystemBytes, SystemMemoryLimit: d.SystemLimit, ThresholdBytes: d.ThresholdBytes, HeadroomBytes: d.HeadroomBytes, Reason: d.Reason, Action: action, DescendantsSurvive: descendantsSurvive, Detail: scrubGuardResourceDetail(d.Detail), BuildCommit: identity.Commit, BuildModule: identity.ModuleVersion, BuildDirty: identity.Dirty, ActivationID: guardResourceActivationID, ReasoningPosture: d.ReasoningPosture, ResourceAxis: d.ResourceAxis, ResourceUsage: d.ResourceUsage, ResourceEnforcement: d.ResourceEnforcement}
 	if receipt.BuildModule == "" {
 		receipt.BuildModule = "cmd/fak"
 	}

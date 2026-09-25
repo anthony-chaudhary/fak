@@ -40,7 +40,15 @@ type JobObject struct{}
 
 // ManagedJobConfig mirrors the Windows aggregate Job Object limit input.
 type ManagedJobConfig struct {
-	MemoryLimitBytes uint64
+	MemoryLimitBytes    uint64
+	ReadBytesPerSecond  uint64
+	WriteBytesPerSecond uint64
+}
+
+// IORateControlError reports that the platform has no native Job Object I/O
+// rate-control surface. Callers must retain their sampled monitor fallback.
+func (j *JobObject) IORateControlError() error {
+	return errors.New("windowgate: native I/O rate control is unsupported on this platform")
 }
 
 // Close is a no-op off Windows.

@@ -8,6 +8,17 @@ import (
 	"time"
 )
 
+func TestFaultDomainReportsUnboundIORatesInsteadOfClaimingEnforcement(t *testing.T) {
+	limits := requestedSupport(ResourceEnvelope{ReadBytesPerSecond: 1 << 20, WriteBytesPerSecond: 1 << 20}, nil)
+	for _, limit := range limits {
+		if limit.Resource == "io_read" || limit.Resource == "io_write" {
+			if limit.Enforced {
+				t.Fatalf("unsupported I/O rate overclaimed: %+v", limit)
+			}
+		}
+	}
+}
+
 func TestFaultDomainReceiptNeverOverclaimsUnsupportedLimits(t *testing.T) {
 	d, err := NewFaultDomain("instance/a", ResourceEnvelope{MemoryBytes: 64 << 20, ProcessCount: 4, OpenFiles: 32, ScratchBytes: 1 << 20, CoordinatorReserve: ResourceReserve{MemoryBytes: 32 << 20, CPUPercent: 10, ProcessCount: 2}})
 	if err != nil {

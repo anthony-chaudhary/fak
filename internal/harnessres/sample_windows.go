@@ -154,5 +154,10 @@ func readProcPID(pid int) (procSample, bool) {
 		s.peakRSS, s.havePeakRSS = uint64(mem.base.peakWorkingSetSize), true
 		s.private, s.havePrivate = uint64(mem.privateUsage), true
 	}
+	var io ioCounters
+	if ok, _, _ := procGetProcessIoCounters.Call(uintptr(h),
+		uintptr(unsafe.Pointer(&io))); ok != 0 {
+		s.ioRead, s.ioWrite, s.haveIO = io.readBytes, io.writeBytes, true
+	}
 	return s, true
 }

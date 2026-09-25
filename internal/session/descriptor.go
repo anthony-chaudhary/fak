@@ -139,7 +139,9 @@ type Descriptor struct {
 	// snapshot was taken. A caller that DOES pause cleanly before a graceful shutdown
 	// (Table.PauseTimeBudget) simply gets a descriptor whose ElapsedNanos is already
 	// exact and whose StartedAtUnixNano is already 0 — restoredPaused is then a no-op.
-	Time TimeBudget `json:"time,omitempty,omitzero"`
+	Time          TimeBudget     `json:"time,omitempty,omitzero"`
+	Resource      ResourceBudget `json:"resource,omitempty,omitzero"`
+	ResourceUsage ResourceUsage  `json:"resource_usage,omitempty,omitzero"`
 	// LastActive mirrors State.LastActive (issue #1179, the dormancy-clock epic #1178) so a
 	// session re-attached after a process restart keeps its durable LastActiveAt stamp — and
 	// therefore its derivable dormancy band (dormancy.Stamp.HorizonAt) — instead of presenting
@@ -213,6 +215,8 @@ func descriptorFromState(st State) Descriptor {
 		PendingTurn:      st.PendingTurn,
 		Rev:              st.Rev,
 		Time:             st.Time,
+		Resource:         st.Resource,
+		ResourceUsage:    st.ResourceUsage,
 		LastActive:       st.LastActive,
 	}
 }
@@ -253,7 +257,9 @@ func (d Descriptor) RestoredState() State {
 		// Table.ResumeTimeBudget(trace, now) once the restarted process picks now, which
 		// folds no further elapsed time (already paused) and simply starts the clock
 		// fresh, preserving ElapsedNanos exactly as persisted.
-		Time: d.Time.restoredPaused(),
+		Time:          d.Time.restoredPaused(),
+		Resource:      d.Resource,
+		ResourceUsage: d.ResourceUsage,
 	}
 }
 

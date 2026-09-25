@@ -239,6 +239,7 @@ func TestRegistryRestartReattachesAtPersistedState(t *testing.T) {
 	live.Restore("trace-x", State{TraceID: "trace-x", Run: Running, Budget: Budget{TurnsLeft: 100, TokensLeft: 100}})
 	live.SetPriority("trace-x", 9)
 	live.SetBudget("trace-x", Budget{TurnsLeft: 4, TokensLeft: 40})
+	live.SetResourceBudget("trace-x", ResourceBudget{PeakRSSBytes: 8 << 30, ReadBytesPerSecond: 1 << 20})
 	st, _ := live.Transition("trace-x", Throttled, "slow lane")
 	if _, err := r1.Register("sess-x", "host-a", st, time.Hour, t0); err != nil {
 		t.Fatalf("register: %v", err)
@@ -276,6 +277,9 @@ func TestRegistryRestartReattachesAtPersistedState(t *testing.T) {
 	}
 	if got.Budget.TurnsLeft != 4 || got.Budget.TokensLeft != 40 {
 		t.Fatalf("restart lost the persisted budget: %+v", got.Budget)
+	}
+	if got.Resource.PeakRSSBytes != 8<<30 || got.Resource.ReadBytesPerSecond != 1<<20 {
+		t.Fatalf("restart lost the persisted resource budget: %+v", got.Resource)
 	}
 	if got.Reason != "slow lane" {
 		t.Fatalf("restart lost the persisted reason: %q", got.Reason)

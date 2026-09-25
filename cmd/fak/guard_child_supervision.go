@@ -390,7 +390,11 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
 		startupProgress.Phase("OS process start")
 		resourcePolicy := guardResourcePolicyConfigured()
-		job, releaseHostGrant, startErr := startGuardChildWithHostGrant(context.Background(), child, windowgate.ManagedJobConfig{MemoryLimitBytes: resourcePolicy.MaxTreeBytes})
+		job, releaseHostGrant, startErr := startGuardChildWithHostGrant(context.Background(), child, windowgate.ManagedJobConfig{
+			MemoryLimitBytes:    resourcePolicy.MaxTreeBytes,
+			ReadBytesPerSecond:  resourcePolicy.ResourceBudget.ReadBytesPerSecond,
+			WriteBytesPerSecond: resourcePolicy.ResourceBudget.WriteBytesPerSecond,
+		})
 		if startErr != nil {
 			if child.Process == nil {
 				startErr = errors.Join(startErr, queueLifecycle.abortLaunching())
@@ -399,6 +403,11 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			terminalGuardChild(child, startErr, "launch_failed")
 			finishGuardChildAndReport(startErr, nil, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
+		}
+		if resourcePolicy.ResourceBudget.ReadBytesPerSecond > 0 || resourcePolicy.ResourceBudget.WriteBytesPerSecond > 0 {
+			if ioErr := job.IORateControlError(); ioErr != nil {
+				resourcePolicy.NativeIORateControlError = ioErr.Error()
+			}
 		}
 		terminalRestore.RepairAfterStart()
 		startupProgress.Phase("child registration")
@@ -667,7 +676,11 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
 		startupProgress.Phase("OS process start")
 		resourcePolicy := guardResourcePolicyConfigured()
-		job, releaseHostGrant, err := startGuardChildWithHostGrant(context.Background(), child, windowgate.ManagedJobConfig{MemoryLimitBytes: resourcePolicy.MaxTreeBytes})
+		job, releaseHostGrant, err := startGuardChildWithHostGrant(context.Background(), child, windowgate.ManagedJobConfig{
+			MemoryLimitBytes:    resourcePolicy.MaxTreeBytes,
+			ReadBytesPerSecond:  resourcePolicy.ResourceBudget.ReadBytesPerSecond,
+			WriteBytesPerSecond: resourcePolicy.ResourceBudget.WriteBytesPerSecond,
+		})
 		if err != nil {
 			if child.Process == nil {
 				err = errors.Join(err, queueLifecycle.abortLaunching())
@@ -678,6 +691,11 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			guardDumpStartupReportOnLaunchFail(os.Stderr, srv, dumpStartupOnLaunchFail)
 			finishGuardChildAndReport(err, child.ProcessState, queueLifecycle, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
+		}
+		if resourcePolicy.ResourceBudget.ReadBytesPerSecond > 0 || resourcePolicy.ResourceBudget.WriteBytesPerSecond > 0 {
+			if ioErr := job.IORateControlError(); ioErr != nil {
+				resourcePolicy.NativeIORateControlError = ioErr.Error()
+			}
 		}
 		terminalRestore.RepairAfterStart()
 		startupProgress.Phase("child registration")

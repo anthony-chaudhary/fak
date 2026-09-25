@@ -114,6 +114,9 @@ func readProcPID(pid int) (procSample, bool) {
 			s.private, s.havePrivate = private, true
 		}
 	}
+	if r, w, ok := procIOBytes(pid); ok {
+		s.ioRead, s.ioWrite, s.haveIO = r, w, true
+	}
 	return s, true
 }
 
@@ -161,11 +164,11 @@ func parseProcStatm(line string, pageSize uint64) (rss, private uint64, ok bool)
 	return resident * pageSize, (resident - shared) * pageSize, true
 }
 
-func selfIOBytes() (read, write uint64, ok bool) {
-	if runtime.GOOS != "linux" {
+func procIOBytes(pid int) (read, write uint64, ok bool) {
+	if runtime.GOOS != "linux" || pid <= 0 {
 		return 0, 0, false
 	}
-	b, err := os.ReadFile("/proc/self/io")
+	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/io")
 	if err != nil {
 		return 0, 0, false
 	}
@@ -187,4 +190,8 @@ func selfIOBytes() (read, write uint64, ok bool) {
 		}
 	}
 	return read, write, haveR && haveW
+}
+
+func selfIOBytes() (read, write uint64, ok bool) {
+	return procIOBytes(os.Getpid())
 }

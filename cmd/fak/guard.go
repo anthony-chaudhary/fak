@@ -153,6 +153,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	commitGracePeriod := fs.Duration("commit-grace-period", 30*time.Second, "maximum grace period to allow an in-flight commit to conclude cleanly when --max-duration expires (0 disables; default 30s)")
 	childStopGrace := fs.Duration("child-stop-grace", 3*time.Second, "grace window between graceful interrupt (SIGINT) and destructive tree-kill when stopping a child (default 3s)")
 	budgetEnvelopeSpec := fs.String("budget-envelope", "", "managed-context budget envelope (#1573): turns=20,tokens=200000,context=64000,wall=2h,spend=$25,throughput=40/s,max-tokens=1024,gap=250ms. Seeds this guard session's budget/pace/wall axes; explicit --context-budget-tokens and --max-duration override those envelope axes.")
+	resourceBudgetSpec := fs.String("resource-budget", "", "per-agent process-tree resource budget: peak-rss=8GiB,cpu-seconds=3600,processes=8,io-read-bps=1GiB,io-write-bps=512MiB. Disk rates are sampled and terminate an out-of-budget tree; unavailable counters remain observe-only.")
 	resetOnBudget := fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
 	restartOnBudget := fs.Bool("restart-on-budget", false, "on context-budget exhaustion, stop and relaunch the wrapped child under the continuation trace, writing a carryover seed JSON and exposing it via FAK_RESET_* env vars (requires --context-budget-tokens)")
 	restartLimit := fs.Int("restart-limit", 0, "maximum child relaunches for --restart-on-budget; 0 means unlimited")
@@ -205,11 +206,22 @@ func cmdManageCommand(commandName string, argv []string) {
 		os.Exit(2)
 	}
 	headroomDebounce := resolveGuardHeadroomDebounce(*childHeadroomDebounce, os.Getenv("FAK_GUARD_HEADROOM_DEBOUNCE"))
+	var guardResourceBudget session.ResourceBudget
+	hasGuardResourceBudget := strings.TrimSpace(*resourceBudgetSpec) != ""
+	if hasGuardResourceBudget {
+		var err error
+		guardResourceBudget, err = session.ParseResourceBudget(*resourceBudgetSpec)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fak guard: --resource-budget: %v\n", err)
+			os.Exit(2)
+		}
+	}
 	setGuardResourceConfig(guardResourceConfig{
 		MaxMemoryMB:      *childMaxMemoryMB,
 		PollInterval:     *childResourcePoll,
 		ReceiptPath:      *childResourceJournal,
 		HeadroomDebounce: headroomDebounce,
+		ResourceBudget:   guardResourceBudget,
 	})
 	launchPlan := newGuardLaunchPlan(fs.Args())
 	setLaunchToolGrant(allowTools)
@@ -686,7 +698,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	// and an implicitly named durable launch gets a fresh host/cwd/argv-derived id. The fresh
 	// suffix is load-bearing: reusing "guard" would let the registry restore a previous run's
 	// STOPPED/TIME_BUDGET_EXHAUSTED state into a brand-new --max-duration launch.
-	guardDurabilityWanted := guardSetFlags["session-id"] || contextBudgetLimit > 0 || maxDurationLimit > 0 || hasGuardBudgetEnvelope
+	guardDurabilityWanted := guardSetFlags["session-id"] || contextBudgetLimit > 0 || maxDurationLimit > 0 || hasGuardBudgetEnvelope || hasGuardResourceBudget
 	guardTraceID = resolveGuardSessionID(guardTraceID, guardDurabilityWanted, session.DescriptorMeta{
 		CacheKey: sessionCacheKey(sessionDurabilityHost(), sessionWorkingDir(), "", command),
 	}, newGuardLaunchNonce())
@@ -728,6 +740,9 @@ func cmdManageCommand(commandName string, argv []string) {
 		contextOverride = contextBudgetTokens
 	}
 	applyGuardSessionBudgetEnvelope(serveSessions, guardTraceID, guardBudgetEnvelope, hasGuardBudgetEnvelope, contextOverride, contextBudgetLimit, maxDurationLimit, time.Now())
+	if hasGuardResourceBudget && serveSessions != nil {
+		serveSessions.SetResourceBudget(guardTraceID, guardResourceBudget)
+	}
 	// DEFER the durability setup's git spawns (sessionStartSHA's `git rev-parse HEAD` and
 	// PublishSession's `git hash-object -w` + `git update-ref`) until AFTER the gateway is
 	// bound and MarkReady()'d (see the goroutine below, right after srv.MarkReady()) rather

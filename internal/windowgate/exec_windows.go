@@ -56,6 +56,14 @@ const (
 // (JobObjectExtendedLimitInformation) passed to SetInformationJobObject.
 const jobObjectExtendedLimitInformationClass = 9
 
+// jobObjectIoRateControlInformationClass is the JOBOBJECTINFOCLASS selector
+// (JobObjectIoRateControlInformation) used for the native aggregate bandwidth
+// ceiling. The API is not available on every Windows SKU; callers retain the
+// sampled monitor fallback when SetInformationJobObject reports unsupported.
+const jobObjectIoRateControlInformationClass = 14
+
+const jobObjectIoRateControlEnable = 0x00000001
+
 // Access rights AssignProcessToJobObject requires on the target process handle.
 const (
 	processTerminate    = 0x0001
@@ -118,6 +126,20 @@ type jobObjectExtendedLimitInformation struct {
 	PeakJobMemoryUsed     uintptr
 }
 
+// jobObjectIoRateControlInformation mirrors JOBOBJECT_IO_RATE_CONTROL_INFORMATION.
+// MaxBandwidth is an aggregate bytes-per-second ceiling; Windows exposes one
+// job-wide bandwidth control rather than separate read and write ceilings. The
+// guard monitor therefore retains the separate read/write policy as the
+// authoritative per-axis safety check.
+type jobObjectIoRateControlInformation struct {
+	MaxIops         int64
+	MaxBandwidth    int64
+	ReservationIops int64
+	VolumeName      *uint16
+	BaseIoSize      uint32
+	ControlFlags    uint32
+}
+
 // threadEntry32 mirrors THREADENTRY32 for the one suspended primary thread
 // StartInNewJob resumes after job assignment. This is the same Toolhelp seam the
 // Go runtime's Windows process tests use for CREATE_SUSPENDED children.
@@ -135,13 +157,28 @@ type threadEntry32 struct {
 // keeps it for the worker's lifetime; Close (deferred, or on any teardown path)
 // reaps the entire assigned descendant tree in one syscall.
 type JobObject struct {
-	handle syscall.Handle
+	handle             syscall.Handle
+	ioRateControlError error
 }
 
-// ManagedJobConfig carries the explicit aggregate Job Object memory ceiling.
-// A zero value preserves the historical 64 GiB managed-agent default.
+// IORateControlError reports why a requested native I/O ceiling was not
+// installed. A non-nil result is an explicit degraded-mode signal; the caller
+// must not describe the I/O budget as OS-throttled.
+func (j *JobObject) IORateControlError() error {
+	if j == nil {
+		return nil
+	}
+	return j.ioRateControlError
+}
+
+// ManagedJobConfig carries the explicit aggregate Job Object memory ceiling
+// and optional aggregate disk-bandwidth ceiling. A zero value preserves the
+// historical 64 GiB managed-agent default. Windows I/O control is aggregate;
+// the guard's live monitor enforces separate read/write ceilings where needed.
 type ManagedJobConfig struct {
-	MemoryLimitBytes uint64
+	MemoryLimitBytes    uint64
+	ReadBytesPerSecond  uint64
+	WriteBytesPerSecond uint64
 }
 
 // Close closes the job handle. Because the job carries KILL_ON_JOB_CLOSE, closing
@@ -228,10 +265,18 @@ func StartInNewJob(cmd *exec.Cmd) (*JobObject, error) {
 // ownership and the aggregate commit ceiling. Callers opt in explicitly so an
 // unrelated command-line argument cannot accidentally select or evade the cap.
 func StartManagedAgentInNewJob(cmd *exec.Cmd, config ManagedJobConfig) (*JobObject, error) {
-	return startInNewJob(cmd, managedJobMemoryLimitBytes(config))
+	return startInNewJobWithConfig(cmd, ManagedJobConfig{
+		MemoryLimitBytes:    managedJobMemoryLimitBytes(config),
+		ReadBytesPerSecond:  config.ReadBytesPerSecond,
+		WriteBytesPerSecond: config.WriteBytesPerSecond,
+	})
 }
 
 func startInNewJob(cmd *exec.Cmd, memoryLimit uint64) (*JobObject, error) {
+	return startInNewJobWithConfig(cmd, ManagedJobConfig{MemoryLimitBytes: memoryLimit})
+}
+
+func startInNewJobWithConfig(cmd *exec.Cmd, config ManagedJobConfig) (*JobObject, error) {
 	if cmd == nil {
 		return nil, errors.New("windowgate: StartInNewJob requires a command")
 	}
@@ -244,8 +289,8 @@ func startInNewJob(cmd *exec.Cmd, memoryLimit uint64) (*JobObject, error) {
 	}
 	var job *JobObject
 	var err error
-	if memoryLimit > 0 {
-		job, err = assignProcessToNewJobObject(cmd, memoryLimit)
+	if config.MemoryLimitBytes > 0 || config.ReadBytesPerSecond > 0 || config.WriteBytesPerSecond > 0 {
+		job, err = assignProcessToNewJobObjectWithConfig(cmd, config)
 	} else {
 		job, err = assignToNewJobObject(cmd)
 	}
@@ -326,6 +371,10 @@ func AssignToNewJobObject(cmd *exec.Cmd) (*JobObject, error) {
 }
 
 func assignProcessToNewJobObject(cmd *exec.Cmd, memoryLimit uint64) (*JobObject, error) {
+	return assignProcessToNewJobObjectWithConfig(cmd, ManagedJobConfig{MemoryLimitBytes: memoryLimit})
+}
+
+func assignProcessToNewJobObjectWithConfig(cmd *exec.Cmd, config ManagedJobConfig) (*JobObject, error) {
 	if cmd == nil || cmd.Process == nil {
 		return nil, errors.New("windowgate: AssignToNewJobObject requires a started process")
 	}
@@ -337,9 +386,9 @@ func assignProcessToNewJobObject(cmd *exec.Cmd, memoryLimit uint64) (*JobObject,
 
 	info := jobObjectExtendedLimitInformation{}
 	info.BasicLimitInformation.LimitFlags = jobObjectLimitKillOnJobClose
-	if memoryLimit > 0 {
+	if config.MemoryLimitBytes > 0 {
 		info.BasicLimitInformation.LimitFlags |= jobObjectLimitJobMemory
-		info.JobMemoryLimit = uintptr(memoryLimit)
+		info.JobMemoryLimit = uintptr(config.MemoryLimitBytes)
 	}
 	ok, _, callErr := procSetInformationJobObject.Call(
 		hJob,
@@ -350,6 +399,12 @@ func assignProcessToNewJobObject(cmd *exec.Cmd, memoryLimit uint64) (*JobObject,
 	if ok == 0 {
 		job.Close()
 		return nil, fmt.Errorf("windowgate: SetInformationJobObject: %w", callErr)
+	}
+	if err := setJobObjectIORateControl(hJob, config); err != nil {
+		// The process tree is still contained and the caller can keep its sampled
+		// rate monitor. Preserve the native error so the caller reports degraded
+		// enforcement instead of claiming a hard OS throttle.
+		job.ioRateControlError = err
 	}
 
 	hProc, err := syscall.OpenProcess(processSetQuota|processTerminate, false, uint32(cmd.Process.Pid))
@@ -365,6 +420,40 @@ func assignProcessToNewJobObject(cmd *exec.Cmd, memoryLimit uint64) (*JobObject,
 		return nil, fmt.Errorf("windowgate: AssignProcessToJobObject: %w", callErr)
 	}
 	return job, nil
+}
+
+func setJobObjectIORateControl(hJob uintptr, config ManagedJobConfig) error {
+	bandwidth := managedJobIORateBandwidthBytes(config)
+	if bandwidth == 0 {
+		return nil
+	}
+	if bandwidth > uint64(^uint64(0)>>1) {
+		return fmt.Errorf("windowgate: I/O bandwidth ceiling %d exceeds Win32 MaxBandwidth", bandwidth)
+	}
+	info := jobObjectIoRateControlInformation{
+		MaxBandwidth: int64(bandwidth),
+		ControlFlags: jobObjectIoRateControlEnable,
+	}
+	ok, _, callErr := procSetInformationJobObject.Call(
+		hJob,
+		uintptr(jobObjectIoRateControlInformationClass),
+		uintptr(unsafe.Pointer(&info)),
+		unsafe.Sizeof(info),
+	)
+	if ok == 0 {
+		return fmt.Errorf("windowgate: SetInformationJobObject(I/O rate): %w", callErr)
+	}
+	return nil
+}
+
+func managedJobIORateBandwidthBytes(config ManagedJobConfig) uint64 {
+	// The Win32 control is aggregate. When both axes are declared, their sum is
+	// the job-wide cap; the guard's sampled monitor remains the separate-axis
+	// enforcement authority and reports the exact read/write breach.
+	if config.ReadBytesPerSecond > ^uint64(0)-config.WriteBytesPerSecond {
+		return ^uint64(0)
+	}
+	return config.ReadBytesPerSecond + config.WriteBytesPerSecond
 }
 
 func managedJobMemoryLimitBytes(config ManagedJobConfig) uint64 {

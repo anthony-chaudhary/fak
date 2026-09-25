@@ -23,13 +23,15 @@ const (
 // ScratchBytes and OpenFiles are reported but remain advisory until an OS adapter
 // can bind them to the complete descendant tree.
 type ResourceEnvelope struct {
-	MemoryBytes        uint64
-	CPUPercent         uint32
-	CPUTime            time.Duration
-	ProcessCount       uint32
-	OpenFiles          uint64
-	ScratchBytes       uint64
-	CoordinatorReserve ResourceReserve
+	MemoryBytes         uint64
+	CPUPercent          uint32
+	CPUTime             time.Duration
+	ProcessCount        uint32
+	ReadBytesPerSecond  uint64
+	WriteBytesPerSecond uint64
+	OpenFiles           uint64
+	ScratchBytes        uint64
+	CoordinatorReserve  ResourceReserve
 }
 
 // ResourceReserve records headroom deliberately kept outside the fault domain.
@@ -183,7 +185,7 @@ func requestedSupport(e ResourceEnvelope, enforced map[string]string) []LimitSup
 	requested := []struct {
 		name string
 		on   bool
-	}{{"memory", e.MemoryBytes > 0}, {"cpu_share", e.CPUPercent > 0}, {"cpu_time", e.CPUTime > 0}, {"processes", e.ProcessCount > 0}, {"open_files", e.OpenFiles > 0}, {"scratch", e.ScratchBytes > 0}}
+	}{{"memory", e.MemoryBytes > 0}, {"cpu_share", e.CPUPercent > 0}, {"cpu_time", e.CPUTime > 0}, {"processes", e.ProcessCount > 0}, {"io_read", e.ReadBytesPerSecond > 0}, {"io_write", e.WriteBytesPerSecond > 0}, {"open_files", e.OpenFiles > 0}, {"scratch", e.ScratchBytes > 0}}
 	var out []LimitSupport
 	for _, r := range requested {
 		if !r.on {

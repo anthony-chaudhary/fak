@@ -721,7 +721,9 @@ func (t *Table) RecontinueAtWithTransaction(parent, child string, fresh Budget, 
 		// ceiling: the floor AND its accumulated observation window carry onto the
 		// child (#2762), so a hidden context reset cannot launder a session that
 		// has been running below its floor back to a fresh grace window.
-		Throughput: parentSt.Throughput,
+		Throughput:    parentSt.Throughput,
+		Resource:      parentSt.Resource,
+		ResourceUsage: parentSt.ResourceUsage,
 		// LastActive is a lineage carry like Time/Generation above: the child inherits the
 		// parent's dormancy stamp, monotonically advanced to now (the reset IS activity), so
 		// a hidden context reset neither zeroes the how-long-dormant clock nor runs it

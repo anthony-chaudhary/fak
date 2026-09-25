@@ -347,6 +347,13 @@ type State struct {
 	// byte-identically to a pre-#2762 State (omitzero keeps the wire shape
 	// unchanged when unused).
 	Throughput ThroughputBudget `json:"throughput,omitempty,omitzero"`
+	// Resource is the per-tree hardware budget declared for this session. It is
+	// deliberately separate from Budget: resource ceilings govern asynchronous
+	// process-tree observations, not per-turn model/tool work.
+	Resource ResourceBudget `json:"resource,omitempty,omitzero"`
+	// ResourceUsage is the latest observed process-tree sample. Presence bits in
+	// ResourceUsage keep unavailable OS counters distinct from observed zero.
+	ResourceUsage ResourceUsage `json:"resource_usage,omitempty,omitzero"`
 	// Assumptions is the live, visible ledger of facts the session is relying on.
 	// It carries provenance, confidence, and expiry only; it never carries hidden
 	// transcript bytes and it does not gate behavior by itself. Empty means the
