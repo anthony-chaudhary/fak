@@ -48,6 +48,7 @@ type guardStartupView struct {
 	debugStats           bool
 	quiet                bool
 	pinUpstream          bool
+	router               *guardRouterUpstream
 	apiKey               string
 	apiKeyEnv            string
 	keychainAPIKey       bool
@@ -132,6 +133,8 @@ func renderGuardStartupReport(v guardStartupView) string {
 		// note (subscription OAuth vs passthrough) only applies when fak proxies an API.
 		if !v.localModel {
 			switch {
+			case v.router != nil:
+				fmt.Fprintln(&startupReport, guardRouterAuthLine(*v.router))
 			case v.pinUpstream && v.up == "anthropic":
 				fmt.Fprintf(&startupReport, "fak guard: upstream auth — Claude Pro/Max subscription (provider-reported identity; OAuth token from %s, sent as a bearer token)\n", v.oauthSource)
 			case v.up == "anthropic" && v.apiKey != "" && v.keychainAPIKey:

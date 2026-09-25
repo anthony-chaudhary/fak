@@ -89,6 +89,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	workProfile := fs.String("work-profile", agentDefaultWorkProfile, "work policy for the witnessed Claude instruction seam; defaults to ponytail:medium, standard disables")
 	baseURL := fs.String("base-url", "", "upstream provider base URL (default: the provider's public API, e.g. anthropic -> https://api.anthropic.com)")
 	remoteServe := fs.String("remote-serve", "", "point the guarded turn's INFERENCE at a remote `fak serve` running on a lab box you chose (HOST or HOST:PORT, default port 8080), or at a public-safe local alias like @lab/glm-5.2 resolved from the user's lab target config. Forces the OpenAI-compatible wire and upstream base http://HOST:PORT/v1 (the /v1 fak serve serves its chat route under), so the dev turn runs on the lab GPU while the kernel still adjudicates locally. Mutually exclusive with --base-url; preflights GET /healthz AND /v1/models and fails loud if the box is not serving the /v1 surface.")
+	useRouter := fs.Bool("router", false, "OPT-IN: use the fak router (the local `fak serve` routing gateway; default http://127.0.0.1:8080, or FAK_AGENT_ROUTER_ORIGIN, or --base-url) as the model provider instead of api.anthropic.com. Anthropic wire (claude) only; the router key comes from --api-key-env or FAK_GATEWAY_KEY and is sent as Authorization: Bearer; the Claude subscription token is never sent. Preflights GET /healthz. Off by default — without it the upstream is unchanged.")
 	model := fs.String("model", "", "upstream model id override (default: forward the client's own model id)")
 	apiKeyEnv := fs.String("api-key-env", "", "env var holding the UPSTREAM API key. For --provider anthropic this is the explicit opt-IN to API billing (e.g. --api-key-env ANTHROPIC_API_KEY); the default is your Claude Pro/Max subscription via OAuth, even when ANTHROPIC_API_KEY is exported. For other providers the default forwards the client's own key (passthrough).")
 	anthropicOAuth := fs.Bool("anthropic-oauth", false, "force the Claude Pro/Max SUBSCRIPTION OAuth token upstream (sourced, in precedence order, from CLAUDE_CODE_OAUTH_TOKEN, then <claude-config>/.credentials.json, then <claude-config>/.oauth-token) sent as Authorization: Bearer + the oauth beta. This is ALREADY the default for --provider anthropic (even when ANTHROPIC_API_KEY is set); the flag forces it and fails loud if no token is found.")
@@ -466,6 +467,29 @@ func cmdManageCommand(commandName string, argv []string) {
 		os.Exit(2)
 	}
 
+	// --router (opt-in): the fak router is the model provider. Validated and preflighted
+	// here, before --local/--gguf can rewrite the upstream flags and before anything binds;
+	// the posture below then skips the subscription-OAuth resolution entirely. nil unless
+	// --router was passed, so the default upstream path is unchanged.
+	var routerUp *guardRouterUpstream
+	if *useRouter {
+		routerProvider, _ := launchPlan.resolveProvider(*provider)
+		ru, err := resolveGuardRouterUpstream(guardRouterInputs{
+			provider: routerProvider, baseURL: *baseURL, remoteServe: *remoteServe, apiKeyEnv: *apiKeyEnv,
+			anthropicOAuth: *anthropicOAuth, localAuto: *localAuto, ggufPath: *ggufPath,
+		}, os.Getenv)
+		if err != nil {
+			guardRouterFail(err)
+		}
+		if err := guardPreflightRouter(ru.origin); err != nil {
+			guardRouterFail(fmt.Errorf("--router: the fak router at %s is not reachable: %v\n  start it with `fak serve`, or point FAK_AGENT_ROUTER_ORIGIN or --base-url at it", ru.origin, err))
+		}
+		routerUp = &ru
+		if !*quiet {
+			fmt.Fprintln(os.Stderr, guardRouterBanner(ru))
+		}
+	}
+
 	// --gguf turns the in-process gateway into a LOCAL in-kernel model server (fak runs
 	// the model itself). Alone, the local model IS the upstream; with --alongside (or an
 	// explicit --base-url) it serves ALONGSIDE the API upstream instead — the gateway's
@@ -570,6 +594,7 @@ func cmdManageCommand(commandName string, argv []string) {
 		quiet:          *quiet,
 		localModel:     localModel,
 		localAlongside: localAlongside,
+		router:         routerUp,
 	})
 	upstreamResolveDur = time.Since(tUpstream)
 	up, providerAutodetected, resolvedBase := posture.up, launchProviderAutodetected, posture.resolvedBase
@@ -1508,6 +1533,7 @@ func cmdManageCommand(commandName string, argv []string) {
 		debugStats:           *debugStats,
 		quiet:                *quiet,
 		pinUpstream:          pinUpstream,
+		router:               routerUp,
 		apiKey:               apiKey,
 		apiKeyEnv:            *apiKeyEnv,
 		keychainAPIKey:       keychainAPIKey,
