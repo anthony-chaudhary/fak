@@ -59,8 +59,9 @@ func newBgloopSupervisor(s *Server) *bgloop.Supervisor {
 	// fak_bgloop_*. The body arms the router after its first probe and then runs
 	// RunHealthLoop, which paces itself and blocks until ctx is done: that is the
 	// CONTINUOUS (Interval 0) contract bgloop.Loop documents, so the Tick owns its own
-	// ticker. The body is a no-op when no fleet was wired, so a non-fleet deployment
-	// still gets a supervised (idle) "fleet-health" row rather than a missing one.
+	// ticker. With no fleet wired the body parks on ctx (never returns early, which
+	// would hot-spin), so a non-fleet deployment still gets a supervised (idle)
+	// "fleet-health" row rather than a missing one.
 	_ = sup.Register(bgloop.Loop{
 		Name:     "fleet-health",
 		Interval: 0,

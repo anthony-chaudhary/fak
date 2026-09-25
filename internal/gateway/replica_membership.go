@@ -88,9 +88,9 @@ func buildReplicaMembership(replicas []PlannerReplica, model string) (*FleetMemb
 // (registered as "fleet-health" in newBgloopSupervisor). It arms the replica router's
 // live membership and drives its health loop on the loop's lifecycle context — the
 // same context startLoops derives from the serve context, so stopLoops cancels and
-// joins it, and /v1/fak/loops shows it. It is a no-op when no fleet was wired (a lone
-// upstream, the in-kernel model, or the mock path) so those deployments are
-// byte-for-byte unchanged, and it returns when ctx is done. The first beat is applied
+// joins it, and /v1/fak/loops shows it. When no fleet was wired (a lone upstream, the
+// in-kernel model, or the mock path) it does no work and parks until ctx is done, so
+// those deployments are unchanged; either way it returns when ctx is done. The first beat is applied
 // SYNCHRONOUSLY before the router is armed, so admission reflects a real probe from the
 // first routed turn rather than the all-unknown state a fresh registry starts in; the
 // router stays on its blind round-robin until that probe returns, so a request racing
@@ -108,6 +108,10 @@ func (s *Server) runFleetHealthLoop(ctx context.Context) error {
 	fm := s.fleet
 	s.fleetMu.Unlock()
 	if fm == nil {
+		// Park, don't return: an Interval-0 Tick that returns at once is re-run
+		// back-to-back by the supervisor, pinning a core in every non-fleet
+		// gateway (each `fak guard` burned ~1 core idle).
+		<-ctx.Done()
 		return nil
 	}
 	fm.ProbeOnce(ctx)
