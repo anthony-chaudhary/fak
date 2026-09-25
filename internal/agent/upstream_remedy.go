@@ -1,9 +1,22 @@
 package agent
 
-// upstream_remedy.go — the single source of truth that maps an upstream failure
-// (HTTP status + response body) to the ONE remedy that can actually fix it, so the
-// caller never applies a DECEIVING remedy: a fix that pattern-matches the surface
-// error but cannot address its real cause.
+// upstream_remedy.go — the single source of truth for the AGENT PLANE's mapping
+// from an upstream failure (HTTP status + response body) to the ONE remedy that can
+// actually fix it, so the caller never applies a DECEIVING remedy: a fix that
+// pattern-matches the surface error but cannot address its real cause.
+//
+// SCOPE, and what this file deliberately does NOT claim. This is the agent
+// plane's severity authority, not the system's. The compiled router has its own
+// closed failure taxonomy (a 403 there is AUTH_REJECTED, a bare 402 is
+// CREDIT_EXHAUSTED), and the two are known to disagree: on a bare 402 the agent
+// BACKS OFF (treating it as transient) while the router fails over and tombstones
+// the credential. classifyUpstream is strictly FINER than the router's taxonomy
+// (it splits the 403 population four ways where the router splits it once), so
+// where a distinction is needed the correct direction is to add a class to the
+// router and read it here — not to keep a second, coarser-or-finer taxonomy
+// private to this package. The status-by-status map of which layer owns which
+// verdict, including every known divergence, is maintained in the private
+// repository at docs/ROUTER-FAILOVER-AUTHORITY.md (fak-private#2707).
 //
 // WHY THIS EXISTS. Before this, the remedy for an upstream failure was implied by the
 // HTTP status number alone (retryableStatus keyed retries; a 401 keyed the auth-refresh
