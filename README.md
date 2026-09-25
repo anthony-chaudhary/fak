@@ -17,6 +17,17 @@ decoding and physical GPU Direct paths are not universally enabled or qualified.
 See the [local-agent milestone](docs/local-agent-milestone.md) for the current
 wiring, the meaning of automatic, and the evidence required to earn the claim.
 
+**Where it stands on speed:** on an Apple M3 Pro running Qwen3.8-27B,
+fak's own Metal engine measured 6.86 decode tok/s, 0.985× a pinned llama.cpp
+reference build on the same Mac, with token-for-token identical output
+(observed 2026-09-03). That is
+parity with the strongest local engine, not yet a lead; see the
+[Qwen results](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) for the receipt.
+
+**Pick your path:** run a local agent → [Try fak](#try-fak) · guard an agent you
+already use → [`fak guard`](#governance-for-external-agents-fak-guard) · check the
+evidence → [benchmarks](docs/benchmarks/README.md) and [claims](CLAIMS.md).
+
 ## Try fak
 
 Install with `curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh` (or `go install github.com/anthony-chaudhary/fak/cmd/fak@latest`).
