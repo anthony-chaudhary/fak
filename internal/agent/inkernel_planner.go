@@ -3277,7 +3277,20 @@ func (p *InKernelPlanner) v41FaultAttributionClause() string {
 	if at == nil {
 		return ""
 	}
-	fa := at.V41ExpertFaultAttribution()
+	return formatV41FaultClause(at.V41ExpertFaultAttribution())
+}
+
+// formatV41FaultClause is the pure renderer behind v41FaultAttributionClause,
+// split out so a unit test can assert the exact clause without a live model.
+// The byte clause is unchanged from the pre-elapsed form (every physical
+// receipt already parses it); the #13299 elapsed split is APPENDED so an
+// operator reading one physical serve log can rank disk wait against f32
+// dequantization against the routed contraction — the choice PLAN
+// halo-ds41-100-30 §101 makes between the residency (#12952), device-contraction
+// (#13128) and dequant levers. Seconds and per-token milliseconds come straight
+// from the ledger's nanosecond accumulators; the contraction backend is the
+// observed engine identity, never a device receipt.
+func formatV41FaultClause(fa model.V41ExpertFaultAttribution) string {
 	if fa == (model.V41ExpertFaultAttribution{}) {
 		return ""
 	}
@@ -3288,11 +3301,24 @@ func (p *InKernelPlanner) v41FaultAttributionClause() string {
 	if reads > 0 {
 		hitFraction = float64(hits) / float64(reads)
 	}
+	// The backend identity is only stamped once a contraction ran; when neither
+	// phase contracted, say so with a dash rather than an ambiguous empty value.
+	backend := pre.ContractionBackend
+	if backend == "" {
+		backend = "-"
+	}
 	return fmt.Sprintf(
-		" v41_faults prefill=[faults=%df/%.1ffpt faulted_bytes=%.1fMiB dequant=%.2fGiB] decode=[faults=%df/%.1ffpt faulted_bytes=%.1fMiB dequant=%.2fGiB] hit_fraction=%.2f",
+		" v41_faults prefill=[faults=%df/%.1ffpt faulted_bytes=%.1fMiB dequant=%.2fGiB] decode=[faults=%df/%.1ffpt faulted_bytes=%.1fMiB dequant=%.2fGiB] hit_fraction=%.2f elapsed prefill=[fault=%.3fs/%.3fmspt dequant=%.3fs/%.3fmspt contraction=%.3fs/%.3fmspt] decode=[fault=%.3fs/%.3fmspt dequant=%.3fs/%.3fmspt contraction=%.3fs/%.3fmspt] contraction_backend=%s",
 		pre.Faults, pre.FaultsPerToken, mib*float64(pre.FaultedBytes), float64(pre.DequantBytes)/(1<<30),
 		dec.Faults, dec.FaultsPerToken, mib*float64(dec.FaultedBytes), float64(dec.DequantBytes)/(1<<30),
-		hitFraction)
+		hitFraction,
+		float64(pre.FaultDoorNanos)/1e9, pre.FaultNanosPerToken/1e6,
+		float64(pre.DequantNanos)/1e9, pre.DequantNanosPerToken/1e6,
+		float64(pre.ContractionNanos)/1e9, pre.ContractionNanosPerToken/1e6,
+		float64(dec.FaultDoorNanos)/1e9, dec.FaultNanosPerToken/1e6,
+		float64(dec.DequantNanos)/1e9, dec.DequantNanosPerToken/1e6,
+		float64(dec.ContractionNanos)/1e9, dec.ContractionNanosPerToken/1e6,
+		backend)
 }
 
 // executionIdentity makes the request log say which compute path actually produced
