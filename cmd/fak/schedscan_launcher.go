@@ -322,6 +322,133 @@ func schedSessionIsolation(logonType string) string {
 // live fleet actually carries.
 var schedScriptPathRe = regexp.MustCompile(`(?i)[^\s"';|&,]*\.(?:ps1|psm1|py|cmd|bat|sh|js|pl|rb)\b`)
 
+// schedResolveActionProgramPath resolves the PROGRAM a task actually launches to a
+// filesystem path, for the existence check schedLauncherAudit runs. It returns ""
+// when the program is a bare name (`fak.exe`, `cmd`) with no directory component —
+// Task Scheduler stores action programs as either an absolute path or a bare
+// executable name, and a bare name is resolved through the launched process's own
+// PATH, which the audit cannot reproduce faithfully. Reporting that as "missing"
+// would be a false positive, so a bare name abstains instead.
+//
+// For a headless shim (`conhost.exe --headless <prog> ...`) the program that
+// matters is the WRAPPED one, not conhost. Environment variables (%LOCALAPPDATA%)
+// are expanded the same way the script resolver does it; a relative program path is
+// joined to the task's working directory so it is checked where the scheduler would
+// run it.
+func schedResolveActionProgramPath(execute, arguments, workingDir string) string {
+	prog := strings.TrimSpace(execute)
+	if class, _ := schedLauncherClassify(execute, arguments); class == schedLauncherHeadless {
+		if wrapped := schedHeadlessWrappedProgram(arguments); wrapped != "" {
+			prog = wrapped
+		}
+	}
+	prog = strings.Trim(strings.TrimSpace(prog), `"`)
+	expanded := schedExpandEnv(prog)
+	if !schedLooksLikePath(expanded) {
+		return ""
+	}
+	if !filepath.IsAbs(expanded) {
+		wd := schedExpandEnv(strings.Trim(strings.TrimSpace(workingDir), `"`))
+		if wd != "" {
+			expanded = filepath.Join(wd, expanded)
+		}
+	}
+	return filepath.FromSlash(expanded)
+}
+
+// schedHeadlessWrappedProgram extracts the program a `conhost --headless` action
+// wraps, preserving spaces in an UNQUOTED path. `schedSplitArgs` splits on
+// whitespace, so it truncates `C:\Program Files\...\pwsh.exe` to `C:\Program`; the
+// program run is defined by the `.exe` boundary, not by the first space. A quoted
+// program is taken literally; otherwise the token is read through its terminating
+// `.exe` (falling back to the first whitespace-delimited token when no `.exe`
+// appears, e.g. a bare `pwsh`).
+func schedHeadlessWrappedProgram(arguments string) string {
+	args := strings.TrimSpace(arguments)
+	lower := strings.ToLower(args)
+	idx := strings.Index(lower, "--headless")
+	if idx < 0 {
+		return ""
+	}
+	rest := strings.TrimSpace(args[idx+len("--headless"):])
+	if rest == "" {
+		return ""
+	}
+	if rest[0] == '"' {
+		if end := strings.IndexByte(rest[1:], '"'); end >= 0 {
+			return rest[1 : 1+end]
+		}
+		return strings.Trim(rest, `"`)
+	}
+	if end := strings.Index(strings.ToLower(rest), ".exe"); end >= 0 {
+		return rest[:end+len(".exe")]
+	}
+	if sp := strings.IndexAny(rest, " \t"); sp > 0 {
+		return rest[:sp]
+	}
+	return rest
+}
+
+// schedReferencedBinaries returns every ABSOLUTE executable path named by a task's
+// action — the program it launches plus any absolute .exe/.cmd/.bat/.com argument it
+// will execute. This is what makes the audit catch the silent-death shape where the
+// action PROGRAM (e.g. conhost.exe or cmd.exe) exists but the binary the action
+// actually re-runs has been deleted: a self-update task pinned to a removed
+// `<repo>\tools\.bin\fak.exe` kept "succeeding" while converging nothing, because
+// nothing inspected that nested path. Bare names and relative paths are skipped
+// (PATH/working-dir-resolved, not checkable); a `%ENV%` token is expanded first.
+//
+// Only absolute (drive-letter or UNC) paths are returned, which keeps the check
+// conservative: a task argument is not a place where a missing absolute executable
+// is benign.
+func schedReferencedBinaries(execute, arguments, workingDir string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	add := func(candidate string) {
+		candidate = strings.Trim(strings.TrimSpace(candidate), `"'`)
+		if candidate == "" {
+			return
+		}
+		expanded := schedExpandEnv(candidate)
+		if !filepath.IsAbs(expanded) {
+			return
+		}
+		key := strings.ToLower(filepath.Clean(expanded))
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, filepath.FromSlash(expanded))
+	}
+	add(schedResolveActionProgramPath(execute, arguments, workingDir))
+	for _, tok := range schedAbsoluteExeRe.FindAllString(arguments, -1) {
+		add(tok)
+	}
+	return out
+}
+
+// schedAbsoluteExeRe finds an absolute Windows executable path (drive-letter or UNC)
+// in an action's argument string, stopping at whitespace, quotes and shell
+// metacharacters the same way the script-path regex does.
+var schedAbsoluteExeRe = regexp.MustCompile(`(?i)(?:[a-z]:\\|\\\\[^\\/\s"';|&,]+\\[^\s"';|&,]+)[^\s"';|&,]*\.(?:exe|cmd|bat|com)`)
+
+// schedLooksLikePath reports whether a program token names a location (absolute or
+// relative) rather than a bare executable name. A token with a directory separator,
+// a drive prefix, or a leading `.`/`~` is a path; `fak.exe` is not.
+func schedLooksLikePath(token string) bool {
+	t := strings.TrimSpace(token)
+	if t == "" {
+		return false
+	}
+	if strings.ContainsAny(t, `\/`) {
+		return true
+	}
+	if len(t) >= 2 && t[1] == ':' && ((t[0] >= 'A' && t[0] <= 'Z') || (t[0] >= 'a' && t[0] <= 'z')) {
+		return true
+	}
+	return strings.HasPrefix(t, ".") || strings.HasPrefix(t, "~")
+}
+
 // schedNormalizePath folds a path for prefix comparison: lowercased, backslashes
 // turned into forward slashes, and an MSYS/Git-Bash drive prefix ("/c/work/fak")
 // rewritten to its Windows spelling ("c:/work/fak") — the fleet's bash actions use
@@ -457,6 +584,22 @@ func schedLauncherAudit(row schedScanTaskInfo, repoRoot string) schedLauncherPos
 			add(
 				fmt.Sprintf("script file missing on disk (%s): target file does not exist at %s", script, targetPath),
 				"restore the deleted script or unregister the orphaned scheduled task",
+			)
+		}
+	}
+
+	// The action's executable targets are the files the scheduler re-runs every tick.
+	// A task whose action PROGRAM has been deleted — or whose action arguments name an
+	// absolute executable that no longer exists — is silently dead: Task Scheduler
+	// keeps the registration and its last success, so the only other observable is a
+	// stale LastTaskResult. This is how a self-update task pinned to a removed
+	// tools/.bin/fak.exe kept "succeeding" while converging nothing.
+	for _, binPath := range schedReferencedBinaries(row.ActionExecute, row.ActionArguments, row.ActionWorkingDirectory) {
+		if _, err := schedStatFn(binPath); err != nil {
+			worse(schedVerdictBroken)
+			add(
+				fmt.Sprintf("action executable missing on disk (%s): target file does not exist at %s", schedExeBase(binPath), binPath),
+				"restore the deleted executable or repoint/unregister the orphaned scheduled task",
 			)
 		}
 	}

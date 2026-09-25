@@ -232,6 +232,71 @@ func TestSchedLauncherAuditCatchesTheAuditedRegressions(t *testing.T) {
 	})
 }
 
+// TestSchedLauncherAuditFlagsADeadActionProgram pins the silent-death check: a task
+// whose action PROGRAM file has been deleted is still registered and still reports its
+// last success, so nothing else reveals that its tick now does nothing. This is the
+// self-update shape — a task pinned to a removed tools/.bin/fak.exe kept "succeeding"
+// while converging no binary. The audit must call that BROKEN and name the missing file.
+func TestSchedLauncherAuditFlagsADeadActionProgram(t *testing.T) {
+	origStat := schedStatFn
+	defer func() { schedStatFn = origStat }()
+	// Only the missing program path fails; everything else (the in-tree script) exists.
+	schedStatFn = func(path string) (os.FileInfo, error) {
+		if strings.Contains(strings.ToLower(path), "tools\\.bin") {
+			return nil, os.ErrNotExist
+		}
+		return nil, nil
+	}
+
+	p := schedLauncherAudit(schedScanTaskInfo{
+		TaskName:        "FakSelfUpdate",
+		LogonType:       "S4U",
+		ActionExecute:   "cmd.exe",
+		ActionArguments: `/d /s /c "C:\work\fak\tools\.bin\fak.exe" self-update --root C:\work\fak --target C:\Users\USER\bin\fak.exe`,
+	}, capturedTaskRepoRoot)
+
+	if p.Verdict != schedVerdictBroken || p.Allowed {
+		t.Fatalf("verdict = %q allowed = %v, want broken/not-allowed\n%+v", p.Verdict, p.Allowed, p)
+	}
+	joined := strings.Join(p.Reasons, " | ")
+	if !strings.Contains(joined, "action executable missing on disk") {
+		t.Errorf("missing the dead-executable finding: %s", joined)
+	}
+	if !strings.Contains(joined, `tools\.bin\fak.exe`) {
+		t.Errorf("the finding must name the missing nested executable: %s", joined)
+	}
+	if !strings.Contains(strings.Join(p.Remediations, " "), "repoint") {
+		t.Errorf("remediation must name repointing the task, got %q", p.Remediations)
+	}
+}
+
+// TestSchedResolveActionProgramPath pins the resolver's two load-bearing choices:
+// a headless shim checks the WRAPPED program (not conhost), and a bare name with no
+// directory abstains (returning "") instead of manufacturing a false "missing".
+func TestSchedResolveActionProgramPath(t *testing.T) {
+	cases := []struct {
+		name               string
+		exe, args, workDir string
+		want               string
+	}{
+		{"absolute program path", `C:\work\fak\fak.exe`, `serve`, "", `C:\work\fak\fak.exe`},
+		{"bare name abstains (PATH-resolved, not checkable)", `fak.exe`, `serve`, "", ""},
+		{"headless shim checks the wrapped program", "conhost.exe", `--headless powershell.exe -File "C:\work\fak\x.ps1"`, "", ""},
+		{"headless shim with a wrapped program path", "conhost.exe", `--headless "C:\Program Files\Python313\python.exe" "x.py"`, "", `C:\Program Files\Python313\python.exe`},
+		{"headless shim with an UNQUOTED program path containing spaces", "conhost.exe", `--headless C:\Program Files\WindowsApps\Microsoft.PowerShell_7.6.4.0_x64__8wekyb3d8bbwe\pwsh.exe -NoProfile -File "C:\work\fak\x.ps1"`, "", `C:\Program Files\WindowsApps\Microsoft.PowerShell_7.6.4.0_x64__8wekyb3d8bbwe\pwsh.exe`},
+		{"headless shim with a bare wrapped name abstains", "conhost.exe", `--headless pwsh.exe -NoProfile -File "C:\work\fak\x.ps1"`, "", ""},
+		{"relative program joins the working directory", `sub\fak.exe`, `serve`, `C:\work\fak`, `C:\work\fak\sub\fak.exe`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := schedResolveActionProgramPath(tc.exe, tc.args, tc.workDir)
+			if got != tc.want {
+				t.Fatalf("resolve = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestParseSchedTaskXML proves a versioned task definition decodes into the same
 // row shape the live probe emits — that equivalence is what lets the pass/fail
 // report run in CI on any OS instead of only on the one Windows box.
