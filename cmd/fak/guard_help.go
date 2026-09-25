@@ -71,7 +71,7 @@ type guardFlagGroup struct {
 // display order: the wire + floor first, the rarely-touched plumbing last.
 var guardFlagGroups = []guardFlagGroup{
 	{"Upstream wire & auth", []string{
-		"addr", "provider", "base-url", "model", "api-key-env",
+		"addr", "provider", "base-url", "router", "model", "api-key-env",
 		"anthropic-oauth", "oauth-token-env", "env", "require-key-env", "rotate",
 	}},
 	{"Policy, floor & audit", []string{

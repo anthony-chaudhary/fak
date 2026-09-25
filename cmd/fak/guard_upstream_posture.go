@@ -31,6 +31,9 @@ type guardUpstreamPostureInputs struct {
 	quiet          bool
 	localModel     bool
 	localAlongside bool
+	// router is the resolved opt-in --router upstream; nil (the default) leaves every
+	// branch below exactly as it was.
+	router *guardRouterUpstream
 }
 
 // guardUpstreamPosture is what the upstream resolution hands back to the rest of the
@@ -124,6 +127,11 @@ func resolveGuardUpstreamPosture(in guardUpstreamPostureInputs) guardUpstreamPos
 	// every non-enterprise host. See guard_upstream_trust.go.
 	p.upstreamTrustNote = guardUpstreamTrustGate(in.quiet)
 	p.cloudRouteWaived = guardCloudRouteGate(in.quiet)
+	// --router (opt-in): the fak router is the upstream. Return before resolveGuardUpstream
+	// so the Claude subscription token is never sourced, pinned, or re-resolved for it.
+	if in.router != nil {
+		return in.router.posture(p)
+	}
 	if in.localModel && !in.localAlongside {
 		p.up, p.providerAutodetected = resolveGuardProvider(in.provider, command[0])
 		return p
