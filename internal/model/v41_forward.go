@@ -1720,6 +1720,17 @@ func (m *Model) v41ExpertTripleInto(l int, stem string, scratch *v41ProjScratch)
 // (v41ExpertF32Into: resident stores first, then the R5 checkpoint tier), so a
 // projection present in neither still refuses with the same typed
 // ErrV41ForwardStage naming the tensor.
+//
+// #13516: the resolved w2 is RETAINED in the layer-scoped cache exactly as the
+// host triple arm retains its triple (v41ExpertTripleInto -> v41CacheExpertTriple).
+// Without this retention the device-handled grouped arm re-faulted the SAME
+// expert's down projection once per (token, slot) row: the host arm materializes
+// one triple per expert group, but this seam resolved w2 per row and never put
+// it back, so under the streamed/checkpoint regime (tier hit_fraction=0.00) each
+// pick paid a fresh checkpoint fault -- the 2.1x prefill regression #13516. The
+// cached copy is a COPY because scratch.exp2 is reused for the next expert; the
+// caller's returned slice keeps pointing at the live scratch, never the retained
+// copy, so no aliasing escapes the layer.
 func (m *Model) hostExpertDown(l int, stem string, scratch *v41ProjScratch) ([]float32, error) {
 	name := layerName(l, stem+".w2.weight")
 	if w, ok := scratch.v41LayerCacheGet(name); ok {
@@ -1731,6 +1742,9 @@ func (m *Model) hostExpertDown(l int, stem string, scratch *v41ProjScratch) ([]f
 		return nil, v41StageErr(v41StageMoE, l, rerr)
 	}
 	scratch.exp2 = w
+	// Retain a copy for the rest of the layer so the next row of the SAME expert
+	// group is a RAM hit: one fault per expert group, not one per pick.
+	m.v41CacheExpertTriple(l, stem, scratch, nil, nil, w)
 	return w, nil
 }
 

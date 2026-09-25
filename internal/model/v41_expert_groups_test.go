@@ -283,6 +283,15 @@ func TestV41ExpertGroupsForwardMatchesTokenMajor(t *testing.T) {
 // slab cannot hold a whole expert triple, so the token-major path re-faults every
 // token and grouping is the only way to bound the reads.
 func TestV41ExpertGroupsThrashRegimeBoundsReads(t *testing.T) {
+	// This witness drives the package-global budget/force overrides, so restore
+	// them even on the success path: a leaked override (the pre-#13516 success
+	// path left v41TestLayerCacheBudgetOverride at one slab) shrinks the
+	// layer cache for every later test in the package.
+	t.Cleanup(func() {
+		v41ForceTokenMajor = false
+		v41TestLayerCacheBudgetOverride = 0
+	})
+
 	one := []int{1}
 	long := []int{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}
 
@@ -451,6 +460,58 @@ func TestV41ExpertGroupsDeviceSeamDeclinesWithoutDevice(t *testing.T) {
 					pos, i, base.Logits[pos][i], alt.Logits[pos][i])
 			}
 		}
+	}
+}
+
+// TestV41ExpertGroupsDeviceSeamBoundsStreamedFaults is the #13516 regression: on a
+// MULTI-TOKEN prefill through the device gate/up seam (the grouped/expert-major
+// contraction) with routed experts carried ONLY by a stream-through checkpoint
+// tier, the tier fault count must be token-independent -- one fault per distinct
+// routed projection -- exactly as the token-major arm is. The #13511 grouped seam
+// resolved the down projection per ROW via hostExpertDown and never retained it in
+// the layer-scoped cache, so under the streamed regime every pick re-faulted w2 and
+// Reads scaled with the token count (the 2.1x Q2_K prefill regression #13516).
+//
+// The oracle is a 1-token device prefill (seq == 1, the token-major arm), which
+// cannot repeat a projection across the token dimension and therefore faults the
+// layer's distinct routed set times 3 on ANY correct implementation. The grouped
+// device panel of the SAME token must fault no more.
+func TestV41ExpertGroupsDeviceSeamBoundsStreamedFaults(t *testing.T) {
+	setQ4KSDOTForTest(false)
+	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+
+	one := []int{1}
+	long := []int{1, 1, 1, 1, 1, 1, 1, 1}
+
+	deviceSession := func(m *Model) *Session {
+		s := &Session{M: m, Backend: &v41HalSeamBackend{Backend: compute.Default()}, halW: map[string]compute.Tensor{}}
+		if s.v41ExpertGateUpFunc() == nil {
+			t.Fatal("a DeviceMemory session did not bind the device gate/up callback")
+		}
+		return s
+	}
+
+	// 1-token floor: the token-major device arm faults each distinct routed
+	// projection once (gate+up staged once per expert, w2 faulted once per expert).
+	mOne, _ := v41TierOnlyBudgetModel(t, 0)
+	if _, err := mOne.forwardV41(one, deviceSession(mOne).v41State()); err != nil {
+		t.Fatalf("1-token device prefill: %v", err)
+	}
+	floor := mOne.expertCheckpoint.Stats().Reads
+	if floor == 0 {
+		t.Fatal("fixture faulted no routed projections; the read comparison would be vacuous")
+	}
+
+	// Grouped device panel: the SAME token eight times must not fault w2 once per
+	// pick. Reads must equal the 1-token distinct floor, not scale with tokens.
+	mLong, _ := v41TierOnlyBudgetModel(t, 0)
+	if _, err := mLong.forwardV41(long, deviceSession(mLong).v41State()); err != nil {
+		t.Fatalf("8-token grouped device prefill: %v", err)
+	}
+	got := mLong.expertCheckpoint.Stats().Reads
+	if got != floor {
+		t.Fatalf("grouped device 8-token prefill faulted %d projections, want the 1-token distinct floor %d "+
+			"(token-independent): the per-row down resolution re-faulted w2", got, floor)
 	}
 }
 
