@@ -37,6 +37,10 @@ services:
       # Manual `docker compose up` keeps using the tracked :8080 default.
       - "${FAK_PROMETHEUS_CONFIG:-./prometheus.yml}:/etc/prometheus/prometheus.yml:ro"
       - ./prometheus-alerts.yml:/etc/prometheus/prometheus-alerts.yml:ro
+      # fak-obs-stack writes the generated Halo inventory below provisioning/;
+      # mounting the directory lets a fresh checkout start without that runtime
+      # file and pick it up after the supervisor publishes and reloads it.
+      - ./provisioning:/etc/prometheus/provisioning:ro
       - fleet-prometheus-data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"

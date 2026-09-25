@@ -161,4 +161,4 @@ scrape_configs:
     scrape_interval: 30s
     file_sd_configs:
       - files:
-          - /etc/prometheus/strix-halo-targets.json
+          - /etc/prometheus/provisioning/strix-halo-targets.json
