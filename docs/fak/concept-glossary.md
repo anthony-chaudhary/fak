@@ -678,3 +678,10 @@ The #1302 page-cache-aware expert read: reads one expert's stride through a mapp
 The closed promotion-candidate taxonomy a scratchpad artifact is classified into: unfinished-spine, blocked, discovered-edge-case, deferred-caveat, next-checkable-step. A CandidateKind is the deterministic Classify verdict over one parked artifact's filename/leading block.
 
 **Distinct from:** It is the CLOSED taxonomy value for a parked scratchpad artifact that looks like an unfiled session flag, NOT the plan/spawn Candidate (a scored span the planner may keep resident) and NOT a generic kind enum.
+
+
+### expertGateUp (V4.1 optional device gate/up callback)
+
+The optional callback field v41ForwardState.expertGateUp (v41_forward.go), bound by Session.v41ExpertGateUpFunc when the session advertises a DeviceMemory backend; both the token-major and expert-major V4.1 routed contractions offer each routed row to it so the device gate/up + SwiGLU run on the backend while the host down contraction stays on the host.
+
+**Distinct from:** The OPTIONAL per-row device gate/up + SwiGLU callback a V4.1 session installs (v41ForwardState.expertGateUp); a compute-engine SEAM that runs a routed expert's gate/up projections on the device, NOT the adjudication guard, NOT the FFN load-time gateUp locals, and NOT a routing gate.

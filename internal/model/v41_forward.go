@@ -2552,7 +2552,13 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	// token-major stream byte-for-byte.
 	routedByToken := make([][]float32, seq)
 	if seq > 1 && !v41ForceTokenMajor {
-		if err := m.v41ContractRoutedGrouped(l, x, perTokenPicks, scratch, ffnNorm, eps, cfg, routedByToken); err != nil {
+		// #13511: thread the session's optional device gate/up callback into the
+		// grouped (expert-major) contraction too, so a multi-token prefill offers
+		// each routed row to the same device seam the token-major arm uses
+		// (#13358) instead of unconditionally running the host SwiGLU. A nil
+		// callback (Model.Forward, or no device backend) keeps the grouped path
+		// byte-for-byte.
+		if err := m.v41ContractRoutedGrouped(l, x, perTokenPicks, scratch, ffnNorm, eps, cfg, routedByToken, st); err != nil {
 			return err
 		}
 	} else {

@@ -137,12 +137,22 @@ var v41TestLayerCacheBudgetOverride int64
 // byte-identical to the token-major loop (grouping reorders the READS, never a
 // token's arithmetic). `out[t]` receives token t's routed sum.
 //
+// #13511: before falling back to the host triple, each row is offered to the
+// session's optional device gate/up seam (st.expertGateUp) exactly as the
+// token-major arm does (#13358). The engine choice is per (expert, encoding), so
+// it is uniform across a group, but the gate/up MatMul consumes the ROW's own
+// rmsnorm input, so the seam is invoked per row. A handled row keeps the gate/up
+// f32 weights off the host and runs the down contraction over the device-produced
+// intermediate; a declined row falls through to the historical host triple
+// byte-for-byte. A nil `st` (Model.Forward, or no device backend) leaves the
+// whole panel byte-identical to the pre-#13511 grouped path.
+//
 // The per-contraction telemetry (#13299) is noted once per contracted row exactly
 // as the token-major loop noted it per pick, so the fault/dequant-vs-contraction
 // attribution is unchanged in bucket counts. Any materialization error aborts
 // before the weighted replay, so a partial panel never reaches `out`.
-func (m *Model) v41ContractRoutedGrouped(l int, x [][]float32, perTokenPicks [][]routePick, scratch *v41ProjScratch, ffnNorm []float32, eps float32, cfg Config, out [][]float32) error {
-	H := cfg.HiddenSize
+func (m *Model) v41ContractRoutedGrouped(l int, x [][]float32, perTokenPicks [][]routePick, scratch *v41ProjScratch, ffnNorm []float32, eps float32, cfg Config, out [][]float32, st *v41ForwardState) error {
+	H, I := cfg.HiddenSize, cfg.MoEIntermediateSize
 	groups := v41PlanExpertGroups(perTokenPicks)
 	// One rmsnorm row per token, computed once and reused by every group that
 	// contracts a row of that token (the token-major path recomputed it per pick;
@@ -159,18 +169,63 @@ func (m *Model) v41ContractRoutedGrouped(l int, x [][]float32, perTokenPicks [][
 	for t, picks := range perTokenPicks {
 		unweighted[t] = make([][]float32, len(picks))
 	}
+	// tripleReady guards lazy materialization of the group's host triple: when the
+	// device seam handles every row, the gate/up f32 weights are never materialized
+	// on the host at all (#13358's whole point). The triple is materialized once
+	// per group, on the first row the device seam declines, and reused for the
+	// remaining host rows -- preserving #13304's one-materialization-per-group bound.
 	for _, g := range groups {
 		stem := "ffn.experts." + itoa(g.Expert)
-		w1, w3, w2, err := m.v41ExpertTripleInto(l, stem, scratch)
-		if err != nil {
-			return err
-		}
+		var (
+			w1, w3, w2  []float32
+			tripleReady bool
+		)
 		for _, row := range g.Rows {
 			xn := xnByToken[row.Token]
+			// #13511: offer the row to the session's device gate/up seam first, the
+			// same seam the token-major arm consults (#13358). A handled result
+			// returns the I-wide fused intermediate from the backend, so the gate/up
+			// f32 weights are never materialized on the host and only the existing
+			// host down contraction runs over it (resolved per row through the same
+			// residency-complete path the token-major arm uses). A selected device
+			// failure must surface, never be swallowed as a decline.
+			if st != nil && st.expertGateUp != nil {
+				h, outcome, gerr := st.expertGateUp(l, stem, xn)
+				switch outcome {
+				case v41GateUpError:
+					return v41StageErr(v41StageMoE, l, gerr)
+				case v41GateUpHandled:
+					wd, err := m.hostExpertDown(l, stem, scratch)
+					if err != nil {
+						return err
+					}
+					contractOpen := m.v41NowNanos()
+					y := matRows(wd, h, H, I)
+					if contractOpen != 0 {
+						m.v41NoteExpertContractionNanos(m.v41NowNanos() - contractOpen)
+					} else {
+						m.v41NoteExpertContraction()
+					}
+					unweighted[row.Token][row.Slot] = y
+					continue
+				}
+			}
+			// The host arm: materialize the group's triple once (lazily, so a
+			// device-handled group never touches the gate/up f32 weights), then
+			// contract the row through the historical host SwiGLU. A decline (or a
+			// nil state) therefore keeps the pre-#13511 grouped path byte-for-byte.
+			if !tripleReady {
+				var err error
+				w1, w3, w2, err = m.v41ExpertTripleInto(l, stem, scratch)
+				if err != nil {
+					return err
+				}
+				tripleReady = true
+			}
 			// Same #13299 attribution as the token-major loop: one note per
 			// contracted (token, pick) row, so the ledger's bucket counts match.
 			contractOpen := m.v41NowNanos()
-			y := v41SwiGLU(w1, w3, w2, xn, cfg.MoEIntermediateSize, H, cfg)
+			y := v41SwiGLU(w1, w3, w2, xn, I, H, cfg)
 			if contractOpen != 0 {
 				m.v41NoteExpertContractionNanos(m.v41NowNanos() - contractOpen)
 			} else {

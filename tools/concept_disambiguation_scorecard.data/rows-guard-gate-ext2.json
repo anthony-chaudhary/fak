@@ -455,7 +455,7 @@
       "kind": "symbol",
       "definition": "Local identifiers in internal/model's weight-loading code: gateUp is the concatenated gate++up tensor in the fused-split path, and gateName is the gate_proj weight's resolved name in the safetensors quantizer.",
       "distinction": "These are NEURAL-NET FFN gate-projection LOAD-TIME locals (handling gate_up_proj / gate_proj weights), NOTHING to do with adjudication gates; siblings of mlp.gate_proj, not the guard kernel.",
-      "distinct_from": ["mlp-gate-proj", "gate-up-proj", "guard-kernel"],
+      "distinct_from": ["mlp-gate-proj", "gate-up-proj", "guard-kernel", "x2-guard-gate-v41expertgateup"],
       "aliases": ["gatename"],
       "grounding": "gateup",
       "grounding_kind": "symbol",

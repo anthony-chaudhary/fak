@@ -42,5 +42,27 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "x2-guard-gate-v41expertgateup",
+      "canonical": "expertGateUp (V4.1 optional device gate/up callback)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The optional callback field v41ForwardState.expertGateUp (v41_forward.go), bound by Session.v41ExpertGateUpFunc when the session advertises a DeviceMemory backend; both the token-major and expert-major V4.1 routed contractions offer each routed row to it so the device gate/up + SwiGLU run on the backend while the host down contraction stays on the host.",
+      "distinction": "The OPTIONAL per-row device gate/up + SwiGLU callback a V4.1 session installs (v41ForwardState.expertGateUp); a compute-engine SEAM that runs a routed expert's gate/up projections on the device, NOT the adjudication guard, NOT the FFN load-time gateUp locals, and NOT a routing gate.",
+      "distinct_from": [
+        "x2-guard-gate-modelgatevars",
+        "guard-kernel",
+        "gate-up-proj",
+        "mlp-gate-proj"
+      ],
+      "aliases": [],
+      "grounding": "expertGateUp",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

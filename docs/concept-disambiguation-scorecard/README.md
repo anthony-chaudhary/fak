@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **539** (clarity 0 + coverage 539) |
-| **Crystal-clear concepts (and climbing)** | **1119** crystal of 2845 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2954 / 3493** (84.6% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **1120** crystal of 2846 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2955 / 3494** (84.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 219 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **84** of 4065 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **84** of 4066 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 90.0/100 (grade A) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2845 concepts - score 90.0/100 (grade A) - disambiguation-debt 539
+concept-disambiguation chart - 2846 concepts - score 90.0/100 (grade A) - disambiguation-debt 539
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ##################.......... 1119
+  * crystal       ##################.......... 1120
   o defined       ############################ 1726
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -47,7 +47,7 @@ clarity mix by family (each cell = one concept):
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            *****************oooooooooooooooooooooooooooooooo (49 concept(s); 17 crystal)
   gateway-engine   ******************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (171 concept(s); 54 crystal)
-  guard-gate       ****************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (449 concept(s); 208 crystal)
+  guard-gate       *****************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (450 concept(s); 209 crystal)
   layout           **********ooooooooo (19 concept(s); 10 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
   plan             ******************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (370 concept(s); 126 crystal)
@@ -69,7 +69,7 @@ coverage by family (positioned / discovered):
   gateway-engine   #######################..... 210/253
   policy-capability ########################.... 219/253
   attention        #####################....... 88/118
-  guard-gate       ##########################.. 507/537
+  guard-gate       ##########################.. 508/538
   pool             ################............ 40/70
   support-maturity ####################........ 73/101
   witness-proof    ########################.... 166/192
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 84.6%  (2954/3493 confusable tokens positioned)
+namespace coverage  [###########################.....] 84.6%  (2955/3494 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 219
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 219/219
 
-name index: 4065 lookup name(s) -> 2845 concept(s), 84 ambiguous
+name index: 4066 lookup name(s) -> 2846 concept(s), 84 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **219 / 219** (219 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1980 / 5095 |
+| Boundaries drawn (mutual / total) | 1988 / 5103 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4065 over 2845 concepts |
+| Lookup names indexed | 4066 over 2846 concepts |
 | Lookup names landing on several concepts | 84 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2845 |
+| Concepts carrying a contrast set | 2846 |
 
 ## The concepts (best verdict first)
 
@@ -492,6 +492,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | guard-gate | **aggregateAnswers** - Typed exhaustive corpus-level gold facts and candidate outputs for state counts, label counts, and chronology top-k grading. |
 | * | crystal | symbol | guard-gate | **gateVerbTierTree (whole-tree verb-tier gate)** - Whole-tree fak hygiene gate (internal/hooks/gate_verbtier.go, reason VERB_UNTIERED) that refuses a dispatched cmd/fak verb whose token devindex.TierOf cannot resolve to a tier — the pre-push twin of devindex.TestVerbTierCoverageIsTotal (epic #2653). |
 | * | crystal | config | guard-gate | **Q4_K gate/up output slab (session-owned Metal buffer)** - Q4KGateUpOutputSlab is the explicit session setting that reuses one bounded Metal output buffer across eligible Q4_K gate and up MLP projections within that session. |
+| * | crystal | symbol | guard-gate | **expertGateUp (V4.1 optional device gate/up callback)** - The optional callback field v41ForwardState.expertGateUp (v41_forward.go), bound by Session.v41ExpertGateUpFunc when the session advertises a DeviceMemory backend; both the token-major and expert-major V4.1 routed contractions offer each routed row to it so the device gate/up + SwiGLU run on the backend while the host down contraction stays on the host. |
 | * | crystal | subsystem | guard-gate | **guard_mcp (guard MCP self-query install)** - The cmd/fak/guard_mcp.go module: it wires fak's own MCP self-query surface (fak_index_*, fak_memory_*, fak_context_*) into the guarded child by injecting an MCP server registration into the child's launch config, mirroring the install shape of guard_precompact.go / guard_codex.go. |
 | * | crystal | subsystem | guard-gate | **guard_codex (guard Codex-provider wiring)** - The cmd/fak/guard_codex.go module: the first-class `fak guard -- codex` wiring, fak's OpenAI-Codex provider install path (credential resolve plus config rewrite) that lets the guard front a Codex child the same way it fronts an Anthropic one. |
 | * | crystal | symbol | guard-gate | **GuardAssumption (assume-check adjudication)** - assumecheck.GuardAssumption: the adjudication that folds a stated assumption plus its evidence into an Allow/Refuse verdict for `fak assume check` (and the re-witness loop `fak assume loop`). |
@@ -3119,8 +3120,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 26 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3115/5095 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2845 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3115/5103 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2846 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3129,7 +3130,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4065 lookup name(s) resolves - 84 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4066 lookup name(s) resolves - 84 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3143,7 +3144,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | gateway-engine | 210 | 253 | 43 |
 | policy-capability | 219 | 253 | 34 |
 | attention | 88 | 118 | 30 |
-| guard-gate | 507 | 537 | 30 |
+| guard-gate | 508 | 538 | 30 |
 | pool | 40 | 70 | 30 |
 | support-maturity | 73 | 101 | 28 |
 | witness-proof | 166 | 192 | 26 |

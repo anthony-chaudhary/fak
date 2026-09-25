@@ -27,6 +27,8 @@ package model
 import (
 	"math"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // v41GroupPicks builds a deterministic per-token pick set that cycles through a
@@ -336,6 +338,120 @@ func TestV41ExpertGroupsThrashRegimeBoundsReads(t *testing.T) {
 	}
 	t.Logf("thrash regime (cache=%d B/slab): 16-token reads token-major=%d grouped=%d (1-token floor=%d)",
 		slabBytes, tmReads, gReads, distinctReads)
+}
+
+// TestV41ExpertGroupsDeviceSeam is the #13511 witness: a MULTI-TOKEN prefill
+// (seq > 1, the expert-major grouped contraction) through a device-capable V4.1
+// session must offer every routed row to the shared device gate/up operation, so
+// the gate/up + SwiGLU run on the backend and the Q3_K down contraction stays on
+// the host -- exactly the engine split #13358 wires into the token-major arm. On a
+// session whose state carries no callback (Model.Forward, or no device backend)
+// the grouped path must stay byte-for-byte the historical host stream.
+//
+// [SW-VERIFIED]: the device backend forwards to cpu-ref (compute.Default()); this
+// is a deterministic software contract, NOT a physical GPU qualification. No
+// [HW-WITNESSED] criterion is claimed.
+func TestV41ExpertGroupsDeviceSeam(t *testing.T) {
+	setQ4KSDOTForTest(false)
+	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+
+	m := v41MixedQuantExpertModel(t)
+	// A multi-token panel: seq > 1 selects the grouped (expert-major) contraction.
+	ids := []int{1, 2, 3, 4}
+
+	// Host oracle: a session with no device backend binds no callback, so the
+	// grouped path runs the historical host gate/up/down triple.
+	hostSess := &Session{M: m}
+	hostState := hostSess.v41State()
+	if hostState.expertGateUp != nil {
+		t.Fatal("a session with no backend bound a device gate/up callback")
+	}
+	hostAct, err := m.forwardV41(ids, hostState)
+	if err != nil {
+		t.Fatalf("host grouped %d-token prefill: %v", len(ids), err)
+	}
+	if len(hostAct.Logits) != len(ids) {
+		t.Fatalf("host arm emitted %d logit rows, want %d", len(hostAct.Logits), len(ids))
+	}
+
+	// Device arm: the SAME multi-token panel through the grouped contraction with
+	// the device gate/up callback bound. Every routed row must reach the seam.
+	be := &v41HalSeamBackend{Backend: compute.Default()}
+	devSess := &Session{M: m, Backend: be, halW: map[string]compute.Tensor{}}
+	devState := devSess.v41State()
+	if devState.expertGateUp == nil {
+		t.Fatal("a DeviceMemory session did not bind the device gate/up callback")
+	}
+	devAct, err := m.forwardV41(ids, devState)
+	if err != nil {
+		t.Fatalf("device grouped %d-token prefill: %v", len(ids), err)
+	}
+
+	// (a) The grouped contraction offered EVERY routed row to the device seam: two
+	// MatMuls (gate, up) plus one fused SwiGLU per (token, pick, layer).
+	rows := len(ids) * m.Cfg.NumExpertsPerTok * m.Cfg.NumLayers
+	if be.matmuls != 2*rows {
+		t.Fatalf("device MatMul count = %d, want %d (gate+up per grouped row)", be.matmuls, 2*rows)
+	}
+	if be.swiglu != rows {
+		t.Fatalf("device SwiGLU count = %d, want %d (one fused SwiGLU per grouped row)", be.swiglu, rows)
+	}
+
+	// (b) The Q3_K down projection has no device kernel, so it must never be staged
+	// device-side: the down contraction stayed on the host.
+	for l := 0; l < m.Cfg.NumLayers; l++ {
+		for e := 0; e < m.Cfg.NumExperts; e++ {
+			down := layerName(l, "ffn.experts."+itoa(e)+".w2.weight")
+			if _, staged := devSess.halW["kquant-raw:"+down]; staged {
+				t.Fatalf("Q3_K down %s was staged on the device; it has no HAL kernel and must stay on the host", down)
+			}
+		}
+	}
+
+	// (c) Token-history parity: device gate/up + host down reproduces the host triple.
+	if len(devAct.Logits) != len(hostAct.Logits) {
+		t.Fatalf("device arm returned %d logit rows, want %d", len(devAct.Logits), len(hostAct.Logits))
+	}
+	for pos := range devAct.Logits {
+		assertV41LogitsClose(t, devAct.Logits[pos], hostAct.Logits[pos],
+			"grouped device Q2_K gate/up + host Q3_K down vs host triple")
+	}
+}
+
+// TestV41ExpertGroupsDeviceSeamDeclinesWithoutDevice is the #13511 negative
+// control: the SAME multi-token grouped panel on a session with no device backend
+// must keep the callback nil and reproduce the historical host stream
+// byte-for-byte, so the seam is a strict addition to the grouped path.
+func TestV41ExpertGroupsDeviceSeamDeclinesWithoutDevice(t *testing.T) {
+	setQ4KSDOTForTest(false)
+	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+
+	m := v41MixedQuantExpertModel(t)
+	ids := []int{1, 2, 3, 4}
+
+	base, err := m.forwardV41(ids, (&Session{M: m}).v41State())
+	if err != nil {
+		t.Fatalf("base grouped prefill: %v", err)
+	}
+	noBackend := &Session{M: m}
+	if noBackend.v41ExpertGateUpFunc() != nil {
+		t.Fatal("a session with no backend bound a device gate/up callback")
+	}
+	alt, err := m.forwardV41(ids, noBackend.v41State())
+	if err != nil {
+		t.Fatalf("no-backend grouped prefill: %v", err)
+	}
+	if len(base.Logits) != len(alt.Logits) {
+		t.Fatalf("no-backend arm returned %d rows, want %d", len(alt.Logits), len(base.Logits))
+	}
+	for pos := range base.Logits {
+		for i := range base.Logits[pos] {
+			if base.Logits[pos][i] != alt.Logits[pos][i] {
+				t.Fatalf("no-backend grouped path not byte-identical at position %d idx %d: %v != %v",
+					pos, i, base.Logits[pos][i], alt.Logits[pos][i])
+			}
+		}
+	}
 }
 
 // TestV41ExpertGroupsReplayIsSlotOrdered pins the accumulation-order contract: a
