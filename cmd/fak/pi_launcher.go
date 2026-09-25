@@ -41,6 +41,8 @@ type piLaunchOptions struct {
 
 var piLaunchRun = execPiLaunchChild
 
+const defaultPiLauncherAddr = "127.0.0.1:8080"
+
 func cmdPi(argv []string) {
 	os.Exit(runPi(os.Stdout, os.Stderr, argv))
 }
@@ -61,7 +63,7 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	probePrompt := fs.String("probe", "", "run a single headless probe turn with this prompt and exit")
 	promptFlag := fs.String("prompt", "", "alias for probe prompt (or pass -p)")
 	fs.StringVar(promptFlag, "p", "", "alias for probe prompt")
-	addr := fs.String("addr", "127.0.0.1:8080", "fak serve gateway listen address (default: 127.0.0.1:8080 or FAK_SERVE_ADDR)")
+	addr := fs.String("addr", "", "fak serve gateway listen address (default: configured provider URL, then 127.0.0.1:8080 or FAK_SERVE_ADDR)")
 	baseURL := fs.String("base-url", "", "fak serve provider base URL (default: http://<addr>/v1)")
 	model := fs.String("model", "", "model ID (default: --model flag > existing settings.json defaultModel > auto-detect from fak serve /healthz > qwen38:27b-q4)")
 	configPath := fs.String("config-path", "", "custom destination path for Pi models.json (default: ~/.pi/agent/models.json)")
@@ -95,23 +97,39 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	if !parseFlags(fs, argv) {
 		return 2
 	}
+	addrSet, baseURLSet := false, false
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "addr":
+			addrSet = true
+		case "base-url":
+			baseURLSet = true
+		}
+	})
 
 	effectivePrompt := *probePrompt
 	if effectivePrompt == "" && *promptFlag != "" {
 		effectivePrompt = *promptFlag
 	}
 
-	targetAddr := *addr
-	if envAddr := os.Getenv("FAK_SERVE_ADDR"); envAddr != "" && targetAddr == "127.0.0.1:8080" {
-		targetAddr = envAddr
+	targetAddr := strings.TrimSpace(*addr)
+	targetBaseURL := strings.TrimSpace(*baseURL)
+	if !baseURLSet && targetBaseURL == "" {
+		configured := configuredPiProviderBaseURL(*configPath)
+		switch {
+		case addrSet:
+			targetBaseURL = projectassets.NormalizePiBaseURL(targetAddr)
+		case strings.TrimSpace(os.Getenv("FAK_SERVE_ADDR")) != "":
+			targetAddr = strings.TrimSpace(os.Getenv("FAK_SERVE_ADDR"))
+			targetBaseURL = projectassets.NormalizePiBaseURL(targetAddr)
+		case configured != "":
+			targetBaseURL = projectassets.NormalizePiBaseURL(configured)
+		default:
+			targetAddr = defaultPiLauncherAddr
+			targetBaseURL = projectassets.NormalizePiBaseURL(targetAddr)
+		}
 	}
-
-	targetBaseURL := *baseURL
-	if targetBaseURL == "" {
-		targetBaseURL = projectassets.NormalizePiBaseURL(targetAddr)
-	} else {
-		targetBaseURL = projectassets.NormalizePiBaseURL(targetBaseURL)
-	}
+	targetBaseURL = projectassets.NormalizePiBaseURL(targetBaseURL)
 
 	targetModel := strings.TrimSpace(*model)
 	modelAutoDetected := false
@@ -319,6 +337,25 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	return piLaunchRun(stdout, stderr, argvOut, env)
+}
+
+// configuredPiProviderBaseURL returns the persisted Fak provider endpoint when
+// it is readable and valid. The launcher treats a missing or malformed config as
+// absent so an explicit flag, FAK_SERVE_ADDR, or the fresh-install default remains usable.
+func configuredPiProviderBaseURL(target string) string {
+	data, err := os.ReadFile(projectassets.ResolvePiConfigPath(target))
+	if err != nil {
+		return ""
+	}
+	var cfg struct {
+		Providers map[string]struct {
+			BaseURL string `json:"baseUrl"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(string(data), "\ufeff")), &cfg); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.Providers[projectassets.DefaultPiProviderID].BaseURL)
 }
 
 // installPiLaunchProviderExtension gives a raw `fak pi` child a launch-local `fak`
