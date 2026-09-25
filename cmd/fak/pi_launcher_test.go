@@ -78,11 +78,53 @@ func TestRunPiDryRun(t *testing.T) {
 	if !strings.Contains(out, "pi --provider fak --model qwen38:27b-q4") {
 		t.Errorf("expected stdout to contain launch command, got: %s", out)
 	}
-	if !strings.Contains(errOut, "backend     = http://127.0.0.1:65531/v1 (raw without guard)") {
+	if !strings.Contains(errOut, "backend     = http://127.0.0.1:65531/v1") {
 		t.Errorf("expected stderr to contain raw backend note, got: %s", errOut)
 	}
 	if !strings.Contains(errOut, "provider    = fak") {
 		t.Errorf("expected stderr to contain provider fak, got: %s", errOut)
+	}
+}
+
+func TestRunPiDryRunUsesConfiguredProviderURL(t *testing.T) {
+	isolatePiHome(t)
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, "models.json")
+	settingsPath := filepath.Join(tmp, "settings.json")
+	if err := os.WriteFile(modelsPath, []byte(`{"providers":{"fak":{"baseUrl":"http://127.0.0.1:19091/v1"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runPi(&stdout, &stderr, []string{
+		"--dry-run",
+		"--check-backend=false",
+		"--config-path", modelsPath,
+		"--settings-path", settingsPath,
+		"--model", "qwen38:27b-q4",
+	})
+	if code != 0 {
+		t.Fatalf("runPi --dry-run returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "backend     = http://127.0.0.1:19091/v1") {
+		t.Fatalf("launcher ignored configured provider URL: %s", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runPi(&stdout, &stderr, []string{
+		"--dry-run",
+		"--check-backend=false",
+		"--addr", "127.0.0.1:19092",
+		"--config-path", modelsPath,
+		"--settings-path", settingsPath,
+		"--model", "qwen38:27b-q4",
+	})
+	if code != 0 {
+		t.Fatalf("explicit addr dry-run returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "backend     = http://127.0.0.1:19092/v1") {
+		t.Fatalf("explicit addr did not override configured provider URL: %s", stderr.String())
 	}
 }
 
