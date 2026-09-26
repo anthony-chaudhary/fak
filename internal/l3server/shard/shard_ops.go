@@ -400,7 +400,11 @@ func (s *Shard) resolveGetEntry(op ShardOp) (entry index.Entry, valCI int, a all
 	}
 	// Check TTL
 	if entry.TTL > 0 && time.Now().UnixMilli() > entry.TTL {
-		// Expired â€” delete it
+		// Expired â€” reclaim the slab slots before dropping the index/eviction
+		// entries. Once the entry left the index the periodic TTL sweep can no
+		// longer see it, so an unfreed slot would be orphaned permanently.
+		s.freeEntryKey(entry)
+		s.freeEntryValue(entry)
 		s.idx.Delete(op.KeyHash, uint16(len(op.Key)))
 		s.eviction.Remove(op.KeyHash)
 		s.metrics.IncrMisses()
@@ -643,6 +647,8 @@ func (s *Shard) handleMGet(op ShardOp) OpResult {
 			continue
 		}
 		if entry.TTL > 0 && now > entry.TTL {
+			s.freeEntryKey(entry)
+			s.freeEntryValue(entry)
 			s.idx.Delete(keyHash, uint16(len(key)))
 			s.eviction.Remove(keyHash)
 			s.metrics.IncrTTLExpirations()
@@ -700,6 +706,8 @@ func (s *Shard) handleMGetWithAlloc(op ShardOp) OpResult {
 			continue
 		}
 		if entry.TTL > 0 && now > entry.TTL {
+			s.freeEntryKey(entry)
+			s.freeEntryValue(entry)
 			s.idx.Delete(keyHash, uint16(len(key)))
 			s.eviction.Remove(keyHash)
 			s.metrics.IncrTTLExpirations()
@@ -839,6 +847,8 @@ func (s *Shard) handleTest(op ShardOp) OpResult {
 			continue
 		}
 		if entry.TTL > 0 && now > entry.TTL {
+			s.freeEntryKey(entry)
+			s.freeEntryValue(entry)
 			s.idx.Delete(hashes[i], uint16(len(key)))
 			s.eviction.Remove(hashes[i])
 			misses++
