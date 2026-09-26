@@ -868,3 +868,48 @@ func TestLeaseSkipTracking(t *testing.T) {
 		t.Error("missing evictions_lease_skip in shard entry")
 	}
 }
+
+// TestHandleGetWithAllocCoordinatePath witnesses that the RDMA/descriptor entry
+// point (Dispatcher.HandleGetWithAlloc) resolves a real key to coordinates
+// without materializing the value on the dispatcher seam. This is the
+// reachability witness for the coordinate-only read path: the shard-level
+// parity test proves the OpGetAlloc semantics, and this test proves the
+// production caller (RDMA HandleGetWithAlloc) actually returns AllocInfo and no
+// Value bytes for a live dispatch.
+func TestHandleGetWithAllocCoordinatePath(t *testing.T) {
+	d := newTestDispatcher(t)
+	setKey(t, d, "coord", "value-bytes")
+
+	msg := protocol.Message{
+		Header: protocol.Header{OpCode: protocol.OpGet},
+		Body:   protocol.EncodeKeyBody([]byte("coord")),
+	}
+	res, err := d.HandleGetWithAlloc(msg)
+	if err != nil {
+		t.Fatalf("HandleGetWithAlloc: %v", err)
+	}
+	if !res.Found || !res.OK {
+		t.Fatalf("coordinate path miss: found=%v ok=%v err=%v", res.Found, res.OK, res.Err)
+	}
+	if res.Value != nil {
+		t.Errorf("coordinate path must not materialize Value; got %d bytes", len(res.Value))
+	}
+	if res.AllocInfo == nil {
+		t.Fatal("coordinate path must return AllocInfo for the RDMA caller")
+	}
+	if res.AllocInfo.Size != uint64(len("value-bytes")) {
+		t.Errorf("AllocInfo.Size=%d, want %d", res.AllocInfo.Size, len("value-bytes"))
+	}
+
+	// A missing key must be a clean not-found with no coordinates.
+	miss, err := d.HandleGetWithAlloc(protocol.Message{
+		Header: protocol.Header{OpCode: protocol.OpGet},
+		Body:   protocol.EncodeKeyBody([]byte("absent")),
+	})
+	if err != nil {
+		t.Fatalf("HandleGetWithAlloc miss: %v", err)
+	}
+	if miss.Found || miss.AllocInfo != nil {
+		t.Errorf("miss must be not-found with nil AllocInfo; got found=%v alloc=%+v", miss.Found, miss.AllocInfo)
+	}
+}

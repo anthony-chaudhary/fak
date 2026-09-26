@@ -50,14 +50,16 @@ func (d *Dispatcher) HandleGet(msg protocol.Message) protocol.Message {
 	}
 }
 
-// HandleGetWithAlloc processes a single GET and returns both the result and alloc metadata.
-// Used by the RDMA transport to look up MR info for the RDMA Read path.
+// HandleGetWithAlloc processes a single GET and returns alloc metadata only.
+// Used by the RDMA transport to look up MR info for the RDMA Read path: the
+// coordinate-only shard op avoids materializing the value []byte (the largest
+// per-GET Go-heap allocation) since only AllocMeta is needed for a remote read.
 func (d *Dispatcher) HandleGetWithAlloc(msg protocol.Message) (shard.OpResult, error) {
 	key, err := protocol.DecodeKeyBody(msg.Body)
 	if err != nil {
 		return shard.OpResult{}, err
 	}
-	return d.submitPreDecoded(key, shard.OpGet), nil
+	return d.submitPreDecoded(key, shard.OpGetAlloc), nil
 }
 
 // HandleSet processes a SET request.

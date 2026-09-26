@@ -19,6 +19,8 @@ func (s *Shard) handleOp(op ShardOp) {
 	switch op.Type {
 	case OpGet:
 		result = s.handleGet(op)
+	case OpGetAlloc:
+		result = s.handleGetAlloc(op)
 	case OpSet:
 		result = s.handleSet(op)
 	case OpDelete:
@@ -324,29 +326,8 @@ func (e errorString) Error() string { return string(e) }
 func (s *Shard) handleGet(op ShardOp) OpResult {
 	s.metrics.IncrGets()
 
-	entry, _, found := s.idx.Lookup(op.KeyHash, uint16(len(op.Key)))
-	if !found {
-		s.metrics.IncrMisses()
-		return OpResult{Found: false}
-	}
-
-	// Check TTL
-	if entry.TTL > 0 && time.Now().UnixMilli() > entry.TTL {
-		// Expired â€” delete it
-		s.idx.Delete(op.KeyHash, uint16(len(op.Key)))
-		s.eviction.Remove(op.KeyHash)
-		s.metrics.IncrMisses()
-		s.metrics.IncrTTLExpirations()
-		return OpResult{Found: false}
-	}
-
-	// Read value from correct allocator (migration-aware)
-	a := s.allocForEntry(entry)
-	valCI := int(entry.ValueClassIdx)
-	if entry.Flags&index.FlagHasClassIdx == 0 {
-		valCI = findAllocClassIn(a, uint64(entry.ValueLen))
-	}
-	if valCI < 0 || valCI >= a.NumClasses() {
+	entry, valCI, a, ok := s.resolveGetEntry(op)
+	if !ok {
 		return OpResult{Found: false}
 	}
 	valAlloc := alloc.Allocation{ClassIdx: valCI, Offset: entry.ValueOffset, Size: a.ClassSize(valCI)}
@@ -372,6 +353,70 @@ func (s *Shard) handleGet(op ShardOp) OpResult {
 			Size:     uint64(entry.ValueLen),
 		},
 	}
+}
+
+// handleGetAlloc is the coordinate-only read path: it resolves the entry, TTL and
+// physical allocation coordinates but never materializes a value []byte. The
+// RDMA/descriptor caller only needs AllocMeta (region offset + length) to issue a
+// remote read, so the largest per-GET Go-heap allocation on the hot path is removed.
+func (s *Shard) handleGetAlloc(op ShardOp) OpResult {
+	s.metrics.IncrGets()
+
+	entry, valCI, a, ok := s.resolveGetEntry(op)
+	if !ok {
+		return OpResult{Found: false}
+	}
+	// Validate the backing slot is large enough for the logical value. Read
+	// returns a zero-copy view into the region (no value []byte is materialized),
+	// so length parity with the copy path is preserved without its allocation.
+	valAlloc := alloc.Allocation{ClassIdx: valCI, Offset: entry.ValueOffset, Size: a.ClassSize(valCI)}
+	if uint32(len(a.Read(valAlloc))) < entry.ValueLen {
+		log.Printf("WARN: shard %d: value data shorter than entry.ValueLen â€” treating as miss", s.id)
+		return OpResult{Found: false}
+	}
+
+	s.eviction.Access(op.KeyHash)
+	s.metrics.IncrHits()
+	return OpResult{
+		Found: true,
+		OK:    true,
+		AllocInfo: &AllocMeta{
+			ClassIdx: valCI,
+			Offset:   entry.ValueOffset,
+			Size:     uint64(entry.ValueLen),
+		},
+	}
+}
+
+// resolveGetEntry performs the shared lookup + TTL + allocator/class resolution for
+// the GET read paths. ok=false means the caller must report a miss (it has not yet
+// recorded the miss metric). It returns the entry, the resolved value class index,
+// and the allocator backing the entry.
+func (s *Shard) resolveGetEntry(op ShardOp) (entry index.Entry, valCI int, a alloc.Allocator, ok bool) {
+	entry, _, found := s.idx.Lookup(op.KeyHash, uint16(len(op.Key)))
+	if !found {
+		s.metrics.IncrMisses()
+		return index.Entry{}, 0, nil, false
+	}
+	// Check TTL
+	if entry.TTL > 0 && time.Now().UnixMilli() > entry.TTL {
+		// Expired â€” delete it
+		s.idx.Delete(op.KeyHash, uint16(len(op.Key)))
+		s.eviction.Remove(op.KeyHash)
+		s.metrics.IncrMisses()
+		s.metrics.IncrTTLExpirations()
+		return index.Entry{}, 0, nil, false
+	}
+	// Read value from correct allocator (migration-aware)
+	a = s.allocForEntry(entry)
+	valCI = int(entry.ValueClassIdx)
+	if entry.Flags&index.FlagHasClassIdx == 0 {
+		valCI = findAllocClassIn(a, uint64(entry.ValueLen))
+	}
+	if valCI < 0 || valCI >= a.NumClasses() {
+		return index.Entry{}, 0, nil, false
+	}
+	return entry, valCI, a, true
 }
 
 func (s *Shard) handleSet(op ShardOp) OpResult {

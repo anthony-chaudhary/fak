@@ -75,7 +75,7 @@ func (t *opLatencyTracker) reset() {
 // opLatencyTrackers tracks latency per operation category.
 type opLatencyTrackers struct {
 	all       opLatencyTracker // every op
-	get       opLatencyTracker // OpGet + OpMGet + OpMGetWithAlloc
+	get       opLatencyTracker // OpGet + OpGetAlloc + OpMGet + OpMGetWithAlloc
 	set       opLatencyTracker // OpSet + OpMSet
 	exists    opLatencyTracker // OpTest
 	queueWait opLatencyTracker // time from enqueue to dequeue
@@ -86,7 +86,7 @@ type opLatencyTrackers struct {
 func (lt *opLatencyTrackers) record(opType OpType, d time.Duration) {
 	lt.all.record(d)
 	switch opType {
-	case OpGet, OpMGet, OpMGetWithAlloc:
+	case OpGet, OpGetAlloc, OpMGet, OpMGetWithAlloc:
 		lt.get.record(d)
 	case OpSet, OpMSet:
 		lt.set.record(d)

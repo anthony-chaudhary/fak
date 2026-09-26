@@ -41,6 +41,7 @@ const (
 	OpRestore       // Bulk-load entries from a snapshot
 	OpMGetWithAlloc // Batch GET returning AllocInfos per key (for RDMA batch)
 	OpBatchLease    // Batch lease grant (multiple keyHashes in one op)
+	OpGetAlloc      // Single GET returning AllocMeta only (no value copy) for the RDMA/descriptor path
 )
 
 // ShardOp is a request submitted to a shard.
