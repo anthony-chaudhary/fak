@@ -89,9 +89,31 @@ or immature moment-in-time findings `WATCH` with a review trigger. This prevents
 **Silence the PRIOR_ART advisory by actually checking prior art, never by stamping
 `Prior-art: n/a` reflexively or muting the gate.** The trailer is a record of a reference you
 read - if you genuinely could find no prior art for a truly novel contraction, say *that* in
-the trailer (`Prior-art: none found - novel <X>; oracle cpuref cosine >= <f>`) so the claim is
-falsifiable and the next person can disprove it by naming the art you missed. An empty `n/a`
-on a GEMM that llama.cpp ships is the exact failure this skill exists to catch.
+the trailer as a dated **dry-hole record** so the claim is falsifiable and the next person can
+disprove it by naming the art you missed:
+
+```text
+Prior-art: DRY-HOLE axis=<axis> searched=<class>,<class>,... observed=YYYY-MM-DD q="<query as run>"; oracle cpuref cosine >= <f>
+```
+
+`searched` names at least 3 distinct source classes, at least 2 of them live-field
+(`github`, `prs`, `releases`, `papers`, `web`; the internal classes are `code`, `notes`,
+`registry`, `sota`) - silence from the matrix and our own notes alone is *unmined*, not dry.
+A dry-hole record expires after 14 days (7 before a "first"/"novel"/"#1" claim). An empty
+`n/a` on a GEMM that llama.cpp ships is the exact failure this skill exists to catch.
+
+## Re-check points (the field moves mid-campaign)
+
+The pass above is not one-shot. Re-run step 1-2 and refresh the dry-hole record:
+
+- **pre-attempt** - before each specific optimization or kernel variant, not once per campaign;
+- **post-failure** - when an attempt fails or underperforms, query again with the measured
+  failure signature (e.g. "decode GEMV at 55% of roofline, bandwidth-bound") - it is a sharper
+  question than the one you started with;
+- **plateau** - after two consecutive attempts without gain, re-search upstream PRs and
+  releases since the last record before calling the axis exhausted;
+- **pre-claim** - before any "first", "novel", "#1", or "beats SOTA" statement, with a record
+  no older than 7 days.
 
 ## Adding an operation to the matrix
 
