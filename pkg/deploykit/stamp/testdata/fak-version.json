@@ -1,0 +1,10 @@
+{
+  "app_version": "0.55.0",
+  "commit": "d5840f2e9ee30648b486b4284cb49f3cfccdac4a",
+  "commit_short": "d5840f2e9ee3",
+  "dirty": false,
+  "stamped": true,
+  "go": "go1.26.7",
+  "os": "windows",
+  "arch": "amd64"
+}
