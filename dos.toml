@@ -262,6 +262,7 @@ concurrent = [
   "newleaf",
   "scorecard", # pkg/scorecard shared scorecard fold/render kernel; not an internal leaf
   "repocompose", # pkg/repocompose
+  "deploykit", # pkg/deploykit shared deployable lifecycle contract (descriptor, stage enum, fak.deploy.receipt/v1)
   "strix", # pkg/strix
   "productscorecard",
   "rsl", # internal/rsl Reference State Log leaf; cmd/fak audit shim stays in the cmd lane
@@ -639,6 +640,7 @@ autopick = [
   "newleaf",
   "scorecard", # pkg/scorecard shared scorecard fold/render kernel; see [lanes].concurrent note
   "repocompose", # pkg/repocompose
+  "deploykit", # pkg/deploykit
   "strix", # pkg/strix
   "productscorecard",
   "rsl", # internal/rsl Reference State Log leaf; see [lanes].concurrent note
@@ -1006,6 +1008,7 @@ benchruns = ["internal/benchruns/**"]
 newleaf = ["internal/newleaf/**"]
 scorecard = ["pkg/scorecard/**"]
 repocompose = ["pkg/repocompose/**"]
+deploykit = ["pkg/deploykit/**"]
 strix = ["pkg/strix/**"]
 scratchmark = ["internal/scratchmark/**"] # self-declared-disposability detector: a file whose leading comment block calls itself a throwaway. Its gate shim (internal/hooks/gate_scratchmark.go) stays in the `hooks` lane to keep leaf trees pairwise-disjoint.
 productscorecard = ["internal/productscorecard/**"]
