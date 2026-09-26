@@ -340,6 +340,41 @@ func TestIsGPURelatedValidation(t *testing.T) {
 			mine:     []string{"internal/amdgpu/strix_prefill.s"},
 			expected: true,
 		},
+		{
+			name:     "control-plane test file mentioning halo must not trigger",
+			mine:     []string{"platform/obs/stack/halo_test.go"},
+			expected: false,
+		},
+		{
+			name:     "control-plane source under platform/strix must not trigger",
+			mine:     []string{"platform/strix/opencode_runtime.go"},
+			expected: false,
+		},
+		{
+			name:     "test file outside gpu roots mentioning halo must not trigger",
+			mine:     []string{"internal/foo/halo_test.go"},
+			expected: false,
+		},
+		{
+			name:     "test file under gpu root still triggers via root",
+			mine:     []string{"internal/amdgpu/x_test.go"},
+			expected: true,
+		},
+		{
+			name:     "public non-test source with vulkan keyword still triggers",
+			mine:     []string{"internal/serve/vulkan_backend.go"},
+			expected: true,
+		},
+		{
+			name:     "model metal kernel still triggers via model marker",
+			mine:     []string{"internal/model/metal_kernel.go"},
+			expected: true,
+		},
+		{
+			name:     "compute shader path containing vulkan still triggers",
+			mine:     []string{"shaders/vulkan_matmul.comp"},
+			expected: true,
+		},
 	}
 
 	for _, tt := range tests {

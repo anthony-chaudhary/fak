@@ -61,9 +61,19 @@ func isGPURelatedValidation(mine []string) bool {
 		if !isSourcePath(norm) {
 			continue
 		}
-		for _, kw := range gpuKeywords {
-			if strings.Contains(lower, kw) {
-				return true
+		// The keyword arm skips two classes that never carry device surface:
+		//   - test files (`_test.go`): a test ships no device code; tests under
+		//     a GPU root already triggered via the root match above, and model
+		//     device tests still trigger via the marker arm below.
+		//   - the private factory/control-plane tree (`platform/`): it carries
+		//     no device surface by boundary rule; device HAL lives in public
+		//     internal/. Its component names (e.g. a `strix` or `halo` package)
+		//     describe what it manages, not code that runs on the device.
+		if keywordArmApplies(norm) {
+			for _, kw := range gpuKeywords {
+				if strings.Contains(lower, kw) {
+					return true
+				}
 			}
 		}
 		if norm == modelRoot || strings.HasPrefix(norm, modelRoot+"/") {
@@ -75,6 +85,19 @@ func isGPURelatedValidation(mine []string) bool {
 		}
 	}
 	return false
+}
+
+// keywordArmApplies reports whether the loose GPU-keyword substring test may
+// fire for a source path. Test files and the control-plane `platform/` tree are
+// excluded; see isGPURelatedValidation.
+func keywordArmApplies(norm string) bool {
+	if strings.HasSuffix(strings.ToLower(norm), "_test.go") {
+		return false
+	}
+	if norm == "platform" || strings.HasPrefix(norm, "platform/") {
+		return false
+	}
+	return true
 }
 
 // sourcePathExtensions are the artifact kinds that can carry GPU/compute
