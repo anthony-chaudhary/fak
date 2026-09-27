@@ -145,7 +145,7 @@ func MeasureProtectionLatency(ctx context.Context, repo string, opts LatencyOpti
 
 	// 3. Collect registered worker worktrees.
 	dummyReport2 := &Report{}
-	wts, _ := worktrees(cleanRepo, workerRoot, runner, dummyReport2)
+	wts, _ := worktrees(cleanRepo, workerRoot, runner, dummyReport2, nil)
 	errorsList = append(errorsList, dummyReport2.Errors...)
 
 	workerPaths := make(map[string]bool)

@@ -1121,7 +1121,7 @@ func (td mcpToolDescriptor) toMap() map[string]any {
 // toolDescriptors is the tools/list payload. The inputSchema is a JSON Schema for
 // the {tool, arguments, read_only} shape both tools accept.
 func toolDescriptors() []map[string]any {
-	schema := json.RawMessage(`{"type":"object","properties":{"tool":{"type":"string","description":"the logical tool name to route through the kernel"},"arguments":{"anyOf":[{"type":"object","additionalProperties":false},{"type":"string"}],"description":"the tool arguments: a JSON object, or a JSON-encoded string"},"read_only":{"type":"boolean","description":"hint that the tool is read-only/idempotent (enables vDSO dedup)"},"trace_id":{"type":"string","description":"optional session trace id; omitted means the gateway mints one and returns it"},"witness":{"type":"string","description":"optional external world-state token the call is reading at"}},"required":["tool"],"additionalProperties":false}`)
+	schema := json.RawMessage(`{"type":"object","properties":{"tool":{"type":"string","description":"the logical tool name to route through the kernel"},"arguments":{"anyOf":[{"type":"object"},{"type":"string"}],"description":"the tool arguments: a JSON object, or a JSON-encoded string"},"read_only":{"type":"boolean","description":"hint that the tool is read-only/idempotent (enables vDSO dedup)"},"trace_id":{"type":"string","description":"optional session trace id; omitted means the gateway mints one and returns it"},"witness":{"type":"string","description":"optional external world-state token the call is reading at"}},"required":["tool"],"additionalProperties":false}`)
 	tools := []map[string]any{
 		mcpToolDescriptor{
 			Name:        "fak_adjudicate",
@@ -1149,10 +1149,10 @@ func toolDescriptors() []map[string]any {
   "properties": {
     "tool": {"type": "string", "description": "the tool name that produced this result (its source class keys the provenance taint)"},
     "result": {
-      "anyOf": [{"type": "object", "additionalProperties": false}, {"type": "string"}],
+      "anyOf": [{"type": "object"}, {"type": "string"}],
       "description": "the tool result content: a JSON object, or a JSON-encoded string"
     },
-	"items": {"type": "array", "minItems": 1, "description": "independent tool results to admit in one call", "items": {"type": "object", "properties": {"tool": {"type": "string"}, "result": {"anyOf": [{"type": "object", "additionalProperties": false}, {"type": "string"}], "description": "the tool result content: a JSON object, or a JSON-encoded string"}, "trace_id": {"type": "string"}, "witness": {"type": "string"}}, "required": ["tool"], "additionalProperties": false}},
+	"items": {"type": "array", "minItems": 1, "description": "independent tool results to admit in one call", "items": {"type": "object", "properties": {"tool": {"type": "string"}, "result": {"anyOf": [{"type": "object"}, {"type": "string"}], "description": "the tool result content: a JSON object, or a JSON-encoded string"}, "trace_id": {"type": "string"}, "witness": {"type": "string"}}, "required": ["tool"], "additionalProperties": false}},
     "trace_id": {"type": "string", "description": "the session trace this result belongs to (keys the IFC taint ledger)"},
     "witness": {"type": "string", "description": "optional external world-state token the result was read at"}
   },
@@ -1180,7 +1180,7 @@ func toolDescriptors() []map[string]any {
   "properties": {
     "trace_id": {"type": "string", "description": "session trace id; omitted uses the gateway default trace when configured"},
     "context_tokens": {"type": "integer", "description": "optional provider/model context-token count to debit before checking the reset boundary"},
-    "messages": {"type": "array", "items": {"type": "object", "additionalProperties": false}, "description": "optional transcript messages to distill into the fresh-window carryover seed"}
+    "messages": {"type": "array", "items": {"type": "object"}, "description": "optional transcript messages to distill into the fresh-window carryover seed"}
   },
   "additionalProperties": false
 }`),

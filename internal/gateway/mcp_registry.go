@@ -46,6 +46,20 @@ func validateToolDescriptors() error {
 
 func validateOpenAPISchemaNode(path string, schema map[string]any) error {
 	stype, _ := schema["type"].(string)
+	// A node that sets additionalProperties:false WITHOUT declaring a properties
+	// key is a closed EMPTY object: it admits zero properties, so every real
+	// payload is rejected ("arguments.detail_level: Expected never"). That is
+	// never a useful shape for a parameter — the author means "any object" and
+	// must spell it as a bare {"type":"object"}.
+	//
+	// A genuinely argument-free tool stays legal because it declares
+	// properties:{} explicitly (e.g. fak_memory_drivers, fak_hil_probe); the
+	// ABSENCE of the key is what marks the mistake.
+	if closed, ok := schema["additionalProperties"].(bool); ok && !closed {
+		if _, hasProps := schema["properties"]; !hasProps {
+			return fmt.Errorf("gateway: schema %s sets additionalProperties:false with no properties key, so it rejects every payload; use a bare {\"type\":\"object\"} for a free-form object", path)
+		}
+	}
 	if req, ok := schema["required"].([]any); ok {
 		if !strings.EqualFold(stype, "object") {
 			return fmt.Errorf("gateway: schema %s.required only allowed for type object (got %q)", path, stype)

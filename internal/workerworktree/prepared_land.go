@@ -470,16 +470,27 @@ func normalizePreparedPaths(paths []string) ([]string, error) {
 	out := make([]string, 0, len(paths))
 	for _, raw := range paths {
 		raw = strings.TrimSpace(raw)
-		if strings.IndexByte(raw, 0) >= 0 || filepath.IsAbs(raw) || filepath.VolumeName(raw) != "" {
+		if strings.IndexByte(raw, 0) >= 0 || filepath.IsAbs(raw) || filepath.VolumeName(raw) != "" || hasWindowsDrivePrefix(raw) {
 			return nil, fmt.Errorf("unsafe path %q", raw)
 		}
 		p := pathpkg.Clean(strings.ReplaceAll(raw, "\\", "/"))
-		if p == "" || p == "." || p == ".." || strings.HasPrefix(p, "../") {
+		if p == "" || p == "." || p == ".." || strings.HasPrefix(p, "../") || strings.HasPrefix(p, "/") {
 			return nil, fmt.Errorf("unsafe path %q", raw)
 		}
 		out = append(out, p)
 	}
 	return normalizeStrings(out), nil
+}
+
+// hasWindowsDrivePrefix reports a drive-qualified path such as `C:foo` on every
+// OS. filepath.VolumeName only sees it on Windows, but a prepared path set is
+// replayed on Windows workers, where `C:foo` escapes the worktree.
+func hasWindowsDrivePrefix(p string) bool {
+	if len(p) < 2 || p[1] != ':' {
+		return false
+	}
+	c := p[0] | 0x20
+	return c >= 'a' && c <= 'z'
 }
 
 func normalizeStrings(values []string) []string {

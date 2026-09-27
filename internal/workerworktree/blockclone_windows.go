@@ -60,11 +60,27 @@ func cloneFileBlocks(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer syscall.CloseHandle(target)
-	if err := syscall.Ftruncate(target, info.Size()); err != nil {
+	// CREATE_NEW made dst, so any failure past this point must remove it:
+	// cloneTreeWalk's byte-copy fallback opens dst O_EXCL and would otherwise
+	// fail on every file of a volume without block cloning (e.g. NTFS).
+	cloneErr := duplicateExtents(target, source, info.Size())
+	closeErr := syscall.CloseHandle(target)
+	if cloneErr != nil {
+		_ = os.Remove(dst)
+		return cloneErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(dst)
+		return closeErr
+	}
+	return nil
+}
+
+func duplicateExtents(target, source syscall.Handle, size int64) error {
+	if err := syscall.Ftruncate(target, size); err != nil {
 		return err
 	}
-	input := duplicateExtentsData{FileHandle: source, ByteCount: info.Size()}
+	input := duplicateExtentsData{FileHandle: source, ByteCount: size}
 	var returned uint32
 	if err := syscall.DeviceIoControl(target, fsctlDuplicateExtentsToFile, (*byte)(unsafe.Pointer(&input)), uint32(unsafe.Sizeof(input)), nil, 0, &returned, nil); err != nil {
 		return fmt.Errorf("FSCTL_DUPLICATE_EXTENTS_TO_FILE: %w", err)

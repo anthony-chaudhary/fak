@@ -102,8 +102,14 @@ func renderGuardStartupReport(v guardStartupView) string {
 		// unstamped case printGuardBanner already warns about on its `build` row: this binary CAN attest
 		// its commit — that commit is just provably behind/off origin/main — and the default guard path
 		// re-execs THIS same file. Classify once by git ancestry and say so right under the banner.
-		if warn := guardSkewBuildWarning(guardBuildSkewAssessment()); warn != "" {
-			fmt.Fprint(&startupReport, warn)
+		// Not under --quiet: the classification shells git up to five times before the child
+		// starts, and a quiet launch (which also forces the banner off) never shows the line, so
+		// it must not pay those serial probes on the critical path (#1833). The info pane still
+		// reads the same once-per-process assessment lazily.
+		if !v.quiet {
+			if warn := guardSkewBuildWarning(guardBuildSkewAssessment()); warn != "" {
+				fmt.Fprint(&startupReport, warn)
+			}
 		}
 		if v.preCompactInstall.Applied {
 			fmt.Fprintf(&startupReport, "fak guard: Claude PreCompact hook: %s (settings %s)\n", v.preCompactInstall.Mode, v.preCompactInstall.SettingsPath)

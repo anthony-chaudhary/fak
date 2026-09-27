@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/binstamp"
 )
 
 // guard_login_e2e_test.go — the END-TO-END witness for the "fak guard gets stuck on login
@@ -264,6 +266,14 @@ func readGuardE2EGitCalls(t *testing.T, path string) string {
 // `fak guard -- <agent>` used to pay sessionDescriptorMeta + PublishSession on the
 // critical path, which meant at least three serial `git` subprocesses before the child could
 // run. With a fake git first on PATH, the default launch must produce no git call log at all.
+//
+// The helper child is THIS test binary, and the Go toolchain stamps test binaries with VCS
+// info. A binary built from a tree with any uncommitted or untracked file is stamped
+// vcs.modified=true, and some startup probes (the versionskew build-skew check in
+// guard_skew.go) skip git entirely for a dirty stamp. So this witness only fully bites
+// when the package is built from a CLEAN checkout (CI, the commit validator's snapshot), and
+// can pass in a dirty dev tree while failing in a clean one; the failure message prints the
+// stamp so that difference is visible instead of reading as order-dependence.
 func TestGuardDefaultLaunchDoesNotSpawnGit(t *testing.T) {
 	binDir, logPath := writeGuardE2EFakeGit(t)
 	child := writeGuardE2ENoopChild(t, false)
@@ -284,7 +294,9 @@ func TestGuardDefaultLaunchDoesNotSpawnGit(t *testing.T) {
 		t.Fatalf("guard default launch exit=%d, want 0.\noutput:\n%s", code, out)
 	}
 	if calls := readGuardE2EGitCalls(t, logPath); strings.TrimSpace(calls) != "" {
-		t.Fatalf("default guard launch spawned git despite no durability opt-in:\n%s\noutput:\n%s", calls, out)
+		st := binstamp.Self()
+		t.Fatalf("default guard launch spawned git despite no durability opt-in (test binary stamp: rev=%q dirty=%v hasVCS=%v):\n%s\noutput:\n%s",
+			st.Revision, st.Dirty, st.HasVCS, calls, out)
 	}
 }
 

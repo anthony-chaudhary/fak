@@ -236,6 +236,10 @@ func TestReapDeadWorktreeCleansStaleLocks(t *testing.T) {
 	// 4. Invoke Prepare for a new worktree.
 	// The automated dead worktree sweep in Prepare must detect the dead/stale worktree,
 	// forcibly unlock it, prune it, and successfully initialize the new worktree.
+	// Prepare's sweep is debounced process-wide, and the first Prepare above (or
+	// any earlier test) just swept, so clear the cooldown to witness this sweep.
+	ResetSweepGateForTest()
+	t.Cleanup(ResetSweepGateForTest)
 	newRes := Prepare(root, "freshlane", "freshkey", "", wtRoot, nil)
 	if !newRes.OK {
 		t.Fatalf("Prepare failed after sweeping dead worktree: %+v", newRes)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -11,7 +12,6 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/wipinventory"
 	"github.com/anthony-chaudhary/fak/internal/wiplifecycle"
-	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 func runWIPLifecycle(args []string, stdout, stderr io.Writer) int {
@@ -106,33 +106,40 @@ func emitWIPLifecycle(stdout, stderr io.Writer, receipt wiplifecycle.Receipt) in
 }
 
 func beginAutomaticWIPLifecycle(root, kind string, stderr io.Writer) func() {
-	finish, _, _ := beginAutomaticWIPLifecycleWithRunner(root, kind, stderr, wipinventory.GitRunner{})
+	git := wipinventory.GitRunner{}
+	finish, _, _ := beginAutomaticWIPLifecycleWithRunner(root, kind, stderr, git, git, wipinventory.Options{})
 	return finish
 }
 
-type boundedLifecycleGitRunner struct {
-	run workerworktree.GitRunner
+// boundedLifecycle ties an automatic lifecycle bracket to the deadline of the
+// mutation it brackets.
+type boundedLifecycle struct {
+	// ctx is the mutation's shared deadline; the after capture spends what is left.
+	ctx context.Context
+	// beforeBudget caps the before capture so a large fleet cannot starve the
+	// mutation's own probes of the shared deadline.
+	beforeBudget time.Duration
+	// focus is the checkout the mutation targets. The before capture is complete
+	// once its own state is known; other failures are recorded as advisory.
+	focus string
 }
 
-func (r boundedLifecycleGitRunner) Run(root string, args ...string) ([]byte, error) {
-	rc, out := r.run(root, args)
-	if rc != 0 {
-		return nil, fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(out))
-	}
-	return []byte(out), nil
+func beginAutomaticWIPLifecycleWithGit(root, kind string, stderr io.Writer, bounds boundedLifecycle) (func(), wiplifecycle.Receipt, error) {
+	beforeCtx, cancel := context.WithTimeout(bounds.ctx, bounds.beforeBudget)
+	defer cancel()
+	return beginAutomaticWIPLifecycleWithRunner(root, kind, stderr,
+		wipinventory.DeadlineRunner{Ctx: beforeCtx},
+		wipinventory.DeadlineRunner{Ctx: bounds.ctx},
+		wipinventory.Options{Focus: bounds.focus})
 }
 
-func beginAutomaticWIPLifecycleWithGit(root, kind string, stderr io.Writer, git workerworktree.GitRunner) (func(), wiplifecycle.Receipt, error) {
-	return beginAutomaticWIPLifecycleWithRunner(root, kind, stderr, boundedLifecycleGitRunner{run: git})
-}
-
-func beginAutomaticWIPLifecycleWithRunner(root, kind string, stderr io.Writer, runner wipinventory.Runner) (func(), wiplifecycle.Receipt, error) {
+func beginAutomaticWIPLifecycleWithRunner(root, kind string, stderr io.Writer, before, after wipinventory.Runner, opts wipinventory.Options) (func(), wiplifecycle.Receipt, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		fmt.Fprintf(stderr, "WIP_LIFECYCLE_CAPTURE_FAILED phase=before kind=%s error=%v\n", kind, err)
 		return func() {}, wiplifecycle.Receipt{}, err
 	}
-	receipt, err := wiplifecycle.BeginWithRunner(root, kind, "", time.Now(), runner)
+	receipt, err := wiplifecycle.BeginWithOptions(root, kind, "", time.Now(), before, opts)
 	if err != nil {
 		fmt.Fprintf(stderr, "WIP_LIFECYCLE_CAPTURE_FAILED phase=before kind=%s error=%v\n", kind, err)
 		return func() {}, receipt, err
@@ -146,10 +153,13 @@ func beginAutomaticWIPLifecycleWithRunner(root, kind string, stderr io.Writer, r
 	} else {
 		fmt.Fprintf(stderr, "WIP_LIFECYCLE_CAPTURED phase=before kind=%s operation=%s artifact=%s\n", kind, receipt.OperationID, receipt.Before.Artifact)
 	}
+	if receipt.Before.Advisory != "" {
+		fmt.Fprintf(stderr, "WIP_LIFECYCLE_CAPTURE_ADVISORY phase=before kind=%s focus=%s error=%s\n", kind, receipt.Before.Focus, receipt.Before.Advisory)
+	}
 	var once sync.Once
 	return func() {
 		once.Do(func() {
-			finished, finishErr := wiplifecycle.FinishWithRunner(root, receipt.OperationID, time.Now(), runner)
+			finished, finishErr := wiplifecycle.FinishWithRunner(root, receipt.OperationID, time.Now(), after)
 			if finishErr != nil {
 				fmt.Fprintf(stderr, "WIP_LIFECYCLE_CAPTURE_FAILED phase=after kind=%s operation=%s error=%v\n", kind, receipt.OperationID, finishErr)
 				return

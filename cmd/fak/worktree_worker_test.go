@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
+	"github.com/anthony-chaudhary/fak/internal/wiplifecycle"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
@@ -379,6 +380,79 @@ func newSingleReapFixture(t *testing.T) (repo, worktree, base string) {
 	return repo, worktree, base
 }
 
+// worktreeGitPath resolves a checkout's own git-dir file, such as a linked
+// worktree's private index under .git/worktrees/<id>/.
+func worktreeGitPath(t *testing.T, dir, name string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--path-format=absolute", "--git-path", name).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git rev-parse --git-path %s: %v: %s", name, err, out)
+	}
+	return filepath.FromSlash(strings.TrimSpace(string(out)))
+}
+
+// TestWorkerReapIgnoresUnrelatedWorktreeCaptureFailure pins fak#13560: a single
+// reap gates only on the TARGET's own before capture. Another worker worktree
+// whose status capture fails is kept in the lifecycle receipt as advisory
+// evidence, and the clean target is still reaped.
+func TestWorkerReapIgnoresUnrelatedWorktreeCaptureFailure(t *testing.T) {
+	repo, worktree, base := newSingleReapFixture(t)
+	other := workerworktree.Prepare(repo, "ci", "13560", base, filepath.Dir(worktree), nil)
+	if !other.OK {
+		t.Fatalf("prepare unrelated worktree: %+v", other)
+	}
+	t.Cleanup(func() { _ = workerworktree.ForceReap(repo, other.Path, nil) })
+	otherIndex := worktreeGitPath(t, other.Path, "index")
+	savedIndex, err := os.ReadFile(otherIndex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(otherIndex, []byte("invalid index"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Cleanups run last-in first-out: restore the index before the force reap.
+	t.Cleanup(func() { _ = os.WriteFile(otherIndex, savedIndex, 0o644) })
+
+	// A generous ceiling: the before capture must actually reach the unrelated
+	// worktree for this test to exercise its failure, and a loaded host can spend
+	// seconds per git call. An unloaded run finishes in about a second.
+	res := runReapCommand(t, 5*time.Minute, nil, "--root", repo, "--worktree", worktree, "--max-wait", "4m")
+	if res.code != 0 {
+		t.Fatalf("clean target reap exit=%d stdout=%q stderr=%q", res.code, res.stdout, res.stderr)
+	}
+	got := reapReceipt(t, res.stdout)
+	if got["code"] != workerworktree.ReapCodeRemoved || got["ok"] != true || got["removed"] != true {
+		t.Fatalf("clean target reap receipt=%v", got)
+	}
+	if _, err := os.Stat(worktree); !os.IsNotExist(err) {
+		t.Fatalf("clean target was not removed: %v", err)
+	}
+	if fi, err := os.Stat(other.Path); err != nil || !fi.IsDir() {
+		t.Fatalf("unrelated worktree did not survive: %v", err)
+	}
+	otherName := filepath.Base(other.Path)
+	if !strings.Contains(res.stderr, "WIP_LIFECYCLE_CAPTURED phase=before kind=worker-reap") ||
+		!strings.Contains(res.stderr, "WIP_LIFECYCLE_CAPTURE_ADVISORY phase=before kind=worker-reap") ||
+		!strings.Contains(res.stderr, otherName) {
+		t.Fatalf("want a known before capture plus an advisory naming %s; stderr=%q", otherName, res.stderr)
+	}
+
+	receipts, err := wiplifecycle.List(repo)
+	if err != nil || len(receipts) != 1 {
+		t.Fatalf("lifecycle receipts=%#v err=%v, want exactly the reap's receipt", receipts, err)
+	}
+	before := receipts[0].Before
+	if !before.Known || before.Error != "" {
+		t.Fatalf("before capture=%#v, want known with no in-scope error", before)
+	}
+	if !strings.HasSuffix(before.Focus, filepath.Base(worktree)) {
+		t.Fatalf("before focus=%q, want the reap target %s", before.Focus, worktree)
+	}
+	if !strings.Contains(before.Advisory, otherName) {
+		t.Fatalf("before advisory=%q, want the unrelated failure recorded for %s", before.Advisory, otherName)
+	}
+}
+
 func TestSingleReapDirtyWorktreeReturnsTypedRefusalAndPreservesWork(t *testing.T) {
 	repo, worktree, _ := newSingleReapFixture(t)
 	if err := os.WriteFile(filepath.Join(worktree, "owned.txt"), []byte("unlanded\n"), 0o644); err != nil {
@@ -454,10 +528,12 @@ func TestWorkerReapRefusesWhenPreLifecycleInventoryIsUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Force before-inventory unknown pre-state: corrupt .git/index in repo so
-	// wipinventory.Collect encounters a git error during population capture,
-	// rendering receipt.Before.Known = false.
-	indexPath := filepath.Join(repo, ".git", "index")
+	// Force an unknown TARGET pre-state: corrupt the worktree's own index so the
+	// focused before capture of the target fails, rendering receipt.Before.Known
+	// = false. Since fak#13560 only the target's own capture gates the reap; an
+	// unrelated checkout's failure is advisory (see
+	// TestWorkerReapIgnoresUnrelatedWorktreeCaptureFailure).
+	indexPath := worktreeGitPath(t, worktree, "index")
 	savedIndex, err := os.ReadFile(indexPath)
 	if err != nil {
 		t.Fatal(err)
@@ -483,8 +559,11 @@ func TestWorkerReapRefusesWhenPreLifecycleInventoryIsUnknown(t *testing.T) {
 	if got["removed"] == true {
 		t.Fatalf("want no removal receipt emitted, got removed=true")
 	}
+	if detail, _ := got["detail"].(string); !strings.Contains(detail, "focus ") {
+		t.Fatalf("want the refusal to name the target's own capture, got detail=%q", detail)
+	}
 
-	// Restore .git/index
+	// Restore the target's index
 	if err := os.WriteFile(indexPath, savedIndex, 0o644); err != nil {
 		t.Fatal(err)
 	}
