@@ -6,7 +6,7 @@ description: "Execution plan for the next ten fak-native Qwen3.8 performance ite
 # Plan: #9430 - next ten fak-native Qwen Mac performance items
 
 - Owner: Codex coordinator, 2026-08-27
-- Reconciliation: #9739 (open); audited 2026-09-04 against live GitHub state, commit history, and landed witness bundles
+- Reconciliation: #9739 (open); audited 2026-09-27 against live GitHub state, commit history, and landed witness bundles; #9513/#2723 reopened for the M10 real-process rerun
 - Umbrella: #9430 (open); parent context #8011 (open)
 - Authority: `fak native-performance --current` for runnable-now packets and live holds; `docs/benchmarks/NATIVE-PERFORMANCE-HILLCLIMB.md` / `--next` remain the semantic graph-ready lever view.
 - Centrality: Core
@@ -33,7 +33,7 @@ Historical Qwen3.6 artifacts and receipts, including the Qwen3.6 laptop evidence
 
 Ship `10 / 10 KEEP`: ten issue-bound Mac items with positive net-true end-to-end movement, preserved quality, `engine=fak-native`, zero fallback, and immutable accepted receipts.
 
-Current result: `3 / 10 KEEP`.
+Current result: `2 / 10 KEEP` (M1 and M2 only).
 
 Rejected experiments, default-off candidates, enabling-only commits, synthetic-only tests, and comparator-only runs remain evidence but do not advance the numerator.
 
@@ -67,7 +67,7 @@ The eight `metal.*` levers remain the semantic authority. This execution plan ad
 - [ ] M7 - Exact-prefix block reuse (#8395; exact-boundary prefix COW #9499 shipped at `caf933645`, live serving arm under #8395 outstanding)
 - [x] M8 - Bounded chunked-prefill scheduling (#9066 append prefill shipped at `80c16ae95`, #1912 scheduler interleaving closed at `f3530035c`)
 - [ ] M9 - Resident hybrid co-batching (#9074/#9075/#8395; substrates #9515/#9516, model co-batching #9074, and agent coalescing #9075 shipped, live serving campaign under #8395 outstanding)
-- [x] M10 - Matched parity reconvergence (#9513; exact M3 Pro P32/T64 parity close-out bundle shipped at `d3cf7df2e` KEEP, closes #9513/#2723)
+- [ ] M10 - Matched parity reconvergence (#9513/#2723 reopened; `d3cf7df2e` remains validator/delivery evidence, but its performance credit was invalidated on 2026-09-27 pending a real-process rerun)
 
 ### 1. M1 - No-copy streamed Q4_K Metal spans (#9073)
 
@@ -121,7 +121,7 @@ Substrates #9515 (GDN) and #9516 (full attention) shipped. Model co-batching #90
 
 Run #9513's final same-artifact fak-native versus pinned llama.cpp Mac campaign; MLX may appear only as a separately typed observation unless it proves the identical artifact hash. Publish the exact current result without mixing envelopes; the plan exits after this phase rather than expanding into another optimization queue.
 
-#9513 and #2723 are closed. The terminal M10 exact M3 Pro P32/T64 parity close-out bundle was published in `docs/_witnesses/issue-9513-qwen38-m10-parity/` at `d3cf7df2e`, achieving 6.8633 tok/s fak-native vs 6.9667 tok/s pinned llama.cpp b9828 (98.52% parity ratio >= 95.0% threshold), 0 fallbacks, exact greedy tokens, logit parity <= 0.0001, and verified by `TestMatchedParityReceipt`, earning 3/10 KEEP under #9430.
+#9513 and #2723 are reopened. The M10 bundle published in `docs/_witnesses/issue-9513-qwen38-m10-parity/` at `d3cf7df2e` remains useful validator and delivery evidence, but its performance credit was invalidated on 2026-09-27: the measurement commands replay committed JSON instead of executing the candidate and comparator, the recorded fak revision is not resolvable, and the bundled profile timing conflicts with the claimed prefill samples. M10 stays unchecked until a quiescent M3 Pro runs a serialized real-process 3+3 P32/T64 campaign against pinned llama.cpp b9828 with resolvable source and binary identities, raw outputs, health/residency/fallback evidence, exact-token parity, and logit gates.
 
 ## Current state
 
@@ -135,14 +135,15 @@ Issue #10317 applies the canonical three-axis model in [`docs/progress-state-def
 | 4 / #8820 | `IMPLEMENTATION_SHIPPED` | `CONTRACT_VALIDATED` for the delivered prefill mechanism; no new qualifying performance receipt | `PARKED_LOW_VALUE` | Reactivate when row 1's profile or a fresh TTFT receipt shows panel prefill is again the highest-value lever. |
 | 5 / #9216 | `IMPLEMENTATION_SHIPPED` | `CONTRACT_VALIDATED` for the fused mixer spine (`ce46d5d78`); runtime performance remains unqualified | `AWAITING_RUNTIME_RECEIPT` | Run the ordered exact Metal P32/T64 receipt. |
 | 6 / #8324 | `IMPLEMENTATION_SHIPPED` | `CONTRACT_VALIDATED` for coarse resident decode (`0c25bd26f`); fail-closed rerun harness `daa18873b`; no qualifying runtime receipt | `AWAITING_RUNTIME_RECEIPT` | Run the exact packet on sanctioned capacity. |
-| 7 / #8822, #9513 | `SPINE_SHIPPED` | `CONTRACT_VALIDATED` (`ACCEPTED`: exact M3 Pro P32/T64 parity close-out bundle #9513 landed at `d3cf7df2e`) | `COMPLETE` | Accepted exact M3 Pro P32/T64 parity close-out #9513 with 98.52% decode throughput parity (6.8633 vs 6.9667 tok/s), 0 fallbacks, exact tokens, and logit parity; closes #9513. |
-| 8 / #2723 | `SPINE_SHIPPED` | `CONTRACT_VALIDATED` (`ACCEPTED`: head-to-head fak vs llama.cpp vs MLX matched comparison in #9513) | `COMPLETE` | Head-to-head M3 Pro comparison published in #9513 witness bundle; closes #2723. |
+| 7 / #8822, #9513 | `SPINE_SHIPPED` | `DELIVERY_VALIDATED`; `d3cf7df2e` performance credit invalidated on 2026-09-27 because it does not prove real-process execution | `AWAITING_RUNTIME_RECEIPT` | After M3 Pro quiescence, run #9513's serialized real-process 3+3 P32/T64 fak-native versus pinned llama.cpp b9828 campaign with resolvable source and binary identities and raw evidence. |
+| 8 / #2723 | `SPINE_SHIPPED` | `DELIVERY_VALIDATED`; the authored comparison packet is retained, but the head-to-head result is not an accepted physical receipt | `AWAITING_RUNTIME_RECEIPT` | Reconcile #2723 from the same #9513 real-process campaign; do not restore comparison credit from committed JSON replay. |
 | 9 / #8395 → #9499 → #1912 → #9074/#9075 | `SPINE_SHIPPED` | `CONTRACT_VALIDATED` for shipped substrates and mechanisms (#9492, #9499, #9066, #1912, #9074, #9075); exact integrated runtime remains missing | `DEPENDENCY_ADVANCING: 5/5` | All five constituent mechanisms landed (#1912 closed); advance integrated #8395 serving throughput campaign. |
 | 10 / #9987 → #8657 → #8658 | `SPINE_SHIPPED` | `CONTRACT_VALIDATED` for bounded prerequisite behavior; resident speculative runtime evidence remains missing | `ACTIVE_PROBE / DEPENDENCY_ADVANCING` | Run the smallest fak-native residency probe that can retire the next dependency, then preserve the pinned campaign receipt. |
 
 Additional plan state:
 
 - Delivery credit is recorded for witnessed validators, correctness, implementations, prepared packets, and removed dependencies. Performance credit remains separate and fail-closed.
+- The historical `d3cf7df2e` M10 bundle remains immutable delivery evidence, but it contributes no performance KEEP after the 2026-09-27 provenance audit.
 - The exact Qwen3.8-27B Q4_K_M artifact remains pinned by SHA-256 `7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169`.
 - llama.cpp and MLX remain explicit comparison/reference arms only; neither is a fak product fallback.
 - Historical row evidence remains authoritative: rows 1, 4-7, 9, and 10 retained typed hold/demotion outcomes; rows 2 and 8 shipped bounded validator/correctness spines without runtime qualification; row 3 alone reached full acceptance.
@@ -158,8 +159,9 @@ Kernel/runtime commits must follow `fak sota`, name the exact source revision/pa
 
 ## Execution log
 
+- 2026-09-27: invalidated M10 performance credit from `d3cf7df2e` and reopened #9513/#2723 after provenance audit found committed-JSON measurement commands, an unresolvable fak revision, and profile timing inconsistent with the claimed prefill samples. The bundle remains validator/delivery evidence; the hero metric returns to `2 / 10 KEEP` pending a quiescent M3 Pro real-process 3+3 P32/T64 rerun against pinned llama.cpp b9828.
 - 2026-09-05: M8 bounded chunked-prefill scheduler interleaving #1912 verified complete and closed on main (`f3530035c`); NativeScheduler bounded prefill chunking, decode interleaving, cancellation cleanup, and 0 fallback verified by `TestNativeSchedulerInterleavesBoundedQwenPrefill` (15/15 PASS); closes #1912.
-- 2026-09-03: M10 exact parity campaign #9513 completed with matched M3 Pro P32/T64 parity close-out bundle (`docs/_witnesses/issue-9513-qwen38-m10-parity/`) landed at `d3cf7df2e`; candidate achieved 6.8633 tok/s vs 6.9667 tok/s for pinned llama.cpp b9828 (98.52% throughput parity ratio >= 95.0% threshold), 0 fallbacks, exact greedy tokens, logit parity <= 0.0001; verified by `TestMatchedParityReceipt`; M10 earns 3/10 KEEP under #9430 and closes #9513 and #2723.
+- 2026-09-03: M10 parity packet #9513 landed at `d3cf7df2e` and its authored JSON passed `TestMatchedParityReceipt`; the 2026-09-27 audit retained that validator/delivery result but invalidated the packet's performance credit, so it does not earn a KEEP or close #9513/#2723.
 - 2026-09-03: M4 coarse resident Metal decode #8324 landed at `0c25bd26f` closing #8324 with amortized synchronization (1 sync per token across layers), CPU parity tests (`TestQwen35ResidentMetalDecoder*`), and typed stage profiling; exact Mac runtime performance receipt remains outstanding.
 - 2026-09-03: M6 exact paged-swap receipt #9492 landed at `3399133a3` closing #9492 with `QwenPagedSwapReceipt` arrival-trace OFF/ON witness, zero fallback, zero recompute, and exact output equality; live serving campaign under #8395 remains open.
 - 2026-09-03: M3 fused linear-attention mixer #9216 landed at `ce46d5d78` closing #9216 with single command buffer submission, zero intermediate transfers, and multi-step CPU oracle parity (cosine >= 0.999999); exact Mac performance receipt remains outstanding.
@@ -167,7 +169,7 @@ Kernel/runtime commits must follow `fak sota`, name the exact source revision/pa
 - 2026-08-30: M9 co-batching #9074 and coalescing #9075 verified and closed on main (`d7ce989e4` and `0f36db306`/`4869e704e`) building on #9515/#9516; live serving campaign under #8395 remains open.
 - 2026-09-03: M2 exact campaign #9525 completed with balanced C/M/M/C/C/M execution; candidate executed P=32 prefill in 1 command buffer (vs 192 per-op synchronous command buffers on control) with 0 fallbacks; median prefill latency improved by 43.8% (10284.5 ms vs 18304.9 ms) and median first-token latency improved by 43.9% (2451.8 ms vs 4368.5 ms); M2 earns 2/10 KEEP under #9430 and closes #9230/#9525/#9257.
 - 2026-09-03: M1 exact campaign #9482 completed with balanced C/M/M/C/C/M execution; candidate mapped 184/184 Q4_K tensors (8.33 GB zero-copy Metal residency with 0 fallbacks); median first-token latency improved by 42.5% (4368.5 ms vs 7603.1 ms) and median prefill improved by 15.7% (18304.9 ms vs 21713.3 ms); M1 earns 1/10 KEEP under #9430 and closes #8325/#9482.
-- 2026-08-30: issue #10317 made the three-axis progress vocabulary canonical, preserved prior `HOLD`/`REJECT` outcomes as evidence history, separated delivery from performance credit, and reframed all ten rows with an actionable next movement; the strict fak-native gate and `0 / 10` performance-qualified result are unchanged.
+- 2026-08-30: issue #10317 made the three-axis progress vocabulary canonical, preserved prior `HOLD`/`REJECT` outcomes as evidence history, separated delivery from performance credit, and reframed all ten rows with an actionable next movement; the strict fak-native gate and then-current `0 / 10` performance-qualified result were unchanged.
 - 2026-08-27: proved the existing #9050 top-ten plan targets RTX/WSL, not macOS, and excluded it from this objective.
 - 2026-08-27: read the authoritative eight-lever Metal graph and selected only two measured prerequisites to form the ten-item execution queue.
 - 2026-08-27: opened umbrella #9430 with all ten task-list items and full completion contract.
