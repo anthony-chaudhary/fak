@@ -150,6 +150,11 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// request-local purpose: it is read once here and never mutates the served path.
 	cachePopulate := p.cachePopulate
 	reuse := p.tree != nil && inKernelPlannerPrefixReuseSupported(p.m, p.backend)
+	// admit gates every prefix-cache ADMISSION (checkpoint, full prompt, continuation) while
+	// lookup keeps using reuse: a turn the host-memory arm admitted without room for its
+	// retained copies (#13267, inkernel_host_budget.go) still reuses a cached prefix but
+	// leaves nothing new behind in the cache.
+	admit := reuse && !inKernelSkipPrefixAdmission(ctx)
 
 	// 1) Acquire a session, reusing the longest cached KV prefix when enabled. The clone
 	// (SessionFromPrefix) happens under the lock, so once we unlock our session owns an
@@ -436,7 +441,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		}
 		prefillAt := matched
 		checkpoint := inKernelAdaptiveSnapshotCheckpoint(prefillAt, cacheable, len(ids))
-		if reuse && (p.backend != nil || inKernelHostSnapshotReuse(p)) && checkpoint > prefillAt {
+		if admit && (p.backend != nil || inKernelHostSnapshotReuse(p)) && checkpoint > prefillAt {
 			logits, err = p.prefillDivergentSuffix(ctx, s, ids[prefillAt:checkpoint], measurement)
 			if err != nil {
 				return
@@ -482,7 +487,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// 3) Snapshot the full-prompt KV (before decode mutates s.Cache) and cache it under a
 	// fresh Lookup→Insert→Done. The snapshot covers the FULL ids prefix, so it is a valid
 	// leaf kv no matter how much a concurrent turn may have inserted since step 1.
-	if reuse {
+	if admit {
 		if p.backend != nil {
 			if !skipExactDeviceL1Readmission {
 				var snap *model.PrefixSnapshot
@@ -574,7 +579,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		samplerHook: p.cachePrimeSamplerHook,
 		emitHook:    p.cachePrimeEmitHook,
 	}
-	if reuse {
+	if admit {
 		// A continuation is cacheable only after its token has actually crossed the
 		// model forward boundary. Keep this nil when reuse is off so the ordinary
 		// decode path pays no allocation or append cost.

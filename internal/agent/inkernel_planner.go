@@ -175,6 +175,11 @@ type InKernelPlanner struct {
 	pressureTrimMu sync.Mutex
 	pressureTrim   map[requestPressureTrimKey]*requestPressureTrimStats
 
+	// hostBudget is the armed host-session memory ceiling (#13267, inkernel_host_budget.go):
+	// nil keeps the historical unbounded host path; SetHostMemoryBudget arms it.
+	hostBudgetMu sync.Mutex
+	hostBudget   *hostMemoryBudget
+
 	// kvSpanEvict gates the model-side KV-quarantine eviction BRIDGE (internal/kvmmu)
 	// on the live serve path (issue #579). When on, a tool-result QUARANTINE drives a
 	// real model.KVCache.Evict of the result's K/V span over a fresh model.Session built
@@ -1149,7 +1154,11 @@ func (e *InKernelCapacityError) Error() string {
 	if scope == "" {
 		scope = compute.MemoryScopeDevice
 	}
-	return fmt.Sprintf("in-kernel GPU capacity precheck refused request (%s %s plan needs %d bytes, available budget is %d bytes)", scope, class, e.Want, e.Avail)
+	subject := "GPU"
+	if scope == compute.MemoryScopeHost {
+		subject = "host-memory"
+	}
+	return fmt.Sprintf("in-kernel %s capacity precheck refused request (%s %s plan needs %d bytes, available budget is %d bytes)", subject, scope, class, e.Want, e.Avail)
 }
 
 // recoverDevicePanic is the body of Complete's deferred recover, factored out so it is
@@ -2357,11 +2366,8 @@ func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []
 	if err == nil {
 		return res, nil
 	}
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return res, ctxErr
-	}
-	if !p.prepareDeviceOOMRetry(err) {
-		return res, err
+	if retry, retryGate := p.admitDeviceOOMRetry(ctx, err, len(ids), maxNew); !retry {
+		return res, retryGate
 	}
 	if onRetry != nil {
 		onRetry()
@@ -2369,6 +2375,30 @@ func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []
 	retryRes, retryErr := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
 	p.recordInKernelOOMRetry(err, retryErr == nil)
 	return retryRes, retryErr
+}
+
+// admitDeviceOOMRetry decides whether a failed first attempt may run once more, and
+// returns the error to surface when it may not. It is bounded (#13267): a cancelled
+// request, a coalesced lane that already crossed the shared decode pass (a replay would
+// fail closed with the fresh lane's nil error and book an empty completion as a
+// successful retry), and a non-OOM failure never retry; a retry is admitted only after
+// the idle pools were trimmed AND the request re-prices under the recovered capacity,
+// otherwise it refuses typed instead of re-growing into the same wall.
+func (p *InKernelPlanner) admitDeviceOOMRetry(ctx context.Context, err error, promptTokens, maxNew int) (bool, error) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return false, ctxErr
+	}
+	if req, ok := ctx.Value(inKernelCoalesceContextKey{}).(*inKernelCoalesceRequest); ok && req.decodePass.Load() > 0 {
+		return false, err
+	}
+	if !p.prepareDeviceOOMRetry(err) {
+		return false, err
+	}
+	if capErr := p.refuseOversizeRequest(promptTokens, maxNew); capErr != nil {
+		// No retry ran, so none is booked: the retry counter counts attempted retries.
+		return false, capErr
+	}
+	return true, nil
 }
 
 func (p *InKernelPlanner) prepareDeviceOOMRetry(err error) bool {
@@ -2750,6 +2780,13 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			return nil, err
 		}
 	}
+	// #13267: the host-session (Metal) seam has no compute.Backend for refuseOversizeRequest
+	// to ask, so an armed host ceiling prices it here, before any session or clone exists.
+	ctx, releaseHostMemory, hostErr := p.admitHostMemory(ctx, len(ids), maxNew)
+	if hostErr != nil {
+		return nil, hostErr
+	}
+	defer releaseHostMemory()
 	var measurement *nativeInferenceMeasurement
 	if sp.NativeInferenceReceipt || (sp.DecodeTrace && sp.DecodeTokenObserver == nil) || sp.NativeDecodeTokenIDs {
 		measurement = &nativeInferenceMeasurement{
