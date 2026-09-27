@@ -668,3 +668,43 @@ func TestReadLedgerRejectsMalformedJSON(t *testing.T) {
 		t.Fatal("ActiveReservations accepted malformed JSON; want fail-closed error")
 	}
 }
+
+// TestReservationFailsClosedOnUnclassifiedHostSample is the #9587 fail-closed
+// witness for the primitive: a zero-value or unrecognized pressure level, an
+// unprobeable host total, and an allocatable reading larger than the physical
+// pool are all unknown host states, so the store must refuse with a typed reason
+// and a remedy hint rather than admit as if the host were healthy.
+func TestReservationFailsClosedOnUnclassifiedHostSample(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name   string
+		mutate func(*ReservationRequest)
+		want   string
+	}{
+		{"zero_pressure", func(r *ReservationRequest) { r.Host.Pressure = "" }, "pressure_unknown"},
+		{"unrecognized_pressure", func(r *ReservationRequest) { r.Host.Pressure = "WARN" }, "pressure_unknown"},
+		{"zero_total", func(r *ReservationRequest) { r.Host.TotalBytes = 0 }, "capacity_unknown"},
+		{"allocatable_exceeds_total", func(r *ReservationRequest) { r.Host.AllocatableBytes = r.Host.TotalBytes + 1 }, "capacity_unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			store := NewReservationStore(dir)
+			store.alive = func(int) bool { return true }
+			req := reservationRequest(101, 10, 5, 100, PressureNormal)
+			tc.mutate(&req)
+			got, err := store.Reserve(ctx, req)
+			if err != nil {
+				t.Fatalf("Reserve err=%v", err)
+			}
+			if got.Admit || got.Reason != tc.want || got.RemedyHint == "" || got.Reservation != nil {
+				t.Fatalf("decision=%+v, want typed refusal %q with a remedy hint", got, tc.want)
+			}
+			if tc.want == "pressure_unknown" && got.Pressure != PressureUnknown {
+				t.Fatalf("decision pressure=%q, want normalized %q", got.Pressure, PressureUnknown)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "reservations.json")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("refusal must not create a ledger row: stat err=%v", err)
+			}
+		})
+	}
+}

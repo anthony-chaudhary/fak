@@ -10,7 +10,12 @@ import (
 	"time"
 )
 
-const defaultReceiptSchema = "fak.metal-unified-memory-reservation/1"
+// MetalReservationReceiptSchema is stamped on every Metal reservation receipt. /2 stops
+// deriving peak_rss_bytes from the plan and swap_bytes from compressed memory:
+// both are now measured-or-absent, and the lifecycle fields are additive.
+const MetalReservationReceiptSchema = "fak.metal-unified-memory-reservation/2"
+
+const defaultReceiptSchema = MetalReservationReceiptSchema
 
 // UnifiedMemoryReservation accounts for startup peak bytes, steady resident bytes,
 // memory pressure level, and process owner on Apple Silicon unified memory.
@@ -58,6 +63,16 @@ func (r *UnifiedMemoryReservation) Release(ctx context.Context) error {
 
 // MetalReservationReceipt provides an evidentiary receipt for an admission decision
 // or lifecycle state transition on Apple unified memory.
+//
+// Topology and addressability are deliberately separate facts: HostUnified says
+// host and device draw from one physical pool (so every resident byte counts
+// against the same reservation budget), while HostAddressable says whether a
+// device buffer may be dereferenced from the host. A unified topology never
+// authorizes a host dereference, so HostAddressable stays false.
+//
+// PeakRSSBytes and SwapBytes are measurements, never plan values: a producer
+// that cannot measure them leaves them zero (omitted) rather than substituting a
+// planned or compressed-memory figure.
 type MetalReservationReceipt struct {
 	Schema           string     `json:"schema"`
 	Engine           string     `json:"engine"`  // "fak-native"
@@ -76,11 +91,23 @@ type MetalReservationReceipt struct {
 	Pressure         Pressure   `json:"pressure"`
 	OwnerPID         int        `json:"owner_pid"`
 	ReservationID    string     `json:"reservation_id,omitempty"`
-	Phase            string     `json:"phase,omitempty"` // "startup", "steady", or "released"
-	PeakRSSBytes     int64      `json:"peak_rss_bytes,omitempty"`
-	SwapBytes        int64      `json:"swap_bytes,omitempty"`
-	Cleanup          string     `json:"cleanup,omitempty"` // "active", "released", "reaped", or "none"
+	Phase            string     `json:"phase,omitempty"`          // "startup", "steady", or "released"
+	PeakRSSBytes     int64      `json:"peak_rss_bytes,omitempty"` // measured process peak RSS; 0 = not measured
+	SwapBytes        int64      `json:"swap_bytes,omitempty"`     // measured host swap in use; 0 = not measured
+	Cleanup          string     `json:"cleanup,omitempty"`        // "active", "released", "release_failed", "deferred_to_exit", "reaped", or "none"
 	Timestamp        time.Time  `json:"timestamp"`
+
+	// Lifecycle fields (schema /2, additive).
+	Stage                string           `json:"stage,omitempty"`                  // "admit", "refuse", "steady", "load_failed", "release"
+	AdmissionMode        string           `json:"admission_mode,omitempty"`         // "default", "aggregate", or "exclusive"
+	LeaseRetained        bool             `json:"lease_retained,omitempty"`         // the machine-wide GPU lease is held for the residency
+	LiveAllocatableBytes int64            `json:"live_allocatable_bytes,omitempty"` // the live host reading before any stable-budget floor
+	CompressedBytes      int64            `json:"compressed_bytes,omitempty"`       // compressor-held bytes in the host sample
+	Classes              map[string]int64 `json:"classes,omitempty"`                // planned bytes by memory class
+	TopologyProbed       bool             `json:"topology_probed,omitempty"`        // HostUnified came from a device probe, not a default
+	RemedyHint           string           `json:"remedy_hint,omitempty"`
+	RSSBytes             int64            `json:"rss_bytes,omitempty"`      // measured current process RSS; 0 = not measured
+	TeardownError        string           `json:"teardown_error,omitempty"` // model teardown outcome before release
 }
 
 func (r *MetalReservationReceipt) JSON() ([]byte, error) {
@@ -386,8 +413,7 @@ func (m *UnifiedMemoryReservationManager) buildReceipt(req UnifiedMemoryReservat
 		OwnerPID:         req.OwnerPID,
 		ReservationID:    resID,
 		Phase:            phase,
-		PeakRSSBytes:     req.Plan.StartupPeakBytes,
-		SwapBytes:        req.Host.CompressedBytes,
+		CompressedBytes:  req.Host.CompressedBytes,
 		Cleanup:          cleanup,
 		Timestamp:        timestamp,
 	}
@@ -418,15 +444,17 @@ func (m *UnifiedMemoryReservationManager) GenerateReleaseReceipt(r UnifiedMemory
 		OwnerPID:         r.OwnerPID,
 		ReservationID:    r.ID,
 		Phase:            "released",
-		PeakRSSBytes:     0,
-		SwapBytes:        host.CompressedBytes,
+		CompressedBytes:  host.CompressedBytes,
 		Cleanup:          "released",
 		Timestamp:        now,
 	}
 }
 
-// SampleM3ProQwen38Receipt returns an exact serialized M3 Pro Qwen3.8 Metal admission receipt
-// demonstrating the physical unified topology without treating device buffers as host-addressable.
+// SampleM3ProQwen38Receipt returns a SYNTHETIC, hand-authored receipt fixture that
+// shows the receipt shape for an M3 Pro Qwen3.8 admission (unified topology, device
+// buffers not host-addressable). Its numbers are illustrative, not measured: it is
+// never evidence of a live run: a live #9587 receipt is the JSON a real serve emits
+// on stderr for each admission stage.
 func SampleM3ProQwen38Receipt() MetalReservationReceipt {
 	return MetalReservationReceipt{
 		Schema:          defaultReceiptSchema,
@@ -443,15 +471,13 @@ func SampleM3ProQwen38Receipt() MetalReservationReceipt {
 			SteadyBytes:      16 * (1 << 30), // 16 GiB steady residency
 		},
 		AllocatableBytes: 30 * (1 << 30), // 30 GiB allocatable
-		AvailableBytes:   30 * (1 << 30),
+		AvailableBytes:   10 * (1 << 30), // allocatable minus the 20 GiB reserved
 		ReservedBytes:    20 * (1 << 30),
 		TotalBytes:       36 * (1 << 30), // 36 GiB unified memory
 		Pressure:         PressureNormal,
 		OwnerPID:         os.Getpid(),
 		ReservationID:    "res-m3pro-qwen38-001",
 		Phase:            "startup",
-		PeakRSSBytes:     17 * (1 << 30),
-		SwapBytes:        0,
 		Cleanup:          "active",
 		Timestamp:        time.Date(2026, time.August, 29, 12, 0, 0, 0, time.UTC),
 	}

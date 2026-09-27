@@ -444,3 +444,107 @@ func TestMetalReservationReceiptGeneration(t *testing.T) {
 		t.Fatalf("witness planned bytes unexpected: %+v", witness.PlannedBytes)
 	}
 }
+
+// TestMetalReservationReceiptsNeverSubstitutePlanOrCompressedForMeasurements is
+// the schema /2 witness (#9587): the manager's admit, refuse, and release
+// receipts report peak_rss_bytes and swap_bytes only as measurements, so with
+// nothing measured both stay zero and are omitted from the JSON. The planned
+// startup peak stays in planned_bytes and the host compressor bytes stay in
+// compressed_bytes. Unified topology never implies host-addressable buffers.
+func TestMetalReservationReceiptsNeverSubstitutePlanOrCompressedForMeasurements(t *testing.T) {
+	ctx := context.Background()
+	mgr := NewMetalReservationManager(t.TempDir())
+	mgr.SetAlive(func(int) bool { return true })
+	const (
+		compressed = int64(7 << 20)
+		peak       = int64(60 << 20)
+		steady     = int64(30 << 20)
+		capacity   = int64(100 << 20)
+	)
+	check := func(label string, rc *MetalReservationReceipt) {
+		t.Helper()
+		if rc == nil {
+			t.Fatalf("%s: nil receipt", label)
+		}
+		if rc.Schema != MetalReservationReceiptSchema {
+			t.Errorf("%s: schema = %q, want %q", label, rc.Schema, MetalReservationReceiptSchema)
+		}
+		if rc.PeakRSSBytes != 0 {
+			t.Errorf("%s: peak_rss_bytes = %d, want 0 (unmeasured; planned peak %d belongs in planned_bytes)", label, rc.PeakRSSBytes, peak)
+		}
+		if rc.SwapBytes != 0 {
+			t.Errorf("%s: swap_bytes = %d, want 0 (unmeasured; compressed bytes are not swap)", label, rc.SwapBytes)
+		}
+		if rc.CompressedBytes != compressed {
+			t.Errorf("%s: compressed_bytes = %d, want the host sample's %d", label, rc.CompressedBytes, compressed)
+		}
+		if rc.PlannedBytes.StartupPeakBytes != peak {
+			t.Errorf("%s: planned startup peak = %d, want %d", label, rc.PlannedBytes.StartupPeakBytes, peak)
+		}
+		if !rc.HostUnified || rc.HostAddressable {
+			t.Errorf("%s: host_unified/host_addressable = %v/%v, want true/false", label, rc.HostUnified, rc.HostAddressable)
+		}
+		b, err := json.Marshal(rc)
+		if err != nil {
+			t.Fatalf("%s: marshal receipt: %v", label, err)
+		}
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(b, &raw); err != nil {
+			t.Fatalf("%s: decode receipt keys: %v", label, err)
+		}
+		for _, key := range []string{"peak_rss_bytes", "swap_bytes"} {
+			if v, ok := raw[key]; ok {
+				t.Errorf("%s: receipt JSON carries unmeasured %s=%s", label, key, v)
+			}
+		}
+		var gotCompressed int64
+		if err := json.Unmarshal(raw["compressed_bytes"], &gotCompressed); err != nil || gotCompressed != compressed {
+			t.Errorf("%s: receipt JSON compressed_bytes = %s (err %v), want %d", label, raw["compressed_bytes"], err, compressed)
+		}
+		if got := string(raw["host_addressable"]); got != "false" {
+			t.Errorf("%s: receipt JSON host_addressable = %q, want an explicit false", label, got)
+		}
+	}
+
+	req := metalReq(os.Getpid(), peak, steady, capacity, PressureNormal)
+	req.Host.CompressedBytes = compressed
+	admitted, err := mgr.Reserve(ctx, req)
+	if err != nil || !admitted.Admit || admitted.Reservation == nil {
+		t.Fatalf("reserve: %+v, err=%v", admitted, err)
+	}
+	check("admit", admitted.Receipt)
+
+	// The store refuses the same plan once the first peak is held (60+60 > 100).
+	refused, err := mgr.Reserve(ctx, req)
+	if err != nil || refused.Admit || refused.Reason != "aggregate_capacity" {
+		t.Fatalf("second reserve: %+v, err=%v, want aggregate_capacity refusal", refused, err)
+	}
+	check("aggregate_capacity refusal", refused.Receipt)
+
+	// The manager's own warning gate builds its receipt before the store.
+	warn := req
+	warn.Host.Pressure = PressureWarning
+	warned, err := mgr.Reserve(ctx, warn)
+	if err != nil || warned.Admit || warned.Reason != "pressure_warning" {
+		t.Fatalf("warning reserve: %+v, err=%v, want pressure_warning refusal", warned, err)
+	}
+	check("pressure_warning refusal", warned.Receipt)
+
+	if err := admitted.Reservation.Release(ctx); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	check("release", mgr.GenerateReleaseReceipt(*admitted.Reservation, req.Host))
+
+	// The synthetic fixture shares the schema and carries no fabricated
+	// measurements; its available bytes are allocatable minus reserved.
+	sample := SampleM3ProQwen38Receipt()
+	if sample.Schema != MetalReservationReceiptSchema || sample.PeakRSSBytes != 0 || sample.SwapBytes != 0 {
+		t.Errorf("sample receipt schema/peak_rss/swap = %q/%d/%d, want %q/0/0", sample.Schema, sample.PeakRSSBytes, sample.SwapBytes, MetalReservationReceiptSchema)
+	}
+	if sample.AvailableBytes != sample.AllocatableBytes-sample.ReservedBytes {
+		t.Errorf("sample receipt available = %d, want allocatable %d - reserved %d", sample.AvailableBytes, sample.AllocatableBytes, sample.ReservedBytes)
+	}
+	if !sample.HostUnified || sample.HostAddressable {
+		t.Errorf("sample receipt host_unified/host_addressable = %v/%v, want true/false", sample.HostUnified, sample.HostAddressable)
+	}
+}

@@ -845,9 +845,18 @@ func cmdManageCommand(commandName string, argv []string) {
 		var residencyRelease func()
 		if useMetal {
 			// Mirror `fak serve`: the Metal session forward takes the GPU residency lease
-			// (same loadLocalLauncherModelWithMetalLease helper) before loading weights.
+			// and memory reservation (admitLocalMetalModel) before loading weights.
+			// Receipt lines stay off the agent's terminal unless the full banner is on.
+			var receiptOut io.Writer = io.Discard
+			if !*quiet && *bannerFlag == guardBannerFull {
+				receiptOut = os.Stderr
+			}
 			var leaseErr error
-			residencyRelease, leaseErr = loadLocalLauncherModelWithMetalLease(true, *ggufPath, gpulease.Options{}, load)
+			residencyRelease, leaseErr = admitLocalMetalModel(true, *ggufPath, gpulease.Options{}, metalAdmissionSpec{
+				Load:       func() bool { load(); return inKernelModel != nil },
+				Teardown:   func() error { return closeAdmittedModelWeights(inKernelModel) },
+				ReceiptOut: receiptOut,
+			})
 			if leaseErr != nil {
 				fmt.Fprintln(os.Stderr, "fak guard: Metal model residency:", leaseErr)
 				os.Exit(1)

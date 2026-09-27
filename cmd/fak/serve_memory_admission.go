@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/localadmission"
 	"github.com/anthony-chaudhary/fak/internal/memgate"
+	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // streamedQ4KFreeCPUReservationPeakBytes is the candidate reservation bound
@@ -324,25 +326,6 @@ func estimateMetalWeightsMemoryBounds(ggufPath string) (localadmission.MemoryPla
 	return localadmission.MemoryPlan{StartupPeakBytes: peak, SteadyBytes: steady}, nil
 }
 
-// loadLocalLauncherModelWithMetalLease coordinates local native Metal memory admission,
-// combining the model's startup/steady memory plan, current Darwin allocatable memory and pressure,
-// active FAK reservations, and GPU leases.
-//
-// In exclusive mode (FAK_NATIVE_ADMISSION=exclusive), it retains the conservative exclusive
-// GPU lease across the entire serve lifecycle as a verified rollback mechanism.
-//
-// In aggregate mode (default), it acquires an exclusive load lease during initial model allocation
-// to prevent transient allocation races, reserves startup peak memory in the persistent reservation store,
-// downshifts to steady residency once loaded, and releases the transient load lease so that proven-small
-// models can safely coexist when aggregate capacity permits.
-//
-// fitFloors, when supplied, is the STABLE reserve-based budget the turnkey path
-// pins (total unified memory minus the 20% OS reserve). The reservation then
-// admits against the same envelope the loader planned against: it lifts a
-// transient live-memory dip up to that floor while pressure is normal/warning.
-// Under critical/unknown pressure the live reading wins and the reservation
-// still fails closed. Omitted (every serve --gguf/all-in-one caller) preserves
-// the historical pure live-probe behavior.
 // metalLeaseRefusalAdvice builds the actionable tail of the `fak up` Metal
 // residency refusal (#13131). The lease carries only the holder's pid, so the
 // historical advice was an unconditional "stop the holder process" — which, on
@@ -402,13 +385,91 @@ func metalLeaseRefusalError(err error, path string, waitBound time.Duration) err
 		err, rec.String(), metalLeaseRefusalAdvice(path))
 }
 
+// loadLocalLauncherModelWithMetalLease is the historical admission entry point
+// whose loader cannot report failure: a normal return counts as a resident
+// model. New callers that can observe a failed load, or that own model
+// teardown, use admitLocalMetalModel so a nil model never holds a steady
+// reservation and capacity is returned only after the weights are freed.
 func loadLocalLauncherModelWithMetalLease(useMetal bool, ggufPath string, opts gpulease.Options, load func(), fitFloors ...*serveFitBudget) (release func(), err error) {
+	spec := metalAdmissionSpec{Load: func() bool { load(); return true }}
+	if len(fitFloors) > 0 {
+		spec.FitFloor = fitFloors[0]
+	}
+	return admitLocalMetalModel(useMetal, ggufPath, opts, spec)
+}
+
+// metalAdmissionSpec is one native Metal load whose reservation lifecycle the
+// admission seam owns end to end (#9587).
+type metalAdmissionSpec struct {
+	// Load performs the model load and reports whether a model is now resident.
+	// false is a load failure: the reservation is released without ever being
+	// marked steady and the GPU lease is dropped, exactly once, before
+	// admitLocalMetalModel returns (with a no-op release and a nil error, so the
+	// caller's own "model failed to load" handling still runs).
+	Load func() bool
+	// Teardown frees the resident model. The returned release runs it BEFORE it
+	// hands the reservation and the GPU lease back, so capacity is returned only
+	// after the model's bytes are freed. nil leaves teardown to the caller.
+	Teardown func() error
+	// FitFloor is the STABLE reserve-based budget the turnkey path pins (total
+	// unified memory minus the 20% OS reserve); see reservationAllocatable. nil
+	// keeps the pure live-probe admission.
+	FitFloor *serveFitBudget
+	// ReceiptOut receives the lifecycle receipt lines; nil writes them to
+	// serveAdmissionReceiptOut (stderr). A caller that owns the terminal (guard's
+	// quiet/auto banner) passes io.Discard.
+	ReceiptOut io.Writer
+}
+
+// Native admission modes (FAK_NATIVE_ADMISSION).
+const (
+	// nativeAdmissionDefault reserves aggregate bytes AND retains the GPU lease
+	// for the whole residency.
+	nativeAdmissionDefault = "default"
+	// nativeAdmissionAggregate reserves aggregate bytes and drops the GPU lease
+	// after load when the model is small enough to coexist.
+	nativeAdmissionAggregate = "aggregate"
+	// nativeAdmissionExclusive is the conservative rollback: the GPU lease alone
+	// serializes residency and no aggregate reservation is written.
+	nativeAdmissionExclusive = "exclusive"
+)
+
+func resolveNativeAdmissionMode() string {
+	switch strings.TrimSpace(os.Getenv("FAK_NATIVE_ADMISSION")) {
+	case nativeAdmissionAggregate:
+		return nativeAdmissionAggregate
+	case nativeAdmissionExclusive:
+		return nativeAdmissionExclusive
+	}
+	return nativeAdmissionDefault
+}
+
+// admitLocalMetalModel coordinates local native Metal memory admission. Before
+// any model byte is allocated it combines the model's startup/steady memory
+// plan, the current Darwin allocatable memory and pressure, and the active FAK
+// reservations into one reservation transaction under the machine-wide GPU
+// lease, and it emits a decision receipt at every lifecycle stage.
+//
+//   - An unreadable host sample, unknown or critical pressure, or an aggregate
+//     that does not fit refuses before the loader (typed reason + remedy).
+//   - The reservation holds the startup peak during load and drops to the
+//     steady residency only after spec.Load reports success; a failed load
+//     releases it without ever marking it steady.
+//   - The returned release runs spec.Teardown first, then returns the
+//     reservation and the lease, exactly once.
+//
+// FAK_NATIVE_ADMISSION=exclusive is the conservative rollback: the lease alone
+// serializes residency for the whole serve and no reservation is written.
+// FAK_NATIVE_ADMISSION=aggregate drops the lease after a small load so
+// proven-small models can coexist; the default keeps the lease as well as the
+// reservation.
+func admitLocalMetalModel(useMetal bool, ggufPath string, opts gpulease.Options, spec metalAdmissionSpec) (release func(), err error) {
 	if !useMetal || strings.TrimSpace(ggufPath) == "" {
-		load()
+		spec.Load()
 		return func() {}, nil
 	}
 
-	exclusiveMode := os.Getenv("FAK_NATIVE_ADMISSION") == "exclusive"
+	mode := resolveNativeAdmissionMode()
 
 	opts.NoWait = true
 	opts.Timeout = 0
@@ -424,118 +485,210 @@ func loadLocalLauncherModelWithMetalLease(useMetal bool, ggufPath string, opts g
 		return func() {}, fmt.Errorf("fak local launcher: acquire Metal residency lease %s before model load: %w", path, err)
 	}
 
-	resDir := defaultLocalReservationDir()
-	store := localadmission.NewReservationStore(resDir)
+	store := localadmission.NewReservationStore(defaultLocalReservationDir())
 	plan, stateEnvelope, err := estimateMetalModelMemoryBoundsWithEnvelope(ggufPath)
 	if err != nil {
 		lease.Release()
 		return func() {}, fmt.Errorf("fak local launcher: Metal memory estimate refused before model load: %w", err)
 	}
 
+	rc := newMetalAdmissionReceipt(ggufPath, mode, plan, stateEnvelope)
+	rc.out = spec.ReceiptOut
 	var resID string
-	retainLease := os.Getenv("FAK_NATIVE_ADMISSION") != "aggregate"
+	retainLease := mode != nativeAdmissionAggregate
 
-	mem, memErr := serveReadMemory()
-	if memErr == nil && mem.TotalBytes > 0 {
-		sample := memgate.AdmissionSampleFor(mem)
-		if localadmission.Pressure(sample.Pressure) == localadmission.PressureWarning {
-			compPct := 0.0
-			if sample.TotalBytes > 0 {
-				compPct = float64(sample.CompressedBytes) / float64(sample.TotalBytes) * 100.0
-			}
-			allocGiB := float64(sample.AllocatableBytes) / (1 << 30)
-			fmt.Fprintf(os.Stderr, "fak local launcher: advisory: ambient memory pressure is warning (compressed %.1f%%, %.2f GiB allocatable); close background apps if paging occurs\n", compPct, allocGiB)
+	host, hostKnown := serveAdmissionHostSample()
+	rc.observeHost(host)
+	if hostKnown && host.Pressure == localadmission.PressureWarning {
+		compPct := float64(host.CompressedBytes) / float64(host.TotalBytes) * 100.0
+		allocGiB := float64(host.AllocatableBytes) / (1 << 30)
+		fmt.Fprintf(os.Stderr, "fak local launcher: advisory: ambient memory pressure is warning (compressed %.1f%%, %.2f GiB allocatable); close background apps if paging occurs\n", compPct, allocGiB)
+	}
+
+	if mode == nativeAdmissionExclusive {
+		rc.LeaseRetained = true
+		rc.stage("admit", "ADMIT", "exclusive_lease")
+		rc.emit()
+	} else {
+		// An unreadable host sample is submitted as-is (unknown pressure, zero
+		// capacity) so the store refuses it with a typed reason before the loader.
+		req := localadmission.ReservationRequest{
+			OwnerPID: os.Getpid(),
+			Plan:     plan,
+			Host:     host,
+			Policy:   os.Getenv("FAK_ADMISSION_POLICY"),
 		}
-
-		if !exclusiveMode {
-			var fitFloor *serveFitBudget
-			if len(fitFloors) > 0 {
-				fitFloor = fitFloors[0]
-			}
-			allocatable := reservationAllocatable(sample.AllocatableBytes, fitFloor, sample.Pressure, sample.TotalBytes)
-			req := localadmission.ReservationRequest{
-				OwnerPID: os.Getpid(),
-				Plan:     plan,
-				Host: localadmission.AdmissionSample{
-					TotalBytes:       sample.TotalBytes,
-					AllocatableBytes: allocatable,
-					CompressedBytes:  sample.CompressedBytes,
-					WiredBytes:       sample.WiredBytes,
-					Pressure:         localadmission.Pressure(sample.Pressure),
-				},
-				Policy: os.Getenv("FAK_ADMISSION_POLICY"),
-			}
-			if stateEnvelope != nil {
-				req.Classes = memoryClassesToStrings(stateEnvelope.Classes())
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			dec, rerr := store.Reserve(ctx, req)
-			cancel()
-			if rerr != nil {
-				lease.Release()
-				return func() {}, fmt.Errorf("fak local launcher: local memory reservation error: %w", rerr)
-			}
-			if !dec.Admit {
-				lease.Release()
-				hint := dec.RemedyHint
-				if hint == "" {
-					avail := dec.CapacityBytes - dec.ReservedBytes
-					if avail < 0 {
-						avail = 0
-					}
-					hint = fmt.Sprintf("requested startup peak %.2f GiB (steady %.2f GiB) exceeds available allocatable capacity %.2f GiB (active reservations %.2f GiB)",
-						float64(dec.RequestedPeakBytes)/(1<<30),
-						float64(plan.SteadyBytes)/(1<<30),
-						float64(avail)/(1<<30),
-						float64(dec.ReservedBytes)/(1<<30))
+		if hostKnown {
+			req.Host.AllocatableBytes = reservationAllocatable(host.AllocatableBytes, spec.FitFloor, memgate.Pressure(host.Pressure), host.TotalBytes)
+		}
+		if stateEnvelope != nil {
+			req.Classes = memoryClassesToStrings(stateEnvelope.Classes())
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		dec, rerr := store.Reserve(ctx, req)
+		cancel()
+		if rerr != nil {
+			lease.Release()
+			return func() {}, fmt.Errorf("fak local launcher: local memory reservation error: %w", rerr)
+		}
+		rc.observeDecision(dec)
+		if !dec.Admit {
+			lease.Release()
+			if dec.Reason != "aggregate_capacity" {
+				// Early refusals never read the ledger, so the decision carries no
+				// peer total; report what peers actually hold (best effort).
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				if reserved, err := store.TotalReservedBytes(ctx); err == nil {
+					rc.ReservedBytes = reserved
+					rc.AvailableBytes = max(rc.AllocatableBytes-reserved, 0)
 				}
-				return func() {}, fmt.Errorf("fak local launcher: local memory reservation refused: %s (%s)", dec.Reason, hint)
+				cancel()
 			}
-			if dec.Reservation != nil {
-				resID = dec.Reservation.ID
-			}
-
-			if opts.Path != "" || plan.StartupPeakBytes > sample.AllocatableBytes/2 || plan.SteadyBytes > sample.AllocatableBytes/2 {
-				retainLease = true
-			}
+			hint := reservationRefusalHint(dec, plan)
+			rc.RemedyHint = hint
+			rc.stage("refuse", "REJECT", dec.Reason)
+			rc.emit()
+			return func() {}, fmt.Errorf("fak local launcher: local memory reservation refused: %s (%s)", dec.Reason, hint)
 		}
+		if dec.Reservation != nil {
+			resID = dec.Reservation.ID
+		}
+		if opts.Path != "" || plan.StartupPeakBytes > host.AllocatableBytes/2 || plan.SteadyBytes > host.AllocatableBytes/2 {
+			retainLease = true
+		}
+		rc.LeaseRetained = retainLease
+		rc.stage("admit", "ADMIT", dec.Reason)
+		rc.emit()
+	}
+
+	releaseReservation := func(stage string) bool {
+		if resID == "" {
+			return true
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := store.Release(ctx, resID)
+		cancel()
+		if err != nil {
+			// The row stays until its owner exits and is reaped: say so rather
+			// than silently leaking capacity for the process lifetime.
+			fmt.Fprintf(os.Stderr, "fak local launcher: %s: release memory reservation %s: %v (the dead-owner reap reclaims it after this process exits)\n", stage, resID, err)
+			return false
+		}
+		return true
 	}
 
 	loaded := false
 	defer func() {
 		if !loaded {
-			if resID != "" {
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				_ = store.Release(ctx, resID)
-				cancel()
-			}
+			// A panicking loader never reaches steady: return the startup
+			// reservation and the lease before the panic propagates.
+			releaseReservation("aborted load")
 			lease.Release()
 		}
 	}()
-	load()
+	ok := spec.Load()
 	loaded = true
+	if !ok {
+		released := releaseReservation("failed load")
+		lease.Release()
+		failedStore := store
+		if mode == nativeAdmissionExclusive {
+			failedStore = nil
+		}
+		rc.observeRelease(failedStore, released)
+		rc.stage("load_failed", "RELEASED", "load_failed")
+		rc.emit()
+		return func() {}, nil
+	}
 	if resID != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_, _ = store.MarkSteady(ctx, resID)
+		r, err := store.MarkSteady(ctx, resID)
 		cancel()
+		if err != nil {
+			// Failing to downshift keeps the startup peak held (fail-closed) but
+			// starves peers, so it must be visible.
+			fmt.Fprintf(os.Stderr, "fak local launcher: mark memory reservation %s steady: %v (the startup peak stays reserved)\n", resID, err)
+		} else {
+			rc.Phase = r.Phase
+			// The held bytes dropped from the startup peak to the steady residency.
+			rc.ReservedBytes -= r.StartupPeakBytes - r.HeldBytes
+			rc.AvailableBytes = max(rc.AllocatableBytes-rc.ReservedBytes, 0)
+			rc.stage("steady", "ADMIT", "steady")
+			rc.emit()
+		}
 	}
 	if !retainLease {
 		lease.Release()
 	}
 
+	// Exclusive mode writes no reservation, so its receipts must not read (or
+	// reap) the shared ledger either.
+	ledgerStore := store
+	if mode == nativeAdmissionExclusive {
+		ledgerStore = nil
+	}
 	var once sync.Once
 	return func() {
 		once.Do(func() {
-			if resID != "" {
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				_ = store.Release(ctx, resID)
-				cancel()
+			if spec.Teardown != nil {
+				if err := spec.Teardown(); err != nil {
+					rc.TeardownError = err.Error()
+					var active *fakmodel.WeightSessionsActiveError
+					if errors.As(err, &active) {
+						// The weights stay resident until the last session closes, so
+						// handing the capacity back now would let a peer admit against
+						// bytes that are still allocated. Keep the reservation (and a
+						// retained lease) until this process exits: the kernel drops the
+						// lease flock and the dead-owner reap reclaims the ledger row.
+						rc.Cleanup = "deferred_to_exit"
+						rc.stage("release", "DEFERRED", "weight_sessions_active")
+						rc.emit()
+						return
+					}
+				}
 			}
+			released := releaseReservation("teardown")
 			if retainLease {
 				lease.Release()
 			}
+			rc.observeRelease(ledgerStore, released)
+			rc.stage("release", "RELEASED", "teardown")
+			rc.emit()
 		})
 	}, nil
+}
+
+// closeAdmittedModelWeights is the teardown an admitted Metal load runs before
+// its reservation is released. CloseWeights is idempotent, so a later close on
+// the same model (e.g. serve's closeEPGroup) is a no-op. When sessions are still
+// attached, the free completes when the last one closes; the typed error is
+// recorded on the release receipt.
+func closeAdmittedModelWeights(m *fakmodel.Model) error {
+	if m == nil {
+		return nil
+	}
+	return m.CloseWeights()
+}
+
+// reservationRefusalHint returns the store's remedy hint, or a reason-accurate
+// fallback. The capacity arithmetic is only quoted for an aggregate-capacity
+// refusal; other reasons must not claim the plan "exceeds" anything.
+func reservationRefusalHint(dec localadmission.ReservationDecision, plan localadmission.MemoryPlan) string {
+	if dec.RemedyHint != "" {
+		return dec.RemedyHint
+	}
+	if dec.Reason != "aggregate_capacity" {
+		return fmt.Sprintf("reservation request not admissible (startup peak %d bytes, steady %d bytes)", plan.StartupPeakBytes, plan.SteadyBytes)
+	}
+	avail := dec.CapacityBytes - dec.ReservedBytes
+	if avail < 0 {
+		avail = 0
+	}
+	return fmt.Sprintf("requested startup peak %.2f GiB (steady %.2f GiB) exceeds available allocatable capacity %.2f GiB (active reservations %.2f GiB)",
+		float64(dec.RequestedPeakBytes)/(1<<30),
+		float64(plan.SteadyBytes)/(1<<30),
+		float64(avail)/(1<<30),
+		float64(dec.ReservedBytes)/(1<<30))
 }
 
 // loadLocalLauncherModelWithVulkanLease coordinates local native Vulkan memory admission,
