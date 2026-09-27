@@ -237,6 +237,16 @@ type ControlIngress interface {
 	ServeHTTP(http.ResponseWriter, *http.Request)
 }
 
+// PolymodelBinding joins one host-loaded local model ID to the planner that
+// executes it. New consults these bindings only when polymodel is enabled and
+// at least two distinct bindings are supplied; smaller sets leave the legacy
+// planner selection unchanged.
+type PolymodelBinding struct {
+	ModelID     string
+	Planner     agent.Planner
+	WeightBytes int64
+}
+
 // Config configures a gateway Server. The zero value is not valid — use New,
 // which fills defaults and validates against the registered ABI.
 type Config struct {
@@ -390,6 +400,11 @@ type Config struct {
 	// `fak serve --gguf …` (no --base-url); Tokenizer is the explicit --tokenizer or the
 	// GGUF's embedded tokenizer. Proxy mode (BaseURL set) wins.
 	InKernelModel *model.Model
+	// PolymodelBindings are already-loaded local planners available for exact-ID
+	// selection through one polymodel residency pool. The seam is default-off:
+	// New uses it only when FAK_POLYMODEL enables polymodel and this slice holds
+	// at least two valid, distinct bindings.
+	PolymodelBindings []PolymodelBinding
 	// Tokenizer is the BPE tokenizer the in-kernel chat planner encodes ChatML with.
 	Tokenizer *tokenizer.Tokenizer
 	// InKernelQ4K flags the preloaded model as resident-Q4_K so the chat decode runs

@@ -48,6 +48,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/policy"
+	"github.com/anthony-chaudhary/fak/internal/polymodel"
 	"github.com/anthony-chaudhary/fak/internal/rungobs"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
@@ -61,6 +62,114 @@ import (
 type ConfigError struct {
 	Field  string
 	Reason string
+}
+
+// PolymodelModelNotHeldError reports an exact model ID that is absent from the
+// gateway's admitted polymodel pool. It is a typed refusal so callers can
+// distinguish an unknown local binding from a resident planner failure.
+type PolymodelModelNotHeldError struct {
+	ModelID string
+}
+
+func (e *PolymodelModelNotHeldError) Error() string {
+	return fmt.Sprintf("gateway: polymodel model %q is not held", e.ModelID)
+}
+
+type polymodelPlanner struct {
+	model    string
+	pool     *polymodel.Pool
+	planners map[polymodel.ModelID]agent.Planner
+}
+
+func newPolymodelPlanner(bindings []PolymodelBinding, modelID string) (*polymodelPlanner, error) {
+	var budget int64
+	planners := make(map[polymodel.ModelID]agent.Planner, len(bindings))
+	for i, binding := range bindings {
+		id := polymodel.ModelID(strings.TrimSpace(binding.ModelID))
+		switch {
+		case id == "":
+			return nil, &ConfigError{Field: fmt.Sprintf("PolymodelBindings[%d].ModelID", i), Reason: "must not be empty"}
+		case binding.Planner == nil:
+			return nil, &ConfigError{Field: fmt.Sprintf("PolymodelBindings[%d].Planner", i), Reason: "must not be nil"}
+		case binding.WeightBytes < 0:
+			return nil, &ConfigError{Field: fmt.Sprintf("PolymodelBindings[%d].WeightBytes", i), Reason: "must not be negative"}
+		case binding.WeightBytes > int64(^uint64(0)>>1)-budget:
+			return nil, &ConfigError{Field: "PolymodelBindings", Reason: "weight-byte budget overflows int64"}
+		}
+		if _, exists := planners[id]; exists {
+			return nil, &ConfigError{Field: fmt.Sprintf("PolymodelBindings[%d].ModelID", i), Reason: fmt.Sprintf("duplicate model ID %q", id)}
+		}
+		budget += binding.WeightBytes
+		planners[id] = binding.Planner
+	}
+
+	pool := polymodel.NewPool(budget)
+	for i, binding := range bindings {
+		id := polymodel.ModelID(strings.TrimSpace(binding.ModelID))
+		if _, err := pool.Admit(polymodel.Model{ID: id, WeightBytes: binding.WeightBytes}); err != nil {
+			return nil, &ConfigError{Field: fmt.Sprintf("PolymodelBindings[%d]", i), Reason: err.Error()}
+		}
+	}
+	return &polymodelPlanner{model: modelID, pool: pool, planners: planners}, nil
+}
+
+func (p *polymodelPlanner) Model() string { return p.model }
+
+func (p *polymodelPlanner) pick(opts []agent.SampleOpt) (agent.Planner, error) {
+	var sample agent.SampleParams
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&sample)
+		}
+	}
+	id := polymodel.ModelID(strings.TrimSpace(sample.Model))
+	if !p.pool.Has(id) {
+		return nil, &PolymodelModelNotHeldError{ModelID: string(id)}
+	}
+	return p.planners[id], nil
+}
+
+func (p *polymodelPlanner) Complete(ctx context.Context, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	planner, err := p.pick(opts)
+	if err != nil {
+		return nil, err
+	}
+	return planner.Complete(ctx, messages, tools, opts...)
+}
+
+func (p *polymodelPlanner) StreamingSupported() bool {
+	for _, planner := range p.planners {
+		if plannerStreams(planner) {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *polymodelPlanner) CompleteStream(ctx context.Context, sink agent.StreamSink, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	planner, err := p.pick(opts)
+	if err != nil {
+		return nil, err
+	}
+	if streaming, ok := planner.(agent.StreamingPlanner); ok && streaming.StreamingSupported() {
+		return streaming.CompleteStream(ctx, sink, messages, tools, opts...)
+	}
+	completion, err := planner.Complete(ctx, messages, tools, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if completion != nil && completion.Message.Content != "" {
+		if err := sink(completion.Message.Content); err != nil {
+			return nil, err
+		}
+	}
+	return completion, nil
+}
+
+func (p *polymodelPlanner) WalkPlanners(fn func(agent.Planner)) {
+	for _, planner := range p.planners {
+		fn(planner)
+	}
 }
 
 func (e *ConfigError) Error() string {
@@ -502,6 +611,13 @@ func selectChatPlanner(cfg Config, model string, proxyURLs []string, logf func(s
 	// quietly read a new planner as unclassified and shrink coverage without saying so.
 	side := localityUnknown
 	switch {
+	case polymodel.Enabled() && len(cfg.PolymodelBindings) >= 2:
+		planner, err = newPolymodelPlanner(cfg.PolymodelBindings, model)
+		if err != nil {
+			return nil, localityUnknown, nil, false, err
+		}
+		side = localitySelfHosted
+		logf("gateway: polymodel planner — %d exact-ID local bindings admitted", len(cfg.PolymodelBindings))
 	case len(proxyURLs) != 0 && cfg.InKernelModel != nil && cfg.Tokenizer != nil:
 		// DUAL (small local model ALONGSIDE the API upstream, dual_planner.go): a live
 		// proxy AND a loaded in-kernel model in ONE gateway. Requests addressed to the
