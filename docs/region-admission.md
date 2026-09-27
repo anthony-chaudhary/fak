@@ -149,18 +149,20 @@ change: the historical uncoordinated drive is preserved byte-for-byte.
 
 ```bash
 # before editing internal/gateway/** in a shared checkout:
-git fetch origin 'refs/fak/locks/*:refs/fak/locks/*'   # see peers' leases
+fak leaseref sync --fetch-only   # see peers' leases
 fak loop region --lane gateway --actor session:$ME     # may I?
-fak leaseref acquire --id session-$ME-gateway --tree 'internal/gateway/**' --ttl 3600
-# ... work ... (renew with `fak leaseref renew` if it runs long)
-fak leaseref release --id session-$ME-gateway --holder $ME   # done: hand the region back NOW
+fak leaseref acquire --id session-$ME-gateway --holder "$ME" --tree 'internal/gateway/**' --ttl 3600
+# Save record.generation from the acquire JSON as $G. Present it on every later write.
+fak leaseref renew --id session-$ME-gateway --holder "$ME" --generation "$G"   # while working
+fak leaseref release --id session-$ME-gateway --holder "$ME" --generation "$G"   # done
 ```
 
 Once held, the manual lease is not advisory decoration: the dispatch tick and
 every lane/region-declaring loop drive will **refuse** to enter that region
 until it clears. When the work is done, `fak leaseref release` — the release
 twin of `acquire` — hands the region back immediately (holder-checked and
-CAS-deleted: a live lease held by a different holder refuses `STALE_LEASE`, an
+CAS-deleted: a live lease held by a different holder or presented with a stale
+generation refuses `STALE_LEASE`, an
 already-absent one is an idempotent OK, and an expired record is releasable by
 anyone as a single-id reap; `--force` is the operator override). A holder that
 never releases is still bounded: the TTL lapses the record and

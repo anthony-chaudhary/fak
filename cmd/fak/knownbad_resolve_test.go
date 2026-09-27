@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/knownbad"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
@@ -207,6 +208,56 @@ func TestKnownBadResolveReleasesOnWitness(t *testing.T) {
 	// Sanity: the freed payload is the full un-held two-lane payload (both lanes routed).
 	if _, ok := freed.Lanes["bar"]; !ok {
 		t.Errorf("disjoint lane bar must remain routed throughout")
+	}
+}
+
+func TestKnownBadResolveCannotReleaseReacquiredSameHolderLease(t *testing.T) {
+	dir := gitInitKnownBad(t)
+	ledger := filepath.Join(dir, "known-bad.jsonl")
+	const now = int64(1_700_000_000)
+	sig := knownbad.Signature("build", []string{"internal/fenced/**"}, "")
+
+	var out bytes.Buffer
+	if rc := runKnownBad(&out, &out, []string{"record", "--tree", "internal/fenced/**", "--reason", "build", "--ledger", ledger}, now); rc != 0 {
+		t.Fatalf("record rc=%d out=%q", rc, out.String())
+	}
+	out.Reset()
+	if rc := runKnownBad(&out, &out, []string{"claim", "--by", "fixer", "--dir", dir, "--ledger", ledger, sig}, now); rc != 0 {
+		t.Fatalf("claim rc=%d out=%q", rc, out.String())
+	}
+	records, err := readKnownBadLedger(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim, live := knownbad.FindLatestLive(records, sig, now)
+	if !live || claim.ClaimGeneration <= 0 {
+		t.Fatalf("claim did not persist a positive generation: %+v", claim)
+	}
+	store := leaseref.NewInDir(dir)
+	ctx := context.Background()
+	if v, err := store.ReleaseFenced(ctx, knownbad.LeaseID(sig), "fixer", claim.ClaimGeneration, time.Unix(now, 0)); err != nil || !v.OK {
+		t.Fatalf("release claimed epoch: verdict=%+v err=%v", v, err)
+	}
+	replacement, v, err := store.AcquireFenced(ctx, leaseref.Record{ID: knownbad.LeaseID(sig), Holder: "fixer", TTLSeconds: 3600}, time.Unix(now+1, 0))
+	if err != nil || !v.OK || replacement.Generation <= claim.ClaimGeneration {
+		t.Fatalf("reacquire same holder: record=%+v verdict=%+v err=%v", replacement, v, err)
+	}
+
+	stubKnownBadWitness(t, true, nil)
+	out.Reset()
+	if rc := runKnownBad(&out, &out, []string{"resolve", "--by", "fixer", "--witness", "tests", "--dir", dir, "--ledger", ledger, "--json", sig}, now+2); rc != 0 {
+		t.Fatalf("resolve rc=%d out=%q", rc, out.String())
+	}
+	var res resolveJSON
+	if err := json.Unmarshal(out.Bytes(), &res); err != nil {
+		t.Fatalf("resolve JSON: %v out=%q", err, out.String())
+	}
+	if res.Lease == nil || res.Lease.OK || res.Lease.Reason != leaseref.ReasonStaleLease || res.Lease.Current != replacement.Generation {
+		t.Fatalf("stale claim release verdict=%+v, want STALE_LEASE current=%d", res.Lease, replacement.Generation)
+	}
+	got, ok, err := store.Get(ctx, knownbad.LeaseID(sig))
+	if err != nil || !ok || got.Generation != replacement.Generation {
+		t.Fatalf("stale claim deleted replacement: got=%+v ok=%v err=%v", got, ok, err)
 	}
 }
 

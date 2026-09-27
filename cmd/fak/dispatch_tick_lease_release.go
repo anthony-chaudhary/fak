@@ -274,8 +274,7 @@ func releaseInProcessLaneLease(root string, lease map[string]any) string {
 //
 // The fence is #4324's and it is what makes this safe to do without a sidecar round trip:
 // the token is read straight off the acquire result, a ZERO generation is refused outright
-// (dispatchLeaseFenceReleasable — ReleaseFenced skips its generation comparison when either
-// side is 0, which would degrade the fence to a holder-string match, and holders collide),
+// (dispatchLeaseFenceReleasable — modern acquisitions always return a positive token),
 // and ReleaseFenced's CAS re-checks holder AND generation, so a lane a janitor already
 // reclaimed and re-issued reads STALE_LEASE and is left to the peer that now owns it.
 //

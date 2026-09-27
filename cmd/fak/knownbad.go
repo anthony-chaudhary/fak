@@ -398,9 +398,10 @@ func runKnownBadClaim(stdout, stderr io.Writer, argv []string, nowUnix int64) in
 	// as LEASE_CONTENDED, which names no winner; retry a bounded number of times so the
 	// loser re-reads the now-committed ref and resolves to a definitive LEASE_HELD
 	// carrying the winner — turning an ambiguous race into a nameable fixer.
+	var acquired leaseref.Record
 	var verdict leaseref.FenceVerdict
 	for attempt := 0; attempt < 5; attempt++ {
-		if _, verdict, err = store.AcquireFenced(ctx, req, time.Unix(nowUnix, 0)); err != nil {
+		if acquired, verdict, err = store.AcquireFenced(ctx, req, time.Unix(nowUnix, 0)); err != nil {
 			fmt.Fprintf(stderr, "fak knownbad claim: acquire exclusive lease: %v\n", err)
 			return 1
 		}
@@ -444,7 +445,7 @@ func runKnownBadClaim(stdout, stderr io.Writer, argv []string, nowUnix int64) in
 	// Won the election: stamp the claimant onto the ledger as a superseding row. The
 	// lease guarantees we are the sole writer of this claim, so the append is not a
 	// race — but if it fails we surface an error rather than claim a silent success.
-	claimRec := sigRec.WithClaim(claimant, nowUnix)
+	claimRec := sigRec.WithClaim(claimant, nowUnix, acquired.Generation)
 	if err := appendKnownBadRow(ledgerPath, claimRec); err != nil {
 		fmt.Fprintf(stderr, "fak knownbad claim: won the exclusive lease but could not record the claim: %v\n", err)
 		return 1
@@ -592,7 +593,7 @@ func runKnownBadResolve(stdout, stderr io.Writer, argv []string, nowUnix int64) 
 	// held by someone else is surfaced as a warning rather than failing the resolve — the
 	// signature is already witnessed-closed, the stuck lease is a separate operator action.
 	leaseID := knownbad.LeaseID(sig)
-	lease := releaseKnownBadLease(repoDir, leaseID, resolver, nowUnix)
+	lease := releaseKnownBadLease(repoDir, leaseID, resolver, sigRec.ClaimGeneration, nowUnix)
 
 	res := knownBadResolveResult{
 		Schema:    knownbad.Schema,
@@ -637,14 +638,15 @@ type knownBadResolveResult struct {
 // releaseKnownBadLease drops the fixer's exclusive lease (W5) at refs/fak/locks/<leaseID>
 // as the release arm of resolve. It returns the fenced verdict (nil only when the lease id
 // is unusable, which the resolve caller already validated upstream so it never is here).
-// An absent lease is an idempotent OK; a live lease held by a different holder refuses
-// STALE_LEASE (surfaced, not fatal — the signature is witnessed-closed regardless).
-func releaseKnownBadLease(dir, leaseID, holder string, nowUnix int64) *leaseref.FenceVerdict {
+// An absent lease is an idempotent OK. The generation comes from the durable claim row,
+// never from a fresh lease read, so a stale same-holder claim refuses STALE_LEASE; a
+// legacy zero-token claim likewise cannot release a live positive-generation lease.
+func releaseKnownBadLease(dir, leaseID, holder string, generation, nowUnix int64) *leaseref.FenceVerdict {
 	if leaseID == "" {
 		return nil
 	}
 	store := leaseref.NewInDir(pathutil.ExpandTilde(dir))
-	verdict, err := store.ReleaseFenced(context.Background(), leaseID, holder, 0, time.Unix(nowUnix, 0))
+	verdict, err := store.ReleaseFenced(context.Background(), leaseID, holder, generation, time.Unix(nowUnix, 0))
 	if err != nil {
 		// Infrastructure failure (git not runnable): report it as a non-OK verdict rather
 		// than failing the already-witnessed resolve.
@@ -738,7 +740,7 @@ func runKnownBadRevoke(stdout, stderr io.Writer, argv []string, nowUnix int64) i
 	}
 	leaseID := knownbad.LeaseID(sig)
 	repoDir := pathutil.ExpandTilde(*dir)
-	lease := releaseKnownBadLease(repoDir, leaseID, holder, nowUnix)
+	lease := releaseKnownBadLease(repoDir, leaseID, holder, sigRec.ClaimGeneration, nowUnix)
 
 	res := knownBadRevokeResult{
 		Schema:    knownbad.Schema,

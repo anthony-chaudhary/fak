@@ -59,6 +59,9 @@ type loopDriveRegionHold struct {
 	tree   []string
 	ttl    int64
 	held   bool
+	// generation is the acquired lease epoch. Reusing the holder string after a
+	// release must not let an older drive renew or delete the replacement.
+	generation int64
 
 	// stderr is the operator stream this hold announces its NONFATAL
 	// degradations on — the same stream the region REFUSAL path already takes
@@ -233,8 +236,10 @@ func (h *loopDriveRegionHold) ensure(now time.Time) (*loopDriveRegionRefusal, er
 			return nil, nil
 		case string(verdict.Reason) == leaseref.ReasonNoLease:
 			h.held = false // lapsed, untaken: fall through to reacquire
+			h.generation = 0
 		default:
 			h.held = false
+			h.generation = 0
 			return &loopDriveRegionRefusal{
 				Reason: string(verdict.Reason),
 				Detail: fmt.Sprintf("region lease %s lost mid-drive: %s", h.id, verdict.Detail),
@@ -261,7 +266,7 @@ func (h *loopDriveRegionHold) ensure(now time.Time) (*loopDriveRegionRefusal, er
 		Holder:     h.holder,
 		TTLSeconds: h.ttl,
 	}
-	verdict, err := h.acquireOnce(ctx, rec, now)
+	acquired, verdict, err := h.acquireOnce(ctx, rec, now)
 	if err != nil {
 		return nil, err
 	}
@@ -272,6 +277,7 @@ func (h *loopDriveRegionHold) ensure(now time.Time) (*loopDriveRegionRefusal, er
 		}, nil
 	}
 	h.held = true
+	h.generation = acquired.Generation
 	if h.afterAcquire != nil {
 		h.afterAcquire()
 	}
@@ -318,12 +324,12 @@ func (h *loopDriveRegionHold) decide(live []leaseref.Record) regionadmit.Decisio
 // renewOnce renews the held lease, retrying a single LEASE_CONTENDED (a lost
 // CAS is transient — "re-read and retry" is the fence's own contract).
 func (h *loopDriveRegionHold) renewOnce(ctx context.Context, now time.Time) (leaseref.FenceVerdict, error) {
-	_, verdict, err := h.store.Renew(ctx, h.id, h.holder, h.ttl, now)
+	_, verdict, err := h.store.RenewFenced(ctx, h.id, h.holder, h.generation, h.ttl, now)
 	if err != nil {
 		return leaseref.FenceVerdict{}, fmt.Errorf("renew region lease %s: %w", h.id, err)
 	}
 	if !verdict.OK && string(verdict.Reason) == leaseref.ReasonLeaseContended {
-		_, verdict, err = h.store.Renew(ctx, h.id, h.holder, h.ttl, now)
+		_, verdict, err = h.store.RenewFenced(ctx, h.id, h.holder, h.generation, h.ttl, now)
 		if err != nil {
 			return leaseref.FenceVerdict{}, fmt.Errorf("renew region lease %s: %w", h.id, err)
 		}
@@ -332,18 +338,18 @@ func (h *loopDriveRegionHold) renewOnce(ctx context.Context, now time.Time) (lea
 }
 
 // acquireOnce acquires the lease with the same single LEASE_CONTENDED retry.
-func (h *loopDriveRegionHold) acquireOnce(ctx context.Context, rec leaseref.Record, now time.Time) (leaseref.FenceVerdict, error) {
-	_, verdict, err := h.store.AcquireFenced(ctx, rec, now)
+func (h *loopDriveRegionHold) acquireOnce(ctx context.Context, rec leaseref.Record, now time.Time) (leaseref.Record, leaseref.FenceVerdict, error) {
+	acquired, verdict, err := h.store.AcquireFenced(ctx, rec, now)
 	if err != nil {
-		return leaseref.FenceVerdict{}, fmt.Errorf("acquire region lease %s: %w", h.id, err)
+		return leaseref.Record{}, leaseref.FenceVerdict{}, fmt.Errorf("acquire region lease %s: %w", h.id, err)
 	}
 	if !verdict.OK && string(verdict.Reason) == leaseref.ReasonLeaseContended {
-		_, verdict, err = h.store.AcquireFenced(ctx, rec, now)
+		acquired, verdict, err = h.store.AcquireFenced(ctx, rec, now)
 		if err != nil {
-			return leaseref.FenceVerdict{}, fmt.Errorf("acquire region lease %s: %w", h.id, err)
+			return leaseref.Record{}, leaseref.FenceVerdict{}, fmt.Errorf("acquire region lease %s: %w", h.id, err)
 		}
 	}
-	return verdict, nil
+	return acquired, verdict, nil
 }
 
 // release drops the held lease. Nil-safe and idempotent; an unheld or already
@@ -353,7 +359,8 @@ func (h *loopDriveRegionHold) release() {
 		return
 	}
 	h.held = false
-	_ = h.store.Release(context.Background(), h.id)
+	_, _ = h.store.ReleaseFenced(context.Background(), h.id, h.holder, h.generation, time.Now())
+	h.generation = 0
 }
 
 // evidence is the ledger evidence ref for a held region lease, nil otherwise.

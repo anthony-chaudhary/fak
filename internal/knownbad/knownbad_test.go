@@ -297,8 +297,8 @@ func TestClaimStampAndFindLatestLive(t *testing.T) {
 	if orig.Claimed() {
 		t.Fatalf("a fresh record must not be Claimed()")
 	}
-	claim := orig.WithClaim("fixer-7", now)
-	if !claim.Claimed() || claim.ClaimedBy != "fixer-7" || claim.ClaimedAtUnix != now {
+	claim := orig.WithClaim("fixer-7", now, 42)
+	if !claim.Claimed() || claim.ClaimedBy != "fixer-7" || claim.ClaimedAtUnix != now || claim.ClaimGeneration != 42 {
 		t.Fatalf("WithClaim did not stamp the fixer: %+v", claim)
 	}
 	if claim.Signature != orig.Signature || len(claim.TreeGlobs) != len(orig.TreeGlobs) || claim.ReasonClass != orig.ReasonClass {
@@ -306,6 +306,9 @@ func TestClaimStampAndFindLatestLive(t *testing.T) {
 	}
 	if orig.Claimed() {
 		t.Errorf("WithClaim mutated the receiver instead of returning a copy")
+	}
+	if orig.ClaimGeneration != 0 {
+		t.Errorf("WithClaim mutated the receiver generation: %+v", orig)
 	}
 
 	other := NewRecord("test", []string{"internal/bar/**"}, "", "a2", "", now-5, 0)

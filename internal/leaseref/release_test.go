@@ -28,8 +28,8 @@ func TestReleaseFencedAbsentIsIdempotentOK(t *testing.T) {
 }
 
 // TestReleaseFencedHolderReleasesOwnLiveLease is the happy path: the live holder
-// releases its own lease (with and without presenting its generation) and the ref is
-// gone; the plumbing never touches a branch or HEAD.
+// releases its own lease with its exact generation and the ref is gone; the plumbing
+// never touches a branch or HEAD.
 func TestReleaseFencedHolderReleasesOwnLiveLease(t *testing.T) {
 	g := newFakeGit()
 	s := NewWithRunner(g.run, "")
@@ -56,13 +56,13 @@ func TestReleaseFencedHolderReleasesOwnLiveLease(t *testing.T) {
 		}
 	}
 
-	// Generation 0 (not presented) also releases: the fence is optional on release,
-	// holder identity is not.
-	if _, av, err = s.AcquireFenced(ctx(), Record{ID: "lane", TreeGlobs: []string{"a/**"}, Holder: "me", TTLSeconds: 3600}, now); err != nil || !av.OK {
+	// A later positive generation likewise requires its exact token.
+	reacquired, av, err := s.AcquireFenced(ctx(), Record{ID: "lane", TreeGlobs: []string{"a/**"}, Holder: "me", TTLSeconds: 3600}, now)
+	if err != nil || !av.OK {
 		t.Fatalf("re-AcquireFenced: %+v %v", av, err)
 	}
-	if v, err = s.ReleaseFenced(ctx(), "lane", "me", 0, now); err != nil || !v.OK {
-		t.Fatalf("release without generation = %+v %v, want OK", v, err)
+	if v, err = s.ReleaseFenced(ctx(), "lane", "me", reacquired.Generation, now); err != nil || !v.OK {
+		t.Fatalf("release generation %d = %+v %v, want OK", reacquired.Generation, v, err)
 	}
 }
 
@@ -121,6 +121,27 @@ func TestReleaseFencedRefusesStaleGeneration(t *testing.T) {
 	}
 }
 
+// TestReleaseFencedRefusesPositiveTokenForExpiredLegacyRecord ensures expiry does
+// not promote a stale positive token into maintenance authority over a different
+// epoch. Only generation zero may reap an expired generation-zero record.
+func TestReleaseFencedRefusesPositiveTokenForExpiredLegacyRecord(t *testing.T) {
+	g := newFakeGit()
+	s := NewWithRunner(g.run, "")
+	if _, err := s.Acquire(ctx(), Record{ID: "legacy", Holder: "peer", AcquiredAt: 100, TTLSeconds: 10}); err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	v, err := s.ReleaseFenced(ctx(), "legacy", "peer", 1, time.Unix(1000, 0))
+	if err != nil {
+		t.Fatalf("ReleaseFenced: %v", err)
+	}
+	if v.OK || v.Reason != ReasonStaleLease || v.Presented != 1 || v.Current != 0 {
+		t.Fatalf("verdict = %+v, want STALE_LEASE presented=1 current=0", v)
+	}
+	if _, ok, err := s.Get(ctx(), "legacy"); err != nil || !ok {
+		t.Fatalf("stale positive token deleted expired legacy record: ok=%v err=%v", ok, err)
+	}
+}
+
 // TestReleaseFencedExpiredIsSingleIDReap pins the expired asymmetry: a lapsed record is
 // releasable by ANYONE (deleting it is reap semantics, not a write under the lease).
 func TestReleaseFencedExpiredIsSingleIDReap(t *testing.T) {
@@ -164,7 +185,11 @@ func TestReleaseFencedCASLossIsContended(t *testing.T) {
 		}
 		return g.run(c, dir, args...)
 	}, "")
-	v, err := s2.ReleaseFenced(ctx(), "lane", "me", 0, now)
+	rec, ok, err := s.Get(ctx(), "lane")
+	if err != nil || !ok {
+		t.Fatalf("Get seed lease: ok=%v err=%v", ok, err)
+	}
+	v, err := s2.ReleaseFenced(ctx(), "lane", "me", rec.Generation, now)
 	if err != nil {
 		t.Fatalf("ReleaseFenced: %v", err)
 	}

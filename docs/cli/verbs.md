@@ -301,7 +301,8 @@ fak leaseref liveness --session $ME   # classify each LIVE lease self|peer-live|
 fak leaseref session-publish --session $ME --ttl 2400   # publish/refresh refs/fak/locks/session-$ME, a side-ref heartbeat used by liveness
 fak leaseref audit          # READ-ONLY staleness report (control-pane envelope); reaps nothing
 fak leaseref reap           # delete the expired (reapable) records — a crashed holder is bounded
-fak leaseref release --id L --holder $ME   # the release twin of acquire: hand the lease back NOW instead of waiting out the TTL (holder-checked; exit 3 on a refusal)
+fak leaseref renew --id L --holder $ME --generation $G   # heartbeat with the token returned by acquire
+fak leaseref release --id L --holder $ME --generation $G   # hand the lease back NOW; a stale token refuses with exit 3
 
 # public-repository backup plane: participating machines share this key out of band
 fak leaseref announce --issue 123 --id L --holder "$ME" --tree 'docs/**' --ttl 900 --action acquire --public-safe-key-file ~/.config/fak/lease-announce.key

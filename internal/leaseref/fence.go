@@ -285,32 +285,57 @@ func (s *Store) commitFenced(ctx context.Context, ref string, out Record, oldOID
 // be reacquired, never revived by a renew, since a peer may already own it). On OK it returns
 // the renewed record. ttlSeconds <= 0 keeps the lease's existing TTL.
 func (s *Store) Renew(ctx context.Context, id, holder string, ttlSeconds int64, now time.Time) (Record, FenceVerdict, error) {
+	return s.renew(ctx, id, holder, 0, false, ttlSeconds, now)
+}
+
+// RenewFenced extends a lease only when the caller presents the exact live generation.
+// Holder identity alone is insufficient: the same holder string may release and reacquire
+// an id, producing a newer lease epoch while an older process still retains that holder.
+// Requiring the generation prevents that stale process from renewing the replacement lease.
+//
+// Generation zero remains valid only for a live legacy generation-zero record. Once a lease
+// has a positive fencing token, omitting the token (zero) is stale and fails closed. The
+// admitted write still uses update-ref's old-value CAS, so a ref that advances after the
+// read returns LEASE_CONTENDED rather than overwriting the winner.
+func (s *Store) RenewFenced(ctx context.Context, id, holder string, generation, ttlSeconds int64, now time.Time) (Record, FenceVerdict, error) {
+	return s.renew(ctx, id, holder, generation, true, ttlSeconds, now)
+}
+
+func (s *Store) renew(ctx context.Context, id, holder string, generation int64, requireGeneration bool, ttlSeconds int64, now time.Time) (Record, FenceVerdict, error) {
 	ref, oldOID, hasRef, err := s.resolveLeaseRef(ctx, id)
 	if err != nil {
 		return Record{}, FenceVerdict{}, err
 	}
+	v := FenceVerdict{Presented: generation}
 	if !hasRef {
-		return Record{}, FenceVerdict{Reason: ReasonNoLease, Detail: "no lease for id " + id + "; reacquire before renewing"}, nil
+		v.Reason = ReasonNoLease
+		v.Detail = "no lease for id " + id + "; reacquire before renewing"
+		return Record{}, v, nil
 	}
 	cur, err := s.readRef(ctx, ref)
 	if err != nil {
 		return Record{}, FenceVerdict{}, err
 	}
+	v.Current = cur.Generation
+	v.Holder = cur.Holder
 	if cur.Expired(now) {
-		return Record{}, FenceVerdict{
-			Reason:  ReasonNoLease,
-			Current: cur.Generation,
-			Holder:  cur.Holder,
-			Detail:  fmt.Sprintf("lease %s expired; reacquire (a lapsed lease is not revived by a renew — a peer may already own it)", id),
-		}, nil
+		v.Reason = ReasonNoLease
+		v.Detail = fmt.Sprintf("lease %s expired; reacquire (a lapsed lease is not revived by a renew — a peer may already own it)", id)
+		return Record{}, v, nil
 	}
 	if holder == "" || cur.Holder != holder {
-		return Record{}, FenceVerdict{
-			Reason:  ReasonStaleLease,
-			Current: cur.Generation,
-			Holder:  cur.Holder,
-			Detail:  fmt.Sprintf("lease %s is now held by %q, not %q — halt and reacquire", id, cur.Holder, holder),
-		}, nil
+		v.Reason = ReasonStaleLease
+		v.Detail = fmt.Sprintf("lease %s is now held by %q, not %q — halt and reacquire", id, cur.Holder, holder)
+		return Record{}, v, nil
+	}
+	if requireGeneration && generation != cur.Generation {
+		v.Reason = ReasonStaleLease
+		if generation == 0 && cur.Generation > 0 {
+			v.Detail = fmt.Sprintf("lease %s requires positive generation %d; generation 0 is legacy-only — halt and reacquire", id, cur.Generation)
+		} else {
+			v.Detail = fmt.Sprintf("lease %s is live at generation %d; presented generation %d is stale — halt and reacquire before renewing", id, cur.Generation, generation)
+		}
+		return Record{}, v, nil
 	}
 	out := cur
 	out.RenewedAt = now.Unix()

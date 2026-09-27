@@ -522,6 +522,11 @@ func TestLeaserefAcquireReleaseRenewAmbientSync(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("leaseref acquire failed with code %d: %s", code, stderr.String())
 	}
+	var acquired fencedResult
+	if err := json.Unmarshal(stdout.Bytes(), &acquired); err != nil || acquired.Record == nil {
+		t.Fatalf("decode acquired generation: result=%+v err=%v out=%q", acquired, err, stdout.String())
+	}
+	generation := fmt.Sprint(acquired.Record.Generation)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 sync calls for acquire (fetch then push), got %d: %+v", len(got), got)
 	}
@@ -536,7 +541,7 @@ func TestLeaserefAcquireReleaseRenewAmbientSync(t *testing.T) {
 	got = nil
 	stdout.Reset()
 	stderr.Reset()
-	code = runLeaseref(&stdout, &stderr, []string{"renew", "--dir", dir, "--id", "lease-10849", "--holder", "worker-1", "--ttl", "600"})
+	code = runLeaseref(&stdout, &stderr, []string{"renew", "--dir", dir, "--id", "lease-10849", "--holder", "worker-1", "--generation", generation, "--ttl", "600"})
 	if code != 0 {
 		t.Fatalf("leaseref renew failed with code %d: %s", code, stderr.String())
 	}
@@ -554,7 +559,7 @@ func TestLeaserefAcquireReleaseRenewAmbientSync(t *testing.T) {
 	got = nil
 	stdout.Reset()
 	stderr.Reset()
-	code = runLeaseref(&stdout, &stderr, []string{"release", "--dir", dir, "--id", "lease-10849", "--holder", "worker-1"})
+	code = runLeaseref(&stdout, &stderr, []string{"release", "--dir", dir, "--id", "lease-10849", "--holder", "worker-1", "--generation", generation})
 	if code != 0 {
 		t.Fatalf("leaseref release failed with code %d: %s", code, stderr.String())
 	}

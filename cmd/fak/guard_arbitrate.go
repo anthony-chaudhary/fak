@@ -340,7 +340,7 @@ func (g *guardArbitrateLease) renew() {
 		case <-g.stop:
 			return
 		case now := <-ticker.C:
-			rec, verdict, err := g.store.Renew(context.Background(), g.record.ID, g.record.Holder, int64(guardArbitrateTTL/time.Second), now)
+			rec, verdict, err := g.store.RenewFenced(context.Background(), g.record.ID, g.record.Holder, g.record.Generation, int64(guardArbitrateTTL/time.Second), now)
 			if err == nil && verdict.OK {
 				g.record = rec
 			}

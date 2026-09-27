@@ -355,7 +355,7 @@ func TestLeaserefFenceEndToEnd(t *testing.T) {
 	// B renews: generation stays 2, exit 0.
 	out.Reset()
 	errb.Reset()
-	if code := runLeaseref(&out, &errb, []string{"renew", "--id", "lane", "--holder", "B", "--dir", dir}); code != 0 {
+	if code := runLeaseref(&out, &errb, []string{"renew", "--id", "lane", "--holder", "B", "--generation", "2", "--dir", dir}); code != 0 {
 		t.Fatalf("renew exit=%d, want 0 (out=%q stderr=%q)", code, out.String(), errb.String())
 	}
 	var rn fencedResult

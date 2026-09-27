@@ -15,7 +15,7 @@ import (
 // plane 1 — the atomicity closure): POST /v1/leases/{acquire,renew,release} over the
 // SAME leaseref store the read plane (leaseplane_endpoint.go) and the `fak leaseref` CLI
 // verbs use. The gateway is leaseref-blind; this file is the one seam that translates the
-// injected gateway request into leaseref.AcquireFenced / Renew / ReleaseFenced and folds
+// injected gateway request into leaseref.AcquireFenced / RenewFenced / ReleaseFenced and folds
 // the leaseref.FenceVerdict back into the gateway's wire shape.
 //
 // The gateway serializes calls into this function (leaseWriteMu), so it is already a
@@ -101,7 +101,7 @@ func serveLeaseWrite(ctx context.Context, op string, req gateway.LeaseWriteReque
 		}, now))
 
 	case "renew":
-		return settle(store.Renew(ctx, req.ID, req.Holder, req.TTLSeconds, now))
+		return settle(store.RenewFenced(ctx, req.ID, req.Holder, req.Generation, req.TTLSeconds, now))
 
 	case "release":
 		// A release deletes the record rather than writing one, so there is nothing to

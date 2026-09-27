@@ -74,25 +74,25 @@ func TestAmbientLeaserefAnnounceCommandsOnlyPostSuccessfulTransitions(t *testing
 		return runLeaserefAcquire(out, errb, []string{"--dir", dir, "--id", "secret-raw-lease-8947", "--holder", "node-b/session"})
 	})
 	run(leaserefRefused, func(out, errb *bytes.Buffer) int {
-		return runLeaserefRenew(out, errb, []string{"--dir", dir, "--id", "secret-raw-lease-8947", "--holder", "node-b/session", "--ttl", "800"})
+		return runLeaserefRenew(out, errb, []string{"--dir", dir, "--id", "secret-raw-lease-8947", "--holder", "node-b/session", "--generation", "1", "--ttl", "800"})
 	})
 	if len(bodies) != 1 {
 		t.Fatalf("refusals posted: %d bodies, want 1", len(bodies))
 	}
 	run(0, func(out, errb *bytes.Buffer) int {
-		return runLeaserefRenew(out, errb, []string{"--dir", dir, "--id", "secret-raw-lease-8947", "--holder", "node-a/session", "--ttl", "800"})
+		return runLeaserefRenew(out, errb, []string{"--dir", dir, "--id", "secret-raw-lease-8947", "--holder", "node-a/session", "--generation", "1", "--ttl", "800"})
 	})
 	if len(bodies) != 2 {
 		t.Fatalf("posts after renew=%d, want 2", len(bodies))
 	}
 	run(leaserefRefused, func(out, errb *bytes.Buffer) int {
-		return runLeaserefRelease(out, errb, []string{"--dir", dir, "--id", "secret-raw-lease-8947", "--holder", "node-b/session"})
+		return runLeaserefRelease(out, errb, []string{"--dir", dir, "--id", "secret-raw-lease-8947", "--holder", "node-b/session", "--generation", "1"})
 	})
 	if len(bodies) != 2 {
 		t.Fatalf("release refusal posted: %d bodies, want 2", len(bodies))
 	}
 	run(0, func(out, errb *bytes.Buffer) int {
-		return runLeaserefRelease(out, errb, []string{"--dir", dir, "--id", "secret-raw-lease-8947", "--holder", "node-a/session"})
+		return runLeaserefRelease(out, errb, []string{"--dir", dir, "--id", "secret-raw-lease-8947", "--holder", "node-a/session", "--generation", "1"})
 	})
 	if len(bodies) != 3 {
 		t.Fatalf("posts after release=%d, want 3", len(bodies))
@@ -122,10 +122,10 @@ func TestAmbientLeaserefAnnounceCommandErrorsDoNotPost(t *testing.T) {
 			return runLeaserefAcquire(out, errb, []string{"--dir", missing, "--id", "secret-raw-lease-8947", "--holder", "node/session"})
 		}},
 		{"renew", func(out, errb *bytes.Buffer) int {
-			return runLeaserefRenew(out, errb, []string{"--dir", missing, "--id", "secret-raw-lease-8947", "--holder", "node/session"})
+			return runLeaserefRenew(out, errb, []string{"--dir", missing, "--id", "secret-raw-lease-8947", "--holder", "node/session", "--generation", "1"})
 		}},
 		{"release", func(out, errb *bytes.Buffer) int {
-			return runLeaserefRelease(out, errb, []string{"--dir", missing, "--id", "secret-raw-lease-8947", "--holder", "node/session"})
+			return runLeaserefRelease(out, errb, []string{"--dir", missing, "--id", "secret-raw-lease-8947", "--holder", "node/session", "--generation", "1"})
 		}},
 	}
 	for _, tc := range cases {
@@ -161,10 +161,10 @@ func TestAmbientLeaserefAnnouncePostFailuresPreserveCommandResults(t *testing.T)
 			return runLeaserefAcquire(out, errb, []string{"--dir", dir, "--id", "private-lane", "--holder", "private-holder", "--tree", "private/**"})
 		}},
 		{"renew", func(out, errb *bytes.Buffer) int {
-			return runLeaserefRenew(out, errb, []string{"--dir", dir, "--id", "private-lane", "--holder", "private-holder", "--ttl", "700"})
+			return runLeaserefRenew(out, errb, []string{"--dir", dir, "--id", "private-lane", "--holder", "private-holder", "--generation", "1", "--ttl", "700"})
 		}},
 		{"release", func(out, errb *bytes.Buffer) int {
-			return runLeaserefRelease(out, errb, []string{"--dir", dir, "--id", "private-lane", "--holder", "private-holder"})
+			return runLeaserefRelease(out, errb, []string{"--dir", dir, "--id", "private-lane", "--holder", "private-holder", "--generation", "1"})
 		}},
 	}
 	for _, tc := range commands {
@@ -214,13 +214,13 @@ func TestAmbientLeaserefAnnounceTwoNodesRealCommandsFoldEmpty(t *testing.T) {
 		return runLeaserefAcquire(out, errb, []string{"--dir", dir, "--id", "node-b-lane", "--holder", "node-b/session"})
 	})
 	call(func(out, errb *bytes.Buffer) int {
-		return runLeaserefRenew(out, errb, []string{"--dir", dir, "--id", "node-a-lane", "--holder", "node-a/session", "--ttl", "600"})
+		return runLeaserefRenew(out, errb, []string{"--dir", dir, "--id", "node-a-lane", "--holder", "node-a/session", "--generation", "1", "--ttl", "600"})
 	})
 	call(func(out, errb *bytes.Buffer) int {
-		return runLeaserefRelease(out, errb, []string{"--dir", dir, "--id", "node-b-lane", "--holder", "node-b/session"})
+		return runLeaserefRelease(out, errb, []string{"--dir", dir, "--id", "node-b-lane", "--holder", "node-b/session", "--generation", "1"})
 	})
 	call(func(out, errb *bytes.Buffer) int {
-		return runLeaserefRelease(out, errb, []string{"--dir", dir, "--id", "node-a-lane", "--holder", "node-a/session"})
+		return runLeaserefRelease(out, errb, []string{"--dir", dir, "--id", "node-a-lane", "--holder", "node-a/session", "--generation", "1"})
 	})
 	if held := leaseref.FoldAnnouncements(bodies); len(held) != 0 {
 		t.Fatalf("two-node lifecycle did not fold empty: %+v", held)

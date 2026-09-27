@@ -414,6 +414,7 @@ func TestLeaseCoordinatorDistinctIDTreeRace(t *testing.T) {
 	renewReq := gateway.LeaseWriteRequest{
 		ID:         winner.id,
 		Holder:     winner.res.Holder,
+		Generation: winner.res.Generation,
 		TreeGlobs:  []string{"internal/kernel/**"},
 		TTLSeconds: 300,
 	}

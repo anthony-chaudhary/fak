@@ -141,6 +141,13 @@ type Record struct {
 	// ClaimedAtUnix is the unix-seconds instant the claim row was appended (0 when
 	// unclaimed) — the companion to ClaimedBy.
 	ClaimedAtUnix int64 `json:"claimed_at_unix,omitempty"`
+	// ClaimGeneration is the fencing token returned by the exclusive lease acquire
+	// that elected ClaimedBy. Resolve and revoke must present this exact recorded
+	// epoch when releasing the lease: holder identity alone cannot distinguish a
+	// stale claim from a later lease reacquired by the same holder. Zero identifies
+	// a legacy claim row that predates generation propagation; it cannot authorize
+	// release of a live positive-generation lease.
+	ClaimGeneration int64 `json:"claim_generation,omitempty"`
 	// ResolvedBy names the agent (or operator) that closed this signature on a
 	// WITNESSED fix (W6, #2718). It is bookkeeping the operator card (W7) reads to
 	// point a human at who released the fleet — the witness gate itself is enforced
@@ -510,11 +517,16 @@ func (r Record) WithRevoke(revokedBy string, revokedAtUnix int64, revokeReason s
 // mutate the failure it points at. Recording the claimant is bookkeeping the
 // scope-hold and operator surfaces read — the exactly-one invariant is enforced by
 // the exclusive lease, not this stamp — so a caller must have WON the lease before
-// appending the returned row.
-func (r Record) WithClaim(claimant string, claimedAtUnix int64) Record {
+// appending the returned row. generation records the acquired lease epoch; it is
+// optional only so callers can represent pre-fencing legacy claim rows.
+func (r Record) WithClaim(claimant string, claimedAtUnix int64, generation ...int64) Record {
 	out := r
 	out.ClaimedBy = strings.TrimSpace(claimant)
 	out.ClaimedAtUnix = claimedAtUnix
+	out.ClaimGeneration = 0
+	if len(generation) > 0 {
+		out.ClaimGeneration = generation[0]
+	}
 	return out
 }
 

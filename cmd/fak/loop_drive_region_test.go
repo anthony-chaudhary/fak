@@ -402,6 +402,38 @@ func TestLoopDriveRegionHoldReacquiresAfterLapse(t *testing.T) {
 	}
 }
 
+func TestLoopDriveRegionHoldRejectsStaleSameHolderEpoch(t *testing.T) {
+	dir := initRegionTestRepo(t)
+	t.Setenv("FAK_LEASEREF_SYNC", "off")
+	hold := newLoopDriveRegionHold(loopDriveOptions{}, loopdrive.Spec{Loop: "fenced-loop", Lane: "gateway"})
+	now := time.Now()
+	if refuse, err := hold.ensure(now); err != nil || refuse != nil {
+		t.Fatalf("first acquire: refuse=%+v err=%v", refuse, err)
+	}
+	oldGeneration := hold.generation
+	hold.release()
+	replacement, verdict, err := hold.store.AcquireFenced(context.Background(), leaseref.Record{
+		ID: hold.id, Holder: hold.holder, TreeGlobs: hold.tree, TTLSeconds: hold.ttl,
+	}, now.Add(time.Second))
+	if err != nil || !verdict.OK || replacement.Generation <= oldGeneration {
+		t.Fatalf("same-holder replacement: record=%+v verdict=%+v err=%v", replacement, verdict, err)
+	}
+
+	hold.held = true
+	hold.generation = oldGeneration
+	refuse, err := hold.ensure(now.Add(2 * time.Second))
+	if err != nil || refuse == nil || refuse.Reason != leaseref.ReasonStaleLease {
+		t.Fatalf("stale renew: refuse=%+v err=%v", refuse, err)
+	}
+	hold.held = true
+	hold.generation = oldGeneration
+	hold.release()
+	got, ok, err := leaseref.NewInDir(dir).Get(context.Background(), hold.id)
+	if err != nil || !ok || got.Generation != replacement.Generation {
+		t.Fatalf("stale release changed replacement: got=%+v ok=%v err=%v", got, ok, err)
+	}
+}
+
 // TestDispatchAcquireHonorsLaneTaxonomy proves the dispatch side of the shared
 // seam: the tick's lane-lease acquire now refuses on the SAME decision — here
 // an exclusive-lane live lease (a release cut) blocks a disjoint-tree lane,

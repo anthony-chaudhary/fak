@@ -149,6 +149,9 @@ func TestKnownBadClaimElectsExactlyOneFixer(t *testing.T) {
 			if r.ClaimedAtUnix != now {
 				t.Errorf("claim stamped at %d, want injected now=%d", r.ClaimedAtUnix, now)
 			}
+			if r.ClaimGeneration != rec.Generation || r.ClaimGeneration <= 0 {
+				t.Errorf("claim generation = %d, want acquired fencing token %d", r.ClaimGeneration, rec.Generation)
+			}
 		}
 	}
 	if claimed != 1 {

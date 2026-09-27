@@ -32,8 +32,9 @@ import (
 
 // ReleaseFenced deletes the lease at refs/fak/locks/<id> iff the caller may: the
 // ref is absent (idempotent OK), the record is expired (single-id reap), or the
-// caller IS the live holder — presenting a non-zero generation additionally
-// requires it to match the live lease's. A live lease held by a different (or
+// caller IS the live holder and presents the live generation. Generation zero
+// is accepted only for a legacy generation-zero record; every positive live
+// generation requires the exact positive token. A live lease held by a different (or
 // anonymous) holder refuses STALE_LEASE; a ref that advanced between the read and
 // the CAS delete refuses LEASE_CONTENDED (re-read and retry).
 func (s *Store) ReleaseFenced(ctx context.Context, id, holder string, generation int64, now time.Time) (FenceVerdict, error) {
@@ -54,6 +55,15 @@ func (s *Store) ReleaseFenced(ctx context.Context, id, holder string, generation
 	}
 	v.Current = cur.Generation
 	v.Holder = cur.Holder
+	// A caller that presents a fencing token is claiming a specific lease epoch.
+	// Validate that claim even when the record is expired: expiry permits an
+	// uncredentialed (generation-zero) maintenance reap, but it must not turn a
+	// stale positive token into authority to delete a different epoch.
+	if generation > 0 && generation != cur.Generation {
+		v.Reason = ReasonStaleLease
+		v.Detail = fmt.Sprintf("lease %s is at generation %d; presented generation %d is stale — not released", id, cur.Generation, generation)
+		return v, nil
+	}
 
 	if !cur.Expired(now) {
 		// A LIVE lease may be released only by its proven holder. An anonymous live
@@ -64,9 +74,13 @@ func (s *Store) ReleaseFenced(ctx context.Context, id, holder string, generation
 			v.Detail = fmt.Sprintf("lease %s is held live by %q, not %q — not released; let it expire or have its holder release it", id, cur.Holder, holder)
 			return v, nil
 		}
-		if generation != 0 && cur.Generation != 0 && generation != cur.Generation {
+		if generation != cur.Generation {
 			v.Reason = ReasonStaleLease
-			v.Detail = fmt.Sprintf("lease %s is live at generation %d; presented generation %d is stale — halt and reacquire before releasing", id, cur.Generation, generation)
+			if generation == 0 && cur.Generation > 0 {
+				v.Detail = fmt.Sprintf("lease %s requires positive generation %d; generation 0 is legacy-only — halt and reacquire before releasing", id, cur.Generation)
+			} else {
+				v.Detail = fmt.Sprintf("lease %s is live at generation %d; presented generation %d is stale — halt and reacquire before releasing", id, cur.Generation, generation)
+			}
 			return v, nil
 		}
 	}

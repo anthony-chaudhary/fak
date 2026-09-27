@@ -173,8 +173,9 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
       acquire default) cannot expire and so can never be reaped; those are
       judged by AGE instead — never by the holder's pid, which names a
       per-invocation CLI child and is dead even for a healthy lease — and
-      reported under age_stale[] / age_stale_ids, whose remedy is
-      'fak leaseref release ID', not the reaper. Reaps NOTHING — verdict ACTION
+      reported under age_stale[] / age_stale_ids, whose remedy is a generation-
+      fenced release by its holder or an explicit operator --force, not the reaper.
+      Reaps NOTHING — verdict ACTION
       is the signal to act. This is the member 'fak garden' folds.
 
   fak leaseref acquire --id ID --holder H [--session S] [--tree GLOB ...] [--ttl SEC] [--dir DIR] [--announce on|off|offline --announce-issue N --announce-repo OWNER/REPO]
@@ -198,16 +199,18 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
       you were paused/dormant — halt and reacquire, never resume:
         fak leaseref fence --id L --holder $ME --generation $G || reacquire
 
-  fak leaseref renew --id ID --holder H [--ttl SEC] [--dir DIR] [--announce on|off|offline --announce-issue N --announce-repo OWNER/REPO]
-      Heartbeat: extend YOUR live lease's window WITHOUT bumping the generation. A
-      lease taken over by a peer is refused STALE_LEASE; a lapsed/absent lease NO_LEASE.
+  fak leaseref renew --id ID --holder H --generation N [--ttl SEC] [--dir DIR] [--announce on|off|offline --announce-issue N --announce-repo OWNER/REPO]
+      Heartbeat: extend YOUR live lease's window WITHOUT bumping the generation.
+      Present the generation returned by acquire; a stale or omitted token for a
+      positive-generation lease is refused STALE_LEASE. A lapsed lease is NO_LEASE.
 
-  fak leaseref release --id ID --holder H [--generation N] [--force] [--dir DIR] [--announce on|off|offline --announce-issue N --announce-repo OWNER/REPO]
+  fak leaseref release --id ID --holder H --generation N [--force] [--dir DIR] [--announce on|off|offline --announce-issue N --announce-repo OWNER/REPO]
       The release twin of 'acquire': delete YOUR lease the moment the work is
       done instead of waiting out the TTL (a finished exclusive-lane lease stops
       stalling the fleet). Holder-checked and CAS-deleted: a live lease held by
-      a DIFFERENT holder is refused STALE_LEASE, a wrong --generation likewise,
-      and a ref that advanced under the delete is LEASE_CONTENDED. An absent
+      a DIFFERENT holder is refused STALE_LEASE, a missing or wrong generation
+      for a positive-generation lease likewise, and a ref that advanced under
+      the delete is LEASE_CONTENDED. An absent
       lease is an idempotent OK; an EXPIRED record is releasable by anyone
       (single-id reap). --force skips the holder check (operator override).
 
@@ -522,7 +525,7 @@ func runLeaserefReap(stdout, stderr io.Writer, argv []string) int {
 // while the lane it names stayed permanently refused, which is why the fleet accumulated
 // 18 wedged lanes with nothing anywhere reporting them. It is now counted and named on its
 // own keys (age_stale_count / age_stale_ids / age_stale) with the remedy that works,
-// `fak leaseref release <id>`, spelled out in the reason.
+// a generation-fenced `fak leaseref release`, spelled out in the reason.
 //
 // THE RESIDUAL, stated rather than hidden: internal/gardenbundle maps this member to ActReap,
 // so an ACTION driven only by age-stale ghosts still makes the garden tick run the reaper,
@@ -598,7 +601,7 @@ func runLeaserefAudit(stdout, stderr io.Writer, argv []string) int {
 		if len(ageStaleIDs) > 0 {
 			// Named separately from the reapable set, with the remedy that actually works.
 			// The reaper is not it, and saying so here is the whole point of the rung.
-			reason += fmt.Sprintf("; %d TTL-less lease(s) stale by age >= %ds (%s) — `reap` cannot collect these, release each with `fak leaseref release <id>`",
+			reason += fmt.Sprintf("; %d TTL-less lease(s) stale by age >= %ds (%s) — `reap` cannot collect these; release with `fak leaseref release --id ID --holder H --generation N` or operator --force",
 				len(ageStaleIDs), leaserefNoTTLStaleAgeS, strings.Join(ageStaleIDs, ", "))
 		}
 	}
@@ -861,6 +864,7 @@ func runLeaserefRenew(stdout, stderr io.Writer, argv []string) int {
 	dir := fs.String("dir", "", "repo dir (default: git discovery from cwd)")
 	id := fs.String("id", "", "lease id to renew")
 	holder := fs.String("holder", "", "the holder identity that owns the lease")
+	gen := fs.Int64("generation", 0, "the fencing token returned by acquire (0 only for a legacy generation-zero lease)")
 	ttl := fs.Int64("ttl", 0, "new lifetime in seconds (0 = keep the lease's existing TTL)")
 	announce := fs.String("announce", "", "public-safe lifecycle announcement: on, off, or offline")
 	announceIssue := fs.Int("announce-issue", 0, "coordination issue number for --announce=on")
@@ -875,7 +879,7 @@ func runLeaserefRenew(stdout, stderr io.Writer, argv []string) int {
 	}
 	store := leaseref.NewInDir(*dir)
 	ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceLeaserefRenew, store, "", false)
-	rec, v, err := store.Renew(context.Background(), *id, *holder, *ttl, time.Now())
+	rec, v, err := store.RenewFenced(context.Background(), *id, *holder, *gen, *ttl, time.Now())
 	if err != nil {
 		fmt.Fprintf(stderr, "fak leaseref renew: %v\n", err)
 		return 1

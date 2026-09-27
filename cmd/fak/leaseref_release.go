@@ -26,7 +26,7 @@ func runLeaserefRelease(stdout, stderr io.Writer, argv []string) int {
 	dir := fs.String("dir", "", "repo dir (default: git discovery from cwd)")
 	id := fs.String("id", "", "lease id to release")
 	holder := fs.String("holder", "", "the holder identity that owns the lease")
-	gen := fs.Int64("generation", 0, "the fencing token from acquire (0 = don't check the token)")
+	gen := fs.Int64("generation", 0, "the fencing token from acquire (0 only for a legacy generation-zero lease)")
 	force := fs.Bool("force", false, "operator override: delete the record without the holder check")
 	announce := fs.String("announce", "", "public-safe lifecycle announcement: on, off, or offline")
 	announceIssue := fs.Int("announce-issue", 0, "coordination issue number for --announce=on")
