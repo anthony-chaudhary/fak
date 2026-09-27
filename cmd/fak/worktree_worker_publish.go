@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -82,10 +83,10 @@ func worktreeWorkerGoBuildVerify(wtPath string) (bool, string) {
 	if err != nil {
 		return false, "prepare isolated Go build directories: " + err.Error()
 	}
-	cmd := windowgate.Command("go", "build", "./...")
+	cmd := windowgate.Command("go", worktreeWorkerGoBuildVerifyArgs()...)
 	cmd.Dir = wtPath
 	windowgate.ConfigureBackgroundCommand(cmd)
-	cmd.Env = append(os.Environ(), "GOCACHE="+env["GOCACHE"], "GOTMPDIR="+env["GOTMPDIR"])
+	cmd.Env = worktreeWorkerGoBuildVerifyEnv(os.Environ(), env, os.UserCacheDir)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return true, ""
@@ -95,4 +96,49 @@ func worktreeWorkerGoBuildVerify(wtPath string) (bool, string) {
 		detail = detail[len(detail)-500:]
 	}
 	return false, "go build ./... failed: " + detail
+}
+
+// worktreeWorkerGoBuildVerifyArgs is the verification-only compile check. Land
+// candidates live at disposable, randomly named roots, and cmd/go folds a
+// main-module package's directory into its action ID unless -trimpath is set, so
+// without it no verify could reuse another verify's compiles. -buildvcs=false
+// skips VCS stamping of a detached, possibly patched checkout. Same contract as
+// buildCheckArgs (internal/devcmd) and validateGoCheckArgs (internal/validate).
+func worktreeWorkerGoBuildVerifyArgs() []string {
+	return []string{"build", "-trimpath", "-buildvcs=false", "./..."}
+}
+
+// worktreeWorkerGoBuildVerifyEnv keeps GOTMPDIR inside the worktree but leaves
+// GOCACHE on the caller's shared cache. Go's cache is content-addressed and safe
+// for concurrent processes, and a failed compile records no output, so one
+// candidate's broken build cannot red another's. A private per-candidate cache
+// only made every land verify a cold rebuild of the standard library and the
+// whole module graph, which was most of the host's compile load. The isolated
+// cache remains the fallback when there is no usable shared cache: GOCACHE set
+// to off or a relative path, or unset with no user cache directory.
+func worktreeWorkerGoBuildVerifyEnv(base []string, isolated map[string]string, userCacheDir func() (string, error)) []string {
+	env := append(append([]string(nil), base...), "GOTMPDIR="+isolated["GOTMPDIR"])
+	cache, set := goBuildVerifyEnvValue(base, "GOCACHE")
+	shared := set && cache != "off" && filepath.IsAbs(cache)
+	if !set || cache == "" {
+		_, err := userCacheDir()
+		shared = err == nil
+	}
+	if shared {
+		return env
+	}
+	return append(env, "GOCACHE="+isolated["GOCACHE"])
+}
+
+// goBuildVerifyEnvValue returns the last value of key in env, matching the key
+// case-insensitively the way os/exec deduplicates a Windows environment.
+func goBuildVerifyEnvValue(env []string, key string) (string, bool) {
+	value, found := "", false
+	for _, kv := range env {
+		name, v, ok := strings.Cut(kv, "=")
+		if ok && strings.EqualFold(name, key) {
+			value, found = v, true
+		}
+	}
+	return value, found
 }
