@@ -726,7 +726,13 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			runErr := child.Wait()
 			lifecycle.finish(runErr == nil)
 			terminalGuardChild(child, runErr, "")
-			wait <- errors.Join(runErr, finishGuardChildHostGrant(job, releaseHostGrant))
+			// Keep runErr's concrete type when cleanup succeeds: the supervised loop
+			// type-asserts it (*exec.ExitError) for crash classification, typed Codex
+			// refusals and the child's exit code, and errors.Join always wraps.
+			if cleanupErr := finishGuardChildHostGrant(job, releaseHostGrant); cleanupErr != nil {
+				runErr = errors.Join(runErr, cleanupErr)
+			}
+			wait <- runErr
 		}()
 		resourceStop := make(chan struct{})
 		resourcePolicy.Stop = resourceStop
