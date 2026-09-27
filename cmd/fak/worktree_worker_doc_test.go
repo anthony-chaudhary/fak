@@ -68,6 +68,7 @@ func TestManagedWorkerWorktreesDoc_SubcommandsAndOptions(t *testing.T) {
 		"--require-remote-recovery",
 		"--disambiguation-timeout-ms",
 		"--unsafe-skip-symptom-witness",
+		"--symptom-timeout",
 		"--lane",
 		"--key",
 		"--lease-id",

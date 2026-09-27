@@ -216,6 +216,7 @@ fak worktree worker land --worktree <dir> [flags]
 - `--require-remote-recovery`: Refuses trunk CAS if remote candidate read-back fails.
 - `--disambiguation-timeout-ms <ms>`: Disambiguation deadline (1..900000 ms; default 120000 ms).
 - `--unsafe-skip-symptom-witness`: Bypasses mandatory fail-to-pass test witness for `fix(*)` commits.
+- `--symptom-timeout <duration>`: Wall-clock budget for the `fix(*)` symptom witness (two scratch worktrees plus a candidate and a parent `go test` compile; default `10m`). A run the budget kills abstains as `SYMPTOM_TIMEOUT`, never `SYMPTOM_NO_MATCH`; raise it for large packages or a loaded host.
 - `--root <dir>`: Repo root (default: discovered from working directory).
 
 #### Landing mechanics and safety guarantees

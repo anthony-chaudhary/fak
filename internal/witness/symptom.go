@@ -27,7 +27,9 @@ package witness
 //	  reproduces the bug against the old source) — then run it at the ref — it must PASS (green).
 //	  Both hold => CONFIRMED. Passes-at-parent => REFUTED (tautological). Parent compilation or
 //	  build failure => ABSTAIN (unproven: the overlaid test failed to compile against parent source,
-//	  e.g. referencing an API introduced in the fix — never a false CONFIRM; #12058). Default (flag unset) =>
+//	  e.g. referencing an API introduced in the fix — never a false CONFIRM; #12058). The caller's
+//	  context bounds the whole rung: once it ends, any verdict => ABSTAIN as a timeout, because a
+//	  killed `go test` is indistinguishable from a red or a zero-match run. Default (flag unset) =>
 //	  ABSTAIN after the structural check: running an arbitrary test against an old tree is heavy,
 //	  so like the RSL rung the cost is opt-in and the kernel's fail-closed default turns abstain
 //	  into a deny rather than a false CONFIRM.
@@ -126,7 +128,41 @@ func (r *Resolver) ResolveSymptom(ctx context.Context, ref string, mandatoryExec
 
 // ResolveSymptomWithDetail returns the witness outcome plus a bounded diagnostic.
 // Diagnostics contain no test output or source bytes, so land receipts stay compact.
+// A resolution whose context ended (deadline or cancel) abstains as a timeout; see
+// symptomBudgetVerdict.
 func (r *Resolver) ResolveSymptomWithDetail(ctx context.Context, ref string, mandatoryExec bool) (abi.WitnessOutcome, string) {
+	outcome, detail := r.resolveSymptomWithDetail(ctx, ref, mandatoryExec)
+	return symptomBudgetVerdict(ctx, outcome, detail)
+}
+
+// symptomBudgetVerdict refuses to trust any verdict reached after the resolution context
+// ended. Every git and `go test` step runs under ctx, and a step the budget kills fails in
+// the same shape as a genuine negative: a mid-compile kill leaves no `run` event (reads as
+// "matched no executed test"), a killed parent run exits non-zero (reads as RED), a killed
+// git read reads as a missing ref. Once ctx is done the rung cannot tell a real refutation
+// or confirmation from a kill, so it abstains as a timeout — never a refutation (a worker
+// land's 10-minute budget expiring mid-compile was once reported as SYMPTOM_NO_MATCH).
+func symptomBudgetVerdict(ctx context.Context, outcome abi.WitnessOutcome, detail string) (abi.WitnessOutcome, string) {
+	if ctx.Err() == nil {
+		return outcome, detail
+	}
+	cause := "symptom budget expired: " + ctx.Err().Error()
+	if strings.Contains(detail, "timed out") {
+		return abi.WitnessAbstain, detail + " (" + cause + ")"
+	}
+	return abi.WitnessAbstain, "timed out before a trustworthy verdict (" + cause + "); discarded result: " + detail
+}
+
+// symptomRunInterrupted reports whether a runner result was cut short by the resolution
+// context. commandRunner uses exec.CommandContext with a process-tree cancel, and Cmd.Wait
+// reports the killed process as an ordinary *exec.ExitError, so the runner returns
+// (partial output, non-zero code, err == nil): the same shape as a real test failure or a
+// zero-match run. Only the context says the run was killed.
+func symptomRunInterrupted(ctx context.Context, err error) bool {
+	return ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+}
+
+func (r *Resolver) resolveSymptomWithDetail(ctx context.Context, ref string, mandatoryExec bool) (abi.WitnessOutcome, string) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return abi.WitnessAbstain, "missing symptom ref"
@@ -605,8 +641,13 @@ func runSelectedGoTests(ctx context.Context, run CommandRunner, dir string, pkgs
 		compiled = append(compiled, regexp.MustCompile(selector))
 	}
 	out, code, err := run(ctx, dir, goTestArgvSelected(pkgs, tags, strings.Join(parts, "|"))...)
+	if symptomRunInterrupted(ctx, err) {
+		// A mid-compile kill leaves partial output with no `run` event and no build-failure
+		// marker; reading it would refute the witness as "matched no executed test".
+		return selectedGoTestResult{timedOut: true, runErr: err}
+	}
 	if err != nil {
-		return selectedGoTestResult{timedOut: errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled), runErr: err}
+		return selectedGoTestResult{runErr: err}
 	}
 	seen := make([]bool, len(compiled))
 	failed := make([]bool, len(compiled))

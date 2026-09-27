@@ -759,6 +759,7 @@ All destructive or administrative operations fail open and default to dry-run or
   - `--require-remote-recovery`: Refuse trunk CAS if remote read-back fails.
   - `--disambiguation-timeout-ms <ms>`: Disambiguation deadline (1..900000 ms; default 120000 ms).
   - `--unsafe-skip-symptom-witness`: Bypass mandatory fail-to-pass symptom witness for `fix(*)` commits.
+  - `--symptom-timeout <duration>`: Budget for the `fix(*)` symptom witness (default: `10m`); a run the budget kills abstains as `SYMPTOM_TIMEOUT`.
   - `--root <dir>`: Repository root.
 - `reap`: Release clean worktrees within a deadline or perform bulk cold sweeps.
   - `--worktree <dir>`: Single worktree directory to remove (refuses dirty trees).

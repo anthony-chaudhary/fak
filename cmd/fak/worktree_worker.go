@@ -545,13 +545,21 @@ func splitTagList(s string) []string {
 	return tags
 }
 
-func verifyWorkerLandSymptom(wtPath, ref string, extraTags []string) workerworktree.Result {
-	return verifyWorkerLandSymptomSelected(wtPath, ref, extraTags, nil)
+// defaultWorkerLandSymptomTimeout bounds the mandatory red-then-green symptom witness: two
+// scratch worktrees plus a candidate and a parent `go test` compile. --symptom-timeout
+// overrides it for large packages or a loaded host.
+const defaultWorkerLandSymptomTimeout = 10 * time.Minute
+
+func verifyWorkerLandSymptom(wtPath, ref string, extraTags []string, timeout time.Duration) workerworktree.Result {
+	return verifyWorkerLandSymptomSelected(wtPath, ref, extraTags, nil, timeout)
 }
 
-func verifyWorkerLandSymptomSelected(wtPath, ref string, extraTags, testSelectors []string) workerworktree.Result {
+func verifyWorkerLandSymptomSelected(wtPath, ref string, extraTags, testSelectors []string, timeout time.Duration) workerworktree.Result {
+	if timeout <= 0 {
+		timeout = defaultWorkerLandSymptomTimeout
+	}
 	resolver := witness.NewWithRunner(nil, wtPath).WithSymptomTags(extraTags).WithSymptomTests(testSelectors)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	outcome, detail := resolver.ResolveSymptomWithDetail(ctx, ref, true)
 	switch outcome {
@@ -560,21 +568,27 @@ func verifyWorkerLandSymptomSelected(wtPath, ref string, extraTags, testSelector
 	case abi.WitnessRefuted:
 		return workerLandSymptomUnwitnessed(symptomRefusalDetail("refuted", detail))
 	default:
-		return workerLandSymptomUnwitnessed(symptomRefusalDetail("abstained", detail))
+		res := workerLandSymptomUnwitnessed(symptomRefusalDetail("abstained", detail))
+		if strings.HasPrefix(res.Detail, "SYMPTOM_TIMEOUT") {
+			res.Detail += fmt.Sprintf(" [symptom budget %s; raise with --symptom-timeout]", timeout)
+		}
+		return res
 	}
 }
 
 // symptomRefusalDetail keeps the established top-level SYMPTOM_UNWITNESSED code
-// while exposing a stable subtype for automation and operator remediation.
+// while exposing a stable subtype for automation and operator remediation. A timeout
+// is classified first: a run the budget killed can leave a detail that also names a
+// zero match or a parent failure, and neither is evidence once the budget expired.
 func symptomRefusalDetail(outcome, detail string) string {
 	subtype := "SYMPTOM_OTHER"
 	switch {
+	case strings.Contains(detail, "timed out"):
+		subtype = "SYMPTOM_TIMEOUT"
 	case strings.Contains(detail, "matched no"):
 		subtype = "SYMPTOM_NO_MATCH"
 	case strings.Contains(detail, "parent") && (strings.Contains(detail, "did not build") || strings.Contains(detail, "did not parse")):
 		subtype = "SYMPTOM_PARENT_BUILD"
-	case strings.Contains(detail, "timed out"):
-		subtype = "SYMPTOM_TIMEOUT"
 	case strings.Contains(detail, "candidate") && strings.Contains(detail, "failed"):
 		subtype = "SYMPTOM_CANDIDATE_FAILED"
 	case strings.Contains(detail, "ambiguous"):
@@ -934,6 +948,8 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 	var symptomTests repeatedString
 	fs.Var(&symptomTests, "symptom-test",
 		"Go test-name regex to run for the mandatory red-then-green witness (repeatable; changed tests are overlaid onto the parent)")
+	symptomTimeout := fs.Duration("symptom-timeout", defaultWorkerLandSymptomTimeout,
+		"wall-clock budget for the mandatory fix(*) red-then-green symptom witness (two scratch worktrees and two go test compiles); a run the budget kills abstains as SYMPTOM_TIMEOUT")
 	requireTestWitness := fs.Bool("require-test-witness", false,
 		"require verified test witness receipt before landing worker diff")
 	receiptID := fs.String("receipt-id", "", "prepared landing receipt ID (required by accept)")
@@ -950,6 +966,9 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 		if _, err := regexp.Compile(selector); err != nil {
 			return returnEarly(workerworktree.Result{OK: false, Code: "SYMPTOM_SELECTOR_INVALID", Reason: "invalid --symptom-test regex", Detail: err.Error()}, 2)
 		}
+	}
+	if *symptomTimeout <= 0 {
+		return returnEarly(workerworktree.Result{OK: false, Code: "SYMPTOM_TIMEOUT_INVALID", Reason: "--symptom-timeout must be a positive duration", Detail: symptomTimeout.String()}, 2)
 	}
 
 	worktreeDir := strings.TrimSpace(*worktree)
@@ -1035,9 +1054,9 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 				}
 				if requireSymptomWitness {
 					if len(selectedSymptomTests) > 0 {
-						return verifyWorkerLandSymptomSelected(dir, "HEAD", splitTagList(*symptomTags), selectedSymptomTests)
+						return verifyWorkerLandSymptomSelected(dir, "HEAD", splitTagList(*symptomTags), selectedSymptomTests, *symptomTimeout)
 					}
-					return worktreeWorkerPreparedSymptomVerify(dir, "HEAD", splitTagList(*symptomTags))
+					return worktreeWorkerPreparedSymptomVerify(dir, "HEAD", splitTagList(*symptomTags), *symptomTimeout)
 				}
 				return workerworktree.Result{OK: true}
 			}
@@ -1077,7 +1096,7 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 				if materializationErr != nil {
 					return workerLandSymptomUnwitnessed(materializationErr.Error())
 				}
-				return verifyWorkerLandSymptomSelected(dir, "HEAD", splitTagList(*symptomTags), selectedSymptomTests)
+				return verifyWorkerLandSymptomSelected(dir, "HEAD", splitTagList(*symptomTags), selectedSymptomTests, *symptomTimeout)
 			}
 			return workerworktree.LandProspectiveVerified(
 				repoRoot, worktreeDir, strings.TrimSpace(*baseSHA), strings.TrimSpace(*msgFile),

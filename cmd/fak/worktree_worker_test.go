@@ -2421,7 +2421,7 @@ func TestWorktreeWorkerLandPrepareAccept(t *testing.T) {
 	originalBuild, originalSymptom := worktreeWorkerPreparedGoBuildVerify, worktreeWorkerPreparedSymptomVerify
 	buildCalls, symptomCalls := 0, 0
 	worktreeWorkerPreparedGoBuildVerify = func(string) (bool, string) { buildCalls++; return false, "accept must not build" }
-	worktreeWorkerPreparedSymptomVerify = func(string, string, []string) workerworktree.Result {
+	worktreeWorkerPreparedSymptomVerify = func(string, string, []string, time.Duration) workerworktree.Result {
 		symptomCalls++
 		return workerworktree.Result{OK: false}
 	}
@@ -2501,7 +2501,7 @@ func TestWorktreeWorkerSandboxCompatiblePreparedLandAccept(t *testing.T) {
 	originalBuild, originalSymptom := worktreeWorkerPreparedGoBuildVerify, worktreeWorkerPreparedSymptomVerify
 	buildCalls, symptomCalls := 0, 0
 	worktreeWorkerPreparedGoBuildVerify = func(string) (bool, string) { buildCalls++; return true, "built" }
-	worktreeWorkerPreparedSymptomVerify = func(string, string, []string) workerworktree.Result {
+	worktreeWorkerPreparedSymptomVerify = func(string, string, []string, time.Duration) workerworktree.Result {
 		symptomCalls++
 		return workerworktree.Result{OK: true}
 	}
@@ -2536,7 +2536,7 @@ func TestWorktreeWorkerLandPrepareFixRunsBuildAndSymptom(t *testing.T) {
 	originalBuild, originalSymptom := worktreeWorkerPreparedGoBuildVerify, worktreeWorkerPreparedSymptomVerify
 	buildCalls, symptomCalls := 0, 0
 	worktreeWorkerPreparedGoBuildVerify = func(string) (bool, string) { buildCalls++; return true, "built" }
-	worktreeWorkerPreparedSymptomVerify = func(string, string, []string) workerworktree.Result {
+	worktreeWorkerPreparedSymptomVerify = func(string, string, []string, time.Duration) workerworktree.Result {
 		symptomCalls++
 		return workerworktree.Result{OK: true}
 	}
