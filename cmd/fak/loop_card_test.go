@@ -58,7 +58,10 @@ func TestLoopRunAutomaticallyScoresPerformanceRSIOnceAtCompletion(t *testing.T) 
 	if got := strings.Count(stderr.String(), marker); got != 1 {
 		t.Fatalf("performance RSI invocation count=%d, want exactly 1:\n%s", got, stderr.String())
 	}
-	for _, want := range []string{`"schema":"fak-performance-rsi-loop-turn/1"`, `"status":"scored"`, `"reason":"SCORE_COMPLETE"`} {
+	// complete.json is a fully scoreable fixture that still carries performance-RSI
+	// debt, so a completed score names that debt (ReasonPerformanceRSIDebt, #11983)
+	// rather than the debt-free SCORE_COMPLETE.
+	for _, want := range []string{`"schema":"fak-performance-rsi-loop-turn/1"`, `"status":"scored"`, `"reason":"` + perfrsiscore.ReasonPerformanceRSIDebt + `"`} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("loop-turn receipt missing %q:\n%s", want, stderr.String())
 		}
@@ -92,7 +95,9 @@ func TestLoopRunScoresMatchingRunScopedPerformanceRSIOutput(t *testing.T) {
 	}
 
 	receipt := loopPerformanceRSIReceipt(t, stderr.String())
-	if receipt.Status != perfrsiscore.LoopTurnScored || receipt.Reason != "SCORE_COMPLETE" || receipt.Snapshot != "issue-10156-matching" {
+	// The helper re-emits complete.json (debt-carrying) under this run's snapshot, so
+	// the scored receipt names the debt rather than the debt-free SCORE_COMPLETE.
+	if receipt.Status != perfrsiscore.LoopTurnScored || receipt.Reason != perfrsiscore.ReasonPerformanceRSIDebt || receipt.Snapshot != "issue-10156-matching" {
 		t.Fatalf("matching output receipt = %+v", receipt)
 	}
 	if receipt.InvocationOutcomes.Success != 1 || receipt.InvocationOutcomes.Refusal != 0 || receipt.InvocationOutcomes.Error != 0 || receipt.InvocationOutcomes.Total() != 1 {

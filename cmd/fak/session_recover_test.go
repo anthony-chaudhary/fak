@@ -294,8 +294,15 @@ func TestSessionRecoverAlreadyReceiptedDoesNotStagePrompt(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &summary); err != nil {
 		t.Fatal(err)
 	}
-	if len(summary.Results) != 1 || summary.Results[0].Status != "already_receipted" {
+	// Since #10550 (27626223cb) selection itself reads the receipt dir: a live
+	// (non-terminal) receipt for the same thread/cwd/argv is an active owner, so the
+	// row is refused as duplicate_active_owner before any prompt is staged, instead
+	// of reaching the later WriteReceipt race check that reports already_receipted.
+	if len(summary.Results) != 1 || summary.Results[0].Status != "refused" || summary.Results[0].Reason != "duplicate_active_owner" {
 		t.Fatalf("summary=%+v", summary)
+	}
+	if summary.Results[0].ReceiptPath != req.ReceiptPath {
+		t.Fatalf("refusal receipt path = %q, want the pre-existing receipt %q", summary.Results[0].ReceiptPath, req.ReceiptPath)
 	}
 }
 func TestSessionRecoverProviderLaunchDeliversExactPromptAtProviderBoundary(t *testing.T) {
@@ -998,6 +1005,15 @@ func TestSessionRecoverRefusesMalformedIdentityBeforeInventoryOrLaunch(t *testin
 func TestSessionRecoverDefaultFullSafeCohortAndBoundedLimit(t *testing.T) {
 	oldInv, oldLaunch := recoveryInventory, recoveryLaunch
 	defer func() { recoveryInventory, recoveryLaunch = oldInv, oldLaunch }()
+	// Recovery is fail-closed on its durable identity authority. Without FLEET_REG_DIR it
+	// falls back to the repo-root tools/_registry ledger (gitignored), which exists only
+	// when an earlier package test happened to write it — so a fresh checkout running this
+	// file's tests alone refused with "identity authority unreadable". Own a valid, empty one.
+	regDir := t.TempDir()
+	t.Setenv("FLEET_REG_DIR", regDir)
+	if err := os.WriteFile(resume.IdentityLedgerPath(regDir), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	report := sessionrecovery.InventoryReport{}
 	for i := 0; i < 12; i++ {

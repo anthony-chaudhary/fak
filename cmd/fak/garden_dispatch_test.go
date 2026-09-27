@@ -11,6 +11,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 // gardenDispatchIssuesFixture writes a gh-issue-list-shaped JSON file with two
@@ -72,8 +73,19 @@ func gardenDispatchRouterFor(t *testing.T) {
 // real broker + real subprocess spawner, which is environment-dependent (0 spawns on a
 // headless CI runner) — the same allow-broker + fake-spawner pattern the dispatch-tick
 // live tests use.
+//
+// It also pins the managed worker-worktree root to a per-test temp dir. The live
+// tick prepares a REAL managed worktree (workerworktree.Prepare) whose default root
+// is host-global ($LOCALAPPDATA or os.TempDir()/Fleet/worker-worktrees) and whose
+// directory name is derived from lane+issue only, so the fixed fixture issues
+// (#101/docs, #102/cmd) collide with the directories an earlier run left behind:
+// the fixture repo is gone, the stale dir is not in its `git worktree list`, and
+// preparation refuses WORKTREE_PREPARE_FAILED ("orphan target refused") -- zero
+// spawns on any host that has run the package before, plus operator Fleet-dir
+// pollution on a dev box.
 func gardenDispatchSpawnerFor(t *testing.T) {
 	t.Helper()
+	t.Setenv(workerworktree.WorktreeRootEnv, t.TempDir())
 	oldBroker := launchSpawnBroker
 	oldSpawner := dispatchIssueWorkerSpawner
 	launchSpawnBroker = func(a launchBrokerAttempt) launchBrokerGrant {
@@ -202,7 +214,7 @@ func TestGardenDispatchApplySpawnsAdmittedOnly(t *testing.T) {
 		t.Fatalf("DryRun = true, want false under --apply")
 	}
 	if got.Spawned == 0 {
-		t.Fatalf("Spawned = 0, want at least 1 under a happy-path --apply")
+		t.Fatalf("Spawned = 0, want at least 1 under a happy-path --apply\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
 	}
 }
 
