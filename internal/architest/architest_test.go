@@ -129,6 +129,7 @@ var tier = map[string]int{
 	"cavemanpairwise":        1, // pure blinded pairwise benchmark judge and fail-closed evidence accounting; stdlib-only, off the product path.
 	"harnessartifact":        2, // immutable, content-addressed artifacts around harnessresolve locks (#7230).
 	"harnessres":             1, // cross-platform, stdlib-only process resource sampler for the fak guard harness (CPU/mem/IO); imports nothing internal, off the hot path (#2045, epic #2044).
+	"runtimeobs":             1, // stdlib-only, availability-checked runtime/metrics vector -> versioned Go scheduler/GC/memory-class receipt; imports nothing internal (#10182).
 	"harnessinit":            3, // product scaffold + cross-host conformance; depends on host/resolve/window launch seams (#8227).
 	"harnesshost":            2, // resolves first-party host profiles into product manifests and locks before scaffold rendering.
 	"harnessrelease":         1, // release-asset checksum/extraction and external-product witness runner (#6957).
@@ -366,7 +367,7 @@ var tier = map[string]int{
 	"vcachewarm":          3, // vCache M3 dedicated warming (#718): Anthropic max_tokens:0 vs decode-1 decision gates, byte-identical prefix guard, send-one-then-fan barrier, and wasted-warm accounting. Pure decision layer, off the hot path, no live transport claim.
 	"vcacheqa":            3, // vCache gate QA harness (#1495, child of #1490): the shared honesty-lint (Law A2 elision AST scan) + forced-cache-MISS helper (drives vcachestar.FoldTelemetry) + non-forgeable witness (journal.Row-shaped hash chain, verified via journal.VerifyRows) + provenance fence (OBSERVED/WITNESSED, cachewitness vocabulary) + determinism check every M1-M5 gate imports before flipping default-on. Imports journal(2)+guardrsi(1)+cachewitness(1)+vcachestar(2)+cachemeta(1)+stdlib, off the hot path, not registered.
 	"sessionreset":        3, // budget-reset carryover builder: a pluggable Contributor registry that folds a drained session's transcript into the "human-like" seed a fresh session is re-armed with (durable facts via ctxmmu's shipped prior + task recap + warm-prefix descriptor via vcachechain + verbatim tail). Mechanism: imports ctxmmu(2)+vcachechain(2)+stdlib, NOT the wire agent type; off the hot path, registers nothing into the kernel.
-	"taskmgr":             2, // process-local task/step/resource/ETA snapshot fold; stdlib-only, off the hot path.
+	"taskmgr":             2, // process-local task/step/resource/ETA snapshot fold; imports witnessprocess + runtimeobs(1) for its STW-free default sampler, off the hot path.
 	"issuepolicy":         2, // pure spine-first GitHub issue candidate policy; stdlib-only, off the hot path.
 	"issuecentrality":     2, // deterministic issue problem-centrality audit over issuepolicy contracts.
 	"issuecohort":         2, // pure batch cohort planner: folds many issuecontract candidates into concurrency-safe waves (disjoint-tree), a split-first queue, triage, and duplicate-key groups; imports issuecontract(1)+stdlib, off the hot path.
