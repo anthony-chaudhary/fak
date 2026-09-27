@@ -176,24 +176,18 @@ func planIssueProcessCauseCommands(number int, repo, state string, labels []stri
 		if len(edit) > 5 {
 			commands = append(commands, edit)
 		}
-		if labelSet[processCauseRepairLabel] && strings.EqualFold(strings.TrimSpace(state), "closed") {
-			commands = append(commands, []string{"issue", "reopen", issueNumber, "--repo", repo, "--comment", "Process cause repaired; reopening the issue for normal triage."})
-		}
 		return commands
 	}
 
-	commands := [][]string{{"label", "create", processCauseRepairLabel, "--repo", repo, "--force", "--color", "D93F0B", "--description", "Issue is closed until its process-cause declaration is repaired"}}
+	commands := [][]string{{"label", "create", processCauseRepairLabel, "--repo", repo, "--force", "--color", "D93F0B", "--description", "Issue body needs a valid process-cause declaration"}}
 	edit := []string{"issue", "edit", issueNumber, "--repo", repo, "--add-label", processCauseRepairLabel}
 	for _, label := range processLabels {
 		edit = append(edit, "--remove-label", label)
 	}
 	commands = append(commands, edit)
 	if !labelSet[processCauseRepairLabel] {
-		message := "Process-cause validation failed: " + strings.Join(readout.Errors, "; ") + ". Edit the issue to include exactly one `Process cause: <value>` declaration. Allowed values: concurrency, infrastructure-lag, model-failure, harness-failure, scoping-failure, verification-gap, handoff-failure, other, unknown, none. Concurrency also requires exactly one `Process cause detail: <value>` using shared-state, lease-contention, integration-order, resource-contention, or ownership-overlap. A valid edit will remove this hold and reopen the issue."
+		message := "Process-cause validation failed: " + strings.Join(readout.Errors, "; ") + ". Edit the issue to include exactly one `Process cause: <value>` declaration. Allowed values: concurrency, infrastructure-lag, model-failure, harness-failure, scoping-failure, verification-gap, handoff-failure, other, unknown, none. Concurrency also requires exactly one `Process cause detail: <value>` using shared-state, lease-contention, integration-order, resource-contention, or ownership-overlap. A valid edit will remove this label; the issue stays open meanwhile."
 		commands = append(commands, []string{"issue", "comment", issueNumber, "--repo", repo, "--body", message})
-	}
-	if !strings.EqualFold(strings.TrimSpace(state), "closed") {
-		commands = append(commands, []string{"issue", "close", issueNumber, "--repo", repo, "--reason", "not planned"})
 	}
 	return commands
 }

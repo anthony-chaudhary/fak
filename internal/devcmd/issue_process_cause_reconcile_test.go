@@ -70,7 +70,7 @@ func recordingProcessCauseRunner(t *testing.T, calls *[][]string, liveBody, live
 	}
 }
 
-func TestIssueProcessCauseReconcileValidReplacesStaleAndReopensRepair(t *testing.T) {
+func TestIssueProcessCauseReconcileValidReplacesStaleWithoutReopening(t *testing.T) {
 	body := "### Development process cause\n\nProcess cause: concurrency\n\n### Concurrency detail\n\nProcess cause detail: shared-state\n"
 	labels := []string{"bug", "process-cause:none", "process-cause:model-failure", processCauseRepairLabel}
 	path := writeProcessCauseEventFor(t, "fork-owner/arbitrary-repo", 941,
@@ -86,7 +86,6 @@ func TestIssueProcessCauseReconcileValidReplacesStaleAndReopensRepair(t *testing
 		{"issue", "view", "941", "--repo", "fork-owner/arbitrary-repo", "--json", "body,state,labels"},
 		{"label", "create", "process-cause:concurrency", "--repo", "fork-owner/arbitrary-repo", "--force", "--color", "0E8A16", "--description", "Declared development-process cause"},
 		{"issue", "edit", "941", "--repo", "fork-owner/arbitrary-repo", "--add-label", "process-cause:concurrency", "--remove-label", "process-cause:model-failure", "--remove-label", "process-cause:none", "--remove-label", processCauseRepairLabel},
-		{"issue", "reopen", "941", "--repo", "fork-owner/arbitrary-repo", "--comment", "Process cause repaired; reopening the issue for normal triage."},
 	}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("commands mismatch:\n got: %#v\nwant: %#v", calls, want)
@@ -103,17 +102,20 @@ func TestIssueProcessCauseReconcileMissingNeverDefaultsToUnknown(t *testing.T) {
 		t.Fatalf("code=%d, want 3; stderr=%s", code, errb.String())
 	}
 	joined := commandText(calls)
+	if strings.Contains(joined, "issue close") || strings.Contains(joined, "issue reopen") {
+		t.Fatalf("reconciler changed issue state:\n%s", joined)
+	}
 	if strings.Contains(joined, "process-cause:unknown") {
 		t.Fatalf("missing declaration was silently labeled unknown:\n%s", joined)
 	}
-	for _, want := range []string{"--add-label needs-process-cause", "missing Process cause declaration", "issue close 17"} {
+	for _, want := range []string{"--add-label needs-process-cause", "missing Process cause declaration"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("commands missing %q:\n%s", want, joined)
 		}
 	}
 }
 
-func TestIssueProcessCauseReconcileInvalidQuarantinesWithRepair(t *testing.T) {
+func TestIssueProcessCauseReconcileInvalidLabelsWithoutClosing(t *testing.T) {
 	body := "### Development process cause\n\nProcess cause: concurrency\n"
 	path := writeProcessCauseEvent(t, body, "open", "process-cause:none")
 	var calls [][]string
@@ -124,7 +126,7 @@ func TestIssueProcessCauseReconcileInvalidQuarantinesWithRepair(t *testing.T) {
 		t.Fatalf("code=%d, want 3; stderr=%s", code, errb.String())
 	}
 	joined := commandText(calls)
-	for _, want := range []string{"--add-label needs-process-cause", "--remove-label process-cause:none", "issue comment 17", "requires Process cause detail", "issue close 17"} {
+	for _, want := range []string{"--add-label needs-process-cause", "--remove-label process-cause:none", "issue comment 17", "requires Process cause detail"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("commands missing %q:\n%s", want, joined)
 		}

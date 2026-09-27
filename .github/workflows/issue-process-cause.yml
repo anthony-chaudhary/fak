@@ -2,9 +2,9 @@ name: issue-process-cause
 
 # GitHub issue forms can require a selection but cannot derive a dynamic label
 # from it. This event path closes that gap for form, API, and transferred issues.
-# Invalid declarations are reversibly quarantined: the issue gets a repair label,
-# an actionable comment, and is closed. Editing it to a valid declaration removes
-# the repair label, installs exactly one process-cause:* label, and reopens it.
+# Invalid declarations get a repair label and one actionable comment; the issue
+# is never closed. Editing it to a valid declaration removes the repair label and
+# installs exactly one process-cause:* label. Issue state is never changed.
 on:
   issues:
     types: [opened, edited, reopened, transferred]
