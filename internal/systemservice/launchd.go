@@ -96,6 +96,8 @@ type LaunchdCommands struct {
 	Bootout   string `json:"bootout"`
 	Kickstart string `json:"kickstart"`
 	Print     string `json:"print"`
+	Enable    string `json:"enable,omitempty"`
+	Disable   string `json:"disable,omitempty"`
 }
 
 // LaunchdInput carries host-specific facts for projecting a portable spec
@@ -135,10 +137,15 @@ func (p *LaunchdProjection) BootstrapCommand() string { return p.Commands.Bootst
 func (p *LaunchdProjection) BootoutCommand() string   { return p.Commands.Bootout }
 func (p *LaunchdProjection) KickstartCommand() string { return p.Commands.Kickstart }
 func (p *LaunchdProjection) PrintCommand() string     { return p.Commands.Print }
+func (p *LaunchdProjection) EnableCommand() string    { return p.Commands.Enable }
+func (p *LaunchdProjection) DisableCommand() string   { return p.Commands.Disable }
 func (p *LaunchdProjection) PlistText() string        { return p.PlistXML }
 func (p *LaunchdProjection) UnitText() string         { return p.PlistXML }
 
 // LaunchdStatus represents the parsed runtime status from launchctl print.
+// Program, Arguments, Runs, and Properties describe the job definition
+// launchd currently has loaded, so a caller can compare it against the plist
+// on disk and detect a stale loaded definition.
 type LaunchdStatus struct {
 	Target         string               `json:"target,omitempty"`
 	Label          string               `json:"label"`
@@ -147,6 +154,10 @@ type LaunchdStatus struct {
 	State          string               `json:"state"`
 	PID            int                  `json:"pid,omitempty"`
 	PlistPath      string               `json:"plist_path,omitempty"`
+	Program        string               `json:"program,omitempty"`
+	Arguments      []string             `json:"arguments,omitempty"`
+	Runs           int                  `json:"runs,omitempty"`
+	Properties     []string             `json:"properties,omitempty"`
 	LastExitCode   *int                 `json:"last_exit_code,omitempty"`
 	ExitReason     string               `json:"exit_reason,omitempty"`
 	Phase          servicespec.Phase    `json:"phase"`
@@ -289,6 +300,8 @@ func ProjectLaunchd(spec *servicespec.Spec, in LaunchdInput) (*LaunchdProjection
 		Bootout:   fmt.Sprintf("launchctl bootout %s", target),
 		Kickstart: fmt.Sprintf("launchctl kickstart -k %s", target),
 		Print:     fmt.Sprintf("launchctl print %s", target),
+		Enable:    fmt.Sprintf("launchctl enable %s", target),
+		Disable:   fmt.Sprintf("launchctl disable %s", target),
 	}
 
 	var keepAlive LaunchdKeepAlive
@@ -463,52 +476,113 @@ func buildKeepAliveXML(b *bytes.Buffer, k LaunchdKeepAlive) {
 }
 
 // ParseLaunchctlPrint parses `launchctl print <target>` output into a typed LaunchdStatus.
+//
+// The output is a tab-indented dump: a column-0 `<target> = {` header whose
+// directly indented keys describe the job, plus nested blocks (`arguments = {`,
+// `environment = {`, `resource coalition = {`, `jetsam coalition = {`,
+// `event triggers = {`, ...) indented one level deeper. Nested blocks reuse
+// key names such as `state` and `type` (a coalition is `type = jetsam`,
+// `state = active`), and launchctl sometimes prints a block's closing brace at
+// the end of a content line, so top-level membership is decided by
+// indentation, not by counting braces: a key belongs to the job exactly when
+// its leading whitespace equals the first body line's. Without a header (a
+// caller that pre-strips it) the first line's indentation is the top level.
+// The top-level `arguments = {` block is copied verbatim, one argv entry per
+// line with exactly one extra indent stripped. The XPC_SERVICE_NAME label
+// fallback is honored at any depth because it lives inside `environment = {`.
 func ParseLaunchctlPrint(output string) (*LaunchdStatus, error) {
 	if strings.TrimSpace(output) == "" {
 		return nil, ErrEmptyLaunchctlPrint
 	}
 
-	lower := strings.ToLower(output)
-	if strings.Contains(lower, "could not find service") ||
-		strings.Contains(lower, "service is not loaded") ||
-		strings.Contains(lower, "no such process") ||
-		strings.Contains(lower, "invalid domain") {
-		return nil, fmt.Errorf("%w: %s", ErrLaunchctlServiceNotFound, strings.TrimSpace(output))
-	}
-
-	lines := strings.Split(output, "\n")
-	var target, label, domain, launchdType, state, plistPath, exitReason string
-	var pid int
+	lines := strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n")
+	var target, label, domain, launchdType, state, plistPath, exitReason, program, termSignal string
+	var pid, runs int
 	var lastExitCode *int
+	var arguments, properties []string
 
-	// Detect top-level target header: "<target> = {"
-	for _, l := range lines {
-		tl := strings.TrimSpace(l)
-		if tl == "" {
+	// The header is the first column-0 "<target> = {" line; anything before it
+	// (a merged stderr warning) is ignored.
+	bodyStart, header := 0, false
+	for i, l := range lines {
+		if l == "" || l[0] == ' ' || l[0] == '\t' {
 			continue
 		}
-		if target == "" && strings.Contains(tl, " = {") {
-			idx := strings.Index(tl, " = {")
-			t := strings.TrimSpace(tl[:idx])
-			// Check if this is a domain print rather than service
-			if t == "system" || (strings.HasPrefix(t, "gui/") || strings.HasPrefix(t, "user/") || strings.HasPrefix(t, "login/") || strings.HasPrefix(t, "pid/")) && !strings.Contains(strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(t, "gui/"), "user/"), "login/"), "pid/"), "/") {
-				return nil, fmt.Errorf("%w: target %q is a domain, not a service", ErrMalformedLaunchctlOutput, t)
-			}
-			target = t
-			if lastSlash := strings.LastIndex(target, "/"); lastSlash >= 0 {
-				domain = target[:lastSlash]
-				label = target[lastSlash+1:]
-			} else {
-				label = target
-			}
+		tl := strings.TrimRight(l, " \t")
+		if !strings.HasSuffix(tl, " = {") {
+			continue
 		}
+		t := strings.TrimSpace(strings.TrimSuffix(tl, " = {"))
+		// Check if this is a domain print rather than service
+		if t == "system" || (strings.HasPrefix(t, "gui/") || strings.HasPrefix(t, "user/") || strings.HasPrefix(t, "login/") || strings.HasPrefix(t, "pid/")) && !strings.Contains(strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(t, "gui/"), "user/"), "login/"), "pid/"), "/") {
+			return nil, fmt.Errorf("%w: target %q is a domain, not a service", ErrMalformedLaunchctlOutput, t)
+		}
+		target = t
+		if lastSlash := strings.LastIndex(target, "/"); lastSlash >= 0 {
+			domain = target[:lastSlash]
+			label = target[lastSlash+1:]
+		} else {
+			label = target
+		}
+		bodyStart, header = i+1, true
 		break
 	}
+	if !header {
+		// launchctl's refusals are short header-less texts ("Bad request." /
+		// "Could not find service ..."). Matching them only here keeps a
+		// loaded job whose argv or exit text happens to contain one of these
+		// phrases from reading as not found.
+		lower := strings.ToLower(output)
+		for _, sentinel := range []string{"could not find service", "could not find domain", "service is not loaded", "no such process", "invalid domain"} {
+			if strings.Contains(lower, sentinel) {
+				return nil, fmt.Errorf("%w: %s", ErrLaunchctlServiceNotFound, strings.TrimSpace(output))
+			}
+		}
+	}
 
-	for _, line := range lines {
+	topIndent, indentKnown := "", false
+	closed, inArgs := !header, false
+	for _, line := range lines[bodyStart:] {
 		trimmed := strings.TrimSpace(line)
+		indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+		if inArgs {
+			if trimmed == "}" && indent == topIndent {
+				inArgs = false
+				continue
+			}
+			if entry, ok := strings.CutPrefix(line, topIndent+"\t"); ok {
+				arguments = append(arguments, entry)
+			} else {
+				arguments = append(arguments, trimmed)
+			}
+			continue
+		}
 		if trimmed == "" {
 			continue
+		}
+		if !indentKnown {
+			topIndent, indentKnown = indent, true
+		}
+		if header && trimmed == "}" && len(indent) < len(topIndent) {
+			closed = true
+			break
+		}
+		if strings.HasPrefix(trimmed, "XPC_SERVICE_NAME => ") {
+			if label == "" {
+				label = strings.TrimSpace(strings.TrimPrefix(trimmed, "XPC_SERVICE_NAME => "))
+			}
+			continue
+		}
+		if indent != topIndent {
+			continue
+		}
+		if trimmed == "arguments = {" {
+			inArgs = true
+			arguments = arguments[:0]
+			continue
+		}
+		if strings.HasSuffix(trimmed, "{") || trimmed == "}" {
+			continue // a nested block opener or closer at the top indent
 		}
 		if strings.HasPrefix(trimmed, "path = ") {
 			plistPath = strings.TrimSpace(strings.TrimPrefix(trimmed, "path = "))
@@ -518,6 +592,19 @@ func ParseLaunchctlPrint(output string) (*LaunchdStatus, error) {
 			state = strings.TrimSpace(strings.TrimPrefix(trimmed, "state = "))
 		} else if strings.HasPrefix(trimmed, "job state = ") && state == "" {
 			state = strings.TrimSpace(strings.TrimPrefix(trimmed, "job state = "))
+		} else if strings.HasPrefix(trimmed, "program = ") {
+			program = strings.TrimSpace(strings.TrimPrefix(trimmed, "program = "))
+		} else if strings.HasPrefix(trimmed, "runs = ") {
+			if n, ok := parseLeadingInt(strings.TrimPrefix(trimmed, "runs = ")); ok && n >= 0 {
+				runs = n
+			}
+		} else if strings.HasPrefix(trimmed, "properties = ") {
+			properties = properties[:0]
+			for _, p := range strings.Split(strings.TrimPrefix(trimmed, "properties = "), "|") {
+				if p = strings.TrimSpace(p); p != "" {
+					properties = append(properties, p)
+				}
+			}
 		} else if strings.HasPrefix(trimmed, "pid = ") {
 			pidStr := strings.TrimSpace(strings.TrimPrefix(trimmed, "pid = "))
 			val, err := strconv.Atoi(pidStr)
@@ -531,15 +618,9 @@ func ParseLaunchctlPrint(output string) (*LaunchdStatus, error) {
 				domain = f[0]
 			}
 		} else if strings.HasPrefix(trimmed, "last exit code = ") {
-			codeStr := strings.TrimSpace(strings.TrimPrefix(trimmed, "last exit code = "))
-			if codeStr != "(never exited)" {
-				f := strings.Fields(codeStr)
-				if len(f) > 0 {
-					c, err := strconv.Atoi(f[0])
-					if err == nil {
-						lastExitCode = &c
-					}
-				}
+			// Forms: "0", "3", "1: Operation not permitted", "(never exited)".
+			if c, ok := parseLeadingInt(strings.TrimPrefix(trimmed, "last exit code = ")); ok {
+				lastExitCode = &c
 			}
 		} else if strings.HasPrefix(trimmed, "last exit reason = ") {
 			exitReason = strings.TrimSpace(strings.TrimPrefix(trimmed, "last exit reason = "))
@@ -547,9 +628,21 @@ func ParseLaunchctlPrint(output string) (*LaunchdStatus, error) {
 			exitReason = strings.TrimSpace(strings.TrimPrefix(trimmed, "exit reason = "))
 		} else if strings.HasPrefix(trimmed, "immediate reason = ") && exitReason == "" {
 			exitReason = strings.TrimSpace(strings.TrimPrefix(trimmed, "immediate reason = "))
-		} else if strings.HasPrefix(trimmed, "XPC_SERVICE_NAME => ") && label == "" {
-			label = strings.TrimSpace(strings.TrimPrefix(trimmed, "XPC_SERVICE_NAME => "))
+		} else if strings.HasPrefix(trimmed, "last terminating signal = ") {
+			termSignal = strings.TrimSpace(strings.TrimPrefix(trimmed, "last terminating signal = "))
 		}
+	}
+	if inArgs || !closed {
+		return nil, fmt.Errorf("%w: truncated output (an unclosed block)", ErrMalformedLaunchctlOutput)
+	}
+	if termSignal != "" && lastExitCode == nil && exitReason == "" {
+		exitReason = "terminated by signal: " + termSignal
+	}
+	if len(arguments) == 0 {
+		arguments = nil
+	}
+	if len(properties) == 0 {
+		properties = nil
 	}
 
 	if label == "" {
@@ -627,10 +720,71 @@ func ParseLaunchctlPrint(output string) (*LaunchdStatus, error) {
 		State:          state,
 		PID:            pid,
 		PlistPath:      plistPath,
+		Program:        program,
+		Arguments:      arguments,
+		Runs:           runs,
+		Properties:     properties,
 		LastExitCode:   lastExitCode,
 		ExitReason:     exitReason,
 		Phase:          phase,
 		Observed:       observed,
 		ObservedStatus: observed,
 	}, nil
+}
+
+// parseLeadingInt parses the leading, optionally signed, decimal integer of s
+// and ignores any trailing text, so "1: Operation not permitted" yields 1.
+// It reports false when s does not start with a number, e.g. "(never exited)".
+func parseLeadingInt(s string) (int, bool) {
+	s = strings.TrimSpace(s)
+	end := 0
+	if end < len(s) && (s[end] == '-' || s[end] == '+') {
+		end++
+	}
+	digits := end
+	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
+		end++
+	}
+	if end == digits {
+		return 0, false
+	}
+	v, err := strconv.Atoi(s[:end])
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
+// ParseLaunchctlPrintDisabled reports whether label is disabled in
+// `launchctl print-disabled <domain>` output. Rows look like
+//
+//	"com.fak.up" => enabled
+//	"com.fak.up" => disabled
+//
+// and older macOS prints `=> false` (enabled) / `=> true` (disabled). The
+// quoted label must match exactly. found is false when no row names label
+// (launchd then applies the plist's own Disabled key, which defaults to
+// enabled).
+func ParseLaunchctlPrintDisabled(output, label string) (disabled bool, found bool) {
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, `"`) {
+			continue
+		}
+		end := strings.Index(trimmed[1:], `"`)
+		if end < 0 || trimmed[1:1+end] != label {
+			continue
+		}
+		rest := strings.TrimSpace(trimmed[1+end+1:])
+		if !strings.HasPrefix(rest, "=>") {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(strings.TrimPrefix(rest, "=>"))) {
+		case "disabled", "true":
+			return true, true
+		case "enabled", "false":
+			return false, true
+		}
+	}
+	return false, false
 }

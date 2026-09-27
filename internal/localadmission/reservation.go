@@ -108,11 +108,25 @@ func NewReservationStore(dir string) *ReservationStore {
 	return &ReservationStore{dir: dir, now: time.Now, alive: processAlive, lockDelay: 5 * time.Millisecond}
 }
 
+// normalizePressure maps any value outside the closed pressure vocabulary
+// (including the zero value) onto PressureUnknown, so a producer that forgets
+// to set Pressure, or writes an unrecognized level, fails closed instead of
+// being admitted as if the host were healthy.
+func normalizePressure(p Pressure) Pressure {
+	switch p {
+	case PressureNormal, PressureWarning, PressureCritical:
+		return p
+	}
+	return PressureUnknown
+}
+
 func (s *ReservationStore) Reserve(ctx context.Context, req ReservationRequest) (ReservationDecision, error) {
+	req.Host.Pressure = normalizePressure(req.Host.Pressure)
 	d := ReservationDecision{CapacityBytes: req.Host.AllocatableBytes, RequestedPeakBytes: req.Plan.StartupPeakBytes, Pressure: req.Host.Pressure}
 	if req.Host.Pressure == PressureUnknown {
 		d.Reaped = s.reapPersisted(ctx)
 		d.Reason = "pressure_unknown"
+		d.RemedyHint = "host memory pressure could not be classified; retry once the host sample is readable, or use the conservative exclusive lease (FAK_NATIVE_ADMISSION=exclusive)"
 		return d, nil
 	}
 	policy := req.Policy
@@ -131,9 +145,13 @@ func (s *ReservationStore) Reserve(ctx context.Context, req ReservationRequest) 
 			return d, nil
 		}
 	}
-	if req.Host.AllocatableBytes <= 0 {
+	// An unprobeable host total, or an allocatable reading larger than the
+	// physical pool, is not a capacity the store can admit against: both mean the
+	// host sample is unknown, so the reservation fails closed.
+	if req.Host.AllocatableBytes <= 0 || req.Host.TotalBytes <= 0 || req.Host.AllocatableBytes > req.Host.TotalBytes {
 		d.Reaped = s.reapPersisted(ctx)
 		d.Reason = "capacity_unknown"
+		d.RemedyHint = "host memory capacity could not be probed; retry once the host sample is readable, or use the conservative exclusive lease (FAK_NATIVE_ADMISSION=exclusive)"
 		return d, nil
 	}
 	if req.OwnerPID <= 0 || req.Plan.StartupPeakBytes <= 0 || req.Plan.SteadyBytes <= 0 || req.Plan.SteadyBytes > req.Plan.StartupPeakBytes {

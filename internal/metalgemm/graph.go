@@ -52,6 +52,22 @@ int mg_qwen35_graph_attention_dkv(void *graph, void *q, void *k, void *v, void *
     int base, int nh, int nkv, int hd, int rotary, float scale, float qk_eps, int gain1p, int qknorm,
     int qnorm_elems, int knorm_elems,
     void **out, void **kraw, void **kpost, void **vcurrent);
+int mg_qwen35_graph_kvq8_ready(void);
+void *mg_qwen35_graph_kvq8_alloc(long bytes);
+int mg_qwen35_graph_kvq8_write(void *buf, long off, const void *src, long bytes);
+int mg_qwen35_graph_kvq8_read(void *buf, long off, void *dst, long bytes);
+int mg_qwen35_graph_attention_q8(void *graph, void *q, void *k, void *v, void *gate,
+    const float *qnorm, const float *knorm, const float *cosv, const float *sinv,
+    const signed char *prefix_kc, const float *prefix_ks, const signed char *prefix_vc, const float *prefix_vs,
+    int base, int nh, int nkv, int hd, int rotary, float scale, float qk_eps, int gain1p, int qknorm,
+    int qnorm_elems, int knorm_elems,
+    void **out, void **kraw, void **kpost, void **vcurrent, void **kc, void **ks, void **vc, void **vs);
+int mg_qwen35_graph_attention_dkv_q8(void *graph, void *q, void *k, void *v, void *gate,
+    const float *qnorm, const float *knorm, const float *cosv, const float *sinv,
+    void *kv_kc, void *kv_ks, void *kv_vc, void *kv_vs, long elem_off,
+    int base, int nh, int nkv, int hd, int rotary, float scale, float qk_eps, int gain1p, int qknorm,
+    int qnorm_elems, int knorm_elems,
+    void **out, void **kraw, void **kpost, void **vcurrent, void **kc, void **ks, void **vc, void **vs);
 void *mg_qwen35_graph_norm(void *graph, void *input, const float *weight, int rows, int width, float eps, int gain1p, int last_only);
 int mg_qwen35_graph_add(void *graph, void *x, void *y, int n);
 int mg_qwen35_graph_swiglu(void *graph, void *gate, void *up, int n);
@@ -1091,6 +1107,309 @@ func (g *ProjectionGraph) FullAttentionDevice(q, k, v, gate *GraphResult, kv *De
 		KPost:  &GraphResult{ptr: kpostp, out: kvwidth, p: g.p, graph: g},
 		V:      &GraphResult{ptr: vcurp, out: kvwidth, p: g.p, graph: g},
 	}, nil
+}
+
+// KVQ8BlockSize is the element count sharing one f32 scale in the packed Q8_0 KV
+// layout. It equals internal/model's KVQuantQ8_0BlockSize: the packed rows these
+// entries produce and consume are the host cache's realized kvPackedRow bytes.
+const KVQ8BlockSize = 32
+
+// KVQ8RowBytes is the packed size of one kvWidth-wide K or V row: one int8 code per
+// element plus one f32 scale per KVQ8BlockSize elements (1152 B at the Qwen3.8
+// kvWidth=1024, against 4096 B as F32).
+func KVQ8RowBytes(kvWidth int) int { return kvWidth + kvWidth/KVQ8BlockSize*4 }
+
+// KVQ8Rows is a run of packed Q8_0 KV rows in the host cache's realized layout
+// (internal/model/kvcache_q8.go kvPackedRow): row-major int8 codes, one per element,
+// and one f32 scale per KVQ8BlockSize elements, for post-RoPE K and raw V.
+type KVQ8Rows struct {
+	KCodes  []int8
+	KScales []float32
+	VCodes  []int8
+	VScales []float32
+}
+
+// Rows reports how many kvWidth-wide rows r holds, or -1 when its four sides
+// disagree with each other or with the block geometry.
+func (r KVQ8Rows) Rows(kvWidth int) int {
+	if kvWidth <= 0 || kvWidth%KVQ8BlockSize != 0 || len(r.KCodes)%kvWidth != 0 {
+		return -1
+	}
+	n := len(r.KCodes) / kvWidth
+	blocks := n * (kvWidth / KVQ8BlockSize)
+	if len(r.VCodes) != len(r.KCodes) || len(r.KScales) != blocks || len(r.VScales) != blocks {
+		return -1
+	}
+	return n
+}
+
+// KVQ8Available reports whether the packed Q8_0 KV pipelines compiled on this
+// device. They are a separate library from the F32 graph, so false declines only
+// the Q8 entries and never the F32 route. It initializes the device first: probing
+// the pipelines before the device exists would latch both graph libraries declined.
+func KVQ8Available() bool { return Available() && C.mg_qwen35_graph_kvq8_ready() != 0 }
+
+// Qwen35GraphAttentionQ8Result is a full-attention result plus the panel's rows in
+// the packed layout the attention consumed. KCodes/VCodes carry int8 codes four per
+// float32 word (out = kvWidth/4), decoded from a terminal readback with KVQ8Codes;
+// KScales/VScales carry kvWidth/KVQ8BlockSize scales per row.
+type Qwen35GraphAttentionQ8Result struct {
+	Qwen35GraphAttentionResult
+	KCodes, KScales, VCodes, VScales *GraphResult
+}
+
+// KVQ8Codes reinterprets a terminal readback of a KCodes/VCodes result as the int8
+// codes it carries. The returned slice aliases words.
+func KVQ8Codes(words []float32) []int8 {
+	if len(words) == 0 {
+		return nil
+	}
+	return unsafe.Slice((*int8)(unsafe.Pointer(&words[0])), len(words)*4)
+}
+
+func cFlag(b bool) C.int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// qwenQ8Attention validates the operands both packed-Q8 attention entries share.
+// head_dim must be a whole number of Q8 blocks so a block never straddles two heads.
+func (g *ProjectionGraph) qwenQ8Attention(q, k, v, gate *GraphResult, qnorm, knorm, cosv, sinv []float32, base, nH, nKV, hd, rotary int, scale, qkEps float32) error {
+	if g == nil {
+		return errGraphTerminal
+	}
+	if !qwenOrderedPanel(g.p) {
+		return fmt.Errorf("metalgemm: Qwen full-attention panel P=%d outside witnessed set [1,%d]", g.p, PromptPanelMaxTokens)
+	}
+	if nH <= 0 || nKV <= 0 || nH%nKV != 0 || hd < KVQ8BlockSize || hd > 256 || hd%KVQ8BlockSize != 0 {
+		return errors.New("metalgemm: invalid Qwen Q8 full-attention geometry")
+	}
+	qwidth, kvwidth := nH*hd, nKV*hd
+	for _, check := range []struct {
+		r *GraphResult
+		w int
+	}{{q, qwidth}, {gate, qwidth}, {k, kvwidth}, {v, kvwidth}} {
+		if err := g.qwenInput(check.r, g.p, check.w); err != nil {
+			return err
+		}
+	}
+	qNormShapeOK := len(qnorm) == hd || len(qnorm) == qwidth
+	kNormShapeOK := len(knorm) == hd || len(knorm) == kvwidth
+	if !qNormShapeOK || !kNormShapeOK || rotary < 2 || rotary > hd || rotary%2 != 0 || len(cosv) != g.p*(rotary/2) || len(sinv) != len(cosv) || base < 0 || scale <= 0 || qkEps <= 0 {
+		return errors.New("metalgemm: invalid Qwen Q8 full-attention geometry")
+	}
+	return nil
+}
+
+func (g *ProjectionGraph) qwenQ8Result(qwidth, kvwidth int, outp, krawp, kpostp, vcurp, kcp, ksp, vcp, vsp unsafe.Pointer) Qwen35GraphAttentionQ8Result {
+	res := func(ptr unsafe.Pointer, out int) *GraphResult {
+		return &GraphResult{ptr: ptr, out: out, p: g.p, graph: g}
+	}
+	// Q/K norm, panel quantize, device append and attention.
+	g.encoders += 4
+	return Qwen35GraphAttentionQ8Result{
+		Qwen35GraphAttentionResult: Qwen35GraphAttentionResult{Output: res(outp, qwidth), KRaw: res(krawp, kvwidth), KPost: res(kpostp, kvwidth), V: res(vcurp, kvwidth)},
+		KCodes:                     res(kcp, kvwidth/4),
+		KScales:                    res(ksp, kvwidth/KVQ8BlockSize),
+		VCodes:                     res(vcp, kvwidth/4),
+		VScales:                    res(vsp, kvwidth/KVQ8BlockSize),
+	}
+}
+
+// FullAttentionQ8 is FullAttention over a host-owned PACKED Q8_0 prefix (#12981).
+// prefix holds `base` rows in the host cache's realized layout, so the host keeps
+// 1.125 B/element of token KV instead of 4 and the per-panel prefix upload shrinks
+// by the same ratio. The panel's post-RoPE K and raw V rows are quantized on the
+// device before it attends (the host q8 path's append-then-attend order) and come
+// back packed, so the caller appends exactly the bytes the device attended. KRaw
+// (the host's f32 pre-RoPE row), KPost and V are also returned f32.
+func (g *ProjectionGraph) FullAttentionQ8(q, k, v, gate *GraphResult, qnorm, knorm, cosv, sinv []float32, prefix KVQ8Rows, base, nH, nKV, hd, rotary int, scale, qkEps float32, gain1p, qkNorm bool) (Qwen35GraphAttentionQ8Result, error) {
+	if err := g.qwenQ8Attention(q, k, v, gate, qnorm, knorm, cosv, sinv, base, nH, nKV, hd, rotary, scale, qkEps); err != nil {
+		return Qwen35GraphAttentionQ8Result{}, err
+	}
+	qwidth, kvwidth := nH*hd, nKV*hd
+	if prefix.Rows(kvwidth) != base {
+		return Qwen35GraphAttentionQ8Result{}, errors.New("metalgemm: packed Q8 prefix does not hold base rows")
+	}
+	var pkc, pvc *C.schar
+	var pks, pvs *C.float
+	if base > 0 {
+		pkc, pvc = (*C.schar)(unsafe.Pointer(&prefix.KCodes[0])), (*C.schar)(unsafe.Pointer(&prefix.VCodes[0]))
+		pks, pvs = (*C.float)(unsafe.Pointer(&prefix.KScales[0])), (*C.float)(unsafe.Pointer(&prefix.VScales[0]))
+	}
+	var outp, krawp, kpostp, vcurp, kcp, ksp, vcp, vsp unsafe.Pointer
+	if C.mg_qwen35_graph_attention_q8(g.ptr, q.ptr, k.ptr, v.ptr, gate.ptr,
+		(*C.float)(unsafe.Pointer(&qnorm[0])), (*C.float)(unsafe.Pointer(&knorm[0])),
+		(*C.float)(unsafe.Pointer(&cosv[0])), (*C.float)(unsafe.Pointer(&sinv[0])), pkc, pks, pvc, pvs,
+		C.int(base), C.int(nH), C.int(nKV), C.int(hd), C.int(rotary), C.float(scale), C.float(qkEps), cFlag(gain1p), cFlag(qkNorm), C.int(len(qnorm)), C.int(len(knorm)),
+		&outp, &krawp, &kpostp, &vcurp, &kcp, &ksp, &vcp, &vsp) == 0 {
+		return Qwen35GraphAttentionQ8Result{}, errors.New("metalgemm: Qwen Q8 full-attention encode failed")
+	}
+	g.hostUploadBytes += uint64(len(qnorm)+len(knorm)+len(cosv)+len(sinv)+len(prefix.KScales)+len(prefix.VScales))*4 + uint64(len(prefix.KCodes)+len(prefix.VCodes))
+	return g.qwenQ8Result(qwidth, kvwidth, outp, krawp, kpostp, vcurp, kcp, ksp, vcp, vsp), nil
+}
+
+// DeviceKVQ8 is DeviceKV's packed twin (#12981): a caller-owned device store holding
+// every full-attention layer's post-RoPE K and raw V rows as Q8_0 codes plus block
+// scales, KVQ8RowBytes per row per side, never an F32 mirror. KRaw is not held: the
+// host keeps the f32 pre-RoPE row (FullAttentionDeviceQ8 returns it per panel), which
+// is the planner's mixed KVPrecisionQ8 layout. Layer l's rows start at element
+// l*tokens*kvWidth of each side, so one store serves every layer of a walk.
+type DeviceKVQ8 struct {
+	kc, ks, vc, vs          unsafe.Pointer
+	layers, tokens, kvWidth int
+}
+
+// NewDeviceKVQ8 allocates a packed store for tokens rows across layers layers of
+// kvWidth elements. Returns nil when the geometry, the Q8 pipelines or any device
+// allocation is unavailable, which the caller treats as a decline.
+func NewDeviceKVQ8(layers, tokens, kvWidth int) *DeviceKVQ8 {
+	if layers <= 0 || tokens <= 0 || kvWidth <= 0 || kvWidth%KVQ8BlockSize != 0 || tokens > int(^uint(0)>>1)/kvWidth || layers > int(^uint(0)>>1)/(tokens*kvWidth) || !KVQ8Available() {
+		return nil
+	}
+	codes := layers * tokens * kvWidth
+	scales := codes / KVQ8BlockSize * 4
+	d := &DeviceKVQ8{layers: layers, tokens: tokens, kvWidth: kvWidth}
+	for _, side := range []struct {
+		p *unsafe.Pointer
+		n int
+	}{{&d.kc, codes}, {&d.ks, scales}, {&d.vc, codes}, {&d.vs, scales}} {
+		if *side.p = C.mg_qwen35_graph_kvq8_alloc(C.long(side.n)); *side.p == nil {
+			d.Close()
+			return nil
+		}
+	}
+	return d
+}
+
+// Tokens reports the per-layer row capacity the store was sized for.
+func (d *DeviceKVQ8) Tokens() int {
+	if d == nil {
+		return 0
+	}
+	return d.tokens
+}
+
+// ResidentBytes reports the packed bytes the store keeps resident: both sides at
+// full capacity. At 16 layers x 20480 tokens x kvWidth 1024 that is 0.70 GiB,
+// against 2.50 GiB for DeviceKV's F32 KPost+V sides.
+func (d *DeviceKVQ8) ResidentBytes() int64 {
+	if d == nil || d.kc == nil {
+		return 0
+	}
+	return 2 * int64(d.layers) * int64(d.tokens) * int64(KVQ8RowBytes(d.kvWidth))
+}
+
+// region maps rows [row,row+n) of layer to byte offsets/lengths of the code and
+// scale sides.
+func (d *DeviceKVQ8) region(layer, row, n int) (codeOff, scaleOff, codeLen, scaleLen int, err error) {
+	if d == nil || d.kc == nil || d.ks == nil || d.vc == nil || d.vs == nil {
+		return 0, 0, 0, 0, errors.New("metalgemm: packed device KV is not allocated")
+	}
+	if layer < 0 || layer >= d.layers || row < 0 || n < 0 || row > d.tokens-n {
+		return 0, 0, 0, 0, errors.New("metalgemm: packed device KV region out of range")
+	}
+	codeOff, codeLen = (layer*d.tokens+row)*d.kvWidth, n*d.kvWidth
+	return codeOff, codeOff / KVQ8BlockSize * 4, codeLen, codeLen / KVQ8BlockSize * 4, nil
+}
+
+// WriteRows seeds rows [row, row+n) of layer with host packed rows, e.g. a prefix
+// the host cache already holds. A fresh walk appends on the device and never writes.
+func (d *DeviceKVQ8) WriteRows(layer, row int, rows KVQ8Rows) error {
+	n := rows.Rows(d.width())
+	if n < 0 {
+		return errors.New("metalgemm: packed Q8 rows disagree with the store geometry")
+	}
+	codeOff, scaleOff, codeLen, scaleLen, err := d.region(layer, row, n)
+	if err != nil || n == 0 {
+		return err
+	}
+	for _, side := range []struct {
+		buf      unsafe.Pointer
+		off, len int
+		src      unsafe.Pointer
+	}{{d.kc, codeOff, codeLen, unsafe.Pointer(&rows.KCodes[0])}, {d.ks, scaleOff, scaleLen, unsafe.Pointer(&rows.KScales[0])},
+		{d.vc, codeOff, codeLen, unsafe.Pointer(&rows.VCodes[0])}, {d.vs, scaleOff, scaleLen, unsafe.Pointer(&rows.VScales[0])}} {
+		if C.mg_qwen35_graph_kvq8_write(side.buf, C.long(side.off), side.src, C.long(side.len)) == 0 {
+			return errors.New("metalgemm: packed device KV write failed")
+		}
+	}
+	return nil
+}
+
+// ReadRows copies rows [row, row+n) of layer back into the host packed layout. Call
+// it only after every graph appending to those rows has finished.
+func (d *DeviceKVQ8) ReadRows(layer, row, n int) (KVQ8Rows, error) {
+	codeOff, scaleOff, codeLen, scaleLen, err := d.region(layer, row, n)
+	if err != nil || n == 0 {
+		return KVQ8Rows{}, err
+	}
+	out := KVQ8Rows{KCodes: make([]int8, codeLen), KScales: make([]float32, scaleLen/4), VCodes: make([]int8, codeLen), VScales: make([]float32, scaleLen/4)}
+	for _, side := range []struct {
+		buf      unsafe.Pointer
+		off, len int
+		dst      unsafe.Pointer
+	}{{d.kc, codeOff, codeLen, unsafe.Pointer(&out.KCodes[0])}, {d.ks, scaleOff, scaleLen, unsafe.Pointer(&out.KScales[0])},
+		{d.vc, codeOff, codeLen, unsafe.Pointer(&out.VCodes[0])}, {d.vs, scaleOff, scaleLen, unsafe.Pointer(&out.VScales[0])}} {
+		if C.mg_qwen35_graph_kvq8_read(side.buf, C.long(side.off), side.dst, C.long(side.len)) == 0 {
+			return KVQ8Rows{}, errors.New("metalgemm: packed device KV read failed")
+		}
+	}
+	return out, nil
+}
+
+func (d *DeviceKVQ8) width() int {
+	if d == nil {
+		return 0
+	}
+	return d.kvWidth
+}
+
+// Close frees the packed store. Safe to call twice.
+func (d *DeviceKVQ8) Close() {
+	if d == nil {
+		return
+	}
+	for _, p := range []*unsafe.Pointer{&d.kc, &d.ks, &d.vc, &d.vs} {
+		if *p != nil {
+			C.mg_qwen35_graph_kv_free(*p)
+			*p = nil
+		}
+	}
+	d.layers, d.tokens = 0, 0
+}
+
+// FullAttentionDeviceQ8 is FullAttentionDevice over a packed DeviceKVQ8 store: layer
+// `layer` must already hold `base` rows. The panel's packed K/V rows are appended at
+// row base on the device and attention reads the packed prefix+panel in place, so a
+// walk pays neither a host prefix copy nor an F32 mirror. The panel's packed rows
+// (and f32 KRaw/KPost/V) are also returned as graph results, so a host cache can
+// mirror the store with the exact bytes without a region download.
+func (g *ProjectionGraph) FullAttentionDeviceQ8(q, k, v, gate *GraphResult, kv *DeviceKVQ8, layer int, qnorm, knorm, cosv, sinv []float32, base, nH, nKV, hd, rotary int, scale, qkEps float32, gain1p, qkNorm bool) (Qwen35GraphAttentionQ8Result, error) {
+	if err := g.qwenQ8Attention(q, k, v, gate, qnorm, knorm, cosv, sinv, base, nH, nKV, hd, rotary, scale, qkEps); err != nil {
+		return Qwen35GraphAttentionQ8Result{}, err
+	}
+	qwidth, kvwidth := nH*hd, nKV*hd
+	if kv.width() != kvwidth {
+		return Qwen35GraphAttentionQ8Result{}, errors.New("metalgemm: packed device KV width does not match the attention geometry")
+	}
+	elemOff, _, _, _, err := kv.region(layer, base, g.p)
+	if err != nil {
+		return Qwen35GraphAttentionQ8Result{}, err
+	}
+	elemOff -= base * kvwidth
+	var outp, krawp, kpostp, vcurp, kcp, ksp, vcp, vsp unsafe.Pointer
+	if C.mg_qwen35_graph_attention_dkv_q8(g.ptr, q.ptr, k.ptr, v.ptr, gate.ptr,
+		(*C.float)(unsafe.Pointer(&qnorm[0])), (*C.float)(unsafe.Pointer(&knorm[0])),
+		(*C.float)(unsafe.Pointer(&cosv[0])), (*C.float)(unsafe.Pointer(&sinv[0])), kv.kc, kv.ks, kv.vc, kv.vs, C.long(elemOff),
+		C.int(base), C.int(nH), C.int(nKV), C.int(hd), C.int(rotary), C.float(scale), C.float(qkEps), cFlag(gain1p), cFlag(qkNorm), C.int(len(qnorm)), C.int(len(knorm)),
+		&outp, &krawp, &kpostp, &vcurp, &kcp, &ksp, &vcp, &vsp) == 0 {
+		return Qwen35GraphAttentionQ8Result{}, errors.New("metalgemm: Qwen Q8 full-attention device-KV encode failed")
+	}
+	g.hostUploadBytes += uint64(len(qnorm)+len(knorm)+len(cosv)+len(sinv)) * 4
+	return g.qwenQ8Result(qwidth, kvwidth, outp, krawp, kpostp, vcurp, kcp, ksp, vcp, vsp), nil
 }
 
 func (g *ProjectionGraph) GDN(state *GDNState, mixed, z, b, a *GraphResult, panel GDNPanel) (*GraphResult, error) {

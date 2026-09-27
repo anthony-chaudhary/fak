@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -58,6 +59,7 @@ func printUpHelp(w io.Writer) {
 	fmt.Fprintln(w, "  --bundle-verify-key <key>   optional public key / signature verification key for bundle")
 	fmt.Fprintln(w, "  --policy <path>             path to security policy file")
 	fmt.Fprintln(w, "  --help, -h                  show this help message")
+	printUpServiceHelp(w)
 }
 
 // upHelpFlagLines renders the human-readable synopsis for each flag registered
@@ -128,6 +130,10 @@ func isServeDelegation(argv []string) bool {
 // When raw serve-specific flags are passed, it delegates directly to serve.
 // Otherwise, it runs the turnkey Apple Silicon model provisioner and interactive server.
 func cmdUp(argv []string) {
+	if isUpServiceVerb(argv) {
+		cmdUpService(argv)
+		return
+	}
 	for _, arg := range argv {
 		if arg == "--help" || arg == "-h" || arg == "help" {
 			printUpHelp(os.Stdout)
@@ -494,6 +500,7 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	}
 	server.armGPUIdleExit(*gpuIdleExit)
 	server.armMemGuard(*maxRSS, *maxRSSSustain)
+	server.armHostMemoryBudget(*maxRSS)
 	printTurnkeyReady(stdout, ver, server.Addr(), plan)
 	printTurnkeyBackendStamp(stdout, server.metalDecision, metalResidencyStampFrom(server.liveResidencyReport()))
 	if *gpuIdleExit > 0 {
@@ -2038,7 +2045,55 @@ func writeTurnkeyInferenceError(w http.ResponseWriter, err error) {
 		}})
 		return
 	}
+	// An in-kernel capacity refusal (the #13267 host-memory arm or the device precheck)
+	// or a recovered device OOM is a local, retryable resource condition: the request was
+	// declined before it could grow the resident server into a jetsam kill. Surface it as
+	// 503 + Retry-After with the same in_kernel_oom code the gateway uses, not an opaque 500.
+	var capErr *agent.InKernelCapacityError
+	var oomErr *agent.InKernelOOMError
+	if errors.As(err, &capErr) || errors.As(err, &oomErr) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", turnkeyCapacityRetryAfterSeconds)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
+			"message": err.Error() + "; retry later, or reduce the prompt/context size or max_tokens",
+			"type":    "server_error", "code": "in_kernel_oom",
+		}})
+		return
+	}
 	http.Error(w, fmt.Sprintf("inference error: %v", err), http.StatusInternalServerError)
+}
+
+// turnkeyCapacityRetryAfterSeconds is the Retry-After hint on an in-kernel capacity
+// refusal: long enough for an in-flight turn to finish and release its reservation.
+const turnkeyCapacityRetryAfterSeconds = "5"
+
+// armHostMemoryBudget hands the --max-rss ceiling to the in-kernel planner (#13267) so
+// the host-session (Metal) seam prices every request against it BEFORE allocating, and
+// declines typed instead of growing past it. The memory guard stays the backstop that
+// stops a process whose RSS still breaches the ceiling. A zero limit, or a planner
+// without the seam, leaves the historical unbounded path untouched.
+func (s *turnkeyServer) armHostMemoryBudget(limit uint64) {
+	if s == nil || limit == 0 {
+		return
+	}
+	armer, ok := s.planner.(interface {
+		SetHostMemoryBudget(ceiling int64, used func() (int64, bool))
+	})
+	if !ok {
+		return
+	}
+	ceiling := int64(math.MaxInt64)
+	if limit < uint64(math.MaxInt64) {
+		ceiling = int64(limit)
+	}
+	armer.SetHostMemoryBudget(ceiling, func() (int64, bool) {
+		rss := platformCurrentRSS()
+		if rss == 0 || rss > uint64(math.MaxInt64) {
+			return 0, false
+		}
+		return int64(rss), true
+	})
 }
 
 func runTurnkeyREPL(ctx context.Context, in io.Reader, out io.Writer, baseURL string, profile macfit.TurnkeyProfile) error {

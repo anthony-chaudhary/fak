@@ -3748,6 +3748,11 @@
           "category": "incidental",
           "reason": "The DeepSeek V4.1 attention-compressor gate projection (blk.<L>.attn_compressor_gate -> self_attn.compressor.wgate) matches the guard-gate lexical family only on the 'gate' substring: it is a model WEIGHT matrix holding the compressor's gate projection, not a validation rung that admits, refuses or gates anything. Positioned by the #12640 tensor-map slice.",
           "token": "wgate"
+        },
+        {
+          "category": "incidental",
+          "reason": "One of three FAK_NATIVE_ADMISSION mode constants (default/aggregate/exclusive) local to the Metal admission seam; the doc comment defines each mode, so there is no collision to disambiguate.",
+          "token": "nativeAdmissionAggregate"
         }
       ],
       "exclude": [
@@ -4124,6 +4129,7 @@
         "mcp__fak_guard__sandbox_reset",
         "mcp__fak_guard__sandbox_state",
         "mcp__fak_guard__sandbox_write",
+        "nativeAdmissionAggregate",
         "nativeAdmissionPolicyForBudget",
         "nativeReasonMessageRoleUnsupported",
         "nativeq4kgateupoutputslab",
@@ -6265,6 +6271,16 @@
           "category": "incidental",
           "reason": "CLI command handler for sessionsearch",
           "token": "cmdSessionSearch"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt reason string for a release deferred to process exit because model weight sessions are still attached (model.WeightSessionsActiveError); a local wire literal, not a separate concept.",
+          "token": "weight_sessions_active"
+        },
+        {
+          "category": "incidental",
+          "reason": "The localadmission envelope type (weights + per-session KV/state for the enforced session bound + cohort scratch) that the native Metal admission reservation is sized from; defined by its doc comment in internal/localadmission/envelope.go and only consumed by that seam and its receipt.",
+          "token": "SessionResidencyPlan"
         }
       ],
       "exclude": [
@@ -6390,6 +6406,7 @@
         "SessionProviderBoundary",
         "SessionRate",
         "SessionRecoveryScenarios",
+        "SessionResidencyPlan",
         "SessionShellErrorRate",
         "SessionSourceResolution",
         "SessionSourceSelfTestReport",
@@ -6673,6 +6690,7 @@
         "verifyFilterToolScheduler",
         "verifyFilterToolSchedulerPath",
         "warmupBenchSession",
+        "weight_sessions_active",
         "wipPeerCheckpointSessions",
         "witnessed_sufficiency_slot_released",
         "writeGuardCodexSessionBinding",
@@ -13208,6 +13226,16 @@
           "category": "incidental",
           "reason": "alias for agentopt TurnEffortDecision",
           "token": "DynamicEffortDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported receipt helper that copies a localadmission.ReservationDecision onto the admission receipt; self-descriptive and local to the receipt file.",
+          "token": "observeDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "The typed return value of localadmission.ReservationStore.Reserve (admit flag, typed reason, capacity/reserved bytes, pressure, created reservation); consumed only by the native Metal admission seam and its receipt, so it names one struct rather than a separate decision concept.",
+          "token": "ReservationDecision"
         }
       ],
       "id": "decision",
@@ -13239,6 +13267,7 @@
         "ModelCallsDeltaPerDecision",
         "OBSERVER_DECISION_IGNORED",
         "PlanStepDecision",
+        "ReservationDecision",
         "ReuseDecision",
         "RuntimeVerdict",
         "SessionClientDecisionRequest",
@@ -13267,6 +13296,7 @@
         "naturalTrafficBreakEven",
         "naturalTrafficDecision",
         "naturalTrafficPolicyRow",
+        "observeDecision",
         "observed_decisions",
         "partialretrydecision",
         "permissiondecision",

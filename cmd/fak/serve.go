@@ -699,8 +699,15 @@ func cmdServe(argv []string) {
 	var releaseMetalResidency func()
 	var metalErr error
 	releaseVulkanResidency, err := loadServeModelWithVulkanLease(sf, gpulease.Options{}, func() {
-		releaseMetalResidency, metalErr = loadLocalLauncherModelWithMetalLease(rt.useMetal, *sf.ggufPath, gpulease.Options{}, func() {
-			rt.loadModel(sf)
+		// The admission seam owns the reservation lifecycle (#9587): a load that
+		// leaves no in-kernel model releases it without marking it steady, and the
+		// release frees the weights before handing capacity back.
+		releaseMetalResidency, metalErr = admitLocalMetalModel(rt.useMetal, *sf.ggufPath, gpulease.Options{}, metalAdmissionSpec{
+			Load: func() bool {
+				rt.loadModel(sf)
+				return rt.inKernelModel != nil
+			},
+			Teardown: func() error { return closeAdmittedModelWeights(rt.inKernelModel) },
 		})
 	})
 	if err != nil {

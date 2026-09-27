@@ -209,35 +209,33 @@ func TestLoadLocalLauncherModelWithMetalLeaseCoexistsForSmallModels(t *testing.T
 		t.Fatalf("second small model expected 1 load, got %d", loads2)
 	}
 
-	// Verify ledger recorded both coexisting reservations in steady state.
-	ledgerPath := filepath.Join(resDir, "reservations.json")
-	data, err := os.ReadFile(ledgerPath)
-	if err != nil {
-		t.Fatalf("read ledger: %v", err)
+	// Verify ledger recorded both coexisting reservations in steady state. The
+	// ledger is MarshalIndent'ed, so decode it rather than substring-match.
+	const steadyBytes = 268435456
+	rows := readMetalAdmissionLedger(t, resDir)
+	if len(rows) != 2 {
+		t.Fatalf("ledger should record both coexisting reservations: %+v", rows)
 	}
-	content := string(data)
-	if !strings.Contains(content, "steady") {
-		t.Fatalf("ledger should record steady phase: %s", content)
+	for _, r := range rows {
+		if r.Phase != "steady" || r.HeldBytes != steadyBytes || r.OwnerPID != os.Getpid() {
+			t.Fatalf("coexisting reservation = %+v, want steady holding %d bytes for pid %d", r, steadyBytes, os.Getpid())
+		}
 	}
 
 	// Release first model, verify second remains active.
 	release1()
-	dataAfter1, err := os.ReadFile(ledgerPath)
-	if err != nil {
-		t.Fatalf("read ledger after release1: %v", err)
+	after1 := readMetalAdmissionLedger(t, resDir)
+	if len(after1) != 1 || after1[0].Phase != "steady" || after1[0].HeldBytes != steadyBytes {
+		t.Fatalf("ledger should still contain only the second model after release1: %+v", after1)
 	}
-	if !strings.Contains(string(dataAfter1), "steady") {
-		t.Fatalf("ledger should still contain second model after release1: %s", string(dataAfter1))
+	if after1[0].ID != rows[0].ID && after1[0].ID != rows[1].ID {
+		t.Fatalf("surviving reservation %q is not one of the two admitted rows %+v", after1[0].ID, rows)
 	}
 
 	// Release second model, verify cleanup.
 	release2()
-	dataAfter2, err := os.ReadFile(ledgerPath)
-	if err != nil {
-		t.Fatalf("read ledger after release2: %v", err)
-	}
-	if strings.Contains(string(dataAfter2), "\"held_bytes\":268435456") {
-		t.Fatalf("ledger should have cleaned up second reservation: %s", string(dataAfter2))
+	if after2 := readMetalAdmissionLedger(t, resDir); len(after2) != 0 {
+		t.Fatalf("ledger should have cleaned up second reservation: %+v", after2)
 	}
 }
 
@@ -277,18 +275,32 @@ func TestLoadLocalLauncherModelWithMetalLeaseLoadFailureReleasesReservation(t *t
 	t.Setenv("FAK_TEST_STARTUP_PEAK_BYTES", "536870912")
 	t.Setenv("FAK_TEST_STEADY_BYTES", "268435456")
 
+	const panicMsg = "simulated loader panic"
+	loaderRan := false
+	var inLoader []localadmission.Reservation
 	defer func() {
-		_ = recover()
-		// After panic in loader, check that ledger was reaped / released
-		ledgerPath := filepath.Join(resDir, "reservations.json")
-		data, err := os.ReadFile(ledgerPath)
-		if err == nil && strings.Contains(string(data), "\"phase\":\"startup\"") {
-			t.Fatalf("aborted load must not leak startup reservation in ledger: %s", string(data))
+		if r := recover(); r != panicMsg {
+			t.Fatalf("recovered %v, want the loader panic %q to propagate through admission", r, panicMsg)
+		}
+		// The witness is only meaningful if the startup reservation existed
+		// while the loader ran.
+		if !loaderRan || len(inLoader) != 1 || inLoader[0].Phase != "startup" || inLoader[0].HeldBytes != 536870912 {
+			t.Fatalf("ledger inside the panicking loader (ran=%v) = %+v, want one startup row holding the 512 MiB peak", loaderRan, inLoader)
+		}
+		// After panic in loader, the aborted load must not leak its startup
+		// reservation or the lease.
+		if rows := readMetalAdmissionLedger(t, resDir); len(rows) != 0 {
+			t.Fatalf("aborted load must not leak startup reservation in ledger: %+v", rows)
+		}
+		if err := acquireMetalLeaseNoWait(leasePath); err != nil {
+			t.Fatalf("aborted load must not leak the GPU lease: %v", err)
 		}
 	}()
 
 	_, _ = loadLocalLauncherModelWithMetalLease(true, "panicking-model.gguf", gpulease.Options{}, func() {
-		panic("simulated loader panic")
+		loaderRan = true
+		inLoader = readMetalAdmissionLedger(t, resDir)
+		panic(panicMsg)
 	})
 }
 
