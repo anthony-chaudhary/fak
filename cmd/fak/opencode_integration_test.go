@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -28,6 +29,13 @@ func TestOpencodeIntegrationLoopback(t *testing.T) {
 	opencode, err := exec.LookPath("opencode")
 	if err != nil {
 		t.Skip("installed OpenCode is required for the macOS integration witness")
+	}
+	if opencodeCrossesWSLInterop(opencode) {
+		native, ok := lookNativeOpencodeOnWSL()
+		if !ok {
+			t.Skipf("only a Windows OpenCode is on PATH (%s): run through WSL interop it is a Windows process that receives none of this test's HOME/XDG isolation or OPENCODE_CONFIG_CONTENT (it loads the Windows user's config and cannot resolve the fak provider); install a Linux-native OpenCode to run this witness under WSL", opencode)
+		}
+		opencode = native
 	}
 
 	const (
@@ -192,7 +200,9 @@ func TestOpencodeIntegrationLoopback(t *testing.T) {
 		return 0
 	}
 	t.Cleanup(func() { opencodeLaunchRun = origRun })
-	code := runOpencode(&output, &output, []string{
+	// This witness is the guarded path (credential swap, adjudication, audit
+	// journal); since f856f7b0d2 (#13485) the guard is opt-in, so request it.
+	code := runOpencode(&output, &output, []string{"--guard",
 		"--base-url", upstream.URL + "/v1", "--api-key-env", "TEST_OPENCODE_UPSTREAM_KEY",
 		"--model", model, "--audit", auditPath, "--quiet", "--split", "off",
 		"--probe", prompt, "--pure", "--auto", "--skip-permissions=false",
@@ -228,6 +238,53 @@ func TestOpencodeIntegrationLoopback(t *testing.T) {
 	if !sawReadDecision {
 		t.Fatalf("audit journal lacks an allowed read DECIDE row: %+v", rows)
 	}
+}
+
+// opencodeCrossesWSLInterop reports whether path, as seen from a Linux test
+// process under WSL, is a Windows program on a DrvFs mount (/mnt/<drive>/...).
+// WSL runs such a program as a Windows process and forwards only the variables
+// named in WSLENV, so a child environment built by the test never reaches it.
+func opencodeCrossesWSLInterop(path string) bool {
+	if runtime.GOOS != "linux" || !runningUnderWSL() {
+		return false
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+	return onWSLDrvFsMount(path)
+}
+
+func runningUnderWSL() bool {
+	if os.Getenv("WSL_DISTRO_NAME") != "" || os.Getenv("WSL_INTEROP") != "" {
+		return true
+	}
+	_, err := os.Stat("/proc/sys/fs/binfmt_misc/WSLInterop")
+	return err == nil
+}
+
+func onWSLDrvFsMount(path string) bool {
+	rest, ok := strings.CutPrefix(path, "/mnt/")
+	return ok && len(rest) >= 2 && rest[1] == '/' && rest[0] >= 'a' && rest[0] <= 'z'
+}
+
+// lookNativeOpencodeOnWSL finds an executable "opencode" on PATH outside the
+// Windows DrvFs mounts, i.e. a Linux-native install that honors the child env.
+func lookNativeOpencodeOnWSL() (string, bool) {
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		if dir == "" || onWSLDrvFsMount(dir+"/") {
+			continue
+		}
+		candidate := filepath.Join(dir, "opencode")
+		info, err := os.Stat(candidate)
+		if err != nil || info.IsDir() || info.Mode().Perm()&0o111 == 0 {
+			continue
+		}
+		if resolved, err := filepath.EvalSymlinks(candidate); err == nil && onWSLDrvFsMount(resolved) {
+			continue
+		}
+		return candidate, true
+	}
+	return "", false
 }
 
 func opencodeIntegrationBaseEnv(source []string) []string {
