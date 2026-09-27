@@ -185,6 +185,7 @@ When `fak commit` or preflight encounters `COMMITTED_RED`:
   fak recover COMMITTED_RED --execute
   ```
   which invokes the `/ci-repair` diagnostics and suggests the exact remediation command.
+- A red can be pre-existing: test step only, identical on the landing base, and witnessed per [`commit-clean`](../commit-clean/SKILL.md) "Pre-existing red". In that case, land first under that rule without asking (operator policy 2026-09-26), then triage or file the trunk red separately.
 
 ### 3. Dual-Repo Sync (`fak-sync repo` in `fak-private`)
 When `fak-sync repo` is wedged by public trunk compilation errors:
