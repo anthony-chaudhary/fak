@@ -11,8 +11,8 @@
 //     require per-position argmax == the oracle's argmax_per_pos (the SAME bar the f32
 //     oracle test enforces, now at int8). Reports greedy agreement + last-pos logit max|Δ|.
 //  2. SPEED — decode ms/tok for f32 vs int8, measured INTERLEAVED per rep (so both sample
-//     the same time-varying load on this shared box) with a MIN headline (least-contended
-//     estimate); prefill P=16/64/256 per path. Same LCG id protocol as cmd/modelbench.
+//     the same time-varying load on this shared box), with median headline and min retained
+//     as a least-contended diagnostic; prefill P=16/64/256 per path. Same LCG id protocol.
 //  3. VERDICT — reads experiments/model-baseline/hf.json (f32) and hf-int8.json (dynamic
 //     int8) and prints whether quant-fak's decode beats each. The int8 row is the goal.
 package main
@@ -44,7 +44,11 @@ func lcgIDs(n, vocab int) []int {
 func medianMS(ds []time.Duration) float64 {
 	cp := append([]time.Duration(nil), ds...)
 	sort.Slice(cp, func(i, j int) bool { return cp[i] < cp[j] })
-	return float64(cp[len(cp)/2].Nanoseconds()) / 1e6
+	mid := len(cp) / 2
+	if len(cp)%2 != 0 {
+		return float64(cp[mid].Nanoseconds()) / 1e6
+	}
+	return (float64(cp[mid-1].Nanoseconds()) + float64(cp[mid].Nanoseconds())) / 2e6
 }
 
 func minMS(ds []time.Duration) float64 {
@@ -68,7 +72,7 @@ type decodeResult struct {
 	PromptTokens  int     `json:"prompt_tokens"`
 	DecodeSteps   int     `json:"decode_steps"`
 	Reps          int     `json:"reps"`
-	PerTokenMedMS float64 `json:"per_token_median_ms"` // carries the MIN (contention-robust headline)
+	PerTokenMedMS float64 `json:"per_token_median_ms"`
 	TokPerSec     float64 `json:"tok_per_sec"`
 }
 
@@ -80,6 +84,88 @@ type oraclePrompt struct {
 }
 type oracleDoc struct {
 	Prompts []oraclePrompt `json:"prompts"`
+}
+
+func readRequiredOracle(dir string) (oracleDoc, error) {
+	path := filepath.Join(dir, "oracle.json")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return oracleDoc{}, fmt.Errorf("read required oracle %s: %w", path, err)
+	}
+	var doc oracleDoc
+	if err := json.Unmarshal(b, &doc); err != nil {
+		return oracleDoc{}, fmt.Errorf("decode required oracle %s: %w", path, err)
+	}
+	if len(doc.Prompts) == 0 {
+		return oracleDoc{}, fmt.Errorf("required oracle %s has no prompts", path)
+	}
+	for i, p := range doc.Prompts {
+		if len(p.Ids) == 0 || len(p.ArgmaxPos) == 0 {
+			return oracleDoc{}, fmt.Errorf("required oracle %s prompt %d has zero positions", path, i)
+		}
+		if len(p.ArgmaxPos) != len(p.Ids) {
+			return oracleDoc{}, fmt.Errorf("required oracle %s prompt %d has %d ids but %d argmax positions", path, i, len(p.Ids), len(p.ArgmaxPos))
+		}
+	}
+	return doc, nil
+}
+
+func decodeSummaries(f32D, q8D [2]float64, prompt, steps, reps int) (decodeResult, decodeResult) {
+	mk := func(medianMS float64) decodeResult {
+		r := decodeResult{
+			PromptTokens:  prompt,
+			DecodeSteps:   steps,
+			Reps:          reps,
+			PerTokenMedMS: medianMS,
+		}
+		if medianMS > 0 {
+			r.TokPerSec = 1e3 / medianMS
+		}
+		return r
+	}
+	return mk(f32D[1]), mk(q8D[1])
+}
+
+type q8BenchDecision struct {
+	CorrectnessOK bool
+	BeatsHFInt8   bool
+	BeatsHFF32    bool
+	ExitCode      int
+}
+
+func decideQ8Bench(totalPositions, totalMatches int, q8MedianMS, hfInt8MedianMS, hfF32MedianMS float64) q8BenchDecision {
+	d := q8BenchDecision{
+		CorrectnessOK: totalPositions > 0 && totalMatches == totalPositions,
+		BeatsHFInt8:   q8MedianMS > 0 && hfInt8MedianMS > 0 && q8MedianMS < hfInt8MedianMS,
+		BeatsHFF32:    q8MedianMS > 0 && hfF32MedianMS > 0 && q8MedianMS < hfF32MedianMS,
+	}
+	if !d.CorrectnessOK {
+		d.ExitCode = 2
+	}
+	return d
+}
+
+func (d q8BenchDecision) verdictReport(q8MedianMS, hfInt8MedianMS, hfF32MedianMS float64) map[string]any {
+	return map[string]any{
+		"hf_f32_best_decode_median_ms":  hfF32MedianMS,
+		"hf_int8_best_decode_median_ms": hfInt8MedianMS,
+		"fak_int8_decode_median_ms":     q8MedianMS,
+		"hf_f32_available":              hfF32MedianMS > 0,
+		"hf_int8_available":             hfInt8MedianMS > 0,
+		"beats_hf_int8":                 d.BeatsHFInt8,
+		"beats_hf_f32":                  d.BeatsHFF32,
+	}
+}
+
+func (d q8BenchDecision) humanVerdict(q8MedianMS, hfInt8MedianMS, hfF32MedianMS float64) string {
+	hf := func(ms float64, beat bool) string {
+		if ms <= 0 {
+			return "unavailable (beat=false)"
+		}
+		return fmt.Sprintf("%.2f (beat=%v)", ms, beat)
+	}
+	return fmt.Sprintf("VERDICT  fak int8 decode(median)=%.2f ms/tok | HF int8 median=%s | HF f32 median=%s | argmax-exact=%v",
+		q8MedianMS, hf(hfInt8MedianMS, d.BeatsHFInt8), hf(hfF32MedianMS, d.BeatsHFF32), d.CorrectnessOK)
 }
 
 type promptCheck struct {
@@ -94,7 +180,7 @@ type promptCheck struct {
 
 func readOracleLastLogits(dir string, idx, seq, vocab int) []float32 {
 	b, err := os.ReadFile(filepath.Join(dir, "oracle", fmt.Sprintf("%d.logits.f32", idx)))
-	if err != nil {
+	if err != nil || len(b) < 4 {
 		return nil
 	}
 	all := unsafe.Slice((*float32)(unsafe.Pointer(&b[0])), len(b)/4)
@@ -190,9 +276,10 @@ func benchPrefill(m *model.Model, quant bool, P, reps, vocab int) float64 {
 	return medianMS(ds)
 }
 
-// hfBestDecode reads an HF bench JSON and returns the best (smallest) decode ms/tok across
-// its configs, or 0 if unreadable.
-func hfBestDecode(path string) float64 {
+// hfBestDecode reads an HF bench JSON and returns the best (smallest) median
+// decode ms/tok among configs measured with the same sample regime. A missing,
+// unreadable, malformed, or unmatched report is explicitly unavailable (zero).
+func hfBestDecode(path string, prompt, steps, reps int) float64 {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return 0
@@ -200,6 +287,9 @@ func hfBestDecode(path string) float64 {
 	var doc struct {
 		Configs []struct {
 			Decode struct {
+				PromptTokens     int     `json:"prompt_tokens"`
+				DecodeSteps      int     `json:"decode_steps"`
+				Reps             int     `json:"reps"`
 				PerTokenMedianMS float64 `json:"per_token_median_ms"`
 			} `json:"decode"`
 		} `json:"configs"`
@@ -209,6 +299,9 @@ func hfBestDecode(path string) float64 {
 	}
 	best := 0.0
 	for _, c := range doc.Configs {
+		if c.Decode.PromptTokens != prompt || c.Decode.DecodeSteps != steps || c.Decode.Reps != reps {
+			continue
+		}
 		if d := c.Decode.PerTokenMedianMS; d > 0 && (best == 0 || d < best) {
 			best = d
 		}
@@ -220,7 +313,7 @@ func main() {
 	dir := flag.String("dir", "internal/model/.cache/smollm2-135m", "model export dir")
 	out := flag.String("out", "", "write JSON result here (default stdout)")
 	prefillReps := flag.Int("prefill-reps", 4, "reps per prefill size (median)")
-	decodeReps := flag.Int("decode-reps", 25, "interleaved decode reps (min headline)")
+	decodeReps := flag.Int("decode-reps", 25, "interleaved decode reps (median headline)")
 	decodeSteps := flag.Int("decode-steps", 32, "tokens to decode")
 	decodePrompt := flag.Int("decode-prompt", 16, "prompt length before decode")
 	expDir := flag.String("exp", "experiments/model-baseline", "dir holding hf.json / hf-int8.json for the verdict")
@@ -228,6 +321,12 @@ func main() {
 	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
 	*dir = pathutil.ExpandTilde(*dir)
 	prefillSizes := []int{16, 64, 256}
+
+	doc, err := readRequiredOracle(*dir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "oracle:", err)
+		os.Exit(1)
+	}
 
 	t0 := time.Now()
 	m, err := model.Load(*dir)
@@ -254,37 +353,23 @@ func main() {
 	}
 
 	// ---- correctness gate (deterministic, contention-independent) --------
-	var doc oracleDoc
-	b, rerr := os.ReadFile(filepath.Join(*dir, "oracle.json"))
-	correctnessOK := true
 	var checks []promptCheck
 	totalPos, totalMatch := 0, 0
-	if rerr == nil {
-		_ = json.Unmarshal(b, &doc)
-		for _, p := range doc.Prompts {
-			pc := checkPromptQuant(m, *dir, p, vocab)
-			checks = append(checks, pc)
-			totalPos += pc.Positions
-			totalMatch += pc.ArgmaxMatches
-			if pc.ArgmaxMatches != pc.Positions {
-				correctnessOK = false
-			}
-			fmt.Fprintf(os.Stderr, "[int8 correctness] prompt %d: argmax %d/%d  greedy %d/%d  last|Δ|=%.4f argmaxOK=%v\n",
-				pc.Index, pc.ArgmaxMatches, pc.Positions, pc.GreedyAgree, pc.GreedyTotal, pc.LastMaxAbsDiff, pc.LastArgmaxOK)
-		}
-		fmt.Fprintf(os.Stderr, "[int8 correctness] TOTAL argmax %d/%d -> %s\n", totalMatch, totalPos,
-			map[bool]string{true: "ARGMAX-EXACT vs HF oracle", false: "ARGMAX DRIFT"}[correctnessOK])
-	} else {
-		fmt.Fprintln(os.Stderr, "[int8 correctness] no oracle.json; skipping correctness gate")
+	for _, p := range doc.Prompts {
+		pc := checkPromptQuant(m, *dir, p, vocab)
+		checks = append(checks, pc)
+		totalPos += pc.Positions
+		totalMatch += pc.ArgmaxMatches
+		fmt.Fprintf(os.Stderr, "[int8 correctness] prompt %d: argmax %d/%d  greedy %d/%d  last|Δ|=%.4f argmaxOK=%v\n",
+			pc.Index, pc.ArgmaxMatches, pc.Positions, pc.GreedyAgree, pc.GreedyTotal, pc.LastMaxAbsDiff, pc.LastArgmaxOK)
 	}
+	correctnessOK := totalPos > 0 && totalMatch == totalPos
+	fmt.Fprintf(os.Stderr, "[int8 correctness] TOTAL argmax %d/%d -> %s\n", totalMatch, totalPos,
+		map[bool]string{true: "ARGMAX-EXACT vs HF oracle", false: "ARGMAX DRIFT"}[correctnessOK])
 
 	// ---- speed --------------------------------------------------------------
 	f32D, q8D := interleavedDecode(m, *decodePrompt, *decodeSteps, *decodeReps, vocab)
-	mkDec := func(msMin float64) decodeResult {
-		return decodeResult{PromptTokens: *decodePrompt, DecodeSteps: *decodeSteps, Reps: *decodeReps,
-			PerTokenMedMS: msMin, TokPerSec: 1.0 / (msMin / 1e3)}
-	}
-	f32Dec, q8Dec := mkDec(f32D[0]), mkDec(q8D[0])
+	f32Dec, q8Dec := decodeSummaries(f32D, q8D, *decodePrompt, *decodeSteps, *decodeReps)
 	fmt.Fprintf(os.Stderr, "[decode min ms/tok] f32=%.2f  int8=%.2f   (median: %.2f / %.2f)\n", f32D[0], q8D[0], f32D[1], q8D[1])
 	prefAll := func(quant bool, tag string) []prefillResult {
 		var prefs []prefillResult
@@ -299,10 +384,9 @@ func main() {
 	q8Pre := prefAll(true, "int8")
 
 	// ---- verdict vs the HF peers -------------------------------------------
-	hfF32 := hfBestDecode(filepath.Join(*expDir, "hf.json"))
-	hfInt8 := hfBestDecode(filepath.Join(*expDir, "hf-int8.json"))
-	beatsHFInt8 := hfInt8 > 0 && q8Dec.PerTokenMedMS < hfInt8
-	beatsHFf32 := hfF32 > 0 && q8Dec.PerTokenMedMS < hfF32
+	hfF32 := hfBestDecode(filepath.Join(*expDir, "hf.json"), *decodePrompt, *decodeSteps, *decodeReps)
+	hfInt8 := hfBestDecode(filepath.Join(*expDir, "hf-int8.json"), *decodePrompt, *decodeSteps, *decodeReps)
+	decision := decideQ8Bench(totalPos, totalMatch, q8Dec.PerTokenMedMS, hfInt8, hfF32)
 
 	report := map[string]any{
 		"app_version": appversion.Current(),
@@ -318,20 +402,15 @@ func main() {
 			"f32":  f32D,
 			"int8": q8D,
 		},
-		"decode_speedup_min_f32_over_int8": f32Dec.PerTokenMedMS / q8Dec.PerTokenMedMS,
+		"decode_speedup_min_f32_over_int8":    f32D[0] / q8D[0],
+		"decode_speedup_median_f32_over_int8": f32Dec.PerTokenMedMS / q8Dec.PerTokenMedMS,
 		"correctness": map[string]any{
 			"gate_argmax_exact_vs_hf_oracle": correctnessOK,
 			"total_positions":                totalPos,
 			"total_argmax_matches":           totalMatch,
 			"per_prompt":                     checks,
 		},
-		"verdict": map[string]any{
-			"hf_f32_best_decode_ms":  hfF32,
-			"hf_int8_best_decode_ms": hfInt8,
-			"fak_int8_decode_ms_min": q8Dec.PerTokenMedMS,
-			"beats_hf_int8":          beatsHFInt8,
-			"beats_hf_f32":           beatsHFf32,
-		},
+		"verdict": decision.verdictReport(q8Dec.PerTokenMedMS, hfInt8, hfF32),
 	}
 	jb, _ := benchcli.MarshalReport(report)
 	if *out != "" {
@@ -343,9 +422,8 @@ func main() {
 	} else {
 		fmt.Println(string(jb))
 	}
-	fmt.Fprintf(os.Stderr, "\nVERDICT  fak int8 decode(min)=%.2f ms/tok | HF int8=%.2f (beat=%v) | HF f32=%.2f (beat=%v) | argmax-exact=%v\n",
-		q8Dec.PerTokenMedMS, hfInt8, beatsHFInt8, hfF32, beatsHFf32, correctnessOK)
-	if !correctnessOK {
-		os.Exit(2) // argmax drift in the shipped int8 path is a hard failure
+	fmt.Fprintln(os.Stderr, "\n"+decision.humanVerdict(q8Dec.PerTokenMedMS, hfInt8, hfF32))
+	if decision.ExitCode != 0 {
+		os.Exit(decision.ExitCode) // argmax drift in the shipped int8 path is a hard failure
 	}
 }
