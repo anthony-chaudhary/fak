@@ -433,7 +433,11 @@ func TestServeQ4KStandardArchUsesDeviceResidentNotOffloadPlan(t *testing.T) {
 }
 
 func TestFitServeGGUFOnDeviceRawPlanAndUnknownCapacityFailOpen(t *testing.T) {
-	ws := serveSynthWeightSource(t)
+	// The resident-Q4K arm derives storage from the header Config since #11962
+	// (4aa1a694a3), so a metadata-less source is a malformed input there, not a raw
+	// plan. The configured source has the same two tensors; its unmapped names keep
+	// the estimator on the raw/lean payload admission this test pins.
+	ws := serveSynthConfiguredWeightSource(t)
 	fitsRaw := serveCapBackend{Backend: compute.Default(), total: 2 << 20, free: 2 << 20, known: true}
 	if err := fitServeGGUFOnDevice(ws, fitsRaw, false, 0); err != nil {
 		t.Fatalf("raw/lean GGUF plan should fit the 2 MiB test backend, got %v", err)
@@ -584,6 +588,15 @@ func TestFitServeGGUFPathOnHostRefusesExpandingQ8Load(t *testing.T) {
 	dir := t.TempDir()
 	udPath := filepath.Join(dir, "qwen38-27b-ud-q2kxl.gguf")
 	writeSynth27BGGUF(t, udPath, true)
+
+	// The host arm selects resident Q4_K for UD-Q2_K_XL only on a Metal host (or with
+	// an explicit FAK_Q4K opt-in) since #12568/#12615; elsewhere it takes the expanding
+	// Q8 arm. Pin the Metal-host premise this scenario describes so the verdict does not
+	// depend on the runner's GPU or ambient FAK_Q4K.
+	original := serveMetalAvailable
+	serveMetalAvailable = func() bool { return true }
+	t.Cleanup(func() { serveMetalAvailable = original })
+	t.Setenv("FAK_Q4K", "")
 
 	// In resident mode, 27B UD-Q2_K_XL weights (~9.53 GiB) admit on 36 GiB host.
 	if err := fitServeGGUFPathOnReportedHost(udPath, false, 0, 36*gib, 36*gib, true, nil); err != nil {
