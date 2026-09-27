@@ -68,6 +68,8 @@ var WorkflowKinds = map[string]string{
 	"shared-tree-clobber": "a peer's concurrent edit or stage on the shared trunk overwrote or raced this agent's work",
 	"tool-timeout":        "a tool or command that timed out or hung long enough to stall the loop",
 	"lane-collision":      "two workers contending on the same files or lease so one had to back off or redo work",
+	"completion-blocker":  "a refusal or workflow condition that prevents an otherwise bounded task from completing after its safe recovery paths are exhausted",
+	"catch-22":            "a recovery path that requires the same unavailable capability, permission, state, or action whose absence caused the original block",
 	"other":               "agentic-dev friction worth tracking that fits no other workflow kind",
 }
 
