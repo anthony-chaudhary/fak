@@ -210,7 +210,7 @@ fak worktree worker land --worktree <dir> [flags]
 - `--base-sha <sha>`: Commit SHA the worktree was pinned at (diff base; default: `HEAD`).
 - `--msg-file <file>`: Commit message file for `git commit -s -F` (defaults to worktree tip message).
 - `--paths <path>`: Scopes the commit to specific paths; repeatable (default: entire applied diff).
-- `--verify <hook>`: Pre-land verification executed inside the worktree (`off` or `go-build`).
+- `--verify <hook>`: Pre-land verification executed inside the worktree (`off` or `go-build`). Use `off` only for a pre-existing red: the same packages fail with the same first error on the landing base, and every condition and receipt in `.claude/skills/commit-clean/SKILL.md` "Pre-existing red" holds.
 - `--core-lock-maintenance-witness <claim>`: Witness claim required when modifying core-locked paths.
 - `--recovery-remote <remote>`: Git remote receiving candidate recovery ref before trunk CAS.
 - `--require-remote-recovery`: Refuses trunk CAS if remote candidate read-back fails.

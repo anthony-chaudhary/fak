@@ -308,7 +308,7 @@ func commitBuildCheckAdvice(reason string) string {
 	case safecommit.ReasonBuildCheckTimeout:
 		return "fak commit: prospective validation did not finish, so nothing here says this commit is green. This is retryable (exit 3): run the `fak validate --mine ...` command above, or pass --allow-build-check-timeout (env FAK_COMMIT_BUILD_CHECK=allow-timeout) to land it UNCHECKED on purpose. --allow-build-check-timeout is recorded in --json as build_check.failed_open; --no-build-check disables the admission gate."
 	default:
-		return "fak commit: the exact owned delta failed prospective build, vet, formatting, or affected tests before the real index changed. Run the `fak validate --mine ...` command above and fix the named phase; use --no-build-check only for an intentional unchecked landing."
+		return "fak commit: the exact owned delta failed prospective build, vet, formatting, or affected tests before the real index changed. Run the `fak validate --mine ...` command above and fix the named phase; use --no-build-check only for an intentional unchecked landing, such as a pre-existing red in the test step only (never build, vet, gofmt, or strix-validation) that meets every condition in .claude/skills/commit-clean/SKILL.md, section Pre-existing red."
 	}
 }
 
