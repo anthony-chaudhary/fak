@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,8 +60,8 @@ func TestGuardReplayShippedFloorDeniesEveryFixtureDanger(t *testing.T) {
 			}
 			v := adj.Adjudicate(context.Background(), &abi.ToolCall{Tool: c.Tool, Args: ref})
 			if c.ExpectAllow() {
-				if v.Kind != abi.VerdictAllow {
-					t.Errorf("call %s (%s %s): shipped floor gave %v, want ALLOW", c.ID, c.Tool, c.ArgPreview(), v.Kind)
+				if ok, why := floorAdmits(c.Tool, v); !ok {
+					t.Errorf("call %s (%s %s): shipped floor did not admit it (%s), want ALLOW", c.ID, c.Tool, c.ArgPreview(), why)
 				}
 				continue
 			}
@@ -76,6 +77,43 @@ func TestGuardReplayShippedFloorDeniesEveryFixtureDanger(t *testing.T) {
 	}
 }
 
+// floorNativeReroutes is the sanctioned in-syscall re-route table the shipped floor applies to
+// native read-family tools: since #11150 (commit 306d37f125) a Read is transparently rewritten
+// to fak_read, and since #11499 (commit 7fa61ef91c) grep/glob-family calls to fak_grep/fak_glob
+// (internal/adjudicator/decide.go). Keys are lower-cased tool names.
+var floorNativeReroutes = map[string]string{
+	"read": "fak_read",
+	"grep": "fak_grep", "rg": "fak_grep", "ripgrep": "fak_grep", "search": "fak_grep",
+	"glob": "fak_glob", "find": "fak_glob",
+}
+
+// floorAdmits reports whether a floor verdict ADMITS tool, in the same sense the gateway
+// counts a call as admitted (internal/gateway/adjudicate_proposed.go treats ALLOW and TRANSFORM
+// alike): a bare ALLOW, or a TRANSFORM that re-routes a native read-family tool to its
+// sanctioned fak_* twin. A TRANSFORM to any other tool, or one with no substitute, does NOT
+// count, so a rewrite can never pass as "allowed" by accident. The second result says why not.
+func floorAdmits(tool string, v abi.Verdict) (bool, string) {
+	switch v.Kind {
+	case abi.VerdictAllow:
+		return true, ""
+	case abi.VerdictTransform:
+		want, ok := floorNativeReroutes[strings.ToLower(tool)]
+		if !ok {
+			return false, fmt.Sprintf("TRANSFORM of %q, which has no sanctioned fak_* re-route", tool)
+		}
+		tp, ok := v.Payload.(abi.TransformPayload)
+		if !ok {
+			return false, fmt.Sprintf("TRANSFORM with payload %T, want abi.TransformPayload", v.Payload)
+		}
+		if tp.NewTool != want {
+			return false, fmt.Sprintf("TRANSFORM to %q, want the sanctioned re-route %q", tp.NewTool, want)
+		}
+		return true, ""
+	default:
+		return false, fmt.Sprintf("verdict %v (%s)", v.Kind, abi.ReasonName(v.Reason))
+	}
+}
+
 // TestGuardReplayRunsCleanOnBothWires drives the full runGuardReplay end to end over the
 // shared fixture on both wires and asserts it reports success (exit 0) and prints the
 // per-call verdicts, the exit summary, and the verified journal — the observable
@@ -85,6 +123,11 @@ func TestGuardReplayRunsCleanOnBothWires(t *testing.T) {
 	// after so it does not leak into a sibling test that assumes a clean boot (e.g.
 	// TestGuardEnableAuditEnablesVerifiableTrail).
 	t.Cleanup(journal.ResetActiveForTest)
+	// ...and start from one: journal.Enable is idempotent, so a journal some earlier test left
+	// active (an in-process guard run with --audit <its TempDir>) would be reused, the report
+	// would name that foreign path instead of the fak-guard-replay- default asserted below, and
+	// verification would fail once that test's TempDir is gone.
+	journal.ResetActiveForTest()
 	for _, wire := range []string{"anthropic", "openai"} {
 		t.Run(wire, func(t *testing.T) {
 			t.Cleanup(journal.ResetActiveForTest)

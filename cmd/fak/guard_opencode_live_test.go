@@ -116,6 +116,20 @@ func TestOpencodeLiveGatewayWireTransitWitness(t *testing.T) {
 	tempDir := t.TempDir()
 	auditFile := filepath.Join(tempDir, "fak-audit.jsonl")
 	logFile := filepath.Join(tempDir, "gw.log")
+	// The guard below runs IN-PROCESS, so the process-global state a real `fak guard` process
+	// sets for its own lifetime would otherwise outlive this test. Registered after t.TempDir
+	// so these cleanups run BEFORE the temp dir is removed (LIFO).
+	//   - the decision journal: --audit Enables the process-global journal at auditFile, and
+	//     journal.Enable is idempotent, so every later journal.Enable in the package (e.g.
+	//     runGuardReplay) silently reused this test's file — which t.TempDir then deleted, so
+	//     TestGuardReplayRunsCleanOnBothWires failed "journal chain FAILED to verify: open
+	//     .../TestOpencodeLiveGatewayWireTransitWitness.../fak-audit.jsonl: no such file".
+	//     Closing it here also releases the handle so the temp dir can be removed on Windows.
+	//   - the env the guard normalizes its flags into (timeout floors, scratchpad roots, ...).
+	//   - the default adjudicator floor the guard installs.
+	preserveGuardDefaultPolicy(t)
+	restoreProcessEnvOnCleanup(t)
+	t.Cleanup(journal.ResetActiveForTest)
 	t.Setenv("TEST_UPSTREAM_KEY", upstreamKey)
 
 	// Pick a free local port for the gateway
@@ -129,7 +143,18 @@ func TestOpencodeLiveGatewayWireTransitWitness(t *testing.T) {
 	// 3. Launch the in-process gateway by invoking guard with a mock child.
 	// We run guard in a goroutine and perform a client query through it.
 	guardDone := make(chan int, 1)
+	guardExited := make(chan struct{})
+	// Registered after the state-restoring cleanups above, so it runs FIRST: never restore the
+	// journal/env/floor out from under a guard goroutine that is still tearing down.
+	t.Cleanup(func() {
+		select {
+		case <-guardExited:
+		case <-time.After(30 * time.Second):
+			t.Log("in-process guard still running at cleanup; its process-global state may leak")
+		}
+	})
 	go func() {
+		defer close(guardExited)
 		childCmd := "cmd"
 		childArgs := []string{"/c", "echo", "opencode-child-running"}
 		if runtime.GOOS != "windows" {
@@ -250,6 +275,35 @@ func TestOpencodeLiveGatewayWireTransitWitness(t *testing.T) {
 		}
 		t.Logf("audit journal verified: %d hash-chained rows intact", n)
 	}
+}
+
+// restoreProcessEnvOnCleanup snapshots the whole process environment and puts it back at
+// cleanup: variables the test run added are unset, changed or removed ones are restored. An
+// in-process guard normalizes flags into env exactly as a real guard process does (e.g. the
+// FAK_HTTP_WRITE_TIMEOUT_S / FAK_PLANNER_TIMEOUT_S / FAK_STREAM_STALL_TIMEOUT_S floors and
+// FAK_GUARD_SCRATCHPAD_ROOTS), and later tests plus every child they exec inherit os.Environ.
+// Windows' hidden per-drive "=C:" entries have an empty key and are left alone.
+func restoreProcessEnvOnCleanup(t *testing.T) {
+	t.Helper()
+	before := map[string]string{}
+	for _, kv := range os.Environ() {
+		if k, v, _ := strings.Cut(kv, "="); k != "" {
+			before[k] = v
+		}
+	}
+	t.Cleanup(func() {
+		for _, kv := range os.Environ() {
+			k, _, _ := strings.Cut(kv, "=")
+			if _, kept := before[k]; k != "" && !kept {
+				_ = os.Unsetenv(k)
+			}
+		}
+		for k, v := range before {
+			if cur, ok := os.LookupEnv(k); !ok || cur != v {
+				_ = os.Setenv(k, v)
+			}
+		}
+	})
 }
 
 func runGuardLaunch(argv []string, stdout, stderr io.Writer) int {
