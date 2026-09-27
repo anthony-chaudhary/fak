@@ -79,3 +79,32 @@ body:
           required: true
         - label: I understand this may become a public replay fixture if accepted.
           required: true
+  - type: dropdown
+    id: process-cause
+    attributes:
+      label: Development process cause
+      description: Choose the primary development-process cause. This is independent of the product area or issue type.
+      options:
+        - "Process cause: concurrency"
+        - "Process cause: infrastructure-lag"
+        - "Process cause: model-failure"
+        - "Process cause: harness-failure"
+        - "Process cause: scoping-failure"
+        - "Process cause: verification-gap"
+        - "Process cause: handoff-failure"
+        - "Process cause: other"
+        - "Process cause: unknown"
+        - "Process cause: none"
+    validations:
+      required: true
+  - type: dropdown
+    id: process-cause-detail
+    attributes:
+      label: Concurrency detail
+      description: Select exactly one only when the primary cause is concurrency; otherwise leave this blank.
+      options:
+        - "Process cause detail: shared-state"
+        - "Process cause detail: lease-contention"
+        - "Process cause detail: integration-order"
+        - "Process cause detail: resource-contention"
+        - "Process cause detail: ownership-overlap"

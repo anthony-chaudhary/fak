@@ -1,0 +1,37 @@
+name: issue-process-cause
+
+# GitHub issue forms can require a selection but cannot derive a dynamic label
+# from it. This event path closes that gap for form, API, and transferred issues.
+# Invalid declarations are reversibly quarantined: the issue gets a repair label,
+# an actionable comment, and is closed. Editing it to a valid declaration removes
+# the repair label, installs exactly one process-cause:* label, and reopens it.
+on:
+  issues:
+    types: [opened, edited, reopened, transferred]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: issue-process-cause-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: validate body and reconcile process-cause label
+    if: ${{ github.repository == 'anthony-chaudhary/fak' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Validate and reconcile
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: go run ./cmd/fak-dev issue reconcile-process-cause --event-file "$GITHUB_EVENT_PATH"

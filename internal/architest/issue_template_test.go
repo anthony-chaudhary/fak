@@ -444,7 +444,7 @@ func TestHumanIssueTemplatesPromptForCanonicalProblemFrame(t *testing.T) {
 	// joined the canonical packet with #10590 (docs/standards/risk-assessment.md) —
 	// proportionate change assessment sits between done-condition and witness-context.
 	// execution-boundary joined with #10965 for shift-left resource requirements.
-	workerReadyIDs := []string{"parent-context", "generation", "problem_frame", "current-state", "why-next", "working-spine", "priority-context", "work-unit", "expected-steps", "assumptions", "confusion-risks", "coordination-notes", "trigger", "batch-policy", "in-scope", "out-of-scope", "done-condition", "risk-assessment", "witness-context", "witness-envelope", "baseline-artifact", "declared-lever", "candidate-artifact", "promotion-gate", "durable-witness", "rejected-levers", "witness-exception", "witness", "acceptance-gate", "lane", "path-hints", "hot-tree-owning-lanes", "hot-tree-contention-check", "hot-tree-partition", "hot-tree-commit-recipe", "execution-boundary", "boundary-notes", "closure-binding", "final-checks"}
+	workerReadyIDs := []string{"parent-context", "generation", "problem_frame", "current-state", "why-next", "working-spine", "priority-context", "work-unit", "expected-steps", "assumptions", "confusion-risks", "coordination-notes", "trigger", "batch-policy", "in-scope", "out-of-scope", "done-condition", "risk-assessment", "witness-context", "witness-envelope", "baseline-artifact", "declared-lever", "candidate-artifact", "promotion-gate", "durable-witness", "rejected-levers", "witness-exception", "witness", "acceptance-gate", "lane", "path-hints", "hot-tree-owning-lanes", "hot-tree-contention-check", "hot-tree-partition", "hot-tree-commit-recipe", "execution-boundary", "boundary-notes", "closure-binding", "final-checks", "process-cause", "process-cause-detail"}
 	for _, name := range []string{"feature-request.yml", "bug-report.yml", "worker-ready-issue.yml"} {
 		data, err := os.ReadFile(filepath.Join(root, ".github", "ISSUE_TEMPLATE", name))
 		if err != nil {
@@ -472,6 +472,116 @@ func TestHumanIssueTemplatesPromptForCanonicalProblemFrame(t *testing.T) {
 		}
 		if !strings.Contains(body, "Enabling") || !strings.Contains(body, "name the Core outcome") || !strings.Contains(body, "Stewardship") || !strings.Contains(body, "name the obligation") {
 			t.Errorf("%s does not explain targeted centrality classes", name)
+		}
+	}
+}
+
+func TestEveryIssueFormRequiresCanonicalProcessCause(t *testing.T) {
+	root := filepath.Dir(internalDir(t))
+	dir := filepath.Join(root, ".github", "ISSUE_TEMPLATE")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	primaries := []string{
+		"concurrency", "infrastructure-lag", "model-failure", "harness-failure",
+		"scoping-failure", "verification-gap", "handoff-failure", "other", "unknown", "none",
+	}
+	details := []string{"shared-state", "lease-contention", "integration-order", "resource-contention", "ownership-overlap"}
+	checked := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || name == "config.yml" || (filepath.Ext(name) != ".yml" && filepath.Ext(name) != ".yaml") {
+			continue
+		}
+		raw, readErr := os.ReadFile(filepath.Join(dir, name))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		body := string(raw)
+		checked++
+		for _, want := range []string{"\n    id: process-cause\n", "label: Development process cause", "\n    id: process-cause-detail\n", "label: Concurrency detail"} {
+			if strings.Count(body, want) != 1 {
+				t.Errorf("%s must contain exactly one %q", name, want)
+			}
+		}
+		causeAt := strings.Index(body, "id: process-cause\n")
+		detailAt := strings.Index(body, "id: process-cause-detail\n")
+		if causeAt < 0 || detailAt < 0 || causeAt >= detailAt {
+			t.Errorf("%s process-cause fields are missing or out of order", name)
+			continue
+		}
+		causeBlock := body[causeAt:detailAt]
+		if !strings.Contains(causeBlock, "validations:\n      required: true") {
+			t.Errorf("%s process-cause selection is not required", name)
+		}
+		var wantPrimaryOptions []string
+		for _, primary := range primaries {
+			wantPrimaryOptions = append(wantPrimaryOptions, "Process cause: "+primary)
+		}
+		if got := quotedOptionsWithPrefix(causeBlock, "Process cause: "); !reflect.DeepEqual(got, wantPrimaryOptions) {
+			t.Errorf("%s process-cause options mismatch:\n got: %v\nwant: %v", name, got, wantPrimaryOptions)
+		}
+		detailBlock := body[detailAt:]
+		var wantDetailOptions []string
+		for _, detail := range details {
+			wantDetailOptions = append(wantDetailOptions, "Process cause detail: "+detail)
+		}
+		if got := quotedOptionsWithPrefix(detailBlock, "Process cause detail: "); !reflect.DeepEqual(got, wantDetailOptions) {
+			t.Errorf("%s concurrency-detail options mismatch:\n got: %v\nwant: %v", name, got, wantDetailOptions)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no issue forms checked")
+	}
+	config, err := os.ReadFile(filepath.Join(dir, "config.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := topLevelScalar(string(config), "blank_issues_enabled"); !ok || got != "false" {
+		t.Fatalf("blank issues must be disabled so process-cause selection cannot be bypassed; got %q present=%v", got, ok)
+	}
+}
+
+func quotedOptionsWithPrefix(block, prefix string) []string {
+	var options []string
+	for _, raw := range strings.Split(block, "\n") {
+		line := strings.TrimSpace(raw)
+		if !strings.HasPrefix(line, "- \""+prefix) || !strings.HasSuffix(line, "\"") {
+			continue
+		}
+		options = append(options, strings.TrimSuffix(strings.TrimPrefix(line, "- \""), "\""))
+	}
+	return options
+}
+
+func topLevelScalar(doc, key string) (string, bool) {
+	for _, raw := range strings.Split(doc, "\n") {
+		if raw == "" || raw[0] == ' ' || raw[0] == '\t' || raw[0] == '#' {
+			continue
+		}
+		name, value, ok := strings.Cut(raw, ":")
+		if ok && strings.TrimSpace(name) == key {
+			return strings.TrimSpace(strings.SplitN(value, "#", 2)[0]), true
+		}
+	}
+	return "", false
+}
+
+func TestIssueProcessCauseWorkflowWiresNativeReconciler(t *testing.T) {
+	root := filepath.Dir(internalDir(t))
+	raw, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "issue-process-cause.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(raw)
+	for _, want := range []string{
+		"types: [opened, edited, reopened, transferred]",
+		"issues: write",
+		"go run ./cmd/fak-dev issue reconcile-process-cause --event-file \"$GITHUB_EVENT_PATH\"",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("issue-process-cause workflow missing %q", want)
 		}
 	}
 }

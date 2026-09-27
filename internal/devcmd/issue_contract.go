@@ -31,6 +31,8 @@ func RunIssue(stdout, stderr io.Writer, argv []string) int {
 		return runIssueContractSections(stdout, stderr, argv[1:])
 	case "reconcile":
 		return runIssueReconcile(stdout, stderr, argv[1:])
+	case "reconcile-process-cause":
+		return runIssueProcessCauseReconcile(stdout, stderr, argv[1:])
 	case "cohort":
 		return runIssueCohort(stdout, stderr, argv[1:])
 	case "fanout":
@@ -1276,6 +1278,7 @@ func issueUsage(w io.Writer) {
   fak-dev issue create   --title T (--body B | --body-file F) [--labels l1,l2] [--category C --layer L]
                      [--repo owner/name] [--dry-run] [--json]
                      [--dedupe-checked --dedupe-cap N --dedupe-threshold F --dedupe-warn-only]
+  fak-dev issue reconcile-process-cause --event-file GITHUB_EVENT.json [--dry-run] [--json]
   fak-dev issue draft    --lane L [--title T] [--slug S] [--out DIR]
                      [--dedupe-checked --dedupe-cap N] [--repo owner/name] [--dry-run] [--json]
   fak-dev issue edit     --issue N [--title T] [--body B | --body-file F]
