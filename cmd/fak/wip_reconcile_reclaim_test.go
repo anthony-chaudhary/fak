@@ -26,36 +26,44 @@ import (
 // it back OUT of the working tree, so the recorded patch applies to the tree again. That
 // is the narrow window §1 of the ticket says the fleet loses by default.
 //
+// Each RECLAIM delta ADDS a file HEAD does not carry. Since #10075 an unscoped checkpoint's
+// payload is measured from its delta, and a payload file HEAD carries with different bytes
+// is DIVERGED, which reconcile quarantines before it ever asks whether the patch applies
+// (#5940, wiprecon.Decide). A tracked-file edit would therefore read QUARANTINE, not
+// RECLAIM; an absent-from-HEAD file is the at-risk salvage RECLAIM exists to recover.
+//
 // It returns the repo dir and the `now` the ages are measured against.
 func wipReclaimFixture(t *testing.T) (string, time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	dir, file := wipTestRepo(t)
+	dir, _ := wipTestRepo(t)
 	now := time.Now()
 	base := now.Add(-8 * time.Hour).Unix()
 
-	// alpha: a tracked delta captured on HEAD0, then withdrawn from the tree.
-	if err := os.WriteFile(file, []byte("base line\nedit A\n"), 0o644); err != nil {
+	// alpha: a new-file delta captured on HEAD0, then withdrawn from the tree.
+	alphaFile := filepath.Join(dir, "alpha.txt")
+	if err := os.WriteFile(alphaFile, []byte("edit A\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if r, err := wipCheckpoint(ctx, dir, "alpha", true, base); err != nil || r.Object == "" {
 		t.Fatalf("checkpoint alpha: %v (%+v)", err, r)
 	}
-	if err := os.WriteFile(file, []byte("base line\n"), 0o644); err != nil {
+	if err := os.Remove(alphaFile); err != nil {
 		t.Fatal(err)
 	}
 
 	// Advance HEAD by one unrelated commit so alpha's base drifts and bravo's does not.
 	wipReclaimAdvanceHEAD(t, ctx, dir, "other.txt", "unrelated\n")
 
-	// bravo: a tracked delta captured on HEAD1 (zero drift), then withdrawn.
-	if err := os.WriteFile(file, []byte("base line\nedit B\n"), 0o644); err != nil {
+	// bravo: a new-file delta captured on HEAD1 (zero drift), then withdrawn.
+	bravoFile := filepath.Join(dir, "bravo.txt")
+	if err := os.WriteFile(bravoFile, []byte("edit B\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if r, err := wipCheckpoint(ctx, dir, "bravo", true, now.Add(-1*time.Hour).Unix()); err != nil || r.Object == "" {
 		t.Fatalf("checkpoint bravo: %v (%+v)", err, r)
 	}
-	if err := os.WriteFile(file, []byte("base line\n"), 0o644); err != nil {
+	if err := os.Remove(bravoFile); err != nil {
 		t.Fatal(err)
 	}
 
