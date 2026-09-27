@@ -36,6 +36,7 @@ const (
 type Server struct {
 	mu           sync.RWMutex
 	cfg          *config.Config
+	mgrCfg       shard.ManagerConfig
 	shardManager *shard.Manager
 	metrics      *metrics.Collector
 	status       atomic.Value
@@ -75,6 +76,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 
 	s := &Server{
 		cfg:          cfg,
+		mgrCfg:       mgrCfg,
 		shardManager: manager,
 		metrics:      collector,
 	}
@@ -83,6 +85,12 @@ func NewServer(cfg *config.Config) (*Server, error) {
 }
 
 // Start begins serving cache traffic across all configured shards.
+//
+// Start is idempotent in the sense that a Stop/Start cycle is supported: the
+// shard manager owns single-shot lifecycle channels (quit/done) and its shards'
+// allocators are released on Stop, so a restart provisions a fresh manager
+// rather than reusing a torn-down one. A Start while already running is
+// refused, matching the existing "server is already running" contract.
 func (s *Server) Start(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -92,16 +100,26 @@ func (s *Server) Start(ctx context.Context) error {
 		return fmt.Errorf("l3server: server is already running")
 	}
 
+	// A previous Stop released the manager (and its shard allocators); build a
+	// fresh one so the single-shot channels are never closed twice.
+	if s.shardManager == nil {
+		manager, err := shard.NewManager(s.mgrCfg)
+		if err != nil {
+			return fmt.Errorf("l3server: reinitialize shard manager: %w", err)
+		}
+		s.shardManager = manager
+	}
+
 	s.status.Store(StatusStarting)
 	s.startedAt = time.Now().UTC()
-	if s.shardManager != nil {
-		s.shardManager.Start()
-	}
+	s.shardManager.Start()
 	s.status.Store(StatusRunning)
 	return nil
 }
 
 // Stop initiates graceful termination of all shards and frees memory mappings.
+// Stop is idempotent: a Stop on an already-stopped server is a no-op, and the
+// released manager is dropped so the next Start provisions a fresh one.
 func (s *Server) Stop(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -112,11 +130,13 @@ func (s *Server) Stop(ctx context.Context) error {
 	}
 
 	s.status.Store(StatusStopping)
-	defer s.status.Store(StatusStopped)
-
 	if s.shardManager != nil {
 		s.shardManager.Stop()
+		// Drop the stopped manager so a subsequent Start rebuilds one with
+		// fresh lifecycle channels and allocators.
+		s.shardManager = nil
 	}
+	s.status.Store(StatusStopped)
 	return nil
 }
 
