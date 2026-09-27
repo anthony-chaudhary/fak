@@ -685,3 +685,59 @@ The closed promotion-candidate taxonomy a scratchpad artifact is classified into
 The optional callback field v41ForwardState.expertGateUp (v41_forward.go), bound by Session.v41ExpertGateUpFunc when the session advertises a DeviceMemory backend; both the token-major and expert-major V4.1 routed contractions offer each routed row to it so the device gate/up + SwiGLU run on the backend while the host down contraction stays on the host.
 
 **Distinct from:** The OPTIONAL per-row device gate/up + SwiGLU callback a V4.1 session installs (v41ForwardState.expertGateUp); a compute-engine SEAM that runs a routed expert's gate/up projections on the device, NOT the adjudication guard, NOT the FFN load-time gateUp locals, and NOT a routing gate.
+
+
+### verifyTopologyCandidate (land-verify candidate checkout)
+
+internal/workerworktree.verifyTopologyCandidate materializes the exact tree a land is about to publish as a detached verify-only git worktree named .fak-cand-validate-<pid>-<start>-<n> beside the repository (or in the system temp directory), runs the verify hook in it, and removes it afterwards.
+
+**Distinct from:** A disposable VERIFY CHECKOUT of a land's prospective tree - NOT the planner Candidate (a scored context span), not a dispatch or issue candidate, and not the worker worktree whose diff is being landed.
+
+
+### SweepTopologyCandidates (leaked verify-checkout collector)
+
+internal/workerworktree.SweepTopologyCandidates classifies every .fak-cand-validate-* verify checkout in a parent directory and, under Apply, removes those whose owner process is gone, then prunes their git worktree registrations.
+
+**Distinct from:** Collects leaked land-verify checkouts by owner liveness - NOT the owner-stamped worker-worktree GC and not the lease-based cold reap, which only see fak-worker-wt-* worktrees.
+
+
+### CandidateSweepOptions (verify-checkout sweep knobs)
+
+internal/workerworktree.CandidateSweepOptions carries the clock, legacy age floor, apply opt-in, removal limit, and process-liveness probes for SweepTopologyCandidates.
+
+**Distinct from:** Options for the verify-checkout sweep only - NOT GCOptions (owner-stamped worker GC) and not a planner candidate configuration.
+
+
+### LegacyCandidateMaxAge (verify-checkout legacy age floor)
+
+internal/workerworktree.LegacyCandidateMaxAge (2h) is how long a verify checkout whose name carries no owner pid/start must sit untouched before the sweep collects it.
+
+**Distinct from:** An age floor only for owner-less legacy verify checkouts - NOT DefaultColdAgeFloor (worker-worktree cold reap) and not a planner retry or budget window.
+
+
+### TopologyCandidateParent (verify-checkout parent directory)
+
+internal/workerworktree.TopologyCandidateParent returns where a repository's verify checkouts are created: beside the repository when its go.work escapes it, otherwise the system temp directory.
+
+**Distinct from:** Resolves the directory verify checkouts live in - NOT the worker-worktree root (DefaultRoot) and not a path to one checkout.
+
+
+### topologyCandidatePattern (owner-named verify-checkout name)
+
+internal/workerworktree.topologyCandidatePattern is the os.MkdirTemp pattern .fak-cand-validate-<pid>-<start base36>-* that encodes the creating process identity in each verify checkout name.
+
+**Distinct from:** The naming scheme that makes owner liveness provable after a kill - NOT the legacy bare .fak-cand-validate-* name and not a worker-worktree owner stamp sidecar.
+
+
+### cleanupTopologyCandidate (verify-checkout deferred cleanup)
+
+internal/workerworktree.cleanupTopologyCandidate is verifyTopologyCandidate's deferred cleanup: git worktree remove, then a retried directory removal, then prune only once the directory is gone.
+
+**Distinct from:** The in-process cleanup of the checkout this land created - NOT the cross-process sweep that collects checkouts whose land was killed before this ran.
+
+
+### sweepTopologyCandidatesBeforeCreate (land-path verify-checkout sweep)
+
+internal/workerworktree.sweepTopologyCandidatesBeforeCreate is the rate-limited, two-removal-bounded sweep a land runs before creating its own verify checkout.
+
+**Distinct from:** The bounded in-land trigger of SweepTopologyCandidates - NOT the unbounded operator verb fak worktree worker gc --candidates.

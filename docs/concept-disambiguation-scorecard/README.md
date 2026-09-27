@@ -15,11 +15,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **539** (clarity 0 + coverage 539) |
-| **Crystal-clear concepts (and climbing)** | **1120** crystal of 2846 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2955 / 3494** (84.6% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **541** (clarity 0 + coverage 541) |
+| **Crystal-clear concepts (and climbing)** | **1128** crystal of 2854 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2963 / 3504** (84.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 219 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **84** of 4066 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **84** of 4074 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 90.0/100 (grade A) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2846 concepts - score 90.0/100 (grade A) - disambiguation-debt 539
+concept-disambiguation chart - 2854 concepts - score 90.0/100 (grade A) - disambiguation-debt 541
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ##################.......... 1120
+  * crystal       ##################.......... 1128
   o defined       ############################ 1726
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -50,7 +50,7 @@ clarity mix by family (each cell = one concept):
   guard-gate       *****************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (450 concept(s); 209 crystal)
   layout           **********ooooooooo (19 concept(s); 10 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
-  plan             ******************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (370 concept(s); 126 crystal)
+  plan             **************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (378 concept(s); 134 crystal)
   policy-capability ************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (201 concept(s); 96 crystal)
   pool             ******oooooooooooooooooooooooooooooooo (38 concept(s); 6 crystal)
   render-materialize *******************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (199 concept(s); 43 crystal)
@@ -62,14 +62,14 @@ clarity mix by family (each cell = one concept):
   witness-proof    ***********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (163 concept(s); 83 crystal)
 
 coverage by family (positioned / discovered):
-  plan             ######################...... 432/541
+  plan             ######################...... 440/549
   session-runtime  ########################.... 279/332
   cache            ########################.... 325/377
   context-ctx      ########################.... 250/293
   gateway-engine   #######################..... 210/253
-  policy-capability ########################.... 219/253
+  policy-capability ########################.... 219/254
+  guard-gate       ##########################.. 508/539
   attention        #####################....... 88/118
-  guard-gate       ##########################.. 508/538
   pool             ################............ 40/70
   support-maturity ####################........ 73/101
   witness-proof    ########################.... 166/192
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 84.6%  (2955/3494 confusable tokens positioned)
+namespace coverage  [###########################.....] 84.6%  (2963/3504 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 219
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 219/219
 
-name index: 4066 lookup name(s) -> 2846 concept(s), 84 ambiguous
+name index: 4074 lookup name(s) -> 2854 concept(s), 84 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **219 / 219** (219 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1988 / 5103 |
+| Boundaries drawn (mutual / total) | 2018 / 5133 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4066 over 2846 concepts |
+| Lookup names indexed | 4074 over 2854 concepts |
 | Lookup names landing on several concepts | 84 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2846 |
+| Concepts carrying a contrast set | 2854 |
 
 ## The concepts (best verdict first)
 
@@ -852,6 +852,14 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | plan | **Plan (memq)** - Static pre-execution Explain output: pipeline steps, effects, and mutations |
 | * | crystal | symbol | plan | **Candidate** - Scored span the planner may keep resident with cost, benefit, and density metrics |
 | * | crystal | symbol | plan | **FilingPlan (quality regression auto-filing lifecycle plan)** - internal/quality/issue_autofile.go: the set of issue-tracker lifecycle actions (open/update/hold/close) one quality RUN implies, computed purely from the durable Tracker state plus that run's observations, each action carrying the scrubbed replay bundle that reproduces it. |
+| * | crystal | symbol | plan | **verifyTopologyCandidate (land-verify candidate checkout)** - internal/workerworktree.verifyTopologyCandidate materializes the exact tree a land is about to publish as a detached verify-only git worktree named .fak-cand-validate-<pid>-<start>-<n> beside the repository (or in the system temp directory), runs the verify hook in it, and removes it afterwards. |
+| * | crystal | symbol | plan | **SweepTopologyCandidates (leaked verify-checkout collector)** - internal/workerworktree.SweepTopologyCandidates classifies every .fak-cand-validate-* verify checkout in a parent directory and, under Apply, removes those whose owner process is gone, then prunes their git worktree registrations. |
+| * | crystal | symbol | plan | **CandidateSweepOptions (verify-checkout sweep knobs)** - internal/workerworktree.CandidateSweepOptions carries the clock, legacy age floor, apply opt-in, removal limit, and process-liveness probes for SweepTopologyCandidates. |
+| * | crystal | symbol | plan | **LegacyCandidateMaxAge (verify-checkout legacy age floor)** - internal/workerworktree.LegacyCandidateMaxAge (2h) is how long a verify checkout whose name carries no owner pid/start must sit untouched before the sweep collects it. |
+| * | crystal | symbol | plan | **TopologyCandidateParent (verify-checkout parent directory)** - internal/workerworktree.TopologyCandidateParent returns where a repository's verify checkouts are created: beside the repository when its go.work escapes it, otherwise the system temp directory. |
+| * | crystal | symbol | plan | **topologyCandidatePattern (owner-named verify-checkout name)** - internal/workerworktree.topologyCandidatePattern is the os.MkdirTemp pattern .fak-cand-validate-<pid>-<start base36>-* that encodes the creating process identity in each verify checkout name. |
+| * | crystal | symbol | plan | **cleanupTopologyCandidate (verify-checkout deferred cleanup)** - internal/workerworktree.cleanupTopologyCandidate is verifyTopologyCandidate's deferred cleanup: git worktree remove, then a retried directory removal, then prune only once the directory is gone. |
+| * | crystal | symbol | plan | **sweepTopologyCandidatesBeforeCreate (land-path verify-checkout sweep)** - internal/workerworktree.sweepTopologyCandidatesBeforeCreate is the rate-limited, two-removal-bounded sweep a land runs before creating its own verify checkout. |
 | * | crystal | symbol | policy-capability | **egress_posture** - The verdict-meta key the adjudicator's egress band stamps on a refusal to name WHICH egress stance produced it -- currently 'restrict', the strict-allowlist posture in which WebFetch flips from default-allowed to allowlist-only. It answers 'why was this host refused' for a reader of the decision journal, distinguishing a posture-driven refusal from a rule-driven one. |
 | * | crystal | symbol | policy-capability | **call_adjudicated (loop-progress SSE event)** - call_adjudicated (Go const ProgressCallAdjudicated) is the loop-progress event KIND that publishes one tool call's already-decided kernel verdict on the native owned-loop SSE stream (#5148): it carries Turn, CallID, Tool, Verdict (ALLOW/DENY/TRANSFORM/QUARANTINE) and, on a deny, the closed refusal reason a client gates on. |
 | * | crystal | config | policy-capability | **benchmark license posture** - The benchmark environment contract field that states whether a named software license must be verified, must be absent, or is irrelevant before task launch. |
@@ -3120,8 +3128,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 26 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3115/5103 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2846 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3115/5133 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2854 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3130,21 +3138,21 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4066 lookup name(s) resolves - 84 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4074 lookup name(s) resolves - 84 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 432 | 541 | 109 |
+| plan | 440 | 549 | 109 |
 | session-runtime | 279 | 332 | 53 |
 | cache | 325 | 377 | 52 |
 | context-ctx | 250 | 293 | 43 |
 | gateway-engine | 210 | 253 | 43 |
-| policy-capability | 219 | 253 | 34 |
+| policy-capability | 219 | 254 | 35 |
+| guard-gate | 508 | 539 | 31 |
 | attention | 88 | 118 | 30 |
-| guard-gate | 508 | 538 | 30 |
 | pool | 40 | 70 | 30 |
 | support-maturity | 73 | 101 | 28 |
 | witness-proof | 166 | 192 | 26 |

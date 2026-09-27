@@ -87,6 +87,8 @@ func worktreeWorkerGC(argv []string) {
 	maxAge := flags.Duration("max-age", workerworktree.DefaultColdAgeFloor, "minimum owner-stamp age before a dead-owner/released-lease worktree is eligible (for example 30m, 24h)")
 	dryRun := flags.Bool("dry-run", false, "list candidates and delete nothing (this is already the default)")
 	apply := flags.Bool("apply", false, "force-remove selected worktrees and prune git administrative entries")
+	candidates := flags.Bool("candidates", false, "collect leaked land-verify candidate checkouts (.fak-cand-validate-*) whose creating process is gone, instead of worker worktrees")
+	legacyMaxAge := flags.Duration("legacy-max-age", workerworktree.LegacyCandidateMaxAge, "with --candidates, minimum untouched age before a candidate whose name carries no owner identity is eligible")
 	root := flags.String("root", "", "repo root (default: discover from cwd)")
 	flags.Parse(argv)
 	if *dryRun && *apply {
@@ -94,6 +96,10 @@ func worktreeWorkerGC(argv []string) {
 		os.Exit(2)
 	}
 	repoRoot := worktreeWorkerRoot(*root)
+	if *candidates {
+		worktreeWorkerGCCandidates(repoRoot, *apply, *legacyMaxAge)
+		return
+	}
 	report := workerworktree.GarbageCollect(repoRoot, nil, workerworktree.GCOptions{
 		Now:          time.Now(),
 		MaxAge:       *maxAge,
@@ -106,6 +112,32 @@ func worktreeWorkerGC(argv []string) {
 		fmt.Fprintf(os.Stderr, "reaped %d/%d owner-dead, lease-released worktrees (apply)\n", report.Reaped, report.WouldReap)
 	} else {
 		fmt.Fprintf(os.Stderr, "would reap %d owner-dead, lease-released worktrees, 0 deleted (dry-run; pass --apply to collect)\n", report.WouldReap)
+	}
+}
+
+// worktreeWorkerGCCandidates collects the verify-only candidate checkouts a killed
+// land leaves beside the repository (or in the system temp directory). A land
+// already sweeps a few before creating its own; this is the unbounded operator
+// form. Dry-run unless apply.
+func worktreeWorkerGCCandidates(repoRoot string, apply bool, legacyMaxAge time.Duration) {
+	parent, err := workerworktree.TopologyCandidateParent(repoRoot)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fak worktree worker gc --candidates: "+err.Error())
+		os.Exit(1)
+	}
+	report := workerworktree.SweepTopologyCandidates(repoRoot, parent, nil, workerworktree.CandidateSweepOptions{
+		Now:          time.Now(),
+		LegacyMaxAge: legacyMaxAge,
+		Apply:        apply,
+	})
+	worktreeWorkerEmit(report)
+	if apply {
+		fmt.Fprintf(os.Stderr, "reaped %d/%d owner-gone land-verify candidates in %s (%d failures)\n", report.Reaped, report.WouldReap, report.Parent, len(report.Failures))
+	} else {
+		fmt.Fprintf(os.Stderr, "would reap %d owner-gone land-verify candidates in %s, 0 deleted (dry-run; pass --apply to collect)\n", report.WouldReap, report.Parent)
+	}
+	if len(report.Failures) > 0 {
+		os.Exit(1)
 	}
 }
 

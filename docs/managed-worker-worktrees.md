@@ -291,6 +291,29 @@ A worktree is eligible for `gc` removal only when **both** conditions are proven
 1. **Owner process is dead:** The PID recorded in the owner stamp no longer exists.
 2. **Lane lease is released:** The lease oracle confirms the stamped lease is inactive.
 
+#### Land-verify candidates (`--candidates`)
+
+`land` verifies a workspace whose `go.work` escapes the repository in a detached
+checkout named `.fak-cand-validate-*` beside the repository (in the system temp
+directory otherwise), and removes it when verification ends. A land that is killed
+first (for example by a supervisor's deadline) cannot remove it. `gc --candidates`
+collects those leaked checkouts:
+
+```bash
+fak worktree worker gc --candidates [--legacy-max-age <duration>]
+fak worktree worker gc --candidates --apply [--legacy-max-age <duration>]
+```
+
+A candidate named `.fak-cand-validate-<pid>-<start>-<n>` is eligible when that pid
+and process start time no longer identify a running process. A name without an
+owner identity is eligible once untouched past `--legacy-max-age` (default `2h`). Each
+directory is removed before `git worktree prune` runs against the repository it was
+registered in. A land killed inside `git worktree add` also leaves git's
+`initializing` lock on a registration whose directory is gone, which a plain prune
+never clears; the sweep removes that lock under the same owner/age rule so the
+prune collects it. Candidates never hold unique work: each is a copy of an existing
+commit plus a diff the worker worktree still holds.
+
 ### 6. `publish` and `recover` — Remote publication and crash recovery
 
 Provides durability against local host loss and tools for resuming interrupted lands.

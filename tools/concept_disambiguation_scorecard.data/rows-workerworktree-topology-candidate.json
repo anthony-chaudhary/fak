@@ -1,0 +1,169 @@
+{
+  "rows": [
+    {
+      "id": "wwt-topology-candidate-verify",
+      "canonical": "verifyTopologyCandidate (land-verify candidate checkout)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/workerworktree.verifyTopologyCandidate materializes the exact tree a land is about to publish as a detached verify-only git worktree named .fak-cand-validate-\u003cpid\u003e-\u003cstart\u003e-\u003cn\u003e beside the repository (or in the system temp directory), runs the verify hook in it, and removes it afterwards.",
+      "distinction": "A disposable VERIFY CHECKOUT of a land's prospective tree - NOT the planner Candidate (a scored context span), not a dispatch or issue candidate, and not the worker worktree whose diff is being landed.",
+      "distinct_from": [
+        "candidate-planner",
+        "wwt-topology-candidate-sweep",
+        "wwt-topology-candidate-parent",
+        "wwt-topology-candidate-pattern"
+      ],
+      "aliases": [],
+      "grounding": "verifyTopologyCandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "wwt-topology-candidate-sweep",
+      "canonical": "SweepTopologyCandidates (leaked verify-checkout collector)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/workerworktree.SweepTopologyCandidates classifies every .fak-cand-validate-* verify checkout in a parent directory and, under Apply, removes those whose owner process is gone, then prunes their git worktree registrations.",
+      "distinction": "Collects leaked land-verify checkouts by owner liveness - NOT the owner-stamped worker-worktree GC and not the lease-based cold reap, which only see fak-worker-wt-* worktrees.",
+      "distinct_from": [
+        "wwt-topology-candidate-verify",
+        "candidate-planner",
+        "wwt-topology-candidate-sweep-options",
+        "wwt-topology-candidate-legacy-max-age",
+        "wwt-topology-candidate-cleanup",
+        "wwt-topology-candidate-sweep-before-create"
+      ],
+      "aliases": [],
+      "grounding": "SweepTopologyCandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "wwt-topology-candidate-sweep-options",
+      "canonical": "CandidateSweepOptions (verify-checkout sweep knobs)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/workerworktree.CandidateSweepOptions carries the clock, legacy age floor, apply opt-in, removal limit, and process-liveness probes for SweepTopologyCandidates.",
+      "distinction": "Options for the verify-checkout sweep only - NOT GCOptions (owner-stamped worker GC) and not a planner candidate configuration.",
+      "distinct_from": [
+        "wwt-topology-candidate-sweep",
+        "candidate-planner"
+      ],
+      "aliases": [],
+      "grounding": "CandidateSweepOptions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "wwt-topology-candidate-legacy-max-age",
+      "canonical": "LegacyCandidateMaxAge (verify-checkout legacy age floor)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/workerworktree.LegacyCandidateMaxAge (2h) is how long a verify checkout whose name carries no owner pid/start must sit untouched before the sweep collects it.",
+      "distinction": "An age floor only for owner-less legacy verify checkouts - NOT DefaultColdAgeFloor (worker-worktree cold reap) and not a planner retry or budget window.",
+      "distinct_from": [
+        "wwt-topology-candidate-sweep",
+        "candidate-planner"
+      ],
+      "aliases": [],
+      "grounding": "LegacyCandidateMaxAge",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "wwt-topology-candidate-parent",
+      "canonical": "TopologyCandidateParent (verify-checkout parent directory)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/workerworktree.TopologyCandidateParent returns where a repository's verify checkouts are created: beside the repository when its go.work escapes it, otherwise the system temp directory.",
+      "distinction": "Resolves the directory verify checkouts live in - NOT the worker-worktree root (DefaultRoot) and not a path to one checkout.",
+      "distinct_from": [
+        "wwt-topology-candidate-verify",
+        "candidate-planner"
+      ],
+      "aliases": [],
+      "grounding": "TopologyCandidateParent",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "wwt-topology-candidate-pattern",
+      "canonical": "topologyCandidatePattern (owner-named verify-checkout name)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/workerworktree.topologyCandidatePattern is the os.MkdirTemp pattern .fak-cand-validate-\u003cpid\u003e-\u003cstart base36\u003e-* that encodes the creating process identity in each verify checkout name.",
+      "distinction": "The naming scheme that makes owner liveness provable after a kill - NOT the legacy bare .fak-cand-validate-* name and not a worker-worktree owner stamp sidecar.",
+      "distinct_from": [
+        "wwt-topology-candidate-verify",
+        "candidate-planner"
+      ],
+      "aliases": [],
+      "grounding": "topologyCandidatePattern",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "wwt-topology-candidate-cleanup",
+      "canonical": "cleanupTopologyCandidate (verify-checkout deferred cleanup)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/workerworktree.cleanupTopologyCandidate is verifyTopologyCandidate's deferred cleanup: git worktree remove, then a retried directory removal, then prune only once the directory is gone.",
+      "distinction": "The in-process cleanup of the checkout this land created - NOT the cross-process sweep that collects checkouts whose land was killed before this ran.",
+      "distinct_from": [
+        "wwt-topology-candidate-sweep",
+        "candidate-planner"
+      ],
+      "aliases": [],
+      "grounding": "cleanupTopologyCandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "wwt-topology-candidate-sweep-before-create",
+      "canonical": "sweepTopologyCandidatesBeforeCreate (land-path verify-checkout sweep)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/workerworktree.sweepTopologyCandidatesBeforeCreate is the rate-limited, two-removal-bounded sweep a land runs before creating its own verify checkout.",
+      "distinction": "The bounded in-land trigger of SweepTopologyCandidates - NOT the unbounded operator verb fak worktree worker gc --candidates.",
+      "distinct_from": [
+        "wwt-topology-candidate-sweep",
+        "candidate-planner"
+      ],
+      "aliases": [],
+      "grounding": "sweepTopologyCandidatesBeforeCreate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

@@ -93,6 +93,11 @@ fak worktree <subcommand>
                    Owner-stamped leak GC. Selects only old, clean worktrees whose
                    owner PID is dead AND stamped lease is released. DRY-RUN by default;
                    --apply force-removes selected worktrees and prunes git admin entries.
+      gc --candidates [--legacy-max-age D] [--dry-run|--apply]
+                   Collect land-verify candidate checkouts (.fak-cand-validate-*) a
+                   killed land left behind. Eligible when the owner pid+start in the
+                   name is gone, or, for a name without one, untouched past
+                   --legacy-max-age (default 2h). DRY-RUN by default.
       list [--json] [--capacity-reason WHY] [--remote R] [--fetch]
            [--worker NAME|PATH] [--session SESS] [--timeout D]
                    List the live per-worker worktrees. The default preserves the
